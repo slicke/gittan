@@ -11,9 +11,12 @@ uses
   ATSynEdit_Gutter_Decor, ATSynEdit_Globals, ATStringProc,
   ec_SyntAnal,
   gittan.lexers, gittan.git, gittan.icons, gittan.theme, gittan.changenav,
-  gittan.summary;
+  gittan.summary, gittan.watch;
 
 type
+  {** What the space right of the tree shows: the summary, one changed
+    file, the raw repository diff, or a plain file from File > Open. }
+  TGittanView = (gvSummary, gvChanges, gvRepoDiff, gvFile);
 
   { TForm1 }
 
@@ -48,7 +51,16 @@ type
     FFileCount: integer;
     FDark: boolean;
     FBookmarkBandWidth: integer;
+    FWatcher: TGittanWatcher;
+    FView: TGittanView;
     procedure ApplyTheme;
+    procedure MenuRefreshClick(Sender: TObject);
+    procedure WatcherChange(Sender: TObject);
+    procedure StartWatcher;
+    procedure StopWatcher;
+    function LoadRepository: boolean;
+    procedure RefreshRepository;
+    function SelectedPath: string;
     procedure UpdateStatus;
     procedure BuildMenu;
     procedure BuildSyntaxMenu;
@@ -100,6 +112,7 @@ resourcestring
   rsView = '&View';
   rsSummary = '&Summary';
   rsRepoDiff = '&Repository Diff';
+  rsRefresh = 'Re&fresh';
   rsDropHint = 'Open a repository, or drop a folder or file here.';
   rsGo = '&Go';
   rsNextChange = '&Next Change';
@@ -118,6 +131,8 @@ const
     line backgrounds of a diff. }
   bmAdded = 1;
   bmDeleted = 2;
+  { How often the watcher asks git whether the repository changed. }
+  WatchInterval = 2000;
 
 { TForm1 }
 
@@ -203,6 +218,7 @@ end;
 procedure TForm1.FormDestroy(Sender: TObject);
 begin
   Application.RemoveAsyncCalls(Self);
+  StopWatcher;
   FAdapter.Lexer := nil;
   FreeAndNil(FLexers);
   FreeAndNil(FRepo);
@@ -393,6 +409,12 @@ begin
   Item.ShortCut := ShortCut(VK_2, [ssModifier]);
   Item.OnClick := @MenuRepoDiffClick;
   ViewMenu.Add(Item);
+  ViewMenu.Add(NewLine);
+  Item := TMenuItem.Create(ViewMenu);
+  Item.Caption := rsRefresh;
+  Item.ShortCut := ShortCut(VK_R, [ssModifier]);
+  Item.OnClick := @MenuRefreshClick;
+  ViewMenu.Add(Item);
 
   FSyntaxMenu := TMenuItem.Create(Main);
   FSyntaxMenu.Caption := rsSyntax;
@@ -531,6 +553,7 @@ begin
   SetLexer(FLexers.ForFile(AFileName));
   UpdateChangeNav;
   ShowEditor;
+  FView := gvFile;
   Caption := ExtractFileName(AFileName) + ' - Gittan';
 end;
 
@@ -779,19 +802,31 @@ end;
   under the Diff lexer; the file tree lists the changed files and the status
   bar counts them. }
 procedure TForm1.OpenRepository(const ADir: string);
-var
-  Stats: TGittanFileStats;
-  Icons: array of integer;
-  i: integer;
 begin
+  { Open closes the previous repository even when it fails. }
+  StopWatcher;
   if not FRepo.Open(ADir) then
   begin
     MessageDlg(FRepo.Error, mtError, [mbOK], 0);
     Exit;
   end;
   Caption := ExtractFileName(FRepo.Root) + ' - Gittan';
-  if not FRepo.ChangeStats(Stats) then
+  if not LoadRepository then
     MessageDlg(FRepo.Error, mtError, [mbOK], 0);
+  ShowSummary;
+  StartWatcher;
+end;
+
+{ Reads the branch and the changed files of the open repository into the
+  tree and the summary. Returns false, with the message in FRepo.Error,
+  when git failed; the views are empty then. }
+function TForm1.LoadRepository: boolean;
+var
+  Stats: TGittanFileStats;
+  Icons: array of integer;
+  i: integer;
+begin
+  Result := FRepo.ChangeStats(Stats);
   FBranch := FRepo.Branch;
   FFileCount := Length(Stats);
   FillFileTree(Stats);
@@ -799,7 +834,121 @@ begin
   for i := 0 to High(Stats) do
     Icons[i] := ChangeIcon(Stats[i].Kind);
   FSummary.SetRepository(ExtractFileName(FRepo.Root), FBranch, Stats, Icons);
-  ShowSummary;
+end;
+
+{ ---------------------------------------------------------------------------
+  Watching the repository
+  ---------------------------------------------------------------------------
+  The branch and the changed files are read when the repository is opened.
+  A branch switch, a commit or an edit in another program happens behind
+  Gittan's back, so a watcher thread polls git and RefreshRepository
+  reloads the views in place when something changed. View > Refresh does
+  the same by hand. }
+procedure TForm1.StartWatcher;
+begin
+  StopWatcher;
+  if FRepo.Root = '' then
+    Exit;
+  FWatcher := TGittanWatcher.Create(FRepo.Root, WatchInterval);
+  FWatcher.OnChange := @WatcherChange;
+  FWatcher.Start;
+end;
+
+procedure TForm1.StopWatcher;
+begin
+  FreeAndNil(FWatcher);
+end;
+
+procedure TForm1.WatcherChange(Sender: TObject);
+begin
+  RefreshRepository;
+end;
+
+procedure TForm1.MenuRefreshClick(Sender: TObject);
+begin
+  RefreshRepository;
+end;
+
+{ The path of the selected file in the tree, empty when none or a folder
+  is selected. }
+function TForm1.SelectedPath: string;
+begin
+  Result := '';
+  if (FileTree.Selected <> nil) and (FileTree.Selected.Data <> nil) then
+    Result := FileTree.Selected.GetTextPath;
+end;
+
+{ Reloads the repository and keeps what the user looks at: the folders
+  opened in the tree, the selected file with its scroll position, or the
+  repository diff. A selected file that is no longer changed gives way to
+  the summary. Filling the tree drops the selection, so the view is noted
+  first and restored by selecting the file again, which runs the usual
+  selection handler. }
+procedure TForm1.RefreshRepository;
+var
+  Expanded: TStringList;
+  Node: TTreeNode;
+  Path: string;
+  View: TGittanView;
+  TopLine, CaretY: integer;
+
+  procedure RestoreScroll;
+  begin
+    if Edit.Strings.Count = 0 then
+      Exit;
+    Edit.DoCaretSingle(0, Min(CaretY, Edit.Strings.Count - 1));
+    Edit.LineTop := Min(TopLine, Edit.Strings.Count - 1);
+    Edit.Update;
+  end;
+
+begin
+  if FRepo.Root = '' then
+    Exit;
+  View := FView;
+  Path := SelectedPath;
+  TopLine := Edit.LineTop;
+  CaretY := Edit.Carets[0].PosY;
+  Expanded := TStringList.Create;
+  try
+    Expanded.CaseSensitive := True;
+    Node := FileTree.Items.GetFirstNode;
+    while Node <> nil do
+    begin
+      if (Node.Data = nil) and Node.Expanded then
+        Expanded.Add(Node.GetTextPath);
+      Node := Node.GetNext;
+    end;
+    if not LoadRepository then
+      StatusBar.SimpleText := FRepo.Error;
+    Node := FileTree.Items.GetFirstNode;
+    while Node <> nil do
+    begin
+      if (Node.Data = nil) and (Expanded.IndexOf(Node.GetTextPath) >= 0) then
+        Node.Expand(False);
+      Node := Node.GetNext;
+    end;
+  finally
+    Expanded.Free;
+  end;
+  case View of
+    gvChanges:
+      begin
+        SummarySelectFile(nil, Path);
+        if FileTree.Selected = nil then
+        begin
+          ShowSummary;
+          Caption := ExtractFileName(FRepo.Root) + ' - Gittan';
+        end
+        else
+          RestoreScroll;
+      end;
+    gvRepoDiff:
+      begin
+        ShowRepoDiff;
+        RestoreScroll;
+      end;
+  end;
+  UpdateStatus;
 end;
 
 { ---------------------------------------------------------------------------
@@ -812,6 +961,7 @@ procedure TForm1.ShowSummary;
 begin
   Edit.Visible := False;
   FSummaryBox.Visible := True;
+  FView := gvSummary;
   { A file picked again after the summary must fire the selection event. }
   FileTree.Selected := nil;
   if FRepo.Root <> '' then
@@ -876,6 +1026,7 @@ begin
       MarkLine(i, char(Edit.Strings.Lines[i][1]));
   UpdateChangeNav;
   ShowEditor;
+  FView := gvRepoDiff;
   FileTree.Selected := nil;
   Caption := ExtractFileName(FRepo.Root) + ' - Gittan';
   UpdateStatus;
@@ -905,6 +1056,7 @@ begin
     ShowLineNumbers(Lines);
     UpdateChangeNav;
     ShowEditor;
+    FView := gvChanges;
     Edit.FileName := IncludeTrailingPathDelimiter(FRepo.Root) +
       SetDirSeparators(APath);
     UpdateStatus;

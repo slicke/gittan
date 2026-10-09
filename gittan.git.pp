@@ -66,6 +66,13 @@ type
       git does not know yet is returned as all added lines; a binary file
       gives no lines. Returns false when git failed. }
     function FileChanges(const APath: string; ALines: TStrings): boolean;
+    {** A text that changes whenever the branch, the set of changed files
+      or the content of a changed file changes: the branch, the status of
+      every changed file, the diff against HEAD, and the size and
+      modification time of every untracked file (the diff does not cover
+      them). Empty when nothing is open or git failed. Meant for polling:
+      two equal fingerprints mean there is nothing new to show. }
+    function Fingerprint: string;
     {** Work tree root, empty when nothing is open. }
     property Root: string read FRoot;
     {** Message from the last git call that failed. }
@@ -321,6 +328,43 @@ begin
     Result := ckAdded
   else
     Result := ckModified;
+end;
+
+{ The diff covers every tracked change in full, so an edit that keeps the
+  line counts still shows. An untracked file is not in the diff and is not
+  read (it may be large); its size and time stand in, from one stat. }
+function TGittanRepo.Fingerprint: string;
+var
+  Paths: TStringList;
+  Info: TSearchRec;
+  FileName: string;
+  i: integer;
+begin
+  Result := '';
+  if FRoot = '' then
+    Exit;
+  Paths := TStringList.Create;
+  try
+    if not ChangedPaths(Paths) then
+      Exit;
+    Result := Branch + #10;
+    for i := 0 to Paths.Count - 1 do
+      Result := Result + IntToStr(PtrUInt(Paths.Objects[i])) + ' ' + Paths[i] + #10;
+    Result := Result + Diff;
+    for i := 0 to Paths.Count - 1 do
+      if TGittanChangeKind(PtrUInt(Paths.Objects[i])) = ckUntracked then
+      begin
+        FileName := IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(Paths[i]);
+        if FindFirst(FileName, faAnyFile, Info) = 0 then
+        begin
+          Result := Result + #10 + Paths[i] + #9 + IntToStr(Info.Time) + #9 +
+            IntToStr(Info.Size);
+          FindClose(Info);
+        end;
+      end;
+  finally
+    Paths.Free;
+  end;
 end;
 
 { The hunk header "@@" starts the lines; "\ No newline at end of file"
