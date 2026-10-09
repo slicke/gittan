@@ -18,6 +18,15 @@ type
   TGittanChangeKind = (ckModified, ckAdded, ckDeleted, ckRenamed, ckUntracked,
     ckConflict);
 
+  {** One changed file with its line counts. A binary file has no counts. }
+  TGittanFileStat = record
+    Path: string;
+    Kind: TGittanChangeKind;
+    Added, Deleted: integer;
+    Binary: boolean;
+  end;
+  TGittanFileStats = array of TGittanFileStat;
+
   {** One opened repository. Open finds the work tree root for a folder, and
     the other calls run inside that root. }
   TGittanRepo = class
@@ -43,6 +52,13 @@ type
       the file's TGittanChangeKind as TObject(PtrUInt(Ord(Kind))). Returns
       false when git failed. }
     function ChangedPaths(AList: TStrings): boolean;
+    {** The changed files of ChangedPaths with their added and deleted line
+      counts from `git diff --numstat`. A file git does not know yet has
+      every line counted as added. Returns false when git failed. }
+    function ChangeStats(out AStats: TGittanFileStats): boolean;
+    {** The current branch, the short commit id when HEAD is detached, or
+      empty when nothing is open. }
+    function Branch: string;
     {** The change kind of a "XY" status from `git status --porcelain`. }
     class function ChangeKind(const AStatus: string): TGittanChangeKind;
     {** One changed file as the lines of a unified diff against HEAD with the
@@ -156,6 +172,126 @@ begin
     AList.Objects[i] := TObject(PtrUInt(Ord(ChangeKind(Copy(AList[i], 1, 2)))));
     AList[i] := Path;
   end;
+end;
+
+{ Git's own heuristic: a NUL byte in the first 8000 bytes makes a file
+  binary. A text file has one line per line feed, plus an unterminated last
+  line. }
+procedure CountNewFile(const AFileName: string; var AStat: TGittanFileStat);
+const
+  Probe = 8000;
+var
+  Stream: TFileStream;
+  Buffer: array[0..4095] of byte;
+  Got, i, Seen: integer;
+  LastByte: byte;
+begin
+  AStat.Added := 0;
+  AStat.Deleted := 0;
+  AStat.Binary := False;
+  Stream := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
+  try
+    Seen := 0;
+    LastByte := 10;
+    repeat
+      Got := Stream.Read(Buffer, SizeOf(Buffer));
+      for i := 0 to Got - 1 do
+      begin
+        if (Buffer[i] = 0) and (Seen + i < Probe) then
+        begin
+          AStat.Binary := True;
+          AStat.Added := 0;
+          Exit;
+        end;
+        if Buffer[i] = 10 then
+          Inc(AStat.Added);
+      end;
+      if Got > 0 then
+        LastByte := Buffer[Got - 1];
+      Inc(Seen, Got);
+    until Got = 0;
+    if (Seen > 0) and (LastByte <> 10) then
+      Inc(AStat.Added);
+  finally
+    Stream.Free;
+  end;
+end;
+
+{ A numstat line is "added<tab>deleted<tab>path", with "-" for both counts
+  of a binary file. Renames are turned off so the new path of a rename gets
+  its counts; the old path is not in the list and is skipped. The counts
+  are against HEAD, so staged and unstaged changes are both in. }
+function TGittanRepo.ChangeStats(out AStats: TGittanFileStats): boolean;
+var
+  Paths, Num: TStringList;
+  Output, Line, Path, Counts, FileName: string;
+  i, Tab1, Tab2, Idx: integer;
+begin
+  AStats := nil;
+  Paths := TStringList.Create;
+  Num := TStringList.Create;
+  try
+    Paths.CaseSensitive := True;
+    Result := ChangedPaths(Paths);
+    if not Result then
+      Exit;
+    SetLength(AStats, Paths.Count);
+    for i := 0 to Paths.Count - 1 do
+    begin
+      AStats[i] := Default(TGittanFileStat);
+      AStats[i].Path := Paths[i];
+      AStats[i].Kind := TGittanChangeKind(PtrUInt(Paths.Objects[i]));
+    end;
+    if not RunGit(FRoot, ['diff', '--numstat', '--no-renames', 'HEAD'], Output) then
+      RunGit(FRoot, ['diff', '--numstat', '--no-renames'], Output);
+    Num.Text := Output;
+    for Line in Num do
+    begin
+      Tab1 := Pos(#9, Line);
+      if Tab1 = 0 then
+        Continue;
+      Tab2 := Pos(#9, Line, Tab1 + 1);
+      if Tab2 = 0 then
+        Continue;
+      Path := Copy(Line, Tab2 + 1, MaxInt);
+      Idx := Paths.IndexOf(Path);
+      if Idx < 0 then
+        Continue;
+      Counts := Copy(Line, 1, Tab1 - 1);
+      if Counts = '-' then
+        AStats[Idx].Binary := True
+      else
+      begin
+        AStats[Idx].Added := StrToIntDef(Counts, 0);
+        AStats[Idx].Deleted := StrToIntDef(Copy(Line, Tab1 + 1, Tab2 - Tab1 - 1), 0);
+      end;
+    end;
+    for i := 0 to High(AStats) do
+      if AStats[i].Kind = ckUntracked then
+      begin
+        FileName := IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(AStats[i].Path);
+        if FileExists(FileName) and not DirectoryExists(FileName) then
+          CountNewFile(FileName, AStats[i]);
+      end;
+  finally
+    Num.Free;
+    Paths.Free;
+  end;
+end;
+
+{ symbolic-ref names the branch even before its first commit; it fails
+  when HEAD is detached, and the commit id stands in then. }
+function TGittanRepo.Branch: string;
+begin
+  Result := '';
+  if FRoot = '' then
+    Exit;
+  if RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'HEAD'], Result) then
+    Result := Trim(Result)
+  else if RunGit(FRoot, ['rev-parse', '--short', 'HEAD'], Result) then
+    Result := Trim(Result)
+  else
+    Result := '';
 end;
 
 { X is the index column, Y the work tree. A "U" in either (or both sides

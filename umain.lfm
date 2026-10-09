@@ -11,23 +11,6 @@ object Form1: TForm1
   OnDestroy = FormDestroy
   OnDropFiles = FormDropFiles
   LCLVersion = '4.8.0.0'
-  object ToolBar: TToolBar
-    Left = 0
-    Height = 26
-    Top = 0
-    Width = 900
-    AutoSize = True
-    Caption = 'ToolBar'
-    ShowCaptions = True
-    TabOrder = 1
-    object ToolOpenRepo: TToolButton
-      Left = 1
-      Top = 2
-      AutoSize = True
-      Caption = 'Open Repository'
-      OnClick = ToolOpenRepoClick
-    end
-  end
   object FileTree: TTreeView
     Left = 0
     Height = 551
@@ -64,6 +47,8 @@ object Form1: TForm1
     Top = 577
     Width = 900
     Panels = <>
+    ParentShowHint = False
+    ShowHint = True
     SimplePanel = True
   end
   object TreeImages: TImageList

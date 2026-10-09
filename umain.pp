@@ -10,7 +10,8 @@ uses
   ATSynEdit, ATSynEdit_Adapter_EControl, ATSynEdit_Bookmarks,
   ATSynEdit_Gutter_Decor, ATSynEdit_Globals, ATStringProc,
   ec_SyntAnal,
-  gittan.lexers, gittan.git, gittan.icons, gittan.theme, gittan.changenav;
+  gittan.lexers, gittan.git, gittan.icons, gittan.theme, gittan.changenav,
+  gittan.summary;
 
 type
 
@@ -19,8 +20,6 @@ type
   TForm1 = class(TForm)
     Edit: TATSynEdit;
     StatusBar: TStatusBar;
-    ToolBar: TToolBar;
-    ToolOpenRepo: TToolButton;
     DirDialog: TSelectDirectoryDialog;
     ThemeTimer: TTimer;
     FileTree: TTreeView;
@@ -36,7 +35,6 @@ type
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure FormDropFiles(Sender: TObject; const FileNames: array of string);
-    procedure ToolOpenRepoClick(Sender: TObject);
   private
     FAdapter: TATAdapterEControl;
     FLexers: TGittanLexers;
@@ -44,6 +42,10 @@ type
     FSyntaxMenu: TMenuItem;
     FNav: TGittanChangeNav;
     FNavUpdateQueued: boolean;
+    FSummaryBox: TScrollBox;
+    FSummary: TGittanSummary;
+    FBranch: string;
+    FFileCount: integer;
     FDark: boolean;
     FBookmarkBandWidth: integer;
     procedure ApplyTheme;
@@ -51,7 +53,15 @@ type
     procedure BuildMenu;
     procedure BuildSyntaxMenu;
     procedure MenuOpenClick(Sender: TObject);
+    procedure MenuOpenRepoClick(Sender: TObject);
     procedure MenuSyntaxClick(Sender: TObject);
+    procedure MenuSummaryClick(Sender: TObject);
+    procedure MenuRepoDiffClick(Sender: TObject);
+    procedure SummaryBoxResize(Sender: TObject);
+    procedure SummarySelectFile(Sender: TObject; const APath: string);
+    procedure ShowSummary;
+    procedure ShowEditor;
+    procedure ShowRepoDiff;
     procedure MenuPrevChangeClick(Sender: TObject);
     procedure MenuNextChangeClick(Sender: TObject);
     procedure SetLexer(ALexer: TecSyntAnalyzer);
@@ -64,7 +74,7 @@ type
     procedure UpdateChangeNav;
     procedure GoToChange(ANext: boolean);
     procedure ShowChanges(const APath: string);
-    procedure FillFileTree(AFiles: TStrings);
+    procedure FillFileTree(const AStats: TGittanFileStats);
     function CompareTreeNodes(Node1, Node2: TTreeNode): integer;
   public
     {** Loads a file into the editor and picks its lexer from the file
@@ -85,7 +95,12 @@ implementation
 resourcestring
   rsFile = '&File';
   rsOpen = '&Open...';
+  rsOpenRepo = 'Open &Repository...';
   rsSyntax = '&Syntax';
+  rsView = '&View';
+  rsSummary = '&Summary';
+  rsRepoDiff = '&Repository Diff';
+  rsDropHint = 'Open a repository, or drop a folder or file here.';
   rsGo = '&Go';
   rsNextChange = '&Next Change';
   rsPrevChange = '&Previous Change';
@@ -93,8 +108,10 @@ resourcestring
   rsNoLexers = 'No lexers found. Run "make lexlib" or set GITTAN_LEXLIB.';
   rsLexerCount = '%d lexers';
   rsDiffLexer = 'Diff';
-  rsChangedFiles = '%d changed files in %s';
-  rsNoChanges = 'No changes in %s';
+  rsRepoOnBranch = '%s on %s';
+  rsChangedFiles = '%d changed files';
+  rsOneChangedFile = '1 changed file';
+  rsNoChanges = 'no changes';
 
 const
   { Bookmark kinds in the editor's second bookmark list, used only for the
@@ -120,6 +137,10 @@ begin
   Edit.GutterDecorAlignment := taRightJustify;
   Edit.OnChangeZoom := @EditChangeZoom;
   Edit.OnChangeCaretPos := @EditChangeCaretPos;
+  { The minimap shows where in the file the changes are: it paints the
+    same line backgrounds as the text. }
+  Edit.OptMinimapVisible := True;
+  Edit.OptMinimapTooltipVisible := False;
   FBookmarkBandWidth := Edit.OptGutterWidthBookmarks;
   { The line states band marks every line of a freshly set text as new
     with a green bar, which means nothing in a viewer. }
@@ -143,6 +164,20 @@ begin
   FNav.OnPrev := @MenuPrevChangeClick;
   FNav.OnNext := @MenuNextChangeClick;
   UpdateChangeNav;
+  { The summary takes the editor's place until a file is picked. The
+    scroll box gives it native scrolling; its resize keeps the summary at
+    least as tall as the box, so the summary's background fills it. }
+  FSummaryBox := TScrollBox.Create(Self);
+  FSummaryBox.Parent := Self;
+  FSummaryBox.Align := alClient;
+  FSummaryBox.BorderStyle := bsNone;
+  FSummaryBox.HorzScrollBar.Visible := False;
+  FSummaryBox.OnResize := @SummaryBoxResize;
+  FSummary := TGittanSummary.Create(Self);
+  FSummary.Parent := FSummaryBox;
+  FSummary.Images := TreeImages;
+  FSummary.OnSelectFile := @SummarySelectFile;
+  FSummary.SetMessage(rsDropHint);
 
   FRepo := TGittanRepo.Create;
   FLexers := TGittanLexers.Create;
@@ -156,6 +191,7 @@ begin
   ApplyTheme;
 
   BuildMenu;
+  ShowSummary;
   { gittan [file | folder] }
   if ParamCount > 0 then
     if DirectoryExists(ParamStr(1)) then
@@ -239,19 +275,33 @@ begin
   else
     FNav.SetColors(Edit.Colors.TextBG, RGBToColor(246, 246, 246),
       RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
+  FSummaryBox.Color := Edit.Colors.TextBG;
+  if FDark then
+    FSummary.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(45, 45, 46), RGBToColor(63, 185, 80),
+      RGBToColor(248, 81, 73), RGBToColor(62, 62, 62))
+  else
+    FSummary.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(243, 243, 243), RGBToColor(26, 127, 55),
+      RGBToColor(207, 34, 46), RGBToColor(222, 222, 222));
   { The change view's line numbers carry their own color. }
   for i := 0 to Edit.GutterDecor.Count - 1 do
     Edit.GutterDecor.ItemPtr(i)^.Data.TextColor := Edit.Colors.GutterFont;
   Edit.Invalidate;
 end;
 
+{ A dropped folder opens as a repository, a dropped file as a file. }
 procedure TForm1.FormDropFiles(Sender: TObject; const FileNames: array of string);
 begin
-  if Length(FileNames) > 0 then
+  if Length(FileNames) = 0 then
+    Exit;
+  if DirectoryExists(FileNames[0]) then
+    OpenRepository(FileNames[0])
+  else
     OpenFile(FileNames[0]);
 end;
 
-procedure TForm1.ToolOpenRepoClick(Sender: TObject);
+procedure TForm1.MenuOpenRepoClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
     DirDialog.InitialDir := FRepo.Root;
@@ -259,19 +309,49 @@ begin
     OpenRepository(DirDialog.FileName);
 end;
 
-{ Shows the editor's file name and lexer. }
+{ The status bar names the repository and branch while the summary or the
+  raw diff is shown, and the file and its lexer while a file is shown; the
+  full path is in its hint, so the bar stays short. }
 procedure TForm1.UpdateStatus;
 var
-  Shown: string;
+  Lexer, Repo: string;
 begin
   if FAdapter.Lexer = nil then
-    Shown := rsPlainText
+    Lexer := rsPlainText
   else
-    Shown := FAdapter.Lexer.LexerName;
-  if Edit.FileName <> '' then
-    StatusBar.SimpleText := ExtractFileName(Edit.FileName) + ' - ' + Shown
+    Lexer := FAdapter.Lexer.LexerName;
+  Repo := '';
+  if FRepo.Root <> '' then
+  begin
+    Repo := Format(rsRepoOnBranch, [ExtractFileName(FRepo.Root), FBranch]);
+    if FBranch = '' then
+      Repo := ExtractFileName(FRepo.Root);
+  end;
+  if FSummaryBox.Visible and (Repo <> '') then
+  begin
+    case FFileCount of
+      0: StatusBar.SimpleText := Repo + ' · ' + rsNoChanges;
+      1: StatusBar.SimpleText := Repo + ' · ' + rsOneChangedFile;
+      else
+        StatusBar.SimpleText := Repo + ' · ' + Format(rsChangedFiles, [FFileCount]);
+    end;
+    StatusBar.Hint := FRepo.Root;
+  end
+  else if Edit.FileName <> '' then
+  begin
+    StatusBar.SimpleText := ExtractFileName(Edit.FileName) + ' · ' + Lexer;
+    StatusBar.Hint := Edit.FileName;
+  end
+  else if Repo <> '' then
+  begin
+    StatusBar.SimpleText := Repo + ' · ' + Lexer;
+    StatusBar.Hint := FRepo.Root;
+  end
   else
-    StatusBar.SimpleText := Shown;
+  begin
+    StatusBar.SimpleText := Lexer;
+    StatusBar.Hint := '';
+  end;
 end;
 
 { ---------------------------------------------------------------------------
@@ -280,7 +360,7 @@ end;
 procedure TForm1.BuildMenu;
 var
   Main: TMainMenu;
-  FileMenu, GoMenu, Item: TMenuItem;
+  FileMenu, ViewMenu, GoMenu, Item: TMenuItem;
 begin
   Main := TMainMenu.Create(Self);
   Menu := Main;
@@ -290,10 +370,29 @@ begin
   Main.Items.Add(FileMenu);
 
   Item := TMenuItem.Create(FileMenu);
+  Item.Caption := rsOpenRepo;
+  Item.ShortCut := ShortCut(VK_O, [ssModifier, ssShift]);
+  Item.OnClick := @MenuOpenRepoClick;
+  FileMenu.Add(Item);
+  Item := TMenuItem.Create(FileMenu);
   Item.Caption := rsOpen;
   Item.ShortCut := ShortCut(VK_O, [ssModifier]);
   Item.OnClick := @MenuOpenClick;
   FileMenu.Add(Item);
+
+  ViewMenu := TMenuItem.Create(Main);
+  ViewMenu.Caption := rsView;
+  Main.Items.Add(ViewMenu);
+  Item := TMenuItem.Create(ViewMenu);
+  Item.Caption := rsSummary;
+  Item.ShortCut := ShortCut(VK_1, [ssModifier]);
+  Item.OnClick := @MenuSummaryClick;
+  ViewMenu.Add(Item);
+  Item := TMenuItem.Create(ViewMenu);
+  Item.Caption := rsRepoDiff;
+  Item.ShortCut := ShortCut(VK_2, [ssModifier]);
+  Item.OnClick := @MenuRepoDiffClick;
+  ViewMenu.Add(Item);
 
   FSyntaxMenu := TMenuItem.Create(Main);
   FSyntaxMenu.Caption := rsSyntax;
@@ -431,6 +530,7 @@ begin
   Edit.FileName := AFileName;
   SetLexer(FLexers.ForFile(AFileName));
   UpdateChangeNav;
+  ShowEditor;
   Caption := ExtractFileName(AFileName) + ' - Gittan';
 end;
 
@@ -597,6 +697,10 @@ begin
     else
       Break;
   FNav.SetPosition(Current, Length(Blocks));
+  { The pill sits left of the minimap, which shares the editor's right
+    edge; RectMinimap is empty while the minimap is off or not yet laid
+    out. }
+  FNav.BorderSpacing.Right := 20 + Max(0, Edit.RectMinimap.Width);
 end;
 
 { The caret event fires from inside the editor's own updates, where
@@ -676,7 +780,8 @@ end;
   bar counts them. }
 procedure TForm1.OpenRepository(const ADir: string);
 var
-  Files: TStringList;
+  Stats: TGittanFileStats;
+  Icons: array of integer;
   i: integer;
 begin
   if not FRepo.Open(ADir) then
@@ -684,6 +789,84 @@ begin
     MessageDlg(FRepo.Error, mtError, [mbOK], 0);
     Exit;
   end;
+  Caption := ExtractFileName(FRepo.Root) + ' - Gittan';
+  if not FRepo.ChangeStats(Stats) then
+    MessageDlg(FRepo.Error, mtError, [mbOK], 0);
+  FBranch := FRepo.Branch;
+  FFileCount := Length(Stats);
+  FillFileTree(Stats);
+  SetLength(Icons, Length(Stats));
+  for i := 0 to High(Stats) do
+    Icons[i] := ChangeIcon(Stats[i].Kind);
+  FSummary.SetRepository(ExtractFileName(FRepo.Root), FBranch, Stats, Icons);
+  ShowSummary;
+end;
+
+{ ---------------------------------------------------------------------------
+  Summary and editor
+  ---------------------------------------------------------------------------
+  The summary and the editor share the space right of the tree; one of
+  them is shown. The summary is the view of the repository, the editor the
+  view of one file or of the raw repository diff. }
+procedure TForm1.ShowSummary;
+begin
+  Edit.Visible := False;
+  FSummaryBox.Visible := True;
+  { A file picked again after the summary must fire the selection event. }
+  FileTree.Selected := nil;
+  if FRepo.Root <> '' then
+    UpdateStatus;
+end;
+
+procedure TForm1.ShowEditor;
+begin
+  FSummaryBox.Visible := False;
+  Edit.Visible := True;
+end;
+
+{ The summary paints its own background; it must cover the scroll box. }
+procedure TForm1.SummaryBoxResize(Sender: TObject);
+begin
+  FSummary.Constraints.MinHeight := FSummaryBox.ClientHeight;
+end;
+
+{ A click on a file in the summary selects it in the tree, which shows its
+  changes. The tree's node texts are the path components. }
+procedure TForm1.SummarySelectFile(Sender: TObject; const APath: string);
+var
+  Node: TTreeNode;
+begin
+  Node := FileTree.Items.GetFirstNode;
+  while Node <> nil do
+  begin
+    if (Node.Data <> nil) and (Node.GetTextPath = APath) then
+    begin
+      FileTree.Selected := Node;
+      Node.MakeVisible;
+      Exit;
+    end;
+    Node := Node.GetNext;
+  end;
+end;
+
+procedure TForm1.MenuSummaryClick(Sender: TObject);
+begin
+  if FRepo.Root <> '' then
+    ShowSummary;
+end;
+
+procedure TForm1.MenuRepoDiffClick(Sender: TObject);
+begin
+  if FRepo.Root <> '' then
+    ShowRepoDiff;
+end;
+
+{ The work tree's uncommitted changes as one unified diff under the Diff
+  lexer, with the +/- lines colored like the change view. }
+procedure TForm1.ShowRepoDiff;
+var
+  i: integer;
+begin
   ShowText(FRepo.Diff, FLexers.ByName(rsDiffLexer));
   { The "---"/"+++" file headers are not changes. }
   for i := 0 to Edit.Strings.Count - 1 do
@@ -692,18 +875,10 @@ begin
       (Copy(Edit.Strings.Lines[i], 1, 3) <> '+++') then
       MarkLine(i, char(Edit.Strings.Lines[i][1]));
   UpdateChangeNav;
+  ShowEditor;
+  FileTree.Selected := nil;
   Caption := ExtractFileName(FRepo.Root) + ' - Gittan';
-  Files := TStringList.Create;
-  try
-    FRepo.ChangedPaths(Files);
-    FillFileTree(Files);
-    if Files.Count > 0 then
-      StatusBar.SimpleText := Format(rsChangedFiles, [Files.Count, FRepo.Root])
-    else
-      StatusBar.SimpleText := Format(rsNoChanges, [FRepo.Root]);
-  finally
-    Files.Free;
-  end;
+  UpdateStatus;
 end;
 
 { Shows one changed file with its deleted lines kept in place: the diff with
@@ -729,6 +904,7 @@ begin
       MarkLine(i, Lines[i][1]);
     ShowLineNumbers(Lines);
     UpdateChangeNav;
+    ShowEditor;
     Edit.FileName := IncludeTrailingPathDelimiter(FRepo.Root) +
       SetDirSeparators(APath);
     UpdateStatus;
@@ -747,7 +923,7 @@ end;
   git status reports as one entry) has Data = nil, the folder icon, and is
   never opened. git lists paths sorted, so the folder node of the previous
   path is reused when the folder repeats. }
-procedure TForm1.FillFileTree(AFiles: TStrings);
+procedure TForm1.FillFileTree(const AStats: TGittanFileStats);
 var
   Path, Dir, Part: string;
   DirNode, Node, LastDir: TTreeNode;
@@ -759,9 +935,9 @@ begin
     FileTree.Items.Clear;
     LastDir := nil;
     LastDirPath := '';
-    for i := 0 to AFiles.Count - 1 do
+    for i := 0 to High(AStats) do
     begin
-      Path := AFiles[i];
+      Path := AStats[i].Path;
       if Path = '' then
         Continue;
       Dir := ExtractFilePath(Path);
@@ -801,7 +977,7 @@ begin
       else
       begin
         Node.Data := Pointer(1);
-        Node.ImageIndex := ChangeIcon(TGittanChangeKind(PtrUInt(AFiles.Objects[i])));
+        Node.ImageIndex := ChangeIcon(AStats[i].Kind);
       end;
       Node.SelectedIndex := Node.ImageIndex;
     end;
