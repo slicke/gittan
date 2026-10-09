@@ -19,12 +19,16 @@ uses
 
 type
   TGittanSelectFileEvent = procedure(Sender: TObject; const APath: string) of object;
+  {** A right click on a file's row, with the mouse position in screen
+    coordinates for a popup menu. }
+  TGittanContextFileEvent = procedure(Sender: TObject; const APath: string;
+    const AScreenPos: TPoint) of object;
 
   { TGittanSummary }
 
   TGittanSummary = class(TCustomControl)
   private
-    FRepoName, FBranch, FMessage, FHint, FSelected: string;
+    FRepoName, FBranch, FBase, FMessage, FHint, FSelected, FNotice: string;
     FStats: TGittanFileStats;
     FImages: TCustomImageList;
     FIcon: TIcon;
@@ -33,11 +37,14 @@ type
     FHot: integer;
     FBack, FText, FDim, FHover, FSelectedBack, FAdded, FDeleted, FLine: TColor;
     FOnSelectFile: TGittanSelectFileEvent;
+    FOnContextFile: TGittanContextFileEvent;
     FRowsTop: integer;
     function RowAt(Y: integer): integer;
     procedure SetHot(AValue: integer);
     procedure SetSelected(const AValue: string);
+    procedure SetNotice(const AValue: string);
     procedure UpdateHeight;
+    procedure PaintNotice(var Y: integer);
     procedure PaintMessage;
     procedure PaintClean(Y: integer);
     procedure PaintHeader(var Y: integer);
@@ -52,9 +59,10 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
-    {** Shows the changed files AStats of repository AName on ABranch;
-      AIcons holds the image index in Images of each file's badge. }
-    procedure SetRepository(const AName, ABranch: string;
+    {** Shows the changed files AStats of repository AName on ABranch,
+      compared against ABase (empty for the usual HEAD); AIcons holds the
+      image index in Images of each file's badge. }
+    procedure SetRepository(const AName, ABranch, ABase: string;
       const AStats: TGittanFileStats; const AIcons: array of integer);
     {** Shows AMessage alone, centered, under AIcon (when it has one) and
       over the dimmer AHint: the view with no repository. }
@@ -70,8 +78,13 @@ type
     {** The path of the file whose row is marked: the one the editor last
       showed. Empty marks none. }
     property Selected: string read FSelected write SetSelected;
+    {** A line under the header, dimmed: why the summary is shown when
+      the user did not ask for it. Empty shows none. }
+    property Notice: string read FNotice write SetNotice;
     {** A click on a file's row. }
     property OnSelectFile: TGittanSelectFileEvent read FOnSelectFile write FOnSelectFile;
+    {** A right click on a file's row. }
+    property OnContextFile: TGittanContextFileEvent read FOnContextFile write FOnContextFile;
   end;
 
 implementation
@@ -86,6 +99,9 @@ resourcestring
   rsNoChanges = 'No changes';
   rsClean = 'Working tree clean';
   rsBinary = 'binary';
+  rsVsBase = 'vs %s';
+  rsStaged = 'staged';
+  rsPartlyStaged = 'partly staged';
 
 const
   Pad = 24;
@@ -117,13 +133,14 @@ begin
   inherited Destroy;
 end;
 
-procedure TGittanSummary.SetRepository(const AName, ABranch: string;
+procedure TGittanSummary.SetRepository(const AName, ABranch, ABase: string;
   const AStats: TGittanFileStats; const AIcons: array of integer);
 var
   i: integer;
 begin
   FRepoName := AName;
   FBranch := ABranch;
+  FBase := ABase;
   FMessage := '';
   FStats := Copy(AStats);
   SetLength(FIconIndex, Length(AIcons));
@@ -182,6 +199,8 @@ begin
     Measure.Free;
   end;
   FRowsTop := Pad + TitleHeight + 6 + BodyHeight + Pad;
+  if FNotice <> '' then
+    Inc(FRowsTop, RowHeight);
   Height := FRowsTop + Max(Length(FStats), 2) * RowHeight + Pad;
 end;
 
@@ -190,6 +209,16 @@ begin
   if FSelected = AValue then
     Exit;
   FSelected := AValue;
+  Invalidate;
+end;
+
+procedure TGittanSummary.SetNotice(const AValue: string);
+begin
+  if FNotice = AValue then
+    Exit;
+  FNotice := AValue;
+  if FMessage = '' then
+    UpdateHeight;
   Invalidate;
 end;
 
@@ -231,7 +260,15 @@ begin
   Canvas.Font.Style := [];
   Canvas.Font.Color := FDim;
   if FBranch <> '' then
+  begin
     Canvas.TextOut(X, Y + TitleHeight - BodyHeight - 3, Format(rsOnBranch, [FBranch]));
+    Inc(X, Canvas.TextWidth(Format(rsOnBranch, [FBranch])) + Gap);
+  end;
+  if FBase <> '' then
+  begin
+    Canvas.Font.Color := FText;
+    Canvas.TextOut(X, Y + TitleHeight - BodyHeight - 3, Format(rsVsBase, [FBase]));
+  end;
   Inc(Y, TitleHeight + 6);
 
   Added := 0;
@@ -264,6 +301,29 @@ begin
   Canvas.Pen.Color := FLine;
   Canvas.Line(Pad, Y, Width - Pad, Y);
   Inc(Y, Pad div 2);
+end;
+
+{ An info disc with an "i" and the notice text, in the row above the
+  files. Y is advanced past it. }
+procedure TGittanSummary.PaintNotice(var Y: integer);
+var
+  X, CenterY: integer;
+begin
+  Canvas.Font := Font;
+  Canvas.Brush.Style := bsClear;
+  X := Pad;
+  CenterY := Y + RowHeight div 2;
+  Canvas.Pen.Color := FDim;
+  Canvas.Brush.Style := bsClear;
+  Canvas.Ellipse(X, CenterY - CheckSize div 2, X + CheckSize, CenterY + CheckSize div 2);
+  Canvas.Font.Style := [fsBold];
+  Canvas.Font.Color := FDim;
+  Canvas.TextOut(X + (CheckSize - Canvas.TextWidth('i')) div 2,
+    CenterY - Canvas.TextHeight('i') div 2, 'i');
+  Canvas.Font.Style := [];
+  Canvas.TextOut(X + CheckSize + Gap div 2 + 2,
+    CenterY - Canvas.TextHeight('Xg') div 2, FNotice);
+  Inc(Y, RowHeight);
 end;
 
 { The bar compares this file's change with the largest one: the added part
@@ -357,6 +417,20 @@ begin
   end;
   Canvas.Font.Color := FText;
   Canvas.TextOut(X, TextY, FileName);
+  Inc(X, Canvas.TextWidth(FileName) + Gap);
+  { What the index holds, when the path left room for it. }
+  if Stat.Staged then
+  begin
+    if Stat.Unstaged then
+      Count := rsPartlyStaged
+    else
+      Count := rsStaged;
+    if X + Canvas.TextWidth(Count) <= CountsX - Gap then
+    begin
+      Canvas.Font.Color := FDim;
+      Canvas.TextOut(X, TextY, Count);
+    end;
+  end;
 
   if Stat.Binary then
   begin
@@ -474,6 +548,8 @@ begin
   end;
   Y := Pad;
   PaintHeader(Y);
+  if FNotice <> '' then
+    PaintNotice(Y);
   if Y <> FRowsTop then
   begin
     FRowsTop := Y;
@@ -504,8 +580,12 @@ var
 begin
   inherited MouseUp(Button, Shift, X, Y);
   Row := RowAt(Y);
-  if (Button = mbLeft) and (Row >= 0) and Assigned(FOnSelectFile) then
-    FOnSelectFile(Self, FStats[Row].Path);
+  if Row < 0 then
+    Exit;
+  if (Button = mbLeft) and Assigned(FOnSelectFile) then
+    FOnSelectFile(Self, FStats[Row].Path)
+  else if (Button = mbRight) and Assigned(FOnContextFile) then
+    FOnContextFile(Self, FStats[Row].Path, ClientToScreen(Point(X, Y)));
 end;
 
 end.

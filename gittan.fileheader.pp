@@ -21,7 +21,7 @@ type
 
   TGittanFileHeader = class(TCustomControl)
   private
-    FPrefix, FName, FLexer: string;
+    FPrefix, FName, FLexer, FStage: string;
     FIcon: integer;
     FAdded, FDeleted: integer;
     FHasCounts, FBinary: boolean;
@@ -40,6 +40,9 @@ type
     procedure SetTitle(const ATitle: string);
     {** Shows the added and deleted line counts, or "binary" when ABinary. }
     procedure SetCounts(AAdded, ADeleted: integer; ABinary: boolean);
+    {** Shows "staged" or "partly staged" before the counts, or nothing
+      when AStaged is false. }
+    procedure SetStage(AStaged, AUnstaged: boolean);
     {** The lexer name shown on the right. }
     procedure SetLexer(const ALexer: string);
     {** Shows the navigator at ACurrent of ATotal changes, or hides it when
@@ -59,6 +62,8 @@ implementation
 
 resourcestring
   rsBinary = 'binary';
+  rsStaged = 'staged';
+  rsPartlyStaged = 'partly staged';
 
 const
   HeaderHeight = 36;
@@ -94,6 +99,7 @@ begin
   FName := ExtractFileName(APath);
   FIcon := AIcon;
   FHasCounts := False;
+  FStage := '';
   Invalidate;
 end;
 
@@ -103,6 +109,18 @@ begin
   FName := ATitle;
   FIcon := -1;
   FHasCounts := False;
+  FStage := '';
+  Invalidate;
+end;
+
+procedure TGittanFileHeader.SetStage(AStaged, AUnstaged: boolean);
+begin
+  if not AStaged then
+    FStage := ''
+  else if AUnstaged then
+    FStage := rsPartlyStaged
+  else
+    FStage := rsStaged;
   Invalidate;
 end;
 
@@ -192,6 +210,7 @@ begin
       else
         DrawRight('+0', FDim);
     end;
+  DrawRight(FStage, FDim);
 
   X := Pad;
   if (FIcon >= 0) and (FImages <> nil) then

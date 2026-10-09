@@ -12,18 +12,28 @@ interface
 uses
   Classes, SysUtils;
 
+const
+  {** Bits added to the kind in the Objects of ChangedPaths: the index
+    holds a change, the work tree differs from the index. }
+  flagStaged = 16;
+  flagUnstaged = 32;
+
 type
   {** What happened to a changed file, condensed from the two status columns
     of `git status --porcelain`. }
   TGittanChangeKind = (ckModified, ckAdded, ckDeleted, ckRenamed, ckUntracked,
     ckConflict);
 
-  {** One changed file with its line counts. A binary file has no counts. }
+  {** One changed file with its line counts. A binary file has no counts.
+    Staged is set when the index holds a change to the file, Unstaged when
+    the work tree differs from the index; an untracked file has neither.
+    Both are false while a Base other than HEAD is compared against. }
   TGittanFileStat = record
     Path: string;
     Kind: TGittanChangeKind;
     Added, Deleted: integer;
     Binary: boolean;
+    Staged, Unstaged: boolean;
   end;
   TGittanFileStats = array of TGittanFileStat;
 
@@ -33,24 +43,32 @@ type
   private
     FRoot: string;
     FError: string;
+    FBase: string;
     function RunGit(const ADir: string; const AArgs: array of string;
       out AOutput: string): boolean;
+    function DiffBase: string;
+    function RunDiff(const AArgs: array of string; out AOutput: string): boolean;
   public
     {** Opens the repository that contains ADir. Returns false, with the git
       message in Error, when ADir is not inside a work tree. }
     function Open(const ADir: string): boolean;
     {** Forgets the repository. }
     procedure Close;
-    {** Unified diff of the work tree against HEAD, or against the index in
-      a repository without commits. Empty when there are no changes. }
+    {** Unified diff of the work tree against Base (HEAD by default), or
+      against the index in a repository without commits. Empty when there
+      are no changes. }
     function Diff: string;
+    {** The branches and tags of the repository, local branches first,
+      each most recently committed first: what Base can be set to. }
+    function Refs(AList: TStrings): boolean;
     {** Changed files as "XY path" lines from `git status --porcelain`,
       untracked files included. Returns false when git failed. }
     function ChangedFiles(AList: TStrings): boolean;
     {** Paths of the changed files from ChangedFiles, relative to Root with
       "/" separators; a rename gives its new path. Each Objects entry holds
-      the file's TGittanChangeKind as TObject(PtrUInt(Ord(Kind))). Returns
-      false when git failed. }
+      the file's TGittanChangeKind as TObject(PtrUInt(Ord(Kind))), with
+      flagStaged and flagUnstaged added from the two status columns.
+      Returns false when git failed. }
     function ChangedPaths(AList: TStrings): boolean;
     {** The changed files of ChangedPaths with their added and deleted line
       counts from `git diff --numstat`. A file git does not know yet has
@@ -77,6 +95,9 @@ type
     property Root: string read FRoot;
     {** Message from the last git call that failed. }
     property Error: string read FError;
+    {** The commit the work tree is compared against: a branch, tag or
+      commit id, or empty for HEAD. }
+    property Base: string read FBase write FBase;
   end;
 
 implementation
@@ -129,13 +150,67 @@ begin
   end;
   Result := RunGit(ADir, ['rev-parse', '--show-toplevel'], Top);
   if Result then
-    FRoot := Trim(Top);
+    FRoot := Trim(Top)
+  else if Pos('not a git repository', FError) > 0 then
+    FError := Format('Not a git repository: %s', [ADir]);
 end;
 
 procedure TGittanRepo.Close;
 begin
   FRoot := '';
   FError := '';
+  FBase := '';
+end;
+
+function TGittanRepo.DiffBase: string;
+begin
+  if FBase = '' then
+    Result := 'HEAD'
+  else
+    Result := FBase;
+end;
+
+{ Runs `git diff AArgs <base>`, with the base before the "--" of a path
+  list when AArgs has one. HEAD does not exist before the first commit,
+  and the index is the best base then; another base that does not resolve
+  is an error. }
+function TGittanRepo.RunDiff(const AArgs: array of string; out AOutput: string): boolean;
+var
+  Args: array of string;
+  i, n, Sep: integer;
+begin
+  Sep := Length(AArgs);
+  for i := 0 to High(AArgs) do
+    if AArgs[i] = '--' then
+    begin
+      Sep := i;
+      Break;
+    end;
+  SetLength(Args, Length(AArgs) + 2);
+  Args[0] := 'diff';
+  n := 1;
+  for i := 0 to High(AArgs) do
+  begin
+    if i = Sep then
+    begin
+      Args[n] := DiffBase;
+      Inc(n);
+    end;
+    Args[n] := AArgs[i];
+    Inc(n);
+  end;
+  if Sep = Length(AArgs) then
+    Args[n] := DiffBase;
+  Result := RunGit(FRoot, Args, AOutput);
+  if not Result and (FBase = '') then
+  begin
+    { Without HEAD: the same call, the base left out. }
+    SetLength(Args, Length(AArgs) + 1);
+    Args[0] := 'diff';
+    for i := 0 to High(AArgs) do
+      Args[i + 1] := AArgs[i];
+    Result := RunGit(FRoot, Args, AOutput);
+  end;
 end;
 
 function TGittanRepo.Diff: string;
@@ -143,22 +218,96 @@ begin
   Result := '';
   if FRoot = '' then
     Exit;
-  { HEAD does not exist before the first commit; the index is the best
-    base then. }
-  if not RunGit(FRoot, ['diff', '--no-color', '--no-ext-diff', 'HEAD'], Result) then
-    RunGit(FRoot, ['diff', '--no-color', '--no-ext-diff'], Result);
+  RunDiff(['--no-color', '--no-ext-diff'], Result);
 end;
 
+{ for-each-ref sorts within each group, so the groups are asked for one
+  by one: local branches, remote branches, tags. A symbolic ref such as
+  origin/HEAD (short name "origin") is skipped: it only points at
+  another one in the list. }
+function TGittanRepo.Refs(AList: TStrings): boolean;
+var
+  Output, Line, Name: string;
+  Group: string;
+  Raw: TStringList;
+  Tab: integer;
+begin
+  AList.Clear;
+  if FRoot = '' then
+    Exit(False);
+  Result := True;
+  Raw := TStringList.Create;
+  try
+    for Group in ['refs/heads', 'refs/remotes', 'refs/tags'] do
+    begin
+      if not RunGit(FRoot, ['for-each-ref', '--format=%(refname:short)%09%(symref)',
+        '--sort=-committerdate', Group], Output) then
+        Exit(False);
+      Raw.Text := Output;
+      for Line in Raw do
+      begin
+        Tab := Pos(#9, Line);
+        if (Tab = 0) or (Tab < Length(Line)) then
+          Continue;
+        Name := Copy(Line, 1, Tab - 1);
+        if (Name <> '') and (AList.IndexOf(Name) < 0) then
+          AList.Add(Name);
+      end;
+    end;
+  finally
+    Raw.Free;
+  end;
+end;
+
+{ Against HEAD the list is git status itself. Against another base it is
+  `git diff --name-status` turned into the same "XY path" shape, with the
+  letter in the work tree column, plus the untracked files from git
+  status, which no diff lists. }
 function TGittanRepo.ChangedFiles(AList: TStrings): boolean;
 var
-  Output: string;
+  Output, Line: string;
+  Raw: TStringList;
 begin
   AList.Clear;
   if FRoot = '' then
     Exit(False);
   Result := RunGit(FRoot, ['status', '--porcelain'], Output);
-  if Result then
+  if not Result then
+    Exit;
+  if FBase = '' then
+  begin
     AList.Text := Output;
+    Exit;
+  end;
+  Raw := TStringList.Create;
+  try
+    Raw.Text := Output;
+    for Line in Raw do
+      if Copy(Line, 1, 2) = '??' then
+        AList.Add(Line);
+    Result := RunDiff(['--name-status', '--no-renames'], Output);
+    if not Result then
+      Exit;
+    Raw.Text := Output;
+    for Line in Raw do
+      if (Length(Line) > 2) and (Line[2] = #9) then
+        AList.Add(' ' + Line[1] + ' ' + Copy(Line, 3, MaxInt));
+  finally
+    Raw.Free;
+  end;
+end;
+
+{ X is the index column, Y the work tree column; an untracked or ignored
+  file has neither flag. }
+function StageFlags(const AStatus: string): integer;
+begin
+  Result := 0;
+  if (Length(AStatus) >= 1) and (AStatus[1] in ['?', '!']) then
+    Exit;
+  if (Length(AStatus) >= 1) and (AStatus[1] <> ' ') then
+    Result := Result or flagStaged;
+  if (Length(AStatus) >= 2) and (AStatus[2] <> ' ') then
+    Result := Result or flagUnstaged;
 end;
 
 { A porcelain line is "XY path", or "XY old -> new" for a rename or copy. }
@@ -176,7 +325,8 @@ begin
     Arrow := Pos(' -> ', Path);
     if Arrow > 0 then
       Delete(Path, 1, Arrow + 3);
-    AList.Objects[i] := TObject(PtrUInt(Ord(ChangeKind(Copy(AList[i], 1, 2)))));
+    AList.Objects[i] := TObject(PtrUInt(Ord(ChangeKind(Copy(AList[i], 1, 2))) +
+      StageFlags(Copy(AList[i], 1, 2))));
     AList[i] := Path;
   end;
 end;
@@ -247,10 +397,11 @@ begin
     begin
       AStats[i] := Default(TGittanFileStat);
       AStats[i].Path := Paths[i];
-      AStats[i].Kind := TGittanChangeKind(PtrUInt(Paths.Objects[i]));
+      AStats[i].Kind := TGittanChangeKind(PtrUInt(Paths.Objects[i]) and 15);
+      AStats[i].Staged := PtrUInt(Paths.Objects[i]) and flagStaged <> 0;
+      AStats[i].Unstaged := PtrUInt(Paths.Objects[i]) and flagUnstaged <> 0;
     end;
-    if not RunGit(FRoot, ['diff', '--numstat', '--no-renames', 'HEAD'], Output) then
-      RunGit(FRoot, ['diff', '--numstat', '--no-renames'], Output);
+    RunDiff(['--numstat', '--no-renames'], Output);
     Num.Text := Output;
     for Line in Num do
     begin
@@ -352,7 +503,7 @@ begin
       Result := Result + IntToStr(PtrUInt(Paths.Objects[i])) + ' ' + Paths[i] + #10;
     Result := Result + Diff;
     for i := 0 to Paths.Count - 1 do
-      if TGittanChangeKind(PtrUInt(Paths.Objects[i])) = ckUntracked then
+      if TGittanChangeKind(PtrUInt(Paths.Objects[i]) and 15) = ckUntracked then
       begin
         FileName := IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(Paths[i]);
         if FindFirst(FileName, faAnyFile, Info) = 0 then
@@ -379,11 +530,8 @@ begin
   ALines.Clear;
   if FRoot = '' then
     Exit(False);
-  Result := RunGit(FRoot, ['diff', '--no-color', '--no-ext-diff', '--no-renames',
-    '-U99999999', 'HEAD', '--', APath], Output);
-  if not Result then
-    Result := RunGit(FRoot, ['diff', '--no-color', '--no-ext-diff', '--no-renames',
-      '-U99999999', '--', APath], Output);
+  Result := RunDiff(['--no-color', '--no-ext-diff', '--no-renames',
+    '-U99999999', '--', APath], Output);
   if not Result then
     Exit;
   Raw := TStringList.Create;

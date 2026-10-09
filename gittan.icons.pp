@@ -21,6 +21,11 @@ const
 {** Image index of the badge for AKind. }
 function ChangeIcon(AKind: TGittanChangeKind): integer;
 
+{** Image index of the badge for AKind with the staged mark: a small
+  check in the badge's lower right corner, for a file whose change is in
+  the index (in part or in full). }
+function StagedIcon(AKind: TGittanChangeKind): integer;
+
 {** Image index of the folder icon with a dot in the color of AKind: the
   most severe change among the files inside the folder. }
 function FolderIcon(AKind: TGittanChangeKind): integer;
@@ -33,7 +38,8 @@ function FolderIconKind(AIndex: integer; out AKind: TGittanChangeKind): boolean;
 function WorseKind(A, B: TGittanChangeKind): TGittanChangeKind;
 
 {** Fills the empty list AImages with the folder icon at iconFolder, the
-  change badges at ChangeIcon and the dotted folders at FolderIcon. }
+  change badges at ChangeIcon, the dotted folders at FolderIcon and the
+  staged badges at StagedIcon. }
 procedure FillTreeIcons(AImages: TCustomImageList);
 
 implementation
@@ -54,6 +60,11 @@ end;
 function FolderIcon(AKind: TGittanChangeKind): integer;
 begin
   Result := iconFolder + 1 + KindCount + Ord(AKind);
+end;
+
+function StagedIcon(AKind: TGittanChangeKind): integer;
+begin
+  Result := iconFolder + 1 + 2 * KindCount + Ord(AKind);
 end;
 
 function FolderIconKind(AIndex: integer; out AKind: TGittanChangeKind): boolean;
@@ -129,6 +140,22 @@ begin
     BadgeLetter[AKind], BGRAWhite, taCenter);
 end;
 
+{ The badge with the staged mark: a white disc over the lower right
+  corner, cut out of the badge by a transparent ring, with a check in the
+  badge's color. }
+function DrawStagedBadge(ASize: integer; AKind: TGittanChangeKind): TBGRABitmap;
+var
+  s: single;
+begin
+  Result := DrawBadge(ASize, AKind);
+  s := ASize / 16;
+  Result.EraseEllipseAntialias(12 * s, 12 * s, 5 * s, 5 * s, 255);
+  Result.FillEllipseAntialias(12 * s, 12 * s, 4 * s, 4 * s, BGRAWhite);
+  Result.LineCap := pecRound;
+  Result.DrawLineAntialias(9.5 * s, 12 * s, 11.3 * s, 13.8 * s, BadgeColor(AKind), 1.6 * s);
+  Result.DrawLineAntialias(11.3 * s, 13.8 * s, 14.5 * s, 10.2 * s, BadgeColor(AKind), 1.6 * s);
+end;
+
 { Adds one icon drawn at 16 and 32 pixels and frees the bitmaps. }
 procedure AddIcon(AImages: TCustomImageList; ASmall, ALarge: TBGRABitmap);
 begin
@@ -153,6 +180,8 @@ begin
     AddIcon(AImages, DrawBadge(16, Kind), DrawBadge(32, Kind));
   for Kind := Low(TGittanChangeKind) to High(TGittanChangeKind) do
     AddIcon(AImages, DrawDottedFolder(16, Kind), DrawDottedFolder(32, Kind));
+  for Kind := Low(TGittanChangeKind) to High(TGittanChangeKind) do
+    AddIcon(AImages, DrawStagedBadge(16, Kind), DrawStagedBadge(32, Kind));
 end;
 
 end.

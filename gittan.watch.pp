@@ -14,14 +14,15 @@ uses
   Classes, SysUtils, gittan.git;
 
 type
-  {** Polls the repository rooted at ARoot every AInterval milliseconds
+  {** Polls the repository rooted at ARoot, compared against ABase (empty
+    for HEAD), every AInterval milliseconds
     through its own TGittanRepo and fires OnChange, in the main thread,
     whenever the repository's Fingerprint differs from the previous one.
     The first poll only takes the baseline. Set OnChange, then call Start;
     Free stops the thread and drops any pending notification. }
   TGittanWatcher = class(TThread)
   private
-    FRoot: string;
+    FRoot, FBase: string;
     FRepo: TGittanRepo;
     FWake: PRTLEvent;
     FInterval: integer;
@@ -32,7 +33,7 @@ type
     procedure Execute; override;
     procedure TerminatedSet; override;
   public
-    constructor Create(const ARoot: string; AInterval: integer);
+    constructor Create(const ARoot, ABase: string; AInterval: integer);
     destructor Destroy; override;
     {** Drops the handler, ends the thread and waits for it. }
     procedure Stop;
@@ -44,13 +45,16 @@ implementation
 
 { TGittanWatcher }
 
-constructor TGittanWatcher.Create(const ARoot: string; AInterval: integer);
+constructor TGittanWatcher.Create(const ARoot, ABase: string; AInterval: integer);
 begin
   inherited Create(True);
   FRoot := ARoot;
   FInterval := AInterval;
   FRepo := TGittanRepo.Create;
   FWake := RTLEventCreate;
+  { The thread's repository is opened in Execute; the base must be set
+    after Open, which clears it. }
+  FBase := ABase;
 end;
 
 destructor TGittanWatcher.Destroy;
@@ -75,6 +79,7 @@ var
 begin
   if not FRepo.Open(FRoot) then
     Exit;
+  FRepo.Base := FBase;
   FLast := FRepo.Fingerprint;
   while not Terminated do
   begin
