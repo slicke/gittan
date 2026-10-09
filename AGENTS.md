@@ -18,6 +18,11 @@ This file applies to the Gittan repository root and its subdirectories.
   Tools > Build Lazarus inside the IDE uses Apple's ld unless the build profile carries the same `-FD` option.
 - Debug builds on macOS must use DWARF 2 (`-gw2`); FPC 3.2.x's DWARF 3 writer fails on Objective-C classes.
 
+## CI
+- `.github/workflows/build.yml` builds on every push to main and every PR: macOS arm64 (cocoa, `.dmg`), Windows x64 (win32, `.zip`) and Linux amd64 (qt6, `.tar.gz`), each with `lexlib/` beside the executable (in `Contents/Resources` for the bundle). The toolchain pins are Trndi's (Lazarus 4.8).
+- The checkout fetches the submodules, and every leg registers the vendored `.lpk` files with `lazbuild --add-package-link` (the list is `VENDOR_PACKAGES` in the workflow, in dependency order). A new vendored package must be added there too.
+- The macOS leg installs Homebrew's `lld` for the `tools/darwin-lld` shim, replaces the bundle's symlink with the binary and signs the bundle ad hoc. The Windows runner has no make, so that leg copies the lexers and calls lazbuild itself; keep it in step with `make lexlib`.
+
 ## Application icon
 - `icons/gittan-source.png` is the artwork (a rounded square on a white background with a gray halo). `make icons` runs `tools/makeicons.swift` (macOS only: CoreGraphics and `iconutil`), which measures the outline, cuts the icon out with a transparent background and writes `icons/gittan.png` (1024, the master), `icons/png/gittan-<n>.png` (16 to 512, for Linux desktop files), `icons/Gittan.icns` and `Gittan.ico`. Commit the generated files; other platforms only consume them.
 - The halo cannot be told from the icon's light gray right side by color, so the script measures the left, top and right edges and the bottom-left corner profile, where the frame is dark blue, checks it against the dark red bottom-right corner, and mirrors it to the top corners. A new artwork must keep that layout, or the script needs new edge probes.

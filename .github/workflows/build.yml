@@ -1,0 +1,250 @@
+name: Build (All Platforms)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+# ---------------------------------------------------------------------------------
+# WORKFLOW OVERVIEW
+# ---------------------------------------------------------------------------------
+# One matrix job builds Gittan natively on each platform and uploads a package:
+#   - macOS (arm64):   Gittan-macos-silicon.dmg  (Gittan.app with lexlib inside)
+#   - Windows (x64):   Gittan-windows-x64.zip    (Gittan.exe + lexlib/)
+#   - Linux (amd64):   Gittan-linux-amd64.tar.gz (Gittan + lexlib/, Qt6)
+#
+# The toolchain is the same Lazarus 4.8 pin Trndi uses. Two things differ from
+# Trndi:
+#   - vendor/ holds the ATSynEdit packages as git submodules. A fresh Lazarus
+#     knows none of them, so every leg registers their .lpk files with
+#     `lazbuild --add-package-link` before building (lazbuild then compiles them
+#     on demand as dependencies of Gittan.lpi).
+#   - Gittan.lpi links Darwin targets through tools/darwin-lld (see AGENTS.md),
+#     so the macOS leg installs Homebrew's lld.
+# ---------------------------------------------------------------------------------
+
+concurrency:
+  group: gittan-build-${{ github.ref }}
+  # Cancel superseded PR builds; never cancel main builds
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # Registration order follows the dependencies: atsynedit_package needs the
+  # first three, atsynedit_ex_package needs econtrol_package.
+  VENDOR_PACKAGES: >-
+    vendor/ATFlatControls/atflatcontrols/atflatcontrols_package.lpk
+    vendor/EncConv/encconv/encconv_package.lpk
+    vendor/BGRABitmap/bgrabitmap/bgrabitmappack.lpk
+    vendor/ATSynEdit/atsynedit/atsynedit_package.lpk
+    vendor/EControl/econtrol/econtrol_package.lpk
+    vendor/ATSynEdit_Ex/atsynedit_ex/atsynedit_ex_package.lpk
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    # Far above a normal build, far below the 6h default a hung lazbuild would burn.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            os_target: linux
+            # libqt6pas6/-dev only entered the Ubuntu archive in 25.10.
+            runner: ubuntu-26.04
+          - name: macos-arm64
+            os_target: macos
+            runner: macos-14
+          - name: windows-x64
+            os_target: windows
+            runner: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      # ===================== TOOLCHAINS =====================
+      - name: Install Lazarus/FPC (Linux)
+        if: matrix.os_target == 'linux'
+        env:
+          FPC_LAZ_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20Linux%20amd64%20DEB/Lazarus%204.8/fpc-laz_3.2.2-210709_amd64.deb/download
+          FPC_SRC_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20Linux%20amd64%20DEB/Lazarus%204.8/fpc-src_3.2.2-210709_amd64.deb/download
+          LAZ_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20Linux%20amd64%20DEB/Lazarus%204.8/lazarus-project_4.8.0-0_amd64.deb/download
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl \
+            qt6-base-dev libqt6pas6 libqt6pas-dev
+          # SourceForge mirrors flake; retry hard before failing the job.
+          CURL_RETRY="--retry 5 --retry-delay 5 --retry-all-errors"
+          curl -fsSL $CURL_RETRY -o fpc-laz.deb "$FPC_LAZ_URL"
+          curl -fsSL $CURL_RETRY -o fpc-src.deb "$FPC_SRC_URL"
+          curl -fsSL $CURL_RETRY -o lazarus.deb "$LAZ_URL"
+          sudo dpkg -i fpc-laz.deb fpc-src.deb lazarus.deb || true
+          sudo apt-get -f install -y
+          rm -f fpc-laz.deb fpc-src.deb lazarus.deb
+          fpc -iV
+          lazbuild --version
+
+      - name: Install Lazarus/FPC and lld (macOS)
+        if: matrix.os_target == 'macos'
+        env:
+          FPC_DMG_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20macOS%20aarch64/Lazarus%204.8/fpc-3.2.4rc1a.intelarm64-macosx.dmg/download
+          LAZ_ZIP_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20macOS%20aarch64/Lazarus%204.8/lazarus-darwin-aarch64-4.8.zip/download
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: |
+          set -euo pipefail
+          CURL_RETRY="--retry 5 --retry-delay 5 --retry-all-errors"
+          DL="$RUNNER_TEMP/toolchain"
+          mkdir -p "$DL"
+          curl -fsSL $CURL_RETRY -o "$DL/fpc.dmg" "$FPC_DMG_URL"
+          curl -fsSL $CURL_RETRY -o "$DL/lazarus.zip" "$LAZ_ZIP_URL"
+
+          MNT="$(mktemp -d)"
+          hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DL/fpc.dmg"
+          PKG="$(find "$MNT" -maxdepth 2 -name '*.pkg' | head -n1)"
+          [ -n "$PKG" ] || { echo "No .pkg found in the FPC dmg" >&2; exit 1; }
+          sudo installer -pkg "$PKG" -target /
+          hdiutil detach "$MNT"
+
+          # lld: Gittan.lpi links through tools/darwin-lld, which execs ld64.lld.
+          brew install make lld
+
+          xattr -cr "$DL/lazarus.zip"
+          EXTRACT="$(mktemp -d)"
+          unzip -q "$DL/lazarus.zip" -d "$EXTRACT"
+          LB="$(find "$EXTRACT" -maxdepth 3 -name lazbuild -type f | head -n1)"
+          [ -n "$LB" ] || { echo "lazbuild not found in the Lazarus zip" >&2; exit 1; }
+          sudo rm -rf /Applications/lazarus
+          sudo mv "$(dirname "$LB")" /Applications/lazarus
+          sudo xattr -cr /Applications/lazarus
+
+          # Point the zip's Lazarus at the installed FPC through a primary
+          # config path of its own (the zip ships without any configuration).
+          GMAKE="$(brew --prefix)/bin/gmake"
+          sudo mkdir -p /Applications/lazarus/config
+          printf -- '--pcp=/Applications/lazarus/config\n--lazarusdir=/Applications/lazarus\n' \
+            | sudo tee /Applications/lazarus/lazarus.cfg >/dev/null
+          sudo tee /Applications/lazarus/config/environmentoptions.xml >/dev/null <<XML
+          <?xml version="1.0" encoding="UTF-8"?>
+          <CONFIG>
+            <EnvironmentOptions>
+              <Version Value="112" Lazarus="4.8"/>
+              <LazarusDirectory Value="/Applications/lazarus/"/>
+              <CompilerFilename Value="/usr/local/bin/fpc"/>
+              <FPCSourceDirectory Value="\$(LazarusDir)/fpc/\$(FPCVer)/sources/"/>
+              <MakeFilename Value="$GMAKE"/>
+              <TestBuildDirectory Value="\$ENV(TMPDIR)"/>
+            </EnvironmentOptions>
+          </CONFIG>
+          XML
+          sudo sed -i '' -e 's/^          //' /Applications/lazarus/config/environmentoptions.xml
+          sudo chown -R "$(id -u):$(id -g)" /Applications/lazarus/config
+
+          echo "/Applications/lazarus" >> "$GITHUB_PATH"
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+          export PATH="/Applications/lazarus:/usr/local/bin:$(brew --prefix)/bin:$PATH"
+          fpc -iV
+          lazbuild --version
+          command -v ld64.lld
+
+      - name: Install Lazarus/FPC (Windows)
+        if: matrix.os_target == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          curl.exe -L --fail --retry 5 --retry-delay 5 --retry-all-errors -o lazarus-4.8.exe "https://sourceforge.net/projects/lazarus/files/Lazarus%20Windows%2064%20bits/Lazarus%204.8/lazarus-4.8-fpc-3.2.2-win64.exe/download"
+          # SourceForge sometimes answers with an HTML page; check for the MZ header.
+          $fs = [System.IO.File]::OpenRead('lazarus-4.8.exe')
+          $mz = New-Object byte[] 2
+          $null = $fs.Read($mz, 0, 2)
+          $fs.Close()
+          if (($mz[0] -ne 0x4D) -or ($mz[1] -ne 0x5A)) {
+            throw "lazarus-4.8.exe is not a Windows executable; the mirror likely returned a web page."
+          }
+          Start-Process '.\lazarus-4.8.exe' -ArgumentList '/VERYSILENT','/SP-','/NORESTART','/DIR=C:\Lazarus' -Wait
+          Remove-Item 'lazarus-4.8.exe'
+          Add-Content $env:GITHUB_PATH 'C:\Lazarus'
+          & 'C:\Lazarus\lazbuild.exe' --version
+
+      # ===================== VENDORED PACKAGES =====================
+      - name: Register vendored packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          LAZARGS=()
+          if [ "${{ matrix.os_target }}" = "windows" ]; then LAZARGS+=(--lazarusdir='C:\Lazarus'); fi
+          for LPK in $VENDOR_PACKAGES; do
+            [ -f "$LPK" ] || { echo "::error::$LPK is missing; are the submodules checked out?"; exit 1; }
+            lazbuild "${LAZARGS[@]}" --add-package-link "$LPK"
+          done
+
+      # ===================== BUILD + PACKAGE =====================
+      - name: Build and package (Linux)
+        if: matrix.os_target == 'linux'
+        run: |
+          set -euo pipefail
+          # The Makefile builds with qt6 on Linux and refreshes lexlib/.
+          make
+          mkdir -p dist/Gittan
+          cp Gittan dist/Gittan/
+          cp -r lexlib dist/Gittan/
+          cp icons/png/gittan-256.png dist/Gittan/gittan.png
+          tar -C dist -czf Gittan-linux-amd64.tar.gz Gittan
+
+      - name: Build and package (macOS)
+        if: matrix.os_target == 'macos'
+        run: |
+          set -euo pipefail
+          # The Makefile builds with cocoa, refreshes lexlib/ and puts the icon
+          # into Gittan.app.
+          gmake
+          # Lazarus's bundle links Contents/MacOS/Gittan to ../../../Gittan;
+          # replace the link with the binary and carry lexlib in Resources,
+          # where gittan.lexers.pp looks for it.
+          mkdir -p dist
+          cp -R Gittan.app dist/
+          rm -f dist/Gittan.app/Contents/MacOS/Gittan
+          cp Gittan dist/Gittan.app/Contents/MacOS/Gittan
+          cp -R lexlib dist/Gittan.app/Contents/Resources/
+          # Apple Silicon refuses unsigned code; sign ad hoc.
+          codesign --force --deep --sign - dist/Gittan.app
+          codesign --verify --deep --strict dist/Gittan.app
+          ln -s /Applications dist/Applications
+          hdiutil create -volname Gittan -srcfolder dist -ov -format UDZO Gittan-macos-silicon.dmg
+
+      - name: Build and package (Windows)
+        if: matrix.os_target == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # No make on the Windows runner; this is what `make lexlib` does.
+          rm -rf lexlib && mkdir -p lexlib
+          find vendor/CudaText-lexers -mindepth 2 -maxdepth 2 -name '*.lcf' -exec cp -p {} lexlib/ \;
+          echo "Copied $(ls lexlib | wc -l) lexers to lexlib/"
+          lazbuild --lazarusdir='C:\Lazarus' --widgetset=win32 Gittan.lpi
+          mkdir -p dist/Gittan
+          cp Gittan.exe dist/Gittan/
+          cp -r lexlib dist/Gittan/
+          (cd dist && 7z a -tzip ../Gittan-windows-x64.zip Gittan >/dev/null)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: gittan-${{ matrix.name }}
+          path: |
+            Gittan-linux-amd64.tar.gz
+            Gittan-macos-silicon.dmg
+            Gittan-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14
