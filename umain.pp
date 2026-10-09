@@ -7,64 +7,51 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, Menus, ComCtrls,
   ExtCtrls, LCLType, LazLoggerBase,
-  ATSynEdit, ATSynEdit_Adapter_EControl,
+  ATSynEdit, ATSynEdit_Adapter_EControl, ATSynEdit_Bookmarks,
   ec_SyntAnal,
   gittan.lexers, gittan.git;
 
 type
 
-  {** The two panes of the split view. }
-  TPane = (paLeft, paRight);
-
   { TForm1 }
 
   TForm1 = class(TForm)
-    EditLeft: TATSynEdit;
-    Splitter: TSplitter;
-    EditRight: TATSynEdit;
+    Edit: TATSynEdit;
     StatusBar: TStatusBar;
     ToolBar: TToolBar;
     ToolOpenRepo: TToolButton;
     DirDialog: TSelectDirectoryDialog;
     FileTree: TTreeView;
     TreeSplitter: TSplitter;
-    procedure EditorEnter(Sender: TObject);
+    procedure EditCalcBookmarkColor(Sender: TObject; ABookmarkKind: integer;
+      var AColor: TColor);
     procedure FileTreeSelectionChanged(Sender: TObject);
-    procedure SplitterMoved(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure FormDropFiles(Sender: TObject; const FileNames: array of string);
-    procedure FormResize(Sender: TObject);
     procedure ToolOpenRepoClick(Sender: TObject);
   private
-    FEditors: array[TPane] of TATSynEdit;
-    FAdapters: array[TPane] of TATAdapterEControl;
-    FActive: TPane;
-    FSplitRatio: double;
+    FAdapter: TATAdapterEControl;
     FLexers: TGittanLexers;
     FRepo: TGittanRepo;
     FSyntaxMenu: TMenuItem;
-    function Editor: TATSynEdit;
-    function Adapter: TATAdapterEControl;
-    function EditorsWidth: integer;
     procedure UpdateStatus;
     procedure BuildMenu;
     procedure BuildSyntaxMenu;
     procedure MenuOpenClick(Sender: TObject);
-    procedure MenuSaveClick(Sender: TObject);
     procedure MenuSyntaxClick(Sender: TObject);
-    procedure SetLexer(APane: TPane; ALexer: TecSyntAnalyzer);
-    procedure ShowText(APane: TPane; const AText: string;
-      ALexer: TecSyntAnalyzer);
-    procedure LoadFile(APane: TPane; const AFileName: string);
-    procedure FillFileTree;
+    procedure SetLexer(ALexer: TecSyntAnalyzer);
+    procedure ShowText(const AText: string; ALexer: TecSyntAnalyzer);
+    procedure MarkLine(ALine: integer; AChange: char);
+    procedure ShowChanges(const APath: string);
+    procedure FillFileTree(AFiles: TStrings);
     function CompareTreeNodes(Node1, Node2: TTreeNode): integer;
   public
-    {** Loads a file into the active pane and picks its lexer from the file
+    {** Loads a file into the editor and picks its lexer from the file
       name. }
     procedure OpenFile(const AFileName: string);
-    {** Opens the git repository containing ADir and shows its uncommitted
-      changes as a diff in the right pane. }
+    {** Opens the git repository containing ADir, lists its changed files in
+      the tree and shows the uncommitted changes as a diff in the editor. }
     procedure OpenRepository(const ADir: string);
   end;
 
@@ -78,7 +65,6 @@ implementation
 resourcestring
   rsFile = '&File';
   rsOpen = '&Open...';
-  rsSave = '&Save';
   rsSyntax = '&Syntax';
   rsPlainText = 'Plain text';
   rsNoLexers = 'No lexers found. Run "make lexlib" or set GITTAN_LEXLIB.';
@@ -86,27 +72,23 @@ resourcestring
   rsDiffLexer = 'Diff';
   rsChangedFiles = '%d changed files in %s';
   rsNoChanges = 'No changes in %s';
-  rsFileMissing = 'Not in the work tree: %s';
+
+const
+  { Bookmark kinds in the editor's second bookmark list, used only for the
+    line backgrounds of a diff. }
+  bmAdded = 1;
+  bmDeleted = 2;
 
 { TForm1 }
 
 procedure TForm1.FormCreate(Sender: TObject);
-var
-  Pane: TPane;
 begin
-  { The editors and splitter come from umain.lfm. The EControl adapter is not
-    an IDE component, so each editor gets its own here; that lets the panes
-    use different lexers. }
-  FEditors[paLeft] := EditLeft;
-  FEditors[paRight] := EditRight;
-  for Pane in TPane do
-  begin
-    FAdapters[Pane] := TATAdapterEControl.Create(Self);
-    FAdapters[Pane].AddEditor(FEditors[Pane]);
-  end;
-  FSplitRatio := 0.5;
-  FormResize(nil);
-  FActive := paLeft;
+  { The editor comes from umain.lfm. The EControl adapter is not an IDE
+    component, so it is created here. Gittan is a viewer, so the editor is
+    read-only; ShowText and OpenFile lift that while they replace the text. }
+  FAdapter := TATAdapterEControl.Create(Self);
+  FAdapter.AddEditor(Edit);
+  Edit.ModeReadOnly := True;
 
   FRepo := TGittanRepo.Create;
   FLexers := TGittanLexers.Create;
@@ -118,23 +100,17 @@ begin
     DebugLn(FLexers.Errors);
 
   BuildMenu;
-  { gittan [left [right]] }
+  { gittan [file | folder] }
   if ParamCount > 0 then
-    OpenFile(ParamStr(1));
-  if ParamCount > 1 then
-  begin
-    FActive := paRight;
-    OpenFile(ParamStr(2));
-    FActive := paLeft;
-  end;
+    if DirectoryExists(ParamStr(1)) then
+      OpenRepository(ParamStr(1))
+    else
+      OpenFile(ParamStr(1));
 end;
 
 procedure TForm1.FormDestroy(Sender: TObject);
-var
-  Pane: TPane;
 begin
-  for Pane in TPane do
-    FAdapters[Pane].Lexer := nil;
+  FAdapter.Lexer := nil;
   FreeAndNil(FLexers);
   FreeAndNil(FRepo);
 end;
@@ -153,61 +129,17 @@ begin
     OpenRepository(DirDialog.FileName);
 end;
 
-{ Keep the editor split at the same proportion when the window is resized or
-  the file tree changes width. }
-procedure TForm1.FormResize(Sender: TObject);
-begin
-  if FEditors[paLeft] <> nil then
-    FEditors[paLeft].Width := Round(EditorsWidth * FSplitRatio);
-end;
-
-{ ---------------------------------------------------------------------------
-  Split view
-  ---------------------------------------------------------------------------
-  Menu commands act on the active pane: the editor that last had focus. }
-function TForm1.Editor: TATSynEdit;
-begin
-  Result := FEditors[FActive];
-end;
-
-function TForm1.Adapter: TATAdapterEControl;
-begin
-  Result := FAdapters[FActive];
-end;
-
-procedure TForm1.EditorEnter(Sender: TObject);
-begin
-  if Sender = FEditors[paRight] then
-    FActive := paRight
-  else
-    FActive := paLeft;
-  UpdateStatus;
-end;
-
-{ Width shared by the two editors: the client area minus the file tree. }
-function TForm1.EditorsWidth: integer;
-begin
-  Result := ClientWidth - FileTree.Width - TreeSplitter.Width;
-  if Result < 1 then
-    Result := 1;
-end;
-
-procedure TForm1.SplitterMoved(Sender: TObject);
-begin
-  FSplitRatio := FEditors[paLeft].Width / EditorsWidth;
-end;
-
-{ Shows the active pane's file name and lexer. }
+{ Shows the editor's file name and lexer. }
 procedure TForm1.UpdateStatus;
 var
   Shown: string;
 begin
-  if Adapter.Lexer = nil then
+  if FAdapter.Lexer = nil then
     Shown := rsPlainText
   else
-    Shown := Adapter.Lexer.LexerName;
-  if Editor.FileName <> '' then
-    StatusBar.SimpleText := ExtractFileName(Editor.FileName) + ' - ' + Shown
+    Shown := FAdapter.Lexer.LexerName;
+  if Edit.FileName <> '' then
+    StatusBar.SimpleText := ExtractFileName(Edit.FileName) + ' - ' + Shown
   else
     StatusBar.SimpleText := Shown;
 end;
@@ -231,12 +163,6 @@ begin
   Item.Caption := rsOpen;
   Item.ShortCut := ShortCut(VK_O, [ssModifier]);
   Item.OnClick := @MenuOpenClick;
-  FileMenu.Add(Item);
-
-  Item := TMenuItem.Create(FileMenu);
-  Item.Caption := rsSave;
-  Item.ShortCut := ShortCut(VK_S, [ssModifier]);
-  Item.OnClick := @MenuSaveClick;
   FileMenu.Add(Item);
 
   FSyntaxMenu := TMenuItem.Create(Main);
@@ -299,26 +225,6 @@ begin
   end;
 end;
 
-procedure TForm1.MenuSaveClick(Sender: TObject);
-var
-  Dlg: TSaveDialog;
-begin
-  if Editor.FileName = '' then
-  begin
-    Dlg := TSaveDialog.Create(nil);
-    try
-      if not Dlg.Execute then
-        Exit;
-      Editor.FileName := Dlg.FileName;
-    finally
-      Dlg.Free;
-    end;
-  end;
-  Editor.SaveToFile(Editor.FileName);
-  if Adapter.Lexer = nil then
-    SetLexer(FActive, FLexers.ForFile(Editor.FileName));
-end;
-
 procedure TForm1.MenuSyntaxClick(Sender: TObject);
 var
   LexName: string;
@@ -326,71 +232,120 @@ begin
   { Strip the accelerator ampersand the widgetset may have inserted. }
   LexName := StringReplace(TMenuItem(Sender).Caption, '&', '', [rfReplaceAll]);
   if LexName = rsPlainText then
-    SetLexer(FActive, nil)
+    SetLexer(nil)
   else
-    SetLexer(FActive, FLexers.ByName(LexName));
+    SetLexer(FLexers.ByName(LexName));
 end;
 
 { ---------------------------------------------------------------------------
   Files and lexers
   --------------------------------------------------------------------------- }
-procedure TForm1.SetLexer(APane: TPane; ALexer: TecSyntAnalyzer);
+procedure TForm1.SetLexer(ALexer: TecSyntAnalyzer);
 begin
-  FAdapters[APane].Lexer := ALexer;
+  FAdapter.Lexer := ALexer;
   { Assigning a lexer does not parse anything yet; a change event from line 0
     starts the adapter's background parse of the whole text. }
   if ALexer <> nil then
-    FEditors[APane].DoEventChange(0);
+    Edit.DoEventChange(0);
   UpdateStatus;
-  FEditors[APane].Update;
+  Edit.Update;
 end;
 
-{ Replaces a pane's text with generated content that belongs to no file. }
-procedure TForm1.ShowText(APane: TPane; const AText: string;
-  ALexer: TecSyntAnalyzer);
+{ Replaces the text with generated content that belongs to no file. A
+  read-only ATSynEdit ignores assignments to Text, so read-only mode is
+  lifted while the text is replaced. Loading does not clear the second
+  bookmark list, so the diff colors are dropped here. }
+procedure TForm1.ShowText(const AText: string; ALexer: TecSyntAnalyzer);
 begin
-  FAdapters[APane].Lexer := nil;
-  FEditors[APane].Text := UTF8Decode(AText);
-  FEditors[APane].FileName := '';
-  FEditors[APane].Modified := False;
-  FEditors[APane].DoCaretSingle(0, 0);
-  SetLexer(APane, ALexer);
-end;
-
-procedure TForm1.LoadFile(APane: TPane; const AFileName: string);
-begin
-  FAdapters[APane].Lexer := nil;
-  FEditors[APane].LoadFromFile(AFileName, []);
-  FEditors[APane].FileName := AFileName;
-  SetLexer(APane, FLexers.ForFile(AFileName));
+  FAdapter.Lexer := nil;
+  Edit.BookmarkDeleteAll_2;
+  Edit.ModeReadOnly := False;
+  Edit.Text := UTF8Decode(AText);
+  { Setting Text skips the wrap rebuild while the editor has no fold ranges
+    (it is in "virtual" wrap mode then) and never flags one as needed, so
+    once the lexer adds folds the wrap items of the previous text are
+    reused and lines paint cut off. LoadFromFile clears the wrap info and
+    flags the rebuild itself; do the same here. }
+  Edit.WrapInfo.Clear;
+  Edit.Update(True);
+  Edit.ModeReadOnly := True;
+  Edit.FileName := '';
+  Edit.Modified := False;
+  Edit.DoCaretSingle(0, 0);
+  SetLexer(ALexer);
 end;
 
 procedure TForm1.OpenFile(const AFileName: string);
 begin
-  LoadFile(FActive, AFileName);
+  FAdapter.Lexer := nil;
+  Edit.BookmarkDeleteAll_2;
+  Edit.ModeReadOnly := False;
+  Edit.LoadFromFile(AFileName, []);
+  Edit.ModeReadOnly := True;
+  Edit.FileName := AFileName;
+  SetLexer(FLexers.ForFile(AFileName));
   Caption := ExtractFileName(AFileName) + ' - Gittan';
+end;
+
+{ ---------------------------------------------------------------------------
+  Diff colors
+  ---------------------------------------------------------------------------
+  Added and deleted lines get a background through the editor's second
+  bookmark list: a bookmark there colors its line but draws no gutter icon.
+  The kind picks the color. }
+procedure TForm1.EditCalcBookmarkColor(Sender: TObject; ABookmarkKind: integer;
+  var AColor: TColor);
+begin
+  case ABookmarkKind of
+    bmAdded: AColor := RGBToColor(214, 245, 214);
+    bmDeleted: AColor := RGBToColor(252, 215, 215);
+  end;
+end;
+
+{ AChange is the first character of a unified diff line. }
+procedure TForm1.MarkLine(ALine: integer; AChange: char);
+var
+  Kind: integer;
+begin
+  case AChange of
+    '+': Kind := bmAdded;
+    '-': Kind := bmDeleted;
+    else
+      Exit;
+  end;
+  Edit.BookmarkSetForLine_2(ALine, Kind, '', TATBookmarkAutoDelete.DontDelete,
+    False, 0);
 end;
 
 { ---------------------------------------------------------------------------
   Repository
   ---------------------------------------------------------------------------
-  The right pane shows the work tree's uncommitted changes as a unified diff
-  under the Diff lexer; the status bar counts the changed files. }
+  The editor shows the work tree's uncommitted changes as a unified diff
+  under the Diff lexer; the file tree lists the changed files and the status
+  bar counts them. }
 procedure TForm1.OpenRepository(const ADir: string);
 var
   Files: TStringList;
+  i: integer;
 begin
   if not FRepo.Open(ADir) then
   begin
     MessageDlg(FRepo.Error, mtError, [mbOK], 0);
     Exit;
   end;
-  ShowText(paRight, FRepo.Diff, FLexers.ByName(rsDiffLexer));
-  FillFileTree;
+  ShowText(FRepo.Diff, FLexers.ByName(rsDiffLexer));
+  { The "---"/"+++" file headers are not changes. }
+  for i := 0 to Edit.Strings.Count - 1 do
+    if (Edit.Strings.LinesLen[i] > 0) and
+      (Copy(Edit.Strings.Lines[i], 1, 3) <> '---') and
+      (Copy(Edit.Strings.Lines[i], 1, 3) <> '+++') then
+      MarkLine(i, char(Edit.Strings.Lines[i][1]));
   Caption := ExtractFileName(FRepo.Root) + ' - Gittan';
   Files := TStringList.Create;
   try
-    if FRepo.ChangedFiles(Files) and (Files.Count > 0) then
+    FRepo.ChangedPaths(Files);
+    FillFileTree(Files);
+    if Files.Count > 0 then
       StatusBar.SimpleText := Format(rsChangedFiles, [Files.Count, FRepo.Root])
     else
       StatusBar.SimpleText := Format(rsNoChanges, [FRepo.Root]);
@@ -399,32 +354,59 @@ begin
   end;
 end;
 
+{ Shows one changed file with its deleted lines kept in place: the diff with
+  the whole file as context, the +/- markers turned into line colors. The
+  lexer comes from the file name. }
+procedure TForm1.ShowChanges(const APath: string);
+var
+  Lines, Plain: TStringList;
+  i: integer;
+begin
+  Lines := TStringList.Create;
+  Plain := TStringList.Create;
+  try
+    if not FRepo.FileChanges(APath, Lines) then
+    begin
+      StatusBar.SimpleText := FRepo.Error;
+      Exit;
+    end;
+    for i := 0 to Lines.Count - 1 do
+      Plain.Add(Copy(Lines[i], 2, MaxInt));
+    ShowText(Plain.Text, FLexers.ForFile(APath));
+    for i := 0 to Lines.Count - 1 do
+      MarkLine(i, Lines[i][1]);
+    Edit.FileName := IncludeTrailingPathDelimiter(FRepo.Root) +
+      SetDirSeparators(APath);
+    UpdateStatus;
+    Edit.Update;
+  finally
+    Plain.Free;
+    Lines.Free;
+  end;
+end;
+
 { ---------------------------------------------------------------------------
   File tree
   ---------------------------------------------------------------------------
-  One node per path component of the repository's file list. A file node has
-  Data set; a folder node (or a submodule, which ls-files reports as one
-  entry) has Data = nil and is never opened. git lists paths sorted, so the
-  folder node of the previous path is reused when the folder repeats. }
-procedure TForm1.FillFileTree;
+  One node per path component of each changed file. A file node has Data
+  set; a folder node (or a submodule, which git status reports as one entry)
+  has Data = nil and is never opened. git lists paths sorted, so the folder
+  node of the previous path is reused when the folder repeats. }
+procedure TForm1.FillFileTree(AFiles: TStrings);
 var
-  Files: TStringList;
   Path, Dir, Part: string;
   DirNode, Node, LastDir: TTreeNode;
   LastDirPath: string;
   i, Start, Sep: integer;
 begin
-  Files := TStringList.Create;
   FileTree.BeginUpdate;
   try
     FileTree.Items.Clear;
-    if not FRepo.ListFiles(Files) then
-      Exit;
     LastDir := nil;
     LastDirPath := '';
-    for i := 0 to Files.Count - 1 do
+    for i := 0 to AFiles.Count - 1 do
     begin
-      Path := Files[i];
+      Path := AFiles[i];
       if Path = '' then
         Continue;
       Dir := ExtractFilePath(Path);
@@ -461,7 +443,6 @@ begin
     FileTree.CustomSort(@CompareTreeNodes);
   finally
     FileTree.EndUpdate;
-    Files.Free;
   end;
 end;
 
@@ -473,24 +454,16 @@ begin
     Result := CompareText(Node1.Text, Node2.Text);
 end;
 
-{ Selecting a file shows it in the left editor. Folders only expand. A file
-  deleted from the work tree is still listed from the index, so check first. }
+{ Selecting a file shows its changes. Folders only expand. A deleted file
+  still has a diff: every line of it, deleted. }
 procedure TForm1.FileTreeSelectionChanged(Sender: TObject);
 var
   Node: TTreeNode;
-  FileName: string;
 begin
   Node := FileTree.Selected;
   if (Node = nil) or (Node.Data = nil) or (FRepo.Root = '') then
     Exit;
-  FileName := IncludeTrailingPathDelimiter(FRepo.Root) +
-    SetDirSeparators(Node.GetTextPath);
-  if not FileExists(FileName) then
-  begin
-    StatusBar.SimpleText := Format(rsFileMissing, [Node.GetTextPath]);
-    Exit;
-  end;
-  LoadFile(paLeft, FileName);
+  ShowChanges(Node.GetTextPath);
   Caption := Node.Text + ' - ' + ExtractFileName(FRepo.Root) + ' - Gittan';
 end;
 

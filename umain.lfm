@@ -10,7 +10,6 @@ object Form1: TForm1
   OnCreate = FormCreate
   OnDestroy = FormDestroy
   OnDropFiles = FormDropFiles
-  OnResize = FormResize
   LCLVersion = '4.8.0.0'
   object ToolBar: TToolBar
     Left = 0
@@ -20,7 +19,7 @@ object Form1: TForm1
     AutoSize = True
     Caption = 'ToolBar'
     ShowCaptions = True
-    TabOrder = 2
+    TabOrder = 1
     object ToolOpenRepo: TToolButton
       Left = 1
       Top = 2
@@ -36,7 +35,7 @@ object Form1: TForm1
     Width = 220
     Align = alLeft
     ReadOnly = True
-    TabOrder = 3
+    TabOrder = 2
     OnSelectionChanged = FileTreeSelectionChanged
     Options = [tvoAutoItemHeight, tvoHideSelection, tvoKeepCollapsedNodes, tvoReadOnly, tvoShowButtons, tvoShowLines, tvoShowRoot, tvoToolTips, tvoThemedDraw]
   end
@@ -45,36 +44,16 @@ object Form1: TForm1
     Height = 551
     Top = 26
     Width = 5
-    OnMoved = FormResize
   end
-  object EditLeft: TATSynEdit
+  object Edit: TATSynEdit
     Left = 225
     Height = 551
     Top = 26
-    Width = 340
-    Align = alLeft
+    Width = 675
+    Align = alClient
     TabOrder = 0
     TabStop = True
-    OnEnter = EditorEnter
-    OptRulerVisible = False
-    OptUnprintedVisible = False
-  end
-  object Splitter: TSplitter
-    Left = 565
-    Height = 551
-    Top = 26
-    Width = 5
-    OnMoved = SplitterMoved
-  end
-  object EditRight: TATSynEdit
-    Left = 570
-    Height = 551
-    Top = 26
-    Width = 330
-    Align = alClient
-    TabOrder = 1
-    TabStop = True
-    OnEnter = EditorEnter
+    OnCalcBookmarkColor = EditCalcBookmarkColor
     OptRulerVisible = False
     OptUnprintedVisible = False
   end

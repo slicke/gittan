@@ -12,7 +12,7 @@ interface
 
 uses
   Classes, SysUtils,
-  ec_SyntAnal, ec_LexerList;
+  ec_SyntAnal, ec_LexerList, ec_syntax_format, LCLType;
 
 type
   {** Owns the lexer list and knows where the lexer files live. }
@@ -21,11 +21,15 @@ type
     FList: TecLexerList;
     FFolder: string;
     FErrors: string;
+    procedure NormalizeStyles;
   public
     constructor Create;
     destructor Destroy; override;
-    {** Loads all lexers from the first folder that exists. Returns false when
-      no lexer folder was found. }
+    {** Loads all lexers from the first folder that exists and normalizes
+      their styles: background colors are dropped so only the diff colors
+      paint line backgrounds, and system font colors become "none" so the
+      editor's own text color is used. Returns false when no lexer folder
+      was found. }
     function Load: boolean;
     {** The lexer for a file name, or nil for plain text. }
     function ForFile(const AFileName: string): TecSyntAnalyzer;
@@ -44,7 +48,7 @@ function LexerFolderCandidates: TStringArray;
 implementation
 
 uses
-  Forms;
+  Graphics, Forms;
 
 { ---------------------------------------------------------------------------
   Lexer folder lookup
@@ -108,8 +112,34 @@ begin
       LoadErrors := '';
       FList.InitLibrary(FFolder, LinkErrors);
       FErrors := LoadErrors + LinkErrors;
+      NormalizeStyles;
       Exit(FList.LexerCount > 0);
     end;
+end;
+
+{ Lexer styles may carry a background (Markdown code blocks, for example);
+  Gittan uses the line background for the diff, so every style is reduced to
+  its font and foreground color. Some lexers also use system colors such as
+  clWindowText for text, which the widgetset resolves to white in a dark
+  desktop theme while the editor keeps its light background; those colors
+  are dropped so the editor's text color applies. }
+procedure TGittanLexers.NormalizeStyles;
+var
+  i, j: integer;
+  An: TecSyntAnalyzer;
+  Fmt: TecSyntaxFormat;
+begin
+  for i := 0 to FList.LexerCount - 1 do
+  begin
+    An := FList.Lexers[i];
+    for j := 0 to An.Formats.Count - 1 do
+    begin
+      Fmt := An.Formats[j];
+      Fmt.BgColor := clNone;
+      if (Fmt.Font <> nil) and ((Fmt.Font.Color and SYS_COLOR_BASE) <> 0) then
+        Fmt.Font.Color := clNone;
+    end;
+  end;
 end;
 
 function TGittanLexers.ForFile(const AFileName: string): TecSyntAnalyzer;

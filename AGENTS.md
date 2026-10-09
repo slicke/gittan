@@ -24,16 +24,19 @@ This file applies to the Gittan repository root and its subdirectories.
 - Do not edit files under `vendor/`. Update a package by moving its submodule to a new commit; rebuild the IDE as above if it is one the IDE is built with.
 
 ## Syntax highlighting
-- `gittan.lexers.pp` loads every EControl lexer (`*.lcf`) from one folder and picks a lexer by file name. `umain.pp` shows two editors side by side, each connected through its own `TATAdapterEControl`; menu commands act on the editor that last had focus.
+- `gittan.lexers.pp` loads every EControl lexer (`*.lcf`) from one folder and picks a lexer by file name. `umain.pp` shows one read-only editor connected through a `TATAdapterEControl`; the Syntax menu changes its lexer.
 - CudaText-lexers keeps one subfolder per lexer, but EControl loads from a flat folder. `make lexlib` copies the lexers into `lexlib/` (generated, gitignored); every build target runs it.
 - At runtime the folder is found through `GITTAN_LEXLIB`, then `lexlib` beside the executable, then `Contents/Resources/lexlib` in a macOS bundle.
 - After assigning a lexer, call the editor's `DoEventChange(0)`. Without it the adapter never parses and the text stays uncolored.
+- `TGittanLexers.Load` normalizes every lexer style: `BgColor` is cleared so lexers only color text (line backgrounds are reserved for the diff colors), and a system font color such as `clWindowText` becomes `clNone`. Cocoa resolves system colors through the desktop theme, so in dark mode they turn white on the editor's light background and the text disappears (seen with the Delphi resources lexer on `.lfm`).
+- After replacing the text through `Text` (not `LoadFromFile`), call `WrapInfo.Clear` and `Update(True)`. Setting `Text` skips the wrap rebuild while no fold ranges exist and never flags it, so once the lexer adds folds the old wrap items are reused and lines paint cut off or blank.
 
 ## Git
 - `gittan.git.pp` wraps the `git` command line tool (found on PATH) through `RunCommandIndir` from fcl-process; it does not link libgit2. `TGittanRepo.Open` resolves any folder to its work tree root with `rev-parse --show-toplevel`.
-- The toolbar's "Open Repository" button uses the `TSelectDirectoryDialog` on the form, then `OpenRepository` in `umain.pp` shows `git diff HEAD` (or `git diff` before the first commit) in the right pane under the Diff lexer and counts changed files from `git status --porcelain` in the status bar.
-- The `TTreeView` on the far left lists the repository's files from `git ls-files --cached --others --exclude-standard` (tracked and untracked, ignored files left out), folders first. A file node has `Data` set; folders and submodules have `Data = nil`. Selecting a file loads it into the left editor; a path still in the index but deleted from the work tree is reported in the status bar instead.
-- `SetLexer`, `ShowText` and `LoadFile` take a `TPane` so content can go to a pane that does not have focus. The editor split ratio is relative to the width left after the file tree.
+- The toolbar's "Open Repository" button uses the `TSelectDirectoryDialog` on the form (a folder on the command line, `gittan <folder>`, opens one too), then `OpenRepository` in `umain.pp` shows `git diff HEAD` (or `git diff` before the first commit) in the editor under the Diff lexer and counts changed files from `git status --porcelain` in the status bar.
+- The `TTreeView` on the left lists only the changed files, taken from the same `git status --porcelain` output through `ChangedPaths` (untracked files included, a rename shown under its new path), folders first. A file node has `Data` set; folders and submodules have `Data = nil`.
+- Selecting a file calls `ShowChanges`: `FileChanges` runs `git diff --no-renames -U99999999 HEAD -- path` so the whole file is one hunk, with deleted lines kept in place. The `+`/`-` markers are stripped from the text and become line backgrounds (green added, red deleted) through the editor's second bookmark list (`BookmarkSetForLine_2`), whose entries color a line without a gutter icon; `OnCalcBookmarkColor` maps the kind to the color. An untracked file is read from disk and shown all green. The repository diff on open gets the same colors on its `+`/`-` lines.
+- The editor is a viewer: `ModeReadOnly` is set in `FormCreate`. ATSynEdit silently ignores `Text` and `LoadFromFile` while read-only, so `ShowText` and `OpenFile` clear the mode around the load and set it again. Loading does not clear the second bookmark list, so they call `BookmarkDeleteAll_2` first. There is no Save command.
 
 ## Editing Guidance
 - Keep changes focused and minimal. Avoid unrelated refactors or formatting-only edits.

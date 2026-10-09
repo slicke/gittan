@@ -33,10 +33,15 @@ type
     {** Changed files as "XY path" lines from `git status --porcelain`,
       untracked files included. Returns false when git failed. }
     function ChangedFiles(AList: TStrings): boolean;
-    {** Paths of tracked and untracked files, relative to Root with "/"
-      separators; ignored files are left out. Returns false when git
+    {** Paths of the changed files from ChangedFiles, relative to Root with
+      "/" separators; a rename gives its new path. Returns false when git
       failed. }
-    function ListFiles(AList: TStrings): boolean;
+    function ChangedPaths(AList: TStrings): boolean;
+    {** One changed file as the lines of a unified diff against HEAD with the
+      whole file as context: every line starts with ' ', '+' or '-'. A file
+      git does not know yet is returned as all added lines; a binary file
+      gives no lines. Returns false when git failed. }
+    function FileChanges(const APath: string; ALines: TStrings): boolean;
     {** Work tree root, empty when nothing is open. }
     property Root: string read FRoot;
     {** Message from the last git call that failed. }
@@ -125,17 +130,68 @@ begin
     AList.Text := Output;
 end;
 
-function TGittanRepo.ListFiles(AList: TStrings): boolean;
+{ A porcelain line is "XY path", or "XY old -> new" for a rename or copy. }
+function TGittanRepo.ChangedPaths(AList: TStrings): boolean;
 var
-  Output: string;
+  i, Arrow: integer;
+  Path: string;
 begin
-  AList.Clear;
+  Result := ChangedFiles(AList);
+  if not Result then
+    Exit;
+  for i := 0 to AList.Count - 1 do
+  begin
+    Path := Copy(AList[i], 4, MaxInt);
+    Arrow := Pos(' -> ', Path);
+    if Arrow > 0 then
+      Delete(Path, 1, Arrow + 3);
+    AList[i] := Path;
+  end;
+end;
+
+{ The hunk header "@@" starts the lines; "\ No newline at end of file"
+  notes are dropped. Renames are turned off so a renamed file is a plain new
+  file under its new path, which is how the file tree lists it. }
+function TGittanRepo.FileChanges(const APath: string; ALines: TStrings): boolean;
+var
+  Output, Line, FileName: string;
+  Raw: TStringList;
+  InHunk: boolean;
+begin
+  ALines.Clear;
   if FRoot = '' then
     Exit(False);
-  Result := RunGit(FRoot, ['ls-files', '--cached', '--others', '--exclude-standard'],
-    Output);
-  if Result then
-    AList.Text := Output;
+  Result := RunGit(FRoot, ['diff', '--no-color', '--no-ext-diff', '--no-renames',
+    '-U99999999', 'HEAD', '--', APath], Output);
+  if not Result then
+    Result := RunGit(FRoot, ['diff', '--no-color', '--no-ext-diff', '--no-renames',
+      '-U99999999', '--', APath], Output);
+  if not Result then
+    Exit;
+  Raw := TStringList.Create;
+  try
+    if Output = '' then
+    begin
+      { Not in HEAD or the index: an untracked file, all of it new. }
+      FileName := IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(APath);
+      if FileExists(FileName) then
+      begin
+        Raw.LoadFromFile(FileName);
+        for Line in Raw do
+          ALines.Add('+' + Line);
+      end;
+      Exit;
+    end;
+    Raw.Text := Output;
+    InHunk := False;
+    for Line in Raw do
+      if not InHunk then
+        InHunk := Copy(Line, 1, 2) = '@@'
+      else if (Line <> '') and (Line[1] in [' ', '+', '-']) then
+        ALines.Add(Line);
+  finally
+    Raw.Free;
+  end;
 end;
 
 end.
