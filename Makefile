@@ -53,7 +53,29 @@ LAZFLAGS = --widgetset=$(WIDGETSET)
 LEXERS_SRC := vendor/CudaText-lexers
 LEXLIB := lexlib
 
-.PHONY: all build debug rebuild run clean help lexlib
+# Application icon. icons/gittan-source.png is the artwork; `make icons` cuts
+# it out of its white background with tools/makeicons.swift (macOS only) into
+# icons/gittan.png, icons/png/, icons/Gittan.icns and Gittan.ico. Lazarus
+# compiles Gittan.ico into the executable for Windows and Linux, but writes no
+# icon into the macOS bundle it creates, so every Darwin build copies the .icns
+# into Gittan.app and names it in Info.plist.
+ICON_SRC ?= icons/gittan-source.png
+BUNDLE := Gittan.app
+ifeq ($(shell uname -s),Darwin)
+define bundle_icon
+	@if [ -d "$(BUNDLE)/Contents" ]; then \
+	  cp icons/Gittan.icns "$(BUNDLE)/Contents/Resources/Gittan.icns"; \
+	  /usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$(BUNDLE)/Contents/Info.plist" >/dev/null 2>&1 || \
+	    /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string Gittan.icns' "$(BUNDLE)/Contents/Info.plist"; \
+	  touch "$(BUNDLE)"; \
+	fi
+endef
+else
+define bundle_icon
+endef
+endif
+
+.PHONY: all build debug rebuild run clean help lexlib icons
 
 all: build
 
@@ -64,17 +86,24 @@ help:
 	@echo "  rebuild   Build with every unit recompiled (-B)"
 	@echo "  run       Build, then start Gittan (RUN_ARGS forwards arguments)"
 	@echo "  lexlib    Copy the lexers from $(LEXERS_SRC) into $(LEXLIB)/ (part of every build)"
+	@echo "  icons     Regenerate the icons from ICON_SRC=$(ICON_SRC) (macOS only)"
 	@echo "  clean     Remove lib/, $(LEXLIB)/ and the binary"
 	@echo "Current: WIDGETSET=$(WIDGETSET) LAZBUILD=$(LAZBUILD) LD64_LLD=$(LD64_LLD)"
 
 build: lexlib
 	$(LAZBUILD) $(LAZFLAGS) $(LPI)
+	$(bundle_icon)
 
 debug: lexlib
 	$(LAZBUILD) $(LAZFLAGS) $(DEBUG_FLAGS) $(LPI)
+	$(bundle_icon)
 
 rebuild: lexlib
 	$(LAZBUILD) -B $(LAZFLAGS) $(LPI)
+	$(bundle_icon)
+
+icons:
+	swift tools/makeicons.swift "$(ICON_SRC)" icons Gittan.ico
 
 lexlib:
 	@if [ ! -d "$(LEXERS_SRC)/Pascal" ]; then \

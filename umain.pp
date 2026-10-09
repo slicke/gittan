@@ -8,6 +8,7 @@ uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, Menus, ComCtrls,
   ExtCtrls, StdCtrls, Buttons, LCLType, LazLoggerBase, Math,
   ATSynEdit, ATSynEdit_Adapter_EControl, ATSynEdit_Bookmarks,
+  ATSynEdit_Gutter_Decor, ATSynEdit_Globals, ATStringProc,
   ec_SyntAnal,
   gittan.lexers, gittan.git, gittan.icons, gittan.theme;
 
@@ -30,6 +31,7 @@ type
     procedure NextChangeButtonClick(Sender: TObject);
     procedure EditCalcBookmarkColor(Sender: TObject; ABookmarkKind: integer;
       var AColor: TColor);
+    procedure EditChangeZoom(Sender: TObject);
     procedure ThemeTimerTimer(Sender: TObject);
     procedure FileTreeSelectionChanged(Sender: TObject);
     procedure FormCreate(Sender: TObject);
@@ -42,6 +44,7 @@ type
     FRepo: TGittanRepo;
     FSyntaxMenu: TMenuItem;
     FDark: boolean;
+    FBookmarkBandWidth: integer;
     procedure ApplyTheme;
     procedure UpdateStatus;
     procedure BuildMenu;
@@ -51,6 +54,9 @@ type
     procedure SetLexer(ALexer: TecSyntAnalyzer);
     procedure ShowText(const AText: string; ALexer: TecSyntAnalyzer);
     procedure MarkLine(ALine: integer; AChange: char);
+    procedure ShowLineNumbers(ALines: TStrings);
+    procedure ResetLineNumbers;
+    procedure UpdateNumberWidth;
     procedure UpdateNextChange;
     procedure ShowChanges(const APath: string);
     procedure FillFileTree(AFiles: TStrings);
@@ -99,6 +105,12 @@ begin
   FAdapter := TATAdapterEControl.Create(Self);
   FAdapter.AddEditor(Edit);
   Edit.ModeReadOnly := True;
+  { Every line gets its number: the change view numbers lines itself (see
+    ShowLineNumbers) and the file view should look the same. }
+  Edit.OptNumbersStyle := TATEditorNumbersStyle.All;
+  Edit.GutterDecorAlignment := taRightJustify;
+  Edit.OnChangeZoom := @EditChangeZoom;
+  FBookmarkBandWidth := Edit.OptGutterWidthBookmarks;
 
   FillTreeIcons(TreeImages);
   FillButtonIcons(ButtonImages);
@@ -154,6 +166,8 @@ end;
   its own palette, light by default, and the lexer colors are tuned for a
   white background, so both are set here from FDark. }
 procedure TForm1.ApplyTheme;
+var
+  i: integer;
 begin
   Edit.Colors.Init;
   if FDark then
@@ -194,6 +208,9 @@ begin
       ComboboxArrowBG := RGBToColor(40, 40, 40);
     end;
   FLexers.ApplyTheme(FDark);
+  { The change view's line numbers carry their own color. }
+  for i := 0 to Edit.GutterDecor.Count - 1 do
+    Edit.GutterDecor.ItemPtr(i)^.Data.TextColor := Edit.Colors.GutterFont;
   Edit.Invalidate;
 end;
 
@@ -341,6 +358,7 @@ procedure TForm1.ShowText(const AText: string; ALexer: TecSyntAnalyzer);
 begin
   FAdapter.Lexer := nil;
   Edit.BookmarkDeleteAll_2;
+  ResetLineNumbers;
   Edit.ModeReadOnly := False;
   Edit.Text := UTF8Decode(AText);
   { Setting Text skips the wrap rebuild while the editor has no fold ranges
@@ -361,6 +379,7 @@ procedure TForm1.OpenFile(const AFileName: string);
 begin
   FAdapter.Lexer := nil;
   Edit.BookmarkDeleteAll_2;
+  ResetLineNumbers;
   Edit.ModeReadOnly := False;
   Edit.LoadFromFile(AFileName, []);
   Edit.ModeReadOnly := True;
@@ -404,6 +423,82 @@ begin
   end;
   Edit.BookmarkSetForLine_2(ALine, Kind, '', TATBookmarkAutoDelete.DontDelete,
     False, 0);
+end;
+
+{ ---------------------------------------------------------------------------
+  Line numbers of the change view
+  ---------------------------------------------------------------------------
+  The change view keeps deleted lines in the text, so the editor's own
+  numbering counts them and every line below a deletion shows a number
+  too high. ATSynEdit has no hook for the number text, but its gutter
+  "decor" draws a text per line in the bookmark band. So the number band
+  is hidden, the bookmark band is widened to the number width, and each
+  kept line gets its number in the new file as decor text; a deleted line
+  gets none. The file view uses the editor's own numbering. }
+
+{ ALines are the diff lines with their +/- markers, one per editor line. }
+procedure TForm1.ShowLineNumbers(ALines: TStrings);
+var
+  Decor: TATGutterDecorData;
+  Band, Line, i: integer;
+begin
+  Line := 0;
+  for i := 0 to ALines.Count - 1 do
+  begin
+    if (ALines[i] <> '') and (ALines[i][1] = '-') then
+      Continue;
+    Inc(Line);
+    Decor := Default(TATGutterDecorData);
+    Decor.LineNum := i;
+    Decor.ImageIndex := -1;
+    { The trailing space keeps the right-aligned number off the next band. }
+    Decor.TextAll := IntToStr(Line) + ' ';
+    Decor.TextColor := Edit.Colors.GutterFont;
+    Edit.GutterDecor.Add(Decor);
+  end;
+  Band := Edit.Gutter.FindIndexByTag(ATEditorOptions.GutterTagNumbers);
+  if Band >= 0 then
+    Edit.Gutter[Band].Visible := False;
+  Band := Edit.Gutter.FindIndexByTag(ATEditorOptions.GutterTagBookmarks);
+  if Band >= 0 then
+    Edit.Gutter[Band].Scaled := False;
+  UpdateNumberWidth;
+end;
+
+{ Back to the editor's own numbering. }
+procedure TForm1.ResetLineNumbers;
+var
+  Band: integer;
+begin
+  Edit.GutterDecor.Clear;
+  Band := Edit.Gutter.FindIndexByTag(ATEditorOptions.GutterTagNumbers);
+  if Band >= 0 then
+    Edit.Gutter[Band].Visible := True;
+  Band := Edit.Gutter.FindIndexByTag(ATEditorOptions.GutterTagBookmarks);
+  if Band >= 0 then
+    Edit.Gutter[Band].Scaled := True;
+  Edit.OptGutterWidthBookmarks := FBookmarkBandWidth;
+end;
+
+{ The bookmark band holds the line numbers while the change view is shown:
+  room for the digits of the last number, the trailing space and one
+  character of indent. The band width is reapplied by the editor on every
+  update, so the option is set rather than the band. }
+procedure TForm1.UpdateNumberWidth;
+var
+  CharWidth: integer;
+begin
+  if Edit.GutterDecor.Count = 0 then
+    Exit;
+  CharWidth := Edit.TextCharSize.XScaled div ATEditorCharXScale;
+  Edit.OptGutterWidthBookmarks :=
+    (Length(IntToStr(Edit.GutterDecor.Count)) + 2) * CharWidth;
+end;
+
+{ Zooming changes the character width the number band is sized from. }
+procedure TForm1.EditChangeZoom(Sender: TObject);
+begin
+  UpdateNumberWidth;
 end;
 
 { The arrow floating over the editor's lower right corner is shown only
@@ -501,6 +596,7 @@ begin
     ShowText(Plain.Text, FLexers.ForFile(APath));
     for i := 0 to Lines.Count - 1 do
       MarkLine(i, Lines[i][1]);
+    ShowLineNumbers(Lines);
     UpdateNextChange;
     Edit.FileName := IncludeTrailingPathDelimiter(FRepo.Root) +
       SetDirSeparators(APath);
