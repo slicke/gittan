@@ -17,11 +17,12 @@ object Form1: TForm1
     Top = 26
     Width = 220
     Align = alLeft
+    BorderStyle = bsNone
     Images = TreeImages
     ReadOnly = True
     TabOrder = 2
     OnSelectionChanged = FileTreeSelectionChanged
-    Options = [tvoAutoItemHeight, tvoHideSelection, tvoKeepCollapsedNodes, tvoReadOnly, tvoShowButtons, tvoShowLines, tvoShowRoot, tvoToolTips, tvoThemedDraw]
+    Options = [tvoAutoItemHeight, tvoHideSelection, tvoKeepCollapsedNodes, tvoReadOnly, tvoShowButtons, tvoToolTips, tvoThemedDraw]
   end
   object TreeSplitter: TSplitter
     Left = 220
@@ -29,17 +30,27 @@ object Form1: TForm1
     Top = 26
     Width = 5
   end
-  object Edit: TATSynEdit
+  object EditorPanel: TPanel
     Left = 225
     Height = 551
     Top = 26
     Width = 675
     Align = alClient
+    BevelOuter = bvNone
+    Caption = ''
     TabOrder = 0
-    TabStop = True
-    OnCalcBookmarkColor = EditCalcBookmarkColor
-    OptRulerVisible = False
-    OptUnprintedVisible = False
+    object Edit: TATSynEdit
+      Left = 0
+      Height = 551
+      Top = 0
+      Width = 675
+      Align = alClient
+      TabOrder = 0
+      TabStop = True
+      OnCalcBookmarkColor = EditCalcBookmarkColor
+      OptRulerVisible = False
+      OptUnprintedVisible = False
+    end
   end
   object StatusBar: TStatusBar
     Left = 0

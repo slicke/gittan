@@ -106,9 +106,14 @@ begin
   Result := Height;
 end;
 
+{ Before the caret has reached a change there is no current one, and a
+  dash says so better than a zero. }
 function TGittanChangeNav.CounterText: string;
 begin
-  Result := Format('%d / %d', [FCurrent, FTotal]);
+  if FCurrent = 0 then
+    Result := Format('– / %d', [FTotal])
+  else
+    Result := Format('%d / %d', [FCurrent, FTotal]);
 end;
 
 function TGittanChangeNav.PartAt(X: integer): TGittanNavPart;

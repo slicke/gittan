@@ -11,7 +11,7 @@ uses
   ATSynEdit_Gutter_Decor, ATSynEdit_Globals, ATStringProc,
   ec_SyntAnal,
   gittan.lexers, gittan.git, gittan.icons, gittan.theme, gittan.changenav,
-  gittan.summary, gittan.watch;
+  gittan.summary, gittan.fileheader, gittan.watch;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -22,6 +22,7 @@ type
 
   TForm1 = class(TForm)
     Edit: TATSynEdit;
+    EditorPanel: TPanel;
     StatusBar: TStatusBar;
     DirDialog: TSelectDirectoryDialog;
     ThemeTimer: TTimer;
@@ -43,12 +44,14 @@ type
     FLexers: TGittanLexers;
     FRepo: TGittanRepo;
     FSyntaxMenu: TMenuItem;
+    FHeader: TGittanFileHeader;
     FNav: TGittanChangeNav;
     FNavUpdateQueued: boolean;
     FSummaryBox: TScrollBox;
     FSummary: TGittanSummary;
     FBranch: string;
     FFileCount: integer;
+    FStats: TGittanFileStats;
     FDark: boolean;
     FBookmarkBandWidth: integer;
     FWatcher: TGittanWatcher;
@@ -79,7 +82,9 @@ type
     procedure SetLexer(ALexer: TecSyntAnalyzer);
     procedure ShowText(const AText: string; ALexer: TecSyntAnalyzer);
     procedure MarkLine(ALine: integer; AChange: char);
+    procedure SetLineStatesBand(AVisible: boolean);
     procedure ShowLineNumbers(ALines: TStrings);
+    function LineNumberColor(AKind: integer): TColor;
     procedure ResetLineNumbers;
     procedure UpdateNumberWidth;
     function ChangeBlocks: TIntegerDynArray;
@@ -122,6 +127,7 @@ resourcestring
   rsLexerCount = '%d lexers';
   rsDiffLexer = 'Diff';
   rsRepoOnBranch = '%s on %s';
+  rsRepoDiffTitle = 'Repository diff';
   rsChangedFiles = '%d changed files';
   rsOneChangedFile = '1 changed file';
   rsNoChanges = 'no changes';
@@ -137,8 +143,6 @@ const
 { TForm1 }
 
 procedure TForm1.FormCreate(Sender: TObject);
-var
-  Band: integer;
 begin
   { The editor comes from umain.lfm. The EControl adapter is not an IDE
     component, so it is created here. Gittan is a viewer, so the editor is
@@ -156,26 +160,24 @@ begin
     same line backgrounds as the text. }
   Edit.OptMinimapVisible := True;
   Edit.OptMinimapTooltipVisible := False;
+  { The fold icons are noise in a viewer; they appear while the mouse is
+    over the gutter. }
+  Edit.OptGutterShowFoldAlways := False;
   FBookmarkBandWidth := Edit.OptGutterWidthBookmarks;
-  { The line states band marks every line of a freshly set text as new
-    with a green bar, which means nothing in a viewer. }
-  Band := Edit.Gutter.FindIndexByTag(ATEditorOptions.GutterTagLineStates);
-  if Band >= 0 then
-    Edit.Gutter[Band].Visible := False;
+  { The line states band is the diff's strip of added and deleted lines
+    (see MarkLine); a plain file has none. }
+  SetLineStatesBand(False);
 
   FillTreeIcons(TreeImages);
-  { The change navigator floats over the editor's lower right corner. It
-    is anchored to the editor's edges, so it stays there as it grows with
-    its counter. }
-  FNav := TGittanChangeNav.Create(Self);
-  FNav.Parent := Edit;
-  FNav.Anchors := [akRight, akBottom];
-  FNav.AnchorSideRight.Control := Edit;
-  FNav.AnchorSideRight.Side := asrRight;
-  FNav.AnchorSideBottom.Control := Edit;
-  FNav.AnchorSideBottom.Side := asrBottom;
-  FNav.BorderSpacing.Right := 20;
-  FNav.BorderSpacing.Bottom := 20;
+  { The header names what the editor shows and holds the change
+    navigator; it sits above the editor in the panel the two share with
+    the summary. }
+  FHeader := TGittanFileHeader.Create(Self);
+  FHeader.Parent := EditorPanel;
+  FHeader.Align := alTop;
+  FHeader.Images := TreeImages;
+  FHeader.Visible := False;
+  FNav := FHeader.Nav;
   FNav.OnPrev := @MenuPrevChangeClick;
   FNav.OnNext := @MenuNextChangeClick;
   UpdateChangeNav;
@@ -183,7 +185,7 @@ begin
     scroll box gives it native scrolling; its resize keeps the summary at
     least as tall as the box, so the summary's background fills it. }
   FSummaryBox := TScrollBox.Create(Self);
-  FSummaryBox.Parent := Self;
+  FSummaryBox.Parent := EditorPanel;
   FSummaryBox.Align := alClient;
   FSummaryBox.BorderStyle := bsNone;
   FSummaryBox.HorzScrollBar.Visible := False;
@@ -247,6 +249,18 @@ var
   i: integer;
 begin
   Edit.Colors.Init;
+  { The strip in the gutter: added lines green, deleted (the "changed"
+    state) red, in the summary's colors. }
+  if FDark then
+  begin
+    Edit.Colors.StateAdded := RGBToColor(63, 185, 80);
+    Edit.Colors.StateChanged := RGBToColor(248, 81, 73);
+  end
+  else
+  begin
+    Edit.Colors.StateAdded := RGBToColor(26, 127, 55);
+    Edit.Colors.StateChanged := RGBToColor(207, 34, 46);
+  end;
   if FDark then
     with Edit.Colors do
     begin
@@ -285,12 +299,23 @@ begin
       ComboboxArrowBG := RGBToColor(40, 40, 40);
     end;
   FLexers.ApplyTheme(FDark);
+  { The header takes the gutter's shade; the navigator pill sits on it. }
   if FDark then
-    FNav.SetColors(Edit.Colors.TextBG, RGBToColor(45, 45, 46),
-      RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240))
+  begin
+    FHeader.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(63, 185, 80), RGBToColor(248, 81, 73),
+      RGBToColor(62, 62, 62));
+    FNav.SetColors(RGBToColor(37, 37, 38), RGBToColor(50, 50, 51),
+      RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240));
+  end
   else
-    FNav.SetColors(Edit.Colors.TextBG, RGBToColor(246, 246, 246),
+  begin
+    FHeader.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(26, 127, 55), RGBToColor(207, 34, 46),
+      RGBToColor(222, 222, 222));
+    FNav.SetColors(RGBToColor(246, 246, 246), clWhite,
       RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
+  end;
   FSummaryBox.Color := Edit.Colors.TextBG;
   if FDark then
     FSummary.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
@@ -300,9 +325,11 @@ begin
     FSummary.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(243, 243, 243), RGBToColor(26, 127, 55),
       RGBToColor(207, 34, 46), RGBToColor(222, 222, 222));
-  { The change view's line numbers carry their own color. }
+  { The change view's line numbers carry their own color: the strip's
+    green on an added line. }
   for i := 0 to Edit.GutterDecor.Count - 1 do
-    Edit.GutterDecor.ItemPtr(i)^.Data.TextColor := Edit.Colors.GutterFont;
+    Edit.GutterDecor.ItemPtr(i)^.Data.TextColor := LineNumberColor(
+      Edit.GutterDecor.ItemPtr(i)^.Data.Tag);
   Edit.Invalidate;
 end;
 
@@ -336,6 +363,7 @@ begin
     Lexer := rsPlainText
   else
     Lexer := FAdapter.Lexer.LexerName;
+  FHeader.SetLexer(Lexer);
   Repo := '';
   if FRepo.Root <> '' then
   begin
@@ -343,7 +371,9 @@ begin
     if FBranch = '' then
       Repo := ExtractFileName(FRepo.Root);
   end;
-  if FSummaryBox.Visible and (Repo <> '') then
+  { The header names the file and its lexer, so the bar keeps to the
+    repository. }
+  if Repo <> '' then
   begin
     case FFileCount of
       0: StatusBar.SimpleText := Repo + ' · ' + rsNoChanges;
@@ -355,13 +385,8 @@ begin
   end
   else if Edit.FileName <> '' then
   begin
-    StatusBar.SimpleText := ExtractFileName(Edit.FileName) + ' · ' + Lexer;
+    StatusBar.SimpleText := Edit.FileName;
     StatusBar.Hint := Edit.FileName;
-  end
-  else if Repo <> '' then
-  begin
-    StatusBar.SimpleText := Repo + ' · ' + Lexer;
-    StatusBar.Hint := FRepo.Root;
   end
   else
   begin
@@ -521,6 +546,8 @@ end;
   lifted while the text is replaced. Loading does not clear the second
   bookmark list, so the diff colors are dropped here. }
 procedure TForm1.ShowText(const AText: string; ALexer: TecSyntAnalyzer);
+var
+  i: integer;
 begin
   FAdapter.Lexer := nil;
   Edit.BookmarkDeleteAll_2;
@@ -538,6 +565,12 @@ begin
   Edit.FileName := '';
   Edit.Modified := False;
   Edit.DoCaretSingle(0, 0);
+  Edit.LineTop := 0;
+  { The text comes with every line in the "added" state; MarkLine sets
+    the states of the diff. }
+  for i := 0 to Edit.Strings.Count - 1 do
+    Edit.Strings.LinesState[i] := TATLineState.None;
+  SetLineStatesBand(True);
   SetLexer(ALexer);
 end;
 
@@ -549,7 +582,9 @@ begin
   Edit.ModeReadOnly := False;
   Edit.LoadFromFile(AFileName, []);
   Edit.ModeReadOnly := True;
+  SetLineStatesBand(False);
   Edit.FileName := AFileName;
+  FHeader.SetFile(AFileName, -1);
   SetLexer(FLexers.ForFile(AFileName));
   UpdateChangeNav;
   ShowEditor;
@@ -580,19 +615,44 @@ begin
     end;
 end;
 
-{ AChange is the first character of a unified diff line. }
+{ AChange is the first character of a unified diff line. Besides the
+  background, the line gets a state for the gutter's line states band,
+  which paints a strip in the state's color: "added" for an added line,
+  "changed" for a deleted one. ShowText clears the states and shows the
+  band. }
 procedure TForm1.MarkLine(ALine: integer; AChange: char);
 var
   Kind: integer;
 begin
   case AChange of
-    '+': Kind := bmAdded;
-    '-': Kind := bmDeleted;
+    '+':
+      begin
+        Kind := bmAdded;
+        Edit.Strings.LinesState[ALine] := TATLineState.Added;
+      end;
+    '-':
+      begin
+        Kind := bmDeleted;
+        Edit.Strings.LinesState[ALine] := TATLineState.Changed;
+      end;
     else
       Exit;
   end;
   Edit.BookmarkSetForLine_2(ALine, Kind, '', TATBookmarkAutoDelete.DontDelete,
     False, 0);
+end;
+
+{ The line states band is meant for an editor, where it marks the lines
+  changed since the file was loaded or saved; a freshly set text has every
+  line marked as new. Gittan shows it only for a diff, with the states set
+  by MarkLine. }
+procedure TForm1.SetLineStatesBand(AVisible: boolean);
+var
+  Band: integer;
+begin
+  Band := Edit.Gutter.FindIndexByTag(ATEditorOptions.GutterTagLineStates);
+  if Band >= 0 then
+    Edit.Gutter[Band].Visible := AVisible;
 end;
 
 { ---------------------------------------------------------------------------
@@ -615,7 +675,7 @@ begin
   Line := 0;
   for i := 0 to ALines.Count - 1 do
   begin
-    if (ALines[i] <> '') and (ALines[i][1] = '-') then
+    if (ALines[i] = '') or (ALines[i][1] = '-') then
       Continue;
     Inc(Line);
     Decor := Default(TATGutterDecorData);
@@ -623,7 +683,10 @@ begin
     Decor.ImageIndex := -1;
     { The trailing space keeps the right-aligned number off the next band. }
     Decor.TextAll := IntToStr(Line) + ' ';
-    Decor.TextColor := Edit.Colors.GutterFont;
+    { The tag keeps the kind, so ApplyTheme can recolor the number. }
+    if ALines[i][1] = '+' then
+      Decor.Tag := bmAdded;
+    Decor.TextColor := LineNumberColor(Decor.Tag);
     Edit.GutterDecor.Add(Decor);
   end;
   Band := Edit.Gutter.FindIndexByTag(ATEditorOptions.GutterTagNumbers);
@@ -633,6 +696,16 @@ begin
   if Band >= 0 then
     Edit.Gutter[Band].Scaled := False;
   UpdateNumberWidth;
+end;
+
+{ An added line's number takes the strip's green; the rest the gutter's
+  usual color. }
+function TForm1.LineNumberColor(AKind: integer): TColor;
+begin
+  if AKind = bmAdded then
+    Result := Edit.Colors.StateAdded
+  else
+    Result := Edit.Colors.GutterFont;
 end;
 
 { Back to the editor's own numbering. }
@@ -701,17 +774,20 @@ begin
   SetLength(Result, n);
 end;
 
-{ The navigator is shown only while the text has changes to jump to. Its
-  counter names the last block the caret has reached, 0 before the first. }
+{ The navigator in the header is shown only while the text has changes to
+  jump to. Its counter names the last block the caret has reached, 0
+  before the first. }
 procedure TForm1.UpdateChangeNav;
 var
   Blocks: TIntegerDynArray;
   Cur, Current, i: integer;
 begin
   Blocks := ChangeBlocks;
-  FNav.Visible := Length(Blocks) > 0;
   if Length(Blocks) = 0 then
+  begin
+    FHeader.SetChanges(0, 0);
     Exit;
+  end;
   Cur := Edit.Carets[0].PosY;
   Current := 0;
   for i := 0 to High(Blocks) do
@@ -719,17 +795,14 @@ begin
       Current := i + 1
     else
       Break;
-  FNav.SetPosition(Current, Length(Blocks));
-  { The pill sits left of the minimap, which shares the editor's right
-    edge; RectMinimap is empty while the minimap is off or not yet laid
-    out. }
-  FNav.BorderSpacing.Right := 20 + Max(0, Edit.RectMinimap.Width);
+  FHeader.SetChanges(Current, Length(Blocks));
 end;
 
 { The caret event fires from inside the editor's own updates, where
-  resizing a child (the navigator grows with its counter) makes the editor
-  recompute its scroll position from a half-updated state and scroll
-  sideways. So the update waits for the message loop. }
+  resizing the header's navigator (it grows with its counter) made the
+  editor, while the navigator was its child, recompute its scroll position
+  from a half-updated state and scroll sideways. So the update waits for
+  the message loop. }
 procedure TForm1.EditChangeCaretPos(Sender: TObject);
 begin
   if FNavUpdateQueued then
@@ -827,6 +900,7 @@ var
   i: integer;
 begin
   Result := FRepo.ChangeStats(Stats);
+  FStats := Stats;
   FBranch := FRepo.Branch;
   FFileCount := Length(Stats);
   FillFileTree(Stats);
@@ -879,14 +953,14 @@ begin
 end;
 
 { Reloads the repository and keeps what the user looks at: the folders
-  opened in the tree, the selected file with its scroll position, or the
+  closed in the tree, the selected file with its scroll position, or the
   repository diff. A selected file that is no longer changed gives way to
   the summary. Filling the tree drops the selection, so the view is noted
   first and restored by selecting the file again, which runs the usual
   selection handler. }
 procedure TForm1.RefreshRepository;
 var
-  Expanded: TStringList;
+  Collapsed: TStringList;
   Node: TTreeNode;
   Path: string;
   View: TGittanView;
@@ -908,14 +982,14 @@ begin
   Path := SelectedPath;
   TopLine := Edit.LineTop;
   CaretY := Edit.Carets[0].PosY;
-  Expanded := TStringList.Create;
+  Collapsed := TStringList.Create;
   try
-    Expanded.CaseSensitive := True;
+    Collapsed.CaseSensitive := True;
     Node := FileTree.Items.GetFirstNode;
     while Node <> nil do
     begin
-      if (Node.Data = nil) and Node.Expanded then
-        Expanded.Add(Node.GetTextPath);
+      if (Node.Data = nil) and not Node.Expanded then
+        Collapsed.Add(Node.GetTextPath);
       Node := Node.GetNext;
     end;
     if not LoadRepository then
@@ -923,12 +997,12 @@ begin
     Node := FileTree.Items.GetFirstNode;
     while Node <> nil do
     begin
-      if (Node.Data = nil) and (Expanded.IndexOf(Node.GetTextPath) >= 0) then
-        Node.Expand(False);
+      if (Node.Data = nil) and (Collapsed.IndexOf(Node.GetTextPath) >= 0) then
+        Node.Collapse(False);
       Node := Node.GetNext;
     end;
   finally
-    Expanded.Free;
+    Collapsed.Free;
   end;
   case View of
     gvChanges:
@@ -960,6 +1034,7 @@ end;
 procedure TForm1.ShowSummary;
 begin
   Edit.Visible := False;
+  FHeader.Visible := False;
   FSummaryBox.Visible := True;
   FView := gvSummary;
   { A file picked again after the summary must fire the selection event. }
@@ -971,6 +1046,7 @@ end;
 procedure TForm1.ShowEditor;
 begin
   FSummaryBox.Visible := False;
+  FHeader.Visible := True;
   Edit.Visible := True;
 end;
 
@@ -1015,8 +1091,17 @@ end;
   lexer, with the +/- lines colored like the change view. }
 procedure TForm1.ShowRepoDiff;
 var
-  i: integer;
+  i, Added, Deleted: integer;
 begin
+  FHeader.SetTitle(rsRepoDiffTitle);
+  Added := 0;
+  Deleted := 0;
+  for i := 0 to High(FStats) do
+  begin
+    Inc(Added, FStats[i].Added);
+    Inc(Deleted, FStats[i].Deleted);
+  end;
+  FHeader.SetCounts(Added, Deleted, False);
   ShowText(FRepo.Diff, FLexers.ByName(rsDiffLexer));
   { The "---"/"+++" file headers are not changes. }
   for i := 0 to Edit.Strings.Count - 1 do
@@ -1050,6 +1135,14 @@ begin
     end;
     for i := 0 to Lines.Count - 1 do
       Plain.Add(Copy(Lines[i], 2, MaxInt));
+    FHeader.SetFile(APath, -1);
+    for i := 0 to High(FStats) do
+      if FStats[i].Path = APath then
+      begin
+        FHeader.SetFile(APath, ChangeIcon(FStats[i].Kind));
+        FHeader.SetCounts(FStats[i].Added, FStats[i].Deleted, FStats[i].Binary);
+        Break;
+      end;
     ShowText(Plain.Text, FLexers.ForFile(APath));
     for i := 0 to Lines.Count - 1 do
       MarkLine(i, Lines[i][1]);
@@ -1134,6 +1227,8 @@ begin
       Node.SelectedIndex := Node.ImageIndex;
     end;
     FileTree.CustomSort(@CompareTreeNodes);
+    { Every changed file is in view from the start. }
+    FileTree.FullExpand;
   finally
     FileTree.EndUpdate;
   end;

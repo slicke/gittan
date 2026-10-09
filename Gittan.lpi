@@ -74,6 +74,10 @@
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
+        <Filename Value="gittan.fileheader.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
         <Filename Value="gittan.watch.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
