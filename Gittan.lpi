@@ -58,6 +58,10 @@
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
+        <Filename Value="gittan.theme.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
         <Filename Value="gittan.icons.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>

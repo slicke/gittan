@@ -12,7 +12,7 @@ interface
 
 uses
   Classes, SysUtils,
-  ec_SyntAnal, ec_LexerList, ec_syntax_format, LCLType;
+  ec_SyntAnal, ec_LexerList, ec_syntax_format, LCLType, Graphics;
 
 type
   {** Owns the lexer list and knows where the lexer files live. }
@@ -21,6 +21,7 @@ type
     FList: TecLexerList;
     FFolder: string;
     FErrors: string;
+    FOriginal: array of TColor;
     procedure NormalizeStyles;
   public
     constructor Create;
@@ -31,6 +32,11 @@ type
       editor's own text color is used. Returns false when no lexer folder
       was found. }
     function Load: boolean;
+    {** Sets every lexer's text colors for a dark or a light editor. The
+      colors from the lexer files are kept for light; for dark each one is
+      lightened with LightenForDark. Can be called again when the desktop
+      theme changes. }
+    procedure ApplyTheme(ADark: boolean);
     {** The lexer for a file name, or nil for plain text. }
     function ForFile(const AFileName: string): TecSyntAnalyzer;
     {** The lexer with this exact name, or nil. }
@@ -48,7 +54,7 @@ function LexerFolderCandidates: TStringArray;
 implementation
 
 uses
-  Graphics, Forms;
+  Forms, gittan.theme;
 
 { ---------------------------------------------------------------------------
   Lexer folder lookup
@@ -122,13 +128,19 @@ end;
   its font and foreground color. Some lexers also use system colors such as
   clWindowText for text, which the widgetset resolves to white in a dark
   desktop theme while the editor keeps its light background; those colors
-  are dropped so the editor's text color applies. }
+  are dropped so the editor's text color applies. The colors that remain are
+  remembered so ApplyTheme can go back to them. }
 procedure TGittanLexers.NormalizeStyles;
 var
-  i, j: integer;
+  i, j, n: integer;
   An: TecSyntAnalyzer;
   Fmt: TecSyntaxFormat;
 begin
+  n := 0;
+  for i := 0 to FList.LexerCount - 1 do
+    Inc(n, FList.Lexers[i].Formats.Count);
+  SetLength(FOriginal, n);
+  n := 0;
   for i := 0 to FList.LexerCount - 1 do
   begin
     An := FList.Lexers[i];
@@ -138,6 +150,36 @@ begin
       Fmt.BgColor := clNone;
       if (Fmt.Font <> nil) and ((Fmt.Font.Color and SYS_COLOR_BASE) <> 0) then
         Fmt.Font.Color := clNone;
+      if Fmt.Font <> nil then
+        FOriginal[n] := Fmt.Font.Color
+      else
+        FOriginal[n] := clNone;
+      Inc(n);
+    end;
+  end;
+end;
+
+{ The formats are visited in the same order as in NormalizeStyles, so the
+  remembered colors line up. }
+procedure TGittanLexers.ApplyTheme(ADark: boolean);
+var
+  i, j, n: integer;
+  An: TecSyntAnalyzer;
+  Fmt: TecSyntaxFormat;
+begin
+  n := 0;
+  for i := 0 to FList.LexerCount - 1 do
+  begin
+    An := FList.Lexers[i];
+    for j := 0 to An.Formats.Count - 1 do
+    begin
+      Fmt := An.Formats[j];
+      if Fmt.Font <> nil then
+        if ADark then
+          Fmt.Font.Color := LightenForDark(FOriginal[n])
+        else
+          Fmt.Font.Color := FOriginal[n];
+      Inc(n);
     end;
   end;
 end;

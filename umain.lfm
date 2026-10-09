@@ -88,6 +88,12 @@ object Form1: TForm1
     Left = 360
     Top = 48
   end
+  object ThemeTimer: TTimer
+    Interval = 2000
+    OnTimer = ThemeTimerTimer
+    Left = 600
+    Top = 48
+  end
   object DirDialog: TSelectDirectoryDialog
     Title = 'Open Repository'
     Left = 520

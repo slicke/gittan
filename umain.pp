@@ -9,7 +9,7 @@ uses
   ExtCtrls, StdCtrls, Buttons, LCLType, LazLoggerBase, Math,
   ATSynEdit, ATSynEdit_Adapter_EControl, ATSynEdit_Bookmarks,
   ec_SyntAnal,
-  gittan.lexers, gittan.git, gittan.icons;
+  gittan.lexers, gittan.git, gittan.icons, gittan.theme;
 
 type
 
@@ -21,6 +21,7 @@ type
     ToolBar: TToolBar;
     ToolOpenRepo: TToolButton;
     DirDialog: TSelectDirectoryDialog;
+    ThemeTimer: TTimer;
     FileTree: TTreeView;
     TreeImages: TImageList;
     ButtonImages: TImageList;
@@ -29,6 +30,7 @@ type
     procedure NextChangeButtonClick(Sender: TObject);
     procedure EditCalcBookmarkColor(Sender: TObject; ABookmarkKind: integer;
       var AColor: TColor);
+    procedure ThemeTimerTimer(Sender: TObject);
     procedure FileTreeSelectionChanged(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
@@ -39,6 +41,8 @@ type
     FLexers: TGittanLexers;
     FRepo: TGittanRepo;
     FSyntaxMenu: TMenuItem;
+    FDark: boolean;
+    procedure ApplyTheme;
     procedure UpdateStatus;
     procedure BuildMenu;
     procedure BuildSyntaxMenu;
@@ -112,6 +116,8 @@ begin
     StatusBar.SimpleText := rsNoLexers;
   if FLexers.Errors <> '' then
     DebugLn(FLexers.Errors);
+  FDark := IsDarkMode;
+  ApplyTheme;
 
   BuildMenu;
   { gittan [file | folder] }
@@ -127,6 +133,68 @@ begin
   FAdapter.Lexer := nil;
   FreeAndNil(FLexers);
   FreeAndNil(FRepo);
+end;
+
+{ The desktop theme can change while Gittan runs. The LCL has no event for
+  it, so the timer asks every other second; the check is two system color
+  lookups. }
+procedure TForm1.ThemeTimerTimer(Sender: TObject);
+begin
+  if IsDarkMode <> FDark then
+  begin
+    FDark := not FDark;
+    ApplyTheme;
+  end;
+end;
+
+{ ---------------------------------------------------------------------------
+  Theme
+  ---------------------------------------------------------------------------
+  The native controls follow the desktop theme by themselves. The editor has
+  its own palette, light by default, and the lexer colors are tuned for a
+  white background, so both are set here from FDark. }
+procedure TForm1.ApplyTheme;
+begin
+  Edit.Colors.Init;
+  if FDark then
+    with Edit.Colors do
+    begin
+      TextFont := RGBToColor(224, 224, 224);
+      TextBG := RGBToColor(30, 30, 30);
+      TextSelFont := clNone;
+      TextSelBG := RGBToColor(38, 79, 120);
+      TextDisabledFont := RGBToColor(128, 128, 128);
+      TextDisabledBG := RGBToColor(40, 40, 40);
+      GutterFont := RGBToColor(133, 133, 133);
+      GutterBG := RGBToColor(37, 37, 38);
+      GutterCaretFont := RGBToColor(200, 200, 200);
+      GutterCaretBG := RGBToColor(55, 55, 56);
+      GutterFoldLine := RGBToColor(133, 133, 133);
+      GutterFoldLine2 := RGBToColor(160, 120, 120);
+      GutterFoldBG := RGBToColor(55, 55, 56);
+      GutterSeparatorBG := RGBToColor(60, 60, 60);
+      CurrentLineBG := RGBToColor(42, 42, 42);
+      IndentVertLines := RGBToColor(70, 70, 70);
+      BlockStaple := RGBToColor(70, 70, 70);
+      BlockSepLine := RGBToColor(70, 70, 70);
+      MarginRight := RGBToColor(60, 60, 60);
+      CollapseLine := RGBToColor(160, 120, 120);
+      CollapseMarkFont := RGBToColor(200, 160, 160);
+      CollapseMarkBG := RGBToColor(55, 55, 56);
+      CollapseMarkBorder := RGBToColor(160, 120, 120);
+      UnprintedFont := RGBToColor(110, 110, 160);
+      UnprintedBG := RGBToColor(55, 55, 56);
+      Links := RGBToColor(100, 160, 240);
+      LockedBG := RGBToColor(40, 40, 40);
+      MarkedLinesBG := RGBToColor(70, 60, 30);
+      MinimapBorder := RGBToColor(60, 60, 60);
+      BorderLine := RGBToColor(60, 60, 60);
+      BorderLineFocused := RGBToColor(38, 79, 120);
+      ComboboxArrow := RGBToColor(133, 133, 133);
+      ComboboxArrowBG := RGBToColor(40, 40, 40);
+    end;
+  FLexers.ApplyTheme(FDark);
+  Edit.Invalidate;
 end;
 
 procedure TForm1.FormDropFiles(Sender: TObject; const FileNames: array of string);
@@ -311,10 +379,16 @@ end;
 procedure TForm1.EditCalcBookmarkColor(Sender: TObject; ABookmarkKind: integer;
   var AColor: TColor);
 begin
-  case ABookmarkKind of
-    bmAdded: AColor := RGBToColor(214, 245, 214);
-    bmDeleted: AColor := RGBToColor(252, 215, 215);
-  end;
+  if FDark then
+    case ABookmarkKind of
+      bmAdded: AColor := RGBToColor(28, 66, 34);
+      bmDeleted: AColor := RGBToColor(84, 30, 30);
+    end
+  else
+    case ABookmarkKind of
+      bmAdded: AColor := RGBToColor(214, 245, 214);
+      bmDeleted: AColor := RGBToColor(252, 215, 215);
+    end;
 end;
 
 { AChange is the first character of a unified diff line. }
