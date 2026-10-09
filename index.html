@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gittan — a native diff viewer for your working tree</title>
+<meta name="description" content="Gittan shows what you changed in a git repository: every modified file in a tree, the diff with syntax highlighting, side by side or unified, refreshed as you work. Native on macOS, Windows and Linux.">
+<meta property="og:title" content="Gittan">
+<meta property="og:description" content="A native diff viewer for your working tree. macOS, Windows and Linux.">
+<meta property="og:image" content="https://slicke.github.io/gittan/assets/icon-256.png">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/icon-256.png">
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --bg-elev: #ffffff;
+    --fg: #1b1f27;
+    --fg-muted: #5c6370;
+    --line: #e2e5ea;
+    --blue: #2f5f9e;
+    --blue-dark: #1f3f6b;
+    --red: #b63a3a;
+    --green: #2e8b4f;
+    --add-bg: #e6ffec;
+    --add-fg: #1a7f37;
+    --del-bg: #ffebe9;
+    --del-fg: #cf222e;
+    --gutter: #eef0f3;
+    --code-fg: #24292f;
+    --kw: #cf222e;
+    --str: #0a3069;
+    --cmt: #6e7781;
+    --fn: #8250df;
+    --radius: 12px;
+    --shadow: 0 1px 2px rgba(0,0,0,.06), 0 12px 40px -12px rgba(20,30,60,.25);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1218;
+      --bg-elev: #171b23;
+      --fg: #e6e8ec;
+      --fg-muted: #9aa3b2;
+      --line: #262c38;
+      --blue: #6ea0e6;
+      --blue-dark: #a9c6f0;
+      --red: #e06c6c;
+      --green: #5fbf7f;
+      --add-bg: #15301f;
+      --add-fg: #5fd38a;
+      --del-bg: #3a1c1e;
+      --del-fg: #ff8a85;
+      --gutter: #1d222b;
+      --code-fg: #d4dae3;
+      --kw: #ff7b72;
+      --str: #a5d6ff;
+      --cmt: #8b949e;
+      --fn: #d2a8ff;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 40px -12px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1218;
+    --bg-elev: #171b23;
+    --fg: #e6e8ec;
+    --fg-muted: #9aa3b2;
+    --line: #262c38;
+    --blue: #6ea0e6;
+    --blue-dark: #a9c6f0;
+    --red: #e06c6c;
+    --green: #5fbf7f;
+    --add-bg: #15301f;
+    --add-fg: #5fd38a;
+    --del-bg: #3a1c1e;
+    --del-fg: #ff8a85;
+    --gutter: #1d222b;
+    --code-fg: #d4dae3;
+    --kw: #ff7b72;
+    --str: #a5d6ff;
+    --cmt: #8b949e;
+    --fn: #d2a8ff;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 40px -12px rgba(0,0,0,.7);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+
+  /* ---------- nav ---------- */
+  nav {
+    display: flex; align-items: center; gap: 20px;
+    padding: 18px 0;
+  }
+  nav .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; color: var(--fg); }
+  nav .brand img { width: 28px; height: 28px; }
+  nav .links { margin-left: auto; display: flex; gap: 22px; font-size: 15px; }
+  nav .links a { color: var(--fg-muted); }
+  nav .links a:hover { color: var(--fg); text-decoration: none; }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 48px 16px 24px; text-align: center; }
+  .hero img { width: 128px; height: 128px; filter: drop-shadow(0 10px 24px rgba(20,30,60,.25)); }
+  .hero h1 { font-size: 48px; letter-spacing: -0.02em; margin: 20px 0 8px; }
+  .hero p.tag { font-size: 21px; color: var(--fg-muted); margin: 0 auto 28px; max-width: 600px; }
+  .btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 11px 20px; border-radius: 10px; font-weight: 600; font-size: 15px;
+    border: 1px solid var(--line); background: var(--bg-elev); color: var(--fg);
+  }
+  .btn:hover { text-decoration: none; border-color: var(--fg-muted); }
+  .btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn svg { width: 18px; height: 18px; }
+  .hero .platforms { margin-top: 14px; color: var(--fg-muted); font-size: 14px; }
+
+  /* ---------- app mock ---------- */
+  .shot { margin: 40px auto 0; max-width: 960px; }
+  .app {
+    background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); overflow: hidden; font-size: 13px; text-align: left;
+  }
+  .titlebar {
+    height: 38px; display: flex; align-items: center; justify-content: center;
+    border-bottom: 1px solid var(--line); position: relative; color: var(--fg-muted); font-weight: 500;
+  }
+  .titlebar .lights { position: absolute; left: 14px; top: 12px; display: flex; gap: 8px; }
+  .titlebar .lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+  .titlebar .lights i:nth-child(1) { background: #ff5f57; }
+  .titlebar .lights i:nth-child(2) { background: #febc2e; }
+  .titlebar .lights i:nth-child(3) { background: #28c840; }
+  .body { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 420px; }
+  .tree { border-right: 1px solid var(--line); padding: 8px 0; background: var(--bg); }
+  .tree .row { display: flex; align-items: center; gap: 7px; padding: 4px 12px; white-space: nowrap; }
+  .tree .row.sel { background: var(--blue); color: #fff; }
+  .tree .row.d1 { padding-left: 28px; }
+  .tree .row.d2 { padding-left: 44px; }
+  .badge {
+    width: 16px; height: 16px; border-radius: 4px; flex: none;
+    font: 700 10px/16px ui-monospace, Menlo, monospace; text-align: center; color: #fff;
+  }
+  .badge.m { background: #d9822b; } .badge.a { background: #2e8b4f; } .badge.d { background: #b63a3a; }
+  .badge.u { background: #6c7a92; } .badge.r { background: #6a5acd; }
+  .badge.chk { position: relative; }
+  .badge.chk::after {
+    content: "✓"; position: absolute; right: -5px; bottom: -5px; width: 11px; height: 11px;
+    border-radius: 50%; background: #fff; color: #2e8b4f; font-size: 8px; line-height: 11px; box-shadow: 0 0 0 1px var(--line);
+  }
+  .folder { width: 16px; height: 12px; border-radius: 3px; background: #7c8ba3; flex: none; position: relative; }
+  .folder::after { content: ""; position: absolute; right: 2px; bottom: 2px; width: 5px; height: 5px; border-radius: 50%; background: #d9822b; }
+  .folder.red::after { background: #b63a3a; }
+
+  .editor { display: flex; flex-direction: column; min-width: 0; }
+  .fileheader {
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+    background: var(--gutter); border-bottom: 1px solid var(--line);
+  }
+  .fileheader .path { color: var(--fg-muted); }
+  .fileheader .path b { color: var(--fg); font-weight: 600; }
+  .fileheader .stats { margin-left: auto; display: flex; gap: 10px; align-items: center; color: var(--fg-muted); }
+  .fileheader .plus { color: var(--add-fg); font-weight: 600; }
+  .fileheader .minus { color: var(--del-fg); font-weight: 600; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px;
+    background: var(--blue); color: #fff; font-weight: 600; font-size: 12px; white-space: nowrap;
+  }
+  .pill span { opacity: .8; }
+
+  .code { flex: 1; overflow: hidden; max-width: 100%; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.6; color: var(--code-fg); }
+  .ln { display: grid; grid-template-columns: 44px 3px 1fr; }
+  .ln .n { text-align: right; padding-right: 10px; color: var(--fg-muted); background: var(--gutter); user-select: none; }
+  .ln .s { background: transparent; }
+  .ln .t { padding-left: 12px; white-space: pre; }
+  .ln.add .t { background: var(--add-bg); }
+  .ln.add .s { background: var(--add-fg); }
+  .ln.add .n { color: var(--add-fg); }
+  .ln.del .t { background: var(--del-bg); }
+  .ln.del .s { background: var(--del-fg); }
+  .ln.gap .t { color: var(--fg-muted); text-align: center; padding-left: 0; font-style: italic; }
+  .ln.gap .n { color: transparent; }
+  .kw { color: var(--kw); } .str { color: var(--str); } .cmt { color: var(--cmt); } .fn { color: var(--fn); }
+
+  .statusbar {
+    border-top: 1px solid var(--line); padding: 5px 12px; color: var(--fg-muted); font-size: 12px;
+    display: flex; gap: 14px;
+  }
+
+  @media (max-width: 720px) {
+    .body { grid-template-columns: minmax(0, 1fr); }
+    .tree { display: none; }
+    .hero h1 { font-size: 36px; }
+    .hero p.tag { font-size: 18px; }
+    .ln { grid-template-columns: 34px 3px 1fr; }
+    nav .links { gap: 14px; font-size: 14px; }
+    nav .links a[href="#build"] { display: none; }
+    .fileheader { flex-wrap: wrap; }
+  }
+
+  /* ---------- sections ---------- */
+  section { padding: 56px 0; }
+  section + section { border-top: 1px solid var(--line); }
+  h2 { font-size: 28px; letter-spacing: -0.01em; margin: 0 0 8px; }
+  .lead { color: var(--fg-muted); margin: 0 0 32px; max-width: 640px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px;
+  }
+  .card h3 { margin: 0 0 6px; font-size: 16px; }
+  .card p { margin: 0; color: var(--fg-muted); font-size: 14.5px; }
+  .card .ic { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; margin-bottom: 12px; background: var(--gutter); }
+  .card .ic svg { width: 20px; height: 20px; stroke: var(--blue); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  kbd {
+    font: 600 12px/1 ui-monospace, Menlo, monospace; color: var(--fg); background: var(--gutter);
+    border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 2px 6px; white-space: nowrap;
+  }
+
+  /* ---------- download ---------- */
+  .dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  @media (max-width: 720px) { .dl { grid-template-columns: 1fr; } }
+  .dl .card { display: flex; flex-direction: column; }
+  .dl .card .name { font-weight: 600; font-size: 17px; }
+  .dl .card .file { color: var(--fg-muted); font-size: 13px; margin: 2px 0 14px; }
+  .dl .card .btn { margin-top: auto; justify-content: center; }
+  .note {
+    margin-top: 22px; padding: 14px 16px; border-radius: 10px; font-size: 14.5px;
+    background: var(--gutter); border: 1px solid var(--line); color: var(--fg-muted);
+  }
+
+  pre.sh {
+    background: #11151c; color: #d6dde8; border-radius: 10px; padding: 16px 18px; overflow-x: auto;
+    font-size: 13.5px; line-height: 1.6; margin: 0;
+  }
+  pre.sh .c { color: #7b8794; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start; }
+  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
+  .cols ul { margin: 0; padding-left: 18px; color: var(--fg-muted); font-size: 15px; }
+  .cols li { margin: 6px 0; }
+
+  footer { padding: 32px 0 48px; color: var(--fg-muted); font-size: 14px; border-top: 1px solid var(--line); }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; }
+  footer .spacer { flex: 1; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <nav>
+    <a class="brand" href="#"><img src="assets/icon-256.png" alt=""> Gittan</a>
+    <div class="links">
+      <a href="#features">Features</a>
+      <a href="#download">Download</a>
+      <a href="#build">Build</a>
+      <a href="https://github.com/slicke/gittan">GitHub</a>
+    </div>
+  </nav>
+</div>
+
+<header class="hero wrap">
+  <img src="assets/icon-256.png" alt="Gittan icon" width="128" height="128">
+  <h1>Gittan</h1>
+  <p class="tag">A native diff viewer for your working tree. Open a repository and see what you changed, as you change it.</p>
+  <div class="btns">
+    <a class="btn primary" href="#download">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg>
+      Download
+    </a>
+    <a class="btn" href="https://github.com/slicke/gittan">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56v-2.17c-3.2.7-3.87-1.37-3.87-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.78 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.09 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5z"/></svg>
+      View on GitHub
+    </a>
+  </div>
+  <div class="platforms">macOS · Windows · Linux</div>
+
+  <div class="shot">
+    <div class="app" aria-hidden="true">
+      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div>gittan</div>
+      <div class="body">
+        <div class="tree">
+          <div class="row"><span class="folder"></span>src</div>
+          <div class="row d1"><span class="badge m">M</span>gittan.git.pp</div>
+          <div class="row d1 sel"><span class="badge m chk">M</span>gittan.watch.pp</div>
+          <div class="row d1"><span class="badge a">A</span>gittan.findbar.pp</div>
+          <div class="row"><span class="folder red"></span>tools</div>
+          <div class="row d1"><span class="badge d">D</span>old-build.sh</div>
+          <div class="row d1"><span class="badge r">R</span>makeicons.swift</div>
+          <div class="row"><span class="badge u">U</span>NOTES.md</div>
+          <div class="row"><span class="badge m">M</span>Makefile</div>
+        </div>
+        <div class="editor">
+          <div class="fileheader">
+            <span class="badge m chk">M</span>
+            <span class="path">src/<b>gittan.watch.pp</b></span>
+            <span class="stats">
+              <span>staged</span>
+              <span class="plus">+6</span><span class="minus">−2</span>
+              <span>Pascal</span>
+              <span class="pill">‹ <span>2 / 3</span> ›</span>
+            </span>
+          </div>
+          <div class="code">
+            <div class="ln gap"><span class="n"></span><span class="s"></span><span class="t">⋯ 41 unchanged lines ⋯</span></div>
+            <div class="ln"><span class="n">42</span><span class="s"></span><span class="t"><span class="kw">procedure</span> <span class="fn">TGittanWatcher.Execute</span>;</span></div>
+            <div class="ln"><span class="n">43</span><span class="s"></span><span class="t"><span class="kw">var</span></span></div>
+            <div class="ln"><span class="n">44</span><span class="s"></span><span class="t">  Print: <span class="kw">string</span>;</span></div>
+            <div class="ln"><span class="n">45</span><span class="s"></span><span class="t"><span class="kw">begin</span></span></div>
+            <div class="ln del"><span class="n"></span><span class="s"></span><span class="t">  <span class="kw">while not</span> Terminated <span class="kw">do</span></span></div>
+            <div class="ln del"><span class="n"></span><span class="s"></span><span class="t">    Sleep(<span class="str">2000</span>);</span></div>
+            <div class="ln add"><span class="n">46</span><span class="s"></span><span class="t">  <span class="cmt">// Poll the repository and report a change to the main thread.</span></span></div>
+            <div class="ln add"><span class="n">47</span><span class="s"></span><span class="t">  <span class="kw">while not</span> Terminated <span class="kw">do</span></span></div>
+            <div class="ln add"><span class="n">48</span><span class="s"></span><span class="t">  <span class="kw">begin</span></span></div>
+            <div class="ln add"><span class="n">49</span><span class="s"></span><span class="t">    Print := FRepo.Fingerprint;</span></div>
+            <div class="ln add"><span class="n">50</span><span class="s"></span><span class="t">    <span class="kw">if</span> Print &lt;&gt; FLast <span class="kw">then</span> Queue(<span class="fn">@NotifyChange</span>);</span></div>
+            <div class="ln add"><span class="n">51</span><span class="s"></span><span class="t">    FLast := Print;</span></div>
+            <div class="ln"><span class="n">52</span><span class="s"></span><span class="t">    FEvent.WaitFor(WatchInterval);</span></div>
+            <div class="ln"><span class="n">53</span><span class="s"></span><span class="t">  <span class="kw">end</span>;</span></div>
+            <div class="ln"><span class="n">54</span><span class="s"></span><span class="t"><span class="kw">end</span>;</span></div>
+            <div class="ln gap"><span class="n"></span><span class="s"></span><span class="t">⋯ 18 unchanged lines ⋯</span></div>
+          </div>
+          <div class="statusbar"><span>gittan on main vs origin/main</span><span>·</span><span>8 changed files</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <h2>Built for one job</h2>
+    <p class="lead">Gittan does not commit, push or merge. It shows the difference between your work tree and a commit, and keeps that view fresh while you edit in whatever you like.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></div>
+        <h3>Live view</h3>
+        <p>A background thread polls the repository every two seconds. Save a file in your editor and the tree, the counts and the diff update on their own.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h16"/></svg></div>
+        <h3>Hide unchanged lines</h3>
+        <p>Keep only the changed lines with 1, 3, 5 or 10 lines of context. Click a gap to open it. Highlighting still covers the whole file, so nothing colors wrong.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/></svg></div>
+        <h3>Side by side or unified</h3>
+        <p>Old on the left, new on the right, scrolled in step, each side numbered from its own file. Or a single view with deleted lines kept in place.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4"/><path d="m16 8 4 4-4 4"/><path d="m14 4-4 16"/></svg></div>
+        <h3>Syntax highlighting</h3>
+        <p>Over 370 lexers from the CudaText collection, picked by file name. Colors are tuned for both light and dark backgrounds.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7"/><path d="M18 10.5c0 4-12 3-12 5"/></svg></div>
+        <h3>Compare with any ref</h3>
+        <p>Diff against HEAD by default, or pick a branch, a tag or a commit. The tree, the counts and every file diff follow the base you chose.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.5 0-1-.1-1.5A5 5 0 0 1 12 3.1z"/></svg></div>
+        <h3>Dark mode</h3>
+        <p>Follows the desktop theme, and switches when it does. The native tree, menus and status bar come from the platform, so it looks at home everywhere.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m6 13 6 6 6-6"/></svg></div>
+        <h3>Scroll on to the next file</h3>
+        <p>Keep scrolling at the bottom of a file and the next one pulls in. Step changes with <kbd>F7</kbd>, files with <kbd>F8</kbd>, or click a row in the summary.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m7 10 3 2-3 2"/><path d="M12 14h5"/></svg></div>
+        <h3>Opens in your editor</h3>
+        <p>Right-click a file to copy its path, reveal it in Finder or the file manager, or open it in the editor of your choice.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div>
+        <h3>Knows what is staged</h3>
+        <p>A check mark on the badge, and "staged" or "partly staged" in the header, tells you what the index already holds. Find in file with <kbd>⌘F</kbd>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap">
+    <h2>Download</h2>
+    <p class="lead">Gittan is built for every platform on every push. Builds are published as GitHub Actions artifacts until the first release.</p>
+    <div class="dl">
+      <div class="card">
+        <div class="name">macOS</div>
+        <div class="file">Apple Silicon · Gittan-macos-silicon.dmg</div>
+        <a class="btn" href="https://github.com/slicke/gittan/actions/workflows/build.yml?query=branch%3Amain+is%3Asuccess">Get the latest build</a>
+      </div>
+      <div class="card">
+        <div class="name">Windows</div>
+        <div class="file">x64 · Gittan-windows-x64.zip</div>
+        <a class="btn" href="https://github.com/slicke/gittan/actions/workflows/build.yml?query=branch%3Amain+is%3Asuccess">Get the latest build</a>
+      </div>
+      <div class="card">
+        <div class="name">Linux</div>
+        <div class="file">amd64, Qt 6 · Gittan-linux-amd64.tar.gz</div>
+        <a class="btn" href="https://github.com/slicke/gittan/actions/workflows/build.yml?query=branch%3Amain+is%3Asuccess">Get the latest build</a>
+      </div>
+    </div>
+    <div class="note">
+      Open the newest successful run and pick your platform under <em>Artifacts</em>. Downloading artifacts needs a GitHub account. Gittan runs the <code>git</code> command line tool, so git must be installed and on your PATH. The macOS build is signed ad hoc: on first launch, right-click the app and choose Open. Tagged builds will appear on the <a href="https://github.com/slicke/gittan/releases">Releases page</a>.
+    </div>
+  </div>
+</section>
+
+<section id="build">
+  <div class="wrap">
+    <h2>Build from source</h2>
+    <p class="lead">Gittan is a Free Pascal application built with Lazarus. The editor is ATSynEdit, the highlighter is EControl, both vendored as submodules.</p>
+    <div class="cols">
+      <pre class="sh"><span class="c"># Lazarus 4.8 and FPC 3.2.x, then:</span>
+git clone --recursive https://github.com/slicke/gittan.git
+cd gittan
+make          <span class="c"># cocoa on macOS, qt6 on Linux</span>
+make run</pre>
+      <ul>
+        <li>The Makefile finds lazbuild in <code>/Applications/lazarus</code> on macOS when it is not on PATH.</li>
+        <li>On macOS the link step goes through LLVM's <code>ld64.lld</code> (<code>brew install lld</code>), since Apple's linker rejects the object code FPC 3.2 emits.</li>
+        <li>On Linux you need the Qt 6 bindings: <code>libqt6pas6</code> and <code>libqt6pas-dev</code>.</li>
+        <li>Register the vendored packages in Lazarus once; the CI workflow lists them in dependency order.</li>
+        <li>Details for every platform are in <a href="https://github.com/slicke/gittan/blob/main/AGENTS.md">AGENTS.md</a>.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>Gittan is open source on <a href="https://github.com/slicke/gittan">GitHub</a>.</span>
+    <span class="spacer"></span>
+    <span>Made with <a href="https://www.lazarus-ide.org/">Lazarus</a>, <a href="https://github.com/Alexey-T/ATSynEdit">ATSynEdit</a> and the <a href="https://github.com/Alexey-T/CudaText-lexers">CudaText lexers</a>.</span>
+  </div>
+</footer>
+
+</body>
+</html>
