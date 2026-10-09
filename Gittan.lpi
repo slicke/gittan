@@ -25,6 +25,9 @@
     </RunParams>
     <RequiredPackages>
       <Item>
+        <PackageName Value="BGRABitmapPack"/>
+      </Item>
+      <Item>
         <PackageName Value="atsynedit_ex_package"/>
       </Item>
       <Item>
@@ -52,6 +55,10 @@
       </Unit>
       <Unit>
         <Filename Value="gittan.git.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
+        <Filename Value="gittan.icons.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
     </Units>

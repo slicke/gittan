@@ -6,10 +6,10 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, Menus, ComCtrls,
-  ExtCtrls, LCLType, LazLoggerBase,
+  ExtCtrls, StdCtrls, Buttons, LCLType, LazLoggerBase, Math,
   ATSynEdit, ATSynEdit_Adapter_EControl, ATSynEdit_Bookmarks,
   ec_SyntAnal,
-  gittan.lexers, gittan.git;
+  gittan.lexers, gittan.git, gittan.icons;
 
 type
 
@@ -22,7 +22,11 @@ type
     ToolOpenRepo: TToolButton;
     DirDialog: TSelectDirectoryDialog;
     FileTree: TTreeView;
+    TreeImages: TImageList;
+    ButtonImages: TImageList;
     TreeSplitter: TSplitter;
+    NextChangeButton: TBitBtn;
+    procedure NextChangeButtonClick(Sender: TObject);
     procedure EditCalcBookmarkColor(Sender: TObject; ABookmarkKind: integer;
       var AColor: TColor);
     procedure FileTreeSelectionChanged(Sender: TObject);
@@ -43,6 +47,7 @@ type
     procedure SetLexer(ALexer: TecSyntAnalyzer);
     procedure ShowText(const AText: string; ALexer: TecSyntAnalyzer);
     procedure MarkLine(ALine: integer; AChange: char);
+    procedure UpdateNextChange;
     procedure ShowChanges(const APath: string);
     procedure FillFileTree(AFiles: TStrings);
     function CompareTreeNodes(Node1, Node2: TTreeNode): integer;
@@ -72,6 +77,7 @@ resourcestring
   rsDiffLexer = 'Diff';
   rsChangedFiles = '%d changed files in %s';
   rsNoChanges = 'No changes in %s';
+  rsNextChange = 'Next change';
 
 const
   { Bookmark kinds in the editor's second bookmark list, used only for the
@@ -89,6 +95,14 @@ begin
   FAdapter := TATAdapterEControl.Create(Self);
   FAdapter.AddEditor(Edit);
   Edit.ModeReadOnly := True;
+
+  FillTreeIcons(TreeImages);
+  FillButtonIcons(ButtonImages);
+  NextChangeButton.Images := ButtonImages;
+  NextChangeButton.ImageIndex := iconArrowDown;
+  NextChangeButton.GlyphShowMode := gsmAlways;
+  NextChangeButton.Hint := rsNextChange;
+  UpdateNextChange;
 
   FRepo := TGittanRepo.Create;
   FLexers := TGittanLexers.Create;
@@ -284,6 +298,7 @@ begin
   Edit.ModeReadOnly := True;
   Edit.FileName := AFileName;
   SetLexer(FLexers.ForFile(AFileName));
+  UpdateNextChange;
   Caption := ExtractFileName(AFileName) + ' - Gittan';
 end;
 
@@ -317,6 +332,42 @@ begin
     False, 0);
 end;
 
+{ The arrow floating over the editor's lower right corner is shown only
+  while the text has changes to jump to. }
+procedure TForm1.UpdateNextChange;
+begin
+  NextChangeButton.Visible := Edit.Strings.Bookmarks2.Count > 0;
+end;
+
+{ Jumps to the first line of the next block of changed lines after the
+  caret, wrapping around to the first block. The block lands a few lines
+  below the top edge so its context stays in view. }
+procedure TForm1.NextChangeButtonClick(Sender: TObject);
+var
+  Marks: TATBookmarks;
+  Cur, Line, Target, i: integer;
+begin
+  Marks := Edit.Strings.Bookmarks2;
+  if Marks.Count = 0 then
+    Exit;
+  Cur := Edit.Carets[0].PosY;
+  Target := Marks[0]^.Data.LineNum;
+  { The list is sorted by line; a block starts where the line before is
+    not marked. }
+  for i := 0 to Marks.Count - 1 do
+  begin
+    Line := Marks[i]^.Data.LineNum;
+    if (Line > Cur) and ((i = 0) or (Marks[i - 1]^.Data.LineNum <> Line - 1)) then
+    begin
+      Target := Line;
+      Break;
+    end;
+  end;
+  Edit.DoCaretSingle(0, Target);
+  Edit.LineTop := Max(0, Target - 3);
+  Edit.Update;
+end;
+
 { ---------------------------------------------------------------------------
   Repository
   ---------------------------------------------------------------------------
@@ -340,6 +391,7 @@ begin
       (Copy(Edit.Strings.Lines[i], 1, 3) <> '---') and
       (Copy(Edit.Strings.Lines[i], 1, 3) <> '+++') then
       MarkLine(i, char(Edit.Strings.Lines[i][1]));
+  UpdateNextChange;
   Caption := ExtractFileName(FRepo.Root) + ' - Gittan';
   Files := TStringList.Create;
   try
@@ -375,6 +427,7 @@ begin
     ShowText(Plain.Text, FLexers.ForFile(APath));
     for i := 0 to Lines.Count - 1 do
       MarkLine(i, Lines[i][1]);
+    UpdateNextChange;
     Edit.FileName := IncludeTrailingPathDelimiter(FRepo.Root) +
       SetDirSeparators(APath);
     UpdateStatus;
@@ -389,9 +442,10 @@ end;
   File tree
   ---------------------------------------------------------------------------
   One node per path component of each changed file. A file node has Data
-  set; a folder node (or a submodule, which git status reports as one entry)
-  has Data = nil and is never opened. git lists paths sorted, so the folder
-  node of the previous path is reused when the folder repeats. }
+  set and a badge for its change kind; a folder node (or a submodule, which
+  git status reports as one entry) has Data = nil, the folder icon, and is
+  never opened. git lists paths sorted, so the folder node of the previous
+  path is reused when the folder repeats. }
 procedure TForm1.FillFileTree(AFiles: TStrings);
 var
   Path, Dir, Part: string;
@@ -429,16 +483,26 @@ begin
           while (Node <> nil) and (Node.Text <> Part) do
             Node := Node.GetNextSibling;
           if Node = nil then
+          begin
             Node := FileTree.Items.AddChild(DirNode, Part);
+            Node.ImageIndex := iconFolder;
+            Node.SelectedIndex := iconFolder;
+          end;
           DirNode := Node;
         until False;
         LastDir := DirNode;
         LastDirPath := Dir;
       end;
       Node := FileTree.Items.AddChild(DirNode, ExtractFileName(Path));
-      if not DirectoryExists(IncludeTrailingPathDelimiter(FRepo.Root) +
+      if DirectoryExists(IncludeTrailingPathDelimiter(FRepo.Root) +
         SetDirSeparators(Path)) then
+        Node.ImageIndex := iconFolder
+      else
+      begin
         Node.Data := Pointer(1);
+        Node.ImageIndex := ChangeIcon(TGittanChangeKind(PtrUInt(AFiles.Objects[i])));
+      end;
+      Node.SelectedIndex := Node.ImageIndex;
     end;
     FileTree.CustomSort(@CompareTreeNodes);
   finally

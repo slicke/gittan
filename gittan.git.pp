@@ -13,6 +13,11 @@ uses
   Classes, SysUtils;
 
 type
+  {** What happened to a changed file, condensed from the two status columns
+    of `git status --porcelain`. }
+  TGittanChangeKind = (ckModified, ckAdded, ckDeleted, ckRenamed, ckUntracked,
+    ckConflict);
+
   {** One opened repository. Open finds the work tree root for a folder, and
     the other calls run inside that root. }
   TGittanRepo = class
@@ -34,9 +39,12 @@ type
       untracked files included. Returns false when git failed. }
     function ChangedFiles(AList: TStrings): boolean;
     {** Paths of the changed files from ChangedFiles, relative to Root with
-      "/" separators; a rename gives its new path. Returns false when git
-      failed. }
+      "/" separators; a rename gives its new path. Each Objects entry holds
+      the file's TGittanChangeKind as TObject(PtrUInt(Ord(Kind))). Returns
+      false when git failed. }
     function ChangedPaths(AList: TStrings): boolean;
+    {** The change kind of a "XY" status from `git status --porcelain`. }
+    class function ChangeKind(const AStatus: string): TGittanChangeKind;
     {** One changed file as the lines of a unified diff against HEAD with the
       whole file as context: every line starts with ' ', '+' or '-'. A file
       git does not know yet is returned as all added lines; a binary file
@@ -145,8 +153,38 @@ begin
     Arrow := Pos(' -> ', Path);
     if Arrow > 0 then
       Delete(Path, 1, Arrow + 3);
+    AList.Objects[i] := TObject(PtrUInt(Ord(ChangeKind(Copy(AList[i], 1, 2)))));
     AList[i] := Path;
   end;
+end;
+
+{ X is the index column, Y the work tree. A "U" in either (or both sides
+  added or deleted) is an unmerged file; a deletion on either side wins over
+  the rest since the file is gone; a rename or copy keeps its new path. "T"
+  (type change) and anything unknown count as modified. }
+class function TGittanRepo.ChangeKind(const AStatus: string): TGittanChangeKind;
+var
+  X, Y: char;
+begin
+  X := ' ';
+  Y := ' ';
+  if Length(AStatus) >= 1 then
+    X := AStatus[1];
+  if Length(AStatus) >= 2 then
+    Y := AStatus[2];
+  if (X = '?') or (Y = '?') then
+    Result := ckUntracked
+  else if (X = 'U') or (Y = 'U') or ((X = 'A') and (Y = 'A')) or
+    ((X = 'D') and (Y = 'D')) then
+    Result := ckConflict
+  else if (X = 'D') or (Y = 'D') then
+    Result := ckDeleted
+  else if X in ['R', 'C'] then
+    Result := ckRenamed
+  else if X = 'A' then
+    Result := ckAdded
+  else
+    Result := ckModified;
 end;
 
 { The hunk header "@@" starts the lines; "\ No newline at end of file"
