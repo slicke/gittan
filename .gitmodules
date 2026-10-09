@@ -1,0 +1,21 @@
+[submodule "vendor/ATSynEdit"]
+	path = vendor/ATSynEdit
+	url = https://github.com/Alexey-T/ATSynEdit.git
+[submodule "vendor/ATFlatControls"]
+	path = vendor/ATFlatControls
+	url = https://github.com/Alexey-T/ATFlatControls.git
+[submodule "vendor/EncConv"]
+	path = vendor/EncConv
+	url = https://github.com/Alexey-T/EncConv.git
+[submodule "vendor/BGRABitmap"]
+	path = vendor/BGRABitmap
+	url = https://github.com/bgrabitmap/bgrabitmap.git
+[submodule "vendor/EControl"]
+	path = vendor/EControl
+	url = https://github.com/Alexey-T/EControl.git
+[submodule "vendor/ATSynEdit_Ex"]
+	path = vendor/ATSynEdit_Ex
+	url = https://github.com/Alexey-T/ATSynEdit_Ex.git
+[submodule "vendor/CudaText-lexers"]
+	path = vendor/CudaText-lexers
+	url = https://github.com/Alexey-T/CudaText-lexers.git

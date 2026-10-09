@@ -1,0 +1,15 @@
+# Normalize every text file to LF in the repository and the working tree on
+# all platforms, so the same unit edited on macOS and Windows never shows a
+# whole-file diff. FPC, Lazarus and PowerShell all read LF fine on Windows.
+* text=auto eol=lf
+
+# Lazarus binary artifacts. State it so a stray text-looking header can never
+# trigger EOL rewriting.
+*.res binary
+*.ico binary
+*.icns binary
+*.png binary
+
+# Enforce LF line endings for all shell scripts (tools/darwin-lld/ld included).
+*.sh text eol=lf
+tools/darwin-lld/ld text eol=lf
