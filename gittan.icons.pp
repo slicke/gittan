@@ -1,6 +1,6 @@
 unit gittan.icons;
 
-{** Icons for Gittan's file tree and editor buttons.
+{** Icons for Gittan's file tree.
 
   The icons are drawn at startup with BGRABitmap instead of being shipped as
   image files: a folder, and one badge per change kind carrying the letter
@@ -24,13 +24,6 @@ function ChangeIcon(AKind: TGittanChangeKind): integer;
 {** Fills the empty list AImages with the folder icon at iconFolder and the
   change badges at ChangeIcon. }
 procedure FillTreeIcons(AImages: TCustomImageList);
-
-const
-  {** Image index of the "next change" arrow in the list FillButtonIcons fills. }
-  iconArrowDown = 0;
-
-{** Fills the empty list AImages with the icons of the editor's buttons. }
-procedure FillButtonIcons(AImages: TCustomImageList);
 
 implementation
 
@@ -90,22 +83,6 @@ begin
     BadgeLetter[AKind], BGRAWhite, taCenter);
 end;
 
-{ A down arrow in dark gray. The push button it sits on stays light in both
-  themes on macOS (the glass bezel takes the editor's white background), and
-  a caption would follow the theme's text color and turn white on white. }
-function DrawArrowDown(ASize: integer): TBGRABitmap;
-var
-  s: single;
-  Color: TBGRAPixel;
-begin
-  Result := TBGRABitmap.Create(ASize, ASize, BGRAPixelTransparent);
-  s := ASize / 16;
-  Color := BGRA($40, $40, $40);
-  Result.FillRoundRectAntialias(6.5 * s, 2 * s, 9.5 * s, 9 * s, s, s, Color);
-  Result.FillPolyAntialias([PointF(2.5 * s, 7.5 * s), PointF(13.5 * s, 7.5 * s),
-    PointF(8 * s, 13.5 * s)], Color);
-end;
-
 { Adds one icon drawn at 16 and 32 pixels and frees the bitmaps. }
 procedure AddIcon(AImages: TCustomImageList; ASmall, ALarge: TBGRABitmap);
 begin
@@ -128,14 +105,6 @@ begin
   AddIcon(AImages, DrawFolder(16), DrawFolder(32));
   for Kind := Low(TGittanChangeKind) to High(TGittanChangeKind) do
     AddIcon(AImages, DrawBadge(16, Kind), DrawBadge(32, Kind));
-end;
-
-procedure FillButtonIcons(AImages: TCustomImageList);
-begin
-  AImages.Width := 16;
-  AImages.Height := 16;
-  AImages.RegisterResolutions([16, 32]);
-  AddIcon(AImages, DrawArrowDown(16), DrawArrowDown(32));
 end;
 
 end.

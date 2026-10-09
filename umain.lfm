@@ -57,20 +57,6 @@ object Form1: TForm1
     OnCalcBookmarkColor = EditCalcBookmarkColor
     OptRulerVisible = False
     OptUnprintedVisible = False
-    object NextChangeButton: TBitBtn
-      Left = 623
-      Height = 32
-      Top = 499
-      Width = 32
-      Anchors = [akRight, akBottom]
-      BorderSpacing.Right = 20
-      BorderSpacing.Bottom = 20
-      ParentShowHint = False
-      ShowHint = True
-      TabStop = False
-      TabOrder = 0
-      OnClick = NextChangeButtonClick
-    end
   end
   object StatusBar: TStatusBar
     Left = 0
@@ -82,10 +68,6 @@ object Form1: TForm1
   end
   object TreeImages: TImageList
     Left = 440
-    Top = 48
-  end
-  object ButtonImages: TImageList
-    Left = 360
     Top = 48
   end
   object ThemeTimer: TTimer

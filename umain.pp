@@ -6,11 +6,11 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, Menus, ComCtrls,
-  ExtCtrls, StdCtrls, Buttons, LCLType, LazLoggerBase, Math,
+  ExtCtrls, StdCtrls, LCLType, LazLoggerBase, Math, Types,
   ATSynEdit, ATSynEdit_Adapter_EControl, ATSynEdit_Bookmarks,
   ATSynEdit_Gutter_Decor, ATSynEdit_Globals, ATStringProc,
   ec_SyntAnal,
-  gittan.lexers, gittan.git, gittan.icons, gittan.theme;
+  gittan.lexers, gittan.git, gittan.icons, gittan.theme, gittan.changenav;
 
 type
 
@@ -25,13 +25,12 @@ type
     ThemeTimer: TTimer;
     FileTree: TTreeView;
     TreeImages: TImageList;
-    ButtonImages: TImageList;
     TreeSplitter: TSplitter;
-    NextChangeButton: TBitBtn;
-    procedure NextChangeButtonClick(Sender: TObject);
     procedure EditCalcBookmarkColor(Sender: TObject; ABookmarkKind: integer;
       var AColor: TColor);
     procedure EditChangeZoom(Sender: TObject);
+    procedure EditChangeCaretPos(Sender: TObject);
+    procedure UpdateChangeNavAsync(Data: PtrInt);
     procedure ThemeTimerTimer(Sender: TObject);
     procedure FileTreeSelectionChanged(Sender: TObject);
     procedure FormCreate(Sender: TObject);
@@ -43,6 +42,8 @@ type
     FLexers: TGittanLexers;
     FRepo: TGittanRepo;
     FSyntaxMenu: TMenuItem;
+    FNav: TGittanChangeNav;
+    FNavUpdateQueued: boolean;
     FDark: boolean;
     FBookmarkBandWidth: integer;
     procedure ApplyTheme;
@@ -51,13 +52,17 @@ type
     procedure BuildSyntaxMenu;
     procedure MenuOpenClick(Sender: TObject);
     procedure MenuSyntaxClick(Sender: TObject);
+    procedure MenuPrevChangeClick(Sender: TObject);
+    procedure MenuNextChangeClick(Sender: TObject);
     procedure SetLexer(ALexer: TecSyntAnalyzer);
     procedure ShowText(const AText: string; ALexer: TecSyntAnalyzer);
     procedure MarkLine(ALine: integer; AChange: char);
     procedure ShowLineNumbers(ALines: TStrings);
     procedure ResetLineNumbers;
     procedure UpdateNumberWidth;
-    procedure UpdateNextChange;
+    function ChangeBlocks: TIntegerDynArray;
+    procedure UpdateChangeNav;
+    procedure GoToChange(ANext: boolean);
     procedure ShowChanges(const APath: string);
     procedure FillFileTree(AFiles: TStrings);
     function CompareTreeNodes(Node1, Node2: TTreeNode): integer;
@@ -81,13 +86,15 @@ resourcestring
   rsFile = '&File';
   rsOpen = '&Open...';
   rsSyntax = '&Syntax';
+  rsGo = '&Go';
+  rsNextChange = '&Next Change';
+  rsPrevChange = '&Previous Change';
   rsPlainText = 'Plain text';
   rsNoLexers = 'No lexers found. Run "make lexlib" or set GITTAN_LEXLIB.';
   rsLexerCount = '%d lexers';
   rsDiffLexer = 'Diff';
   rsChangedFiles = '%d changed files in %s';
   rsNoChanges = 'No changes in %s';
-  rsNextChange = 'Next change';
 
 const
   { Bookmark kinds in the editor's second bookmark list, used only for the
@@ -98,6 +105,8 @@ const
 { TForm1 }
 
 procedure TForm1.FormCreate(Sender: TObject);
+var
+  Band: integer;
 begin
   { The editor comes from umain.lfm. The EControl adapter is not an IDE
     component, so it is created here. Gittan is a viewer, so the editor is
@@ -110,15 +119,30 @@ begin
   Edit.OptNumbersStyle := TATEditorNumbersStyle.All;
   Edit.GutterDecorAlignment := taRightJustify;
   Edit.OnChangeZoom := @EditChangeZoom;
+  Edit.OnChangeCaretPos := @EditChangeCaretPos;
   FBookmarkBandWidth := Edit.OptGutterWidthBookmarks;
+  { The line states band marks every line of a freshly set text as new
+    with a green bar, which means nothing in a viewer. }
+  Band := Edit.Gutter.FindIndexByTag(ATEditorOptions.GutterTagLineStates);
+  if Band >= 0 then
+    Edit.Gutter[Band].Visible := False;
 
   FillTreeIcons(TreeImages);
-  FillButtonIcons(ButtonImages);
-  NextChangeButton.Images := ButtonImages;
-  NextChangeButton.ImageIndex := iconArrowDown;
-  NextChangeButton.GlyphShowMode := gsmAlways;
-  NextChangeButton.Hint := rsNextChange;
-  UpdateNextChange;
+  { The change navigator floats over the editor's lower right corner. It
+    is anchored to the editor's edges, so it stays there as it grows with
+    its counter. }
+  FNav := TGittanChangeNav.Create(Self);
+  FNav.Parent := Edit;
+  FNav.Anchors := [akRight, akBottom];
+  FNav.AnchorSideRight.Control := Edit;
+  FNav.AnchorSideRight.Side := asrRight;
+  FNav.AnchorSideBottom.Control := Edit;
+  FNav.AnchorSideBottom.Side := asrBottom;
+  FNav.BorderSpacing.Right := 20;
+  FNav.BorderSpacing.Bottom := 20;
+  FNav.OnPrev := @MenuPrevChangeClick;
+  FNav.OnNext := @MenuNextChangeClick;
+  UpdateChangeNav;
 
   FRepo := TGittanRepo.Create;
   FLexers := TGittanLexers.Create;
@@ -142,6 +166,7 @@ end;
 
 procedure TForm1.FormDestroy(Sender: TObject);
 begin
+  Application.RemoveAsyncCalls(Self);
   FAdapter.Lexer := nil;
   FreeAndNil(FLexers);
   FreeAndNil(FRepo);
@@ -208,6 +233,12 @@ begin
       ComboboxArrowBG := RGBToColor(40, 40, 40);
     end;
   FLexers.ApplyTheme(FDark);
+  if FDark then
+    FNav.SetColors(Edit.Colors.TextBG, RGBToColor(45, 45, 46),
+      RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240))
+  else
+    FNav.SetColors(Edit.Colors.TextBG, RGBToColor(246, 246, 246),
+      RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
   { The change view's line numbers carry their own color. }
   for i := 0 to Edit.GutterDecor.Count - 1 do
     Edit.GutterDecor.ItemPtr(i)^.Data.TextColor := Edit.Colors.GutterFont;
@@ -249,7 +280,7 @@ end;
 procedure TForm1.BuildMenu;
 var
   Main: TMainMenu;
-  FileMenu, Item: TMenuItem;
+  FileMenu, GoMenu, Item: TMenuItem;
 begin
   Main := TMainMenu.Create(Self);
   Menu := Main;
@@ -268,6 +299,20 @@ begin
   FSyntaxMenu.Caption := rsSyntax;
   Main.Items.Add(FSyntaxMenu);
   BuildSyntaxMenu;
+
+  GoMenu := TMenuItem.Create(Main);
+  GoMenu.Caption := rsGo;
+  Main.Items.Add(GoMenu);
+  Item := TMenuItem.Create(GoMenu);
+  Item.Caption := rsNextChange;
+  Item.ShortCut := ShortCut(VK_F7, []);
+  Item.OnClick := @MenuNextChangeClick;
+  GoMenu.Add(Item);
+  Item := TMenuItem.Create(GoMenu);
+  Item.Caption := rsPrevChange;
+  Item.ShortCut := ShortCut(VK_F7, [ssShift]);
+  Item.OnClick := @MenuPrevChangeClick;
+  GoMenu.Add(Item);
 end;
 
 { The lexer list is long (hundreds of entries), so it is grouped into one
@@ -385,7 +430,7 @@ begin
   Edit.ModeReadOnly := True;
   Edit.FileName := AFileName;
   SetLexer(FLexers.ForFile(AFileName));
-  UpdateNextChange;
+  UpdateChangeNav;
   Caption := ExtractFileName(AFileName) + ' - Gittan';
 end;
 
@@ -398,15 +443,17 @@ end;
 procedure TForm1.EditCalcBookmarkColor(Sender: TObject; ABookmarkKind: integer;
   var AColor: TColor);
 begin
+  { A faint tint of the editor background, so the syntax colors still
+    read on top of it. }
   if FDark then
     case ABookmarkKind of
-      bmAdded: AColor := RGBToColor(28, 66, 34);
-      bmDeleted: AColor := RGBToColor(84, 30, 30);
+      bmAdded: AColor := RGBToColor(32, 52, 37);
+      bmDeleted: AColor := RGBToColor(66, 38, 38);
     end
   else
     case ABookmarkKind of
-      bmAdded: AColor := RGBToColor(214, 245, 214);
-      bmDeleted: AColor := RGBToColor(252, 215, 215);
+      bmAdded: AColor := RGBToColor(218, 251, 225);
+      bmDeleted: AColor := RGBToColor(255, 235, 233);
     end;
 end;
 
@@ -501,40 +548,124 @@ begin
   UpdateNumberWidth;
 end;
 
-{ The arrow floating over the editor's lower right corner is shown only
-  while the text has changes to jump to. }
-procedure TForm1.UpdateNextChange;
-begin
-  NextChangeButton.Visible := Edit.Strings.Bookmarks2.Count > 0;
-end;
+{ ---------------------------------------------------------------------------
+  Change navigation
+  ---------------------------------------------------------------------------
+  The navigator floating over the editor's lower right corner, and the Go
+  menu, jump between the blocks of changed lines. }
 
-{ Jumps to the first line of the next block of changed lines after the
-  caret, wrapping around to the first block. The block lands a few lines
-  below the top edge so its context stays in view. }
-procedure TForm1.NextChangeButtonClick(Sender: TObject);
+{ The first line of every block of changed lines, in order. The second
+  bookmark list is sorted by line; a block starts where the line before is
+  not marked. }
+function TForm1.ChangeBlocks: TIntegerDynArray;
 var
   Marks: TATBookmarks;
-  Cur, Line, Target, i: integer;
+  Line, i, n: integer;
 begin
+  Result := nil;
   Marks := Edit.Strings.Bookmarks2;
-  if Marks.Count = 0 then
-    Exit;
-  Cur := Edit.Carets[0].PosY;
-  Target := Marks[0]^.Data.LineNum;
-  { The list is sorted by line; a block starts where the line before is
-    not marked. }
+  SetLength(Result, Marks.Count);
+  n := 0;
   for i := 0 to Marks.Count - 1 do
   begin
     Line := Marks[i]^.Data.LineNum;
-    if (Line > Cur) and ((i = 0) or (Marks[i - 1]^.Data.LineNum <> Line - 1)) then
+    if (i = 0) or (Marks[i - 1]^.Data.LineNum <> Line - 1) then
     begin
-      Target := Line;
-      Break;
+      Result[n] := Line;
+      Inc(n);
     end;
+  end;
+  SetLength(Result, n);
+end;
+
+{ The navigator is shown only while the text has changes to jump to. Its
+  counter names the last block the caret has reached, 0 before the first. }
+procedure TForm1.UpdateChangeNav;
+var
+  Blocks: TIntegerDynArray;
+  Cur, Current, i: integer;
+begin
+  Blocks := ChangeBlocks;
+  FNav.Visible := Length(Blocks) > 0;
+  if Length(Blocks) = 0 then
+    Exit;
+  Cur := Edit.Carets[0].PosY;
+  Current := 0;
+  for i := 0 to High(Blocks) do
+    if Blocks[i] <= Cur then
+      Current := i + 1
+    else
+      Break;
+  FNav.SetPosition(Current, Length(Blocks));
+end;
+
+{ The caret event fires from inside the editor's own updates, where
+  resizing a child (the navigator grows with its counter) makes the editor
+  recompute its scroll position from a half-updated state and scroll
+  sideways. So the update waits for the message loop. }
+procedure TForm1.EditChangeCaretPos(Sender: TObject);
+begin
+  if FNavUpdateQueued then
+    Exit;
+  FNavUpdateQueued := True;
+  Application.QueueAsyncCall(@UpdateChangeNavAsync, 0);
+end;
+
+procedure TForm1.UpdateChangeNavAsync(Data: PtrInt);
+begin
+  FNavUpdateQueued := False;
+  UpdateChangeNav;
+end;
+
+{ Jumps to the first line of the next (or previous) block of changed lines
+  from the caret, wrapping around at either end. The block lands a few
+  lines below the top edge so its context stays in view. }
+procedure TForm1.GoToChange(ANext: boolean);
+var
+  Blocks: TIntegerDynArray;
+  Cur, Target, i: integer;
+begin
+  Blocks := ChangeBlocks;
+  if Length(Blocks) = 0 then
+    Exit;
+  Cur := Edit.Carets[0].PosY;
+  Target := -1;
+  if ANext then
+  begin
+    for i := 0 to High(Blocks) do
+      if Blocks[i] > Cur then
+      begin
+        Target := Blocks[i];
+        Break;
+      end;
+    if Target < 0 then
+      Target := Blocks[0];
+  end
+  else
+  begin
+    for i := High(Blocks) downto 0 do
+      if Blocks[i] < Cur then
+      begin
+        Target := Blocks[i];
+        Break;
+      end;
+    if Target < 0 then
+      Target := Blocks[High(Blocks)];
   end;
   Edit.DoCaretSingle(0, Target);
   Edit.LineTop := Max(0, Target - 3);
   Edit.Update;
+  UpdateChangeNav;
+end;
+
+procedure TForm1.MenuNextChangeClick(Sender: TObject);
+begin
+  GoToChange(True);
+end;
+
+procedure TForm1.MenuPrevChangeClick(Sender: TObject);
+begin
+  GoToChange(False);
 end;
 
 { ---------------------------------------------------------------------------
@@ -560,7 +691,7 @@ begin
       (Copy(Edit.Strings.Lines[i], 1, 3) <> '---') and
       (Copy(Edit.Strings.Lines[i], 1, 3) <> '+++') then
       MarkLine(i, char(Edit.Strings.Lines[i][1]));
-  UpdateNextChange;
+  UpdateChangeNav;
   Caption := ExtractFileName(FRepo.Root) + ' - Gittan';
   Files := TStringList.Create;
   try
@@ -597,7 +728,7 @@ begin
     for i := 0 to Lines.Count - 1 do
       MarkLine(i, Lines[i][1]);
     ShowLineNumbers(Lines);
-    UpdateNextChange;
+    UpdateChangeNav;
     Edit.FileName := IncludeTrailingPathDelimiter(FRepo.Root) +
       SetDirSeparators(APath);
     UpdateStatus;
