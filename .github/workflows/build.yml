@@ -186,7 +186,8 @@ jobs:
           if [ "${{ matrix.os_target }}" = "windows" ]; then LAZARGS+=(--lazarusdir='C:\Lazarus'); fi
           for LPK in $VENDOR_PACKAGES; do
             [ -f "$LPK" ] || { echo "::error::$LPK is missing; are the submodules checked out?"; exit 1; }
-            lazbuild "${LAZARGS[@]}" --add-package-link "$LPK"
+            # ${a[@]+...}: macOS's bash 3.2 calls an empty array unbound under set -u.
+            lazbuild ${LAZARGS[@]+"${LAZARGS[@]}"} --add-package-link "$LPK"
           done
 
       # ===================== BUILD + PACKAGE =====================
