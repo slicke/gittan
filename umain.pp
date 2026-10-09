@@ -52,6 +52,7 @@ type
     FBranch: string;
     FFileCount: integer;
     FStats: TGittanFileStats;
+    FAppIcon: TIcon;
     FDark: boolean;
     FBookmarkBandWidth: integer;
     FWatcher: TGittanWatcher;
@@ -65,6 +66,7 @@ type
     procedure RefreshRepository;
     function SelectedPath: string;
     procedure UpdateStatus;
+    procedure UpdateCaption;
     procedure BuildMenu;
     procedure BuildSyntaxMenu;
     procedure MenuOpenClick(Sender: TObject);
@@ -119,6 +121,7 @@ resourcestring
   rsRepoDiff = '&Repository Diff';
   rsRefresh = 'Re&fresh';
   rsDropHint = 'Open a repository, or drop a folder or file here.';
+  rsDropShortcut = 'File > Open Repository    %s';
   rsGo = '&Go';
   rsNextChange = '&Next Change';
   rsPrevChange = '&Previous Change';
@@ -160,6 +163,8 @@ begin
     same line backgrounds as the text. }
   Edit.OptMinimapVisible := True;
   Edit.OptMinimapTooltipVisible := False;
+  { A fixed, narrow minimap; the default takes a fifth of the editor. }
+  Edit.OptMinimapCharWidth := 30;
   { The fold icons are noise in a viewer; they appear while the mouse is
     over the gutter. }
   Edit.OptGutterShowFoldAlways := False;
@@ -194,7 +199,16 @@ begin
   FSummary.Parent := FSummaryBox;
   FSummary.Images := TreeImages;
   FSummary.OnSelectFile := @SummarySelectFile;
-  FSummary.SetMessage(rsDropHint);
+  { The summary draws the application icon in its empty view, from its
+    own copy: Application.Icon keeps to its small image. }
+  FAppIcon := TIcon.Create;
+  try
+    FAppIcon.LoadFromResourceName(HInstance, 'MAINICON');
+  except
+    FreeAndNil(FAppIcon);
+  end;
+  FSummary.SetMessage(rsDropHint, Format(rsDropShortcut,
+    [{$IFDEF DARWIN}'⇧⌘O'{$ELSE}'Ctrl+Shift+O'{$ENDIF}]), FAppIcon);
 
   FRepo := TGittanRepo.Create;
   FLexers := TGittanLexers.Create;
@@ -224,6 +238,7 @@ begin
   FAdapter.Lexer := nil;
   FreeAndNil(FLexers);
   FreeAndNil(FRepo);
+  FreeAndNil(FAppIcon);
 end;
 
 { The desktop theme can change while Gittan runs. The LCL has no event for
@@ -319,12 +334,12 @@ begin
   FSummaryBox.Color := Edit.Colors.TextBG;
   if FDark then
     FSummary.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(45, 45, 46), RGBToColor(63, 185, 80),
-      RGBToColor(248, 81, 73), RGBToColor(62, 62, 62))
+      RGBToColor(150, 150, 150), RGBToColor(45, 45, 46), RGBToColor(38, 38, 39),
+      RGBToColor(63, 185, 80), RGBToColor(248, 81, 73), RGBToColor(62, 62, 62))
   else
     FSummary.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(243, 243, 243), RGBToColor(26, 127, 55),
-      RGBToColor(207, 34, 46), RGBToColor(222, 222, 222));
+      RGBToColor(110, 110, 110), RGBToColor(243, 243, 243), RGBToColor(248, 248, 248),
+      RGBToColor(26, 127, 55), RGBToColor(207, 34, 46), RGBToColor(222, 222, 222));
   { The change view's line numbers carry their own color: the strip's
     green on an added line. }
   for i := 0 to Edit.GutterDecor.Count - 1 do
@@ -355,6 +370,18 @@ end;
 { The status bar names the repository and branch while the summary or the
   raw diff is shown, and the file and its lexer while a file is shown; the
   full path is in its hint, so the bar stays short. }
+{ The window is named after the repository, or the file when none is
+  open; the header names the file, so the title does not change with it. }
+procedure TForm1.UpdateCaption;
+begin
+  if FRepo.Root <> '' then
+    Caption := ExtractFileName(FRepo.Root) + ' - Gittan'
+  else if Edit.FileName <> '' then
+    Caption := ExtractFileName(Edit.FileName) + ' - Gittan'
+  else
+    Caption := 'Gittan';
+end;
+
 procedure TForm1.UpdateStatus;
 var
   Lexer, Repo: string;
@@ -585,11 +612,12 @@ begin
   SetLineStatesBand(False);
   Edit.FileName := AFileName;
   FHeader.SetFile(AFileName, -1);
+  FSummary.Selected := '';
   SetLexer(FLexers.ForFile(AFileName));
   UpdateChangeNav;
   ShowEditor;
   FView := gvFile;
-  Caption := ExtractFileName(AFileName) + ' - Gittan';
+  UpdateCaption;
 end;
 
 { ---------------------------------------------------------------------------
@@ -883,7 +911,8 @@ begin
     MessageDlg(FRepo.Error, mtError, [mbOK], 0);
     Exit;
   end;
-  Caption := ExtractFileName(FRepo.Root) + ' - Gittan';
+  UpdateCaption;
+  FSummary.Selected := '';
   if not LoadRepository then
     MessageDlg(FRepo.Error, mtError, [mbOK], 0);
   ShowSummary;
@@ -1009,10 +1038,7 @@ begin
       begin
         SummarySelectFile(nil, Path);
         if FileTree.Selected = nil then
-        begin
-          ShowSummary;
-          Caption := ExtractFileName(FRepo.Root) + ' - Gittan';
-        end
+          ShowSummary
         else
           RestoreScroll;
       end;
@@ -1113,7 +1139,7 @@ begin
   ShowEditor;
   FView := gvRepoDiff;
   FileTree.Selected := nil;
-  Caption := ExtractFileName(FRepo.Root) + ' - Gittan';
+  FSummary.Selected := '';
   UpdateStatus;
 end;
 
@@ -1144,6 +1170,8 @@ begin
         Break;
       end;
     ShowText(Plain.Text, FLexers.ForFile(APath));
+    { The summary marks the row of the file the editor showed last. }
+    FSummary.Selected := APath;
     for i := 0 to Lines.Count - 1 do
       MarkLine(i, Lines[i][1]);
     ShowLineNumbers(Lines);
@@ -1164,9 +1192,10 @@ end;
   File tree
   ---------------------------------------------------------------------------
   One node per path component of each changed file. A file node has Data
-  set and a badge for its change kind; a folder node (or a submodule, which
-  git status reports as one entry) has Data = nil, the folder icon, and is
-  never opened. git lists paths sorted, so the folder node of the previous
+  set and a badge for its change kind; a folder node has Data = nil and
+  the folder icon with a dot for the worst change inside; a submodule,
+  which git status reports as one entry, has Data = nil and the plain
+  folder icon. Neither is ever opened. git lists paths sorted, so the folder node of the previous
   path is reused when the folder repeats. }
 procedure TForm1.FillFileTree(const AStats: TGittanFileStats);
 var
@@ -1174,6 +1203,7 @@ var
   DirNode, Node, LastDir: TTreeNode;
   LastDirPath: string;
   i, Start, Sep: integer;
+  Kind, FolderKind: TGittanChangeKind;
 begin
   FileTree.BeginUpdate;
   try
@@ -1225,6 +1255,18 @@ begin
         Node.ImageIndex := ChangeIcon(AStats[i].Kind);
       end;
       Node.SelectedIndex := Node.ImageIndex;
+      { Every folder above carries a dot in the color of the most severe
+        change inside it. }
+      Kind := AStats[i].Kind;
+      Node := DirNode;
+      while Node <> nil do
+      begin
+        if FolderIconKind(Node.ImageIndex, FolderKind) then
+          Kind := WorseKind(Kind, FolderKind);
+        Node.ImageIndex := FolderIcon(Kind);
+        Node.SelectedIndex := Node.ImageIndex;
+        Node := Node.Parent;
+      end;
     end;
     FileTree.CustomSort(@CompareTreeNodes);
     { Every changed file is in view from the start. }
@@ -1252,7 +1294,6 @@ begin
   if (Node = nil) or (Node.Data = nil) or (FRepo.Root = '') then
     Exit;
   ShowChanges(Node.GetTextPath);
-  Caption := Node.Text + ' - ' + ExtractFileName(FRepo.Root) + ' - Gittan';
 end;
 
 end.
