@@ -3,6 +3,7 @@ name: Build (All Platforms)
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
   workflow_dispatch: {}
@@ -14,6 +15,9 @@ on:
 #   - macOS (arm64):   Gittan-macos-silicon.dmg  (Gittan.app with lexlib inside)
 #   - Windows (x64):   Gittan-windows-x64.zip    (Gittan.exe + lexlib/)
 #   - Linux (amd64):   Gittan-linux-amd64.tar.gz (Gittan + lexlib/, Qt6)
+#
+# A push of a tag such as v0.1.0 also runs the release job, which collects the
+# three packages and publishes them as a GitHub release named after the tag.
 #
 # The toolchain is the same Lazarus 4.8 pin Trndi uses. Two things differ from
 # Trndi:
@@ -249,3 +253,31 @@ jobs:
             Gittan-windows-x64.zip
           if-no-files-found: error
           retention-days: 14
+
+  # ===================== RELEASE =====================
+  release:
+    name: Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: packages
+          merge-multiple: true
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ls -l packages
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Gittan $GITHUB_REF_NAME" \
+            --generate-notes \
+            packages/Gittan-macos-silicon.dmg \
+            packages/Gittan-windows-x64.zip \
+            packages/Gittan-linux-amd64.tar.gz
