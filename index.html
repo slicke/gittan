@@ -7,7 +7,7 @@
 <meta name="description" content="Gittan shows what you changed in a git repository: every modified file in a tree, the diff with syntax highlighting, side by side or unified, refreshed as you work. Native on macOS, Windows and Linux.">
 <meta property="og:title" content="Gittan">
 <meta property="og:description" content="A native diff viewer for your working tree. macOS, Windows and Linux.">
-<meta property="og:image" content="https://slicke.github.io/gittan/assets/icon-256.png">
+<meta property="og:image" content="https://gittan.app/assets/icon-256.png">
 <meta property="og:type" content="website">
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="apple-touch-icon" href="assets/icon-256.png">
@@ -392,26 +392,26 @@
 <section id="download">
   <div class="wrap">
     <h2>Download</h2>
-    <p class="lead">Gittan is built for every platform on every push. Builds are published as GitHub Actions artifacts until the first release.</p>
+    <p class="lead">Packaged builds for every platform are on the Releases page. Pick the file for your system.</p>
     <div class="dl">
       <div class="card">
         <div class="name">macOS</div>
         <div class="file">Apple Silicon · Gittan-macos-silicon.dmg</div>
-        <a class="btn" href="https://github.com/slicke/gittan/actions/workflows/build.yml?query=branch%3Amain+is%3Asuccess">Get the latest build</a>
+        <a class="btn" href="https://github.com/slicke/gittan/releases/latest">Download</a>
       </div>
       <div class="card">
         <div class="name">Windows</div>
         <div class="file">x64 · Gittan-windows-x64.zip</div>
-        <a class="btn" href="https://github.com/slicke/gittan/actions/workflows/build.yml?query=branch%3Amain+is%3Asuccess">Get the latest build</a>
+        <a class="btn" href="https://github.com/slicke/gittan/releases/latest">Download</a>
       </div>
       <div class="card">
         <div class="name">Linux</div>
         <div class="file">amd64, Qt 6 · Gittan-linux-amd64.tar.gz</div>
-        <a class="btn" href="https://github.com/slicke/gittan/actions/workflows/build.yml?query=branch%3Amain+is%3Asuccess">Get the latest build</a>
+        <a class="btn" href="https://github.com/slicke/gittan/releases/latest">Download</a>
       </div>
     </div>
     <div class="note">
-      Open the newest successful run and pick your platform under <em>Artifacts</em>. Downloading artifacts needs a GitHub account. Gittan runs the <code>git</code> command line tool, so git must be installed and on your PATH. The macOS build is signed ad hoc: on first launch, right-click the app and choose Open. Tagged builds will appear on the <a href="https://github.com/slicke/gittan/releases">Releases page</a>.
+      Gittan runs the <code>git</code> command line tool, so git must be installed and on your PATH. The macOS build is signed ad hoc: on first launch, right-click the app and choose Open. Every push to main is also built on <a href="https://github.com/slicke/gittan/actions/workflows/build.yml?query=branch%3Amain+is%3Asuccess">GitHub Actions</a>, where the artifacts of the newest run are the current development build.
     </div>
   </div>
 </section>
