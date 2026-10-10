@@ -9,10 +9,10 @@ uses
   ExtCtrls, StdCtrls, LCLType, LazLoggerBase, Math, Types,
   ATSynEdit, ATSynEdit_Adapter_EControl, ATSynEdit_Bookmarks,
   ATSynEdit_Carets, ATSynEdit_Gutter_Decor, ATSynEdit_Globals, ATStringProc,
-  ec_SyntAnal,
+  ATSynEdit_Markers, ATSynEdit_LineParts, ec_SyntAnal,
   gittan.lexers, gittan.git, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.fileheader, gittan.watch, gittan.settings,
-  gittan.findbar;
+  gittan.findbar, gittan.worddiff;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -60,7 +60,7 @@ type
     FSettings: TGittanSettings;
     FSyntaxMenu, FAutoLexerItem, FPlainTextItem: TMenuItem;
     FRecentMenu, FCompareMenu: TMenuItem;
-    FWrapItem, FOnlyChangesItem, FSideItem: TMenuItem;
+    FWrapItem, FOnlyChangesItem, FSideItem, FIgnoreSpaceItem: TMenuItem;
     FContextItems: array of TMenuItem;
     FFilePopup, FStatusPopup: TPopupMenu;
     FRevealItem, FOpenItem: TMenuItem;
@@ -93,8 +93,11 @@ type
     FCurrentPath: string;
     FExpanded: TIntegerDynArray;
     FRows: TGittanRows;
-    FOnlyChanges, FSideBySide, FWordWrap: boolean;
+    FOnlyChanges, FSideBySide, FWordWrap, FIgnoreWhitespace: boolean;
     FContextLines: integer;
+    { The spans of the changed lines that differ word by word, one entry
+      per line of FChangeLines; see gittan.worddiff. }
+    FWordSpans: TGittanLineSpans;
     { Scrolling on past the bottom of a file: the wheel delta pulled so
       far, the time of the last wheel event, whether a pull counts (not
       while the momentum of the gesture that just jumped runs on), the
@@ -142,6 +145,10 @@ type
     procedure ShowText(AEd: TATSynEdit; const AText: string; ALexer: TecSyntAnalyzer);
     procedure MarkLine(AEd: TATSynEdit; ALine: integer; AChange: char);
     procedure MarkRow(AEd: TATSynEdit; ARow, AKind: integer);
+    procedure MarkWords(AEd: TATSynEdit; ARow: integer; const ASpans: TGittanSpans;
+      AChange: char; AOffset: integer);
+    function WordColor(ATag: integer): TColor;
+    procedure RecolorWords(AEd: TATSynEdit);
     procedure SetLineStatesBand(AEd: TATSynEdit; AVisible: boolean);
     procedure SetRowNumbers(AEd: TATSynEdit; const ANumbers, AKinds: TIntegerDynArray);
     function LineNumberColor(AKind: integer): TColor;
@@ -190,6 +197,7 @@ type
     procedure MenuOnlyChangesClick(Sender: TObject);
     procedure MenuContextLinesClick(Sender: TObject);
     procedure MenuSideBySideClick(Sender: TObject);
+    procedure MenuIgnoreSpaceClick(Sender: TObject);
     procedure MenuNextFileClick(Sender: TObject);
     procedure MenuPrevFileClick(Sender: TObject);
     function StepFile(ANext: boolean): boolean;
@@ -255,6 +263,7 @@ resourcestring
   rsNLines = '%d lines';
   rsSideBySide = 'Side &by Side';
   rsWordWrap = '&Word Wrap';
+  rsIgnoreSpace = 'I&gnore Whitespace';
   rsZoomIn = 'Zoom &In';
   rsZoomOut = 'Zoom &Out';
   rsZoomReset = 'Actual Si&ze';
@@ -308,6 +317,10 @@ const
   bmDeleted = 2;
   bmGap = 3;
   bmFiller = 4;
+  { Tags of the editor's attribs that mark the words that differ inside
+    an added or a deleted line. }
+  tagWordAdded = 1;
+  tagWordDeleted = 2;
   { Row kinds in TGittanRow.Line. }
   rowGap = -1;
   rowFiller = -2;
@@ -624,6 +637,8 @@ begin
     FSummary.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(243, 243, 243), RGBToColor(248, 248, 248),
       RGBToColor(26, 127, 55), RGBToColor(207, 34, 46), RGBToColor(222, 222, 222));
+  RecolorWords(Edit);
+  RecolorWords(FEditOld);
 end;
 
 { A dropped folder opens as a repository, a dropped file as a file. }
@@ -789,6 +804,9 @@ begin
   FWrapItem := AddItem(ViewMenu, rsWordWrap, ShortCut(VK_W, [ssModifier, ssAlt]),
     @MenuWrapClick);
   FWrapItem.Checked := FWordWrap;
+  FIgnoreSpaceItem := AddItem(ViewMenu, rsIgnoreSpace, ShortCut(VK_I, [ssModifier, ssAlt]),
+    @MenuIgnoreSpaceClick);
+  FIgnoreSpaceItem.Checked := FIgnoreWhitespace;
   ViewMenu.Add(NewLine);
   AddItem(ViewMenu, rsZoomIn, ShortCut(VK_OEM_PLUS, [ssModifier]), @MenuZoomInClick);
   AddItem(ViewMenu, rsZoomOut, ShortCut(VK_OEM_MINUS, [ssModifier]), @MenuZoomOutClick);
@@ -1008,6 +1026,66 @@ begin
       bmGap: AColor := RGBToColor(238, 238, 238);
       bmFiller: AColor := RGBToColor(246, 246, 246);
     end;
+end;
+
+{ The shade of a word that differs, on top of the line's tint: the same
+  hue, strong enough to be told from the line, faint enough for the
+  syntax colors to read. }
+function TForm1.WordColor(ATag: integer): TColor;
+begin
+  Result := clNone;
+  if FDark then
+    case ATag of
+      tagWordAdded: Result := RGBToColor(38, 98, 54);
+      tagWordDeleted: Result := RGBToColor(124, 52, 52);
+    end
+  else
+    case ATag of
+      tagWordAdded: Result := RGBToColor(171, 242, 188);
+      tagWordDeleted: Result := RGBToColor(255, 196, 194);
+    end;
+end;
+
+{ Marks ASpans of row ARow, an added ('+') or deleted ('-') line, through
+  the editor's attribs: a line part with only a background color, so the
+  lexer's text color stays. AOffset is added to every span, for a text
+  that keeps the diff marker in its first column. }
+procedure TForm1.MarkWords(AEd: TATSynEdit; ARow: integer; const ASpans: TGittanSpans;
+  AChange: char; AOffset: integer);
+var
+  Part: TATLinePart;
+  WordTag, i: integer;
+begin
+  if ASpans = nil then
+    Exit;
+  case AChange of
+    '+': WordTag := tagWordAdded;
+    '-': WordTag := tagWordDeleted;
+    else
+      Exit;
+  end;
+  InitLinePart(Part);
+  Part.ColorBG := WordColor(WordTag);
+  for i := 0 to High(ASpans) do
+    AEd.Attribs.Add(Point(ASpans[i].Start + AOffset, ARow), Point(ASpans[i].Len, 0),
+      TATMarkerTags.Init(WordTag, 0), @Part);
+end;
+
+{ After a theme change: the word marks take the colors of the new theme. }
+procedure TForm1.RecolorWords(AEd: TATSynEdit);
+var
+  Item: TATMarkerItem;
+  i: integer;
+begin
+  for i := 0 to AEd.Attribs.Count - 1 do
+  begin
+    Item := AEd.Attribs[i];
+    if (Item.Tag = tagWordAdded) or (Item.Tag = tagWordDeleted) then
+    begin
+      Item.LinePart.ColorBG := WordColor(Item.Tag);
+      AEd.Attribs[i] := Item;
+    end;
+  end;
 end;
 
 { AChange is the first character of a unified diff line. Besides the
@@ -1573,7 +1651,9 @@ end;
 procedure TForm1.ShowRepoDiff;
 var
   i, Added, Deleted: integer;
-  Title: string;
+  Title, DiffText: string;
+  Lines: TStringList;
+  Spans: TGittanLineSpans;
 begin
   Title := rsRepoDiffTitle;
   if FRepo.Base <> '' then
@@ -1591,13 +1671,32 @@ begin
   FCurrentPath := '';
   FManualLexer := False;
   FView := gvRepoDiff;
-  ShowText(Edit, FRepo.Diff, FLexers.ByName(rsDiffLexer));
+  DiffText := FRepo.Diff;
+  ShowText(Edit, DiffText, FLexers.ByName(rsDiffLexer));
   { The "---"/"+++" file headers are not changes. }
   for i := 0 to Edit.Strings.Count - 1 do
     if (Edit.Strings.LinesLen[i] > 0) and
       (Copy(Edit.Strings.Lines[i], 1, 3) <> '---') and
       (Copy(Edit.Strings.Lines[i], 1, 3) <> '+++') then
       MarkLine(Edit, i, char(Edit.Strings.Lines[i][1]));
+  { The words that differ, as in the change view. The diff's own lines
+    (hunk and file headers) are given a blank marker so they do not
+    count as changes; the text keeps its marker column, so the spans
+    are shifted by one. }
+  Lines := TStringList.Create;
+  try
+    Lines.Text := DiffText;
+    for i := 0 to Lines.Count - 1 do
+      if (Lines[i] = '') or not (Lines[i][1] in ['+', '-']) or
+        (Copy(Lines[i], 1, 3) = '---') or (Copy(Lines[i], 1, 3) = '+++') then
+        Lines[i] := ' ' + Lines[i];
+    WordDiff(Lines, FIgnoreWhitespace, Spans);
+    for i := 0 to Min(High(Spans), Edit.Strings.Count - 1) do
+      if Spans[i] <> nil then
+        MarkWords(Edit, i, Spans[i], Lines[i][1], 1);
+  finally
+    Lines.Free;
+  end;
   UpdateChangeNav;
   ShowEditor;
   FileTree.Selected := nil;

@@ -71,6 +71,7 @@ var
 begin
   n := FChangeLines.Count;
   NumberLines(FChangeLines, OldNum, NewNum);
+  WordDiff(FChangeLines, FIgnoreWhitespace, FWordSpans);
   { Which diff lines are shown: all, or the changed ones with their
     context and the gaps the user opened. }
   SetLength(Keep, n);
@@ -215,6 +216,8 @@ begin
       begin
         Marker := FChangeLines[ARows[i].Line][1];
         MarkLine(AEd, i, Marker);
+        if ARows[i].Line <= High(FWordSpans) then
+          MarkWords(AEd, i, FWordSpans[ARows[i].Line], Marker, 0);
         if AOldSide then
         begin
           Numbers[i] := AOldNum[ARows[i].Line];

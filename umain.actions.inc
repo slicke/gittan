@@ -46,6 +46,8 @@ begin
   FOnlyChanges := FSettings.OnlyChanges;
   FSideBySide := FSettings.SideBySide;
   FWordWrap := FSettings.WordWrap;
+  FIgnoreWhitespace := FSettings.IgnoreWhitespace;
+  FRepo.IgnoreWhitespace := FIgnoreWhitespace;
   FContextLines := ContextChoices[1];
   for i := 0 to High(ContextChoices) do
     if ContextChoices[i] = FSettings.ContextLines then
@@ -100,6 +102,7 @@ begin
   FSettings.OnlyChanges := FOnlyChanges;
   FSettings.ContextLines := FContextLines;
   FSettings.SideBySide := FSideBySide;
+  FSettings.IgnoreWhitespace := FIgnoreWhitespace;
   FSettings.Save;
 end;
 
@@ -344,6 +347,18 @@ begin
   FSideItem.Checked := FSideBySide;
   RebuildIfChanges;
   ApplyLayout;
+end;
+
+{ Whitespace changes are left out by git itself (-w on every diff), so
+  the counts, the tree and the views all follow: the repository is
+  loaded again and the view restored, as on a refresh. }
+procedure TForm1.MenuIgnoreSpaceClick(Sender: TObject);
+begin
+  FIgnoreWhitespace := not FIgnoreWhitespace;
+  FIgnoreSpaceItem.Checked := FIgnoreWhitespace;
+  FRepo.IgnoreWhitespace := FIgnoreWhitespace;
+  FExpanded := nil;
+  RefreshRepository;
 end;
 
 { ---------------------------------------------------------------------------

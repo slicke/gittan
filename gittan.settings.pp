@@ -41,6 +41,8 @@ type
     OnlyChanges: boolean;
     ContextLines: integer;
     SideBySide: boolean;
+    {** Leave whitespace changes out of every diff. }
+    IgnoreWhitespace: boolean;
     {** Command that opens a file from the context menu, with the path
       appended; empty opens it with the desktop's default application. }
     EditorCommand: string;
@@ -111,6 +113,7 @@ begin
       OnlyChanges := Ini.ReadBool(SecView, 'OnlyChanges', False);
       ContextLines := Ini.ReadInteger(SecView, 'ContextLines', 3);
       SideBySide := Ini.ReadBool(SecView, 'SideBySide', False);
+      IgnoreWhitespace := Ini.ReadBool(SecView, 'IgnoreWhitespace', False);
       EditorCommand := Ini.ReadString(SecView, 'EditorCommand', '');
       FRecent.Clear;
       for i := 0 to MaxRecent - 1 do
@@ -149,6 +152,7 @@ begin
       Ini.WriteBool(SecView, 'OnlyChanges', OnlyChanges);
       Ini.WriteInteger(SecView, 'ContextLines', ContextLines);
       Ini.WriteBool(SecView, 'SideBySide', SideBySide);
+      Ini.WriteBool(SecView, 'IgnoreWhitespace', IgnoreWhitespace);
       Ini.WriteString(SecView, 'EditorCommand', EditorCommand);
       Ini.EraseSection(SecRecent);
       for i := 0 to FRecent.Count - 1 do

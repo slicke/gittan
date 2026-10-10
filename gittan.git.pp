@@ -44,6 +44,7 @@ type
     FRoot: string;
     FError: string;
     FBase: string;
+    FIgnoreWhitespace: boolean;
     function RunGit(const ADir: string; const AArgs: array of string;
       out AOutput: string): boolean;
     function DiffBase: string;
@@ -98,6 +99,10 @@ type
     {** The commit the work tree is compared against: a branch, tag or
       commit id, or empty for HEAD. }
     property Base: string read FBase write FBase;
+    {** Leave out changes in whitespace: every diff is run with -w, so a
+      line that only changed its spacing counts as unchanged, and a file
+      with no other change has no changes. }
+    property IgnoreWhitespace: boolean read FIgnoreWhitespace write FIgnoreWhitespace;
   end;
 
 implementation
@@ -177,7 +182,41 @@ end;
 function TGittanRepo.RunDiff(const AArgs: array of string; out AOutput: string): boolean;
 var
   Args: array of string;
-  i, n, Sep: integer;
+  Sep, i: integer;
+
+  { "diff", -w when whitespace is ignored, then AArgs with the base put
+    before its "--" (or last, without one) when AWithBase. }
+  procedure Build(AWithBase: boolean);
+  var
+    i, n: integer;
+  begin
+    SetLength(Args, Length(AArgs) + 3);
+    n := 0;
+    Args[n] := 'diff';
+    Inc(n);
+    if FIgnoreWhitespace then
+    begin
+      Args[n] := '-w';
+      Inc(n);
+    end;
+    for i := 0 to High(AArgs) do
+    begin
+      if AWithBase and (i = Sep) then
+      begin
+        Args[n] := DiffBase;
+        Inc(n);
+      end;
+      Args[n] := AArgs[i];
+      Inc(n);
+    end;
+    if AWithBase and (Sep = Length(AArgs)) then
+    begin
+      Args[n] := DiffBase;
+      Inc(n);
+    end;
+    SetLength(Args, n);
+  end;
+
 begin
   Sep := Length(AArgs);
   for i := 0 to High(AArgs) do
@@ -186,29 +225,12 @@ begin
       Sep := i;
       Break;
     end;
-  SetLength(Args, Length(AArgs) + 2);
-  Args[0] := 'diff';
-  n := 1;
-  for i := 0 to High(AArgs) do
-  begin
-    if i = Sep then
-    begin
-      Args[n] := DiffBase;
-      Inc(n);
-    end;
-    Args[n] := AArgs[i];
-    Inc(n);
-  end;
-  if Sep = Length(AArgs) then
-    Args[n] := DiffBase;
+  Build(True);
   Result := RunGit(FRoot, Args, AOutput);
   if not Result and (FBase = '') then
   begin
     { Without HEAD: the same call, the base left out. }
-    SetLength(Args, Length(AArgs) + 1);
-    Args[0] := 'diff';
-    for i := 0 to High(AArgs) do
-      Args[i + 1] := AArgs[i];
+    Build(False);
     Result := RunGit(FRoot, Args, AOutput);
   end;
 end;
@@ -523,9 +545,10 @@ end;
   file under its new path, which is how the file tree lists it. }
 function TGittanRepo.FileChanges(const APath: string; ALines: TStrings): boolean;
 var
-  Output, Line, FileName: string;
+  Output, Line, FileName, Tracked: string;
   Raw: TStringList;
   InHunk: boolean;
+  Marker: char;
 begin
   ALines.Clear;
   if FRoot = '' then
@@ -538,13 +561,20 @@ begin
   try
     if Output = '' then
     begin
-      { Not in HEAD or the index: an untracked file, all of it new. }
+      { Not in HEAD or the index: an untracked file, all of it new. A
+        tracked file without a diff (its changes are in whitespace only
+        while IgnoreWhitespace is set, or its mode changed) is shown as
+        it is, every line unchanged. }
       FileName := IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(APath);
       if FileExists(FileName) then
       begin
+        if RunGit(FRoot, ['ls-files', '--', APath], Tracked) and (Tracked <> '') then
+          Marker := ' '
+        else
+          Marker := '+';
         Raw.LoadFromFile(FileName);
         for Line in Raw do
-          ALines.Add('+' + Line);
+          ALines.Add(Marker + Line);
       end;
       Exit;
     end;
