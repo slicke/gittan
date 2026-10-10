@@ -109,8 +109,8 @@ lexlib:
 	@if [ ! -d "$(LEXERS_SRC)/Pascal" ]; then \
 	  echo "$(LEXERS_SRC) is empty; run: git submodule update --init"; exit 1; fi
 	@rm -rf "$(LEXLIB)" && mkdir -p "$(LEXLIB)"
-	@find "$(LEXERS_SRC)" -mindepth 2 -maxdepth 2 -name '*.lcf' -exec cp -p {} "$(LEXLIB)/" \;
-	@echo "Copied $$(ls "$(LEXLIB)" | wc -l | tr -d ' ') lexers to $(LEXLIB)/"
+	@find "$(LEXERS_SRC)" -mindepth 2 -maxdepth 2 \( -name '*.lcf' -o -name '*.cuda-lexmap' \) -exec cp -p {} "$(LEXLIB)/" \;
+	@echo "Copied $$(ls "$(LEXLIB)"/*.lcf | wc -l | tr -d ' ') lexers to $(LEXLIB)/"
 
 run: build
 	./Gittan $(RUN_ARGS)
