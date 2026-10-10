@@ -3,7 +3,6 @@ name: Build (All Platforms)
 on:
   push:
     branches: [ main ]
-    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
   workflow_dispatch: {}
@@ -16,8 +15,10 @@ on:
 #   - Windows (x64):   Gittan-windows-x64.zip    (Gittan.exe + lexlib/)
 #   - Linux (amd64):   Gittan-linux-amd64.tar.gz (Gittan + lexlib/, Qt6)
 #
-# A push of a tag such as v0.1.0 also runs the release job, which collects the
-# three packages and publishes them as a GitHub release named after the tag.
+# As in Trndi, a push to main publishes a release: the version job takes the
+# next build number from the "build-<n>" tags (100 when there is none), and
+# the publish job creates the release "build-<n>" with the three packages and
+# the commits since the previous build as its notes. PRs only upload artifacts.
 #
 # The toolchain is the same Lazarus 4.8 pin Trndi uses. Two things differ from
 # Trndi:
@@ -50,8 +51,36 @@ env:
     vendor/ATSynEdit_Ex/atsynedit_ex/atsynedit_ex_package.lpk
 
 jobs:
+  # ===================== DETERMINE VERSION =====================
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Only a push to main publishes; PRs and manual runs skip this job.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    outputs:
+      build_number: ${{ steps.setver.outputs.build_number }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history and every tag, for the build-<n> tags below.
+          fetch-depth: 0
+
+      - name: Determine the next build number
+        id: setver
+        run: |
+          set -euo pipefail
+          LATEST=$(git tag | grep -E '^build-[0-9]+$' | sed 's/^build-//' | sort -n | tail -1 || true)
+          if [ -z "$LATEST" ]; then NEXT=100; else NEXT=$((LATEST + 1)); fi
+          echo "build_number=${NEXT}" >> "$GITHUB_OUTPUT"
+          echo "Next build number: ${NEXT}"
+
+  # ===================== BUILD MATRIX =====================
   build:
     name: Build (${{ matrix.name }})
+    needs: version
+    # Run for PRs too, where the version job is skipped.
+    if: always() && (needs.version.result == 'success' || needs.version.result == 'skipped')
     runs-on: ${{ matrix.runner }}
     # Far above a normal build, far below the 6h default a hung lazbuild would burn.
     timeout-minutes: 90
@@ -254,15 +283,22 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # ===================== RELEASE =====================
-  release:
-    name: Release
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+  # ===================== PUBLISH =====================
+  publish:
+    name: Publish build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [version, build]
     permissions:
       contents: write
+    # Plain needs semantics: a failed leg skips the release, so no release
+    # ever lacks a platform.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
       - uses: actions/download-artifact@v8
         with:
           path: packages
@@ -271,13 +307,42 @@ jobs:
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
+          BUILD: ${{ needs.version.outputs.build_number }}
         run: |
           set -euo pipefail
+          TAG="build-${BUILD}"
+          PREV="build-$((BUILD - 1))"
           ls -l packages
-          gh release create "$GITHUB_REF_NAME" \
+
+          # The commits since the previous build, or the last ten for the first one.
+          if git rev-parse -q --verify "refs/tags/$PREV" >/dev/null; then
+            CHANGES=$(git log --no-merges --format='- %s' "${PREV}..HEAD")
+            [ -n "$CHANGES" ] || CHANGES="- No new commits"
+          else
+            CHANGES=$(git log --no-merges --format='- %s' -10)
+          fi
+
+          {
+            echo "Automated build of Gittan from the latest source."
+            echo
+            echo "## Changes"
+            echo
+            echo "$CHANGES"
+            echo
+            echo "## Downloads"
+            echo
+            echo "- **Gittan-macos-silicon.dmg** — macOS on Apple Silicon. The app is signed ad hoc: right-click it and choose Open the first time."
+            echo "- **Gittan-windows-x64.zip** — Windows x64. Unzip anywhere and run Gittan.exe."
+            echo "- **Gittan-linux-amd64.tar.gz** — Linux amd64, needs Qt 6 and libqt6pas6."
+            echo
+            echo "Gittan runs the git command line tool, so git must be on your PATH."
+          } > notes.md
+
+          gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Gittan $GITHUB_REF_NAME" \
-            --generate-notes \
+            --target "$GITHUB_SHA" \
+            --title "Gittan build ${BUILD}" \
+            --notes-file notes.md \
             packages/Gittan-macos-silicon.dmg \
             packages/Gittan-windows-x64.zip \
             packages/Gittan-linux-amd64.tar.gz
