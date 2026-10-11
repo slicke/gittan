@@ -243,7 +243,7 @@ begin
       begin
         RelPath := Node.GetTextPath;
         FullPath := IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(RelPath);
-        Lexer := FLexers.ForFile(RelPath);
+        Lexer := FLexers.ForFile(RelPath, FRepo.Root);
         if (RelPath <> FCurrentPath) and (Lexer <> nil) and FileExists(FullPath) then
         begin
           P := FindDefinition(ParseScratch(FullPath, Lexer), Word, -1);

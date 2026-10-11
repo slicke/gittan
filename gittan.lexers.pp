@@ -25,7 +25,9 @@ type
     FErrors: string;
     FOriginal: array of TColor;
     FOriginalStyle: array of TFontStyles;
+    FChooseDir: string;
     procedure NormalizeStyles;
+    function ChooseLexer(const AFileName: string; ALexers: TStringList): integer;
   public
     constructor Create;
     destructor Destroy; override;
@@ -41,8 +43,10 @@ type
       color from the lexer file for light, lightened with LightenForDark
       for dark. Can be called again when the desktop theme changes. }
     procedure ApplyTheme(ADark: boolean);
-    {** The lexer for a file name, or nil for plain text. }
-    function ForFile(const AFileName: string): TecSyntAnalyzer;
+    {** The lexer for a file name, or nil for plain text. An extension
+      several lexers claim is settled by the files beside it (see
+      gittan.lexerpick); a relative name is taken under ARoot. }
+    function ForFile(const AFileName: string; const ARoot: string = ''): TecSyntAnalyzer;
     {** The lexer with this exact name, or nil. }
     function ByName(const AName: string): TecSyntAnalyzer;
     {** Names of all loaded, non-internal lexers, sorted. }
@@ -58,7 +62,11 @@ function LexerFolderCandidates: TStringArray;
 implementation
 
 uses
-  Forms, gittan.theme;
+  Forms, LazFileUtils, gittan.theme, gittan.lexerpick;
+
+const
+  { How many sibling files are looked at to settle an ambiguous extension. }
+  MaxSiblings = 500;
 
 { ---------------------------------------------------------------------------
   Syntax theme
@@ -291,9 +299,45 @@ begin
   end;
 end;
 
-function TGittanLexers.ForFile(const AFileName: string): TecSyntAnalyzer;
+function TGittanLexers.ForFile(const AFileName: string; const ARoot: string): TecSyntAnalyzer;
 begin
-  Result := FList.FindLexerByFilename(AFileName, nil);
+  FChooseDir := ExtractFilePath(AFileName);
+  if (ARoot <> '') and not FilenameIsAbsolute(AFileName) then
+    FChooseDir := IncludeTrailingPathDelimiter(ARoot) + FChooseDir;
+  Result := FList.FindLexerByFilename(AFileName, @ChooseLexer);
+end;
+
+{ The lexer list's choice among the lexers that claim the file's
+  extension (ALexers, sorted by name): the lexers of the files beside it
+  (in FChooseDir, set by ForFile) vote, then the preference table has a
+  say, else the first is taken. A sibling with an ambiguous extension of
+  its own gets the first lexer in name order; its vote is as good as any. }
+function TGittanLexers.ChooseLexer(const AFileName: string; ALexers: TStringList): integer;
+var
+  Exts, Votes: TStringList;
+  Ext: string;
+  An: TecSyntAnalyzer;
+  i: integer;
+begin
+  Exts := TStringList.Create;
+  Votes := TStringList.Create;
+  try
+    Ext := LowerCase(ExtractFileExt(AFileName));
+    Delete(Ext, 1, 1);
+    SiblingExtensions(FChooseDir, Ext, Exts, MaxSiblings);
+    for i := 0 to Exts.Count - 1 do
+    begin
+      An := FList.FindLexerByFilename('x.' + Exts[i], nil);
+      if An <> nil then
+        Votes.Add(An.LexerName);
+    end;
+    Result := MostVoted(Votes, ALexers);
+    if Result < 0 then
+      Result := ALexers.IndexOf(PreferredLexer(Ext));
+  finally
+    Exts.Free;
+    Votes.Free;
+  end;
 end;
 
 function TGittanLexers.ByName(const AName: string): TecSyntAnalyzer;

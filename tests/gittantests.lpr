@@ -10,7 +10,7 @@ uses
   cthreads,
   {$ENDIF}
   Classes, consoletestrunner,
-  testworddiff, testgit, testsettings, testsymbols;
+  testworddiff, testgit, testsettings, testsymbols, testlexerpick;
 
 var
   App: TTestRunner;

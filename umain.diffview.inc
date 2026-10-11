@@ -114,7 +114,7 @@ begin
     end;
     Inc(i);
   end;
-  Lexer := FLexers.ForFile(FCurrentPath);
+  Lexer := FLexers.ForFile(FCurrentPath, FRepo.Root);
   if not FSideBySide then
   begin
     FRows := Rows;

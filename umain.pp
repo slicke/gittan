@@ -956,7 +956,7 @@ end;
 function TForm1.AutoLexer: TecSyntAnalyzer;
 begin
   case FView of
-    gvChanges: Result := FLexers.ForFile(FCurrentPath);
+    gvChanges: Result := FLexers.ForFile(FCurrentPath, FRepo.Root);
     gvRepoDiff: Result := FLexers.ByName(rsDiffLexer);
     gvFile: Result := FLexers.ForFile(Edit.FileName);
     else
