@@ -22,6 +22,7 @@ type
     procedure TestStamp;
     procedure TestRoundTrip;
     procedure TestMissingAndDamagedFile;
+    procedure TestCacheDir;
   end;
 
 implementation
@@ -161,6 +162,23 @@ begin
   finally
     Index.Free;
   end;
+end;
+
+procedure TSymbolIndexTest.TestCacheDir;
+var
+  Dir: string;
+begin
+  Dir := IndexCacheDir;
+  {$IFDEF WINDOWS}
+  AssertTrue('absolute', (Length(Dir) > 2) and (Dir[2] = ':'));
+  {$ELSE}
+  AssertTrue('absolute', Dir[1] = PathDelim);
+  {$ENDIF}
+  AssertTrue('ends with separator', Dir[Length(Dir)] = PathDelim);
+  AssertTrue('named for Gittan', Pos(PathDelim + 'Gittan' + PathDelim + 'index' + PathDelim, Dir) > 0);
+  {$IFDEF DARWIN}
+  AssertTrue('in Library/Caches', Pos('/Library/Caches/', Dir) > 0);
+  {$ENDIF}
 end;
 
 initialization

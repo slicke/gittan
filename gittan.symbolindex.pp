@@ -60,6 +60,13 @@ type
   it does not exist. }
 function FileStamp(const AFileName: string; out ASize, ATime: int64): boolean;
 
+{** The folder for the index files: the user's cache folder, which the
+  system may clear and backups leave out, since an index is rebuilt
+  from the repository. ~/Library/Caches/Gittan on macOS, $XDG_CACHE_HOME
+  or ~/.cache/Gittan elsewhere on Unix, %LOCALAPPDATA%\Gittan on
+  Windows; with a trailing separator. }
+function IndexCacheDir: string;
+
 implementation
 
 const
@@ -114,6 +121,28 @@ begin
 end;
 
 { TGittanSymbolIndex }
+
+function IndexCacheDir: string;
+var
+  Base: string;
+begin
+  {$IFDEF DARWIN}
+  Base := IncludeTrailingPathDelimiter(GetUserDir) + 'Library/Caches';
+  {$ELSE}
+  {$IFDEF WINDOWS}
+  Base := GetEnvironmentVariable('LOCALAPPDATA');
+  if Base = '' then
+    Base := GetEnvironmentVariable('APPDATA');
+  {$ELSE}
+  Base := GetEnvironmentVariable('XDG_CACHE_HOME');
+  if Base = '' then
+    Base := IncludeTrailingPathDelimiter(GetUserDir) + '.cache';
+  {$ENDIF}
+  {$ENDIF}
+  if Base = '' then
+    Base := GetTempDir;
+  Result := IncludeTrailingPathDelimiter(Base) + 'Gittan' + PathDelim + 'index' + PathDelim;
+end;
 
 constructor TGittanSymbolIndex.Create;
 begin

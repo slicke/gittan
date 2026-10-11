@@ -5,10 +5,10 @@
   of every file of the repository that has a lexer, so Go to Definition
   and the hover reach past the changed files. OpenRepository starts the
   indexing: the index of the repository is read from disk (one file per
-  repository under the configuration folder), the files git lists are
+  repository in the user's cache folder, see IndexCacheDir), the files git lists are
   queued, and those whose size or time differ from the index are parsed
-  one at a time in FIndexEdit, a hidden editor with its own adapter. The
-  parse runs in the adapter's thread; its done event (IndexParseDone)
+  one at a time in FIndexEdit, a hidden editor with its own adapter.
+  The parse runs in the adapter's thread; its done event (IndexParseDone)
   collects the symbols and queues the next file from the message loop,
   so the window stays responsive. A file that never reports (FIndexTimer)
   or is larger than MaxIndexedSize is entered without symbols, so it is
@@ -23,11 +23,11 @@ const
   { How often the status bar shows the indexing progress. }
   IndexReportEvery = 25;
 
-{ The index file of the open repository: named by a hash of its root. }
+{ The index file of the open repository: in the cache folder, named by
+  a hash of the root. }
 function TForm1.IndexFileName: string;
 begin
-  Result := IncludeTrailingPathDelimiter(GetAppConfigDir(False)) + 'index' +
-    PathDelim + MD5Print(MD5String(FRepo.Root)) + '.txt';
+  Result := IndexCacheDir + MD5Print(MD5String(FRepo.Root)) + '.txt';
 end;
 
 procedure TForm1.SaveIndex;
