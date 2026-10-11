@@ -1,5 +1,5 @@
 { ---------------------------------------------------------------------------
-  Go to Definition
+  Go to Definition, Go to Symbol
   ---------------------------------------------------------------------------
   Included by umain.pp. The lexer's code tree (the ranges EControl marks
   DisplayInTree: functions, methods, classes, sections) is the only
@@ -65,11 +65,35 @@ begin
     Result := UTF8Encode(Copy(S, N1 + 1, N2 - N1));
 end;
 
-{ The position (0-based column and row) of the best range of AAdapter's
-  code tree named for AWord, Y = -1 when there is none. The range's
-  identifier token (the name in its header) gives the position, else
-  the range's first token. A range at row ASkipRow is left out, so a
-  lookup from the definition itself goes on to the other files. }
+{ Whether R is a range the lexer shows in its code tree, as CudaText
+  shows it: with a tree rule, and from the main lexer, not a sub-lexer. }
+function InCodeTree(Client: TecClientSyntAnalyzer; R: TecTextRange): boolean;
+begin
+  Result := (R.Rule <> nil) and R.Rule.DisplayInTree and (R.StartIdx >= 0) and
+    (R.Rule.SyntOwner.LexerName = Client.Owner.LexerName);
+end;
+
+{ The name of R in the code tree, on one line. }
+function RangeName(Client: TecClientSyntAnalyzer; R: TecTextRange): string;
+begin
+  Result := Trim(UTF8Encode(Client.GetRangeName(R, Client.PublicData.Tokens)));
+  Result := StringReplace(Result, #13, ' ', [rfReplaceAll]);
+  Result := StringReplace(Result, #10, ' ', [rfReplaceAll]);
+end;
+
+{ The position (0-based column and row) of R: its identifier token (the
+  name in its header), else its first token. }
+function RangePos(Client: TecClientSyntAnalyzer; R: TecTextRange): TPoint;
+begin
+  if R.IdentIdx >= 0 then
+    Result := Client.PublicData.Tokens._GetItemPtr(R.IdentIdx)^.Range.PointStart
+  else
+    Result := Client.PublicData.Tokens._GetItemPtr(R.StartIdx)^.Range.PointStart;
+end;
+
+{ The position of the best range of AAdapter's code tree named for
+  AWord, Y = -1 when there is none. A range at row ASkipRow is left out,
+  so a lookup from the definition itself goes on to the other files. }
 function TForm1.FindDefinition(AAdapter: TATAdapterEControl; const AWord: string;
   ASkipRow: integer): TPoint;
 var
@@ -89,15 +113,12 @@ begin
     for i := 0 to Client.PublicData.FoldRanges.Count - 1 do
     begin
       R := TecTextRange(Client.PublicData.FoldRanges[i]);
-      if (R.Rule = nil) or not R.Rule.DisplayInTree or (R.StartIdx < 0) then
+      if not InCodeTree(Client, R) then
         Continue;
-      Rank := SymbolRank(UTF8Encode(Client.GetRangeName(R, Client.PublicData.Tokens)), AWord);
+      Rank := SymbolRank(RangeName(Client, R), AWord);
       if Rank <= Best then
         Continue;
-      if R.IdentIdx >= 0 then
-        P := Client.PublicData.Tokens._GetItemPtr(R.IdentIdx)^.Range.PointStart
-      else
-        P := Client.PublicData.Tokens._GetItemPtr(R.StartIdx)^.Range.PointStart;
+      P := RangePos(Client, R);
       if P.Y = ASkipRow then
         Continue;
       Best := Rank;
@@ -270,4 +291,74 @@ begin
     GoToDefinition(FEditOld)
   else
     GoToDefinition(Edit);
+end;
+
+{ The code tree of AAdapter's text as a flat list: the name of every
+  range in file order with its nesting depth, and the position of each in
+  FSymbolPos. }
+procedure TForm1.CollectSymbols(AAdapter: TATAdapterEControl; ANames: TStrings;
+  out ADepths: TIntegerDynArray);
+var
+  Client: TecClientSyntAnalyzer;
+  R, Outer: TecTextRange;
+  i, Depth: integer;
+begin
+  ANames.Clear;
+  ADepths := nil;
+  FSymbolPos := nil;
+  Client := AAdapter.AnClient;
+  if Client = nil then
+    Exit;
+  WaitForParse(AAdapter);
+  Client.CriSecForData.Enter;
+  try
+    for i := 0 to Client.PublicData.FoldRanges.Count - 1 do
+    begin
+      R := TecTextRange(Client.PublicData.FoldRanges[i]);
+      if not InCodeTree(Client, R) then
+        Continue;
+      Depth := 0;
+      Outer := R.Parent;
+      while Outer <> nil do
+      begin
+        if InCodeTree(Client, Outer) then
+          Inc(Depth);
+        Outer := Outer.Parent;
+      end;
+      ANames.Add(RangeName(Client, R));
+      SetLength(ADepths, Length(ADepths) + 1);
+      ADepths[High(ADepths)] := Depth;
+      SetLength(FSymbolPos, Length(FSymbolPos) + 1);
+      FSymbolPos[High(FSymbolPos)] := RangePos(Client, R);
+    end;
+  finally
+    Client.CriSecForData.Leave;
+  end;
+end;
+
+{ Go > Go to Symbol: lists the symbols of the shown file in the symbol
+  bar. }
+procedure TForm1.MenuGoToSymbolClick(Sender: TObject);
+var
+  Depths: TIntegerDynArray;
+begin
+  if not Edit.Visible then
+    Exit;
+  CollectSymbols(FAdapter, FSymbolNames, Depths);
+  FSymbolBar.SetSymbols(FSymbolNames, Depths);
+  FSymbolBar.Activate;
+end;
+
+procedure TForm1.SymbolBarPick(Sender: TObject; AIndex: integer);
+begin
+  SymbolBarClose(Sender);
+  if (AIndex >= 0) and (AIndex <= High(FSymbolPos)) then
+    JumpToDefinition(Edit, FSymbolPos[AIndex], NameIdentifier(FSymbolNames[AIndex]));
+end;
+
+procedure TForm1.SymbolBarClose(Sender: TObject);
+begin
+  FSymbolBar.Visible := False;
+  if Edit.Visible and Edit.CanFocus then
+    Edit.SetFocus;
 end;

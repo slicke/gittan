@@ -13,7 +13,7 @@ uses
   ATSynEdit_Markers, ATSynEdit_LineParts, ATSynEdit_Ranges, ec_SyntAnal,
   gittan.lexers, gittan.git, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.fileheader, gittan.watch, gittan.settings,
-  gittan.findbar, gittan.worddiff, gittan.symbols;
+  gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -71,6 +71,10 @@ type
     FNav: TGittanChangeNav;
     FNavUpdateQueued: boolean;
     FFindBar: TGittanFindBar;
+    { The symbol bar and the position of each symbol it lists. }
+    FSymbolBar: TGittanSymbolBar;
+    FSymbolNames: TStringList;
+    FSymbolPos: array of TPoint;
     FSummaryBox: TScrollBox;
     FSummary: TGittanSummary;
     FEditOld: TATSynEdit;
@@ -213,6 +217,11 @@ type
     procedure JumpToDefinition(AEd: TATSynEdit; APos: TPoint; const AWord: string);
     procedure GoToDefinition(AEd: TATSynEdit);
     procedure MenuGoToDefinitionClick(Sender: TObject);
+    procedure MenuGoToSymbolClick(Sender: TObject);
+    procedure SymbolBarPick(Sender: TObject; AIndex: integer);
+    procedure SymbolBarClose(Sender: TObject);
+    procedure CollectSymbols(AAdapter: TATAdapterEControl; ANames: TStrings;
+      out ADepths: TIntegerDynArray);
     procedure AdapterParseBegin(Sender: TObject);
     procedure AdapterParseDone(Sender: TObject; ATime: integer);
     function NeighbourFile(ANext: boolean): TTreeNode;
@@ -289,6 +298,7 @@ resourcestring
   rsFindNext = 'Find &Next';
   rsFindPrev = 'Find &Previous';
   rsGoToDefinition = 'Go to &Definition';
+  rsGoToSymbol = 'Go to S&ymbol...';
   rsLookingFor = 'Looking for a definition of "%s"...';
   rsNoDefinition = 'No definition of "%s" among the changed files.';
   rsNextChange = 'Next &Change';
@@ -427,6 +437,15 @@ begin
   FFindBar.Visible := False;
   FFindBar.OnSearch := @FindBarSearch;
   FFindBar.OnClose := @FindBarClose;
+  { The symbol bar sits under the find bar. }
+  FSymbolNames := TStringList.Create;
+  FSymbolBar := TGittanSymbolBar.Create(Self);
+  FSymbolBar.Parent := EditorPanel;
+  FSymbolBar.Top := FHeader.Height + FFindBar.Height;
+  FSymbolBar.Align := alTop;
+  FSymbolBar.Visible := False;
+  FSymbolBar.OnPick := @SymbolBarPick;
+  FSymbolBar.OnClose := @SymbolBarClose;
   { The summary takes the editor's place until a file is picked. The
     scroll box gives it native scrolling; its resize keeps the summary at
     least as tall as the box, so the summary's background fills it. }
@@ -494,6 +513,7 @@ begin
   FreeAndNil(FRepo);
   FreeAndNil(FAppIcon);
   FreeAndNil(FChangeLines);
+  FreeAndNil(FSymbolNames);
   FreeAndNil(FSettings);
 end;
 
@@ -641,6 +661,8 @@ begin
       RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240));
     FFindBar.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(62, 62, 62));
+    FSymbolBar.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(62, 62, 62));
     FFindBar.Nav.SetColors(RGBToColor(37, 37, 38), RGBToColor(50, 50, 51),
       RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240));
     FPullFill := RGBToColor(50, 50, 51);
@@ -656,6 +678,8 @@ begin
     FNav.SetColors(RGBToColor(246, 246, 246), clWhite,
       RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
     FFindBar.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(222, 222, 222));
+    FSymbolBar.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(222, 222, 222));
     FFindBar.Nav.SetColors(RGBToColor(246, 246, 246), clWhite,
       RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
@@ -862,6 +886,7 @@ begin
   AddItem(GoMenu, rsFindPrev, ShortCut(VK_G, [ssModifier, ssShift]), @MenuFindPrevClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsGoToDefinition, ShortCut(VK_F12, []), @MenuGoToDefinitionClick);
+  AddItem(GoMenu, rsGoToSymbol, ShortCut(VK_T, [ssModifier]), @MenuGoToSymbolClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextChange, ShortCut(VK_F7, []), @MenuNextChangeClick);
   AddItem(GoMenu, rsPrevChange, ShortCut(VK_F7, [ssShift]), @MenuPrevChangeClick);
@@ -1649,6 +1674,7 @@ begin
   FSideSplitter.Visible := False;
   FHeader.Visible := False;
   FFindBar.Visible := False;
+  FSymbolBar.Visible := False;
   FSummaryBox.Visible := True;
   FView := gvSummary;
   { A file picked again after the summary must fire the selection event. }
@@ -1660,6 +1686,8 @@ end;
 { FView is set before the call: the layout depends on it. }
 procedure TForm1.ShowEditor;
 begin
+  { The symbol bar lists the file shown before. }
+  FSymbolBar.Visible := False;
   FSummaryBox.Visible := False;
   FHeader.Visible := True;
   ApplyLayout;

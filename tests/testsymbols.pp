@@ -17,6 +17,7 @@ type
     procedure TestParameterRanksLower;
     procedure TestCaseRanks;
     procedure TestEmpty;
+    procedure TestNameIdentifier;
   end;
 
 implementation
@@ -53,6 +54,16 @@ begin
   AssertEquals(srNone, SymbolRank('', 'Foo'));
   AssertEquals(srNone, SymbolRank('Foo', ''));
   AssertEquals(srNone, SymbolRank('()', 'Foo'));
+end;
+
+procedure TSymbolsTest.TestNameIdentifier;
+begin
+  AssertEquals('foo', NameIdentifier('func foo(int a, char b)'));
+  AssertEquals('GoToChange', NameIdentifier('TForm1.GoToChange'));
+  AssertEquals('Foo', NameIdentifier('class Foo'));
+  AssertEquals('anon', NameIdentifier('func <anon>()'));
+  AssertEquals('', NameIdentifier('<>()'));
+  AssertEquals('', NameIdentifier(''));
 end;
 
 initialization

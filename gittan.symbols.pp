@@ -24,6 +24,11 @@ const
 {** How well the code tree name AName stands for the word AWord. }
 function SymbolRank(const AName, AWord: string): integer;
 
+{** The identifier that names the symbol in the code tree name AName:
+  the last one before the first parenthesis ("foo" in "func foo(int a)",
+  "Bar" in "TFoo.Bar", "Foo" in "class Foo"), or '' when there is none. }
+function NameIdentifier(const AName: string): string;
+
 implementation
 
 uses
@@ -68,6 +73,29 @@ begin
       Rank := srNameIgnoringCase;
     if Rank > Result then
       Result := Rank;
+  end;
+end;
+
+function NameIdentifier(const AName: string): string;
+var
+  i, Start, ParenAt: integer;
+begin
+  Result := '';
+  ParenAt := Pos('(', AName);
+  if ParenAt = 0 then
+    ParenAt := Length(AName) + 1;
+  i := 1;
+  while i < ParenAt do
+  begin
+    if not IsWordChar(AName[i]) then
+    begin
+      Inc(i);
+      Continue;
+    end;
+    Start := i;
+    while (i < ParenAt) and IsWordChar(AName[i]) do
+      Inc(i);
+    Result := Copy(AName, Start, i - Start);
   end;
 end;
 
