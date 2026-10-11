@@ -1,0 +1,413 @@
+unit testgit;
+
+{** Tests of gittan.git. The status parsing is tested on its own; the
+  rest runs the real git against a repository made in a temporary folder
+  for each test, so git must be on PATH. }
+
+{$mode objfpc}{$H+}
+
+interface
+
+uses
+  Classes, SysUtils, fpcunit, testregistry, gittan.git;
+
+type
+  TGitRepoTest = class(TTestCase)
+  private
+    FDir: string;
+    FRepo: TGittanRepo;
+    function Git(const AArgs: array of string): string;
+    procedure WriteFile(const APath, AContent: string);
+    procedure Commit(const AMessage: string);
+    procedure MakeHistory;
+    function FindStat(const AStats: TGittanFileStats; const APath: string): TGittanFileStat;
+    function Joined(AList: TStrings): string;
+  protected
+    procedure SetUp; override;
+    procedure TearDown; override;
+  published
+    procedure TestChangeKind;
+    procedure TestStageFlags;
+    procedure TestOpenNonRepo;
+    procedure TestOpenSubfolderFindsRoot;
+    procedure TestChangeStats;
+    procedure TestFileChanges;
+    procedure TestIgnoreWhitespace;
+    procedure TestUnbornRepository;
+    procedure TestBase;
+    procedure TestFingerprint;
+  end;
+
+implementation
+
+uses
+  Process;
+
+procedure RemoveTree(const ADir: string);
+var
+  Info: TSearchRec;
+begin
+  if FindFirst(IncludeTrailingPathDelimiter(ADir) + '*', faAnyFile, Info) = 0 then
+  try
+    repeat
+      if (Info.Name = '.') or (Info.Name = '..') then
+        Continue;
+      if Info.Attr and faDirectory <> 0 then
+        RemoveTree(IncludeTrailingPathDelimiter(ADir) + Info.Name)
+      else
+        DeleteFile(IncludeTrailingPathDelimiter(ADir) + Info.Name);
+    until FindNext(Info) <> 0;
+  finally
+    FindClose(Info);
+  end;
+  RemoveDir(ADir);
+end;
+
+procedure TGitRepoTest.SetUp;
+begin
+  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'gittan-test-' +
+    IntToStr(GetProcessID) + '-' + IntToStr(Random(MaxInt));
+  ForceDirectories(FDir);
+  FRepo := TGittanRepo.Create;
+end;
+
+procedure TGitRepoTest.TearDown;
+begin
+  FRepo.Free;
+  RemoveTree(FDir);
+end;
+
+{ Runs git in the test folder with a fixed identity and fails the test
+  when it fails. }
+function TGitRepoTest.Git(const AArgs: array of string): string;
+var
+  Args: array of string;
+  Status, i: integer;
+begin
+  SetLength(Args, Length(AArgs) + 4);
+  Args[0] := '-c';
+  Args[1] := 'user.name=Gittan Test';
+  Args[2] := '-c';
+  Args[3] := 'user.email=test@example.invalid';
+  for i := 0 to High(AArgs) do
+    Args[i + 4] := AArgs[i];
+  if RunCommandIndir(FDir, 'git', Args, Result, Status, [poStderrToOutPut]) <> 0 then
+    Fail('git could not be run');
+  if Status <> 0 then
+    Fail('git ' + AArgs[0] + ' failed: ' + Trim(Result));
+end;
+
+{ Writes AContent as it is, so the line endings are what the test says. }
+procedure TGitRepoTest.WriteFile(const APath, AContent: string);
+var
+  Stream: TFileStream;
+  FileName: string;
+begin
+  FileName := IncludeTrailingPathDelimiter(FDir) + SetDirSeparators(APath);
+  ForceDirectories(ExtractFileDir(FileName));
+  Stream := TFileStream.Create(FileName, fmCreate);
+  try
+    if AContent <> '' then
+      Stream.WriteBuffer(AContent[1], Length(AContent));
+  finally
+    Stream.Free;
+  end;
+end;
+
+procedure TGitRepoTest.Commit(const AMessage: string);
+begin
+  Git(['add', '-A']);
+  Git(['commit', '-q', '-m', AMessage]);
+end;
+
+{ One commit with the files the tests change. }
+procedure TGitRepoTest.MakeHistory;
+begin
+  Git(['init', '-q']);
+  WriteFile('a.txt', 'one'#10'two'#10'three'#10);
+  WriteFile('dir sp/fil å.txt', 'a'#10);
+  WriteFile('q"uote.txt', 'x'#10);
+  WriteFile('del.txt', 'gone'#10);
+  WriteFile('staged.txt', 'old'#10);
+  Commit('files');
+end;
+
+function TGitRepoTest.FindStat(const AStats: TGittanFileStats;
+  const APath: string): TGittanFileStat;
+var
+  i: integer;
+begin
+  for i := 0 to High(AStats) do
+    if AStats[i].Path = APath then
+      Exit(AStats[i]);
+  Fail('not in the stats: ' + APath);
+  Result := Default(TGittanFileStat);
+end;
+
+function TGitRepoTest.Joined(AList: TStrings): string;
+var
+  i: integer;
+begin
+  Result := '';
+  for i := 0 to AList.Count - 1 do
+    Result := Result + AList[i] + '|';
+end;
+
+procedure TGitRepoTest.TestChangeKind;
+begin
+  AssertTrue(TGittanRepo.ChangeKind(' M') = ckModified);
+  AssertTrue(TGittanRepo.ChangeKind('M ') = ckModified);
+  AssertTrue(TGittanRepo.ChangeKind('MM') = ckModified);
+  AssertTrue('type change counts as modified', TGittanRepo.ChangeKind(' T') = ckModified);
+  AssertTrue(TGittanRepo.ChangeKind('A ') = ckAdded);
+  AssertTrue(TGittanRepo.ChangeKind('AM') = ckAdded);
+  AssertTrue(TGittanRepo.ChangeKind('D ') = ckDeleted);
+  AssertTrue(TGittanRepo.ChangeKind(' D') = ckDeleted);
+  AssertTrue('deleted after rename', TGittanRepo.ChangeKind('RD') = ckDeleted);
+  AssertTrue(TGittanRepo.ChangeKind('R ') = ckRenamed);
+  AssertTrue(TGittanRepo.ChangeKind('RM') = ckRenamed);
+  AssertTrue(TGittanRepo.ChangeKind('C ') = ckRenamed);
+  AssertTrue(TGittanRepo.ChangeKind('??') = ckUntracked);
+  AssertTrue(TGittanRepo.ChangeKind('UU') = ckConflict);
+  AssertTrue(TGittanRepo.ChangeKind('AU') = ckConflict);
+  AssertTrue(TGittanRepo.ChangeKind('AA') = ckConflict);
+  AssertTrue(TGittanRepo.ChangeKind('DD') = ckConflict);
+  AssertTrue('empty is modified', TGittanRepo.ChangeKind('') = ckModified);
+end;
+
+procedure TGitRepoTest.TestStageFlags;
+begin
+  AssertEquals(flagUnstaged, TGittanRepo.StageFlags(' M'));
+  AssertEquals(flagStaged, TGittanRepo.StageFlags('M '));
+  AssertEquals(flagStaged or flagUnstaged, TGittanRepo.StageFlags('MM'));
+  AssertEquals(flagStaged, TGittanRepo.StageFlags('A '));
+  AssertEquals(flagStaged, TGittanRepo.StageFlags('R '));
+  AssertEquals(0, TGittanRepo.StageFlags('??'));
+  AssertEquals(0, TGittanRepo.StageFlags('!!'));
+  AssertEquals(0, TGittanRepo.StageFlags(''));
+end;
+
+procedure TGitRepoTest.TestOpenNonRepo;
+begin
+  AssertFalse(FRepo.Open(FDir));
+  AssertEquals('Not a git repository: ' + FDir, FRepo.Error);
+  AssertEquals('', FRepo.Root);
+  AssertFalse(FRepo.Open(IncludeTrailingPathDelimiter(FDir) + 'missing'));
+  AssertEquals(1, Pos('Folder not found: ', FRepo.Error));
+end;
+
+procedure TGitRepoTest.TestOpenSubfolderFindsRoot;
+var
+  Top: string;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(IncludeTrailingPathDelimiter(FDir) + 'dir sp'));
+  Top := Trim(Git(['rev-parse', '--show-toplevel']));
+  AssertEquals(Top, FRepo.Root);
+  AssertTrue(FileExists(IncludeTrailingPathDelimiter(FRepo.Root) + 'a.txt'));
+  FRepo.Close;
+  AssertEquals('', FRepo.Root);
+end;
+
+procedure TGitRepoTest.TestChangeStats;
+var
+  Stats: TGittanFileStats;
+  S: TGittanFileStat;
+begin
+  MakeHistory;
+  WriteFile('a.txt', 'one'#10'zwei'#10'three'#10);
+  Git(['mv', 'dir sp/fil å.txt', 'dir sp/ny.txt']);
+  WriteFile('q"uote.txt', 'x'#10'y'#10);
+  Git(['rm', '-q', 'del.txt']);
+  WriteFile('staged.txt', 'new'#10);
+  Git(['add', 'staged.txt']);
+  WriteFile('new.txt', 'n1'#10'n2');
+  WriteFile('bin.dat', 'ab'#0'cd');
+  WriteFile('newdir/sub/inner.txt', 'i'#10);
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.ChangeStats(Stats));
+  AssertEquals(8, Length(Stats));
+
+  S := FindStat(Stats, 'a.txt');
+  AssertTrue(S.Kind = ckModified);
+  AssertEquals(1, S.Added);
+  AssertEquals(1, S.Deleted);
+  AssertFalse(S.Staged);
+  AssertTrue(S.Unstaged);
+
+  S := FindStat(Stats, 'dir sp/ny.txt');
+  AssertTrue('a rename is listed under its new path', S.Kind = ckRenamed);
+  AssertTrue(S.Staged);
+  AssertEquals('the new path of a rename gets the counts', 1, S.Added);
+
+  S := FindStat(Stats, 'q"uote.txt');
+  AssertTrue(S.Kind = ckModified);
+  AssertEquals(1, S.Added);
+  AssertEquals(0, S.Deleted);
+
+  S := FindStat(Stats, 'del.txt');
+  AssertTrue(S.Kind = ckDeleted);
+  AssertEquals(1, S.Deleted);
+  AssertTrue(S.Staged);
+
+  S := FindStat(Stats, 'staged.txt');
+  AssertTrue(S.Kind = ckModified);
+  AssertTrue(S.Staged);
+  AssertFalse(S.Unstaged);
+
+  S := FindStat(Stats, 'new.txt');
+  AssertTrue(S.Kind = ckUntracked);
+  AssertEquals('an unterminated last line counts', 2, S.Added);
+  AssertFalse(S.Staged or S.Unstaged);
+
+  S := FindStat(Stats, 'bin.dat');
+  AssertTrue(S.Kind = ckUntracked);
+  AssertTrue(S.Binary);
+  AssertEquals(0, S.Added);
+
+  S := FindStat(Stats, 'newdir/sub/inner.txt');
+  AssertTrue('a file in an untracked directory is listed by itself, not as the directory',
+    S.Kind = ckUntracked);
+  AssertEquals(1, S.Added);
+end;
+
+procedure TGitRepoTest.TestFileChanges;
+var
+  Lines: TStringList;
+begin
+  MakeHistory;
+  WriteFile('a.txt', 'one'#10'zwei'#10'three'#10);
+  WriteFile('new.txt', 'n1'#10'n2');
+  Git(['rm', '-q', 'del.txt']);
+  AssertTrue(FRepo.Open(FDir));
+  Lines := TStringList.Create;
+  try
+    AssertTrue(FRepo.FileChanges('a.txt', Lines));
+    AssertEquals(' one|-two|+zwei| three|', Joined(Lines));
+    AssertTrue(FRepo.FileChanges('new.txt', Lines));
+    AssertEquals('an untracked file is all new', '+n1|+n2|', Joined(Lines));
+    AssertTrue(FRepo.FileChanges('del.txt', Lines));
+    AssertEquals('a deleted file is all gone', '-gone|', Joined(Lines));
+    AssertTrue(FRepo.FileChanges('staged.txt', Lines));
+    AssertEquals('an unchanged tracked file is shown as it is', ' old|', Joined(Lines));
+  finally
+    Lines.Free;
+  end;
+end;
+
+procedure TGitRepoTest.TestIgnoreWhitespace;
+var
+  Lines: TStringList;
+  Stats: TGittanFileStats;
+begin
+  MakeHistory;
+  WriteFile('a.txt', 'one'#10'two  '#10'three'#10);
+  AssertTrue(FRepo.Open(FDir));
+  Lines := TStringList.Create;
+  try
+    AssertTrue(FRepo.FileChanges('a.txt', Lines));
+    AssertEquals(' one|-two|+two  | three|', Joined(Lines));
+    FRepo.IgnoreWhitespace := True;
+    AssertTrue(FRepo.FileChanges('a.txt', Lines));
+    AssertEquals('with -w the file has no changes', ' one| two  | three|', Joined(Lines));
+    AssertTrue(FRepo.ChangeStats(Stats));
+    AssertEquals(1, Length(Stats));
+    AssertEquals(0, Stats[0].Added + Stats[0].Deleted);
+  finally
+    Lines.Free;
+  end;
+end;
+
+procedure TGitRepoTest.TestUnbornRepository;
+var
+  Stats: TGittanFileStats;
+  Lines: TStringList;
+begin
+  Git(['init', '-q']);
+  WriteFile('first.txt', 'hello'#10);
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue('the branch is named before its first commit', FRepo.Branch <> '');
+  AssertTrue(FRepo.ChangeStats(Stats));
+  AssertEquals(1, Length(Stats));
+  AssertTrue(Stats[0].Kind = ckUntracked);
+  Git(['add', 'first.txt']);
+  AssertTrue('the empty tree stands in for HEAD', FRepo.ChangeStats(Stats));
+  AssertEquals(1, Length(Stats));
+  AssertTrue(Stats[0].Kind = ckAdded);
+  AssertEquals(1, Stats[0].Added);
+  Lines := TStringList.Create;
+  try
+    AssertTrue(FRepo.FileChanges('first.txt', Lines));
+    AssertEquals('+hello|', Joined(Lines));
+  finally
+    Lines.Free;
+  end;
+  AssertTrue(FRepo.Fingerprint <> '');
+end;
+
+procedure TGitRepoTest.TestBase;
+var
+  Stats: TGittanFileStats;
+  Refs: TStringList;
+begin
+  MakeHistory;
+  Git(['tag', 'first']);
+  WriteFile('a.txt', 'one'#10'two'#10'three'#10'four'#10);
+  Commit('second');
+  WriteFile('new.txt', 'n'#10);
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.ChangeStats(Stats));
+  AssertEquals('against HEAD only the untracked file', 1, Length(Stats));
+
+  FRepo.Base := 'first';
+  AssertTrue(FRepo.ChangeStats(Stats));
+  AssertEquals(2, Length(Stats));
+  AssertTrue(FindStat(Stats, 'a.txt').Kind = ckModified);
+  AssertEquals(1, FindStat(Stats, 'a.txt').Added);
+  AssertFalse('no stage flags against a base', FindStat(Stats, 'a.txt').Staged);
+  AssertTrue(FindStat(Stats, 'new.txt').Kind = ckUntracked);
+
+  Refs := TStringList.Create;
+  try
+    AssertTrue(FRepo.Refs(Refs));
+    AssertTrue(Refs.IndexOf('first') >= 0);
+    AssertTrue(Refs.IndexOf(FRepo.Branch) >= 0);
+  finally
+    Refs.Free;
+  end;
+
+  FRepo.Base := 'no-such-ref';
+  AssertFalse('an unknown base is an error', FRepo.ChangeStats(Stats));
+  AssertTrue(FRepo.Error <> '');
+end;
+
+procedure TGitRepoTest.TestFingerprint;
+var
+  A, B: string;
+begin
+  MakeHistory;
+  WriteFile('a.txt', 'one'#10'zwei'#10'three'#10);
+  WriteFile('new.txt', 'n'#10);
+  AssertTrue(FRepo.Open(FDir));
+  A := FRepo.Fingerprint;
+  AssertTrue(A <> '');
+  AssertEquals('stable while nothing changes', A, FRepo.Fingerprint);
+  { An edit that keeps the size and the line count. }
+  WriteFile('a.txt', 'one'#10'drei'#10'three'#10);
+  B := FRepo.Fingerprint;
+  AssertTrue('content change seen', A <> B);
+  WriteFile('new.txt', 'm'#10);
+  A := FRepo.Fingerprint;
+  AssertTrue('untracked content change seen', A <> B);
+  Git(['commit', '-q', '--amend', '--allow-empty', '-m', 'files again']);
+  B := FRepo.Fingerprint;
+  AssertTrue('a moved HEAD seen', A <> B);
+  Git(['add', 'a.txt']);
+  A := FRepo.Fingerprint;
+  AssertTrue('staging seen', A <> B);
+end;
+
+initialization
+  Randomize;
+  RegisterTest(TGitRepoTest);
+end.

@@ -236,6 +236,13 @@ begin
   SetRowNumbers(AEd, Numbers, Kinds);
   if Hidden then
   begin
+    { The wrap info skips hidden lines only while the editor has a fold
+      range at all; the lexer adds its ranges later, from a background
+      parse, and plain text never gets any. A range over the whole text,
+      tagged persistent so the adapter carries it across its parses,
+      makes the hidden rows count from the first build. The range is
+      never folded, and the fold band that would draw it is hidden. }
+    AEd.Fold.Add(1, 0, 1, AEd.Strings.Count - 1, False, '', cTagPersistentFoldRange);
     { The wrap info maps the rows on screen; it must be rebuilt from
       the hidden-lines map. }
     AEd.Strings.WrapStructInvalidate;

@@ -48,7 +48,9 @@ type
     function RunGit(const ADir: string; const AArgs: array of string;
       out AOutput: string): boolean;
     function DiffBase: string;
+    function EmptyTree: string;
     function RunDiff(const AArgs: array of string; out AOutput: string): boolean;
+    function FullPath(const APath: string): string;
   public
     {** Opens the repository that contains ADir. Returns false, with the git
       message in Error, when ADir is not inside a work tree. }
@@ -56,20 +58,21 @@ type
     {** Forgets the repository. }
     procedure Close;
     {** Unified diff of the work tree against Base (HEAD by default), or
-      against the index in a repository without commits. Empty when there
-      are no changes. }
+      against the empty tree in a repository without commits, where every
+      staged file is new. Empty when there are no changes. }
     function Diff: string;
     {** The branches and tags of the repository, local branches first,
       each most recently committed first: what Base can be set to. }
     function Refs(AList: TStrings): boolean;
-    {** Changed files as "XY path" lines from `git status --porcelain`,
-      untracked files included. Returns false when git failed. }
+    {** Changed files as "XY path" entries in the shape of `git status
+      --porcelain`, untracked files included, one per file: a rename is
+      listed under its new path alone. Paths are plain UTF-8 with "/"
+      separators, never quoted. Returns false when git failed. }
     function ChangedFiles(AList: TStrings): boolean;
-    {** Paths of the changed files from ChangedFiles, relative to Root with
-      "/" separators; a rename gives its new path. Each Objects entry holds
-      the file's TGittanChangeKind as TObject(PtrUInt(Ord(Kind))), with
-      flagStaged and flagUnstaged added from the two status columns.
-      Returns false when git failed. }
+    {** Paths of the changed files from ChangedFiles, relative to Root.
+      Each Objects entry holds the file's TGittanChangeKind as
+      TObject(PtrUInt(Ord(Kind))), with flagStaged and flagUnstaged added
+      from the two status columns. Returns false when git failed. }
     function ChangedPaths(AList: TStrings): boolean;
     {** The changed files of ChangedPaths with their added and deleted line
       counts from `git diff --numstat`. A file git does not know yet has
@@ -80,17 +83,21 @@ type
     function Branch: string;
     {** The change kind of a "XY" status from `git status --porcelain`. }
     class function ChangeKind(const AStatus: string): TGittanChangeKind;
+    {** flagStaged and flagUnstaged for a "XY" status: X is the index
+      column, Y the work tree column; an untracked or ignored file has
+      neither flag. }
+    class function StageFlags(const AStatus: string): integer;
     {** One changed file as the lines of a unified diff against HEAD with the
       whole file as context: every line starts with ' ', '+' or '-'. A file
       git does not know yet is returned as all added lines; a binary file
       gives no lines. Returns false when git failed. }
     function FileChanges(const APath: string; ALines: TStrings): boolean;
     {** A text that changes whenever the branch, the set of changed files
-      or the content of a changed file changes: the branch, the status of
-      every changed file, the diff against HEAD, and the size and
-      modification time of every untracked file (the diff does not cover
-      them). Empty when nothing is open or git failed. Meant for polling:
-      two equal fingerprints mean there is nothing new to show. }
+      or the content of a changed file changes: the branch, the commit ids
+      of HEAD and Base, the status of every changed file, and the size,
+      modification time and content hash of every changed file on disk.
+      Empty when nothing is open or git failed. Meant for polling: two
+      equal fingerprints mean there is nothing new to show. }
     function Fingerprint: string;
     {** Work tree root, empty when nothing is open. }
     property Root: string read FRoot;
@@ -108,30 +115,49 @@ type
 implementation
 
 uses
-  Process;
+  Process, md5;
 
 { ---------------------------------------------------------------------------
   Running git
   ---------------------------------------------------------------------------
   git is found on PATH. stderr goes into the same string as stdout, so on
-  failure the output is the error message and is kept in FError. Path names
-  come back as plain UTF-8 instead of octal escapes. }
+  failure the output is the error message and is kept in FError. git gets
+  the environment of Gittan with LC_ALL set to C, so its messages come in
+  English whatever the user's locale and the few that are matched on can
+  be relied upon, and with prompts turned off, since nobody could answer
+  one. Path names come back as plain UTF-8 instead of octal escapes. }
 function TGittanRepo.RunGit(const ADir: string; const AArgs: array of string;
   out AOutput: string): boolean;
 var
-  Args: array of string;
+  P: TProcess;
+  Err, Env: string;
   Status, i: integer;
 begin
   AOutput := '';
-  SetLength(Args, Length(AArgs) + 2);
-  Args[0] := '-c';
-  Args[1] := 'core.quotepath=false';
-  for i := 0 to High(AArgs) do
-    Args[i + 2] := AArgs[i];
-  if RunCommandIndir(ADir, 'git', Args, AOutput, Status, [poStderrToOutPut]) <> 0 then
-  begin
-    FError := 'Could not run git. Is it installed?';
-    Exit(False);
+  P := TProcess.Create(nil);
+  try
+    P.Executable := 'git';
+    P.CurrentDirectory := ADir;
+    P.Parameters.Add('-c');
+    P.Parameters.Add('core.quotepath=false');
+    for i := 0 to High(AArgs) do
+      P.Parameters.Add(AArgs[i]);
+    for i := 1 to GetEnvironmentVariableCount do
+    begin
+      Env := GetEnvironmentString(i);
+      if (Pos('LC_ALL=', Env) <> 1) and (Pos('GIT_TERMINAL_PROMPT=', Env) <> 1) then
+        P.Environment.Add(Env);
+    end;
+    P.Environment.Add('LC_ALL=C');
+    P.Environment.Add('GIT_TERMINAL_PROMPT=0');
+    P.Options := [poStderrToOutPut, poNoConsole];
+    if P.RunCommandLoop(AOutput, Err, Status) <> 0 then
+    begin
+      FError := 'Could not run git. Is it installed?';
+      Exit(False);
+    end;
+  finally
+    P.Free;
   end;
   Result := Status = 0;
   if not Result then
@@ -139,6 +165,24 @@ begin
     FError := Trim(AOutput);
     AOutput := '';
   end;
+end;
+
+{ The NUL-separated fields of the output of a git command run with -z; a
+  trailing NUL ends the last field and adds none. }
+procedure SplitNul(const AOutput: string; AFields: TStrings);
+var
+  Start, i: integer;
+begin
+  AFields.Clear;
+  Start := 1;
+  for i := 1 to Length(AOutput) do
+    if AOutput[i] = #0 then
+    begin
+      AFields.Add(Copy(AOutput, Start, i - Start));
+      Start := i + 1;
+    end;
+  if Start <= Length(AOutput) then
+    AFields.Add(Copy(AOutput, Start, MaxInt));
 end;
 
 { TGittanRepo }
@@ -156,6 +200,8 @@ begin
   Result := RunGit(ADir, ['rev-parse', '--show-toplevel'], Top);
   if Result then
     FRoot := Trim(Top)
+  { git's message is in English (RunGit sets LC_ALL=C), so the common
+    case gets a shorter one; any other failure keeps git's own. }
   else if Pos('not a git repository', FError) > 0 then
     FError := Format('Not a git repository: %s', [ADir]);
 end;
@@ -175,18 +221,37 @@ begin
     Result := FBase;
 end;
 
+function TGittanRepo.FullPath(const APath: string): string;
+begin
+  Result := IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(APath);
+end;
+
+{ The id of the empty tree, which depends on the repository's hash
+  function: the base of a diff before the first commit. }
+function TGittanRepo.EmptyTree: string;
+var
+  Format: string;
+begin
+  if RunGit(FRoot, ['rev-parse', '--show-object-format'], Format) and
+    (Trim(Format) = 'sha256') then
+    Result := '6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321'
+  else
+    Result := '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+end;
+
 { Runs `git diff AArgs <base>`, with the base before the "--" of a path
-  list when AArgs has one. HEAD does not exist before the first commit,
-  and the index is the best base then; another base that does not resolve
-  is an error. }
+  list when AArgs has one. HEAD does not exist before the first commit;
+  the empty tree stands in then, so everything staged shows as added.
+  Another base that does not resolve is an error. }
 function TGittanRepo.RunDiff(const AArgs: array of string; out AOutput: string): boolean;
 var
   Args: array of string;
+  FirstError: string;
   Sep, i: integer;
 
-  { "diff", -w when whitespace is ignored, then AArgs with the base put
-    before its "--" (or last, without one) when AWithBase. }
-  procedure Build(AWithBase: boolean);
+  { "diff", -w when whitespace is ignored, then AArgs with ABase put
+    before its "--" (or last, without one). }
+  procedure Build(const ABase: string);
   var
     i, n: integer;
   begin
@@ -201,17 +266,17 @@ var
     end;
     for i := 0 to High(AArgs) do
     begin
-      if AWithBase and (i = Sep) then
+      if i = Sep then
       begin
-        Args[n] := DiffBase;
+        Args[n] := ABase;
         Inc(n);
       end;
       Args[n] := AArgs[i];
       Inc(n);
     end;
-    if AWithBase and (Sep = Length(AArgs)) then
+    if Sep = Length(AArgs) then
     begin
-      Args[n] := DiffBase;
+      Args[n] := ABase;
       Inc(n);
     end;
     SetLength(Args, n);
@@ -225,13 +290,18 @@ begin
       Sep := i;
       Break;
     end;
-  Build(True);
+  Build(DiffBase);
   Result := RunGit(FRoot, Args, AOutput);
   if not Result and (FBase = '') then
   begin
-    { Without HEAD: the same call, the base left out. }
-    Build(False);
+    { Without HEAD: the same call against the empty tree. When that fails
+      too, HEAD was not the problem and the first message is the one to
+      show. }
+    FirstError := FError;
+    Build(EmptyTree);
     Result := RunGit(FRoot, Args, AOutput);
+    if not Result then
+      FError := FirstError;
   end;
 end;
 
@@ -284,44 +354,62 @@ end;
 { Against HEAD the list is git status itself. Against another base it is
   `git diff --name-status` turned into the same "XY path" shape, with the
   letter in the work tree column, plus the untracked files from git
-  status, which no diff lists. }
+  status, which no diff lists. Untracked files are asked for one by one
+  (--untracked-files=all): by default git folds a directory of them into
+  a single "dir/" entry, which no diff or numstat can say anything
+  about. Both are read with -z: a path with a space,
+  a quote or a control character is quoted C-style in the line form, but
+  comes as it is between NULs. A status entry is "XY path"; a rename or
+  copy (R or C in either column) is followed by the old path as a field
+  of its own, which is dropped. A name-status entry is two fields, the
+  letter and the path (renames are off, so there is no third). }
 function TGittanRepo.ChangedFiles(AList: TStrings): boolean;
 var
-  Output, Line: string;
-  Raw: TStringList;
+  Output, Entry: string;
+  Fields: TStringList;
+  i: integer;
 begin
   AList.Clear;
   if FRoot = '' then
     Exit(False);
-  Result := RunGit(FRoot, ['status', '--porcelain'], Output);
+  Result := RunGit(FRoot, ['status', '--porcelain', '-z',
+    '--untracked-files=all'], Output);
   if not Result then
     Exit;
-  if FBase = '' then
-  begin
-    AList.Text := Output;
-    Exit;
-  end;
-  Raw := TStringList.Create;
+  Fields := TStringList.Create;
   try
-    Raw.Text := Output;
-    for Line in Raw do
-      if Copy(Line, 1, 2) = '??' then
-        AList.Add(Line);
-    Result := RunDiff(['--name-status', '--no-renames'], Output);
+    SplitNul(Output, Fields);
+    i := 0;
+    while i < Fields.Count do
+    begin
+      Entry := Fields[i];
+      Inc(i);
+      if Length(Entry) < 4 then
+        Continue;
+      if (Entry[1] in ['R', 'C']) or (Entry[2] in ['R', 'C']) then
+        Inc(i);
+      if (FBase = '') or (Copy(Entry, 1, 2) = '??') then
+        AList.Add(Entry);
+    end;
+    if FBase = '' then
+      Exit;
+    Result := RunDiff(['--name-status', '--no-renames', '-z'], Output);
     if not Result then
       Exit;
-    Raw.Text := Output;
-    for Line in Raw do
-      if (Length(Line) > 2) and (Line[2] = #9) then
-        AList.Add(' ' + Line[1] + ' ' + Copy(Line, 3, MaxInt));
+    SplitNul(Output, Fields);
+    i := 0;
+    while i + 1 < Fields.Count do
+    begin
+      if Fields[i] <> '' then
+        AList.Add(' ' + Fields[i][1] + ' ' + Fields[i + 1]);
+      Inc(i, 2);
+    end;
   finally
-    Raw.Free;
+    Fields.Free;
   end;
 end;
 
-{ X is the index column, Y the work tree column; an untracked or ignored
-  file has neither flag. }
-function StageFlags(const AStatus: string): integer;
+class function TGittanRepo.StageFlags(const AStatus: string): integer;
 begin
   Result := 0;
   if (Length(AStatus) >= 1) and (AStatus[1] in ['?', '!']) then
@@ -332,24 +420,18 @@ begin
     Result := Result or flagUnstaged;
 end;
 
-{ A porcelain line is "XY path", or "XY old -> new" for a rename or copy. }
 function TGittanRepo.ChangedPaths(AList: TStrings): boolean;
 var
-  i, Arrow: integer;
-  Path: string;
+  i: integer;
 begin
   Result := ChangedFiles(AList);
   if not Result then
     Exit;
   for i := 0 to AList.Count - 1 do
   begin
-    Path := Copy(AList[i], 4, MaxInt);
-    Arrow := Pos(' -> ', Path);
-    if Arrow > 0 then
-      Delete(Path, 1, Arrow + 3);
     AList.Objects[i] := TObject(PtrUInt(Ord(ChangeKind(Copy(AList[i], 1, 2))) +
       StageFlags(Copy(AList[i], 1, 2))));
-    AList[i] := Path;
+    AList[i] := Copy(AList[i], 4, MaxInt);
   end;
 end;
 
@@ -396,14 +478,14 @@ begin
   end;
 end;
 
-{ A numstat line is "added<tab>deleted<tab>path", with "-" for both counts
+{ A numstat entry is "added<tab>deleted<tab>path", with "-" for both counts
   of a binary file. Renames are turned off so the new path of a rename gets
   its counts; the old path is not in the list and is skipped. The counts
   are against HEAD, so staged and unstaged changes are both in. }
 function TGittanRepo.ChangeStats(out AStats: TGittanFileStats): boolean;
 var
   Paths, Num: TStringList;
-  Output, Line, Path, Counts, FileName: string;
+  Output, Entry, Path, Counts, FileName: string;
   i, Tab1, Tab2, Idx: integer;
 begin
   AStats := nil;
@@ -423,33 +505,33 @@ begin
       AStats[i].Staged := PtrUInt(Paths.Objects[i]) and flagStaged <> 0;
       AStats[i].Unstaged := PtrUInt(Paths.Objects[i]) and flagUnstaged <> 0;
     end;
-    RunDiff(['--numstat', '--no-renames'], Output);
-    Num.Text := Output;
-    for Line in Num do
+    RunDiff(['--numstat', '--no-renames', '-z'], Output);
+    SplitNul(Output, Num);
+    for Entry in Num do
     begin
-      Tab1 := Pos(#9, Line);
+      Tab1 := Pos(#9, Entry);
       if Tab1 = 0 then
         Continue;
-      Tab2 := Pos(#9, Line, Tab1 + 1);
+      Tab2 := Pos(#9, Entry, Tab1 + 1);
       if Tab2 = 0 then
         Continue;
-      Path := Copy(Line, Tab2 + 1, MaxInt);
+      Path := Copy(Entry, Tab2 + 1, MaxInt);
       Idx := Paths.IndexOf(Path);
       if Idx < 0 then
         Continue;
-      Counts := Copy(Line, 1, Tab1 - 1);
+      Counts := Copy(Entry, 1, Tab1 - 1);
       if Counts = '-' then
         AStats[Idx].Binary := True
       else
       begin
         AStats[Idx].Added := StrToIntDef(Counts, 0);
-        AStats[Idx].Deleted := StrToIntDef(Copy(Line, Tab1 + 1, Tab2 - Tab1 - 1), 0);
+        AStats[Idx].Deleted := StrToIntDef(Copy(Entry, Tab1 + 1, Tab2 - Tab1 - 1), 0);
       end;
     end;
     for i := 0 to High(AStats) do
       if AStats[i].Kind = ckUntracked then
       begin
-        FileName := IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(AStats[i].Path);
+        FileName := FullPath(AStats[i].Path);
         if FileExists(FileName) and not DirectoryExists(FileName) then
           CountNewFile(FileName, AStats[i]);
       end;
@@ -503,14 +585,19 @@ begin
     Result := ckModified;
 end;
 
-{ The diff covers every tracked change in full, so an edit that keeps the
-  line counts still shows. An untracked file is not in the diff and is not
-  read (it may be large); its size and time stand in, from one stat. }
+{ The commit ids of HEAD and the base catch a commit, an amend or a moved
+  branch that leaves the status alone; the status catches staging and the
+  set of files; the hash of each changed file catches an edit, also one
+  that keeps the line count, which the stat alone would miss when it
+  falls within the resolution of the modification time. No diff is run:
+  hashing the changed files is what one costs in reading, without the
+  process and the diff on top. A deleted file is not on disk and adds
+  nothing; a directory (a submodule) adds its stat alone. }
 function TGittanRepo.Fingerprint: string;
 var
   Paths: TStringList;
   Info: TSearchRec;
-  FileName: string;
+  FileName, Id: string;
   i: integer;
 begin
   Result := '';
@@ -521,20 +608,30 @@ begin
     if not ChangedPaths(Paths) then
       Exit;
     Result := Branch + #10;
+    if RunGit(FRoot, ['rev-parse', '--verify', '-q', 'HEAD'], Id) then
+      Result := Result + Trim(Id);
+    if (FBase <> '') and RunGit(FRoot, ['rev-parse', '--verify', '-q',
+      FBase + '^{commit}'], Id) then
+      Result := Result + ' ' + Trim(Id);
+    Result := Result + #10;
     for i := 0 to Paths.Count - 1 do
       Result := Result + IntToStr(PtrUInt(Paths.Objects[i])) + ' ' + Paths[i] + #10;
-    Result := Result + Diff;
     for i := 0 to Paths.Count - 1 do
-      if TGittanChangeKind(PtrUInt(Paths.Objects[i]) and 15) = ckUntracked then
-      begin
-        FileName := IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(Paths[i]);
-        if FindFirst(FileName, faAnyFile, Info) = 0 then
-        begin
-          Result := Result + #10 + Paths[i] + #9 + IntToStr(Info.Time) + #9 +
-            IntToStr(Info.Size);
-          FindClose(Info);
+    begin
+      FileName := FullPath(Paths[i]);
+      if FindFirst(FileName, faAnyFile, Info) <> 0 then
+        Continue;
+      Result := Result + Paths[i] + #9 + FormatDateTime('yyyymmddhhnnsszzz', Info.TimeStamp) + #9 + IntToStr(Info.Size);
+      if Info.Attr and faDirectory = 0 then
+        try
+          Result := Result + #9 + MD5Print(MD5File(FileName));
+        except
+          { Gone or unreadable between the stat and the read; the stat
+            says what it can. }
         end;
-      end;
+      Result := Result + #10;
+      FindClose(Info);
+    end;
   finally
     Paths.Free;
   end;
@@ -565,7 +662,7 @@ begin
         tracked file without a diff (its changes are in whitespace only
         while IgnoreWhitespace is set, or its mode changed) is shown as
         it is, every line unchanged. }
-      FileName := IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(APath);
+      FileName := FullPath(APath);
       if FileExists(FileName) then
       begin
         if RunGit(FRoot, ['ls-files', '--', APath], Tracked) and (Tracked <> '') then

@@ -46,6 +46,15 @@ endif
 
 LAZFLAGS = --widgetset=$(WIDGETSET)
 
+# Unit tests. tests/gittantests.lpr is a console program over the non-visual
+# units (git, worddiff, settings), built with fpc alone: no LCL, no lazbuild.
+# On macOS it links through the same lld shim as the app.
+FPC ?= fpc
+TESTBIN := tests/gittantests
+ifeq ($(shell uname -s),Darwin)
+  TESTFLAGS := -FD$(CURDIR)/tools/darwin-lld
+endif
+
 # Syntax highlighting. vendor/CudaText-lexers keeps each EControl lexer in a
 # subfolder of its own, but TecLexerList loads *.lcf from one flat folder, so
 # copy them all into $(LEXLIB) beside the executable. Rebuilt on every build;
@@ -75,7 +84,7 @@ define bundle_icon
 endef
 endif
 
-.PHONY: all build debug rebuild run clean help lexlib icons
+.PHONY: all build debug rebuild run clean help lexlib icons test
 
 all: build
 
@@ -85,9 +94,10 @@ help:
 	@echo "  debug     Build with debug info (DWARF 2 on macOS)"
 	@echo "  rebuild   Build with every unit recompiled (-B)"
 	@echo "  run       Build, then start Gittan (RUN_ARGS forwards arguments)"
+	@echo "  test      Build and run the unit tests in tests/ (TEST_ARGS forwards options)"
 	@echo "  lexlib    Copy the lexers from $(LEXERS_SRC) into $(LEXLIB)/ (part of every build)"
 	@echo "  icons     Regenerate the icons from ICON_SRC=$(ICON_SRC) (macOS only)"
-	@echo "  clean     Remove lib/, $(LEXLIB)/ and the binary"
+	@echo "  clean     Remove lib/, $(LEXLIB)/, the test build and the binary"
 	@echo "Current: WIDGETSET=$(WIDGETSET) LAZBUILD=$(LAZBUILD) LD64_LLD=$(LD64_LLD)"
 
 build: lexlib
@@ -115,5 +125,10 @@ lexlib:
 run: build
 	./Gittan $(RUN_ARGS)
 
+test:
+	@mkdir -p tests/lib
+	$(FPC) -Mobjfpc -Sh -O1 -Fu. -FUtests/lib -FEtests $(TESTFLAGS) tests/gittantests.lpr
+	$(TESTBIN) --all --format=plain $(TEST_ARGS)
+
 clean:
-	rm -rf lib $(LEXLIB) Gittan Gittan.app Gittan.exe
+	rm -rf lib $(LEXLIB) Gittan Gittan.app Gittan.exe tests/lib $(TESTBIN) $(TESTBIN).exe

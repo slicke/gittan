@@ -19,6 +19,7 @@ on:
 # next build number from the "build-<n>" tags (100 when there is none), and
 # the publish job creates the release "build-<n>" with the three packages and
 # the commits since the previous build as its notes. PRs only upload artifacts.
+# Every leg also builds and runs the unit tests in tests/ (`make test`).
 #
 # The toolchain is the same Lazarus 4.8 pin Trndi uses. Two things differ from
 # Trndi:
@@ -230,6 +231,7 @@ jobs:
           set -euo pipefail
           # The Makefile builds with qt6 on Linux and refreshes lexlib/.
           make
+          make test
           mkdir -p dist/Gittan
           cp Gittan dist/Gittan/
           cp -r lexlib dist/Gittan/
@@ -243,6 +245,7 @@ jobs:
           # The Makefile builds with cocoa, refreshes lexlib/ and puts the icon
           # into Gittan.app.
           gmake
+          gmake test
           # Lazarus's bundle links Contents/MacOS/Gittan to ../../../Gittan;
           # replace the link with the binary and carry lexlib in Resources,
           # where gittan.lexers.pp looks for it.
@@ -267,6 +270,13 @@ jobs:
           find vendor/CudaText-lexers -mindepth 2 -maxdepth 2 \( -name '*.lcf' -o -name '*.cuda-lexmap' \) -exec cp -p {} lexlib/ \;
           echo "Copied $(ls lexlib/*.lcf | wc -l) lexers to lexlib/"
           lazbuild --lazarusdir='C:\Lazarus' --widgetset=win32 Gittan.lpi
+          # The unit tests, as `make test` builds them: a console program
+          # compiled with the fpc that comes with the Lazarus installer.
+          FPC="$(find /c/Lazarus/fpc -name fpc.exe -path '*x86_64-win64*' | head -n1)"
+          [ -n "$FPC" ] || { echo "::error::fpc.exe not found under C:\Lazarus\fpc"; exit 1; }
+          mkdir -p tests/lib
+          "$FPC" -Mobjfpc -Sh -O1 -Fu. -FUtests/lib -FEtests tests/gittantests.lpr
+          tests/gittantests.exe --all --format=plain
           mkdir -p dist/Gittan
           cp Gittan.exe dist/Gittan/
           cp -r lexlib dist/Gittan/

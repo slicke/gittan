@@ -46,7 +46,9 @@ type
     {** Command that opens a file from the context menu, with the path
       appended; empty opens it with the desktop's default application. }
     EditorCommand: string;
-    constructor Create;
+    {** AFileName names the ini file; empty picks gittan.ini in the
+      user's configuration folder. }
+    constructor Create(const AFileName: string = '');
     destructor Destroy; override;
     {** Reads the file; missing keys keep their defaults. }
     procedure Load;
@@ -74,12 +76,15 @@ const
 
 { TGittanSettings }
 
-constructor TGittanSettings.Create;
+constructor TGittanSettings.Create(const AFileName: string);
 begin
   inherited Create;
   FRecent := TStringList.Create;
   FRecent.CaseSensitive := True;
-  FFileName := IncludeTrailingPathDelimiter(GetAppConfigDir(False)) + 'gittan.ini';
+  if AFileName <> '' then
+    FFileName := AFileName
+  else
+    FFileName := IncludeTrailingPathDelimiter(GetAppConfigDir(False)) + 'gittan.ini';
   ContextLines := 3;
 end;
 

@@ -9,7 +9,7 @@ uses
   ExtCtrls, StdCtrls, LCLType, LazLoggerBase, Math, Types,
   ATSynEdit, ATSynEdit_Adapter_EControl, ATSynEdit_Bookmarks,
   ATSynEdit_Carets, ATSynEdit_Gutter_Decor, ATSynEdit_Globals, ATStringProc,
-  ATSynEdit_Markers, ATSynEdit_LineParts, ec_SyntAnal,
+  ATSynEdit_Markers, ATSynEdit_LineParts, ATSynEdit_Ranges, ec_SyntAnal,
   gittan.lexers, gittan.git, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.findbar, gittan.worddiff;
@@ -493,11 +493,15 @@ begin
     the change view hides lines through the folding mechanism (see
     BuildChangeView), which a fold or unfold of a lexer range would
     disturb. Folding itself stays enabled, since the wrap info skips
-    hidden lines only then. }
+    hidden lines only then, and only while a fold range exists (see
+    FillChangeEditor). }
   AEd.OptGutterShowFoldAlways := False;
   Band := AEd.Gutter.FindIndexByTag(ATEditorOptions.GutterTagFolding);
   if Band >= 0 then
     AEd.Gutter[Band].Visible := False;
+  { A row followed by hidden lines gets a dashed underline; the gap row
+    already says what is left out. }
+  ATEditorOptions.FoldedUnderlineStyle := TATEditorFoldedUnderlineStyle.None;
   SetLineStatesBand(AEd, False);
 end;
 
