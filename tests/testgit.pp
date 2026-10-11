@@ -36,6 +36,7 @@ type
     procedure TestUnbornRepository;
     procedure TestBase;
     procedure TestFingerprint;
+    procedure TestFiles;
   end;
 
 implementation
@@ -405,6 +406,27 @@ begin
   Git(['add', 'a.txt']);
   A := FRepo.Fingerprint;
   AssertTrue('staging seen', A <> B);
+end;
+
+procedure TGitRepoTest.TestFiles;
+var
+  L: TStringList;
+begin
+  MakeHistory;
+  WriteFile('new/untracked.txt', 'x');
+  WriteFile('ignored.log', 'x');
+  WriteFile('.gitignore', '*.log'#10);
+  AssertTrue(FRepo.Open(FDir));
+  L := TStringList.Create;
+  try
+    AssertTrue(FRepo.Files(L));
+    AssertTrue('tracked file listed', L.IndexOf('a.txt') >= 0);
+    AssertTrue('untracked file listed', L.IndexOf('new/untracked.txt') >= 0);
+    AssertTrue('ignore file listed', L.IndexOf('.gitignore') >= 0);
+    AssertEquals('ignored file left out', -1, L.IndexOf('ignored.log'));
+  finally
+    L.Free;
+  end;
 end;
 
 initialization

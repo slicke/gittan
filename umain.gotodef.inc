@@ -6,17 +6,12 @@
   symbol table there is. CodeTree reads it from an adapter as a flat
   list of symbols (gittan.symbols). A word is looked up among them, in
   the text the caret or mouse is in first and then in the other changed
-  files of the repository, each parsed once by a hidden editor with its
-  own adapter and kept in FSymbolCache until the repository is loaded
-  again. A hit in another file selects it in the tree, which shows it,
-  and the lookup runs again on the text the editor shows, so the rows of
-  the change view (deleted lines kept, unchanged lines hidden) need no
-  mapping. The word under the mouse shows its definition's line in a
+  files of the repository through the symbol index (umain.index.inc).
+  A hit in another file shows it, through the tree when it is a changed
+  file, and the lookup runs again on the text the editor shows, so the
+  rows of the change view (deleted lines kept, unchanged lines hidden)
+  need no mapping. The word under the mouse shows its definition's line in a
   hint after a pause, and is underlined as a link while Cmd is held. }
-
-const
-  { How long one parse may take before the lookup gives up on it. }
-  ParseTimeout = 3000;
 
 { The adapters report the start and the end of a parse; the adapter's
   Tag keeps whether its data is complete (1) or not (0), which
@@ -165,27 +160,6 @@ begin
   Result := FScratchAdapter;
 end;
 
-{ The code tree of the changed file ARelPath as it is in the work tree,
-  from the cache or parsed now; nil for a file that is gone or has no
-  lexer. The cache keeps an entry without symbols for those, so they
-  are not tried again. }
-function TForm1.FileSymbols(const ARelPath: string): TGittanFileSymbols;
-var
-  i: integer;
-  FullPath: string;
-  Lexer: TecSyntAnalyzer;
-begin
-  i := FSymbolCache.IndexOf(ARelPath);
-  if i >= 0 then
-    Exit(TGittanFileSymbols(FSymbolCache.Objects[i]));
-  Result := TGittanFileSymbols.Create;
-  FSymbolCache.AddObject(ARelPath, Result);
-  FullPath := IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(ARelPath);
-  Lexer := FLexers.ForFile(ARelPath, FRepo.Root);
-  if (Lexer <> nil) and FileExists(FullPath) then
-    Result.Items := CodeTree(ParseScratch(FullPath, Lexer), FScratch);
-end;
-
 { The 0-based offset of AWord as a whole word in S, ignoring case, or
   -1. }
 function WordPos(const S, AWord: UnicodeString; const ANonWordChars: UnicodeString): integer;
@@ -262,10 +236,9 @@ procedure TForm1.GoToDefinition(AEd: TATSynEdit);
 var
   Word, RelPath: string;
   P: TPoint;
-  Node: TTreeNode;
   Caret: TATCaretItem;
   N1, N2: integer;
-  Symbols: TGittanFileSymbols;
+  Symbol: TGittanSymbol;
 begin
   if not AEd.Visible or (AEd.Carets.Count = 0) then
     Exit;
@@ -293,31 +266,16 @@ begin
     JumpToDefinition(AEd, P, Word);
     Exit;
   end;
-  if FRepo.Root <> '' then
+  StatusBar.SimpleText := Format(rsLookingFor, [Word]);
+  if FindInRepo(Word, RelPath, Symbol) then
   begin
-    StatusBar.SimpleText := Format(rsLookingFor, [Word]);
-    Node := FileTree.Items.GetFirstNode;
-    while Node <> nil do
-    begin
-      if Node.Data <> nil then
-      begin
-        RelPath := Node.GetTextPath;
-        if RelPath <> FCurrentPath then
-        begin
-          Symbols := FileSymbols(RelPath);
-          if BestSymbol(Symbols.Items, Word, -1) >= 0 then
-          begin
-            FileTree.Selected := Node;
-            Node.MakeVisible;
-            P := FindDefinition(FAdapter, Edit, Word, -1);
-            if P.Y >= 0 then
-              JumpToDefinition(Edit, P, Word);
-            Exit;
-          end;
-        end;
-      end;
-      Node := Node.GetNext;
-    end;
+    ShowRepoFile(RelPath);
+    P := FindDefinition(FAdapter, Edit, Word, -1);
+    if P.Y >= 0 then
+      JumpToDefinition(Edit, P, Word)
+    else
+      UpdateStatus;
+    Exit;
   end;
   StatusBar.SimpleText := Format(rsNoDefinition, [Word]);
 end;
@@ -476,9 +434,7 @@ var
   Ed: TATSynEdit;
   Word, Where, Line, RelPath: string;
   P: TPoint;
-  Node: TTreeNode;
-  Symbols: TGittanFileSymbols;
-  i: integer;
+  Symbol: TGittanSymbol;
 begin
   FHoverTimer.Enabled := False;
   Ed := FHoverEd;
@@ -501,27 +457,10 @@ begin
     Where := Format('%s:%s', [Where, RowLabel(Ed, P.Y)]);
     Line := UTF8Encode(Ed.Strings.Lines[P.Y]);
   end
-  else if FRepo.Root <> '' then
+  else if FindInRepo(Word, RelPath, Symbol) then
   begin
-    Node := FileTree.Items.GetFirstNode;
-    while (Node <> nil) and (Where = '') do
-    begin
-      if Node.Data <> nil then
-      begin
-        RelPath := Node.GetTextPath;
-        if RelPath <> FCurrentPath then
-        begin
-          Symbols := FileSymbols(RelPath);
-          i := BestSymbol(Symbols.Items, Word, -1);
-          if i >= 0 then
-          begin
-            Where := Format('%s:%d', [RelPath, Symbols.Items[i].Row + 1]);
-            Line := Symbols.Items[i].Line;
-          end;
-        end;
-      end;
-      Node := Node.GetNext;
-    end;
+    Where := Format('%s:%d', [RelPath, Symbol.Row + 1]);
+    Line := Symbol.Line;
   end;
   { The mouse may have moved on while the files were parsed. }
   if (Where = '') or (FHoverEd = nil) or (FHoverWord <> Word) then

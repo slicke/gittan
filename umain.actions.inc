@@ -104,6 +104,7 @@ begin
   FSettings.SideBySide := FSideBySide;
   FSettings.IgnoreWhitespace := FIgnoreWhitespace;
   FSettings.Save;
+  SaveIndex;
 end;
 
 { ---------------------------------------------------------------------------

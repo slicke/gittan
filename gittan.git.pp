@@ -81,6 +81,11 @@ type
     {** The current branch, the short commit id when HEAD is detached, or
       empty when nothing is open. }
     function Branch: string;
+    {** Every file of the work tree git knows or would add: the tracked
+      files and the untracked ones that are not ignored, as paths
+      relative to Root with "/" separators. Returns false when git
+      failed. }
+    function Files(AList: TStrings): boolean;
     {** The change kind of a "XY" status from `git status --porcelain`. }
     class function ChangeKind(const AStatus: string): TGittanChangeKind;
     {** flagStaged and flagUnstaged for a "XY" status: X is the index
@@ -363,6 +368,19 @@ end;
   copy (R or C in either column) is followed by the old path as a field
   of its own, which is dropped. A name-status entry is two fields, the
   letter and the path (renames are off, so there is no third). }
+function TGittanRepo.Files(AList: TStrings): boolean;
+var
+  Output: string;
+begin
+  AList.Clear;
+  if FRoot = '' then
+    Exit(False);
+  Result := RunGit(FRoot, ['ls-files', '-z', '--cached', '--others',
+    '--exclude-standard'], Output);
+  if Result then
+    SplitNul(Output, AList);
+end;
+
 function TGittanRepo.ChangedFiles(AList: TStrings): boolean;
 var
   Output, Entry: string;

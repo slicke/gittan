@@ -13,7 +13,8 @@ uses
   ATSynEdit_Markers, ATSynEdit_LineParts, ATSynEdit_Ranges, ec_SyntAnal,
   gittan.lexers, gittan.git, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.fileheader, gittan.watch, gittan.settings,
-  gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar;
+  gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
+  gittan.symbolindex, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -32,12 +33,6 @@ type
     Hidden: boolean;
   end;
   TGittanRows = array of TGittanRow;
-
-  {** The code tree of a changed file, kept in the symbol cache. }
-  TGittanFileSymbols = class
-  public
-    Items: TGittanSymbols;
-  end;
 
   { TForm1 }
 
@@ -77,14 +72,24 @@ type
     FNav: TGittanChangeNav;
     FNavUpdateQueued: boolean;
     FFindBar: TGittanFindBar;
-    { The symbol bar and the symbols it lists; the code trees of the
-      other changed files, by relative path, parsed on the first need
-      and dropped by LoadRepository; and the word under the mouse, the
-      editor and row it is in, whether it is underlined as a link, and
-      the timer that shows its definition. }
+    { The symbol bar and the symbols it lists; the symbol index of the
+      repository with the state of its building (see umain.index.inc:
+      the files git lists, the next of them, how many there are, the one
+      being parsed, the hidden editor and adapter that parse, the timer
+      that gives up on a parse, and whether the index has changed since
+      it was written); and the word under the mouse, the editor and row
+      it is in, whether it is underlined as a link, and the timer that
+      shows its definition. }
     FSymbolBar: TGittanSymbolBar;
     FSymbols: TGittanSymbols;
-    FSymbolCache: TStringList;
+    FIndex: TGittanSymbolIndex;
+    FIndexQueue: TStringList;
+    FIndexPos, FIndexTotal: integer;
+    FIndexCurrent: string;
+    FIndexEdit: TATSynEdit;
+    FIndexAdapter: TATAdapterEControl;
+    FIndexTimer: TTimer;
+    FIndexing, FIndexSaveNeeded: boolean;
     FHoverTimer: TTimer;
     FHoverEd: TATSynEdit;
     FHoverWord: string;
@@ -228,7 +233,19 @@ type
     function StepFile(ANext: boolean): boolean;
     function WordAt(AEd: TATSynEdit; APos: TPoint; out AStart, AEnd: integer): string;
     function CodeTree(AAdapter: TATAdapterEControl; AEd: TATSynEdit): TGittanSymbols;
-    function FileSymbols(const ARelPath: string): TGittanFileSymbols;
+    function FileSymbols(const ARelPath: string): TGittanSymbols;
+    function IndexFileName: string;
+    procedure SaveIndex;
+    procedure StartIndexing;
+    procedure StopIndexing;
+    procedure IndexNext;
+    procedure IndexNextAsync(Data: PtrInt);
+    procedure IndexParseDone(Sender: TObject; ATime: integer);
+    procedure IndexTimerTimer(Sender: TObject);
+    function ShownRelPath: string;
+    function FindInRepo(const AWord: string; out APath: string;
+      out ASymbol: TGittanSymbol): boolean;
+    procedure ShowRepoFile(const ARelPath: string);
     function FindDefinition(AAdapter: TATAdapterEControl; AEd: TATSynEdit;
       const AWord: string; ASkipRow: integer): TPoint;
     function ParseScratch(const AFileName: string; ALexer: TecSyntAnalyzer): TATAdapterEControl;
@@ -321,7 +338,8 @@ resourcestring
   rsGoToDefinition = 'Go to &Definition';
   rsGoToSymbol = 'Go to S&ymbol...';
   rsLookingFor = 'Looking for a definition of "%s"...';
-  rsNoDefinition = 'No definition of "%s" among the changed files.';
+  rsNoDefinition = 'No definition of "%s" in the repository.';
+  rsIndexing = 'indexing %d/%d';
   rsNextChange = 'Next &Change';
   rsPrevChange = 'Previous C&hange';
   rsNextFile = 'Next F&ile';
@@ -374,6 +392,9 @@ const
   tagHoverLink = 3;
   { How long the mouse rests on a word before its definition is shown. }
   HoverPause = 600;
+  { How long one parse may take before a lookup or the indexer gives up
+    on it. }
+  ParseTimeout = 3000;
   { Row kinds in TGittanRow.Line. }
   rowGap = -1;
   rowFiller = -2;
@@ -464,8 +485,12 @@ begin
   FFindBar.OnSearch := @FindBarSearch;
   FFindBar.OnClose := @FindBarClose;
   { The symbol bar sits under the find bar. }
-  FSymbolCache := TStringList.Create;
-  FSymbolCache.OwnsObjects := True;
+  FIndex := TGittanSymbolIndex.Create;
+  FIndexQueue := TStringList.Create;
+  FIndexTimer := TTimer.Create(Self);
+  FIndexTimer.Enabled := False;
+  FIndexTimer.Interval := ParseTimeout;
+  FIndexTimer.OnTimer := @IndexTimerTimer;
   FHoverTimer := TTimer.Create(Self);
   FHoverTimer.Enabled := False;
   FHoverTimer.Interval := HoverPause;
@@ -536,15 +561,20 @@ procedure TForm1.FormDestroy(Sender: TObject);
 begin
   Application.RemoveAsyncCalls(Self);
   StopWatcher;
+  StopIndexing;
+  SaveIndex;
   FAdapter.Lexer := nil;
   FAdapterOld.Lexer := nil;
   if FScratchAdapter <> nil then
     FScratchAdapter.Lexer := nil;
+  if FIndexAdapter <> nil then
+    FIndexAdapter.Lexer := nil;
   FreeAndNil(FLexers);
   FreeAndNil(FRepo);
   FreeAndNil(FAppIcon);
   FreeAndNil(FChangeLines);
-  FreeAndNil(FSymbolCache);
+  FreeAndNil(FIndex);
+  FreeAndNil(FIndexQueue);
   FreeAndNil(FSettings);
 end;
 
@@ -596,6 +626,8 @@ begin
     Result := FAdapterOld
   else if AEd = FScratch then
     Result := FScratchAdapter
+  else if AEd = FIndexEdit then
+    Result := FIndexAdapter
   else
     Result := FAdapter;
 end;
@@ -791,6 +823,8 @@ begin
       Repo := ExtractFileName(FRepo.Root);
     if FRepo.Base <> '' then
       Repo := Repo + ' ' + Format(rsVsBase, [FRepo.Base]);
+    if FIndexing then
+      Repo := Repo + ' · ' + Format(rsIndexing, [FIndexPos, FIndexTotal]);
   end;
   if Repo <> '' then
   begin
@@ -1515,6 +1549,8 @@ procedure TForm1.OpenRepository(const ADir: string);
 begin
   { Open closes the previous repository even when it fails. }
   StopWatcher;
+  StopIndexing;
+  SaveIndex;
   FSummary.Notice := '';
   FCurrentPath := '';
   if not FRepo.Open(ADir) then
@@ -1531,6 +1567,7 @@ begin
     FSettings.AddRecent(FRepo.Root);
     RebuildRecentMenu;
     ShowSummary;
+    StartIndexing;
   end;
   StartWatcher;
 end;
@@ -1561,8 +1598,6 @@ begin
   Result := FRepo.ChangeStats(Stats);
   if not Result then
     FLoadError := FRepo.Error;
-  { The files may have changed. }
-  FSymbolCache.Clear;
   FStats := Stats;
   FBranch := FRepo.Branch;
   FFileCount := Length(Stats);
@@ -1990,5 +2025,6 @@ end;
 {$I umain.diffview.inc}
 {$I umain.actions.inc}
 {$I umain.gotodef.inc}
+{$I umain.index.inc}
 
 end.
