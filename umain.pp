@@ -9,10 +9,11 @@ uses
   ExtCtrls, StdCtrls, LCLType, LazLoggerBase, Math, Types,
   ATSynEdit, ATSynEdit_Adapter_EControl, ATSynEdit_Bookmarks,
   ATSynEdit_Carets, ATSynEdit_Gutter_Decor, ATSynEdit_Globals, ATStringProc,
+  ATStringProc_WordJump,
   ATSynEdit_Markers, ATSynEdit_LineParts, ATSynEdit_Ranges, ec_SyntAnal,
   gittan.lexers, gittan.git, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.fileheader, gittan.watch, gittan.settings,
-  gittan.findbar, gittan.worddiff;
+  gittan.findbar, gittan.worddiff, gittan.symbols;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -73,6 +74,10 @@ type
     FSummaryBox: TScrollBox;
     FSummary: TGittanSummary;
     FEditOld: TATSynEdit;
+    { The hidden editor that parses another changed file for Go to
+      Definition, with its adapter; made on the first lookup. }
+    FScratch: TATSynEdit;
+    FScratchAdapter: TATAdapterEControl;
     FSideSplitter: TSplitter;
     FSideRatio: double;
     FSyncingScroll: boolean;
@@ -201,6 +206,15 @@ type
     procedure MenuNextFileClick(Sender: TObject);
     procedure MenuPrevFileClick(Sender: TObject);
     function StepFile(ANext: boolean): boolean;
+    function WordAtCaret(AEd: TATSynEdit): string;
+    function FindDefinition(AAdapter: TATAdapterEControl; const AWord: string;
+      ASkipRow: integer): TPoint;
+    function ParseScratch(const AFileName: string; ALexer: TecSyntAnalyzer): TATAdapterEControl;
+    procedure JumpToDefinition(AEd: TATSynEdit; APos: TPoint; const AWord: string);
+    procedure GoToDefinition(AEd: TATSynEdit);
+    procedure MenuGoToDefinitionClick(Sender: TObject);
+    procedure AdapterParseBegin(Sender: TObject);
+    procedure AdapterParseDone(Sender: TObject; ATime: integer);
     function NeighbourFile(ANext: boolean): TTreeNode;
     procedure EditMouseWheel(Sender: TObject; Shift: TShiftState;
       WheelDelta: integer; MousePos: TPoint; var Handled: boolean);
@@ -274,6 +288,9 @@ resourcestring
   rsFind = '&Find...';
   rsFindNext = 'Find &Next';
   rsFindPrev = 'Find &Previous';
+  rsGoToDefinition = 'Go to &Definition';
+  rsLookingFor = 'Looking for a definition of "%s"...';
+  rsNoDefinition = 'No definition of "%s" among the changed files.';
   rsNextChange = 'Next &Change';
   rsPrevChange = 'Previous C&hange';
   rsNextFile = 'Next F&ile';
@@ -344,6 +361,9 @@ begin
     read-only; ShowText and OpenFile lift that while they replace the text. }
   FAdapter := TATAdapterEControl.Create(Self);
   FAdapter.AddEditor(Edit);
+  { Go to Definition waits for a parse through these (see WaitForParse). }
+  FAdapter.OnParseBegin := @AdapterParseBegin;
+  FAdapter.OnParseDone := @AdapterParseDone;
   SetupEditor(Edit);
   { The minimap shows where in the file the changes are: it paints the
     same line backgrounds as the text. }
@@ -374,6 +394,8 @@ begin
   FEditOld.OptMinimapVisible := False;
   FAdapterOld := TATAdapterEControl.Create(Self);
   FAdapterOld.AddEditor(FEditOld);
+  FAdapterOld.OnParseBegin := @AdapterParseBegin;
+  FAdapterOld.OnParseDone := @AdapterParseDone;
   SetupEditor(FEditOld);
   FSideSplitter := TSplitter.Create(Self);
   FSideSplitter.Parent := EditorPanel;
@@ -466,6 +488,8 @@ begin
   StopWatcher;
   FAdapter.Lexer := nil;
   FAdapterOld.Lexer := nil;
+  if FScratchAdapter <> nil then
+    FScratchAdapter.Lexer := nil;
   FreeAndNil(FLexers);
   FreeAndNil(FRepo);
   FreeAndNil(FAppIcon);
@@ -480,8 +504,14 @@ end;
 procedure TForm1.SetupEditor(AEd: TATSynEdit);
 var
   Band: integer;
+  Actions: TATEditorMouseActions;
 begin
   AEd.ModeReadOnly := True;
+  { Cmd+click (Ctrl+click elsewhere) goes to the definition of the word
+    (see EditMouseUp); the editor's default for it, a second caret, is
+    of no use in a viewer. }
+  InitEditorMouseActions(Actions, True);
+  AEd.MouseActions := Actions;
   AEd.OptNumbersStyle := TATEditorNumbersStyle.All;
   AEd.GutterDecorAlignment := taRightJustify;
   AEd.OnChangeZoom := @EditChangeZoom;
@@ -509,6 +539,8 @@ function TForm1.AdapterOf(AEd: TATSynEdit): TATAdapterEControl;
 begin
   if AEd = FEditOld then
     Result := FAdapterOld
+  else if AEd = FScratch then
+    Result := FScratchAdapter
   else
     Result := FAdapter;
 end;
@@ -828,6 +860,8 @@ begin
   AddItem(GoMenu, rsFind, ShortCut(VK_F, [ssModifier]), @MenuFindClick);
   AddItem(GoMenu, rsFindNext, ShortCut(VK_G, [ssModifier]), @MenuFindNextClick);
   AddItem(GoMenu, rsFindPrev, ShortCut(VK_G, [ssModifier, ssShift]), @MenuFindPrevClick);
+  GoMenu.Add(NewLine);
+  AddItem(GoMenu, rsGoToDefinition, ShortCut(VK_F12, []), @MenuGoToDefinitionClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextChange, ShortCut(VK_F7, []), @MenuNextChangeClick);
   AddItem(GoMenu, rsPrevChange, ShortCut(VK_F7, [ssShift]), @MenuPrevChangeClick);
@@ -1202,21 +1236,43 @@ begin
   AEd.OptGutterWidthBookmarks := FBookmarkBandWidth;
 end;
 
+{ The width of one character of AEd's font, at its zoom, measured here:
+  the editor measures its own at its next paint, and the number band is
+  sized before that, when the change view of the first file is built
+  (the summary hides the editor until then) and on a zoom. Until then
+  the editor's TextCharSize is a placeholder, and a band sized from it
+  cuts the numbers once the editor applies it. }
+function EditorCharWidth(AEd: TATSynEdit): integer;
+var
+  Bmp: TBitmap;
+begin
+  Bmp := TBitmap.Create;
+  try
+    Bmp.Canvas.Font.Name := AEd.Font.Name;
+    if AEd.OptScaleFont > 0 then
+      Bmp.Canvas.Font.Size := AEd.Font.Size * AEd.OptScaleFont div 100
+    else
+      Bmp.Canvas.Font.Size := ATEditorScaleFont(AEd.Font.Size);
+    Result := Max(1, Bmp.Canvas.TextWidth(ATEditorOptions.SampleChar));
+  finally
+    Bmp.Free;
+  end;
+end;
+
 { The bookmark band holds the line numbers while the change view is shown:
   room for the widest number (its text has the trailing space) and one
   character of indent. The band width is reapplied by the editor on every
   update, so the option is set rather than the band. }
 procedure TForm1.UpdateNumberWidth(AEd: TATSynEdit);
 var
-  CharWidth, Widest, i: integer;
+  Widest, i: integer;
 begin
   if AEd.GutterDecor.Count = 0 then
     Exit;
   Widest := 0;
   for i := 0 to AEd.GutterDecor.Count - 1 do
     Widest := Max(Widest, Length(AEd.GutterDecor.ItemPtr(i)^.Data.TextAll));
-  CharWidth := AEd.TextCharSize.XScaled div ATEditorCharXScale;
-  AEd.OptGutterWidthBookmarks := (Widest + 1) * CharWidth;
+  AEd.OptGutterWidthBookmarks := (Widest + 1) * EditorCharWidth(AEd);
 end;
 
 { Zooming changes the character width the number band is sized from. The
@@ -1866,5 +1922,6 @@ end;
 
 {$I umain.diffview.inc}
 {$I umain.actions.inc}
+{$I umain.gotodef.inc}
 
 end.

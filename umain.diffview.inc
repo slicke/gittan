@@ -282,14 +282,23 @@ begin
   UpdateChangeNav;
 end;
 
-{ A click on a gap row opens it. The editor put the caret on the clicked
-  row on mouse down. }
+{ A click on a gap row opens it; Cmd+click (Ctrl+click elsewhere) goes
+  to the definition of the clicked word. The editor put the caret on the
+  clicked position on mouse down. }
 procedure TForm1.EditMouseUp(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: integer);
 var
   Row: integer;
 begin
-  if (Button <> mbLeft) or (FView <> gvChanges) then
+  if Button <> mbLeft then
+    Exit;
+  if ssModifier in Shift then
+  begin
+    if TATSynEdit(Sender).Carets[0].EndY < 0 then
+      GoToDefinition(TATSynEdit(Sender));
+    Exit;
+  end;
+  if FView <> gvChanges then
     Exit;
   Row := TATSynEdit(Sender).Carets[0].PosY;
   if (Row >= 0) and (Row <= High(FRows)) and (FRows[Row].Line = rowGap) then
