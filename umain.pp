@@ -33,6 +33,12 @@ type
   end;
   TGittanRows = array of TGittanRow;
 
+  {** The code tree of a changed file, kept in the symbol cache. }
+  TGittanFileSymbols = class
+  public
+    Items: TGittanSymbols;
+  end;
+
   { TForm1 }
 
   TForm1 = class(TForm)
@@ -71,10 +77,20 @@ type
     FNav: TGittanChangeNav;
     FNavUpdateQueued: boolean;
     FFindBar: TGittanFindBar;
-    { The symbol bar and the position of each symbol it lists. }
+    { The symbol bar and the symbols it lists; the code trees of the
+      other changed files, by relative path, parsed on the first need
+      and dropped by LoadRepository; and the word under the mouse, the
+      editor and row it is in, whether it is underlined as a link, and
+      the timer that shows its definition. }
     FSymbolBar: TGittanSymbolBar;
-    FSymbolNames: TStringList;
-    FSymbolPos: array of TPoint;
+    FSymbols: TGittanSymbols;
+    FSymbolCache: TStringList;
+    FHoverTimer: TTimer;
+    FHoverEd: TATSynEdit;
+    FHoverWord: string;
+    FHoverRow: integer;
+    FHoverLinked: boolean;
+    FLinkColor: TColor;
     FSummaryBox: TScrollBox;
     FSummary: TGittanSummary;
     FEditOld: TATSynEdit;
@@ -210,9 +226,11 @@ type
     procedure MenuNextFileClick(Sender: TObject);
     procedure MenuPrevFileClick(Sender: TObject);
     function StepFile(ANext: boolean): boolean;
-    function WordAtCaret(AEd: TATSynEdit): string;
-    function FindDefinition(AAdapter: TATAdapterEControl; const AWord: string;
-      ASkipRow: integer): TPoint;
+    function WordAt(AEd: TATSynEdit; APos: TPoint; out AStart, AEnd: integer): string;
+    function CodeTree(AAdapter: TATAdapterEControl; AEd: TATSynEdit): TGittanSymbols;
+    function FileSymbols(const ARelPath: string): TGittanFileSymbols;
+    function FindDefinition(AAdapter: TATAdapterEControl; AEd: TATSynEdit;
+      const AWord: string; ASkipRow: integer): TPoint;
     function ParseScratch(const AFileName: string; ALexer: TecSyntAnalyzer): TATAdapterEControl;
     procedure JumpToDefinition(AEd: TATSynEdit; APos: TPoint; const AWord: string);
     procedure GoToDefinition(AEd: TATSynEdit);
@@ -220,8 +238,11 @@ type
     procedure MenuGoToSymbolClick(Sender: TObject);
     procedure SymbolBarPick(Sender: TObject; AIndex: integer);
     procedure SymbolBarClose(Sender: TObject);
-    procedure CollectSymbols(AAdapter: TATAdapterEControl; ANames: TStrings;
-      out ADepths: TIntegerDynArray);
+    procedure EditMouseMove(Sender: TObject; Shift: TShiftState; X, Y: integer);
+    procedure EditMouseLeave(Sender: TObject);
+    procedure HoverTimerTimer(Sender: TObject);
+    procedure ClearHover;
+    function RowLabel(AEd: TATSynEdit; ARow: integer): string;
     procedure AdapterParseBegin(Sender: TObject);
     procedure AdapterParseDone(Sender: TObject; ATime: integer);
     function NeighbourFile(ANext: boolean): TTreeNode;
@@ -348,6 +369,11 @@ const
     an added or a deleted line. }
   tagWordAdded = 1;
   tagWordDeleted = 2;
+  { The attribute that underlines the word under the mouse while Cmd is
+    held, as a link to its definition. }
+  tagHoverLink = 3;
+  { How long the mouse rests on a word before its definition is shown. }
+  HoverPause = 600;
   { Row kinds in TGittanRow.Line. }
   rowGap = -1;
   rowFiller = -2;
@@ -438,7 +464,12 @@ begin
   FFindBar.OnSearch := @FindBarSearch;
   FFindBar.OnClose := @FindBarClose;
   { The symbol bar sits under the find bar. }
-  FSymbolNames := TStringList.Create;
+  FSymbolCache := TStringList.Create;
+  FSymbolCache.OwnsObjects := True;
+  FHoverTimer := TTimer.Create(Self);
+  FHoverTimer.Enabled := False;
+  FHoverTimer.Interval := HoverPause;
+  FHoverTimer.OnTimer := @HoverTimerTimer;
   FSymbolBar := TGittanSymbolBar.Create(Self);
   FSymbolBar.Parent := EditorPanel;
   FSymbolBar.Top := FHeader.Height + FFindBar.Height;
@@ -513,7 +544,7 @@ begin
   FreeAndNil(FRepo);
   FreeAndNil(FAppIcon);
   FreeAndNil(FChangeLines);
-  FreeAndNil(FSymbolNames);
+  FreeAndNil(FSymbolCache);
   FreeAndNil(FSettings);
 end;
 
@@ -537,6 +568,10 @@ begin
   AEd.OnChangeZoom := @EditChangeZoom;
   AEd.OnCalcBookmarkColor := @EditCalcBookmarkColor;
   AEd.OnMouseUp := @EditMouseUp;
+  { The word under the mouse shows its definition (see EditMouseMove). }
+  AEd.OnMouseMove := @EditMouseMove;
+  AEd.OnMouseLeave := @EditMouseLeave;
+  AEd.ShowHint := True;
   AEd.OnScroll := @EditorScroll;
   AEd.OnMouseWheel := @EditMouseWheel;
   { The fold band is hidden: in a viewer the fold icons are noise, and
@@ -669,6 +704,7 @@ begin
     FPullBorder := RGBToColor(85, 85, 86);
     FPullText := RGBToColor(200, 200, 200);
     FPullBar := RGBToColor(40, 80, 130);
+    FLinkColor := RGBToColor(78, 161, 255);
   end
   else
   begin
@@ -687,6 +723,7 @@ begin
     FPullBorder := RGBToColor(205, 205, 205);
     FPullText := RGBToColor(70, 70, 70);
     FPullBar := RGBToColor(205, 225, 250);
+    FLinkColor := RGBToColor(0, 102, 204);
   end;
   FSummaryBox.Color := Edit.Colors.TextBG;
   if FDark then
@@ -1524,6 +1561,8 @@ begin
   Result := FRepo.ChangeStats(Stats);
   if not Result then
     FLoadError := FRepo.Error;
+  { The files may have changed. }
+  FSymbolCache.Clear;
   FStats := Stats;
   FBranch := FRepo.Branch;
   FFileCount := Length(Stats);

@@ -14,6 +14,16 @@ unit gittan.symbols;
 
 interface
 
+type
+  {** A symbol of a file's code tree: its name, the row and column of
+    its name (0-based), its nesting depth, and the text of its row. }
+  TGittanSymbol = record
+    Name: string;
+    Row, Col, Depth: integer;
+    Line: string;
+  end;
+  TGittanSymbols = array of TGittanSymbol;
+
 const
   { The ranks SymbolRank answers; a higher one is a better match. }
   srNone = 0;
@@ -23,6 +33,12 @@ const
 
 {** How well the code tree name AName stands for the word AWord. }
 function SymbolRank(const AName, AWord: string): integer;
+
+{** The index in ASymbols of the symbol that best stands for AWord (see
+  SymbolRank), the first among equals, leaving out those on row ASkipRow;
+  -1 when none does. }
+function BestSymbol(const ASymbols: TGittanSymbols; const AWord: string;
+  ASkipRow: integer): integer;
 
 {** The identifier that names the symbol in the code tree name AName:
   the last one before the first parenthesis ("foo" in "func foo(int a)",
@@ -73,6 +89,26 @@ begin
       Rank := srNameIgnoringCase;
     if Rank > Result then
       Result := Rank;
+  end;
+end;
+
+function BestSymbol(const ASymbols: TGittanSymbols; const AWord: string;
+  ASkipRow: integer): integer;
+var
+  i, Rank, Best: integer;
+begin
+  Result := -1;
+  Best := srNone;
+  for i := 0 to High(ASymbols) do
+  begin
+    if ASymbols[i].Row = ASkipRow then
+      Continue;
+    Rank := SymbolRank(ASymbols[i].Name, AWord);
+    if Rank > Best then
+    begin
+      Best := Rank;
+      Result := i;
+    end;
   end;
 end;
 

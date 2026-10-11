@@ -1,15 +1,18 @@
 { ---------------------------------------------------------------------------
-  Go to Definition, Go to Symbol
+  Go to Definition, Go to Symbol, hover
   ---------------------------------------------------------------------------
   Included by umain.pp. The lexer's code tree (the ranges EControl marks
   DisplayInTree: functions, methods, classes, sections) is the only
-  symbol table there is: a word is looked up among the names of those
-  ranges, in the text the caret is in first and then in the other
-  changed files of the repository, each parsed by a hidden editor with
-  its own adapter. A hit in another file selects it in the tree, which
-  shows it, and the lookup runs again on the text the editor shows, so
-  the rows of the change view (deleted lines kept, unchanged lines
-  hidden) need no mapping. }
+  symbol table there is. CodeTree reads it from an adapter as a flat
+  list of symbols (gittan.symbols). A word is looked up among them, in
+  the text the caret or mouse is in first and then in the other changed
+  files of the repository, each parsed once by a hidden editor with its
+  own adapter and kept in FSymbolCache until the repository is loaded
+  again. A hit in another file selects it in the tree, which shows it,
+  and the lookup runs again on the text the editor shows, so the rows of
+  the change view (deleted lines kept, unchanged lines hidden) need no
+  mapping. The word under the mouse shows its definition's line in a
+  hint after a pause, and is underlined as a link while Cmd is held. }
 
 const
   { How long one parse may take before the lookup gives up on it. }
@@ -45,24 +48,22 @@ begin
   end;
 end;
 
-{ The word under the first caret of AEd (the word before the caret when
-  the caret is right after one), as the editor's word jumping sees it. }
-function TForm1.WordAtCaret(AEd: TATSynEdit): string;
+{ The word at APos in AEd (the word before it when APos is right after
+  one), as the editor's word jumping sees it, with its bounds on the
+  line. }
+function TForm1.WordAt(AEd: TATSynEdit; APos: TPoint; out AStart, AEnd: integer): string;
 var
-  Caret: TATCaretItem;
   S: UnicodeString;
-  N1, N2: integer;
 begin
   Result := '';
-  if AEd.Carets.Count = 0 then
+  AStart := 0;
+  AEnd := 0;
+  if not AEd.Strings.IsIndexValid(APos.Y) then
     Exit;
-  Caret := AEd.Carets[0];
-  if not AEd.Strings.IsIndexValid(Caret.PosY) then
-    Exit;
-  S := AEd.Strings.Lines[Caret.PosY];
-  SFindWordBounds(S, Caret.PosX, N1, N2, AEd.OptNonWordChars);
-  if N2 > N1 then
-    Result := UTF8Encode(Copy(S, N1 + 1, N2 - N1));
+  S := AEd.Strings.Lines[APos.Y];
+  SFindWordBounds(S, APos.X, AStart, AEnd, AEd.OptNonWordChars);
+  if AEnd > AStart then
+    Result := UTF8Encode(Copy(S, AStart + 1, AEnd - AStart));
 end;
 
 { Whether R is a range the lexer shows in its code tree, as CudaText
@@ -73,60 +74,74 @@ begin
     (R.Rule.SyntOwner.LexerName = Client.Owner.LexerName);
 end;
 
-{ The name of R in the code tree, on one line. }
-function RangeName(Client: TecClientSyntAnalyzer; R: TecTextRange): string;
-begin
-  Result := Trim(UTF8Encode(Client.GetRangeName(R, Client.PublicData.Tokens)));
-  Result := StringReplace(Result, #13, ' ', [rfReplaceAll]);
-  Result := StringReplace(Result, #10, ' ', [rfReplaceAll]);
-end;
-
-{ The position (0-based column and row) of R: its identifier token (the
-  name in its header), else its first token. }
-function RangePos(Client: TecClientSyntAnalyzer; R: TecTextRange): TPoint;
-begin
-  if R.IdentIdx >= 0 then
-    Result := Client.PublicData.Tokens._GetItemPtr(R.IdentIdx)^.Range.PointStart
-  else
-    Result := Client.PublicData.Tokens._GetItemPtr(R.StartIdx)^.Range.PointStart;
-end;
-
-{ The position of the best range of AAdapter's code tree named for
-  AWord, Y = -1 when there is none. A range at row ASkipRow is left out,
-  so a lookup from the definition itself goes on to the other files. }
-function TForm1.FindDefinition(AAdapter: TATAdapterEControl; const AWord: string;
-  ASkipRow: integer): TPoint;
+{ The code tree of AAdapter's text, which AEd shows, as a flat list in
+  file order: each range's name on one line, the position of its
+  identifier token (the name in its header, else its first token), its
+  nesting depth and the text of its row. Waits for the parse. }
+function TForm1.CodeTree(AAdapter: TATAdapterEControl; AEd: TATSynEdit): TGittanSymbols;
 var
   Client: TecClientSyntAnalyzer;
-  R: TecTextRange;
-  i, Rank, Best: integer;
+  R, Outer: TecTextRange;
+  Title: string;
   P: TPoint;
+  i, Count: integer;
 begin
-  Result := Point(0, -1);
+  Result := nil;
   Client := AAdapter.AnClient;
   if Client = nil then
     Exit;
   WaitForParse(AAdapter);
-  Best := srNone;
+  Count := 0;
   Client.CriSecForData.Enter;
   try
+    SetLength(Result, Client.PublicData.FoldRanges.Count);
     for i := 0 to Client.PublicData.FoldRanges.Count - 1 do
     begin
       R := TecTextRange(Client.PublicData.FoldRanges[i]);
       if not InCodeTree(Client, R) then
         Continue;
-      Rank := SymbolRank(RangeName(Client, R), AWord);
-      if Rank <= Best then
-        Continue;
-      P := RangePos(Client, R);
-      if P.Y = ASkipRow then
-        Continue;
-      Best := Rank;
-      Result := P;
+      Title := Trim(UTF8Encode(Client.GetRangeName(R, Client.PublicData.Tokens)));
+      Title := StringReplace(Title, #13, ' ', [rfReplaceAll]);
+      Result[Count].Name := StringReplace(Title, #10, ' ', [rfReplaceAll]);
+      if R.IdentIdx >= 0 then
+        P := Client.PublicData.Tokens._GetItemPtr(R.IdentIdx)^.Range.PointStart
+      else
+        P := Client.PublicData.Tokens._GetItemPtr(R.StartIdx)^.Range.PointStart;
+      Result[Count].Row := P.Y;
+      Result[Count].Col := P.X;
+      if AEd.Strings.IsIndexValid(P.Y) then
+        Result[Count].Line := UTF8Encode(AEd.Strings.Lines[P.Y]);
+      Result[Count].Depth := 0;
+      Outer := R.Parent;
+      while Outer <> nil do
+      begin
+        if InCodeTree(Client, Outer) then
+          Inc(Result[Count].Depth);
+        Outer := Outer.Parent;
+      end;
+      Inc(Count);
     end;
   finally
     Client.CriSecForData.Leave;
   end;
+  SetLength(Result, Count);
+end;
+
+{ The position of the best symbol of AAdapter's code tree named for
+  AWord, Y = -1 when there is none. A symbol at row ASkipRow is left
+  out, so a lookup from the definition itself goes on to the other
+  files. }
+function TForm1.FindDefinition(AAdapter: TATAdapterEControl; AEd: TATSynEdit;
+  const AWord: string; ASkipRow: integer): TPoint;
+var
+  Symbols: TGittanSymbols;
+  i: integer;
+begin
+  Result := Point(0, -1);
+  Symbols := CodeTree(AAdapter, AEd);
+  i := BestSymbol(Symbols, AWord, ASkipRow);
+  if i >= 0 then
+    Result := Point(Symbols[i].Col, Symbols[i].Row);
 end;
 
 { Parses the file at AFileName with ALexer in the hidden editor, made on
@@ -148,6 +163,27 @@ begin
   FScratch.FileName := AFileName;
   SetEditorLexer(FScratch, ALexer);
   Result := FScratchAdapter;
+end;
+
+{ The code tree of the changed file ARelPath as it is in the work tree,
+  from the cache or parsed now; nil for a file that is gone or has no
+  lexer. The cache keeps an entry without symbols for those, so they
+  are not tried again. }
+function TForm1.FileSymbols(const ARelPath: string): TGittanFileSymbols;
+var
+  i: integer;
+  FullPath: string;
+  Lexer: TecSyntAnalyzer;
+begin
+  i := FSymbolCache.IndexOf(ARelPath);
+  if i >= 0 then
+    Exit(TGittanFileSymbols(FSymbolCache.Objects[i]));
+  Result := TGittanFileSymbols.Create;
+  FSymbolCache.AddObject(ARelPath, Result);
+  FullPath := IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(ARelPath);
+  Lexer := FLexers.ForFile(ARelPath, FRepo.Root);
+  if (Lexer <> nil) and FileExists(FullPath) then
+    Result.Items := CodeTree(ParseScratch(FullPath, Lexer), FScratch);
 end;
 
 { The 0-based offset of AWord as a whole word in S, ignoring case, or
@@ -186,7 +222,7 @@ begin
         (FRows[APos.Y].Line <= FRows[i].GapTo) then
       begin
         ExpandGap(FRows[i].GapFrom, FRows[i].GapTo);
-        APos := FindDefinition(FAdapter, AWord, -1);
+        APos := FindDefinition(FAdapter, Edit, AWord, -1);
         if APos.Y < 0 then
           Exit;
         Break;
@@ -224,17 +260,20 @@ end;
   of the repository. }
 procedure TForm1.GoToDefinition(AEd: TATSynEdit);
 var
-  Word, RelPath, FullPath: string;
+  Word, RelPath: string;
   P: TPoint;
   Node: TTreeNode;
-  Lexer: TecSyntAnalyzer;
+  Caret: TATCaretItem;
+  N1, N2: integer;
+  Symbols: TGittanFileSymbols;
 begin
-  if not AEd.Visible then
+  if not AEd.Visible or (AEd.Carets.Count = 0) then
     Exit;
-  Word := WordAtCaret(AEd);
+  Caret := AEd.Carets[0];
+  Word := WordAt(AEd, Point(Caret.PosX, Caret.PosY), N1, N2);
   if Word = '' then
     Exit;
-  P := FindDefinition(AdapterOf(AEd), Word, AEd.Carets[0].PosY);
+  P := FindDefinition(AdapterOf(AEd), AEd, Word, Caret.PosY);
   if (P.Y >= 0) and not AEd.IsLineFolded(P.Y) then
   begin
     JumpToDefinition(AEd, P, Word);
@@ -242,7 +281,7 @@ begin
   end;
   if AEd = FEditOld then
   begin
-    P := FindDefinition(FAdapter, Word, -1);
+    P := FindDefinition(FAdapter, Edit, Word, -1);
     if P.Y >= 0 then
     begin
       JumpToDefinition(Edit, P, Word);
@@ -263,16 +302,14 @@ begin
       if Node.Data <> nil then
       begin
         RelPath := Node.GetTextPath;
-        FullPath := IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(RelPath);
-        Lexer := FLexers.ForFile(RelPath, FRepo.Root);
-        if (RelPath <> FCurrentPath) and (Lexer <> nil) and FileExists(FullPath) then
+        if RelPath <> FCurrentPath then
         begin
-          P := FindDefinition(ParseScratch(FullPath, Lexer), Word, -1);
-          if P.Y >= 0 then
+          Symbols := FileSymbols(RelPath);
+          if BestSymbol(Symbols.Items, Word, -1) >= 0 then
           begin
             FileTree.Selected := Node;
             Node.MakeVisible;
-            P := FindDefinition(FAdapter, Word, -1);
+            P := FindDefinition(FAdapter, Edit, Word, -1);
             if P.Y >= 0 then
               JumpToDefinition(Edit, P, Word);
             Exit;
@@ -293,67 +330,38 @@ begin
     GoToDefinition(Edit);
 end;
 
-{ The code tree of AAdapter's text as a flat list: the name of every
-  range in file order with its nesting depth, and the position of each in
-  FSymbolPos. }
-procedure TForm1.CollectSymbols(AAdapter: TATAdapterEControl; ANames: TStrings;
-  out ADepths: TIntegerDynArray);
-var
-  Client: TecClientSyntAnalyzer;
-  R, Outer: TecTextRange;
-  i, Depth: integer;
-begin
-  ANames.Clear;
-  ADepths := nil;
-  FSymbolPos := nil;
-  Client := AAdapter.AnClient;
-  if Client = nil then
-    Exit;
-  WaitForParse(AAdapter);
-  Client.CriSecForData.Enter;
-  try
-    for i := 0 to Client.PublicData.FoldRanges.Count - 1 do
-    begin
-      R := TecTextRange(Client.PublicData.FoldRanges[i]);
-      if not InCodeTree(Client, R) then
-        Continue;
-      Depth := 0;
-      Outer := R.Parent;
-      while Outer <> nil do
-      begin
-        if InCodeTree(Client, Outer) then
-          Inc(Depth);
-        Outer := Outer.Parent;
-      end;
-      ANames.Add(RangeName(Client, R));
-      SetLength(ADepths, Length(ADepths) + 1);
-      ADepths[High(ADepths)] := Depth;
-      SetLength(FSymbolPos, Length(FSymbolPos) + 1);
-      FSymbolPos[High(FSymbolPos)] := RangePos(Client, R);
-    end;
-  finally
-    Client.CriSecForData.Leave;
-  end;
-end;
-
 { Go > Go to Symbol: lists the symbols of the shown file in the symbol
   bar. }
 procedure TForm1.MenuGoToSymbolClick(Sender: TObject);
 var
+  Names: TStringList;
   Depths: TIntegerDynArray;
+  i: integer;
 begin
   if not Edit.Visible then
     Exit;
-  CollectSymbols(FAdapter, FSymbolNames, Depths);
-  FSymbolBar.SetSymbols(FSymbolNames, Depths);
+  FSymbols := CodeTree(FAdapter, Edit);
+  Names := TStringList.Create;
+  try
+    SetLength(Depths, Length(FSymbols));
+    for i := 0 to High(FSymbols) do
+    begin
+      Names.Add(FSymbols[i].Name);
+      Depths[i] := FSymbols[i].Depth;
+    end;
+    FSymbolBar.SetSymbols(Names, Depths);
+  finally
+    Names.Free;
+  end;
   FSymbolBar.Activate;
 end;
 
 procedure TForm1.SymbolBarPick(Sender: TObject; AIndex: integer);
 begin
   SymbolBarClose(Sender);
-  if (AIndex >= 0) and (AIndex <= High(FSymbolPos)) then
-    JumpToDefinition(Edit, FSymbolPos[AIndex], NameIdentifier(FSymbolNames[AIndex]));
+  if (AIndex >= 0) and (AIndex <= High(FSymbols)) then
+    JumpToDefinition(Edit, Point(FSymbols[AIndex].Col, FSymbols[AIndex].Row),
+      NameIdentifier(FSymbols[AIndex].Name));
 end;
 
 procedure TForm1.SymbolBarClose(Sender: TObject);
@@ -361,4 +369,163 @@ begin
   FSymbolBar.Visible := False;
   if Edit.Visible and Edit.CanFocus then
     Edit.SetFocus;
+end;
+
+{ ---------------------------------------------------------------------------
+  Hover
+  --------------------------------------------------------------------------- }
+
+{ The number the gutter shows for ARow: the change view's own (the decor
+  text, see SetRowNumbers), else the editor's. }
+function TForm1.RowLabel(AEd: TATSynEdit; ARow: integer): string;
+var
+  i: integer;
+begin
+  for i := 0 to AEd.GutterDecor.Count - 1 do
+    if AEd.GutterDecor.ItemPtr(i)^.Data.LineNum = ARow then
+      Exit(Trim(AEd.GutterDecor.ItemPtr(i)^.Data.TextAll));
+  Result := IntToStr(ARow + 1);
+end;
+
+{ Forgets the word under the mouse: the hint, the timer and the link
+  underline. }
+procedure TForm1.ClearHover;
+begin
+  FHoverTimer.Enabled := False;
+  if FHoverEd <> nil then
+  begin
+    Application.CancelHint;
+    FHoverEd.Hint := '';
+    if FHoverLinked then
+    begin
+      FHoverEd.Attribs.DeleteWithTag(tagHoverLink);
+      FHoverEd.Cursor := crDefault;
+      FHoverEd.Invalidate;
+    end;
+  end;
+  FHoverLinked := False;
+  FHoverWord := '';
+  FHoverEd := nil;
+end;
+
+{ Follows the mouse over the text: a new word under it starts the hover
+  timer over; with Cmd (Ctrl elsewhere) held the word is underlined and
+  the cursor is a hand, as a link to its definition. }
+procedure TForm1.EditMouseMove(Sender: TObject; Shift: TShiftState; X, Y: integer);
+var
+  Ed: TATSynEdit;
+  Details: TATEditorPosDetails;
+  P: TPoint;
+  Word: string;
+  N1, N2: integer;
+  Part: TATLinePart;
+  Link: boolean;
+begin
+  Ed := TATSynEdit(Sender);
+  P := Ed.ClientPosToCaretPos(ATPoint(X, Y), Details);
+  Word := '';
+  if (P.Y >= 0) and not Details.BelowAllText and not Details.EndOfWrappedLine and
+    (Details.OnGapItem = nil) then
+    Word := WordAt(Ed, P, N1, N2);
+  if (Word <> FHoverWord) or (Ed <> FHoverEd) or (P.Y <> FHoverRow) then
+  begin
+    ClearHover;
+    if Word = '' then
+      Exit;
+    FHoverEd := Ed;
+    FHoverWord := Word;
+    FHoverRow := P.Y;
+    FHoverTimer.Enabled := True;
+  end;
+  Link := (ssModifier in Shift) and (Word <> '');
+  if Link <> FHoverLinked then
+  begin
+    FHoverLinked := Link;
+    if Link then
+    begin
+      InitLinePart(Part);
+      Part.ColorFont := FLinkColor;
+      Part.ColorBorder := FLinkColor;
+      Part.BorderDown := TATLineStyle.Solid;
+      Ed.Attribs.Add(Point(N1, P.Y), Point(N2 - N1, 0),
+        TATMarkerTags.Init(tagHoverLink, 0), @Part);
+      Ed.Cursor := crHandPoint;
+    end
+    else
+    begin
+      Ed.Attribs.DeleteWithTag(tagHoverLink);
+      Ed.Cursor := crDefault;
+    end;
+    Ed.Invalidate;
+  end;
+end;
+
+procedure TForm1.EditMouseLeave(Sender: TObject);
+begin
+  if Sender = FHoverEd then
+    ClearHover;
+end;
+
+{ The mouse has rested on a word: its definition, in the text under the
+  mouse first (skipping the word's own row, so a definition shows no
+  hint for itself), then in the new side when the mouse is on the old
+  one, then in the other changed files, is shown as a hint: where it
+  is, and the line that defines it. }
+procedure TForm1.HoverTimerTimer(Sender: TObject);
+var
+  Ed: TATSynEdit;
+  Word, Where, Line, RelPath: string;
+  P: TPoint;
+  Node: TTreeNode;
+  Symbols: TGittanFileSymbols;
+  i: integer;
+begin
+  FHoverTimer.Enabled := False;
+  Ed := FHoverEd;
+  Word := FHoverWord;
+  if (Ed = nil) or (Word = '') or not Ed.Visible then
+    Exit;
+  Where := '';
+  P := FindDefinition(AdapterOf(Ed), Ed, Word, FHoverRow);
+  if (P.Y < 0) and (Ed = FEditOld) then
+  begin
+    Ed := Edit;
+    P := FindDefinition(FAdapter, Edit, Word, -1);
+  end;
+  if P.Y >= 0 then
+  begin
+    if FCurrentPath <> '' then
+      Where := ExtractFileName(FCurrentPath)
+    else
+      Where := ExtractFileName(Edit.FileName);
+    Where := Format('%s:%s', [Where, RowLabel(Ed, P.Y)]);
+    Line := UTF8Encode(Ed.Strings.Lines[P.Y]);
+  end
+  else if FRepo.Root <> '' then
+  begin
+    Node := FileTree.Items.GetFirstNode;
+    while (Node <> nil) and (Where = '') do
+    begin
+      if Node.Data <> nil then
+      begin
+        RelPath := Node.GetTextPath;
+        if RelPath <> FCurrentPath then
+        begin
+          Symbols := FileSymbols(RelPath);
+          i := BestSymbol(Symbols.Items, Word, -1);
+          if i >= 0 then
+          begin
+            Where := Format('%s:%d', [RelPath, Symbols.Items[i].Row + 1]);
+            Line := Symbols.Items[i].Line;
+          end;
+        end;
+      end;
+      Node := Node.GetNext;
+    end;
+  end;
+  { The mouse may have moved on while the files were parsed. }
+  if (Where = '') or (FHoverEd = nil) or (FHoverWord <> Word) then
+    Exit;
+  FHoverEd.Hint := Where + LineEnding + Trim(Line);
+  Application.ActivateHint(Mouse.CursorPos);
 end;

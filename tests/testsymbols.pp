@@ -18,6 +18,7 @@ type
     procedure TestCaseRanks;
     procedure TestEmpty;
     procedure TestNameIdentifier;
+    procedure TestBestSymbol;
   end;
 
 implementation
@@ -64,6 +65,25 @@ begin
   AssertEquals('anon', NameIdentifier('func <anon>()'));
   AssertEquals('', NameIdentifier('<>()'));
   AssertEquals('', NameIdentifier(''));
+end;
+
+procedure TSymbolsTest.TestBestSymbol;
+var
+  S: TGittanSymbols;
+begin
+  SetLength(S, 3);
+  S[0].Name := 'foo(int bar)';
+  S[0].Row := 1;
+  S[1].Name := 'TFoo.Bar';
+  S[1].Row := 5;
+  S[2].Name := 'bar';
+  S[2].Row := 9;
+  AssertEquals(1, BestSymbol(S, 'Bar', -1));
+  AssertEquals(2, BestSymbol(S, 'bar', -1));
+  AssertEquals(1, BestSymbol(S, 'bar', 9));
+  AssertEquals(0, BestSymbol(S, 'foo', -1));
+  AssertEquals(-1, BestSymbol(S, 'baz', -1));
+  AssertEquals(-1, BestSymbol(nil, 'bar', -1));
 end;
 
 initialization
