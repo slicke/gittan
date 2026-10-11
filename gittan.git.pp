@@ -125,8 +125,12 @@ uses
 { ---------------------------------------------------------------------------
   Running git
   ---------------------------------------------------------------------------
-  git is found on PATH. stderr goes into the same string as stdout, so on
-  failure the output is the error message and is kept in FError. git gets
+  git is found on PATH. stderr is read apart from stdout: git warns there
+  about things that are not failures (with core.autocrlf on, every diff
+  of a file with LF line endings says they will be replaced), and a
+  warning must not be taken for output. On failure the error message is
+  kept in FError: what came on stderr, or on stdout when stderr had
+  nothing. git gets
   the environment of Gittan with LC_ALL set to C, so its messages come in
   English whatever the user's locale and the few that are matched on can
   be relied upon, and with prompts turned off, since nobody could answer
@@ -155,7 +159,7 @@ begin
     end;
     P.Environment.Add('LC_ALL=C');
     P.Environment.Add('GIT_TERMINAL_PROMPT=0');
-    P.Options := [poStderrToOutPut, poNoConsole];
+    P.Options := [poNoConsole];
     if P.RunCommandLoop(AOutput, Err, Status) <> 0 then
     begin
       FError := 'Could not run git. Is it installed?';
@@ -167,7 +171,9 @@ begin
   Result := Status = 0;
   if not Result then
   begin
-    FError := Trim(AOutput);
+    FError := Trim(Err);
+    if FError = '' then
+      FError := Trim(AOutput);
     AOutput := '';
   end;
 end;
