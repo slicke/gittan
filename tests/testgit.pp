@@ -44,6 +44,12 @@ implementation
 uses
   Process;
 
+const
+  { A name git quotes C-style in its line output, to check that the -z
+    forms come through as they are. Windows forbids a quote in a file
+    name, so there the test settles for an apostrophe. }
+  QuoteName = {$ifdef MSWINDOWS}'q''uote.txt'{$else}'q"uote.txt'{$endif};
+
 procedure RemoveTree(const ADir: string);
 var
   Info: TSearchRec;
@@ -127,7 +133,7 @@ begin
   Git(['init', '-q']);
   WriteFile('a.txt', 'one'#10'two'#10'three'#10);
   WriteFile('dir sp/fil å.txt', 'a'#10);
-  WriteFile('q"uote.txt', 'x'#10);
+  WriteFile(QuoteName, 'x'#10);
   WriteFile('del.txt', 'gone'#10);
   WriteFile('staged.txt', 'old'#10);
   Commit('files');
@@ -218,7 +224,7 @@ begin
   MakeHistory;
   WriteFile('a.txt', 'one'#10'zwei'#10'three'#10);
   Git(['mv', 'dir sp/fil å.txt', 'dir sp/ny.txt']);
-  WriteFile('q"uote.txt', 'x'#10'y'#10);
+  WriteFile(QuoteName, 'x'#10'y'#10);
   Git(['rm', '-q', 'del.txt']);
   WriteFile('staged.txt', 'new'#10);
   Git(['add', 'staged.txt']);
@@ -241,7 +247,7 @@ begin
   AssertTrue(S.Staged);
   AssertEquals('the new path of a rename gets the counts', 1, S.Added);
 
-  S := FindStat(Stats, 'q"uote.txt');
+  S := FindStat(Stats, QuoteName);
   AssertTrue(S.Kind = ckModified);
   AssertEquals(1, S.Added);
   AssertEquals(0, S.Deleted);
