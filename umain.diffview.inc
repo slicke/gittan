@@ -172,7 +172,7 @@ procedure TForm1.FillChangeEditor(AEd: TATSynEdit; const ARows: TGittanRows;
 var
   Lines: TStringList;
   Numbers, Kinds: TIntegerDynArray;
-  i, Count: integer;
+  i, Down, Up, All: integer;
   Marker: char;
   Hidden: boolean;
 begin
@@ -181,13 +181,7 @@ begin
     for i := 0 to High(ARows) do
       case ARows[i].Line of
         rowGap:
-          begin
-            Count := ARows[i].GapTo - ARows[i].GapFrom + 1;
-            if Count = 1 then
-              Lines.Add(rsGapLine)
-            else
-              Lines.Add(Format(rsGapLines, [Count]));
-          end;
+          Lines.Add(GapRowText(ARows[i].GapTo - ARows[i].GapFrom + 1, Down, Up, All));
         rowFiller: Lines.Add('');
         else
           Lines.Add(Copy(FChangeLines[ARows[i].Line], 2, MaxInt));
@@ -263,6 +257,35 @@ begin
     Inc(Result);
 end;
 
+{ The text of a gap row standing for ACount hidden lines: how many, and
+  for a run longer than GapStep the three ways to open it, each a few
+  lines on: ADown opens the first GapStep lines (the text above goes on
+  down), AUp the last ones (the text below goes on up), AAll the whole
+  run. The three are the columns the labels start at, in UTF-16 units
+  as the editor counts them, or -1 for a short run, where a click
+  anywhere opens it. }
+function TForm1.GapRowText(ACount: integer; out ADown, AUp, AAll: integer): string;
+const
+  Sep = '   ';
+begin
+  if ACount = 1 then
+    Result := rsGapLine
+  else
+    Result := Format(rsGapLines, [ACount]);
+  ADown := -1;
+  AUp := -1;
+  AAll := -1;
+  if ACount <= GapStep then
+    Exit;
+  Result := Result + Sep;
+  ADown := Length(UTF8Decode(Result));
+  Result := Result + Format(rsGapDown, [GapStep]) + Sep;
+  AUp := Length(UTF8Decode(Result));
+  Result := Result + Format(rsGapUp, [GapStep]) + Sep;
+  AAll := Length(UTF8Decode(Result));
+  Result := Result + rsGapAll;
+end;
+
 { Opens the hidden lines AFrom..ATo of the diff: the view is rebuilt with
   them kept, at the same scroll position. }
 procedure TForm1.ExpandGap(AFrom, ATo: integer);
@@ -282,13 +305,14 @@ begin
   UpdateChangeNav;
 end;
 
-{ A click on a gap row opens it; Cmd+click (Ctrl+click elsewhere) goes
-  to the definition of the clicked word. The editor put the caret on the
-  clicked position on mouse down. }
+{ A click on a gap row opens it: on one of its labels (see GapRowText)
+  the first or the last GapStep lines, elsewhere the whole run. Cmd+click
+  (Ctrl+click elsewhere) goes to the definition of the clicked word.
+  The editor put the caret on the clicked position on mouse down. }
 procedure TForm1.EditMouseUp(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: integer);
 var
-  Row: integer;
+  Row, Col, From, To_, Down, Up, All: integer;
 begin
   if Button <> mbLeft then
     Exit;
@@ -301,9 +325,22 @@ begin
   if FView <> gvChanges then
     Exit;
   Row := TATSynEdit(Sender).Carets[0].PosY;
-  if (Row >= 0) and (Row <= High(FRows)) and (FRows[Row].Line = rowGap) then
-    ExpandGap(FRows[Row].GapFrom, FRows[Row].GapTo);
+  if (Row < 0) or (Row > High(FRows)) or (FRows[Row].Line <> rowGap) then
+    Exit;
+  From := FRows[Row].GapFrom;
+  To_ := FRows[Row].GapTo;
+  Col := TATSynEdit(Sender).Carets[0].PosX;
+  GapRowText(To_ - From + 1, Down, Up, All);
+  if (All >= 0) and (Col < All) then
+  begin
+    if Col >= Up then
+      From := To_ - GapStep + 1
+    else if Col >= Down then
+      To_ := From + GapStep - 1;
+  end;
+  ExpandGap(From, To_);
 end;
+
 
 { The two sides scroll together. The event fires after a paint, so the
   other side is moved only when it differs; its own event then finds

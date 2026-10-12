@@ -199,7 +199,9 @@ type
       AOldSide: boolean; const AOldNum, ANewNum: TIntegerDynArray;
       ALexer: TecSyntAnalyzer);
     function VisibleRow(ARow: integer): integer;
+    function GapRowText(ACount: integer; out ADown, AUp, AAll: integer): string;
     procedure ExpandGap(AFrom, ATo: integer);
+
     procedure EditMouseUp(Sender: TObject; Button: TMouseButton; Shift: TShiftState;
       X, Y: integer);
     procedure EditorScroll(Sender: TObject);
@@ -373,6 +375,9 @@ resourcestring
   rsNoLongerChanged = '%s has no changes any more.';
   rsGapLines = '⋯  %d unchanged lines  ⋯';
   rsGapLine = '⋯  1 unchanged line  ⋯';
+  rsGapDown = '↓ %d';
+  rsGapUp = '↑ %d';
+  rsGapAll = 'all';
   rsPullNext = 'Next: %s  ↓';
 
 const
@@ -409,6 +414,9 @@ const
   { Row kinds in TGittanRow.Line. }
   rowGap = -1;
   rowFiller = -2;
+  { How many hidden lines a gap row's labels open at a time. }
+  GapStep = 20;
+
   { How often the watcher asks git whether the repository changed. }
   WatchInterval = 2000;
   { The choices of View > Context Lines. }
