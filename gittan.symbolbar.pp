@@ -2,10 +2,12 @@ unit gittan.symbolbar;
 
 {** The symbol bar: a row under the file header with a filter field and
   a list of the symbols of the shown file (the functions, methods and
-  classes of the lexer's code tree, indented by nesting). Typing filters
-  the list, Up and Down move in it, Enter or a double click picks: the
-  bar raises OnPick with the symbol's index in the list SetSymbols got,
-  and OnClose for Escape or the cross. It knows nothing about the text.
+  classes of the lexer's code tree, indented by nesting), or of the
+  whole repository, each with where it is. Typing filters the list, the
+  names matched at a word start first, Up and Down move in it, Enter or
+  a double click picks: the bar raises OnPick with the symbol's index in
+  the list SetSymbols got, and OnClose for Escape or the cross. It knows
+  nothing about the text.
 
   The field and the list are native controls so typing, scrolling and
   the keyboard work as the desktop expects; the row paints itself in the
@@ -27,7 +29,7 @@ type
   private
     FEdit: TEdit;
     FList: TListBox;
-    FNames: TStringList;
+    FNames, FDetails: TStringList;
     FDepths: TIntegerDynArray;
     { The index in FNames of every row the list shows. }
     FShown: TIntegerDynArray;
@@ -53,8 +55,12 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
-    {** The symbols to list, in file order, each with its nesting depth. }
-    procedure SetSymbols(ANames: TStrings; const ADepths: TIntegerDynArray);
+    {** The symbols to list, in file order, each with its nesting depth.
+      ADetails, when given, says where each symbol is (the symbols of
+      the repository): it is shown after the name, nothing is indented,
+      and the list stays empty until something is typed. }
+    procedure SetSymbols(ANames: TStrings; const ADepths: TIntegerDynArray;
+      ADetails: TStrings = nil);
     {** Shows the bar, focuses the field and selects its text so typing
       replaces the previous filter. }
     procedure Activate;
@@ -72,9 +78,16 @@ uses
 
 resourcestring
   rsSymbolHint = 'Symbol';
+  rsRepoSymbolHint = 'Symbol in repository';
   rsNoSymbols = 'No symbols';
+  rsTypeToSearch = 'Type to search';
+  rsMoreSymbols = '… %d more';
 
 const
+  { The most rows the list shows; a native list with thousands of rows
+    is slow to fill. }
+  MaxRows = 300;
+  DetailSep = '  ·  ';
   RowHeight = 38;
   { The list's height; its native row height is unknown until it has a
     handle, so a fixed one is used. }
@@ -91,6 +104,7 @@ begin
   inherited Create(AOwner);
   ControlStyle := ControlStyle + [csOpaque];
   FNames := TStringList.Create;
+  FDetails := TStringList.Create;
   FEdit := TEdit.Create(Self);
   FEdit.Parent := Self;
   FEdit.Width := EditWidth;
@@ -109,13 +123,23 @@ end;
 destructor TGittanSymbolBar.Destroy;
 begin
   FNames.Free;
+  FDetails.Free;
   inherited Destroy;
 end;
 
-procedure TGittanSymbolBar.SetSymbols(ANames: TStrings; const ADepths: TIntegerDynArray);
+procedure TGittanSymbolBar.SetSymbols(ANames: TStrings; const ADepths: TIntegerDynArray;
+  ADetails: TStrings);
 begin
   FNames.Assign(ANames);
   FDepths := Copy(ADepths);
+  if ADetails = nil then
+    FDetails.Clear
+  else
+    FDetails.Assign(ADetails);
+  if FDetails.Count > 0 then
+    FEdit.TextHint := rsRepoSymbolHint
+  else
+    FEdit.TextHint := rsSymbolHint;
   Fill;
 end;
 
@@ -137,13 +161,24 @@ begin
   Invalidate;
 end;
 
+{ Whether C begins a word: not a letter, digit or underscore (a
+  non-ASCII byte counts as a letter), so a filter matched after it
+  matches at the start of an identifier. }
+function IsWordBreak(C: char): boolean;
+begin
+  Result := not (C in ['A'..'Z', 'a'..'z', '0'..'9', '_', #128..#255]);
+end;
+
 { The rows that match the filter (any part of the name, ignoring case),
-  indented by depth while there is no filter. The first row is selected
-  so Enter picks it. }
+  those matched at the start of a word first, at most MaxRows of them,
+  indented by depth while there is no filter. The symbols of the
+  repository need a filter: there are too many to list. The first row is
+  selected so Enter picks it. }
 procedure TGittanSymbolBar.Fill;
 var
-  Filter, Row: string;
-  i, Count: integer;
+  Filter, Row, Low: string;
+  i, p, Pass, Count, Matches: integer;
+  AtWordStart: boolean;
 begin
   Filter := LowerCase(Trim(FEdit.Text));
   FList.Items.BeginUpdate;
@@ -151,19 +186,50 @@ begin
     FList.Items.Clear;
     SetLength(FShown, FNames.Count);
     Count := 0;
-    for i := 0 to FNames.Count - 1 do
-    begin
-      Row := FNames[i];
-      if (Filter <> '') and (Pos(Filter, LowerCase(Row)) = 0) then
-        Continue;
-      if (Filter = '') and (i <= High(FDepths)) then
-        Row := StringOfChar(' ', 3 * FDepths[i]) + Row;
-      FList.Items.Add(Row);
-      FShown[Count] := i;
-      Inc(Count);
-    end;
+    Matches := 0;
+    if (Filter = '') and (FDetails.Count > 0) then
+      FList.Items.Add(rsTypeToSearch)
+    else
+      for Pass := 0 to 1 do
+      begin
+        if (Filter = '') and (Pass = 1) then
+          Break;
+        for i := 0 to FNames.Count - 1 do
+        begin
+          Row := FNames[i];
+          if Filter <> '' then
+          begin
+            Low := LowerCase(Row);
+            p := Pos(Filter, Low);
+            if p = 0 then
+              Continue;
+            { The first pass takes the matches at a word start, the
+              second the rest. }
+            AtWordStart := False;
+            while (p > 0) and not AtWordStart do
+            begin
+              AtWordStart := (p = 1) or IsWordBreak(Low[p - 1]);
+              p := Pos(Filter, Low, p + 1);
+            end;
+            if AtWordStart <> (Pass = 0) then
+              Continue;
+          end;
+          Inc(Matches);
+          if Count >= MaxRows then
+            Continue;
+          if (Filter = '') and (i <= High(FDepths)) then
+            Row := StringOfChar(' ', 3 * FDepths[i]) + Row;
+          if i < FDetails.Count then
+            Row := Row + DetailSep + FDetails[i];
+          FList.Items.Add(Row);
+          FShown[Count] := i;
+          Inc(Count);
+        end;
+      end;
     SetLength(FShown, Count);
-    if Count = 0 then
+    if Matches > Count then
+      FList.Items.Add(Format(rsMoreSymbols, [Matches - Count]))
+    else if FList.Items.Count = 0 then
       FList.Items.Add(rsNoSymbols);
   finally
     FList.Items.EndUpdate;
@@ -171,6 +237,7 @@ begin
   if Count > 0 then
     FList.ItemIndex := 0;
 end;
+
 
 procedure TGittanSymbolBar.Pick;
 begin

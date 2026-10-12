@@ -298,6 +298,7 @@ var
 begin
   if not Edit.Visible then
     Exit;
+  FreeAndNil(FSymbolFiles);
   FSymbols := CodeTree(FAdapter, Edit);
   Names := TStringList.Create;
   try
@@ -314,13 +315,127 @@ begin
   FSymbolBar.Activate;
 end;
 
+{ Go > Go to Symbol in Repository: lists the symbols of every file of
+  the repository in the symbol bar, each with its file and line: the
+  changed files first, in tree order, parsed on demand as the index may
+  not have reached them, then the rest of the index as far as it has
+  got. FSymbolFiles keeps the file of each. }
+procedure TForm1.MenuGoToRepoSymbolClick(Sender: TObject);
+var
+  Names, Details: TStringList;
+  Seen: TStringList;
+  Node: TTreeNode;
+  E: TGittanIndexEntry;
+  Path: string;
+  i: integer;
+
+  procedure AddFile(const APath: string; const ASymbols: TGittanSymbols);
+  var
+    j: integer;
+  begin
+    if Names.Count + Length(ASymbols) > Length(FSymbols) then
+      SetLength(FSymbols, 2 * (Names.Count + Length(ASymbols)));
+    for j := 0 to High(ASymbols) do
+    begin
+      FSymbols[Names.Count] := ASymbols[j];
+      Names.Add(ASymbols[j].Name);
+      Details.Add(Format('%s:%d', [APath, ASymbols[j].Row + 1]));
+      FSymbolFiles.Add(APath);
+    end;
+  end;
+
+begin
+  if FRepo.Root = '' then
+    Exit;
+  FreeAndNil(FSymbolFiles);
+  FSymbolFiles := TStringList.Create;
+  Names := TStringList.Create;
+  Details := TStringList.Create;
+  Seen := TStringList.Create;
+  try
+    Seen.CaseSensitive := True;
+    Seen.Sorted := True;
+    Seen.Duplicates := dupIgnore;
+    { FSymbols grows as AddFile needs and is cut to size after. }
+    SetLength(FSymbols, 0);
+    Node := FileTree.Items.GetFirstNode;
+    while Node <> nil do
+    begin
+      if Node.Data <> nil then
+      begin
+        Path := Node.GetTextPath;
+        if Seen.IndexOf(Path) < 0 then
+        begin
+          Seen.Add(Path);
+          AddFile(Path, FileSymbols(Path));
+        end;
+      end;
+      Node := Node.GetNext;
+    end;
+    Path := ShownRelPath;
+    if (Path <> '') and (Seen.IndexOf(Path) < 0) then
+    begin
+      Seen.Add(Path);
+      AddFile(Path, FileSymbols(Path));
+
+    end;
+    for i := 0 to FIndex.Count - 1 do
+    begin
+      E := FIndex[i];
+      if E.Indexed and (Seen.IndexOf(E.Path) < 0) then
+        AddFile(E.Path, E.Items);
+    end;
+    SetLength(FSymbols, Names.Count);
+    FSymbolBar.SetSymbols(Names, nil, Details);
+  finally
+    Seen.Free;
+    Details.Free;
+    Names.Free;
+  end;
+  FSymbolBar.Activate;
+end;
+
+{ A symbol of the shown file is jumped to; one of another file shows
+  the file first and is looked up again in the text the editor shows,
+  by its full name (several overloads may share the identifier), else
+  by its identifier, as Go to Definition does. }
 procedure TForm1.SymbolBarPick(Sender: TObject; AIndex: integer);
+var
+  Symbol: TGittanSymbol;
+  Path, Ident: string;
+  Shown: TGittanSymbols;
+  P: TPoint;
+  i: integer;
 begin
   SymbolBarClose(Sender);
-  if (AIndex >= 0) and (AIndex <= High(FSymbols)) then
-    JumpToDefinition(Edit, Point(FSymbols[AIndex].Col, FSymbols[AIndex].Row),
-      NameIdentifier(FSymbols[AIndex].Name));
+  if (AIndex < 0) or (AIndex > High(FSymbols)) then
+    Exit;
+  Symbol := FSymbols[AIndex];
+  Ident := NameIdentifier(Symbol.Name);
+  if (FSymbolFiles = nil) or (AIndex >= FSymbolFiles.Count) then
+  begin
+    JumpToDefinition(Edit, Point(Symbol.Col, Symbol.Row), Ident);
+    Exit;
+  end;
+  Path := FSymbolFiles[AIndex];
+  if Path <> ShownRelPath then
+    ShowRepoFile(Path);
+  if not Edit.Visible then
+    Exit;
+  Shown := CodeTree(FAdapter, Edit);
+  P := Point(0, -1);
+  for i := 0 to High(Shown) do
+    if Shown[i].Name = Symbol.Name then
+    begin
+      P := Point(Shown[i].Col, Shown[i].Row);
+      Break;
+    end;
+  if P.Y < 0 then
+    P := FindDefinition(FAdapter, Edit, Ident, -1);
+  if P.Y >= 0 then
+    JumpToDefinition(Edit, P, Ident);
 end;
+
 
 procedure TForm1.SymbolBarClose(Sender: TObject);
 begin

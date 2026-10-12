@@ -82,6 +82,9 @@ type
       shows its definition. }
     FSymbolBar: TGittanSymbolBar;
     FSymbols: TGittanSymbols;
+    { The file of each of FSymbols, relative to the root, when the bar
+      lists the repository; nil when it lists the shown file. }
+    FSymbolFiles: TStringList;
     FIndex: TGittanSymbolIndex;
     FIndexQueue: TStringList;
     FIndexPos, FIndexTotal: integer;
@@ -253,6 +256,7 @@ type
     procedure GoToDefinition(AEd: TATSynEdit);
     procedure MenuGoToDefinitionClick(Sender: TObject);
     procedure MenuGoToSymbolClick(Sender: TObject);
+    procedure MenuGoToRepoSymbolClick(Sender: TObject);
     procedure SymbolBarPick(Sender: TObject; AIndex: integer);
     procedure SymbolBarClose(Sender: TObject);
     procedure EditMouseMove(Sender: TObject; Shift: TShiftState; X, Y: integer);
@@ -338,6 +342,7 @@ resourcestring
   rsFindPrev = 'Find &Previous';
   rsGoToDefinition = 'Go to &Definition';
   rsGoToSymbol = 'Go to S&ymbol...';
+  rsGoToRepoSymbol = 'Go to Symbol in Re&pository...';
   rsLookingFor = 'Looking for a definition of "%s"...';
   rsNoDefinition = 'No definition of "%s" in the repository.';
   rsIndexing = 'indexing %d/%d';
@@ -577,6 +582,8 @@ begin
   FreeAndNil(FChangeLines);
   FreeAndNil(FIndex);
   FreeAndNil(FIndexQueue);
+  FreeAndNil(FSymbolFiles);
+
   FreeAndNil(FSettings);
 end;
 
@@ -908,8 +915,9 @@ begin
   RebuildRecentMenu;
   AddItem(FileMenu, rsOpen, ShortCut(VK_O, [ssModifier]), @MenuOpenClick);
   FileMenu.Add(NewLine);
-  FTerminalItem := AddItem(FileMenu, rsOpenTerminal, ShortCut(VK_T, [ssModifier, ssShift]),
+  FTerminalItem := AddItem(FileMenu, rsOpenTerminal, ShortCut(VK_T, [ssModifier, ssAlt]),
     @MenuOpenTerminalClick);
+
   FTerminalItem.Enabled := False;
 
   ViewMenu := TMenuItem.Create(Main);
@@ -964,6 +972,8 @@ begin
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsGoToDefinition, ShortCut(VK_F12, []), @MenuGoToDefinitionClick);
   AddItem(GoMenu, rsGoToSymbol, ShortCut(VK_T, [ssModifier]), @MenuGoToSymbolClick);
+  AddItem(GoMenu, rsGoToRepoSymbol, ShortCut(VK_T, [ssModifier, ssShift]),
+    @MenuGoToRepoSymbolClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextChange, ShortCut(VK_F7, []), @MenuNextChangeClick);
   AddItem(GoMenu, rsPrevChange, ShortCut(VK_F7, [ssShift]), @MenuPrevChangeClick);
