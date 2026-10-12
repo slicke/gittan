@@ -61,7 +61,7 @@ type
     FRepo: TGittanRepo;
     FSettings: TGittanSettings;
     FSyntaxMenu, FAutoLexerItem, FPlainTextItem: TMenuItem;
-    FRecentMenu, FCompareMenu: TMenuItem;
+    FRecentMenu, FCompareMenu, FTerminalItem: TMenuItem;
     FWrapItem, FOnlyChangesItem, FSideItem, FIgnoreSpaceItem: TMenuItem;
     FContextItems: array of TMenuItem;
     FFilePopup, FStatusPopup: TPopupMenu;
@@ -280,6 +280,7 @@ type
     procedure StatusBarClick(Sender: TObject);
     procedure MenuCopyBranchClick(Sender: TObject);
     procedure MenuCopyRepoPathClick(Sender: TObject);
+    procedure MenuOpenTerminalClick(Sender: TObject);
     procedure RebuildCompareMenu;
     procedure MenuCompareClick(Sender: TObject);
     procedure MenuCompareOtherClick(Sender: TObject);
@@ -301,7 +302,7 @@ implementation
 {$R *.lfm}
 
 uses
-  Clipbrd, LCLIntf, Process;
+  Clipbrd, LCLIntf, Process, FileUtil;
 
 resourcestring
   rsFile = '&File';
@@ -349,6 +350,7 @@ resourcestring
   rsOpenInEditor = 'Open in &Editor';
   rsCopyBranch = 'Copy &Branch Name';
   rsCopyRepoPath = 'Copy Repository &Path';
+  rsOpenTerminal = 'Open in &Terminal';
   rsPlainText = 'Plain text';
   rsNoLexers = 'No lexers found. Run "make lexlib" or set GITTAN_LEXLIB.';
   rsLexerCount = '%d lexers';
@@ -905,6 +907,10 @@ begin
   FRecentMenu := AddItem(FileMenu, rsOpenRecent, 0, nil);
   RebuildRecentMenu;
   AddItem(FileMenu, rsOpen, ShortCut(VK_O, [ssModifier]), @MenuOpenClick);
+  FileMenu.Add(NewLine);
+  FTerminalItem := AddItem(FileMenu, rsOpenTerminal, ShortCut(VK_T, [ssModifier, ssShift]),
+    @MenuOpenTerminalClick);
+  FTerminalItem.Enabled := False;
 
   ViewMenu := TMenuItem.Create(Main);
   ViewMenu.Caption := rsView;
@@ -1607,6 +1613,7 @@ begin
     Icons[i] := StatIcon(Stats[i]);
   FSummary.SetRepository(ExtractFileName(FRepo.Root), FBranch, FRepo.Base, Stats, Icons);
   RebuildCompareMenu;
+  FTerminalItem.Enabled := FRepo.Root <> '';
 end;
 
 { The badge of a file: with the staged mark when the index holds any of

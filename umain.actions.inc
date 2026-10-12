@@ -16,8 +16,9 @@ begin
     Result := '~' + Copy(APath, Length(Home) + 1, MaxInt);
 end;
 
-{ Starts AExe with AArgs and does not wait for it. }
-procedure RunDetached(const AExe: string; const AArgs: array of string);
+{ Starts AExe with AArgs, in ADir when given, and does not wait for it. }
+procedure RunDetached(const AExe: string; const AArgs: array of string;
+  const ADir: string = '');
 var
   P: TProcess;
   S: string;
@@ -25,6 +26,7 @@ begin
   P := TProcess.Create(nil);
   try
     P.Executable := AExe;
+    P.CurrentDirectory := ADir;
     for S in AArgs do
       P.Parameters.Add(S);
     P.Options := [poNoConsole];
@@ -573,6 +575,10 @@ begin
   FStatusPopup := TPopupMenu.Create(Self);
   AddItem(FStatusPopup, rsCopyBranch, @MenuCopyBranchClick);
   AddItem(FStatusPopup, rsCopyRepoPath, @MenuCopyRepoPathClick);
+  Item := TMenuItem.Create(FStatusPopup);
+  Item.Caption := '-';
+  FStatusPopup.Items.Add(Item);
+  AddItem(FStatusPopup, rsOpenTerminal, @MenuOpenTerminalClick);
   StatusBar.PopupMenu := FStatusPopup;
 end;
 
@@ -634,36 +640,40 @@ begin
   {$ENDIF}
 end;
 
-{ The editor command from the settings file, with the path appended; the
-  desktop's default application when none is set. }
-procedure TForm1.MenuOpenInEditorClick(Sender: TObject);
+{ Runs ACommand, words separated by spaces, with APath appended. }
+procedure RunCommandWith(const ACommand, APath: string);
 var
   Words: TStringList;
   Args: array of string;
   i: integer;
 begin
-  if FContextPath = '' then
-    Exit;
-  if Trim(FSettings.EditorCommand) = '' then
-  begin
-    OpenDocument(ContextFullPath);
-    Exit;
-  end;
   Words := TStringList.Create;
   try
     Words.Delimiter := ' ';
     Words.StrictDelimiter := False;
-    Words.DelimitedText := Trim(FSettings.EditorCommand);
+    Words.DelimitedText := Trim(ACommand);
     if Words.Count = 0 then
       Exit;
     SetLength(Args, Words.Count);
     for i := 1 to Words.Count - 1 do
       Args[i - 1] := Words[i];
-    Args[High(Args)] := ContextFullPath;
+    Args[High(Args)] := APath;
     RunDetached(Words[0], Args);
   finally
     Words.Free;
   end;
+end;
+
+{ The editor command from the settings file, with the path appended; the
+  desktop's default application when none is set. }
+procedure TForm1.MenuOpenInEditorClick(Sender: TObject);
+begin
+  if FContextPath = '' then
+    Exit;
+  if Trim(FSettings.EditorCommand) = '' then
+    OpenDocument(ContextFullPath)
+  else
+    RunCommandWith(FSettings.EditorCommand, ContextFullPath);
 end;
 
 { A click on the status bar goes back to the summary. }
@@ -682,6 +692,45 @@ procedure TForm1.MenuCopyRepoPathClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
     Clipboard.AsText := FRepo.Root;
+end;
+
+{ The terminal command from the settings file, with the repository root
+  appended; the platform's terminal when none is set. On Linux the first
+  terminal found on PATH is started in the root, since every terminal
+  starts in its working directory but each names the option differently. }
+procedure TForm1.MenuOpenTerminalClick(Sender: TObject);
+{$IF not defined(DARWIN) and not defined(WINDOWS)}
+const
+  Terminals: array[0..4] of string = ('x-terminal-emulator', 'gnome-terminal',
+    'konsole', 'xfce4-terminal', 'xterm');
+var
+  T: string;
+{$ENDIF}
+begin
+  if FRepo.Root = '' then
+    Exit;
+  if Trim(FSettings.TerminalCommand) <> '' then
+  begin
+    RunCommandWith(FSettings.TerminalCommand, FRepo.Root);
+    Exit;
+  end;
+  {$IFDEF DARWIN}
+  RunDetached('open', ['-a', 'Terminal', FRepo.Root]);
+  {$ELSE}
+  {$IFDEF WINDOWS}
+  if FindDefaultExecutablePath('wt.exe') <> '' then
+    RunDetached('wt.exe', ['-d', FRepo.Root])
+  else
+    RunDetached('cmd.exe', ['/C', 'start', 'cmd.exe'], FRepo.Root);
+  {$ELSE}
+  for T in Terminals do
+    if FindDefaultExecutablePath(T) <> '' then
+    begin
+      RunDetached(T, [], FRepo.Root);
+      Exit;
+    end;
+  {$ENDIF}
+  {$ENDIF}
 end;
 
 { ---------------------------------------------------------------------------
