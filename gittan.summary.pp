@@ -60,8 +60,9 @@ type
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
     {** Shows the changed files AStats of repository AName on ABranch,
-      compared against ABase (empty for the usual HEAD); AIcons holds the
-      image index in Images of each file's badge. }
+      with ABase saying what is compared, as it is to be shown ("vs
+      main", "main...feature"; empty for the usual HEAD); AIcons holds
+      the image index in Images of each file's badge. }
     procedure SetRepository(const AName, ABranch, ABase: string;
       const AStats: TGittanFileStats; const AIcons: array of integer);
     {** Shows AMessage alone, centered, under AIcon (when it has one) and
@@ -99,7 +100,6 @@ resourcestring
   rsNoChanges = 'No changes';
   rsClean = 'Working tree clean';
   rsBinary = 'binary';
-  rsVsBase = 'vs %s';
   rsStaged = 'staged';
   rsPartlyStaged = 'partly staged';
 
@@ -267,7 +267,8 @@ begin
   if FBase <> '' then
   begin
     Canvas.Font.Color := FText;
-    Canvas.TextOut(X, Y + TitleHeight - BodyHeight - 3, Format(rsVsBase, [FBase]));
+    Canvas.TextOut(X, Y + TitleHeight - BodyHeight - 3, FBase);
+
   end;
   Inc(Y, TitleHeight + 6);
 

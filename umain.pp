@@ -289,6 +289,8 @@ type
     procedure MenuCompareClick(Sender: TObject);
     procedure MenuCompareOtherClick(Sender: TObject);
     procedure SetBase(const ARef: string);
+    function BaseLabel: string;
+
   public
     {** Loads a file into the editor and picks its lexer from the file
       name. }
@@ -323,7 +325,9 @@ resourcestring
   rsCompareWith = '&Compare With';
   rsWorkingTree = 'HEAD (Working Tree)';
   rsOtherRef = 'Other...';
-  rsRefPrompt = 'Branch, tag or commit to compare the working tree against:';
+  rsRefPrompt = 'Branch, tag or commit to compare the working tree against, ' +
+    'or two commits: main...feature shows what feature changed since it left main, ' +
+    'v1..v2 compares the two.';
   rsOnlyChanges = '&Hide Unchanged Lines';
   rsContextLines = 'Conte&xt Lines';
   rsNLines = '%d lines';
@@ -831,7 +835,7 @@ begin
     if FBranch = '' then
       Repo := ExtractFileName(FRepo.Root);
     if FRepo.Base <> '' then
-      Repo := Repo + ' ' + Format(rsVsBase, [FRepo.Base]);
+      Repo := Repo + ' ' + BaseLabel;
     if FIndexing then
       Repo := Repo + ' · ' + Format(rsIndexing, [FIndexPos, FIndexTotal]);
   end;
@@ -1621,7 +1625,7 @@ begin
   SetLength(Icons, Length(Stats));
   for i := 0 to High(Stats) do
     Icons[i] := StatIcon(Stats[i]);
-  FSummary.SetRepository(ExtractFileName(FRepo.Root), FBranch, FRepo.Base, Stats, Icons);
+  FSummary.SetRepository(ExtractFileName(FRepo.Root), FBranch, BaseLabel, Stats, Icons);
   RebuildCompareMenu;
   FTerminalItem.Enabled := FRepo.Root <> '';
 end;
@@ -1836,7 +1840,7 @@ var
 begin
   Title := rsRepoDiffTitle;
   if FRepo.Base <> '' then
-    Title := Title + ' ' + Format(rsVsBase, [FRepo.Base]);
+    Title := Title + ' ' + BaseLabel;
   FHeader.SetTitle(Title);
   Added := 0;
   Deleted := 0;

@@ -797,9 +797,23 @@ begin
   SetBase(Ref);
 end;
 
+{ What the work tree is compared against, for the summary, the status
+  bar and the repository diff: "vs base", or the range itself, which
+  says both sides; '' against HEAD. }
+function TForm1.BaseLabel: string;
+begin
+  if FRepo.Base = '' then
+    Result := ''
+  else if FRepo.IsRange then
+    Result := FRepo.Base
+  else
+    Result := Format(rsVsBase, [FRepo.Base]);
+end;
+
 { A base git cannot resolve is reported in the summary and the previous
   one is kept. }
 procedure TForm1.SetBase(const ARef: string);
+
 var
   Prev: string;
 begin

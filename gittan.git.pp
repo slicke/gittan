@@ -49,6 +49,7 @@ type
       out AOutput: string): boolean;
     function DiffBase: string;
     function EmptyTree: string;
+    procedure SplitRange(out ALeft, ARight: string);
     function RunDiff(const AArgs: array of string; out AOutput: string): boolean;
     function FullPath(const APath: string): string;
   public
@@ -81,6 +82,9 @@ type
     {** The current branch, the short commit id when HEAD is detached, or
       empty when nothing is open. }
     function Branch: string;
+    {** Whether Base is a range "A..B" or "A...B": the right side of
+      every diff is then the commit B instead of the work tree. }
+    function IsRange: boolean;
     {** Every file of the work tree git knows or would add: the tracked
       files and the untracked ones that are not ignored, as paths
       relative to Root with "/" separators. Returns false when git
@@ -109,7 +113,10 @@ type
     {** Message from the last git call that failed. }
     property Error: string read FError;
     {** The commit the work tree is compared against: a branch, tag or
-      commit id, or empty for HEAD. }
+      commit id, or empty for HEAD. A range "A..B" compares the commits A
+      and B instead, "A...B" the commit B against its merge base with A
+      (the changes of a branch since it left A), as git diff reads them;
+      an end left out is HEAD. }
     property Base: string read FBase write FBase;
     {** Leave out changes in whitespace: every diff is run with -w, so a
       line that only changed its spacing counts as unchanged, and a file
@@ -230,6 +237,27 @@ begin
     Result := 'HEAD'
   else
     Result := FBase;
+end;
+
+function TGittanRepo.IsRange: boolean;
+begin
+  Result := Pos('..', FBase) > 0;
+end;
+
+{ The two ends of a range Base, HEAD for one left out. }
+procedure TGittanRepo.SplitRange(out ALeft, ARight: string);
+var
+  p: integer;
+begin
+  p := Pos('..', FBase);
+  ALeft := Copy(FBase, 1, p - 1);
+  ARight := Copy(FBase, p + 2, MaxInt);
+  if Copy(ARight, 1, 1) = '.' then
+    Delete(ARight, 1, 1);
+  if ALeft = '' then
+    ALeft := 'HEAD';
+  if ARight = '' then
+    ARight := 'HEAD';
 end;
 
 function TGittanRepo.FullPath(const APath: string): string;
@@ -396,27 +424,32 @@ begin
   AList.Clear;
   if FRoot = '' then
     Exit(False);
-  Result := RunGit(FRoot, ['status', '--porcelain', '-z',
-    '--untracked-files=all'], Output);
-  if not Result then
-    Exit;
   Fields := TStringList.Create;
   try
-    SplitNul(Output, Fields);
-    i := 0;
-    while i < Fields.Count do
+    { Between two commits the work tree has no say, so git status is
+      not asked. }
+    if not IsRange then
     begin
-      Entry := Fields[i];
-      Inc(i);
-      if Length(Entry) < 4 then
-        Continue;
-      if (Entry[1] in ['R', 'C']) or (Entry[2] in ['R', 'C']) then
+      Result := RunGit(FRoot, ['status', '--porcelain', '-z',
+        '--untracked-files=all'], Output);
+      if not Result then
+        Exit;
+      SplitNul(Output, Fields);
+      i := 0;
+      while i < Fields.Count do
+      begin
+        Entry := Fields[i];
         Inc(i);
-      if (FBase = '') or (Copy(Entry, 1, 2) = '??') then
-        AList.Add(Entry);
+        if Length(Entry) < 4 then
+          Continue;
+        if (Entry[1] in ['R', 'C']) or (Entry[2] in ['R', 'C']) then
+          Inc(i);
+        if (FBase = '') or (Copy(Entry, 1, 2) = '??') then
+          AList.Add(Entry);
+      end;
+      if FBase = '' then
+        Exit;
     end;
-    if FBase = '' then
-      Exit;
     Result := RunDiff(['--name-status', '--no-renames', '-z'], Output);
     if not Result then
       Exit;
@@ -621,7 +654,8 @@ function TGittanRepo.Fingerprint: string;
 var
   Paths: TStringList;
   Info: TSearchRec;
-  FileName, Id: string;
+  FileName, Id, Left, Right: string;
+
   i: integer;
 begin
   Result := '';
@@ -634,12 +668,23 @@ begin
     Result := Branch + #10;
     if RunGit(FRoot, ['rev-parse', '--verify', '-q', 'HEAD'], Id) then
       Result := Result + Trim(Id);
-    if (FBase <> '') and RunGit(FRoot, ['rev-parse', '--verify', '-q',
+    if IsRange then
+    begin
+      SplitRange(Left, Right);
+      if RunGit(FRoot, ['rev-parse', '--verify', '-q', Left + '^{commit}'], Id) then
+        Result := Result + ' ' + Trim(Id);
+      if RunGit(FRoot, ['rev-parse', '--verify', '-q', Right + '^{commit}'], Id) then
+        Result := Result + ' ' + Trim(Id);
+    end
+    else if (FBase <> '') and RunGit(FRoot, ['rev-parse', '--verify', '-q',
       FBase + '^{commit}'], Id) then
       Result := Result + ' ' + Trim(Id);
     Result := Result + #10;
     for i := 0 to Paths.Count - 1 do
       Result := Result + IntToStr(PtrUInt(Paths.Objects[i])) + ' ' + Paths[i] + #10;
+    { Between two commits the files on disk do not matter. }
+    if IsRange then
+      Exit;
     for i := 0 to Paths.Count - 1 do
     begin
       FileName := FullPath(Paths[i]);
@@ -685,7 +730,19 @@ begin
       { Not in HEAD or the index: an untracked file, all of it new. A
         tracked file without a diff (its changes are in whitespace only
         while IgnoreWhitespace is set, or its mode changed) is shown as
-        it is, every line unchanged. }
+        it is, every line unchanged; between two commits as it is in the
+        right one. }
+      if IsRange then
+      begin
+        SplitRange(FileName, Tracked);
+        if RunGit(FRoot, ['show', Tracked + ':' + APath], Output) then
+        begin
+          Raw.Text := Output;
+          for Line in Raw do
+            ALines.Add(' ' + Line);
+        end;
+        Exit;
+      end;
       FileName := FullPath(APath);
       if FileExists(FileName) then
       begin

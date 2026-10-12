@@ -35,6 +35,7 @@ type
     procedure TestIgnoreWhitespace;
     procedure TestUnbornRepository;
     procedure TestBase;
+    procedure TestRange;
     procedure TestFingerprint;
     procedure TestFiles;
   end;
@@ -388,7 +389,59 @@ begin
   AssertTrue(FRepo.Error <> '');
 end;
 
+{ A range compares two commits: the work tree and its untracked files
+  are out, a file without a diff comes from the right commit, and the
+  three-dot form takes the branch's changes since the merge base. }
+procedure TGitRepoTest.TestRange;
+var
+  Stats: TGittanFileStats;
+  Lines: TStringList;
+  Main: string;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  Main := FRepo.Branch;
+  Git(['tag', 'first']);
+  Git(['checkout', '-q', '-b', 'feature']);
+  WriteFile('a.txt', 'one'#10'two'#10'three'#10'four'#10);
+  Commit('on feature');
+  Git(['checkout', '-q', Main]);
+
+  WriteFile('del.txt', 'gone'#10'later'#10);
+  Commit('on main');
+  WriteFile('new.txt', 'n'#10);
+
+  FRepo.Base := 'first..feature';
+  AssertTrue(FRepo.IsRange);
+  AssertTrue(FRepo.ChangeStats(Stats));
+  AssertEquals('only the commits count', 1, Length(Stats));
+  AssertEquals('a.txt', Stats[0].Path);
+  AssertEquals(1, Stats[0].Added);
+  Lines := TStringList.Create;
+  try
+    AssertTrue(FRepo.FileChanges('a.txt', Lines));
+    AssertEquals(4, Lines.Count);
+    AssertEquals('+four', Lines[3]);
+    { The merge base of main and feature is "first", so main's own
+      commit is left out; del.txt has no diff and is read from feature. }
+    FRepo.Base := Main + '...feature';
+    AssertTrue(FRepo.ChangeStats(Stats));
+    AssertEquals(1, Length(Stats));
+    AssertEquals('a.txt', Stats[0].Path);
+    AssertTrue(FRepo.FileChanges('del.txt', Lines));
+    AssertEquals(1, Lines.Count);
+    AssertEquals(' gone', Lines[0]);
+    FRepo.Base := Main + '..feature';
+    AssertTrue(FRepo.ChangeStats(Stats));
+    AssertEquals('two commits apart', 2, Length(Stats));
+  finally
+    Lines.Free;
+  end;
+  AssertTrue(FRepo.Fingerprint <> '');
+end;
+
 procedure TGitRepoTest.TestFingerprint;
+
 var
   A, B: string;
 begin
