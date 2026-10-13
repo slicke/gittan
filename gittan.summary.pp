@@ -99,6 +99,7 @@ resourcestring
   rsManyFiles = '%d changed files';
   rsNoChanges = 'No changes';
   rsClean = 'Working tree clean';
+  rsCleanVs = 'No changes %s';
   rsBinary = 'binary';
   rsStaged = 'staged';
   rsPartlyStaged = 'partly staged';
@@ -509,12 +510,19 @@ begin
   end;
 end;
 
-{ A green disc with a check mark and "Working tree clean", where the rows
-  would start, so a repository without changes does not look unfinished. }
+{ A green disc with a check mark and "Working tree clean" (or "No changes
+  vs base" when the tree is compared against something other than HEAD),
+  where the rows would start, so a repository without changes does not
+  look unfinished. }
 procedure TGittanSummary.PaintClean(Y: integer);
 var
   X, CenterY: integer;
+  CleanText: string;
 begin
+  if FBase = '' then
+    CleanText := rsClean
+  else
+    CleanText := Format(rsCleanVs, [FBase]);
   Canvas.Font := Font;
   Canvas.Font.Color := FDim;
   Canvas.Brush.Style := bsClear;
@@ -532,7 +540,7 @@ begin
   Canvas.Pen.Width := 1;
   Canvas.Brush.Style := bsClear;
   Canvas.TextOut(X + CheckSize + Gap div 2 + 2,
-    CenterY - Canvas.TextHeight('Xg') div 2, rsClean);
+    CenterY - Canvas.TextHeight('Xg') div 2, CleanText);
 end;
 
 procedure TGittanSummary.Paint;

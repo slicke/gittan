@@ -23,6 +23,7 @@ type
   TGittanWatcher = class(TThread)
   private
     FRoot, FBase: string;
+    FWholeTree: boolean;
     FRepo: TGittanRepo;
     FWake: PRTLEvent;
     FInterval: integer;
@@ -33,7 +34,8 @@ type
     procedure Execute; override;
     procedure TerminatedSet; override;
   public
-    constructor Create(const ARoot, ABase: string; AInterval: integer);
+    constructor Create(const ARoot, ABase: string; AWholeTree: boolean;
+      AInterval: integer);
     destructor Destroy; override;
     {** Drops the handler, ends the thread and waits for it. }
     procedure Stop;
@@ -45,7 +47,8 @@ implementation
 
 { TGittanWatcher }
 
-constructor TGittanWatcher.Create(const ARoot, ABase: string; AInterval: integer);
+constructor TGittanWatcher.Create(const ARoot, ABase: string; AWholeTree: boolean;
+  AInterval: integer);
 begin
   inherited Create(True);
   FRoot := ARoot;
@@ -55,6 +58,7 @@ begin
   { The thread's repository is opened in Execute; the base must be set
     after Open, which clears it. }
   FBase := ABase;
+  FWholeTree := AWholeTree;
 end;
 
 destructor TGittanWatcher.Destroy;
@@ -80,6 +84,7 @@ begin
   if not FRepo.Open(FRoot) then
     Exit;
   FRepo.Base := FBase;
+  FRepo.WholeTree := FWholeTree;
   FLast := FRepo.Fingerprint;
   while not Terminated do
   begin

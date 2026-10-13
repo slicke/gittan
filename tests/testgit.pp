@@ -38,6 +38,7 @@ type
     procedure TestRange;
     procedure TestFingerprint;
     procedure TestFiles;
+    procedure TestSnapshot;
   end;
 
 implementation
@@ -465,6 +466,63 @@ begin
   Git(['add', 'a.txt']);
   A := FRepo.Fingerprint;
   AssertTrue('staging seen', A <> B);
+end;
+
+{ A snapshot holds the untracked files, and the whole tree comparison
+  against it sees only what changed since: an untracked file it holds is
+  no change, a new one is added, a deleted one deleted; the repository's
+  own index stays as it was. }
+procedure TGitRepoTest.TestSnapshot;
+var
+  Id, Status: string;
+  Stats: TGittanFileStats;
+  Lines: TStringList;
+begin
+  MakeHistory;
+  WriteFile('a.txt', 'one'#10'zwei'#10'three'#10);
+  WriteFile('new.txt', 'n'#10);
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.TakeSnapshot(Id));
+  AssertEquals('a full id', 40, Length(Id));
+  AssertTrue(FRepo.HasCommit(Id));
+  AssertFalse(FRepo.HasCommit('no-such-ref'));
+  Status := Git(['status', '--porcelain']);
+  AssertTrue('new.txt still untracked', Pos('?? new.txt', Status) > 0);
+  AssertTrue('a.txt still unstaged', Pos(' M a.txt', Status) > 0);
+
+  FRepo.Base := Id;
+  FRepo.WholeTree := True;
+  AssertTrue(FRepo.ChangeStats(Stats));
+  AssertEquals('nothing since the snapshot', 0, Length(Stats));
+
+  WriteFile('new.txt', 'n'#10'm'#10);
+  WriteFile('later.txt', 'l'#10);
+  DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'del.txt');
+  AssertTrue(FRepo.ChangeStats(Stats));
+  AssertEquals(3, Length(Stats));
+  AssertTrue(FindStat(Stats, 'new.txt').Kind = ckModified);
+  AssertEquals(1, FindStat(Stats, 'new.txt').Added);
+  AssertTrue('new since the snapshot is added, not untracked',
+    FindStat(Stats, 'later.txt').Kind = ckAdded);
+  AssertEquals(1, FindStat(Stats, 'later.txt').Added);
+  AssertTrue(FindStat(Stats, 'del.txt').Kind = ckDeleted);
+  Lines := TStringList.Create;
+  try
+    AssertTrue(FRepo.FileChanges('new.txt', Lines));
+    AssertEquals(' n|+m|', Joined(Lines));
+    AssertTrue(FRepo.FileChanges('later.txt', Lines));
+    AssertEquals('+l|', Joined(Lines));
+  finally
+    Lines.Free;
+  end;
+  Status := Git(['status', '--porcelain']);
+  AssertTrue('later.txt untracked for git', Pos('?? later.txt', Status) > 0);
+
+  { Without WholeTree the snapshot's untracked file reads as deleted and
+    untracked at once: what WholeTree is for. }
+  FRepo.WholeTree := False;
+  AssertTrue(FRepo.ChangeStats(Stats));
+  AssertTrue(FindStat(Stats, 'later.txt').Kind = ckUntracked);
 end;
 
 procedure TGitRepoTest.TestFiles;

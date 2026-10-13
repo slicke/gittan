@@ -736,22 +736,25 @@ end;
 { ---------------------------------------------------------------------------
   Comparing against another commit
   ---------------------------------------------------------------------------
-  View > Compare With lists the branches and tags; the chosen one becomes
-  the repository's Base, and every diff, count and the watcher follow it.
-  The list is rebuilt with the repository. }
+  View > Compare With lists the branches and tags, then the snapshots of
+  the repository; the chosen one becomes the repository's Base, and every
+  diff, count and the watcher follow it. The list is rebuilt with the
+  repository. A snapshot item carries Tag 1: the base is then compared
+  with WholeTree, since the snapshot holds the untracked files. }
 procedure TForm1.RebuildCompareMenu;
 var
   Refs: TStringList;
   Item: TMenuItem;
   i: integer;
 
-  function AddRef(const ACaption, ARef: string): TMenuItem;
+  function AddRef(const ACaption, ARef: string; ASnapshot: boolean): TMenuItem;
   begin
     Result := TMenuItem.Create(FCompareMenu);
     Result.Caption := ACaption;
     Result.Hint := ARef;
+    Result.Tag := Ord(ASnapshot);
     Result.RadioItem := True;
-    Result.Checked := ARef = FRepo.Base;
+    Result.Checked := (ARef = FRepo.Base) and (ASnapshot = FRepo.WholeTree);
     Result.OnClick := @MenuCompareClick;
     FCompareMenu.Add(Result);
   end;
@@ -760,21 +763,31 @@ begin
   if FCompareMenu = nil then
     Exit;
   FCompareMenu.Clear;
-  AddRef(rsWorkingTree, '');
+  AddRef(rsWorkingTree, '', False);
   Refs := TStringList.Create;
   try
     if FRepo.Root <> '' then
       FRepo.Refs(Refs);
-    if (FRepo.Base <> '') and (Refs.IndexOf(FRepo.Base) < 0) then
+    if (FRepo.Base <> '') and not FRepo.WholeTree and (Refs.IndexOf(FRepo.Base) < 0) then
       Refs.Insert(0, FRepo.Base);
     if Refs.Count > 0 then
       FCompareMenu.Add(NewLine);
     for i := 0 to Min(Refs.Count, 40) - 1 do
-      AddRef(Refs[i], Refs[i]);
+      AddRef(Refs[i], Refs[i], False);
   finally
     Refs.Free;
   end;
+  if FSnapshots.Count > 0 then
+    FCompareMenu.Add(NewLine);
+  for i := 0 to FSnapshots.Count - 1 do
+    AddRef(Format(rsSnapshot, [TGittanSnapshots.Caption(FSnapshots[i].Time, Now)]),
+      FSnapshots[i].Id, True);
   FCompareMenu.Add(NewLine);
+  Item := TMenuItem.Create(FCompareMenu);
+  Item.Caption := rsTakeSnapshot;
+  Item.ShortCut := ShortCut(VK_N, [ssModifier, ssShift]);
+  Item.OnClick := @MenuTakeSnapshotClick;
+  FCompareMenu.Add(Item);
   Item := TMenuItem.Create(FCompareMenu);
   Item.Caption := rsOtherRef;
   Item.OnClick := @MenuCompareOtherClick;
@@ -784,7 +797,7 @@ end;
 
 procedure TForm1.MenuCompareClick(Sender: TObject);
 begin
-  SetBase(TMenuItem(Sender).Hint);
+  SetBase(TMenuItem(Sender).Hint, TMenuItem(Sender).Tag = 1);
 end;
 
 procedure TForm1.MenuCompareOtherClick(Sender: TObject);
@@ -797,36 +810,105 @@ begin
   SetBase(Ref);
 end;
 
+{ ---------------------------------------------------------------------------
+  Snapshots
+  ---------------------------------------------------------------------------
+  Compare With > Take Snapshot (Cmd+Shift+N) records the work tree as it
+  is, untracked files included, as a commit no branch points at
+  (TGittanRepo.TakeSnapshot) and compares against it, so the views show
+  only what changes from here on: what one wants while someone or
+  something else is editing the tree. The snapshots of a repository are
+  kept in a file in the cache folder, named by a hash of the root like
+  the symbol index, newest first; LoadSnapshots drops the ones git has
+  pruned since. A failed snapshot is noted in the summary. }
+procedure TForm1.MenuTakeSnapshotClick(Sender: TObject);
+var
+  Id: string;
+begin
+  if FRepo.Root = '' then
+    Exit;
+  if not FRepo.TakeSnapshot(Id) then
+  begin
+    FSummary.Notice := Format(rsSnapshotFailed, [FRepo.Error]);
+    ShowSummary;
+    Exit;
+  end;
+  FSnapshots.Add(Id, Now);
+  SaveSnapshots;
+  SetBase(Id, True);
+end;
+
+function TForm1.SnapshotsFileName: string;
+begin
+  Result := IndexCacheDir + MD5Print(MD5String(FRepo.Root)) + '.snapshots';
+end;
+
+procedure TForm1.LoadSnapshots;
+var
+  i, Count: integer;
+begin
+  FSnapshots.Load(SnapshotsFileName);
+  Count := FSnapshots.Count;
+  for i := FSnapshots.Count - 1 downto 0 do
+    if not FRepo.HasCommit(FSnapshots[i].Id) then
+      FSnapshots.Delete(i);
+  if FSnapshots.Count <> Count then
+    SaveSnapshots;
+end;
+
+procedure TForm1.SaveSnapshots;
+begin
+  try
+    FSnapshots.Save(SnapshotsFileName);
+  except
+    { The cache folder cannot be written; the list lives for the session. }
+  end;
+end;
+
 { What the work tree is compared against, for the summary, the status
   bar and the repository diff: "vs base", or the range itself, which
   says both sides; '' against HEAD. }
 function TForm1.BaseLabel: string;
+var
+  i: integer;
 begin
   if FRepo.Base = '' then
     Result := ''
   else if FRepo.IsRange then
     Result := FRepo.Base
+  else if FRepo.WholeTree then
+  begin
+    i := FSnapshots.IndexOf(FRepo.Base);
+    if i >= 0 then
+      Result := Format(rsVsBase, [Format(rsVsSnapshot,
+        [TGittanSnapshots.Caption(FSnapshots[i].Time, Now)])])
+    else
+      Result := Format(rsVsBase, [Copy(FRepo.Base, 1, 7)]);
+  end
   else
     Result := Format(rsVsBase, [FRepo.Base]);
 end;
 
 { A base git cannot resolve is reported in the summary and the previous
-  one is kept. }
-procedure TForm1.SetBase(const ARef: string);
-
+  one is kept. ASnapshot compares the whole tree, see TakeSnapshot. }
+procedure TForm1.SetBase(const ARef: string; ASnapshot: boolean);
 var
   Prev: string;
+  PrevSnapshot: boolean;
 begin
-  if (FRepo.Root = '') or (ARef = FRepo.Base) then
+  if (FRepo.Root = '') or ((ARef = FRepo.Base) and (ASnapshot = FRepo.WholeTree)) then
     Exit;
   Prev := FRepo.Base;
+  PrevSnapshot := FRepo.WholeTree;
   StopWatcher;
   FRepo.Base := ARef;
+  FRepo.WholeTree := ASnapshot;
   FLoadError := '';
   RefreshRepository;
   if FLoadError <> '' then
   begin
     FRepo.Base := Prev;
+    FRepo.WholeTree := PrevSnapshot;
     RefreshRepository;
     FSummary.Notice := FLoadError;
     ShowSummary;

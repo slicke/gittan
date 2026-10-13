@@ -14,7 +14,7 @@ uses
   gittan.lexers, gittan.git, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
-  gittan.symbolindex, md5;
+  gittan.symbolindex, gittan.snapshots, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -62,6 +62,7 @@ type
     FSettings: TGittanSettings;
     FSyntaxMenu, FAutoLexerItem, FPlainTextItem: TMenuItem;
     FRecentMenu, FCompareMenu, FTerminalItem: TMenuItem;
+    FSnapshots: TGittanSnapshots;
     FWrapItem, FOnlyChangesItem, FSideItem, FIgnoreSpaceItem: TMenuItem;
     FContextItems: array of TMenuItem;
     FFilePopup, FStatusPopup: TPopupMenu;
@@ -290,8 +291,12 @@ type
     procedure RebuildCompareMenu;
     procedure MenuCompareClick(Sender: TObject);
     procedure MenuCompareOtherClick(Sender: TObject);
-    procedure SetBase(const ARef: string);
+    procedure MenuTakeSnapshotClick(Sender: TObject);
+    procedure SetBase(const ARef: string; ASnapshot: boolean = False);
     function BaseLabel: string;
+    function SnapshotsFileName: string;
+    procedure LoadSnapshots;
+    procedure SaveSnapshots;
 
   public
     {** Loads a file into the editor and picks its lexer from the file
@@ -327,6 +332,10 @@ resourcestring
   rsCompareWith = '&Compare With';
   rsWorkingTree = 'HEAD (Working Tree)';
   rsOtherRef = 'Other...';
+  rsTakeSnapshot = 'Take S&napshot';
+  rsSnapshot = 'Snapshot %s';
+  rsVsSnapshot = 'snapshot %s';
+  rsSnapshotFailed = 'Could not take a snapshot: %s';
   rsRefPrompt = 'Branch, tag or commit to compare the working tree against, ' +
     'or two commits: main...feature shows what feature changed since it left main, ' +
     'v1..v2 compares the two.';
@@ -547,6 +556,7 @@ begin
     [{$IFDEF DARWIN}'⇧⌘O'{$ELSE}'Ctrl+Shift+O'{$ENDIF}]), FAppIcon);
 
   FRepo := TGittanRepo.Create;
+  FSnapshots := TGittanSnapshots.Create;
   FLexers := TGittanLexers.Create;
   if FLexers.Load then
     StatusBar.SimpleText := Format(rsLexerCount, [0])
@@ -590,6 +600,7 @@ begin
     FIndexAdapter.Lexer := nil;
   FreeAndNil(FLexers);
   FreeAndNil(FRepo);
+  FreeAndNil(FSnapshots);
   FreeAndNil(FAppIcon);
   FreeAndNil(FChangeLines);
   FreeAndNil(FIndex);
@@ -1588,6 +1599,7 @@ begin
   end;
   UpdateCaption;
   FSummary.Selected := '';
+  LoadSnapshots;
   if not LoadRepository then
     ShowError(FLoadError)
   else
@@ -1661,7 +1673,8 @@ begin
   StopWatcher;
   if FRepo.Root = '' then
     Exit;
-  FWatcher := TGittanWatcher.Create(FRepo.Root, FRepo.Base, WatchInterval);
+  FWatcher := TGittanWatcher.Create(FRepo.Root, FRepo.Base, FRepo.WholeTree,
+    WatchInterval);
   FWatcher.OnChange := @WatcherChange;
   FWatcher.Start;
 end;

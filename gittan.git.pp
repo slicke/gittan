@@ -44,9 +44,17 @@ type
     FRoot: string;
     FError: string;
     FBase: string;
+    FWholeTree: boolean;
+    FTempIndex: string;
     FIgnoreWhitespace: boolean;
     function RunGit(const ADir: string; const AArgs: array of string;
-      out AOutput: string): boolean;
+      out AOutput: string; const AIndexFile: string = ''): boolean;
+    function IndexPath: string;
+    function CopyIndex(const ATarget: string): boolean;
+    function WholeTreeActive: boolean;
+    function CompareIndex: string;
+    procedure DropTempIndex;
+    procedure SetWholeTree(AValue: boolean);
     function DiffBase: string;
     function EmptyTree: string;
     procedure SplitRange(out ALeft, ARight: string);
@@ -55,6 +63,7 @@ type
   public
     {** Opens the repository that contains ADir. Returns false, with the git
       message in Error, when ADir is not inside a work tree. }
+    destructor Destroy; override;
     function Open(const ADir: string): boolean;
     {** Forgets the repository. }
     procedure Close;
@@ -65,6 +74,16 @@ type
     {** The branches and tags of the repository, local branches first,
       each most recently committed first: what Base can be set to. }
     function Refs(AList: TStrings): boolean;
+    {** Whether ARef names a commit in the repository. }
+    function HasCommit(const ARef: string): boolean;
+    {** Records the work tree as it is now, untracked files included, in
+      a commit of its own (parent HEAD when there is one, no branch points
+      at it), and returns its id: a Base to compare against later, with
+      WholeTree set, to see what changed since. The repository's own
+      index is left alone: the tree is built through a temporary copy.
+      The commit is reachable from nothing, so git prunes it with the
+      other loose objects two weeks or more after it was made. }
+    function TakeSnapshot(out AId: string): boolean;
     {** Changed files as "XY path" entries in the shape of `git status
       --porcelain`, untracked files included, one per file: a rename is
       listed under its new path alone. Paths are plain UTF-8 with "/"
@@ -118,6 +137,14 @@ type
       (the changes of a branch since it left A), as git diff reads them;
       an end left out is HEAD. }
     property Base: string read FBase write FBase;
+    {** Compare every file of the work tree against Base, the untracked
+      ones too: a diff only lists the files of the index, so one is run
+      through a temporary index with every file added. An untracked file
+      Base holds unchanged is then not a change, one it lacks is added,
+      not untracked; the stage flags are off as against any base. Made
+      for a snapshot from TakeSnapshot, which holds the untracked files;
+      no effect against HEAD or in a range. }
+    property WholeTree: boolean read FWholeTree write SetWholeTree;
     {** Leave out changes in whitespace: every diff is run with -w, so a
       line that only changed its spacing counts as unchanged, and a file
       with no other change has no changes. }
@@ -143,7 +170,7 @@ uses
   be relied upon, and with prompts turned off, since nobody could answer
   one. Path names come back as plain UTF-8 instead of octal escapes. }
 function TGittanRepo.RunGit(const ADir: string; const AArgs: array of string;
-  out AOutput: string): boolean;
+  out AOutput: string; const AIndexFile: string): boolean;
 var
   P: TProcess;
   Err, Env: string;
@@ -161,11 +188,14 @@ begin
     for i := 1 to GetEnvironmentVariableCount do
     begin
       Env := GetEnvironmentString(i);
-      if (Pos('LC_ALL=', Env) <> 1) and (Pos('GIT_TERMINAL_PROMPT=', Env) <> 1) then
+      if (Pos('LC_ALL=', Env) <> 1) and (Pos('GIT_TERMINAL_PROMPT=', Env) <> 1) and
+        (Pos('GIT_INDEX_FILE=', Env) <> 1) then
         P.Environment.Add(Env);
     end;
     P.Environment.Add('LC_ALL=C');
     P.Environment.Add('GIT_TERMINAL_PROMPT=0');
+    if AIndexFile <> '' then
+      P.Environment.Add('GIT_INDEX_FILE=' + AIndexFile);
     P.Options := [poNoConsole];
     if P.RunCommandLoop(AOutput, Err, Status) <> 0 then
     begin
@@ -205,6 +235,12 @@ end;
 
 { TGittanRepo }
 
+destructor TGittanRepo.Destroy;
+begin
+  DropTempIndex;
+  inherited Destroy;
+end;
+
 function TGittanRepo.Open(const ADir: string): boolean;
 var
   Top: string;
@@ -226,9 +262,11 @@ end;
 
 procedure TGittanRepo.Close;
 begin
+  DropTempIndex;
   FRoot := '';
   FError := '';
   FBase := '';
+  FWholeTree := False;
 end;
 
 function TGittanRepo.DiffBase: string;
@@ -276,6 +314,135 @@ begin
     Result := '6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321'
   else
     Result := '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+end;
+
+{ ---------------------------------------------------------------------------
+  The whole tree through a temporary index
+  ---------------------------------------------------------------------------
+  `git diff <commit>` compares the commit with the work tree, but only for
+  the paths the index knows: an untracked file is never in it, and a path
+  the commit has but the index lacks reads as deleted. So a snapshot that
+  holds the untracked files is compared through an index of its own: a
+  copy of the repository's, with every file of the work tree added in
+  intent (-N: the entry without its content, so no object is written) and
+  the deleted ones dropped (-A) before each diff. The copy is made once
+  per TGittanRepo and refreshed, since git then re-stats only what moved;
+  the repository's own index is never written. The snapshot is built the
+  same way, with the contents added (write-tree needs them). }
+
+{ The repository's index file: in the git dir of the work tree (a linked
+  work tree has one of its own). }
+function TGittanRepo.IndexPath: string;
+var
+  Dir: string;
+begin
+  Result := '';
+  if RunGit(FRoot, ['rev-parse', '--absolute-git-dir'], Dir) then
+    Result := IncludeTrailingPathDelimiter(Trim(Dir)) + 'index';
+end;
+
+{ Copies the repository's index to ATarget; no index (nothing staged
+  since init) leaves ATarget absent, which git takes as empty. }
+function TGittanRepo.CopyIndex(const ATarget: string): boolean;
+var
+  Source: string;
+  Stream: TMemoryStream;
+begin
+  Result := True;
+  Source := IndexPath;
+  if (Source = '') or not FileExists(Source) then
+    Exit;
+  Stream := TMemoryStream.Create;
+  try
+    try
+      Stream.LoadFromFile(Source);
+      Stream.SaveToFile(ATarget);
+    except
+      Result := False;
+    end;
+  finally
+    Stream.Free;
+  end;
+end;
+
+function TGittanRepo.WholeTreeActive: boolean;
+begin
+  Result := FWholeTree and (FBase <> '') and not IsRange;
+end;
+
+{ The temporary index for the whole tree comparison, brought up to date
+  with the work tree; empty when the comparison does not apply, or the
+  index could not be made (the diff then runs with the repository's). }
+function TGittanRepo.CompareIndex: string;
+var
+  Output: string;
+begin
+  Result := '';
+  if not WholeTreeActive then
+    Exit;
+  if FTempIndex = '' then
+  begin
+    FTempIndex := GetTempFileName(GetTempDir, 'gittan-index-');
+    if not CopyIndex(FTempIndex) then
+    begin
+      DropTempIndex;
+      Exit;
+    end;
+  end;
+  RunGit(FRoot, ['add', '-A', '-N'], Output, FTempIndex);
+  Result := FTempIndex;
+end;
+
+procedure TGittanRepo.SetWholeTree(AValue: boolean);
+begin
+  FWholeTree := AValue;
+  if not AValue then
+    DropTempIndex;
+end;
+
+procedure TGittanRepo.DropTempIndex;
+begin
+  if FTempIndex <> '' then
+  begin
+    DeleteFile(FTempIndex);
+    DeleteFile(FTempIndex + '.lock');
+    FTempIndex := '';
+  end;
+end;
+
+function TGittanRepo.HasCommit(const ARef: string): boolean;
+var
+  Id: string;
+begin
+  Result := (FRoot <> '') and (ARef <> '') and
+    RunGit(FRoot, ['rev-parse', '--verify', '-q', ARef + '^{commit}'], Id);
+end;
+
+function TGittanRepo.TakeSnapshot(out AId: string): boolean;
+var
+  Index, Tree, Head: string;
+begin
+  AId := '';
+  if FRoot = '' then
+    Exit(False);
+  Index := GetTempFileName(GetTempDir, 'gittan-snapshot-');
+  try
+    Result := CopyIndex(Index) and
+      RunGit(FRoot, ['add', '-A'], Tree, Index) and
+      RunGit(FRoot, ['write-tree'], Tree, Index);
+    if not Result then
+      Exit;
+    Tree := Trim(Tree);
+    if RunGit(FRoot, ['rev-parse', '--verify', '-q', 'HEAD'], Head) then
+      Result := RunGit(FRoot, ['commit-tree', Tree, '-p', Trim(Head), '-m',
+        'Gittan snapshot'], AId)
+    else
+      Result := RunGit(FRoot, ['commit-tree', Tree, '-m', 'Gittan snapshot'], AId);
+    AId := Trim(AId);
+  finally
+    DeleteFile(Index);
+    DeleteFile(Index + '.lock');
+  end;
 end;
 
 { Runs `git diff AArgs <base>`, with the base before the "--" of a path
@@ -330,7 +497,7 @@ begin
       Break;
     end;
   Build(DiffBase);
-  Result := RunGit(FRoot, Args, AOutput);
+  Result := RunGit(FRoot, Args, AOutput, CompareIndex);
   if not Result and (FBase = '') then
   begin
     { Without HEAD: the same call against the empty tree. When that fails
@@ -393,7 +560,7 @@ end;
 { Against HEAD the list is git status itself. Against another base it is
   `git diff --name-status` turned into the same "XY path" shape, with the
   letter in the work tree column, plus the untracked files from git
-  status, which no diff lists. Untracked files are asked for one by one
+  status, which no diff lists (unless WholeTree is set). Untracked files are asked for one by one
   (--untracked-files=all): by default git folds a directory of them into
   a single "dir/" entry, which no diff or numstat can say anything
   about. Both are read with -z: a path with a space,
@@ -427,8 +594,9 @@ begin
   Fields := TStringList.Create;
   try
     { Between two commits the work tree has no say, so git status is
-      not asked. }
-    if not IsRange then
+      not asked; nor for the whole tree, where the diff lists the
+      untracked files itself. }
+    if not IsRange and not WholeTreeActive then
     begin
       Result := RunGit(FRoot, ['status', '--porcelain', '-z',
         '--untracked-files=all'], Output);
@@ -636,7 +804,7 @@ begin
     Result := ckDeleted
   else if X in ['R', 'C'] then
     Result := ckRenamed
-  else if X = 'A' then
+  else if (X = 'A') or (Y = 'A') then
     Result := ckAdded
   else
     Result := ckModified;
@@ -746,7 +914,8 @@ begin
       FileName := FullPath(APath);
       if FileExists(FileName) then
       begin
-        if RunGit(FRoot, ['ls-files', '--', APath], Tracked) and (Tracked <> '') then
+        if RunGit(FRoot, ['ls-files', '--', APath], Tracked, CompareIndex) and
+          (Tracked <> '') then
           Marker := ' '
         else
           Marker := '+';
