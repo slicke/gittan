@@ -4,7 +4,7 @@
     <Version Value="12"/>
     <General>
       <SessionStorage Value="InProjectDir"/>
-      <Title Value="Gittan"/>
+      <Title Value="Git Tree Analyzer &amp; Navigator"/>
       <Scaled Value="True"/>
       <ResourceType Value="res"/>
       <UseXPManifest Value="True"/>
@@ -13,6 +13,10 @@
       </XPManifest>
       <Icon Value="0"/>
     </General>
+    <VersionInfo>
+      <UseVersionInfo Value="True"/>
+      <StringTable FileDescription="Git Tree Analyzer &amp; Navigator" InternalName="Gittan" OriginalFilename="Gittan.exe" ProductName="Git Tree Analyzer &amp; Navigator"/>
+    </VersionInfo>
     <BuildModes>
       <Item Name="Default" Default="True"/>
     </BuildModes>

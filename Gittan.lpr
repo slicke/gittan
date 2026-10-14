@@ -16,6 +16,7 @@ uses
 {$R *.res}
 
 begin
+  Application.Title:='Git Tree Analyzer & Navigator';
   RequireDerivedFormResource:=True;
   Application.Scaled:=True;
   {$PUSH}{$WARN 5044 OFF}

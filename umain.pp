@@ -402,6 +402,7 @@ uses
   Clipbrd, LCLIntf, Process, FileUtil, LazFileUtils, DateUtils;
 
 resourcestring
+  rsAppName = 'Git Tree Analyzer & Navigator';
   rsFile = '&File';
   rsOpen = '&Open...';
   rsOpenRepo = 'Open &Repository...';
@@ -701,6 +702,7 @@ begin
   BuildPopups;
   ApplyWrap;
   OnClose := @FormClose;
+  UpdateCaption;
   ShowSummary;
   { gittan [file | folder], else the repository of the last run. }
   if ParamCount > 0 then
@@ -955,15 +957,23 @@ begin
 end;
 
 { The window is named after the repository, or the file when none is
-  open; the header names the file, so the title does not change with it. }
+  open; the header names the file, so the title does not change with it.
+  Cocoa reads an ampersand in a window title as an accelerator and drops
+  it, so there every ampersand is doubled. }
 procedure TForm1.UpdateCaption;
+var
+  Title: string;
 begin
   if FRepo.Root <> '' then
-    Caption := ExtractFileName(FRepo.Root) + ' - Gittan'
+    Title := ExtractFileName(FRepo.Root) + ' - ' + rsAppName
   else if Edit.FileName <> '' then
-    Caption := ExtractFileName(Edit.FileName) + ' - Gittan'
+    Title := ExtractFileName(Edit.FileName) + ' - ' + rsAppName
   else
-    Caption := 'Gittan';
+    Title := rsAppName;
+  {$IFDEF LCLCocoa}
+  Title := StringReplace(Title, '&', '&&', [rfReplaceAll]);
+  {$ENDIF}
+  Caption := Title;
 end;
 
 { The status bar names the repository, its branch and the base it is

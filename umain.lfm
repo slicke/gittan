@@ -4,7 +4,7 @@ object Form1: TForm1
   Top = 30
   Width = 900
   AllowDropFiles = True
-  Caption = 'Gittan'
+  Caption = 'Git Tree Analyzer & Navigator'
   ClientHeight = 600
   ClientWidth = 900
   OnCreate = FormCreate
