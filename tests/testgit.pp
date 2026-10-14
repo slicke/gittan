@@ -702,6 +702,10 @@ begin
     Base := Trim(Git(['rev-parse', 'HEAD']));
     Git(['remote', 'add', 'origin', Remote]);
     Git(['push', '-q', 'origin', Branch]);
+    { Populate the origin/* remote-tracking refs the way a clone or fetch
+      does: a plain push no longer updates them on git 2.55, where it still
+      did on older git. }
+    Git(['fetch', '-q', 'origin']);
     { No origin/HEAD yet: main or master on the remote, when the branch
       is one of them, is the fallback. }
     if (Branch = 'main') or (Branch = 'master') then
