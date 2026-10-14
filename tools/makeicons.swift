@@ -2,19 +2,18 @@
 //
 //   swift tools/makeicons.swift <artwork.png> <outdir> <Gittan.ico>
 //
-// The artwork is a rounded square painted on a white background with a soft
-// gray halo around it. The halo cannot be told from the icon's light gray
-// right side by color alone, so the icon's outline is measured where it is
-// unambiguous: the left, top and right edges and the bottom-left corner
-// profile (dark blue against the halo). The profile is mirrored to the other
-// three corners, the outline is shrunk by one pixel and softened by a 3x3
-// average, and everything outside it becomes transparent.
+// The artwork is a square image of a light blue document on a white background,
+// with a neutral gray drop shadow. The document is cut out: it is told from the
+// background by its blue tint, the background turns transparent and the shadow
+// becomes black with the alpha of its gray, so it stays soft on any background.
+// Windows and Linux get the document alone; macOS gets it on a black rounded
+// square (a superellipse, like the continuous corners of macOS app icons).
 //
 // Writes:
-//   <outdir>/gittan.png          1024x1024 master, the icon filling the canvas
+//   <outdir>/gittan.png          1024x1024 master, the document alone
 //   <outdir>/png/gittan-<n>.png  16..512 for Linux desktop files
-//   <outdir>/Gittan.icns         macOS, icon inset to Apple's 824/1024 grid
-//   <Gittan.ico>                 Windows/Linux LCL icon, 16..256
+//   <outdir>/Gittan.icns         macOS, black rounded square inset to Apple's 824/1024 grid
+//   <Gittan.ico>                 Windows/Linux LCL icon, 16..256, the document alone
 //
 // macOS only (CoreGraphics, ImageIO, iconutil).
 
@@ -98,114 +97,109 @@ func resized(_ img: CGImage, to size: Int, inset: CGFloat = 0) -> Bitmap {
   return bm
 }
 
+let art = load(srcPath)
+if art.width != art.height { fail("the artwork must be square, it is \(art.width)x\(art.height)") }
+
 // ---------------------------------------------------------------------------
-// Outline
+// Windows and Linux: the document without its background
 // ---------------------------------------------------------------------------
 
-let art = load(srcPath)
 let W = art.width, H = art.height
 
-// A pixel belongs to the icon where it is dark or colored; the halo is a light
-// neutral gray and the background white. Transparent pixels never count.
-func isIcon(_ x: Int, _ y: Int) -> Bool {
-  let (r, g, b, a) = art.rgba(x, y)
-  if a < 128 { return false }
-  let mx = max(r, g, b), mn = min(r, g, b)
-  return mx < 150 || mx - mn > 25
-}
-
-func firstIcon(row y: Int, from x0: Int, to x1: Int) -> Int? {
-  let step = x1 >= x0 ? 1 : -1
-  var x = x0
-  while x != x1 { if isIcon(x, y) { return x }; x += step }
-  return nil
-}
-func firstIcon(col x: Int, from y0: Int, to y1: Int) -> Int? {
-  let step = y1 >= y0 ? 1 : -1
-  var y = y0
-  while y != y1 { if isIcon(x, y) { return y }; y += step }
-  return nil
-}
-
-// Edges: the left side at mid height, top and bottom on the blue left half,
-// the right side where the frame is dark red (lower third).
-let probeX = W * 39 / 100, probeY = H * 71 / 100
-guard let left = firstIcon(row: H / 2, from: 0, to: W / 2),
-      let top = firstIcon(col: probeX, from: 0, to: H / 2),
-      let bottom = firstIcon(col: probeX, from: H - 1, to: H / 2),
-      let right = firstIcon(row: probeY, from: W - 1, to: W / 2)
-else { fail("cannot find the icon's edges") }
-
-// Corner profile, measured at the bottom-left corner where the frame is dark
-// blue: leftmost icon pixel per row above the bottom edge, until it reaches
-// the left edge. Forced monotonic so noise cannot dent the mask.
-var profile: [Int] = []
-var run = W
-for y in stride(from: bottom, through: H / 2, by: -1) {
-  let x = firstIcon(row: y, from: 0, to: W / 2) ?? W
-  run = min(run, x)
-  if run <= left { break }
-  profile.append(run)
-}
-let radius = profile.count
-
-// Sanity check against the bottom-right corner, which is dark red.
-var mismatch = 0
-for (i, xl) in profile.enumerated() {
-  let xr = firstIcon(row: bottom - i, from: W - 1, to: W / 2) ?? -1
-  mismatch = max(mismatch, abs((right - xr) - (xl - left)))
-}
-print("outline: x \(left)...\(right), y \(top)...\(bottom), corner \(radius)px, left/right corner mismatch \(mismatch)px")
-if mismatch > 6 { fail("the top corners differ too much; the artwork is not symmetric") }
-
-let cw = right - left + 1, ch = bottom - top + 1
-
-// Inset of the outline from the box edge for each row, after a 1px erosion.
-func inset(row y: Int) -> Int? {
-  let dy = min(y, ch - 1 - y)
-  if dy < 1 { return nil }
-  let d = dy - 1
-  return (d < radius ? profile[d] - left : 0) + 1
-}
-
-var hard = [Float](repeating: 0, count: cw * ch)
-for y in 0..<ch {
-  guard let ins = inset(row: y) else { continue }
-  if cw - 2 * ins <= 0 { continue }
-  for x in ins..<(cw - ins) { hard[y * cw + x] = 1 }
-}
-// 3x3 average softens the stepped outline into a one pixel ramp.
-var alpha = [Float](repeating: 0, count: cw * ch)
-for y in 0..<ch {
-  for x in 0..<cw {
-    var sum: Float = 0
-    for dy in -1...1 { for dx in -1...1 {
-      let xx = x + dx, yy = y + dy
-      if xx >= 0, xx < cw, yy >= 0, yy < ch { sum += hard[yy * cw + xx] }
-    } }
-    alpha[y * cw + x] = sum / 9
+// The document is tinted blue; the background and shadow are neutral gray.
+var tinted = [Bool](repeating: false, count: W * H)
+for y in 0..<H {
+  for x in 0..<W {
+    let (r, _, b, _) = art.rgba(x, y)
+    tinted[y * W + x] = b - r >= 3
   }
 }
+// The background is what an untinted path reaches from the border; the
+// document is everything else, so its green, red and gray bars are kept.
+var outside = [Bool](repeating: false, count: W * H)
+var stack: [Int] = []
+for x in 0..<W { stack.append(x); stack.append((H - 1) * W + x) }
+for y in 0..<H { stack.append(y * W); stack.append(y * W + W - 1) }
+while let i = stack.popLast() {
+  if outside[i] || tinted[i] { continue }
+  outside[i] = true
+  let x = i % W, y = i / W
+  if x > 0 { stack.append(i - 1) }
+  if x < W - 1 { stack.append(i + 1) }
+  if y > 0 { stack.append(i - W) }
+  if y < H - 1 { stack.append(i + W) }
+}
+// The tint leaves the outline ragged: the fold's diagonal is nearly white and
+// the shadow has stray tinted specks along the edge. An opening (erode, then
+// dilate, 3 pixels) removes the specks before a closing (dilate, then erode,
+// 5 pixels) could join them to the edge; the closing fills the notches. Two
+// 13x13 averages smooth the outline, and a steep ramp around three quarters
+// (a pixel inside the tint, past the gray antialiased rim) turns the blur
+// back into an edge about two pixels wide.
+// Combines the (2r+1)x(2r+1) neighborhood of every pixel, a row pass then a
+// column pass, with pick starting from first.
+func spread(_ src: [Float], _ r: Int, _ first: Float, _ pick: (Float, Float) -> Float) -> [Float] {
+  var tmp = src, out = src
+  for y in 0..<H { for x in 0..<W {
+    var v = first
+    for d in -r...r { v = pick(v, src[y * W + min(max(x + d, 0), W - 1)]) }
+    tmp[y * W + x] = v
+  } }
+  for y in 0..<H { for x in 0..<W {
+    var v = first
+    for d in -r...r { v = pick(v, tmp[min(max(y + d, 0), H - 1) * W + x]) }
+    out[y * W + x] = v
+  } }
+  return out
+}
+var mask = outside.map { $0 ? Float(0) : 1 }
+mask = spread(spread(mask, 3, 1, min), 3, 0, max)
+mask = spread(spread(mask, 5, 0, max), 5, 1, min)
+mask = spread(spread(mask, 6, 0, +).map { $0 / 169 }, 6, 0, +).map { $0 / 169 }
+mask = mask.map { min(1, max(0, ($0 - 0.75) * 7 + 0.5)) }
+let loose = Bitmap(width: W, height: H)
+for y in 0..<H {
+  for x in 0..<W {
+    let m = mask[y * W + x]
+    let (r, g, b, _) = art.rgba(x, y)
+    // The shadow's gray becomes black with that much alpha; the near white
+    // background (252 and up) disappears.
+    let shade = max(0, Float(252 - min(r, g, b)) / 252)
+    let a = m + (1 - m) * shade
+    let i = loose.offset(x, y)
+    loose.data[i] = UInt8(Float(r) * m + 0.5)
+    loose.data[i + 1] = UInt8(Float(g) * m + 0.5)
+    loose.data[i + 2] = UInt8(Float(b) * m + 0.5)
+    loose.data[i + 3] = UInt8(a * 255 + 0.5)
+  }
+}
+let looseImage = loose.image
 
 // ---------------------------------------------------------------------------
-// Master: the cut-out centered on a square canvas
+// macOS: the document on a black rounded square
 // ---------------------------------------------------------------------------
 
-let side = max(cw, ch)
+// The outline is a superellipse |x|^5 + |y|^5 = 1, close to the continuous
+// corners of macOS app icons, filled with antialiasing through a clip path.
+let side = 1024
 let cut = Bitmap(width: side, height: side)
-let ox = (side - cw) / 2, oy = (side - ch) / 2
-for y in 0..<ch {
-  for x in 0..<cw {
-    let a = alpha[y * cw + x]
-    if a <= 0 { continue }
-    let (r, g, b, _) = art.rgba(left + x, top + y)
-    let i = cut.offset(ox + x, oy + y)
-    cut.data[i] = UInt8(Float(r) * a + 0.5)
-    cut.data[i + 1] = UInt8(Float(g) * a + 0.5)
-    cut.data[i + 2] = UInt8(Float(b) * a + 0.5)
-    cut.data[i + 3] = UInt8(a * 255 + 0.5)
-  }
+let path = CGMutablePath()
+let half = CGFloat(side) / 2, exponent = 5.0, steps = 2048
+for i in 0..<steps {
+  let t = Double(i) / Double(steps) * 2 * Double.pi
+  let c = cos(t), s = sin(t)
+  let x = copysign(pow(abs(c), 2 / exponent), c), y = copysign(pow(abs(s), 2 / exponent), s)
+  let p = CGPoint(x: half + half * CGFloat(x), y: half + half * CGFloat(y))
+  if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
 }
+path.closeSubpath()
+cut.ctx.addPath(path)
+cut.ctx.clip()
+cut.ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+cut.ctx.fill(CGRect(x: 0, y: 0, width: side, height: side))
+// The document shrinks to 84% so the plate shows around it.
+let docInset = CGFloat(side) * 0.08
+cut.draw(looseImage, in: CGRect(x: 0, y: 0, width: side, height: side).insetBy(dx: docInset, dy: docInset))
 let cutImage = cut.image
 
 let fm = FileManager.default
@@ -215,7 +209,7 @@ func write(_ data: Data, _ path: String) {
   do { try data.write(to: URL(fileURLWithPath: path)) } catch { fail("cannot write \(path): \(error)") }
 }
 
-let master = resized(cutImage, to: 1024)
+let master = resized(looseImage, to: 1024)
 write(master.pngData(), outDir + "/gittan.png")
 let masterImage = master.image
 
