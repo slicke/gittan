@@ -268,7 +268,8 @@ type
     procedure StartWatcher;
     procedure StopWatcher;
     function LoadRepository: boolean;
-    procedure RefreshRepository;
+    procedure ApplySnapshot(const ASnap: TGittanRepoSnapshot);
+    procedure RefreshRepository(ASnap: PGittanRepoSnapshot = nil);
     procedure ShowError(const AMessage: string);
     function SelectedPath: string;
     function StatIcon(const AStat: TGittanFileStat): integer;
@@ -2110,46 +2111,57 @@ end;
 { Reads the branch and the changed files of the open repository into the
   tree and the summary. Returns false, with the message in FLoadError,
   when git failed; the views are empty then. }
+{ Gathers the repository and draws it, all on this thread: the load when a
+  repository is opened, where a short wait is expected. The watcher path
+  gathers the snapshot in its own thread and calls ApplySnapshot alone. }
 function TForm1.LoadRepository: boolean;
 var
-  Stats: TGittanFileStats;
+  Snap: TGittanRepoSnapshot;
+begin
+  Result := FRepo.Snapshot(Snap);
+  ApplySnapshot(Snap);
+end;
+
+{ Draws a snapshot of the repository into the views, on the main thread.
+  The git work that built it is ApplySnapshot's caller's business: it is
+  done on this thread by LoadRepository, in the watcher thread otherwise. }
+procedure TForm1.ApplySnapshot(const ASnap: TGittanRepoSnapshot);
+var
   Icons: array of integer;
   i: integer;
   Branch: string;
 begin
+  if not ASnap.Ok then
+    FLoadError := ASnap.Error;
   ClearBlameCache;
-  Result := FRepo.ChangeStats(Stats);
-  if not Result then
-    FLoadError := FRepo.Error;
-  FStats := Stats;
-  FBranch := FRepo.Branch;
+  FStats := ASnap.Stats;
+  FBranch := ASnap.Branch;
+  { The pull request is looked up for the branch HEAD is on, the detached
+    id during a rebase, so this runs before the rebase branch stands in. }
   StartPullJob(False);
-  FDefaultBranch := FRepo.DefaultBranch;
-  if not FRepo.MergeBase(FDefaultBranch, FMergeBase) then
-    FMergeBase := '';
-  FHasUpstream := FRepo.AheadBehind(FAhead, FBehind);
-  FOperation := FRepo.Operation;
-  if FOperation = 'rebasing' then
-  begin
+  FDefaultBranch := ASnap.DefaultBranch;
+  FMergeBase := ASnap.MergeBase;
+  FHasUpstream := ASnap.HasUpstream;
+  FAhead := ASnap.Ahead;
+  FBehind := ASnap.Behind;
+  FOperation := ASnap.Operation;
+  if (FOperation = 'rebasing') and (ASnap.RebaseBranch <> '') then
     { HEAD is detached while a rebase stops; the branch is the one it
       rebases. }
-    Branch := FRepo.RebaseBranch;
-    if Branch <> '' then
-      FBranch := Branch;
-  end;
+    FBranch := ASnap.RebaseBranch;
   FConflictFiles := 0;
-  for i := 0 to High(Stats) do
-    if Stats[i].Kind = ckConflict then
+  for i := 0 to High(FStats) do
+    if FStats[i].Kind = ckConflict then
       Inc(FConflictFiles);
-  FFileCount := Length(Stats);
-  FillFileTree(Stats);
-  SetLength(Icons, Length(Stats));
-  for i := 0 to High(Stats) do
-    Icons[i] := StatIcon(Stats[i]);
+  FFileCount := Length(FStats);
+  FillFileTree(FStats);
+  SetLength(Icons, Length(FStats));
+  for i := 0 to High(FStats) do
+    Icons[i] := StatIcon(FStats[i]);
   Branch := FBranch;
   if FOperation <> '' then
     Branch := Branch + ' · ' + FOperation;
-  FSummary.SetRepository(ExtractFileName(FRepo.Root), Branch, BaseLabel, Stats, Icons);
+  FSummary.SetRepository(ExtractFileName(FRepo.Root), Branch, BaseLabel, FStats, Icons);
   RebuildCompareMenu;
   FTerminalItem.Enabled := FRepo.Root <> '';
 end;
@@ -2189,8 +2201,14 @@ begin
 end;
 
 procedure TForm1.WatcherChange(Sender: TObject);
+var
+  Snap: TGittanRepoSnapshot;
 begin
-  RefreshRepository;
+  { Runs on the main thread while the watcher is held in Synchronize, so
+    its snapshot, gathered off the main thread, is copied out and applied
+    without running any git here. }
+  Snap := FWatcher.Snapshot;
+  RefreshRepository(@Snap);
 end;
 
 procedure TForm1.MenuRefreshClick(Sender: TObject);
@@ -2213,8 +2231,10 @@ end;
   repository diff. A selected file that is no longer changed gives way to
   the summary, which says so. Filling the tree drops the selection, so
   the view is noted first and restored by selecting the file again, which
-  runs the usual selection handler. }
-procedure TForm1.RefreshRepository;
+  runs the usual selection handler. ASnap nil reads the repository here;
+  otherwise it is the snapshot the watcher already gathered off the main
+  thread, which is only drawn. }
+procedure TForm1.RefreshRepository(ASnap: PGittanRepoSnapshot = nil);
 var
   Collapsed: TStringList;
   Node: TTreeNode;
@@ -2249,8 +2269,17 @@ begin
         Collapsed.Add(Node.GetTextPath);
       Node := Node.GetNext;
     end;
-    if not LoadRepository then
-      StatusBar.SimpleText := FLoadError;
+    if ASnap = nil then
+    begin
+      if not LoadRepository then
+        StatusBar.SimpleText := FLoadError;
+    end
+    else
+    begin
+      ApplySnapshot(ASnap^);
+      if not ASnap^.Ok then
+        StatusBar.SimpleText := FLoadError;
+    end;
     Node := FileTree.Items.GetFirstNode;
     while Node <> nil do
     begin

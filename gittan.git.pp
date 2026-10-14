@@ -37,6 +37,19 @@ type
   end;
   TGittanFileStats = array of TGittanFileStat;
 
+  {** Everything the views read about a repository at one moment, gathered
+    in one pass so it can be computed off the main thread and handed over
+    whole. Ok is false when git failed, with the message in Error. }
+  TGittanRepoSnapshot = record
+    Ok: boolean;
+    Error: string;
+    Stats: TGittanFileStats;
+    Branch, DefaultBranch, MergeBase, Operation, RebaseBranch: string;
+    HasUpstream: boolean;
+    Ahead, Behind: integer;
+  end;
+  PGittanRepoSnapshot = ^TGittanRepoSnapshot;
+
   {** One opened repository. Open finds the work tree root for a folder, and
     the other calls run inside that root. }
   TGittanRepo = class
@@ -109,6 +122,15 @@ type
       counts from `git diff --numstat`. A file git does not know yet has
       every line counted as added. Returns false when git failed. }
     function ChangeStats(out AStats: TGittanFileStats): boolean;
+    {** Everything the views read about the repository, gathered in one
+      pass: the changed files, the branch, the default branch, the merge
+      base with it, the ahead/behind counts, and the operation in progress
+      with the branch a rebase rebases. Runs only git, no LCL, so it can
+      be called from a watcher thread and the result handed to the main
+      thread. ASnap.Ok is false, with ASnap.Error set, when the changed
+      files could not be read; the rest is filled in as far as git
+      answered. Returns ASnap.Ok. }
+    function Snapshot(out ASnap: TGittanRepoSnapshot): boolean;
     {** The current branch, the short commit id when HEAD is detached, or
       empty when nothing is open. }
     function Branch: string;
@@ -1070,6 +1092,28 @@ begin
     Num.Free;
     Paths.Free;
   end;
+end;
+
+{ One pass over git for everything the views read, so a watcher thread can
+  gather it and hand the record to the main thread, which then only draws.
+  The changed files decide Ok; branch and the rest are read regardless and
+  filled in as far as git answered, as LoadRepository used to do call by
+  call. }
+function TGittanRepo.Snapshot(out ASnap: TGittanRepoSnapshot): boolean;
+begin
+  ASnap := Default(TGittanRepoSnapshot);
+  ASnap.Ok := ChangeStats(ASnap.Stats);
+  if not ASnap.Ok then
+    ASnap.Error := FError;
+  ASnap.Branch := Branch;
+  ASnap.DefaultBranch := DefaultBranch;
+  if not MergeBase(ASnap.DefaultBranch, ASnap.MergeBase) then
+    ASnap.MergeBase := '';
+  ASnap.HasUpstream := AheadBehind(ASnap.Ahead, ASnap.Behind);
+  ASnap.Operation := Operation;
+  if ASnap.Operation = 'rebasing' then
+    ASnap.RebaseBranch := RebaseBranch;
+  Result := ASnap.Ok;
 end;
 
 { symbolic-ref names the branch even before its first commit; it fails

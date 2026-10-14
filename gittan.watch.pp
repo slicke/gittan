@@ -28,6 +28,7 @@ type
     FWake: PRTLEvent;
     FInterval: integer;
     FLast: string;
+    FSnapshot: TGittanRepoSnapshot;
     FOnChange: TNotifyEvent;
     procedure Notify;
   protected
@@ -41,6 +42,11 @@ type
     procedure Stop;
     {** Called in the main thread after the repository changed. }
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
+    {** The repository as it was when the last OnChange fired, gathered in
+      the watcher thread so the main thread only draws it. Read it from the
+      OnChange handler; the thread is held in Synchronize meanwhile, so it
+      is not overwritten until the handler returns. }
+    property Snapshot: TGittanRepoSnapshot read FSnapshot;
   end;
 
 implementation
@@ -76,7 +82,9 @@ end;
   ---------------------------------------------------------------------------
   The thread sleeps on an event with the interval as timeout, so Terminate
   wakes it at once instead of after a whole interval. git runs in this
-  thread; only Notify reaches the main thread, through the thread queue. }
+  thread, the snapshot too; only Notify reaches the main thread. It goes
+  through Synchronize, not Queue, so the thread is held while the main
+  thread reads FSnapshot and does not overwrite it on the next tick. }
 procedure TGittanWatcher.Execute;
 var
   Fingerprint: string;
@@ -95,7 +103,10 @@ begin
     if Fingerprint <> FLast then
     begin
       FLast := Fingerprint;
-      Queue(@Notify);
+      FRepo.Snapshot(FSnapshot);
+      if Terminated then
+        Break;
+      Synchronize(@Notify);
     end;
   end;
 end;
@@ -111,9 +122,9 @@ begin
     FOnChange(Self);
 end;
 
-{ WaitFor on the main thread runs the queued calls while it waits, so the
-  handler is dropped first: a Notify that is already queued then does
-  nothing. }
+{ WaitFor on the main thread runs the pending Synchronize while it waits,
+  so the handler is dropped first: a Notify already waiting then does
+  nothing and the thread it holds is let go. }
 procedure TGittanWatcher.Stop;
 begin
   FOnChange := nil;
