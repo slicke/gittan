@@ -120,6 +120,15 @@ type
       git does not know yet is returned as all added lines; a binary file
       gives no lines. Returns false when git failed. }
     function FileChanges(const APath: string; ALines: TStrings): boolean;
+    {** The two commits a diff of a file is between: ALeft is Base (HEAD
+      by default), ARight the right commit of a range, or empty for the
+      work tree. }
+    procedure DiffSides(out ALeft, ARight: string);
+    {** The output of `git blame --porcelain` for APath as it is in the
+      commit ARef, or in the work tree when ARef is empty, with
+      IgnoreWhitespace passed on as -w. Returns false when git failed: a
+      file it does not know, or one ARef lacks. }
+    function Blame(const APath, ARef: string; out AOutput: string): boolean;
     {** A text that changes whenever the branch, the set of changed files
       or the content of a changed file changes: the branch, the commit ids
       of HEAD and Base, the status of every changed file, and the size,
@@ -935,6 +944,48 @@ begin
   finally
     Raw.Free;
   end;
+end;
+
+{ ---------------------------------------------------------------------------
+  Blame
+  --------------------------------------------------------------------------- }
+procedure TGittanRepo.DiffSides(out ALeft, ARight: string);
+begin
+  if IsRange then
+    SplitRange(ALeft, ARight)
+  else
+  begin
+    ALeft := DiffBase;
+    ARight := '';
+  end;
+end;
+
+function TGittanRepo.Blame(const APath, ARef: string; out AOutput: string): boolean;
+var
+  Args: array of string;
+  n: integer;
+begin
+  AOutput := '';
+  if FRoot = '' then
+    Exit(False);
+  SetLength(Args, 6);
+  Args[0] := 'blame';
+  Args[1] := '--porcelain';
+  n := 2;
+  if FIgnoreWhitespace then
+  begin
+    Args[n] := '-w';
+    Inc(n);
+  end;
+  if ARef <> '' then
+  begin
+    Args[n] := ARef;
+    Inc(n);
+  end;
+  Args[n] := '--';
+  Args[n + 1] := APath;
+  SetLength(Args, n + 2);
+  Result := RunGit(FRoot, Args, AOutput);
 end;
 
 end.

@@ -43,6 +43,8 @@ type
     SideBySide: boolean;
     {** Leave whitespace changes out of every diff. }
     IgnoreWhitespace: boolean;
+    {** Show in the gutter who last changed each line. }
+    Blame: boolean;
     {** Command that opens a file from the context menu, with the path
       appended; empty opens it with the desktop's default application. }
     EditorCommand: string;
@@ -122,6 +124,7 @@ begin
       ContextLines := Ini.ReadInteger(SecView, 'ContextLines', 3);
       SideBySide := Ini.ReadBool(SecView, 'SideBySide', False);
       IgnoreWhitespace := Ini.ReadBool(SecView, 'IgnoreWhitespace', False);
+      Blame := Ini.ReadBool(SecView, 'Blame', False);
       EditorCommand := Ini.ReadString(SecView, 'EditorCommand', '');
       TerminalCommand := Ini.ReadString(SecView, 'TerminalCommand', '');
       FRecent.Clear;
@@ -162,6 +165,7 @@ begin
       Ini.WriteInteger(SecView, 'ContextLines', ContextLines);
       Ini.WriteBool(SecView, 'SideBySide', SideBySide);
       Ini.WriteBool(SecView, 'IgnoreWhitespace', IgnoreWhitespace);
+      Ini.WriteBool(SecView, 'Blame', Blame);
       Ini.WriteString(SecView, 'EditorCommand', EditorCommand);
       Ini.WriteString(SecView, 'TerminalCommand', TerminalCommand);
       Ini.EraseSection(SecRecent);

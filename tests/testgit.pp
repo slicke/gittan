@@ -39,6 +39,7 @@ type
     procedure TestFingerprint;
     procedure TestFiles;
     procedure TestSnapshot;
+    procedure TestBlame;
   end;
 
 implementation
@@ -544,6 +545,46 @@ begin
   finally
     L.Free;
   end;
+end;
+
+{ Each side of a diff blamed in its version: the base names the commit
+  of every line, the work tree the uncommitted ones under zeros. An
+  untracked file cannot be blamed. }
+procedure TGitRepoTest.TestBlame;
+var
+  Output, Left, Right, Head: string;
+begin
+  MakeHistory;
+  Git(['tag', 'first']);
+  WriteFile('a.txt', 'one'#10'two'#10'three'#10'four'#10);
+  Commit('second');
+  WriteFile('a.txt', 'one'#10'two'#10'three'#10'four'#10'five'#10);
+  WriteFile('new.txt', 'n'#10);
+  AssertTrue(FRepo.Open(FDir));
+  Head := Trim(Git(['rev-parse', 'HEAD']));
+
+  FRepo.DiffSides(Left, Right);
+  AssertEquals('HEAD', Left);
+  AssertEquals('the work tree', '', Right);
+  AssertTrue(FRepo.Blame('a.txt', '', Output));
+  AssertTrue('the commit of line four', Pos(Head + ' 4 4', Output) > 0);
+  AssertTrue('line five is not committed',
+    Pos(StringOfChar('0', 40) + ' 5 5', Output) > 0);
+  AssertTrue(Pos('author Gittan Test', Output) > 0);
+  AssertTrue(Pos('summary second', Output) > 0);
+
+  AssertTrue(FRepo.Blame('a.txt', 'first', Output));
+  AssertTrue('three lines in the first commit', Pos(' 3 3', Output) > 0);
+  AssertFalse(Pos(' 4 4', Output) > 0);
+  AssertTrue(Pos('summary files', Output) > 0);
+
+  AssertFalse('untracked', FRepo.Blame('new.txt', '', Output));
+  AssertFalse('not in the commit', FRepo.Blame('new.txt', 'first', Output));
+
+  FRepo.Base := 'first..HEAD';
+  FRepo.DiffSides(Left, Right);
+  AssertEquals('first', Left);
+  AssertEquals('HEAD', Right);
 end;
 
 initialization

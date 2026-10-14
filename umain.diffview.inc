@@ -71,6 +71,8 @@ var
 begin
   n := FChangeLines.Count;
   NumberLines(FChangeLines, OldNum, NewNum);
+  FOldNum := OldNum;
+  FNewNum := NewNum;
   WordDiff(FChangeLines, FIgnoreWhitespace, FWordSpans);
   { Which diff lines are shown: all, or the changed ones with their
     context and the gaps the user opened. }
@@ -118,6 +120,7 @@ begin
   if not FSideBySide then
   begin
     FRows := Rows;
+    FRowsOld := nil;
     FillChangeEditor(Edit, Rows, False, OldNum, NewNum, Lexer);
     Exit;
   end;
@@ -157,6 +160,7 @@ begin
     end;
   end;
   FRows := RightRows;
+  FRowsOld := LeftRows;
   FillChangeEditor(FEditOld, LeftRows, True, OldNum, NewNum, Lexer);
   FillChangeEditor(Edit, RightRows, False, OldNum, NewNum, Lexer);
   FEditOld.LineTop := 0;

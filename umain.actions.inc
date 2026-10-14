@@ -49,6 +49,7 @@ begin
   FSideBySide := FSettings.SideBySide;
   FWordWrap := FSettings.WordWrap;
   FIgnoreWhitespace := FSettings.IgnoreWhitespace;
+  FBlameOn := FSettings.Blame;
   FRepo.IgnoreWhitespace := FIgnoreWhitespace;
   FContextLines := ContextChoices[1];
   for i := 0 to High(ContextChoices) do
@@ -105,6 +106,7 @@ begin
   FSettings.ContextLines := FContextLines;
   FSettings.SideBySide := FSideBySide;
   FSettings.IgnoreWhitespace := FIgnoreWhitespace;
+  FSettings.Blame := FBlameOn;
   FSettings.Save;
   SaveIndex;
 end;
@@ -500,7 +502,8 @@ var
   Part: double;
   R: TRect;
 begin
-  if (FOverscroll <= 0) or (FView <> gvChanges) then
+  DrawBlame(TATSynEdit(Sender), C);
+  if (Sender <> Edit) or (FOverscroll <= 0) or (FView <> gvChanges) then
     Exit;
   Node := NeighbourFile(True);
   if Node = nil then

@@ -478,6 +478,7 @@ begin
   end;
   FHoverLinked := False;
   FHoverWord := '';
+  FHoverBlame := '';
   FHoverEd := nil;
 end;
 
@@ -495,12 +496,27 @@ var
   Link: boolean;
 begin
   Ed := TATSynEdit(Sender);
+  { On the blame band the cell under the mouse is the hover, see
+    umain.blame.inc. }
+  Word := BlameHintAt(Ed, X, Y);
+  if Word <> '' then
+  begin
+    if (Word <> FHoverBlame) or (Ed <> FHoverEd) then
+    begin
+      ClearHover;
+      FHoverEd := Ed;
+      FHoverBlame := Word;
+      FHoverTimer.Enabled := True;
+    end;
+    Exit;
+  end;
   P := Ed.ClientPosToCaretPos(ATPoint(X, Y), Details);
   Word := '';
   if (P.Y >= 0) and not Details.BelowAllText and not Details.EndOfWrappedLine and
     (Details.OnGapItem = nil) then
     Word := WordAt(Ed, P, N1, N2);
-  if (Word <> FHoverWord) or (Ed <> FHoverEd) or (P.Y <> FHoverRow) then
+  if (Word <> FHoverWord) or (Ed <> FHoverEd) or (P.Y <> FHoverRow) or
+    (FHoverBlame <> '') then
   begin
     ClearHover;
     if Word = '' then
@@ -552,6 +568,12 @@ var
   Symbol: TGittanSymbol;
 begin
   FHoverTimer.Enabled := False;
+  if (FHoverEd <> nil) and (FHoverBlame <> '') then
+  begin
+    FHoverEd.Hint := FHoverBlame;
+    Application.ActivateHint(Mouse.CursorPos);
+    Exit;
+  end;
   Ed := FHoverEd;
   Word := FHoverWord;
   if (Ed = nil) or (Word = '') or not Ed.Visible then

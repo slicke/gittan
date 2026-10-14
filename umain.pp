@@ -10,11 +10,12 @@ uses
   ATSynEdit, ATSynEdit_Adapter_EControl, ATSynEdit_Bookmarks,
   ATSynEdit_Carets, ATSynEdit_Gutter_Decor, ATSynEdit_Globals, ATStringProc,
   ATStringProc_WordJump,
-  ATSynEdit_Markers, ATSynEdit_LineParts, ATSynEdit_Ranges, ec_SyntAnal,
+  ATSynEdit_Markers, ATSynEdit_LineParts, ATSynEdit_Ranges, ATSynEdit_WrapInfo,
+  ec_SyntAnal,
   gittan.lexers, gittan.git, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
-  gittan.symbolindex, gittan.snapshots, md5;
+  gittan.symbolindex, gittan.snapshots, gittan.blame, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -97,6 +98,8 @@ type
     FHoverTimer: TTimer;
     FHoverEd: TATSynEdit;
     FHoverWord: string;
+    { The hint of the blame cell under the mouse, see umain.blame.inc. }
+    FHoverBlame: string;
     FHoverRow: integer;
     FHoverLinked: boolean;
     FLinkColor: TColor;
@@ -127,6 +130,10 @@ type
     FCurrentPath: string;
     FExpanded: TIntegerDynArray;
     FRows: TGittanRows;
+    { The rows of the old side, and the number of each diff line in the
+      old and the new file (see NumberLines). }
+    FRowsOld: TGittanRows;
+    FOldNum, FNewNum: TIntegerDynArray;
     FOnlyChanges, FSideBySide, FWordWrap, FIgnoreWhitespace: boolean;
     FContextLines: integer;
     { The spans of the changed lines that differ word by word, one entry
@@ -142,6 +149,20 @@ type
     FOverscrollArmed: boolean;
     FOverscrollTimer: TTimer;
     FPullFill, FPullBorder, FPullText, FPullBar: TColor;
+    { View > Blame (see umain.blame.inc): whether it is on, its menu item,
+      the blames of the two sides of the shown file, the job that blames
+      a file, the cache of the results (TGittanBlame per side and path,
+      nil for a side git could not blame), the jobs given up on, the
+      width of the author column in characters, and the time the ages
+      are counted from. }
+    FBlameOn: boolean;
+    FBlameItem: TMenuItem;
+    FBlameOld, FBlameNew: TGittanBlame;
+    FBlameJob: TGittanBlameJob;
+    FBlameCache: TStringList;
+    FBlameZombies: TList;
+    FBlameCols: integer;
+    FBlameNow: int64;
     procedure ApplyTheme;
     procedure ApplyEditorColors(AEd: TATSynEdit);
     procedure SetupEditor(AEd: TATSynEdit);
@@ -213,6 +234,22 @@ type
     procedure ApplyLayout;
     procedure ApplyWrap;
     procedure RebuildIfChanges;
+    { umain.blame.inc }
+    procedure MenuBlameClick(Sender: TObject);
+    procedure StartBlame;
+    procedure AbandonBlameJob;
+    procedure FreeFinishedBlameJobs(AWait: boolean);
+    procedure FreeBlameJobsAsync(Data: PtrInt);
+    procedure CacheBlame(const ARef, APath: string; ABlame: TGittanBlame);
+    procedure BlameJobDone(Sender: TObject);
+    procedure ClearBlameCache;
+    procedure StopBlame;
+    procedure ApplyBlame;
+    procedure SetBlameBand(AEd: TATSynEdit);
+    function BlameOfRow(AEd: TATSynEdit; ARow: integer; out ABlame: TGittanBlame): integer;
+    function BlameHintText(const ACommit: TGittanBlameCommit): string;
+    function BlameHintAt(AEd: TATSynEdit; X, Y: integer): string;
+    procedure DrawBlame(AEd: TATSynEdit; C: TCanvas);
     { umain.actions.inc }
     procedure ApplySettings;
     procedure FormClose(Sender: TObject; var CloseAction: TCloseAction);
@@ -315,7 +352,7 @@ implementation
 {$R *.lfm}
 
 uses
-  Clipbrd, LCLIntf, Process, FileUtil;
+  Clipbrd, LCLIntf, Process, FileUtil, DateUtils;
 
 resourcestring
   rsFile = '&File';
@@ -345,6 +382,9 @@ resourcestring
   rsSideBySide = 'Side &by Side';
   rsWordWrap = '&Word Wrap';
   rsIgnoreSpace = 'I&gnore Whitespace';
+  rsBlame = '&Blame';
+  rsNotCommitted = 'Not committed';
+  rsNotCommittedYet = 'Not committed yet';
   rsZoomIn = 'Zoom &In';
   rsZoomOut = 'Zoom &Out';
   rsZoomReset = 'Actual Si&ze';
@@ -415,6 +455,11 @@ const
   { The attribute that underlines the word under the mouse while Cmd is
     held, as a link to its definition. }
   tagHoverLink = 3;
+  { The gutter band of the blame (see umain.blame.inc), the width of its
+    age column in characters and the most the author column takes. }
+  gutterTagBlame = 100;
+  BlameAgeCols = 5;
+  BlameMaxAuthorCols = 20;
   { How long the mouse rests on a word before its definition is shown. }
   HoverPause = 600;
   { How long one parse may take before a lookup or the indexer gives up
@@ -440,6 +485,10 @@ begin
   FSettings := TGittanSettings.Create;
   FSettings.Load;
   FChangeLines := TStringList.Create;
+  FBlameCache := TStringList.Create;
+  FBlameCache.CaseSensitive := True;
+  FBlameZombies := TList.Create;
+  FBlameCols := 12;
   FSideRatio := 0.5;
   { The editor comes from umain.lfm. The EControl adapter is not an IDE
     component, so it is created here. Gittan is a viewer, so the editor is
@@ -477,6 +526,7 @@ begin
   FEditOld.OptRulerVisible := False;
   FEditOld.OptUnprintedVisible := False;
   FEditOld.OptMinimapVisible := False;
+  FEditOld.OnDrawEditor := @EditDrawEditor;
   FAdapterOld := TATAdapterEControl.Create(Self);
   FAdapterOld.AddEditor(FEditOld);
   FAdapterOld.OnParseBegin := @AdapterParseBegin;
@@ -590,6 +640,7 @@ procedure TForm1.FormDestroy(Sender: TObject);
 begin
   Application.RemoveAsyncCalls(Self);
   StopWatcher;
+  StopBlame;
   StopIndexing;
   SaveIndex;
   FAdapter.Lexer := nil;
@@ -650,6 +701,9 @@ begin
     already says what is left out. }
   ATEditorOptions.FoldedUnderlineStyle := TATEditorFoldedUnderlineStyle.None;
   SetLineStatesBand(AEd, False);
+  { The blame band, leftmost, hidden until View > Blame; the editor
+    leaves its size alone (see SetBlameBand). }
+  AEd.Gutter.Add(0, 0, gutterTagBlame, False, False);
 end;
 
 function TForm1.AdapterOf(AEd: TATSynEdit): TATAdapterEControl;
@@ -975,6 +1029,9 @@ begin
   FIgnoreSpaceItem := AddItem(ViewMenu, rsIgnoreSpace, ShortCut(VK_I, [ssModifier, ssAlt]),
     @MenuIgnoreSpaceClick);
   FIgnoreSpaceItem.Checked := FIgnoreWhitespace;
+  FBlameItem := AddItem(ViewMenu, rsBlame, ShortCut(VK_B, [ssModifier, ssShift]),
+    @MenuBlameClick);
+  FBlameItem.Checked := FBlameOn;
   ViewMenu.Add(NewLine);
   AddItem(ViewMenu, rsZoomIn, ShortCut(VK_OEM_PLUS, [ssModifier]), @MenuZoomInClick);
   AddItem(ViewMenu, rsZoomOut, ShortCut(VK_OEM_MINUS, [ssModifier]), @MenuZoomOutClick);
@@ -1377,6 +1434,15 @@ end;
   (the summary hides the editor until then) and on a zoom. Until then
   the editor's TextCharSize is a placeholder, and a band sized from it
   cuts the numbers once the editor applies it. }
+{ The size of AEd's font at its zoom, as the editor sets its canvas. }
+function EditorFontSize(AEd: TATSynEdit): integer;
+begin
+  if AEd.OptScaleFont > 0 then
+    Result := AEd.Font.Size * AEd.OptScaleFont div 100
+  else
+    Result := ATEditorScaleFont(AEd.Font.Size);
+end;
+
 function EditorCharWidth(AEd: TATSynEdit): integer;
 var
   Bmp: TBitmap;
@@ -1384,10 +1450,7 @@ begin
   Bmp := TBitmap.Create;
   try
     Bmp.Canvas.Font.Name := AEd.Font.Name;
-    if AEd.OptScaleFont > 0 then
-      Bmp.Canvas.Font.Size := AEd.Font.Size * AEd.OptScaleFont div 100
-    else
-      Bmp.Canvas.Font.Size := ATEditorScaleFont(AEd.Font.Size);
+    Bmp.Canvas.Font.Size := EditorFontSize(AEd);
     Result := Max(1, Bmp.Canvas.TextWidth(ATEditorOptions.SampleChar));
   finally
     Bmp.Free;
@@ -1424,6 +1487,7 @@ begin
     Other.OptScaleFont := TATSynEdit(Sender).OptScaleFont;
   UpdateNumberWidth(Edit);
   UpdateNumberWidth(FEditOld);
+  ApplyBlame;
 end;
 
 { ---------------------------------------------------------------------------
@@ -1635,6 +1699,7 @@ var
   Icons: array of integer;
   i: integer;
 begin
+  ClearBlameCache;
   Result := FRepo.ChangeStats(Stats);
   if not Result then
     FLoadError := FRepo.Error;
@@ -1807,6 +1872,7 @@ begin
   FSummaryBox.Visible := False;
   FHeader.Visible := True;
   ApplyLayout;
+  ApplyBlame;
   Edit.Visible := True;
 end;
 
@@ -1954,6 +2020,7 @@ begin
     SetDirSeparators(APath);
   UpdateStatus;
   Edit.Update;
+  StartBlame;
 end;
 
 { ---------------------------------------------------------------------------
@@ -2067,6 +2134,7 @@ end;
 {$I umain.diffview.inc}
 {$I umain.actions.inc}
 {$I umain.gotodef.inc}
+{$I umain.blame.inc}
 {$I umain.index.inc}
 
 end.
