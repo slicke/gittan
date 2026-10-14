@@ -4,7 +4,9 @@
   Included by umain.pp. View > Blame adds a band at the left of the
   gutter of the change view that names, at the first row of each run of
   lines last changed by the same commit, the author and the age of the
-  commit; the mouse over the band shows the commit itself. A line of
+  commit; the mouse over the band shows the commit itself. In the
+  history view (umain.history.inc) the band names the commit of each
+  section the same way, from the history itself, without a blame. A line of
   the new side (the work tree, or the right commit of a range) is blamed
   in that version, a deleted line in the base. The two blames of a file
   run in a TGittanBlameJob, and the results are kept per commit and
@@ -63,7 +65,8 @@ end;
 
 { A job that is no longer wanted runs on without a handler until git is
   done, and is freed with the next finished jobs: waiting for it here
-  would stall the window. }
+  would stall the window. The history jobs (umain.history.inc) are kept
+  in the same list. }
 procedure TForm1.AbandonBlameJob;
 begin
   if FBlameJob = nil then
@@ -78,9 +81,9 @@ var
   i: integer;
 begin
   for i := FBlameZombies.Count - 1 downto 0 do
-    if AWait or TGittanBlameJob(FBlameZombies[i]).Finished then
+    if AWait or TThread(FBlameZombies[i]).Finished then
     begin
-      TGittanBlameJob(FBlameZombies[i]).Free;
+      TThread(FBlameZombies[i]).Free;
       FBlameZombies.Delete(i);
     end;
 end;
@@ -142,6 +145,8 @@ end;
 procedure TForm1.StopBlame;
 begin
   ClearBlameCache;
+  AbandonHistoryJob;
+  FreeAndNil(FHistory);
   FreeFinishedBlameJobs(True);
   FreeAndNil(FBlameZombies);
   FreeAndNil(FBlameCache);
@@ -172,11 +177,20 @@ procedure TForm1.ApplyBlame;
   end;
 
 var
-  Cols: integer;
+  Cols, i: integer;
 begin
   Cols := 0;
-  Measure(FBlameOld, Cols);
-  Measure(FBlameNew, Cols);
+  if FView = gvHistory then
+  begin
+    if FHistory <> nil then
+      for i := 0 to High(FHistory.Commits) do
+        Cols := Max(Cols, Length(UTF8Decode(BlameAuthor(FHistory.Commits[i].Info))));
+  end
+  else
+  begin
+    Measure(FBlameOld, Cols);
+    Measure(FBlameNew, Cols);
+  end;
   if Cols > 0 then
     FBlameCols := Min(BlameMaxAuthorCols, Cols);
   FBlameNow := DateTimeToUnix(Now, False);
@@ -196,7 +210,7 @@ begin
   Band := AEd.Gutter.FindIndexByTag(gutterTagBlame);
   if Band < 0 then
     Exit;
-  Shown := FBlameOn and (FView = gvChanges);
+  Shown := FBlameOn and (FView in [gvChanges, gvHistory]);
   W := (FBlameCols + BlameAgeCols + 4) * EditorCharWidth(AEd);
   if (AEd.Gutter[Band].Visible <> Shown) or (AEd.Gutter[Band].Size <> W) then
   begin
@@ -244,6 +258,41 @@ begin
     ABlame := nil;
 end;
 
+{ The commit of row ARow of AEd for the band: in the history view the
+  commit of the row's section, its header and fillers included, so a
+  folded section shows its author and age too (the more row has none),
+  else the blamed commit (see BlameOfRow). AKey and ASource together
+  tell one commit from another: the index in ASource, the history or
+  the blame. }
+function TForm1.CommitOfRow(AEd: TATSynEdit; ARow: integer; out AInfo: TGittanBlameCommit;
+  out AKey: integer; out ASource: TObject): boolean;
+var
+  Blame: TGittanBlame;
+begin
+  Result := False;
+  AInfo := Default(TGittanBlameCommit);
+  AKey := -1;
+  ASource := nil;
+  if FView = gvHistory then
+  begin
+    if (AEd <> Edit) or (FHistory = nil) or (ARow < 0) or (ARow > High(FRows)) or
+      (FRows[ARow].Line = rowMore) then
+      Exit;
+    AKey := FRows[ARow].GapFrom;
+    if (AKey < 0) or (AKey > High(FHistory.Commits)) then
+      Exit;
+    ASource := FHistory;
+    AInfo := FHistory.Commits[AKey].Info;
+    Exit(True);
+  end;
+  AKey := BlameOfRow(AEd, ARow, Blame);
+  if AKey < 0 then
+    Exit;
+  ASource := Blame;
+  AInfo := Blame.Commits[AKey];
+  Result := True;
+end;
+
 function TForm1.BlameHintText(const ACommit: TGittanBlameCommit): string;
 begin
   if ACommit.Uncommitted then
@@ -258,10 +307,11 @@ end;
   the first column of the text. }
 function TForm1.BlameHintAt(AEd: TATSynEdit; X, Y: integer): string;
 var
-  Band, Commit: integer;
+  Band, Key: integer;
   Details: TATEditorPosDetails;
   P: TPoint;
-  Blame: TGittanBlame;
+  Info: TGittanBlameCommit;
+  Src: TObject;
 begin
   Result := '';
   Band := AEd.Gutter.FindIndexByTag(gutterTagBlame);
@@ -271,9 +321,8 @@ begin
   P := AEd.ClientPosToCaretPos(ATPoint(AEd.RectMain.Left + 1, Y), Details);
   if (P.Y < 0) or Details.BelowAllText then
     Exit;
-  Commit := BlameOfRow(AEd, P.Y, Blame);
-  if Commit >= 0 then
-    Result := BlameHintText(Blame.Commits[Commit]);
+  if CommitOfRow(AEd, P.Y, Info, Key, Src) then
+    Result := BlameHintText(Info);
 end;
 
 { Paints the band: the author at the left and the age at the right of
@@ -282,16 +331,17 @@ end;
   row of a wrapped line counts, and a row without a commit ends a run. }
 procedure TForm1.DrawBlame(AEd: TATSynEdit; C: TCanvas);
 var
-  Band, W, CharW, CharH, TextH, Commit, PrevCommit, Y: integer;
+  Band, W, CharW, CharH, TextH, Key, PrevKey, Y: integer;
   Item: TATWrapItem;
-  Blame, PrevBlame: TGittanBlame;
+  Src, PrevSrc: TObject;
+  Info: TGittanBlameCommit;
   Author, Age: string;
   AuthorU: UnicodeString;
 begin
   Band := AEd.Gutter.FindIndexByTag(gutterTagBlame);
-  if (Band < 0) or not AEd.Gutter[Band].Visible or (FView <> gvChanges) then
+  if (Band < 0) or not AEd.Gutter[Band].Visible or not (FView in [gvChanges, gvHistory]) then
     Exit;
-  if (FBlameOld = nil) and (FBlameNew = nil) then
+  if (FView = gvChanges) and (FBlameOld = nil) and (FBlameNew = nil) then
     Exit;
   CharW := EditorCharWidth(AEd);
   CharH := AEd.TextCharSize.Y;
@@ -303,8 +353,8 @@ begin
   C.ClipRect := Rect(AEd.Gutter[Band].Left, AEd.RectMain.Top, AEd.Gutter[Band].Right,
     AEd.RectMain.Bottom);
   try
-    PrevCommit := -2;
-    PrevBlame := nil;
+    PrevKey := -2;
+    PrevSrc := nil;
     W := AEd.WrapInfo.FindIndexOfLineNumber(AEd.LineTop);
     while W < AEd.WrapInfo.Count do
     begin
@@ -315,25 +365,25 @@ begin
       Y := AEd.CaretPosToClientPos(Point(0, Item.NLineIndex)).Y;
       if Y >= AEd.RectMain.Bottom then
         Break;
-      Commit := BlameOfRow(AEd, Item.NLineIndex, Blame);
-      if (Commit = PrevCommit) and (Blame = PrevBlame) then
+      CommitOfRow(AEd, Item.NLineIndex, Info, Key, Src);
+      if (Key = PrevKey) and (Src = PrevSrc) then
         Continue;
-      PrevCommit := Commit;
-      PrevBlame := Blame;
-      if Commit < 0 then
+      PrevKey := Key;
+      PrevSrc := Src;
+      if Src = nil then
         Continue;
-      AuthorU := UTF8Decode(BlameAuthor(Blame.Commits[Commit]));
+      AuthorU := UTF8Decode(BlameAuthor(Info));
       if Length(AuthorU) > FBlameCols then
         AuthorU := Copy(AuthorU, 1, FBlameCols - 1) + '…';
       Author := UTF8Encode(AuthorU);
-      if Blame.Commits[Commit].Uncommitted then
+      if Info.Uncommitted then
       begin
         Age := '';
         C.Font.Style := [fsItalic];
       end
       else
       begin
-        Age := BlameAge(Blame.Commits[Commit].Time, FBlameNow);
+        Age := BlameAge(Info.Time, FBlameNow);
         C.Font.Style := [];
       end;
       TextH := C.TextHeight(Author);
@@ -349,21 +399,26 @@ begin
 end;
 
 { A click on a cell of the band shows the commit of its row: what it
-  changed, in every file, as the diff from its parent. }
+  changed, in every file, as the diff from its parent; in the history
+  view with the file open at the lines. }
 procedure TForm1.EditClickGutter(Sender: TObject; ABand, ALine: integer;
   var AHandled: boolean);
 var
   Ed: TATSynEdit;
-  Commit: integer;
-  Blame: TGittanBlame;
+  Key: integer;
+  Info: TGittanBlameCommit;
+  Src: TObject;
 begin
   Ed := TATSynEdit(Sender);
   if (ABand < 0) or (Ed.Gutter[ABand].Tag <> gutterTagBlame) then
     Exit;
   AHandled := True;
-  Commit := BlameOfRow(Ed, ALine, Blame);
-  if (Commit >= 0) and not Blame.Commits[Commit].Uncommitted then
-    ShowBlameCommit(Blame.Commits[Commit].Hash);
+  if not CommitOfRow(Ed, ALine, Info, Key, Src) or Info.Uncommitted then
+    Exit;
+  if FView = gvHistory then
+    ShowHistoryCommit(Key)
+  else
+    ShowBlameCommit(Info.Hash);
 end;
 
 { Compares the commit with its parent, which lists its files and shows

@@ -129,6 +129,17 @@ type
       IgnoreWhitespace passed on as -w. Returns false when git failed: a
       file it does not know, or one ARef lacks. }
     function Blame(const APath, ARef: string; out AOutput: string): boolean;
+    {** The output of `git log` for the commits that changed the lines
+      AFrom..ATo of APath, as they are in the commit ARef (HEAD when
+      empty), newest first and at most AMax of them, each with its diff
+      of those lines (`git log -L`). With AFrom 0 the whole file is
+      followed instead (`git log -p`). Every commit starts with a line
+      of #1, the hash, the author, the author time and the summary
+      separated by #31 (see TGittanHistory.Parse). IgnoreWhitespace is
+      passed on as -w. Returns false when git failed: a file it does not
+      know, or a range past the end of the file in ARef. }
+    function LineHistory(const APath, ARef: string; AFrom, ATo, AMax: integer;
+      out AOutput: string): boolean;
     {** A Base that shows what the commit AHash changed: the range from
       its parent, or from the empty tree for a commit without one. }
     function CommitRange(const AHash: string): string;
@@ -996,6 +1007,50 @@ begin
   Args[n] := '--';
   Args[n + 1] := APath;
   SetLength(Args, n + 2);
+  Result := RunGit(FRoot, Args, AOutput);
+end;
+
+function TGittanRepo.LineHistory(const APath, ARef: string; AFrom, ATo, AMax: integer;
+  out AOutput: string): boolean;
+var
+  Args: array of string;
+
+  procedure Add(const AArg: string);
+  begin
+    SetLength(Args, Length(Args) + 1);
+    Args[High(Args)] := AArg;
+  end;
+
+begin
+  AOutput := '';
+  if FRoot = '' then
+    Exit(False);
+  Args := nil;
+  Add('log');
+  Add('--no-color');
+  Add('--no-ext-diff');
+  Add('-n');
+  Add(IntToStr(AMax));
+  Add('--format=%x01%H%x1f%an%x1f%at%x1f%s');
+  if FIgnoreWhitespace then
+    Add('-w');
+  if AFrom > 0 then
+  begin
+    { -L takes no path list: the file is part of the range. }
+    Add('-L');
+    Add(Format('%d,%d:%s', [AFrom, ATo, APath]));
+    if ARef <> '' then
+      Add(ARef);
+  end
+  else
+  begin
+    Add('-p');
+    Add('--no-renames');
+    if ARef <> '' then
+      Add(ARef);
+    Add('--');
+    Add(APath);
+  end;
   Result := RunGit(FRoot, Args, AOutput);
 end;
 

@@ -9,7 +9,7 @@ unit testgit;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.git;
+  Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.history;
 
 type
   TGitRepoTest = class(TTestCase)
@@ -41,6 +41,7 @@ type
     procedure TestSnapshot;
     procedure TestBlame;
     procedure TestCommitRange;
+    procedure TestLineHistory;
   end;
 
 implementation
@@ -615,6 +616,71 @@ begin
   AssertEquals(5, Length(Stats));
   AssertTrue(FindStat(Stats, 'a.txt').Kind = ckAdded);
   AssertEquals(3, FindStat(Stats, 'a.txt').Added);
+end;
+
+{ The history of a range follows the lines through the commits that
+  changed them and leaves out the commits that changed other lines; the
+  history of the whole file has every commit. The output is read by
+  TGittanHistory, so it is checked through that. }
+procedure TGitRepoTest.TestLineHistory;
+var
+  Output, First, Third: string;
+  H: TGittanHistory;
+begin
+  Git(['init', '-q']);
+  WriteFile('f.txt', 'head'#10'begin'#10'  a'#10'end'#10'tail'#10);
+  Commit('first');
+  First := Trim(Git(['rev-parse', 'HEAD']));
+  WriteFile('f.txt', 'head'#10'begin'#10'  b'#10'end'#10'tail'#10);
+  Commit('second');
+  WriteFile('f.txt', 'head'#10'begin'#10'  b'#10'  c'#10'end'#10'tail'#10);
+  Commit('third');
+  Third := Trim(Git(['rev-parse', 'HEAD']));
+  WriteFile('f.txt', 'head'#10'begin'#10'  b'#10'  c'#10'end'#10'tail changed'#10);
+  Commit('fourth');
+  AssertTrue(FRepo.Open(FDir));
+
+  H := TGittanHistory.Create;
+  try
+    { begin..end in HEAD is lines 2..5. }
+    AssertTrue(FRepo.LineHistory('f.txt', '', 2, 5, 10, Output));
+    AssertTrue(H.Parse(Output));
+    AssertEquals('the commit of the tail is not among them', 3, H.Count);
+    AssertEquals(Third, H.Commits[0].Info.Hash);
+    AssertEquals('third', H.Commits[0].Info.Summary);
+    AssertEquals('Gittan Test', H.Commits[0].Info.Author);
+    AssertTrue(H.Commits[0].Info.Time > 0);
+    AssertEquals(1, Length(H.Commits[0].Hunks));
+    AssertEquals(2, H.Commits[0].Hunks[0].NewStart);
+    AssertEquals('+  c', H.Commits[0].Hunks[0].Lines[2]);
+    AssertEquals('second', H.Commits[1].Info.Summary);
+    AssertEquals('-  a', H.Commits[1].Hunks[0].Lines[1]);
+    AssertEquals('+  b', H.Commits[1].Hunks[0].Lines[2]);
+    AssertEquals(First, H.Commits[2].Info.Hash);
+
+    AssertTrue(FRepo.LineHistory('f.txt', '', 2, 5, 2, Output));
+    AssertTrue(H.Parse(Output));
+    AssertEquals('at most two', 2, H.Count);
+
+    { The range in an older commit, and the whole file. }
+    AssertTrue(FRepo.LineHistory('f.txt', Third + '^', 2, 4, 10, Output));
+    AssertTrue(H.Parse(Output));
+    AssertEquals(2, H.Count);
+    AssertEquals('second', H.Commits[0].Info.Summary);
+
+    AssertTrue(FRepo.LineHistory('f.txt', '', 0, 0, 10, Output));
+    AssertTrue(H.Parse(Output));
+    AssertEquals(4, H.Count);
+    AssertEquals('fourth', H.Commits[0].Info.Summary);
+    AssertEquals('line 6 with three lines of context', 3, H.Commits[0].Hunks[0].OldStart);
+
+    { An end past the file is clamped by git, a start past it is an error. }
+    AssertTrue(FRepo.LineHistory('f.txt', '', 2, 50, 10, Output));
+    AssertFalse('past the end', FRepo.LineHistory('f.txt', '', 40, 50, 10, Output));
+    AssertFalse('unknown file', FRepo.LineHistory('nope.txt', '', 1, 2, 10, Output));
+  finally
+    H.Free;
+  end;
 end;
 
 initialization

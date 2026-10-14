@@ -15,19 +15,22 @@ uses
   gittan.lexers, gittan.git, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
-  gittan.symbolindex, gittan.snapshots, gittan.blame, md5;
+  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
-    file, the raw repository diff, or a plain file from File > Open. }
-  TGittanView = (gvSummary, gvChanges, gvRepoDiff, gvFile);
+    file, the raw repository diff, a plain file from File > Open, or the
+    history of a piece of code (Go > Code History). }
+  TGittanView = (gvSummary, gvChanges, gvRepoDiff, gvFile, gvHistory);
 
   {** One row of the change view. Line is the index of its diff line in
     the file's diff, rowGap for a row that stands for the unchanged lines
-    GapFrom..GapTo hidden by View > Hide Unchanged Lines, or rowFiller
-    for the blank row the side-by-side view puts opposite a line the
-    other side has. A hidden row is in the text, so the lexer sees the
-    whole file, but not on screen. }
+    GapFrom..GapTo hidden by View > Hide Unchanged Lines, rowFiller for
+    the blank row the side-by-side view puts opposite a line the other
+    side has, or, in the history view, rowCommit for the header of the
+    commit GapFrom and rowMore for the row that fetches older commits. A
+    hidden row is in the text, so the lexer sees the whole file, but not
+    on screen. }
   TGittanRow = record
     Line: integer;
     GapFrom, GapTo: integer;
@@ -166,6 +169,20 @@ type
     { The Base a click on the band set, so the summary can name the
       commit instead of the range. }
     FBlameRange: string;
+    { Go > Code History (see umain.history.inc): the commits shown, the
+      job that fetches them, the file, the commit the lines are counted
+      in (empty for HEAD), the lines (From 0 for the whole file), what
+      the header calls the piece, how many commits are asked for, whether
+      git had more, and the scroll position to restore when the job is
+      done. }
+    FHistory: TGittanHistory;
+    FHistoryJob: TGittanHistoryJob;
+    FHistoryPath, FHistoryRef, FHistoryName: string;
+    FHistoryFrom, FHistoryTo, FHistoryMax: integer;
+    FHistoryMore: boolean;
+    FHistoryTopLine, FHistoryCaretY: integer;
+    { The layered rows of the history, see TGittanHistory.Layers. }
+    FHistoryRows: TGittanHistoryRows;
     procedure ApplyTheme;
     procedure ApplyEditorColors(AEd: TATSynEdit);
     procedure SetupEditor(AEd: TATSynEdit);
@@ -206,6 +223,8 @@ type
     procedure MarkWords(AEd: TATSynEdit; ARow: integer; const ASpans: TGittanSpans;
       AChange: char; AOffset: integer);
     function WordColor(ATag: integer): TColor;
+    function HistoryColor(AIndex: integer; AStrong: boolean): TColor;
+    procedure MarkHeader(AEd: TATSynEdit; ARow: integer);
     procedure RecolorWords(AEd: TATSynEdit);
     procedure SetLineStatesBand(AEd: TATSynEdit; AVisible: boolean);
     procedure SetRowNumbers(AEd: TATSynEdit; const ANumbers, AKinds: TIntegerDynArray);
@@ -250,12 +269,34 @@ type
     procedure ApplyBlame;
     procedure SetBlameBand(AEd: TATSynEdit);
     function BlameOfRow(AEd: TATSynEdit; ARow: integer; out ABlame: TGittanBlame): integer;
+    function CommitOfRow(AEd: TATSynEdit; ARow: integer; out AInfo: TGittanBlameCommit;
+      out AKey: integer; out ASource: TObject): boolean;
     function BlameHintText(const ACommit: TGittanBlameCommit): string;
     function BlameHintAt(AEd: TATSynEdit; X, Y: integer): string;
     procedure DrawBlame(AEd: TATSynEdit; C: TCanvas);
     procedure EditClickGutter(Sender: TObject; ABand, ALine: integer; var AHandled: boolean);
     procedure ShowBlameCommit(const AHash: string);
     procedure HandCursorAsync(Data: PtrInt);
+    { umain.history.inc }
+    procedure MenuHistoryClick(Sender: TObject);
+    function ChunkRows(out AFrom, ATo: integer; out AName: string): boolean;
+    function EnclosingRange(AAdapter: TATAdapterEControl; ARow: integer;
+      out AFrom, ATo: integer; out AName: string): boolean;
+    function ChunkLines(AFromRow, AToRow: integer; out AFrom, ATo: integer): boolean;
+    function HistoryRef: string;
+    procedure StartHistory;
+    procedure AbandonHistoryJob;
+    procedure HistoryJobDone(Sender: TObject);
+    procedure AddUncommittedHistory;
+    procedure ShowHistory;
+    procedure BuildHistoryView;
+    procedure MarkHistoryWords(AEd: TATSynEdit; ARow: integer;
+      const ASpans: TGittanSpans; ACommit: integer);
+    procedure MarkSwatch(AEd: TATSynEdit; ARow, ACommit: integer);
+    procedure HistoryCounts(AIndex: integer; out AAdded, ADeleted: integer);
+    function HistoryHeaderText(AIndex: integer): string;
+    procedure HistoryClick(ARow: integer);
+    procedure ShowHistoryCommit(AIndex: integer);
     { umain.actions.inc }
     procedure ApplySettings;
     procedure FormClose(Sender: TObject; var CloseAction: TCloseAction);
@@ -358,7 +399,7 @@ implementation
 {$R *.lfm}
 
 uses
-  Clipbrd, LCLIntf, Process, FileUtil, DateUtils;
+  Clipbrd, LCLIntf, Process, FileUtil, LazFileUtils, DateUtils;
 
 resourcestring
   rsFile = '&File';
@@ -392,6 +433,16 @@ resourcestring
   rsNotCommitted = 'Not committed';
   rsNotCommittedYet = 'Not committed yet';
   rsCommit = 'commit %s';
+  rsHistory = 'Code &History';
+  rsHistoryTitle = 'History of %s';
+  rsHistoryIn = '%s in %s';
+  rsHistoryLines = 'lines %d-%d';
+  rsHistoryMore = '⋯  ↓ %d older changes  ⋯';
+  rsHistoryCounts = '+%d −%d';
+  rsHistoryLoading = 'Loading history...';
+  rsHistoryNeedsFile = 'Show a file first: the history is of the selected lines, or of the function at the caret.';
+  rsNoHistoryYet = 'These lines are not committed yet, so they have no history.';
+  rsNoHistory = 'No history of these lines.';
   rsZoomIn = 'Zoom &In';
   rsZoomOut = 'Zoom &Out';
   rsZoomReset = 'Actual Si&ze';
@@ -455,6 +506,11 @@ const
   bmDeleted = 2;
   bmGap = 3;
   bmFiller = 4;
+  { A legend row of the history view, and from bmHistoryBase on the
+    rows of the history tinted by their commit: kind bmHistoryBase + the
+    commit's index. }
+  bmCommit = 5;
+  bmHistoryBase = 100;
   { Tags of the editor's attribs that mark the words that differ inside
     an added or a deleted line. }
   tagWordAdded = 1;
@@ -462,6 +518,15 @@ const
   { The attribute that underlines the word under the mouse while Cmd is
     held, as a link to its definition. }
   tagHoverLink = 3;
+  { The attributes of the history view: a legend row in bold and the
+    plain text color, over the lexer's; a word that changed, shaded in
+    its commit's tint (the commit in TagEx); the swatch of a legend row;
+    and the italics of an older version or the strike-through of a
+    removed line. }
+  tagHistoryHeader = 4;
+  tagHistoryWord = 5;
+  tagHistorySwatch = 6;
+  tagHistoryStyle = 7;
   { The gutter band of the blame (see umain.blame.inc), the width of its
     age column in characters and the most the author column takes. }
   gutterTagBlame = 100;
@@ -475,8 +540,14 @@ const
   { Row kinds in TGittanRow.Line. }
   rowGap = -1;
   rowFiller = -2;
+  rowCommit = -3;
+  rowMore = -4;
   { How many hidden lines a gap row's labels open at a time. }
   GapStep = 20;
+  { How many commits the history view shows at a time, and the line
+    range that stands for the whole file (git clamps it to the end). }
+  HistoryStep = 5;
+  WholeFileLines = 1000000;
 
   { How often the watcher asks git whether the repository changed. }
   WatchInterval = 2000;
@@ -1062,6 +1133,7 @@ begin
   AddItem(GoMenu, rsGoToSymbol, ShortCut(VK_T, [ssModifier]), @MenuGoToSymbolClick);
   AddItem(GoMenu, rsGoToRepoSymbol, ShortCut(VK_T, [ssModifier, ssShift]),
     @MenuGoToRepoSymbolClick);
+  AddItem(GoMenu, rsHistory, ShortCut(VK_H, [ssModifier, ssShift]), @MenuHistoryClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextChange, ShortCut(VK_F7, []), @MenuNextChangeClick);
   AddItem(GoMenu, rsPrevChange, ShortCut(VK_F7, [ssShift]), @MenuPrevChangeClick);
@@ -1159,6 +1231,7 @@ begin
     gvChanges: Result := FLexers.ForFile(FCurrentPath, FRepo.Root);
     gvRepoDiff: Result := FLexers.ByName(rsDiffLexer);
     gvFile: Result := FLexers.ForFile(Edit.FileName);
+    gvHistory: Result := FLexers.ForFile(FHistoryPath, FRepo.Root);
     else
       Result := nil;
   end;
@@ -1202,8 +1275,13 @@ begin
     (it is in "virtual" wrap mode then) and never flags one as needed, so
     once the lexer adds folds the wrap items of the previous text are
     reused and lines paint cut off. LoadFromFile clears the wrap info and
-    flags the rebuild itself; do the same here. }
+    flags the rebuild itself; do the same here. The rebuild must be a full
+    one: the editor otherwise applies the line operations it recorded for
+    the replacement to the cleared wrap info, which can leave it empty
+    and the editor blank (seen when the history view replaced its own
+    text), so the recorded operations are dropped too. }
   AEd.WrapInfo.Clear;
+  AEd.Strings.WrapStructInvalidate;
   AEd.Update(True);
   AEd.ModeReadOnly := True;
   AEd.FileName := '';
@@ -1245,17 +1323,52 @@ end;
   Added and deleted lines get a background through the editor's second
   bookmark list: a bookmark there colors its line but draws no gutter icon.
   The kind picks the color. }
+{ A color from a hue, saturation and lightness, each 0..1. }
+function HSLToColor(H, S, L: double): TColor;
+var
+  C, X, M, R, G, B: double;
+  Sector: integer;
+begin
+  C := (1 - Abs(2 * L - 1)) * S;
+  Sector := Trunc(H * 6) mod 6;
+  X := C * (1 - Abs(Frac(H * 6) * 2 - 1));
+  case Sector of
+    0: begin R := C; G := X; B := 0; end;
+    1: begin R := X; G := C; B := 0; end;
+    2: begin R := 0; G := C; B := X; end;
+    3: begin R := 0; G := X; B := C; end;
+    4: begin R := X; G := 0; B := C; end;
+    else begin R := C; G := 0; B := X; end;
+  end;
+  M := L - C / 2;
+  Result := RGBToColor(Round((R + M) * 255), Round((G + M) * 255), Round((B + M) * 255));
+end;
+
+{ The commit index as an attribute's TagEx, which is a byte. }
+function HistoryTagEx(ACommit: integer): integer;
+begin
+  Result := Max(-1, Min(ACommit, 127));
+end;
+
 procedure TForm1.EditCalcBookmarkColor(Sender: TObject; ABookmarkKind: integer;
   var AColor: TColor);
 begin
   { A faint tint of the editor background, so the syntax colors still
-    read on top of it; a gap and a filler row take the gutter's shade. }
+    read on top of it; a gap and a filler row take the gutter's shade, a
+    legend row of the history view a cool one, and a row of the history
+    the tint of its commit. }
+  if ABookmarkKind >= bmHistoryBase then
+  begin
+    AColor := HistoryColor(ABookmarkKind - bmHistoryBase, False);
+    Exit;
+  end;
   if FDark then
     case ABookmarkKind of
       bmAdded: AColor := RGBToColor(32, 52, 37);
       bmDeleted: AColor := RGBToColor(66, 38, 38);
       bmGap: AColor := RGBToColor(44, 44, 46);
       bmFiller: AColor := RGBToColor(37, 37, 38);
+      bmCommit: AColor := RGBToColor(40, 46, 58);
     end
   else
     case ABookmarkKind of
@@ -1263,6 +1376,7 @@ begin
       bmDeleted: AColor := RGBToColor(255, 235, 233);
       bmGap: AColor := RGBToColor(238, 238, 238);
       bmFiller: AColor := RGBToColor(246, 246, 246);
+      bmCommit: AColor := RGBToColor(226, 232, 240);
     end;
 end;
 
@@ -1310,6 +1424,62 @@ begin
 end;
 
 { After a theme change: the word marks take the colors of the new theme. }
+{ The tint of commit AIndex of the history view, or the strong one for
+  the words that changed and the swatch: one hue per commit, spread by
+  the golden angle so neighbours differ, as a faint tint of the editor
+  background in the way of the diff colors. A row older than the history
+  (AIndex -1) gets a grey. }
+function TForm1.HistoryColor(AIndex: integer; AStrong: boolean): TColor;
+var
+  Hue, Sat, Light: double;
+begin
+  if AIndex < 0 then
+  begin
+    if FDark then
+      Sat := 0
+    else
+      Sat := 0;
+    Hue := 0;
+  end
+  else
+  begin
+    Hue := ((210 + AIndex * 137) mod 360) / 360;
+    if FDark then
+      Sat := 0.45
+    else
+      Sat := 0.65;
+  end;
+  if FDark then
+  begin
+    if AStrong then
+      Light := 0.36
+    else
+      Light := 0.22;
+  end
+  else
+  begin
+    if AStrong then
+      Light := 0.78
+    else
+      Light := 0.91;
+  end;
+  Result := HSLToColor(Hue, Sat, Light);
+end;
+
+{ Sets row ARow, a legend row of the history view, in bold and in the
+  editor's text color: the lexer would otherwise color the words of
+  the summary as code. The swatch at its start is colored on top. }
+procedure TForm1.MarkHeader(AEd: TATSynEdit; ARow: integer);
+var
+  Part: TATLinePart;
+begin
+  InitLinePart(Part);
+  Part.ColorFont := AEd.Colors.TextFont;
+  Part.FontStyles := afsFontBold;
+  AEd.Attribs.Add(Point(0, ARow), Point(AEd.Strings.LinesLen[ARow], 0),
+    TATMarkerTags.Init(tagHistoryHeader, 0), @Part);
+end;
+
 procedure TForm1.RecolorWords(AEd: TATSynEdit);
 var
   Item: TATMarkerItem;
@@ -1321,6 +1491,21 @@ begin
     if (Item.Tag = tagWordAdded) or (Item.Tag = tagWordDeleted) then
     begin
       Item.LinePart.ColorBG := WordColor(Item.Tag);
+      AEd.Attribs[i] := Item;
+    end
+    else if Item.Tag = tagHistoryHeader then
+    begin
+      Item.LinePart.ColorFont := AEd.Colors.TextFont;
+      AEd.Attribs[i] := Item;
+    end
+    else if Item.Tag = tagHistoryWord then
+    begin
+      Item.LinePart.ColorBG := HistoryColor(Item.TagEx, True);
+      AEd.Attribs[i] := Item;
+    end
+    else if Item.Tag = tagHistorySwatch then
+    begin
+      Item.LinePart.ColorFont := HistoryColor(Item.TagEx, True);
       AEd.Attribs[i] := Item;
     end;
   end;
@@ -1520,7 +1705,7 @@ begin
   Prev := -2;
   for i := 0 to Marks.Count - 1 do
   begin
-    if Marks[i]^.Data.Kind = bmGap then
+    if (Marks[i]^.Data.Kind = bmGap) or (Marks[i]^.Data.Kind = bmCommit) then
       Continue;
     Line := Marks[i]^.Data.LineNum;
     if Prev <> Line - 1 then
@@ -1846,6 +2031,13 @@ begin
         ShowRepoDiff;
         RestoreScroll;
       end;
+    gvHistory:
+      begin
+        { The view is rebuilt when the job is done, at the same place. }
+        FHistoryTopLine := TopLine;
+        FHistoryCaretY := CaretY;
+        StartHistory;
+      end;
   end;
   UpdateStatus;
 end;
@@ -1865,6 +2057,7 @@ begin
   FFindBar.Visible := False;
   FSymbolBar.Visible := False;
   FSummaryBox.Visible := True;
+  AbandonHistoryJob;
   FView := gvSummary;
   { A file picked again after the summary must fire the selection event. }
   FileTree.Selected := nil;
@@ -1875,6 +2068,9 @@ end;
 { FView is set before the call: the layout depends on it. }
 procedure TForm1.ShowEditor;
 begin
+  { A history still being fetched is for a view that is no longer shown. }
+  if FView <> gvHistory then
+    AbandonHistoryJob;
   { The symbol bar lists the file shown before. }
   FSymbolBar.Visible := False;
   FSummaryBox.Visible := False;
@@ -2144,5 +2340,6 @@ end;
 {$I umain.gotodef.inc}
 {$I umain.blame.inc}
 {$I umain.index.inc}
+{$I umain.history.inc}
 
 end.

@@ -169,7 +169,9 @@ end;
 { Puts ARows into AEd: the text, the hidden lines, the line colors and
   states, and the line numbers (from the old file on the old side, else
   from the new). A deleted line in the unified view has no number; a
-  gap, filler or hidden row has neither number nor state. }
+  gap, filler, commit header, more or hidden row has neither number nor
+  state. The history view (umain.history.inc) builds its rows into the
+  same fields and fills the editor through here too. }
 procedure TForm1.FillChangeEditor(AEd: TATSynEdit; const ARows: TGittanRows;
   AOldSide: boolean; const AOldNum, ANewNum: TIntegerDynArray;
   ALexer: TecSyntAnalyzer);
@@ -187,6 +189,8 @@ begin
         rowGap:
           Lines.Add(GapRowText(ARows[i].GapTo - ARows[i].GapFrom + 1, Down, Up, All));
         rowFiller: Lines.Add('');
+        rowCommit: Lines.Add(HistoryHeaderText(ARows[i].GapFrom));
+        rowMore: Lines.Add(Format(rsHistoryMore, [HistoryStep]));
         else
           Lines.Add(Copy(FChangeLines[ARows[i].Line], 2, MaxInt));
       end;
@@ -210,6 +214,12 @@ begin
     case ARows[i].Line of
       rowGap: MarkRow(AEd, i, bmGap);
       rowFiller: MarkRow(AEd, i, bmFiller);
+      rowCommit:
+        begin
+          MarkRow(AEd, i, bmCommit);
+          MarkHeader(AEd, i);
+        end;
+      rowMore: MarkRow(AEd, i, bmGap);
       else
       begin
         Marker := FChangeLines[ARows[i].Line][1];
@@ -310,9 +320,11 @@ begin
 end;
 
 { A click on a gap row opens it: on one of its labels (see GapRowText)
-  the first or the last GapStep lines, elsewhere the whole run. Cmd+click
-  (Ctrl+click elsewhere) goes to the definition of the clicked word.
-  The editor put the caret on the clicked position on mouse down. }
+  the first or the last GapStep lines, elsewhere the whole run; in the
+  history view a click on a commit header or the more row acts (see
+  HistoryClick). Cmd+click (Ctrl+click elsewhere) goes to the definition
+  of the clicked word. The editor put the caret on the clicked position
+  on mouse down. }
 procedure TForm1.EditMouseUp(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: integer);
 var
@@ -324,6 +336,11 @@ begin
   begin
     if TATSynEdit(Sender).Carets[0].EndY < 0 then
       GoToDefinition(TATSynEdit(Sender));
+    Exit;
+  end;
+  if FView = gvHistory then
+  begin
+    HistoryClick(TATSynEdit(Sender).Carets[0].PosY);
     Exit;
   end;
   if FView <> gvChanges then
