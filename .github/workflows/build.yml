@@ -341,7 +341,7 @@ jobs:
             echo
             echo "## Downloads"
             echo
-            echo "- **Gittan-macos-silicon.dmg** — macOS on Apple Silicon. The app is signed ad hoc: right-click it and choose Open the first time."
+            echo '- **Gittan-macos-silicon.dmg** — macOS on Apple Silicon. The app is signed ad hoc, so macOS blocks it at first: drag it to Applications, then run `xattr -cr /Applications/Gittan.app` in Terminal.'
             echo "- **Gittan-windows-x64.zip** — Windows x64. Unzip anywhere and run Gittan.exe."
             echo "- **Gittan-linux-amd64.tar.gz** — Linux amd64, needs Qt 6 and libqt6pas6."
             echo
