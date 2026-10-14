@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Gittan — a native diff viewer for your working tree</title>
-<meta name="description" content="Gittan shows what you changed in a git repository: every modified file in a tree, the diff with syntax highlighting, side by side or unified, refreshed as you work. Native on macOS, Windows and Linux.">
-<meta property="og:title" content="Gittan">
-<meta property="og:description" content="A native diff viewer for your working tree. macOS, Windows and Linux.">
-<meta property="og:image" content="https://gittan.app/assets/icon-256.png">
+<title>Gittan — Git Tree Analyzer &amp; Navigator</title>
+<meta name="description" content="Gittan, the Git Tree Analyzer &amp; Navigator, shows what you changed in a git repository, who last changed each line and how a piece of code got the way it is. Native on macOS, Windows and Linux.">
+<meta property="og:title" content="Gittan — Git Tree Analyzer &amp; Navigator">
+<meta property="og:description" content="See what you changed, who wrote each line and how the code got here. macOS, Windows and Linux.">
+<meta property="og:image" content="https://gittan.app/assets/shots/unified-light.png">
 <meta property="og:type" content="website">
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="apple-touch-icon" href="assets/icon-256.png">
@@ -109,8 +109,9 @@
 
   /* ---------- hero ---------- */
   .hero { padding: 48px 16px 24px; text-align: center; }
-  .hero img { width: 128px; height: 128px; filter: drop-shadow(0 10px 24px rgba(20,30,60,.25)); }
-  .hero h1 { font-size: 48px; letter-spacing: -0.02em; margin: 20px 0 8px; }
+  .hero .icon { width: 128px; height: 128px; filter: drop-shadow(0 10px 24px rgba(20,30,60,.25)); }
+  .hero h1 { font-size: 48px; letter-spacing: -0.02em; margin: 20px 0 2px; }
+  .hero .full { font-size: 15px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--blue); margin: 0 0 14px; }
   .hero p.tag { font-size: 21px; color: var(--fg-muted); margin: 0 auto 28px; max-width: 600px; }
   .btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
   .btn {
@@ -124,86 +125,32 @@
   .btn svg { width: 18px; height: 18px; }
   .hero .platforms { margin-top: 14px; color: var(--fg-muted); font-size: 14px; }
 
-  /* ---------- app mock ---------- */
-  .shot { margin: 40px auto 0; max-width: 960px; }
-  .app {
-    background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius);
-    box-shadow: var(--shadow); overflow: hidden; font-size: 13px; text-align: left;
-  }
-  .titlebar {
-    height: 38px; display: flex; align-items: center; justify-content: center;
-    border-bottom: 1px solid var(--line); position: relative; color: var(--fg-muted); font-weight: 500;
-  }
-  .titlebar .lights { position: absolute; left: 14px; top: 12px; display: flex; gap: 8px; }
-  .titlebar .lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
-  .titlebar .lights i:nth-child(1) { background: #ff5f57; }
-  .titlebar .lights i:nth-child(2) { background: #febc2e; }
-  .titlebar .lights i:nth-child(3) { background: #28c840; }
-  .body { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 420px; }
-  .tree { border-right: 1px solid var(--line); padding: 8px 0; background: var(--bg); }
-  .tree .row { display: flex; align-items: center; gap: 7px; padding: 4px 12px; white-space: nowrap; }
-  .tree .row.sel { background: var(--blue); color: #fff; }
-  .tree .row.d1 { padding-left: 28px; }
-  .tree .row.d2 { padding-left: 44px; }
-  .badge {
-    width: 16px; height: 16px; border-radius: 4px; flex: none;
-    font: 700 10px/16px ui-monospace, Menlo, monospace; text-align: center; color: #fff;
-  }
-  .badge.m { background: #d9822b; } .badge.a { background: #2e8b4f; } .badge.d { background: #b63a3a; }
-  .badge.u { background: #6c7a92; } .badge.r { background: #6a5acd; }
-  .badge.chk { position: relative; }
-  .badge.chk::after {
-    content: "✓"; position: absolute; right: -5px; bottom: -5px; width: 11px; height: 11px;
-    border-radius: 50%; background: #fff; color: #2e8b4f; font-size: 8px; line-height: 11px; box-shadow: 0 0 0 1px var(--line);
-  }
-  .folder { width: 16px; height: 12px; border-radius: 3px; background: #7c8ba3; flex: none; position: relative; }
-  .folder::after { content: ""; position: absolute; right: 2px; bottom: 2px; width: 5px; height: 5px; border-radius: 50%; background: #d9822b; }
-  .folder.red::after { background: #b63a3a; }
 
-  .editor { display: flex; flex-direction: column; min-width: 0; }
-  .fileheader {
-    display: flex; align-items: center; gap: 8px; padding: 8px 12px;
-    background: var(--gutter); border-bottom: 1px solid var(--line);
+  /* ---------- screenshots ---------- */
+  .shot { margin: 40px auto 0; max-width: 1040px; }
+  .shot img, .tour img {
+    display: block; width: 100%; height: auto; border-radius: 12px;
+    box-shadow: 0 0 0 1px var(--line), var(--shadow); background: var(--bg-elev);
   }
-  .fileheader .path { color: var(--fg-muted); }
-  .fileheader .path b { color: var(--fg); font-weight: 600; }
-  .fileheader .stats { margin-left: auto; display: flex; gap: 10px; align-items: center; color: var(--fg-muted); }
-  .fileheader .plus { color: var(--add-fg); font-weight: 600; }
-  .fileheader .minus { color: var(--del-fg); font-weight: 600; }
-  .pill {
-    display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px;
-    background: var(--blue); color: #fff; font-weight: 600; font-size: 12px; white-space: nowrap;
+  .tour .tabs { display: none; gap: 6px; flex-wrap: wrap; margin: 0 0 20px; }
+  .tour .tabs button {
+    font: 600 14px/1 inherit; font-family: inherit; padding: 9px 14px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--bg-elev); color: var(--fg-muted);
   }
-  .pill span { opacity: .8; }
-
-  .code { flex: 1; overflow: hidden; max-width: 100%; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.6; color: var(--code-fg); }
-  .ln { display: grid; grid-template-columns: 44px 3px 1fr; }
-  .ln .n { text-align: right; padding-right: 10px; color: var(--fg-muted); background: var(--gutter); user-select: none; }
-  .ln .s { background: transparent; }
-  .ln .t { padding-left: 12px; white-space: pre; }
-  .ln.add .t { background: var(--add-bg); }
-  .ln.add .s { background: var(--add-fg); }
-  .ln.add .n { color: var(--add-fg); }
-  .ln.del .t { background: var(--del-bg); }
-  .ln.del .s { background: var(--del-fg); }
-  .ln.gap .t { color: var(--fg-muted); text-align: center; padding-left: 0; font-style: italic; }
-  .ln.gap .n { color: transparent; }
-  .kw { color: var(--kw); } .str { color: var(--str); } .cmt { color: var(--cmt); } .fn { color: var(--fn); }
-
-  .statusbar {
-    border-top: 1px solid var(--line); padding: 5px 12px; color: var(--fg-muted); font-size: 12px;
-    display: flex; gap: 14px;
-  }
+  .tour .tabs button:hover { color: var(--fg); border-color: var(--fg-muted); }
+  .tour .tabs button[aria-selected="true"] { background: var(--blue); border-color: var(--blue); color: #fff; }
+  .tour figure { margin: 0 0 48px; }
+  .tour figcaption { margin: 0 0 16px; max-width: 680px; color: var(--fg-muted); }
+  .tour figcaption b { color: var(--fg); }
+  .js .tour .tabs { display: flex; }
+  .js .tour figure { display: none; margin-bottom: 0; }
+  .js .tour figure.on { display: block; }
 
   @media (max-width: 720px) {
-    .body { grid-template-columns: minmax(0, 1fr); }
-    .tree { display: none; }
     .hero h1 { font-size: 36px; }
     .hero p.tag { font-size: 18px; }
-    .ln { grid-template-columns: 34px 3px 1fr; }
     nav .links { gap: 14px; font-size: 14px; }
     nav .links a[href="#build"] { display: none; }
-    .fileheader { flex-wrap: wrap; }
   }
 
   /* ---------- sections ---------- */
@@ -254,11 +201,13 @@
 </style>
 </head>
 <body>
+<script>document.documentElement.classList.add('js')</script>
 
 <div class="wrap">
   <nav>
     <a class="brand" href="#"><img src="assets/icon-256.png" alt=""> Gittan</a>
     <div class="links">
+      <a href="#tour">Tour</a>
       <a href="#features">Features</a>
       <a href="#download">Download</a>
       <a href="#build">Build</a>
@@ -268,9 +217,10 @@
 </div>
 
 <header class="hero wrap">
-  <img src="assets/icon-256.png" alt="Gittan icon" width="128" height="128">
+  <img class="icon" src="assets/icon-256.png" alt="Gittan icon" width="128" height="128">
   <h1>Gittan</h1>
-  <p class="tag">A native diff viewer for your working tree. Open a repository and see what you changed, as you change it.</p>
+  <p class="full">Git Tree Analyzer &amp; Navigator</p>
+  <p class="tag">A native viewer for your git repository. See what you changed as you change it, who wrote each line, and how a piece of code got the way it is.</p>
   <div class="btns">
     <a class="btn primary" href="#download">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg>
@@ -284,60 +234,57 @@
   <div class="platforms">macOS · Windows · Linux</div>
 
   <div class="shot">
-    <div class="app" aria-hidden="true">
-      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div>gittan</div>
-      <div class="body">
-        <div class="tree">
-          <div class="row"><span class="folder"></span>src</div>
-          <div class="row d1"><span class="badge m">M</span>gittan.git.pp</div>
-          <div class="row d1 sel"><span class="badge m chk">M</span>gittan.watch.pp</div>
-          <div class="row d1"><span class="badge a">A</span>gittan.findbar.pp</div>
-          <div class="row"><span class="folder red"></span>tools</div>
-          <div class="row d1"><span class="badge d">D</span>old-build.sh</div>
-          <div class="row d1"><span class="badge r">R</span>makeicons.swift</div>
-          <div class="row"><span class="badge u">U</span>NOTES.md</div>
-          <div class="row"><span class="badge m">M</span>Makefile</div>
-        </div>
-        <div class="editor">
-          <div class="fileheader">
-            <span class="badge m chk">M</span>
-            <span class="path">src/<b>gittan.watch.pp</b></span>
-            <span class="stats">
-              <span>staged</span>
-              <span class="plus">+6</span><span class="minus">−2</span>
-              <span>Pascal</span>
-              <span class="pill">‹ <span>2 / 3</span> ›</span>
-            </span>
-          </div>
-          <div class="code">
-            <div class="ln gap"><span class="n"></span><span class="s"></span><span class="t">⋯ 41 unchanged lines ⋯</span></div>
-            <div class="ln"><span class="n">42</span><span class="s"></span><span class="t"><span class="kw">procedure</span> <span class="fn">TGittanWatcher.Execute</span>;</span></div>
-            <div class="ln"><span class="n">43</span><span class="s"></span><span class="t"><span class="kw">var</span></span></div>
-            <div class="ln"><span class="n">44</span><span class="s"></span><span class="t">  Print: <span class="kw">string</span>;</span></div>
-            <div class="ln"><span class="n">45</span><span class="s"></span><span class="t"><span class="kw">begin</span></span></div>
-            <div class="ln del"><span class="n"></span><span class="s"></span><span class="t">  <span class="kw">while not</span> Terminated <span class="kw">do</span></span></div>
-            <div class="ln del"><span class="n"></span><span class="s"></span><span class="t">    Sleep(<span class="str">2000</span>);</span></div>
-            <div class="ln add"><span class="n">46</span><span class="s"></span><span class="t">  <span class="cmt">// Poll the repository and report a change to the main thread.</span></span></div>
-            <div class="ln add"><span class="n">47</span><span class="s"></span><span class="t">  <span class="kw">while not</span> Terminated <span class="kw">do</span></span></div>
-            <div class="ln add"><span class="n">48</span><span class="s"></span><span class="t">  <span class="kw">begin</span></span></div>
-            <div class="ln add"><span class="n">49</span><span class="s"></span><span class="t">    Print := FRepo.Fingerprint;</span></div>
-            <div class="ln add"><span class="n">50</span><span class="s"></span><span class="t">    <span class="kw">if</span> Print &lt;&gt; FLast <span class="kw">then</span> Queue(<span class="fn">@NotifyChange</span>);</span></div>
-            <div class="ln add"><span class="n">51</span><span class="s"></span><span class="t">    FLast := Print;</span></div>
-            <div class="ln"><span class="n">52</span><span class="s"></span><span class="t">    FEvent.WaitFor(WatchInterval);</span></div>
-            <div class="ln"><span class="n">53</span><span class="s"></span><span class="t">  <span class="kw">end</span>;</span></div>
-            <div class="ln"><span class="n">54</span><span class="s"></span><span class="t"><span class="kw">end</span>;</span></div>
-            <div class="ln gap"><span class="n"></span><span class="s"></span><span class="t">⋯ 18 unchanged lines ⋯</span></div>
-          </div>
-          <div class="statusbar"><span>gittan on main vs origin/main</span><span>·</span><span>8 changed files</span></div>
-        </div>
-      </div>
-    </div>
+    <picture>
+      <source srcset="assets/shots/unified-dark.png" media="(prefers-color-scheme: dark)">
+      <img src="assets/shots/unified-light.png" width="1280" height="800" alt="Gittan showing the changes to a Vue component: the file tree of changed files on the left, the diff with deleted lines in red and added lines in green on the right">
+    </picture>
   </div>
 </header>
 
+<section id="tour" class="tour">
+  <div class="wrap">
+    <h2>A closer look</h2>
+    <p class="lead">A small Vue and TypeScript project with a few changes not committed yet, as Gittan shows it.</p>
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" aria-controls="t-history">Code History</button>
+      <button role="tab" aria-selected="false" aria-controls="t-blame">Blame</button>
+      <button role="tab" aria-selected="false" aria-controls="t-side">Side by side</button>
+      <button role="tab" aria-selected="false" aria-controls="t-summary">Summary</button>
+    </div>
+    <figure id="t-history" class="on">
+      <figcaption><b>Code History</b> lays the earlier versions of each line under the line itself, one color per commit. The stats line of this component has five: the scaffold, the length, the walking time, the hours and minutes, and the change not committed yet.</figcaption>
+      <picture>
+      <source srcset="assets/shots/history-dark.png" media="(prefers-color-scheme: dark)">
+      <img src="assets/shots/history-light.png" width="1280" height="800" loading="lazy" alt="Code History of TrailCard.vue: five commits listed at the top, each with its own color, and the earlier versions of each line shown under it in that color">
+    </picture>
+    </figure>
+    <figure id="t-blame">
+      <figcaption><b>Blame</b> puts who last changed each line, and how long ago, in a column beside the diff. Click a cell to compare that commit with its parent.</figcaption>
+      <picture>
+      <source srcset="assets/shots/blame-dark.png" media="(prefers-color-scheme: dark)">
+      <img src="assets/shots/blame-light.png" width="1280" height="800" loading="lazy" alt="The diff of TrailCard.vue with a blame column naming the author and age of each line, and Not committed beside the new lines">
+    </picture>
+    </figure>
+    <figure id="t-side">
+      <figcaption><b>Side by side</b>: the old file on the left, the new one on the right, scrolled in step and numbered from their own files. Changed words are marked within a line.</figcaption>
+      <picture>
+      <source srcset="assets/shots/side-dark.png" media="(prefers-color-scheme: dark)">
+      <img src="assets/shots/side-light.png" width="1280" height="800" loading="lazy" alt="The side-by-side diff of TrailCard.vue, with the old version on the left and the new version on the right">
+    </picture>
+    </figure>
+    <figure id="t-summary">
+      <figcaption><b>The summary</b> opens with the repository: every changed file with its counts, and a check mark for what is staged.</figcaption>
+      <picture>
+      <source srcset="assets/shots/summary-dark.png" media="(prefers-color-scheme: dark)">
+      <img src="assets/shots/summary-light.png" width="1280" height="800" loading="lazy" alt="The repository summary: five changed files with added and deleted line counts and bars, one marked staged">
+    </picture>
+    </figure>
+  </div>
+</section>
+
 <section id="features">
   <div class="wrap">
-    <h2>Built for one job</h2>
+    <h2>See what changed</h2>
     <p class="lead">Gittan does not commit, push or merge. It shows the difference between your work tree and a commit, and keeps that view fresh while you edit in whatever you like.</p>
     <div class="grid">
       <div class="card">
@@ -363,7 +310,7 @@
       <div class="card">
         <div class="ic"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7"/><path d="M18 10.5c0 4-12 3-12 5"/></svg></div>
         <h3>Compare with any ref</h3>
-        <p>Diff against HEAD by default, or pick a branch, a tag or a commit. The tree, the counts and every file diff follow the base you chose.</p>
+        <p>Diff against HEAD by default, or pick a branch, a tag, a commit or a snapshot. The tree, the counts and every file diff follow the base you chose.</p>
       </div>
       <div class="card">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.5 0-1-.1-1.5A5 5 0 0 1 12 3.1z"/></svg></div>
@@ -378,12 +325,51 @@
       <div class="card">
         <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m7 10 3 2-3 2"/><path d="M12 14h5"/></svg></div>
         <h3>Opens in your editor</h3>
-        <p>Right-click a file to copy its path, reveal it in Finder or the file manager, or open it in the editor of your choice.</p>
+        <p>Right-click a file to copy its path, reveal it in Finder or the file manager, or open it in the editor of your choice. <kbd>⌘⌥T</kbd> opens the repository in a terminal.</p>
       </div>
       <div class="card">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div>
         <h3>Knows what is staged</h3>
         <p>A check mark on the badge, and "staged" or "partly staged" in the header, tells you what the index already holds. Find in file with <kbd>⌘F</kbd>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="history">
+  <div class="wrap">
+    <h2>See how it got there</h2>
+    <p class="lead">Every line has a past. Gittan reads it from git and lays it next to the code, so you can tell who changed what, when, and why it looks the way it does.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M7 10h13"/><path d="M10 14h10"/><path d="M13 18h7"/></svg></div>
+        <h3>Code History</h3>
+        <p>Put the caret in a function or select a few lines, then <kbd>⌘⇧H</kbd>. Each line gets its earlier versions under it, one color per commit.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M17 8h4"/><path d="M17 12h4"/></svg></div>
+        <h3>Blame</h3>
+        <p>Who last changed each line, and when, beside the code with <kbd>⌘⇧B</kbd>. Click a cell to see that whole commit against its parent.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.5 6H14a4 4 0 0 1 4 4v5.5"/></svg></div>
+        <h3>Compare two commits</h3>
+        <p>Compare With &gt; Other takes a range: <code>main...feature</code> shows what a branch changed since it left main, <code>v1..v2</code> what came between two tags.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><circle cx="12" cy="13.5" r="3.5"/><path d="M8 7l1.5-3h5L16 7"/></svg></div>
+        <h3>Snapshots</h3>
+        <p>Take a snapshot of the work tree with <kbd>⌘⇧N</kbd> and compare against it later, to see what the last round of edits did without committing anything.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M7 4 3 8l4 4"/><path d="M3 8h11a6 6 0 0 1 0 12H9"/></svg></div>
+        <h3>Go to definition</h3>
+        <p>Hover a word to see where it is defined, and jump there with <kbd>F12</kbd>. Gittan finds it through the lexer's code tree, with no language server to set up.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/></svg></div>
+        <h3>Find a symbol</h3>
+        <p>List the symbols of the shown file with <kbd>⌘T</kbd>, or of the whole repository with <kbd>⌘⇧T</kbd>, and type a few letters to get there.</p>
       </div>
     </div>
   </div>
@@ -445,5 +431,17 @@ make run</pre>
   </div>
 </footer>
 
+<script>
+  // Without script every screenshot shows, one under the other.
+  document.querySelectorAll('.tour .tabs button').forEach(function (b, _, all) {
+    b.addEventListener('click', function () {
+      all.forEach(function (o) {
+        var on = o === b;
+        o.setAttribute('aria-selected', on);
+        document.getElementById(o.getAttribute('aria-controls')).classList.toggle('on', on);
+      });
+    });
+  });
+</script>
 </body>
 </html>
