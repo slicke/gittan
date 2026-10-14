@@ -163,6 +163,9 @@ type
     FBlameZombies: TList;
     FBlameCols: integer;
     FBlameNow: int64;
+    { The Base a click on the band set, so the summary can name the
+      commit instead of the range. }
+    FBlameRange: string;
     procedure ApplyTheme;
     procedure ApplyEditorColors(AEd: TATSynEdit);
     procedure SetupEditor(AEd: TATSynEdit);
@@ -250,6 +253,9 @@ type
     function BlameHintText(const ACommit: TGittanBlameCommit): string;
     function BlameHintAt(AEd: TATSynEdit; X, Y: integer): string;
     procedure DrawBlame(AEd: TATSynEdit; C: TCanvas);
+    procedure EditClickGutter(Sender: TObject; ABand, ALine: integer; var AHandled: boolean);
+    procedure ShowBlameCommit(const AHash: string);
+    procedure HandCursorAsync(Data: PtrInt);
     { umain.actions.inc }
     procedure ApplySettings;
     procedure FormClose(Sender: TObject; var CloseAction: TCloseAction);
@@ -385,6 +391,7 @@ resourcestring
   rsBlame = '&Blame';
   rsNotCommitted = 'Not committed';
   rsNotCommittedYet = 'Not committed yet';
+  rsCommit = 'commit %s';
   rsZoomIn = 'Zoom &In';
   rsZoomOut = 'Zoom &Out';
   rsZoomReset = 'Actual Si&ze';
@@ -704,6 +711,7 @@ begin
   { The blame band, leftmost, hidden until View > Blame; the editor
     leaves its size alone (see SetBlameBand). }
   AEd.Gutter.Add(0, 0, gutterTagBlame, False, False);
+  AEd.OnClickGutter := @EditClickGutter;
 end;
 
 function TForm1.AdapterOf(AEd: TATSynEdit): TATAdapterEControl;

@@ -40,6 +40,7 @@ type
     procedure TestFiles;
     procedure TestSnapshot;
     procedure TestBlame;
+    procedure TestCommitRange;
   end;
 
 implementation
@@ -585,6 +586,35 @@ begin
   FRepo.DiffSides(Left, Right);
   AssertEquals('first', Left);
   AssertEquals('HEAD', Right);
+end;
+
+{ The range of a commit runs from its parent; a root commit, which has
+  none, from the empty tree, so every file of it reads as added. }
+procedure TGitRepoTest.TestCommitRange;
+var
+  Stats: TGittanFileStats;
+  Root, Second: string;
+begin
+  MakeHistory;
+  Root := Trim(Git(['rev-parse', 'HEAD']));
+  WriteFile('a.txt', 'one'#10'two'#10'three'#10'four'#10);
+  Commit('second');
+  Second := Trim(Git(['rev-parse', 'HEAD']));
+  AssertTrue(FRepo.Open(FDir));
+  AssertEquals(Second + '^..' + Second, FRepo.CommitRange(Second));
+  AssertEquals('4b825dc642cb6eb9a060e54bf8d69288fbee4904..' + Root, FRepo.CommitRange(Root));
+
+  FRepo.Base := FRepo.CommitRange(Second);
+  AssertTrue(FRepo.ChangeStats(Stats));
+  AssertEquals(1, Length(Stats));
+  AssertEquals('a.txt', Stats[0].Path);
+  AssertEquals(1, Stats[0].Added);
+
+  FRepo.Base := FRepo.CommitRange(Root);
+  AssertTrue(FRepo.ChangeStats(Stats));
+  AssertEquals(5, Length(Stats));
+  AssertTrue(FindStat(Stats, 'a.txt').Kind = ckAdded);
+  AssertEquals(3, FindStat(Stats, 'a.txt').Added);
 end;
 
 initialization

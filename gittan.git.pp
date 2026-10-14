@@ -129,6 +129,9 @@ type
       IgnoreWhitespace passed on as -w. Returns false when git failed: a
       file it does not know, or one ARef lacks. }
     function Blame(const APath, ARef: string; out AOutput: string): boolean;
+    {** A Base that shows what the commit AHash changed: the range from
+      its parent, or from the empty tree for a commit without one. }
+    function CommitRange(const AHash: string): string;
     {** A text that changes whenever the branch, the set of changed files
       or the content of a changed file changes: the branch, the commit ids
       of HEAD and Base, the status of every changed file, and the size,
@@ -958,6 +961,14 @@ begin
     ALeft := DiffBase;
     ARight := '';
   end;
+end;
+
+function TGittanRepo.CommitRange(const AHash: string): string;
+begin
+  if HasCommit(AHash + '^') then
+    Result := AHash + '^..' + AHash
+  else
+    Result := EmptyTree + '..' + AHash;
 end;
 
 function TGittanRepo.Blame(const APath, ARef: string; out AOutput: string): boolean;

@@ -475,6 +475,8 @@ begin
       FHoverEd.Cursor := crDefault;
       FHoverEd.Invalidate;
     end;
+    if FHoverBlame <> '' then
+      FHoverEd.Cursor := crDefault;
   end;
   FHoverLinked := False;
   FHoverWord := '';
@@ -508,6 +510,10 @@ begin
       FHoverBlame := Word;
       FHoverTimer.Enabled := True;
     end;
+    { The editor sets its own cursor after this handler, a plain arrow
+      over a band it does not know; the hand comes after that. }
+    if Word <> rsNotCommittedYet then
+      Application.QueueAsyncCall(@HandCursorAsync, PtrInt(Ed));
     Exit;
   end;
   P := Ed.ClientPosToCaretPos(ATPoint(X, Y), Details);

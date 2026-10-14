@@ -347,3 +347,43 @@ begin
     C.Font.Style := [];
   end;
 end;
+
+{ A click on a cell of the band shows the commit of its row: what it
+  changed, in every file, as the diff from its parent. }
+procedure TForm1.EditClickGutter(Sender: TObject; ABand, ALine: integer;
+  var AHandled: boolean);
+var
+  Ed: TATSynEdit;
+  Commit: integer;
+  Blame: TGittanBlame;
+begin
+  Ed := TATSynEdit(Sender);
+  if (ABand < 0) or (Ed.Gutter[ABand].Tag <> gutterTagBlame) then
+    Exit;
+  AHandled := True;
+  Commit := BlameOfRow(Ed, ALine, Blame);
+  if (Commit >= 0) and not Blame.Commits[Commit].Uncommitted then
+    ShowBlameCommit(Blame.Commits[Commit].Hash);
+end;
+
+{ Compares the commit with its parent, which lists its files and shows
+  the one the click was in, if the commit touched it under this path.
+  The summary names the commit (see BaseLabel); Compare With > HEAD
+  (Working Tree) goes back. }
+procedure TForm1.ShowBlameCommit(const AHash: string);
+var
+  Range: string;
+begin
+  Range := FRepo.CommitRange(AHash);
+  ClearHover;
+  FBlameRange := Range;
+  SetBase(Range);
+end;
+
+{ The hand over a cell that can be clicked, set from the message loop so
+  it lands after the editor's own cursor update (see EditMouseMove). }
+procedure TForm1.HandCursorAsync(Data: PtrInt);
+begin
+  if (FHoverBlame <> '') and (TATSynEdit(Data) = FHoverEd) then
+    FHoverEd.Cursor := crHandPoint;
+end;

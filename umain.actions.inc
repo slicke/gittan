@@ -877,6 +877,9 @@ var
 begin
   if FRepo.Base = '' then
     Result := ''
+  else if (FRepo.Base = FBlameRange) and FRepo.IsRange then
+    Result := Format(rsVsBase, [Format(rsCommit,
+      [Copy(FRepo.Base, Pos('..', FRepo.Base) + 2, 7)])])
   else if FRepo.IsRange then
     Result := FRepo.Base
   else if FRepo.WholeTree then
@@ -904,6 +907,8 @@ begin
   Prev := FRepo.Base;
   PrevSnapshot := FRepo.WholeTree;
   StopWatcher;
+  if ARef <> FBlameRange then
+    FBlameRange := '';
   FRepo.Base := ARef;
   FRepo.WholeTree := ASnapshot;
   FLoadError := '';
@@ -912,6 +917,7 @@ begin
   begin
     FRepo.Base := Prev;
     FRepo.WholeTree := PrevSnapshot;
+    FBlameRange := '';
     RefreshRepository;
     FSummary.Notice := FLoadError;
     ShowSummary;
