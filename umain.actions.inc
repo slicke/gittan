@@ -614,12 +614,21 @@ begin
   FEditOld.PopupText := FEditPopup;
 
   FStatusPopup := TPopupMenu.Create(Self);
+  FStatusPopup.OnPopup := @StatusPopupPopup;
   AddItem(FStatusPopup, rsCopyBranch, @MenuCopyBranchClick);
   AddItem(FStatusPopup, rsCopyRepoPath, @MenuCopyRepoPathClick);
   Item := TMenuItem.Create(FStatusPopup);
   Item.Caption := '-';
   FStatusPopup.Items.Add(Item);
   AddItem(FStatusPopup, rsOpenTerminal, @MenuOpenTerminalClick);
+  if FHasGitHubCli then
+  begin
+    Item := TMenuItem.Create(FStatusPopup);
+    Item.Caption := '-';
+    FStatusPopup.Items.Add(Item);
+    FOpenPullItem := AddItem(FStatusPopup, rsOpenPull, @MenuOpenPullClick);
+    FCopyPullItem := AddItem(FStatusPopup, rsCopyPullUrl, @MenuCopyPullUrlClick);
+  end;
   StatusBar.PopupMenu := FStatusPopup;
 end;
 
@@ -939,7 +948,8 @@ begin
   try
     if FRepo.Root <> '' then
       FRepo.Refs(Refs);
-    if (FRepo.Base <> '') and not FRepo.WholeTree and (Refs.IndexOf(FRepo.Base) < 0) then
+    if (FRepo.Base <> '') and not FRepo.WholeTree and (FRepo.Base <> FPullRange) and
+      (Refs.IndexOf(FRepo.Base) < 0) then
       Refs.Insert(0, FRepo.Base);
     if Refs.Count > 0 then
       FCompareMenu.Add(NewLine);
@@ -959,6 +969,14 @@ begin
   Item.ShortCut := ShortCut(VK_N, [ssModifier, ssShift]);
   Item.OnClick := @MenuTakeSnapshotClick;
   FCompareMenu.Add(Item);
+  FPullMenu := nil;
+  if FHasGitHubCli then
+  begin
+    FPullMenu := TMenuItem.Create(FCompareMenu);
+    FPullMenu.Caption := rsPullRequests;
+    FCompareMenu.Add(FPullMenu);
+    RebuildPullMenu;
+  end;
   Item := TMenuItem.Create(FCompareMenu);
   Item.Caption := rsOtherRef;
   Item.OnClick := @MenuCompareOtherClick;
@@ -979,6 +997,152 @@ begin
     Exit;
   Ref := Trim(InputBox(StringReplace(rsCompareWith, '&', '', []), rsRefPrompt, FRepo.Base));
   SetBase(Ref);
+end;
+
+{ ---------------------------------------------------------------------------
+  Pull requests
+  ---------------------------------------------------------------------------
+  gh goes to the network, so the job runs in a thread: once per
+  repository and branch, and again on View > Refresh (AForce). A job
+  still running for something else is abandoned like a blame job. }
+procedure TForm1.StartPullJob(AForce: boolean);
+var
+  Key: string;
+begin
+  if not FHasGitHubCli then
+    Exit;
+  Key := FRepo.Root + #0 + FBranch;
+  if (FRepo.Root = '') or (not AForce and (Key = FPullKey)) then
+    Exit;
+  AbandonPullJob;
+  FPullKey := Key;
+  FHasPull := False;
+  FPulls := nil;
+  FPullError := '';
+  FPullJob := TGittanPullRequestJob.Create(FGitHubCli, FRepo.Root, FBranch);
+  FPullJob.OnDone := @PullJobDone;
+  FPullJob.Start;
+  RebuildPullMenu;
+end;
+
+procedure TForm1.AbandonPullJob;
+begin
+  if FPullJob = nil then
+    Exit;
+  FPullJob.Stop(False);
+  FBlameZombies.Add(FPullJob);
+  FPullJob := nil;
+end;
+
+procedure TForm1.PullJobDone(Sender: TObject);
+var
+  Job: TGittanPullRequestJob;
+begin
+  Job := TGittanPullRequestJob(Sender);
+  if Job <> FPullJob then
+    Exit;
+  FPullJob := nil;
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+  FHasPull := Job.HasPull;
+  FPull := Job.Pull;
+  FPulls := Job.Pulls;
+  FPullError := Job.Error;
+  UpdateStatus;
+  RebuildPullMenu;
+end;
+
+{ Compare With > Pull Requests: one radio item per open pull request,
+  the one compared against checked; a note while the job runs, when
+  there are none, or when gh failed. }
+procedure TForm1.RebuildPullMenu;
+var
+  Item: TMenuItem;
+  i: integer;
+  Note: string;
+begin
+  if FPullMenu = nil then
+    Exit;
+  FPullMenu.Clear;
+  if FPullJob <> nil then
+    Note := rsPullLoading
+  else if FPullError <> '' then
+    Note := FPullError
+  else if Length(FPulls) = 0 then
+    Note := rsNoPulls
+  else
+    Note := '';
+  if Note <> '' then
+  begin
+    Item := TMenuItem.Create(FPullMenu);
+    Item.Caption := Note;
+    Item.Enabled := False;
+    FPullMenu.Add(Item);
+    Exit;
+  end;
+  for i := 0 to High(FPulls) do
+  begin
+    Item := TMenuItem.Create(FPullMenu);
+    if FPulls[i].IsDraft then
+      Item.Caption := Format(rsPullDraftItem, [FPulls[i].Number, FPulls[i].Title])
+    else
+      Item.Caption := Format(rsPullItem, [FPulls[i].Number, FPulls[i].Title]);
+    Item.Hint := FPulls[i].Url;
+    Item.Tag := i;
+    Item.RadioItem := True;
+    Item.Checked := (FPullRange <> '') and (FRepo.Base = FPullRange) and
+      (FPulls[i].Number = FPullNumber);
+    Item.OnClick := @MenuComparePullClick;
+    FPullMenu.Add(Item);
+  end;
+end;
+
+{ Fetches the pull request's head into a ref of Gittan's own, and its
+  base branch, and compares the two with the three-dot range, as GitHub
+  shows a pull request: what the branch adds since it left the base. }
+procedure TForm1.MenuComparePullClick(Sender: TObject);
+var
+  Pull: TGittanPullRequest;
+  i: integer;
+  Remote, HeadRef: string;
+begin
+  i := TMenuItem(Sender).Tag;
+  if (FRepo.Root = '') or (i < 0) or (i > High(FPulls)) then
+    Exit;
+  Pull := FPulls[i];
+  StatusBar.SimpleText := Format(rsFetchingPull, [Pull.Number]);
+  StatusBar.Update;
+  Remote := FRepo.RemoteFor(RepoPathOfUrl(Pull.Url));
+  if not FRepo.FetchPullRequest(Remote, Pull.Number, Pull.BaseRef, HeadRef) then
+  begin
+    FSummary.Notice := Format(rsPullFailed, [Pull.Number, FRepo.Error]);
+    ShowSummary;
+    UpdateStatus;
+    Exit;
+  end;
+  FPullRange := Remote + '/' + Pull.BaseRef + '...' + HeadRef;
+  FPullNumber := Pull.Number;
+  SetBase(FPullRange);
+end;
+
+procedure TForm1.StatusPopupPopup(Sender: TObject);
+begin
+  if FOpenPullItem <> nil then
+    FOpenPullItem.Enabled := FHasPull and (FPull.Url <> '');
+  if FCopyPullItem <> nil then
+    FCopyPullItem.Enabled := FHasPull and (FPull.Url <> '');
+end;
+
+procedure TForm1.MenuOpenPullClick(Sender: TObject);
+begin
+  if FHasPull and (FPull.Url <> '') then
+    OpenURL(FPull.Url);
+end;
+
+procedure TForm1.MenuCopyPullUrlClick(Sender: TObject);
+begin
+  if FHasPull and (FPull.Url <> '') then
+    Clipboard.AsText := FPull.Url;
 end;
 
 { ---------------------------------------------------------------------------
@@ -1048,6 +1212,8 @@ begin
   else if (FRepo.Base = FBlameRange) and FRepo.IsRange then
     Result := Format(rsVsBase, [Format(rsCommit,
       [Copy(FRepo.Base, Pos('..', FRepo.Base) + 2, 7)])])
+  else if (FRepo.Base = FPullRange) and FRepo.IsRange then
+    Result := Format(rsVsBase, [Format(rsVsPull, [FPullNumber])])
   else if FRepo.IsRange then
     Result := FRepo.Base
   else if FRepo.WholeTree then

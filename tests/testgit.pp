@@ -42,6 +42,8 @@ type
     procedure TestBlame;
     procedure TestCommitRange;
     procedure TestLineHistory;
+    procedure TestRemoteFor;
+    procedure TestFetchPullRequest;
   end;
 
 implementation
@@ -591,6 +593,57 @@ end;
 
 { The range of a commit runs from its parent; a root commit, which has
   none, from the empty tree, so every file of it reads as added. }
+procedure TGitRepoTest.TestRemoteFor;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  AssertEquals('', FRepo.RemoteFor('foo/bar'));
+  Git(['remote', 'add', 'upstream', 'https://github.com/Foo/Bar.git']);
+  Git(['remote', 'add', 'origin', 'git@github.com:me/bar.git']);
+  AssertEquals('upstream', FRepo.RemoteFor('foo/bar'));
+  AssertEquals('origin', FRepo.RemoteFor('me/bar'));
+  { Unknown: origin when there is one, else the first remote git lists. }
+  AssertEquals('origin', FRepo.RemoteFor('nobody/nothing'));
+  AssertEquals('origin', FRepo.RemoteFor(''));
+  Git(['remote', 'remove', 'origin']);
+  AssertEquals('upstream', FRepo.RemoteFor('nobody/nothing'));
+end;
+
+{ A bare repository stands in for GitHub: it serves the pull request as
+  refs/pull/7/head, as GitHub does. }
+procedure TGitRepoTest.TestFetchPullRequest;
+var
+  Remote, Branch, Head, HeadRef, Output: string;
+  Status: integer;
+begin
+  MakeHistory;
+  Remote := FDir + '-remote';
+  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Status,
+    [poStderrToOutPut]) = 0 then
+  try
+    Branch := Trim(Git(['rev-parse', '--abbrev-ref', 'HEAD']));
+    Git(['remote', 'add', 'origin', Remote]);
+    Git(['push', '-q', 'origin', Branch]);
+    WriteFile('a.txt', 'one'#10'two'#10'three'#10'four'#10);
+    Commit('the pull request');
+    Head := Trim(Git(['rev-parse', 'HEAD']));
+    Git(['push', '-q', 'origin', 'HEAD:refs/pull/7/head']);
+    Git(['reset', '-q', '--hard', 'HEAD^']);
+    AssertTrue(FRepo.Open(FDir));
+    AssertTrue(FRepo.FetchPullRequest('origin', 7, Branch, HeadRef));
+    AssertEquals('refs/gittan/pr/7', HeadRef);
+    AssertEquals(Head, Trim(Git(['rev-parse', HeadRef])));
+    AssertTrue(FRepo.HasCommit('origin/' + Branch));
+    AssertFalse(FRepo.FetchPullRequest('origin', 8, Branch, HeadRef));
+    FRepo.Base := 'origin/' + Branch + '...' + HeadRef;
+    AssertTrue(FRepo.IsRange);
+  finally
+    RemoveTree(Remote);
+  end
+  else
+    Fail('could not make a bare repository');
+end;
+
 procedure TGitRepoTest.TestCommitRange;
 var
   Stats: TGittanFileStats;

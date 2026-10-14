@@ -76,6 +76,17 @@ type
     function Refs(AList: TStrings): boolean;
     {** Whether ARef names a commit in the repository. }
     function HasCommit(const ARef: string): boolean;
+    {** The remote whose URL holds ARepoPath ("owner/repo", compared
+      without regard to case), else origin, else the first remote, else
+      empty. }
+    function RemoteFor(const ARepoPath: string): string;
+    {** Fetches pull request ANumber of ARemote (a GitHub remote, which
+      serves it as refs/pull/N/head) into refs/gittan/pr/N, the name given
+      in AHeadRef, and ABaseRef along with it, so the remote-tracking
+      branch of the base is current too. Nothing in the work tree or the
+      branches changes. }
+    function FetchPullRequest(const ARemote: string; ANumber: integer;
+      const ABaseRef: string; out AHeadRef: string): boolean;
     {** Records the work tree as it is now, untracked files included, in
       a commit of its own (parent HEAD when there is one, no branch points
       at it), and returns its id: a Base to compare against later, with
@@ -520,6 +531,55 @@ var
 begin
   Result := (FRoot <> '') and (ARef <> '') and
     RunGit(FRoot, ['rev-parse', '--verify', '-q', ARef + '^{commit}'], Id);
+end;
+
+function TGittanRepo.RemoteFor(const ARepoPath: string): string;
+var
+  Output, Line, Name: string;
+  Raw: TStringList;
+  p: integer;
+  HasOrigin: boolean;
+begin
+  Result := '';
+  HasOrigin := False;
+  if (FRoot = '') or not RunGit(FRoot, ['config', '--get-regexp', '^remote\..*\.url$'],
+    Output) then
+    Exit;
+  Raw := TStringList.Create;
+  try
+    Raw.Text := Output;
+    for Line in Raw do
+    begin
+      { remote.<name>.url <url> }
+      p := Pos(' ', Line);
+      if (p = 0) or (Pos('remote.', Line) <> 1) then
+        Continue;
+      Name := Copy(Line, 8, p - 8);
+      if Copy(Name, Length(Name) - 3, 4) <> '.url' then
+        Continue;
+      Name := Copy(Name, 1, Length(Name) - 4);
+      if Result = '' then
+        Result := Name;
+      HasOrigin := HasOrigin or (Name = 'origin');
+      if (ARepoPath <> '') and (Pos(LowerCase(ARepoPath), LowerCase(Line)) > p) then
+        Exit(Name);
+    end;
+  finally
+    Raw.Free;
+  end;
+  if HasOrigin then
+    Result := 'origin';
+end;
+
+function TGittanRepo.FetchPullRequest(const ARemote: string; ANumber: integer;
+  const ABaseRef: string; out AHeadRef: string): boolean;
+var
+  Output: string;
+begin
+  AHeadRef := 'refs/gittan/pr/' + IntToStr(ANumber);
+  Result := (FRoot <> '') and (ARemote <> '') and RunGit(FRoot, ['fetch', '--no-tags',
+    '-q', ARemote, ABaseRef, '+refs/pull/' + IntToStr(ANumber) + '/head:' + AHeadRef],
+    Output);
 end;
 
 function TGittanRepo.TakeSnapshot(out AId: string): boolean;

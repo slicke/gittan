@@ -11,7 +11,8 @@ uses
   {$ENDIF}
   Classes, consoletestrunner,
   testworddiff, testgit, testsettings, testsymbols, testlexerpick,
-  testsymbolindex, testsnapshots, testblame, testhistory, testsyntaxthemes;
+  testsymbolindex, testsnapshots, testblame, testhistory, testsyntaxthemes,
+  testgithub;
 
 var
   App: TTestRunner;

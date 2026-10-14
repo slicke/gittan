@@ -12,7 +12,7 @@ uses
   ATStringProc_WordJump,
   ATSynEdit_Markers, ATSynEdit_LineParts, ATSynEdit_Ranges, ATSynEdit_WrapInfo,
   ec_SyntAnal,
-  gittan.lexers, gittan.git, gittan.icons, gittan.theme, gittan.changenav,
+  gittan.lexers, gittan.git, gittan.github, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
@@ -90,6 +90,22 @@ type
     FPopupEd: TATSynEdit;
     FPopupRow: integer;
     FPopupHash: string;
+    { GitHub's view of the repository, read by a TGittanPullRequestJob
+      when the repository or its branch changes (FPullKey names the pair
+      the data is for) and on View > Refresh: the pull request of the
+      branch, if any, and the open pull requests, or gh's message. A
+      finished job goes to FBlameZombies, which frees it later. The
+      Compare With > Pull Requests submenu lists FPulls; a chosen one is
+      fetched and compared as the range FPullRange, numbered
+      FPullNumber, which BaseLabel names "PR #12". }
+    FPullJob: TGittanPullRequestJob;
+    FPull: TGittanPullRequest;
+    FHasPull: boolean;
+    FPulls: TGittanPullRequests;
+    FPullError, FPullKey: string;
+    FPullMenu, FOpenPullItem, FCopyPullItem: TMenuItem;
+    FPullRange: string;
+    FPullNumber: integer;
     FContextFromSummary: boolean;
     FHeader: TGittanFileHeader;
     FNav: TGittanChangeNav;
@@ -394,6 +410,14 @@ type
     procedure MenuOpenLineOnGitHubClick(Sender: TObject);
     procedure MenuOpenCommitOnGitHubClick(Sender: TObject);
     procedure OpenOnGitHub(const AArgs: array of string);
+    procedure StartPullJob(AForce: boolean);
+    procedure AbandonPullJob;
+    procedure PullJobDone(Sender: TObject);
+    procedure RebuildPullMenu;
+    procedure StatusPopupPopup(Sender: TObject);
+    procedure MenuComparePullClick(Sender: TObject);
+    procedure MenuOpenPullClick(Sender: TObject);
+    procedure MenuCopyPullUrlClick(Sender: TObject);
     procedure OpenFileOnGitHub(const APath: string; ALine: integer);
     function FileLineOfRow(AEd: TATSynEdit; ARow: integer): integer;
     procedure StatusBarClick(Sender: TObject);
@@ -533,6 +557,16 @@ const
   rsOpenOnGitHub = 'Open on &GitHub';
   rsOpenCommitOnGitHub = 'Open Co&mmit on GitHub';
   rsGitHubFailed = 'gh: %s';
+  rsPullRequests = 'Pull Re&quests';
+  rsPullLoading = 'Loading...';
+  rsNoPulls = 'No open pull requests';
+  rsPullItem = '#%d %s';
+  rsPullDraftItem = '#%d %s (draft)';
+  rsVsPull = 'PR #%d';
+  rsOpenPull = 'Open Pull Re&quest';
+  rsCopyPullUrl = 'Copy Pull Request &URL';
+  rsFetchingPull = 'Fetching pull request #%d...';
+  rsPullFailed = 'Could not fetch pull request #%d: %s';
   { Bookmark kinds in the editor's second bookmark list, used only for the
     line backgrounds of a diff: an added line, a deleted one, a gap row
     standing for hidden lines, and a filler row of the side-by-side
@@ -756,6 +790,7 @@ procedure TForm1.FormDestroy(Sender: TObject);
 begin
   Application.RemoveAsyncCalls(Self);
   StopWatcher;
+  AbandonPullJob;
   StopBlame;
   StopIndexing;
   SaveIndex;
@@ -1034,6 +1069,8 @@ begin
       Repo := ExtractFileName(FRepo.Root);
     if FRepo.Base <> '' then
       Repo := Repo + ' ' + BaseLabel;
+    if FHasPull then
+      Repo := Repo + ' · ' + PullRequestStatus(FPull);
     if FIndexing then
       Repo := Repo + ' · ' + Format(rsIndexing, [FIndexPos, FIndexTotal]);
   end;
@@ -1905,6 +1942,7 @@ begin
   SaveIndex;
   FSummary.Notice := '';
   FCurrentPath := '';
+  FPullRange := '';
   if not FRepo.Open(ADir) then
   begin
     ShowError(FRepo.Error);
@@ -1954,6 +1992,7 @@ begin
     FLoadError := FRepo.Error;
   FStats := Stats;
   FBranch := FRepo.Branch;
+  StartPullJob(False);
   FFileCount := Length(Stats);
   FillFileTree(Stats);
   SetLength(Icons, Length(Stats));
@@ -2006,6 +2045,7 @@ end;
 procedure TForm1.MenuRefreshClick(Sender: TObject);
 begin
   RefreshRepository;
+  StartPullJob(True);
 end;
 
 { The path of the selected file in the tree, empty when none or a folder
