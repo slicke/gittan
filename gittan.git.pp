@@ -180,10 +180,37 @@ type
   without /opt/homebrew/bin and /usr/local/bin. }
 function FindGitHubCli: string;
 
+{** Runs gh (AExe, from FindGitHubCli) in ADir and answers whether it
+  succeeded, with its standard output in AOutput and, on failure, its
+  message in AError. gh runs with its prompts and its update notice off,
+  since nobody could answer the one and the other would land in stderr. }
+function RunGitHubCli(const AExe, ADir: string; const AArgs: array of string;
+  out AOutput, AError: string): boolean;
+
 implementation
 
 uses
   Process, md5;
+
+{ Gives P the environment of Gittan without the variables whose names
+  (with the equals sign) are in ASkip, so the caller can set those. }
+procedure CopyEnvironment(P: TProcess; const ASkip: array of string);
+var
+  Env, Prefix: string;
+  i: integer;
+  Keep: boolean;
+begin
+  for i := 1 to GetEnvironmentVariableCount do
+  begin
+    Env := GetEnvironmentString(i);
+    Keep := True;
+    for Prefix in ASkip do
+      if Pos(Prefix, Env) = 1 then
+        Keep := False;
+    if Keep then
+      P.Environment.Add(Env);
+  end;
+end;
 
 { ---------------------------------------------------------------------------
   Running git
@@ -202,7 +229,7 @@ function TGittanRepo.RunGit(const ADir: string; const AArgs: array of string;
   out AOutput: string; const AIndexFile: string): boolean;
 var
   P: TProcess;
-  Err, Env: string;
+  Err: string;
   Status, i: integer;
 begin
   AOutput := '';
@@ -214,13 +241,7 @@ begin
     P.Parameters.Add('core.quotepath=false');
     for i := 0 to High(AArgs) do
       P.Parameters.Add(AArgs[i]);
-    for i := 1 to GetEnvironmentVariableCount do
-    begin
-      Env := GetEnvironmentString(i);
-      if (Pos('LC_ALL=', Env) <> 1) and (Pos('GIT_TERMINAL_PROMPT=', Env) <> 1) and
-        (Pos('GIT_INDEX_FILE=', Env) <> 1) then
-        P.Environment.Add(Env);
-    end;
+    CopyEnvironment(P, ['LC_ALL=', 'GIT_TERMINAL_PROMPT=', 'GIT_INDEX_FILE=']);
     P.Environment.Add('LC_ALL=C');
     P.Environment.Add('GIT_TERMINAL_PROMPT=0');
     if AIndexFile <> '' then
@@ -260,6 +281,42 @@ begin
   if Extra <> '' then
     Path := Path + PathSeparator + Extra;
   Result := ExeSearch(Name, Path);
+end;
+
+function RunGitHubCli(const AExe, ADir: string; const AArgs: array of string;
+  out AOutput, AError: string): boolean;
+var
+  P: TProcess;
+  Status, i: integer;
+begin
+  AOutput := '';
+  AError := '';
+  P := TProcess.Create(nil);
+  try
+    P.Executable := AExe;
+    P.CurrentDirectory := ADir;
+    for i := 0 to High(AArgs) do
+      P.Parameters.Add(AArgs[i]);
+    CopyEnvironment(P, ['GH_PROMPT_DISABLED=', 'GH_NO_UPDATE_NOTIFIER=']);
+    P.Environment.Add('GH_PROMPT_DISABLED=1');
+    P.Environment.Add('GH_NO_UPDATE_NOTIFIER=1');
+    P.Options := [poNoConsole];
+    if P.RunCommandLoop(AOutput, AError, Status) <> 0 then
+    begin
+      AError := 'Could not run ' + AExe;
+      Exit(False);
+    end;
+  finally
+    P.Free;
+  end;
+  Result := Status = 0;
+  if not Result then
+  begin
+    AError := Trim(AError);
+    if AError = '' then
+      AError := Trim(AOutput);
+    AOutput := '';
+  end;
 end;
 
 { The NUL-separated fields of the output of a git command run with -z; a

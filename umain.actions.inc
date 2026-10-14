@@ -590,8 +590,28 @@ begin
   FFilePopup.Items.Add(Item);
   FRevealItem := AddItem(FFilePopup, rsReveal, @MenuRevealClick);
   FOpenItem := AddItem(FFilePopup, rsOpenInEditor, @MenuOpenInEditorClick);
+  if FHasGitHubCli then
+    AddItem(FFilePopup, rsOpenOnGitHub, @MenuOpenOnGitHubClick);
   FileTree.PopupMenu := FFilePopup;
   FHeader.PopupMenu := FFilePopup;
+
+  { The editors' menu replaces ATSynEdit's own, whose cut, paste, delete,
+    undo and redo a read-only viewer never enables. }
+  FEditPopup := TPopupMenu.Create(Self);
+  FEditPopup.OnPopup := @EditPopupPopup;
+  AddItem(FEditPopup, rsEditCopy, @MenuEditCopyClick);
+  AddItem(FEditPopup, rsEditSelectAll, @MenuEditSelectAllClick);
+  if FHasGitHubCli then
+  begin
+    Item := TMenuItem.Create(FEditPopup);
+    Item.Caption := '-';
+    FEditPopup.Items.Add(Item);
+    FGitHubEditItem := AddItem(FEditPopup, rsOpenOnGitHub, @MenuOpenLineOnGitHubClick);
+    FGitHubCommitItem := AddItem(FEditPopup, rsOpenCommitOnGitHub,
+      @MenuOpenCommitOnGitHubClick);
+  end;
+  Edit.PopupText := FEditPopup;
+  FEditOld.PopupText := FEditPopup;
 
   FStatusPopup := TPopupMenu.Create(Self);
   AddItem(FStatusPopup, rsCopyBranch, @MenuCopyBranchClick);
@@ -659,6 +679,136 @@ begin
   RunDetached('xdg-open', [ExtractFileDir(ContextFullPath)]);
   {$ENDIF}
   {$ENDIF}
+end;
+
+{ ---------------------------------------------------------------------------
+  The editor menu, and GitHub
+  ---------------------------------------------------------------------------
+  ATSynEdit pops the menu up itself, so the editor under the mouse and
+  the row there are found here, before the items are enabled. }
+procedure TForm1.EditPopupPopup(Sender: TObject);
+var
+  P: TPoint;
+  Details: TATEditorPosDetails;
+  Info: TGittanBlameCommit;
+  Key: integer;
+  Src: TObject;
+begin
+  FPopupEd := Edit;
+  if (FEditOld <> nil) and FEditOld.Visible and
+    PtInRect(FEditOld.ClientRect, FEditOld.ScreenToClient(Mouse.CursorPos)) then
+    FPopupEd := FEditOld;
+  P := FPopupEd.ScreenToClient(Mouse.CursorPos);
+  P := FPopupEd.ClientPosToCaretPos(ATPoint(P.X, P.Y), Details);
+  FPopupRow := P.Y;
+  if (P.Y < 0) or Details.BelowAllText then
+    FPopupRow := -1;
+  FPopupHash := '';
+  if (FPopupRow >= 0) and CommitOfRow(FPopupEd, FPopupRow, Info, Key, Src) and
+    not Info.Uncommitted then
+    FPopupHash := Info.Hash;
+  if FGitHubEditItem <> nil then
+    FGitHubEditItem.Enabled := (FRepo.Root <> '') and (FCurrentPath <> '');
+  if FGitHubCommitItem <> nil then
+    FGitHubCommitItem.Enabled := FPopupHash <> '';
+end;
+
+procedure TForm1.MenuEditCopyClick(Sender: TObject);
+begin
+  FPopupEd.DoCommand(cCommand_ClipboardCopy, TATCommandInvoke.MenuContext);
+end;
+
+procedure TForm1.MenuEditSelectAllClick(Sender: TObject);
+begin
+  FPopupEd.DoCommand(cCommand_SelectAll, TATCommandInvoke.MenuContext);
+end;
+
+{ Opens the page of the repository on GitHub that gh browse finds for
+  AArgs. gh only prints the address (--no-browser) and the desktop
+  opens it, so a failure (no GitHub remote, say) is told in the status
+  bar instead of going unseen. }
+procedure TForm1.OpenOnGitHub(const AArgs: array of string);
+var
+  Args: array of string;
+  Url, Err: string;
+  i: integer;
+begin
+  if not FHasGitHubCli or (FRepo.Root = '') then
+    Exit;
+  SetLength(Args, Length(AArgs) + 2);
+  Args[0] := 'browse';
+  Args[1] := '--no-browser';
+  for i := 0 to High(AArgs) do
+    Args[i + 2] := AArgs[i];
+  if RunGitHubCli(FGitHubCli, FRepo.Root, Args, Url, Err) and (Trim(Url) <> '') then
+    OpenURL(Trim(Url))
+  else
+  begin
+    Err := Trim(Err);
+    if Pos(LineEnding, Err) > 0 then
+      Err := Copy(Err, 1, Pos(LineEnding, Err) - 1);
+    StatusBar.SimpleText := Format(rsGitHubFailed, [Err]);
+  end;
+end;
+
+{ The file, at ALine when it is above 0, in the version the view shows:
+  the right commit of a range (what a blame click or Compare With >
+  Other set), else the branch, since the work tree has no page. }
+procedure TForm1.OpenFileOnGitHub(const APath: string; ALine: integer);
+var
+  Target, OldRef, NewRef: string;
+begin
+  Target := APath;
+  if ALine > 0 then
+    Target := Target + ':' + IntToStr(ALine);
+  FRepo.DiffSides(OldRef, NewRef);
+  if NewRef <> '' then
+    OpenOnGitHub([Target, '--commit=' + NewRef])
+  else if FBranch <> '' then
+    OpenOnGitHub([Target, '--branch', FBranch])
+  else
+    OpenOnGitHub([Target]);
+end;
+
+{ The line of the shown file that row ARow of AEd holds, 0 when the row
+  is not one of the new side (a gap, a filler, a deleted line, the old
+  side, or a history row, whose lines are of several versions). }
+function TForm1.FileLineOfRow(AEd: TATSynEdit; ARow: integer): integer;
+var
+  Line: integer;
+begin
+  Result := 0;
+  if (AEd <> Edit) or (ARow < 0) then
+    Exit;
+  case FView of
+    gvFile:
+      Result := ARow + 1;
+    gvChanges:
+      if ARow <= High(FRows) then
+      begin
+        Line := FRows[ARow].Line;
+        if (Line >= 0) and (Line <= High(FNewNum)) then
+          Result := FNewNum[Line];
+      end;
+  end;
+end;
+
+procedure TForm1.MenuOpenOnGitHubClick(Sender: TObject);
+begin
+  if FContextPath <> '' then
+    OpenFileOnGitHub(FContextPath, 0);
+end;
+
+procedure TForm1.MenuOpenLineOnGitHubClick(Sender: TObject);
+begin
+  if FCurrentPath <> '' then
+    OpenFileOnGitHub(FCurrentPath, FileLineOfRow(FPopupEd, FPopupRow));
+end;
+
+procedure TForm1.MenuOpenCommitOnGitHubClick(Sender: TObject);
+begin
+  if FPopupHash <> '' then
+    OpenOnGitHub([FPopupHash]);
 end;
 
 { Runs ACommand, words separated by spaces, with APath appended. }

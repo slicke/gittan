@@ -7,7 +7,7 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, Menus, ComCtrls,
   ExtCtrls, StdCtrls, LCLType, LazLoggerBase, Math, Types,
-  ATSynEdit, ATSynEdit_Adapter_EControl, ATSynEdit_Bookmarks,
+  ATSynEdit, ATSynEdit_Adapter_EControl, ATSynEdit_Bookmarks, ATSynEdit_Commands,
   ATSynEdit_Carets, ATSynEdit_Gutter_Decor, ATSynEdit_Globals, ATStringProc,
   ATStringProc_WordJump,
   ATSynEdit_Markers, ATSynEdit_LineParts, ATSynEdit_Ranges, ATSynEdit_WrapInfo,
@@ -79,9 +79,17 @@ type
     FThemeItems: array of TMenuItem;
     {** The chosen syntax theme, an index into SyntaxThemes. }
     FSyntaxTheme: integer;
-    FFilePopup, FStatusPopup: TPopupMenu;
+    FFilePopup, FStatusPopup, FEditPopup: TPopupMenu;
     FRevealItem, FOpenItem: TMenuItem;
     FContextPath: string;
+    { The GitHub items of the editor menu, made only when gh is installed
+      (the file menu's is enabled with the rest of its items); the editor the editor menu popped up over and the
+      row under the mouse then (-1 below the text), and the commit of
+      that row, for Open Commit on GitHub. }
+    FGitHubEditItem, FGitHubCommitItem: TMenuItem;
+    FPopupEd: TATSynEdit;
+    FPopupRow: integer;
+    FPopupHash: string;
     FContextFromSummary: boolean;
     FHeader: TGittanFileHeader;
     FNav: TGittanChangeNav;
@@ -379,6 +387,15 @@ type
     procedure MenuCopyRelativePathClick(Sender: TObject);
     procedure MenuRevealClick(Sender: TObject);
     procedure MenuOpenInEditorClick(Sender: TObject);
+    procedure EditPopupPopup(Sender: TObject);
+    procedure MenuEditCopyClick(Sender: TObject);
+    procedure MenuEditSelectAllClick(Sender: TObject);
+    procedure MenuOpenOnGitHubClick(Sender: TObject);
+    procedure MenuOpenLineOnGitHubClick(Sender: TObject);
+    procedure MenuOpenCommitOnGitHubClick(Sender: TObject);
+    procedure OpenOnGitHub(const AArgs: array of string);
+    procedure OpenFileOnGitHub(const APath: string; ALine: integer);
+    function FileLineOfRow(AEd: TATSynEdit; ARow: integer): integer;
     procedure StatusBarClick(Sender: TObject);
     procedure MenuCopyBranchClick(Sender: TObject);
     procedure MenuCopyRepoPathClick(Sender: TObject);
@@ -511,6 +528,11 @@ const
   OverscrollPause = 300;
   rsReveal = {$IFDEF DARWIN}'Reveal in &Finder'{$ELSE}
     {$IFDEF WINDOWS}'Show in &Explorer'{$ELSE}'Show in &File Manager'{$ENDIF}{$ENDIF};
+  rsEditCopy = '&Copy';
+  rsEditSelectAll = 'Select &All';
+  rsOpenOnGitHub = 'Open on &GitHub';
+  rsOpenCommitOnGitHub = 'Open Co&mmit on GitHub';
+  rsGitHubFailed = 'gh: %s';
   { Bookmark kinds in the editor's second bookmark list, used only for the
     line backgrounds of a diff: an added line, a deleted one, a gap row
     standing for hidden lines, and a filler row of the side-by-side
