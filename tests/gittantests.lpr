@@ -12,7 +12,8 @@ uses
   Classes, consoletestrunner,
   testworddiff, testgit, testsettings, testsymbols, testlexerpick,
   testsymbolindex, testsnapshots, testblame, testhistory, testsyntaxthemes,
-  testgithub, testconflicts, testcli, testsymbolchanges;
+  testgithub, testconflicts, testcli, testsymbolchanges,
+  testcallers;
 
 var
   App: TTestRunner;

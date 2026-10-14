@@ -16,7 +16,7 @@ uses
   gittan.summary, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
-  gittan.syntaxthemes, gittan.cli, gittan.symbolchanges, md5;
+  gittan.syntaxthemes, gittan.cli, gittan.symbolchanges, gittan.callers, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -151,6 +151,10 @@ type
     { Whether each of FSymbols is in the old side's text (Go > Changed
       Symbols in the side-by-side view), nil when none is. }
     FSymbolOnOld: array of boolean;
+    { Whether the rows of FSymbols in other files are places to go to as
+      they are (the uses Go > Callers of Changed Symbols lists), not
+      definitions to look up in the file's text. }
+    FSymbolPlaces: boolean;
     FIndex: TGittanSymbolIndex;
     FIndexQueue: TStringList;
     FIndexPos, FIndexTotal: integer;
@@ -404,7 +408,9 @@ type
     function WordAt(AEd: TATSynEdit; APos: TPoint; out AStart, AEnd: integer): string;
     function CodeTree(AAdapter: TATAdapterEControl; AEd: TATSynEdit): TGittanSymbols;
     function CodeRanges(AAdapter: TATAdapterEControl; AEd: TATSynEdit): TGittanCodeRanges;
+    function ShownSymbolChanges(out ANew, AOld: TGittanSideText): TGittanSymbolChanges;
     procedure MenuChangedSymbolsClick(Sender: TObject);
+    procedure MenuCallersClick(Sender: TObject);
     function FileSymbols(const ARelPath: string): TGittanSymbols;
     function IndexFileName: string;
     procedure SaveIndex;
@@ -577,6 +583,11 @@ resourcestring
   rsChangedSymbolHint = 'Changed symbol';
   rsRepoSymbolHint = 'Symbol in repository';
   rsNoChangedSymbols = 'No changed symbols in this file.';
+  rsCallers = 'Ca&llers of Changed Symbols...';
+  rsCallerHint = 'Changed symbol or a line that uses it';
+  rsCallersAbove = 'same name, listed above';
+  rsNoCallers = 'No other file uses the changed symbols.';
+  rsCallersStatus = 'The changed symbols are used in %s outside this file.';
   rsLookingFor = 'Looking for a definition of "%s"...';
   rsNoDefinition = 'No definition of "%s" in the repository.';
   rsIndexing = 'indexing %d/%d';
@@ -1326,6 +1337,7 @@ begin
   { Cmd+Y alone is the editor's delete-line key, which gets the key first. }
   AddItem(GoMenu, rsChangedSymbols, ShortCut(VK_Y, [ssModifier, ssShift]),
     @MenuChangedSymbolsClick);
+  AddItem(GoMenu, rsCallers, ShortCut(VK_C, [ssModifier, ssShift]), @MenuCallersClick);
   AddItem(GoMenu, rsHistory, ShortCut(VK_H, [ssModifier, ssShift]), @MenuHistoryClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextChange, ShortCut(VK_F7, []), @MenuNextChangeClick);

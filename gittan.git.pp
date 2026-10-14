@@ -140,6 +140,14 @@ type
       relative to Root with "/" separators. Returns false when git
       failed. }
     function Files(AList: TStrings): boolean;
+    {** Runs `git grep` for the words AWords, whole words only, over the
+      files Files lists (the untracked ones too), binary files left out,
+      ignoring case when AIgnoreCase. AOutput is what `-z -n` prints: the
+      path, the row and the text of every matching row, NUL separated,
+      one row per line (see ParseGrep in gittan.callers). No match is not
+      a failure: the output is empty then. Returns false when git
+      failed. }
+    function Grep(AWords: TStrings; AIgnoreCase: boolean; out AOutput: string): boolean;
     {** The change kind of a "XY" status from `git status --porcelain`. }
     class function ChangeKind(const AStatus: string): TGittanChangeKind;
     {** flagStaged and flagUnstaged for a "XY" status: X is the index
@@ -839,6 +847,44 @@ begin
     '--exclude-standard'], Output);
   if Result then
     SplitNul(Output, AList);
+end;
+
+{ git grep exits with 1 and says nothing when no row matched, which
+  RunGit reports as a failure without a message. }
+function TGittanRepo.Grep(AWords: TStrings; AIgnoreCase: boolean; out AOutput: string): boolean;
+var
+  Args: array of string;
+  i, n: integer;
+begin
+  AOutput := '';
+  if (FRoot = '') or (AWords.Count = 0) then
+    Exit(False);
+  SetLength(Args, 10 + 2 * AWords.Count);
+  Args[0] := 'grep';
+  Args[1] := '-z';
+  Args[2] := '-n';
+  Args[3] := '-w';
+  Args[4] := '-F';
+  Args[5] := '-I';
+  Args[6] := '--untracked';
+  n := 7;
+  if AIgnoreCase then
+  begin
+    Args[n] := '-i';
+    Inc(n);
+  end;
+  for i := 0 to AWords.Count - 1 do
+  begin
+    Args[n] := '-e';
+    Args[n + 1] := AWords[i];
+    Inc(n, 2);
+  end;
+  Args[n] := '--';
+  Args[n + 1] := '.';
+  SetLength(Args, n + 2);
+  Result := RunGit(FRoot, Args, AOutput);
+  if not Result and (FError = '') then
+    Result := True;
 end;
 
 function TGittanRepo.ChangedFiles(AList: TStrings): boolean;

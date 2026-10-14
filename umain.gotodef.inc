@@ -325,6 +325,7 @@ begin
     Exit;
   FreeAndNil(FSymbolFiles);
   FSymbolOnOld := nil;
+  FSymbolPlaces := False;
   FSymbols := CodeTree(FAdapter, Edit);
   Names := TStringList.Create;
   try
@@ -375,6 +376,7 @@ begin
     Exit;
   FreeAndNil(FSymbolFiles);
   FSymbolOnOld := nil;
+  FSymbolPlaces := False;
   FSymbolFiles := TStringList.Create;
   Names := TStringList.Create;
   Details := TStringList.Create;
@@ -422,11 +424,29 @@ begin
   FSymbolBar.Activate;
 end;
 
-{ Go > Changed Symbols: lists the symbols of the shown file the diff
-  changed in the symbol bar, each with how (see gittan.symbolchanges):
+{ The symbols of the shown file the diff changed (see gittan.symbolchanges):
   the code tree of the text laid over the markers of the rows. In the
-  side-by-side view the wholly deleted symbols come from the old side,
-  and FSymbolOnOld remembers which so a pick goes there. }
+  side-by-side view the wholly deleted symbols come from the old side.
+  The Lines of both sides are the caller's to free. }
+function TForm1.ShownSymbolChanges(out ANew, AOld: TGittanSideText): TGittanSymbolChanges;
+begin
+  ANew := Default(TGittanSideText);
+  AOld := Default(TGittanSideText);
+  ANew.Ranges := CodeRanges(FAdapter, Edit);
+  ANew.Markers := RowMarkers(FRows, False);
+  ANew.Lines := RowTexts(Edit);
+  if FEditOld.Visible then
+  begin
+    AOld.Ranges := CodeRanges(FAdapterOld, FEditOld);
+    AOld.Markers := RowMarkers(FRowsOld, True);
+    AOld.Lines := RowTexts(FEditOld);
+  end;
+  Result := SymbolChanges(ANew, AOld, FEditOld.Visible);
+end;
+
+{ Go > Changed Symbols: lists the changed symbols of the shown file in
+  the symbol bar, each with how it changed. FSymbolOnOld remembers which
+  are only in the old side's text, so a pick goes there. }
 procedure TForm1.MenuChangedSymbolsClick(Sender: TObject);
 var
   NewSide, OldSide: TGittanSideText;
@@ -435,28 +455,16 @@ var
   Depths: TIntegerDynArray;
   R: TGittanCodeRange;
   OtherName: string;
-  TwoSides: boolean;
   i: integer;
 begin
   if not Edit.Visible or (FView <> gvChanges) then
     Exit;
-  TwoSides := FEditOld.Visible;
-  NewSide := Default(TGittanSideText);
-  OldSide := Default(TGittanSideText);
+  Changes := ShownSymbolChanges(NewSide, OldSide);
   Names := TStringList.Create;
   Details := TStringList.Create;
   try
-    NewSide.Ranges := CodeRanges(FAdapter, Edit);
-    NewSide.Markers := RowMarkers(FRows, False);
-    NewSide.Lines := RowTexts(Edit);
-    if TwoSides then
-    begin
-      OldSide.Ranges := CodeRanges(FAdapterOld, FEditOld);
-      OldSide.Markers := RowMarkers(FRowsOld, True);
-      OldSide.Lines := RowTexts(FEditOld);
-    end;
-    Changes := SymbolChanges(NewSide, OldSide, TwoSides);
     FreeAndNil(FSymbolFiles);
+    FSymbolPlaces := False;
     SetLength(FSymbols, Length(Changes));
     SetLength(FSymbolOnOld, Length(Changes));
     SetLength(Depths, Length(Changes));
@@ -487,11 +495,182 @@ begin
   FSymbolBar.Activate;
 end;
 
+{ Go > Callers of Changed Symbols: the impact of the diff of the shown
+  file on the rest of the repository (see gittan.callers). The identifier
+  of every changed symbol (the old end of a move left out: the symbol is
+  still there) goes to one git grep over the work tree, whole words,
+  without regard to case for a lexer that reads identifiers so; the rows
+  of the changed files are left out, since their uses are in the diff, as
+  are files without a lexer or with one for prose (a mention in the
+  documentation is not a call) and the rows the index knows as
+  definitions of the same identifier. The symbol bar then lists each changed symbol
+  with how many files and rows use it, and under it, one row per use: the
+  symbol the index puts the row in (or the file name), the file and row,
+  and the text. A pick on a use opens the file there (FSymbolPlaces); a
+  second changed symbol with the same identifier only points up. }
+procedure TForm1.MenuCallersClick(Sender: TObject);
+var
+  NewSide, OldSide: TGittanSideText;
+  Changes: TGittanSymbolChanges;
+  Idents, Skip, Listed, Names, Details: TStringList;
+  Depths: TIntegerDynArray;
+  Callers, Kept: TGittanCallers;
+  Output, Ident, Path: string;
+  IgnoreCase: boolean;
+  R: TGittanCodeRange;
+  E: TGittanIndexEntry;
+  Node: TTreeNode;
+  Lexer: TecSyntAnalyzer;
+  i, j, k, m, n, Files, Lines: integer;
+begin
+  if not Edit.Visible or (FView <> gvChanges) or (FRepo.Root = '') then
+    Exit;
+  Changes := ShownSymbolChanges(NewSide, OldSide);
+  IgnoreCase := (FAdapter.Lexer <> nil) and LexerIgnoresCase(FAdapter.Lexer.LexerName);
+  Idents := TStringList.Create;
+  Skip := TStringList.Create;
+  Listed := TStringList.Create;
+  Names := TStringList.Create;
+  Details := TStringList.Create;
+  try
+    if Length(Changes) = 0 then
+    begin
+      StatusBar.SimpleText := rsNoChangedSymbols;
+      Exit;
+    end;
+    Idents.CaseSensitive := not IgnoreCase;
+    Listed.CaseSensitive := not IgnoreCase;
+    for i := 0 to High(Changes) do
+    begin
+      if Changes[i].Kind = scMovedFrom then
+        Continue;
+      Ident := NameIdentifier(ChangeRange(Changes[i], NewSide, OldSide).Symbol.Name);
+      if (Ident <> '') and (Idents.IndexOf(Ident) < 0) then
+        Idents.Add(Ident);
+    end;
+    Skip.CaseSensitive := True;
+    Skip.Sorted := True;
+    Skip.Duplicates := dupIgnore;
+    Skip.Add(ShownRelPath);
+    Node := FileTree.Items.GetFirstNode;
+    while Node <> nil do
+    begin
+      if Node.Data <> nil then
+        Skip.Add(Node.GetTextPath);
+      Node := Node.GetNext;
+    end;
+    if (Idents.Count = 0) or not FRepo.Grep(Idents, IgnoreCase, Output) then
+    begin
+      if Idents.Count = 0 then
+        StatusBar.SimpleText := rsNoCallers
+      else
+        StatusBar.SimpleText := FRepo.Error;
+      Exit;
+    end;
+    Callers := ParseGrep(Output, Idents, IgnoreCase, Skip);
+    SetLength(Kept, Length(Callers));
+    n := 0;
+    for i := 0 to High(Callers) do
+    begin
+      Lexer := FLexers.ForFile(Callers[i].Path, FRepo.Root);
+      if (Lexer = nil) or LexerIsProse(Lexer.LexerName) then
+        Continue;
+      E := FIndex.Find(Callers[i].Path);
+      if (E <> nil) and IsDefinitionRow(E.Items, Callers[i].Row, Idents[Callers[i].Ident],
+        IgnoreCase) then
+        Continue;
+      Kept[n] := Callers[i];
+      Inc(n);
+    end;
+    SetLength(Kept, n);
+    if n = 0 then
+    begin
+      StatusBar.SimpleText := rsNoCallers;
+      Exit;
+    end;
+
+    FreeAndNil(FSymbolFiles);
+    FSymbolFiles := TStringList.Create;
+    FSymbolPlaces := True;
+    SetLength(FSymbols, Length(Changes) + n);
+    SetLength(FSymbolOnOld, Length(FSymbols));
+    SetLength(Depths, Length(FSymbols));
+    n := 0;
+    for i := 0 to High(Changes) do
+    begin
+      if Changes[i].Kind = scMovedFrom then
+        Continue;
+      R := ChangeRange(Changes[i], NewSide, OldSide);
+      FSymbols[n] := R.Symbol;
+      FSymbolOnOld[n] := Changes[i].OnOld;
+      Depths[n] := 0;
+      FSymbolFiles.Add('');
+      Names.Add(R.Symbol.Name);
+      Ident := NameIdentifier(R.Symbol.Name);
+      j := Idents.IndexOf(Ident);
+      Inc(n);
+      if j < 0 then
+      begin
+        Details.Add(CallersDetail(0, 0, False));
+        Continue;
+      end;
+      if Listed.IndexOf(Ident) >= 0 then
+      begin
+        Details.Add(rsCallersAbove);
+        Continue;
+      end;
+      Listed.Add(Ident);
+      CountCallers(Kept, j, Files, Lines);
+      Details.Add(CallersDetail(Files, Lines, Changes[i].Kind in [scDeleted, scRenamedFrom]));
+      for k := 0 to High(Kept) do
+      begin
+        if Kept[k].Ident <> j then
+          Continue;
+        Path := Kept[k].Path;
+        FSymbols[n] := Default(TGittanSymbol);
+        FSymbols[n].Name := Ident;
+        FSymbols[n].Row := Kept[k].Row;
+        FSymbols[n].Col := Kept[k].Col;
+        FSymbols[n].Depth := 1;
+        FSymbols[n].Line := Kept[k].Line;
+        FSymbolOnOld[n] := False;
+        Depths[n] := 1;
+        FSymbolFiles.Add(Path);
+        m := -1;
+        E := FIndex.Find(Path);
+        if E <> nil then
+          m := EnclosingSymbol(E.Items, Kept[k].Row);
+        if m >= 0 then
+          Names.Add(E.Items[m].Name)
+        else
+          Names.Add(ExtractFileName(Path));
+        Details.Add(Format('%s:%d    %s', [Path, Kept[k].Row + 1, Trim(Kept[k].Line)]));
+        Inc(n);
+      end;
+    end;
+    SetLength(FSymbols, n);
+    SetLength(FSymbolOnOld, n);
+    SetLength(Depths, n);
+    FSymbolBar.SetSymbols(Names, Depths, Details, False, rsCallerHint);
+    StatusBar.SimpleText := Format(rsCallersStatus, [FilesText(CallerFileCount(Kept))]);
+  finally
+    NewSide.Lines.Free;
+    OldSide.Lines.Free;
+    Details.Free;
+    Names.Free;
+    Listed.Free;
+    Skip.Free;
+    Idents.Free;
+  end;
+  FSymbolBar.Activate;
+end;
+
 { A symbol of the shown file is jumped to (on the old side when it is
   only there); one of another file shows the file first and is looked up
   again in the text the editor shows, by its full name (several overloads
   may share the identifier), else by its identifier, as Go to Definition
-  does. }
+  does. A use of a changed symbol (FSymbolPlaces) is a row of that file
+  as it is, so it is jumped to directly. }
 procedure TForm1.SymbolBarPick(Sender: TObject; AIndex: integer);
 var
   Symbol: TGittanSymbol;
@@ -505,7 +684,7 @@ begin
     Exit;
   Symbol := FSymbols[AIndex];
   Ident := NameIdentifier(Symbol.Name);
-  if (FSymbolFiles = nil) or (AIndex >= FSymbolFiles.Count) then
+  if (FSymbolFiles = nil) or (AIndex >= FSymbolFiles.Count) or (FSymbolFiles[AIndex] = '') then
   begin
     if (AIndex <= High(FSymbolOnOld)) and FSymbolOnOld[AIndex] and FEditOld.Visible then
       JumpToDefinition(FEditOld, Point(Symbol.Col, Symbol.Row), Ident)
@@ -518,6 +697,16 @@ begin
     ShowRepoFile(Path);
   if not Edit.Visible then
     Exit;
+  if FSymbolPlaces then
+  begin
+    { The scroll to the row needs the wrap info of the text just loaded,
+      which the first paint would build, and the line top the editor
+      kept from the resize of showing the file would win at that paint. }
+    Edit.UpdateWrapInfo(True);
+    Edit.LineTopTodo := 0;
+    JumpToDefinition(Edit, Point(Symbol.Col, Symbol.Row), Ident);
+    Exit;
+  end;
   Shown := CodeTree(FAdapter, Edit);
   P := Point(0, -1);
   for i := 0 to High(Shown) do

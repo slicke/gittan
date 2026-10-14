@@ -45,6 +45,10 @@ function BestSymbol(const ASymbols: TGittanSymbols; const AWord: string;
   "Bar" in "TFoo.Bar", "Foo" in "class Foo"), or '' when there is none. }
 function NameIdentifier(const AName: string): string;
 
+{** Whether C can be part of an identifier: a letter, digit or underscore
+  (a non-ASCII byte counts as a letter). }
+function IsWordChar(C: char): boolean;
+
 implementation
 
 uses

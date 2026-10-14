@@ -38,6 +38,7 @@ type
     procedure TestRange;
     procedure TestFingerprint;
     procedure TestFiles;
+    procedure TestGrep;
     procedure TestSnapshot;
     procedure TestBlame;
     procedure TestCommitRange;
@@ -555,6 +556,35 @@ begin
     AssertEquals('ignored file left out', -1, L.IndexOf('ignored.log'));
   finally
     L.Free;
+  end;
+end;
+
+{ Whole words over the tracked and untracked files, as path, row and
+  text; case only on request; no match is an empty success. }
+procedure TGitRepoTest.TestGrep;
+var
+  Words: TStringList;
+  Output: string;
+begin
+  MakeHistory;
+  WriteFile('b.txt', 'twofold'#10'Two words'#10);
+  WriteFile('new/u.txt', 'two'#10);
+  AssertTrue(FRepo.Open(FDir));
+  Words := TStringList.Create;
+  try
+    Words.Add('two');
+    AssertTrue(FRepo.Grep(Words, False, Output));
+    AssertTrue('tracked row', Pos('a.txt'#0'2'#0'two'#10, Output) > 0);
+    AssertTrue('untracked row', Pos('new/u.txt'#0'1'#0'two'#10, Output) > 0);
+    AssertEquals('whole words only', 0, Pos('twofold', Output));
+    AssertEquals('case kept', 0, Pos('Two words', Output));
+    AssertTrue(FRepo.Grep(Words, True, Output));
+    AssertTrue('case ignored', Pos('b.txt'#0'2'#0'Two words'#10, Output) > 0);
+    Words[0] := 'nothingatall';
+    AssertTrue('no match is no failure', FRepo.Grep(Words, False, Output));
+    AssertEquals('', Output);
+  finally
+    Words.Free;
   end;
 end;
 
