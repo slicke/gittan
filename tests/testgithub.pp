@@ -18,6 +18,7 @@ type
     procedure TestParseBad;
     procedure TestStatus;
     procedure TestRepoPathOfUrl;
+    procedure TestChecks;
   end;
 
 implementation
@@ -42,6 +43,7 @@ begin
   AssertEquals('main', Pull.BaseRef);
   AssertEquals('ada', Pull.Author);
   AssertFalse(Pull.IsDraft);
+  AssertEquals(0, Pull.ChecksPassed + Pull.ChecksFailed + Pull.ChecksPending);
 end;
 
 procedure TGitHubTest.TestParsePullRequests;
@@ -101,6 +103,48 @@ begin
   AssertEquals('', RepoPathOfUrl('https://github.com/owner'));
   AssertEquals('', RepoPathOfUrl('owner/repo'));
   AssertEquals('', RepoPathOfUrl(''));
+end;
+
+procedure TGitHubTest.TestChecks;
+const
+  CheckRun = '{"__typename":"CheckRun","status":"%s","conclusion":"%s","name":"x"}';
+  Ctx = '{"__typename":"StatusContext","state":"%s","context":"y"}';
+var
+  Pull: TGittanPullRequest;
+
+  function Parse(const AChecks: string): TGittanPullRequest;
+  begin
+    AssertTrue(ParsePullRequest('{"number":1,"state":"OPEN","statusCheckRollup":[' +
+      AChecks + ']}', Result));
+  end;
+
+begin
+  Pull := Parse('');
+  AssertEquals('', PullRequestChecks(Pull));
+  AssertEquals('PR #1', PullRequestStatus(Pull));
+
+  Pull := Parse(Format(CheckRun, ['COMPLETED', 'SUCCESS']) + ',' + Format(CheckRun, ['COMPLETED', 'SKIPPED']) +
+    ',' + Format(Ctx, ['SUCCESS']));
+  AssertEquals(3, Pull.ChecksPassed);
+  AssertEquals('checks ✓', PullRequestChecks(Pull));
+  AssertEquals('PR #1 · checks ✓', PullRequestStatus(Pull));
+
+  Pull := Parse(Format(CheckRun, ['COMPLETED', 'SUCCESS']) + ',' + Format(CheckRun, ['IN_PROGRESS', '']) +
+    ',' + Format(CheckRun, ['QUEUED', '']));
+  AssertEquals(2, Pull.ChecksPending);
+  AssertEquals('2 checks pending', PullRequestChecks(Pull));
+  Pull := Parse(Format(Ctx, ['PENDING']));
+  AssertEquals('1 check pending', PullRequestChecks(Pull));
+
+  Pull := Parse(Format(CheckRun, ['COMPLETED', 'FAILURE']) + ',' + Format(CheckRun, ['IN_PROGRESS', '']) +
+    ',' + Format(Ctx, ['ERROR']) + ',' + Format(CheckRun, ['COMPLETED', 'CANCELLED']));
+  AssertEquals(3, Pull.ChecksFailed);
+  AssertEquals(1, Pull.ChecksPending);
+  AssertEquals('3 checks failing', PullRequestChecks(Pull));
+  Pull := Parse(Format(CheckRun, ['COMPLETED', 'TIMED_OUT']));
+  AssertEquals('1 check failing', PullRequestChecks(Pull));
+  Pull.ReviewDecision := 'APPROVED';
+  AssertEquals('PR #1 · Approved · 1 check failing', PullRequestStatus(Pull));
 end;
 
 initialization

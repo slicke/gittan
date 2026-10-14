@@ -20,21 +20,29 @@ type
     Number: integer;
     Title, State, ReviewDecision, Url, HeadRef, BaseRef, Author: string;
     IsDraft: boolean;
+    { The checks of the head commit (statusCheckRollup): how many passed
+      (or were skipped or neutral), failed (or were cancelled, timed out,
+      or need action) and are still running or queued. }
+    ChecksPassed, ChecksFailed, ChecksPending: integer;
   end;
   TGittanPullRequests = array of TGittanPullRequest;
 
 const
   {** The fields asked of gh, the ones the record holds. }
   PullRequestFields = 'number,title,state,reviewDecision,url,headRefName,baseRefName,' +
-    'author,isDraft';
+    'author,isDraft,statusCheckRollup';
 
 {** Reads the object gh pr view --json prints. }
 function ParsePullRequest(const AJson: string; out APull: TGittanPullRequest): boolean;
 {** Reads the array gh pr list --json prints. }
 function ParsePullRequests(const AJson: string; out APulls: TGittanPullRequests): boolean;
 {** The short line of the status bar: "PR #12 · Approved", "PR #12 · Draft",
-  "PR #12 · Merged", with the review decision in words. }
+  "PR #12 · Merged", with the review decision in words, and the checks
+  after it when there are any: "checks ✓", "2 checks failing" or
+  "3 checks pending". }
 function PullRequestStatus(const APull: TGittanPullRequest): string;
+{** The checks part of PullRequestStatus alone, empty without checks. }
+function PullRequestChecks(const APull: TGittanPullRequest): string;
 {** "owner/repo" of a GitHub address such as https://github.com/owner/repo/pull/12,
   empty when the address is not one. }
 function RepoPathOfUrl(const AUrl: string): string;
@@ -76,9 +84,33 @@ implementation
 uses
   fpjson, jsonparser, gittan.git;
 
+{ A CheckRun has a status (COMPLETED, IN_PROGRESS, QUEUED, ...) and, once
+  completed, a conclusion; a StatusContext (the older commit status API)
+  has a state. }
+procedure CountCheck(ACheck: TJSONObject; var APull: TGittanPullRequest);
+var
+  Verdict: string;
+begin
+  if ACheck.Get('__typename', '') = 'StatusContext' then
+    Verdict := ACheck.Get('state', '')
+  else if ACheck.Get('status', '') = 'COMPLETED' then
+    Verdict := ACheck.Get('conclusion', '')
+  else
+    Verdict := 'PENDING';
+  case Verdict of
+    'SUCCESS', 'SKIPPED', 'NEUTRAL':
+      Inc(APull.ChecksPassed);
+    'FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE':
+      Inc(APull.ChecksFailed);
+    else
+      Inc(APull.ChecksPending);
+  end;
+end;
+
 function ReadPull(AObject: TJSONObject; out APull: TGittanPullRequest): boolean;
 var
-  Author: TJSONData;
+  Author, Checks: TJSONData;
+  i: integer;
 begin
   APull := Default(TGittanPullRequest);
   Result := AObject.IndexOfName('number') >= 0;
@@ -95,6 +127,11 @@ begin
   Author := AObject.Find('author');
   if (Author <> nil) and (Author.JSONType = jtObject) then
     APull.Author := TJSONObject(Author).Get('login', '');
+  Checks := AObject.Find('statusCheckRollup');
+  if (Checks <> nil) and (Checks.JSONType = jtArray) then
+    for i := 0 to TJSONArray(Checks).Count - 1 do
+      if TJSONArray(Checks)[i].JSONType = jtObject then
+        CountCheck(TJSONObject(TJSONArray(Checks)[i]), APull);
 end;
 
 function ParsePullRequest(const AJson: string; out APull: TGittanPullRequest): boolean;
@@ -166,6 +203,23 @@ begin
   Result := 'PR #' + IntToStr(APull.Number);
   if Note <> '' then
     Result := Result + ' · ' + Note;
+  Note := PullRequestChecks(APull);
+  if Note <> '' then
+    Result := Result + ' · ' + Note;
+end;
+
+function PullRequestChecks(const APull: TGittanPullRequest): string;
+begin
+  if APull.ChecksFailed > 0 then
+    Result := IntToStr(APull.ChecksFailed) + ' checks failing'
+  else if APull.ChecksPending > 0 then
+    Result := IntToStr(APull.ChecksPending) + ' checks pending'
+  else if APull.ChecksPassed > 0 then
+    Result := 'checks ✓'
+  else
+    Result := '';
+  if (APull.ChecksFailed = 1) or ((APull.ChecksFailed = 0) and (APull.ChecksPending = 1)) then
+    Result := StringReplace(Result, 'checks', 'check', []);
 end;
 
 function RepoPathOfUrl(const AUrl: string): string;
