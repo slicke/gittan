@@ -118,7 +118,11 @@ jobs:
           sudo apt-get install -y build-essential curl \
             qt6-base-dev libqt6pas6 libqt6pas-dev
           # SourceForge mirrors flake; retry hard before failing the job.
-          CURL_RETRY="--retry 5 --retry-delay 5 --retry-all-errors"
+          # --connect-timeout and the speed guard abort a stalled or
+          # half-open transfer (which is not an error, so --retry-all-errors
+          # alone would wait on it forever) so the retry can take over.
+          CURL_RETRY="--retry 5 --retry-delay 5 --retry-all-errors \
+            --connect-timeout 30 --speed-limit 1024 --speed-time 60"
           curl -fsSL $CURL_RETRY -o fpc-laz.deb "$FPC_LAZ_URL"
           curl -fsSL $CURL_RETRY -o fpc-src.deb "$FPC_SRC_URL"
           curl -fsSL $CURL_RETRY -o lazarus.deb "$LAZ_URL"
@@ -130,6 +134,8 @@ jobs:
 
       - name: Install Lazarus/FPC and lld (macOS)
         if: matrix.os_target == 'macos'
+        # A stalled mirror must not burn the whole 90-minute job budget.
+        timeout-minutes: 30
         env:
           FPC_DMG_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20macOS%20aarch64/Lazarus%204.8/fpc-3.2.4rc1a.intelarm64-macosx.dmg/download
           LAZ_ZIP_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20macOS%20aarch64/Lazarus%204.8/lazarus-darwin-aarch64-4.8.zip/download
@@ -137,7 +143,11 @@ jobs:
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: |
           set -euo pipefail
-          CURL_RETRY="--retry 5 --retry-delay 5 --retry-all-errors"
+          # The speed guard aborts a stalled or half-open transfer (not an
+          # error, so --retry-all-errors would otherwise wait on it forever)
+          # so the retry can take over instead of hanging the job.
+          CURL_RETRY="--retry 5 --retry-delay 5 --retry-all-errors \
+            --connect-timeout 30 --speed-limit 1024 --speed-time 60"
           DL="$RUNNER_TEMP/toolchain"
           mkdir -p "$DL"
           curl -fsSL $CURL_RETRY -o "$DL/fpc.dmg" "$FPC_DMG_URL"
@@ -197,7 +207,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          curl.exe -L --fail --retry 5 --retry-delay 5 --retry-all-errors -o lazarus-4.8.exe "https://sourceforge.net/projects/lazarus/files/Lazarus%20Windows%2064%20bits/Lazarus%204.8/lazarus-4.8-fpc-3.2.2-win64.exe/download"
+          curl.exe -L --fail --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --speed-limit 1024 --speed-time 60 -o lazarus-4.8.exe "https://sourceforge.net/projects/lazarus/files/Lazarus%20Windows%2064%20bits/Lazarus%204.8/lazarus-4.8-fpc-3.2.2-win64.exe/download"
           # SourceForge sometimes answers with an HTML page; check for the MZ header.
           $fs = [System.IO.File]::OpenRead('lazarus-4.8.exe')
           $mz = New-Object byte[] 2
