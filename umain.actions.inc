@@ -82,7 +82,7 @@ begin
   if FSettings.Maximized then
     WindowState := wsMaximized;
   if FSettings.TreeWidth > 80 then
-    FileTree.Width := FSettings.TreeWidth;
+    FTreePanel.Width := FSettings.TreeWidth;
 end;
 
 procedure TForm1.FormClose(Sender: TObject; var CloseAction: TCloseAction);
@@ -102,7 +102,7 @@ begin
     FSettings.Width := Width;
     FSettings.Height := Height;
   end;
-  FSettings.TreeWidth := FileTree.Width;
+  FSettings.TreeWidth := FTreePanel.Width;
   FSettings.FontName := Edit.Font.Name;
   FSettings.FontSize := Edit.Font.Size;
   FSettings.Zoom := Edit.OptScaleFont;

@@ -106,6 +106,12 @@ type
     FPullMenu, FOpenPullItem, FCopyPullItem: TMenuItem;
     FPullRange: string;
     FPullNumber: integer;
+    { The tree sits in a panel under a filter field (Go > Filter Files):
+      FillFileTree keeps only the files whose path holds FTreeFilterText,
+      the field's text in lower case. }
+    FTreePanel: TPanel;
+    FTreeFilter: TEdit;
+    FTreeFilterText: string;
     FContextFromSummary: boolean;
     FHeader: TGittanFileHeader;
     FNav: TGittanChangeNav;
@@ -411,6 +417,10 @@ type
     procedure MenuOpenCommitOnGitHubClick(Sender: TObject);
     procedure OpenOnGitHub(const AArgs: array of string);
     procedure StartPullJob(AForce: boolean);
+    procedure SetupTreeFilter;
+    procedure TreeFilterChange(Sender: TObject);
+    procedure TreeFilterKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
+    procedure MenuFilterFilesClick(Sender: TObject);
     procedure AbandonPullJob;
     procedure PullJobDone(Sender: TObject);
     procedure RebuildPullMenu;
@@ -557,6 +567,8 @@ const
   rsOpenOnGitHub = 'Open on &GitHub';
   rsOpenCommitOnGitHub = 'Open Co&mmit on GitHub';
   rsGitHubFailed = 'gh: %s';
+  rsFilterFiles = 'Fi&lter Files';
+  rsFilterHint = 'Filter files';
   rsPullRequests = 'Pull Re&quests';
   rsPullLoading = 'Loading...';
   rsNoPulls = 'No open pull requests';
@@ -767,6 +779,7 @@ begin
   FDark := IsDarkMode;
   ApplyTheme;
 
+  SetupTreeFilter;
   ApplySettings;
   BuildMenu;
   BuildPopups;
@@ -1221,6 +1234,7 @@ begin
   AddItem(GoMenu, rsFind, ShortCut(VK_F, [ssModifier]), @MenuFindClick);
   AddItem(GoMenu, rsFindNext, ShortCut(VK_G, [ssModifier]), @MenuFindNextClick);
   AddItem(GoMenu, rsFindPrev, ShortCut(VK_G, [ssModifier, ssShift]), @MenuFindPrevClick);
+  AddItem(GoMenu, rsFilterFiles, ShortCut(VK_F, [ssModifier, ssShift]), @MenuFilterFilesClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsGoToDefinition, ShortCut(VK_F12, []), @MenuGoToDefinitionClick);
   AddItem(GoMenu, rsGoToSymbol, ShortCut(VK_T, [ssModifier]), @MenuGoToSymbolClick);
@@ -2348,7 +2362,8 @@ begin
     for i := 0 to High(AStats) do
     begin
       Path := AStats[i].Path;
-      if Path = '' then
+      if (Path = '') or ((FTreeFilterText <> '') and
+        (Pos(FTreeFilterText, LowerCase(Path)) = 0)) then
         Continue;
       Dir := ExtractFilePath(Path);
       if (i > 0) and (Dir = LastDirPath) then
@@ -2408,6 +2423,85 @@ begin
     FileTree.FullExpand;
   finally
     FileTree.EndUpdate;
+  end;
+end;
+
+{ ---------------------------------------------------------------------------
+  The tree filter
+  ---------------------------------------------------------------------------
+  The tree comes from umain.lfm aligned left on the form; it is moved
+  into a panel of the same width under a native edit field, so the
+  splitter sizes the panel and the settings keep its width. }
+procedure TForm1.SetupTreeFilter;
+begin
+  FTreePanel := TPanel.Create(Self);
+  FTreePanel.BevelOuter := bvNone;
+  FTreePanel.Caption := '';
+  FTreePanel.Width := FileTree.Width;
+  FTreePanel.Left := 0;
+  FTreePanel.Align := alLeft;
+  FTreePanel.Parent := Self;
+  FTreeFilter := TEdit.Create(Self);
+  FTreeFilter.TextHint := rsFilterHint;
+  FTreeFilter.Align := alTop;
+  FTreeFilter.BorderSpacing.Around := 4;
+  FTreeFilter.OnChange := @TreeFilterChange;
+  FTreeFilter.OnKeyDown := @TreeFilterKeyDown;
+  FTreeFilter.Parent := FTreePanel;
+  FileTree.Parent := FTreePanel;
+  FileTree.Align := alClient;
+end;
+
+{ Rebuilds the tree for the new filter and keeps the shown file selected
+  without reloading it. }
+procedure TForm1.TreeFilterChange(Sender: TObject);
+var
+  Handler: TNotifyEvent;
+begin
+  FTreeFilterText := LowerCase(Trim(FTreeFilter.Text));
+  Handler := FileTree.OnSelectionChanged;
+  FileTree.OnSelectionChanged := nil;
+  try
+    FillFileTree(FStats);
+    if (FView = gvChanges) and (FCurrentPath <> '') then
+      SummarySelectFile(nil, FCurrentPath);
+  finally
+    FileTree.OnSelectionChanged := Handler;
+  end;
+end;
+
+{ Escape clears the filter, or leaves the field when it is empty; Enter
+  and Down go to the tree. }
+procedure TForm1.TreeFilterKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
+begin
+  case Key of
+    VK_ESCAPE:
+      begin
+        Key := 0;
+        if FTreeFilter.Text <> '' then
+          FTreeFilter.Text := ''
+        else if FileTree.CanFocus then
+          FileTree.SetFocus;
+      end;
+    VK_RETURN, VK_DOWN:
+      begin
+        Key := 0;
+        if FileTree.CanFocus then
+        begin
+          if (FileTree.Selected = nil) and (FileTree.Items.Count > 0) then
+            FileTree.Selected := FileTree.Items.GetFirstNode;
+          FileTree.SetFocus;
+        end;
+      end;
+  end;
+end;
+
+procedure TForm1.MenuFilterFilesClick(Sender: TObject);
+begin
+  if FTreeFilter.CanFocus then
+  begin
+    FTreeFilter.SetFocus;
+    FTreeFilter.SelectAll;
   end;
 end;
 
