@@ -456,11 +456,17 @@ begin
     if not Result then
       Exit;
     Tree := Trim(Tree);
+    { commit-tree refuses to run without a name and an e-mail, which a
+      fresh machine (or a CI runner) does not have; the snapshot is never
+      shared, so it gets an identity of its own. }
     if RunGit(FRoot, ['rev-parse', '--verify', '-q', 'HEAD'], Head) then
-      Result := RunGit(FRoot, ['commit-tree', Tree, '-p', Trim(Head), '-m',
-        'Gittan snapshot'], AId)
+      Result := RunGit(FRoot, ['-c', 'user.name=Gittan', '-c',
+        'user.email=gittan@localhost', 'commit-tree', Tree, '-p', Trim(Head),
+        '-m', 'Gittan snapshot'], AId)
     else
-      Result := RunGit(FRoot, ['commit-tree', Tree, '-m', 'Gittan snapshot'], AId);
+      Result := RunGit(FRoot, ['-c', 'user.name=Gittan', '-c',
+        'user.email=gittan@localhost', 'commit-tree', Tree, '-m',
+        'Gittan snapshot'], AId);
     AId := Trim(AId);
   finally
     DeleteFile(Index);
