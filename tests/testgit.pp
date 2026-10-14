@@ -46,6 +46,7 @@ type
     procedure TestFetchPullRequest;
     procedure TestDefaultBranchAndMergeBase;
     procedure TestAheadBehind;
+    procedure TestOperation;
   end;
 
 implementation
@@ -719,6 +720,47 @@ begin
   finally
     RemoveTree(Remote);
   end;
+end;
+
+{ A merge and a rebase that stop on a conflict, each aborted after. }
+procedure TGitRepoTest.TestOperation;
+var
+  Branch, Output: string;
+  Stats: TGittanFileStats;
+  Status: integer;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  AssertEquals('', FRepo.Operation);
+  AssertEquals('', FRepo.RebaseBranch);
+  AssertTrue(DirectoryExists(FRepo.GitDir));
+  Branch := Trim(Git(['rev-parse', '--abbrev-ref', 'HEAD']));
+  Git(['checkout', '-q', '-b', 'topic']);
+  WriteFile('a.txt', 'topic'#10);
+  Commit('topic');
+  Git(['checkout', '-q', Branch]);
+  WriteFile('a.txt', 'main'#10);
+  Commit('main');
+
+  { git merge fails on the conflict, so it runs without the helper. }
+  RunCommandIndir(FDir, 'git', ['-c', 'user.name=T', '-c', 'user.email=t@example.invalid',
+    'merge', 'topic'], Output, Status, [poStderrToOutPut]);
+  AssertTrue('merge stops', Status <> 0);
+  AssertEquals('merging', FRepo.Operation);
+  AssertTrue(FRepo.ChangeStats(Stats));
+  AssertEquals(Ord(ckConflict), Ord(FindStat(Stats, 'a.txt').Kind));
+  Git(['merge', '--abort']);
+  AssertEquals('', FRepo.Operation);
+
+  Git(['checkout', '-q', 'topic']);
+  RunCommandIndir(FDir, 'git', ['-c', 'user.name=T', '-c', 'user.email=t@example.invalid',
+    'rebase', Branch], Output, Status, [poStderrToOutPut]);
+  AssertTrue('rebase stops', Status <> 0);
+  AssertEquals('rebasing', FRepo.Operation);
+  AssertEquals('topic', FRepo.RebaseBranch);
+  Git(['rebase', '--abort']);
+  AssertEquals('', FRepo.Operation);
+  AssertEquals('', FRepo.RebaseBranch);
 end;
 
 procedure TGitRepoTest.TestCommitRange;

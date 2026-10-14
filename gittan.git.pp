@@ -122,6 +122,16 @@ type
     {** How many commits the branch is ahead of and behind its upstream;
       false when it has none. }
     function AheadBehind(out AAhead, ABehind: integer): boolean;
+    {** The git directory of the work tree (a linked work tree has one of
+      its own), empty when nothing is open. }
+    function GitDir: string;
+    {** What git is in the middle of: "merging", "rebasing",
+      "cherry-picking", "reverting" or "bisecting", from the files it
+      leaves in the git directory meanwhile; empty when nothing. }
+    function Operation: string;
+    {** The branch a rebase in progress is rebasing, which HEAD, detached
+      meanwhile, no longer names; empty when there is no rebase. }
+    function RebaseBranch: string;
     {** Whether Base is a range "A..B" or "A...B": the right side of
       every diff is then the commit B instead of the work tree. }
     function IsRange: boolean;
@@ -462,8 +472,76 @@ var
   Dir: string;
 begin
   Result := '';
-  if RunGit(FRoot, ['rev-parse', '--absolute-git-dir'], Dir) then
-    Result := IncludeTrailingPathDelimiter(Trim(Dir)) + 'index';
+  Dir := GitDir;
+  if Dir <> '' then
+    Result := IncludeTrailingPathDelimiter(Dir) + 'index';
+end;
+
+function TGittanRepo.GitDir: string;
+begin
+  Result := '';
+  if (FRoot <> '') and RunGit(FRoot, ['rev-parse', '--absolute-git-dir'], Result) then
+    Result := Trim(Result)
+  else
+    Result := '';
+end;
+
+{ A rebase keeps its state in rebase-merge (the default backend) or
+  rebase-apply, which git am also uses (with an "applying" file). A
+  cherry-pick or revert of several commits also leaves a sequencer
+  directory, but its _HEAD file is there while it stops. }
+function TGittanRepo.Operation: string;
+var
+  Dir: string;
+begin
+  Result := '';
+  Dir := GitDir;
+  if Dir = '' then
+    Exit;
+  Dir := IncludeTrailingPathDelimiter(Dir);
+  if DirectoryExists(Dir + 'rebase-merge') or
+    (DirectoryExists(Dir + 'rebase-apply') and not FileExists(Dir + 'rebase-apply' +
+    PathDelim + 'applying')) then
+    Result := 'rebasing'
+  else if DirectoryExists(Dir + 'rebase-apply') then
+    Result := 'applying patches'
+  else if FileExists(Dir + 'MERGE_HEAD') then
+    Result := 'merging'
+  else if FileExists(Dir + 'CHERRY_PICK_HEAD') then
+    Result := 'cherry-picking'
+  else if FileExists(Dir + 'REVERT_HEAD') then
+    Result := 'reverting'
+  else if FileExists(Dir + 'BISECT_LOG') then
+    Result := 'bisecting';
+end;
+
+function TGittanRepo.RebaseBranch: string;
+var
+  Dir, Sub: string;
+  Lines: TStringList;
+begin
+  Result := '';
+  Dir := GitDir;
+  if Dir = '' then
+    Exit;
+  for Sub in ['rebase-merge', 'rebase-apply'] do
+    if FileExists(IncludeTrailingPathDelimiter(Dir) + Sub + PathDelim + 'head-name') then
+    begin
+      Lines := TStringList.Create;
+      try
+        Lines.LoadFromFile(IncludeTrailingPathDelimiter(Dir) + Sub + PathDelim + 'head-name');
+        if Lines.Count > 0 then
+          Result := Trim(Lines[0]);
+      finally
+        Lines.Free;
+      end;
+      if Pos('refs/heads/', Result) = 1 then
+        Delete(Result, 1, Length('refs/heads/'));
+      { A rebase of a detached HEAD writes "detached HEAD". }
+      if Pos(' ', Result) > 0 then
+        Result := '';
+      Exit;
+    end;
 end;
 
 { Copies the repository's index to ATarget; no index (nothing staged

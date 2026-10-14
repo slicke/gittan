@@ -12,7 +12,7 @@ uses
   ATStringProc_WordJump,
   ATSynEdit_Markers, ATSynEdit_LineParts, ATSynEdit_Ranges, ATSynEdit_WrapInfo,
   ec_SyntAnal,
-  gittan.lexers, gittan.git, gittan.github, gittan.icons, gittan.theme, gittan.changenav,
+  gittan.lexers, gittan.git, gittan.github, gittan.conflicts, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
@@ -123,6 +123,13 @@ type
     FDefaultBranch, FMergeBase: string;
     FHasUpstream: boolean;
     FAhead, FBehind: integer;
+    { What git is in the middle of ("merging", "rebasing", ...) and how
+      many files have conflicts, read by LoadRepository; and the role of
+      each line of FChangeLines in a conflict (see gittan.conflicts),
+      set by ShowChanges for a conflicted file, nil otherwise. }
+    FOperation: string;
+    FConflictFiles: integer;
+    FConflictRoles: TIntegerDynArray;
     FContextFromSummary: boolean;
     FHeader: TGittanFileHeader;
     FNav: TGittanChangeNav;
@@ -591,6 +598,8 @@ const
   rsFilterFiles = 'Fi&lter Files';
   rsMergeBase = '%s (Merge Base)';
   rsVsMergeBase = '%s (merge base)';
+  rsConflictedFiles = '%d conflicted files';
+  rsOneConflictedFile = '1 conflicted file';
   rsAhead = '↑%d';
   rsBehind = '↓%d';
   rsFilterHint = 'Filter files';
@@ -616,6 +625,12 @@ const
     rows of the history tinted by their commit: kind bmHistoryBase + the
     commit's index. }
   bmCommit = 5;
+  { The lines of a conflict git left in a file: its marker lines, our
+    side, the merge base and their side (see gittan.conflicts). }
+  bmConflictMarker = 6;
+  bmConflictOurs = 7;
+  bmConflictBase = 8;
+  bmConflictTheirs = 9;
   bmHistoryBase = 100;
   { Tags of the editor's attribs that mark the words that differ inside
     an added or a deleted line. }
@@ -1109,6 +1124,12 @@ begin
       Repo := Repo + ' ' + Format(rsAhead, [FAhead]);
     if FHasUpstream and (FBehind > 0) then
       Repo := Repo + ' ' + Format(rsBehind, [FBehind]);
+    if FOperation <> '' then
+      Repo := Repo + ' · ' + FOperation;
+    if FConflictFiles = 1 then
+      Repo := Repo + ' · ' + rsOneConflictedFile
+    else if FConflictFiles > 1 then
+      Repo := Repo + ' · ' + Format(rsConflictedFiles, [FConflictFiles]);
     if FRepo.Base <> '' then
       Repo := Repo + ' ' + BaseLabel;
     if FHasPull then
@@ -1491,8 +1512,10 @@ procedure TForm1.EditCalcBookmarkColor(Sender: TObject; ABookmarkKind: integer;
 begin
   { A faint tint of the editor background, so the syntax colors still
     read on top of it; a gap and a filler row take the gutter's shade, a
-    legend row of the history view a cool one, and a row of the history
-    the tint of its commit. }
+    legend row of the history view a cool one, a row of the history
+    the tint of its commit, and the lines of a conflict a violet for the
+    markers, a blue for our side, a grey for the base and an amber for
+    theirs. }
   if ABookmarkKind >= bmHistoryBase then
   begin
     AColor := HistoryColor(ABookmarkKind - bmHistoryBase, False);
@@ -1505,6 +1528,10 @@ begin
       bmGap: AColor := RGBToColor(44, 44, 46);
       bmFiller: AColor := RGBToColor(37, 37, 38);
       bmCommit: AColor := RGBToColor(40, 46, 58);
+      bmConflictMarker: AColor := RGBToColor(74, 44, 92);
+      bmConflictOurs: AColor := RGBToColor(30, 46, 72);
+      bmConflictBase: AColor := RGBToColor(46, 46, 48);
+      bmConflictTheirs: AColor := RGBToColor(62, 52, 28);
     end
   else
     case ABookmarkKind of
@@ -1513,6 +1540,10 @@ begin
       bmGap: AColor := RGBToColor(238, 238, 238);
       bmFiller: AColor := RGBToColor(246, 246, 246);
       bmCommit: AColor := RGBToColor(226, 232, 240);
+      bmConflictMarker: AColor := RGBToColor(232, 214, 246);
+      bmConflictOurs: AColor := RGBToColor(221, 235, 255);
+      bmConflictBase: AColor := RGBToColor(236, 236, 236);
+      bmConflictTheirs: AColor := RGBToColor(255, 241, 208);
     end;
 end;
 
@@ -2028,6 +2059,7 @@ var
   Stats: TGittanFileStats;
   Icons: array of integer;
   i: integer;
+  Branch: string;
 begin
   ClearBlameCache;
   Result := FRepo.ChangeStats(Stats);
@@ -2040,12 +2072,28 @@ begin
   if not FRepo.MergeBase(FDefaultBranch, FMergeBase) then
     FMergeBase := '';
   FHasUpstream := FRepo.AheadBehind(FAhead, FBehind);
+  FOperation := FRepo.Operation;
+  if FOperation = 'rebasing' then
+  begin
+    { HEAD is detached while a rebase stops; the branch is the one it
+      rebases. }
+    Branch := FRepo.RebaseBranch;
+    if Branch <> '' then
+      FBranch := Branch;
+  end;
+  FConflictFiles := 0;
+  for i := 0 to High(Stats) do
+    if Stats[i].Kind = ckConflict then
+      Inc(FConflictFiles);
   FFileCount := Length(Stats);
   FillFileTree(Stats);
   SetLength(Icons, Length(Stats));
   for i := 0 to High(Stats) do
     Icons[i] := StatIcon(Stats[i]);
-  FSummary.SetRepository(ExtractFileName(FRepo.Root), FBranch, BaseLabel, Stats, Icons);
+  Branch := FBranch;
+  if FOperation <> '' then
+    Branch := Branch + ' · ' + FOperation;
+  FSummary.SetRepository(ExtractFileName(FRepo.Root), Branch, BaseLabel, Stats, Icons);
   RebuildCompareMenu;
   FTerminalItem.Enabled := FRepo.Root <> '';
 end;
@@ -2347,12 +2395,15 @@ begin
   SetOverscroll(0);
   FSummary.Notice := '';
   FHeader.SetFile(APath, -1);
+  FConflictRoles := nil;
   for i := 0 to High(FStats) do
     if FStats[i].Path = APath then
     begin
       FHeader.SetFile(APath, StatIcon(FStats[i]));
       FHeader.SetCounts(FStats[i].Added, FStats[i].Deleted, FStats[i].Binary);
       FHeader.SetStage(FStats[i].Staged, FStats[i].Unstaged);
+      if FStats[i].Kind = ckConflict then
+        FConflictRoles := ConflictRoles(FChangeLines);
       Break;
     end;
   FManualLexer := False;

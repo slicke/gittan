@@ -178,7 +178,7 @@ procedure TForm1.FillChangeEditor(AEd: TATSynEdit; const ARows: TGittanRows;
 var
   Lines: TStringList;
   Numbers, Kinds: TIntegerDynArray;
-  i, Down, Up, All: integer;
+  i, Down, Up, All, Role: integer;
   Marker: char;
   Hidden: boolean;
 begin
@@ -223,8 +223,22 @@ begin
       else
       begin
         Marker := FChangeLines[ARows[i].Line][1];
-        MarkLine(AEd, i, Marker);
-        if ARows[i].Line <= High(FWordSpans) then
+        Role := crNone;
+        if not AOldSide and (FView = gvChanges) and (ARows[i].Line <= High(FConflictRoles)) then
+          Role := FConflictRoles[ARows[i].Line];
+        if Role = crNone then
+          MarkLine(AEd, i, Marker)
+        else
+        begin
+          { A line of a conflict takes the tint of its role instead of
+            the diff's; the strip still shows what is new. }
+          if Marker = '+' then
+            AEd.Strings.LinesState[i] := TATLineState.Added;
+          MarkRow(AEd, i, bmConflictMarker + Role - crMarker);
+          if Role = crMarker then
+            MarkHeader(AEd, i);
+        end;
+        if (Role = crNone) and (ARows[i].Line <= High(FWordSpans)) then
           MarkWords(AEd, i, FWordSpans[ARows[i].Line], Marker, 0);
         if AOldSide then
         begin
