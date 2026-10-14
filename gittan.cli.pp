@@ -153,7 +153,8 @@ begin
   {$IF DEFINED(DARWIN)}
   Result := '/usr/local/bin/gittan';
   {$ELSEIF DEFINED(WINDOWS)}
-  Result := IncludeTrailingPathDelimiter(GetEnvironmentVariable('LOCALAPPDATA')) +
+  // The Windows unit shadows SysUtils with its own PChar GetEnvironmentVariable.
+  Result := IncludeTrailingPathDelimiter(SysUtils.GetEnvironmentVariable('LOCALAPPDATA')) +
     'Gittan\bin\gittan.cmd';
   {$ELSE}
   Result := IncludeTrailingPathDelimiter(GetUserDir) + '.local/bin/gittan';
@@ -301,7 +302,7 @@ begin
   Target := CliInstallPath;
   if Foreign(Target, AMessage) then
     Exit(False);
-  if FileExists(Target) and not DeleteFile(Target) then
+  if FileExists(Target) and not SysUtils.DeleteFile(Target) then
   begin
     { /usr/local/bin belongs to root: remove as an administrator. }
     if not RunAsAdmin('rm -f ' + ShellQuote(Target), Output) then
@@ -389,7 +390,7 @@ begin
   Target := CliInstallPath;
   if Foreign(Target, AMessage) then
     Exit(False);
-  if FileExists(Target) and not DeleteFile(Target) then
+  if FileExists(Target) and not SysUtils.DeleteFile(Target) then
   begin
     AMessage := 'Could not remove ' + Target + '.';
     Exit(False);
@@ -434,7 +435,7 @@ begin
   Target := CliInstallPath;
   if Foreign(Target, AMessage) then
     Exit(False);
-  Result := not FileExists(Target) or DeleteFile(Target);
+  Result := not FileExists(Target) or SysUtils.DeleteFile(Target);
   if Result then
     AMessage := 'Removed ' + Target + '.'
   else
