@@ -944,12 +944,14 @@ begin
     Exit;
   FCompareMenu.Clear;
   AddRef(rsWorkingTree, '', False);
+  if FMergeBase <> '' then
+    AddRef(Format(rsMergeBase, [FDefaultBranch]), FMergeBase, False);
   Refs := TStringList.Create;
   try
     if FRepo.Root <> '' then
       FRepo.Refs(Refs);
     if (FRepo.Base <> '') and not FRepo.WholeTree and (FRepo.Base <> FPullRange) and
-      (Refs.IndexOf(FRepo.Base) < 0) then
+      (FRepo.Base <> FMergeBase) and (Refs.IndexOf(FRepo.Base) < 0) then
       Refs.Insert(0, FRepo.Base);
     if Refs.Count > 0 then
       FCompareMenu.Add(NewLine);
@@ -1225,6 +1227,8 @@ begin
     else
       Result := Format(rsVsBase, [Copy(FRepo.Base, 1, 7)]);
   end
+  else if FRepo.Base = FMergeBase then
+    Result := Format(rsVsBase, [Format(rsVsMergeBase, [FDefaultBranch])])
   else
     Result := Format(rsVsBase, [FRepo.Base]);
 end;

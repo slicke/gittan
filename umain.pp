@@ -112,6 +112,13 @@ type
     FTreePanel: TPanel;
     FTreeFilter: TEdit;
     FTreeFilterText: string;
+    { The default branch of the remote (origin/main) and the merge base
+      of the branch with it, Compare With's "origin/main (Merge Base)";
+      and the branch's lead on and lag behind its upstream, for the
+      status bar. All read by LoadRepository. }
+    FDefaultBranch, FMergeBase: string;
+    FHasUpstream: boolean;
+    FAhead, FBehind: integer;
     FContextFromSummary: boolean;
     FHeader: TGittanFileHeader;
     FNav: TGittanChangeNav;
@@ -568,6 +575,10 @@ const
   rsOpenCommitOnGitHub = 'Open Co&mmit on GitHub';
   rsGitHubFailed = 'gh: %s';
   rsFilterFiles = 'Fi&lter Files';
+  rsMergeBase = '%s (Merge Base)';
+  rsVsMergeBase = '%s (merge base)';
+  rsAhead = '↑%d';
+  rsBehind = '↓%d';
   rsFilterHint = 'Filter files';
   rsPullRequests = 'Pull Re&quests';
   rsPullLoading = 'Loading...';
@@ -1080,6 +1091,10 @@ begin
     Repo := Format(rsRepoOnBranch, [ExtractFileName(FRepo.Root), FBranch]);
     if FBranch = '' then
       Repo := ExtractFileName(FRepo.Root);
+    if FHasUpstream and (FAhead > 0) then
+      Repo := Repo + ' ' + Format(rsAhead, [FAhead]);
+    if FHasUpstream and (FBehind > 0) then
+      Repo := Repo + ' ' + Format(rsBehind, [FBehind]);
     if FRepo.Base <> '' then
       Repo := Repo + ' ' + BaseLabel;
     if FHasPull then
@@ -2007,6 +2022,10 @@ begin
   FStats := Stats;
   FBranch := FRepo.Branch;
   StartPullJob(False);
+  FDefaultBranch := FRepo.DefaultBranch;
+  if not FRepo.MergeBase(FDefaultBranch, FMergeBase) then
+    FMergeBase := '';
+  FHasUpstream := FRepo.AheadBehind(FAhead, FBehind);
   FFileCount := Length(Stats);
   FillFileTree(Stats);
   SetLength(Icons, Length(Stats));

@@ -112,6 +112,16 @@ type
     {** The current branch, the short commit id when HEAD is detached, or
       empty when nothing is open. }
     function Branch: string;
+    {** The remote-tracking branch the repository was cloned from, such as
+      origin/main: what the remote's HEAD points at, else main or master
+      on the remote RemoteFor gives, else empty. }
+    function DefaultBranch: string;
+    {** The merge base of ARef and HEAD, the commit the branch left ARef
+      at; false when either is unknown or they share no history. }
+    function MergeBase(const ARef: string; out AHash: string): boolean;
+    {** How many commits the branch is ahead of and behind its upstream;
+      false when it has none. }
+    function AheadBehind(out AAhead, ABehind: integer): boolean;
     {** Whether Base is a range "A..B" or "A...B": the right side of
       every diff is then the commit B instead of the work tree. }
     function IsRange: boolean;
@@ -938,6 +948,53 @@ end;
 
 { symbolic-ref names the branch even before its first commit; it fails
   when HEAD is detached, and the commit id stands in then. }
+function TGittanRepo.DefaultBranch: string;
+var
+  Remote, Name: string;
+begin
+  Result := '';
+  if FRoot = '' then
+    Exit;
+  Remote := RemoteFor('');
+  if Remote = '' then
+    Exit;
+  if RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'refs/remotes/' + Remote + '/HEAD'],
+    Result) then
+    Exit(Trim(Result));
+  for Name in ['main', 'master'] do
+    if HasCommit(Remote + '/' + Name) then
+      Exit(Remote + '/' + Name);
+  Result := '';
+end;
+
+function TGittanRepo.MergeBase(const ARef: string; out AHash: string): boolean;
+begin
+  AHash := '';
+  Result := (FRoot <> '') and (ARef <> '') and
+    RunGit(FRoot, ['merge-base', ARef, 'HEAD'], AHash);
+  AHash := Trim(AHash);
+  Result := Result and (AHash <> '');
+end;
+
+function TGittanRepo.AheadBehind(out AAhead, ABehind: integer): boolean;
+var
+  Output: string;
+  Tab: integer;
+begin
+  AAhead := 0;
+  ABehind := 0;
+  { left-right counts the commits only on the upstream (behind) and only
+    on HEAD (ahead), tab-separated. }
+  Result := (FRoot <> '') and
+    RunGit(FRoot, ['rev-list', '--left-right', '--count', '@{upstream}...HEAD'], Output);
+  if not Result then
+    Exit;
+  Output := Trim(Output);
+  Tab := Pos(#9, Output);
+  Result := (Tab > 0) and TryStrToInt(Copy(Output, 1, Tab - 1), ABehind) and
+    TryStrToInt(Copy(Output, Tab + 1, MaxInt), AAhead);
+end;
+
 function TGittanRepo.Branch: string;
 begin
   Result := '';

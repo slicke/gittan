@@ -44,6 +44,8 @@ type
     procedure TestLineHistory;
     procedure TestRemoteFor;
     procedure TestFetchPullRequest;
+    procedure TestDefaultBranchAndMergeBase;
+    procedure TestAheadBehind;
   end;
 
 implementation
@@ -642,6 +644,81 @@ begin
   end
   else
     Fail('could not make a bare repository');
+end;
+
+{ A bare repository as the remote; the test's branch is pushed to it. }
+procedure TGitRepoTest.TestDefaultBranchAndMergeBase;
+var
+  Remote, Branch, Base, Hash: string;
+  Output: string;
+  Status: integer;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  AssertEquals('', FRepo.DefaultBranch);
+  AssertFalse(FRepo.MergeBase('', Hash));
+  AssertFalse(FRepo.MergeBase('nothing', Hash));
+  Remote := FDir + '-remote';
+  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Status,
+    [poStderrToOutPut]) <> 0 then
+    Fail('could not make a bare repository');
+  try
+    Branch := Trim(Git(['rev-parse', '--abbrev-ref', 'HEAD']));
+    Base := Trim(Git(['rev-parse', 'HEAD']));
+    Git(['remote', 'add', 'origin', Remote]);
+    Git(['push', '-q', 'origin', Branch]);
+    { No origin/HEAD yet: main or master on the remote, when the branch
+      is one of them, is the fallback. }
+    if (Branch = 'main') or (Branch = 'master') then
+      AssertEquals('origin/' + Branch, FRepo.DefaultBranch);
+    Git(['remote', 'set-head', 'origin', Branch]);
+    AssertEquals('origin/' + Branch, FRepo.DefaultBranch);
+    Git(['checkout', '-q', '-b', 'topic']);
+    WriteFile('a.txt', 'one'#10'two'#10'three'#10'four'#10);
+    Commit('on topic');
+    AssertTrue(FRepo.MergeBase('origin/' + Branch, Hash));
+    AssertEquals(Base, Hash);
+  finally
+    RemoveTree(Remote);
+  end;
+end;
+
+procedure TGitRepoTest.TestAheadBehind;
+var
+  Remote, Branch, Output: string;
+  Status, Ahead, Behind: integer;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  AssertFalse(FRepo.AheadBehind(Ahead, Behind));
+  Remote := FDir + '-remote';
+  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Status,
+    [poStderrToOutPut]) <> 0 then
+    Fail('could not make a bare repository');
+  try
+    Branch := Trim(Git(['rev-parse', '--abbrev-ref', 'HEAD']));
+    Git(['remote', 'add', 'origin', Remote]);
+    Git(['push', '-q', '-u', 'origin', Branch]);
+    AssertTrue(FRepo.AheadBehind(Ahead, Behind));
+    AssertEquals(0, Ahead);
+    AssertEquals(0, Behind);
+    WriteFile('a.txt', 'one'#10'two'#10'three'#10'four'#10);
+    Commit('ahead one');
+    WriteFile('a.txt', 'one'#10'two'#10'three'#10'four'#10'five'#10);
+    Commit('ahead two');
+    AssertTrue(FRepo.AheadBehind(Ahead, Behind));
+    AssertEquals(2, Ahead);
+    AssertEquals(0, Behind);
+    { The remote moves on without us: push the two from a detached
+      commit of their own, then drop one locally. }
+    Git(['push', '-q', 'origin', 'HEAD:' + Branch]);
+    Git(['reset', '-q', '--hard', 'HEAD^']);
+    AssertTrue(FRepo.AheadBehind(Ahead, Behind));
+    AssertEquals(0, Ahead);
+    AssertEquals(1, Behind);
+  finally
+    RemoveTree(Remote);
+  end;
 end;
 
 procedure TGitRepoTest.TestCommitRange;
