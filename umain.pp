@@ -16,7 +16,7 @@ uses
   gittan.summary, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
-  gittan.syntaxthemes, md5;
+  gittan.syntaxthemes, gittan.cli, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -71,7 +71,7 @@ type
     FGitHubCli: string;
     FHasGitHubCli: boolean;
     FSyntaxMenu, FAutoLexerItem, FPlainTextItem: TMenuItem;
-    FRecentMenu, FCompareMenu, FTerminalItem: TMenuItem;
+    FRecentMenu, FCompareMenu, FTerminalItem, FUninstallCliItem: TMenuItem;
     FSnapshots: TGittanSnapshots;
     FWrapItem, FOnlyChangesItem, FSideItem, FIgnoreSpaceItem: TMenuItem;
     FContextItems: array of TMenuItem;
@@ -458,6 +458,9 @@ type
     procedure MenuCopyBranchClick(Sender: TObject);
     procedure MenuCopyRepoPathClick(Sender: TObject);
     procedure MenuOpenTerminalClick(Sender: TObject);
+    procedure MenuInstallCliClick(Sender: TObject);
+    procedure MenuUninstallCliClick(Sender: TObject);
+    procedure ToolsMenuClick(Sender: TObject);
     procedure RebuildCompareMenu;
     procedure MenuCompareClick(Sender: TObject);
     procedure MenuCompareOtherClick(Sender: TObject);
@@ -538,6 +541,9 @@ resourcestring
   rsDropHint = 'Open a repository, or drop a folder or file here.';
   rsDropShortcut = 'File > Open Repository    %s';
   rsGo = '&Go';
+  rsTools = '&Tools';
+  rsInstallCli = 'Install &CLI Command';
+  rsUninstallCli = '&Uninstall CLI Command';
   rsFind = '&Find...';
   rsFindNext = 'Find &Next';
   rsFindPrev = 'Find &Previous';
@@ -1192,7 +1198,7 @@ end;
 procedure TForm1.BuildMenu;
 var
   Main: TMainMenu;
-  FileMenu, ViewMenu, GoMenu, Item, Sub: TMenuItem;
+  FileMenu, ViewMenu, GoMenu, ToolsMenu, Item, Sub: TMenuItem;
   i: integer;
 
   function AddItem(AParent: TMenuItem; const ACaption: string; AShortCut: TShortCut;
@@ -1298,6 +1304,13 @@ begin
   AddItem(GoMenu, rsNextFile, ShortCut(VK_F8, []), @MenuNextFileClick);
   AddItem(GoMenu, rsPrevFile, ShortCut(VK_F8, [ssShift]), @MenuPrevFileClick);
 end;
+
+  ToolsMenu := TMenuItem.Create(Main);
+  ToolsMenu.Caption := rsTools;
+  ToolsMenu.OnClick := @ToolsMenuClick;
+  Main.Items.Add(ToolsMenu);
+  AddItem(ToolsMenu, rsInstallCli, 0, @MenuInstallCliClick);
+  FUninstallCliItem := AddItem(ToolsMenu, rsUninstallCli, 0, @MenuUninstallCliClick);
 
 { Automatic and Plain text first, then the lexer list, which is long
   (hundreds of entries), grouped into one submenu per initial letter. The

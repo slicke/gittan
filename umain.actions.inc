@@ -991,6 +991,35 @@ begin
   {$ENDIF}
 end;
 
+{ Tools > Install CLI Command: a gittan command for the terminal that
+  starts this executable (see gittan.cli). }
+procedure TForm1.MenuInstallCliClick(Sender: TObject);
+var
+  Msg: string;
+begin
+  if InstallCli(Application.ExeName, Msg) then
+    MessageDlg(Msg, mtInformation, [mbOK], 0)
+  else
+    MessageDlg(Msg, mtError, [mbOK], 0);
+end;
+
+procedure TForm1.MenuUninstallCliClick(Sender: TObject);
+var
+  Msg: string;
+begin
+  if UninstallCli(Msg) then
+    MessageDlg(Msg, mtInformation, [mbOK], 0)
+  else
+    MessageDlg(Msg, mtError, [mbOK], 0);
+end;
+
+{ Uninstall is offered only while Gittan's own script is installed; the
+  menu's OnClick runs as it opens. }
+procedure TForm1.ToolsMenuClick(Sender: TObject);
+begin
+  FUninstallCliItem.Enabled := CliInstalled;
+end;
+
 { ---------------------------------------------------------------------------
   Comparing against another commit
   ---------------------------------------------------------------------------
