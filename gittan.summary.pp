@@ -23,6 +23,9 @@ type
     coordinates for a popup menu. }
   TGittanContextFileEvent = procedure(Sender: TObject; const APath: string;
     const AScreenPos: TPoint) of object;
+  {** A click on the branch in the header, with its rectangle in screen
+    coordinates for a popup to drop down from. }
+  TGittanBranchClickEvent = procedure(Sender: TObject; const AScreenRect: TRect) of object;
 
   { TGittanSummary }
 
@@ -38,7 +41,17 @@ type
     FBack, FText, FDim, FHover, FSelectedBack, FAdded, FDeleted, FLine: TColor;
     FOnSelectFile: TGittanSelectFileEvent;
     FOnContextFile: TGittanContextFileEvent;
+    FOnBranchClick: TGittanBranchClickEvent;
     FRowsTop: integer;
+    { The height the content needs; the control is at least as high as
+      the box it fills, see FitHeight. }
+    FContentHeight: integer;
+    { The branch's chip in the header, in client coordinates; empty
+      without a branch. }
+    FBranchRect: TRect;
+    FBranchHot: boolean;
+    function BranchClickable: boolean;
+    procedure SetBranchHot(AValue: boolean);
     function RowAt(Y: integer): integer;
     procedure SetHot(AValue: integer);
     procedure SetSelected(const AValue: string);
@@ -74,6 +87,12 @@ type
       bar. }
     procedure SetColors(ABack, AText, ADim, AHover, ASelected, AAdded,
       ADeleted, ALine: TColor);
+    {** Makes the control at least AMin high (the height of the box it
+      sits in, so its background covers the box), and no higher than
+      its content needs beyond that: a minimum constraint alone would
+      leave it at an old, larger height when the box shrinks, and the
+      box would scroll. }
+    procedure FitHeight(AMin: integer);
     {** The image list the file badges come from. }
     property Images: TCustomImageList read FImages write FImages;
     {** The path of the file whose row is marked: the one the editor last
@@ -86,6 +105,9 @@ type
     property OnSelectFile: TGittanSelectFileEvent read FOnSelectFile write FOnSelectFile;
     {** A right click on a file's row. }
     property OnContextFile: TGittanContextFileEvent read FOnContextFile write FOnContextFile;
+    {** A click on the branch in the header. While it is set the branch
+      is drawn as a chip with a chevron, highlighted under the mouse. }
+    property OnBranchClick: TGittanBranchClickEvent read FOnBranchClick write FOnBranchClick;
   end;
 
 implementation
@@ -115,6 +137,9 @@ const
   TitleFontSize = 20;
   MessageIconSize = 64;
   CheckSize = 20;
+  ChipPadX = 6;
+  ChipPadY = 3;
+  ChevronWidth = 14;
 
 { TGittanSummary }
 
@@ -202,7 +227,15 @@ begin
   FRowsTop := Pad + TitleHeight + 6 + BodyHeight + Pad;
   if FNotice <> '' then
     Inc(FRowsTop, RowHeight);
-  Height := FRowsTop + Max(Length(FStats), 2) * RowHeight + Pad;
+  FContentHeight := FRowsTop + Max(Length(FStats), 2) * RowHeight + Pad;
+  Height := Max(FContentHeight, Constraints.MinHeight);
+end;
+
+procedure TGittanSummary.FitHeight(AMin: integer);
+begin
+  Constraints.MinHeight := AMin;
+  if FMessage = '' then
+    Height := Max(FContentHeight, AMin);
 end;
 
 procedure TGittanSummary.SetSelected(const AValue: string);
@@ -220,6 +253,23 @@ begin
   FNotice := AValue;
   if FMessage = '' then
     UpdateHeight;
+  Invalidate;
+end;
+
+function TGittanSummary.BranchClickable: boolean;
+begin
+  Result := Assigned(FOnBranchClick) and (FMessage = '') and (FBranch <> '');
+end;
+
+procedure TGittanSummary.SetBranchHot(AValue: boolean);
+begin
+  if FBranchHot = AValue then
+    Exit;
+  FBranchHot := AValue;
+  if AValue then
+    Cursor := crHandPoint
+  else
+    Cursor := crDefault;
   Invalidate;
 end;
 
@@ -245,7 +295,7 @@ end;
   next, a divider below. Y is advanced past the header. }
 procedure TGittanSummary.PaintHeader(var Y: integer);
 var
-  X, TitleHeight, BodyHeight, Added, Deleted, i: integer;
+  X, TitleHeight, BodyHeight, TextY, Added, Deleted, i: integer;
   Heading: string;
 begin
   Canvas.Brush.Style := bsClear;
@@ -260,10 +310,40 @@ begin
   Canvas.Font.Size := Font.Size;
   Canvas.Font.Style := [];
   Canvas.Font.Color := FDim;
+  FBranchRect := Rect(0, 0, 0, 0);
   if FBranch <> '' then
   begin
-    Canvas.TextOut(X, Y + TitleHeight - BodyHeight - 3, Format(rsOnBranch, [FBranch]));
-    Inc(X, Canvas.TextWidth(Format(rsOnBranch, [FBranch])) + Gap);
+    Heading := Format(rsOnBranch, [FBranch]);
+    TextY := Y + TitleHeight - BodyHeight - 3;
+    if BranchClickable then
+    begin
+      { A chip with a chevron, so the branch reads as something to
+        click; filled while the mouse is over it. }
+      FBranchRect := Rect(X - ChipPadX, TextY - ChipPadY,
+        X + Canvas.TextWidth(Heading) + ChevronWidth + ChipPadX, TextY + BodyHeight + ChipPadY);
+      if FBranchHot then
+      begin
+        Canvas.Pen.Style := psClear;
+        Canvas.Brush.Style := bsSolid;
+        Canvas.Brush.Color := FHover;
+        Canvas.RoundRect(FBranchRect, 8, 8);
+        Canvas.Pen.Style := psSolid;
+        Canvas.Brush.Style := bsClear;
+        Canvas.Font.Color := FText;
+      end;
+      Canvas.TextOut(X, TextY, Heading);
+      Inc(X, Canvas.TextWidth(Heading) + ChevronWidth div 2);
+      Canvas.Pen.Color := Canvas.Font.Color;
+      Canvas.Polyline([Point(X - 3, TextY + BodyHeight div 2 - 1),
+        Point(X, TextY + BodyHeight div 2 + 2), Point(X + 3, TextY + BodyHeight div 2 - 1)]);
+      Inc(X, ChevronWidth div 2 + ChipPadX + Gap);
+      Canvas.Font.Color := FDim;
+    end
+    else
+    begin
+      Canvas.TextOut(X, TextY, Heading);
+      Inc(X, Canvas.TextWidth(Heading) + Gap);
+    end;
   end;
   if FBase <> '' then
   begin
@@ -562,7 +642,8 @@ begin
   if Y <> FRowsTop then
   begin
     FRowsTop := Y;
-    Height := FRowsTop + Max(Length(FStats), 2) * RowHeight + Pad;
+    FContentHeight := FRowsTop + Max(Length(FStats), 2) * RowHeight + Pad;
+    Height := Max(FContentHeight, Constraints.MinHeight);
   end;
   if Length(FStats) = 0 then
     PaintClean(FRowsTop);
@@ -574,12 +655,14 @@ procedure TGittanSummary.MouseMove(Shift: TShiftState; X, Y: integer);
 begin
   inherited MouseMove(Shift, X, Y);
   SetHot(RowAt(Y));
+  SetBranchHot(BranchClickable and PtInRect(FBranchRect, Point(X, Y)));
 end;
 
 procedure TGittanSummary.MouseLeave;
 begin
   inherited MouseLeave;
   SetHot(-1);
+  SetBranchHot(False);
 end;
 
 procedure TGittanSummary.MouseUp(Button: TMouseButton; Shift: TShiftState;
@@ -588,6 +671,13 @@ var
   Row: integer;
 begin
   inherited MouseUp(Button, Shift, X, Y);
+  if (Button = mbLeft) and BranchClickable and PtInRect(FBranchRect, Point(X, Y)) then
+  begin
+    FOnBranchClick(Self, Rect(ClientToScreen(FBranchRect.TopLeft).X,
+      ClientToScreen(FBranchRect.TopLeft).Y, ClientToScreen(FBranchRect.BottomRight).X,
+      ClientToScreen(FBranchRect.BottomRight).Y));
+    Exit;
+  end;
   Row := RowAt(Y);
   if Row < 0 then
     Exit;

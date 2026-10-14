@@ -48,6 +48,7 @@ type
     procedure TestDefaultBranchAndMergeBase;
     procedure TestAheadBehind;
     procedure TestOperation;
+    procedure TestBranchesAndSwitch;
   end;
 
 implementation
@@ -891,6 +892,45 @@ begin
   finally
     H.Free;
   end;
+end;
+
+{ The local branches are listed and switched to; a switch git refuses
+  (an unknown name, a local change it would overwrite) fails with its
+  reason and leaves the branch alone. }
+procedure TGitRepoTest.TestBranchesAndSwitch;
+var
+  Branch: string;
+  Local, Remote: TStringList;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  Branch := Trim(Git(['rev-parse', '--abbrev-ref', 'HEAD']));
+  Git(['branch', 'topic']);
+  Local := TStringList.Create;
+  Remote := TStringList.Create;
+  try
+    AssertTrue(FRepo.Branches(Local, Remote));
+    AssertEquals(2, Local.Count);
+    AssertTrue(Local.IndexOf(Branch) >= 0);
+    AssertTrue(Local.IndexOf('topic') >= 0);
+    AssertEquals(0, Remote.Count);
+  finally
+    Local.Free;
+    Remote.Free;
+  end;
+  AssertTrue(FRepo.Switch('topic'));
+  AssertEquals('topic', FRepo.Branch);
+  AssertFalse(FRepo.Switch('nothing'));
+  AssertTrue(FRepo.Error <> '');
+  AssertEquals('topic', FRepo.Branch);
+  WriteFile('a.txt', 'topic'#10);
+  Commit('topic');
+  AssertTrue(FRepo.Switch(Branch));
+  AssertEquals(Branch, FRepo.Branch);
+  WriteFile('a.txt', 'local'#10);
+  AssertFalse('a local change the switch would overwrite', FRepo.Switch('topic'));
+  AssertTrue(Pos('overwritten', FRepo.Error) > 0);
+  AssertEquals(Branch, FRepo.Branch);
 end;
 
 initialization

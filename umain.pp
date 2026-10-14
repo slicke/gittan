@@ -16,7 +16,8 @@ uses
   gittan.summary, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
-  gittan.syntaxthemes, gittan.cli, gittan.symbolchanges, gittan.callers, md5;
+  gittan.syntaxthemes, gittan.cli, gittan.symbolchanges, gittan.callers,
+  gittan.popuplist, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -173,6 +174,10 @@ type
     FLinkColor: TColor;
     FSummaryBox: TScrollBox;
     FSummary: TGittanSummary;
+    { The list that drops down from the branch in the summary, with the
+      branch to switch to for each of its items ('' for a header). }
+    FBranchPopup: TGittanPopupList;
+    FBranchNames: TStringList;
     FEditOld: TATSynEdit;
     { The hidden editor that parses another changed file for Go to
       Definition, with its adapter; made on the first lookup. }
@@ -452,6 +457,9 @@ type
     procedure FilePopupPopup(Sender: TObject);
     procedure SummaryContextFile(Sender: TObject; const APath: string;
       const AScreenPos: TPoint);
+    procedure SummaryBranchClick(Sender: TObject; const AScreenRect: TRect);
+    procedure BranchPopupPick(Sender: TObject; AIndex: integer);
+    procedure SwitchBranch(const ABranch: string);
     function ContextFullPath: string;
     procedure MenuCopyPathClick(Sender: TObject);
     procedure MenuCopyRelativePathClick(Sender: TObject);
@@ -607,6 +615,9 @@ resourcestring
   rsLexerCount = '%d lexers';
   rsDiffLexer = 'Diff';
   rsRepoOnBranch = '%s on %s';
+  rsBranches = 'Branches';
+  rsRemoteBranches = 'Remote branches';
+  rsFilterBranches = 'Filter branches';
   rsVsBase = 'vs %s';
   rsRepoDiffTitle = 'Repository diff';
   rsChangedFiles = '%d changed files';
@@ -840,6 +851,13 @@ begin
   FSummary.Images := TreeImages;
   FSummary.OnSelectFile := @SummarySelectFile;
   FSummary.OnContextFile := @SummaryContextFile;
+  FSummary.OnBranchClick := @SummaryBranchClick;
+  { The branch list pops up over the form, under the branch. }
+  FBranchNames := TStringList.Create;
+  FBranchPopup := TGittanPopupList.Create(Self);
+  FBranchPopup.Parent := Self;
+  FBranchPopup.FilterHint := rsFilterBranches;
+  FBranchPopup.OnPick := @BranchPopupPick;
   { The summary draws the application icon in its empty view, from its
     own copy: Application.Icon keeps to its small image. }
   FAppIcon := TIcon.Create;
@@ -889,6 +907,7 @@ begin
   Application.RemoveAsyncCalls(Self);
   StopWatcher;
   AbandonPullJob;
+  FBranchNames.Free;
   StopBlame;
   StopIndexing;
   SaveIndex;
@@ -1068,6 +1087,9 @@ begin
       RGBToColor(150, 150, 150), RGBToColor(62, 62, 62));
     FFindBar.Nav.SetColors(RGBToColor(37, 37, 38), RGBToColor(50, 50, 51),
       RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240));
+    FBranchPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
+      RGBToColor(100, 160, 240));
     FPullFill := RGBToColor(50, 50, 51);
     FPullBorder := RGBToColor(85, 85, 86);
     FPullText := RGBToColor(200, 200, 200);
@@ -1087,6 +1109,9 @@ begin
       RGBToColor(110, 110, 110), RGBToColor(222, 222, 222));
     FFindBar.Nav.SetColors(RGBToColor(246, 246, 246), clWhite,
       RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
+    FBranchPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
+      RGBToColor(0, 110, 230));
     FPullFill := clWhite;
     FPullBorder := RGBToColor(205, 205, 205);
     FPullText := RGBToColor(70, 70, 70);
@@ -2359,7 +2384,7 @@ end;
 { The summary paints its own background; it must cover the scroll box. }
 procedure TForm1.SummaryBoxResize(Sender: TObject);
 begin
-  FSummary.Constraints.MinHeight := FSummaryBox.ClientHeight;
+  FSummary.FitHeight(FSummaryBox.ClientHeight);
 end;
 
 { A click on a file in the summary selects it in the tree, which shows its

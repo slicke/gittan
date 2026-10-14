@@ -73,6 +73,7 @@ type
     procedure SplitRange(out ALeft, ARight: string);
     function RunDiff(const AArgs: array of string; out AOutput: string): boolean;
     function FullPath(const APath: string): string;
+    function RefGroup(const AGroup: string; AList: TStrings): boolean;
   public
     {** Opens the repository that contains ADir. Returns false, with the git
       message in Error, when ADir is not inside a work tree. }
@@ -87,6 +88,17 @@ type
     {** The branches and tags of the repository, local branches first,
       each most recently committed first: what Base can be set to. }
     function Refs(AList: TStrings): boolean;
+    {** The branches of the repository, each group most recently
+      committed first: the local ones in ALocal, the remote-tracking ones
+      (origin/main) in ARemote, the symbolic origin/HEAD left out. }
+    function Branches(ALocal, ARemote: TStrings): boolean;
+    {** Switches the work tree to the branch ABranch (`git switch`): a
+      local branch, or the name of a remote-tracking one without the
+      remote, which makes a local branch tracking it. False, with git's
+      reason in Error, when git refuses: a change in the work tree the
+      switch would overwrite, an operation in progress, or a name it
+      does not know. }
+    function Switch(const ABranch: string): boolean;
     {** Whether ARef names a commit in the repository. }
     function HasCommit(const ARef: string): boolean;
     {** The remote whose URL holds ARepoPath ("owner/repo", compared
@@ -808,42 +820,64 @@ begin
   RunDiff(['--no-color', '--no-ext-diff'], Result);
 end;
 
-{ for-each-ref sorts within each group, so the groups are asked for one
-  by one: local branches, remote branches, tags. A symbolic ref such as
+{ Appends the refs under AGroup (refs/heads, refs/remotes or refs/tags),
+  most recently committed first, to AList. A symbolic ref such as
   origin/HEAD (short name "origin") is skipped: it only points at
   another one in the list. }
-function TGittanRepo.Refs(AList: TStrings): boolean;
+function TGittanRepo.RefGroup(const AGroup: string; AList: TStrings): boolean;
 var
   Output, Line, Name: string;
-  Group: string;
   Raw: TStringList;
   Tab: integer;
 begin
-  AList.Clear;
-  if FRoot = '' then
-    Exit(False);
-  Result := True;
+  Result := RunGit(FRoot, ['for-each-ref', '--format=%(refname:short)%09%(symref)',
+    '--sort=-committerdate', AGroup], Output);
+  if not Result then
+    Exit;
   Raw := TStringList.Create;
   try
-    for Group in ['refs/heads', 'refs/remotes', 'refs/tags'] do
+    Raw.Text := Output;
+    for Line in Raw do
     begin
-      if not RunGit(FRoot, ['for-each-ref', '--format=%(refname:short)%09%(symref)',
-        '--sort=-committerdate', Group], Output) then
-        Exit(False);
-      Raw.Text := Output;
-      for Line in Raw do
-      begin
-        Tab := Pos(#9, Line);
-        if (Tab = 0) or (Tab < Length(Line)) then
-          Continue;
-        Name := Copy(Line, 1, Tab - 1);
-        if (Name <> '') and (AList.IndexOf(Name) < 0) then
-          AList.Add(Name);
-      end;
+      Tab := Pos(#9, Line);
+      if (Tab = 0) or (Tab < Length(Line)) then
+        Continue;
+      Name := Copy(Line, 1, Tab - 1);
+      if (Name <> '') and (AList.IndexOf(Name) < 0) then
+        AList.Add(Name);
     end;
   finally
     Raw.Free;
   end;
+end;
+
+{ for-each-ref sorts within each group, so the groups are asked for one
+  by one: local branches, remote branches, tags. }
+function TGittanRepo.Refs(AList: TStrings): boolean;
+begin
+  AList.Clear;
+  if FRoot = '' then
+    Exit(False);
+  Result := RefGroup('refs/heads', AList) and RefGroup('refs/remotes', AList) and
+    RefGroup('refs/tags', AList);
+end;
+
+function TGittanRepo.Branches(ALocal, ARemote: TStrings): boolean;
+begin
+  ALocal.Clear;
+  ARemote.Clear;
+  if FRoot = '' then
+    Exit(False);
+  Result := RefGroup('refs/heads', ALocal) and RefGroup('refs/remotes', ARemote);
+end;
+
+function TGittanRepo.Switch(const ABranch: string): boolean;
+var
+  Output: string;
+begin
+  if (FRoot = '') or (ABranch = '') then
+    Exit(False);
+  Result := RunGit(FRoot, ['switch', ABranch], Output);
 end;
 
 { Against HEAD the list is git status itself. Against another base it is

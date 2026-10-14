@@ -674,6 +674,100 @@ begin
   Result := IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(FContextPath);
 end;
 
+{ ---------------------------------------------------------------------------
+  Switching branch
+  ---------------------------------------------------------------------------
+  A click on the branch in the summary drops the branch list down from
+  it: the local branches with the current one checked, then the
+  remote-tracking ones that have no local branch yet (shown with their
+  remote, switched to by their name alone, which makes the local branch).
+  Picking one runs git switch; what git refuses (a local change it would
+  overwrite, an operation in progress) is told in the summary's notice. }
+procedure TForm1.SummaryBranchClick(Sender: TObject; const AScreenRect: TRect);
+var
+  Local, Remote: TStringList;
+  i, Slash: integer;
+  Short: string;
+begin
+  if FRepo.Root = '' then
+    Exit;
+  Local := TStringList.Create;
+  Remote := TStringList.Create;
+  try
+    if not FRepo.Branches(Local, Remote) then
+    begin
+      FSummary.Notice := FRepo.Error;
+      Exit;
+    end;
+    FBranchPopup.Clear;
+    FBranchNames.Clear;
+    FBranchPopup.AddHeader(rsBranches);
+    FBranchNames.Add('');
+    for i := 0 to Local.Count - 1 do
+    begin
+      FBranchPopup.Add(Local[i], '', Local[i] = FBranch);
+      FBranchNames.Add(Local[i]);
+    end;
+    for i := 0 to Remote.Count - 1 do
+    begin
+      Slash := Pos('/', Remote[i]);
+      Short := Copy(Remote[i], Slash + 1, MaxInt);
+      if (Slash = 0) or (Local.IndexOf(Short) >= 0) then
+        Continue;
+      if FBranchNames.Count = Local.Count + 1 then
+      begin
+        FBranchPopup.AddHeader(rsRemoteBranches);
+        FBranchNames.Add('');
+      end;
+      FBranchPopup.Add(Remote[i]);
+      FBranchNames.Add(Short);
+    end;
+  finally
+    Local.Free;
+    Remote.Free;
+  end;
+  FBranchPopup.Popup(AScreenRect);
+end;
+
+procedure TForm1.BranchPopupPick(Sender: TObject; AIndex: integer);
+begin
+  if (AIndex < 0) or (AIndex >= FBranchNames.Count) then
+    Exit;
+  if (FBranchNames[AIndex] <> '') and (FBranchNames[AIndex] <> FBranch) then
+    SwitchBranch(FBranchNames[AIndex]);
+end;
+
+{ The watcher is stopped meanwhile, as for a new base, and the views
+  are refreshed from the new branch. Git's first line says why a
+  switch was refused; the rest lists the files. }
+procedure TForm1.SwitchBranch(const ABranch: string);
+var
+  Reason: string;
+begin
+  if FRepo.Root = '' then
+    Exit;
+  StopWatcher;
+  if FRepo.Switch(ABranch) then
+  begin
+    FLoadError := '';
+    FSummary.Notice := '';
+    RefreshRepository;
+  end
+  else
+  begin
+    Reason := FRepo.Error;
+    if Pos(#10, Reason) > 0 then
+      Reason := Copy(Reason, 1, Pos(#10, Reason) - 1);
+    if Copy(Reason, 1, 7) = 'error: ' then
+      Delete(Reason, 1, 7)
+    else if Copy(Reason, 1, 7) = 'fatal: ' then
+      Delete(Reason, 1, 7);
+    FSummary.Notice := Reason;
+    ShowSummary;
+  end;
+  StartWatcher;
+end;
+
 procedure TForm1.MenuCopyPathClick(Sender: TObject);
 begin
   if FContextPath <> '' then
