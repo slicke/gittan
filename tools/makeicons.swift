@@ -6,13 +6,14 @@
 // with a neutral gray drop shadow. The document is cut out: it is told from the
 // background by its blue tint, the background turns transparent and the shadow
 // becomes black with the alpha of its gray, so it stays soft on any background.
-// Windows and Linux get the document alone; macOS gets it on a black rounded
-// square (a superellipse, like the continuous corners of macOS app icons).
+// Windows and Linux get the document alone; macOS gets it on a dark rounded
+// square (a superellipse, like the continuous corners of macOS app icons)
+// with a gradient and a light outline.
 //
 // Writes:
 //   <outdir>/gittan.png          1024x1024 master, the document alone
 //   <outdir>/png/gittan-<n>.png  16..512 for Linux desktop files
-//   <outdir>/Gittan.icns         macOS, black rounded square inset to Apple's 824/1024 grid
+//   <outdir>/Gittan.icns         macOS, dark rounded square inset to Apple's 824/1024 grid
 //   <Gittan.ico>                 Windows/Linux LCL icon, 16..256, the document alone
 //
 // macOS only (CoreGraphics, ImageIO, iconutil).
@@ -193,13 +194,30 @@ for i in 0..<steps {
   if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
 }
 path.closeSubpath()
+// Context coordinates count from the bottom: a gradient from y = side to 0
+// runs from the top down.
+let rgb = CGColorSpaceCreateDeviceRGB()
+func gradient(_ top: [CGFloat], _ bottom: [CGFloat]) -> CGGradient {
+  CGGradient(colorSpace: rgb, colorComponents: top + bottom, locations: [0, 1], count: 2)!
+}
+let top = CGPoint(x: 0, y: CGFloat(side)), bottom = CGPoint(x: 0, y: 0)
+cut.ctx.saveGState()
 cut.ctx.addPath(path)
 cut.ctx.clip()
-cut.ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
-cut.ctx.fill(CGRect(x: 0, y: 0, width: side, height: side))
+// The plate: graphite at the top, nearly black at the bottom.
+cut.ctx.drawLinearGradient(gradient([0.23, 0.24, 0.27, 1], [0.03, 0.03, 0.04, 1]),
+                           start: top, end: bottom, options: [])
 // The document shrinks to 84% so the plate shows around it.
 let docInset = CGFloat(side) * 0.08
 cut.draw(looseImage, in: CGRect(x: 0, y: 0, width: side, height: side).insetBy(dx: docInset, dy: docInset))
+// The outline: a 6 pixel stroke on the outline, clipped to its inner half,
+// lit from above like the rims of macOS icons.
+cut.ctx.addPath(path)
+cut.ctx.setLineWidth(12)
+cut.ctx.replacePathWithStrokedPath()
+cut.ctx.clip()
+cut.ctx.drawLinearGradient(gradient([1, 1, 1, 0.45], [1, 1, 1, 0.12]), start: top, end: bottom, options: [])
+cut.ctx.restoreGState()
 let cutImage = cut.image
 
 let fm = FileManager.default
