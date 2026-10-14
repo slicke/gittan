@@ -174,6 +174,12 @@ type
     property IgnoreWhitespace: boolean read FIgnoreWhitespace write FIgnoreWhitespace;
   end;
 
+{** Full path of GitHub's command line tool gh, or empty when it is not
+  installed. Looked for on PATH and then where Homebrew and the Linux
+  packages put it, since an app started from the macOS Finder gets a PATH
+  without /opt/homebrew/bin and /usr/local/bin. }
+function FindGitHubCli: string;
+
 implementation
 
 uses
@@ -236,6 +242,24 @@ begin
       FError := Trim(AOutput);
     AOutput := '';
   end;
+end;
+
+function FindGitHubCli: string;
+const
+  {$ifdef windows}
+  Name = 'gh.exe';
+  Extra = '';
+  {$else}
+  Name = 'gh';
+  Extra = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/home/linuxbrew/.linuxbrew/bin:/snap/bin';
+  {$endif}
+var
+  Path: string;
+begin
+  Path := GetEnvironmentVariable('PATH');
+  if Extra <> '' then
+    Path := Path + PathSeparator + Extra;
+  Result := ExeSearch(Name, Path);
 end;
 
 { The NUL-separated fields of the output of a git command run with -z; a

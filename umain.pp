@@ -65,6 +65,11 @@ type
     FLexers: TGittanLexers;
     FRepo: TGittanRepo;
     FSettings: TGittanSettings;
+    { gh, GitHub's command line tool, as found at startup: its full path
+      (run it by that, PATH may not reach it) and whether there is one.
+      The features that need GitHub are offered only when it is there. }
+    FGitHubCli: string;
+    FHasGitHubCli: boolean;
     FSyntaxMenu, FAutoLexerItem, FPlainTextItem: TMenuItem;
     FRecentMenu, FCompareMenu, FTerminalItem: TMenuItem;
     FSnapshots: TGittanSnapshots;
@@ -570,6 +575,8 @@ procedure TForm1.FormCreate(Sender: TObject);
 begin
   FSettings := TGittanSettings.Create;
   FSettings.Load;
+  FGitHubCli := FindGitHubCli;
+  FHasGitHubCli := FGitHubCli <> '';
   FChangeLines := TStringList.Create;
   FBlameCache := TStringList.Create;
   FBlameCache.CaseSensitive := True;
