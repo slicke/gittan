@@ -144,7 +144,8 @@ type
     class function ChangeKind(const AStatus: string): TGittanChangeKind;
     {** flagStaged and flagUnstaged for a "XY" status: X is the index
       column, Y the work tree column; an untracked or ignored file has
-      neither flag. }
+      neither flag, and neither has an unmerged one, whose columns name
+      the two sides of the conflict, not the index and the work tree. }
     class function StageFlags(const AStatus: string): integer;
     {** One changed file as the lines of a unified diff against HEAD with the
       whole file as context: every line starts with ' ', '+' or '-'. A file
@@ -895,7 +896,8 @@ end;
 class function TGittanRepo.StageFlags(const AStatus: string): integer;
 begin
   Result := 0;
-  if (Length(AStatus) >= 1) and (AStatus[1] in ['?', '!']) then
+  if ((Length(AStatus) >= 1) and (AStatus[1] in ['?', '!'])) or
+    (ChangeKind(AStatus) = ckConflict) then
     Exit;
   if (Length(AStatus) >= 1) and (AStatus[1] <> ' ') then
     Result := Result or flagStaged;

@@ -202,6 +202,10 @@ begin
   AssertEquals(0, TGittanRepo.StageFlags('??'));
   AssertEquals(0, TGittanRepo.StageFlags('!!'));
   AssertEquals(0, TGittanRepo.StageFlags(''));
+  { Unmerged: both columns name the sides of the conflict. }
+  AssertEquals(0, TGittanRepo.StageFlags('UU'));
+  AssertEquals(0, TGittanRepo.StageFlags('AA'));
+  AssertEquals(0, TGittanRepo.StageFlags('DU'));
 end;
 
 procedure TGitRepoTest.TestOpenNonRepo;
