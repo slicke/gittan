@@ -397,7 +397,7 @@
       </div>
     </div>
     <div class="note">
-      Gittan runs the <code>git</code> command line tool, so git must be installed and on your PATH. The macOS build is signed ad hoc: on first launch, right-click the app and choose Open. Every push to main is also built on <a href="https://github.com/slicke/gittan/actions/workflows/build.yml?query=branch%3Amain+is%3Asuccess">GitHub Actions</a>, where the artifacts of the newest run are the current development build.
+      Gittan runs the <code>git</code> command line tool, so git must be installed and on your PATH. The macOS build is signed ad hoc, so macOS blocks it at first: drag it to Applications, then run <code>xattr -cr /Applications/Gittan.app</code> in Terminal. Every push to main is also built on <a href="https://github.com/slicke/gittan/actions/workflows/build.yml?query=branch%3Amain+is%3Asuccess">GitHub Actions</a>, where the artifacts of the newest run are the current development build.
     </div>
   </div>
 </section>
