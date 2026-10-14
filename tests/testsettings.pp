@@ -75,6 +75,7 @@ begin
     S.SideBySide := True;
     S.IgnoreWhitespace := True;
     S.EditorCommand := 'code -g';
+    S.SyntaxTheme := 'Delphi';
     S.AddRecent('/tmp/a');
     S.AddRecent('/tmp/b');
     S.Save;
@@ -99,6 +100,7 @@ begin
     AssertTrue(S.SideBySide);
     AssertTrue(S.IgnoreWhitespace);
     AssertEquals('code -g', S.EditorCommand);
+    AssertEquals('Delphi', S.SyntaxTheme);
     AssertEquals(2, S.Recent.Count);
     AssertEquals('newest first', '/tmp/b', S.Recent[0]);
     AssertEquals('/tmp/a', S.Recent[1]);

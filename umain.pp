@@ -15,7 +15,8 @@ uses
   gittan.lexers, gittan.git, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
-  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, md5;
+  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
+  gittan.syntaxthemes, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -69,6 +70,10 @@ type
     FSnapshots: TGittanSnapshots;
     FWrapItem, FOnlyChangesItem, FSideItem, FIgnoreSpaceItem: TMenuItem;
     FContextItems: array of TMenuItem;
+    {** The View > Syntax Theme items, in SyntaxThemes order. }
+    FThemeItems: array of TMenuItem;
+    {** The chosen syntax theme, an index into SyntaxThemes. }
+    FSyntaxTheme: integer;
     FFilePopup, FStatusPopup: TPopupMenu;
     FRevealItem, FOpenItem: TMenuItem;
     FContextPath: string;
@@ -316,6 +321,7 @@ type
     procedure MenuWrapClick(Sender: TObject);
     procedure MenuOnlyChangesClick(Sender: TObject);
     procedure MenuContextLinesClick(Sender: TObject);
+    procedure MenuSyntaxThemeClick(Sender: TObject);
     procedure MenuSideBySideClick(Sender: TObject);
     procedure MenuIgnoreSpaceClick(Sender: TObject);
     procedure MenuNextFileClick(Sender: TObject);
@@ -448,6 +454,7 @@ resourcestring
   rsZoomOut = 'Zoom &Out';
   rsZoomReset = 'Actual Si&ze';
   rsFont = 'Fo&nt...';
+  rsSyntaxTheme = 'Syntax T&heme';
   rsDropHint = 'Open a repository, or drop a folder or file here.';
   rsDropShortcut = 'File > Open Repository    %s';
   rsGo = '&Go';
@@ -883,7 +890,7 @@ procedure TForm1.ApplyTheme;
 begin
   ApplyEditorColors(Edit);
   ApplyEditorColors(FEditOld);
-  FLexers.ApplyTheme(FDark);
+  FLexers.ApplyTheme(FDark, FSyntaxTheme);
   { The header and the find bar take the gutter's shade; the navigator
     pills sit on it. }
   if FDark then
@@ -1126,6 +1133,16 @@ begin
   AddItem(ViewMenu, rsZoomOut, ShortCut(VK_OEM_MINUS, [ssModifier]), @MenuZoomOutClick);
   AddItem(ViewMenu, rsZoomReset, ShortCut(VK_0, [ssModifier]), @MenuZoomResetClick);
   AddItem(ViewMenu, rsFont, 0, @MenuFontClick);
+  Sub := AddItem(ViewMenu, rsSyntaxTheme, 0, nil);
+  SetLength(FThemeItems, Length(SyntaxThemes));
+  for i := 0 to High(SyntaxThemes) do
+  begin
+    Item := AddItem(Sub, SyntaxThemes[i].Name, 0, @MenuSyntaxThemeClick);
+    Item.Tag := i;
+    Item.RadioItem := True;
+    Item.Checked := i = FSyntaxTheme;
+    FThemeItems[i] := Item;
+  end;
 
   FSyntaxMenu := TMenuItem.Create(Main);
   FSyntaxMenu.Caption := rsSyntax;

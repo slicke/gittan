@@ -45,6 +45,9 @@ type
     IgnoreWhitespace: boolean;
     {** Show in the gutter who last changed each line. }
     Blame: boolean;
+    {** The name of the syntax theme (see gittan.syntaxthemes); empty for
+      the default. }
+    SyntaxTheme: string;
     {** Command that opens a file from the context menu, with the path
       appended; empty opens it with the desktop's default application. }
     EditorCommand: string;
@@ -125,6 +128,7 @@ begin
       SideBySide := Ini.ReadBool(SecView, 'SideBySide', False);
       IgnoreWhitespace := Ini.ReadBool(SecView, 'IgnoreWhitespace', False);
       Blame := Ini.ReadBool(SecView, 'Blame', False);
+      SyntaxTheme := Ini.ReadString(SecView, 'SyntaxTheme', '');
       EditorCommand := Ini.ReadString(SecView, 'EditorCommand', '');
       TerminalCommand := Ini.ReadString(SecView, 'TerminalCommand', '');
       FRecent.Clear;
@@ -166,6 +170,7 @@ begin
       Ini.WriteBool(SecView, 'SideBySide', SideBySide);
       Ini.WriteBool(SecView, 'IgnoreWhitespace', IgnoreWhitespace);
       Ini.WriteBool(SecView, 'Blame', Blame);
+      Ini.WriteString(SecView, 'SyntaxTheme', SyntaxTheme);
       Ini.WriteString(SecView, 'EditorCommand', EditorCommand);
       Ini.WriteString(SecView, 'TerminalCommand', TerminalCommand);
       Ini.EraseSection(SecRecent);

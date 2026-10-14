@@ -50,6 +50,11 @@ begin
   FWordWrap := FSettings.WordWrap;
   FIgnoreWhitespace := FSettings.IgnoreWhitespace;
   FBlameOn := FSettings.Blame;
+  FSyntaxTheme := FindSyntaxTheme(FSettings.SyntaxTheme);
+  if FSyntaxTheme < 0 then
+    FSyntaxTheme := DefaultSyntaxTheme;
+  if FSyntaxTheme <> DefaultSyntaxTheme then
+    FLexers.ApplyTheme(FDark, FSyntaxTheme);
   FRepo.IgnoreWhitespace := FIgnoreWhitespace;
   FContextLines := ContextChoices[1];
   for i := 0 to High(ContextChoices) do
@@ -107,6 +112,7 @@ begin
   FSettings.SideBySide := FSideBySide;
   FSettings.IgnoreWhitespace := FIgnoreWhitespace;
   FSettings.Blame := FBlameOn;
+  FSettings.SyntaxTheme := SyntaxThemes[FSyntaxTheme].Name;
   FSettings.Save;
   SaveIndex;
 end;
@@ -344,6 +350,18 @@ begin
     FContextItems[i].Checked := FContextItems[i].Tag = FContextLines;
   if FOnlyChanges then
     RebuildIfChanges;
+end;
+
+{ The lexer formats carry the colors, so the editors only need a repaint,
+  which ApplyTheme does with the rest of the palette. }
+procedure TForm1.MenuSyntaxThemeClick(Sender: TObject);
+var
+  i: integer;
+begin
+  FSyntaxTheme := TMenuItem(Sender).Tag;
+  for i := 0 to High(FThemeItems) do
+    FThemeItems[i].Checked := i = FSyntaxTheme;
+  ApplyTheme;
 end;
 
 procedure TForm1.MenuSideBySideClick(Sender: TObject);
