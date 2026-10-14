@@ -23,6 +23,12 @@ begin
   Application.MainFormOnTaskbar:=True;
   {$POP}
   Application.Initialize;
+  {$IFDEF DARWIN}
+  { The LCL sets MAINICON, cut for Windows and Linux to fill its canvas, as
+    the Dock icon while the app runs. Clearing it keeps the bundle's .icns,
+    inset to Apple's grid. }
+  Application.Icon.Clear;
+  {$ENDIF}
   Application.CreateForm(TForm1, Form1);
   Application.Run;
 end.
