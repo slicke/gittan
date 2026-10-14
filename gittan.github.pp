@@ -46,6 +46,10 @@ function PullRequestChecks(const APull: TGittanPullRequest): string;
 {** "owner/repo" of a GitHub address such as https://github.com/owner/repo/pull/12,
   empty when the address is not one. }
 function RepoPathOfUrl(const AUrl: string): string;
+{** The first issue or pull request number a commit summary names, as
+  "#123" (a digit must follow the sign, and the sign must not follow a
+  word, so "C#5" is not one); 0 when it names none. }
+function IssueNumber(const ASummary: string): integer;
 
 type
   {** Runs gh pr view for the branch checked out in a repository (ABranch
@@ -252,6 +256,28 @@ begin
   end;
   if Pos('/', Rest) > 0 then
     Result := Rest;
+end;
+
+function IssueNumber(const ASummary: string): integer;
+var
+  i, j: integer;
+begin
+  Result := 0;
+  i := 1;
+  while i < Length(ASummary) do
+  begin
+    if (ASummary[i] = '#') and (ASummary[i + 1] in ['0'..'9']) and
+      ((i = 1) or not (ASummary[i - 1] in ['0'..'9', 'a'..'z', 'A'..'Z', '_'])) then
+    begin
+      j := i + 1;
+      while (j <= Length(ASummary)) and (ASummary[j] in ['0'..'9']) do
+        Inc(j);
+      Result := StrToIntDef(Copy(ASummary, i + 1, j - i - 1), 0);
+      if Result > 0 then
+        Exit;
+    end;
+    Inc(i);
+  end;
 end;
 
 { ---------------------------------------------------------------------------

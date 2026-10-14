@@ -591,7 +591,10 @@ begin
   FRevealItem := AddItem(FFilePopup, rsReveal, @MenuRevealClick);
   FOpenItem := AddItem(FFilePopup, rsOpenInEditor, @MenuOpenInEditorClick);
   if FHasGitHubCli then
+  begin
     AddItem(FFilePopup, rsOpenOnGitHub, @MenuOpenOnGitHubClick);
+    AddItem(FFilePopup, rsCopyGitHubUrl, @MenuCopyGitHubUrlClick);
+  end;
   FileTree.PopupMenu := FFilePopup;
   FHeader.PopupMenu := FFilePopup;
 
@@ -601,14 +604,22 @@ begin
   FEditPopup.OnPopup := @EditPopupPopup;
   AddItem(FEditPopup, rsEditCopy, @MenuEditCopyClick);
   AddItem(FEditPopup, rsEditSelectAll, @MenuEditSelectAllClick);
+  Item := TMenuItem.Create(FEditPopup);
+  Item.Caption := '-';
+  FEditPopup.Items.Add(Item);
+  FShowCommitItem := AddItem(FEditPopup, rsShowCommit, @MenuShowCommitClick);
+  FCopyHashItem := AddItem(FEditPopup, rsCopyHash, @MenuCopyHashClick);
   if FHasGitHubCli then
   begin
     Item := TMenuItem.Create(FEditPopup);
     Item.Caption := '-';
     FEditPopup.Items.Add(Item);
     FGitHubEditItem := AddItem(FEditPopup, rsOpenOnGitHub, @MenuOpenLineOnGitHubClick);
+    AddItem(FEditPopup, rsCopyGitHubUrl, @MenuCopyLineGitHubUrlClick);
     FGitHubCommitItem := AddItem(FEditPopup, rsOpenCommitOnGitHub,
       @MenuOpenCommitOnGitHubClick);
+    FGitHubIssueItem := AddItem(FEditPopup, Format(rsOpenIssueOnGitHub, [0]),
+      @MenuOpenIssueOnGitHubClick);
   end;
   Edit.PopupText := FEditPopup;
   FEditOld.PopupText := FEditPopup;
@@ -713,13 +724,45 @@ begin
   if (P.Y < 0) or Details.BelowAllText then
     FPopupRow := -1;
   FPopupHash := '';
+  FPopupKey := -1;
+  FPopupIssue := 0;
   if (FPopupRow >= 0) and CommitOfRow(FPopupEd, FPopupRow, Info, Key, Src) and
     not Info.Uncommitted then
+  begin
     FPopupHash := Info.Hash;
+    if FView = gvHistory then
+      FPopupKey := Key;
+    FPopupIssue := IssueNumber(Info.Summary);
+  end;
+  FShowCommitItem.Enabled := FPopupHash <> '';
+  FCopyHashItem.Enabled := FPopupHash <> '';
   if FGitHubEditItem <> nil then
     FGitHubEditItem.Enabled := (FRepo.Root <> '') and (FCurrentPath <> '');
   if FGitHubCommitItem <> nil then
     FGitHubCommitItem.Enabled := FPopupHash <> '';
+  if FGitHubIssueItem <> nil then
+  begin
+    FGitHubIssueItem.Visible := FPopupIssue > 0;
+    FGitHubIssueItem.Caption := Format(rsOpenIssueOnGitHub, [FPopupIssue]);
+  end;
+end;
+
+{ The commit the row's blame or history gives, shown against its
+  parent, as a click on the blame band does. }
+procedure TForm1.MenuShowCommitClick(Sender: TObject);
+begin
+  if FPopupHash = '' then
+    Exit;
+  if (FView = gvHistory) and (FPopupKey >= 0) then
+    ShowHistoryCommit(FPopupKey)
+  else
+    ShowBlameCommit(FPopupHash);
+end;
+
+procedure TForm1.MenuCopyHashClick(Sender: TObject);
+begin
+  if FPopupHash <> '' then
+    Clipboard.AsText := FPopupHash;
 end;
 
 procedure TForm1.MenuEditCopyClick(Sender: TObject);
@@ -732,16 +775,18 @@ begin
   FPopupEd.DoCommand(cCommand_SelectAll, TATCommandInvoke.MenuContext);
 end;
 
-{ Opens the page of the repository on GitHub that gh browse finds for
-  AArgs. gh only prints the address (--no-browser) and the desktop
-  opens it, so a failure (no GitHub remote, say) is told in the status
-  bar instead of going unseen. }
-procedure TForm1.OpenOnGitHub(const AArgs: array of string);
+{ The address of the page of the repository on GitHub that gh browse
+  finds for AArgs: gh only prints it (--no-browser). A failure (no
+  GitHub remote, say) is told in the status bar instead of going
+  unseen. }
+function TForm1.GitHubUrl(const AArgs: array of string; out AUrl: string): boolean;
 var
   Args: array of string;
-  Url, Err: string;
+  Err: string;
   i: integer;
 begin
+  AUrl := '';
+  Result := False;
   if not FHasGitHubCli or (FRepo.Root = '') then
     Exit;
   SetLength(Args, Length(AArgs) + 2);
@@ -749,9 +794,9 @@ begin
   Args[1] := '--no-browser';
   for i := 0 to High(AArgs) do
     Args[i + 2] := AArgs[i];
-  if RunGitHubCli(FGitHubCli, FRepo.Root, Args, Url, Err) and (Trim(Url) <> '') then
-    OpenURL(Trim(Url))
-  else
+  Result := RunGitHubCli(FGitHubCli, FRepo.Root, Args, AUrl, Err) and (Trim(AUrl) <> '');
+  AUrl := Trim(AUrl);
+  if not Result then
   begin
     Err := Trim(Err);
     if Pos(LineEnding, Err) > 0 then
@@ -760,10 +805,19 @@ begin
   end;
 end;
 
-{ The file, at ALine when it is above 0, in the version the view shows:
-  the right commit of a range (what a blame click or Compare With >
-  Other set), else the branch, since the work tree has no page. }
-procedure TForm1.OpenFileOnGitHub(const APath: string; ALine: integer);
+procedure TForm1.OpenOnGitHub(const AArgs: array of string);
+var
+  Url: string;
+begin
+  if GitHubUrl(AArgs, Url) then
+    OpenURL(Url);
+end;
+
+{ The gh browse arguments for a file, at ALine when it is above 0, in
+  the version the view shows: the right commit of a range (what a blame
+  click or Compare With > Other set), else the branch, since the work
+  tree has no page. }
+function TForm1.FileGitHubArgs(const APath: string; ALine: integer): TStringArray;
 var
   Target, OldRef, NewRef: string;
 begin
@@ -772,11 +826,11 @@ begin
     Target := Target + ':' + IntToStr(ALine);
   FRepo.DiffSides(OldRef, NewRef);
   if NewRef <> '' then
-    OpenOnGitHub([Target, '--commit=' + NewRef])
+    Result := [Target, '--commit=' + NewRef]
   else if FBranch <> '' then
-    OpenOnGitHub([Target, '--branch', FBranch])
+    Result := [Target, '--branch', FBranch]
   else
-    OpenOnGitHub([Target]);
+    Result := [Target];
 end;
 
 { The line of the shown file that row ARow of AEd holds, 0 when the row
@@ -805,19 +859,43 @@ end;
 procedure TForm1.MenuOpenOnGitHubClick(Sender: TObject);
 begin
   if FContextPath <> '' then
-    OpenFileOnGitHub(FContextPath, 0);
+    OpenOnGitHub(FileGitHubArgs(FContextPath, 0));
+end;
+
+procedure TForm1.MenuCopyGitHubUrlClick(Sender: TObject);
+var
+  Url: string;
+begin
+  if (FContextPath <> '') and GitHubUrl(FileGitHubArgs(FContextPath, 0), Url) then
+    Clipboard.AsText := Url;
 end;
 
 procedure TForm1.MenuOpenLineOnGitHubClick(Sender: TObject);
 begin
   if FCurrentPath <> '' then
-    OpenFileOnGitHub(FCurrentPath, FileLineOfRow(FPopupEd, FPopupRow));
+    OpenOnGitHub(FileGitHubArgs(FCurrentPath, FileLineOfRow(FPopupEd, FPopupRow)));
+end;
+
+procedure TForm1.MenuCopyLineGitHubUrlClick(Sender: TObject);
+var
+  Url: string;
+begin
+  if (FCurrentPath <> '') and
+    GitHubUrl(FileGitHubArgs(FCurrentPath, FileLineOfRow(FPopupEd, FPopupRow)), Url) then
+    Clipboard.AsText := Url;
 end;
 
 procedure TForm1.MenuOpenCommitOnGitHubClick(Sender: TObject);
 begin
   if FPopupHash <> '' then
     OpenOnGitHub([FPopupHash]);
+end;
+
+{ gh browse with a number opens the issue or the pull request. }
+procedure TForm1.MenuOpenIssueOnGitHubClick(Sender: TObject);
+begin
+  if FPopupIssue > 0 then
+    OpenOnGitHub([IntToStr(FPopupIssue)]);
 end;
 
 { Runs ACommand, words separated by spaces, with APath appended. }

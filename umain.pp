@@ -86,10 +86,14 @@ type
       (the file menu's is enabled with the rest of its items); the editor the editor menu popped up over and the
       row under the mouse then (-1 below the text), and the commit of
       that row, for Open Commit on GitHub. }
-    FGitHubEditItem, FGitHubCommitItem: TMenuItem;
+    FGitHubEditItem, FGitHubCommitItem, FGitHubIssueItem: TMenuItem;
+    FShowCommitItem, FCopyHashItem: TMenuItem;
     FPopupEd: TATSynEdit;
     FPopupRow: integer;
     FPopupHash: string;
+    { The row's commit as the history view keys it, -1 elsewhere, and
+      the first "#123" of the commit's summary, 0 when it has none. }
+    FPopupKey, FPopupIssue: integer;
     { GitHub's view of the repository, read by a TGittanPullRequestJob
       when the repository or its branch changes (FPullKey names the pair
       the data is for) and on View > Refresh: the pull request of the
@@ -420,8 +424,14 @@ type
     procedure MenuEditCopyClick(Sender: TObject);
     procedure MenuEditSelectAllClick(Sender: TObject);
     procedure MenuOpenOnGitHubClick(Sender: TObject);
+    procedure MenuCopyGitHubUrlClick(Sender: TObject);
     procedure MenuOpenLineOnGitHubClick(Sender: TObject);
+    procedure MenuCopyLineGitHubUrlClick(Sender: TObject);
     procedure MenuOpenCommitOnGitHubClick(Sender: TObject);
+    procedure MenuOpenIssueOnGitHubClick(Sender: TObject);
+    procedure MenuShowCommitClick(Sender: TObject);
+    procedure MenuCopyHashClick(Sender: TObject);
+    function GitHubUrl(const AArgs: array of string; out AUrl: string): boolean;
     procedure OpenOnGitHub(const AArgs: array of string);
     procedure StartPullJob(AForce: boolean);
     procedure SetupTreeFilter;
@@ -435,7 +445,7 @@ type
     procedure MenuComparePullClick(Sender: TObject);
     procedure MenuOpenPullClick(Sender: TObject);
     procedure MenuCopyPullUrlClick(Sender: TObject);
-    procedure OpenFileOnGitHub(const APath: string; ALine: integer);
+    function FileGitHubArgs(const APath: string; ALine: integer): TStringArray;
     function FileLineOfRow(AEd: TATSynEdit; ARow: integer): integer;
     procedure StatusBarClick(Sender: TObject);
     procedure MenuCopyBranchClick(Sender: TObject);
@@ -573,6 +583,10 @@ const
   rsEditSelectAll = 'Select &All';
   rsOpenOnGitHub = 'Open on &GitHub';
   rsOpenCommitOnGitHub = 'Open Co&mmit on GitHub';
+  rsCopyGitHubUrl = 'Copy GitHub &URL';
+  rsOpenIssueOnGitHub = 'Open #%d on GitHub';
+  rsShowCommit = 'Show Comm&it';
+  rsCopyHash = 'Copy Commit &Hash';
   rsGitHubFailed = 'gh: %s';
   rsFilterFiles = 'Fi&lter Files';
   rsMergeBase = '%s (Merge Base)';

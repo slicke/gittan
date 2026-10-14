@@ -19,6 +19,7 @@ type
     procedure TestStatus;
     procedure TestRepoPathOfUrl;
     procedure TestChecks;
+    procedure TestIssueNumber;
   end;
 
 implementation
@@ -145,6 +146,18 @@ begin
   AssertEquals('1 check failing', PullRequestChecks(Pull));
   Pull.ReviewDecision := 'APPROVED';
   AssertEquals('PR #1 · Approved · 1 check failing', PullRequestStatus(Pull));
+end;
+
+procedure TGitHubTest.TestIssueNumber;
+begin
+  AssertEquals(123, IssueNumber('Fix the thing (#123)'));
+  AssertEquals(7, IssueNumber('#7 first, #8 second'));
+  AssertEquals(42, IssueNumber('Merge pull request #42 from x/y'));
+  AssertEquals(0, IssueNumber('No number here'));
+  AssertEquals(0, IssueNumber('Port to C#5 and #'));
+  AssertEquals(0, IssueNumber('item#9 is not one'));
+  AssertEquals(0, IssueNumber('#0 is nothing'));
+  AssertEquals(0, IssueNumber(''));
 end;
 
 initialization
