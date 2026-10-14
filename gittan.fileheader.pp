@@ -21,7 +21,7 @@ type
 
   TGittanFileHeader = class(TCustomControl)
   private
-    FPrefix, FName, FLexer, FStage: string;
+    FPrefix, FName, FLexer, FStage, FSymbol: string;
     FIcon: integer;
     FAdded, FDeleted: integer;
     FHasCounts, FBinary: boolean;
@@ -45,6 +45,9 @@ type
     procedure SetStage(AStaged, AUnstaged: boolean);
     {** The lexer name shown on the right. }
     procedure SetLexer(const ALexer: string);
+    {** The symbol the caret is in, shown dimmed after the file name, or
+      '' for none. }
+    procedure SetSymbol(const ASymbol: string);
     {** Shows the navigator at ACurrent of ATotal changes, or hides it when
       ATotal is 0. }
     procedure SetChanges(ACurrent, ATotal: integer);
@@ -71,6 +74,7 @@ const
   Pad = 12;
   Gap = 12;
   IconSize = 16;
+  SymbolSep = '  ›  ';
 
 { TGittanFileHeader }
 
@@ -100,6 +104,7 @@ begin
   FIcon := AIcon;
   FHasCounts := False;
   FStage := '';
+  FSymbol := '';
   Invalidate;
 end;
 
@@ -110,6 +115,7 @@ begin
   FIcon := -1;
   FHasCounts := False;
   FStage := '';
+  FSymbol := '';
   Invalidate;
 end;
 
@@ -141,6 +147,14 @@ begin
   Invalidate;
 end;
 
+procedure TGittanFileHeader.SetSymbol(const ASymbol: string);
+begin
+  if FSymbol = ASymbol then
+    Exit;
+  FSymbol := ASymbol;
+  Invalidate;
+end;
+
 procedure TGittanFileHeader.SetChanges(ACurrent, ATotal: integer);
 begin
   FNav.Visible := ATotal > 0;
@@ -164,7 +178,8 @@ begin
 end;
 
 { Right to left: the navigator, the lexer, the counts; then the badge and
-  the path from the left in the room that is left. A path too long for it
+  the path from the left in the room that is left, and the symbol the
+  caret is in after the path when it fits. A path too long for the room
   loses its directory first, then its end. }
 procedure TGittanFileHeader.Paint;
 var
@@ -244,6 +259,14 @@ begin
   end;
   Canvas.Font.Color := FText;
   Canvas.TextOut(X, TextY, FileName);
+  if FSymbol = '' then
+    Exit;
+  Inc(X, Canvas.TextWidth(FileName));
+  S := SymbolSep + FSymbol;
+  if X + Canvas.TextWidth(S) > Right then
+    Exit;
+  Canvas.Font.Color := FDim;
+  Canvas.TextOut(X, TextY, S);
 end;
 
 end.

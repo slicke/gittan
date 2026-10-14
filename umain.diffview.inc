@@ -13,7 +13,14 @@
   With View > Side by Side the rows are split over two editors: the old
   side with the deleted lines, the new side with the added ones, and a
   filler row opposite each line the other side has, so the two scroll in
-  step. }
+  step.
+
+  The lexer's code tree gives the view its symbols: a gap row names the
+  symbol the block of changes after it is in, as git's hunk headers do,
+  and the file header names the symbol the caret is in. The tree is
+  known only when the background parse of the text ends, so the headings
+  are found then (UpdateSymbolHeadings, from AdapterParseDone) and the
+  view is built once more with them in its gap rows. }
 
 { The index is the diff line, the value its number in the old file (0
   for an added line) or the new file (0 for a deleted line). }
@@ -74,6 +81,16 @@ begin
   FOldNum := OldNum;
   FNewNum := NewNum;
   WordDiff(FChangeLines, FIgnoreWhitespace, FWordSpans);
+  { The blocks of changed lines, which the headings are kept by. The
+    code tree of the text goes with the text, which is replaced here. }
+  FBlockStarts := nil;
+  for i := 0 to n - 1 do
+    if (FChangeLines[i][1] <> ' ') and ((i = 0) or (FChangeLines[i - 1][1] = ' ')) then
+    begin
+      SetLength(FBlockStarts, Length(FBlockStarts) + 1);
+      FBlockStarts[High(FBlockStarts)] := i;
+    end;
+  FRangesValid := False;
   { Which diff lines are shown: all, or the changed ones with their
     context and the gaps the user opened. }
   SetLength(Keep, n);
@@ -117,13 +134,15 @@ begin
     Inc(i);
   end;
   Lexer := FLexers.ForFile(FCurrentPath, FRepo.Root);
-  if not FSideBySide then
-  begin
-    FRows := Rows;
-    FRowsOld := nil;
-    FillChangeEditor(Edit, Rows, False, OldNum, NewNum, Lexer);
-    Exit;
-  end;
+  FBuildingView := True;
+  try
+    if not FSideBySide then
+    begin
+      FRows := Rows;
+      FRowsOld := nil;
+      FillChangeEditor(Edit, Rows, False, OldNum, NewNum, Lexer);
+      Exit;
+    end;
   { Side by side: a context or gap row goes to both sides; a run of
     deleted lines and the run of added lines after it go to the old and
     the new side, the shorter padded with fillers. }
@@ -159,11 +178,16 @@ begin
         AddRow(RightRows, rowFiller, 0, 0);
     end;
   end;
-  FRows := RightRows;
-  FRowsOld := LeftRows;
-  FillChangeEditor(FEditOld, LeftRows, True, OldNum, NewNum, Lexer);
-  FillChangeEditor(Edit, RightRows, False, OldNum, NewNum, Lexer);
-  FEditOld.LineTop := 0;
+    FRows := RightRows;
+    FRowsOld := LeftRows;
+    FillChangeEditor(FEditOld, LeftRows, True, OldNum, NewNum, Lexer);
+    FillChangeEditor(Edit, RightRows, False, OldNum, NewNum, Lexer);
+    FEditOld.LineTop := 0;
+  finally
+    FBuildingView := False;
+    { In case a parse ended during the build. }
+    UpdateSymbolHeadings;
+  end;
 end;
 
 { Puts ARows into AEd: the text, the hidden lines, the line colors and
@@ -178,7 +202,7 @@ procedure TForm1.FillChangeEditor(AEd: TATSynEdit; const ARows: TGittanRows;
 var
   Lines: TStringList;
   Numbers, Kinds: TIntegerDynArray;
-  i, Down, Up, All, Role: integer;
+  i, Down, Up, All, Heading, Role: integer;
   Marker: char;
   Hidden: boolean;
 begin
@@ -187,7 +211,8 @@ begin
     for i := 0 to High(ARows) do
       case ARows[i].Line of
         rowGap:
-          Lines.Add(GapRowText(ARows[i].GapTo - ARows[i].GapFrom + 1, Down, Up, All));
+          Lines.Add(GapRowText(ARows[i].GapTo - ARows[i].GapFrom + 1,
+            GapHeading(ARows[i].GapTo), Down, Up, All, Heading));
         rowFiller: Lines.Add('');
         rowCommit: Lines.Add(HistoryHeaderText(ARows[i].GapFrom));
         rowMore: Lines.Add(Format(rsHistoryMore, [HistoryStep]));
@@ -291,10 +316,14 @@ end;
   down), AUp the last ones (the text below goes on up), AAll the whole
   run. The three are the columns the labels start at, in UTF-16 units
   as the editor counts them, or -1 for a short run, where a click
-  anywhere opens it. }
-function TForm1.GapRowText(ACount: integer; out ADown, AUp, AAll: integer): string;
+  anywhere opens it. AHeading, the symbol the changes after the gap are
+  in, ends the row, from column AHeadingCol (-1 without one); a click on
+  it does nothing. }
+function TForm1.GapRowText(ACount: integer; const AHeading: string;
+  out ADown, AUp, AAll, AHeadingCol: integer): string;
 const
   Sep = '   ';
+  HeadingSep = '      ';
 begin
   if ACount = 1 then
     Result := rsGapLine
@@ -303,15 +332,175 @@ begin
   ADown := -1;
   AUp := -1;
   AAll := -1;
-  if ACount <= GapStep then
+  AHeadingCol := -1;
+  if ACount > GapStep then
+  begin
+    Result := Result + Sep;
+    ADown := Length(UTF8Decode(Result));
+    Result := Result + Format(rsGapDown, [GapStep]) + Sep;
+    AUp := Length(UTF8Decode(Result));
+    Result := Result + Format(rsGapUp, [GapStep]) + Sep;
+    AAll := Length(UTF8Decode(Result));
+    Result := Result + rsGapAll;
+  end;
+  if AHeading = '' then
     Exit;
-  Result := Result + Sep;
-  ADown := Length(UTF8Decode(Result));
-  Result := Result + Format(rsGapDown, [GapStep]) + Sep;
-  AUp := Length(UTF8Decode(Result));
-  Result := Result + Format(rsGapUp, [GapStep]) + Sep;
-  AAll := Length(UTF8Decode(Result));
-  Result := Result + rsGapAll;
+  Result := Result + HeadingSep;
+  AHeadingCol := Length(UTF8Decode(Result));
+  Result := Result + AHeading;
+end;
+
+{ The heading of the gap row that hides the diff lines up to AGapTo: the
+  name of the symbol around the first block of changes after the gap,
+  as far as UpdateSymbolHeadings has found the names; '' for no block
+  (the gap runs to the end) or no symbol. }
+function TForm1.GapHeading(AGapTo: integer): string;
+var
+  b: integer;
+begin
+  Result := '';
+  for b := 0 to High(FBlockStarts) do
+    if FBlockStarts[b] > AGapTo then
+    begin
+      if b <= High(FHeadings) then
+        Result := FHeadings[b];
+      Exit;
+    end;
+end;
+
+{ One marker per row of ARows: the diff line's own, ' ' for a gap or
+  another row that stands for no line, and for a filler row of the
+  side-by-side view the marker of the line it stands opposite ('-' on
+  the new side, '+' on the old), so a symbol on one side counts the
+  lines the other side has. }
+function TForm1.RowMarkers(const ARows: TGittanRows; AOldSide: boolean): string;
+var
+  i: integer;
+begin
+  SetLength(Result, Length(ARows));
+  for i := 0 to High(ARows) do
+    if ARows[i].Line >= 0 then
+      Result[i + 1] := FChangeLines[ARows[i].Line][1]
+    else if ARows[i].Line = rowFiller then
+    begin
+      if AOldSide then
+        Result[i + 1] := '+'
+      else
+        Result[i + 1] := '-';
+    end
+    else
+      Result[i + 1] := ' ';
+end;
+
+{ The rows of AEd as UTF-8, for the move and rename detection. }
+function TForm1.RowTexts(AEd: TATSynEdit): TStringList;
+var
+  i: integer;
+begin
+  Result := TStringList.Create;
+  Result.Capacity := AEd.Strings.Count;
+  for i := 0 to AEd.Strings.Count - 1 do
+    Result.Add(UTF8Encode(AEd.Strings.Lines[i]));
+end;
+
+{ The parse of the change view's text ended: keeps the code tree of each
+  side and names the block of changes after every gap by the innermost
+  range around the block's first line, on the new side, or on the old
+  side for a block of deleted lines the new side shows as fillers. New
+  names rebuild the view, at the same place, so the gap rows show them;
+  the parse of that text finds the same names and ends it. A lexer that
+  reads a heading as code could name the blocks differently each time,
+  so a file is rebuilt for its headings only twice. }
+procedure TForm1.UpdateSymbolHeadings;
+var
+  RowOf, RowOfOld: TIntegerDynArray;
+  Names: array of string;
+  b, i, r, Line: integer;
+  Differ: boolean;
+begin
+  { A parse may end while the view is being built, with one side's text
+    replaced and the other's not yet; the build calls here when it is
+    done. The text ends with an empty line after the last row. }
+  if FBuildingView or (FView <> gvChanges) or (FAdapter.Tag = 0) or
+    (Edit.Strings.Count <> Length(FRows) + 1) then
+    Exit;
+  if FEditOld.Visible and ((FAdapterOld.Tag = 0) or
+    (FEditOld.Strings.Count <> Length(FRowsOld) + 1)) then
+    Exit;
+  FCodeRanges := CodeRanges(FAdapter, Edit);
+  if FEditOld.Visible then
+    FOldRanges := CodeRanges(FAdapterOld, FEditOld)
+  else
+    FOldRanges := nil;
+  FRangesValid := True;
+  UpdateSymbolCrumb;
+  SetLength(RowOf, FChangeLines.Count);
+  SetLength(RowOfOld, FChangeLines.Count);
+  for i := 0 to High(RowOf) do
+  begin
+    RowOf[i] := -1;
+    RowOfOld[i] := -1;
+  end;
+  for r := 0 to High(FRows) do
+    if FRows[r].Line >= 0 then
+      RowOf[FRows[r].Line] := r;
+  for r := 0 to High(FRowsOld) do
+    if FRowsOld[r].Line >= 0 then
+      RowOfOld[FRowsOld[r].Line] := r;
+  SetLength(Names, Length(FBlockStarts));
+  for b := 0 to High(FBlockStarts) do
+  begin
+    Names[b] := '';
+    Line := FBlockStarts[b];
+    r := RowOf[Line];
+    if r >= 0 then
+      i := InnermostRange(FCodeRanges, r)
+    else
+      i := -1;
+    if i >= 0 then
+      Names[b] := FCodeRanges[i].Symbol.Name
+    else if RowOfOld[Line] >= 0 then
+    begin
+      i := InnermostRange(FOldRanges, RowOfOld[Line]);
+      if i >= 0 then
+        Names[b] := FOldRanges[i].Symbol.Name;
+    end;
+  end;
+  Differ := Length(Names) <> Length(FHeadings);
+  for b := 0 to High(Names) do
+    if not Differ and (Names[b] <> FHeadings[b]) then
+      Differ := True;
+  if not Differ then
+    Exit;
+  FHeadings := Names;
+  if FOnlyChanges and (FHeadingRebuilds < 2) then
+  begin
+    Inc(FHeadingRebuilds);
+    { The adapter is still in its parse-done handler; the text is
+      replaced from the message loop. }
+    Application.QueueAsyncCall(@RebuildForHeadingsAsync, 0);
+  end;
+end;
+
+procedure TForm1.RebuildForHeadingsAsync(Data: PtrInt);
+begin
+  if FView = gvChanges then
+    RebuildIfChanges;
+end;
+
+{ The file header names the symbol the caret is in, from the code tree
+  of the last parse while the text is the one it parsed. }
+procedure TForm1.UpdateSymbolCrumb;
+var
+  i: integer;
+begin
+  i := -1;
+  if (FView = gvChanges) and FRangesValid and (Edit.Carets.Count > 0) then
+    i := InnermostRange(FCodeRanges, Edit.Carets[0].PosY);
+  if i >= 0 then
+    FHeader.SetSymbol(FCodeRanges[i].Symbol.Name)
+  else
+    FHeader.SetSymbol('');
 end;
 
 { Opens the hidden lines AFrom..ATo of the diff: the view is rebuilt with
@@ -342,7 +531,7 @@ end;
 procedure TForm1.EditMouseUp(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: integer);
 var
-  Row, Col, From, To_, Down, Up, All: integer;
+  Row, Col, From, To_, Down, Up, All, Heading: integer;
 begin
   if Button <> mbLeft then
     Exit;
@@ -365,7 +554,9 @@ begin
   From := FRows[Row].GapFrom;
   To_ := FRows[Row].GapTo;
   Col := TATSynEdit(Sender).Carets[0].PosX;
-  GapRowText(To_ - From + 1, Down, Up, All);
+  GapRowText(To_ - From + 1, GapHeading(To_), Down, Up, All, Heading);
+  if (Heading >= 0) and (Col >= Heading) then
+    Exit;
   if (All >= 0) and (Col < All) then
   begin
     if Col >= Up then

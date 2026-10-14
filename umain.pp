@@ -16,7 +16,7 @@ uses
   gittan.summary, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
-  gittan.syntaxthemes, gittan.cli, md5;
+  gittan.syntaxthemes, gittan.cli, gittan.symbolchanges, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -148,6 +148,9 @@ type
     { The file of each of FSymbols, relative to the root, when the bar
       lists the repository; nil when it lists the shown file. }
     FSymbolFiles: TStringList;
+    { Whether each of FSymbols is in the old side's text (Go > Changed
+      Symbols in the side-by-side view), nil when none is. }
+    FSymbolOnOld: array of boolean;
     FIndex: TGittanSymbolIndex;
     FIndexQueue: TStringList;
     FIndexPos, FIndexTotal: integer;
@@ -200,6 +203,17 @@ type
     { The spans of the changed lines that differ word by word, one entry
       per line of FChangeLines; see gittan.worddiff. }
     FWordSpans: TGittanLineSpans;
+    { The symbols of the change view (see UpdateSymbolHeadings): the first
+      diff line of every block of changed lines, the name of the code tree
+      range each block is in (a gap row names the block after it), the
+      code tree of each side's text (valid, FRangesValid, from the end of
+      a parse to the next build), and how often the headings rebuilt the
+      view of this file. }
+    FBlockStarts: TIntegerDynArray;
+    FHeadings: array of string;
+    FCodeRanges, FOldRanges: TGittanCodeRanges;
+    FRangesValid, FBuildingView: boolean;
+    FHeadingRebuilds: integer;
     { Scrolling on past the bottom of a file: the wheel delta pulled so
       far, the time of the last wheel event, whether a pull counts (not
       while the momentum of the gesture that just jumped runs on), the
@@ -301,7 +315,14 @@ type
       AOldSide: boolean; const AOldNum, ANewNum: TIntegerDynArray;
       ALexer: TecSyntAnalyzer);
     function VisibleRow(ARow: integer): integer;
-    function GapRowText(ACount: integer; out ADown, AUp, AAll: integer): string;
+    function GapRowText(ACount: integer; const AHeading: string;
+      out ADown, AUp, AAll, AHeadingCol: integer): string;
+    function GapHeading(AGapTo: integer): string;
+    function RowMarkers(const ARows: TGittanRows; AOldSide: boolean): string;
+    function RowTexts(AEd: TATSynEdit): TStringList;
+    procedure UpdateSymbolHeadings;
+    procedure RebuildForHeadingsAsync(Data: PtrInt);
+    procedure UpdateSymbolCrumb;
     procedure ExpandGap(AFrom, ATo: integer);
 
     procedure EditMouseUp(Sender: TObject; Button: TMouseButton; Shift: TShiftState;
@@ -382,6 +403,8 @@ type
     function StepFile(ANext: boolean): boolean;
     function WordAt(AEd: TATSynEdit; APos: TPoint; out AStart, AEnd: integer): string;
     function CodeTree(AAdapter: TATAdapterEControl; AEd: TATSynEdit): TGittanSymbols;
+    function CodeRanges(AAdapter: TATAdapterEControl; AEd: TATSynEdit): TGittanCodeRanges;
+    procedure MenuChangedSymbolsClick(Sender: TObject);
     function FileSymbols(const ARelPath: string): TGittanSymbols;
     function IndexFileName: string;
     procedure SaveIndex;
@@ -550,6 +573,10 @@ resourcestring
   rsGoToDefinition = 'Go to &Definition';
   rsGoToSymbol = 'Go to S&ymbol...';
   rsGoToRepoSymbol = 'Go to Symbol in Re&pository...';
+  rsChangedSymbols = 'Changed S&ymbols...';
+  rsChangedSymbolHint = 'Changed symbol';
+  rsRepoSymbolHint = 'Symbol in repository';
+  rsNoChangedSymbols = 'No changed symbols in this file.';
   rsLookingFor = 'Looking for a definition of "%s"...';
   rsNoDefinition = 'No definition of "%s" in the repository.';
   rsIndexing = 'indexing %d/%d';
@@ -1296,6 +1323,9 @@ begin
   AddItem(GoMenu, rsGoToSymbol, ShortCut(VK_T, [ssModifier]), @MenuGoToSymbolClick);
   AddItem(GoMenu, rsGoToRepoSymbol, ShortCut(VK_T, [ssModifier, ssShift]),
     @MenuGoToRepoSymbolClick);
+  { Cmd+Y alone is the editor's delete-line key, which gets the key first. }
+  AddItem(GoMenu, rsChangedSymbols, ShortCut(VK_Y, [ssModifier, ssShift]),
+    @MenuChangedSymbolsClick);
   AddItem(GoMenu, rsHistory, ShortCut(VK_H, [ssModifier, ssShift]), @MenuHistoryClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextChange, ShortCut(VK_F7, []), @MenuNextChangeClick);
@@ -1303,7 +1333,6 @@ begin
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextFile, ShortCut(VK_F8, []), @MenuNextFileClick);
   AddItem(GoMenu, rsPrevFile, ShortCut(VK_F8, [ssShift]), @MenuPrevFileClick);
-end;
 
   ToolsMenu := TMenuItem.Create(Main);
   ToolsMenu.Caption := rsTools;
@@ -1311,6 +1340,7 @@ end;
   Main.Items.Add(ToolsMenu);
   AddItem(ToolsMenu, rsInstallCli, 0, @MenuInstallCliClick);
   FUninstallCliItem := AddItem(ToolsMenu, rsUninstallCli, 0, @MenuUninstallCliClick);
+end;
 
 { Automatic and Plain text first, then the lexer list, which is long
   (hundreds of entries), grouped into one submenu per initial letter. The
@@ -1906,6 +1936,7 @@ var
   Blocks: TIntegerDynArray;
   Cur, Current, i: integer;
 begin
+  UpdateSymbolCrumb;
   Blocks := ChangeBlocks;
   if Length(Blocks) = 0 then
   begin
@@ -2404,6 +2435,10 @@ begin
   end;
   if APath <> FCurrentPath then
     FExpanded := nil;
+  { The diff may have changed, so the blocks and their headings are
+    found again after the parse. }
+  FHeadings := nil;
+  FHeadingRebuilds := 0;
   FCurrentPath := APath;
   SetOverscroll(0);
   FSummary.Notice := '';

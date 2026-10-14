@@ -25,6 +25,9 @@ end;
 procedure TForm1.AdapterParseDone(Sender: TObject; ATime: integer);
 begin
   TComponent(Sender).Tag := 1;
+  { The change view's symbols come from the parse of its text. }
+  if ((Sender = FAdapter) or (Sender = FAdapterOld)) and (FView = gvChanges) then
+    UpdateSymbolHeadings;
 end;
 
 { Waits for the adapter's background parse of its text. }
@@ -72,8 +75,10 @@ end;
 { The code tree of AAdapter's text, which AEd shows, as a flat list in
   file order: each range's name on one line, the position of its
   identifier token (the name in its header, else its first token), its
-  nesting depth and the text of its row. Waits for the parse. }
-function TForm1.CodeTree(AAdapter: TATAdapterEControl; AEd: TATSynEdit): TGittanSymbols;
+  nesting depth and the text of its row, with the first and the last row
+  the range spans (a range the lexer never closed runs to the end of the
+  text). Waits for the parse. }
+function TForm1.CodeRanges(AAdapter: TATAdapterEControl; AEd: TATSynEdit): TGittanCodeRanges;
 var
   Client: TecClientSyntAnalyzer;
   R, Outer: TecTextRange;
@@ -97,29 +102,49 @@ begin
         Continue;
       Title := Trim(UTF8Encode(Client.GetRangeName(R, Client.PublicData.Tokens)));
       Title := StringReplace(Title, #13, ' ', [rfReplaceAll]);
-      Result[Count].Name := StringReplace(Title, #10, ' ', [rfReplaceAll]);
+      Result[Count].Symbol.Name := StringReplace(Title, #10, ' ', [rfReplaceAll]);
       if R.IdentIdx >= 0 then
         P := Client.PublicData.Tokens._GetItemPtr(R.IdentIdx)^.Range.PointStart
       else
         P := Client.PublicData.Tokens._GetItemPtr(R.StartIdx)^.Range.PointStart;
-      Result[Count].Row := P.Y;
-      Result[Count].Col := P.X;
+      Result[Count].Symbol.Row := P.Y;
+      Result[Count].Symbol.Col := P.X;
+      Result[Count].Symbol.Line := '';
       if AEd.Strings.IsIndexValid(P.Y) then
-        Result[Count].Line := UTF8Encode(AEd.Strings.Lines[P.Y]);
-      Result[Count].Depth := 0;
+        Result[Count].Symbol.Line := UTF8Encode(AEd.Strings.Lines[P.Y]);
+      Result[Count].Symbol.Depth := 0;
       Outer := R.Parent;
       while Outer <> nil do
       begin
         if InCodeTree(Client, Outer) then
-          Inc(Result[Count].Depth);
+          Inc(Result[Count].Symbol.Depth);
         Outer := Outer.Parent;
       end;
+      Result[Count].FromRow :=
+        Client.PublicData.Tokens._GetItemPtr(R.StartIdx)^.Range.PointStart.Y;
+      if R.EndIdx >= 0 then
+        Result[Count].ToRow :=
+          Client.PublicData.Tokens._GetItemPtr(R.EndIdx)^.Range.PointEnd.Y
+      else
+        Result[Count].ToRow := AEd.Strings.Count - 1;
       Inc(Count);
     end;
   finally
     Client.CriSecForData.Leave;
   end;
   SetLength(Result, Count);
+end;
+
+{ The symbols of CodeRanges without their spans. }
+function TForm1.CodeTree(AAdapter: TATAdapterEControl; AEd: TATSynEdit): TGittanSymbols;
+var
+  Ranges: TGittanCodeRanges;
+  i: integer;
+begin
+  Ranges := CodeRanges(AAdapter, AEd);
+  SetLength(Result, Length(Ranges));
+  for i := 0 to High(Ranges) do
+    Result[i] := Ranges[i].Symbol;
 end;
 
 { The position of the best symbol of AAdapter's code tree named for
@@ -299,6 +324,7 @@ begin
   if not Edit.Visible then
     Exit;
   FreeAndNil(FSymbolFiles);
+  FSymbolOnOld := nil;
   FSymbols := CodeTree(FAdapter, Edit);
   Names := TStringList.Create;
   try
@@ -348,6 +374,7 @@ begin
   if FRepo.Root = '' then
     Exit;
   FreeAndNil(FSymbolFiles);
+  FSymbolOnOld := nil;
   FSymbolFiles := TStringList.Create;
   Names := TStringList.Create;
   Details := TStringList.Create;
@@ -386,7 +413,7 @@ begin
         AddFile(E.Path, E.Items);
     end;
     SetLength(FSymbols, Names.Count);
-    FSymbolBar.SetSymbols(Names, nil, Details);
+    FSymbolBar.SetSymbols(Names, nil, Details, True, rsRepoSymbolHint);
   finally
     Seen.Free;
     Details.Free;
@@ -395,10 +422,76 @@ begin
   FSymbolBar.Activate;
 end;
 
-{ A symbol of the shown file is jumped to; one of another file shows
-  the file first and is looked up again in the text the editor shows,
-  by its full name (several overloads may share the identifier), else
-  by its identifier, as Go to Definition does. }
+{ Go > Changed Symbols: lists the symbols of the shown file the diff
+  changed in the symbol bar, each with how (see gittan.symbolchanges):
+  the code tree of the text laid over the markers of the rows. In the
+  side-by-side view the wholly deleted symbols come from the old side,
+  and FSymbolOnOld remembers which so a pick goes there. }
+procedure TForm1.MenuChangedSymbolsClick(Sender: TObject);
+var
+  NewSide, OldSide: TGittanSideText;
+  Changes: TGittanSymbolChanges;
+  Names, Details: TStringList;
+  Depths: TIntegerDynArray;
+  R: TGittanCodeRange;
+  OtherName: string;
+  TwoSides: boolean;
+  i: integer;
+begin
+  if not Edit.Visible or (FView <> gvChanges) then
+    Exit;
+  TwoSides := FEditOld.Visible;
+  NewSide := Default(TGittanSideText);
+  OldSide := Default(TGittanSideText);
+  Names := TStringList.Create;
+  Details := TStringList.Create;
+  try
+    NewSide.Ranges := CodeRanges(FAdapter, Edit);
+    NewSide.Markers := RowMarkers(FRows, False);
+    NewSide.Lines := RowTexts(Edit);
+    if TwoSides then
+    begin
+      OldSide.Ranges := CodeRanges(FAdapterOld, FEditOld);
+      OldSide.Markers := RowMarkers(FRowsOld, True);
+      OldSide.Lines := RowTexts(FEditOld);
+    end;
+    Changes := SymbolChanges(NewSide, OldSide, TwoSides);
+    FreeAndNil(FSymbolFiles);
+    SetLength(FSymbols, Length(Changes));
+    SetLength(FSymbolOnOld, Length(Changes));
+    SetLength(Depths, Length(Changes));
+    for i := 0 to High(Changes) do
+    begin
+      R := ChangeRange(Changes[i], NewSide, OldSide);
+      FSymbols[i] := R.Symbol;
+      FSymbolOnOld[i] := Changes[i].OnOld;
+      Depths[i] := R.Symbol.Depth;
+      Names.Add(R.Symbol.Name);
+      OtherName := '';
+      if Changes[i].Other >= 0 then
+        OtherName := ChangeRange(Changes[Changes[i].Other], NewSide, OldSide).Symbol.Name;
+      Details.Add(ChangeDetail(Changes[i], OtherName));
+    end;
+    if Length(Changes) = 0 then
+    begin
+      StatusBar.SimpleText := rsNoChangedSymbols;
+      Exit;
+    end;
+    FSymbolBar.SetSymbols(Names, Depths, Details, False, rsChangedSymbolHint);
+  finally
+    NewSide.Lines.Free;
+    OldSide.Lines.Free;
+    Details.Free;
+    Names.Free;
+  end;
+  FSymbolBar.Activate;
+end;
+
+{ A symbol of the shown file is jumped to (on the old side when it is
+  only there); one of another file shows the file first and is looked up
+  again in the text the editor shows, by its full name (several overloads
+  may share the identifier), else by its identifier, as Go to Definition
+  does. }
 procedure TForm1.SymbolBarPick(Sender: TObject; AIndex: integer);
 var
   Symbol: TGittanSymbol;
@@ -414,7 +507,10 @@ begin
   Ident := NameIdentifier(Symbol.Name);
   if (FSymbolFiles = nil) or (AIndex >= FSymbolFiles.Count) then
   begin
-    JumpToDefinition(Edit, Point(Symbol.Col, Symbol.Row), Ident);
+    if (AIndex <= High(FSymbolOnOld)) and FSymbolOnOld[AIndex] and FEditOld.Visible then
+      JumpToDefinition(FEditOld, Point(Symbol.Col, Symbol.Row), Ident)
+    else
+      JumpToDefinition(Edit, Point(Symbol.Col, Symbol.Row), Ident);
     Exit;
   end;
   Path := FSymbolFiles[AIndex];

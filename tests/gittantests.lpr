@@ -12,7 +12,7 @@ uses
   Classes, consoletestrunner,
   testworddiff, testgit, testsettings, testsymbols, testlexerpick,
   testsymbolindex, testsnapshots, testblame, testhistory, testsyntaxthemes,
-  testgithub, testconflicts, testcli;
+  testgithub, testconflicts, testcli, testsymbolchanges;
 
 var
   App: TTestRunner;

@@ -36,7 +36,7 @@ type
     FBack, FText, FDim, FLine: TColor;
     FOnPick: TGittanPickEvent;
     FOnClose: TNotifyEvent;
-    FCloseHot: boolean;
+    FCloseHot, FNeedFilter: boolean;
     function CloseRect: TRect;
     procedure Fill;
     procedure Pick;
@@ -55,12 +55,14 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
-    {** The symbols to list, in file order, each with its nesting depth.
-      ADetails, when given, says where each symbol is (the symbols of
-      the repository): it is shown after the name, nothing is indented,
-      and the list stays empty until something is typed. }
+    {** The symbols to list, in file order, each with its nesting depth
+      (indented while there is no filter). ADetails, when given, says
+      something about each symbol (where it is, or how it changed) after
+      its name. With ANeedFilter (the symbols of the repository) the list
+      stays empty until something is typed. AHint is the field's hint,
+      the default for ''. }
     procedure SetSymbols(ANames: TStrings; const ADepths: TIntegerDynArray;
-      ADetails: TStrings = nil);
+      ADetails: TStrings = nil; ANeedFilter: boolean = False; const AHint: string = '');
     {** Shows the bar, focuses the field and selects its text so typing
       replaces the previous filter. }
     procedure Activate;
@@ -78,7 +80,6 @@ uses
 
 resourcestring
   rsSymbolHint = 'Symbol';
-  rsRepoSymbolHint = 'Symbol in repository';
   rsNoSymbols = 'No symbols';
   rsTypeToSearch = 'Type to search';
   rsMoreSymbols = '… %d more';
@@ -128,7 +129,7 @@ begin
 end;
 
 procedure TGittanSymbolBar.SetSymbols(ANames: TStrings; const ADepths: TIntegerDynArray;
-  ADetails: TStrings);
+  ADetails: TStrings; ANeedFilter: boolean; const AHint: string);
 begin
   FNames.Assign(ANames);
   FDepths := Copy(ADepths);
@@ -136,8 +137,9 @@ begin
     FDetails.Clear
   else
     FDetails.Assign(ADetails);
-  if FDetails.Count > 0 then
-    FEdit.TextHint := rsRepoSymbolHint
+  FNeedFilter := ANeedFilter;
+  if AHint <> '' then
+    FEdit.TextHint := AHint
   else
     FEdit.TextHint := rsSymbolHint;
   Fill;
@@ -172,8 +174,8 @@ end;
 { The rows that match the filter (any part of the name, ignoring case),
   those matched at the start of a word first, at most MaxRows of them,
   indented by depth while there is no filter. The symbols of the
-  repository need a filter: there are too many to list. The first row is
-  selected so Enter picks it. }
+  repository need a filter (FNeedFilter): there are too many to list.
+  The first row is selected so Enter picks it. }
 procedure TGittanSymbolBar.Fill;
 var
   Filter, Row, Low: string;
@@ -187,7 +189,7 @@ begin
     SetLength(FShown, FNames.Count);
     Count := 0;
     Matches := 0;
-    if (Filter = '') and (FDetails.Count > 0) then
+    if (Filter = '') and FNeedFilter then
       FList.Items.Add(rsTypeToSearch)
     else
       for Pass := 0 to 1 do
