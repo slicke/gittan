@@ -58,6 +58,9 @@ type
     procedure UpdateChangeNavAsync(Data: PtrInt);
     procedure ThemeTimerTimer(Sender: TObject);
     procedure FileTreeSelectionChanged(Sender: TObject);
+    procedure FileTreeMouseMove(Sender: TObject; Shift: TShiftState; X, Y: integer);
+    procedure FileTreeMouseLeave(Sender: TObject);
+    procedure TreeHintTimerTimer(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure FormDropFiles(Sender: TObject; const FileNames: array of string);
@@ -211,6 +214,11 @@ type
     FIndexTimer: TTimer;
     FIndexing, FIndexSaveNeeded: boolean;
     FHoverTimer: TTimer;
+    { The hint of the file under the mouse in the tree and the timer
+      that shows it, see FileTreeMouseMove. }
+    FTreeHint: string;
+    FTreeHintNode: TTreeNode;
+    FTreeHintTimer: TTimer;
     FHoverEd: TATSynEdit;
     FHoverWord: string;
     { The hint of the blame cell under the mouse, see umain.blame.inc. }
@@ -333,6 +341,7 @@ type
     procedure WelcomeOpenRecent(Sender: TObject; const ARoot: string);
     function SelectedPath: string;
     function StatIcon(const AStat: TGittanFileStat): integer;
+    function StatHint(const AStat: TGittanFileStat): string;
     procedure UpdateStatus;
     {** The checks of a pull request for the status bar: red with the
       failing ones counted, amber with the pending ones, green when all
@@ -864,6 +873,14 @@ const
   rsConflictedFiles = '%d conflicted files';
   rsOneConflictedFile = '1 conflicted file';
   rsFilterHint = 'Filter files';
+  rsKindModified = 'Modified';
+  rsKindAdded = 'Added';
+  rsKindDeleted = 'Deleted';
+  rsKindRenamed = 'Renamed';
+  rsKindUntracked = 'Untracked';
+  rsKindConflict = 'Conflict';
+  rsHintStaged = '%s · staged';
+  rsHintPartlyStaged = '%s · partly staged';
   rsPullRequests = 'Pull Re&quests';
   rsPullLoading = 'Loading...';
   rsNoPulls = 'No open pull requests';
@@ -1055,6 +1072,14 @@ begin
   FHoverTimer.Enabled := False;
   FHoverTimer.Interval := HoverPause;
   FHoverTimer.OnTimer := @HoverTimerTimer;
+  { A file in the tree says what its badge means after a pause. }
+  FTreeHintTimer := TTimer.Create(Self);
+  FTreeHintTimer.Enabled := False;
+  FTreeHintTimer.Interval := Application.HintPause;
+  FTreeHintTimer.OnTimer := @TreeHintTimerTimer;
+  FileTree.ShowHint := True;
+  FileTree.OnMouseMove := @FileTreeMouseMove;
+  FileTree.OnMouseLeave := @FileTreeMouseLeave;
   FSymbolBar := TGittanSymbolBar.Create(Self);
   FSymbolBar.Parent := EditorPanel;
   FSymbolBar.Top := FHeader.Height + FFindBar.Height;
@@ -2590,6 +2615,20 @@ begin
     Result := ChangeIcon(AStat.Kind);
 end;
 
+{ What a file's badge means: the kind of change, and how much of it is
+  staged. }
+function TForm1.StatHint(const AStat: TGittanFileStat): string;
+const
+  KindNames: array[TGittanChangeKind] of string = (rsKindModified,
+    rsKindAdded, rsKindDeleted, rsKindRenamed, rsKindUntracked, rsKindConflict);
+begin
+  Result := KindNames[AStat.Kind];
+  if AStat.Staged and AStat.Unstaged then
+    Result := Format(rsHintPartlyStaged, [Result])
+  else if AStat.Staged then
+    Result := Format(rsHintStaged, [Result]);
+end;
+
 { ---------------------------------------------------------------------------
   Watching the repository
   ---------------------------------------------------------------------------
@@ -3176,6 +3215,59 @@ begin
   FRepoTree.Selected := nil;
   FSubTree.Selected := nil;
   ShowChanges(Node.GetTextPath);
+end;
+
+{ The file under the mouse gets its StatHint after Application.HintPause.
+  The tree's own hint is set only when the timer fires and cleared when
+  the mouse moves to another row, since the LCL's hint does not follow a
+  hint that changes within one control on Cocoa. }
+procedure TForm1.FileTreeMouseMove(Sender: TObject; Shift: TShiftState; X, Y: integer);
+var
+  Node: TTreeNode;
+  Tip, Path: string;
+  i: integer;
+begin
+  Tip := '';
+  Node := FileTree.GetNodeAt(X, Y);
+  if (Node <> nil) and (Node.Data <> nil) then
+  begin
+    Path := Node.GetTextPath;
+    for i := 0 to High(FStats) do
+      if FStats[i].Path = Path then
+      begin
+        Tip := StatHint(FStats[i]);
+        Break;
+      end;
+  end;
+  if Tip = '' then
+    Node := nil;
+  if (Node = FTreeHintNode) and (Tip = FTreeHint) then
+    Exit;
+  FileTreeMouseLeave(Sender);
+  FTreeHintNode := Node;
+  FTreeHint := Tip;
+  FTreeHintTimer.Enabled := Tip <> '';
+end;
+
+procedure TForm1.FileTreeMouseLeave(Sender: TObject);
+begin
+  FTreeHintTimer.Enabled := False;
+  if FileTree.Hint <> '' then
+  begin
+    Application.CancelHint;
+    FileTree.Hint := '';
+  end;
+  FTreeHint := '';
+  FTreeHintNode := nil;
+end;
+
+procedure TForm1.TreeHintTimerTimer(Sender: TObject);
+begin
+  FTreeHintTimer.Enabled := False;
+  if FTreeHint = '' then
+    Exit;
+  FileTree.Hint := FTreeHint;
+  Application.ActivateHint(Mouse.CursorPos);
 end;
 
 {$I umain.diffview.inc}
