@@ -2580,12 +2580,12 @@ begin
   FTerminalItem.Enabled := FRepo.Root <> '';
 end;
 
-{ The badge of a file: with the staged mark when the index holds any of
-  its change. }
+{ The badge of a file: solid when the index holds all of its change,
+  ringed when it holds part of it. }
 function TForm1.StatIcon(const AStat: TGittanFileStat): integer;
 begin
   if AStat.Staged then
-    Result := StagedIcon(AStat.Kind)
+    Result := StagedIcon(AStat.Kind, AStat.Unstaged)
   else
     Result := ChangeIcon(AStat.Kind);
 end;

@@ -3,8 +3,10 @@ unit gittan.icons;
 {** Icons for Gittan's file tree.
 
   The icons are drawn at startup with BGRABitmap instead of being shipped as
-  image files: a folder, and one badge per change kind carrying the letter
-  git status uses for it. Every icon is drawn at 16 and 32 pixels so it stays
+  image files: a folder, and badges per change kind carrying the letter
+  git status uses for it. How full a badge is tells how much of the change
+  is in the index: a tint for none, a tint in a ring for part, a solid
+  square for all. Every icon is drawn at 16 and 32 pixels so it stays
   sharp on a HiDPI screen. }
 
 {$mode objfpc}{$H+}
@@ -19,15 +21,15 @@ const
   iconFolder = 0;
   {** Image index of the plain file icon, for a file listed without a
     change (the Repository section), after the badges and the folders. }
-  iconFile = 1 + 3 * (Ord(High(TGittanChangeKind)) + 1);
+  iconFile = 1 + 4 * (Ord(High(TGittanChangeKind)) + 1);
 
 {** Image index of the badge for AKind. }
 function ChangeIcon(AKind: TGittanChangeKind): integer;
 
-{** Image index of the badge for AKind with the staged mark: a small
-  check in the badge's lower right corner, for a file whose change is in
-  the index (in part or in full). }
-function StagedIcon(AKind: TGittanChangeKind): integer;
+{** Image index of the badge for AKind of a file whose change is in the
+  index: the solid badge when all of it is (APartly false), the tinted one
+  in a ring of the kind's color when only part of it is. }
+function StagedIcon(AKind: TGittanChangeKind; APartly: boolean = False): integer;
 
 {** Image index of the folder icon with a dot in the color of AKind: the
   most severe change among the files inside the folder. }
@@ -46,7 +48,8 @@ function WorseKind(A, B: TGittanChangeKind): TGittanChangeKind;
 
 {** Fills the empty list AImages with the folder icon at iconFolder, the
   change badges at ChangeIcon, the dotted folders at FolderIcon, the
-  staged badges at StagedIcon and the plain file at iconFile. }
+  staged and the partly staged badges at StagedIcon and the plain file at
+  iconFile. }
 procedure FillTreeIcons(AImages: TCustomImageList);
 
 implementation
@@ -69,9 +72,11 @@ begin
   Result := iconFolder + 1 + KindCount + Ord(AKind);
 end;
 
-function StagedIcon(AKind: TGittanChangeKind): integer;
+function StagedIcon(AKind: TGittanChangeKind; APartly: boolean): integer;
 begin
   Result := iconFolder + 1 + 2 * KindCount + Ord(AKind);
+  if APartly then
+    Inc(Result, KindCount);
 end;
 
 function FolderIconKind(AIndex: integer; out AKind: TGittanChangeKind): boolean;
@@ -91,11 +96,13 @@ begin
 end;
 
 { Green for new content, red for removed, blue for a move, purple for a
-  conflict and orange for the common case, a modified file. }
+  conflict, gray for a file git does not track yet and orange for the
+  common case, a modified file. }
 function BadgeColor(AKind: TGittanChangeKind): TBGRAPixel;
 begin
   case AKind of
-    ckAdded, ckUntracked: Result := BGRA($2E, $A0, $43);
+    ckAdded: Result := BGRA($2E, $A0, $43);
+    ckUntracked: Result := BGRA($8A, $94, $9E);
     ckDeleted: Result := BGRA($D8, $3A, $3A);
     ckRenamed: Result := BGRA($2F, $80, $D8);
     ckConflict: Result := BGRA($9B, $3F, $C8);
@@ -154,37 +161,43 @@ begin
   Result.FillEllipseAntialias(12 * s, 12 * s, 3.5 * s, 3.5 * s, BadgeColor(AKind));
 end;
 
-{ A rounded square in the kind's color with its letter in white. }
-function DrawBadge(ASize: integer; AKind: TGittanChangeKind): TBGRABitmap;
+type
+  TBadgeFill = (bfTint, bfRing, bfSolid);
+
+{ A rounded square with the kind's letter: a translucent tint of the
+  kind's color under the letter in that color (bfTint), the same inside a
+  ring of the color (bfRing), or the color itself under a white letter
+  (bfSolid). The tint is translucent so it suits a light and a dark tree. }
+function DrawBadge(ASize: integer; AKind: TGittanChangeKind;
+  AFill: TBadgeFill): TBGRABitmap;
 var
   s: single;
+  Color, Tint, Letter: TBGRAPixel;
 begin
   Result := TBGRABitmap.Create(ASize, ASize, BGRAPixelTransparent);
   s := ASize / 16;
-  Result.FillRoundRectAntialias(1 * s, 1 * s, 15 * s, 15 * s, 3 * s, 3 * s,
-    BadgeColor(AKind));
+  Color := BadgeColor(AKind);
+  Tint := Color;
+  Tint.alpha := 64;
+  Letter := Color;
+  case AFill of
+    bfTint:
+      Result.FillRoundRectAntialias(1 * s, 1 * s, 15 * s, 15 * s, 2.5 * s, 2.5 * s, Tint);
+    bfRing:
+      Result.RoundRectAntialias(1.75 * s, 1.75 * s, 14.25 * s, 14.25 * s,
+        2 * s, 2 * s, Color, 1.5 * s, Tint);
+    bfSolid:
+    begin
+      Result.FillRoundRectAntialias(1 * s, 1 * s, 15 * s, 15 * s, 2.5 * s, 2.5 * s, Color);
+      Letter := BGRAWhite;
+    end;
+  end;
   Result.FontName := 'default';
   Result.FontStyle := [fsBold];
   Result.FontQuality := fqFineAntialiasing;
-  Result.FontFullHeight := Round(12 * s);
+  Result.FontFullHeight := Round(13 * s);
   Result.TextOut(ASize / 2, (ASize - Result.FontFullHeight) / 2,
-    BadgeLetter[AKind], BGRAWhite, taCenter);
-end;
-
-{ The badge with the staged mark: a white disc over the lower right
-  corner, cut out of the badge by a transparent ring, with a check in the
-  badge's color. }
-function DrawStagedBadge(ASize: integer; AKind: TGittanChangeKind): TBGRABitmap;
-var
-  s: single;
-begin
-  Result := DrawBadge(ASize, AKind);
-  s := ASize / 16;
-  Result.EraseEllipseAntialias(12 * s, 12 * s, 5 * s, 5 * s, 255);
-  Result.FillEllipseAntialias(12 * s, 12 * s, 4 * s, 4 * s, BGRAWhite);
-  Result.LineCap := pecRound;
-  Result.DrawLineAntialias(9.5 * s, 12 * s, 11.3 * s, 13.8 * s, BadgeColor(AKind), 1.6 * s);
-  Result.DrawLineAntialias(11.3 * s, 13.8 * s, 14.5 * s, 10.2 * s, BadgeColor(AKind), 1.6 * s);
+    BadgeLetter[AKind], Letter, taCenter);
 end;
 
 { Adds one icon drawn at 16 and 32 pixels and frees the bitmaps. }
@@ -208,11 +221,13 @@ begin
   AImages.RegisterResolutions([16, 32]);
   AddIcon(AImages, DrawFolder(16), DrawFolder(32));
   for Kind := Low(TGittanChangeKind) to High(TGittanChangeKind) do
-    AddIcon(AImages, DrawBadge(16, Kind), DrawBadge(32, Kind));
+    AddIcon(AImages, DrawBadge(16, Kind, bfTint), DrawBadge(32, Kind, bfTint));
   for Kind := Low(TGittanChangeKind) to High(TGittanChangeKind) do
     AddIcon(AImages, DrawDottedFolder(16, Kind), DrawDottedFolder(32, Kind));
   for Kind := Low(TGittanChangeKind) to High(TGittanChangeKind) do
-    AddIcon(AImages, DrawStagedBadge(16, Kind), DrawStagedBadge(32, Kind));
+    AddIcon(AImages, DrawBadge(16, Kind, bfSolid), DrawBadge(32, Kind, bfSolid));
+  for Kind := Low(TGittanChangeKind) to High(TGittanChangeKind) do
+    AddIcon(AImages, DrawBadge(16, Kind, bfRing), DrawBadge(32, Kind, bfRing));
   AddIcon(AImages, DrawFile(16), DrawFile(32));
 end;
 
