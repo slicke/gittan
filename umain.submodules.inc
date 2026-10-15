@@ -11,14 +11,19 @@
   for commits not fetched yet, "↑2" for a recorded commit past the
   remote, "⚠" when the remote could not be asked. One TGittanSubmoduleJob
   per submodule asks the remote with ls-remote, so nothing is fetched;
-  the jobs run when the list or the recorded commits change and on
-  View > Refresh. A click shows the submodule in the editor through
+  the jobs run when the list or the recorded commits change, on
+  View > Refresh, and SubmodulePoll after the last job of a round
+  (FSubTimer), keeping the rows meanwhile. A click shows the submodule in the editor through
   ShowSubmodule: its URL and branch, the recorded commit, the checked out
   one, the remote's, and the remote's new commits when the submodule
   has them. }
 procedure TForm1.SetupSubmodules;
 begin
   FSubJobs := TList.Create;
+  FSubTimer := TTimer.Create(Self);
+  FSubTimer.Enabled := False;
+  FSubTimer.Interval := SubmodulePoll;
+  FSubTimer.OnTimer := @SubTimerTimer;
   FSubPanel := TPanel.Create(Self);
   FSubPanel.BevelOuter := bvNone;
   FSubPanel.Caption := '';
@@ -136,19 +141,24 @@ begin
 end;
 
 { One job per submodule, so a slow remote holds up only its own row.
-  The rows keep nothing of the previous jobs. }
-procedure TForm1.StartSubmoduleJobs;
+  The rows keep nothing of the previous jobs unless AKeep. }
+procedure TForm1.StartSubmoduleJobs(AKeep: boolean);
 var
   Job: TGittanSubmoduleJob;
   i: integer;
 begin
   AbandonSubmoduleJobs;
   FSubKey := SubmoduleKey;
+  if Length(FSubInfos) <> Length(FSubmodules) then
+    AKeep := False;
   SetLength(FSubInfos, Length(FSubmodules));
   for i := 0 to High(FSubmodules) do
   begin
-    FSubInfos[i] := Default(TGittanSubmoduleInfo);
-    FSubInfos[i].Path := FSubmodules[i].Path;
+    if not AKeep or (FSubInfos[i].Path <> FSubmodules[i].Path) then
+    begin
+      FSubInfos[i] := Default(TGittanSubmoduleInfo);
+      FSubInfos[i].Path := FSubmodules[i].Path;
+    end;
     Job := TGittanSubmoduleJob.Create(FRepo.Root, FSubmodules[i], FBranch);
     Job.OnDone := @SubmoduleJobDone;
     FSubJobs.Add(Job);
@@ -156,10 +166,22 @@ begin
   end;
 end;
 
+{ A poll waits for jobs still running; their end sets the timer again. }
+procedure TForm1.SubTimerTimer(Sender: TObject);
+begin
+  FSubTimer.Enabled := False;
+  if (FRepo.Root = '') or (FSubJobs.Count > 0) or (Length(FSubmodules) = 0) then
+    Exit;
+  StartSubmoduleJobs(True);
+end;
+
 procedure TForm1.AbandonSubmoduleJobs;
 var
   i: integer;
 begin
+  { No jobs, no poll: the next round's end starts the timer again. }
+  if FSubTimer <> nil then
+    FSubTimer.Enabled := False;
   if FSubJobs = nil then
     Exit;
   for i := 0 to FSubJobs.Count - 1 do
@@ -171,12 +193,24 @@ begin
 end;
 
 { The job's result goes to its row, and to the view when it shows the
-  submodule. The job is freed from the message loop, as a blame job. }
+  submodule and the result differs (a poll that finds the same leaves
+  the caret alone). The job is freed from the message loop, as a blame
+  job. The last job of a round sets the poll. }
+{ What the view shows of a job's result, to tell whether a poll changed
+  it. }
+function SubmoduleInfoKey(const AInfo: TGittanSubmoduleInfo): string;
+begin
+  Result := IntToStr(Ord(AInfo.State)) + #0 + AInfo.CheckedOut + #0 + AInfo.Tip +
+    #0 + IntToStr(AInfo.Behind) + #0 + IntToStr(AInfo.Ahead) + #0 + AInfo.Error +
+    #0 + BoolToStr(AInfo.Initialized, True);
+end;
+
 procedure TForm1.SubmoduleJobDone(Sender: TObject);
 var
   Job: TGittanSubmoduleJob;
   Node: TTreeNode;
   i, TopLine: integer;
+  Same: boolean;
 begin
   Job := TGittanSubmoduleJob(Sender);
   if FSubJobs.IndexOf(Job) < 0 then
@@ -187,13 +221,14 @@ begin
   for i := 0 to High(FSubmodules) do
     if (FSubmodules[i].Path = Job.Info.Path) and (i <= High(FSubInfos)) then
     begin
+      Same := SubmoduleInfoKey(FSubInfos[i]) = SubmoduleInfoKey(Job.Info);
       FSubInfos[i] := Job.Info;
       Node := FSubTree.Items.GetFirstNode;
       while (Node <> nil) and (Node.Data <> Pointer(PtrInt(i + 1))) do
         Node := Node.GetNextSibling;
       if Node <> nil then
         Node.Text := SubmoduleRowText(i);
-      if (FView = gvSubmodule) and (FSubShown = FSubmodules[i].Path) then
+      if (FView = gvSubmodule) and (FSubShown = FSubmodules[i].Path) and not Same then
       begin
         TopLine := Edit.LineTop;
         ShowSubmodule(i);
@@ -203,7 +238,10 @@ begin
     end;
   { The count of newer ones in the header. }
   if FSubJobs.Count = 0 then
+  begin
     FillSubmoduleTree;
+    FSubTimer.Enabled := True;
+  end;
 end;
 
 procedure TForm1.SubTreeSelectionChanged(Sender: TObject);
@@ -256,10 +294,12 @@ begin
   Info := Default(TGittanSubmoduleInfo);
   if AIndex <= High(FSubInfos) then
     Info := FSubInfos[AIndex];
+  { A poll keeps the previous result shown while it runs. }
   Checking := False;
-  for i := 0 to FSubJobs.Count - 1 do
-    if TGittanSubmoduleJob(FSubJobs[i]).Sub.Path = Sub.Path then
-      Checking := True;
+  if Info.State = smUnknown then
+    for i := 0 to FSubJobs.Count - 1 do
+      if TGittanSubmoduleJob(FSubJobs[i]).Sub.Path = Sub.Path then
+        Checking := True;
   Lines := TStringList.Create;
   try
     Add(rsSubUrl, Sub.Url);

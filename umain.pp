@@ -143,6 +143,9 @@ type
     FSubInfos: array of TGittanSubmoduleInfo;
     FSubJobs: TList;
     FSubKey, FSubShown: string;
+    { Asks the remotes again SubmodulePoll ms after the last job of a
+      round finished; off while no repository is open. }
+    FSubTimer: TTimer;
     { Editing the repository's own files (umain.repofiles.inc): the full
       name of the file the editor holds open to edits, '' while it shows
       something else; the file's time stamp when it was loaded or saved,
@@ -574,7 +577,10 @@ type
     procedure FillSubmodules;
     function SubmoduleRowText(AIndex: integer): string;
     procedure FillSubmoduleTree;
-    procedure StartSubmoduleJobs;
+    {** Starts a job per submodule. AKeep keeps what the previous jobs
+      found shown meanwhile, for a poll. }
+    procedure StartSubmoduleJobs(AKeep: boolean = False);
+    procedure SubTimerTimer(Sender: TObject);
     procedure AbandonSubmoduleJobs;
     procedure SubmoduleJobDone(Sender: TObject);
     procedure SubTreeSelectionChanged(Sender: TObject);
@@ -839,6 +845,8 @@ const
     while checks run and otherwise; ms. }
   PullPollPending = 30000;
   PullPollIdle = 300000;
+  { How often the submodules' remotes are asked again; ms. }
+  SubmodulePoll = 300000;
   rsReveal = {$IFDEF DARWIN}'Reveal in &Finder'{$ELSE}
     {$IFDEF WINDOWS}'Show in &Explorer'{$ELSE}'Show in &File Manager'{$ENDIF}{$ENDIF};
   rsEditCopy = '&Copy';
