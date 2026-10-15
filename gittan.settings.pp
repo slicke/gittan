@@ -49,6 +49,8 @@ type
     IgnoreWhitespace: boolean;
     {** Show in the gutter who last changed each line. }
     Blame: boolean;
+    {** Show the review comments of the pull request in the change view. }
+    ReviewComments: boolean;
     {** The name of the syntax theme (see gittan.syntaxthemes); empty for
       the default. }
     SyntaxTheme: string;
@@ -158,6 +160,7 @@ begin
       ContextLines := Ini.ReadInteger(SecView, 'ContextLines', 3);
       SideBySide := Ini.ReadBool(SecView, 'SideBySide', False);
       IgnoreWhitespace := Ini.ReadBool(SecView, 'IgnoreWhitespace', False);
+      ReviewComments := Ini.ReadBool(SecView, 'ReviewComments', True);
       Blame := Ini.ReadBool(SecView, 'Blame', False);
       SyntaxTheme := Ini.ReadString(SecView, 'SyntaxTheme', '');
       EditorCommand := Ini.ReadString(SecView, 'EditorCommand', '');
@@ -203,6 +206,7 @@ begin
       Ini.WriteInteger(SecView, 'ContextLines', ContextLines);
       Ini.WriteBool(SecView, 'SideBySide', SideBySide);
       Ini.WriteBool(SecView, 'IgnoreWhitespace', IgnoreWhitespace);
+      Ini.WriteBool(SecView, 'ReviewComments', ReviewComments);
       Ini.WriteBool(SecView, 'Blame', Blame);
       Ini.WriteString(SecView, 'SyntaxTheme', SyntaxTheme);
       Ini.WriteString(SecView, 'EditorCommand', EditorCommand);

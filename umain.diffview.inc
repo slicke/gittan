@@ -80,6 +80,7 @@ begin
   NumberLines(FChangeLines, OldNum, NewNum);
   FOldNum := OldNum;
   FNewNum := NewNum;
+  PlaceThreads;
   WordDiff(FChangeLines, FIgnoreWhitespace, FWordSpans);
   { The blocks of changed lines, which the headings are kept by. The
     code tree of the text goes with the text, which is replaced here. }
@@ -112,6 +113,10 @@ begin
         Keep[j] := True;
       Inc(k, 2);
     end;
+    { A line with review comments stays, so its card shows. }
+    for k := 0 to High(FThreadRows) do
+      if (FThreadRows[k] >= 0) and (FThreadRows[k] < n) then
+        Keep[FThreadRows[k]] := True;
   end;
   { The rows of the unified view: a shown line, or a gap row followed by
     the run of hidden lines it stands for. }
@@ -187,6 +192,7 @@ begin
     FEditOld.LineTop := 0;
   finally
     FBuildingView := False;
+    ApplyReviewGaps;
     { In case a parse ended during the build. }
     UpdateSymbolHeadings;
   end;
@@ -537,6 +543,12 @@ var
 begin
   if Button <> mbLeft then
     Exit;
+  { A click on a review comment's card (see EditClickGap). }
+  if FGapToggle <> '' then
+  begin
+    ToggleThreadNow;
+    Exit;
+  end;
   if ssModifier in Shift then
   begin
     if TATSynEdit(Sender).Carets[0].EndY < 0 then
@@ -588,11 +600,31 @@ begin
   try
     if Dst.LineTop <> Src.LineTop then
       Dst.LineTop := Src.LineTop;
+    MatchScrollPixels(Src, Dst);
     if Dst.ColumnLeft <> Src.ColumnLeft then
       Dst.ColumnLeft := Src.ColumnLeft;
   finally
     FSyncingScroll := False;
   end;
+end;
+
+{ The top line puts the two sides in step to the line. Within a line
+  they can still be apart: the pixels scrolled into it, or with the
+  review comments' cards (umain.reviews.inc), into the gaps under it or
+  over the first line (position -1), which both sides have the same. }
+procedure TForm1.MatchScrollPixels(ASrc, ADst: TATSynEdit);
+var
+  Info: TATEditorScrollInfo;
+begin
+  Info := ADst.ScrollVert;
+  if (Info.NPos = ASrc.ScrollVert.NPos) and
+    (Info.NPixelOffset = ASrc.ScrollVert.NPixelOffset) then
+    Exit;
+  Info.NPos := ASrc.ScrollVert.NPos;
+  Info.NPixelOffset := ASrc.ScrollVert.NPixelOffset;
+  Info.SmoothPos := ASrc.ScrollVert.SmoothPos;
+  ADst.ScrollVert := Info;
+  ADst.Update;
 end;
 
 { The scroll event fires for the user's scrolling only; after the view
@@ -621,6 +653,7 @@ begin
     FEditOld.UpdateWrapInfo(True);
     FEditOld.LineTop := Edit.LineTop;
     FEditOld.LineTopTodo := Edit.LineTop;
+    MatchScrollPixels(Edit, FEditOld);
     if FEditOld.ColumnLeft <> Edit.ColumnLeft then
       FEditOld.ColumnLeft := Edit.ColumnLeft;
     FEditOld.Invalidate;

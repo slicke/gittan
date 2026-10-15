@@ -50,6 +50,7 @@ begin
   FWordWrap := FSettings.WordWrap;
   FIgnoreWhitespace := FSettings.IgnoreWhitespace;
   FBlameOn := FSettings.Blame;
+  FShowComments := FSettings.ReviewComments;
   FSyntaxTheme := FindSyntaxTheme(FSettings.SyntaxTheme);
   if FSyntaxTheme < 0 then
     FSyntaxTheme := DefaultSyntaxTheme;
@@ -117,6 +118,7 @@ begin
   FSettings.SideBySide := FSideBySide;
   FSettings.IgnoreWhitespace := FIgnoreWhitespace;
   FSettings.Blame := FBlameOn;
+  FSettings.ReviewComments := FShowComments;
   FSettings.SyntaxTheme := SyntaxThemes[FSyntaxTheme].Name;
   FSettings.Save;
   SaveIndex;
@@ -581,6 +583,7 @@ var
   Down: boolean;
   R: TRect;
 begin
+  DrawGapGutter(TATSynEdit(Sender), C);
   DrawBlame(TATSynEdit(Sender), C);
   DrawDiscard(TATSynEdit(Sender), C);
   if (Sender <> Edit) or (FOverscroll = 0) or (FView <> gvChanges) then
@@ -1175,7 +1178,7 @@ begin
     spSync:
       SyncClick(AScreenRect);
     spPull:
-      MenuOpenPullClick(Sender);
+      PullChipClick(AScreenRect);
     spUpdate:
       UpdateDialog;
     spConflicts:
@@ -1423,6 +1426,8 @@ begin
   FPullError := Job.Error;
   UpdateStatus;
   RebuildPullMenu;
+  { The review comments follow at the same pace. }
+  StartReviewJob(True);
   { Ask again later, more often while checks run; not when gh failed
     (no GitHub remote, not logged in), which a refresh retries. }
   if FPullError = '' then
@@ -1485,14 +1490,24 @@ end;
   shows a pull request: what the branch adds since it left the base. }
 procedure TForm1.MenuComparePullClick(Sender: TObject);
 var
-  Pull: TGittanPullRequest;
   i: integer;
-  Remote, HeadRef: string;
 begin
   i := TMenuItem(Sender).Tag;
   if (FRepo.Root = '') or (i < 0) or (i > High(FPulls)) then
     Exit;
-  Pull := FPulls[i];
+  ComparePull(FPulls[i]);
+end;
+
+{ Fetches APull and compares with it: the range from where it left its
+  base to its head, what GitHub shows as its changes. }
+procedure TForm1.ComparePull(const APull: TGittanPullRequest);
+var
+  Pull: TGittanPullRequest;
+  Remote, HeadRef: string;
+begin
+  if FRepo.Root = '' then
+    Exit;
+  Pull := APull;
   FStatus.ShowMessage(Format(rsFetchingPull, [Pull.Number]), stNormal, 0);
   Remote := FRepo.RemoteFor(RepoPathOfUrl(Pull.Url));
   FStatus.ClearMessage;
@@ -1506,6 +1521,77 @@ begin
   FPullRange := Remote + '/' + Pull.BaseRef + '...' + HeadRef;
   FPullNumber := Pull.Number;
   SetBase(FPullRange);
+end;
+
+{ The rows of the list a click on the status bar's pull request drops
+  down. }
+const
+  paCompare = 1;
+  paWorkingTree = 2;
+  paOpen = 3;
+  paCopy = 4;
+
+{ A click on the status bar's pull request: compare with it, which
+  shows its changes as GitHub does and its review comments where they
+  were made (with how many are open), back to the working tree, or open
+  it on GitHub. }
+procedure TForm1.PullChipClick(const AScreenRect: TRect);
+var
+  Comparing: boolean;
+  Detail: string;
+  Open: integer;
+
+  procedure AddAction(AAction: integer; const ACaption, ADetail: string;
+    AChecked: boolean = False);
+  begin
+    FPullPopup.Add(ACaption, ADetail, AChecked);
+    SetLength(FPullActions, Length(FPullActions) + 1);
+    FPullActions[High(FPullActions)] := AAction;
+  end;
+
+begin
+  if not FHasPull or (FRepo.Root = '') then
+    Exit;
+  Comparing := (FPullRange <> '') and (FRepo.Base = FPullRange) and FRepo.IsRange and
+    (FPullNumber = FPull.Number);
+  Detail := '';
+  if FShowComments and (FThreadsNumber = FPull.Number) then
+  begin
+    Open := OpenThreads(FThreads);
+    if Open = 1 then
+      Detail := rsReviewOpenOne
+    else if Open > 1 then
+      Detail := Format(rsReviewOpen, [Open]);
+  end;
+  FPullPopup.Clear;
+  FPullActions := nil;
+  FPullPopup.AddHeader(Format(rsPullHintTitle, [FPull.Number, FPull.Title]));
+  SetLength(FPullActions, 1);
+  FPullActions[0] := 0;
+  AddAction(paCompare, rsComparePull, Detail, Comparing);
+  AddAction(paWorkingTree, rsCompareWorkingTree, '', (FRepo.Base = '') and
+    not FRepo.WholeTree);
+  if FPull.Url <> '' then
+  begin
+    AddAction(paOpen, rsOpenPullOnGitHub, '');
+    AddAction(paCopy, rsCopyPullLink, '');
+  end;
+  FPullPopup.Popup(AScreenRect);
+end;
+
+procedure TForm1.PullPopupPick(Sender: TObject; AIndex: integer);
+begin
+  if (AIndex < 0) or (AIndex > High(FPullActions)) or not FHasPull then
+    Exit;
+  case FPullActions[AIndex] of
+    paCompare:
+      if not ((FPullRange <> '') and (FRepo.Base = FPullRange) and
+        (FPullNumber = FPull.Number)) then
+        ComparePull(FPull);
+    paWorkingTree: SetBase('');
+    paOpen: MenuOpenPullClick(Sender);
+    paCopy: MenuCopyPullUrlClick(Sender);
+  end;
 end;
 
 procedure TForm1.StatusPopupPopup(Sender: TObject);
@@ -1558,6 +1644,7 @@ begin
   AddChecks(APull.ChecksFailed, HintFailed, rsPullHintFailedOne, rsPullHintFailed);
   AddChecks(APull.ChecksPending, HintPending, rsPullHintPendingOne, rsPullHintPending);
   AddChecks(APull.ChecksPassed, HintPassed, rsPullHintPassedOne, rsPullHintPassed);
+  Result := Result + ReviewHint(APull.Number);
   Result := Result + LineEnding + HintLink + ' ' + rsPullHintOpen;
 end;
 
@@ -1681,4 +1768,6 @@ begin
     ShowSummary;
   end;
   StartWatcher;
+  { Comparing with a pull request shows its comments. }
+  StartReviewJob(False);
 end;
