@@ -62,8 +62,8 @@ endif
 LEXERS_SRC := vendor/CudaText-lexers
 LEXLIB := lexlib
 
-# Application icon. icons/gittan-source.png is the artwork; `make icons` cuts
-# it out with tools/makeicons.swift (macOS only) into
+# Application icon. icons/gittan-source.png is the artwork, the cut-out tile;
+# `make icons` sizes it with tools/makeicons.swift (macOS only) into
 # icons/gittan.png, icons/png/, icons/Gittan.icns and Gittan.ico. Lazarus
 # compiles Gittan.ico into the executable for Windows and Linux, but writes no
 # icon into the macOS bundle it creates, so every Darwin build copies the .icns
