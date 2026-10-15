@@ -59,7 +59,9 @@ endif
 # subfolder of its own, but TecLexerList loads *.lcf from one flat folder, so
 # copy them all into $(LEXLIB) beside the executable. Rebuilt on every build;
 # it is a few hundred small files. GITTAN_LEXLIB points the app elsewhere.
+# lexers/ holds Gittan's own lexers in the same layout.
 LEXERS_SRC := vendor/CudaText-lexers
+LEXERS_OWN := lexers
 LEXLIB := lexlib
 
 # Application icon. icons/gittan-source.png is the artwork, the cut-out tile;
@@ -102,7 +104,7 @@ help:
 	@echo "  rebuild   Build with every unit recompiled (-B)"
 	@echo "  run       Build, then start Gittan (RUN_ARGS forwards arguments)"
 	@echo "  test      Build and run the unit tests in tests/ (TEST_ARGS forwards options)"
-	@echo "  lexlib    Copy the lexers from $(LEXERS_SRC) into $(LEXLIB)/ (part of every build)"
+	@echo "  lexlib    Copy the lexers from $(LEXERS_SRC) and $(LEXERS_OWN) into $(LEXLIB)/ (part of every build)"
 	@echo "  icons     Regenerate the icons from ICON_SRC=$(ICON_SRC) (macOS only)"
 	@echo "  clean     Remove lib/, $(LEXLIB)/, the test build and the binary"
 	@echo "Current: WIDGETSET=$(WIDGETSET) LAZBUILD=$(LAZBUILD) LD64_LLD=$(LD64_LLD)"
@@ -126,7 +128,7 @@ lexlib:
 	@if [ ! -d "$(LEXERS_SRC)/Pascal" ]; then \
 	  echo "$(LEXERS_SRC) is empty; run: git submodule update --init"; exit 1; fi
 	@rm -rf "$(LEXLIB)" && mkdir -p "$(LEXLIB)"
-	@find "$(LEXERS_SRC)" -mindepth 2 -maxdepth 2 \( -name '*.lcf' -o -name '*.cuda-lexmap' \) -exec cp -p {} "$(LEXLIB)/" \;
+	@find "$(LEXERS_SRC)" "$(LEXERS_OWN)" -mindepth 2 -maxdepth 2 \( -name '*.lcf' -o -name '*.cuda-lexmap' \) -exec cp -p {} "$(LEXLIB)/" \;
 	@echo "Copied $$(ls "$(LEXLIB)"/*.lcf | wc -l | tr -d ' ') lexers to $(LEXLIB)/"
 
 run: build

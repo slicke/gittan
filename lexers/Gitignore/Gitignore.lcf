@@ -1,0 +1,118 @@
+object SyntAnal1: TLibSyntAnalyzer
+  Formats = <
+    item
+      DisplayName = 'Comment'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clGray
+      Font.Height = -13
+      Font.Name = 'Courier New'
+      Font.Style = [fsItalic]
+    end
+    item
+      DisplayName = 'Negation'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clRed
+      Font.Height = -13
+      Font.Name = 'Courier New'
+      Font.Style = [fsBold]
+    end
+    item
+      DisplayName = 'Wildcard'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clPurple
+      Font.Height = -13
+      Font.Name = 'Courier New'
+      Font.Style = [fsBold]
+    end
+    item
+      DisplayName = 'Escape'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clMaroon
+      Font.Height = -13
+      Font.Name = 'Courier New'
+      Font.Style = []
+    end
+    item
+      DisplayName = 'Pattern'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clBlack
+      Font.Height = -13
+      Font.Name = 'Courier New'
+      Font.Style = []
+    end>
+  TokenRules = <
+    item
+      DisplayName = 'Comment'
+      StyleName = 'Comment'
+      TokenType = 1
+      Expression = '^\#.*'
+      ColumnFrom = 0
+      ColumnTo = 0
+    end
+    item
+      DisplayName = 'Negation'
+      StyleName = 'Negation'
+      TokenType = 2
+      Expression = '^!'
+      ColumnFrom = 0
+      ColumnTo = 0
+    end
+    item
+      DisplayName = 'Escape'
+      StyleName = 'Escape'
+      TokenType = 3
+      Expression = '\\.'
+      ColumnFrom = 0
+      ColumnTo = 0
+    end
+    item
+      DisplayName = 'Class'
+      StyleName = 'Wildcard'
+      TokenType = 4
+      Expression = '\[[^\]\r\n]*\]'
+      ColumnFrom = 0
+      ColumnTo = 0
+    end
+    item
+      DisplayName = 'Wildcard'
+      StyleName = 'Wildcard'
+      TokenType = 4
+      Expression = '\*\*|\*|\?'
+      ColumnFrom = 0
+      ColumnTo = 0
+    end
+    item
+      DisplayName = 'Pattern'
+      StyleName = 'Pattern'
+      TokenType = 5
+      Expression = '[^\*\?\[\\\r\n]+'
+      ColumnFrom = 0
+      ColumnTo = 0
+    end>
+  BlockRules = <>
+  CodeTemplates = <>
+  SubAnalyzers = <>
+  SampleText.Strings = (
+    '# build output'
+    '/build/'
+    '*.o'
+    '**/node_modules/'
+    'doc/**/*.pdf'
+    'log[0-9].txt'
+    '!keep.me'
+    '\#not-a-comment.txt')
+  TokenTypeNames.Strings = (
+    'Unknown'
+    'Comment'
+    'Negation'
+    'Escape'
+    'Wildcard'
+    'Pattern')
+  Extentions = '/.gitignore /.dockerignore /.npmignore /.prettierignore /.eslintignore /.stylelintignore /.vscodeignore /.slugignore'
+  LexerName = 'Gitignore'
+  SkipSpaces = False
+  Notes.Strings = (
+    'Gittan: ignore files in the gitignore(5) syntax')
+  LineComment = '#'
+  Charset = DEFAULT_CHARSET
+end

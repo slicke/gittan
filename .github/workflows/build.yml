@@ -277,7 +277,7 @@ jobs:
           set -euo pipefail
           # No make on the Windows runner; this is what `make lexlib` does.
           rm -rf lexlib && mkdir -p lexlib
-          find vendor/CudaText-lexers -mindepth 2 -maxdepth 2 \( -name '*.lcf' -o -name '*.cuda-lexmap' \) -exec cp -p {} lexlib/ \;
+          find vendor/CudaText-lexers lexers -mindepth 2 -maxdepth 2 \( -name '*.lcf' -o -name '*.cuda-lexmap' \) -exec cp -p {} lexlib/ \;
           echo "Copied $(ls lexlib/*.lcf | wc -l) lexers to lexlib/"
           lazbuild --lazarusdir='C:\Lazarus' --widgetset=win32 Gittan.lpi
           # The unit tests, as `make test` builds them: a console program
