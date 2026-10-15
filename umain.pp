@@ -227,11 +227,12 @@ type
     FCodeRanges, FOldRanges: TGittanCodeRanges;
     FRangesValid, FBuildingView: boolean;
     FHeadingRebuilds: integer;
-    { Scrolling on past the bottom of a file: the wheel delta pulled so
-      far, the time of the last wheel event, whether a pull counts (not
-      while the momentum of the gesture that just jumped runs on), the
-      timer that forgets a pull left half way, and the colors of the
-      pill that shows the pull. }
+    { Scrolling on past the bottom of a file, or the top: the wheel
+      delta pulled so far (positive downwards, towards the next file,
+      negative upwards, towards the previous), the time of the last wheel
+      event, whether a pull counts (not while the momentum of the gesture
+      that just jumped runs on), the timer that forgets a pull left half
+      way, and the colors of the pill that shows the pull. }
     FOverscroll: integer;
     FOverscrollTick: QWord;
     FOverscrollArmed: boolean;
@@ -462,6 +463,8 @@ type
     procedure EditMouseWheel(Sender: TObject; Shift: TShiftState;
       WheelDelta: integer; MousePos: TPoint; var Handled: boolean);
     procedure SetOverscroll(AValue: integer);
+    procedure ShowFileEnd;
+    procedure SetWheelScroll(AOn: boolean);
     procedure OverscrollTimerTimer(Sender: TObject);
     procedure EditDrawEditor(Sender: TObject; C: TCanvas; const ARect: TRect);
     procedure BuildPopups;
@@ -649,6 +652,7 @@ resourcestring
   rsGapUp = '↑ %d';
   rsGapAll = 'all';
   rsPullNext = 'Next: %s  ↓';
+  rsPullPrev = 'Previous: %s  ↑';
   rsSwitchBranchHint = 'Switch branch';
   rsShowSummaryHint = 'Show the summary';
   rsShowConflictHint = 'Show the first conflicted file';
@@ -666,11 +670,12 @@ resourcestring
   rsPositionOld = 'Ln %d (old), Col %d';
 
 const
-  { Scrolling on past the bottom of a file goes to the next one: the
-    wheel delta the pull needs (120 is one notch of a mouse wheel, 8 one
-    pixel of a trackpad on macOS), the quiet time after which a pull left
-    half way is forgotten, and the pause that tells a new gesture from
-    the momentum of the one that jumped. Milliseconds. }
+  { Scrolling on past the bottom of a file goes to the next one, and
+    past the top to the previous: the wheel delta the pull needs (120 is
+    one notch of a mouse wheel, 8 one pixel of a trackpad on macOS), the
+    quiet time after which a pull left half way is forgotten, and the
+    pause that tells a new gesture from the momentum of the one that
+    jumped. Milliseconds. }
   OverscrollNeeded = 600;
   OverscrollForget = 1200;
   OverscrollPause = 300;
@@ -802,8 +807,9 @@ begin
   { A fixed, narrow minimap; the default takes a fifth of the editor. }
   Edit.OptMinimapCharWidth := 30;
   Edit.OnChangeCaretPos := @EditChangeCaretPos;
-  { Scrolling on past the bottom pulls in the next file; the pill that
-    shows the pull is painted over the text (see EditMouseWheel). }
+  { Scrolling on past the bottom pulls in the next file, and past the
+    top the previous one; the pill that shows the pull is painted over
+    the text (see EditMouseWheel). }
   Edit.OnDrawEditor := @EditDrawEditor;
   FOverscrollArmed := True;
   FOverscrollTimer := TTimer.Create(Self);

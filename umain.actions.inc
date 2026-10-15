@@ -456,39 +456,66 @@ begin
   end;
 end;
 
-{ Scrolling on past the bottom of a file pulls in the next one. The event
-  fires before the editor scrolls, so a wheel step that is already at the
-  bottom counts toward the pull; one that scrolls, or scrolls up, starts
-  over. A pill at the bottom of the text rises with the pull (see
-  EditDrawEditor), and when the pull is complete the next file is shown
-  from its top. The gesture's momentum runs on after the jump, so the
-  pull is disarmed until the wheel has paused. }
+{ Scrolling on past the bottom of a file pulls in the next one, and past
+  the top the previous one. The event fires before the editor scrolls, so
+  a wheel step that is already at the edge counts toward the pull; one
+  that scrolls, or goes the other way, starts over. FOverscroll is the
+  delta pulled so far, positive downwards. A pill at the edge of the text
+  comes in with the pull (see EditDrawEditor), and when the pull is
+  complete the next file is shown from its top, or the previous one from
+  its bottom. The gesture's momentum runs on after the jump, so the pull
+  is disarmed until the wheel has paused, and the editor's own scrolling
+  is off meanwhile (SetWheelScroll). }
 procedure TForm1.EditMouseWheel(Sender: TObject; Shift: TShiftState;
   WheelDelta: integer; MousePos: TPoint; var Handled: boolean);
 var
   Now: QWord;
-  AtBottom: boolean;
+  Down, AtEdge: boolean;
 begin
-  if (FView <> gvChanges) or (Shift - [ssLeft] <> []) then
-    Exit;
   Now := GetTickCount64;
   if not FOverscrollArmed then
+  begin
     FOverscrollArmed := Now - FOverscrollTick >= OverscrollPause;
+    if FOverscrollArmed then
+      SetWheelScroll(True);
+  end;
   FOverscrollTick := Now;
-  if not FOverscrollArmed then
+  if not FOverscrollArmed or (FView <> gvChanges) or
+    (Shift - [ssLeft] <> []) then
     Exit;
-  AtBottom := Edit.ScrollVert.SmoothPos >= Edit.ScrollVert.SmoothPosLast;
-  if (WheelDelta >= 0) or not AtBottom or (NeighbourFile(True) = nil) then
+  Down := WheelDelta < 0;
+  if Down then
+    AtEdge := Edit.ScrollVert.SmoothPos >= Edit.ScrollVert.SmoothPosLast
+  else
+    AtEdge := Edit.ScrollVert.SmoothPos <= 0;
+  if (WheelDelta = 0) or not AtEdge or (NeighbourFile(Down) = nil) then
   begin
     SetOverscroll(0);
     Exit;
   end;
+  { A file that fits in the window is at both edges: a pull the other
+    way starts over. }
+  if (FOverscroll <> 0) and ((FOverscroll > 0) <> Down) then
+    SetOverscroll(0);
   SetOverscroll(FOverscroll - WheelDelta);
-  if FOverscroll < OverscrollNeeded then
+  if Abs(FOverscroll) < OverscrollNeeded then
     Exit;
   FOverscrollArmed := False;
+  SetWheelScroll(False);
   SetOverscroll(0);
-  StepFile(True);
+  if StepFile(Down) and not Down then
+    ShowFileEnd;
+end;
+
+{ The editor scrolls on every wheel event after this handler, whatever
+  Handled says: the one that completes a pull would scroll the file just
+  pulled in away from its edge, and so would the momentum after it, so
+  the editors' wheel scrolling is off from the jump until the wheel has
+  paused. }
+procedure TForm1.SetWheelScroll(AOn: boolean);
+begin
+  Edit.OptMouseWheelScrollVert := AOn;
+  FEditOld.OptMouseWheelScrollVert := AOn;
 end;
 
 procedure TForm1.SetOverscroll(AValue: integer);
@@ -499,8 +526,34 @@ begin
   { Restarted on every change: the pull is forgotten after a quiet
     spell. }
   FOverscrollTimer.Enabled := False;
-  FOverscrollTimer.Enabled := AValue > 0;
+  FOverscrollTimer.Enabled := AValue <> 0;
   Edit.Invalidate;
+end;
+
+{ Shows the end of the file just pulled in: the caret on its last line
+  and the last page in view, so scrolling on upwards reads the file
+  backwards and Previous Change finds its last change. The scroll needs
+  the wrap info of the text just loaded, which the first paint would
+  build, and the line top the editor kept from the resize of showing the
+  file would win at that paint. The editor keeps the line top within the
+  last page, so the last line's puts that page in view. }
+procedure TForm1.ShowFileEnd;
+var
+  Last: integer;
+begin
+  Last := Edit.Strings.Count - 1;
+  { The editor's trailing empty line is no line of the file. }
+  if Edit.Strings.IsLastLineFake then
+    Dec(Last);
+  if Last < 0 then
+    Exit;
+  Edit.UpdateWrapInfo(True);
+  Edit.LineTopTodo := 0;
+  Edit.DoCaretSingle(0, Last);
+  Edit.LineTop := Last;
+  Edit.Update;
+  SyncOldSide;
+  UpdateChangeNav;
 end;
 
 procedure TForm1.OverscrollTimerTimer(Sender: TObject);
@@ -508,34 +561,43 @@ begin
   SetOverscroll(0);
 end;
 
-{ The pill that shows the pull: it rises from the bottom edge of the text
-  as the pull grows, and fills from the left, until the next file is
-  pulled in. The canvas is clipped to the text rectangle so the pill
-  comes up from under its edge. }
+{ The pill that shows the pull: it comes in from the edge of the text the
+  pull is at, rising from the bottom for the next file or descending from
+  the top for the previous, as the pull grows, and fills from the left,
+  until the file is pulled in. The canvas is clipped to the text
+  rectangle so the pill comes in from under its edge. }
 procedure TForm1.EditDrawEditor(Sender: TObject; C: TCanvas; const ARect: TRect);
 var
   Node: TTreeNode;
   Pill: string;
-  W, H, Pad: integer;
+  W, H, Pad, Y: integer;
   Part: double;
+  Down: boolean;
   R: TRect;
 begin
   DrawBlame(TATSynEdit(Sender), C);
-  if (Sender <> Edit) or (FOverscroll <= 0) or (FView <> gvChanges) then
+  if (Sender <> Edit) or (FOverscroll = 0) or (FView <> gvChanges) then
     Exit;
-  Node := NeighbourFile(True);
+  Down := FOverscroll > 0;
+  Node := NeighbourFile(Down);
   if Node = nil then
     Exit;
-  Pill := Format(rsPullNext, [ExtractFileName(Node.GetTextPath)]);
-  Part := Min(1.0, FOverscroll / OverscrollNeeded);
+  if Down then
+    Pill := Format(rsPullNext, [ExtractFileName(Node.GetTextPath)])
+  else
+    Pill := Format(rsPullPrev, [ExtractFileName(Node.GetTextPath)]);
+  Part := Min(1.0, Abs(FOverscroll) / OverscrollNeeded);
   C.Font.Assign(FHeader.Font);
   C.Font.Color := FPullText;
   H := C.TextHeight(Pill) + 10;
   Pad := H div 2 + 4;
   W := C.TextWidth(Pill) + 2 * Pad;
   R := Rect(0, 0, W, H);
-  R.Offset((ARect.Left + ARect.Right - W) div 2,
-    ARect.Bottom - Round(Part * (H + 12)));
+  if Down then
+    Y := ARect.Bottom - Round(Part * (H + 12))
+  else
+    Y := ARect.Top - H + Round(Part * (H + 12));
+  R.Offset((ARect.Left + ARect.Right - W) div 2, Y);
   C.Clipping := True;
   C.ClipRect := ARect;
   try
