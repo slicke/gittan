@@ -17,7 +17,7 @@ uses
   gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
   gittan.syntaxthemes, gittan.cli, gittan.symbolchanges, gittan.callers,
-  gittan.popuplist, gittan.statusbar, md5;
+  gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -121,6 +121,15 @@ type
     FTreePanel: TPanel;
     FTreeFilter: TEdit;
     FTreeFilterText: string;
+    { The Repository section at the bottom of the tree panel
+      (umain.repofiles.inc): the repository's own files from
+      gittan.repofiles in a second tree under a header that folds it,
+      and the "Add to .gitignore" and "Add to .git/info/exclude" submenus
+      of the file menu, filled with the patterns for the file on popup. }
+    FRepoPanel: TPanel;
+    FRepoHeader: TGittanSectionHeader;
+    FRepoTree: TTreeView;
+    FIgnoreMenu, FExcludeMenu: TMenuItem;
     { The default branch of the remote (origin/main) and the merge base
       of the branch with it, Compare With's "origin/main (Merge Base)";
       and the branch's lead on and lag behind its upstream, for the
@@ -508,6 +517,15 @@ type
     procedure StartPullJob(AForce: boolean; AKeep: boolean = False);
     procedure PullTimerTimer(Sender: TObject);
     procedure SetupTreeFilter;
+    procedure SetupRepoFiles;
+    procedure ColorRepoHeader;
+    procedure FillRepoFiles;
+    procedure LayoutRepoFiles;
+    procedure RepoHeaderToggle(Sender: TObject);
+    procedure TreePanelResize(Sender: TObject);
+    procedure RepoTreeSelectionChanged(Sender: TObject);
+    procedure FillIgnoreMenus(const APath: string);
+    procedure MenuIgnoreClick(Sender: TObject);
     procedure TreeFilterChange(Sender: TObject);
     procedure TreeFilterKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
     procedure MenuFilterFilesClick(Sender: TObject);
@@ -637,6 +655,11 @@ resourcestring
   rsPrevChange = 'Previous C&hange';
   rsNextFile = 'Next F&ile';
   rsPrevFile = 'Previous Fi&le';
+  rsRepoFiles = 'Repository';
+  rsAddToIgnore = 'Add to .&gitignore';
+  rsAddToExclude = 'Add to .git/info/e&xclude';
+  rsIgnoreAdded = 'Added %s to %s';
+  rsIgnoreFailed = 'Could not write %s';
   rsCopyPath = 'Copy &Path';
   rsCopyRelativePath = 'Copy &Relative Path';
   rsOpenInEditor = 'Open in &Editor';
@@ -965,6 +988,7 @@ begin
   ApplyTheme;
 
   SetupTreeFilter;
+  SetupRepoFiles;
   ApplySettings;
   BuildMenu;
   BuildPopups;
@@ -1234,6 +1258,8 @@ begin
       RGBToColor(110, 110, 110), RGBToColor(243, 243, 243), RGBToColor(205, 205, 205),
       RGBToColor(207, 34, 46));
   end;
+  if FRepoHeader <> nil then
+    ColorRepoHeader;
   RecolorWords(Edit);
   RecolorWords(FEditOld);
 end;
@@ -2287,6 +2313,8 @@ end;
 procedure TForm1.ShowError(const AMessage: string);
 begin
   FileTree.Items.Clear;
+  FRepoTree.Items.Clear;
+  FRepoPanel.Visible := False;
   FStats := nil;
   FFileCount := 0;
   ShowWelcome(AMessage);
@@ -2345,6 +2373,7 @@ begin
       Inc(FConflictFiles);
   FFileCount := Length(FStats);
   FillFileTree(FStats);
+  FillRepoFiles;
   SetLength(Icons, Length(FStats));
   for i := 0 to High(FStats) do
     Icons[i] := StatIcon(FStats[i]);
@@ -2530,6 +2559,7 @@ begin
   FStatus.SetPosition('');
   { A file picked again after the summary must fire the selection event. }
   FileTree.Selected := nil;
+  FRepoTree.Selected := nil;
   if FRepo.Root <> '' then
     UpdateStatus;
 end;
@@ -2910,6 +2940,8 @@ begin
   Node := FileTree.Selected;
   if (Node = nil) or (Node.Data = nil) or (FRepo.Root = '') then
     Exit;
+  { One selection between the two trees. }
+  FRepoTree.Selected := nil;
   ShowChanges(Node.GetTextPath);
 end;
 
@@ -2919,5 +2951,6 @@ end;
 {$I umain.blame.inc}
 {$I umain.index.inc}
 {$I umain.history.inc}
+{$I umain.repofiles.inc}
 
 end.

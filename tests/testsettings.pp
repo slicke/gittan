@@ -66,6 +66,7 @@ begin
     S.Height := 600;
     S.Maximized := True;
     S.TreeWidth := 240;
+    S.RepoFilesOpen := True;
     S.FontName := 'Menlo';
     S.FontSize := 13;
     S.Zoom := 120;
@@ -91,6 +92,7 @@ begin
     AssertEquals(600, S.Height);
     AssertTrue(S.Maximized);
     AssertEquals(240, S.TreeWidth);
+    AssertTrue(S.RepoFilesOpen);
     AssertEquals('Menlo', S.FontName);
     AssertEquals(13, S.FontSize);
     AssertEquals(120, S.Zoom);

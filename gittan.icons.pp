@@ -17,6 +17,9 @@ uses
 const
   {** Image index of the folder icon. }
   iconFolder = 0;
+  {** Image index of the plain file icon, for a file listed without a
+    change (the Repository section), after the badges and the folders. }
+  iconFile = 1 + 3 * (Ord(High(TGittanChangeKind)) + 1);
 
 {** Image index of the badge for AKind. }
 function ChangeIcon(AKind: TGittanChangeKind): integer;
@@ -42,8 +45,8 @@ function KindColor(AKind: TGittanChangeKind): TColor;
 function WorseKind(A, B: TGittanChangeKind): TGittanChangeKind;
 
 {** Fills the empty list AImages with the folder icon at iconFolder, the
-  change badges at ChangeIcon, the dotted folders at FolderIcon and the
-  staged badges at StagedIcon. }
+  change badges at ChangeIcon, the dotted folders at FolderIcon, the
+  staged badges at StagedIcon and the plain file at iconFile. }
 procedure FillTreeIcons(AImages: TCustomImageList);
 
 implementation
@@ -120,6 +123,25 @@ begin
   Result.FillRoundRectAntialias(1 * s, 4 * s, 15 * s, 13 * s, 1.5 * s, 1.5 * s, Color);
 end;
 
+{ A plain file: a page with its top right corner folded, in a gray a
+  shade lighter than the folder, with two faint lines of text. }
+function DrawFile(ASize: integer): TBGRABitmap;
+var
+  s: single;
+  Color: TBGRAPixel;
+begin
+  Result := TBGRABitmap.Create(ASize, ASize, BGRAPixelTransparent);
+  s := ASize / 16;
+  Color := BGRA($9A, $A6, $B6);
+  Result.FillPolyAntialias([PointF(3 * s, 1 * s), PointF(9.5 * s, 1 * s),
+    PointF(13 * s, 4.5 * s), PointF(13 * s, 15 * s), PointF(3 * s, 15 * s)], Color);
+  Result.FillPolyAntialias([PointF(9.5 * s, 1 * s), PointF(9.5 * s, 4.5 * s),
+    PointF(13 * s, 4.5 * s)], BGRA($6E, $7C, $8E));
+  Result.LineCap := pecRound;
+  Result.DrawLineAntialias(5 * s, 8 * s, 11 * s, 8 * s, BGRA(255, 255, 255, 170), 1.2 * s);
+  Result.DrawLineAntialias(5 * s, 11 * s, 9.5 * s, 11 * s, BGRA(255, 255, 255, 170), 1.2 * s);
+end;
+
 { The folder with a dot in the kind's color over its lower right corner.
   A transparent ring around the dot keeps it apart from the folder. }
 function DrawDottedFolder(ASize: integer; AKind: TGittanChangeKind): TBGRABitmap;
@@ -191,6 +213,7 @@ begin
     AddIcon(AImages, DrawDottedFolder(16, Kind), DrawDottedFolder(32, Kind));
   for Kind := Low(TGittanChangeKind) to High(TGittanChangeKind) do
     AddIcon(AImages, DrawStagedBadge(16, Kind), DrawStagedBadge(32, Kind));
+  AddIcon(AImages, DrawFile(16), DrawFile(32));
 end;
 
 end.

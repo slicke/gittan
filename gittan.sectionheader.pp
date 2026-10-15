@@ -1,0 +1,177 @@
+unit gittan.sectionheader;
+
+{** A section header: a row with a disclosure chevron, a title and a
+  dimmed detail, which folds and unfolds what sits under it. Made for
+  the Repository section under the tree of changed files.
+
+  It paints itself in colors the form sets, like the file header, since
+  a native header would keep the desktop's look on a themed panel. A
+  click flips Expanded and raises OnToggle; whoever owns the section
+  shows or hides the content and sizes it. }
+
+{$mode objfpc}{$H+}
+
+interface
+
+uses
+  Classes, SysUtils, Types, Controls, Graphics;
+
+type
+
+  { TGittanSectionHeader }
+
+  TGittanSectionHeader = class(TCustomControl)
+  private
+    FTitle, FDetail: string;
+    FExpanded, FHot: boolean;
+    FBack, FText, FDim, FHover, FLine: TColor;
+    FOnToggle: TNotifyEvent;
+    procedure SetTitle(const AValue: string);
+    procedure SetDetail(const AValue: string);
+    procedure SetExpanded(AValue: boolean);
+  protected
+    procedure Paint; override;
+    procedure MouseEnter; override;
+    procedure MouseLeave; override;
+    procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
+      override;
+  public
+    constructor Create(AOwner: TComponent); override;
+    {** The palette: the background, the title, the dim chevron and
+      detail, the fill under the mouse and the line along the top. }
+    procedure SetColors(ABack, AText, ADim, AHover, ALine: TColor);
+    {** The name of the section. }
+    property Title: string read FTitle write SetTitle;
+    {** Shown dimmed after the title: a count, say. }
+    property Detail: string read FDetail write SetDetail;
+    {** Whether the section is unfolded; the chevron points down then.
+      Setting it does not raise OnToggle. }
+    property Expanded: boolean read FExpanded write SetExpanded;
+    {** After a click flipped Expanded. }
+    property OnToggle: TNotifyEvent read FOnToggle write FOnToggle;
+  end;
+
+implementation
+
+const
+  HeaderHeight = 26;
+  Pad = 10;
+  ChevronSize = 4;
+  Gap = 8;
+
+{ TGittanSectionHeader }
+
+constructor TGittanSectionHeader.Create(AOwner: TComponent);
+begin
+  inherited Create(AOwner);
+  ControlStyle := ControlStyle + [csOpaque];
+  Height := HeaderHeight;
+  Cursor := crHandPoint;
+  SetColors(clBtnFace, clWindowText, clGrayText, clBtnFace, clBtnShadow);
+end;
+
+procedure TGittanSectionHeader.SetColors(ABack, AText, ADim, AHover, ALine: TColor);
+begin
+  FBack := ABack;
+  FText := AText;
+  FDim := ADim;
+  FHover := AHover;
+  FLine := ALine;
+  Invalidate;
+end;
+
+procedure TGittanSectionHeader.SetTitle(const AValue: string);
+begin
+  if FTitle = AValue then
+    Exit;
+  FTitle := AValue;
+  Invalidate;
+end;
+
+procedure TGittanSectionHeader.SetDetail(const AValue: string);
+begin
+  if FDetail = AValue then
+    Exit;
+  FDetail := AValue;
+  Invalidate;
+end;
+
+procedure TGittanSectionHeader.SetExpanded(AValue: boolean);
+begin
+  if FExpanded = AValue then
+    Exit;
+  FExpanded := AValue;
+  Invalidate;
+end;
+
+procedure TGittanSectionHeader.Paint;
+var
+  X, Y, TextY: integer;
+begin
+  Canvas.Brush.Style := bsSolid;
+  if FHot then
+    Canvas.Brush.Color := FHover
+  else
+    Canvas.Brush.Color := FBack;
+  Canvas.FillRect(ClientRect);
+  Canvas.Pen.Color := FLine;
+  Canvas.Pen.Width := 1;
+  Canvas.Line(0, 0, Width, 0);
+  { The chevron: to the right while folded, down while unfolded. }
+  X := Pad + ChevronSize;
+  Y := Height div 2;
+  Canvas.Pen.Color := FDim;
+  Canvas.Pen.Width := 2;
+  if FExpanded then
+  begin
+    Canvas.Line(X - ChevronSize, Y - ChevronSize div 2, X, Y + ChevronSize div 2);
+    Canvas.Line(X, Y + ChevronSize div 2, X + ChevronSize + 1, Y - ChevronSize div 2 - 1);
+  end
+  else
+  begin
+    Canvas.Line(X - ChevronSize div 2, Y - ChevronSize, X + ChevronSize div 2, Y);
+    Canvas.Line(X + ChevronSize div 2, Y, X - ChevronSize div 2 - 1, Y + ChevronSize + 1);
+  end;
+  Canvas.Pen.Width := 1;
+  Canvas.Font := Font;
+  Canvas.Brush.Style := bsClear;
+  TextY := (Height - Canvas.TextHeight('Xg')) div 2;
+  X := Pad + 2 * ChevronSize + Gap;
+  Canvas.Font.Color := FText;
+  Canvas.TextOut(X, TextY, FTitle);
+  if FDetail <> '' then
+  begin
+    Inc(X, Canvas.TextWidth(FTitle) + Gap);
+    Canvas.Font.Color := FDim;
+    Canvas.TextOut(X, TextY, FDetail);
+  end;
+end;
+
+procedure TGittanSectionHeader.MouseEnter;
+begin
+  inherited MouseEnter;
+  FHot := True;
+  Invalidate;
+end;
+
+procedure TGittanSectionHeader.MouseLeave;
+begin
+  inherited MouseLeave;
+  FHot := False;
+  Invalidate;
+end;
+
+procedure TGittanSectionHeader.MouseUp(Button: TMouseButton; Shift: TShiftState;
+  X, Y: integer);
+begin
+  inherited MouseUp(Button, Shift, X, Y);
+  if (Button = mbLeft) and PtInRect(ClientRect, Point(X, Y)) then
+  begin
+    FExpanded := not FExpanded;
+    Invalidate;
+    if Assigned(FOnToggle) then
+      FOnToggle(Self);
+  end;
+end;
+
+end.

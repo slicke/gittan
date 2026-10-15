@@ -83,6 +83,8 @@ begin
     WindowState := wsMaximized;
   if FSettings.TreeWidth > 80 then
     FTreePanel.Width := FSettings.TreeWidth;
+  FRepoHeader.Expanded := FSettings.RepoFilesOpen;
+  LayoutRepoFiles;
 end;
 
 procedure TForm1.FormClose(Sender: TObject; var CloseAction: TCloseAction);
@@ -103,6 +105,7 @@ begin
     FSettings.Height := Height;
   end;
   FSettings.TreeWidth := FTreePanel.Width;
+  FSettings.RepoFilesOpen := FRepoHeader.Expanded;
   FSettings.FontName := Edit.Font.Name;
   FSettings.FontSize := Edit.Font.Size;
   FSettings.Zoom := Edit.OptScaleFont;
@@ -658,7 +661,14 @@ begin
     AddItem(FFilePopup, rsOpenOnGitHub, @MenuOpenOnGitHubClick);
     AddItem(FFilePopup, rsCopyGitHubUrl, @MenuCopyGitHubUrlClick);
   end;
+  Item := TMenuItem.Create(FFilePopup);
+  Item.Caption := '-';
+  FFilePopup.Items.Add(Item);
+  { Filled with the patterns for the file when the menu pops up. }
+  FIgnoreMenu := AddItem(FFilePopup, rsAddToIgnore, nil);
+  FExcludeMenu := AddItem(FFilePopup, rsAddToExclude, nil);
   FileTree.PopupMenu := FFilePopup;
+  FRepoTree.PopupMenu := FFilePopup;
   FHeader.PopupMenu := FFilePopup;
 
   { The editors' menu replaces ATSynEdit's own, whose cut, paste, delete,
@@ -715,6 +725,12 @@ begin
     FContextFromSummary := False
   else if FFilePopup.PopupComponent = FHeader then
     FContextPath := FCurrentPath
+  else if FFilePopup.PopupComponent = FRepoTree then
+  begin
+    FContextPath := '';
+    if (FRepoTree.Selected <> nil) and (FRepoTree.Selected.Data <> nil) then
+      FContextPath := FRepoTree.Selected.GetTextPath;
+  end
   else
     FContextPath := SelectedPath;
   Exists := (FContextPath <> '') and FileExists(ContextFullPath);
@@ -722,6 +738,7 @@ begin
     FFilePopup.Items[i].Enabled := FContextPath <> '';
   FRevealItem.Enabled := Exists;
   FOpenItem.Enabled := Exists;
+  FillIgnoreMenus(FContextPath);
 end;
 
 procedure TForm1.SummaryContextFile(Sender: TObject; const APath: string;

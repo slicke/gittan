@@ -30,6 +30,8 @@ type
     Maximized: boolean;
     {** The width of the file tree, 0 for the default. }
     TreeWidth: integer;
+    {** Whether the Repository section under the tree is unfolded. }
+    RepoFilesOpen: boolean;
     {** The editor font; an empty name keeps the default. }
     FontName: string;
     FontSize: integer;
@@ -119,6 +121,7 @@ begin
       Height := Ini.ReadInteger(SecWindow, 'Height', 0);
       Maximized := Ini.ReadBool(SecWindow, 'Maximized', False);
       TreeWidth := Ini.ReadInteger(SecWindow, 'TreeWidth', 0);
+      RepoFilesOpen := Ini.ReadBool(SecWindow, 'RepoFiles', False);
       FontName := Ini.ReadString(SecView, 'FontName', '');
       FontSize := Ini.ReadInteger(SecView, 'FontSize', 0);
       Zoom := Ini.ReadInteger(SecView, 'Zoom', 0);
@@ -161,6 +164,7 @@ begin
       Ini.WriteInteger(SecWindow, 'Height', Height);
       Ini.WriteBool(SecWindow, 'Maximized', Maximized);
       Ini.WriteInteger(SecWindow, 'TreeWidth', TreeWidth);
+      Ini.WriteBool(SecWindow, 'RepoFiles', RepoFilesOpen);
       Ini.WriteString(SecView, 'FontName', FontName);
       Ini.WriteInteger(SecView, 'FontSize', FontSize);
       Ini.WriteInteger(SecView, 'Zoom', Zoom);
