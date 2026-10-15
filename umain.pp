@@ -1642,6 +1642,7 @@ begin
     FStatus.SetState('', '');
     FStatus.SetBase('');
     FStatus.SetPull('', '', stNormal, 0);
+    FStatus.SetPullThreads(0, 0);
     FStatus.SetFiles('');
     FStatus.SetProgress('', 0, 0);
     Exit;
@@ -1670,9 +1671,16 @@ begin
     Tone := PullChecks(FPull, Checks);
     FStatus.SetPull('#' + IntToStr(FPull.Number), PullRequestNote(FPull), Tone, Checks);
     FStatus.PartHint[spPull] := PullHint(FPull);
+    if FShowComments and (FThreadsNumber = FPull.Number) then
+      FStatus.SetPullThreads(OpenThreads(FThreads), Length(FThreads))
+    else
+      FStatus.SetPullThreads(0, 0);
   end
   else
+  begin
     FStatus.SetPull('', '', stNormal, 0);
+    FStatus.SetPullThreads(0, 0);
+  end;
   if FIndexing then
     FStatus.SetProgress(Format(rsIndexing, [FIndexPos, FIndexTotal]),
       FIndexPos, FIndexTotal)

@@ -62,7 +62,7 @@ type
   private
     FTitle, FBranch, FOperation, FBase, FPull, FPullNote, FFiles, FPosition: string;
     FUpdate: string;
-    FPullChecks: integer;
+    FPullChecks, FPullOpen, FPullThreads: integer;
     FMessage, FProgressText, FConflicts: string;
     FAhead, FBehind, FProgressPos, FProgressTotal: integer;
     FPullTone, FMessageTone: TGittanStatusTone;
@@ -111,6 +111,11 @@ type
       or pending ones. }
     procedure SetPull(const ANumber, ANote: string; ATone: TGittanStatusTone;
       AChecks: integer);
+    {** The review threads of the pull request: a speech bubble after the
+      checks, in the accent color with AOpen after it while threads are
+      open, dimmed when all AAll are resolved or outdated, none without
+      threads. }
+    procedure SetPullThreads(AOpen, AAll: integer);
     {** The changed files ("3 changed files"), '' for none. }
     procedure SetFiles(const AText: string);
     {** The caret's position ("Ln 12, Col 4"), '' for none. }
@@ -503,6 +508,15 @@ begin
   Change(FPullNote, ANote);
 end;
 
+procedure TGittanStatusBar.SetPullThreads(AOpen, AAll: integer);
+begin
+  if (FPullOpen = AOpen) and (FPullThreads = AAll) then
+    Exit;
+  FPullOpen := AOpen;
+  FPullThreads := AAll;
+  Invalidate;
+end;
+
 procedure TGittanStatusBar.SetFiles(const AText: string);
 begin
   Change(FFiles, AText);
@@ -639,7 +653,7 @@ procedure TGittanStatusBar.Paint;
 var
   P: TGittanStatusPart;
   TextH, TextY, X, Right, LeftEnd, W, Room, MidWant, IconW: integer;
-  Sync, S, Checks: string;
+  Sync, S, Checks, Threads: string;
   ShowTitle, ShowBase: boolean;
 
   function ChipRect(AX, AWidth: integer): TRect;
@@ -750,15 +764,22 @@ begin
   begin
     { The pull request icon, the number, the state dimmed, then the
       checks as an icon in their tone with the count of the failing or
-      pending ones. It gives way first when the window is narrow. }
+      pending ones, and the review threads as a speech bubble with the
+      count of the open ones. It gives way first when the window is
+      narrow. }
     Checks := '';
     if FPullChecks > 0 then
       Checks := IntToStr(FPullChecks);
+    Threads := '';
+    if FPullOpen > 0 then
+      Threads := IntToStr(FPullOpen);
     W := IconW + Canvas.TextWidth(FPull);
     if FPullNote <> '' then
       Inc(W, Gap div 2 + Canvas.TextWidth(FPullNote));
     if FPullTone <> stNormal then
       Inc(W, Gap div 2 + IconW - IconGap + Canvas.TextWidth(Checks));
+    if FPullThreads > 0 then
+      Inc(W, Gap div 2 + IconW - IconGap + Canvas.TextWidth(Threads));
     if Right - W > Width div 3 then
     begin
       X := Right - W;
@@ -787,6 +808,18 @@ begin
         Inc(X, IconW - IconGap);
         Canvas.Font.Color := FTones[FPullTone];
         Canvas.TextOut(X, TextY, Checks);
+        Inc(X, Canvas.TextWidth(Checks));
+      end;
+      if FPullThreads > 0 then
+      begin
+        Inc(X, Gap div 2);
+        if FPullOpen > 0 then
+          Canvas.Font.Color := FAccent
+        else
+          Canvas.Font.Color := FDim;
+        DrawStatusIcon(Canvas, HintComment, X, TextY, TextH, Canvas.Font.Color);
+        Inc(X, IconW - IconGap);
+        Canvas.TextOut(X, TextY, Threads);
       end;
       Dec(Right, W + Gap + ChipPadX);
     end;
