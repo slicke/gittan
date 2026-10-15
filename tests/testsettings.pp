@@ -49,6 +49,7 @@ begin
     AssertEquals(0, S.Width);
     AssertFalse(S.SideBySide);
     AssertEquals(0, S.Recent.Count);
+    AssertEquals(0, S.UpdateSnoozedUntil, 0);
   finally
     S.Free;
   end;
@@ -78,6 +79,7 @@ begin
     S.IgnoreWhitespace := True;
     S.EditorCommand := 'code -g';
     S.SyntaxTheme := 'Delphi';
+    S.UpdateSnoozedUntil := EncodeDate(2026, 10, 29) + 0.5;
     S.AddRecent('/tmp/a');
     S.AddRecent('/tmp/b');
     S.Save;
@@ -105,6 +107,8 @@ begin
     AssertTrue(S.IgnoreWhitespace);
     AssertEquals('code -g', S.EditorCommand);
     AssertEquals('Delphi', S.SyntaxTheme);
+    AssertEquals('the day, without the time', EncodeDate(2026, 10, 29),
+      S.UpdateSnoozedUntil, 0);
     AssertEquals(2, S.Recent.Count);
     AssertEquals('newest first', '/tmp/b', S.Recent[0]);
     AssertEquals('/tmp/a', S.Recent[1]);

@@ -58,6 +58,10 @@ type
     {** Command that opens a terminal, with the repository root appended;
       empty opens the platform's default terminal. }
     TerminalCommand: string;
+    {** The day until which a newer Gittan is not pointed out, 0 for no
+      such wait: Remind Me Later in the update dialog sets it. Kept as a
+      date alone. }
+    UpdateSnoozedUntil: TDateTime;
     {** AFileName names the ini file; empty picks gittan.ini in the
       user's configuration folder. }
     constructor Create(const AFileName: string = '');
@@ -85,6 +89,7 @@ const
   SecWindow = 'Window';
   SecView = 'View';
   SecRecent = 'Recent';
+  SecUpdate = 'Update';
   ConfigFolder = 'Gittan';
 
 {** The folder the ini file lives in. GetAppConfigDir names it after
@@ -95,6 +100,14 @@ function ConfigDir: string;
 begin
   Result := ExtractFilePath(ExcludeTrailingPathDelimiter(GetAppConfigDir(False)))
     + ConfigFolder;
+end;
+
+{ A day written yyyy-mm-dd, in no locale's format; 0 for anything else. }
+function ReadDay(const AText: string): TDateTime;
+begin
+  if (Length(AText) <> 10) or not TryEncodeDate(StrToIntDef(Copy(AText, 1, 4), 0),
+    StrToIntDef(Copy(AText, 6, 2), 0), StrToIntDef(Copy(AText, 9, 2), 0), Result) then
+    Result := 0;
 end;
 
 { TGittanSettings }
@@ -149,6 +162,7 @@ begin
       SyntaxTheme := Ini.ReadString(SecView, 'SyntaxTheme', '');
       EditorCommand := Ini.ReadString(SecView, 'EditorCommand', '');
       TerminalCommand := Ini.ReadString(SecView, 'TerminalCommand', '');
+      UpdateSnoozedUntil := ReadDay(Ini.ReadString(SecUpdate, 'SnoozedUntil', ''));
       FRecent.Clear;
       for i := 0 to MaxRecent - 1 do
       begin
@@ -193,6 +207,11 @@ begin
       Ini.WriteString(SecView, 'SyntaxTheme', SyntaxTheme);
       Ini.WriteString(SecView, 'EditorCommand', EditorCommand);
       Ini.WriteString(SecView, 'TerminalCommand', TerminalCommand);
+      if UpdateSnoozedUntil > 0 then
+        Ini.WriteString(SecUpdate, 'SnoozedUntil',
+          FormatDateTime('yyyy"-"mm"-"dd', UpdateSnoozedUntil))
+      else
+        Ini.DeleteKey(SecUpdate, 'SnoozedUntil');
       Ini.EraseSection(SecRecent);
       for i := 0 to FRecent.Count - 1 do
         Ini.WriteString(SecRecent, 'Repo' + IntToStr(i), FRecent[i]);

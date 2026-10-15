@@ -1176,6 +1176,8 @@ begin
       SyncClick(AScreenRect);
     spPull:
       MenuOpenPullClick(Sender);
+    spUpdate:
+      UpdateDialog;
     spConflicts:
       for i := 0 to High(FStats) do
         if FStats[i].Kind = ckConflict then

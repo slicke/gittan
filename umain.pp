@@ -16,7 +16,7 @@ uses
   gittan.summary, gittan.welcome, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
-  gittan.syntaxthemes, gittan.cli, gittan.symbolchanges, gittan.callers,
+  gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader,
   gittan.discard, gittan.submodules, md5;
 
@@ -119,6 +119,14 @@ type
     FPullMenu, FOpenPullItem, FCopyPullItem: TMenuItem;
     FPullRange: string;
     FPullNumber: integer;
+    { A newer Gittan (umain.update.inc): the check under way, the timer
+      that starts the next, whether the menu asked for the one under way,
+      and the latest release, FHasUpdate when it is newer than this
+      build. }
+    FUpdateJob: TGittanUpdateJob;
+    FUpdateTimer: TTimer;
+    FUpdateManual, FHasUpdate: boolean;
+    FUpdateRelease: TGittanRelease;
     { The tree sits in a panel under a filter field (Go > Filter Files):
       FillFileTree keeps only the files whose path holds FTreeFilterText,
       the field's text in lower case. }
@@ -614,6 +622,13 @@ type
     procedure TreeFilterKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
     procedure MenuFilterFilesClick(Sender: TObject);
     procedure AbandonPullJob;
+    procedure StartUpdateCheck(AManual: boolean);
+    procedure UpdateTimerTimer(Sender: TObject);
+    procedure AbandonUpdateJob;
+    procedure UpdateJobDone(Sender: TObject);
+    procedure ShowUpdateBadge;
+    procedure UpdateDialog;
+    procedure MenuCheckUpdatesClick(Sender: TObject);
     procedure PullJobDone(Sender: TObject);
     procedure RebuildPullMenu;
     procedure StatusPopupPopup(Sender: TObject);
@@ -717,6 +732,20 @@ resourcestring
   rsTools = '&Tools';
   rsInstallCli = 'Install &CLI Command';
   rsUninstallCli = '&Uninstall CLI Command';
+  rsCheckUpdates = 'Check for &Updates...';
+  rsUpdateTitle = 'Gittan Updates';
+  rsUpdateBadge = 'Build %d available';
+  rsUpdateHint = '%s is out; this is build %d.';
+  rsUpdateHintClick = 'Click to download it';
+  rsUpdateAvailable = '%s is out; this is build %d. Download it from GitHub?';
+  rsUpdateDownload = 'Download';
+  rsUpdateLater = 'Remind Me in %d Days';
+  rsUpdateNotNow = 'Not Now';
+  rsUpdateCurrent = 'Gittan is up to date: build %d is the latest.';
+  rsUpdateLocalBuild = 'This is a local build, so it is not compared with the releases. The latest release is %s.';
+  rsUpdateOpenPage = 'Open Release Page';
+  rsUpdateClose = 'Close';
+  rsUpdateFailed = 'Could not ask GitHub for the latest release: %s';
   rsFind = '&Find...';
   rsFindNext = 'Find &Next';
   rsFindPrev = 'Find &Previous';
@@ -856,6 +885,11 @@ const
   PullPollIdle = 300000;
   { How often the submodules' remotes are asked again; ms. }
   SubmodulePoll = 300000;
+  { The first look for a newer Gittan after start, then how often it is
+    looked for again; ms. Remind Me Later waits UpdateSnoozeDays. }
+  UpdateFirstCheck = 5000;
+  UpdatePoll = 6 * 60 * 60 * 1000;
+  UpdateSnoozeDays = 14;
   rsReveal = {$IFDEF DARWIN}'Reveal in &Finder'{$ELSE}
     {$IFDEF WINDOWS}'Show in &Explorer'{$ELSE}'Show in &File Manager'{$ENDIF}{$ENDIF};
   rsEditCopy = '&Copy';
@@ -1002,6 +1036,11 @@ begin
   FPullTimer := TTimer.Create(Self);
   FPullTimer.Enabled := False;
   FPullTimer.OnTimer := @PullTimerTimer;
+  { A local build has no number to compare, so only the menu checks. }
+  FUpdateTimer := TTimer.Create(Self);
+  FUpdateTimer.Interval := UpdateFirstCheck;
+  FUpdateTimer.OnTimer := @UpdateTimerTimer;
+  FUpdateTimer.Enabled := CurrentBuild >= 0;
   FBookmarkBandWidth := Edit.OptGutterWidthBookmarks;
   { The second editor shows the old side of the side-by-side view, left
     of the first, which then shows the new side. It has its own adapter,
@@ -1171,6 +1210,7 @@ begin
   Application.RemoveAsyncCalls(Self);
   StopWatcher;
   AbandonPullJob;
+  AbandonUpdateJob;
   AbandonSubmoduleJobs;
   FreeAndNil(FSubJobs);
   FBranchNames.Free;
@@ -1746,6 +1786,8 @@ begin
   Main.Items.Add(ToolsMenu);
   AddItem(ToolsMenu, rsInstallCli, 0, @MenuInstallCliClick);
   FUninstallCliItem := AddItem(ToolsMenu, rsUninstallCli, 0, @MenuUninstallCliClick);
+  ToolsMenu.Add(NewLine);
+  AddItem(ToolsMenu, rsCheckUpdates, 0, @MenuCheckUpdatesClick);
 end;
 
 { Automatic and Plain text first, then the lexer list, which is long
@@ -3279,5 +3321,6 @@ end;
 {$I umain.history.inc}
 {$I umain.repofiles.inc}
 {$I umain.submodules.inc}
+{$I umain.update.inc}
 
 end.

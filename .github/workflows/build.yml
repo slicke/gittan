@@ -85,6 +85,10 @@ jobs:
     runs-on: ${{ matrix.runner }}
     # Far above a normal build, far below the 6h default a hung lazbuild would burn.
     timeout-minutes: 90
+    env:
+      # Compiled into gittan.update, which compares it with the latest
+      # release; empty on a PR, where the version job is skipped.
+      GITTAN_BUILD: ${{ needs.version.outputs.build_number }}
     strategy:
       fail-fast: false
       matrix:

@@ -26,7 +26,7 @@ uses
 type
   {** The parts of the bar, from left to right. }
   TGittanStatusPart = (spNone, spRepo, spBranch, spSync, spOperation, spConflicts,
-    spBase, spMessage, spProgress, spPull, spFiles, spPosition);
+    spBase, spMessage, spProgress, spPull, spFiles, spPosition, spUpdate);
 
   {** How a message or the pull request reads: in the text color, or
     in green, amber or red. }
@@ -61,6 +61,7 @@ type
   TGittanStatusBar = class(TCustomControl)
   private
     FTitle, FBranch, FOperation, FBase, FPull, FPullNote, FFiles, FPosition: string;
+    FUpdate: string;
     FPullChecks: integer;
     FMessage, FProgressText, FConflicts: string;
     FAhead, FBehind, FProgressPos, FProgressTotal: integer;
@@ -114,6 +115,9 @@ type
     procedure SetFiles(const AText: string);
     {** The caret's position ("Ln 12, Col 4"), '' for none. }
     procedure SetPosition(const AText: string);
+    {** A newer Gittan ("Build 109 available") as a green badge at the
+      right edge, '' for none. }
+    procedure SetUpdate(const AText: string);
     {** Shows AText in the middle in ATone, in place of any message before.
       It clears itself after ASeconds; 0 keeps it until the next message
       or ClearMessage, for a message that says something is under way. }
@@ -137,7 +141,7 @@ type
 
 {** The parts that answer a click. }
 const
-  StatusClickable = [spRepo, spBranch, spSync, spConflicts, spPull, spFiles];
+  StatusClickable = [spRepo, spBranch, spSync, spConflicts, spPull, spFiles, spUpdate];
 
   {** Markers at the start of a hint line, drawn as icons: a green check,
     a red cross, an amber clock, a globe for a link, two arrows for a
@@ -499,6 +503,11 @@ begin
   Change(FPosition, AText);
 end;
 
+procedure TGittanStatusBar.SetUpdate(const AText: string);
+begin
+  Change(FUpdate, AText);
+end;
+
 procedure TGittanStatusBar.ShowMessage(const AText: string; ATone: TGittanStatusTone;
   ASeconds: integer);
 begin
@@ -706,8 +715,15 @@ begin
   TextY := (Height + 1 - TextH) div 2;
   IconW := TextH - 4 + IconGap;
 
-  { Right zone, right to left: position, files, pull request. }
+  { Right zone, right to left: a newer Gittan, position, files, pull
+    request. }
   Right := Width - Pad;
+  if FUpdate <> '' then
+  begin
+    W := BadgeWidth(FUpdate);
+    DrawBadge(spUpdate, Right - W, FUpdate, stGood);
+    Dec(Right, W + Gap);
+  end;
   if FPosition <> '' then
   begin
     W := Canvas.TextWidth(FPosition);
