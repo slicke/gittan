@@ -120,6 +120,7 @@ begin
   FThreadsKey := '';
   FReviewError := '';
   FMapDiffKey := '';
+  FileTree.Invalidate;
 end;
 
 { Fetches the threads of the pull request ReviewTarget names when they
@@ -196,6 +197,7 @@ begin
   if Key = FThreadsKey then
     Exit;
   FThreadsKey := Key;
+  FileTree.Invalidate;
   RebuildIfChanges;
 end;
 
@@ -875,6 +877,89 @@ begin
     FThreadFlips.Add(FGapToggle);
   FGapToggle := '';
   Application.QueueAsyncCall(@ReviewRelayoutAsync, 0);
+end;
+
+{ The threads of APath the tree marks it with: AOpen neither resolved
+  nor outdated, AAll every one; none while the change view shows no
+  comments (see PlaceThreads). }
+procedure TForm1.FileThreads(const APath: string; out AOpen, AAll: integer);
+var
+  t: integer;
+begin
+  AOpen := 0;
+  AAll := 0;
+  if not FShowComments or (FThreadsNumber = 0) or (FRepo.IsRange and not ReviewExact) then
+    Exit;
+  for t := 0 to High(FThreads) do
+    if FThreads[t].Path = APath then
+    begin
+      Inc(AAll);
+      if not FThreads[t].Resolved and not FThreads[t].Outdated then
+        Inc(AOpen);
+    end;
+end;
+
+{ What the tree's hint of APath adds about its threads. }
+function TForm1.FileThreadsHint(const APath: string): string;
+var
+  Open, All: integer;
+begin
+  FileThreads(APath, Open, All);
+  if Open = 1 then
+    Result := rsTreeThreadOpen
+  else if Open > 1 then
+    Result := Format(rsTreeThreadsOpen, [Open])
+  else if All > 0 then
+    Result := rsTreeThreadsDone
+  else
+    Result := '';
+end;
+
+{ A file with review comments gets a speech bubble at the right end of
+  its row, with the number of open threads, gray when every thread is
+  resolved or outdated; after the name when that reaches further. The
+  theme (tvoThemedDraw) marks a selected row behind its name alone, so
+  the bubble keeps its colors there and nothing is filled under it. }
+procedure TForm1.FileTreeAdvancedCustomDrawItem(Sender: TCustomTreeView;
+  Node: TTreeNode; State: TCustomDrawState; Stage: TCustomDrawStage;
+  var PaintImages, DefaultDraw: boolean);
+var
+  R: TRect;
+  C: TCanvas;
+  Open, All, W, X: integer;
+  Num: string;
+  Tint: TColor;
+begin
+  DefaultDraw := True;
+  if (Stage <> cdPostPaint) or (Node.Data = nil) then
+    Exit;
+  FileThreads(Node.GetTextPath, Open, All);
+  if All = 0 then
+    Exit;
+  R := Node.DisplayRect(False);
+  C := Sender.Canvas;
+  if Open > 0 then
+    Tint := FLinkColor
+  else if FDark then
+    Tint := RGBToColor(150, 150, 150)
+  else
+    Tint := RGBToColor(110, 110, 110);
+  Num := '';
+  if Open > 0 then
+    Num := IntToStr(Open);
+  { The icon takes a square 4 px smaller than the row (see DrawStatusIcon). }
+  W := R.Height - 4;
+  if Num <> '' then
+    Inc(W, 3 + C.TextWidth(Num));
+  X := Max(R.Right - 8 - W, Node.DisplayTextRight + 8);
+  DrawStatusIcon(C, HintComment, X, R.Top, R.Height, Tint);
+  if Num <> '' then
+  begin
+    C.Brush.Style := bsClear;
+    C.Font.Color := Tint;
+    C.TextOut(X + R.Height - 1, R.Top + (R.Height - C.TextHeight(Num)) div 2, Num);
+    C.Brush.Style := bsSolid;
+  end;
 end;
 
 { The line the status bar's pull request hint adds: how many threads of

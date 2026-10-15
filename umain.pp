@@ -508,6 +508,11 @@ type
     procedure EditClickGap(Sender: TObject; AGapItem: TATGapItem; APos: TPoint);
     procedure ToggleThreadNow;
     function ReviewHint(ANumber: integer): string;
+    procedure FileThreads(const APath: string; out AOpen, AAll: integer);
+    function FileThreadsHint(const APath: string): string;
+    procedure FileTreeAdvancedCustomDrawItem(Sender: TCustomTreeView;
+      Node: TTreeNode; State: TCustomDrawState; Stage: TCustomDrawStage;
+      var PaintImages, DefaultDraw: boolean);
     { umain.history.inc }
     procedure MenuHistoryClick(Sender: TObject);
     function ChunkRows(out AFrom, ATo: integer; out AName: string): boolean;
@@ -926,6 +931,9 @@ resourcestring
   rsReviewOpen = '%d open review threads';
   rsReviewOpenOne = '1 open review thread';
   rsReviewFailed = 'Could not fetch the review comments';
+  rsTreeThreadOpen = ' · 1 open review thread';
+  rsTreeThreadsOpen = ' · %d open review threads';
+  rsTreeThreadsDone = ' · review comments, all resolved';
 
 const
   { Scrolling on past the bottom of a file goes to the next one, and
@@ -1183,6 +1191,8 @@ begin
   FileTree.ShowHint := True;
   FileTree.OnMouseMove := @FileTreeMouseMove;
   FileTree.OnMouseLeave := @FileTreeMouseLeave;
+  { Files with review comments get a speech bubble (umain.reviews.inc). }
+  FileTree.OnAdvancedCustomDrawItem := @FileTreeAdvancedCustomDrawItem;
   FSymbolBar := TGittanSymbolBar.Create(Self);
   FSymbolBar.Parent := EditorPanel;
   FSymbolBar.Top := FHeader.Height + FFindBar.Height;
@@ -3357,7 +3367,7 @@ begin
     for i := 0 to High(FStats) do
       if FStats[i].Path = Path then
       begin
-        Tip := StatHint(FStats[i]);
+        Tip := StatHint(FStats[i]) + FileThreadsHint(Path);
         Break;
       end;
   end;
