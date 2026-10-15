@@ -104,6 +104,10 @@ type
       fetched and compared as the range FPullRange, numbered
       FPullNumber, which BaseLabel names "PR #12". }
     FPullJob: TGittanPullRequestJob;
+    { Asks gh again after PullPollPending ms while checks run, after
+      PullPollIdle ms otherwise, so the status bar follows the checks and
+      the review; off while no repository is open or gh failed. }
+    FPullTimer: TTimer;
     FPull: TGittanPullRequest;
     FHasPull: boolean;
     FPulls: TGittanPullRequests;
@@ -485,7 +489,11 @@ type
     procedure MenuCopyHashClick(Sender: TObject);
     function GitHubUrl(const AArgs: array of string; out AUrl: string): boolean;
     procedure OpenOnGitHub(const AArgs: array of string);
-    procedure StartPullJob(AForce: boolean);
+    {** Runs the pull request job. AForce asks again for the same
+      repository and branch; AKeep keeps the data shown meanwhile, for a
+      poll, where clearing it would blink the chip and the menu. }
+    procedure StartPullJob(AForce: boolean; AKeep: boolean = False);
+    procedure PullTimerTimer(Sender: TObject);
     procedure SetupTreeFilter;
     procedure TreeFilterChange(Sender: TObject);
     procedure TreeFilterKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
@@ -669,6 +677,10 @@ const
   { How long a note in the status bar stays, and an error; seconds. }
   StatusNoteSeconds = 6;
   StatusErrorSeconds = 12;
+  { How long the pull request data is kept before gh is asked again,
+    while checks run and otherwise; ms. }
+  PullPollPending = 30000;
+  PullPollIdle = 300000;
   rsReveal = {$IFDEF DARWIN}'Reveal in &Finder'{$ELSE}
     {$IFDEF WINDOWS}'Show in &Explorer'{$ELSE}'Show in &File Manager'{$ENDIF}{$ENDIF};
   rsEditCopy = '&Copy';
@@ -798,6 +810,9 @@ begin
   FOverscrollTimer.Enabled := False;
   FOverscrollTimer.Interval := OverscrollForget;
   FOverscrollTimer.OnTimer := @OverscrollTimerTimer;
+  FPullTimer := TTimer.Create(Self);
+  FPullTimer.Enabled := False;
+  FPullTimer.OnTimer := @PullTimerTimer;
   FBookmarkBandWidth := Edit.OptGutterWidthBookmarks;
   { The second editor shows the old side of the side-by-side view, left
     of the first, which then shows the new side. It has its own adapter,

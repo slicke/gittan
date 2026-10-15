@@ -1228,7 +1228,7 @@ end;
   gh goes to the network, so the job runs in a thread: once per
   repository and branch, and again on View > Refresh (AForce). A job
   still running for something else is abandoned like a blame job. }
-procedure TForm1.StartPullJob(AForce: boolean);
+procedure TForm1.StartPullJob(AForce: boolean; AKeep: boolean);
 var
   Key: string;
 begin
@@ -1239,17 +1239,33 @@ begin
     Exit;
   AbandonPullJob;
   FPullKey := Key;
-  FHasPull := False;
-  FPulls := nil;
-  FPullError := '';
+  if not AKeep then
+  begin
+    FHasPull := False;
+    FPulls := nil;
+    FPullError := '';
+  end;
   FPullJob := TGittanPullRequestJob.Create(FGitHubCli, FRepo.Root, FBranch);
   FPullJob.OnDone := @PullJobDone;
   FPullJob.Start;
-  RebuildPullMenu;
+  if not AKeep then
+    RebuildPullMenu;
+end;
+
+{ A poll waits for a job still running; that job's end sets the timer
+  again. }
+procedure TForm1.PullTimerTimer(Sender: TObject);
+begin
+  FPullTimer.Enabled := False;
+  if (FRepo.Root = '') or (FPullJob <> nil) then
+    Exit;
+  StartPullJob(True, True);
 end;
 
 procedure TForm1.AbandonPullJob;
 begin
+  { No job, no poll: the next finished job starts the timer again. }
+  FPullTimer.Enabled := False;
   if FPullJob = nil then
     Exit;
   FPullJob.Stop(False);
@@ -1273,6 +1289,16 @@ begin
   FPullError := Job.Error;
   UpdateStatus;
   RebuildPullMenu;
+  { Ask again later, more often while checks run; not when gh failed
+    (no GitHub remote, not logged in), which a refresh retries. }
+  if FPullError = '' then
+  begin
+    if FHasPull and (FPull.ChecksPending > 0) then
+      FPullTimer.Interval := PullPollPending
+    else
+      FPullTimer.Interval := PullPollIdle;
+    FPullTimer.Enabled := True;
+  end;
 end;
 
 { Compare With > Pull Requests: one radio item per open pull request,
