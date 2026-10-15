@@ -279,10 +279,10 @@ type
     function SelectedPath: string;
     function StatIcon(const AStat: TGittanFileStat): integer;
     procedure UpdateStatus;
-    {** The tone the status bar gives a pull request: red for failing
-      checks or requested changes, amber while checks run, green when
-      approved or every check passed. }
-    function PullTone(const APull: TGittanPullRequest): TGittanStatusTone;
+    {** The checks of a pull request for the status bar: red with the
+      failing ones counted, amber with the pending ones, green when all
+      passed, or stNormal without checks. }
+    function PullChecks(const APull: TGittanPullRequest; out ACount: integer): TGittanStatusTone;
     {** The status bar's hint for a pull request: its number and title,
       the checks by outcome, and what a click does. }
     function PullHint(const APull: TGittanPullRequest): string;
@@ -1221,6 +1221,8 @@ end;
 procedure TForm1.UpdateStatus;
 var
   Lexer, Sync: string;
+  Tone: TGittanStatusTone;
+  Checks: integer;
 begin
   if FAdapter.Lexer = nil then
     Lexer := rsPlainText
@@ -1238,7 +1240,7 @@ begin
     FStatus.SetSync(0, 0);
     FStatus.SetState('', '');
     FStatus.SetBase('');
-    FStatus.SetPull('', stNormal);
+    FStatus.SetPull('', '', stNormal, 0);
     FStatus.SetFiles('');
     FStatus.SetProgress('', 0, 0);
     Exit;
@@ -1264,11 +1266,12 @@ begin
   FStatus.SetBase(BaseLabel);
   if FHasPull then
   begin
-    FStatus.SetPull(PullRequestStatus(FPull), PullTone(FPull));
+    Tone := PullChecks(FPull, Checks);
+    FStatus.SetPull('#' + IntToStr(FPull.Number), PullRequestNote(FPull), Tone, Checks);
     FStatus.PartHint[spPull] := PullHint(FPull);
   end
   else
-    FStatus.SetPull('', stNormal);
+    FStatus.SetPull('', '', stNormal, 0);
   if FIndexing then
     FStatus.SetProgress(Format(rsIndexing, [FIndexPos, FIndexTotal]),
       FIndexPos, FIndexTotal)

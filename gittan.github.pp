@@ -43,6 +43,9 @@ function ParsePullRequests(const AJson: string; out APulls: TGittanPullRequests)
 function PullRequestStatus(const APull: TGittanPullRequest): string;
 {** The checks part of PullRequestStatus alone, empty without checks. }
 function PullRequestChecks(const APull: TGittanPullRequest): string;
+{** The state part of PullRequestStatus alone: Merged, Closed, Draft,
+  Approved, Changes requested or Review required, else empty. }
+function PullRequestNote(const APull: TGittanPullRequest): string;
 {** "owner/repo" of a GitHub address such as https://github.com/owner/repo/pull/12,
   empty when the address is not one. }
 function RepoPathOfUrl(const AUrl: string): string;
@@ -186,24 +189,29 @@ begin
   end;
 end;
 
+function PullRequestNote(const APull: TGittanPullRequest): string;
+begin
+  if APull.State = 'MERGED' then
+    Result := 'Merged'
+  else if APull.State = 'CLOSED' then
+    Result := 'Closed'
+  else if APull.IsDraft then
+    Result := 'Draft'
+  else if APull.ReviewDecision = 'APPROVED' then
+    Result := 'Approved'
+  else if APull.ReviewDecision = 'CHANGES_REQUESTED' then
+    Result := 'Changes requested'
+  else if APull.ReviewDecision = 'REVIEW_REQUIRED' then
+    Result := 'Review required'
+  else
+    Result := '';
+end;
+
 function PullRequestStatus(const APull: TGittanPullRequest): string;
 var
   Note: string;
 begin
-  if APull.State = 'MERGED' then
-    Note := 'Merged'
-  else if APull.State = 'CLOSED' then
-    Note := 'Closed'
-  else if APull.IsDraft then
-    Note := 'Draft'
-  else if APull.ReviewDecision = 'APPROVED' then
-    Note := 'Approved'
-  else if APull.ReviewDecision = 'CHANGES_REQUESTED' then
-    Note := 'Changes requested'
-  else if APull.ReviewDecision = 'REVIEW_REQUIRED' then
-    Note := 'Review required'
-  else
-    Note := '';
+  Note := PullRequestNote(APull);
   Result := 'PR #' + IntToStr(APull.Number);
   if Note <> '' then
     Result := Result + ' · ' + Note;

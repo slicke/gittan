@@ -59,7 +59,8 @@ type
 
   TGittanStatusBar = class(TCustomControl)
   private
-    FTitle, FBranch, FOperation, FBase, FPull, FFiles, FPosition: string;
+    FTitle, FBranch, FOperation, FBase, FPull, FPullNote, FFiles, FPosition: string;
+    FPullChecks: integer;
     FMessage, FProgressText, FConflicts: string;
     FAhead, FBehind, FProgressPos, FProgressTotal: integer;
     FPullTone, FMessageTone: TGittanStatusTone;
@@ -101,8 +102,13 @@ type
     procedure SetState(const AOperation, AConflicts: string);
     {** The base label ("vs origin/main"), '' for none. }
     procedure SetBase(const ABase: string);
-    {** The pull request's status line, '' for none, and its tone. }
-    procedure SetPull(const AText: string; ATone: TGittanStatusTone);
+    {** The pull request: its number ("#12", '' for none), its state
+      ("Approved", "Draft", '' for none) and its checks: an icon in
+      ATone (a check for stGood, a cross for stBad, a clock for stWarn,
+      none for stNormal) with AChecks after it when above 0, the failing
+      or pending ones. }
+    procedure SetPull(const ANumber, ANote: string; ATone: TGittanStatusTone;
+      AChecks: integer);
     {** The changed files ("3 changed files"), '' for none. }
     procedure SetFiles(const AText: string);
     {** The caret's position ("Ln 12, Col 4"), '' for none. }
@@ -134,7 +140,8 @@ const
 
   {** Markers at the start of a hint line, drawn as icons: a green check,
     a red cross, an amber clock, a globe for a link, two arrows for a
-    switch, a folder and a branch. Each is followed by a space. }
+    switch, a folder, a branch and a pull request. Each is followed by a
+    space. }
   HintPassed = '✓';
   HintFailed = '✕';
   HintPending = '◷';
@@ -142,6 +149,7 @@ const
   HintSwitch = '⇄';
   HintFolder = '📁';
   HintBranch = '⑂';
+  HintPull = '⤴';
 
 implementation
 
@@ -157,7 +165,6 @@ const
   ChevronWidth = 12;
   { Between the icon of the name or the branch and its text. }
   IconGap = 5;
-  DotSize = 7;
   ProgressWidth = 80;
   ProgressHeight = 4;
   { Below this the middle is too narrow for a message to say anything. }
@@ -209,7 +216,7 @@ var
 begin
   AIcon := '';
   AText := ALine;
-  for M in [HintPassed, HintFailed, HintPending, HintLink, HintSwitch, HintFolder, HintBranch] do
+  for M in [HintPassed, HintFailed, HintPending, HintLink, HintSwitch, HintFolder, HintBranch, HintPull] do
     if Copy(ALine, 1, Length(M) + 1) = M + ' ' then
     begin
       AIcon := M;
@@ -300,6 +307,20 @@ begin
     ACanvas.Ellipse(L + 1, T, L + 5, T + 4);
     ACanvas.Ellipse(L + 1, T + S - 4, L + 5, T + S);
     ACanvas.Ellipse(L + S - 4, T + 1, L + S, T + 5);
+  end
+  else if AIcon = HintPull then
+  begin
+    { A pull request, as GitHub draws it: the stem on the left with a
+      dot at each end, and on the right a dot at the bottom whose line
+      rises and bends over to the top of the stem. }
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Pen.Width := 1;
+    ACanvas.Line(L + 3, T + 4, L + 3, T + S - 3);
+    ACanvas.Polyline([Point(L + S - 2, T + S - 4), Point(L + S - 2, T + 4),
+      Point(L + S - 4, T + 2), Point(L + 6, T + 2)]);
+    ACanvas.Ellipse(L + 1, T, L + 5, T + 4);
+    ACanvas.Ellipse(L + 1, T + S - 4, L + 5, T + S);
+    ACanvas.Ellipse(L + S - 4, T + S - 4, L + S, T + S);
   end;
   ACanvas.Pen.Width := 1;
 end;
@@ -448,14 +469,17 @@ begin
   Change(FBase, ABase);
 end;
 
-procedure TGittanStatusBar.SetPull(const AText: string; ATone: TGittanStatusTone);
+procedure TGittanStatusBar.SetPull(const ANumber, ANote: string;
+  ATone: TGittanStatusTone; AChecks: integer);
 begin
-  if FPullTone <> ATone then
+  if (FPullTone <> ATone) or (FPullChecks <> AChecks) then
   begin
     FPullTone := ATone;
+    FPullChecks := AChecks;
     Invalidate;
   end;
-  Change(FPull, AText);
+  Change(FPull, ANumber);
+  Change(FPullNote, ANote);
 end;
 
 procedure TGittanStatusBar.SetFiles(const AText: string);
@@ -589,7 +613,7 @@ procedure TGittanStatusBar.Paint;
 var
   P: TGittanStatusPart;
   TextH, TextY, X, Right, LeftEnd, W, Room, MidWant, IconW: integer;
-  Sync, S: string;
+  Sync, S, Checks: string;
   ShowTitle, ShowBase: boolean;
 
   function ChipRect(AX, AWidth: integer): TRect;
@@ -691,24 +715,46 @@ begin
   end;
   if FPull <> '' then
   begin
-    { The pull request gives way first when the window is narrow. }
-    W := Canvas.TextWidth(FPull) + DotSize + 6;
+    { The pull request icon, the number, the state dimmed, then the
+      checks as an icon in their tone with the count of the failing or
+      pending ones. It gives way first when the window is narrow. }
+    Checks := '';
+    if FPullChecks > 0 then
+      Checks := IntToStr(FPullChecks);
+    W := IconW + Canvas.TextWidth(FPull);
+    if FPullNote <> '' then
+      Inc(W, Gap div 2 + Canvas.TextWidth(FPullNote));
+    if FPullTone <> stNormal then
+      Inc(W, Gap div 2 + IconW - IconGap + Canvas.TextWidth(Checks));
     if Right - W > Width div 3 then
     begin
-      FRects[spPull] := ChipRect(Right - W - ChipPadX, W + 2 * ChipPadX);
+      X := Right - W;
+      FRects[spPull] := ChipRect(X - ChipPadX, W + 2 * ChipPadX);
       DrawHot(spPull);
-      Canvas.Pen.Style := psClear;
-      Canvas.Brush.Style := bsSolid;
-      if FPullTone = stNormal then
-        Canvas.Brush.Color := FDim
-      else
-        Canvas.Brush.Color := FTones[FPullTone];
-      Canvas.Ellipse(Right - W, TextY + (TextH - DotSize) div 2,
-        Right - W + DotSize, TextY + (TextH - DotSize) div 2 + DotSize);
-      Canvas.Pen.Style := psSolid;
-      Canvas.Brush.Style := bsClear;
+      DrawStatusIcon(Canvas, HintPull, X, TextY, TextH, FDim);
+      Inc(X, IconW);
       Canvas.Font.Color := FText;
-      Canvas.TextOut(Right - W + DotSize + 6, TextY, FPull);
+      Canvas.TextOut(X, TextY, FPull);
+      Inc(X, Canvas.TextWidth(FPull));
+      if FPullNote <> '' then
+      begin
+        Inc(X, Gap div 2);
+        Canvas.Font.Color := FDim;
+        Canvas.TextOut(X, TextY, FPullNote);
+        Inc(X, Canvas.TextWidth(FPullNote));
+      end;
+      if FPullTone <> stNormal then
+      begin
+        Inc(X, Gap div 2);
+        case FPullTone of
+          stGood: DrawStatusIcon(Canvas, HintPassed, X, TextY, TextH, FTones[stGood]);
+          stBad: DrawStatusIcon(Canvas, HintFailed, X, TextY, TextH, FTones[stBad]);
+          stWarn: DrawStatusIcon(Canvas, HintPending, X, TextY, TextH, FTones[stWarn]);
+        end;
+        Inc(X, IconW - IconGap);
+        Canvas.Font.Color := FTones[FPullTone];
+        Canvas.TextOut(X, TextY, Checks);
+      end;
       Dec(Right, W + Gap + ChipPadX);
     end;
   end;

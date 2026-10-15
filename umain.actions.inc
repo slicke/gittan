@@ -1362,15 +1362,20 @@ begin
     OpenURL(FPull.Url);
 end;
 
-function TForm1.PullTone(const APull: TGittanPullRequest): TGittanStatusTone;
+function TForm1.PullChecks(const APull: TGittanPullRequest; out ACount: integer): TGittanStatusTone;
 begin
-  if (APull.State = 'MERGED') or (APull.State = 'CLOSED') then
-    Result := stNormal
-  else if (APull.ChecksFailed > 0) or (APull.ReviewDecision = 'CHANGES_REQUESTED') then
-    Result := stBad
+  ACount := 0;
+  if APull.ChecksFailed > 0 then
+  begin
+    ACount := APull.ChecksFailed;
+    Result := stBad;
+  end
   else if APull.ChecksPending > 0 then
-    Result := stWarn
-  else if (APull.ReviewDecision = 'APPROVED') or (APull.ChecksPassed > 0) then
+  begin
+    ACount := APull.ChecksPending;
+    Result := stWarn;
+  end
+  else if APull.ChecksPassed > 0 then
     Result := stGood
   else
     Result := stNormal;
