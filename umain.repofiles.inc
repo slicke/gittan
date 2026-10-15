@@ -7,9 +7,12 @@
   file shows up that should not. It is a header that folds, remembered
   in the settings, over a second tree like the first, in a panel at the
   bottom of the tree panel; the panel is as high as the rows, up to half
-  the panel, and hidden while there is nothing to list. A click shows the
-  file through ShowRepoFile, so a changed one is selected in the tree
-  above with its diff, and only one of the trees keeps a selection. }
+  the panel, and hidden while there is nothing to list. The exclude file
+  of the git directory, .git/info/exclude, is listed last when it
+  exists. A click shows the file through ShowRepoFile, so a changed one
+  is selected in the tree above with its diff, and only one of the trees
+  keeps a selection. The files listed here are the ones the editor lets
+  the user change; see "Editing the repository's files" below. }
 procedure TForm1.SetupRepoFiles;
 begin
   FRepoPanel := TPanel.Create(Self);
@@ -48,7 +51,9 @@ begin
 end;
 
 { Fills the section's tree from ListRepoFiles: the root files in their
-  fixed order, then .github as a folder, every folder open. }
+  fixed order, then .github as a folder, every folder open, then the
+  exclude file as one row (Data 2, where the others have 1), since it
+  is not under the root. }
 procedure TForm1.FillRepoFiles;
 var
   Files: TStringList;
@@ -91,6 +96,14 @@ begin
       Node.Data := Pointer(1);
       Node.ImageIndex := iconFile;
       Node.SelectedIndex := iconFile;
+    end;
+    if (FExcludePath <> '') and FileExists(FExcludePath) then
+    begin
+      Node := FRepoTree.Items.AddChild(nil, ExcludeShown);
+      Node.Data := Pointer(2);
+      Node.ImageIndex := iconFile;
+      Node.SelectedIndex := iconFile;
+      Inc(Count);
     end;
     FRepoTree.FullExpand;
   finally
@@ -148,7 +161,40 @@ begin
   Node := FRepoTree.Selected;
   if (Node = nil) or (Node.Data = nil) or (FRepo.Root = '') then
     Exit;
+  if Node.Data = Pointer(2) then
+  begin
+    { The exclude file is never in the tree above: it is not tracked. }
+    FileTree.Selected := nil;
+    OpenFile(FExcludePath);
+    Exit;
+  end;
   ShowRepoFile(Node.GetTextPath);
+end;
+
+{ Selects the row of APath in the section without showing the file, or
+  clears the selection for '', as after a refresh rebuilt the rows. }
+procedure TForm1.SelectRepoNode(const APath: string);
+var
+  Node: TTreeNode;
+begin
+  FRepoTree.OnSelectionChanged := nil;
+  try
+    FRepoTree.Selected := nil;
+    if APath = '' then
+      Exit;
+    Node := FRepoTree.Items.GetFirstNode;
+    while Node <> nil do
+    begin
+      if (Node.Data <> nil) and (Node.GetTextPath = APath) then
+      begin
+        FRepoTree.Selected := Node;
+        Exit;
+      end;
+      Node := Node.GetNext;
+    end;
+  finally
+    FRepoTree.OnSelectionChanged := @RepoTreeSelectionChanged;
+  end;
 end;
 
 { ---------------------------------------------------------------------------
@@ -209,25 +255,206 @@ begin
     Exit;
   if Item.Parent = FExcludeMenu then
   begin
-    FileName := FRepo.GitDir;
-    if FileName = '' then
-    begin
-      StatusNote(FRepo.Error, True);
-      Exit;
-    end;
-    FileName := IncludeTrailingPathDelimiter(FileName) + SetDirSeparators(ExcludeFile);
-    Shown := '.git/' + ExcludeFile;
+    FileName := FExcludePath;
+    Shown := ExcludeShown;
   end
   else
   begin
     Shown := RepoRootFiles[0];
     FileName := IncludeTrailingPathDelimiter(FRepo.Root) + Shown;
   end;
-  if AddIgnorePattern(FileName, Item.Hint) then
+  if (FileName <> '') and AddIgnorePattern(FileName, Item.Hint) then
   begin
     StatusNote(Format(rsIgnoreAdded, [Item.Hint, Shown]));
     RefreshRepository;
   end
   else
     StatusNote(Format(rsIgnoreFailed, [Shown]), True);
+end;
+
+{ ---------------------------------------------------------------------------
+  Editing the repository's files
+  ---------------------------------------------------------------------------
+  The editor is a viewer, except for the files the Repository section
+  lists: a .gitignore or a workflow is what one wants to touch while
+  looking at a change, so the file view of one of them is open to edits.
+  OpenFile asks RepoFileName and calls BeginEdit, which lifts read-only
+  mode and puts Revert and Save pills in the header (Cmd+Z and Shift+Cmd+Z
+  undo and redo through the editor's own keymap); the diff view of such a
+  file offers an Edit pill that opens the file view. A dot after the
+  file name, the pills and File > Save (Cmd+S) follow Edit.Modified
+  through UpdateEditState. Whatever replaces the editor's text (OpenFile,
+  ShowText, ShowSummary, OpenRepository) first runs FlushEdit, which
+  offers to save unsaved changes, then LeaveEdit; closing the window
+  asks through FormCloseQuery, with a Cancel. A save writes the file
+  with the encoding and line ends it was read with, notes it in the
+  status bar and refreshes the repository, so the tree shows the result
+  at once; the watcher otherwise leaves an edit alone (RefreshRepository)
+  and the header says when the file changed on disk behind it. }
+
+{ Whether AFileName, a full name, is one of the repository's own files:
+  the exclude file, or a file under the root that IsRepoFile accepts. }
+function TForm1.RepoFileName(const AFileName: string): boolean;
+var
+  Root, Rel: string;
+begin
+  if (AFileName <> '') and (AFileName = FExcludePath) then
+    Exit(True);
+  if FRepo.Root = '' then
+    Exit(False);
+  Root := IncludeTrailingPathDelimiter(FRepo.Root);
+  if Copy(AFileName, 1, Length(Root)) <> Root then
+    Exit(False);
+  Rel := Copy(AFileName, Length(Root) + 1, MaxInt);
+  Result := IsRepoFile(StringReplace(Rel, PathDelim, '/', [rfReplaceAll]));
+end;
+
+{ Opens the loaded file AFileName to edits. }
+procedure TForm1.BeginEdit(const AFileName: string);
+begin
+  FEditPath := AFileName;
+  FEditStamp := FileAge(AFileName);
+  Edit.ModeReadOnly := False;
+  FHeader.SetActions([rsRevertAction, rsSaveAction]);
+  UpdateEditState;
+end;
+
+{ Offers to save unsaved changes before the editor's text is replaced.
+  Declining drops them; there is no way to stay, since the caller is
+  already on its way elsewhere. }
+procedure TForm1.FlushEdit;
+begin
+  if (FEditPath = '') or not Edit.Modified then
+    Exit;
+  if QuestionDlg(rsAppName, Format(rsSaveAsk, [ExtractFileName(FEditPath)]),
+    mtConfirmation, [mrYes, rsSaveAction, 'IsDefault', mrNo, rsDontSave], 0) = mrYes then
+    SaveEdit(False)
+  else
+    Edit.Modified := False;
+end;
+
+{ Ends the edit: the editor is read-only again. The pills go with the
+  next title the header gets. }
+procedure TForm1.LeaveEdit;
+begin
+  if FEditPath = '' then
+    Exit;
+  FEditPath := '';
+  Edit.ModeReadOnly := True;
+  Edit.Modified := False;
+  UpdateEditState;
+end;
+
+{ The dot, the pills and File > Save follow whether there is anything to
+  save. The pills are left alone outside an edit: the diff view has one
+  of its own. }
+procedure TForm1.UpdateEditState;
+var
+  Dirty: boolean;
+begin
+  Dirty := (FEditPath <> '') and Edit.Modified;
+  FHeader.SetModified(Dirty);
+  if FEditPath <> '' then
+  begin
+    FHeader.SetActionEnabled(0, Dirty);
+    FHeader.SetActionEnabled(1, Dirty);
+  end;
+  if FSaveItem <> nil then
+    FSaveItem.Enabled := Dirty;
+end;
+
+{ Writes the edited file; ARefresh reloads the repository so the tree
+  shows the result at once. False when the write failed, which the
+  status bar says. }
+function TForm1.SaveEdit(ARefresh: boolean): boolean;
+var
+  Shown: string;
+begin
+  Result := False;
+  if FEditPath = '' then
+    Exit;
+  Shown := ExtractFileName(FEditPath);
+  try
+    Edit.SaveToFile(FEditPath);
+  except
+    on E: Exception do
+    begin
+      StatusNote(Format(rsSaveFailed, [Shown, E.Message]), True);
+      Exit;
+    end;
+  end;
+  FEditStamp := FileAge(FEditPath);
+  FHeader.SetNote('');
+  StatusNote(Format(rsSaved, [Shown]));
+  Result := True;
+  if ARefresh then
+    RefreshRepository;
+end;
+
+{ Drops the changes and loads the file from disk again, at the same
+  place, after asking: the undo history goes with them. }
+procedure TForm1.RevertEdit;
+var
+  TopLine: integer;
+begin
+  if (FEditPath = '') or not Edit.Modified then
+    Exit;
+  if QuestionDlg(rsAppName, Format(rsRevertAsk, [ExtractFileName(FEditPath)]),
+    mtConfirmation, [mrYes, rsRevertAction, mrCancel, rsCancelButton, 'IsCancel'], 0) <> mrYes then
+    Exit;
+  TopLine := Edit.LineTop;
+  Edit.Modified := False;
+  OpenFile(FEditPath);
+  Edit.LineTop := Min(TopLine, Max(Edit.Strings.Count - 1, 0));
+end;
+
+{ A pill in the header: Revert or Save during an edit, else Edit on the
+  diff view of a repository file, which opens its file view; the file
+  stays selected in the section, not in the tree above, so a click there
+  brings the diff back. }
+procedure TForm1.HeaderAction(Sender: TObject; AIndex: integer);
+var
+  Path: string;
+begin
+  if FEditPath <> '' then
+  begin
+    if AIndex = 0 then
+      RevertEdit
+    else
+      SaveEdit(True);
+    Exit;
+  end;
+  if (FView <> gvChanges) or (FCurrentPath = '') or (FRepo.Root = '') then
+    Exit;
+  Path := FCurrentPath;
+  FileTree.Selected := nil;
+  OpenFile(IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(Path));
+  SelectRepoNode(Path);
+end;
+
+procedure TForm1.EditChangeModified(Sender: TObject);
+begin
+  UpdateEditState;
+end;
+
+procedure TForm1.MenuSaveClick(Sender: TObject);
+begin
+  if FEditPath <> '' then
+    SaveEdit(True);
+end;
+
+{ Unsaved changes hold the window open until they are saved or dropped. }
+procedure TForm1.FormCloseQuery(Sender: TObject; var CanClose: boolean);
+begin
+  CanClose := True;
+  if (FEditPath = '') or not Edit.Modified then
+    Exit;
+  case QuestionDlg(rsAppName, Format(rsSaveAsk, [ExtractFileName(FEditPath)]),
+      mtConfirmation, [mrYes, rsSaveAction, 'IsDefault', mrNo, rsDontSave,
+      mrCancel, rsCancelButton, 'IsCancel'], 0) of
+    mrYes: CanClose := SaveEdit(False);
+    mrNo: Edit.Modified := False;
+    else
+      CanClose := False;
+  end;
 end;

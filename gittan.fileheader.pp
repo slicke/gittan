@@ -2,41 +2,62 @@ unit gittan.fileheader;
 
 {** The file header: a bar above the editor that names what it shows. On
   the left the badge and path of the file (the directory dimmed, the file
-  name in full color), on the right its added and deleted line counts, the
-  lexer, and the change navigator for jumping between the changed blocks.
+  name in full color, a dot after it while the editor holds unsaved
+  changes), on the right its added and deleted line counts, the lexer,
+  the actions the view offers as pills (Edit, Save, Revert) and the
+  change navigator for jumping between the changed blocks.
 
   It paints itself with the editor's palette in both themes, like the
-  summary, and owns the navigator as a child so it can lay out around it. }
+  summary, and owns the navigator as a child so it can lay out around it.
+  The pills are painted here and hit-tested on the mouse, as the
+  navigator does with its arrows. }
 
 {$mode objfpc}{$H+}
 
 interface
 
 uses
-  Classes, SysUtils, Controls, Graphics, ImgList, gittan.changenav;
+  Classes, SysUtils, Controls, Graphics, ImgList, Types, gittan.changenav;
 
 type
+  {** A click on the action pill at AIndex, in the order of SetActions. }
+  TGittanHeaderActionEvent = procedure(Sender: TObject; AIndex: integer) of object;
 
   { TGittanFileHeader }
 
   TGittanFileHeader = class(TCustomControl)
   private
-    FPrefix, FName, FLexer, FStage, FSymbol: string;
+    FPrefix, FName, FLexer, FStage, FSymbol, FNote: string;
     FIcon: integer;
     FAdded, FDeleted: integer;
-    FHasCounts, FBinary: boolean;
+    FHasCounts, FBinary, FModified: boolean;
     FImages: TCustomImageList;
     FNav: TGittanChangeNav;
     FBack, FText, FDim, FAddedColor, FDeletedColor, FLine: TColor;
+    FFill, FBorder, FHotColor: TColor;
+    FActions: array of string;
+    FActionsEnabled: array of boolean;
+    FActionRects: array of TRect;
+    FHot, FPressed: integer;
+    FOnAction: TGittanHeaderActionEvent;
+    function ActionAt(X, Y: integer): integer;
+    procedure SetHot(AValue: integer);
   protected
     procedure Paint; override;
+    procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
+    procedure MouseLeave; override;
+    procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
+      override;
+    procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
+      override;
   public
     constructor Create(AOwner: TComponent); override;
     {** Shows APath split into its directory and file name, with the badge
-      at AIcon in Images (or none when AIcon is -1). The counts are
-      cleared. }
+      at AIcon in Images (or none when AIcon is -1). The counts, the
+      actions, the note and the modified dot are cleared. }
     procedure SetFile(const APath: string; AIcon: integer);
-    {** Shows ATitle alone, without a badge. The counts are cleared. }
+    {** Shows ATitle alone, without a badge. The counts, the actions, the
+      note and the modified dot are cleared. }
     procedure SetTitle(const ATitle: string);
     {** Shows the added and deleted line counts, or "binary" when ABinary. }
     procedure SetCounts(AAdded, ADeleted: integer; ABinary: boolean);
@@ -51,14 +72,28 @@ type
     {** Shows the navigator at ACurrent of ATotal changes, or hides it when
       ATotal is 0. }
     procedure SetChanges(ACurrent, ATotal: integer);
+    {** The action pills, left to right, all enabled; none for an empty
+      array. A click fires OnAction with the index. }
+    procedure SetActions(const ACaptions: array of string);
+    {** Enables or dims the pill at AIndex. }
+    procedure SetActionEnabled(AIndex: integer; AEnabled: boolean);
+    {** Shows the dot after the file name that marks unsaved changes. }
+    procedure SetModified(AModified: boolean);
+    {** A warning shown in the deleted color left of the pills, or '' for
+      none. }
+    procedure SetNote(const ANote: string);
     {** Sets the palette: the background, the text, the dim text for the
       directory and lexer, the added and deleted colors, and the line color
       for the bottom border. }
     procedure SetColors(ABack, AText, ADim, AAdded, ADeleted, ALine: TColor);
+    {** The pills' colors: the fill, the border and the text under the
+      mouse. }
+    procedure SetPillColors(AFill, ABorder, AHot: TColor);
     {** The image list the badge comes from. }
     property Images: TCustomImageList read FImages write FImages;
     {** The navigator, for its colors and click handlers. }
     property Nav: TGittanChangeNav read FNav;
+    property OnAction: TGittanHeaderActionEvent read FOnAction write FOnAction;
   end;
 
 implementation
@@ -71,9 +106,13 @@ resourcestring
 const
   HeaderHeight = 36;
   NavHeight = 26;
+  PillHeight = 24;
+  PillPad = 10;
+  PillGap = 6;
   Pad = 12;
   Gap = 12;
   IconSize = 16;
+  DotSize = 7;
   SymbolSep = '  ›  ';
 
 { TGittanFileHeader }
@@ -84,6 +123,8 @@ begin
   ControlStyle := ControlStyle + [csOpaque];
   Height := HeaderHeight;
   FIcon := -1;
+  FHot := -1;
+  FPressed := -1;
   FNav := TGittanChangeNav.Create(Self);
   FNav.Parent := Self;
   FNav.Height := NavHeight;
@@ -95,6 +136,7 @@ begin
   FNav.BorderSpacing.Right := Pad - 2;
   FNav.Visible := False;
   SetColors(clWindow, clWindowText, clGrayText, clGreen, clRed, clBtnShadow);
+  SetPillColors(clBtnFace, clBtnShadow, clHighlight);
 end;
 
 procedure TGittanFileHeader.SetFile(const APath: string; AIcon: integer);
@@ -105,7 +147,9 @@ begin
   FHasCounts := False;
   FStage := '';
   FSymbol := '';
-  Invalidate;
+  FNote := '';
+  FModified := False;
+  SetActions([]);
 end;
 
 procedure TGittanFileHeader.SetTitle(const ATitle: string);
@@ -116,7 +160,9 @@ begin
   FHasCounts := False;
   FStage := '';
   FSymbol := '';
-  Invalidate;
+  FNote := '';
+  FModified := False;
+  SetActions([]);
 end;
 
 procedure TGittanFileHeader.SetStage(AStaged, AUnstaged: boolean);
@@ -164,6 +210,51 @@ begin
   Invalidate;
 end;
 
+procedure TGittanFileHeader.SetActions(const ACaptions: array of string);
+var
+  i: integer;
+begin
+  SetLength(FActions, Length(ACaptions));
+  SetLength(FActionsEnabled, Length(ACaptions));
+  SetLength(FActionRects, Length(ACaptions));
+  for i := 0 to High(ACaptions) do
+  begin
+    FActions[i] := ACaptions[i];
+    FActionsEnabled[i] := True;
+    FActionRects[i] := Rect(0, 0, 0, 0);
+  end;
+  FHot := -1;
+  FPressed := -1;
+  Cursor := crDefault;
+  Invalidate;
+end;
+
+procedure TGittanFileHeader.SetActionEnabled(AIndex: integer; AEnabled: boolean);
+begin
+  if (AIndex < 0) or (AIndex > High(FActionsEnabled)) then
+    Exit;
+  if FActionsEnabled[AIndex] = AEnabled then
+    Exit;
+  FActionsEnabled[AIndex] := AEnabled;
+  Invalidate;
+end;
+
+procedure TGittanFileHeader.SetModified(AModified: boolean);
+begin
+  if FModified = AModified then
+    Exit;
+  FModified := AModified;
+  Invalidate;
+end;
+
+procedure TGittanFileHeader.SetNote(const ANote: string);
+begin
+  if FNote = ANote then
+    Exit;
+  FNote := ANote;
+  Invalidate;
+end;
+
 procedure TGittanFileHeader.SetColors(ABack, AText, ADim, AAdded, ADeleted,
   ALine: TColor);
 begin
@@ -177,14 +268,88 @@ begin
   Invalidate;
 end;
 
-{ Right to left: the navigator, the lexer, the counts; then the badge and
-  the path from the left in the room that is left, and the symbol the
-  caret is in after the path when it fits. A path too long for the room
-  loses its directory first, then its end. }
+procedure TGittanFileHeader.SetPillColors(AFill, ABorder, AHot: TColor);
+begin
+  FFill := AFill;
+  FBorder := ABorder;
+  FHotColor := AHot;
+  Invalidate;
+end;
+
+{ The pill under the point, -1 for none; a dimmed pill is not hit. }
+function TGittanFileHeader.ActionAt(X, Y: integer): integer;
+var
+  i: integer;
+begin
+  for i := 0 to High(FActionRects) do
+    if FActionsEnabled[i] and FActionRects[i].Contains(Point(X, Y)) then
+      Exit(i);
+  Result := -1;
+end;
+
+procedure TGittanFileHeader.SetHot(AValue: integer);
+begin
+  if FHot = AValue then
+    Exit;
+  FHot := AValue;
+  if AValue >= 0 then
+    Cursor := crHandPoint
+  else
+    Cursor := crDefault;
+  Invalidate;
+end;
+
+procedure TGittanFileHeader.MouseMove(Shift: TShiftState; X, Y: integer);
+begin
+  inherited MouseMove(Shift, X, Y);
+  SetHot(ActionAt(X, Y));
+end;
+
+procedure TGittanFileHeader.MouseLeave;
+begin
+  inherited MouseLeave;
+  SetHot(-1);
+end;
+
+procedure TGittanFileHeader.MouseDown(Button: TMouseButton; Shift: TShiftState;
+  X, Y: integer);
+begin
+  inherited MouseDown(Button, Shift, X, Y);
+  if Button = mbLeft then
+  begin
+    FPressed := ActionAt(X, Y);
+    Invalidate;
+  end;
+end;
+
+{ The click fires on release over the pill that was pressed. }
+procedure TGittanFileHeader.MouseUp(Button: TMouseButton; Shift: TShiftState;
+  X, Y: integer);
+var
+  Index: integer;
+begin
+  inherited MouseUp(Button, Shift, X, Y);
+  if Button <> mbLeft then
+    Exit;
+  Index := FPressed;
+  FPressed := -1;
+  Invalidate;
+  if (Index < 0) or (Index <> ActionAt(X, Y)) then
+    Exit;
+  if Assigned(FOnAction) then
+    FOnAction(Self, Index);
+end;
+
+{ Right to left: the navigator, the pills, the note, the lexer, the
+  counts; then the badge and the path from the left in the room that is
+  left, the modified dot after the name, and the symbol the caret is in
+  after that when it fits. A path too long for the room loses its
+  directory first, then its end. }
 procedure TGittanFileHeader.Paint;
 var
-  X, Right, TextY, Room: integer;
+  X, Right, TextY, Room, i, W, PillTop: integer;
   Prefix, FileName, S: string;
+  R: TRect;
 
   procedure DrawRight(const AText: string; AColor: TColor);
   begin
@@ -209,6 +374,33 @@ begin
   Right := Width - Pad;
   if FNav.Visible then
     Dec(Right, FNav.Width + Gap);
+  { The pills, the last one rightmost. }
+  PillTop := (Height - 1 - PillHeight) div 2;
+  for i := High(FActions) downto 0 do
+  begin
+    W := Canvas.TextWidth(FActions[i]) + 2 * PillPad;
+    R := Rect(Right - W, PillTop, Right, PillTop + PillHeight);
+    FActionRects[i] := R;
+    Canvas.Pen.Color := FBorder;
+    Canvas.Pen.Width := 1;
+    Canvas.Brush.Style := bsSolid;
+    Canvas.Brush.Color := FFill;
+    Canvas.RoundRect(R.Left, R.Top, R.Right, R.Bottom, PillHeight, PillHeight);
+    Canvas.Brush.Style := bsClear;
+    if not FActionsEnabled[i] then
+      Canvas.Font.Color := FDim
+    else if (FPressed = i) or ((FPressed < 0) and (FHot = i)) then
+      Canvas.Font.Color := FHotColor
+    else
+      Canvas.Font.Color := FText;
+    Canvas.TextOut(R.Left + PillPad, TextY, FActions[i]);
+    Right := R.Left;
+    if i = 0 then
+      Dec(Right, Gap)
+    else
+      Dec(Right, PillGap);
+  end;
+  DrawRight(FNote, FDeletedColor);
   DrawRight(FLexer, FDim);
   if FHasCounts then
     if FBinary then
@@ -235,6 +427,8 @@ begin
     Inc(X, IconSize + Gap div 2 + 2);
   end;
   Room := Right - X;
+  if FModified then
+    Dec(Room, DotSize + Gap div 2);
   Prefix := FPrefix;
   FileName := FName;
   if Canvas.TextWidth(Prefix + FileName) > Room then
@@ -259,9 +453,20 @@ begin
   end;
   Canvas.Font.Color := FText;
   Canvas.TextOut(X, TextY, FileName);
+  Inc(X, Canvas.TextWidth(FileName));
+  if FModified then
+  begin
+    Inc(X, Gap div 2);
+    Canvas.Pen.Color := FText;
+    Canvas.Brush.Style := bsSolid;
+    Canvas.Brush.Color := FText;
+    PillTop := (Height - 1 - DotSize) div 2;
+    Canvas.Ellipse(X, PillTop, X + DotSize, PillTop + DotSize);
+    Canvas.Brush.Style := bsClear;
+    Inc(X, DotSize);
+  end;
   if FSymbol = '' then
     Exit;
-  Inc(X, Canvas.TextWidth(FileName));
   S := SymbolSep + FSymbol;
   if X + Canvas.TextWidth(S) > Right then
     Exit;

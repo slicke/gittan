@@ -130,6 +130,14 @@ type
     FRepoHeader: TGittanSectionHeader;
     FRepoTree: TTreeView;
     FIgnoreMenu, FExcludeMenu: TMenuItem;
+    { Editing the repository's own files (umain.repofiles.inc): the full
+      name of the file the editor holds open to edits, '' while it shows
+      something else; the file's time stamp when it was loaded or saved,
+      so a change on disk behind an edit is noticed; the exclude file of
+      the open repository, found once when it is opened; and File > Save. }
+    FEditPath, FExcludePath: string;
+    FEditStamp: LongInt;
+    FSaveItem: TMenuItem;
     { The default branch of the remote (origin/main) and the merge base
       of the branch with it, Compare With's "origin/main (Merge Base)";
       and the branch's lead on and lag behind its upstream, for the
@@ -526,6 +534,18 @@ type
     procedure RepoTreeSelectionChanged(Sender: TObject);
     procedure FillIgnoreMenus(const APath: string);
     procedure MenuIgnoreClick(Sender: TObject);
+    function RepoFileName(const AFileName: string): boolean;
+    procedure BeginEdit(const AFileName: string);
+    procedure FlushEdit;
+    procedure LeaveEdit;
+    procedure UpdateEditState;
+    function SaveEdit(ARefresh: boolean): boolean;
+    procedure RevertEdit;
+    procedure SelectRepoNode(const APath: string);
+    procedure HeaderAction(Sender: TObject; AIndex: integer);
+    procedure EditChangeModified(Sender: TObject);
+    procedure MenuSaveClick(Sender: TObject);
+    procedure FormCloseQuery(Sender: TObject; var CanClose: boolean);
     procedure TreeFilterChange(Sender: TObject);
     procedure TreeFilterKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
     procedure MenuFilterFilesClick(Sender: TObject);
@@ -660,6 +680,18 @@ resourcestring
   rsAddToExclude = 'Add to .git/info/e&xclude';
   rsIgnoreAdded = 'Added %s to %s';
   rsIgnoreFailed = 'Could not write %s';
+  rsSave = '&Save';
+  rsEditAction = 'Edit';
+  rsSaveAction = 'Save';
+  rsRevertAction = 'Revert';
+  rsDontSave = 'Don''t Save';
+  rsCancelButton = 'Cancel';
+  rsSaveAsk = 'Save the changes to %s?';
+  rsRevertAsk = 'Drop the changes to %s and load it from disk again?';
+  rsSaved = 'Saved %s';
+  rsSaveFailed = 'Could not save %s: %s';
+  rsChangedOnDisk = 'changed on disk';
+  rsGitignoreLexer = 'Gitignore';
   rsCopyPath = 'Copy &Path';
   rsCopyRelativePath = 'Copy &Relative Path';
   rsOpenInEditor = 'Open in &Editor';
@@ -843,6 +875,7 @@ begin
   { A fixed, narrow minimap; the default takes a fifth of the editor. }
   Edit.OptMinimapCharWidth := 30;
   Edit.OnChangeCaretPos := @EditChangeCaretPos;
+  Edit.OnChangeModified := @EditChangeModified;
   { Scrolling on past the bottom pulls in the next file, and past the
     top the previous one; the pill that shows the pull is painted over
     the text (see EditMouseWheel). }
@@ -904,6 +937,7 @@ begin
   FNav := FHeader.Nav;
   FNav.OnPrev := @MenuPrevChangeClick;
   FNav.OnNext := @MenuNextChangeClick;
+  FHeader.OnAction := @HeaderAction;
   UpdateChangeNav;
   { The find bar sits under the header, above the editor. }
   FFindBar := TGittanFindBar.Create(Self);
@@ -994,6 +1028,7 @@ begin
   BuildPopups;
   ApplyWrap;
   OnClose := @FormClose;
+  OnCloseQuery := @FormCloseQuery;
   UpdateCaption;
   ShowSummary;
   { gittan [file | folder], else the repository of the last run. }
@@ -1046,6 +1081,10 @@ var
   Actions: TATEditorMouseActions;
 begin
   AEd.ModeReadOnly := True;
+  { The caret stays within the line: a click past its end lands at the
+    end, and typing there (in a repository file open to edits) does not
+    pad the line with spaces. }
+  AEd.OptCaretVirtual := False;
   { Cmd+click (Ctrl+click elsewhere) goes to the definition of the word
     (see EditMouseUp); the editor's default for it, a second caret, is
     of no use in a viewer. }
@@ -1188,6 +1227,8 @@ begin
       RGBToColor(62, 62, 62));
     FNav.SetColors(RGBToColor(37, 37, 38), RGBToColor(50, 50, 51),
       RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240));
+    FHeader.SetPillColors(RGBToColor(50, 50, 51), RGBToColor(85, 85, 86),
+      RGBToColor(100, 160, 240));
     FFindBar.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(62, 62, 62));
     FSymbolBar.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
@@ -1217,6 +1258,7 @@ begin
       RGBToColor(222, 222, 222));
     FNav.SetColors(RGBToColor(246, 246, 246), clWhite,
       RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
+    FHeader.SetPillColors(clWhite, RGBToColor(205, 205, 205), RGBToColor(0, 110, 230));
     FFindBar.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(222, 222, 222));
     FSymbolBar.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
@@ -1475,6 +1517,8 @@ begin
   FRecentMenu := AddItem(FileMenu, rsOpenRecent, 0, nil);
   RebuildRecentMenu;
   AddItem(FileMenu, rsOpen, ShortCut(VK_O, [ssModifier]), @MenuOpenClick);
+  FSaveItem := AddItem(FileMenu, rsSave, ShortCut(VK_S, [ssModifier]), @MenuSaveClick);
+  FSaveItem.Enabled := False;
   FileMenu.Add(NewLine);
   FTerminalItem := AddItem(FileMenu, rsOpenTerminal, ShortCut(VK_T, [ssModifier, ssAlt]),
     @MenuOpenTerminalClick);
@@ -1692,6 +1736,11 @@ procedure TForm1.ShowText(AEd: TATSynEdit; const AText: string;
 var
   i: integer;
 begin
+  if AEd = Edit then
+  begin
+    FlushEdit;
+    LeaveEdit;
+  end;
   AdapterOf(AEd).Lexer := nil;
   AEd.BookmarkDeleteAll_2;
   ResetLineNumbers(AEd);
@@ -1724,6 +1773,8 @@ end;
 
 procedure TForm1.OpenFile(const AFileName: string);
 begin
+  FlushEdit;
+  LeaveEdit;
   FAdapter.Lexer := nil;
   Edit.BookmarkDeleteAll_2;
   ResetLineNumbers(Edit);
@@ -1737,7 +1788,14 @@ begin
   FCurrentPath := '';
   FManualLexer := False;
   FView := gvFile;
-  SetLexer(FLexers.ForFile(AFileName));
+  { One of the repository's own files is open to edits. }
+  if RepoFileName(AFileName) then
+    BeginEdit(AFileName);
+  { The exclude file has .gitignore's syntax but not its name. }
+  if (AFileName <> '') and (AFileName = FExcludePath) then
+    SetLexer(FLexers.ByName(rsGitignoreLexer))
+  else
+    SetLexer(FLexers.ForFile(AFileName));
   UpdateChangeNav;
   ShowEditor;
   UpdateCaption;
@@ -2282,17 +2340,26 @@ end;
 procedure TForm1.OpenRepository(const ADir: string);
 begin
   { Open closes the previous repository even when it fails. }
+  FlushEdit;
+  LeaveEdit;
   StopWatcher;
   StopIndexing;
   SaveIndex;
   FSummary.Notice := '';
   FCurrentPath := '';
   FPullRange := '';
+  FExcludePath := '';
   if not FRepo.Open(ADir) then
   begin
     ShowError(FRepo.Error);
     Exit;
   end;
+  { The exclude file lives in the git directory, which git names (a
+    work tree's is elsewhere), once per open: the section lists it and
+    Add to .git/info/exclude writes to it. }
+  FExcludePath := FRepo.GitDir;
+  if FExcludePath <> '' then
+    FExcludePath := IncludeTrailingPathDelimiter(FExcludePath) + SetDirSeparators(ExcludeFile);
   UpdateCaption;
   FSummary.Selected := '';
   LoadSnapshots;
@@ -2459,7 +2526,7 @@ procedure TForm1.RefreshRepository(ASnap: PGittanRepoSnapshot = nil);
 var
   Collapsed: TStringList;
   Node: TTreeNode;
-  Path: string;
+  Path, RepoPath: string;
   View: TGittanView;
   TopLine, CaretY: integer;
 
@@ -2478,6 +2545,9 @@ begin
     Exit;
   View := FView;
   Path := SelectedPath;
+  RepoPath := '';
+  if (FRepoTree.Selected <> nil) and (FRepoTree.Selected.Data <> nil) then
+    RepoPath := FRepoTree.Selected.GetTextPath;
   TopLine := Edit.LineTop;
   CaretY := Edit.Carets[0].PosY;
   Collapsed := TStringList.Create;
@@ -2511,7 +2581,21 @@ begin
   finally
     Collapsed.Free;
   end;
+  SelectRepoNode(RepoPath);
   case View of
+    gvFile:
+      { A repository file open to edits follows the disk while the
+        editor holds it unchanged; an edit in progress is left alone and
+        the header says the file changed behind it. }
+      if (FEditPath <> '') and FileExists(FEditPath) and
+        (FileAge(FEditPath) <> FEditStamp) then
+        if Edit.Modified then
+          FHeader.SetNote(rsChangedOnDisk)
+        else
+        begin
+          OpenFile(FEditPath);
+          RestoreScroll;
+        end;
     gvChanges:
       begin
         SummarySelectFile(nil, Path);
@@ -2547,6 +2631,8 @@ end;
   view of one file or of the raw repository diff. }
 procedure TForm1.ShowSummary;
 begin
+  FlushEdit;
+  LeaveEdit;
   Edit.Visible := False;
   FEditOld.Visible := False;
   FSideSplitter.Visible := False;
@@ -2708,6 +2794,9 @@ var
   Lines: TStringList;
   i: integer;
 begin
+  { Asked before the header names the next file, not when the text is
+    replaced further down. }
+  FlushEdit;
   Lines := TStringList.Create;
   try
     if not FRepo.FileChanges(APath, Lines) then
@@ -2740,6 +2829,9 @@ begin
         FConflictRoles := ConflictRoles(FChangeLines);
       Break;
     end;
+  { One of the repository's own files can be opened to edits. }
+  if IsRepoFile(APath) then
+    FHeader.SetActions([rsEditAction]);
   FManualLexer := False;
   FView := gvChanges;
   ApplyLayout;

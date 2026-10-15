@@ -23,6 +23,7 @@ type
     procedure TestListOrder;
     procedure TestListEmpty;
     procedure TestPatterns;
+    procedure TestIsRepoFile;
     procedure TestAddMakesFile;
     procedure TestAddAppends;
     procedure TestAddOnce;
@@ -147,6 +148,20 @@ begin
   AssertEquals('a dotfile has no extension to generalize', 1, Length(P));
   AssertEquals('/.env', P[0]);
   AssertEquals(0, Length(IgnorePatterns('')));
+end;
+
+procedure TRepoFilesTest.TestIsRepoFile;
+begin
+  AssertTrue(IsRepoFile('.gitignore'));
+  AssertTrue(IsRepoFile('.editorconfig'));
+  AssertTrue(IsRepoFile('.github/workflows/ci.yml'));
+  AssertTrue(IsRepoFile('.github/CODEOWNERS'));
+  AssertFalse('a source file', IsRepoFile('src/main.pas'));
+  AssertFalse('a root file not in the list', IsRepoFile('README.md'));
+  AssertFalse('an ignore file in a folder', IsRepoFile('src/.gitignore'));
+  AssertFalse('the folder itself', IsRepoFile('.github'));
+  AssertFalse('a name that starts like the folder', IsRepoFile('.githubx/a'));
+  AssertFalse(IsRepoFile(''));
 end;
 
 procedure TRepoFilesTest.TestAddMakesFile;

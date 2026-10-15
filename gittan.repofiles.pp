@@ -24,11 +24,18 @@ const
   RepoFolder = '.github';
   {** The ignore file inside the git directory that is not committed. }
   ExcludeFile = 'info/exclude';
+  {** What the exclude file is called where it is shown. }
+  ExcludeShown = '.git/' + ExcludeFile;
 
 {** Lists the repository's own files under ARoot as paths relative to it
   with "/" separators: the RepoRootFiles that exist, in that order, then
   every file under RepoFolder, folders walked, sorted by path. }
 procedure ListRepoFiles(const ARoot: string; AList: TStrings);
+
+{** Whether ARelPath, relative to the root with "/" separators, is one
+  of the repository's own files: a RepoRootFiles name or a file under
+  RepoFolder. These are the files the editor lets the user change. }
+function IsRepoFile(const ARelPath: string): boolean;
 
 {** The gitignore patterns that would hide APath, a path relative to the
   root with "/" separators: the file itself anchored at the root
@@ -91,6 +98,16 @@ begin
   finally
     Folder.Free;
   end;
+end;
+
+function IsRepoFile(const ARelPath: string): boolean;
+var
+  Name: string;
+begin
+  for Name in RepoRootFiles do
+    if ARelPath = Name then
+      Exit(True);
+  Result := Copy(ARelPath, 1, Length(RepoFolder) + 1) = RepoFolder + '/';
 end;
 
 function IgnorePatterns(const APath: string): TStringArray;
