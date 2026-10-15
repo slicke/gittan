@@ -1,0 +1,169 @@
+object SyntAnal1: TLibSyntAnalyzer
+  Formats = <
+    item
+      DisplayName = 'Comment'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clGray
+      Font.Height = -13
+      Font.Name = 'Courier New'
+      Font.Style = [fsItalic]
+    end
+    item
+      DisplayName = 'Macro'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clRed
+      Font.Height = -13
+      Font.Name = 'Courier New'
+      Font.Style = [fsBold]
+    end
+    item
+      DisplayName = 'Wildcard'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clPurple
+      Font.Height = -13
+      Font.Name = 'Courier New'
+      Font.Style = [fsBold]
+    end
+    item
+      DisplayName = 'Escape'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clMaroon
+      Font.Height = -13
+      Font.Name = 'Courier New'
+      Font.Style = []
+    end
+    item
+      DisplayName = 'Pattern'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clBlack
+      Font.Height = -13
+      Font.Name = 'Courier New'
+      Font.Style = []
+    end
+    item
+      DisplayName = 'Prefix'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clRed
+      Font.Height = -13
+      Font.Name = 'Courier New'
+      Font.Style = [fsBold]
+    end
+    item
+      DisplayName = 'Attribute'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clNavy
+      Font.Height = -13
+      Font.Name = 'Courier New'
+      Font.Style = []
+    end
+    item
+      DisplayName = 'Value'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clGreen
+      Font.Height = -13
+      Font.Name = 'Courier New'
+      Font.Style = []
+    end>
+  TokenRules = <
+    item
+      DisplayName = 'Comment'
+      StyleName = 'Comment'
+      TokenType = 1
+      Expression = '^[\x20\t]*\#.*'
+      ColumnFrom = 0
+      ColumnTo = 0
+    end
+    item
+      DisplayName = 'Macro'
+      StyleName = 'Macro'
+      TokenType = 2
+      Expression = '^\[attr\][^\s]+'
+      ColumnFrom = 0
+      ColumnTo = 0
+    end
+    item
+      DisplayName = 'Escape'
+      StyleName = 'Escape'
+      TokenType = 3
+      Expression = '\\.'
+      ColumnFrom = 0
+      ColumnTo = 0
+    end
+    item
+      DisplayName = 'Class'
+      StyleName = 'Wildcard'
+      TokenType = 4
+      Expression = '\[[^\]\r\n]*\]'
+      ColumnFrom = 0
+      ColumnTo = 0
+    end
+    item
+      DisplayName = 'Wildcard'
+      StyleName = 'Wildcard'
+      TokenType = 4
+      Expression = '\*\*|\*|\?'
+      ColumnFrom = 0
+      ColumnTo = 0
+    end
+    item
+      DisplayName = 'Prefix'
+      StyleName = 'Prefix'
+      TokenType = 6
+      Expression = '(?<=[\x20\t])[\-!]'
+      ColumnFrom = 0
+      ColumnTo = 0
+    end
+    item
+      DisplayName = 'Value'
+      StyleName = 'Value'
+      TokenType = 8
+      Expression = '=[^\s]*'
+      ColumnFrom = 0
+      ColumnTo = 0
+    end
+    item
+      DisplayName = 'Attribute'
+      StyleName = 'Attribute'
+      TokenType = 7
+      Expression = '(?<=[\x20\t\-!])[^\s=]+'
+      ColumnFrom = 0
+      ColumnTo = 0
+    end
+    item
+      DisplayName = 'Pattern'
+      StyleName = 'Pattern'
+      TokenType = 5
+      Expression = '[^\*\?\[\\\s]+'
+      ColumnFrom = 0
+      ColumnTo = 0
+    end>
+  BlockRules = <>
+  CodeTemplates = <>
+  SubAnalyzers = <>
+  SampleText.Strings = (
+    '# line endings'
+    '* text=auto'
+    '*.sh text eol=lf'
+    '*.png binary'
+    '*.min.js -diff !merge linguist-generated'
+    'docs/**/*.md diff=markdown'
+    '[attr]lfs filter=lfs diff=lfs merge=lfs -text'
+    '*.psd lfs')
+  TokenTypeNames.Strings = (
+    'Unknown'
+    'Comment'
+    'Macro'
+    'Escape'
+    'Wildcard'
+    'Pattern'
+    'Prefix'
+    'Attribute'
+    'Value')
+  Extentions = '/.gitattributes'
+  LexerName = 'Gitattributes'
+  SkipSpaces = False
+  Notes.Strings = (
+    'Gittan: .gitattributes in the gitattributes(5) syntax')
+  LineComment = '#'
+  Charset = DEFAULT_CHARSET
+end

@@ -1,0 +1,15 @@
+[comments]
+styles_cmt=Comment
+styles_str=
+str1=
+str2=
+
+[map]
+Comment=Comment
+Macro=Label
+Wildcard=Symbol2
+Escape=String
+Pattern=Id
+Prefix=IdKeyword
+Attribute=Id1
+Value=String
