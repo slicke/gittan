@@ -67,15 +67,22 @@ LEXLIB := lexlib
 # icons/gittan.png, icons/png/, icons/Gittan.icns and Gittan.ico. Lazarus
 # compiles Gittan.ico into the executable for Windows and Linux, but writes no
 # icon into the macOS bundle it creates, so every Darwin build copies the .icns
-# into Gittan.app and names it in Info.plist.
+# into Gittan.app and names it in Info.plist. A fresh bundle's Info.plist has
+# the project title as CFBundleName with its "&" unescaped, which no plist
+# reader accepts; escape it and name the bundle Gittan before adding the icon.
 ICON_SRC ?= icons/gittan-source.png
 BUNDLE := Gittan.app
 ifeq ($(shell uname -s),Darwin)
 define bundle_icon
-	@if [ -d "$(BUNDLE)/Contents" ]; then \
+	@set -e; plist="$(BUNDLE)/Contents/Info.plist"; \
+	if [ -d "$(BUNDLE)/Contents" ]; then \
+	  mkdir -p "$(BUNDLE)/Contents/Resources"; \
 	  cp icons/Gittan.icns "$(BUNDLE)/Contents/Resources/Gittan.icns"; \
-	  /usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$(BUNDLE)/Contents/Info.plist" >/dev/null 2>&1 || \
-	    /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string Gittan.icns' "$(BUNDLE)/Contents/Info.plist"; \
+	  sed -i '' -E 's/&([^a-zA-Z#]|$$)/\&amp;\1/g' "$$plist"; \
+	  /usr/libexec/PlistBuddy -c 'Set :CFBundleName Gittan' "$$plist"; \
+	  /usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$$plist" >/dev/null 2>&1 || \
+	    /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string Gittan.icns' "$$plist"; \
+	  plutil -lint "$$plist" >/dev/null; \
 	  touch "$(BUNDLE)"; \
 	fi
 endef
