@@ -273,6 +273,13 @@ function FindGitHubCli: string;
 function RunGitHubCli(const AExe, ADir: string; const AArgs: array of string;
   out AOutput, AError: string): boolean;
 
+{** Runs git in ADir as TGittanRepo does (see Running git) and answers
+  whether it succeeded, with its standard output in AOutput and, on
+  failure, its message in AError. For work outside an open repository's
+  root, such as a submodule, and for threads, which keep no repository. }
+function RunGitIn(const ADir: string; const AArgs: array of string;
+  out AOutput, AError: string; const AIndexFile: string = ''): boolean;
+
 implementation
 
 uses
@@ -311,14 +318,14 @@ end;
   English whatever the user's locale and the few that are matched on can
   be relied upon, and with prompts turned off, since nobody could answer
   one. Path names come back as plain UTF-8 instead of octal escapes. }
-function TGittanRepo.RunGit(const ADir: string; const AArgs: array of string;
-  out AOutput: string; const AIndexFile: string): boolean;
+function RunGitIn(const ADir: string; const AArgs: array of string;
+  out AOutput, AError: string; const AIndexFile: string): boolean;
 var
   P: TProcess;
-  Err: string;
   Status, i: integer;
 begin
   AOutput := '';
+  AError := '';
   P := TProcess.Create(nil);
   try
     P.Executable := 'git';
@@ -333,9 +340,9 @@ begin
     if AIndexFile <> '' then
       P.Environment.Add('GIT_INDEX_FILE=' + AIndexFile);
     P.Options := [poNoConsole];
-    if P.RunCommandLoop(AOutput, Err, Status) <> 0 then
+    if P.RunCommandLoop(AOutput, AError, Status) <> 0 then
     begin
-      FError := 'Could not run git. Is it installed?';
+      AError := 'Could not run git. Is it installed?';
       Exit(False);
     end;
   finally
@@ -344,11 +351,21 @@ begin
   Result := Status = 0;
   if not Result then
   begin
-    FError := Trim(Err);
-    if FError = '' then
-      FError := Trim(AOutput);
+    AError := Trim(AError);
+    if AError = '' then
+      AError := Trim(AOutput);
     AOutput := '';
   end;
+end;
+
+function TGittanRepo.RunGit(const ADir: string; const AArgs: array of string;
+  out AOutput: string; const AIndexFile: string): boolean;
+var
+  Err: string;
+begin
+  Result := RunGitIn(ADir, AArgs, AOutput, Err, AIndexFile);
+  if not Result then
+    FError := Err;
 end;
 
 function FindGitHubCli: string;

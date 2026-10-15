@@ -84,6 +84,7 @@ begin
   if FSettings.TreeWidth > 80 then
     FTreePanel.Width := FSettings.TreeWidth;
   FRepoHeader.Expanded := FSettings.RepoFilesOpen;
+  FSubHeader.Expanded := FSettings.SubmodulesOpen;
   LayoutRepoFiles;
 end;
 
@@ -106,6 +107,7 @@ begin
   end;
   FSettings.TreeWidth := FTreePanel.Width;
   FSettings.RepoFilesOpen := FRepoHeader.Expanded;
+  FSettings.SubmodulesOpen := FSubHeader.Expanded;
   FSettings.FontName := Edit.Font.Name;
   FSettings.FontSize := Edit.Font.Size;
   FSettings.Zoom := Edit.OptScaleFont;

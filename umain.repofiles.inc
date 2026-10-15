@@ -48,6 +48,13 @@ begin
   else
     FRepoHeader.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(232, 232, 232), RGBToColor(222, 222, 222));
+  if FSubHeader <> nil then
+    if FDark then
+      FSubHeader.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+        RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(62, 62, 62))
+    else
+      FSubHeader.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
+        RGBToColor(110, 110, 110), RGBToColor(232, 232, 232), RGBToColor(222, 222, 222));
 end;
 
 { Fills the section's tree from ListRepoFiles: the root files in their
@@ -118,30 +125,42 @@ begin
   LayoutRepoFiles;
 end;
 
-{ The panel is the header alone while folded, else the header and the
-  rows in view, within half the tree panel. }
+{ A section's panel is the header alone while folded, else the header
+  and the rows in view, within half the tree panel, or a third of it
+  each while both the Repository and the Submodules sections show. }
 procedure TForm1.LayoutRepoFiles;
 var
-  Rows, RowHeight, H: integer;
-  Node: TTreeNode;
-begin
-  H := FRepoHeader.Height;
-  FRepoTree.Visible := FRepoHeader.Expanded;
-  if FRepoHeader.Expanded then
+  Limit: integer;
+
+  function SectionHeight(AHeader: TGittanSectionHeader; ATree: TTreeView): integer;
+  var
+    Rows, RowHeight: integer;
+    Node: TTreeNode;
   begin
+    Result := AHeader.Height;
+    ATree.Visible := AHeader.Expanded;
+    if not AHeader.Expanded then
+      Exit;
     Rows := 0;
-    Node := FRepoTree.Items.GetFirstVisibleNode;
+    Node := ATree.Items.GetFirstVisibleNode;
     while Node <> nil do
     begin
       Inc(Rows);
       Node := Node.GetNextVisible;
     end;
-    RowHeight := FRepoTree.DefaultItemHeight;
+    RowHeight := ATree.DefaultItemHeight;
     if RowHeight < 8 then
       RowHeight := 20;
-    H := H + Min(Rows * RowHeight + 4, FTreePanel.ClientHeight div 2);
+    Result := Result + Min(Rows * RowHeight + 4, Limit);
   end;
-  FRepoPanel.Height := H;
+
+begin
+  Limit := FTreePanel.ClientHeight div 2;
+  if (FSubPanel <> nil) and FSubPanel.Visible and FRepoPanel.Visible then
+    Limit := FTreePanel.ClientHeight div 3;
+  FRepoPanel.Height := SectionHeight(FRepoHeader, FRepoTree);
+  if FSubPanel <> nil then
+    FSubPanel.Height := SectionHeight(FSubHeader, FSubTree);
 end;
 
 procedure TForm1.RepoHeaderToggle(Sender: TObject);
@@ -161,6 +180,7 @@ begin
   Node := FRepoTree.Selected;
   if (Node = nil) or (Node.Data = nil) or (FRepo.Root = '') then
     Exit;
+  FSubTree.Selected := nil;
   if Node.Data = Pointer(2) then
   begin
     { The exclude file is never in the tree above: it is not tracked. }
@@ -422,6 +442,11 @@ begin
       RevertEdit
     else
       SaveEdit(True);
+    Exit;
+  end;
+  if FView = gvSubmodule then
+  begin
+    OpenShownSubmodule;
     Exit;
   end;
   if (FView <> gvChanges) or (FCurrentPath = '') or (FRepo.Root = '') then

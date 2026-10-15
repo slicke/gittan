@@ -32,6 +32,8 @@ type
     TreeWidth: integer;
     {** Whether the Repository section under the tree is unfolded. }
     RepoFilesOpen: boolean;
+    {** Whether the Submodules section under it is unfolded. }
+    SubmodulesOpen: boolean;
     {** The editor font; an empty name keeps the default. }
     FontName: string;
     FontSize: integer;
@@ -83,6 +85,17 @@ const
   SecWindow = 'Window';
   SecView = 'View';
   SecRecent = 'Recent';
+  ConfigFolder = 'Gittan';
+
+{** The folder the ini file lives in. GetAppConfigDir names it after
+  ApplicationName, which the LCL takes from Application.Title, a long name
+  with an ampersand; this keeps its parent and names the folder Gittan
+  whatever the title says. }
+function ConfigDir: string;
+begin
+  Result := ExtractFilePath(ExcludeTrailingPathDelimiter(GetAppConfigDir(False)))
+    + ConfigFolder;
+end;
 
 { TGittanSettings }
 
@@ -94,8 +107,9 @@ begin
   if AFileName <> '' then
     FFileName := AFileName
   else
-    FFileName := IncludeTrailingPathDelimiter(GetAppConfigDir(False)) + 'gittan.ini';
+    FFileName := IncludeTrailingPathDelimiter(ConfigDir) + 'gittan.ini';
   ContextLines := 3;
+  SubmodulesOpen := True;
 end;
 
 destructor TGittanSettings.Destroy;
@@ -122,6 +136,7 @@ begin
       Maximized := Ini.ReadBool(SecWindow, 'Maximized', False);
       TreeWidth := Ini.ReadInteger(SecWindow, 'TreeWidth', 0);
       RepoFilesOpen := Ini.ReadBool(SecWindow, 'RepoFiles', False);
+      SubmodulesOpen := Ini.ReadBool(SecWindow, 'Submodules', True);
       FontName := Ini.ReadString(SecView, 'FontName', '');
       FontSize := Ini.ReadInteger(SecView, 'FontSize', 0);
       Zoom := Ini.ReadInteger(SecView, 'Zoom', 0);
@@ -165,6 +180,7 @@ begin
       Ini.WriteBool(SecWindow, 'Maximized', Maximized);
       Ini.WriteInteger(SecWindow, 'TreeWidth', TreeWidth);
       Ini.WriteBool(SecWindow, 'RepoFiles', RepoFilesOpen);
+      Ini.WriteBool(SecWindow, 'Submodules', SubmodulesOpen);
       Ini.WriteString(SecView, 'FontName', FontName);
       Ini.WriteInteger(SecView, 'FontSize', FontSize);
       Ini.WriteInteger(SecView, 'Zoom', Zoom);

@@ -18,13 +18,13 @@ uses
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
   gittan.syntaxthemes, gittan.cli, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader,
-  gittan.discard, md5;
+  gittan.discard, gittan.submodules, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
-    file, the raw repository diff, a plain file from File > Open, or the
-    history of a piece of code (Go > Code History). }
-  TGittanView = (gvSummary, gvChanges, gvRepoDiff, gvFile, gvHistory);
+    file, the raw repository diff, a plain file from File > Open, the
+    history of a piece of code (Go > Code History), or a submodule. }
+  TGittanView = (gvSummary, gvChanges, gvRepoDiff, gvFile, gvHistory, gvSubmodule);
 
   {** One row of the change view. Line is the index of its diff line in
     the file's diff, rowGap for a row that stands for the unchanged lines
@@ -131,6 +131,18 @@ type
     FRepoHeader: TGittanSectionHeader;
     FRepoTree: TTreeView;
     FIgnoreMenu, FExcludeMenu: TMenuItem;
+    { The Submodules section under it (umain.submodules.inc): the
+      submodules from gittan.submodules, what their jobs found out
+      (FSubInfos, one per submodule, smUnknown while its job runs), the
+      jobs still running, what they were started for (SubmoduleKey) and
+      the path of the submodule the view shows. }
+    FSubPanel: TPanel;
+    FSubHeader: TGittanSectionHeader;
+    FSubTree: TTreeView;
+    FSubmodules: TGittanSubmodules;
+    FSubInfos: array of TGittanSubmoduleInfo;
+    FSubJobs: TList;
+    FSubKey, FSubShown: string;
     { Editing the repository's own files (umain.repofiles.inc): the full
       name of the file the editor holds open to edits, '' while it shows
       something else; the file's time stamp when it was loaded or saved,
@@ -557,6 +569,18 @@ type
     procedure RepoHeaderToggle(Sender: TObject);
     procedure TreePanelResize(Sender: TObject);
     procedure RepoTreeSelectionChanged(Sender: TObject);
+    procedure SetupSubmodules;
+    function SubmoduleKey: string;
+    procedure FillSubmodules;
+    function SubmoduleRowText(AIndex: integer): string;
+    procedure FillSubmoduleTree;
+    procedure StartSubmoduleJobs;
+    procedure AbandonSubmoduleJobs;
+    procedure SubmoduleJobDone(Sender: TObject);
+    procedure SubTreeSelectionChanged(Sender: TObject);
+    procedure ShowSubmodule(AIndex: integer);
+    procedure OpenShownSubmodule;
+    procedure RestoreSubmodule;
     procedure FillIgnoreMenus(const APath: string);
     procedure MenuIgnoreClick(Sender: TObject);
     function RepoFileName(const AFileName: string): boolean;
@@ -701,6 +725,29 @@ resourcestring
   rsNextFile = 'Next F&ile';
   rsPrevFile = 'Previous Fi&le';
   rsRepoFiles = 'Repository';
+  rsSubmodules = 'Submodules';
+  rsSubmodulesNewer = '%d · ↓%d';
+  rsSubUrl = 'URL';
+  rsSubBranch = 'Branch';
+  rsSubDefaultBranch = 'the remote''s default branch';
+  rsSubSameBranch = 'the repository''s own branch (%s)';
+  rsSubRecorded = 'Recorded';
+  rsSubNoRecorded = 'none: the index records no commit for it';
+  rsSubConflict = 'in conflict: the index holds more than one commit';
+  rsSubCheckedOut = 'Checked out';
+  rsSubSameAsRecorded = 'the recorded commit';
+  rsSubNotInitialized = 'nothing: not initialized (git submodule update --init)';
+  rsSubRemote = 'Remote';
+  rsSubChecking = 'checking...';
+  rsSubUpToDate = 'the recorded commit, up to date';
+  rsSubBehind = '%d new commits';
+  rsSubAhead = 'the recorded commit is %d commits past it';
+  rsSubDiverged = '%d new commits; the recorded commit has %d it lacks';
+  rsSubNotFetched = 'new commits; fetch in the submodule to list them';
+  rsSubFailed = 'could not be asked: %s';
+  rsSubIncoming = 'New on the remote';
+  rsSubMore = '... and %d more';
+  rsSubOpen = 'Open';
   rsAddToIgnore = 'Add to .&gitignore';
   rsAddToExclude = 'Add to .git/info/e&xclude';
   rsIgnoreAdded = 'Added %s to %s';
@@ -1065,6 +1112,7 @@ begin
 
   SetupTreeFilter;
   SetupRepoFiles;
+  SetupSubmodules;
   ApplySettings;
   BuildMenu;
   BuildPopups;
@@ -1090,6 +1138,8 @@ begin
   Application.RemoveAsyncCalls(Self);
   StopWatcher;
   AbandonPullJob;
+  AbandonSubmoduleJobs;
+  FreeAndNil(FSubJobs);
   FBranchNames.Free;
   FSyncHashes.Free;
   StopBlame;
@@ -2405,6 +2455,11 @@ begin
   UpdateDiscardItems;
   FPullRange := '';
   FExcludePath := '';
+  AbandonSubmoduleJobs;
+  FSubmodules := nil;
+  FSubInfos := nil;
+  FSubKey := '';
+  FSubShown := '';
   if not FRepo.Open(ADir) then
   begin
     ShowError(FRepo.Error);
@@ -2438,6 +2493,12 @@ begin
   FileTree.Items.Clear;
   FRepoTree.Items.Clear;
   FRepoPanel.Visible := False;
+  AbandonSubmoduleJobs;
+  FSubmodules := nil;
+  FSubInfos := nil;
+  FSubKey := '';
+  FSubTree.Items.Clear;
+  FSubPanel.Visible := False;
   FStats := nil;
   FFileCount := 0;
   ShowWelcome(AMessage);
@@ -2497,6 +2558,7 @@ begin
   FFileCount := Length(FStats);
   FillFileTree(FStats);
   FillRepoFiles;
+  FillSubmodules;
   SetLength(Icons, Length(FStats));
   for i := 0 to High(FStats) do
     Icons[i] := StatIcon(FStats[i]);
@@ -2559,6 +2621,13 @@ procedure TForm1.MenuRefreshClick(Sender: TObject);
 begin
   RefreshRepository;
   StartPullJob(True);
+  if FRepo.Root <> '' then
+  begin
+    StartSubmoduleJobs;
+    FillSubmoduleTree;
+    if FView = gvSubmodule then
+      RestoreSubmodule;
+  end;
 end;
 
 { The path of the selected file in the tree, empty when none or a folder
@@ -2668,6 +2737,12 @@ begin
         ShowRepoDiff;
         RestoreScroll;
       end;
+    gvSubmodule:
+      begin
+        RestoreSubmodule;
+        if FView = gvSubmodule then
+          RestoreScroll;
+      end;
     gvHistory:
       begin
         { The view is rebuilt when the job is done, at the same place. }
@@ -2702,6 +2777,7 @@ begin
   { A file picked again after the summary must fire the selection event. }
   FileTree.Selected := nil;
   FRepoTree.Selected := nil;
+  FSubTree.Selected := nil;
   if FRepo.Root <> '' then
     UpdateStatus;
 end;
@@ -3088,8 +3164,9 @@ begin
   Node := FileTree.Selected;
   if (Node = nil) or (Node.Data = nil) or (FRepo.Root = '') then
     Exit;
-  { One selection between the two trees. }
+  { One selection among the trees. }
   FRepoTree.Selected := nil;
+  FSubTree.Selected := nil;
   ShowChanges(Node.GetTextPath);
 end;
 
@@ -3101,5 +3178,6 @@ end;
 {$I umain.index.inc}
 {$I umain.history.inc}
 {$I umain.repofiles.inc}
+{$I umain.submodules.inc}
 
 end.
