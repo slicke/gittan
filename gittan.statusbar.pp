@@ -151,6 +151,12 @@ const
   HintBranch = '⑂';
   HintPull = '⤴';
 
+{** Draws the icon of the marker AIcon (HintPassed and the others above)
+  in AColor, in a square a little smaller than ASize centered on a line
+  ASize high at X, Y. The welcome view draws its folders with it too. }
+procedure DrawStatusIcon(ACanvas: TCanvas; const AIcon: string; X, Y, ASize: integer;
+  AColor: TColor);
+
 implementation
 
 uses

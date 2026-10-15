@@ -12,7 +12,7 @@ unit gittan.icons;
 interface
 
 uses
-  Classes, SysUtils, ImgList, gittan.git;
+  Classes, SysUtils, Graphics, ImgList, gittan.git;
 
 const
   {** Image index of the folder icon. }
@@ -33,6 +33,10 @@ function FolderIcon(AKind: TGittanChangeKind): integer;
 {** The kind of a folder icon from FolderIcon, false for any other index. }
 function FolderIconKind(AIndex: integer; out AKind: TGittanChangeKind): boolean;
 
+{** The color of the badge of AKind, for other views that draw a mark
+  in the kind's color, such as the summary's dots. }
+function KindColor(AKind: TGittanChangeKind): TColor;
+
 {** The more severe of two kinds: a conflict before a deletion, then a
   modification, a rename, an addition, and last an untracked file. }
 function WorseKind(A, B: TGittanChangeKind): TGittanChangeKind;
@@ -45,7 +49,7 @@ procedure FillTreeIcons(AImages: TCustomImageList);
 implementation
 
 uses
-  Graphics, BGRABitmap, BGRABitmapTypes;
+  BGRABitmap, BGRABitmapTypes;
 
 const
   BadgeLetter: array[TGittanChangeKind] of string = ('M', 'A', 'D', 'R', 'U', '!');
@@ -95,6 +99,11 @@ begin
     else
       Result := BGRA($E0, $8A, $1E);
   end;
+end;
+
+function KindColor(AKind: TGittanChangeKind): TColor;
+begin
+  Result := BGRAToColor(BadgeColor(AKind));
 end;
 
 { A folder: a tab above a body, in a neutral blue-gray. Coordinates are in

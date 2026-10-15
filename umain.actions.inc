@@ -141,6 +141,7 @@ begin
   Item.Enabled := FSettings.Recent.Count > 0;
   Item.OnClick := @MenuClearRecentClick;
   FRecentMenu.Add(Item);
+  FWelcome.SetRecent(FSettings.Recent);
 end;
 
 procedure TForm1.MenuRecentClick(Sender: TObject);

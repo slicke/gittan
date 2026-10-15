@@ -78,6 +78,10 @@
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
+        <Filename Value="gittan.welcome.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
         <Filename Value="gittan.popuplist.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>

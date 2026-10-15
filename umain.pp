@@ -13,7 +13,7 @@ uses
   ATSynEdit_Markers, ATSynEdit_LineParts, ATSynEdit_Ranges, ATSynEdit_WrapInfo,
   ec_SyntAnal,
   gittan.lexers, gittan.git, gittan.github, gittan.conflicts, gittan.icons, gittan.theme, gittan.changenav,
-  gittan.summary, gittan.fileheader, gittan.watch, gittan.settings,
+  gittan.summary, gittan.welcome, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
   gittan.syntaxthemes, gittan.cli, gittan.symbolchanges, gittan.callers,
@@ -178,6 +178,7 @@ type
     FLinkColor: TColor;
     FSummaryBox: TScrollBox;
     FSummary: TGittanSummary;
+    FWelcome: TGittanWelcome;
     { The list that drops down from the branch in the summary, with the
       branch to switch to for each of its items ('' for a header). }
     FBranchPopup: TGittanPopupList;
@@ -281,6 +282,9 @@ type
     procedure ApplySnapshot(const ASnap: TGittanRepoSnapshot);
     procedure RefreshRepository(ASnap: PGittanRepoSnapshot = nil);
     procedure ShowError(const AMessage: string);
+    procedure ShowWelcome(const AError: string);
+    procedure WelcomeOpen(Sender: TObject);
+    procedure WelcomeOpenRecent(Sender: TObject; const ARoot: string);
     function SelectedPath: string;
     function StatIcon(const AStat: TGittanFileStat): integer;
     procedure UpdateStatus;
@@ -600,8 +604,7 @@ resourcestring
   rsZoomReset = 'Actual Si&ze';
   rsFont = 'Fo&nt...';
   rsSyntaxTheme = 'Syntax T&heme';
-  rsDropHint = 'Open a repository, or drop a folder or file here.';
-  rsDropShortcut = 'File > Open Repository    %s';
+  rsTagline = 'See what changed in a git repository';
   rsGo = '&Go';
   rsTools = '&Tools';
   rsInstallCli = 'Install &CLI Command';
@@ -916,16 +919,23 @@ begin
   FBranchPopup.Parent := Self;
   FBranchPopup.FilterHint := rsFilterBranches;
   FBranchPopup.OnPick := @BranchPopupPick;
-  { The summary draws the application icon in its empty view, from its
-    own copy: Application.Icon keeps to its small image. }
+  { The welcome view shares the summary's box and draws the application
+    icon from its own copy: Application.Icon keeps to its small image. }
   FAppIcon := TIcon.Create;
   try
     FAppIcon.LoadFromResourceName(HInstance, 'MAINICON');
   except
     FreeAndNil(FAppIcon);
   end;
-  FSummary.SetMessage(rsDropHint, Format(rsDropShortcut,
-    [{$IFDEF DARWIN}'⇧⌘O'{$ELSE}'Ctrl+Shift+O'{$ENDIF}]), FAppIcon);
+  FWelcome := TGittanWelcome.Create(Self);
+  FWelcome.Parent := FSummaryBox;
+  FWelcome.Title := 'Gittan';
+  FWelcome.Tagline := rsTagline;
+  FWelcome.Shortcut := {$IFDEF DARWIN}'⇧⌘O'{$ELSE}'Ctrl+Shift+O'{$ENDIF};
+  FWelcome.SetIcon(FAppIcon);
+  FWelcome.OnOpen := @WelcomeOpen;
+  FWelcome.OnOpenRecent := @WelcomeOpenRecent;
+  ShowWelcome('');
 
   FRepo := TGittanRepo.Create;
   FSnapshots := TGittanSnapshots.Create;
@@ -1183,13 +1193,23 @@ begin
   end;
   FSummaryBox.Color := Edit.Colors.TextBG;
   if FDark then
+  begin
     FSummary.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(45, 45, 46), RGBToColor(38, 38, 39),
-      RGBToColor(63, 185, 80), RGBToColor(248, 81, 73), RGBToColor(62, 62, 62))
+      RGBToColor(63, 185, 80), RGBToColor(248, 81, 73), RGBToColor(62, 62, 62));
+    FWelcome.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(45, 45, 46), RGBToColor(85, 85, 86),
+      RGBToColor(248, 81, 73));
+  end
   else
+  begin
     FSummary.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(243, 243, 243), RGBToColor(248, 248, 248),
       RGBToColor(26, 127, 55), RGBToColor(207, 34, 46), RGBToColor(222, 222, 222));
+    FWelcome.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(243, 243, 243), RGBToColor(205, 205, 205),
+      RGBToColor(207, 34, 46));
+  end;
   RecolorWords(Edit);
   RecolorWords(FEditOld);
 end;
@@ -2245,11 +2265,12 @@ begin
   FileTree.Items.Clear;
   FStats := nil;
   FFileCount := 0;
-  FSummary.SetMessage(AMessage, Format(rsDropShortcut,
-    [{$IFDEF DARWIN}'⇧⌘O'{$ELSE}'Ctrl+Shift+O'{$ENDIF}]), FAppIcon);
+  ShowWelcome(AMessage);
   ShowSummary;
   UpdateStatus;
-  FStatus.ShowMessage(AMessage, stBad, 0);
+  { The welcome view keeps the error; the bar's copy clears itself, so
+    it is not left behind when a repository opens. }
+  FStatus.ShowMessage(AMessage, stBad, StatusErrorSeconds);
   UpdateCaption;
 end;
 
@@ -2307,6 +2328,8 @@ begin
   if FOperation <> '' then
     Branch := Branch + ' · ' + FOperation;
   FSummary.SetRepository(ExtractFileName(FRepo.Root), Branch, BaseLabel, FStats, Icons);
+  FWelcome.Visible := False;
+  FSummary.Visible := True;
   RebuildCompareMenu;
   FTerminalItem.Enabled := FRepo.Root <> '';
 end;
@@ -2506,6 +2529,28 @@ end;
 procedure TForm1.SummaryBoxResize(Sender: TObject);
 begin
   FSummary.FitHeight(FSummaryBox.ClientHeight);
+  FWelcome.FitHeight(FSummaryBox.ClientHeight);
+end;
+
+{ The welcome view takes the summary's place in the box, with AError
+  under its title when opening a repository failed; it stays until a
+  repository loads, see LoadRepository. }
+procedure TForm1.ShowWelcome(const AError: string);
+begin
+  FWelcome.SetError(AError);
+  FSummary.Visible := False;
+  FWelcome.Visible := True;
+  FWelcome.FitHeight(FSummaryBox.ClientHeight);
+end;
+
+procedure TForm1.WelcomeOpen(Sender: TObject);
+begin
+  MenuOpenRepoClick(Sender);
+end;
+
+procedure TForm1.WelcomeOpenRecent(Sender: TObject; const ARoot: string);
+begin
+  OpenRepository(ARoot);
 end;
 
 { A click on a file in the summary selects it in the tree, which shows its
