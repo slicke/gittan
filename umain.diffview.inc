@@ -140,6 +140,7 @@ begin
     begin
       FRows := Rows;
       FRowsOld := nil;
+      FindBlockRows;
       FillChangeEditor(Edit, Rows, False, OldNum, NewNum, Lexer);
       Exit;
     end;
@@ -180,6 +181,7 @@ begin
   end;
     FRows := RightRows;
     FRowsOld := LeftRows;
+    FindBlockRows;
     FillChangeEditor(FEditOld, LeftRows, True, OldNum, NewNum, Lexer);
     FillChangeEditor(Edit, RightRows, False, OldNum, NewNum, Lexer);
     FEditOld.LineTop := 0;

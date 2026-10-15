@@ -580,6 +580,7 @@ var
   R: TRect;
 begin
   DrawBlame(TATSynEdit(Sender), C);
+  DrawDiscard(TATSynEdit(Sender), C);
   if (Sender <> Edit) or (FOverscroll = 0) or (FView <> gvChanges) then
     Exit;
   Down := FOverscroll > 0;

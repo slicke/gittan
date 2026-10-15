@@ -784,9 +784,14 @@ var
   Link: boolean;
 begin
   Ed := TATSynEdit(Sender);
-  { On the blame band the cell under the mouse is the hover, see
-    umain.blame.inc. }
-  Word := BlameHintAt(Ed, X, Y);
+  { On the discard band the button under the mouse is lit and its hint
+    goes the way of the blame's (see umain.discard.inc); on the blame
+    band the cell under the mouse is the hover, see umain.blame.inc. }
+  SetHotDiscard(Ed, DiscardAt(Ed, X, Y));
+  if FHotDiscard >= 0 then
+    Word := Format(rsDiscardHint, [DiscardBackText(FHotDiscard)])
+  else
+    Word := BlameHintAt(Ed, X, Y);
   if Word <> '' then
   begin
     if (Word <> FHoverBlame) or (Ed <> FHoverEd) then
@@ -843,6 +848,7 @@ end;
 
 procedure TForm1.EditMouseLeave(Sender: TObject);
 begin
+  SetHotDiscard(TATSynEdit(Sender), -1);
   if Sender = FHoverEd then
     ClearHover;
 end;

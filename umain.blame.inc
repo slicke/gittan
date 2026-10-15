@@ -196,6 +196,8 @@ begin
   FBlameNow := DateTimeToUnix(Now, False);
   SetBlameBand(Edit);
   SetBlameBand(FEditOld);
+  SetDiscardBand(Edit);
+  SetDiscardBand(FEditOld);
 end;
 
 { The band's width is in pixels of the editor's font at its zoom, and
@@ -410,6 +412,13 @@ var
   Src: TObject;
 begin
   Ed := TATSynEdit(Sender);
+  if (ABand >= 0) and (Ed.Gutter[ABand].Tag = gutterTagDiscard) then
+  begin
+    AHandled := True;
+    if Ed = Edit then
+      DiscardBlockAt(BlockAtRow(ALine));
+    Exit;
+  end;
   if (ABand < 0) or (Ed.Gutter[ABand].Tag <> gutterTagBlame) then
     Exit;
   AHandled := True;

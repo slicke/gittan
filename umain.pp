@@ -17,7 +17,8 @@ uses
   gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
   gittan.syntaxthemes, gittan.cli, gittan.symbolchanges, gittan.callers,
-  gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader, md5;
+  gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader,
+  gittan.discard, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -138,6 +139,15 @@ type
     FEditPath, FExcludePath: string;
     FEditStamp: LongInt;
     FSaveItem: TMenuItem;
+    { Discarding a block of changes (umain.discard.inc): the row of the
+      first line of every block (FBlockStarts), found by BuildChangeView;
+      the block whose button the mouse is on (-1 for none); the blocks
+      discarded, latest last, which File > Undo Discard puts back; and
+      the two menu items. }
+    FBlockRows: TIntegerDynArray;
+    FHotDiscard: integer;
+    FDiscards: array of TGittanDiscard;
+    FDiscardItem, FUndoDiscardItem: TMenuItem;
     { The default branch of the remote (origin/main) and the merge base
       of the branch with it, Compare With's "origin/main (Merge Base)";
       and the branch's lead on and lag behind its upstream, for the
@@ -403,6 +413,21 @@ type
     procedure EditClickGutter(Sender: TObject; ABand, ALine: integer; var AHandled: boolean);
     procedure ShowBlameCommit(const AHash: string);
     procedure HandCursorAsync(Data: PtrInt);
+    { umain.discard.inc }
+    function CanDiscard: boolean;
+    procedure FindBlockRows;
+    function BlockAtRow(ARow: integer): integer;
+    function DiscardAt(AEd: TATSynEdit; X, Y: integer): integer;
+    procedure SetDiscardBand(AEd: TATSynEdit);
+    procedure DrawDiscard(AEd: TATSynEdit; C: TCanvas);
+    procedure SetHotDiscard(AEd: TATSynEdit; ABlock: integer);
+    procedure DiscardBlockAt(ABlock: integer);
+    procedure UpdateDiscardItems;
+    procedure FileMenuClick(Sender: TObject);
+    procedure MenuDiscardClick(Sender: TObject);
+    procedure MenuUndoDiscardClick(Sender: TObject);
+    function DiscardBackText(ABlock: integer): string;
+    function DiscardBaseName: string;
     { umain.history.inc }
     procedure MenuHistoryClick(Sender: TObject);
     function ChunkRows(out AFrom, ATo: integer; out AName: string): boolean;
@@ -691,6 +716,19 @@ resourcestring
   rsSaved = 'Saved %s';
   rsSaveFailed = 'Could not save %s: %s';
   rsChangedOnDisk = 'changed on disk';
+  rsDiscardChange = '&Discard Change';
+  rsUndoDiscard = '&Undo Discard';
+  rsDiscardAction = 'Discard';
+  rsDiscardHint = 'Discard this change.' + LineEnding +
+    '%s. File > Undo Discard brings it back.';
+  rsDiscardAsk = 'Discard this change to %s?' + LineEnding +
+    '%s. File > Undo Discard brings it back.';
+  rsDiscardBackOne = 'The line goes back to how it is in %s';
+  rsDiscardBackMany = 'The %d lines go back to how they are in %s';
+  rsDiscarded = 'Discarded the change at line %d of %s';
+  rsDiscardUndone = 'Put the change at line %d of %s back';
+  rsDiscardFailed = 'Could not discard the change: %s';
+  rsUndoDiscardFailed = 'Could not put the change back: %s';
   rsGitignoreLexer = 'Gitignore';
   rsCopyPath = 'Copy &Path';
   rsCopyRelativePath = 'Copy &Relative Path';
@@ -819,6 +857,9 @@ const
   { The gutter band of the blame (see umain.blame.inc), the width of its
     age column in characters and the most the author column takes. }
   gutterTagBlame = 100;
+  { The band with the discard buttons (see umain.discard.inc), right of
+    the editor's own bands, next to the text. }
+  gutterTagDiscard = 101;
   BlameAgeCols = 5;
   BlameMaxAuthorCols = 20;
   { How long the mouse rests on a word before its definition is shown. }
@@ -854,6 +895,7 @@ begin
   FGitHubCli := FindGitHubCli;
   FHasGitHubCli := FGitHubCli <> '';
   FChangeLines := TStringList.Create;
+  FHotDiscard := -1;
   FBlameCache := TStringList.Create;
   FBlameCache.CaseSensitive := True;
   FBlameZombies := TList.Create;
@@ -1118,6 +1160,9 @@ begin
   { The blame band, leftmost, hidden until View > Blame; the editor
     leaves its size alone (see SetBlameBand). }
   AEd.Gutter.Add(0, 0, gutterTagBlame, False, False);
+  { The discard band, rightmost, shown with a changed file (see
+    SetDiscardBand). }
+  AEd.Gutter.Add(-1, 0, gutterTagDiscard, False, False);
   AEd.OnClickGutter := @EditClickGutter;
 end;
 
@@ -1519,6 +1564,13 @@ begin
   AddItem(FileMenu, rsOpen, ShortCut(VK_O, [ssModifier]), @MenuOpenClick);
   FSaveItem := AddItem(FileMenu, rsSave, ShortCut(VK_S, [ssModifier]), @MenuSaveClick);
   FSaveItem.Enabled := False;
+  FileMenu.Add(NewLine);
+  FDiscardItem := AddItem(FileMenu, rsDiscardChange, ShortCut(VK_BACK, [ssModifier, ssShift]),
+    @MenuDiscardClick);
+  FUndoDiscardItem := AddItem(FileMenu, rsUndoDiscard, ShortCut(VK_Z, [ssModifier, ssAlt]),
+    @MenuUndoDiscardClick);
+  UpdateDiscardItems;
+  FileMenu.OnClick := @FileMenuClick;
   FileMenu.Add(NewLine);
   FTerminalItem := AddItem(FileMenu, rsOpenTerminal, ShortCut(VK_T, [ssModifier, ssAlt]),
     @MenuOpenTerminalClick);
@@ -2222,6 +2274,7 @@ var
 begin
   UpdateSymbolCrumb;
   UpdateStatusPosition;
+  UpdateDiscardItems;
   Blocks := ChangeBlocks;
   if Length(Blocks) = 0 then
   begin
@@ -2347,6 +2400,9 @@ begin
   SaveIndex;
   FSummary.Notice := '';
   FCurrentPath := '';
+  { The discards of the previous repository are not for this one. }
+  FDiscards := nil;
+  UpdateDiscardItems;
   FPullRange := '';
   FExcludePath := '';
   if not FRepo.Open(ADir) then
@@ -3041,6 +3097,7 @@ end;
 {$I umain.actions.inc}
 {$I umain.gotodef.inc}
 {$I umain.blame.inc}
+{$I umain.discard.inc}
 {$I umain.index.inc}
 {$I umain.history.inc}
 {$I umain.repofiles.inc}
