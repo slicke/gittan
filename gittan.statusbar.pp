@@ -3,7 +3,8 @@ unit gittan.statusbar;
 {** The status bar: a strip along the bottom of the window in three zones.
 
   On the left the repository: its name, the branch as a chip that drops
-  the branch list, the commits ahead of and behind the upstream, what git
+  the branch list, the commits ahead of and behind the upstream (a click
+  lists them), what git
   is in the middle of and the conflicted files as tinted badges, and the
   base the work tree is compared against. In the middle a passing message,
   which clears itself after a while, or the progress of a long job. On the
@@ -136,7 +137,7 @@ type
 
 {** The parts that answer a click. }
 const
-  StatusClickable = [spRepo, spBranch, spConflicts, spPull, spFiles];
+  StatusClickable = [spRepo, spBranch, spSync, spConflicts, spPull, spFiles];
 
   {** Markers at the start of a hint line, drawn as icons: a green check,
     a red cross, an amber clock, a globe for a link, two arrows for a

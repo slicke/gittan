@@ -183,6 +183,10 @@ type
       branch to switch to for each of its items ('' for a header). }
     FBranchPopup: TGittanPopupList;
     FBranchNames: TStringList;
+    { The list that drops up from the status bar's ahead/behind counts,
+      with the commit each of its items shows ('' for a header). }
+    FSyncPopup: TGittanPopupList;
+    FSyncHashes: TStringList;
     FEditOld: TATSynEdit;
     { The hidden editor that parses another changed file for Go to
       Definition, with its adapter; made on the first lookup. }
@@ -477,6 +481,8 @@ type
       const AScreenPos: TPoint);
     procedure SummaryBranchClick(Sender: TObject; const AScreenRect: TRect);
     procedure BranchPopupPick(Sender: TObject; AIndex: integer);
+    procedure SyncClick(const AScreenRect: TRect);
+    procedure SyncPopupPick(Sender: TObject; AIndex: integer);
     procedure SwitchBranch(const ABranch: string);
     function ContextFullPath: string;
     procedure MenuCopyPathClick(Sender: TObject);
@@ -661,6 +667,10 @@ resourcestring
   rsShowConflictHint = 'Show the first conflicted file';
   rsAheadHint = '%d commits not pushed yet';
   rsBehindHint = '%d commits not pulled yet';
+  rsNotPushed = 'Not pushed yet';
+  rsNotPulled = 'Not pulled yet';
+  rsMoreCommits = '… and %d more';
+  rsFilterCommits = 'Filter commits';
   rsPosition = 'Ln %d, Col %d';
   rsPullHintTitle = '#%d %s';
   rsPullHintPassed = '%d checks passed';
@@ -919,6 +929,13 @@ begin
   FBranchPopup.Parent := Self;
   FBranchPopup.FilterHint := rsFilterBranches;
   FBranchPopup.OnPick := @BranchPopupPick;
+  { The commits not pushed or pulled yet pop up over the form, above the
+    counts in the status bar. }
+  FSyncHashes := TStringList.Create;
+  FSyncPopup := TGittanPopupList.Create(Self);
+  FSyncPopup.Parent := Self;
+  FSyncPopup.FilterHint := rsFilterCommits;
+  FSyncPopup.OnPick := @SyncPopupPick;
   { The welcome view shares the summary's box and draws the application
     icon from its own copy: Application.Icon keeps to its small image. }
   FAppIcon := TIcon.Create;
@@ -973,6 +990,7 @@ begin
   StopWatcher;
   AbandonPullJob;
   FBranchNames.Free;
+  FSyncHashes.Free;
   StopBlame;
   StopIndexing;
   SaveIndex;
@@ -1155,6 +1173,9 @@ begin
     FBranchPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
+    FSyncPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
+      RGBToColor(100, 160, 240));
     FStatus.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(62, 62, 62), RGBToColor(58, 58, 59),
       RGBToColor(100, 160, 240), RGBToColor(63, 185, 80), RGBToColor(227, 179, 65),
@@ -1179,6 +1200,9 @@ begin
     FFindBar.Nav.SetColors(RGBToColor(246, 246, 246), clWhite,
       RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
     FBranchPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
+      RGBToColor(0, 110, 230));
+    FSyncPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
     FStatus.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),

@@ -1091,10 +1091,57 @@ begin
     RunCommandWith(FSettings.EditorCommand, ContextFullPath);
 end;
 
+{ A click on the ahead/behind counts in the status bar lists the commits
+  behind them: those not pushed yet, newest first, then those not pulled
+  yet, each with its short id on the right. Picking one shows it against
+  its parent, as a click on a blame band does. The list is cut at what
+  SyncCommits gives, with a header saying how many more there are. }
+procedure TForm1.SyncClick(const AScreenRect: TRect);
+
+  procedure AddGroup(AAhead: boolean; ACount: integer; const AHeader: string);
+  var
+    Commits: TGittanCommitLines;
+    i: integer;
+  begin
+    if (ACount = 0) or not FRepo.SyncCommits(AAhead, Commits) then
+      Exit;
+    FSyncPopup.AddHeader(AHeader);
+    FSyncHashes.Add('');
+    for i := 0 to High(Commits) do
+    begin
+      FSyncPopup.Add(Commits[i].Subject, Commits[i].Short);
+      FSyncHashes.Add(Commits[i].Hash);
+    end;
+    if ACount > Length(Commits) then
+    begin
+      FSyncPopup.AddHeader(Format(rsMoreCommits, [ACount - Length(Commits)]));
+      FSyncHashes.Add('');
+    end;
+  end;
+
+begin
+  if (FRepo.Root = '') or not FHasUpstream then
+    Exit;
+  FSyncPopup.Clear;
+  FSyncHashes.Clear;
+  AddGroup(True, FAhead, rsNotPushed);
+  AddGroup(False, FBehind, rsNotPulled);
+  if FSyncHashes.Count = 0 then
+    Exit;
+  FSyncPopup.Popup(AScreenRect);
+end;
+
+procedure TForm1.SyncPopupPick(Sender: TObject; AIndex: integer);
+begin
+  if (AIndex < 0) or (AIndex >= FSyncHashes.Count) or (FSyncHashes[AIndex] = '') then
+    Exit;
+  ShowBlameCommit(FSyncHashes[AIndex]);
+end;
+
 { The status bar's parts: the branch drops the branch list up from it,
-  as in the summary; the pull request opens on GitHub; the conflicts
-  show the first conflicted file; the name and the file count go back
-  to the summary. }
+  as in the summary; the ahead/behind counts list their commits; the
+  pull request opens on GitHub; the conflicts show the first conflicted
+  file; the name and the file count go back to the summary. }
 procedure TForm1.StatusPartClick(Sender: TObject; APart: TGittanStatusPart;
   const AScreenRect: TRect);
 var
@@ -1105,6 +1152,8 @@ begin
       MenuSummaryClick(Sender);
     spBranch:
       SummaryBranchClick(Sender, AScreenRect);
+    spSync:
+      SyncClick(AScreenRect);
     spPull:
       MenuOpenPullClick(Sender);
     spConflicts:
