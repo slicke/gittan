@@ -141,6 +141,7 @@ begin
   Item.Enabled := FSettings.Recent.Count > 0;
   Item.OnClick := @MenuClearRecentClick;
   FRecentMenu.Add(Item);
+  FWelcome.SetRecent(FSettings.Recent);
 end;
 
 procedure TForm1.MenuRecentClick(Sender: TObject);
@@ -456,39 +457,66 @@ begin
   end;
 end;
 
-{ Scrolling on past the bottom of a file pulls in the next one. The event
-  fires before the editor scrolls, so a wheel step that is already at the
-  bottom counts toward the pull; one that scrolls, or scrolls up, starts
-  over. A pill at the bottom of the text rises with the pull (see
-  EditDrawEditor), and when the pull is complete the next file is shown
-  from its top. The gesture's momentum runs on after the jump, so the
-  pull is disarmed until the wheel has paused. }
+{ Scrolling on past the bottom of a file pulls in the next one, and past
+  the top the previous one. The event fires before the editor scrolls, so
+  a wheel step that is already at the edge counts toward the pull; one
+  that scrolls, or goes the other way, starts over. FOverscroll is the
+  delta pulled so far, positive downwards. A pill at the edge of the text
+  comes in with the pull (see EditDrawEditor), and when the pull is
+  complete the next file is shown from its top, or the previous one from
+  its bottom. The gesture's momentum runs on after the jump, so the pull
+  is disarmed until the wheel has paused, and the editor's own scrolling
+  is off meanwhile (SetWheelScroll). }
 procedure TForm1.EditMouseWheel(Sender: TObject; Shift: TShiftState;
   WheelDelta: integer; MousePos: TPoint; var Handled: boolean);
 var
   Now: QWord;
-  AtBottom: boolean;
+  Down, AtEdge: boolean;
 begin
-  if (FView <> gvChanges) or (Shift - [ssLeft] <> []) then
-    Exit;
   Now := GetTickCount64;
   if not FOverscrollArmed then
+  begin
     FOverscrollArmed := Now - FOverscrollTick >= OverscrollPause;
+    if FOverscrollArmed then
+      SetWheelScroll(True);
+  end;
   FOverscrollTick := Now;
-  if not FOverscrollArmed then
+  if not FOverscrollArmed or (FView <> gvChanges) or
+    (Shift - [ssLeft] <> []) then
     Exit;
-  AtBottom := Edit.ScrollVert.SmoothPos >= Edit.ScrollVert.SmoothPosLast;
-  if (WheelDelta >= 0) or not AtBottom or (NeighbourFile(True) = nil) then
+  Down := WheelDelta < 0;
+  if Down then
+    AtEdge := Edit.ScrollVert.SmoothPos >= Edit.ScrollVert.SmoothPosLast
+  else
+    AtEdge := Edit.ScrollVert.SmoothPos <= 0;
+  if (WheelDelta = 0) or not AtEdge or (NeighbourFile(Down) = nil) then
   begin
     SetOverscroll(0);
     Exit;
   end;
+  { A file that fits in the window is at both edges: a pull the other
+    way starts over. }
+  if (FOverscroll <> 0) and ((FOverscroll > 0) <> Down) then
+    SetOverscroll(0);
   SetOverscroll(FOverscroll - WheelDelta);
-  if FOverscroll < OverscrollNeeded then
+  if Abs(FOverscroll) < OverscrollNeeded then
     Exit;
   FOverscrollArmed := False;
+  SetWheelScroll(False);
   SetOverscroll(0);
-  StepFile(True);
+  if StepFile(Down) and not Down then
+    ShowFileEnd;
+end;
+
+{ The editor scrolls on every wheel event after this handler, whatever
+  Handled says: the one that completes a pull would scroll the file just
+  pulled in away from its edge, and so would the momentum after it, so
+  the editors' wheel scrolling is off from the jump until the wheel has
+  paused. }
+procedure TForm1.SetWheelScroll(AOn: boolean);
+begin
+  Edit.OptMouseWheelScrollVert := AOn;
+  FEditOld.OptMouseWheelScrollVert := AOn;
 end;
 
 procedure TForm1.SetOverscroll(AValue: integer);
@@ -499,8 +527,34 @@ begin
   { Restarted on every change: the pull is forgotten after a quiet
     spell. }
   FOverscrollTimer.Enabled := False;
-  FOverscrollTimer.Enabled := AValue > 0;
+  FOverscrollTimer.Enabled := AValue <> 0;
   Edit.Invalidate;
+end;
+
+{ Shows the end of the file just pulled in: the caret on its last line
+  and the last page in view, so scrolling on upwards reads the file
+  backwards and Previous Change finds its last change. The scroll needs
+  the wrap info of the text just loaded, which the first paint would
+  build, and the line top the editor kept from the resize of showing the
+  file would win at that paint. The editor keeps the line top within the
+  last page, so the last line's puts that page in view. }
+procedure TForm1.ShowFileEnd;
+var
+  Last: integer;
+begin
+  Last := Edit.Strings.Count - 1;
+  { The editor's trailing empty line is no line of the file. }
+  if Edit.Strings.IsLastLineFake then
+    Dec(Last);
+  if Last < 0 then
+    Exit;
+  Edit.UpdateWrapInfo(True);
+  Edit.LineTopTodo := 0;
+  Edit.DoCaretSingle(0, Last);
+  Edit.LineTop := Last;
+  Edit.Update;
+  SyncOldSide;
+  UpdateChangeNav;
 end;
 
 procedure TForm1.OverscrollTimerTimer(Sender: TObject);
@@ -508,34 +562,43 @@ begin
   SetOverscroll(0);
 end;
 
-{ The pill that shows the pull: it rises from the bottom edge of the text
-  as the pull grows, and fills from the left, until the next file is
-  pulled in. The canvas is clipped to the text rectangle so the pill
-  comes up from under its edge. }
+{ The pill that shows the pull: it comes in from the edge of the text the
+  pull is at, rising from the bottom for the next file or descending from
+  the top for the previous, as the pull grows, and fills from the left,
+  until the file is pulled in. The canvas is clipped to the text
+  rectangle so the pill comes in from under its edge. }
 procedure TForm1.EditDrawEditor(Sender: TObject; C: TCanvas; const ARect: TRect);
 var
   Node: TTreeNode;
   Pill: string;
-  W, H, Pad: integer;
+  W, H, Pad, Y: integer;
   Part: double;
+  Down: boolean;
   R: TRect;
 begin
   DrawBlame(TATSynEdit(Sender), C);
-  if (Sender <> Edit) or (FOverscroll <= 0) or (FView <> gvChanges) then
+  if (Sender <> Edit) or (FOverscroll = 0) or (FView <> gvChanges) then
     Exit;
-  Node := NeighbourFile(True);
+  Down := FOverscroll > 0;
+  Node := NeighbourFile(Down);
   if Node = nil then
     Exit;
-  Pill := Format(rsPullNext, [ExtractFileName(Node.GetTextPath)]);
-  Part := Min(1.0, FOverscroll / OverscrollNeeded);
+  if Down then
+    Pill := Format(rsPullNext, [ExtractFileName(Node.GetTextPath)])
+  else
+    Pill := Format(rsPullPrev, [ExtractFileName(Node.GetTextPath)]);
+  Part := Min(1.0, Abs(FOverscroll) / OverscrollNeeded);
   C.Font.Assign(FHeader.Font);
   C.Font.Color := FPullText;
   H := C.TextHeight(Pill) + 10;
   Pad := H div 2 + 4;
   W := C.TextWidth(Pill) + 2 * Pad;
   R := Rect(0, 0, W, H);
-  R.Offset((ARect.Left + ARect.Right - W) div 2,
-    ARect.Bottom - Round(Part * (H + 12)));
+  if Down then
+    Y := ARect.Bottom - Round(Part * (H + 12))
+  else
+    Y := ARect.Top - H + Round(Part * (H + 12));
+  R.Offset((ARect.Left + ARect.Right - W) div 2, Y);
   C.Clipping := True;
   C.ClipRect := ARect;
   try
@@ -640,7 +703,7 @@ begin
     FOpenPullItem := AddItem(FStatusPopup, rsOpenPull, @MenuOpenPullClick);
     FCopyPullItem := AddItem(FStatusPopup, rsCopyPullUrl, @MenuCopyPullUrlClick);
   end;
-  StatusBar.PopupMenu := FStatusPopup;
+  FStatus.PopupMenu := FStatusPopup;
 end;
 
 procedure TForm1.FilePopupPopup(Sender: TObject);
@@ -895,7 +958,7 @@ begin
     Err := Trim(Err);
     if Pos(LineEnding, Err) > 0 then
       Err := Copy(Err, 1, Pos(LineEnding, Err) - 1);
-    StatusBar.SimpleText := Format(rsGitHubFailed, [Err]);
+    StatusNote(Format(rsGitHubFailed, [Err]), True);
   end;
 end;
 
@@ -1028,10 +1091,79 @@ begin
     RunCommandWith(FSettings.EditorCommand, ContextFullPath);
 end;
 
-{ A click on the status bar goes back to the summary. }
-procedure TForm1.StatusBarClick(Sender: TObject);
+{ A click on the ahead/behind counts in the status bar lists the commits
+  behind them: those not pushed yet, newest first, then those not pulled
+  yet, each with its short id on the right. Picking one shows it against
+  its parent, as a click on a blame band does. The list is cut at what
+  SyncCommits gives, with a header saying how many more there are. }
+procedure TForm1.SyncClick(const AScreenRect: TRect);
+
+  procedure AddGroup(AAhead: boolean; ACount: integer; const AHeader: string);
+  var
+    Commits: TGittanCommitLines;
+    i: integer;
+  begin
+    if (ACount = 0) or not FRepo.SyncCommits(AAhead, Commits) then
+      Exit;
+    FSyncPopup.AddHeader(AHeader);
+    FSyncHashes.Add('');
+    for i := 0 to High(Commits) do
+    begin
+      FSyncPopup.Add(Commits[i].Subject, Commits[i].Short);
+      FSyncHashes.Add(Commits[i].Hash);
+    end;
+    if ACount > Length(Commits) then
+    begin
+      FSyncPopup.AddHeader(Format(rsMoreCommits, [ACount - Length(Commits)]));
+      FSyncHashes.Add('');
+    end;
+  end;
+
 begin
-  MenuSummaryClick(Sender);
+  if (FRepo.Root = '') or not FHasUpstream then
+    Exit;
+  FSyncPopup.Clear;
+  FSyncHashes.Clear;
+  AddGroup(True, FAhead, rsNotPushed);
+  AddGroup(False, FBehind, rsNotPulled);
+  if FSyncHashes.Count = 0 then
+    Exit;
+  FSyncPopup.Popup(AScreenRect);
+end;
+
+procedure TForm1.SyncPopupPick(Sender: TObject; AIndex: integer);
+begin
+  if (AIndex < 0) or (AIndex >= FSyncHashes.Count) or (FSyncHashes[AIndex] = '') then
+    Exit;
+  ShowBlameCommit(FSyncHashes[AIndex]);
+end;
+
+{ The status bar's parts: the branch drops the branch list up from it,
+  as in the summary; the ahead/behind counts list their commits; the
+  pull request opens on GitHub; the conflicts show the first conflicted
+  file; the name and the file count go back to the summary. }
+procedure TForm1.StatusPartClick(Sender: TObject; APart: TGittanStatusPart;
+  const AScreenRect: TRect);
+var
+  i: integer;
+begin
+  case APart of
+    spRepo, spFiles:
+      MenuSummaryClick(Sender);
+    spBranch:
+      SummaryBranchClick(Sender, AScreenRect);
+    spSync:
+      SyncClick(AScreenRect);
+    spPull:
+      MenuOpenPullClick(Sender);
+    spConflicts:
+      for i := 0 to High(FStats) do
+        if FStats[i].Kind = ckConflict then
+        begin
+          SummarySelectFile(Sender, FStats[i].Path);
+          Break;
+        end;
+  end;
 end;
 
 procedure TForm1.MenuCopyBranchClick(Sender: TObject);
@@ -1208,7 +1340,7 @@ end;
   gh goes to the network, so the job runs in a thread: once per
   repository and branch, and again on View > Refresh (AForce). A job
   still running for something else is abandoned like a blame job. }
-procedure TForm1.StartPullJob(AForce: boolean);
+procedure TForm1.StartPullJob(AForce: boolean; AKeep: boolean);
 var
   Key: string;
 begin
@@ -1219,17 +1351,33 @@ begin
     Exit;
   AbandonPullJob;
   FPullKey := Key;
-  FHasPull := False;
-  FPulls := nil;
-  FPullError := '';
+  if not AKeep then
+  begin
+    FHasPull := False;
+    FPulls := nil;
+    FPullError := '';
+  end;
   FPullJob := TGittanPullRequestJob.Create(FGitHubCli, FRepo.Root, FBranch);
   FPullJob.OnDone := @PullJobDone;
   FPullJob.Start;
-  RebuildPullMenu;
+  if not AKeep then
+    RebuildPullMenu;
+end;
+
+{ A poll waits for a job still running; that job's end sets the timer
+  again. }
+procedure TForm1.PullTimerTimer(Sender: TObject);
+begin
+  FPullTimer.Enabled := False;
+  if (FRepo.Root = '') or (FPullJob <> nil) then
+    Exit;
+  StartPullJob(True, True);
 end;
 
 procedure TForm1.AbandonPullJob;
 begin
+  { No job, no poll: the next finished job starts the timer again. }
+  FPullTimer.Enabled := False;
   if FPullJob = nil then
     Exit;
   FPullJob.Stop(False);
@@ -1253,6 +1401,16 @@ begin
   FPullError := Job.Error;
   UpdateStatus;
   RebuildPullMenu;
+  { Ask again later, more often while checks run; not when gh failed
+    (no GitHub remote, not logged in), which a refresh retries. }
+  if FPullError = '' then
+  begin
+    if FHasPull and (FPull.ChecksPending > 0) then
+      FPullTimer.Interval := PullPollPending
+    else
+      FPullTimer.Interval := PullPollIdle;
+    FPullTimer.Enabled := True;
+  end;
 end;
 
 { Compare With > Pull Requests: one radio item per open pull request,
@@ -1313,9 +1471,9 @@ begin
   if (FRepo.Root = '') or (i < 0) or (i > High(FPulls)) then
     Exit;
   Pull := FPulls[i];
-  StatusBar.SimpleText := Format(rsFetchingPull, [Pull.Number]);
-  StatusBar.Update;
+  FStatus.ShowMessage(Format(rsFetchingPull, [Pull.Number]), stNormal, 0);
   Remote := FRepo.RemoteFor(RepoPathOfUrl(Pull.Url));
+  FStatus.ClearMessage;
   if not FRepo.FetchPullRequest(Remote, Pull.Number, Pull.BaseRef, HeadRef) then
   begin
     FSummary.Notice := Format(rsPullFailed, [Pull.Number, FRepo.Error]);
@@ -1340,6 +1498,45 @@ procedure TForm1.MenuOpenPullClick(Sender: TObject);
 begin
   if FHasPull and (FPull.Url <> '') then
     OpenURL(FPull.Url);
+end;
+
+function TForm1.PullChecks(const APull: TGittanPullRequest; out ACount: integer): TGittanStatusTone;
+begin
+  ACount := 0;
+  if APull.ChecksFailed > 0 then
+  begin
+    ACount := APull.ChecksFailed;
+    Result := stBad;
+  end
+  else if APull.ChecksPending > 0 then
+  begin
+    ACount := APull.ChecksPending;
+    Result := stWarn;
+  end
+  else if APull.ChecksPassed > 0 then
+    Result := stGood
+  else
+    Result := stNormal;
+end;
+
+{ One line per outcome of the checks, as gh counts them for the status
+  line (a skipped one passed), worst first, each with its icon. }
+function TForm1.PullHint(const APull: TGittanPullRequest): string;
+
+  procedure AddChecks(ACount: integer; const AIcon, AOne, AMany: string);
+  begin
+    if ACount = 1 then
+      Result := Result + LineEnding + AIcon + ' ' + AOne
+    else if ACount > 1 then
+      Result := Result + LineEnding + AIcon + ' ' + Format(AMany, [ACount]);
+  end;
+
+begin
+  Result := Format(rsPullHintTitle, [APull.Number, APull.Title]);
+  AddChecks(APull.ChecksFailed, HintFailed, rsPullHintFailedOne, rsPullHintFailed);
+  AddChecks(APull.ChecksPending, HintPending, rsPullHintPendingOne, rsPullHintPending);
+  AddChecks(APull.ChecksPassed, HintPassed, rsPullHintPassedOne, rsPullHintPassed);
+  Result := Result + LineEnding + HintLink + ' ' + rsPullHintOpen;
 end;
 
 procedure TForm1.MenuCopyPullUrlClick(Sender: TObject);

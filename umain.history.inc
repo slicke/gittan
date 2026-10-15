@@ -33,14 +33,14 @@ begin
   Path := ShownRelPath;
   if (FRepo.Root = '') or not (FView in [gvChanges, gvFile]) or (Path = '') then
   begin
-    StatusBar.SimpleText := rsHistoryNeedsFile;
+    StatusNote(rsHistoryNeedsFile);
     Exit;
   end;
   if ChunkRows(FromRow, ToRow, Title) then
   begin
     if not ChunkLines(FromRow, ToRow, FromLine, ToLine) then
     begin
-      StatusBar.SimpleText := rsNoHistoryYet;
+      StatusNote(rsNoHistoryYet);
       Exit;
     end;
     if Title = '' then
@@ -193,7 +193,7 @@ begin
     FHistoryFrom, FHistoryTo, FHistoryMax + 1, FRepo.IgnoreWhitespace);
   FHistoryJob.OnDone := @HistoryJobDone;
   FHistoryJob.Start;
-  StatusBar.SimpleText := rsHistoryLoading;
+  FStatus.ShowMessage(rsHistoryLoading, stNormal, 0);
 end;
 
 procedure TForm1.AbandonHistoryJob;
@@ -203,6 +203,8 @@ begin
   FHistoryJob.Stop(False);
   FBlameZombies.Add(FHistoryJob);
   FHistoryJob := nil;
+  { Its "Loading history..." is no longer true. }
+  FStatus.ClearMessage;
 end;
 
 { The job is done: the commits, and the uncommitted changes before them,
@@ -221,11 +223,12 @@ begin
   if Job.History = nil then
   begin
     if Job.Error <> '' then
-      StatusBar.SimpleText := Job.Error
+      StatusNote(Job.Error, True)
     else
-      StatusBar.SimpleText := rsNoHistory;
+      StatusNote(rsNoHistory);
     Exit;
   end;
+  FStatus.ClearMessage;
   FHistory.Free;
   FHistory := Job.Take;
   FHistoryMore := FHistory.Count > FHistoryMax;

@@ -291,9 +291,10 @@ begin
     JumpToDefinition(AEd, P, Word);
     Exit;
   end;
-  StatusBar.SimpleText := Format(rsLookingFor, [Word]);
+  FStatus.ShowMessage(Format(rsLookingFor, [Word]), stNormal, 0);
   if FindInRepo(Word, RelPath, Symbol) then
   begin
+    FStatus.ClearMessage;
     ShowRepoFile(RelPath);
     P := FindDefinition(FAdapter, Edit, Word, -1);
     if P.Y >= 0 then
@@ -302,7 +303,7 @@ begin
       UpdateStatus;
     Exit;
   end;
-  StatusBar.SimpleText := Format(rsNoDefinition, [Word]);
+  StatusNote(Format(rsNoDefinition, [Word]));
 end;
 
 procedure TForm1.MenuGoToDefinitionClick(Sender: TObject);
@@ -482,7 +483,7 @@ begin
     end;
     if Length(Changes) = 0 then
     begin
-      StatusBar.SimpleText := rsNoChangedSymbols;
+      StatusNote(rsNoChangedSymbols);
       Exit;
     end;
     FSymbolBar.SetSymbols(Names, Depths, Details, False, rsChangedSymbolHint);
@@ -535,7 +536,7 @@ begin
   try
     if Length(Changes) = 0 then
     begin
-      StatusBar.SimpleText := rsNoChangedSymbols;
+      StatusNote(rsNoChangedSymbols);
       Exit;
     end;
     Idents.CaseSensitive := not IgnoreCase;
@@ -562,9 +563,9 @@ begin
     if (Idents.Count = 0) or not FRepo.Grep(Idents, IgnoreCase, Output) then
     begin
       if Idents.Count = 0 then
-        StatusBar.SimpleText := rsNoCallers
+        StatusNote(rsNoCallers)
       else
-        StatusBar.SimpleText := FRepo.Error;
+        StatusNote(FRepo.Error, True);
       Exit;
     end;
     Callers := ParseGrep(Output, Idents, IgnoreCase, Skip);
@@ -585,7 +586,7 @@ begin
     SetLength(Kept, n);
     if n = 0 then
     begin
-      StatusBar.SimpleText := rsNoCallers;
+      StatusNote(rsNoCallers);
       Exit;
     end;
 
@@ -652,7 +653,7 @@ begin
     SetLength(FSymbolOnOld, n);
     SetLength(Depths, n);
     FSymbolBar.SetSymbols(Names, Depths, Details, False, rsCallerHint);
-    StatusBar.SimpleText := Format(rsCallersStatus, [FilesText(CallerFileCount(Kept))]);
+    StatusNote(Format(rsCallersStatus, [FilesText(CallerFileCount(Kept))]));
   finally
     NewSide.Lines.Free;
     OldSide.Lines.Free;

@@ -47,6 +47,7 @@ type
     procedure TestFetchPullRequest;
     procedure TestDefaultBranchAndMergeBase;
     procedure TestAheadBehind;
+    procedure TestSyncCommits;
     procedure TestOperation;
     procedure TestBranchesAndSwitch;
   end;
@@ -756,6 +757,55 @@ begin
     AssertTrue(FRepo.AheadBehind(Ahead, Behind));
     AssertEquals(0, Ahead);
     AssertEquals(1, Behind);
+  finally
+    RemoveTree(Remote);
+  end;
+end;
+
+procedure TGitRepoTest.TestSyncCommits;
+var
+  Remote, Branch, Output: string;
+  Status: integer;
+  Commits: TGittanCommitLines;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  AssertFalse(FRepo.SyncCommits(True, Commits));
+  Remote := FDir + '-remote';
+  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Status,
+    [poStderrToOutPut]) <> 0 then
+    Fail('could not make a bare repository');
+  try
+    Branch := Trim(Git(['rev-parse', '--abbrev-ref', 'HEAD']));
+    Git(['remote', 'add', 'origin', Remote]);
+    Git(['push', '-q', '-u', 'origin', Branch]);
+    AssertTrue(FRepo.SyncCommits(True, Commits));
+    AssertEquals(0, Length(Commits));
+    WriteFile('a.txt', 'one'#10'two'#10'three'#10'four'#10);
+    Commit('ahead one');
+    WriteFile('a.txt', 'one'#10'two'#10'three'#10'four'#10'five'#10);
+    Commit('ahead two');
+    AssertTrue(FRepo.SyncCommits(True, Commits));
+    AssertEquals(2, Length(Commits));
+    AssertEquals('ahead two', Commits[0].Subject);
+    AssertEquals('ahead one', Commits[1].Subject);
+    AssertEquals(Trim(Git(['rev-parse', 'HEAD'])), Commits[0].Hash);
+    AssertEquals(Trim(Git(['rev-parse', '--short', 'HEAD'])), Commits[0].Short);
+    AssertTrue(Length(Commits[0].Short) < Length(Commits[0].Hash));
+    AssertTrue(FRepo.SyncCommits(False, Commits));
+    AssertEquals(0, Length(Commits));
+    { Only the newest when asked for one. }
+    AssertTrue(FRepo.SyncCommits(True, Commits, 1));
+    AssertEquals(1, Length(Commits));
+    AssertEquals('ahead two', Commits[0].Subject);
+    { The remote moves on without us, as in TestAheadBehind. }
+    Git(['push', '-q', 'origin', 'HEAD:' + Branch]);
+    Git(['reset', '-q', '--hard', 'HEAD^']);
+    AssertTrue(FRepo.SyncCommits(True, Commits));
+    AssertEquals(0, Length(Commits));
+    AssertTrue(FRepo.SyncCommits(False, Commits));
+    AssertEquals(1, Length(Commits));
+    AssertEquals('ahead two', Commits[0].Subject);
   finally
     RemoveTree(Remote);
   end;

@@ -50,6 +50,13 @@ type
   end;
   PGittanRepoSnapshot = ^TGittanRepoSnapshot;
 
+  {** A commit as SyncCommits lists it: its id, the short id git
+    abbreviates it to, and the first line of its message. }
+  TGittanCommitLine = record
+    Hash, Short, Subject: string;
+  end;
+  TGittanCommitLines = array of TGittanCommitLine;
+
   {** One opened repository. Open finds the work tree root for a folder, and
     the other calls run inside that root. }
   TGittanRepo = class
@@ -156,6 +163,11 @@ type
     {** How many commits the branch is ahead of and behind its upstream;
       false when it has none. }
     function AheadBehind(out AAhead, ABehind: integer): boolean;
+    {** The commits the branch is ahead of its upstream (not pushed yet)
+      with AAhead, else those it is behind (not pulled yet), newest
+      first, at most AMax of them; false when it has no upstream. }
+    function SyncCommits(AAhead: boolean; out ACommits: TGittanCommitLines;
+      AMax: integer = 100): boolean;
     {** The git directory of the work tree (a linked work tree has one of
       its own), empty when nothing is open. }
     function GitDir: string;
@@ -264,7 +276,7 @@ function RunGitHubCli(const AExe, ADir: string; const AArgs: array of string;
 implementation
 
 uses
-  Process, md5;
+  Process, md5, StrUtils;
 
 { Gives P the environment of Gittan without the variables whose names
   (with the equals sign) are in ASkip, so the caller can set those. }
@@ -1197,6 +1209,42 @@ begin
   Tab := Pos(#9, Output);
   Result := (Tab > 0) and TryStrToInt(Copy(Output, 1, Tab - 1), ABehind) and
     TryStrToInt(Copy(Output, Tab + 1, MaxInt), AAhead);
+end;
+
+function TGittanRepo.SyncCommits(AAhead: boolean; out ACommits: TGittanCommitLines;
+  AMax: integer): boolean;
+var
+  Output, Range, Line: string;
+  Lines: TStringList;
+  i, A, B: integer;
+begin
+  ACommits := nil;
+  if AAhead then
+    Range := '@{upstream}..HEAD'
+  else
+    Range := 'HEAD..@{upstream}';
+  Result := (FRoot <> '') and RunGit(FRoot, ['log', '--no-color', '-n', IntToStr(AMax),
+    '--format=%H%x1f%h%x1f%s', Range], Output);
+  if not Result then
+    Exit;
+  Lines := TStringList.Create;
+  try
+    Lines.Text := Output;
+    for i := 0 to Lines.Count - 1 do
+    begin
+      Line := Lines[i];
+      A := Pos(#31, Line);
+      B := PosEx(#31, Line, A + 1);
+      if (A = 0) or (B = 0) then
+        Continue;
+      SetLength(ACommits, Length(ACommits) + 1);
+      ACommits[High(ACommits)].Hash := Copy(Line, 1, A - 1);
+      ACommits[High(ACommits)].Short := Copy(Line, A + 1, B - A - 1);
+      ACommits[High(ACommits)].Subject := Copy(Line, B + 1, MaxInt);
+    end;
+  finally
+    Lines.Free;
+  end;
 end;
 
 function TGittanRepo.Branch: string;

@@ -2,19 +2,16 @@
 //
 //   swift tools/makeicons.swift <artwork.png> <outdir> <Gittan.ico>
 //
-// The artwork is a square image of a light blue document on a white background,
-// with a neutral gray drop shadow. The document is cut out: it is told from the
-// background by its blue tint, the background turns transparent and the shadow
-// becomes black with the alpha of its gray, so it stays soft on any background.
-// Windows and Linux get the document alone; macOS gets it on a dark rounded
-// square (a superellipse, like the continuous corners of macOS app icons)
-// with a gradient and a light outline.
+// The artwork is the finished icon: a square PNG of a rounded tile (a
+// superellipse, like the continuous corners of macOS app icons) with its own
+// rim, transparent outside the tile. Windows and Linux get the tile filling
+// its canvas; macOS gets it inset to Apple's grid over a soft drop shadow.
 //
 // Writes:
-//   <outdir>/gittan.png          1024x1024 master, the document alone
+//   <outdir>/gittan.png          1024x1024 master, the tile filling the canvas
 //   <outdir>/png/gittan-<n>.png  16..512 for Linux desktop files
-//   <outdir>/Gittan.icns         macOS, dark rounded square inset to Apple's 824/1024 grid
-//   <Gittan.ico>                 Windows/Linux LCL icon, 16..256, the document alone
+//   <outdir>/Gittan.icns         macOS, the tile inset to Apple's 824/1024 grid
+//   <Gittan.ico>                 Windows/Linux LCL icon, 16..256, the tile filling the canvas
 //
 // macOS only (CoreGraphics, ImageIO, iconutil).
 
@@ -91,134 +88,15 @@ func load(_ path: String) -> Bitmap {
   return bm
 }
 
-func resized(_ img: CGImage, to size: Int, inset: CGFloat = 0) -> Bitmap {
+func resized(_ img: CGImage, to size: Int) -> Bitmap {
   let bm = Bitmap(width: size, height: size)
-  let s = CGFloat(size) - 2 * inset
-  bm.draw(img, in: CGRect(x: inset, y: inset, width: s, height: s))
+  bm.draw(img, in: CGRect(x: 0, y: 0, width: size, height: size))
   return bm
 }
 
 let art = load(srcPath)
 if art.width != art.height { fail("the artwork must be square, it is \(art.width)x\(art.height)") }
-
-// ---------------------------------------------------------------------------
-// Windows and Linux: the document without its background
-// ---------------------------------------------------------------------------
-
-let W = art.width, H = art.height
-
-// The document is tinted blue; the background and shadow are neutral gray.
-var tinted = [Bool](repeating: false, count: W * H)
-for y in 0..<H {
-  for x in 0..<W {
-    let (r, _, b, _) = art.rgba(x, y)
-    tinted[y * W + x] = b - r >= 3
-  }
-}
-// The background is what an untinted path reaches from the border; the
-// document is everything else, so its green, red and gray bars are kept.
-var outside = [Bool](repeating: false, count: W * H)
-var stack: [Int] = []
-for x in 0..<W { stack.append(x); stack.append((H - 1) * W + x) }
-for y in 0..<H { stack.append(y * W); stack.append(y * W + W - 1) }
-while let i = stack.popLast() {
-  if outside[i] || tinted[i] { continue }
-  outside[i] = true
-  let x = i % W, y = i / W
-  if x > 0 { stack.append(i - 1) }
-  if x < W - 1 { stack.append(i + 1) }
-  if y > 0 { stack.append(i - W) }
-  if y < H - 1 { stack.append(i + W) }
-}
-// The tint leaves the outline ragged: the fold's diagonal is nearly white and
-// the shadow has stray tinted specks along the edge. An opening (erode, then
-// dilate, 3 pixels) removes the specks before a closing (dilate, then erode,
-// 5 pixels) could join them to the edge; the closing fills the notches. Two
-// 13x13 averages smooth the outline, and a steep ramp around three quarters
-// (a pixel inside the tint, past the gray antialiased rim) turns the blur
-// back into an edge about two pixels wide.
-// Combines the (2r+1)x(2r+1) neighborhood of every pixel, a row pass then a
-// column pass, with pick starting from first.
-func spread(_ src: [Float], _ r: Int, _ first: Float, _ pick: (Float, Float) -> Float) -> [Float] {
-  var tmp = src, out = src
-  for y in 0..<H { for x in 0..<W {
-    var v = first
-    for d in -r...r { v = pick(v, src[y * W + min(max(x + d, 0), W - 1)]) }
-    tmp[y * W + x] = v
-  } }
-  for y in 0..<H { for x in 0..<W {
-    var v = first
-    for d in -r...r { v = pick(v, tmp[min(max(y + d, 0), H - 1) * W + x]) }
-    out[y * W + x] = v
-  } }
-  return out
-}
-var mask = outside.map { $0 ? Float(0) : 1 }
-mask = spread(spread(mask, 3, 1, min), 3, 0, max)
-mask = spread(spread(mask, 5, 0, max), 5, 1, min)
-mask = spread(spread(mask, 6, 0, +).map { $0 / 169 }, 6, 0, +).map { $0 / 169 }
-mask = mask.map { min(1, max(0, ($0 - 0.75) * 7 + 0.5)) }
-let loose = Bitmap(width: W, height: H)
-for y in 0..<H {
-  for x in 0..<W {
-    let m = mask[y * W + x]
-    let (r, g, b, _) = art.rgba(x, y)
-    // The shadow's gray becomes black with that much alpha; the near white
-    // background (252 and up) disappears.
-    let shade = max(0, Float(252 - min(r, g, b)) / 252)
-    let a = m + (1 - m) * shade
-    let i = loose.offset(x, y)
-    loose.data[i] = UInt8(Float(r) * m + 0.5)
-    loose.data[i + 1] = UInt8(Float(g) * m + 0.5)
-    loose.data[i + 2] = UInt8(Float(b) * m + 0.5)
-    loose.data[i + 3] = UInt8(a * 255 + 0.5)
-  }
-}
-let looseImage = loose.image
-
-// ---------------------------------------------------------------------------
-// macOS: the document on a black rounded square
-// ---------------------------------------------------------------------------
-
-// The outline is a superellipse |x|^5 + |y|^5 = 1, close to the continuous
-// corners of macOS app icons, filled with antialiasing through a clip path.
-let side = 1024
-let cut = Bitmap(width: side, height: side)
-let path = CGMutablePath()
-let half = CGFloat(side) / 2, exponent = 5.0, steps = 2048
-for i in 0..<steps {
-  let t = Double(i) / Double(steps) * 2 * Double.pi
-  let c = cos(t), s = sin(t)
-  let x = copysign(pow(abs(c), 2 / exponent), c), y = copysign(pow(abs(s), 2 / exponent), s)
-  let p = CGPoint(x: half + half * CGFloat(x), y: half + half * CGFloat(y))
-  if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
-}
-path.closeSubpath()
-// Context coordinates count from the bottom: a gradient from y = side to 0
-// runs from the top down.
-let rgb = CGColorSpaceCreateDeviceRGB()
-func gradient(_ top: [CGFloat], _ bottom: [CGFloat]) -> CGGradient {
-  CGGradient(colorSpace: rgb, colorComponents: top + bottom, locations: [0, 1], count: 2)!
-}
-let top = CGPoint(x: 0, y: CGFloat(side)), bottom = CGPoint(x: 0, y: 0)
-cut.ctx.saveGState()
-cut.ctx.addPath(path)
-cut.ctx.clip()
-// The plate: graphite at the top, nearly black at the bottom.
-cut.ctx.drawLinearGradient(gradient([0.23, 0.24, 0.27, 1], [0.03, 0.03, 0.04, 1]),
-                           start: top, end: bottom, options: [])
-// The document shrinks to 84% so the plate shows around it.
-let docInset = CGFloat(side) * 0.08
-cut.draw(looseImage, in: CGRect(x: 0, y: 0, width: side, height: side).insetBy(dx: docInset, dy: docInset))
-// The outline: a 6 pixel stroke on the outline, clipped to its inner half,
-// lit from above like the rims of macOS icons.
-cut.ctx.addPath(path)
-cut.ctx.setLineWidth(12)
-cut.ctx.replacePathWithStrokedPath()
-cut.ctx.clip()
-cut.ctx.drawLinearGradient(gradient([1, 1, 1, 0.45], [1, 1, 1, 0.12]), start: top, end: bottom, options: [])
-cut.ctx.restoreGState()
-let cutImage = cut.image
+let artImage = art.image
 
 let fm = FileManager.default
 try? fm.createDirectory(atPath: outDir + "/png", withIntermediateDirectories: true)
@@ -227,13 +105,31 @@ func write(_ data: Data, _ path: String) {
   do { try data.write(to: URL(fileURLWithPath: path)) } catch { fail("cannot write \(path): \(error)") }
 }
 
-let master = resized(looseImage, to: 1024)
+// ---------------------------------------------------------------------------
+// Windows and Linux: the tile filling its canvas
+// ---------------------------------------------------------------------------
+
+let master = resized(artImage, to: 1024)
 write(master.pngData(), outDir + "/gittan.png")
 let masterImage = master.image
 
 for n in [16, 22, 24, 32, 48, 64, 128, 256, 512] {
   write(resized(masterImage, to: n).pngData(), outDir + "/png/gittan-\(n).png")
 }
+
+// ---------------------------------------------------------------------------
+// macOS: the tile inset to Apple's 824/1024 grid over a soft drop shadow
+// ---------------------------------------------------------------------------
+
+let side = 1024
+let mac = Bitmap(width: side, height: side)
+let macInset = CGFloat(side) * 100 / 1024
+// Context coordinates count from the bottom: a negative offset drops the
+// shadow below the tile.
+mac.ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 28,
+                  color: CGColor(gray: 0, alpha: 0.4))
+mac.draw(artImage, in: CGRect(x: 0, y: 0, width: side, height: side).insetBy(dx: macInset, dy: macInset))
+let macImage = mac.image
 
 // ---------------------------------------------------------------------------
 // Windows .ico: BMP entries up to 128, PNG at 256
@@ -289,17 +185,16 @@ for e in entries { ico.append(e.data) }
 write(ico, icoPath)
 
 // ---------------------------------------------------------------------------
-// macOS .icns through iconutil, artwork inset to Apple's 824/1024 grid
+// macOS .icns through iconutil
 // ---------------------------------------------------------------------------
 
 let tmp = NSTemporaryDirectory() + "gittan-\(getpid()).iconset"
 try? fm.removeItem(atPath: tmp)
 do { try fm.createDirectory(atPath: tmp, withIntermediateDirectories: true) } catch { fail("cannot create \(tmp)") }
-let macInset: CGFloat = 100.0 / 1024.0
 for n in [16, 32, 128, 256, 512] {
   for scale in [1, 2] {
     let px = n * scale
-    let bm = resized(cutImage, to: px, inset: macInset * CGFloat(px))
+    let bm = resized(macImage, to: px)
     let name = scale == 1 ? "icon_\(n)x\(n).png" : "icon_\(n)x\(n)@2x.png"
     write(bm.pngData(), tmp + "/" + name)
   }

@@ -3,8 +3,7 @@ unit gittan.summary;
 {** The repository summary: what Gittan shows when a repository is opened,
   before a file is picked. It lists the changed files with their added and
   deleted line counts and a bar that compares the sizes of the changes,
-  under a header with the repository name, branch and totals. With no
-  repository open it shows a hint instead.
+  under a header with the repository name, branch and totals.
 
   It paints itself so it matches the editor's palette in both themes. It
   sizes its height to its content and is meant to sit in a TScrollBox,
@@ -15,7 +14,7 @@ unit gittan.summary;
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Graphics, ImgList, gittan.git;
+  Classes, SysUtils, Types, Controls, Graphics, ImgList, gittan.git, gittan.icons;
 
 type
   TGittanSelectFileEvent = procedure(Sender: TObject; const APath: string) of object;
@@ -31,11 +30,9 @@ type
 
   TGittanSummary = class(TCustomControl)
   private
-    FRepoName, FBranch, FBase, FMessage, FHint, FSelected, FNotice: string;
+    FRepoName, FBranch, FBase, FSelected, FNotice: string;
     FStats: TGittanFileStats;
     FImages: TCustomImageList;
-    FIcon: TIcon;
-    FIconBitmap: TBitmap;
     FIconIndex: array of integer;
     FHot: integer;
     FBack, FText, FDim, FHover, FSelectedBack, FAdded, FDeleted, FLine: TColor;
@@ -58,11 +55,12 @@ type
     procedure SetNotice(const AValue: string);
     procedure UpdateHeight;
     procedure PaintNotice(var Y: integer);
-    procedure PaintMessage;
     procedure PaintClean(Y: integer);
     procedure PaintHeader(var Y: integer);
     procedure PaintRow(AIndex, ATop: integer);
     procedure PaintBar(X, Y: integer; const AStat: TGittanFileStat; AMax: integer);
+    procedure PaintKinds(Y, ALeft, ARight: integer);
+    function BarWidth: integer;
   protected
     procedure Paint; override;
     procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
@@ -71,16 +69,12 @@ type
       override;
   public
     constructor Create(AOwner: TComponent); override;
-    destructor Destroy; override;
     {** Shows the changed files AStats of repository AName on ABranch,
       with ABase saying what is compared, as it is to be shown ("vs
       main", "main...feature"; empty for the usual HEAD); AIcons holds
       the image index in Images of each file's badge. }
     procedure SetRepository(const AName, ABranch, ABase: string;
       const AStats: TGittanFileStats; const AIcons: array of integer);
-    {** Shows AMessage alone, centered, under AIcon (when it has one) and
-      over the dimmer AHint: the view with no repository. }
-    procedure SetMessage(const AMessage, AHint: string; AIcon: TIcon);
     {** Sets the palette: the background, the text, the dim text for paths
       and counts, the hovered row, the selected row, the added and deleted
       colors, and the line color for the divider and the empty part of a
@@ -127,15 +121,21 @@ resourcestring
   rsPartlyStaged = 'partly staged';
 
 const
+  { The count of each kind in the header, after a dot in its color. }
+  KindCount: array[TGittanChangeKind] of string = ('%d modified', '%d added',
+    '%d deleted', '%d renamed', '%d untracked', '%d conflicted');
   Pad = 24;
-  RowHeight = 28;
+  RowHeight = 30;
   IconSize = 16;
-  BarWidth = 96;
+  { The row bars take a share of the width, within these. }
+  MinBarWidth = 96;
+  MaxBarWidth = 200;
+  TotalBarWidth = 140;
   BarHeight = 6;
+  DotSize = 8;
   CountWidth = 56;
   Gap = 12;
   TitleFontSize = 20;
-  MessageIconSize = 64;
   CheckSize = 20;
   ChipPadX = 6;
   ChipPadY = 3;
@@ -150,13 +150,9 @@ begin
   FHot := -1;
   SetColors(clWindow, clWindowText, clGrayText, clBtnFace, clBtnFace, clGreen,
     clRed, clBtnShadow);
-  SetMessage('', '', nil);
-end;
-
-destructor TGittanSummary.Destroy;
-begin
-  FIconBitmap.Free;
-  inherited Destroy;
+  { The height follows the content; the scroll box it sits in scrolls. }
+  Align := alTop;
+  UpdateHeight;
 end;
 
 procedure TGittanSummary.SetRepository(const AName, ABranch, ABase: string;
@@ -167,29 +163,12 @@ begin
   FRepoName := AName;
   FBranch := ABranch;
   FBase := ABase;
-  FMessage := '';
   FStats := Copy(AStats);
   SetLength(FIconIndex, Length(AIcons));
   for i := 0 to High(AIcons) do
     FIconIndex[i] := AIcons[i];
   FHot := -1;
-  { The height follows the content; the scroll box it sits in scrolls. }
-  Align := alTop;
   UpdateHeight;
-  Invalidate;
-end;
-
-procedure TGittanSummary.SetMessage(const AMessage, AHint: string; AIcon: TIcon);
-begin
-  FMessage := AMessage;
-  FHint := AHint;
-  FIcon := AIcon;
-  FreeAndNil(FIconBitmap);
-  FStats := nil;
-  FIconIndex := nil;
-  FHot := -1;
-  { The message is centered in whatever room the scroll box has. }
-  Align := alClient;
   Invalidate;
 end;
 
@@ -234,8 +213,7 @@ end;
 procedure TGittanSummary.FitHeight(AMin: integer);
 begin
   Constraints.MinHeight := AMin;
-  if FMessage = '' then
-    Height := Max(FContentHeight, AMin);
+  Height := Max(FContentHeight, AMin);
 end;
 
 procedure TGittanSummary.SetSelected(const AValue: string);
@@ -251,14 +229,13 @@ begin
   if FNotice = AValue then
     Exit;
   FNotice := AValue;
-  if FMessage = '' then
-    UpdateHeight;
+  UpdateHeight;
   Invalidate;
 end;
 
 function TGittanSummary.BranchClickable: boolean;
 begin
-  Result := Assigned(FOnBranchClick) and (FMessage = '') and (FBranch <> '');
+  Result := Assigned(FOnBranchClick) and (FBranch <> '');
 end;
 
 procedure TGittanSummary.SetBranchHot(AValue: boolean);
@@ -276,7 +253,7 @@ end;
 function TGittanSummary.RowAt(Y: integer): integer;
 begin
   Result := -1;
-  if (FMessage <> '') or (Y < FRowsTop) then
+  if Y < FRowsTop then
     Exit;
   Result := (Y - FRowsTop) div RowHeight;
   if Result > High(FStats) then
@@ -377,12 +354,83 @@ begin
     Canvas.TextOut(X, Y, Heading);
     Inc(X, Canvas.TextWidth(Heading) + Gap div 2);
     Canvas.Font.Color := FDeleted;
-    Canvas.TextOut(X, Y, '−' + IntToStr(Deleted));
+    Heading := '−' + IntToStr(Deleted);
+    Canvas.TextOut(X, Y, Heading);
+    Inc(X, Canvas.TextWidth(Heading) + Gap);
+    { The whole change as one bar: the added share in green, the
+      deleted in red. }
+    if Added + Deleted > 0 then
+    begin
+      Canvas.Pen.Style := psClear;
+      Canvas.Brush.Style := bsSolid;
+      Canvas.Brush.Color := FDeleted;
+      Canvas.RoundRect(X, Y + (BodyHeight - BarHeight) div 2, X + TotalBarWidth,
+        Y + (BodyHeight + BarHeight) div 2, BarHeight, BarHeight);
+      if Added > 0 then
+      begin
+        Canvas.Brush.Color := FAdded;
+        Canvas.RoundRect(X, Y + (BodyHeight - BarHeight) div 2,
+          X + Max(BarHeight, Round(Added / (Added + Deleted) * TotalBarWidth)),
+          Y + (BodyHeight + BarHeight) div 2, BarHeight, BarHeight);
+      end;
+      Canvas.Pen.Style := psSolid;
+      Canvas.Brush.Style := bsClear;
+      Inc(X, TotalBarWidth + Gap);
+    end;
+    PaintKinds(Y, X, Width - Pad);
   end;
   Inc(Y, BodyHeight + Pad div 2);
   Canvas.Pen.Color := FLine;
   Canvas.Line(Pad, Y, Width - Pad, Y);
   Inc(Y, Pad div 2);
+end;
+
+{ How many files of each kind, as a dot in the kind's color and a dim
+  count, right-aligned at ARight on the line at Y; left out when they
+  would not fit between ALeft and ARight. }
+procedure TGittanSummary.PaintKinds(Y, ALeft, ARight: integer);
+var
+  Counts: array[TGittanChangeKind] of integer;
+  Kind: TGittanChangeKind;
+  i, X, BodyHeight, Total: integer;
+  KindText: string;
+begin
+  for Kind := Low(Kind) to High(Kind) do
+    Counts[Kind] := 0;
+  for i := 0 to High(FStats) do
+    Inc(Counts[FStats[i].Kind]);
+  Canvas.Font.Color := FDim;
+  BodyHeight := Canvas.TextHeight('Xg');
+  Total := 0;
+  for Kind := Low(Kind) to High(Kind) do
+    if Counts[Kind] > 0 then
+      Inc(Total, DotSize + Gap div 2 + Canvas.TextWidth(Format(KindCount[Kind],
+        [Counts[Kind]])) + Gap);
+  Dec(Total, Gap);
+  if (Total <= 0) or (ALeft + Total > ARight) then
+    Exit;
+  X := ARight - Total;
+  for Kind := Low(Kind) to High(Kind) do
+    if Counts[Kind] > 0 then
+    begin
+      Canvas.Pen.Style := psClear;
+      Canvas.Brush.Style := bsSolid;
+      Canvas.Brush.Color := KindColor(Kind);
+      Canvas.Ellipse(X, Y + (BodyHeight - DotSize) div 2, X + DotSize,
+        Y + (BodyHeight + DotSize) div 2);
+      Canvas.Pen.Style := psSolid;
+      Canvas.Brush.Style := bsClear;
+      Inc(X, DotSize + Gap div 2);
+      KindText := Format(KindCount[Kind], [Counts[Kind]]);
+      Canvas.TextOut(X, Y, KindText);
+      Inc(X, Canvas.TextWidth(KindText) + Gap);
+    end;
+end;
+
+{ The bars of the rows share the width: a sixth of it, within bounds. }
+function TGittanSummary.BarWidth: integer;
+begin
+  Result := Min(MaxBarWidth, Max(MinBarWidth, Width div 6));
 end;
 
 { An info disc with an "i" and the notice text, in the row above the
@@ -545,51 +593,6 @@ begin
     MaxChange);
 end;
 
-{ The icon, the message in full color and the hint in dim, as one block
-  centered in the control. }
-procedure TGittanSummary.PaintMessage;
-var
-  Y, LineHeight, Total: integer;
-  HasIcon: boolean;
-begin
-  Canvas.Font := Font;
-  Canvas.Brush.Style := bsClear;
-  LineHeight := Canvas.TextHeight('Xg');
-  HasIcon := (FIcon <> nil) and not FIcon.Empty;
-  Total := LineHeight;
-  if HasIcon then
-    Inc(Total, MessageIconSize + Pad);
-  if FHint <> '' then
-    Inc(Total, LineHeight + Gap div 2);
-  Y := (Height - Total) div 2;
-  if HasIcon then
-  begin
-    { The icon's image for the size in device pixels (so a HiDPI screen
-      gets the sharp one) is copied into a bitmap: drawing the icon
-      itself goes through its handle, which Cocoa makes from the first,
-      smallest image. }
-    if FIconBitmap = nil then
-    begin
-      FIcon.Current := FIcon.GetBestIndexForSize(
-        Size(Round(MessageIconSize * GetCanvasScaleFactor),
-        Round(MessageIconSize * GetCanvasScaleFactor)));
-      FIconBitmap := TBitmap.Create;
-      FIconBitmap.LoadFromRawImage(FIcon.RawImage, False);
-    end;
-    Canvas.StretchDraw(Rect((Width - MessageIconSize) div 2, Y,
-      (Width + MessageIconSize) div 2, Y + MessageIconSize), FIconBitmap);
-    Inc(Y, MessageIconSize + Pad);
-  end;
-  Canvas.Font.Color := FText;
-  Canvas.TextOut((Width - Canvas.TextWidth(FMessage)) div 2, Y, FMessage);
-  if FHint <> '' then
-  begin
-    Inc(Y, LineHeight + Gap div 2);
-    Canvas.Font.Color := FDim;
-    Canvas.TextOut((Width - Canvas.TextWidth(FHint)) div 2, Y, FHint);
-  end;
-end;
-
 { A green disc with a check mark and "Working tree clean" (or "No changes
   vs base" when the tree is compared against something other than HEAD),
   where the rows would start, so a repository without changes does not
@@ -630,11 +633,6 @@ begin
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := FBack;
   Canvas.FillRect(ClientRect);
-  if FMessage <> '' then
-  begin
-    PaintMessage;
-    Exit;
-  end;
   Y := Pad;
   PaintHeader(Y);
   if FNotice <> '' then
