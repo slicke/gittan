@@ -283,6 +283,9 @@ type
       checks or requested changes, amber while checks run, green when
       approved or every check passed. }
     function PullTone(const APull: TGittanPullRequest): TGittanStatusTone;
+    {** The status bar's hint for a pull request: its number and title,
+      the checks by outcome, and what a click does. }
+    function PullHint(const APull: TGittanPullRequest): string;
     procedure UpdateSyntaxChecks;
     procedure UpdateCaption;
     procedure BuildMenu;
@@ -644,6 +647,14 @@ resourcestring
   rsAheadHint = '%d commits not pushed yet';
   rsBehindHint = '%d commits not pulled yet';
   rsPosition = 'Ln %d, Col %d';
+  rsPullHintTitle = '#%d %s';
+  rsPullHintPassed = '%d checks passed';
+  rsPullHintPassedOne = '1 check passed';
+  rsPullHintFailed = '%d checks failing';
+  rsPullHintFailedOne = '1 check failing';
+  rsPullHintPending = '%d checks pending';
+  rsPullHintPendingOne = '1 check pending';
+  rsPullHintOpen = 'Click to open it on GitHub';
   rsPositionOld = 'Ln %d (old), Col %d';
 
 const
@@ -819,7 +830,7 @@ begin
   FStatus.Parent := Self;
   FStatus.Align := alBottom;
   FStatus.OnPartClick := @StatusPartClick;
-  FStatus.PartHint[spBranch] := rsSwitchBranchHint;
+  FStatus.PartHint[spBranch] := HintSwitch + ' ' + rsSwitchBranchHint;
   FStatus.PartHint[spFiles] := rsShowSummaryHint;
   FStatus.PartHint[spConflicts] := rsShowConflictHint;
 
@@ -1220,7 +1231,10 @@ begin
   if FRepo.Root = '' then
   begin
     FStatus.SetRepository(Edit.FileName, '');
-    FStatus.PartHint[spRepo] := Edit.FileName;
+    if Edit.FileName <> '' then
+      FStatus.PartHint[spRepo] := HintFolder + ' ' + Edit.FileName
+    else
+      FStatus.PartHint[spRepo] := '';
     FStatus.SetSync(0, 0);
     FStatus.SetState('', '');
     FStatus.SetBase('');
@@ -1230,7 +1244,7 @@ begin
     Exit;
   end;
   FStatus.SetRepository(ExtractFileName(FRepo.Root), FBranch);
-  FStatus.PartHint[spRepo] := FRepo.Root;
+  FStatus.PartHint[spRepo] := HintFolder + ' ' + FRepo.Root;
   if FHasUpstream then
     FStatus.SetSync(FAhead, FBehind)
   else
@@ -1251,7 +1265,7 @@ begin
   if FHasPull then
   begin
     FStatus.SetPull(PullRequestStatus(FPull), PullTone(FPull));
-    FStatus.PartHint[spPull] := FPull.Title;
+    FStatus.PartHint[spPull] := PullHint(FPull);
   end
   else
     FStatus.SetPull('', stNormal);

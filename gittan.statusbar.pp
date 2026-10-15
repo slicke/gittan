@@ -36,6 +36,25 @@ type
   TGittanStatusClickEvent = procedure(Sender: TObject; APart: TGittanStatusPart;
     const AScreenRect: TRect) of object;
 
+  { TGittanStatusHint }
+
+  {** The bar's hint window. A line may start with one of the Hint*
+    markers below and a space; the marker is drawn as an icon in its
+    color instead. With more than one line the first, the title, is
+    bold. }
+  TGittanStatusHint = class(THintWindow)
+  private
+    FBack, FText, FLine: TColor;
+    FTones: array[TGittanStatusTone] of TColor;
+    procedure SplitLine(const ALine: string; out AIcon, AText: string);
+    procedure DrawIcon(const AIcon: string; X, Y, ASize: integer);
+  protected
+    procedure Paint; override;
+  public
+    function CalcHintRect(MaxWidth: integer; const AHint: string;
+      AData: pointer): TRect; override;
+  end;
+
   { TGittanStatusBar }
 
   TGittanStatusBar = class(TCustomControl)
@@ -48,7 +67,8 @@ type
     FRects: array[TGittanStatusPart] of TRect;
     FClickable: set of TGittanStatusPart;
     FHot, FPressed: TGittanStatusPart;
-    FTimer: TTimer;
+    FTimer, FHintTimer: TTimer;
+    FHintWindow: TGittanStatusHint;
     FBack, FText, FDim, FLine, FHover, FAccent: TColor;
     FTones: array[TGittanStatusTone] of TColor;
     FOnPartClick: TGittanStatusClickEvent;
@@ -57,6 +77,9 @@ type
     procedure SetPartHint(APart: TGittanStatusPart; const AValue: string);
     procedure SetHot(AValue: TGittanStatusPart);
     procedure TimerTimer(Sender: TObject);
+    function HotHint: string;
+    procedure HintTimerTimer(Sender: TObject);
+    procedure HideHint;
     procedure Change(var AField: string; const AValue: string);
   protected
     procedure Paint; override;
@@ -109,6 +132,17 @@ type
 const
   StatusClickable = [spRepo, spBranch, spConflicts, spPull, spFiles];
 
+  {** Markers at the start of a hint line, drawn as icons: a green check,
+    a red cross, an amber clock, a globe for a link, two arrows for a
+    switch, a folder and a branch. Each is followed by a space. }
+  HintPassed = '✓';
+  HintFailed = '✕';
+  HintPending = '◷';
+  HintLink = '🌐';
+  HintSwitch = '⇄';
+  HintFolder = '📁';
+  HintBranch = '⑂';
+
 implementation
 
 uses
@@ -121,6 +155,8 @@ const
   ChipPadX = 6;
   ChipPadY = 2;
   ChevronWidth = 12;
+  { Between the icon of the name or the branch and its text. }
+  IconGap = 5;
   DotSize = 7;
   ProgressWidth = 80;
   ProgressHeight = 4;
@@ -160,6 +196,201 @@ begin
   Result := Result + '…';
 end;
 
+const
+  HintPad = 8;
+  HintLineGap = 3;
+  HintIconGap = 6;
+
+{ TGittanStatusHint }
+
+procedure TGittanStatusHint.SplitLine(const ALine: string; out AIcon, AText: string);
+var
+  M: string;
+begin
+  AIcon := '';
+  AText := ALine;
+  for M in [HintPassed, HintFailed, HintPending, HintLink, HintSwitch, HintFolder, HintBranch] do
+    if Copy(ALine, 1, Length(M) + 1) = M + ' ' then
+    begin
+      AIcon := M;
+      AText := Copy(ALine, Length(M) + 2, MaxInt);
+      Exit;
+    end;
+end;
+
+{ The icons are drawn with lines rather than taken from a font, so they
+  have the palette's colors and the same weight on every system. ASize
+  is the line height; the icon takes a square a little smaller,
+  centered. }
+procedure DrawStatusIcon(ACanvas: TCanvas; const AIcon: string; X, Y, ASize: integer;
+  AColor: TColor);
+var
+  S, L, T, CX, CY: integer;
+begin
+  S := ASize - 4;
+  L := X;
+  T := Y + (ASize - S) div 2;
+  CX := L + S div 2;
+  CY := T + S div 2;
+  ACanvas.Brush.Style := bsClear;
+  ACanvas.Pen.Width := 2;
+  if AIcon = HintPassed then
+  begin
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Polyline([Point(L + 1, CY), Point(L + S * 2 div 5, T + S - 2),
+      Point(L + S - 1, T + 2)]);
+  end
+  else if AIcon = HintFailed then
+  begin
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Line(L + 2, T + 2, L + S - 2, T + S - 2);
+    ACanvas.Line(L + S - 2, T + 2, L + 2, T + S - 2);
+  end
+  else if AIcon = HintPending then
+  begin
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Pen.Width := 1;
+    ACanvas.Ellipse(L, T, L + S, T + S);
+    ACanvas.Line(CX, CY, CX, T + 3);
+    ACanvas.Line(CX, CY, L + S - 4, CY);
+  end
+  else if AIcon = HintLink then
+  begin
+    { A globe: the outline, a meridian and the equator with two
+      parallels. }
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Pen.Width := 1;
+    ACanvas.Ellipse(L, T, L + S, T + S);
+    ACanvas.Ellipse(CX - S div 4, T, CX + S div 4 + 1, T + S);
+    ACanvas.Line(L, CY, L + S, CY);
+    ACanvas.Line(L + 2, T + S div 4 + 1, L + S - 2, T + S div 4 + 1);
+    ACanvas.Line(L + 2, T + S - S div 4 - 1, L + S - 2, T + S - S div 4 - 1);
+  end
+  else if AIcon = HintSwitch then
+  begin
+    { Two arrows, the upper to the right and the lower to the left. }
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Pen.Width := 1;
+    ACanvas.Line(L, T + S div 4, L + S, T + S div 4);
+    ACanvas.Polyline([Point(L + S - 4, T + S div 4 - 3), Point(L + S - 1, T + S div 4),
+      Point(L + S - 4, T + S div 4 + 3)]);
+    ACanvas.Line(L, T + S - S div 4, L + S, T + S - S div 4);
+    ACanvas.Polyline([Point(L + 3, T + S - S div 4 - 3), Point(L, T + S - S div 4),
+      Point(L + 3, T + S - S div 4 + 3)]);
+  end
+  else if AIcon = HintFolder then
+  begin
+    { A folder: the tab on the upper left, then the body. }
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Pen.Width := 1;
+    ACanvas.Polygon([Point(L, T + 2), Point(L + S * 2 div 5, T + 2),
+      Point(L + S div 2, T + 4), Point(L + S, T + 4), Point(L + S, T + S - 1),
+      Point(L, T + S - 1)]);
+    ACanvas.Line(L, T + 6, L + S, T + 6);
+  end
+  else if AIcon = HintBranch then
+  begin
+    { A branch: the stem on the left with a dot at each end, and a
+      dot on the right whose line bends down into the stem. }
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Pen.Width := 1;
+    ACanvas.Line(L + 3, T + 4, L + 3, T + S - 3);
+    ACanvas.Polyline([Point(L + S - 2, T + 5), Point(L + S - 2, T + S div 2),
+      Point(L + 4, T + S - 4)]);
+    ACanvas.Ellipse(L + 1, T, L + 5, T + 4);
+    ACanvas.Ellipse(L + 1, T + S - 4, L + 5, T + S);
+    ACanvas.Ellipse(L + S - 4, T + 1, L + S, T + 5);
+  end;
+  ACanvas.Pen.Width := 1;
+end;
+
+procedure TGittanStatusHint.DrawIcon(const AIcon: string; X, Y, ASize: integer);
+var
+  C: TColor;
+begin
+  if AIcon = HintPassed then
+    C := FTones[stGood]
+  else if AIcon = HintFailed then
+    C := FTones[stBad]
+  else if AIcon = HintPending then
+    C := FTones[stWarn]
+  else
+    C := FTones[stNormal];
+  DrawStatusIcon(Canvas, AIcon, X, Y, ASize, C);
+end;
+
+function TGittanStatusHint.CalcHintRect(MaxWidth: integer; const AHint: string;
+  AData: pointer): TRect;
+var
+  Lines: TStringList;
+  i, W, H, LineH: integer;
+  LineIcon, LineText: string;
+begin
+  Lines := TStringList.Create;
+  try
+    Lines.Text := AHint;
+    Canvas.Font := Font;
+    LineH := Canvas.TextHeight('Xg');
+    W := 0;
+    for i := 0 to Lines.Count - 1 do
+    begin
+      SplitLine(Lines[i], LineIcon, LineText);
+      if (i = 0) and (Lines.Count > 1) then
+        Canvas.Font.Style := [fsBold];
+      H := Canvas.TextWidth(LineText);
+      Canvas.Font.Style := [];
+      if LineIcon <> '' then
+        Inc(H, LineH + HintIconGap);
+      W := Max(W, H);
+    end;
+    W := Min(W, MaxWidth);
+    H := Lines.Count * LineH + Max(0, Lines.Count - 1) * HintLineGap;
+    Result := Rect(0, 0, W + 2 * HintPad, H + 2 * HintPad);
+  finally
+    Lines.Free;
+  end;
+end;
+
+procedure TGittanStatusHint.Paint;
+var
+  Lines: TStringList;
+  i, Y, X, LineH: integer;
+  LineIcon, LineText: string;
+begin
+  Canvas.Brush.Style := bsSolid;
+  Canvas.Brush.Color := FBack;
+  Canvas.Pen.Color := FLine;
+  Canvas.Pen.Width := 1;
+  Canvas.Rectangle(ClientRect);
+  Lines := TStringList.Create;
+  try
+    Lines.Text := Caption;
+    Canvas.Font := Font;
+    LineH := Canvas.TextHeight('Xg');
+    Y := HintPad;
+    for i := 0 to Lines.Count - 1 do
+    begin
+      SplitLine(Lines[i], LineIcon, LineText);
+      X := HintPad;
+      if LineIcon <> '' then
+      begin
+        DrawIcon(LineIcon, X, Y, LineH);
+        Inc(X, LineH + HintIconGap);
+      end;
+      if (i = 0) and (Lines.Count > 1) then
+        Canvas.Font.Style := [fsBold]
+      else
+        Canvas.Font.Style := [];
+      Canvas.Font.Color := FText;
+      Canvas.Brush.Style := bsClear;
+      Canvas.TextOut(X, Y, LineText);
+      Inc(Y, LineH + HintLineGap);
+    end;
+  finally
+    Lines.Free;
+  end;
+end;
+
 { TGittanStatusBar }
 
 constructor TGittanStatusBar.Create(AOwner: TComponent);
@@ -167,11 +398,17 @@ begin
   inherited Create(AOwner);
   ControlStyle := ControlStyle + [csOpaque];
   Height := BarHeight;
-  ShowHint := True;
-  ParentShowHint := False;
   FTimer := TTimer.Create(Self);
   FTimer.Enabled := False;
   FTimer.OnTimer := @TimerTimer;
+  { The bar shows its hints itself (see SetHot), so the LCL's own stays
+    off. }
+  ShowHint := False;
+  ParentShowHint := False;
+  FHintTimer := TTimer.Create(Self);
+  FHintTimer.Enabled := False;
+  FHintTimer.Interval := Application.HintPause;
+  FHintTimer.OnTimer := @HintTimerTimer;
   FClickable := StatusClickable;
   SetColors(clBtnFace, clWindowText, clGrayText, clBtnShadow, clBtnHighlight,
     clHighlight, clGreen, clOlive, clRed);
@@ -293,8 +530,54 @@ end;
 procedure TGittanStatusBar.SetPartHint(APart: TGittanStatusPart; const AValue: string);
 begin
   FHints[APart] := AValue;
-  if FHot = APart then
-    Hint := AValue;
+end;
+
+function TGittanStatusBar.HotHint: string;
+begin
+  case FHot of
+    spMessage: Result := FMessage;
+    spProgress: Result := FProgressText;
+    else
+      Result := FHints[FHot];
+  end;
+end;
+
+{ The hint goes above the part, left aligned with it and kept inside the
+  bar's width, since below the bar is outside the window. }
+procedure TGittanStatusBar.HintTimerTimer(Sender: TObject);
+var
+  Tip: string;
+  R: TRect;
+  P: TPoint;
+  MaxRight: integer;
+begin
+  FHintTimer.Enabled := False;
+  Tip := HotHint;
+  if (FHot = spNone) or (Tip = '') then
+    Exit;
+  if FHintWindow = nil then
+    FHintWindow := TGittanStatusHint.Create(Self);
+  FHintWindow.Font := Font;
+  FHintWindow.FBack := FBack;
+  FHintWindow.FText := FText;
+  FHintWindow.FLine := FLine;
+  FHintWindow.FTones := FTones;
+  FHintWindow.FTones[stNormal] := FDim;
+  R := FHintWindow.CalcHintRect(Max(200, Width - 2 * Pad), Tip, nil);
+  P := ClientToScreen(Point(FRects[FHot].Left, 0));
+  Types.OffsetRect(R, P.X, P.Y - R.Bottom - 4);
+  MaxRight := ClientToScreen(Point(Width - Pad, 0)).X;
+  if R.Right > MaxRight then
+    Types.OffsetRect(R, Max(ClientToScreen(Point(Pad, 0)).X - R.Left,
+      MaxRight - R.Right), 0);
+  FHintWindow.ActivateHint(R, Tip);
+end;
+
+procedure TGittanStatusBar.HideHint;
+begin
+  FHintTimer.Enabled := False;
+  if (FHintWindow <> nil) and FHintWindow.Visible then
+    FHintWindow.Hide;
 end;
 
 { Every part is measured and placed here, so the rectangles the mouse is
@@ -305,7 +588,7 @@ end;
 procedure TGittanStatusBar.Paint;
 var
   P: TGittanStatusPart;
-  TextH, TextY, X, Right, LeftEnd, W, Room, MidWant: integer;
+  TextH, TextY, X, Right, LeftEnd, W, Room, MidWant, IconW: integer;
   Sync, S: string;
   ShowTitle, ShowBase: boolean;
 
@@ -365,9 +648,9 @@ var
   begin
     Result := 0;
     if ATitle and (FTitle <> '') then
-      Inc(Result, Canvas.TextWidth(FTitle) + Gap);
+      Inc(Result, IconW + Canvas.TextWidth(FTitle) + Gap);
     if FBranch <> '' then
-      Inc(Result, Canvas.TextWidth(FBranch) + ChevronWidth + 2 * ChipPadX + Gap);
+      Inc(Result, IconW + Canvas.TextWidth(FBranch) + ChevronWidth + 2 * ChipPadX + Gap);
     if Sync <> '' then
       Inc(Result, Canvas.TextWidth(Sync) + Gap);
     if FOperation <> '' then
@@ -390,6 +673,7 @@ begin
   Canvas.Brush.Style := bsClear;
   TextH := Canvas.TextHeight('Xg');
   TextY := (Height + 1 - TextH) div 2;
+  IconW := TextH - 4 + IconGap;
 
   { Right zone, right to left: position, files, pull request. }
   Right := Width - Pad;
@@ -447,19 +731,28 @@ begin
   ShowBase := LeftWidth(True, True) <= Room;
   ShowTitle := ShowBase or (LeftWidth(True, False) <= Room);
 
+  { The name and the branch each have an icon before them, a folder and
+    a branch, inside the part so it takes the fill too. }
   X := Pad;
   if ShowTitle and (FTitle <> '') then
   begin
-    S := Ellipsize(Canvas, FTitle, Right - X);
-    DrawText(spRepo, X, S, FText);
+    S := Ellipsize(Canvas, FTitle, Right - X - IconW);
+    FRects[spRepo] := ChipRect(X - ChipPadX, IconW + Canvas.TextWidth(S) + 2 * ChipPadX);
+    DrawHot(spRepo);
+    DrawStatusIcon(Canvas, HintFolder, X, TextY, TextH, FDim);
+    Inc(X, IconW);
+    Canvas.Font.Color := FText;
+    Canvas.TextOut(X, TextY, S);
     Inc(X, Canvas.TextWidth(S) + Gap);
   end;
-  if (FBranch <> '') and (X < Right - ChevronWidth - 2 * ChipPadX) then
+  if (FBranch <> '') and (X < Right - IconW - ChevronWidth - 2 * ChipPadX) then
   begin
-    S := Ellipsize(Canvas, FBranch, Right - X - ChevronWidth - 2 * ChipPadX);
-    W := Canvas.TextWidth(S) + ChevronWidth;
+    S := Ellipsize(Canvas, FBranch, Right - X - IconW - ChevronWidth - 2 * ChipPadX);
+    W := IconW + Canvas.TextWidth(S) + ChevronWidth;
     FRects[spBranch] := ChipRect(X - ChipPadX, W + 2 * ChipPadX);
     DrawHot(spBranch);
+    DrawStatusIcon(Canvas, HintBranch, X, TextY, TextH, FDim);
+    Inc(X, IconW);
     Canvas.Font.Color := FText;
     Canvas.TextOut(X, TextY, S);
     Inc(X, Canvas.TextWidth(S) + ChevronWidth div 2 + 1);
@@ -546,15 +839,13 @@ begin
   if FHot = AValue then
     Exit;
   FHot := AValue;
-  { A new part has its own hint; the old one is taken down so the new one
-    comes up after the usual pause. }
-  Application.CancelHint;
-  if AValue = spMessage then
-    Hint := FMessage
-  else if AValue = spProgress then
-    Hint := FProgressText
-  else
-    Hint := FHints[AValue];
+  { A new part has its own hint: the old one is taken down and the new
+    one comes up after the usual pause. The bar shows them itself, since
+    the LCL's hint, which follows controls, never came up again once the
+    mouse had moved within the bar. }
+  HideHint;
+  if HotHint <> '' then
+    FHintTimer.Enabled := True;
   if AValue in FClickable then
     Cursor := crHandPoint
   else
@@ -572,12 +863,14 @@ procedure TGittanStatusBar.MouseLeave;
 begin
   inherited MouseLeave;
   SetHot(spNone);
+  HideHint;
 end;
 
 procedure TGittanStatusBar.MouseDown(Button: TMouseButton; Shift: TShiftState;
   X, Y: integer);
 begin
   inherited MouseDown(Button, Shift, X, Y);
+  HideHint;
   if Button = mbLeft then
     FPressed := PartAt(X, Y);
 end;

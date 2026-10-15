@@ -1376,6 +1376,26 @@ begin
     Result := stNormal;
 end;
 
+{ One line per outcome of the checks, as gh counts them for the status
+  line (a skipped one passed), worst first, each with its icon. }
+function TForm1.PullHint(const APull: TGittanPullRequest): string;
+
+  procedure AddChecks(ACount: integer; const AIcon, AOne, AMany: string);
+  begin
+    if ACount = 1 then
+      Result := Result + LineEnding + AIcon + ' ' + AOne
+    else if ACount > 1 then
+      Result := Result + LineEnding + AIcon + ' ' + Format(AMany, [ACount]);
+  end;
+
+begin
+  Result := Format(rsPullHintTitle, [APull.Number, APull.Title]);
+  AddChecks(APull.ChecksFailed, HintFailed, rsPullHintFailedOne, rsPullHintFailed);
+  AddChecks(APull.ChecksPending, HintPending, rsPullHintPendingOne, rsPullHintPending);
+  AddChecks(APull.ChecksPassed, HintPassed, rsPullHintPassedOne, rsPullHintPassed);
+  Result := Result + LineEnding + HintLink + ' ' + rsPullHintOpen;
+end;
+
 procedure TForm1.MenuCopyPullUrlClick(Sender: TObject);
 begin
   if FHasPull and (FPull.Url <> '') then
