@@ -18,7 +18,7 @@ uses
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader,
-  gittan.discard, gittan.submodules, md5;
+  gittan.discard, gittan.submodules, gittan.reviews, ATSynEdit_Gaps, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -332,6 +332,28 @@ type
     FHistoryTopLine, FHistoryCaretY: integer;
     { The layered rows of the history, see TGittanHistory.Layers. }
     FHistoryRows: TGittanHistoryRows;
+    { View > Review Comments (see umain.reviews.inc): whether it is on,
+      its menu item, the job that fetches the threads, the threads of the
+      pull request FThreadsNumber of FThreadsRepo with its head commit,
+      what they hold (FThreadsKey) and gh's message when the last fetch
+      failed; the diff line of each thread in the shown file
+      (FThreadRows), the diff from the head to the work tree the lines
+      are mapped through (for FMapDiffKey, head and path), the threads
+      folded or unfolded against their default, the width the cards of
+      each editor were laid out for and a canvas to measure text on. }
+    FShowComments: boolean;
+    FReviewItem: TMenuItem;
+    FReviewJob: TGittanReviewJob;
+    FThreads: TGittanReviewThreads;
+    FThreadsNumber: integer;
+    FThreadsRepo, FThreadsHead, FThreadsKey, FReviewError: string;
+    FThreadRows: TIntegerDynArray;
+    FMapDiff, FMapDiffKey: string;
+    FThreadFlips: TStringList;
+    FReviewWidths: array[0..1] of integer;
+    FReviewMeasure: TBitmap;
+    { The thread a click on its card folds when the button comes up. }
+    FGapToggle: string;
     procedure ApplyTheme;
     procedure ApplyEditorColors(AEd: TATSynEdit);
     procedure SetupEditor(AEd: TATSynEdit);
@@ -460,6 +482,32 @@ type
     procedure MenuUndoDiscardClick(Sender: TObject);
     function DiscardBackText(ABlock: integer): string;
     function DiscardBaseName: string;
+    { umain.reviews.inc }
+    procedure MenuReviewCommentsClick(Sender: TObject);
+    function ReviewTarget(out ANumber: integer; out ARepoPath: string): boolean;
+    function ReviewExact: boolean;
+    procedure ClearReviews;
+    procedure StartReviewJob(AForce: boolean);
+    procedure AbandonReviewJob;
+    procedure ReviewJobDone(Sender: TObject);
+    procedure PlaceThreads;
+    function ThreadId(AThread: integer): string;
+    function ThreadOpen(AThread: integer): boolean;
+    procedure ReviewFont(C: TCanvas; AKind: integer);
+    function ReviewLineHeight(AKind: integer): integer;
+    procedure ReviewLayout(AThread, AInner: integer; ALines: TStrings);
+    function ReviewCardHeight(AThread, AWidth: integer): integer;
+    function ReviewGapWidth(AEd: TATSynEdit): integer;
+    procedure ApplyReviewGaps;
+    procedure ReviewRelayoutAsync(Data: PtrInt);
+    procedure RevealTopGapAsync(Data: PtrInt);
+    procedure MatchScrollPixels(ASrc, ADst: TATSynEdit);
+    procedure DrawGapGutter(AEd: TATSynEdit; C: TCanvas);
+    procedure EditDrawGap(Sender: TObject; C: TCanvas; const ARect: TRect;
+      AGap: TATGapItem);
+    procedure EditClickGap(Sender: TObject; AGapItem: TATGapItem; APos: TPoint);
+    procedure ToggleThreadNow;
+    function ReviewHint(ANumber: integer): string;
     { umain.history.inc }
     procedure MenuHistoryClick(Sender: TObject);
     function ChunkRows(out AFrom, ATo: integer; out AName: string): boolean;
@@ -677,7 +725,7 @@ implementation
 {$R *.lfm}
 
 uses
-  Clipbrd, LCLIntf, Process, FileUtil, LazFileUtils, DateUtils;
+  Clipbrd, LCLIntf, Process, FileUtil, LazFileUtils, DateUtils, StrUtils, LazUTF8;
 
 resourcestring
   rsAppName = 'Git Tree Analyzer & Navigator';
@@ -865,6 +913,19 @@ resourcestring
   rsPullHintPendingOne = '1 check pending';
   rsPullHintOpen = 'Click to open it on GitHub';
   rsPositionOld = 'Ln %d (old), Col %d';
+  rsReviewComments = 'Review &Comments';
+  rsReviewResolved = 'Resolved';
+  rsReviewOutdated = 'Outdated';
+  rsReviewOnFile = 'On the file';
+  rsReviewLine = 'On line %d';
+  rsReviewLines = 'Lines %d–%d';
+  rsReviewRemovedLine = 'On removed line %d';
+  rsReviewReplies = ' (+%d)';
+  rsReviewSuggestion = 'Suggested change:';
+  rsReviewLink = 'GitHub ↗';
+  rsReviewOpen = '%d open review threads';
+  rsReviewOpenOne = '1 open review thread';
+  rsReviewFailed = 'Could not fetch the review comments';
 
 const
   { Scrolling on past the bottom of a file goes to the next one, and
@@ -1005,6 +1066,9 @@ begin
   FBlameCache := TStringList.Create;
   FBlameCache.CaseSensitive := True;
   FBlameZombies := TList.Create;
+  FThreadFlips := TStringList.Create;
+  FReviewMeasure := TBitmap.Create;
+  FReviewMeasure.SetSize(1, 1);
   FBlameCols := 12;
   FSideRatio := 0.5;
   { The editor comes from umain.lfm. The EControl adapter is not an IDE
@@ -1210,6 +1274,7 @@ begin
   Application.RemoveAsyncCalls(Self);
   StopWatcher;
   AbandonPullJob;
+  AbandonReviewJob;
   AbandonUpdateJob;
   AbandonSubmoduleJobs;
   FreeAndNil(FSubJobs);
@@ -1232,6 +1297,8 @@ begin
   FreeAndNil(FIndex);
   FreeAndNil(FIndexQueue);
   FreeAndNil(FSymbolFiles);
+  FreeAndNil(FThreadFlips);
+  FreeAndNil(FReviewMeasure);
 
   FreeAndNil(FSettings);
 end;
@@ -1287,6 +1354,9 @@ begin
     SetDiscardBand). }
   AEd.Gutter.Add(-1, 0, gutterTagDiscard, False, False);
   AEd.OnClickGutter := @EditClickGutter;
+  { The cards of the review comments (see umain.reviews.inc). }
+  AEd.OnDrawGap := @EditDrawGap;
+  AEd.OnClickGap := @EditClickGap;
 end;
 
 function TForm1.AdapterOf(AEd: TATSynEdit): TATAdapterEControl;
@@ -1735,6 +1805,10 @@ begin
   FBlameItem := AddItem(ViewMenu, rsBlame, ShortCut(VK_B, [ssModifier, ssShift]),
     @MenuBlameClick);
   FBlameItem.Checked := FBlameOn;
+  FReviewItem := AddItem(ViewMenu, rsReviewComments, ShortCut(VK_M, [ssModifier, ssShift]),
+    @MenuReviewCommentsClick);
+  FReviewItem.Checked := FShowComments;
+  FReviewItem.Enabled := FHasGitHubCli;
   ViewMenu.Add(NewLine);
   AddItem(ViewMenu, rsZoomIn, ShortCut(VK_OEM_PLUS, [ssModifier]), @MenuZoomInClick);
   AddItem(ViewMenu, rsZoomOut, ShortCut(VK_OEM_MINUS, [ssModifier]), @MenuZoomOutClick);
@@ -1920,6 +1994,7 @@ begin
   end;
   AdapterOf(AEd).Lexer := nil;
   AEd.BookmarkDeleteAll_2;
+  AEd.Gaps.Clear;
   ResetLineNumbers(AEd);
   AEd.ModeReadOnly := False;
   AEd.Text := UTF8Decode(AText);
@@ -2529,6 +2604,9 @@ begin
   FDiscards := nil;
   UpdateDiscardItems;
   FPullRange := '';
+  AbandonReviewJob;
+  ClearReviews;
+  FThreadFlips.Clear;
   FExcludePath := '';
   AbandonSubmoduleJobs;
   FSubmodules := nil;
@@ -3031,6 +3109,8 @@ begin
   end;
   if APath <> FCurrentPath then
     FExpanded := nil;
+  { The file may have changed since the head was mapped onto it. }
+  FMapDiffKey := '';
   { The diff may have changed, so the blocks and their headings are
     found again after the parse. }
   FHeadings := nil;
@@ -3322,5 +3402,6 @@ end;
 {$I umain.repofiles.inc}
 {$I umain.submodules.inc}
 {$I umain.update.inc}
+{$I umain.reviews.inc}
 
 end.

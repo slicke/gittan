@@ -145,8 +145,8 @@ const
 
   {** Markers at the start of a hint line, drawn as icons: a green check,
     a red cross, an amber clock, a globe for a link, two arrows for a
-    switch, a folder, a branch and a pull request. Each is followed by a
-    space. }
+    switch, a folder, a branch, a pull request and a speech bubble for
+    review comments. Each is followed by a space. }
   HintPassed = '✓';
   HintFailed = '✕';
   HintPending = '◷';
@@ -155,6 +155,7 @@ const
   HintFolder = '📁';
   HintBranch = '⑂';
   HintPull = '⤴';
+  HintComment = '💬';
 
 {** Draws the icon of the marker AIcon (HintPassed and the others above)
   in AColor, in a square a little smaller than ASize centered on a line
@@ -227,7 +228,8 @@ var
 begin
   AIcon := '';
   AText := ALine;
-  for M in [HintPassed, HintFailed, HintPending, HintLink, HintSwitch, HintFolder, HintBranch, HintPull] do
+  for M in [HintPassed, HintFailed, HintPending, HintLink, HintSwitch, HintFolder, HintBranch, HintPull,
+    HintComment] do
     if Copy(ALine, 1, Length(M) + 1) = M + ' ' then
     begin
       AIcon := M;
@@ -332,6 +334,14 @@ begin
     ACanvas.Ellipse(L + 1, T, L + 5, T + 4);
     ACanvas.Ellipse(L + 1, T + S - 4, L + 5, T + S);
     ACanvas.Ellipse(L + S - 4, T + S - 4, L + S, T + S);
+  end
+  else if AIcon = HintComment then
+  begin
+    { A speech bubble: a rounded box with a tail at the lower left. }
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Pen.Width := 1;
+    ACanvas.RoundRect(L, T + 1, L + S, T + S - 3, 4, 4);
+    ACanvas.Polyline([Point(L + 3, T + S - 4), Point(L + 3, T + S), Point(L + 7, T + S - 4)]);
   end;
   ACanvas.Pen.Width := 1;
 end;

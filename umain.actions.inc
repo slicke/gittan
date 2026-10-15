@@ -50,6 +50,7 @@ begin
   FWordWrap := FSettings.WordWrap;
   FIgnoreWhitespace := FSettings.IgnoreWhitespace;
   FBlameOn := FSettings.Blame;
+  FShowComments := FSettings.ReviewComments;
   FSyntaxTheme := FindSyntaxTheme(FSettings.SyntaxTheme);
   if FSyntaxTheme < 0 then
     FSyntaxTheme := DefaultSyntaxTheme;
@@ -117,6 +118,7 @@ begin
   FSettings.SideBySide := FSideBySide;
   FSettings.IgnoreWhitespace := FIgnoreWhitespace;
   FSettings.Blame := FBlameOn;
+  FSettings.ReviewComments := FShowComments;
   FSettings.SyntaxTheme := SyntaxThemes[FSyntaxTheme].Name;
   FSettings.Save;
   SaveIndex;
@@ -581,6 +583,7 @@ var
   Down: boolean;
   R: TRect;
 begin
+  DrawGapGutter(TATSynEdit(Sender), C);
   DrawBlame(TATSynEdit(Sender), C);
   DrawDiscard(TATSynEdit(Sender), C);
   if (Sender <> Edit) or (FOverscroll = 0) or (FView <> gvChanges) then
@@ -1423,6 +1426,8 @@ begin
   FPullError := Job.Error;
   UpdateStatus;
   RebuildPullMenu;
+  { The review comments follow at the same pace. }
+  StartReviewJob(True);
   { Ask again later, more often while checks run; not when gh failed
     (no GitHub remote, not logged in), which a refresh retries. }
   if FPullError = '' then
@@ -1558,6 +1563,7 @@ begin
   AddChecks(APull.ChecksFailed, HintFailed, rsPullHintFailedOne, rsPullHintFailed);
   AddChecks(APull.ChecksPending, HintPending, rsPullHintPendingOne, rsPullHintPending);
   AddChecks(APull.ChecksPassed, HintPassed, rsPullHintPassedOne, rsPullHintPassed);
+  Result := Result + ReviewHint(APull.Number);
   Result := Result + LineEnding + HintLink + ' ' + rsPullHintOpen;
 end;
 
@@ -1681,4 +1687,6 @@ begin
     ShowSummary;
   end;
   StartWatcher;
+  { Comparing with a pull request shows its comments. }
+  StartReviewJob(False);
 end;

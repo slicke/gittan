@@ -13,7 +13,8 @@ uses
   testworddiff, testgit, testsettings, testsymbols, testlexerpick,
   testsymbolindex, testsnapshots, testblame, testhistory, testsyntaxthemes,
   testgithub, testconflicts, testcli, testsymbolchanges,
-  testcallers, testrepofiles, testdiscard, testsubmodules, testupdate;
+  testcallers, testrepofiles, testdiscard, testsubmodules, testupdate,
+  testreviews;
 
 var
   App: TTestRunner;
