@@ -17,7 +17,7 @@ uses
   gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
   gittan.syntaxthemes, gittan.cli, gittan.symbolchanges, gittan.callers,
-  gittan.popuplist, md5;
+  gittan.popuplist, gittan.statusbar, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -45,7 +45,6 @@ type
   TForm1 = class(TForm)
     Edit: TATSynEdit;
     EditorPanel: TPanel;
-    StatusBar: TStatusBar;
     DirDialog: TSelectDirectoryDialog;
     ThemeTimer: TTimer;
     FileTree: TTreeView;
@@ -81,6 +80,7 @@ type
     {** The chosen syntax theme, an index into SyntaxThemes. }
     FSyntaxTheme: integer;
     FFilePopup, FStatusPopup, FEditPopup: TPopupMenu;
+    FStatus: TGittanStatusBar;
     FRevealItem, FOpenItem: TMenuItem;
     FContextPath: string;
     { The GitHub items of the editor menu, made only when gh is installed
@@ -279,6 +279,10 @@ type
     function SelectedPath: string;
     function StatIcon(const AStat: TGittanFileStat): integer;
     procedure UpdateStatus;
+    {** The tone the status bar gives a pull request: red for failing
+      checks or requested changes, amber while checks run, green when
+      approved or every check passed. }
+    function PullTone(const APull: TGittanPullRequest): TGittanStatusTone;
     procedure UpdateSyntaxChecks;
     procedure UpdateCaption;
     procedure BuildMenu;
@@ -492,7 +496,13 @@ type
     procedure MenuCopyPullUrlClick(Sender: TObject);
     function FileGitHubArgs(const APath: string; ALine: integer): TStringArray;
     function FileLineOfRow(AEd: TATSynEdit; ARow: integer): integer;
-    procedure StatusBarClick(Sender: TObject);
+    procedure StatusPartClick(Sender: TObject; APart: TGittanStatusPart;
+      const AScreenRect: TRect);
+    {** Shows AText in the status bar for a while, in red when AError. }
+    procedure StatusNote(const AText: string; AError: boolean = False);
+    {** The caret's line and column in the status bar while the editor
+      shows a file, nothing elsewhere. }
+    procedure UpdateStatusPosition;
     procedure MenuCopyBranchClick(Sender: TObject);
     procedure MenuCopyRepoPathClick(Sender: TObject);
     procedure MenuOpenTerminalClick(Sender: TObject);
@@ -599,7 +609,7 @@ resourcestring
   rsCallersStatus = 'The changed symbols are used in %s outside this file.';
   rsLookingFor = 'Looking for a definition of "%s"...';
   rsNoDefinition = 'No definition of "%s" in the repository.';
-  rsIndexing = 'indexing %d/%d';
+  rsIndexing = 'Indexing %d/%d';
   rsNextChange = 'Next &Change';
   rsPrevChange = 'Previous C&hange';
   rsNextFile = 'Next F&ile';
@@ -612,9 +622,7 @@ resourcestring
   rsOpenTerminal = 'Open in &Terminal';
   rsPlainText = 'Plain text';
   rsNoLexers = 'No lexers found. Run "make lexlib" or set GITTAN_LEXLIB.';
-  rsLexerCount = '%d lexers';
   rsDiffLexer = 'Diff';
-  rsRepoOnBranch = '%s on %s';
   rsBranches = 'Branches';
   rsRemoteBranches = 'Remote branches';
   rsFilterBranches = 'Filter branches';
@@ -622,7 +630,7 @@ resourcestring
   rsRepoDiffTitle = 'Repository diff';
   rsChangedFiles = '%d changed files';
   rsOneChangedFile = '1 changed file';
-  rsNoChanges = 'no changes';
+  rsNoChanges = 'No changes';
   rsNoLongerChanged = '%s has no changes any more.';
   rsGapLines = '⋯  %d unchanged lines  ⋯';
   rsGapLine = '⋯  1 unchanged line  ⋯';
@@ -630,6 +638,13 @@ resourcestring
   rsGapUp = '↑ %d';
   rsGapAll = 'all';
   rsPullNext = 'Next: %s  ↓';
+  rsSwitchBranchHint = 'Switch branch';
+  rsShowSummaryHint = 'Show the summary';
+  rsShowConflictHint = 'Show the first conflicted file';
+  rsAheadHint = '%d commits not pushed yet';
+  rsBehindHint = '%d commits not pulled yet';
+  rsPosition = 'Ln %d, Col %d';
+  rsPositionOld = 'Ln %d (old), Col %d';
 
 const
   { Scrolling on past the bottom of a file goes to the next one: the
@@ -640,6 +655,9 @@ const
   OverscrollNeeded = 600;
   OverscrollForget = 1200;
   OverscrollPause = 300;
+  { How long a note in the status bar stays, and an error; seconds. }
+  StatusNoteSeconds = 6;
+  StatusErrorSeconds = 12;
   rsReveal = {$IFDEF DARWIN}'Reveal in &Finder'{$ELSE}
     {$IFDEF WINDOWS}'Show in &Explorer'{$ELSE}'Show in &File Manager'{$ENDIF}{$ENDIF};
   rsEditCopy = '&Copy';
@@ -656,8 +674,6 @@ const
   rsVsMergeBase = '%s (merge base)';
   rsConflictedFiles = '%d conflicted files';
   rsOneConflictedFile = '1 conflicted file';
-  rsAhead = '↑%d';
-  rsBehind = '↓%d';
   rsFilterHint = 'Filter files';
   rsPullRequests = 'Pull Re&quests';
   rsPullLoading = 'Loading...';
@@ -797,6 +813,16 @@ begin
   FSideSplitter.OnMoved := @SideSplitterMoved;
   EditorPanel.OnResize := @EditorPanelResize;
 
+  { The status bar along the bottom; its parts answer clicks of their
+    own (StatusPartClick). }
+  FStatus := TGittanStatusBar.Create(Self);
+  FStatus.Parent := Self;
+  FStatus.Align := alBottom;
+  FStatus.OnPartClick := @StatusPartClick;
+  FStatus.PartHint[spBranch] := rsSwitchBranchHint;
+  FStatus.PartHint[spFiles] := rsShowSummaryHint;
+  FStatus.PartHint[spConflicts] := rsShowConflictHint;
+
   FillTreeIcons(TreeImages);
   FileTree.Options := FileTree.Options + [tvoRightClickSelect];
   { The header names what the editor shows and holds the change
@@ -872,13 +898,10 @@ begin
   FRepo := TGittanRepo.Create;
   FSnapshots := TGittanSnapshots.Create;
   FLexers := TGittanLexers.Create;
-  if FLexers.Load then
-    StatusBar.SimpleText := Format(rsLexerCount, [0])
-  else
-    StatusBar.SimpleText := rsNoLexers;
+  if not FLexers.Load then
+    FStatus.ShowMessage(rsNoLexers, stBad, 0);
   if FLexers.Errors <> '' then
     DebugLn(FLexers.Errors);
-  StatusBar.OnClick := @StatusBarClick;
   FDark := IsDarkMode;
   ApplyTheme;
 
@@ -1090,6 +1113,10 @@ begin
     FBranchPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
+    FStatus.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(62, 62, 62), RGBToColor(58, 58, 59),
+      RGBToColor(100, 160, 240), RGBToColor(63, 185, 80), RGBToColor(227, 179, 65),
+      RGBToColor(248, 81, 73));
     FPullFill := RGBToColor(50, 50, 51);
     FPullBorder := RGBToColor(85, 85, 86);
     FPullText := RGBToColor(200, 200, 200);
@@ -1112,6 +1139,10 @@ begin
     FBranchPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
+    FStatus.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(222, 222, 222), RGBToColor(232, 232, 232),
+      RGBToColor(0, 110, 230), RGBToColor(26, 127, 55), RGBToColor(154, 103, 0),
+      RGBToColor(207, 34, 46));
     FPullFill := clWhite;
     FPullBorder := RGBToColor(205, 205, 205);
     FPullText := RGBToColor(70, 70, 70);
@@ -1170,13 +1201,15 @@ begin
   Caption := Title;
 end;
 
-{ The status bar names the repository, its branch and the base it is
-  compared against while one is open (the header names the file and its
-  lexer); the full file path when a plain file is open without a
-  repository; else the lexer name. The full path is in the hint. }
+{ The status bar shows the repository whenever one is open: its name,
+  the branch, the commits ahead and behind, what git is in the middle of,
+  the conflicted files, the base, the pull request, the indexing and the
+  changed files (the header names the file and its lexer). Without one it
+  shows the path of a plain file. Messages and the caret's position are
+  set elsewhere and left alone. }
 procedure TForm1.UpdateStatus;
 var
-  Lexer, Repo: string;
+  Lexer, Sync: string;
 begin
   if FAdapter.Lexer = nil then
     Lexer := rsPlainText
@@ -1184,49 +1217,97 @@ begin
     Lexer := FAdapter.Lexer.LexerName;
   FHeader.SetLexer(Lexer);
   UpdateSyntaxChecks;
-  Repo := '';
-  if FRepo.Root <> '' then
+  if FRepo.Root = '' then
   begin
-    Repo := Format(rsRepoOnBranch, [ExtractFileName(FRepo.Root), FBranch]);
-    if FBranch = '' then
-      Repo := ExtractFileName(FRepo.Root);
-    if FHasUpstream and (FAhead > 0) then
-      Repo := Repo + ' ' + Format(rsAhead, [FAhead]);
-    if FHasUpstream and (FBehind > 0) then
-      Repo := Repo + ' ' + Format(rsBehind, [FBehind]);
-    if FOperation <> '' then
-      Repo := Repo + ' · ' + FOperation;
-    if FConflictFiles = 1 then
-      Repo := Repo + ' · ' + rsOneConflictedFile
-    else if FConflictFiles > 1 then
-      Repo := Repo + ' · ' + Format(rsConflictedFiles, [FConflictFiles]);
-    if FRepo.Base <> '' then
-      Repo := Repo + ' ' + BaseLabel;
-    if FHasPull then
-      Repo := Repo + ' · ' + PullRequestStatus(FPull);
-    if FIndexing then
-      Repo := Repo + ' · ' + Format(rsIndexing, [FIndexPos, FIndexTotal]);
+    FStatus.SetRepository(Edit.FileName, '');
+    FStatus.PartHint[spRepo] := Edit.FileName;
+    FStatus.SetSync(0, 0);
+    FStatus.SetState('', '');
+    FStatus.SetBase('');
+    FStatus.SetPull('', stNormal);
+    FStatus.SetFiles('');
+    FStatus.SetProgress('', 0, 0);
+    Exit;
   end;
-  if Repo <> '' then
+  FStatus.SetRepository(ExtractFileName(FRepo.Root), FBranch);
+  FStatus.PartHint[spRepo] := FRepo.Root;
+  if FHasUpstream then
+    FStatus.SetSync(FAhead, FBehind)
+  else
+    FStatus.SetSync(0, 0);
+  Sync := '';
+  if FHasUpstream and (FAhead > 0) then
+    Sync := Format(rsAheadHint, [FAhead]);
+  if FHasUpstream and (FBehind > 0) then
+    Sync := Trim(Sync + LineEnding + Format(rsBehindHint, [FBehind]));
+  FStatus.PartHint[spSync] := Sync;
+  case FConflictFiles of
+    0: FStatus.SetState(FOperation, '');
+    1: FStatus.SetState(FOperation, rsOneConflictedFile);
+    else
+      FStatus.SetState(FOperation, Format(rsConflictedFiles, [FConflictFiles]));
+  end;
+  FStatus.SetBase(BaseLabel);
+  if FHasPull then
   begin
-    case FFileCount of
-      0: StatusBar.SimpleText := Repo + ' · ' + rsNoChanges;
-      1: StatusBar.SimpleText := Repo + ' · ' + rsOneChangedFile;
-      else
-        StatusBar.SimpleText := Repo + ' · ' + Format(rsChangedFiles, [FFileCount]);
-    end;
-    StatusBar.Hint := FRepo.Root;
-  end
-  else if Edit.FileName <> '' then
-  begin
-    StatusBar.SimpleText := Edit.FileName;
-    StatusBar.Hint := Edit.FileName;
+    FStatus.SetPull(PullRequestStatus(FPull), PullTone(FPull));
+    FStatus.PartHint[spPull] := FPull.Title;
   end
   else
-  begin
-    StatusBar.SimpleText := Lexer;
-    StatusBar.Hint := '';
+    FStatus.SetPull('', stNormal);
+  if FIndexing then
+    FStatus.SetProgress(Format(rsIndexing, [FIndexPos, FIndexTotal]),
+      FIndexPos, FIndexTotal)
+  else
+    FStatus.SetProgress('', 0, 0);
+  case FFileCount of
+    0: FStatus.SetFiles(rsNoChanges);
+    1: FStatus.SetFiles(rsOneChangedFile);
+    else
+      FStatus.SetFiles(Format(rsChangedFiles, [FFileCount]));
   end;
+end;
+
+procedure TForm1.StatusNote(const AText: string; AError: boolean);
+begin
+  if AError then
+    FStatus.ShowMessage(AText, stBad, StatusErrorSeconds)
+  else
+    FStatus.ShowMessage(AText, stNormal, StatusNoteSeconds);
+end;
+
+{ The line is the file's own: in the change view the new side's number,
+  or the old side's for a deleted line, since the rows of the view are
+  not the file's lines. The column counts characters from 1. The
+  repository diff and the history have no file line to name. }
+procedure TForm1.UpdateStatusPosition;
+var
+  Row, Col, Line: integer;
+  Old: boolean;
+begin
+  { Edit.Visible is no test: a file's view is built before ShowEditor
+    shows the editor. }
+  if (Edit.Carets.Count = 0) or not (FView in [gvChanges, gvFile]) then
+  begin
+    FStatus.SetPosition('');
+    Exit;
+  end;
+  Row := Edit.Carets[0].PosY;
+  Col := Edit.Carets[0].PosX + 1;
+  Old := False;
+  Line := FileLineOfRow(Edit, Row);
+  if (Line = 0) and (FView = gvChanges) and (Row <= High(FRows)) and
+    (FRows[Row].Line >= 0) and (FRows[Row].Line <= High(FOldNum)) then
+  begin
+    Line := FOldNum[FRows[Row].Line];
+    Old := Line > 0;
+  end;
+  if Line <= 0 then
+    FStatus.SetPosition('')
+  else if Old then
+    FStatus.SetPosition(Format(rsPositionOld, [Line, Col]))
+  else
+    FStatus.SetPosition(Format(rsPosition, [Line, Col]));
 end;
 
 { The Syntax menu marks the lexer in use and, when it was picked from the
@@ -1403,7 +1484,6 @@ begin
   Names := TStringList.Create;
   try
     FLexers.GetNames(Names);
-    StatusBar.SimpleText := Format(rsLexerCount, [Names.Count]);
     Group := nil;
     LastInitial := '';
     for LexName in Names do
@@ -1975,6 +2055,7 @@ var
   Cur, Current, i: integer;
 begin
   UpdateSymbolCrumb;
+  UpdateStatusPosition;
   Blocks := ChangeBlocks;
   if Length(Blocks) = 0 then
   begin
@@ -2129,7 +2210,8 @@ begin
   FSummary.SetMessage(AMessage, Format(rsDropShortcut,
     [{$IFDEF DARWIN}'⇧⌘O'{$ELSE}'Ctrl+Shift+O'{$ENDIF}]), FAppIcon);
   ShowSummary;
-  StatusBar.SimpleText := AMessage;
+  UpdateStatus;
+  FStatus.ShowMessage(AMessage, stBad, 0);
   UpdateCaption;
 end;
 
@@ -2297,13 +2379,13 @@ begin
     if ASnap = nil then
     begin
       if not LoadRepository then
-        StatusBar.SimpleText := FLoadError;
+        FStatus.ShowMessage(FLoadError, stBad, 0);
     end
     else
     begin
       ApplySnapshot(ASnap^);
       if not ASnap^.Ok then
-        StatusBar.SimpleText := FLoadError;
+        FStatus.ShowMessage(FLoadError, stBad, 0);
     end;
     Node := FileTree.Items.GetFirstNode;
     while Node <> nil do
@@ -2360,6 +2442,7 @@ begin
   FSummaryBox.Visible := True;
   AbandonHistoryJob;
   FView := gvSummary;
+  FStatus.SetPosition('');
   { A file picked again after the summary must fire the selection event. }
   FileTree.Selected := nil;
   if FRepo.Root <> '' then
@@ -2492,7 +2575,7 @@ begin
   try
     if not FRepo.FileChanges(APath, Lines) then
     begin
-      StatusBar.SimpleText := FRepo.Error;
+      StatusNote(FRepo.Error, True);
       Exit;
     end;
     FChangeLines.Assign(Lines);

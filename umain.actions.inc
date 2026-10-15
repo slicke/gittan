@@ -640,7 +640,7 @@ begin
     FOpenPullItem := AddItem(FStatusPopup, rsOpenPull, @MenuOpenPullClick);
     FCopyPullItem := AddItem(FStatusPopup, rsCopyPullUrl, @MenuCopyPullUrlClick);
   end;
-  StatusBar.PopupMenu := FStatusPopup;
+  FStatus.PopupMenu := FStatusPopup;
 end;
 
 procedure TForm1.FilePopupPopup(Sender: TObject);
@@ -895,7 +895,7 @@ begin
     Err := Trim(Err);
     if Pos(LineEnding, Err) > 0 then
       Err := Copy(Err, 1, Pos(LineEnding, Err) - 1);
-    StatusBar.SimpleText := Format(rsGitHubFailed, [Err]);
+    StatusNote(Format(rsGitHubFailed, [Err]), True);
   end;
 end;
 
@@ -1028,10 +1028,30 @@ begin
     RunCommandWith(FSettings.EditorCommand, ContextFullPath);
 end;
 
-{ A click on the status bar goes back to the summary. }
-procedure TForm1.StatusBarClick(Sender: TObject);
+{ The status bar's parts: the branch drops the branch list up from it,
+  as in the summary; the pull request opens on GitHub; the conflicts
+  show the first conflicted file; the name and the file count go back
+  to the summary. }
+procedure TForm1.StatusPartClick(Sender: TObject; APart: TGittanStatusPart;
+  const AScreenRect: TRect);
+var
+  i: integer;
 begin
-  MenuSummaryClick(Sender);
+  case APart of
+    spRepo, spFiles:
+      MenuSummaryClick(Sender);
+    spBranch:
+      SummaryBranchClick(Sender, AScreenRect);
+    spPull:
+      MenuOpenPullClick(Sender);
+    spConflicts:
+      for i := 0 to High(FStats) do
+        if FStats[i].Kind = ckConflict then
+        begin
+          SummarySelectFile(Sender, FStats[i].Path);
+          Break;
+        end;
+  end;
 end;
 
 procedure TForm1.MenuCopyBranchClick(Sender: TObject);
@@ -1313,9 +1333,9 @@ begin
   if (FRepo.Root = '') or (i < 0) or (i > High(FPulls)) then
     Exit;
   Pull := FPulls[i];
-  StatusBar.SimpleText := Format(rsFetchingPull, [Pull.Number]);
-  StatusBar.Update;
+  FStatus.ShowMessage(Format(rsFetchingPull, [Pull.Number]), stNormal, 0);
   Remote := FRepo.RemoteFor(RepoPathOfUrl(Pull.Url));
+  FStatus.ClearMessage;
   if not FRepo.FetchPullRequest(Remote, Pull.Number, Pull.BaseRef, HeadRef) then
   begin
     FSummary.Notice := Format(rsPullFailed, [Pull.Number, FRepo.Error]);
@@ -1340,6 +1360,20 @@ procedure TForm1.MenuOpenPullClick(Sender: TObject);
 begin
   if FHasPull and (FPull.Url <> '') then
     OpenURL(FPull.Url);
+end;
+
+function TForm1.PullTone(const APull: TGittanPullRequest): TGittanStatusTone;
+begin
+  if (APull.State = 'MERGED') or (APull.State = 'CLOSED') then
+    Result := stNormal
+  else if (APull.ChecksFailed > 0) or (APull.ReviewDecision = 'CHANGES_REQUESTED') then
+    Result := stBad
+  else if APull.ChecksPending > 0 then
+    Result := stWarn
+  else if (APull.ReviewDecision = 'APPROVED') or (APull.ChecksPassed > 0) then
+    Result := stGood
+  else
+    Result := stNormal;
 end;
 
 procedure TForm1.MenuCopyPullUrlClick(Sender: TObject);
