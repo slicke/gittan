@@ -244,6 +244,10 @@ type
     { The list that drops up from the status bar's ahead/behind counts,
       with the commit each of its items shows ('' for a header). }
     FSyncPopup: TGittanPopupList;
+    { The list a click on the status bar's pull request drops down, and
+      what each of its rows does (the pa* constants). }
+    FPullPopup: TGittanPopupList;
+    FPullActions: TIntegerDynArray;
     FSyncHashes: TStringList;
     FEditOld: TATSynEdit;
     { The hidden editor that parses another changed file for Go to
@@ -610,6 +614,9 @@ type
     procedure BranchPopupPick(Sender: TObject; AIndex: integer);
     procedure SyncClick(const AScreenRect: TRect);
     procedure SyncPopupPick(Sender: TObject; AIndex: integer);
+    procedure PullChipClick(const AScreenRect: TRect);
+    procedure PullPopupPick(Sender: TObject; AIndex: integer);
+    procedure ComparePull(const APull: TGittanPullRequest);
     procedure SwitchBranch(const ABranch: string);
     function ContextFullPath: string;
     procedure MenuCopyPathClick(Sender: TObject);
@@ -916,7 +923,11 @@ resourcestring
   rsPullHintFailedOne = '1 check failing';
   rsPullHintPending = '%d checks pending';
   rsPullHintPendingOne = '1 check pending';
-  rsPullHintOpen = 'Click to open it on GitHub';
+  rsPullHintOpen = 'Click to compare with it or open it on GitHub';
+  rsComparePull = 'Compare With This Pull Request';
+  rsCompareWorkingTree = 'Compare With the Working Tree';
+  rsOpenPullOnGitHub = 'Open on GitHub';
+  rsCopyPullLink = 'Copy Link';
   rsPositionOld = 'Ln %d (old), Col %d';
   rsReviewComments = 'Review &Comments';
   rsReviewResolved = 'Resolved';
@@ -1228,6 +1239,9 @@ begin
   FSyncPopup.Parent := Self;
   FSyncPopup.FilterHint := rsFilterCommits;
   FSyncPopup.OnPick := @SyncPopupPick;
+  FPullPopup := TGittanPopupList.Create(Self);
+  FPullPopup.Parent := Self;
+  FPullPopup.OnPick := @PullPopupPick;
   { The welcome view shares the summary's box and draws the application
     icon from its own copy: Application.Icon keeps to its small image. }
   FAppIcon := TIcon.Create;
@@ -1489,6 +1503,9 @@ begin
     FSyncPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
+    FPullPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
+      RGBToColor(100, 160, 240));
     FStatus.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(62, 62, 62), RGBToColor(58, 58, 59),
       RGBToColor(100, 160, 240), RGBToColor(63, 185, 80), RGBToColor(227, 179, 65),
@@ -1517,6 +1534,9 @@ begin
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
     FSyncPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
+      RGBToColor(0, 110, 230));
+    FPullPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
     FStatus.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
