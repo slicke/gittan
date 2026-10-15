@@ -15,6 +15,7 @@ type
   published
     procedure TestShellQuote;
     procedure TestMacScript;
+    procedure TestMacBundleOf;
     procedure TestUnixScript;
     procedure TestWindowsScript;
     procedure TestPathListHas;
@@ -38,6 +39,27 @@ begin
   AssertTrue(Pos('#!/bin/sh', S) = 1);
   AssertTrue('defaults to the current folder', Pos('set -- "$PWD"', S) > 0);
   AssertTrue(Pos('exec open -a ''/Applications/Gittan.app'' "$@"', S) > 0);
+end;
+
+procedure TCliTest.TestMacBundleOf;
+var
+  Dir: string;
+begin
+  AssertEquals('/Applications/Gittan.app',
+    MacBundleOf('/Applications/Gittan.app/Contents/MacOS/Gittan'));
+  Dir := IncludeTrailingPathDelimiter(GetTempDir) + 'gittantest-bundle-' + IntToStr(GetProcessID);
+  ForceDirectories(Dir + '/Gittan.app/Contents/MacOS');
+  try
+    AssertEquals('no bundle beside it', '', MacBundleOf(Dir + '/Gittan'));
+    FileClose(FileCreate(Dir + '/Gittan.app/Contents/MacOS/Gittan'));
+    AssertEquals('the bundle beside it', Dir + '/Gittan.app', MacBundleOf(Dir + '/Gittan'));
+  finally
+    DeleteFile(Dir + '/Gittan.app/Contents/MacOS/Gittan');
+    RemoveDir(Dir + '/Gittan.app/Contents/MacOS');
+    RemoveDir(Dir + '/Gittan.app/Contents');
+    RemoveDir(Dir + '/Gittan.app');
+    RemoveDir(Dir);
+  end;
 end;
 
 procedure TCliTest.TestUnixScript;

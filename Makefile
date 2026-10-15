@@ -131,8 +131,16 @@ lexlib:
 	@find "$(LEXERS_SRC)" "$(LEXERS_OWN)" -mindepth 2 -maxdepth 2 \( -name '*.lcf' -o -name '*.cuda-lexmap' \) -exec cp -p {} "$(LEXLIB)/" \;
 	@echo "Copied $$(ls "$(LEXLIB)"/*.lcf | wc -l | tr -d ' ') lexers to $(LEXLIB)/"
 
+# macOS: started as ./Gittan, Gittan gets neither a Dock icon nor a menu bar;
+# through the bundle's link it is the app, and still prints to the terminal.
+ifeq ($(shell uname -s),Darwin)
+  RUN_EXE := ./$(BUNDLE)/Contents/MacOS/Gittan
+else
+  RUN_EXE := ./Gittan
+endif
+
 run: build
-	./Gittan $(RUN_ARGS)
+	$(RUN_EXE) $(RUN_ARGS)
 
 test:
 	@mkdir -p tests/lib

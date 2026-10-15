@@ -4,8 +4,9 @@ unit gittan.cli;
   opens a folder or file in Gittan, the current folder when none is given.
   It is a small script that starts the Gittan it was installed from:
 
-  - macOS: /usr/local/bin/gittan runs `open -a` on the bundle, so a running
-    Gittan opens the path (Cocoa delivers it to the form's OnDropFiles).
+  - macOS: /usr/local/bin/gittan runs `open -a` on the bundle (also when
+    Gittan was started as the executable beside it, which would get neither
+    a Dock icon nor a menu bar), so a running Gittan opens the path (Cocoa delivers it to the form's OnDropFiles).
     /usr/local/bin needs an administrator on a fresh system; the copy then
     goes through `osascript ... with administrator privileges`.
   - Windows: gittan.cmd in %LOCALAPPDATA%\Gittan\bin, which is added to
@@ -32,6 +33,11 @@ function ShellQuote(const AText: string): string;
 
 {** The macOS script, which opens ABundle (the .app) with `open -a`. }
 function MacCliScript(const ABundle: string): string;
+
+{** The macOS bundle (the .app) to open for the executable AExe: the one
+  AExe is in, or else AName.app beside it, as a build leaves Gittan.app
+  next to Gittan with its executable a link back; '' when there is none. }
+function MacBundleOf(const AExe: string): string;
 
 {** The Unix script, which starts AExe in the background. }
 function UnixCliScript(const AExe: string): string;
@@ -85,6 +91,18 @@ begin
     '# gittan [folder | file] opens it in Gittan, the current folder by default.' + LineEnding +
     '[ $# -eq 0 ] && set -- "$PWD"' + LineEnding +
     'exec open -a ' + ShellQuote(ABundle) + ' "$@"' + LineEnding;
+end;
+
+function MacBundleOf(const AExe: string): string;
+var
+  i: integer;
+begin
+  i := Pos('.app/Contents/MacOS/', AExe);
+  if i > 0 then
+    Exit(Copy(AExe, 1, i + 3));
+  Result := AExe + '.app';
+  if not FileExists(Result + '/Contents/MacOS/' + ExtractFileName(AExe)) then
+    Result := '';
 end;
 
 function UnixCliScript(const AExe: string): string;
@@ -239,24 +257,12 @@ begin
   AOutput := Trim(AOutput);
 end;
 
-{ The bundle around AExe (…/Gittan.app/Contents/MacOS/Gittan), or ''. }
-function BundleOf(const AExe: string): string;
-var
-  i: integer;
-begin
-  i := Pos('.app/Contents/MacOS/', AExe);
-  if i = 0 then
-    Result := ''
-  else
-    Result := Copy(AExe, 1, i + 3);
-end;
-
 function InstallCli(const AExe: string; out AMessage: string): boolean;
 var
   Bundle, Script, Target, Temp, Output, Cmd: string;
 begin
   Target := CliInstallPath;
-  Bundle := BundleOf(AExe);
+  Bundle := MacBundleOf(AExe);
   { Run from a disk image, or translocated by Gatekeeper because it was
     never moved, the path is gone once the image is ejected. }
   if (Pos('/AppTranslocation/', AExe) > 0) or (Copy(AExe, 1, 9) = '/Volumes/') then
