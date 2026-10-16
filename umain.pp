@@ -732,7 +732,7 @@ type
   public
     {** Loads a file into the editor and picks its lexer from the file
       name. }
-    procedure OpenFile(const AFileName: string);
+    procedure OpenFile(AFileName: string);
     {** Opens the git repository containing ADir, lists its changed files in
       the tree and shows the uncommitted changes as a diff in the editor. }
     procedure OpenRepository(const ADir: string);
@@ -2078,7 +2078,9 @@ begin
   SetEditorLexer(AEd, ALexer);
 end;
 
-procedure TForm1.OpenFile(const AFileName: string);
+{ AFileName is not a const: callers pass FEditPath, which LeaveEdit
+  clears, and a const would then name freed memory. }
+procedure TForm1.OpenFile(AFileName: string);
 begin
   FlushEdit;
   LeaveEdit;
