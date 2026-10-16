@@ -8,9 +8,9 @@ unit gittan.summary;
   comments and the text its reviews were submitted with, which are on no
   line, so the change view has no place for them. A clean tree shows,
   instead of the totals, a large check with how far the branch is from
-  its upstream, and its newest commits instead of rows; with nothing to
-  list the check stands alone in the middle, as the empty view's icon
-  does.
+  its upstream, and its newest commits instead of rows while some are
+  not pushed; otherwise the check stands alone in the middle, as the
+  empty view's icon does.
 
   It paints itself so it matches the editor's palette in both themes. It
   sizes its height to its content and is meant to sit in a TScrollBox,
@@ -150,7 +150,7 @@ type
       clean", and after it how many commits the branch is ahead of
       (AAhead) and behind (ABehind) its upstream when it has one
       (AHasUpstream). The commits show only while there are no changed
-      files. }
+      files and some are not pushed. }
     procedure SetCommits(const ACommits: TGittanCommitLines;
       AAhead, ABehind: integer; AHasUpstream: boolean);
     {** The color of the notes' links. }
@@ -289,9 +289,13 @@ begin
   Invalidate;
 end;
 
+{ The commits are listed while some wait to be pushed; a branch that is
+  pushed, or has no upstream to push to, has nothing to act on, so its
+  clean state stands alone. }
 function TGittanSummary.ShowsCommits: boolean;
 begin
-  Result := (Length(FStats) = 0) and (Length(FCommits) > 0);
+  Result := (Length(FStats) = 0) and (Length(FCommits) > 0) and FHasUpstream
+    and (FAhead > 0);
 end;
 
 { Under a clean tree the commits take the place of the file rows, after
