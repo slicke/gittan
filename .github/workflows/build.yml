@@ -21,14 +21,12 @@ on:
 # the commits since the previous build as its notes. PRs only upload artifacts.
 # Every leg also builds and runs the unit tests in tests/ (`make test`).
 #
-# The toolchain is the same Lazarus 4.8 pin Trndi uses. Two things differ from
+# The toolchain is Lazarus 5.0RC1 (Trndi pins 4.8). One thing differs from
 # Trndi:
 #   - vendor/ holds the ATSynEdit packages as git submodules. A fresh Lazarus
 #     knows none of them, so every leg registers their .lpk files with
 #     `lazbuild --add-package-link` before building (lazbuild then compiles them
 #     on demand as dependencies of Gittan.lpi).
-#   - Gittan.lpi links Darwin targets through tools/darwin-lld (see AGENTS.md),
-#     so the macOS leg installs Homebrew's lld.
 # ---------------------------------------------------------------------------------
 
 concurrency:
@@ -113,9 +111,9 @@ jobs:
       - name: Install Lazarus/FPC (Linux)
         if: matrix.os_target == 'linux'
         env:
-          FPC_LAZ_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20Linux%20amd64%20DEB/Lazarus%204.8/fpc-laz_3.2.2-210709_amd64.deb/download
-          FPC_SRC_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20Linux%20amd64%20DEB/Lazarus%204.8/fpc-src_3.2.2-210709_amd64.deb/download
-          LAZ_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20Linux%20amd64%20DEB/Lazarus%204.8/lazarus-project_4.8.0-0_amd64.deb/download
+          FPC_LAZ_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20Linux%20amd64%20DEB/Lazarus%205.0RC1/fpc-laz_3.2.2-210709_amd64.deb/download
+          FPC_SRC_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20Linux%20amd64%20DEB/Lazarus%205.0RC1/fpc-src_3.2.2-210709_amd64.deb/download
+          LAZ_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20Linux%20amd64%20DEB/Lazarus%205.0RC1/lazarus-project_5.0.0-0_amd64.deb/download
         run: |
           set -euo pipefail
           sudo apt-get update
@@ -136,13 +134,13 @@ jobs:
           fpc -iV
           lazbuild --version
 
-      - name: Install Lazarus/FPC and lld (macOS)
+      - name: Install Lazarus/FPC (macOS)
         if: matrix.os_target == 'macos'
         # A stalled mirror must not burn the whole 90-minute job budget.
         timeout-minutes: 30
         env:
-          FPC_DMG_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20macOS%20aarch64/Lazarus%204.8/fpc-3.2.4rc1a.intelarm64-macosx.dmg/download
-          LAZ_ZIP_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20macOS%20aarch64/Lazarus%204.8/lazarus-darwin-aarch64-4.8.zip/download
+          FPC_DMG_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20macOS%20aarch64/Lazarus%205.0RC1/fpc-3.2.4rc2.intelarm64-macosx.dmg/download
+          LAZ_ZIP_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20macOS%20aarch64/Lazarus%205.0RC1/lazarus-darwin-aarch64-5.0RC1.zip/download
           HOMEBREW_NO_AUTO_UPDATE: "1"
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: |
@@ -164,8 +162,7 @@ jobs:
           sudo installer -pkg "$PKG" -target /
           hdiutil detach "$MNT"
 
-          # lld: Gittan.lpi links through tools/darwin-lld, which execs ld64.lld.
-          brew install make lld
+          brew install make
 
           xattr -cr "$DL/lazarus.zip"
           EXTRACT="$(mktemp -d)"
@@ -186,7 +183,7 @@ jobs:
           <?xml version="1.0" encoding="UTF-8"?>
           <CONFIG>
             <EnvironmentOptions>
-              <Version Value="112" Lazarus="4.8"/>
+              <Version Value="112" Lazarus="5.0RC1"/>
               <LazarusDirectory Value="/Applications/lazarus/"/>
               <CompilerFilename Value="/usr/local/bin/fpc"/>
               <FPCSourceDirectory Value="\$(LazarusDir)/fpc/\$(FPCVer)/sources/"/>
@@ -204,24 +201,23 @@ jobs:
           export PATH="/Applications/lazarus:/usr/local/bin:$(brew --prefix)/bin:$PATH"
           fpc -iV
           lazbuild --version
-          command -v ld64.lld
 
       - name: Install Lazarus/FPC (Windows)
         if: matrix.os_target == 'windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          curl.exe -L --fail --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --speed-limit 1024 --speed-time 60 -o lazarus-4.8.exe "https://sourceforge.net/projects/lazarus/files/Lazarus%20Windows%2064%20bits/Lazarus%204.8/lazarus-4.8-fpc-3.2.2-win64.exe/download"
+          curl.exe -L --fail --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --speed-limit 1024 --speed-time 60 -o lazarus-5.0RC1.exe "https://sourceforge.net/projects/lazarus/files/Lazarus%20Windows%2064%20bits/Lazarus%205.0RC1/lazarus-5.0RC1-fpc-3.2.2-win64.exe/download"
           # SourceForge sometimes answers with an HTML page; check for the MZ header.
-          $fs = [System.IO.File]::OpenRead('lazarus-4.8.exe')
+          $fs = [System.IO.File]::OpenRead('lazarus-5.0RC1.exe')
           $mz = New-Object byte[] 2
           $null = $fs.Read($mz, 0, 2)
           $fs.Close()
           if (($mz[0] -ne 0x4D) -or ($mz[1] -ne 0x5A)) {
-            throw "lazarus-4.8.exe is not a Windows executable; the mirror likely returned a web page."
+            throw "lazarus-5.0RC1.exe is not a Windows executable; the mirror likely returned a web page."
           }
-          Start-Process '.\lazarus-4.8.exe' -ArgumentList '/VERYSILENT','/SP-','/NORESTART','/DIR=C:\Lazarus' -Wait
-          Remove-Item 'lazarus-4.8.exe'
+          Start-Process '.\lazarus-5.0RC1.exe' -ArgumentList '/VERYSILENT','/SP-','/NORESTART','/DIR=C:\Lazarus' -Wait
+          Remove-Item 'lazarus-5.0RC1.exe'
           Add-Content $env:GITHUB_PATH 'C:\Lazarus'
           & 'C:\Lazarus\lazbuild.exe' --version
 

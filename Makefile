@@ -26,17 +26,7 @@ else
   WIDGETSET ?= qt6
 endif
 
-# macOS linker. Apple's ld from Xcode/CLT 27 refuses the Objective-C method
-# lists FPC 3.2.x emits ("malformed method list atom"), in the LCL as much as
-# in our units, and -ld_classic is gone. Gittan.lpi therefore always links
-# Darwin targets through tools/darwin-lld/ld (via -FD), a shim taken from
-# Trndi that translates the ld64-only flags and execs LLVM's ld64.lld
-# (brew install lld). The shim finds ld64.lld itself; LD64_LLD overrides it.
-# The same conditional applies to builds from the Lazarus IDE.
 ifeq ($(shell uname -s),Darwin)
-  LD64_LLD ?= $(shell command -v ld64.lld 2>/dev/null || \
-    ls /opt/homebrew/bin/ld64.lld /usr/local/bin/ld64.lld 2>/dev/null | head -n1)
-  export LD64_LLD
   # FPC 3.2.x's DWARF 3 writer stops with an internal error on Objective-C
   # classes; DWARF 2 works and LLDB reads it.
   DEBUG_FLAGS := --opt=-g --opt=-gw2 --opt=-gl
@@ -48,12 +38,8 @@ LAZFLAGS = --widgetset=$(WIDGETSET)
 
 # Unit tests. tests/gittantests.lpr is a console program over the non-visual
 # units (git, worddiff, settings), built with fpc alone: no LCL, no lazbuild.
-# On macOS it links through the same lld shim as the app.
 FPC ?= fpc
 TESTBIN := tests/gittantests
-ifeq ($(shell uname -s),Darwin)
-  TESTFLAGS := -FD$(CURDIR)/tools/darwin-lld
-endif
 
 # Syntax highlighting. vendor/CudaText-lexers keeps each EControl lexer in a
 # subfolder of its own, but TecLexerList loads *.lcf from one flat folder, so
@@ -107,7 +93,7 @@ help:
 	@echo "  lexlib    Copy the lexers from $(LEXERS_SRC) and $(LEXERS_OWN) into $(LEXLIB)/ (part of every build)"
 	@echo "  icons     Regenerate the icons from ICON_SRC=$(ICON_SRC) (macOS only)"
 	@echo "  clean     Remove lib/, $(LEXLIB)/, the test build and the binary"
-	@echo "Current: WIDGETSET=$(WIDGETSET) LAZBUILD=$(LAZBUILD) LD64_LLD=$(LD64_LLD)"
+	@echo "Current: WIDGETSET=$(WIDGETSET) LAZBUILD=$(LAZBUILD)"
 
 build: lexlib
 	$(LAZBUILD) $(LAZFLAGS) $(LPI)
@@ -144,7 +130,7 @@ run: build
 
 test:
 	@mkdir -p tests/lib
-	$(FPC) -Mobjfpc -Sh -O1 -Fu. -FUtests/lib -FEtests $(TESTFLAGS) tests/gittantests.lpr
+	$(FPC) -Mobjfpc -Sh -O1 -Fu. -FUtests/lib -FEtests tests/gittantests.lpr
 	$(TESTBIN) --all --format=plain $(TEST_ARGS)
 
 clean:

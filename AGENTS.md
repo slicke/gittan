@@ -11,19 +11,13 @@ This file applies to the Gittan repository root and its subdirectories.
 - `make test` builds `tests/gittantests.lpr` with plain `fpc` (no LCL) and runs it: fpcunit tests of `gittan.git` (parsing on its own, the rest against a temporary repository made with the real git), `gittan.worddiff` and `gittan.settings`. CI runs it on every leg. A new non-visual unit gets a `tests/test<name>.pp` registered in the runner.
 
 ## macOS linking
-- Apple's ld from Xcode/CLT 27 rejects the Objective-C method lists FPC 3.2.x emits, and `-ld_classic` is gone. Darwin targets therefore link through LLVM's `ld64.lld` (`brew install lld`) via the shim in `tools/darwin-lld/ld`, taken from Trndi.
-- `Gittan.lpi` adds `-FD$(ProjPath)/tools/darwin-lld` for `TargetOS='darwin'` only, so lazbuild and the Lazarus IDE both use it. Do not remove that conditional.
-- Rebuilding the Lazarus IDE (for example after installing a package) also needs the shim:
-  ```sh
-  /Applications/lazarus/lazbuild --build-ide="-FD$PWD/tools/darwin-lld" --ws=cocoa
-  ```
-  Tools > Build Lazarus inside the IDE uses Apple's ld unless the build profile carries the same `-FD` option.
+- Darwin targets link with Apple's ld. The first ld of Xcode/CLT 27 rejected the Objective-C method lists FPC 3.2.x emits ("malformed method list atom"), and Gittan linked through LLVM's `ld64.lld` for a while; ld-27037 (August 2026) links them again. On "malformed method list atom", update Xcode or the Command Line Tools.
 - Debug builds on macOS must use DWARF 2 (`-gw2`); FPC 3.2.x's DWARF 3 writer fails on Objective-C classes.
 
 ## CI
-- `.github/workflows/build.yml` builds on every push to main and every PR: macOS arm64 (cocoa, `.dmg`), Windows x64 (win32, `.zip`) and Linux amd64 (qt6, `.tar.gz`), each with `lexlib/` beside the executable (in `Contents/Resources` for the bundle). The toolchain pins are Trndi's (Lazarus 4.8).
+- `.github/workflows/build.yml` builds on every push to main and every PR: macOS arm64 (cocoa, `.dmg`), Windows x64 (win32, `.zip`) and Linux amd64 (qt6, `.tar.gz`), each with `lexlib/` beside the executable (in `Contents/Resources` for the bundle). The toolchain is Lazarus 5.0RC1 on every leg (FPC 3.2.4rc2 on macOS, 3.2.2 elsewhere).
 - The checkout fetches the submodules, and every leg registers the vendored `.lpk` files with `lazbuild --add-package-link` (the list is `VENDOR_PACKAGES` in the workflow, in dependency order). A new vendored package must be added there too.
-- The macOS leg installs Homebrew's `lld` for the `tools/darwin-lld` shim, replaces the bundle's symlink with the binary and signs the bundle ad hoc. The Windows runner has no make, so that leg copies the lexers and calls lazbuild itself; keep it in step with `make lexlib`.
+- The macOS leg replaces the bundle's symlink with the binary and signs the bundle ad hoc. The Windows runner has no make, so that leg copies the lexers and calls lazbuild itself; keep it in step with `make lexlib`.
 - Every push to main publishes a release, as in Trndi: the `version` job takes the next build number from the `build-<n>` tags (100 when there is none), and `publish` runs after the three builds, downloads the packages and creates the release `build-<n>` (tagged on the pushed commit by `gh release create`) with the commits since the previous build as its notes. A failed leg skips the release. PRs only upload artifacts. The build job passes the number to every leg as `GITTAN_BUILD`, which `gittan.update.pp` compiles in (`{$I %GITTAN_BUILD%}`); a local or PR build has none. The website on the `gh-pages` branch links to `releases/latest`.
 
 ## Application icon
