@@ -7,6 +7,7 @@ This file applies to the Gittan repository root and its subdirectories.
 - Prefer the project Makefile instead of calling `lazbuild` directly. Run `make help` before inventing a new command or target.
 - On macOS use `make` (or `gmake`); it finds lazbuild in `/Applications/lazarus` when it is not on PATH.
 - Prefer the smallest relevant target: `make`, `make debug`, `make rebuild`, `make run`.
+- On Windows, where there is no make, `.\make.ps1` has the same targets (build, debug, rebuild, run, lexlib, test, clean, help) and finds lazbuild as Trndi's does (LAZBUILD, PATH, `C:\lazarus`, `C:\fpcupdeluxe\lazarus`). A build from the Lazarus IDE (F9) does not copy the lexers: run `.\make.ps1 lexlib` once, or after the lexers change.
 - `make test` builds `tests/gittantests.lpr` with plain `fpc` (no LCL) and runs it: fpcunit tests of `gittan.git` (parsing on its own, the rest against a temporary repository made with the real git), `gittan.worddiff` and `gittan.settings`. CI runs it on every leg. A new non-visual unit gets a `tests/test<name>.pp` registered in the runner.
 
 ## macOS linking
