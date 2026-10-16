@@ -360,7 +360,8 @@ begin
     TerminalCmd := FSettings.TerminalCommand;
     Corner := EditorPanel.ClientToScreen(Point(EditorPanel.ClientWidth -
       Scale96ToForm(Margin), EditorPanel.ClientHeight - Scale96ToForm(Margin)));
-    if EditSettings(F, Theme, EditorCmd, TerminalCmd, @PreviewSettings, Corner) then
+    if EditSettings(F, Theme, EditorCmd, TerminalCmd, @PreviewSettings, FLexers,
+      Edit, Corner) then
     begin
       PreviewSettings(F, Theme);
       FSettings.EditorCommand := EditorCmd;
