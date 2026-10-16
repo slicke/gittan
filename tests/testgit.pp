@@ -45,6 +45,7 @@ type
     procedure TestLineHistory;
     procedure TestRemoteFor;
     procedure TestUserName;
+    procedure TestFileBlob;
     procedure TestFetchPullRequest;
     procedure TestDefaultBranchAndMergeBase;
     procedure TestAheadBehind;
@@ -655,6 +656,25 @@ begin
   AssertTrue(FRepo.Open(FDir));
   Git(['config', 'user.name', '  Björn Lindh ']);
   AssertEquals('Björn Lindh', FRepo.UserName);
+end;
+
+{ The bytes come back as they are, a NUL and a CR LF included. }
+procedure TGitRepoTest.TestFileBlob;
+var
+  Data: RawByteString;
+begin
+  MakeHistory;
+  WriteFile('pic.bin', 'one'#0#13#10'two');
+  Git(['add', 'pic.bin']);
+  Git(['commit', '-q', '-m', 'Add pic']);
+  WriteFile('pic.bin', 'three');
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.FileBlob('pic.bin', 'HEAD', Data));
+  AssertEquals('one'#0#13#10'two', Data);
+  AssertTrue(FRepo.FileBlob('pic.bin', '', Data));
+  AssertEquals('three', Data);
+  AssertFalse(FRepo.FileBlob('none.bin', 'HEAD', Data));
+  AssertFalse(FRepo.FileBlob('none.bin', '', Data));
 end;
 
 { A bare repository stands in for GitHub: it serves the pull request as

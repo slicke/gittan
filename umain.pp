@@ -20,13 +20,15 @@ uses
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader,
-  gittan.discard, gittan.submodules, gittan.reviews, ATSynEdit_Gaps, md5;
+  gittan.discard, gittan.submodules, gittan.reviews, gittan.imagediff, ATSynEdit_Gaps, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
     file, the raw repository diff, a plain file from File > Open, the
-    history of a piece of code (Go > Code History), or a submodule. }
-  TGittanView = (gvSummary, gvChanges, gvRepoDiff, gvFile, gvHistory, gvSubmodule);
+    history of a piece of code (Go > Code History), a submodule, or a
+    changed image, side by side (gittan.imagediff). }
+  TGittanView = (gvSummary, gvChanges, gvRepoDiff, gvFile, gvHistory, gvSubmodule,
+    gvImage);
 
   {** The three strengths of a commit's color in the history view: the
     faint tint of its rows, the shade of the words it changed, and the
@@ -365,6 +367,9 @@ type
     { The name the changes not committed yet are made under, for their
       initial (see DrawInitials). }
     FHistoryUser: string;
+    { The change view of an image, in the editor's place (see
+      ShowImageChanges). }
+    FImageDiff: TGittanImageDiff;
     { View > Review Comments (see umain.reviews.inc): whether it is on,
       its menu item, the job that fetches the threads, the threads of the
       pull request FThreadsNumber of FThreadsRepo with its head commit,
@@ -427,6 +432,7 @@ type
     procedure SummarySelectFile(Sender: TObject; const APath: string);
     procedure ShowSummary;
     procedure ShowEditor;
+    procedure ShowImageChanges(const APath: string);
     procedure ShowRepoDiff;
     procedure MenuPrevChangeClick(Sender: TObject);
     procedure MenuNextChangeClick(Sender: TObject);
@@ -1267,6 +1273,10 @@ begin
   { The summary takes the editor's place until a file is picked. The
     scroll box gives it native scrolling; its resize keeps the summary at
     least as tall as the box, so the summary's background fills it. }
+  FImageDiff := TGittanImageDiff.Create(Self);
+  FImageDiff.Parent := EditorPanel;
+  FImageDiff.Align := alClient;
+  FImageDiff.Visible := False;
   FSummaryBox := TScrollBox.Create(Self);
   FSummaryBox.Parent := EditorPanel;
   FSummaryBox.Align := alClient;
@@ -1552,6 +1562,9 @@ begin
     FHeader.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(63, 185, 80), RGBToColor(248, 81, 73),
       RGBToColor(62, 62, 62));
+    FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(62, 62, 62), RGBToColor(248, 81, 73),
+      RGBToColor(63, 185, 80), RGBToColor(58, 58, 60), RGBToColor(44, 44, 46));
     FNav.SetColors(RGBToColor(37, 37, 38), RGBToColor(50, 50, 51),
       RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240));
     FHeader.SetPillColors(RGBToColor(50, 50, 51), RGBToColor(85, 85, 86),
@@ -1588,6 +1601,9 @@ begin
     FHeader.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(26, 127, 55), RGBToColor(207, 34, 46),
       RGBToColor(222, 222, 222));
+    FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
+      RGBToColor(110, 110, 110), RGBToColor(222, 222, 222), RGBToColor(207, 34, 46),
+      RGBToColor(26, 127, 55), RGBToColor(255, 255, 255), RGBToColor(230, 230, 230));
     FNav.SetColors(RGBToColor(246, 246, 246), clWhite,
       RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
     FHeader.SetPillColors(clWhite, RGBToColor(205, 205, 205), RGBToColor(0, 110, 230));
@@ -1696,7 +1712,9 @@ var
   Tone: TGittanStatusTone;
   Checks: integer;
 begin
-  if FAdapter.Lexer = nil then
+  if FView = gvImage then
+    Lexer := ImageFormatName(FCurrentPath)
+  else if FAdapter.Lexer = nil then
     Lexer := rsPlainText
   else
     Lexer := FAdapter.Lexer.LexerName;
@@ -2558,6 +2576,9 @@ var
   Line, Prev, i, n: integer;
 begin
   Result := nil;
+  { The editor keeps the text of the file before an image. }
+  if FView = gvImage then
+    Exit;
   Marks := Edit.Strings.Bookmarks2;
   SetLength(Result, Marks.Count);
   n := 0;
@@ -2636,7 +2657,7 @@ begin
   Blocks := ChangeBlocks;
   if Length(Blocks) = 0 then
   begin
-    if FView = gvChanges then
+    if FView in [gvChanges, gvImage] then
       StepFile(ANext);
     Exit;
   end;
@@ -3001,7 +3022,7 @@ begin
           OpenFile(FEditPath);
           RestoreScroll;
         end;
-    gvChanges:
+    gvChanges, gvImage:
       begin
         SummarySelectFile(nil, Path);
         if FileTree.Selected = nil then
@@ -3047,6 +3068,7 @@ begin
   Edit.Visible := False;
   FEditOld.Visible := False;
   FSideSplitter.Visible := False;
+  FImageDiff.Visible := False;
   FHeader.Visible := False;
   FFindBar.Visible := False;
   FSymbolBar.Visible := False;
@@ -3071,10 +3093,38 @@ begin
   { The symbol bar lists the file shown before. }
   FSymbolBar.Visible := False;
   FSummaryBox.Visible := False;
+  FImageDiff.Visible := False;
   FHeader.Visible := True;
   ApplyLayout;
   ApplyBlame;
   Edit.Visible := True;
+end;
+
+{ An image in the change view: the version compared against and the new
+  one side by side in FImageDiff, in the editor's place, under the file
+  header. The editor's text is left as it was; FView keeps the views
+  of text (find, blame, the navigator) away from it. }
+procedure TForm1.ShowImageChanges(const APath: string);
+var
+  OldRef, NewRef: string;
+  OldData, NewData: RawByteString;
+  HasOld, HasNew: boolean;
+begin
+  AbandonHistoryJob;
+  FRepo.DiffSides(OldRef, NewRef);
+  HasOld := FRepo.FileBlob(APath, OldRef, OldData);
+  HasNew := FRepo.FileBlob(APath, NewRef, NewData);
+  FImageDiff.SetImages(OldData, NewData, HasOld, HasNew);
+  FView := gvImage;
+  FSymbolBar.Visible := False;
+  FFindBar.Visible := False;
+  FSummaryBox.Visible := False;
+  Edit.Visible := False;
+  FHeader.Visible := True;
+  ApplyLayout;
+  FImageDiff.Visible := True;
+  FSummary.Selected := APath;
+  FStatus.SetPosition('');
 end;
 
 { The summary paints its own background; it must cover the scroll box. }
@@ -3243,6 +3293,13 @@ begin
         FConflictRoles := ConflictRoles(FChangeLines);
       Break;
     end;
+  if IsImagePath(APath) then
+  begin
+    ShowImageChanges(APath);
+    UpdateChangeNav;
+    UpdateStatus;
+    Exit;
+  end;
   { One of the repository's own files can be opened to edits. }
   if IsRepoFile(APath) then
     FHeader.SetActions([rsEditAction]);

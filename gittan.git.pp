@@ -214,6 +214,10 @@ type
       by default), ARight the right commit of a range, or empty for the
       work tree. }
     procedure DiffSides(out ALeft, ARight: string);
+    {** The bytes of APath as it is in the commit ARef (`git cat-file
+      blob`, no filter applied), or in the work tree when ARef is empty.
+      Returns false when the version has no such file. }
+    function FileBlob(const APath, ARef: string; out AData: RawByteString): boolean;
     {** The output of `git blame --porcelain` for APath as it is in the
       commit ARef, or in the work tree when ARef is empty, with
       IgnoreWhitespace passed on as -w. Returns false when git failed: a
@@ -1455,6 +1459,39 @@ begin
   begin
     ALeft := DiffBase;
     ARight := '';
+  end;
+end;
+
+function TGittanRepo.FileBlob(const APath, ARef: string; out AData: RawByteString): boolean;
+var
+  Output: string;
+  Stream: TFileStream;
+begin
+  AData := '';
+  if (FRoot = '') or (APath = '') then
+    Exit(False);
+  if ARef <> '' then
+  begin
+    Result := RunGit(FRoot, ['cat-file', 'blob', ARef + ':' + APath], Output);
+    if Result then
+      AData := Output;
+    Exit;
+  end;
+  Result := FileExists(FullPath(APath));
+  if not Result then
+    Exit;
+  try
+    Stream := TFileStream.Create(FullPath(APath), fmOpenRead or fmShareDenyNone);
+    try
+      SetLength(AData, Stream.Size);
+      if Length(AData) > 0 then
+        Stream.ReadBuffer(AData[1], Length(AData));
+    finally
+      Stream.Free;
+    end;
+  except
+    AData := '';
+    Result := False;
   end;
 end;
 
