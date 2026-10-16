@@ -15,6 +15,7 @@ uses
   gittan.lexers, gittan.git, gittan.github, gittan.conflicts, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.welcome, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
+  {$IFDEF LCLCocoa}gittan.toolbar,{$ENDIF}
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader,
@@ -133,6 +134,12 @@ type
     FTreePanel: TPanel;
     FTreeFilter: TEdit;
     FTreeFilterText: string;
+    {$IFDEF LCLCocoa}
+    { The window's toolbar on macOS 11 and later (SetupTitleBar): the
+      name, the filter as a native search field in place of FTreeFilter,
+      and the header's navigator and pills. nil before macOS 11. }
+    FToolbar: TGittanToolbar;
+    {$ENDIF}
     { The height of the strip the title bar covers on macOS, where the
       content reaches under it (SetupTitleBar); 0 elsewhere. }
     FTitleBarHeight: integer;
@@ -689,6 +696,11 @@ type
     procedure FormCloseQuery(Sender: TObject; var CanClose: boolean);
     procedure TreeFilterChange(Sender: TObject);
     procedure TreeFilterKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
+    function TreeFilterQuery: string;
+    {$IFDEF LCLCocoa}
+    procedure ToolbarSearchKey(Sender: TObject; var Key: word);
+    procedure HeaderControlsChange(Sender: TObject);
+    {$ENDIF}
     procedure MenuFilterFilesClick(Sender: TObject);
     procedure AbandonPullJob;
     procedure StartUpdateCheck(AManual: boolean);
@@ -751,6 +763,7 @@ uses
 
 resourcestring
   rsAppName = 'Git Tree Analyzer & Navigator';
+  rsAppShortName = 'Gittan';
   rsFile = '&File';
   rsOpen = '&Open...';
   rsOpenRepo = 'Open &Repository...';
@@ -1328,6 +1341,9 @@ begin
   FreeAndNil(FRepo);
   FreeAndNil(FSnapshots);
   FreeAndNil(FAppIcon);
+  {$IFDEF LCLCocoa}
+  FreeAndNil(FToolbar);
+  {$ENDIF}
   FreeAndNil(FChangeLines);
   FreeAndNil(FIndex);
   FreeAndNil(FIndexQueue);
@@ -3335,9 +3351,26 @@ end;
 procedure TForm1.SetupTitleBar;
 begin
   {$IFDEF LCLCocoa}
+  { The toolbar first: it makes the strip taller. }
+  FToolbar := TGittanToolbar.Install(Handle, rsAppShortName, rsFilterHint);
+  if FToolbar <> nil then
+  begin
+    FTreeFilter.Visible := False;
+    FToolbar.OnSearchChange := @TreeFilterChange;
+    FToolbar.OnSearchKey := @ToolbarSearchKey;
+    FToolbar.OnAction := @HeaderAction;
+    FToolbar.OnPrev := @MenuPrevChangeClick;
+    FToolbar.OnNext := @MenuNextChangeClick;
+    FHeader.ShowControls := False;
+    FHeader.OnControlsChange := @HeaderControlsChange;
+    HeaderControlsChange(nil);
+  end;
   FTitleBarHeight := ExtendUnderTitleBar(Handle);
   {$ENDIF}
   FTreeFilter.BorderSpacing.Top := FTitleBarHeight;
+  { With the toolbar's field in its place the tree is at the top. }
+  if not FTreeFilter.Visible then
+    FileTree.BorderSpacing.Top := FTitleBarHeight;
   FHeader.BorderSpacing.Top := FTitleBarHeight;
   FSummaryBox.BorderSpacing.Top := FTitleBarHeight;
   TreeSplitter.BorderSpacing.Top := FTitleBarHeight;
@@ -3390,7 +3423,7 @@ procedure TForm1.TreeFilterChange(Sender: TObject);
 var
   Handler: TNotifyEvent;
 begin
-  FTreeFilterText := LowerCase(Trim(FTreeFilter.Text));
+  FTreeFilterText := LowerCase(Trim(TreeFilterQuery));
   Handler := FileTree.OnSelectionChanged;
   FileTree.OnSelectionChanged := nil;
   try
@@ -3410,7 +3443,7 @@ begin
     VK_ESCAPE:
       begin
         Key := 0;
-        if FTreeFilter.Text <> '' then
+        if TreeFilterQuery <> '' then
           FTreeFilter.Text := ''
         else if FileTree.CanFocus then
           FileTree.SetFocus;
@@ -3428,8 +3461,66 @@ begin
   end;
 end;
 
+{ The filter's text: the toolbar's search field on macOS, else the
+  field over the tree. }
+function TForm1.TreeFilterQuery: string;
+begin
+  {$IFDEF LCLCocoa}
+  if FToolbar <> nil then
+    Exit(FToolbar.SearchText);
+  {$ENDIF}
+  Result := FTreeFilter.Text;
+end;
+
+{$IFDEF LCLCocoa}
+{ The search field passes Escape (when it is empty), Enter and Down on
+  as the field over the tree takes them. The form does not know the
+  field and still has the control focused before it as the active one,
+  so focusing that again would do nothing. }
+procedure TForm1.ToolbarSearchKey(Sender: TObject; var Key: word);
+begin
+  ActiveControl := nil;
+  TreeFilterKeyDown(Sender, Key, []);
+end;
+
+{ The toolbar shows the header's navigator and pills, none while the
+  header is hidden (the summary). }
+procedure TForm1.HeaderControlsChange(Sender: TObject);
+var
+  Captions: array of string;
+  States: array of boolean;
+  i: integer;
+begin
+  if FToolbar = nil then
+    Exit;
+  Captions := nil;
+  States := nil;
+  if FHeader.Visible then
+  begin
+    SetLength(Captions, FHeader.ActionCount);
+    SetLength(States, FHeader.ActionCount);
+    for i := 0 to FHeader.ActionCount - 1 do
+    begin
+      Captions[i] := FHeader.ActionCaption[i];
+      States[i] := FHeader.ActionEnabled[i];
+    end;
+    FToolbar.SetChanges(FHeader.ChangeCurrent, FHeader.ChangeTotal);
+  end
+  else
+    FToolbar.SetChanges(0, 0);
+  FToolbar.SetActions(Captions, States);
+end;
+{$ENDIF}
+
 procedure TForm1.MenuFilterFilesClick(Sender: TObject);
 begin
+  {$IFDEF LCLCocoa}
+  if FToolbar <> nil then
+  begin
+    FToolbar.FocusSearch;
+    Exit;
+  end;
+  {$ENDIF}
   if FTreeFilter.CanFocus then
   begin
     FTreeFilter.SetFocus;

@@ -10,7 +10,12 @@ unit gittan.fileheader;
   It paints itself with the editor's palette in both themes, like the
   summary, and owns the navigator as a child so it can lay out around it.
   The pills are painted here and hit-tested on the mouse, as the
-  navigator does with its arrows. }
+  navigator does with its arrows.
+
+  On macOS the window's toolbar shows the pills and the navigator
+  instead (gittan.toolbar.pp): ShowControls off leaves them out here,
+  and OnControlsChange tells when they, or the header's visibility,
+  changed, so the toolbar can follow. }
 
 {$mode objfpc}{$H+}
 
@@ -40,10 +45,19 @@ type
     FActionRects: array of TRect;
     FHot, FPressed: integer;
     FOnAction: TGittanHeaderActionEvent;
+    FShowControls: boolean;
+    FChangeCurrent, FChangeTotal: integer;
+    FOnControlsChange: TNotifyEvent;
+    procedure ControlsChanged;
+    procedure SetShowControls(AValue: boolean);
+    function GetActionCount: integer;
+    function GetActionCaption(AIndex: integer): string;
+    function GetActionEnabled(AIndex: integer): boolean;
     function ActionAt(X, Y: integer): integer;
     procedure SetHot(AValue: integer);
   protected
     procedure Paint; override;
+    procedure VisibleChanged; override;
     procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
     procedure MouseLeave; override;
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
@@ -94,6 +108,17 @@ type
     {** The navigator, for its colors and click handlers. }
     property Nav: TGittanChangeNav read FNav;
     property OnAction: TGittanHeaderActionEvent read FOnAction write FOnAction;
+    {** Whether the pills and the navigator are shown here; True by default. }
+    property ShowControls: boolean read FShowControls write SetShowControls;
+    property ActionCount: integer read GetActionCount;
+    property ActionCaption[AIndex: integer]: string read GetActionCaption;
+    property ActionEnabled[AIndex: integer]: boolean read GetActionEnabled;
+    {** The navigator's position as SetChanges gave it. }
+    property ChangeCurrent: integer read FChangeCurrent;
+    property ChangeTotal: integer read FChangeTotal;
+    {** The actions, their states, the navigator's position or the
+      header's visibility changed. }
+    property OnControlsChange: TNotifyEvent read FOnControlsChange write FOnControlsChange;
   end;
 
 implementation
@@ -125,6 +150,7 @@ begin
   FIcon := -1;
   FHot := -1;
   FPressed := -1;
+  FShowControls := True;
   FNav := TGittanChangeNav.Create(Self);
   FNav.Parent := Self;
   FNav.Height := NavHeight;
@@ -203,11 +229,51 @@ end;
 
 procedure TGittanFileHeader.SetChanges(ACurrent, ATotal: integer);
 begin
-  FNav.Visible := ATotal > 0;
+  FChangeCurrent := ACurrent;
+  FChangeTotal := ATotal;
+  FNav.Visible := FShowControls and (ATotal > 0);
   if ATotal > 0 then
     FNav.SetPosition(ACurrent, ATotal);
   { The room for the path depends on the navigator's width. }
   Invalidate;
+  ControlsChanged;
+end;
+
+procedure TGittanFileHeader.ControlsChanged;
+begin
+  if Assigned(FOnControlsChange) then
+    FOnControlsChange(Self);
+end;
+
+procedure TGittanFileHeader.VisibleChanged;
+begin
+  inherited VisibleChanged;
+  ControlsChanged;
+end;
+
+procedure TGittanFileHeader.SetShowControls(AValue: boolean);
+begin
+  if FShowControls = AValue then
+    Exit;
+  FShowControls := AValue;
+  FNav.Visible := AValue and (FChangeTotal > 0);
+  SetHot(-1);
+  Invalidate;
+end;
+
+function TGittanFileHeader.GetActionCount: integer;
+begin
+  Result := Length(FActions);
+end;
+
+function TGittanFileHeader.GetActionCaption(AIndex: integer): string;
+begin
+  Result := FActions[AIndex];
+end;
+
+function TGittanFileHeader.GetActionEnabled(AIndex: integer): boolean;
+begin
+  Result := FActionsEnabled[AIndex];
 end;
 
 procedure TGittanFileHeader.SetActions(const ACaptions: array of string);
@@ -227,6 +293,7 @@ begin
   FPressed := -1;
   Cursor := crDefault;
   Invalidate;
+  ControlsChanged;
 end;
 
 procedure TGittanFileHeader.SetActionEnabled(AIndex: integer; AEnabled: boolean);
@@ -237,6 +304,7 @@ begin
     Exit;
   FActionsEnabled[AIndex] := AEnabled;
   Invalidate;
+  ControlsChanged;
 end;
 
 procedure TGittanFileHeader.SetModified(AModified: boolean);
@@ -281,6 +349,8 @@ function TGittanFileHeader.ActionAt(X, Y: integer): integer;
 var
   i: integer;
 begin
+  if not FShowControls then
+    Exit(-1);
   for i := 0 to High(FActionRects) do
     if FActionsEnabled[i] and FActionRects[i].Contains(Point(X, Y)) then
       Exit(i);
@@ -378,6 +448,8 @@ begin
   PillTop := (Height - 1 - PillHeight) div 2;
   for i := High(FActions) downto 0 do
   begin
+    if not FShowControls then
+      Break;
     W := Canvas.TextWidth(FActions[i]) + 2 * PillPad;
     R := Rect(Right - W, PillTop, Right, PillTop + PillHeight);
     FActionRects[i] := R;
