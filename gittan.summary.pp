@@ -7,8 +7,10 @@ unit gittan.summary;
   two, the conversation of the pull request when there is one: its
   comments and the text its reviews were submitted with, which are on no
   line, so the change view has no place for them. A clean tree shows,
-  instead of rows, how far the branch is from its upstream and its
-  newest commits.
+  instead of the totals, a large check with how far the branch is from
+  its upstream, and its newest commits instead of rows; with nothing to
+  list the check stands alone in the middle, as the empty view's icon
+  does.
 
   It paints itself so it matches the editor's palette in both themes. It
   sizes its height to its content and is meant to sit in a TScrollBox,
@@ -101,8 +103,14 @@ type
     procedure SetNotice(const AValue: string);
     procedure UpdateHeight;
     procedure PaintNotice(var Y: integer);
-    procedure PaintClean(Y: integer);
-    procedure PaintSync(X, Y: integer);
+    function CentersClean: boolean;
+    function CleanText: string;
+    function HeaderBlockHeight(ACanvas: TCanvas): integer;
+    function CenterBlockHeight(ACanvas: TCanvas): integer;
+    procedure DrawCheck(X, Y, ASize: integer);
+    procedure PaintCleanHeader(Y: integer);
+    procedure PaintCleanCentered;
+    function PaintSync(X, Y: integer; ADraw: boolean = True): integer;
     procedure PaintHeader(var Y: integer);
     procedure PaintRow(AIndex, ATop: integer);
     procedure PaintBar(X, Y: integer; const AStat: TGittanFileStat; AMax: integer);
@@ -176,7 +184,6 @@ uses
 resourcestring
   rsOneFile = '1 changed file';
   rsManyFiles = '%d changed files';
-  rsNoChanges = 'No changes';
   rsClean = 'Working tree clean';
   rsCleanVs = 'No changes %s';
   rsRecentCommits = 'Recent commits';
@@ -209,6 +216,11 @@ const
   Gap = 12;
   TitleFontSize = 20;
   CheckSize = 20;
+  { "Working tree clean", larger than the body; its check in the header
+    and alone in the middle. }
+  CleanFontSize = 15;
+  HeaderCheck = 34;
+  CenterCheck = 64;
   ChipPadX = 6;
   ChipPadY = 3;
   ChevronWidth = 14;
@@ -222,8 +234,6 @@ const
   NoteGap = 8;
   NoteStripe = 3;
   NoteMaxLines = 12;
-  { The room above the commits' heading, under the clean row. }
-  CommitsGap = 12;
 
 { TGittanSummary }
 
@@ -284,20 +294,71 @@ begin
   Result := (Length(FStats) = 0) and (Length(FCommits) > 0);
 end;
 
-{ Under a clean tree the clean row takes the place of the first file
-  row; the commits follow it after a gap and their heading. Sets
-  FCommitsTop and FContentHeight from FRowsTop. }
+{ Under a clean tree the commits take the place of the file rows, after
+  their heading. Sets FCommitsTop and FContentHeight from FRowsTop. }
 procedure TGittanSummary.PlaceCommits;
 var
   BodyHeight: integer;
 begin
   FMeasure.Canvas.Font := Font;
   BodyHeight := FMeasure.Canvas.TextHeight('Xg');
-  FCommitsTop := FRowsTop + RowHeight + CommitsGap + BodyHeight + NoteGap;
+  FCommitsTop := FRowsTop + BodyHeight + NoteGap;
   if ShowsCommits then
     FContentHeight := FCommitsTop + Length(FCommits) * RowHeight + Pad
+  else if CentersClean then
+    FContentHeight := FRowsTop + CenterBlockHeight(FMeasure.Canvas) + 2 * Pad
   else
     FContentHeight := FRowsTop + Max(Length(FStats), 2) * RowHeight + Pad;
+end;
+
+{ A clean tree with nothing else to show: no commits, no conversation. }
+function TGittanSummary.CentersClean: boolean;
+begin
+  Result := (Length(FStats) = 0) and not ShowsCommits and (Length(FNotes) = 0);
+end;
+
+{ "Working tree clean", or "No changes vs base" when the tree is
+  compared against something other than HEAD. }
+function TGittanSummary.CleanText: string;
+begin
+  if FBase = '' then
+    Result := rsClean
+  else
+    Result := Format(rsCleanVs, [FBase]);
+end;
+
+{ The height of the header under the title: the totals line, the clean
+  check with its text and the sync line, or nothing when the clean
+  state stands in the middle. }
+function TGittanSummary.HeaderBlockHeight(ACanvas: TCanvas): integer;
+var
+  BodyHeight: integer;
+begin
+  ACanvas.Font := Font;
+  BodyHeight := ACanvas.TextHeight('Xg');
+  if Length(FStats) > 0 then
+    Exit(BodyHeight);
+  if CentersClean then
+    Exit(0);
+  ACanvas.Font.Size := CleanFontSize;
+  Result := ACanvas.TextHeight('Xg');
+  if FHasUpstream then
+    Inc(Result, 2 + BodyHeight);
+  Result := Max(Result, HeaderCheck);
+end;
+
+{ The height of the clean state in the middle: the check, the text and
+  the sync line. }
+function TGittanSummary.CenterBlockHeight(ACanvas: TCanvas): integer;
+var
+  BodyHeight: integer;
+begin
+  ACanvas.Font := Font;
+  BodyHeight := ACanvas.TextHeight('Xg');
+  ACanvas.Font.Size := CleanFontSize;
+  Result := CenterCheck + Gap + ACanvas.TextHeight('Xg');
+  if FHasUpstream then
+    Inc(Result, 4 + BodyHeight);
 end;
 
 procedure TGittanSummary.SetColors(ABack, AText, ADim, AHover, ASelected,
@@ -331,7 +392,7 @@ begin
   finally
     Measure.Free;
   end;
-  FRowsTop := Pad + TitleHeight + 6 + BodyHeight + Pad;
+  FRowsTop := Pad + TitleHeight + 6 + HeaderBlockHeight(FMeasure.Canvas) + Pad;
   if FNotice <> '' then
     Inc(FRowsTop, RowHeight);
   LayoutNotes;
@@ -655,7 +716,8 @@ begin
 end;
 
 { Repository name and branch on one line, the file count and totals on the
-  next, a divider below. Y is advanced past the header. }
+  next (the clean state instead, unless it stands in the middle), a
+  divider below. Y is advanced past the header. }
 procedure TGittanSummary.PaintHeader(var Y: integer);
 var
   X, TitleHeight, BodyHeight, TextY, IconW, Added, Deleted, i: integer;
@@ -728,17 +790,17 @@ begin
     Inc(Deleted, FStats[i].Deleted);
   end;
   X := Pad;
-  case Length(FStats) of
-    0: Heading := rsNoChanges;
-    1: Heading := rsOneFile;
-    else
-      Heading := Format(rsManyFiles, [Length(FStats)]);
-  end;
-  Canvas.Font.Color := FDim;
-  Canvas.TextOut(X, Y, Heading);
-  Inc(X, Canvas.TextWidth(Heading) + Gap);
+  if (Length(FStats) = 0) and not CentersClean then
+    PaintCleanHeader(Y);
   if Length(FStats) > 0 then
   begin
+    if Length(FStats) = 1 then
+      Heading := rsOneFile
+    else
+      Heading := Format(rsManyFiles, [Length(FStats)]);
+    Canvas.Font.Color := FDim;
+    Canvas.TextOut(X, Y, Heading);
+    Inc(X, Canvas.TextWidth(Heading) + Gap);
     Canvas.Font.Color := FAdded;
     Heading := '+' + IntToStr(Added);
     Canvas.TextOut(X, Y, Heading);
@@ -769,7 +831,7 @@ begin
     end;
     PaintKinds(Y, X, Width - Pad);
   end;
-  Inc(Y, BodyHeight + Pad div 2);
+  Inc(Y, HeaderBlockHeight(Canvas) + Pad div 2);
   Canvas.Pen.Color := FLine;
   Canvas.Line(Pad, Y, Width - Pad, Y);
   Inc(Y, Pad div 2);
@@ -983,65 +1045,112 @@ begin
     MaxChange);
 end;
 
-{ A green disc with a check mark and "Working tree clean" (or "No changes
-  vs base" when the tree is compared against something other than HEAD),
-  where the rows would start, so a repository without changes does not
-  look unfinished. }
-procedure TGittanSummary.PaintClean(Y: integer);
+{ A green disc ASize across at X, Y with a check mark cut out of it. }
+procedure TGittanSummary.DrawCheck(X, Y, ASize: integer);
 var
-  X, CenterY: integer;
-  CleanText: string;
+  CenterY: integer;
 begin
-  if FBase = '' then
-    CleanText := rsClean
-  else
-    CleanText := Format(rsCleanVs, [FBase]);
-  Canvas.Font := Font;
-  Canvas.Font.Color := FDim;
-  Canvas.Brush.Style := bsClear;
-  X := Pad;
-  CenterY := Y + RowHeight div 2;
+  CenterY := Y + ASize div 2;
   Canvas.Pen.Style := psClear;
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := FAdded;
-  Canvas.Ellipse(X, CenterY - CheckSize div 2, X + CheckSize, CenterY + CheckSize div 2);
+  Canvas.Ellipse(X, Y, X + ASize, Y + ASize);
   Canvas.Pen.Style := psSolid;
   Canvas.Pen.Color := FBack;
-  Canvas.Pen.Width := 2;
-  Canvas.Polyline([Point(X + 5, CenterY), Point(X + 9, CenterY + 4),
-    Point(X + 15, CenterY - 4)]);
+  Canvas.Pen.Width := Max(2, ASize div 10);
+  Canvas.Polyline([Point(X + ASize * 27 div 100, CenterY),
+    Point(X + ASize * 44 div 100, CenterY + ASize * 17 div 100),
+    Point(X + ASize * 74 div 100, CenterY - ASize * 17 div 100)]);
   Canvas.Pen.Width := 1;
   Canvas.Brush.Style := bsClear;
-  X := X + CheckSize + Gap div 2 + 2;
-  Canvas.TextOut(X, CenterY - Canvas.TextHeight('Xg') div 2, CleanText);
-  PaintSync(X + Canvas.TextWidth(CleanText), CenterY - Canvas.TextHeight('Xg') div 2);
 end;
 
-{ How far the branch is from its upstream, after the clean text at X:
-  the commits not pushed in the color their dots have in the list, the
-  ones not pulled dimmed, or that there is nothing to either. Nothing
-  without an upstream. }
-procedure TGittanSummary.PaintSync(X, Y: integer);
+{ The clean state in the header, in place of the totals: a large check,
+  the clean text larger than the body, and how far the branch is from
+  its upstream under it, so the state of the tree reads before the
+  commits below it. }
+procedure TGittanSummary.PaintCleanHeader(Y: integer);
+var
+  X, BlockHeight, BodyHeight, TextHeight, TextY: integer;
+begin
+  BlockHeight := HeaderBlockHeight(Canvas);
+  Canvas.Font := Font;
+  BodyHeight := Canvas.TextHeight('Xg');
+  Canvas.Font.Size := CleanFontSize;
+  TextHeight := Canvas.TextHeight('Xg');
+  DrawCheck(Pad, Y + (BlockHeight - HeaderCheck) div 2, HeaderCheck);
+  X := Pad + HeaderCheck + Gap;
+  TextY := Y + (BlockHeight - TextHeight - IfThen(FHasUpstream, 2 + BodyHeight, 0)) div 2;
+  Canvas.Brush.Style := bsClear;
+  Canvas.Font.Color := FText;
+  Canvas.TextOut(X, TextY, CleanText);
+  Canvas.Font := Font;
+  PaintSync(X, TextY + TextHeight + 2);
+end;
+
+{ The clean state alone, when there is nothing to list: a check as large
+  as the empty view's icon, the clean text and the sync line under it,
+  centered in the control, below the header. }
+procedure TGittanSummary.PaintCleanCentered;
+var
+  BlockTop, CenterX, TextHeight: integer;
+begin
+  BlockTop := Max(FRowsTop + Pad, (Height - CenterBlockHeight(Canvas)) div 2);
+  CenterX := Width div 2;
+  DrawCheck(CenterX - CenterCheck div 2, BlockTop, CenterCheck);
+  Inc(BlockTop, CenterCheck + Gap);
+  Canvas.Font := Font;
+  Canvas.Font.Size := CleanFontSize;
+  Canvas.Font.Color := FText;
+  Canvas.Brush.Style := bsClear;
+  TextHeight := Canvas.TextHeight('Xg');
+  Canvas.TextOut(CenterX - Canvas.TextWidth(CleanText) div 2, BlockTop, CleanText);
+  Inc(BlockTop, TextHeight + 4);
+  Canvas.Font := Font;
+  PaintSync(CenterX - PaintSync(0, 0, False) div 2, BlockTop);
+end;
+
+{ How far the branch is from its upstream at X: the commits not pushed
+  in the color their dots have in the list, the ones not pulled in the
+  text color, or that there is nothing to either, the parts apart by
+  dots. Nothing without an upstream. Returns the width; ADraw False only
+  measures. }
+function TGittanSummary.PaintSync(X, Y: integer; ADraw: boolean): integer;
+var
+  StartX: integer;
 
   procedure Part(const AText: string; AColor: TColor);
   begin
-    Canvas.Font.Color := FDim;
-    Canvas.TextOut(X, Y, ' · ');
-    Inc(X, Canvas.TextWidth(' · '));
-    Canvas.Font.Color := AColor;
-    Canvas.TextOut(X, Y, AText);
+    if X > StartX then
+    begin
+      if ADraw then
+      begin
+        Canvas.Font.Color := FDim;
+        Canvas.TextOut(X, Y, ' · ');
+      end;
+      Inc(X, Canvas.TextWidth(' · '));
+    end;
+    if ADraw then
+    begin
+      Canvas.Font.Color := AColor;
+      Canvas.TextOut(X, Y, AText);
+    end;
     Inc(X, Canvas.TextWidth(AText));
   end;
 
 begin
-  if not FHasUpstream then
-    Exit;
-  if FAhead > 0 then
-    Part('↑ ' + Format(rsNotPushed, [FAhead]), FLink);
-  if FBehind > 0 then
-    Part('↓ ' + Format(rsNotPulled, [FBehind]), FText);
-  if (FAhead = 0) and (FBehind = 0) then
-    Part(rsInSync, FDim);
+  StartX := X;
+  Canvas.Brush.Style := bsClear;
+  if FHasUpstream then
+  begin
+    if FAhead > 0 then
+      Part('↑ ' + Format(rsNotPushed, [FAhead]), FLink);
+    if FBehind > 0 then
+      Part('↓ ' + Format(rsNotPulled, [FBehind]), FText);
+    if (FAhead = 0) and (FBehind = 0) then
+      Part(rsInSync, FDim);
+  end;
+  Result := X - StartX;
 end;
 
 { The heading, then a row per commit, the dots joined by a line down the
@@ -1173,8 +1282,8 @@ begin
     PlaceCommits;
     Height := Max(FContentHeight, Constraints.MinHeight);
   end;
-  if Length(FStats) = 0 then
-    PaintClean(FRowsTop);
+  if CentersClean then
+    PaintCleanCentered;
   if ShowsCommits then
     PaintCommits;
   for i := 0 to High(FStats) do
