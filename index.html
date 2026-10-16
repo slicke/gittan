@@ -7,7 +7,7 @@
 <meta name="description" content="Gittan, the Git Tree Analyzer &amp; Navigator, shows what you changed in a git repository, who last changed each line and how a piece of code got the way it is. Native on macOS, Windows and Linux.">
 <meta property="og:title" content="Gittan — Git Tree Analyzer &amp; Navigator">
 <meta property="og:description" content="See what you changed, who wrote each line and how the code got here. macOS, Windows and Linux.">
-<meta property="og:image" content="https://gittan.app/assets/shots/unified-light.png">
+<meta property="og:image" content="https://gittan.app/assets/shots/unified-dark.png">
 <meta property="og:type" content="website">
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="apple-touch-icon" href="assets/icon-256.png">
@@ -195,6 +195,19 @@
   .cols ul { margin: 0; padding-left: 18px; color: var(--fg-muted); font-size: 15px; }
   .cols li { margin: 6px 0; }
 
+  .steps { list-style: none; counter-reset: step; margin: 0; padding: 0; display: grid; gap: 28px; max-width: 760px; }
+  .steps > li { counter-increment: step; position: relative; padding-left: 44px; }
+  .steps > li::before {
+    content: counter(step); position: absolute; left: 0; top: -2px;
+    width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--blue); color: #fff; font-weight: 600; font-size: 14px;
+  }
+  .steps h3 { margin: 0 0 6px; font-size: 17px; }
+  .steps p { margin: 0 0 12px; color: var(--fg-muted); font-size: 15px; }
+  .steps pre.sh { margin: 0 0 12px; }
+  .notes { margin: 32px 0 0; padding-left: 18px; color: var(--fg-muted); font-size: 15px; max-width: 760px; }
+  .notes li { margin: 6px 0; }
+
   footer { padding: 32px 0 48px; color: var(--fg-muted); font-size: 14px; border-top: 1px solid var(--line); }
   footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; }
   footer .spacer { flex: 1; }
@@ -235,8 +248,7 @@
 
   <div class="shot">
     <picture>
-      <source srcset="assets/shots/unified-dark.png" media="(prefers-color-scheme: dark)">
-      <img src="assets/shots/unified-light.png" width="1280" height="800" alt="Gittan showing the changes to a Vue component: the file tree of changed files on the left, the diff with deleted lines in red and added lines in green on the right">
+      <img src="assets/shots/unified-dark.png" width="1280" height="800" alt="Gittan in dark mode showing the changes to a Vue component: the file tree of changed files on the left, the diff with deleted lines in red and added lines in green on the right">
     </picture>
   </div>
 </header>
@@ -244,12 +256,15 @@
 <section id="tour" class="tour">
   <div class="wrap">
     <h2>A closer look</h2>
-    <p class="lead">A small Vue and TypeScript project with a few changes not committed yet, as Gittan shows it.</p>
+    <p class="lead">A small Vue and TypeScript project as Gittan shows it: a few changes not committed yet, two commits not pushed, and a submodule that moved on.</p>
     <div class="tabs" role="tablist">
       <button role="tab" aria-selected="true" aria-controls="t-history">Code History</button>
       <button role="tab" aria-selected="false" aria-controls="t-blame">Blame</button>
       <button role="tab" aria-selected="false" aria-controls="t-side">Side by side</button>
       <button role="tab" aria-selected="false" aria-controls="t-summary">Summary</button>
+      <button role="tab" aria-selected="false" aria-controls="t-graph">Commit graph</button>
+      <button role="tab" aria-selected="false" aria-controls="t-submodule">Submodules</button>
+      <button role="tab" aria-selected="false" aria-controls="t-clean">Clean tree</button>
     </div>
     <figure id="t-history" class="on">
       <figcaption><b>Code History</b> lays the earlier versions of each line under the line itself, one color per commit. The stats line of this component has five: the scaffold, the length, the walking time, the hours and minutes, and the change not committed yet.</figcaption>
@@ -273,10 +288,31 @@
     </picture>
     </figure>
     <figure id="t-summary">
-      <figcaption><b>The summary</b> opens with the repository: every changed file with its counts, and a check mark for what is staged.</figcaption>
+      <figcaption><b>The summary</b> opens with the repository: every changed file with its counts, a badge that fills as a change gets staged, and for a submodule the commits it moved between.</figcaption>
       <picture>
       <source srcset="assets/shots/summary-dark.png" media="(prefers-color-scheme: dark)">
-      <img src="assets/shots/summary-light.png" width="1280" height="800" loading="lazy" alt="The repository summary: five changed files with added and deleted line counts and bars, one marked staged">
+      <img src="assets/shots/summary-light.png" width="1280" height="800" loading="lazy" alt="The repository summary: six changed files with added and deleted line counts and bars, one marked staged, and a submodule moved from eabdd83 to d913fb8">
+    </picture>
+    </figure>
+    <figure id="t-graph">
+      <figcaption><b>The commit graph</b> (<kbd>⌘3</kbd>) draws every branch and tag, marks the commits not pushed and the ones waiting on the remote, and shows any commit against its parent with a click.</figcaption>
+      <picture>
+      <source srcset="assets/shots/graph-dark.png" media="(prefers-color-scheme: dark)">
+      <img src="assets/shots/graph-light.png" width="1280" height="800" loading="lazy" alt="The commit graph over the summary: main two commits ahead and one behind origin/main, an offline-maps branch, and two merged branches">
+    </picture>
+    </figure>
+    <figure id="t-submodule">
+      <figcaption><b>Submodules</b> get a section of their own. Gittan asks each remote for new commits, and a click shows what a submodule moved to and what it no longer has.</figcaption>
+      <picture>
+      <source srcset="assets/shots/submodule-dark.png" media="(prefers-color-scheme: dark)">
+      <img src="assets/shots/submodule-light.png" width="1280" height="800" loading="lazy" alt="The view of the trail-icons submodule: changed from eabdd83 to d913fb8, three new commits listed with author and date, then its URL, branch and the recorded, checked-out and remote commits">
+    </picture>
+    </figure>
+    <figure id="t-clean">
+      <figcaption><b>A clean tree</b> says so, and tells how far the branch is from its upstream. The commits not pushed yet are marked in the list under it.</figcaption>
+      <picture>
+      <source srcset="assets/shots/clean-dark.png" media="(prefers-color-scheme: dark)">
+      <img src="assets/shots/clean-light.png" width="1280" height="800" loading="lazy" alt="The summary of a clean working tree: a green check, two commits not pushed and one not pulled, and the ten newest commits with the two unpushed ones marked">
     </picture>
     </figure>
   </div>
@@ -330,7 +366,22 @@
       <div class="card">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div>
         <h3>Knows what is staged</h3>
-        <p>A check mark on the badge, and "staged" or "partly staged" in the header, tells you what the index already holds. Find in file with <kbd>⌘F</kbd>.</p>
+        <p>A badge fills as a change gets staged: a tint for none of it, a ring for part, solid for all. The header says "staged" or "partly staged" too.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></div>
+        <h3>Discard a change</h3>
+        <p>A button beside each block of changed lines puts it back the way it is in HEAD, or in the base you compare with. Gittan asks first.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg></div>
+        <h3>Images side by side</h3>
+        <p>A changed PNG, JPEG, GIF and the like shows as the two pictures next to each other, at the same scale.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/><path d="M4 4h16"/><path d="M4 20h16"/></svg></div>
+        <h3>Folding</h3>
+        <p>Fold functions, classes and other blocks the lexer knows, in the file view and in the unified diff.</p>
       </div>
     </div>
   </div>
@@ -371,6 +422,21 @@
         <h3>Find a symbol</h3>
         <p>List the symbols of the shown file with <kbd>⌘T</kbd>, or of the whole repository with <kbd>⌘⇧T</kbd>, and type a few letters to get there.</p>
       </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10"/><path d="M6 7c0 4 12 1 12 3"/></svg></div>
+        <h3>Commit graph</h3>
+        <p><kbd>⌘3</kbd>, or a click on the ahead and behind counts in the status bar, draws the branches with what is not pushed or not pulled yet.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+        <h3>Pull request reviews</h3>
+        <p>With the <code>gh</code> CLI signed in, the status bar shows the branch's pull request and its checks, and the review comments appear under the lines they are about.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/></svg></div>
+        <h3>Submodules</h3>
+        <p>Every submodule in a section of its own, with the new commits on its remote. Gittan checks again every five minutes, and fetches nothing.</p>
+      </div>
     </div>
   </div>
 </section>
@@ -405,21 +471,49 @@
 <section id="build">
   <div class="wrap">
     <h2>Build from source</h2>
-    <p class="lead">Gittan is a Free Pascal application built with Lazarus. The editor is ATSynEdit, the highlighter is EControl, both vendored as submodules.</p>
-    <div class="cols">
-      <pre class="sh"><span class="c"># Lazarus 4.8 and FPC 3.2.x, then:</span>
-git clone --recursive https://github.com/slicke/gittan.git
+    <p class="lead">Gittan is a Free Pascal application built with Lazarus. The editor (ATSynEdit), the highlighter (EControl) and the lexers are git submodules, so fetch them and register their packages with Lazarus before the first build.</p>
+    <ol class="steps">
+      <li>
+        <h3>Install Lazarus and FPC</h3>
+        <p>Lazarus 5.0 with FPC 3.2.2 or later. On Linux also the Qt 6 bindings: <code>qt6-base-dev libqt6pas6 libqt6pas-dev</code>. On macOS, the Xcode Command Line Tools.</p>
+      </li>
+      <li>
+        <h3>Clone with the submodules</h3>
+<pre class="sh">git clone --recursive https://github.com/slicke/gittan.git
 cd gittan
-make          <span class="c"># cocoa on macOS, qt6 on Linux</span>
-make run</pre>
-      <ul>
-        <li>The Makefile finds lazbuild in <code>/Applications/lazarus</code> on macOS when it is not on PATH.</li>
-        <li>On macOS the link step goes through LLVM's <code>ld64.lld</code> (<code>brew install lld</code>), since Apple's linker rejects the object code FPC 3.2 emits.</li>
-        <li>On Linux you need the Qt 6 bindings: <code>libqt6pas6</code> and <code>libqt6pas-dev</code>.</li>
-        <li>Register the vendored packages in Lazarus once; the CI workflow lists them in dependency order.</li>
-        <li>Details for every platform are in <a href="https://github.com/slicke/gittan/blob/main/AGENTS.md">AGENTS.md</a>.</li>
-      </ul>
-    </div>
+
+<span class="c"># Cloned without --recursive, or pulled a submodule change?</span>
+git submodule update --init --recursive</pre>
+      </li>
+      <li>
+        <h3>Register the vendored packages, once</h3>
+        <p>Lazarus has to know where the packages are. Add them in this order, since each depends on the ones before it.</p>
+<pre class="sh">for p in ATFlatControls/atflatcontrols/atflatcontrols_package.lpk \
+         EncConv/encconv/encconv_package.lpk \
+         BGRABitmap/bgrabitmap/bgrabitmappack.lpk \
+         ATSynEdit/atsynedit/atsynedit_package.lpk \
+         EControl/econtrol/econtrol_package.lpk \
+         ATSynEdit_Ex/atsynedit_ex/atsynedit_ex_package.lpk; do
+  lazbuild --add-package-link vendor/$p
+done</pre>
+        <p>On Windows run the same <code>lazbuild --add-package-link</code> for each file in PowerShell, or open each <code>.lpk</code> once in the IDE (Package &gt; Open Package File), which registers it.</p>
+      </li>
+      <li>
+        <h3>Build and run</h3>
+<pre class="sh">make          <span class="c"># cocoa on macOS, qt6 on Linux</span>
+make run
+
+<span class="c"># Windows, where there is no make:</span>
+.\make.ps1
+.\make.ps1 run</pre>
+      </li>
+    </ol>
+    <ul class="notes">
+      <li>The Makefile finds lazbuild in <code>/Applications/lazarus</code> on macOS when it is not on PATH; <code>make.ps1</code> looks in <code>C:\lazarus</code> and <code>C:\fpcupdeluxe\lazarus</code>.</li>
+      <li>Every build copies the lexers from <code>vendor/CudaText-lexers</code> into <code>lexlib/</code>. A build from the Lazarus IDE does not: run <code>make lexlib</code> once.</li>
+      <li>On macOS, "malformed method list atom" from the linker means an old ld: update Xcode or the Command Line Tools.</li>
+      <li>Details for every platform are in <a href="https://github.com/slicke/gittan/blob/main/AGENTS.md">AGENTS.md</a>.</li>
+    </ul>
   </div>
 </section>
 
