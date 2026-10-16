@@ -6,7 +6,9 @@ unit gittan.summary;
   under a header with the repository name, branch and totals. Between the
   two, the conversation of the pull request when there is one: its
   comments and the text its reviews were submitted with, which are on no
-  line, so the change view has no place for them.
+  line, so the change view has no place for them. A clean tree shows,
+  instead of rows, how far the branch is from its upstream and its
+  newest commits.
 
   It paints itself so it matches the editor's palette in both themes. It
   sizes its height to its content and is meant to sit in a TScrollBox,
@@ -29,6 +31,8 @@ type
   {** A click on the branch in the header, with its rectangle in screen
     coordinates for a popup to drop down from. }
   TGittanBranchClickEvent = procedure(Sender: TObject; const AScreenRect: TRect) of object;
+  {** A click on a commit's row, with its id. }
+  TGittanSelectCommitEvent = procedure(Sender: TObject; const AHash: string) of object;
   {** A click on a link to AUrl. }
   TGittanOpenUrlEvent = procedure(Sender: TObject; const AUrl: string) of object;
 
@@ -58,6 +62,14 @@ type
     FNotesWidth, FNotesHeight: integer;
     { The note whose link is under the mouse, -1 for none. }
     FLinkHot: integer;
+    { The newest commits, shown under a clean tree, with how far the
+      branch is from its upstream; FCommitHot is the row under the
+      mouse, -1 for none. }
+    FCommits: TGittanCommitLines;
+    FAhead, FBehind: integer;
+    FHasUpstream: boolean;
+    FCommitsTop, FCommitHot: integer;
+    FOnSelectCommit: TGittanSelectCommitEvent;
     FMeasure: TBitmap;
     FOnSelectFile: TGittanSelectFileEvent;
     FOnContextFile: TGittanContextFileEvent;
@@ -74,6 +86,12 @@ type
     function BranchClickable: boolean;
     procedure SetBranchHot(AValue: boolean);
     function RowAt(Y: integer): integer;
+    function CommitAt(Y: integer): integer;
+    procedure SetCommitHot(AValue: integer);
+    function ShowsCommits: boolean;
+    procedure PlaceCommits;
+    procedure PaintCommits;
+    procedure PaintCommit(AIndex, ATop, AHashWidth: integer);
     procedure SetHot(AValue: integer);
     procedure SetLinkHot(AValue: integer);
     function LinkAt(X, Y: integer): integer;
@@ -84,6 +102,7 @@ type
     procedure UpdateHeight;
     procedure PaintNotice(var Y: integer);
     procedure PaintClean(Y: integer);
+    procedure PaintSync(X, Y: integer);
     procedure PaintHeader(var Y: integer);
     procedure PaintRow(AIndex, ATop: integer);
     procedure PaintBar(X, Y: integer; const AStat: TGittanFileStat; AMax: integer);
@@ -119,6 +138,13 @@ type
     {** Shows ANotes, the conversation of a pull request, under the
       heading ATitle; no notes shows none. }
     procedure SetNotes(const ATitle: string; const ANotes: TGittanPullNotes);
+    {** Shows ACommits, the newest commits of HEAD, under "Working tree
+      clean", and after it how many commits the branch is ahead of
+      (AAhead) and behind (ABehind) its upstream when it has one
+      (AHasUpstream). The commits show only while there are no changed
+      files. }
+    procedure SetCommits(const ACommits: TGittanCommitLines;
+      AAhead, ABehind: integer; AHasUpstream: boolean);
     {** The color of the notes' links. }
     property LinkColor: TColor read FLink write FLink;
     {** The image list the file badges come from. }
@@ -136,6 +162,8 @@ type
     {** A click on the branch in the header. While it is set the branch
       is drawn as a chip with a chevron, highlighted under the mouse. }
     property OnBranchClick: TGittanBranchClickEvent read FOnBranchClick write FOnBranchClick;
+    {** A click on a commit's row. }
+    property OnSelectCommit: TGittanSelectCommitEvent read FOnSelectCommit write FOnSelectCommit;
     {** A click on a note's link to GitHub. }
     property OnOpenUrl: TGittanOpenUrlEvent read FOnOpenUrl write FOnOpenUrl;
   end;
@@ -152,6 +180,10 @@ resourcestring
   rsNoChanges = 'No changes';
   rsClean = 'Working tree clean';
   rsCleanVs = 'No changes %s';
+  rsRecentCommits = 'Recent commits';
+  rsNotPushed = '%d not pushed';
+  rsNotPulled = '%d not pulled';
+  rsInSync = 'up to date with upstream';
   rsBinary = 'binary';
   rsStaged = 'staged';
   rsPartlyStaged = 'partly staged';
@@ -189,6 +221,8 @@ const
   NoteGap = 8;
   NoteStripe = 3;
   NoteMaxLines = 12;
+  { The room above the commits' heading, under the clean row. }
+  CommitsGap = 12;
 
 { TGittanSummary }
 
@@ -198,6 +232,7 @@ begin
   ControlStyle := ControlStyle + [csOpaque];
   FHot := -1;
   FLinkHot := -1;
+  FCommitHot := -1;
   FNotesWidth := -1;
   FLink := clHighlight;
   FMeasure := TBitmap.Create;
@@ -229,6 +264,39 @@ begin
   FHot := -1;
   UpdateHeight;
   Invalidate;
+end;
+
+procedure TGittanSummary.SetCommits(const ACommits: TGittanCommitLines;
+  AAhead, ABehind: integer; AHasUpstream: boolean);
+begin
+  FCommits := Copy(ACommits);
+  FAhead := AAhead;
+  FBehind := ABehind;
+  FHasUpstream := AHasUpstream;
+  FCommitHot := -1;
+  UpdateHeight;
+  Invalidate;
+end;
+
+function TGittanSummary.ShowsCommits: boolean;
+begin
+  Result := (Length(FStats) = 0) and (Length(FCommits) > 0);
+end;
+
+{ Under a clean tree the clean row takes the place of the first file
+  row; the commits follow it after a gap and their heading. Sets
+  FCommitsTop and FContentHeight from FRowsTop. }
+procedure TGittanSummary.PlaceCommits;
+var
+  BodyHeight: integer;
+begin
+  FMeasure.Canvas.Font := Font;
+  BodyHeight := FMeasure.Canvas.TextHeight('Xg');
+  FCommitsTop := FRowsTop + RowHeight + CommitsGap + BodyHeight + NoteGap;
+  if ShowsCommits then
+    FContentHeight := FCommitsTop + Length(FCommits) * RowHeight + Pad
+  else
+    FContentHeight := FRowsTop + Max(Length(FStats), 2) * RowHeight + Pad;
 end;
 
 procedure TGittanSummary.SetColors(ABack, AText, ADim, AHover, ASelected,
@@ -267,7 +335,7 @@ begin
     Inc(FRowsTop, RowHeight);
   LayoutNotes;
   Inc(FRowsTop, FNotesHeight);
-  FContentHeight := FRowsTop + Max(Length(FStats), 2) * RowHeight + Pad;
+  PlaceCommits;
   Height := Max(FContentHeight, Constraints.MinHeight);
 end;
 
@@ -557,6 +625,24 @@ begin
   Result := (Y - FRowsTop) div RowHeight;
   if Result > High(FStats) then
     Result := -1;
+end;
+
+function TGittanSummary.CommitAt(Y: integer): integer;
+begin
+  Result := -1;
+  if not ShowsCommits or (Y < FCommitsTop) then
+    Exit;
+  Result := (Y - FCommitsTop) div RowHeight;
+  if Result > High(FCommits) then
+    Result := -1;
+end;
+
+procedure TGittanSummary.SetCommitHot(AValue: integer);
+begin
+  if FCommitHot = AValue then
+    Exit;
+  FCommitHot := AValue;
+  Invalidate;
 end;
 
 procedure TGittanSummary.SetHot(AValue: integer);
@@ -921,8 +1007,147 @@ begin
     Point(X + 15, CenterY - 4)]);
   Canvas.Pen.Width := 1;
   Canvas.Brush.Style := bsClear;
-  Canvas.TextOut(X + CheckSize + Gap div 2 + 2,
-    CenterY - Canvas.TextHeight('Xg') div 2, CleanText);
+  X := X + CheckSize + Gap div 2 + 2;
+  Canvas.TextOut(X, CenterY - Canvas.TextHeight('Xg') div 2, CleanText);
+  PaintSync(X + Canvas.TextWidth(CleanText), CenterY - Canvas.TextHeight('Xg') div 2);
+end;
+
+{ How far the branch is from its upstream, after the clean text at X:
+  the commits not pushed in the color their dots have in the list, the
+  ones not pulled dimmed, or that there is nothing to either. Nothing
+  without an upstream. }
+procedure TGittanSummary.PaintSync(X, Y: integer);
+
+  procedure Part(const AText: string; AColor: TColor);
+  begin
+    Canvas.Font.Color := FDim;
+    Canvas.TextOut(X, Y, ' · ');
+    Inc(X, Canvas.TextWidth(' · '));
+    Canvas.Font.Color := AColor;
+    Canvas.TextOut(X, Y, AText);
+    Inc(X, Canvas.TextWidth(AText));
+  end;
+
+begin
+  if not FHasUpstream then
+    Exit;
+  if FAhead > 0 then
+    Part('↑ ' + Format(rsNotPushed, [FAhead]), FLink);
+  if FBehind > 0 then
+    Part('↓ ' + Format(rsNotPulled, [FBehind]), FText);
+  if (FAhead = 0) and (FBehind = 0) then
+    Part(rsInSync, FDim);
+end;
+
+{ The heading, then a row per commit, the dots joined by a line down the
+  icon column so they read as a history. The short ids line up at the
+  right, as wide as the widest. }
+procedure TGittanSummary.PaintCommits;
+var
+  i, HashWidth, BodyHeight, LineX: integer;
+begin
+  Canvas.Font := Font;
+  BodyHeight := Canvas.TextHeight('Xg');
+  Canvas.Brush.Style := bsClear;
+  Canvas.Font.Style := [fsBold];
+  Canvas.Font.Color := FDim;
+  Canvas.TextOut(Pad, FCommitsTop - NoteGap - BodyHeight, rsRecentCommits);
+  Canvas.Font.Style := [];
+  HashWidth := 0;
+  for i := 0 to High(FCommits) do
+    HashWidth := Max(HashWidth, Canvas.TextWidth(FCommits[i].Short));
+  for i := 0 to High(FCommits) do
+    if i = FCommitHot then
+    begin
+      Canvas.Pen.Style := psClear;
+      Canvas.Brush.Style := bsSolid;
+      Canvas.Brush.Color := FHover;
+      Canvas.RoundRect(Pad div 2, FCommitsTop + i * RowHeight, Width - Pad div 2,
+        FCommitsTop + (i + 1) * RowHeight, 8, 8);
+      Canvas.Pen.Style := psSolid;
+    end;
+  if Length(FCommits) > 1 then
+  begin
+    LineX := Pad + IconSize div 2;
+    Canvas.Pen.Color := FLine;
+    Canvas.Pen.Width := 2;
+    Canvas.Line(LineX, FCommitsTop + RowHeight div 2, LineX,
+      FCommitsTop + High(FCommits) * RowHeight + RowHeight div 2);
+    Canvas.Pen.Width := 1;
+  end;
+  for i := 0 to High(FCommits) do
+    PaintCommit(i, FCommitsTop + i * RowHeight, HashWidth);
+end;
+
+{ A dot on the line, filled in the link color when the commit is not
+  pushed, a ring otherwise; the subject, cut to fit with an ellipsis;
+  the author and age dimmed, dropped when the subject would get too
+  little room; the short id at the right. }
+procedure TGittanSummary.PaintCommit(AIndex, ATop, AHashWidth: integer);
+var
+  Commit: TGittanCommitLine;
+  X, CenterX, CenterY, TextY, Right, Room, n: integer;
+  Meta, Subject: string;
+begin
+  Commit := FCommits[AIndex];
+  Canvas.Font := Font;
+  TextY := ATop + (RowHeight - Canvas.TextHeight('Xg')) div 2;
+  CenterX := Pad + IconSize div 2;
+  CenterY := ATop + RowHeight div 2;
+  Canvas.Brush.Style := bsSolid;
+  if Commit.Unpushed then
+  begin
+    Canvas.Pen.Color := FLink;
+    Canvas.Brush.Color := FLink;
+  end
+  else
+  begin
+    Canvas.Pen.Color := FDim;
+    if AIndex = FCommitHot then
+      Canvas.Brush.Color := FHover
+    else
+      Canvas.Brush.Color := FBack;
+  end;
+  Canvas.Pen.Width := 2;
+  Canvas.Ellipse(CenterX - DotSize div 2 - 1, CenterY - DotSize div 2 - 1,
+    CenterX + DotSize div 2 + 1, CenterY + DotSize div 2 + 1);
+  Canvas.Pen.Width := 1;
+  Canvas.Brush.Style := bsClear;
+
+  Right := Width - Pad;
+  Canvas.Font.Color := FDim;
+  Canvas.TextOut(Right - Canvas.TextWidth(Commit.Short), TextY, Commit.Short);
+  Dec(Right, AHashWidth + Gap + Gap div 2);
+
+  X := Pad + IconSize + Gap div 2 + 2;
+  Meta := Commit.Author;
+  if Commit.Date > 0 then
+  begin
+    if Meta <> '' then
+      Meta := Meta + ' · ';
+    Meta := Meta + ReviewAge(Commit.Date, LocalTimeToUniversal(Now));
+  end;
+  if Right - Canvas.TextWidth(Meta) - Gap - X < Width div 3 then
+    Meta := ReviewAge(Commit.Date, LocalTimeToUniversal(Now));
+  if Right - Canvas.TextWidth(Meta) - Gap - X < Width div 4 then
+    Meta := '';
+  if Meta <> '' then
+  begin
+    Canvas.TextOut(Right - Canvas.TextWidth(Meta), TextY, Meta);
+    Dec(Right, Canvas.TextWidth(Meta) + Gap + Gap div 2);
+  end;
+
+  Room := Right - X;
+  Subject := Commit.Subject;
+  if Canvas.TextWidth(Subject) > Room then
+  begin
+    n := UTF8Length(Subject);
+    while (n > 0) and (Canvas.TextWidth(UTF8Copy(Subject, 1, n) + '…') > Room) do
+      Dec(n);
+    Subject := TrimRight(UTF8Copy(Subject, 1, n)) + '…';
+  end;
+  Canvas.Font.Color := FText;
+  Canvas.TextOut(X, TextY, Subject);
 end;
 
 procedure TGittanSummary.Paint;
@@ -940,11 +1165,13 @@ begin
   if Y <> FRowsTop then
   begin
     FRowsTop := Y;
-    FContentHeight := FRowsTop + Max(Length(FStats), 2) * RowHeight + Pad;
+    PlaceCommits;
     Height := Max(FContentHeight, Constraints.MinHeight);
   end;
   if Length(FStats) = 0 then
     PaintClean(FRowsTop);
+  if ShowsCommits then
+    PaintCommits;
   for i := 0 to High(FStats) do
     PaintRow(i, FRowsTop + i * RowHeight);
 end;
@@ -953,6 +1180,7 @@ procedure TGittanSummary.MouseMove(Shift: TShiftState; X, Y: integer);
 begin
   inherited MouseMove(Shift, X, Y);
   SetHot(RowAt(Y));
+  SetCommitHot(CommitAt(Y));
   SetLinkHot(LinkAt(X, Y));
   SetBranchHot(BranchClickable and PtInRect(FBranchRect, Point(X, Y)));
   if FLinkHot >= 0 then
@@ -965,6 +1193,7 @@ procedure TGittanSummary.MouseLeave;
 begin
   inherited MouseLeave;
   SetHot(-1);
+  SetCommitHot(-1);
   SetLinkHot(-1);
   SetBranchHot(False);
 end;
@@ -985,6 +1214,12 @@ begin
   if (Button = mbLeft) and Assigned(FOnOpenUrl) and (LinkAt(X, Y) >= 0) then
   begin
     FOnOpenUrl(Self, FNotes[LinkAt(X, Y)].Url);
+    Exit;
+  end;
+  Row := CommitAt(Y);
+  if (Row >= 0) and (Button = mbLeft) and Assigned(FOnSelectCommit) then
+  begin
+    FOnSelectCommit(Self, FCommits[Row].Hash);
     Exit;
   end;
   Row := RowAt(Y);

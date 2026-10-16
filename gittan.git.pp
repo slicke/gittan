@@ -37,6 +37,18 @@ type
   end;
   TGittanFileStats = array of TGittanFileStat;
 
+  {** A commit as SyncCommits and RecentCommits list it: its id, the
+    short id git abbreviates it to, and the first line of its message.
+    RecentCommits also gives the author, the commit time (UTC, 0 when
+    unknown) and whether the commit is on HEAD but not on its upstream
+    (not pushed yet). }
+  TGittanCommitLine = record
+    Hash, Short, Subject, Author: string;
+    Date: TDateTime;
+    Unpushed: boolean;
+  end;
+  TGittanCommitLines = array of TGittanCommitLine;
+
   {** Everything the views read about a repository at one moment, gathered
     in one pass so it can be computed off the main thread and handed over
     whole. Ok is false when git failed, with the message in Error. }
@@ -47,15 +59,12 @@ type
     Branch, DefaultBranch, MergeBase, Operation, RebaseBranch: string;
     HasUpstream: boolean;
     Ahead, Behind: integer;
+    {** The newest commits of HEAD, from RecentCommits; read only when
+      the work tree is clean, since only the summary of a clean tree
+      shows them. }
+    Recent: TGittanCommitLines;
   end;
   PGittanRepoSnapshot = ^TGittanRepoSnapshot;
-
-  {** A commit as SyncCommits lists it: its id, the short id git
-    abbreviates it to, and the first line of its message. }
-  TGittanCommitLine = record
-    Hash, Short, Subject: string;
-  end;
-  TGittanCommitLines = array of TGittanCommitLine;
 
   {** One opened repository. Open finds the work tree root for a folder, and
     the other calls run inside that root. }
@@ -172,6 +181,10 @@ type
       first, at most AMax of them; false when it has no upstream. }
     function SyncCommits(AAhead: boolean; out ACommits: TGittanCommitLines;
       AMax: integer = 100): boolean;
+    {** The newest AMax commits of HEAD, newest first, those not pushed
+      to the upstream marked; false before the first commit. }
+    function RecentCommits(out ACommits: TGittanCommitLines;
+      AMax: integer = 10): boolean;
     {** The git directory of the work tree (a linked work tree has one of
       its own), empty when nothing is open. }
     function GitDir: string;
@@ -291,7 +304,7 @@ function RunGitIn(const ADir: string; const AArgs: array of string;
 implementation
 
 uses
-  Process, md5, StrUtils;
+  Process, md5, StrUtils, DateUtils;
 
 { Gives P the environment of Gittan without the variables whose names
   (with the equals sign) are in ASkip, so the caller can set those. }
@@ -1191,6 +1204,8 @@ begin
   ASnap.Operation := Operation;
   if ASnap.Operation = 'rebasing' then
     ASnap.RebaseBranch := RebaseBranch;
+  if ASnap.Ok and (Length(ASnap.Stats) = 0) then
+    RecentCommits(ASnap.Recent);
   Result := ASnap.Ok;
 end;
 
@@ -1273,6 +1288,53 @@ begin
       ACommits[High(ACommits)].Hash := Copy(Line, 1, A - 1);
       ACommits[High(ACommits)].Short := Copy(Line, A + 1, B - A - 1);
       ACommits[High(ACommits)].Subject := Copy(Line, B + 1, MaxInt);
+    end;
+  finally
+    Lines.Free;
+  end;
+end;
+
+{ The fields are split at unit separators, the subject last since it
+  may hold anything. The commits not pushed are the newest of those on
+  HEAD and not on the upstream: at most AMax of them, in the same order
+  as the log, so every one of them in the log's first AMax is found. }
+function TGittanRepo.RecentCommits(out ACommits: TGittanCommitLines;
+  AMax: integer): boolean;
+var
+  Output, Ahead: string;
+  Lines: TStringList;
+  Fields: TStringArray;
+  i: integer;
+  Seconds: int64;
+begin
+  ACommits := nil;
+  Result := (FRoot <> '') and RunGit(FRoot, ['log', '--no-color', '-n', IntToStr(AMax),
+    '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%s', 'HEAD'], Output);
+  if not Result then
+    Exit;
+  if not RunGit(FRoot, ['rev-list', '-n', IntToStr(AMax), '@{upstream}..HEAD'], Ahead) then
+    Ahead := '';
+  Lines := TStringList.Create;
+  try
+    Lines.Text := Output;
+    for i := 0 to Lines.Count - 1 do
+    begin
+      Fields := SplitString(Lines[i], #31);
+      if Length(Fields) < 5 then
+        Continue;
+      SetLength(ACommits, Length(ACommits) + 1);
+      with ACommits[High(ACommits)] do
+      begin
+        Hash := Fields[0];
+        Short := Fields[1];
+        Author := Fields[2];
+        if TryStrToInt64(Fields[3], Seconds) then
+          Date := UnixToDateTime(Seconds)
+        else
+          Date := 0;
+        Subject := Fields[4];
+        Unpushed := Pos(Hash, Ahead) > 0;
+      end;
     end;
   finally
     Lines.Free;

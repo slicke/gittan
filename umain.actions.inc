@@ -1216,6 +1216,13 @@ begin
   ShowBlameCommit(FSyncHashes[AIndex]);
 end;
 
+{ A click on a commit in the summary of a clean tree shows it against its
+  parent, as a pick from the sync list does. }
+procedure TForm1.SummarySelectCommit(Sender: TObject; const AHash: string);
+begin
+  ShowBlameCommit(AHash);
+end;
+
 { The status bar's parts: the branch drops the branch list up from it,
   as in the summary; the ahead/behind counts list their commits; the
   pull request opens on GitHub; the conflicts show the first conflicted

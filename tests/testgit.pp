@@ -50,6 +50,7 @@ type
     procedure TestDefaultBranchAndMergeBase;
     procedure TestAheadBehind;
     procedure TestSyncCommits;
+    procedure TestRecentCommits;
     procedure TestOperation;
     procedure TestBranchesAndSwitch;
   end;
@@ -835,6 +836,60 @@ begin
     AssertTrue(FRepo.SyncCommits(False, Commits));
     AssertEquals(1, Length(Commits));
     AssertEquals('ahead two', Commits[0].Subject);
+  finally
+    RemoveTree(Remote);
+  end;
+end;
+
+procedure TGitRepoTest.TestRecentCommits;
+var
+  Remote, Branch, Output: string;
+  Status: integer;
+  Commits: TGittanCommitLines;
+  Snap: TGittanRepoSnapshot;
+begin
+  Git(['init', '-q']);
+  AssertTrue(FRepo.Open(FDir));
+  { Nothing before the first commit. }
+  AssertFalse(FRepo.RecentCommits(Commits));
+  AssertEquals(0, Length(Commits));
+  MakeHistory;
+  WriteFile('a.txt', 'one'#10'two'#10'three'#10'four'#10);
+  Commit('"quoted" subject · ok');
+  AssertTrue(FRepo.RecentCommits(Commits));
+  AssertEquals(2, Length(Commits));
+  AssertEquals('"quoted" subject · ok', Commits[0].Subject);
+  AssertEquals('files', Commits[1].Subject);
+  AssertEquals(Trim(Git(['rev-parse', 'HEAD'])), Commits[0].Hash);
+  AssertEquals(Trim(Git(['rev-parse', '--short', 'HEAD'])), Commits[0].Short);
+  AssertEquals(Trim(Git(['log', '-1', '--format=%an'])), Commits[0].Author);
+  AssertTrue(Commits[0].Date > 0);
+  { No upstream: nothing counts as not pushed. }
+  AssertFalse(Commits[0].Unpushed);
+  AssertTrue(FRepo.RecentCommits(Commits, 1));
+  AssertEquals(1, Length(Commits));
+  { A clean tree carries them in the snapshot. }
+  AssertTrue(FRepo.Snapshot(Snap));
+  AssertEquals(2, Length(Snap.Recent));
+  Remote := FDir + '-remote';
+  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Status,
+    [poStderrToOutPut]) <> 0 then
+    Fail('could not make a bare repository');
+  try
+    Branch := Trim(Git(['rev-parse', '--abbrev-ref', 'HEAD']));
+    Git(['remote', 'add', 'origin', Remote]);
+    Git(['push', '-q', '-u', 'origin', Branch]);
+    WriteFile('a.txt', 'one'#10);
+    Commit('ahead');
+    AssertTrue(FRepo.RecentCommits(Commits));
+    AssertEquals(3, Length(Commits));
+    AssertTrue(Commits[0].Unpushed);
+    AssertFalse(Commits[1].Unpushed);
+    AssertFalse(Commits[2].Unpushed);
+    { A changed tree leaves them out. }
+    WriteFile('a.txt', 'changed'#10);
+    AssertTrue(FRepo.Snapshot(Snap));
+    AssertEquals(0, Length(Snap.Recent));
   finally
     RemoveTree(Remote);
   end;

@@ -653,6 +653,7 @@ type
       const AScreenPos: TPoint);
     procedure SummaryBranchClick(Sender: TObject; const AScreenRect: TRect);
     procedure SummaryOpenUrl(Sender: TObject; const AUrl: string);
+    procedure SummarySelectCommit(Sender: TObject; const AHash: string);
     procedure BranchPopupPick(Sender: TObject; AIndex: integer);
     procedure SyncClick(const AScreenRect: TRect);
     procedure SyncPopupPick(Sender: TObject; AIndex: integer);
@@ -1290,6 +1291,7 @@ begin
   FSummary.OnContextFile := @SummaryContextFile;
   FSummary.OnBranchClick := @SummaryBranchClick;
   FSummary.OnOpenUrl := @SummaryOpenUrl;
+  FSummary.OnSelectCommit := @SummarySelectCommit;
   { The branch list pops up over the form, under the branch. }
   FBranchNames := TStringList.Create;
   FBranchPopup := TGittanPopupList.Create(Self);
@@ -2852,6 +2854,7 @@ begin
   Branch := FBranch;
   if FOperation <> '' then
     Branch := Branch + ' · ' + FOperation;
+  FSummary.SetCommits(ASnap.Recent, FAhead, FBehind, FHasUpstream);
   FSummary.SetRepository(ExtractFileName(FRepo.Root), Branch, BaseLabel, FStats, Icons);
   FWelcome.Visible := False;
   FSummary.Visible := True;
