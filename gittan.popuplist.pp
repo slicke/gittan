@@ -26,7 +26,8 @@ unit gittan.popuplist;
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Graphics, StdCtrls, Forms, LCLType;
+  Classes, SysUtils, Types, Controls, Graphics, StdCtrls, Forms, LCLType,
+  LCLVersion, LMessages;
 
 type
   TGittanPopupPickEvent = procedure(Sender: TObject; AIndex: integer) of object;
@@ -89,7 +90,12 @@ type
     procedure EditChange(Sender: TObject);
     procedure EditKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
     procedure KeyInput(var Key: word);
+    { Lazarus 4.99 passes the whole message, by reference. }
+    {$IF lcl_fullversion >= 4990000}
+    procedure UserInput(Sender: TObject; var Message: TLMessage);
+    {$ELSE}
     procedure UserInput(Sender: TObject; Msg: cardinal);
+    {$ENDIF}
     procedure AppDeactivate(Sender: TObject);
     function Owns(AControl: TControl): boolean;
     procedure Hook(AOn: boolean);
@@ -131,7 +137,7 @@ type
 implementation
 
 uses
-  Math, LCLIntf, LMessages;
+  Math, LCLIntf;
 
 resourcestring
   rsNoMatches = 'No matches';
@@ -555,8 +561,16 @@ end;
   which it was on most widgetsets; Cocoa passes the last key message
   instead, so the mouse buttons are asked as well. A key goes to the
   focused control, inside the panel while it is up. }
+{$IF lcl_fullversion >= 4990000}
+procedure TGittanPopupList.UserInput(Sender: TObject; var Message: TLMessage);
+var
+  Msg: cardinal;
+begin
+  Msg := Message.msg;
+{$ELSE}
 procedure TGittanPopupList.UserInput(Sender: TObject; Msg: cardinal);
 begin
+{$ENDIF}
   if not Visible then
     Exit;
   if (Sender is TControl) and Owns(TControl(Sender)) then
