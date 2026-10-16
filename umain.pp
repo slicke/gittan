@@ -136,6 +136,9 @@ type
     { The height of the strip the title bar covers on macOS, where the
       content reaches under it (SetupTitleBar); 0 elsewhere. }
     FTitleBarHeight: integer;
+    { The track and the fill of the indexing's band over the title bar
+      (ShowTitleBand from UpdateStatus), set by ApplyTheme. }
+    FBandTrack, FBandFill: TColor;
     { The Repository section at the bottom of the tree panel
       (umain.repofiles.inc): the repository's own files from
       gittan.repofiles in a second tree under a header that folds it,
@@ -647,6 +650,7 @@ type
     procedure SetupTreeFilter;
     procedure SetupTitleBar;
     procedure ColorSidebar;
+    procedure UpdateIndexBand;
     procedure SetupRepoFiles;
     procedure ColorRepoHeader;
     procedure FillRepoFiles;
@@ -1522,6 +1526,8 @@ begin
     FPullText := RGBToColor(200, 200, 200);
     FPullBar := RGBToColor(40, 80, 130);
     FLinkColor := RGBToColor(78, 161, 255);
+    FBandTrack := RGBToColor(62, 62, 62);
+    FBandFill := RGBToColor(100, 160, 240);
   end
   else
   begin
@@ -1555,6 +1561,8 @@ begin
     FPullText := RGBToColor(70, 70, 70);
     FPullBar := RGBToColor(205, 225, 250);
     FLinkColor := RGBToColor(0, 102, 204);
+    FBandTrack := RGBToColor(222, 222, 222);
+    FBandFill := RGBToColor(0, 110, 230);
   end;
   FSummaryBox.Color := Edit.Colors.TextBG;
   if FDark then
@@ -1694,6 +1702,7 @@ begin
       FIndexPos, FIndexTotal)
   else
     FStatus.SetProgress('', 0, 0);
+  UpdateIndexBand;
   case FFileCount of
     0: FStatus.SetFiles(rsNoChanges);
     1: FStatus.SetFiles(rsOneChangedFile);
@@ -3331,6 +3340,21 @@ begin
   FSummaryBox.BorderSpacing.Top := FTitleBarHeight;
   TreeSplitter.BorderSpacing.Top := FTitleBarHeight;
   ColorSidebar;
+end;
+
+{ The indexing's progress as a band along the top edge of the window,
+  over the title bar (macOS; the status bar has its own bar). It is
+  shown for every file, not only when the status bar is updated: the
+  big files of a large repository take seconds between those. }
+procedure TForm1.UpdateIndexBand;
+begin
+  {$IFDEF LCLCocoa}
+  if FIndexing then
+    ShowTitleBand(Handle, FIndexPos, FIndexTotal, ColorToRGB(FBandTrack),
+      ColorToRGB(FBandFill))
+  else
+    HideTitleBand(Handle);
+  {$ENDIF}
 end;
 
 { The tree panel and its trees take the gutter's shade, as the section

@@ -96,7 +96,9 @@ begin
     Path := FIndexQueue[FIndexPos];
     Inc(FIndexPos);
     if FIndexPos mod IndexReportEvery = 0 then
-      UpdateStatus;
+      UpdateStatus
+    else
+      UpdateIndexBand;
     Full := IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(Path);
     if not FileStamp(Full, Size, Time) then
     begin

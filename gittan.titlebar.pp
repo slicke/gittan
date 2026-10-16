@@ -14,6 +14,13 @@
   OnMouseDown never fires there). So the strip is left to the panels'
   own spacing, with nothing in it to click.
 
+  ShowTitleBand puts a progress band along the top edge, over the title
+  bar above the traffic lights, as a page's loading bar: two NSBoxes
+  (a track and a fill) added to the window's content view, since the
+  LCL's own controls are not drawn by Cocoa when they are a few pixels
+  high (seen 2026-10-16: a TCustomControl under about 25 px shows
+  nothing, a taller one fills its whole bounds with its color).
+
   The unit uses CocoaAll alone; umain keeps it behind LCLCocoa, so the
   other widgetsets never see it. }
 unit gittan.titlebar;
@@ -29,19 +36,44 @@ interface
   has no window yet. }
 function ExtendUnderTitleBar(AHandle: PtrUInt): integer;
 
+{** Shows the band along the top edge of the form's window, APos of
+  ATotal filled (a little at least, past the window's rounded corner),
+  in the colors ATrack and AFill (RGB as ColorToRGB gives it). The band
+  is made on the first call. }
+procedure ShowTitleBand(AHandle: PtrUInt; APos, ATotal: integer;
+  ATrack, AFill: longword);
+
+{** Hides the band. }
+procedure HideTitleBand(AHandle: PtrUInt);
+
 implementation
 
 uses
-  CocoaAll, cocoa_extra;
+  Math, CocoaAll, cocoa_extra;
+
+const
+  BandHeight = 3;
+  { The least the fill is wide: the window's rounded corner hides the
+    first pixels, so a fill of a few of 800 files showed nothing. }
+  MinFill = 24;
+
+var
+  Track, Fill: NSBox;
+
+function WindowOf(AHandle: PtrUInt): NSWindow;
+begin
+  if AHandle = 0 then
+    Result := nil
+  else
+    Result := NSView(AHandle).window;
+end;
 
 function ExtendUnderTitleBar(AHandle: PtrUInt): integer;
 var
   Win: NSWindow;
 begin
   Result := 0;
-  if AHandle = 0 then
-    Exit;
-  Win := NSView(AHandle).window;
+  Win := WindowOf(AHandle);
   if Win = nil then
     Exit;
   Win.setStyleMask(Win.styleMask or NSFullSizeContentViewWindowMask);
@@ -52,6 +84,71 @@ begin
   { contentLayoutRect is the content view less the title bar. }
   Result := Round(Win.contentView.frame.size.height -
     Win.contentLayoutRect.size.height);
+end;
+
+function RGBColor(ARGB: longword): NSColor;
+begin
+  Result := NSColor.colorWithCalibratedRed_green_blue_alpha(
+    (ARGB and $FF) / 255, ((ARGB shr 8) and $FF) / 255,
+    ((ARGB shr 16) and $FF) / 255, 1);
+end;
+
+{ A box with a plain fill and nothing else, along the top edge of the
+  view AAbove, over it in AParent, kept at the top as the window
+  resizes. }
+function MakeBand(AParent, AAbove: NSView): NSBox;
+var
+  R: NSRect;
+begin
+  R := AAbove.frame;
+  Result := NSBox.alloc.initWithFrame(NSMakeRect(R.origin.x,
+    R.origin.y + R.size.height - BandHeight, R.size.width, BandHeight));
+  Result.setBoxType(NSBoxCustom);
+  Result.setBorderType(NSNoBorder);
+  Result.setBorderWidth(0);
+  Result.setTitlePosition(NSNoTitle);
+  Result.setContentViewMargins(NSMakeSize(0, 0));
+  Result.setAutoresizingMask(NSViewWidthSizable or NSViewMinYMargin);
+  AParent.addSubview_positioned_relativeTo(Result, NSWindowAbove, AAbove);
+end;
+
+procedure ShowTitleBand(AHandle: PtrUInt; APos, ATotal: integer;
+  ATrack, AFill: longword);
+var
+  Win: NSWindow;
+  R: NSRect;
+begin
+  Win := WindowOf(AHandle);
+  if Win = nil then
+    Exit;
+  if Track = nil then
+  begin
+    { Above the content view, in the window's frame view: a subview of
+      the content view (the LCL's scroll view) ends up under its
+      content. }
+    Track := MakeBand(Win.contentView.superview, Win.contentView);
+    Fill := MakeBand(Win.contentView.superview, Track);
+  end;
+  Track.setFillColor(RGBColor(ATrack));
+  Fill.setFillColor(RGBColor(AFill));
+  R := Win.contentView.frame;
+  if ATotal > 0 then
+    R.size.width := Max(MinFill, R.size.width * APos / ATotal)
+  else
+    R.size.width := 0;
+  R.origin.y := R.origin.y + R.size.height - BandHeight;
+  R.size.height := BandHeight;
+  Fill.setFrame(R);
+  Track.setHidden(False);
+  Fill.setHidden(False);
+end;
+
+procedure HideTitleBand(AHandle: PtrUInt);
+begin
+  if Track = nil then
+    Exit;
+  Track.setHidden(True);
+  Fill.setHidden(True);
 end;
 
 end.
