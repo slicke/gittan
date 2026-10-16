@@ -28,6 +28,12 @@ type
     history of a piece of code (Go > Code History), or a submodule. }
   TGittanView = (gvSummary, gvChanges, gvRepoDiff, gvFile, gvHistory, gvSubmodule);
 
+  {** The three strengths of a commit's color in the history view: the
+    faint tint of its rows, the shade of the words it changed, and the
+    swatch of its legend row, which is text and must read on the
+    background. }
+  THistoryTone = (htRow, htWord, htSwatch);
+
   {** One row of the change view. Line is the index of its diff line in
     the file's diff, rowGap for a row that stands for the unchanged lines
     GapFrom..GapTo hidden by View > Hide Unchanged Lines, rowFiller for
@@ -430,7 +436,7 @@ type
     procedure MarkWords(AEd: TATSynEdit; ARow: integer; const ASpans: TGittanSpans;
       AChange: char; AOffset: integer);
     function WordColor(ATag: integer): TColor;
-    function HistoryColor(AIndex: integer; AStrong: boolean): TColor;
+    function HistoryColor(AIndex: integer; ATone: THistoryTone): TColor;
     procedure MarkHeader(AEd: TATSynEdit; ARow: integer);
     procedure RecolorWords(AEd: TATSynEdit);
     procedure SetLineStatesBand(AEd: TATSynEdit; AVisible: boolean);
@@ -2163,27 +2169,6 @@ end;
   Added and deleted lines get a background through the editor's second
   bookmark list: a bookmark there colors its line but draws no gutter icon.
   The kind picks the color. }
-{ A color from a hue, saturation and lightness, each 0..1. }
-function HSLToColor(H, S, L: double): TColor;
-var
-  C, X, M, R, G, B: double;
-  Sector: integer;
-begin
-  C := (1 - Abs(2 * L - 1)) * S;
-  Sector := Trunc(H * 6) mod 6;
-  X := C * (1 - Abs(Frac(H * 6) * 2 - 1));
-  case Sector of
-    0: begin R := C; G := X; B := 0; end;
-    1: begin R := X; G := C; B := 0; end;
-    2: begin R := 0; G := C; B := X; end;
-    3: begin R := 0; G := X; B := C; end;
-    4: begin R := X; G := 0; B := C; end;
-    else begin R := C; G := 0; B := X; end;
-  end;
-  M := L - C / 2;
-  Result := RGBToColor(Round((R + M) * 255), Round((G + M) * 255), Round((B + M) * 255));
-end;
-
 { The commit index as an attribute's TagEx, which is a byte. }
 function HistoryTagEx(ACommit: integer): integer;
 begin
@@ -2201,7 +2186,7 @@ begin
     theirs. }
   if ABookmarkKind >= bmHistoryBase then
   begin
-    AColor := HistoryColor(ABookmarkKind - bmHistoryBase, False);
+    AColor := HistoryColor(ABookmarkKind - bmHistoryBase, htRow);
     Exit;
   end;
   if FDark then
@@ -2274,46 +2259,57 @@ begin
 end;
 
 { After a theme change: the word marks take the colors of the new theme. }
-{ The tint of commit AIndex of the history view, or the strong one for
-  the words that changed and the swatch: one hue per commit, spread by
-  the golden angle so neighbours differ, as a faint tint of the editor
-  background in the way of the diff colors. A row older than the history
-  (AIndex -1) gets a grey. }
-function TForm1.HistoryColor(AIndex: integer; AStrong: boolean): TColor;
+type
+  THistoryPalette = array[0..5, THistoryTone] of array[0..2] of byte;
+
+const
+  { The colors of the history view's commits, taken in turn. Six hues
+    in OKLCH (245 blue, 55 orange, 285 violet, 195 teal, 330 pink, 110
+    olive), each tone at one lightness and chroma, so every hue looks as
+    light as the others: the rows at L 0.935 (light) and 0.32 (dark),
+    the words at 0.86 and 0.42, the swatch at 0.60 and 0.75, which
+    keeps it at 3.4:1 or more against the background. The hues keep
+    away from the diff's red and green, which mean deleted and added
+    elsewhere, and are ordered so that neighbours differ the most. }
+  HistoryLight: THistoryPalette = (
+    ((204, 238, 255), (152, 216, 255), (4, 134, 211)),
+    ((255, 225, 199), (255, 192, 145), (194, 99, 0)),
+    ((229, 229, 255), (202, 200, 255), (121, 112, 213)),
+    ((191, 246, 245), (122, 230, 229), (0, 154, 156)),
+    ((255, 221, 251), (247, 185, 240), (176, 91, 170)),
+    ((235, 237, 195), (213, 215, 137), (135, 134, 0)));
+  HistoryDark: THistoryPalette = (
+    ((21, 54, 79), (25, 81, 123), (96, 182, 250)),
+    ((74, 42, 18), (114, 62, 20), (237, 150, 88)),
+    ((48, 46, 80), (73, 69, 124), (166, 161, 253)),
+    ((0, 60, 60), (0, 91, 92), (0, 199, 199)),
+    ((68, 39, 65), (104, 57, 100), (220, 143, 213)),
+    ((53, 53, 11), (80, 81, 3), (179, 181, 73)));
+  { A line older than the history (commit -1) in the same lightness. }
+  HistoryGreyLight: array[THistoryTone] of byte = (233, 209, 128);
+  HistoryGreyDark: array[THistoryTone] of byte = (51, 77, 174);
+
+{ The color of commit AIndex of the history view in tone ATone: the
+  palette's colors in turn, as tints of the editor background in the
+  way of the diff colors. A line older than the history (AIndex -1)
+  gets a grey. }
+function TForm1.HistoryColor(AIndex: integer; ATone: THistoryTone): TColor;
 var
-  Hue, Sat, Light: double;
+  C: array[0..2] of byte;
 begin
   if AIndex < 0 then
   begin
     if FDark then
-      Sat := 0
+      C[0] := HistoryGreyDark[ATone]
     else
-      Sat := 0;
-    Hue := 0;
-  end
-  else
-  begin
-    Hue := ((210 + AIndex * 137) mod 360) / 360;
-    if FDark then
-      Sat := 0.45
-    else
-      Sat := 0.65;
+      C[0] := HistoryGreyLight[ATone];
+    Exit(RGBToColor(C[0], C[0], C[0]));
   end;
   if FDark then
-  begin
-    if AStrong then
-      Light := 0.36
-    else
-      Light := 0.22;
-  end
+    C := HistoryDark[AIndex mod Length(HistoryDark), ATone]
   else
-  begin
-    if AStrong then
-      Light := 0.78
-    else
-      Light := 0.91;
-  end;
-  Result := HSLToColor(Hue, Sat, Light);
+    C := HistoryLight[AIndex mod Length(HistoryLight), ATone];
+  Result := RGBToColor(C[0], C[1], C[2]);
 end;
 
 { Sets row ARow, a legend row of the history view, in bold and in the
@@ -2350,12 +2346,12 @@ begin
     end
     else if Item.Tag = tagHistoryWord then
     begin
-      Item.LinePart.ColorBG := HistoryColor(Item.TagEx, True);
+      Item.LinePart.ColorBG := HistoryColor(Item.TagEx, htWord);
       AEd.Attribs[i] := Item;
     end
     else if Item.Tag = tagHistorySwatch then
     begin
-      Item.LinePart.ColorFont := HistoryColor(Item.TagEx, True);
+      Item.LinePart.ColorFont := HistoryColor(Item.TagEx, htSwatch);
       AEd.Attribs[i] := Item;
     end;
   end;

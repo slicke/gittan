@@ -12,7 +12,7 @@
   changed is followed by the version it replaced, in italics, then the
   version before that, and so on; a line a commit removed is kept, in
   strike-through, after the line it followed. Every version has the
-  tint of the commit it comes from (HistoryColor, one hue per commit),
+  tint of the commit it comes from (HistoryColor, six hues in turn),
   the words that changed from one version to the next are shaded, and
   the blame band names the commit's author and age at every run of rows.
   A legend at the top lists the commits with their color, hash, date,
@@ -430,7 +430,7 @@ begin
   end;
 end;
 
-{ Shades ASpans of row ARow in the strong tint of commit ACommit. }
+{ Shades ASpans of row ARow in the word tone of commit ACommit. }
 procedure TForm1.MarkHistoryWords(AEd: TATSynEdit; ARow: integer;
   const ASpans: TGittanSpans; ACommit: integer);
 var
@@ -440,20 +440,20 @@ begin
   if ASpans = nil then
     Exit;
   InitLinePart(Part);
-  Part.ColorBG := HistoryColor(ACommit, True);
+  Part.ColorBG := HistoryColor(ACommit, htWord);
   for i := 0 to High(ASpans) do
     AEd.Attribs.Add(Point(ASpans[i].Start, ARow), Point(ASpans[i].Len, 0),
       TATMarkerTags.Init(tagHistoryWord, HistoryTagEx(ACommit)), @Part);
 end;
 
 { Colors the swatch, the first character of legend row ARow, in the
-  strong tint of commit ACommit. }
+  swatch tone of commit ACommit. }
 procedure TForm1.MarkSwatch(AEd: TATSynEdit; ARow, ACommit: integer);
 var
   Part: TATLinePart;
 begin
   InitLinePart(Part);
-  Part.ColorFont := HistoryColor(ACommit, True);
+  Part.ColorFont := HistoryColor(ACommit, htSwatch);
   AEd.Attribs.Add(Point(0, ARow), Point(1, 0),
     TATMarkerTags.Init(tagHistorySwatch, HistoryTagEx(ACommit)), @Part);
 end;
