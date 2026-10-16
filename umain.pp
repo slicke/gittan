@@ -1503,8 +1503,8 @@ begin
 end;
 
 { The desktop theme can change while Gittan runs. The LCL has no event for
-  it, so the timer asks every other second; the check is two system color
-  lookups. }
+  it, so the timer asks every other second; the check is a system color or
+  registry lookup. }
 procedure TForm1.ThemeTimerTimer(Sender: TObject);
 begin
   if IsDarkMode <> FDark then
@@ -1517,7 +1517,8 @@ end;
 { ---------------------------------------------------------------------------
   Theme
   ---------------------------------------------------------------------------
-  The native controls follow the desktop theme by themselves. The editor has
+  The native controls follow the desktop theme by themselves, except on
+  Windows, where they stay light. The editor has
   its own palette, light by default, and the lexer colors are tuned for a
   white background, so both are set here from FDark. }
 procedure TForm1.ApplyEditorColors(AEd: TATSynEdit);

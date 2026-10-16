@@ -2,10 +2,11 @@ unit gittan.theme;
 
 {** Dark mode support for Gittan.
 
-  The native controls follow the desktop theme on their own; this unit tells
-  whether that theme is dark and adapts the colors Gittan sets itself: the
-  editor palette and the lexer text colors, which the lexer collection tuned
-  for a white background. }
+  This unit tells whether the desktop theme is dark and adapts the colors
+  Gittan sets itself: the editor palette and the lexer text colors, which
+  the lexer collection tuned for a white background. The native controls
+  follow the theme on their own on Cocoa and Qt; on Windows they stay
+  light. }
 
 {$mode objfpc}{$H+}
 
@@ -14,8 +15,9 @@ interface
 uses
   Graphics;
 
-{** True when the desktop theme is dark, judged by the window system color
-  being darker than its text color. Works with every widgetset. }
+{** True when the desktop theme is dark, as ThemeServices.IsDarkTheme
+  tells: the appearance on Cocoa, AppsUseLightTheme in the registry on
+  Windows 10 and later, how dark the system colors are elsewhere. }
 function IsDarkMode: boolean;
 
 {** Perceived brightness of an RGB value, 0 to 255. }
@@ -29,7 +31,7 @@ function LightenForDark(AColor: TColor): TColor;
 implementation
 
 uses
-  LCLType;
+  LCLType, Themes;
 
 { Black and the lexers' other dark colors are blended toward white until
   they reach this brightness. The editor's dark text color sits at 224, so
@@ -45,8 +47,7 @@ end;
 
 function IsDarkMode: boolean;
 begin
-  Result := ColorLuminance(ColorToRGB(clWindow)) <
-    ColorLuminance(ColorToRGB(clWindowText));
+  Result := ThemeServices.IsDarkTheme;
 end;
 
 { Every channel is moved the same fraction of its way to 255. Luminance is
