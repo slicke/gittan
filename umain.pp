@@ -16,6 +16,7 @@ uses
   gittan.summary, gittan.welcome, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   {$IFDEF LCLCocoa}gittan.toolbar,{$ENDIF}
+  {$IFDEF LCLWin32}gittan.wintitlebar,{$ENDIF}
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader,
@@ -139,6 +140,12 @@ type
       name, the filter as a native search field in place of FTreeFilter,
       and the header's navigator and pills. nil before macOS 11. }
     FToolbar: TGittanToolbar;
+    {$ENDIF}
+    {$IFDEF LCLWin32}
+    { The window's own title bar on Windows (SetupTitleBar): the name, the
+      menus, the filter field, the header's navigator and pills and the
+      caption buttons, in the strip Windows' title bar had. }
+    FWinBar: TGittanWinTitleBar;
     {$ENDIF}
     { The height of the strip the title bar covers on macOS, where the
       content reaches under it (SetupTitleBar); 0 elsewhere. }
@@ -699,8 +706,8 @@ type
     function TreeFilterQuery: string;
     {$IFDEF LCLCocoa}
     procedure ToolbarSearchKey(Sender: TObject; var Key: word);
-    procedure HeaderControlsChange(Sender: TObject);
     {$ENDIF}
+    procedure HeaderControlsChange(Sender: TObject);
     procedure MenuFilterFilesClick(Sender: TObject);
     procedure AbandonPullJob;
     procedure StartUpdateCheck(AManual: boolean);
@@ -1299,6 +1306,10 @@ begin
   SetupTitleBar;
   ApplySettings;
   BuildMenu;
+  {$IFDEF LCLWin32}
+  { The title bar lists the menus. }
+  FWinBar.Layout;
+  {$ENDIF}
   BuildPopups;
   ApplyWrap;
   OnClose := @FormClose;
@@ -3367,6 +3378,21 @@ begin
   end;
   FTitleBarHeight := ExtendUnderTitleBar(Handle);
   {$ENDIF}
+  {$IFDEF LCLWin32}
+  FWinBar := TGittanWinTitleBar.Create(Self);
+  FWinBar.Title := rsAppShortName;
+  FWinBar.Align := alTop;
+  FWinBar.Parent := Self;
+  FWinBar.SplitControl := TreeSplitter;
+  FWinBar.Search := FTreeFilter;
+  FWinBar.OnAction := @HeaderAction;
+  FWinBar.Nav.OnPrev := @MenuPrevChangeClick;
+  FWinBar.Nav.OnNext := @MenuNextChangeClick;
+  FHeader.ShowControls := False;
+  FHeader.OnControlsChange := @HeaderControlsChange;
+  HeaderControlsChange(nil);
+  InstallTitleBar(Self, FWinBar);
+  {$ENDIF}
   FTreeFilter.BorderSpacing.Top := FTitleBarHeight;
   { With the toolbar's field in its place the tree is at the top. }
   if not FTreeFilter.Visible then
@@ -3415,6 +3441,29 @@ begin
   if FSubTree <> nil then
     FSubTree.BackgroundColor := Shade;
   EditorPanel.Color := Edit.Colors.TextBG;
+  {$IFDEF LCLWin32}
+  { The title bar runs the sidebar's shade over the sidebar and the
+    editor's background over the rest, with the header's pills. }
+  if FWinBar <> nil then
+    if FDark then
+    begin
+      FWinBar.SetColors(Shade, Edit.Colors.TextBG, Edit.Colors.TextFont,
+        RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(85, 85, 86),
+        RGBToColor(100, 160, 240), RGBToColor(50, 50, 51), RGBToColor(70, 70, 71),
+        RGBToColor(62, 62, 63));
+      FWinBar.Nav.SetColors(Edit.Colors.TextBG, RGBToColor(50, 50, 51),
+        RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240));
+    end
+    else
+    begin
+      FWinBar.SetColors(Shade, Edit.Colors.TextBG, RGBToColor(30, 30, 30),
+        RGBToColor(110, 110, 110), clWhite, RGBToColor(205, 205, 205),
+        RGBToColor(0, 110, 230), clWhite, RGBToColor(205, 205, 205),
+        RGBToColor(229, 229, 229));
+      FWinBar.Nav.SetColors(Edit.Colors.TextBG, clWhite,
+        RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
+    end;
+  {$ENDIF}
 end;
 
 { Rebuilds the tree for the new filter and keeps the shown file selected
@@ -3424,6 +3473,11 @@ var
   Handler: TNotifyEvent;
 begin
   FTreeFilterText := LowerCase(Trim(TreeFilterQuery));
+  {$IFDEF LCLWin32}
+  { The clear button shows while there is text. }
+  if FWinBar <> nil then
+    FWinBar.Invalidate;
+  {$ENDIF}
   Handler := FileTree.OnSelectionChanged;
   FileTree.OnSelectionChanged := nil;
   try
@@ -3482,19 +3536,20 @@ begin
   ActiveControl := nil;
   TreeFilterKeyDown(Sender, Key, []);
 end;
+{$ENDIF}
 
-{ The toolbar shows the header's navigator and pills, none while the
-  header is hidden (the summary). }
+{ The toolbar (macOS) or the title bar (Windows) shows the header's
+  navigator and pills, none while the header is hidden (the summary). }
 procedure TForm1.HeaderControlsChange(Sender: TObject);
 var
   Captions: array of string;
   States: array of boolean;
-  i: integer;
+  i, Current, Total: integer;
 begin
-  if FToolbar = nil then
-    Exit;
   Captions := nil;
   States := nil;
+  Current := 0;
+  Total := 0;
   if FHeader.Visible then
   begin
     SetLength(Captions, FHeader.ActionCount);
@@ -3504,13 +3559,24 @@ begin
       Captions[i] := FHeader.ActionCaption[i];
       States[i] := FHeader.ActionEnabled[i];
     end;
-    FToolbar.SetChanges(FHeader.ChangeCurrent, FHeader.ChangeTotal);
-  end
-  else
-    FToolbar.SetChanges(0, 0);
-  FToolbar.SetActions(Captions, States);
+    Current := FHeader.ChangeCurrent;
+    Total := FHeader.ChangeTotal;
+  end;
+  {$IFDEF LCLCocoa}
+  if FToolbar <> nil then
+  begin
+    FToolbar.SetChanges(Current, Total);
+    FToolbar.SetActions(Captions, States);
+  end;
+  {$ENDIF}
+  {$IFDEF LCLWin32}
+  if FWinBar <> nil then
+  begin
+    FWinBar.SetChanges(Current, Total);
+    FWinBar.SetActions(Captions, States);
+  end;
+  {$ENDIF}
 end;
-{$ENDIF}
 
 procedure TForm1.MenuFilterFilesClick(Sender: TObject);
 begin
