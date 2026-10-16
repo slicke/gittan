@@ -20,7 +20,8 @@ uses
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader,
-  gittan.discard, gittan.submodules, gittan.reviews, gittan.imagediff, ATSynEdit_Gaps, md5;
+  gittan.discard, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
+  gittan.commitgraph, ATSynEdit_Gaps, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -275,14 +276,13 @@ type
       branch to switch to for each of its items ('' for a header). }
     FBranchPopup: TGittanPopupList;
     FBranchNames: TStringList;
-    { The list that drops up from the status bar's ahead/behind counts,
-      with the commit each of its items shows ('' for a header). }
-    FSyncPopup: TGittanPopupList;
+    { The commit graph, in the middle of the form, from the status bar's
+      ahead/behind counts or View > Commit Graph. }
+    FGraph: TGittanCommitGraph;
     { The list a click on the status bar's pull request drops down, and
       what each of its rows does (the pa* constants). }
     FPullPopup: TGittanPopupList;
     FPullActions: TIntegerDynArray;
-    FSyncHashes: TStringList;
     FEditOld: TATSynEdit;
     { The hidden editor that parses another changed file for Go to
       Definition, with its adapter; made on the first lookup. }
@@ -670,8 +670,9 @@ type
     procedure SummaryOpenUrl(Sender: TObject; const AUrl: string);
     procedure SummarySelectCommit(Sender: TObject; const AHash: string);
     procedure BranchPopupPick(Sender: TObject; AIndex: integer);
-    procedure SyncClick(const AScreenRect: TRect);
-    procedure SyncPopupPick(Sender: TObject; AIndex: integer);
+    procedure ShowCommitGraph;
+    procedure MenuCommitGraphClick(Sender: TObject);
+    procedure GraphPick(Sender: TObject; const AHash: string);
     procedure PullChipClick(const AScreenRect: TRect);
     procedure PullPopupPick(Sender: TObject; AIndex: integer);
     procedure ComparePull(const APull: TGittanPullRequest);
@@ -985,10 +986,10 @@ resourcestring
   rsShowConflictHint = 'Show the first conflicted file';
   rsAheadHint = '%d commits not pushed yet';
   rsBehindHint = '%d commits not pulled yet';
-  rsNotPushed = 'Not pushed yet';
-  rsNotPulled = 'Not pulled yet';
-  rsMoreCommits = '… and %d more';
-  rsFilterCommits = 'Filter commits';
+  rsInSyncHint = 'Up to date with upstream';
+  rsNoUpstreamHint = 'No upstream branch';
+  rsGraphHint = 'Click to show the commit graph';
+  rsCommitGraph = 'Commit &Graph';
   rsPosition = 'Ln %d, Col %d';
   rsPullHintTitle = '#%d %s';
   rsPullHintPassed = '%d checks passed';
@@ -1318,13 +1319,10 @@ begin
   FBranchPopup.Parent := Self;
   FBranchPopup.FilterHint := rsFilterBranches;
   FBranchPopup.OnPick := @BranchPopupPick;
-  { The commits not pushed or pulled yet pop up over the form, above the
-    counts in the status bar. }
-  FSyncHashes := TStringList.Create;
-  FSyncPopup := TGittanPopupList.Create(Self);
-  FSyncPopup.Parent := Self;
-  FSyncPopup.FilterHint := rsFilterCommits;
-  FSyncPopup.OnPick := @SyncPopupPick;
+  { The commit graph pops up in the middle of the form. }
+  FGraph := TGittanCommitGraph.Create(Self);
+  FGraph.Parent := Self;
+  FGraph.OnPick := @GraphPick;
   FPullPopup := TGittanPopupList.Create(Self);
   FPullPopup.Parent := Self;
   FPullPopup.OnPick := @PullPopupPick;
@@ -1394,7 +1392,6 @@ begin
   AbandonSubmoduleJobs;
   FreeAndNil(FSubJobs);
   FBranchNames.Free;
-  FSyncHashes.Free;
   StopBlame;
   StopIndexing;
   SaveIndex;
@@ -1574,6 +1571,10 @@ begin
   ApplyEditorColors(Edit);
   ApplyEditorColors(FEditOld);
   FLexers.ApplyTheme(FDark, FSyntaxTheme);
+  { The graph's lanes take the history view's hues. }
+  FGraph.SetLaneColors([HistoryColor(0, htSwatch), HistoryColor(1, htSwatch),
+    HistoryColor(2, htSwatch), HistoryColor(3, htSwatch), HistoryColor(4, htSwatch),
+    HistoryColor(5, htSwatch)]);
   { The header and the find bar take the gutter's shade; the navigator
     pills sit on it. }
   if FDark then
@@ -1597,9 +1598,9 @@ begin
     FBranchPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
-    FSyncPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+    FGraph.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
+      RGBToColor(100, 160, 240), RGBToColor(227, 179, 65));
     FPullPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
@@ -1635,9 +1636,9 @@ begin
     FBranchPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
-    FSyncPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
+    FGraph.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
+      RGBToColor(0, 110, 230), RGBToColor(154, 103, 0));
     FPullPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
@@ -1746,7 +1747,7 @@ begin
       FStatus.PartHint[spRepo] := HintFolder + ' ' + Edit.FileName
     else
       FStatus.PartHint[spRepo] := '';
-    FStatus.SetSync(0, 0);
+    FStatus.SetSync(0, 0, False);
     FStatus.SetState('', '');
     FStatus.SetBase('');
     FStatus.SetPull('', '', stNormal, 0);
@@ -1758,15 +1759,24 @@ begin
   FStatus.SetRepository(ExtractFileName(FRepo.Root), FBranch);
   FStatus.PartHint[spRepo] := HintFolder + ' ' + FRepo.Root;
   if FHasUpstream then
-    FStatus.SetSync(FAhead, FBehind)
+    FStatus.SetSync(FAhead, FBehind, True)
   else
-    FStatus.SetSync(0, 0);
+    FStatus.SetSync(0, 0, True);
+  { The counts, or that there is nothing to push or pull, then what a
+    click does. }
   Sync := '';
   if FHasUpstream and (FAhead > 0) then
     Sync := Format(rsAheadHint, [FAhead]);
   if FHasUpstream and (FBehind > 0) then
     Sync := Trim(Sync + LineEnding + Format(rsBehindHint, [FBehind]));
-  FStatus.PartHint[spSync] := Sync;
+  if Sync = '' then
+  begin
+    if FHasUpstream then
+      Sync := rsInSyncHint
+    else
+      Sync := rsNoUpstreamHint;
+  end;
+  FStatus.PartHint[spSync] := HintSync + ' ' + Sync + LineEnding + rsGraphHint;
   case FConflictFiles of
     0: FStatus.SetState(FOperation, '');
     1: FStatus.SetState(FOperation, rsOneConflictedFile);
@@ -1929,6 +1939,7 @@ begin
   Main.Items.Add(ViewMenu);
   AddItem(ViewMenu, rsSummary, ShortCut(VK_1, [ssModifier]), @MenuSummaryClick);
   AddItem(ViewMenu, rsRepoDiff, ShortCut(VK_2, [ssModifier]), @MenuRepoDiffClick);
+  AddItem(ViewMenu, rsCommitGraph, ShortCut(VK_3, [ssModifier]), @MenuCommitGraphClick);
   ViewMenu.Add(NewLine);
   FCompareMenu := AddItem(ViewMenu, rsCompareWith, 0, nil);
   RebuildCompareMenu;

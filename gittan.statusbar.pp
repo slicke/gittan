@@ -65,6 +65,7 @@ type
     FPullChecks, FPullOpen, FPullThreads: integer;
     FMessage, FProgressText, FConflicts: string;
     FAhead, FBehind, FProgressPos, FProgressTotal: integer;
+    FSyncShown: boolean;
     FPullTone, FMessageTone: TGittanStatusTone;
     FHints: array[TGittanStatusPart] of string;
     FRects: array[TGittanStatusPart] of TRect;
@@ -97,8 +98,11 @@ type
     {** The name on the left (the repository, or the path of a file opened
       without one) and the branch; '' hides either. }
     procedure SetRepository(const ATitle, ABranch: string);
-    {** The commits ahead of and behind the upstream; 0 hides either. }
-    procedure SetSync(AAhead, ABehind: integer);
+    {** The commits ahead of and behind the upstream; 0 hides either.
+      With AShown and neither, the part is an icon of two arrows, up
+      and down, so it can still be clicked; without AShown and
+      neither, it is gone. }
+    procedure SetSync(AAhead, ABehind: integer; AShown: boolean);
     {** What git is in the middle of ("merging") and the conflicted files
       ("2 conflicted files"), each '' for none. }
     procedure SetState(const AOperation, AConflicts: string);
@@ -150,8 +154,9 @@ const
 
   {** Markers at the start of a hint line, drawn as icons: a green check,
     a red cross, an amber clock, a globe for a link, two arrows for a
-    switch, a folder, a branch, a pull request and a speech bubble for
-    review comments. Each is followed by a space. }
+    switch, a folder, a branch, a pull request, a speech bubble for
+    review comments and an arrow up beside one down for the commits
+    to push and pull. Each is followed by a space. }
   HintPassed = '✓';
   HintFailed = '✕';
   HintPending = '◷';
@@ -161,6 +166,7 @@ const
   HintBranch = '⑂';
   HintPull = '⤴';
   HintComment = '💬';
+  HintSync = '⇅';
 
 {** Draws the icon of the marker AIcon (HintPassed and the others above)
   in AColor, in a square a little smaller than ASize centered on a line
@@ -234,7 +240,7 @@ begin
   AIcon := '';
   AText := ALine;
   for M in [HintPassed, HintFailed, HintPending, HintLink, HintSwitch, HintFolder, HintBranch, HintPull,
-    HintComment] do
+    HintComment, HintSync] do
     if Copy(ALine, 1, Length(M) + 1) = M + ' ' then
     begin
       AIcon := M;
@@ -347,6 +353,17 @@ begin
     ACanvas.Pen.Width := 1;
     ACanvas.RoundRect(L, T + 1, L + S, T + S - 3, 4, 4);
     ACanvas.Polyline([Point(L + 3, T + S - 4), Point(L + 3, T + S), Point(L + 7, T + S - 4)]);
+  end
+  else if AIcon = HintSync then
+  begin
+    { An arrow up on the left and one down on the right. }
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Pen.Width := 1;
+    ACanvas.Line(L + 3, T + 1, L + 3, T + S);
+    ACanvas.Polyline([Point(L, T + 4), Point(L + 3, T + 1), Point(L + 6, T + 4)]);
+    ACanvas.Line(L + S - 3, T, L + S - 3, T + S - 1);
+    ACanvas.Polyline([Point(L + S - 6, T + S - 4), Point(L + S - 3, T + S - 1),
+      Point(L + S, T + S - 4)]);
   end;
   ACanvas.Pen.Width := 1;
 end;
@@ -475,12 +492,13 @@ begin
   Change(FBranch, ABranch);
 end;
 
-procedure TGittanStatusBar.SetSync(AAhead, ABehind: integer);
+procedure TGittanStatusBar.SetSync(AAhead, ABehind: integer; AShown: boolean);
 begin
-  if (FAhead = AAhead) and (FBehind = ABehind) then
+  if (FAhead = AAhead) and (FBehind = ABehind) and (FSyncShown = AShown) then
     Exit;
   FAhead := AAhead;
   FBehind := ABehind;
+  FSyncShown := AShown;
   Invalidate;
 end;
 
@@ -716,7 +734,9 @@ var
     if FBranch <> '' then
       Inc(Result, IconW + Canvas.TextWidth(FBranch) + ChevronWidth + 2 * ChipPadX + Gap);
     if Sync <> '' then
-      Inc(Result, Canvas.TextWidth(Sync) + Gap);
+      Inc(Result, Canvas.TextWidth(Sync) + Gap)
+    else if FSyncShown then
+      Inc(Result, IconW + Gap);
     if FOperation <> '' then
       Inc(Result, BadgeWidth(FOperation) + Gap div 2);
     if FConflicts <> '' then
@@ -877,6 +897,13 @@ begin
   begin
     DrawText(spSync, X, Sync, FDim);
     Inc(X, Canvas.TextWidth(Sync) + Gap);
+  end
+  else if (Sync = '') and FSyncShown and (X + IconW <= Right) then
+  begin
+    FRects[spSync] := ChipRect(X - ChipPadX, IconW - IconGap + 2 * ChipPadX);
+    DrawHot(spSync);
+    DrawStatusIcon(Canvas, HintSync, X, TextY, TextH, FDim);
+    Inc(X, IconW - IconGap + Gap);
   end;
   if (FOperation <> '') and (X + BadgeWidth(FOperation) <= Right) then
   begin

@@ -666,6 +666,8 @@ end;
 { The old side keeps its share of the width when the panel resizes. }
 procedure TForm1.EditorPanelResize(Sender: TObject);
 begin
+  if FGraph <> nil then
+    FGraph.Recenter;
   if FEditOld.Visible then
     FEditOld.Width := Round((EditorPanel.ClientWidth - FSideSplitter.Width) * FSideRatio);
 end;

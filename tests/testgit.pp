@@ -9,7 +9,7 @@ unit testgit;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.history;
+  Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.history, gittan.graph;
 
 type
   TGitRepoTest = class(TTestCase)
@@ -51,6 +51,7 @@ type
     procedure TestAheadBehind;
     procedure TestSyncCommits;
     procedure TestRecentCommits;
+    procedure TestGraphCommits;
     procedure TestOperation;
     procedure TestBranchesAndSwitch;
   end;
@@ -890,6 +891,63 @@ begin
     WriteFile('a.txt', 'changed'#10);
     AssertTrue(FRepo.Snapshot(Snap));
     AssertEquals(0, Length(Snap.Recent));
+  finally
+    RemoveTree(Remote);
+  end;
+end;
+
+{ A branch merged back: the merge has two parents, the root none; the
+  refs come through, and against an upstream the commits on one side
+  only are marked. }
+procedure TGitRepoTest.TestGraphCommits;
+var
+  Remote, Branch, Output: string;
+  Status: integer;
+  Commits: TGittanGraphCommits;
+begin
+  Git(['init', '-q']);
+  AssertTrue(FRepo.Open(FDir));
+  AssertFalse(FRepo.GraphCommits(Commits));
+  MakeHistory;
+  Branch := Trim(Git(['rev-parse', '--abbrev-ref', 'HEAD']));
+  Git(['checkout', '-q', '-b', 'side']);
+  WriteFile('b.txt', 'side'#10);
+  Commit('on side');
+  Git(['checkout', '-q', Branch]);
+  WriteFile('a.txt', 'main'#10);
+  Commit('on main');
+  Git(['merge', '-q', '--no-ff', '-m', 'merge side', 'side']);
+  Git(['tag', 'v1']);
+  AssertTrue(FRepo.GraphCommits(Commits));
+  AssertEquals(4, Length(Commits));
+  AssertEquals('merge side', Commits[0].Subject);
+  AssertEquals(2, Length(Commits[0].Parents));
+  AssertEquals(0, Length(Commits[3].Parents));
+  AssertEquals('files', Commits[3].Subject);
+  AssertEquals(Trim(Git(['log', '-1', '--format=%an'])), Commits[0].Author);
+  AssertTrue(Commits[0].Date > 0);
+  AssertEquals(2, Length(Commits[0].Refs));
+  AssertEquals(Branch, Commits[0].Refs[0].Name);
+  AssertTrue(Commits[0].Refs[0].Kind = grHead);
+  AssertEquals('v1', Commits[0].Refs[1].Name);
+  AssertEquals(2, GraphWidth(Commits));
+  AssertFalse(Commits[0].Unpushed);
+  Remote := FDir + '-remote';
+  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Status,
+    [poStderrToOutPut]) <> 0 then
+    Fail('could not make a bare repository');
+  try
+    Git(['remote', 'add', 'origin', Remote]);
+    Git(['push', '-q', '-u', 'origin', Branch]);
+    Git(['reset', '-q', '--hard', 'HEAD~1']);
+    WriteFile('c.txt', 'ahead'#10);
+    Commit('ahead');
+    AssertTrue(FRepo.GraphCommits(Commits));
+    AssertEquals('ahead', Commits[0].Subject);
+    AssertTrue(Commits[0].Unpushed);
+    AssertEquals('merge side', Commits[1].Subject);
+    AssertTrue(Commits[1].Unpulled);
+    AssertFalse(Commits[1].Unpushed);
   finally
     RemoveTree(Remote);
   end;

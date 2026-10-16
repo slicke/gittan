@@ -10,7 +10,7 @@ unit gittan.git;
 interface
 
 uses
-  Classes, SysUtils;
+  Classes, SysUtils, gittan.graph;
 
 const
   {** Bits added to the kind in the Objects of ChangedPaths: the index
@@ -185,6 +185,12 @@ type
       to the upstream marked; false before the first commit. }
     function RecentCommits(out ACommits: TGittanCommitLines;
       AMax: integer = 10): boolean;
+    {** The newest AMax commits of every local and remote branch, every
+      tag and HEAD, in topological order, newest first, with their
+      parents and refs, those not pushed and not pulled marked, laid out
+      with LayoutGraph; false before the first commit. }
+    function GraphCommits(out ACommits: TGittanGraphCommits;
+      AMax: integer = 500): boolean;
     {** The git directory of the work tree (a linked work tree has one of
       its own), empty when nothing is open. }
     function GitDir: string;
@@ -1339,6 +1345,63 @@ begin
   finally
     Lines.Free;
   end;
+end;
+
+{ The fields are split at unit separators, the subject last since it
+  may hold anything. The commits not pushed (or not pulled) are read
+  with the same cut, so every one in the log is marked. }
+function TGittanRepo.GraphCommits(out ACommits: TGittanGraphCommits;
+  AMax: integer): boolean;
+var
+  Output, Ahead, Behind: string;
+  Lines: TStringList;
+  Fields: TStringArray;
+  i: integer;
+  Seconds: int64;
+begin
+  ACommits := nil;
+  Result := (FRoot <> '') and RunGit(FRoot, ['log', '--no-color', '--topo-order',
+    '--decorate=full', '-n', IntToStr(AMax),
+    '--format=%H%x1f%P%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%s',
+    '--branches', '--remotes', '--tags', 'HEAD'], Output);
+  if not Result then
+    Exit;
+  if not RunGit(FRoot, ['rev-list', '-n', IntToStr(AMax), '@{upstream}..HEAD'], Ahead) then
+    Ahead := '';
+  if not RunGit(FRoot, ['rev-list', '-n', IntToStr(AMax), 'HEAD..@{upstream}'], Behind) then
+    Behind := '';
+  Lines := TStringList.Create;
+  try
+    Lines.Text := Output;
+    for i := 0 to Lines.Count - 1 do
+    begin
+      Fields := SplitString(Lines[i], #31);
+      if Length(Fields) < 7 then
+        Continue;
+      SetLength(ACommits, Length(ACommits) + 1);
+      with ACommits[High(ACommits)] do
+      begin
+        Hash := Fields[0];
+        if Fields[1] = '' then
+          Parents := nil
+        else
+          Parents := Fields[1].Split([' ']);
+        Short := Fields[2];
+        Author := Fields[3];
+        if TryStrToInt64(Fields[4], Seconds) then
+          Date := UnixToDateTime(Seconds)
+        else
+          Date := 0;
+        Refs := ParseGraphRefs(Fields[5]);
+        Subject := Fields[6];
+        Unpushed := Pos(Hash, Ahead) > 0;
+        Unpulled := Pos(Hash, Behind) > 0;
+      end;
+    end;
+  finally
+    Lines.Free;
+  end;
+  LayoutGraph(ACommits);
 end;
 
 function TGittanRepo.Branch: string;
