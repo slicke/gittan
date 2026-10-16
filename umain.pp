@@ -133,6 +133,9 @@ type
     FTreePanel: TPanel;
     FTreeFilter: TEdit;
     FTreeFilterText: string;
+    { The height of the strip the title bar covers on macOS, where the
+      content reaches under it (SetupTitleBar); 0 elsewhere. }
+    FTitleBarHeight: integer;
     { The Repository section at the bottom of the tree panel
       (umain.repofiles.inc): the repository's own files from
       gittan.repofiles in a second tree under a header that folds it,
@@ -642,6 +645,8 @@ type
     procedure StartPullJob(AForce: boolean; AKeep: boolean = False);
     procedure PullTimerTimer(Sender: TObject);
     procedure SetupTreeFilter;
+    procedure SetupTitleBar;
+    procedure ColorSidebar;
     procedure SetupRepoFiles;
     procedure ColorRepoHeader;
     procedure FillRepoFiles;
@@ -737,7 +742,8 @@ implementation
 {$R *.lfm}
 
 uses
-  Clipbrd, LCLIntf, Process, FileUtil, LazFileUtils, DateUtils, StrUtils, LazUTF8;
+  Clipbrd, LCLIntf, Process, FileUtil, LazFileUtils, DateUtils, StrUtils, LazUTF8
+  {$IFDEF LCLCocoa}, gittan.titlebar{$ENDIF};
 
 resourcestring
   rsAppName = 'Git Tree Analyzer & Navigator';
@@ -1273,6 +1279,7 @@ begin
   SetupTreeFilter;
   SetupRepoFiles;
   SetupSubmodules;
+  SetupTitleBar;
   ApplySettings;
   BuildMenu;
   BuildPopups;
@@ -1570,6 +1577,7 @@ begin
   end;
   if FRepoHeader <> nil then
     ColorRepoHeader;
+  ColorSidebar;
   RecolorWords(Edit);
   RecolorWords(FEditOld);
 end;
@@ -3299,6 +3307,55 @@ begin
   FTreeFilter.Parent := FTreePanel;
   FileTree.Parent := FTreePanel;
   FileTree.Align := alClient;
+end;
+
+{ ---------------------------------------------------------------------------
+  The title bar
+  ---------------------------------------------------------------------------
+  On macOS the content reaches under the title bar, which is made
+  transparent (gittan.titlebar.pp), so the tree panel's shade runs up to
+  the top edge on the left and the editor's background on the right, as
+  a sidebar does in Finder or Mail. The title bar still takes the mouse
+  in the strip (a drag moves the window, a double click zooms it), so
+  the controls at the top of both, the filter field and the header or
+  the summary, are moved down by the strip's height, and the splitter
+  too, which otherwise showed its cursor where a drag moved the window.
+  The other widgetsets keep their title bars. }
+procedure TForm1.SetupTitleBar;
+begin
+  {$IFDEF LCLCocoa}
+  FTitleBarHeight := ExtendUnderTitleBar(Handle);
+  {$ENDIF}
+  FTreeFilter.BorderSpacing.Top := FTitleBarHeight;
+  FHeader.BorderSpacing.Top := FTitleBarHeight;
+  FSummaryBox.BorderSpacing.Top := FTitleBarHeight;
+  TreeSplitter.BorderSpacing.Top := FTitleBarHeight;
+  ColorSidebar;
+end;
+
+{ The tree panel and its trees take the gutter's shade, as the section
+  headers do, so the sidebar is one block from the title bar down to the
+  status bar, and the form too, for the notch above the splitter; the
+  editor panel takes the editor's background, which shows in the strip
+  above the header or the summary. }
+procedure TForm1.ColorSidebar;
+var
+  Shade: TColor;
+begin
+  if FTreePanel = nil then
+    Exit;
+  if FDark then
+    Shade := RGBToColor(37, 37, 38)
+  else
+    Shade := RGBToColor(246, 246, 246);
+  FTreePanel.Color := Shade;
+  Color := Shade;
+  FileTree.BackgroundColor := Shade;
+  if FRepoTree <> nil then
+    FRepoTree.BackgroundColor := Shade;
+  if FSubTree <> nil then
+    FSubTree.BackgroundColor := Shade;
+  EditorPanel.Color := Edit.Colors.TextBG;
 end;
 
 { Rebuilds the tree for the new filter and keeps the shown file selected
