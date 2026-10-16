@@ -1,7 +1,8 @@
 unit gittan.reviews;
 
 {** The review comments of a pull request: its threads as GitHub's
-  GraphQL API gives them through gh, a job that fetches them in a
+  GraphQL API gives them through gh, the notes of its conversation that
+  are on no line, a job that fetches them in a
   thread, and the mapping of a line of the pull request's head to the
   same line in the work tree. Nothing here needs the LCL. }
 
@@ -34,13 +35,31 @@ type
   end;
   TGittanReviewThreads = array of TGittanReviewThread;
 
+  {** What a note of the pull request's conversation is: a comment of
+    its own, or a submitted review with that outcome. }
+  TGittanPullNoteKind = (pnComment, pnCommented, pnApproved, pnChangesRequested,
+    pnDismissed);
+
+  {** A note that is on no line: a comment in the pull request's
+    conversation, or the text a review was submitted with (what a
+    reviewer writes when requesting changes or approving). Created is in
+    UTC, 0 when GitHub gave no time. }
+  TGittanPullNote = record
+    Kind: TGittanPullNoteKind;
+    Author, Body, Url: string;
+    Created: TDateTime;
+  end;
+  TGittanPullNotes = array of TGittanPullNote;
+
 const
   {** The GraphQL query for one page of the threads of a pull request;
     $after is the cursor of the page before, left out for the first. }
   ReviewThreadsQuery =
     'query($owner:String!,$name:String!,$number:Int!,$after:String){' +
     'repository(owner:$owner,name:$name){pullRequest(number:$number){' +
-    'headRefOid reviewThreads(first:100,after:$after){' +
+    'headRefOid reviews(last:100){nodes{state body author{login} submittedAt url}} ' +
+    'comments(last:100){nodes{author{login} body createdAt url}} ' +
+    'reviewThreads(first:100,after:$after){' +
     'pageInfo{hasNextPage endCursor} nodes{' +
     'isResolved isOutdated path line startLine originalLine diffSide subjectType ' +
     'comments(first:100){nodes{author{login} body createdAt url}}}}}}}';
@@ -51,6 +70,14 @@ const
   the text is not such an answer. }
 function ParseReviewThreads(const AJson: string; var AThreads: TGittanReviewThreads;
   out AHeadOid: string; out AHasNext: boolean; out ACursor: string): boolean;
+
+{** Reads the conversation of the pull request from an answer to
+  ReviewThreadsQuery into ANotes, oldest first: its comments, and its
+  reviews that were submitted with text or that approved, requested
+  changes or were dismissed; a review that only commented on lines has
+  nothing to show here, and a pending one is not submitted yet. False
+  when the text is not such an answer. }
+function ParsePullNotes(const AJson: string; out ANotes: TGittanPullNotes): boolean;
 
 {** The line ALine of a file, counted in the old side of ADiff (what
   `git diff -U0` prints for the file), on the new side: shifted by the
@@ -77,6 +104,7 @@ type
     FExe, FRoot, FRepoPath: string;
     FNumber: integer;
     FThreads: TGittanReviewThreads;
+    FNotes: TGittanPullNotes;
     FHeadOid, FError: string;
     FOnDone: TNotifyEvent;
     procedure Notify;
@@ -90,6 +118,8 @@ type
     property Number: integer read FNumber;
     property RepoPath: string read FRepoPath;
     property Threads: TGittanReviewThreads read FThreads;
+    {** The conversation, from the first page. }
+    property Notes: TGittanPullNotes read FNotes;
     property HeadOid: string read FHeadOid;
     property Error: string read FError;
     property OnDone: TNotifyEvent read FOnDone write FOnDone;
@@ -138,21 +168,37 @@ begin
     Result := '';
 end;
 
-function ReadComment(AObject: TJSONObject): TGittanReviewComment;
+{ The login of a comment's author; a deleted account has none. }
+function AuthorOf(AObject: TJSONObject): string;
 var
   Author: TJSONData;
 begin
-  Result := Default(TGittanReviewComment);
+  Result := '';
   Author := AObject.Find('author');
   if (Author <> nil) and (Author.JSONType = jtObject) then
-    Result.Author := StrOf(TJSONObject(Author), 'login');
-  { A deleted account has no author. }
-  if Result.Author = '' then
-    Result.Author := 'ghost';
-  Result.Body := StringReplace(StrOf(AObject, 'body'), #13#10, #10, [rfReplaceAll]);
+    Result := StrOf(TJSONObject(Author), 'login');
+  if Result = '' then
+    Result := 'ghost';
+end;
+
+function BodyOf(AObject: TJSONObject): string;
+begin
+  Result := StringReplace(StrOf(AObject, 'body'), #13#10, #10, [rfReplaceAll]);
+end;
+
+function TimeOf(AObject: TJSONObject; const AName: string): TDateTime;
+begin
+  if not TryISO8601ToDate(StrOf(AObject, AName), Result, True) then
+    Result := 0;
+end;
+
+function ReadComment(AObject: TJSONObject): TGittanReviewComment;
+begin
+  Result := Default(TGittanReviewComment);
+  Result.Author := AuthorOf(AObject);
+  Result.Body := BodyOf(AObject);
   Result.Url := StrOf(AObject, 'url');
-  if not TryISO8601ToDate(StrOf(AObject, 'createdAt'), Result.Created, True) then
-    Result.Created := 0;
+  Result.Created := TimeOf(AObject, 'createdAt');
 end;
 
 function ReadThread(AObject: TJSONObject; out AThread: TGittanReviewThread): boolean;
@@ -228,6 +274,91 @@ begin
           SetLength(AThreads, Length(AThreads) + 1);
           AThreads[High(AThreads)] := Thread;
         end;
+    Result := True;
+  finally
+    Data.Free;
+  end;
+end;
+
+function ParsePullNotes(const AJson: string; out ANotes: TGittanPullNotes): boolean;
+var
+  Data, Pull, Nodes: TJSONData;
+  Node: TJSONObject;
+  Note: TGittanPullNote;
+  State: string;
+  i, j: integer;
+
+  procedure Add;
+  begin
+    SetLength(ANotes, Length(ANotes) + 1);
+    ANotes[High(ANotes)] := Note;
+  end;
+
+begin
+  ANotes := nil;
+  Result := False;
+  try
+    Data := GetJSON(AJson);
+  except
+    Exit;
+  end;
+  try
+    Pull := Dig(Data, ['data', 'repository', 'pullRequest']);
+    if (Pull = nil) or (Pull.JSONType <> jtObject) then
+      Exit;
+    Nodes := Dig(Pull, ['comments', 'nodes']);
+    if (Nodes <> nil) and (Nodes.JSONType = jtArray) then
+      for i := 0 to Nodes.Count - 1 do
+        if Nodes.Items[i].JSONType = jtObject then
+        begin
+          Node := TJSONObject(Nodes.Items[i]);
+          Note := Default(TGittanPullNote);
+          Note.Kind := pnComment;
+          Note.Author := AuthorOf(Node);
+          Note.Body := Trim(BodyOf(Node));
+          Note.Url := StrOf(Node, 'url');
+          Note.Created := TimeOf(Node, 'createdAt');
+          if Note.Body <> '' then
+            Add;
+        end;
+    Nodes := Dig(Pull, ['reviews', 'nodes']);
+    if (Nodes <> nil) and (Nodes.JSONType = jtArray) then
+      for i := 0 to Nodes.Count - 1 do
+        if Nodes.Items[i].JSONType = jtObject then
+        begin
+          Node := TJSONObject(Nodes.Items[i]);
+          Note := Default(TGittanPullNote);
+          State := StrOf(Node, 'state');
+          if State = 'APPROVED' then
+            Note.Kind := pnApproved
+          else if State = 'CHANGES_REQUESTED' then
+            Note.Kind := pnChangesRequested
+          else if State = 'DISMISSED' then
+            Note.Kind := pnDismissed
+          else if State = 'COMMENTED' then
+            Note.Kind := pnCommented
+          else
+            Continue;
+          Note.Author := AuthorOf(Node);
+          Note.Body := Trim(BodyOf(Node));
+          Note.Url := StrOf(Node, 'url');
+          Note.Created := TimeOf(Node, 'submittedAt');
+          if (Note.Body <> '') or (Note.Kind <> pnCommented) then
+            Add;
+        end;
+    { Comments and reviews each come in order; together they are sorted
+      by time, keeping that order among equal times. }
+    for i := 1 to High(ANotes) do
+    begin
+      Note := ANotes[i];
+      j := i - 1;
+      while (j >= 0) and (ANotes[j].Created > Note.Created) do
+      begin
+        ANotes[j + 1] := ANotes[j];
+        Dec(j);
+      end;
+      ANotes[j + 1] := Note;
+    end;
     Result := True;
   finally
     Data.Free;
@@ -386,7 +517,10 @@ begin
       Break;
     end;
     if Pages = 0 then
+    begin
       FHeadOid := Head;
+      ParsePullNotes(Output, FNotes);
+    end;
     Inc(Pages);
   until not HasNext or (Pages >= 20);
   if not Terminated then

@@ -59,6 +59,12 @@ begin
   Result := MD5Print(MD5String(S));
 end;
 
+{ The link of a note in the summary's conversation. }
+procedure TForm1.SummaryOpenUrl(Sender: TObject; const AUrl: string);
+begin
+  OpenURL(AUrl);
+end;
+
 procedure TForm1.MenuReviewCommentsClick(Sender: TObject);
 begin
   FShowComments := not FShowComments;
@@ -120,6 +126,7 @@ begin
   FThreadsKey := '';
   FReviewError := '';
   FMapDiffKey := '';
+  FSummary.SetNotes('', nil);
   FileTree.Invalidate;
 end;
 
@@ -193,6 +200,7 @@ begin
   if FThreadsHead <> Job.HeadOid then
     FMapDiffKey := '';
   FThreadsHead := Job.HeadOid;
+  FSummary.SetNotes(Format(rsConversation, [Job.Number]), Job.Notes);
   UpdateStatus;
   if Key = FThreadsKey then
     Exit;

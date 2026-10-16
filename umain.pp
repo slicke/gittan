@@ -635,6 +635,7 @@ type
     procedure SummaryContextFile(Sender: TObject; const APath: string;
       const AScreenPos: TPoint);
     procedure SummaryBranchClick(Sender: TObject; const AScreenRect: TRect);
+    procedure SummaryOpenUrl(Sender: TObject; const AUrl: string);
     procedure BranchPopupPick(Sender: TObject; AIndex: integer);
     procedure SyncClick(const AScreenRect: TRect);
     procedure SyncPopupPick(Sender: TObject; AIndex: integer);
@@ -977,6 +978,7 @@ resourcestring
   rsReviewOpen = '%d open review threads';
   rsReviewOpenOne = '1 open review thread';
   rsReviewFailed = 'Could not fetch the review comments';
+  rsConversation = 'Conversation of pull request #%d';
   rsTreeThreadOpen = ' · 1 open review thread';
   rsTreeThreadsOpen = ' · %d open review threads';
   rsTreeThreadsDone = ' · review comments, all resolved';
@@ -1261,6 +1263,7 @@ begin
   FSummary.OnSelectFile := @SummarySelectFile;
   FSummary.OnContextFile := @SummaryContextFile;
   FSummary.OnBranchClick := @SummaryBranchClick;
+  FSummary.OnOpenUrl := @SummaryOpenUrl;
   { The branch list pops up over the form, under the branch. }
   FBranchNames := TStringList.Create;
   FBranchPopup := TGittanPopupList.Create(Self);
@@ -1597,6 +1600,7 @@ begin
     FBandFill := RGBToColor(0, 110, 230);
   end;
   FSummaryBox.Color := Edit.Colors.TextBG;
+  FSummary.LinkColor := FLinkColor;
   if FDark then
   begin
     FSummary.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,

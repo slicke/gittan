@@ -17,6 +17,7 @@ type
     procedure TestParseThreads;
     procedure TestParsePages;
     procedure TestParseNotAnAnswer;
+    procedure TestParseNotes;
     procedure TestMapLineWithoutDiff;
     procedure TestMapLineShifted;
     procedure TestMapLineChanged;
@@ -105,6 +106,44 @@ begin
     T, Head, HasNext, Cursor));
   AssertFalse(ParseReviewThreads('{"errors":[{"message":"x"}]}', T, Head, HasNext, Cursor));
   AssertEquals(0, Length(T));
+end;
+
+const
+  NotesAnswer =
+    '{"data":{"repository":{"pullRequest":{"headRefOid":"abc123",' +
+    '"reviews":{"nodes":[' +
+    '{"state":"COMMENTED","body":"","author":{"login":"alice"},' +
+    '"submittedAt":"2026-10-01T09:00:00Z","url":"r1"},' +
+    '{"state":"CHANGES_REQUESTED","body":"Please fix\r\nthis.","author":{"login":"bob"},' +
+    '"submittedAt":"2026-10-02T09:00:00Z","url":"r2"},' +
+    '{"state":"PENDING","body":"Draft","author":{"login":"bob"},"submittedAt":null,"url":"r3"},' +
+    '{"state":"APPROVED","body":"","author":null,"submittedAt":"2026-10-04T09:00:00Z","url":"r4"}]},' +
+    '"comments":{"nodes":[' +
+    '{"author":{"login":"carol"},"body":"Looks big.","createdAt":"2026-10-03T09:00:00Z","url":"c1"},' +
+    '{"author":{"login":"carol"},"body":"  ","createdAt":"2026-10-03T10:00:00Z","url":"c2"},' +
+    '{"author":{"login":"dave"},"body":"First!","createdAt":"2026-09-30T09:00:00Z","url":"c3"}]},' +
+    '"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}}';
+
+procedure TReviewsTest.TestParseNotes;
+var
+  N: TGittanPullNotes;
+begin
+  AssertTrue(ParsePullNotes(NotesAnswer, N));
+  AssertEquals('empty comments, line-only and pending reviews are left out', 4, Length(N));
+  AssertEquals('oldest first', 'c3', N[0].Url);
+  AssertTrue(N[0].Kind = pnComment);
+  AssertEquals('r2', N[1].Url);
+  AssertTrue(N[1].Kind = pnChangesRequested);
+  AssertEquals('bob', N[1].Author);
+  AssertEquals('Please fix'#10'this.', N[1].Body);
+  AssertEquals(EncodeDateTime(2026, 10, 2, 9, 0, 0, 0), N[1].Created);
+  AssertEquals('c1', N[2].Url);
+  AssertEquals('an approval without text is kept', 'r4', N[3].Url);
+  AssertTrue(N[3].Kind = pnApproved);
+  AssertEquals('ghost', N[3].Author);
+  AssertTrue('threads alone have no notes', ParsePullNotes(Answer, N));
+  AssertEquals(0, Length(N));
+  AssertFalse(ParsePullNotes('not json', N));
 end;
 
 procedure TReviewsTest.TestMapLineWithoutDiff;
