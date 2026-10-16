@@ -321,17 +321,65 @@ begin
   try
     Dlg.Font.Assign(Edit.Font);
     if Dlg.Execute then
-    begin
-      Edit.Font.Assign(Dlg.Font);
-      FEditOld.Font.Assign(Dlg.Font);
-      Edit.Update(True);
-      FEditOld.Update(True);
-      UpdateNumberWidth(Edit);
-      UpdateNumberWidth(FEditOld);
-    end;
+      ApplyEditorFont(Dlg.Font);
   finally
     Dlg.Free;
   end;
+end;
+
+procedure TForm1.ApplyEditorFont(AFont: TFont);
+begin
+  Edit.Font.Assign(AFont);
+  FEditOld.Font.Assign(AFont);
+  Edit.Update(True);
+  FEditOld.Update(True);
+  UpdateNumberWidth(Edit);
+  UpdateNumberWidth(FEditOld);
+end;
+
+{ The settings dialog previews the font and the theme in the editor and
+  puts back the old ones when it is cancelled; the commands are saved with
+  the rest when the window closes. }
+procedure TForm1.MenuSettingsClick(Sender: TObject);
+const
+  Margin = 24;
+var
+  OldFont, F: TFont;
+  OldTheme, Theme: integer;
+  EditorCmd, TerminalCmd: string;
+  Corner: TPoint;
+begin
+  OldFont := TFont.Create;
+  F := TFont.Create;
+  try
+    OldFont.Assign(Edit.Font);
+    F.Assign(Edit.Font);
+    OldTheme := FSyntaxTheme;
+    Theme := FSyntaxTheme;
+    EditorCmd := FSettings.EditorCommand;
+    TerminalCmd := FSettings.TerminalCommand;
+    Corner := EditorPanel.ClientToScreen(Point(EditorPanel.ClientWidth -
+      Scale96ToForm(Margin), EditorPanel.ClientHeight - Scale96ToForm(Margin)));
+    if EditSettings(F, Theme, EditorCmd, TerminalCmd, @PreviewSettings, Corner) then
+    begin
+      PreviewSettings(F, Theme);
+      FSettings.EditorCommand := EditorCmd;
+      FSettings.TerminalCommand := TerminalCmd;
+    end
+    else
+      PreviewSettings(OldFont, OldTheme);
+  finally
+    F.Free;
+    OldFont.Free;
+  end;
+end;
+
+procedure TForm1.PreviewSettings(AFont: TFont; ATheme: integer);
+begin
+  if not Edit.Font.IsEqual(AFont) then
+    ApplyEditorFont(AFont);
+  if ATheme <> FSyntaxTheme then
+    SetSyntaxTheme(ATheme);
 end;
 
 procedure TForm1.MenuWrapClick(Sender: TObject);
@@ -363,10 +411,15 @@ end;
 { The lexer formats carry the colors, so the editors only need a repaint,
   which ApplyTheme does with the rest of the palette. }
 procedure TForm1.MenuSyntaxThemeClick(Sender: TObject);
+begin
+  SetSyntaxTheme(TMenuItem(Sender).Tag);
+end;
+
+procedure TForm1.SetSyntaxTheme(ATheme: integer);
 var
   i: integer;
 begin
-  FSyntaxTheme := TMenuItem(Sender).Tag;
+  FSyntaxTheme := ATheme;
   for i := 0 to High(FThemeItems) do
     FThemeItems[i].Checked := i = FSyntaxTheme;
   ApplyTheme;
@@ -1102,7 +1155,7 @@ begin
   end;
 end;
 
-{ The editor command from the settings file, with the path appended; the
+{ The editor command from the settings, with the path appended; the
   desktop's default application when none is set. }
 procedure TForm1.MenuOpenInEditorClick(Sender: TObject);
 begin

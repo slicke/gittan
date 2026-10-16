@@ -14,7 +14,7 @@ uses
   ec_SyntAnal,
   gittan.lexers, gittan.git, gittan.github, gittan.conflicts, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.welcome, gittan.fileheader, gittan.watch, gittan.settings,
-  gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
+  gittan.settingsdlg, gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   {$IFDEF LCLCocoa}gittan.toolbar,{$ENDIF}
   {$IFDEF LCLWin32}gittan.wintitlebar,{$ENDIF}
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
@@ -573,10 +573,14 @@ type
     procedure MenuZoomOutClick(Sender: TObject);
     procedure MenuZoomResetClick(Sender: TObject);
     procedure MenuFontClick(Sender: TObject);
+    procedure MenuSettingsClick(Sender: TObject);
+    procedure PreviewSettings(AFont: TFont; ATheme: integer);
+    procedure ApplyEditorFont(AFont: TFont);
     procedure MenuWrapClick(Sender: TObject);
     procedure MenuOnlyChangesClick(Sender: TObject);
     procedure MenuContextLinesClick(Sender: TObject);
     procedure MenuSyntaxThemeClick(Sender: TObject);
+    procedure SetSyntaxTheme(ATheme: integer);
     procedure MenuSideBySideClick(Sender: TObject);
     procedure MenuIgnoreSpaceClick(Sender: TObject);
     procedure MenuNextFileClick(Sender: TObject);
@@ -766,7 +770,7 @@ implementation
 
 uses
   Clipbrd, LCLIntf, Process, FileUtil, LazFileUtils, DateUtils, StrUtils, LazUTF8
-  {$IFDEF LCLCocoa}, gittan.titlebar{$ENDIF};
+  {$IFDEF LCLCocoa}, CocoaConfig, gittan.titlebar{$ENDIF};
 
 resourcestring
   rsAppName = 'Git Tree Analyzer & Navigator';
@@ -823,6 +827,7 @@ resourcestring
   rsInstallCli = 'Install &CLI Command';
   rsUninstallCli = '&Uninstall CLI Command';
   rsCheckUpdates = 'Check for &Updates...';
+  rsSettings = 'Se&ttings...';
   rsUpdateTitle = 'Gittan Updates';
   rsUpdateBadge = 'Build %d available';
   rsUpdateHint = '%s is out; this is build %d.';
@@ -1828,6 +1833,13 @@ var
 
 begin
   Main := TMainMenu.Create(Self);
+  { On macOS Settings is in the application menu, which the LCL builds
+    when the menu is set, with these items first, before Services. }
+  {$IFDEF LCLCocoa}
+  Item := TMenuItem.Create(Self);
+  AddItem(Item, rsSettings, ShortCut(VK_OEM_COMMA, [ssModifier]), @MenuSettingsClick);
+  CocoaConfigMenu.appMenu.customMenus := Item;
+  {$ENDIF}
   Menu := Main;
 
   FileMenu := TMenuItem.Create(Main);
@@ -1944,6 +1956,10 @@ begin
   FUninstallCliItem := AddItem(ToolsMenu, rsUninstallCli, 0, @MenuUninstallCliClick);
   ToolsMenu.Add(NewLine);
   AddItem(ToolsMenu, rsCheckUpdates, 0, @MenuCheckUpdatesClick);
+  {$IFNDEF LCLCocoa}
+  ToolsMenu.Add(NewLine);
+  AddItem(ToolsMenu, rsSettings, ShortCut(VK_OEM_COMMA, [ssModifier]), @MenuSettingsClick);
+  {$ENDIF}
 end;
 
 { Automatic and Plain text first, then the lexer list, which is long
