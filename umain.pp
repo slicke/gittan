@@ -20,7 +20,8 @@ uses
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader,
-  gittan.discard, gittan.submodules, gittan.reviews, gittan.imagediff, ATSynEdit_Gaps, md5;
+  gittan.discard, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
+  gittan.commitgraph, ATSynEdit_Gaps, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -180,12 +181,15 @@ type
       submodules from gittan.submodules, what their jobs found out
       (FSubInfos, one per submodule, smUnknown while its job runs), the
       jobs still running, what they were started for (SubmoduleKey) and
-      the path of the submodule the view shows. }
+      the path of the submodule the view shows. FSubChanges holds, one
+      per submodule, how a changed one moved between the sides compared
+      (FromHash empty and ToHash empty for one git status leaves out). }
     FSubPanel: TPanel;
     FSubHeader: TGittanSectionHeader;
     FSubTree: TTreeView;
     FSubmodules: TGittanSubmodules;
     FSubInfos: array of TGittanSubmoduleInfo;
+    FSubChanges: array of TGittanSubmoduleChange;
     FSubJobs: TList;
     FSubKey, FSubShown: string;
     { Asks the remotes again SubmodulePoll ms after the last job of a
@@ -275,14 +279,13 @@ type
       branch to switch to for each of its items ('' for a header). }
     FBranchPopup: TGittanPopupList;
     FBranchNames: TStringList;
-    { The list that drops up from the status bar's ahead/behind counts,
-      with the commit each of its items shows ('' for a header). }
-    FSyncPopup: TGittanPopupList;
+    { The commit graph, in the middle of the form, from the status bar's
+      ahead/behind counts or View > Commit Graph. }
+    FGraph: TGittanCommitGraph;
     { The list a click on the status bar's pull request drops down, and
       what each of its rows does (the pa* constants). }
     FPullPopup: TGittanPopupList;
     FPullActions: TIntegerDynArray;
-    FSyncHashes: TStringList;
     FEditOld: TATSynEdit;
     { The hidden editor that parses another changed file for Go to
       Definition, with its adapter; made on the first lookup. }
@@ -670,8 +673,9 @@ type
     procedure SummaryOpenUrl(Sender: TObject; const AUrl: string);
     procedure SummarySelectCommit(Sender: TObject; const AHash: string);
     procedure BranchPopupPick(Sender: TObject; AIndex: integer);
-    procedure SyncClick(const AScreenRect: TRect);
-    procedure SyncPopupPick(Sender: TObject; AIndex: integer);
+    procedure ShowCommitGraph;
+    procedure MenuCommitGraphClick(Sender: TObject);
+    procedure GraphPick(Sender: TObject; const AHash: string);
     procedure PullChipClick(const AScreenRect: TRect);
     procedure PullPopupPick(Sender: TObject; AIndex: integer);
     procedure ComparePull(const APull: TGittanPullRequest);
@@ -713,6 +717,12 @@ type
     procedure SetupSubmodules;
     function SubmoduleKey: string;
     procedure FillSubmodules;
+    {** The index in FSubmodules of the submodule at APath, -1 for none. }
+    function SubmoduleAt(const APath: string): integer;
+    {** "6a1f2c0 → 1a377b1" for submodule AIndex when it moved, else
+      empty. }
+    function SubmoduleMoveText(AIndex: integer): string;
+    procedure SelectShownSubmodule;
     function SubmoduleRowText(AIndex: integer): string;
     procedure FillSubmoduleTree;
     {** Starts a job per submodule. AKeep keeps what the previous jobs
@@ -926,6 +936,15 @@ resourcestring
   rsSubIncoming = 'New on the remote';
   rsSubMore = '... and %d more';
   rsSubOpen = 'Open';
+  rsSubChange = 'Changed';
+  rsSubNone = 'none';
+  rsSubForward = '%d new commits';
+  rsSubBack = 'back by %d commits';
+  rsSubBoth = '%d new commits, %d dropped';
+  rsSubUncounted = 'the submodule lacks one of them; fetch in it to list the commits';
+  rsSubAdded = 'Commits it moved on to';
+  rsSubDropped = 'Commits it no longer has';
+  rsHintSubmodule = 'Submodule moved %s; click to see the commits';
   rsAddToIgnore = 'Add to .&gitignore';
   rsAddToExclude = 'Add to .git/info/e&xclude';
   rsIgnoreAdded = 'Added %s to %s';
@@ -985,10 +1004,10 @@ resourcestring
   rsShowConflictHint = 'Show the first conflicted file';
   rsAheadHint = '%d commits not pushed yet';
   rsBehindHint = '%d commits not pulled yet';
-  rsNotPushed = 'Not pushed yet';
-  rsNotPulled = 'Not pulled yet';
-  rsMoreCommits = '… and %d more';
-  rsFilterCommits = 'Filter commits';
+  rsInSyncHint = 'Up to date with upstream';
+  rsNoUpstreamHint = 'No upstream branch';
+  rsGraphHint = 'Click to show the commit graph';
+  rsCommitGraph = 'Commit &Graph';
   rsPosition = 'Ln %d, Col %d';
   rsPullHintTitle = '#%d %s';
   rsPullHintPassed = '%d checks passed';
@@ -1318,13 +1337,10 @@ begin
   FBranchPopup.Parent := Self;
   FBranchPopup.FilterHint := rsFilterBranches;
   FBranchPopup.OnPick := @BranchPopupPick;
-  { The commits not pushed or pulled yet pop up over the form, above the
-    counts in the status bar. }
-  FSyncHashes := TStringList.Create;
-  FSyncPopup := TGittanPopupList.Create(Self);
-  FSyncPopup.Parent := Self;
-  FSyncPopup.FilterHint := rsFilterCommits;
-  FSyncPopup.OnPick := @SyncPopupPick;
+  { The commit graph pops up in the middle of the form. }
+  FGraph := TGittanCommitGraph.Create(Self);
+  FGraph.Parent := Self;
+  FGraph.OnPick := @GraphPick;
   FPullPopup := TGittanPopupList.Create(Self);
   FPullPopup.Parent := Self;
   FPullPopup.OnPick := @PullPopupPick;
@@ -1394,7 +1410,6 @@ begin
   AbandonSubmoduleJobs;
   FreeAndNil(FSubJobs);
   FBranchNames.Free;
-  FSyncHashes.Free;
   StopBlame;
   StopIndexing;
   SaveIndex;
@@ -1574,6 +1589,10 @@ begin
   ApplyEditorColors(Edit);
   ApplyEditorColors(FEditOld);
   FLexers.ApplyTheme(FDark, FSyntaxTheme);
+  { The graph's lanes take the history view's hues. }
+  FGraph.SetLaneColors([HistoryColor(0, htSwatch), HistoryColor(1, htSwatch),
+    HistoryColor(2, htSwatch), HistoryColor(3, htSwatch), HistoryColor(4, htSwatch),
+    HistoryColor(5, htSwatch)]);
   { The header and the find bar take the gutter's shade; the navigator
     pills sit on it. }
   if FDark then
@@ -1597,9 +1616,9 @@ begin
     FBranchPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
-    FSyncPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+    FGraph.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
+      RGBToColor(100, 160, 240), RGBToColor(227, 179, 65));
     FPullPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
@@ -1635,9 +1654,9 @@ begin
     FBranchPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
-    FSyncPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
+    FGraph.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
+      RGBToColor(0, 110, 230), RGBToColor(154, 103, 0));
     FPullPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
@@ -1746,7 +1765,7 @@ begin
       FStatus.PartHint[spRepo] := HintFolder + ' ' + Edit.FileName
     else
       FStatus.PartHint[spRepo] := '';
-    FStatus.SetSync(0, 0);
+    FStatus.SetSync(0, 0, False);
     FStatus.SetState('', '');
     FStatus.SetBase('');
     FStatus.SetPull('', '', stNormal, 0);
@@ -1758,15 +1777,24 @@ begin
   FStatus.SetRepository(ExtractFileName(FRepo.Root), FBranch);
   FStatus.PartHint[spRepo] := HintFolder + ' ' + FRepo.Root;
   if FHasUpstream then
-    FStatus.SetSync(FAhead, FBehind)
+    FStatus.SetSync(FAhead, FBehind, True)
   else
-    FStatus.SetSync(0, 0);
+    FStatus.SetSync(0, 0, True);
+  { The counts, or that there is nothing to push or pull, then what a
+    click does. }
   Sync := '';
   if FHasUpstream and (FAhead > 0) then
     Sync := Format(rsAheadHint, [FAhead]);
   if FHasUpstream and (FBehind > 0) then
     Sync := Trim(Sync + LineEnding + Format(rsBehindHint, [FBehind]));
-  FStatus.PartHint[spSync] := Sync;
+  if Sync = '' then
+  begin
+    if FHasUpstream then
+      Sync := rsInSyncHint
+    else
+      Sync := rsNoUpstreamHint;
+  end;
+  FStatus.PartHint[spSync] := HintSync + ' ' + Sync + LineEnding + rsGraphHint;
   case FConflictFiles of
     0: FStatus.SetState(FOperation, '');
     1: FStatus.SetState(FOperation, rsOneConflictedFile);
@@ -1929,6 +1957,7 @@ begin
   Main.Items.Add(ViewMenu);
   AddItem(ViewMenu, rsSummary, ShortCut(VK_1, [ssModifier]), @MenuSummaryClick);
   AddItem(ViewMenu, rsRepoDiff, ShortCut(VK_2, [ssModifier]), @MenuRepoDiffClick);
+  AddItem(ViewMenu, rsCommitGraph, ShortCut(VK_3, [ssModifier]), @MenuCommitGraphClick);
   ViewMenu.Add(NewLine);
   FCompareMenu := AddItem(ViewMenu, rsCompareWith, 0, nil);
   RebuildCompareMenu;
@@ -2969,6 +2998,7 @@ end;
 procedure TForm1.ApplySnapshot(const ASnap: TGittanRepoSnapshot);
 var
   Icons: array of integer;
+  Texts: array of string;
   i: integer;
   Branch: string;
 begin
@@ -2999,13 +3029,18 @@ begin
   FillRepoFiles;
   FillSubmodules;
   SetLength(Icons, Length(FStats));
+  SetLength(Texts, Length(FStats));
   for i := 0 to High(FStats) do
+  begin
     Icons[i] := StatIcon(FStats[i]);
+    Texts[i] := SubmoduleMoveText(SubmoduleAt(FStats[i].Path));
+  end;
   Branch := FBranch;
   if FOperation <> '' then
     Branch := Branch + ' · ' + FOperation;
   FSummary.SetCommits(ASnap.Recent, FAhead, FBehind, FHasUpstream);
-  FSummary.SetRepository(ExtractFileName(FRepo.Root), Branch, BaseLabel, FStats, Icons);
+  FSummary.SetRepository(ExtractFileName(FRepo.Root), Branch, BaseLabel, FStats, Icons,
+    Texts);
   FWelcome.Visible := False;
   FSummary.Visible := True;
   RebuildCompareMenu;
@@ -3316,7 +3351,18 @@ end;
 procedure TForm1.SummarySelectFile(Sender: TObject; const APath: string);
 var
   Node: TTreeNode;
+  Sub: integer;
 begin
+  { A submodule is shown whether or not the filter leaves its node in
+    the tree; ShowSubmodule selects the node when it is there. }
+  Sub := SubmoduleAt(APath);
+  if Sub >= 0 then
+  begin
+    FileTree.Selected := nil;
+    FSubTree.Selected := nil;
+    ShowSubmodule(Sub);
+    Exit;
+  end;
   Node := FileTree.Items.GetFirstNode;
   while Node <> nil do
   begin
@@ -3481,7 +3527,8 @@ end;
   set and a badge for its change kind; a folder node has Data = nil and
   the folder icon with a dot for the worst change inside; a submodule,
   which git status reports as one entry, has Data = nil and the plain
-  folder icon. Neither is ever opened. git lists paths sorted, so the folder node of the previous
+  folder icon. A folder is never opened; a submodule shows ShowSubmodule.
+  git lists paths sorted, so the folder node of the previous
   path is reused when the folder repeats. }
 procedure TForm1.FillFileTree(const AStats: TGittanFileStats);
 var
@@ -3844,19 +3891,31 @@ begin
     Result := CompareText(Node1.Text, Node2.Text);
 end;
 
-{ Selecting a file shows its changes. Folders only expand. A deleted file
-  still has a diff: every line of it, deleted. }
+{ Selecting a file shows its changes, a submodule how it moved. Folders
+  only expand. A deleted file still has a diff: every line of it,
+  deleted. }
 procedure TForm1.FileTreeSelectionChanged(Sender: TObject);
 var
   Node: TTreeNode;
+  Sub: integer;
 begin
   Node := FileTree.Selected;
-  if (Node = nil) or (Node.Data = nil) or (FRepo.Root = '') then
+  if (Node = nil) or (FRepo.Root = '') then
     Exit;
+  Sub := -1;
+  if Node.Data = nil then
+  begin
+    Sub := SubmoduleAt(Node.GetTextPath);
+    if Sub < 0 then
+      Exit;
+  end;
   { One selection among the trees. }
   FRepoTree.Selected := nil;
   FSubTree.Selected := nil;
-  ShowChanges(Node.GetTextPath);
+  if Sub >= 0 then
+    ShowSubmodule(Sub)
+  else
+    ShowChanges(Node.GetTextPath);
 end;
 
 { The file under the mouse gets its StatHint after Application.HintPause.
@@ -3880,6 +3939,12 @@ begin
         Tip := StatHint(FStats[i]) + FileThreadsHint(Path);
         Break;
       end;
+  end
+  else if Node <> nil then
+  begin
+    i := SubmoduleAt(Node.GetTextPath);
+    if (i >= 0) and (SubmoduleMoveText(i) <> '') then
+      Tip := Format(rsHintSubmodule, [SubmoduleMoveText(i)]);
   end;
   if Tip = '' then
     Node := nil;

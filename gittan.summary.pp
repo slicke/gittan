@@ -54,6 +54,8 @@ type
     FStats: TGittanFileStats;
     FImages: TCustomImageList;
     FIconIndex: array of integer;
+    { What a row shows in place of its counts and bar, '' for those. }
+    FRowTexts: array of string;
     FHot: integer;
     FBack, FText, FDim, FHover, FSelectedBack, FAdded, FDeleted, FLine, FLink: TColor;
     FNotesTitle: string;
@@ -128,9 +130,12 @@ type
     {** Shows the changed files AStats of repository AName on ABranch,
       with ABase saying what is compared, as it is to be shown ("vs
       main", "main...feature"; empty for the usual HEAD); AIcons holds
-      the image index in Images of each file's badge. }
+      the image index in Images of each file's badge, and ATexts what to
+      show in place of a row's counts and bar, such as the commits a
+      submodule moved between; empty for the counts. }
     procedure SetRepository(const AName, ABranch, ABase: string;
-      const AStats: TGittanFileStats; const AIcons: array of integer);
+      const AStats: TGittanFileStats; const AIcons: array of integer;
+      const ATexts: array of string);
     {** Sets the palette: the background, the text, the dim text for paths
       and counts, the hovered row, the selected row, the added and deleted
       colors, and the line color for the divider and the empty part of a
@@ -261,10 +266,14 @@ begin
 end;
 
 procedure TGittanSummary.SetRepository(const AName, ABranch, ABase: string;
-  const AStats: TGittanFileStats; const AIcons: array of integer);
+  const AStats: TGittanFileStats; const AIcons: array of integer;
+  const ATexts: array of string);
 var
   i: integer;
 begin
+  SetLength(FRowTexts, Length(ATexts));
+  for i := 0 to High(ATexts) do
+    FRowTexts[i] := ATexts[i];
   FRepoName := AName;
   FBranch := ABranch;
   FBase := ABase;
@@ -954,7 +963,7 @@ procedure TGittanSummary.PaintRow(AIndex, ATop: integer);
 var
   Stat: TGittanFileStat;
   X, CountsX, TextY, BodyHeight, Room, MaxChange, i: integer;
-  Dir, FileName, Count: string;
+  Dir, FileName, Count, RowText: string;
 begin
   Stat := FStats[AIndex];
   Canvas.Font := Font;
@@ -978,6 +987,11 @@ begin
   Inc(X, IconSize + Gap div 2 + 2);
 
   CountsX := Width - Pad - BarWidth - Gap - 2 * CountWidth - Gap div 2;
+  RowText := '';
+  if AIndex <= High(FRowTexts) then
+    RowText := FRowTexts[AIndex];
+  if RowText <> '' then
+    CountsX := Min(CountsX, Width - Pad - Canvas.TextWidth(RowText));
   Room := CountsX - Gap - X;
   Dir := ExtractFilePath(Stat.Path);
   FileName := ExtractFileName(Stat.Path);
@@ -1018,6 +1032,12 @@ begin
     end;
   end;
 
+  if RowText <> '' then
+  begin
+    Canvas.Font.Color := FDim;
+    Canvas.TextOut(Width - Pad - Canvas.TextWidth(RowText), TextY, RowText);
+    Exit;
+  end;
   if Stat.Binary then
   begin
     Canvas.Font.Color := FDim;
@@ -1044,7 +1064,8 @@ begin
 
   MaxChange := 0;
   for i := 0 to High(FStats) do
-    MaxChange := Max(MaxChange, FStats[i].Added + FStats[i].Deleted);
+    if (i > High(FRowTexts)) or (FRowTexts[i] = '') then
+      MaxChange := Max(MaxChange, FStats[i].Added + FStats[i].Deleted);
   PaintBar(Width - Pad - BarWidth, ATop + (RowHeight - BarHeight) div 2, Stat,
     MaxChange);
 end;

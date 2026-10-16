@@ -10,6 +10,5 @@
 *.icns binary
 *.png binary
 
-# Enforce LF line endings for all shell scripts (tools/darwin-lld/ld included).
+# Enforce LF line endings for all shell scripts.
 *.sh text eol=lf
-tools/darwin-lld/ld text eol=lf

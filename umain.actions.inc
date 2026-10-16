@@ -1186,62 +1186,53 @@ begin
     RunCommandWith(FSettings.EditorCommand, ContextFullPath);
 end;
 
-{ A click on the ahead/behind counts in the status bar lists the commits
-  behind them: those not pushed yet, newest first, then those not pulled
-  yet, each with its short id on the right. Picking one shows it against
-  its parent, as a click on a blame band does. The list is cut at what
-  SyncCommits gives, with a header saying how many more there are. }
-procedure TForm1.SyncClick(const AScreenRect: TRect);
+{ The commit graph: the newest GraphLimit commits of every branch, in
+  the middle of the form. A click on the status bar's ahead/behind
+  counts opens it, as View > Commit Graph does; picking a commit shows
+  it against its parent, as a click on a blame band does. }
+const
+  GraphLimit = 500;
 
-  procedure AddGroup(AAhead: boolean; ACount: integer; const AHeader: string);
-  var
-    Commits: TGittanCommitLines;
-    i: integer;
-  begin
-    if (ACount = 0) or not FRepo.SyncCommits(AAhead, Commits) then
-      Exit;
-    FSyncPopup.AddHeader(AHeader);
-    FSyncHashes.Add('');
-    for i := 0 to High(Commits) do
-    begin
-      FSyncPopup.Add(Commits[i].Subject, Commits[i].Short);
-      FSyncHashes.Add(Commits[i].Hash);
-    end;
-    if ACount > Length(Commits) then
-    begin
-      FSyncPopup.AddHeader(Format(rsMoreCommits, [ACount - Length(Commits)]));
-      FSyncHashes.Add('');
-    end;
-  end;
-
+procedure TForm1.ShowCommitGraph;
+var
+  Commits: TGittanGraphCommits;
 begin
-  if (FRepo.Root = '') or not FHasUpstream then
+  if FRepo.Root = '' then
     Exit;
-  FSyncPopup.Clear;
-  FSyncHashes.Clear;
-  AddGroup(True, FAhead, rsNotPushed);
-  AddGroup(False, FBehind, rsNotPulled);
-  if FSyncHashes.Count = 0 then
+  if FGraph.Visible then
+  begin
+    FGraph.Close;
     Exit;
-  FSyncPopup.Popup(AScreenRect);
+  end;
+  Screen.Cursor := crHourGlass;
+  try
+    FRepo.GraphCommits(Commits, GraphLimit);
+  finally
+    Screen.Cursor := crDefault;
+  end;
+  FGraph.Popup(Commits, Length(Commits) >= GraphLimit, FBranch, FAhead, FBehind,
+    FHasUpstream);
 end;
 
-procedure TForm1.SyncPopupPick(Sender: TObject; AIndex: integer);
+procedure TForm1.MenuCommitGraphClick(Sender: TObject);
 begin
-  if (AIndex < 0) or (AIndex >= FSyncHashes.Count) or (FSyncHashes[AIndex] = '') then
-    Exit;
-  ShowBlameCommit(FSyncHashes[AIndex]);
+  ShowCommitGraph;
+end;
+
+procedure TForm1.GraphPick(Sender: TObject; const AHash: string);
+begin
+  ShowBlameCommit(AHash);
 end;
 
 { A click on a commit in the summary of a clean tree shows it against its
-  parent, as a pick from the sync list does. }
+  parent, as a pick from the commit graph does. }
 procedure TForm1.SummarySelectCommit(Sender: TObject; const AHash: string);
 begin
   ShowBlameCommit(AHash);
 end;
 
 { The status bar's parts: the branch drops the branch list up from it,
-  as in the summary; the ahead/behind counts list their commits; the
+  as in the summary; the ahead/behind counts open the commit graph; the
   pull request opens on GitHub; the conflicts show the first conflicted
   file; the name and the file count go back to the summary. }
 procedure TForm1.StatusPartClick(Sender: TObject; APart: TGittanStatusPart;
@@ -1255,7 +1246,7 @@ begin
     spBranch:
       SummaryBranchClick(Sender, AScreenRect);
     spSync:
-      SyncClick(AScreenRect);
+      ShowCommitGraph;
     spPull:
       PullChipClick(AScreenRect);
     spUpdate:

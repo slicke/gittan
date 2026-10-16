@@ -6,7 +6,8 @@ unit gittan.submodules;
   and the commit its remote's branch is at, asked with git ls-remote, so
   nothing is fetched and nothing in the submodule changes. When the
   submodule already has the remote's commit, the commits between are
-  counted and listed. TGittanSubmoduleJob runs CheckSubmodule in a thread,
+  counted and listed. CompareSubmodule tells how a changed submodule
+  moved between the two sides of a comparison. TGittanSubmoduleJob runs CheckSubmodule in a thread,
   since ls-remote goes to the network. Nothing here needs the LCL; the
   unit is tested in tests/testsubmodules.pp. }
 
@@ -73,6 +74,22 @@ type
     Incoming: TGittanSubmoduleCommits;
   end;
 
+  {** How a submodule moved between the two sides of what is compared:
+    FromHash is the commit the left side records for it, ToHash the one
+    the right side records, or for the work tree the commit checked out
+    (the recorded one when not initialized); either is empty when that
+    side has no submodule there. FromCommit and ToCommit describe them
+    when the submodule has them (Hash empty otherwise). Added counts the
+    commits ToHash has that FromHash lacks, Removed the other way round,
+    both -1 when they cannot be counted; Commits lists the added ones and
+    Dropped the removed ones, newest first, at most MaxIncoming each. }
+  TGittanSubmoduleChange = record
+    FromHash, ToHash: string;
+    FromCommit, ToCommit: TGittanSubmoduleCommit;
+    Added, Removed: integer;
+    Commits, Dropped: TGittanSubmoduleCommits;
+  end;
+
 {** Reads what `git config -z --get-regexp ^submodule\.` prints for
   .gitmodules into one record per submodule, in the order they come,
   each with its name, path, URL and branch. A submodule without a path
@@ -105,6 +122,10 @@ procedure ParseSubmoduleLog(const AOutput: string; out ACommits: TGittanSubmodul
 {** The format CheckSubmodule gives git log. }
 function SubmoduleLogFormat: string;
 
+{** The commit of the gitlink `git ls-tree -z <ref> -- <path>` printed,
+  empty when it printed none (the path is a file, or not there). }
+function ParseGitlink(const AOutput: string): string;
+
 {** Lists the submodules of the repository at ARoot: the ones .gitmodules
   names, with the commits the index records. Empty, and true, when there
   is no .gitmodules; false, with git's message in AError, when git
@@ -119,6 +140,13 @@ function ListSubmodules(const ARoot: string; out AList: TGittanSubmodules;
   ".". }
 function CheckSubmodule(const ARoot: string; const ASub: TGittanSubmodule;
   const ASuperBranch: string): TGittanSubmoduleInfo;
+
+{** How ASub of the repository at ARoot moved from the commit ALeft
+  records for it to the one ARight records, or, for an empty ARight, to
+  the commit checked out in it. Only the submodule's own objects are
+  read, nothing is fetched. }
+function CompareSubmodule(const ARoot: string; const ASub: TGittanSubmodule;
+  const ALeft, ARight: string): TGittanSubmoduleChange;
 
 type
   {** Runs CheckSubmodule in a thread. OnDone is called in the main thread
@@ -385,6 +413,18 @@ begin
   end;
 end;
 
+{ The entry is "<mode> <type> <hash>\t<path>". }
+function ParseGitlink(const AOutput: string): string;
+var
+  Tab: integer;
+begin
+  Result := '';
+  Tab := Pos(#9, AOutput);
+  if (Tab = 0) or (Copy(AOutput, 1, 14) <> '160000 commit ') then
+    Exit;
+  Result := Copy(AOutput, 15, Tab - 15);
+end;
+
 function ListSubmodules(const ARoot: string; out AList: TGittanSubmodules;
   out AError: string): boolean;
 var
@@ -431,19 +471,101 @@ begin
     Output, Err);
 end;
 
+{ Whether the submodule's work tree ADir has a git directory. }
+function IsInitialized(const ADir: string): boolean;
+begin
+  Result := FileExists(IncludeTrailingPathDelimiter(ADir) + '.git') or
+    DirectoryExists(IncludeTrailingPathDelimiter(ADir) + '.git');
+end;
+
+{ The counts of `git rev-list --left-right --count A...B` in ADir: the
+  commits only A has in ALeft, only B has in ARight; false when git
+  failed. }
+function CountApart(const ADir, A, B: string; out ALeft, ARight: integer): boolean;
+var
+  Output, Err: string;
+  Tab: integer;
+begin
+  ALeft := -1;
+  ARight := -1;
+  if not RunGitIn(ADir, ['rev-list', '--left-right', '--count', A + '...' + B],
+    Output, Err) then
+    Exit(False);
+  Output := Trim(Output);
+  Tab := Pos(#9, Output);
+  Result := (Tab > 0) and TryStrToInt(Copy(Output, 1, Tab - 1), ALeft) and
+    TryStrToInt(Copy(Output, Tab + 1, MaxInt), ARight);
+  if not Result then
+  begin
+    ALeft := -1;
+    ARight := -1;
+  end;
+end;
+
+{ The commits of ARange in ADir, newest first, at most MaxIncoming. }
+function LogRange(const ADir, ARange: string): TGittanSubmoduleCommits;
+var
+  Output, Err: string;
+begin
+  Result := nil;
+  if RunGitIn(ADir, ['log', '--no-color', '-n', IntToStr(MaxIncoming),
+    SubmoduleLogFormat, ARange, '--'], Output, Err) then
+    ParseSubmoduleLog(Output, Result);
+end;
+
+function CompareSubmodule(const ARoot: string; const ASub: TGittanSubmodule;
+  const ALeft, ARight: string): TGittanSubmoduleChange;
+var
+  Dir, Output, Err: string;
+  Initialized: boolean;
+begin
+  Result := Default(TGittanSubmoduleChange);
+  Result.Added := -1;
+  Result.Removed := -1;
+  Dir := IncludeTrailingPathDelimiter(ARoot) + SetDirSeparators(ASub.Path);
+  Initialized := IsInitialized(Dir);
+  if RunGitIn(ARoot, ['ls-tree', '-z', ALeft, '--', ASub.Path], Output, Err) then
+    Result.FromHash := ParseGitlink(Output);
+  if ARight <> '' then
+  begin
+    if RunGitIn(ARoot, ['ls-tree', '-z', ARight, '--', ASub.Path], Output, Err) then
+      Result.ToHash := ParseGitlink(Output);
+  end
+  else if Initialized and RunGitIn(Dir, ['rev-parse', '--verify', '-q', 'HEAD'],
+    Output, Err) then
+    Result.ToHash := Trim(Output)
+  else
+    Result.ToHash := ASub.Recorded;
+  if Result.FromHash = Result.ToHash then
+  begin
+    Result.Added := 0;
+    Result.Removed := 0;
+    Exit;
+  end;
+  if not Initialized then
+    Exit;
+  Result.FromCommit := DescribeCommit(Dir, Result.FromHash);
+  Result.ToCommit := DescribeCommit(Dir, Result.ToHash);
+  if (Result.FromCommit.Hash = '') or (Result.ToCommit.Hash = '') or
+    not CountApart(Dir, Result.FromHash, Result.ToHash, Result.Removed, Result.Added) then
+    Exit;
+  if Result.Added > 0 then
+    Result.Commits := LogRange(Dir, Result.FromHash + '..' + Result.ToHash);
+  if Result.Removed > 0 then
+    Result.Dropped := LogRange(Dir, Result.ToHash + '..' + Result.FromHash);
+end;
+
 function CheckSubmodule(const ARoot: string; const ASub: TGittanSubmodule;
   const ASuperBranch: string): TGittanSubmoduleInfo;
 var
   Dir, Output, Err, RunDir, Remote, SuperUrl: string;
-  Tab: integer;
 begin
   Result := Default(TGittanSubmoduleInfo);
   Result.Path := ASub.Path;
   Result.Behind := -1;
   Result.Ahead := -1;
   Dir := IncludeTrailingPathDelimiter(ARoot) + SetDirSeparators(ASub.Path);
-  Result.Initialized := FileExists(IncludeTrailingPathDelimiter(Dir) + '.git') or
-    DirectoryExists(IncludeTrailingPathDelimiter(Dir) + '.git');
+  Result.Initialized := IsInitialized(Dir);
   if Result.Initialized and RunGitIn(Dir, ['rev-parse', '--verify', '-q', 'HEAD'],
     Output, Err) then
     Result.CheckedOut := Trim(Output);
@@ -507,28 +629,16 @@ begin
   if not Result.Initialized or not HasObject(Dir, Result.Tip) or
     not HasObject(Dir, ASub.Recorded) then
     Exit;
-  if not RunGitIn(Dir, ['rev-list', '--left-right', '--count',
-    ASub.Recorded + '...' + Result.Tip], Output, Err) then
+  if not CountApart(Dir, ASub.Recorded, Result.Tip, Result.Ahead, Result.Behind) then
     Exit;
-  Output := Trim(Output);
-  Tab := Pos(#9, Output);
-  if (Tab = 0) or not TryStrToInt(Copy(Output, 1, Tab - 1), Result.Ahead) or
-    not TryStrToInt(Copy(Output, Tab + 1, MaxInt), Result.Behind) then
-  begin
-    Result.Ahead := -1;
-    Result.Behind := -1;
-    Exit;
-  end;
   if (Result.Behind > 0) and (Result.Ahead > 0) then
     Result.State := smDiverged
   else if Result.Behind > 0 then
     Result.State := smBehind
   else
     Result.State := smAhead;
-  if (Result.Behind > 0) and RunGitIn(Dir, ['log', '--no-color', '-n',
-    IntToStr(MaxIncoming), SubmoduleLogFormat, ASub.Recorded + '..' + Result.Tip, '--'],
-    Output, Err) then
-    ParseSubmoduleLog(Output, Result.Incoming);
+  if Result.Behind > 0 then
+    Result.Incoming := LogRange(Dir, ASub.Recorded + '..' + Result.Tip);
 end;
 
 { ---------------------------------------------------------------------------
