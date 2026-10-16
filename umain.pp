@@ -362,6 +362,9 @@ type
     FHistoryTopLine, FHistoryCaretY: integer;
     { The layered rows of the history, see TGittanHistory.Layers. }
     FHistoryRows: TGittanHistoryRows;
+    { The name the changes not committed yet are made under, for their
+      initial (see DrawInitials). }
+    FHistoryUser: string;
     { View > Review Comments (see umain.reviews.inc): whether it is on,
       its menu item, the job that fetches the threads, the threads of the
       pull request FThreadsNumber of FThreadsRepo with its head commit,
@@ -559,6 +562,8 @@ type
     procedure MarkHistoryWords(AEd: TATSynEdit; ARow: integer;
       const ASpans: TGittanSpans; ACommit: integer);
     procedure MarkSwatch(AEd: TATSynEdit; ARow, ACommit: integer);
+    procedure SetInitialBand(AEd: TATSynEdit);
+    procedure DrawInitials(AEd: TATSynEdit; C: TCanvas);
     procedure HistoryCounts(AIndex: integer; out AAdded, ADeleted: integer);
     function HistoryHeaderText(AIndex: integer): string;
     procedure HistoryClick(ARow: integer);
@@ -1089,6 +1094,11 @@ const
   { The band with the discard buttons (see umain.discard.inc), right of
     the editor's own bands, next to the text. }
   gutterTagDiscard = 101;
+  { The band of the history view with the author's initial on every
+    row (see umain.history.inc), next to the text, and its width in
+    characters. }
+  gutterTagInitial = 102;
+  InitialCols = 3;
   BlameAgeCols = 5;
   BlameMaxAuthorCols = 20;
   { How long the mouse rests on a word before its definition is shown. }
@@ -1426,6 +1436,9 @@ begin
   { The blame band, leftmost, hidden until View > Blame; the editor
     leaves its size alone (see SetBlameBand). }
   AEd.Gutter.Add(0, 0, gutterTagBlame, False, False);
+  { The initials band, next to the text, shown in the history view (see
+    SetInitialBand). }
+  AEd.Gutter.Add(-1, 0, gutterTagInitial, False, False);
   { The discard band, rightmost, shown with a changed file (see
     SetDiscardBand). }
   AEd.Gutter.Add(-1, 0, gutterTagDiscard, False, False);

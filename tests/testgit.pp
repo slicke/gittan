@@ -44,6 +44,7 @@ type
     procedure TestCommitRange;
     procedure TestLineHistory;
     procedure TestRemoteFor;
+    procedure TestUserName;
     procedure TestFetchPullRequest;
     procedure TestDefaultBranchAndMergeBase;
     procedure TestAheadBehind;
@@ -646,6 +647,14 @@ begin
   AssertEquals('origin', FRepo.RemoteFor(''));
   Git(['remote', 'remove', 'origin']);
   AssertEquals('upstream', FRepo.RemoteFor('nobody/nothing'));
+end;
+
+procedure TGitRepoTest.TestUserName;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  Git(['config', 'user.name', '  Björn Lindh ']);
+  AssertEquals('Björn Lindh', FRepo.UserName);
 end;
 
 { A bare repository stands in for GitHub: it serves the pull request as

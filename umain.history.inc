@@ -373,6 +373,7 @@ begin
   FChangeLines.Clear;
   FExpanded := nil;
   FWordSpans := nil;
+  FHistoryUser := FRepo.UserName;
   Rows := nil;
   for c := 0 to High(FHistory.Commits) do
     AddRow(rowCommit, c);
@@ -485,6 +486,104 @@ begin
   {$ELSE}
   Result := AText;
   {$ENDIF}
+end;
+
+{ The initials band is shown in the history view, on the new side,
+  which is the only one the view uses; its width follows the zoom, as
+  the blame band's does. }
+procedure TForm1.SetInitialBand(AEd: TATSynEdit);
+var
+  Band, W: integer;
+  Shown: boolean;
+begin
+  Band := AEd.Gutter.FindIndexByTag(gutterTagInitial);
+  if Band < 0 then
+    Exit;
+  Shown := (FView = gvHistory) and (AEd = Edit);
+  W := InitialCols * EditorCharWidth(AEd);
+  if (AEd.Gutter[Band].Visible <> Shown) or (AEd.Gutter[Band].Size <> W) then
+  begin
+    AEd.Gutter[Band].Visible := Shown;
+    AEd.Gutter[Band].Size := W;
+    AEd.Update(True);
+  end;
+end;
+
+{ The first letter of AName in upper case, composed (see ComposedText),
+  or empty for an empty name. }
+function NameInitial(const AName: string): string;
+var
+  Name: string;
+begin
+  Name := Trim(ComposedText(AName));
+  if Name = '' then
+    Exit('');
+  Result := UTF8UpperCase(UTF8Copy(Name, 1, 1));
+end;
+
+{ Paints the initials band: on every row with a commit, its legend row
+  included, the initial of the commit's author (the user's for the
+  changes not committed yet) on a flat rounded badge in the tint of the
+  commit's rows, the letter in its swatch tone, so the badge reads as
+  part of its row. A line older than the history has no badge. Only the
+  first row of a wrapped line gets one. }
+procedure TForm1.DrawInitials(AEd: TATSynEdit; C: TCanvas);
+var
+  Band, W, CharH, Y, Key, Radius, Pad: integer;
+  Item: TATWrapItem;
+  Info: TGittanBlameCommit;
+  Src: TObject;
+  Letter: string;
+  Badge: TRect;
+begin
+  Band := AEd.Gutter.FindIndexByTag(gutterTagInitial);
+  if (Band < 0) or not AEd.Gutter[Band].Visible or (FView <> gvHistory) or
+    (AEd <> Edit) then
+    Exit;
+  CharH := AEd.TextCharSize.Y;
+  Pad := Max(1, CharH div 10);
+  Radius := Max(2, CharH div 3);
+  C.Font.Name := AEd.Font.Name;
+  C.Font.Size := EditorFontSize(AEd);
+  C.Font.Style := [fsBold];
+  C.Pen.Style := psClear;
+  C.Clipping := True;
+  C.ClipRect := Rect(AEd.Gutter[Band].Left, AEd.RectMain.Top, AEd.Gutter[Band].Right,
+    AEd.RectMain.Bottom);
+  try
+    W := AEd.WrapInfo.FindIndexOfLineNumber(AEd.LineTop);
+    while W < AEd.WrapInfo.Count do
+    begin
+      Item := AEd.WrapInfo[W];
+      Inc(W);
+      if not Item.bInitial then
+        Continue;
+      Y := AEd.CaretPosToClientPos(Point(0, Item.NLineIndex)).Y;
+      if Y >= AEd.RectMain.Bottom then
+        Break;
+      if not CommitOfRow(AEd, Item.NLineIndex, Info, Key, Src) then
+        Continue;
+      if Info.Uncommitted then
+        Letter := NameInitial(FHistoryUser)
+      else
+        Letter := NameInitial(Info.Author);
+      if Letter = '' then
+        Continue;
+      Badge := Rect(AEd.Gutter[Band].Left + Pad * 2, Y + Pad,
+        AEd.Gutter[Band].Right - Pad * 2, Y + CharH - Pad);
+      C.Brush.Style := bsSolid;
+      C.Brush.Color := HistoryColor(Key, htRow);
+      C.RoundRect(Badge, Radius, Radius);
+      C.Brush.Style := bsClear;
+      C.Font.Color := HistoryColor(Key, htSwatch);
+      C.TextOut((Badge.Left + Badge.Right - C.TextWidth(Letter)) div 2,
+        (Badge.Top + Badge.Bottom - C.TextHeight(Letter)) div 2, Letter);
+    end;
+  finally
+    C.Clipping := False;
+    C.Font.Style := [];
+    C.Pen.Style := psSolid;
+  end;
 end;
 
 { The legend row of commit AIndex: the swatch (colored by MarkSwatch),

@@ -198,6 +198,8 @@ begin
   SetBlameBand(FEditOld);
   SetDiscardBand(Edit);
   SetDiscardBand(FEditOld);
+  SetInitialBand(Edit);
+  SetInitialBand(FEditOld);
 end;
 
 { The band's width is in pixels of the editor's font at its zoom, and
@@ -305,20 +307,28 @@ begin
 end;
 
 { The hint for the mouse at X, Y of AEd: the commit of the row under it
-  when X is on the band, else empty. The row is found from Y alone, at
-  the first column of the text. }
+  when X is on the band or the initials band, else empty. The row is
+  found from Y alone, at the first column of the text. }
 function TForm1.BlameHintAt(AEd: TATSynEdit; X, Y: integer): string;
+
+  function OnBand(ATag: integer): boolean;
+  var
+    Band: integer;
+  begin
+    Band := AEd.Gutter.FindIndexByTag(ATag);
+    Result := (Band >= 0) and AEd.Gutter[Band].Visible and (X >= AEd.Gutter[Band].Left) and
+      (X < AEd.Gutter[Band].Right);
+  end;
+
 var
-  Band, Key: integer;
+  Key: integer;
   Details: TATEditorPosDetails;
   P: TPoint;
   Info: TGittanBlameCommit;
   Src: TObject;
 begin
   Result := '';
-  Band := AEd.Gutter.FindIndexByTag(gutterTagBlame);
-  if (Band < 0) or not AEd.Gutter[Band].Visible or (X < AEd.Gutter[Band].Left) or
-    (X >= AEd.Gutter[Band].Right) then
+  if not OnBand(gutterTagBlame) and not OnBand(gutterTagInitial) then
     Exit;
   P := AEd.ClientPosToCaretPos(ATPoint(AEd.RectMain.Left + 1, Y), Details);
   if (P.Y < 0) or Details.BelowAllText then
@@ -419,7 +429,8 @@ begin
       DiscardBlockAt(BlockAtRow(ALine));
     Exit;
   end;
-  if (ABand < 0) or (Ed.Gutter[ABand].Tag <> gutterTagBlame) then
+  if (ABand < 0) or ((Ed.Gutter[ABand].Tag <> gutterTagBlame) and
+    (Ed.Gutter[ABand].Tag <> gutterTagInitial)) then
     Exit;
   AHandled := True;
   if not CommitOfRow(Ed, ALine, Info, Key, Src) or Info.Uncommitted then

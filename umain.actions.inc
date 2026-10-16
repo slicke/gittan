@@ -639,6 +639,7 @@ var
 begin
   DrawGapGutter(TATSynEdit(Sender), C);
   DrawBlame(TATSynEdit(Sender), C);
+  DrawInitials(TATSynEdit(Sender), C);
   DrawDiscard(TATSynEdit(Sender), C);
   if (Sender <> Edit) or (FOverscroll = 0) or (FView <> gvChanges) then
     Exit;

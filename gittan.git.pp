@@ -108,6 +108,10 @@ type
     function Switch(const ABranch: string): boolean;
     {** Whether ARef names a commit in the repository. }
     function HasCommit(const ARef: string): boolean;
+    {** The name the repository commits under (`git config user.name`,
+      the repository's own setting before the global one), empty when
+      none is set. }
+    function UserName: string;
     {** The remote whose URL holds ARepoPath ("owner/repo", compared
       without regard to case), else origin, else the first remote, else
       empty. }
@@ -691,6 +695,13 @@ var
 begin
   Result := (FRoot <> '') and (ARef <> '') and
     RunGit(FRoot, ['rev-parse', '--verify', '-q', ARef + '^{commit}'], Id);
+end;
+
+function TGittanRepo.UserName: string;
+begin
+  if (FRoot = '') or not RunGit(FRoot, ['config', 'user.name'], Result) then
+    Exit('');
+  Result := Trim(Result);
 end;
 
 function TGittanRepo.RemoteFor(const ARepoPath: string): string;
