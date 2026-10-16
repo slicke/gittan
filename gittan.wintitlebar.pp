@@ -366,14 +366,15 @@ constructor TGittanWinTitleBar.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
   ControlStyle := ControlStyle + [csOpaque];
-  Height := Scale96ToForm(BarHeight);
+  { Not Scale96ToForm: the bar has no form yet. }
+  Height := Scale96ToScreen(BarHeight);
   FHotIndex := -1;
   FPressedIndex := -1;
   FOpenMenu := -1;
   FActive := True;
   FNav := TGittanChangeNav.Create(Self);
   FNav.Parent := Self;
-  FNav.Height := Scale96ToForm(NavHeight);
+  FNav.Height := Scale96ToScreen(NavHeight);
   FNav.Visible := False;
   if Screen.Fonts.IndexOf('Segoe Fluent Icons') >= 0 then
     FGlyphFont := 'Segoe Fluent Icons'
