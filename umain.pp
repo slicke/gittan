@@ -131,6 +131,10 @@ type
     FPullTimer: TTimer;
     FPull: TGittanPullRequest;
     FHasPull: boolean;
+    { The local branches the job found tracking a branch deleted on
+      the remote, which the branch list marks and the summary says for
+      the current one. }
+    FGoneBranches: TStringList;
     FPulls: TGittanPullRequests;
     FPullError, FPullKey: string;
     FPullMenu, FOpenPullItem, FCopyPullItem: TMenuItem;
@@ -985,6 +989,7 @@ resourcestring
   rsDiffLexer = 'Diff';
   rsBranches = 'Branches';
   rsRemoteBranches = 'Remote branches';
+  rsBranchGone = 'deleted on remote';
   rsFilterBranches = 'Filter branches';
   rsVsBase = 'vs %s';
   rsRepoDiffTitle = 'Repository diff';
@@ -1333,6 +1338,7 @@ begin
   FSummary.OnSelectCommit := @SummarySelectCommit;
   { The branch list pops up over the form, under the branch. }
   FBranchNames := TStringList.Create;
+  FGoneBranches := TStringList.Create;
   FBranchPopup := TGittanPopupList.Create(Self);
   FBranchPopup.Parent := Self;
   FBranchPopup.FilterHint := rsFilterBranches;
@@ -1410,6 +1416,7 @@ begin
   AbandonSubmoduleJobs;
   FreeAndNil(FSubJobs);
   FBranchNames.Free;
+  FGoneBranches.Free;
   StopBlame;
   StopIndexing;
   SaveIndex;

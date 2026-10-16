@@ -108,6 +108,11 @@ type
       committed first: the local ones in ALocal, the remote-tracking ones
       (origin/main) in ARemote, the symbolic origin/HEAD left out. }
     function Branches(ALocal, ARemote: TStrings): boolean;
+    {** The local branches whose upstream is gone (`[gone]` in
+      `git branch -vv`): the branch it tracks was deleted on the remote
+      and a fetch with --prune, or the push that deleted it, removed the
+      remote-tracking ref. }
+    function GoneBranches(AList: TStrings): boolean;
     {** Switches the work tree to the branch ABranch (`git switch`): a
       local branch, or the name of a remote-tracking one without the
       remote, which makes a local branch tracking it. False, with git's
@@ -307,6 +312,13 @@ function RunGitHubCli(const AExe, ADir: string; const AArgs: array of string;
 function RunGitIn(const ADir: string; const AArgs: array of string;
   out AOutput, AError: string; const AIndexFile: string = ''): boolean;
 
+{** Puts in AList the local branches of the repository in ADir that track
+  a branch no longer on its remote: git ls-remote asks each remote once,
+  since the remote-tracking ref stays until a fetch with --prune. A
+  remote that cannot be reached counts none of its branches as gone.
+  For threads: it goes to the network. }
+procedure GoneUpstreamsIn(const ADir: string; AList: TStrings);
+
 {** S quoted as the C runtime of Windows splits a command line: in double
   quotes, with a quote inside escaped and the backslashes before it or
   before the closing quote doubled; S as it is when it holds no space, tab
@@ -427,6 +439,60 @@ begin
     if AError = '' then
       AError := Trim(AOutput);
     AOutput := '';
+  end;
+end;
+
+{ Each line of for-each-ref is "branch<TAB>remote<TAB>refs/heads/x",
+  the last two empty without an upstream; each of ls-remote's is
+  "<id><TAB>refs/heads/x". }
+procedure GoneUpstreamsIn(const ADir: string; AList: TStrings);
+var
+  Output, Err, Line, Remote: string;
+  Tracks, Fields, Heads, Asked: TStringList;
+  i: integer;
+begin
+  AList.Clear;
+  if not RunGitIn(ADir, ['for-each-ref',
+    '--format=%(refname:short)%09%(upstream:remotename)%09%(upstream:remoteref)',
+    'refs/heads'], Output, Err) then
+    Exit;
+  Tracks := TStringList.Create;
+  Fields := TStringList.Create;
+  Heads := TStringList.Create;
+  Asked := TStringList.Create;
+  try
+    Tracks.Text := Output;
+    Fields.Delimiter := #9;
+    Fields.StrictDelimiter := True;
+    Heads.Sorted := True;
+    for i := 0 to Tracks.Count - 1 do
+    begin
+      Fields.DelimitedText := Tracks[i];
+      if (Fields.Count < 3) or (Fields[1] = '') or (Fields[2] = '') then
+        Continue;
+      Remote := Fields[1];
+      if Asked.IndexOf(Remote) < 0 then
+      begin
+        Asked.Add(Remote);
+        if RunGitIn(ADir, ['ls-remote', '--heads', Remote], Output, Err) then
+        begin
+          for Line in Output.Split([#10]) do
+            if Pos(#9, Line) > 0 then
+              Heads.Add(Remote + #9 + Copy(Line, Pos(#9, Line) + 1, MaxInt));
+        end
+        else
+          { Not reached: one ref stands for it, which no branch matches. }
+          Heads.Add(Remote + #9#9);
+      end;
+      if (Heads.IndexOf(Remote + #9#9) < 0) and
+        (Heads.IndexOf(Remote + #9 + Fields[2]) < 0) then
+        AList.Add(Fields[0]);
+    end;
+  finally
+    Tracks.Free;
+    Fields.Free;
+    Heads.Free;
+    Asked.Free;
   end;
 end;
 
@@ -977,6 +1043,33 @@ begin
   if FRoot = '' then
     Exit(False);
   Result := RefGroup('refs/heads', ALocal) and RefGroup('refs/remotes', ARemote);
+end;
+
+function TGittanRepo.GoneBranches(AList: TStrings): boolean;
+var
+  Output, Line: string;
+  Raw: TStringList;
+  Tab: integer;
+begin
+  AList.Clear;
+  if FRoot = '' then
+    Exit(False);
+  Result := RunGit(FRoot, ['for-each-ref', '--format=%(refname:short)%09%(upstream:track)',
+    'refs/heads'], Output);
+  if not Result then
+    Exit;
+  Raw := TStringList.Create;
+  try
+    Raw.Text := Output;
+    for Line in Raw do
+    begin
+      Tab := Pos(#9, Line);
+      if (Tab > 1) and (Copy(Line, Tab + 1, MaxInt) = '[gone]') then
+        AList.Add(Copy(Line, 1, Tab - 1));
+    end;
+  finally
+    Raw.Free;
+  end;
 end;
 
 function TGittanRepo.Switch(const ABranch: string): boolean;

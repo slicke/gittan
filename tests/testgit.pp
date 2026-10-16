@@ -55,6 +55,8 @@ type
     procedure TestGraphCommits;
     procedure TestOperation;
     procedure TestBranchesAndSwitch;
+    procedure TestGoneBranches;
+    procedure TestGoneUpstreams;
   end;
 
 implementation
@@ -1140,6 +1142,79 @@ begin
   AssertFalse('a local change the switch would overwrite', FRepo.Switch('topic'));
   AssertTrue(Pos('overwritten', FRepo.Error) > 0);
   AssertEquals(Branch, FRepo.Branch);
+end;
+
+{ A branch whose upstream ref is missing is gone; one tracking a ref
+  that is there, or tracking nothing, is not. No remote is reached:
+  the config and the remote-tracking ref are set by hand. }
+procedure TGitRepoTest.TestGoneBranches;
+var
+  Gone: TStringList;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  Git(['branch', 'topic']);
+  Git(['branch', 'kept']);
+  Git(['branch', 'loose']);
+  Git(['remote', 'add', 'origin', FDir + '-nowhere']);
+  Git(['update-ref', 'refs/remotes/origin/kept', 'HEAD']);
+  Git(['branch', '-q', '-u', 'origin/kept', 'kept']);
+  Git(['config', 'branch.topic.remote', 'origin']);
+  Git(['config', 'branch.topic.merge', 'refs/heads/topic']);
+  Gone := TStringList.Create;
+  try
+    AssertTrue(FRepo.GoneBranches(Gone));
+    AssertEquals(1, Gone.Count);
+    AssertEquals('topic', Gone[0]);
+  finally
+    Gone.Free;
+  end;
+end;
+
+{ The branch is deleted on the remote behind our back, as GitHub does
+  after a merge: the remote-tracking ref stays, so only the remote
+  knows. }
+procedure TGitRepoTest.TestGoneUpstreams;
+var
+  Remote, Branch, Output: string;
+  Status: integer;
+  Gone: TStringList;
+
+  function GoneText: string;
+  begin
+    GoneUpstreamsIn(FDir, Gone);
+    Result := Trim(Gone.Text);
+  end;
+
+begin
+  Gone := TStringList.Create;
+  MakeHistory;
+  Remote := FDir + '-remote';
+  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Status,
+    [poStderrToOutPut]) <> 0 then
+    Fail('could not make a bare repository');
+  try
+    Branch := Trim(Git(['rev-parse', '--abbrev-ref', 'HEAD']));
+    AssertEquals('no upstream', '', GoneText);
+    Git(['remote', 'add', 'origin', Remote]);
+    Git(['push', '-q', '-u', 'origin', Branch]);
+    Git(['branch', 'topic']);
+    Git(['push', '-q', '-u', 'origin', 'topic']);
+    Git(['branch', 'loose']);
+    AssertEquals('still there', '', GoneText);
+    if RunCommandIndir(Remote, 'git', ['update-ref', '-d', 'refs/heads/' + Branch],
+      Output, Status, [poStderrToOutPut]) <> 0 then
+      Fail('could not delete the branch on the remote');
+    AssertTrue(Trim(Git(['rev-parse', 'origin/' + Branch])) <> '');
+    AssertEquals('deleted on the remote', Branch, GoneText);
+  finally
+    RemoveTree(Remote);
+  end;
+  try
+    AssertEquals('remote unreachable', '', GoneText);
+  finally
+    Gone.Free;
+  end;
 end;
 
 initialization

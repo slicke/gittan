@@ -59,12 +59,15 @@ type
     only says which; empty skips it) and gh pr list, in a thread, since
     both go to the network. OnDone is called in the main thread when both are
     done, as long as the job has not been stopped. A branch with no pull
-    request is not a failure: HasPull is false and Error empty. }
+    request is not a failure: HasPull is false and Error empty. The job
+    also asks the remotes which local branches track a branch that is
+    gone from them (GoneBranches), as GitHub deletes a merged one. }
   TGittanPullRequestJob = class(TThread)
   private
     FExe, FRoot, FBranch: string;
     FPull: TGittanPullRequest;
     FHasPull: boolean;
+    FGone: TStringList;
     FPulls: TGittanPullRequests;
     FError: string;
     FOnDone: TNotifyEvent;
@@ -73,12 +76,15 @@ type
     procedure Execute; override;
   public
     constructor Create(const AExe, ARoot, ABranch: string);
+    destructor Destroy; override;
     {** Drops the handler and ends the thread; a result still on its way
       is thrown away. Waits for a running gh only when AWait is set. }
     procedure Stop(AWait: boolean);
     property Branch: string read FBranch;
     property Pull: TGittanPullRequest read FPull;
     property HasPull: boolean read FHasPull;
+    {** The local branches whose upstream is deleted on its remote. }
+    property GoneBranches: TStringList read FGone;
     property Pulls: TGittanPullRequests read FPulls;
     {** gh's message when the list could not be read (no GitHub remote,
       not logged in), else empty. }
@@ -298,6 +304,13 @@ begin
   FExe := AExe;
   FRoot := ARoot;
   FBranch := ABranch;
+  FGone := TStringList.Create;
+end;
+
+destructor TGittanPullRequestJob.Destroy;
+begin
+  FGone.Free;
+  inherited Destroy;
 end;
 
 procedure TGittanPullRequestJob.Execute;
@@ -319,6 +332,8 @@ begin
   end
   else
     FError := Err;
+  if not Terminated then
+    GoneUpstreamsIn(FRoot, FGone);
   if not Terminated then
     Queue(@Notify);
 end;

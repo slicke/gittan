@@ -72,6 +72,9 @@ type
     FCommits: TGittanCommitLines;
     FAhead, FBehind: integer;
     FHasUpstream: boolean;
+    { The upstream is deleted on the remote: the sync line says so, in
+      red after a cross, in place of the counts. }
+    FUpstreamGone: boolean;
     FCommitsTop, FCommitHot: integer;
     FOnSelectCommit: TGittanSelectCommitEvent;
     FMeasure: TBitmap;
@@ -158,6 +161,9 @@ type
       files and some are not pushed. }
     procedure SetCommits(const ACommits: TGittanCommitLines;
       AAhead, ABehind: integer; AHasUpstream: boolean);
+    {** Whether the upstream is deleted on the remote, which the sync
+      line then says in place of the counts. }
+    procedure SetUpstreamGone(AGone: boolean);
     {** The color of the notes' links. }
     property LinkColor: TColor read FLink write FLink;
     {** The image list the file badges come from. }
@@ -195,6 +201,7 @@ resourcestring
   rsNotPushed = '%d not pushed';
   rsNotPulled = '%d not pulled';
   rsInSync = 'up to date with upstream';
+  rsUpstreamGone = '✕ upstream deleted on remote';
   rsBinary = 'binary';
   rsStaged = 'staged';
   rsPartlyStaged = 'partly staged';
@@ -301,6 +308,14 @@ end;
 { The commits are listed while some wait to be pushed; a branch that is
   pushed, or has no upstream to push to, has nothing to act on, so its
   clean state stands alone. }
+procedure TGittanSummary.SetUpstreamGone(AGone: boolean);
+begin
+  if FUpstreamGone = AGone then
+    Exit;
+  FUpstreamGone := AGone;
+  Invalidate;
+end;
+
 function TGittanSummary.ShowsCommits: boolean;
 begin
   Result := (Length(FStats) = 0) and (Length(FCommits) > 0) and FHasUpstream
@@ -1166,7 +1181,9 @@ var
 begin
   StartX := X;
   Canvas.Brush.Style := bsClear;
-  if FHasUpstream then
+  if FHasUpstream and FUpstreamGone then
+    Part(rsUpstreamGone, FDeleted)
+  else if FHasUpstream then
   begin
     if FAhead > 0 then
       Part('↑ ' + Format(rsNotPushed, [FAhead]), FLink);

@@ -836,34 +836,46 @@ end;
   Switching branch
   ---------------------------------------------------------------------------
   A click on the branch in the summary drops the branch list down from
-  it: the local branches with the current one checked, then the
+  it: the local branches with the current one checked (one whose
+  upstream is gone says "deleted on remote"), then the
   remote-tracking ones that have no local branch yet (shown with their
   remote, switched to by their name alone, which makes the local branch).
   Picking one runs git switch; what git refuses (a local change it would
   overwrite, an operation in progress) is told in the summary's notice. }
 procedure TForm1.SummaryBranchClick(Sender: TObject; const AScreenRect: TRect);
 var
-  Local, Remote: TStringList;
+  Local, Remote, Gone: TStringList;
   i, Slash: integer;
-  Short: string;
+  Short, Detail: string;
 begin
   if FRepo.Root = '' then
     Exit;
   Local := TStringList.Create;
   Remote := TStringList.Create;
+  Gone := TStringList.Create;
   try
     if not FRepo.Branches(Local, Remote) then
     begin
       FSummary.Notice := FRepo.Error;
       Exit;
     end;
+    FRepo.GoneBranches(Gone);
+    { What the remotes said, which a stale remote-tracking ref hides
+      from git. }
+    for i := 0 to FGoneBranches.Count - 1 do
+      if Gone.IndexOf(FGoneBranches[i]) < 0 then
+        Gone.Add(FGoneBranches[i]);
     FBranchPopup.Clear;
     FBranchNames.Clear;
     FBranchPopup.AddHeader(rsBranches);
     FBranchNames.Add('');
     for i := 0 to Local.Count - 1 do
     begin
-      FBranchPopup.Add(Local[i], '', Local[i] = FBranch);
+      if Gone.IndexOf(Local[i]) >= 0 then
+        Detail := rsBranchGone
+      else
+        Detail := '';
+      FBranchPopup.Add(Local[i], Detail, Local[i] = FBranch);
       FBranchNames.Add(Local[i]);
     end;
     for i := 0 to Remote.Count - 1 do
@@ -883,6 +895,7 @@ begin
   finally
     Local.Free;
     Remote.Free;
+    Gone.Free;
   end;
   FBranchPopup.Popup(AScreenRect);
 end;
@@ -1451,6 +1464,8 @@ begin
     FHasPull := False;
     FPulls := nil;
     FPullError := '';
+    FGoneBranches.Clear;
+    FSummary.SetUpstreamGone(False);
   end;
   FPullJob := TGittanPullRequestJob.Create(FGitHubCli, FRepo.Root, FBranch);
   FPullJob.OnDone := @PullJobDone;
@@ -1494,6 +1509,8 @@ begin
   FPull := Job.Pull;
   FPulls := Job.Pulls;
   FPullError := Job.Error;
+  FGoneBranches.Assign(Job.GoneBranches);
+  FSummary.SetUpstreamGone(FGoneBranches.IndexOf(FBranch) >= 0);
   UpdateStatus;
   RebuildPullMenu;
   { The review comments follow at the same pace. }
