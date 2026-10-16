@@ -49,6 +49,12 @@ type
     FBox: TScrollBox;
     FRows: TGittanGraphRows;
     FCommits: TGittanGraphCommits;
+    { Per row, worked out once since a paint of a row has to be quick
+      while it scrolls: the author and age, the age alone, and the
+      subject as it was last cut to fit, with the room it was cut for
+      (-1 before the first paint). }
+    FMetaFull, FMetaAge, FSubjects: array of string;
+    FSubjectRoom: TIntegerDynArray;
     FLanes: integer;
     FMore: boolean;
     FBranch: string;
@@ -76,6 +82,7 @@ type
     procedure PaintRow(ACanvas: TCanvas; AIndex, ATop: integer);
     function PaintRefs(ACanvas: TCanvas; const ARefs: TGittanGraphRefs;
       X, ACenterY, ARight: integer): integer;
+    function FitText(ACanvas: TCanvas; const AText: string; ARoom: integer): string;
     procedure Pick;
     procedure Dismiss;
     procedure KeyInput(var Key: word);
@@ -276,6 +283,21 @@ begin
   Dismiss;
   FCommits := ACommits;
   FLanes := GraphWidth(ACommits);
+  SetLength(FMetaFull, Length(FCommits));
+  SetLength(FMetaAge, Length(FCommits));
+  SetLength(FSubjects, Length(FCommits));
+  SetLength(FSubjectRoom, Length(FCommits));
+  for r := 0 to High(FCommits) do
+  begin
+    FMetaAge[r] := '';
+    if FCommits[r].Date > 0 then
+      FMetaAge[r] := ReviewAge(FCommits[r].Date, LocalTimeToUniversal(Now));
+    FMetaFull[r] := FCommits[r].Author;
+    if (FMetaFull[r] <> '') and (FMetaAge[r] <> '') then
+      FMetaFull[r] := FMetaFull[r] + ' · ';
+    FMetaFull[r] := FMetaFull[r] + FMetaAge[r];
+    FSubjectRoom[r] := -1;
+  end;
   FMore := AMore;
   FBranch := ABranch;
   FAhead := AAhead;
@@ -650,9 +672,9 @@ end;
 procedure TGittanCommitGraph.PaintRow(ACanvas: TCanvas; AIndex, ATop: integer);
 var
   C: TGittanGraphCommit;
-  i, CenterY, Bottom, X, Right, TextY, Room, n: integer;
+  i, CenterY, Bottom, X, Right, TextY, Room: integer;
   IsHead: boolean;
-  Meta, Subject, Mark: string;
+  Meta, Mark: string;
 begin
   C := FCommits[AIndex];
   CenterY := ATop + RowHeight div 2;
@@ -728,15 +750,9 @@ begin
   Dec(Right, ACanvas.TextWidth('↑') + Gap + Gap div 2);
 
   X := GraphRight;
-  Meta := C.Author;
-  if C.Date > 0 then
-  begin
-    if Meta <> '' then
-      Meta := Meta + ' · ';
-    Meta := Meta + ReviewAge(C.Date, LocalTimeToUniversal(Now));
-  end;
+  Meta := FMetaFull[AIndex];
   if Right - ACanvas.TextWidth(Meta) - Gap - X < FRows.Width div 3 then
-    Meta := ReviewAge(C.Date, LocalTimeToUniversal(Now));
+    Meta := FMetaAge[AIndex];
   if Right - ACanvas.TextWidth(Meta) - Gap - X < FRows.Width div 4 then
     Meta := '';
   if Meta <> '' then
@@ -749,19 +765,52 @@ begin
   X := PaintRefs(ACanvas, C.Refs, X, CenterY, Right);
   ACanvas.Font := Font;
   Room := Right - X;
-  Subject := C.Subject;
-  if ACanvas.TextWidth(Subject) > Room then
+  if FSubjectRoom[AIndex] <> Room then
   begin
-    n := UTF8Length(Subject);
-    while (n > 0) and (ACanvas.TextWidth(UTF8Copy(Subject, 1, n) + '…') > Room) do
-      Dec(n);
-    if n > 0 then
-      Subject := TrimRight(UTF8Copy(Subject, 1, n)) + '…'
-    else
-      Subject := '';
+    FSubjects[AIndex] := FitText(ACanvas, C.Subject, Room);
+    FSubjectRoom[AIndex] := Room;
   end;
   ACanvas.Font.Color := FText;
-  ACanvas.TextOut(X, TextY, Subject);
+  ACanvas.TextOut(X, TextY, FSubjects[AIndex]);
+end;
+
+{ AText cut to fit ARoom with an ellipsis. A subject can be a whole
+  paragraph, and measuring is slow, so it is first cut to as many
+  characters as could fit at a third of the width of an "n", then the
+  longest start that fits is found by halving. }
+function TGittanCommitGraph.FitText(ACanvas: TCanvas; const AText: string;
+  ARoom: integer): string;
+var
+  Lo, Hi, Mid, MaxChars: integer;
+  S: string;
+begin
+  if ARoom <= 0 then
+    Exit('');
+  MaxChars := ARoom div Max(1, ACanvas.TextWidth('n') div 3) + 1;
+  if UTF8Length(AText) > MaxChars then
+    S := UTF8Copy(AText, 1, MaxChars)
+  else
+  begin
+    S := AText;
+    if ACanvas.TextWidth(S) <= ARoom then
+      Exit(S);
+  end;
+  { The longest start of S that fits with the ellipsis: Lo fits, Hi
+    does not. }
+  Lo := 0;
+  Hi := UTF8Length(S) + 1;
+  while Hi - Lo > 1 do
+  begin
+    Mid := (Lo + Hi) div 2;
+    if ACanvas.TextWidth(UTF8Copy(S, 1, Mid) + '…') <= ARoom then
+      Lo := Mid
+    else
+      Hi := Mid;
+  end;
+  if Lo = 0 then
+    Result := ''
+  else
+    Result := TrimRight(UTF8Copy(S, 1, Lo)) + '…';
 end;
 
 { The refs as chips from X: the branch HEAD is on filled in the accent,
