@@ -20,7 +20,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Controls, Graphics, ImgList, gittan.git, gittan.icons,
-  gittan.reviews;
+  gittan.reviews, gittan.statusbar;
 
 type
   TGittanSelectFileEvent = procedure(Sender: TObject; const APath: string) of object;
@@ -174,7 +174,6 @@ uses
   Math, DateUtils, LazUTF8;
 
 resourcestring
-  rsOnBranch = 'on %s';
   rsOneFile = '1 changed file';
   rsManyFiles = '%d changed files';
   rsNoChanges = 'No changes';
@@ -213,6 +212,8 @@ const
   ChipPadX = 6;
   ChipPadY = 3;
   ChevronWidth = 14;
+  { Between the branch icon and the name, as in the status bar. }
+  IconGap = 5;
   { A note's card: room inside it, between cards, the colored stripe at
     its left, and the most lines of text it shows (the rest is on
     GitHub). }
@@ -657,7 +658,7 @@ end;
   next, a divider below. Y is advanced past the header. }
 procedure TGittanSummary.PaintHeader(var Y: integer);
 var
-  X, TitleHeight, BodyHeight, TextY, Added, Deleted, i: integer;
+  X, TitleHeight, BodyHeight, TextY, IconW, Added, Deleted, i: integer;
   Heading: string;
 begin
   Canvas.Brush.Style := bsClear;
@@ -671,18 +672,19 @@ begin
   X := Pad + Canvas.TextWidth(FRepoName) + Gap;
   Canvas.Font.Size := Font.Size;
   Canvas.Font.Style := [];
-  Canvas.Font.Color := FDim;
   FBranchRect := Rect(0, 0, 0, 0);
+  { The branch as the status bar shows it: a branch icon, the name in
+    the text color, and a dimmed chevron when a click drops the list.
+    The chip is filled while the mouse is over it. }
   if FBranch <> '' then
   begin
-    Heading := Format(rsOnBranch, [FBranch]);
     TextY := Y + TitleHeight - BodyHeight - 3;
+    IconW := BodyHeight - 4 + IconGap;
     if BranchClickable then
     begin
-      { A chip with a chevron, so the branch reads as something to
-        click; filled while the mouse is over it. }
       FBranchRect := Rect(X - ChipPadX, TextY - ChipPadY,
-        X + Canvas.TextWidth(Heading) + ChevronWidth + ChipPadX, TextY + BodyHeight + ChipPadY);
+        X + IconW + Canvas.TextWidth(FBranch) + ChevronWidth + ChipPadX,
+        TextY + BodyHeight + ChipPadY);
       if FBranchHot then
       begin
         Canvas.Pen.Style := psClear;
@@ -691,21 +693,24 @@ begin
         Canvas.RoundRect(FBranchRect, 8, 8);
         Canvas.Pen.Style := psSolid;
         Canvas.Brush.Style := bsClear;
-        Canvas.Font.Color := FText;
       end;
-      Canvas.TextOut(X, TextY, Heading);
-      Inc(X, Canvas.TextWidth(Heading) + ChevronWidth div 2);
-      Canvas.Pen.Color := Canvas.Font.Color;
+    end;
+    DrawStatusIcon(Canvas, HintBranch, X, TextY, BodyHeight, FDim);
+    Canvas.Pen.Width := 1;
+    Canvas.Brush.Style := bsClear;
+    Inc(X, IconW);
+    Canvas.Font.Color := FText;
+    Canvas.TextOut(X, TextY, FBranch);
+    Inc(X, Canvas.TextWidth(FBranch));
+    if BranchClickable then
+    begin
+      Inc(X, ChevronWidth div 2 + 1);
+      Canvas.Pen.Color := FDim;
       Canvas.Polyline([Point(X - 3, TextY + BodyHeight div 2 - 1),
         Point(X, TextY + BodyHeight div 2 + 2), Point(X + 3, TextY + BodyHeight div 2 - 1)]);
-      Inc(X, ChevronWidth div 2 + ChipPadX + Gap);
-      Canvas.Font.Color := FDim;
-    end
-    else
-    begin
-      Canvas.TextOut(X, TextY, Heading);
-      Inc(X, Canvas.TextWidth(Heading) + Gap);
+      Inc(X, ChevronWidth div 2 + ChipPadX);
     end;
+    Inc(X, Gap);
   end;
   if FBase <> '' then
   begin
