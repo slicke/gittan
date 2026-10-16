@@ -30,6 +30,8 @@ type
     procedure TestNoSubmodules;
     procedure TestCheck;
     procedure TestCheckNotInitialized;
+    procedure TestParseGitlink;
+    procedure TestCompare;
   end;
 
 implementation
@@ -299,6 +301,74 @@ begin
   CommitFile(Up, 'a.txt', 'second');
   Info := CheckSubmodule(Clone, List[0], '');
   AssertTrue(Info.State = smNotFetched);
+end;
+
+procedure TSubmodulesTest.TestParseGitlink;
+begin
+  AssertEquals('2222222222222222222222222222222222222222',
+    ParseGitlink('160000 commit 2222222222222222222222222222222222222222'#9'vendor/a'#0));
+  AssertEquals('', ParseGitlink('100644 blob 1111111111111111111111111111111111111111'#9'a'#0));
+  AssertEquals('', ParseGitlink(''));
+end;
+
+{ The submodule checked out at a newer commit than HEAD records, then at
+  an older one, then staged, then between two commits of the
+  repository. }
+procedure TSubmodulesTest.TestCompare;
+var
+  Up, Super, Lib, First, Third: string;
+  List: TGittanSubmodules;
+  Err: string;
+  Change: TGittanSubmoduleChange;
+begin
+  Up := IncludeTrailingPathDelimiter(FDir) + 'up';
+  Super := IncludeTrailingPathDelimiter(FDir) + 'super';
+  Lib := IncludeTrailingPathDelimiter(Super) + 'lib';
+  ForceDirectories(Up);
+  ForceDirectories(Super);
+  Git(Up, ['init', '-q']);
+  CommitFile(Up, 'a.txt', 'first');
+  First := Trim(Git(Up, ['rev-parse', 'HEAD']));
+  Git(Super, ['init', '-q']);
+  Git(Super, ['submodule', 'add', '-q', Up, 'lib']);
+  Git(Super, ['commit', '-q', '-m', 'add lib']);
+  AssertTrue(Err, ListSubmodules(Super, List, Err));
+
+  Change := CompareSubmodule(Super, List[0], 'HEAD', '');
+  AssertEquals(First, Change.FromHash);
+  AssertEquals(First, Change.ToHash);
+  AssertEquals(0, Change.Added);
+
+  CommitFile(Up, 'a.txt', 'second');
+  CommitFile(Up, 'a.txt', 'third');
+  Third := Trim(Git(Up, ['rev-parse', 'HEAD']));
+  Git(Lib, ['fetch', '-q']);
+  Git(Lib, ['checkout', '-q', Third]);
+  Change := CompareSubmodule(Super, List[0], 'HEAD', '');
+  AssertEquals(First, Change.FromHash);
+  AssertEquals(Third, Change.ToHash);
+  AssertEquals('first', Change.FromCommit.Subject);
+  AssertEquals('third', Change.ToCommit.Subject);
+  AssertEquals(2, Change.Added);
+  AssertEquals(0, Change.Removed);
+  AssertEquals(2, Length(Change.Commits));
+  AssertEquals('third', Change.Commits[0].Subject);
+  AssertEquals('second', Change.Commits[1].Subject);
+  AssertEquals(0, Length(Change.Dropped));
+
+  Git(Super, ['add', 'lib']);
+  Git(Super, ['commit', '-q', '-m', 'move lib']);
+  Git(Lib, ['checkout', '-q', First]);
+  Change := CompareSubmodule(Super, List[0], 'HEAD', '');
+  AssertEquals(0, Change.Added);
+  AssertEquals(2, Change.Removed);
+  AssertEquals(2, Length(Change.Dropped));
+  AssertEquals('third', Change.Dropped[0].Subject);
+
+  Change := CompareSubmodule(Super, List[0], 'HEAD~1', 'HEAD');
+  AssertEquals(First, Change.FromHash);
+  AssertEquals(Third, Change.ToHash);
+  AssertEquals(2, Change.Added);
 end;
 
 initialization

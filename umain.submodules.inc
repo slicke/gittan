@@ -16,7 +16,10 @@
   (FSubTimer), keeping the rows meanwhile. A click shows the submodule in the editor through
   ShowSubmodule: its URL and branch, the recorded commit, the checked out
   one, the remote's, and the remote's new commits when the submodule
-  has them. }
+  has them. A submodule git status reports changed is shown the same way
+  from its row in the summary or its node in the file tree, the view then
+  opening with how it moved (CompareSubmodule) and the commits it moved
+  by. }
 procedure TForm1.SetupSubmodules;
 begin
   FSubJobs := TList.Create;
@@ -71,14 +74,97 @@ end;
 procedure TForm1.FillSubmodules;
 var
   List: TGittanSubmodules;
-  Err: string;
+  Err, FromSide, ToSide: string;
+  i, j: integer;
 begin
   if not ListSubmodules(FRepo.Root, List, Err) then
     List := nil;
   FSubmodules := List;
+  { Only the changed ones are compared; that reads the submodule alone. }
+  FRepo.DiffSides(FromSide, ToSide);
+  SetLength(FSubChanges, Length(FSubmodules));
+  for i := 0 to High(FSubmodules) do
+  begin
+    FSubChanges[i] := Default(TGittanSubmoduleChange);
+    for j := 0 to High(FStats) do
+      if FStats[j].Path = FSubmodules[i].Path then
+      begin
+        FSubChanges[i] := CompareSubmodule(FRepo.Root, FSubmodules[i], FromSide, ToSide);
+        Break;
+      end;
+  end;
   if SubmoduleKey <> FSubKey then
     StartSubmoduleJobs;
   FillSubmoduleTree;
+end;
+
+function TForm1.SubmoduleAt(const APath: string): integer;
+var
+  i: integer;
+begin
+  for i := 0 to High(FSubmodules) do
+    if FSubmodules[i].Path = APath then
+      Exit(i);
+  Result := -1;
+end;
+
+function TForm1.SubmoduleMoveText(AIndex: integer): string;
+
+  function Short(const AHash: string): string;
+  begin
+    if AHash = '' then
+      Result := rsSubNone
+    else
+      Result := Copy(AHash, 1, 7);
+  end;
+
+begin
+  Result := '';
+  if (AIndex < 0) or (AIndex > High(FSubChanges)) then
+    Exit;
+  with FSubChanges[AIndex] do
+    if FromHash <> ToHash then
+      Result := Short(FromHash) + ' → ' + Short(ToHash);
+end;
+
+{ The shown submodule's node stays selected in the tree it was picked
+  in; after a refresh, which empties both, it is selected in the file
+  tree when it is changed, else in the Submodules section: one selection
+  among the trees. }
+procedure TForm1.SelectShownSubmodule;
+var
+  Node, InFiles, InSubs: TTreeNode;
+  FileHandler, SubHandler: TNotifyEvent;
+begin
+  if FView <> gvSubmodule then
+    Exit;
+  InFiles := nil;
+  Node := FileTree.Items.GetFirstNode;
+  while (Node <> nil) and (InFiles = nil) do
+  begin
+    if (Node.Data = nil) and (Node.GetTextPath = FSubShown) then
+      InFiles := Node;
+    Node := Node.GetNext;
+  end;
+  InSubs := FSubTree.Items.GetFirstNode;
+  while (InSubs <> nil) and (SubmoduleAt(FSubShown) + 1 <> integer(PtrUInt(InSubs.Data))) do
+    InSubs := InSubs.GetNextSibling;
+  if (InSubs <> nil) and (FSubTree.Selected = InSubs) then
+    InFiles := nil
+  else if InFiles <> nil then
+    InSubs := nil;
+  FileHandler := FileTree.OnSelectionChanged;
+  SubHandler := FSubTree.OnSelectionChanged;
+  FileTree.OnSelectionChanged := nil;
+  FSubTree.OnSelectionChanged := nil;
+  try
+    FileTree.Selected := InFiles;
+    FSubTree.Selected := InSubs;
+    FRepoTree.Selected := nil;
+  finally
+    FileTree.OnSelectionChanged := FileHandler;
+    FSubTree.OnSelectionChanged := SubHandler;
+  end;
 end;
 
 { The row of submodule AIndex: its path and what the remote holds. }
@@ -123,13 +209,12 @@ begin
       Node.SelectedIndex := RowIcon;
       if (i <= High(FSubInfos)) and (FSubInfos[i].State in [smBehind, smDiverged, smNotFetched]) then
         Inc(Newer);
-      if (FView = gvSubmodule) and (FSubmodules[i].Path = FSubShown) then
-        FSubTree.Selected := Node;
     end;
   finally
     FSubTree.EndUpdate;
     FSubTree.OnSelectionChanged := @SubTreeSelectionChanged;
   end;
+  SelectShownSubmodule;
   if Newer > 0 then
     FSubHeader.Detail := Format(rsSubmodulesNewer, [Length(FSubmodules), Newer])
   else if Length(FSubmodules) > 0 then
@@ -272,6 +357,7 @@ procedure TForm1.ShowSubmodule(AIndex: integer);
 var
   Sub: TGittanSubmodule;
   Info: TGittanSubmoduleInfo;
+  Change: TGittanSubmoduleChange;
   Checking: boolean;
   Lines: TStringList;
   Line: string;
@@ -300,8 +386,46 @@ begin
     for i := 0 to FSubJobs.Count - 1 do
       if TGittanSubmoduleJob(FSubJobs[i]).Sub.Path = Sub.Path then
         Checking := True;
+  Change := Default(TGittanSubmoduleChange);
+  if AIndex <= High(FSubChanges) then
+    Change := FSubChanges[AIndex];
   Lines := TStringList.Create;
   try
+    { How it moved comes first: that is what a changed submodule is
+      opened for. }
+    if Change.FromHash <> Change.ToHash then
+    begin
+      if (Change.Added > 0) and (Change.Removed > 0) then
+        Line := Format(rsSubBoth, [Change.Added, Change.Removed])
+      else if Change.Added > 0 then
+        Line := Format(rsSubForward, [Change.Added])
+      else if Change.Removed > 0 then
+        Line := Format(rsSubBack, [Change.Removed])
+      else if (Change.FromHash <> '') and (Change.ToHash <> '') then
+        Line := rsSubUncounted
+      else
+        Line := '';
+      Add(rsSubChange, SubmoduleMoveText(AIndex) + '  ' + Line);
+      if Length(Change.Commits) > 0 then
+      begin
+        Lines.Add('');
+        Lines.Add(rsSubAdded);
+        for i := 0 to High(Change.Commits) do
+          Lines.Add(SubmoduleCommitText(Change.Commits[i]));
+        if Change.Added > Length(Change.Commits) then
+          Lines.Add(Format(rsSubMore, [Change.Added - Length(Change.Commits)]));
+      end;
+      if Length(Change.Dropped) > 0 then
+      begin
+        Lines.Add('');
+        Lines.Add(rsSubDropped);
+        for i := 0 to High(Change.Dropped) do
+          Lines.Add(SubmoduleCommitText(Change.Dropped[i]));
+        if Change.Removed > Length(Change.Dropped) then
+          Lines.Add(Format(rsSubMore, [Change.Removed - Length(Change.Dropped)]));
+      end;
+      Lines.Add('');
+    end;
     Add(rsSubUrl, Sub.Url);
     if Sub.Branch = '' then
       Add(rsSubBranch, rsSubDefaultBranch)
@@ -343,7 +467,8 @@ begin
           Line := '';
       end;
     Add(rsSubRemote, Line);
-    if Length(Info.Incoming) > 0 then
+    { Moved to the remote's commit, the list above has the same ones. }
+    if (Length(Info.Incoming) > 0) and (Change.ToHash <> Info.Tip) then
     begin
       Lines.Add('');
       Lines.Add(rsSubIncoming);
@@ -366,8 +491,8 @@ begin
     FHeader.SetActions([rsSubOpen]);
   UpdateChangeNav;
   ShowEditor;
-  FileTree.Selected := nil;
-  FSummary.Selected := '';
+  SelectShownSubmodule;
+  FSummary.Selected := Sub.Path;
   UpdateStatus;
 end;
 
