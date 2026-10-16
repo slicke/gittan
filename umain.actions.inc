@@ -234,8 +234,9 @@ begin
   SetLength(Matches, 64);
   for i := 0 to Edit.Strings.Count - 1 do
   begin
-    { A hidden line of the change view cannot be shown. }
-    if Edit.IsLineFolded(i) then
+    { A hidden line of the change view cannot be shown; a folded one is
+      unfolded when the match is in it. }
+    if not FoldingShown and Edit.IsLineFolded(i) then
       Continue;
     S := UnicodeLowerCase(Edit.Strings.Lines[i]);
     p := Pos(Needle, S);
@@ -287,7 +288,7 @@ begin
   end;
   { The caret lands after the match, the selection covers it. }
   Edit.DoGotoPos(Point(Matches[Idx].X + Length(Needle), Matches[Idx].Y), Matches[Idx],
-    10, 5, True, TATEditorActionIfFolded.Ignore);
+    10, 5, True, FoldAction);
   SyncOldSide;
   FFindBar.SetMatches(Idx + 1, Count);
 end;
@@ -388,6 +389,22 @@ begin
   FWordWrap := not FWordWrap;
   FWrapItem.Checked := FWordWrap;
   ApplyWrap;
+end;
+
+{ View > Folding: the command in the item's Tag, on the ranges of the
+  lexer where FoldingShown. The shortcuts reach here in the other views
+  too. }
+procedure TForm1.MenuFoldClick(Sender: TObject);
+begin
+  if not FoldingShown or not Edit.Visible then
+    Exit;
+  Edit.DoCommand(TMenuItem(Sender).Tag, TATCommandInvoke.MenuMain);
+  Edit.Update;
+end;
+
+procedure TForm1.ViewMenuClick(Sender: TObject);
+begin
+  FFoldMenu.Enabled := FoldingShown and Edit.Visible;
 end;
 
 procedure TForm1.MenuOnlyChangesClick(Sender: TObject);

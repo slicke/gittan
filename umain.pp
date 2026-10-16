@@ -88,6 +88,12 @@ type
     FRecentMenu, FCompareMenu, FTerminalItem, FUninstallCliItem: TMenuItem;
     FSnapshots: TGittanSnapshots;
     FWrapItem, FOnlyChangesItem, FSideItem, FIgnoreSpaceItem: TMenuItem;
+    {** View > Folding, enabled where FoldingShown (see ViewMenuClick). }
+    FFoldMenu: TMenuItem;
+    {** The file lines the folded ranges started on before a rebuild of
+      the text of FKeptFoldsPath (see KeepFolds). }
+    FKeptFolds: TIntegerDynArray;
+    FKeptFoldsPath: string;
     FContextItems: array of TMenuItem;
     {** The View > Syntax Theme items, in SyntaxThemes order. }
     FThemeItems: array of TMenuItem;
@@ -594,6 +600,15 @@ type
     procedure PreviewSettings(AFont: TFont; ATheme: integer);
     procedure ApplyEditorFont(AFont: TFont);
     procedure MenuWrapClick(Sender: TObject);
+    procedure MenuFoldClick(Sender: TObject);
+    procedure ViewMenuClick(Sender: TObject);
+    function FoldingShown: boolean;
+    procedure SetFoldBand(AEd: TATSynEdit; AVisible: boolean);
+    function FoldAction: TATEditorActionIfFolded;
+    function FileLineOfRow(ARow: integer): integer;
+    function FoldPath: string;
+    procedure KeepFolds;
+    procedure RestoreFolds;
     procedure MenuOnlyChangesClick(Sender: TObject);
     procedure MenuContextLinesClick(Sender: TObject);
     procedure MenuSyntaxThemeClick(Sender: TObject);
@@ -821,6 +836,11 @@ resourcestring
   rsSideBySide = 'Side &by Side';
   rsWordWrap = '&Word Wrap';
   rsIgnoreSpace = 'I&gnore Whitespace';
+  rsFolding = 'F&olding';
+  rsFold = '&Fold';
+  rsUnfold = '&Unfold';
+  rsFoldAll = 'Fold &All';
+  rsUnfoldAll = 'U&nfold All';
   rsBlame = '&Blame';
   rsNotCommitted = 'Not committed';
   rsNotCommittedYet = 'Not committed yet';
@@ -1407,7 +1427,6 @@ end;
   states band hidden until a diff is shown. }
 procedure TForm1.SetupEditor(AEd: TATSynEdit);
 var
-  Band: integer;
   Actions: TATEditorMouseActions;
 begin
   AEd.ModeReadOnly := True;
@@ -1431,16 +1450,12 @@ begin
   AEd.ShowHint := True;
   AEd.OnScroll := @EditorScroll;
   AEd.OnMouseWheel := @EditMouseWheel;
-  { The fold band is hidden: in a viewer the fold icons are noise, and
-    the change view hides lines through the folding mechanism (see
-    BuildChangeView), which a fold or unfold of a lexer range would
-    disturb. Folding itself stays enabled, since the wrap info skips
-    hidden lines only then, and only while a fold range exists (see
-    FillChangeEditor). }
+  { The fold band is shown where FoldingShown allows (see SetFoldBand),
+    its icons only under the mouse. Folding itself stays enabled everywhere,
+    since the wrap info skips hidden lines only then, and only while a
+    fold range exists (see FillChangeEditor). }
   AEd.OptGutterShowFoldAlways := False;
-  Band := AEd.Gutter.FindIndexByTag(ATEditorOptions.GutterTagFolding);
-  if Band >= 0 then
-    AEd.Gutter[Band].Visible := False;
+  SetFoldBand(AEd, False);
   { A row followed by hidden lines gets a dashed underline; the gap row
     already says what is left out. }
   ATEditorOptions.FoldedUnderlineStyle := TATEditorFoldedUnderlineStyle.None;
@@ -1529,10 +1544,12 @@ begin
       BlockStaple := RGBToColor(70, 70, 70);
       BlockSepLine := RGBToColor(70, 70, 70);
       MarginRight := RGBToColor(60, 60, 60);
-      CollapseLine := RGBToColor(160, 120, 120);
-      CollapseMarkFont := RGBToColor(200, 160, 160);
-      CollapseMarkBG := RGBToColor(55, 55, 56);
-      CollapseMarkBorder := RGBToColor(160, 120, 120);
+      { A folded range in the file view: its first line, dimmed, in a
+        grey frame like the navigator pills. }
+      CollapseLine := RGBToColor(85, 85, 86);
+      CollapseMarkFont := RGBToColor(150, 150, 150);
+      CollapseMarkBG := RGBToColor(50, 50, 51);
+      CollapseMarkBorder := RGBToColor(85, 85, 86);
       UnprintedFont := RGBToColor(110, 110, 160);
       UnprintedBG := RGBToColor(55, 55, 56);
       Links := RGBToColor(100, 160, 240);
@@ -1936,6 +1953,16 @@ begin
   FWrapItem := AddItem(ViewMenu, rsWordWrap, ShortCut(VK_W, [ssModifier, ssAlt]),
     @MenuWrapClick);
   FWrapItem.Checked := FWordWrap;
+  FFoldMenu := AddItem(ViewMenu, rsFolding, 0, nil);
+  AddItem(FFoldMenu, rsFold, ShortCut(VK_OEM_MINUS, [ssModifier, ssAlt]),
+    @MenuFoldClick).Tag := cCommand_FoldingFoldAtCurLine;
+  AddItem(FFoldMenu, rsUnfold, ShortCut(VK_OEM_PLUS, [ssModifier, ssAlt]),
+    @MenuFoldClick).Tag := cCommand_FoldingUnfoldAtCurLine;
+  AddItem(FFoldMenu, rsFoldAll, ShortCut(VK_OEM_MINUS, [ssModifier, ssAlt, ssShift]),
+    @MenuFoldClick).Tag := cCommand_FoldAll;
+  AddItem(FFoldMenu, rsUnfoldAll, ShortCut(VK_OEM_PLUS, [ssModifier, ssAlt, ssShift]),
+    @MenuFoldClick).Tag := cCommand_UnfoldAll;
+  ViewMenu.OnClick := @ViewMenuClick;
   FIgnoreSpaceItem := AddItem(ViewMenu, rsIgnoreSpace, ShortCut(VK_I, [ssModifier, ssAlt]),
     @MenuIgnoreSpaceClick);
   FIgnoreSpaceItem.Checked := FIgnoreWhitespace;
@@ -2418,6 +2445,127 @@ begin
     False, 0);
 end;
 
+{ Whether the shown text may be folded: in the file view, and in the
+  unified change view while it hides no lines. Hide Unchanged Lines hides
+  them through the folding mechanism (see BuildChangeView), which a fold
+  or unfold of a lexer range would disturb; Side by Side would lose its
+  row alignment; the history view hides lines as the change view does. }
+function TForm1.FoldingShown: boolean;
+begin
+  Result := (FView = gvFile) or ((FView = gvChanges) and not FOnlyChanges and
+    not FSideBySide);
+end;
+
+{ The fold band lets the ranges of the lexer (functions, classes,
+  blocks) be folded by a click; it is shown where FoldingShown allows. }
+procedure TForm1.SetFoldBand(AEd: TATSynEdit; AVisible: boolean);
+var
+  Band: integer;
+begin
+  Band := AEd.Gutter.FindIndexByTag(ATEditorOptions.GutterTagFolding);
+  if (Band >= 0) and (AEd.Gutter[Band].Visible <> AVisible) then
+  begin
+    AEd.Gutter[Band].Visible := AVisible;
+    AEd.Gutter.Update;
+  end;
+end;
+
+{ A jump to a folded line unfolds it where folding is shown; elsewhere a
+  hidden line is the diff's, which a jump must leave hidden. }
+function TForm1.FoldAction: TATEditorActionIfFolded;
+begin
+  if FoldingShown then
+    Result := TATEditorActionIfFolded.Unfold
+  else
+    Result := TATEditorActionIfFolded.Ignore;
+end;
+
+{ The line of the file shown in ARow, 1-based, for KeepFolds: the row
+  itself in the file view, the line of the new file in the change view
+  (0 for a deleted line, a gap or a filler). }
+function TForm1.FileLineOfRow(ARow: integer): integer;
+begin
+  Result := 0;
+  if FView = gvFile then
+    Result := ARow + 1
+  else if (FView = gvChanges) and (ARow >= 0) and (ARow <= High(FRows)) and
+    (FRows[ARow].Line >= 0) and (FRows[ARow].Line <= High(FNewNum)) then
+    Result := FNewNum[FRows[ARow].Line];
+end;
+
+{ The path of the shown text, for KeepFolds. }
+function TForm1.FoldPath: string;
+begin
+  if FView = gvFile then
+    Result := Edit.FileName
+  else
+    Result := FCurrentPath;
+end;
+
+{ Remembers the folded ranges before the shown text is replaced by the
+  same file again (a refresh, a view option), by the file line they
+  start on; RestoreFolds folds them again once the lexer has parsed the
+  new text. }
+procedure TForm1.KeepFolds;
+var
+  i, Line: integer;
+  R: PATFoldRange;
+begin
+  FKeptFolds := nil;
+  FKeptFoldsPath := '';
+  if not FoldingShown then
+    Exit;
+  for i := 0 to Edit.Fold.Count - 1 do
+  begin
+    R := Edit.Fold.ItemPtr(i);
+    if not R^.Folded then
+      Continue;
+    Line := FileLineOfRow(R^.Y);
+    if Line > 0 then
+    begin
+      SetLength(FKeptFolds, Length(FKeptFolds) + 1);
+      FKeptFolds[High(FKeptFolds)] := Line;
+    end;
+  end;
+  if FKeptFolds <> nil then
+    FKeptFoldsPath := FoldPath;
+end;
+
+{ From AdapterParseDone: folds the first range on each line KeepFolds
+  remembered, when the text is the same file's and may be folded. }
+procedure TForm1.RestoreFolds;
+var
+  i, j, Line: integer;
+  R: PATFoldRange;
+  Folded: boolean;
+begin
+  if FKeptFolds = nil then
+    Exit;
+  if FoldingShown and (FoldPath = FKeptFoldsPath) then
+  begin
+    Folded := False;
+    for i := 0 to Edit.Fold.Count - 1 do
+    begin
+      R := Edit.Fold.ItemPtr(i);
+      if R^.Folded or R^.IsSimple then
+        Continue;
+      Line := FileLineOfRow(R^.Y);
+      for j := 0 to High(FKeptFolds) do
+        if FKeptFolds[j] = Line then
+        begin
+          FKeptFolds[j] := 0;
+          Edit.DoRangeFold(i);
+          Folded := True;
+          Break;
+        end;
+    end;
+    if Folded then
+      Edit.Update;
+  end;
+  FKeptFolds := nil;
+  FKeptFoldsPath := '';
+end;
+
 { The line states band is meant for an editor, where it marks the lines
   changed since the file was loaded or saved; a freshly set text has every
   line marked as new. Gittan shows it only for a diff, with the states set
@@ -2703,6 +2851,8 @@ begin
       Target := Blocks[High(Blocks)];
     end;
   end;
+  if FoldingShown then
+    Edit.DoUnfoldLine(Target);
   Edit.DoCaretSingle(0, Target);
   Edit.LineTop := Max(0, Target - 3);
   Edit.Update;
@@ -3022,11 +3172,13 @@ begin
           FHeader.SetNote(rsChangedOnDisk)
         else
         begin
+          KeepFolds;
           OpenFile(FEditPath);
           RestoreScroll;
         end;
     gvChanges, gvImage:
       begin
+        KeepFolds;
         SummarySelectFile(nil, Path);
         if FileTree.Selected = nil then
         begin
@@ -3098,6 +3250,7 @@ begin
   FSummaryBox.Visible := False;
   FImageDiff.Visible := False;
   FHeader.Visible := True;
+  SetFoldBand(Edit, FoldingShown);
   ApplyLayout;
   ApplyBlame;
   Edit.Visible := True;

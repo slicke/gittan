@@ -192,6 +192,7 @@ begin
     FEditOld.LineTop := 0;
   finally
     FBuildingView := False;
+    SetFoldBand(Edit, FoldingShown);
     ApplyReviewGaps;
     { In case a parse ended during the build. }
     UpdateSymbolHeadings;
@@ -716,6 +717,7 @@ begin
     Exit;
   TopLine := Edit.LineTop;
   CaretY := Edit.Carets[0].PosY;
+  KeepFolds;
   ApplyLayout;
   BuildChangeView;
   if Edit.Strings.Count > 0 then

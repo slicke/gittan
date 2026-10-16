@@ -25,6 +25,9 @@ end;
 procedure TForm1.AdapterParseDone(Sender: TObject; ATime: integer);
 begin
   TComponent(Sender).Tag := 1;
+  { The ranges folded before a refresh are folded again. }
+  if Sender = FAdapter then
+    RestoreFolds;
   { The change view's symbols come from the parse of its text. }
   if ((Sender = FAdapter) or (Sender = FAdapterOld)) and (FView = gvChanges) then
     UpdateSymbolHeadings;
@@ -239,8 +242,7 @@ begin
     N2 := APos.X;
   end;
   { The caret lands after the name, the selection covers it. }
-  AEd.DoGotoPos(Point(N2, APos.Y), Point(N1, APos.Y), 10, 5, True,
-    TATEditorActionIfFolded.Ignore);
+  AEd.DoGotoPos(Point(N2, APos.Y), Point(N1, APos.Y), 10, 5, True, FoldAction);
   { The old side follows the new one (SyncOldSide), so a jump in the old
     side scrolls the new side there first. }
   if AEd = FEditOld then
