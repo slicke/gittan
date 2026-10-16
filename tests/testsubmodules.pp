@@ -9,7 +9,7 @@ unit testsubmodules;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.submodules;
+  Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.submodules;
 
 type
   TSubmodulesTest = class(TTestCase)
@@ -86,7 +86,7 @@ begin
   Args[4] := '-c';
   Args[5] := 'protocol.file.allow=always';
   for i := 0 to High(AArgs) do
-    Args[i + 6] := AArgs[i];
+    Args[i + 6] := ProcessArg(AArgs[i]);
   if RunCommandIndir(ADir, 'git', Args, Result, Status, [poStderrToOutPut]) <> 0 then
     Fail('git could not be run');
   if Status <> 0 then

@@ -307,6 +307,19 @@ function RunGitHubCli(const AExe, ADir: string; const AArgs: array of string;
 function RunGitIn(const ADir: string; const AArgs: array of string;
   out AOutput, AError: string; const AIndexFile: string = ''): boolean;
 
+{** S quoted as the C runtime of Windows splits a command line: in double
+  quotes, with a quote inside escaped and the backslashes before it or
+  before the closing quote doubled; S as it is when it holds no space, tab
+  or quote and is not empty. }
+function WindowsArg(const S: string): string;
+
+{** S as an item of TProcess.Parameters. On Windows TProcess joins them
+  into one command line and quotes an item only when it holds a space and
+  no quote, so an item with a quote (a commit message, a pull request's
+  title) or an empty one would not come through; there it is WindowsArg,
+  which TProcess passes as it is. Elsewhere S. }
+function ProcessArg(const S: string): string;
+
 implementation
 
 uses
@@ -330,6 +343,38 @@ begin
     if Keep then
       P.Environment.Add(Env);
   end;
+end;
+
+function WindowsArg(const S: string): string;
+var
+  i, Slashes: integer;
+begin
+  if (S <> '') and (LastDelimiter(' '#9'"', S) = 0) then
+    Exit(S);
+  Result := '"';
+  Slashes := 0;
+  for i := 1 to Length(S) do
+  begin
+    if S[i] = '\' then
+      Inc(Slashes)
+    else
+    begin
+      if S[i] = '"' then
+        Result := Result + StringOfChar('\', Slashes + 1);
+      Slashes := 0;
+    end;
+    Result := Result + S[i];
+  end;
+  Result := Result + StringOfChar('\', Slashes) + '"';
+end;
+
+function ProcessArg(const S: string): string;
+begin
+  {$ifdef MSWINDOWS}
+  Result := WindowsArg(S);
+  {$else}
+  Result := S;
+  {$endif}
 end;
 
 { ---------------------------------------------------------------------------
@@ -360,7 +405,7 @@ begin
     P.Parameters.Add('-c');
     P.Parameters.Add('core.quotepath=false');
     for i := 0 to High(AArgs) do
-      P.Parameters.Add(AArgs[i]);
+      P.Parameters.Add(ProcessArg(AArgs[i]));
     CopyEnvironment(P, ['LC_ALL=', 'GIT_TERMINAL_PROMPT=', 'GIT_INDEX_FILE=']);
     P.Environment.Add('LC_ALL=C');
     P.Environment.Add('GIT_TERMINAL_PROMPT=0');
@@ -426,7 +471,7 @@ begin
     P.Executable := AExe;
     P.CurrentDirectory := ADir;
     for i := 0 to High(AArgs) do
-      P.Parameters.Add(AArgs[i]);
+      P.Parameters.Add(ProcessArg(AArgs[i]));
     CopyEnvironment(P, ['GH_PROMPT_DISABLED=', 'GH_NO_UPDATE_NOTIFIER=']);
     P.Environment.Add('GH_PROMPT_DISABLED=1');
     P.Environment.Add('GH_NO_UPDATE_NOTIFIER=1');

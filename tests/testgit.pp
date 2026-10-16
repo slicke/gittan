@@ -26,6 +26,7 @@ type
     procedure SetUp; override;
     procedure TearDown; override;
   published
+    procedure TestWindowsArg;
     procedure TestChangeKind;
     procedure TestStageFlags;
     procedure TestOpenNonRepo;
@@ -114,7 +115,7 @@ begin
   Args[2] := '-c';
   Args[3] := 'user.email=test@example.invalid';
   for i := 0 to High(AArgs) do
-    Args[i + 4] := AArgs[i];
+    Args[i + 4] := ProcessArg(AArgs[i]);
   if RunCommandIndir(FDir, 'git', Args, Result, Status, [poStderrToOutPut]) <> 0 then
     Fail('git could not be run');
   if Status <> 0 then
@@ -175,6 +176,22 @@ begin
   Result := '';
   for i := 0 to AList.Count - 1 do
     Result := Result + AList[i] + '|';
+end;
+
+{ As the C runtime of Windows reads it back: 2n backslashes and a quote
+  are n backslashes and the end of the quotes, 2n+1 and a quote are n and
+  a quote; other backslashes are themselves. }
+procedure TGitRepoTest.TestWindowsArg;
+begin
+  AssertEquals('plain', WindowsArg('plain'));
+  AssertEquals('C:\dir\a.txt', WindowsArg('C:\dir\a.txt'));
+  AssertEquals('""', WindowsArg(''));
+  AssertEquals('"two words"', WindowsArg('two words'));
+  AssertEquals('"\"quoted\" subject"', WindowsArg('"quoted" subject'));
+  AssertEquals('"say \"hi\""', WindowsArg('say "hi"'));
+  AssertEquals('"a\\\"b"', WindowsArg('a\"b'));
+  AssertEquals('"C:\my dir\\"', WindowsArg('C:\my dir\'));
+  AssertEquals('"tab'#9'here"', WindowsArg('tab'#9'here'));
 end;
 
 procedure TGitRepoTest.TestChangeKind;

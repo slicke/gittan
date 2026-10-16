@@ -19,6 +19,13 @@ uses
 var
   App: TTestRunner;
 begin
+  {$IFDEF WINDOWS}
+  { Strings are UTF-8, as LazUTF8 makes them in the app; without it a
+    string reaches CreateProcessW and the file functions in the ANSI code
+    page, and "Björn" becomes "BjÃ¶rn". }
+  SetMultiByteConversionCodePage(CP_UTF8);
+  SetMultiByteRTLFileSystemCodePage(CP_UTF8);
+  {$ENDIF}
   App := TTestRunner.Create(nil);
   try
     App.Initialize;
