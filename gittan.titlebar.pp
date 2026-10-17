@@ -71,6 +71,7 @@ end;
 function ExtendUnderTitleBar(AHandle: PtrUInt): integer;
 var
   Win: NSWindow;
+  NoInsets: NSEdgeInsets;
 begin
   Result := 0;
   Win := WindowOf(AHandle);
@@ -81,6 +82,15 @@ begin
   { No line under the title: the content is what is under it. }
   if NSAppKitVersionNumber >= NSAppKitVersionNumber11_0 then
     Win.setTitlebarSeparatorStyle(NSTitlebarSeparatorStyleNone);
+  { The LCL's content view is a scroll view, which under a full size
+    content view gets the title bar's height as a top inset, so a
+    scroll over the strip moved the whole form down by it. }
+  if Win.contentView.isKindOfClass(NSScrollView) then
+  begin
+    NSScrollView(Win.contentView).setAutomaticallyAdjustsContentInsets(False);
+    NoInsets := Default(NSEdgeInsets);
+    NSScrollView(Win.contentView).setContentInsets(NoInsets);
+  end;
   { contentLayoutRect is the content view less the title bar. }
   Result := Round(Win.contentView.frame.size.height -
     Win.contentLayoutRect.size.height);
