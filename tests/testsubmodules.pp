@@ -76,7 +76,7 @@ end;
 function TSubmodulesTest.Git(const ADir: string; const AArgs: array of string): string;
 var
   Args: array of string;
-  Status, i: integer;
+  Code, i: integer;
 begin
   SetLength(Args, Length(AArgs) + 6);
   Args[0] := '-c';
@@ -87,9 +87,9 @@ begin
   Args[5] := 'protocol.file.allow=always';
   for i := 0 to High(AArgs) do
     Args[i + 6] := ProcessArg(AArgs[i]);
-  if RunCommandIndir(ADir, 'git', Args, Result, Status, [poStderrToOutPut]) <> 0 then
+  if RunCommandIndir(ADir, 'git', Args, Result, Code, [poStderrToOutPut]) <> 0 then
     Fail('git could not be run');
-  if Status <> 0 then
+  if Code <> 0 then
     Fail('git ' + AArgs[0] + ' failed: ' + Trim(Result));
 end;
 

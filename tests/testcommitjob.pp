@@ -73,11 +73,11 @@ end;
 procedure TCommitJobTest.Git(const AArgs: array of string);
 var
   Output: string;
-  Status: integer;
+  Code: integer;
 begin
-  if RunCommandIndir(FDir, 'git', AArgs, Output, Status, [poStderrToOutPut]) <> 0 then
+  if RunCommandIndir(FDir, 'git', AArgs, Output, Code, [poStderrToOutPut]) <> 0 then
     Fail('git could not be run');
-  if Status <> 0 then
+  if Code <> 0 then
     Fail('git ' + AArgs[0] + ' failed: ' + Trim(Output));
 end;
 

@@ -129,7 +129,7 @@ end;
 function TGitRepoTest.Git(const AArgs: array of string): string;
 var
   Args: array of string;
-  Status, i: integer;
+  Code, i: integer;
 begin
   SetLength(Args, Length(AArgs) + 4);
   Args[0] := '-c';
@@ -138,9 +138,9 @@ begin
   Args[3] := 'user.email=test@example.invalid';
   for i := 0 to High(AArgs) do
     Args[i + 4] := ProcessArg(AArgs[i]);
-  if RunCommandIndir(FDir, 'git', Args, Result, Status, [poStderrToOutPut]) <> 0 then
+  if RunCommandIndir(FDir, 'git', Args, Result, Code, [poStderrToOutPut]) <> 0 then
     Fail('git could not be run');
-  if Status <> 0 then
+  if Code <> 0 then
     Fail('git ' + AArgs[0] + ' failed: ' + Trim(Result));
 end;
 
@@ -532,7 +532,7 @@ end;
   own index stays as it was. }
 procedure TGitRepoTest.TestSnapshot;
 var
-  Id, Status: string;
+  Id, Porcelain: string;
   Stats: TGittanFileStats;
   Lines: TStringList;
 begin
@@ -544,9 +544,9 @@ begin
   AssertEquals('a full id', 40, Length(Id));
   AssertTrue(FRepo.HasCommit(Id));
   AssertFalse(FRepo.HasCommit('no-such-ref'));
-  Status := Git(['status', '--porcelain']);
-  AssertTrue('new.txt still untracked', Pos('?? new.txt', Status) > 0);
-  AssertTrue('a.txt still unstaged', Pos(' M a.txt', Status) > 0);
+  Porcelain := Git(['status', '--porcelain']);
+  AssertTrue('new.txt still untracked', Pos('?? new.txt', Porcelain) > 0);
+  AssertTrue('a.txt still unstaged', Pos(' M a.txt', Porcelain) > 0);
 
   FRepo.Base := Id;
   FRepo.WholeTree := True;
@@ -573,8 +573,8 @@ begin
   finally
     Lines.Free;
   end;
-  Status := Git(['status', '--porcelain']);
-  AssertTrue('later.txt untracked for git', Pos('?? later.txt', Status) > 0);
+  Porcelain := Git(['status', '--porcelain']);
+  AssertTrue('later.txt untracked for git', Pos('?? later.txt', Porcelain) > 0);
 
   { Without WholeTree the snapshot's untracked file reads as deleted and
     untracked at once: what WholeTree is for. }
@@ -748,11 +748,11 @@ end;
 procedure TGitRepoTest.TestFetchPullRequest;
 var
   Remote, Branch, Head, HeadRef, Output: string;
-  Status: integer;
+  Code: integer;
 begin
   MakeHistory;
   Remote := FDir + '-remote';
-  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Status,
+  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Code,
     [poStderrToOutPut]) = 0 then
   try
     Branch := Trim(Git(['rev-parse', '--abbrev-ref', 'HEAD']));
@@ -783,7 +783,7 @@ procedure TGitRepoTest.TestDefaultBranchAndMergeBase;
 var
   Remote, Branch, Base, Hash: string;
   Output: string;
-  Status: integer;
+  Code: integer;
 begin
   MakeHistory;
   AssertTrue(FRepo.Open(FDir));
@@ -791,7 +791,7 @@ begin
   AssertFalse(FRepo.MergeBase('', Hash));
   AssertFalse(FRepo.MergeBase('nothing', Hash));
   Remote := FDir + '-remote';
-  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Status,
+  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Code,
     [poStderrToOutPut]) <> 0 then
     Fail('could not make a bare repository');
   try
@@ -822,13 +822,13 @@ end;
 procedure TGitRepoTest.TestAheadBehind;
 var
   Remote, Branch, Output: string;
-  Status, Ahead, Behind: integer;
+  Code, Ahead, Behind: integer;
 begin
   MakeHistory;
   AssertTrue(FRepo.Open(FDir));
   AssertFalse(FRepo.AheadBehind(Ahead, Behind));
   Remote := FDir + '-remote';
-  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Status,
+  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Code,
     [poStderrToOutPut]) <> 0 then
     Fail('could not make a bare repository');
   try
@@ -860,14 +860,14 @@ end;
 procedure TGitRepoTest.TestSyncCommits;
 var
   Remote, Branch, Output: string;
-  Status: integer;
+  Code: integer;
   Commits: TGittanCommitLines;
 begin
   MakeHistory;
   AssertTrue(FRepo.Open(FDir));
   AssertFalse(FRepo.SyncCommits(True, Commits));
   Remote := FDir + '-remote';
-  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Status,
+  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Code,
     [poStderrToOutPut]) <> 0 then
     Fail('could not make a bare repository');
   try
@@ -909,7 +909,7 @@ end;
 procedure TGitRepoTest.TestRecentCommits;
 var
   Remote, Branch, Output: string;
-  Status: integer;
+  Code: integer;
   Commits: TGittanCommitLines;
   Snap: TGittanRepoSnapshot;
 begin
@@ -937,7 +937,7 @@ begin
   AssertTrue(FRepo.Snapshot(Snap));
   AssertEquals(2, Length(Snap.Recent));
   Remote := FDir + '-remote';
-  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Status,
+  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Code,
     [poStderrToOutPut]) <> 0 then
     Fail('could not make a bare repository');
   try
@@ -966,7 +966,7 @@ end;
 procedure TGitRepoTest.TestGraphCommits;
 var
   Remote, Branch, Output: string;
-  Status: integer;
+  Code: integer;
   Commits: TGittanGraphCommits;
 begin
   Git(['init', '-q']);
@@ -997,7 +997,7 @@ begin
   AssertEquals(2, GraphWidth(Commits));
   AssertFalse(Commits[0].Unpushed);
   Remote := FDir + '-remote';
-  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Status,
+  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Code,
     [poStderrToOutPut]) <> 0 then
     Fail('could not make a bare repository');
   try
@@ -1022,7 +1022,7 @@ procedure TGitRepoTest.TestOperation;
 var
   Branch, Output: string;
   Stats: TGittanFileStats;
-  Status: integer;
+  Code: integer;
 begin
   MakeHistory;
   AssertTrue(FRepo.Open(FDir));
@@ -1039,8 +1039,8 @@ begin
 
   { git merge fails on the conflict, so it runs without the helper. }
   RunCommandIndir(FDir, 'git', ['-c', 'user.name=T', '-c', 'user.email=t@example.invalid',
-    'merge', 'topic'], Output, Status, [poStderrToOutPut]);
-  AssertTrue('merge stops', Status <> 0);
+    'merge', 'topic'], Output, Code, [poStderrToOutPut]);
+  AssertTrue('merge stops', Code <> 0);
   AssertEquals('merging', FRepo.Operation);
   AssertTrue(FRepo.ChangeStats(Stats));
   AssertEquals(Ord(ckConflict), Ord(FindStat(Stats, 'a.txt').Kind));
@@ -1049,8 +1049,8 @@ begin
 
   Git(['checkout', '-q', 'topic']);
   RunCommandIndir(FDir, 'git', ['-c', 'user.name=T', '-c', 'user.email=t@example.invalid',
-    'rebase', Branch], Output, Status, [poStderrToOutPut]);
-  AssertTrue('rebase stops', Status <> 0);
+    'rebase', Branch], Output, Code, [poStderrToOutPut]);
+  AssertTrue('rebase stops', Code <> 0);
   AssertEquals('rebasing', FRepo.Operation);
   AssertEquals('topic', FRepo.RebaseBranch);
   Git(['rebase', '--abort']);
@@ -1156,10 +1156,10 @@ end;
 { The file APath as HEAD has it, or '' when HEAD has no such file. }
 function HeadFile(const ADir, APath: string): string;
 var
-  Status: integer;
+  Code: integer;
 begin
-  if (RunCommandIndir(ADir, 'git', ['show', 'HEAD:' + APath], Result, Status, []) <> 0) or
-    (Status <> 0) then
+  if (RunCommandIndir(ADir, 'git', ['show', 'HEAD:' + APath], Result, Code, []) <> 0) or
+    (Code <> 0) then
     Result := '';
 end;
 
@@ -1221,7 +1221,7 @@ procedure TGitRepoTest.TestCommitAmendAndHook;
 var
   Paths: TStringList;
   Parent, Id, Text, Hook: string;
-  Status: integer;
+  Code: integer;
 begin
   MakeHistory;
   Git(['config', 'user.name', 'Gittan Test']);
@@ -1243,7 +1243,7 @@ begin
       '#!/bin/sh'#10'echo "hook says no" >&2'#10'exit 1'#10);
     Hook := IncludeTrailingPathDelimiter(FDir) + SetDirSeparators('.git/hooks/pre-commit');
     {$ifdef UNIX}
-    RunCommandIndir(FDir, 'chmod', ['+x', Hook], Text, Status, []);
+    RunCommandIndir(FDir, 'chmod', ['+x', Hook], Text, Code, []);
     {$endif}
     WriteFile('new.txt', 'new'#10);
     Paths.Add('new.txt');
@@ -1284,7 +1284,7 @@ procedure TGitRepoTest.TestCommitMerge;
 var
   Paths: TStringList;
   Branch, Output, Id: string;
-  Status: integer;
+  Code: integer;
 begin
   MakeHistory;
   Git(['config', 'user.name', 'Gittan Test']);
@@ -1297,8 +1297,8 @@ begin
   Git(['checkout', '-q', Branch]);
   WriteFile('a.txt', 'main'#10);
   Commit('main');
-  RunCommandIndir(FDir, 'git', ['merge', 'topic'], Output, Status, [poStderrToOutPut]);
-  AssertTrue('merge stops', Status <> 0);
+  RunCommandIndir(FDir, 'git', ['merge', 'topic'], Output, Code, [poStderrToOutPut]);
+  AssertTrue('merge stops', Code <> 0);
   WriteFile('a.txt', 'both'#10);
   WriteFile('extra.txt', 'extra'#10);
   Paths := TStringList.Create;
@@ -1325,7 +1325,7 @@ var
   Dirs: TStringList;
   Paths: TStringList;
   Own, Id, Text: string;
-  Status: integer;
+  Code: integer;
 begin
   Own := GetEnvironmentVariable('PATH');
   AssertTrue(ToolSearchPath, Pos(Own, ToolSearchPath) = 1);
@@ -1351,7 +1351,7 @@ begin
   Git(['config', 'user.email', 'test@example.invalid']);
   AssertTrue(FRepo.Open(FDir));
   WriteFile('.git/hooks/pre-commit', '#!/bin/sh'#10'printf %s "$PATH" > ../hook-path'#10);
-  RunCommandIndir(FDir, 'chmod', ['+x', '.git/hooks/pre-commit'], Text, Status, []);
+  RunCommandIndir(FDir, 'chmod', ['+x', '.git/hooks/pre-commit'], Text, Code, []);
   WriteFile('a.txt', 'hooked'#10);
   Paths := TStringList.Create;
   try
@@ -1377,13 +1377,13 @@ end;
 procedure PushFromOther(const ARemote, AOther, AFile: string);
 var
   Output: string;
-  Status: integer;
+  Code: integer;
   Lines: TStringList;
 begin
   if not DirectoryExists(AOther) then
     RunCommandIndir(ExtractFileDir(AOther), 'git', ['clone', '-q', ARemote, AOther],
-      Output, Status, [poStderrToOutPut]);
-  RunCommandIndir(AOther, 'git', ['pull', '-q', '--ff-only'], Output, Status,
+      Output, Code, [poStderrToOutPut]);
+  RunCommandIndir(AOther, 'git', ['pull', '-q', '--ff-only'], Output, Code,
     [poStderrToOutPut]);
   Lines := TStringList.Create;
   try
@@ -1392,14 +1392,14 @@ begin
   finally
     Lines.Free;
   end;
-  RunCommandIndir(AOther, 'git', ['add', '-A'], Output, Status, [poStderrToOutPut]);
+  RunCommandIndir(AOther, 'git', ['add', '-A'], Output, Code, [poStderrToOutPut]);
   RunCommandIndir(AOther, 'git', ['-c', 'user.name=Other', '-c',
-    'user.email=other@example.invalid', 'commit', '-q', '-m', AFile], Output, Status,
+    'user.email=other@example.invalid', 'commit', '-q', '-m', AFile], Output, Code,
     [poStderrToOutPut]);
-  if Status <> 0 then
+  if Code <> 0 then
     raise Exception.Create('other commit failed: ' + Output);
-  RunCommandIndir(AOther, 'git', ['push', '-q'], Output, Status, [poStderrToOutPut]);
-  if Status <> 0 then
+  RunCommandIndir(AOther, 'git', ['push', '-q'], Output, Code, [poStderrToOutPut]);
+  if Code <> 0 then
     raise Exception.Create('other push failed: ' + Output);
 end;
 
@@ -1409,7 +1409,7 @@ end;
 procedure TGitRepoTest.TestPushFetchPull;
 var
   Remote, Other, Output: string;
-  Status, Ahead, Behind: integer;
+  Code, Ahead, Behind: integer;
   Rejected, Diverged: boolean;
 begin
   MakeHistory;
@@ -1420,7 +1420,7 @@ begin
   AssertFalse(Rejected);
   Remote := FDir + '-remote';
   Other := FDir + '-other';
-  RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Status,
+  RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Code,
     [poStderrToOutPut]);
   try
     Git(['remote', 'add', 'origin', Remote]);
@@ -1464,7 +1464,7 @@ end;
 procedure TGitRepoTest.TestPullDiverged;
 var
   Remote, Other, Output: string;
-  Status: integer;
+  Code: integer;
   Rejected, Diverged: boolean;
 begin
   MakeHistory;
@@ -1473,7 +1473,7 @@ begin
   AssertTrue(FRepo.Open(FDir));
   Remote := FDir + '-remote';
   Other := FDir + '-other';
-  RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Status,
+  RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Code,
     [poStderrToOutPut]);
   try
     Git(['remote', 'add', 'origin', Remote]);
@@ -1495,8 +1495,8 @@ begin
     Commit('mine again');
     WriteFile('del.txt', 'local change'#10);
     AssertTrue(FRepo.Error, FRepo.Pull(pmRebase, Diverged));
-    RunCommandIndir(FDir, 'git', ['rev-parse', '-q', '--verify', 'HEAD^2'], Output, Status, []);
-    AssertTrue('no merge commit', Status <> 0);
+    RunCommandIndir(FDir, 'git', ['rev-parse', '-q', '--verify', 'HEAD^2'], Output, Code, []);
+    AssertTrue('no merge commit', Code <> 0);
     AssertTrue(FileExists(IncludeTrailingPathDelimiter(FDir) + 'two.txt'));
     AssertEquals(' M del.txt'#0, Git(['status', '--porcelain', '-z']));
   finally
@@ -1545,10 +1545,10 @@ end;
 procedure GitStops(const ADir: string; const AArgs: array of string);
 var
   Output: string;
-  Status: integer;
+  Code: integer;
 begin
-  RunCommandIndir(ADir, 'git', AArgs, Output, Status, [poStderrToOutPut]);
-  if Status = 0 then
+  RunCommandIndir(ADir, 'git', AArgs, Output, Code, [poStderrToOutPut]);
+  if Code = 0 then
     raise Exception.Create('git did not stop: ' + Output);
 end;
 
@@ -1797,7 +1797,7 @@ end;
 procedure TGitRepoTest.TestBranchManagement;
 var
   Remote, Main, R, B: string;
-  Status: integer;
+  Code: integer;
   NotMerged, Rejected: boolean;
 begin
   MakeHistory;
@@ -1806,7 +1806,7 @@ begin
   AssertTrue(FRepo.Open(FDir));
   Main := FRepo.Branch;
   Remote := FDir + '-remote';
-  RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], R, Status,
+  RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], R, Code,
     [poStderrToOutPut]);
   try
     Git(['remote', 'add', 'origin', Remote]);
@@ -1844,8 +1844,8 @@ begin
     AssertTrue(FRepo.Error, FRepo.DeleteRemoteBranch('origin/work'));
     AssertFalse(FRepo.HasCommit('refs/remotes/origin/work'));
     RunCommandIndir(Remote, 'git', ['rev-parse', '--verify', '-q', 'refs/heads/work'], R,
-      Status, []);
-    AssertTrue('gone from the remote', Status <> 0);
+      Code, []);
+    AssertTrue('gone from the remote', Code <> 0);
     AssertFalse(FRepo.DeleteRemoteBranch('nowhere/work'));
   finally
     RemoveTree(Remote);
@@ -2015,7 +2015,7 @@ end;
 procedure TGitRepoTest.TestGoneUpstreams;
 var
   Remote, Branch, Output: string;
-  Status: integer;
+  Code: integer;
   Gone: TStringList;
 
   function GoneText: string;
@@ -2028,7 +2028,7 @@ begin
   Gone := TStringList.Create;
   MakeHistory;
   Remote := FDir + '-remote';
-  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Status,
+  if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Code,
     [poStderrToOutPut]) <> 0 then
     Fail('could not make a bare repository');
   try
@@ -2041,7 +2041,7 @@ begin
     Git(['branch', 'loose']);
     AssertEquals('still there', '', GoneText);
     if RunCommandIndir(Remote, 'git', ['update-ref', '-d', 'refs/heads/' + Branch],
-      Output, Status, [poStderrToOutPut]) <> 0 then
+      Output, Code, [poStderrToOutPut]) <> 0 then
       Fail('could not delete the branch on the remote');
     AssertTrue(Trim(Git(['rev-parse', 'origin/' + Branch])) <> '');
     AssertEquals('deleted on the remote', Branch, GoneText);
