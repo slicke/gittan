@@ -81,6 +81,23 @@ begin
   FCommitAmend.Align := alLeft;
   FCommitAmend.OnClick := @CommitAmendClick;
   FCommitAmend.Parent := FCommitRow;
+  FAbortButton := TButton.Create(Self);
+  FAbortButton.Caption := rsAbortButton;
+  FAbortButton.Align := alLeft;
+  FAbortButton.AutoSize := True;
+  FAbortButton.Left := 1000;
+  FAbortButton.Visible := False;
+  FAbortButton.OnClick := @AbortOperationClick;
+  FAbortButton.Parent := FCommitRow;
+  FSkipButton := TButton.Create(Self);
+  FSkipButton.Caption := rsSkipButton;
+  FSkipButton.Align := alLeft;
+  FSkipButton.AutoSize := True;
+  FSkipButton.Left := 2000;
+  FSkipButton.BorderSpacing.Left := 4;
+  FSkipButton.Visible := False;
+  FSkipButton.OnClick := @SkipOperationClick;
+  FSkipButton.Parent := FCommitRow;
   FCommitButton := TButton.Create(Self);
   FCommitButton.Caption := rsCommitButton;
   FCommitButton.Align := alRight;
@@ -139,7 +156,7 @@ end;
   compared with HEAD, so the tree is what a commit would take. }
 function TForm1.CommitChoosing: boolean;
 begin
-  Result := (FRepo.Root <> '') and (FRepo.Base = '');
+  Result := (FRepo.Root <> '') and (FRepo.Base = '') and not ContinueMode;
 end;
 
 { Whether FStats[AIndex] is chosen: as flipped, else unless git does
@@ -330,7 +347,7 @@ end;
 procedure TForm1.UpdateCommitState;
 var
   Chosen, Total, i: integer;
-  Whole, Can: boolean;
+  Whole, Continuing, Busy, Can: boolean;
   Note: string;
 begin
   if FCommitPanel = nil then
@@ -349,23 +366,42 @@ begin
     end;
   Whole := (FOperation = 'merging') or (FOperation = 'cherry-picking') or
     (FOperation = 'reverting');
+  Continuing := ContinueMode;
+  Busy := (FCommitJob <> nil) or (FRemoteJob <> nil);
+  { A merge is committed with git's message, filled into an empty field
+    once; it goes when the merge does. }
+  if FOperation = 'merging' then
+  begin
+    if (FMergeMessage = '') and (Trim(FCommitMemo.Text) = '') then
+    begin
+      FMergeMessage := FRepo.MergeMessage;
+      if FMergeMessage <> '' then
+        FCommitMemo.Text := FMergeMessage;
+    end;
+  end
+  else if FMergeMessage <> '' then
+  begin
+    if FCommitMemo.Text = FMergeMessage then
+      FCommitMemo.Clear;
+    FMergeMessage := '';
+  end;
   Note := '';
-  Can := (FCommitJob = nil) and (FRemoteJob = nil);
-  if not CommitChoosing then
+  Can := not Busy;
+  if FRepo.Base <> '' then
   begin
     Note := rsCommitNotHead;
     Can := False;
   end
-  else if (FOperation = 'rebasing') or (FOperation = 'applying patches') then
-  begin
-    Note := Format(rsCommitBusy, [FOperation]);
-    Can := False;
-  end
   else if FConflictFiles > 0 then
   begin
-    Note := Format(rsCommitConflicts, [FConflictFiles]);
+    if FConflictFiles = 1 then
+      Note := rsCommitConflictOne
+    else
+      Note := Format(rsCommitConflicts, [FConflictFiles]);
     Can := False;
   end
+  else if Continuing then
+    Note := Format(rsContinueNote, [OperationNoun(FOperation)])
   else if Whole then
     Note := Format(rsCommitWhole, [FOperation])
   else if (Chosen = 0) and not FCommitAmend.Checked then
@@ -374,7 +410,7 @@ begin
       Note := rsCommitNothing;
     Can := False;
   end;
-  if Trim(FCommitMemo.Text) = '' then
+  if not Continuing and (Trim(FCommitMemo.Text) = '') then
     Can := False;
   if CommitChoosing and (Total > 0) then
     FCommitHeader.Detail := Format(rsCommitCount, [Chosen, Total])
@@ -382,13 +418,24 @@ begin
     FCommitHeader.Detail := '';
   if FCommitJob <> nil then
     FCommitButton.Caption := rsCommitting
+  else if Continuing then
+    FCommitButton.Caption := rsContinueButton
+  else if FOperation = 'merging' then
+    FCommitButton.Caption := rsCommitMergeButton
   else if FCommitAmend.Checked then
     FCommitButton.Caption := rsCommitAmendButton
   else
     FCommitButton.Caption := rsCommitButton;
   FCommitButton.Enabled := Can;
-  FCommitMemo.ReadOnly := FCommitJob <> nil;
-  FCommitAmend.Enabled := (FCommitJob = nil) and not Whole;
+  { git keeps the message of a commit it carries on with. }
+  FCommitMemo.ReadOnly := Busy or Continuing;
+  FCommitMemo.Enabled := not Continuing;
+  FCommitAmend.Visible := FOperation = '';
+  FCommitAmend.Enabled := not Busy;
+  FAbortButton.Visible := (FOperation <> '') and (FOperation <> 'bisecting');
+  FAbortButton.Enabled := not Busy;
+  FSkipButton.Visible := Continuing;
+  FSkipButton.Enabled := not Busy;
   FCommitNote.Caption := Note;
   FCommitNote.Visible := Note <> '';
   if FCommitItem <> nil then
@@ -406,7 +453,7 @@ begin
   begin
     Key := 0;
     if FCommitButton.Enabled then
-      StartCommit;
+      CommitButtonClick(Sender);
   end;
 end;
 
@@ -433,7 +480,10 @@ end;
 
 procedure TForm1.CommitButtonClick(Sender: TObject);
 begin
-  StartCommit;
+  if ContinueMode then
+    ContinueOperationClick
+  else
+    StartCommit;
 end;
 
 { File > Commit: the section unfolded and the message field focused. }
@@ -519,6 +569,7 @@ begin
     FCommitMemo.Clear;
     FCommitAmend.Checked := False;
     FAmendMessage := '';
+    FMergeMessage := '';
     FCommitOn.Clear;
     FCommitOff.Clear;
     StatusNote(Format(rsCommitted, [Copy(Job.Id, 1, 7), Subject]));
@@ -573,6 +624,7 @@ begin
   FCommitOff.Clear;
   FCommitAmend.Checked := False;
   FAmendMessage := '';
+  FMergeMessage := '';
   FCommitDraftFor := FRepo.Root;
   if (FRepo.Root <> '') and (FSettings.CommitDraftRepo = FRepo.Root) then
     FCommitMemo.Text := FSettings.CommitDraft

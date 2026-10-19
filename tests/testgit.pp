@@ -66,6 +66,10 @@ type
     procedure TestPushFetchPull;
     procedure TestPullDiverged;
     procedure TestRemoteEnvironment;
+    procedure TestResolveMerge;
+    procedure TestResolveRebase;
+    procedure TestMarkResolvedAndAbort;
+    procedure TestSkip;
   end;
 
 implementation
@@ -1509,6 +1513,123 @@ begin
   end;
   Git(['config', 'core.sshCommand', 'ssh -i key']);
   AssertEquals('the user runs ssh their own way', 0, Length(FRepo.RemoteEnvironment));
+end;
+
+{ Two branches that change a.txt each their own way, topic also
+  deleting del.txt where the default branch changes it; the default
+  branch is checked out. Answers its name. }
+function MakeDiverged(ATest: TGitRepoTest): string;
+begin
+  ATest.MakeHistory;
+  ATest.Git(['config', 'user.name', 'Gittan Test']);
+  ATest.Git(['config', 'user.email', 'test@example.invalid']);
+  Result := Trim(ATest.Git(['rev-parse', '--abbrev-ref', 'HEAD']));
+  ATest.Git(['checkout', '-q', '-b', 'topic']);
+  ATest.WriteFile('a.txt', 'topic'#10);
+  ATest.Git(['rm', '-q', 'del.txt']);
+  ATest.Commit('topic');
+  ATest.Git(['checkout', '-q', Result]);
+  ATest.WriteFile('a.txt', 'main'#10);
+  ATest.WriteFile('del.txt', 'changed'#10);
+  ATest.Commit('main');
+end;
+
+{ git stops on a conflict with a failure, so it runs without the helper. }
+procedure GitStops(const ADir: string; const AArgs: array of string);
+var
+  Output: string;
+  Status: integer;
+begin
+  RunCommandIndir(ADir, 'git', AArgs, Output, Status, [poStderrToOutPut]);
+  if Status = 0 then
+    raise Exception.Create('git did not stop: ' + Output);
+end;
+
+function FileText(const AFileName: string): string;
+var
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  try
+    Lines.LoadFromFile(AFileName);
+    Result := Lines.Text;
+  finally
+    Lines.Free;
+  end;
+end;
+
+procedure TGitRepoTest.TestResolveMerge;
+var
+  Branch: string;
+begin
+  Branch := MakeDiverged(Self);
+  AssertTrue(FRepo.Open(FDir));
+  GitStops(FDir, ['merge', 'topic']);
+  AssertEquals('merging', FRepo.Operation);
+  AssertTrue(FRepo.MergeMessage, Pos('Merge branch ''topic''', FRepo.MergeMessage) = 1);
+  AssertFalse('conflicts left', FRepo.ContinueOperation);
+  AssertEquals('merging', FRepo.Operation);
+  AssertTrue(FRepo.Error, FRepo.ResolveConflict('a.txt', csTheirs));
+  AssertEquals('topic' + LineEnding, FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
+  AssertTrue(FRepo.Error, FRepo.ResolveConflict('del.txt', csTheirs));
+  AssertFalse('theirs deleted it', FileExists(IncludeTrailingPathDelimiter(FDir) + 'del.txt'));
+  AssertTrue(FRepo.Error, FRepo.ContinueOperation);
+  AssertEquals('', FRepo.Operation);
+  AssertEquals(Trim(Git(['rev-parse', 'topic'])), Trim(Git(['rev-parse', 'HEAD^2'])));
+  AssertEquals(Branch, FRepo.Branch);
+end;
+
+{ In a rebase mine is the commit being replayed, git's theirs. }
+procedure TGitRepoTest.TestResolveRebase;
+var
+  Branch: string;
+begin
+  Branch := MakeDiverged(Self);
+  AssertTrue(FRepo.Open(FDir));
+  Git(['checkout', '-q', 'topic']);
+  GitStops(FDir, ['rebase', Branch]);
+  AssertEquals('rebasing', FRepo.Operation);
+  AssertTrue(FRepo.Error, FRepo.ResolveConflict('a.txt', csMine));
+  AssertEquals('topic' + LineEnding, FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
+  AssertTrue(FRepo.Error, FRepo.ResolveConflict('del.txt', csMine));
+  AssertFalse(FileExists(IncludeTrailingPathDelimiter(FDir) + 'del.txt'));
+  AssertTrue(FRepo.Error, FRepo.ContinueOperation);
+  AssertEquals('', FRepo.Operation);
+  AssertEquals('topic', FRepo.Branch);
+  AssertEquals(Trim(Git(['rev-parse', Branch])), Trim(Git(['rev-parse', 'HEAD^'])));
+end;
+
+procedure TGitRepoTest.TestMarkResolvedAndAbort;
+begin
+  MakeDiverged(Self);
+  AssertTrue(FRepo.Open(FDir));
+  GitStops(FDir, ['merge', 'topic']);
+  WriteFile('a.txt', 'both'#10);
+  AssertTrue(FRepo.Error, FRepo.MarkResolved('a.txt'));
+  { Deleted on disk: resolved as deleted. }
+  DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'del.txt');
+  AssertTrue(FRepo.Error, FRepo.MarkResolved('del.txt'));
+  AssertEquals('', Git(['ls-files', '-u']));
+  AssertTrue(FRepo.Error, FRepo.AbortOperation);
+  AssertEquals('', FRepo.Operation);
+  AssertEquals('main' + LineEnding, FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
+  AssertFalse('nothing to abort', FRepo.AbortOperation);
+end;
+
+procedure TGitRepoTest.TestSkip;
+var
+  Branch: string;
+begin
+  Branch := MakeDiverged(Self);
+  AssertTrue(FRepo.Open(FDir));
+  GitStops(FDir, ['merge', 'topic']);
+  AssertFalse('a merge has nothing to skip', FRepo.SkipOperation);
+  Git(['merge', '--abort']);
+  Git(['checkout', '-q', 'topic']);
+  GitStops(FDir, ['rebase', Branch]);
+  AssertTrue(FRepo.Error, FRepo.SkipOperation);
+  AssertEquals('', FRepo.Operation);
+  AssertEquals(Trim(Git(['rev-parse', Branch])), Trim(Git(['rev-parse', 'HEAD'])));
 end;
 
 procedure TGitRepoTest.TestBranchesAndSwitch;

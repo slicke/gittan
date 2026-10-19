@@ -449,6 +449,8 @@ begin
       SaveEdit(True);
     Exit;
   end;
+  if ConflictHeaderAction(AIndex) then
+    Exit;
   if FView = gvSubmodule then
   begin
     OpenShownSubmodule;

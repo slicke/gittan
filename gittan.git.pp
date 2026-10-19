@@ -73,6 +73,12 @@ type
     merge commit, pmRebase by rebasing the branch's own commits on top. }
   TGittanPullMode = (pmAuto, pmMerge, pmRebase);
 
+  {** A side of a conflict: the user's own work, or what came in. In a
+    merge, a cherry-pick, a revert or a stash git calls them ours and
+    theirs; a rebase replays the user's commits onto the upstream, so
+    there mine is git's theirs. }
+  TGittanConflictSide = (csMine, csTheirs);
+
   {** One opened repository. Open finds the work tree root for a folder, and
     the other calls run inside that root. }
   TGittanRepo = class
@@ -179,6 +185,32 @@ type
       sees; none when the user runs ssh their own way (GIT_SSH_COMMAND,
       GIT_SSH or core.sshCommand). A key in the agent still works. }
     function RemoteEnvironment: TStringArray;
+    {** Resolves the conflict in APath by taking one side whole, as
+      `git checkout --ours` or `--theirs` and `git add` do; when that
+      side deleted the file it goes (`git rm`). }
+    function ResolveConflict(const APath: string; ASide: TGittanConflictSide): boolean;
+    {** Marks APath resolved as it is in the work tree (`git add`), or
+      deleted when it is gone from there (`git rm`). }
+    function MarkResolved(const APath: string): boolean;
+    {** Goes on with what git is in the middle of (Operation), once the
+      conflicts are resolved: the tracked files' changes are staged
+      first (`git add -u`), since they are what the stopped commit
+      takes, then `git <merge|rebase|cherry-pick|revert|am> --continue`
+      runs without an editor, keeping git's message. Refused while a
+      file is still in conflict. A rebase may stop
+      again at a later commit, which leaves it rebasing with new
+      conflicts and is no failure. }
+    function ContinueOperation: boolean;
+    {** Leaves out the commit a rebase, cherry-pick, revert or am
+      stopped at (`--skip`) and goes on with the rest. }
+    function SkipOperation: boolean;
+    {** Gives up what git is in the middle of (`--abort`): the branch and
+      the work tree go back to how they were before it started. }
+    function AbortOperation: boolean;
+    {** The message git prepared for the merge, cherry-pick or revert in
+      progress (MERGE_MSG in the git directory), its comment lines left
+      out; empty when there is none. }
+    function MergeMessage: string;
     {** The e-mail the repository commits under (`git config
       user.email`), empty when none is set. }
     function UserEmail: string;
@@ -1504,6 +1536,166 @@ begin
   if not Result then
     ARejected := (Pos('[rejected]', FError) > 0) or (Pos('fetch first', FError) > 0) or
       (Pos('non-fast-forward', FError) > 0);
+end;
+
+{ ---------------------------------------------------------------------------
+  Conflicts
+  --------------------------------------------------------------------------- }
+
+{ The stages the index holds for APath while it is in conflict: 1 the
+  base, 2 ours, 3 theirs; a side that deleted the file has none. }
+function ConflictStages(const ARoot, APath: string): string;
+var
+  Output, Err, Entry: string;
+  Fields: TStringList;
+  Tab: integer;
+begin
+  Result := '';
+  if not RunGitIn(ARoot, ['--literal-pathspecs', 'ls-files', '-u', '-z', '--', APath],
+    Output, Err) then
+    Exit;
+  Fields := TStringList.Create;
+  try
+    SplitNul(Output, Fields);
+    for Entry in Fields do
+    begin
+      { "<mode> <id> <stage>\t<path>" }
+      Tab := Pos(#9, Entry);
+      if Tab > 1 then
+        Result := Result + Entry[Tab - 1];
+    end;
+  finally
+    Fields.Free;
+  end;
+end;
+
+function TGittanRepo.ResolveConflict(const APath: string; ASide: TGittanConflictSide): boolean;
+var
+  Output, Stages: string;
+  Ours: boolean;
+begin
+  if FRoot = '' then
+    Exit(False);
+  Ours := ASide = csMine;
+  if Operation = 'rebasing' then
+    Ours := not Ours;
+  Stages := ConflictStages(FRoot, APath);
+  if (Ours and (Pos('2', Stages) = 0)) or (not Ours and (Pos('3', Stages) = 0)) then
+    Exit(RunGit(FRoot, ['--literal-pathspecs', 'rm', '-q', '--', APath], Output));
+  if Ours then
+    Result := RunGit(FRoot, ['--literal-pathspecs', 'checkout', '--ours', '--', APath], Output)
+  else
+    Result := RunGit(FRoot, ['--literal-pathspecs', 'checkout', '--theirs', '--', APath], Output);
+  Result := Result and RunGit(FRoot, ['--literal-pathspecs', 'add', '--', APath], Output);
+end;
+
+function TGittanRepo.MarkResolved(const APath: string): boolean;
+var
+  Output: string;
+begin
+  if FRoot = '' then
+    Exit(False);
+  if FileExists(FullPath(APath)) or DirectoryExists(FullPath(APath)) then
+    Result := RunGit(FRoot, ['--literal-pathspecs', 'add', '--', APath], Output)
+  else
+    Result := RunGit(FRoot, ['--literal-pathspecs', 'rm', '-q', '--', APath], Output);
+end;
+
+{ The command of the operation in progress, '' for none (or bisect,
+  which has no --continue). }
+function OperationCommand(const AOperation: string): string;
+begin
+  if AOperation = 'merging' then
+    Result := 'merge'
+  else if AOperation = 'rebasing' then
+    Result := 'rebase'
+  else if AOperation = 'applying patches' then
+    Result := 'am'
+  else if AOperation = 'cherry-picking' then
+    Result := 'cherry-pick'
+  else if AOperation = 'reverting' then
+    Result := 'revert'
+  else
+    Result := '';
+end;
+
+{ git runs the editor through the shell; ":" does nothing there and
+  leaves the message git prepared, on every platform. }
+function TGittanRepo.ContinueOperation: boolean;
+var
+  Command, Output, Err: string;
+begin
+  Command := OperationCommand(Operation);
+  if (FRoot = '') or (Command = '') then
+  begin
+    FError := 'Git is not in the middle of anything to continue.';
+    Exit(False);
+  end;
+  { git add -u would take a file still in conflict, markers and all, as
+    resolved. }
+  if not RunGit(FRoot, ['ls-files', '-u'], Output) then
+    Exit(False);
+  if Trim(Output) <> '' then
+  begin
+    FError := 'Resolve the conflicts first.';
+    Exit(False);
+  end;
+  if not RunGit(FRoot, ['add', '-u'], Output) then
+    Exit(False);
+  Result := RunGitEnv(FRoot, [Command, '--continue'], ['GIT_EDITOR=:'], Output, Err);
+  if Result then
+    Exit;
+  FError := Err;
+  { Stopped at a later commit with conflicts of its own: going on worked. }
+  Result := (Operation <> '') and RunGit(FRoot, ['ls-files', '-u'], Output) and
+    (Trim(Output) <> '');
+end;
+
+function TGittanRepo.SkipOperation: boolean;
+var
+  Command, Output: string;
+begin
+  Command := OperationCommand(Operation);
+  if (FRoot = '') or (Command = '') or (Command = 'merge') then
+  begin
+    FError := 'There is no commit to skip.';
+    Exit(False);
+  end;
+  Result := RunGit(FRoot, [Command, '--skip'], Output);
+end;
+
+function TGittanRepo.AbortOperation: boolean;
+var
+  Command, Output: string;
+begin
+  Command := OperationCommand(Operation);
+  if (FRoot = '') or (Command = '') then
+  begin
+    FError := 'Git is not in the middle of anything to abort.';
+    Exit(False);
+  end;
+  Result := RunGit(FRoot, [Command, '--abort'], Output);
+end;
+
+function TGittanRepo.MergeMessage: string;
+var
+  Dir, Line: string;
+  Lines: TStringList;
+begin
+  Result := '';
+  Dir := GitDir;
+  if (Dir = '') or not FileExists(IncludeTrailingPathDelimiter(Dir) + 'MERGE_MSG') then
+    Exit;
+  Lines := TStringList.Create;
+  try
+    Lines.LoadFromFile(IncludeTrailingPathDelimiter(Dir) + 'MERGE_MSG');
+    for Line in Lines do
+      if (Line = '') or (Line[1] <> '#') then
+        Result := Result + Line + #10;
+  finally
+    Lines.Free;
+  end;
+  Result := Trim(Result);
 end;
 
 function TGittanRepo.HeadMessage(out AMessage: string): boolean;

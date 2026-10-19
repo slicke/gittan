@@ -753,6 +753,12 @@ begin
   Item := TMenuItem.Create(FFilePopup);
   Item.Caption := '-';
   FFilePopup.Items.Add(Item);
+  FResolveMineItem := AddItem(FFilePopup, rsResolveMineItem, @MenuResolveMineClick);
+  FResolveTheirsItem := AddItem(FFilePopup, rsResolveTheirsItem, @MenuResolveTheirsClick);
+  FMarkResolvedItem := AddItem(FFilePopup, rsMarkResolvedItem, @MenuMarkResolvedClick);
+  Item := TMenuItem.Create(FFilePopup);
+  Item.Caption := '-';
+  FFilePopup.Items.Add(Item);
   { Filled with the patterns for the file when the menu pops up. }
   FIgnoreMenu := AddItem(FFilePopup, rsAddToIgnore, nil);
   FExcludeMenu := AddItem(FFilePopup, rsAddToExclude, nil);
@@ -827,6 +833,9 @@ begin
     FFilePopup.Items[i].Enabled := FContextPath <> '';
   FRevealItem.Enabled := Exists;
   FOpenItem.Enabled := Exists;
+  FResolveMineItem.Enabled := IsConflictPath(FContextPath);
+  FResolveTheirsItem.Enabled := FResolveMineItem.Enabled;
+  FMarkResolvedItem.Enabled := FResolveMineItem.Enabled;
   FillIgnoreMenus(FContextPath);
 end;
 

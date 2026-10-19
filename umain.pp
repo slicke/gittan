@@ -119,6 +119,8 @@ type
     FFilePopup, FStatusPopup, FEditPopup: TPopupMenu;
     FStatus: TGittanStatusBar;
     FRevealItem, FOpenItem: TMenuItem;
+    { The file menu's conflict items (umain.conflicts.inc). }
+    FResolveMineItem, FResolveTheirsItem, FMarkResolvedItem: TMenuItem;
     FContextPath: string;
     { The GitHub items of the editor menu, made only when gh is installed
       (the file menu's is enabled with the rest of its items); the editor the editor menu popped up over and the
@@ -220,6 +222,10 @@ type
     FCommitItem: TMenuItem;
     FCommitJob: TGittanCommitJob;
     FCommitDraftFor, FAmendMessage: string;
+    { Abort and Skip for what git is in the middle of, and the merge
+      message filled into the field (umain.conflicts.inc). }
+    FAbortButton, FSkipButton: TButton;
+    FMergeMessage: string;
     { Fetch, pull and push (umain.remote.inc): the job while it runs,
       the commits ahead when it started, the menu items, and the list
       the status bar's counts drop up. }
@@ -803,6 +809,17 @@ type
     procedure SaveCommitDraft;
     procedure LoadCommitDraft;
     procedure UpdateRemoteItems;
+    function ContinueMode: boolean;
+    function IsConflictPath(const APath: string): boolean;
+    function MarkersLeft(const APath: string): integer;
+    procedure ResolvePath(const APath: string; AAction: integer);
+    function ConflictHeaderAction(AIndex: integer): boolean;
+    procedure MenuResolveMineClick(Sender: TObject);
+    procedure MenuResolveTheirsClick(Sender: TObject);
+    procedure MenuMarkResolvedClick(Sender: TObject);
+    procedure ContinueOperationClick;
+    procedure SkipOperationClick(Sender: TObject);
+    procedure AbortOperationClick(Sender: TObject);
     procedure StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode = pmAuto);
     procedure RemoteJobDone(Sender: TObject);
     procedure StopRemoteJob(AWait: boolean);
@@ -1023,6 +1040,7 @@ resourcestring
   rsCommitNotHead = 'Commits go on HEAD. Compare with HEAD to choose files.';
   rsCommitBusy = 'Git is %s. Continue or abort it in a terminal first.';
   rsCommitConflicts = 'Resolve the conflicts first (%d files).';
+  rsCommitConflictOne = 'Resolve the conflict first.';
   rsCommitWhole = 'While %s, everything staged goes into the commit too.';
   rsCommitNothing = 'Tick the files to commit.';
   rsCommitted = 'Committed %s: %s';
@@ -1056,6 +1074,43 @@ resourcestring
   rsPushRejectedTitle = 'The Push Was Rejected';
   rsPushRejected = 'The remote has commits the branch does not have yet. Pull them first?';
   rsPullAction = 'Pull';
+  rsUseMine = 'Use Mine';
+  rsUseTheirs = 'Use Theirs';
+  rsMarkResolved = 'Mark Resolved';
+  rsResolveMineItem = 'Resolve Using Mine';
+  rsResolveTheirsItem = 'Resolve Using Theirs';
+  rsMarkResolvedItem = 'Mark as Resolved';
+  rsResolveTitle = 'Resolve the Conflict';
+  rsResolveAsk = 'Replace %s with %s? Edits made to it since the conflict are lost.';
+  rsResolveAction = 'Replace';
+  rsSideMine = 'your version';
+  rsSideTheirs = 'the incoming version';
+  rsMarkResolvedTitle = 'Conflicts Left';
+  rsMarkersLeft = '%s still has %d conflicts. Mark it resolved anyway?';
+  rsResolved = 'Resolved %s';
+  rsResolveFailed = 'Could not resolve %s: %s';
+  rsNounMerge = 'the merge';
+  rsNounRebase = 'the rebase';
+  rsNounCherryPick = 'the cherry-pick';
+  rsNounRevert = 'the revert';
+  rsNounPatches = 'applying the patches';
+  rsContinueButton = 'Continue';
+  rsSkipButton = 'Skip';
+  rsAbortButton = 'Abort';
+  rsCommitMergeButton = 'Commit Merge';
+  rsContinueNote = 'Continue goes on with %s.';
+  rsContinueFailed = 'Could not continue %s';
+  rsContinued = 'Finished %s';
+  rsContinuedOn = 'Went on with %s';
+  rsStoppedAgain = 'Stopped again with conflicts';
+  rsSkipTitle = 'Skip the Commit';
+  rsSkipAsk = 'Leave out the commit git stopped at, with its changes, and go on with the rest?';
+  rsSkipped = 'Skipped the commit';
+  rsSkipFailed = 'Could not skip the commit';
+  rsAbortTitle = 'Abort';
+  rsAbortAsk = 'Abort %s? The branch and the files go back to how they were before it started.';
+  rsAborted = 'Aborted %s';
+  rsAbortFailed = 'Could not abort %s';
   rsIdentityTitle = 'Who Commits?';
   rsIdentityName = 'Name';
   rsIdentityEmail = 'E-mail';
@@ -3821,7 +3876,10 @@ begin
       FHeader.SetCounts(FStats[i].Added, FStats[i].Deleted, FStats[i].Binary);
       FHeader.SetStage(FStats[i].Staged, FStats[i].Unstaged);
       if FStats[i].Kind = ckConflict then
+      begin
         FConflictRoles := ConflictRoles(FChangeLines);
+        FHeader.SetActions([rsUseMine, rsUseTheirs, rsMarkResolved]);
+      end;
       Break;
     end;
   if IsImagePath(APath) then
@@ -3844,7 +3902,7 @@ begin
     Exit;
   end;
   { One of the repository's own files can be opened to edits. }
-  if IsRepoFile(APath) then
+  if IsRepoFile(APath) and (FConflictRoles = nil) then
     FHeader.SetActions([rsEditAction]);
   FManualLexer := False;
   FView := gvChanges;
@@ -4341,6 +4399,7 @@ end;
 {$I umain.update.inc}
 {$I umain.reviews.inc}
 {$I umain.translations.inc}
+{$I umain.conflicts.inc}
 {$I umain.commit.inc}
 {$I umain.remote.inc}
 
