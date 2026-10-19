@@ -9,6 +9,9 @@ uses
   {$IFDEF UNIX}
   cthreads,
   {$ENDIF}
+  {$IFDEF WINDOWS}
+  Windows,
+  {$ENDIF}
   Classes, consoletestrunner,
   testworddiff, testgit, testsettings, testsymbols, testlexerpick,
   testsymbolindex, testsnapshots, testblame, testhistory, testsyntaxthemes,
@@ -25,6 +28,12 @@ begin
     page, and "Björn" becomes "BjÃ¶rn". }
   SetMultiByteConversionCodePage(CP_UTF8);
   SetMultiByteRTLFileSystemCodePage(CP_UTF8);
+  { Git for Windows sets core.autocrlf=true, so a checkout, revert or rebase
+    writes CRLF and the tests' LF contents do not match; every git the
+    tests start inherits this environment and keeps LF. }
+  SetEnvironmentVariable('GIT_CONFIG_COUNT', '1');
+  SetEnvironmentVariable('GIT_CONFIG_KEY_0', 'core.autocrlf');
+  SetEnvironmentVariable('GIT_CONFIG_VALUE_0', 'false');
   {$ENDIF}
   App := TTestRunner.Create(nil);
   try
