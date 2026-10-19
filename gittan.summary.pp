@@ -95,6 +95,13 @@ type
     FBaseRect: TRect;
     FBaseHot, FBaseClickable: boolean;
     FOnBaseClick: TGittanBranchClickEvent;
+    { The sync line's chip ("↑ 3 not pushed · ↓ 2 not pulled"), drawn as
+      one while OnSyncClick is set and the branch has an upstream, with
+      its hover state. }
+    FSyncRect: TRect;
+    FSyncHot: boolean;
+    FOnSyncClick: TGittanBranchClickEvent;
+    procedure SetSyncHot(AValue: boolean);
     function BranchClickable: boolean;
     procedure SetBranchHot(AValue: boolean);
     procedure SetBaseHot(AValue: boolean);
@@ -193,6 +200,10 @@ type
       actions, such as a branch to merge). }
     property OnBaseClick: TGittanBranchClickEvent read FOnBaseClick write FOnBaseClick;
     property BaseClickable: boolean read FBaseClickable write SetBaseClickable;
+    {** A click on the sync line (the commits not pushed or not pulled),
+      which is drawn as a chip under the mouse while this is set and the
+      branch has an upstream. }
+    property OnSyncClick: TGittanBranchClickEvent read FOnSyncClick write FOnSyncClick;
     {** A click on a commit's row. }
     property OnSelectCommit: TGittanSelectCommitEvent read FOnSelectCommit write FOnSelectCommit;
     {** A click on a note's link to GitHub. }
@@ -715,6 +726,18 @@ begin
   Invalidate;
 end;
 
+procedure TGittanSummary.SetSyncHot(AValue: boolean);
+begin
+  if FSyncHot = AValue then
+    Exit;
+  FSyncHot := AValue;
+  if AValue then
+    Cursor := crHandPoint
+  else
+    Cursor := crDefault;
+  Invalidate;
+end;
+
 procedure TGittanSummary.SetBaseHot(AValue: boolean);
 begin
   if FBaseHot = AValue then
@@ -835,6 +858,7 @@ begin
     Inc(X, Gap);
   end;
   FBaseRect := Rect(0, 0, 0, 0);
+  FSyncRect := Rect(0, 0, 0, 0);
   if FBase <> '' then
   begin
     TextY := Y + TitleHeight - BodyHeight - 3;
@@ -1237,6 +1261,22 @@ var
 begin
   StartX := X;
   Canvas.Brush.Style := bsClear;
+  { The line is a chip while a click drops the sync list: filled under
+    the mouse, as the branch chip is. }
+  if ADraw and Assigned(FOnSyncClick) and FHasUpstream and not FUpstreamGone then
+  begin
+    FSyncRect := Rect(X - ChipPadX, Y - ChipPadY, X + PaintSync(0, 0, False) + ChipPadX,
+      Y + Canvas.TextHeight('Xg') + ChipPadY);
+    if FSyncHot then
+    begin
+      Canvas.Pen.Style := psClear;
+      Canvas.Brush.Style := bsSolid;
+      Canvas.Brush.Color := FHover;
+      Canvas.RoundRect(FSyncRect, 8, 8);
+      Canvas.Pen.Style := psSolid;
+      Canvas.Brush.Style := bsClear;
+    end;
+  end;
   if FHasUpstream and FUpstreamGone then
     Part(rsUpstreamGone, FDeleted)
   else if FHasUpstream then
@@ -1396,9 +1436,10 @@ begin
   SetLinkHot(LinkAt(X, Y));
   SetBranchHot(BranchClickable and PtInRect(FBranchRect, Point(X, Y)));
   SetBaseHot((FBaseRect.Right > FBaseRect.Left) and PtInRect(FBaseRect, Point(X, Y)));
+  SetSyncHot((FSyncRect.Right > FSyncRect.Left) and PtInRect(FSyncRect, Point(X, Y)));
   if FLinkHot >= 0 then
     Cursor := crHandPoint
-  else if not (FBranchHot or FBaseHot) then
+  else if not (FBranchHot or FBaseHot or FSyncHot) then
     Cursor := crDefault;
 end;
 
@@ -1410,6 +1451,7 @@ begin
   SetLinkHot(-1);
   SetBranchHot(False);
   SetBaseHot(False);
+  SetSyncHot(False);
 end;
 
 procedure TGittanSummary.MouseUp(Button: TMouseButton; Shift: TShiftState;
@@ -1431,6 +1473,14 @@ begin
     FOnBaseClick(Self, Rect(ClientToScreen(FBaseRect.TopLeft).X,
       ClientToScreen(FBaseRect.TopLeft).Y, ClientToScreen(FBaseRect.BottomRight).X,
       ClientToScreen(FBaseRect.BottomRight).Y));
+    Exit;
+  end;
+  if (Button = mbLeft) and (FSyncRect.Right > FSyncRect.Left) and Assigned(FOnSyncClick) and
+    PtInRect(FSyncRect, Point(X, Y)) then
+  begin
+    FOnSyncClick(Self, Rect(ClientToScreen(FSyncRect.TopLeft).X,
+      ClientToScreen(FSyncRect.TopLeft).Y, ClientToScreen(FSyncRect.BottomRight).X,
+      ClientToScreen(FSyncRect.BottomRight).Y));
     Exit;
   end;
   if (Button = mbLeft) and Assigned(FOnOpenUrl) and (LinkAt(X, Y) >= 0) then

@@ -928,6 +928,7 @@ type
     function BaseActionRef: string;
     procedure BaseClick(const AScreenRect: TRect);
     procedure SummaryBaseClick(Sender: TObject; const AScreenRect: TRect);
+    procedure SummarySyncClick(Sender: TObject; const AScreenRect: TRect);
     procedure BasePopupPick(Sender: TObject; AIndex: integer);
     procedure SyncPopupPick(Sender: TObject; AIndex: integer);
     function SubmoduleKey: string;
@@ -1795,6 +1796,7 @@ begin
   FSummary.OnContextFile := @SummaryContextFile;
   FSummary.OnBranchClick := @SummaryBranchClick;
   FSummary.OnBaseClick := @SummaryBaseClick;
+  FSummary.OnSyncClick := @SummarySyncClick;
   FSummary.OnOpenUrl := @SummaryOpenUrl;
   FSummary.OnSelectCommit := @SummarySelectCommit;
   { The branch list pops up over the form, under the branch. }

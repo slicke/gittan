@@ -174,6 +174,12 @@ begin
   FSyncPopup.Popup(AScreenRect);
 end;
 
+{ The summary's sync line ("↑ 3 not pushed") drops the same list. }
+procedure TForm1.SummarySyncClick(Sender: TObject; const AScreenRect: TRect);
+begin
+  SyncClick(AScreenRect);
+end;
+
 procedure TForm1.SyncPopupPick(Sender: TObject; AIndex: integer);
 begin
   if (AIndex < 0) or (AIndex > High(FSyncActions)) then
