@@ -32,12 +32,17 @@ type
   TGittanPoRowKind = (prEntry, prFuzzy, prUntranslated, prSeparator);
 
   {** The two sides of the translation view, row for row: the text, the
-    line of the file a row starts (0 for none) and the kind of each. The
+    line of the file a row starts (0 for none) and the kind of each, and
+    which rows of the left side hold a context, which the view dims. The
     shorter side of an entry is padded with blank rows. }
   TGittanPoRows = record
     Left, Right: TStringArray;
     LeftLines, RightLines: TIntegerDynArray;
     Kinds: array of TGittanPoRowKind;
+    Context: array of boolean;
+    {** The index in the entries of the entry each row belongs to, -1
+      for a separator. }
+    Entries: TIntegerDynArray;
   end;
 
 {** Whether APath is a gettext translation file, by its extension. A
@@ -68,6 +73,12 @@ function IsTranslated(const AEntry: TGittanPoEntry): boolean;
   shown. }
 function PoRows(const AEntries: TGittanPoEntries;
   out ACount, AFuzzy, AUntranslated: integer): TGittanPoRows;
+
+{** Which entries of ANew changed since AOld, one flag per entry of ANew:
+  an entry is paired with the one of AOld with the same context and
+  original, and it changed when there is none, or when its plural, its
+  translation or its fuzzy flag differ. }
+function ChangedEntries(const AOld, ANew: TGittanPoEntries): TBooleanDynArray;
 
 implementation
 
@@ -378,11 +389,18 @@ begin
         RightLines[Right.Count - 1] := 0;
         SetLength(Result.Kinds, Left.Count);
         Result.Kinds[Left.Count - 1] := prSeparator;
+        SetLength(Result.Entries, Left.Count);
+        Result.Entries[Left.Count - 1] := -1;
       end;
       Inc(ACount);
       Base := Left.Count;
       if AEntries[e].HasContext then
+      begin
         AddText(Left, LeftLines, '[' + AEntries[e].Context + ']', '', 0);
+        { The context's rows are marked through their objects. }
+        for i := Base to Left.Count - 1 do
+          Left.Objects[i] := Left;
+      end;
       AddText(Left, LeftLines, AEntries[e].Id, '', AEntries[e].IdLine);
       if AEntries[e].HasPlural then
         AddText(Left, LeftLines, AEntries[e].IdPlural, '', 0);
@@ -410,16 +428,70 @@ begin
         RightLines[Right.Count - 1] := 0;
       end;
       SetLength(Result.Kinds, Rows);
+      SetLength(Result.Entries, Rows);
       for i := Base to Rows - 1 do
+      begin
         Result.Kinds[i] := Kind;
+        Result.Entries[i] := e;
+      end;
     end;
     Result.Left := Left.ToStringArray;
     Result.Right := Right.ToStringArray;
     Result.LeftLines := LeftLines;
     Result.RightLines := RightLines;
+    SetLength(Result.Context, Left.Count);
+    for i := 0 to Left.Count - 1 do
+      Result.Context[i] := Left.Objects[i] <> nil;
   finally
     Left.Free;
     Right.Free;
+  end;
+end;
+
+{ The key an entry is paired by: its context and its original. A #4
+  parts them, as gettext does in its compiled files. }
+function EntryKey(const AEntry: TGittanPoEntry): string;
+begin
+  if AEntry.HasContext then
+    Result := AEntry.Context + #4 + AEntry.Id
+  else
+    Result := AEntry.Id;
+end;
+
+function SameEntry(const A, B: TGittanPoEntry): boolean;
+var
+  i: integer;
+begin
+  Result := (A.IdPlural = B.IdPlural) and (A.Fuzzy = B.Fuzzy) and
+    (Length(A.Strs) = Length(B.Strs));
+  if Result then
+    for i := 0 to High(A.Strs) do
+      if A.Strs[i] <> B.Strs[i] then
+        Exit(False);
+end;
+
+function ChangedEntries(const AOld, ANew: TGittanPoEntries): TBooleanDynArray;
+var
+  Keys: TStringList;
+  i, k: integer;
+begin
+  SetLength(Result, Length(ANew));
+  Keys := TStringList.Create;
+  try
+    Keys.CaseSensitive := True;
+    Keys.Sorted := True;
+    Keys.Duplicates := dupIgnore;
+    for i := 0 to High(AOld) do
+      if not AOld[i].Obsolete then
+        Keys.AddObject(EntryKey(AOld[i]), TObject(PtrInt(i)));
+    for i := 0 to High(ANew) do
+    begin
+      k := Keys.IndexOf(EntryKey(ANew[i]));
+      Result[i] := (k < 0) or
+        not SameEntry(AOld[PtrInt(Keys.Objects[k])], ANew[i]);
+    end;
+  finally
+    Keys.Free;
   end;
 end;
 

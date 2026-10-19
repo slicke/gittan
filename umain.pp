@@ -393,6 +393,8 @@ type
     FTranslations: boolean;
     FTranslationsItem: TMenuItem;
     FTranslationFile, FPoStats: string;
+    { The first row of each entry the navigator steps through. }
+    FPoBlocks: TIntegerDynArray;
     { View > Review Comments (see umain.reviews.inc): whether it is on,
       its menu item, the job that fetches the threads, the threads of the
       pull request FThreadsNumber of FThreadsRepo with its head commit,
@@ -460,7 +462,7 @@ type
     procedure ShowBinaryFile(const AFileName: string);
     function SidesShown: boolean;
     function ShowsChangedFile: boolean;
-    procedure ShowTranslation(const AText: string);
+    procedure ShowTranslation(const AText, AOld: string; ACompare: boolean);
     procedure ShowTranslationChanges(const APath: string);
     procedure ShowTranslationFile(const AFileName: string);
     procedure MenuTranslationsClick(Sender: TObject);
@@ -865,6 +867,7 @@ resourcestring
   rsOnlyChanges = '&Hide Unchanged Lines';
   rsTranslations = 'T&ranslations';
   rsTranslationStats = '%d entries · %d fuzzy · %d untranslated';
+  rsTranslationChanged = '%d changed · ';
   rsContextLines = 'Conte&xt Lines';
   rsNLines = '%d lines';
   rsSideBySide = 'Side &by Side';
@@ -1163,6 +1166,9 @@ const
   tagHistoryWord = 5;
   tagHistorySwatch = 6;
   tagHistoryStyle = 7;
+  { The context of an entry in the translation view, dimmed to the
+    gutter's color (see umain.translations.inc). }
+  tagPoContext = 8;
   { The gutter band of the blame (see umain.blame.inc), the width of its
     age column in characters and the most the author column takes. }
   gutterTagBlame = 100;
@@ -2505,6 +2511,11 @@ begin
     begin
       Item.LinePart.ColorFont := HistoryColor(Item.TagEx, htSwatch);
       AEd.Attribs[i] := Item;
+    end
+    else if Item.Tag = tagPoContext then
+    begin
+      Item.LinePart.ColorFont := AEd.Colors.GutterFont;
+      AEd.Attribs[i] := Item;
     end;
   end;
 end;
@@ -2828,6 +2839,10 @@ begin
     file. }
   if FView in [gvImage, gvBinary] then
     Exit;
+  { The translation view keeps its own blocks: the changed entries, or
+    the ones that need work. }
+  if FView = gvTranslation then
+    Exit(FPoBlocks);
   Marks := Edit.Strings.Bookmarks2;
   SetLength(Result, Marks.Count);
   n := 0;

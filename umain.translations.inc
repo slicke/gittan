@@ -8,8 +8,12 @@
   an entry is padded with blank rows and a blank row parts the entries.
   A fuzzy entry is tinted amber and one without a translation red, on
   both sides, and a fuzzy one's translation has an amber "!" before its
-  number, so the navigator and F7 step through the entries that
-  need work. The numbers are the lines of the file the original and the
+  number. In the change view the entries that changed since the version
+  compared against (paired by context and original, ChangedEntries) get
+  the diff's green strip, and the navigator and F7 step through them;
+  elsewhere, and for a new file, they step through the entries that
+  need work. An entry's context stands in brackets above its original,
+  dimmed. The numbers are the lines of the file the original and the
   translation start on. A changed file shows its new version (the old
   one when it is deleted), a file from File > Open its text on disk; a
   file with a conflict keeps the change view, since its markers would
@@ -32,13 +36,20 @@ end;
 const
   FuzzyMark = '! ';
 
-{ Fills the two editors with the entries of AText, a .po file. }
-procedure TForm1.ShowTranslation(const AText: string);
+{ Fills the two editors with the entries of AText, a .po file. With
+  ACompare the entries that changed since AOld, the version compared
+  against, get the diff's strip and are the blocks the navigator steps
+  through; without, the fuzzy and untranslated entries are. }
+procedure TForm1.ShowTranslation(const AText, AOld: string; ACompare: boolean);
 var
   Rows: TGittanPoRows;
-  Count, Fuzzy, Untranslated, i, Row: integer;
+  Entries: TGittanPoEntries;
+  EntryChanged: TBooleanDynArray;
+  Count, Fuzzy, Untranslated, Edited, i, Row: integer;
+  Starts: boolean;
   Kinds: TIntegerDynArray;
   Decor: PATGutterDecorItem;
+  Part: TATLinePart;
 
   function Joined(const ALines: TStringArray): string;
   var
@@ -57,8 +68,12 @@ var
 
 begin
   AbandonHistoryJob;
-  Rows := PoRows(ParsePo(AText), Count, Fuzzy, Untranslated);
+  Entries := ParsePo(AText);
+  Rows := PoRows(Entries, Count, Fuzzy, Untranslated);
   FPoStats := Format(rsTranslationStats, [Count, Fuzzy, Untranslated]);
+  EntryChanged := nil;
+  if ACompare then
+    EntryChanged := ChangedEntries(ParsePo(AOld), Entries);
   FView := gvTranslation;
   FManualLexer := False;
   FSymbolBar.Visible := False;
@@ -80,6 +95,14 @@ begin
       MarkRow(Edit, i, Kinds[i]);
     end;
   end;
+  { The context, which a Lazarus project fills with the resource
+    string's name, is dimmed so the original stands out. }
+  InitLinePart(Part);
+  Part.ColorFont := FEditOld.Colors.GutterFont;
+  for i := 0 to High(Rows.Context) do
+    if Rows.Context[i] and (FEditOld.Strings.LinesLen[i] > 0) then
+      FEditOld.Attribs.Add(Point(0, i), Point(FEditOld.Strings.LinesLen[i], 0),
+        TATMarkerTags.Init(tagPoContext, 0), @Part);
   SetRowNumbers(FEditOld, Rows.LeftLines, Kinds);
   SetRowNumbers(Edit, Rows.RightLines, Kinds);
   { A fuzzy entry's translation has a "!" before its number. }
@@ -91,6 +114,33 @@ begin
       Decor^.Data.TextAll := FuzzyMark + Decor^.Data.TextAll;
   end;
   UpdateNumberWidth(Edit);
+  { The blocks: the first row of every changed entry, which gets the
+    diff's strip on the new side, or of every entry that needs work. }
+  FPoBlocks := nil;
+  Edited := 0;
+  for i := 0 to High(Rows.Entries) do
+  begin
+    Row := Rows.Entries[i];
+    if Row < 0 then
+      Continue;
+    Starts := (i = 0) or (Rows.Entries[i - 1] <> Row);
+    if ACompare then
+    begin
+      if not EntryChanged[Row] then
+        Continue;
+      Edit.Strings.LinesState[i] := TATLineState.Added;
+    end
+    else if Kinds[i] = 0 then
+      Continue;
+    if Starts then
+    begin
+      SetLength(FPoBlocks, Length(FPoBlocks) + 1);
+      FPoBlocks[High(FPoBlocks)] := i;
+      Inc(Edited);
+    end;
+  end;
+  if ACompare then
+    FPoStats := Format(rsTranslationChanged, [Edited]) + FPoStats;
   FEditOld.LineTop := 0;
   UpdateChangeNav;
   ShowEditor;
@@ -102,14 +152,19 @@ end;
 procedure TForm1.ShowTranslationChanges(const APath: string);
 var
   OldRef, NewRef: string;
-  Data: RawByteString;
+  Data, OldData: RawByteString;
+  HasOld, HasNew: boolean;
 begin
   FRepo.DiffSides(OldRef, NewRef);
-  if not FRepo.FileBlob(APath, NewRef, Data) and
-    not FRepo.FileBlob(APath, OldRef, Data) then
-    Data := '';
+  HasOld := FRepo.FileBlob(APath, OldRef, OldData);
+  HasNew := FRepo.FileBlob(APath, NewRef, Data);
   FTranslationFile := '';
-  ShowTranslation(Data);
+  { A new file has nothing to compare with, and a deleted one shows its
+    old version. }
+  if HasNew then
+    ShowTranslation(Data, OldData, HasOld)
+  else
+    ShowTranslation(OldData, '', False);
   FSummary.Selected := APath;
   Edit.FileName := IncludeTrailingPathDelimiter(FRepo.Root) +
     SetDirSeparators(APath);
@@ -136,7 +191,7 @@ begin
     FSummary.Selected := '';
     FCurrentPath := '';
     FTranslationFile := AFileName;
-    ShowTranslation(Stream.DataString);
+    ShowTranslation(Stream.DataString, '', False);
   finally
     Stream.Free;
   end;

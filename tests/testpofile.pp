@@ -8,7 +8,7 @@ unit testpofile;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.pofile;
+  Classes, SysUtils, Types, fpcunit, testregistry, gittan.pofile;
 
 type
   TPoFileTest = class(TTestCase)
@@ -22,6 +22,7 @@ type
     procedure TestObsolete;
     procedure TestRows;
     procedure TestRowsPlural;
+    procedure TestChanged;
   end;
 
 implementation
@@ -168,6 +169,10 @@ begin
   AssertEquals(12, Rows.LeftLines[3]);
   AssertEquals('Spara %s', Rows.Right[2]);
   AssertEquals('', Rows.Right[3]);
+  AssertTrue(Rows.Context[2]);
+  AssertFalse(Rows.Context[3]);
+  AssertFalse(Rows.Context[0]);
+  AssertEquals(6, Length(Rows.Context));
   AssertTrue(Rows.Kinds[2] = prFuzzy);
   AssertTrue(Rows.Kinds[3] = prFuzzy);
   AssertEquals('Quit', Rows.Left[5]);
@@ -188,6 +193,37 @@ begin
   AssertEquals('%d files', Rows.Left[1]);
   AssertEquals('[0] %d fil', Rows.Right[0]);
   AssertEquals('[1] ', Rows.Right[1]);
+end;
+
+procedure TPoFileTest.TestChanged;
+var
+  Old, New: TGittanPoEntries;
+  Changed: TBooleanDynArray;
+  Rows: TGittanPoRows;
+  Count, Fuzzy, Untranslated: integer;
+begin
+  Old := ParsePo('msgid "a"' + LineEnding + 'msgstr "A"' + LineEnding + '' +
+    LineEnding + 'msgctxt "x"' + LineEnding + 'msgid "b"' + LineEnding +
+    'msgstr "B"' + LineEnding + '' + LineEnding + 'msgid "c"' + LineEnding +
+    'msgstr "C"' + LineEnding);
+  New := ParsePo('msgid "a"' + LineEnding + 'msgstr "A"' + LineEnding + '' +
+    LineEnding + 'msgctxt "x"' + LineEnding + 'msgid "b"' + LineEnding +
+    'msgstr "Bee"' + LineEnding + '' + LineEnding + '#, fuzzy' + LineEnding +
+    'msgid "c"' + LineEnding + 'msgstr "C"' + LineEnding + '' + LineEnding +
+    'msgctxt "y"' + LineEnding + 'msgid "a"' + LineEnding + 'msgstr "A"' + LineEnding);
+  Changed := ChangedEntries(Old, New);
+  AssertEquals(4, Length(Changed));
+  AssertFalse(Changed[0]);
+  AssertTrue(Changed[1]);
+  AssertTrue(Changed[2]);
+  AssertTrue(Changed[3]);
+  AssertFalse(ChangedEntries(New, New)[1]);
+  Rows := PoRows(New, Count, Fuzzy, Untranslated);
+  AssertEquals(Length(Rows.Left), Length(Rows.Entries));
+  AssertEquals(0, Rows.Entries[0]);
+  AssertEquals(-1, Rows.Entries[1]);
+  AssertEquals(1, Rows.Entries[2]);
+  AssertEquals(1, Rows.Entries[3]);
 end;
 
 initialization
