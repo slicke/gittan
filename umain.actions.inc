@@ -1390,6 +1390,8 @@ begin
       MenuSummaryClick(Sender);
     spBranch:
       SummaryBranchClick(Sender, AScreenRect);
+    spBase:
+      BaseClick(AScreenRect);
     spSync:
       SyncClick(AScreenRect);
     spPull:

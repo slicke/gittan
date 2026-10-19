@@ -375,6 +375,65 @@ begin
     MessageDlg(rsCaFailed, FRepo.Error, mtError, [mbOK], 0);
 end;
 
+{ ---------------------------------------------------------------------------
+  Acting on what is compared
+  ---------------------------------------------------------------------------
+  While the base is a branch compared through its merge base with the
+  current one (current...branch, what Show What <branch> Changed Since
+  <current> shows: what merging it would bring), the base label in the
+  summary and the status bar is a chip that drops down Merge <branch>
+  into <current> and Rebase <current> onto <branch>, so looking comes
+  first and the action is at hand. Not while git is in the middle of
+  something or a job runs, nor for a pull request's or a blame range. }
+function TForm1.BaseActionRef: string;
+var
+  Base, LeftSide: string;
+  Dots: integer;
+begin
+  Result := '';
+  Base := FRepo.Base;
+  Dots := Pos('...', Base);
+  if (FRepo.Root = '') or (FBranch = '') or (Dots = 0) or (Base = FPullRange) or
+    (Base = FBlameRange) or (FOperation <> '') or (FCommitJob <> nil) or (FRemoteJob <> nil) then
+    Exit;
+  LeftSide := Copy(Base, 1, Dots - 1);
+  if (LeftSide = FBranch) or (LeftSide = 'HEAD') then
+    Result := Copy(Base, Dots + 3, MaxInt);
+end;
+
+procedure TForm1.BaseClick(const AScreenRect: TRect);
+var
+  Ref: string;
+begin
+  Ref := BaseActionRef;
+  if Ref = '' then
+    Exit;
+  FBaseActionRef := Ref;
+  FBasePopup.Clear;
+  FBasePopup.AddHeader(Format(rsVsSince, [Ref, FBranch]));
+  FBaseMergeIndex := FBasePopup.Add(Format(rsBmMerge, [Ref, FBranch]));
+  FBaseRebaseIndex := FBasePopup.Add(Format(rsBmRebase, [FBranch, Ref]));
+  FBasePopup.Popup(AScreenRect);
+end;
+
+procedure TForm1.SummaryBaseClick(Sender: TObject; const AScreenRect: TRect);
+begin
+  BaseClick(AScreenRect);
+end;
+
+{ The compared branch stays the base through the merge or rebase, so
+  the summary shows what is left of the difference: nothing after a
+  merge or a rebase that went through. }
+procedure TForm1.BasePopupPick(Sender: TObject; AIndex: integer);
+begin
+  if (FBaseActionRef = '') or (BaseActionRef <> FBaseActionRef) then
+    Exit;
+  if AIndex = FBaseMergeIndex then
+    MergeIntoCurrent(FBaseActionRef)
+  else if AIndex = FBaseRebaseIndex then
+    RebaseOntoAsk(FBaseActionRef);
+end;
+
 { A merge of ARef into the branch HEAD is on, with git's message; one
   that stops with conflicts leaves them to the Commit section. }
 procedure TForm1.MergeIntoCurrent(const ARef: string);

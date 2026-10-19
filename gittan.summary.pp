@@ -90,8 +90,15 @@ type
       without a branch. }
     FBranchRect: TRect;
     FBranchHot: boolean;
+    { The base label's chip, drawn as one while BaseClickable, with its
+      hover state. }
+    FBaseRect: TRect;
+    FBaseHot, FBaseClickable: boolean;
+    FOnBaseClick: TGittanBranchClickEvent;
     function BranchClickable: boolean;
     procedure SetBranchHot(AValue: boolean);
+    procedure SetBaseHot(AValue: boolean);
+    procedure SetBaseClickable(AValue: boolean);
     function RowAt(Y: integer): integer;
     function CommitAt(Y: integer): integer;
     procedure SetCommitHot(AValue: integer);
@@ -181,6 +188,11 @@ type
     {** A click on the branch in the header. While it is set the branch
       is drawn as a chip with a chevron, highlighted under the mouse. }
     property OnBranchClick: TGittanBranchClickEvent read FOnBranchClick write FOnBranchClick;
+    {** A click on the base label in the header, which is drawn as a chip
+      with a chevron while BaseClickable is set (for a base that has
+      actions, such as a branch to merge). }
+    property OnBaseClick: TGittanBranchClickEvent read FOnBaseClick write FOnBaseClick;
+    property BaseClickable: boolean read FBaseClickable write SetBaseClickable;
     {** A click on a commit's row. }
     property OnSelectCommit: TGittanSelectCommitEvent read FOnSelectCommit write FOnSelectCommit;
     {** A click on a note's link to GitHub. }
@@ -695,6 +707,26 @@ begin
   Result := Assigned(FOnBranchClick) and (FBranch <> '');
 end;
 
+procedure TGittanSummary.SetBaseClickable(AValue: boolean);
+begin
+  if FBaseClickable = AValue then
+    Exit;
+  FBaseClickable := AValue;
+  Invalidate;
+end;
+
+procedure TGittanSummary.SetBaseHot(AValue: boolean);
+begin
+  if FBaseHot = AValue then
+    Exit;
+  FBaseHot := AValue;
+  if AValue then
+    Cursor := crHandPoint
+  else
+    Cursor := crDefault;
+  Invalidate;
+end;
+
 procedure TGittanSummary.SetBranchHot(AValue: boolean);
 begin
   if FBranchHot = AValue then
@@ -802,11 +834,35 @@ begin
     end;
     Inc(X, Gap);
   end;
+  FBaseRect := Rect(0, 0, 0, 0);
   if FBase <> '' then
   begin
+    TextY := Y + TitleHeight - BodyHeight - 3;
+    { A base with actions is a chip like the branch, with a chevron. }
+    if FBaseClickable and Assigned(FOnBaseClick) then
+    begin
+      FBaseRect := Rect(X - ChipPadX, TextY - ChipPadY,
+        X + Canvas.TextWidth(FBase) + ChevronWidth + ChipPadX, TextY + BodyHeight + ChipPadY);
+      if FBaseHot then
+      begin
+        Canvas.Pen.Style := psClear;
+        Canvas.Brush.Style := bsSolid;
+        Canvas.Brush.Color := FHover;
+        Canvas.RoundRect(FBaseRect, 8, 8);
+        Canvas.Pen.Style := psSolid;
+        Canvas.Brush.Style := bsClear;
+      end;
+    end;
     Canvas.Font.Color := FText;
-    Canvas.TextOut(X, Y + TitleHeight - BodyHeight - 3, FBase);
-
+    Canvas.TextOut(X, TextY, FBase);
+    if FBaseRect.Right > FBaseRect.Left then
+    begin
+      Inc(X, Canvas.TextWidth(FBase) + ChevronWidth div 2 + 1);
+      Canvas.Pen.Width := 1;
+      Canvas.Pen.Color := FDim;
+      Canvas.Polyline([Point(X - 3, TextY + BodyHeight div 2 - 1),
+        Point(X, TextY + BodyHeight div 2 + 2), Point(X + 3, TextY + BodyHeight div 2 - 1)]);
+    end;
   end;
   Inc(Y, TitleHeight + 6);
 
@@ -1339,9 +1395,10 @@ begin
   SetCommitHot(CommitAt(Y));
   SetLinkHot(LinkAt(X, Y));
   SetBranchHot(BranchClickable and PtInRect(FBranchRect, Point(X, Y)));
+  SetBaseHot((FBaseRect.Right > FBaseRect.Left) and PtInRect(FBaseRect, Point(X, Y)));
   if FLinkHot >= 0 then
     Cursor := crHandPoint
-  else if not FBranchHot then
+  else if not (FBranchHot or FBaseHot) then
     Cursor := crDefault;
 end;
 
@@ -1352,6 +1409,7 @@ begin
   SetCommitHot(-1);
   SetLinkHot(-1);
   SetBranchHot(False);
+  SetBaseHot(False);
 end;
 
 procedure TGittanSummary.MouseUp(Button: TMouseButton; Shift: TShiftState;
@@ -1365,6 +1423,14 @@ begin
     FOnBranchClick(Self, Rect(ClientToScreen(FBranchRect.TopLeft).X,
       ClientToScreen(FBranchRect.TopLeft).Y, ClientToScreen(FBranchRect.BottomRight).X,
       ClientToScreen(FBranchRect.BottomRight).Y));
+    Exit;
+  end;
+  if (Button = mbLeft) and (FBaseRect.Right > FBaseRect.Left) and Assigned(FOnBaseClick) and
+    PtInRect(FBaseRect, Point(X, Y)) then
+  begin
+    FOnBaseClick(Self, Rect(ClientToScreen(FBaseRect.TopLeft).X,
+      ClientToScreen(FBaseRect.TopLeft).Y, ClientToScreen(FBaseRect.BottomRight).X,
+      ClientToScreen(FBaseRect.BottomRight).Y));
     Exit;
   end;
   if (Button = mbLeft) and Assigned(FOnOpenUrl) and (LinkAt(X, Y) >= 0) then

@@ -106,8 +106,10 @@ type
     {** What git is in the middle of ("merging") and the conflicted files
       ("2 conflicted files"), each '' for none. }
     procedure SetState(const AOperation, AConflicts: string);
-    {** The base label ("vs origin/main"), '' for none. }
-    procedure SetBase(const ABase: string);
+    {** The base label ("vs origin/main"), '' for none; AClickable makes
+      the part answer a click (and show a hand), for a base that has
+      actions. }
+    procedure SetBase(const ABase: string; AClickable: boolean = False);
     {** The pull request: its number ("#12", '' for none), its state
       ("Approved", "Draft", '' for none) and its checks: an icon in
       ATone (a check for stGood, a cross for stBad, a clock for stWarn,
@@ -512,8 +514,12 @@ begin
   Change(FConflicts, AConflicts);
 end;
 
-procedure TGittanStatusBar.SetBase(const ABase: string);
+procedure TGittanStatusBar.SetBase(const ABase: string; AClickable: boolean);
 begin
+  if AClickable then
+    Include(FClickable, spBase)
+  else
+    Exclude(FClickable, spBase);
   Change(FBase, ABase);
 end;
 

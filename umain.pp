@@ -250,6 +250,13 @@ type
     FRemoteAhead: integer;
     FFetchItem, FPullItem, FPushItem: TMenuItem;
     FSyncPopup: TGittanPopupList;
+    { The actions of a base that is a branch compared through the merge
+      base with the current one (umain.branches.inc): the list dropped
+      from the base label in the summary and the status bar, and the
+      branch it is for. }
+    FBasePopup: TGittanPopupList;
+    FBaseActionRef: string;
+    FBaseMergeIndex, FBaseRebaseIndex: integer;
     FSyncActions: TIntegerDynArray;
     FSubPanel: TPanel;
     FSubHeader: TGittanSectionHeader;
@@ -918,6 +925,10 @@ type
     procedure MenuPullClick(Sender: TObject);
     procedure MenuPushClick(Sender: TObject);
     procedure SyncClick(const AScreenRect: TRect);
+    function BaseActionRef: string;
+    procedure BaseClick(const AScreenRect: TRect);
+    procedure SummaryBaseClick(Sender: TObject; const AScreenRect: TRect);
+    procedure BasePopupPick(Sender: TObject; AIndex: integer);
     procedure SyncPopupPick(Sender: TObject; AIndex: integer);
     function SubmoduleKey: string;
     procedure FillSubmodules;
@@ -1418,6 +1429,7 @@ resourcestring
   rsPullNext = 'Next: %s  ↓';
   rsPullPrev = 'Previous: %s  ↑';
   rsSwitchBranchHint = 'Switch branch';
+  rsBaseActionsHint = 'Merge or rebase';
   rsShowSummaryHint = 'Show the summary';
   rsShowConflictHint = 'Show the conflicted files';
   rsAheadHint = '%d commits not pushed yet';
@@ -1782,6 +1794,7 @@ begin
   FSummary.OnSelectFile := @SummarySelectFile;
   FSummary.OnContextFile := @SummaryContextFile;
   FSummary.OnBranchClick := @SummaryBranchClick;
+  FSummary.OnBaseClick := @SummaryBaseClick;
   FSummary.OnOpenUrl := @SummaryOpenUrl;
   FSummary.OnSelectCommit := @SummarySelectCommit;
   { The branch list pops up over the form, under the branch. }
@@ -1808,6 +1821,9 @@ begin
   FSyncPopup := TGittanPopupList.Create(Self);
   FSyncPopup.Parent := Self;
   FSyncPopup.OnPick := @SyncPopupPick;
+  FBasePopup := TGittanPopupList.Create(Self);
+  FBasePopup.Parent := Self;
+  FBasePopup.OnPick := @BasePopupPick;
   FConflictPopup := TGittanPopupList.Create(Self);
   FConflictPopup.Parent := Self;
   FConflictPopup.OnPick := @ConflictPopupPick;
@@ -2108,6 +2124,9 @@ begin
     FSyncPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
+    FBasePopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
+      RGBToColor(100, 160, 240));
     FConflictPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
@@ -2154,6 +2173,9 @@ begin
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
     FSyncPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
+      RGBToColor(0, 110, 230));
+    FBasePopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
     FConflictPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
@@ -2305,7 +2327,11 @@ begin
     else
       FStatus.SetState(FOperation, Format(rsConflictedFiles, [FConflictFiles]));
   end;
-  FStatus.SetBase(BaseLabel);
+  FStatus.SetBase(BaseLabel, BaseActionRef <> '');
+  if BaseActionRef <> '' then
+    FStatus.PartHint[spBase] := rsBaseActionsHint
+  else
+    FStatus.PartHint[spBase] := '';
   if FHasPull then
   begin
     Tone := PullChecks(FPull, Checks);
@@ -3641,6 +3667,7 @@ begin
   if FOperation <> '' then
     Branch := Branch + ' · ' + FOperation;
   FSummary.SetCommits(ASnap.Recent, FAhead, FBehind, FHasUpstream);
+  FSummary.BaseClickable := BaseActionRef <> '';
   FSummary.SetRepository(ExtractFileName(FRepo.Root), Branch, BaseLabel, FStats, Icons,
     Texts);
   FWelcome.Visible := False;
