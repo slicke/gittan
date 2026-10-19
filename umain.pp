@@ -3722,7 +3722,40 @@ end;
   above the header or the summary. }
 procedure TForm1.ColorSidebar;
 var
-  Shade{$IFDEF LCLWin32}, TreeFont{$ENDIF}: TColor;
+  Shade: TColor;
+
+  {$IFDEF LCLWin32}
+  { On Windows the theme draws a tree's names in its own text color, black,
+    whatever Font.Color says (the LCL's theme is not the window's), so in
+    dark mode the trees draw themselves, in the editor's colors, and take
+    the dark Explorer theme for their scroll bars. }
+  procedure ColorTree(ATree: TTreeView);
+  begin
+    if ATree = nil then
+      Exit;
+    if FDark then
+    begin
+      ATree.Options := ATree.Options - [tvoThemedDraw];
+      ATree.Font.Color := Edit.Colors.TextFont;
+      ATree.SelectionColor := Edit.Colors.TextSelBG;
+      ATree.SelectionFontColor := Edit.Colors.TextFont;
+      ATree.SelectionFontColorUsed := True;
+      ATree.ExpandSignType := tvestArrow;
+      ATree.ExpandSignColor := RGBToColor(150, 150, 150);
+    end
+    else
+    begin
+      ATree.Options := ATree.Options + [tvoThemedDraw];
+      ATree.Font.Color := clDefault;
+      ATree.SelectionFontColorUsed := False;
+      ATree.ExpandSignType := tvestTheme;
+    end;
+    { Asking for the handle creates it, at startup too. }
+    if ATree.Parent <> nil then
+      DarkWindowTheme(ATree.Handle, FDark);
+  end;
+  {$ENDIF}
+
 begin
   if FTreePanel = nil then
     Exit;
@@ -3739,17 +3772,9 @@ begin
     FSubTree.BackgroundColor := Shade;
   EditorPanel.Color := Edit.Colors.TextBG;
   {$IFDEF LCLWin32}
-  { The trees draw their names in the font's color, clWindowText, which
-    stays black on Windows, where the native controls stay light. }
-  if FDark then
-    TreeFont := Edit.Colors.TextFont
-  else
-    TreeFont := clDefault;
-  FileTree.Font.Color := TreeFont;
-  if FRepoTree <> nil then
-    FRepoTree.Font.Color := TreeFont;
-  if FSubTree <> nil then
-    FSubTree.Font.Color := TreeFont;
+  ColorTree(FileTree);
+  ColorTree(FRepoTree);
+  ColorTree(FSubTree);
   { The title bar runs the sidebar's shade over the sidebar and the
     editor's background over the rest, with the header's pills. }
   if FWinBar <> nil then

@@ -28,9 +28,21 @@ function ColorLuminance(C: TColor): double;
   bright is returned as is. System colors are not RGB and are left alone. }
 function LightenForDark(AColor: TColor): TColor;
 
+{$IFDEF LCLWin32}
+{** Opts the process into uxtheme's dark mode, as Trndi does, so the
+  DarkMode_ theme classes resolve. Done before the first window, when the
+  desktop is dark at startup; on Windows before 10 1809 nothing happens. }
+procedure AllowDarkApp;
+
+{** Gives AWnd the dark Explorer theme (dark scroll bars) or, with ADark
+  False, the default one again. }
+procedure DarkWindowTheme(AWnd: THandle; ADark: boolean);
+{$ENDIF}
+
 implementation
 
 uses
+  {$IFDEF LCLWin32}Windows,{$ENDIF}
   LCLType, Themes;
 
 { Black and the lexers' other dark colors are blended toward white until
@@ -49,6 +61,49 @@ function IsDarkMode: boolean;
 begin
   Result := ThemeServices.IsDarkTheme;
 end;
+
+{$IFDEF LCLWin32}
+const
+  WM_THEMECHANGED = $031A;
+
+type
+  { uxtheme's ordinal 135: SetPreferredAppMode on Windows 10 1903 and later,
+    AllowDarkModeForApp (a BOOL) on 1809; 1 means allow dark in both. }
+  TSetPreferredAppMode = function(AMode: integer): integer; stdcall;
+  { Ordinal 133. }
+  TAllowDarkModeForWindow = function(AWnd: HWND; AAllow: BOOL): BOOL; stdcall;
+
+function SetWindowTheme(AWnd: HWND; ASubAppName, ASubIdList: PWideChar): HRESULT;
+  stdcall; external 'uxtheme.dll' name 'SetWindowTheme';
+
+procedure AllowDarkApp;
+var
+  SetMode: TSetPreferredAppMode;
+begin
+  Pointer(SetMode) := GetProcAddress(GetModuleHandle('uxtheme.dll'),
+    MAKEINTRESOURCE(135));
+  if Assigned(SetMode) then
+    SetMode(1);
+end;
+
+procedure DarkWindowTheme(AWnd: THandle; ADark: boolean);
+var
+  AllowDark: TAllowDarkModeForWindow;
+begin
+  if AWnd = 0 then
+    Exit;
+  Pointer(AllowDark) := GetProcAddress(GetModuleHandle('uxtheme.dll'),
+    MAKEINTRESOURCE(133));
+  if Assigned(AllowDark) then
+    AllowDark(AWnd, ADark);
+  if ADark then
+    SetWindowTheme(AWnd, PWideChar(UnicodeString('DarkMode_Explorer')), nil)
+  else
+    SetWindowTheme(AWnd, nil, nil);
+  { The window keeps the theme it opened until told it changed. }
+  SendMessage(AWnd, WM_THEMECHANGED, 0, 0);
+end;
+{$ENDIF}
 
 { Every channel is moved the same fraction of its way to 255. Luminance is
   linear in the channels, so the fraction that lands exactly on the target
