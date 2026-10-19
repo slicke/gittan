@@ -51,6 +51,7 @@ begin
   FIgnoreWhitespace := FSettings.IgnoreWhitespace;
   FBlameOn := FSettings.Blame;
   FShowComments := FSettings.ReviewComments;
+  FTranslations := FSettings.Translations;
   FSyntaxTheme := FindSyntaxTheme(FSettings.SyntaxTheme);
   if FSyntaxTheme < 0 then
     FSyntaxTheme := DefaultSyntaxTheme;
@@ -119,6 +120,7 @@ begin
   FSettings.IgnoreWhitespace := FIgnoreWhitespace;
   FSettings.Blame := FBlameOn;
   FSettings.ReviewComments := FShowComments;
+  FSettings.Translations := FTranslations;
   FSettings.SyntaxTheme := SyntaxThemes[FSyntaxTheme].Name;
   FSettings.Save;
   SaveIndex;
@@ -466,15 +468,18 @@ end;
 { ---------------------------------------------------------------------------
   Stepping through the files
   --------------------------------------------------------------------------- }
+{ The caret goes to the file's first (or last) change; a file without
+  any, such as an image or a binary file, is left as it is, since
+  GoToChange would step on to the file after it. }
 procedure TForm1.MenuNextFileClick(Sender: TObject);
 begin
-  if StepFile(True) then
+  if StepFile(True) and (Length(ChangeBlocks) > 0) then
     GoToChange(True);
 end;
 
 procedure TForm1.MenuPrevFileClick(Sender: TObject);
 begin
-  if StepFile(False) then
+  if StepFile(False) and (Length(ChangeBlocks) > 0) then
     GoToChange(False);
 end;
 

@@ -47,6 +47,7 @@ type
     procedure TestRemoteFor;
     procedure TestUserName;
     procedure TestFileBlob;
+    procedure TestFileSize;
     procedure TestFetchPullRequest;
     procedure TestDefaultBranchAndMergeBase;
     procedure TestAheadBehind;
@@ -696,6 +697,28 @@ begin
   AssertEquals('three', Data);
   AssertFalse(FRepo.FileBlob('none.bin', 'HEAD', Data));
   AssertFalse(FRepo.FileBlob('none.bin', '', Data));
+end;
+
+procedure TGitRepoTest.TestFileSize;
+var
+  Size: int64;
+begin
+  MakeHistory;
+  WriteFile('pic.bin', 'one'#0#13#10'two');
+  Git(['add', 'pic.bin']);
+  Git(['commit', '-q', '-m', 'Add pic']);
+  WriteFile('pic.bin', 'three');
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.FileSize('pic.bin', 'HEAD', Size));
+  AssertEquals(9, Size);
+  AssertTrue(FRepo.FileSize('pic.bin', '', Size));
+  AssertEquals(5, Size);
+  AssertFalse(FRepo.FileSize('none.bin', 'HEAD', Size));
+  AssertFalse(FRepo.FileSize('none.bin', '', Size));
+  AssertTrue(IsBinaryFile(FDir + PathDelim + 'pic.bin') = False);
+  WriteFile('pic.bin', 'a'#0'b');
+  AssertTrue(IsBinaryFile(FDir + PathDelim + 'pic.bin'));
+  AssertFalse(IsBinaryFile(FDir + PathDelim + 'none.bin'));
 end;
 
 { A bare repository stands in for GitHub: it serves the pull request as

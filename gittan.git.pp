@@ -242,6 +242,10 @@ type
       blob`, no filter applied), or in the work tree when ARef is empty.
       Returns false when the version has no such file. }
     function FileBlob(const APath, ARef: string; out AData: RawByteString): boolean;
+    {** The size in bytes of APath in the commit ARef (`git cat-file -s`),
+      or in the work tree when ARef is empty, without reading it. Returns
+      false when the version has no such file. }
+    function FileSize(const APath, ARef: string; out ASize: int64): boolean;
     {** The output of `git blame --porcelain` for APath as it is in the
       commit ARef, or in the work tree when ARef is empty, with
       IgnoreWhitespace passed on as -w. Returns false when git failed: a
@@ -304,6 +308,10 @@ function FindGitHubCli: string;
   since nobody could answer the one and the other would land in stderr. }
 function RunGitHubCli(const AExe, ADir: string; const AArgs: array of string;
   out AOutput, AError: string): boolean;
+
+{** Whether the file AFileName is binary by git's own rule: a NUL byte
+  in its first 8000 bytes. False for a file that cannot be read. }
+function IsBinaryFile(const AFileName: string): boolean;
 
 {** Runs git in ADir as TGittanRepo does (see Running git) and answers
   whether it succeeded, with its standard output in AOutput and, on
@@ -1266,6 +1274,30 @@ begin
   end;
 end;
 
+function IsBinaryFile(const AFileName: string): boolean;
+const
+  Probe = 8000;
+var
+  Stream: TFileStream;
+  Buffer: array[0..Probe - 1] of byte;
+  Got, i: integer;
+begin
+  Result := False;
+  try
+    Stream := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
+    try
+      Got := Stream.Read(Buffer, SizeOf(Buffer));
+      for i := 0 to Got - 1 do
+        if Buffer[i] = 0 then
+          Exit(True);
+    finally
+      Stream.Free;
+    end;
+  except
+    Result := False;
+  end;
+end;
+
 { A numstat entry is "added<tab>deleted<tab>path", with "-" for both counts
   of a binary file. Renames are turned off so the new path of a rename gets
   its counts; the old path is not in the list and is skipped. The counts
@@ -1708,6 +1740,28 @@ begin
         ALines.Add(Line);
   finally
     Raw.Free;
+  end;
+end;
+
+function TGittanRepo.FileSize(const APath, ARef: string; out ASize: int64): boolean;
+var
+  Output: string;
+  Info: TSearchRec;
+begin
+  ASize := 0;
+  if (FRoot = '') or (APath = '') then
+    Exit(False);
+  if ARef <> '' then
+  begin
+    Result := RunGit(FRoot, ['cat-file', '-s', ARef + ':' + APath], Output) and
+      TryStrToInt64(Trim(Output), ASize);
+    Exit;
+  end;
+  Result := FindFirst(FullPath(APath), faAnyFile, Info) = 0;
+  if Result then
+  begin
+    ASize := Info.Size;
+    FindClose(Info);
   end;
 end;
 

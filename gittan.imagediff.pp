@@ -69,6 +69,10 @@ function IsImagePath(const APath: string): boolean;
   extension in upper case and "image" ("PNG image"). }
 function ImageFormatName(const APath: string): string;
 
+{** The size of a file for a caption: bytes, else kilo- or megabytes
+  with one decimal. }
+function ByteSize(ABytes: int64): string;
+
 implementation
 
 uses
@@ -108,8 +112,6 @@ begin
   Result := Format(rsImage, [UpperCase(Copy(ExtractFileExt(APath), 2, MaxInt))]);
 end;
 
-{ The size of a file for a caption: bytes, else kilo- or megabytes with
-  one decimal. }
 function ByteSize(ABytes: int64): string;
 begin
   if ABytes < 1024 then

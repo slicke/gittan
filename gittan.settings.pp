@@ -51,6 +51,9 @@ type
     Blame: boolean;
     {** Show the review comments of the pull request in the change view. }
     ReviewComments: boolean;
+    {** Show a translation file (.po) as its originals beside its
+      translations. }
+    Translations: boolean;
     {** The name of the syntax theme (see gittan.syntaxthemes); empty for
       the default. }
     SyntaxTheme: string;
@@ -125,6 +128,7 @@ begin
     FFileName := IncludeTrailingPathDelimiter(ConfigDir) + 'gittan.ini';
   ContextLines := 3;
   SubmodulesOpen := True;
+  Translations := True;
 end;
 
 destructor TGittanSettings.Destroy;
@@ -161,6 +165,7 @@ begin
       SideBySide := Ini.ReadBool(SecView, 'SideBySide', False);
       IgnoreWhitespace := Ini.ReadBool(SecView, 'IgnoreWhitespace', False);
       ReviewComments := Ini.ReadBool(SecView, 'ReviewComments', True);
+      Translations := Ini.ReadBool(SecView, 'Translations', True);
       Blame := Ini.ReadBool(SecView, 'Blame', False);
       SyntaxTheme := Ini.ReadString(SecView, 'SyntaxTheme', '');
       EditorCommand := Ini.ReadString(SecView, 'EditorCommand', '');
@@ -207,6 +212,7 @@ begin
       Ini.WriteBool(SecView, 'SideBySide', SideBySide);
       Ini.WriteBool(SecView, 'IgnoreWhitespace', IgnoreWhitespace);
       Ini.WriteBool(SecView, 'ReviewComments', ReviewComments);
+      Ini.WriteBool(SecView, 'Translations', Translations);
       Ini.WriteBool(SecView, 'Blame', Blame);
       Ini.WriteString(SecView, 'SyntaxTheme', SyntaxTheme);
       Ini.WriteString(SecView, 'EditorCommand', EditorCommand);

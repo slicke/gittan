@@ -678,14 +678,14 @@ begin
     FSideRatio := FEditOld.Width / (EditorPanel.ClientWidth - FSideSplitter.Width);
 end;
 
-{ Shows the old side next to the editor in the side-by-side change view,
-  hides it in every other view. Word wrap is off while the two sides are
-  shown: wrapped rows would not line up. }
+{ Shows the old side next to the editor in the side-by-side change view
+  and the translation view, hides it in every other view. Word wrap is
+  off while the two sides are shown: wrapped rows would not line up. }
 procedure TForm1.ApplyLayout;
 var
   Side: boolean;
 begin
-  Side := FSideBySide and (FView = gvChanges);
+  Side := SidesShown;
   if Side then
     FEditOld.Width := Round((EditorPanel.ClientWidth - FSideSplitter.Width) * FSideRatio);
   FEditOld.Visible := Side;
@@ -699,7 +699,7 @@ procedure TForm1.ApplyWrap;
 var
   Mode: TATEditorWrapMode;
 begin
-  if FWordWrap and not (FSideBySide and (FView = gvChanges)) then
+  if FWordWrap and not SidesShown then
     Mode := TATEditorWrapMode.ModeOn
   else
     Mode := TATEditorWrapMode.ModeOff;

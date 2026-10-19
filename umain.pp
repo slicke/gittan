@@ -21,15 +21,17 @@ uses
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader,
   gittan.discard, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
-  gittan.commitgraph, ATSynEdit_Gaps, md5;
+  gittan.commitgraph, gittan.pofile, gittan.binaryview, ATSynEdit_Gaps, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
     file, the raw repository diff, a plain file from File > Open, the
-    history of a piece of code (Go > Code History), a submodule, or a
-    changed image, side by side (gittan.imagediff). }
+    history of a piece of code (Go > Code History), a submodule, a
+    changed image, side by side (gittan.imagediff), a translation file
+    with its originals beside its translations (umain.translations.inc),
+    or a binary file, changed or opened (gittan.binaryview). }
   TGittanView = (gvSummary, gvChanges, gvRepoDiff, gvFile, gvHistory, gvSubmodule,
-    gvImage);
+    gvImage, gvTranslation, gvBinary);
 
   {** The three strengths of a commit's color in the history view: the
     faint tint of its rows, the shade of the words it changed, and the
@@ -383,6 +385,14 @@ type
     { The change view of an image, in the editor's place (see
       ShowImageChanges). }
     FImageDiff: TGittanImageDiff;
+    { A binary file, in the editor's place (see ShowBinaryChanges). }
+    FBinaryView: TGittanBinaryView;
+    { View > Translations (see umain.translations.inc): whether it is on,
+      its menu item, the file shown from disk ('' for a changed file) and
+      the counts the header shows. }
+    FTranslations: boolean;
+    FTranslationsItem: TMenuItem;
+    FTranslationFile, FPoStats: string;
     { View > Review Comments (see umain.reviews.inc): whether it is on,
       its menu item, the job that fetches the threads, the threads of the
       pull request FThreadsNumber of FThreadsRepo with its head commit,
@@ -446,6 +456,14 @@ type
     procedure ShowSummary;
     procedure ShowEditor;
     procedure ShowImageChanges(const APath: string);
+    procedure ShowBinaryChanges(const APath: string);
+    procedure ShowBinaryFile(const AFileName: string);
+    function SidesShown: boolean;
+    function ShowsChangedFile: boolean;
+    procedure ShowTranslation(const AText: string);
+    procedure ShowTranslationChanges(const APath: string);
+    procedure ShowTranslationFile(const AFileName: string);
+    procedure MenuTranslationsClick(Sender: TObject);
     procedure ShowRepoDiff;
     procedure MenuPrevChangeClick(Sender: TObject);
     procedure MenuNextChangeClick(Sender: TObject);
@@ -845,6 +863,8 @@ resourcestring
     'or two commits: main...feature shows what feature changed since it left main, ' +
     'v1..v2 compares the two.';
   rsOnlyChanges = '&Hide Unchanged Lines';
+  rsTranslations = 'T&ranslations';
+  rsTranslationStats = '%d entries · %d fuzzy · %d untranslated';
   rsContextLines = 'Conte&xt Lines';
   rsNLines = '%d lines';
   rsSideBySide = 'Side &by Side';
@@ -1122,6 +1142,10 @@ const
   bmConflictOurs = 7;
   bmConflictBase = 8;
   bmConflictTheirs = 9;
+  { An entry of the translation view that is fuzzy, and one that is not
+    translated (see umain.translations.inc). }
+  bmFuzzy = 10;
+  bmUntranslated = 11;
   bmHistoryBase = 100;
   { Tags of the editor's attribs that mark the words that differ inside
     an added or a deleted line. }
@@ -1322,6 +1346,10 @@ begin
   FImageDiff.Parent := EditorPanel;
   FImageDiff.Align := alClient;
   FImageDiff.Visible := False;
+  FBinaryView := TGittanBinaryView.Create(Self);
+  FBinaryView.Parent := EditorPanel;
+  FBinaryView.Align := alClient;
+  FBinaryView.Visible := False;
   FSummaryBox := TScrollBox.Create(Self);
   FSummaryBox.Parent := EditorPanel;
   FSummaryBox.Align := alClient;
@@ -1611,6 +1639,8 @@ begin
     FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(62, 62, 62), RGBToColor(248, 81, 73),
       RGBToColor(63, 185, 80), RGBToColor(58, 58, 60), RGBToColor(44, 44, 46));
+    FBinaryView.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(44, 44, 46));
     FNav.SetColors(RGBToColor(37, 37, 38), RGBToColor(50, 50, 51),
       RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240));
     FHeader.SetPillColors(RGBToColor(50, 50, 51), RGBToColor(85, 85, 86),
@@ -1650,6 +1680,8 @@ begin
     FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
       RGBToColor(110, 110, 110), RGBToColor(222, 222, 222), RGBToColor(207, 34, 46),
       RGBToColor(26, 127, 55), RGBToColor(255, 255, 255), RGBToColor(230, 230, 230));
+    FBinaryView.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
+      RGBToColor(110, 110, 110), RGBToColor(246, 246, 246));
     FNav.SetColors(RGBToColor(246, 246, 246), clWhite,
       RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
     FHeader.SetPillColors(clWhite, RGBToColor(205, 205, 205), RGBToColor(0, 110, 230));
@@ -1760,6 +1792,10 @@ var
 begin
   if FView = gvImage then
     Lexer := ImageFormatName(FCurrentPath)
+  else if FView = gvTranslation then
+    Lexer := FPoStats
+  else if FView = gvBinary then
+    Lexer := ''
   else if FAdapter.Lexer = nil then
     Lexer := rsPlainText
   else
@@ -2006,6 +2042,9 @@ begin
   FBlameItem := AddItem(ViewMenu, rsBlame, ShortCut(VK_B, [ssModifier, ssShift]),
     @MenuBlameClick);
   FBlameItem.Checked := FBlameOn;
+  FTranslationsItem := AddItem(ViewMenu, rsTranslations, ShortCut(VK_L, [ssModifier, ssAlt]),
+    @MenuTranslationsClick);
+  FTranslationsItem.Checked := FTranslations;
   FReviewItem := AddItem(ViewMenu, rsReviewComments, ShortCut(VK_M, [ssModifier, ssShift]),
     @MenuReviewCommentsClick);
   FReviewItem.Checked := FShowComments;
@@ -2234,6 +2273,18 @@ procedure TForm1.OpenFile(AFileName: string);
 begin
   FlushEdit;
   LeaveEdit;
+  if FTranslations and IsPoPath(AFileName) then
+  begin
+    ShowTranslationFile(AFileName);
+    UpdateChangeNav;
+    Exit;
+  end;
+  if IsBinaryFile(AFileName) then
+  begin
+    ShowBinaryFile(AFileName);
+    UpdateChangeNav;
+    Exit;
+  end;
   FAdapter.Lexer := nil;
   Edit.BookmarkDeleteAll_2;
   ResetLineNumbers(Edit);
@@ -2297,6 +2348,8 @@ begin
       bmConflictOurs: AColor := RGBToColor(30, 46, 72);
       bmConflictBase: AColor := RGBToColor(46, 46, 48);
       bmConflictTheirs: AColor := RGBToColor(62, 52, 28);
+      bmFuzzy: AColor := RGBToColor(62, 52, 28);
+      bmUntranslated: AColor := RGBToColor(66, 38, 38);
     end
   else
     case ABookmarkKind of
@@ -2309,6 +2362,8 @@ begin
       bmConflictOurs: AColor := RGBToColor(221, 235, 255);
       bmConflictBase: AColor := RGBToColor(236, 236, 236);
       bmConflictTheirs: AColor := RGBToColor(255, 241, 208);
+      bmFuzzy: AColor := RGBToColor(255, 241, 208);
+      bmUntranslated: AColor := RGBToColor(255, 235, 233);
     end;
 end;
 
@@ -2659,12 +2714,18 @@ begin
 end;
 
 { An added line's number takes the strip's green, a deleted line's (on
-  the old side) its red; the rest the gutter's usual color. }
+  the old side) its red, a fuzzy entry's in the translation view an
+  amber; the rest the gutter's usual color. }
 function TForm1.LineNumberColor(AKind: integer): TColor;
 begin
   case AKind of
     bmAdded: Result := Edit.Colors.StateAdded;
     bmDeleted: Result := Edit.Colors.StateChanged;
+    bmFuzzy:
+      if FDark then
+        Result := RGBToColor(224, 176, 72)
+      else
+        Result := RGBToColor(168, 112, 0);
     else
       Result := Edit.Colors.GutterFont;
   end;
@@ -2763,8 +2824,9 @@ var
   Line, Prev, i, n: integer;
 begin
   Result := nil;
-  { The editor keeps the text of the file before an image. }
-  if FView = gvImage then
+  { The editor keeps the text of the file before an image or a binary
+    file. }
+  if FView in [gvImage, gvBinary] then
     Exit;
   Marks := Edit.Strings.Bookmarks2;
   SetLength(Result, Marks.Count);
@@ -2844,7 +2906,7 @@ begin
   Blocks := ChangeBlocks;
   if Length(Blocks) = 0 then
   begin
-    if FView in [gvChanges, gvImage] then
+    if ShowsChangedFile then
       StepFile(ANext);
     Exit;
   end;
@@ -2860,7 +2922,7 @@ begin
       end;
     if Target < 0 then
     begin
-      if (FView = gvChanges) and StepFile(True) then
+      if ShowsChangedFile and StepFile(True) then
       begin
         Blocks := ChangeBlocks;
         if Length(Blocks) = 0 then
@@ -2879,7 +2941,7 @@ begin
       end;
     if Target < 0 then
     begin
-      if (FView = gvChanges) and StepFile(False) then
+      if ShowsChangedFile and StepFile(False) then
       begin
         Blocks := ChangeBlocks;
         if Length(Blocks) = 0 then
@@ -3219,7 +3281,10 @@ begin
           OpenFile(FEditPath);
           RestoreScroll;
         end;
-    gvChanges, gvImage:
+    gvChanges, gvImage, gvTranslation, gvBinary:
+      { A translation or a binary file opened from disk is not in the
+        tree. }
+      if not (View in [gvTranslation, gvBinary]) or (FCurrentPath <> '') then
       begin
         KeepFolds;
         SummarySelectFile(nil, Path);
@@ -3267,6 +3332,7 @@ begin
   FEditOld.Visible := False;
   FSideSplitter.Visible := False;
   FImageDiff.Visible := False;
+  FBinaryView.Visible := False;
   FHeader.Visible := False;
   FFindBar.Visible := False;
   FSymbolBar.Visible := False;
@@ -3292,6 +3358,7 @@ begin
   FSymbolBar.Visible := False;
   FSummaryBox.Visible := False;
   FImageDiff.Visible := False;
+  FBinaryView.Visible := False;
   FHeader.Visible := True;
   SetFoldBand(Edit, FoldingShown);
   ApplyLayout;
@@ -3318,12 +3385,71 @@ begin
   FSymbolBar.Visible := False;
   FFindBar.Visible := False;
   FSummaryBox.Visible := False;
+  FBinaryView.Visible := False;
   Edit.Visible := False;
   FHeader.Visible := True;
   ApplyLayout;
   FImageDiff.Visible := True;
   FSummary.Selected := APath;
   FStatus.SetPosition('');
+end;
+
+{ A binary file in the change view: its sizes before and after in
+  FBinaryView, in the editor's place, as an image is shown. }
+procedure TForm1.ShowBinaryChanges(const APath: string);
+var
+  OldRef, NewRef: string;
+  OldSize, NewSize: int64;
+  HasOld, HasNew: boolean;
+begin
+  AbandonHistoryJob;
+  FRepo.DiffSides(OldRef, NewRef);
+  HasOld := FRepo.FileSize(APath, OldRef, OldSize);
+  HasNew := FRepo.FileSize(APath, NewRef, NewSize);
+  FBinaryView.SetChange(APath, HasOld, HasNew, OldSize, NewSize);
+  FView := gvBinary;
+  FSymbolBar.Visible := False;
+  FFindBar.Visible := False;
+  FSummaryBox.Visible := False;
+  FImageDiff.Visible := False;
+  Edit.Visible := False;
+  FHeader.Visible := True;
+  ApplyLayout;
+  FBinaryView.Visible := True;
+  FSummary.Selected := APath;
+  FStatus.SetPosition('');
+end;
+
+{ A binary file from File > Open: its size, in the editor's place. }
+procedure TForm1.ShowBinaryFile(const AFileName: string);
+var
+  Info: TSearchRec;
+  Size: int64;
+begin
+  AbandonHistoryJob;
+  Size := 0;
+  if FindFirst(AFileName, faAnyFile, Info) = 0 then
+  begin
+    Size := Info.Size;
+    FindClose(Info);
+  end;
+  FBinaryView.SetFile(AFileName, Size);
+  FHeader.SetFile(AFileName, -1);
+  FSummary.Selected := '';
+  FCurrentPath := '';
+  FView := gvBinary;
+  Edit.FileName := AFileName;
+  FSymbolBar.Visible := False;
+  FFindBar.Visible := False;
+  FSummaryBox.Visible := False;
+  FImageDiff.Visible := False;
+  Edit.Visible := False;
+  FHeader.Visible := True;
+  ApplyLayout;
+  FBinaryView.Visible := True;
+  FStatus.SetPosition('');
+  UpdateStatus;
+  UpdateCaption;
 end;
 
 { The summary paints its own background; it must cover the scroll box. }
@@ -3465,13 +3591,20 @@ procedure TForm1.ShowChanges(const APath: string);
 var
   Lines: TStringList;
   i: integer;
+  Binary: boolean;
 begin
   { Asked before the header names the next file, not when the text is
     replaced further down. }
   FlushEdit;
+  { A binary file has no lines to diff; a new one would be read as
+    text. }
+  Binary := False;
+  for i := 0 to High(FStats) do
+    if FStats[i].Path = APath then
+      Binary := FStats[i].Binary;
   Lines := TStringList.Create;
   try
-    if not FRepo.FileChanges(APath, Lines) then
+    if not Binary and not FRepo.FileChanges(APath, Lines) then
     begin
       StatusNote(FRepo.Error, True);
       Exit;
@@ -3508,6 +3641,18 @@ begin
     ShowImageChanges(APath);
     UpdateChangeNav;
     UpdateStatus;
+    Exit;
+  end;
+  if Binary then
+  begin
+    ShowBinaryChanges(APath);
+    UpdateChangeNav;
+    UpdateStatus;
+    Exit;
+  end;
+  if FTranslations and IsPoPath(APath) and (FConflictRoles = nil) then
+  begin
+    ShowTranslationChanges(APath);
     Exit;
   end;
   { One of the repository's own files can be opened to edits. }
@@ -4005,5 +4150,6 @@ end;
 {$I umain.submodules.inc}
 {$I umain.update.inc}
 {$I umain.reviews.inc}
+{$I umain.translations.inc}
 
 end.
