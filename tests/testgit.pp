@@ -1552,16 +1552,19 @@ begin
     raise Exception.Create('git did not stop: ' + Output);
 end;
 
+{ The file's bytes as they are: a TStringList's Text would end every line
+  with LineEnding, CRLF on Windows, whatever the file has. }
 function FileText(const AFileName: string): string;
 var
-  Lines: TStringList;
+  F: TFileStream;
 begin
-  Lines := TStringList.Create;
+  F := TFileStream.Create(AFileName, fmOpenRead);
   try
-    Lines.LoadFromFile(AFileName);
-    Result := Lines.Text;
+    SetLength(Result, F.Size);
+    if F.Size > 0 then
+      F.ReadBuffer(Result[1], F.Size);
   finally
-    Lines.Free;
+    F.Free;
   end;
 end;
 
@@ -1577,7 +1580,7 @@ begin
   AssertFalse('conflicts left', FRepo.ContinueOperation);
   AssertEquals('merging', FRepo.Operation);
   AssertTrue(FRepo.Error, FRepo.ResolveConflict('a.txt', csTheirs));
-  AssertEquals('topic' + LineEnding, FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
+  AssertEquals('topic'#10, FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
   AssertTrue(FRepo.Error, FRepo.ResolveConflict('del.txt', csTheirs));
   AssertFalse('theirs deleted it', FileExists(IncludeTrailingPathDelimiter(FDir) + 'del.txt'));
   AssertTrue(FRepo.Error, FRepo.ContinueOperation);
@@ -1597,7 +1600,7 @@ begin
   GitStops(FDir, ['rebase', Branch]);
   AssertEquals('rebasing', FRepo.Operation);
   AssertTrue(FRepo.Error, FRepo.ResolveConflict('a.txt', csMine));
-  AssertEquals('topic' + LineEnding, FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
+  AssertEquals('topic'#10, FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
   AssertTrue(FRepo.Error, FRepo.ResolveConflict('del.txt', csMine));
   AssertFalse(FileExists(IncludeTrailingPathDelimiter(FDir) + 'del.txt'));
   AssertTrue(FRepo.Error, FRepo.ContinueOperation);
@@ -1619,7 +1622,7 @@ begin
   AssertEquals('', Git(['ls-files', '-u']));
   AssertTrue(FRepo.Error, FRepo.AbortOperation);
   AssertEquals('', FRepo.Operation);
-  AssertEquals('main' + LineEnding, FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
+  AssertEquals('main'#10, FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
   AssertFalse('nothing to abort', FRepo.AbortOperation);
 end;
 
