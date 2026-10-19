@@ -264,6 +264,7 @@
   .tour .tabs button:hover { color: var(--fg); }
   .tour .tabs button[aria-selected="true"] { background: var(--bg-elev); color: var(--fg); box-shadow: var(--shadow-sm), 0 0 0 1px var(--line); }
   .tour figure { margin: 0 0 56px; }
+  .gallery { padding: 0; margin: 0 0 56px; }
   .tour figcaption { margin: 0 0 18px; max-width: 700px; color: var(--fg-muted); min-height: 3.2em; }
   .tour figcaption b { color: var(--fg); }
   .js .tour .tabs { display: flex; }
@@ -594,6 +595,60 @@
     <p class="eyebrow">Workflow</p>
     <h2>Commit, sync and merge</h2>
     <p class="lead">Gittan started as a viewer, and it still puts the diff first. Now the work that follows happens there too. Anything that would throw work away asks first, and nothing gets merged or rebased unless you ask for it.</p>
+    <div class="tour gallery">
+    <div class="tabs" role="tablist" aria-label="Workflow screenshots">
+      <button role="tab" id="b-commit" aria-selected="true" aria-controls="t-commit">Commit</button>
+      <button role="tab" id="b-sync" aria-selected="false" aria-controls="t-sync" tabindex="-1">Pull &amp; push</button>
+      <button role="tab" id="b-branches" aria-selected="false" aria-controls="t-branches" tabindex="-1">Branches</button>
+      <button role="tab" id="b-conflicts" aria-selected="false" aria-controls="t-conflicts" tabindex="-1">Conflicts</button>
+      <button role="tab" id="b-graphmenu" aria-selected="false" aria-controls="t-graphmenu" tabindex="-1">Commit menu</button>
+    </div>
+    <figure id="t-commit" class="on" role="tabpanel" aria-labelledby="b-commit">
+      <figcaption><b>Commit</b> from the tree: tick the files that belong together, write the message under them, and commit with <kbd>⌘↩</kbd>. README.md waits for the next one.</figcaption>
+      <picture>
+        <source srcset="assets/shots/commit-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+        <source srcset="assets/shots/commit-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+        <source srcset="assets/shots/commit-light.avif" type="image/avif">
+        <img src="assets/shots/commit-light.png" width="1280" height="800" loading="lazy" alt="TrailCard.vue changed in the diff view, every changed file in the tree with a check box, README.md unticked, and the Commit section with a message and the Commit button">
+      </picture>
+    </figure>
+    <figure id="t-sync" role="tabpanel" aria-labelledby="b-sync">
+      <figcaption><b>Pull, push and fetch</b> drop up from the ahead and behind counts in the status bar: two commits to push, one to pull.</figcaption>
+      <picture>
+        <source srcset="assets/shots/sync-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+        <source srcset="assets/shots/sync-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+        <source srcset="assets/shots/sync-light.avif" type="image/avif">
+        <img src="assets/shots/sync-light.png" width="1280" height="800" loading="lazy" alt="The list over the status bar with Pull (one behind), Push (two ahead), Fetch and Commit Graph">
+      </picture>
+    </figure>
+    <figure id="t-branches" role="tabpanel" aria-labelledby="b-branches">
+      <figcaption><b>The branch list</b> makes a new branch and offers to delete the one whose remote branch is gone. A right click on a branch merges it, rebases onto it or compares with it, in either direction.</figcaption>
+      <picture>
+        <source srcset="assets/shots/branches-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+        <source srcset="assets/shots/branches-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+        <source srcset="assets/shots/branches-light.avif" type="image/avif">
+        <img src="assets/shots/branches-light.png" width="1280" height="800" loading="lazy" alt="The branch list under the summary title with New Branch, Delete Gone Branches and elevation-chart marked deleted on remote, and the menu of offline-maps with Merge offline-maps into main highlighted">
+      </picture>
+    </figure>
+    <figure id="t-conflicts" role="tabpanel" aria-labelledby="b-conflicts">
+      <figcaption><b>A merge that stopped</b> is marked in the status bar. Your side and theirs each get a color, Use Mine, Use Theirs and Mark Resolved sit in the toolbar, and the Commit section waits with Commit Merge and Abort.</figcaption>
+      <picture>
+        <source srcset="assets/shots/conflicts-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+        <source srcset="assets/shots/conflicts-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+        <source srcset="assets/shots/conflicts-light.avif" type="image/avif">
+        <img src="assets/shots/conflicts-light.png" width="1280" height="800" loading="lazy" alt="TrailCard.vue in conflict while merging offline-maps: the HEAD side tinted blue, the offline-maps side amber, the markers violet, Use Mine, Use Theirs and Mark Resolved in the toolbar and a red badge for two conflicted files">
+      </picture>
+    </figure>
+    <figure id="t-graphmenu" role="tabpanel" aria-labelledby="b-graphmenu">
+      <figcaption><b>A right click in the commit graph</b> branches or tags from a commit, merges it, cherry-picks or reverts it, or resets the branch to it.</figcaption>
+      <picture>
+        <source srcset="assets/shots/graphmenu-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+        <source srcset="assets/shots/graphmenu-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+        <source srcset="assets/shots/graphmenu-light.avif" type="image/avif">
+        <img src="assets/shots/graphmenu-light.png" width="1280" height="800" loading="lazy" alt="The commit graph with the menu of a commit on offline-maps: Show Commit, Compare with Working Tree, Switch, Create Branch Here, Create Tag Here, Merge, Cherry-pick into main highlighted, Revert, Reset main to Here, Copy Commit Hash">
+      </picture>
+    </figure>
+    </div>
     <div class="bento">
       <div class="tile w4 split reveal">
         <div>
@@ -1030,24 +1085,26 @@ make run
       card.querySelector('.file').textContent.split(' · ')[0] + ' · <a href="#download">Other platforms</a>';
   }
 
-  // ---- Tour tabs, with arrow keys. Without script every screenshot shows, one under the other.
-  var tabs = Array.prototype.slice.call(document.querySelectorAll('.tour [role="tab"]'));
-  function select(b, focus) {
-    tabs.forEach(function (o) {
-      var on = o === b;
-      o.setAttribute('aria-selected', on);
-      o.tabIndex = on ? 0 : -1;
-      document.getElementById(o.getAttribute('aria-controls')).classList.toggle('on', on);
-    });
-    if (focus) { b.focus(); b.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
-  }
-  tabs.forEach(function (b, i) {
-    b.addEventListener('click', function () { select(b); });
-    b.addEventListener('keydown', function (e) {
-      var j = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : null;
-      if (j === null) return;
-      e.preventDefault();
-      select(tabs[(j + tabs.length) % tabs.length], true);
+  // ---- Screenshot tabs, one set per tablist, with arrow keys. Without script every screenshot shows, one under the other.
+  document.querySelectorAll('.tour [role="tablist"]').forEach(function (list) {
+    var tabs = Array.prototype.slice.call(list.querySelectorAll('[role="tab"]'));
+    function select(b, focus) {
+      tabs.forEach(function (o) {
+        var on = o === b;
+        o.setAttribute('aria-selected', on);
+        o.tabIndex = on ? 0 : -1;
+        document.getElementById(o.getAttribute('aria-controls')).classList.toggle('on', on);
+      });
+      if (focus) { b.focus(); b.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
+    }
+    tabs.forEach(function (b, i) {
+      b.addEventListener('click', function () { select(b); });
+      b.addEventListener('keydown', function (e) {
+        var j = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : null;
+        if (j === null) return;
+        e.preventDefault();
+        select(tabs[(j + tabs.length) % tabs.length], true);
+      });
     });
   });
 
