@@ -141,6 +141,20 @@ type
       files the branch changes, merged into its version (`--merge`);
       where they clash the files are left in conflict. }
     function Switch(const ABranch: string; AMerge: boolean = False): boolean;
+    {** Puts the files APaths (relative to Root) back as HEAD has them,
+      in the index and the work tree (`git restore --source=HEAD
+      --staged --worktree`); one HEAD lacks, added or untracked, is taken
+      out of the index and deleted, and a rename goes back along with
+      its old path. Before anything changes, the content of every file
+      on disk is written into the repository as a blob (`git
+      hash-object -w`), so RestoreReverted can put it back: ASaved gets
+      one line per file, the path, a NUL and the blob's id, which is
+      empty for a file that was not there. A submodule is left alone. }
+    function RevertFiles(APaths, ASaved: TStrings): boolean;
+    {** Writes back what RevertFiles saved in ASaved: each file as it
+      was on disk, and a file that was not there is deleted again. What
+      the index held is not brought back. }
+    function RestoreReverted(ASaved: TStrings): boolean;
     {** Stashes every local change, untracked files included, with the
       message AMessage (`git stash push -u`), leaving the work tree as
       HEAD has it. }
@@ -824,6 +838,20 @@ begin
     AFields.Add(Copy(AOutput, Start, MaxInt));
 end;
 
+{ Writes AText to AFileName byte for byte. }
+procedure WriteBytes(const AFileName, AText: string);
+var
+  Stream: TFileStream;
+begin
+  Stream := TFileStream.Create(AFileName, fmCreate);
+  try
+    if AText <> '' then
+      Stream.WriteBuffer(AText[1], Length(AText));
+  finally
+    Stream.Free;
+  end;
+end;
+
 { TGittanRepo }
 
 destructor TGittanRepo.Destroy;
@@ -1349,6 +1377,149 @@ begin
     Result := RunGit(FRoot, ['switch', ABranch], Output);
 end;
 
+function TGittanRepo.RevertFiles(APaths, ASaved: TStrings): boolean;
+var
+  Output, Entry, Path, Id, ListFile: string;
+  Fields, Chosen, Paths, InHead, Restore, Remove: TStringList;
+  i: integer;
+
+  function NulList(AList: TStrings): string;
+  var
+    j: integer;
+  begin
+    Result := '';
+    for j := 0 to AList.Count - 1 do
+      Result := Result + AList[j] + #0;
+  end;
+
+begin
+  ASaved.Clear;
+  if (FRoot = '') or (APaths.Count = 0) then
+    Exit(False);
+  if not RunGit(FRoot, ['status', '--porcelain', '-z', '--untracked-files=all'], Output) then
+    Exit(False);
+  Fields := TStringList.Create;
+  Chosen := TStringList.Create;
+  Paths := TStringList.Create;
+  InHead := TStringList.Create;
+  Restore := TStringList.Create;
+  Remove := TStringList.Create;
+  ListFile := GetTempFileName(GetTempDir, 'gittan-revert-');
+  try
+    Chosen.CaseSensitive := True;
+    Chosen.Sorted := True;
+    Chosen.Duplicates := dupIgnore;
+    Chosen.AddStrings(APaths);
+    Paths.CaseSensitive := True;
+    Paths.Sorted := True;
+    Paths.Duplicates := dupIgnore;
+    for Path in APaths do
+      if not DirectoryExists(FullPath(Path)) then
+        Paths.Add(Path);
+    { A rename's old path comes with its new one. }
+    SplitNul(Output, Fields);
+    i := 0;
+    while i < Fields.Count do
+    begin
+      Entry := Fields[i];
+      Inc(i);
+      if Length(Entry) < 4 then
+        Continue;
+      if (Entry[1] in ['R', 'C']) or (Entry[2] in ['R', 'C']) then
+      begin
+        if (i < Fields.Count) and (Pos('R', Copy(Entry, 1, 2)) > 0) and
+          (Chosen.IndexOf(Copy(Entry, 4, MaxInt)) >= 0) then
+          Paths.Add(Fields[i]);
+        Inc(i);
+      end;
+    end;
+    InHead.CaseSensitive := True;
+    InHead.Sorted := True;
+    if RunGit(FRoot, ['rev-parse', '--verify', '-q', 'HEAD'], Output) then
+    begin
+      if not RunGit(FRoot, ['ls-tree', '-r', '-z', '--name-only', 'HEAD'], Output) then
+        Exit(False);
+      SplitNul(Output, InHead);
+    end;
+    { Every file on disk is saved before anything changes. }
+    for Path in Paths do
+    begin
+      Id := '';
+      if FileExists(FullPath(Path)) then
+      begin
+        if not RunGit(FRoot, ['hash-object', '-w', '--no-filters', '--', Path], Id) then
+          Exit(False);
+        Id := Trim(Id);
+      end;
+      ASaved.Add(Path + #0 + Id);
+      if InHead.IndexOf(Path) >= 0 then
+        Restore.Add(Path)
+      else
+        Remove.Add(Path);
+    end;
+    Result := True;
+    if Restore.Count > 0 then
+    begin
+      WriteBytes(ListFile, NulList(Restore));
+      Result := RunGit(FRoot, ['--literal-pathspecs', 'restore', '--source=HEAD', '--staged',
+        '--worktree', '--pathspec-from-file=' + ListFile, '--pathspec-file-nul'], Output);
+    end;
+    if Result and (Remove.Count > 0) then
+    begin
+      WriteBytes(ListFile, NulList(Remove));
+      Result := RunGit(FRoot, ['--literal-pathspecs', 'rm', '--cached', '-q',
+        '--ignore-unmatch', '--pathspec-from-file=' + ListFile, '--pathspec-file-nul'], Output);
+      for Path in Remove do
+        if FileExists(FullPath(Path)) then
+          DeleteFile(FullPath(Path));
+    end;
+  finally
+    Fields.Free;
+    Chosen.Free;
+    Paths.Free;
+    InHead.Free;
+    Restore.Free;
+    Remove.Free;
+    DeleteFile(ListFile);
+  end;
+end;
+
+function TGittanRepo.RestoreReverted(ASaved: TStrings): boolean;
+var
+  i: integer;
+  Path, Id, Data: string;
+begin
+  Result := FRoot <> '';
+  for i := 0 to ASaved.Count - 1 do
+  begin
+    if Pos(#0, ASaved[i]) < 2 then
+      Continue;
+    Path := Copy(ASaved[i], 1, Pos(#0, ASaved[i]) - 1);
+    Id := Copy(ASaved[i], Pos(#0, ASaved[i]) + 1, MaxInt);
+    if Id = '' then
+    begin
+      if FileExists(FullPath(Path)) then
+        DeleteFile(FullPath(Path));
+      Continue;
+    end;
+    if not RunGit(FRoot, ['cat-file', 'blob', Id], Data) then
+    begin
+      Result := False;
+      Continue;
+    end;
+    try
+      ForceDirectories(ExtractFileDir(FullPath(Path)));
+      WriteBytes(FullPath(Path), Data);
+    except
+      on E: Exception do
+      begin
+        FError := E.Message;
+        Result := False;
+      end;
+    end;
+  end;
+end;
+
 function TGittanRepo.Stash(const AMessage: string): boolean;
 var
   Output: string;
@@ -1371,20 +1542,6 @@ begin
     else if Listing then
       Listing := False;
   Result := AFiles.Count > 0;
-end;
-
-{ Writes AText to AFileName byte for byte. }
-procedure WriteBytes(const AFileName, AText: string);
-var
-  Stream: TFileStream;
-begin
-  Stream := TFileStream.Create(AFileName, fmCreate);
-  try
-    if AText <> '' then
-      Stream.WriteBuffer(AText[1], Length(AText));
-  finally
-    Stream.Free;
-  end;
 end;
 
 { The paths go to git in files (--pathspec-from-file, NUL separated), so

@@ -74,6 +74,7 @@ type
     procedure TestCommitActionConflicts;
     procedure TestBranchManagement;
     procedure TestSwitchBlocked;
+    procedure TestRevertFiles;
   end;
 
 implementation
@@ -1814,6 +1815,59 @@ begin
     AssertTrue(FRepo.Switch('other'));
   finally
     Files.Free;
+  end;
+end;
+
+{ Modified, staged, deleted, added, untracked and renamed files go back
+  to HEAD; what was on disk comes back with RestoreReverted. }
+procedure TGitRepoTest.TestRevertFiles;
+var
+  Paths, Saved: TStringList;
+  Root: string;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  Root := IncludeTrailingPathDelimiter(FDir);
+  WriteFile('a.txt', 'changed'#10);
+  WriteFile('staged.txt', 'staged'#10);
+  Git(['add', 'staged.txt']);
+  DeleteFile(Root + 'del.txt');
+  WriteFile('added.txt', 'added'#10);
+  Git(['add', 'added.txt']);
+  WriteFile('un=tracked.txt', 'untracked'#10);
+  Git(['mv', QuoteName, 'moved.txt']);
+  WriteFile('dir sp/fil å.txt', 'kept'#10);
+  Paths := TStringList.Create;
+  Saved := TStringList.Create;
+  try
+    Paths.Add('a.txt');
+    Paths.Add('staged.txt');
+    Paths.Add('del.txt');
+    Paths.Add('added.txt');
+    Paths.Add('un=tracked.txt');
+    Paths.Add('moved.txt');
+    AssertTrue(FRepo.Error, FRepo.RevertFiles(Paths, Saved));
+    AssertEquals('the old path of the rename too', 7, Saved.Count);
+    AssertEquals('one'#10'two'#10'three'#10, FileText(Root + 'a.txt'));
+    AssertEquals('old'#10, FileText(Root + 'staged.txt'));
+    AssertEquals('gone'#10, FileText(Root + 'del.txt'));
+    AssertFalse(FileExists(Root + 'added.txt'));
+    AssertFalse(FileExists(Root + 'un=tracked.txt'));
+    AssertFalse(FileExists(Root + 'moved.txt'));
+    AssertEquals('x'#10, FileText(Root + QuoteName));
+    AssertEquals('not chosen', 'M "dir sp/fil \303\245.txt"', Trim(Git(['-c',
+      'core.quotepath=true', 'status', '--porcelain'])));
+
+    AssertTrue(FRepo.Error, FRepo.RestoreReverted(Saved));
+    AssertEquals('changed'#10, FileText(Root + 'a.txt'));
+    AssertEquals('staged'#10, FileText(Root + 'staged.txt'));
+    AssertFalse('it was deleted', FileExists(Root + 'del.txt'));
+    AssertEquals('added'#10, FileText(Root + 'added.txt'));
+    AssertEquals('untracked'#10, FileText(Root + 'un=tracked.txt'));
+    AssertEquals('x'#10, FileText(Root + 'moved.txt'));
+  finally
+    Paths.Free;
+    Saved.Free;
   end;
 end;
 

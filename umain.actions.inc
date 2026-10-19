@@ -753,6 +753,7 @@ begin
   Item := TMenuItem.Create(FFilePopup);
   Item.Caption := '-';
   FFilePopup.Items.Add(Item);
+  FRevertItem := AddItem(FFilePopup, rsRevertChangesItem, @MenuRevertChangesClick);
   FResolveMineItem := AddItem(FFilePopup, rsResolveMineItem, @MenuResolveMineClick);
   FResolveTheirsItem := AddItem(FFilePopup, rsResolveTheirsItem, @MenuResolveTheirsClick);
   FMarkResolvedItem := AddItem(FFilePopup, rsMarkResolvedItem, @MenuMarkResolvedClick);
@@ -815,6 +816,7 @@ procedure TForm1.FilePopupPopup(Sender: TObject);
 var
   i: integer;
   Exists: boolean;
+  Targets: TStringList;
 begin
   if FContextFromSummary then
     FContextFromSummary := False
@@ -828,11 +830,23 @@ begin
   end
   else
     FContextPath := SelectedPath;
+  { A folder of the tree: only Revert Changes acts on it. }
+  FContextFolder := '';
+  if (FFilePopup.PopupComponent = FileTree) and (FContextPath = '') and
+    (FileTree.Selected <> nil) and (FileTree.Selected.Count > 0) then
+    FContextFolder := FileTree.Selected.GetTextPath;
   Exists := (FContextPath <> '') and FileExists(ContextFullPath);
   for i := 0 to FFilePopup.Items.Count - 1 do
     FFilePopup.Items[i].Enabled := FContextPath <> '';
   FRevealItem.Enabled := Exists;
   FOpenItem.Enabled := Exists;
+  Targets := TStringList.Create;
+  try
+    RevertTargets(Targets);
+    FRevertItem.Enabled := CanRevert and (Targets.Count > 0);
+  finally
+    Targets.Free;
+  end;
   FResolveMineItem.Enabled := IsConflictPath(FContextPath);
   FResolveTheirsItem.Enabled := FResolveMineItem.Enabled;
   FMarkResolvedItem.Enabled := FResolveMineItem.Enabled;

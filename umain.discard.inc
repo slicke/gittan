@@ -294,6 +294,12 @@ begin
   FDiscardItem.Enabled := CanDiscard and (Edit.Carets.Count > 0) and
     (BlockAtRow(Edit.Carets[0].PosY) >= 0);
   FUndoDiscardItem.Enabled := Length(FDiscards) > 0;
+  if FRevertFileItem <> nil then
+  begin
+    FRevertFileItem.Enabled := CanRevert and IsChangedPath(FCurrentPath) and
+      (FView in [gvChanges, gvImage, gvBinary, gvTranslation]);
+    FUndoRevertItem.Enabled := FRevertUndo.Count > 0;
+  end;
 end;
 
 procedure TForm1.FileMenuClick(Sender: TObject);

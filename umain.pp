@@ -122,6 +122,12 @@ type
     { The file menu's conflict items (umain.conflicts.inc). }
     FResolveMineItem, FResolveTheirsItem, FMarkResolvedItem: TMenuItem;
     FContextPath: string;
+    { Reverting (umain.revert.inc): the folder of the tree the file menu
+      was opened on, '' for a file; the menu items; and per revert, its
+      label with what RevertFiles saved (a TStringList), latest last. }
+    FContextFolder: string;
+    FRevertItem, FRevertFileItem, FUndoRevertItem: TMenuItem;
+    FRevertUndo: TStringList;
     { The GitHub items of the editor menu, made only when gh is installed
       (the file menu's is enabled with the rest of its items); the editor the editor menu popped up over and the
       row under the mouse then (-1 below the text), and the commit of
@@ -821,6 +827,14 @@ type
     procedure SaveCommitDraft;
     procedure LoadCommitDraft;
     procedure UpdateRemoteItems;
+    procedure RevertTargets(AList: TStrings);
+    function CanRevert: boolean;
+    procedure RevertPaths(APaths: TStrings; const ALabel: string);
+    procedure MenuRevertChangesClick(Sender: TObject);
+    procedure MenuRevertFileClick(Sender: TObject);
+    procedure MenuUndoRevertClick(Sender: TObject);
+    function IsChangedPath(const APath: string): boolean;
+    procedure ClearRevertUndo;
     procedure BranchContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
     procedure BranchMenuClick(Sender: TObject);
     function BranchAction(const AName: string): boolean;
@@ -1256,6 +1270,18 @@ resourcestring
   rsChangedOnDisk = 'changed on disk';
   rsDiscardChange = '&Discard Change';
   rsUndoDiscard = '&Undo Discard';
+  rsRevertFile = 'Re&vert File...';
+  rsUndoRevert = 'Undo Re&vert';
+  rsRevertChangesItem = 'Revert Changes...';
+  rsRevertTitle = 'Revert';
+  rsRevertFilesAsk = 'Revert %s to how HEAD has it? Your changes are undone, and a new ' +
+    'file is deleted. File > Undo Revert brings them back.';
+  rsRevertFilesAction = 'Revert';
+  rsRevertCount = '%d files in %s';
+  rsReverted = 'Reverted %s';
+  rsRevertFailed = 'Could not revert';
+  rsRevertUndone = 'Brought back %s';
+  rsRevertUndoFailed = 'Could not bring everything back: %s';
   rsDiscardAction = 'Discard';
   rsDiscardHint = 'Discard this change.' + LineEnding +
     '%s. File > Undo Discard brings it back.';
@@ -1659,6 +1685,7 @@ begin
   FSummary.OnOpenUrl := @SummaryOpenUrl;
   FSummary.OnSelectCommit := @SummarySelectCommit;
   { The branch list pops up over the form, under the branch. }
+  FRevertUndo := TStringList.Create;
   FBranchNames := TStringList.Create;
   FBranchRefs := TStringList.Create;
   FGoneToDelete := TStringList.Create;
@@ -1749,6 +1776,8 @@ begin
   AbandonUpdateJob;
   AbandonSubmoduleJobs;
   FreeAndNil(FSubJobs);
+  ClearRevertUndo;
+  FRevertUndo.Free;
   FBranchNames.Free;
   FBranchRefs.Free;
   FGoneToDelete.Free;
@@ -2316,6 +2345,9 @@ begin
     @MenuDiscardClick);
   FUndoDiscardItem := AddItem(FileMenu, rsUndoDiscard, ShortCut(VK_Z, [ssModifier, ssAlt]),
     @MenuUndoDiscardClick);
+  FRevertFileItem := AddItem(FileMenu, rsRevertFile, ShortCut(VK_BACK, [ssModifier, ssAlt]),
+    @MenuRevertFileClick);
+  FUndoRevertItem := AddItem(FileMenu, rsUndoRevert, 0, @MenuUndoRevertClick);
   UpdateDiscardItems;
   FileMenu.OnClick := @FileMenuClick;
   FileMenu.Add(NewLine);
@@ -3327,6 +3359,7 @@ begin
   FCurrentPath := '';
   { The discards of the previous repository are not for this one. }
   FDiscards := nil;
+  ClearRevertUndo;
   UpdateDiscardItems;
   FPullRange := '';
   AbandonReviewJob;
@@ -4509,6 +4542,7 @@ const
 {$I umain.conflicts.inc}
 {$I umain.commitactions.inc}
 {$I umain.branches.inc}
+{$I umain.revert.inc}
 {$I umain.commit.inc}
 {$I umain.remote.inc}
 
