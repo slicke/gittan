@@ -5,7 +5,7 @@ unit gittan.theme;
   This unit tells whether the desktop theme is dark and adapts the colors
   Gittan sets itself: the editor palette and the lexer text colors, which
   the lexer collection tuned for a white background. The native controls
-  follow the theme on their own on Cocoa and Qt, and on Windows through
+  follow the theme on their own on Cocoa and GTK 3, and on Windows through
   MetaDarkStyle. }
 
 {$mode objfpc}{$H+}

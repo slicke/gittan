@@ -23,7 +23,10 @@ ifeq ($(OS),Windows_NT)
 else ifeq ($(shell uname -s),Darwin)
   WIDGETSET ?= cocoa
 else
-  WIDGETSET ?= qt6
+  # gtk3: GTK draws its own window decoration under Wayland, so a form can
+  # take the title bar (gtk_window_set_titlebar) and keep the shadow and
+  # the rounded corners; Qt 6 would need a frameless window without them.
+  WIDGETSET ?= gtk3
 endif
 
 ifeq ($(shell uname -s),Darwin)

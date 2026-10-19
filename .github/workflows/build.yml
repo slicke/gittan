@@ -13,7 +13,7 @@ on:
 # One matrix job builds Gittan natively on each platform and uploads a package:
 #   - macOS (arm64):   Gittan-macos-silicon.dmg  (Gittan.app with lexlib inside)
 #   - Windows (x64):   Gittan-windows-x64.zip    (Gittan.exe + lexlib/)
-#   - Linux (amd64):   Gittan-linux-amd64.tar.gz (Gittan + lexlib/, Qt6)
+#   - Linux (amd64):   Gittan-linux-amd64.tar.gz (Gittan + lexlib/, GTK 3)
 #
 # As in Trndi, a push to main publishes a release: the version job takes the
 # next build number from the "build-<n>" tags (100 when there is none), and
@@ -94,8 +94,7 @@ jobs:
         include:
           - name: linux-amd64
             os_target: linux
-            # libqt6pas6/-dev only entered the Ubuntu archive in 25.10.
-            runner: ubuntu-26.04
+            runner: ubuntu-latest
           - name: macos-arm64
             os_target: macos
             runner: macos-14
@@ -119,7 +118,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y build-essential curl \
-            qt6-base-dev libqt6pas6 libqt6pas-dev
+            libgtk-3-dev
           # SourceForge mirrors flake; retry hard before failing the job.
           # --connect-timeout and the speed guard abort a stalled or
           # half-open transfer (which is not an error, so --retry-all-errors
@@ -240,7 +239,7 @@ jobs:
         if: matrix.os_target == 'linux'
         run: |
           set -euo pipefail
-          # The Makefile builds with qt6 on Linux and refreshes lexlib/.
+          # The Makefile builds with gtk3 on Linux and refreshes lexlib/.
           make
           make test
           mkdir -p dist/Gittan
@@ -354,7 +353,7 @@ jobs:
             echo
             echo '- **Gittan-macos-silicon.dmg** — macOS on Apple Silicon. The app is signed ad hoc, so macOS blocks it at first: drag it to Applications, then run `xattr -cr /Applications/Gittan.app` in Terminal.'
             echo "- **Gittan-windows-x64.zip** — Windows x64. Unzip anywhere and run Gittan.exe."
-            echo "- **Gittan-linux-amd64.tar.gz** — Linux amd64, needs Qt 6 and libqt6pas6."
+            echo "- **Gittan-linux-amd64.tar.gz** — Linux amd64, needs GTK 3."
             echo
             echo "Gittan runs the git command line tool, so git must be on your PATH."
           } > notes.md
