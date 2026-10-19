@@ -103,10 +103,10 @@ begin
   AFrom := 0;
   ATo := 0;
   AName := '';
+  WaitForParse(AAdapter);
   Client := AAdapter.AnClient;
   if Client = nil then
     Exit;
-  WaitForParse(AAdapter);
   Client.CriSecForData.Enter;
   try
     for i := 0 to Client.PublicData.FoldRanges.Count - 1 do

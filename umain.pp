@@ -358,6 +358,10 @@ type
     { The hidden editor that parses another changed file for Go to
       Definition, with its adapter; made on the first lookup. }
     FScratch: TATSynEdit;
+    { A lookup runs in the scratch editor, or the hover's lookup runs:
+      both wait for parses with the message loop running, and must not
+      start again inside themselves. }
+    FScratchBusy, FHoverBusy: boolean;
     FScratchAdapter: TATAdapterEControl;
     FSideSplitter: TSplitter;
     FSideRatio: double;
@@ -738,6 +742,7 @@ type
     procedure SymbolBarClose(Sender: TObject);
     procedure EditMouseMove(Sender: TObject; Shift: TShiftState; X, Y: integer);
     procedure EditMouseLeave(Sender: TObject);
+    procedure HoverLookup(Ed: TATSynEdit; const Word: string);
     procedure HoverTimerTimer(Sender: TObject);
     procedure ClearHover;
     function RowLabel(AEd: TATSynEdit; ARow: integer): string;

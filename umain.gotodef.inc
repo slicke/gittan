@@ -33,7 +33,11 @@ begin
     UpdateSymbolHeadings;
 end;
 
-{ Waits for the adapter's background parse of its text. }
+{ Waits for the adapter's background parse of its text. The message loop
+  runs meanwhile, so anything may happen to the adapter: another file
+  scrolled into the view, or another lookup in the scratch editor, sets
+  a new lexer and frees the parser it had. A caller takes AnClient after
+  the wait, never before it. }
 procedure WaitForParse(AAdapter: TATAdapterEControl);
 var
   Start: QWord;
@@ -90,10 +94,10 @@ var
   i, Count: integer;
 begin
   Result := nil;
+  WaitForParse(AAdapter);
   Client := AAdapter.AnClient;
   if Client = nil then
     Exit;
-  WaitForParse(AAdapter);
   Count := 0;
   Client.CriSecForData.Enter;
   try
@@ -863,11 +867,13 @@ end;
 procedure TForm1.HoverTimerTimer(Sender: TObject);
 var
   Ed: TATSynEdit;
-  Word, Where, Line, RelPath: string;
-  P: TPoint;
-  Symbol: TGittanSymbol;
+  Word: string;
 begin
   FHoverTimer.Enabled := False;
+  { A lookup waits for parses with the message loop running, where the
+    timer may fire again; the second hover waits for the next pause. }
+  if FHoverBusy then
+    Exit;
   if (FHoverEd <> nil) and (FHoverBlame <> '') then
   begin
     FHoverEd.Hint := FHoverBlame;
@@ -878,6 +884,20 @@ begin
   Word := FHoverWord;
   if (Ed = nil) or (Word = '') or not Ed.Visible then
     Exit;
+  FHoverBusy := True;
+  try
+    HoverLookup(Ed, Word);
+  finally
+    FHoverBusy := False;
+  end;
+end;
+
+procedure TForm1.HoverLookup(Ed: TATSynEdit; const Word: string);
+var
+  Where, Line, RelPath: string;
+  P: TPoint;
+  Symbol: TGittanSymbol;
+begin
   Where := '';
   P := FindDefinition(AdapterOf(Ed), Ed, Word, FHoverRow);
   if (P.Y < 0) and (Ed = FEditOld) then

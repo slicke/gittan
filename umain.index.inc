@@ -198,16 +198,30 @@ begin
   Lexer := FLexers.ForFile(ARelPath, FRepo.Root);
   if Lexer = nil then
     Exit;
+  if Size <= MaxIndexedSize then
+  begin
+    { The parse waits with the message loop running; a lookup started
+      meanwhile would load another file into the scratch editor and free
+      the parser this one reads. It finds nothing now and caches
+      nothing, and the file is parsed again when next asked for. }
+    if FScratchBusy then
+      Exit;
+    FScratchBusy := True;
+    try
+      Result := CodeTree(ParseScratch(Full, Lexer), FScratch);
+    finally
+      FScratchBusy := False;
+    end;
+    { Only the symbols of this file go into the index. }
+    if FScratch.FileName <> Full then
+      Exit(nil);
+  end;
   E := FIndex.Add(ARelPath);
   E.Size := Size;
   E.Time := Time;
-  if Size > MaxIndexedSize then
-    E.Items := nil
-  else
-    E.Items := CodeTree(ParseScratch(Full, Lexer), FScratch);
+  E.Items := Result;
   E.Indexed := True;
   FIndexSaveNeeded := True;
-  Result := E.Items;
 end;
 
 { The path of the shown file relative to the repository root: the
