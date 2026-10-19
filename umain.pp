@@ -225,6 +225,11 @@ type
     { Abort and Skip for what git is in the middle of, and the merge
       message filled into the field (umain.conflicts.inc). }
     FAbortButton, FSkipButton: TButton;
+    { The commit graph's menu (umain.commitactions.inc), built for the
+      commit it is shown for, with that commit and the name it goes by. }
+    FCommitPopup: TPopupMenu;
+    FActionCommit: TGittanGraphCommit;
+    FActionName: string;
     FMergeMessage: string;
     { Fetch, pull and push (umain.remote.inc): the job while it runs,
       the commits ahead when it started, the menu items, and the list
@@ -809,6 +814,9 @@ type
     procedure SaveCommitDraft;
     procedure LoadCommitDraft;
     procedure UpdateRemoteItems;
+    procedure GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
+      const AScreenPos: TPoint);
+    procedure CommitMenuClick(Sender: TObject);
     function ContinueMode: boolean;
     function IsConflictPath(const APath: string): boolean;
     function MarkersLeft(const APath: string): integer;
@@ -1074,6 +1082,37 @@ resourcestring
   rsPushRejectedTitle = 'The Push Was Rejected';
   rsPushRejected = 'The remote has commits the branch does not have yet. Pull them first?';
   rsPullAction = 'Pull';
+  rsCaShow = 'Show Commit';
+  rsCaCompare = 'Compare with Working Tree';
+  rsCaSwitch = 'Switch to %s';
+  rsCaBranch = 'Create Branch Here...';
+  rsCaTag = 'Create Tag Here...';
+  rsCaMerge = 'Merge %s into %s';
+  rsCaCherryPick = 'Cherry-pick into %s';
+  rsCaRevert = 'Revert Commit';
+  rsCaReset = 'Reset %s to Here';
+  rsCaResetSoft = 'Soft: keep the changes staged...';
+  rsCaResetMixed = 'Mixed: keep the changes in the files...';
+  rsCaResetHard = 'Hard: discard all changes...';
+  rsCaBranchTitle = 'Create Branch';
+  rsCaBranchPrompt = 'Name of the new branch at %s';
+  rsCaTagTitle = 'Create Tag';
+  rsCaTagPrompt = 'Name of the tag on %s';
+  rsCaTagMessage = 'Message (optional, makes it annotated)';
+  rsCaResetTitle = 'Reset';
+  rsCaResetAsk = 'Move %s to %s? The commits after it leave the branch.';
+  rsCaResetSoftAsk = 'Their changes stay staged.';
+  rsCaResetMixedAsk = 'Their changes stay in the files, unstaged.';
+  rsCaResetHardAsk = 'Their changes and every uncommitted change to a tracked file are lost.';
+  rsCaResetAction = 'Reset';
+  rsCaBranched = 'Created and switched to %s';
+  rsCaTagged = 'Tagged %s as %s';
+  rsCaMerged = 'Merged %s';
+  rsCaPicked = 'Cherry-picked %s';
+  rsCaReverted = 'Reverted %s';
+  rsCaWasReset = 'Reset %s to %s';
+  rsCaConflicts = 'Stopped with conflicts: resolve them, then continue';
+  rsCaFailed = 'Git refused';
   rsUseMine = 'Use Mine';
   rsUseTheirs = 'Use Theirs';
   rsMarkResolved = 'Mark Resolved';
@@ -1576,6 +1615,8 @@ begin
   FGraph := TGittanCommitGraph.Create(Self);
   FGraph.Parent := Self;
   FGraph.OnPick := @GraphPick;
+  FGraph.OnContext := @GraphContext;
+  FCommitPopup := TPopupMenu.Create(Self);
   FPullPopup := TGittanPopupList.Create(Self);
   FPullPopup.Parent := Self;
   FPullPopup.OnPick := @PullPopupPick;
@@ -4400,6 +4441,7 @@ end;
 {$I umain.reviews.inc}
 {$I umain.translations.inc}
 {$I umain.conflicts.inc}
+{$I umain.commitactions.inc}
 {$I umain.commit.inc}
 {$I umain.remote.inc}
 

@@ -70,6 +70,8 @@ type
     procedure TestResolveRebase;
     procedure TestMarkResolvedAndAbort;
     procedure TestSkip;
+    procedure TestCommitActions;
+    procedure TestCommitActionConflicts;
   end;
 
 implementation
@@ -1630,6 +1632,88 @@ begin
   AssertTrue(FRepo.Error, FRepo.SkipOperation);
   AssertEquals('', FRepo.Operation);
   AssertEquals(Trim(Git(['rev-parse', Branch])), Trim(Git(['rev-parse', 'HEAD'])));
+end;
+
+procedure TGitRepoTest.TestCommitActions;
+var
+  First, Side, Main: string;
+  Conflicts: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  First := Trim(Git(['rev-parse', 'HEAD']));
+  Main := FRepo.Branch;
+  AssertTrue(FRepo.IsBranchName('feature/x'));
+  AssertFalse(FRepo.IsBranchName('bad..name'));
+  AssertFalse(FRepo.IsBranchName(''));
+
+  AssertTrue(FRepo.Error, FRepo.CreateBranch('side', First, False));
+  AssertEquals('not switched', Main, FRepo.Branch);
+  AssertFalse('taken', FRepo.CreateBranch('side', First, False));
+  AssertFalse(FRepo.CreateBranch('bad..name', First, False));
+  AssertTrue(FRepo.Error, FRepo.CreateTag('v1', First, ''));
+  AssertEquals('commit', Trim(Git(['cat-file', '-t', 'v1'])));
+  AssertTrue(FRepo.Error, FRepo.CreateTag('v2', First, 'Release two'));
+  AssertEquals('annotated', 'tag', Trim(Git(['cat-file', '-t', 'v2'])));
+
+  Git(['checkout', '-q', 'side']);
+  WriteFile('b.txt', 'b'#10);
+  Commit('side change');
+  Side := Trim(Git(['rev-parse', 'HEAD']));
+  Git(['checkout', '-q', Main]);
+  AssertTrue(FRepo.IsAncestor(First, Side));
+  AssertFalse(FRepo.IsAncestor(Side, 'HEAD'));
+
+  AssertTrue(FRepo.Error, FRepo.CherryPick(Side, Conflicts));
+  AssertFalse(Conflicts);
+  AssertEquals('side change', Trim(Git(['log', '-1', '--format=%s'])));
+  AssertTrue(FileExists(IncludeTrailingPathDelimiter(FDir) + 'b.txt'));
+  AssertTrue(FRepo.Error, FRepo.RevertCommit('HEAD', Conflicts));
+  AssertFalse(FileExists(IncludeTrailingPathDelimiter(FDir) + 'b.txt'));
+  AssertTrue(Pos('Revert', Git(['log', '-1', '--format=%s'])) = 1);
+
+  AssertTrue(FRepo.Error, FRepo.Reset(First, rmSoft));
+  AssertEquals(First, Trim(Git(['rev-parse', 'HEAD'])));
+  AssertTrue(FRepo.Error, FRepo.MergeRef('side', Conflicts));
+  AssertEquals('a fast-forward', Side, Trim(Git(['rev-parse', 'HEAD'])));
+  WriteFile('a.txt', 'local'#10);
+  AssertTrue(FRepo.Error, FRepo.Reset(First, rmMixed));
+  AssertEquals('local'#10, FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
+  AssertTrue(FileExists(IncludeTrailingPathDelimiter(FDir) + 'b.txt'));
+  AssertTrue(FRepo.Error, FRepo.Reset(First, rmHard));
+  { The mixed reset left b.txt untracked, and a hard one keeps those. }
+  AssertEquals('?? b.txt'#0, Git(['status', '--porcelain', '-z']));
+  AssertEquals('one'#10'two'#10'three'#10, FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
+
+  AssertFalse('the switch would overwrite b.txt', FRepo.CreateBranch('new', Side, True));
+  AssertFalse('nor is the branch made', FRepo.HasCommit('refs/heads/new'));
+  DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'b.txt');
+  AssertTrue(FRepo.Error, FRepo.CreateBranch('new', Side, True));
+  AssertEquals('new', FRepo.Branch);
+  AssertEquals(Side, Trim(Git(['rev-parse', 'HEAD'])));
+end;
+
+{ A cherry-pick or merge that stops with conflicts says so, and leaves
+  git in the middle of it. }
+procedure TGitRepoTest.TestCommitActionConflicts;
+var
+  Conflicts: boolean;
+begin
+  MakeDiverged(Self);
+  AssertTrue(FRepo.Open(FDir));
+  AssertFalse(FRepo.CherryPick('topic', Conflicts));
+  AssertTrue(FRepo.Error, Conflicts);
+  AssertTrue(FRepo.Error <> '');
+  AssertEquals('cherry-picking', FRepo.Operation);
+  AssertTrue(FRepo.AbortOperation);
+  AssertFalse(FRepo.MergeRef('topic', Conflicts));
+  AssertTrue(Conflicts);
+  AssertEquals('merging', FRepo.Operation);
+  AssertTrue(FRepo.AbortOperation);
+  AssertFalse('no such commit', FRepo.CherryPick('nothing', Conflicts));
+  AssertFalse(Conflicts);
 end;
 
 procedure TGitRepoTest.TestBranchesAndSwitch;

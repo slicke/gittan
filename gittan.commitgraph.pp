@@ -9,7 +9,8 @@ unit gittan.commitgraph;
 
   Like the popup list it is a child of the form, placed over whatever
   the form shows. Up and Down move in it, Enter or a click picks a
-  commit (OnPick with its id); Escape, the close button, a click outside
+  commit (OnPick with its id); a right click or the Menu key asks for
+  the commit's menu (OnContext, with the commit and where to show it); Escape, the close button, a click outside
   the panel or the application going to the background closes it. The
   rows sit in a TScrollBox for native scrolling. }
 
@@ -23,6 +24,8 @@ uses
 
 type
   TGittanGraphPickEvent = procedure(Sender: TObject; const AHash: string) of object;
+  TGittanGraphContextEvent = procedure(Sender: TObject; const ACommit: TGittanGraphCommit;
+    const AScreenPos: TPoint) of object;
 
   TGittanCommitGraph = class;
 
@@ -68,6 +71,8 @@ type
     FBack, FText, FDim, FHover, FLine, FAccent, FTag: TColor;
     FLaneColors: array of TColor;
     FOnPick: TGittanGraphPickEvent;
+    FOnContext: TGittanGraphContextEvent;
+    procedure Context(const AScreenPos: TPoint);
     function LaneColor(AIndex: integer): TColor;
     function LaneX(ALane: integer): integer;
     function GraphRight: integer;
@@ -123,6 +128,10 @@ type
     {** The colors the lanes take in turn. }
     procedure SetLaneColors(const AColors: array of TColor);
     property OnPick: TGittanGraphPickEvent read FOnPick write FOnPick;
+    {** A right click on a commit, or the Menu key on the highlighted one:
+      the panel stays open under the menu the handler shows at
+      AScreenPos. }
+    property OnContext: TGittanGraphContextEvent read FOnContext write FOnContext;
   end;
 
 implementation
@@ -183,6 +192,11 @@ begin
   begin
     FGraph.SetCurrent(Row);
     FGraph.Pick;
+  end
+  else if (Button = mbRight) and (Row >= 0) then
+  begin
+    FGraph.SetCurrent(Row);
+    FGraph.Context(ClientToScreen(Point(X, Y)));
   end;
 end;
 
@@ -385,6 +399,12 @@ begin
   Dismiss;
 end;
 
+procedure TGittanCommitGraph.Context(const AScreenPos: TPoint);
+begin
+  if (FCurrent >= 0) and (FCurrent <= High(FCommits)) and Assigned(FOnContext) then
+    FOnContext(Self, FCommits[FCurrent], AScreenPos);
+end;
+
 procedure TGittanCommitGraph.Pick;
 var
   Hash: string;
@@ -450,7 +470,8 @@ begin
 end;
 
 { Up and Down move a row, Page Up and Page Down a box, Home and End to
-  the ends, Enter picks, Escape closes. }
+  the ends, Enter picks, the Menu key opens the commit's menu under its
+  row, Escape closes. }
 procedure TGittanCommitGraph.KeyInput(var Key: word);
 var
   Page: integer;
@@ -465,6 +486,9 @@ begin
     VK_END: Step(Length(FCommits));
     VK_RETURN: Pick;
     VK_ESCAPE: Close;
+    VK_APPS:
+      if FCurrent >= 0 then
+        Context(FRows.ClientToScreen(Point(LaneX(FLanes), (FCurrent + 1) * RowHeight)));
     VK_TAB: ;
     else
       Exit;

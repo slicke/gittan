@@ -79,6 +79,11 @@ type
     there mine is git's theirs. }
   TGittanConflictSide = (csMine, csTheirs);
 
+  {** What Reset keeps: the index and the work tree (rmSoft, the reset
+    commits' changes staged), the work tree (rmMixed, unstaged), or
+    nothing (rmHard, every change in tracked files lost). }
+  TGittanResetMode = (rmSoft, rmMixed, rmHard);
+
   {** One opened repository. Open finds the work tree root for a folder, and
     the other calls run inside that root. }
   TGittanRepo = class
@@ -185,6 +190,32 @@ type
       sees; none when the user runs ssh their own way (GIT_SSH_COMMAND,
       GIT_SSH or core.sshCommand). A key in the agent still works. }
     function RemoteEnvironment: TStringArray;
+    {** Whether AName may name a branch (`git check-ref-format --branch`). }
+    function IsBranchName(const AName: string): boolean;
+    {** Makes the branch AName at the commit AAt, and switches to it with
+      ASwitch (`git switch -c`). False, with git's reason, when the name
+      is taken or wrong, or the switch would overwrite local changes;
+      the branch is then not made either. }
+    function CreateBranch(const AName, AAt: string; ASwitch: boolean): boolean;
+    {** Tags the commit AAt as AName: an annotated tag with the message
+      AMessage, or a lightweight one when it is empty. }
+    function CreateTag(const AName, AAt, AMessage: string): boolean;
+    {** Whether the commit AAncestor is in the history of ADescendant. }
+    function IsAncestor(const AAncestor, ADescendant: string): boolean;
+    {** Merges ARef (a branch, tag or commit) into the branch HEAD is on,
+      with git's message (`git merge --no-edit`). False when nothing was
+      merged; AConflicts is then set when git stopped merging with
+      conflicts to resolve, which the Commit section carries on. }
+    function MergeRef(const ARef: string; out AConflicts: boolean): boolean;
+    {** Applies the changes of the commit AHash on top of HEAD as a new
+      commit (`git cherry-pick`); AConflicts as for MergeRef. }
+    function CherryPick(const AHash: string; out AConflicts: boolean): boolean;
+    {** Makes a commit that undoes AHash (`git revert --no-edit`);
+      AConflicts as for MergeRef. }
+    function RevertCommit(const AHash: string; out AConflicts: boolean): boolean;
+    {** Moves the branch HEAD is on (or HEAD itself when detached) to the
+      commit AHash, keeping what AMode says (`git reset`). }
+    function Reset(const AHash: string; AMode: TGittanResetMode): boolean;
     {** Resolves the conflict in APath by taking one side whole, as
       `git checkout --ours` or `--theirs` and `git add` do; when that
       side deleted the file it goes (`git rm`). }
@@ -1536,6 +1567,117 @@ begin
   if not Result then
     ARejected := (Pos('[rejected]', FError) > 0) or (Pos('fetch first', FError) > 0) or
       (Pos('non-fast-forward', FError) > 0);
+end;
+
+{ ---------------------------------------------------------------------------
+  Commit actions
+  ---------------------------------------------------------------------------
+  What the commit graph's menu does to a commit. Merge, cherry-pick and
+  revert make commits: they run with GIT_EDITOR=: so no editor waits,
+  and when they stop with conflicts git is left in the middle of them,
+  which is no state to report as a plain failure. }
+function TGittanRepo.IsBranchName(const AName: string): boolean;
+var
+  Output: string;
+begin
+  Result := (FRoot <> '') and (AName <> '') and
+    RunGit(FRoot, ['check-ref-format', '--branch', AName], Output);
+end;
+
+function TGittanRepo.CreateBranch(const AName, AAt: string; ASwitch: boolean): boolean;
+var
+  Output: string;
+begin
+  if not IsBranchName(AName) then
+  begin
+    FError := Format('"%s" is not a valid branch name.', [AName]);
+    Exit(False);
+  end;
+  if ASwitch then
+    Result := RunGit(FRoot, ['switch', '-c', AName, AAt], Output)
+  else
+    Result := RunGit(FRoot, ['branch', AName, AAt], Output);
+end;
+
+function TGittanRepo.CreateTag(const AName, AAt, AMessage: string): boolean;
+var
+  Output: string;
+begin
+  if (FRoot = '') or (AName = '') then
+    Exit(False);
+  if AMessage <> '' then
+    Result := RunGit(FRoot, ['tag', '-a', '-m', AMessage, AName, AAt], Output)
+  else
+    Result := RunGit(FRoot, ['tag', AName, AAt], Output);
+end;
+
+function TGittanRepo.IsAncestor(const AAncestor, ADescendant: string): boolean;
+var
+  Output: string;
+begin
+  Result := (FRoot <> '') and
+    RunGit(FRoot, ['merge-base', '--is-ancestor', AAncestor, ADescendant], Output);
+end;
+
+{ Runs a command that makes a commit, as the comment above says. AError
+  keeps git's reason; AConflicts is set when it stopped with conflicts. }
+function RunCommitting(ARepo: TGittanRepo; const ARoot: string;
+  const AArgs: array of string; out AConflicts: boolean; out AError: string): boolean;
+var
+  Output, Ignored: string;
+begin
+  AConflicts := False;
+  Result := RunGitEnv(ARoot, AArgs, ['GIT_EDITOR=:'], Output, AError);
+  if Result then
+    Exit;
+  AConflicts := (ARepo.Operation <> '') and
+    RunGitIn(ARoot, ['ls-files', '-u'], Output, Ignored) and (Trim(Output) <> '');
+end;
+
+function TGittanRepo.MergeRef(const ARef: string; out AConflicts: boolean): boolean;
+var
+  Err: string;
+begin
+  AConflicts := False;
+  if FRoot = '' then
+    Exit(False);
+  Result := RunCommitting(Self, FRoot, ['merge', '--no-edit', ARef], AConflicts, Err);
+  if not Result then
+    FError := Err;
+end;
+
+function TGittanRepo.CherryPick(const AHash: string; out AConflicts: boolean): boolean;
+var
+  Err: string;
+begin
+  AConflicts := False;
+  if FRoot = '' then
+    Exit(False);
+  Result := RunCommitting(Self, FRoot, ['cherry-pick', AHash], AConflicts, Err);
+  if not Result then
+    FError := Err;
+end;
+
+function TGittanRepo.RevertCommit(const AHash: string; out AConflicts: boolean): boolean;
+var
+  Err: string;
+begin
+  AConflicts := False;
+  if FRoot = '' then
+    Exit(False);
+  Result := RunCommitting(Self, FRoot, ['revert', '--no-edit', AHash], AConflicts, Err);
+  if not Result then
+    FError := Err;
+end;
+
+function TGittanRepo.Reset(const AHash: string; AMode: TGittanResetMode): boolean;
+const
+  Flags: array[TGittanResetMode] of string = ('--soft', '--mixed', '--hard');
+var
+  Output: string;
+begin
+  Result := (FRoot <> '') and (AHash <> '') and
+    RunGit(FRoot, ['reset', '-q', Flags[AMode], AHash], Output);
 end;
 
 { ---------------------------------------------------------------------------
