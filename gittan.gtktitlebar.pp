@@ -10,8 +10,10 @@
   (the name, the menus, the search field, the navigator, the pills and
   the caption buttons) with the GTK parts of it. GTK only takes the
   title bar from a window it has not realized, and the LCL realizes the
-  form's window as it creates it, so the window is unrealized first (it
-  is not shown yet) and realized again when the form is shown.
+  form's window as it creates it (which InstallTitleBar makes it do,
+  since the form has no handle yet while it is created), so the window
+  is unrealized first (it is not shown yet) and realized again at once:
+  the LCL reads the window's GdkWindow when it shows the form.
 
   The bar takes the mouse itself: a press on an empty part followed by a
   drag past a few pixels starts the compositor's move
@@ -24,8 +26,9 @@
 
   The menu stays on the window, so commands are found in it and its
   shortcuts work, but its names are hidden (HideNativeMenu hides the
-  menu bar's items and lets it be a pixel high: the LCL subtracts the
-  bar's height from the form's, and takes a height of 0 as the menu
+  menu bar's items, kept hidden through the show_all the LCL runs when
+  it shows the form, and lets the bar be a pixel high: the LCL subtracts
+  the bar's height from the form's, and takes a height of 0 as the menu
   height of its own) and the bar shows them; a click pops the item's
   submenu under the name (gtk_menu_popup_at_widget), and its "deactivate"
   tells the bar when it closed. The caption glyphs are drawn with lines.
@@ -94,14 +97,15 @@ var
     so a late signal finds nothing. }
   LiveBar: TGittanGtkTitleBar;
 
-{ The GTK window of the form the bar is on; nil before it has one. }
-function FormWindow(ABar: TControl): PGtkWindow;
+{ The GTK window of the form the bar is on; nil before it has one,
+  unless AForce makes the form create it. }
+function FormWindow(ABar: TControl; AForce: boolean = False): PGtkWindow;
 var
   Form: TCustomForm;
 begin
   Result := nil;
   Form := GetParentForm(ABar);
-  if (Form = nil) or not Form.HandleAllocated then
+  if (Form = nil) or not (AForce or Form.HandleAllocated) then
     Exit;
   Result := PGtkWindow(TGtk3Widget(Form.Handle).Widget);
   if not Gtk3IsGtkWindow(PGObject(Result)) then
@@ -135,7 +139,7 @@ var
   Box: PGtkWidget;
 begin
   LiveBar := ABar;
-  Win := FormWindow(ABar);
+  Win := FormWindow(ABar, True);
   if Win = nil then
     Exit;
   if gtk_widget_get_realized(PGtkWidget(Win)) and
@@ -144,6 +148,10 @@ begin
   Box := PGtkWidget(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0));
   gtk_widget_show(Box);
   gtk_window_set_titlebar(Win, Box);
+  { Realized again, with the decoration: the LCL's ShowHide reads the
+    window's GdkWindow before it shows the form. }
+  if not gtk_widget_get_realized(PGtkWidget(Win)) then
+    gtk_widget_realize(PGtkWidget(Win));
   g_signal_connect_data(PGObject(Win), 'notify::is-active',
     TGCallback(@ActiveChanged), ABar, nil, G_CONNECT_DEFAULT);
   g_signal_connect_data(PGObject(Win), 'window-state-event',
@@ -388,7 +396,11 @@ begin
   begin
     Menu.Items[i].HandleNeeded;
     if Menu.Items[i].HandleAllocated then
+    begin
+      { The LCL shows the form with show_all, which skips these. }
+      gtk_widget_set_no_show_all(TGtk3MenuItem(Menu.Items[i].Handle).Widget, True);
       gtk_widget_hide(TGtk3MenuItem(Menu.Items[i].Handle).Widget);
+    end;
   end;
   if TGtk3Widget(Form.Handle) is TGtk3Window then
     gtk_widget_set_size_request(PGtkWidget(TGtk3Window(Form.Handle).GetMenuBar), 1, 1);
