@@ -519,6 +519,7 @@
       <button role="tab" id="b-history" aria-selected="true" aria-controls="t-history">Code History</button>
       <button role="tab" id="b-blame" aria-selected="false" aria-controls="t-blame" tabindex="-1">Blame</button>
       <button role="tab" id="b-side" aria-selected="false" aria-controls="t-side" tabindex="-1">Side by side</button>
+      <button role="tab" id="b-markdown" aria-selected="false" aria-controls="t-markdown" tabindex="-1">Markdown</button>
       <button role="tab" id="b-summary" aria-selected="false" aria-controls="t-summary" tabindex="-1">Summary</button>
       <button role="tab" id="b-graph" aria-selected="false" aria-controls="t-graph" tabindex="-1">Commit graph</button>
       <button role="tab" id="b-submodule" aria-selected="false" aria-controls="t-submodule" tabindex="-1">Submodules</button>
@@ -549,6 +550,15 @@
         <source srcset="assets/shots/side-dark.png" media="(prefers-color-scheme: dark)" data-dark>
         <source srcset="assets/shots/side-light.avif" type="image/avif">
         <img src="assets/shots/side-light.png" width="1280" height="800" loading="lazy" alt="The side-by-side diff of stores/trails.ts, the old version on the left and the new one on the right, with the changed words marked in the line that now filters by region">
+      </picture>
+    </figure>
+    <figure id="t-markdown" role="tabpanel" aria-labelledby="b-markdown">
+      <figcaption><b>Markdown preview</b> (<kbd>⌘⇧V</kbd>) draws a README beside its diff the way GitHub shows it: headings, tables, highlighted code and images, following the file as it changes.</figcaption>
+      <picture>
+        <source srcset="assets/shots/markdown-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+        <source srcset="assets/shots/markdown-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+        <source srcset="assets/shots/markdown-light.avif" type="image/avif">
+        <img src="assets/shots/markdown-light.png" width="1280" height="800" loading="lazy" alt="The diff of README.md with its preview on the right: the Trailhead heading, a walking-time table of three trails, a shell and a TypeScript code block and a link to the weather API">
       </picture>
     </figure>
     <figure id="t-summary" role="tabpanel" aria-labelledby="b-summary">
@@ -966,7 +976,7 @@
   <div class="wrap">
     <p class="eyebrow">Source</p>
     <h2>Build from source</h2>
-    <p class="lead">Gittan is a Free Pascal application built with Lazarus. The editor (ATSynEdit), the highlighter (EControl), the lexers and MetaDarkStyle are git submodules, so fetch them and register their packages with Lazarus before the first build.</p>
+    <p class="lead">Gittan is a Free Pascal application built with Lazarus. The editor (ATSynEdit), the highlighter (EControl), the lexers, MetaDarkStyle and LazInk (the Markdown preview) are git submodules, so fetch them and register their packages with Lazarus before the first build.</p>
     <ol class="steps">
       <li>
         <h3>Install Lazarus and FPC</h3>
@@ -992,7 +1002,8 @@ git submodule update --init --recursive</pre>
          ATSynEdit/atsynedit/atsynedit_package.lpk \
          EControl/econtrol/econtrol_package.lpk \
          ATSynEdit_Ex/atsynedit_ex/atsynedit_ex_package.lpk \
-         metadarkstyle/metadarkstyle.lpk; do
+         metadarkstyle/metadarkstyle.lpk \
+         lazink/lazink.lpk; do
   lazbuild --add-package-link vendor/$p
 done</pre>
         </div>
@@ -1013,7 +1024,7 @@ make run
     <ul class="notes">
       <li>The Makefile finds lazbuild in <code>/Applications/lazarus</code> on macOS when it is not on PATH; <code>make.ps1</code> looks in <code>C:\lazarus</code> and <code>C:\fpcupdeluxe\lazarus</code>.</li>
       <li>Every build copies the lexers from <code>vendor/CudaText-lexers</code> into <code>lexlib/</code>. A build from the Lazarus IDE does not: run <code>make lexlib</code> once.</li>
-      <li>Already built Gittan before? Register <code>metadarkstyle.lpk</code> too; every platform needs it, though only Windows uses it.</li>
+      <li>Already built Gittan before? Register <code>metadarkstyle.lpk</code> and <code>lazink.lpk</code> too; every platform needs MetaDarkStyle, though only Windows uses it.</li>
       <li>On macOS, "malformed method list atom" from the linker means an old ld: update Xcode or the Command Line Tools.</li>
       <li>Details for every platform are in <a href="https://github.com/slicke/gittan/blob/main/AGENTS.md">AGENTS.md</a>.</li>
     </ul>
@@ -1025,7 +1036,7 @@ make run
   <div class="wrap">
     <span>Gittan is open source on <a href="https://github.com/slicke/gittan">GitHub</a>.</span>
     <span class="spacer"></span>
-    <span>Made with <a href="https://www.lazarus-ide.org/">Lazarus</a>, <a href="https://github.com/Alexey-T/ATSynEdit">ATSynEdit</a>, the <a href="https://github.com/Alexey-T/CudaText-lexers">CudaText lexers</a> and <a href="https://github.com/zamtmn/metadarkstyle">MetaDarkStyle</a>.</span>
+    <span>Made with <a href="https://www.lazarus-ide.org/">Lazarus</a>, <a href="https://github.com/Alexey-T/ATSynEdit">ATSynEdit</a>, the <a href="https://github.com/Alexey-T/CudaText-lexers">CudaText lexers</a>, <a href="https://github.com/zamtmn/metadarkstyle">MetaDarkStyle</a> and <a href="https://github.com/TonyStone31/LazInk">LazInk</a>.</span>
   </div>
 </footer>
 
