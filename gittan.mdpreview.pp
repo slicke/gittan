@@ -77,6 +77,18 @@ begin
   Result := Format('#%.2x%.2x%.2x', [Red(c), Green(c), Blue(c)]);
 end;
 
+{ AFrom moved AWeight of the way to ATo. }
+function Mix(AFrom, ATo: TColor; AWeight: double): TColor;
+var
+  f, t: longint;
+begin
+  f := ColorToRGB(AFrom);
+  t := ColorToRGB(ATo);
+  Result := RGBToColor(Round(Red(f) + (Red(t) - Red(f)) * AWeight),
+    Round(Green(f) + (Green(t) - Green(f)) * AWeight),
+    Round(Blue(f) + (Blue(t) - Blue(f)) * AWeight));
+end;
+
 constructor TGittanMarkdownPreview.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
@@ -94,7 +106,9 @@ end;
 
 { The page's own sheet: the body in the editor's colors, with room at
   the sides, at the control's font size (CSS's medium). LazInk adds GitHub's look of Markdown (quotes, code, tables)
-  on top, mixed from Color and Font.Color. Images are no wider than the
+  on top, mixed from Color and Font.Color, but shades code toward white,
+  which a white page does not show, so code is shaded toward the text
+  here. Images are no wider than the
   column, but never stretched past their own size. }
 procedure TGittanMarkdownPreview.ApplyStyle;
 begin
@@ -106,6 +120,8 @@ begin
     'line-height: 1.5; margin: 0; padding: 16px 24px; }' +
     'h1, h2 { padding-bottom: 0.3em; border-bottom: 1px solid ' + Css(FDim) + '; }' +
     'a { color: ' + Css(FLink) + '; }' +
+    'pre, code { background: ' + Css(Mix(FBack, FFore, 0.07)) + '; }' +
+    'pre code { background: transparent; }' +
     'img { max-width: 100%; width: auto; }';
 end;
 
