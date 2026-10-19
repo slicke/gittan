@@ -937,7 +937,8 @@ begin
     case AMode of
       blMerge: FBranchPopup.AddHeader(Format(rsBmMergeHeader, [FBranch]));
       blRebase: FBranchPopup.AddHeader(Format(rsBmRebaseHeader, [FBranch]));
-      blCompare: FBranchPopup.AddHeader(Format(rsBmCompareHeader, [FBranch]));
+      blBranchSince: FBranchPopup.AddHeader(Format(rsBmCompareHeader, [FBranch]));
+      blCurrentSince: FBranchPopup.AddHeader(Format(rsBmCompareBackHeader, [FBranch]));
       else
         FBranchPopup.AddHeader(rsBranches);
     end;
@@ -998,7 +999,8 @@ begin
   case FBranchListMode of
     blMerge: MergeIntoCurrent(Ref);
     blRebase: RebaseOntoAsk(Ref);
-    blCompare: CompareSince(Ref);
+    blBranchSince: CompareSince(Ref);
+    blCurrentSince: CompareCurrentSince(Ref);
     else
       SwitchBranch(FBranchNames[AIndex]);
   end;
@@ -1935,6 +1937,10 @@ begin
       [Copy(FRepo.Base, Pos('..', FRepo.Base) + 2, 7)])])
   else if (FRepo.Base = FPullRange) and FRepo.IsRange then
     Result := Format(rsVsBase, [Format(rsVsPull, [FPullNumber])])
+  else if FRepo.IsRange and (Pos('...', FRepo.Base) > 0) then
+    { "main...feature" reads as what feature changed since main. }
+    Result := Format(rsVsSince, [Copy(FRepo.Base, Pos('...', FRepo.Base) + 3, MaxInt),
+      Copy(FRepo.Base, 1, Pos('...', FRepo.Base) - 1)])
   else if FRepo.IsRange then
     Result := FRepo.Base
   else if FRepo.WholeTree then

@@ -41,9 +41,9 @@ type
 
   {** What picking a branch from the branch list does: switch to it,
     merge it into the current branch, rebase the current branch onto it,
-    or show what it changed since it left the current branch
-    (umain.branches.inc). }
-  TGittanBranchListMode = (blSwitch, blMerge, blRebase, blCompare);
+    show what it changed since it left the current branch, or what the
+    current branch changed since it left it (umain.branches.inc). }
+  TGittanBranchListMode = (blSwitch, blMerge, blRebase, blBranchSince, blCurrentSince);
 
   {** One row of the change view. Line is the index of its diff line in
     the file's diff, rowGap for a row that stands for the unchanged lines
@@ -370,7 +370,8 @@ type
     { What the branch list drops down for, and the Branch menu's items,
       whose captions name the current branch. }
     FBranchListMode: TGittanBranchListMode;
-    FSwitchItem, FNewBranchItem, FMergeItem, FRebaseItem, FCompareBranchItem: TMenuItem;
+    FSwitchItem, FNewBranchItem, FMergeItem, FRebaseItem, FCompareBranchItem,
+      FCompareBackItem: TMenuItem;
     { The commit graph, in the middle of the form, from the status bar's
       ahead/behind counts or View > Commit Graph. }
     FGraph: TGittanCommitGraph;
@@ -873,6 +874,7 @@ type
     procedure MergeIntoCurrent(const ARef: string);
     procedure RebaseOntoAsk(const ARef: string);
     procedure CompareSince(const ARef: string);
+    procedure CompareCurrentSince(const ARef: string);
     procedure ShowBranchList(AMode: TGittanBranchListMode; const AScreenRect: TRect);
     procedure UpdateBranchItems;
     procedure BranchMenuOpen(Sender: TObject);
@@ -1222,11 +1224,13 @@ resourcestring
   rsBmNewItem = '&New Branch...';
   rsBmMergeItem = '&Merge into %s...';
   rsBmRebaseItem = '&Rebase %s onto...';
-  rsBmCompareItem = 'Show What a Branch &Changed Since %s...';
+  rsBmCompareItem = 'Show What a Branch &Changed Since It Left %s...';
+  rsBmCompareBackItem = 'Show What %s Changed Since It &Left...';
   rsBmCurrent = 'the Current Branch';
   rsBmMergeHeader = 'Merge into %s';
   rsBmRebaseHeader = 'Rebase %s onto';
-  rsBmCompareHeader = 'Show what a branch changed since %s';
+  rsBmCompareHeader = 'Show what a branch changed since it left %s';
+  rsBmCompareBackHeader = 'Show what %s changed since it left';
   rsBmRebaseTitle = 'Rebase';
   rsBmRebaseAsk = 'Rebase %s onto %s? Its %d commits since they parted are replayed on top of %s.';
   rsBmRebaseAskOne = 'Rebase %s onto %s? Its one commit since they parted is replayed on top of %s.';
@@ -1400,6 +1404,7 @@ resourcestring
   rsBranchGone = 'deleted on remote';
   rsFilterBranches = 'Filter branches';
   rsVsBase = 'vs %s';
+  rsVsSince = '%s since %s';
   rsRepoDiffTitle = 'Repository diff';
   rsChangedFiles = '%d changed files';
   rsOneChangedFile = '1 changed file';
@@ -2484,7 +2489,9 @@ begin
   FRebaseItem.Tag := Ord(blRebase);
   BranchMenu.Add(NewLine);
   FCompareBranchItem := AddItem(BranchMenu, '', 0, @MenuBranchListClick);
-  FCompareBranchItem.Tag := Ord(blCompare);
+  FCompareBranchItem.Tag := Ord(blBranchSince);
+  FCompareBackItem := AddItem(BranchMenu, '', 0, @MenuBranchListClick);
+  FCompareBackItem.Tag := Ord(blCurrentSince);
   UpdateBranchItems;
 
   ViewMenu := TMenuItem.Create(Main);

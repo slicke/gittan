@@ -7,8 +7,10 @@
   its remote. A right click on a branch (or the Menu key) shows what can
   be done with it: switch to it, merge it into the current branch,
   rebase the current branch onto it, show what it changed since it left
-  the current one (the range current...branch) or compare the work tree
-  with it, rename or delete it, and delete it on its remote. Deleting
+  the current one (the range current...branch), what the current one
+  changed since it left it (branch...current, as a pull request to it
+  would show) or compare the work tree with it, rename or delete it, and
+  delete it on its remote. Deleting
   asks first, and asks again for a branch whose commits are in no other
   branch (git -d refuses it), since those commits are then only in the
   reflog. Nothing that moves HEAD is offered while git is in the middle
@@ -17,9 +19,10 @@
 
   The Branch menu offers the same with the verb first: Switch to
   Branch... (Cmd+B), New Branch..., Merge into <current>..., Rebase
-  <current> onto... and Show What a Branch Changed Since <current>...
-  each drop the branch list (ShowBranchList) from the status bar's
-  branch in the mode that does that with the branch picked. }
+  <current> onto..., Show What a Branch Changed Since It Left
+  <current>... and Show What <current> Changed Since It Left... each
+  drop the branch list (ShowBranchList) from the status bar's branch in
+  the mode that does that with the branch picked. }
 const
   bmSwitch = 1;
   bmMerge = 2;
@@ -29,6 +32,7 @@ const
   bmCompareTree = 6;
   bmCompareSince = 7;
   bmRebase = 8;
+  bmCurrentSince = 9;
 
 procedure TForm1.BranchContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
 var
@@ -74,6 +78,7 @@ begin
     Add(Format(rsBmRebase, [Amp(FBranch), Amp(Ref)]), bmRebase, not Busy);
     FBranchMenu.Items.Add(NewLine);
     Add(Format(rsBmCompareSince, [Amp(Ref), Amp(FBranch)]), bmCompareSince, True);
+    Add(Format(rsBmCompareSince, [Amp(FBranch), Amp(Ref)]), bmCurrentSince, True);
     Add(rsBmCompareTree, bmCompareTree, True);
   end;
   if not IsRemote then
@@ -107,6 +112,7 @@ begin
     bmSwitch: SwitchBranch(BranchName);
     bmCompareTree: SetBase(Ref);
     bmCompareSince: CompareSince(Ref);
+    bmCurrentSince: CompareCurrentSince(Ref);
     bmMerge: MergeIntoCurrent(Ref);
     bmRebase: RebaseOntoAsk(Ref);
     bmRename: RenameBranchAsk(BranchName);
@@ -251,6 +257,16 @@ begin
     SetBase('HEAD...' + ARef);
 end;
 
+{ What the current branch did since it left ARef, through their merge
+  base, as a pull request to ARef would show. }
+procedure TForm1.CompareCurrentSince(const ARef: string);
+begin
+  if (FOperation = '') and FRepo.HasCommit('refs/heads/' + FBranch) then
+    SetBase(ARef + '...' + FBranch)
+  else
+    SetBase(ARef + '...HEAD');
+end;
+
 { The Branch menu's items: enabled with a repository, the ones that move
   HEAD not while git is in the middle of something or a job runs, and
   captioned with the current branch. Called as the menu opens and
@@ -276,6 +292,8 @@ begin
   FRebaseItem.Enabled := FMergeItem.Enabled;
   FCompareBranchItem.Caption := Format(rsBmCompareItem, [Current]);
   FCompareBranchItem.Enabled := Has;
+  FCompareBackItem.Caption := Format(rsBmCompareBackItem, [Current]);
+  FCompareBackItem.Enabled := Has;
 end;
 
 procedure TForm1.BranchMenuOpen(Sender: TObject);
