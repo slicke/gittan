@@ -58,6 +58,11 @@ type
     procedure TestBranchesAndSwitch;
     procedure TestGoneBranches;
     procedure TestGoneUpstreams;
+    procedure TestCommit;
+    procedure TestCommitAmendAndHook;
+    procedure TestCommitUnborn;
+    procedure TestCommitMerge;
+    procedure TestToolSearchPath;
   end;
 
 implementation
@@ -678,6 +683,9 @@ begin
   AssertTrue(FRepo.Open(FDir));
   Git(['config', 'user.name', '  Björn Lindh ']);
   AssertEquals('Björn Lindh', FRepo.UserName);
+  AssertTrue(FRepo.SetIdentity('Gittan Test', 'test@example.invalid', False));
+  AssertEquals('Gittan Test', FRepo.UserName);
+  AssertEquals('test@example.invalid', FRepo.UserEmail);
 end;
 
 { The bytes come back as they are, a NUL and a CR LF included. }
@@ -1131,6 +1139,225 @@ end;
 { The local branches are listed and switched to; a switch git refuses
   (an unknown name, a local change it would overwrite) fails with its
   reason and leaves the branch alone. }
+{ The file APath as HEAD has it, or '' when HEAD has no such file. }
+function HeadFile(const ADir, APath: string): string;
+var
+  Status: integer;
+begin
+  if (RunCommandIndir(ADir, 'git', ['show', 'HEAD:' + APath], Result, Status, []) <> 0) or
+    (Status <> 0) then
+    Result := '';
+end;
+
+{ Only the chosen files go in, as they are in the work tree, whatever
+  the index holds; the rest stays as it was, staged or untracked. }
+procedure TGitRepoTest.TestCommit;
+const
+  Message = 'Subject'#10#10'# not a comment'#10'body';
+var
+  Paths: TStringList;
+  Id, Text: string;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  WriteFile('a.txt', 'changed'#10);
+  WriteFile('staged.txt', 'staged'#10);
+  Git(['add', 'staged.txt']);
+  WriteFile('staged.txt', 'work tree'#10);
+  WriteFile('dir sp/fil å.txt', 'left staged'#10);
+  Git(['add', 'dir sp/fil å.txt']);
+  Git(['rm', '-q', 'del.txt']);
+  Git(['mv', QuoteName, 'moved.txt']);
+  WriteFile('br[a].txt', 'literal'#10);
+  WriteFile('bra.txt', 'not chosen'#10);
+  Paths := TStringList.Create;
+  try
+    AssertFalse('nothing chosen', FRepo.Commit(Message, Paths, False, Id));
+    AssertTrue(FRepo.Error <> '');
+    Paths.Add('a.txt');
+    Paths.Add('staged.txt');
+    Paths.Add('del.txt');
+    Paths.Add('moved.txt');
+    Paths.Add('br[a].txt');
+    AssertTrue(FRepo.Error, FRepo.Commit(Message, Paths, False, Id));
+  finally
+    Paths.Free;
+  end;
+  AssertEquals(Trim(Git(['rev-parse', 'HEAD'])), Id);
+  AssertEquals('changed'#10, HeadFile(FDir, 'a.txt'));
+  AssertEquals('the work tree, not the index', 'work tree'#10, HeadFile(FDir, 'staged.txt'));
+  AssertEquals('', HeadFile(FDir, 'del.txt'));
+  AssertEquals('the old path of the rename', '', HeadFile(FDir, QuoteName));
+  AssertEquals('x'#10, HeadFile(FDir, 'moved.txt'));
+  AssertEquals('literal'#10, HeadFile(FDir, 'br[a].txt'));
+  AssertEquals('', HeadFile(FDir, 'bra.txt'));
+  AssertEquals('a'#10, HeadFile(FDir, 'dir sp/fil å.txt'));
+  Text := Git(['status', '--porcelain', '-z']);
+  AssertEquals('M  dir sp/fil å.txt'#0'?? bra.txt'#0, Text);
+  AssertTrue(FRepo.HeadMessage(Text));
+  AssertEquals(Message, Text);
+end;
+
+{ Amend without paths changes only the message; a hook that fails
+  stops the commit, with its output as the error, and the untracked
+  file added for it is untracked again. }
+procedure TGitRepoTest.TestCommitAmendAndHook;
+var
+  Paths: TStringList;
+  Parent, Id, Text, Hook: string;
+  Status: integer;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  WriteFile('a.txt', 'staged'#10);
+  Git(['add', 'a.txt']);
+  Parent := Trim(Git(['rev-parse', 'HEAD~0']));
+  Paths := TStringList.Create;
+  try
+    AssertTrue(FRepo.Error, FRepo.Commit('renamed', Paths, True, Id));
+    AssertTrue(Id <> Parent);
+    AssertTrue(FRepo.HeadMessage(Text));
+    AssertEquals('renamed', Text);
+    AssertEquals('one'#10'two'#10'three'#10, HeadFile(FDir, 'a.txt'));
+    AssertEquals('M  a.txt'#0, Git(['status', '--porcelain', '-z']));
+
+    WriteFile('.git/hooks/pre-commit',
+      '#!/bin/sh'#10'echo "hook says no" >&2'#10'exit 1'#10);
+    Hook := IncludeTrailingPathDelimiter(FDir) + SetDirSeparators('.git/hooks/pre-commit');
+    {$ifdef UNIX}
+    RunCommandIndir(FDir, 'chmod', ['+x', Hook], Text, Status, []);
+    {$endif}
+    WriteFile('new.txt', 'new'#10);
+    Paths.Add('new.txt');
+    AssertFalse(FRepo.Commit('blocked', Paths, False, Id));
+    AssertTrue(FRepo.Error, Pos('hook says no', FRepo.Error) > 0);
+    AssertEquals('M  a.txt'#0'?? new.txt'#0, Git(['status', '--porcelain', '-z']));
+  finally
+    Paths.Free;
+  end;
+end;
+
+procedure TGitRepoTest.TestCommitUnborn;
+var
+  Paths: TStringList;
+  Id: string;
+begin
+  Git(['init', '-q']);
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  WriteFile('first.txt', 'first'#10);
+  WriteFile('later.txt', 'later'#10);
+  Paths := TStringList.Create;
+  try
+    Paths.Add('first.txt');
+    AssertTrue(FRepo.Error, FRepo.Commit('first', Paths, False, Id));
+  finally
+    Paths.Free;
+  end;
+  AssertEquals('first'#10, HeadFile(FDir, 'first.txt'));
+  AssertEquals('?? later.txt'#0, Git(['status', '--porcelain', '-z']));
+end;
+
+{ A merge cannot commit some files only: while a conflict is left it
+  is refused, once it is resolved the chosen files are added and the
+  whole index committed, with both parents. }
+procedure TGitRepoTest.TestCommitMerge;
+var
+  Paths: TStringList;
+  Branch, Output, Id: string;
+  Status: integer;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Branch := Trim(Git(['rev-parse', '--abbrev-ref', 'HEAD']));
+  Git(['checkout', '-q', '-b', 'topic']);
+  WriteFile('a.txt', 'topic'#10);
+  Commit('topic');
+  Git(['checkout', '-q', Branch]);
+  WriteFile('a.txt', 'main'#10);
+  Commit('main');
+  RunCommandIndir(FDir, 'git', ['merge', 'topic'], Output, Status, [poStderrToOutPut]);
+  AssertTrue('merge stops', Status <> 0);
+  WriteFile('a.txt', 'both'#10);
+  WriteFile('extra.txt', 'extra'#10);
+  Paths := TStringList.Create;
+  try
+    Paths.Add('a.txt');
+    Paths.Add('extra.txt');
+    AssertFalse(FRepo.Commit('merged', Paths, False, Id));
+    AssertTrue(FRepo.Error, Pos('a.txt', FRepo.Error) > 0);
+    Git(['add', 'a.txt']);
+    AssertTrue(FRepo.Error, FRepo.Commit('merged', Paths, False, Id));
+  finally
+    Paths.Free;
+  end;
+  AssertEquals('', FRepo.Operation);
+  AssertEquals(Trim(Git(['rev-parse', 'topic'])), Trim(Git(['rev-parse', 'HEAD^2'])));
+  AssertEquals('both'#10, HeadFile(FDir, 'a.txt'));
+  AssertEquals('extra'#10, HeadFile(FDir, 'extra.txt'));
+end;
+
+{ Gittan's PATH comes first and no folder twice; git is found on it,
+  and the hooks git runs get it as their PATH. }
+procedure TGitRepoTest.TestToolSearchPath;
+var
+  Dirs: TStringList;
+  Paths: TStringList;
+  Own, Id, Text: string;
+  Status: integer;
+begin
+  Own := GetEnvironmentVariable('PATH');
+  AssertTrue(ToolSearchPath, Pos(Own, ToolSearchPath) = 1);
+  Dirs := TStringList.Create;
+  try
+    Dirs.Sorted := True;
+    Dirs.Duplicates := dupError;
+    for Text in Copy(ToolSearchPath, Length(Own) + 1, MaxInt).Split([PathSeparator]) do
+      if Text <> '' then
+      begin
+        AssertTrue('not in PATH already: ' + Text,
+          Pos(PathSeparator + Text + PathSeparator, PathSeparator + Own + PathSeparator) = 0);
+        Dirs.Add(Text);
+      end;
+  finally
+    Dirs.Free;
+  end;
+  AssertTrue(FindTool('git') <> '');
+  AssertEquals('', FindTool('no-such-tool-gittan'));
+  {$ifdef UNIX}
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  WriteFile('.git/hooks/pre-commit', '#!/bin/sh'#10'printf %s "$PATH" > ../hook-path'#10);
+  RunCommandIndir(FDir, 'chmod', ['+x', '.git/hooks/pre-commit'], Text, Status, []);
+  WriteFile('a.txt', 'hooked'#10);
+  Paths := TStringList.Create;
+  try
+    Paths.Add('a.txt');
+    AssertTrue(FRepo.Error, FRepo.Commit('hooked', Paths, False, Id));
+  finally
+    Paths.Free;
+  end;
+  Dirs := TStringList.Create;
+  try
+    Dirs.LoadFromFile(ExtractFileDir(ExcludeTrailingPathDelimiter(FDir)) + '/hook-path');
+    { git puts its own exec path first. }
+    AssertTrue(Dirs.Text, Pos(ToolSearchPath, Dirs.Text) > 0);
+  finally
+    Dirs.Free;
+    DeleteFile(ExtractFileDir(ExcludeTrailingPathDelimiter(FDir)) + '/hook-path');
+  end;
+  {$endif}
+end;
+
 procedure TGitRepoTest.TestBranchesAndSwitch;
 var
   Branch: string;

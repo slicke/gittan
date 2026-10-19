@@ -87,6 +87,8 @@ begin
     FTreePanel.Width := FSettings.TreeWidth;
   FRepoHeader.Expanded := FSettings.RepoFilesOpen;
   FSubHeader.Expanded := FSettings.SubmodulesOpen;
+  FCommitHeader.Expanded := FSettings.CommitOpen;
+  FCommitBox.Visible := FCommitHeader.Expanded;
   LayoutRepoFiles;
 end;
 
@@ -110,6 +112,9 @@ begin
   FSettings.TreeWidth := FTreePanel.Width;
   FSettings.RepoFilesOpen := FRepoHeader.Expanded;
   FSettings.SubmodulesOpen := FSubHeader.Expanded;
+  FSettings.CommitOpen := FCommitHeader.Expanded;
+  StopCommitJob(True);
+  SaveCommitDraft;
   FSettings.FontName := Edit.Font.Name;
   FSettings.FontSize := Edit.Font.Size;
   FSettings.Zoom := Edit.OptScaleFont;

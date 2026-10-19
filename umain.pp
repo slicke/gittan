@@ -21,7 +21,7 @@ uses
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader,
   gittan.discard, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
-  gittan.commitgraph, gittan.pofile, gittan.binaryview, ATSynEdit_Gaps, md5;
+  gittan.commitgraph, gittan.pofile, gittan.binaryview, gittan.commitjob, ATSynEdit_Gaps, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -53,6 +53,20 @@ type
     Hidden: boolean;
   end;
   TGittanRows = array of TGittanRow;
+
+  {** The tree views of the form, the one from umain.lfm included, with a
+    click on a node's check box (its state image) told apart: it goes to
+    OnStateClick instead of selecting the row, so choosing files to
+    commit does not show each one. }
+  TTreeView = class(ComCtrls.TTreeView)
+  private
+    FOnStateClick: TTVExpandedEvent;
+  protected
+    procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
+      override;
+  public
+    property OnStateClick: TTVExpandedEvent read FOnStateClick write FOnStateClick;
+  end;
 
   { TForm1 }
 
@@ -190,6 +204,22 @@ type
       the path of the submodule the view shows. FSubChanges holds, one
       per submodule, how a changed one moved between the sides compared
       (FromHash empty and ToHash empty for one git status leaves out). }
+    { The Commit section under the tree (umain.commit.inc): the check
+      boxes of the tree (FCheckImages), the files flipped from what is
+      chosen by default, the section's controls, the commit job while it
+      runs, the repository the message was written in, and the message
+      Amend took from HEAD. }
+    FCheckImages: TImageList;
+    FCommitOn, FCommitOff: TStringList;
+    FCommitPanel, FCommitBox, FCommitRow: TPanel;
+    FCommitHeader: TGittanSectionHeader;
+    FCommitMemo: TMemo;
+    FCommitAmend: TCheckBox;
+    FCommitButton: TButton;
+    FCommitNote: TLabel;
+    FCommitItem: TMenuItem;
+    FCommitJob: TGittanCommitJob;
+    FCommitDraftFor, FAmendMessage: string;
     FSubPanel: TPanel;
     FSubHeader: TGittanSectionHeader;
     FSubTree: TTreeView;
@@ -739,6 +769,31 @@ type
     procedure TreePanelResize(Sender: TObject);
     procedure RepoTreeSelectionChanged(Sender: TObject);
     procedure SetupSubmodules;
+    procedure SetupCommit;
+    procedure FocusTreeAsync(Data: PtrInt);
+    procedure ColorCommit;
+    procedure CommitHeaderToggle(Sender: TObject);
+    function CommitChoosing: boolean;
+    function CommitChosen(AIndex: integer): boolean;
+    procedure SetCommitChosen(AIndex: integer; AValue: boolean);
+    function CommitStatOf(ANode: TTreeNode): integer;
+    procedure ApplyCommitChecks;
+    procedure FlipCommitNode(ANode: TTreeNode);
+    procedure FileTreeStateClick(Sender: TObject; Node: TTreeNode);
+    procedure FileTreeKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
+    procedure ChosenCommitPaths(AList: TStrings);
+    procedure UpdateCommitState;
+    procedure CommitMemoChange(Sender: TObject);
+    procedure CommitMemoKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
+    procedure CommitAmendClick(Sender: TObject);
+    procedure CommitButtonClick(Sender: TObject);
+    procedure MenuCommitClick(Sender: TObject);
+    function EnsureIdentity: boolean;
+    procedure StartCommit;
+    procedure CommitJobDone(Sender: TObject);
+    procedure StopCommitJob(AWait: boolean);
+    procedure SaveCommitDraft;
+    procedure LoadCommitDraft;
     function SubmoduleKey: string;
     procedure FillSubmodules;
     {** The index in FSubmodules of the submodule at APath, -1 for none. }
@@ -940,6 +995,24 @@ resourcestring
   rsNextFile = 'Next F&ile';
   rsPrevFile = 'Previous Fi&le';
   rsRepoFiles = 'Repository';
+  rsCommitSection = 'Commit';
+  rsCommitMenu = 'Co&mmit...';
+  rsCommitButton = 'Commit';
+  rsCommitAmendButton = 'Amend Commit';
+  rsCommitAmend = 'Amend';
+  rsCommitting = 'Committing...';
+  rsCommitMessageHint = {$IFDEF DARWIN}'Message (⌘↩ to commit)'{$ELSE}'Message (Ctrl+Enter to commit)'{$ENDIF};
+  rsCommitCount = '%d of %d';
+  rsCommitNotHead = 'Commits go on HEAD. Compare with HEAD to choose files.';
+  rsCommitBusy = 'Git is %s. Continue or abort it in a terminal first.';
+  rsCommitConflicts = 'Resolve the conflicts first (%d files).';
+  rsCommitWhole = 'While %s, everything staged goes into the commit too.';
+  rsCommitNothing = 'Tick the files to commit.';
+  rsCommitted = 'Committed %s: %s';
+  rsCommitFailed = 'The commit failed';
+  rsIdentityTitle = 'Who Commits?';
+  rsIdentityName = 'Name';
+  rsIdentityEmail = 'E-mail';
   rsSubmodules = 'Submodules';
   rsSubmodulesNewer = '%d · ↓%d';
   rsSubUrl = 'URL';
@@ -1208,11 +1281,32 @@ const
 
 { TForm1 }
 
+{ TTreeView }
+
+procedure TTreeView.MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
+var
+  Node: TTreeNode;
+begin
+  if (Button = mbLeft) and Assigned(FOnStateClick) and (StateImages <> nil) then
+  begin
+    Node := GetNodeAt(X, Y);
+    if (Node <> nil) and (Node.StateIndex >= 0) and
+      (htOnStateIcon in GetHitTestInfoAt(X, Y)) then
+    begin
+      if not Focused and CanFocus then
+        SetFocus;
+      FOnStateClick(Self, Node);
+      Exit;
+    end;
+  end;
+  inherited MouseDown(Button, Shift, X, Y);
+end;
+
 procedure TForm1.FormCreate(Sender: TObject);
 begin
   FSettings := TGittanSettings.Create;
   FSettings.Load;
-  FGitHubCli := FindGitHubCli;
+  FGitHubCli := FindTool('gh');
   FHasGitHubCli := FGitHubCli <> '';
   FChangeLines := TStringList.Create;
   FHotDiscard := -1;
@@ -1415,6 +1509,7 @@ begin
   SetupTreeFilter;
   SetupRepoFiles;
   SetupSubmodules;
+  SetupCommit;
   SetupTitleBar;
   ApplySettings;
   BuildMenu;
@@ -1443,6 +1538,7 @@ end;
 procedure TForm1.FormDestroy(Sender: TObject);
 begin
   Application.RemoveAsyncCalls(Self);
+  StopCommitJob(True);
   StopWatcher;
   AbandonPullJob;
   AbandonReviewJob;
@@ -1473,6 +1569,8 @@ begin
   FreeAndNil(FSymbolFiles);
   FreeAndNil(FThreadFlips);
   FreeAndNil(FReviewMeasure);
+  FreeAndNil(FCommitOn);
+  FreeAndNil(FCommitOff);
 
   FreeAndNil(FSettings);
 end;
@@ -1740,6 +1838,7 @@ begin
   end;
   if FRepoHeader <> nil then
     ColorRepoHeader;
+  ColorCommit;
   ColorSidebar;
   RecolorWords(Edit);
   RecolorWords(FEditOld);
@@ -1990,6 +2089,9 @@ begin
   FSaveItem := AddItem(FileMenu, rsSave, ShortCut(VK_S, [ssModifier]), @MenuSaveClick);
   FSaveItem.Enabled := False;
   FileMenu.Add(NewLine);
+  FCommitItem := AddItem(FileMenu, rsCommitMenu, ShortCut(VK_K, [ssModifier]),
+    @MenuCommitClick);
+  FCommitItem.Enabled := False;
   FDiscardItem := AddItem(FileMenu, rsDiscardChange, ShortCut(VK_BACK, [ssModifier, ssShift]),
     @MenuDiscardClick);
   FUndoDiscardItem := AddItem(FileMenu, rsUndoDiscard, ShortCut(VK_Z, [ssModifier, ssAlt]),
@@ -2995,6 +3097,8 @@ begin
   { Open closes the previous repository even when it fails. }
   FlushEdit;
   LeaveEdit;
+  SaveCommitDraft;
+  StopCommitJob(False);
   StopWatcher;
   StopIndexing;
   SaveIndex;
@@ -3015,9 +3119,12 @@ begin
   FSubShown := '';
   if not FRepo.Open(ADir) then
   begin
+    FCommitDraftFor := '';
     ShowError(FRepo.Error);
+    UpdateCommitState;
     Exit;
   end;
+  LoadCommitDraft;
   { The exclude file lives in the git directory, which git names (a
     work tree's is elsewhere), once per open: the section lists it and
     Add to .git/info/exclude writes to it. }
@@ -3111,6 +3218,7 @@ begin
       Inc(FConflictFiles);
   FFileCount := Length(FStats);
   FillFileTree(FStats);
+  UpdateCommitState;
   FillRepoFiles;
   FillSubmodules;
   SetLength(Icons, Length(FStats));
@@ -3776,6 +3884,8 @@ begin
   finally
     FileTree.EndUpdate;
   end;
+  if FCommitOn <> nil then
+    ApplyCommitChecks;
 end;
 
 { ---------------------------------------------------------------------------
@@ -4166,5 +4276,6 @@ end;
 {$I umain.update.inc}
 {$I umain.reviews.inc}
 {$I umain.translations.inc}
+{$I umain.commit.inc}
 
 end.

@@ -23,6 +23,12 @@ const
     change (the Repository section), after the badges and the folders. }
   iconFile = 1 + 4 * (Ord(High(TGittanChangeKind)) + 1);
 
+  {** State image indexes of the check boxes FillCheckIcons draws: not
+    chosen, chosen, and a folder with some of its files chosen. }
+  checkOff = 0;
+  checkOn = 1;
+  checkMixed = 2;
+
 {** Image index of the badge for AKind. }
 function ChangeIcon(AKind: TGittanChangeKind): integer;
 
@@ -51,6 +57,12 @@ function WorseKind(A, B: TGittanChangeKind): TGittanChangeKind;
   staged and the partly staged badges at StagedIcon and the plain file at
   iconFile. }
 procedure FillTreeIcons(AImages: TCustomImageList);
+
+{** Fills the empty list AImages with the check boxes of the tree's
+  commit choice, at checkOff, checkOn and checkMixed: a gray outline,
+  and the accent blue with a white check or dash, which read on a light
+  and a dark tree alike. }
+procedure FillCheckIcons(AImages: TCustomImageList);
 
 implementation
 
@@ -229,6 +241,46 @@ begin
   for Kind := Low(TGittanChangeKind) to High(TGittanChangeKind) do
     AddIcon(AImages, DrawBadge(16, Kind, bfRing), DrawBadge(32, Kind, bfRing));
   AddIcon(AImages, DrawFile(16), DrawFile(32));
+end;
+
+type
+  TCheckMark = (cmNone, cmCheck, cmDash);
+
+{ A rounded box a little smaller than the badges, so the two icons of a
+  row stand apart. }
+function DrawCheck(ASize: integer; AMark: TCheckMark): TBGRABitmap;
+var
+  s: single;
+  Accent: TBGRAPixel;
+begin
+  Result := TBGRABitmap.Create(ASize, ASize, BGRAPixelTransparent);
+  s := ASize / 16;
+  Accent := BGRA($2F, $80, $D8);
+  Result.LineCap := pecRound;
+  Result.JoinStyle := pjsRound;
+  if AMark = cmNone then
+  begin
+    Result.RoundRectAntialias(2.5 * s, 2.5 * s, 13.5 * s, 13.5 * s, 2.5 * s, 2.5 * s,
+      BGRA($8A, $94, $9E), 1.2 * s);
+    Exit;
+  end;
+  Result.FillRoundRectAntialias(2 * s, 2 * s, 14 * s, 14 * s, 3 * s, 3 * s, Accent);
+  if AMark = cmCheck then
+    Result.DrawPolyLineAntialias([PointF(4.8 * s, 8.2 * s), PointF(7 * s, 10.5 * s),
+      PointF(11.2 * s, 5.6 * s)], BGRAWhite, 1.8 * s)
+  else
+    Result.DrawLineAntialias(5 * s, 8 * s, 11 * s, 8 * s, BGRAWhite, 1.8 * s);
+end;
+
+procedure FillCheckIcons(AImages: TCustomImageList);
+var
+  Mark: TCheckMark;
+begin
+  AImages.Width := 16;
+  AImages.Height := 16;
+  AImages.RegisterResolutions([16, 32]);
+  for Mark := Low(TCheckMark) to High(TCheckMark) do
+    AddIcon(AImages, DrawCheck(16, Mark), DrawCheck(32, Mark));
 end;
 
 end.

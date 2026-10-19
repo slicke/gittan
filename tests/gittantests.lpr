@@ -14,7 +14,7 @@ uses
   testsymbolindex, testsnapshots, testblame, testhistory, testsyntaxthemes,
   testgithub, testconflicts, testcli, testsymbolchanges,
   testcallers, testrepofiles, testdiscard, testsubmodules, testupdate,
-  testreviews, testgraph, testpofile;
+  testreviews, testgraph, testpofile, testcommitjob;
 
 var
   App: TTestRunner;

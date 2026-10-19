@@ -120,12 +120,37 @@ type
       switch would overwrite, an operation in progress, or a name it
       does not know. }
     function Switch(const ABranch: string): boolean;
+    {** Commits the files APaths (relative to Root, as ChangedPaths gives
+      them) as they are in the work tree, with the message AMessage as it
+      is, whatever the index holds for them: the other changed files stay
+      out of the commit, and their staged changes stay staged. An
+      untracked file among APaths is added first, and taken out of the
+      index again when the commit fails; the old path of a rename is
+      committed with its new one. With AAmend HEAD is replaced instead,
+      and with no paths only its message changes. During a merge, a
+      cherry-pick or a revert git allows no commit of some files only:
+      APaths are then added to the index and the whole index committed.
+      git runs the repository's hooks and signs as configured. False,
+      with the reason in Error (a hook's output, say), when nothing was
+      committed: also while any file is in conflict, or with no paths and
+      no AAmend outside those operations. AId is the new commit. }
+    function Commit(const AMessage: string; APaths: TStrings; AAmend: boolean;
+      out AId: string): boolean;
+    {** The whole message of HEAD, without its trailing line ends; false
+      before the first commit. }
+    function HeadMessage(out AMessage: string): boolean;
     {** Whether ARef names a commit in the repository. }
     function HasCommit(const ARef: string): boolean;
     {** The name the repository commits under (`git config user.name`,
       the repository's own setting before the global one), empty when
       none is set. }
     function UserName: string;
+    {** The e-mail the repository commits under (`git config
+      user.email`), empty when none is set. }
+    function UserEmail: string;
+    {** Sets the name and e-mail commits are made under: in the user's
+      global git config with AGlobal, else in the repository's own. }
+    function SetIdentity(const AName, AEmail: string; AGlobal: boolean): boolean;
     {** The remote whose URL holds ARepoPath ("owner/repo", compared
       without regard to case), else origin, else the first remote, else
       empty. }
@@ -296,13 +321,21 @@ type
     property IgnoreWhitespace: boolean read FIgnoreWhitespace write FIgnoreWhitespace;
   end;
 
-{** Full path of GitHub's command line tool gh, or empty when it is not
-  installed. Looked for on PATH and then where Homebrew and the Linux
-  packages put it, since an app started from the macOS Finder gets a PATH
-  without /opt/homebrew/bin and /usr/local/bin. }
-function FindGitHubCli: string;
+{** The PATH Gittan looks for its tools on and runs git and gh with,
+  so the hooks git runs get it too: Gittan's own PATH, then the folders
+  of it that are missing where package managers and version managers
+  put commands (Homebrew, /usr/local/bin, ~/.local/bin, Cargo, Volta,
+  asdf, mise, Nix, Linuxbrew, snap), those that exist. An app started
+  from the macOS Finder gets a PATH of /usr/bin:/bin:/usr/sbin:/sbin
+  alone, without which neither gh nor the node of a hook would be
+  found. Windows keeps its PATH as it is. }
+function ToolSearchPath: string;
 
-{** Runs gh (AExe, from FindGitHubCli) in ADir and answers whether it
+{** Full path of the command AName (without .exe; Windows adds it) on
+  ToolSearchPath, or empty when it is not installed. }
+function FindTool(const AName: string): string;
+
+{** Runs gh (AExe, from FindTool('gh')) in ADir and answers whether it
   succeeded, with its standard output in AOutput and, on failure, its
   message in AError. gh runs with its prompts and its update notice off,
   since nobody could answer the one and the other would land in stderr. }
@@ -345,8 +378,70 @@ implementation
 uses
   Process, md5, StrUtils, DateUtils;
 
+var
+  GToolPath: string;
+  GGitExe: string;
+
+function ToolSearchPath: string;
+begin
+  Result := GToolPath;
+end;
+
+{ Gittan's PATH with the folders of Extra that exist and are not in it
+  yet, after it, so a tool the user put first on PATH still comes
+  first. }
+function MakeToolPath: string;
+{$ifndef windows}
+const
+  Extra: array[0..14] of string = ('/opt/homebrew/bin', '/opt/homebrew/sbin',
+    '/usr/local/bin', '/usr/bin', '/bin', '~/.local/bin', '~/bin', '~/.cargo/bin',
+    '~/.volta/bin', '~/.asdf/shims', '~/.local/share/mise/shims',
+    '~/.nix-profile/bin', '/nix/var/nix/profiles/default/bin',
+    '/home/linuxbrew/.linuxbrew/bin', '/snap/bin');
+var
+  Dirs: TStringList;
+  Home, Dir, Full: string;
+{$endif}
+begin
+  Result := GetEnvironmentVariable('PATH');
+  {$ifndef windows}
+  Home := ExcludeTrailingPathDelimiter(GetUserDir);
+  Dirs := TStringList.Create;
+  try
+    for Dir in Result.Split([PathSeparator]) do
+      if Dir <> '' then
+        Dirs.Add(Dir);
+    for Dir in Extra do
+    begin
+      if (Dir[1] = '~') and (Home = '') then
+        Continue;
+      Full := StringReplace(Dir, '~', Home, []);
+      if (Dirs.IndexOf(Full) >= 0) or not DirectoryExists(Full) then
+        Continue;
+      if Result <> '' then
+        Result := Result + PathSeparator;
+      Result := Result + Full;
+      Dirs.Add(Full);
+    end;
+  finally
+    Dirs.Free;
+  end;
+  {$endif}
+end;
+
+function FindTool(const AName: string): string;
+begin
+  {$ifdef windows}
+  Result := ExeSearch(AName + '.exe', GToolPath);
+  {$else}
+  Result := ExeSearch(AName, GToolPath);
+  {$endif}
+end;
+
 { Gives P the environment of Gittan without the variables whose names
-  (with the equals sign) are in ASkip, so the caller can set those. }
+  (with the equals sign) are in ASkip, so the caller can set those, and
+  with ToolSearchPath as its PATH outside Windows (whose variable is
+  "Path", and whose PATH is kept as it is). }
 procedure CopyEnvironment(P: TProcess; const ASkip: array of string);
 var
   Env, Prefix: string;
@@ -360,9 +455,16 @@ begin
     for Prefix in ASkip do
       if Pos(Prefix, Env) = 1 then
         Keep := False;
+    {$ifndef windows}
+    if Pos('PATH=', Env) = 1 then
+      Keep := False;
+    {$endif}
     if Keep then
       P.Environment.Add(Env);
   end;
+  {$ifndef windows}
+  P.Environment.Add('PATH=' + GToolPath);
+  {$endif}
 end;
 
 function WindowsArg(const S: string): string;
@@ -420,15 +522,19 @@ begin
   AError := '';
   P := TProcess.Create(nil);
   try
-    P.Executable := 'git';
+    P.Executable := GGitExe;
     P.CurrentDirectory := ADir;
     P.Parameters.Add('-c');
     P.Parameters.Add('core.quotepath=false');
     for i := 0 to High(AArgs) do
       P.Parameters.Add(ProcessArg(AArgs[i]));
-    CopyEnvironment(P, ['LC_ALL=', 'GIT_TERMINAL_PROMPT=', 'GIT_INDEX_FILE=']);
+    CopyEnvironment(P, ['LC_ALL=', 'GIT_TERMINAL_PROMPT=', 'GIT_INDEX_FILE=',
+      'GIT_OPTIONAL_LOCKS=']);
     P.Environment.Add('LC_ALL=C');
     P.Environment.Add('GIT_TERMINAL_PROMPT=0');
+    { git status refreshes the index when it may, under index.lock; the
+      watcher's poll would then make a commit started meanwhile fail. }
+    P.Environment.Add('GIT_OPTIONAL_LOCKS=0');
     if AIndexFile <> '' then
       P.Environment.Add('GIT_INDEX_FILE=' + AIndexFile);
     P.Options := [poNoConsole];
@@ -512,24 +618,6 @@ begin
   Result := RunGitIn(ADir, AArgs, AOutput, Err, AIndexFile);
   if not Result then
     FError := Err;
-end;
-
-function FindGitHubCli: string;
-const
-  {$ifdef windows}
-  Name = 'gh.exe';
-  Extra = '';
-  {$else}
-  Name = 'gh';
-  Extra = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/home/linuxbrew/.linuxbrew/bin:/snap/bin';
-  {$endif}
-var
-  Path: string;
-begin
-  Path := GetEnvironmentVariable('PATH');
-  if Extra <> '' then
-    Path := Path + PathSeparator + Extra;
-  Result := ExeSearch(Name, Path);
 end;
 
 function RunGitHubCli(const AExe, ADir: string; const AArgs: array of string;
@@ -846,6 +934,25 @@ begin
   Result := Trim(Result);
 end;
 
+function TGittanRepo.UserEmail: string;
+begin
+  if (FRoot = '') or not RunGit(FRoot, ['config', 'user.email'], Result) then
+    Exit('');
+  Result := Trim(Result);
+end;
+
+function TGittanRepo.SetIdentity(const AName, AEmail: string; AGlobal: boolean): boolean;
+var
+  Output, Scope: string;
+begin
+  if AGlobal then
+    Scope := '--global'
+  else
+    Scope := '--local';
+  Result := (FRoot <> '') and RunGit(FRoot, ['config', Scope, 'user.name', AName], Output) and
+    RunGit(FRoot, ['config', Scope, 'user.email', AEmail], Output);
+end;
+
 function TGittanRepo.RemoteFor(const ARepoPath: string): string;
 var
   Output, Line, Name: string;
@@ -1087,6 +1194,172 @@ begin
   if (FRoot = '') or (ABranch = '') then
     Exit(False);
   Result := RunGit(FRoot, ['switch', ABranch], Output);
+end;
+
+{ Writes AText to AFileName byte for byte. }
+procedure WriteBytes(const AFileName, AText: string);
+var
+  Stream: TFileStream;
+begin
+  Stream := TFileStream.Create(AFileName, fmCreate);
+  try
+    if AText <> '' then
+      Stream.WriteBuffer(AText[1], Length(AText));
+  finally
+    Stream.Free;
+  end;
+end;
+
+{ The paths go to git in files (--pathspec-from-file, NUL separated), so
+  no command line grows with them, and are read literally: a name with
+  a "*" or a ":" is that name, not a pattern. git commit --only commits
+  the work tree's version of the paths through an index of its own and
+  leaves the real index as it was for the others; it knows only tracked
+  paths, so the untracked ones are added before. A path whose deletion
+  is staged is in neither the index nor the work tree, and git add
+  would not match it: during an operation, where the chosen paths are
+  added, such a path is left to the index, which already says it is
+  gone. }
+function TGittanRepo.Commit(const AMessage: string; APaths: TStrings;
+  AAmend: boolean; out AId: string): boolean;
+var
+  Output, Entry, Path, XY, Op, Err, SpecFile, AddFile, MsgFile: string;
+  Fields, Chosen, Spec, Added: TStringList;
+  Args: array of string;
+  Whole: boolean;
+  i: integer;
+
+  procedure Arg(const S: string);
+  begin
+    SetLength(Args, Length(Args) + 1);
+    Args[High(Args)] := S;
+  end;
+
+  function NulList(AList: TStrings): string;
+  var
+    j: integer;
+  begin
+    Result := '';
+    for j := 0 to AList.Count - 1 do
+      Result := Result + AList[j] + #0;
+  end;
+
+begin
+  AId := '';
+  if FRoot = '' then
+    Exit(False);
+  Op := Operation;
+  Whole := (Op = 'merging') or (Op = 'cherry-picking') or (Op = 'reverting');
+  if (APaths.Count = 0) and not AAmend and not Whole then
+  begin
+    FError := 'No files chosen to commit.';
+    Exit(False);
+  end;
+  if not RunGit(FRoot, ['status', '--porcelain', '-z', '--untracked-files=all'], Output) then
+    Exit(False);
+  Fields := TStringList.Create;
+  Chosen := TStringList.Create;
+  Spec := TStringList.Create;
+  Added := TStringList.Create;
+  SpecFile := GetTempFileName(GetTempDir, 'gittan-paths-');
+  AddFile := GetTempFileName(GetTempDir, 'gittan-add-');
+  MsgFile := GetTempFileName(GetTempDir, 'gittan-message-');
+  try
+    Chosen.CaseSensitive := True;
+    Chosen.Sorted := True;
+    Chosen.Duplicates := dupIgnore;
+    Chosen.AddStrings(APaths);
+    Spec.AddStrings(APaths);
+    SplitNul(Output, Fields);
+    i := 0;
+    while i < Fields.Count do
+    begin
+      Entry := Fields[i];
+      Inc(i);
+      if Length(Entry) < 4 then
+        Continue;
+      XY := Copy(Entry, 1, 2);
+      Path := Copy(Entry, 4, MaxInt);
+      if (XY = 'DD') or (XY = 'AA') or (Pos('U', XY) > 0) then
+      begin
+        FError := 'Resolve the conflict in ' + Path + ' first.';
+        Exit(False);
+      end;
+      if (Entry[1] in ['R', 'C']) or (Entry[2] in ['R', 'C']) then
+      begin
+        if (i < Fields.Count) and (Pos('R', XY) > 0) and (Chosen.IndexOf(Path) >= 0) then
+          Spec.Add(Fields[i]);
+        Inc(i);
+      end;
+      if Chosen.IndexOf(Path) < 0 then
+        Continue;
+      if XY = '??' then
+        Added.Add(Path)
+      else if Whole and (XY[1] <> 'D') then
+        Added.Add(Path);
+    end;
+
+    if Added.Count > 0 then
+    begin
+      WriteBytes(AddFile, NulList(Added));
+      if not RunGit(FRoot, ['--literal-pathspecs', 'add', '-A',
+        '--pathspec-from-file=' + AddFile, '--pathspec-file-nul'], Output) then
+        Exit(False);
+    end;
+    WriteBytes(MsgFile, AMessage);
+    Args := nil;
+    Arg('--literal-pathspecs');
+    Arg('commit');
+    Arg('-q');
+    Arg('-F');
+    Arg(MsgFile);
+    if AAmend then
+      Arg('--amend');
+    if not Whole then
+    begin
+      Arg('--only');
+      if Spec.Count > 0 then
+      begin
+        WriteBytes(SpecFile, NulList(Spec));
+        Arg('--pathspec-from-file=' + SpecFile);
+        Arg('--pathspec-file-nul');
+      end;
+    end;
+    Result := RunGit(FRoot, Args, Output);
+    if not Result then
+    begin
+      { Put the untracked files back as they were; what git said about
+        the commit is the error to show. }
+      if not Whole and (Added.Count > 0) then
+      begin
+        Err := FError;
+        RunGit(FRoot, ['--literal-pathspecs', 'rm', '--cached', '-q',
+          '--pathspec-from-file=' + AddFile, '--pathspec-file-nul'], Output);
+        FError := Err;
+      end;
+      Exit;
+    end;
+    if RunGit(FRoot, ['rev-parse', 'HEAD'], Output) then
+      AId := Trim(Output);
+  finally
+    Fields.Free;
+    Chosen.Free;
+    Spec.Free;
+    Added.Free;
+    DeleteFile(SpecFile);
+    DeleteFile(AddFile);
+    DeleteFile(MsgFile);
+  end;
+end;
+
+function TGittanRepo.HeadMessage(out AMessage: string): boolean;
+begin
+  AMessage := '';
+  Result := (FRoot <> '') and RunGit(FRoot, ['log', '-1', '--format=%B', 'HEAD'], AMessage);
+  if Result then
+    AMessage := TrimRight(AMessage)
+  else
+    AMessage := '';
 end;
 
 { Against HEAD the list is git status itself. Against another base it is
@@ -1892,4 +2165,9 @@ begin
   Result := RunGit(FRoot, Args, AOutput);
 end;
 
+initialization
+  GToolPath := MakeToolPath;
+  GGitExe := FindTool('git');
+  if GGitExe = '' then
+    GGitExe := 'git';
 end.

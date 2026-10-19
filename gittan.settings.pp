@@ -34,6 +34,12 @@ type
     RepoFilesOpen: boolean;
     {** Whether the Submodules section under it is unfolded. }
     SubmodulesOpen: boolean;
+    {** Whether the Commit section under the tree is unfolded. }
+    CommitOpen: boolean;
+    {** The commit message being written, kept until it is committed,
+      and the repository it is for (its root): another repository's
+      section starts empty. The message may have several lines. }
+    CommitDraft, CommitDraftRepo: string;
     {** The editor font; an empty name keeps the default. }
     FontName: string;
     FontSize: integer;
@@ -95,6 +101,7 @@ const
   SecView = 'View';
   SecRecent = 'Recent';
   SecUpdate = 'Update';
+  SecCommit = 'Commit';
   ConfigFolder = 'Gittan';
 
 {** The folder the ini file lives in. GetAppConfigDir names it after
@@ -115,6 +122,37 @@ begin
     Result := 0;
 end;
 
+{ An ini value is one line: a line end is written as \n, and so a
+  backslash as \\. }
+function EscapeLines(const AText: string): string;
+begin
+  Result := StringReplace(AText, '\', '\\', [rfReplaceAll]);
+  Result := StringReplace(Result, #13#10, #10, [rfReplaceAll]);
+  Result := StringReplace(Result, #10, '\n', [rfReplaceAll]);
+end;
+
+function UnescapeLines(const AText: string): string;
+var
+  i: integer;
+begin
+  Result := '';
+  i := 1;
+  while i <= Length(AText) do
+  begin
+    if (AText[i] = '\') and (i < Length(AText)) then
+    begin
+      Inc(i);
+      if AText[i] = 'n' then
+        Result := Result + #10
+      else
+        Result := Result + AText[i];
+    end
+    else
+      Result := Result + AText[i];
+    Inc(i);
+  end;
+end;
+
 { TGittanSettings }
 
 constructor TGittanSettings.Create(const AFileName: string);
@@ -128,6 +166,7 @@ begin
     FFileName := IncludeTrailingPathDelimiter(ConfigDir) + 'gittan.ini';
   ContextLines := 3;
   SubmodulesOpen := True;
+  CommitOpen := True;
   Translations := True;
 end;
 
@@ -156,6 +195,9 @@ begin
       TreeWidth := Ini.ReadInteger(SecWindow, 'TreeWidth', 0);
       RepoFilesOpen := Ini.ReadBool(SecWindow, 'RepoFiles', False);
       SubmodulesOpen := Ini.ReadBool(SecWindow, 'Submodules', True);
+      CommitOpen := Ini.ReadBool(SecWindow, 'Commit', True);
+      CommitDraft := UnescapeLines(Ini.ReadString(SecCommit, 'Draft', ''));
+      CommitDraftRepo := Ini.ReadString(SecCommit, 'Repo', '');
       FontName := Ini.ReadString(SecView, 'FontName', '');
       FontSize := Ini.ReadInteger(SecView, 'FontSize', 0);
       Zoom := Ini.ReadInteger(SecView, 'Zoom', 0);
@@ -203,6 +245,14 @@ begin
       Ini.WriteInteger(SecWindow, 'TreeWidth', TreeWidth);
       Ini.WriteBool(SecWindow, 'RepoFiles', RepoFilesOpen);
       Ini.WriteBool(SecWindow, 'Submodules', SubmodulesOpen);
+      Ini.WriteBool(SecWindow, 'Commit', CommitOpen);
+      if CommitDraft <> '' then
+      begin
+        Ini.WriteString(SecCommit, 'Draft', EscapeLines(CommitDraft));
+        Ini.WriteString(SecCommit, 'Repo', CommitDraftRepo);
+      end
+      else
+        Ini.EraseSection(SecCommit);
       Ini.WriteString(SecView, 'FontName', FontName);
       Ini.WriteInteger(SecView, 'FontSize', FontSize);
       Ini.WriteInteger(SecView, 'Zoom', Zoom);

@@ -50,6 +50,8 @@ begin
     AssertFalse(S.SideBySide);
     AssertEquals(0, S.Recent.Count);
     AssertEquals(0, S.UpdateSnoozedUntil, 0);
+    AssertTrue(S.CommitOpen);
+    AssertEquals('', S.CommitDraft);
   finally
     S.Free;
   end;
@@ -69,6 +71,9 @@ begin
     S.TreeWidth := 240;
     S.RepoFilesOpen := True;
     S.SubmodulesOpen := False;
+    S.CommitOpen := False;
+    S.CommitDraft := 'Subject = x'#10#10'C:\new\nope\\'#10;
+    S.CommitDraftRepo := '/tmp/a';
     S.FontName := 'Menlo';
     S.FontSize := 13;
     S.Zoom := 120;
@@ -97,6 +102,9 @@ begin
     AssertEquals(240, S.TreeWidth);
     AssertTrue(S.RepoFilesOpen);
     AssertFalse(S.SubmodulesOpen);
+    AssertFalse(S.CommitOpen);
+    AssertEquals('Subject = x'#10#10'C:\new\nope\\'#10, S.CommitDraft);
+    AssertEquals('/tmp/a', S.CommitDraftRepo);
     AssertEquals('Menlo', S.FontName);
     AssertEquals(13, S.FontSize);
     AssertEquals(120, S.Zoom);
