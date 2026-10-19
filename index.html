@@ -504,7 +504,7 @@
         <source srcset="assets/shots/unified-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
         <source srcset="assets/shots/unified-dark.png" media="(prefers-color-scheme: dark)" data-dark>
         <source srcset="assets/shots/unified-light.avif" type="image/avif">
-        <img src="assets/shots/unified-light.png" width="1280" height="800" fetchpriority="high" alt="Gittan showing the changes to a Vue component: the file tree of changed files on the left, the diff with deleted lines in red and added lines in green on the right">
+        <img src="assets/shots/unified-light.png" width="1280" height="800" fetchpriority="high" alt="Gittan showing the changes to a Vue component: the changed files with check boxes in the tree on the left, the diff with the added lines in green on the right, and the Commit section under the tree">
       </picture>
     </div>
   </div>
@@ -525,12 +525,12 @@
       <button role="tab" id="b-clean" aria-selected="false" aria-controls="t-clean" tabindex="-1">Clean tree</button>
     </div>
     <figure id="t-history" class="on" role="tabpanel" aria-labelledby="b-history">
-      <figcaption><b>Code History</b> lays the earlier versions of each line under the line itself, one color per commit. The stats line of this component has five: the scaffold, the length, the walking time, the hours and minutes, and the change not committed yet.</figcaption>
+      <figcaption><b>Code History</b> lays the earlier versions of each line under the line itself, one color per commit. The stats line of this component has four: the length, the walking time, the hours and minutes, and the unit of the climb.</figcaption>
       <picture>
         <source srcset="assets/shots/history-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
         <source srcset="assets/shots/history-dark.png" media="(prefers-color-scheme: dark)" data-dark>
         <source srcset="assets/shots/history-light.avif" type="image/avif">
-        <img src="assets/shots/history-light.png" width="1280" height="800" loading="lazy" alt="Code History of TrailCard.vue: five commits listed at the top, each with its own color, and the earlier versions of each line shown under it in that color">
+        <img src="assets/shots/history-light.png" width="1280" height="800" loading="lazy" alt="Code History of TrailCard.vue: four commits and the change not committed yet listed at the top, each with its own color and the author's initial, and the earlier versions of each line shown under it in that color">
       </picture>
     </figure>
     <figure id="t-blame" role="tabpanel" aria-labelledby="b-blame">
@@ -548,7 +548,7 @@
         <source srcset="assets/shots/side-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
         <source srcset="assets/shots/side-dark.png" media="(prefers-color-scheme: dark)" data-dark>
         <source srcset="assets/shots/side-light.avif" type="image/avif">
-        <img src="assets/shots/side-light.png" width="1280" height="800" loading="lazy" alt="The side-by-side diff of TrailCard.vue, with the old version on the left and the new version on the right">
+        <img src="assets/shots/side-light.png" width="1280" height="800" loading="lazy" alt="The side-by-side diff of stores/trails.ts, the old version on the left and the new one on the right, with the changed words marked in the line that now filters by region">
       </picture>
     </figure>
     <figure id="t-summary" role="tabpanel" aria-labelledby="b-summary">
@@ -557,7 +557,7 @@
         <source srcset="assets/shots/summary-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
         <source srcset="assets/shots/summary-dark.png" media="(prefers-color-scheme: dark)" data-dark>
         <source srcset="assets/shots/summary-light.avif" type="image/avif">
-        <img src="assets/shots/summary-light.png" width="1280" height="800" loading="lazy" alt="The repository summary: six changed files with added and deleted line counts and bars, one marked staged, and a submodule moved from eabdd83 to d913fb8">
+        <img src="assets/shots/summary-light.png" width="1280" height="800" loading="lazy" alt="The repository summary: six changed files with added and deleted line counts and bars, one marked staged, and a submodule moved from 1d840ba to ee0c887">
       </picture>
     </figure>
     <figure id="t-graph" role="tabpanel" aria-labelledby="b-graph">
@@ -566,7 +566,7 @@
         <source srcset="assets/shots/graph-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
         <source srcset="assets/shots/graph-dark.png" media="(prefers-color-scheme: dark)" data-dark>
         <source srcset="assets/shots/graph-light.avif" type="image/avif">
-        <img src="assets/shots/graph-light.png" width="1280" height="800" loading="lazy" alt="The commit graph over the summary: main two commits ahead and one behind origin/main, an offline-maps branch, and two merged branches">
+        <img src="assets/shots/graph-light.png" width="1280" height="800" loading="lazy" alt="The commit graph over the summary: main two commits ahead and one behind origin/main, the offline-maps and elevation-chart branches, and two merged branches">
       </picture>
     </figure>
     <figure id="t-submodule" role="tabpanel" aria-labelledby="b-submodule">
@@ -575,7 +575,7 @@
         <source srcset="assets/shots/submodule-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
         <source srcset="assets/shots/submodule-dark.png" media="(prefers-color-scheme: dark)" data-dark>
         <source srcset="assets/shots/submodule-light.avif" type="image/avif">
-        <img src="assets/shots/submodule-light.png" width="1280" height="800" loading="lazy" alt="The view of the trail-icons submodule: changed from eabdd83 to d913fb8, three new commits listed with author and date, then its URL, branch and the recorded, checked-out and remote commits">
+        <img src="assets/shots/submodule-light.png" width="1280" height="800" loading="lazy" alt="The view of the trail-icons submodule: changed from 1d840ba to ee0c887 with the two commits it moved on to, then its URL, branch, the recorded, checked-out and remote commits, and the three commits new on the remote">
       </picture>
     </figure>
     <figure id="t-clean" role="tabpanel" aria-labelledby="b-clean">
