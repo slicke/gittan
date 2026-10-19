@@ -880,8 +880,16 @@ end;
   overwrite, an operation in progress) is told in the summary's notice.
   The list starts with its actions (umain.branches.inc); FBranchRefs
   holds, per row, the remote-tracking branch of a remote row, '' for
-  the others. }
+  the others. The Branch menu drops the same list for its other verbs
+  (AMode, kept in FBranchListMode for the pick): then the header says
+  what the pick does, the current branch and the actions are left out,
+  and nothing is checked. }
 procedure TForm1.SummaryBranchClick(Sender: TObject; const AScreenRect: TRect);
+begin
+  ShowBranchList(blSwitch, AScreenRect);
+end;
+
+procedure TForm1.ShowBranchList(AMode: TGittanBranchListMode; const AScreenRect: TRect);
 var
   Local, Remote, Gone: TStringList;
   i, Slash: integer;
@@ -890,6 +898,7 @@ var
 begin
   if FRepo.Root = '' then
     Exit;
+  FBranchListMode := AMode;
   HasRemoteHeader := False;
   Local := TStringList.Create;
   Remote := TStringList.Create;
@@ -913,28 +922,36 @@ begin
     for i := 0 to Local.Count - 1 do
       if (Gone.IndexOf(Local[i]) >= 0) and (Local[i] <> FBranch) then
         FGoneToDelete.Add(Local[i]);
-    if FOperation = '' then
+    if (AMode = blSwitch) and (FOperation = '') then
     begin
       FBranchPopup.Add(rsBmNew);
       FBranchNames.Add(BranchNew);
       FBranchRefs.Add('');
     end;
-    if FGoneToDelete.Count > 0 then
+    if (AMode = blSwitch) and (FGoneToDelete.Count > 0) then
     begin
       FBranchPopup.Add(rsBmGone, IntToStr(FGoneToDelete.Count));
       FBranchNames.Add(BranchGone);
       FBranchRefs.Add('');
     end;
-    FBranchPopup.AddHeader(rsBranches);
+    case AMode of
+      blMerge: FBranchPopup.AddHeader(Format(rsBmMergeHeader, [FBranch]));
+      blRebase: FBranchPopup.AddHeader(Format(rsBmRebaseHeader, [FBranch]));
+      blCompare: FBranchPopup.AddHeader(Format(rsBmCompareHeader, [FBranch]));
+      else
+        FBranchPopup.AddHeader(rsBranches);
+    end;
     FBranchNames.Add('');
     FBranchRefs.Add('');
     for i := 0 to Local.Count - 1 do
     begin
+      if (AMode <> blSwitch) and (Local[i] = FBranch) then
+        Continue;
       if Gone.IndexOf(Local[i]) >= 0 then
         Detail := rsBranchGone
       else
         Detail := '';
-      FBranchPopup.Add(Local[i], Detail, Local[i] = FBranch);
+      FBranchPopup.Add(Local[i], Detail, (AMode = blSwitch) and (Local[i] = FBranch));
       FBranchNames.Add(Local[i]);
       FBranchRefs.Add('');
     end;
@@ -963,14 +980,28 @@ begin
   FBranchPopup.Popup(AScreenRect);
 end;
 
+{ A remote row goes by its remote-tracking ref for anything but a
+  switch, which makes the local branch from it. }
 procedure TForm1.BranchPopupPick(Sender: TObject; AIndex: integer);
+var
+  Ref: string;
 begin
   if (AIndex < 0) or (AIndex >= FBranchNames.Count) then
     Exit;
   if BranchAction(FBranchNames[AIndex]) then
     Exit;
-  if (FBranchNames[AIndex] <> '') and (FBranchNames[AIndex] <> FBranch) then
-    SwitchBranch(FBranchNames[AIndex]);
+  if (FBranchNames[AIndex] = '') or (FBranchNames[AIndex] = FBranch) then
+    Exit;
+  Ref := FBranchRefs[AIndex];
+  if Ref = '' then
+    Ref := FBranchNames[AIndex];
+  case FBranchListMode of
+    blMerge: MergeIntoCurrent(Ref);
+    blRebase: RebaseOntoAsk(Ref);
+    blCompare: CompareSince(Ref);
+    else
+      SwitchBranch(FBranchNames[AIndex]);
+  end;
 end;
 
 { The watcher is stopped meanwhile, as for a new base, and the views

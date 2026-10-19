@@ -24,6 +24,7 @@ begin
   FFetchItem.Enabled := Can;
   FPullItem.Enabled := Can;
   FPushItem.Enabled := Can;
+  UpdateBranchItems;
 end;
 
 procedure TForm1.StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode;

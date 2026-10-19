@@ -39,6 +39,12 @@ type
     background. }
   THistoryTone = (htRow, htWord, htSwatch);
 
+  {** What picking a branch from the branch list does: switch to it,
+    merge it into the current branch, rebase the current branch onto it,
+    or show what it changed since it left the current branch
+    (umain.branches.inc). }
+  TGittanBranchListMode = (blSwitch, blMerge, blRebase, blCompare);
+
   {** One row of the change view. Line is the index of its diff line in
     the file's diff, rowGap for a row that stands for the unchanged lines
     GapFrom..GapTo hidden by View > Hide Unchanged Lines, rowFiller for
@@ -361,6 +367,10 @@ type
     FBranchRefs, FGoneToDelete: TStringList;
     FBranchMenu: TPopupMenu;
     FMenuBranch, FMenuBranchRef, FMenuBranchUpstream: string;
+    { What the branch list drops down for, and the Branch menu's items,
+      whose captions name the current branch. }
+    FBranchListMode: TGittanBranchListMode;
+    FSwitchItem, FNewBranchItem, FMergeItem, FRebaseItem, FCompareBranchItem: TMenuItem;
     { The commit graph, in the middle of the form, from the status bar's
       ahead/behind counts or View > Commit Graph. }
     FGraph: TGittanCommitGraph;
@@ -861,6 +871,13 @@ type
     procedure DeleteBranchAsk(const AName: string);
     procedure DeleteGoneBranches;
     procedure MergeIntoCurrent(const ARef: string);
+    procedure RebaseOntoAsk(const ARef: string);
+    procedure CompareSince(const ARef: string);
+    procedure ShowBranchList(AMode: TGittanBranchListMode; const AScreenRect: TRect);
+    procedure UpdateBranchItems;
+    procedure BranchMenuOpen(Sender: TObject);
+    procedure MenuBranchListClick(Sender: TObject);
+    procedure MenuNewBranchClick(Sender: TObject);
     procedure GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
       const AScreenPos: TPoint);
     procedure CommitMenuClick(Sender: TObject);
@@ -1199,6 +1216,24 @@ resourcestring
   rsBmMerge = 'Merge %s into %s';
   rsBmCompareSince = 'Show What %s Changed Since %s';
   rsBmCompareTree = 'Compare with Working Tree';
+  rsBmRebase = 'Rebase %s onto %s';
+  rsBranchMenu = '&Branch';
+  rsBmSwitchItem = '&Switch to Branch...';
+  rsBmNewItem = '&New Branch...';
+  rsBmMergeItem = '&Merge into %s...';
+  rsBmRebaseItem = '&Rebase %s onto...';
+  rsBmCompareItem = 'Show What a Branch &Changed Since %s...';
+  rsBmCurrent = 'the Current Branch';
+  rsBmMergeHeader = 'Merge into %s';
+  rsBmRebaseHeader = 'Rebase %s onto';
+  rsBmCompareHeader = 'Show what a branch changed since %s';
+  rsBmRebaseTitle = 'Rebase';
+  rsBmRebaseAsk = 'Rebase %s onto %s? Its %d commits since they parted are replayed on top of %s.';
+  rsBmRebaseAskOne = 'Rebase %s onto %s? Its one commit since they parted is replayed on top of %s.';
+  rsBmRebasePushed = '%d of them are already pushed, so the next push must be forced.';
+  rsBmRebasePushedOne = 'One of them is already pushed, so the next push must be forced.';
+  rsBmRebaseNothing = '%s has no commits since it left %s: nothing to rebase';
+  rsBmRebased = 'Rebased %s onto %s';
   rsBmRename = 'Rename...';
   rsBmDelete = 'Delete...';
   rsBmDeleteRemote = 'Delete %s on the Remote...';
@@ -2370,7 +2405,7 @@ end;
 procedure TForm1.BuildMenu;
 var
   Main: TMainMenu;
-  FileMenu, ViewMenu, GoMenu, ToolsMenu, Item, Sub: TMenuItem;
+  FileMenu, BranchMenu, ViewMenu, GoMenu, ToolsMenu, Item, Sub: TMenuItem;
   i: integer;
 
   function AddItem(AParent: TMenuItem; const ACaption: string; AShortCut: TShortCut;
@@ -2431,6 +2466,26 @@ begin
     @MenuOpenTerminalClick);
 
   FTerminalItem.Enabled := False;
+
+  { The Branch menu: the verb first, then the branch from the list
+    (umain.branches.inc). }
+  BranchMenu := TMenuItem.Create(Main);
+  BranchMenu.Caption := rsBranchMenu;
+  BranchMenu.OnClick := @BranchMenuOpen;
+  Main.Items.Add(BranchMenu);
+  FSwitchItem := AddItem(BranchMenu, rsBmSwitchItem, ShortCut(VK_B, [ssModifier]),
+    @MenuBranchListClick);
+  FSwitchItem.Tag := Ord(blSwitch);
+  FNewBranchItem := AddItem(BranchMenu, rsBmNewItem, 0, @MenuNewBranchClick);
+  BranchMenu.Add(NewLine);
+  FMergeItem := AddItem(BranchMenu, '', 0, @MenuBranchListClick);
+  FMergeItem.Tag := Ord(blMerge);
+  FRebaseItem := AddItem(BranchMenu, '', 0, @MenuBranchListClick);
+  FRebaseItem.Tag := Ord(blRebase);
+  BranchMenu.Add(NewLine);
+  FCompareBranchItem := AddItem(BranchMenu, '', 0, @MenuBranchListClick);
+  FCompareBranchItem.Tag := Ord(blCompare);
+  UpdateBranchItems;
 
   ViewMenu := TMenuItem.Create(Main);
   ViewMenu.Caption := rsView;
@@ -3585,6 +3640,7 @@ begin
   FSummary.Visible := True;
   RebuildCompareMenu;
   FTerminalItem.Enabled := FRepo.Root <> '';
+  UpdateBranchItems;
 end;
 
 { The badge of a file: solid when the index holds all of its change,

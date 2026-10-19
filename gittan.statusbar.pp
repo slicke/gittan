@@ -141,6 +141,10 @@ type
       the green, amber and red of the tones. }
     procedure SetColors(ABack, AText, ADim, ALine, AHover, AAccent, AGood, AWarn,
       ABad: TColor);
+    {** Where APart is on the screen, for a list dropped from it by
+      something other than a click (a menu item); an empty rectangle at
+      the bar's left edge when the part is not shown. }
+    function PartScreenRect(APart: TGittanStatusPart): TRect;
     {** The hint shown over APart; the message's hint is its full text. }
     property PartHint[APart: TGittanStatusPart]: string read GetPartHint write SetPartHint;
     {** The parts that answer a click; the bar shows a hand and a fill over
@@ -1015,6 +1019,16 @@ begin
 end;
 
 { The click fires on release over the part that was pressed. }
+function TGittanStatusBar.PartScreenRect(APart: TGittanStatusPart): TRect;
+begin
+  if (FRects[APart].Right <= FRects[APart].Left) then
+    Result := Rect(0, 0, 0, Height)
+  else
+    Result := FRects[APart];
+  Result.TopLeft := ClientToScreen(Result.TopLeft);
+  Result.BottomRight := ClientToScreen(Result.BottomRight);
+end;
+
 procedure TGittanStatusBar.MouseUp(Button: TMouseButton; Shift: TShiftState;
   X, Y: integer);
 var

@@ -5,15 +5,21 @@
   with New Branch..., which makes a branch at HEAD and switches to it,
   and Delete Gone Branches... when local branches track one deleted on
   its remote. A right click on a branch (or the Menu key) shows what can
-  be done with it: switch to it, merge it into the current branch, show
-  what it changed since it left the current one (the range
-  current...branch) or compare the work tree with it, rename or delete
-  it, and delete it on its remote. Deleting asks first,
-  and asks again for a branch whose commits are in no other branch (git
-  -d refuses it), since those commits are then only in the reflog.
-  Nothing that moves HEAD is offered while git is in the middle of
-  something or a commit, fetch, pull or push runs; deleting a branch on
-  its remote goes to the network and runs as a remote job. }
+  be done with it: switch to it, merge it into the current branch,
+  rebase the current branch onto it, show what it changed since it left
+  the current one (the range current...branch) or compare the work tree
+  with it, rename or delete it, and delete it on its remote. Deleting
+  asks first, and asks again for a branch whose commits are in no other
+  branch (git -d refuses it), since those commits are then only in the
+  reflog. Nothing that moves HEAD is offered while git is in the middle
+  of something or a commit, fetch, pull or push runs; deleting a branch
+  on its remote goes to the network and runs as a remote job.
+
+  The Branch menu offers the same with the verb first: Switch to
+  Branch... (Cmd+B), New Branch..., Merge into <current>..., Rebase
+  <current> onto... and Show What a Branch Changed Since <current>...
+  each drop the branch list (ShowBranchList) from the status bar's
+  branch in the mode that does that with the branch picked. }
 const
   bmSwitch = 1;
   bmMerge = 2;
@@ -22,6 +28,7 @@ const
   bmDeleteRemote = 5;
   bmCompareTree = 6;
   bmCompareSince = 7;
+  bmRebase = 8;
 
 procedure TForm1.BranchContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
 var
@@ -64,6 +71,7 @@ begin
   begin
     Add(Format(rsBmSwitch, [Amp(BranchName)]), bmSwitch, not Busy);
     Add(Format(rsBmMerge, [Amp(Ref), Amp(FBranch)]), bmMerge, not Busy);
+    Add(Format(rsBmRebase, [Amp(FBranch), Amp(Ref)]), bmRebase, not Busy);
     FBranchMenu.Items.Add(NewLine);
     Add(Format(rsBmCompareSince, [Amp(Ref), Amp(FBranch)]), bmCompareSince, True);
     Add(rsBmCompareTree, bmCompareTree, True);
@@ -98,15 +106,9 @@ begin
   case (Sender as TMenuItem).Tag of
     bmSwitch: SwitchBranch(BranchName);
     bmCompareTree: SetBase(Ref);
-    { What the branch did since it left the current one, through their
-      merge base, as a pull request from it would show; HEAD while git
-      is in the middle of something, when FBranch may not be HEAD. }
-    bmCompareSince:
-      if (FOperation = '') and FRepo.HasCommit('refs/heads/' + FBranch) then
-        SetBase(FBranch + '...' + Ref)
-      else
-        SetBase('HEAD...' + Ref);
+    bmCompareSince: CompareSince(Ref);
     bmMerge: MergeIntoCurrent(Ref);
+    bmRebase: RebaseOntoAsk(Ref);
     bmRename: RenameBranchAsk(BranchName);
     bmDelete: DeleteBranchAsk(BranchName);
     bmDeleteRemote:
@@ -236,6 +238,123 @@ begin
     Names.Free;
     Unmerged.Free;
   end;
+end;
+
+{ What the branch ARef did since it left the current one, through their
+  merge base, as a pull request from it would show; HEAD while git is
+  in the middle of something, when FBranch may not be HEAD. }
+procedure TForm1.CompareSince(const ARef: string);
+begin
+  if (FOperation = '') and FRepo.HasCommit('refs/heads/' + FBranch) then
+    SetBase(FBranch + '...' + ARef)
+  else
+    SetBase('HEAD...' + ARef);
+end;
+
+{ The Branch menu's items: enabled with a repository, the ones that move
+  HEAD not while git is in the middle of something or a job runs, and
+  captioned with the current branch. Called as the menu opens and
+  whenever the repository or a job changes, for the shortcuts. }
+procedure TForm1.UpdateBranchItems;
+var
+  Has, Busy: boolean;
+  Current: string;
+begin
+  if FMergeItem = nil then
+    Exit;
+  Has := (FRepo <> nil) and (FRepo.Root <> '');
+  Busy := (FOperation <> '') or (FCommitJob <> nil) or (FRemoteJob <> nil);
+  if Has and (FBranch <> '') then
+    Current := StringReplace(FBranch, '&', '&&', [rfReplaceAll])
+  else
+    Current := rsBmCurrent;
+  FSwitchItem.Enabled := Has;
+  FNewBranchItem.Enabled := Has and (FOperation = '');
+  FMergeItem.Caption := Format(rsBmMergeItem, [Current]);
+  FMergeItem.Enabled := Has and not Busy and (FBranch <> '');
+  FRebaseItem.Caption := Format(rsBmRebaseItem, [Current]);
+  FRebaseItem.Enabled := FMergeItem.Enabled;
+  FCompareBranchItem.Caption := Format(rsBmCompareItem, [Current]);
+  FCompareBranchItem.Enabled := Has;
+end;
+
+procedure TForm1.BranchMenuOpen(Sender: TObject);
+begin
+  UpdateBranchItems;
+end;
+
+{ The list drops from the status bar's branch, where a click drops it. }
+procedure TForm1.MenuBranchListClick(Sender: TObject);
+var
+  Mode: TGittanBranchListMode;
+begin
+  if FRepo.Root = '' then
+    Exit;
+  Mode := TGittanBranchListMode((Sender as TMenuItem).Tag);
+  if (Mode in [blMerge, blRebase]) and
+    ((FOperation <> '') or (FCommitJob <> nil) or (FRemoteJob <> nil) or (FBranch = '')) then
+    Exit;
+  ShowBranchList(Mode, FStatus.PartScreenRect(spBranch));
+end;
+
+procedure TForm1.MenuNewBranchClick(Sender: TObject);
+begin
+  if (FRepo.Root <> '') and (FOperation = '') then
+    BranchAction(BranchNew);
+end;
+
+{ A rebase of the current branch onto ARef: it says how many commits
+  are replayed, and that the next push must be forced when some of
+  them are pushed already, since they are rewritten. Local changes go
+  along (--autostash). One that stops with conflicts leaves them to the
+  Commit section, as a merge does. }
+procedure TForm1.RebaseOntoAsk(const ARef: string);
+var
+  Branch, Msg: string;
+  Count, Pushed: integer;
+  Ok, Conflicts: boolean;
+begin
+  Branch := FBranch;
+  if (FRepo.Root = '') or (Branch = '') or (FOperation <> '') or (FCommitJob <> nil) or
+    (FRemoteJob <> nil) then
+    Exit;
+  if not FRepo.CommitsToRebase(ARef, Count, Pushed) then
+  begin
+    MessageDlg(rsCaFailed, FRepo.Error, mtError, [mbOK], 0);
+    Exit;
+  end;
+  if Count = 0 then
+  begin
+    StatusNote(Format(rsBmRebaseNothing, [Branch, ARef]));
+    Exit;
+  end;
+  if Count = 1 then
+    Msg := Format(rsBmRebaseAskOne, [Branch, ARef, ARef])
+  else
+    Msg := Format(rsBmRebaseAsk, [Branch, ARef, Count, ARef]);
+  if Pushed = 1 then
+    Msg := Msg + ' ' + rsBmRebasePushedOne
+  else if Pushed > 1 then
+    Msg := Msg + ' ' + Format(rsBmRebasePushed, [Pushed]);
+  if QuestionDlg(rsBmRebaseTitle, Msg, mtConfirmation, [mrYes, rsRebaseAction, 'IsDefault',
+    mrCancel, rsCancelButton, 'IsCancel'], 0) <> mrYes then
+    Exit;
+  StopWatcher;
+  Screen.Cursor := crHourGlass;
+  try
+    Ok := FRepo.RebaseOnto(ARef, Conflicts);
+  finally
+    Screen.Cursor := crDefault;
+  end;
+  FSummary.Notice := '';
+  RefreshRepository;
+  StartWatcher;
+  if Ok then
+    StatusNote(Format(rsBmRebased, [Branch, ARef]))
+  else if Conflicts then
+    StatusNote(rsCaConflicts, True)
+  else
+    MessageDlg(rsCaFailed, FRepo.Error, mtError, [mbOK], 0);
 end;
 
 { A merge of ARef into the branch HEAD is on, with git's message; one

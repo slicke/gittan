@@ -75,6 +75,8 @@ type
     procedure TestBranchManagement;
     procedure TestSwitchBlocked;
     procedure TestRevertFiles;
+    procedure TestRebaseOnto;
+    procedure TestRebaseOntoConflicts;
   end;
 
 implementation
@@ -1635,6 +1637,76 @@ begin
   AssertTrue(FRepo.Error, FRepo.SkipOperation);
   AssertEquals('', FRepo.Operation);
   AssertEquals(Trim(Git(['rev-parse', Branch])), Trim(Git(['rev-parse', 'HEAD'])));
+end;
+
+{ Two commits on side are replayed onto main, a local change stashed
+  along; with an upstream that has the first of them, that one counts as
+  pushed. }
+procedure TGitRepoTest.TestRebaseOnto;
+var
+  Main, Base: string;
+  Count, Pushed: integer;
+  Conflicts: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Main := FRepo.Branch;
+  Git(['checkout', '-q', '-b', 'side']);
+  WriteFile('b.txt', 'b'#10);
+  Commit('side one');
+  WriteFile('c.txt', 'c'#10);
+  Commit('side two');
+  Git(['checkout', '-q', Main]);
+  WriteFile('d.txt', 'd'#10);
+  Commit('main');
+  Base := Trim(Git(['rev-parse', 'HEAD']));
+  Git(['checkout', '-q', 'side']);
+
+  AssertTrue(FRepo.Error, FRepo.CommitsToRebase(Main, Count, Pushed));
+  AssertEquals(2, Count);
+  AssertEquals('no upstream', 0, Pushed);
+  AssertTrue(FRepo.CommitsToRebase('HEAD', Count, Pushed));
+  AssertEquals('nothing since itself', 0, Count);
+  AssertFalse(FRepo.CommitsToRebase('no-such-ref', Count, Pushed));
+  Git(['branch', 'pub', 'HEAD~1']);
+  Git(['branch', '-u', 'pub']);
+  AssertTrue(FRepo.Error, FRepo.CommitsToRebase(Main, Count, Pushed));
+  AssertEquals(2, Count);
+  AssertEquals('side one is on pub', 1, Pushed);
+
+  WriteFile('a.txt', 'edited'#10);
+  AssertTrue(FRepo.Error, FRepo.RebaseOnto(Main, Conflicts));
+  AssertFalse(Conflicts);
+  AssertEquals('', FRepo.Operation);
+  AssertEquals('side', FRepo.Branch);
+  AssertEquals('on top of main', Base, Trim(Git(['rev-parse', 'HEAD~2'])));
+  AssertEquals('side two', Trim(Git(['log', '-1', '--format=%s'])));
+  AssertEquals('the local change came back', 'edited'#10,
+    FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
+  AssertTrue(FRepo.CommitsToRebase(Main, Count, Pushed));
+  AssertEquals(2, Count);
+  AssertEquals('rewritten, so no longer on pub', 0, Pushed);
+end;
+
+{ A rebase that stops with conflicts is left for the Commit section,
+  and can be aborted. }
+procedure TGitRepoTest.TestRebaseOntoConflicts;
+var
+  Branch: string;
+  Conflicts: boolean;
+begin
+  Branch := MakeDiverged(Self);
+  AssertTrue(FRepo.Open(FDir));
+  Git(['checkout', '-q', 'topic']);
+  AssertFalse(FRepo.RebaseOnto(Branch, Conflicts));
+  AssertTrue('conflicts', Conflicts);
+  AssertEquals('rebasing', FRepo.Operation);
+  AssertEquals('topic', FRepo.RebaseBranch);
+  AssertTrue(FRepo.Error, FRepo.AbortOperation);
+  AssertEquals('', FRepo.Operation);
+  AssertEquals('topic', FRepo.Branch);
 end;
 
 procedure TGitRepoTest.TestCommitActions;

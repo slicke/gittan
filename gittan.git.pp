@@ -248,6 +248,16 @@ type
       merged; AConflicts is then set when git stopped merging with
       conflicts to resolve, which the Commit section carries on. }
     function MergeRef(const ARef: string; out AConflicts: boolean): boolean;
+    {** Replays the commits the branch HEAD is on made since it left AOnto
+      (a branch, tag or commit) on top of AOnto (`git rebase --autostash`,
+      so local changes are stashed and put back). False when git refused;
+      AConflicts is then set when the rebase stopped with conflicts to
+      resolve, which the Commit section carries on. }
+    function RebaseOnto(const AOnto: string; out AConflicts: boolean): boolean;
+    {** What a rebase onto AOnto would replay: ACount commits, of which
+      APushed are already on the branch's upstream, so the next push
+      after rewriting them must be forced. False when AOnto is unknown. }
+    function CommitsToRebase(const AOnto: string; out ACount, APushed: integer): boolean;
     {** Applies the changes of the commit AHash on top of HEAD as a new
       commit (`git cherry-pick`); AConflicts as for MergeRef. }
     function CherryPick(const AHash: string; out AConflicts: boolean): boolean;
@@ -1929,6 +1939,38 @@ begin
   Result := RunCommitting(Self, FRoot, ['merge', '--no-edit', ARef], AConflicts, Err);
   if not Result then
     FError := Err;
+end;
+
+function TGittanRepo.RebaseOnto(const AOnto: string; out AConflicts: boolean): boolean;
+var
+  Err: string;
+begin
+  AConflicts := False;
+  if FRoot = '' then
+    Exit(False);
+  Result := RunCommitting(Self, FRoot, ['rebase', '--autostash', AOnto], AConflicts, Err);
+  if not Result then
+    FError := Err;
+end;
+
+{ rev-list counts the commits on HEAD but not on AOnto; those also on the
+  upstream are the ones pushed. A branch without an upstream has pushed
+  none. }
+function TGittanRepo.CommitsToRebase(const AOnto: string; out ACount, APushed: integer): boolean;
+var
+  Output: string;
+  NotPushed: integer;
+begin
+  ACount := 0;
+  APushed := 0;
+  Result := (FRoot <> '') and
+    RunGit(FRoot, ['rev-list', '--count', AOnto + '..HEAD'], Output) and
+    TryStrToInt(Trim(Output), ACount);
+  if not Result or (ACount = 0) then
+    Exit;
+  if RunGit(FRoot, ['rev-list', '--count', AOnto + '..HEAD', '^@{upstream}'], Output) and
+    TryStrToInt(Trim(Output), NotPushed) then
+    APushed := ACount - NotPushed;
 end;
 
 function TGittanRepo.CherryPick(const AHash: string; out AConflicts: boolean): boolean;
