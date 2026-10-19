@@ -13,7 +13,10 @@
   latest first. The band is shown for a tracked text file against a
   commit or a snapshot, not against a range (the right side is not the
   work tree then), nor for a new file (discarding its one block would
-  empty it) or a conflict. }
+  empty it) or a conflict. A conflicted file takes the band for the
+  buttons that resolve one conflict at a time (CanResolveBlocks, see
+  umain.conflicts.inc): the rows are then those of the conflicts and the
+  button is a fork. }
 
 { Whether the shown file's blocks can be discarded. }
 function TForm1.CanDiscard: boolean;
@@ -80,9 +83,16 @@ var
   Band, b, RowTop: integer;
   Details: TATEditorPosDetails;
   P: TPoint;
+  Rows: TIntegerDynArray;
 begin
   Result := -1;
-  if (AEd <> Edit) or not CanDiscard then
+  if AEd <> Edit then
+    Exit;
+  if CanResolveBlocks then
+    Rows := FConflictRows
+  else if CanDiscard then
+    Rows := FBlockRows
+  else
     Exit;
   Band := AEd.Gutter.FindIndexByTag(gutterTagDiscard);
   if (Band < 0) or not AEd.Gutter[Band].Visible or (X < AEd.Gutter[Band].Left) or
@@ -91,8 +101,8 @@ begin
   P := AEd.ClientPosToCaretPos(ATPoint(AEd.RectMain.Left + 1, Y), Details);
   if (P.Y < 0) or Details.BelowAllText then
     Exit;
-  for b := 0 to High(FBlockRows) do
-    if FBlockRows[b] = P.Y then
+  for b := 0 to High(Rows) do
+    if Rows[b] = P.Y then
     begin
       RowTop := AEd.CaretPosToClientPos(Point(0, P.Y)).Y;
       if (Y >= RowTop) and (Y < RowTop + AEd.TextCharSize.Y) then
@@ -112,7 +122,7 @@ begin
   Band := AEd.Gutter.FindIndexByTag(gutterTagDiscard);
   if Band < 0 then
     Exit;
-  Shown := (AEd = Edit) and CanDiscard;
+  Shown := (AEd = Edit) and (CanDiscard or CanResolveBlocks);
   W := AEd.TextCharSize.Y + EditorCharWidth(AEd);
   if (AEd.Gutter[Band].Visible <> Shown) or (AEd.Gutter[Band].Size <> W) then
   begin
@@ -125,15 +135,30 @@ end;
 
 { Paints the buttons: an arrow going back round a circle on the first
   screen row of each block in view, in the gutter's text color, the one
-  under the mouse on a disc in the caret row's gutter color. }
+  under the mouse on a disc in the caret row's gutter color. For a
+  conflicted file the rows are the conflicts' and the button a fork:
+  two branches coming together into one; and a bar in the conflict
+  color runs down the band's left edge from the conflict's first row to
+  its last, so a conflict stands out from the changes around it when
+  the file is long. }
 procedure TForm1.DrawDiscard(AEd: TATSynEdit; C: TCanvas);
 var
-  Band, W, b, CharH, Y, Cx, Cy, R, A: integer;
+  Band, W, b, CharH, Y, Cx, Cy, R, A, Y2: integer;
   Item: TATWrapItem;
+  Rows: TIntegerDynArray;
+  Fork: boolean;
 begin
   Band := AEd.Gutter.FindIndexByTag(gutterTagDiscard);
-  if (Band < 0) or not AEd.Gutter[Band].Visible or (AEd <> Edit) or not CanDiscard or
-    (Length(FBlockRows) = 0) then
+  if (Band < 0) or not AEd.Gutter[Band].Visible or (AEd <> Edit) then
+    Exit;
+  Fork := CanResolveBlocks;
+  if Fork then
+    Rows := FConflictRows
+  else if CanDiscard then
+    Rows := FBlockRows
+  else
+    Exit;
+  if Length(Rows) = 0 then
     Exit;
   CharH := AEd.TextCharSize.Y;
   R := Max(3, (CharH - 6) div 2);
@@ -142,9 +167,26 @@ begin
   C.ClipRect := Rect(AEd.Gutter[Band].Left, AEd.RectMain.Top, AEd.Gutter[Band].Right,
     AEd.RectMain.Bottom);
   try
+    if Fork then
+    begin
+      C.Pen.Style := psClear;
+      C.Brush.Style := bsSolid;
+      C.Brush.Color := KindColor(ckConflict);
+      for b := 0 to High(Rows) do
+      begin
+        if (Rows[b] < 0) or (b > High(FConflictEndRows)) or (FConflictEndRows[b] < 0) then
+          Continue;
+        Y := AEd.CaretPosToClientPos(Point(0, Rows[b])).Y;
+        Y2 := AEd.CaretPosToClientPos(Point(0, FConflictEndRows[b])).Y + CharH;
+        if (Y2 <= AEd.RectMain.Top) or (Y >= AEd.RectMain.Bottom) then
+          Continue;
+        C.FillRect(AEd.Gutter[Band].Left + 1, Max(Y, AEd.RectMain.Top),
+          AEd.Gutter[Band].Left + 4, Min(Y2, AEd.RectMain.Bottom));
+      end;
+    end;
     b := 0;
     W := AEd.WrapInfo.FindIndexOfLineNumber(AEd.LineTop);
-    while (W < AEd.WrapInfo.Count) and (b <= High(FBlockRows)) do
+    while (W < AEd.WrapInfo.Count) and (b <= High(Rows)) do
     begin
       Item := AEd.WrapInfo[W];
       Inc(W);
@@ -153,9 +195,9 @@ begin
       Y := AEd.CaretPosToClientPos(Point(0, Item.NLineIndex)).Y;
       if Y >= AEd.RectMain.Bottom then
         Break;
-      while (b <= High(FBlockRows)) and (FBlockRows[b] < Item.NLineIndex) do
+      while (b <= High(Rows)) and (Rows[b] < Item.NLineIndex) do
         Inc(b);
-      if (b > High(FBlockRows)) or (FBlockRows[b] <> Item.NLineIndex) then
+      if (b > High(Rows)) or (Rows[b] <> Item.NLineIndex) then
         Continue;
       Cx := (AEd.Gutter[Band].Left + AEd.Gutter[Band].Right) div 2;
       Cy := Y + CharH div 2;
@@ -172,11 +214,22 @@ begin
       C.Pen.Style := psSolid;
       C.Pen.Width := Max(1, R div 3);
       C.Brush.Style := bsClear;
-      { Round from the lower right over the top to the left, where the
-        head points down. }
-      C.Arc(Cx - R, Cy - R, Cx + R, Cy + R, 300 * 16, 240 * 16);
-      C.Line(Cx - R, Cy + 1, Cx - R - A, Cy + 1 - A);
-      C.Line(Cx - R, Cy + 1, Cx - R + A, Cy + 1 - A);
+      if Fork then
+      begin
+        { Two branches from the top corners into the middle, one line
+          on down from there. }
+        C.Line(Cx - R, Cy - R, Cx, Cy);
+        C.Line(Cx + R, Cy - R, Cx, Cy);
+        C.Line(Cx, Cy, Cx, Cy + R + 1);
+      end
+      else
+      begin
+        { Round from the lower right over the top to the left, where the
+          head points down. }
+        C.Arc(Cx - R, Cy - R, Cx + R, Cy + R, 300 * 16, 240 * 16);
+        C.Line(Cx - R, Cy + 1, Cx - R - A, Cy + 1 - A);
+        C.Line(Cx - R, Cy + 1, Cx - R + A, Cy + 1 - A);
+      end;
       Inc(b);
     end;
   finally
@@ -294,6 +347,7 @@ begin
   FDiscardItem.Enabled := CanDiscard and (Edit.Carets.Count > 0) and
     (BlockAtRow(Edit.Carets[0].PosY) >= 0);
   FUndoDiscardItem.Enabled := Length(FDiscards) > 0;
+  UpdateResolveItems;
   if FRevertFileItem <> nil then
   begin
     FRevertFileItem.Enabled := CanRevert and IsChangedPath(FCurrentPath) and

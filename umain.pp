@@ -273,6 +273,20 @@ type
     FHotDiscard: integer;
     FDiscards: array of TGittanDiscard;
     FDiscardItem, FUndoDiscardItem: TMenuItem;
+    { Resolving one conflict at a time (umain.conflicts.inc): the diff
+      line of each conflict's "<<<<<<<" (set by ShowChanges with the
+      roles) and its row in the view (found with the block rows), which
+      take the discard band's buttons for a conflicted file; the list
+      the button drops down (the sides to take) or the conflict badge
+      drops down (the conflicted files), what it holds, and the conflict
+      a pick resolves; and the File and editor menu items. }
+    FConflictStarts, FConflictEnds, FConflictRows, FConflictEndRows: TIntegerDynArray;
+    FConflictPopup: TGittanPopupList;
+    FConflictPopupFiles: boolean;
+    FConflictPaths: TStringArray;
+    FConflictPicks: array of TGittanConflictPick;
+    FResolveIndex: integer;
+    FResolveItem, FResolveEditItem: TMenuItem;
     { The default branch of the remote (origin/main) and the merge base
       of the branch with it, Compare With's "origin/main (Merge Base)";
       and the branch's lead on and lag behind its upstream, for the
@@ -855,6 +869,22 @@ type
     function MarkersLeft(const APath: string): integer;
     procedure ResolvePath(const APath: string; AAction: integer);
     function ConflictHeaderAction(AIndex: integer): boolean;
+    function CanResolveBlocks: boolean;
+    procedure FindConflictRows;
+    function ConflictAtRow(ARow: integer): integer;
+    procedure ResolveConflictAt(AIndex: integer);
+    procedure ApplyConflictPick(AIndex: integer; APick: TGittanConflictPick);
+    procedure ConflictPopupPick(Sender: TObject; AIndex: integer);
+    procedure ConflictBadgeClick(const AScreenRect: TRect);
+    function ConflictDetail(const APath: string): string;
+    function NextConflictFile(const AAfter: string; ANext: boolean): string;
+    procedure ShowNextConflict(const AAfter: string; AAdvance: boolean);
+    procedure GoToConflict(ANext: boolean);
+    procedure MenuNextConflictClick(Sender: TObject);
+    procedure MenuPrevConflictClick(Sender: TObject);
+    procedure UpdateResolveItems;
+    procedure MenuResolveHereClick(Sender: TObject);
+    procedure MenuResolveEditClick(Sender: TObject);
     procedure MenuResolveMineClick(Sender: TObject);
     procedure MenuResolveTheirsClick(Sender: TObject);
     procedure MenuMarkResolvedClick(Sender: TObject);
@@ -1068,6 +1098,9 @@ resourcestring
   rsIndexing = 'Indexing %d/%d';
   rsNextChange = 'Next &Change';
   rsPrevChange = 'Previous C&hange';
+  rsNextConflict = 'Next Conflic&t';
+  rsPrevConflict = 'Pre&vious Conflict';
+  rsConflictsSuffix = 'conflicts';
   rsNextFile = 'Next F&ile';
   rsPrevFile = 'Previous Fi&le';
   rsRepoFiles = 'Repository';
@@ -1203,6 +1236,23 @@ resourcestring
   rsMarkersLeft = '%s still has %d conflicts. Mark it resolved anyway?';
   rsResolved = 'Resolved %s';
   rsResolveFailed = 'Could not resolve %s: %s';
+  rsResolveHere = 'Resolve &Conflict...';
+  rsResolveBlockHint = 'Resolve this conflict.' + LineEnding +
+    'Click to take mine, theirs or both';
+  rsResolveBlockTitle = 'Conflict %d of %d';
+  rsUseBothMineFirst = 'Use Both, Mine First';
+  rsUseBothTheirsFirst = 'Use Both, Theirs First';
+  rsResolvedBlock = 'Resolved the conflict at line %d of %s; %d left in the file';
+  rsResolvedBlockOne = 'Resolved the conflict at line %d of %s; 1 left in the file';
+  rsResolvedLast = 'Resolved the last conflict in %s and marked it resolved';
+  rsResolveBlockFailed = 'Could not resolve the conflict: %s';
+  rsConflictsInFile = '%d conflicts';
+  rsConflictInFile = '1 conflict';
+  rsConflictNoMarkers = 'no markers left';
+  rsConflictGone = 'deleted';
+  rsAllResolved = 'All conflicts resolved';
+  rsAllResolvedCommit = 'All conflicts resolved: commit the merge';
+  rsAllResolvedContinue = 'All conflicts resolved: continue %s';
   rsNounMerge = 'the merge';
   rsNounRebase = 'the rebase';
   rsNounCherryPick = 'the cherry-pick';
@@ -1329,7 +1379,7 @@ resourcestring
   rsPullPrev = 'Previous: %s  ↑';
   rsSwitchBranchHint = 'Switch branch';
   rsShowSummaryHint = 'Show the summary';
-  rsShowConflictHint = 'Show the first conflicted file';
+  rsShowConflictHint = 'Show the conflicted files';
   rsAheadHint = '%d commits not pushed yet';
   rsBehindHint = '%d commits not pulled yet';
   rsInSyncHint = 'Up to date with upstream';
@@ -1628,6 +1678,9 @@ begin
   FNav := FHeader.Nav;
   FNav.OnPrev := @MenuPrevChangeClick;
   FNav.OnNext := @MenuNextChangeClick;
+  FHeader.ConflictNav.Suffix := rsConflictsSuffix;
+  FHeader.ConflictNav.OnPrev := @MenuPrevConflictClick;
+  FHeader.ConflictNav.OnNext := @MenuNextConflictClick;
   FHeader.OnAction := @HeaderAction;
   UpdateChangeNav;
   { The find bar sits under the header, above the editor. }
@@ -1715,6 +1768,10 @@ begin
   FSyncPopup := TGittanPopupList.Create(Self);
   FSyncPopup.Parent := Self;
   FSyncPopup.OnPick := @SyncPopupPick;
+  FConflictPopup := TGittanPopupList.Create(Self);
+  FConflictPopup.Parent := Self;
+  FConflictPopup.OnPick := @ConflictPopupPick;
+  FResolveIndex := -1;
   { The welcome view shares the summary's box and draws the application
     icon from its own copy: Application.Icon keeps to its small image. }
   FAppIcon := TIcon.Create;
@@ -1989,6 +2046,8 @@ begin
       RGBToColor(150, 150, 150), RGBToColor(44, 44, 46));
     FNav.SetColors(RGBToColor(37, 37, 38), RGBToColor(50, 50, 51),
       RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240));
+    FHeader.ConflictNav.SetColors(RGBToColor(37, 37, 38), RGBToColor(58, 46, 68),
+      RGBToColor(120, 80, 160), RGBToColor(210, 170, 245), RGBToColor(240, 215, 255));
     FHeader.SetPillColors(RGBToColor(50, 50, 51), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
     FFindBar.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
@@ -2007,6 +2066,9 @@ begin
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
     FSyncPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
+      RGBToColor(100, 160, 240));
+    FConflictPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
     FStatus.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
@@ -2033,6 +2095,8 @@ begin
       RGBToColor(110, 110, 110), RGBToColor(246, 246, 246));
     FNav.SetColors(RGBToColor(246, 246, 246), clWhite,
       RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
+    FHeader.ConflictNav.SetColors(RGBToColor(246, 246, 246), RGBToColor(248, 240, 255),
+      RGBToColor(190, 160, 220), RGBToColor(110, 50, 160), RGBToColor(155, 63, 200));
     FHeader.SetPillColors(clWhite, RGBToColor(205, 205, 205), RGBToColor(0, 110, 230));
     FFindBar.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(222, 222, 222));
@@ -2050,6 +2114,9 @@ begin
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
     FSyncPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
+      RGBToColor(0, 110, 230));
+    FConflictPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
     FStatus.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
@@ -2352,6 +2419,8 @@ begin
     @MenuDiscardClick);
   FUndoDiscardItem := AddItem(FileMenu, rsUndoDiscard, ShortCut(VK_Z, [ssModifier, ssAlt]),
     @MenuUndoDiscardClick);
+  FResolveItem := AddItem(FileMenu, rsResolveHere, ShortCut(VK_R, [ssModifier, ssShift]),
+    @MenuResolveHereClick);
   FRevertFileItem := AddItem(FileMenu, rsRevertFile, ShortCut(VK_BACK, [ssModifier, ssAlt]),
     @MenuRevertFileClick);
   FUndoRevertItem := AddItem(FileMenu, rsUndoRevert, 0, @MenuUndoRevertClick);
@@ -2457,6 +2526,8 @@ begin
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextChange, ShortCut(VK_F7, []), @MenuNextChangeClick);
   AddItem(GoMenu, rsPrevChange, ShortCut(VK_F7, [ssShift]), @MenuPrevChangeClick);
+  AddItem(GoMenu, rsNextConflict, ShortCut(VK_F6, []), @MenuNextConflictClick);
+  AddItem(GoMenu, rsPrevConflict, ShortCut(VK_F6, [ssShift]), @MenuPrevConflictClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextFile, ShortCut(VK_F8, []), @MenuNextFileClick);
   AddItem(GoMenu, rsPrevFile, ShortCut(VK_F8, [ssShift]), @MenuPrevFileClick);
@@ -3238,6 +3309,7 @@ begin
   if Length(Blocks) = 0 then
   begin
     FHeader.SetChanges(0, 0);
+    FHeader.SetConflicts(0, 0);
     Exit;
   end;
   Cur := Edit.Carets[0].PosY;
@@ -3248,6 +3320,20 @@ begin
     else
       Break;
   FHeader.SetChanges(Current, Length(Blocks));
+  { The conflict navigator counts the conflicts of a conflicted file the
+    same way. }
+  if (FView = gvChanges) and IsConflictPath(FCurrentPath) then
+  begin
+    Current := 0;
+    for i := 0 to High(FConflictRows) do
+      if FConflictRows[i] <= Cur then
+        Current := i + 1
+      else
+        Break;
+    FHeader.SetConflicts(Current, Length(FConflictRows));
+  end
+  else
+    FHeader.SetConflicts(0, 0);
 end;
 
 { The caret event fires from inside the editor's own updates, where
@@ -3974,7 +4060,7 @@ end;
 procedure TForm1.ShowChanges(const APath: string);
 var
   Lines: TStringList;
-  i: integer;
+  i, c: integer;
   Binary: boolean;
 begin
   { Asked before the header names the next file, not when the text is
@@ -4010,6 +4096,8 @@ begin
   FSummary.Notice := '';
   FHeader.SetFile(APath, -1);
   FConflictRoles := nil;
+  FConflictStarts := nil;
+  FConflictEnds := nil;
   for i := 0 to High(FStats) do
     if FStats[i].Path = APath then
     begin
@@ -4019,6 +4107,10 @@ begin
       if FStats[i].Kind = ckConflict then
       begin
         FConflictRoles := ConflictRoles(FChangeLines);
+        FConflictStarts := ConflictStarts(FConflictRoles, FChangeLines);
+        SetLength(FConflictEnds, Length(FConflictStarts));
+        for c := 0 to High(FConflictStarts) do
+          FConflictEnds[c] := ConflictEnd(FChangeLines, FConflictRoles, FConflictStarts[c]);
         FHeader.SetActions([rsUseMine, rsUseTheirs, rsMarkResolved]);
       end;
       Break;
@@ -4203,6 +4295,8 @@ begin
     FToolbar.OnAction := @HeaderAction;
     FToolbar.OnPrev := @MenuPrevChangeClick;
     FToolbar.OnNext := @MenuNextChangeClick;
+    FToolbar.OnConflictPrev := @MenuPrevConflictClick;
+    FToolbar.OnConflictNext := @MenuNextConflictClick;
     FHeader.ShowControls := False;
     FHeader.OnControlsChange := @HeaderControlsChange;
     HeaderControlsChange(nil);
@@ -4219,6 +4313,9 @@ begin
   FWinBar.OnAction := @HeaderAction;
   FWinBar.Nav.OnPrev := @MenuPrevChangeClick;
   FWinBar.Nav.OnNext := @MenuNextChangeClick;
+  FWinBar.ConflictNav.Suffix := rsConflictsSuffix;
+  FWinBar.ConflictNav.OnPrev := @MenuPrevConflictClick;
+  FWinBar.ConflictNav.OnNext := @MenuNextConflictClick;
   FHeader.ShowControls := False;
   FHeader.OnControlsChange := @HeaderControlsChange;
   HeaderControlsChange(nil);
@@ -4293,6 +4390,8 @@ begin
         RGBToColor(62, 62, 63));
       FWinBar.Nav.SetColors(Edit.Colors.TextBG, RGBToColor(50, 50, 51),
         RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240));
+      FWinBar.ConflictNav.SetColors(Edit.Colors.TextBG, RGBToColor(58, 46, 68),
+        RGBToColor(120, 80, 160), RGBToColor(210, 170, 245), RGBToColor(240, 215, 255));
     end
     else
     begin
@@ -4302,6 +4401,8 @@ begin
         RGBToColor(229, 229, 229));
       FWinBar.Nav.SetColors(Edit.Colors.TextBG, clWhite,
         RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
+      FWinBar.ConflictNav.SetColors(Edit.Colors.TextBG, RGBToColor(248, 240, 255),
+        RGBToColor(190, 160, 220), RGBToColor(110, 50, 160), RGBToColor(155, 63, 200));
     end;
   {$ENDIF}
 end;
@@ -4384,12 +4485,14 @@ procedure TForm1.HeaderControlsChange(Sender: TObject);
 var
   Captions: array of string;
   States: array of boolean;
-  i, Current, Total: integer;
+  i, Current, Total, ConflictCurrent, ConflictTotal: integer;
 begin
   Captions := nil;
   States := nil;
   Current := 0;
   Total := 0;
+  ConflictCurrent := 0;
+  ConflictTotal := 0;
   if FHeader.Visible then
   begin
     SetLength(Captions, FHeader.ActionCount);
@@ -4401,10 +4504,13 @@ begin
     end;
     Current := FHeader.ChangeCurrent;
     Total := FHeader.ChangeTotal;
+    ConflictCurrent := FHeader.ConflictCurrent;
+    ConflictTotal := FHeader.ConflictTotal;
   end;
   {$IFDEF LCLCocoa}
   if FToolbar <> nil then
   begin
+    FToolbar.SetConflicts(ConflictCurrent, ConflictTotal, rsConflictsSuffix);
     FToolbar.SetChanges(Current, Total);
     FToolbar.SetActions(Captions, States);
   end;
@@ -4412,6 +4518,7 @@ begin
   {$IFDEF LCLWin32}
   if FWinBar <> nil then
   begin
+    FWinBar.SetConflicts(ConflictCurrent, ConflictTotal);
     FWinBar.SetChanges(Current, Total);
     FWinBar.SetActions(Captions, States);
   end;

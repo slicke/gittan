@@ -776,6 +776,8 @@ begin
   Item := TMenuItem.Create(FEditPopup);
   Item.Caption := '-';
   FEditPopup.Items.Add(Item);
+  { Shown for a conflicted file only. }
+  FResolveEditItem := AddItem(FEditPopup, rsResolveHere, @MenuResolveEditClick);
   FShowCommitItem := AddItem(FEditPopup, rsShowCommit, @MenuShowCommitClick);
   FCopyHashItem := AddItem(FEditPopup, rsCopyHash, @MenuCopyHashClick);
   if FHasGitHubCli then
@@ -1106,6 +1108,8 @@ begin
     FGitHubIssueItem.Visible := FPopupIssue > 0;
     FGitHubIssueItem.Caption := Format(rsOpenIssueOnGitHub, [FPopupIssue]);
   end;
+  FResolveEditItem.Visible := CanResolveBlocks;
+  FResolveEditItem.Enabled := (FPopupEd = Edit) and (ConflictAtRow(FPopupRow) >= 0);
 end;
 
 { The commit the row's blame or history gives, shown against its
@@ -1343,12 +1347,10 @@ end;
 { The status bar's parts: the branch drops the branch list up from it,
   as in the summary; the ahead/behind counts drop up pull, push, fetch
   and the commit graph; the
-  pull request opens on GitHub; the conflicts show the first conflicted
-  file; the name and the file count go back to the summary. }
+  pull request opens on GitHub; the conflicts drop down the conflicted
+  files; the name and the file count go back to the summary. }
 procedure TForm1.StatusPartClick(Sender: TObject; APart: TGittanStatusPart;
   const AScreenRect: TRect);
-var
-  i: integer;
 begin
   case APart of
     spRepo, spFiles:
@@ -1362,12 +1364,7 @@ begin
     spUpdate:
       UpdateDialog;
     spConflicts:
-      for i := 0 to High(FStats) do
-        if FStats[i].Kind = ckConflict then
-        begin
-          SummarySelectFile(Sender, FStats[i].Path);
-          Break;
-        end;
+      ConflictBadgeClick(AScreenRect);
   end;
 end;
 

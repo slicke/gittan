@@ -37,7 +37,7 @@ type
     FAdded, FDeleted: integer;
     FHasCounts, FBinary, FModified: boolean;
     FImages: TCustomImageList;
-    FNav: TGittanChangeNav;
+    FNav, FConflictNav: TGittanChangeNav;
     FBack, FText, FDim, FAddedColor, FDeletedColor, FLine: TColor;
     FFill, FBorder, FHotColor: TColor;
     FActions: array of string;
@@ -47,6 +47,7 @@ type
     FOnAction: TGittanHeaderActionEvent;
     FShowControls: boolean;
     FChangeCurrent, FChangeTotal: integer;
+    FConflictCurrent, FConflictTotal: integer;
     FOnControlsChange: TNotifyEvent;
     procedure ControlsChanged;
     procedure SetShowControls(AValue: boolean);
@@ -86,6 +87,9 @@ type
     {** Shows the navigator at ACurrent of ATotal changes, or hides it when
       ATotal is 0. }
     procedure SetChanges(ACurrent, ATotal: integer);
+    {** Shows ACurrent of ATotal conflicts in the conflict navigator, or
+      hides it when ATotal is 0. }
+    procedure SetConflicts(ACurrent, ATotal: integer);
     {** The action pills, left to right, all enabled; none for an empty
       array. A click fires OnAction with the index. }
     procedure SetActions(const ACaptions: array of string);
@@ -107,6 +111,9 @@ type
     property Images: TCustomImageList read FImages write FImages;
     {** The navigator, for its colors and click handlers. }
     property Nav: TGittanChangeNav read FNav;
+    {** The conflict navigator, left of the other one while SetConflicts
+      gave it a count, for its colors, suffix and click handlers. }
+    property ConflictNav: TGittanChangeNav read FConflictNav;
     property OnAction: TGittanHeaderActionEvent read FOnAction write FOnAction;
     {** Whether the pills and the navigator are shown here; True by default. }
     property ShowControls: boolean read FShowControls write SetShowControls;
@@ -116,6 +123,9 @@ type
     {** The navigator's position as SetChanges gave it. }
     property ChangeCurrent: integer read FChangeCurrent;
     property ChangeTotal: integer read FChangeTotal;
+    {** The conflict navigator's position as SetConflicts gave it. }
+    property ConflictCurrent: integer read FConflictCurrent;
+    property ConflictTotal: integer read FConflictTotal;
     {** The actions, their states, the navigator's position or the
       header's visibility changed. }
     property OnControlsChange: TNotifyEvent read FOnControlsChange write FOnControlsChange;
@@ -161,6 +171,18 @@ begin
   FNav.AnchorSideTop.Side := asrCenter;
   FNav.BorderSpacing.Right := Pad - 2;
   FNav.Visible := False;
+  { Left of the change navigator; a file with conflicts has changes, so
+    the one it is anchored to is shown whenever it is. }
+  FConflictNav := TGittanChangeNav.Create(Self);
+  FConflictNav.Parent := Self;
+  FConflictNav.Height := NavHeight;
+  FConflictNav.Anchors := [akRight, akTop];
+  FConflictNav.AnchorSideRight.Control := FNav;
+  FConflictNav.AnchorSideRight.Side := asrLeft;
+  FConflictNav.AnchorSideTop.Control := Self;
+  FConflictNav.AnchorSideTop.Side := asrCenter;
+  FConflictNav.BorderSpacing.Right := Gap div 2;
+  FConflictNav.Visible := False;
   SetColors(clWindow, clWindowText, clGrayText, clGreen, clRed, clBtnShadow);
   SetPillColors(clBtnFace, clBtnShadow, clHighlight);
 end;
@@ -239,6 +261,17 @@ begin
   ControlsChanged;
 end;
 
+procedure TGittanFileHeader.SetConflicts(ACurrent, ATotal: integer);
+begin
+  FConflictCurrent := ACurrent;
+  FConflictTotal := ATotal;
+  FConflictNav.Visible := FShowControls and (ATotal > 0);
+  if ATotal > 0 then
+    FConflictNav.SetPosition(ACurrent, ATotal);
+  Invalidate;
+  ControlsChanged;
+end;
+
 procedure TGittanFileHeader.ControlsChanged;
 begin
   if Assigned(FOnControlsChange) then
@@ -257,6 +290,7 @@ begin
     Exit;
   FShowControls := AValue;
   FNav.Visible := AValue and (FChangeTotal > 0);
+  FConflictNav.Visible := AValue and (FConflictTotal > 0);
   SetHot(-1);
   Invalidate;
 end;
@@ -444,6 +478,8 @@ begin
   Right := Width - Pad;
   if FNav.Visible then
     Dec(Right, FNav.Width + Gap);
+  if FConflictNav.Visible then
+    Dec(Right, FConflictNav.Width + Gap div 2);
   { The pills, the last one rightmost. }
   PillTop := (Height - 1 - PillHeight) div 2;
   for i := High(FActions) downto 0 do

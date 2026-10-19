@@ -426,7 +426,12 @@ begin
   begin
     AHandled := True;
     if Ed = Edit then
-      DiscardBlockAt(BlockAtRow(ALine));
+    begin
+      if CanResolveBlocks then
+        ResolveConflictAt(ConflictAtRow(ALine))
+      else
+        DiscardBlockAt(BlockAtRow(ALine));
+    end;
     Exit;
   end;
   if (ABand < 0) or ((Ed.Gutter[ABand].Tag <> gutterTagBlame) and

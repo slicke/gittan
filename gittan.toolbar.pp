@@ -42,14 +42,16 @@ type
     FToolbar: NSToolbar;
     FDelegate: NSObject;
     FSearch: NSSearchField;
-    FCounter: NSTextField;
+    FCounter, FConflictCounter: NSTextField;
     FActions: array of string;
     FEnabled: array of boolean;
     FCurrent, FTotal: integer;
+    FConflictCurrent, FConflictTotal: integer;
+    FConflictSuffix: string;
     FOnSearchChange: TNotifyEvent;
     FOnSearchKey: TGittanToolbarKeyEvent;
     FOnAction: TGittanToolbarActionEvent;
-    FOnPrev, FOnNext: TNotifyEvent;
+    FOnPrev, FOnNext, FOnConflictPrev, FOnConflictNext: TNotifyEvent;
     function GetSearchText: string;
     procedure Update;
   public
@@ -66,6 +68,10 @@ type
     {** Shows the navigator at ACurrent of ATotal changes, or hides it when
       ATotal is 0. }
     procedure SetChanges(ACurrent, ATotal: integer);
+    {** Shows the conflict navigator, left of the other one, at ACurrent
+      of ATotal conflicts with ASuffix after the counter, or hides it
+      when ATotal is 0. }
+    procedure SetConflicts(ACurrent, ATotal: integer; const ASuffix: string);
     {** Focuses the search field with its text selected. }
     procedure FocusSearch;
     property SearchText: string read GetSearchText;
@@ -74,6 +80,8 @@ type
     property OnAction: TGittanToolbarActionEvent read FOnAction write FOnAction;
     property OnPrev: TNotifyEvent read FOnPrev write FOnPrev;
     property OnNext: TNotifyEvent read FOnNext write FOnNext;
+    property OnConflictPrev: TNotifyEvent read FOnConflictPrev write FOnConflictPrev;
+    property OnConflictNext: TNotifyEvent read FOnConflictNext write FOnConflictNext;
   end;
 
 implementation
@@ -94,6 +102,10 @@ type
   NSFontDigits = objccategory external (NSFont)
     class function monospacedDigitSystemFontOfSize_weight(fontSize: Double;
       weight: Double): NSFont; message 'monospacedDigitSystemFontOfSize:weight:'; { 10.11 }
+  end;
+
+  NSColorSystem = objccategory external (NSColor)
+    class function systemPurpleColor: NSColor; message 'systemPurpleColor'; { 10.10 }
   end;
 
   NSToolbarCentered = objccategory external (NSToolbar)
@@ -122,6 +134,10 @@ const
   IdSearch = 'gittan.search';
   IdCounter = 'gittan.counter';
   IdNav = 'gittan.nav';
+  IdConflictCounter = 'gittan.conflictcounter';
+  IdConflictNav = 'gittan.conflictnav';
+  { The tag of the segmented control that steps the conflicts. }
+  ConflictNavTag = 1;
   IdAction = 'gittan.action.';
   { The items before the navigator and the actions: the name, a flexible
     space, the search field and a flexible space. }
@@ -156,13 +172,28 @@ begin
   Result.autorelease;
 end;
 
+{ The up and down arrows that step the changes (or the conflicts, with
+  ConflictNavTag), sending gittanNavClicked: to ATarget. }
+function MakeNav(ATarget: id; ATag: integer): NSSegmentedControl;
+begin
+  Result := NSSegmentedControl.alloc.initWithFrame(NSMakeRect(0, 0, 10, 10));
+  Result.setSegmentCount(2);
+  Result.setImage_forSegment(SymbolImage('chevron.up'), 0);
+  Result.setImage_forSegment(SymbolImage('chevron.down'), 1);
+  Result.setTrackingMode(NSSegmentSwitchTrackingMomentary);
+  Result.setTarget(ATarget);
+  Result.setAction(objcselector('gittanNavClicked:'));
+  Result.setTag(ATag);
+  Result.sizeToFit;
+  Result.autorelease;
+end;
+
 { TGittanToolbarDelegate }
 
 function TGittanToolbarDelegate.toolbar_itemForItemIdentifier_willBeInsertedIntoToolbar(
   toolbar: NSToolbar; itemIdentifier: NSString; flag: ObjCBOOL): NSToolbarItem;
 var
   Search: NSSearchToolbarItem;
-  Seg: NSSegmentedControl;
   Index: integer;
 begin
   Result := nil;
@@ -187,17 +218,18 @@ begin
   end
   else if itemIdentifier.isEqualToString(NSStr(IdNav)) then
   begin
-    Seg := NSSegmentedControl.alloc.initWithFrame(NSMakeRect(0, 0, 10, 10));
-    Seg.setSegmentCount(2);
-    Seg.setImage_forSegment(SymbolImage('chevron.up'), 0);
-    Seg.setImage_forSegment(SymbolImage('chevron.down'), 1);
-    Seg.setTrackingMode(NSSegmentSwitchTrackingMomentary);
-    Seg.setTarget(Self);
-    Seg.setAction(objcselector('gittanNavClicked:'));
-    Seg.sizeToFit;
-    Seg.autorelease;
     Result := NSToolbarItem.alloc.initWithItemIdentifier(itemIdentifier);
-    Result.setView(Seg);
+    Result.setView(MakeNav(Self, 0));
+  end
+  else if itemIdentifier.isEqualToString(NSStr(IdConflictCounter)) then
+  begin
+    Result := NSToolbarItem.alloc.initWithItemIdentifier(itemIdentifier);
+    Result.setView(Owner.FConflictCounter);
+  end
+  else if itemIdentifier.isEqualToString(NSStr(IdConflictNav)) then
+  begin
+    Result := NSToolbarItem.alloc.initWithItemIdentifier(itemIdentifier);
+    Result.setView(MakeNav(Self, ConflictNavTag));
   end
   else if itemIdentifier.hasPrefix(NSStr(IdAction)) then
   begin
@@ -229,6 +261,8 @@ var
   i: integer;
 begin
   A := NSMutableArray.arrayWithArray(toolbarDefaultItemIdentifiers(toolbar));
+  A.addObject(NSStr(IdConflictCounter));
+  A.addObject(NSStr(IdConflictNav));
   A.addObject(NSStr(IdCounter));
   A.addObject(NSStr(IdNav));
   for i := 0 to MaxActions - 1 do
@@ -274,8 +308,22 @@ begin
 end;
 
 procedure TGittanToolbarDelegate.navClicked(sender: id);
+var
+  Prev, Conflicts: boolean;
 begin
-  if NSSegmentedControl(sender).selectedSegment = 0 then
+  Prev := NSSegmentedControl(sender).selectedSegment = 0;
+  Conflicts := NSSegmentedControl(sender).tag = ConflictNavTag;
+  if Conflicts and Prev then
+  begin
+    if Assigned(Owner.FOnConflictPrev) then
+      Owner.FOnConflictPrev(Owner);
+  end
+  else if Conflicts then
+  begin
+    if Assigned(Owner.FOnConflictNext) then
+      Owner.FOnConflictNext(Owner);
+  end
+  else if Prev then
   begin
     if Assigned(Owner.FOnPrev) then
       Owner.FOnPrev(Owner);
@@ -315,6 +363,10 @@ begin
     NSFont.monospacedDigitSystemFontOfSize_weight(NSFont.systemFontSize, 0));
   Result.FCounter.setTextColor(NSColor.secondaryLabelColor);
   Result.FCounter.retain;
+  Result.FConflictCounter := MakeLabel('– / 0',
+    NSFont.monospacedDigitSystemFontOfSize_weight(NSFont.systemFontSize, 0));
+  Result.FConflictCounter.setTextColor(NSColor.systemPurpleColor);
+  Result.FConflictCounter.retain;
 
   Result.FToolbar := NSToolbar.alloc.initWithIdentifier(NSStr('gittan.toolbar'));
   Result.FToolbar.setDelegate(Delegate);
@@ -344,6 +396,8 @@ begin
   end;
   if FCounter <> nil then
     FCounter.release;
+  if FConflictCounter <> nil then
+    FConflictCounter.release;
   if FDelegate <> nil then
     FDelegate.release;
   inherited Destroy;
@@ -379,16 +433,25 @@ begin
   Update;
 end;
 
+procedure TGittanToolbar.SetConflicts(ACurrent, ATotal: integer; const ASuffix: string);
+begin
+  FConflictCurrent := ACurrent;
+  FConflictTotal := ATotal;
+  FConflictSuffix := ASuffix;
+  Update;
+end;
+
 procedure TGittanToolbar.FocusSearch;
 begin
   FWindow.makeFirstResponder(FSearch);
   FSearch.selectText(nil);
 end;
 
-{ The items after the fixed ones are the counter and the arrows while
-  there are changes, then one per action. They are inserted again when
-  that set changed; the counter, the captions and the enabled states are
-  set on the items in place. }
+{ The items after the fixed ones are the conflict counter and arrows
+  while there are conflicts, the counter and the arrows while there are
+  changes, then one per action. They are inserted again when that set
+  changed; the counters, the captions and the enabled states are set on
+  the items in place. }
 procedure TGittanToolbar.Update;
 var
   Wanted: TStringList;
@@ -400,6 +463,11 @@ var
 begin
   Wanted := TStringList.Create;
   try
+    if FConflictTotal > 0 then
+    begin
+      Wanted.Add(IdConflictCounter);
+      Wanted.Add(IdConflictNav);
+    end;
     if FTotal > 0 then
     begin
       Wanted.Add(IdCounter);
@@ -434,6 +502,12 @@ begin
   else
     FCounter.setStringValue(NSStr(Format('– / %d', [FTotal])));
   FCounter.sizeToFit;
+  if FConflictCurrent > 0 then
+    FConflictCounter.setStringValue(NSStr(Format('%d / %d %s',
+      [FConflictCurrent, FConflictTotal, FConflictSuffix])))
+  else
+    FConflictCounter.setStringValue(NSStr(Format('– / %d %s', [FConflictTotal, FConflictSuffix])));
+  FConflictCounter.sizeToFit;
   Items := FToolbar.items;
   for i := FixedItems to integer(Items.count) - 1 do
   begin

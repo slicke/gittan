@@ -24,6 +24,7 @@ type
   TGittanChangeNav = class(TCustomControl)
   private
     FCurrent, FTotal: integer;
+    FSuffix: string;
     FHot, FPressed: TGittanNavPart;
     FBackColor, FFillColor, FBorderColor, FTextColor, FHotColor: TColor;
     FOnPrev, FOnNext: TNotifyEvent;
@@ -31,6 +32,7 @@ type
     function CounterText: string;
     function PartAt(X: integer): TGittanNavPart;
     procedure SetHot(AValue: TGittanNavPart);
+    procedure SetSuffix(const AValue: string);
     procedure DrawArrow(ACenterX, ACenterY: integer; AUp: boolean; AColor: TColor);
   protected
     procedure Paint; override;
@@ -48,6 +50,8 @@ type
     procedure SetColors(ABack, AFill, ABorder, AText, AHot: TColor);
     {** Shows ACurrent of ATotal changes; ACurrent is 0 before the first. }
     procedure SetPosition(ACurrent, ATotal: integer);
+    {** A word after the counter ("1 / 3 conflicts"), none by default. }
+    property Suffix: string read FSuffix write SetSuffix;
     property OnPrev: TNotifyEvent read FOnPrev write FOnPrev;
     property OnNext: TNotifyEvent read FOnNext write FOnNext;
   end;
@@ -101,6 +105,14 @@ begin
   Invalidate;
 end;
 
+procedure TGittanChangeNav.SetSuffix(const AValue: string);
+begin
+  if FSuffix = AValue then
+    Exit;
+  FSuffix := AValue;
+  SetPosition(FCurrent, FTotal);
+end;
+
 function TGittanChangeNav.ButtonWidth: integer;
 begin
   Result := Height;
@@ -114,6 +126,8 @@ begin
     Result := Format('– / %d', [FTotal])
   else
     Result := Format('%d / %d', [FCurrent, FTotal]);
+  if FSuffix <> '' then
+    Result := Result + ' ' + FSuffix;
 end;
 
 function TGittanChangeNav.PartAt(X: integer): TGittanNavPart;

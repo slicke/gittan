@@ -146,6 +146,7 @@ begin
       FRows := Rows;
       FRowsOld := nil;
       FindBlockRows;
+      FindConflictRows;
       FillChangeEditor(Edit, Rows, False, OldNum, NewNum, Lexer);
       Exit;
     end;
@@ -187,6 +188,7 @@ begin
     FRows := RightRows;
     FRowsOld := LeftRows;
     FindBlockRows;
+    FindConflictRows;
     FillChangeEditor(FEditOld, LeftRows, True, OldNum, NewNum, Lexer);
     FillChangeEditor(Edit, RightRows, False, OldNum, NewNum, Lexer);
     FEditOld.LineTop := 0;

@@ -794,7 +794,9 @@ begin
     goes the way of the blame's (see umain.discard.inc); on the blame
     band the cell under the mouse is the hover, see umain.blame.inc. }
   SetHotDiscard(Ed, DiscardAt(Ed, X, Y));
-  if FHotDiscard >= 0 then
+  if (FHotDiscard >= 0) and CanResolveBlocks then
+    Word := rsResolveBlockHint
+  else if FHotDiscard >= 0 then
     Word := Format(rsDiscardHint, [DiscardBackText(FHotDiscard)])
   else
     Word := BlameHintAt(Ed, X, Y);

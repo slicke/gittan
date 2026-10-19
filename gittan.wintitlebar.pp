@@ -55,7 +55,7 @@ type
   TGittanWinTitleBar = class(TCustomControl)
   private
     FSearch: TCustomEdit;
-    FNav: TGittanChangeNav;
+    FNav, FConflictNav: TGittanChangeNav;
     FSplitControl: TControl;
     FActions: array of string;
     FEnabled: array of boolean;
@@ -111,6 +111,9 @@ type
     {** Shows the navigator at ACurrent of ATotal changes, or hides it when
       ATotal is 0. }
     procedure SetChanges(ACurrent, ATotal: integer);
+    {** Shows ACurrent of ATotal conflicts in the conflict navigator, or
+      hides it when ATotal is 0. }
+    procedure SetConflicts(ACurrent, ATotal: integer);
     {** The bar's colors: the shade over the sidebar and the background
       over the rest, the text and the dim text, the pills' fill, border
       and text under the mouse, the search field's fill and border, and a
@@ -125,6 +128,9 @@ type
     {** The control whose right edge ends the sidebar's shade. }
     property SplitControl: TControl read FSplitControl write FSplitControl;
     property Nav: TGittanChangeNav read FNav;
+    {** The conflict navigator, left of the other one while SetConflicts
+      gave it a count. }
+    property ConflictNav: TGittanChangeNav read FConflictNav;
     {** The name on the left. }
     property Title: string read FTitle write FTitle;
     {** Whether the window is the active one; the text dims when not. }
@@ -390,6 +396,10 @@ begin
   FNav.Parent := Self;
   FNav.Height := Scale96ToScreen(NavHeight);
   FNav.Visible := False;
+  FConflictNav := TGittanChangeNav.Create(Self);
+  FConflictNav.Parent := Self;
+  FConflictNav.Height := Scale96ToScreen(NavHeight);
+  FConflictNav.Visible := False;
   if Screen.Fonts.IndexOf('Segoe Fluent Icons') >= 0 then
     FGlyphFont := 'Segoe Fluent Icons'
   else
@@ -499,6 +509,18 @@ begin
   end;
 end;
 
+procedure TGittanWinTitleBar.SetConflicts(ACurrent, ATotal: integer);
+begin
+  if ATotal > 0 then
+    FConflictNav.SetPosition(ACurrent, ATotal);
+  if FConflictNav.Visible <> (ATotal > 0) then
+  begin
+    FConflictNav.Visible := ATotal > 0;
+    Layout;
+    Invalidate;
+  end;
+end;
+
 function TGittanWinTitleBar.BandFillWidth(APos, ATotal: integer): integer;
 begin
   if ATotal <= 0 then
@@ -574,6 +596,12 @@ begin
     FNav.SetBounds(Right - FNav.Width, (H - FNav.Height) div 2, FNav.Width,
       FNav.Height);
     Right := FNav.Left - Scale96ToForm(Gap);
+  end;
+  if FConflictNav.Visible then
+  begin
+    FConflictNav.SetBounds(Right - FConflictNav.Width, (H - FConflictNav.Height) div 2,
+      FConflictNav.Width, FConflictNav.Height);
+    Right := FConflictNav.Left - Scale96ToForm(Gap);
   end;
 
   { The name is bold. }
