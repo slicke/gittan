@@ -1953,6 +1953,15 @@ var
   Actions: TATEditorMouseActions;
 begin
   AEd.ModeReadOnly := True;
+  {$IFDEF LCLGtk3}
+  { ATSynEdit paints into a bitmap of its own only where the widgetset
+    can draw outside Paint (EditorDoubleBufferedNeeded), and straight
+    onto the control elsewhere. gtk3 cannot, and unbuffered every blink
+    of the caret invalidated the editor, which GTK cleared to its
+    background before ATSynEdit painted it again: a repository file open
+    to edits flickered. With the bitmap a blink only blits it. }
+  AEd.DoubleBuffered := True;
+  {$ENDIF}
   { The caret stays within the line: a click past its end lands at the
     end, and typing there (in a repository file open to edits) does not
     pad the line with spaces. }
