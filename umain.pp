@@ -1959,8 +1959,14 @@ begin
     onto the control elsewhere. gtk3 cannot, and unbuffered every blink
     of the caret invalidated the editor, which GTK cleared to its
     background before ATSynEdit painted it again: a repository file open
-    to edits flickered. With the bitmap a blink only blits it. }
+    to edits flickered. With the bitmap a blink only blits it. The caret
+    does not blink either: on a blink ATSynEdit first inverts the caret
+    straight on the control's canvas, outside Paint, which gtk3 draws
+    onto the window outside its frame, so the caret flashed out of step
+    with the bitmap blitted after it; a still caret is drawn from the
+    bitmap alone. }
   AEd.DoubleBuffered := True;
+  AEd.OptCaretBlinkEnabled := False;
   {$ENDIF}
   { The caret stays within the line: a click past its end lands at the
     end, and typing there (in a repository file open to edits) does not
