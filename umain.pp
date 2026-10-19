@@ -170,7 +170,7 @@ type
       content reaches under it (SetupTitleBar); 0 elsewhere. }
     FTitleBarHeight: integer;
     { The track and the fill of the indexing's band over the title bar
-      (ShowTitleBand from UpdateStatus), set by ApplyTheme. }
+      (ShowTitleBand, or FWinBar.SetBand on Windows, from UpdateIndexBand), set by ApplyTheme. }
     FBandTrack, FBandFill: TColor;
     { The Repository section at the bottom of the tree panel
       (umain.repofiles.inc): the repository's own files from
@@ -3701,7 +3701,8 @@ begin
 end;
 
 { The indexing's progress as a band along the top edge of the window,
-  over the title bar (macOS; the status bar has its own bar). It is
+  over the title bar (macOS) or in the form's own title bar (Windows;
+  the status bar has its own bar). It is
   shown for every file, not only when the status bar is updated: the
   big files of a large repository take seconds between those. }
 procedure TForm1.UpdateIndexBand;
@@ -3712,6 +3713,14 @@ begin
       ColorToRGB(FBandFill))
   else
     HideTitleBand(Handle);
+  {$ENDIF}
+  {$IFDEF LCLWin32}
+  if FWinBar = nil then
+    Exit;
+  if FIndexing then
+    FWinBar.SetBand(FIndexPos, FIndexTotal, FBandTrack, FBandFill)
+  else
+    FWinBar.SetBand(0, 0, FBandTrack, FBandFill);
   {$ENDIF}
 end;
 

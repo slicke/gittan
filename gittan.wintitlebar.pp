@@ -26,6 +26,10 @@
   that submenu with TrackPopupMenuEx, owned by the form, and Alt with a
   letter opens the menu it underlines there instead of the hidden bar.
 
+  SetBand draws a progress band along the bar's top edge, as the band
+  over the title bar on macOS (gittan.titlebar): the bar paints it, in
+  the strip above its menus, field and pills.
+
   The unit uses the Windows API; umain keeps it behind LCLWin32. }
 unit gittan.wintitlebar;
 
@@ -64,11 +68,14 @@ type
     FActive: boolean;
     FSide, FMain, FText, FDim, FPillFill, FPillBorder, FHotColor: TColor;
     FSearchFill, FSearchBorder, FButtonHot: TColor;
+    FBandPos, FBandTotal: integer;
+    FBandTrack, FBandFill: TColor;
     FGlyphFont, FTitle: string;
     FOnAction: TGittanTitleActionEvent;
     procedure SetSearch(AValue: TCustomEdit);
     procedure SetActive(AValue: boolean);
     function PartAt(X, Y: integer; out AIndex: integer): TGittanTitlePart;
+    function BandFillWidth(APos, ATotal: integer): integer;
     function MenuOf(AForm: TCustomForm): TMainMenu;
     procedure SetHot(APart: TGittanTitlePart; AIndex: integer);
     procedure OpenMenu(AIndex: integer);
@@ -110,6 +117,9 @@ type
       caption button under the mouse. }
     procedure SetColors(ASide, AMain, AText, ADim, APillFill, APillBorder, AHot,
       ASearchFill, ASearchBorder, AButtonHot: TColor);
+    {** Shows the band along the top edge, APos of ATotal filled, in the
+      colors ATrack and AFill; ATotal 0 hides it. }
+    procedure SetBand(APos, ATotal: integer; ATrack, AFill: TColor);
     {** The filter field, borderless, laid out inside the rounded box. }
     property Search: TCustomEdit read FSearch write SetSearch;
     {** The control whose right edge ends the sidebar's shade. }
@@ -144,6 +154,10 @@ const
   PillGap = 6;
   ButtonWidth = 46;
   NavHeight = 26;
+  BandHeight = 3;
+  { The least the band's fill is wide: Windows 11 rounds the window's
+    corners, which hide its first pixels. }
+  MinBandFill = 16;
   { Segoe Fluent Icons (Windows 11) and Segoe MDL2 Assets (Windows 10). }
   GlyphMinimize = #$EE#$A4#$A1;
   GlyphMaximize = #$EE#$A4#$A2;
@@ -483,6 +497,34 @@ begin
     Layout;
     Invalidate;
   end;
+end;
+
+function TGittanWinTitleBar.BandFillWidth(APos, ATotal: integer): integer;
+begin
+  if ATotal <= 0 then
+    Result := 0
+  else
+    Result := Max(Scale96ToForm(MinBandFill), Width * Min(APos, ATotal) div ATotal);
+end;
+
+{ Called for every file indexed: only the band is repainted, and only
+  when its fill grows by a pixel or its colors change. }
+procedure TGittanWinTitleBar.SetBand(APos, ATotal: integer; ATrack, AFill: TColor);
+var
+  R: TRect;
+  Same: boolean;
+begin
+  Same := ((ATotal > 0) = (FBandTotal > 0)) and (ATrack = FBandTrack) and
+    (AFill = FBandFill) and
+    (BandFillWidth(APos, ATotal) = BandFillWidth(FBandPos, FBandTotal));
+  FBandPos := APos;
+  FBandTotal := ATotal;
+  FBandTrack := ATrack;
+  FBandFill := AFill;
+  if Same or not HandleAllocated then
+    Exit;
+  R := Types.Rect(0, 0, Width, Scale96ToForm(BandHeight));
+  InvalidateRect(Handle, @R, False);
 end;
 
 procedure TGittanWinTitleBar.SetButtonState(AHot, APressed: TGittanTitlePart);
@@ -883,6 +925,17 @@ begin
     Glyph := GlyphMaximize;
   DrawButton(tpMaximize, FMaxRect, Glyph);
   DrawButton(tpClose, FCloseRect, GlyphClose);
+
+  if FBandTotal > 0 then
+  begin
+    W := BandFillWidth(FBandPos, FBandTotal);
+    i := Scale96ToForm(BandHeight);
+    Canvas.Brush.Style := bsSolid;
+    Canvas.Brush.Color := FBandFill;
+    Canvas.FillRect(Types.Rect(0, 0, W, i));
+    Canvas.Brush.Color := FBandTrack;
+    Canvas.FillRect(Types.Rect(W, 0, Width, i));
+  end;
 end;
 
 end.
