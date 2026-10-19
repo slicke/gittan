@@ -334,6 +334,13 @@ type
       branch to switch to for each of its items ('' for a header). }
     FBranchPopup: TGittanPopupList;
     FBranchNames: TStringList;
+    { Branch management (umain.branches.inc): per row of the branch list
+      the remote-tracking branch of a remote row, the branches Delete
+      Gone Branches deletes, the menu of a branch and the branch it is
+      for (its name, its ref, and the remote branch it deletes). }
+    FBranchRefs, FGoneToDelete: TStringList;
+    FBranchMenu: TPopupMenu;
+    FMenuBranch, FMenuBranchRef, FMenuBranchUpstream: string;
     { The commit graph, in the middle of the form, from the status bar's
       ahead/behind counts or View > Commit Graph. }
     FGraph: TGittanCommitGraph;
@@ -814,6 +821,13 @@ type
     procedure SaveCommitDraft;
     procedure LoadCommitDraft;
     procedure UpdateRemoteItems;
+    procedure BranchContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
+    procedure BranchMenuClick(Sender: TObject);
+    function BranchAction(const AName: string): boolean;
+    procedure RenameBranchAsk(const AName: string);
+    procedure DeleteBranchAsk(const AName: string);
+    procedure DeleteGoneBranches;
+    procedure MergeIntoCurrent(const ARef: string);
     procedure GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
       const AScreenPos: TPoint);
     procedure CommitMenuClick(Sender: TObject);
@@ -828,7 +842,8 @@ type
     procedure ContinueOperationClick;
     procedure SkipOperationClick(Sender: TObject);
     procedure AbortOperationClick(Sender: TObject);
-    procedure StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode = pmAuto);
+    procedure StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode = pmAuto;
+      const AArg: string = '');
     procedure RemoteJobDone(Sender: TObject);
     procedure StopRemoteJob(AWait: boolean);
     procedure MenuFetchClick(Sender: TObject);
@@ -1113,6 +1128,33 @@ resourcestring
   rsCaWasReset = 'Reset %s to %s';
   rsCaConflicts = 'Stopped with conflicts: resolve them, then continue';
   rsCaFailed = 'Git refused';
+  rsBmNew = 'New Branch...';
+  rsBmGone = 'Delete Gone Branches...';
+  rsBmNewPrompt = 'Name of the new branch, made at HEAD and switched to';
+  rsBmSwitch = 'Switch to %s';
+  rsBmMerge = 'Merge %s into %s';
+  rsBmRename = 'Rename...';
+  rsBmDelete = 'Delete...';
+  rsBmDeleteRemote = 'Delete %s on the Remote...';
+  rsBmRenameTitle = 'Rename Branch';
+  rsBmRenamePrompt = 'New name for %s';
+  rsBmRenamed = 'Renamed %s to %s';
+  rsBmDeleteTitle = 'Delete Branch';
+  rsBmDeleteAsk = 'Delete the branch %s?';
+  rsBmNotMerged = '%s has commits that are in no other branch. Delete it anyway? ' +
+    'Those commits are then only in the reflog.';
+  rsBmDeleteAction = 'Delete';
+  rsBmDeleted = 'Deleted %s';
+  rsBmDeleteRemoteTitle = 'Delete on the Remote';
+  rsBmDeleteRemoteAsk = 'Delete %s on the remote, for everyone who uses it?';
+  rsBmGoneTitle = 'Delete Gone Branches';
+  rsBmGoneAsk = 'Delete these %d branches, whose upstream was deleted on the remote?';
+  rsBmGoneUnmerged = 'These %d have commits that are in no other branch. Delete them too?';
+  rsBmGoneDeleted = 'Deleted %d branches';
+  rsBmGoneDeletedOne = 'Deleted 1 branch';
+  rsDeletingRemote = 'Deleting %s...';
+  rsDeletedRemote = 'Deleted %s on the remote';
+  rsDeleteRemoteFailed = 'Could not delete %s on the remote';
   rsUseMine = 'Use Mine';
   rsUseTheirs = 'Use Theirs';
   rsMarkResolved = 'Mark Resolved';
@@ -1606,11 +1648,15 @@ begin
   FSummary.OnSelectCommit := @SummarySelectCommit;
   { The branch list pops up over the form, under the branch. }
   FBranchNames := TStringList.Create;
+  FBranchRefs := TStringList.Create;
+  FGoneToDelete := TStringList.Create;
+  FBranchMenu := TPopupMenu.Create(Self);
   FGoneBranches := TStringList.Create;
   FBranchPopup := TGittanPopupList.Create(Self);
   FBranchPopup.Parent := Self;
   FBranchPopup.FilterHint := rsFilterBranches;
   FBranchPopup.OnPick := @BranchPopupPick;
+  FBranchPopup.OnContext := @BranchContext;
   { The commit graph pops up in the middle of the form. }
   FGraph := TGittanCommitGraph.Create(Self);
   FGraph.Parent := Self;
@@ -1692,6 +1738,8 @@ begin
   AbandonSubmoduleJobs;
   FreeAndNil(FSubJobs);
   FBranchNames.Free;
+  FBranchRefs.Free;
+  FGoneToDelete.Free;
   FGoneBranches.Free;
   StopBlame;
   StopIndexing;
@@ -4428,6 +4476,12 @@ begin
   Application.ActivateHint(Mouse.CursorPos);
 end;
 
+const
+  { The branch list's action rows (umain.branches.inc), in FBranchNames:
+    no branch name holds a colon. }
+  BranchNew = ':new';
+  BranchGone = ':gone';
+
 {$I umain.diffview.inc}
 {$I umain.actions.inc}
 {$I umain.gotodef.inc}
@@ -4442,6 +4496,7 @@ end;
 {$I umain.translations.inc}
 {$I umain.conflicts.inc}
 {$I umain.commitactions.inc}
+{$I umain.branches.inc}
 {$I umain.commit.inc}
 {$I umain.remote.inc}
 

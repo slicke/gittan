@@ -9,7 +9,9 @@ unit gittan.popuplist;
   Popup shows the panel under a rectangle given in screen coordinates
   (above it when there is more room there), focused, with a filter
   field on top when the list is long. Up and Down move in it, Enter or
-  a click picks: OnPick comes with the index Add gave the item. Escape,
+  a click picks: OnPick comes with the index Add gave the item. A right
+  click or the Menu key on an item raises OnContext instead, with the
+  item and where to show a menu for it; the list stays open. Escape,
   a click outside the panel or the application going to the background
   closes it; OnClose comes whenever it hides, after OnPick.
 
@@ -31,6 +33,8 @@ uses
 
 type
   TGittanPopupPickEvent = procedure(Sender: TObject; AIndex: integer) of object;
+  TGittanPopupContextEvent = procedure(Sender: TObject; AIndex: integer;
+    const AScreenPos: TPoint) of object;
 
   TGittanPopupItem = record
     Caption, Detail: string;
@@ -74,7 +78,9 @@ type
     FBack, FText, FDim, FHover, FLine, FAccent: TColor;
     FFilterHint: string;
     FOnPick: TGittanPopupPickEvent;
+    FOnContext: TGittanPopupContextEvent;
     FOnClose: TNotifyEvent;
+    procedure Context(const AScreenPos: TPoint);
     function Pickable: integer;
     function ContentWidth: integer;
     procedure Fill;
@@ -131,6 +137,7 @@ type
       more than a few items. }
     property FilterHint: string read FFilterHint write FFilterHint;
     property OnPick: TGittanPopupPickEvent read FOnPick write FOnPick;
+    property OnContext: TGittanPopupContextEvent read FOnContext write FOnContext;
     property OnClose: TNotifyEvent read FOnClose write FOnClose;
   end;
 
@@ -190,6 +197,11 @@ begin
   begin
     FList.SetCurrent(Row);
     FList.Pick;
+  end
+  else if (Button = mbRight) and (Row >= 0) then
+  begin
+    FList.SetCurrent(Row);
+    FList.Context(ClientToScreen(Point(X, Y)));
   end;
 end;
 
@@ -454,6 +466,14 @@ begin
     FOnClose(Self);
 end;
 
+procedure TGittanPopupList.Context(const AScreenPos: TPoint);
+begin
+  if (FCurrent < 0) or (FCurrent > High(FShown)) or FItems[FShown[FCurrent]].Header then
+    Exit;
+  if Assigned(FOnContext) then
+    FOnContext(Self, FShown[FCurrent], AScreenPos);
+end;
+
 procedure TGittanPopupList.Pick;
 var
   Index: integer;
@@ -538,6 +558,10 @@ begin
     VK_DOWN: Step(1);
     VK_RETURN: Pick;
     VK_ESCAPE: Close;
+    VK_APPS:
+      if FCurrent >= 0 then
+        Context(FRows.ClientToScreen(Point(FRows.ClientWidth div 3,
+          (FCurrent + 1) * RowHeight)));
     VK_TAB: ;
     else
       Exit;

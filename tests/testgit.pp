@@ -72,6 +72,7 @@ type
     procedure TestSkip;
     procedure TestCommitActions;
     procedure TestCommitActionConflicts;
+    procedure TestBranchManagement;
   end;
 
 implementation
@@ -1714,6 +1715,64 @@ begin
   AssertTrue(FRepo.AbortOperation);
   AssertFalse('no such commit', FRepo.CherryPick('nothing', Conflicts));
   AssertFalse(Conflicts);
+end;
+
+procedure TGitRepoTest.TestBranchManagement;
+var
+  Remote, Main, R, B: string;
+  Status: integer;
+  NotMerged, Rejected: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Main := FRepo.Branch;
+  Remote := FDir + '-remote';
+  RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], R, Status,
+    [poStderrToOutPut]);
+  try
+    Git(['remote', 'add', 'origin', Remote]);
+    { A remote's name may have a slash of its own. }
+    Git(['remote', 'add', 'team/fork', Remote]);
+    AssertTrue(FRepo.SplitRemoteRef('origin/feature/x', R, B));
+    AssertEquals('origin', R);
+    AssertEquals('feature/x', B);
+    AssertTrue(FRepo.SplitRemoteRef('team/fork/y', R, B));
+    AssertEquals('team/fork', R);
+    AssertEquals('y', B);
+    AssertFalse(FRepo.SplitRemoteRef('nowhere/z', R, B));
+    Git(['remote', 'remove', 'team/fork']);
+
+    AssertTrue(FRepo.CreateBranch('work', 'HEAD', True));
+    AssertTrue(FRepo.Push(Rejected));
+    AssertEquals('origin/work', FRepo.Upstream('work'));
+    AssertEquals('', FRepo.Upstream(Main));
+    AssertTrue(FRepo.Error, FRepo.RenameBranch('work', 'job'));
+    AssertEquals('job', FRepo.Branch);
+    AssertEquals('the upstream goes along', 'origin/work', FRepo.Upstream('job'));
+    AssertFalse(FRepo.RenameBranch('job', 'bad..name'));
+
+    WriteFile('a.txt', 'only on job'#10);
+    Commit('only on job');
+    Git(['checkout', '-q', Main]);
+    AssertFalse(FRepo.DeleteBranch('job', False, NotMerged));
+    AssertTrue(FRepo.Error, NotMerged);
+    AssertTrue(FRepo.Error, FRepo.DeleteBranch('job', True, NotMerged));
+    AssertFalse(FRepo.HasCommit('refs/heads/job'));
+    AssertFalse('the current one', FRepo.DeleteBranch(Main, True, NotMerged));
+    AssertFalse(NotMerged);
+
+    AssertTrue(FRepo.HasCommit('refs/remotes/origin/work'));
+    AssertTrue(FRepo.Error, FRepo.DeleteRemoteBranch('origin/work'));
+    AssertFalse(FRepo.HasCommit('refs/remotes/origin/work'));
+    RunCommandIndir(Remote, 'git', ['rev-parse', '--verify', '-q', 'refs/heads/work'], R,
+      Status, []);
+    AssertTrue('gone from the remote', Status <> 0);
+    AssertFalse(FRepo.DeleteRemoteBranch('nowhere/work'));
+  finally
+    RemoveTree(Remote);
+  end;
 end;
 
 procedure TGitRepoTest.TestBranchesAndSwitch;

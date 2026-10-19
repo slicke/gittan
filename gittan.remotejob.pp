@@ -12,10 +12,11 @@ uses
 
 type
   {** What a TGittanRemoteJob does. }
-  TGittanRemoteKind = (rkFetch, rkPull, rkPush);
+  TGittanRemoteKind = (rkFetch, rkPull, rkPush, rkDeleteRemote);
 
-  {** Runs a fetch, a pull (the way Mode says) or a push of the
-    repository at ARoot through TGittanRepo, on a repository of its own.
+  {** Runs a fetch, a pull (the way Mode says), a push, or the deletion
+    of the remote branch Arg stands for (a remote-tracking branch such
+    as origin/feature) of the repository at ARoot through TGittanRepo, on a repository of its own.
     OnDone is called in the main thread when it is done, unless the job
     has been stopped. A job is never broken off, as a pull stopped
     halfway would leave a merge behind: Stop only drops the handler, and
@@ -23,7 +24,7 @@ type
     starts never runs Execute). }
   TGittanRemoteJob = class(TThread)
   private
-    FRoot: string;
+    FRoot, FArg: string;
     FKind: TGittanRemoteKind;
     FMode: TGittanPullMode;
     FOk, FDiverged, FRejected: boolean;
@@ -34,13 +35,14 @@ type
     procedure Execute; override;
   public
     constructor Create(const ARoot: string; AKind: TGittanRemoteKind;
-      AMode: TGittanPullMode = pmAuto);
+      AMode: TGittanPullMode = pmAuto; const AArg: string = '');
     {** Drops the handler, and waits for git to end when AWait is set, as
       on quitting. }
     procedure Stop(AWait: boolean);
     property Root: string read FRoot;
     property Kind: TGittanRemoteKind read FKind;
     property Mode: TGittanPullMode read FMode;
+    property Arg: string read FArg;
     {** Whether git did it. }
     property Ok: boolean read FOk;
     {** A pull that failed since the branch has diverged from its
@@ -57,10 +59,11 @@ type
 implementation
 
 constructor TGittanRemoteJob.Create(const ARoot: string; AKind: TGittanRemoteKind;
-  AMode: TGittanPullMode);
+  AMode: TGittanPullMode; const AArg: string);
 begin
   inherited Create(True);
   FRoot := ARoot;
+  FArg := AArg;
   FKind := AKind;
   FMode := AMode;
 end;
@@ -76,6 +79,7 @@ begin
         rkFetch: FOk := Repo.Fetch;
         rkPull: FOk := Repo.Pull(FMode, FDiverged);
         rkPush: FOk := Repo.Push(FRejected);
+        rkDeleteRemote: FOk := Repo.DeleteRemoteBranch(FArg);
       end;
     if not FOk then
       FError := Repo.Error;

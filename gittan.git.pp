@@ -197,6 +197,27 @@ type
       is taken or wrong, or the switch would overwrite local changes;
       the branch is then not made either. }
     function CreateBranch(const AName, AAt: string; ASwitch: boolean): boolean;
+    {** Renames the local branch AOld to ANew (`git branch -m`), its
+      upstream and reflog going with it. }
+    function RenameBranch(const AOld, ANew: string): boolean;
+    {** Deletes the local branch AName (`git branch -d`), or with AForce
+      even when its commits are in no other branch or its upstream
+      (`-D`). False, with git's reason, when nothing was deleted;
+      ANotMerged is then set when only that stood in the way. }
+    function DeleteBranch(const AName: string; AForce: boolean;
+      out ANotMerged: boolean): boolean;
+    {** The remote-tracking branch the local branch AName tracks, such as
+      origin/main; empty when it tracks none. }
+    function Upstream(const AName: string): string;
+    {** Splits a remote-tracking branch such as origin/feature/x into the
+      remote (origin) and the branch on it (feature/x), by the remotes
+      the repository has, so a remote whose name has a slash is found
+      too; false when no remote matches. }
+    function SplitRemoteRef(const ARef: string; out ARemote, ABranch: string): boolean;
+    {** Deletes the branch the remote-tracking branch ARef stands for on
+      its remote (`git push <remote> --delete <branch>`), and so the
+      remote-tracking branch. Goes to the network. }
+    function DeleteRemoteBranch(const ARef: string): boolean;
     {** Tags the commit AAt as AName: an annotated tag with the message
       AMessage, or a lightweight one when it is empty. }
     function CreateTag(const AName, AAt, AMessage: string): boolean;
@@ -1597,6 +1618,74 @@ begin
     Result := RunGit(FRoot, ['switch', '-c', AName, AAt], Output)
   else
     Result := RunGit(FRoot, ['branch', AName, AAt], Output);
+end;
+
+function TGittanRepo.RenameBranch(const AOld, ANew: string): boolean;
+var
+  Output: string;
+begin
+  if not IsBranchName(ANew) then
+  begin
+    FError := Format('"%s" is not a valid branch name.', [ANew]);
+    Exit(False);
+  end;
+  Result := RunGit(FRoot, ['branch', '-m', AOld, ANew], Output);
+end;
+
+{ git -d says the branch "is not fully merged" when that is all that
+  keeps it. }
+function TGittanRepo.DeleteBranch(const AName: string; AForce: boolean;
+  out ANotMerged: boolean): boolean;
+var
+  Output: string;
+begin
+  ANotMerged := False;
+  if (FRoot = '') or (AName = '') then
+    Exit(False);
+  if AForce then
+    Result := RunGit(FRoot, ['branch', '-D', AName], Output)
+  else
+    Result := RunGit(FRoot, ['branch', '-d', AName], Output);
+  if not Result then
+    ANotMerged := Pos('not fully merged', FError) > 0;
+end;
+
+function TGittanRepo.Upstream(const AName: string): string;
+begin
+  if (FRoot = '') or (AName = '') or not RunGit(FRoot, ['for-each-ref',
+    '--format=%(upstream:short)', 'refs/heads/' + AName], Result) then
+    Exit('');
+  Result := Trim(Result);
+end;
+
+function TGittanRepo.SplitRemoteRef(const ARef: string; out ARemote, ABranch: string): boolean;
+var
+  Output, Remote: string;
+begin
+  ARemote := '';
+  ABranch := '';
+  if (FRoot = '') or not RunGit(FRoot, ['remote'], Output) then
+    Exit(False);
+  { The longest remote that is a prefix, for remotes "a" and "a/b". }
+  for Remote in Output.Split([#10]) do
+    if (Trim(Remote) <> '') and (Pos(Trim(Remote) + '/', ARef) = 1) and
+      (Length(Trim(Remote)) > Length(ARemote)) then
+      ARemote := Trim(Remote);
+  Result := ARemote <> '';
+  if Result then
+    ABranch := Copy(ARef, Length(ARemote) + 2, MaxInt);
+end;
+
+function TGittanRepo.DeleteRemoteBranch(const ARef: string): boolean;
+var
+  Remote, OnRemote: string;
+begin
+  if not SplitRemoteRef(ARef, Remote, OnRemote) or (OnRemote = '') then
+  begin
+    FError := Format('%s is not a branch of a remote.', [ARef]);
+    Exit(False);
+  end;
+  Result := RunRemote(['push', Remote, '--delete', OnRemote]);
 end;
 
 function TGittanRepo.CreateTag(const AName, AAt, AMessage: string): boolean;

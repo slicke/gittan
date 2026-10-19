@@ -26,18 +26,20 @@ begin
   FPushItem.Enabled := Can;
 end;
 
-procedure TForm1.StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode);
+procedure TForm1.StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode;
+  const AArg: string);
 begin
   if (FRepo.Root = '') or (FRemoteJob <> nil) or (FCommitJob <> nil) then
     Exit;
   FRemoteAhead := FAhead;
-  FRemoteJob := TGittanRemoteJob.Create(FRepo.Root, AKind, AMode);
+  FRemoteJob := TGittanRemoteJob.Create(FRepo.Root, AKind, AMode, AArg);
   FRemoteJob.OnDone := @RemoteJobDone;
   FRemoteJob.Start;
   case AKind of
     rkFetch: FStatus.ShowMessage(rsFetching, stNormal, 0);
     rkPull: FStatus.ShowMessage(rsPulling, stNormal, 0);
     rkPush: FStatus.ShowMessage(rsPushing, stNormal, 0);
+    rkDeleteRemote: FStatus.ShowMessage(Format(rsDeletingRemote, [AArg]), stNormal, 0);
   end;
   UpdateRemoteItems;
   UpdateCommitState;
@@ -71,6 +73,8 @@ begin
           StatusNote(rsFetched);
       rkPull:
         StatusNote(rsPulled);
+      rkDeleteRemote:
+        StatusNote(Format(rsDeletedRemote, [Job.Arg]));
       rkPush:
         if FRemoteAhead = 1 then
           StatusNote(Format(rsPushedOne, [FBranch]))
@@ -99,6 +103,8 @@ begin
       rkFetch: MessageDlg(rsFetchFailed, Job.Error, mtError, [mbOK], 0);
       rkPull: MessageDlg(rsGitPullFailed, Job.Error, mtError, [mbOK], 0);
       rkPush: MessageDlg(rsPushFailed, Job.Error, mtError, [mbOK], 0);
+      rkDeleteRemote: MessageDlg(Format(rsDeleteRemoteFailed, [Job.Arg]), Job.Error,
+          mtError, [mbOK], 0);
     end;
 end;
 

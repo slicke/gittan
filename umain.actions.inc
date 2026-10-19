@@ -861,15 +861,20 @@ end;
   remote-tracking ones that have no local branch yet (shown with their
   remote, switched to by their name alone, which makes the local branch).
   Picking one runs git switch; what git refuses (a local change it would
-  overwrite, an operation in progress) is told in the summary's notice. }
+  overwrite, an operation in progress) is told in the summary's notice.
+  The list starts with its actions (umain.branches.inc); FBranchRefs
+  holds, per row, the remote-tracking branch of a remote row, '' for
+  the others. }
 procedure TForm1.SummaryBranchClick(Sender: TObject; const AScreenRect: TRect);
 var
   Local, Remote, Gone: TStringList;
   i, Slash: integer;
   Short, Detail: string;
+  HasRemoteHeader: boolean;
 begin
   if FRepo.Root = '' then
     Exit;
+  HasRemoteHeader := False;
   Local := TStringList.Create;
   Remote := TStringList.Create;
   Gone := TStringList.Create;
@@ -887,8 +892,26 @@ begin
         Gone.Add(FGoneBranches[i]);
     FBranchPopup.Clear;
     FBranchNames.Clear;
+    FBranchRefs.Clear;
+    FGoneToDelete.Clear;
+    for i := 0 to Local.Count - 1 do
+      if (Gone.IndexOf(Local[i]) >= 0) and (Local[i] <> FBranch) then
+        FGoneToDelete.Add(Local[i]);
+    if FOperation = '' then
+    begin
+      FBranchPopup.Add(rsBmNew);
+      FBranchNames.Add(BranchNew);
+      FBranchRefs.Add('');
+    end;
+    if FGoneToDelete.Count > 0 then
+    begin
+      FBranchPopup.Add(rsBmGone, IntToStr(FGoneToDelete.Count));
+      FBranchNames.Add(BranchGone);
+      FBranchRefs.Add('');
+    end;
     FBranchPopup.AddHeader(rsBranches);
     FBranchNames.Add('');
+    FBranchRefs.Add('');
     for i := 0 to Local.Count - 1 do
     begin
       if Gone.IndexOf(Local[i]) >= 0 then
@@ -897,6 +920,7 @@ begin
         Detail := '';
       FBranchPopup.Add(Local[i], Detail, Local[i] = FBranch);
       FBranchNames.Add(Local[i]);
+      FBranchRefs.Add('');
     end;
     for i := 0 to Remote.Count - 1 do
     begin
@@ -904,13 +928,16 @@ begin
       Short := Copy(Remote[i], Slash + 1, MaxInt);
       if (Slash = 0) or (Local.IndexOf(Short) >= 0) then
         Continue;
-      if FBranchNames.Count = Local.Count + 1 then
+      if not HasRemoteHeader then
       begin
         FBranchPopup.AddHeader(rsRemoteBranches);
         FBranchNames.Add('');
+        FBranchRefs.Add('');
+        HasRemoteHeader := True;
       end;
       FBranchPopup.Add(Remote[i]);
       FBranchNames.Add(Short);
+      FBranchRefs.Add(Remote[i]);
     end;
   finally
     Local.Free;
@@ -923,6 +950,8 @@ end;
 procedure TForm1.BranchPopupPick(Sender: TObject; AIndex: integer);
 begin
   if (AIndex < 0) or (AIndex >= FBranchNames.Count) then
+    Exit;
+  if BranchAction(FBranchNames[AIndex]) then
     Exit;
   if (FBranchNames[AIndex] <> '') and (FBranchNames[AIndex] <> FBranch) then
     SwitchBranch(FBranchNames[AIndex]);
