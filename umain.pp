@@ -3722,7 +3722,7 @@ end;
   above the header or the summary. }
 procedure TForm1.ColorSidebar;
 var
-  Shade: TColor;
+  Shade{$IFDEF LCLWin32}, TreeFont{$ENDIF}: TColor;
 begin
   if FTreePanel = nil then
     Exit;
@@ -3739,6 +3739,17 @@ begin
     FSubTree.BackgroundColor := Shade;
   EditorPanel.Color := Edit.Colors.TextBG;
   {$IFDEF LCLWin32}
+  { The trees draw their names in the font's color, clWindowText, which
+    stays black on Windows, where the native controls stay light. }
+  if FDark then
+    TreeFont := Edit.Colors.TextFont
+  else
+    TreeFont := clDefault;
+  FileTree.Font.Color := TreeFont;
+  if FRepoTree <> nil then
+    FRepoTree.Font.Color := TreeFont;
+  if FSubTree <> nil then
+    FSubTree.Font.Color := TreeFont;
   { The title bar runs the sidebar's shade over the sidebar and the
     editor's background over the rest, with the header's pills. }
   if FWinBar <> nil then
