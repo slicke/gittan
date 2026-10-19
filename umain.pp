@@ -1159,6 +1159,8 @@ resourcestring
   rsBmNewPrompt = 'Name of the new branch, made at HEAD and switched to';
   rsBmSwitch = 'Switch to %s';
   rsBmMerge = 'Merge %s into %s';
+  rsBmCompareSince = 'Show What %s Changed Since %s';
+  rsBmCompareTree = 'Compare with Working Tree';
   rsBmRename = 'Rename...';
   rsBmDelete = 'Delete...';
   rsBmDeleteRemote = 'Delete %s on the Remote...';

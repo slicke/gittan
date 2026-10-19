@@ -5,8 +5,10 @@
   with New Branch..., which makes a branch at HEAD and switches to it,
   and Delete Gone Branches... when local branches track one deleted on
   its remote. A right click on a branch (or the Menu key) shows what can
-  be done with it: switch to it, merge it into the current branch,
-  rename or delete it, and delete it on its remote. Deleting asks first,
+  be done with it: switch to it, merge it into the current branch, show
+  what it changed since it left the current one (the range
+  current...branch) or compare the work tree with it, rename or delete
+  it, and delete it on its remote. Deleting asks first,
   and asks again for a branch whose commits are in no other branch (git
   -d refuses it), since those commits are then only in the reflog.
   Nothing that moves HEAD is offered while git is in the middle of
@@ -18,6 +20,8 @@ const
   bmRename = 3;
   bmDelete = 4;
   bmDeleteRemote = 5;
+  bmCompareTree = 6;
+  bmCompareSince = 7;
 
 procedure TForm1.BranchContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
 var
@@ -60,6 +64,9 @@ begin
   begin
     Add(Format(rsBmSwitch, [Amp(BranchName)]), bmSwitch, not Busy);
     Add(Format(rsBmMerge, [Amp(Ref), Amp(FBranch)]), bmMerge, not Busy);
+    FBranchMenu.Items.Add(NewLine);
+    Add(Format(rsBmCompareSince, [Amp(Ref), Amp(FBranch)]), bmCompareSince, True);
+    Add(rsBmCompareTree, bmCompareTree, True);
   end;
   if not IsRemote then
   begin
@@ -90,6 +97,15 @@ begin
   FBranchPopup.Close;
   case (Sender as TMenuItem).Tag of
     bmSwitch: SwitchBranch(BranchName);
+    bmCompareTree: SetBase(Ref);
+    { What the branch did since it left the current one, through their
+      merge base, as a pull request from it would show; HEAD while git
+      is in the middle of something, when FBranch may not be HEAD. }
+    bmCompareSince:
+      if (FOperation = '') and FRepo.HasCommit('refs/heads/' + FBranch) then
+        SetBase(FBranch + '...' + Ref)
+      else
+        SetBase('HEAD...' + Ref);
     bmMerge: MergeIntoCurrent(Ref);
     bmRename: RenameBranchAsk(BranchName);
     bmDelete: DeleteBranchAsk(BranchName);
