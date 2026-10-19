@@ -171,10 +171,10 @@ end;
 procedure TForm1.TreePanelResize(Sender: TObject);
 begin
   LayoutRepoFiles;
-  {$IFDEF LCLWin32}
+  {$IFDEF OWNBAR}
   { The title bar's shade follows the sidebar's width. }
-  if FWinBar <> nil then
-    FWinBar.Invalidate;
+  if FOwnBar <> nil then
+    FOwnBar.Invalidate;
   {$ENDIF}
 end;
 

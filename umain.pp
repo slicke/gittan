@@ -2,6 +2,9 @@ unit umain;
 
 {$mode objfpc}{$H+}
 
+{ The form draws its own title bar on Windows and GTK 3 (gittan.owntitlebar). }
+{$IF DEFINED(LCLWin32) OR DEFINED(LCLGtk3)}{$DEFINE OWNBAR}{$ENDIF}
+
 interface
 
 uses
@@ -16,7 +19,9 @@ uses
   gittan.summary, gittan.welcome, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.settingsdlg, gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   {$IFDEF LCLCocoa}gittan.toolbar,{$ENDIF}
+  {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
   {$IFDEF LCLWin32}gittan.wintitlebar,{$ENDIF}
+  {$IFDEF LCLGtk3}gittan.gtktitlebar,{$ENDIF}
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader,
@@ -190,17 +195,18 @@ type
       and the header's navigator and pills. nil before macOS 11. }
     FToolbar: TGittanToolbar;
     {$ENDIF}
-    {$IFDEF LCLWin32}
-    { The window's own title bar on Windows (SetupTitleBar): the name, the
-      menus, the filter field, the header's navigator and pills and the
-      caption buttons, in the strip Windows' title bar had. }
-    FWinBar: TGittanWinTitleBar;
+    {$IFDEF OWNBAR}
+    { The window's own title bar on Windows and GTK 3 (SetupTitleBar): the
+      name, the menus, the filter field, the header's navigator and pills
+      and the caption buttons, in the strip the window system's title bar
+      had. A TGittanWinTitleBar or a TGittanGtkTitleBar. }
+    FOwnBar: TGittanOwnTitleBar;
     {$ENDIF}
     { The height of the strip the title bar covers on macOS, where the
       content reaches under it (SetupTitleBar); 0 elsewhere. }
     FTitleBarHeight: integer;
     { The track and the fill of the indexing's band over the title bar
-      (ShowTitleBand, or FWinBar.SetBand on Windows, from UpdateIndexBand), set by ApplyTheme. }
+      (ShowTitleBand, or FOwnBar.SetBand on Windows and GTK 3, from UpdateIndexBand), set by ApplyTheme. }
     FBandTrack, FBandFill: TColor;
     { The Repository section at the bottom of the tree panel
       (umain.repofiles.inc): the repository's own files from
@@ -970,6 +976,9 @@ type
     function TreeFilterQuery: string;
     {$IFDEF LCLCocoa}
     procedure ToolbarSearchKey(Sender: TObject; var Key: word);
+    {$ENDIF}
+    {$IFDEF LCLGtk3}
+    procedure FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
     {$ENDIF}
     procedure HeaderControlsChange(Sender: TObject);
     procedure MenuFilterFilesClick(Sender: TObject);
@@ -1865,9 +1874,12 @@ begin
   SetupTitleBar;
   ApplySettings;
   BuildMenu;
-  {$IFDEF LCLWin32}
+  {$IFDEF OWNBAR}
   { The title bar lists the menus. }
-  FWinBar.Layout;
+  FOwnBar.Layout;
+  {$ENDIF}
+  {$IFDEF LCLGtk3}
+  TGittanGtkTitleBar(FOwnBar).HideNativeMenu;
   {$ENDIF}
   BuildPopups;
   ApplyWrap;
@@ -4373,7 +4385,10 @@ end;
   the controls at the top of both, the filter field and the header or
   the summary, are moved down by the strip's height, and the splitter
   too, which otherwise showed its cursor where a drag moved the window.
-  The other widgetsets keep their title bars. }
+  On Windows and GTK 3 the form draws the title bar itself
+  (gittan.owntitlebar; gittan.wintitlebar and gittan.gtktitlebar), with
+  the name, the menus, the filter field, the header's navigator and
+  pills and the caption buttons in it. }
 procedure TForm1.SetupTitleBar;
 begin
   {$IFDEF LCLCocoa}
@@ -4396,22 +4411,36 @@ begin
   FTitleBarHeight := ExtendUnderTitleBar(Handle);
   {$ENDIF}
   {$IFDEF LCLWin32}
-  FWinBar := TGittanWinTitleBar.Create(Self);
-  FWinBar.Title := rsAppShortName;
-  FWinBar.Align := alTop;
-  FWinBar.Parent := Self;
-  FWinBar.SplitControl := TreeSplitter;
-  FWinBar.Search := FTreeFilter;
-  FWinBar.OnAction := @HeaderAction;
-  FWinBar.Nav.OnPrev := @MenuPrevChangeClick;
-  FWinBar.Nav.OnNext := @MenuNextChangeClick;
-  FWinBar.ConflictNav.Suffix := rsConflictsSuffix;
-  FWinBar.ConflictNav.OnPrev := @MenuPrevConflictClick;
-  FWinBar.ConflictNav.OnNext := @MenuNextConflictClick;
+  FOwnBar := TGittanWinTitleBar.Create(Self);
+  {$ENDIF}
+  {$IFDEF LCLGtk3}
+  FOwnBar := TGittanGtkTitleBar.Create(Self);
+  { Alt and a letter opens the menu it underlines, as the hidden menu
+    bar would. }
+  KeyPreview := True;
+  OnKeyDown := @FormKeyDown;
+  {$ENDIF}
+  {$IFDEF OWNBAR}
+  FOwnBar.Title := rsAppShortName;
+  FOwnBar.Align := alTop;
+  FOwnBar.Parent := Self;
+  FOwnBar.SplitControl := TreeSplitter;
+  FOwnBar.Search := FTreeFilter;
+  FOwnBar.OnAction := @HeaderAction;
+  FOwnBar.Nav.OnPrev := @MenuPrevChangeClick;
+  FOwnBar.Nav.OnNext := @MenuNextChangeClick;
+  FOwnBar.ConflictNav.Suffix := rsConflictsSuffix;
+  FOwnBar.ConflictNav.OnPrev := @MenuPrevConflictClick;
+  FOwnBar.ConflictNav.OnNext := @MenuNextConflictClick;
   FHeader.ShowControls := False;
   FHeader.OnControlsChange := @HeaderControlsChange;
   HeaderControlsChange(nil);
-  InstallTitleBar(Self, FWinBar);
+  {$ENDIF}
+  {$IFDEF LCLWin32}
+  InstallTitleBar(Self, TGittanWinTitleBar(FOwnBar));
+  {$ENDIF}
+  {$IFDEF LCLGtk3}
+  InstallTitleBar(Self, TGittanGtkTitleBar(FOwnBar));
   {$ENDIF}
   FTreeFilter.BorderSpacing.Top := FTitleBarHeight;
   { With the toolbar's field in its place the tree is at the top. }
@@ -4424,8 +4453,8 @@ begin
 end;
 
 { The indexing's progress as a band along the top edge of the window,
-  over the title bar (macOS) or in the form's own title bar (Windows;
-  the status bar has its own bar). It is
+  over the title bar (macOS) or in the form's own title bar (Windows and
+  GTK 3; the status bar has its own bar). It is
   shown for every file, not only when the status bar is updated: the
   big files of a large repository take seconds between those. }
 procedure TForm1.UpdateIndexBand;
@@ -4437,13 +4466,13 @@ begin
   else
     HideTitleBand(Handle);
   {$ENDIF}
-  {$IFDEF LCLWin32}
-  if FWinBar = nil then
+  {$IFDEF OWNBAR}
+  if FOwnBar = nil then
     Exit;
   if FIndexing then
-    FWinBar.SetBand(FIndexPos, FIndexTotal, FBandTrack, FBandFill)
+    FOwnBar.SetBand(FIndexPos, FIndexTotal, FBandTrack, FBandFill)
   else
-    FWinBar.SetBand(0, 0, FBandTrack, FBandFill);
+    FOwnBar.SetBand(0, 0, FBandTrack, FBandFill);
   {$ENDIF}
 end;
 
@@ -4470,30 +4499,30 @@ begin
   if FSubTree <> nil then
     FSubTree.BackgroundColor := Shade;
   EditorPanel.Color := Edit.Colors.TextBG;
-  {$IFDEF LCLWin32}
+  {$IFDEF OWNBAR}
   { The title bar runs the sidebar's shade over the sidebar and the
     editor's background over the rest, with the header's pills. }
-  if FWinBar <> nil then
+  if FOwnBar <> nil then
     if FDark then
     begin
-      FWinBar.SetColors(Shade, Edit.Colors.TextBG, Edit.Colors.TextFont,
+      FOwnBar.SetColors(Shade, Edit.Colors.TextBG, Edit.Colors.TextFont,
         RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(85, 85, 86),
         RGBToColor(100, 160, 240), RGBToColor(50, 50, 51), RGBToColor(70, 70, 71),
         RGBToColor(62, 62, 63));
-      FWinBar.Nav.SetColors(Edit.Colors.TextBG, RGBToColor(50, 50, 51),
+      FOwnBar.Nav.SetColors(Edit.Colors.TextBG, RGBToColor(50, 50, 51),
         RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240));
-      FWinBar.ConflictNav.SetColors(Edit.Colors.TextBG, RGBToColor(58, 46, 68),
+      FOwnBar.ConflictNav.SetColors(Edit.Colors.TextBG, RGBToColor(58, 46, 68),
         RGBToColor(120, 80, 160), RGBToColor(210, 170, 245), RGBToColor(240, 215, 255));
     end
     else
     begin
-      FWinBar.SetColors(Shade, Edit.Colors.TextBG, RGBToColor(30, 30, 30),
+      FOwnBar.SetColors(Shade, Edit.Colors.TextBG, RGBToColor(30, 30, 30),
         RGBToColor(110, 110, 110), clWhite, RGBToColor(205, 205, 205),
         RGBToColor(0, 110, 230), clWhite, RGBToColor(205, 205, 205),
         RGBToColor(229, 229, 229));
-      FWinBar.Nav.SetColors(Edit.Colors.TextBG, clWhite,
+      FOwnBar.Nav.SetColors(Edit.Colors.TextBG, clWhite,
         RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
-      FWinBar.ConflictNav.SetColors(Edit.Colors.TextBG, RGBToColor(248, 240, 255),
+      FOwnBar.ConflictNav.SetColors(Edit.Colors.TextBG, RGBToColor(248, 240, 255),
         RGBToColor(190, 160, 220), RGBToColor(110, 50, 160), RGBToColor(155, 63, 200));
     end;
   {$ENDIF}
@@ -4506,10 +4535,10 @@ var
   Handler: TNotifyEvent;
 begin
   FTreeFilterText := LowerCase(Trim(TreeFilterQuery));
-  {$IFDEF LCLWin32}
+  {$IFDEF OWNBAR}
   { The clear button shows while there is text. }
-  if FWinBar <> nil then
-    FWinBar.Invalidate;
+  if FOwnBar <> nil then
+    FOwnBar.Invalidate;
   {$ENDIF}
   Handler := FileTree.OnSelectionChanged;
   FileTree.OnSelectionChanged := nil;
@@ -4559,6 +4588,17 @@ begin
   Result := FTreeFilter.Text;
 end;
 
+{$IFDEF LCLGtk3}
+{ Alt and a letter opens the menu with that accelerator from the title
+  bar, as the menu bar would have before the bar hid its names. }
+procedure TForm1.FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
+begin
+  if (Shift * [ssAlt, ssCtrl, ssShift, ssMeta] = [ssAlt]) and (Key >= VK_A) and
+    (Key <= VK_Z) and (FOwnBar <> nil) and FOwnBar.OpenMenuByKey(Chr(Key)) then
+    Key := 0;
+end;
+{$ENDIF}
+
 {$IFDEF LCLCocoa}
 { The search field passes Escape (when it is empty), Enter and Down on
   as the field over the tree takes them. The form does not know the
@@ -4571,7 +4611,7 @@ begin
 end;
 {$ENDIF}
 
-{ The toolbar (macOS) or the title bar (Windows) shows the header's
+{ The toolbar (macOS) or the title bar (Windows, GTK 3) shows the header's
   navigator and pills, none while the header is hidden (the summary). }
 procedure TForm1.HeaderControlsChange(Sender: TObject);
 var
@@ -4607,12 +4647,12 @@ begin
     FToolbar.SetActions(Captions, States);
   end;
   {$ENDIF}
-  {$IFDEF LCLWin32}
-  if FWinBar <> nil then
+  {$IFDEF OWNBAR}
+  if FOwnBar <> nil then
   begin
-    FWinBar.SetConflicts(ConflictCurrent, ConflictTotal);
-    FWinBar.SetChanges(Current, Total);
-    FWinBar.SetActions(Captions, States);
+    FOwnBar.SetConflicts(ConflictCurrent, ConflictTotal);
+    FOwnBar.SetChanges(Current, Total);
+    FOwnBar.SetActions(Captions, States);
   end;
   {$ENDIF}
 end;
