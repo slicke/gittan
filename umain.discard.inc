@@ -299,4 +299,5 @@ end;
 procedure TForm1.FileMenuClick(Sender: TObject);
 begin
   UpdateDiscardItems;
+  UpdateRemoteItems;
 end;

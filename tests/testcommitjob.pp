@@ -1,6 +1,6 @@
 unit testcommitjob;
 
-{** Tests of gittan.commitjob against a repository made in a temporary
+{** Tests of gittan.commitjob and gittan.remotejob against a repository made in a temporary
   folder with the real git. }
 
 {$mode objfpc}{$H+}
@@ -8,7 +8,7 @@ unit testcommitjob;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.commitjob;
+  Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.commitjob, gittan.remotejob;
 
 type
   TCommitJobTest = class(TTestCase)
@@ -18,7 +18,7 @@ type
     procedure Git(const AArgs: array of string);
     procedure WriteFile(const AName, AContent: string);
     procedure JobDone(Sender: TObject);
-    procedure RunJob(AJob: TGittanCommitJob);
+    procedure RunJob(AJob: TThread);
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -26,6 +26,7 @@ type
     procedure TestCommits;
     procedure TestFails;
     procedure TestStopped;
+    procedure TestRemoteJob;
   end;
 
 implementation
@@ -100,7 +101,7 @@ end;
 
 { Runs the job to its end and lets its queued notification through, as
   the application's message loop would. }
-procedure TCommitJobTest.RunJob(AJob: TGittanCommitJob);
+procedure TCommitJobTest.RunJob(AJob: TThread);
 begin
   AJob.Start;
   AJob.WaitFor;
@@ -179,6 +180,49 @@ begin
   finally
     Job.Free;
   end;
+end;
+
+{ A push to a bare repository beside the test's, then one with no
+  remote left, which fails with git's reason. }
+procedure TCommitJobTest.TestRemoteJob;
+var
+  Remote: string;
+  Job: TGittanRemoteJob;
+begin
+  WriteFile('a.txt', 'a');
+  Git(['add', '-A']);
+  Git(['commit', '-q', '-m', 'first']);
+  Remote := ExcludeTrailingPathDelimiter(FDir) + '-remote';
+  Git(['init', '-q', '--bare', Remote]);
+  try
+    Git(['remote', 'add', 'origin', Remote]);
+    Job := TGittanRemoteJob.Create(FDir, rkPush);
+    try
+      Job.OnDone := @JobDone;
+      RunJob(Job);
+      AssertEquals(1, FDone);
+      AssertTrue(Job.Error, Job.Ok);
+      AssertFalse(Job.Rejected);
+    finally
+      Job.Free;
+    end;
+    { Removing the remote drops the branch's upstream too. }
+    Git(['remote', 'remove', 'origin']);
+    Job := TGittanRemoteJob.Create(FDir, rkPush);
+    try
+      Job.OnDone := @JobDone;
+      RunJob(Job);
+      AssertEquals(2, FDone);
+      AssertFalse(Job.Ok);
+      AssertTrue(Job.Error <> '');
+    finally
+      Job.Free;
+    end;
+  except
+    RemoveTree(Remote);
+    raise;
+  end;
+  RemoveTree(Remote);
 end;
 
 initialization

@@ -66,6 +66,13 @@ type
   end;
   PGittanRepoSnapshot = ^TGittanRepoSnapshot;
 
+  {** How Pull joins the upstream's commits to the branch: pmAuto as the
+    user's config says (pull.rebase, pull.ff, branch.<name>.rebase), or,
+    when it says nothing, only by a fast-forward, so a branch that has
+    diverged is not merged or rebased without asking; pmMerge with a
+    merge commit, pmRebase by rebasing the branch's own commits on top. }
+  TGittanPullMode = (pmAuto, pmMerge, pmRebase);
+
   {** One opened repository. Open finds the work tree root for a folder, and
     the other calls run inside that root. }
   TGittanRepo = class
@@ -78,6 +85,7 @@ type
     FIgnoreWhitespace: boolean;
     function RunGit(const ADir: string; const AArgs: array of string;
       out AOutput: string; const AIndexFile: string = ''): boolean;
+    function RunRemote(const AArgs: array of string): boolean;
     function IndexPath: string;
     function CopyIndex(const ATarget: string): boolean;
     function WholeTreeActive: boolean;
@@ -145,6 +153,32 @@ type
       the repository's own setting before the global one), empty when
       none is set. }
     function UserName: string;
+    {** Fetches every remote, dropping the remote-tracking branches
+      whose branch is gone from it (`git fetch --all --prune`). }
+    function Fetch: boolean;
+    {** Pulls the branch's upstream into it, the way AMode says. False,
+      with git's reason in Error, when nothing was pulled; ADiverged is
+      then set when the branch and its upstream both have commits the
+      other lacks, so a fast-forward alone could not do it and the user
+      must choose pmMerge or pmRebase. A merge takes git's message as it
+      is, without an editor; a rebase stashes the local changes for the
+      time it runs (--autostash). A conflict leaves git merging or
+      rebasing, as on the command line. }
+    function Pull(AMode: TGittanPullMode; out ADiverged: boolean): boolean;
+    {** Pushes the branch to its upstream (`git push <remote>
+      HEAD:<branch>`, whatever push.default says), or, without one, to a
+      branch of the same name on the remote RemoteFor gives, which then
+      becomes its upstream (-u). False, with git's reason in Error, when
+      nothing was pushed: ARejected is then set when the remote has
+      commits the branch lacks, which a pull would bring first. }
+    function Push(out ARejected: boolean): boolean;
+    {** The variables a fetch, pull or push runs with besides Gittan's
+      own: ssh in batch mode (`ssh -o BatchMode=yes`), so a key that
+      needs its passphrase, or a host not yet known, fails at once with
+      ssh's reason instead of waiting for an answer at a terminal nobody
+      sees; none when the user runs ssh their own way (GIT_SSH_COMMAND,
+      GIT_SSH or core.sshCommand). A key in the agent still works. }
+    function RemoteEnvironment: TStringArray;
     {** The e-mail the repository commits under (`git config
       user.email`), empty when none is set. }
     function UserEmail: string;
@@ -353,6 +387,11 @@ function IsBinaryFile(const AFileName: string): boolean;
 function RunGitIn(const ADir: string; const AArgs: array of string;
   out AOutput, AError: string; const AIndexFile: string = ''): boolean;
 
+{** RunGitIn with the variables AEnv ("NAME=value") set besides those
+  Gittan always sets. }
+function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
+  out AOutput, AError: string; const AIndexFile: string = ''): boolean;
+
 {** Puts in AList the local branches of the repository in ADir that track
   a branch no longer on its remote: git ls-remote asks each remote once,
   since the remote-tracking ref stays until a fetch with --prune. A
@@ -514,8 +553,15 @@ end;
   one. Path names come back as plain UTF-8 instead of octal escapes. }
 function RunGitIn(const ADir: string; const AArgs: array of string;
   out AOutput, AError: string; const AIndexFile: string): boolean;
+begin
+  Result := RunGitEnv(ADir, AArgs, [], AOutput, AError, AIndexFile);
+end;
+
+function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
+  out AOutput, AError: string; const AIndexFile: string): boolean;
 var
   P: TProcess;
+  Skip: array of string;
   Status, i: integer;
 begin
   AOutput := '';
@@ -528,8 +574,16 @@ begin
     P.Parameters.Add('core.quotepath=false');
     for i := 0 to High(AArgs) do
       P.Parameters.Add(ProcessArg(AArgs[i]));
-    CopyEnvironment(P, ['LC_ALL=', 'GIT_TERMINAL_PROMPT=', 'GIT_INDEX_FILE=',
-      'GIT_OPTIONAL_LOCKS=']);
+    SetLength(Skip, 4 + Length(AEnv));
+    Skip[0] := 'LC_ALL=';
+    Skip[1] := 'GIT_TERMINAL_PROMPT=';
+    Skip[2] := 'GIT_INDEX_FILE=';
+    Skip[3] := 'GIT_OPTIONAL_LOCKS=';
+    for i := 0 to High(AEnv) do
+      Skip[4 + i] := Copy(AEnv[i], 1, Pos('=', AEnv[i]));
+    CopyEnvironment(P, Skip);
+    for i := 0 to High(AEnv) do
+      P.Environment.Add(AEnv[i]);
     P.Environment.Add('LC_ALL=C');
     P.Environment.Add('GIT_TERMINAL_PROMPT=0');
     { git status refreshes the index when it may, under index.lock; the
@@ -1350,6 +1404,106 @@ begin
     DeleteFile(AddFile);
     DeleteFile(MsgFile);
   end;
+end;
+
+{ ---------------------------------------------------------------------------
+  Remotes
+  ---------------------------------------------------------------------------
+  Fetch, pull and push go to the network: they run with
+  RemoteEnvironment, and their output on stderr (progress, "To ...") is
+  no failure. }
+function TGittanRepo.RemoteEnvironment: TStringArray;
+var
+  Output: string;
+begin
+  Result := nil;
+  if (GetEnvironmentVariable('GIT_SSH_COMMAND') <> '') or
+    (GetEnvironmentVariable('GIT_SSH') <> '') then
+    Exit;
+  if (FRoot <> '') and RunGit(FRoot, ['config', 'core.sshCommand'], Output) and
+    (Trim(Output) <> '') then
+    Exit;
+  SetLength(Result, 1);
+  Result[0] := 'GIT_SSH_COMMAND=ssh -o BatchMode=yes';
+end;
+
+function TGittanRepo.RunRemote(const AArgs: array of string): boolean;
+var
+  Output, Err: string;
+begin
+  Result := (FRoot <> '') and RunGitEnv(FRoot, AArgs, RemoteEnvironment, Output, Err);
+  if not Result then
+    FError := Err;
+end;
+
+function TGittanRepo.Fetch: boolean;
+begin
+  Result := RunRemote(['fetch', '--all', '--prune']);
+end;
+
+{ Whether the config says how to pull: then pmAuto leaves it to git. }
+function PullConfigured(const ARoot, ABranch: string): boolean;
+var
+  Output, Err: string;
+begin
+  Result := RunGitIn(ARoot, ['config', 'pull.rebase'], Output, Err) or
+    RunGitIn(ARoot, ['config', 'pull.ff'], Output, Err) or
+    ((ABranch <> '') and RunGitIn(ARoot, ['config', 'branch.' + ABranch + '.rebase'],
+    Output, Err));
+end;
+
+{ git says "Not possible to fast-forward" for --ff-only and pull.ff=only,
+  and "divergent branches" when it is told nothing. }
+function TGittanRepo.Pull(AMode: TGittanPullMode; out ADiverged: boolean): boolean;
+begin
+  ADiverged := False;
+  case AMode of
+    pmMerge:
+      Result := RunRemote(['pull', '--no-rebase', '--ff', '--no-edit']);
+    pmRebase:
+      Result := RunRemote(['pull', '--rebase', '--autostash']);
+    else
+      if PullConfigured(FRoot, Branch) then
+        Result := RunRemote(['pull', '--no-edit'])
+      else
+        Result := RunRemote(['pull', '--ff-only']);
+  end;
+  if not Result then
+    ADiverged := (Pos('Not possible to fast-forward', FError) > 0) or
+      (Pos('divergent branches', FError) > 0);
+end;
+
+function TGittanRepo.Push(out ARejected: boolean): boolean;
+var
+  Name, Remote, Merge: string;
+begin
+  ARejected := False;
+  Result := False;
+  if FRoot = '' then
+    Exit;
+  if not RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'HEAD'], Name) or (Trim(Name) = '') then
+  begin
+    FError := 'HEAD is not on a branch.';
+    Exit;
+  end;
+  Name := Trim(Name);
+  if RunGit(FRoot, ['config', 'branch.' + Name + '.remote'], Remote) and
+    RunGit(FRoot, ['config', 'branch.' + Name + '.merge'], Merge) and
+    (Trim(Remote) <> '') and (Trim(Merge) <> '') then
+    Result := RunRemote(['push', Trim(Remote), 'HEAD:' + Trim(Merge)])
+  else
+  begin
+    Remote := RemoteFor('');
+    if Remote = '' then
+    begin
+      FError := 'The repository has no remote to push to.';
+      Exit;
+    end;
+    Result := RunRemote(['push', '-u', Remote, 'HEAD']);
+  end;
+  if not Result then
+    ARejected := (Pos('[rejected]', FError) > 0) or (Pos('fetch first', FError) > 0) or
+      (Pos('non-fast-forward', FError) > 0);
 end;
 
 function TGittanRepo.HeadMessage(out AMessage: string): boolean;

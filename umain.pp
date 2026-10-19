@@ -21,7 +21,7 @@ uses
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader,
   gittan.discard, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
-  gittan.commitgraph, gittan.pofile, gittan.binaryview, gittan.commitjob, ATSynEdit_Gaps, md5;
+  gittan.commitgraph, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, ATSynEdit_Gaps, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -220,6 +220,14 @@ type
     FCommitItem: TMenuItem;
     FCommitJob: TGittanCommitJob;
     FCommitDraftFor, FAmendMessage: string;
+    { Fetch, pull and push (umain.remote.inc): the job while it runs,
+      the commits ahead when it started, the menu items, and the list
+      the status bar's counts drop up. }
+    FRemoteJob: TGittanRemoteJob;
+    FRemoteAhead: integer;
+    FFetchItem, FPullItem, FPushItem: TMenuItem;
+    FSyncPopup: TGittanPopupList;
+    FSyncActions: TIntegerDynArray;
     FSubPanel: TPanel;
     FSubHeader: TGittanSectionHeader;
     FSubTree: TTreeView;
@@ -794,6 +802,15 @@ type
     procedure StopCommitJob(AWait: boolean);
     procedure SaveCommitDraft;
     procedure LoadCommitDraft;
+    procedure UpdateRemoteItems;
+    procedure StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode = pmAuto);
+    procedure RemoteJobDone(Sender: TObject);
+    procedure StopRemoteJob(AWait: boolean);
+    procedure MenuFetchClick(Sender: TObject);
+    procedure MenuPullClick(Sender: TObject);
+    procedure MenuPushClick(Sender: TObject);
+    procedure SyncClick(const AScreenRect: TRect);
+    procedure SyncPopupPick(Sender: TObject; AIndex: integer);
     function SubmoduleKey: string;
     procedure FillSubmodules;
     {** The index in FSubmodules of the submodule at APath, -1 for none. }
@@ -1010,6 +1027,35 @@ resourcestring
   rsCommitNothing = 'Tick the files to commit.';
   rsCommitted = 'Committed %s: %s';
   rsCommitFailed = 'The commit failed';
+  rsFetchMenu = '&Fetch';
+  rsPullMenu = '&Pull';
+  rsPushMenu = 'P&ush';
+  rsFetchItem = 'Fetch';
+  rsGitPullItem = 'Pull';
+  rsPushItem = 'Push';
+  rsCommitGraphItem = 'Commit Graph';
+  rsPushNewBranch = 'new on the remote';
+  rsFetching = 'Fetching...';
+  rsPulling = 'Pulling...';
+  rsPushing = 'Pushing...';
+  rsFetched = 'Fetched';
+  rsFetchedBehind = 'Fetched: %d commits to pull';
+  rsFetchedBehindOne = 'Fetched: 1 commit to pull';
+  rsPulled = 'Pulled';
+  rsPushed = 'Pushed %d commits on %s';
+  rsPushedOne = 'Pushed 1 commit on %s';
+  rsPushedBranch = 'Pushed %s';
+  rsFetchFailed = 'The fetch failed';
+  rsGitPullFailed = 'The pull failed';
+  rsPushFailed = 'The push failed';
+  rsPullDivergedTitle = 'The Branch Has Diverged';
+  rsPullDiverged = 'The branch and its upstream both have commits the other lacks. ' +
+    'Merge them with a merge commit, or rebase your commits onto the upstream''s?';
+  rsMergeAction = 'Merge';
+  rsRebaseAction = 'Rebase';
+  rsPushRejectedTitle = 'The Push Was Rejected';
+  rsPushRejected = 'The remote has commits the branch does not have yet. Pull them first?';
+  rsPullAction = 'Pull';
   rsIdentityTitle = 'Who Commits?';
   rsIdentityName = 'Name';
   rsIdentityEmail = 'E-mail';
@@ -1107,7 +1153,7 @@ resourcestring
   rsBehindHint = '%d commits not pulled yet';
   rsInSyncHint = 'Up to date with upstream';
   rsNoUpstreamHint = 'No upstream branch';
-  rsGraphHint = 'Click to show the commit graph';
+  rsGraphHint = 'Click to pull, push or show the commit graph';
   rsCommitGraph = 'Commit &Graph';
   rsPosition = 'Ln %d, Col %d';
   rsPullHintTitle = '#%d %s';
@@ -1478,6 +1524,9 @@ begin
   FPullPopup := TGittanPopupList.Create(Self);
   FPullPopup.Parent := Self;
   FPullPopup.OnPick := @PullPopupPick;
+  FSyncPopup := TGittanPopupList.Create(Self);
+  FSyncPopup.Parent := Self;
+  FSyncPopup.OnPick := @SyncPopupPick;
   { The welcome view shares the summary's box and draws the application
     icon from its own copy: Application.Icon keeps to its small image. }
   FAppIcon := TIcon.Create;
@@ -1539,6 +1588,7 @@ procedure TForm1.FormDestroy(Sender: TObject);
 begin
   Application.RemoveAsyncCalls(Self);
   StopCommitJob(True);
+  StopRemoteJob(True);
   StopWatcher;
   AbandonPullJob;
   AbandonReviewJob;
@@ -1764,6 +1814,9 @@ begin
     FPullPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
+    FSyncPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
+      RGBToColor(100, 160, 240));
     FStatus.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(62, 62, 62), RGBToColor(58, 58, 59),
       RGBToColor(100, 160, 240), RGBToColor(63, 185, 80), RGBToColor(227, 179, 65),
@@ -1802,6 +1855,9 @@ begin
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230), RGBToColor(154, 103, 0));
     FPullPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
+      RGBToColor(0, 110, 230));
+    FSyncPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
     FStatus.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
@@ -2092,6 +2148,14 @@ begin
   FCommitItem := AddItem(FileMenu, rsCommitMenu, ShortCut(VK_K, [ssModifier]),
     @MenuCommitClick);
   FCommitItem.Enabled := False;
+  FPullItem := AddItem(FileMenu, rsPullMenu, ShortCut(VK_L, [ssModifier, ssShift]),
+    @MenuPullClick);
+  FPushItem := AddItem(FileMenu, rsPushMenu, ShortCut(VK_P, [ssModifier, ssShift]),
+    @MenuPushClick);
+  FFetchItem := AddItem(FileMenu, rsFetchMenu, ShortCut(VK_F, [ssModifier, ssAlt]),
+    @MenuFetchClick);
+  UpdateRemoteItems;
+  FileMenu.Add(NewLine);
   FDiscardItem := AddItem(FileMenu, rsDiscardChange, ShortCut(VK_BACK, [ssModifier, ssShift]),
     @MenuDiscardClick);
   FUndoDiscardItem := AddItem(FileMenu, rsUndoDiscard, ShortCut(VK_Z, [ssModifier, ssAlt]),
@@ -3099,6 +3163,7 @@ begin
   LeaveEdit;
   SaveCommitDraft;
   StopCommitJob(False);
+  StopRemoteJob(False);
   StopWatcher;
   StopIndexing;
   SaveIndex;
@@ -4277,5 +4342,6 @@ end;
 {$I umain.reviews.inc}
 {$I umain.translations.inc}
 {$I umain.commit.inc}
+{$I umain.remote.inc}
 
 end.

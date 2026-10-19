@@ -63,6 +63,9 @@ type
     procedure TestCommitUnborn;
     procedure TestCommitMerge;
     procedure TestToolSearchPath;
+    procedure TestPushFetchPull;
+    procedure TestPullDiverged;
+    procedure TestRemoteEnvironment;
   end;
 
 implementation
@@ -1356,6 +1359,156 @@ begin
     DeleteFile(ExtractFileDir(ExcludeTrailingPathDelimiter(FDir)) + '/hook-path');
   end;
   {$endif}
+end;
+
+{ A second clone of ARemote in AOther commits AFile and pushes, so the
+  remote moves on without the test's repository. }
+procedure PushFromOther(const ARemote, AOther, AFile: string);
+var
+  Output: string;
+  Status: integer;
+  Lines: TStringList;
+begin
+  if not DirectoryExists(AOther) then
+    RunCommandIndir(ExtractFileDir(AOther), 'git', ['clone', '-q', ARemote, AOther],
+      Output, Status, [poStderrToOutPut]);
+  RunCommandIndir(AOther, 'git', ['pull', '-q', '--ff-only'], Output, Status,
+    [poStderrToOutPut]);
+  Lines := TStringList.Create;
+  try
+    Lines.Text := AFile;
+    Lines.SaveToFile(IncludeTrailingPathDelimiter(AOther) + AFile);
+  finally
+    Lines.Free;
+  end;
+  RunCommandIndir(AOther, 'git', ['add', '-A'], Output, Status, [poStderrToOutPut]);
+  RunCommandIndir(AOther, 'git', ['-c', 'user.name=Other', '-c',
+    'user.email=other@example.invalid', 'commit', '-q', '-m', AFile], Output, Status,
+    [poStderrToOutPut]);
+  if Status <> 0 then
+    raise Exception.Create('other commit failed: ' + Output);
+  RunCommandIndir(AOther, 'git', ['push', '-q'], Output, Status, [poStderrToOutPut]);
+  if Status <> 0 then
+    raise Exception.Create('other push failed: ' + Output);
+end;
+
+{ A push without an upstream makes one; a fetch sees what another clone
+  pushed, a pull fast-forwards to it; a push behind the remote is
+  rejected. }
+procedure TGitRepoTest.TestPushFetchPull;
+var
+  Remote, Other, Output: string;
+  Status, Ahead, Behind: integer;
+  Rejected, Diverged: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  AssertFalse('no remote', FRepo.Push(Rejected));
+  AssertFalse(Rejected);
+  Remote := FDir + '-remote';
+  Other := FDir + '-other';
+  RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Status,
+    [poStderrToOutPut]);
+  try
+    Git(['remote', 'add', 'origin', Remote]);
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+    AssertTrue('upstream set', FRepo.AheadBehind(Ahead, Behind));
+    AssertEquals(0, Ahead);
+    WriteFile('a.txt', 'pushed'#10);
+    Commit('to push');
+    AssertTrue(FRepo.AheadBehind(Ahead, Behind));
+    AssertEquals(1, Ahead);
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+    AssertTrue(FRepo.AheadBehind(Ahead, Behind));
+    AssertEquals(0, Ahead);
+
+    PushFromOther(Remote, Other, 'other.txt');
+    AssertTrue(FRepo.AheadBehind(Ahead, Behind));
+    AssertEquals('not fetched yet', 0, Behind);
+    AssertTrue(FRepo.Error, FRepo.Fetch);
+    AssertTrue(FRepo.AheadBehind(Ahead, Behind));
+    AssertEquals(1, Behind);
+    AssertTrue(FRepo.Error, FRepo.Pull(pmAuto, Diverged));
+    AssertTrue(FRepo.AheadBehind(Ahead, Behind));
+    AssertEquals(0, Behind);
+    AssertTrue(FileExists(IncludeTrailingPathDelimiter(FDir) + 'other.txt'));
+
+    PushFromOther(Remote, Other, 'more.txt');
+    WriteFile('a.txt', 'mine'#10);
+    Commit('mine');
+    AssertFalse(FRepo.Push(Rejected));
+    AssertTrue(FRepo.Error, Rejected);
+  finally
+    RemoveTree(Remote);
+    RemoveTree(Other);
+  end;
+end;
+
+{ Told nothing, a pull only fast-forwards and says when the branch has
+  diverged; merge and rebase then join the two, the rebase with a local
+  change stashed for the time it runs. The config is set here, so the
+  user's own pull settings do not count. }
+procedure TGitRepoTest.TestPullDiverged;
+var
+  Remote, Other, Output: string;
+  Status: integer;
+  Rejected, Diverged: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Remote := FDir + '-remote';
+  Other := FDir + '-other';
+  RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Status,
+    [poStderrToOutPut]);
+  try
+    Git(['remote', 'add', 'origin', Remote]);
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+    PushFromOther(Remote, Other, 'one.txt');
+    WriteFile('a.txt', 'mine'#10);
+    Commit('mine');
+    Git(['config', 'pull.rebase', 'false']);
+    Git(['config', 'pull.ff', 'only']);
+    AssertFalse(FRepo.Pull(pmAuto, Diverged));
+    AssertTrue(FRepo.Error, Diverged);
+    AssertTrue(FRepo.Error, FRepo.Pull(pmMerge, Diverged));
+    { A merge commit: its second parent is there (Git fails otherwise). }
+    Git(['rev-parse', '-q', '--verify', 'HEAD^2']);
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+
+    PushFromOther(Remote, Other, 'two.txt');
+    WriteFile('a.txt', 'mine again'#10);
+    Commit('mine again');
+    WriteFile('del.txt', 'local change'#10);
+    AssertTrue(FRepo.Error, FRepo.Pull(pmRebase, Diverged));
+    RunCommandIndir(FDir, 'git', ['rev-parse', '-q', '--verify', 'HEAD^2'], Output, Status, []);
+    AssertTrue('no merge commit', Status <> 0);
+    AssertTrue(FileExists(IncludeTrailingPathDelimiter(FDir) + 'two.txt'));
+    AssertEquals(' M del.txt'#0, Git(['status', '--porcelain', '-z']));
+  finally
+    RemoveTree(Remote);
+    RemoveTree(Other);
+  end;
+end;
+
+procedure TGitRepoTest.TestRemoteEnvironment;
+var
+  Env: TStringArray;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  Env := FRepo.RemoteEnvironment;
+  if (GetEnvironmentVariable('GIT_SSH_COMMAND') = '') and
+    (GetEnvironmentVariable('GIT_SSH') = '') then
+  begin
+    AssertEquals(1, Length(Env));
+    AssertEquals('GIT_SSH_COMMAND=ssh -o BatchMode=yes', Env[0]);
+  end;
+  Git(['config', 'core.sshCommand', 'ssh -i key']);
+  AssertEquals('the user runs ssh their own way', 0, Length(FRepo.RemoteEnvironment));
 end;
 
 procedure TGitRepoTest.TestBranchesAndSwitch;

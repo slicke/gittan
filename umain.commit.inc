@@ -350,7 +350,7 @@ begin
   Whole := (FOperation = 'merging') or (FOperation = 'cherry-picking') or
     (FOperation = 'reverting');
   Note := '';
-  Can := FCommitJob = nil;
+  Can := (FCommitJob = nil) and (FRemoteJob = nil);
   if not CommitChoosing then
   begin
     Note := rsCommitNotHead;
@@ -478,7 +478,8 @@ procedure TForm1.StartCommit;
 var
   Paths: TStringList;
 begin
-  if (FCommitJob <> nil) or not FCommitButton.Enabled or not EnsureIdentity then
+  if (FCommitJob <> nil) or (FRemoteJob <> nil) or not FCommitButton.Enabled or
+    not EnsureIdentity then
     Exit;
   Paths := TStringList.Create;
   try
@@ -492,6 +493,7 @@ begin
   FCommitJob.Start;
   FStatus.ShowMessage(rsCommitting, stNormal, 0);
   UpdateCommitState;
+  UpdateRemoteItems;
 end;
 
 { Done: on success the message, Amend and the flips go, and the tree
@@ -525,6 +527,7 @@ begin
     FStatus.ShowMessage('', stNormal, 0);
   RefreshRepository;
   UpdateCommitState;
+  UpdateRemoteItems;
   if not Job.Ok then
     MessageDlg(rsCommitFailed, Job.Error, mtError, [mbOK], 0);
 end;

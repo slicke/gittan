@@ -114,6 +114,7 @@ begin
   FSettings.SubmodulesOpen := FSubHeader.Expanded;
   FSettings.CommitOpen := FCommitHeader.Expanded;
   StopCommitJob(True);
+  StopRemoteJob(True);
   SaveCommitDraft;
   FSettings.FontName := Edit.Font.Name;
   FSettings.FontSize := Edit.Font.Size;
@@ -1255,7 +1256,8 @@ begin
 end;
 
 { The status bar's parts: the branch drops the branch list up from it,
-  as in the summary; the ahead/behind counts open the commit graph; the
+  as in the summary; the ahead/behind counts drop up pull, push, fetch
+  and the commit graph; the
   pull request opens on GitHub; the conflicts show the first conflicted
   file; the name and the file count go back to the summary. }
 procedure TForm1.StatusPartClick(Sender: TObject; APart: TGittanStatusPart;
@@ -1269,7 +1271,7 @@ begin
     spBranch:
       SummaryBranchClick(Sender, AScreenRect);
     spSync:
-      ShowCommitGraph;
+      SyncClick(AScreenRect);
     spPull:
       PullChipClick(AScreenRect);
     spUpdate:
