@@ -137,8 +137,14 @@ type
       remote, which makes a local branch tracking it. False, with git's
       reason in Error, when git refuses: a change in the work tree the
       switch would overwrite, an operation in progress, or a name it
-      does not know. }
-    function Switch(const ABranch: string): boolean;
+      does not know. With AMerge the local changes come along even to
+      files the branch changes, merged into its version (`--merge`);
+      where they clash the files are left in conflict. }
+    function Switch(const ABranch: string; AMerge: boolean = False): boolean;
+    {** Stashes every local change, untracked files included, with the
+      message AMessage (`git stash push -u`), leaving the work tree as
+      HEAD has it. }
+    function Stash(const AMessage: string): boolean;
     {** Commits the files APaths (relative to Root, as ChangedPaths gives
       them) as they are in the work tree, with the message AMessage as it
       is, whatever the index holds for them: the other changed files stay
@@ -459,6 +465,12 @@ function FindTool(const AName: string): string;
   since nobody could answer the one and the other would land in stderr. }
 function RunGitHubCli(const AExe, ADir: string; const AArgs: array of string;
   out AOutput, AError: string): boolean;
+
+{** The files a refused switch or checkout names in AError, git's
+  message, as those it "would overwrite" (local changes, or untracked
+  files the branch has), each on a line of its own after a tab; false
+  when the message names none, a refusal for another reason. }
+function SwitchBlockedFiles(const AError: string; AFiles: TStrings): boolean;
 
 {** Whether the file AFileName is binary by git's own rule: a NUL byte
   in its first 8000 bytes. False for a file that cannot be read. }
@@ -1325,13 +1337,40 @@ begin
   end;
 end;
 
-function TGittanRepo.Switch(const ABranch: string): boolean;
+function TGittanRepo.Switch(const ABranch: string; AMerge: boolean): boolean;
 var
   Output: string;
 begin
   if (FRoot = '') or (ABranch = '') then
     Exit(False);
-  Result := RunGit(FRoot, ['switch', ABranch], Output);
+  if AMerge then
+    Result := RunGit(FRoot, ['switch', '--merge', ABranch], Output)
+  else
+    Result := RunGit(FRoot, ['switch', ABranch], Output);
+end;
+
+function TGittanRepo.Stash(const AMessage: string): boolean;
+var
+  Output: string;
+begin
+  Result := (FRoot <> '') and RunGit(FRoot, ['stash', 'push', '-u', '-m', AMessage], Output);
+end;
+
+function SwitchBlockedFiles(const AError: string; AFiles: TStrings): boolean;
+var
+  Line: string;
+  Listing: boolean;
+begin
+  AFiles.Clear;
+  Listing := False;
+  for Line in AError.Split([#10]) do
+    if Pos('would be overwritten by', Line) > 0 then
+      Listing := True
+    else if Listing and (Line <> '') and (Line[1] = #9) then
+      AFiles.Add(Trim(Line))
+    else if Listing then
+      Listing := False;
+  Result := AFiles.Count > 0;
 end;
 
 { Writes AText to AFileName byte for byte. }

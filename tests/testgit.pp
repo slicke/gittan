@@ -73,6 +73,7 @@ type
     procedure TestCommitActions;
     procedure TestCommitActionConflicts;
     procedure TestBranchManagement;
+    procedure TestSwitchBlocked;
   end;
 
 implementation
@@ -1772,6 +1773,47 @@ begin
     AssertFalse(FRepo.DeleteRemoteBranch('nowhere/work'));
   finally
     RemoveTree(Remote);
+  end;
+end;
+
+{ A switch the local changes block names the files; a stash clears the
+  way, and --merge brings them along. }
+procedure TGitRepoTest.TestSwitchBlocked;
+var
+  Main: string;
+  Files: TStringList;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Main := FRepo.Branch;
+  Git(['checkout', '-q', '-b', 'other']);
+  WriteFile('a.txt', 'one'#10'two'#10'three'#10'four'#10);
+  Commit('four');
+  Git(['checkout', '-q', Main]);
+  WriteFile('a.txt', 'zero'#10'one'#10'two'#10'three'#10);
+  WriteFile('new.txt', 'untracked'#10);
+  Files := TStringList.Create;
+  try
+    AssertFalse(FRepo.Switch('other'));
+    AssertTrue(FRepo.Error, SwitchBlockedFiles(FRepo.Error, Files));
+    AssertEquals('a.txt', Files.Text.Trim);
+    AssertFalse(SwitchBlockedFiles('fatal: invalid reference: x', Files));
+
+    AssertTrue(FRepo.Error, FRepo.Switch('other', True));
+    AssertEquals('other', FRepo.Branch);
+    AssertEquals('both changes', 'zero'#10'one'#10'two'#10'three'#10'four'#10,
+      FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
+
+    Git(['checkout', '-q', '-f', Main]);
+    WriteFile('a.txt', 'local'#10);
+    AssertTrue(FRepo.Error, FRepo.Stash('before switching'));
+    AssertEquals('', Git(['status', '--porcelain']));
+    AssertTrue(Pos('before switching', Git(['stash', 'list'])) > 0);
+    AssertTrue(FRepo.Switch('other'));
+  finally
+    Files.Free;
   end;
 end;
 

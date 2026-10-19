@@ -958,32 +958,65 @@ begin
 end;
 
 { The watcher is stopped meanwhile, as for a new base, and the views
-  are refreshed from the new branch. Git's first line says why a
-  switch was refused; the rest lists the files. }
+  are refreshed from the new branch. When local changes block the
+  switch, a dialog names the files git listed and offers what
+  TortoiseGit does: stash them and switch, or bring them along merged
+  into the branch's version (`git switch --merge`, which may leave
+  conflicts); any other refusal is shown with git's whole message. }
 procedure TForm1.SwitchBranch(const ABranch: string);
 var
-  Reason: string;
-begin
-  if FRepo.Root = '' then
-    Exit;
-  StopWatcher;
-  if FRepo.Switch(ABranch) then
+  Files: TStringList;
+  Shown: string;
+  i: integer;
+
+  procedure Switched(const ANote: string);
   begin
     FLoadError := '';
     FSummary.Notice := '';
     RefreshRepository;
-  end
-  else
-  begin
-    Reason := FRepo.Error;
-    if Pos(#10, Reason) > 0 then
-      Reason := Copy(Reason, 1, Pos(#10, Reason) - 1);
-    if Copy(Reason, 1, 7) = 'error: ' then
-      Delete(Reason, 1, 7)
-    else if Copy(Reason, 1, 7) = 'fatal: ' then
-      Delete(Reason, 1, 7);
-    FSummary.Notice := Reason;
-    ShowSummary;
+    StatusNote(ANote);
+  end;
+
+begin
+  if FRepo.Root = '' then
+    Exit;
+  StopWatcher;
+  Files := TStringList.Create;
+  try
+    if FRepo.Switch(ABranch) then
+      Switched(Format(rsSwitched, [ABranch]))
+    else if SwitchBlockedFiles(FRepo.Error, Files) then
+    begin
+      Shown := '';
+      for i := 0 to Min(Files.Count, 10) - 1 do
+        Shown := Shown + LineEnding + '  ' + Files[i];
+      if Files.Count > 10 then
+        Shown := Shown + LineEnding + '  ' + Format(rsSwitchMore, [Files.Count - 10]);
+      case QuestionDlg(rsSwitchBlockedTitle, Format(rsSwitchBlocked, [ABranch]) + LineEnding +
+          Shown, mtWarning, [mrYes, rsStashAndSwitch, 'IsDefault', mrNo, rsBringChanges,
+          mrCancel, rsCancelButton, 'IsCancel'], 0) of
+        mrYes:
+          if not FRepo.Stash(Format(rsStashMessage, [ABranch])) then
+            MessageDlg(rsStashFailed, FRepo.Error, mtError, [mbOK], 0)
+          else if FRepo.Switch(ABranch) then
+            Switched(Format(rsStashedSwitched, [ABranch]))
+          else
+          begin
+            RefreshRepository;
+            MessageDlg(Format(rsSwitchFailed, [ABranch]), FRepo.Error + LineEnding +
+              LineEnding + rsStashKept, mtError, [mbOK], 0);
+          end;
+        mrNo:
+          if FRepo.Switch(ABranch, True) then
+            Switched(Format(rsSwitchedAlong, [ABranch]))
+          else
+            MessageDlg(Format(rsSwitchFailed, [ABranch]), FRepo.Error, mtError, [mbOK], 0);
+      end;
+    end
+    else
+      MessageDlg(Format(rsSwitchFailed, [ABranch]), FRepo.Error, mtError, [mbOK], 0);
+  finally
+    Files.Free;
   end;
   StartWatcher;
 end;
