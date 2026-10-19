@@ -48,6 +48,7 @@ begin
     AssertEquals(3, S.ContextLines);
     AssertEquals(0, S.Width);
     AssertFalse(S.SideBySide);
+    AssertFalse(S.MarkdownPreview);
     AssertEquals(0, S.Recent.Count);
     AssertEquals(0, S.UpdateSnoozedUntil, 0);
     AssertTrue(S.CommitOpen);
@@ -81,6 +82,7 @@ begin
     S.OnlyChanges := True;
     S.ContextLines := 5;
     S.SideBySide := True;
+    S.MarkdownPreview := True;
     S.IgnoreWhitespace := True;
     S.EditorCommand := 'code -g';
     S.SyntaxTheme := 'Delphi';
@@ -112,6 +114,7 @@ begin
     AssertTrue(S.OnlyChanges);
     AssertEquals(5, S.ContextLines);
     AssertTrue(S.SideBySide);
+    AssertTrue(S.MarkdownPreview);
     AssertTrue(S.IgnoreWhitespace);
     AssertEquals('code -g', S.EditorCommand);
     AssertEquals('Delphi', S.SyntaxTheme);

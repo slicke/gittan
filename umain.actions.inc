@@ -47,6 +47,7 @@ var
 begin
   FOnlyChanges := FSettings.OnlyChanges;
   FSideBySide := FSettings.SideBySide;
+  FMdPreviewOn := FSettings.MarkdownPreview;
   FWordWrap := FSettings.WordWrap;
   FIgnoreWhitespace := FSettings.IgnoreWhitespace;
   FBlameOn := FSettings.Blame;
@@ -123,6 +124,7 @@ begin
   FSettings.OnlyChanges := FOnlyChanges;
   FSettings.ContextLines := FContextLines;
   FSettings.SideBySide := FSideBySide;
+  FSettings.MarkdownPreview := FMdPreviewOn;
   FSettings.IgnoreWhitespace := FIgnoreWhitespace;
   FSettings.Blame := FBlameOn;
   FSettings.ReviewComments := FShowComments;

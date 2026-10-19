@@ -665,19 +665,31 @@ begin
   end;
 end;
 
-{ The old side keeps its share of the width when the panel resizes. }
+{ The width the two sides share: the panel's, less the Markdown preview
+  and its splitter when they are shown. }
+function TForm1.SidesWidth: integer;
+begin
+  Result := EditorPanel.ClientWidth - FSideSplitter.Width;
+  if FMdPreview.Visible then
+    Dec(Result, FMdPreview.Width + FMdSplitter.Width);
+end;
+
+{ The old side and the Markdown preview keep their shares of the width
+  when the panel resizes. }
 procedure TForm1.EditorPanelResize(Sender: TObject);
 begin
   if FGraph <> nil then
     FGraph.Recenter;
+  if FMdPreview.Visible then
+    FMdPreview.Width := Round(EditorPanel.ClientWidth * FMdRatio);
   if FEditOld.Visible then
-    FEditOld.Width := Round((EditorPanel.ClientWidth - FSideSplitter.Width) * FSideRatio);
+    FEditOld.Width := Round(SidesWidth * FSideRatio);
 end;
 
 procedure TForm1.SideSplitterMoved(Sender: TObject);
 begin
-  if EditorPanel.ClientWidth > FSideSplitter.Width then
-    FSideRatio := FEditOld.Width / (EditorPanel.ClientWidth - FSideSplitter.Width);
+  if SidesWidth > 0 then
+    FSideRatio := FEditOld.Width / SidesWidth;
 end;
 
 { Shows the old side next to the editor in the side-by-side change view
@@ -689,7 +701,7 @@ var
 begin
   Side := SidesShown;
   if Side then
-    FEditOld.Width := Round((EditorPanel.ClientWidth - FSideSplitter.Width) * FSideRatio);
+    FEditOld.Width := Round(SidesWidth * FSideRatio);
   FEditOld.Visible := Side;
   FSideSplitter.Visible := Side;
   if Side then

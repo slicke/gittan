@@ -26,7 +26,7 @@ uses
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader,
   gittan.discard, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
-  gittan.commitgraph, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, ATSynEdit_Gaps, md5;
+  gittan.commitgraph, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, gittan.mdpreview, ATSynEdit_Gaps, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -115,7 +115,7 @@ type
     FSyntaxMenu, FAutoLexerItem, FPlainTextItem: TMenuItem;
     FRecentMenu, FCompareMenu, FTerminalItem, FUninstallCliItem: TMenuItem;
     FSnapshots: TGittanSnapshots;
-    FWrapItem, FOnlyChangesItem, FSideItem, FIgnoreSpaceItem: TMenuItem;
+    FWrapItem, FOnlyChangesItem, FSideItem, FIgnoreSpaceItem, FMdPreviewItem: TMenuItem;
     {** View > Folding, enabled where FoldingShown (see ViewMenuClick). }
     FFoldMenu: TMenuItem;
     {** The file lines the folded ranges started on before a rebuild of
@@ -491,6 +491,14 @@ type
     FImageDiff: TGittanImageDiff;
     { A binary file, in the editor's place (see ShowBinaryChanges). }
     FBinaryView: TGittanBinaryView;
+    { View > Markdown Preview (see umain.mdpreview.inc): whether it is on,
+      the page right of the editor, its splitter, its share of the width
+      and the pause after an edit before the page follows. }
+    FMdPreviewOn: boolean;
+    FMdPreview: TGittanMarkdownPreview;
+    FMdSplitter: TSplitter;
+    FMdRatio: double;
+    FMdTimer: TTimer;
     { View > Translations (see umain.translations.inc): whether it is on,
       its menu item, the file shown from disk ('' for a changed file) and
       the counts the header shows. }
@@ -619,6 +627,7 @@ type
     procedure SyncOldSideAsync(Data: PtrInt);
     procedure EditorPanelResize(Sender: TObject);
     procedure SideSplitterMoved(Sender: TObject);
+    function SidesWidth: integer;
     procedure ApplyLayout;
     procedure ApplyWrap;
     procedure RebuildIfChanges;
@@ -745,6 +754,14 @@ type
     procedure MenuSyntaxThemeClick(Sender: TObject);
     procedure SetSyntaxTheme(ATheme: integer);
     procedure MenuSideBySideClick(Sender: TObject);
+    procedure MenuMarkdownPreviewClick(Sender: TObject);
+    function MarkdownPreviewPath: string;
+    procedure UpdateMarkdownPreview;
+    procedure HideMarkdownPreview;
+    procedure MdSplitterMoved(Sender: TObject);
+    procedure MdTimerTimer(Sender: TObject);
+    procedure EditChange(Sender: TObject);
+    procedure MdPreviewOpenFile(Sender: TObject; const AFileName: string);
     procedure MenuIgnoreSpaceClick(Sender: TObject);
     procedure MenuNextFileClick(Sender: TObject);
     procedure MenuPrevFileClick(Sender: TObject);
@@ -1073,6 +1090,7 @@ resourcestring
   rsNLines = '%d lines';
   rsSideBySide = 'Side &by Side';
   rsWordWrap = '&Word Wrap';
+  rsMarkdownPreview = '&Markdown Preview';
   rsIgnoreSpace = 'I&gnore Whitespace';
   rsFolding = 'F&olding';
   rsFold = '&Fold';
@@ -1599,6 +1617,8 @@ const
   { How long one parse may take before a lookup or the indexer gives up
     on it. }
   ParseTimeout = 3000;
+  { How long typing pauses before the Markdown preview follows it. }
+  MdPreviewPause = 300;
   { Row kinds in TGittanRow.Line. }
   rowGap = -1;
   rowFiller = -2;
@@ -1657,6 +1677,7 @@ begin
   FReviewMeasure.SetSize(1, 1);
   FBlameCols := 12;
   FSideRatio := 0.5;
+  FMdRatio := 0.5;
   { The editor comes from umain.lfm. The EControl adapter is not an IDE
     component, so it is created here. Gittan is a viewer, so the editor is
     read-only; ShowText and OpenFile lift that while they replace the text. }
@@ -1674,6 +1695,7 @@ begin
   Edit.OptMinimapCharWidth := 30;
   Edit.OnChangeCaretPos := @EditChangeCaretPos;
   Edit.OnChangeModified := @EditChangeModified;
+  Edit.OnChange := @EditChange;
   { Scrolling on past the bottom pulls in the next file, and past the
     top the previous one; the pill that shows the pull is painted over
     the text (see EditMouseWheel). }
@@ -1792,6 +1814,23 @@ begin
   FBinaryView.Parent := EditorPanel;
   FBinaryView.Align := alClient;
   FBinaryView.Visible := False;
+  { The Markdown preview sits right of the editor, its splitter between
+    them; both are created before the editor's alClient takes the rest. }
+  FMdPreview := TGittanMarkdownPreview.Create(Self);
+  FMdPreview.Parent := EditorPanel;
+  FMdPreview.Align := alRight;
+  FMdPreview.Width := EditorPanel.ClientWidth div 2;
+  FMdPreview.Visible := False;
+  FMdPreview.OnOpenFile := @MdPreviewOpenFile;
+  FMdSplitter := TSplitter.Create(Self);
+  FMdSplitter.Parent := EditorPanel;
+  FMdSplitter.Align := alRight;
+  FMdSplitter.Visible := False;
+  FMdSplitter.OnMoved := @MdSplitterMoved;
+  FMdTimer := TTimer.Create(Self);
+  FMdTimer.Enabled := False;
+  FMdTimer.Interval := MdPreviewPause;
+  FMdTimer.OnTimer := @MdTimerTimer;
   FSummaryBox := TScrollBox.Create(Self);
   FSummaryBox.Parent := EditorPanel;
   FSummaryBox.Align := alClient;
@@ -2223,6 +2262,12 @@ begin
     FBandFill := RGBToColor(0, 110, 230);
   end;
   FSummaryBox.Color := Edit.Colors.TextBG;
+  if FDark then
+    FMdPreview.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
+      RGBToColor(62, 62, 62), FLinkColor, True)
+  else
+    FMdPreview.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
+      RGBToColor(222, 222, 222), FLinkColor, False);
   FSummary.LinkColor := FLinkColor;
   if FDark then
   begin
@@ -2576,6 +2621,9 @@ begin
   FSideItem := AddItem(ViewMenu, rsSideBySide, ShortCut(VK_S, [ssModifier, ssShift]),
     @MenuSideBySideClick);
   FSideItem.Checked := FSideBySide;
+  FMdPreviewItem := AddItem(ViewMenu, rsMarkdownPreview, ShortCut(VK_V, [ssModifier, ssShift]),
+    @MenuMarkdownPreviewClick);
+  FMdPreviewItem.Checked := FMdPreviewOn;
   FWrapItem := AddItem(ViewMenu, rsWordWrap, ShortCut(VK_W, [ssModifier, ssAlt]),
     @MenuWrapClick);
   FWrapItem.Checked := FWordWrap;
@@ -3922,6 +3970,7 @@ begin
   FSideSplitter.Visible := False;
   FImageDiff.Visible := False;
   FBinaryView.Visible := False;
+  HideMarkdownPreview;
   FHeader.Visible := False;
   FFindBar.Visible := False;
   FSymbolBar.Visible := False;
@@ -3953,6 +4002,7 @@ begin
   ApplyLayout;
   ApplyBlame;
   Edit.Visible := True;
+  UpdateMarkdownPreview;
 end;
 
 { An image in the change view: the version compared against and the new
@@ -3976,6 +4026,7 @@ begin
   FSummaryBox.Visible := False;
   FBinaryView.Visible := False;
   Edit.Visible := False;
+  HideMarkdownPreview;
   FHeader.Visible := True;
   ApplyLayout;
   FImageDiff.Visible := True;
@@ -4002,6 +4053,7 @@ begin
   FSummaryBox.Visible := False;
   FImageDiff.Visible := False;
   Edit.Visible := False;
+  HideMarkdownPreview;
   FHeader.Visible := True;
   ApplyLayout;
   FBinaryView.Visible := True;
@@ -4033,6 +4085,7 @@ begin
   FSummaryBox.Visible := False;
   FImageDiff.Visible := False;
   Edit.Visible := False;
+  HideMarkdownPreview;
   FHeader.Visible := True;
   ApplyLayout;
   FBinaryView.Visible := True;
@@ -4806,5 +4859,6 @@ const
 {$I umain.revert.inc}
 {$I umain.commit.inc}
 {$I umain.remote.inc}
+{$I umain.mdpreview.inc}
 
 end.

@@ -49,6 +49,7 @@ env:
     vendor/EControl/econtrol/econtrol_package.lpk
     vendor/ATSynEdit_Ex/atsynedit_ex/atsynedit_ex_package.lpk
     vendor/metadarkstyle/metadarkstyle.lpk
+    vendor/lazink/lazink.lpk
 
 jobs:
   # ===================== DETERMINE VERSION =====================

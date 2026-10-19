@@ -29,6 +29,9 @@
     </RunParams>
     <RequiredPackages>
       <Item>
+        <PackageName Value="LazInk"/>
+      </Item>
+      <Item>
         <PackageName Value="BGRABitmapPack"/>
       </Item>
       <Item>

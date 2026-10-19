@@ -51,6 +51,8 @@ type
     OnlyChanges: boolean;
     ContextLines: integer;
     SideBySide: boolean;
+    {** Show a Markdown file's preview beside the editor. }
+    MarkdownPreview: boolean;
     {** Leave whitespace changes out of every diff. }
     IgnoreWhitespace: boolean;
     {** Show in the gutter who last changed each line. }
@@ -205,6 +207,7 @@ begin
       OnlyChanges := Ini.ReadBool(SecView, 'OnlyChanges', False);
       ContextLines := Ini.ReadInteger(SecView, 'ContextLines', 3);
       SideBySide := Ini.ReadBool(SecView, 'SideBySide', False);
+      MarkdownPreview := Ini.ReadBool(SecView, 'MarkdownPreview', False);
       IgnoreWhitespace := Ini.ReadBool(SecView, 'IgnoreWhitespace', False);
       ReviewComments := Ini.ReadBool(SecView, 'ReviewComments', True);
       Translations := Ini.ReadBool(SecView, 'Translations', True);
@@ -260,6 +263,7 @@ begin
       Ini.WriteBool(SecView, 'OnlyChanges', OnlyChanges);
       Ini.WriteInteger(SecView, 'ContextLines', ContextLines);
       Ini.WriteBool(SecView, 'SideBySide', SideBySide);
+      Ini.WriteBool(SecView, 'MarkdownPreview', MarkdownPreview);
       Ini.WriteBool(SecView, 'IgnoreWhitespace', IgnoreWhitespace);
       Ini.WriteBool(SecView, 'ReviewComments', ReviewComments);
       Ini.WriteBool(SecView, 'Translations', Translations);
