@@ -10,7 +10,10 @@ uses
   athreads,
   {$ENDIF}
   Interfaces, // this includes the LCL widgetset
-  Forms, umain{$IFDEF LCLWin32}, gittan.theme{$ENDIF}
+  {$IFDEF LCLWin32}
+  uDarkStyleParams, uMetaDarkStyle, uDarkStyleSchemes,
+  {$ENDIF}
+  Forms, umain
   { you can add units after this };
 
 {$R *.res}
@@ -23,9 +26,11 @@ begin
   Application.MainFormOnTaskbar:=True;
   {$POP}
   {$IFDEF LCLWin32}
-  { Before the first window, so the trees can take the dark theme. }
-  if IsDarkMode then
-    AllowDarkApp;
+  { MetaDarkStyle turns the LCL's native controls, menus, scroll bars and
+    dialogs dark when Windows is in dark mode at startup; it does not
+    follow a change while Gittan runs (see IsDarkMode). }
+  PreferredAppMode := pamAllowDark;
+  ApplyMetaDarkStyle(DefaultDark);
   {$ENDIF}
   Application.Initialize;
   {$IFDEF DARWIN}

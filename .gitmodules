@@ -19,3 +19,7 @@
 [submodule "vendor/CudaText-lexers"]
 	path = vendor/CudaText-lexers
 	url = https://github.com/Alexey-T/CudaText-lexers.git
+[submodule "vendor/metadarkstyle"]
+	path = vendor/metadarkstyle
+	url = https://github.com/zamtmn/metadarkstyle.git
+	ignore = untracked
