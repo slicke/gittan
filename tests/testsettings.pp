@@ -22,6 +22,8 @@ type
     procedure TestRoundTrip;
     procedure TestRecentList;
     procedure TestDamagedFileGivesDefaults;
+    procedure TestOldDefaultFont;
+    procedure TestDefaultFontSize;
   end;
 
 implementation
@@ -170,6 +172,42 @@ begin
   finally
     S.Free;
   end;
+end;
+
+procedure TSettingsTest.TestOldDefaultFont;
+var
+  S: TGittanSettings;
+  F: TStringList;
+begin
+  F := TStringList.Create;
+  try
+    F.Text := '[View]'#10'FontName=Courier New'#10'FontSize=9'#10;
+    F.SaveToFile(FFileName);
+  finally
+    F.Free;
+  end;
+  S := TGittanSettings.Create(FFileName);
+  try
+    S.Load;
+    AssertEquals('the old built-in font is no choice', '', S.FontName);
+    AssertEquals(0, S.FontSize);
+    S.FontName := 'Courier New';
+    S.FontSize := 10;
+    S.Save;
+    S.Load;
+    AssertEquals('another size is a choice', 'Courier New', S.FontName);
+    AssertEquals(10, S.FontSize);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSettingsTest.TestDefaultFontSize;
+begin
+  AssertTrue(DefaultFontSize(1080) >= 9);
+  AssertEquals('a large screen gets a size up', DefaultFontSize(1080) + 1,
+    DefaultFontSize(1440));
+  AssertEquals(DefaultFontSize(1080) + 2, DefaultFontSize(2160));
 end;
 
 initialization

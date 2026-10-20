@@ -108,6 +108,9 @@ type
     FLexers: TGittanLexers;
     FRepo: TGittanRepo;
     FSettings: TGittanSettings;
+    { The editor's font size when none was picked (DefaultFontSize for
+      the screen the window opened on). }
+    FDefaultFontSize: integer;
     { gh, GitHub's command line tool, as found at startup: its full path
       (run it by that, PATH may not reach it) and whether there is one.
       The features that need GitHub are offered only when it is there. }

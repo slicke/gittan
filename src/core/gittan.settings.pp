@@ -15,6 +15,18 @@ uses
 const
   {** How many repositories File > Open Recent lists. }
   MaxRecent = 10;
+  {** The editor font when none was picked: the platform's own monospaced
+    font (what Terminal and Xcode, Visual Studio or the desktop use). }
+  DefaultFontName = {$IFDEF DARWIN}'Menlo'{$ELSE}{$IFDEF WINDOWS}'Consolas'
+    {$ELSE}'Monospace'{$ENDIF}{$ENDIF};
+
+{** The editor's font size when none was picked, for a screen AHeight
+  logical pixels high (points on macOS, pixels at 96 DPI elsewhere; the
+  widgetset scales a point size to the screen's DPI itself): a size up on
+  a large screen, which is seen from further away. The LCL's Cocoa takes a
+  size as points at 96 DPI and hands macOS that many pixels, a third more
+  than a native point, so 9 there is what Xcode and Terminal call 12. }
+function DefaultFontSize(AHeight: integer): integer;
 
 type
 
@@ -40,7 +52,8 @@ type
       and the repository it is for (its root): another repository's
       section starts empty. The message may have several lines. }
     CommitDraft, CommitDraftRepo: string;
-    {** The editor font; an empty name keeps the default. }
+    {** The editor font; an empty name and a zero size keep the defaults
+      (DefaultFontName, DefaultFontSize). }
     FontName: string;
     FontSize: integer;
     {** The editor's font scale in percent, 0 for the default. }
@@ -114,6 +127,15 @@ function ConfigDir: string;
 begin
   Result := ExtractFilePath(ExcludeTrailingPathDelimiter(GetAppConfigDir(False)))
     + ConfigFolder;
+end;
+
+function DefaultFontSize(AHeight: integer): integer;
+begin
+  Result := {$IFDEF DARWIN}9{$ELSE}10{$ENDIF};
+  if AHeight >= 1200 then
+    Inc(Result);
+  if AHeight >= 1600 then
+    Inc(Result);
 end;
 
 { A day written yyyy-mm-dd, in no locale's format; 0 for anything else. }
@@ -202,6 +224,13 @@ begin
       CommitDraftRepo := Ini.ReadString(SecCommit, 'Repo', '');
       FontName := Ini.ReadString(SecView, 'FontName', '');
       FontSize := Ini.ReadInteger(SecView, 'FontSize', 0);
+      { Earlier versions wrote the editor's built-in Courier New 9 though
+        nobody picked it; it counts as no choice, so the default applies. }
+      if SameText(FontName, 'Courier New') and (FontSize = 9) then
+      begin
+        FontName := '';
+        FontSize := 0;
+      end;
       Zoom := Ini.ReadInteger(SecView, 'Zoom', 0);
       WordWrap := Ini.ReadBool(SecView, 'WordWrap', False);
       OnlyChanges := Ini.ReadBool(SecView, 'OnlyChanges', False);

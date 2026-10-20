@@ -63,16 +63,6 @@ begin
   for i := 0 to High(ContextChoices) do
     if ContextChoices[i] = FSettings.ContextLines then
       FContextLines := ContextChoices[i];
-  if FSettings.FontName <> '' then
-    Edit.Font.Name := FSettings.FontName;
-  if FSettings.FontSize > 0 then
-    Edit.Font.Size := FSettings.FontSize;
-  FEditOld.Font.Assign(Edit.Font);
-  if FSettings.Zoom > 0 then
-  begin
-    Edit.OptScaleFont := FSettings.Zoom;
-    FEditOld.OptScaleFont := FSettings.Zoom;
-  end;
   { The window where it was, if that is still on a screen. }
   if (FSettings.Width > 0) and (FSettings.Height > 0) then
   begin
@@ -84,6 +74,24 @@ begin
   end;
   if FSettings.Maximized then
     WindowState := wsMaximized;
+  { The editor font as picked, else the platform's, its size from the
+    height of the screen the window is on. }
+  FDefaultFontSize := DefaultFontSize(MulDiv(Screen.MonitorFromRect(BoundsRect)
+    .BoundsRect.Height, 96, Screen.PixelsPerInch));
+  if FSettings.FontName <> '' then
+    Edit.Font.Name := FSettings.FontName
+  else
+    Edit.Font.Name := DefaultFontName;
+  if FSettings.FontSize > 0 then
+    Edit.Font.Size := FSettings.FontSize
+  else
+    Edit.Font.Size := FDefaultFontSize;
+  FEditOld.Font.Assign(Edit.Font);
+  if FSettings.Zoom > 0 then
+  begin
+    Edit.OptScaleFont := FSettings.Zoom;
+    FEditOld.OptScaleFont := FSettings.Zoom;
+  end;
   if FSettings.TreeWidth > 80 then
     FTreePanel.Width := FSettings.TreeWidth;
   FRepoHeader.Expanded := FSettings.RepoFilesOpen;
@@ -117,8 +125,14 @@ begin
   StopCommitJob(True);
   StopRemoteJob(True);
   SaveCommitDraft;
+  { The defaults are not written, so they follow the screen and a later
+    Gittan's choice. }
   FSettings.FontName := Edit.Font.Name;
+  if SameText(FSettings.FontName, DefaultFontName) then
+    FSettings.FontName := '';
   FSettings.FontSize := Edit.Font.Size;
+  if FSettings.FontSize = FDefaultFontSize then
+    FSettings.FontSize := 0;
   FSettings.Zoom := Edit.OptScaleFont;
   FSettings.WordWrap := FWordWrap;
   FSettings.OnlyChanges := FOnlyChanges;
