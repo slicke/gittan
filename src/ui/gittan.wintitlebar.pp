@@ -23,6 +23,12 @@
   in it and its shortcuts work. A click on a menu name in the bar opens
   that submenu with TrackPopupMenuEx, owned by the form, and Alt with a
   letter opens the menu it underlines there instead of the hidden bar.
+  Windows still draws the hidden bar, and the line under it (white in
+  dark mode; MetaDarkStyle paints over it at the top of the client area,
+  now the window's top), over the client area when the window is
+  activated or deactivated: WM_NCACTIVATE is passed on with -1, which
+  asks for no repaint, and after it and WM_NCPAINT the form has the
+  strip down to the line painted again (HideMenuBar).
 
   The unit uses the Windows API; umain keeps it behind LCLWin32. }
 unit gittan.wintitlebar;
@@ -83,6 +89,9 @@ var
   Bar: TGittanWinTitleBar;
   FormWnd: HWND;
   OldFormProc, OldBarProc: WNDPROC;
+  { Where the client area would start under the menu bar, from the
+    window's top, as WM_NCCALCSIZE found it. }
+  MenuBottom: integer;
 
 { The resize border's thickness, as Windows sizes it for the window. }
 function FrameThickness(AWnd: HWND; AVertical: boolean): integer;
@@ -134,6 +143,27 @@ begin
   end;
 end;
 
+{ Has the strip of the form where Windows draws the hidden menu bar and
+  the line under it painted again, over what it drew. }
+procedure HideMenuBar(AWnd: HWND);
+var
+  W: TRect;
+  P: TPoint;
+  R: TRect;
+begin
+  if MenuBottom <= 0 then
+    Exit;
+  Windows.GetWindowRect(AWnd, W);
+  P := Types.Point(0, 0);
+  Windows.ClientToScreen(AWnd, P);
+  { The line is the row above MenuBottom; a row more below it. }
+  R.Top := 0;
+  R.Bottom := W.Top + MenuBottom + 1 - P.Y;
+  R.Left := 0;
+  R.Right := W.Right - W.Left;
+  RedrawWindow(AWnd, @R, 0, RDW_INVALIDATE or RDW_ERASE or RDW_ALLCHILDREN);
+end;
+
 { The bar's own window: the parts that take clicks are its own, the rest
   goes to the form, which knows the caption and the buttons. }
 function BarProc(Wnd: HWND; Msg: UINT; WParam: WPARAM; LParam: LPARAM): LRESULT; stdcall;
@@ -169,6 +199,7 @@ begin
         Params := PNCCalcSizeParams(LParam);
         Top := Params^.rgrc[0].Top;
         Result := CallWindowProcW(OldFormProc, Wnd, Msg, WParam, LParam);
+        MenuBottom := Params^.rgrc[0].Top - Top;
         Params^.rgrc[0].Top := Top;
         if IsZoomed(Wnd) then
           Inc(Params^.rgrc[0].Top, FrameThickness(Wnd, True));
@@ -258,6 +289,18 @@ begin
     WM_SIZE:
       if Bar <> nil then
         Bar.Invalidate;
+    WM_NCACTIVATE:
+      begin
+        Result := CallWindowProcW(OldFormProc, Wnd, Msg, WParam, -1);
+        HideMenuBar(Wnd);
+        Exit;
+      end;
+    WM_NCPAINT:
+      begin
+        Result := CallWindowProcW(OldFormProc, Wnd, Msg, WParam, LParam);
+        HideMenuBar(Wnd);
+        Exit;
+      end;
   end;
   Result := CallWindowProcW(OldFormProc, Wnd, Msg, WParam, LParam);
 end;
