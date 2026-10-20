@@ -53,102 +53,102 @@
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="umain.pp"/>
+        <Filename Value="src/umain.pp"/>
         <IsPartOfProject Value="True"/>
         <ComponentName Value="Form1"/>
         <HasResources Value="True"/>
         <ResourceBaseClass Value="Form"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.lexers.pp"/>
+        <Filename Value="src/gittan.lexers.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.git.pp"/>
+        <Filename Value="src/gittan.git.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.theme.pp"/>
+        <Filename Value="src/gittan.theme.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.icons.pp"/>
+        <Filename Value="src/gittan.icons.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.changenav.pp"/>
+        <Filename Value="src/gittan.changenav.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.summary.pp"/>
+        <Filename Value="src/gittan.summary.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.welcome.pp"/>
+        <Filename Value="src/gittan.welcome.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.popuplist.pp"/>
+        <Filename Value="src/gittan.popuplist.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.hoverpills.pp"/>
+        <Filename Value="src/gittan.hoverpills.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.notice.pp"/>
+        <Filename Value="src/gittan.notice.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.banner.pp"/>
+        <Filename Value="src/gittan.banner.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.keep.pp"/>
+        <Filename Value="src/gittan.keep.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.statusbar.pp"/>
+        <Filename Value="src/gittan.statusbar.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.fileheader.pp"/>
+        <Filename Value="src/gittan.fileheader.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.watch.pp"/>
+        <Filename Value="src/gittan.watch.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.worddiff.pp"/>
+        <Filename Value="src/gittan.worddiff.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.github.pp"/>
+        <Filename Value="src/gittan.github.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.conflicts.pp"/>
+        <Filename Value="src/gittan.conflicts.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.imagediff.pp"/>
+        <Filename Value="src/gittan.imagediff.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.graph.pp"/>
+        <Filename Value="src/gittan.graph.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.commitgraph.pp"/>
+        <Filename Value="src/gittan.commitgraph.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.commitjob.pp"/>
+        <Filename Value="src/gittan.commitjob.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="gittan.remotejob.pp"/>
+        <Filename Value="src/gittan.remotejob.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
     </Units>
@@ -160,6 +160,7 @@
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir)"/>
+      <OtherUnitFiles Value="src"/>
       <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Linking>

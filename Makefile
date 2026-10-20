@@ -133,7 +133,7 @@ run: build
 
 test:
 	@mkdir -p tests/lib
-	$(FPC) -Mobjfpc -Sh -O1 -Fu. -FUtests/lib -FEtests tests/gittantests.lpr
+	$(FPC) -Mobjfpc -Sh -O1 -Fusrc -FUtests/lib -FEtests tests/gittantests.lpr
 	$(TESTBIN) --all --format=plain $(TEST_ARGS)
 
 clean:

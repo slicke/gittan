@@ -4,6 +4,7 @@
 This file applies to the Gittan repository root and its subdirectories.
 
 ## Working Rules
+- The units (`gittan.*.pp`) and the main form (`umain.pp`, `umain.lfm`, `umain.*.inc`) live in `src/`; `Gittan.lpr` and `Gittan.lpi` stay in the root. A unit keeps its dotted name as its file name, since FPC finds a unit by file name and does not map folders to names. `src` is the project's `OtherUnitFiles` and the test build's `-Fusrc` (Makefile, make.ps1 and the CI workflow).
 - Prefer the project Makefile instead of calling `lazbuild` directly. Run `make help` before inventing a new command or target.
 - On macOS use `make` (or `gmake`); it finds lazbuild in `/Applications/lazarus` when it is not on PATH.
 - Prefer the smallest relevant target: `make`, `make debug`, `make rebuild`, `make run`.
