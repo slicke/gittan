@@ -1440,6 +1440,8 @@ end;
   folder, a bare number means the newest version that starts with it,
   and no alias or one naming a version not installed gives the newest
   installed; fnm's default alias is its own folder. }
+{ The node folders are named with PathDelim, a backslash on Windows, so
+  the expected ones are too. }
 procedure TGitRepoTest.TestNodeManagerBins;
 var
   Nvm, Fnm, Versions: string;
@@ -1454,28 +1456,28 @@ begin
     ForceDirectories(Versions + 'v20.9.0/bin');
     ForceDirectories(Versions + 'v24.21.0/bin');
     ForceDirectories(Versions + 'v9.11.2/bin');
-    AssertEquals('newest without alias', Versions + 'v24.21.0/bin', NvmNodeBin(Nvm));
+    AssertEquals('newest without alias', SetDirSeparators(Versions + 'v24.21.0/bin'), NvmNodeBin(Nvm));
     ForceDirectories(Nvm + '/alias/lts');
     WriteFile('../' + ExtractFileName(Nvm) + '/alias/default', 'lts/*'#10);
     WriteFile('../' + ExtractFileName(Nvm) + '/alias/lts/*', 'lts/iron'#10);
     WriteFile('../' + ExtractFileName(Nvm) + '/alias/lts/iron', 'v20.20.2'#10);
-    AssertEquals('through the aliases', Versions + 'v20.20.2/bin', NvmNodeBin(Nvm));
+    AssertEquals('through the aliases', SetDirSeparators(Versions + 'v20.20.2/bin'), NvmNodeBin(Nvm));
     WriteFile('../' + ExtractFileName(Nvm) + '/alias/default', '20'#10);
-    AssertEquals('newest 20', Versions + 'v20.20.2/bin', NvmNodeBin(Nvm));
+    AssertEquals('newest 20', SetDirSeparators(Versions + 'v20.20.2/bin'), NvmNodeBin(Nvm));
     WriteFile('../' + ExtractFileName(Nvm) + '/alias/default', '20.9'#10);
-    AssertEquals('newest 20.9', Versions + 'v20.9.0/bin', NvmNodeBin(Nvm));
+    AssertEquals('newest 20.9', SetDirSeparators(Versions + 'v20.9.0/bin'), NvmNodeBin(Nvm));
     WriteFile('../' + ExtractFileName(Nvm) + '/alias/default', 'v16.20.2'#10);
-    AssertEquals('not installed', Versions + 'v24.21.0/bin', NvmNodeBin(Nvm));
+    AssertEquals('not installed', SetDirSeparators(Versions + 'v24.21.0/bin'), NvmNodeBin(Nvm));
     WriteFile('../' + ExtractFileName(Nvm) + '/alias/default', 'loop'#10);
     WriteFile('../' + ExtractFileName(Nvm) + '/alias/loop', 'loop'#10);
-    AssertEquals('alias loop', Versions + 'v24.21.0/bin', NvmNodeBin(Nvm));
+    AssertEquals('alias loop', SetDirSeparators(Versions + 'v24.21.0/bin'), NvmNodeBin(Nvm));
 
     AssertEquals('', FnmNodeBin(Fnm));
     ForceDirectories(Fnm + '/node-versions/v22.0.0/installation/bin');
     ForceDirectories(Fnm + '/node-versions/v23.1.0/installation/bin');
-    AssertEquals(Fnm + '/node-versions/v23.1.0/installation/bin', FnmNodeBin(Fnm));
+    AssertEquals(SetDirSeparators(Fnm + '/node-versions/v23.1.0/installation/bin'), FnmNodeBin(Fnm));
     ForceDirectories(Fnm + '/aliases/default/bin');
-    AssertEquals(Fnm + '/aliases/default/bin', FnmNodeBin(Fnm));
+    AssertEquals(SetDirSeparators(Fnm + '/aliases/default/bin'), FnmNodeBin(Fnm));
   finally
     RemoveTree(Nvm);
     RemoveTree(Fnm);

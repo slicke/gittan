@@ -238,12 +238,21 @@ end;
 procedure TRepoInfoRepoTest.TestGather;
 var
   Info: TGittanRepoInfo;
+  Big: string;
+  i: integer;
 begin
   Git(['init', '-q', '-b', 'main']);
   Put('a.txt', 'one');
   Git(['add', 'a.txt']);
   Git(['commit', '-q', '-m', 'first']);
-  Put('b.txt', 'two');
+  { Some kilobytes that do not compress: git for Windows counts the
+    objects' bytes rather than their disk blocks, and a few tiny loose
+    objects make less than the one KiB count-objects counts in. }
+  RandSeed := 1;
+  SetLength(Big, 8192);
+  for i := 1 to Length(Big) do
+    Big[i] := Chr(Ord('a') + Random(26));
+  Put('b.txt', Big);
   Git(['add', 'b.txt']);
   Git(['-c', 'user.name=Other', 'commit', '-q', '-m', 'second']);
   Git(['tag', 'v1']);
