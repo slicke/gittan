@@ -479,13 +479,7 @@ begin
     else
       Target := Rows[High(Rows)];
   end;
-  if FoldingShown then
-    Edit.DoUnfoldLine(Target);
-  Edit.DoCaretSingle(0, Target);
-  Edit.LineTop := Max(0, Target - 3);
-  Edit.Update;
-  SyncOldSide;
-  UpdateChangeNav;
+  ShowChangeAt(Target);
 end;
 
 procedure TForm1.MenuNextConflictClick(Sender: TObject);

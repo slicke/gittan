@@ -616,6 +616,8 @@ type
     function ChangeBlocks: TIntegerDynArray;
     procedure UpdateChangeNav;
     procedure GoToChange(ANext: boolean);
+    procedure ShowChangeAt(ARow: integer);
+    procedure GoToFirstChange;
     procedure ShowChanges(const APath: string);
     procedure FillFileTree(const AStats: TGittanFileStats);
     function CompareTreeNodes(Node1, Node2: TTreeNode): integer;
@@ -3633,13 +3635,51 @@ begin
       Target := Blocks[High(Blocks)];
     end;
   end;
+  ShowChangeAt(Target);
+end;
+
+{ The caret goes to ARow, which lands a few lines below the top edge so
+  the context above it stays in view. }
+procedure TForm1.ShowChangeAt(ARow: integer);
+begin
   if FoldingShown then
-    Edit.DoUnfoldLine(Target);
-  Edit.DoCaretSingle(0, Target);
-  Edit.LineTop := Max(0, Target - 3);
+    Edit.DoUnfoldLine(ARow);
+  Edit.DoCaretSingle(0, ARow);
+  Edit.LineTop := Max(0, ARow - 3);
   Edit.Update;
   SyncOldSide;
   UpdateChangeNav;
+end;
+
+{ A file chosen in the tree opens at its first change, or its first
+  conflict, with the caret on it so that Next Change goes on to the
+  second. A change that is already on the first screen leaves the top of
+  the file in view. }
+procedure TForm1.GoToFirstChange;
+var
+  Blocks: TIntegerDynArray;
+  Target, Row: integer;
+begin
+  if (FView = gvChanges) and IsConflictPath(FCurrentPath) and (Length(FConflictRows) > 0) then
+    Blocks := FConflictRows
+  else
+    Blocks := ChangeBlocks;
+  if Length(Blocks) = 0 then
+    Exit;
+  Target := Blocks[0];
+  ShowChangeAt(Target);
+  { Setting LineTop above has filled the wrap info, which counts the
+    screen rows down to the change past any folds. }
+  if Target > 3 then
+  begin
+    Row := Edit.WrapInfo.FindIndexOfLineNumber(Target);
+    if (Row >= 0) and (Row < Edit.GetVisibleLines - 1) then
+    begin
+      Edit.LineTop := 0;
+      Edit.Update;
+      SyncOldSide;
+    end;
+  end;
 end;
 
 procedure TForm1.MenuNextChangeClick(Sender: TObject);
@@ -3917,6 +3957,9 @@ var
     Edit.LineTop := Min(TopLine, Edit.Strings.Count - 1);
     Edit.Update;
     SyncOldSide;
+    { Moving the caret here fires no caret event, and the navigator and
+      the status bar still show where the view was built with it. }
+    UpdateChangeNav;
   end;
 
 begin
@@ -4833,7 +4876,10 @@ begin
   if Sub >= 0 then
     ShowSubmodule(Sub)
   else
+  begin
     ShowChanges(Node.GetTextPath);
+    GoToFirstChange;
+  end;
 end;
 
 { The file under the mouse gets its StatHint after Application.HintPause.

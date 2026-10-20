@@ -476,19 +476,23 @@ end;
 { ---------------------------------------------------------------------------
   Stepping through the files
   --------------------------------------------------------------------------- }
-{ The caret goes to the file's first (or last) change; a file without
-  any, such as an image or a binary file, is left as it is, since
-  GoToChange would step on to the file after it. }
+{ The caret goes to the file's first change, as selecting the file in
+  the tree does, or going back, to its last; a file without any, such as
+  an image or a binary file, is left as it is. }
 procedure TForm1.MenuNextFileClick(Sender: TObject);
 begin
-  if StepFile(True) and (Length(ChangeBlocks) > 0) then
-    GoToChange(True);
+  StepFile(True);
 end;
 
 procedure TForm1.MenuPrevFileClick(Sender: TObject);
+var
+  Blocks: TIntegerDynArray;
 begin
-  if StepFile(False) and (Length(ChangeBlocks) > 0) then
-    GoToChange(False);
+  if not StepFile(False) then
+    Exit;
+  Blocks := ChangeBlocks;
+  if Length(Blocks) > 0 then
+    ShowChangeAt(Blocks[High(Blocks)]);
 end;
 
 { Selects the next (or previous) file in the tree, wrapping around, which
