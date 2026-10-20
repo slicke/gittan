@@ -4,7 +4,7 @@
 This file applies to the Gittan repository root and its subdirectories.
 
 ## Working Rules
-- The units (`gittan.*.pp`) and the main form (`umain.pp`, `umain.lfm`, `umain.*.inc`) live in `src/`; `Gittan.lpr` and `Gittan.lpi` stay in the root. A unit keeps its dotted name as its file name, since FPC finds a unit by file name and does not map folders to names. `src` is the project's `OtherUnitFiles` and the test build's `-Fusrc` (Makefile, make.ps1 and the CI workflow).
+- The units (`gittan.*.pp`) live in `src/`, split in two: `src/core/` holds the units without the LCL, which plain `fpc` builds and the tests use, and `src/ui/` the controls, the units that need the LCL or a widgetset, and the main form (`umain.pp`, `umain.lfm`, `umain.*.inc`). `Gittan.lpr` and `Gittan.lpi` stay in the root. A new unit goes in `src/core/` when it builds without the LCL. A unit keeps its dotted name as its file name, since FPC finds a unit by file name and does not map folders to names. The project's `OtherUnitFiles` is `src/core;src/ui`, and the test build (Makefile, make.ps1 and the CI workflow) has only `-Fusrc/core`, so a core unit that comes to use the LCL breaks `make test`.
 - Prefer the project Makefile instead of calling `lazbuild` directly. Run `make help` before inventing a new command or target.
 - On macOS use `make` (or `gmake`); it finds lazbuild in `/Applications/lazarus` when it is not on PATH.
 - Prefer the smallest relevant target: `make`, `make debug`, `make rebuild`, `make run`.

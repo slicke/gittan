@@ -286,7 +286,7 @@ jobs:
           FPC="$(find /c/Lazarus/fpc -name fpc.exe -path '*x86_64-win64*' | head -n1)"
           [ -n "$FPC" ] || { echo "::error::fpc.exe not found under C:\Lazarus\fpc"; exit 1; }
           mkdir -p tests/lib
-          "$FPC" -Mobjfpc -Sh -O1 -Fusrc -FUtests/lib -FEtests tests/gittantests.lpr
+          "$FPC" -Mobjfpc -Sh -O1 -Fusrc/core -FUtests/lib -FEtests tests/gittantests.lpr
           tests/gittantests.exe --all --format=plain
           mkdir -p dist/Gittan
           cp Gittan.exe dist/Gittan/

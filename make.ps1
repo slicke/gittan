@@ -109,7 +109,7 @@ switch ($target) {
             Write-Error 'fpc not found on PATH or beside lazbuild.'; exit 1
         }
         New-Item -ItemType Directory -Path 'tests\lib' -Force | Out-Null
-        & fpc -Mobjfpc -Sh -O1 '-Fusrc' '-FUtests\lib' '-FEtests' 'tests\gittantests.lpr'
+        & fpc -Mobjfpc -Sh -O1 '-Fusrc\core' '-FUtests\lib' '-FEtests' 'tests\gittantests.lpr'
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         & 'tests\gittantests.exe' --all --format=plain @rest
         exit $LASTEXITCODE
