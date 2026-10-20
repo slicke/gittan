@@ -190,6 +190,10 @@ type
     FTreePanel: TPanel;
     FTreeFilter: TEdit;
     FTreeFilterText: string;
+    { Whether git reported no change, for the check FileTreeAdvancedCustomDraw
+      paints in the empty tree; a filter that hides every file does not
+      count. }
+    FTreeClean: boolean;
     {$IFDEF LCLCocoa}
     { The window's toolbar on macOS 11 and later (SetupTitleBar): the
       name, the filter as a native search field in place of FTreeFilter,
@@ -749,6 +753,8 @@ type
     procedure FileTreeAdvancedCustomDrawItem(Sender: TCustomTreeView;
       Node: TTreeNode; State: TCustomDrawState; Stage: TCustomDrawStage;
       var PaintImages, DefaultDraw: boolean);
+    procedure FileTreeAdvancedCustomDraw(Sender: TCustomTreeView;
+      const ARect: TRect; Stage: TCustomDrawStage; var DefaultDraw: boolean);
     { umain.history.inc }
     procedure MenuHistoryClick(Sender: TObject);
     function ChunkRows(out AFrom, ATo: integer; out AName: string): boolean;
@@ -1132,6 +1138,7 @@ resourcestring
   rsNavHome = 'Home';
   rsNavRepository = 'Repository';
   rsNavFiles = 'Files';
+  rsTreeClean = 'No changes';
   rsRefresh = 'Re&fresh';
   rsCompareWith = '&Compare With';
   rsWorkingTree = 'HEAD (Working Tree)';
@@ -1886,6 +1893,7 @@ begin
   FileTree.OnMouseLeave := @FileTreeMouseLeave;
   { Files with review comments get a speech bubble (umain.reviews.inc). }
   FileTree.OnAdvancedCustomDrawItem := @FileTreeAdvancedCustomDrawItem;
+  FileTree.OnAdvancedCustomDraw := @FileTreeAdvancedCustomDraw;
   FSymbolBar := TGittanSymbolBar.Create(Self);
   FSymbolBar.Parent := EditorPanel;
   FSymbolBar.Top := FHeader.Height + FFindBar.Height;
@@ -4319,10 +4327,8 @@ begin
   FRepoPage.Visible := False;
   { At startup the sidebar is not built yet. }
   if FSideNav <> nil then
-  begin
     FSideNav.Selected := -1;
-    FSideNav.HeadingClean := False;
-  end;
+  FTreeClean := False;
   FWelcome.Visible := True;
   FWelcome.FitHeight(FSummaryBox.ClientHeight);
 end;
@@ -4629,10 +4635,58 @@ begin
   finally
     FileTree.EndUpdate;
   end;
-  { Nothing changed, not nothing matching the filter. }
-  FSideNav.HeadingClean := Length(AStats) = 0;
+  if FTreeClean <> (Length(AStats) = 0) then
+  begin
+    FTreeClean := Length(AStats) = 0;
+    FileTree.Invalidate;
+  end;
   if FCommitOn <> nil then
     ApplyCommitChecks;
+end;
+
+{ The empty tree of a clean repository shows the summary's mark for it
+  in gray, so it stays quiet beside the green one in the summary: a
+  large disc with a check cut out of it, with "No changes" under it, in
+  the middle of the tree. }
+procedure TForm1.FileTreeAdvancedCustomDraw(Sender: TCustomTreeView;
+  const ARect: TRect; Stage: TCustomDrawStage; var DefaultDraw: boolean);
+const
+  Disc = 40;
+  Gap = 10;
+var
+  C: TCanvas;
+  X, Y, CenterY, TextH: integer;
+begin
+  DefaultDraw := True;
+  if (Stage <> cdPostPaint) or not FTreeClean or (Sender.Items.Count > 0) then
+    Exit;
+  C := Sender.Canvas;
+  C.Font := Sender.Font;
+  TextH := C.TextHeight('Xg');
+  X := (Sender.ClientWidth - Disc) div 2;
+  Y := (Sender.ClientHeight - Disc - Gap - TextH) div 2;
+  C.Pen.Style := psClear;
+  C.Brush.Style := bsSolid;
+  if FDark then
+    C.Brush.Color := RGBToColor(85, 85, 87)
+  else
+    C.Brush.Color := RGBToColor(196, 196, 198);
+  C.Ellipse(X, Y, X + Disc, Y + Disc);
+  CenterY := Y + Disc div 2;
+  C.Pen.Style := psSolid;
+  C.Pen.Color := Sender.BackgroundColor;
+  C.Pen.Width := 4;
+  C.Polyline([Point(X + Disc * 27 div 100, CenterY),
+    Point(X + Disc * 44 div 100, CenterY + Disc * 17 div 100),
+    Point(X + Disc * 74 div 100, CenterY - Disc * 17 div 100)]);
+  C.Pen.Width := 1;
+  C.Brush.Style := bsClear;
+  if FDark then
+    C.Font.Color := RGBToColor(150, 150, 150)
+  else
+    C.Font.Color := RGBToColor(110, 110, 110);
+  C.TextOut((Sender.ClientWidth - C.TextWidth(rsTreeClean)) div 2,
+    Y + Disc + Gap, rsTreeClean);
 end;
 
 { ---------------------------------------------------------------------------
@@ -4784,12 +4838,10 @@ begin
   FileTree.BackgroundColor := Shade;
   if FDark then
     FSideNav.SetColors(Shade, Edit.Colors.TextFont, RGBToColor(150, 150, 150),
-      RGBToColor(50, 50, 51), RGBToColor(62, 62, 64), RGBToColor(62, 62, 62),
-      RGBToColor(63, 185, 80))
+      RGBToColor(50, 50, 51), RGBToColor(62, 62, 64), RGBToColor(62, 62, 62))
   else
     FSideNav.SetColors(Shade, RGBToColor(30, 30, 30), RGBToColor(110, 110, 110),
-      RGBToColor(235, 235, 235), RGBToColor(222, 222, 224), RGBToColor(222, 222, 222),
-      RGBToColor(26, 127, 55));
+      RGBToColor(235, 235, 235), RGBToColor(222, 222, 224), RGBToColor(222, 222, 222));
   if FRepoTree <> nil then
     FRepoTree.BackgroundColor := Shade;
   if FSubTree <> nil then
