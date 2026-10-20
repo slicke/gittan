@@ -283,16 +283,13 @@ type
     FEditPath, FExcludePath: string;
     FEditStamp: LongInt;
     FSaveItem: TMenuItem;
-    { Discarding a block of changes (umain.discard.inc): the row of the
-      first line of every block (FBlockStarts), found by BuildChangeView;
-      the block the mouse is on and the row it is on (-1 for none),
-      whether it is on the band there, the timer that shows the pills
-      at the row's end after a pause and the pills; the blocks
-      discarded, latest last, which
-      File > Undo Discard puts back; and the two menu items. }
-    FBlockRows: TIntegerDynArray;
+    { Discarding a block of changes (umain.discard.inc): the block the
+      mouse is on and the row it is on (-1 for none; for a conflicted
+      file the conflict whose button it is on), the timer that shows the
+      pills at the row's end after a pause and the pills; the blocks
+      discarded, latest last, which File > Undo Discard puts back; and
+      the two menu items. }
     FHotDiscard, FHotRow: integer;
-    FHotOnBand: boolean;
     FPillTimer: TTimer;
     FDiscardPills: TGittanHoverPills;
     { Keeping changes as code for the session (gittan.keep): the keeps
@@ -671,14 +668,13 @@ type
     procedure HandCursorAsync(Data: PtrInt);
     { umain.discard.inc }
     function CanDiscard: boolean;
-    procedure FindBlockRows;
     function LineAtRow(ARow: integer): integer;
     function BlockAtRow(ARow: integer): integer;
     function DiscardAt(AEd: TATSynEdit; X, Y: integer; out ARow: integer;
-      out AOnBand: boolean; out AKeep: integer): integer;
+      out AKeep: integer): integer;
     procedure SetDiscardBand(AEd: TATSynEdit);
     procedure DrawDiscard(AEd: TATSynEdit; C: TCanvas);
-    procedure SetHotDiscard(AEd: TATSynEdit; ABlock, AKeep, ARow: integer; AOnBand: boolean);
+    procedure SetHotDiscard(AEd: TATSynEdit; ABlock, AKeep, ARow: integer);
     procedure KeepBlockAt(ABlock: integer);
     procedure UnkeepAt(AKeep: integer);
     procedure UnkeepFile;

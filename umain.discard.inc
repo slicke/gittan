@@ -1,35 +1,32 @@
 { ---------------------------------------------------------------------------
   Discarding a change
   ---------------------------------------------------------------------------
-  Included by umain.pp. Every block of changed lines in the change view
-  gets a button in a gutter band of its own (gutterTagDiscard, next to
-  the text, on the new side only) on its first row, and the band is
-  live down every row of the block. The mouse resting on a changed row
-  (PillPause), on the band or in the text, lights the button and shows
-  two pills at the row's right end (FDiscardPills, a TGittanHoverPills,
-  Keep with a check mark and Discard with the button's arrow, both for
-  the block. Keep shows the change as plain code for the rest of the
+  Included by umain.pp. The mouse resting on a changed row of the
+  change view (PillPause, over the text of the new side) shows two
+  pills at the row's right end (FDiscardPills, a TGittanHoverPills),
+  Keep with a check mark and Discard with an arrow going back round a
+  circle, both for the block of changed lines the row is in. Keep shows the change as plain code for the rest of the
   session (gittan.keep): the keeps of every file are in FKeeps,
   ShowChanges applies them to FChangeLines (the diff as git gave it
   stays in FRawChangeLines), and the view is built from the result, so
   a kept line has no color, no strip and no button, the navigator does
   not count it and Hide Unchanged Lines folds it away; FKeptOf says
   which lines are kept, and the mouse resting on one gets an Unkeep
-  pill, the header an "Unkeep n" pill for the whole file. A click on
-  the band, the Discard pill or File > Discard Change on the block the
-  caret is in puts the block's lines back to how they are in the
+  pill, the header an "Unkeep n" pill for the whole file. The Discard
+  pill, or File > Discard Change on the block the caret is in, puts
+  the block's lines back to how they are in the
   version compared against: its deleted lines are written over its
   added ones (gittan.discard, which checks the file still holds them
   first), after a question, and the repository is refreshed so the
   view shows the result. The blocks discarded are kept, so File > Undo
   Discard writes them back, the latest first.
-  The band is shown for a tracked text file against a
-  commit or a snapshot, not against a range (the right side is not the
-  work tree then), nor for a new file (discarding its one block would
-  empty it) or a conflict. A conflicted file takes the band for the
-  buttons that resolve one conflict at a time (CanResolveBlocks, see
-  umain.conflicts.inc): the rows are then those of the conflicts and the
-  button is a fork. }
+  The pills are offered for a tracked text file against a commit or a
+  snapshot, not against a range (the right side is not the work tree
+  then), nor for a new file (discarding its one block would empty it)
+  or a conflict (CanDiscard). A conflicted file has a gutter band of
+  its own instead (gutterTagDiscard, next to the text, on the new side
+  only) with a fork button on each conflict's first row, which resolves
+  one conflict at a time (CanResolveBlocks, see umain.conflicts.inc). }
 
 { Whether the shown file's blocks can be discarded. }
 function TForm1.CanDiscard: boolean;
@@ -42,35 +39,6 @@ begin
   for i := 0 to High(FStats) do
     if FStats[i].Path = FCurrentPath then
       Exit(not FStats[i].Binary and (FStats[i].Kind in [ckModified, ckRenamed, ckDeleted]));
-end;
-
-{ The row of the first line of every block (FBlockRows from
-  FBlockStarts), from the rows of the view just built: in the unified
-  view the line's own row, side by side the row the line is on either
-  side (the other side has a filler there). The rows follow the diff, so
-  one pass finds them all. }
-procedure TForm1.FindBlockRows;
-var
-  b, r: integer;
-begin
-  { The blocks are counted anew: the one under the mouse is no longer
-    the one it was. }
-  SetHotDiscard(Edit, -1, -1, -1, False);
-  SetLength(FBlockRows, Length(FBlockStarts));
-  for b := 0 to High(FBlockRows) do
-    FBlockRows[b] := -1;
-  b := 0;
-  for r := 0 to High(FRows) do
-  begin
-    if b > High(FBlockStarts) then
-      Break;
-    if (FRows[r].Line = FBlockStarts[b]) or
-      ((r <= High(FRowsOld)) and (FRowsOld[r].Line = FBlockStarts[b])) then
-    begin
-      FBlockRows[b] := r;
-      Inc(b);
-    end;
-  end;
 end;
 
 { The diff line on row ARow: the new side's, or the old side's where
@@ -104,35 +72,38 @@ begin
 end;
 
 { The block the mouse is on at X, Y of AEd, or -1, in ARow the row it
-  is on, in AOnBand whether it is on the band rather than the text, and
-  in AKeep the kept change the row shows as code, or -1. Every row of a
-  block counts, on the band and across the text, since the pills offer
-  the row's own line; a conflict's button is on the band, on the first
-  screen row of the conflict's first row alone. }
+  is on, and in AKeep the kept change the row shows as code, or -1.
+  Every row of a block counts, across the text, since the pills are for
+  its block. For a conflicted file the result is the conflict whose
+  button is under the mouse: on the band, on the first screen row of
+  the conflict's first row. }
 function TForm1.DiscardAt(AEd: TATSynEdit; X, Y: integer; out ARow: integer;
-  out AOnBand: boolean; out AKeep: integer): integer;
+  out AKeep: integer): integer;
 var
   Band, b, RowTop, Line: integer;
   Details: TATEditorPosDetails;
   P: TPoint;
+  Resolve: boolean;
 begin
   Result := -1;
   ARow := -1;
-  AOnBand := False;
   AKeep := -1;
-  if (AEd <> Edit) or not (CanResolveBlocks or CanDiscard) then
+  if AEd <> Edit then
     Exit;
-  Band := AEd.Gutter.FindIndexByTag(gutterTagDiscard);
-  if (Band < 0) or not AEd.Gutter[Band].Visible or (X < AEd.Gutter[Band].Left) or
-    (X >= AEd.RectMain.Right) then
-    Exit;
-  AOnBand := X < AEd.Gutter[Band].Right;
-  if CanResolveBlocks and not AOnBand then
+  Resolve := CanResolveBlocks;
+  if Resolve then
+  begin
+    Band := AEd.Gutter.FindIndexByTag(gutterTagDiscard);
+    if (Band < 0) or not AEd.Gutter[Band].Visible or (X < AEd.Gutter[Band].Left) or
+      (X >= AEd.Gutter[Band].Right) then
+      Exit;
+  end
+  else if not CanDiscard or (X < AEd.RectMain.Left) or (X >= AEd.RectMain.Right) then
     Exit;
   P := AEd.ClientPosToCaretPos(ATPoint(AEd.RectMain.Left + 1, Y), Details);
   if (P.Y < 0) or Details.BelowAllText or (Details.OnGapItem <> nil) then
     Exit;
-  if CanResolveBlocks then
+  if Resolve then
   begin
     for b := 0 to High(FConflictRows) do
       if FConflictRows[b] = P.Y then
@@ -172,9 +143,9 @@ begin
   Band := AEd.Gutter.FindIndexByTag(gutterTagDiscard);
   if Band < 0 then
     Exit;
-  Shown := (AEd = Edit) and (CanDiscard or CanResolveBlocks);
-  if (AEd = Edit) and not Shown then
-    SetHotDiscard(Edit, -1, -1, -1, False);
+  Shown := (AEd = Edit) and CanResolveBlocks;
+  if (AEd = Edit) and not Shown and not CanDiscard then
+    SetHotDiscard(Edit, -1, -1, -1);
   W := AEd.TextCharSize.Y + EditorCharWidth(AEd);
   if (AEd.Gutter[Band].Visible <> Shown) or (AEd.Gutter[Band].Size <> W) then
   begin
@@ -185,56 +156,44 @@ begin
   AEd.Invalidate;
 end;
 
-{ Paints the buttons: an arrow going back round a circle on the first
-  screen row of each block in view, in the gutter's text color, the one
-  under the mouse on a disc in the caret row's gutter color. For a
-  conflicted file the rows are the conflicts' and the button a fork:
-  two branches coming together into one; and a bar in the conflict
-  color runs down the band's left edge from the conflict's first row to
-  its last, so a conflict stands out from the changes around it when
-  the file is long. }
+{ Paints the fork buttons of a conflicted file on the first screen row
+  of each conflict in view: two branches coming together into one, in
+  the gutter's text color, the one under the mouse on a disc in the
+  caret row's gutter color; and a bar in the conflict color runs down
+  the band's left edge from the conflict's first row to its last, so a
+  conflict stands out from the changes around it when the file is
+  long. }
 procedure TForm1.DrawDiscard(AEd: TATSynEdit; C: TCanvas);
 var
-  Band, W, b, CharH, Y, Cx, Cy, R, A, Y2: integer;
+  Band, W, b, CharH, Y, Cx, Cy, R, Y2: integer;
   Item: TATWrapItem;
   Rows: TIntegerDynArray;
-  Fork: boolean;
 begin
   Band := AEd.Gutter.FindIndexByTag(gutterTagDiscard);
-  if (Band < 0) or not AEd.Gutter[Band].Visible or (AEd <> Edit) then
+  if (Band < 0) or not AEd.Gutter[Band].Visible or (AEd <> Edit) or not CanResolveBlocks then
     Exit;
-  Fork := CanResolveBlocks;
-  if Fork then
-    Rows := FConflictRows
-  else if CanDiscard then
-    Rows := FBlockRows
-  else
-    Exit;
+  Rows := FConflictRows;
   if Length(Rows) = 0 then
     Exit;
   CharH := AEd.TextCharSize.Y;
   R := Max(3, (CharH - 6) div 2);
-  A := Max(2, (R * 2) div 3);
   C.Clipping := True;
   C.ClipRect := Rect(AEd.Gutter[Band].Left, AEd.RectMain.Top, AEd.Gutter[Band].Right,
     AEd.RectMain.Bottom);
   try
-    if Fork then
+    C.Pen.Style := psClear;
+    C.Brush.Style := bsSolid;
+    C.Brush.Color := KindColor(ckConflict);
+    for b := 0 to High(Rows) do
     begin
-      C.Pen.Style := psClear;
-      C.Brush.Style := bsSolid;
-      C.Brush.Color := KindColor(ckConflict);
-      for b := 0 to High(Rows) do
-      begin
-        if (Rows[b] < 0) or (b > High(FConflictEndRows)) or (FConflictEndRows[b] < 0) then
-          Continue;
-        Y := AEd.CaretPosToClientPos(Point(0, Rows[b])).Y;
-        Y2 := AEd.CaretPosToClientPos(Point(0, FConflictEndRows[b])).Y + CharH;
-        if (Y2 <= AEd.RectMain.Top) or (Y >= AEd.RectMain.Bottom) then
-          Continue;
-        C.FillRect(AEd.Gutter[Band].Left + 1, Max(Y, AEd.RectMain.Top),
-          AEd.Gutter[Band].Left + 4, Min(Y2, AEd.RectMain.Bottom));
-      end;
+      if (Rows[b] < 0) or (b > High(FConflictEndRows)) or (FConflictEndRows[b] < 0) then
+        Continue;
+      Y := AEd.CaretPosToClientPos(Point(0, Rows[b])).Y;
+      Y2 := AEd.CaretPosToClientPos(Point(0, FConflictEndRows[b])).Y + CharH;
+      if (Y2 <= AEd.RectMain.Top) or (Y >= AEd.RectMain.Bottom) then
+        Continue;
+      C.FillRect(AEd.Gutter[Band].Left + 1, Max(Y, AEd.RectMain.Top),
+        AEd.Gutter[Band].Left + 4, Min(Y2, AEd.RectMain.Bottom));
     end;
     b := 0;
     W := AEd.WrapInfo.FindIndexOfLineNumber(AEd.LineTop);
@@ -266,22 +225,11 @@ begin
       C.Pen.Style := psSolid;
       C.Pen.Width := Max(1, R div 3);
       C.Brush.Style := bsClear;
-      if Fork then
-      begin
-        { Two branches from the top corners into the middle, one line
-          on down from there. }
-        C.Line(Cx - R, Cy - R, Cx, Cy);
-        C.Line(Cx + R, Cy - R, Cx, Cy);
-        C.Line(Cx, Cy, Cx, Cy + R + 1);
-      end
-      else
-      begin
-        { Round from the lower right over the top to the left, where the
-          head points down. }
-        C.Arc(Cx - R, Cy - R, Cx + R, Cy + R, 300 * 16, 240 * 16);
-        C.Line(Cx - R, Cy + 1, Cx - R - A, Cy + 1 - A);
-        C.Line(Cx - R, Cy + 1, Cx - R + A, Cy + 1 - A);
-      end;
+      { Two branches from the top corners into the middle, one line on
+        down from there. }
+      C.Line(Cx - R, Cy - R, Cx, Cy);
+      C.Line(Cx + R, Cy - R, Cx, Cy);
+      C.Line(Cx, Cy, Cx, Cy + R + 1);
       Inc(b);
     end;
   finally
@@ -292,26 +240,19 @@ begin
   end;
 end;
 
-{ The block under the mouse is lit and the pills follow the row: at
+{ The block under the mouse is kept and the pills follow the row: at
   once while they are up, after the pause when a new row is entered,
-  so a mouse passing through the diff raises none; the band is on Edit
-  only. The hand the band put on the editor goes when the mouse leaves
-  the band, unless a hover of its own keeps it. }
-procedure TForm1.SetHotDiscard(AEd: TATSynEdit; ABlock, AKeep, ARow: integer;
-  AOnBand: boolean);
+  so a mouse passing through the diff raises none; for a conflicted
+  file the conflict whose button is under the mouse is lit. Edit only. }
+procedure TForm1.SetHotDiscard(AEd: TATSynEdit; ABlock, AKeep, ARow: integer);
 begin
-  AOnBand := AOnBand and (ABlock >= 0);
-  if (ABlock = FHotDiscard) and (AKeep = FHotKeep) and (ARow = FHotRow) and
-    (AOnBand = FHotOnBand) then
+  if (ABlock = FHotDiscard) and (AKeep = FHotKeep) and (ARow = FHotRow) then
     Exit;
-  if FHotOnBand and not AOnBand and (FHoverBlame = '') and not FHoverLinked then
-    Edit.Cursor := crDefault;
-  if ABlock <> FHotDiscard then
+  if (ABlock <> FHotDiscard) and CanResolveBlocks then
     Edit.Invalidate;
   FHotDiscard := ABlock;
   FHotKeep := AKeep;
   FHotRow := ARow;
-  FHotOnBand := AOnBand;
   FPillTimer.Enabled := False;
   if (ABlock < 0) and (AKeep < 0) then
     FDiscardPills.Dismiss
@@ -333,19 +274,17 @@ end;
   none. }
 procedure TForm1.ShowDiscardPills;
 var
-  Band, Y: integer;
+  Y: integer;
   Anchor: TRect;
 begin
-  Band := Edit.Gutter.FindIndexByTag(gutterTagDiscard);
   if ((FHotDiscard < 0) and (FHotKeep < 0)) or (FHotRow < 0) or
-    (FHotDiscard > High(FBlockStarts)) or CanResolveBlocks or not CanDiscard or
-    (Band < 0) or not Edit.Gutter[Band].Visible then
+    (FHotDiscard > High(FBlockStarts)) or CanResolveBlocks or not CanDiscard then
   begin
     FDiscardPills.Dismiss;
     Exit;
   end;
   Y := Edit.CaretPosToClientPos(Point(0, FHotRow)).Y;
-  Anchor := Rect(Edit.Gutter[Band].Left, Y, Edit.RectMain.Right, Y + Edit.TextCharSize.Y);
+  Anchor := Rect(Edit.RectMain.Left, Y, Edit.RectMain.Right, Y + Edit.TextCharSize.Y);
   Anchor.TopLeft := Edit.ClientToScreen(Anchor.TopLeft);
   Anchor.BottomRight := Edit.ClientToScreen(Anchor.BottomRight);
   if FHotKeep >= 0 then
@@ -361,18 +300,13 @@ begin
     PtInRect(FDiscardPills.BoundsRect, ScreenToClient(Mouse.CursorPos));
 end;
 
-{ Whether the mouse is over Edit's rows, from the band across the text. }
+{ Whether the mouse is over Edit's text. }
 function TForm1.MouseOnDiscardRows: boolean;
 var
-  Band: integer;
   P: TPoint;
 begin
-  Result := False;
-  Band := Edit.Gutter.FindIndexByTag(gutterTagDiscard);
-  if (Band < 0) or not Edit.Gutter[Band].Visible then
-    Exit;
   P := Edit.ScreenToClient(Mouse.CursorPos);
-  Result := (P.X >= Edit.Gutter[Band].Left) and (P.X < Edit.RectMain.Right) and
+  Result := (P.X >= Edit.RectMain.Left) and (P.X < Edit.RectMain.Right) and
     (P.Y >= Edit.RectMain.Top) and (P.Y < Edit.RectMain.Bottom);
 end;
 
@@ -384,7 +318,7 @@ var
 begin
   Block := FHotDiscard;
   Keep := FHotKeep;
-  SetHotDiscard(Edit, -1, -1, -1, False);
+  SetHotDiscard(Edit, -1, -1, -1);
   if Keep >= 0 then
     UnkeepAt(Keep)
   else if AIndex = 0 then
@@ -398,7 +332,7 @@ end;
 procedure TForm1.DiscardPillsLeave(Sender: TObject);
 begin
   if not MouseOnDiscardRows then
-    SetHotDiscard(Edit, -1, -1, -1, False);
+    SetHotDiscard(Edit, -1, -1, -1);
 end;
 
 { What discarding the block does, for the question: the lines put back
@@ -434,7 +368,7 @@ begin
     DiscardBackText(ABlock)]), mtConfirmation,
     [mrYes, rsDiscardAction, 'IsDefault', mrCancel, rsCancelButton, 'IsCancel'], 0) <> mrYes then
     Exit;
-  SetHotDiscard(Edit, -1, -1, -1, False);
+  SetHotDiscard(Edit, -1, -1, -1);
   if not DiscardBlock(ABlock, Err) then
   begin
     StatusNote(Format(rsDiscardFailed, [Err]), True);

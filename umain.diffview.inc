@@ -145,7 +145,9 @@ begin
     begin
       FRows := Rows;
       FRowsOld := nil;
-      FindBlockRows;
+      { The blocks are counted anew: the one under the mouse is no
+        longer the one it was. }
+      SetHotDiscard(Edit, -1, -1, -1);
       FindConflictRows;
       FillChangeEditor(Edit, Rows, False, OldNum, NewNum, Lexer);
       Exit;
@@ -187,7 +189,7 @@ begin
   end;
     FRows := RightRows;
     FRowsOld := LeftRows;
-    FindBlockRows;
+    SetHotDiscard(Edit, -1, -1, -1);
     FindConflictRows;
     FillChangeEditor(FEditOld, LeftRows, True, OldNum, NewNum, Lexer);
     FillChangeEditor(Edit, RightRows, False, OldNum, NewNum, Lexer);
@@ -594,7 +596,7 @@ var
 begin
   { The pills at a row's end would stay where the row was. }
   if Sender = Edit then
-    SetHotDiscard(Edit, -1, -1, -1, False);
+    SetHotDiscard(Edit, -1, -1, -1);
   if FSyncingScroll or not FEditOld.Visible then
     Exit;
   Src := TATSynEdit(Sender);

@@ -140,7 +140,7 @@ end;
 
 { The row of each conflict's "<<<<<<<" line (FConflictRows from
   FConflictStarts) and of its last line (FConflictEndRows from
-  FConflictEnds), as FindBlockRows finds the blocks': the lines are
+  FConflictEnds), from the rows of the view just built: the lines are
   added ones, so they are on the new side. }
 procedure TForm1.FindConflictRows;
 
@@ -257,7 +257,7 @@ begin
   Anchor := Rect(L, Y, R, Y + Edit.TextCharSize.Y);
   Anchor.TopLeft := Edit.ClientToScreen(Anchor.TopLeft);
   Anchor.BottomRight := Edit.ClientToScreen(Anchor.BottomRight);
-  SetHotDiscard(Edit, -1, -1, -1, False);
+  SetHotDiscard(Edit, -1, -1, -1);
   { The button's hint would stay over the list. }
   ClearHover;
   FConflictPopup.Popup(Anchor);
