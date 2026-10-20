@@ -8,8 +8,9 @@ unit gittan.sidenav;
   with the row's index; whoever owns the sidebar shows the page and
   sets Selected, so the rows follow the view and never lead it. Under
   the rows a Heading names what the sidebar lists below them, as the
-  music app writes Library over its playlists: a dim bold title over a
-  line, as the headings of the repository page.
+  music app writes Library over its playlists: a dim bold title with a
+  page icon where the rows have theirs, so its text is in line with
+  theirs, over a line, as the headings of the repository page.
 
   It paints itself in the sidebar's shade, as the section headers do,
   and is as high as its rows and the heading. }
@@ -22,8 +23,9 @@ uses
   Classes, SysUtils, Types, Controls, Graphics;
 
 type
-  {** What a row's icon shows: a house, or a book for the repository. }
-  TGittanNavIcon = (niHome, niRepository);
+  {** What a row's icon shows: a house, a book for the repository, or
+    a page for the heading over the files. }
+  TGittanNavIcon = (niHome, niRepository, niFiles);
 
   {** A click on a row, with its index. }
   TGittanNavPickEvent = procedure(Sender: TObject; AIndex: integer) of object;
@@ -82,6 +84,7 @@ const
   HeadingTop = 10;
   HeadingGap = 5;
   HeadingBottom = 4;
+  HeadingIconSize = 12;
 
 { TGittanSideNav }
 
@@ -186,8 +189,9 @@ begin
 end;
 
 { The icons are drawn with lines in AColor, in a square ASize wide with
-  its top left at X, Y: a house, its roof over a body with a door, and
-  a closed book, its cover with the spine along the left. }
+  its top left at X, Y: a house, its roof over a body with a door, a
+  closed book, its cover with the spine along the left, and a page with
+  its top right corner folded. }
 procedure TGittanSideNav.DrawIcon(AIcon: TGittanNavIcon; X, Y, ASize: integer;
   AColor: TColor);
 var
@@ -216,6 +220,14 @@ begin
       Canvas.Line(X + 7, Y + 4, X + ASize - 2, Y + 4);
       Canvas.Line(X + 7, Y + 7, X + ASize - 2, Y + 7);
     end;
+    niFiles:
+    begin
+      Mid := X + 1;  { the left edge; the page is two narrower than high }
+      Eave := Mid + ASize - 2;  { the right edge }
+      Canvas.Polyline([Point(Mid, Y), Point(Eave - 4, Y), Point(Eave, Y + 4),
+        Point(Eave, Y + ASize), Point(Mid, Y + ASize), Point(Mid, Y)]);
+      Canvas.Polyline([Point(Eave - 4, Y), Point(Eave - 4, Y + 4), Point(Eave, Y + 4)]);
+    end;
   end;
 end;
 
@@ -232,10 +244,12 @@ begin
   if FHeading <> '' then
   begin
     Y := 2 * PadY + Length(FCaptions) * RowHeight + HeadingTop;
+    DrawIcon(niFiles, 2 * PadX, Y + (TextH - HeadingIconSize) div 2,
+      HeadingIconSize, FDim);
     Canvas.Brush.Style := bsClear;
     Canvas.Font.Style := [fsBold];
     Canvas.Font.Color := FDim;
-    Canvas.TextOut(2 * PadX, Y, FHeading);
+    Canvas.TextOut(2 * PadX + IconSize + IconGap, Y, FHeading);
     Canvas.Font.Style := [];
     Inc(Y, TextH + HeadingGap);
     Canvas.Pen.Style := psSolid;
