@@ -25,7 +25,7 @@ uses
   {$IFDEF LCLGtk3}gittan.gtktitlebar,{$ENDIF}
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
-  gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader,
+  gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader, gittan.hintbox,
   gittan.discard, gittan.keep, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, gittan.mdpreview, ATSynEdit_Gaps, md5;
 
@@ -250,7 +250,7 @@ type
     FCommitMemo: TMemo;
     FCommitAmend: TCheckBox;
     FCommitButton: TButton;
-    FCommitNote: TLabel;
+    FCommitNote: TGittanHintBox;
     FCommitItem: TMenuItem;
     FCommitJob: TGittanCommitJob;
     FCommitDraftFor, FAmendMessage: string;
@@ -1321,7 +1321,6 @@ resourcestring
   rsCommitMessageHint = {$IFDEF DARWIN}'Message (⌘↩ to commit)'{$ELSE}'Message (Ctrl+Enter to commit)'{$ENDIF};
   rsCommitCount = '%d of %d';
   rsCommitNotHead = 'Commits go on HEAD. Compare with HEAD to choose files.';
-  rsCommitBusy = 'Git is %s. Continue or abort it in a terminal first.';
   rsCommitConflicts = 'Resolve the conflicts first (%d files).';
   rsCommitConflictOne = 'Resolve the conflict first.';
   rsCommitWhole = 'While %s, everything staged goes into the commit too.';

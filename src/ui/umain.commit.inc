@@ -104,13 +104,10 @@ begin
   FCommitButton.AutoSize := True;
   FCommitButton.OnClick := @CommitButtonClick;
   FCommitButton.Parent := FCommitRow;
-  FCommitNote := TLabel.Create(Self);
+  FCommitNote := TGittanHintBox.Create(Self);
   FCommitNote.Align := alTop;
   FCommitNote.Top := 2000;
-  FCommitNote.WordWrap := True;
-  FCommitNote.AutoSize := True;
-  FCommitNote.BorderSpacing.Top := 4;
-  FCommitNote.Caption := '';
+  FCommitNote.BorderSpacing.Top := 8;
   FCommitNote.Visible := False;
   FCommitNote.Parent := FCommitBox;
   ColorCommit;
@@ -126,8 +123,9 @@ begin
     FileTree.SetFocus;
 end;
 
-{ The header in the other sections' palette, the note dimmed like their
-  details; the native controls keep the desktop's look. }
+{ The header in the other sections' palette, the note in a box tinted
+  with the accent of the tree's boxes, or red for conflicts; the native
+  controls keep the desktop's look. }
 procedure TForm1.ColorCommit;
 begin
   if FCommitHeader = nil then
@@ -136,13 +134,19 @@ begin
   begin
     FCommitHeader.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(62, 62, 62));
-    FCommitNote.Font.Color := RGBToColor(150, 150, 150);
+    FCommitNote.Font.Color := RGBToColor(200, 200, 200);
+    FCommitNote.SetColors(RGBToColor(33, 44, 58), RGBToColor(44, 66, 92),
+      RGBToColor(56, 34, 36), RGBToColor(100, 50, 54));
+    FCommitNote.GlyphColor := RGBToColor(150, 150, 150);
   end
   else
   begin
     FCommitHeader.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(232, 232, 232), RGBToColor(222, 222, 222));
-    FCommitNote.Font.Color := RGBToColor(110, 110, 110);
+    FCommitNote.Font.Color := RGBToColor(60, 60, 60);
+    FCommitNote.SetColors(RGBToColor(234, 243, 252), RGBToColor(200, 222, 245),
+      RGBToColor(253, 236, 236), RGBToColor(242, 198, 198));
+    FCommitNote.GlyphColor := RGBToColor(110, 110, 110);
   end;
 end;
 
@@ -436,7 +440,26 @@ begin
   FAbortButton.Enabled := not Busy;
   FSkipButton.Visible := Continuing;
   FSkipButton.Enabled := not Busy;
-  FCommitNote.Caption := Note;
+  FCommitNote.Text := Note;
+  { "Tick the files" beside a ticked box and the conflicts beside their
+    badge, as the tree draws them, the base beside a branch. }
+  FCommitNote.Warn := (FRepo.Base = '') and (FConflictFiles > 0);
+  if Note = rsCommitNotHead then
+    FCommitNote.Glyph := HintBranch
+  else
+    FCommitNote.Glyph := '';
+  if Note = rsCommitNothing then
+  begin
+    FCommitNote.Images := FCheckImages;
+    FCommitNote.Icon := checkOn;
+  end
+  else if FCommitNote.Warn then
+  begin
+    FCommitNote.Images := TreeImages;
+    FCommitNote.Icon := ChangeIcon(ckConflict);
+  end
+  else
+    FCommitNote.Icon := -1;
   FCommitNote.Visible := Note <> '';
   if FCommitItem <> nil then
     FCommitItem.Enabled := FRepo.Root <> '';
