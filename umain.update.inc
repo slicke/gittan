@@ -66,7 +66,7 @@ begin
   if not Manual then
     Exit;
   if not Job.Ok then
-    MessageDlg(rsUpdateTitle, Format(rsUpdateFailed, [Job.Error]), mtError, [mbOK], 0)
+    BannerError(rsUpdateTitle, Format(rsUpdateFailed, [Job.Error]))
   else if FHasUpdate then
     UpdateDialog
   else if CurrentBuild < 0 then
@@ -77,8 +77,7 @@ begin
       OpenURL(FUpdateRelease.Url);
   end
   else
-    MessageDlg(rsUpdateTitle, Format(rsUpdateCurrent, [CurrentBuild]), mtInformation,
-      [mbOK], 0);
+    BannerInfo(Format(rsUpdateCurrent, [CurrentBuild]));
 end;
 
 procedure TForm1.ShowUpdateBadge;

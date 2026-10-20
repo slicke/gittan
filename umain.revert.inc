@@ -64,7 +64,7 @@ begin
       FRevertUndo.AddObject(ALabel, Saved);
       Saved := nil;
     end;
-    MessageDlg(rsRevertFailed, FRepo.Error, mtError, [mbOK], 0);
+    BannerError(rsRevertFailed, FRepo.Error);
   end;
   Saved.Free;
   FSummary.Notice := '';

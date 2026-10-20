@@ -231,7 +231,7 @@ begin
       end
       else
       begin
-        MessageDlg(rsCaFailed, FRepo.Error, mtError, [mbOK], 0);
+        BannerError(rsCaFailed, FRepo.Error);
         Reopen := False;
       end;
       if Reopen then

@@ -1052,24 +1052,24 @@ begin
           mrCancel, rsCancelButton, 'IsCancel'], 0) of
         mrYes:
           if not FRepo.Stash(Format(rsStashMessage, [ABranch])) then
-            MessageDlg(rsStashFailed, FRepo.Error, mtError, [mbOK], 0)
+            BannerError(rsStashFailed, FRepo.Error)
           else if FRepo.Switch(ABranch) then
             Switched(Format(rsStashedSwitched, [ABranch]))
           else
           begin
             RefreshRepository;
-            MessageDlg(Format(rsSwitchFailed, [ABranch]), FRepo.Error + LineEnding +
-              LineEnding + rsStashKept, mtError, [mbOK], 0);
+            BannerError(Format(rsSwitchFailed, [ABranch]), FRepo.Error + LineEnding +
+              LineEnding + rsStashKept);
           end;
         mrNo:
           if FRepo.Switch(ABranch, True) then
             Switched(Format(rsSwitchedAlong, [ABranch]))
           else
-            MessageDlg(Format(rsSwitchFailed, [ABranch]), FRepo.Error, mtError, [mbOK], 0);
+            BannerError(Format(rsSwitchFailed, [ABranch]), FRepo.Error);
       end;
     end
     else
-      MessageDlg(Format(rsSwitchFailed, [ABranch]), FRepo.Error, mtError, [mbOK], 0);
+      BannerError(Format(rsSwitchFailed, [ABranch]), FRepo.Error);
   finally
     Files.Free;
   end;

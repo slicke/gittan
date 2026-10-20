@@ -580,7 +580,7 @@ begin
   UpdateCommitState;
   UpdateRemoteItems;
   if not Job.Ok then
-    MessageDlg(rsCommitFailed, Job.Error, mtError, [mbOK], 0);
+    BannerError(rsCommitFailed, Job.Error);
 end;
 
 { A commit is never broken off: one still running when the repository

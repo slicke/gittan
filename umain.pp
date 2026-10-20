@@ -27,7 +27,7 @@ uses
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader,
   gittan.discard, gittan.keep, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
-  gittan.commitgraph, gittan.notice, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, gittan.mdpreview, ATSynEdit_Gaps, md5;
+  gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, gittan.mdpreview, ATSynEdit_Gaps, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -416,6 +416,9 @@ type
     FNotice: TGittanNotice;
     FNoticeTimer: TTimer;
     FNoticeHook: boolean;
+    { The banner over the file header and the summary: what failed, until
+      it is closed (BannerError). }
+    FBanner: TGittanBanner;
     { What a failure notice's first button runs again. }
     FRetryKind: TGittanRemoteKind;
     FRetryMode: TGittanPullMode;
@@ -1080,8 +1083,19 @@ type
     function FileLineOfRow(AEd: TATSynEdit; ARow: integer): integer;
     procedure StatusPartClick(Sender: TObject; APart: TGittanStatusPart;
       const AScreenRect: TRect);
-    {** Shows AText in the status bar for a while, in red when AError. }
+    {** Shows AText in the status bar for a while, or an error in the
+      banner, its first line as the title. }
     procedure StatusNote(const AText: string; AError: boolean = False);
+    {** Shows a failure in the banner until it is closed: ATitle in bold,
+      ADetail (git's error, say) after it and unfolded on demand. }
+    procedure BannerError(const ATitle, ADetail: string);
+    {** Shows a note in the banner for a few seconds. }
+    procedure BannerInfo(const ATitle: string; const ADetail: string = '');
+    procedure BannerChange(Sender: TObject);
+    {** Gives the space under the macOS title bar to the top control of
+      the editor panel: the banner while it is shown, else the file
+      header and the summary. }
+    procedure PlaceUnderTitleBar;
     {** The caret's line and column in the status bar while the editor
       shows a file, nothing elsewhere. }
     procedure UpdateStatusPosition;
@@ -1599,6 +1613,8 @@ const
   { How long a note in the status bar stays, and an error; seconds. }
   StatusNoteSeconds = 6;
   StatusErrorSeconds = 12;
+  { How long a note stays in the banner. }
+  BannerInfoSeconds = 8;
   { How long the pull request data is kept before gh is asked again,
     while checks run and otherwise; ms. }
   PullPollPending = 30000;
@@ -1864,6 +1880,13 @@ begin
   FHeader.ConflictNav.OnNext := @MenuNextConflictClick;
   FHeader.OnAction := @HeaderAction;
   UpdateChangeNav;
+  { The banner sits over the header, hidden until something fails. }
+  FBanner := TGittanBanner.Create(Self);
+  FBanner.Parent := EditorPanel;
+  FBanner.Top := 0;
+  FBanner.Align := alTop;
+  FBanner.Visible := False;
+  FBanner.OnChange := @BannerChange;
   { The find bar sits under the header, above the editor. }
   FFindBar := TGittanFindBar.Create(Self);
   FFindBar.Parent := EditorPanel;
@@ -2313,6 +2336,9 @@ begin
     FNotice.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(0, 110, 230), RGBToColor(241, 112, 112));
+    FBanner.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(62, 62, 62), RGBToColor(62, 62, 62),
+      RGBToColor(100, 160, 240), RGBToColor(248, 81, 73));
     FPullPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
@@ -2370,6 +2396,9 @@ begin
     FNotice.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230), RGBToColor(200, 40, 40));
+    FBanner.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(222, 222, 222), RGBToColor(222, 222, 222),
+      RGBToColor(0, 110, 230), RGBToColor(207, 34, 46));
     FPullPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
@@ -2577,11 +2606,63 @@ begin
 end;
 
 procedure TForm1.StatusNote(const AText: string; AError: boolean);
+var
+  S: string;
+  i: integer;
 begin
   if AError then
-    FStatus.ShowMessage(AText, stBad, StatusErrorSeconds)
+  begin
+    S := Trim(AText);
+    i := Pos(LineEnding, S);
+    if i > 0 then
+      BannerError(Copy(S, 1, i - 1), Copy(S, i + Length(LineEnding), MaxInt))
+    else
+      BannerError(S, '');
+  end
   else
     FStatus.ShowMessage(AText, stNormal, StatusNoteSeconds);
+end;
+
+procedure TForm1.BannerError(const ATitle, ADetail: string);
+begin
+  FBanner.DetailFont.Assign(Edit.Font);
+  FBanner.Add(ATitle, ADetail, bkError);
+end;
+
+procedure TForm1.BannerInfo(const ATitle: string; const ADetail: string);
+begin
+  FBanner.DetailFont.Assign(Edit.Font);
+  FBanner.Add(ATitle, ADetail, bkInfo, BannerInfoSeconds);
+end;
+
+procedure TForm1.BannerChange(Sender: TObject);
+begin
+  PlaceUnderTitleBar;
+end;
+
+{ The banner is the first alTop control of the panel when shown (Top 0
+  puts it before the header), and takes the strip's height as its own
+  spacing so the header under it does not leave a gap. }
+procedure TForm1.PlaceUnderTitleBar;
+begin
+  EditorPanel.DisableAlign;
+  try
+    if FBanner.Visible then
+    begin
+      FBanner.BorderSpacing.Top := FTitleBarHeight;
+      FBanner.Top := 0;
+      FHeader.BorderSpacing.Top := 0;
+      FSummaryBox.BorderSpacing.Top := 0;
+    end
+    else
+    begin
+      FBanner.BorderSpacing.Top := 0;
+      FHeader.BorderSpacing.Top := FTitleBarHeight;
+      FSummaryBox.BorderSpacing.Top := FTitleBarHeight;
+    end;
+  finally
+    EditorPanel.EnableAlign;
+  end;
 end;
 
 { The line is the file's own: in the change view the new side's number,
@@ -3811,6 +3892,8 @@ begin
   FSubInfos := nil;
   FSubKey := '';
   FSubShown := '';
+  { Its failures are not this one's. }
+  FBanner.Clear;
   if not FRepo.Open(ADir) then
   begin
     FCommitDraftFor := '';
@@ -4788,8 +4871,7 @@ begin
   { With the toolbar's field in its place the page rows are at the top. }
   if not FTreeFilter.Visible then
     FSideNav.BorderSpacing.Top := FTitleBarHeight;
-  FHeader.BorderSpacing.Top := FTitleBarHeight;
-  FSummaryBox.BorderSpacing.Top := FTitleBarHeight;
+  PlaceUnderTitleBar;
   TreeSplitter.BorderSpacing.Top := FTitleBarHeight;
   ColorSidebar;
 end;

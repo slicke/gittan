@@ -207,7 +207,7 @@ begin
   FRetryKind := AJob.Kind;
   FRetryMode := AJob.Mode;
   FRetryArg := AJob.Arg;
-  StatusNote(Title, True);
+  FStatus.ShowMessage(Title, stBad, StatusErrorSeconds);
   FNotice.DetailFont.Assign(Edit.Font);
   FNotice.Popup(Title, AJob.Error, False, nkBad);
   FNotice.SetButtons([Again, rsCopyOutput]);

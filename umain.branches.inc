@@ -150,7 +150,7 @@ begin
     StatusNote(Format(rsCaBranched, [Trim(Values[0])]));
   end
   else
-    MessageDlg(rsCaFailed, FRepo.Error, mtError, [mbOK], 0);
+    BannerError(rsCaFailed, FRepo.Error);
   StartWatcher;
 end;
 
@@ -170,7 +170,7 @@ begin
     StatusNote(Format(rsBmRenamed, [AName, Trim(Values[0])]));
   end
   else
-    MessageDlg(rsCaFailed, FRepo.Error, mtError, [mbOK], 0);
+    BannerError(rsCaFailed, FRepo.Error);
   StartWatcher;
 end;
 
@@ -198,7 +198,7 @@ begin
     StatusNote(Format(rsBmDeleted, [AName]));
   end
   else
-    MessageDlg(rsCaFailed, FRepo.Error, mtError, [mbOK], 0);
+    BannerError(rsCaFailed, FRepo.Error);
 end;
 
 { The branches whose upstream is gone, the current one left out: the
@@ -338,7 +338,7 @@ begin
     Exit;
   if not FRepo.CommitsToRebase(ARef, Count, Pushed) then
   begin
-    MessageDlg(rsCaFailed, FRepo.Error, mtError, [mbOK], 0);
+    BannerError(rsCaFailed, FRepo.Error);
     Exit;
   end;
   if Count = 0 then
@@ -372,7 +372,7 @@ begin
   else if Conflicts then
     StatusNote(rsCaConflicts, True)
   else
-    MessageDlg(rsCaFailed, FRepo.Error, mtError, [mbOK], 0);
+    BannerError(rsCaFailed, FRepo.Error);
 end;
 
 { ---------------------------------------------------------------------------
@@ -455,5 +455,5 @@ begin
   else if Conflicts then
     StatusNote(rsCaConflicts, True)
   else
-    MessageDlg(rsCaFailed, FRepo.Error, mtError, [mbOK], 0);
+    BannerError(rsCaFailed, FRepo.Error);
 end;
