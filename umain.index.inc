@@ -6,11 +6,19 @@
   and the hover reach past the changed files. OpenRepository starts the
   indexing: the index of the repository is read from disk (one file per
   repository in the user's cache folder, see IndexCacheDir), the files git lists are
-  queued, and those whose size or time differ from the index are parsed
-  one at a time in FIndexEdit, a hidden editor with its own adapter.
-  The parse runs in the adapter's thread; its done event (IndexParseDone)
-  collects the symbols and queues the next file from the message loop,
-  so the window stays responsive. A file that never reports (FIndexTimer)
+  queued, sorted by extension so files of one lexer follow each other,
+  and those whose size or time differ from the index are parsed one at
+  a time in FIndexEdit, a hidden editor with its own adapter. The parse
+  runs in the adapter's thread; its done event (IndexParseDone) collects
+  the symbols and queues the next file from the message loop, so the
+  window stays responsive. The adapter keeps its lexer, and with it its
+  parser thread, from one file to the next: loading a file into the
+  editor starts the parse. It is given a new lexer only when the file
+  needs another one, or when a parse is still running (after a timeout,
+  or a repository closed mid-parse), since the thread ends with the
+  lexer, which takes up to a tenth of a second, and a done event of a
+  parse that is still running must not be taken for the next file's.
+  A file that never reports (FIndexTimer)
   or is larger than MaxIndexedSize is entered without symbols, so it is
   not tried again. The index is written when the indexing ends and when
   the repository or the window is closed. The changed files are also
@@ -22,6 +30,15 @@ const
   MaxIndexedSize = 2 * 1024 * 1024;
   { How often the status bar shows the indexing progress. }
   IndexReportEvery = 25;
+
+{ Orders the queue by extension, then by path, so the files of one
+  lexer come together and the adapter seldom changes lexer. }
+function CompareByExt(List: TStringList; Index1, Index2: integer): integer;
+begin
+  Result := CompareStr(ExtractFileExt(List[Index1]), ExtractFileExt(List[Index2]));
+  if Result = 0 then
+    Result := CompareStr(List[Index1], List[Index2]);
+end;
 
 { The index file of the open repository: in the cache folder, named by
   a hash of the root. }
@@ -64,6 +81,7 @@ begin
   end;
   { Files git no longer lists are dropped. }
   FIndex.KeepOnly(FIndexQueue);
+  FIndexQueue.CustomSort(@CompareByExt);
   FIndexPos := 0;
   FIndexTotal := FIndexQueue.Count;
   FIndexing := True;
@@ -122,10 +140,19 @@ begin
     if E.Indexed then
       Continue;
     FIndexCurrent := Path;
-    FIndexAdapter.Lexer := nil;
-    FIndexEdit.LoadFromFile(Full, []);
-    FIndexEdit.FileName := Full;
-    SetEditorLexer(FIndexEdit, Lexer);
+    if (FIndexAdapter.Lexer = Lexer) and not FIndexAdapter.IsParsingBusy then
+    begin
+      { Loading the text starts the parse through the change event. }
+      FIndexEdit.LoadFromFile(Full, []);
+      FIndexEdit.FileName := Full;
+    end
+    else
+    begin
+      FIndexAdapter.Lexer := nil;
+      FIndexEdit.LoadFromFile(Full, []);
+      FIndexEdit.FileName := Full;
+      SetEditorLexer(FIndexEdit, Lexer);
+    end;
     FIndexTimer.Enabled := True;
     Exit;
   end;
