@@ -13,7 +13,13 @@
   The graph closes when an item is picked; after an action that changes
   the history it opens again, so the result is in view. A merge,
   cherry-pick or revert that stops with conflicts leaves them to the
-  Commit section. The watcher is stopped meanwhile, as for a switch. }
+  Commit section. The watcher is stopped meanwhile, as for a switch.
+  Two commits are compared through a mark: Mark for Comparison keeps
+  one (FMarkHash, by the name it goes by in FMarkName, shown in the
+  accent in the graph, which stays open), and the menu of another then
+  offers Compare with Marked <name>: the base becomes the range from
+  the older of the two to the newer (by their times, FMarkDate), so the
+  views show what changed between them going forward. }
 const
   caShow = 1;
   caCompare = 2;
@@ -28,6 +34,8 @@ const
   caResetHard = 11;
   caCopy = 12;
   caGitHub = 13;
+  caMark = 14;
+  caCompareMarked = 15;
 
 procedure TForm1.GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
   const AScreenPos: TPoint);
@@ -86,6 +94,12 @@ begin
   FCommitPopup.Items.Clear;
   Add(nil, rsCaShow, caShow);
   Add(nil, rsCaCompare, caCompare);
+  if FMarkHash = ACommit.Hash then
+    Add(nil, rsCaUnmark, caMark)
+  else
+    Add(nil, rsCaMark, caMark);
+  if (FMarkHash <> '') and (FMarkHash <> ACommit.Hash) then
+    Add(nil, Format(rsCaCompareMarked, [Amp(FMarkName)]), caCompareMarked);
   Line;
   for i := 0 to High(ACommit.Refs) do
     if (ACommit.Refs[i].Kind = grBranch) and (ACommit.Refs[i].Name <> FBranch) then
@@ -126,12 +140,33 @@ begin
   Short := FActionCommit.Short;
   if (FRepo.Root = '') or (Hash = '') then
     Exit;
+  if (Sender as TMenuItem).Tag = caMark then
+  begin
+    if FMarkHash = Hash then
+    begin
+      FMarkHash := '';
+      FMarkName := '';
+    end
+    else
+    begin
+      FMarkHash := Hash;
+      FMarkName := FActionName;
+      FMarkDate := FActionCommit.Date;
+    end;
+    FGraph.Marked := FMarkHash;
+    Exit;
+  end;
   FGraph.Close;
   case (Sender as TMenuItem).Tag of
     caShow:
       ShowBlameCommit(Hash);
     caCompare:
       SetBase(Hash);
+    caCompareMarked:
+      if FMarkDate > FActionCommit.Date then
+        SetBase(FActionName + '..' + FMarkName)
+      else
+        SetBase(FMarkName + '..' + FActionName);
     caSwitch:
       SwitchBranch((Sender as TMenuItem).Hint);
     caCopy:

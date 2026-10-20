@@ -435,6 +435,12 @@ type
       with LayoutGraph; false before the first commit. }
     function GraphCommits(out ACommits: TGittanGraphCommits;
       AMax: integer = 500): boolean;
+    {** The ids of the commits of every local and remote branch, every
+      tag and HEAD that touched APath, a file or a folder relative to
+      Root, newest first, at most AMax; a file is followed through its
+      renames. False when git failed, as before the first commit. }
+    function PathCommits(const APath: string; AHashes: TStrings;
+      AMax: integer = 50000): boolean;
     {** The git directory of the work tree (a linked work tree has one of
       its own), empty when nothing is open. }
     function GitDir: string;
@@ -3337,22 +3343,22 @@ begin
   end;
 end;
 
-{ The fields are split at unit separators, the subject last since it
-  may hold anything. The commits not pushed (or not pulled) are read
-  with the same cut, so every one in the log is marked. }
+{ The fields are split at unit separators and the commits at NULs (-z),
+  since the body, last, may hold anything, line breaks too. The commits
+  not pushed (or not pulled) are read with the same cut, so every one in
+  the log is marked. }
 function TGittanRepo.GraphCommits(out ACommits: TGittanGraphCommits;
   AMax: integer): boolean;
 var
   Output, Ahead, Behind: string;
-  Lines: TStringList;
-  Fields: TStringArray;
+  Records, Fields: TStringArray;
   i: integer;
   Seconds: int64;
 begin
   ACommits := nil;
   Result := (FRoot <> '') and RunGit(FRoot, ['log', '--no-color', '--topo-order',
-    '--decorate=full', '-n', IntToStr(AMax),
-    '--format=%H%x1f%P%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%s',
+    '--decorate=full', '-z', '-n', IntToStr(AMax),
+    '--format=%H%x1f%P%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%s%x1f%b',
     '--branches', '--remotes', '--tags', 'HEAD'], Output);
   if not Result then
     Exit;
@@ -3360,38 +3366,70 @@ begin
     Ahead := '';
   if not RunGit(FRoot, ['rev-list', '-n', IntToStr(AMax), 'HEAD..@{upstream}'], Behind) then
     Behind := '';
-  Lines := TStringList.Create;
-  try
-    Lines.Text := Output;
-    for i := 0 to Lines.Count - 1 do
+  Records := Output.Split([#0]);
+  for i := 0 to High(Records) do
+  begin
+    Fields := Records[i].Split([#31]);
+    if Length(Fields) < 8 then
+      Continue;
+    SetLength(ACommits, Length(ACommits) + 1);
+    with ACommits[High(ACommits)] do
     begin
-      Fields := SplitString(Lines[i], #31);
-      if Length(Fields) < 7 then
-        Continue;
-      SetLength(ACommits, Length(ACommits) + 1);
-      with ACommits[High(ACommits)] do
-      begin
-        Hash := Fields[0];
-        if Fields[1] = '' then
-          Parents := nil
-        else
-          Parents := Fields[1].Split([' ']);
-        Short := Fields[2];
-        Author := Fields[3];
-        if TryStrToInt64(Fields[4], Seconds) then
-          Date := UnixToDateTime(Seconds)
-        else
-          Date := 0;
-        Refs := ParseGraphRefs(Fields[5]);
-        Subject := Fields[6];
-        Unpushed := Pos(Hash, Ahead) > 0;
-        Unpulled := Pos(Hash, Behind) > 0;
-      end;
+      Hash := Fields[0];
+      if Fields[1] = '' then
+        Parents := nil
+      else
+        Parents := Fields[1].Split([' ']);
+      Short := Fields[2];
+      Author := Fields[3];
+      if TryStrToInt64(Fields[4], Seconds) then
+        Date := UnixToDateTime(Seconds)
+      else
+        Date := 0;
+      Refs := ParseGraphRefs(Fields[5]);
+      Subject := Fields[6];
+      Body := TrimRight(Fields[7]);
+      Unpushed := Pos(Hash, Ahead) > 0;
+      Unpulled := Pos(Hash, Behind) > 0;
     end;
-  finally
-    Lines.Free;
   end;
   LayoutGraph(ACommits);
+end;
+
+{ --literal-pathspecs, so a path with a glob character is the path. A
+  folder is not followed: --follow wants one file. }
+function TGittanRepo.PathCommits(const APath: string; AHashes: TStrings;
+  AMax: integer): boolean;
+var
+  Output: string;
+  Args: array of string;
+  n: integer;
+begin
+  AHashes.Clear;
+  if (FRoot = '') or (APath = '') then
+    Exit(False);
+  SetLength(Args, 12);
+  Args[0] := '--literal-pathspecs';
+  Args[1] := 'log';
+  Args[2] := '--format=%H';
+  Args[3] := '-n';
+  Args[4] := IntToStr(AMax);
+  n := 5;
+  if not DirectoryExists(FullPath(APath)) then
+  begin
+    Args[n] := '--follow';
+    Inc(n);
+  end;
+  Args[n] := '--branches';
+  Args[n + 1] := '--remotes';
+  Args[n + 2] := '--tags';
+  Args[n + 3] := 'HEAD';
+  Args[n + 4] := '--';
+  Args[n + 5] := APath;
+  SetLength(Args, n + 6);
+  Result := RunGit(FRoot, Args, Output);
+  if Result then
+    AHashes.Text := Output;
 end;
 
 function TGittanRepo.Branch: string;

@@ -147,6 +147,7 @@ type
       label with what RevertFiles saved (a TStringList), latest last. }
     FContextFolder: string;
     FRevertItem, FRevertFileItem, FUndoRevertItem: TMenuItem;
+    FFileHistoryItem: TMenuItem;
     FRevertUndo: TStringList;
     { The GitHub items of the editor menu, made only when gh is installed
       (the file menu's is enabled with the rest of its items); the editor the editor menu popped up over and the
@@ -261,6 +262,10 @@ type
     FCommitPopup: TPopupMenu;
     FActionCommit: TGittanGraphCommit;
     FActionName: string;
+    { The commit marked in the commit graph for a comparison, and the
+      name it goes by (see umain.commitactions.inc). }
+    FMarkHash, FMarkName: string;
+    FMarkDate: TDateTime;
     FMergeMessage: string;
     { Fetch, pull and push (umain.remote.inc): the job while it runs,
       the commits ahead and HEAD when it started, the menu items, and
@@ -785,6 +790,7 @@ type
       const ARect: TRect; Stage: TCustomDrawStage; var DefaultDraw: boolean);
     { umain.history.inc }
     procedure MenuHistoryClick(Sender: TObject);
+    procedure MenuGoFileHistoryClick(Sender: TObject);
     function ChunkRows(out AFrom, ATo: integer; out AName: string): boolean;
     function EnclosingRange(AAdapter: TATAdapterEControl; ARow: integer;
       out AFrom, ATo: integer; out AName: string): boolean;
@@ -910,7 +916,9 @@ type
     procedure SummaryOpenUrl(Sender: TObject; const AUrl: string);
     procedure SummarySelectCommit(Sender: TObject; const AHash: string);
     procedure BranchPopupPick(Sender: TObject; AIndex: integer);
-    procedure ShowCommitGraph;
+    procedure ShowCommitGraph(const AFilter: string = '');
+    procedure GraphMore(Sender: TObject);
+    procedure GraphPathCommits(Sender: TObject; const APath: string; AHashes: TStrings);
     procedure MenuCommitGraphClick(Sender: TObject);
     procedure GraphPick(Sender: TObject; const AHash: string);
     procedure PullChipClick(const AScreenRect: TRect);
@@ -982,6 +990,7 @@ type
     function CanRevert: boolean;
     procedure RevertPaths(APaths: TStrings; const ALabel: string);
     procedure MenuRevertChangesClick(Sender: TObject);
+    procedure MenuFileHistoryClick(Sender: TObject);
     procedure MenuRevertFileClick(Sender: TObject);
     procedure MenuUndoRevertClick(Sender: TObject);
     function IsChangedPath(const APath: string): boolean;
@@ -1242,6 +1251,7 @@ resourcestring
   rsNotCommittedYet = 'Not committed yet';
   rsCommit = 'commit %s';
   rsHistory = 'Code &History';
+  rsGoFileHistory = 'Fi&le History';
   rsHistoryTitle = 'History of %s';
   rsHistoryIn = '%s in %s';
   rsHistoryLines = 'lines %d-%d';
@@ -1365,6 +1375,9 @@ resourcestring
   rsPullAction = 'Pull';
   rsCaShow = 'Show Commit';
   rsCaCompare = 'Compare with Working Tree';
+  rsCaMark = 'Mark for Comparison';
+  rsCaUnmark = 'Unmark';
+  rsCaCompareMarked = 'Compare with Marked %s';
   rsCaSwitch = 'Switch to %s';
   rsCaBranch = 'Create Branch Here...';
   rsCaTag = 'Create Tag Here...';
@@ -1604,6 +1617,7 @@ resourcestring
   rsRevertFile = 'Re&vert File...';
   rsUndoRevert = 'Undo Re&vert';
   rsRevertChangesItem = 'Revert Changes...';
+  rsFileHistoryItem = 'Show History';
   rsRevertTitle = 'Revert';
   rsRevertFilesAsk = 'Revert %s to how HEAD has it? Your changes are undone, and a new ' +
     'file is deleted. File > Undo Revert brings them back.';
@@ -2097,6 +2111,8 @@ begin
   FGraph.Parent := Self;
   FGraph.OnPick := @GraphPick;
   FGraph.OnContext := @GraphContext;
+  FGraph.OnMore := @GraphMore;
+  FGraph.OnPathCommits := @GraphPathCommits;
   FCommitPopup := TPopupMenu.Create(Self);
   FPullPopup := TGittanPopupList.Create(Self);
   FPullPopup.Parent := Self;
@@ -3062,6 +3078,7 @@ begin
     @MenuChangedSymbolsClick);
   AddItem(GoMenu, rsCallers, ShortCut(VK_C, [ssModifier, ssShift]), @MenuCallersClick);
   AddItem(GoMenu, rsHistory, ShortCut(VK_H, [ssModifier, ssShift]), @MenuHistoryClick);
+  AddItem(GoMenu, rsGoFileHistory, 0, @MenuGoFileHistoryClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextChange, ShortCut(VK_F7, []), @MenuNextChangeClick);
   AddItem(GoMenu, rsPrevChange, ShortCut(VK_F7, [ssShift]), @MenuPrevChangeClick);
@@ -4034,6 +4051,8 @@ begin
   ClearRevertUndo;
   UpdateDiscardItems;
   FPullRange := '';
+  FMarkHash := '';
+  FMarkName := '';
   AbandonReviewJob;
   ClearReviews;
   FThreadFlips.Clear;

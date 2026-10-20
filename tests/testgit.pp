@@ -57,6 +57,7 @@ type
     procedure TestSyncCommits;
     procedure TestRecentCommits;
     procedure TestGraphCommits;
+    procedure TestPathCommits;
     procedure TestOperation;
     procedure TestBranchesAndSwitch;
     procedure TestGoneBranches;
@@ -993,7 +994,7 @@ end;
 procedure TGitRepoTest.TestGraphCommits;
 var
   Remote, Branch, Output: string;
-  Code: integer;
+  Code, i: integer;
   Commits: TGittanGraphCommits;
 begin
   Git(['init', '-q']);
@@ -1006,12 +1007,17 @@ begin
   Commit('on side');
   Git(['checkout', '-q', Branch]);
   WriteFile('a.txt', 'main'#10);
-  Commit('on main');
+  Git(['add', '-A']);
+  Git(['commit', '-q', '-m', 'on main', '-m', 'A body'#10#10'of two paragraphs']);
   Git(['merge', '-q', '--no-ff', '-m', 'merge side', 'side']);
   Git(['tag', 'v1']);
   AssertTrue(FRepo.GraphCommits(Commits));
   AssertEquals(4, Length(Commits));
   AssertEquals('merge side', Commits[0].Subject);
+  AssertEquals('', Commits[0].Body);
+  for i := 0 to High(Commits) do
+    if Commits[i].Subject = 'on main' then
+      AssertEquals('A body'#10#10'of two paragraphs', Commits[i].Body);
   AssertEquals(2, Length(Commits[0].Parents));
   AssertEquals(0, Length(Commits[3].Parents));
   AssertEquals('files', Commits[3].Subject);
@@ -1041,6 +1047,40 @@ begin
     AssertFalse(Commits[1].Unpushed);
   finally
     RemoveTree(Remote);
+  end;
+end;
+
+{ A file is followed through its rename; a folder lists what changed
+  under it. }
+procedure TGitRepoTest.TestPathCommits;
+var
+  Hashes: TStringList;
+begin
+  Hashes := TStringList.Create;
+  try
+    Git(['init', '-q']);
+    AssertTrue(FRepo.Open(FDir));
+    AssertFalse(FRepo.PathCommits('a.txt', Hashes));
+    MakeHistory;
+    WriteFile('a.txt', 'one'#10'two'#10'three'#10'four'#10);
+    Commit('a again');
+    Git(['mv', 'a.txt', 'b.txt']);
+    Commit('renamed');
+    WriteFile('dir sp/other.txt', 'b'#10);
+    Commit('in the folder');
+    AssertTrue(FRepo.PathCommits('b.txt', Hashes));
+    AssertEquals(3, Hashes.Count);
+    AssertEquals(Trim(Git(['rev-parse', 'HEAD~1'])), Hashes[0]);
+    AssertEquals(Trim(Git(['rev-parse', 'HEAD~3'])), Hashes[2]);
+    AssertTrue(FRepo.PathCommits('dir sp', Hashes));
+    AssertEquals(2, Hashes.Count);
+    AssertEquals(Trim(Git(['rev-parse', 'HEAD'])), Hashes[0]);
+    AssertTrue(FRepo.PathCommits('missing.txt', Hashes));
+    AssertEquals(0, Hashes.Count);
+    AssertTrue(FRepo.PathCommits(QuoteName, Hashes));
+    AssertEquals(1, Hashes.Count);
+  finally
+    Hashes.Free;
   end;
 end;
 

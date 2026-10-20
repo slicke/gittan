@@ -7,7 +7,7 @@ unit testgraph;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.graph;
+  Classes, SysUtils, DateUtils, fpcunit, testregistry, gittan.graph;
 
 type
   TGraphTest = class(TTestCase)
@@ -21,6 +21,7 @@ type
     procedure TestTwoTips;
     procedure TestMissingParent;
     procedure TestRefs;
+    procedure TestFilter;
   end;
 
 implementation
@@ -141,6 +142,49 @@ begin
   AssertEquals(1, Length(Refs));
   AssertTrue('detached', Refs[0].Kind = grHead);
   AssertEquals(0, Length(ParseGraphRefs('')));
+end;
+
+{ The parts of a typed filter, and what a commit must have to match it;
+  the words and texts are matched as given, here in lower case. }
+procedure TGraphTest.TestFilter;
+var
+  F: TGittanGraphFilter;
+  D: TDateTime;
+begin
+  AssertTrue(GraphFilterEmpty(ParseGraphFilter('')));
+  AssertTrue(GraphFilterEmpty(ParseGraphFilter('  author:  since:20 ')));
+  F := ParseGraphFilter('fix Author:ann since:2024-06 until:2024-06-15 ' +
+    'path:"src/a b.pp" "two words" after:2024 path:c.pp');
+  AssertFalse(GraphFilterEmpty(F));
+  AssertEquals(2, Length(F.Words));
+  AssertEquals('fix', F.Words[0]);
+  AssertEquals('two words', F.Words[1]);
+  AssertEquals(1, Length(F.Authors));
+  AssertEquals('ann', F.Authors[0]);
+  AssertEquals(2, Length(F.Paths));
+  AssertEquals('src/a b.pp', F.Paths[0]);
+  AssertEquals('c.pp', F.Paths[1]);
+  { The later since wins. }
+  AssertEquals(EncodeDate(2024, 1, 1), F.Since);
+  AssertEquals(EncodeDate(2024, 6, 16), F.Before);
+  F := ParseGraphFilter('until:2023');
+  AssertEquals(0.0, F.Since);
+  AssertEquals(EncodeDate(2024, 1, 1), F.Before);
+
+  F := ParseGraphFilter('fix two author:ann since:2024-06-01 until:2024-06-15');
+  D := LocalTimeToUniversal(EncodeDate(2024, 6, 10) + 0.5);
+  AssertTrue(MatchesGraphFilter(F, 'fix one two ann abc1234', 'ann', D));
+  AssertFalse('a word missing', MatchesGraphFilter(F, 'fix one ann abc1234', 'ann', D));
+  AssertFalse('another author', MatchesGraphFilter(F, 'fix two', 'bob', D));
+  AssertFalse('too early', MatchesGraphFilter(F, 'fix two', 'ann',
+    LocalTimeToUniversal(EncodeDate(2024, 5, 31) + 0.9)));
+  AssertTrue('the last day counts', MatchesGraphFilter(F, 'fix two', 'ann',
+    LocalTimeToUniversal(EncodeDate(2024, 6, 15) + 0.9)));
+  AssertFalse('too late', MatchesGraphFilter(F, 'fix two', 'ann',
+    LocalTimeToUniversal(EncodeDate(2024, 6, 16))));
+  F := ParseGraphFilter('author:ann author:bob');
+  AssertTrue('any author', MatchesGraphFilter(F, '', 'bob', D));
+  AssertTrue('nothing asked', MatchesGraphFilter(ParseGraphFilter(''), '', '', 0));
 end;
 
 initialization

@@ -44,12 +44,12 @@ type
   TGittanGraphEdges = array of TGittanGraphEdge;
 
   {** A commit of the graph: what git log gives (the id, the short id,
-    the parents' ids, the author, the commit time in UTC, the subject
-    and the refs on it), whether it is on HEAD and not on its upstream
+    the parents' ids, the author, the commit time in UTC, the subject,
+    the rest of the message and the refs on it), whether it is on HEAD and not on its upstream
     (not pushed) or the other way round (not pulled), and from
     LayoutGraph its lane, its color and the lines of its row. }
   TGittanGraphCommit = record
-    Hash, Short, Author, Subject: string;
+    Hash, Short, Author, Subject, Body: string;
     Parents: TStringArray;
     Date: TDateTime;
     Refs: TGittanGraphRefs;
@@ -58,6 +58,19 @@ type
     TopEdges, BottomEdges: TGittanGraphEdges;
   end;
   TGittanGraphCommits = array of TGittanGraphCommit;
+
+  {** What the graph's search field asks for, read by ParseGraphFilter:
+    the words every commit shown must have (in its subject, its body,
+    its author or its id), the authors it may be by (one must match
+    when there are any), the first moment its time may be (Since) and
+    the first it may not (Before), both in local time and 0 for no
+    bound, and the paths it must touch. The words and the authors are
+    kept as typed: a caller that wants no case folds them and the
+    texts it matches with MatchesGraphFilter the same way. }
+  TGittanGraphFilter = record
+    Words, Authors, Paths: TStringArray;
+    Since, Before: TDateTime;
+  end;
 
 {** Lays out ACommits, newest first and every commit before its parents,
   setting each one's Lane, Color, TopEdges and BottomEdges. A parent
@@ -73,10 +86,31 @@ function GraphWidth(const ACommits: TGittanGraphCommits): integer;
   names and kinds, in that order; a remote's HEAD is left out. }
 function ParseGraphRefs(const ADecoration: string): TGittanGraphRefs;
 
+{** Reads AText as words separated by spaces, double quotes keeping a
+  phrase together ("path:my file.txt", or path:"my file.txt"), with
+  "author:", "since:" (or "after:"), "until:" (or "before:") and
+  "path:" naming a part; the names are read in any case. A date is a
+  year, a year and month or a day (2024, 2024-06, 2024-06-15); since
+  is from its start, until to its end. A part with nothing after the
+  colon, or a date that does not read as one yet, is left out, so the
+  list does not empty while it is typed. }
+function ParseGraphFilter(const AText: string): TGittanGraphFilter;
+
+{** Whether the filter asks for nothing at all. }
+function GraphFilterEmpty(const AFilter: TGittanGraphFilter): boolean;
+
+{** Whether a commit matches the filter's words, authors and dates:
+  AText is the text the words are looked for in (its subject, body,
+  author and id), AAuthor its author, ADate its time in UTC. Whether
+  it touches the paths is the caller's to find out. }
+function MatchesGraphFilter(const AFilter: TGittanGraphFilter;
+  const AText, AAuthor: string; ADate: TDateTime): boolean;
+
+
 implementation
 
 uses
-  Math, StrUtils;
+  Math, StrUtils, DateUtils;
 
 procedure LayoutGraph(var ACommits: TGittanGraphCommits);
 var
@@ -258,6 +292,151 @@ begin
       Add(Copy(Part, Length('refs/tags/') + 1, MaxInt), grTag);
     { Anything else (refs/stash, notes) is not shown. }
   end;
+end;
+
+
+{ The tokens of AText: runs of anything but spaces, a quoted phrase kept
+  together with its quotes dropped. }
+function SplitFilter(const AText: string): TStringArray;
+var
+  i: integer;
+  Token: string;
+  Quoted: boolean;
+
+  procedure Flush;
+  begin
+    if Token = '' then
+      Exit;
+    SetLength(Result, Length(Result) + 1);
+    Result[High(Result)] := Token;
+    Token := '';
+  end;
+
+begin
+  Result := nil;
+  Token := '';
+  Quoted := False;
+  for i := 1 to Length(AText) do
+    if AText[i] = '"' then
+      Quoted := not Quoted
+    else if (AText[i] <= ' ') and not Quoted then
+      Flush
+    else
+      Token := Token + AText[i];
+  Flush;
+end;
+
+{ A year, a year and month or a day, as the start of it in ADate and,
+  for the end of it, the start of what follows in ANext. }
+function ParseFilterDate(const AText: string; out ADate, ANext: TDateTime): boolean;
+var
+  Parts: TStringArray;
+  Y, M, D: integer;
+begin
+  Result := False;
+  ADate := 0;
+  ANext := 0;
+  Parts := AText.Split(['-', '/', '.']);
+  if (Length(Parts) < 1) or (Length(Parts) > 3) then
+    Exit;
+  if not TryStrToInt(Parts[0], Y) or (Length(Parts[0]) <> 4) then
+    Exit;
+  M := 1;
+  D := 1;
+  if (Length(Parts) >= 2) and not TryStrToInt(Parts[1], M) then
+    Exit;
+  if (Length(Parts) = 3) and not TryStrToInt(Parts[2], D) then
+    Exit;
+  if not TryEncodeDate(Y, M, D, ADate) then
+    Exit;
+  case Length(Parts) of
+    1: ANext := IncYear(ADate);
+    2: ANext := IncMonth(ADate);
+    else
+      ANext := IncDay(ADate);
+  end;
+  Result := True;
+end;
+
+function ParseGraphFilter(const AText: string): TGittanGraphFilter;
+var
+  Tokens: TStringArray;
+  Token, Key, Value: string;
+  i, Colon: integer;
+  From, Next: TDateTime;
+
+  procedure Append(var AList: TStringArray; const AValue: string);
+  begin
+    SetLength(AList, Length(AList) + 1);
+    AList[High(AList)] := AValue;
+  end;
+
+begin
+  Result := Default(TGittanGraphFilter);
+  Tokens := SplitFilter(AText);
+  for i := 0 to High(Tokens) do
+  begin
+    Token := Tokens[i];
+    Colon := Pos(':', Token);
+    Key := '';
+    if Colon > 1 then
+      Key := LowerCase(Copy(Token, 1, Colon - 1));
+    Value := Copy(Token, Colon + 1, MaxInt);
+    if (Key = 'author') or (Key = 'since') or (Key = 'after') or (Key = 'until') or
+      (Key = 'before') or (Key = 'path') then
+    begin
+      if Value = '' then
+        Continue;
+      if Key = 'author' then
+        Append(Result.Authors, Value)
+      else if Key = 'path' then
+        Append(Result.Paths, Value)
+      else if ParseFilterDate(Value, From, Next) then
+      begin
+        if (Key = 'since') or (Key = 'after') then
+          Result.Since := From
+        else
+          Result.Before := Next;
+      end;
+    end
+    else
+      Append(Result.Words, Token);
+  end;
+end;
+
+function GraphFilterEmpty(const AFilter: TGittanGraphFilter): boolean;
+begin
+  Result := (Length(AFilter.Words) = 0) and (Length(AFilter.Authors) = 0) and
+    (Length(AFilter.Paths) = 0) and (AFilter.Since = 0) and (AFilter.Before = 0);
+end;
+
+function MatchesGraphFilter(const AFilter: TGittanGraphFilter;
+  const AText, AAuthor: string; ADate: TDateTime): boolean;
+var
+  i: integer;
+  Local: TDateTime;
+begin
+  Result := False;
+  for i := 0 to High(AFilter.Words) do
+    if Pos(AFilter.Words[i], AText) = 0 then
+      Exit;
+  if Length(AFilter.Authors) > 0 then
+  begin
+    i := 0;
+    while (i <= High(AFilter.Authors)) and (Pos(AFilter.Authors[i], AAuthor) = 0) do
+      Inc(i);
+    if i > High(AFilter.Authors) then
+      Exit;
+  end;
+  if (AFilter.Since <> 0) or (AFilter.Before <> 0) then
+  begin
+    Local := UniversalTimeToLocal(ADate);
+    if (AFilter.Since <> 0) and (Local < AFilter.Since) then
+      Exit;
+    if (AFilter.Before <> 0) and (Local >= AFilter.Before) then
+      Exit;
+  end;
+  Result := True;
 end;
 
 end.

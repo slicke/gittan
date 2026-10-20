@@ -841,6 +841,7 @@ begin
   FFilePopup.Items.Add(Item);
   FRevealItem := AddItem(FFilePopup, rsReveal, @MenuRevealClick);
   FOpenItem := AddItem(FFilePopup, rsOpenInEditor, @MenuOpenInEditorClick);
+  FFileHistoryItem := AddItem(FFilePopup, rsFileHistoryItem, @MenuFileHistoryClick);
   AddGitHubItem(FFilePopup, rsOpenOnGitHub, @MenuOpenOnGitHubClick);
   AddGitHubItem(FFilePopup, rsCopyGitHubUrl, @MenuCopyGitHubUrlClick);
   Item := TMenuItem.Create(FFilePopup);
@@ -927,6 +928,7 @@ begin
     FFilePopup.Items[i].Enabled := FContextPath <> '';
   FRevealItem.Enabled := Exists;
   FOpenItem.Enabled := Exists;
+  FFileHistoryItem.Enabled := (FContextPath <> '') or (FContextFolder <> '');
   Targets := TStringList.Create;
   try
     RevertTargets(Targets);
@@ -1415,29 +1417,90 @@ end;
 { The commit graph: the newest GraphLimit commits of every branch, in
   the middle of the form. A click on the status bar's ahead/behind
   counts opens it, as View > Commit Graph does; picking a commit shows
-  it against its parent, as a click on a blame band does. }
+  it against its parent, as a click on a blame band does. With a filter
+  (Show History in a file's menu, Go > File History) the graph gets up
+  to GraphSearchLimit commits at once, since a filter looks through the
+  whole history; it asks for the same (GraphMore) when a filter is typed
+  into a graph that was cut, or the last row is clicked. The commits
+  that touched a path come from TGittanRepo.PathCommits. }
 const
   GraphLimit = 500;
+  GraphSearchLimit = 50000;
 
-procedure TForm1.ShowCommitGraph;
+procedure TForm1.ShowCommitGraph(const AFilter: string);
+var
+  Commits: TGittanGraphCommits;
+  Limit: integer;
+begin
+  if FRepo.Root = '' then
+    Exit;
+  if FGraph.Visible and (AFilter = '') then
+  begin
+    FGraph.Close;
+    Exit;
+  end;
+  if AFilter = '' then
+    Limit := GraphLimit
+  else
+    Limit := GraphSearchLimit;
+  Screen.Cursor := crHourGlass;
+  try
+    FRepo.GraphCommits(Commits, Limit);
+  finally
+    Screen.Cursor := crDefault;
+  end;
+  FGraph.Marked := FMarkHash;
+  FGraph.Popup(Commits, Length(Commits) >= Limit, FBranch, FAhead, FBehind,
+    FHasUpstream, AFilter);
+end;
+
+procedure TForm1.GraphMore(Sender: TObject);
 var
   Commits: TGittanGraphCommits;
 begin
   if FRepo.Root = '' then
     Exit;
-  if FGraph.Visible then
-  begin
-    FGraph.Close;
-    Exit;
-  end;
   Screen.Cursor := crHourGlass;
   try
-    FRepo.GraphCommits(Commits, GraphLimit);
+    FRepo.GraphCommits(Commits, GraphSearchLimit);
   finally
     Screen.Cursor := crDefault;
   end;
-  FGraph.Popup(Commits, Length(Commits) >= GraphLimit, FBranch, FAhead, FBehind,
-    FHasUpstream);
+  FGraph.Replace(Commits, Length(Commits) >= GraphSearchLimit);
+end;
+
+procedure TForm1.GraphPathCommits(Sender: TObject; const APath: string;
+  AHashes: TStrings);
+begin
+  if FRepo.Root <> '' then
+    FRepo.PathCommits(APath, AHashes, GraphSearchLimit);
+end;
+
+{ The filter that keeps the commits touching APath: quoted when the path
+  has a space, as ParseGraphFilter reads it. }
+function PathFilter(const APath: string): string;
+begin
+  if Pos(' ', APath) > 0 then
+    Result := 'path:"' + APath + '"'
+  else
+    Result := 'path:' + APath;
+end;
+
+{ Show History in the file menu: the graph with the commits that touched
+  the file, or the folder of the tree. }
+procedure TForm1.MenuFileHistoryClick(Sender: TObject);
+begin
+  if FContextPath <> '' then
+    ShowCommitGraph(PathFilter(FContextPath))
+  else if FContextFolder <> '' then
+    ShowCommitGraph(PathFilter(FContextFolder));
+end;
+
+{ Go > File History: the same for the shown file. }
+procedure TForm1.MenuGoFileHistoryClick(Sender: TObject);
+begin
+  if FCurrentPath <> '' then
+    ShowCommitGraph(PathFilter(FCurrentPath));
 end;
 
 procedure TForm1.MenuCommitGraphClick(Sender: TObject);

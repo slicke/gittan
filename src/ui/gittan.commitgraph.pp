@@ -5,29 +5,58 @@ unit gittan.commitgraph;
   lines to its parents, the branches and tags on it as chips, its
   subject, author, age and short id, and an arrow on those not pushed
   or not pulled yet. The header names the branch and how far it is from
-  its upstream.
+  its upstream, and holds the search field: what is typed there
+  (ParseGraphFilter in gittan.graph: words, author:, since:, until:,
+  path:) keeps only the commits that match, as a flat list, since the
+  lanes of a part of the history mean nothing. The commits a path
+  filter asks for come from the owner (OnPathCommits), who asks git;
+  when the log shown was cut and a filter is typed, the owner is asked
+  for the whole log once (OnMore), as it is by a click on the last row
+  that says the log was cut.
 
   Like the popup list it is a child of the form, placed over whatever
   the form shows. Up and Down move in it, Enter or a click picks a
   commit (OnPick with its id); a right click or the Menu key asks for
-  the commit's menu (OnContext, with the commit and where to show it); Escape, the close button, a click outside
-  the panel or the application going to the background closes it. The
-  rows sit in a TScrollBox for native scrolling. }
+  the commit's menu (OnContext, with the commit and where to show it);
+  Escape (with an empty field; else it empties the field), the close
+  button, a click outside the panel or the application going to the
+  background closes it. The rows sit in a TScrollBox for native
+  scrolling; a control may not be taller than 32767 px in the LCL, so
+  with more rows than fit that the rows control stays at MaxRowsHeight
+  and the scroll position is mapped onto the rows (RowShift), which costs
+  nothing but a coarser scroll. One commit may be marked (Marked, its
+  id), for the owner's "compare with the marked commit": its short id
+  is shown in the accent. }
 
 {$mode objfpc}{$H+}
 
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Graphics, Forms, LCLType, LCLVersion,
-  LMessages, gittan.graph;
+  Classes, SysUtils, Types, Controls, Graphics, Forms, StdCtrls, ExtCtrls,
+  LCLType, LCLVersion, LMessages, gittan.graph;
 
 type
   TGittanGraphPickEvent = procedure(Sender: TObject; const AHash: string) of object;
   TGittanGraphContextEvent = procedure(Sender: TObject; const ACommit: TGittanGraphCommit;
     const AScreenPos: TPoint) of object;
+  {** Asked for the ids of the commits that touched APath, added to
+    AHashes. }
+  TGittanGraphPathEvent = procedure(Sender: TObject; const APath: string;
+    AHashes: TStrings) of object;
 
   TGittanCommitGraph = class;
+
+  { TGittanGraphBox }
+
+  {** The scroll box: a scroll repaints the rows, since with the mapped
+    scroll position more than the exposed strip changes. }
+  TGittanGraphBox = class(TScrollBox)
+  private
+    FGraph: TGittanCommitGraph;
+  protected
+    procedure WMVScroll(var Message: TLMVScroll); message LM_VSCROLL;
+  end;
 
   { TGittanGraphRows }
 
@@ -49,48 +78,85 @@ type
 
   TGittanCommitGraph = class(TCustomControl)
   private
-    FBox: TScrollBox;
+    FBox: TGittanGraphBox;
     FRows: TGittanGraphRows;
+    FEdit: TEdit;
+    FTimer: TTimer;
     FCommits: TGittanGraphCommits;
-    { Per row, worked out once since a paint of a row has to be quick
-      while it scrolls: the author and age, the age alone, and the
-      subject as it was last cut to fit, with the room it was cut for
-      (-1 before the first paint). }
-    FMetaFull, FMetaAge, FSubjects: array of string;
+    { Per commit, worked out once since a paint of a row has to be quick
+      while it scrolls: the author and age, the age alone, the subject
+      as it was last cut to fit, with the room it was cut for (-1 before
+      the first paint), and for the filter the text the words are
+      looked for in and the author, both in lower case. }
+    FMetaFull, FMetaAge, FSubjects, FSearch, FAuthorKeys: array of string;
     FSubjectRoom: TIntegerDynArray;
+    { The commit of every row shown: all of them, or those the filter
+      keeps. }
+    FShown: TIntegerDynArray;
+    FFilter: TGittanGraphFilter;
+    FFiltered: boolean;
+    { The commits touching the paths of the filter, and the paths they
+      were asked for. }
+    FPathHashes: TStringList;
+    FPathKey: string;
     FLanes: integer;
-    FMore: boolean;
+    FMore, FAskedMore: boolean;
     FBranch: string;
     FAhead, FBehind: integer;
     FHasUpstream: boolean;
     { The highlighted row, the one Enter picks; -1 for none. }
     FCurrent: integer;
+    FMarked: string;
     FCloseRect: TRect;
-    FCloseHot: boolean;
+    FCloseHot, FFooterHot: boolean;
     FReturnFocus: TWinControl;
     FBack, FText, FDim, FHover, FLine, FAccent, FTag: TColor;
     FLaneColors: array of TColor;
     FOnPick: TGittanGraphPickEvent;
     FOnContext: TGittanGraphContextEvent;
+    FOnMore: TNotifyEvent;
+    FOnPathCommits: TGittanGraphPathEvent;
     procedure Context(const AScreenPos: TPoint);
     function LaneColor(AIndex: integer): TColor;
     function LaneX(ALane: integer): integer;
+    function ShownLanes: integer;
     function GraphRight: integer;
+    function HasFooter: boolean;
+    function TotalHeight: integer;
+    function PhysHeight: integer;
+    function RowShift: integer;
+    function LogicalTop: integer;
+    procedure SetLogicalTop(AValue: integer);
+    procedure Scrolled;
+    procedure ScrollAsync(Data: PtrInt);
+    function FooterClickable: boolean;
+    function FooterText: string;
+    procedure Load(const ACommits: TGittanGraphCommits; AMore: boolean;
+      const AKeep: string);
+    function CurrentHash: string;
+    procedure ApplyFilter;
+    procedure More;
     procedure Arrange;
     procedure Place;
     function RowAt(Y: integer): integer;
+    function FooterAt(Y: integer): boolean;
     procedure SetCurrent(AValue: integer);
     procedure SetCloseHot(AValue: boolean);
+    procedure SetFooterHot(AValue: boolean);
+    procedure SetMarked(const AValue: string);
     procedure Step(ADelta: integer);
     procedure ScrollIntoView;
     procedure PaintRows(ACanvas: TCanvas);
-    procedure PaintRow(ACanvas: TCanvas; AIndex, ATop: integer);
+    procedure PaintRow(ACanvas: TCanvas; ARow, ATop: integer);
     function PaintRefs(ACanvas: TCanvas; const ARefs: TGittanGraphRefs;
       X, ACenterY, ARight: integer): integer;
     function FitText(ACanvas: TCanvas; const AText: string; ARoom: integer): string;
     procedure Pick;
     procedure Dismiss;
     procedure KeyInput(var Key: word);
+    procedure EditChange(Sender: TObject);
+    procedure EditKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
+    procedure TimerTick(Sender: TObject);
     {$IF lcl_fullversion >= 4990000}
     procedure UserInput(Sender: TObject; var Message: TLMessage);
     {$ELSE}
@@ -113,10 +179,15 @@ type
     {** Shows ACommits, laid out by LayoutGraph, in the middle of the
       parent, under a header with ABranch and how many commits it is
       ahead of (AAhead) and behind (ABehind) its upstream when it has
-      one; AMore says the log was cut, which the last row says. The
-      focus goes to the rows, on the commit HEAD is on. }
+      one; AMore says the log was cut, which the last row says. AFilter
+      goes into the search field. The focus goes to the field, the
+      highlight to the commit HEAD is on. }
     procedure Popup(const ACommits: TGittanGraphCommits; AMore: boolean;
-      const ABranch: string; AAhead, ABehind: integer; AHasUpstream: boolean);
+      const ABranch: string; AAhead, ABehind: integer; AHasUpstream: boolean;
+      const AFilter: string = '');
+    {** Puts ACommits in the place of the ones shown, the answer to
+      OnMore: the filter and the highlighted commit stay. }
+    procedure Replace(const ACommits: TGittanGraphCommits; AMore: boolean);
     {** Hides the panel without a pick. }
     procedure Close;
     {** Keeps the panel in the middle of the parent after it resized. }
@@ -127,17 +198,24 @@ type
     procedure SetColors(ABack, AText, ADim, AHover, ALine, AAccent, ATag: TColor);
     {** The colors the lanes take in turn. }
     procedure SetLaneColors(const AColors: array of TColor);
+    {** The id of the commit marked for a comparison, '' for none. }
+    property Marked: string read FMarked write SetMarked;
     property OnPick: TGittanGraphPickEvent read FOnPick write FOnPick;
     {** A right click on a commit, or the Menu key on the highlighted one:
       the panel stays open under the menu the handler shows at
       AScreenPos. }
     property OnContext: TGittanGraphContextEvent read FOnContext write FOnContext;
+    {** The whole log is wanted: the handler answers with Replace. Asked
+      once per Popup. }
+    property OnMore: TNotifyEvent read FOnMore write FOnMore;
+    {** The commits that touched a path of the filter are wanted. }
+    property OnPathCommits: TGittanGraphPathEvent read FOnPathCommits write FOnPathCommits;
   end;
 
 implementation
 
 uses
-  Math, DateUtils, LazUTF8, LCLIntf, gittan.reviews, gittan.statusbar;
+  Math, DateUtils, LazUTF8, LazFileUtils, LCLIntf, gittan.reviews, gittan.statusbar;
 
 resourcestring
   rsGraphTitle = 'Commit Graph';
@@ -145,7 +223,12 @@ resourcestring
   rsGraphNotPulled = '%d not pulled';
   rsGraphInSync = 'up to date with upstream';
   rsGraphMore = 'Showing the newest %d commits';
+  rsGraphLoadAll = 'Load all';
+  rsGraphMatches = '%d of %d commits match';
+  rsGraphMatchesCut = '%d of the newest %d commits match';
   rsGraphEmpty = 'No commits yet';
+  rsGraphNoMatch = 'No commits match';
+  rsGraphFilterHint = 'Search (author: since: until: path:)';
 
 const
   { Room around the panel within the form, and its widest. }
@@ -164,9 +247,25 @@ const
   ChipGap = 5;
   ChipMaxChars = 28;
   CloseSize = 24;
+  EditWidth = 300;
   { Room at the right for the scroll bar, which overlays on macOS. }
   ScrollRoom = 8;
   Border = 1;
+  { The tallest the rows control gets (the LCL sends a size in 16 bits,
+    so a control over 32767 px fails); more rows than that are reached
+    through RowShift. }
+  MaxRowsHeight = 32000;
+  { How long typing may pause before the filter is applied. }
+  FilterDelay = 200;
+
+{ TGittanGraphBox }
+
+procedure TGittanGraphBox.WMVScroll(var Message: TLMVScroll);
+begin
+  inherited WMVScroll(Message);
+  if FGraph <> nil then
+    FGraph.Scrolled;
+end;
 
 { TGittanGraphRows }
 
@@ -179,6 +278,7 @@ procedure TGittanGraphRows.MouseMove(Shift: TShiftState; X, Y: integer);
 begin
   inherited MouseMove(Shift, X, Y);
   FGraph.SetCurrent(FGraph.RowAt(Y));
+  FGraph.SetFooterHot(FGraph.FooterAt(Y) and FGraph.FooterClickable);
 end;
 
 procedure TGittanGraphRows.MouseUp(Button: TMouseButton; Shift: TShiftState;
@@ -193,6 +293,8 @@ begin
     FGraph.SetCurrent(Row);
     FGraph.Pick;
   end
+  else if (Button = mbLeft) and FGraph.FooterAt(Y) and FGraph.FooterClickable then
+    FGraph.More
   else if (Button = mbRight) and (Row >= 0) then
   begin
     FGraph.SetCurrent(Row);
@@ -203,6 +305,7 @@ end;
 procedure TGittanGraphRows.MouseLeave;
 begin
   inherited MouseLeave;
+  FGraph.SetFooterHot(False);
   Cursor := crDefault;
 end;
 
@@ -220,7 +323,12 @@ begin
   ControlStyle := ControlStyle + [csOpaque];
   Visible := False;
   FCurrent := -1;
-  FBox := TScrollBox.Create(Self);
+  FPathHashes := TStringList.Create;
+  FPathHashes.Sorted := True;
+  FPathHashes.Duplicates := dupIgnore;
+  FPathHashes.CaseSensitive := True;
+  FBox := TGittanGraphBox.Create(Self);
+  FBox.FGraph := Self;
   FBox.Parent := Self;
   FBox.BorderStyle := bsNone;
   FBox.HorzScrollBar.Visible := False;
@@ -230,6 +338,15 @@ begin
   FRows.Align := alTop;
   FRows.ControlStyle := FRows.ControlStyle + [csOpaque];
   FRows.TabStop := True;
+  FEdit := TEdit.Create(Self);
+  FEdit.Parent := Self;
+  FEdit.TextHint := rsGraphFilterHint;
+  FEdit.OnChange := @EditChange;
+  FEdit.OnKeyDown := @EditKeyDown;
+  FTimer := TTimer.Create(Self);
+  FTimer.Enabled := False;
+  FTimer.Interval := FilterDelay;
+  FTimer.OnTimer := @TimerTick;
   SetColors(clWindow, clWindowText, clGrayText, clBtnFace, clBtnShadow,
     clHighlight, clMaroon);
   SetLaneColors([clHighlight]);
@@ -237,7 +354,9 @@ end;
 
 destructor TGittanCommitGraph.Destroy;
 begin
+  Application.RemoveAsyncCalls(Self);
   Hook(False);
+  FPathHashes.Free;
   inherited Destroy;
 end;
 
@@ -268,6 +387,14 @@ begin
   FRows.Invalidate;
 end;
 
+procedure TGittanCommitGraph.SetMarked(const AValue: string);
+begin
+  if FMarked = AValue then
+    Exit;
+  FMarked := AValue;
+  FRows.Invalidate;
+end;
+
 function TGittanCommitGraph.LaneColor(AIndex: integer): TColor;
 begin
   if Length(FLaneColors) = 0 then
@@ -280,27 +407,145 @@ begin
   Result := Pad + Min(ALane, MaxLanes - 1) * LaneWidth + LaneWidth div 2;
 end;
 
+{ The lanes drawn: one while the filter shows a flat list. }
+function TGittanCommitGraph.ShownLanes: integer;
+begin
+  if FFiltered then
+    Result := 1
+  else
+    Result := FLanes;
+end;
+
 { Where the text starts, right of the widest row's lanes. }
 function TGittanCommitGraph.GraphRight: integer;
 begin
-  Result := Pad + Max(1, Min(FLanes, MaxLanes)) * LaneWidth + Gap;
+  Result := Pad + Max(1, Min(ShownLanes, MaxLanes)) * LaneWidth + Gap;
 end;
 
-procedure TGittanCommitGraph.Popup(const ACommits: TGittanGraphCommits;
-  AMore: boolean; const ABranch: string; AAhead, ABehind: integer;
-  AHasUpstream: boolean);
+{ A last row for the cut of the log or the count of the matches. }
+function TGittanCommitGraph.HasFooter: boolean;
+begin
+  Result := (Length(FShown) > 0) and (FMore or FFiltered);
+end;
+
+{ A click on the footer loads the whole log, once. }
+{ The height of every row and the footer, and what the rows control
+  gets of it. }
+function TGittanCommitGraph.TotalHeight: integer;
+begin
+  Result := Max(1, Length(FShown) + Ord(HasFooter)) * RowHeight;
+end;
+
+function TGittanCommitGraph.PhysHeight: integer;
+begin
+  Result := Min(TotalHeight, MaxRowsHeight);
+end;
+
+{ How far the rows are above where the box has scrolled to: 0 while the
+  rows control holds them all, else the scroll position mapped from the
+  control's height onto the height of every row, less the position. }
+function TGittanCommitGraph.RowShift: integer;
+var
+  Page, Pos, Total, Phys: integer;
+begin
+  Result := 0;
+  Total := TotalHeight;
+  Phys := PhysHeight;
+  Page := FBox.ClientHeight;
+  if (Total <= Phys) or (Phys <= Page) then
+    Exit;
+  Pos := FBox.VertScrollBar.Position;
+  Result := int64(Pos) * (Total - Page) div (Phys - Page) - Pos;
+end;
+
+{ The row pixel at the top of the box. }
+function TGittanCommitGraph.LogicalTop: integer;
+begin
+  Result := FBox.VertScrollBar.Position + RowShift;
+end;
+
+procedure TGittanCommitGraph.SetLogicalTop(AValue: integer);
+var
+  Page, Total, Phys: integer;
+begin
+  Total := TotalHeight;
+  Phys := PhysHeight;
+  Page := FBox.ClientHeight;
+  AValue := Max(0, AValue);
+  if (Total <= Phys) or (Phys <= Page) then
+    FBox.VertScrollBar.Position := AValue
+  else
+    FBox.VertScrollBar.Position := int64(AValue) * (Phys - Page) div (Total - Page);
+  FRows.Invalidate;
+end;
+
+procedure TGittanCommitGraph.Scrolled;
+begin
+  if TotalHeight > PhysHeight then
+    FRows.Invalidate;
+end;
+
+{ The box takes a new height of the rows control in its own time, so a
+  position set at once is clamped to the old range: it is set again
+  from the message loop. }
+procedure TGittanCommitGraph.ScrollAsync(Data: PtrInt);
+begin
+  if Visible then
+    ScrollIntoView;
+end;
+
+function TGittanCommitGraph.FooterClickable: boolean;
+begin
+  Result := HasFooter and FMore and not FFiltered and not FAskedMore and Assigned(FOnMore);
+end;
+
+function TGittanCommitGraph.FooterText: string;
+begin
+  if FFiltered then
+  begin
+    if FMore then
+      Result := Format(rsGraphMatchesCut, [Length(FShown), Length(FCommits)])
+    else
+      Result := Format(rsGraphMatches, [Length(FShown), Length(FCommits)]);
+  end
+  else
+  begin
+    Result := Format(rsGraphMore, [Length(FCommits)]);
+    if FooterClickable then
+      Result := Result + ' · ' + rsGraphLoadAll;
+  end;
+end;
+
+{ AText with its accented letters composed, as the history view does:
+  macOS gives git a user name in decomposed form, which is not what is
+  typed into the field. }
+function Composed(const AText: string): string;
+begin
+  {$IFDEF DARWIN}
+  Result := GetDarwinNormalizedFilename(AText, 2);
+  {$ELSE}
+  Result := AText;
+  {$ENDIF}
+end;
+
+{ Takes ACommits with what every row needs; every commit is shown, the
+  highlight on the one with the id AKeep, else on the one HEAD is on,
+  else on the first. }
+procedure TGittanCommitGraph.Load(const ACommits: TGittanGraphCommits;
+  AMore: boolean; const AKeep: string);
 var
   i, r: integer;
 begin
-  if Parent = nil then
-    Exit;
-  Dismiss;
   FCommits := ACommits;
   FLanes := GraphWidth(ACommits);
+  FMore := AMore;
   SetLength(FMetaFull, Length(FCommits));
   SetLength(FMetaAge, Length(FCommits));
   SetLength(FSubjects, Length(FCommits));
   SetLength(FSubjectRoom, Length(FCommits));
+  SetLength(FSearch, Length(FCommits));
+  SetLength(FAuthorKeys, Length(FCommits));
+  SetLength(FShown, Length(FCommits));
   for r := 0 to High(FCommits) do
   begin
     FMetaAge[r] := '';
@@ -311,24 +556,53 @@ begin
       FMetaFull[r] := FMetaFull[r] + ' · ';
     FMetaFull[r] := FMetaFull[r] + FMetaAge[r];
     FSubjectRoom[r] := -1;
+    FAuthorKeys[r] := UTF8LowerCase(Composed(FCommits[r].Author));
+    FSearch[r] := UTF8LowerCase(Composed(FCommits[r].Subject + #10 + FCommits[r].Body)) +
+      #10 + FAuthorKeys[r] + #10 + FCommits[r].Hash;
+    FShown[r] := r;
   end;
-  FMore := AMore;
+  FCurrent := -1;
+  for r := 0 to High(FCommits) do
+    if (AKeep <> '') and (FCommits[r].Hash = AKeep) then
+      FCurrent := r;
+  for r := 0 to High(FCommits) do
+  begin
+    if FCurrent >= 0 then
+      Break;
+    for i := 0 to High(FCommits[r].Refs) do
+      if FCommits[r].Refs[i].Kind = grHead then
+        FCurrent := r;
+  end;
+  if (FCurrent < 0) and (Length(FCommits) > 0) then
+    FCurrent := 0;
+end;
+
+function TGittanCommitGraph.CurrentHash: string;
+begin
+  Result := '';
+  if (FCurrent >= 0) and (FCurrent <= High(FShown)) then
+    Result := FCommits[FShown[FCurrent]].Hash;
+end;
+
+procedure TGittanCommitGraph.Popup(const ACommits: TGittanGraphCommits;
+  AMore: boolean; const ABranch: string; AAhead, ABehind: integer;
+  AHasUpstream: boolean; const AFilter: string);
+begin
+  if Parent = nil then
+    Exit;
+  Dismiss;
   FBranch := ABranch;
   FAhead := AAhead;
   FBehind := ABehind;
   FHasUpstream := AHasUpstream;
-  FCurrent := -1;
   FCloseHot := False;
-  for r := 0 to High(FCommits) do
-  begin
-    for i := 0 to High(FCommits[r].Refs) do
-      if FCommits[r].Refs[i].Kind = grHead then
-        FCurrent := r;
-    if FCurrent >= 0 then
-      Break;
-  end;
-  if (FCurrent < 0) and (Length(FCommits) > 0) then
-    FCurrent := 0;
+  FFooterHot := False;
+  FAskedMore := False;
+  FPathKey := '';
+  FPathHashes.Clear;
+  Load(ACommits, AMore, '');
+  FEdit.Text := AFilter;
+  ApplyFilter;
   Place;
   FReturnFocus := nil;
   if (Screen.ActiveControl <> nil) and not Owns(Screen.ActiveControl) then
@@ -340,9 +614,143 @@ begin
   BringToFront;
   FBox.VertScrollBar.Position := 0;
   ScrollIntoView;
-  if FRows.CanFocus then
+  if FEdit.CanFocus then
+    FEdit.SetFocus
+  else if FRows.CanFocus then
     FRows.SetFocus;
   Hook(True);
+end;
+
+procedure TGittanCommitGraph.Replace(const ACommits: TGittanGraphCommits; AMore: boolean);
+begin
+  Load(ACommits, AMore, CurrentHash);
+  ApplyFilter;
+  Place;
+  Application.QueueAsyncCall(@ScrollAsync, 0);
+end;
+
+{ Reads the field and keeps the rows that match. Lower case on both
+  sides, so the case does not matter. The commits of a path come from
+  the owner, asked again only when the paths change. When the log shown
+  was cut, the owner is asked for all of it first (once), and answers
+  with Replace, which comes back here. The highlight stays on the same
+  commit when it is still shown. }
+procedure TGittanCommitGraph.ApplyFilter;
+var
+  Current, Key: string;
+  i, n: integer;
+  Hashes: TStringList;
+begin
+  FTimer.Enabled := False;
+  FFilter := ParseGraphFilter(FEdit.Text);
+  for i := 0 to High(FFilter.Words) do
+    FFilter.Words[i] := UTF8LowerCase(FFilter.Words[i]);
+  for i := 0 to High(FFilter.Authors) do
+    FFilter.Authors[i] := UTF8LowerCase(FFilter.Authors[i]);
+  FFiltered := not GraphFilterEmpty(FFilter);
+  if FFiltered and FMore and not FAskedMore and Assigned(FOnMore) then
+  begin
+    More;
+    Exit;
+  end;
+  Key := '';
+  for i := 0 to High(FFilter.Paths) do
+    Key := Key + FFilter.Paths[i] + #1;
+  if Key <> FPathKey then
+  begin
+    FPathHashes.Clear;
+    if Assigned(FOnPathCommits) then
+    begin
+      Hashes := TStringList.Create;
+      Screen.Cursor := crHourGlass;
+      try
+        for i := 0 to High(FFilter.Paths) do
+        begin
+          Hashes.Clear;
+          FOnPathCommits(Self, FFilter.Paths[i], Hashes);
+          FPathHashes.AddStrings(Hashes);
+        end;
+      finally
+        Screen.Cursor := crDefault;
+        Hashes.Free;
+      end;
+    end;
+    FPathKey := Key;
+  end;
+  Current := CurrentHash;
+  SetLength(FShown, Length(FCommits));
+  n := 0;
+  for i := 0 to High(FCommits) do
+    if not FFiltered or (MatchesGraphFilter(FFilter, FSearch[i], FAuthorKeys[i],
+      FCommits[i].Date) and ((Length(FFilter.Paths) = 0) or
+      (FPathHashes.IndexOf(FCommits[i].Hash) >= 0))) then
+    begin
+      FShown[n] := i;
+      Inc(n);
+    end;
+  SetLength(FShown, n);
+  FCurrent := -1;
+  for i := 0 to High(FShown) do
+    if FCommits[FShown[i]].Hash = Current then
+      FCurrent := i;
+  Arrange;
+  if FCurrent < 0 then
+  begin
+    if n > 0 then
+      FCurrent := 0;
+    FBox.VertScrollBar.Position := 0;
+  end
+  else
+    ScrollIntoView;
+  FRows.Invalidate;
+  Invalidate;
+end;
+
+procedure TGittanCommitGraph.More;
+begin
+  if FAskedMore or not Assigned(FOnMore) then
+    Exit;
+  FAskedMore := True;
+  SetFooterHot(False);
+  FOnMore(Self);
+end;
+
+procedure TGittanCommitGraph.EditChange(Sender: TObject);
+begin
+  FTimer.Enabled := False;
+  FTimer.Enabled := True;
+end;
+
+procedure TGittanCommitGraph.TimerTick(Sender: TObject);
+begin
+  ApplyFilter;
+end;
+
+{ The field passes the keys that move in the list and pick on to it;
+  Home and End only while it is empty, since they move its caret
+  otherwise. Escape empties it first and closes the panel when it is
+  empty. }
+procedure TGittanCommitGraph.EditKeyDown(Sender: TObject; var Key: word;
+  Shift: TShiftState);
+begin
+  case Key of
+    VK_UP, VK_DOWN, VK_PRIOR, VK_NEXT, VK_RETURN, VK_APPS:
+      KeyInput(Key);
+    VK_HOME, VK_END:
+      if FEdit.Text = '' then
+        KeyInput(Key);
+    VK_ESCAPE:
+    begin
+      if FEdit.Text <> '' then
+      begin
+        FEdit.Text := '';
+        ApplyFilter;
+      end
+      else
+        Close;
+      Key := 0;
+    end;
+  end;
 end;
 
 { In the middle of the parent, as wide as it allows up to MaxPanelWidth
@@ -354,7 +762,7 @@ begin
   if Parent = nil then
     Exit;
   W := Max(200, Min(MaxPanelWidth, Parent.ClientWidth - 2 * Margin));
-  H := HeaderHeight + Max(1, Length(FCommits) + Ord(FMore)) * RowHeight + Pad div 2 + Border;
+  H := HeaderHeight + Max(1, Length(FShown) + Ord(HasFooter)) * RowHeight + Pad div 2 + Border;
   H := Max(HeaderHeight + RowHeight, Min(H, Parent.ClientHeight - 2 * Margin));
   SetBounds((Parent.ClientWidth - W) div 2, (Parent.ClientHeight - H) div 2, W, H);
   Arrange;
@@ -367,14 +775,19 @@ begin
 end;
 
 procedure TGittanCommitGraph.Arrange;
+var
+  W: integer;
 begin
-  if (FBox = nil) or (FRows = nil) then
+  if (FBox = nil) or (FRows = nil) or (FEdit = nil) then
     Exit;
   FBox.SetBounds(Border, HeaderHeight, Width - 2 * Border,
     Max(RowHeight, Height - HeaderHeight - Border));
-  FRows.Height := Max(1, Length(FCommits) + Ord(FMore)) * RowHeight;
+  FRows.Height := PhysHeight;
   FCloseRect := Rect(Width - Pad - CloseSize + 4, (HeaderHeight - CloseSize) div 2,
     Width - Pad + 4, (HeaderHeight + CloseSize) div 2);
+  W := Min(EditWidth, Width div 3);
+  FEdit.SetBounds(FCloseRect.Left - Gap - W, (HeaderHeight - FEdit.Height) div 2, W,
+    FEdit.Height);
 end;
 
 procedure TGittanCommitGraph.Resize;
@@ -385,6 +798,7 @@ end;
 
 procedure TGittanCommitGraph.Dismiss;
 begin
+  FTimer.Enabled := False;
   if not Visible then
     Exit;
   Hook(False);
@@ -401,17 +815,17 @@ end;
 
 procedure TGittanCommitGraph.Context(const AScreenPos: TPoint);
 begin
-  if (FCurrent >= 0) and (FCurrent <= High(FCommits)) and Assigned(FOnContext) then
-    FOnContext(Self, FCommits[FCurrent], AScreenPos);
+  if (FCurrent >= 0) and (FCurrent <= High(FShown)) and Assigned(FOnContext) then
+    FOnContext(Self, FCommits[FShown[FCurrent]], AScreenPos);
 end;
 
 procedure TGittanCommitGraph.Pick;
 var
   Hash: string;
 begin
-  if (FCurrent < 0) or (FCurrent > High(FCommits)) then
+  Hash := CurrentHash;
+  if Hash = '' then
     Exit;
-  Hash := FCommits[FCurrent].Hash;
   Dismiss;
   if Assigned(FOnPick) then
     FOnPick(Self, Hash);
@@ -422,9 +836,14 @@ begin
   Result := -1;
   if Y < 0 then
     Exit;
-  Result := Y div RowHeight;
-  if Result > High(FCommits) then
+  Result := (Y + RowShift) div RowHeight;
+  if Result > High(FShown) then
     Result := -1;
+end;
+
+function TGittanCommitGraph.FooterAt(Y: integer): boolean;
+begin
+  Result := HasFooter and (Y >= 0) and ((Y + RowShift) div RowHeight = Length(FShown));
 end;
 
 procedure TGittanCommitGraph.SetCurrent(AValue: integer);
@@ -434,7 +853,7 @@ begin
   FCurrent := AValue;
   if AValue >= 0 then
     FRows.Cursor := crHandPoint
-  else
+  else if not FFooterHot then
     FRows.Cursor := crDefault;
   FRows.Invalidate;
 end;
@@ -447,26 +866,42 @@ begin
   Invalidate;
 end;
 
+procedure TGittanCommitGraph.SetFooterHot(AValue: boolean);
+begin
+  if FFooterHot = AValue then
+    Exit;
+  FFooterHot := AValue;
+  if AValue then
+    FRows.Cursor := crHandPoint
+  else if FCurrent < 0 then
+    FRows.Cursor := crDefault;
+  FRows.Invalidate;
+end;
+
 procedure TGittanCommitGraph.Step(ADelta: integer);
 begin
-  if Length(FCommits) = 0 then
+  if Length(FShown) = 0 then
     Exit;
-  SetCurrent(EnsureRange(FCurrent + ADelta, 0, High(FCommits)));
+  SetCurrent(EnsureRange(FCurrent + ADelta, 0, High(FShown)));
   ScrollIntoView;
 end;
 
+{ The footer comes along with the last row, so End shows it. }
 procedure TGittanCommitGraph.ScrollIntoView;
 var
-  RowTop, Pos: integer;
+  RowTop, RowBottom, Pos: integer;
 begin
   if FCurrent < 0 then
     Exit;
   RowTop := FCurrent * RowHeight;
-  Pos := FBox.VertScrollBar.Position;
+  RowBottom := RowTop + RowHeight;
+  if (FCurrent = High(FShown)) and HasFooter then
+    Inc(RowBottom, RowHeight);
+  Pos := LogicalTop;
   if RowTop < Pos then
-    FBox.VertScrollBar.Position := RowTop
-  else if RowTop + RowHeight > Pos + FBox.ClientHeight then
-    FBox.VertScrollBar.Position := RowTop + RowHeight - FBox.ClientHeight;
+    SetLogicalTop(RowTop)
+  else if RowBottom > Pos + FBox.ClientHeight then
+    SetLogicalTop(RowBottom - FBox.ClientHeight);
 end;
 
 { Up and Down move a row, Page Up and Page Down a box, Home and End to
@@ -482,13 +917,14 @@ begin
     VK_DOWN: Step(1);
     VK_PRIOR: Step(-Page);
     VK_NEXT: Step(Page);
-    VK_HOME: Step(-Length(FCommits));
-    VK_END: Step(Length(FCommits));
+    VK_HOME: Step(-Length(FShown));
+    VK_END: Step(Length(FShown));
     VK_RETURN: Pick;
     VK_ESCAPE: Close;
     VK_APPS:
       if FCurrent >= 0 then
-        Context(FRows.ClientToScreen(Point(LaneX(FLanes), (FCurrent + 1) * RowHeight)));
+        Context(FRows.ClientToScreen(Point(LaneX(ShownLanes),
+          (FCurrent + 1) * RowHeight - RowShift)));
     VK_TAB: ;
     else
       Exit;
@@ -581,7 +1017,8 @@ begin
 end;
 
 { The border, the header (the title, the branch and how far it is from
-  its upstream, the close button) and the divider under it. }
+  its upstream, the search field, the close button) and the divider
+  under it. }
 procedure TGittanCommitGraph.Paint;
 var
   X, Y, BodyHeight, CenterY: integer;
@@ -654,56 +1091,76 @@ begin
   Canvas.Pen.Width := 1;
 end;
 
-{ Only the rows the box shows are painted: the log may have hundreds. }
+{ Only the rows the box shows are painted: the log may have thousands.
+  The footer, when there is one, says the log was cut (a click loads
+  all of it) or how many commits match the filter. }
 procedure TGittanCommitGraph.PaintRows(ACanvas: TCanvas);
 var
-  First, Last, i: integer;
+  First, Last, i, FootTop, Up: integer;
   R: TRect;
 begin
   ACanvas.Brush.Style := bsSolid;
   ACanvas.Brush.Color := FBack;
   ACanvas.FillRect(FRows.ClientRect);
   ACanvas.Font := Font;
-  if Length(FCommits) = 0 then
+  if Length(FShown) = 0 then
   begin
     ACanvas.Brush.Style := bsClear;
     ACanvas.Font.Color := FDim;
-    ACanvas.TextOut(Pad, (RowHeight - ACanvas.TextHeight('Xg')) div 2, rsGraphEmpty);
+    if FFiltered then
+      ACanvas.TextOut(Pad, (RowHeight - ACanvas.TextHeight('Xg')) div 2, rsGraphNoMatch)
+    else
+      ACanvas.TextOut(Pad, (RowHeight - ACanvas.TextHeight('Xg')) div 2, rsGraphEmpty);
     Exit;
   end;
   R := ACanvas.ClipRect;
   if IsRectEmpty(R) then
     R := FRows.ClientRect;
-  First := Max(0, R.Top div RowHeight);
-  Last := Min(High(FCommits), R.Bottom div RowHeight);
+  Up := RowShift;
+  First := Max(0, (R.Top + Up) div RowHeight);
+  Last := Min(High(FShown), (R.Bottom + Up) div RowHeight);
   for i := First to Last do
-    PaintRow(ACanvas, i, i * RowHeight);
-  if FMore and (R.Bottom >= Length(FCommits) * RowHeight) then
+    PaintRow(ACanvas, i, i * RowHeight - Up);
+  if HasFooter and (R.Bottom + Up >= Length(FShown) * RowHeight) then
   begin
+    FootTop := Length(FShown) * RowHeight - Up;
+    if FFooterHot then
+    begin
+      ACanvas.Pen.Style := psClear;
+      ACanvas.Brush.Style := bsSolid;
+      ACanvas.Brush.Color := FHover;
+      ACanvas.RoundRect(Pad div 2, FootTop + 1, FRows.Width - Pad div 2,
+        FootTop + RowHeight - 1, 8, 8);
+      ACanvas.Pen.Style := psSolid;
+    end;
     ACanvas.Brush.Style := bsClear;
-    ACanvas.Font.Color := FDim;
-    ACanvas.TextOut(GraphRight, Length(FCommits) * RowHeight +
-      (RowHeight - ACanvas.TextHeight('Xg')) div 2,
-      Format(rsGraphMore, [Length(FCommits)]));
+    if FooterClickable then
+      ACanvas.Font.Color := FAccent
+    else
+      ACanvas.Font.Color := FDim;
+    ACanvas.TextOut(GraphRight, FootTop + (RowHeight - ACanvas.TextHeight('Xg')) div 2,
+      FooterText);
   end;
 end;
 
-{ The row's highlight, its half of every line through it, its dot (a
-  ring around it on the commit HEAD is on), then from the left the refs
-  and the subject, from the right the short id with an arrow when the
-  commit is not pushed or not pulled, and the author and age, dropped
-  when the subject would get too little room. }
-procedure TGittanCommitGraph.PaintRow(ACanvas: TCanvas; AIndex, ATop: integer);
+{ The row's highlight, its half of every line through it (none in the
+  flat list of a filter), its dot (a ring around it on the commit HEAD
+  is on), then from the left the refs and the subject, from the right
+  the short id (in the accent on the marked commit) with an arrow when
+  the commit is not pushed or not pulled, and the author and age,
+  dropped when the subject would get too little room. }
+procedure TGittanCommitGraph.PaintRow(ACanvas: TCanvas; ARow, ATop: integer);
 var
   C: TGittanGraphCommit;
-  i, CenterY, Bottom, X, Right, TextY, Room: integer;
+  i, Index, CenterY, Bottom, X, Right, TextY, Room: integer;
   IsHead: boolean;
   Meta, Mark: string;
 begin
-  C := FCommits[AIndex];
+  Index := FShown[ARow];
+  C := FCommits[Index];
   CenterY := ATop + RowHeight div 2;
   Bottom := ATop + RowHeight;
-  if AIndex = FCurrent then
+  if ARow = FCurrent then
   begin
     ACanvas.Pen.Style := psClear;
     ACanvas.Brush.Style := bsSolid;
@@ -712,30 +1169,36 @@ begin
     ACanvas.Pen.Style := psSolid;
   end;
 
-  ACanvas.Pen.Width := 2;
-  for i := 0 to High(C.TopEdges) do
+  if not FFiltered then
   begin
-    ACanvas.Pen.Color := LaneColor(C.TopEdges[i].Color);
-    ACanvas.Line(LaneX(C.TopEdges[i].FromLane), ATop, LaneX(C.TopEdges[i].ToLane), CenterY);
+    ACanvas.Pen.Width := 2;
+    for i := 0 to High(C.TopEdges) do
+    begin
+      ACanvas.Pen.Color := LaneColor(C.TopEdges[i].Color);
+      ACanvas.Line(LaneX(C.TopEdges[i].FromLane), ATop, LaneX(C.TopEdges[i].ToLane), CenterY);
+    end;
+    for i := 0 to High(C.BottomEdges) do
+    begin
+      ACanvas.Pen.Color := LaneColor(C.BottomEdges[i].Color);
+      ACanvas.Line(LaneX(C.BottomEdges[i].FromLane), CenterY,
+        LaneX(C.BottomEdges[i].ToLane), Bottom);
+    end;
+    ACanvas.Pen.Width := 1;
   end;
-  for i := 0 to High(C.BottomEdges) do
-  begin
-    ACanvas.Pen.Color := LaneColor(C.BottomEdges[i].Color);
-    ACanvas.Line(LaneX(C.BottomEdges[i].FromLane), CenterY,
-      LaneX(C.BottomEdges[i].ToLane), Bottom);
-  end;
-  ACanvas.Pen.Width := 1;
 
   IsHead := False;
   for i := 0 to High(C.Refs) do
     if C.Refs[i].Kind = grHead then
       IsHead := True;
-  X := LaneX(C.Lane);
+  if FFiltered then
+    X := LaneX(0)
+  else
+    X := LaneX(C.Lane);
   if IsHead then
   begin
     ACanvas.Pen.Color := FText;
     ACanvas.Pen.Width := 2;
-    if AIndex = FCurrent then
+    if ARow = FCurrent then
       ACanvas.Brush.Color := FHover
     else
       ACanvas.Brush.Color := FBack;
@@ -755,8 +1218,15 @@ begin
   ACanvas.Font := Font;
   TextY := CenterY - ACanvas.TextHeight('Xg') div 2;
   Right := FRows.Width - Pad - ScrollRoom;
-  ACanvas.Font.Color := FDim;
+  if (FMarked <> '') and (C.Hash = FMarked) then
+  begin
+    ACanvas.Font.Style := [fsBold];
+    ACanvas.Font.Color := FAccent;
+  end
+  else
+    ACanvas.Font.Color := FDim;
   ACanvas.TextOut(Right - ACanvas.TextWidth(C.Short), TextY, C.Short);
+  ACanvas.Font.Style := [];
   Dec(Right, ACanvas.TextWidth('0000000') + 4);
   Mark := '';
   if C.Unpushed then
@@ -774,9 +1244,9 @@ begin
   Dec(Right, ACanvas.TextWidth('↑') + Gap + Gap div 2);
 
   X := GraphRight;
-  Meta := FMetaFull[AIndex];
+  Meta := FMetaFull[Index];
   if Right - ACanvas.TextWidth(Meta) - Gap - X < FRows.Width div 3 then
-    Meta := FMetaAge[AIndex];
+    Meta := FMetaAge[Index];
   if Right - ACanvas.TextWidth(Meta) - Gap - X < FRows.Width div 4 then
     Meta := '';
   if Meta <> '' then
@@ -789,13 +1259,13 @@ begin
   X := PaintRefs(ACanvas, C.Refs, X, CenterY, Right);
   ACanvas.Font := Font;
   Room := Right - X;
-  if FSubjectRoom[AIndex] <> Room then
+  if FSubjectRoom[Index] <> Room then
   begin
-    FSubjects[AIndex] := FitText(ACanvas, C.Subject, Room);
-    FSubjectRoom[AIndex] := Room;
+    FSubjects[Index] := FitText(ACanvas, C.Subject, Room);
+    FSubjectRoom[Index] := Room;
   end;
   ACanvas.Font.Color := FText;
-  ACanvas.TextOut(X, TextY, FSubjects[AIndex]);
+  ACanvas.TextOut(X, TextY, FSubjects[Index]);
 end;
 
 { AText cut to fit ARoom with an ellipsis. A subject can be a whole
