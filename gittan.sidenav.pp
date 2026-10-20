@@ -9,8 +9,9 @@ unit gittan.sidenav;
   sets Selected, so the rows follow the view and never lead it. Under
   the rows a Heading names what the sidebar lists below them, as the
   music app writes Library over its playlists: a dim bold title with a
-  page icon where the rows have theirs, so its text is in line with
-  theirs, over a line, as the headings of the repository page.
+  page icon, set in as the section headers under the tree set their
+  chevron and title, over a line, as the headings of the repository
+  page.
 
   It paints itself in the sidebar's shade, as the section headers do,
   and is as high as its rows and the heading. }
@@ -85,6 +86,11 @@ const
   HeadingGap = 5;
   HeadingBottom = 4;
   HeadingIconSize = 12;
+  { The icon and the text stand where the section headers under the
+    tree (gittan.sectionheader) have their chevron and their title, so
+    Files, Repository and Commit line up. }
+  HeadingLeft = 10;
+  HeadingTextLeft = 26;
 
 { TGittanSideNav }
 
@@ -244,17 +250,18 @@ begin
   if FHeading <> '' then
   begin
     Y := 2 * PadY + Length(FCaptions) * RowHeight + HeadingTop;
-    DrawIcon(niFiles, 2 * PadX, Y + (TextH - HeadingIconSize) div 2,
+    { The page is drawn one in from X. }
+    DrawIcon(niFiles, HeadingLeft - 1, Y + (TextH - HeadingIconSize) div 2,
       HeadingIconSize, FDim);
     Canvas.Brush.Style := bsClear;
     Canvas.Font.Style := [fsBold];
     Canvas.Font.Color := FDim;
-    Canvas.TextOut(2 * PadX + IconSize + IconGap, Y, FHeading);
+    Canvas.TextOut(HeadingTextLeft, Y, FHeading);
     Canvas.Font.Style := [];
     Inc(Y, TextH + HeadingGap);
     Canvas.Pen.Style := psSolid;
     Canvas.Pen.Color := FLine;
-    Canvas.Line(2 * PadX, Y, Width - 2 * PadX, Y);
+    Canvas.Line(HeadingLeft, Y, Width - HeadingLeft, Y);
   end;
   for i := 0 to High(FCaptions) do
   begin
