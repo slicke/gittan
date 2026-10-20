@@ -1,0 +1,419 @@
+{ ---------------------------------------------------------------------------
+  Stashes
+  ---------------------------------------------------------------------------
+  The Stash menu stashes the local changes (every one, or the files
+  ticked in the tree), pops or applies the newest stash, and lists the
+  stashes; the status bar shows how many there are as a chip with a
+  box, which drops the same list (ShowStashList). A row of the list is
+  a stash with its branch, age and whether it holds untracked files,
+  the one compared against checked; a pick shows what the stash holds,
+  comparing the commit it is against the one it was made on
+  (CompareStash, the range StashRange), and a right click (or the Menu
+  key) offers what can be done with it: apply, pop, make a branch from
+  it, drop. While a stash is compared against, the base label in the
+  summary and the status bar is a chip that drops Apply, Pop and Drop,
+  as a compared branch drops Merge and Rebase, so looking comes first.
+  A stash whose changes clash with the work tree leaves the files in
+  conflict, to resolve as after a merge, and is kept. The stashes come
+  with every snapshot of the repository (FStashes), so one made or
+  dropped in a terminal shows up through the watcher. }
+const
+  { The rows of the list that are no stash, in FStashRows. }
+  StashRowHeader = -1;
+  StashRowNew = -2;
+  smApply = 1;
+  smPop = 2;
+  smBranch = 3;
+  smCompare = 4;
+  smDrop = 5;
+
+{ The message as the list and the notes show it, cut to a line. }
+function TForm1.StashLabel(const AStash: TGittanStash): string;
+begin
+  Result := AStash.Message;
+  if Length(Result) > 60 then
+    Result := UTF8Copy(Result, 1, 57) + '...';
+end;
+
+{ The index in FStashes of the stash compared against, -1 for none. }
+function TForm1.StashOfBase: integer;
+var
+  i: integer;
+begin
+  Result := -1;
+  if (FRepo.Root = '') or (FStashRange = '') or (FRepo.Base <> FStashRange) then
+    Exit;
+  for i := 0 to High(FStashes) do
+    if FStashes[i].Id = FStashRangeId then
+      Exit(i);
+end;
+
+function TForm1.StashBusy: boolean;
+begin
+  Result := (FRepo.Root = '') or (FCommitJob <> nil) or (FRemoteJob <> nil) or
+    (FOperation <> '');
+end;
+
+procedure TForm1.ShowStashList(const AScreenRect: TRect);
+var
+  i: integer;
+  Detail: string;
+  Compared: integer;
+
+  procedure AddRow(ARow: integer);
+  begin
+    SetLength(FStashRows, Length(FStashRows) + 1);
+    FStashRows[High(FStashRows)] := ARow;
+  end;
+
+begin
+  if FRepo.Root = '' then
+    Exit;
+  Compared := StashOfBase;
+  FStashPopup.Clear;
+  FStashRows := nil;
+  if (FFileCount > 0) and not StashBusy and (FConflictFiles = 0) then
+  begin
+    FStashPopup.Add(rsStashNewRow);
+    AddRow(StashRowNew);
+  end;
+  if Length(FStashes) = 0 then
+    FStashPopup.AddHeader(rsNoStashes)
+  else
+    FStashPopup.AddHeader(rsStashes);
+  AddRow(StashRowHeader);
+  for i := 0 to High(FStashes) do
+  begin
+    Detail := FStashes[i].Branch;
+    if Detail <> '' then
+      Detail := Detail + ' · ';
+    Detail := Detail + BlameAge(FStashes[i].Time, DateTimeToUnix(Now, False));
+    if FStashes[i].Untracked then
+      Detail := Detail + ' · ' + rsStashUntracked;
+    FStashPopup.Add(StashLabel(FStashes[i]), Detail, i = Compared);
+    AddRow(i);
+  end;
+  FStashPopup.Popup(AScreenRect);
+end;
+
+procedure TForm1.StashPopupPick(Sender: TObject; AIndex: integer);
+begin
+  if (AIndex < 0) or (AIndex > High(FStashRows)) then
+    Exit;
+  case FStashRows[AIndex] of
+    StashRowHeader: ;
+    StashRowNew: StashChangesAsk(False);
+    else
+      if FStashRows[AIndex] <= High(FStashes) then
+        CompareStash(FStashes[FStashRows[AIndex]]);
+  end;
+end;
+
+procedure TForm1.StashContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
+var
+  Busy: boolean;
+
+  procedure Add(const ACaption: string; ATag: integer; AEnabled: boolean);
+  var
+    Item: TMenuItem;
+  begin
+    Item := TMenuItem.Create(FStashMenu);
+    Item.Caption := ACaption;
+    Item.Tag := ATag;
+    Item.Enabled := AEnabled;
+    Item.OnClick := @StashMenuClick;
+    FStashMenu.Items.Add(Item);
+  end;
+
+begin
+  if (AIndex < 0) or (AIndex > High(FStashRows)) or (FStashRows[AIndex] < 0) or
+    (FStashRows[AIndex] > High(FStashes)) then
+    Exit;
+  FMenuStash := FStashes[FStashRows[AIndex]];
+  Busy := StashBusy;
+  FStashMenu.Items.Clear;
+  Add(rsSmApply, smApply, not Busy);
+  Add(rsSmPop, smPop, not Busy);
+  Add(rsSmBranch, smBranch, not Busy);
+  FStashMenu.Items.Add(NewLine);
+  Add(rsSmCompare, smCompare, not ComparingStash(FMenuStash.Id));
+  FStashMenu.Items.Add(NewLine);
+  Add(rsSmDrop, smDrop, (FCommitJob = nil) and (FRemoteJob = nil));
+  FStashMenu.PopUp(AScreenPos.X, AScreenPos.Y);
+end;
+
+procedure TForm1.StashMenuClick(Sender: TObject);
+var
+  Stash: TGittanStash;
+begin
+  Stash := FMenuStash;
+  if (FRepo.Root = '') or (Stash.Id = '') then
+    Exit;
+  FStashPopup.Close;
+  case (Sender as TMenuItem).Tag of
+    smApply: ApplyStash(Stash, False);
+    smPop: ApplyStash(Stash, True);
+    smBranch: BranchFromStashAsk(Stash);
+    smCompare: CompareStash(Stash);
+    smDrop: DropStashAsk(Stash);
+  end;
+end;
+
+{ Asks for a message, which may be left empty (git then names the
+  stash after HEAD), and stashes every change, or with AChosenOnly the
+  files ticked in the tree. git makes no stash when there is nothing
+  to save, which the count of stashes after the refresh tells. }
+procedure TForm1.StashChangesAsk(AChosenOnly: boolean);
+var
+  Paths: TStringList;
+  Values: array of string;
+  Prompt, Err: string;
+  Before, Count: integer;
+  Ok: boolean;
+begin
+  if StashBusy or (FConflictFiles > 0) then
+    Exit;
+  Paths := TStringList.Create;
+  try
+    if AChosenOnly then
+    begin
+      if not CommitChoosing then
+        Exit;
+      ChosenCommitPaths(Paths);
+      if Paths.Count = 0 then
+        Exit;
+      Prompt := Format(rsStashPromptChosen, [Paths.Count]);
+      Count := Paths.Count;
+    end
+    else
+    begin
+      Prompt := rsStashPrompt;
+      Count := FFileCount;
+    end;
+    SetLength(Values, 1);
+    Values[0] := '';
+    if not InputQuery(rsStashTitle, [Prompt], Values) then
+      Exit;
+    Before := Length(FStashes);
+    StopWatcher;
+    if AChosenOnly then
+      Ok := FRepo.Stash(Trim(Values[0]), Paths)
+    else
+      Ok := FRepo.Stash(Trim(Values[0]));
+    Err := FRepo.Error;
+    FSummary.Notice := '';
+    RefreshRepository;
+    StartWatcher;
+    if not Ok then
+      BannerError(rsStashFailed, Err)
+    else if Length(FStashes) = Before then
+      StatusNote(rsNothingToStash)
+    else if Count = 1 then
+      StatusNote(rsStashedOne)
+    else
+      StatusNote(Format(rsStashed, [Count]));
+  finally
+    Paths.Free;
+  end;
+end;
+
+{ Back to the work tree after the stash went in, so the views show
+  the changes it brought: a compared stash (this one or another) is a
+  range, which shows the stash's commit, not the tree. The stash comes
+  by value here and in the others that refresh, since one given as
+  FStashes[i] is gone with the array once the refresh lists them
+  again. }
+procedure TForm1.ApplyStash(AStash: TGittanStash; APop: boolean);
+var
+  Ok, Conflicts: boolean;
+  Err: string;
+begin
+  if StashBusy then
+    Exit;
+  StopWatcher;
+  Screen.Cursor := crHourGlass;
+  try
+    Ok := FRepo.StashApply(AStash.Id, APop, Conflicts);
+  finally
+    Screen.Cursor := crDefault;
+  end;
+  { The refresh runs git too, which may leave a reason of its own. }
+  Err := FRepo.Error;
+  FSummary.Notice := '';
+  if (FStashRange <> '') and (FRepo.Base = FStashRange) then
+    SetBase('')
+  else
+    RefreshRepository;
+  StartWatcher;
+  if Ok and APop then
+    StatusNote(Format(rsStashPopped, [StashLabel(AStash)]))
+  else if Ok then
+    StatusNote(Format(rsStashApplied, [StashLabel(AStash)]))
+  else if Conflicts then
+    BannerError(rsStashConflictsTitle, rsStashConflictsKept + LineEnding + LineEnding + Err)
+  else
+    BannerError(rsStashApplyFailed, Err);
+end;
+
+procedure TForm1.DropStashAsk(AStash: TGittanStash);
+begin
+  if (FCommitJob <> nil) or (FRemoteJob <> nil) then
+    Exit;
+  if QuestionDlg(rsDropStashTitle, Format(rsDropStashAsk, [StashLabel(AStash)]), mtWarning,
+    [mrYes, rsDropAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
+    Exit;
+  StopWatcher;
+  if FRepo.StashDrop(AStash.Id) then
+  begin
+    if ComparingStash(AStash.Id) then
+      SetBase('')
+    else
+      RefreshRepository;
+    StatusNote(Format(rsStashDropped, [StashLabel(AStash)]));
+  end
+  else
+    BannerError(rsCaFailed, FRepo.Error);
+  StartWatcher;
+end;
+
+procedure TForm1.BranchFromStashAsk(AStash: TGittanStash);
+var
+  Values: array of string;
+begin
+  if StashBusy then
+    Exit;
+  SetLength(Values, 1);
+  Values[0] := '';
+  if not InputQuery(rsStashBranchTitle, [rsStashBranchPrompt], Values) or
+    (Trim(Values[0]) = '') then
+    Exit;
+  StopWatcher;
+  if FRepo.StashBranch(Trim(Values[0]), AStash.Id) then
+  begin
+    FLoadError := '';
+    FSummary.Notice := '';
+    if ComparingStash(AStash.Id) then
+      SetBase('')
+    else
+      RefreshRepository;
+    StatusNote(Format(rsStashBranched, [Trim(Values[0])]));
+  end
+  else
+    BannerError(rsCaFailed, FRepo.Error);
+  StartWatcher;
+end;
+
+{ Whether the stash AId is the one compared against. }
+function TForm1.ComparingStash(const AId: string): boolean;
+begin
+  Result := (FStashRange <> '') and (FRepo.Base = FStashRange) and (FStashRangeId = AId);
+end;
+
+procedure TForm1.CompareStash(AStash: TGittanStash);
+var
+  Range: string;
+begin
+  if ComparingStash(AStash.Id) then
+    Exit;
+  if not FRepo.StashRange(AStash.Id, Range) then
+  begin
+    BannerError(rsCaFailed, FRepo.Error);
+    Exit;
+  end;
+  FStashRange := Range;
+  FStashRangeId := AStash.Id;
+  SetBase(FStashRange);
+end;
+
+{ The base chip while a stash is compared against: Apply, Pop and
+  Drop. }
+procedure TForm1.StashBaseClick(const AScreenRect: TRect);
+var
+  i: integer;
+begin
+  i := StashOfBase;
+  if i < 0 then
+    Exit;
+  FBaseStashId := FStashes[i].Id;
+  FBaseActionRef := '';
+  FBasePopup.Clear;
+  FBasePopup.AddHeader(Format(rsVsStash, [StashLabel(FStashes[i])]));
+  FBaseApplyIndex := FBasePopup.Add(rsSmApply);
+  FBasePopIndex := FBasePopup.Add(rsSmPop);
+  FBaseDropIndex := FBasePopup.Add(rsSmDrop);
+  FBasePopup.Popup(AScreenRect);
+end;
+
+procedure TForm1.StashBasePick(AIndex: integer);
+var
+  i: integer;
+begin
+  i := StashOfBase;
+  if (i < 0) or (FStashes[i].Id <> FBaseStashId) then
+    Exit;
+  if AIndex = FBaseApplyIndex then
+    ApplyStash(FStashes[i], False)
+  else if AIndex = FBasePopIndex then
+    ApplyStash(FStashes[i], True)
+  else if AIndex = FBaseDropIndex then
+    DropStashAsk(FStashes[i]);
+end;
+
+{ The Stash menu's items: stashing with changes to stash (the ticked
+  files only while the tree chooses what to commit), popping and
+  applying with a stash, none while git is in the middle of something
+  or a commit, fetch, pull or push runs. Called as the menu opens and
+  whenever the repository or a job changes, for the shortcuts. }
+procedure TForm1.UpdateStashItems;
+var
+  Has, Busy: boolean;
+  Chosen, i: integer;
+begin
+  if FStashAllItem = nil then
+    Exit;
+  Has := (FRepo <> nil) and (FRepo.Root <> '');
+  Busy := not Has or StashBusy;
+  Chosen := 0;
+  if Has and CommitChoosing then
+    for i := 0 to High(FStats) do
+      if (FStats[i].Kind <> ckConflict) and CommitChosen(i) then
+        Inc(Chosen);
+  FStashAllItem.Enabled := not Busy and (FFileCount > 0) and (FConflictFiles = 0);
+  FStashChosenItem.Enabled := not Busy and (Chosen > 0) and (FConflictFiles = 0);
+  FPopStashItem.Enabled := not Busy and (Length(FStashes) > 0);
+  FApplyStashItem.Enabled := FPopStashItem.Enabled;
+  FStashListItem.Enabled := Has;
+end;
+
+procedure TForm1.StashMenuOpen(Sender: TObject);
+begin
+  UpdateStashItems;
+end;
+
+procedure TForm1.MenuStashAllClick(Sender: TObject);
+begin
+  StashChangesAsk(False);
+end;
+
+procedure TForm1.MenuStashChosenClick(Sender: TObject);
+begin
+  StashChangesAsk(True);
+end;
+
+procedure TForm1.MenuPopStashClick(Sender: TObject);
+begin
+  if Length(FStashes) > 0 then
+    ApplyStash(FStashes[0], True);
+end;
+
+procedure TForm1.MenuApplyStashClick(Sender: TObject);
+begin
+  if Length(FStashes) > 0 then
+    ApplyStash(FStashes[0], False);
+end;
+
+procedure TForm1.MenuStashListClick(Sender: TObject);
+begin
+  if FRepo.Root <> '' then
+    ShowStashList(FStatus.PartScreenRect(spStash));
+end;

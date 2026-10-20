@@ -405,9 +405,15 @@ procedure TForm1.BaseClick(const AScreenRect: TRect);
 var
   Ref: string;
 begin
+  if StashOfBase >= 0 then
+  begin
+    StashBaseClick(AScreenRect);
+    Exit;
+  end;
   Ref := BaseActionRef;
   if Ref = '' then
     Exit;
+  FBaseStashId := '';
   FBaseActionRef := Ref;
   FBasePopup.Clear;
   FBasePopup.AddHeader(Format(rsVsSince, [Ref, FBranch]));
@@ -426,6 +432,11 @@ end;
   merge or a rebase that went through. }
 procedure TForm1.BasePopupPick(Sender: TObject; AIndex: integer);
 begin
+  if FBaseStashId <> '' then
+  begin
+    StashBasePick(AIndex);
+    Exit;
+  end;
   if (FBaseActionRef = '') or (BaseActionRef <> FBaseActionRef) then
     Exit;
   if AIndex = FBaseMergeIndex then

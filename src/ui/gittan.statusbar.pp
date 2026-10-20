@@ -4,9 +4,9 @@ unit gittan.statusbar;
 
   On the left the repository: its name, the branch as a chip that drops
   the branch list, the commits ahead of and behind the upstream (a click
-  lists them), what git
-  is in the middle of and the conflicted files as tinted badges, and the
-  base the work tree is compared against. In the middle a passing message,
+  lists them), the stashes as a box with their count (a click lists
+  them), what git is in the middle of and the conflicted files as
+  tinted badges, and the base the work tree is compared against. In the middle a passing message,
   which clears itself after a while, or the progress of a long job. On the
   right the branch's pull request, the number of changed files and the
   caret's line and column.
@@ -25,8 +25,8 @@ uses
 
 type
   {** The parts of the bar, from left to right. }
-  TGittanStatusPart = (spNone, spRepo, spBranch, spSync, spOperation, spConflicts,
-    spBase, spMessage, spProgress, spPull, spFiles, spPosition, spUpdate);
+  TGittanStatusPart = (spNone, spRepo, spBranch, spSync, spStash, spOperation,
+    spConflicts, spBase, spMessage, spProgress, spPull, spFiles, spPosition, spUpdate);
 
   {** How a message or the pull request reads: in the text color, or
     in green, amber or red. }
@@ -64,7 +64,7 @@ type
     FUpdate: string;
     FPullChecks, FPullOpen, FPullThreads: integer;
     FMessage, FProgressText, FConflicts: string;
-    FAhead, FBehind, FProgressPos, FProgressTotal: integer;
+    FAhead, FBehind, FProgressPos, FProgressTotal, FStashes: integer;
     FSyncShown: boolean;
     FPullTone, FMessageTone: TGittanStatusTone;
     FHints: array[TGittanStatusPart] of string;
@@ -103,6 +103,9 @@ type
       and down, so it can still be clicked; without AShown and
       neither, it is gone. }
     procedure SetSync(AAhead, ABehind: integer; AShown: boolean);
+    {** How many stashes the repository has, shown as a chip with a box
+      and the count after the sync part; 0 hides it. }
+    procedure SetStashes(ACount: integer);
     {** What git is in the middle of ("merging") and the conflicted files
       ("2 conflicted files"), each '' for none. }
     procedure SetState(const AOperation, AConflicts: string);
@@ -156,7 +159,8 @@ type
 
 {** The parts that answer a click. }
 const
-  StatusClickable = [spRepo, spBranch, spSync, spConflicts, spPull, spFiles, spUpdate];
+  StatusClickable = [spRepo, spBranch, spSync, spStash, spConflicts, spPull, spFiles,
+    spUpdate];
 
   {** Markers at the start of a hint line, drawn as icons: a green check,
     a red cross, an amber clock, a globe for a link, two arrows for a
@@ -173,6 +177,7 @@ const
   HintPull = '⤴';
   HintComment = '💬';
   HintSync = '⇅';
+  HintStash = '📦';
 
 {** Draws the icon of the marker AIcon (HintPassed and the others above)
   in AColor, in a square a little smaller than ASize centered on a line
@@ -246,7 +251,7 @@ begin
   AIcon := '';
   AText := ALine;
   for M in [HintPassed, HintFailed, HintPending, HintLink, HintSwitch, HintFolder, HintBranch, HintPull,
-    HintComment, HintSync] do
+    HintComment, HintSync, HintStash] do
     if Copy(ALine, 1, Length(M) + 1) = M + ' ' then
     begin
       AIcon := M;
@@ -370,6 +375,16 @@ begin
     ACanvas.Line(L + S - 3, T, L + S - 3, T + S - 1);
     ACanvas.Polyline([Point(L + S - 6, T + S - 4), Point(L + S - 3, T + S - 1),
       Point(L + S, T + S - 4)]);
+  end
+  else if AIcon = HintStash then
+  begin
+    { A box: the lid across the top, the body under it with a short
+      handle in the middle. }
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Pen.Width := 1;
+    ACanvas.RoundRect(L, T, L + S, T + S div 3 + 1, 2, 2);
+    ACanvas.Rectangle(L + 1, T + S div 3, L + S - 1, T + S);
+    ACanvas.Line(CX - 2, T + S div 3 + 3, CX + 3, T + S div 3 + 3);
   end;
   ACanvas.Pen.Width := 1;
 end;
@@ -505,6 +520,14 @@ begin
   FAhead := AAhead;
   FBehind := ABehind;
   FSyncShown := AShown;
+  Invalidate;
+end;
+
+procedure TGittanStatusBar.SetStashes(ACount: integer);
+begin
+  if ACount = FStashes then
+    Exit;
+  FStashes := ACount;
   Invalidate;
 end;
 
@@ -747,6 +770,8 @@ var
       Inc(Result, Canvas.TextWidth(Sync) + Gap)
     else if FSyncShown then
       Inc(Result, IconW + Gap);
+    if FStashes > 0 then
+      Inc(Result, IconW + Canvas.TextWidth(IntToStr(FStashes)) + 2 * ChipPadX + Gap);
     if FOperation <> '' then
       Inc(Result, BadgeWidth(FOperation) + Gap div 2);
     if FConflicts <> '' then
@@ -914,6 +939,18 @@ begin
     DrawHot(spSync);
     DrawStatusIcon(Canvas, HintSync, X, TextY, TextH, FDim);
     Inc(X, IconW - IconGap + Gap);
+  end;
+  { The stashes: a box with the count after it. }
+  if (FStashes > 0) and (X + IconW + Canvas.TextWidth(IntToStr(FStashes)) <= Right) then
+  begin
+    S := IntToStr(FStashes);
+    FRects[spStash] := ChipRect(X - ChipPadX, IconW + Canvas.TextWidth(S) + 2 * ChipPadX);
+    DrawHot(spStash);
+    DrawStatusIcon(Canvas, HintStash, X, TextY, TextH, FDim);
+    Inc(X, IconW);
+    Canvas.Font.Color := FDim;
+    Canvas.TextOut(X, TextY, S);
+    Inc(X, Canvas.TextWidth(S) + Gap);
   end;
   if (FOperation <> '') and (X + BadgeWidth(FOperation) <= Right) then
   begin

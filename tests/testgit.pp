@@ -83,6 +83,8 @@ type
     procedure TestRevertFiles;
     procedure TestRebaseOnto;
     procedure TestRebaseOntoConflicts;
+    procedure TestStashes;
+    procedure TestStashConflicts;
   end;
 
 implementation
@@ -2253,6 +2255,148 @@ begin
   finally
     Gone.Free;
   end;
+end;
+
+{ A stash of everything, of some files, listed with its branch, message
+  and untracked files, applied, dropped, popped and made into a branch. }
+procedure TGitRepoTest.TestStashes;
+var
+  List: TGittanStashes;
+  Paths: TStringList;
+  Branch, Msg: string;
+  Conflicts: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.Stashes(List));
+  AssertEquals(0, Length(List));
+
+  ParseStashSubject('On main: my work', Branch, Msg);
+  AssertEquals('main', Branch);
+  AssertEquals('my work', Msg);
+  ParseStashSubject('WIP on feature/x: 1234abc files', Branch, Msg);
+  AssertEquals('feature/x', Branch);
+  AssertEquals('1234abc files', Msg);
+  ParseStashSubject('On (no branch): loose', Branch, Msg);
+  AssertEquals('', Branch);
+  AssertEquals('loose', Msg);
+  ParseStashSubject('odd', Branch, Msg);
+  AssertEquals('', Branch);
+  AssertEquals('odd', Msg);
+
+  { Nothing to stash is no failure, and makes no stash. }
+  AssertTrue(FRepo.Error, FRepo.Stash('nothing'));
+  AssertTrue(FRepo.Stashes(List));
+  AssertEquals(0, Length(List));
+
+  WriteFile('a.txt', 'one'#10'two'#10'three'#10'four'#10);
+  WriteFile('new.txt', 'untracked'#10);
+  AssertTrue(FRepo.Error, FRepo.Stash('all of it'));
+  AssertEquals('', Git(['status', '--porcelain']));
+  AssertTrue(FRepo.Stashes(List));
+  AssertEquals(1, Length(List));
+  AssertEquals(0, List[0].Index);
+  AssertEquals(FRepo.Branch, List[0].Branch);
+  AssertEquals('all of it', List[0].Message);
+  AssertTrue('holds new.txt', List[0].Untracked);
+  AssertTrue(List[0].Time > 0);
+  AssertEquals(0, FRepo.StashIndex(List[0].Id));
+  AssertEquals(-1, FRepo.StashIndex('0000000000000000000000000000000000000000'));
+  AssertTrue('made on HEAD', FRepo.CommitId(List[0].Id + '^') = FRepo.CommitId('HEAD'));
+  { The range of a stash with untracked files runs to a commit that
+    holds them too. }
+  AssertTrue(FRepo.StashRange(List[0].Id, Branch));
+  AssertTrue(Branch, Pos(List[0].Id + '^..', Branch) = 1);
+  AssertTrue('another commit', Branch <> List[0].Id + '^..' + List[0].Id);
+  AssertEquals('a.txt'#10'new.txt'#10, Git(['diff', '--name-only', Branch]));
+  AssertEquals('what the stash holds', 'untracked'#10, Git(['show',
+    Copy(Branch, Pos('..', Branch) + 2, MaxInt) + ':new.txt']));
+  AssertFalse(FRepo.StashRange('0000000000000000000000000000000000000000', Branch));
+
+  { Some files only: the others stay as they are. }
+  WriteFile('a.txt', 'one'#10'two'#10'three'#10'five'#10);
+  WriteFile('del.txt', 'changed too'#10);
+  Paths := TStringList.Create;
+  try
+    Paths.Add('a.txt');
+    AssertTrue(FRepo.Error, FRepo.Stash('', Paths));
+  finally
+    Paths.Free;
+  end;
+  AssertEquals(' M del.txt', TrimRight(Git(['status', '--porcelain'])));
+  AssertTrue(FRepo.Stashes(List));
+  AssertEquals(2, Length(List));
+  AssertEquals('the newest first', 'all of it', List[1].Message);
+  AssertEquals(1, List[1].Index);
+  AssertTrue('named after HEAD', Pos('files', List[0].Message) > 0);
+  AssertFalse('nothing untracked', List[0].Untracked);
+  AssertTrue(FRepo.StashRange(List[0].Id, Branch));
+  AssertEquals('the plain range', List[0].Id + '^..' + List[0].Id, Branch);
+  AssertEquals(1, FRepo.StashIndex(List[1].Id));
+
+  { Apply keeps the stash, drop takes it away. }
+  AssertTrue(FRepo.Error, FRepo.StashApply(List[0].Id, False, Conflicts));
+  AssertEquals('one'#10'two'#10'three'#10'five'#10,
+    FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
+  AssertEquals(2, Length(List));
+  AssertEquals(0, FRepo.StashIndex(List[0].Id));
+  AssertTrue(FRepo.Error, FRepo.StashDrop(List[0].Id));
+  AssertEquals(-1, FRepo.StashIndex(List[0].Id));
+  AssertEquals(0, FRepo.StashIndex(List[1].Id));
+  AssertFalse(FRepo.StashDrop(List[0].Id));
+  AssertFalse(FRepo.StashApply(List[0].Id, True, Conflicts));
+  AssertFalse(Conflicts);
+
+  { Pop puts the untracked file back too and drops the stash. }
+  Git(['checkout', '-q', '--', '.']);
+  Git(['clean', '-q', '-f']);
+  AssertTrue(FRepo.Error, FRepo.StashApply(List[1].Id, True, Conflicts));
+  AssertEquals('one'#10'two'#10'three'#10'four'#10,
+    FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
+  AssertEquals('untracked'#10, FileText(IncludeTrailingPathDelimiter(FDir) + 'new.txt'));
+  AssertTrue(FRepo.Stashes(List));
+  AssertEquals(0, Length(List));
+
+  { A branch from a stash starts where the stash was made, with its
+    changes, and the stash goes. }
+  AssertTrue(FRepo.Error, FRepo.Stash('for a branch'));
+  AssertTrue(FRepo.Stashes(List));
+  AssertEquals(1, Length(List));
+  AssertFalse(FRepo.StashBranch('bad..name', List[0].Id));
+  AssertTrue(FRepo.Error, FRepo.StashBranch('from-stash', List[0].Id));
+  AssertEquals('from-stash', FRepo.Branch);
+  AssertEquals('one'#10'two'#10'three'#10'four'#10,
+    FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
+  AssertTrue(FRepo.Stashes(List));
+  AssertEquals(0, Length(List));
+end;
+
+{ A stash whose changes clash with the work tree leaves the file in
+  conflict and keeps the stash. }
+procedure TGitRepoTest.TestStashConflicts;
+var
+  List: TGittanStashes;
+  Conflicts: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  WriteFile('a.txt', 'one'#10'two'#10'stashed'#10);
+  AssertTrue(FRepo.Error, FRepo.Stash('clash'));
+  WriteFile('a.txt', 'one'#10'two'#10'committed'#10);
+  Commit('committed');
+  AssertTrue(FRepo.Stashes(List));
+  AssertEquals(1, Length(List));
+  AssertFalse(FRepo.StashApply(List[0].Id, True, Conflicts));
+  AssertTrue(FRepo.Error, Conflicts);
+  AssertTrue('left in conflict', Pos('UU a.txt', Git(['status', '--porcelain'])) > 0);
+  AssertEquals('the stash is kept', 0, FRepo.StashIndex(List[0].Id));
+  AssertEquals('', FRepo.Operation);
+  Git(['checkout', '-q', 'HEAD', '--', 'a.txt']);
+  AssertTrue(FRepo.Error, FRepo.StashDrop(List[0].Id));
 end;
 
 initialization

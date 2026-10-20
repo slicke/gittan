@@ -58,6 +58,21 @@ type
   {** Everything the views read about a repository at one moment, gathered
     in one pass so it can be computed off the main thread and handed over
     whole. Ok is false when git failed, with the message in Error. }
+  {** A stash: the commit it is (Id), its place in the list (Index, the
+    n of the stash@ n git names it by, which shifts as stashes come and
+    go, so the id names it here), the branch
+    it was made on, its message (the user's, or for one made without
+    the short id and subject of the commit it was made on), when it was
+    made in Unix seconds, and whether it holds untracked files. }
+  TGittanStash = record
+    Id: string;
+    Index: integer;
+    Branch, Message: string;
+    Time: int64;
+    Untracked: boolean;
+  end;
+  TGittanStashes = array of TGittanStash;
+
   TGittanRepoSnapshot = record
     Ok: boolean;
     Error: string;
@@ -65,6 +80,8 @@ type
     Branch, DefaultBranch, MergeBase, Operation, RebaseBranch: string;
     HasUpstream: boolean;
     Ahead, Behind: integer;
+    {** The stashes, newest first, from Stashes. }
+    Stashes: TGittanStashes;
     {** The newest commits of HEAD, from RecentCommits; read only when
       the work tree is clean, since only the summary of a clean tree
       shows them. }
@@ -162,10 +179,43 @@ type
       was on disk, and a file that was not there is deleted again. What
       the index held is not brought back. }
     function RestoreReverted(ASaved: TStrings): boolean;
-    {** Stashes every local change, untracked files included, with the
-      message AMessage (`git stash push -u`), leaving the work tree as
-      HEAD has it. }
-    function Stash(const AMessage: string): boolean;
+    {** Stashes the local changes, untracked files included, with the
+      message AMessage (`git stash push -u`; without one git names the
+      stash after HEAD), leaving the work tree as HEAD has them: every
+      change, or with APaths only the files named (relative to Root),
+      the others left as they are. True with nothing to stash too, when
+      git makes no stash. }
+    function Stash(const AMessage: string; APaths: TStrings = nil): boolean;
+    {** The stashes, newest first (`git stash list`), each with its
+      place in the list. Returns false when git failed. }
+    function Stashes(out AList: TGittanStashes): boolean;
+    {** The place of the stash AId (its commit) in the list now, the n
+      git names it stash@ n by; -1 when it is gone. }
+    function StashIndex(const AId: string): integer;
+    {** Puts the changes of the stash AId back into the work tree (`git
+      stash apply`), and with APop drops it once that went through
+      (`git stash pop`). False, with git's reason, when it did not:
+      AConflicts is then set when the changes clashed with the work tree
+      and the files are left in conflict, to resolve as after a merge;
+      the stash is kept then. }
+    function StashApply(const AId: string; APop: boolean; out AConflicts: boolean): boolean;
+    {** Drops the stash AId (`git stash drop`). }
+    function StashDrop(const AId: string): boolean;
+    {** Makes the branch AName at the commit the stash AId was made on,
+      switches to it, puts the stash's changes back and drops it (`git
+      stash branch`): what to do with a stash the branch has since moved
+      past. False, with git's reason, when the name is taken or wrong or
+      local changes stand in the way; the stash is kept then. }
+    function StashBranch(const AName, AId: string): boolean;
+    {** A Base that shows what the stash AId holds, in ARange: the range
+      from the commit it was made on to the stash. The untracked files
+      a stash holds are in a commit of their own, its third parent: for
+      a stash with any, a commit no branch points at is made whose tree
+      is the stash's with them added (through a temporary index, as a
+      snapshot is), and the range runs to that one, so the view shows
+      the whole stash. False when the stash is unknown; ARange then
+      still names the plain range. }
+    function StashRange(const AId: string; out ARange: string): boolean;
     {** Commits the files APaths (relative to Root, as ChangedPaths gives
       them) as they are in the work tree, with the message AMessage as it
       is, whatever the index holds for them: the other changed files stay
@@ -552,6 +602,13 @@ function RunGitHubCli(const AExe, ADir: string; const AArgs: array of string;
   files the branch has), each on a line of its own after a tab; false
   when the message names none, a refusal for another reason. }
 function SwitchBlockedFiles(const AError: string; AFiles: TStrings): boolean;
+
+{** The branch and the message of a stash from its reflog subject, as
+  `git stash list` prints it: "On main: message" for one made with a
+  message, "WIP on main: 1234abc subject" for one made without (the
+  message is then the short id and subject of the commit it was made
+  on), and "(no branch)" for a detached HEAD, which gives no branch. }
+procedure ParseStashSubject(const ASubject: string; out ABranch, AMessage: string);
 
 {** Whether the file AFileName is binary by git's own rule: a NUL byte
   in its first 8000 bytes. False for a file that cannot be read. }
@@ -1929,11 +1986,266 @@ begin
   end;
 end;
 
-function TGittanRepo.Stash(const AMessage: string): boolean;
+{ The paths go in a file, as a commit's do (see Commit), and are read
+  literally only then: --literal-pathspecs without paths keeps the
+  untracked files out of the stash, since git gathers them with a
+  pathspec of its own that needs its magic. }
+function TGittanRepo.Stash(const AMessage: string; APaths: TStrings): boolean;
+var
+  Output, SpecFile, Nul: string;
+  Args: array of string;
+  i: integer;
+
+  procedure Arg(const S: string);
+  begin
+    SetLength(Args, Length(Args) + 1);
+    Args[High(Args)] := S;
+  end;
+
+begin
+  if FRoot = '' then
+    Exit(False);
+  Args := nil;
+  if (APaths <> nil) and (APaths.Count > 0) then
+    Arg('--literal-pathspecs');
+  Arg('stash');
+  Arg('push');
+  Arg('-u');
+  if AMessage <> '' then
+  begin
+    Arg('-m');
+    Arg(AMessage);
+  end;
+  SpecFile := '';
+  try
+    if (APaths <> nil) and (APaths.Count > 0) then
+    begin
+      Nul := '';
+      for i := 0 to APaths.Count - 1 do
+        Nul := Nul + APaths[i] + #0;
+      SpecFile := GetTempFileName(GetTempDir, 'gittan-stash-');
+      WriteBytes(SpecFile, Nul);
+      Arg('--pathspec-from-file=' + SpecFile);
+      Arg('--pathspec-file-nul');
+    end;
+    Result := RunGit(FRoot, Args, Output);
+  finally
+    if SpecFile <> '' then
+      DeleteFile(SpecFile);
+  end;
+end;
+
+{ The reflog subject of a stash is "On <branch>: <message>" for one made
+  with a message and "WIP on <branch>: <short id> <subject>" for one
+  made without; a stash made with HEAD detached says "(no branch)". }
+procedure ParseStashSubject(const ASubject: string; out ABranch, AMessage: string);
+var
+  Rest: string;
+  Colon: integer;
+begin
+  ABranch := '';
+  AMessage := ASubject;
+  if Pos('WIP on ', ASubject) = 1 then
+    Rest := Copy(ASubject, Length('WIP on ') + 1, MaxInt)
+  else if Pos('On ', ASubject) = 1 then
+    Rest := Copy(ASubject, Length('On ') + 1, MaxInt)
+  else
+    Exit;
+  Colon := Pos(': ', Rest);
+  if Colon = 0 then
+    Exit;
+  ABranch := Copy(Rest, 1, Colon - 1);
+  AMessage := Copy(Rest, Colon + 2, MaxInt);
+  if ABranch = '(no branch)' then
+    ABranch := '';
+end;
+
+{ One line per stash: the id, the parents, the time and the reflog
+  subject. A stash made with -u has a third parent, the commit of the
+  untracked files, also when there were none: its tree is the empty
+  tree then, so the trees of those commits are read in one more call
+  (git log --no-walk, one line per commit) and compared with it. }
+function TGittanRepo.Stashes(out AList: TGittanStashes): boolean;
+var
+  Output, Line, Empty: string;
+  Lines, Trees: TStringList;
+  Args: array of string;
+  Fields: array[0..3] of string;
+  i, n, j, Sep: integer;
+begin
+  AList := nil;
+  if FRoot = '' then
+    Exit(False);
+  Result := RunGit(FRoot, ['stash', 'list', '--format=%H%x1f%P%x1f%at%x1f%gs'], Output);
+  if not Result then
+    Exit;
+  Lines := TStringList.Create;
+  Trees := TStringList.Create;
+  try
+    Lines.Text := Output;
+    n := 0;
+    SetLength(AList, Lines.Count);
+    Args := nil;
+    for i := 0 to Lines.Count - 1 do
+    begin
+      Line := Lines[i];
+      for j := 0 to 2 do
+      begin
+        Sep := Pos(#31, Line);
+        if Sep = 0 then
+          Break;
+        Fields[j] := Copy(Line, 1, Sep - 1);
+        Delete(Line, 1, Sep);
+      end;
+      if Sep = 0 then
+        Continue;
+      Fields[3] := Line;
+      AList[n].Id := Fields[0];
+      AList[n].Index := n;
+      AList[n].Time := StrToInt64Def(Fields[2], 0);
+      ParseStashSubject(Fields[3], AList[n].Branch, AList[n].Message);
+      if WordCount(Fields[1], [' ']) >= 3 then
+      begin
+        { The third parent, looked up below. }
+        Trees.AddObject(ExtractWord(3, Fields[1], [' ']), TObject(PtrUInt(n)));
+        SetLength(Args, Length(Args) + 1);
+        Args[High(Args)] := Trees[Trees.Count - 1];
+      end;
+      Inc(n);
+    end;
+    SetLength(AList, n);
+    if Trees.Count > 0 then
+    begin
+      Empty := EmptyTree;
+      if RunGit(FRoot, Concat(['log', '--no-walk=unsorted', '--format=%H %T'], Args),
+        Output) then
+      begin
+        Lines.Text := Output;
+        for i := 0 to Lines.Count - 1 do
+        begin
+          Line := Lines[i];
+          Sep := Pos(' ', Line);
+          j := Trees.IndexOf(Copy(Line, 1, Sep - 1));
+          if (Sep > 0) and (j >= 0) then
+            AList[PtrUInt(Trees.Objects[j])].Untracked :=
+              Trim(Copy(Line, Sep + 1, MaxInt)) <> Empty;
+        end;
+      end;
+    end;
+  finally
+    Lines.Free;
+    Trees.Free;
+  end;
+end;
+
+function TGittanRepo.StashIndex(const AId: string): integer;
 var
   Output: string;
+  Lines: TStringList;
 begin
-  Result := (FRoot <> '') and RunGit(FRoot, ['stash', 'push', '-u', '-m', AMessage], Output);
+  Result := -1;
+  if (FRoot = '') or (AId = '') or
+    not RunGit(FRoot, ['stash', 'list', '--format=%H'], Output) then
+    Exit;
+  Lines := TStringList.Create;
+  try
+    Lines.Text := Output;
+    Result := Lines.IndexOf(AId);
+  finally
+    Lines.Free;
+  end;
+end;
+
+{ git names a stash to drop or pop by its place in the list only, so
+  the id is looked up first; apply takes a commit, but goes the same way
+  so a stash that is gone is refused alike. git keeps a stash whose
+  changes clashed, and leaves the clashing files in conflict (ls-files
+  -u lists them), with no operation in progress. }
+function TGittanRepo.StashApply(const AId: string; APop: boolean;
+  out AConflicts: boolean): boolean;
+var
+  Output, Ignored, Ref: string;
+  Index: integer;
+begin
+  AConflicts := False;
+  Index := StashIndex(AId);
+  if Index < 0 then
+  begin
+    FError := 'The stash is gone.';
+    Exit(False);
+  end;
+  Ref := 'stash@{' + IntToStr(Index) + '}';
+  if APop then
+    Result := RunGit(FRoot, ['stash', 'pop', Ref], Output)
+  else
+    Result := RunGit(FRoot, ['stash', 'apply', Ref], Output);
+  if not Result then
+    AConflicts := RunGitIn(FRoot, ['ls-files', '-u'], Output, Ignored) and
+      (Trim(Output) <> '');
+end;
+
+function TGittanRepo.StashDrop(const AId: string): boolean;
+var
+  Output: string;
+  Index: integer;
+begin
+  Index := StashIndex(AId);
+  if Index < 0 then
+  begin
+    FError := 'The stash is gone.';
+    Exit(False);
+  end;
+  Result := RunGit(FRoot, ['stash', 'drop', 'stash@{' + IntToStr(Index) + '}'], Output);
+end;
+
+function TGittanRepo.StashBranch(const AName, AId: string): boolean;
+var
+  Output: string;
+  Index: integer;
+begin
+  if not IsBranchName(AName) then
+  begin
+    FError := Format('"%s" is not a valid branch name.', [AName]);
+    Exit(False);
+  end;
+  Index := StashIndex(AId);
+  if Index < 0 then
+  begin
+    FError := 'The stash is gone.';
+    Exit(False);
+  end;
+  Result := RunGit(FRoot, ['stash', 'branch', AName, 'stash@{' + IntToStr(Index) + '}'],
+    Output);
+end;
+
+{ The two trees never overlap (an untracked file is one the stash's
+  tree lacks), so a three-way read-tree from the empty tree takes both
+  without a conflict; -i leaves the work tree out of it. The commit is
+  reachable from nothing, so git prunes it as it does a snapshot. }
+function TGittanRepo.StashRange(const AId: string; out ARange: string): boolean;
+var
+  Output, Tree, Third, Empty, Index: string;
+begin
+  ARange := AId + '^..' + AId;
+  Result := (FRoot <> '') and (AId <> '') and HasCommit(AId);
+  if not Result then
+    Exit;
+  if not RunGit(FRoot, ['rev-parse', '--verify', '-q', AId + '^3^{tree}'], Third) then
+    Exit;
+  Empty := EmptyTree;
+  if Trim(Third) = Empty then
+    Exit;
+  Index := GetTempFileName(GetTempDir, 'gittan-stash-index-');
+  try
+    DeleteFile(Index);
+    if RunGit(FRoot, ['read-tree', '-i', '-m', Empty, AId, AId + '^3'], Output, Index) and
+      RunGit(FRoot, ['write-tree'], Tree, Index) and
+      RunGit(FRoot, ['commit-tree', Trim(Tree), '-p', AId + '^', '-m',
+      'Gittan: the stash ' + AId + ' with its untracked files'], Output) then
+      ARange := AId + '^..' + Trim(Output);
+  finally
+    DeleteFile(Index);
+  end;
 end;
 
 function SwitchBlockedFiles(const AError: string; AFiles: TStrings): boolean;
@@ -2887,6 +3199,7 @@ begin
   ASnap.Operation := Operation;
   if ASnap.Operation = 'rebasing' then
     ASnap.RebaseBranch := RebaseBranch;
+  Stashes(ASnap.Stashes);
   if ASnap.Ok and (Length(ASnap.Stats) = 0) then
     RecentCommits(ASnap.Recent);
   Result := ASnap.Ok;
@@ -3161,6 +3474,9 @@ begin
       FBase + '^{commit}'], Id) then
       Result := Result + ' ' + Trim(Id);
     Result := Result + #10;
+    { The stashes, which the status bar counts and lists. }
+    if RunGit(FRoot, ['stash', 'list', '--format=%H'], Id) then
+      Result := Result + 'stash ' + StringReplace(Trim(Id), #10, ' ', [rfReplaceAll]) + #10;
     for i := 0 to Paths.Count - 1 do
       Result := Result + IntToStr(PtrUInt(Paths.Objects[i])) + ' ' + Paths[i] + #10;
     { Between two commits the files on disk do not matter. }

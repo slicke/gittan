@@ -1474,6 +1474,8 @@ begin
       BaseClick(AScreenRect);
     spSync:
       SyncClick(AScreenRect);
+    spStash:
+      ShowStashList(AScreenRect);
     spPull:
       PullChipClick(AScreenRect);
     spUpdate:
@@ -1601,7 +1603,8 @@ begin
     if FRepo.Root <> '' then
       FRepo.Refs(Refs);
     if (FRepo.Base <> '') and not FRepo.WholeTree and (FRepo.Base <> FPullRange) and
-      (FRepo.Base <> FMergeBase) and (Refs.IndexOf(FRepo.Base) < 0) then
+      (FRepo.Base <> FStashRange) and (FRepo.Base <> FMergeBase) and
+      (Refs.IndexOf(FRepo.Base) < 0) then
       Refs.Insert(0, FRepo.Base);
     if Refs.Count > 0 then
       FCompareMenu.Add(NewLine);
@@ -2017,6 +2020,10 @@ begin
       [Copy(FRepo.Base, Pos('..', FRepo.Base) + 2, 7)])])
   else if (FRepo.Base = FPullRange) and FRepo.IsRange then
     Result := Format(rsVsBase, [Format(rsVsPull, [FPullNumber])])
+  else if (FRepo.Base = FStashRange) and (StashOfBase >= 0) then
+    Result := Format(rsVsBase, [Format(rsVsStash, [StashLabel(FStashes[StashOfBase])])])
+  else if (FRepo.Base = FStashRange) and FRepo.IsRange then
+    Result := Format(rsVsBase, [Format(rsVsStash, [Copy(FStashRangeId, 1, 7)])])
   else if FRepo.IsRange and (Pos('...', FRepo.Base) > 0) then
     { "main...feature" reads as what feature changed since main. }
     Result := Format(rsVsSince, [Copy(FRepo.Base, Pos('...', FRepo.Base) + 3, MaxInt),

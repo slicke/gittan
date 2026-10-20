@@ -417,6 +417,22 @@ type
     FBranchListMode: TGittanBranchListMode;
     FSwitchItem, FNewBranchItem, FMergeItem, FRebaseItem, FCompareBranchItem,
       FCompareBackItem: TMenuItem;
+    { Stashes (umain.stash.inc): what the last snapshot listed, the list
+      that drops from the status bar's stash chip with, per row, the
+      index in FStashes of its stash (StashRowHeader, StashRowNew for
+      the others), the menu of a stash and the one it is for, the range
+      a compared stash is the base as and the stash it is of, the stash
+      the base chip's list is for with its rows, and the Stash menu's
+      items. }
+    FStashes: TGittanStashes;
+    FStashPopup: TGittanPopupList;
+    FStashRows: TIntegerDynArray;
+    FStashMenu: TPopupMenu;
+    FMenuStash: TGittanStash;
+    FStashRange, FStashRangeId, FBaseStashId: string;
+    FBaseApplyIndex, FBasePopIndex, FBaseDropIndex: integer;
+    FStashAllItem, FStashChosenItem, FPopStashItem, FApplyStashItem,
+      FStashListItem: TMenuItem;
     { The commit graph, in the middle of the form, from the status bar's
       ahead/behind counts or View > Commit Graph. }
     FGraph: TGittanCommitGraph;
@@ -985,6 +1001,28 @@ type
     procedure BranchMenuOpen(Sender: TObject);
     procedure MenuBranchListClick(Sender: TObject);
     procedure MenuNewBranchClick(Sender: TObject);
+    function StashLabel(const AStash: TGittanStash): string;
+    function StashOfBase: integer;
+    function StashBusy: boolean;
+    procedure ShowStashList(const AScreenRect: TRect);
+    procedure StashPopupPick(Sender: TObject; AIndex: integer);
+    procedure StashContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
+    procedure StashMenuClick(Sender: TObject);
+    procedure StashChangesAsk(AChosenOnly: boolean);
+    procedure ApplyStash(AStash: TGittanStash; APop: boolean);
+    procedure DropStashAsk(AStash: TGittanStash);
+    procedure BranchFromStashAsk(AStash: TGittanStash);
+    function ComparingStash(const AId: string): boolean;
+    procedure CompareStash(AStash: TGittanStash);
+    procedure StashBaseClick(const AScreenRect: TRect);
+    procedure StashBasePick(AIndex: integer);
+    procedure UpdateStashItems;
+    procedure StashMenuOpen(Sender: TObject);
+    procedure MenuStashAllClick(Sender: TObject);
+    procedure MenuStashChosenClick(Sender: TObject);
+    procedure MenuPopStashClick(Sender: TObject);
+    procedure MenuApplyStashClick(Sender: TObject);
+    procedure MenuStashListClick(Sender: TObject);
     procedure GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
       const AScreenPos: TPoint);
     procedure CommitMenuClick(Sender: TObject);
@@ -1414,6 +1452,46 @@ resourcestring
   rsBmGoneUnmerged = 'These %d have commits that are in no other branch. Delete them too?';
   rsBmGoneDeleted = 'Deleted %d branches';
   rsBmGoneDeletedOne = 'Deleted 1 branch';
+  rsStashMenu = 'Stas&h';
+  rsStashAllItem = '&Stash Changes...';
+  rsStashChosenItem = 'Stash &Ticked Files...';
+  rsPopStashItem = '&Pop Latest Stash';
+  rsApplyStashItem = '&Apply Latest Stash';
+  rsStashListItem = 'Stas&hes...';
+  rsStashes = 'Stashes';
+  rsNoStashes = 'No stashes';
+  rsStashNewRow = 'Stash Changes...';
+  rsFilterStashes = 'Filter stashes';
+  rsStashUntracked = 'with untracked files';
+  rsStashTitle = 'Stash Changes';
+  rsStashPrompt = 'A message for the stash of every change (may be left empty)';
+  rsStashPromptChosen = 'A message for the stash of the %d ticked files (may be left empty)';
+  rsStashed = 'Stashed the changes of %d files';
+  rsStashedOne = 'Stashed the changes of 1 file';
+  rsNothingToStash = 'Nothing to stash';
+  rsSmApply = 'Apply';
+  rsSmPop = 'Pop (Apply and Drop)';
+  rsSmBranch = 'Create Branch from Stash...';
+  rsSmCompare = 'Show the Stash';
+  rsSmDrop = 'Drop...';
+  rsStashApplied = 'Applied the stash: %s';
+  rsStashPopped = 'Popped the stash: %s';
+  rsStashApplyFailed = 'Could not apply the stash';
+  rsStashConflictsTitle = 'The stash clashed with your changes';
+  rsStashConflictsKept = 'The files are left in conflict, to resolve as after a merge. ' +
+    'The stash is kept.';
+  rsDropStashTitle = 'Drop Stash';
+  rsDropStashAsk = 'Drop the stash "%s"? Its changes are then only in the reflog.';
+  rsDropAction = 'Drop';
+  rsStashDropped = 'Dropped the stash: %s';
+  rsStashBranchTitle = 'Create Branch from Stash';
+  rsStashBranchPrompt = 'Name of the branch, made where the stash was made and given its changes';
+  rsStashBranched = 'Created %s from the stash and switched to it';
+  rsVsStash = 'stash: %s';
+  rsStashesHint = '%d stashes';
+  rsStashHintOne = '1 stash';
+  rsStashListHint = 'Click to list them';
+  rsStashActionsHint = 'Apply, pop or drop the stash';
   rsDeletingRemote = 'Deleting %s...';
   rsDeletedRemote = 'Deleted %s on the remote';
   rsDeleteRemoteFailed = 'Could not delete %s on the remote';
@@ -2007,6 +2085,13 @@ begin
   FBranchPopup.FilterHint := rsFilterBranches;
   FBranchPopup.OnPick := @BranchPopupPick;
   FBranchPopup.OnContext := @BranchContext;
+  { The stash list pops up under the status bar's stash chip. }
+  FStashMenu := TPopupMenu.Create(Self);
+  FStashPopup := TGittanPopupList.Create(Self);
+  FStashPopup.Parent := Self;
+  FStashPopup.FilterHint := rsFilterStashes;
+  FStashPopup.OnPick := @StashPopupPick;
+  FStashPopup.OnContext := @StashContext;
   { The commit graph pops up in the middle of the form. }
   FGraph := TGittanCommitGraph.Create(Self);
   FGraph.Parent := Self;
@@ -2358,6 +2443,9 @@ begin
     FBranchPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
+    FStashPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
+      RGBToColor(100, 160, 240));
     FGraph.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240), RGBToColor(227, 179, 65));
@@ -2416,6 +2504,9 @@ begin
     FFindBar.Nav.SetColors(RGBToColor(246, 246, 246), clWhite,
       RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
     FBranchPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
+      RGBToColor(0, 110, 230));
+    FStashPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
     FGraph.SetColors(clWhite, RGBToColor(30, 30, 30),
@@ -2565,6 +2656,7 @@ begin
     else
       FStatus.PartHint[spRepo] := '';
     FStatus.SetSync(0, 0, False);
+    FStatus.SetStashes(0);
     FStatus.SetState('', '');
     FStatus.SetBase('');
     FStatus.SetPull('', '', stNormal, 0);
@@ -2594,15 +2686,23 @@ begin
       Sync := rsNoUpstreamHint;
   end;
   FStatus.PartHint[spSync] := HintSync + ' ' + Sync + LineEnding + rsGraphHint;
+  FStatus.SetStashes(Length(FStashes));
+  if Length(FStashes) = 1 then
+    FStatus.PartHint[spStash] := HintStash + ' ' + rsStashHintOne + LineEnding + rsStashListHint
+  else
+    FStatus.PartHint[spStash] := HintStash + ' ' + Format(rsStashesHint, [Length(FStashes)]) +
+      LineEnding + rsStashListHint;
   case FConflictFiles of
     0: FStatus.SetState(FOperation, '');
     1: FStatus.SetState(FOperation, rsOneConflictedFile);
     else
       FStatus.SetState(FOperation, Format(rsConflictedFiles, [FConflictFiles]));
   end;
-  FStatus.SetBase(BaseLabel, BaseActionRef <> '');
+  FStatus.SetBase(BaseLabel, (BaseActionRef <> '') or (StashOfBase >= 0));
   if BaseActionRef <> '' then
     FStatus.PartHint[spBase] := rsBaseActionsHint
+  else if StashOfBase >= 0 then
+    FStatus.PartHint[spBase] := rsStashActionsHint
   else
     FStatus.PartHint[spBase] := '';
   if FHasPull then
@@ -2767,7 +2867,7 @@ end;
 procedure TForm1.BuildMenu;
 var
   Main: TMainMenu;
-  FileMenu, BranchMenu, ViewMenu, GoMenu, ToolsMenu, Item, Sub: TMenuItem;
+  FileMenu, BranchMenu, StashMenu, ViewMenu, GoMenu, ToolsMenu, Item, Sub: TMenuItem;
   i: integer;
 
   function AddItem(AParent: TMenuItem; const ACaption: string; AShortCut: TShortCut;
@@ -2850,6 +2950,22 @@ begin
   FCompareBackItem := AddItem(BranchMenu, '', 0, @MenuBranchListClick);
   FCompareBackItem.Tag := Ord(blCurrentSince);
   UpdateBranchItems;
+
+  { The Stash menu (umain.stash.inc). }
+  StashMenu := TMenuItem.Create(Main);
+  StashMenu.Caption := rsStashMenu;
+  StashMenu.OnClick := @StashMenuOpen;
+  Main.Items.Add(StashMenu);
+  FStashAllItem := AddItem(StashMenu, rsStashAllItem, ShortCut(VK_S, [ssModifier, ssAlt]),
+    @MenuStashAllClick);
+  FStashChosenItem := AddItem(StashMenu, rsStashChosenItem, 0, @MenuStashChosenClick);
+  StashMenu.Add(NewLine);
+  FPopStashItem := AddItem(StashMenu, rsPopStashItem,
+    ShortCut(VK_S, [ssModifier, ssAlt, ssShift]), @MenuPopStashClick);
+  FApplyStashItem := AddItem(StashMenu, rsApplyStashItem, 0, @MenuApplyStashClick);
+  StashMenu.Add(NewLine);
+  FStashListItem := AddItem(StashMenu, rsStashListItem, 0, @MenuStashListClick);
+  UpdateStashItems;
 
   ViewMenu := TMenuItem.Create(Main);
   ViewMenu.Caption := rsView;
@@ -4029,6 +4145,7 @@ begin
     if FStats[i].Kind = ckConflict then
       Inc(FConflictFiles);
   FFileCount := Length(FStats);
+  FStashes := ASnap.Stashes;
   FillFileTree(FStats);
   UpdateCommitState;
   FillRepoFiles;
@@ -4044,7 +4161,7 @@ begin
   if FOperation <> '' then
     Branch := Branch + ' · ' + FOperation;
   FSummary.SetCommits(ASnap.Recent, FAhead, FBehind, FHasUpstream);
-  FSummary.BaseClickable := BaseActionRef <> '';
+  FSummary.BaseClickable := (BaseActionRef <> '') or (StashOfBase >= 0);
   FSummary.SetRepository(ExtractFileName(FRepo.Root), Branch, BaseLabel, FStats, Icons,
     Texts);
   FWelcome.Visible := False;
@@ -4061,6 +4178,7 @@ begin
   RebuildCompareMenu;
   FTerminalItem.Enabled := FRepo.Root <> '';
   UpdateBranchItems;
+  UpdateStashItems;
 end;
 
 { The badge of a file: solid when the index holds all of its change,
@@ -5249,6 +5367,7 @@ const
 {$I umain.conflicts.inc}
 {$I umain.commitactions.inc}
 {$I umain.branches.inc}
+{$I umain.stash.inc}
 {$I umain.revert.inc}
 {$I umain.commit.inc}
 {$I umain.remote.inc}
