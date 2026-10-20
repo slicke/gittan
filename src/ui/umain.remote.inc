@@ -37,6 +37,11 @@ begin
   if (FRepo.Root = '') or (FRemoteJob <> nil) or (FCommitJob <> nil) then
     Exit;
   FRemoteAhead := FAhead;
+  { What a pull brings in is counted from here when it is done. }
+  if AKind = rkPull then
+    FRemoteHead := FRepo.CommitId('HEAD')
+  else
+    FRemoteHead := '';
   FNoticeHook := (AKind = rkPush) and FRepo.HasHook('pre-push');
   FRemoteJob := TGittanRemoteJob.Create(FRepo.Root, AKind, AMode, AArg);
   FRemoteJob.OnDone := @RemoteJobDone;
@@ -115,6 +120,7 @@ procedure TForm1.RemoteJobDone(Sender: TObject);
 var
   Job: TGittanRemoteJob;
   HookFailed: boolean;
+  Count: integer;
 begin
   Job := TGittanRemoteJob(Sender);
   if Job <> FRemoteJob then
@@ -143,16 +149,28 @@ begin
         else
           StatusNote(rsFetched);
       rkPull:
-        StatusNote(rsPulled);
+        begin
+          { The upstream's commits the old HEAD lacked: what came in,
+            also when a rebase gave the local commits new ids. }
+          Count := FRepo.CountCommits(FRemoteHead, '@{upstream}');
+          if Count = 0 then
+            BannerSuccess(Format(rsPulledNothing, [FBranch]))
+          else if Count = 1 then
+            BannerSuccess(Format(rsPulledOne, [FBranch]))
+          else if Count > 1 then
+            BannerSuccess(Format(rsPulledCount, [Count, FBranch]))
+          else
+            BannerSuccess(rsPulled);
+        end;
       rkDeleteRemote:
         StatusNote(Format(rsDeletedRemote, [Job.Arg]));
       rkPush:
         if FRemoteAhead = 1 then
-          StatusNote(Format(rsPushedOne, [FBranch]))
+          BannerSuccess(Format(rsPushedOne, [FBranch]))
         else if FRemoteAhead > 1 then
-          StatusNote(Format(rsPushed, [FRemoteAhead, FBranch]))
+          BannerSuccess(Format(rsPushed, [FRemoteAhead, FBranch]))
         else
-          StatusNote(Format(rsPushedBranch, [FBranch]));
+          BannerSuccess(Format(rsPushedBranch, [FBranch]));
     end;
     Exit;
   end;

@@ -263,10 +263,11 @@ type
     FActionName: string;
     FMergeMessage: string;
     { Fetch, pull and push (umain.remote.inc): the job while it runs,
-      the commits ahead when it started, the menu items, and the list
-      the status bar's counts drop up. }
+      the commits ahead and HEAD when it started, the menu items, and
+      the list the status bar's counts drop up. }
     FRemoteJob: TGittanRemoteJob;
     FRemoteAhead: integer;
+    FRemoteHead: string;
     FFetchItem, FPullItem, FPushItem: TMenuItem;
     FSyncPopup: TGittanPopupList;
     { The actions of a base that is a branch compared through the merge
@@ -1105,6 +1106,8 @@ type
     procedure BannerError(const ATitle, ADetail: string);
     {** Shows a note in the banner for a few seconds. }
     procedure BannerInfo(const ATitle: string; const ADetail: string = '');
+    {** Shows in green for a few seconds that something went through. }
+    procedure BannerSuccess(const ATitle: string; const ADetail: string = '');
     procedure BannerChange(Sender: TObject);
     {** Gives the space under the macOS title bar to the top control of
       the editor panel: the banner while it is shown, else the file
@@ -1305,6 +1308,9 @@ resourcestring
   rsFetchedBehind = 'Fetched: %d commits to pull';
   rsFetchedBehindOne = 'Fetched: 1 commit to pull';
   rsPulled = 'Pulled';
+  rsPulledOne = 'Pulled 1 commit into %s';
+  rsPulledCount = 'Pulled %d commits into %s';
+  rsPulledNothing = 'Pulled: %s was up to date';
   rsPushed = 'Pushed %d commits on %s';
   rsPushedOne = 'Pushed 1 commit on %s';
   rsPushedBranch = 'Pushed %s';
@@ -2360,7 +2366,7 @@ begin
       RGBToColor(0, 110, 230), RGBToColor(241, 112, 112));
     FBanner.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(62, 62, 62), RGBToColor(62, 62, 62),
-      RGBToColor(100, 160, 240), RGBToColor(248, 81, 73));
+      RGBToColor(100, 160, 240), RGBToColor(248, 81, 73), RGBToColor(63, 185, 80));
     FPullPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
@@ -2420,7 +2426,7 @@ begin
       RGBToColor(0, 110, 230), RGBToColor(200, 40, 40));
     FBanner.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(222, 222, 222), RGBToColor(222, 222, 222),
-      RGBToColor(0, 110, 230), RGBToColor(207, 34, 46));
+      RGBToColor(0, 110, 230), RGBToColor(207, 34, 46), RGBToColor(26, 127, 55));
     FPullPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
@@ -2656,6 +2662,12 @@ procedure TForm1.BannerInfo(const ATitle: string; const ADetail: string);
 begin
   FBanner.DetailFont.Assign(Edit.Font);
   FBanner.Add(ATitle, ADetail, bkInfo, BannerInfoSeconds);
+end;
+
+procedure TForm1.BannerSuccess(const ATitle: string; const ADetail: string);
+begin
+  FBanner.DetailFont.Assign(Edit.Font);
+  FBanner.Add(ATitle, ADetail, bkSuccess, BannerInfoSeconds);
 end;
 
 procedure TForm1.BannerChange(Sender: TObject);

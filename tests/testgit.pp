@@ -53,6 +53,7 @@ type
     procedure TestFetchPullRequest;
     procedure TestDefaultBranchAndMergeBase;
     procedure TestAheadBehind;
+    procedure TestCommitIdAndCount;
     procedure TestSyncCommits;
     procedure TestRecentCommits;
     procedure TestGraphCommits;
@@ -821,6 +822,25 @@ begin
   finally
     RemoveTree(Remote);
   end;
+end;
+
+procedure TGitRepoTest.TestCommitIdAndCount;
+var
+  First: string;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  First := FRepo.CommitId('HEAD');
+  AssertEquals('a full id', 40, Length(First));
+  AssertEquals(Trim(Git(['rev-parse', 'HEAD'])), First);
+  AssertEquals('no such ref', '', FRepo.CommitId('no-such-ref'));
+  WriteFile('a.txt', 'one'#10'two'#10'three'#10'four'#10);
+  Commit('second');
+  WriteFile('a.txt', 'one'#10'two'#10'three'#10'four'#10'five'#10);
+  Commit('third');
+  AssertEquals(2, FRepo.CountCommits(First, 'HEAD'));
+  AssertEquals(0, FRepo.CountCommits('HEAD', First));
+  AssertEquals(-1, FRepo.CountCommits('no-such-ref', 'HEAD'));
 end;
 
 procedure TGitRepoTest.TestAheadBehind;

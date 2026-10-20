@@ -187,6 +187,11 @@ type
     function HeadMessage(out AMessage: string): boolean;
     {** Whether ARef names a commit in the repository. }
     function HasCommit(const ARef: string): boolean;
+    {** The full id of the commit ARef names, empty when it names none. }
+    function CommitId(const ARef: string): string;
+    {** How many commits AFrom..ATo holds (those ATo reaches and AFrom
+      does not), -1 when git cannot tell. }
+    function CountCommits(const AFrom, ATo: string): integer;
     {** The name the repository commits under (`git config user.name`,
       the repository's own setting before the global one), empty when
       none is set. }
@@ -1414,6 +1419,24 @@ var
 begin
   Result := (FRoot <> '') and (ARef <> '') and
     RunGit(FRoot, ['rev-parse', '--verify', '-q', ARef + '^{commit}'], Id);
+end;
+
+function TGittanRepo.CommitId(const ARef: string): string;
+begin
+  if (FRoot = '') or (ARef = '') or
+    not RunGit(FRoot, ['rev-parse', '--verify', '-q', ARef + '^{commit}'], Result) then
+    Exit('');
+  Result := Trim(Result);
+end;
+
+function TGittanRepo.CountCommits(const AFrom, ATo: string): integer;
+var
+  Output: string;
+begin
+  if (FRoot = '') or (AFrom = '') or (ATo = '') or
+    not RunGit(FRoot, ['rev-list', '--count', AFrom + '..' + ATo], Output) or
+    not TryStrToInt(Trim(Output), Result) then
+    Result := -1;
 end;
 
 function TGittanRepo.UserName: string;

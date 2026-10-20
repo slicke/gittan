@@ -8,10 +8,11 @@ unit gittan.banner;
   title in bold and the first line of the detail dimmed after it. When
   the detail has more lines than that, or is cut, Details unfolds it in
   the detail font under the title. Copy puts the title and the detail
-  on the clipboard, and the close button takes the message away, which
-  brings back the one before it; "+2" before the button counts those.
-  An error stays until it is closed; a message given seconds closes
-  itself after them, later while the mouse is over the banner.
+  on the clipboard (not offered for a note or a success without one),
+  and the close button takes the message away, which brings back the
+  one before it; "+2" before the button counts those. An error stays
+  until it is closed; a message given seconds closes itself after them,
+  later while the mouse is over the banner.
 
   It paints itself in colors the form sets, like the file header, and
   raises OnChange when it is shown, hidden or resized, so the form can
@@ -25,8 +26,9 @@ uses
   Classes, SysUtils, Types, Controls, Graphics, ExtCtrls;
 
 type
-  {** The tone of a message: an error in red, a note in the accent. }
-  TGittanBannerKind = (bkError, bkInfo);
+  {** The tone of a message: an error in red, a note in the accent, a
+    success in green. }
+  TGittanBannerKind = (bkError, bkInfo, bkSuccess);
 
   { TGittanBanner }
 
@@ -48,7 +50,7 @@ type
     FDetailsRect, FCopyRect, FCloseRect: TRect;
     FDetailFont: TFont;
     FTimer: TTimer;
-    FBack, FText, FDim, FHover, FLine, FAccent, FBad: TColor;
+    FBack, FText, FDim, FHover, FLine, FAccent, FBad, FGood: TColor;
     FOnChange: TNotifyEvent;
     function Current: TItem;
     procedure SetHotPart(AValue: TPart);
@@ -72,8 +74,10 @@ type
     destructor Destroy; override;
     {** The palette: the background, the title, the dimmed detail and
       links, the fill under the mouse, the line along the bottom, the
-      tone of a note and of an error, which also tint the background. }
-    procedure SetColors(ABack, AText, ADim, AHover, ALine, AAccent, ABad: TColor);
+      tone of a note, of an error and of a success, which also tint the
+      background. }
+    procedure SetColors(ABack, AText, ADim, AHover, ALine, AAccent, ABad,
+      AGood: TColor);
     {** Shows a message over the one in view. ADetail may run over
       several lines; ASeconds closes it after that many seconds, 0 never.
       The same message as the one in view is not added again. }
@@ -136,7 +140,7 @@ begin
   FTimer.Enabled := False;
   FTimer.OnTimer := @TimerTimer;
   SetColors(clBtnFace, clWindowText, clGrayText, clBtnShadow, clBtnShadow,
-    clHighlight, clRed);
+    clHighlight, clRed, clGreen);
 end;
 
 destructor TGittanBanner.Destroy;
@@ -146,7 +150,7 @@ begin
 end;
 
 procedure TGittanBanner.SetColors(ABack, AText, ADim, AHover, ALine, AAccent,
-  ABad: TColor);
+  ABad, AGood: TColor);
 begin
   FBack := ABack;
   FText := AText;
@@ -155,6 +159,7 @@ begin
   FLine := ALine;
   FAccent := AAccent;
   FBad := ABad;
+  FGood := AGood;
   Invalidate;
 end;
 
@@ -285,7 +290,7 @@ begin
 end;
 
 { A disc in the tone with a white mark: "!" for an error, "i" for a
-  note. }
+  note, a check for a success. }
 procedure TGittanBanner.DrawIcon(X, Y: integer; AColor: TColor;
   AKind: TGittanBannerKind);
 var
@@ -299,15 +304,22 @@ begin
   Canvas.Pen.Color := clWhite;
   Canvas.Pen.Width := 2;
   CX := X + IconSize div 2;
-  if AKind = bkError then
-  begin
-    Canvas.Line(CX, Y + 4, CX, Y + 9);
-    Canvas.Line(CX, Y + 11, CX, Y + 13);
-  end
-  else
-  begin
-    Canvas.Line(CX, Y + 4, CX, Y + 6);
-    Canvas.Line(CX, Y + 8, CX, Y + 13);
+  case AKind of
+    bkError:
+      begin
+        Canvas.Line(CX, Y + 4, CX, Y + 9);
+        Canvas.Line(CX, Y + 11, CX, Y + 13);
+      end;
+    bkInfo:
+      begin
+        Canvas.Line(CX, Y + 4, CX, Y + 6);
+        Canvas.Line(CX, Y + 8, CX, Y + 13);
+      end;
+    bkSuccess:
+      begin
+        Canvas.Line(X + 4, Y + 8, X + 7, Y + 11);
+        Canvas.Line(X + 7, Y + 11, X + 12, Y + 5);
+      end;
   end;
   Canvas.Pen.Width := 1;
 end;
@@ -349,10 +361,12 @@ begin
     Exit;
   end;
   Item := Current;
-  if Item.Kind = bkError then
-    Tone := FBad
-  else
-    Tone := FAccent;
+  case Item.Kind of
+    bkError: Tone := FBad;
+    bkSuccess: Tone := FGood;
+    else
+      Tone := FAccent;
+  end;
   Back := Blend(FBack, Tone, TintPercent);
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := Back;
@@ -392,7 +406,11 @@ begin
     Canvas.TextOut(Right - Canvas.TextWidth(S), TextY, S);
     Right := Right - Canvas.TextWidth(S) - Gap;
   end;
-  FCopyRect := PlaceLink(rsBannerCopy, bpCopy);
+  { A note or a success that is its title alone has nothing to copy. }
+  if (Item.Kind = bkError) or (Trim(Item.Detail) <> '') then
+    FCopyRect := PlaceLink(rsBannerCopy, bpCopy)
+  else
+    FCopyRect := Rect(0, 0, 0, 0);
 
   { The title, then the first detail line in what is left; Details goes
     in when there is more to see. }
