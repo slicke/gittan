@@ -6,10 +6,13 @@ unit gittan.sidenav;
   itself. Each row is an icon and a name; the row of the page shown is
   filled, and the one under the mouse tinted. A click raises OnPick
   with the row's index; whoever owns the sidebar shows the page and
-  sets Selected, so the rows follow the view and never lead it.
+  sets Selected, so the rows follow the view and never lead it. Under
+  the rows a Heading names what the sidebar lists below them, as the
+  music app writes Library over its playlists: a dim bold title over a
+  line, as the headings of the repository page.
 
   It paints itself in the sidebar's shade, as the section headers do,
-  and is as high as its rows. }
+  and is as high as its rows and the heading. }
 
 {$mode objfpc}{$H+}
 
@@ -31,9 +34,12 @@ type
   private
     FCaptions: array of string;
     FIcons: array of TGittanNavIcon;
+    FHeading: string;
     FSelected, FHot: integer;
-    FBack, FText, FDim, FHover, FSelectedBack: TColor;
+    FBack, FText, FDim, FHover, FSelectedBack, FLine: TColor;
     FOnPick: TGittanNavPickEvent;
+    procedure SetHeading(const AValue: string);
+    procedure FitHeight;
     function RowAt(Y: integer): integer;
     function RowRect(AIndex: integer): TRect;
     procedure SetSelected(AValue: integer);
@@ -49,9 +55,13 @@ type
     constructor Create(AOwner: TComponent); override;
     {** Adds a row at the end and gives its index. }
     function AddRow(const ACaption: string; AIcon: TGittanNavIcon): integer;
-    {** The palette: the background, the text, the dim icons, the tint
-      under the mouse and the fill of the selected row. }
-    procedure SetColors(ABack, AText, ADim, AHover, ASelected: TColor);
+    {** The palette: the background, the text, the dim icons and
+      heading, the tint under the mouse, the fill of the selected row
+      and the line under the heading. }
+    procedure SetColors(ABack, AText, ADim, AHover, ASelected, ALine: TColor);
+    {** The title under the rows, over what the sidebar lists below
+      them; none when empty. }
+    property Heading: string read FHeading write SetHeading;
     {** The row of the page shown, -1 for none. }
     property Selected: integer read FSelected write SetSelected;
     {** A click on a row. }
@@ -67,6 +77,11 @@ const
   IconSize = 14;
   IconGap = 7;
   Radius = 8;
+  { The heading: its text sits HeadingTop under the rows, and the line
+    HeadingGap under the text, with HeadingBottom below it. }
+  HeadingTop = 10;
+  HeadingGap = 5;
+  HeadingBottom = 4;
 
 { TGittanSideNav }
 
@@ -77,7 +92,38 @@ begin
   FSelected := -1;
   FHot := -1;
   Height := 2 * PadY;
-  SetColors(clBtnFace, clWindowText, clGrayText, clBtnShadow, clHighlight);
+  SetColors(clBtnFace, clWindowText, clGrayText, clBtnShadow, clHighlight,
+    clBtnShadow);
+end;
+
+{ The heading is measured on a bitmap, since the rows and the heading
+  are set before the control has a parent and so a canvas. }
+procedure TGittanSideNav.FitHeight;
+var
+  H: integer;
+  Bmp: TBitmap;
+begin
+  H := 2 * PadY + Length(FCaptions) * RowHeight;
+  if FHeading <> '' then
+  begin
+    Bmp := TBitmap.Create;
+    try
+      Bmp.Canvas.Font := Font;
+      Inc(H, HeadingTop + Bmp.Canvas.TextHeight('Xg') + HeadingGap + 1 + HeadingBottom);
+    finally
+      Bmp.Free;
+    end;
+  end;
+  Height := H;
+end;
+
+procedure TGittanSideNav.SetHeading(const AValue: string);
+begin
+  if FHeading = AValue then
+    Exit;
+  FHeading := AValue;
+  FitHeight;
+  Invalidate;
 end;
 
 function TGittanSideNav.AddRow(const ACaption: string; AIcon: TGittanNavIcon): integer;
@@ -87,17 +133,19 @@ begin
   SetLength(FIcons, Result + 1);
   FCaptions[Result] := ACaption;
   FIcons[Result] := AIcon;
-  Height := 2 * PadY + Length(FCaptions) * RowHeight;
+  FitHeight;
   Invalidate;
 end;
 
-procedure TGittanSideNav.SetColors(ABack, AText, ADim, AHover, ASelected: TColor);
+procedure TGittanSideNav.SetColors(ABack, AText, ADim, AHover, ASelected,
+  ALine: TColor);
 begin
   FBack := ABack;
   FText := AText;
   FDim := ADim;
   FHover := AHover;
   FSelectedBack := ASelected;
+  FLine := ALine;
   Color := ABack;
   Invalidate;
 end;
@@ -173,7 +221,7 @@ end;
 
 procedure TGittanSideNav.Paint;
 var
-  i, TextH, TextY: integer;
+  i, TextH, TextY, Y: integer;
   R: TRect;
 begin
   Canvas.Brush.Style := bsSolid;
@@ -181,6 +229,19 @@ begin
   Canvas.FillRect(ClientRect);
   Canvas.Font := Font;
   TextH := Canvas.TextHeight('Xg');
+  if FHeading <> '' then
+  begin
+    Y := 2 * PadY + Length(FCaptions) * RowHeight + HeadingTop;
+    Canvas.Brush.Style := bsClear;
+    Canvas.Font.Style := [fsBold];
+    Canvas.Font.Color := FDim;
+    Canvas.TextOut(2 * PadX, Y, FHeading);
+    Canvas.Font.Style := [];
+    Inc(Y, TextH + HeadingGap);
+    Canvas.Pen.Style := psSolid;
+    Canvas.Pen.Color := FLine;
+    Canvas.Line(2 * PadX, Y, Width - 2 * PadX, Y);
+  end;
   for i := 0 to High(FCaptions) do
   begin
     R := RowRect(i);

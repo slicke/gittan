@@ -25,6 +25,7 @@ begin
   FSideNav := TGittanSideNav.Create(Self);
   FSideNav.AddRow(rsNavHome, niHome);
   FSideNav.AddRow(rsNavRepository, niRepository);
+  FSideNav.Heading := rsNavFiles;
   FSideNav.OnPick := @SideNavPick;
   { Under the filter field: the alTop controls keep the order of their
     tops. }

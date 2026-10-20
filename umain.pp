@@ -1131,6 +1131,7 @@ resourcestring
   rsRepoInfo = 'Repository &Info';
   rsNavHome = 'Home';
   rsNavRepository = 'Repository';
+  rsNavFiles = 'Files';
   rsRefresh = 'Re&fresh';
   rsCompareWith = '&Compare With';
   rsWorkingTree = 'HEAD (Working Tree)';
@@ -4778,10 +4779,10 @@ begin
   FileTree.BackgroundColor := Shade;
   if FDark then
     FSideNav.SetColors(Shade, Edit.Colors.TextFont, RGBToColor(150, 150, 150),
-      RGBToColor(50, 50, 51), RGBToColor(62, 62, 64))
+      RGBToColor(50, 50, 51), RGBToColor(62, 62, 64), RGBToColor(62, 62, 62))
   else
     FSideNav.SetColors(Shade, RGBToColor(30, 30, 30), RGBToColor(110, 110, 110),
-      RGBToColor(235, 235, 235), RGBToColor(222, 222, 224));
+      RGBToColor(235, 235, 235), RGBToColor(222, 222, 224), RGBToColor(222, 222, 222));
   if FRepoTree <> nil then
     FRepoTree.BackgroundColor := Shade;
   if FSubTree <> nil then
