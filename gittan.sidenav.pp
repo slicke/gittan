@@ -11,7 +11,8 @@ unit gittan.sidenav;
   music app writes Library over its playlists: a dim bold title with a
   page icon, set in as the section headers under the tree set their
   chevron and title, over a line, as the headings of the repository
-  page.
+  page. While HeadingClean the icon is a green disc with a check, the
+  summary's mark for a clean tree, so an empty list reads as done.
 
   It paints itself in the sidebar's shade, as the section headers do,
   and is as high as its rows and the heading. }
@@ -38,10 +39,13 @@ type
     FCaptions: array of string;
     FIcons: array of TGittanNavIcon;
     FHeading: string;
+    FHeadingClean: boolean;
     FSelected, FHot: integer;
-    FBack, FText, FDim, FHover, FSelectedBack, FLine: TColor;
+    FBack, FText, FDim, FHover, FSelectedBack, FLine, FClean: TColor;
     FOnPick: TGittanNavPickEvent;
     procedure SetHeading(const AValue: string);
+    procedure SetHeadingClean(AValue: boolean);
+    procedure DrawCleanIcon(X, Y, ASize: integer);
     procedure FitHeight;
     function RowAt(Y: integer): integer;
     function RowRect(AIndex: integer): TRect;
@@ -60,11 +64,15 @@ type
     function AddRow(const ACaption: string; AIcon: TGittanNavIcon): integer;
     {** The palette: the background, the text, the dim icons and
       heading, the tint under the mouse, the fill of the selected row
-      and the line under the heading. }
-    procedure SetColors(ABack, AText, ADim, AHover, ASelected, ALine: TColor);
+      the line under the heading and the disc of the clean icon. }
+    procedure SetColors(ABack, AText, ADim, AHover, ASelected, ALine,
+      AClean: TColor);
     {** The title under the rows, over what the sidebar lists below
       them; none when empty. }
     property Heading: string read FHeading write SetHeading;
+    {** Whether the heading's icon is the clean check in place of the
+      page: for an empty list of changes. }
+    property HeadingClean: boolean read FHeadingClean write SetHeadingClean;
     {** The row of the page shown, -1 for none. }
     property Selected: integer read FSelected write SetSelected;
     {** A click on a row. }
@@ -102,7 +110,7 @@ begin
   FHot := -1;
   Height := 2 * PadY;
   SetColors(clBtnFace, clWindowText, clGrayText, clBtnShadow, clHighlight,
-    clBtnShadow);
+    clBtnShadow, clGreen);
 end;
 
 { The heading is measured on a bitmap, since the rows and the heading
@@ -126,6 +134,35 @@ begin
   Height := H;
 end;
 
+procedure TGittanSideNav.SetHeadingClean(AValue: boolean);
+begin
+  if FHeadingClean = AValue then
+    Exit;
+  FHeadingClean := AValue;
+  Invalidate;
+end;
+
+{ A disc ASize across at X, Y in the clean color with a check mark cut
+  out of it in the background, as the summary draws its clean state. }
+procedure TGittanSideNav.DrawCleanIcon(X, Y, ASize: integer);
+var
+  CenterY: integer;
+begin
+  CenterY := Y + ASize div 2;
+  Canvas.Pen.Style := psClear;
+  Canvas.Brush.Style := bsSolid;
+  Canvas.Brush.Color := FClean;
+  Canvas.Ellipse(X, Y, X + ASize + 1, Y + ASize + 1);
+  Canvas.Pen.Style := psSolid;
+  Canvas.Pen.Color := FBack;
+  Canvas.Pen.Width := 2;
+  Canvas.Polyline([Point(X + ASize * 27 div 100, CenterY),
+    Point(X + ASize * 44 div 100, CenterY + ASize * 17 div 100),
+    Point(X + ASize * 74 div 100, CenterY - ASize * 17 div 100)]);
+  Canvas.Pen.Width := 1;
+  Canvas.Brush.Style := bsClear;
+end;
+
 procedure TGittanSideNav.SetHeading(const AValue: string);
 begin
   if FHeading = AValue then
@@ -147,7 +184,7 @@ begin
 end;
 
 procedure TGittanSideNav.SetColors(ABack, AText, ADim, AHover, ASelected,
-  ALine: TColor);
+  ALine, AClean: TColor);
 begin
   FBack := ABack;
   FText := AText;
@@ -155,6 +192,7 @@ begin
   FHover := AHover;
   FSelectedBack := ASelected;
   FLine := ALine;
+  FClean := AClean;
   Color := ABack;
   Invalidate;
 end;
@@ -251,8 +289,12 @@ begin
   begin
     Y := 2 * PadY + Length(FCaptions) * RowHeight + HeadingTop;
     { The page is drawn one in from X. }
-    DrawIcon(niFiles, HeadingLeft - 1, Y + (TextH - HeadingIconSize) div 2,
-      HeadingIconSize, FDim);
+    if FHeadingClean then
+      DrawCleanIcon(HeadingLeft - 1, Y + (TextH - HeadingIconSize) div 2,
+        HeadingIconSize)
+    else
+      DrawIcon(niFiles, HeadingLeft - 1, Y + (TextH - HeadingIconSize) div 2,
+        HeadingIconSize, FDim);
     Canvas.Brush.Style := bsClear;
     Canvas.Font.Style := [fsBold];
     Canvas.Font.Color := FDim;

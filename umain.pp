@@ -4319,7 +4319,10 @@ begin
   FRepoPage.Visible := False;
   { At startup the sidebar is not built yet. }
   if FSideNav <> nil then
+  begin
     FSideNav.Selected := -1;
+    FSideNav.HeadingClean := False;
+  end;
   FWelcome.Visible := True;
   FWelcome.FitHeight(FSummaryBox.ClientHeight);
 end;
@@ -4626,6 +4629,8 @@ begin
   finally
     FileTree.EndUpdate;
   end;
+  { Nothing changed, not nothing matching the filter. }
+  FSideNav.HeadingClean := Length(AStats) = 0;
   if FCommitOn <> nil then
     ApplyCommitChecks;
 end;
@@ -4779,10 +4784,12 @@ begin
   FileTree.BackgroundColor := Shade;
   if FDark then
     FSideNav.SetColors(Shade, Edit.Colors.TextFont, RGBToColor(150, 150, 150),
-      RGBToColor(50, 50, 51), RGBToColor(62, 62, 64), RGBToColor(62, 62, 62))
+      RGBToColor(50, 50, 51), RGBToColor(62, 62, 64), RGBToColor(62, 62, 62),
+      RGBToColor(63, 185, 80))
   else
     FSideNav.SetColors(Shade, RGBToColor(30, 30, 30), RGBToColor(110, 110, 110),
-      RGBToColor(235, 235, 235), RGBToColor(222, 222, 224), RGBToColor(222, 222, 222));
+      RGBToColor(235, 235, 235), RGBToColor(222, 222, 224), RGBToColor(222, 222, 222),
+      RGBToColor(26, 127, 55));
   if FRepoTree <> nil then
     FRepoTree.BackgroundColor := Shade;
   if FSubTree <> nil then
