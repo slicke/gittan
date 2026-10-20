@@ -71,6 +71,7 @@ type
     procedure TestPushHook;
     procedure TestPullDiverged;
     procedure TestRemoteEnvironment;
+    procedure TestEnvironmentUtf8;
     procedure TestResolveMerge;
     procedure TestResolveRebase;
     procedure TestMarkResolvedAndAbort;
@@ -1657,6 +1658,66 @@ begin
   end;
   Git(['config', 'core.sshCommand', 'ssh -i key']);
   AssertEquals('the user runs ssh their own way', 0, Length(FRepo.RemoteEnvironment));
+end;
+
+{ Sets a variable in the test's own environment, as the shell that
+  started Gittan would have. On Windows the process has one environment,
+  which SetEnvironmentVariableW changes (the Windows unit's
+  SetEnvironmentVariable is the ANSI one, which could not carry an ö).
+  On Unix the RTL's GetEnvironmentString reads envp, the array the
+  program started with, while a libc-based lookup (fpgetenv on macOS)
+  reads libc's own, so both get the variable: a longer copy of envp
+  with it last. }
+{$ifdef windows}
+function SetEnvironmentVariableW(AName, AValue: PWideChar): LongBool; stdcall;
+  external 'kernel32' name 'SetEnvironmentVariableW';
+{$else}
+function setenv(AName, AValue: PChar; AOverwrite: longint): longint; cdecl;
+  external 'c';
+{$endif}
+procedure SetTestVariable(const AName, AValue: string);
+{$ifndef windows}
+var
+  Count: integer;
+  Wider: PPChar;
+{$endif}
+begin
+  {$ifdef windows}
+  SetEnvironmentVariableW(PWideChar(UnicodeString(AName)),
+    PWideChar(UnicodeString(AValue)));
+  {$else}
+  setenv(PChar(AName), PChar(AValue), 1);
+  Count := 0;
+  while envp[Count] <> nil do
+    Inc(Count);
+  Wider := GetMem((Count + 2) * SizeOf(PChar));
+  Move(envp^, Wider^, Count * SizeOf(PChar));
+  Wider[Count] := StrNew(PChar(AName + '=' + AValue));
+  Wider[Count + 1] := nil;
+  envp := Wider;
+  {$endif}
+end;
+
+{ A variable with a non-ASCII value reaches git as it is: on Windows the
+  RTL's own environment functions turn the ö of USERPROFILE=C:\Users\Björn
+  into ÷, and git could not lock C:/Users/Bj÷rn/.gitconfig. The alias
+  runs in git's shell, which prints what git was given. }
+procedure TGitRepoTest.TestEnvironmentUtf8;
+var
+  Env, Output, Err: string;
+  Found: boolean;
+begin
+  SetTestVariable('GITTAN_TEST_NAME', 'Björn');
+  AssertEquals('Björn', EnvironmentVariable('GITTAN_TEST_NAME'));
+  AssertEquals('', EnvironmentVariable('GITTAN_TEST_UNSET'));
+  Found := False;
+  for Env in EnvironmentStrings do
+    if Env = 'GITTAN_TEST_NAME=Björn' then
+      Found := True;
+  AssertTrue('GITTAN_TEST_NAME=Björn in EnvironmentStrings', Found);
+  AssertTrue(Err, RunGitIn(FDir, ['-c', 'alias.gittan-env=!echo "$GITTAN_TEST_NAME"',
+    'gittan-env'], Output, Err));
+  AssertEquals('Björn', Trim(Output));
 end;
 
 { Two branches that change a.txt each their own way, topic also

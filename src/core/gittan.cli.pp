@@ -24,7 +24,7 @@ unit gittan.cli;
 interface
 
 uses
-  Classes, SysUtils
+  Classes, SysUtils, gittan.git
   {$IFDEF DARWIN}, Process{$ENDIF}
   {$IFDEF WINDOWS}, Windows, Registry{$ELSE}, BaseUnix{$ENDIF};
 
@@ -171,8 +171,7 @@ begin
   {$IF DEFINED(DARWIN)}
   Result := '/usr/local/bin/gittan';
   {$ELSEIF DEFINED(WINDOWS)}
-  // The Windows unit shadows SysUtils with its own PChar GetEnvironmentVariable.
-  Result := IncludeTrailingPathDelimiter(SysUtils.GetEnvironmentVariable('LOCALAPPDATA')) +
+  Result := IncludeTrailingPathDelimiter(EnvironmentVariable('LOCALAPPDATA')) +
     'Gittan\bin\gittan.cmd';
   {$ELSE}
   Result := IncludeTrailingPathDelimiter(GetUserDir) + '.local/bin/gittan';
@@ -427,7 +426,7 @@ begin
   end;
   AMessage := 'Installed ' + Target + '. Type gittan in a terminal to open the ' +
     'current folder, or gittan <folder> to open another.';
-  if not PathListHas(GetEnvironmentVariable('PATH'), ExtractFileDir(Target), ':', False) then
+  if not PathListHas(EnvironmentVariable('PATH'), ExtractFileDir(Target), ':', False) then
     AMessage := AMessage + LineEnding + LineEnding + ExtractFileDir(Target) +
       ' is not on the PATH Gittan was started with. If the shell does not ' +
       'find gittan, add it in your shell profile:' + LineEnding +

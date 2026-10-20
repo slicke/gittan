@@ -63,7 +63,8 @@ function LexerFolderCandidates: TStringArray;
 implementation
 
 uses
-  Forms, LazFileUtils, gittan.theme, gittan.lexerpick, gittan.syntaxthemes;
+  Forms, LazFileUtils, gittan.theme, gittan.lexerpick, gittan.syntaxthemes,
+  gittan.git;
 
 const
   { How many sibling files are looked at to settle an ambiguous extension. }
@@ -91,7 +92,7 @@ var
 begin
   Result := nil;
   ExeDir := ExtractFilePath(Application.ExeName);
-  Env := GetEnvironmentVariable('GITTAN_LEXLIB');
+  Env := EnvironmentVariable('GITTAN_LEXLIB');
   if Env <> '' then
     Result := Concat(Result, [Env]);
   Result := Concat(Result, [

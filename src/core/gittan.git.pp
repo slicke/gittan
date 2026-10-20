@@ -499,6 +499,20 @@ type
   found. Windows keeps its PATH as it is. }
 function ToolSearchPath: string;
 
+{** The value of the environment variable AName as UTF-8, empty when it
+  is not set. SysUtils.GetEnvironmentVariable is wrong on Windows (FPC
+  3.2.4): it reads the ANSI environment and labels the bytes as the OEM
+  code page, so "C:\Users\Björn" (ö is F6 in Windows-1252) comes out as
+  "C:\Users\Bj÷rn" (F6 in code page 850); this reads the Unicode
+  environment instead. Every unit asks the environment through this. }
+function EnvironmentVariable(const AName: string): string;
+
+{** Every variable of Gittan's environment as "NAME=value" in UTF-8;
+  SysUtils.GetEnvironmentString has the fault EnvironmentVariable
+  describes, and a git given a USERPROFILE of Bj÷rn could not write
+  ~/.gitconfig. }
+function EnvironmentStrings: TStringArray;
+
 {** Full path of the command AName (without .exe; Windows adds it) on
   ToolSearchPath, or empty when it is not installed. node is found this
   way too, wherever nvm, fnm, Volta or Homebrew put it. }
@@ -589,6 +603,68 @@ implementation
 
 uses
   Process, Pipes, md5, StrUtils, DateUtils;
+
+{ ---------------------------------------------------------------------------
+  The environment
+  --------------------------------------------------------------------------- }
+
+{$ifdef windows}
+{ Declared here rather than taken from the Windows unit, whose DeleteFile,
+  Sleep and GetEnvironmentVariable would shadow those of SysUtils. }
+function GetEnvironmentStringsW: PWideChar; stdcall;
+  external 'kernel32' name 'GetEnvironmentStringsW';
+function FreeEnvironmentStringsW(ABlock: PWideChar): LongBool; stdcall;
+  external 'kernel32' name 'FreeEnvironmentStringsW';
+{$endif}
+
+function EnvironmentVariable(const AName: string): string;
+begin
+  {$ifdef windows}
+  Result := UTF8Encode(SysUtils.GetEnvironmentVariable(UnicodeString(AName)));
+  {$else}
+  Result := SysUtils.GetEnvironmentVariable(AName);
+  {$endif}
+end;
+
+function EnvironmentStrings: TStringArray;
+{$ifdef windows}
+var
+  Block, P: PWideChar;
+  Entry: UnicodeString;
+begin
+  Result := nil;
+  Block := GetEnvironmentStringsW;
+  if Block = nil then
+    Exit;
+  try
+    P := Block;
+    while P^ <> #0 do
+    begin
+      Entry := P;
+      Inc(P, Length(Entry) + 1);
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := UTF8Encode(Entry);
+    end;
+  finally
+    FreeEnvironmentStringsW(Block);
+  end;
+end;
+{$else}
+var
+  i: integer;
+begin
+  { envp itself, not GetEnvironmentString: GetEnvironmentVariableCount
+    counts once and keeps the number, so a variable set since is missed. }
+  Result := nil;
+  i := 0;
+  while envp[i] <> nil do
+  begin
+    SetLength(Result, i + 1);
+    Result[i] := envp[i];
+    Inc(i);
+  end;
+end;
+{$endif}
 
 var
   GToolPath: string;
@@ -764,7 +840,7 @@ var
 
 {$endif}
 begin
-  Result := GetEnvironmentVariable('PATH');
+  Result := EnvironmentVariable('PATH');
   {$ifndef windows}
   Home := ExcludeTrailingPathDelimiter(GetUserDir);
   Dirs := TStringList.Create;
@@ -778,11 +854,11 @@ begin
         Continue;
       AddDir(StringReplace(Dir, '~', Home, []));
     end;
-    NvmDir := GetEnvironmentVariable('NVM_DIR');
+    NvmDir := EnvironmentVariable('NVM_DIR');
     if (NvmDir = '') and (Home <> '') then
       NvmDir := Home + '/.nvm';
-    FnmDir := GetEnvironmentVariable('FNM_DIR');
-    Pnpm := GetEnvironmentVariable('PNPM_HOME');
+    FnmDir := EnvironmentVariable('FNM_DIR');
+    Pnpm := EnvironmentVariable('PNPM_HOME');
     if Home <> '' then
     begin
       if FnmDir = '' then
@@ -790,7 +866,7 @@ begin
         {$ifdef darwin}
         More := [Home + '/Library/Application Support/fnm', Home + '/.fnm'];
         {$else}
-        More := [GetEnvironmentVariable('XDG_DATA_HOME') + '/fnm',
+        More := [EnvironmentVariable('XDG_DATA_HOME') + '/fnm',
           Home + '/.local/share/fnm', Home + '/.fnm'];
         {$endif}
         for Full in More do
@@ -824,19 +900,18 @@ begin
   {$endif}
 end;
 
-{ Gives P the environment of Gittan without the variables whose names
-  (with the equals sign) are in ASkip, so the caller can set those, and
-  with ToolSearchPath as its PATH outside Windows (whose variable is
-  "Path", and whose PATH is kept as it is). }
+{ Gives P the environment of Gittan (EnvironmentStrings, in UTF-8, which
+  TProcess turns into the Unicode environment the process gets) without
+  the variables whose names (with the equals sign) are in ASkip, so the
+  caller can set those, and with ToolSearchPath as its PATH outside
+  Windows (whose variable is "Path", and whose PATH is kept as it is). }
 procedure CopyEnvironment(P: TProcess; const ASkip: array of string);
 var
   Env, Prefix: string;
-  i: integer;
   Keep: boolean;
 begin
-  for i := 1 to GetEnvironmentVariableCount do
+  for Env in EnvironmentStrings do
   begin
-    Env := GetEnvironmentString(i);
     Keep := True;
     for Prefix in ASkip do
       if Pos(Prefix, Env) = 1 then
@@ -2031,8 +2106,8 @@ var
   Output: string;
 begin
   Result := nil;
-  if (GetEnvironmentVariable('GIT_SSH_COMMAND') <> '') or
-    (GetEnvironmentVariable('GIT_SSH') <> '') then
+  if (EnvironmentVariable('GIT_SSH_COMMAND') <> '') or
+    (EnvironmentVariable('GIT_SSH') <> '') then
     Exit;
   if (FRoot <> '') and RunGit(FRoot, ['config', 'core.sshCommand'], Output) and
     (Trim(Output) <> '') then

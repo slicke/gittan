@@ -13,7 +13,7 @@ unit gittan.symbolindex;
 interface
 
 uses
-  Classes, SysUtils, gittan.symbols;
+  Classes, SysUtils, gittan.symbols, gittan.git;
 
 type
   {** One file of the index: its stamp (size and time, see FileStamp)
@@ -130,11 +130,11 @@ begin
   Base := IncludeTrailingPathDelimiter(GetUserDir) + 'Library/Caches';
   {$ELSE}
   {$IFDEF WINDOWS}
-  Base := GetEnvironmentVariable('LOCALAPPDATA');
+  Base := EnvironmentVariable('LOCALAPPDATA');
   if Base = '' then
-    Base := GetEnvironmentVariable('APPDATA');
+    Base := EnvironmentVariable('APPDATA');
   {$ELSE}
-  Base := GetEnvironmentVariable('XDG_CACHE_HOME');
+  Base := EnvironmentVariable('XDG_CACHE_HOME');
   if Base = '' then
     Base := IncludeTrailingPathDelimiter(GetUserDir) + '.cache';
   {$ENDIF}
