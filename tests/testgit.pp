@@ -1443,7 +1443,8 @@ end;
   and no alias or one naming a version not installed gives the newest
   installed; fnm's default alias is its own folder. }
 { The node folders are named with PathDelim, a backslash on Windows, so
-  the expected ones are too. }
+  the expected ones are too. Windows allows no * in a file name, so there
+  the default alias names lts/iron itself rather than going through lts/*. }
 procedure TGitRepoTest.TestNodeManagerBins;
 var
   Nvm, Fnm, Versions: string;
@@ -1460,8 +1461,12 @@ begin
     ForceDirectories(Versions + 'v9.11.2/bin');
     AssertEquals('newest without alias', SetDirSeparators(Versions + 'v24.21.0/bin'), NvmNodeBin(Nvm));
     ForceDirectories(Nvm + '/alias/lts');
+    {$ifdef windows}
+    WriteFile('../' + ExtractFileName(Nvm) + '/alias/default', 'lts/iron'#10);
+    {$else}
     WriteFile('../' + ExtractFileName(Nvm) + '/alias/default', 'lts/*'#10);
     WriteFile('../' + ExtractFileName(Nvm) + '/alias/lts/*', 'lts/iron'#10);
+    {$endif}
     WriteFile('../' + ExtractFileName(Nvm) + '/alias/lts/iron', 'v20.20.2'#10);
     AssertEquals('through the aliases', SetDirSeparators(Versions + 'v20.20.2/bin'), NvmNodeBin(Nvm));
     WriteFile('../' + ExtractFileName(Nvm) + '/alias/default', '20'#10);
