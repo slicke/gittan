@@ -818,6 +818,9 @@ type
     function MarkdownPreviewPath: string;
     procedure UpdateMarkdownPreview;
     procedure HideMarkdownPreview;
+    function PreviewTogglePath: string;
+    procedure UpdatePreviewToggle;
+    procedure HeaderToggle(Sender: TObject);
     procedure MdSplitterMoved(Sender: TObject);
     procedure MdTimerTimer(Sender: TObject);
     procedure EditChange(Sender: TObject);
@@ -1132,7 +1135,7 @@ implementation
 {$R *.lfm}
 
 uses
-  Clipbrd, LCLIntf, Process, FileUtil, LazFileUtils, DateUtils, StrUtils, LazUTF8
+  Clipbrd, LCLIntf, Process, FileUtil, LazFileUtils, DateUtils, StrUtils, LazUTF8, LCLProc
   {$IFDEF LCLCocoa}, CocoaConfig, gittan.titlebar{$ENDIF};
 
 resourcestring
@@ -1172,7 +1175,10 @@ resourcestring
   rsNLines = '%d lines';
   rsSideBySide = 'Side &by Side';
   rsWordWrap = '&Word Wrap';
-  rsMarkdownPreview = '&Markdown Preview';
+  rsMarkdownPreview = '&Preview';
+  rsPreviewToggle = 'Preview';
+  rsPreviewHint = 'Show the file drawn beside its text (%s)';
+  rsTranslationsHint = 'Show the originals beside the translations (%s)';
   rsIgnoreSpace = 'I&gnore Whitespace';
   rsFolding = 'F&olding';
   rsFold = '&Fold';
@@ -1879,6 +1885,7 @@ begin
   FHeader.ConflictNav.OnPrev := @MenuPrevConflictClick;
   FHeader.ConflictNav.OnNext := @MenuNextConflictClick;
   FHeader.OnAction := @HeaderAction;
+  FHeader.OnToggle := @HeaderToggle;
   UpdateChangeNav;
   { The banner sits over the header, hidden until something fails. }
   FBanner := TGittanBanner.Create(Self);
@@ -2527,6 +2534,7 @@ begin
   else
     Lexer := FAdapter.Lexer.LexerName;
   FHeader.SetLexer(Lexer);
+  UpdatePreviewToggle;
   UpdateSyntaxChecks;
   if FRepo.Root = '' then
   begin

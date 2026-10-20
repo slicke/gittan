@@ -1,16 +1,20 @@
 { ---------------------------------------------------------------------------
   Markdown preview
   ---------------------------------------------------------------------------
-  Included by umain.pp. With View > Markdown Preview on, a Markdown file
-  in the change view or opened by itself gets FMdPreview right of the
-  editor, behind FMdSplitter, at FMdRatio of the panel's width. The
+  Included by umain.pp. With View > Preview on, a Markdown, HTML or SVG
+  file in the change view or opened by itself gets FMdPreview right of
+  the editor, behind FMdSplitter, at FMdRatio of the panel's width. The
   change view previews the new side (the diff lines that are not
   deleted ones), a file opened to edits its text as it is typed, a pause
   of MdPreviewPause after the last key. ShowEditor brings the preview up
-  to date; the views that hide the editor hide it too. }
+  to date; the views that hide the editor hide it too.
 
-{ The full path of the Markdown file the editor shows, '' when it shows
-  none. }
+  The file header's Preview toggle switches the same setting for these
+  files, and View > Translations for a .po file, the other way of
+  showing a file the app has. }
+
+{ The full path of the file the editor shows that the preview draws, ''
+  when it shows none. }
 function TForm1.MarkdownPreviewPath: string;
 begin
   Result := '';
@@ -22,7 +26,7 @@ begin
     gvFile:
       Result := Edit.FileName;
   end;
-  if not IsMarkdownPath(Result) then
+  if not IsPreviewPath(Result) then
     Result := '';
 end;
 
@@ -59,7 +63,7 @@ begin
     { The old side's share is of what is left. }
     ApplyLayout;
   end;
-  FMdPreview.ShowMarkdown(Path, Md);
+  FMdPreview.ShowFile(Path, Md);
 end;
 
 procedure TForm1.HideMarkdownPreview;
@@ -79,6 +83,57 @@ begin
   FMdPreviewOn := not FMdPreviewOn;
   FMdPreviewItem.Checked := FMdPreviewOn;
   UpdateMarkdownPreview;
+  UpdatePreviewToggle;
+end;
+
+{ The file the header's toggle is for: a .po file in the change view
+  without conflicts or in the translation view, or a file the preview
+  draws; '' for none. }
+function TForm1.PreviewTogglePath: string;
+begin
+  Result := '';
+  case FView of
+    gvChanges, gvFile:
+      begin
+        if FView = gvChanges then
+          Result := FCurrentPath
+        else
+          Result := Edit.FileName;
+        if IsPoPath(Result) and (FConflictRoles = nil) then
+          Exit;
+      end;
+    gvTranslation:
+      if FCurrentPath <> '' then
+        Exit(FCurrentPath)
+      else
+        Exit(FTranslationFile);
+  end;
+  if not IsPreviewPath(Result) then
+    Result := '';
+end;
+
+procedure TForm1.UpdatePreviewToggle;
+var
+  Path: string;
+begin
+  Path := PreviewTogglePath;
+  if Path = '' then
+    FHeader.SetToggle('', '', False)
+  else if IsPoPath(Path) then
+    FHeader.SetToggle(rsPreviewToggle, Format(rsTranslationsHint,
+      [ShortCutToText(FTranslationsItem.ShortCut)]), FTranslations)
+  else
+    FHeader.SetToggle(rsPreviewToggle, Format(rsPreviewHint,
+      [ShortCutToText(FMdPreviewItem.ShortCut)]), FMdPreviewOn);
+end;
+
+{ The header's toggle does what its menu item does. }
+procedure TForm1.HeaderToggle(Sender: TObject);
+begin
+  if IsPoPath(PreviewTogglePath) then
+    MenuTranslationsClick(Sender)
+  else
+    MenuMarkdownPreviewClick(Sender);
 end;
 
 procedure TForm1.MdSplitterMoved(Sender: TObject);

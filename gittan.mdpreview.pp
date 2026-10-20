@@ -1,9 +1,12 @@
 unit gittan.mdpreview;
 
-{** The preview of a Markdown file beside the editor: the text drawn as
-  GitHub draws it (headings, lists, tables, quotes, highlighted code,
-  images), by the vendored LazInk (vendor/lazink), which lays HTML and
-  Markdown out on the canvas with no browser engine.
+{** The preview of a Markdown, HTML or SVG file beside the editor: the
+  text drawn as GitHub draws it (headings, lists, tables, quotes,
+  highlighted code, images), by the vendored LazInk (vendor/lazink),
+  which lays HTML and Markdown out on the canvas with no browser engine.
+  LazInk draws no SVG, so an SVG file, and an SVG image a page links to,
+  is drawn by BGRABitmap's BGRASVG and handed to the page as a PNG
+  through OnResource.
 
   The page takes its colors from the form, as the image view does, and
   keeps its scroll position when the same file is shown again, so it
@@ -28,18 +31,23 @@ type
   TGittanMarkdownPreview = class(TInkPage)
   private
     FFileName, FText: string;
+    FSvgSerial, FSvgZoom: integer;
     FBack, FFore, FDim, FLink: TColor;
     FOnOpenFile: TGittanOpenFileEvent;
     procedure ApplyStyle;
+    procedure ShowSvg(const AText: string);
+    procedure PageResource(Sender: TObject; const URL: string; Destination: TStream;
+      var Handled: boolean);
     procedure PageLinkActivate(Sender: TObject; const Link: TInkLinkInfo;
       var Handled: boolean);
   public
     constructor Create(AOwner: TComponent); override;
-    {** Shows AText, the Markdown of the file AFileName (a full path,
-      which places its relative links and images). The same text again
-      does nothing; the same file keeps the scroll position. }
-    procedure ShowMarkdown(const AFileName, AText: string);
-    {** Forgets the text, so the next ShowMarkdown draws it again. }
+    {** Shows AText, the text of the file AFileName (a full path, which
+      places its relative links and images), as Markdown, HTML or SVG by
+      its extension. The same text again does nothing; the same file
+      keeps the scroll position. }
+    procedure ShowFile(const AFileName, AText: string);
+    {** Forgets the text, so the next ShowFile draws it again. }
     procedure Clear;
     {** The palette: the background, the text, quotes and rules, and
       links. ADark picks the page's color scheme. }
@@ -54,10 +62,31 @@ type
 {** Whether APath names a Markdown file, by its extension. }
 function IsMarkdownPath(const APath: string): boolean;
 
+{** Whether APath names an HTML file, by its extension. }
+function IsHtmlPath(const APath: string): boolean;
+
+{** Whether APath names an SVG file, by its extension. }
+function IsSvgPath(const APath: string): boolean;
+
+{** Whether the preview shows APath: Markdown, HTML or SVG. }
+function IsPreviewPath(const APath: string): boolean;
+
 implementation
 
 uses
-  LCLIntf, URIParser;
+  LCLIntf, URIParser, Math, BGRABitmap, BGRABitmapTypes, BGRASVG, BGRACanvas2D;
+
+resourcestring
+  rsCannotReadSvg = 'The SVG cannot be read.';
+
+const
+  { The URL of the SVG file the page shows, numbered per load, since
+    LazInk keeps a picture by its URL. }
+  SvgScheme = 'gittan-svg:';
+  { A small SVG, an icon, is drawn larger: up to this many pixels on its
+    longer side, a whole number of times its size. }
+  SvgMinSide = 256;
+  SvgMaxZoom = 8;
 
 function IsMarkdownPath(const APath: string): boolean;
 var
@@ -66,6 +95,70 @@ begin
   Ext := LowerCase(ExtractFileExt(APath));
   Result := (Ext = '.md') or (Ext = '.markdown') or (Ext = '.mdown') or
     (Ext = '.mkd') or (Ext = '.mkdn');
+end;
+
+function IsHtmlPath(const APath: string): boolean;
+var
+  Ext: string;
+begin
+  Ext := LowerCase(ExtractFileExt(APath));
+  Result := (Ext = '.html') or (Ext = '.htm');
+end;
+
+function IsSvgPath(const APath: string): boolean;
+begin
+  Result := LowerCase(ExtractFileExt(APath)) = '.svg';
+end;
+
+function IsPreviewPath(const APath: string): boolean;
+begin
+  Result := IsMarkdownPath(APath) or IsHtmlPath(APath) or IsSvgPath(APath);
+end;
+
+{ The size ASvg is drawn at by itself, in pixels; 0 by 0 when
+  it cannot be read. }
+function SvgSize(ASvg: TBGRASVG): TPointF;
+begin
+  if ASvg.preserveAspectRatio.Preserve then
+    Result := ASvg.ViewSizeInUnit[cuPixel]
+  else
+    Result := PointF(ASvg.WidthAsPixel, ASvg.HeightAsPixel);
+end;
+
+{ AText, an SVG, drawn AZoom times its size as a PNG into ADest. False
+  when it cannot be read or has no size. }
+function RenderSvg(const AText: string; AZoom: single; ADest: TStream): boolean;
+var
+  Svg: TBGRASVG;
+  Bmp: TBGRABitmap;
+  C2d: TBGRACanvas2D;
+  Size: TPointF;
+begin
+  Result := False;
+  Svg := nil;
+  Bmp := nil;
+  try
+    try
+      Svg := TBGRASVG.CreateFromString(AText);
+      Size := SvgSize(Svg);
+      if (Size.X < 1) or (Size.Y < 1) then
+        Exit;
+      Bmp := TBGRABitmap.Create(Ceil(Size.X * AZoom), Ceil(Size.Y * AZoom));
+      C2d := TBGRACanvas2D.Create(Bmp);
+      try
+        Svg.StretchDraw(C2d, 0, 0, Bmp.Width, Bmp.Height, True);
+      finally
+        C2d.Free;
+      end;
+      Bmp.SaveToStreamAsPng(ADest);
+      Result := True;
+    except
+      Result := False;
+    end;
+  finally
+    Bmp.Free;
+    Svg.Free;
+  end;
 end;
 
 { A TColor as CSS, system colors resolved. }
@@ -98,6 +191,7 @@ begin
   MarkdownRawHTML := True;
   ImageFit := iifWidth;
   OnLinkActivate := @PageLinkActivate;
+  OnResource := @PageResource;
   FBack := clWindow;
   FFore := clWindowText;
   FDim := clGrayText;
@@ -125,7 +219,7 @@ begin
     'img { max-width: 100%; width: auto; }';
 end;
 
-procedure TGittanMarkdownPreview.ShowMarkdown(const AFileName, AText: string);
+procedure TGittanMarkdownPreview.ShowFile(const AFileName, AText: string);
 var
   Same: boolean;
   Y: integer;
@@ -136,11 +230,73 @@ begin
   Y := ScrollY;
   FFileName := AFileName;
   FText := AText;
-  LoadMarkdown(AText, FilenameToURI(AFileName));
+  if IsSvgPath(AFileName) then
+    ShowSvg(AText)
+  else if IsHtmlPath(AFileName) then
+    LoadHTML(AText, FilenameToURI(AFileName))
+  else
+    LoadMarkdown(AText, FilenameToURI(AFileName));
   { Every load is a step of the page's history; the preview has none. }
   ClearHistory;
   if Same then
     ScrollTo(Y);
+end;
+
+{ The SVG centered on a page of its own, at its size or, a small one, a
+  whole number of times larger; PageResource draws it at the screen's
+  pixels. One that cannot be read says so. }
+procedure TGittanMarkdownPreview.ShowSvg(const AText: string);
+var
+  Svg: TBGRASVG;
+  Size: TPointF;
+begin
+  Size := PointF(0, 0);
+  try
+    Svg := TBGRASVG.CreateFromString(AText);
+    try
+      Size := SvgSize(Svg);
+    finally
+      Svg.Free;
+    end;
+  except
+    Size := PointF(0, 0);
+  end;
+  Inc(FSvgSerial);
+  if (Size.X < 1) or (Size.Y < 1) then
+  begin
+    LoadHTML('<p style="text-align: center; color: ' + Css(FDim) + '">' +
+      rsCannotReadSvg + '</p>');
+    Exit;
+  end;
+  FSvgZoom := EnsureRange(Trunc(SvgMinSide / Max(Size.X, Size.Y)), 1, SvgMaxZoom);
+  LoadHTML(Format('<p style="text-align: center"><img src="%s%d.png" ' +
+    'style="width: %dpx"></p>', [SvgScheme, FSvgSerial, Ceil(Size.X * FSvgZoom)]),
+    FilenameToURI(FFileName));
+end;
+
+{ The SVG file shown, and an SVG image of a page, drawn as a PNG: the
+  file at the screen's pixels at the width ShowSvg set, an image at its
+  own size, since the page draws it at the PNG's. }
+procedure TGittanMarkdownPreview.PageResource(Sender: TObject; const URL: string;
+  Destination: TStream; var Handled: boolean);
+var
+  Path: string;
+  Lines: TStringList;
+begin
+  if Copy(URL, 1, Length(SvgScheme)) = SvgScheme then
+  begin
+    Handled := RenderSvg(FText, FSvgZoom * GetCanvasScaleFactor, Destination);
+    Exit;
+  end;
+  if not IsSvgPath(URL) or not URIToFilename(URL, Path) or not FileExists(Path) then
+    Exit;
+  Lines := TStringList.Create;
+  try
+    Lines.LoadFromFile(Path);
+    Handled := RenderSvg(Lines.Text, 1, Destination);
+  finally
+    Lines.Free;
+  end;
 end;
 
 procedure TGittanMarkdownPreview.Clear;

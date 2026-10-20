@@ -211,4 +211,5 @@ begin
     OpenFile(FTranslationFile)
   else if (FView = gvFile) and IsPoPath(Edit.FileName) then
     OpenFile(Edit.FileName);
+  UpdatePreviewToggle;
 end;

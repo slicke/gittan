@@ -4,8 +4,9 @@ unit gittan.fileheader;
   the left the badge and path of the file (the directory dimmed, the file
   name in full color, a dot after it while the editor holds unsaved
   changes), on the right its added and deleted line counts, the lexer,
-  the actions the view offers as pills (Edit, Save, Revert) and the
-  change navigator for jumping between the changed blocks.
+  the toggle of the file's preview, the actions the view offers as
+  pills (Edit, Save, Revert) and the change navigator for jumping
+  between the changed blocks.
 
   It paints itself with the editor's palette in both themes, like the
   summary, and owns the navigator as a child so it can lay out around it.
@@ -13,7 +14,8 @@ unit gittan.fileheader;
   navigator does with its arrows.
 
   On macOS the window's toolbar shows the pills and the navigator
-  instead (gittan.toolbar.pp): ShowControls off leaves them out here,
+  instead (gittan.toolbar.pp): ShowControls off leaves them out here
+  (the toggle stays, as it belongs to the file shown),
   and OnControlsChange tells when they, or the header's visibility,
   changed, so the toolbar can follow. }
 
@@ -44,6 +46,10 @@ type
     FActionsEnabled: array of boolean;
     FActionRects: array of TRect;
     FHot, FPressed: integer;
+    FToggle, FToggleHint: string;
+    FToggleOn: boolean;
+    FToggleRect: TRect;
+    FOnToggle: TNotifyEvent;
     FOnAction: TGittanHeaderActionEvent;
     FShowControls: boolean;
     FChangeCurrent, FChangeTotal: integer;
@@ -93,6 +99,10 @@ type
     {** The action pills, left to right, all enabled; none for an empty
       array. A click fires OnAction with the index. }
     procedure SetActions(const ACaptions: array of string);
+    {** The toggle left of the pills, ACaption shown in the accent while
+      AOn, with AHint as its tooltip; none for an empty ACaption. A click
+      fires OnToggle. SetFile and SetTitle take it away. }
+    procedure SetToggle(const ACaption, AHint: string; AOn: boolean);
     {** Enables or dims the pill at AIndex. }
     procedure SetActionEnabled(AIndex: integer; AEnabled: boolean);
     {** Shows the dot after the file name that marks unsaved changes. }
@@ -115,6 +125,7 @@ type
       gave it a count, for its colors, suffix and click handlers. }
     property ConflictNav: TGittanChangeNav read FConflictNav;
     property OnAction: TGittanHeaderActionEvent read FOnAction write FOnAction;
+    property OnToggle: TNotifyEvent read FOnToggle write FOnToggle;
     {** Whether the pills and the navigator are shown here; True by default. }
     property ShowControls: boolean read FShowControls write SetShowControls;
     property ActionCount: integer read GetActionCount;
@@ -149,6 +160,20 @@ const
   IconSize = 16;
   DotSize = 7;
   SymbolSep = '  ›  ';
+  { What ActionAt gives for the toggle; -1 is nothing. }
+  HitToggle = -2;
+
+{ AFrom moved AWeight of the way to ATo. }
+function Mix(AFrom, ATo: TColor; AWeight: double): TColor;
+var
+  f, t: longint;
+begin
+  f := ColorToRGB(AFrom);
+  t := ColorToRGB(ATo);
+  Result := RGBToColor(Round(Red(f) + (Red(t) - Red(f)) * AWeight),
+    Round(Green(f) + (Green(t) - Green(f)) * AWeight),
+    Round(Blue(f) + (Blue(t) - Blue(f)) * AWeight));
+end;
 
 { TGittanFileHeader }
 
@@ -161,6 +186,7 @@ begin
   FHot := -1;
   FPressed := -1;
   FShowControls := True;
+  ShowHint := True;
   FNav := TGittanChangeNav.Create(Self);
   FNav.Parent := Self;
   FNav.Height := NavHeight;
@@ -197,6 +223,7 @@ begin
   FSymbol := '';
   FNote := '';
   FModified := False;
+  FToggle := '';
   SetActions([]);
 end;
 
@@ -210,6 +237,7 @@ begin
   FSymbol := '';
   FNote := '';
   FModified := False;
+  FToggle := '';
   SetActions([]);
 end;
 
@@ -330,6 +358,18 @@ begin
   ControlsChanged;
 end;
 
+procedure TGittanFileHeader.SetToggle(const ACaption, AHint: string; AOn: boolean);
+begin
+  if (FToggle = ACaption) and (FToggleHint = AHint) and (FToggleOn = AOn) then
+    Exit;
+  FToggle := ACaption;
+  FToggleHint := AHint;
+  FToggleOn := AOn;
+  if FHot = HitToggle then
+    SetHot(-1);
+  Invalidate;
+end;
+
 procedure TGittanFileHeader.SetActionEnabled(AIndex: integer; AEnabled: boolean);
 begin
   if (AIndex < 0) or (AIndex > High(FActionsEnabled)) then
@@ -378,11 +418,14 @@ begin
   Invalidate;
 end;
 
-{ The pill under the point, -1 for none; a dimmed pill is not hit. }
+{ The pill under the point, HitToggle for the toggle, -1 for none; a
+  dimmed pill is not hit. }
 function TGittanFileHeader.ActionAt(X, Y: integer): integer;
 var
   i: integer;
 begin
+  if (FToggle <> '') and FToggleRect.Contains(Point(X, Y)) then
+    Exit(HitToggle);
   if not FShowControls then
     Exit(-1);
   for i := 0 to High(FActionRects) do
@@ -396,10 +439,14 @@ begin
   if FHot = AValue then
     Exit;
   FHot := AValue;
-  if AValue >= 0 then
+  if AValue <> -1 then
     Cursor := crHandPoint
   else
     Cursor := crDefault;
+  if AValue = HitToggle then
+    Hint := FToggleHint
+  else
+    Hint := '';
   Invalidate;
 end;
 
@@ -438,13 +485,19 @@ begin
   Index := FPressed;
   FPressed := -1;
   Invalidate;
-  if (Index < 0) or (Index <> ActionAt(X, Y)) then
+  if (Index = -1) or (Index <> ActionAt(X, Y)) then
     Exit;
+  if Index = HitToggle then
+  begin
+    if Assigned(FOnToggle) then
+      FOnToggle(Self);
+    Exit;
+  end;
   if Assigned(FOnAction) then
     FOnAction(Self, Index);
 end;
 
-{ Right to left: the navigator, the pills, the note, the lexer, the
+{ Right to left: the navigator, the pills, the toggle, the note, the lexer, the
   counts; then the badge and the path from the left in the room that is
   left, the modified dot after the name, and the symbol the caret is in
   after that when it fits. A path too long for the room loses its
@@ -497,7 +550,7 @@ begin
     Canvas.Brush.Style := bsClear;
     if not FActionsEnabled[i] then
       Canvas.Font.Color := FDim
-    else if (FPressed = i) or ((FPressed < 0) and (FHot = i)) then
+    else if (FPressed = i) or ((FPressed = -1) and (FHot = i)) then
       Canvas.Font.Color := FHotColor
     else
       Canvas.Font.Color := FText;
@@ -507,6 +560,34 @@ begin
       Dec(Right, Gap)
     else
       Dec(Right, PillGap);
+  end;
+  { The toggle, tinted in the accent while it is on. }
+  FToggleRect := Rect(0, 0, 0, 0);
+  if FToggle <> '' then
+  begin
+    W := Canvas.TextWidth(FToggle) + 2 * PillPad;
+    R := Rect(Right - W, PillTop, Right, PillTop + PillHeight);
+    FToggleRect := R;
+    Canvas.Pen.Width := 1;
+    Canvas.Brush.Style := bsSolid;
+    if FToggleOn then
+    begin
+      Canvas.Pen.Color := FHotColor;
+      Canvas.Brush.Color := Mix(FFill, FHotColor, 0.18);
+    end
+    else
+    begin
+      Canvas.Pen.Color := FBorder;
+      Canvas.Brush.Color := FFill;
+    end;
+    Canvas.RoundRect(R.Left, R.Top, R.Right, R.Bottom, PillHeight, PillHeight);
+    Canvas.Brush.Style := bsClear;
+    if FToggleOn or (FPressed = HitToggle) or ((FPressed = -1) and (FHot = HitToggle)) then
+      Canvas.Font.Color := FHotColor
+    else
+      Canvas.Font.Color := FText;
+    Canvas.TextOut(R.Left + PillPad, TextY, FToggle);
+    Right := R.Left - Gap;
   end;
   DrawRight(FNote, FDeletedColor);
   DrawRight(FLexer, FDim);
