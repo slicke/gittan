@@ -53,8 +53,9 @@ LEXERS_SRC := vendor/CudaText-lexers
 LEXERS_OWN := lexers
 LEXLIB := lexlib
 
-# Application icon. icons/gittan-source.png is the artwork, the cut-out tile;
-# `make icons` sizes it with tools/makeicons.swift (macOS only) into
+# Application icon. icons/gittan-source.png is the artwork, the motif cut out
+# of its background, and icons/gittan-source-mac.png the motif on its macOS
+# tile; `make icons` sizes them with tools/makeicons.swift (macOS only) into
 # icons/gittan.png, icons/png/, icons/Gittan.icns and Gittan.ico. Lazarus
 # compiles Gittan.ico into the executable for Windows and Linux, but writes no
 # icon into the macOS bundle it creates, so every Darwin build copies the .icns
@@ -62,6 +63,7 @@ LEXLIB := lexlib
 # the project title as CFBundleName with its "&" unescaped, which no plist
 # reader accepts; escape it and name the bundle Gittan before adding the icon.
 ICON_SRC ?= icons/gittan-source.png
+ICON_MAC_SRC ?= icons/gittan-source-mac.png
 BUNDLE := Gittan.app
 ifeq ($(shell uname -s),Darwin)
 define bundle_icon
@@ -94,7 +96,7 @@ help:
 	@echo "  run       Build, then start Gittan (RUN_ARGS forwards arguments)"
 	@echo "  test      Build and run the unit tests in tests/ (TEST_ARGS forwards options)"
 	@echo "  lexlib    Copy the lexers from $(LEXERS_SRC) and $(LEXERS_OWN) into $(LEXLIB)/ (part of every build)"
-	@echo "  icons     Regenerate the icons from ICON_SRC=$(ICON_SRC) (macOS only)"
+	@echo "  icons     Regenerate the icons from ICON_SRC=$(ICON_SRC) and ICON_MAC_SRC=$(ICON_MAC_SRC) (macOS only)"
 	@echo "  clean     Remove lib/, $(LEXLIB)/, the test build and the binary"
 	@echo "Current: WIDGETSET=$(WIDGETSET) LAZBUILD=$(LAZBUILD)"
 
@@ -111,7 +113,7 @@ rebuild: lexlib
 	$(bundle_icon)
 
 icons:
-	swift tools/makeicons.swift "$(ICON_SRC)" icons Gittan.ico
+	swift tools/makeicons.swift "$(ICON_SRC)" "$(ICON_MAC_SRC)" icons Gittan.ico
 
 lexlib:
 	@if [ ! -d "$(LEXERS_SRC)/Pascal" ]; then \

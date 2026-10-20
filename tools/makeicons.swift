@@ -1,17 +1,18 @@
 // makeicons.swift - builds Gittan's application icons from the artwork.
 //
-//   swift tools/makeicons.swift <artwork.png> <outdir> <Gittan.ico>
+//   swift tools/makeicons.swift <artwork.png> <mac-artwork.png> <outdir> <Gittan.ico>
 //
-// The artwork is the finished icon: a square PNG of a rounded tile (a
-// superellipse, like the continuous corners of macOS app icons) with its own
-// rim, transparent outside the tile. Windows and Linux get the tile filling
-// its canvas; macOS gets it inset to Apple's grid over a soft drop shadow.
+// Both artworks are finished, square PNGs. <artwork.png> is the motif alone,
+// transparent around it, for Windows and Linux, which get it filling its
+// canvas. <mac-artwork.png> is the motif on a rounded tile with its own rim,
+// transparent outside the tile, which macOS gets inset to Apple's grid over a
+// soft drop shadow.
 //
 // Writes:
-//   <outdir>/gittan.png          1024x1024 master, the tile filling the canvas
+//   <outdir>/gittan.png          1024x1024 master, the motif filling the canvas
 //   <outdir>/png/gittan-<n>.png  16..512 for Linux desktop files
 //   <outdir>/Gittan.icns         macOS, the tile inset to Apple's 824/1024 grid
-//   <Gittan.ico>                 Windows/Linux LCL icon, 16..256, the tile filling the canvas
+//   <Gittan.ico>                 Windows/Linux LCL icon, 16..256, the motif filling the canvas
 //
 // macOS only (CoreGraphics, ImageIO, iconutil).
 
@@ -21,11 +22,11 @@ import ImageIO
 import UniformTypeIdentifiers
 
 let args = CommandLine.arguments
-guard args.count == 4 else {
-  FileHandle.standardError.write("usage: makeicons.swift <artwork.png> <outdir> <Gittan.ico>\n".data(using: .utf8)!)
+guard args.count == 5 else {
+  FileHandle.standardError.write("usage: makeicons.swift <artwork.png> <mac-artwork.png> <outdir> <Gittan.ico>\n".data(using: .utf8)!)
   exit(2)
 }
-let srcPath = args[1], outDir = args[2], icoPath = args[3]
+let srcPath = args[1], macSrcPath = args[2], outDir = args[3], icoPath = args[4]
 
 func fail(_ msg: String) -> Never {
   FileHandle.standardError.write("makeicons: \(msg)\n".data(using: .utf8)!)
@@ -94,9 +95,13 @@ func resized(_ img: CGImage, to size: Int) -> Bitmap {
   return bm
 }
 
-let art = load(srcPath)
-if art.width != art.height { fail("the artwork must be square, it is \(art.width)x\(art.height)") }
-let artImage = art.image
+func loadSquare(_ path: String) -> CGImage {
+  let art = load(path)
+  if art.width != art.height { fail("\(path) must be square, it is \(art.width)x\(art.height)") }
+  return art.image
+}
+let artImage = loadSquare(srcPath)
+let macArtImage = loadSquare(macSrcPath)
 
 let fm = FileManager.default
 try? fm.createDirectory(atPath: outDir + "/png", withIntermediateDirectories: true)
@@ -106,7 +111,7 @@ func write(_ data: Data, _ path: String) {
 }
 
 // ---------------------------------------------------------------------------
-// Windows and Linux: the tile filling its canvas
+// Windows and Linux: the motif filling its canvas
 // ---------------------------------------------------------------------------
 
 let master = resized(artImage, to: 1024)
@@ -128,7 +133,7 @@ let macInset = CGFloat(side) * 100 / 1024
 // shadow below the tile.
 mac.ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 28,
                   color: CGColor(gray: 0, alpha: 0.4))
-mac.draw(artImage, in: CGRect(x: 0, y: 0, width: side, height: side).insetBy(dx: macInset, dy: macInset))
+mac.draw(macArtImage, in: CGRect(x: 0, y: 0, width: side, height: side).insetBy(dx: macInset, dy: macInset))
 let macImage = mac.image
 
 // ---------------------------------------------------------------------------
