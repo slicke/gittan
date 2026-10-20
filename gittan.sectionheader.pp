@@ -1,8 +1,9 @@
 unit gittan.sectionheader;
 
-{** A section header: a row with a disclosure chevron, a title and a
-  dimmed detail, which folds and unfolds what sits under it. Made for
-  the Repository section under the tree of changed files.
+{** A section header: a row with a disclosure chevron, a dim bold
+  title as the Files heading over the tree, and a dimmed detail, which
+  folds and unfolds what sits under it. Made for the Repository section
+  under the tree of changed files.
 
   It paints itself in colors the form sets, like the file header, since
   a native header would keep the desktop's look on a themed panel. A
@@ -37,8 +38,9 @@ type
       override;
   public
     constructor Create(AOwner: TComponent); override;
-    {** The palette: the background, the title, the dim chevron and
-      detail, the fill under the mouse and the line along the top. }
+    {** The palette: the background, the text (kept for the rows that
+      set it), the dim chevron, title and detail, the fill under the
+      mouse and the line along the top. }
     procedure SetColors(ABack, AText, ADim, AHover, ALine: TColor);
     {** The name of the section. }
     property Title: string read FTitle write SetTitle;
@@ -137,14 +139,14 @@ begin
   Canvas.Brush.Style := bsClear;
   TextY := (Height - Canvas.TextHeight('Xg')) div 2;
   X := Pad + 2 * ChevronSize + Gap;
-  Canvas.Font.Color := FText;
+  { The title is dim and bold, as the Files heading over the tree. }
+  Canvas.Font.Style := [fsBold];
+  Canvas.Font.Color := FDim;
   Canvas.TextOut(X, TextY, FTitle);
+  Inc(X, Canvas.TextWidth(FTitle) + Gap);
+  Canvas.Font.Style := [];
   if FDetail <> '' then
-  begin
-    Inc(X, Canvas.TextWidth(FTitle) + Gap);
-    Canvas.Font.Color := FDim;
     Canvas.TextOut(X, TextY, FDetail);
-  end;
 end;
 
 procedure TGittanSectionHeader.MouseEnter;

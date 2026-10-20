@@ -49,6 +49,8 @@ begin
   FSubTree.OnSelectionChanged := @SubTreeSelectionChanged;
   FSubTree.Align := alClient;
   FSubTree.Parent := FSubPanel;
+  { The Repository section was colored before this header existed. }
+  ColorRepoHeader;
 end;
 
 { What the jobs depend on: the submodules with their recorded commits
