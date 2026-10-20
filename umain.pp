@@ -209,7 +209,7 @@ type
     { The track and the fill of the indexing's band over the title bar
       (ShowTitleBand, or FOwnBar.SetBand on Windows and GTK 3, from UpdateIndexBand), set by ApplyTheme. }
     FBandTrack, FBandFill: TColor;
-    { The Repository section at the bottom of the tree panel
+    { The Config section at the bottom of the tree panel
       (umain.repofiles.inc): the repository's own files from
       gittan.repofiles in a second tree under a header that folds it,
       and the "Add to .gitignore" and "Add to .git/info/exclude" submenus
@@ -1222,7 +1222,7 @@ resourcestring
   rsConflictsSuffix = 'conflicts';
   rsNextFile = 'Next F&ile';
   rsPrevFile = 'Previous Fi&le';
-  rsRepoFiles = 'Repository';
+  rsRepoFiles = 'Config';
   rsCommitSection = 'Commit';
   rsCommitMenu = 'Co&mmit...';
   rsCommitButton = 'Commit';

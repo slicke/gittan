@@ -2,7 +2,7 @@ unit gittan.sectionheader;
 
 {** A section header: a row with a disclosure chevron, a dim bold
   title as the Files heading over the tree, and a dimmed detail, which
-  folds and unfolds what sits under it. Made for the Repository section
+  folds and unfolds what sits under it. Made for the Config section
   under the tree of changed files.
 
   It paints itself in colors the form sets, like the file header, since

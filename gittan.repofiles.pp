@@ -2,7 +2,7 @@ unit gittan.repofiles;
 
 {** The repository's own files: the ones at the root that tell git and
   GitHub how to treat it (.gitignore and its kin) and everything under
-  .github. The Repository section under the tree lists them whether or
+  .github. The Config section under the tree lists them whether or
   not they changed, and the "Add to .gitignore" command writes to one
   of them. Nothing here runs git, so the unit has no LCL dependency and
   is tested in tests/testrepofiles.pp. }

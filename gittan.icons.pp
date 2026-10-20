@@ -20,7 +20,7 @@ const
   {** Image index of the folder icon. }
   iconFolder = 0;
   {** Image index of the plain file icon, for a file listed without a
-    change (the Repository section), after the badges and the folders. }
+    change (the Config section), after the badges and the folders. }
   iconFile = 1 + 4 * (Ord(High(TGittanChangeKind)) + 1);
 
   {** State image indexes of the check boxes FillCheckIcons draws: not

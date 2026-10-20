@@ -1,5 +1,5 @@
 { ---------------------------------------------------------------------------
-  The Repository section
+  The Config section
   ---------------------------------------------------------------------------
   Under the tree of changed files sits a section with the repository's
   own files (gittan.repofiles): .gitignore and its kin at the root and
@@ -300,7 +300,7 @@ end;
 { ---------------------------------------------------------------------------
   Editing the repository's files
   ---------------------------------------------------------------------------
-  The editor is a viewer, except for the files the Repository section
+  The editor is a viewer, except for the files the Config section
   lists: a .gitignore or a workflow is what one wants to touch while
   looking at a change, so the file view of one of them is open to edits.
   OpenFile asks RepoFileName and calls BeginEdit, which lifts read-only

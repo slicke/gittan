@@ -30,7 +30,7 @@ type
     Maximized: boolean;
     {** The width of the file tree, 0 for the default. }
     TreeWidth: integer;
-    {** Whether the Repository section under the tree is unfolded. }
+    {** Whether the Config section under the tree is unfolded. }
     RepoFilesOpen: boolean;
     {** Whether the Submodules section under it is unfolded. }
     SubmodulesOpen: boolean;

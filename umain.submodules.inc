@@ -1,7 +1,7 @@
 { ---------------------------------------------------------------------------
   The Submodules section
   ---------------------------------------------------------------------------
-  Under the Repository section sits one for the submodules .gitmodules
+  Under the Config section sits one for the submodules .gitmodules
   names (gittan.submodules), built like it: a header that folds,
   remembered in the settings, over a tree, hidden while there is nothing
   to list. A row is the submodule's path with the folder icon (dotted
@@ -32,7 +32,7 @@ begin
   FSubPanel.Caption := '';
   FSubPanel.Align := alBottom;
   FSubPanel.Visible := False;
-  { Below the Repository section: alBottom puts the lower Top lower. }
+  { Below the Config section: alBottom puts the lower Top lower. }
   FSubPanel.Top := FRepoPanel.Top + FRepoPanel.Height + 1;
   FSubPanel.Parent := FTreePanel;
   FSubHeader := TGittanSectionHeader.Create(Self);
@@ -49,7 +49,7 @@ begin
   FSubTree.OnSelectionChanged := @SubTreeSelectionChanged;
   FSubTree.Align := alClient;
   FSubTree.Parent := FSubPanel;
-  { The Repository section was colored before this header existed. }
+  { The Config section was colored before this header existed. }
   ColorRepoHeader;
 end;
 
