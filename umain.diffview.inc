@@ -592,6 +592,9 @@ procedure TForm1.EditorScroll(Sender: TObject);
 var
   Src, Dst: TATSynEdit;
 begin
+  { The pills at a row's end would stay where the row was. }
+  if Sender = Edit then
+    SetHotDiscard(Edit, -1, -1, -1, False);
   if FSyncingScroll or not FEditOld.Visible then
     Exit;
   Src := TATSynEdit(Sender);

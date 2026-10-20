@@ -25,7 +25,7 @@ uses
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader,
-  gittan.discard, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
+  gittan.discard, gittan.keep, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.commitgraph, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, gittan.mdpreview, ATSynEdit_Gaps, md5;
 
 type
@@ -285,11 +285,26 @@ type
     FSaveItem: TMenuItem;
     { Discarding a block of changes (umain.discard.inc): the row of the
       first line of every block (FBlockStarts), found by BuildChangeView;
-      the block whose button the mouse is on (-1 for none); the blocks
-      discarded, latest last, which File > Undo Discard puts back; and
-      the two menu items. }
+      the block the mouse is on and the row it is on (-1 for none),
+      whether it is on the band there, the timer that shows the pills
+      at the row's end after a pause and the pills; the blocks
+      discarded, latest last, which
+      File > Undo Discard puts back; and the two menu items. }
     FBlockRows: TIntegerDynArray;
-    FHotDiscard: integer;
+    FHotDiscard, FHotRow: integer;
+    FHotOnBand: boolean;
+    FPillTimer: TTimer;
+    FDiscardPills: TGittanHoverPills;
+    { Keeping changes as code for the session (gittan.keep): the keeps
+      of every file, the diff as git gave it for the shown file (the
+      keeps are applied to a copy, FChangeLines), for each of its lines
+      the keep it comes from or -1, the keep the mouse is on (-1 for
+      none), and the index of the header's Unkeep pill (-1 for none). }
+    FKeeps: TGittanKeeps;
+    FRawChangeLines: TStringList;
+    FKeptOf: TIntegerDynArray;
+    FHotKeep: integer;
+    FHeaderUnkeep: integer;
     FDiscards: array of TGittanDiscard;
     FDiscardItem, FUndoDiscardItem: TMenuItem;
     { Resolving one conflict at a time (umain.conflicts.inc): the diff
@@ -655,17 +670,31 @@ type
     { umain.discard.inc }
     function CanDiscard: boolean;
     procedure FindBlockRows;
+    function LineAtRow(ARow: integer): integer;
     function BlockAtRow(ARow: integer): integer;
-    function DiscardAt(AEd: TATSynEdit; X, Y: integer): integer;
+    function DiscardAt(AEd: TATSynEdit; X, Y: integer; out ARow: integer;
+      out AOnBand: boolean; out AKeep: integer): integer;
     procedure SetDiscardBand(AEd: TATSynEdit);
     procedure DrawDiscard(AEd: TATSynEdit; C: TCanvas);
-    procedure SetHotDiscard(AEd: TATSynEdit; ABlock: integer);
+    procedure SetHotDiscard(AEd: TATSynEdit; ABlock, AKeep, ARow: integer; AOnBand: boolean);
+    procedure KeepBlockAt(ABlock: integer);
+    procedure UnkeepAt(AKeep: integer);
+    procedure UnkeepFile;
+    procedure RebuildKeeps;
+    procedure SetChangeActions;
+    procedure PillTimerTimer(Sender: TObject);
+    procedure ShowDiscardPills;
+    function MouseOnDiscardPills: boolean;
+    function MouseOnDiscardRows: boolean;
+    procedure DiscardPillsPick(Sender: TObject; AIndex: integer);
+    procedure DiscardPillsLeave(Sender: TObject);
+    procedure DiscardThis(const ABlock: TGittanDiscard);
     procedure DiscardBlockAt(ABlock: integer);
     procedure UpdateDiscardItems;
     procedure FileMenuClick(Sender: TObject);
     procedure MenuDiscardClick(Sender: TObject);
     procedure MenuUndoDiscardClick(Sender: TObject);
-    function DiscardBackText(ABlock: integer): string;
+    function DiscardBackText(const ABlock: TGittanDiscard): string;
     function DiscardBaseName: string;
     { umain.reviews.inc }
     procedure MenuReviewCommentsClick(Sender: TObject);
@@ -1418,8 +1447,12 @@ resourcestring
   rsRevertUndone = 'Brought back %s';
   rsRevertUndoFailed = 'Could not bring everything back: %s';
   rsDiscardAction = 'Discard';
-  rsDiscardHint = 'Discard this change.' + LineEnding +
-    '%s. File > Undo Discard brings it back.';
+  rsKeepPill = 'Keep';
+  rsUnkeepPill = 'Unkeep';
+  rsUnkeepAction = 'Unkeep %d';
+  rsKeptBlock = 'Kept the change at line %d of %s as code';
+  rsUnkept = 'Shows the change at line %d of %s again';
+  rsUnkeptAll = 'Shows every change of %s again';
   rsDiscardAsk = 'Discard this change to %s?' + LineEnding +
     '%s. File > Undo Discard brings it back.';
   rsDiscardBackOne = 'The line goes back to how it is in %s';
@@ -1614,6 +1647,8 @@ const
   BlameMaxAuthorCols = 20;
   { How long the mouse rests on a word before its definition is shown. }
   HoverPause = 600;
+  { How long the mouse rests on a changed row before the pills show. }
+  PillPause = 250;
   { How long one parse may take before a lookup or the indexer gives up
     on it. }
   ParseTimeout = 3000;
@@ -1669,6 +1704,11 @@ begin
   FHasGitHubCli := FGitHubCli <> '';
   FChangeLines := TStringList.Create;
   FHotDiscard := -1;
+  FHotRow := -1;
+  FHotKeep := -1;
+  FHeaderUnkeep := -1;
+  FKeeps := TGittanKeeps.Create;
+  FRawChangeLines := TStringList.Create;
   FBlameCache := TStringList.Create;
   FBlameCache.CaseSensitive := True;
   FBlameZombies := TList.Create;
@@ -1877,6 +1917,15 @@ begin
   FConflictPopup := TGittanPopupList.Create(Self);
   FConflictPopup.Parent := Self;
   FConflictPopup.OnPick := @ConflictPopupPick;
+  { The pills beside the row the mouse is on in the discard band. }
+  FDiscardPills := TGittanHoverPills.Create(Self);
+  FDiscardPills.Parent := Self;
+  FDiscardPills.OnPick := @DiscardPillsPick;
+  FDiscardPills.OnLeave := @DiscardPillsLeave;
+  FPillTimer := TTimer.Create(Self);
+  FPillTimer.Enabled := False;
+  FPillTimer.Interval := PillPause;
+  FPillTimer.OnTimer := @PillTimerTimer;
   FResolveIndex := -1;
   { The welcome view shares the summary's box and draws the application
     icon from its own copy: Application.Icon keeps to its small image. }
@@ -1950,6 +1999,8 @@ begin
   AbandonSubmoduleJobs;
   FreeAndNil(FSubJobs);
   ClearRevertUndo;
+  FreeAndNil(FKeeps);
+  FreeAndNil(FRawChangeLines);
   FRevertUndo.Free;
   FBranchNames.Free;
   FBranchRefs.Free;
@@ -2198,6 +2249,9 @@ begin
     FConflictPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
+    FDiscardPills.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+      RGBToColor(85, 85, 86), RGBToColor(100, 160, 240), RGBToColor(63, 185, 80),
+      RGBToColor(248, 81, 73));
     FStatus.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(62, 62, 62), RGBToColor(58, 58, 59),
       RGBToColor(100, 160, 240), RGBToColor(63, 185, 80), RGBToColor(227, 179, 65),
@@ -2249,6 +2303,8 @@ begin
     FConflictPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
+    FDiscardPills.SetColors(clWhite, RGBToColor(30, 30, 30), RGBToColor(205, 205, 205),
+      RGBToColor(0, 110, 230), RGBToColor(26, 127, 55), RGBToColor(207, 34, 46));
     FStatus.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(222, 222, 222), RGBToColor(232, 232, 232),
       RGBToColor(0, 110, 230), RGBToColor(26, 127, 55), RGBToColor(154, 103, 0),
@@ -3615,8 +3671,10 @@ begin
   SaveIndex;
   FSummary.Notice := '';
   FCurrentPath := '';
-  { The discards of the previous repository are not for this one. }
+  { The discards and the keeps of the previous repository are not for
+    this one. }
   FDiscards := nil;
+  FKeeps.ClearAll;
   ClearRevertUndo;
   UpdateDiscardItems;
   FPullRange := '';
@@ -4252,9 +4310,13 @@ begin
       Exit;
     end;
     FChangeLines.Assign(Lines);
+    FRawChangeLines.Assign(Lines);
   finally
     Lines.Free;
   end;
+  { The changes kept as code this session are plain lines from here on
+    (see umain.discard.inc). }
+  FKeeps.Apply(APath, FChangeLines, FKeptOf);
   if APath <> FCurrentPath then
     FExpanded := nil;
   { The file may have changed since the head was mapped onto it. }
@@ -4306,9 +4368,7 @@ begin
     ShowTranslationChanges(APath);
     Exit;
   end;
-  { One of the repository's own files can be opened to edits. }
-  if IsRepoFile(APath) and (FConflictRoles = nil) then
-    FHeader.SetActions([rsEditAction]);
+  SetChangeActions;
   FManualLexer := False;
   FView := gvChanges;
   ApplyLayout;

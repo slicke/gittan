@@ -787,17 +787,26 @@ var
   Word: string;
   N1, N2: integer;
   Part: TATLinePart;
-  Link: boolean;
+  Link, OnBand: boolean;
+  Row, Block, Keep: integer;
 begin
   Ed := TATSynEdit(Sender);
-  { On the discard band the button under the mouse is lit and its hint
-    goes the way of the blame's (see umain.discard.inc); on the blame
-    band the cell under the mouse is the hover, see umain.blame.inc. }
-  SetHotDiscard(Ed, DiscardAt(Ed, X, Y));
+  { On a changed row the block is lit on the discard band and the pills
+    at the row's end say what a click does (see umain.discard.inc): on
+    the band itself no hint, only the hand; over the text the word
+    hover goes on as usual. A conflict's button has a hint that goes
+    the way of the blame's; on the blame band the cell under the mouse
+    is the hover, see umain.blame.inc. }
+  Block := DiscardAt(Ed, X, Y, Row, OnBand, Keep);
+  SetHotDiscard(Ed, Block, Keep, Row, OnBand);
+  if (FHotDiscard >= 0) and OnBand and not CanResolveBlocks then
+  begin
+    ClearHover;
+    Application.QueueAsyncCall(@HandCursorAsync, PtrInt(Ed));
+    Exit;
+  end;
   if (FHotDiscard >= 0) and CanResolveBlocks then
     Word := rsResolveBlockHint
-  else if FHotDiscard >= 0 then
-    Word := Format(rsDiscardHint, [DiscardBackText(FHotDiscard)])
   else
     Word := BlameHintAt(Ed, X, Y);
   if Word <> '' then
@@ -854,9 +863,11 @@ begin
   end;
 end;
 
+{ The mouse that went from the band onto its pills keeps the block. }
 procedure TForm1.EditMouseLeave(Sender: TObject);
 begin
-  SetHotDiscard(TATSynEdit(Sender), -1);
+  if not MouseOnDiscardPills then
+    SetHotDiscard(TATSynEdit(Sender), -1, -1, -1, False);
   if Sender = FHoverEd then
     ClearHover;
 end;

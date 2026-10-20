@@ -458,6 +458,12 @@ begin
   end;
   if (FView <> gvChanges) or (FCurrentPath = '') or (FRepo.Root = '') then
     Exit;
+  { Unkeep shows the file's kept changes again (see umain.discard.inc). }
+  if (FHeaderUnkeep >= 0) and (AIndex = FHeaderUnkeep) then
+  begin
+    UnkeepFile;
+    Exit;
+  end;
   Path := FCurrentPath;
   FileTree.Selected := nil;
   OpenFile(IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(Path));

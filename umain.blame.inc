@@ -460,10 +460,12 @@ begin
   SetBase(Range);
 end;
 
-{ The hand over a cell that can be clicked, set from the message loop so
-  it lands after the editor's own cursor update (see EditMouseMove). }
+{ The hand over a cell that can be clicked, or over a block on the
+  discard band, set from the message loop so it lands after the
+  editor's own cursor update (see EditMouseMove). }
 procedure TForm1.HandCursorAsync(Data: PtrInt);
 begin
-  if (FHoverBlame <> '') and (TATSynEdit(Data) = FHoverEd) then
-    FHoverEd.Cursor := crHandPoint;
+  if ((FHoverBlame <> '') and (TATSynEdit(Data) = FHoverEd)) or
+    (FHotOnBand and (TATSynEdit(Data) = Edit)) then
+    TATSynEdit(Data).Cursor := crHandPoint;
 end;

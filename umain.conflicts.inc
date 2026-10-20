@@ -257,7 +257,7 @@ begin
   Anchor := Rect(L, Y, R, Y + Edit.TextCharSize.Y);
   Anchor.TopLeft := Edit.ClientToScreen(Anchor.TopLeft);
   Anchor.BottomRight := Edit.ClientToScreen(Anchor.BottomRight);
-  SetHotDiscard(Edit, -1);
+  SetHotDiscard(Edit, -1, -1, -1, False);
   { The button's hint would stay over the list. }
   ClearHover;
   FConflictPopup.Popup(Anchor);
