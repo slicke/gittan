@@ -26,7 +26,7 @@ uses
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader,
   gittan.discard, gittan.keep, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
-  gittan.commitgraph, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, gittan.mdpreview, ATSynEdit_Gaps, md5;
+  gittan.commitgraph, gittan.notice, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, gittan.mdpreview, ATSynEdit_Gaps, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -400,6 +400,15 @@ type
     { The commit graph, in the middle of the form, from the status bar's
       ahead/behind counts or View > Commit Graph. }
     FGraph: TGittanCommitGraph;
+    { The notice over the form while a fetch, pull or push runs: at once
+      when a pre-push hook has to run first, else after NoticeDelay. }
+    FNotice: TGittanNotice;
+    FNoticeTimer: TTimer;
+    FNoticeHook: boolean;
+    { What a failure notice's first button runs again. }
+    FRetryKind: TGittanRemoteKind;
+    FRetryMode: TGittanPullMode;
+    FRetryArg: string;
     { The list a click on the status bar's pull request drops down, and
       what each of its rows does (the pa* constants). }
     FPullPopup: TGittanPopupList;
@@ -970,6 +979,12 @@ type
     procedure StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode = pmAuto;
       const AArg: string = '');
     procedure RemoteJobDone(Sender: TObject);
+    procedure RemoteJobOutput(Sender: TObject);
+    procedure NoticeTimerTimer(Sender: TObject);
+    procedure NoticeButton(Sender: TObject; AIndex: integer);
+    procedure ShowRemoteFailure(AJob: TGittanRemoteJob; AHookFailed: boolean);
+    procedure ShowRemoteNotice;
+    function RemoteNoticeTitle: string;
     procedure StopRemoteJob(AWait: boolean);
     procedure MenuFetchClick(Sender: TObject);
     procedure MenuPullClick(Sender: TObject);
@@ -1216,6 +1231,19 @@ resourcestring
   rsFetching = 'Fetching...';
   rsPulling = 'Pulling...';
   rsPushing = 'Pushing...';
+  rsRunningHook = 'Running the pre-push hook...';
+  rsNoticeFetching = 'Fetching';
+  rsNoticePulling = 'Pulling';
+  rsNoticePushing = 'Pushing';
+  rsNoticeHook = 'Running the pre-push hook';
+  rsNoticeDeleting = 'Deleting %s on the remote';
+  rsHookFailed = 'The pre-push hook failed';
+  rsPushAgain = 'Push Again';
+  rsPullAgain = 'Pull Again';
+  rsFetchAgain = 'Fetch Again';
+  rsTryAgain = 'Try Again';
+  rsCopyOutput = 'Copy Output';
+  rsOutputCopied = 'Copied the output';
   rsFetched = 'Fetched';
   rsFetchedBehind = 'Fetched: %d commits to pull';
   rsFetchedBehindOne = 'Fetched: 1 commit to pull';
@@ -1647,6 +1675,8 @@ const
   HoverPause = 600;
   { How long the mouse rests on a changed row before the pills show. }
   PillPause = 250;
+  { Before the notice shows for a fetch, pull or push without a hook. }
+  NoticeDelay = 1000;
   { How long one parse may take before a lookup or the indexer gives up
     on it. }
   ParseTimeout = 3000;
@@ -1941,6 +1971,15 @@ begin
   FWelcome.SetIcon(FAppIcon);
   FWelcome.OnOpen := @WelcomeOpen;
   FWelcome.OnOpenRecent := @WelcomeOpenRecent;
+  { The notice over the form, with the same icon. }
+  FNotice := TGittanNotice.Create(Self);
+  FNotice.Parent := Self;
+  FNotice.SetIcon(FAppIcon);
+  FNotice.OnButton := @NoticeButton;
+  FNoticeTimer := TTimer.Create(Self);
+  FNoticeTimer.Enabled := False;
+  FNoticeTimer.Interval := NoticeDelay;
+  FNoticeTimer.OnTimer := @NoticeTimerTimer;
   ShowWelcome('');
 
   FRepo := TGittanRepo.Create;
@@ -2235,6 +2274,9 @@ begin
     FGraph.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240), RGBToColor(227, 179, 65));
+    FNotice.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
+      RGBToColor(0, 110, 230), RGBToColor(241, 112, 112));
     FPullPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
@@ -2289,6 +2331,9 @@ begin
     FGraph.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230), RGBToColor(154, 103, 0));
+    FNotice.SetColors(clWhite, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
+      RGBToColor(0, 110, 230), RGBToColor(200, 40, 40));
     FPullPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));

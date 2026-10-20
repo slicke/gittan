@@ -19,6 +19,12 @@ const
   flagUnstaged = 32;
 
 type
+  {** A piece of what a git process wrote, on stdout or stderr, as it
+    is read, for a caller that shows the progress of a long command (a
+    pre-push hook's output, say). Called in the thread the command runs
+    in. }
+  TGittanOutputEvent = procedure(const AText: string) of object;
+type
   {** What happened to a changed file, condensed from the two status columns
     of `git status --porcelain`. }
   TGittanChangeKind = (ckModified, ckAdded, ckDeleted, ckRenamed, ckUntracked,
@@ -94,6 +100,7 @@ type
     FWholeTree: boolean;
     FTempIndex: string;
     FIgnoreWhitespace: boolean;
+    FOnOutput: TGittanOutputEvent;
     function RunGit(const ADir: string; const AArgs: array of string;
       out AOutput: string; const AIndexFile: string = ''): boolean;
     function RunRemote(const AArgs: array of string): boolean;
@@ -203,6 +210,10 @@ type
       nothing was pushed: ARejected is then set when the remote has
       commits the branch lacks, which a pull would bring first. }
     function Push(out ARejected: boolean): boolean;
+    {** Whether the repository has the hook AName (pre-push, say): a file
+      of that name in its hooks folder, `core.hooksPath` (husky's
+      .husky/_) or .git/hooks. }
+    function HasHook(const AName: string): boolean;
     {** The variables a fetch, pull or push runs with besides Gittan's
       own: ssh in batch mode (`ssh -o BatchMode=yes`), so a key that
       needs its passphrase, or a host not yet known, fails at once with
@@ -467,6 +478,10 @@ type
       line that only changed its spacing counts as unchanged, and a file
       with no other change has no changes. }
     property IgnoreWhitespace: boolean read FIgnoreWhitespace write FIgnoreWhitespace;
+    {** Gets what a fetch, pull or push writes as it runs: git's progress
+      and the output of the hooks it runs. Called in the caller's
+      thread. }
+    property OnOutput: TGittanOutputEvent read FOnOutput write FOnOutput;
   end;
 
 {** The PATH Gittan looks for its tools on and runs git and gh with,
@@ -480,8 +495,22 @@ type
 function ToolSearchPath: string;
 
 {** Full path of the command AName (without .exe; Windows adds it) on
-  ToolSearchPath, or empty when it is not installed. }
+  ToolSearchPath, or empty when it is not installed. node is found this
+  way too, wherever nvm, fnm, Volta or Homebrew put it. }
 function FindTool(const AName: string): string;
+
+{** The bin folder of the node that nvm in ANvmDir (~/.nvm, or NVM_DIR)
+  runs by default: the version its alias "default" names, followed
+  through the alias files (default → lts/* → lts/krypton → v24.21.0), a
+  bare number ("20", "20.11") taken as the newest version that starts
+  with it, else (no alias, or one naming a version not installed) the
+  newest version installed. Empty when none is. }
+function NvmNodeBin(const ANvmDir: string): string;
+
+{** The bin folder of the node that fnm in AFnmDir (FNM_DIR, or its
+  default folder) runs by default: its alias "default", else the newest
+  version installed. Empty when none is. }
+function FnmNodeBin(const AFnmDir: string): string;
 
 {** Runs gh (AExe, from FindTool('gh')) in ADir and answers whether it
   succeeded, with its standard output in AOutput and, on failure, its
@@ -502,15 +531,25 @@ function IsBinaryFile(const AFileName: string): boolean;
 
 {** Runs git in ADir as TGittanRepo does (see Running git) and answers
   whether it succeeded, with its standard output in AOutput and, on
-  failure, its message in AError. For work outside an open repository's
+  failure, its message in AError: what it wrote on stdout, then on
+  stderr, since a pre-push hook's output goes to the one and git's own
+  reason to the other. For work outside an open repository's
   root, such as a submodule, and for threads, which keep no repository. }
 function RunGitIn(const ADir: string; const AArgs: array of string;
   out AOutput, AError: string; const AIndexFile: string = ''): boolean;
 
 {** RunGitIn with the variables AEnv ("NAME=value") set besides those
-  Gittan always sets. }
+  Gittan always sets, and AOnOutput told of each piece git writes as it
+  runs, on either stream. }
 function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
-  out AOutput, AError: string; const AIndexFile: string = ''): boolean;
+  out AOutput, AError: string; const AIndexFile: string = '';
+  AOnOutput: TGittanOutputEvent = nil): boolean;
+
+{** AText with the carriage returns of a terminal's progress lines
+  ("Writing objects:  33%" written over and over) resolved: of what a
+  line held before each return only the part after the last one stays,
+  so the text reads as the terminal last showed it. }
+function ResolveReturns(const AText: string): string;
 
 {** Puts in AList the local branches of the repository in ADir that track
   a branch no longer on its remote: git ls-remote asks each remote once,
@@ -535,7 +574,7 @@ function ProcessArg(const S: string): string;
 implementation
 
 uses
-  Process, md5, StrUtils, DateUtils;
+  Process, Pipes, md5, StrUtils, DateUtils;
 
 var
   GToolPath: string;
@@ -546,20 +585,147 @@ begin
   Result := GToolPath;
 end;
 
+{ Whether the folder name A ("v24.21.0") is a newer node version than
+  B, by number; a name that is no version counts as the oldest. }
+function NodeVersionNewer(const A, B: string): boolean;
+
+  function Parts(const S: string; out N: array of integer): boolean;
+  var
+    Fields: TStringArray;
+    i: integer;
+  begin
+    for i := 0 to High(N) do
+      N[i] := -1;
+    Fields := S.TrimLeft(['v']).Split(['.']);
+    Result := (Length(Fields) > 0) and (Length(Fields) <= Length(N));
+    for i := 0 to High(Fields) do
+      if not (Result and TryStrToInt(Fields[i], N[i])) then
+        Exit(False);
+  end;
+
+var
+  NA, NB: array[0..2] of integer;
+  i: integer;
+begin
+  if not Parts(A, NA) then
+    Exit(False);
+  if not Parts(B, NB) then
+    Exit(True);
+  for i := 0 to 2 do
+    if NA[i] <> NB[i] then
+      Exit(NA[i] > NB[i]);
+  Result := False;
+end;
+
+{ The newest version folder under AVersionsDir whose name starts with
+  APrefix (every one when it is empty), or empty. }
+function NewestNodeVersion(const AVersionsDir, APrefix: string): string;
+var
+  Info: TSearchRec;
+begin
+  Result := '';
+  if FindFirst(IncludeTrailingPathDelimiter(AVersionsDir) + '*', faDirectory, Info) = 0 then
+  begin
+    repeat
+      if ((Info.Attr and faDirectory) <> 0) and (Info.Name <> '.') and (Info.Name <> '..') and
+        ((APrefix = '') or (Pos(APrefix, Info.Name) = 1)) and
+        ((Result = '') or NodeVersionNewer(Info.Name, Result)) then
+        Result := Info.Name;
+    until FindNext(Info) <> 0;
+    FindClose(Info);
+  end;
+end;
+
+function NvmNodeBin(const ANvmDir: string): string;
+var
+  Versions, Name, Line: string;
+  Hops: integer;
+  Lines: TStringList;
+begin
+  Result := '';
+  Versions := IncludeTrailingPathDelimiter(ANvmDir) + 'versions' + PathDelim + 'node';
+  if not DirectoryExists(Versions) then
+    Exit;
+  Name := 'default';
+  Hops := 0;
+  Lines := TStringList.Create;
+  try
+    { An alias file holds a version or another alias (lts/* → lts/krypton). }
+    while (Hops < 8) and FileExists(IncludeTrailingPathDelimiter(ANvmDir) + 'alias' +
+        PathDelim + Name) do
+    begin
+      Lines.LoadFromFile(IncludeTrailingPathDelimiter(ANvmDir) + 'alias' + PathDelim + Name);
+      Line := '';
+      if Lines.Count > 0 then
+        Line := Trim(Lines[0]);
+      if Line = '' then
+        Break;
+      Name := Line;
+      Inc(Hops);
+    end;
+  finally
+    Lines.Free;
+  end;
+  if (Name <> '') and (Name[1] in ['0'..'9']) then
+    Name := 'v' + Name;
+  if (Name <> '') and (Name[1] = 'v') then
+  begin
+    if DirectoryExists(IncludeTrailingPathDelimiter(Versions) + Name) then
+      Result := Name
+    else
+      Result := NewestNodeVersion(Versions, Name + '.');
+  end;
+  if Result = '' then
+    Result := NewestNodeVersion(Versions, '');
+  if Result <> '' then
+    Result := IncludeTrailingPathDelimiter(Versions) + Result + PathDelim + 'bin';
+end;
+
+function FnmNodeBin(const AFnmDir: string): string;
+var
+  Versions: string;
+begin
+  Result := IncludeTrailingPathDelimiter(AFnmDir) + 'aliases' + PathDelim + 'default' +
+    PathDelim + 'bin';
+  if DirectoryExists(Result) then
+    Exit;
+  Result := '';
+  Versions := IncludeTrailingPathDelimiter(AFnmDir) + 'node-versions';
+  if NewestNodeVersion(Versions, '') <> '' then
+    Result := IncludeTrailingPathDelimiter(Versions) + NewestNodeVersion(Versions, '') +
+      PathDelim + 'installation' + PathDelim + 'bin';
+end;
+
 { Gittan's PATH with the folders of Extra that exist and are not in it
   yet, after it, so a tool the user put first on PATH still comes
-  first. }
+  first. The node of nvm and fnm lives in a folder named after its
+  version, found through their default alias; pnpm's home is PNPM_HOME
+  or its platform's default. }
 function MakeToolPath: string;
 {$ifndef windows}
 const
-  Extra: array[0..14] of string = ('/opt/homebrew/bin', '/opt/homebrew/sbin',
+  Extra: array[0..19] of string = ('/opt/homebrew/bin', '/opt/homebrew/sbin',
     '/usr/local/bin', '/usr/bin', '/bin', '~/.local/bin', '~/bin', '~/.cargo/bin',
     '~/.volta/bin', '~/.asdf/shims', '~/.local/share/mise/shims',
     '~/.nix-profile/bin', '/nix/var/nix/profiles/default/bin',
-    '/home/linuxbrew/.linuxbrew/bin', '/snap/bin');
+    '/home/linuxbrew/.linuxbrew/bin', '/snap/bin',
+    '~/.bun/bin', '~/.deno/bin', '~/.yarn/bin', '~/.npm-global/bin',
+    '~/.config/yarn/global/node_modules/.bin');
 var
   Dirs: TStringList;
-  Home, Dir, Full: string;
+  Home, Dir, Full, NvmDir, FnmDir, Pnpm: string;
+  More: TStringArray;
+
+  procedure AddDir(const AFull: string);
+  begin
+    if (AFull = '') or (Dirs.IndexOf(AFull) >= 0) or not DirectoryExists(AFull) then
+      Exit;
+    if Result <> '' then
+      Result := Result + PathSeparator;
+    Result := Result + AFull;
+    Dirs.Add(AFull);
+  end;
+
 {$endif}
 begin
   Result := GetEnvironmentVariable('PATH');
@@ -574,14 +740,39 @@ begin
     begin
       if (Dir[1] = '~') and (Home = '') then
         Continue;
-      Full := StringReplace(Dir, '~', Home, []);
-      if (Dirs.IndexOf(Full) >= 0) or not DirectoryExists(Full) then
-        Continue;
-      if Result <> '' then
-        Result := Result + PathSeparator;
-      Result := Result + Full;
-      Dirs.Add(Full);
+      AddDir(StringReplace(Dir, '~', Home, []));
     end;
+    NvmDir := GetEnvironmentVariable('NVM_DIR');
+    if (NvmDir = '') and (Home <> '') then
+      NvmDir := Home + '/.nvm';
+    FnmDir := GetEnvironmentVariable('FNM_DIR');
+    Pnpm := GetEnvironmentVariable('PNPM_HOME');
+    if Home <> '' then
+    begin
+      if FnmDir = '' then
+      begin
+        {$ifdef darwin}
+        More := [Home + '/Library/Application Support/fnm', Home + '/.fnm'];
+        {$else}
+        More := [GetEnvironmentVariable('XDG_DATA_HOME') + '/fnm',
+          Home + '/.local/share/fnm', Home + '/.fnm'];
+        {$endif}
+        for Full in More do
+          if (FnmDir = '') and (Full[1] = '/') and DirectoryExists(Full) then
+            FnmDir := Full;
+      end;
+      if Pnpm = '' then
+        {$ifdef darwin}
+        Pnpm := Home + '/Library/pnpm';
+        {$else}
+        Pnpm := Home + '/.local/share/pnpm';
+        {$endif}
+    end;
+    if NvmDir <> '' then
+      AddDir(NvmNodeBin(NvmDir));
+    if FnmDir <> '' then
+      AddDir(FnmNodeBin(FnmDir));
+    AddDir(Pnpm);
   finally
     Dirs.Free;
   end;
@@ -677,12 +868,58 @@ begin
   Result := RunGitEnv(ADir, AArgs, [], AOutput, AError, AIndexFile);
 end;
 
+function ResolveReturns(const AText: string): string;
+var
+  Lines: TStringArray;
+  i, p: integer;
+begin
+  if Pos(#13, AText) = 0 then
+    Exit(AText);
+  Lines := AText.Split([#10]);
+  for i := 0 to High(Lines) do
+  begin
+    { A return at the end of a line (before its newline) is no overwrite. }
+    while (Lines[i] <> '') and (Lines[i][Length(Lines[i])] = #13) do
+      SetLength(Lines[i], Length(Lines[i]) - 1);
+    p := LastDelimiter(#13, Lines[i]);
+    if p > 0 then
+      Lines[i] := Copy(Lines[i], p + 1, MaxInt);
+  end;
+  Result := string.Join(#10, Lines);
+end;
+
+{ Reads what the pipe holds, into ADest and to AOnOutput; false when it
+  held nothing. }
+function ReadPipe(APipe: TInputPipeStream; var ADest: string;
+  AOnOutput: TGittanOutputEvent): boolean;
+var
+  Chunk: string;
+  N: longint;
+begin
+  N := APipe.NumBytesAvailable;
+  Result := N > 0;
+  if not Result then
+    Exit;
+  SetLength(Chunk, N);
+  N := APipe.Read(Chunk[1], N);
+  if N < 0 then
+    N := 0;
+  SetLength(Chunk, N);
+  if Chunk = '' then
+    Exit(False);
+  ADest := ADest + Chunk;
+  if Assigned(AOnOutput) then
+    AOnOutput(Chunk);
+end;
+
 function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
-  out AOutput, AError: string; const AIndexFile: string): boolean;
+  out AOutput, AError: string; const AIndexFile: string;
+  AOnOutput: TGittanOutputEvent): boolean;
 var
   P: TProcess;
   Skip: array of string;
   Status, i: integer;
+  Got: boolean;
 begin
   AOutput := '';
   AError := '';
@@ -711,21 +948,47 @@ begin
     P.Environment.Add('GIT_OPTIONAL_LOCKS=0');
     if AIndexFile <> '' then
       P.Environment.Add('GIT_INDEX_FILE=' + AIndexFile);
-    P.Options := [poNoConsole];
-    if P.RunCommandLoop(AOutput, AError, Status) <> 0 then
-    begin
+    P.Options := [poNoConsole, poUsePipes];
+    { Both pipes are read as git writes, so a long command's progress
+      can be shown and neither pipe fills up and blocks git; what is
+      left once git has ended is read after it. }
+    try
+      P.Execute;
+    except
       AError := 'Could not run git. Is it installed?';
       Exit(False);
     end;
+    repeat
+      Got := ReadPipe(P.Output, AOutput, AOnOutput);
+      if ReadPipe(P.Stderr, AError, AOnOutput) then
+        Got := True;
+      if not Got then
+        if P.Running then
+          Sleep(10)
+        else
+          Break;
+    until False;
+    while ReadPipe(P.Output, AOutput, AOnOutput) do;
+    while ReadPipe(P.Stderr, AError, AOnOutput) do;
+    Status := P.ExitStatus;
   finally
     P.Free;
   end;
+  { A failed git's reason is what it wrote, on both streams in their
+    order: a pre-push hook's output (husky's "pre-push script failed",
+    the tests it ran) is on stdout, git's own "failed to push some refs"
+    on stderr, and either alone says little. Progress is read as the
+    terminal last showed it. }
   Result := Status = 0;
   if not Result then
   begin
-    AError := Trim(AError);
-    if AError = '' then
-      AError := Trim(AOutput);
+    AError := Trim(ResolveReturns(AError));
+    AOutput := ResolveReturns(AOutput);
+    if Trim(AOutput) <> '' then
+      if AError = '' then
+        AError := Trim(AOutput)
+      else
+        AError := Trim(AOutput) + LineEnding + AError;
     AOutput := '';
   end;
 end;
@@ -820,12 +1083,19 @@ begin
   finally
     P.Free;
   end;
+  { A failed git's reason is what it wrote, on both streams in their
+    order: a pre-push hook's output (husky's "pre-push script failed",
+    the tests it ran) is on stdout, git's own "failed to push some refs"
+    on stderr, and either alone says little. }
   Result := Status = 0;
   if not Result then
   begin
     AError := Trim(AError);
-    if AError = '' then
-      AError := Trim(AOutput);
+    if Trim(AOutput) <> '' then
+      if AError = '' then
+        AError := Trim(AOutput)
+      else
+        AError := Trim(AOutput) + LineEnding + AError;
     AOutput := '';
   end;
 end;
@@ -1721,14 +1991,17 @@ function TGittanRepo.RunRemote(const AArgs: array of string): boolean;
 var
   Output, Err: string;
 begin
-  Result := (FRoot <> '') and RunGitEnv(FRoot, AArgs, RemoteEnvironment, Output, Err);
+  Result := (FRoot <> '') and RunGitEnv(FRoot, AArgs, RemoteEnvironment, Output, Err, '',
+    FOnOutput);
   if not Result then
     FError := Err;
 end;
 
+{ --progress: git reports its progress ("Writing objects: 33%") only at
+  a terminal unless asked, and OnOutput shows it. }
 function TGittanRepo.Fetch: boolean;
 begin
-  Result := RunRemote(['fetch', '--all', '--prune']);
+  Result := RunRemote(['fetch', '--all', '--prune', '--progress']);
 end;
 
 { Whether the config says how to pull: then pmAuto leaves it to git. }
@@ -1749,14 +2022,14 @@ begin
   ADiverged := False;
   case AMode of
     pmMerge:
-      Result := RunRemote(['pull', '--no-rebase', '--ff', '--no-edit']);
+      Result := RunRemote(['pull', '--progress', '--no-rebase', '--ff', '--no-edit']);
     pmRebase:
-      Result := RunRemote(['pull', '--rebase', '--autostash']);
+      Result := RunRemote(['pull', '--progress', '--rebase', '--autostash']);
     else
       if PullConfigured(FRoot, Branch) then
-        Result := RunRemote(['pull', '--no-edit'])
+        Result := RunRemote(['pull', '--progress', '--no-edit'])
       else
-        Result := RunRemote(['pull', '--ff-only']);
+        Result := RunRemote(['pull', '--progress', '--ff-only']);
   end;
   if not Result then
     ADiverged := (Pos('Not possible to fast-forward', FError) > 0) or
@@ -1780,7 +2053,7 @@ begin
   if RunGit(FRoot, ['config', 'branch.' + Name + '.remote'], Remote) and
     RunGit(FRoot, ['config', 'branch.' + Name + '.merge'], Merge) and
     (Trim(Remote) <> '') and (Trim(Merge) <> '') then
-    Result := RunRemote(['push', Trim(Remote), 'HEAD:' + Trim(Merge)])
+    Result := RunRemote(['push', '--progress', Trim(Remote), 'HEAD:' + Trim(Merge)])
   else
   begin
     Remote := RemoteFor('');
@@ -1789,11 +2062,28 @@ begin
       FError := 'The repository has no remote to push to.';
       Exit;
     end;
-    Result := RunRemote(['push', '-u', Remote, 'HEAD']);
+    Result := RunRemote(['push', '--progress', '-u', Remote, 'HEAD']);
   end;
   if not Result then
     ARejected := (Pos('[rejected]', FError) > 0) or (Pos('fetch first', FError) > 0) or
       (Pos('non-fast-forward', FError) > 0);
+end;
+
+{ rev-parse --git-path gives the hooks folder with core.hooksPath
+  honoured, relative to the root when it is inside the work tree. }
+function TGittanRepo.HasHook(const AName: string): boolean;
+var
+  Dir: string;
+begin
+  Result := False;
+  if (FRoot = '') or (AName = '') or not RunGit(FRoot, ['rev-parse', '--git-path', 'hooks'], Dir) then
+    Exit;
+  Dir := Trim(Dir);
+  if Dir = '' then
+    Exit;
+  if not ((Dir[1] in ['/', '\']) or ((Length(Dir) > 1) and (Dir[2] = ':'))) then
+    Dir := IncludeTrailingPathDelimiter(FRoot) + Dir;
+  Result := FileExists(IncludeTrailingPathDelimiter(SetDirSeparators(Dir)) + AName);
 end;
 
 { ---------------------------------------------------------------------------

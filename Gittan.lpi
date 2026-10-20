@@ -96,6 +96,10 @@
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
+        <Filename Value="gittan.notice.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
         <Filename Value="gittan.keep.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>

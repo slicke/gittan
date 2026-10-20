@@ -685,6 +685,8 @@ procedure TForm1.EditorPanelResize(Sender: TObject);
 begin
   if FGraph <> nil then
     FGraph.Recenter;
+  if FNotice <> nil then
+    FNotice.Recenter;
   if FMdPreview.Visible then
     FMdPreview.Width := Round(EditorPanel.ClientWidth * FMdRatio);
   if FEditOld.Visible then

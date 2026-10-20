@@ -16,12 +16,14 @@ type
   private
     FDir: string;
     FRepo: TGittanRepo;
+    FCollected: string;
     function Git(const AArgs: array of string): string;
     procedure WriteFile(const APath, AContent: string);
     procedure Commit(const AMessage: string);
     procedure MakeHistory;
     function FindStat(const AStats: TGittanFileStats; const APath: string): TGittanFileStat;
     function Joined(AList: TStrings): string;
+    procedure Collect(const AText: string);
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -63,7 +65,9 @@ type
     procedure TestCommitUnborn;
     procedure TestCommitMerge;
     procedure TestToolSearchPath;
+    procedure TestNodeManagerBins;
     procedure TestPushFetchPull;
+    procedure TestPushHook;
     procedure TestPullDiverged;
     procedure TestRemoteEnvironment;
     procedure TestResolveMerge;
@@ -1406,6 +1410,57 @@ end;
 { A push without an upstream makes one; a fetch sees what another clone
   pushed, a pull fast-forwards to it; a push behind the remote is
   rejected. }
+{ nvm's default alias is followed through the alias files to a version
+  folder, a bare number means the newest version that starts with it,
+  and no alias or one naming a version not installed gives the newest
+  installed; fnm's default alias is its own folder. }
+procedure TGitRepoTest.TestNodeManagerBins;
+var
+  Nvm, Fnm, Versions: string;
+begin
+  Nvm := FDir + '-nvm';
+  Fnm := FDir + '-fnm';
+  Versions := Nvm + '/versions/node/';
+  try
+    AssertEquals('', NvmNodeBin(Nvm));
+    ForceDirectories(Versions + 'v18.20.8/bin');
+    ForceDirectories(Versions + 'v20.20.2/bin');
+    ForceDirectories(Versions + 'v20.9.0/bin');
+    ForceDirectories(Versions + 'v24.21.0/bin');
+    ForceDirectories(Versions + 'v9.11.2/bin');
+    AssertEquals('newest without alias', Versions + 'v24.21.0/bin', NvmNodeBin(Nvm));
+    ForceDirectories(Nvm + '/alias/lts');
+    WriteFile('../' + ExtractFileName(Nvm) + '/alias/default', 'lts/*'#10);
+    WriteFile('../' + ExtractFileName(Nvm) + '/alias/lts/*', 'lts/iron'#10);
+    WriteFile('../' + ExtractFileName(Nvm) + '/alias/lts/iron', 'v20.20.2'#10);
+    AssertEquals('through the aliases', Versions + 'v20.20.2/bin', NvmNodeBin(Nvm));
+    WriteFile('../' + ExtractFileName(Nvm) + '/alias/default', '20'#10);
+    AssertEquals('newest 20', Versions + 'v20.20.2/bin', NvmNodeBin(Nvm));
+    WriteFile('../' + ExtractFileName(Nvm) + '/alias/default', '20.9'#10);
+    AssertEquals('newest 20.9', Versions + 'v20.9.0/bin', NvmNodeBin(Nvm));
+    WriteFile('../' + ExtractFileName(Nvm) + '/alias/default', 'v16.20.2'#10);
+    AssertEquals('not installed', Versions + 'v24.21.0/bin', NvmNodeBin(Nvm));
+    WriteFile('../' + ExtractFileName(Nvm) + '/alias/default', 'loop'#10);
+    WriteFile('../' + ExtractFileName(Nvm) + '/alias/loop', 'loop'#10);
+    AssertEquals('alias loop', Versions + 'v24.21.0/bin', NvmNodeBin(Nvm));
+
+    AssertEquals('', FnmNodeBin(Fnm));
+    ForceDirectories(Fnm + '/node-versions/v22.0.0/installation/bin');
+    ForceDirectories(Fnm + '/node-versions/v23.1.0/installation/bin');
+    AssertEquals(Fnm + '/node-versions/v23.1.0/installation/bin', FnmNodeBin(Fnm));
+    ForceDirectories(Fnm + '/aliases/default/bin');
+    AssertEquals(Fnm + '/aliases/default/bin', FnmNodeBin(Fnm));
+  finally
+    RemoveTree(Nvm);
+    RemoveTree(Fnm);
+  end;
+end;
+
+procedure TGitRepoTest.Collect(const AText: string);
+begin
+  FCollected := FCollected + AText;
+end;
+
 procedure TGitRepoTest.TestPushFetchPull;
 var
   Remote, Other, Output: string;
@@ -1454,6 +1509,63 @@ begin
   finally
     RemoveTree(Remote);
     RemoveTree(Other);
+  end;
+end;
+
+{ A pre-push hook that refuses (husky's, say) stops the push, with its
+  output as the error and not as a rejection; the hook runs with
+  Gittan's PATH, so it finds node wherever nvm or the like put it. }
+procedure TGitRepoTest.TestPushHook;
+var
+  Remote, Output, Text: string;
+  Code: integer;
+  Rejected: boolean;
+  Lines: TStringList;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Remote := FDir + '-remote';
+  RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Code,
+    [poStderrToOutPut]);
+  try
+    Git(['remote', 'add', 'origin', Remote]);
+    AssertFalse('no hook yet', FRepo.HasHook('pre-push'));
+    WriteFile('.git/hooks/pre-push',
+      '#!/bin/sh'#10'printf %s "$PATH" > ../hook-path'#10'echo "hook says no"'#10'exit 1'#10);
+    {$ifdef UNIX}
+    RunCommandIndir(FDir, 'chmod', ['+x', '.git/hooks/pre-push'], Text, Code, []);
+    {$endif}
+    AssertTrue('hook', FRepo.HasHook('pre-push'));
+    AssertFalse('other hook', FRepo.HasHook('pre-commit'));
+    FRepo.OnOutput := @Collect;
+    AssertFalse(FRepo.Push(Rejected));
+    AssertFalse(Rejected);
+    AssertTrue(FRepo.Error, Pos('hook says no', FRepo.Error) > 0);
+    AssertTrue(FCollected, Pos('hook says no', FCollected) > 0);
+    AssertTrue(FCollected, Pos('failed to push', FCollected) > 0);
+    { husky keeps the hooks under core.hooksPath. }
+    Git(['config', 'core.hooksPath', '.husky/_']);
+    AssertFalse('hooksPath empty', FRepo.HasHook('pre-push'));
+    WriteFile('.husky/_/pre-push', '#!/bin/sh'#10'exit 0'#10);
+    AssertTrue('hooksPath', FRepo.HasHook('pre-push'));
+    Git(['config', '--unset', 'core.hooksPath']);
+    AssertEquals('nothing pushed', '', Trim(Git(['ls-remote', '--heads', 'origin'])));
+    {$ifdef UNIX}
+    Lines := TStringList.Create;
+    try
+      Lines.LoadFromFile(ExtractFileDir(ExcludeTrailingPathDelimiter(FDir)) + '/hook-path');
+      AssertTrue(Lines.Text, Pos(ToolSearchPath, Lines.Text) > 0);
+    finally
+      Lines.Free;
+      DeleteFile(ExtractFileDir(ExcludeTrailingPathDelimiter(FDir)) + '/hook-path');
+    end;
+    {$endif}
+    DeleteFile(IncludeTrailingPathDelimiter(FDir) + SetDirSeparators('.git/hooks/pre-push'));
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+  finally
+    RemoveTree(Remote);
   end;
 end;
 

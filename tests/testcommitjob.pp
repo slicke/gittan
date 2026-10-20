@@ -15,6 +15,8 @@ type
   private
     FDir: string;
     FDone: integer;
+    FOutputs: integer;
+    procedure JobOutput(Sender: TObject);
     procedure Git(const AArgs: array of string);
     procedure WriteFile(const AName, AContent: string);
     procedure JobDone(Sender: TObject);
@@ -27,6 +29,8 @@ type
     procedure TestFails;
     procedure TestStopped;
     procedure TestRemoteJob;
+    procedure TestRemoteJobProgress;
+    procedure TestTerminalText;
   end;
 
 implementation
@@ -184,6 +188,78 @@ end;
 
 { A push to a bare repository beside the test's, then one with no
   remote left, which fails with git's reason. }
+procedure TCommitJobTest.JobOutput(Sender: TObject);
+begin
+  Inc(FOutputs);
+  AssertTrue('progress so far', TGittanRemoteJob(Sender).Progress <> '');
+end;
+
+{ A push reports its progress as it goes (--progress, so git counts its
+  objects without a terminal), in the main thread, and the output of a
+  pre-push hook is in it. }
+procedure TCommitJobTest.TestRemoteJobProgress;
+var
+  Remote, Text: string;
+  Job: TGittanRemoteJob;
+  Code: integer;
+begin
+  WriteFile('a.txt', 'a');
+  Git(['add', '-A']);
+  Git(['commit', '-q', '-m', 'first']);
+  Remote := ExcludeTrailingPathDelimiter(FDir) + '-remote';
+  Git(['init', '-q', '--bare', Remote]);
+  try
+    Git(['remote', 'add', 'origin', Remote]);
+    WriteFile('.git/hooks/pre-push', '#!/bin/sh'#10'echo "hook at work"'#10);
+    {$ifdef UNIX}
+    RunCommandIndir(FDir, 'chmod', ['+x', '.git/hooks/pre-push'], Text, Code, []);
+    {$endif}
+    Job := TGittanRemoteJob.Create(FDir, rkPush);
+    try
+      Job.OnDone := @JobDone;
+      Job.OnOutput := @JobOutput;
+      RunJob(Job);
+      AssertEquals(1, FDone);
+      AssertTrue(Job.Error, Job.Ok);
+      AssertTrue('told of output', FOutputs > 0);
+      AssertTrue(Job.Progress, Pos('hook at work', Job.Progress) > 0);
+      AssertTrue(Job.Progress, PushTransferStarted(Job.Progress));
+      AssertTrue(Job.Progress, Pos(#13, Job.Progress) = 0);
+    finally
+      Job.Free;
+    end;
+  except
+    RemoveTree(Remote);
+    raise;
+  end;
+  RemoveTree(Remote);
+end;
+
+{ A carriage return starts the line over, also across chunks; one before
+  a newline is that newline; the transfer marks are known at a line's
+  start only. }
+procedure TCommitJobTest.TestTerminalText;
+var
+  Text: string;
+  Return: boolean;
+begin
+  Text := '';
+  Return := False;
+  AppendTerminalText(Text, Return, 'hook'#10'Writing objects:  33%'#13'Writing objects:  66%');
+  AssertEquals('hook'#10'Writing objects:  66%', Text);
+  AppendTerminalText(Text, Return, #13);
+  AssertTrue(Return);
+  AppendTerminalText(Text, Return, 'Writing objects: 100%, done.'#13#10'To origin'#10);
+  AssertFalse(Return);
+  AssertEquals('hook'#10'Writing objects: 100%, done.'#10'To origin'#10, Text);
+
+  AssertFalse(PushTransferStarted('running tests'));
+  AssertFalse(PushTransferStarted('note: Writing objects: is a git phrase'));
+  AssertTrue(PushTransferStarted('hook'#10'Enumerating objects: 3, done.'));
+  AssertTrue(PushTransferStarted('Everything up-to-date'));
+  AssertTrue(PushTransferStarted('x'#10'remote: Resolving deltas'));
+end;
+
 procedure TCommitJobTest.TestRemoteJob;
 var
   Remote: string;
