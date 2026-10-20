@@ -146,6 +146,7 @@ procedure TForm1.StopBlame;
 begin
   ClearBlameCache;
   AbandonHistoryJob;
+  AbandonRepoInfoJob;
   FreeAndNil(FHistory);
   FreeFinishedBlameJobs(True);
   FreeAndNil(FBlameZombies);

@@ -17,6 +17,7 @@ uses
   ec_SyntAnal,
   gittan.lexers, gittan.git, gittan.github, gittan.conflicts, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.welcome, gittan.fileheader, gittan.watch, gittan.settings,
+  gittan.sidenav, gittan.repoinfo, gittan.repopage,
   gittan.settingsdlg, gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   {$IFDEF LCLCocoa}gittan.toolbar,{$ENDIF}
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
@@ -35,7 +36,7 @@ type
     changed image, side by side (gittan.imagediff), a translation file
     with its originals beside its translations (umain.translations.inc),
     or a binary file, changed or opened (gittan.binaryview). }
-  TGittanView = (gvSummary, gvChanges, gvRepoDiff, gvFile, gvHistory, gvSubmodule,
+  TGittanView = (gvSummary, gvRepoInfo, gvChanges, gvRepoDiff, gvFile, gvHistory, gvSubmodule,
     gvImage, gvTranslation, gvBinary);
 
   {** The three strengths of a commit's color in the history view: the
@@ -381,6 +382,12 @@ type
     FSummaryBox: TScrollBox;
     FSummary: TGittanSummary;
     FWelcome: TGittanWelcome;
+    { The rows at the top of the sidebar, the page about the repository
+      and the job that reads its facts; see umain.repopage.inc. }
+    FSideNav: TGittanSideNav;
+    FRepoPage: TGittanRepoPage;
+    FRepoInfoJob: TGittanRepoInfoJob;
+    FRepoInfoAgain: boolean;
     { The list that drops down from the branch in the summary, with the
       branch to switch to for each of its items ('' for a header). }
     FBranchPopup: TGittanPopupList;
@@ -589,6 +596,14 @@ type
     procedure SummaryBoxResize(Sender: TObject);
     procedure SummarySelectFile(Sender: TObject; const APath: string);
     procedure ShowSummary;
+    procedure LeaveEditorViews;
+    procedure SetupSideNav;
+    procedure SideNavPick(Sender: TObject; AIndex: integer);
+    procedure MenuRepoInfoClick(Sender: TObject);
+    procedure ShowRepoInfo;
+    procedure StartRepoInfoJob;
+    procedure AbandonRepoInfoJob;
+    procedure RepoInfoJobDone(Sender: TObject);
     procedure ShowEditor;
     procedure ShowImageChanges(const APath: string);
     procedure ShowBinaryChanges(const APath: string);
@@ -1113,6 +1128,9 @@ resourcestring
   rsView = '&View';
   rsSummary = '&Summary';
   rsRepoDiff = '&Repository Diff';
+  rsRepoInfo = 'Repository &Info';
+  rsNavHome = 'Home';
+  rsNavRepository = 'Repository';
   rsRefresh = 'Re&fresh';
   rsCompareWith = '&Compare With';
   rsWorkingTree = 'HEAD (Working Tree)';
@@ -1558,6 +1576,9 @@ resourcestring
   rsTreeThreadsDone = ' · review comments, all resolved';
 
 const
+  { The rows of the sidebar's pages (umain.repopage.inc). }
+  navHome = 0;
+  navRepository = 1;
   { Scrolling on past the bottom of a file goes to the next one, and
     past the top to the previous: the wheel delta the pull needs (120 is
     one notch of a mouse wheel, 8 one pixel of a trackpad on macOS), the
@@ -1971,6 +1992,12 @@ begin
   FWelcome.SetIcon(FAppIcon);
   FWelcome.OnOpen := @WelcomeOpen;
   FWelcome.OnOpenRecent := @WelcomeOpenRecent;
+  { The Repository page shares the box too; its links open as the
+    summary's do. }
+  FRepoPage := TGittanRepoPage.Create(Self);
+  FRepoPage.Parent := FSummaryBox;
+  FRepoPage.Visible := False;
+  FRepoPage.OnOpenUrl := @SummaryOpenUrl;
   { The notice over the form, with the same icon. }
   FNotice := TGittanNotice.Create(Self);
   FNotice.Parent := Self;
@@ -2376,6 +2403,9 @@ begin
     FWelcome.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(45, 45, 46), RGBToColor(85, 85, 86),
       RGBToColor(248, 81, 73));
+    FRepoPage.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(62, 62, 62),
+      FLinkColor, FLinkColor, RGBToColor(248, 81, 73));
   end
   else
   begin
@@ -2385,6 +2415,9 @@ begin
     FWelcome.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(243, 243, 243), RGBToColor(205, 205, 205),
       RGBToColor(207, 34, 46));
+    FRepoPage.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(222, 222, 222),
+      FLinkColor, FLinkColor, RGBToColor(207, 34, 46));
   end;
   if FRepoHeader <> nil then
     ColorRepoHeader;
@@ -2697,6 +2730,7 @@ begin
   ViewMenu.Caption := rsView;
   Main.Items.Add(ViewMenu);
   AddItem(ViewMenu, rsSummary, ShortCut(VK_1, [ssModifier]), @MenuSummaryClick);
+  AddItem(ViewMenu, rsRepoInfo, ShortCut(VK_I, [ssModifier, ssShift]), @MenuRepoInfoClick);
   AddItem(ViewMenu, rsRepoDiff, ShortCut(VK_2, [ssModifier]), @MenuRepoDiffClick);
   AddItem(ViewMenu, rsCommitGraph, ShortCut(VK_3, [ssModifier]), @MenuCommitGraphClick);
   ViewMenu.Add(NewLine);
@@ -3888,6 +3922,15 @@ begin
     Texts);
   FWelcome.Visible := False;
   FSummary.Visible := True;
+  { The Repository page keeps the box, and reads the repository again,
+    since the snapshot says it changed. }
+  if FView = gvRepoInfo then
+  begin
+    FSummary.Visible := False;
+    FRepoPage.SetRepository(ExtractFileName(FRepo.Root), FRepo.Root);
+    FRepoPage.Visible := True;
+    StartRepoInfoJob;
+  end;
   RebuildCompareMenu;
   FTerminalItem.Enabled := FRepo.Root <> '';
   UpdateBranchItems;
@@ -4105,6 +4148,31 @@ end;
   view of one file or of the raw repository diff. }
 procedure TForm1.ShowSummary;
 begin
+  LeaveEditorViews;
+  FSummaryBox.Visible := True;
+  FView := gvSummary;
+  { The Repository page gives the box back. }
+  if FRepoPage.Visible then
+  begin
+    FRepoPage.Visible := False;
+    FSummary.Visible := FRepo.Root <> '';
+  end;
+  if FRepo.Root <> '' then
+    FSideNav.Selected := navHome
+  else
+    FSideNav.Selected := -1;
+  FStatus.SetPosition('');
+  { A file picked again after the summary must fire the selection event. }
+  FileTree.Selected := nil;
+  FRepoTree.Selected := nil;
+  FSubTree.Selected := nil;
+  if FRepo.Root <> '' then
+    UpdateStatus;
+end;
+
+{ Hides the editor and what goes with it, for a page in the box. }
+procedure TForm1.LeaveEditorViews;
+begin
   FlushEdit;
   LeaveEdit;
   Edit.Visible := False;
@@ -4116,16 +4184,7 @@ begin
   FHeader.Visible := False;
   FFindBar.Visible := False;
   FSymbolBar.Visible := False;
-  FSummaryBox.Visible := True;
   AbandonHistoryJob;
-  FView := gvSummary;
-  FStatus.SetPosition('');
-  { A file picked again after the summary must fire the selection event. }
-  FileTree.Selected := nil;
-  FRepoTree.Selected := nil;
-  FSubTree.Selected := nil;
-  if FRepo.Root <> '' then
-    UpdateStatus;
 end;
 
 { FView is set before the call: the layout depends on it. }
@@ -4137,6 +4196,7 @@ begin
   { The symbol bar lists the file shown before. }
   FSymbolBar.Visible := False;
   FSummaryBox.Visible := False;
+  FSideNav.Selected := -1;
   FImageDiff.Visible := False;
   FBinaryView.Visible := False;
   FHeader.Visible := True;
@@ -4166,6 +4226,7 @@ begin
   FSymbolBar.Visible := False;
   FFindBar.Visible := False;
   FSummaryBox.Visible := False;
+  FSideNav.Selected := -1;
   FBinaryView.Visible := False;
   Edit.Visible := False;
   HideMarkdownPreview;
@@ -4193,6 +4254,7 @@ begin
   FSymbolBar.Visible := False;
   FFindBar.Visible := False;
   FSummaryBox.Visible := False;
+  FSideNav.Selected := -1;
   FImageDiff.Visible := False;
   Edit.Visible := False;
   HideMarkdownPreview;
@@ -4225,6 +4287,7 @@ begin
   FSymbolBar.Visible := False;
   FFindBar.Visible := False;
   FSummaryBox.Visible := False;
+  FSideNav.Selected := -1;
   FImageDiff.Visible := False;
   Edit.Visible := False;
   HideMarkdownPreview;
@@ -4241,6 +4304,7 @@ procedure TForm1.SummaryBoxResize(Sender: TObject);
 begin
   FSummary.FitHeight(FSummaryBox.ClientHeight);
   FWelcome.FitHeight(FSummaryBox.ClientHeight);
+  FRepoPage.FitHeight(FSummaryBox.ClientHeight);
 end;
 
 { The welcome view takes the summary's place in the box, with AError
@@ -4249,7 +4313,12 @@ end;
 procedure TForm1.ShowWelcome(const AError: string);
 begin
   FWelcome.SetError(AError);
+  AbandonRepoInfoJob;
   FSummary.Visible := False;
+  FRepoPage.Visible := False;
+  { At startup the sidebar is not built yet. }
+  if FSideNav <> nil then
+    FSideNav.Selected := -1;
   FWelcome.Visible := True;
   FWelcome.FitHeight(FSummaryBox.ClientHeight);
 end;
@@ -4582,6 +4651,7 @@ begin
   FTreeFilter.OnChange := @TreeFilterChange;
   FTreeFilter.OnKeyDown := @TreeFilterKeyDown;
   FTreeFilter.Parent := FTreePanel;
+  SetupSideNav;
   FileTree.Parent := FTreePanel;
   FileTree.Align := alClient;
 end;
@@ -4655,9 +4725,9 @@ begin
   InstallTitleBar(Self, TGittanGtkTitleBar(FOwnBar));
   {$ENDIF}
   FTreeFilter.BorderSpacing.Top := FTitleBarHeight;
-  { With the toolbar's field in its place the tree is at the top. }
+  { With the toolbar's field in its place the page rows are at the top. }
   if not FTreeFilter.Visible then
-    FileTree.BorderSpacing.Top := FTitleBarHeight;
+    FSideNav.BorderSpacing.Top := FTitleBarHeight;
   FHeader.BorderSpacing.Top := FTitleBarHeight;
   FSummaryBox.BorderSpacing.Top := FTitleBarHeight;
   TreeSplitter.BorderSpacing.Top := FTitleBarHeight;
@@ -4706,6 +4776,12 @@ begin
   FTreePanel.Color := Shade;
   Color := Shade;
   FileTree.BackgroundColor := Shade;
+  if FDark then
+    FSideNav.SetColors(Shade, Edit.Colors.TextFont, RGBToColor(150, 150, 150),
+      RGBToColor(50, 50, 51), RGBToColor(62, 62, 64))
+  else
+    FSideNav.SetColors(Shade, RGBToColor(30, 30, 30), RGBToColor(110, 110, 110),
+      RGBToColor(235, 235, 235), RGBToColor(222, 222, 224));
   if FRepoTree <> nil then
     FRepoTree.BackgroundColor := Shade;
   if FSubTree <> nil then
@@ -4996,6 +5072,7 @@ const
 {$I umain.index.inc}
 {$I umain.history.inc}
 {$I umain.repofiles.inc}
+{$I umain.repopage.inc}
 {$I umain.submodules.inc}
 {$I umain.update.inc}
 {$I umain.reviews.inc}
