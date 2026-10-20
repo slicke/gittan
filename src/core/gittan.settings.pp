@@ -15,6 +15,9 @@ uses
 const
   {** How many repositories File > Open Recent lists. }
   MaxRecent = 10;
+  {** The width of a tab in the editor when none was picked: git's own,
+    what a diff shows in a terminal and on GitHub. }
+  DefaultTabSize = 8;
   {** The editor font when none was picked: the platform's own monospaced
     font (what Terminal and Xcode, Visual Studio or the desktop use). }
   DefaultFontName = {$IFDEF DARWIN}'Menlo'{$ELSE}{$IFDEF WINDOWS}'Consolas'
@@ -84,6 +87,16 @@ type
     {** Command that opens a terminal, with the repository root appended;
       empty opens the platform's default terminal. }
     TerminalCommand: string;
+    {** The width of a tab in the editor, in characters; 0 for the
+      default (DefaultTabSize). }
+    TabSize: integer;
+    {** The git to run, as a path to it; empty runs the git found on
+      ToolSearchPath (see gittan.git). }
+    GitPath: string;
+    {** gh, GitHub's command line tool, as a path to it; empty runs the
+      gh found on ToolSearchPath, and when there is none the features
+      that need GitHub are off. }
+    GhPath: string;
     {** The day until which a newer Gittan is not pointed out, 0 for no
       such wait: Remind Me Later in the update dialog sets it. Kept as a
       date alone. }
@@ -117,6 +130,7 @@ const
   SecRecent = 'Recent';
   SecUpdate = 'Update';
   SecCommit = 'Commit';
+  SecTools = 'Tools';
   ConfigFolder = 'Gittan';
 
 {** The folder the ini file lives in. GetAppConfigDir names it after
@@ -244,6 +258,9 @@ begin
       SyntaxTheme := Ini.ReadString(SecView, 'SyntaxTheme', '');
       EditorCommand := Ini.ReadString(SecView, 'EditorCommand', '');
       TerminalCommand := Ini.ReadString(SecView, 'TerminalCommand', '');
+      TabSize := Ini.ReadInteger(SecView, 'TabSize', 0);
+      GitPath := Ini.ReadString(SecTools, 'Git', '');
+      GhPath := Ini.ReadString(SecTools, 'Gh', '');
       UpdateSnoozedUntil := ReadDay(Ini.ReadString(SecUpdate, 'SnoozedUntil', ''));
       FRecent.Clear;
       for i := 0 to MaxRecent - 1 do
@@ -300,6 +317,9 @@ begin
       Ini.WriteString(SecView, 'SyntaxTheme', SyntaxTheme);
       Ini.WriteString(SecView, 'EditorCommand', EditorCommand);
       Ini.WriteString(SecView, 'TerminalCommand', TerminalCommand);
+      Ini.WriteInteger(SecView, 'TabSize', TabSize);
+      Ini.WriteString(SecTools, 'Git', GitPath);
+      Ini.WriteString(SecTools, 'Gh', GhPath);
       if UpdateSnoozedUntil > 0 then
         Ini.WriteString(SecUpdate, 'SnoozedUntil',
           FormatDateTime('yyyy"-"mm"-"dd', UpdateSnoozedUntil))

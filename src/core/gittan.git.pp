@@ -499,6 +499,15 @@ function ToolSearchPath: string;
   way too, wherever nvm, fnm, Volta or Homebrew put it. }
 function FindTool(const AName: string): string;
 
+{** Makes git run by the path APath, or, with APath empty, by the one
+  FindTool gives (plain git when it finds none, so the error names it).
+  Called at start with the setting and again when the setting changes:
+  a git started after that runs by the new path. }
+procedure SetGitExe(const APath: string);
+
+{** The path git runs by. }
+function GitExe: string;
+
 {** The bin folder of the node that nvm in ANvmDir (~/.nvm, or NVM_DIR)
   runs by default: the version its alias "default" names, followed
   through the alias files (default → lts/* → lts/krypton → v24.21.0), a
@@ -579,10 +588,32 @@ uses
 var
   GToolPath: string;
   GGitExe: string;
+  { The paths git ran by before: kept, so that a thread starting git while
+    the main thread changes the path copies a string that is not freed. }
+  GOldGitExes: TStringList;
 
 function ToolSearchPath: string;
 begin
   Result := GToolPath;
+end;
+
+procedure SetGitExe(const APath: string);
+begin
+  if GGitExe <> '' then
+    GOldGitExes.Add(GGitExe);
+  if APath <> '' then
+    GGitExe := APath
+  else
+  begin
+    GGitExe := FindTool('git');
+    if GGitExe = '' then
+      GGitExe := 'git';
+  end;
+end;
+
+function GitExe: string;
+begin
+  Result := GGitExe;
 end;
 
 { Whether the folder name A ("v24.21.0") is a newer node version than
@@ -3272,7 +3303,9 @@ end;
 
 initialization
   GToolPath := MakeToolPath;
-  GGitExe := FindTool('git');
-  if GGitExe = '' then
-    GGitExe := 'git';
+  GOldGitExes := TStringList.Create;
+  SetGitExe('');
+
+finalization
+  GOldGitExes.Free;
 end.

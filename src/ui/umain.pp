@@ -111,11 +111,16 @@ type
     { The editor's font size when none was picked (DefaultFontSize for
       the screen the window opened on). }
     FDefaultFontSize: integer;
-    { gh, GitHub's command line tool, as found at startup: its full path
-      (run it by that, PATH may not reach it) and whether there is one.
-      The features that need GitHub are offered only when it is there. }
+    { gh, GitHub's command line tool: the path the settings give, else
+      the one FindTool gives (run it by that, PATH may not reach it), and
+      whether there is one. The features that need GitHub are offered
+      only when it is there: the menu items in FGitHubItems are shown
+      then, hidden otherwise (UpdateGitHubItems). }
     FGitHubCli: string;
     FHasGitHubCli: boolean;
+    FGitHubItems: array of TMenuItem;
+    { The width of a tab in the editors, in characters. }
+    FTabSize: integer;
     FSyntaxMenu, FAutoLexerItem, FPlainTextItem: TMenuItem;
     FRecentMenu, FCompareMenu, FTerminalItem, FUninstallCliItem: TMenuItem;
     FSnapshots: TGittanSnapshots;
@@ -800,8 +805,11 @@ type
     procedure MenuZoomResetClick(Sender: TObject);
     procedure MenuFontClick(Sender: TObject);
     procedure MenuSettingsClick(Sender: TObject);
-    procedure PreviewSettings(AFont: TFont; ATheme: integer);
+    procedure PreviewSettings(AFont: TFont; ATheme, ATabSize: integer);
     procedure ApplyEditorFont(AFont: TFont);
+    procedure ApplyTabSize(ASize: integer);
+    procedure FindGitHubCli;
+    procedure UpdateGitHubItems;
     procedure MenuWrapClick(Sender: TObject);
     procedure MenuFoldClick(Sender: TObject);
     procedure ViewMenuClick(Sender: TObject);
@@ -1782,8 +1790,11 @@ procedure TForm1.FormCreate(Sender: TObject);
 begin
   FSettings := TGittanSettings.Create;
   FSettings.Load;
-  FGitHubCli := FindTool('gh');
-  FHasGitHubCli := FGitHubCli <> '';
+  SetGitExe(FSettings.GitPath);
+  FindGitHubCli;
+  FTabSize := FSettings.TabSize;
+  if FTabSize <= 0 then
+    FTabSize := DefaultTabSize;
   FChangeLines := TStringList.Create;
   FHotDiscard := -1;
   FHotRow := -1;
@@ -2174,6 +2185,7 @@ begin
   InitEditorMouseActions(Actions, True);
   AEd.MouseActions := Actions;
   AEd.OptNumbersStyle := TATEditorNumbersStyle.All;
+  AEd.OptTabSize := FTabSize;
   AEd.GutterDecorAlignment := taRightJustify;
   AEd.OnChangeZoom := @EditChangeZoom;
   AEd.OnCalcBookmarkColor := @EditCalcBookmarkColor;
@@ -4922,19 +4934,11 @@ var
 begin
   if FTreePanel = nil then
     Exit;
-  if FDark then
-    Shade := RGBToColor(37, 37, 38)
-  else
-    Shade := RGBToColor(246, 246, 246);
+  Shade := SidebarShade(FDark);
   FTreePanel.Color := Shade;
   Color := Shade;
   FileTree.BackgroundColor := Shade;
-  if FDark then
-    FSideNav.SetColors(Shade, Edit.Colors.TextFont, RGBToColor(150, 150, 150),
-      RGBToColor(50, 50, 51), RGBToColor(62, 62, 64), RGBToColor(62, 62, 62))
-  else
-    FSideNav.SetColors(Shade, RGBToColor(30, 30, 30), RGBToColor(110, 110, 110),
-      RGBToColor(235, 235, 235), RGBToColor(222, 222, 224), RGBToColor(222, 222, 222));
+  ThemeSideNav(FSideNav, FDark, Edit.Colors.TextFont);
   if FRepoTree <> nil then
     FRepoTree.BackgroundColor := Shade;
   if FSubTree <> nil then

@@ -1,9 +1,12 @@
 unit gittan.settingsdlg;
 
 {** The settings dialog (Gittan > Settings on macOS, Tools > Settings
-  elsewhere): the editor font and its size, the syntax theme, and the
-  commands Open in Editor and Open in Terminal run. The other view options
-  are in the View menu, and the window remembers its own state.
+  elsewhere), in two pages picked in a sidebar of the main window's kind,
+  as the system's settings have: Editor, the editor font and its size,
+  the width of a tab and the syntax theme, with a sample; and Tools, the
+  commands Open in Editor and Open in Terminal run, and the git and gh to
+  run in place of those found on PATH. The other view options are in the
+  View menu, and the window remembers its own state.
 
   The font and the theme are previewed twice: in the main editor, where
   every change goes at once through the caller's preview handler, which puts
@@ -18,33 +21,47 @@ interface
 
 uses
   Classes, SysUtils, Types, Forms, Controls, Graphics, Dialogs, StdCtrls,
-  ExtCtrls, Spin, ATSynEdit, gittan.lexers;
+  ExtCtrls, Spin, ATSynEdit, gittan.lexers, gittan.sidenav;
 
 type
-  {** Shows AFont and the theme ATheme (an index into SyntaxThemes) in the
-    editor while the dialog is open. }
-  TSettingsPreview = procedure(AFont: TFont; ATheme: integer) of object;
+  {** Shows AFont, the theme ATheme (an index into SyntaxThemes) and a tab
+    ATabSize characters wide in the editor while the dialog is open. }
+  TSettingsPreview = procedure(AFont: TFont; ATheme, ATabSize: integer) of object;
 
-{** Shows the dialog with AFont, ATheme, AEditor and ATerminal in it, its
-  bottom right corner at ACorner (screen coordinates) so the code in the
-  middle of the window stays in view. APreview gets every change of the
-  font or theme. The sample editor takes its lexers from ALexers and its
+  {** What the dialog edits besides the font. }
+  TSettingsValues = record
+    {** An index into SyntaxThemes. }
+    Theme: integer;
+    TabSize: integer;
+    EditorCommand, TerminalCommand: string;
+    {** Paths of git and gh; empty for the ones found on PATH. }
+    GitPath, GhPath: string;
+  end;
+
+{** Shows the dialog with AFont and AValues in it, its bottom right corner
+  at ACorner (screen coordinates) so the code in the middle of the window
+  stays in view. APreview gets every change of the font, the theme or the
+  tab width. The sample editor takes its lexers from ALexers and its
   colors and zoom from ATemplate, the main editor. On OK the arguments are
   changed and the result is True; on Cancel they are left alone, and the
   caller undoes the preview. }
-function EditSettings(AFont: TFont; var ATheme: integer;
-  var AEditor, ATerminal: string; APreview: TSettingsPreview;
-  ALexers: TGittanLexers; ATemplate: TATSynEdit; ACorner: TPoint): boolean;
+function EditSettings(AFont: TFont; var AValues: TSettingsValues;
+  APreview: TSettingsPreview; ALexers: TGittanLexers; ATemplate: TATSynEdit;
+  ACorner: TPoint): boolean;
 
 implementation
 
 uses
-  ec_SyntAnal, ATSynEdit_Adapter_EControl, ATSynEdit_Globals, gittan.syntaxthemes;
+  Math, ec_SyntAnal, ATSynEdit_Adapter_EControl, ATSynEdit_Globals,
+  gittan.syntaxthemes, gittan.git, gittan.theme;
 
 resourcestring
   rsSettingsTitle = 'Settings';
+  rsEditorPage = 'Editor';
+  rsToolsPage = 'Tools';
   rsEditorFont = 'Editor font';
   rsChangeFont = '&Change...';
+  rsTabWidth = 'Tab width';
   rsSyntaxTheme = 'Syntax theme';
   rsPreview = 'Preview';
   rsEditorCommand = 'Open in Editor command';
@@ -61,16 +78,32 @@ resourcestring
   {$ENDIF}
   {$ENDIF}
   rsTerminalNote = 'The repository''s folder is appended.';
+  rsGitPath = 'git';
+  rsGitDefault = 'The git on PATH';
+  rsGhPath = 'gh, GitHub''s command line tool';
+  rsGhDefault = 'The gh on PATH';
+  rsToolFound = 'Found: %s';
+  rsToolNotFound = 'Not found on PATH.';
+  rsGhNotFound = 'Not found on PATH; the GitHub features are off.';
+  rsToolTyped = 'Run in place of the one on PATH.';
+  rsToolMissing = 'There is no such file.';
   rsOK = 'OK';
   rsCancel = 'Cancel';
 
 const
   MinFontSize = 6;
   MaxFontSize = 72;
+  MinTabSize = 1;
+  MaxTabSize = 16;
   {** What the size field shows for a font of the default size (0). }
   DefaultFontSize = 13;
   {** The sample editor's height at 96 dpi: about a dozen lines. }
   SampleHeight = 210;
+  {** The sidebar's width at 96 dpi, and the space around the content. }
+  NavWidth = 150;
+  ContentMargin = 16;
+  {** The content's least width at 96 dpi: the sample's lines. }
+  ContentWidth = 500;
 
 type
   TSample = record
@@ -171,9 +204,17 @@ type
   private
     FFont: TFont;
     FFontLabel: TLabel;
-    FSizeEdit: TSpinEdit;
+    FSizeEdit, FTabEdit: TSpinEdit;
     FThemeBox: TComboBox;
-    FEditorEdit, FTerminalEdit: TEdit;
+    FEditorEdit, FTerminalEdit, FGitEdit, FGhEdit: TEdit;
+    FGitNote, FGhNote: TLabel;
+    { The sidebar with a row per page, and the content beside it: the
+      box of each page, which sizes itself, one shown at a time, and the
+      buttons under them. FBox is the one Place puts controls in. }
+    FNavPanel, FContent: TPanel;
+    FNav: TGittanSideNav;
+    FEditorBox, FToolsBox: TPanel;
+    FBox: TWinControl;
     FPreview: TSettingsPreview;
     FNextTop: integer;
     FLoading: boolean;
@@ -190,11 +231,19 @@ type
     function AddEdit(const AHint: string): TEdit;
     function AddButton(ARow: TPanel; const ACaption: string;
       AResult: TModalResult): TButton;
+    function AddPage(const ACaption: string; AIcon: TGittanNavIcon): TPanel;
+    procedure NavPick(Sender: TObject; AIndex: integer);
+    procedure ShowPage(AIndex: integer);
+    procedure ApplyTheme;
+    function AddTool(const ACaption, AHint: string; out ANote: TLabel): TEdit;
     procedure ShowFont;
     procedure Preview;
     procedure ChangeFontClick(Sender: TObject);
     procedure SizeChange(Sender: TObject);
+    procedure TabChange(Sender: TObject);
     procedure ThemeChange(Sender: TObject);
+    procedure ToolChange(Sender: TObject);
+    procedure ShowTool(AEdit: TEdit; ANote: TLabel; const AName, ANotFound: string);
     procedure SampleClick(Sender: TObject);
     procedure ShowSample;
     procedure StyleSample;
@@ -209,6 +258,7 @@ type
 constructor TSettingsForm.Create(AOwner: TComponent);
 var
   Row: TPanel;
+  Lbl: TLabel;
   Btn, OK, Cancel: TButton;
   i: integer;
 begin
@@ -218,12 +268,37 @@ begin
   BorderStyle := bsDialog;
   Position := poDesigned;
   AutoSize := True;
-  Constraints.MinWidth := Scale96ToScreen(520);
-  ChildSizing.LeftRightSpacing := Scale96ToScreen(16);
-  ChildSizing.TopBottomSpacing := Scale96ToScreen(12);
 
-  { The name, then the size and Change... on the right, which alRight
-    orders by Left. }
+  { The sidebar down the left, as high as the form, and the content
+    beside it, which sizes itself and so the form (alLeft for both, so
+    the form takes their widths; the sidebar's shade is set in
+    ApplyTheme). }
+  FNavPanel := TPanel.Create(Self);
+  FNavPanel.BevelOuter := bvNone;
+  FNavPanel.Align := alLeft;
+  FNavPanel.Left := 0;
+  FNavPanel.Width := Scale96ToScreen(NavWidth);
+  FNavPanel.Parent := Self;
+  FNav := TGittanSideNav.Create(Self);
+  FNav.Align := alTop;
+  FNav.BorderSpacing.Top := Scale96ToScreen(8);
+  FNav.OnPick := @NavPick;
+  FNav.Parent := FNavPanel;
+  FContent := TPanel.Create(Self);
+  FContent.BevelOuter := bvNone;
+  FContent.AutoSize := True;
+  FContent.Align := alLeft;
+  FContent.Left := 1000;
+  FContent.Constraints.MinWidth := Scale96ToScreen(ContentWidth);
+  FContent.ChildSizing.LeftRightSpacing := Scale96ToScreen(ContentMargin);
+  FContent.ChildSizing.TopBottomSpacing := Scale96ToScreen(ContentMargin);
+  FContent.Parent := Self;
+  FEditorBox := AddPage(rsEditorPage, niEditor);
+  FToolsBox := AddPage(rsToolsPage, niTools);
+
+  { The Editor page: the font's name, then the size and Change... on the
+    right, which alRight orders by Left. }
+  FBox := FEditorBox;
   AddLabel(rsEditorFont, 0);
   Row := AddRow(4);
   Btn := TButton.Create(Self);
@@ -246,6 +321,23 @@ begin
   FFontLabel.Align := alClient;
   FFontLabel.Layout := tlCenter;
   FFontLabel.Parent := Row;
+
+  { The tab width beside its label. }
+  Row := AddRow(12);
+  Lbl := TLabel.Create(Self);
+  Lbl.Caption := rsTabWidth;
+  Lbl.Align := alLeft;
+  Lbl.Layout := tlCenter;
+  Lbl.Parent := Row;
+  FTabEdit := TSpinEdit.Create(Self);
+  FTabEdit.MinValue := MinTabSize;
+  FTabEdit.MaxValue := MaxTabSize;
+  FTabEdit.Width := Scale96ToScreen(64);
+  FTabEdit.Align := alLeft;
+  FTabEdit.Left := 1000;
+  FTabEdit.BorderSpacing.Left := Scale96ToScreen(8);
+  FTabEdit.OnChange := @TabChange;
+  FTabEdit.Parent := Row;
 
   AddLabel(rsSyntaxTheme, 16);
   FThemeBox := TComboBox.Create(Self);
@@ -293,7 +385,10 @@ begin
   FAdapter := TATAdapterEControl.Create(Self);
   FAdapter.AddEditor(FSampleEdit);
 
-  AddLabel(rsEditorCommand, 16);
+  { The Tools page: each command with a note on what an empty field does,
+    each tool with a note on what will run (ShowTool). }
+  FBox := FToolsBox;
+  AddLabel(rsEditorCommand, 0);
   FEditorEdit := AddEdit(rsEditorDefault);
   AddLabel(rsEditorNote, 4).Font.Color := clGrayText;
 
@@ -301,8 +396,12 @@ begin
   FTerminalEdit := AddEdit(rsTerminalDefault);
   AddLabel(rsTerminalNote, 4).Font.Color := clGrayText;
 
+  FGitEdit := AddTool(rsGitPath, rsGitDefault, FGitNote);
+  FGhEdit := AddTool(rsGhPath, rsGhDefault, FGhNote);
+
   { OK on the right on macOS, Cancel on the right elsewhere. }
-  Row := AddRow(20);
+  FBox := FContent;
+  Row := AddRow(16);
   OK := AddButton(Row, rsOK, mrOK);
   OK.Default := True;
   Cancel := AddButton(Row, rsCancel, mrCancel);
@@ -326,23 +425,93 @@ begin
   inherited Destroy;
 end;
 
-{ The form has its size once it has laid itself out, just before it shows. }
+{ The content has its size once the form has laid itself out, just before
+  it shows: both pages are held at the height of the taller (the one not
+  shown has its preferred height, not a laid out one), so the form keeps
+  its size when the page changes, and goes to its corner. }
 procedure TSettingsForm.DoShow;
+var
+  W, H, Tallest: integer;
 begin
   inherited DoShow;
+  FToolsBox.GetPreferredSize(W, H, False, True);
+  Tallest := Max(FEditorBox.Height, H);
+  FEditorBox.Constraints.MinHeight := Tallest;
+  FToolsBox.Constraints.MinHeight := Tallest;
   SetBounds(FCorner.X - Width, FCorner.Y - Height, Width, Height);
   MakeFullyVisible;
 end;
 
-{ Puts AControl under the ones placed before it: alTop stacks controls by
-  their Top. }
+{ Puts AControl under the ones placed before it in FBox: alTop stacks
+  controls by their Top. }
 procedure TSettingsForm.Place(AControl: TControl; ASpaceAbove: integer);
 begin
   AControl.Align := alTop;
   AControl.BorderSpacing.Top := Scale96ToScreen(ASpaceAbove);
   Inc(FNextTop, 1000);
   AControl.Top := FNextTop;
-  AControl.Parent := Self;
+  AControl.Parent := FBox;
+end;
+
+{ A row in the sidebar and a box in the content for a page, which sizes
+  itself to what Place puts in it; the first page is the one shown. }
+function TSettingsForm.AddPage(const ACaption: string; AIcon: TGittanNavIcon): TPanel;
+var
+  Index: integer;
+begin
+  Index := FNav.AddRow(ACaption, AIcon);
+  FBox := FContent;
+  Result := TPanel.Create(Self);
+  Result.BevelOuter := bvNone;
+  Result.AutoSize := True;
+  Result.Visible := Index = 0;
+  Place(Result, 0);
+  if Index = 0 then
+    FNav.Selected := 0;
+end;
+
+procedure TSettingsForm.NavPick(Sender: TObject; AIndex: integer);
+begin
+  ShowPage(AIndex);
+end;
+
+{ Shows the page's box over the buttons: a box that was hidden kept the
+  Top it was placed with, past the buttons' laid out one, so it goes to
+  0 first (alTop orders by Top). The form is laid out once, at the end. }
+procedure TSettingsForm.ShowPage(AIndex: integer);
+var
+  Box: TPanel;
+begin
+  DisableAutoSizing;
+  try
+    FEditorBox.Visible := False;
+    FToolsBox.Visible := False;
+    if AIndex = 0 then
+      Box := FEditorBox
+    else
+      Box := FToolsBox;
+    Box.Top := 0;
+    Box.Visible := True;
+  finally
+    EnableAutoSizing;
+  end;
+  FNav.Selected := AIndex;
+end;
+
+{ The sidebar in the main window's shade, its rows in the editor's text
+  color in dark mode. }
+procedure TSettingsForm.ApplyTheme;
+var
+  Dark: boolean;
+  TextColor: TColor;
+begin
+  Dark := IsDarkMode;
+  FNavPanel.Color := SidebarShade(Dark);
+  if FTemplate <> nil then
+    TextColor := FTemplate.Colors.TextFont
+  else
+    TextColor := clWindowText;
+  ThemeSideNav(FNav, Dark, TextColor);
 end;
 
 function TSettingsForm.AddRow(ASpaceAbove: integer): TPanel;
@@ -379,6 +548,18 @@ begin
   Result.Parent := ARow;
 end;
 
+{ A label, the field (OnChange refreshes the note) and the note, which
+  wraps when a path is long. }
+function TSettingsForm.AddTool(const ACaption, AHint: string; out ANote: TLabel): TEdit;
+begin
+  AddLabel(ACaption, 16);
+  Result := AddEdit(AHint);
+  Result.OnChange := @ToolChange;
+  ANote := AddLabel('', 4);
+  ANote.Font.Color := clGrayText;
+  ANote.WordWrap := True;
+end;
+
 { The name in the label and the size in its field, without previewing. }
 procedure TSettingsForm.ShowFont;
 begin
@@ -399,7 +580,7 @@ begin
   if FLoading then
     Exit;
   if Assigned(FPreview) then
-    FPreview(FFont, FThemeBox.ItemIndex);
+    FPreview(FFont, FThemeBox.ItemIndex, FTabEdit.Value);
   StyleSample;
 end;
 
@@ -415,6 +596,7 @@ begin
     FSampleEdit.OptScaleFont := FTemplate.OptScaleFont;
   end;
   FSampleEdit.Font.Assign(FFont);
+  FSampleEdit.OptTabSize := FTabEdit.Value;
   Lexer := FAdapter.Lexer;
   FAdapter.Lexer := nil;
   SetLexer(Lexer);
@@ -489,14 +671,53 @@ begin
   Preview;
 end;
 
+{ A width typed out of range is left until it is in range again. }
+procedure TSettingsForm.TabChange(Sender: TObject);
+begin
+  if (FTabEdit.Value < MinTabSize) or (FTabEdit.Value > MaxTabSize) then
+    Exit;
+  Preview;
+end;
+
 procedure TSettingsForm.ThemeChange(Sender: TObject);
 begin
   Preview;
 end;
 
-function EditSettings(AFont: TFont; var ATheme: integer;
-  var AEditor, ATerminal: string; APreview: TSettingsPreview;
-  ALexers: TGittanLexers; ATemplate: TATSynEdit; ACorner: TPoint): boolean;
+procedure TSettingsForm.ToolChange(Sender: TObject);
+begin
+  if Sender = FGitEdit then
+    ShowTool(FGitEdit, FGitNote, 'git', rsToolNotFound)
+  else
+    ShowTool(FGhEdit, FGhNote, 'gh', rsGhNotFound);
+end;
+
+{ The note under AEdit for the tool AName: with the field empty, where
+  the tool is found on PATH or ANotFound; with a path typed, whether that
+  file exists. }
+procedure TSettingsForm.ShowTool(AEdit: TEdit; ANote: TLabel;
+  const AName, ANotFound: string);
+var
+  Path: string;
+begin
+  Path := Trim(AEdit.Text);
+  if Path = '' then
+  begin
+    Path := FindTool(AName);
+    if Path <> '' then
+      ANote.Caption := Format(rsToolFound, [Path])
+    else
+      ANote.Caption := ANotFound;
+  end
+  else if FileExists(Path) then
+    ANote.Caption := rsToolTyped
+  else
+    ANote.Caption := rsToolMissing;
+end;
+
+function EditSettings(AFont: TFont; var AValues: TSettingsValues;
+  APreview: TSettingsPreview; ALexers: TGittanLexers; ATemplate: TATSynEdit;
+  ACorner: TPoint): boolean;
 var
   F: TSettingsForm;
 begin
@@ -505,22 +726,31 @@ begin
     F.FFont.Assign(AFont);
     F.ShowFont;
     F.FLoading := True;
-    F.FThemeBox.ItemIndex := ATheme;
+    F.FThemeBox.ItemIndex := AValues.Theme;
+    F.FTabEdit.Value := AValues.TabSize;
     F.FLoading := False;
-    F.FEditorEdit.Text := AEditor;
-    F.FTerminalEdit.Text := ATerminal;
+    F.FEditorEdit.Text := AValues.EditorCommand;
+    F.FTerminalEdit.Text := AValues.TerminalCommand;
+    F.FGitEdit.Text := AValues.GitPath;
+    F.FGhEdit.Text := AValues.GhPath;
+    F.ToolChange(F.FGitEdit);
+    F.ToolChange(F.FGhEdit);
     F.FPreview := APreview;
     F.FLexers := ALexers;
     F.FTemplate := ATemplate;
+    F.ApplyTheme;
     F.ShowSample;
     F.FCorner := ACorner;
     Result := F.ShowModal = mrOK;
     if Result then
     begin
       AFont.Assign(F.FFont);
-      ATheme := F.FThemeBox.ItemIndex;
-      AEditor := Trim(F.FEditorEdit.Text);
-      ATerminal := Trim(F.FTerminalEdit.Text);
+      AValues.Theme := F.FThemeBox.ItemIndex;
+      AValues.TabSize := F.FTabEdit.Value;
+      AValues.EditorCommand := Trim(F.FEditorEdit.Text);
+      AValues.TerminalCommand := Trim(F.FTerminalEdit.Text);
+      AValues.GitPath := Trim(F.FGitEdit.Text);
+      AValues.GhPath := Trim(F.FGhEdit.Text);
     end;
   finally
     F.Free;

@@ -1349,6 +1349,11 @@ begin
   end;
   AssertTrue(FindTool('git') <> '');
   AssertEquals('', FindTool('no-such-tool-gittan'));
+  AssertEquals('git runs by the git found', FindTool('git'), GitExe);
+  SetGitExe('/no/such/git');
+  AssertEquals('/no/such/git', GitExe);
+  SetGitExe('');
+  AssertEquals('back to the git found', FindTool('git'), GitExe);
   {$ifdef UNIX}
   MakeHistory;
   Git(['config', 'user.name', 'Gittan Test']);

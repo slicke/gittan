@@ -134,6 +134,9 @@ begin
   if FSettings.FontSize = FDefaultFontSize then
     FSettings.FontSize := 0;
   FSettings.Zoom := Edit.OptScaleFont;
+  FSettings.TabSize := FTabSize;
+  if FTabSize = DefaultTabSize then
+    FSettings.TabSize := 0;
   FSettings.WordWrap := FWordWrap;
   FSettings.OnlyChanges := FOnlyChanges;
   FSettings.ContextLines := FContextLines;
@@ -362,16 +365,18 @@ begin
   UpdateNumberWidth(FEditOld);
 end;
 
-{ The settings dialog previews the font and the theme in the editor and
-  puts back the old ones when it is cancelled; the commands are saved with
-  the rest when the window closes. }
+{ The settings dialog previews the font, the theme and the tab width in
+  the editor and puts back the old ones when it is cancelled; the commands
+  are saved with the rest when the window closes. A new git or gh runs
+  from here on: the repository is read again with it, and the GitHub
+  features follow whether gh is there now. }
 procedure TForm1.MenuSettingsClick(Sender: TObject);
 const
   Margin = 24;
 var
   OldFont, F: TFont;
-  OldTheme, Theme: integer;
-  EditorCmd, TerminalCmd: string;
+  OldTheme, OldTabSize: integer;
+  V: TSettingsValues;
   Corner: TPoint;
 begin
   OldFont := TFont.Create;
@@ -380,32 +385,91 @@ begin
     OldFont.Assign(Edit.Font);
     F.Assign(Edit.Font);
     OldTheme := FSyntaxTheme;
-    Theme := FSyntaxTheme;
-    EditorCmd := FSettings.EditorCommand;
-    TerminalCmd := FSettings.TerminalCommand;
+    OldTabSize := FTabSize;
+    V.Theme := FSyntaxTheme;
+    V.TabSize := FTabSize;
+    V.EditorCommand := FSettings.EditorCommand;
+    V.TerminalCommand := FSettings.TerminalCommand;
+    V.GitPath := FSettings.GitPath;
+    V.GhPath := FSettings.GhPath;
     Corner := EditorPanel.ClientToScreen(Point(EditorPanel.ClientWidth -
       Scale96ToForm(Margin), EditorPanel.ClientHeight - Scale96ToForm(Margin)));
-    if EditSettings(F, Theme, EditorCmd, TerminalCmd, @PreviewSettings, FLexers,
-      Edit, Corner) then
+    if EditSettings(F, V, @PreviewSettings, FLexers, Edit, Corner) then
     begin
-      PreviewSettings(F, Theme);
-      FSettings.EditorCommand := EditorCmd;
-      FSettings.TerminalCommand := TerminalCmd;
+      PreviewSettings(F, V.Theme, V.TabSize);
+      FSettings.EditorCommand := V.EditorCommand;
+      FSettings.TerminalCommand := V.TerminalCommand;
+      if (V.GitPath <> FSettings.GitPath) or (V.GhPath <> FSettings.GhPath) then
+      begin
+        FSettings.GitPath := V.GitPath;
+        FSettings.GhPath := V.GhPath;
+        SetGitExe(FSettings.GitPath);
+        FindGitHubCli;
+        UpdateGitHubItems;
+        if not FHasGitHubCli then
+        begin
+          { What the gh that is gone had found. }
+          AbandonPullJob;
+          FPullKey := '';
+          FHasPull := False;
+          FPulls := nil;
+          FPullError := '';
+          ClearReviews;
+        end;
+        MenuRefreshClick(nil);
+      end;
     end
     else
-      PreviewSettings(OldFont, OldTheme);
+      PreviewSettings(OldFont, OldTheme, OldTabSize);
   finally
     F.Free;
     OldFont.Free;
   end;
 end;
 
-procedure TForm1.PreviewSettings(AFont: TFont; ATheme: integer);
+procedure TForm1.PreviewSettings(AFont: TFont; ATheme, ATabSize: integer);
 begin
   if not Edit.Font.IsEqual(AFont) then
     ApplyEditorFont(AFont);
   if ATheme <> FSyntaxTheme then
     SetSyntaxTheme(ATheme);
+  ApplyTabSize(ATabSize);
+end;
+
+{ A tab ASize characters wide in both editors; the wrap follows, since
+  the width of a line changes with it. }
+procedure TForm1.ApplyTabSize(ASize: integer);
+begin
+  if ASize = FTabSize then
+    Exit;
+  FTabSize := ASize;
+  Edit.OptTabSize := ASize;
+  FEditOld.OptTabSize := ASize;
+  Edit.Update(True);
+  FEditOld.Update(True);
+end;
+
+{ gh by the path the settings give, else as found on ToolSearchPath. }
+procedure TForm1.FindGitHubCli;
+begin
+  if FSettings.GhPath <> '' then
+    FGitHubCli := FSettings.GhPath
+  else
+    FGitHubCli := FindTool('gh');
+  FHasGitHubCli := FGitHubCli <> '';
+end;
+
+{ Shows the menu items that need gh when there is one, hides them
+  otherwise. The Compare With menu and a commit's menu are built when
+  they open and look at the flag themselves. }
+procedure TForm1.UpdateGitHubItems;
+var
+  Item: TMenuItem;
+begin
+  for Item in FGitHubItems do
+    Item.Visible := FHasGitHubCli;
+  if FReviewItem <> nil then
+    FReviewItem.Enabled := FHasGitHubCli;
 end;
 
 procedure TForm1.MenuWrapClick(Sender: TObject);
@@ -755,6 +819,18 @@ var
     APopup.Items.Add(Result);
   end;
 
+  { An item (a separator with no caption) shown only when gh is there. }
+  function AddGitHubItem(APopup: TPopupMenu; const ACaption: string;
+    AClick: TNotifyEvent): TMenuItem;
+  begin
+    if ACaption = '' then
+      Result := AddItem(APopup, '-', nil)
+    else
+      Result := AddItem(APopup, ACaption, AClick);
+    SetLength(FGitHubItems, Length(FGitHubItems) + 1);
+    FGitHubItems[High(FGitHubItems)] := Result;
+  end;
+
 begin
   FFilePopup := TPopupMenu.Create(Self);
   FFilePopup.OnPopup := @FilePopupPopup;
@@ -765,11 +841,8 @@ begin
   FFilePopup.Items.Add(Item);
   FRevealItem := AddItem(FFilePopup, rsReveal, @MenuRevealClick);
   FOpenItem := AddItem(FFilePopup, rsOpenInEditor, @MenuOpenInEditorClick);
-  if FHasGitHubCli then
-  begin
-    AddItem(FFilePopup, rsOpenOnGitHub, @MenuOpenOnGitHubClick);
-    AddItem(FFilePopup, rsCopyGitHubUrl, @MenuCopyGitHubUrlClick);
-  end;
+  AddGitHubItem(FFilePopup, rsOpenOnGitHub, @MenuOpenOnGitHubClick);
+  AddGitHubItem(FFilePopup, rsCopyGitHubUrl, @MenuCopyGitHubUrlClick);
   Item := TMenuItem.Create(FFilePopup);
   Item.Caption := '-';
   FFilePopup.Items.Add(Item);
@@ -800,18 +873,14 @@ begin
   FResolveEditItem := AddItem(FEditPopup, rsResolveHere, @MenuResolveEditClick);
   FShowCommitItem := AddItem(FEditPopup, rsShowCommit, @MenuShowCommitClick);
   FCopyHashItem := AddItem(FEditPopup, rsCopyHash, @MenuCopyHashClick);
-  if FHasGitHubCli then
-  begin
-    Item := TMenuItem.Create(FEditPopup);
-    Item.Caption := '-';
-    FEditPopup.Items.Add(Item);
-    FGitHubEditItem := AddItem(FEditPopup, rsOpenOnGitHub, @MenuOpenLineOnGitHubClick);
-    AddItem(FEditPopup, rsCopyGitHubUrl, @MenuCopyLineGitHubUrlClick);
-    FGitHubCommitItem := AddItem(FEditPopup, rsOpenCommitOnGitHub,
-      @MenuOpenCommitOnGitHubClick);
-    FGitHubIssueItem := AddItem(FEditPopup, Format(rsOpenIssueOnGitHub, [0]),
-      @MenuOpenIssueOnGitHubClick);
-  end;
+  AddGitHubItem(FEditPopup, '', nil);
+  FGitHubEditItem := AddGitHubItem(FEditPopup, rsOpenOnGitHub, @MenuOpenLineOnGitHubClick);
+  AddGitHubItem(FEditPopup, rsCopyGitHubUrl, @MenuCopyLineGitHubUrlClick);
+  FGitHubCommitItem := AddGitHubItem(FEditPopup, rsOpenCommitOnGitHub,
+    @MenuOpenCommitOnGitHubClick);
+  { Shown for a commit whose summary names an issue (EditPopupPopup). }
+  FGitHubIssueItem := AddItem(FEditPopup, Format(rsOpenIssueOnGitHub, [0]),
+    @MenuOpenIssueOnGitHubClick);
   Edit.PopupText := FEditPopup;
   FEditOld.PopupText := FEditPopup;
 
@@ -823,15 +892,11 @@ begin
   Item.Caption := '-';
   FStatusPopup.Items.Add(Item);
   AddItem(FStatusPopup, rsOpenTerminal, @MenuOpenTerminalClick);
-  if FHasGitHubCli then
-  begin
-    Item := TMenuItem.Create(FStatusPopup);
-    Item.Caption := '-';
-    FStatusPopup.Items.Add(Item);
-    FOpenPullItem := AddItem(FStatusPopup, rsOpenPull, @MenuOpenPullClick);
-    FCopyPullItem := AddItem(FStatusPopup, rsCopyPullUrl, @MenuCopyPullUrlClick);
-  end;
+  AddGitHubItem(FStatusPopup, '', nil);
+  FOpenPullItem := AddGitHubItem(FStatusPopup, rsOpenPull, @MenuOpenPullClick);
+  FCopyPullItem := AddGitHubItem(FStatusPopup, rsCopyPullUrl, @MenuCopyPullUrlClick);
   FStatus.PopupMenu := FStatusPopup;
+  UpdateGitHubItems;
 end;
 
 procedure TForm1.FilePopupPopup(Sender: TObject);
@@ -1152,15 +1217,10 @@ begin
   end;
   FShowCommitItem.Enabled := FPopupHash <> '';
   FCopyHashItem.Enabled := FPopupHash <> '';
-  if FGitHubEditItem <> nil then
-    FGitHubEditItem.Enabled := (FRepo.Root <> '') and (FCurrentPath <> '');
-  if FGitHubCommitItem <> nil then
-    FGitHubCommitItem.Enabled := FPopupHash <> '';
-  if FGitHubIssueItem <> nil then
-  begin
-    FGitHubIssueItem.Visible := FPopupIssue > 0;
-    FGitHubIssueItem.Caption := Format(rsOpenIssueOnGitHub, [FPopupIssue]);
-  end;
+  FGitHubEditItem.Enabled := (FRepo.Root <> '') and (FCurrentPath <> '');
+  FGitHubCommitItem.Enabled := FPopupHash <> '';
+  FGitHubIssueItem.Visible := FHasGitHubCli and (FPopupIssue > 0);
+  FGitHubIssueItem.Caption := Format(rsOpenIssueOnGitHub, [FPopupIssue]);
   FResolveEditItem.Visible := CanResolveBlocks;
   FResolveEditItem.Enabled := (FPopupEd = Edit) and (ConflictAtRow(FPopupRow) >= 0);
 end;
@@ -1832,10 +1892,8 @@ end;
 
 procedure TForm1.StatusPopupPopup(Sender: TObject);
 begin
-  if FOpenPullItem <> nil then
-    FOpenPullItem.Enabled := FHasPull and (FPull.Url <> '');
-  if FCopyPullItem <> nil then
-    FCopyPullItem.Enabled := FHasPull and (FPull.Url <> '');
+  FOpenPullItem.Enabled := FHasPull and (FPull.Url <> '');
+  FCopyPullItem.Enabled := FHasPull and (FPull.Url <> '');
 end;
 
 procedure TForm1.MenuOpenPullClick(Sender: TObject);

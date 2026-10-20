@@ -24,9 +24,10 @@ uses
   Classes, SysUtils, Types, Controls, Graphics;
 
 type
-  {** What a row's icon shows: a house, a book for the repository, or
-    a page for the heading over the files. }
-  TGittanNavIcon = (niHome, niRepository, niFiles);
+  {** What a row's icon shows: a house, a book for the repository, a
+    page for the heading over the files, a window of text for the
+    settings' Editor page or sliders for its Tools page. }
+  TGittanNavIcon = (niHome, niRepository, niFiles, niEditor, niTools);
 
   {** A click on a row, with its index. }
   TGittanNavPickEvent = procedure(Sender: TObject; AIndex: integer) of object;
@@ -71,6 +72,15 @@ type
     property OnPick: TGittanNavPickEvent read FOnPick write FOnPick;
   end;
 
+{** The sidebar's shade, light or dark: the gutter's, which the tree
+  panel, the section headers and the rows take. }
+function SidebarShade(ADark: boolean): TColor;
+
+{** Colors ANav as the main window's sidebar, on SidebarShade; AText is
+  the text color of a row in dark mode (the editor's), since the light
+  one is fixed. }
+procedure ThemeSideNav(ANav: TGittanSideNav; ADark: boolean; AText: TColor);
+
 implementation
 
 const
@@ -91,6 +101,24 @@ const
     Files, Repository and Commit line up. }
   HeadingLeft = 10;
   HeadingTextLeft = 26;
+
+function SidebarShade(ADark: boolean): TColor;
+begin
+  if ADark then
+    Result := RGBToColor(37, 37, 38)
+  else
+    Result := RGBToColor(246, 246, 246);
+end;
+
+procedure ThemeSideNav(ANav: TGittanSideNav; ADark: boolean; AText: TColor);
+begin
+  if ADark then
+    ANav.SetColors(SidebarShade(True), AText, RGBToColor(150, 150, 150),
+      RGBToColor(50, 50, 51), RGBToColor(62, 62, 64), RGBToColor(62, 62, 62))
+  else
+    ANav.SetColors(SidebarShade(False), RGBToColor(30, 30, 30), RGBToColor(110, 110, 110),
+      RGBToColor(235, 235, 235), RGBToColor(222, 222, 224), RGBToColor(222, 222, 222));
+end;
 
 { TGittanSideNav }
 
@@ -233,6 +261,27 @@ begin
       Canvas.Polyline([Point(Mid, Y), Point(Eave - 4, Y), Point(Eave, Y + 4),
         Point(Eave, Y + ASize), Point(Mid, Y + ASize), Point(Mid, Y)]);
       Canvas.Polyline([Point(Eave - 4, Y), Point(Eave - 4, Y + 4), Point(Eave, Y + 4)]);
+    end;
+    niEditor:
+    begin
+      { A window with three lines of text, the last one short. }
+      Canvas.RoundRect(X, Y, X + ASize + 1, Y + ASize + 1, 3, 3);
+      Canvas.Line(X + 3, Y + 4, X + ASize - 2, Y + 4);
+      Canvas.Line(X + 3, Y + 7, X + ASize - 2, Y + 7);
+      Canvas.Line(X + 3, Y + 10, X + ASize div 2 + 1, Y + 10);
+    end;
+    niTools:
+    begin
+      { Two sliders, their knobs at different places. }
+      Mid := Y + ASize div 3;
+      Eave := Y + ASize * 2 div 3 + 1;
+      Canvas.Line(X, Mid, X + ASize + 1, Mid);
+      Canvas.Line(X, Eave, X + ASize + 1, Eave);
+      Canvas.Brush.Style := bsSolid;
+      Canvas.Brush.Color := AColor;
+      Canvas.Ellipse(X + ASize - 5, Mid - 2, X + ASize, Mid + 3);
+      Canvas.Ellipse(X + 2, Eave - 2, X + 7, Eave + 3);
+      Canvas.Brush.Style := bsClear;
     end;
   end;
 end;

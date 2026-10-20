@@ -55,6 +55,9 @@ begin
     AssertEquals(0, S.UpdateSnoozedUntil, 0);
     AssertTrue(S.CommitOpen);
     AssertEquals('', S.CommitDraft);
+    AssertEquals('no tab width picked', 0, S.TabSize);
+    AssertEquals('', S.GitPath);
+    AssertEquals('', S.GhPath);
   finally
     S.Free;
   end;
@@ -87,6 +90,9 @@ begin
     S.MarkdownPreview := True;
     S.IgnoreWhitespace := True;
     S.EditorCommand := 'code -g';
+    S.TabSize := 4;
+    S.GitPath := '/opt/homebrew/bin/git';
+    S.GhPath := 'C:\Program Files\GitHub CLI\gh.exe';
     S.SyntaxTheme := 'Delphi';
     S.UpdateSnoozedUntil := EncodeDate(2026, 10, 29) + 0.5;
     S.AddRecent('/tmp/a');
@@ -119,6 +125,9 @@ begin
     AssertTrue(S.MarkdownPreview);
     AssertTrue(S.IgnoreWhitespace);
     AssertEquals('code -g', S.EditorCommand);
+    AssertEquals(4, S.TabSize);
+    AssertEquals('/opt/homebrew/bin/git', S.GitPath);
+    AssertEquals('C:\Program Files\GitHub CLI\gh.exe', S.GhPath);
     AssertEquals('Delphi', S.SyntaxTheme);
     AssertEquals('the day, without the time', EncodeDate(2026, 10, 29),
       S.UpdateSnoozedUntil, 0);
