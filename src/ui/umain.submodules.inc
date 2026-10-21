@@ -13,13 +13,14 @@
   per submodule asks the remote with ls-remote, so nothing is fetched;
   the jobs run when the list or the recorded commits change, on
   View > Refresh, and SubmodulePoll after the last job of a round
-  (FSubTimer), keeping the rows meanwhile. A click shows the submodule in the editor through
-  ShowSubmodule: its URL and branch, the recorded commit, the checked out
-  one, the remote's, and the remote's new commits when the submodule
-  has them. A submodule git status reports changed is shown the same way
-  from its row in the summary or its node in the file tree, the view then
-  opening with how it moved (CompareSubmodule) and the commits it moved
-  by. File > Submodules and the section's menu update, sync and add
+  (FSubTimer), keeping the rows meanwhile. A click shows the submodule's
+  page (gittan.subpage, in the summary's box under the file header)
+  through ShowSubmodule: its URL and branch, a card with what the remote
+  holds, the recorded, checked out and remote commits, and the remote's
+  new commits when the submodule has them. A submodule git status
+  reports changed is shown the same way from its row in the summary or
+  its node in the file tree, the page then with a card for how it moved
+  (CompareSubmodule) and the commits it moved by. File > Submodules and the section's menu update, sync and add
   submodules (at the end of this file). }
 procedure TForm1.SetupSubmodules;
 
@@ -317,7 +318,7 @@ procedure TForm1.SubmoduleJobDone(Sender: TObject);
 var
   Job: TGittanSubmoduleJob;
   Node: TTreeNode;
-  i, TopLine: integer;
+  i: integer;
   Same: boolean;
 begin
   Job := TGittanSubmoduleJob(Sender);
@@ -337,11 +338,7 @@ begin
       if Node <> nil then
         Node.Text := SubmoduleRowText(i);
       if (FView = gvSubmodule) and (FSubShown = FSubmodules[i].Path) and not Same then
-      begin
-        TopLine := Edit.LineTop;
         ShowSubmodule(i);
-        Edit.LineTop := Min(TopLine, Max(Edit.Strings.Count - 1, 0));
-      end;
       Break;
     end;
   { The count of newer ones in the header. }
@@ -366,37 +363,19 @@ begin
 end;
 
 { A commit as a line of the view: short id, date, author, summary. }
-function SubmoduleCommitText(const ACommit: TGittanSubmoduleCommit): string;
-begin
-  Result := ACommit.Short + '  ' + ACommit.Date + '  ' + ACommit.Author + '  ' +
-    ACommit.Subject;
-end;
-
-{ Shows submodule AIndex in the editor as text: where it comes from,
-  then the recorded, checked out and remote commits, then the remote's
-  new commits. The header names it, with an Open pill that opens it as a
-  repository of its own when it is checked out. }
+{ Shows submodule AIndex on its page in the summary's box, under the
+  file header, which names it, with an Open pill that opens it as a
+  repository of its own when it is checked out and an Update pill while
+  it is not checked out at the recorded commit. The page keeps its
+  scroll position while it shows the same submodule. }
 procedure TForm1.ShowSubmodule(AIndex: integer);
 var
   Sub: TGittanSubmodule;
   Info: TGittanSubmoduleInfo;
   Change: TGittanSubmoduleChange;
-  Checking: boolean;
-  Lines: TStringList;
-  Line: string;
+  Checking, Same: boolean;
   Actions: TStringArray;
   i: integer;
-
-  procedure Add(const ALabel, AText: string);
-  begin
-    Lines.Add(Format('%-13s%s', [ALabel, AText]));
-  end;
-
-  function Short(const AHash: string): string;
-  begin
-    Result := Copy(AHash, 1, 7);
-  end;
-
 begin
   if (AIndex < 0) or (AIndex > High(FSubmodules)) then
     Exit;
@@ -413,103 +392,24 @@ begin
   Change := Default(TGittanSubmoduleChange);
   if AIndex <= High(FSubChanges) then
     Change := FSubChanges[AIndex];
-  Lines := TStringList.Create;
-  try
-    { How it moved comes first: that is what a changed submodule is
-      opened for. }
-    if Change.FromHash <> Change.ToHash then
-    begin
-      if (Change.Added > 0) and (Change.Removed > 0) then
-        Line := Format(rsSubBoth, [Change.Added, Change.Removed])
-      else if Change.Added > 0 then
-        Line := Format(rsSubForward, [Change.Added])
-      else if Change.Removed > 0 then
-        Line := Format(rsSubBack, [Change.Removed])
-      else if (Change.FromHash <> '') and (Change.ToHash <> '') then
-        Line := rsSubUncounted
-      else
-        Line := '';
-      Add(rsSubChange, SubmoduleMoveText(AIndex) + '  ' + Line);
-      if Length(Change.Commits) > 0 then
-      begin
-        Lines.Add('');
-        Lines.Add(rsSubAdded);
-        for i := 0 to High(Change.Commits) do
-          Lines.Add(SubmoduleCommitText(Change.Commits[i]));
-        if Change.Added > Length(Change.Commits) then
-          Lines.Add(Format(rsSubMore, [Change.Added - Length(Change.Commits)]));
-      end;
-      if Length(Change.Dropped) > 0 then
-      begin
-        Lines.Add('');
-        Lines.Add(rsSubDropped);
-        for i := 0 to High(Change.Dropped) do
-          Lines.Add(SubmoduleCommitText(Change.Dropped[i]));
-        if Change.Removed > Length(Change.Dropped) then
-          Lines.Add(Format(rsSubMore, [Change.Removed - Length(Change.Dropped)]));
-      end;
-      Lines.Add('');
-    end;
-    Add(rsSubUrl, Sub.Url);
-    if Sub.Branch = '' then
-      Add(rsSubBranch, rsSubDefaultBranch)
-    else if Sub.Branch = '.' then
-      Add(rsSubBranch, Format(rsSubSameBranch, [FBranch]))
-    else
-      Add(rsSubBranch, Sub.Branch);
-    Lines.Add('');
-    if Sub.Recorded = '' then
-      Add(rsSubRecorded, rsSubNoRecorded)
-    else if Info.Recorded.Hash <> '' then
-      Add(rsSubRecorded, SubmoduleCommitText(Info.Recorded))
-    else
-      Add(rsSubRecorded, Short(Sub.Recorded));
-    if Sub.Conflict then
-      Add('', rsSubConflict);
-    if Checking then
-      Add(rsSubCheckedOut, rsSubChecking)
-    else if not Info.Initialized then
-      Add(rsSubCheckedOut, rsSubNotInitialized)
-    else if Info.CheckedOut = Sub.Recorded then
-      Add(rsSubCheckedOut, rsSubSameAsRecorded)
-    else if Info.Current.Hash <> '' then
-      Add(rsSubCheckedOut, SubmoduleCommitText(Info.Current))
-    else
-      Add(rsSubCheckedOut, Short(Info.CheckedOut));
-    if Checking then
-      Line := rsSubChecking
-    else
-      case Info.State of
-        smUpToDate: Line := Short(Info.Tip) + '  ' + rsSubUpToDate;
-        smBehind: Line := Short(Info.Tip) + '  ' + Format(rsSubBehind, [Info.Behind]);
-        smAhead: Line := Short(Info.Tip) + '  ' + Format(rsSubAhead, [Info.Ahead]);
-        smDiverged: Line := Short(Info.Tip) + '  ' +
-            Format(rsSubDiverged, [Info.Behind, Info.Ahead]);
-        smNotFetched: Line := Short(Info.Tip) + '  ' + rsSubNotFetched;
-        smFailed: Line := Format(rsSubFailed, [Info.Error]);
-        else
-          Line := '';
-      end;
-    Add(rsSubRemote, Line);
-    { Moved to the remote's commit, the list above has the same ones. }
-    if (Length(Info.Incoming) > 0) and (Change.ToHash <> Info.Tip) then
-    begin
-      Lines.Add('');
-      Lines.Add(rsSubIncoming);
-      for i := 0 to High(Info.Incoming) do
-        Lines.Add(SubmoduleCommitText(Info.Incoming[i]));
-      if Info.Behind > Length(Info.Incoming) then
-        Lines.Add(Format(rsSubMore, [Info.Behind - Length(Info.Incoming)]));
-    end;
-    FSummary.Notice := '';
-    FCurrentPath := '';
-    FManualLexer := False;
-    FView := gvSubmodule;
-    FSubShown := Sub.Path;
-    ShowText(Edit, Lines.Text, nil);
-  finally
-    Lines.Free;
-  end;
+  Same := (FView = gvSubmodule) and FSubPage.Visible and (FSubPage.Path = Sub.Path);
+  LeaveEditorViews;
+  FSummary.Notice := '';
+  FCurrentPath := '';
+  FManualLexer := False;
+  FView := gvSubmodule;
+  FSubShown := Sub.Path;
+  FWelcome.Visible := False;
+  FSummary.Visible := False;
+  FRepoPage.Visible := False;
+  FSubPage.SetSubmodule(Sub, Info, Change, Checking, FBranch);
+  FSubPage.Visible := True;
+  FSubPage.FitHeight(FSummaryBox.ClientHeight);
+  FSummaryBox.Visible := True;
+  if not Same then
+    FSummaryBox.VertScrollBar.Position := 0;
+  FSideNav.Selected := -1;
+  FStatus.SetPosition('');
   FHeader.SetFile(Sub.Path, iconFolder);
   { Update while it is not checked out, or checked out elsewhere than
     the recorded commit. }
@@ -529,11 +429,20 @@ begin
   end;
   if Length(Actions) > 0 then
     FHeader.SetActions(Actions);
-  UpdateChangeNav;
-  ShowEditor;
+  FHeader.SetChanges(0, 0);
+  FHeader.SetConflicts(0, 0);
+  FHeader.Visible := True;
+  PlaceUnderTitleBar;
   SelectShownSubmodule;
   FSummary.Selected := Sub.Path;
   UpdateStatus;
+end;
+
+{ A click on a commit of the submodule's page copies its id. }
+procedure TForm1.SubPageCopyCommit(Sender: TObject; const AHash: string);
+begin
+  Clipboard.AsText := AHash;
+  StatusNote(Format(rsSubCopied, [Copy(AHash, 1, 7)]), False);
 end;
 
 { The Open pill: the submodule as a repository of its own. }

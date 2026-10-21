@@ -58,6 +58,7 @@ begin
   FView := gvRepoInfo;
   FWelcome.Visible := False;
   FSummary.Visible := False;
+  FSubPage.Visible := False;
   FRepoPage.SetRepository(ExtractFileName(FRepo.Root), FRepo.Root);
   FRepoPage.Visible := True;
   FRepoPage.FitHeight(FSummaryBox.ClientHeight);

@@ -17,7 +17,7 @@ uses
   ec_SyntAnal,
   gittan.lexers, gittan.git, gittan.github, gittan.conflicts, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.welcome, gittan.fileheader, gittan.watch, gittan.settings,
-  gittan.sidenav, gittan.repoinfo, gittan.repopage,
+  gittan.sidenav, gittan.repoinfo, gittan.repopage, gittan.subpage,
   gittan.settingsdlg, gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   {$IFDEF LCLCocoa}gittan.toolbar,{$ENDIF}
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
@@ -449,6 +449,8 @@ type
       and the job that reads its facts; see umain.repopage.inc. }
     FSideNav: TGittanSideNav;
     FRepoPage: TGittanRepoPage;
+    { The page of a submodule, in the box too (umain.submodules.inc). }
+    FSubPage: TGittanSubPage;
     FRepoInfoJob: TGittanRepoInfoJob;
     FRepoInfoAgain: boolean;
     { The list that drops down from the branch in the summary, with the
@@ -1107,6 +1109,7 @@ type
     procedure EditRemotesAsk;
     procedure MenuRemotesClick(Sender: TObject);
     procedure RepoPageEditRemotes(Sender: TObject);
+    procedure SubPageCopyCommit(Sender: TObject; const AHash: string);
     procedure BrowseCommit(const AHash, AName, ASubject: string);
     function PatchFolder: string;
     procedure CreatePatches(const AOlder, ANewer: string);
@@ -1865,26 +1868,6 @@ resourcestring
   rsIdentityEmail = 'E-mail';
   rsSubmodules = 'Submodules';
   rsSubmodulesNewer = '%d · ↓%d';
-  rsSubUrl = 'URL';
-  rsSubBranch = 'Branch';
-  rsSubDefaultBranch = 'the remote''s default branch';
-  rsSubSameBranch = 'the repository''s own branch (%s)';
-  rsSubRecorded = 'Recorded';
-  rsSubNoRecorded = 'none: the index records no commit for it';
-  rsSubConflict = 'in conflict: the index holds more than one commit';
-  rsSubCheckedOut = 'Checked out';
-  rsSubSameAsRecorded = 'the recorded commit';
-  rsSubNotInitialized = 'nothing: not initialized (Update checks it out)';
-  rsSubRemote = 'Remote';
-  rsSubChecking = 'checking...';
-  rsSubUpToDate = 'the recorded commit, up to date';
-  rsSubBehind = '%d new commits';
-  rsSubAhead = 'the recorded commit is %d commits past it';
-  rsSubDiverged = '%d new commits; the recorded commit has %d it lacks';
-  rsSubNotFetched = 'new commits; fetch in the submodule to list them';
-  rsSubFailed = 'could not be asked: %s';
-  rsSubIncoming = 'New on the remote';
-  rsSubMore = '... and %d more';
   rsSubOpen = 'Open';
   rsSubUpdateAction = 'Update';
   rsSubmodulesMenu = 'Su&bmodules';
@@ -1914,14 +1897,8 @@ resourcestring
   rsNoticeSubAdding = 'Adding the submodule %s';
   rsSubAddedOk = 'Added the submodule %s; commit it with .gitmodules';
   rsSubAddFailed = 'The submodule could not be added';
-  rsSubChange = 'Changed';
   rsSubNone = 'none';
-  rsSubForward = '%d new commits';
-  rsSubBack = 'back by %d commits';
-  rsSubBoth = '%d new commits, %d dropped';
-  rsSubUncounted = 'the submodule lacks one of them; fetch in it to list the commits';
-  rsSubAdded = 'Commits it moved on to';
-  rsSubDropped = 'Commits it no longer has';
+  rsSubCopied = 'Copied %s';
   rsHintSubmodule = 'Submodule moved %s; click to see the commits';
   rsAddToIgnore = 'Add to .&gitignore';
   rsAddToExclude = 'Add to .git/info/e&xclude';
@@ -2556,6 +2533,12 @@ begin
   FRepoPage.Visible := False;
   FRepoPage.OnOpenUrl := @SummaryOpenUrl;
   FRepoPage.OnEditRemotes := @RepoPageEditRemotes;
+  { So does the page of a submodule. }
+  FSubPage := TGittanSubPage.Create(Self);
+  FSubPage.Parent := FSummaryBox;
+  FSubPage.Visible := False;
+  FSubPage.OnOpenUrl := @SummaryOpenUrl;
+  FSubPage.OnCopyCommit := @SubPageCopyCommit;
   { The notice over the form, with the same icon. }
   FNotice := TGittanNotice.Create(Self);
   FNotice.Parent := Self;
@@ -2999,6 +2982,11 @@ begin
     FRepoPage.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(62, 62, 62),
       FLinkColor, FLinkColor, RGBToColor(248, 81, 73));
+    FRepoPage.SetCardColor(RGBToColor(40, 40, 41));
+    FSubPage.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(45, 45, 46), RGBToColor(62, 62, 62),
+      RGBToColor(40, 40, 41), FLinkColor, RGBToColor(63, 185, 80),
+      RGBToColor(227, 179, 65), RGBToColor(248, 81, 73));
   end
   else
   begin
@@ -3011,7 +2999,16 @@ begin
     FRepoPage.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(222, 222, 222),
       FLinkColor, FLinkColor, RGBToColor(207, 34, 46));
+    FRepoPage.SetCardColor(RGBToColor(245, 245, 246));
+    FSubPage.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(243, 243, 243), RGBToColor(222, 222, 222),
+      RGBToColor(245, 245, 246), FLinkColor, RGBToColor(26, 127, 55),
+      RGBToColor(154, 103, 0), RGBToColor(207, 34, 46));
   end;
+  { The contributors take the graph's lane colors. }
+  FRepoPage.SetLaneColors([HistoryColor(0, htSwatch), HistoryColor(1, htSwatch),
+    HistoryColor(2, htSwatch), HistoryColor(3, htSwatch), HistoryColor(4, htSwatch),
+    HistoryColor(5, htSwatch)]);
   if FRepoHeader <> nil then
     ColorRepoHeader;
   ColorCommit;
@@ -3075,7 +3072,7 @@ begin
     Lexer := ImageFormatName(FCurrentPath)
   else if FView = gvTranslation then
     Lexer := FPoStats
-  else if FView = gvBinary then
+  else if FView in [gvBinary, gvSubmodule] then
     Lexer := ''
   else if FAdapter.Lexer = nil then
     Lexer := rsPlainText
@@ -3229,7 +3226,11 @@ begin
     begin
       FBanner.BorderSpacing.Top := 0;
       FHeader.BorderSpacing.Top := FTitleBarHeight;
-      FSummaryBox.BorderSpacing.Top := FTitleBarHeight;
+      { The page of a submodule has the header over the box. }
+      if FHeader.Visible then
+        FSummaryBox.BorderSpacing.Top := 0
+      else
+        FSummaryBox.BorderSpacing.Top := FTitleBarHeight;
     end;
   finally
     EditorPanel.EnableAlign;
@@ -4637,12 +4638,15 @@ begin
   FSummary.SetRepository(ExtractFileName(FRepo.Root), Branch, BaseLabel, FStats, Icons,
     Texts);
   FWelcome.Visible := False;
-  FSummary.Visible := True;
+  { The page of a submodule keeps the box; RefreshRepository shows it
+    again. }
+  FSummary.Visible := FView <> gvSubmodule;
   { The Repository page keeps the box, and reads the repository again,
     since the snapshot says it changed. }
   if FView = gvRepoInfo then
   begin
     FSummary.Visible := False;
+    FSubPage.Visible := False;
     FRepoPage.SetRepository(ExtractFileName(FRepo.Root), FRepo.Root);
     FRepoPage.Visible := True;
     StartRepoInfoJob;
@@ -4841,11 +4845,7 @@ begin
         RestoreScroll;
       end;
     gvSubmodule:
-      begin
-        RestoreSubmodule;
-        if FView = gvSubmodule then
-          RestoreScroll;
-      end;
+      RestoreSubmodule;
     gvHistory:
       begin
         { The view is rebuilt when the job is done, at the same place. }
@@ -4868,10 +4868,11 @@ begin
   LeaveEditorViews;
   FSummaryBox.Visible := True;
   FView := gvSummary;
-  { The Repository page gives the box back. }
-  if FRepoPage.Visible then
+  { The Repository page and the page of a submodule give the box back. }
+  if FRepoPage.Visible or FSubPage.Visible then
   begin
     FRepoPage.Visible := False;
+    FSubPage.Visible := False;
     FSummary.Visible := FRepo.Root <> '';
   end;
   if FRepo.Root <> '' then
@@ -4902,6 +4903,8 @@ begin
   FFindBar.Visible := False;
   FSymbolBar.Visible := False;
   AbandonHistoryJob;
+  if FBanner <> nil then
+    PlaceUnderTitleBar;
 end;
 
 { FView is set before the call: the layout depends on it. }
@@ -5022,6 +5025,7 @@ begin
   FSummary.FitHeight(FSummaryBox.ClientHeight);
   FWelcome.FitHeight(FSummaryBox.ClientHeight);
   FRepoPage.FitHeight(FSummaryBox.ClientHeight);
+  FSubPage.FitHeight(FSummaryBox.ClientHeight);
 end;
 
 { The welcome view takes the summary's place in the box, with AError
@@ -5033,6 +5037,7 @@ begin
   AbandonRepoInfoJob;
   FSummary.Visible := False;
   FRepoPage.Visible := False;
+  FSubPage.Visible := False;
   { At startup the sidebar is not built yet. }
   if FSideNav <> nil then
     FSideNav.Selected := -1;

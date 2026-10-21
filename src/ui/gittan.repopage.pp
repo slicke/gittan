@@ -2,13 +2,16 @@ unit gittan.repopage;
 
 {** The Repository page: what Gittan shows about the repository itself,
   beside the summary of its changes. Under the name and the path it
-  lists the facts gittan.repoinfo gathers in three parts: an overview
-  (the branch and its upstream, how many commits since when, the
-  branches, the tags, the tracked files, the submodules and the size of
-  the objects), the remotes with their URLs, a web address among them
-  being a link and Edit Remotes... at the right of the heading, and the
-  authors with the most commits, each with a bar
-  that compares their counts.
+  The name comes with the branch after it, as the summary's header has
+  it, and what the branch tracks; the path under them. Then the facts
+  gittan.repoinfo gathers: tiles, each a count large with its name over
+  it and a detail under it (the commits with the dates of the first and
+  the latest, the local and remote branches, the tags with the newest,
+  the tracked files, the submodules and the size of the objects), the
+  remotes with a globe for a web address, which is a link, and Edit
+  Remotes... at the right of the heading, and the authors with the most
+  commits, each with a disc of their initials and a bar in a color of
+  the commit graph's lanes that compares their counts.
 
   It paints itself in the editor's palette, like the summary, and sizes
   its height to its content so it can sit in the same TScrollBox. While
@@ -31,7 +34,8 @@ type
     FName, FRoot: string;
     FInfo: TGittanRepoInfo;
     FHasInfo, FLoading: boolean;
-    FBack, FText, FDim, FHover, FLine, FLink, FBar, FErrorColor: TColor;
+    FBack, FText, FDim, FHover, FLine, FLink, FBar, FErrorColor, FCard: TColor;
+    FLaneColors: array of TColor;
     FLinkRects: array of TRect;
     FLinkUrls: array of string;
     FHot: integer;
@@ -45,9 +49,10 @@ type
     procedure AddLink(const ARect: TRect; const AUrl: string);
     procedure PaintHeading(var Y: integer; const ATitle, ADetail: string);
     procedure PaintAction(ATop: integer; const ACaption, ALink: string);
-    procedure PaintRow(var Y: integer; ALabelWidth: integer; const ALabel, AValue: string;
-      const AUrl: string = '');
-    function OverviewRows(ALabels, AValues: TStrings): integer;
+    procedure PaintRemote(var Y: integer; const ARemote: TGittanRemote; ANameWidth: integer);
+    procedure PaintTiles(var Y: integer);
+    procedure PaintContributors(var Y: integer);
+    function LaneColor(AIndex: integer): TColor;
   protected
     procedure Paint; override;
     procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
@@ -67,6 +72,11 @@ type
       under the mouse, the dividers, the links, the bars of the
       contributors and the error text. }
     procedure SetColors(ABack, AText, ADim, AHover, ALine, ALink, ABar, AError: TColor);
+    {** The fill of the tiles. }
+    procedure SetCardColor(ACard: TColor);
+    {** The colors of the contributors, in order: the commit graph's lane
+      colors. Without them every bar takes the bar color. }
+    procedure SetLaneColors(const AColors: array of TColor);
     {** Makes the control at least AMin high (the height of the box it
       sits in, so its background covers the box), and no higher than its
       content needs beyond that. }
@@ -84,13 +94,11 @@ type
 implementation
 
 uses
-  Math, DateUtils, gittan.reviews;
+  Math, DateUtils, LazUTF8, gittan.reviews, gittan.statusbar;
 
 resourcestring
-  rsOverview = 'Overview';
   rsRemotes = 'Remotes';
   rsContributors = 'Contributors';
-  rsBranchLabel = 'Branch';
   rsCommitsLabel = 'Commits';
   rsBranchesLabel = 'Branches';
   rsTagsLabel = 'Tags';
@@ -99,10 +107,15 @@ resourcestring
   rsSizeLabel = 'Size';
   rsUpstreamOf = 'tracks %s';
   rsNoUpstream = 'no upstream';
-  rsFirstCommit = 'the first on %s';
-  rsLatestCommit = 'the latest %s';
-  rsLocalRemote = '%s local · %s remote';
-  rsTracked = '%s tracked';
+  rsSince = 'since %s';
+  rsLastCommit = 'last commit %s';
+  rsLocal = 'local';
+  rsRemoteBranches = '%s remote';
+  rsTracked = 'tracked';
+  rsNoTags = 'none yet';
+  rsObjects = 'of objects';
+  rsCheckedIn = 'in .gitmodules';
+  rsPushUrl = 'pushes to %s';
   rsNoRemotes = 'No remotes';
   rsEditRemotes = 'Edit Remotes…';
   rsOneAuthor = '1 author';
@@ -119,8 +132,20 @@ const
   RowHeight = 26;
   TitleFontSize = 20;
   BarHeight = 6;
-  BarWidth = 160;
+  BarWidth = 360;
   MaxNameWidth = 240;
+  { The tiles: their least width, the gap between them, the padding in
+    them, the corner radius and the size of the count. }
+  TileMinWidth = 150;
+  TileGap = 10;
+  TilePadX = 14;
+  TilePadY = 10;
+  TileRadius = 12;
+  TileValueSize = 18;
+  { The disc of a contributor's initials, and the rows of the lists. }
+  AvatarSize = 24;
+  ContributorRow = 34;
+  RemoteRow = 30;
 
 { TGittanRepoPage }
 
@@ -132,6 +157,31 @@ begin
   Align := alTop;
   SetColors(clWindow, clWindowText, clGrayText, clBtnFace, clBtnShadow, clHighlight,
     clHighlight, clRed);
+  FCard := clBtnFace;
+end;
+
+procedure TGittanRepoPage.SetCardColor(ACard: TColor);
+begin
+  FCard := ACard;
+  Invalidate;
+end;
+
+procedure TGittanRepoPage.SetLaneColors(const AColors: array of TColor);
+var
+  i: integer;
+begin
+  SetLength(FLaneColors, Length(AColors));
+  for i := 0 to High(AColors) do
+    FLaneColors[i] := AColors[i];
+  Invalidate;
+end;
+
+function TGittanRepoPage.LaneColor(AIndex: integer): TColor;
+begin
+  if Length(FLaneColors) = 0 then
+    Result := FBar
+  else
+    Result := FLaneColors[AIndex mod Length(FLaneColors)];
 end;
 
 procedure TGittanRepoPage.SetRepository(const AName, ARoot: string);
@@ -230,10 +280,10 @@ begin
   Result := AText;
   if Canvas.TextWidth(Result) <= AMaxWidth then
     Exit;
-  Len := Length(AText);
-  while (Len > 1) and (Canvas.TextWidth(Copy(AText, 1, Len) + '…') > AMaxWidth) do
+  Len := UTF8Length(AText);
+  while (Len > 1) and (Canvas.TextWidth(UTF8Copy(AText, 1, Len) + '…') > AMaxWidth) do
     Dec(Len);
-  Result := Copy(AText, 1, Len) + '…';
+  Result := UTF8Copy(AText, 1, Len) + '…';
 end;
 
 procedure TGittanRepoPage.AddLink(const ARect: TRect; const AUrl: string);
@@ -285,79 +335,90 @@ begin
   Canvas.Font.Style := [];
 end;
 
-{ A row of a dim label in a column ALabelWidth wide and a value after
-  it; a value with AUrl is drawn as a link. }
-procedure TGittanRepoPage.PaintRow(var Y: integer; ALabelWidth: integer;
-  const ALabel, AValue: string; const AUrl: string);
+{ A remote: a globe for a web address, else a folder, the name in bold
+  in a column ANameWidth wide, then the URL, a link when it is a web
+  address; a push URL of its own goes dimmed on a line under it. }
+procedure TGittanRepoPage.PaintRemote(var Y: integer; const ARemote: TGittanRemote;
+  ANameWidth: integer);
 var
-  TextH, TextY, X, Room: integer;
+  TextH, TextY, X, IconW: integer;
   Shown: string;
   R: TRect;
 begin
   Canvas.Font := Font;
   Canvas.Brush.Style := bsClear;
   TextH := Canvas.TextHeight('Xg');
-  TextY := Y + (RowHeight - TextH) div 2;
-  Canvas.Font.Color := FDim;
-  Canvas.TextOut(Pad, TextY, FitRight(ALabel, ALabelWidth - Gap div 2));
-  X := Pad + ALabelWidth;
-  Room := Width - Pad - X;
-  if AUrl <> '' then
+  TextY := Y + (RemoteRow - TextH) div 2;
+  IconW := TextH - 4 + 6;
+  if ARemote.Web <> '' then
+    DrawStatusIcon(Canvas, HintLink, Pad, TextY, TextH, FDim)
+  else
+    DrawStatusIcon(Canvas, HintFolder, Pad, TextY, TextH, FDim);
+  Canvas.Pen.Width := 1;
+  Canvas.Brush.Style := bsClear;
+  X := Pad + IconW;
+  Canvas.Font.Style := [fsBold];
+  Canvas.Font.Color := FText;
+  Canvas.TextOut(X, TextY, FitRight(ARemote.Name, ANameWidth - Gap));
+  Canvas.Font.Style := [];
+  Inc(X, ANameWidth);
+  Shown := FitRight(ARemote.Url, Width - Pad - X);
+  if ARemote.Web <> '' then
   begin
-    Shown := FitRight(AValue, Room);
     R := Rect(X, TextY, X + Canvas.TextWidth(Shown), TextY + TextH);
-    AddLink(R, AUrl);
+    AddLink(R, ARemote.Web);
     Canvas.Font.Color := FLink;
     if FHot = High(FLinkRects) then
       Canvas.Font.Style := [fsUnderline];
-    Canvas.TextOut(X, TextY, Shown);
-    Canvas.Font.Style := [];
   end
   else
-  begin
     Canvas.Font.Color := FText;
-    Canvas.TextOut(X, TextY, FitRight(AValue, Room));
+  Canvas.TextOut(X, TextY, Shown);
+  Canvas.Font.Style := [];
+  Inc(Y, RemoteRow);
+  if (ARemote.PushUrl <> '') and (ARemote.PushUrl <> ARemote.Url) then
+  begin
+    Canvas.Font.Color := FDim;
+    Canvas.TextOut(X, Y - 4, FitRight(Format(rsPushUrl, [ARemote.PushUrl]), Width - Pad - X));
+    Inc(Y, TextH + 2);
   end;
-  Inc(Y, RowHeight);
 end;
 
-{ The labels and values of the overview, in order; the width of the
-  widest label is given. }
-function TGittanRepoPage.OverviewRows(ALabels, AValues: TStrings): integer;
+{ The tiles: as many in a row as fit at TileMinWidth, the rows as even
+  as they can be. Each has its name dimmed, the count large and a
+  detail dimmed under it. }
+procedure TGittanRepoPage.PaintTiles(var Y: integer);
 var
-  Value, Tags: string;
-  i: integer;
+  Labels, Values, Details: array of string;
+  n, MaxCols, Rows, Cols, TileW, TileH, BodyH, ValueH, i, X, TileY, Inner: integer;
+  Tags: string;
   Settings: TFormatSettings;
+  R: TRect;
+
+  procedure Add(const ALabel, AValue, ADetail: string);
+  begin
+    SetLength(Labels, Length(Labels) + 1);
+    SetLength(Values, Length(Values) + 1);
+    SetLength(Details, Length(Details) + 1);
+    Labels[High(Labels)] := ALabel;
+    Values[High(Values)] := AValue;
+    Details[High(Details)] := ADetail;
+  end;
+
 begin
   Settings := DefaultFormatSettings;
-  ALabels.Clear;
-  AValues.Clear;
-  if FInfo.Branch <> '' then
-  begin
-    Value := FInfo.Branch;
-    if FInfo.Upstream <> '' then
-      Value := Value + ' · ' + Format(rsUpstreamOf, [FInfo.Upstream])
-    else
-      Value := Value + ' · ' + rsNoUpstream;
-  end
-  else
-    Value := rsDetached;
-  ALabels.Add(rsBranchLabel);
-  AValues.Add(Value);
-  Value := GroupDigits(FInfo.Commits);
+  Labels := nil;
+  Values := nil;
+  Details := nil;
   if FInfo.FirstCommit > 0 then
-    Value := Value + ' · ' + Format(rsFirstCommit,
-      [FormatDateTime('d mmm yyyy', UniversalTimeToLocal(FInfo.FirstCommit), Settings)]);
-  if FInfo.LastCommit > 0 then
-    Value := Value + ' · ' + Format(rsLatestCommit,
-      [ReviewAge(FInfo.LastCommit, LocalTimeToUniversal(Now))]);
-  ALabels.Add(rsCommitsLabel);
-  AValues.Add(Value);
-  ALabels.Add(rsBranchesLabel);
-  AValues.Add(Format(rsLocalRemote, [GroupDigits(FInfo.LocalBranches),
-    GroupDigits(FInfo.RemoteBranches)]));
+    Add(rsCommitsLabel, GroupDigits(FInfo.Commits), Format(rsSince,
+      [FormatDateTime('d mmm yyyy', UniversalTimeToLocal(FInfo.FirstCommit), Settings)]))
+  else
+    Add(rsCommitsLabel, GroupDigits(FInfo.Commits), '');
+  Add(rsBranchesLabel, GroupDigits(FInfo.LocalBranches), rsLocal + ' · ' +
+    Format(rsRemoteBranches, [GroupDigits(FInfo.RemoteBranches)]));
   if FInfo.Tags = 0 then
-    Value := rsNone
+    Tags := rsNoTags
   else
   begin
     Tags := '';
@@ -369,34 +430,163 @@ begin
     end;
     if Length(FInfo.NewestTags) < FInfo.Tags then
       Tags := Tags + ', …';
-    Value := GroupDigits(FInfo.Tags);
-    if Tags <> '' then
-      Value := Value + ' · ' + Tags;
   end;
-  ALabels.Add(rsTagsLabel);
-  AValues.Add(Value);
-  ALabels.Add(rsFilesLabel);
-  AValues.Add(Format(rsTracked, [GroupDigits(FInfo.Files)]));
+  Add(rsTagsLabel, GroupDigits(FInfo.Tags), Tags);
+  Add(rsFilesLabel, GroupDigits(FInfo.Files), rsTracked);
   if FInfo.Submodules > 0 then
-  begin
-    ALabels.Add(rsSubmodulesLabel);
-    AValues.Add(GroupDigits(FInfo.Submodules));
-  end;
-  ALabels.Add(rsSizeLabel);
-  AValues.Add(FormatKiB(FInfo.SizeKiB));
-  Result := 0;
+    Add(rsSubmodulesLabel, GroupDigits(FInfo.Submodules), rsCheckedIn);
+  Add(rsSizeLabel, FormatKiB(FInfo.SizeKiB), rsObjects);
+
+  n := Length(Labels);
+  MaxCols := Max(1, (Width - 2 * Pad + TileGap) div (TileMinWidth + TileGap));
+  Rows := (n + MaxCols - 1) div MaxCols;
+  Cols := (n + Rows - 1) div Rows;
+  TileW := (Width - 2 * Pad - (Cols - 1) * TileGap) div Cols;
   Canvas.Font := Font;
-  for i := 0 to ALabels.Count - 1 do
-    Result := Max(Result, Canvas.TextWidth(ALabels[i]));
+  BodyH := Canvas.TextHeight('Xg');
+  Canvas.Font.Size := TileValueSize;
+  Canvas.Font.Style := [fsBold];
+  ValueH := Canvas.TextHeight('Xg');
+  TileH := 2 * TilePadY + 2 * BodyH + ValueH + 2;
+  for i := 0 to n - 1 do
+  begin
+    X := Pad + (i mod Cols) * (TileW + TileGap);
+    TileY := Y + (i div Cols) * (TileH + TileGap);
+    R := Rect(X, TileY, X + TileW, TileY + TileH);
+    Canvas.Pen.Style := psClear;
+    Canvas.Brush.Style := bsSolid;
+    Canvas.Brush.Color := FCard;
+    Canvas.RoundRect(R, TileRadius, TileRadius);
+    Canvas.Pen.Style := psSolid;
+    Canvas.Brush.Style := bsClear;
+    Inner := TileW - 2 * TilePadX;
+    Canvas.Font := Font;
+    Canvas.Font.Color := FDim;
+    Canvas.TextOut(X + TilePadX, TileY + TilePadY, FitRight(Labels[i], Inner));
+    Canvas.Font.Size := TileValueSize;
+    Canvas.Font.Style := [fsBold];
+    Canvas.Font.Color := FText;
+    Canvas.TextOut(X + TilePadX, TileY + TilePadY + BodyH, FitRight(Values[i], Inner));
+    Canvas.Font := Font;
+    Canvas.Font.Color := FDim;
+    if Details[i] <> '' then
+      Canvas.TextOut(X + TilePadX, TileY + TilePadY + BodyH + ValueH + 2,
+        FitRight(Details[i], Inner));
+  end;
+  Inc(Y, Rows * TileH + (Rows - 1) * TileGap);
+end;
+
+{ The initials of AName: the first letters of its first and last word,
+  in capitals. }
+function Initials(const AName: string): string;
+var
+  Words: TStringArray;
+  First, Last: string;
+begin
+  Words := Trim(AName).Split([' '], TStringSplitOptions.ExcludeEmpty);
+  if Length(Words) = 0 then
+    Exit('?');
+  First := UTF8Copy(Words[0], 1, 1);
+  if Length(Words) > 1 then
+    Last := UTF8Copy(Words[High(Words)], 1, 1)
+  else
+    Last := '';
+  Result := UTF8UpperCase(First + Last);
+end;
+
+{ A row per author: a disc with their initials in their color, the name,
+  a bar in the same color against the most commits of any of them, and
+  the count at the right edge with the share of all commits dimmed. }
+procedure TGittanRepoPage.PaintContributors(var Y: integer);
+var
+  i, Most, TextH, TextY, NameCol, X, BarX, BarRight, BarW, ShareW, CountW,
+    CenterY, InitialsH: integer;
+  Count, Share, Mark: string;
+  R: TRect;
+begin
+  Canvas.Font := Font;
+  TextH := Canvas.TextHeight('Xg');
+  Most := 0;
+  NameCol := 0;
+  for i := 0 to High(FInfo.Contributors) do
+  begin
+    Most := Max(Most, FInfo.Contributors[i].Commits);
+    NameCol := Max(NameCol, Canvas.TextWidth(FInfo.Contributors[i].Name));
+  end;
+  NameCol := Min(NameCol, MaxNameWidth) + 2 * Gap;
+  ShareW := Canvas.TextWidth('100%');
+  for i := 0 to High(FInfo.Contributors) do
+  begin
+    CenterY := Y + ContributorRow div 2;
+    TextY := CenterY - TextH div 2;
+    { The disc and the initials, in the background color so they read
+      on the lighter hues of a dark theme and the deeper of a light one. }
+    Canvas.Pen.Style := psClear;
+    Canvas.Brush.Style := bsSolid;
+    Canvas.Brush.Color := LaneColor(i);
+    Canvas.Ellipse(Pad, CenterY - AvatarSize div 2, Pad + AvatarSize,
+      CenterY + AvatarSize div 2);
+    Canvas.Pen.Style := psSolid;
+    Canvas.Brush.Style := bsClear;
+    Mark := Initials(FInfo.Contributors[i].Name);
+    Canvas.Font.Size := Max(8, Font.Size - 3);
+    if Font.Size <= 0 then
+      Canvas.Font.Size := 9;
+    Canvas.Font.Style := [fsBold];
+    Canvas.Font.Color := FBack;
+    InitialsH := Canvas.TextHeight(Mark);
+    Canvas.TextOut(Pad + (AvatarSize - Canvas.TextWidth(Mark)) div 2,
+      CenterY - InitialsH div 2, Mark);
+    Canvas.Font := Font;
+    Canvas.Brush.Style := bsClear;
+
+    X := Pad + AvatarSize + Gap;
+    Canvas.Font.Color := FText;
+    Canvas.TextOut(X, TextY, FitRight(FInfo.Contributors[i].Name, NameCol - Gap));
+
+    { The bar, left out when there is no room for it, then the count and
+      the share right after it, in columns of their own. }
+    BarX := X + NameCol;
+    BarRight := Width - Pad - ShareW - 2 * Gap - Canvas.TextWidth('00 000');
+    BarW := Min(BarWidth, BarRight - BarX);
+    if BarW < 40 then
+      BarW := 0;
+    if FInfo.Commits > 0 then
+      Share := IntToStr(Round(FInfo.Contributors[i].Commits * 100 / FInfo.Commits)) + '%'
+    else
+      Share := '';
+    Count := GroupDigits(FInfo.Contributors[i].Commits);
+    CountW := Canvas.TextWidth(Count);
+    X := BarX + BarW + Gap + Canvas.TextWidth('00 000');
+    Canvas.Font.Color := FText;
+    Canvas.TextOut(X - CountW, TextY, Count);
+    Canvas.Font.Color := FDim;
+    Canvas.TextOut(X + Gap + ShareW - Canvas.TextWidth(Share), TextY, Share);
+
+    if BarW > 0 then
+    begin
+      R := Rect(BarX, CenterY - BarHeight div 2, BarX + BarW, CenterY + BarHeight div 2);
+      Canvas.Pen.Style := psClear;
+      Canvas.Brush.Style := bsSolid;
+      Canvas.Brush.Color := FHover;
+      Canvas.RoundRect(R, BarHeight, BarHeight);
+      if Most > 0 then
+      begin
+        R.Right := BarX + Max(BarHeight, BarW * FInfo.Contributors[i].Commits div Most);
+        Canvas.Brush.Color := LaneColor(i);
+        Canvas.RoundRect(R, BarHeight, BarHeight);
+      end;
+      Canvas.Pen.Style := psSolid;
+      Canvas.Brush.Style := bsClear;
+    end;
+    Inc(Y, ContributorRow);
+  end;
 end;
 
 procedure TGittanRepoPage.Paint;
 var
-  Y, TextH, TitleH, LabelWidth, i, Most, X, TextY, BarX, BarW, CountW, NameW,
-    HeadingTop: integer;
-  Labels, Values: TStringList;
-  Detail, Count: string;
-  R: TRect;
+  Y, TextH, TitleH, NameW, i, X, TextY, HeadingTop: integer;
+  Detail: string;
 begin
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := FBack;
@@ -408,15 +598,42 @@ begin
   TextH := Canvas.TextHeight('Xg');
   Y := Pad;
 
-  { The name and the path, as the summary's header. }
+  { The name with the branch after it, as the summary's header has it,
+    and what the branch tracks; the path under them. }
   Canvas.Font.Size := TitleFontSize;
   Canvas.Font.Style := [fsBold];
   Canvas.Font.Color := FText;
   TitleH := Canvas.TextHeight('Xg');
   Canvas.TextOut(Pad, Y, FName);
+  X := Pad + Canvas.TextWidth(FName) + Gap;
+  Canvas.Font := Font;
+  Canvas.Brush.Style := bsClear;
+  if FHasInfo then
+  begin
+    TextY := Y + TitleH - TextH - 3;
+    if FInfo.Branch <> '' then
+    begin
+      DrawStatusIcon(Canvas, HintBranch, X, TextY, TextH, FDim);
+      Canvas.Pen.Width := 1;
+      Canvas.Brush.Style := bsClear;
+      Inc(X, TextH - 4 + 5);
+      Canvas.Font.Color := FText;
+      Canvas.TextOut(X, TextY, FInfo.Branch);
+      Inc(X, Canvas.TextWidth(FInfo.Branch) + Gap);
+      if FInfo.Upstream <> '' then
+        Detail := Format(rsUpstreamOf, [FInfo.Upstream])
+      else
+        Detail := rsNoUpstream;
+    end
+    else
+      Detail := rsDetached;
+    if FInfo.LastCommit > 0 then
+      Detail := Detail + ' · ' + Format(rsLastCommit,
+        [ReviewAge(FInfo.LastCommit, LocalTimeToUniversal(Now))]);
+    Canvas.Font.Color := FDim;
+    Canvas.TextOut(X, TextY, FitRight(Detail, Max(0, Width - Pad - X)));
+  end;
   Inc(Y, TitleH + 2);
-  Canvas.Font.Size := Font.Size;
-  Canvas.Font.Style := [];
   Canvas.Font.Color := FDim;
   Canvas.TextOut(Pad, Y, FitLeft(FRoot, Width - 2 * Pad));
   Inc(Y, TextH);
@@ -438,76 +655,44 @@ begin
 
   if FHasInfo then
   begin
-    Labels := TStringList.Create;
-    Values := TStringList.Create;
-    try
-      LabelWidth := OverviewRows(Labels, Values);
-      { The remotes' names share the column. }
+    Inc(Y, Pad);
+    PaintTiles(Y);
+
+    HeadingTop := Y;
+    PaintHeading(Y, rsRemotes, '');
+    if Assigned(FOnEditRemotes) then
+      PaintAction(HeadingTop + Pad, rsEditRemotes, EditRemotesLink);
+    Canvas.Font := Font;
+    Canvas.Font.Style := [fsBold];
+    NameW := 0;
+    for i := 0 to High(FInfo.Remotes) do
+      NameW := Max(NameW, Canvas.TextWidth(FInfo.Remotes[i].Name));
+    NameW := Min(NameW, MaxNameWidth) + 2 * Gap;
+    if Length(FInfo.Remotes) = 0 then
+    begin
+      Canvas.Font := Font;
+      Canvas.Font.Color := FDim;
+      Canvas.TextOut(Pad, Y + (RemoteRow - TextH) div 2, rsNoRemotes);
+      Inc(Y, RemoteRow);
+    end
+    else
       for i := 0 to High(FInfo.Remotes) do
-        LabelWidth := Max(LabelWidth, Canvas.TextWidth(FInfo.Remotes[i].Name));
-      LabelWidth := Min(LabelWidth, MaxNameWidth) + Gap;
-      PaintHeading(Y, rsOverview, '');
-      for i := 0 to Labels.Count - 1 do
-        PaintRow(Y, LabelWidth, Labels[i], Values[i]);
+        PaintRemote(Y, FInfo.Remotes[i], NameW);
 
-      HeadingTop := Y;
-      PaintHeading(Y, rsRemotes, '');
-      if Assigned(FOnEditRemotes) then
-        PaintAction(HeadingTop + Pad, rsEditRemotes, EditRemotesLink);
-      if Length(FInfo.Remotes) = 0 then
-        PaintRow(Y, LabelWidth, '', rsNoRemotes)
-      else
-        for i := 0 to High(FInfo.Remotes) do
-          PaintRow(Y, LabelWidth, FInfo.Remotes[i].Name, FInfo.Remotes[i].Url,
-            FInfo.Remotes[i].Web);
-
-      if FInfo.Authors = 1 then
-        Detail := rsOneAuthor
-      else
-        Detail := Format(rsAuthors, [GroupDigits(FInfo.Authors)]);
-      PaintHeading(Y, rsContributors, Detail);
-      { A row per author: the name, a bar against the most commits of
-        any of them, and the count at the right edge. }
-      Most := 0;
-      for i := 0 to High(FInfo.Contributors) do
-        Most := Max(Most, FInfo.Contributors[i].Commits);
-      if Length(FInfo.Contributors) = 0 then
-        PaintRow(Y, LabelWidth, '', rsNone);
-      for i := 0 to High(FInfo.Contributors) do
-      begin
-        Canvas.Font := Font;
-        Canvas.Brush.Style := bsClear;
-        TextY := Y + (RowHeight - TextH) div 2;
-        Count := GroupDigits(FInfo.Contributors[i].Commits);
-        CountW := Canvas.TextWidth(Count);
-        BarW := Min(BarWidth, Max(40, Width - 2 * Pad - MaxNameWidth - CountW - 2 * Gap));
-        NameW := Width - 2 * Pad - BarW - CountW - 2 * Gap;
-        Canvas.Font.Color := FText;
-        Canvas.TextOut(Pad, TextY, FitRight(FInfo.Contributors[i].Name, NameW));
-        BarX := Width - Pad - CountW - Gap - BarW;
-        R := Rect(BarX, Y + (RowHeight - BarHeight) div 2, BarX + BarW,
-          Y + (RowHeight + BarHeight) div 2);
-        Canvas.Pen.Style := psClear;
-        Canvas.Brush.Style := bsSolid;
-        Canvas.Brush.Color := FHover;
-        Canvas.RoundRect(R, BarHeight, BarHeight);
-        if Most > 0 then
-        begin
-          R.Right := BarX + Max(BarHeight, BarW * FInfo.Contributors[i].Commits div Most);
-          Canvas.Brush.Color := FBar;
-          Canvas.RoundRect(R, BarHeight, BarHeight);
-        end;
-        Canvas.Pen.Style := psSolid;
-        Canvas.Brush.Style := bsClear;
-        Canvas.Font.Color := FDim;
-        X := Width - Pad - CountW;
-        Canvas.TextOut(X, TextY, Count);
-        Inc(Y, RowHeight);
-      end;
-    finally
-      Labels.Free;
-      Values.Free;
-    end;
+    if FInfo.Authors = 1 then
+      Detail := rsOneAuthor
+    else
+      Detail := Format(rsAuthors, [GroupDigits(FInfo.Authors)]);
+    PaintHeading(Y, rsContributors, Detail);
+    if Length(FInfo.Contributors) = 0 then
+    begin
+      Canvas.Font := Font;
+      Canvas.Font.Color := FDim;
+      Canvas.TextOut(Pad, Y + (RowHeight - TextH) div 2, rsNone);
+      Inc(Y, RowHeight);
+    end
+    else
+      PaintContributors(Y);
   end;
 
   FContentHeight := Y + Pad;
