@@ -92,14 +92,23 @@ begin
   end;
 end;
 
-{ What the middle pill offers for the block: Include for one left out
-  or of a file not ticked, Leave Out for the rest. }
+{ What the middle pill offers for the block: Include in Commit for one
+  left out or of a file not ticked, Skip in Commit for the rest. }
 function TForm1.LeaveOutCaption(ABlock: integer): string;
 begin
   if not ShownFileChosen or BlockLeftOut(ABlock) then
     Result := rsIncludePill
   else
     Result := rsLeaveOutPill;
+end;
+
+{ The middle pill's hint, for the caption LeaveOutCaption gives. }
+function TForm1.LeaveOutHint(ABlock: integer): string;
+begin
+  if LeaveOutCaption(ABlock) = rsIncludePill then
+    Result := rsIncludePillHint
+  else
+    Result := rsLeaveOutPillHint;
 end;
 
 { The middle pill: the block goes out of the commit, or back in. }

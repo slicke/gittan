@@ -2,7 +2,7 @@ unit gittan.hoverpills;
 
 {** A strip of pills that appears at the end of the row the mouse is
   on and offers an action or two: made for the change view, where a
-  changed row gets Keep and Discard for its block, after a check mark
+  changed row gets Reviewed and Discard for its block, after a check mark
   or the discard arrow. Show places
   the strip at the right end of an anchor rectangle given in screen
   coordinates (the row, across the text), centered on its height and
@@ -14,14 +14,18 @@ unit gittan.hoverpills;
   gittan.popuplist), and paints itself in the colors SetColors gives:
   the box, its border, the text, the text of the pill under the mouse,
   and the check mark and the arrow. Its font is a size under the
-  form's, so the strip stays near the height of a row. }
+  form's, so the strip stays near the height of a row. A pill can have
+  a hint, which the strip shows itself under the pill after the usual
+  pause, as the status bar does; a pill with the discard arrow stands a
+  little apart from the ones before it, since it is the one that loses
+  work. }
 
 {$mode objfpc}{$H+}
 
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Graphics;
+  Classes, SysUtils, Types, Controls, Graphics, ExtCtrls, Forms;
 
 type
   TGittanPillPickEvent = procedure(Sender: TObject; AIndex: integer) of object;
@@ -30,18 +34,22 @@ type
 
   TGittanHoverPills = class(TCustomControl)
   private
-    FCaptions: array of string;
+    FCaptions, FHints: array of string;
     FRects: array of TRect;
     FIcons: string;
     FHot, FPressed: integer;
     FBack, FText, FLine, FHotColor, FKeepColor, FDiscardColor: TColor;
     FOnPick: TGittanPillPickEvent;
     FOnLeave: TNotifyEvent;
+    FHintTimer: TTimer;
+    FHintWindow: THintWindow;
     function PillAt(X, Y: integer): integer;
     function ArrowWidth(APillHeight: integer): integer;
     procedure DrawArrow(ALeft, ATop, APillHeight: integer; AColor: TColor);
     procedure DrawCheck(ALeft, ATop, APillHeight: integer; AColor: TColor);
     procedure SetHot(AValue: integer);
+    procedure HintTimerTimer(Sender: TObject);
+    procedure HideHint;
   protected
     procedure Paint; override;
     procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
@@ -56,10 +64,11 @@ type
       AIcons gives each pill its icon by position: 'k' a check mark in
       the keep color, 'd' the discard arrow (an arrow going back round
       a circle, as the band's button) in the discard color, anything
-      else none. Showing it again at the same place with the same pills
+      else none. AHints gives each pill its hint by position ('' for
+      none). Showing it again at the same place with the same pills
       changes nothing. }
     procedure Show(const AAnchor: TRect; const ACaptions: array of string;
-      const AIcons: string = '');
+      const AIcons: string; const AHints: array of string);
     {** Hides the strip. }
     procedure Dismiss;
     {** The colors: the box, the text, the border, the text of the pill
@@ -83,6 +92,8 @@ const
   PillPad = 8;
   PillRise = 2;
   ArrowGap = 5;
+  { Before the pill with the discard arrow, added to PillGap. }
+  DiscardGap = 8;
   Offset = 4;
   { The font: a size under the form's on every desktop, so the strip
     stays near the height of a row. }
@@ -99,6 +110,10 @@ begin
   ParentFont := False;
   Font.Size := PillFontSize;
   SetColors(clWindow, clWindowText, clBtnShadow, clHighlight, clGreen, clRed);
+  FHintTimer := TTimer.Create(Self);
+  FHintTimer.Enabled := False;
+  FHintTimer.Interval := Application.HintPause;
+  FHintTimer.OnTimer := @HintTimerTimer;
 end;
 
 procedure TGittanHoverPills.SetColors(ABack, AText, ALine, AHot, AKeep, ADiscard: TColor);
@@ -123,7 +138,7 @@ end;
   from the anchor's right end, moved left when it would run out of the
   parent. }
 procedure TGittanHoverPills.Show(const AAnchor: TRect; const ACaptions: array of string;
-  const AIcons: string);
+  const AIcons: string; const AHints: array of string);
 var
   Anchor: TRect;
   i, X, W, H, PillH: integer;
@@ -139,6 +154,12 @@ begin
   SetLength(FCaptions, Length(ACaptions));
   for i := 0 to High(ACaptions) do
     FCaptions[i] := ACaptions[i];
+  SetLength(FHints, Length(FCaptions));
+  for i := 0 to High(FHints) do
+    if i <= High(AHints) then
+      FHints[i] := AHints[i]
+    else
+      FHints[i] := '';
   SetLength(FRects, Length(FCaptions));
   Canvas.Font := Font;
   PillH := Canvas.TextHeight('Xg') + 2 * PillRise;
@@ -149,6 +170,8 @@ begin
     W := Canvas.TextWidth(FCaptions[i]) + 2 * PillPad;
     if (i < Length(FIcons)) and (FIcons[i + 1] in ['k', 'd']) then
       W := W + ArrowWidth(PillH) + ArrowGap;
+    if (i > 0) and (i < Length(FIcons)) and (FIcons[i + 1] = 'd') then
+      X := X + DiscardGap;
     FRects[i] := Rect(X, Pad, X + W, Pad + PillH);
     X := X + W + PillGap;
   end;
@@ -161,6 +184,7 @@ begin
     Exit;
   FHot := -1;
   FPressed := -1;
+  HideHint;
   SetBounds(X, i, W, H);
   Visible := True;
   BringToFront;
@@ -174,6 +198,7 @@ begin
   Visible := False;
   FHot := -1;
   FPressed := -1;
+  HideHint;
 end;
 
 function TGittanHoverPills.PillAt(X, Y: integer): integer;
@@ -191,7 +216,38 @@ begin
   if AValue = FHot then
     Exit;
   FHot := AValue;
+  HideHint;
+  if (FHot >= 0) and (FHot <= High(FHints)) and (FHints[FHot] <> '') then
+    FHintTimer.Enabled := True;
   Invalidate;
+end;
+
+{ The hint goes under the pill, left aligned with it and kept inside the
+  form; the LCL's own hint follows controls and would not change from
+  pill to pill. }
+procedure TGittanHoverPills.HintTimerTimer(Sender: TObject);
+var
+  R: TRect;
+  P: TPoint;
+begin
+  FHintTimer.Enabled := False;
+  if not Visible or (FHot < 0) or (FHot > High(FHints)) or (FHints[FHot] = '') then
+    Exit;
+  if FHintWindow = nil then
+    FHintWindow := THintWindow.Create(Self);
+  R := FHintWindow.CalcHintRect(320, FHints[FHot], nil);
+  P := ClientToScreen(Point(FRects[FHot].Left, Height + 4));
+  if Parent <> nil then
+    P.X := Min(P.X, Parent.ClientToScreen(Point(Parent.ClientWidth, 0)).X - R.Right - 4);
+  Types.OffsetRect(R, P.X, P.Y);
+  FHintWindow.ActivateHint(R, FHints[FHot]);
+end;
+
+procedure TGittanHoverPills.HideHint;
+begin
+  FHintTimer.Enabled := False;
+  if (FHintWindow <> nil) and FHintWindow.Visible then
+    FHintWindow.Hide;
 end;
 
 { Round from the lower right over the top to the left, where the head
@@ -283,6 +339,7 @@ procedure TGittanHoverPills.MouseDown(Button: TMouseButton; Shift: TShiftState;
   X, Y: integer);
 begin
   inherited MouseDown(Button, Shift, X, Y);
+  HideHint;
   if Button = mbLeft then
   begin
     FPressed := PillAt(X, Y);

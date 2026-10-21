@@ -863,6 +863,7 @@ type
     function LineLeftOut(ALine: integer): boolean;
     function BlockLeftOut(ABlock: integer): boolean;
     function LeaveOutCaption(ABlock: integer): string;
+    function LeaveOutHint(ABlock: integer): string;
     procedure ToggleLeaveOutAt(ABlock: integer);
     procedure LeaveOutBlockAt(ABlock: integer);
     procedure IncludeBlockAt(ABlock: integer);
@@ -2009,14 +2010,21 @@ resourcestring
   rsRemoved = 'Deleted %s; commit it to take it out of the repository';
   rsRemoveFailed = 'Could not remove %s';
   rsDiscardAction = 'Discard';
-  rsKeepPill = 'Keep';
-  rsUnkeepPill = 'Unkeep';
-  rsUnkeepAction = 'Unkeep %d';
-  rsKeptBlock = 'Kept the change at line %d of %s as code';
+  rsKeepPill = 'Reviewed';
+  rsKeepPillHint = 'Mark the change reviewed: it shows as plain code for the rest of ' +
+    'the session. The file and the commit are not touched.';
+  rsUnkeepPill = 'Not Reviewed';
+  rsUnkeepPillHint = 'Show the change as a change again';
+  rsUnkeepAction = 'Show %d Reviewed';
+  rsKeptBlock = 'Marked the change at line %d of %s reviewed';
   rsUnkept = 'Shows the change at line %d of %s again';
   rsUnkeptAll = 'Shows every change of %s again';
-  rsLeaveOutPill = 'Leave Out';
-  rsIncludePill = 'Include';
+  rsLeaveOutPill = 'Skip in Commit';
+  rsLeaveOutPillHint = 'Leave the change out of the next commit; it stays in the file';
+  rsIncludePill = 'Include in Commit';
+  rsIncludePillHint = 'Put the change back into the next commit';
+  rsDiscardPillHint = 'Put the lines back as they were, after asking; ' +
+    'File > Undo Discard brings them back';
   rsIncludeAllAction = 'Include All';
   rsLeftOutBlock = 'Left the change at line %d of %s out of the commit';
   rsLeftOutFile = 'Left every change of %s out of the commit';

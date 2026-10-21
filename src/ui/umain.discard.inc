@@ -289,11 +289,13 @@ begin
   Anchor.BottomRight := Edit.ClientToScreen(Anchor.BottomRight);
   FPillChoose := (FHotKeep < 0) and CanLeaveOut;
   if FHotKeep >= 0 then
-    FDiscardPills.Show(Anchor, [rsUnkeepPill])
+    FDiscardPills.Show(Anchor, [rsUnkeepPill], '', [rsUnkeepPillHint])
   else if FPillChoose then
-    FDiscardPills.Show(Anchor, [rsKeepPill, LeaveOutCaption(FHotDiscard), rsDiscardAction], 'k d')
+    FDiscardPills.Show(Anchor, [rsKeepPill, LeaveOutCaption(FHotDiscard), rsDiscardAction],
+      'k d', [rsKeepPillHint, LeaveOutHint(FHotDiscard), rsDiscardPillHint])
   else
-    FDiscardPills.Show(Anchor, [rsKeepPill, rsDiscardAction], 'kd');
+    FDiscardPills.Show(Anchor, [rsKeepPill, rsDiscardAction], 'kd',
+      [rsKeepPillHint, rsDiscardPillHint]);
 end;
 
 { Whether the mouse is over the pills, which are a child of the form. }
