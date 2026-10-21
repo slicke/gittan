@@ -447,14 +447,28 @@ begin
 end;
 
 { The new page with its changes from the old marked, the classes of
-  gittan.richdiff drawn by the style sheet. }
+  gittan.richdiff drawn by the style sheet. It is loaded as HTML, which
+  LazInk does not give the look of Markdown (MarkdownSheet), so a
+  Markdown page carries that sheet itself, followed by ours again, since
+  a page's own sheet wins over the host's. The sheet is in the control's
+  colors, so SetColors loads the page again. }
 procedure TGittanMarkdownPreview.ShowRichDiff;
+var
+  Html: string;
+  p: integer;
 begin
   if IsHtmlPath(FFileName) then
-    LoadHTML(MarkRichDiff(FOldText, FText), FilenameToURI(FFileName))
-  else
-    LoadHTML(MarkRichDiff(MarkdownToHTML(FOldText, [imoRawHTML]),
-      MarkdownToHTML(FText, [imoRawHTML])), FilenameToURI(FFileName));
+  begin
+    LoadHTML(MarkRichDiff(FOldText, FText), FilenameToURI(FFileName));
+    Exit;
+  end;
+  Html := MarkRichDiff(MarkdownToHTML(FOldText, [imoRawHTML]),
+    MarkdownToHTML(FText, [imoRawHTML]));
+  p := Pos('<head>', Html);
+  if p > 0 then
+    Insert('<style>' + MarkdownSheet + StyleSheet.Text + '</style>', Html,
+      p + Length('<head>'));
+  LoadHTML(Html, FilenameToURI(FFileName));
 end;
 
 { The SVG file shown, both sides of a changed one, and an SVG image of a
@@ -496,6 +510,8 @@ end;
 
 procedure TGittanMarkdownPreview.SetColors(ABack, AText, ADim, ALink: TColor;
   ADark: boolean);
+var
+  Y: integer;
 begin
   FBack := ABack;
   FFore := AText;
@@ -507,6 +523,13 @@ begin
   else
     ColorScheme := icsLight;
   ApplyStyle;
+  if FCompare and not IsSvgPath(FFileName) then
+  begin
+    Y := ScrollY;
+    ShowRichDiff;
+    ClearHistory;
+    ScrollTo(Y);
+  end;
 end;
 
 procedure TGittanMarkdownPreview.SetFontSize(ASize: integer);
