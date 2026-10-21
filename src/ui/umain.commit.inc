@@ -218,8 +218,9 @@ begin
     end;
 end;
 
-{ Sets every node's box: a file's from CommitChosen, a folder's from
-  the files under it, none for a conflict or while not choosing. }
+{ Sets every node's box: a file's from CommitChosen, mixed when changes
+  of it are left out (see umain.leaveout.inc), a folder's from the
+  files under it, none for a conflict or while not choosing. }
 procedure TForm1.ApplyCommitChecks;
 var
   Node: TTreeNode;
@@ -261,10 +262,12 @@ var
     begin
       i := CommitStatOf(ANode);
       if i >= 0 then
-        if CommitChosen(i) then
-          Result := checkOn
+        if not CommitChosen(i) then
+          Result := checkOff
+        else if FLeftOut.Count(FStats[i].Path) > 0 then
+          Result := checkMixed
         else
-          Result := checkOff;
+          Result := checkOn;
     end;
     ANode.StateIndex := Result;
   end;
@@ -284,8 +287,9 @@ begin
   end;
 end;
 
-{ A file's box flips it; a folder's chooses every file under it, or
-  none when all of them were. }
+{ A file's box flips it, a mixed one takes it whole; a folder's chooses
+  every file under it, or none when all of them were. Either way the
+  changes left out of the files go. }
 procedure TForm1.FlipCommitNode(ANode: TTreeNode);
 var
   Value: boolean;
@@ -299,7 +303,10 @@ var
     begin
       i := CommitStatOf(ANode);
       if i >= 0 then
+      begin
         SetCommitChosen(i, Value);
+        DropLeftOut(FStats[i].Path);
+      end;
       Exit;
     end;
     Child := ANode.GetFirstChild;
@@ -550,6 +557,8 @@ end;
 procedure TForm1.StartCommit;
 var
   Paths: TStringList;
+  Parts: TGittanCommitParts;
+  Err: string;
 begin
   if (FCommitJob <> nil) or (FRemoteJob <> nil) or not FCommitButton.Enabled or
     not EnsureIdentity then
@@ -557,8 +566,15 @@ begin
   Paths := TStringList.Create;
   try
     ChosenCommitPaths(Paths);
+    { The files with changes left out go in as their text without them
+      (see umain.leaveout.inc). }
+    if not CommitParts(Paths, Parts, Err) then
+    begin
+      BannerError(rsCommitFailed, Err);
+      Exit;
+    end;
     FCommitJob := TGittanCommitJob.Create(FRepo.Root, FCommitMemo.Text, Paths,
-      FCommitAmend.Checked);
+      FCommitAmend.Checked, Parts);
   finally
     Paths.Free;
   end;
@@ -595,6 +611,7 @@ begin
     FMergeMessage := '';
     FCommitOn.Clear;
     FCommitOff.Clear;
+    FLeftOut.ClearAll;
     StatusNote(Format(rsCommitted, [Copy(Job.Id, 1, 7), Subject]));
   end
   else

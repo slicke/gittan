@@ -287,8 +287,11 @@ begin
   Anchor := Rect(Edit.RectMain.Left, Y, Edit.RectMain.Right, Y + Edit.TextCharSize.Y);
   Anchor.TopLeft := Edit.ClientToScreen(Anchor.TopLeft);
   Anchor.BottomRight := Edit.ClientToScreen(Anchor.BottomRight);
+  FPillChoose := (FHotKeep < 0) and CanLeaveOut;
   if FHotKeep >= 0 then
     FDiscardPills.Show(Anchor, [rsUnkeepPill])
+  else if FPillChoose then
+    FDiscardPills.Show(Anchor, [rsKeepPill, LeaveOutCaption(FHotDiscard), rsDiscardAction], 'k d')
   else
     FDiscardPills.Show(Anchor, [rsKeepPill, rsDiscardAction], 'kd');
 end;
@@ -310,8 +313,9 @@ begin
     (P.Y >= Edit.RectMain.Top) and (P.Y < Edit.RectMain.Bottom);
 end;
 
-{ A pill: Unkeep on a kept line, else Keep or Discard for the block.
-  The pills go before the question. }
+{ A pill: Unkeep on a kept line, else Keep, Leave Out or Include (see
+  umain.leaveout.inc) or Discard for the block. The pills go before the
+  question. }
 procedure TForm1.DiscardPillsPick(Sender: TObject; AIndex: integer);
 var
   Block, Keep: integer;
@@ -323,6 +327,8 @@ begin
     UnkeepAt(Keep)
   else if AIndex = 0 then
     KeepBlockAt(Block)
+  else if FPillChoose and (AIndex = 1) then
+    ToggleLeaveOutAt(Block)
   else
     DiscardBlockAt(Block);
 end;
@@ -403,6 +409,7 @@ begin
     Exit;
   for k := 0 to High(Pairs) do
     FKeeps.Add(FCurrentPath, Pairs[k]);
+  IncludeKept(Pairs);
   StatusNote(Format(rsKeptBlock, [Pairs[0].Line, FCurrentPath]));
   RebuildKeeps;
 end;
@@ -448,6 +455,7 @@ procedure TForm1.RebuildKeeps;
 begin
   FChangeLines.Assign(FRawChangeLines);
   FKeeps.Apply(FCurrentPath, FChangeLines, FKeptOf);
+  ApplyLeftOut;
   FHeadings := nil;
   FHeadingRebuilds := 0;
   SetChangeActions;
@@ -455,20 +463,29 @@ begin
 end;
 
 { The header's pills in the change view: Edit for one of the
-  repository's own files, and Unkeep with the count while the file has
-  kept changes (FHeaderUnkeep is its index, for HeaderAction). A
-  conflicted file has its own pills (see ShowChanges). }
+  repository's own files, Include All while changes of the file are
+  left out of the commit (FHeaderInclude), and Unkeep with the count
+  while the file has kept changes (FHeaderUnkeep is its index, for
+  HeaderAction). A conflicted file has its own pills (see
+  ShowChanges). }
 procedure TForm1.SetChangeActions;
 var
   Captions: array of string;
   n: integer;
 begin
   FHeaderUnkeep := -1;
+  FHeaderInclude := -1;
   if FConflictRoles <> nil then
     Exit;
   Captions := nil;
   if IsRepoFile(FCurrentPath) then
     Captions := [rsEditAction];
+  if CanLeaveOut and ShownFileChosen and (FLeftOut.Count(FCurrentPath) > 0) then
+  begin
+    FHeaderInclude := Length(Captions);
+    SetLength(Captions, Length(Captions) + 1);
+    Captions[High(Captions)] := rsIncludeAllAction;
+  end;
   n := FKeeps.Count(FCurrentPath);
   if n > 0 then
   begin
@@ -523,6 +540,7 @@ begin
   FDiscardItem.Enabled := CanDiscard and (Edit.Carets.Count > 0) and
     (BlockAtRow(Edit.Carets[0].PosY) >= 0);
   FUndoDiscardItem.Enabled := Length(FDiscards) > 0;
+  UpdateLeaveOutItem;
   UpdateResolveItems;
   if FRevertFileItem <> nil then
   begin

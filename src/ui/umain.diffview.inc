@@ -264,7 +264,22 @@ begin
         Role := crNone;
         if not AOldSide and (FView = gvChanges) and (ARows[i].Line <= High(FConflictRoles)) then
           Role := FConflictRoles[ARows[i].Line];
-        if Role = crNone then
+        if (Role = crNone) and LineLeftOut(ARows[i].Line) then
+        begin
+          { A change left out of the commit keeps its strip in a muted
+            tint, without its word shades (see umain.leaveout.inc). }
+          if Marker = '+' then
+          begin
+            AEd.Strings.LinesState[i] := TATLineState.Added;
+            MarkRow(AEd, i, bmLeftOutAdded);
+          end
+          else
+          begin
+            AEd.Strings.LinesState[i] := TATLineState.Changed;
+            MarkRow(AEd, i, bmLeftOutDeleted);
+          end;
+        end
+        else if Role = crNone then
           MarkLine(AEd, i, Marker)
         else
         begin
@@ -276,7 +291,8 @@ begin
           if Role = crMarker then
             MarkHeader(AEd, i);
         end;
-        if (Role = crNone) and (ARows[i].Line <= High(FWordSpans)) then
+        if (Role = crNone) and (ARows[i].Line <= High(FWordSpans)) and
+          not LineLeftOut(ARows[i].Line) then
           MarkWords(AEd, i, FWordSpans[ARows[i].Line], Marker, 0);
         if AOldSide then
         begin

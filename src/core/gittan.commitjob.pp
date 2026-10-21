@@ -13,16 +13,17 @@ uses
 type
   {** Commits APaths of the repository at ARoot with AMessage, amending
     HEAD with AAmend, through TGittanRepo.Commit on a repository of its
-    own. OnDone is called in the main thread when it is done, unless the
-    job has been stopped. A commit is never broken off: Stop only drops
-    the handler, and the commit goes on to its end. The thread is not
-    terminated for it, since a thread terminated before it starts never
-    runs Execute at all. }
+    own, AParts with the text they give. OnDone is called in the main
+    thread when it is done, unless the job has been stopped. A commit is
+    never broken off: Stop only drops the handler, and the commit goes on
+    to its end. The thread is not terminated for it, since a thread
+    terminated before it starts never runs Execute at all. }
   TGittanCommitJob = class(TThread)
   private
     FRoot, FMessage: string;
     FPaths: TStringList;
     FAmend: boolean;
+    FParts: TGittanCommitParts;
     FOk: boolean;
     FId, FError: string;
     FOnDone: TNotifyEvent;
@@ -31,7 +32,7 @@ type
     procedure Execute; override;
   public
     constructor Create(const ARoot, AMessage: string; APaths: TStrings;
-      AAmend: boolean);
+      AAmend: boolean; const AParts: TGittanCommitParts = nil);
     destructor Destroy; override;
     {** Drops the handler, and waits for the commit to end when AWait is
       set, as on quitting, so git is not left halfway. }
@@ -51,7 +52,7 @@ type
 implementation
 
 constructor TGittanCommitJob.Create(const ARoot, AMessage: string;
-  APaths: TStrings; AAmend: boolean);
+  APaths: TStrings; AAmend: boolean; const AParts: TGittanCommitParts);
 begin
   inherited Create(True);
   FRoot := ARoot;
@@ -59,6 +60,7 @@ begin
   FPaths := TStringList.Create;
   FPaths.AddStrings(APaths);
   FAmend := AAmend;
+  FParts := Copy(AParts);
 end;
 
 destructor TGittanCommitJob.Destroy;
@@ -74,7 +76,7 @@ begin
   Repo := TGittanRepo.Create;
   try
     if Repo.Open(FRoot) then
-      FOk := Repo.Commit(FMessage, FPaths, FAmend, FId);
+      FOk := Repo.Commit(FMessage, FPaths, FAmend, FId, FParts);
     if not FOk then
       FError := Repo.Error;
   finally

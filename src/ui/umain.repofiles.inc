@@ -464,6 +464,13 @@ begin
     UnkeepFile;
     Exit;
   end;
+  { Include All takes the file's changes left out back into the commit
+    (see umain.leaveout.inc). }
+  if (FHeaderInclude >= 0) and (AIndex = FHeaderInclude) then
+  begin
+    IncludeFile;
+    Exit;
+  end;
   Path := FCurrentPath;
   FileTree.Selected := nil;
   OpenFile(IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(Path));

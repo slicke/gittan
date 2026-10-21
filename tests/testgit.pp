@@ -65,6 +65,7 @@ type
     procedure TestCommit;
     procedure TestCommitAmendAndHook;
     procedure TestCommitUnborn;
+    procedure TestCommitParts;
     procedure TestCommitMerge;
     procedure TestToolSearchPath;
     procedure TestNodeManagerBins;
@@ -1344,12 +1345,82 @@ begin
   AssertEquals('?? later.txt'#0, Git(['status', '--porcelain', '-z']));
 end;
 
+{ A part goes in with its own text, the work tree's mode and the rest
+  of the chosen files; the real index then holds the committed text, so
+  what was left out shows as not staged, and a staged file not chosen
+  stays staged. A hook that fails leaves the index as it was; an amend
+  takes parts too. }
+procedure TGitRepoTest.TestCommitParts;
+var
+  Paths: TStringList;
+  Parts: TGittanCommitParts;
+  Parent, Id, Text, Hook: string;
+  Code: integer;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Parent := Trim(Git(['rev-parse', 'HEAD']));
+  WriteFile('a.txt', 'ONE'#10'two'#10'THREE'#10);
+  {$ifdef UNIX}
+  RunCommandIndir(FDir, 'chmod', ['+x', 'a.txt'], Text, Code, []);
+  {$endif}
+  WriteFile('staged.txt', 'staged'#10);
+  Git(['add', 'staged.txt']);
+  WriteFile('new.txt', 'new'#10);
+  Parts := nil;
+  SetLength(Parts, 1);
+  Parts[0].Path := 'a.txt';
+  Parts[0].Text := 'ONE'#10'two'#10'three'#10;
+  Paths := TStringList.Create;
+  try
+    Paths.Add('a.txt');
+    Paths.Add('new.txt');
+    AssertTrue(FRepo.Error, FRepo.Commit('part', Paths, False, Id, Parts));
+    AssertEquals(Trim(Git(['rev-parse', 'HEAD'])), Id);
+    AssertEquals(Parent, Trim(Git(['rev-parse', 'HEAD~1'])));
+    AssertEquals('ONE'#10'two'#10'three'#10, HeadFile(FDir, 'a.txt'));
+    AssertEquals('new'#10, HeadFile(FDir, 'new.txt'));
+    AssertEquals('old'#10, HeadFile(FDir, 'staged.txt'));
+    {$ifdef UNIX}
+    AssertEquals('the mode of the work tree', '100755', Copy(Git(['ls-tree', 'HEAD', 'a.txt']), 1, 6));
+    {$endif}
+    AssertEquals(' M a.txt'#0'M  staged.txt'#0, Git(['status', '--porcelain', '-z']));
+
+    WriteFile('.git/hooks/pre-commit',
+      '#!/bin/sh'#10'echo "hook says no" >&2'#10'exit 1'#10);
+    Hook := IncludeTrailingPathDelimiter(FDir) + SetDirSeparators('.git/hooks/pre-commit');
+    {$ifdef UNIX}
+    RunCommandIndir(FDir, 'chmod', ['+x', Hook], Text, Code, []);
+    {$endif}
+    Paths.Clear;
+    Paths.Add('a.txt');
+    Parts[0].Text := 'ONE'#10'two'#10'THREE'#10;
+    AssertFalse(FRepo.Commit('blocked', Paths, False, Id, Parts));
+    AssertTrue(FRepo.Error, Pos('hook says no', FRepo.Error) > 0);
+    AssertEquals(' M a.txt'#0'M  staged.txt'#0, Git(['status', '--porcelain', '-z']));
+    DeleteFile(Hook);
+
+    AssertTrue(FRepo.Error, FRepo.Commit('amended', Paths, True, Id, Parts));
+    AssertEquals(Parent, Trim(Git(['rev-parse', 'HEAD~1'])));
+    AssertEquals('ONE'#10'two'#10'THREE'#10, HeadFile(FDir, 'a.txt'));
+    AssertEquals('the amended commit keeps its files', 'new'#10, HeadFile(FDir, 'new.txt'));
+    AssertTrue(FRepo.HeadMessage(Text));
+    AssertEquals('amended', Text);
+    AssertEquals('M  staged.txt'#0, Git(['status', '--porcelain', '-z']));
+  finally
+    Paths.Free;
+  end;
+end;
+
 { A merge cannot commit some files only: while a conflict is left it
   is refused, once it is resolved the chosen files are added and the
   whole index committed, with both parents. }
 procedure TGitRepoTest.TestCommitMerge;
 var
   Paths: TStringList;
+  Parts: TGittanCommitParts;
   Branch, Output, Id: string;
   Code: integer;
 begin
@@ -1375,7 +1446,12 @@ begin
     AssertFalse(FRepo.Commit('merged', Paths, False, Id));
     AssertTrue(FRepo.Error, Pos('a.txt', FRepo.Error) > 0);
     Git(['add', 'a.txt']);
-    AssertTrue(FRepo.Error, FRepo.Commit('merged', Paths, False, Id));
+    { A part goes into the index the merge commits. }
+    WriteFile('extra.txt', 'extra'#10'left out'#10);
+    SetLength(Parts, 1);
+    Parts[0].Path := 'extra.txt';
+    Parts[0].Text := 'extra'#10;
+    AssertTrue(FRepo.Error, FRepo.Commit('merged', Paths, False, Id, Parts));
   finally
     Paths.Free;
   end;
@@ -1383,6 +1459,7 @@ begin
   AssertEquals(Trim(Git(['rev-parse', 'topic'])), Trim(Git(['rev-parse', 'HEAD^2'])));
   AssertEquals('both'#10, HeadFile(FDir, 'a.txt'));
   AssertEquals('extra'#10, HeadFile(FDir, 'extra.txt'));
+  AssertEquals(' M extra.txt'#0, Git(['status', '--porcelain', '-z']));
 end;
 
 { Gittan's PATH comes first and no folder twice; git is found on it,

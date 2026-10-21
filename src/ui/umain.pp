@@ -26,7 +26,7 @@ uses
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader, gittan.hintbox,
-  gittan.discard, gittan.keep, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
+  gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, gittan.mdpreview, ATSynEdit_Gaps, md5;
 
 type
@@ -321,8 +321,16 @@ type
     FKeptOf: TIntegerDynArray;
     FHotKeep: integer;
     FHeaderUnkeep: integer;
+    { Leaving changes out of the commit (umain.leaveout.inc): the
+      changes left out of every file, for each line of FChangeLines the
+      one it is or -1, the index of the header's Include All pill (-1
+      for none), and whether the pills shown have Leave Out or Include. }
+    FLeftOut: TGittanKeeps;
+    FLeftOutOf: TIntegerDynArray;
+    FHeaderInclude: integer;
+    FPillChoose: boolean;
     FDiscards: array of TGittanDiscard;
-    FDiscardItem, FUndoDiscardItem: TMenuItem;
+    FDiscardItem, FUndoDiscardItem, FLeaveOutItem: TMenuItem;
     { Resolving one conflict at a time (umain.conflicts.inc): the diff
       line of each conflict's "<<<<<<<" (set by ShowChanges with the
       roles) and its row in the view (found with the block rows), which
@@ -748,6 +756,25 @@ type
     procedure DiscardPillsPick(Sender: TObject; AIndex: integer);
     procedure DiscardPillsLeave(Sender: TObject);
     procedure DiscardThis(const ABlock: TGittanDiscard);
+    { umain.leaveout.inc }
+    function CanLeaveOut: boolean;
+    function CommitStatIndex(const APath: string): integer;
+    function ShownFileChosen: boolean;
+    procedure ApplyLeftOut;
+    function LineLeftOut(ALine: integer): boolean;
+    function BlockLeftOut(ABlock: integer): boolean;
+    function LeaveOutCaption(ABlock: integer): string;
+    procedure ToggleLeaveOutAt(ABlock: integer);
+    procedure LeaveOutBlockAt(ABlock: integer);
+    procedure IncludeBlockAt(ABlock: integer);
+    procedure IncludeFile;
+    procedure IncludeKept(const APairs: TGittanKeepArray);
+    procedure LeftOutChanged;
+    procedure DropLeftOut(const APath: string);
+    function CommitParts(APaths: TStrings; out AParts: TGittanCommitParts;
+      out AError: string): boolean;
+    procedure MenuLeaveOutClick(Sender: TObject);
+    procedure UpdateLeaveOutItem;
     procedure DiscardBlockAt(ABlock: integer);
     procedure UpdateDiscardItems;
     procedure FileMenuClick(Sender: TObject);
@@ -1613,6 +1640,8 @@ resourcestring
   rsChangedOnDisk = 'changed on disk';
   rsDiscardChange = '&Discard Change';
   rsUndoDiscard = '&Undo Discard';
+  rsLeaveOutItem = '&Leave Change Out of Commit';
+  rsIncludeItem = '&Include Change in Commit';
   rsRevertFile = 'Re&vert File...';
   rsUndoRevert = 'Undo Re&vert';
   rsRevertChangesItem = 'Revert Changes...';
@@ -1633,6 +1662,13 @@ resourcestring
   rsKeptBlock = 'Kept the change at line %d of %s as code';
   rsUnkept = 'Shows the change at line %d of %s again';
   rsUnkeptAll = 'Shows every change of %s again';
+  rsLeaveOutPill = 'Leave Out';
+  rsIncludePill = 'Include';
+  rsIncludeAllAction = 'Include All';
+  rsLeftOutBlock = 'Left the change at line %d of %s out of the commit';
+  rsLeftOutFile = 'Left every change of %s out of the commit';
+  rsIncludedBlock = 'The change at line %d of %s goes into the commit';
+  rsIncludedAll = 'Every change of %s goes into the commit';
   rsDiscardAsk = 'Discard this change to %s?' + LineEnding +
     '%s. File > Undo Discard brings it back.';
   rsDiscardBackOne = 'The line goes back to how it is in %s';
@@ -1797,6 +1833,10 @@ const
     translated (see umain.translations.inc). }
   bmFuzzy = 10;
   bmUntranslated = 11;
+  { An added and a deleted line left out of the commit (see
+    umain.leaveout.inc). }
+  bmLeftOutAdded = 12;
+  bmLeftOutDeleted = 13;
   bmHistoryBase = 100;
   { Tags of the editor's attribs that mark the words that differ inside
     an added or a deleted line. }
@@ -1898,6 +1938,8 @@ begin
   FHotKeep := -1;
   FHeaderUnkeep := -1;
   FKeeps := TGittanKeeps.Create;
+  FLeftOut := TGittanKeeps.Create;
+  FHeaderInclude := -1;
   FRawChangeLines := TStringList.Create;
   FBlameCache := TStringList.Create;
   FBlameCache.CaseSensitive := True;
@@ -2223,6 +2265,7 @@ begin
   FreeAndNil(FSubJobs);
   ClearRevertUndo;
   FreeAndNil(FKeeps);
+  FreeAndNil(FLeftOut);
   FreeAndNil(FRawChangeLines);
   FRevertUndo.Free;
   FBranchNames.Free;
@@ -2931,6 +2974,8 @@ begin
     @MenuDiscardClick);
   FUndoDiscardItem := AddItem(FileMenu, rsUndoDiscard, ShortCut(VK_Z, [ssModifier, ssAlt]),
     @MenuUndoDiscardClick);
+  FLeaveOutItem := AddItem(FileMenu, rsLeaveOutItem, ShortCut(VK_K, [ssModifier, ssAlt]),
+    @MenuLeaveOutClick);
   FResolveItem := AddItem(FileMenu, rsResolveHere, ShortCut(VK_R, [ssModifier, ssShift]),
     @MenuResolveHereClick);
   FRevertFileItem := AddItem(FileMenu, rsRevertFile, ShortCut(VK_BACK, [ssModifier, ssAlt]),
@@ -3343,6 +3388,8 @@ begin
       bmConflictTheirs: AColor := RGBToColor(62, 52, 28);
       bmFuzzy: AColor := RGBToColor(62, 52, 28);
       bmUntranslated: AColor := RGBToColor(66, 38, 38);
+      bmLeftOutAdded: AColor := RGBToColor(38, 43, 39);
+      bmLeftOutDeleted: AColor := RGBToColor(47, 39, 39);
     end
   else
     case ABookmarkKind of
@@ -3357,6 +3404,8 @@ begin
       bmConflictTheirs: AColor := RGBToColor(255, 241, 208);
       bmFuzzy: AColor := RGBToColor(255, 241, 208);
       bmUntranslated: AColor := RGBToColor(255, 235, 233);
+      bmLeftOutAdded: AColor := RGBToColor(240, 245, 241);
+      bmLeftOutDeleted: AColor := RGBToColor(248, 242, 241);
     end;
 end;
 
@@ -4043,10 +4092,11 @@ begin
   SaveIndex;
   FSummary.Notice := '';
   FCurrentPath := '';
-  { The discards and the keeps of the previous repository are not for
-    this one. }
+  { The discards, the keeps and the changes left out of the previous
+    repository are not for this one. }
   FDiscards := nil;
   FKeeps.ClearAll;
+  FLeftOut.ClearAll;
   ClearRevertUndo;
   UpdateDiscardItems;
   FPullRange := '';
@@ -4785,9 +4835,10 @@ begin
     ShowTranslationChanges(APath);
     Exit;
   end;
-  SetChangeActions;
   FManualLexer := False;
   FView := gvChanges;
+  ApplyLeftOut;
+  SetChangeActions;
   ApplyLayout;
   BuildChangeView;
   { The summary marks the row of the file the editor showed last. }
@@ -5374,6 +5425,7 @@ const
 {$I umain.gotodef.inc}
 {$I umain.blame.inc}
 {$I umain.discard.inc}
+{$I umain.leaveout.inc}
 {$I umain.index.inc}
 {$I umain.history.inc}
 {$I umain.repofiles.inc}

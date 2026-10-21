@@ -16,7 +16,7 @@ uses
   testworddiff, testgit, testsettings, testsymbols, testlexerpick,
   testsymbolindex, testsnapshots, testblame, testhistory, testsyntaxthemes,
   testgithub, testconflicts, testcli, testsymbolchanges,
-  testcallers, testrepofiles, testdiscard, testkeep, testsubmodules, testupdate,
+  testcallers, testrepofiles, testdiscard, testkeep, testleaveout, testsubmodules, testupdate,
   testreviews, testgraph, testpofile, testcommitjob, testrepoinfo;
 
 var

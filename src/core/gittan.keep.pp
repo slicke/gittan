@@ -54,6 +54,10 @@ type
     {** Removes the keep ApplyKeeps numbered AIndex. }
     procedure Remove(const APath: string; AIndex: integer);
     function Count(const APath: string): integer;
+    {** The keeps of the file, in the order they were added. }
+    function Items(const APath: string): TGittanKeepArray;
+    {** Drops the keeps of the file that ALines does not hold. }
+    procedure Prune(const APath: string; ALines: TStrings);
     procedure Clear(const APath: string);
     procedure ClearAll;
     {** ApplyKeeps with the file's keeps; AKeptOf gives, for every line
@@ -66,6 +70,11 @@ function BlockPairs(ALines: TStrings; AStart: integer): TGittanKeepArray;
 
 {** Whether two keeps name the same change (Line aside). }
 function SameKeep(const A, B: TGittanKeep): boolean;
+
+{** For every line of ALines, the index in AKeeps of the keep its pair
+  is (both lines of a pair get it), or -1: each keep takes the nearest
+  pair with its content that no keep took. }
+function MatchKeeps(ALines: TStrings; const AKeeps: array of TGittanKeep): TIntegerDynArray;
 
 {** Rewrites ALines with the kept pairs as plain code (see the unit
   comment). AKeptOf gives, for every line of the result, the index in
@@ -115,24 +124,82 @@ begin
   end;
 end;
 
-function ApplyKeeps(ALines: TStrings; const AKeeps: array of TGittanKeep;
-  out AKeptOf: TIntegerDynArray): integer;
+function MatchKeeps(ALines: TStrings; const AKeeps: array of TGittanKeep): TIntegerDynArray;
 type
   TCandidate = record
     Pair: TGittanKeep;
-    Keep: integer;
+    Start, Index, Keep: integer;
   end;
 var
-  Blocks: array of record
-    Start, Next: integer;
-    Pairs: TGittanKeepArray;
-  end;
   Cands: array of TCandidate;
-  Starts: array of integer;
-  i, j, b, k, Best, Dist: integer;
+  Pairs: TGittanKeepArray;
+  i, j, k, n, Best, Dist, Old: integer;
+begin
+  Result := nil;
+  SetLength(Result, ALines.Count);
+  for i := 0 to High(Result) do
+    Result[i] := -1;
+  { Every pair of every block is a candidate for a keep. }
+  Cands := nil;
+  i := 0;
+  while i < ALines.Count do
+  begin
+    if ALines[i][1] = ' ' then
+    begin
+      Inc(i);
+      Continue;
+    end;
+    Pairs := BlockPairs(ALines, i);
+    n := Length(Cands);
+    SetLength(Cands, n + Length(Pairs));
+    for k := 0 to High(Pairs) do
+    begin
+      Cands[n + k].Pair := Pairs[k];
+      Cands[n + k].Start := i;
+      Cands[n + k].Index := k;
+      Cands[n + k].Keep := -1;
+    end;
+    while (i < ALines.Count) and (ALines[i][1] <> ' ') do
+      Inc(i);
+  end;
+  { Each keep takes the nearest pair with its content that no keep took. }
+  for j := 0 to High(AKeeps) do
+  begin
+    Best := -1;
+    for k := 0 to High(Cands) do
+      if (Cands[k].Keep < 0) and SameKeep(Cands[k].Pair, AKeeps[j]) then
+      begin
+        Dist := Abs(Cands[k].Pair.Line - AKeeps[j].Line);
+        if (Best < 0) or (Dist < Abs(Cands[Best].Pair.Line - AKeeps[j].Line)) then
+          Best := k;
+      end;
+    if Best >= 0 then
+      Cands[Best].Keep := j;
+  end;
+  { A pair's deleted line is the Index-th of its block, its added line
+    the Index-th after the deleted ones. }
+  for k := 0 to High(Cands) do
+    if Cands[k].Keep >= 0 then
+    begin
+      i := Cands[k].Start;
+      Old := 0;
+      while (i + Old < ALines.Count) and (ALines[i + Old][1] = '-') do
+        Inc(Old);
+      if Cands[k].Pair.HasOld then
+        Result[i + Cands[k].Index] := Cands[k].Keep;
+      if Cands[k].Pair.HasNew then
+        Result[i + Old + Cands[k].Index] := Cands[k].Keep;
+    end;
+end;
+
+function ApplyKeeps(ALines: TStrings; const AKeeps: array of TGittanKeep;
+  out AKeptOf: TIntegerDynArray): integer;
+var
+  Match: TIntegerDynArray;
+  Pairs: TGittanKeepArray;
+  i, k, Keep, Old: integer;
   Out: TStringList;
   Olds, News: TStringList;
-  Kept: TIntegerDynArray;
 
   procedure Emit(const ALine: string; AKeep: integer);
   begin
@@ -156,95 +223,51 @@ var
 begin
   Result := 0;
   AKeptOf := nil;
-  Kept := nil;
-  { The blocks and their pairs, every pair a candidate for a keep. }
-  Blocks := nil;
-  Cands := nil;
-  Starts := nil;
-  i := 0;
-  while i < ALines.Count do
-  begin
-    if ALines[i][1] = ' ' then
-    begin
-      Inc(i);
-      Continue;
-    end;
-    SetLength(Blocks, Length(Blocks) + 1);
-    b := High(Blocks);
-    Blocks[b].Start := i;
-    Blocks[b].Pairs := BlockPairs(ALines, i);
-    SetLength(Starts, b + 1);
-    Starts[b] := Length(Cands);
-    SetLength(Cands, Length(Cands) + Length(Blocks[b].Pairs));
-    for k := 0 to High(Blocks[b].Pairs) do
-    begin
-      Cands[Starts[b] + k].Pair := Blocks[b].Pairs[k];
-      Cands[Starts[b] + k].Keep := -1;
-    end;
-    while (i < ALines.Count) and (ALines[i][1] <> ' ') do
-      Inc(i);
-    Blocks[b].Next := i;
-  end;
-  if Length(Blocks) = 0 then
-  begin
-    SetLength(AKeptOf, ALines.Count);
-    for i := 0 to High(AKeptOf) do
-      AKeptOf[i] := -1;
-    Exit;
-  end;
-  { Each keep takes the nearest pair with its content that no keep took. }
-  for j := 0 to High(AKeeps) do
-  begin
-    Best := -1;
-    for k := 0 to High(Cands) do
-      if (Cands[k].Keep < 0) and SameKeep(Cands[k].Pair, AKeeps[j]) then
-      begin
-        Dist := Abs(Cands[k].Pair.Line - AKeeps[j].Line);
-        if (Best < 0) or (Dist < Abs(Cands[Best].Pair.Line - AKeeps[j].Line)) then
-          Best := k;
-      end;
-    if Best >= 0 then
-    begin
-      Cands[Best].Keep := j;
-      Inc(Result);
-    end;
-  end;
+  Match := MatchKeeps(ALines, AKeeps);
   Out := TStringList.Create;
   Olds := TStringList.Create;
   News := TStringList.Create;
   try
     i := 0;
-    b := 0;
     while i < ALines.Count do
     begin
-      if (b > High(Blocks)) or (i < Blocks[b].Start) then
+      if ALines[i][1] = ' ' then
       begin
         Emit(ALines[i], -1);
         Inc(i);
         Continue;
       end;
-      SetLength(Kept, Length(Blocks[b].Pairs));
-      for k := 0 to High(Kept) do
-        Kept[k] := Cands[Starts[b] + k].Keep;
-      for k := 0 to High(Blocks[b].Pairs) do
-        if Kept[k] < 0 then
+      Pairs := BlockPairs(ALines, i);
+      Old := 0;
+      while (i + Old < ALines.Count) and (ALines[i + Old][1] = '-') do
+        Inc(Old);
+      for k := 0 to High(Pairs) do
+      begin
+        if Pairs[k].HasOld then
+          Keep := Match[i + k]
+        else
+          Keep := Match[i + Old + k];
+        if Keep < 0 then
         begin
-          if Blocks[b].Pairs[k].HasOld then
-            Olds.Add(Blocks[b].Pairs[k].Old);
-          if Blocks[b].Pairs[k].HasNew then
-            News.Add(Blocks[b].Pairs[k].New);
+          if Pairs[k].HasOld then
+            Olds.Add(Pairs[k].Old);
+          if Pairs[k].HasNew then
+            News.Add(Pairs[k].New);
         end
         else
         begin
+          Inc(Result);
           Flush;
-          if Blocks[b].Pairs[k].HasNew then
-            Emit(' ' + Blocks[b].Pairs[k].New, Kept[k]);
+          if Pairs[k].HasNew then
+            Emit(' ' + Pairs[k].New, Keep);
         end;
+      end;
       Flush;
-      i := Blocks[b].Next;
-      Inc(b);
+      while (i < ALines.Count) and (ALines[i][1] <> ' ') do
+        Inc(i);
     end;
     ALines.Assign(Out);
+    SetLength(AKeptOf, ALines.Count);
   finally
     News.Free;
     Olds.Free;
@@ -308,6 +331,42 @@ begin
     Result := 0
   else
     Result := Length(FLists[i]);
+end;
+
+function TGittanKeeps.Items(const APath: string): TGittanKeepArray;
+var
+  i: integer;
+begin
+  i := IndexOf(APath);
+  if i < 0 then
+    Result := nil
+  else
+    Result := Copy(FLists[i]);
+end;
+
+procedure TGittanKeeps.Prune(const APath: string; ALines: TStrings);
+var
+  Match: TIntegerDynArray;
+  Found: array of boolean;
+  i, k, n: integer;
+begin
+  i := IndexOf(APath);
+  if (i < 0) or (Length(FLists[i]) = 0) then
+    Exit;
+  Match := MatchKeeps(ALines, FLists[i]);
+  Found := nil;
+  SetLength(Found, Length(FLists[i]));
+  for k := 0 to High(Match) do
+    if Match[k] >= 0 then
+      Found[Match[k]] := True;
+  n := 0;
+  for k := 0 to High(FLists[i]) do
+    if Found[k] then
+    begin
+      FLists[i][n] := FLists[i][k];
+      Inc(n);
+    end;
+  SetLength(FLists[i], n);
 end;
 
 procedure TGittanKeeps.Clear(const APath: string);

@@ -107,6 +107,15 @@ type
     nothing (rmHard, every change in tracked files lost). }
   TGittanResetMode = (rmSoft, rmMixed, rmHard);
 
+  {** A file committed with other content than the work tree's: Text is
+    what goes in for Path, the work tree's with some of its changes left
+    out (see gittan.leaveout and TGittanRepo.Commit). }
+  TGittanCommitPart = record
+    Path: string;
+    Text: RawByteString;
+  end;
+  TGittanCommitParts = array of TGittanCommitPart;
+
   {** One opened repository. Open finds the work tree root for a folder, and
     the other calls run inside that root. }
   TGittanRepo = class
@@ -229,9 +238,16 @@ type
       git runs the repository's hooks and signs as configured. False,
       with the reason in Error (a hook's output, say), when nothing was
       committed: also while any file is in conflict, or with no paths and
-      no AAmend outside those operations. AId is the new commit. }
+      no AAmend outside those operations. AId is the new commit.
+      AParts are files among APaths that go in with the text they give
+      in place of the work tree's (with the work tree's mode, through
+      git's filters as git add would): the commit is then made from a
+      temporary index, HEAD's tree with APaths added and AParts written
+      over them, and the real index takes the committed paths as the new
+      HEAD has them, so what was left out shows as not staged; during a
+      merge, a cherry-pick or a revert AParts go into the real index. }
     function Commit(const AMessage: string; APaths: TStrings; AAmend: boolean;
-      out AId: string): boolean;
+      out AId: string; const AParts: TGittanCommitParts = nil): boolean;
     {** The whole message of HEAD, without its trailing line ends; false
       before the first commit. }
     function HeadMessage(out AMessage: string): boolean;
@@ -2282,9 +2298,9 @@ end;
   added, such a path is left to the index, which already says it is
   gone. }
 function TGittanRepo.Commit(const AMessage: string; APaths: TStrings;
-  AAmend: boolean; out AId: string): boolean;
+  AAmend: boolean; out AId: string; const AParts: TGittanCommitParts): boolean;
 var
-  Output, Entry, Path, XY, Op, Err, SpecFile, AddFile, MsgFile: string;
+  Output, Entry, Path, XY, Op, Err, SpecFile, AddFile, MsgFile, PartFile, Index: string;
   Fields, Chosen, Spec, Added: TStringList;
   Args: array of string;
   Whole: boolean;
@@ -2303,6 +2319,74 @@ var
     Result := '';
     for j := 0 to AList.Count - 1 do
       Result := Result + AList[j] + #0;
+  end;
+
+  { Writes AParts over their paths in the index AIndex ('' for the
+    repository's): each text goes in as a blob, through the filters of
+    its path, with the mode the index has for the path, which git add
+    gave it from the work tree. }
+  function WriteParts(const AIndex: string): boolean;
+  var
+    j: integer;
+    Blob, Mode: string;
+  begin
+    Result := True;
+    for j := 0 to High(AParts) do
+    begin
+      WriteBytes(PartFile, AParts[j].Text);
+      if not RunGit(FRoot, ['hash-object', '-w', '--path=' + AParts[j].Path, PartFile],
+        Blob, AIndex) or not RunGit(FRoot, ['--literal-pathspecs', 'ls-files', '-s',
+        '--', AParts[j].Path], Mode, AIndex) then
+        Exit(False);
+      Blob := Trim(Blob);
+      Mode := Copy(Mode, 1, Pos(' ', Mode) - 1);
+      if Mode = '' then
+        Mode := '100644';
+      if not RunGit(FRoot, ['update-index', '--add', '--cacheinfo',
+        Mode + ',' + Blob + ',' + AParts[j].Path], Output, AIndex) then
+        Exit(False);
+    end;
+  end;
+
+  { The commit of AParts with the rest of APaths: from a temporary index
+    of HEAD's tree with the paths added and the parts written over them,
+    so the hooks and signing run as for any commit and nothing else the
+    real index holds goes in. The real index then takes the committed
+    paths as the new HEAD has them, as git commit --only leaves them. }
+  function CommitThroughIndex: boolean;
+  begin
+    Result := False;
+    Index := GetTempFileName(GetTempDir, 'gittan-commit-index-');
+    DeleteFile(Index);
+    if HasCommit('HEAD') then
+      Result := RunGit(FRoot, ['read-tree', 'HEAD'], Output, Index)
+    else
+      Result := RunGit(FRoot, ['read-tree', '--empty'], Output, Index);
+    if not Result then
+      Exit;
+    WriteBytes(SpecFile, NulList(Spec));
+    Result := RunGit(FRoot, ['--literal-pathspecs', 'add', '-A',
+      '--pathspec-from-file=' + SpecFile, '--pathspec-file-nul'], Output, Index) and
+      WriteParts(Index);
+    if not Result then
+      Exit;
+    WriteBytes(MsgFile, AMessage);
+    Args := nil;
+    Arg('commit');
+    Arg('-q');
+    Arg('-F');
+    Arg(MsgFile);
+    if AAmend then
+      Arg('--amend');
+    Result := RunGit(FRoot, Args, Output, Index);
+    if not Result then
+      Exit;
+    Err := FError;
+    RunGit(FRoot, ['--literal-pathspecs', 'reset', '-q', '--pathspec-from-file=' +
+      SpecFile, '--pathspec-file-nul'], Output);
+    FError := Err;
+    if RunGit(FRoot, ['rev-parse', 'HEAD'], Output) then
+      AId := Trim(Output);
   end;
 
 begin
@@ -2325,6 +2409,8 @@ begin
   SpecFile := GetTempFileName(GetTempDir, 'gittan-paths-');
   AddFile := GetTempFileName(GetTempDir, 'gittan-add-');
   MsgFile := GetTempFileName(GetTempDir, 'gittan-message-');
+  PartFile := GetTempFileName(GetTempDir, 'gittan-part-');
+  Index := '';
   try
     Chosen.CaseSensitive := True;
     Chosen.Sorted := True;
@@ -2360,6 +2446,8 @@ begin
         Added.Add(Path);
     end;
 
+    if (Length(AParts) > 0) and not Whole then
+      Exit(CommitThroughIndex);
     if Added.Count > 0 then
     begin
       WriteBytes(AddFile, NulList(Added));
@@ -2367,6 +2455,8 @@ begin
         '--pathspec-from-file=' + AddFile, '--pathspec-file-nul'], Output) then
         Exit(False);
     end;
+    if Whole and not WriteParts('') then
+      Exit(False);
     WriteBytes(MsgFile, AMessage);
     Args := nil;
     Arg('--literal-pathspecs');
@@ -2410,6 +2500,12 @@ begin
     DeleteFile(SpecFile);
     DeleteFile(AddFile);
     DeleteFile(MsgFile);
+    DeleteFile(PartFile);
+    if Index <> '' then
+    begin
+      DeleteFile(Index);
+      DeleteFile(Index + '.lock');
+    end;
   end;
 end;
 

@@ -32,6 +32,7 @@ type
     procedure TestUnmatched;
     procedure TestNoBlocks;
     procedure TestKeeps;
+    procedure TestMatch;
   end;
 
 implementation
@@ -195,6 +196,13 @@ begin
     K.Apply('none.txt', FLines, FKeptOf);
     AssertEquals('untouched', ' a|-b|+B| d|', Joined);
     AssertEquals('kept of for untouched', 4, Length(FKeptOf));
+    { Prune drops the keep the diff does not hold, Items gives the rest. }
+    K.Add('a.txt', Keep('x', 'X', 9));
+    Lines([' a', '-b', '-c', '+B', '+C', ' d']);
+    K.Prune('a.txt', FLines);
+    AssertEquals('pruned', 1, K.Count('a.txt'));
+    AssertEquals('C', K.Items('a.txt')[0].New);
+    AssertEquals('no items', 0, Length(K.Items('none.txt')));
     K.Clear('a.txt');
     AssertEquals(0, K.Count('a.txt'));
     AssertEquals(1, K.Count('other.txt'));
@@ -203,6 +211,22 @@ begin
   finally
     K.Free;
   end;
+end;
+
+{ Both lines of a matched pair get the keep's index; a deleted line
+  past the added ones is matched on its own. }
+procedure TKeepTest.TestMatch;
+var
+  M: TIntegerDynArray;
+begin
+  Lines([' a', '-b', '-c', '+B', ' d']);
+  M := MatchKeeps(FLines, [Keep('c', '', 3), Keep('b', 'B', 2)]);
+  AssertEquals(5, Length(M));
+  AssertEquals(-1, M[0]);
+  AssertEquals(1, M[1]);
+  AssertEquals(0, M[2]);
+  AssertEquals(1, M[3]);
+  AssertEquals(-1, M[4]);
 end;
 
 initialization
