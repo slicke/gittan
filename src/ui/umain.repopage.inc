@@ -13,7 +13,12 @@
   off the main thread each time the page is shown and after each
   refresh while it is; the page keeps the facts read before meanwhile.
   The row of the page shown is filled; a file in the editor fills none.
-  View > Repository Info (Cmd+Shift+I) opens the page too. }
+  View > Repository Info (Cmd+Shift+I) opens the page too. The tiles and
+  the authors lead on (RepoPageOpenTarget): the commits to the commit
+  graph, the branches and the tags to their lists, dropped from the
+  tile, the files to the tree of HEAD in the repository browser, the
+  submodules to a submodule's page (from a list when there are more),
+  an author to the commit graph filtered to them. }
 
 const
   { How many authors and tags the page lists. }
@@ -40,6 +45,60 @@ begin
     navHome: MenuSummaryClick(Sender);
     navRepository: MenuRepoInfoClick(Sender);
   end;
+end;
+
+procedure TForm1.RepoPageOpenTarget(Sender: TObject; ATarget: TGittanRepoTarget;
+  const AName: string; const AScreenRect: TRect);
+var
+  Head: TGittanCommitLine;
+  Body: string;
+  i: integer;
+begin
+  if FRepo.Root = '' then
+    Exit;
+  case ATarget of
+    rtCommits:
+      ShowCommitGraph('');
+    rtBranches:
+      ShowBranchList(blSwitch, AScreenRect);
+    rtTags:
+      ShowTagList(AScreenRect);
+    rtFiles:
+      if FRepo.CommitDetails('HEAD', Head, Body) then
+        if FBranch <> '' then
+          BrowseCommit(Head.Hash, FBranch, Head.Subject)
+        else
+          BrowseCommit(Head.Hash, Head.Short, Head.Subject);
+    rtSubmodules:
+      if Length(FSubmodules) = 1 then
+        ShowSubmodule(0)
+      else if Length(FSubmodules) > 1 then
+      begin
+        FSubListPopup.Clear;
+        FSubListPopup.AddHeader(rsSubmodulesHeader);
+        SetLength(FSubListRows, Length(FSubmodules));
+        for i := 0 to High(FSubmodules) do
+          FSubListRows[i] := FSubListPopup.Add(FSubmodules[i].Path, FSubmodules[i].Branch);
+        FSubListPopup.Popup(AScreenRect);
+      end;
+    rtAuthor:
+      if Pos(' ', AName) > 0 then
+        ShowCommitGraph('author:"' + AName + '"')
+      else
+        ShowCommitGraph('author:' + AName);
+  end;
+end;
+
+procedure TForm1.SubListPopupPick(Sender: TObject; AIndex: integer);
+var
+  i: integer;
+begin
+  for i := 0 to Min(High(FSubListRows), High(FSubmodules)) do
+    if FSubListRows[i] = AIndex then
+    begin
+      ShowSubmodule(i);
+      Exit;
+    end;
 end;
 
 procedure TForm1.MenuRepoInfoClick(Sender: TObject);

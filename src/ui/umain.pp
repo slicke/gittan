@@ -496,6 +496,11 @@ type
       items. }
     FTags: TGittanTags;
     FTagPopup: TGittanPopupList;
+    { The submodules, dropped from the Repository page's tile when there
+      is more than one; a pick shows that one's page. }
+    FSubListPopup: TGittanPopupList;
+    { The popup's index of each submodule's row, in FSubmodules' order. }
+    FSubListRows: array of integer;
     FTagRows: TIntegerDynArray;
     FTagMenu: TPopupMenu;
     FMenuTag: TGittanTag;
@@ -736,6 +741,9 @@ type
     procedure SetupSideNav;
     procedure SideNavPick(Sender: TObject; AIndex: integer);
     procedure MenuRepoInfoClick(Sender: TObject);
+    procedure RepoPageOpenTarget(Sender: TObject; ATarget: TGittanRepoTarget;
+      const AName: string; const AScreenRect: TRect);
+    procedure SubListPopupPick(Sender: TObject; AIndex: integer);
     procedure ShowRepoInfo;
     procedure StartRepoInfoJob;
     procedure AbandonRepoInfoJob;
@@ -1780,6 +1788,8 @@ resourcestring
   rsNoTags = 'No tags';
   rsTagNewRow = 'New Tag at HEAD...';
   rsFilterTags = 'Filter tags';
+  rsFilterSubmodules = 'Filter submodules';
+  rsSubmodulesHeader = 'Submodules';
   rsReflogItem = 'Re&flog...';
   rsReflog = 'Where HEAD has been';
   rsNoReflog = 'The reflog is empty';
@@ -2506,6 +2516,10 @@ begin
   FTagPopup.FilterHint := rsFilterTags;
   FTagPopup.OnPick := @TagPopupPick;
   FTagPopup.OnContext := @TagContext;
+  FSubListPopup := TGittanPopupList.Create(Self);
+  FSubListPopup.Parent := Self;
+  FSubListPopup.FilterHint := rsFilterSubmodules;
+  FSubListPopup.OnPick := @SubListPopupPick;
   FReflogMenu := TPopupMenu.Create(Self);
   FReflogPopup := TGittanPopupList.Create(Self);
   FReflogPopup.Parent := Self;
@@ -2575,6 +2589,7 @@ begin
   FRepoPage.Visible := False;
   FRepoPage.OnOpenUrl := @SummaryOpenUrl;
   FRepoPage.OnEditRemotes := @RepoPageEditRemotes;
+  FRepoPage.OnOpenTarget := @RepoPageOpenTarget;
   { So does the page of a submodule. }
   FSubPage := TGittanSubPage.Create(Self);
   FSubPage.Parent := FSummaryBox;
@@ -2895,6 +2910,9 @@ begin
     FTagPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
+    FSubListPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
+      RGBToColor(100, 160, 240));
     FReflogPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
@@ -2965,6 +2983,9 @@ begin
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
     FTagPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
+      RGBToColor(0, 110, 230));
+    FSubListPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
     FReflogPopup.SetColors(clWhite, RGBToColor(30, 30, 30),

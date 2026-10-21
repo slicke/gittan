@@ -13,6 +13,12 @@ unit gittan.repopage;
   commits, each with a disc of their initials and a bar in a color of
   the commit graph's lanes that compares their counts.
 
+  The tiles and the authors lead on (OnOpenTarget, a fill under the
+  mouse): the commits to the commit graph, the branches and the tags to
+  their lists, the files to the tree of HEAD, the submodules to their
+  pages, an author to the commit graph filtered to them. The size is a
+  fact alone.
+
   It paints itself in the editor's palette, like the summary, and sizes
   its height to its content so it can sit in the same TScrollBox. While
   the facts are being read it says so under the name, keeping the facts
@@ -26,6 +32,13 @@ uses
   Classes, SysUtils, Types, Controls, Graphics, gittan.repoinfo, gittan.summary;
 
 type
+  {** What a tile or an author's row leads to. }
+  TGittanRepoTarget = (rtCommits, rtBranches, rtTags, rtFiles, rtSubmodules, rtAuthor);
+  {** A click on a tile or an author's row: the target, the author's name
+    for rtAuthor, and the tile or row in screen coordinates, for a list
+    to drop down from. }
+  TGittanRepoTargetEvent = procedure(Sender: TObject; ATarget: TGittanRepoTarget;
+    const AName: string; const AScreenRect: TRect) of object;
 
   { TGittanRepoPage }
 
@@ -42,6 +55,7 @@ type
     FContentHeight: integer;
     FOnOpenUrl: TGittanOpenUrlEvent;
     FOnEditRemotes: TNotifyEvent;
+    FOnOpenTarget: TGittanRepoTargetEvent;
     function LinkAt(X, Y: integer): integer;
     procedure SetHot(AValue: integer);
     function FitLeft(const AText: string; AMaxWidth: integer): string;
@@ -89,6 +103,9 @@ type
     property OnOpenUrl: TGittanOpenUrlEvent read FOnOpenUrl write FOnOpenUrl;
     {** A click on Edit Remotes... at the right of the remotes' heading. }
     property OnEditRemotes: TNotifyEvent read FOnEditRemotes write FOnEditRemotes;
+    {** A click on a tile that leads on or on an author's row; while it
+      is set they take a fill under the mouse. }
+    property OnOpenTarget: TGittanRepoTargetEvent read FOnOpenTarget write FOnOpenTarget;
   end;
 
 implementation
@@ -125,8 +142,12 @@ resourcestring
   rsDetached = 'detached';
 
 const
-  { The link of Edit Remotes..., told apart from a web address. }
+  { The link of Edit Remotes..., told apart from a web address, and the
+    links of the tiles (the target's ordinal after it) and the authors
+    (the name after it). }
   EditRemotesLink = 'gittan:remotes';
+  TileLink = 'gittan:tile:';
+  AuthorLink = 'gittan:author:';
   Pad = 24;
   Gap = 12;
   RowHeight = 26;
@@ -390,19 +411,32 @@ end;
 procedure TGittanRepoPage.PaintTiles(var Y: integer);
 var
   Labels, Values, Details: array of string;
+  Targets: array of integer;
   n, MaxCols, Rows, Cols, TileW, TileH, BodyH, ValueH, i, X, TileY, Inner: integer;
   Tags: string;
   Settings: TFormatSettings;
   R: TRect;
 
-  procedure Add(const ALabel, AValue, ADetail: string);
+  { ATarget -1 for a tile that leads nowhere. }
+  procedure Add(const ALabel, AValue, ADetail: string; ATarget: integer);
   begin
     SetLength(Labels, Length(Labels) + 1);
     SetLength(Values, Length(Values) + 1);
     SetLength(Details, Length(Details) + 1);
+    SetLength(Targets, Length(Targets) + 1);
     Labels[High(Labels)] := ALabel;
     Values[High(Values)] := AValue;
     Details[High(Details)] := ADetail;
+    Targets[High(Targets)] := ATarget;
+  end;
+
+  { Leads on only when the repository has a commit. }
+  function WithCommits(ATarget: TGittanRepoTarget): integer;
+  begin
+    if FInfo.Commits > 0 then
+      Result := Ord(ATarget)
+    else
+      Result := -1;
   end;
 
 begin
@@ -410,13 +444,15 @@ begin
   Labels := nil;
   Values := nil;
   Details := nil;
+  Targets := nil;
   if FInfo.FirstCommit > 0 then
     Add(rsCommitsLabel, GroupDigits(FInfo.Commits), Format(rsSince,
-      [FormatDateTime('d mmm yyyy', UniversalTimeToLocal(FInfo.FirstCommit), Settings)]))
+      [FormatDateTime('d mmm yyyy', UniversalTimeToLocal(FInfo.FirstCommit), Settings)]),
+      WithCommits(rtCommits))
   else
-    Add(rsCommitsLabel, GroupDigits(FInfo.Commits), '');
+    Add(rsCommitsLabel, GroupDigits(FInfo.Commits), '', WithCommits(rtCommits));
   Add(rsBranchesLabel, GroupDigits(FInfo.LocalBranches), rsLocal + ' · ' +
-    Format(rsRemoteBranches, [GroupDigits(FInfo.RemoteBranches)]));
+    Format(rsRemoteBranches, [GroupDigits(FInfo.RemoteBranches)]), Ord(rtBranches));
   if FInfo.Tags = 0 then
     Tags := rsNoTags
   else
@@ -431,11 +467,11 @@ begin
     if Length(FInfo.NewestTags) < FInfo.Tags then
       Tags := Tags + ', …';
   end;
-  Add(rsTagsLabel, GroupDigits(FInfo.Tags), Tags);
-  Add(rsFilesLabel, GroupDigits(FInfo.Files), rsTracked);
+  Add(rsTagsLabel, GroupDigits(FInfo.Tags), Tags, WithCommits(rtTags));
+  Add(rsFilesLabel, GroupDigits(FInfo.Files), rsTracked, WithCommits(rtFiles));
   if FInfo.Submodules > 0 then
-    Add(rsSubmodulesLabel, GroupDigits(FInfo.Submodules), rsCheckedIn);
-  Add(rsSizeLabel, FormatKiB(FInfo.SizeKiB), rsObjects);
+    Add(rsSubmodulesLabel, GroupDigits(FInfo.Submodules), rsCheckedIn, Ord(rtSubmodules));
+  Add(rsSizeLabel, FormatKiB(FInfo.SizeKiB), rsObjects, -1);
 
   n := Length(Labels);
   MaxCols := Max(1, (Width - 2 * Pad + TileGap) div (TileMinWidth + TileGap));
@@ -456,6 +492,12 @@ begin
     Canvas.Pen.Style := psClear;
     Canvas.Brush.Style := bsSolid;
     Canvas.Brush.Color := FCard;
+    if (Targets[i] >= 0) and Assigned(FOnOpenTarget) then
+    begin
+      if FHot = Length(FLinkRects) then
+        Canvas.Brush.Color := FHover;
+      AddLink(R, TileLink + IntToStr(Targets[i]));
+    end;
     Canvas.RoundRect(R, TileRadius, TileRadius);
     Canvas.Pen.Style := psSolid;
     Canvas.Brush.Style := bsClear;
@@ -519,6 +561,21 @@ begin
   begin
     CenterY := Y + ContributorRow div 2;
     TextY := CenterY - TextH div 2;
+    { The row leads to the author's commits, filled under the mouse. }
+    if Assigned(FOnOpenTarget) then
+    begin
+      R := Rect(Pad - 6, Y + 1, Width - Pad + 6, Y + ContributorRow - 1);
+      if FHot = Length(FLinkRects) then
+      begin
+        Canvas.Pen.Style := psClear;
+        Canvas.Brush.Style := bsSolid;
+        Canvas.Brush.Color := FHover;
+        Canvas.RoundRect(R, 8, 8);
+        Canvas.Pen.Style := psSolid;
+        Canvas.Brush.Style := bsClear;
+      end;
+      AddLink(R, AuthorLink + FInfo.Contributors[i].Name);
+    end;
     { The disc and the initials, in the background color so they read
       on the lighter hues of a dark theme and the deeper of a light one. }
     Canvas.Pen.Style := psClear;
@@ -714,7 +771,8 @@ end;
 
 procedure TGittanRepoPage.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
 var
-  i: integer;
+  i, n: integer;
+  R: TRect;
 begin
   inherited MouseUp(Button, Shift, X, Y);
   if Button <> mbLeft then
@@ -722,7 +780,21 @@ begin
   i := LinkAt(X, Y);
   if i < 0 then
     Exit;
-  if FLinkUrls[i] = EditRemotesLink then
+  R := Rect(ClientToScreen(FLinkRects[i].TopLeft).X, ClientToScreen(FLinkRects[i].TopLeft).Y,
+    ClientToScreen(FLinkRects[i].BottomRight).X, ClientToScreen(FLinkRects[i].BottomRight).Y);
+  if Copy(FLinkUrls[i], 1, Length(TileLink)) = TileLink then
+  begin
+    n := StrToIntDef(Copy(FLinkUrls[i], Length(TileLink) + 1, MaxInt), -1);
+    if Assigned(FOnOpenTarget) and (n >= Ord(Low(TGittanRepoTarget))) and
+      (n <= Ord(High(TGittanRepoTarget))) then
+      FOnOpenTarget(Self, TGittanRepoTarget(n), '', R);
+  end
+  else if Copy(FLinkUrls[i], 1, Length(AuthorLink)) = AuthorLink then
+  begin
+    if Assigned(FOnOpenTarget) then
+      FOnOpenTarget(Self, rtAuthor, Copy(FLinkUrls[i], Length(AuthorLink) + 1, MaxInt), R);
+  end
+  else if FLinkUrls[i] = EditRemotesLink then
   begin
     if Assigned(FOnEditRemotes) then
       FOnEditRemotes(Self);
