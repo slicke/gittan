@@ -16,10 +16,11 @@ uses
   Classes, SysUtils, gittan.git;
 
 type
-  {** A remote: its name, the URL it fetches from, and the same as a web
-    address when the URL is one of a hosting site (Web is '' otherwise). }
+  {** A remote: its name, the URL it fetches from, the one it pushes to
+    (the same unless a push URL is set), and the fetch URL as a web
+    address when it is one of a hosting site (Web is '' otherwise). }
   TGittanRemote = record
-    Name, Url, Web: string;
+    Name, Url, PushUrl, Web: string;
   end;
   TGittanRemotes = array of TGittanRemote;
 
@@ -55,8 +56,14 @@ type
     NewestTags: TGittanTagInfos;
   end;
 
-{** The remotes from `git remote -v`: one per name, with its fetch URL. }
+{** The remotes from `git remote -v`: one per name, with its fetch URL
+  and its push URL, the first of each when there are more. }
 function ParseRemotes(const AOutput: string): TGittanRemotes;
+
+{** The remotes of the repository at ARoot, read by ParseRemotes; false,
+  with git's message in AError, when git failed. }
+function ReadRemotes(const ARoot: string; out ARemotes: TGittanRemotes;
+  out AError: string): boolean;
 
 {** The web address of a remote URL: an https URL of a hosting site
   without its .git, the same for an scp-like (git@host:owner/name.git)
@@ -132,8 +139,8 @@ function ParseRemotes(const AOutput: string): TGittanRemotes;
 var
   Lines: TStringList;
   Line, Name, Url: string;
-  Tab, Space, i: integer;
-  Seen: boolean;
+  Tab, Space, i, At: integer;
+  Push: boolean;
 begin
   Result := nil;
   Lines := TStringList.Create;
@@ -141,30 +148,51 @@ begin
     Lines.Text := AOutput;
     for Line in Lines do
     begin
-      { "origin<tab>https://... (fetch)" }
+      { "origin<tab>https://... (fetch)", then the same with (push) }
       Tab := Pos(#9, Line);
-      if Tab = 0 then
+      if Tab <= 1 then
         Continue;
       Name := Copy(Line, 1, Tab - 1);
       Url := Copy(Line, Tab + 1, MaxInt);
       Space := RPos(' ', Url);
-      if (Space > 0) and (Copy(Url, Space + 1, MaxInt) = '(push)') then
-        Continue;
+      Push := (Space > 0) and (Copy(Url, Space + 1, MaxInt) = '(push)');
       if Space > 0 then
         Url := Copy(Url, 1, Space - 1);
-      Seen := False;
+      At := -1;
       for i := 0 to High(Result) do
-        Seen := Seen or (Result[i].Name = Name);
-      if Seen or (Name = '') then
-        Continue;
-      SetLength(Result, Length(Result) + 1);
-      Result[High(Result)].Name := Name;
-      Result[High(Result)].Url := Url;
-      Result[High(Result)].Web := RemoteWebUrl(Url);
+        if Result[i].Name = Name then
+          At := i;
+      if At < 0 then
+      begin
+        SetLength(Result, Length(Result) + 1);
+        At := High(Result);
+        Result[At].Name := Name;
+      end;
+      if Push then
+      begin
+        if Result[At].PushUrl = '' then
+          Result[At].PushUrl := Url;
+      end
+      else if Result[At].Url = '' then
+      begin
+        Result[At].Url := Url;
+        Result[At].Web := RemoteWebUrl(Url);
+      end;
     end;
   finally
     Lines.Free;
   end;
+end;
+
+function ReadRemotes(const ARoot: string; out ARemotes: TGittanRemotes;
+  out AError: string): boolean;
+var
+  Output: string;
+begin
+  ARemotes := nil;
+  Result := RunGitIn(ARoot, ['remote', '-v'], Output, AError);
+  if Result then
+    ARemotes := ParseRemotes(Output);
 end;
 
 function RemoteWebUrl(const AUrl: string): string;

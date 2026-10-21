@@ -28,7 +28,8 @@ uses
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader, gittan.hintbox,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, gittan.mdpreview,
-  gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.repobrowser, ATSynEdit_Gaps, md5;
+  gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.repobrowser, gittan.clonedlg,
+  gittan.remotesdlg, ATSynEdit_Gaps, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -153,6 +154,11 @@ type
     { Clean (umain.clean.inc): the File menu's item and what the dialog
       deleted last (untracked, ignored or both), offered first again. }
     FCleanItem: TMenuItem;
+    FCloneItem, FInitItem, FRemotesItem: TMenuItem;
+    { Where the last clone went, and whether it brought the submodules:
+      what the clone dialog starts with. }
+    FCloneParent: string;
+    FCloneSubmodules: boolean;
     FCleanKind: TGittanCleanKind;
     { The GitHub items of the editor menu, made only when gh is installed
       (the file menu's is enabled with the rest of its items); the editor the editor menu popped up over and the
@@ -495,6 +501,9 @@ type
     FRetryKind: TGittanRemoteKind;
     FRetryMode: TGittanPullMode;
     FRetryArg, FRetryRemote: string;
+    { A clone's folder and submodules, for Clone Again. }
+    FRetryRoot: string;
+    FRetrySubmodules: boolean;
     { The list a click on the status bar's pull request drops down, and
       what each of its rows does (the pa* constants). }
     FPullPopup: TGittanPopupList;
@@ -651,6 +660,8 @@ type
     procedure ShowWelcome(const AError: string);
     procedure WelcomeOpen(Sender: TObject);
     procedure WelcomeOpenRecent(Sender: TObject; const ARoot: string);
+    procedure WelcomeClone(Sender: TObject);
+    procedure WelcomeInit(Sender: TObject);
     function SelectedPath: string;
     function StatIcon(const AStat: TGittanFileStat): integer;
     function StatHint(const AStat: TGittanFileStat): string;
@@ -1057,6 +1068,15 @@ type
     procedure MenuUndoRevertClick(Sender: TObject);
     function CanClean: boolean;
     procedure MenuCleanClick(Sender: TObject);
+    function CloneParent: string;
+    procedure StartClone(const AUrl, ATarget: string; ASubmodules: boolean);
+    procedure CloneDone(AJob: TGittanRemoteJob);
+    procedure MenuCloneClick(Sender: TObject);
+    procedure MenuInitClick(Sender: TObject);
+    function CanEditRemotes: boolean;
+    procedure EditRemotesAsk;
+    procedure MenuRemotesClick(Sender: TObject);
+    procedure RepoPageEditRemotes(Sender: TObject);
     procedure BrowseCommit(const AHash, AName, ASubject: string);
     function IsChangedPath(const APath: string): boolean;
     procedure ClearRevertUndo;
@@ -1296,6 +1316,21 @@ resourcestring
   rsOpen = '&Open...';
   rsOpenRepo = 'Open &Repository...';
   rsOpenRecent = 'Open Re&cent';
+  rsCloneItem = 'Clo&ne Repository...';
+  rsInitItem = '&Init Repository...';
+  rsInitTitle = 'Init Repository';
+  rsInitInside = 'The folder %s is inside the repository %s. Make a repository of its own ' +
+    'in it anyway? The outer repository then no longer sees its files.';
+  rsInitAction = 'Init';
+  rsInitFailed = 'Could not make a repository in %s';
+  rsInitAlready = '%s is a repository already';
+  rsInitDone = 'Made %s a new repository';
+  rsRemotesItem = 'Re&motes...';
+  rsCloning = 'Cloning %s...';
+  rsNoticeCloning = 'Cloning %s';
+  rsCloneFailed = 'The clone failed';
+  rsCloneAgain = 'Clone Again';
+  rsCloned = 'Cloned %s';
   rsClearMenu = 'Clear Menu';
   rsSyntax = '&Syntax';
   rsAutomatic = '&Automatic';
@@ -2358,6 +2393,7 @@ begin
   except
     FreeAndNil(FAppIcon);
   end;
+  FCloneSubmodules := True;
   FWelcome := TGittanWelcome.Create(Self);
   FWelcome.Parent := FSummaryBox;
   FWelcome.Title := 'Gittan';
@@ -2366,12 +2402,15 @@ begin
   FWelcome.SetIcon(FAppIcon);
   FWelcome.OnOpen := @WelcomeOpen;
   FWelcome.OnOpenRecent := @WelcomeOpenRecent;
+  FWelcome.OnClone := @WelcomeClone;
+  FWelcome.OnInit := @WelcomeInit;
   { The Repository page shares the box too; its links open as the
     summary's do. }
   FRepoPage := TGittanRepoPage.Create(Self);
   FRepoPage.Parent := FSummaryBox;
   FRepoPage.Visible := False;
   FRepoPage.OnOpenUrl := @SummaryOpenUrl;
+  FRepoPage.OnEditRemotes := @RepoPageEditRemotes;
   { The notice over the form, with the same icon. }
   FNotice := TGittanNotice.Create(Self);
   FNotice.Parent := Self;
@@ -3149,6 +3188,8 @@ begin
   AddItem(FileMenu, rsOpenRepo, ShortCut(VK_O, [ssModifier, ssShift]), @MenuOpenRepoClick);
   FRecentMenu := AddItem(FileMenu, rsOpenRecent, 0, nil);
   RebuildRecentMenu;
+  FCloneItem := AddItem(FileMenu, rsCloneItem, 0, @MenuCloneClick);
+  FInitItem := AddItem(FileMenu, rsInitItem, 0, @MenuInitClick);
   AddItem(FileMenu, rsOpen, ShortCut(VK_O, [ssModifier]), @MenuOpenClick);
   FSaveItem := AddItem(FileMenu, rsSave, ShortCut(VK_S, [ssModifier]), @MenuSaveClick);
   FSaveItem.Enabled := False;
@@ -3164,6 +3205,7 @@ begin
     ssAlt]), @MenuForcePushClick);
   FFetchItem := AddItem(FileMenu, rsFetchMenu, ShortCut(VK_F, [ssModifier, ssAlt]),
     @MenuFetchClick);
+  FRemotesItem := AddItem(FileMenu, rsRemotesItem, 0, @MenuRemotesClick);
   UpdateRemoteItems;
   FileMenu.Add(NewLine);
   FDiscardItem := AddItem(FileMenu, rsDiscardChange, ShortCut(VK_BACK, [ssModifier, ssShift]),
@@ -4853,6 +4895,16 @@ begin
   OpenRepository(ARoot);
 end;
 
+procedure TForm1.WelcomeClone(Sender: TObject);
+begin
+  MenuCloneClick(Sender);
+end;
+
+procedure TForm1.WelcomeInit(Sender: TObject);
+begin
+  MenuInitClick(Sender);
+end;
+
 { A click on a file in the summary selects it in the tree, which shows its
   changes. The tree's node texts are the path components. }
 procedure TForm1.SummarySelectFile(Sender: TObject; const APath: string);
@@ -5649,6 +5701,7 @@ const
 {$I umain.reflog.inc}
 {$I umain.revert.inc}
 {$I umain.clean.inc}
+{$I umain.clone.inc}
 {$I umain.repobrowser.inc}
 {$I umain.commit.inc}
 {$I umain.remote.inc}

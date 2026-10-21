@@ -14,7 +14,8 @@
   force the push with --force-with-lease; a forced push that finds the
   remote moved since the last fetch offers to fetch. Any other failure
   shows git's reason. The same job also pushes a branch to a remote it
-  then tracks, pushes tags and deletes a branch or a tag on a remote. }
+  then tracks, pushes tags, deletes a branch or a tag on a remote, and
+  clones (umain.clone.inc). }
 const
   saPull = 0;
   saPush = 1;
@@ -34,6 +35,9 @@ begin
   FPullItem.Enabled := Can;
   FPushItem.Enabled := Can;
   FForcePushItem.Enabled := Can and FHasUpstream;
+  FRemotesItem.Enabled := Can;
+  FCloneItem.Enabled := (FRemoteJob = nil) and (FCommitJob = nil);
+  FInitItem.Enabled := FCloneItem.Enabled;
   UpdateBranchItems;
   UpdateStashItems;
 end;
@@ -101,6 +105,7 @@ begin
     rkDeleteRemote: Result := Format(rsNoticeDeleting, [FRemoteJob.Arg]);
     rkDeleteRemoteTag: Result := Format(rsNoticeDeletingOn, [FRemoteJob.Arg,
         FRemoteJob.Remote]);
+    rkClone: Result := Format(rsNoticeCloning, [CloneFolderName(FRemoteJob.Arg)]);
   end;
 end;
 
@@ -160,6 +165,14 @@ begin
   FNoticeTimer.Enabled := False;
   FNotice.Close;
   FStatus.ShowMessage('', stNormal, 0);
+  { A clone is of no open repository. }
+  if Job.Kind = rkClone then
+  begin
+    UpdateRemoteItems;
+    UpdateCommitState;
+    CloneDone(Job);
+    Exit;
+  end;
   RefreshRepository;
   UpdateRemoteItems;
   UpdateCommitState;
@@ -283,6 +296,11 @@ begin
           Title := rsPushFailed;
         Again := rsPushAgain;
       end;
+    rkClone:
+      begin
+        Title := rsCloneFailed;
+        Again := rsCloneAgain;
+      end;
     else
       Title := Format(rsDeleteRemoteFailed, [AJob.Arg]);
       Again := rsTryAgain;
@@ -291,6 +309,8 @@ begin
   FRetryMode := AJob.Mode;
   FRetryArg := AJob.Arg;
   FRetryRemote := AJob.Remote;
+  FRetryRoot := AJob.Root;
+  FRetrySubmodules := AJob.Submodules;
   FStatus.ShowMessage(Title, stBad, StatusErrorSeconds);
   FNotice.DetailFont.Assign(Edit.Font);
   FNotice.Popup(Title, AJob.Error, False, nkBad);
@@ -303,7 +323,10 @@ begin
     0:
       begin
         FNotice.Close;
-        StartRemote(FRetryKind, FRetryMode, FRetryArg, FRetryRemote);
+        if FRetryKind = rkClone then
+          StartClone(FRetryArg, FRetryRoot, FRetrySubmodules)
+        else
+          StartRemote(FRetryKind, FRetryMode, FRetryArg, FRetryRemote);
       end;
     1:
       begin

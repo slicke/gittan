@@ -54,10 +54,13 @@ begin
   R := ParseRemotes('origin'#9'git@github.com:bjorn/gittan.git (fetch)'#10 +
     'origin'#9'git@github.com:bjorn/gittan.git (push)'#10 +
     'mirror'#9'https://example.org/git/gittan (fetch)'#10 +
-    'mirror'#9'https://example.org/git/gittan (push)'#10);
+    'mirror'#9'ssh://git@example.org/gittan (push)'#10 +
+    'mirror'#9'ssh://git@example.org/second (push)'#10);
   AssertEquals('remotes', 2, Length(R));
   AssertEquals('origin', R[0].Name);
   AssertEquals('git@github.com:bjorn/gittan.git', R[0].Url);
+  AssertEquals('git@github.com:bjorn/gittan.git', R[0].PushUrl);
+  AssertEquals('the first push URL', 'ssh://git@example.org/gittan', R[1].PushUrl);
   AssertEquals('https://github.com/bjorn/gittan', R[0].Web);
   AssertEquals('mirror', R[1].Name);
   AssertEquals('https://example.org/git/gittan', R[1].Url);

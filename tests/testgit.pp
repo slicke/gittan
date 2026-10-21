@@ -9,8 +9,9 @@ unit testgit;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.history, gittan.graph,
-  gittan.rebase;
+  { gittan.repoinfo first: its ParseTags is not the one tested here. }
+  Classes, SysUtils, fpcunit, testregistry, gittan.repoinfo, gittan.git, gittan.history,
+  gittan.graph, gittan.rebase;
 
 type
   TGitRepoTest = class(TTestCase)
@@ -103,6 +104,10 @@ type
     procedure TestClean;
     procedure TestParseTreeEntries;
     procedure TestTreeEntries;
+    procedure TestCloneFolderName;
+    procedure TestLooksLikeCloneUrl;
+    procedure TestCloneAndInit;
+    procedure TestEditRemotes;
   end;
 
 implementation
@@ -3056,6 +3061,118 @@ begin
   AssertTrue(FRepo.FileBlob('del.txt', First, Data));
   AssertEquals('gone'#10, Data);
   AssertFalse('no such folder', FRepo.TreeEntries('HEAD', 'nope', List));
+end;
+
+procedure TGitRepoTest.TestCloneFolderName;
+begin
+  AssertEquals('gittan', CloneFolderName('https://github.com/bjorn/gittan.git'));
+  AssertEquals('gittan', CloneFolderName('https://github.com/bjorn/gittan/'));
+  AssertEquals('gittan', CloneFolderName('git@github.com:bjorn/gittan.git'));
+  AssertEquals('b', CloneFolderName('ssh://git@host.example:2222/a/b.git'));
+  AssertEquals('repo', CloneFolderName('/Users/bjorn/repo/.git'));
+  AssertEquals('repo', CloneFolderName('C:\repos\repo'));
+  AssertEquals('host.example', CloneFolderName('https://host.example:8080/'));
+  AssertEquals('host.example', CloneFolderName('ssh://me@host.example'));
+  AssertEquals('b', CloneFolderName('  ../b.bundle  '));
+  AssertEquals('', CloneFolderName(''));
+end;
+
+procedure TGitRepoTest.TestLooksLikeCloneUrl;
+begin
+  AssertTrue(LooksLikeCloneUrl('https://github.com/a/b.git'));
+  AssertTrue(LooksLikeCloneUrl(' git@github.com:a/b.git'#10));
+  AssertTrue(LooksLikeCloneUrl('ssh://git@host:22/a/b'));
+  AssertTrue(LooksLikeCloneUrl('file:///tmp/b'));
+  AssertFalse('a sentence', LooksLikeCloneUrl('see https://github.com/a/b'));
+  AssertFalse('two lines', LooksLikeCloneUrl('https://a/b'#10'https://c/d'));
+  AssertFalse('a scheme alone', LooksLikeCloneUrl('https://'));
+  AssertFalse('a mail address', LooksLikeCloneUrl('me@example.com'));
+  AssertFalse('a path', LooksLikeCloneUrl('/Users/bjorn/b'));
+  AssertFalse('empty', LooksLikeCloneUrl(''));
+end;
+
+procedure TGitRepoTest.TestCloneAndInit;
+var
+  Target, Err, Fresh: string;
+begin
+  MakeHistory;
+  Target := FDir + '-clone';
+  Fresh := FDir + '-new';
+  try
+    AssertTrue(Err, CloneRepository(FDir, Target, True, Err));
+    AssertTrue(FileExists(Target + PathDelim + 'a.txt'));
+    AssertTrue(FRepo.Open(Target));
+    { The temporary folder may be reached through a link (/var on macOS). }
+    AssertEquals(ExtractFileName(Target), ExtractFileName(ExcludeTrailingPathDelimiter(FRepo.Root)));
+    AssertEquals('origin', FRepo.PushRemote);
+    AssertFalse('the folder is not empty', CloneRepository(FDir, Target, False, Err));
+    AssertTrue(Err <> '');
+    AssertFalse('no parent', CloneRepository(FDir, Target + PathDelim + 'x' + PathDelim + 'y',
+      False, Err));
+    AssertFalse('no repository there', CloneRepository(FDir + '-nothing', Fresh, False, Err));
+    AssertFalse('git removes what it made', DirectoryExists(Fresh));
+
+    AssertFalse('no folder', InitRepository(Fresh, Err));
+    ForceDirectories(Fresh);
+    AssertTrue(Err, InitRepository(Fresh, Err));
+    AssertTrue(FRepo.Open(Fresh));
+    AssertEquals(ExtractFileName(Fresh), ExtractFileName(ExcludeTrailingPathDelimiter(FRepo.Root)));
+  finally
+    RemoveTree(Target);
+    RemoveTree(Fresh);
+  end;
+end;
+
+procedure TGitRepoTest.TestEditRemotes;
+var
+  R: TGittanRemotes;
+  Err: string;
+  Local, Remote: TStringList;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.Error, FRepo.AddRemote('origin', 'https://example.invalid/a.git'));
+  AssertFalse('taken', FRepo.AddRemote('origin', 'https://example.invalid/b.git'));
+  AssertTrue(FRepo.Error <> '');
+  AssertFalse('no name', FRepo.AddRemote('bad name', 'https://example.invalid/b.git'));
+  AssertTrue(ReadRemotes(FDir, R, Err));
+  AssertEquals(1, Length(R));
+  AssertEquals('https://example.invalid/a.git', R[0].Url);
+  AssertEquals('https://example.invalid/a.git', R[0].PushUrl);
+
+  AssertTrue(FRepo.Error, FRepo.SetRemoteUrls('origin', 'https://example.invalid/c.git',
+    'git@example.invalid:c.git'));
+  AssertTrue(ReadRemotes(FDir, R, Err));
+  AssertEquals('https://example.invalid/c.git', R[0].Url);
+  AssertEquals('git@example.invalid:c.git', R[0].PushUrl);
+  AssertTrue(FRepo.Error, FRepo.SetRemoteUrls('origin', 'https://example.invalid/d.git', ''));
+  AssertTrue(ReadRemotes(FDir, R, Err));
+  AssertEquals('https://example.invalid/d.git', R[0].PushUrl);
+  AssertTrue('without a push URL to unset', FRepo.SetRemoteUrls('origin',
+    'https://example.invalid/d.git', 'https://example.invalid/d.git'));
+
+  { A rename takes the remote-tracking branches and the upstream along. }
+  Git(['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+  Git(['config', 'branch.' + FRepo.Branch + '.remote', 'origin']);
+  Git(['config', 'branch.' + FRepo.Branch + '.merge', 'refs/heads/main']);
+  AssertTrue(FRepo.Error, FRepo.RenameRemote('origin', 'upstream'));
+  AssertEquals('upstream/main', FRepo.Upstream(FRepo.Branch));
+  Local := TStringList.Create;
+  Remote := TStringList.Create;
+  try
+    AssertTrue(FRepo.Branches(Local, Remote));
+    AssertEquals('upstream/main|', Joined(Remote));
+    AssertTrue(FRepo.Error, FRepo.RemoveRemote('upstream'));
+    AssertTrue(FRepo.Branches(Local, Remote));
+    AssertEquals(0, Remote.Count);
+    AssertEquals('', FRepo.Upstream(FRepo.Branch));
+    AssertFalse('gone', FRepo.RemoveRemote('upstream'));
+  finally
+    Local.Free;
+    Remote.Free;
+  end;
+  AssertTrue(ReadRemotes(FDir, R, Err));
+  AssertEquals(0, Length(R));
 end;
 
 initialization

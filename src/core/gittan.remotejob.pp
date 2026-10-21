@@ -1,7 +1,7 @@
 unit gittan.remotejob;
 
-{** Fetch, pull and push run in a thread: they go to the network, which
-  can take its time, and the window must not hang meanwhile. }
+{** Fetch, pull, push and clone run in a thread: they go to the network,
+  which can take its time, and the window must not hang meanwhile. }
 
 {$mode objfpc}{$H+}
 
@@ -13,7 +13,7 @@ uses
 type
   {** What a TGittanRemoteJob does. }
   TGittanRemoteKind = (rkFetch, rkPull, rkPush, rkDeleteRemote, rkForcePush, rkPushBranch,
-    rkPushTag, rkDeleteRemoteTag);
+    rkPushTag, rkDeleteRemoteTag, rkClone);
 
   {** Runs a fetch, a pull (the way Mode says), a push, a push with
     --force-with-lease, or the deletion of the remote branch Arg stands
@@ -21,7 +21,8 @@ type
     Remote, the push of the local branch Arg to it as its upstream, the
     push of the tag Arg (every tag with Arg empty) and the deletion of
     the tag Arg on it; of the repository at ARoot through TGittanRepo,
-    on a repository of its own.
+    on a repository of its own. A clone makes the repository at ARoot
+    from the URL Arg, with its submodules when Submodules is set.
     OnDone is called in the main thread when it is done, unless the job
     has been stopped. A job is never broken off, as a pull stopped
     halfway would leave a merge behind: Stop only drops the handler, and
@@ -32,7 +33,7 @@ type
     FRoot, FArg, FRemote: string;
     FKind: TGittanRemoteKind;
     FMode: TGittanPullMode;
-    FOk, FDiverged, FRejected, FStale, FUnseen: boolean;
+    FOk, FDiverged, FRejected, FStale, FUnseen, FSubmodules: boolean;
     FError: string;
     FOnDone, FOnOutput: TNotifyEvent;
     FLock: TRTLCriticalSection;
@@ -57,6 +58,8 @@ type
     property Mode: TGittanPullMode read FMode;
     property Arg: string read FArg;
     property Remote: string read FRemote;
+    {** Whether a clone brings the submodules too; set before Start. }
+    property Submodules: boolean read FSubmodules write FSubmodules;
     {** Whether git did it. }
     property Ok: boolean read FOk;
     {** A pull that failed since the branch has diverged from its
@@ -208,6 +211,12 @@ procedure TGittanRemoteJob.Execute;
 var
   Repo: TGittanRepo;
 begin
+  if FKind = rkClone then
+  begin
+    FOk := CloneRepository(FArg, FRoot, FSubmodules, FError, @Output);
+    Queue(@Notify);
+    Exit;
+  end;
   Repo := TGittanRepo.Create;
   try
     Repo.OnOutput := @Output;
@@ -221,6 +230,7 @@ begin
         rkPushBranch: FOk := Repo.PushBranch(FArg, FRemote);
         rkPushTag: FOk := Repo.PushTag(FRemote, FArg);
         rkDeleteRemoteTag: FOk := Repo.DeleteRemoteTag(FRemote, FArg);
+        rkClone: ;
       end;
     if not FOk then
       FError := Repo.Error;

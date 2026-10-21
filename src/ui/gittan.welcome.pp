@@ -3,7 +3,9 @@ unit gittan.welcome;
 {** The welcome view: what Gittan shows while no repository is open, and
   where a failure to open one is reported. Under the application icon and
   the name it offers a button that opens the folder dialog, with the
-  shortcut drawn as key caps beside it, and lists the recent repositories
+  shortcut drawn as key caps beside it, one that clones a repository and
+  one that makes a new one (the three in a row, or under each other when
+  the row does not fit), and lists the recent repositories
   as rows to click, each with its name and path; a repository whose folder
   is gone is listed dimmed and does not react. An error is shown in red
   under the name, wrapped to the column, so the next attempt is one click
@@ -34,12 +36,13 @@ type
     FIcon: TIcon;
     FIconBitmap: TBitmap;
     FBack, FText, FDim, FHover, FLine, FErrorColor: TColor;
-    { What the mouse is over: hotNone, hotButton or a row's index. }
+    { What the mouse is over: hotNone, a button (hotButton less its
+      index) or a row's index. }
     FHot: integer;
-    FButtonRect: TRect;
+    FButtonRects: array[0..2] of TRect;
     FRowRects: array of TRect;
     FContentHeight: integer;
-    FOnOpen: TNotifyEvent;
+    FOnOpen, FOnClone, FOnInit: TNotifyEvent;
     FOnOpenRecent: TGittanOpenRecentEvent;
     function HotAt(X, Y: integer): integer;
     procedure SetHot(AValue: integer);
@@ -78,6 +81,10 @@ type
     property Shortcut: string read FShortcut write FShortcut;
     {** A click on the open button. }
     property OnOpen: TNotifyEvent read FOnOpen write FOnOpen;
+    {** A click on the clone button. }
+    property OnClone: TNotifyEvent read FOnClone write FOnClone;
+    {** A click on the button that makes a new repository. }
+    property OnInit: TNotifyEvent read FOnInit write FOnInit;
     {** A click on a recent repository. }
     property OnOpenRecent: TGittanOpenRecentEvent read FOnOpenRecent write FOnOpenRecent;
   end;
@@ -89,6 +96,8 @@ uses
 
 resourcestring
   rsOpenButton = 'Open Repository…';
+  rsCloneButton = 'Clone…';
+  rsInitButton = 'Init…';
   rsRecent = 'Recent';
   rsNotFound = 'not found';
   rsDrop = 'or drop a folder or file here';
@@ -180,8 +189,9 @@ var
   i: integer;
 begin
   P := Point(X, Y);
-  if PtInRect(FButtonRect, P) then
-    Exit(hotButton);
+  for i := 0 to High(FButtonRects) do
+    if PtInRect(FButtonRects[i], P) then
+      Exit(hotButton - i);
   for i := 0 to High(FRowRects) do
     if PtInRect(FRowRects[i], P) and not RecentMissing(i) then
       Exit(i);
@@ -265,7 +275,10 @@ end;
 procedure TGittanWelcome.Paint;
 var
   ColLeft, ColWidth, Y, BlockTop, Total, LineHeight, TitleHeight, ErrHeight: integer;
-  ButtonWidth, KeyWidth, X, TextY, i, NameWidth: integer;
+  KeyWidth, X, TextY, i, NameWidth, RowWidth, ButtonHeight, ButtonRows: integer;
+  ButtonWidths: array[0..2] of integer;
+  Captions: array[0..2] of string;
+  Stacked: boolean;
   R: TRect;
   RepoName, Path: string;
   Missing, HasIcon: boolean;
@@ -288,6 +301,29 @@ begin
   TitleHeight := Canvas.TextHeight('Xg');
   Canvas.Font.Size := Font.Size;
   Canvas.Font.Style := [];
+  { The buttons in a row, the open button's key caps after it, or under
+    each other when the row is wider than the room. }
+  Captions[0] := rsOpenButton;
+  Captions[1] := rsCloneButton;
+  Captions[2] := rsInitButton;
+  KeyWidth := 0;
+  if FShortcut <> '' then
+    KeyWidth := Gap + Canvas.TextWidth(FShortcut) + 2 * KeyPadX;
+  RowWidth := KeyWidth + 2 * Gap;
+  { The key caps stand a little apart from the next button. }
+  if KeyWidth > 0 then
+    Inc(RowWidth, Gap);
+  for i := 0 to High(Captions) do
+  begin
+    ButtonWidths[i] := Canvas.TextWidth(Captions[i]) + 2 * ButtonPadX;
+    Inc(RowWidth, ButtonWidths[i]);
+  end;
+  Stacked := RowWidth > Width - 2 * Pad;
+  ButtonHeight := LineHeight + 2 * ButtonPadY;
+  if Stacked then
+    ButtonRows := Length(Captions)
+  else
+    ButtonRows := 1;
   Total := 0;
   if HasIcon then
     Inc(Total, IconSize + Gap);
@@ -303,7 +339,7 @@ begin
       ErrHeight := ErrLines.Count * LineHeight;
       Inc(Total, Gap + ErrHeight);
     end;
-    Inc(Total, Pad + LineHeight + 2 * ButtonPadY);
+    Inc(Total, Pad + ButtonRows * ButtonHeight + (ButtonRows - 1) * Gap div 2);
     if FRecent.Count > 0 then
       Inc(Total, Pad + LineHeight + Gap div 2 + 1 + Gap div 2 + FRecent.Count * RowHeight);
     Inc(Total, Pad + LineHeight);
@@ -358,39 +394,51 @@ begin
       Inc(Y, ErrHeight);
     end;
 
-    { The open button and its shortcut, as one centered group. }
+    { The buttons, as one centered group, or each centered under the one
+      before; the open button's shortcut beside it. }
     Inc(Y, Pad);
-    ButtonWidth := Canvas.TextWidth(rsOpenButton) + 2 * ButtonPadX;
-    KeyWidth := 0;
-    if FShortcut <> '' then
-      KeyWidth := Gap + Canvas.TextWidth(FShortcut) + 2 * KeyPadX;
-    X := (Width - ButtonWidth - KeyWidth) div 2;
-    FButtonRect := Rect(X, Y, X + ButtonWidth, Y + LineHeight + 2 * ButtonPadY);
-    Canvas.Pen.Style := psSolid;
-    Canvas.Pen.Color := FLine;
-    if FHot = hotButton then
-    begin
-      Canvas.Brush.Style := bsSolid;
-      Canvas.Brush.Color := FHover;
-    end
+    if Stacked then
+      X := 0
     else
-      Canvas.Brush.Style := bsClear;
-    Canvas.RoundRect(FButtonRect, 10, 10);
-    Canvas.Brush.Style := bsClear;
-    Canvas.Font.Color := FText;
-    Canvas.TextOut(X + ButtonPadX, Y + ButtonPadY, rsOpenButton);
-    if FShortcut <> '' then
+      X := (Width - RowWidth) div 2;
+    Canvas.Pen.Style := psSolid;
+    for i := 0 to High(Captions) do
     begin
-      { The shortcut as a key cap: a small rounded frame in dim. }
-      X := FButtonRect.Right + Gap;
-      TextY := Y + ButtonPadY;
-      R := Rect(X, TextY - KeyPadY, X + KeyWidth - Gap, TextY + LineHeight + KeyPadY);
+      if Stacked then
+      begin
+        X := (Width - ButtonWidths[i]) div 2;
+        if i = 0 then
+          X := (Width - ButtonWidths[i] - KeyWidth) div 2;
+      end;
+      FButtonRects[i] := Rect(X, Y, X + ButtonWidths[i], Y + ButtonHeight);
       Canvas.Pen.Color := FLine;
-      Canvas.RoundRect(R, 6, 6);
-      Canvas.Font.Color := FDim;
-      Canvas.TextOut(X + KeyPadX, TextY, FShortcut);
+      if FHot = hotButton - i then
+      begin
+        Canvas.Brush.Style := bsSolid;
+        Canvas.Brush.Color := FHover;
+      end
+      else
+        Canvas.Brush.Style := bsClear;
+      Canvas.RoundRect(FButtonRects[i], 10, 10);
+      Canvas.Brush.Style := bsClear;
+      Canvas.Font.Color := FText;
+      Canvas.TextOut(X + ButtonPadX, Y + ButtonPadY, Captions[i]);
+      X := FButtonRects[i].Right + Gap;
+      if (i = 0) and (FShortcut <> '') then
+      begin
+        { The shortcut as a key cap: a small rounded frame in dim. }
+        TextY := Y + ButtonPadY;
+        R := Rect(X, TextY - KeyPadY, X + KeyWidth - Gap, TextY + LineHeight + KeyPadY);
+        Canvas.Pen.Color := FLine;
+        Canvas.RoundRect(R, 6, 6);
+        Canvas.Font.Color := FDim;
+        Canvas.TextOut(X + KeyPadX, TextY, FShortcut);
+        X := R.Right + 2 * Gap;
+      end;
+      if Stacked and (i < High(Captions)) then
+        Inc(Y, ButtonHeight + Gap div 2);
     end;
-    Inc(Y, LineHeight + 2 * ButtonPadY);
+    Inc(Y, ButtonHeight);
 
     { The recent repositories: a dim heading over a divider, then a row
       per repository with the folder, the name and the path. }
@@ -469,6 +517,10 @@ begin
   Hit := HotAt(X, Y);
   if (Hit = hotButton) and Assigned(FOnOpen) then
     FOnOpen(Self)
+  else if (Hit = hotButton - 1) and Assigned(FOnClone) then
+    FOnClone(Self)
+  else if (Hit = hotButton - 2) and Assigned(FOnInit) then
+    FOnInit(Self)
   else if (Hit >= 0) and Assigned(FOnOpenRecent) then
     FOnOpenRecent(Self, FRecent[Hit]);
 end;

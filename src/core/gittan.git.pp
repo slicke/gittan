@@ -357,6 +357,22 @@ type
     {** The remotes of the repository (`git remote`), sorted as git
       lists them. }
     function Remotes(AList: TStrings): boolean;
+    {** Adds the remote AName with the URL AUrl (`git remote add`),
+      fetching nothing. False, with git's reason, when the name is taken
+      or no remote's name. }
+    function AddRemote(const AName, AUrl: string): boolean;
+    {** Renames the remote AOld to ANew (`git remote rename`), its
+      remote-tracking branches and the upstreams that name them going
+      with it. }
+    function RenameRemote(const AOld, ANew: string): boolean;
+    {** Removes the remote AName (`git remote remove`), its
+      remote-tracking branches with it; the branches that tracked them
+      track nothing then. The remote itself is not touched. }
+    function RemoveRemote(const AName: string): boolean;
+    {** Sets the URL the remote AName fetches from to AUrl and the one it
+      pushes to to APushUrl (`git remote set-url`, with --push); with
+      APushUrl empty or AUrl it pushes to AUrl, any push URL unset. }
+    function SetRemoteUrls(const AName, AUrl, APushUrl: string): boolean;
     {** The remote a push goes to: that of the current branch's upstream,
       else the one RemoteFor gives; empty when there is none. }
     function PushRemote: string;
@@ -857,6 +873,35 @@ function RunGitIn(const ADir: string; const AArgs: array of string;
 function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
   out AOutput, AError: string; const AIndexFile: string = '';
   AOnOutput: TGittanOutputEvent = nil): boolean;
+
+{** The variables a command that goes to the network runs with in ADir
+  besides Gittan's own: ssh in batch mode (see
+  TGittanRepo.RemoteEnvironment), unless the environment or the config
+  read in ADir (the repository's, else the user's) says how to run ssh. }
+function RemoteEnvironmentIn(const ADir: string): TStringArray;
+
+{** Clones the repository at AUrl into the folder ATarget (`git clone
+  --progress`, with --recurse-submodules when ASubmodules is set), which
+  must not exist or be empty; ATarget's parent must exist. Goes to the
+  network: AOnOutput is told of what git writes as it runs. False, with
+  git's reason in AError, when git failed; git then removes what it
+  made of ATarget. }
+function CloneRepository(const AUrl, ATarget: string; ASubmodules: boolean;
+  out AError: string; AOnOutput: TGittanOutputEvent = nil): boolean;
+
+{** Makes the existing folder ADir a new repository (`git init`), the
+  first branch named as the config says (init.defaultBranch). }
+function InitRepository(const ADir: string; out AError: string): boolean;
+
+{** The folder git clone would make for AUrl: the last part of the URL
+  or path, without a trailing slash, ".git" or "/.git" (a host alone
+  stands for itself, without its port or user); '' when nothing is left. }
+function CloneFolderName(const AUrl: string): string;
+
+{** Whether AText looks like a URL to clone from: https, http, ssh, git
+  or file URL, or the scp-like user@host:path, on one line without
+  spaces. For prefilling a field from the clipboard. }
+function LooksLikeCloneUrl(const AText: string): boolean;
 
 {** AText with the carriage returns of a terminal's progress lines
   ("Writing objects:  33%" written over and over) resolved: of what a
@@ -2788,19 +2833,122 @@ end;
   Fetch, pull and push go to the network: they run with
   RemoteEnvironment, and their output on stderr (progress, "To ...") is
   no failure. }
-function TGittanRepo.RemoteEnvironment: TStringArray;
+function RemoteEnvironmentIn(const ADir: string): TStringArray;
 var
-  Output: string;
+  Output, Err: string;
 begin
   Result := nil;
   if (EnvironmentVariable('GIT_SSH_COMMAND') <> '') or
     (EnvironmentVariable('GIT_SSH') <> '') then
     Exit;
-  if (FRoot <> '') and RunGit(FRoot, ['config', 'core.sshCommand'], Output) and
+  if (ADir <> '') and RunGitIn(ADir, ['config', 'core.sshCommand'], Output, Err) and
     (Trim(Output) <> '') then
     Exit;
   SetLength(Result, 1);
   Result[0] := 'GIT_SSH_COMMAND=ssh -o BatchMode=yes';
+end;
+
+function TGittanRepo.RemoteEnvironment: TStringArray;
+begin
+  Result := RemoteEnvironmentIn(FRoot);
+end;
+
+{ git clone runs in the parent, so a relative URL means what it says
+  there, and the config read for ssh is the user's. }
+function CloneRepository(const AUrl, ATarget: string; ASubmodules: boolean;
+  out AError: string; AOnOutput: TGittanOutputEvent): boolean;
+var
+  Parent, Output: string;
+begin
+  Parent := ExtractFileDir(ExcludeTrailingPathDelimiter(ATarget));
+  if (AUrl = '') or (Parent = '') or not DirectoryExists(Parent) then
+  begin
+    AError := Format('The folder %s does not exist.', [Parent]);
+    Exit(False);
+  end;
+  if ASubmodules then
+    Result := RunGitEnv(Parent, ['clone', '--progress', '--recurse-submodules', '--', AUrl,
+      ATarget], RemoteEnvironmentIn(Parent), Output, AError, '', AOnOutput)
+  else
+    Result := RunGitEnv(Parent, ['clone', '--progress', '--', AUrl, ATarget],
+      RemoteEnvironmentIn(Parent), Output, AError, '', AOnOutput);
+end;
+
+function InitRepository(const ADir: string; out AError: string): boolean;
+var
+  Output: string;
+begin
+  if not DirectoryExists(ADir) then
+  begin
+    AError := Format('The folder %s does not exist.', [ADir]);
+    Exit(False);
+  end;
+  Result := RunGitIn(ADir, ['init'], Output, AError);
+end;
+
+{ As git's guess_dir_name: the end of the URL, a ".git" bundle or bare
+  suffix dropped, and of a URL with nothing after the host, the host. }
+function CloneFolderName(const AUrl: string): string;
+var
+  S: string;
+  i, Cut: integer;
+begin
+  S := Trim(AUrl);
+  while (S <> '') and (S[Length(S)] in ['/', '\']) do
+    SetLength(S, Length(S) - 1);
+  if LowerCase(Copy(S, Length(S) - 4, 5)) = '/.git' then
+    SetLength(S, Length(S) - 5)
+  else if LowerCase(Copy(S, Length(S) - 3, 4)) = '.git' then
+    SetLength(S, Length(S) - 4);
+  if LowerCase(Copy(S, Length(S) - 6, 7)) = '.bundle' then
+    SetLength(S, Length(S) - 7);
+  while (S <> '') and (S[Length(S)] in ['/', '\']) do
+    SetLength(S, Length(S) - 1);
+  Cut := 0;
+  for i := Length(S) downto 1 do
+    if S[i] in ['/', '\', ':'] then
+    begin
+      Cut := i;
+      Break;
+    end;
+  { https://host:8080 or user@host:22: the part after the colon is a
+    port, and the host is the name. }
+  if (Cut > 0) and (S[Cut] = ':') and (StrToIntDef(Copy(S, Cut + 1, MaxInt), -1) >= 0) then
+  begin
+    SetLength(S, Cut - 1);
+    Cut := 0;
+    for i := Length(S) downto 1 do
+      if S[i] in ['/', '\', ':'] then
+      begin
+        Cut := i;
+        Break;
+      end;
+  end;
+  Result := Copy(S, Cut + 1, MaxInt);
+  i := Pos('@', Result);
+  if i > 0 then
+    Result := Copy(Result, i + 1, MaxInt);
+end;
+
+function LooksLikeCloneUrl(const AText: string): boolean;
+const
+  Schemes: array[0..5] of string = ('https://', 'http://', 'ssh://', 'git://', 'file://',
+    'git+ssh://');
+var
+  S, Scheme: string;
+  At, Colon: integer;
+begin
+  S := Trim(AText);
+  if (S = '') or (Pos(' ', S) > 0) or (Pos(#10, S) > 0) or (Pos(#9, S) > 0) then
+    Exit(False);
+  for Scheme in Schemes do
+    if (Pos(Scheme, LowerCase(S)) = 1) and (Length(S) > Length(Scheme)) then
+      Exit(True);
+  { user@host:path, the user and the host without a slash. }
+  At := Pos('@', S);
+  Colon := Pos(':', S);
+  Result := (At > 1) and (Colon > At + 1) and (Colon < Length(S)) and
+    (Pos('/', Copy(S, 1, Colon)) = 0);
 end;
 
 function TGittanRepo.RunRemote(const AArgs: array of string): boolean;
@@ -2948,6 +3096,43 @@ begin
     for Line in Output.Split([#10]) do
       if Trim(Line) <> '' then
         AList.Add(Trim(Line));
+end;
+
+{ `--` keeps a name or a URL that starts with a dash from being read as
+  an option. }
+function TGittanRepo.AddRemote(const AName, AUrl: string): boolean;
+var
+  Output: string;
+begin
+  Result := (FRoot <> '') and RunGit(FRoot, ['remote', 'add', '--', AName, AUrl], Output);
+end;
+
+function TGittanRepo.RenameRemote(const AOld, ANew: string): boolean;
+var
+  Output: string;
+begin
+  Result := (FRoot <> '') and RunGit(FRoot, ['remote', 'rename', '--', AOld, ANew], Output);
+end;
+
+function TGittanRepo.RemoveRemote(const AName: string): boolean;
+var
+  Output: string;
+begin
+  Result := (FRoot <> '') and RunGit(FRoot, ['remote', 'remove', '--', AName], Output);
+end;
+
+{ git config exits with 5 when there is no push URL to unset. }
+function TGittanRepo.SetRemoteUrls(const AName, AUrl, APushUrl: string): boolean;
+var
+  Output, Err: string;
+begin
+  Result := (FRoot <> '') and RunGit(FRoot, ['remote', 'set-url', '--', AName, AUrl], Output);
+  if not Result then
+    Exit;
+  if RunGitIn(FRoot, ['config', '--get-all', 'remote.' + AName + '.pushurl'], Output, Err) then
+    Result := RunGit(FRoot, ['config', '--unset-all', 'remote.' + AName + '.pushurl'], Output);
+  if Result and (APushUrl <> '') and (APushUrl <> AUrl) then
+    Result := RunGit(FRoot, ['remote', 'set-url', '--push', '--', AName, APushUrl], Output);
 end;
 
 function TGittanRepo.PushRemote: string;

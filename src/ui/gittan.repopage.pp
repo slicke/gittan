@@ -6,7 +6,8 @@ unit gittan.repopage;
   (the branch and its upstream, how many commits since when, the
   branches, the tags, the tracked files, the submodules and the size of
   the objects), the remotes with their URLs, a web address among them
-  being a link, and the authors with the most commits, each with a bar
+  being a link and Edit Remotes... at the right of the heading, and the
+  authors with the most commits, each with a bar
   that compares their counts.
 
   It paints itself in the editor's palette, like the summary, and sizes
@@ -36,12 +37,14 @@ type
     FHot: integer;
     FContentHeight: integer;
     FOnOpenUrl: TGittanOpenUrlEvent;
+    FOnEditRemotes: TNotifyEvent;
     function LinkAt(X, Y: integer): integer;
     procedure SetHot(AValue: integer);
     function FitLeft(const AText: string; AMaxWidth: integer): string;
     function FitRight(const AText: string; AMaxWidth: integer): string;
     procedure AddLink(const ARect: TRect; const AUrl: string);
     procedure PaintHeading(var Y: integer; const ATitle, ADetail: string);
+    procedure PaintAction(ATop: integer; const ACaption, ALink: string);
     procedure PaintRow(var Y: integer; ALabelWidth: integer; const ALabel, AValue: string;
       const AUrl: string = '');
     function OverviewRows(ALabels, AValues: TStrings): integer;
@@ -74,6 +77,8 @@ type
     property Root: string read FRoot;
     {** A click on a remote's web address. }
     property OnOpenUrl: TGittanOpenUrlEvent read FOnOpenUrl write FOnOpenUrl;
+    {** A click on Edit Remotes... at the right of the remotes' heading. }
+    property OnEditRemotes: TNotifyEvent read FOnEditRemotes write FOnEditRemotes;
   end;
 
 implementation
@@ -99,6 +104,7 @@ resourcestring
   rsLocalRemote = '%s local · %s remote';
   rsTracked = '%s tracked';
   rsNoRemotes = 'No remotes';
+  rsEditRemotes = 'Edit Remotes…';
   rsOneAuthor = '1 author';
   rsAuthors = '%s authors';
   rsLoading = 'Reading the repository…';
@@ -106,6 +112,8 @@ resourcestring
   rsDetached = 'detached';
 
 const
+  { The link of Edit Remotes..., told apart from a web address. }
+  EditRemotesLink = 'gittan:remotes';
   Pad = 24;
   Gap = 12;
   RowHeight = 26;
@@ -259,6 +267,24 @@ begin
   Inc(Y, Gap div 2);
 end;
 
+{ ACaption as a link at the right edge, on the line of a heading whose
+  text starts at ATop. }
+procedure TGittanRepoPage.PaintAction(ATop: integer; const ACaption, ALink: string);
+var
+  R: TRect;
+begin
+  Canvas.Font := Font;
+  Canvas.Brush.Style := bsClear;
+  R := Rect(Width - Pad - Canvas.TextWidth(ACaption), ATop, Width - Pad,
+    ATop + Canvas.TextHeight('Xg'));
+  AddLink(R, ALink);
+  Canvas.Font.Color := FLink;
+  if FHot = High(FLinkRects) then
+    Canvas.Font.Style := [fsUnderline];
+  Canvas.TextOut(R.Left, R.Top, ACaption);
+  Canvas.Font.Style := [];
+end;
+
 { A row of a dim label in a column ALabelWidth wide and a value after
   it; a value with AUrl is drawn as a link. }
 procedure TGittanRepoPage.PaintRow(var Y: integer; ALabelWidth: integer;
@@ -366,7 +392,8 @@ end;
 
 procedure TGittanRepoPage.Paint;
 var
-  Y, TextH, TitleH, LabelWidth, i, Most, X, TextY, BarX, BarW, CountW, NameW: integer;
+  Y, TextH, TitleH, LabelWidth, i, Most, X, TextY, BarX, BarW, CountW, NameW,
+    HeadingTop: integer;
   Labels, Values: TStringList;
   Detail, Count: string;
   R: TRect;
@@ -423,7 +450,10 @@ begin
       for i := 0 to Labels.Count - 1 do
         PaintRow(Y, LabelWidth, Labels[i], Values[i]);
 
+      HeadingTop := Y;
       PaintHeading(Y, rsRemotes, '');
+      if Assigned(FOnEditRemotes) then
+        PaintAction(HeadingTop + Pad, rsEditRemotes, EditRemotesLink);
       if Length(FInfo.Remotes) = 0 then
         PaintRow(Y, LabelWidth, '', rsNoRemotes)
       else
@@ -505,7 +535,14 @@ begin
   if Button <> mbLeft then
     Exit;
   i := LinkAt(X, Y);
-  if (i >= 0) and Assigned(FOnOpenUrl) then
+  if i < 0 then
+    Exit;
+  if FLinkUrls[i] = EditRemotesLink then
+  begin
+    if Assigned(FOnEditRemotes) then
+      FOnEditRemotes(Self);
+  end
+  else if Assigned(FOnOpenUrl) then
     FOnOpenUrl(Self, FLinkUrls[i]);
 end;
 
