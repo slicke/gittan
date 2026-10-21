@@ -85,6 +85,7 @@ type
     procedure TestBranchManagement;
     procedure TestSwitchBlocked;
     procedure TestRevertFiles;
+    procedure TestMoveAndRemove;
     procedure TestRebaseOnto;
     procedure TestRebaseOntoConflicts;
     procedure TestRebaseInteractive;
@@ -2947,6 +2948,70 @@ begin
   AssertTrue(FRepo.Error, FRepo.CreateBranch('saved', Second, False));
   AssertTrue(FRepo.Reflog(Log));
   AssertFalse('a branch keeps it now', Log[1].Lost);
+end;
+
+procedure TGitRepoTest.TestMoveAndRemove;
+var
+  Stats: TGittanFileStats;
+  Paths: TStringList;
+  Id: string;
+  i, n: integer;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.IsTracked('a.txt'));
+  AssertTrue(FRepo.IsTracked('dir sp/fil å.txt'));
+  AssertFalse('a folder is no file', FRepo.IsTracked('dir sp'));
+  WriteFile('new.txt', 'n'#10);
+  AssertFalse(FRepo.IsTracked('new.txt'));
+
+  { Into a folder that is not there yet; git shows it as a rename. }
+  AssertTrue(FRepo.Error, FRepo.MovePath('a.txt', 'moved/b.txt'));
+  AssertFalse(FileExists(FDir + PathDelim + 'a.txt'));
+  AssertTrue(FileExists(FDir + PathDelim + 'moved' + PathDelim + 'b.txt'));
+  AssertTrue(FRepo.ChangeStats(Stats));
+  AssertTrue(FindStat(Stats, 'moved/b.txt').Kind = ckRenamed);
+  AssertFalse('untracked', FRepo.MovePath('new.txt', 'other.txt'));
+  AssertFalse('the target exists', FRepo.MovePath(QuoteName, 'new.txt'));
+
+  Paths := TStringList.Create;
+  try
+    { Kept on disk, untracked from now on. }
+    Paths.Add(QuoteName);
+    AssertTrue(FRepo.Error, FRepo.RemovePaths(Paths, True));
+    AssertTrue(FileExists(FDir + PathDelim + QuoteName));
+    AssertFalse(FRepo.IsTracked(QuoteName));
+    AssertEquals('D  ' + QuoteName + #0'?? ' + QuoteName + #0,
+      Git(['status', '--porcelain', '-z', '--', QuoteName]));
+    { Listed once, as the deletion to commit. }
+    AssertTrue(FRepo.ChangeStats(Stats));
+    AssertTrue(FindStat(Stats, QuoteName).Kind = ckDeleted);
+    n := 0;
+    for i := 0 to High(Stats) do
+      if Stats[i].Path = QuoteName then
+        Inc(n);
+    AssertEquals(1, n);
+    { The commit takes it out of HEAD and leaves it on disk, untracked. }
+    AssertTrue(FRepo.Error, FRepo.Commit('untrack', Paths, False, Id));
+    AssertEquals('?? ' + QuoteName + #0, Git(['status', '--porcelain', '-z', '--',
+      QuoteName]));
+    AssertTrue('the rename stays out', Pos('R  a.txt -> moved/b.txt', Git(['status', '--porcelain'])) > 0);
+    AssertEquals('', Git(['ls-tree', '--name-only', 'HEAD', '--', QuoteName]));
+
+    Paths[0] := 'del.txt';
+    AssertTrue(FRepo.Error, FRepo.RemovePaths(Paths, False));
+    AssertFalse(FileExists(FDir + PathDelim + 'del.txt'));
+    AssertTrue(FRepo.ChangeStats(Stats));
+    AssertTrue(FindStat(Stats, 'del.txt').Kind = ckDeleted);
+
+    { git keeps a file with changes not committed from being deleted. }
+    WriteFile('staged.txt', 'changed'#10);
+    Paths[0] := 'staged.txt';
+    AssertFalse(FRepo.RemovePaths(Paths, False));
+    AssertTrue(FileExists(FDir + PathDelim + 'staged.txt'));
+  finally
+    Paths.Free;
+  end;
 end;
 
 procedure TGitRepoTest.TestParseCleanPreview;

@@ -274,6 +274,20 @@ type
       was on disk, and a file that was not there is deleted again. What
       the index held is not brought back. }
     function RestoreReverted(ASaved: TStrings): boolean;
+    {** Whether the index holds APath (relative to Root) as a file
+      (`git ls-files`), so git mv and git rm take it. }
+    function IsTracked(const APath: string): boolean;
+    {** Renames or moves the tracked file AOld to ANew, both relative to
+      Root (`git mv`), making ANew's folder first, since git mv makes
+      none. The rename is staged, so git shows it as one. git refuses an
+      untracked file or a target that exists. }
+    function MovePath(const AOld, ANew: string): boolean;
+    {** Takes the tracked files APaths (relative to Root) out of the
+      repository (`git rm`): with AKeep only out of the index
+      (`--cached`), the files staying on disk as untracked ones, else
+      deleted too. Either is staged, to go in with the next commit. git
+      refuses to delete a file with changes not committed. }
+    function RemovePaths(APaths: TStrings; AKeep: boolean): boolean;
     {** Stashes the local changes, untracked files included, with the
       message AMessage (`git stash push -u`; without one git names the
       stash after HEAD), leaving the work tree as HEAD has them: every
@@ -2436,6 +2450,38 @@ begin
   end;
 end;
 
+function TGittanRepo.IsTracked(const APath: string): boolean;
+var
+  Output: string;
+begin
+  Result := (FRoot <> '') and (APath <> '') and RunGit(FRoot, ['--literal-pathspecs',
+    'ls-files', '-z', '--', APath], Output) and (Output = APath + #0);
+end;
+
+function TGittanRepo.MovePath(const AOld, ANew: string): boolean;
+var
+  Output: string;
+begin
+  if (FRoot = '') or (AOld = '') or (ANew = '') then
+    Exit(False);
+  if ExtractFileDir(ANew) <> '' then
+    ForceDirectories(FullPath(ExtractFileDir(ANew)));
+  Result := RunGit(FRoot, ['mv', '--', AOld, ANew], Output);
+end;
+
+function TGittanRepo.RemovePaths(APaths: TStrings; AKeep: boolean): boolean;
+var
+  Output: string;
+  Args: array of string;
+begin
+  if (FRoot = '') or (APaths.Count = 0) then
+    Exit(False);
+  Args := ['--literal-pathspecs', 'rm', '-q'];
+  if AKeep then
+    Args := Concat(Args, ['--cached']);
+  Result := RunGit(FRoot, Concat(Args, ['--'], APaths.ToStringArray), Output);
+end;
+
 { The paths go in a file, as a commit's do (see Commit), and are read
   literally only then: --literal-pathspecs without paths keeps the
   untracked files out of the stash, since git gathers them with a
@@ -2729,7 +2775,7 @@ function TGittanRepo.Commit(const AMessage: string; APaths: TStrings;
   AAmend: boolean; out AId: string; const AParts: TGittanCommitParts): boolean;
 var
   Output, Entry, Path, XY, Op, Err, SpecFile, AddFile, MsgFile, PartFile, Index: string;
-  Fields, Chosen, Spec, Added: TStringList;
+  Fields, Chosen, Spec, Added, Untrack: TStringList;
   Args: array of string;
   Whole: boolean;
   i: integer;
@@ -2779,8 +2825,11 @@ var
   { The commit of AParts with the rest of APaths: from a temporary index
     of HEAD's tree with the paths added and the parts written over them,
     so the hooks and signing run as for any commit and nothing else the
-    real index holds goes in. The real index then takes the committed
-    paths as the new HEAD has them, as git commit --only leaves them. }
+    real index holds goes in; a file git rm --cached took out of the
+    index (Untrack) is taken out of this one too, since git commit
+    --only would commit it as the work tree has it. The real index then
+    takes the committed paths as the new HEAD has them, as git commit
+    --only leaves them. }
   function CommitThroughIndex: boolean;
   begin
     Result := False;
@@ -2796,6 +2845,12 @@ var
     Result := RunGit(FRoot, ['--literal-pathspecs', 'add', '-A',
       '--pathspec-from-file=' + SpecFile, '--pathspec-file-nul'], Output, Index) and
       WriteParts(Index);
+    if Result and (Untrack.Count > 0) then
+    begin
+      WriteBytes(AddFile, NulList(Untrack));
+      Result := RunGit(FRoot, ['--literal-pathspecs', 'rm', '--cached', '-q',
+        '--pathspec-from-file=' + AddFile, '--pathspec-file-nul'], Output, Index);
+    end;
     if not Result then
       Exit;
     WriteBytes(MsgFile, AMessage);
@@ -2834,6 +2889,7 @@ begin
   Chosen := TStringList.Create;
   Spec := TStringList.Create;
   Added := TStringList.Create;
+  Untrack := TStringList.Create;
   SpecFile := GetTempFileName(GetTempDir, 'gittan-paths-');
   AddFile := GetTempFileName(GetTempDir, 'gittan-add-');
   MsgFile := GetTempFileName(GetTempDir, 'gittan-message-');
@@ -2871,10 +2927,18 @@ begin
       if XY = '??' then
         Added.Add(Path)
       else if Whole and (XY[1] <> 'D') then
-        Added.Add(Path);
+        Added.Add(Path)
+      else if (XY[1] = 'D') and FileExists(FullPath(Path)) then
+        Untrack.Add(Path);
     end;
+    { A file taken out of the index but kept (git rm --cached) is
+      untracked too, and is not to go back in. }
+    Added.CaseSensitive := True;
+    for Path in Untrack do
+      if Added.IndexOf(Path) >= 0 then
+        Added.Delete(Added.IndexOf(Path));
 
-    if (Length(AParts) > 0) and not Whole then
+    if ((Length(AParts) > 0) or (Untrack.Count > 0)) and not Whole then
       Exit(CommitThroughIndex);
     if Added.Count > 0 then
     begin
@@ -2925,6 +2989,7 @@ begin
     Chosen.Free;
     Spec.Free;
     Added.Free;
+    Untrack.Free;
     DeleteFile(SpecFile);
     DeleteFile(AddFile);
     DeleteFile(MsgFile);
@@ -4674,14 +4739,17 @@ end;
 function TGittanRepo.ChangedFiles(AList: TStrings): boolean;
 var
   Output, Entry: string;
-  Fields: TStringList;
+  Fields, Removed: TStringList;
   i: integer;
 begin
   AList.Clear;
   if FRoot = '' then
     Exit(False);
   Fields := TStringList.Create;
+  Removed := TStringList.Create;
   try
+    Removed.CaseSensitive := True;
+    Removed.Sorted := True;
     { Between two commits the work tree has no say, so git status is
       not asked; nor for the whole tree, where the diff lists the
       untracked files itself. }
@@ -4701,6 +4769,13 @@ begin
           Continue;
         if (Entry[1] in ['R', 'C']) or (Entry[2] in ['R', 'C']) then
           Inc(i);
+        { A file git rm --cached took out of the index is listed once,
+          as the deletion to commit, not also as untracked (those come
+          last). }
+        if Entry[1] = 'D' then
+          Removed.Add(Copy(Entry, 4, MaxInt))
+        else if (Copy(Entry, 1, 2) = '??') and (Removed.IndexOf(Copy(Entry, 4, MaxInt)) >= 0) then
+          Continue;
         if (FBase = '') or (Copy(Entry, 1, 2) = '??') then
           AList.Add(Entry);
       end;
@@ -4720,6 +4795,7 @@ begin
     end;
   finally
     Fields.Free;
+    Removed.Free;
   end;
 end;
 

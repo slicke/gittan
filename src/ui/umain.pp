@@ -154,6 +154,9 @@ type
     FRevertItem, FRevertFileItem, FUndoRevertItem: TMenuItem;
     FFileHistoryItem: TMenuItem;
     FRevertUndo: TStringList;
+    { Rename or Move and Remove from Git in the file menu
+      (umain.movefiles.inc). }
+    FMoveItem, FRemoveItem: TMenuItem;
     { Clean (umain.clean.inc): the File menu's item and what the dialog
       deleted last (untracked, ignored or both), offered first again. }
     FCleanItem: TMenuItem;
@@ -1087,6 +1090,9 @@ type
     function CanRevert: boolean;
     procedure RevertPaths(APaths: TStrings; const ALabel: string);
     procedure MenuRevertChangesClick(Sender: TObject);
+    function CanMoveFiles: boolean;
+    procedure MenuMoveFileClick(Sender: TObject);
+    procedure MenuRemoveFileClick(Sender: TObject);
     procedure MenuFileHistoryClick(Sender: TObject);
     procedure MenuRevertFileClick(Sender: TObject);
     procedure MenuUndoRevertClick(Sender: TObject);
@@ -1968,6 +1974,21 @@ resourcestring
   rsRevertFailed = 'Could not revert';
   rsRevertUndone = 'Brought back %s';
   rsRevertUndoFailed = 'Could not bring everything back: %s';
+  rsMoveItem = 'Rename or Move...';
+  rsMoveTitle = 'Rename or Move';
+  rsMovePrompt = 'New path of %s, from the top of the repository';
+  rsMoveBadPath = 'A path inside the repository, such as docs/notes.txt';
+  rsMoved = 'Renamed %s to %s; the rename goes in with the next commit';
+  rsMoveFailed = 'Could not rename %s';
+  rsRemoveItem = 'Remove from Git...';
+  rsRemoveTitle = 'Remove from Git';
+  rsRemoveAsk = 'Take %s out of the repository? Stop Tracking keeps the file on disk, ' +
+    'untracked from now on; Delete deletes it too. Either goes in with the next commit.';
+  rsRemoveKeepAction = 'Stop Tracking';
+  rsRemoveDeleteAction = 'Delete';
+  rsUntracked = 'Stopped tracking %s; commit it to take it out of the repository';
+  rsRemoved = 'Deleted %s; commit it to take it out of the repository';
+  rsRemoveFailed = 'Could not remove %s';
   rsDiscardAction = 'Discard';
   rsKeepPill = 'Keep';
   rsUnkeepPill = 'Unkeep';
@@ -5836,6 +5857,7 @@ const
 {$I umain.reflog.inc}
 {$I umain.bisect.inc}
 {$I umain.revert.inc}
+{$I umain.movefiles.inc}
 {$I umain.clean.inc}
 {$I umain.patches.inc}
 {$I umain.clone.inc}

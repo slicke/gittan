@@ -862,6 +862,8 @@ begin
   Item.Caption := '-';
   FFilePopup.Items.Add(Item);
   FRevertItem := AddItem(FFilePopup, rsRevertChangesItem, @MenuRevertChangesClick);
+  FMoveItem := AddItem(FFilePopup, rsMoveItem, @MenuMoveFileClick);
+  FRemoveItem := AddItem(FFilePopup, rsRemoveItem, @MenuRemoveFileClick);
   FResolveMineItem := AddItem(FFilePopup, rsResolveMineItem, @MenuResolveMineClick);
   FResolveTheirsItem := AddItem(FFilePopup, rsResolveTheirsItem, @MenuResolveTheirsClick);
   FMarkResolvedItem := AddItem(FFilePopup, rsMarkResolvedItem, @MenuMarkResolvedClick);
@@ -950,6 +952,8 @@ begin
   finally
     Targets.Free;
   end;
+  FRemoveItem.Enabled := CanMoveFiles;
+  FMoveItem.Enabled := FRemoveItem.Enabled and Exists;
   FResolveMineItem.Enabled := IsConflictPath(FContextPath);
   FResolveTheirsItem.Enabled := FResolveMineItem.Enabled;
   FMarkResolvedItem.Enabled := FResolveMineItem.Enabled;
