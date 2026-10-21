@@ -278,6 +278,12 @@ type
       it is past SubjectSoftLimit; in the warning color past
       SubjectHardLimit. }
     FSubjectCount: TLabel;
+    { How many changed files are chosen and how many could be (not the
+      conflicts), as UpdateCommitState last counted them. }
+    FChosenCount, FChoosableCount: integer;
+    { Tick All Files and Untick All Files in the file menu, over the
+      tree while it chooses what to commit. }
+    FTickSepItem, FTickAllItem, FUntickAllItem: TMenuItem;
     FCommitNote: TGittanHintBox;
     FCommitItem: TMenuItem;
     FCommitJob: TGittanCommitJob;
@@ -1076,6 +1082,10 @@ type
     procedure SetupCommit;
     procedure FocusTreeAsync(Data: PtrInt);
     procedure CommitHintAsync(Data: PtrInt);
+    procedure CommitHeaderCheck(Sender: TObject);
+    procedure SetAllChosen(AValue: boolean);
+    procedure MenuTickAllClick(Sender: TObject);
+    procedure MenuUntickAllClick(Sender: TObject);
     procedure UpdateSubjectCount;
     procedure CommitPushClick(Sender: TObject);
     procedure ColorCommit;
@@ -1530,6 +1540,8 @@ resourcestring
   rsCommitNothing = 'Tick the files to commit.';
   rsCommitted = 'Committed %s: %s';
   rsCommittedTitle = 'Committed %s';
+  rsTickAllItem = 'Tick All Files';
+  rsUntickAllItem = 'Untick All Files';
   rsPushAction = 'Push';
   rsSubjectCount = '%d/%d';
   rsSubjectCountHint = 'Characters in the first line. git log and GitHub cut it after %d.';

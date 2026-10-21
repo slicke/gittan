@@ -873,6 +873,12 @@ begin
   { Filled with the patterns for the file when the menu pops up. }
   FIgnoreMenu := AddItem(FFilePopup, rsAddToIgnore, nil);
   FExcludeMenu := AddItem(FFilePopup, rsAddToExclude, nil);
+  { Over the tree while it chooses what to commit (FilePopupPopup). }
+  FTickSepItem := TMenuItem.Create(FFilePopup);
+  FTickSepItem.Caption := '-';
+  FFilePopup.Items.Add(FTickSepItem);
+  FTickAllItem := AddItem(FFilePopup, rsTickAllItem, @MenuTickAllClick);
+  FUntickAllItem := AddItem(FFilePopup, rsUntickAllItem, @MenuUntickAllClick);
   FileTree.PopupMenu := FFilePopup;
   FRepoTree.PopupMenu := FFilePopup;
   FHeader.PopupMenu := FFilePopup;
@@ -958,6 +964,12 @@ begin
   FResolveTheirsItem.Enabled := FResolveMineItem.Enabled;
   FMarkResolvedItem.Enabled := FResolveMineItem.Enabled;
   FillIgnoreMenus(FContextPath);
+  FTickSepItem.Visible := (FFilePopup.PopupComponent = FileTree) and CommitChoosing and
+    (FChoosableCount > 0);
+  FTickAllItem.Visible := FTickSepItem.Visible;
+  FUntickAllItem.Visible := FTickSepItem.Visible;
+  FTickAllItem.Enabled := (FChosenCount < FChoosableCount) and (FCommitJob = nil);
+  FUntickAllItem.Enabled := (FChosenCount > 0) and (FCommitJob = nil);
 end;
 
 procedure TForm1.SummaryContextFile(Sender: TObject; const APath: string;

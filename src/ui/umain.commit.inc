@@ -48,6 +48,8 @@ begin
   FCommitHeader.Align := alTop;
   FCommitHeader.Expanded := True;
   FCommitHeader.OnToggle := @CommitHeaderToggle;
+  FCommitHeader.CheckImages := FCheckImages;
+  FCommitHeader.OnCheck := @CommitHeaderCheck;
   FCommitHeader.Parent := FCommitPanel;
   FCommitBox := TPanel.Create(Self);
   FCommitBox.BevelOuter := bvNone;
@@ -214,6 +216,42 @@ begin
       RGBToColor(253, 236, 236), RGBToColor(242, 198, 198));
   end;
   UpdateSubjectCount;
+end;
+
+{ The header's box ticks every file that can be chosen, or none when
+  all of them were, as a folder's box does for the files under it. }
+procedure TForm1.CommitHeaderCheck(Sender: TObject);
+begin
+  SetAllChosen(FCommitHeader.CheckIndex <> checkOn);
+end;
+
+{ Chooses every changed file (AValue) or none, the filter's hidden ones
+  too, as the header's count counts them; the changes left out of the
+  files go, as with a folder's box. }
+procedure TForm1.SetAllChosen(AValue: boolean);
+var
+  i: integer;
+begin
+  if not CommitChoosing or (FCommitJob <> nil) then
+    Exit;
+  for i := 0 to High(FStats) do
+    if FStats[i].Kind <> ckConflict then
+    begin
+      SetCommitChosen(i, AValue);
+      DropLeftOut(FStats[i].Path);
+    end;
+  ApplyCommitChecks;
+  UpdateCommitState;
+end;
+
+procedure TForm1.MenuTickAllClick(Sender: TObject);
+begin
+  SetAllChosen(True);
+end;
+
+procedure TForm1.MenuUntickAllClick(Sender: TObject);
+begin
+  SetAllChosen(False);
 end;
 
 procedure TForm1.CommitHeaderToggle(Sender: TObject);
@@ -499,9 +537,22 @@ begin
   if not Continuing and (Trim(FCommitMemo.Text) = '') then
     Can := False;
   if CommitChoosing and (Total > 0) then
-    FCommitHeader.Detail := Format(rsCommitCount, [Chosen, Total])
+  begin
+    FCommitHeader.Detail := Format(rsCommitCount, [Chosen, Total]);
+    if Chosen = 0 then
+      FCommitHeader.CheckIndex := checkOff
+    else if Chosen = Total then
+      FCommitHeader.CheckIndex := checkOn
+    else
+      FCommitHeader.CheckIndex := checkMixed;
+  end
   else
+  begin
     FCommitHeader.Detail := '';
+    FCommitHeader.CheckIndex := -1;
+  end;
+  FChosenCount := Chosen;
+  FChoosableCount := Total;
   if FCommitJob <> nil then
     FCommitButton.Caption := rsCommitting
   else if Continuing then

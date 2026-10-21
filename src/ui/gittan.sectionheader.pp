@@ -8,14 +8,17 @@ unit gittan.sectionheader;
   It paints itself in colors the form sets, like the file header, since
   a native header would keep the desktop's look on a themed panel. A
   click flips Expanded and raises OnToggle; whoever owns the section
-  shows or hides the content and sizes it. }
+  shows or hides the content and sizes it. It can show a check box
+  between the title and the detail (CheckIndex, an image of
+  CheckImages, as the rows under it draw theirs), whose click raises
+  OnCheck instead: the Commit section ticks every file with it. }
 
 {$mode objfpc}{$H+}
 
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Graphics;
+  Classes, SysUtils, Types, Controls, Graphics, ImgList;
 
 type
 
@@ -27,6 +30,12 @@ type
     FExpanded, FHot: boolean;
     FBack, FText, FDim, FHover, FLine: TColor;
     FOnToggle: TNotifyEvent;
+    FCheckImages: TCustomImageList;
+    FCheckIndex: integer;
+    { The check box as last painted, empty without one. }
+    FCheckRect: TRect;
+    FOnCheck: TNotifyEvent;
+    procedure SetCheckIndex(AValue: integer);
     procedure SetTitle(const AValue: string);
     procedure SetDetail(const AValue: string);
     procedure SetExpanded(AValue: boolean);
@@ -51,6 +60,12 @@ type
     property Expanded: boolean read FExpanded write SetExpanded;
     {** After a click flipped Expanded. }
     property OnToggle: TNotifyEvent read FOnToggle write FOnToggle;
+    {** Where the check box's image comes from. }
+    property CheckImages: TCustomImageList read FCheckImages write FCheckImages;
+    {** The check box's image in CheckImages, -1 (the default) for none. }
+    property CheckIndex: integer read FCheckIndex write SetCheckIndex;
+    {** A click on the check box, which leaves Expanded alone. }
+    property OnCheck: TNotifyEvent read FOnCheck write FOnCheck;
   end;
 
 implementation
@@ -69,6 +84,7 @@ begin
   ControlStyle := ControlStyle + [csOpaque];
   Height := HeaderHeight;
   Cursor := crHandPoint;
+  FCheckIndex := -1;
   SetColors(clBtnFace, clWindowText, clGrayText, clBtnFace, clBtnShadow);
 end;
 
@@ -79,6 +95,14 @@ begin
   FDim := ADim;
   FHover := AHover;
   FLine := ALine;
+  Invalidate;
+end;
+
+procedure TGittanSectionHeader.SetCheckIndex(AValue: integer);
+begin
+  if FCheckIndex = AValue then
+    Exit;
+  FCheckIndex := AValue;
   Invalidate;
 end;
 
@@ -145,6 +169,15 @@ begin
   Canvas.TextOut(X, TextY, FTitle);
   Inc(X, Canvas.TextWidth(FTitle) + Gap);
   Canvas.Font.Style := [];
+  FCheckRect := Rect(0, 0, 0, 0);
+  if (FCheckIndex >= 0) and (FCheckImages <> nil) and
+    (FCheckIndex < FCheckImages.Count) then
+  begin
+    FCheckRect := Bounds(X, (Height - FCheckImages.Height) div 2, FCheckImages.Width,
+      FCheckImages.Height);
+    FCheckImages.Draw(Canvas, FCheckRect.Left, FCheckRect.Top, FCheckIndex);
+    Inc(X, FCheckImages.Width + Gap div 2);
+  end;
   if FDetail <> '' then
     Canvas.TextOut(X, TextY, FDetail);
 end;
@@ -167,6 +200,13 @@ procedure TGittanSectionHeader.MouseUp(Button: TMouseButton; Shift: TShiftState;
   X, Y: integer);
 begin
   inherited MouseUp(Button, Shift, X, Y);
+  { The box takes a few pixels around it too, being small. }
+  if (Button = mbLeft) and not FCheckRect.IsEmpty and Assigned(FOnCheck) and
+    PtInRect(Rect(FCheckRect.Left - 3, 0, FCheckRect.Right + 3, Height), Point(X, Y)) then
+  begin
+    FOnCheck(Self);
+    Exit;
+  end;
   if (Button = mbLeft) and PtInRect(ClientRect, Point(X, Y)) then
   begin
     FExpanded := not FExpanded;
