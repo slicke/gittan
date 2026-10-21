@@ -450,9 +450,16 @@
   .prev .md .a { color: var(--add-fg); background: var(--add-bg); margin: 0 -12px; padding: 0 12px; }
   .prev h4 { margin: 0 0 4px; font: 400 18px/1.2 var(--display); }
   .prev p { margin: 0; color: var(--fg-muted); line-height: 1.5; font-size: 12px; }
-  .wins { display: grid; gap: 8px; }
-  .wins div { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--fg-muted); }
-  .wins b { width: 64px; flex: none; color: var(--fg); font-weight: 650; }
+  .oswins { position: relative; aspect-ratio: 1000 / 760; }
+  .oswins figure { position: absolute; width: 74%; margin: 0; }
+  .oswins img { display: block; width: 100%; height: auto; border-radius: 8px; box-shadow: 0 10px 28px rgba(0,0,0,.28), 0 0 0 1px rgba(0,0,0,.25); }
+  .oswins figcaption {
+    position: absolute; right: 12px; top: -11px; padding: 3px 9px; border-radius: 999px;
+    font-size: 11.5px; font-weight: 650; color: var(--fg); background: var(--bg-elev); border: 1px solid var(--line-strong);
+  }
+  .oswins .os-linux { left: 0; top: 0; }
+  .oswins .os-windows { left: 13%; top: 17%; }
+  .oswins .os-mac { right: 0; bottom: 0; }
   .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .stats div { background: var(--bg-sunk); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-width: 0; }
   .stats b { display: block; font: 400 26px/1 var(--display); letter-spacing: -.01em; margin-bottom: 4px; }
@@ -1052,10 +1059,19 @@
           <h3>At home on each desktop</h3>
           <p>The file filter, the change navigator and the actions sit up in the title bar on every platform, and the window keeps the system's shadow and rounded corners.</p>
         </div>
-        <div class="art wins" aria-hidden="true">
-          <div><b>macOS</b>unified toolbar</div>
-          <div><b>Windows</b>its own title bar</div>
-          <div><b>Linux</b>GTK 3, its own header</div>
+        <div class="art oswins">
+          <figure class="os-linux"><picture>
+            <source srcset="assets/shots/os-linux.avif" type="image/avif">
+            <img src="assets/shots/os-linux.png" width="1000" height="617" loading="lazy" alt="Gittan on Fedora Linux with KDE: the commit graph of the trndi repository in a window with its own title bar">
+          </picture><figcaption>Linux</figcaption></figure>
+          <figure class="os-windows"><picture>
+            <source srcset="assets/shots/os-windows.avif" type="image/avif">
+            <img src="assets/shots/os-windows.png" width="1000" height="611" loading="lazy" alt="Gittan on Windows 11: the same commit graph, with the menus and the file filter in the window's title bar">
+          </picture><figcaption>Windows</figcaption></figure>
+          <figure class="os-mac"><picture>
+            <source srcset="assets/shots/os-mac.avif" type="image/avif">
+            <img src="assets/shots/os-mac.png" width="1000" height="617" loading="lazy" alt="Gittan on macOS: the same commit graph under the unified toolbar">
+          </picture><figcaption>macOS</figcaption></figure>
         </div>
       </div>
     </div>
