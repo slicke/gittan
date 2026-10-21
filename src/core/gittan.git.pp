@@ -462,6 +462,22 @@ type
     {** Deletes the tag AName on ARemote (`git push <remote> --delete
       refs/tags/<name>`), leaving the local one. Goes to the network. }
     function DeleteRemoteTag(const ARemote, AName: string): boolean;
+    {** Initializes and checks out the submodules at the commits the
+      repository records, theirs too (`git submodule update --init
+      --recursive`), or the one at APath alone; what a submodule lacks
+      is fetched. Goes to the network. }
+    function UpdateSubmodules(const APath: string): boolean;
+    {** Copies the URLs .gitmodules gives into the config and into the
+      submodules' own remotes (`git submodule sync --recursive`), for
+      every submodule or the one at APath alone. }
+    function SyncSubmodules(const APath: string): boolean;
+    {** Clones AUrl into APath (relative to the root, "/" separators) as
+      a new submodule following the branch ABranch (the remote's
+      default with ABranch empty), and stages it with .gitmodules (`git
+      submodule add`). False, with git's reason, when the path is taken
+      or the clone failed; git then leaves nothing behind. Goes to the
+      network. }
+    function AddSubmodule(const AUrl, APath, ABranch: string): boolean;
     {** The newest ALimit lines of HEAD's reflog, newest first (`git log
       -g`, read by ParseReflog), those whose commit no ref and not HEAD
       reaches marked Lost (`git rev-list <commits> --not --all`). An
@@ -3656,6 +3672,43 @@ begin
   if (FRoot = '') or (ARemote = '') or (AName = '') then
     Exit(False);
   Result := RunRemote(['push', ARemote, '--delete', 'refs/tags/' + AName]);
+end;
+
+{ ---------------------------------------------------------------------------
+  Submodules
+  ---------------------------------------------------------------------------
+  An update and an add clone and fetch, so they run as a fetch does,
+  with RemoteEnvironment; a sync only writes the config. }
+function TGittanRepo.UpdateSubmodules(const APath: string): boolean;
+begin
+  if APath = '' then
+    Result := RunRemote(['submodule', 'update', '--init', '--recursive', '--progress'])
+  else
+    Result := RunRemote(['submodule', 'update', '--init', '--recursive', '--progress', '--',
+      APath]);
+end;
+
+function TGittanRepo.SyncSubmodules(const APath: string): boolean;
+var
+  Output: string;
+begin
+  if FRoot = '' then
+    Exit(False);
+  if APath = '' then
+    Result := RunGit(FRoot, ['submodule', 'sync', '--recursive'], Output)
+  else
+    Result := RunGit(FRoot, ['submodule', 'sync', '--recursive', '--', APath], Output);
+end;
+
+{ No --progress: git 2.30 takes it for an update only. }
+function TGittanRepo.AddSubmodule(const AUrl, APath, ABranch: string): boolean;
+begin
+  if (AUrl = '') or (APath = '') then
+    Exit(False);
+  if ABranch = '' then
+    Result := RunRemote(['submodule', 'add', '--', AUrl, APath])
+  else
+    Result := RunRemote(['submodule', 'add', '-b', ABranch, '--', AUrl, APath]);
 end;
 
 function TGittanRepo.IsAncestor(const AAncestor, ADescendant: string): boolean;

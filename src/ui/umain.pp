@@ -29,7 +29,7 @@ uses
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, gittan.mdpreview,
   gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.repobrowser, gittan.clonedlg,
-  gittan.remotesdlg, ATSynEdit_Gaps, md5;
+  gittan.remotesdlg, gittan.submoduledlg, ATSynEdit_Gaps, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -321,6 +321,13 @@ type
     { Asks the remotes again SubmodulePoll ms after the last job of a
       round finished; off while no repository is open. }
     FSubTimer: TTimer;
+    { The submodules' actions: File > Submodules, the section's menu with
+      the items it enables, and the index of the shown submodule's
+      Update pill in the header (-1 when it has none). }
+    FSubUpdateAllItem, FSubSyncAllItem, FSubAddItem: TMenuItem;
+    FSubPopup: TPopupMenu;
+    FSubUpdateItem, FSubSyncItem, FSubOpenItem: TMenuItem;
+    FSubUpdatePill: integer;
     { Editing the repository's own files (umain.repofiles.inc): the full
       name of the file the editor holds open to edits, '' while it shows
       something else; the file's time stamp when it was loaded or saved,
@@ -517,8 +524,9 @@ type
     FRetryKind: TGittanRemoteKind;
     FRetryMode: TGittanPullMode;
     FRetryArg, FRetryRemote: string;
-    { A clone's folder and submodules, for Clone Again. }
-    FRetryRoot: string;
+    { A clone's folder and submodules, for Clone Again; a submodule's
+      path and branch, for Try Again after an add. }
+    FRetryRoot, FRetryPath, FRetryBranch: string;
     FRetrySubmodules: boolean;
     { The list a click on the status bar's pull request drops down, and
       what each of its rows does (the pa* constants). }
@@ -1241,6 +1249,22 @@ type
     procedure ShowSubmodule(AIndex: integer);
     procedure OpenShownSubmodule;
     procedure RestoreSubmodule;
+    function CanSubmoduleAction: boolean;
+    procedure UpdateSubmoduleItems;
+    procedure RecheckSubmodules;
+    procedure UpdateSubmodulesAsk(const APath: string);
+    procedure SyncSubmodulesNow(const APath: string);
+    procedure AddSubmoduleAsk(const AUrl, APath, ABranch: string);
+    procedure SubmoduleRemoteDone(AJob: TGittanRemoteJob);
+    function PopupSubmodule: integer;
+    procedure SubPopupPopup(Sender: TObject);
+    procedure MenuSubUpdateAllClick(Sender: TObject);
+    procedure MenuSubSyncAllClick(Sender: TObject);
+    procedure MenuSubAddClick(Sender: TObject);
+    procedure MenuSubUpdateClick(Sender: TObject);
+    procedure MenuSubSyncClick(Sender: TObject);
+    procedure MenuSubOpenClick(Sender: TObject);
+    procedure MenuSubCopyPathClick(Sender: TObject);
     procedure FillIgnoreMenus(const APath: string);
     procedure MenuIgnoreClick(Sender: TObject);
     function RepoFileName(const AFileName: string): boolean;
@@ -1844,7 +1868,7 @@ resourcestring
   rsSubConflict = 'in conflict: the index holds more than one commit';
   rsSubCheckedOut = 'Checked out';
   rsSubSameAsRecorded = 'the recorded commit';
-  rsSubNotInitialized = 'nothing: not initialized (git submodule update --init)';
+  rsSubNotInitialized = 'nothing: not initialized (Update checks it out)';
   rsSubRemote = 'Remote';
   rsSubChecking = 'checking...';
   rsSubUpToDate = 'the recorded commit, up to date';
@@ -1856,6 +1880,34 @@ resourcestring
   rsSubIncoming = 'New on the remote';
   rsSubMore = '... and %d more';
   rsSubOpen = 'Open';
+  rsSubUpdateAction = 'Update';
+  rsSubmodulesMenu = 'Su&bmodules';
+  rsSubUpdateAllItem = '&Update Submodules';
+  rsSubSyncAllItem = '&Sync Submodule URLs';
+  rsSubAddItem = '&Add Submodule...';
+  rsSubUpdateItem = '&Update';
+  rsSubSyncItem = '&Sync URL';
+  rsSubOpenItem = '&Open as Repository';
+  rsSubUpdateTitle = 'Update Submodules';
+  rsSubUpdateMoved = 'These submodules are checked out at another commit than the one ' +
+    'the repository records; Update checks out the recorded one:';
+  rsSubUpdateMovedKeep = 'Their commits stay in them, and a branch checked out in one stays ' +
+    'where it is.';
+  rsSubUpdating = 'Updating %s...';
+  rsSubUpdatingAll = 'Updating the submodules...';
+  rsNoticeSubUpdating = 'Updating %s';
+  rsNoticeSubUpdatingAll = 'Updating the submodules';
+  rsSubUpdated = 'Updated %s';
+  rsSubUpdatedAll = 'Updated the submodules';
+  rsSubUpdateFailed = 'The submodule update failed';
+  rsSubUpdateAgain = 'Update Again';
+  rsSubSynced = 'Synced the URL of %s';
+  rsSubSyncedAll = 'Synced the URLs of the submodules';
+  rsSubSyncFailed = 'Could not sync the submodule URLs';
+  rsSubAdding = 'Adding the submodule %s...';
+  rsNoticeSubAdding = 'Adding the submodule %s';
+  rsSubAddedOk = 'Added the submodule %s; commit it with .gitmodules';
+  rsSubAddFailed = 'The submodule could not be added';
   rsSubChange = 'Changed';
   rsSubNone = 'none';
   rsSubForward = '%d new commits';
@@ -3278,6 +3330,11 @@ begin
   FFetchItem := AddItem(FileMenu, rsFetchMenu, ShortCut(VK_F, [ssModifier, ssAlt]),
     @MenuFetchClick);
   FRemotesItem := AddItem(FileMenu, rsRemotesItem, 0, @MenuRemotesClick);
+  Sub := AddItem(FileMenu, rsSubmodulesMenu, 0, nil);
+  FSubUpdateAllItem := AddItem(Sub, rsSubUpdateAllItem, 0, @MenuSubUpdateAllClick);
+  FSubSyncAllItem := AddItem(Sub, rsSubSyncAllItem, 0, @MenuSubSyncAllClick);
+  Sub.Add(NewLine);
+  FSubAddItem := AddItem(Sub, rsSubAddItem, 0, @MenuSubAddClick);
   UpdateRemoteItems;
   FileMenu.Add(NewLine);
   FDiscardItem := AddItem(FileMenu, rsDiscardChange, ShortCut(VK_BACK, [ssModifier, ssShift]),

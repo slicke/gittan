@@ -114,6 +114,10 @@ type
     procedure TestPatches;
   end;
 
+{** Sets a variable in the test's own environment, where every git the
+  tests start finds it. }
+procedure SetTestVariable(const AName, AValue: string);
+
 implementation
 
 uses

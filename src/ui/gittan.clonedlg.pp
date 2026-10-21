@@ -22,6 +22,9 @@ uses
 function ChooseClone(var AUrl, AParent: string; var ASubmodules: boolean;
   out ATarget: string): boolean;
 
+{** Whether the folder ADir has anything in it. }
+function FolderHasEntries(const ADir: string): boolean;
+
 implementation
 
 uses
@@ -75,7 +78,6 @@ type
     constructor Create(AOwner: TComponent); override;
   end;
 
-{ Whether ADir has anything in it. }
 function FolderHasEntries(const ADir: string): boolean;
 var
   Info: TSearchRec;

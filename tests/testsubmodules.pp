@@ -2,7 +2,8 @@ unit testsubmodules;
 
 {** Tests of gittan.submodules: reading .gitmodules, the index and
   ls-remote, relative URLs, and CheckSubmodule against a repository with
-  a submodule whose remote is a folder made for the test. }
+  a submodule whose remote is a folder made for the test; and of
+  TGittanRepo's submodule update, sync and add. }
 
 {$mode objfpc}{$H+}
 
@@ -32,12 +33,31 @@ type
     procedure TestCheckNotInitialized;
     procedure TestParseGitlink;
     procedure TestCompare;
+    procedure TestParseMoved;
+    procedure TestSubmoduleFolder;
+    procedure TestUpdateSyncAdd;
   end;
 
 implementation
 
 uses
-  Process;
+  Process, testgit;
+
+{ git refuses a local folder as a submodule's remote unless told
+  otherwise, and the update and add of TGittanRepo run git themselves:
+  every git the tests start is told through the environment. }
+procedure AllowFileTransport;
+var
+  Count, i: integer;
+begin
+  Count := StrToIntDef(EnvironmentVariable('GIT_CONFIG_COUNT'), 0);
+  for i := 0 to Count - 1 do
+    if EnvironmentVariable('GIT_CONFIG_KEY_' + IntToStr(i)) = 'protocol.file.allow' then
+      Exit;
+  SetTestVariable('GIT_CONFIG_KEY_' + IntToStr(Count), 'protocol.file.allow');
+  SetTestVariable('GIT_CONFIG_VALUE_' + IntToStr(Count), 'always');
+  SetTestVariable('GIT_CONFIG_COUNT', IntToStr(Count + 1));
+end;
 
 procedure RemoveTree(const ADir: string);
 var
@@ -371,6 +391,137 @@ begin
   AssertEquals(2, Change.Added);
 end;
 
+procedure TSubmodulesTest.TestParseMoved;
+var
+  Moved: TStringList;
+begin
+  Moved := TStringList.Create;
+  try
+    ParseMovedSubmodules(
+      ' 1111111111111111111111111111111111111111 vendor/a (heads/main)'#10 +
+      '+2222222222222222222222222222222222222222 lib/my lib (v1.0-2-g2222222)'#10 +
+      '-3333333333333333333333333333333333333333 not/here'#10 +
+      '+4444444444444444444444444444444444444444 no describe'#10, Moved);
+    AssertEquals(2, Moved.Count);
+    AssertEquals('lib/my lib', Moved.Names[0]);
+    AssertEquals('2222222222222222222222222222222222222222', Moved.ValueFromIndex[0]);
+    AssertEquals('no describe', Moved.Names[1]);
+    ParseMovedSubmodules('', Moved);
+    AssertEquals(0, Moved.Count);
+  finally
+    Moved.Free;
+  end;
+end;
+
+procedure TSubmodulesTest.TestSubmoduleFolder;
+var
+  List: TGittanSubmodules;
+begin
+  List := nil;
+  AssertEquals('none', '', SubmoduleFolder(List));
+  SetLength(List, 1);
+  List[0].Path := 'vendor/a';
+  AssertEquals('vendor/', SubmoduleFolder(List));
+  SetLength(List, 3);
+  List[1].Path := 'vendor/b/c';
+  List[2].Path := 'vendor/bc/d';
+  AssertEquals('whole parts only', 'vendor/', SubmoduleFolder(List));
+  List[0].Path := 'vendor/b/a';
+  List[2].Path := 'vendor/b/d';
+  AssertEquals('vendor/b/', SubmoduleFolder(List));
+  List[2].Path := 'other/d';
+  AssertEquals('no common folder', '', SubmoduleFolder(List));
+  List[2].Path := 'd';
+  AssertEquals('one at the root', '', SubmoduleFolder(List));
+end;
+
+{ A clone without its submodule: an update checks it out and its own
+  submodule with it; moved on, the submodule is listed as moved and an
+  update moves it back; a sync takes a new URL from .gitmodules into the
+  config and the submodule's origin; an add clones a new one and stages
+  it with .gitmodules, and refuses a path that is taken. }
+procedure TSubmodulesTest.TestUpdateSyncAdd;
+var
+  Up, Deep, Super, Clone, Lib, Recorded, Output: string;
+  Repo: TGittanRepo;
+  Moved: TStringList;
+  List: TGittanSubmodules;
+  Err: string;
+begin
+  AllowFileTransport;
+  Up := IncludeTrailingPathDelimiter(FDir) + 'up';
+  Deep := IncludeTrailingPathDelimiter(FDir) + 'deep';
+  Super := IncludeTrailingPathDelimiter(FDir) + 'super';
+  Clone := IncludeTrailingPathDelimiter(FDir) + 'clone';
+  ForceDirectories(Up);
+  ForceDirectories(Deep);
+  ForceDirectories(Super);
+  Git(Deep, ['init', '-q']);
+  CommitFile(Deep, 'd.txt', 'deep');
+  Git(Up, ['init', '-q']);
+  CommitFile(Up, 'a.txt', 'first');
+  Git(Up, ['submodule', 'add', '-q', Deep, 'deep']);
+  Git(Up, ['commit', '-q', '-m', 'add deep']);
+  Git(Super, ['init', '-q']);
+  Git(Super, ['submodule', 'add', '-q', Up, 'lib']);
+  Git(Super, ['commit', '-q', '-m', 'add lib']);
+  Git(FDir, ['clone', '-q', Super, Clone]);
+  Lib := IncludeTrailingPathDelimiter(Clone) + 'lib';
+
+  Repo := TGittanRepo.Create;
+  Moved := TStringList.Create;
+  try
+    AssertTrue(Repo.Open(Clone));
+    AssertFalse('not checked out', FileExists(Lib + PathDelim + 'a.txt'));
+    AssertTrue(Repo.Error, Repo.UpdateSubmodules(''));
+    AssertTrue(FileExists(Lib + PathDelim + 'a.txt'));
+    AssertTrue('recursively', FileExists(Lib + PathDelim + 'deep' + PathDelim + 'd.txt'));
+    AssertTrue(MovedSubmodules(Clone, '', Moved));
+    AssertEquals(0, Moved.Count);
+
+    Recorded := Trim(Git(Lib, ['rev-parse', 'HEAD']));
+    CommitFile(Lib, 'b.txt', 'moved on');
+    AssertTrue(MovedSubmodules(Clone, '', Moved));
+    AssertEquals(1, Moved.Count);
+    AssertEquals('lib', Moved.Names[0]);
+    AssertEquals(Trim(Git(Lib, ['rev-parse', 'HEAD'])), Moved.ValueFromIndex[0]);
+    AssertTrue(MovedSubmodules(Clone, 'lib', Moved));
+    AssertEquals('one path', 1, Moved.Count);
+    AssertTrue(Repo.Error, Repo.UpdateSubmodules('lib'));
+    AssertEquals('back at the recorded commit', Recorded, Trim(Git(Lib, ['rev-parse', 'HEAD'])));
+
+    Git(Clone, ['config', '-f', '.gitmodules', 'submodule.lib.url', Up + '-moved']);
+    AssertTrue(Repo.Error, Repo.SyncSubmodules(''));
+    AssertEquals(Up + '-moved', Trim(Git(Clone, ['config', 'submodule.lib.url'])));
+    AssertEquals(Up + '-moved', Trim(Git(Lib, ['config', 'remote.origin.url'])));
+    Git(Clone, ['checkout', '-q', '--', '.gitmodules']);
+    AssertTrue(Repo.Error, Repo.SyncSubmodules('lib'));
+    AssertEquals(Up, Trim(Git(Lib, ['config', 'remote.origin.url'])));
+
+    AssertTrue(Repo.Error, Repo.AddSubmodule(Deep, 'vendor/deep', ''));
+    AssertTrue(FileExists(Clone + PathDelim + 'vendor' + PathDelim + 'deep' + PathDelim +
+      'd.txt'));
+    AssertTrue(Err, ListSubmodules(Clone, List, Err));
+    AssertEquals(2, Length(List));
+    AssertEquals('vendor/deep', List[1].Path);
+    AssertTrue('recorded in the index', List[1].Recorded <> '');
+    Output := Git(Clone, ['status', '--porcelain']);
+    AssertTrue(Output, Pos('A  vendor/deep', Output) > 0);
+    AssertTrue(Output, Pos('M  .gitmodules', Output) > 0);
+    AssertFalse('taken', Repo.AddSubmodule(Deep, 'vendor/deep', ''));
+    AssertTrue(Repo.Error <> '');
+    AssertFalse('no repository there', Repo.AddSubmodule(Deep + '-nothing', 'other', ''));
+    AssertFalse('git removes what it made', DirectoryExists(Clone + PathDelim + 'other'));
+    AssertTrue(Repo.Error, Repo.AddSubmodule(Up, 'branched', 'main'));
+    AssertEquals('main', Trim(Git(Clone, ['config', '-f', '.gitmodules',
+      'submodule.branched.branch'])));
+  finally
+    Moved.Free;
+    Repo.Free;
+  end;
+end;
+
 initialization
   RegisterTest(TSubmodulesTest);
+
 end.

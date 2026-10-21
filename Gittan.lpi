@@ -140,6 +140,10 @@
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
+        <Filename Value="src/ui/gittan.submoduledlg.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
         <Filename Value="src/ui/gittan.statusbar.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>

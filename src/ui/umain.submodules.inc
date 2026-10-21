@@ -19,9 +19,20 @@
   has them. A submodule git status reports changed is shown the same way
   from its row in the summary or its node in the file tree, the view then
   opening with how it moved (CompareSubmodule) and the commits it moved
-  by. }
+  by. File > Submodules and the section's menu update, sync and add
+  submodules (at the end of this file). }
 procedure TForm1.SetupSubmodules;
+
+  function AddItem(const ACaption: string; AClick: TNotifyEvent): TMenuItem;
+  begin
+    Result := TMenuItem.Create(FSubPopup);
+    Result.Caption := ACaption;
+    Result.OnClick := AClick;
+    FSubPopup.Items.Add(Result);
+  end;
+
 begin
+  FSubUpdatePill := -1;
   FSubJobs := TList.Create;
   FSubTimer := TTimer.Create(Self);
   FSubTimer.Enabled := False;
@@ -49,6 +60,15 @@ begin
   FSubTree.OnSelectionChanged := @SubTreeSelectionChanged;
   FSubTree.Align := alClient;
   FSubTree.Parent := FSubPanel;
+  { A right click selects the row, so the menu acts on the one shown. }
+  FSubPopup := TPopupMenu.Create(Self);
+  FSubPopup.OnPopup := @SubPopupPopup;
+  FSubUpdateItem := AddItem(rsSubUpdateItem, @MenuSubUpdateClick);
+  FSubSyncItem := AddItem(rsSubSyncItem, @MenuSubSyncClick);
+  AddItem('-', nil);
+  FSubOpenItem := AddItem(rsSubOpenItem, @MenuSubOpenClick);
+  AddItem(rsCopyPath, @MenuSubCopyPathClick);
+  FSubTree.PopupMenu := FSubPopup;
   { The Config section was colored before this header existed. }
   ColorRepoHeader;
 end;
@@ -225,6 +245,7 @@ begin
     FSubHeader.Detail := '';
   FSubPanel.Visible := Length(FSubmodules) > 0;
   LayoutRepoFiles;
+  UpdateSubmoduleItems;
 end;
 
 { One job per submodule, so a slow remote holds up only its own row.
@@ -363,6 +384,7 @@ var
   Checking: boolean;
   Lines: TStringList;
   Line: string;
+  Actions: TStringArray;
   i: integer;
 
   procedure Add(const ALabel, AText: string);
@@ -489,8 +511,24 @@ begin
     Lines.Free;
   end;
   FHeader.SetFile(Sub.Path, iconFolder);
+  { Update while it is not checked out, or checked out elsewhere than
+    the recorded commit. }
+  Actions := nil;
+  FSubUpdatePill := -1;
+  if (Sub.Recorded <> '') and not Sub.Conflict and not Checking and
+    (not Info.Initialized or (Info.CheckedOut <> Sub.Recorded)) then
+  begin
+    FSubUpdatePill := 0;
+    SetLength(Actions, 1);
+    Actions[0] := rsSubUpdateAction;
+  end;
   if Info.Initialized then
-    FHeader.SetActions([rsSubOpen]);
+  begin
+    SetLength(Actions, Length(Actions) + 1);
+    Actions[High(Actions)] := rsSubOpen;
+  end;
+  if Length(Actions) > 0 then
+    FHeader.SetActions(Actions);
   UpdateChangeNav;
   ShowEditor;
   SelectShownSubmodule;
@@ -519,4 +557,226 @@ begin
       Exit;
     end;
   ShowSummary;
+end;
+
+{ ---------------------------------------------------------------------------
+  Updating, syncing and adding submodules
+  ---------------------------------------------------------------------------
+  File > Submodules updates them all (git submodule update --init
+  --recursive), syncs their URLs from .gitmodules and adds one; the
+  section's menu updates or syncs the row it was opened on, and a
+  submodule shown while it is not checked out, or checked out elsewhere
+  than the recorded commit, has an Update pill. An update and an add go
+  to the network, so they run in the remote job with its notice
+  (umain.remote.inc hands them back to SubmoduleRemoteDone); an update
+  that would move a submodule back to the recorded commit asks first.
+  A sync only writes the config. Then the remotes are asked again. }
+
+function TForm1.CanSubmoduleAction: boolean;
+begin
+  Result := (FRepo <> nil) and (FRepo.Root <> '') and (FRemoteJob = nil) and
+    (FCommitJob = nil);
+end;
+
+procedure TForm1.UpdateSubmoduleItems;
+var
+  Can: boolean;
+begin
+  if FSubAddItem = nil then
+    Exit;
+  Can := CanSubmoduleAction;
+  FSubUpdateAllItem.Enabled := Can and (Length(FSubmodules) > 0);
+  FSubSyncAllItem.Enabled := FSubUpdateAllItem.Enabled;
+  FSubAddItem.Enabled := Can;
+end;
+
+{ What changed in the submodules is asked of their remotes again, and
+  the shown one is shown again, as View > Refresh does. }
+procedure TForm1.RecheckSubmodules;
+begin
+  if FRepo.Root = '' then
+    Exit;
+  StartSubmoduleJobs;
+  FillSubmoduleTree;
+  if FView = gvSubmodule then
+    RestoreSubmodule;
+end;
+
+{ Every submodule with APath empty. One checked out at another commit
+  than the recorded one is moved back by the update, which may be what
+  was not wanted: the user moved it to record the new commit. }
+procedure TForm1.UpdateSubmodulesAsk(const APath: string);
+var
+  Moved: TStringList;
+  List: string;
+  i, Index: integer;
+begin
+  if not CanSubmoduleAction then
+    Exit;
+  Moved := TStringList.Create;
+  try
+    if MovedSubmodules(FRepo.Root, APath, Moved) and (Moved.Count > 0) then
+    begin
+      List := '';
+      for i := 0 to Moved.Count - 1 do
+      begin
+        List := List + LineEnding + Moved.Names[i] + '  ' + Copy(Moved.ValueFromIndex[i], 1, 7);
+        Index := SubmoduleAt(Moved.Names[i]);
+        if Index >= 0 then
+          List := List + ' → ' + Copy(FSubmodules[Index].Recorded, 1, 7);
+      end;
+      if QuestionDlg(rsSubUpdateTitle, rsSubUpdateMoved + LineEnding + List + LineEnding +
+        LineEnding + rsSubUpdateMovedKeep, mtWarning, [mrYes, rsSubUpdateAction, mrCancel,
+        rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
+        Exit;
+    end;
+  finally
+    Moved.Free;
+  end;
+  StartRemote(rkSubmoduleUpdate, pmAuto, APath);
+end;
+
+procedure TForm1.SyncSubmodulesNow(const APath: string);
+var
+  Ok: boolean;
+begin
+  if not CanSubmoduleAction then
+    Exit;
+  Screen.Cursor := crHourGlass;
+  try
+    Ok := FRepo.SyncSubmodules(APath);
+  finally
+    Screen.Cursor := crDefault;
+  end;
+  if not Ok then
+    BannerError(rsSubSyncFailed, FRepo.Error)
+  else if APath = '' then
+    StatusNote(rsSubSyncedAll)
+  else
+    StatusNote(Format(rsSubSynced, [APath]));
+  RecheckSubmodules;
+end;
+
+{ The dialog starts with AUrl, APath and ABranch: empty from the menu,
+  what failed for Try Again. The add runs as a clone does, its notice
+  shown at once. }
+procedure TForm1.AddSubmoduleAsk(const AUrl, APath, ABranch: string);
+var
+  Url, Path, Branch: string;
+  Taken: TStringArray;
+  i: integer;
+begin
+  if not CanSubmoduleAction then
+    Exit;
+  Url := AUrl;
+  Path := APath;
+  Branch := ABranch;
+  SetLength(Taken, Length(FSubmodules));
+  for i := 0 to High(FSubmodules) do
+    Taken[i] := FSubmodules[i].Path;
+  if not ChooseSubmodule(FRepo.Root, SubmoduleFolder(FSubmodules), Taken, Url, Path,
+    Branch) then
+    Exit;
+  if not CanSubmoduleAction then
+    Exit;
+  FNoticeHook := False;
+  FRemoteHead := '';
+  FRemoteAhead := FAhead;
+  FRemoteJob := TGittanRemoteJob.Create(FRepo.Root, rkSubmoduleAdd, pmAuto, Url);
+  FRemoteJob.Path := Path;
+  FRemoteJob.Branch := Branch;
+  FRemoteJob.OnDone := @RemoteJobDone;
+  FRemoteJob.OnOutput := @RemoteJobOutput;
+  FRemoteJob.Start;
+  FStatus.ShowMessage(Format(rsSubAdding, [Path]), stNormal, 0);
+  ShowRemoteNotice;
+  UpdateRemoteItems;
+  UpdateCommitState;
+end;
+
+{ From RemoteJobDone after the refresh, for an update or an add that
+  went through: the submodules are asked again, and a new one is shown. }
+procedure TForm1.SubmoduleRemoteDone(AJob: TGittanRemoteJob);
+var
+  Index: integer;
+begin
+  RecheckSubmodules;
+  if not AJob.Ok then
+    Exit;
+  if AJob.Kind = rkSubmoduleAdd then
+  begin
+    Index := SubmoduleAt(AJob.Path);
+    if Index >= 0 then
+      ShowSubmodule(Index);
+    BannerSuccess(Format(rsSubAddedOk, [AJob.Path]));
+  end
+  else if AJob.Arg = '' then
+    BannerSuccess(rsSubUpdatedAll)
+  else
+    BannerSuccess(Format(rsSubUpdated, [AJob.Arg]));
+end;
+
+{ The submodule of the section's selected row, -1 for none. }
+function TForm1.PopupSubmodule: integer;
+begin
+  Result := -1;
+  if (FSubTree.Selected <> nil) and (FSubTree.Selected.Data <> nil) then
+    Result := integer(PtrUInt(FSubTree.Selected.Data)) - 1;
+  if Result > High(FSubmodules) then
+    Result := -1;
+end;
+
+procedure TForm1.SubPopupPopup(Sender: TObject);
+var
+  Index: integer;
+  Can: boolean;
+begin
+  Index := PopupSubmodule;
+  Can := (Index >= 0) and CanSubmoduleAction;
+  FSubUpdateItem.Enabled := Can and (FSubmodules[Index].Recorded <> '');
+  FSubSyncItem.Enabled := Can;
+  FSubOpenItem.Enabled := (Index >= 0) and (Index <= High(FSubInfos)) and
+    FSubInfos[Index].Initialized;
+end;
+
+procedure TForm1.MenuSubUpdateAllClick(Sender: TObject);
+begin
+  UpdateSubmodulesAsk('');
+end;
+
+procedure TForm1.MenuSubSyncAllClick(Sender: TObject);
+begin
+  SyncSubmodulesNow('');
+end;
+
+procedure TForm1.MenuSubAddClick(Sender: TObject);
+begin
+  AddSubmoduleAsk('', '', '');
+end;
+
+procedure TForm1.MenuSubUpdateClick(Sender: TObject);
+begin
+  if PopupSubmodule >= 0 then
+    UpdateSubmodulesAsk(FSubmodules[PopupSubmodule].Path);
+end;
+
+procedure TForm1.MenuSubSyncClick(Sender: TObject);
+begin
+  if PopupSubmodule >= 0 then
+    SyncSubmodulesNow(FSubmodules[PopupSubmodule].Path);
+end;
+
+procedure TForm1.MenuSubOpenClick(Sender: TObject);
+begin
+  if PopupSubmodule < 0 then
+    Exit;
+  OpenRepository(IncludeTrailingPathDelimiter(FRepo.Root) +
+    SetDirSeparators(FSubmodules[PopupSubmodule].Path));
+end;
+
+procedure TForm1.MenuSubCopyPathClick(Sender: TObject);
+begin
+  if PopupSubmodule >= 0 then
+    Clipboard.AsText := IncludeTrailingPathDelimiter(FRepo.Root) +
+      SetDirSeparators(FSubmodules[PopupSubmodule].Path);
 end;

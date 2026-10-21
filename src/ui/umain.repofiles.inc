@@ -453,7 +453,10 @@ begin
     Exit;
   if FView = gvSubmodule then
   begin
-    OpenShownSubmodule;
+    if AIndex = FSubUpdatePill then
+      UpdateSubmodulesAsk(FSubShown)
+    else
+      OpenShownSubmodule;
     Exit;
   end;
   if (FView <> gvChanges) or (FCurrentPath = '') or (FRepo.Root = '') then

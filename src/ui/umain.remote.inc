@@ -14,8 +14,9 @@
   force the push with --force-with-lease; a forced push that finds the
   remote moved since the last fetch offers to fetch. Any other failure
   shows git's reason. The same job also pushes a branch to a remote it
-  then tracks, pushes tags, deletes a branch or a tag on a remote, and
-  clones (umain.clone.inc). }
+  then tracks, pushes tags, deletes a branch or a tag on a remote,
+  clones (umain.clone.inc), and updates and adds submodules
+  (umain.submodules.inc). }
 const
   saPull = 0;
   saPush = 1;
@@ -38,6 +39,7 @@ begin
   FRemotesItem.Enabled := Can;
   FCloneItem.Enabled := (FRemoteJob = nil) and (FCommitJob = nil);
   FInitItem.Enabled := FCloneItem.Enabled;
+  UpdateSubmoduleItems;
   UpdateBranchItems;
   UpdateStashItems;
 end;
@@ -75,6 +77,11 @@ begin
           FStatus.ShowMessage(Format(rsPushingTo, [AArg, ARemote]), stNormal, 0);
       rkDeleteRemote, rkDeleteRemoteTag:
         FStatus.ShowMessage(Format(rsDeletingRemote, [AArg]), stNormal, 0);
+      rkSubmoduleUpdate:
+        if AArg = '' then
+          FStatus.ShowMessage(rsSubUpdatingAll, stNormal, 0)
+        else
+          FStatus.ShowMessage(Format(rsSubUpdating, [AArg]), stNormal, 0);
     end;
   if FNoticeHook then
     ShowRemoteNotice
@@ -106,6 +113,12 @@ begin
     rkDeleteRemoteTag: Result := Format(rsNoticeDeletingOn, [FRemoteJob.Arg,
         FRemoteJob.Remote]);
     rkClone: Result := Format(rsNoticeCloning, [CloneFolderName(FRemoteJob.Arg)]);
+    rkSubmoduleUpdate:
+      if FRemoteJob.Arg = '' then
+        Result := rsNoticeSubUpdatingAll
+      else
+        Result := Format(rsNoticeSubUpdating, [FRemoteJob.Arg]);
+    rkSubmoduleAdd: Result := Format(rsNoticeSubAdding, [FRemoteJob.Path]);
   end;
 end;
 
@@ -176,6 +189,13 @@ begin
   RefreshRepository;
   UpdateRemoteItems;
   UpdateCommitState;
+  if Job.Kind in [rkSubmoduleUpdate, rkSubmoduleAdd] then
+  begin
+    SubmoduleRemoteDone(Job);
+    if not Job.Ok then
+      ShowRemoteFailure(Job, False);
+    Exit;
+  end;
   if Job.Ok then
   begin
     case Job.Kind of
@@ -301,6 +321,16 @@ begin
         Title := rsCloneFailed;
         Again := rsCloneAgain;
       end;
+    rkSubmoduleUpdate:
+      begin
+        Title := rsSubUpdateFailed;
+        Again := rsSubUpdateAgain;
+      end;
+    rkSubmoduleAdd:
+      begin
+        Title := rsSubAddFailed;
+        Again := rsTryAgain;
+      end;
     else
       Title := Format(rsDeleteRemoteFailed, [AJob.Arg]);
       Again := rsTryAgain;
@@ -311,6 +341,8 @@ begin
   FRetryRemote := AJob.Remote;
   FRetryRoot := AJob.Root;
   FRetrySubmodules := AJob.Submodules;
+  FRetryPath := AJob.Path;
+  FRetryBranch := AJob.Branch;
   FStatus.ShowMessage(Title, stBad, StatusErrorSeconds);
   FNotice.DetailFont.Assign(Edit.Font);
   FNotice.Popup(Title, AJob.Error, False, nkBad);
@@ -325,6 +357,9 @@ begin
         FNotice.Close;
         if FRetryKind = rkClone then
           StartClone(FRetryArg, FRetryRoot, FRetrySubmodules)
+        { The dialog again, as the URL or path may be what was wrong. }
+        else if FRetryKind = rkSubmoduleAdd then
+          AddSubmoduleAsk(FRetryArg, FRetryPath, FRetryBranch)
         else
           StartRemote(FRetryKind, FRetryMode, FRetryArg, FRetryRemote);
       end;

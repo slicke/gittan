@@ -7,7 +7,8 @@ unit gittan.submodules;
   nothing is fetched and nothing in the submodule changes. When the
   submodule already has the remote's commit, the commits between are
   counted and listed. CompareSubmodule tells how a changed submodule
-  moved between the two sides of a comparison. TGittanSubmoduleJob runs CheckSubmodule in a thread,
+  moved between the two sides of a comparison, and MovedSubmodules which
+  ones an update would move back. TGittanSubmoduleJob runs CheckSubmodule in a thread,
   since ls-remote goes to the network. Nothing here needs the LCL; the
   unit is tested in tests/testsubmodules.pp. }
 
@@ -147,6 +148,21 @@ function CheckSubmodule(const ARoot: string; const ASub: TGittanSubmodule;
   read, nothing is fetched. }
 function CompareSubmodule(const ARoot: string; const ASub: TGittanSubmodule;
   const ALeft, ARight: string): TGittanSubmoduleChange;
+
+{** Reads what `git submodule status` prints into the paths of the
+  submodules checked out at another commit than the one recorded for
+  them (the lines marked "+"), each followed by "=" and that commit. }
+procedure ParseMovedSubmodules(const AOutput: string; AMoved: TStrings);
+
+{** The submodules of the repository at ARoot (APath alone, unless it is
+  empty) checked out at another commit than the one recorded, as
+  ParseMovedSubmodules gives them: what an update would move back. }
+function MovedSubmodules(const ARoot, APath: string; AMoved: TStrings): boolean;
+
+{** The folder every submodule in AList is in, with a trailing "/"
+  (vendor/ when they are vendor/a and vendor/b), where a new one likely
+  goes too; empty when they are in no common folder. }
+function SubmoduleFolder(const AList: TGittanSubmodules): string;
 
 type
   {** Runs CheckSubmodule in a thread. OnDone is called in the main thread
@@ -445,6 +461,72 @@ begin
   Result := RunGitIn(ARoot, ['ls-files', '-s', '-z'], Output, AError);
   if Result then
     ApplyIndexEntries(Output, AList);
+end;
+
+{ Each line is a mark (" ", "-" not initialized, "+" moved, "U" in
+  conflict), the commit checked out, the path as it is, and after it
+  " (<describe>)" when git could name the commit. }
+procedure ParseMovedSubmodules(const AOutput: string; AMoved: TStrings);
+var
+  Lines: TStringList;
+  Line, Hash, Path: string;
+  Space, i: integer;
+begin
+  AMoved.Clear;
+  Lines := TStringList.Create;
+  try
+    Lines.Text := AOutput;
+    for i := 0 to Lines.Count - 1 do
+    begin
+      Line := Lines[i];
+      if (Line = '') or (Line[1] <> '+') then
+        Continue;
+      Space := Pos(' ', Line);
+      if Space = 0 then
+        Continue;
+      Hash := Copy(Line, 2, Space - 2);
+      Path := Copy(Line, Space + 1, MaxInt);
+      if (Path <> '') and (Path[Length(Path)] = ')') and (RPos(' (', Path) > 0) then
+        SetLength(Path, RPos(' (', Path) - 1);
+      if Path <> '' then
+        AMoved.Add(Path + '=' + Hash);
+    end;
+  finally
+    Lines.Free;
+  end;
+end;
+
+function MovedSubmodules(const ARoot, APath: string; AMoved: TStrings): boolean;
+var
+  Output, Err: string;
+begin
+  AMoved.Clear;
+  if APath = '' then
+    Result := RunGitIn(ARoot, ['submodule', 'status'], Output, Err)
+  else
+    Result := RunGitIn(ARoot, ['submodule', 'status', '--', APath], Output, Err);
+  if Result then
+    ParseMovedSubmodules(Output, AMoved);
+end;
+
+function SubmoduleFolder(const AList: TGittanSubmodules): string;
+var
+  Folder: string;
+  i: integer;
+begin
+  Result := '';
+  for i := 0 to High(AList) do
+  begin
+    Folder := Copy(AList[i].Path, 1, RPos('/', AList[i].Path));
+    if Folder = '' then
+      Exit('');
+    if i = 0 then
+      Result := Folder
+    else
+      { The longest folder both are in, whole parts only. }
+      while (Result <> '') and (Copy(Folder, 1, Length(Result)) <> Result) do
+        Result := Copy(Result, 1, RPos('/', Copy(Result, 1, Length(Result) - 1)));
+  end;
 end;
 
 { The commit AHash of the repository at ADir, Hash empty when it does not

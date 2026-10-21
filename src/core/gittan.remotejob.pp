@@ -1,7 +1,8 @@
 unit gittan.remotejob;
 
-{** Fetch, pull, push and clone run in a thread: they go to the network,
-  which can take its time, and the window must not hang meanwhile. }
+{** Fetch, pull, push, clone and the submodules' update and add run in a
+  thread: they go to the network, which can take its time, and the
+  window must not hang meanwhile. }
 
 {$mode objfpc}{$H+}
 
@@ -13,7 +14,7 @@ uses
 type
   {** What a TGittanRemoteJob does. }
   TGittanRemoteKind = (rkFetch, rkPull, rkPush, rkDeleteRemote, rkForcePush, rkPushBranch,
-    rkPushTag, rkDeleteRemoteTag, rkClone);
+    rkPushTag, rkDeleteRemoteTag, rkClone, rkSubmoduleUpdate, rkSubmoduleAdd);
 
   {** Runs a fetch, a pull (the way Mode says), a push, a push with
     --force-with-lease, or the deletion of the remote branch Arg stands
@@ -22,7 +23,10 @@ type
     push of the tag Arg (every tag with Arg empty) and the deletion of
     the tag Arg on it; of the repository at ARoot through TGittanRepo,
     on a repository of its own. A clone makes the repository at ARoot
-    from the URL Arg, with its submodules when Submodules is set.
+    from the URL Arg, with its submodules when Submodules is set. A
+    submodule update updates the submodule at the path Arg, or every one
+    with Arg empty; a submodule add clones the URL Arg into Path,
+    following Branch.
     OnDone is called in the main thread when it is done, unless the job
     has been stopped. A job is never broken off, as a pull stopped
     halfway would leave a merge behind: Stop only drops the handler, and
@@ -30,7 +34,7 @@ type
     starts never runs Execute). }
   TGittanRemoteJob = class(TThread)
   private
-    FRoot, FArg, FRemote: string;
+    FRoot, FArg, FRemote, FPath, FBranch: string;
     FKind: TGittanRemoteKind;
     FMode: TGittanPullMode;
     FOk, FDiverged, FRejected, FStale, FUnseen, FSubmodules: boolean;
@@ -60,6 +64,12 @@ type
     property Remote: string read FRemote;
     {** Whether a clone brings the submodules too; set before Start. }
     property Submodules: boolean read FSubmodules write FSubmodules;
+    {** Where a submodule add puts the submodule, relative to the root;
+      set before Start. }
+    property Path: string read FPath write FPath;
+    {** The branch a submodule add follows, empty for the remote's
+      default; set before Start. }
+    property Branch: string read FBranch write FBranch;
     {** Whether git did it. }
     property Ok: boolean read FOk;
     {** A pull that failed since the branch has diverged from its
@@ -230,6 +240,8 @@ begin
         rkPushBranch: FOk := Repo.PushBranch(FArg, FRemote);
         rkPushTag: FOk := Repo.PushTag(FRemote, FArg);
         rkDeleteRemoteTag: FOk := Repo.DeleteRemoteTag(FRemote, FArg);
+        rkSubmoduleUpdate: FOk := Repo.UpdateSubmodules(FArg);
+        rkSubmoduleAdd: FOk := Repo.AddSubmodule(FArg, FPath, FBranch);
         rkClone: ;
       end;
     if not FOk then
