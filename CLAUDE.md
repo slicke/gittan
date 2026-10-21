@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Gittan is a Free Pascal/Lazarus desktop app. AGENTS.md contains the working rules for this repo, including how macOS links, how the vendored ATSynEdit packages are installed in Lazarus, and how syntax highlighting is wired up. Read it before building.
+Gittan is a Free Pascal/Lazarus desktop app. AGENTS.md contains the working rules for this repo, including how macOS links and how the vendored packages are handled, and lists the files in spec/ that describe each area (syntax highlighting, git, the change view and so on). Read AGENTS.md before building, and the spec file for the area you change.
 
 ## Commands
 
