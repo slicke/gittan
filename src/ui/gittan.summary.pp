@@ -58,6 +58,13 @@ type
     FIconIndex: array of integer;
     { What a row shows in place of its counts and bar, '' for those. }
     FRowTexts: array of string;
+    { A pill after a row's file name, '' for none, such as Resolve on a
+      conflicted file; FActionRects are where they were last painted,
+      FActionHot the row whose pill is under the mouse, -1 for none. }
+    FRowActions: array of string;
+    FActionRects: array of TRect;
+    FActionHot: integer;
+    FOnRowAction: TGittanSelectFileEvent;
     FHot: integer;
     FBack, FText, FDim, FHover, FSelectedBack, FAdded, FDeleted, FLine, FLink: TColor;
     FNotesTitle: string;
@@ -129,6 +136,8 @@ type
     procedure PaintCommits;
     procedure PaintCommit(AIndex, ATop, AHashWidth: integer);
     procedure SetHot(AValue: integer);
+    function ActionAt(X, Y: integer): integer;
+    procedure SetActionHot(AValue: integer);
     procedure SetLinkHot(AValue: integer);
     function LinkAt(X, Y: integer): integer;
     procedure LayoutNotes;
@@ -167,10 +176,12 @@ type
       main", "main...feature"; empty for the usual HEAD); AIcons holds
       the image index in Images of each file's badge, and ATexts what to
       show in place of a row's counts and bar, such as the commits a
-      submodule moved between; empty for the counts. }
+      submodule moved between; empty for the counts. AActions holds a
+      pill to show after a row's file name, '' for none; a click on it
+      raises OnRowAction. }
     procedure SetRepository(const AName, ABranch, ABase: string;
       const AStats: TGittanFileStats; const AIcons: array of integer;
-      const ATexts: array of string);
+      const ATexts, AActions: array of string);
     {** Sets the palette: the background, the text, the dim text for paths
       and counts, the hovered row, the selected row, the added and deleted
       colors, and the line color for the divider and the empty part of a
@@ -212,6 +223,8 @@ type
     property Notice: string read FNotice write SetNotice;
     {** A click on a file's row. }
     property OnSelectFile: TGittanSelectFileEvent read FOnSelectFile write FOnSelectFile;
+    {** A click on the pill of a file's row (see SetRepository). }
+    property OnRowAction: TGittanSelectFileEvent read FOnRowAction write FOnRowAction;
     {** A right click on a file's row. }
     property OnContextFile: TGittanContextFileEvent read FOnContextFile write FOnContextFile;
     {** A click on the branch in the header. While it is set the branch
@@ -304,6 +317,7 @@ begin
   inherited Create(AOwner);
   ControlStyle := ControlStyle + [csOpaque];
   FHot := -1;
+  FActionHot := -1;
   FLinkHot := -1;
   FCommitHot := -1;
   FNotesWidth := -1;
@@ -325,13 +339,19 @@ end;
 
 procedure TGittanSummary.SetRepository(const AName, ABranch, ABase: string;
   const AStats: TGittanFileStats; const AIcons: array of integer;
-  const ATexts: array of string);
+  const ATexts, AActions: array of string);
 var
   i: integer;
 begin
   SetLength(FRowTexts, Length(ATexts));
   for i := 0 to High(ATexts) do
     FRowTexts[i] := ATexts[i];
+  SetLength(FRowActions, Length(AActions));
+  for i := 0 to High(AActions) do
+    FRowActions[i] := AActions[i];
+  FActionRects := nil;
+  SetLength(FActionRects, Length(AStats));
+  FActionHot := -1;
   FRepoName := AName;
   FBranch := ABranch;
   FBase := ABase;
@@ -998,6 +1018,25 @@ begin
   Invalidate;
 end;
 
+function TGittanSummary.ActionAt(X, Y: integer): integer;
+var
+  Row: integer;
+begin
+  Result := -1;
+  Row := RowAt(Y);
+  if (Row >= 0) and (Row <= High(FActionRects)) and (Row <= High(FRowActions)) and
+    (FRowActions[Row] <> '') and PtInRect(FActionRects[Row], Point(X, Y)) then
+    Result := Row;
+end;
+
+procedure TGittanSummary.SetActionHot(AValue: integer);
+begin
+  if FActionHot = AValue then
+    Exit;
+  FActionHot := AValue;
+  Invalidate;
+end;
+
 procedure TGittanSummary.SetHot(AValue: integer);
 begin
   if FHot = AValue then
@@ -1265,10 +1304,16 @@ end;
 procedure TGittanSummary.PaintRow(AIndex, ATop: integer);
 var
   Stat: TGittanFileStat;
-  X, CountsX, TextY, BodyHeight, Room, MaxChange, i: integer;
-  Dir, FileName, Count, RowText: string;
+  X, CountsX, TextY, BodyHeight, Room, MaxChange, i, W: integer;
+  Dir, FileName, Count, RowText, RowAction: string;
+  R: TRect;
 begin
   Stat := FStats[AIndex];
+  RowAction := '';
+  if AIndex <= High(FRowActions) then
+    RowAction := FRowActions[AIndex];
+  if AIndex <= High(FActionRects) then
+    FActionRects[AIndex] := Rect(0, 0, 0, 0);
   Canvas.Font := Font;
   BodyHeight := Canvas.TextHeight('Xg');
   TextY := ATop + (RowHeight - BodyHeight) div 2;
@@ -1296,6 +1341,8 @@ begin
   if RowText <> '' then
     CountsX := Min(CountsX, Width - Pad - Canvas.TextWidth(RowText));
   Room := CountsX - Gap - X;
+  if RowAction <> '' then
+    Dec(Room, Canvas.TextWidth(RowAction) + 2 * ChipPadX + Gap);
   Dir := ExtractFilePath(Stat.Path);
   FileName := ExtractFileName(Stat.Path);
   Canvas.Brush.Style := bsClear;
@@ -1321,6 +1368,25 @@ begin
   Canvas.Font.Color := FText;
   Canvas.TextOut(X, TextY, FileName);
   Inc(X, Canvas.TextWidth(FileName) + Gap);
+  { The pill, outlined on the row's fill, its text in the link color
+    under the mouse. }
+  if (RowAction <> '') and (AIndex <= High(FActionRects)) then
+  begin
+    W := Canvas.TextWidth(RowAction) + 2 * ChipPadX;
+    R := Rect(X, TextY - ChipPadY, X + W, TextY + BodyHeight + ChipPadY);
+    FActionRects[AIndex] := R;
+    Canvas.Pen.Color := FLine;
+    Canvas.Brush.Style := bsSolid;
+    Canvas.Brush.Color := FBack;
+    Canvas.RoundRect(R, R.Height, R.Height);
+    Canvas.Brush.Style := bsClear;
+    if AIndex = FActionHot then
+      Canvas.Font.Color := FLink
+    else
+      Canvas.Font.Color := FText;
+    Canvas.TextOut(X + ChipPadX, TextY, RowAction);
+    Inc(X, W + Gap);
+  end;
   { What the index holds, when the path left room for it. }
   if Stat.Staged then
   begin
@@ -1641,13 +1707,14 @@ procedure TGittanSummary.MouseMove(Shift: TShiftState; X, Y: integer);
 begin
   inherited MouseMove(Shift, X, Y);
   SetHot(RowAt(Y));
+  SetActionHot(ActionAt(X, Y));
   SetCommitHot(CommitAt(Y));
   SetLinkHot(LinkAt(X, Y));
   SetBranchHot(BranchClickable and PtInRect(FBranchRect, Point(X, Y)));
   SetBaseHot((FBaseRect.Right > FBaseRect.Left) and PtInRect(FBaseRect, Point(X, Y)));
   SetSyncHot((FSyncRect.Right > FSyncRect.Left) and PtInRect(FSyncRect, Point(X, Y)));
   SetBackHot(Assigned(FOnBackClick) and PtInRect(FBackRect, Point(X, Y)));
-  if (FLinkHot >= 0) or FBackHot then
+  if (FLinkHot >= 0) or (FActionHot >= 0) or FBackHot then
     Cursor := crHandPoint
   else if not (FBranchHot or FBaseHot or FSyncHot) then
     Cursor := crDefault;
@@ -1657,6 +1724,7 @@ procedure TGittanSummary.MouseLeave;
 begin
   inherited MouseLeave;
   SetHot(-1);
+  SetActionHot(-1);
   SetCommitHot(-1);
   SetLinkHot(-1);
   SetBranchHot(False);
@@ -1708,6 +1776,12 @@ begin
   if (Row >= 0) and (Button = mbLeft) and Assigned(FOnSelectCommit) then
   begin
     FOnSelectCommit(Self, FCommits[Row].Hash);
+    Exit;
+  end;
+  Row := ActionAt(X, Y);
+  if (Row >= 0) and (Button = mbLeft) and Assigned(FOnRowAction) then
+  begin
+    FOnRowAction(Self, FStats[Row].Path);
     Exit;
   end;
   Row := RowAt(Y);

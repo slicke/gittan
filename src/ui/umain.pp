@@ -1229,6 +1229,8 @@ type
     function NextConflictFile(const AAfter: string; ANext: boolean): string;
     procedure ShowNextConflict(const AAfter: string; AAdvance: boolean);
     procedure GoToConflict(ANext: boolean);
+    procedure SummaryRowAction(Sender: TObject; const APath: string);
+    procedure CommitNoteLink(Sender: TObject);
     procedure MenuNextConflictClick(Sender: TObject);
     procedure MenuPrevConflictClick(Sender: TObject);
     procedure UpdateResolveItems;
@@ -1545,6 +1547,8 @@ resourcestring
   rsCommitNotHead = 'Commits go on HEAD. Compare with HEAD to choose files.';
   rsCommitConflicts = 'Resolve the conflicts first (%d files).';
   rsCommitConflictOne = 'Resolve the conflict first.';
+  rsNextConflictLink = 'Next Conflict (%s)';
+  rsResolvePill = 'Resolve';
   rsCommitWhole = 'While %s, everything staged goes into the commit too.';
   rsCommitNothing = 'Tick the files to commit.';
   rsCommitted = 'Committed %s: %s';
@@ -2499,6 +2503,7 @@ begin
   FSummary.OnOpenUrl := @SummaryOpenUrl;
   FSummary.OnSelectCommit := @SummarySelectCommit;
   FSummary.OnBackClick := @SummaryBackClick;
+  FSummary.OnRowAction := @SummaryRowAction;
   { The branch list pops up over the form, under the branch. }
   FRevertUndo := TStringList.Create;
   FBranchNames := TStringList.Create;
@@ -4663,7 +4668,7 @@ end;
 procedure TForm1.ApplySnapshot(const ASnap: TGittanRepoSnapshot);
 var
   Icons: array of integer;
-  Texts: array of string;
+  Texts, Actions: array of string;
   i: integer;
   Branch: string;
 begin
@@ -4698,10 +4703,15 @@ begin
   FillSubmodules;
   SetLength(Icons, Length(FStats));
   SetLength(Texts, Length(FStats));
+  SetLength(Actions, Length(FStats));
   for i := 0 to High(FStats) do
   begin
     Icons[i] := StatIcon(FStats[i]);
     Texts[i] := SubmoduleMoveText(SubmoduleAt(FStats[i].Path));
+    if FStats[i].Kind = ckConflict then
+      Actions[i] := rsResolvePill
+    else
+      Actions[i] := '';
   end;
   Branch := FBranch;
   if FOperation <> '' then
@@ -4713,7 +4723,7 @@ begin
   else
     FSummary.SetCommit(Default(TGittanCommitLine), '');
   FSummary.SetRepository(ExtractFileName(FRepo.Root), Branch, BaseLabel, FStats, Icons,
-    Texts);
+    Texts, Actions);
   FWelcome.Visible := False;
   { The page of a submodule keeps the box; RefreshRepository shows it
     again. }

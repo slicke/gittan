@@ -7,7 +7,9 @@ unit gittan.hintbox;
   which says what keeps a commit back, as "Tick the files to commit."
   with the tree's ticked box beside it, so the words point at the
   boxes. A warning (Warn) takes the second palette, for what has to be
-  dealt with first, such as conflicts.
+  dealt with first, such as conflicts. A link (Link, OnLink) on a line
+  of its own under the text leads on, as Next Conflict does under the
+  conflicts.
 
   It wraps its text to its width and takes the height that needs
   (AutoSize, aligned at the top), in colors the form sets. }
@@ -26,7 +28,11 @@ type
 
   TGittanHintBox = class(TCustomControl)
   private
-    FText, FGlyph: string;
+    FText, FGlyph, FLink: string;
+    FLinkColor: TColor;
+    FLinkRect: TRect;
+    FLinkHot: boolean;
+    FOnLink: TNotifyEvent;
     FImages: TCustomImageList;
     FIcon: integer;
     FWarn: boolean;
@@ -38,6 +44,8 @@ type
     procedure SetGlyph(const AValue: string);
     procedure SetGlyphColor(AValue: TColor);
     procedure SetWarn(AValue: boolean);
+    procedure SetLink(const AValue: string);
+    procedure SetLinkHot(AValue: boolean);
     procedure Changed;
     function HasIcon: boolean;
     function TextLeft: integer;
@@ -47,6 +55,10 @@ type
       WithThemeSpace: boolean); override;
     procedure Resize; override;
     procedure Paint; override;
+    procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
+    procedure MouseLeave; override;
+    procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
+      override;
   public
     constructor Create(AOwner: TComponent); override;
     {** The fill and the edge of the box, then those of a warning; the
@@ -63,6 +75,11 @@ type
     property GlyphColor: TColor read FGlyphColor write SetGlyphColor;
     {** Whether the box takes the warning palette. }
     property Warn: boolean read FWarn write SetWarn;
+    {** A link under the text, in LinkColor, underlined under the mouse;
+      empty for none. A click raises OnLink. }
+    property Link: string read FLink write SetLink;
+    property LinkColor: TColor read FLinkColor write FLinkColor;
+    property OnLink: TNotifyEvent read FOnLink write FOnLink;
   end;
 
 implementation
@@ -73,6 +90,8 @@ const
   IconSize = 16;
   Gap = 6;
   Corner = 10;
+  { Between the text and the link under it. }
+  LinkGap = 4;
 
 { TGittanHintBox }
 
@@ -81,6 +100,7 @@ begin
   inherited Create(AOwner);
   FIcon := -1;
   FGlyphColor := clGrayText;
+  FLinkColor := clHighlight;
   AutoSize := True;
   Height := IconSize + 2 * PadY;
   SetColors(clInfoBk, clBtnShadow, clInfoBk, clBtnShadow);
@@ -151,6 +171,49 @@ begin
   Invalidate;
 end;
 
+procedure TGittanHintBox.SetLink(const AValue: string);
+begin
+  if FLink = AValue then
+    Exit;
+  FLink := AValue;
+  FLinkHot := False;
+  Cursor := crDefault;
+  Changed;
+end;
+
+procedure TGittanHintBox.SetLinkHot(AValue: boolean);
+begin
+  if FLinkHot = AValue then
+    Exit;
+  FLinkHot := AValue;
+  if AValue then
+    Cursor := crHandPoint
+  else
+    Cursor := crDefault;
+  Invalidate;
+end;
+
+procedure TGittanHintBox.MouseMove(Shift: TShiftState; X, Y: integer);
+begin
+  inherited MouseMove(Shift, X, Y);
+  SetLinkHot((FLink <> '') and PtInRect(FLinkRect, Point(X, Y)));
+end;
+
+procedure TGittanHintBox.MouseLeave;
+begin
+  inherited MouseLeave;
+  SetLinkHot(False);
+end;
+
+procedure TGittanHintBox.MouseUp(Button: TMouseButton; Shift: TShiftState;
+  X, Y: integer);
+begin
+  inherited MouseUp(Button, Shift, X, Y);
+  if (Button = mbLeft) and (FLink <> '') and PtInRect(FLinkRect, Point(X, Y)) and
+    Assigned(FOnLink) then
+    FOnLink(Self);
+end;
+
 function TGittanHintBox.HasIcon: boolean;
 begin
   Result := (FGlyph <> '') or ((FIcon >= 0) and (FImages <> nil));
@@ -178,6 +241,8 @@ begin
     DrawText(Bmp.Canvas.Handle, PChar(FText), Length(FText), R,
       DT_CALCRECT or DT_WORDBREAK or DT_NOPREFIX);
     Result := R.Bottom - R.Top;
+    if FLink <> '' then
+      Inc(Result, LinkGap + Bmp.Canvas.TextHeight('Xg'));
   finally
     Bmp.Free;
   end;
@@ -240,6 +305,17 @@ begin
   Style.SingleLine := False;
   Style.Clipping := False;
   Canvas.TextRect(R, R.Left, R.Top, FText, Style);
+  FLinkRect := Rect(0, 0, 0, 0);
+  if FLink <> '' then
+  begin
+    R.Top := Height - PadY - Canvas.TextHeight('Xg');
+    FLinkRect := Rect(R.Left, R.Top, R.Left + Canvas.TextWidth(FLink),
+      R.Top + Canvas.TextHeight('Xg'));
+    Canvas.Font.Color := FLinkColor;
+    Canvas.Font.Underline := FLinkHot;
+    Canvas.TextOut(R.Left, R.Top, FLink);
+    Canvas.Font.Underline := False;
+  end;
 end;
 
 end.

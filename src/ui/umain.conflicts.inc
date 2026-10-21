@@ -482,6 +482,16 @@ begin
   ShowChangeAt(Target);
 end;
 
+{ The Resolve pill of a conflicted file's row in the summary shows the
+  file at its first conflict, where the band's buttons resolve it; a
+  file without markers (deleted on one side) shows its header's pills. }
+procedure TForm1.SummaryRowAction(Sender: TObject; const APath: string);
+begin
+  SummarySelectFile(Sender, APath);
+  if (FView = gvChanges) and (FCurrentPath = APath) and (Length(FConflictRows) > 0) then
+    ShowChangeAt(FConflictRows[0]);
+end;
+
 procedure TForm1.MenuNextConflictClick(Sender: TObject);
 begin
   GoToConflict(True);

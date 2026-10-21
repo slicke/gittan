@@ -122,6 +122,7 @@ begin
   FCommitNote.Top := 2000;
   FCommitNote.BorderSpacing.Top := 8;
   FCommitNote.Visible := False;
+  FCommitNote.OnLink := @CommitNoteLink;
   FCommitNote.Parent := FCommitBox;
   ColorCommit;
   { Cocoa makes the first text view of a new window its first
@@ -196,6 +197,7 @@ begin
     FCommitHeader.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(62, 62, 62));
     FCommitNote.Font.Color := RGBToColor(200, 200, 200);
+    FCommitNote.LinkColor := RGBToColor(100, 160, 240);
     FCommitNote.SetColors(RGBToColor(33, 44, 58), RGBToColor(44, 66, 92),
       RGBToColor(56, 34, 36), RGBToColor(100, 50, 54));
     FCommitNote.GlyphColor := RGBToColor(150, 150, 150);
@@ -208,6 +210,7 @@ begin
     FCommitHeader.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(232, 232, 232), RGBToColor(222, 222, 222));
     FCommitNote.Font.Color := RGBToColor(60, 60, 60);
+    FCommitNote.LinkColor := RGBToColor(0, 110, 230);
     FCommitNote.SetColors(RGBToColor(234, 243, 252), RGBToColor(200, 222, 245),
       RGBToColor(253, 236, 236), RGBToColor(242, 198, 198));
     FCommitNote.GlyphColor := RGBToColor(110, 110, 110);
@@ -574,6 +577,11 @@ begin
   FSkipButton.Visible := Continuing;
   FSkipButton.Enabled := not Busy;
   FCommitNote.Text := Note;
+  { The conflicts lead on to the first of them. }
+  if (FRepo.Base = '') and (FConflictFiles > 0) then
+    FCommitNote.Link := Format(rsNextConflictLink, [ShortCutToText(ShortCut(VK_F6, []))])
+  else
+    FCommitNote.Link := '';
   { "Tick the files" beside a ticked box and the conflicts beside their
     badge, as the tree draws them, the base beside a branch. }
   FCommitNote.Warn := (FRepo.Base = '') and (FConflictFiles > 0);
@@ -597,6 +605,11 @@ begin
   UpdateBisectState;
   if FCommitItem <> nil then
     FCommitItem.Enabled := FRepo.Root <> '';
+end;
+
+procedure TForm1.CommitNoteLink(Sender: TObject);
+begin
+  GoToConflict(True);
 end;
 
 procedure TForm1.CommitMemoChange(Sender: TObject);
