@@ -35,6 +35,7 @@ begin
   FSideNav.AddRow(rsNavRecent, niClock, True);
   FSideNav.AddRow(rsNavSettings, niTools, True);
   FSideNav.Heading := rsNavFiles;
+  FSideNav.ShowToggle(rsNavHide, rsNavShow);
   FSideNav.OnPick := @SideNavPick;
   FNavViewRow := -1;
   { A press on a row leaves the graph open, so that the Graph row can

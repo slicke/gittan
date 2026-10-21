@@ -45,6 +45,10 @@ type
     Maximized: boolean;
     {** The width of the file tree, 0 for the default. }
     TreeWidth: integer;
+    {** Whether the sidebar's rows over the file tree, which open the
+      pages, are shown; off, the tree starts under the button that
+      shows them again. }
+    NavOpen: boolean;
     {** Whether the Config section under the tree is unfolded. }
     RepoFilesOpen: boolean;
     {** Whether the Submodules section under it is unfolded. }
@@ -231,6 +235,7 @@ begin
       Height := Ini.ReadInteger(SecWindow, 'Height', 0);
       Maximized := Ini.ReadBool(SecWindow, 'Maximized', False);
       TreeWidth := Ini.ReadInteger(SecWindow, 'TreeWidth', 0);
+      NavOpen := Ini.ReadBool(SecWindow, 'Nav', True);
       RepoFilesOpen := Ini.ReadBool(SecWindow, 'RepoFiles', False);
       SubmodulesOpen := Ini.ReadBool(SecWindow, 'Submodules', True);
       CommitOpen := Ini.ReadBool(SecWindow, 'Commit', True);
@@ -292,6 +297,7 @@ begin
       Ini.WriteInteger(SecWindow, 'Height', Height);
       Ini.WriteBool(SecWindow, 'Maximized', Maximized);
       Ini.WriteInteger(SecWindow, 'TreeWidth', TreeWidth);
+      Ini.WriteBool(SecWindow, 'Nav', NavOpen);
       Ini.WriteBool(SecWindow, 'RepoFiles', RepoFilesOpen);
       Ini.WriteBool(SecWindow, 'Submodules', SubmodulesOpen);
       Ini.WriteBool(SecWindow, 'Commit', CommitOpen);

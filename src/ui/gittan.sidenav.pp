@@ -18,8 +18,17 @@ unit gittan.sidenav;
   chevron and title, over a line, as the headings of the repository
   page.
 
+  With ShowToggle, the first row holds a button at its right end that
+  folds the other rows and the heading away, as a music app's sidebar
+  folds at the button beside its name: a window with its sidebar and an
+  arrow into it, which points out again while they are folded, when
+  the first row alone is left over the heading and whatever the sidebar
+  lists. Collapsed tells the state and OnCollapse reports a change of
+  it.
+
   It paints itself in the sidebar's shade, as the section headers do,
-  and is as high as its rows and the heading. }
+  and is as high as its rows and the heading, or as the first row while
+  folded. }
 
 {$mode objfpc}{$H+}
 
@@ -50,10 +59,18 @@ type
     FLarge: boolean;
     FRowHeight, FIconSize, FIconGap: integer;
     FSelected, FHot: integer;
+    FToggle, FCollapsed, FHotToggle: boolean;
+    FCollapseHint, FExpandHint: string;
     FBack, FText, FDim, FHover, FSelectedBack, FLine: TColor;
     FOnPick: TGittanNavPickEvent;
+    FOnCollapse: TNotifyEvent;
     procedure SetHeading(const AValue: string);
     procedure SetLarge(AValue: boolean);
+    procedure SetCollapsed(AValue: boolean);
+    procedure SetHotToggle(AValue: boolean);
+    procedure UpdateCursor;
+    function ToggleRect: TRect;
+    procedure DrawToggle(const R: TRect; AColor: TColor);
     procedure FitHeight;
     function RowAt(Y: integer): integer;
     function RowTop(AIndex: integer): integer;
@@ -70,6 +87,7 @@ type
     procedure MouseLeave; override;
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
       override;
+    procedure Resize; override;
   public
     constructor Create(AOwner: TComponent); override;
     {** Adds a row at the end and gives its index; ASmall keeps it at
@@ -83,6 +101,15 @@ type
       heading, the tint under the mouse, the fill of the selected row
       and the line under the heading. }
     procedure SetColors(ABack, AText, ADim, AHover, ASelected, ALine: TColor);
+    {** Shows, at the right end of the first row, the button that folds
+      the other rows away, with its hint while they show and while they
+      are folded. }
+    procedure ShowToggle(const ACollapseHint, AExpandHint: string);
+    {** Whether the rows after the first are folded away, the first row
+      alone left over the heading. }
+    property Collapsed: boolean read FCollapsed write SetCollapsed;
+    {** A change of Collapsed, by the button or by the owner. }
+    property OnCollapse: TNotifyEvent read FOnCollapse write FOnCollapse;
     {** The title under the rows, over what the sidebar lists below
       them; none when empty. }
     property Heading: string read FHeading write SetHeading;
@@ -123,6 +150,14 @@ const
   { The small rows stand this far under the large ones. }
   SmallGap = 4;
   Radius = 8;
+  { The folding button at the right end of the first row: its box,
+    tinted under the mouse, holds an icon ToggleIconWidth by
+    ToggleIconHeight, a window wider than high. Its right edge stands
+    where the rows' icons stand from the left, mirrored. }
+  ToggleBox = 20;
+  ToggleIconWidth = 16;
+  ToggleIconHeight = 12;
+  ToggleRadius = 5;
   { The heading: its text sits HeadingTop under the rows, and the line
     HeadingGap under the text, with HeadingBottom below it. }
   HeadingTop = 10;
@@ -170,7 +205,8 @@ begin
 end;
 
 { The heading is measured on a bitmap, since the rows and the heading
-  are set before the control has a parent and so a canvas. }
+  are set before the control has a parent and so a canvas. Folded, the
+  first row is left. }
 procedure TGittanSideNav.FitHeight;
 var
   H: integer;
@@ -218,6 +254,72 @@ begin
   FHeading := AValue;
   FitHeight;
   Invalidate;
+end;
+
+procedure TGittanSideNav.ShowToggle(const ACollapseHint, AExpandHint: string);
+begin
+  FToggle := True;
+  FCollapseHint := ACollapseHint;
+  FExpandHint := AExpandHint;
+  ShowHint := True;
+  FitHeight;
+  Invalidate;
+end;
+
+procedure TGittanSideNav.SetCollapsed(AValue: boolean);
+begin
+  if FCollapsed = AValue then
+    Exit;
+  FCollapsed := AValue;
+  { A row under the mouse is gone with the rows. }
+  FHot := -1;
+  if FHotToggle then
+  begin
+    if FCollapsed then
+      Hint := FExpandHint
+    else
+      Hint := FCollapseHint;
+  end;
+  FitHeight;
+  Invalidate;
+  if Assigned(FOnCollapse) then
+    FOnCollapse(Self);
+end;
+
+function TGittanSideNav.ToggleRect: TRect;
+var
+  Row: TRect;
+  R, T: integer;
+begin
+  if not FToggle or (Length(FCaptions) = 0) then
+    Exit(Rect(0, 0, 0, 0));
+  Row := RowRect(0);
+  R := Row.Right - PadX + (ToggleBox - ToggleIconWidth) div 2;
+  T := Row.Top + (Row.Height - ToggleBox) div 2;
+  Result := Rect(R - ToggleBox, T, R, T + ToggleBox);
+end;
+
+procedure TGittanSideNav.SetHotToggle(AValue: boolean);
+begin
+  if FHotToggle = AValue then
+    Exit;
+  FHotToggle := AValue;
+  if not AValue then
+    Hint := ''
+  else if FCollapsed then
+    Hint := FExpandHint
+  else
+    Hint := FCollapseHint;
+  UpdateCursor;
+  Invalidate;
+end;
+
+procedure TGittanSideNav.UpdateCursor;
+begin
+  if (FHot >= 0) or FHotToggle then
+    Cursor := crHandPoint
+  else
+    Cursor := crDefault;
 end;
 
 function TGittanSideNav.AddRow(const ACaption: string; AIcon: TGittanNavIcon;
@@ -269,10 +371,7 @@ begin
   if FHot = AValue then
     Exit;
   FHot := AValue;
-  if AValue < 0 then
-    Cursor := crDefault
-  else
-    Cursor := crHandPoint;
+  UpdateCursor;
   Invalidate;
 end;
 
@@ -296,12 +395,18 @@ begin
     Inc(Result, SmallGap);
 end;
 
+{ Folded, the first row alone. }
 function TGittanSideNav.RowsHeight: integer;
+var
+  Last: integer;
 begin
   if Length(FCaptions) = 0 then
-    Result := 0
+    Exit(0);
+  if FCollapsed then
+    Last := 0
   else
-    Result := RowTop(High(FCaptions)) + RowHeightOf(High(FCaptions)) - PadY;
+    Last := High(FCaptions);
+  Result := RowTop(Last) + RowHeightOf(Last) - PadY;
 end;
 
 function TGittanSideNav.RowAt(Y: integer): integer;
@@ -310,8 +415,12 @@ var
 begin
   Result := -1;
   for i := 0 to High(FCaptions) do
+  begin
     if (Y >= RowTop(i)) and (Y < RowTop(i) + RowHeightOf(i)) then
       Exit(i);
+    if FCollapsed then
+      Exit;
+  end;
 end;
 
 function TGittanSideNav.RowRect(AIndex: integer): TRect;
@@ -412,6 +521,38 @@ begin
   end;
 end;
 
+{ The folding button: a window with its sidebar along the left and an
+  arrow in the rest, pointing into the sidebar while the rows show, out
+  of it while they are folded. }
+procedure TGittanSideNav.DrawToggle(const R: TRect; AColor: TColor);
+var
+  X, Y, Split, Mid, CX: integer;
+begin
+  if FHotToggle then
+  begin
+    Canvas.Pen.Style := psClear;
+    Canvas.Brush.Style := bsSolid;
+    Canvas.Brush.Color := FHover;
+    Canvas.RoundRect(R, ToggleRadius, ToggleRadius);
+  end;
+  X := R.Left + (R.Width - ToggleIconWidth) div 2;
+  Y := R.Top + (R.Height - ToggleIconHeight) div 2;
+  Canvas.Pen.Style := psSolid;
+  Canvas.Pen.Color := AColor;
+  Canvas.Pen.Width := 1;
+  Canvas.Brush.Style := bsClear;
+  Canvas.RoundRect(X, Y, X + ToggleIconWidth + 1, Y + ToggleIconHeight + 1, 3, 3);
+  Split := X + ToggleIconWidth div 3;
+  Canvas.Line(Split, Y + 1, Split, Y + ToggleIconHeight);
+  Mid := Y + ToggleIconHeight div 2;
+  CX := (Split + X + ToggleIconWidth) div 2;
+  Canvas.Line(CX - 2, Mid, CX + 3, Mid);
+  if FCollapsed then
+    Canvas.Polyline([Point(CX, Mid - 2), Point(CX + 2, Mid), Point(CX, Mid + 2)])
+  else
+    Canvas.Polyline([Point(CX, Mid - 2), Point(CX - 2, Mid), Point(CX, Mid + 2)]);
+end;
+
 procedure TGittanSideNav.Paint;
 var
   i, TextH, TextY, Y, Icon, Gap, PenW: integer;
@@ -440,6 +581,8 @@ begin
   end;
   for i := 0 to High(FCaptions) do
   begin
+    if FCollapsed and (i > 0) then
+      Break;
     R := RowRect(i);
     if FSmall[i] then
     begin
@@ -484,13 +627,21 @@ begin
       Canvas.Font.Style := [];
     Canvas.TextOut(R.Left + PadX + Icon + Gap, TextY, FCaptions[i]);
   end;
+  if FToggle then
+  begin
+    if FHotToggle then
+      DrawToggle(ToggleRect, FText)
+    else
+      DrawToggle(ToggleRect, FDim);
+  end;
   Canvas.Font := Font;
 end;
 
 procedure TGittanSideNav.MouseMove(Shift: TShiftState; X, Y: integer);
 begin
   inherited MouseMove(Shift, X, Y);
-  if (X < PadX) or (X >= Width - PadX) then
+  SetHotToggle(FToggle and PtInRect(ToggleRect, Point(X, Y)));
+  if FHotToggle or (X < PadX) or (X >= Width - PadX) then
     SetHot(-1)
   else
     SetHot(RowAt(Y));
@@ -499,7 +650,16 @@ end;
 procedure TGittanSideNav.MouseLeave;
 begin
   inherited MouseLeave;
+  SetHotToggle(False);
   SetHot(-1);
+end;
+
+{ The button keeps to the right end as the sidebar is sized with the
+  splitter. }
+procedure TGittanSideNav.Resize;
+begin
+  inherited Resize;
+  Invalidate;
 end;
 
 procedure TGittanSideNav.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
@@ -509,6 +669,11 @@ begin
   inherited MouseUp(Button, Shift, X, Y);
   if Button <> mbLeft then
     Exit;
+  if FToggle and PtInRect(ToggleRect, Point(X, Y)) then
+  begin
+    Collapsed := not Collapsed;
+    Exit;
+  end;
   Row := RowAt(Y);
   if (Row >= 0) and (X >= PadX) and (X < Width - PadX) and Assigned(FOnPick) then
     FOnPick(Self, Row);

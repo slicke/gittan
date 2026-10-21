@@ -1470,6 +1470,8 @@ resourcestring
   rsNavSettings = 'Settings';
   rsNoRecent = 'No recent repositories';
   rsNavFiles = 'Files';
+  rsNavHide = 'Hide navigation';
+  rsNavShow = 'Show navigation';
   rsTreeClean = 'No changes';
   rsRefresh = 'Re&fresh';
   rsCompareWith = '&Compare With';

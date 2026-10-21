@@ -94,6 +94,7 @@ begin
   end;
   if FSettings.TreeWidth > 80 then
     FTreePanel.Width := FSettings.TreeWidth;
+  FSideNav.Collapsed := not FSettings.NavOpen;
   FRepoHeader.Expanded := FSettings.RepoFilesOpen;
   FSubHeader.Expanded := FSettings.SubmodulesOpen;
   FCommitHeader.Expanded := FSettings.CommitOpen;
@@ -119,6 +120,7 @@ begin
     FSettings.Height := Height;
   end;
   FSettings.TreeWidth := FTreePanel.Width;
+  FSettings.NavOpen := not FSideNav.Collapsed;
   FSettings.RepoFilesOpen := FRepoHeader.Expanded;
   FSettings.SubmodulesOpen := FSubHeader.Expanded;
   FSettings.CommitOpen := FCommitHeader.Expanded;
