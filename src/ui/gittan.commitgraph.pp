@@ -134,6 +134,8 @@ type
     FOnContext: TGittanGraphContextEvent;
     FOnMore: TNotifyEvent;
     FOnPathCommits: TGittanGraphPathEvent;
+    FOnClose: TNotifyEvent;
+    FKeeper: TControl;
     procedure Context(const AScreenPos: TPoint);
     function LaneColor(AIndex: integer): TColor;
     function LaneX(ALane: integer): integer;
@@ -237,6 +239,12 @@ type
     property OnMore: TNotifyEvent read FOnMore write FOnMore;
     {** The commits that touched a path of the filter are wanted. }
     property OnPathCommits: TGittanGraphPathEvent read FOnPathCommits write FOnPathCommits;
+    {** The panel went away, however it was closed. }
+    property OnClose: TNotifyEvent read FOnClose write FOnClose;
+    {** A control whose clicks leave the panel open, as its own do, so
+      that a row of it can close the panel on the click's release
+      instead of the press closing it and the release opening it again. }
+    property Keeper: TControl read FKeeper write FKeeper;
   end;
 
 implementation
@@ -892,6 +900,8 @@ begin
   if (FReturnFocus <> nil) and FReturnFocus.CanFocus then
     FReturnFocus.SetFocus;
   FReturnFocus := nil;
+  if Assigned(FOnClose) then
+    FOnClose(Self);
 end;
 
 procedure TGittanCommitGraph.Close;
@@ -1076,8 +1086,8 @@ begin
 end;
 
 { As in the popup list: a mouse press on a control outside the panel
-  closes it; Cocoa passes the last key message instead of the press, so
-  the buttons are asked as well. }
+  closes it, unless on the Keeper; Cocoa passes the last key message
+  instead of the press, so the buttons are asked as well. }
 {$IF lcl_fullversion >= 4990000}
 procedure TGittanCommitGraph.UserInput(Sender: TObject; var Message: TLMessage);
 var
@@ -1090,7 +1100,7 @@ begin
 {$ENDIF}
   if not Visible then
     Exit;
-  if (Sender is TControl) and Owns(TControl(Sender)) then
+  if (Sender is TControl) and (Owns(TControl(Sender)) or (Sender = FKeeper)) then
     Exit;
   if (Msg = LM_LBUTTONDOWN) or (Msg = LM_RBUTTONDOWN) or (Msg = LM_MBUTTONDOWN) or
     (GetKeyState(VK_LBUTTON) < 0) or (GetKeyState(VK_RBUTTON) < 0) or

@@ -1568,6 +1568,8 @@ begin
   FGraph.Marked := FMarkHash;
   FGraph.Popup(Commits, Length(Commits) >= Limit, FBranch, FAhead, FBehind,
     FHasUpstream, AFilter);
+  if FGraph.Visible then
+    FSideNav.Selected := navGraph;
 end;
 
 procedure TForm1.GraphMore(Sender: TObject);

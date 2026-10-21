@@ -28,10 +28,19 @@ const
 procedure TForm1.SetupSideNav;
 begin
   FSideNav := TGittanSideNav.Create(Self);
+  FSideNav.Large := True;
   FSideNav.AddRow(rsNavHome, niHome);
+  FSideNav.AddRow(rsNavGraph, niGraph);
   FSideNav.AddRow(rsNavRepository, niRepository);
+  FSideNav.AddRow(rsNavRecent, niClock, True);
+  FSideNav.AddRow(rsNavSettings, niTools, True);
   FSideNav.Heading := rsNavFiles;
   FSideNav.OnPick := @SideNavPick;
+  FNavViewRow := -1;
+  { A press on a row leaves the graph open, so that the Graph row can
+    close it on the release; the page rows close it themselves. }
+  FGraph.Keeper := FSideNav;
+  FGraph.OnClose := @GraphClosed;
   { Under the filter field: the alTop controls keep the order of their
     tops. }
   FSideNav.Top := FTreeFilter.Top + FTreeFilter.Height + 1;
@@ -41,10 +50,59 @@ end;
 
 procedure TForm1.SideNavPick(Sender: TObject; AIndex: integer);
 begin
+  if (AIndex <> navGraph) and FGraph.Visible then
+    FGraph.Close;
   case AIndex of
     navHome: MenuSummaryClick(Sender);
+    navGraph: MenuCommitGraphClick(Sender);
     navRepository: MenuRepoInfoClick(Sender);
+    navRecent: ShowRecentList(FSideNav.RowScreenRect(AIndex));
+    navSettings: MenuSettingsClick(Sender);
   end;
+end;
+
+{ The Recent row's list: the recent repositories as File > Open Recent
+  names them, the open one checked, then Open Repository... }
+procedure TForm1.ShowRecentList(const AAnchor: TRect);
+var
+  i: integer;
+begin
+  FRecentPopup.Clear;
+  if FSettings.Recent.Count = 0 then
+    FRecentPopup.AddHeader(rsNoRecent);
+  for i := 0 to FSettings.Recent.Count - 1 do
+    FRecentPopup.Add(ShortPath(FSettings.Recent[i]), '',
+      (FRepo.Root <> '') and SameFileName(FSettings.Recent[i], FRepo.Root));
+  FRecentPopup.Add(StripHotkey(rsOpenRepo));
+  FRecentPopup.Popup(AAnchor);
+end;
+
+procedure TForm1.RecentPopupPick(Sender: TObject; AIndex: integer);
+begin
+  if AIndex < FSettings.Recent.Count then
+    OpenRepository(FSettings.Recent[AIndex])
+  else
+    MenuOpenRepoClick(Sender);
+end;
+
+{ The row of the view shown; the Graph row stands in for it while the
+  commit graph is open, and takes over again when it closes. }
+procedure TForm1.SetNavRow(ARow: integer);
+begin
+  FNavViewRow := ARow;
+  { At startup the sidebar is not built yet. }
+  if FSideNav = nil then
+    Exit;
+  if FGraph.Visible then
+    FSideNav.Selected := navGraph
+  else
+    FSideNav.Selected := ARow;
+end;
+
+procedure TForm1.GraphClosed(Sender: TObject);
+begin
+  if FSideNav <> nil then
+    FSideNav.Selected := FNavViewRow;
 end;
 
 procedure TForm1.RepoPageOpenTarget(Sender: TObject; ATarget: TGittanRepoTarget;
@@ -128,7 +186,7 @@ begin
   FileTree.Selected := nil;
   FRepoTree.Selected := nil;
   FSubTree.Selected := nil;
-  FSideNav.Selected := navRepository;
+  SetNavRow(navRepository);
   StartRepoInfoJob;
   UpdateStatus;
 end;

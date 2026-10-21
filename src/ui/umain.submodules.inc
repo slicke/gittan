@@ -408,7 +408,7 @@ begin
   FSummaryBox.Visible := True;
   if not Same then
     FSummaryBox.VertScrollBar.Position := 0;
-  FSideNav.Selected := -1;
+  SetNavRow(-1);
   FStatus.SetPosition('');
   FHeader.SetFile(Sub.Path, iconFolder);
   { Update while it is not checked out, or checked out elsewhere than

@@ -322,6 +322,7 @@ type
     FRemoteHead: string;
     FFetchItem, FPullItem, FPushItem, FForcePushItem: TMenuItem;
     FSyncPopup: TGittanPopupList;
+    FRecentPopup: TGittanPopupList;
     { The actions of a base that is a branch compared through the merge
       base with the current one (umain.branches.inc): the list dropped
       from the base label in the summary and the status bar, and the
@@ -468,6 +469,9 @@ type
     { The rows at the top of the sidebar, the page about the repository
       and the job that reads its facts; see umain.repopage.inc. }
     FSideNav: TGittanSideNav;
+    { The sidebar row of the view shown, which the Graph row stands in
+      for while the commit graph is open. }
+    FNavViewRow: integer;
     FRepoPage: TGittanRepoPage;
     { The page of a submodule, in the box too (umain.submodules.inc). }
     FSubPage: TGittanSubPage;
@@ -755,6 +759,10 @@ type
     procedure LeaveEditorViews;
     procedure SetupSideNav;
     procedure SideNavPick(Sender: TObject; AIndex: integer);
+    procedure SetNavRow(ARow: integer);
+    procedure GraphClosed(Sender: TObject);
+    procedure ShowRecentList(const AAnchor: TRect);
+    procedure RecentPopupPick(Sender: TObject; AIndex: integer);
     procedure MenuRepoInfoClick(Sender: TObject);
     procedure RepoPageOpenTarget(Sender: TObject; ATarget: TGittanRepoTarget;
       const AName: string; const AScreenRect: TRect);
@@ -1456,7 +1464,11 @@ resourcestring
   rsRepoDiff = '&Repository Diff';
   rsRepoInfo = 'Repository &Info';
   rsNavHome = 'Home';
+  rsNavGraph = 'Graph';
   rsNavRepository = 'Repository';
+  rsNavRecent = 'Recent';
+  rsNavSettings = 'Settings';
+  rsNoRecent = 'No recent repositories';
   rsNavFiles = 'Files';
   rsTreeClean = 'No changes';
   rsRefresh = 'Re&fresh';
@@ -2152,7 +2164,11 @@ resourcestring
 const
   { The rows of the sidebar's pages (umain.repopage.inc). }
   navHome = 0;
-  navRepository = 1;
+  navGraph = 1;
+  navRepository = 2;
+  { The small rows under them: lists and dialogs, never selected. }
+  navRecent = 3;
+  navSettings = 4;
   { Scrolling on past the bottom of a file goes to the next one, and
     past the top to the previous: the wheel delta the pull needs (120 is
     one notch of a mouse wheel, 8 one pixel of a trackpad on macOS), the
@@ -2599,6 +2615,9 @@ begin
   FSyncPopup := TGittanPopupList.Create(Self);
   FSyncPopup.Parent := Self;
   FSyncPopup.OnPick := @SyncPopupPick;
+  FRecentPopup := TGittanPopupList.Create(Self);
+  FRecentPopup.Parent := Self;
+  FRecentPopup.OnPick := @RecentPopupPick;
   FBasePopup := TGittanPopupList.Create(Self);
   FBasePopup.Parent := Self;
   FBasePopup.OnPick := @BasePopupPick;
@@ -2986,6 +3005,9 @@ begin
     FSyncPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
+    FRecentPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
+      RGBToColor(100, 160, 240));
     FBasePopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
@@ -3062,6 +3084,9 @@ begin
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
     FSyncPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
+      RGBToColor(0, 110, 230));
+    FRecentPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
     FBasePopup.SetColors(clWhite, RGBToColor(30, 30, 30),
@@ -5114,9 +5139,9 @@ begin
     FSummary.Visible := FRepo.Root <> '';
   end;
   if FRepo.Root <> '' then
-    FSideNav.Selected := navHome
+    SetNavRow(navHome)
   else
-    FSideNav.Selected := -1;
+    SetNavRow(-1);
   FStatus.SetPosition('');
   { A file picked again after the summary must fire the selection event. }
   FileTree.Selected := nil;
@@ -5154,7 +5179,7 @@ begin
   { The symbol bar lists the file shown before. }
   FSymbolBar.Visible := False;
   FSummaryBox.Visible := False;
-  FSideNav.Selected := -1;
+  SetNavRow(-1);
   FImageDiff.Visible := False;
   FBinaryView.Visible := False;
   FHeader.Visible := True;
@@ -5184,7 +5209,7 @@ begin
   FSymbolBar.Visible := False;
   FFindBar.Visible := False;
   FSummaryBox.Visible := False;
-  FSideNav.Selected := -1;
+  SetNavRow(-1);
   FBinaryView.Visible := False;
   Edit.Visible := False;
   HideMarkdownPreview;
@@ -5212,7 +5237,7 @@ begin
   FSymbolBar.Visible := False;
   FFindBar.Visible := False;
   FSummaryBox.Visible := False;
-  FSideNav.Selected := -1;
+  SetNavRow(-1);
   FImageDiff.Visible := False;
   Edit.Visible := False;
   HideMarkdownPreview;
@@ -5245,7 +5270,7 @@ begin
   FSymbolBar.Visible := False;
   FFindBar.Visible := False;
   FSummaryBox.Visible := False;
-  FSideNav.Selected := -1;
+  SetNavRow(-1);
   FImageDiff.Visible := False;
   Edit.Visible := False;
   HideMarkdownPreview;
@@ -5276,9 +5301,7 @@ begin
   FSummary.Visible := False;
   FRepoPage.Visible := False;
   FSubPage.Visible := False;
-  { At startup the sidebar is not built yet. }
-  if FSideNav <> nil then
-    FSideNav.Selected := -1;
+  SetNavRow(-1);
   FTreeClean := False;
   FWelcome.Visible := True;
   FWelcome.FitHeight(FSummaryBox.ClientHeight);
