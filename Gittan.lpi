@@ -180,6 +180,10 @@
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
+        <Filename Value="src/core/gittan.commitstats.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
         <Filename Value="src/core/gittan.commitjob.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>

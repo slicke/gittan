@@ -26,7 +26,15 @@ unit gittan.commitgraph;
   and the scroll position is mapped onto the rows (RowShift), which costs
   nothing but a coarser scroll. One commit may be marked (Marked, its
   id), for the owner's "compare with the marked commit": its short id
-  is shown in the accent. }
+  is shown in the accent.
+
+  The Statistics toggle in the header shows, in the place of the rows,
+  how many of the commits shown there are per week, as a bar for every
+  week with each of the authors with the most commits in a lane color,
+  and a row for every author with their count and their weeks; a click
+  on an author's row filters the log to them (CommitStats in
+  gittan.commitstats). Turned on while the log shown was cut, it asks
+  for the whole log first, as a filter does. }
 
 {$mode objfpc}{$H+}
 
@@ -34,7 +42,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Controls, Graphics, Forms, StdCtrls, ExtCtrls,
-  LCLType, LCLVersion, LMessages, gittan.graph;
+  LCLType, LCLVersion, LMessages, gittan.graph, gittan.commitstats;
 
 type
   TGittanGraphPickEvent = procedure(Sender: TObject; const AHash: string) of object;
@@ -109,6 +117,16 @@ type
     FMarked: string;
     FCloseRect: TRect;
     FCloseHot, FFooterHot: boolean;
+    { The statistics shown in the place of the rows while FStatsOn, the
+      toggle's place in the header, and the week and author under the
+      mouse (-1 for none). }
+    FStatsOn, FStatsHot: boolean;
+    FStats: TGittanCommitStats;
+    FStatsRect: TRect;
+    FStatsWeek, FStatsAuthor: integer;
+    { The most commits one author made in one week, which the authors'
+      bars are drawn against. }
+    FStatsAuthorMax: integer;
     FReturnFocus: TWinControl;
     FBack, FText, FDim, FHover, FLine, FAccent, FTag: TColor;
     FLaneColors: array of TColor;
@@ -122,6 +140,7 @@ type
     function ShownLanes: integer;
     function GraphRight: integer;
     function HasFooter: boolean;
+    function ContentHeight: integer;
     function TotalHeight: integer;
     function PhysHeight: integer;
     function RowShift: integer;
@@ -144,6 +163,14 @@ type
     procedure SetCloseHot(AValue: boolean);
     procedure SetFooterHot(AValue: boolean);
     procedure SetMarked(const AValue: string);
+    procedure SetStatsOn(AValue: boolean);
+    procedure SetStatsHot(AValue: boolean);
+    procedure CountStats;
+    function StatsPlot(out ALeft, ARight: integer): boolean;
+    function StatsAuthorsTop: integer;
+    procedure StatsHover(X, Y: integer);
+    procedure StatsClick(X, Y: integer);
+    procedure PaintStats(ACanvas: TCanvas);
     procedure Step(ADelta: integer);
     procedure ScrollIntoView;
     procedure PaintRows(ACanvas: TCanvas);
@@ -215,7 +242,8 @@ type
 implementation
 
 uses
-  Math, DateUtils, LazUTF8, LazFileUtils, LCLIntf, gittan.reviews, gittan.statusbar;
+  Math, DateUtils, LazUTF8, LazFileUtils, LCLIntf, gittan.reviews, gittan.statusbar,
+  gittan.repoinfo;
 
 resourcestring
   rsGraphTitle = 'Commit Graph';
@@ -229,6 +257,15 @@ resourcestring
   rsGraphEmpty = 'No commits yet';
   rsGraphNoMatch = 'No commits match';
   rsGraphFilterHint = 'Search (author: since: until: path:)';
+  rsGraphStats = 'Statistics';
+  rsStatsSummary = '%s commits by %s authors';
+  rsStatsSummaryOne = '%s commits by one author';
+  rsStatsCut = 'the newest %d';
+  rsStatsMatching = 'those the search keeps';
+  rsStatsWeek = 'Week of %s: %s commits';
+  rsStatsAll = 'All authors';
+  rsStatsMostWeek = 'at most %s a week';
+  rsStatsNoTime = 'No commit has a time';
 
 const
   { Room around the panel within the form, and its widest. }
@@ -257,6 +294,14 @@ const
   MaxRowsHeight = 32000;
   { How long typing may pause before the filter is applied. }
   FilterDelay = 200;
+  { The statistics: the height of the weeks' bars, the column of the
+    names and counts left of the weeks, the narrowest a week is drawn,
+    and how many authors of a week the line above the bars names. }
+  ChartHeight = 140;
+  StatsLabelWidth = 260;
+  MinWeekWidth = 3;
+  WeekAuthors = 3;
+  DateFormat = 'yyyy-mm-dd';
 
 { TGittanGraphBox }
 
@@ -277,6 +322,11 @@ end;
 procedure TGittanGraphRows.MouseMove(Shift: TShiftState; X, Y: integer);
 begin
   inherited MouseMove(Shift, X, Y);
+  if FGraph.FStatsOn then
+  begin
+    FGraph.StatsHover(X, Y);
+    Exit;
+  end;
   FGraph.SetCurrent(FGraph.RowAt(Y));
   FGraph.SetFooterHot(FGraph.FooterAt(Y) and FGraph.FooterClickable);
 end;
@@ -287,6 +337,12 @@ var
   Row: integer;
 begin
   inherited MouseUp(Button, Shift, X, Y);
+  if FGraph.FStatsOn then
+  begin
+    if Button = mbLeft then
+      FGraph.StatsClick(X, Y);
+    Exit;
+  end;
   Row := FGraph.RowAt(Y);
   if (Button = mbLeft) and (Row >= 0) then
   begin
@@ -306,6 +362,8 @@ procedure TGittanGraphRows.MouseLeave;
 begin
   inherited MouseLeave;
   FGraph.SetFooterHot(False);
+  if FGraph.FStatsOn then
+    FGraph.StatsHover(-1, -1);
   Cursor := crDefault;
 end;
 
@@ -323,6 +381,8 @@ begin
   ControlStyle := ControlStyle + [csOpaque];
   Visible := False;
   FCurrent := -1;
+  FStatsWeek := -1;
+  FStatsAuthor := -1;
   FPathHashes := TStringList.Create;
   FPathHashes.Sorted := True;
   FPathHashes.Duplicates := dupIgnore;
@@ -428,12 +488,20 @@ begin
   Result := (Length(FShown) > 0) and (FMore or FFiltered);
 end;
 
-{ A click on the footer loads the whole log, once. }
-{ The height of every row and the footer, and what the rows control
-  gets of it. }
+{ The height of every row and the footer, or of the statistics. }
+function TGittanCommitGraph.ContentHeight: integer;
+begin
+  if FStatsOn and (Length(FShown) > 0) then
+    Result := StatsAuthorsTop + Length(FStats.Authors) * RowHeight + Pad div 2
+  else
+    Result := Max(1, Length(FShown) + Ord(HasFooter)) * RowHeight;
+end;
+
+{ What the rows control gets of the content: all of it unless it is
+  taller than a control may be. }
 function TGittanCommitGraph.TotalHeight: integer;
 begin
-  Result := Max(1, Length(FShown) + Ord(HasFooter)) * RowHeight;
+  Result := ContentHeight;
 end;
 
 function TGittanCommitGraph.PhysHeight: integer;
@@ -598,6 +666,8 @@ begin
   FCloseHot := False;
   FFooterHot := False;
   FAskedMore := False;
+  FStatsOn := False;
+  FStatsHot := False;
   FPathKey := '';
   FPathHashes.Clear;
   Load(ACommits, AMore, '');
@@ -693,6 +763,11 @@ begin
   for i := 0 to High(FShown) do
     if FCommits[FShown[i]].Hash = Current then
       FCurrent := i;
+  if FStatsOn then
+  begin
+    CountStats;
+    Place;
+  end;
   Arrange;
   if FCurrent < 0 then
   begin
@@ -762,7 +837,7 @@ begin
   if Parent = nil then
     Exit;
   W := Max(200, Min(MaxPanelWidth, Parent.ClientWidth - 2 * Margin));
-  H := HeaderHeight + Max(1, Length(FShown) + Ord(HasFooter)) * RowHeight + Pad div 2 + Border;
+  H := HeaderHeight + ContentHeight + Pad div 2 + Border;
   H := Max(HeaderHeight + RowHeight, Min(H, Parent.ClientHeight - 2 * Margin));
   SetBounds((Parent.ClientWidth - W) div 2, (Parent.ClientHeight - H) div 2, W, H);
   Arrange;
@@ -788,11 +863,22 @@ begin
   W := Min(EditWidth, Width div 3);
   FEdit.SetBounds(FCloseRect.Left - Gap - W, (HeaderHeight - FEdit.Height) div 2, W,
     FEdit.Height);
+  if HandleAllocated then
+  begin
+    Canvas.Font := Font;
+    W := Canvas.TextWidth(rsGraphStats) + 4 * ChipPadX;
+  end
+  else
+    W := 90;
+  FStatsRect := Rect(FEdit.Left - Gap - W, FEdit.Top, FEdit.Left - Gap, FEdit.Top + FEdit.Height);
 end;
 
 procedure TGittanCommitGraph.Resize;
 begin
   inherited Resize;
+  { The weeks that fit follow the width. }
+  if FStatsOn then
+    CountStats;
   Arrange;
 end;
 
@@ -834,7 +920,7 @@ end;
 function TGittanCommitGraph.RowAt(Y: integer): integer;
 begin
   Result := -1;
-  if Y < 0 then
+  if (Y < 0) or FStatsOn then
     Exit;
   Result := (Y + RowShift) div RowHeight;
   if Result > High(FShown) then
@@ -843,7 +929,7 @@ end;
 
 function TGittanCommitGraph.FooterAt(Y: integer): boolean;
 begin
-  Result := HasFooter and (Y >= 0) and ((Y + RowShift) div RowHeight = Length(FShown));
+  Result := not FStatsOn and HasFooter and (Y >= 0) and ((Y + RowShift) div RowHeight = Length(FShown));
 end;
 
 procedure TGittanCommitGraph.SetCurrent(AValue: integer);
@@ -891,7 +977,7 @@ procedure TGittanCommitGraph.ScrollIntoView;
 var
   RowTop, RowBottom, Pos: integer;
 begin
-  if FCurrent < 0 then
+  if (FCurrent < 0) or FStatsOn then
     Exit;
   RowTop := FCurrent * RowHeight;
   RowBottom := RowTop + RowHeight;
@@ -912,6 +998,24 @@ var
   Page: integer;
 begin
   Page := Max(1, FBox.ClientHeight div RowHeight - 1);
+  { The statistics have no rows to move to: the keys scroll. }
+  if FStatsOn then
+  begin
+    case Key of
+      VK_UP: SetLogicalTop(LogicalTop - RowHeight);
+      VK_DOWN: SetLogicalTop(LogicalTop + RowHeight);
+      VK_PRIOR: SetLogicalTop(LogicalTop - Page * RowHeight);
+      VK_NEXT: SetLogicalTop(LogicalTop + Page * RowHeight);
+      VK_HOME: SetLogicalTop(0);
+      VK_END: SetLogicalTop(TotalHeight);
+      VK_ESCAPE: Close;
+      VK_RETURN, VK_APPS, VK_TAB: ;
+      else
+        Exit;
+    end;
+    Key := 0;
+    Exit;
+  end;
   case Key of
     VK_UP: Step(-1);
     VK_DOWN: Step(1);
@@ -936,7 +1040,8 @@ procedure TGittanCommitGraph.MouseMove(Shift: TShiftState; X, Y: integer);
 begin
   inherited MouseMove(Shift, X, Y);
   SetCloseHot(PtInRect(FCloseRect, Point(X, Y)));
-  if FCloseHot then
+  SetStatsHot(PtInRect(FStatsRect, Point(X, Y)));
+  if FCloseHot or FStatsHot then
     Cursor := crHandPoint
   else
     Cursor := crDefault;
@@ -946,6 +1051,7 @@ procedure TGittanCommitGraph.MouseLeave;
 begin
   inherited MouseLeave;
   SetCloseHot(False);
+  SetStatsHot(False);
 end;
 
 procedure TGittanCommitGraph.MouseUp(Button: TMouseButton; Shift: TShiftState;
@@ -953,7 +1059,9 @@ procedure TGittanCommitGraph.MouseUp(Button: TMouseButton; Shift: TShiftState;
 begin
   inherited MouseUp(Button, Shift, X, Y);
   if (Button = mbLeft) and PtInRect(FCloseRect, Point(X, Y)) then
-    Close;
+    Close
+  else if (Button = mbLeft) and PtInRect(FStatsRect, Point(X, Y)) then
+    SetStatsOn(not FStatsOn);
 end;
 
 function TGittanCommitGraph.Owns(AControl: TControl): boolean;
@@ -1081,6 +1189,31 @@ begin
     Canvas.Pen.Style := psSolid;
     Canvas.Brush.Style := bsClear;
   end;
+  { The Statistics toggle: outlined, filled in the accent while on. }
+  Canvas.Font := Font;
+  if FStatsOn then
+  begin
+    Canvas.Pen.Color := FAccent;
+    Canvas.Brush.Color := FAccent;
+  end
+  else
+  begin
+    Canvas.Pen.Color := FLine;
+    if FStatsHot then
+      Canvas.Brush.Color := FHover
+    else
+      Canvas.Brush.Color := FBack;
+  end;
+  Canvas.Brush.Style := bsSolid;
+  Canvas.RoundRect(FStatsRect, 8, 8);
+  Canvas.Brush.Style := bsClear;
+  if FStatsOn then
+    Canvas.Font.Color := FBack
+  else
+    Canvas.Font.Color := FText;
+  Canvas.TextOut((FStatsRect.Left + FStatsRect.Right - Canvas.TextWidth(rsGraphStats)) div 2,
+    (FStatsRect.Top + FStatsRect.Bottom - BodyHeight) div 2, rsGraphStats);
+
   Canvas.Pen.Color := FDim;
   Canvas.Pen.Width := 2;
   with FCloseRect do
@@ -1103,6 +1236,11 @@ begin
   ACanvas.Brush.Color := FBack;
   ACanvas.FillRect(FRows.ClientRect);
   ACanvas.Font := Font;
+  if FStatsOn and (Length(FShown) > 0) then
+  begin
+    PaintStats(ACanvas);
+    Exit;
+  end;
   if Length(FShown) = 0 then
   begin
     ACanvas.Brush.Style := bsClear;
@@ -1266,6 +1404,330 @@ begin
   end;
   ACanvas.Font.Color := FText;
   ACanvas.TextOut(X, TextY, FSubjects[Index]);
+end;
+
+{ ---------------------------------------------------------------------------
+  Statistics
+  --------------------------------------------------------------------------- }
+
+procedure TGittanCommitGraph.SetStatsHot(AValue: boolean);
+begin
+  if FStatsHot = AValue then
+    Exit;
+  FStatsHot := AValue;
+  Invalidate;
+end;
+
+{ Statistics of the newest commits alone would mislead, so a log that
+  was cut is asked for whole first, as a filter asks for it; the answer
+  (Replace) counts them again. }
+procedure TGittanCommitGraph.SetStatsOn(AValue: boolean);
+begin
+  if FStatsOn = AValue then
+    Exit;
+  FStatsOn := AValue;
+  FStatsWeek := -1;
+  FStatsAuthor := -1;
+  FRows.Cursor := crDefault;
+  if FStatsOn then
+  begin
+    if FMore and not FAskedMore and Assigned(FOnMore) then
+      More;
+    CountStats;
+  end;
+  Place;
+  FBox.VertScrollBar.Position := 0;
+  ScrollIntoView;
+  FRows.Invalidate;
+  Invalidate;
+end;
+
+{ The weeks are as many as fit at MinWeekWidth each, in local time. }
+procedure TGittanCommitGraph.CountStats;
+var
+  L, R, i, j: integer;
+begin
+  StatsPlot(L, R);
+  FStats := CommitStats(FCommits, FShown, Max(1, (R - L) div MinWeekWidth),
+    Now - LocalTimeToUniversal(Now));
+  FStatsAuthorMax := 1;
+  for i := 0 to High(FStats.Authors) do
+    for j := 0 to High(FStats.Authors[i].Weeks) do
+      FStatsAuthorMax := Max(FStatsAuthorMax, FStats.Authors[i].Weeks[j]);
+  FStatsWeek := -1;
+  FStatsAuthor := -1;
+end;
+
+{ Where the weeks are drawn, right of the names and counts. }
+function TGittanCommitGraph.StatsPlot(out ALeft, ARight: integer): boolean;
+begin
+  ALeft := Pad + Min(StatsLabelWidth, (Width - 2 * Border) * 2 div 5);
+  ARight := Width - 2 * Border - Pad - ScrollRoom;
+  Result := ARight - ALeft >= MinWeekWidth;
+end;
+
+{ The line over the bars, the bars and the dates under them come
+  first; the authors' rows start here. }
+function TGittanCommitGraph.StatsAuthorsTop: integer;
+begin
+  Result := Pad div 2 + RowHeight + Gap div 2 + ChartHeight + RowHeight + Gap;
+end;
+
+procedure TGittanCommitGraph.StatsHover(X, Y: integer);
+var
+  L, R, Week, Author, ChartTop: integer;
+begin
+  Week := -1;
+  Author := -1;
+  if (X >= 0) and StatsPlot(L, R) then
+  begin
+    Inc(Y, RowShift);
+    ChartTop := Pad div 2 + RowHeight + Gap div 2;
+    if (Length(FStats.Weeks) > 0) and (X >= L) and (X < R) and (Y >= ChartTop) and
+      (Y < StatsAuthorsTop) then
+      Week := Min(High(FStats.Weeks), Trunc((X - L) / ((R - L) / Length(FStats.Weeks))));
+    if Y >= StatsAuthorsTop then
+    begin
+      Author := (Y - StatsAuthorsTop) div RowHeight;
+      if Author > High(FStats.Authors) then
+        Author := -1;
+    end;
+  end;
+  if Author >= 0 then
+    FRows.Cursor := crHandPoint
+  else
+    FRows.Cursor := crDefault;
+  if (Week = FStatsWeek) and (Author = FStatsAuthor) then
+    Exit;
+  FStatsWeek := Week;
+  FStatsAuthor := Author;
+  FRows.Invalidate;
+end;
+
+{ A click on an author shows their commits: the search keeps its paths
+  and names the author in the place of what else it held. }
+procedure TGittanCommitGraph.StatsClick(X, Y: integer);
+var
+  Search: string;
+  i: integer;
+
+  function Quoted(const APrefix, AValue: string): string;
+  begin
+    if Pos(' ', AValue) > 0 then
+      Result := APrefix + '"' + AValue + '"'
+    else
+      Result := APrefix + AValue;
+  end;
+
+begin
+  StatsHover(X, Y);
+  if FStatsAuthor < 0 then
+    Exit;
+  Search := '';
+  for i := 0 to High(FFilter.Paths) do
+    Search := Search + Quoted('path:', FFilter.Paths[i]) + ' ';
+  FEdit.Text := Search + Quoted('author:', FStats.Authors[FStatsAuthor].Name);
+  FEdit.SelStart := Length(FEdit.Text);
+  SetStatsOn(False);
+  ApplyFilter;
+end;
+
+{ The line over the bars says how many commits and authors there are
+  and over which days, or for the week under the mouse its count and
+  the authors with the most commits in it. Under it a bar for every
+  week, each author's part of it in their color (the authors with the
+  most commits in the lane colors, the others dim), with the first and
+  the last week's dates under them; then a row for every author with
+  their count and their weeks as small bars, drawn against the most one
+  author made in a week. }
+procedure TGittanCommitGraph.PaintStats(ACanvas: TCanvas);
+var
+  Up, TextH, L, R, n, i, a, Most, Sum, X0, X1, Y, RowTop, ChartTop, ChartBottom,
+    CountW, Best, k: integer;
+  ColW: double;
+  Line, Part, Count: string;
+  Done: array of boolean;
+  Clip: TRect;
+
+  function AuthorColor(AIndex: integer): TColor;
+  begin
+    if AIndex < Length(FLaneColors) then
+      Result := LaneColor(AIndex)
+    else
+      Result := FDim;
+  end;
+
+  procedure WeekX(AWeek: integer; out AX0, AX1: integer);
+  begin
+    AX0 := L + Round(AWeek * ColW);
+    AX1 := L + Round((AWeek + 1) * ColW);
+    if AX1 - AX0 >= MinWeekWidth then
+      Dec(AX1);
+    AX1 := Max(AX1, AX0 + 1);
+  end;
+
+  procedure Fill(AX0, AY0, AX1, AY1: integer; AColor: TColor);
+  begin
+    ACanvas.Brush.Style := bsSolid;
+    ACanvas.Brush.Color := AColor;
+    ACanvas.FillRect(AX0, AY0, AX1, AY1);
+  end;
+
+begin
+  Up := RowShift;
+  ACanvas.Font := Font;
+  TextH := ACanvas.TextHeight('Xg');
+  StatsPlot(L, R);
+  n := Length(FStats.Weeks);
+  if n > 0 then
+    ColW := (R - L) / n
+  else
+    ColW := 1;
+  Clip := ACanvas.ClipRect;
+  if IsRectEmpty(Clip) then
+    Clip := FRows.ClientRect;
+
+  { The line over the bars. }
+  if (FStatsWeek >= 0) and (FStatsWeek < n) then
+  begin
+    Line := Format(rsStatsWeek, [FormatDateTime(DateFormat,
+      FStats.FirstWeek + 7 * FStatsWeek), GroupDigits(FStats.Weeks[FStatsWeek])]);
+    Done := nil;
+    SetLength(Done, Length(FStats.Authors));
+    for k := 1 to WeekAuthors do
+    begin
+      Best := -1;
+      for a := 0 to High(FStats.Authors) do
+        if not Done[a] and (FStats.Authors[a].Weeks[FStatsWeek] > 0) and ((Best < 0) or
+          (FStats.Authors[a].Weeks[FStatsWeek] > FStats.Authors[Best].Weeks[FStatsWeek])) then
+          Best := a;
+      if Best < 0 then
+        Break;
+      Done[Best] := True;
+      if k = 1 then
+        Line := Line + ' · '
+      else
+        Line := Line + ', ';
+      Line := Line + FStats.Authors[Best].Name + ' ' +
+        IntToStr(FStats.Authors[Best].Weeks[FStatsWeek]);
+    end;
+  end
+  else
+  begin
+    if Length(FStats.Authors) = 1 then
+      Line := Format(rsStatsSummaryOne, [GroupDigits(FStats.Commits)])
+    else
+      Line := Format(rsStatsSummary, [GroupDigits(FStats.Commits),
+        GroupDigits(Length(FStats.Authors))]);
+    if FStats.Newest > 0 then
+      Line := Line + ' · ' + FormatDateTime(DateFormat, FStats.Oldest) + ' – ' +
+        FormatDateTime(DateFormat, FStats.Newest);
+    if FMore then
+      Line := Line + ' · ' + Format(rsStatsCut, [Length(FCommits)]);
+    if FFiltered then
+      Line := Line + ' · ' + rsStatsMatching;
+  end;
+  ACanvas.Brush.Style := bsClear;
+  ACanvas.Font.Color := FDim;
+  ACanvas.TextOut(Pad, Pad div 2 + (RowHeight - TextH) div 2 - Up,
+    FitText(ACanvas, Line, FRows.Width - 2 * Pad - ScrollRoom));
+
+  { The bars, with the names column left of them. }
+  ChartTop := Pad div 2 + RowHeight + Gap div 2 - Up;
+  ChartBottom := ChartTop + ChartHeight;
+  Most := 1;
+  for i := 0 to n - 1 do
+    Most := Max(Most, FStats.Weeks[i]);
+  ACanvas.Font.Style := [fsBold];
+  ACanvas.Font.Color := FText;
+  Count := GroupDigits(FStats.Commits);
+  CountW := ACanvas.TextWidth(Count);
+  ACanvas.TextOut(L - Gap - CountW, ChartTop, Count);
+  ACanvas.TextOut(Pad, ChartTop, FitText(ACanvas, rsStatsAll, L - 2 * Gap - Pad - CountW));
+  ACanvas.Font.Style := [];
+  ACanvas.Font.Color := FDim;
+  if n = 0 then
+    ACanvas.TextOut(L, ChartTop, rsStatsNoTime);
+  if (FStatsWeek >= 0) and (FStatsWeek < n) then
+  begin
+    WeekX(FStatsWeek, X0, X1);
+    Fill(X0 - 1, ChartTop, X1 + 1, ChartBottom, FHover);
+  end;
+  for i := 0 to n - 1 do
+  begin
+    if FStats.Weeks[i] = 0 then
+      Continue;
+    WeekX(i, X0, X1);
+    Sum := 0;
+    Y := ChartBottom;
+    for a := 0 to High(FStats.Authors) do
+    begin
+      if FStats.Authors[a].Weeks[i] = 0 then
+        Continue;
+      Inc(Sum, FStats.Authors[a].Weeks[i]);
+      RowTop := ChartBottom - Max(1, Round(Sum * (ChartHeight - 2) / Most));
+      if RowTop < Y then
+        Fill(X0, RowTop, X1, Y, AuthorColor(a));
+      Y := RowTop;
+    end;
+  end;
+  ACanvas.Pen.Color := FLine;
+  ACanvas.Line(L, ChartBottom, R, ChartBottom);
+  ACanvas.Brush.Style := bsClear;
+  if n > 0 then
+  begin
+    ACanvas.Font.Color := FDim;
+    ACanvas.TextOut(Pad, ChartTop + TextH + 4, FitText(ACanvas,
+      Format(rsStatsMostWeek, [GroupDigits(Most)]), L - 2 * Gap - Pad));
+    Part := FormatDateTime(DateFormat, FStats.FirstWeek);
+    ACanvas.TextOut(L, ChartBottom + 4, Part);
+    if n > 1 then
+    begin
+      Line := FormatDateTime(DateFormat, FStats.FirstWeek + 7 * (n - 1));
+      if R - ACanvas.TextWidth(Line) > L + ACanvas.TextWidth(Part) + Gap then
+        ACanvas.TextOut(R - ACanvas.TextWidth(Line), ChartBottom + 4, Line);
+    end;
+  end;
+  Y := StatsAuthorsTop - Gap div 2 - Up;
+  ACanvas.Pen.Color := FLine;
+  ACanvas.Line(Pad div 2, Y, FRows.Width - Pad div 2, Y);
+
+  { The authors, only those in view. }
+  for a := Max(0, (Clip.Top + Up - StatsAuthorsTop) div RowHeight) to
+    Min(High(FStats.Authors), (Clip.Bottom + Up - StatsAuthorsTop) div RowHeight) do
+  begin
+    RowTop := StatsAuthorsTop + a * RowHeight - Up;
+    if a = FStatsAuthor then
+    begin
+      ACanvas.Pen.Style := psClear;
+      ACanvas.Brush.Style := bsSolid;
+      ACanvas.Brush.Color := FHover;
+      ACanvas.RoundRect(Pad div 2, RowTop + 1, FRows.Width - Pad div 2, RowTop + RowHeight - 1, 8, 8);
+      ACanvas.Pen.Style := psSolid;
+    end;
+    ACanvas.Pen.Style := psClear;
+    ACanvas.Brush.Style := bsSolid;
+    ACanvas.Brush.Color := AuthorColor(a);
+    Y := RowTop + RowHeight div 2;
+    ACanvas.RoundRect(Pad, Y - 5, Pad + 10, Y + 5, 4, 4);
+    ACanvas.Pen.Style := psSolid;
+    ACanvas.Brush.Style := bsClear;
+    Count := GroupDigits(FStats.Authors[a].Total);
+    CountW := ACanvas.TextWidth(Count);
+    ACanvas.Font.Color := FDim;
+    ACanvas.TextOut(L - Gap - CountW, Y - TextH div 2, Count);
+    ACanvas.Font.Color := FText;
+    ACanvas.TextOut(Pad + 18, Y - TextH div 2, FitText(ACanvas, FStats.Authors[a].Name,
+      L - 2 * Gap - Pad - 18 - CountW));
+    for i := 0 to n - 1 do
+      if FStats.Authors[a].Weeks[i] > 0 then
+      begin
+        WeekX(i, X0, X1);
+        Fill(X0, RowTop + RowHeight - 5 - Max(1, Round(FStats.Authors[a].Weeks[i] *
+          (RowHeight - 10) / FStatsAuthorMax)), X1, RowTop + RowHeight - 5, AuthorColor(a));
+      end;
+    ACanvas.Brush.Style := bsClear;
+  end;
 end;
 
 { AText cut to fit ARoom with an ellipsis. A subject can be a whole
