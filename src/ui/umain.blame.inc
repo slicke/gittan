@@ -455,6 +455,11 @@ var
 begin
   Range := FRepo.CommitRange(AHash);
   ClearHover;
+  if not FRepo.CommitDetails(AHash, FBlameCommit, FBlameBody) then
+  begin
+    FBlameCommit := Default(TGittanCommitLine);
+    FBlameBody := '';
+  end;
   FBlameRange := Range;
   SetBase(Range);
 end;

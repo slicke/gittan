@@ -783,6 +783,12 @@ type
     {** A Base that shows what the commit AHash changed: the range from
       its parent, or from the empty tree for a commit without one. }
     function CommitRange(const AHash: string): string;
+    {** The commit AHash as a line (its id, short id, author, commit time
+      and subject; Unpushed is not set) and ABody, the rest of its
+      message without the blank line after the subject, trimmed; false
+      when git does not know it. }
+    function CommitDetails(const AHash: string; out ACommit: TGittanCommitLine;
+      out ABody: string): boolean;
     {** A text that changes whenever the branch, the set of changed files
       or the content of a changed file changes: the branch, the commit ids
       of HEAD and Base, the status of every changed file, and the size,
@@ -5456,6 +5462,33 @@ begin
     Result := AHash + '^..' + AHash
   else
     Result := EmptyTree + '..' + AHash;
+end;
+
+{ One call with the fields split at unit separators; the body, last,
+  may hold anything, line breaks too. }
+function TGittanRepo.CommitDetails(const AHash: string; out ACommit: TGittanCommitLine;
+  out ABody: string): boolean;
+var
+  Output: string;
+  Fields: TStringArray;
+  Seconds: int64;
+begin
+  ACommit := Default(TGittanCommitLine);
+  ABody := '';
+  Result := (FRoot <> '') and (AHash <> '') and RunGit(FRoot, ['log', '-1', '--no-color',
+    '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%s%x1f%b', AHash, '--'], Output);
+  if not Result then
+    Exit;
+  Fields := Output.Split([#31], 6);
+  if Length(Fields) < 6 then
+    Exit(False);
+  ACommit.Hash := Fields[0];
+  ACommit.Short := Fields[1];
+  ACommit.Author := Fields[2];
+  if TryStrToInt64(Fields[3], Seconds) then
+    ACommit.Date := UnixToDateTime(Seconds);
+  ACommit.Subject := Fields[4];
+  ABody := Trim(AdjustLineBreaks(Fields[5], tlbsLF));
 end;
 
 function TGittanRepo.Blame(const APath, ARef: string; out AOutput: string): boolean;

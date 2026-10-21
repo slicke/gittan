@@ -6,7 +6,9 @@ unit gittan.summary;
   under a header with the repository name, branch and totals. Between the
   two, the conversation of the pull request when there is one: its
   comments and the text its reviews were submitted with, which are on no
-  line, so the change view has no place for them. A clean tree shows,
+  line, so the change view has no place for them; or, while a commit is
+  compared with its parent, a card with its message, author and age and
+  a link back to the working tree. A clean tree shows,
   instead of the totals, a large check with how far the branch is from
   its upstream, and its newest commits instead of rows while some are
   not pushed; otherwise the check stands alone in the middle, as the
@@ -42,7 +44,7 @@ type
     top and height below the start of the section. }
   TGittanSummaryNoteBox = record
     Top, Height: integer;
-    Lines: array of string;
+    Lines: TStringArray;
     LinkRect: TRect;
   end;
 
@@ -66,6 +68,19 @@ type
     FNotesWidth, FNotesHeight: integer;
     { The note whose link is under the mouse, -1 for none. }
     FLinkHot: integer;
+    { The commit compared with its parent, shown in a card under the
+      header; an empty Hash shows none. FCardSubject is its subject and
+      FCardLines its body, wrapped at FCardWidth (-1 to lay them out
+      again), FCardHeight the card's
+      share of the height, room after it included, 0 without one.
+      FBackRect is the card's link back to the working tree. }
+    FCommit: TGittanCommitLine;
+    FCommitBody: string;
+    FCardSubject, FCardLines: TStringArray;
+    FCardWidth, FCardHeight: integer;
+    FBackRect: TRect;
+    FBackHot: boolean;
+    FOnBackClick: TNotifyEvent;
     { The newest commits, shown under a clean tree, with how far the
       branch is from its upstream; FCommitHot is the row under the
       mouse, -1 for none. }
@@ -118,6 +133,9 @@ type
     function LinkAt(X, Y: integer): integer;
     procedure LayoutNotes;
     procedure PaintNotes(var Y: integer);
+    procedure LayoutCard;
+    procedure PaintCard(var Y: integer);
+    procedure SetBackHot(AValue: boolean);
     procedure SetSelected(const AValue: string);
     procedure SetNotice(const AValue: string);
     procedure UpdateHeight;
@@ -168,6 +186,10 @@ type
     {** Shows ANotes, the conversation of a pull request, under the
       heading ATitle; no notes shows none. }
     procedure SetNotes(const ATitle: string; const ANotes: TGittanPullNotes);
+    {** Shows ACommit, the commit the files are compared through (with
+      its parent), in a card under the header with ABody, the rest of
+      its message; an empty Hash shows none. }
+    procedure SetCommit(const ACommit: TGittanCommitLine; const ABody: string);
     {** Shows ACommits, the newest commits of HEAD, under "Working tree
       clean", and after it how many commits the branch is ahead of
       (AAhead) and behind (ABehind) its upstream when it has one
@@ -208,6 +230,8 @@ type
     property OnSelectCommit: TGittanSelectCommitEvent read FOnSelectCommit write FOnSelectCommit;
     {** A click on a note's link to GitHub. }
     property OnOpenUrl: TGittanOpenUrlEvent read FOnOpenUrl write FOnOpenUrl;
+    {** A click on the commit card's link back to the working tree. }
+    property OnBackClick: TNotifyEvent read FOnBackClick write FOnBackClick;
   end;
 
 implementation
@@ -233,6 +257,7 @@ resourcestring
   rsNoteChangesRequested = 'requested changes';
   rsNoteDismissed = 'review dismissed';
   rsNoteLink = 'GitHub ↗';
+  rsBackToTree = 'Back to Working Tree';
 
 const
   { The count of each kind in the header, after a dot in its color. }
@@ -269,6 +294,8 @@ const
   NoteGap = 8;
   NoteStripe = 3;
   NoteMaxLines = 12;
+  { The most lines a commit's subject takes in its card. }
+  SubjectMaxLines = 3;
 
 { TGittanSummary }
 
@@ -280,6 +307,7 @@ begin
   FLinkHot := -1;
   FCommitHot := -1;
   FNotesWidth := -1;
+  FCardWidth := -1;
   FLink := clHighlight;
   FMeasure := TBitmap.Create;
   SetColors(clWindow, clWindowText, clGrayText, clBtnFace, clBtnFace, clGreen,
@@ -446,6 +474,8 @@ begin
   FRowsTop := Pad + TitleHeight + 6 + HeaderBlockHeight(FMeasure.Canvas) + Pad;
   if FNotice <> '' then
     Inc(FRowsTop, RowHeight);
+  LayoutCard;
+  Inc(FRowsTop, FCardHeight);
   LayoutNotes;
   Inc(FRowsTop, FNotesHeight);
   PlaceCommits;
@@ -468,6 +498,63 @@ begin
   Invalidate;
 end;
 
+{ Adds AText to ALines wrapped at AInner pixels on C: at words, and
+  inside a word longer than a line. }
+procedure WrapText(C: TCanvas; const AText: string; AInner: integer;
+  var ALines: TStringArray);
+var
+  Words: TStringList;
+  Line, Part: string;
+  w, n: integer;
+
+  procedure Add(const ALine: string);
+  begin
+    SetLength(ALines, Length(ALines) + 1);
+    ALines[High(ALines)] := ALine;
+  end;
+
+begin
+  if C.TextWidth(AText) <= AInner then
+  begin
+    Add(AText);
+    Exit;
+  end;
+  Words := TStringList.Create;
+  try
+    Words.Delimiter := ' ';
+    Words.StrictDelimiter := True;
+    Words.DelimitedText := AText;
+    Line := '';
+    for w := 0 to Words.Count - 1 do
+    begin
+      if Line = '' then
+        Part := Words[w]
+      else
+        Part := Line + ' ' + Words[w];
+      if C.TextWidth(Part) <= AInner then
+      begin
+        Line := Part;
+        Continue;
+      end;
+      if Line <> '' then
+        Add(Line);
+      Line := Words[w];
+      while (C.TextWidth(Line) > AInner) and (UTF8Length(Line) > 1) do
+      begin
+        n := UTF8Length(Line);
+        while (n > 1) and (C.TextWidth(UTF8Copy(Line, 1, n)) > AInner) do
+          Dec(n);
+        Add(UTF8Copy(Line, 1, n));
+        Line := UTF8Copy(Line, n + 1, MaxInt);
+      end;
+    end;
+    if Line <> '' then
+      Add(Line);
+  finally
+    Words.Free;
+  end;
+end;
+
 { Lays the notes out at the control's width, when it changed: each
   note's text wrapped at words (inside a word longer than a line too),
   at most NoteMaxLines lines with an ellipsis after. }
@@ -485,50 +572,8 @@ var
   end;
 
   procedure Wrap(const AText: string);
-  var
-    Words: TStringList;
-    Line, Part: string;
-    w, n: integer;
   begin
-    if C.TextWidth(AText) <= Inner then
-    begin
-      Add(AText);
-      Exit;
-    end;
-    Words := TStringList.Create;
-    try
-      Words.Delimiter := ' ';
-      Words.StrictDelimiter := True;
-      Words.DelimitedText := AText;
-      Line := '';
-      for w := 0 to Words.Count - 1 do
-      begin
-        if Line = '' then
-          Part := Words[w]
-        else
-          Part := Line + ' ' + Words[w];
-        if C.TextWidth(Part) <= Inner then
-        begin
-          Line := Part;
-          Continue;
-        end;
-        if Line <> '' then
-          Add(Line);
-        Line := Words[w];
-        while (C.TextWidth(Line) > Inner) and (UTF8Length(Line) > 1) do
-        begin
-          n := UTF8Length(Line);
-          while (n > 1) and (C.TextWidth(UTF8Copy(Line, 1, n)) > Inner) do
-            Dec(n);
-          Add(UTF8Copy(Line, 1, n));
-          Line := UTF8Copy(Line, n + 1, MaxInt);
-        end;
-      end;
-      if Line <> '' then
-        Add(Line);
-    finally
-      Words.Free;
-    end;
+    WrapText(C, AText, Inner, Box.Lines);
   end;
 
 begin
@@ -676,6 +721,169 @@ begin
     end;
   end;
   Inc(Y, FNotesHeight);
+end;
+
+procedure TGittanSummary.SetCommit(const ACommit: TGittanCommitLine; const ABody: string);
+begin
+  if (FCommit.Hash = ACommit.Hash) and (FCommitBody = ABody) then
+    Exit;
+  FCommit := ACommit;
+  FCommitBody := ABody;
+  FCardWidth := -1;
+  FBackHot := False;
+  UpdateHeight;
+  Invalidate;
+end;
+
+{ Lays the commit's card out at the control's width, when it changed:
+  the subject in bold, wrapped short of the link at the right, at most
+  SubjectMaxLines lines; the author and age line; and the body wrapped
+  as a note's text is, its blank lines kept but not doubled, at most
+  NoteMaxLines lines with an ellipsis after. }
+procedure TGittanSummary.LayoutCard;
+var
+  C: TCanvas;
+  Inner, SubjectRoom, LineHeight, i, n: integer;
+  Paras: TStringList;
+  Para, Last: string;
+begin
+  if FCardWidth = Width then
+    Exit;
+  FCardWidth := Width;
+  FCardSubject := nil;
+  FCardLines := nil;
+  FCardHeight := 0;
+  if FCommit.Hash = '' then
+    Exit;
+  C := FMeasure.Canvas;
+  C.Font := Font;
+  LineHeight := C.TextHeight('Xg');
+  Inner := Max(40, Width - 2 * Pad - 2 * NotePadX - NoteStripe);
+  SubjectRoom := Max(40, Inner - C.TextWidth(rsBackToTree) - Gap);
+  C.Font.Style := [fsBold];
+  WrapText(C, FCommit.Subject, SubjectRoom, FCardSubject);
+  if Length(FCardSubject) > SubjectMaxLines then
+  begin
+    SetLength(FCardSubject, SubjectMaxLines);
+    Last := FCardSubject[High(FCardSubject)];
+    n := UTF8Length(Last);
+    while (n > 0) and (C.TextWidth(UTF8Copy(Last, 1, n) + '…') > SubjectRoom) do
+      Dec(n);
+    FCardSubject[High(FCardSubject)] := TrimRight(UTF8Copy(Last, 1, n)) + '…';
+  end;
+  C.Font.Style := [];
+  Paras := TStringList.Create;
+  try
+    Paras.Text := FCommitBody;
+    for i := 0 to Paras.Count - 1 do
+    begin
+      Para := TrimRight(Paras[i]);
+      if Para = '' then
+      begin
+        if (Length(FCardLines) > 0) and (FCardLines[High(FCardLines)] <> '') then
+        begin
+          SetLength(FCardLines, Length(FCardLines) + 1);
+          FCardLines[High(FCardLines)] := '';
+        end;
+      end
+      else
+        WrapText(C, Para, Inner, FCardLines);
+      if Length(FCardLines) > NoteMaxLines then
+        Break;
+    end;
+  finally
+    Paras.Free;
+  end;
+  if Length(FCardLines) > NoteMaxLines then
+  begin
+    SetLength(FCardLines, NoteMaxLines);
+    FCardLines[High(FCardLines)] := '…';
+  end;
+  FCardHeight := 2 * NotePadY + (Length(FCardSubject) + 1) * LineHeight + 2;
+  if Length(FCardLines) > 0 then
+    Inc(FCardHeight, 6 + Length(FCardLines) * LineHeight);
+  Inc(FCardHeight, NoteGap + Pad div 2);
+end;
+
+{ A card as a note's, with a stripe in the link color: the subject in
+  bold with the link back to the working tree at the right of its first
+  line, the author,
+  the age and the short id dimmed under it, then the body. Y is
+  advanced past it. }
+procedure TGittanSummary.PaintCard(var Y: integer);
+var
+  Card: TRect;
+  X, At, LineHeight, k: integer;
+  Meta: string;
+begin
+  LayoutCard;
+  FBackRect := Rect(0, 0, 0, 0);
+  if FCardHeight = 0 then
+    Exit;
+  Canvas.Font := Font;
+  LineHeight := Canvas.TextHeight('Xg');
+  Card := Rect(Pad, Y, Width - Pad, Y + FCardHeight - NoteGap - Pad div 2);
+  Canvas.Pen.Color := FLine;
+  Canvas.Brush.Style := bsSolid;
+  Canvas.Brush.Color := FSelectedBack;
+  Canvas.RoundRect(Card, 8, 8);
+  Canvas.Pen.Style := psClear;
+  Canvas.Brush.Color := FLink;
+  Canvas.RoundRect(Card.Left, Card.Top, Card.Left + 2 * NoteStripe, Card.Bottom, 4, 4);
+  Canvas.Brush.Color := FSelectedBack;
+  Canvas.FillRect(Card.Left + NoteStripe, Card.Top + 1, Card.Left + 2 * NoteStripe,
+    Card.Bottom - 1);
+  Canvas.Pen.Style := psSolid;
+  Canvas.Brush.Style := bsClear;
+
+  X := Card.Left + NoteStripe + NotePadX;
+  At := Card.Top + NotePadY;
+  FBackRect := Rect(Card.Right - NotePadX - Canvas.TextWidth(rsBackToTree), At,
+    Card.Right - NotePadX, At + LineHeight);
+  Canvas.Font.Color := FLink;
+  if FBackHot then
+    Canvas.Font.Style := [fsUnderline];
+  Canvas.TextOut(FBackRect.Left, At, rsBackToTree);
+
+  Canvas.Font.Style := [fsBold];
+  Canvas.Font.Color := FText;
+  for k := 0 to High(FCardSubject) do
+  begin
+    Canvas.TextOut(X, At, FCardSubject[k]);
+    Inc(At, LineHeight);
+  end;
+  Canvas.Font.Style := [];
+
+  Inc(At, 2);
+  Meta := FCommit.Author;
+  if FCommit.Date > 0 then
+  begin
+    if Meta <> '' then
+      Meta := Meta + ' · ';
+    Meta := Meta + ReviewAge(FCommit.Date, LocalTimeToUniversal(Now));
+  end;
+  if Meta <> '' then
+    Meta := Meta + ' · ';
+  Meta := Meta + FCommit.Short;
+  Canvas.Font.Color := FDim;
+  Canvas.TextOut(X, At, Meta);
+
+  Inc(At, LineHeight + 6);
+  Canvas.Font.Color := FText;
+  for k := 0 to High(FCardLines) do
+  begin
+    Canvas.TextOut(X, At, FCardLines[k]);
+    Inc(At, LineHeight);
+  end;
+  Inc(Y, FCardHeight);
+end;
+
+procedure TGittanSummary.SetBackHot(AValue: boolean);
+begin
+  if FBackHot = AValue then
+    Exit;
+  FBackHot := AValue;
+  Invalidate;
 end;
 
 function TGittanSummary.LinkAt(X, Y: integer): integer;
@@ -1413,6 +1621,7 @@ begin
   PaintHeader(Y);
   if FNotice <> '' then
     PaintNotice(Y);
+  PaintCard(Y);
   PaintNotes(Y);
   if Y <> FRowsTop then
   begin
@@ -1437,7 +1646,8 @@ begin
   SetBranchHot(BranchClickable and PtInRect(FBranchRect, Point(X, Y)));
   SetBaseHot((FBaseRect.Right > FBaseRect.Left) and PtInRect(FBaseRect, Point(X, Y)));
   SetSyncHot((FSyncRect.Right > FSyncRect.Left) and PtInRect(FSyncRect, Point(X, Y)));
-  if FLinkHot >= 0 then
+  SetBackHot(Assigned(FOnBackClick) and PtInRect(FBackRect, Point(X, Y)));
+  if (FLinkHot >= 0) or FBackHot then
     Cursor := crHandPoint
   else if not (FBranchHot or FBaseHot or FSyncHot) then
     Cursor := crDefault;
@@ -1452,6 +1662,7 @@ begin
   SetBranchHot(False);
   SetBaseHot(False);
   SetSyncHot(False);
+  SetBackHot(False);
 end;
 
 procedure TGittanSummary.MouseUp(Button: TMouseButton; Shift: TShiftState;
@@ -1473,6 +1684,11 @@ begin
     FOnBaseClick(Self, Rect(ClientToScreen(FBaseRect.TopLeft).X,
       ClientToScreen(FBaseRect.TopLeft).Y, ClientToScreen(FBaseRect.BottomRight).X,
       ClientToScreen(FBaseRect.BottomRight).Y));
+    Exit;
+  end;
+  if (Button = mbLeft) and Assigned(FOnBackClick) and PtInRect(FBackRect, Point(X, Y)) then
+  begin
+    FOnBackClick(Self);
     Exit;
   end;
   if (Button = mbLeft) and (FSyncRect.Right > FSyncRect.Left) and Assigned(FOnSyncClick) and

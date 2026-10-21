@@ -19,7 +19,7 @@ uses
   gittan.summary, gittan.welcome, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.sidenav, gittan.repoinfo, gittan.repopage, gittan.subpage,
   gittan.settingsdlg, gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
-  {$IFDEF LCLCocoa}gittan.toolbar,{$ENDIF}
+  {$IFDEF LCLCocoa}gittan.toolbar, gittan.memohint,{$ENDIF}
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
   {$IFDEF LCLWin32}gittan.wintitlebar,{$ENDIF}
   {$IFDEF LCLGtk3}gittan.gtktitlebar,{$ENDIF}
@@ -274,6 +274,10 @@ type
     FCommitMemo: TMemo;
     FCommitAmend: TCheckBox;
     FCommitButton: TButton;
+    { The length of the message's first line, by the Commit button, once
+      it is past SubjectSoftLimit; in the warning color past
+      SubjectHardLimit. }
+    FSubjectCount: TLabel;
     FCommitNote: TGittanHintBox;
     FCommitItem: TMenuItem;
     FCommitJob: TGittanCommitJob;
@@ -312,6 +316,9 @@ type
     FBasePopup: TGittanPopupList;
     FBaseActionRef: string;
     FBaseMergeIndex, FBaseRebaseIndex: integer;
+    { The base popup's items while a commit is shown (see BlameShown):
+      back to the working tree and copy its id; -1 otherwise. }
+    FBaseBackIndex, FBaseCopyIndex: integer;
     FSyncActions: TIntegerDynArray;
     FSubPanel: TPanel;
     FSubHeader: TGittanSectionHeader;
@@ -614,6 +621,10 @@ type
     { The Base a click on the band set, so the summary can name the
       commit instead of the range. }
     FBlameRange: string;
+    { The commit FBlameRange shows and the rest of its message, for the
+      summary's card (see ShowBlameCommit). }
+    FBlameCommit: TGittanCommitLine;
+    FBlameBody: string;
     { Go > Code History (see umain.history.inc): the commits shown, the
       job that fetches them, the file, the commit the lines are counted
       in (empty for HEAD), the lines (From 0 for the whole file), what
@@ -1064,6 +1075,9 @@ type
     procedure SetupSubmodules;
     procedure SetupCommit;
     procedure FocusTreeAsync(Data: PtrInt);
+    procedure CommitHintAsync(Data: PtrInt);
+    procedure UpdateSubjectCount;
+    procedure CommitPushClick(Sender: TObject);
     procedure ColorCommit;
     procedure CommitHeaderToggle(Sender: TObject);
     function CommitChoosing: boolean;
@@ -1235,6 +1249,8 @@ type
     function BaseActionRef: string;
     procedure BaseClick(const AScreenRect: TRect);
     procedure SummaryBaseClick(Sender: TObject; const AScreenRect: TRect);
+    function BlameShown: boolean;
+    procedure SummaryBackClick(Sender: TObject);
     procedure SummarySyncClick(Sender: TObject; const AScreenRect: TRect);
     procedure BasePopupPick(Sender: TObject; AIndex: integer);
     procedure SyncPopupPick(Sender: TObject; AIndex: integer);
@@ -1513,6 +1529,10 @@ resourcestring
   rsCommitWhole = 'While %s, everything staged goes into the commit too.';
   rsCommitNothing = 'Tick the files to commit.';
   rsCommitted = 'Committed %s: %s';
+  rsCommittedTitle = 'Committed %s';
+  rsPushAction = 'Push';
+  rsSubjectCount = '%d/%d';
+  rsSubjectCountHint = 'Characters in the first line. git log and GitHub cut it after %d.';
   rsCommitFailed = 'The commit failed';
   rsFetchMenu = '&Fetch';
   rsPullMenu = '&Pull';
@@ -2018,6 +2038,9 @@ resourcestring
   rsPullPrev = 'Previous: %s  ↑';
   rsSwitchBranchHint = 'Switch branch';
   rsBaseActionsHint = 'Merge or rebase';
+  rsBlameActionsHint = 'Back to the working tree, or copy the commit id';
+  rsBackToTree = 'Back to Working Tree';
+  rsCopyCommitId = 'Copy Commit ID';
   rsShowSummaryHint = 'Show the summary';
   rsShowConflictHint = 'Show the conflicted files';
   rsAheadHint = '%d commits not pushed yet';
@@ -2074,8 +2097,14 @@ const
   { How long a note in the status bar stays, and an error; seconds. }
   StatusNoteSeconds = 6;
   StatusErrorSeconds = 12;
-  { How long a note stays in the banner. }
+  { How long a note stays in the banner, and one that offers an action. }
   BannerInfoSeconds = 8;
+  BannerActionSeconds = 20;
+  { The commit message's first line: its length shows past the soft
+    limit, the usual 50, and warns past the hard one, where git log
+    --oneline and GitHub cut it. }
+  SubjectSoftLimit = 50;
+  SubjectHardLimit = 72;
   { How long the pull request data is kept before gh is asked again,
     while checks run and otherwise; ms. }
   PullPollPending = 30000;
@@ -2439,6 +2468,7 @@ begin
   FSummary.OnSyncClick := @SummarySyncClick;
   FSummary.OnOpenUrl := @SummaryOpenUrl;
   FSummary.OnSelectCommit := @SummarySelectCommit;
+  FSummary.OnBackClick := @SummaryBackClick;
   { The branch list pops up over the form, under the branch. }
   FRevertUndo := TStringList.Create;
   FBranchNames := TStringList.Create;
@@ -3131,9 +3161,11 @@ begin
     else
       FStatus.SetState(FOperation, Format(rsConflictedFiles, [FConflictFiles]));
   end;
-  FStatus.SetBase(BaseLabel, (BaseActionRef <> '') or (StashOfBase >= 0));
+  FStatus.SetBase(BaseLabel, (BaseActionRef <> '') or (StashOfBase >= 0) or BlameShown);
   if BaseActionRef <> '' then
     FStatus.PartHint[spBase] := rsBaseActionsHint
+  else if BlameShown then
+    FStatus.PartHint[spBase] := rsBlameActionsHint
   else if StashOfBase >= 0 then
     FStatus.PartHint[spBase] := rsStashActionsHint
   else
@@ -4634,7 +4666,11 @@ begin
   if FOperation <> '' then
     Branch := Branch + ' · ' + FOperation;
   FSummary.SetCommits(ASnap.Recent, FAhead, FBehind, FHasUpstream);
-  FSummary.BaseClickable := (BaseActionRef <> '') or (StashOfBase >= 0);
+  FSummary.BaseClickable := (BaseActionRef <> '') or (StashOfBase >= 0) or BlameShown;
+  if BlameShown then
+    FSummary.SetCommit(FBlameCommit, FBlameBody)
+  else
+    FSummary.SetCommit(Default(TGittanCommitLine), '');
   FSummary.SetRepository(ExtractFileName(FRepo.Root), Branch, BaseLabel, FStats, Icons,
     Texts);
   FWelcome.Visible := False;

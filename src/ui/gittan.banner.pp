@@ -10,7 +10,9 @@ unit gittan.banner;
   the detail font under the title. Copy puts the title and the detail
   on the clipboard (not offered for a note or a success without one),
   and the close button takes the message away, which brings back the
-  one before it; "+2" before the button counts those. An error stays
+  one before it; "+2" before the button counts those. A message can
+  carry an action, a link by the close button that runs its handler and
+  closes the message (Push after a commit, say). An error stays
   until it is closed; a message given seconds closes itself after them,
   later while the mouse is over the banner.
 
@@ -39,15 +41,17 @@ type
       Title, Detail: string;
       Kind: TGittanBannerKind;
       Seconds: integer;
+      Action: string;
+      OnAction: TNotifyEvent;
     end;
 
-    TPart = (bpNone, bpDetails, bpCopy, bpClose);
+    TPart = (bpNone, bpAction, bpDetails, bpCopy, bpClose);
   private
     FItems: array of TItem;
     FLines: TStringArray;
     FExpanded: boolean;
     FHotPart: TPart;
-    FDetailsRect, FCopyRect, FCloseRect: TRect;
+    FActionRect, FDetailsRect, FCopyRect, FCloseRect: TRect;
     FDetailFont: TFont;
     FTimer: TTimer;
     FBack, FText, FDim, FHover, FLine, FAccent, FBad, FGood: TColor;
@@ -83,6 +87,10 @@ type
       The same message as the one in view is not added again. }
     procedure Add(const ATitle, ADetail: string; AKind: TGittanBannerKind;
       ASeconds: integer = 0);
+    {** Shows a message as Add does, with AAction as a link by the close
+      button that closes the message and calls AOnAction. }
+    procedure AddAction(const ATitle, ADetail: string; AKind: TGittanBannerKind;
+      ASeconds: integer; const AAction: string; AOnAction: TNotifyEvent);
     {** Closes the message in view, showing the one before it. }
     procedure CloseCurrent;
     {** Closes every message. }
@@ -170,11 +178,19 @@ end;
 
 procedure TGittanBanner.Add(const ATitle, ADetail: string; AKind: TGittanBannerKind;
   ASeconds: integer);
+begin
+  AddAction(ATitle, ADetail, AKind, ASeconds, '', nil);
+end;
+
+procedure TGittanBanner.AddAction(const ATitle, ADetail: string;
+  AKind: TGittanBannerKind; ASeconds: integer; const AAction: string;
+  AOnAction: TNotifyEvent);
 var
   Item: TItem;
 begin
   if (Length(FItems) > 0) and (Current.Title = ATitle) and
-    (Current.Detail = ADetail) and (Current.Kind = AKind) then
+    (Current.Detail = ADetail) and (Current.Kind = AKind) and
+    (Current.Action = AAction) then
   begin
     ShowCurrent;
     Exit;
@@ -185,6 +201,8 @@ begin
   Item.Detail := ADetail;
   Item.Kind := AKind;
   Item.Seconds := ASeconds;
+  Item.Action := AAction;
+  Item.OnAction := AOnAction;
   Insert(Item, FItems, Length(FItems));
   ShowCurrent;
 end;
@@ -378,8 +396,8 @@ begin
   TextY := (RowHeight - Canvas.TextHeight('Xg')) div 2;
   DrawIcon(Pad, (RowHeight - IconSize) div 2, Tone, Item.Kind);
 
-  { The close button at the right end, then the count, Copy and
-    Details leftward. }
+  { The close button at the right end, then the count, the action, Copy
+    and Details leftward. }
   FCloseRect := Rect(Width - Pad - CloseSize + 4, (RowHeight - CloseSize) div 2,
     Width - Pad + 4, (RowHeight + CloseSize) div 2);
   if FHotPart = bpClose then
@@ -406,8 +424,17 @@ begin
     Canvas.TextOut(Right - Canvas.TextWidth(S), TextY, S);
     Right := Right - Canvas.TextWidth(S) - Gap;
   end;
-  { A note or a success that is its title alone has nothing to copy. }
-  if (Item.Kind = bkError) or (Trim(Item.Detail) <> '') then
+  if (Item.Action <> '') and Assigned(Item.OnAction) then
+  begin
+    Canvas.Font.Style := [fsBold];
+    FActionRect := PlaceLink(Item.Action, bpAction);
+    Canvas.Font.Style := [];
+  end
+  else
+    FActionRect := Rect(0, 0, 0, 0);
+  { A note or a success that is its title alone has nothing to copy,
+    nor one that offers an action, which is the point of it. }
+  if (Item.Kind = bkError) or ((Trim(Item.Detail) <> '') and (Item.Action = '')) then
     FCopyRect := PlaceLink(rsBannerCopy, bpCopy)
   else
     FCopyRect := Rect(0, 0, 0, 0);
@@ -478,6 +505,8 @@ begin
   P := Point(X, Y);
   if PtInRect(FCloseRect, P) then
     Result := bpClose
+  else if PtInRect(FActionRect, P) then
+    Result := bpAction
   else if PtInRect(FCopyRect, P) then
     Result := bpCopy
   else if Unfoldable and PtInRect(FDetailsRect, P) then
@@ -514,6 +543,7 @@ procedure TGittanBanner.MouseUp(Button: TMouseButton; Shift: TShiftState;
   X, Y: integer);
 var
   S: string;
+  OnAction: TNotifyEvent;
 begin
   inherited MouseUp(Button, Shift, X, Y);
   if (Button <> mbLeft) or (Length(FItems) = 0) then
@@ -521,6 +551,13 @@ begin
   case PartAt(X, Y) of
     bpClose:
       CloseCurrent;
+    bpAction:
+      begin
+        OnAction := Current.OnAction;
+        CloseCurrent;
+        if Assigned(OnAction) then
+          OnAction(Self);
+      end;
     bpCopy:
       begin
         S := Current.Title;

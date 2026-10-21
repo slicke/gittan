@@ -106,6 +106,15 @@ begin
   FCommitButton.AutoSize := True;
   FCommitButton.OnClick := @CommitButtonClick;
   FCommitButton.Parent := FCommitRow;
+  FSubjectCount := TLabel.Create(Self);
+  FSubjectCount.Align := alRight;
+  FSubjectCount.Left := 0;
+  FSubjectCount.Layout := tlCenter;
+  FSubjectCount.BorderSpacing.Right := 8;
+  FSubjectCount.ShowHint := True;
+  FSubjectCount.Hint := Format(rsSubjectCountHint, [SubjectHardLimit]);
+  FSubjectCount.Visible := False;
+  FSubjectCount.Parent := FCommitRow;
   FCommitNote := TGittanHintBox.Create(Self);
   FCommitNote.Align := alTop;
   FCommitNote.Top := 2000;
@@ -117,12 +126,60 @@ begin
     responder, which would be the message field: the tree takes the
     keys once the window is up. }
   Application.QueueAsyncCall(@FocusTreeAsync, 0);
+  Application.QueueAsyncCall(@CommitHintAsync, 0);
 end;
 
 procedure TForm1.FocusTreeAsync(Data: PtrInt);
 begin
   if FileTree.CanFocus then
     FileTree.SetFocus;
+end;
+
+{ Cocoa shows no TextHint in a memo (see gittan.memohint); the hint is
+  set on the text view once the window has made it. }
+procedure TForm1.CommitHintAsync(Data: PtrInt);
+begin
+  {$IFDEF LCLCocoa}
+  if FCommitMemo.HandleAllocated then
+    SetMemoPlaceholder(FCommitMemo.Handle, FCommitMemo.TextHint);
+  {$ENDIF}
+end;
+
+{ The first line's length shows once it is past SubjectSoftLimit, in
+  the warning color past SubjectHardLimit, where git log --oneline and
+  GitHub cut it. }
+procedure TForm1.UpdateSubjectCount;
+var
+  Len: integer;
+begin
+  if FSubjectCount = nil then
+    Exit;
+  Len := 0;
+  if FCommitMemo.Lines.Count > 0 then
+    Len := UTF8Length(TrimRight(FCommitMemo.Lines[0]));
+  FSubjectCount.Visible := Len > SubjectSoftLimit;
+  if not FSubjectCount.Visible then
+    Exit;
+  FSubjectCount.Caption := Format(rsSubjectCount, [Len, SubjectHardLimit]);
+  if Len > SubjectHardLimit then
+  begin
+    if FDark then
+      FSubjectCount.Font.Color := RGBToColor(232, 170, 70)
+    else
+      FSubjectCount.Font.Color := RGBToColor(178, 106, 0);
+  end
+  else if FDark then
+    FSubjectCount.Font.Color := RGBToColor(150, 150, 150)
+  else
+    FSubjectCount.Font.Color := RGBToColor(110, 110, 110);
+end;
+
+{ The Push the banner after a commit offers: as File > Push, while
+  nothing else runs. }
+procedure TForm1.CommitPushClick(Sender: TObject);
+begin
+  if FPushItem.Enabled then
+    StartRemote(rkPush);
 end;
 
 { The header in the other sections' palette, the note in a box tinted
@@ -156,6 +213,7 @@ begin
     FBisectNote.SetColors(RGBToColor(234, 243, 252), RGBToColor(200, 222, 245),
       RGBToColor(253, 236, 236), RGBToColor(242, 198, 198));
   end;
+  UpdateSubjectCount;
 end;
 
 procedure TForm1.CommitHeaderToggle(Sender: TObject);
@@ -493,6 +551,11 @@ end;
 procedure TForm1.CommitMemoChange(Sender: TObject);
 begin
   UpdateCommitState;
+  UpdateSubjectCount;
+  {$IFDEF LCLCocoa}
+  if FCommitMemo.HandleAllocated then
+    ShowMemoPlaceholder(FCommitMemo.Handle, FCommitMemo.Lines.Text = '');
+  {$ENDIF}
 end;
 
 procedure TForm1.CommitMemoKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
@@ -611,6 +674,7 @@ procedure TForm1.CommitJobDone(Sender: TObject);
 var
   Job: TGittanCommitJob;
   Subject: string;
+  Amended: boolean;
 begin
   Job := TGittanCommitJob(Sender);
   if Job <> FCommitJob then
@@ -623,6 +687,7 @@ begin
     Subject := FCommitMemo.Lines.Text;
     if FCommitMemo.Lines.Count > 0 then
       Subject := FCommitMemo.Lines[0];
+    Amended := FCommitAmend.Checked;
     FCommitMemo.Clear;
     FCommitAmend.Checked := False;
     FAmendMessage := '';
@@ -630,7 +695,6 @@ begin
     FCommitOn.Clear;
     FCommitOff.Clear;
     FLeftOut.ClearAll;
-    StatusNote(Format(rsCommitted, [Copy(Job.Id, 1, 7), Subject]));
   end
   else
     FStatus.ShowMessage('', stNormal, 0);
@@ -638,7 +702,19 @@ begin
   UpdateCommitState;
   UpdateRemoteItems;
   if not Job.Ok then
-    BannerError(rsCommitFailed, Job.Error);
+    BannerError(rsCommitFailed, Job.Error)
+  { A branch that can be pushed as it is (it has an upstream and is not
+    behind it, so an amended pushed commit is left to Force Push) is
+    offered the push in a banner; otherwise the status bar says it. }
+  else if not Amended and FHasUpstream and (FAhead > 0) and (FBehind = 0) and
+    FPushItem.Enabled then
+  begin
+    FStatus.ShowMessage('', stNormal, 0);
+    FBanner.AddAction(Format(rsCommittedTitle, [Copy(Job.Id, 1, 7)]), Subject,
+      bkSuccess, BannerActionSeconds, rsPushAction, @CommitPushClick);
+  end
+  else
+    StatusNote(Format(rsCommitted, [Copy(Job.Id, 1, 7), Subject]));
 end;
 
 { A commit is never broken off: one still running when the repository

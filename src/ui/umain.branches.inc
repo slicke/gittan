@@ -534,13 +534,39 @@ begin
     Result := Copy(Base, Dots + 3, MaxInt);
 end;
 
+{ A commit compared with its parent (a click in the commit graph, the
+  blame band or the summary's commits), with its card in the summary. }
+function TForm1.BlameShown: boolean;
+begin
+  Result := (FRepo.Root <> '') and (FBlameRange <> '') and (FRepo.Base = FBlameRange) and
+    (FBlameCommit.Hash <> '');
+end;
+
+procedure TForm1.SummaryBackClick(Sender: TObject);
+begin
+  SetBase('');
+end;
+
 procedure TForm1.BaseClick(const AScreenRect: TRect);
 var
   Ref: string;
 begin
+  FBaseBackIndex := -1;
+  FBaseCopyIndex := -1;
   if StashOfBase >= 0 then
   begin
     StashBaseClick(AScreenRect);
+    Exit;
+  end;
+  if BlameShown then
+  begin
+    FBaseStashId := '';
+    FBaseActionRef := '';
+    FBasePopup.Clear;
+    FBasePopup.AddHeader(Format(rsCommit, [FBlameCommit.Short]));
+    FBaseBackIndex := FBasePopup.Add(rsBackToTree);
+    FBaseCopyIndex := FBasePopup.Add(rsCopyCommitId);
+    FBasePopup.Popup(AScreenRect);
     Exit;
   end;
   Ref := BaseActionRef;
@@ -568,6 +594,18 @@ begin
   if FBaseStashId <> '' then
   begin
     StashBasePick(AIndex);
+    Exit;
+  end;
+  if (FBaseBackIndex >= 0) and (AIndex = FBaseBackIndex) then
+  begin
+    if BlameShown then
+      SetBase('');
+    Exit;
+  end;
+  if (FBaseCopyIndex >= 0) and (AIndex = FBaseCopyIndex) then
+  begin
+    if BlameShown then
+      Clipboard.AsText := FBlameCommit.Hash;
     Exit;
   end;
   if (FBaseActionRef = '') or (BaseActionRef <> FBaseActionRef) then

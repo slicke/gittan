@@ -1159,7 +1159,8 @@ end;
 procedure TGitRepoTest.TestCommitRange;
 var
   Stats: TGittanFileStats;
-  Root, Second: string;
+  Root, Second, Third, Body: string;
+  Details: TGittanCommitLine;
 begin
   MakeHistory;
   Root := Trim(Git(['rev-parse', 'HEAD']));
@@ -1181,6 +1182,23 @@ begin
   AssertEquals(5, Length(Stats));
   AssertTrue(FindStat(Stats, 'a.txt').Kind = ckAdded);
   AssertEquals(3, FindStat(Stats, 'a.txt').Added);
+
+  { The details of a commit: the subject, the author, and the body
+    without the blank line after the subject. }
+  WriteFile('a.txt', 'one'#10);
+  Git(['add', '-A']);
+  Git(['commit', '-q', '-m', 'Third: cut', '-m', 'Why it goes.'#10'Second line.']);
+  Third := Trim(Git(['rev-parse', 'HEAD']));
+  AssertTrue(FRepo.CommitDetails(Third, Details, Body));
+  AssertEquals(Third, Details.Hash);
+  AssertEquals(Copy(Third, 1, Length(Details.Short)), Details.Short);
+  AssertEquals('Third: cut', Details.Subject);
+  AssertEquals('Gittan Test', Details.Author);
+  AssertTrue(Details.Date > 0);
+  AssertEquals('Why it goes.'#10'Second line.', Body);
+  AssertTrue(FRepo.CommitDetails(Root, Details, Body));
+  AssertEquals('', Body);
+  AssertFalse(FRepo.CommitDetails('0123456789abcdef0123456789abcdef01234567', Details, Body));
 end;
 
 { The history of a range follows the lines through the commits that

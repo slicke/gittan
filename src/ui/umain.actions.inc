@@ -1532,9 +1532,12 @@ begin
   ShowCommitGraph;
 end;
 
+{ The summary shows the commit, from any page: its card names it and
+  leads back to the working tree. }
 procedure TForm1.GraphPick(Sender: TObject; const AHash: string);
 begin
   ShowBlameCommit(AHash);
+  ShowSummary;
 end;
 
 { A click on a commit in the summary of a clean tree shows it against its
