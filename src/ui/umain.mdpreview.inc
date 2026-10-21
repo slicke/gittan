@@ -5,7 +5,7 @@
   file in the change view or opened by itself gets FMdPreview right of
   the editor, behind FMdSplitter, at FMdRatio of the panel's width. The
   change view previews the new side (the diff lines that are not
-  deleted ones), a file opened to edits its text as it is typed, a pause
+  deleted ones), an SVG both sides, before over after, a file opened to edits its text as it is typed, a pause
   of MdPreviewPause after the last key. ShowEditor brings the preview up
   to date; the views that hide the editor hide it too.
 
@@ -32,7 +32,7 @@ end;
 
 procedure TForm1.UpdateMarkdownPreview;
 var
-  Path, Md: string;
+  Path, Md, Old: string;
   i: integer;
 begin
   Path := '';
@@ -43,12 +43,18 @@ begin
     HideMarkdownPreview;
     Exit;
   end;
+  Old := '';
   if FView = gvChanges then
   begin
     Md := '';
     for i := 0 to FChangeLines.Count - 1 do
-      if (FChangeLines[i] <> '') and (FChangeLines[i][1] <> '-') then
-        Md := Md + Copy(FChangeLines[i], 2, MaxInt) + LineEnding;
+      if FChangeLines[i] <> '' then
+      begin
+        if FChangeLines[i][1] <> '-' then
+          Md := Md + Copy(FChangeLines[i], 2, MaxInt) + LineEnding;
+        if FChangeLines[i][1] <> '+' then
+          Old := Old + Copy(FChangeLines[i], 2, MaxInt) + LineEnding;
+      end;
   end
   else
     Md := UTF8Encode(Edit.Text);
@@ -63,7 +69,10 @@ begin
     { The old side's share is of what is left. }
     ApplyLayout;
   end;
-  FMdPreview.ShowFile(Path, Md);
+  if FView = gvChanges then
+    FMdPreview.ShowChange(Path, Old, Md)
+  else
+    FMdPreview.ShowFile(Path, Md);
 end;
 
 procedure TForm1.HideMarkdownPreview;

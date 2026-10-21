@@ -6,7 +6,9 @@ unit gittan.mdpreview;
   which lays HTML and Markdown out on the canvas with no browser engine.
   LazInk draws no SVG, so an SVG file, and an SVG image a page links to,
   is drawn by BGRABitmap's BGRASVG and handed to the page as a PNG
-  through OnResource.
+  through OnResource. A changed SVG is drawn twice, before and after,
+  at one scale, each under a caption with its size, the new one telling
+  how many of the pixels differ, as the image view does.
 
   The page takes its colors from the form, as the image view does, and
   keeps its scroll position when the same file is shown again, so it
@@ -30,12 +32,15 @@ type
 
   TGittanMarkdownPreview = class(TInkPage)
   private
-    FFileName, FText: string;
+    FFileName, FText, FOldText: string;
+    FCompare: boolean;
     FSvgSerial, FSvgZoom: integer;
     FBack, FFore, FDim, FLink: TColor;
     FOnOpenFile: TGittanOpenFileEvent;
     procedure ApplyStyle;
+    procedure Show(const AFileName, AText, AOldText: string; ACompare: boolean);
     procedure ShowSvg(const AText: string);
+    procedure ShowSvgChange;
     procedure PageResource(Sender: TObject; const URL: string; Destination: TStream;
       var Handled: boolean);
     procedure PageLinkActivate(Sender: TObject; const Link: TInkLinkInfo;
@@ -47,6 +52,11 @@ type
       its extension. The same text again does nothing; the same file
       keeps the scroll position. }
     procedure ShowFile(const AFileName, AText: string);
+    {** Shows a change of the file AFileName: ANew, its new text, as
+      ShowFile does, but an SVG as AOld and ANew drawn one above the
+      other, before and after. An empty side has no version (an added
+      or a deleted file). }
+    procedure ShowChange(const AFileName, AOld, ANew: string);
     {** Forgets the text, so the next ShowFile draws it again. }
     procedure Clear;
     {** The palette: the background, the text, quotes and rules, and
@@ -74,15 +84,19 @@ function IsPreviewPath(const APath: string): boolean;
 implementation
 
 uses
-  LCLIntf, URIParser, Math, BGRABitmap, BGRABitmapTypes, BGRASVG, BGRACanvas2D;
+  LCLIntf, URIParser, Math, BGRABitmap, BGRABitmapTypes, BGRASVG, BGRACanvas2D,
+  gittan.imagediff;
 
 resourcestring
   rsCannotReadSvg = 'The SVG cannot be read.';
+  rsCannotDraw = 'Cannot draw this SVG';
 
 const
   { The URL of the SVG file the page shows, numbered per load, since
     LazInk keeps a picture by its URL. }
   SvgScheme = 'gittan-svg:';
+  { The end of the URL of the old side of a change. }
+  OldSuffix = '-old.png';
   { A small SVG, an icon, is drawn larger: up to this many pixels on its
     longer side, a whole number of times its size. }
   SvgMinSide = 256;
@@ -125,40 +139,71 @@ begin
     Result := PointF(ASvg.WidthAsPixel, ASvg.HeightAsPixel);
 end;
 
-{ AText, an SVG, drawn AZoom times its size as a PNG into ADest. False
-  when it cannot be read or has no size. }
-function RenderSvg(const AText: string; AZoom: single; ADest: TStream): boolean;
+{ The size of AText, an SVG, in pixels; 0 by 0 when it cannot be read. }
+function SvgTextSize(const AText: string): TPointF;
 var
   Svg: TBGRASVG;
-  Bmp: TBGRABitmap;
+begin
+  Result := PointF(0, 0);
+  if AText = '' then
+    Exit;
+  try
+    Svg := TBGRASVG.CreateFromString(AText);
+    try
+      Result := SvgSize(Svg);
+    finally
+      Svg.Free;
+    end;
+  except
+    Result := PointF(0, 0);
+  end;
+end;
+
+{ AText, an SVG, drawn AZoom times its size; nil when it cannot be read
+  or has no size. }
+function SvgBitmap(const AText: string; AZoom: single): TBGRABitmap;
+var
+  Svg: TBGRASVG;
   C2d: TBGRACanvas2D;
   Size: TPointF;
 begin
-  Result := False;
+  Result := nil;
   Svg := nil;
-  Bmp := nil;
   try
     try
       Svg := TBGRASVG.CreateFromString(AText);
       Size := SvgSize(Svg);
       if (Size.X < 1) or (Size.Y < 1) then
         Exit;
-      Bmp := TBGRABitmap.Create(Ceil(Size.X * AZoom), Ceil(Size.Y * AZoom));
-      C2d := TBGRACanvas2D.Create(Bmp);
+      Result := TBGRABitmap.Create(Ceil(Size.X * AZoom), Ceil(Size.Y * AZoom));
+      C2d := TBGRACanvas2D.Create(Result);
       try
-        Svg.StretchDraw(C2d, 0, 0, Bmp.Width, Bmp.Height, True);
+        Svg.StretchDraw(C2d, 0, 0, Result.Width, Result.Height, True);
       finally
         C2d.Free;
       end;
-      Bmp.SaveToStreamAsPng(ADest);
-      Result := True;
     except
-      Result := False;
+      FreeAndNil(Result);
     end;
   finally
-    Bmp.Free;
     Svg.Free;
   end;
+end;
+
+{ AText, an SVG, drawn AZoom times its size as a PNG into ADest. False
+  when it cannot be read or has no size. }
+function RenderSvg(const AText: string; AZoom: single; ADest: TStream): boolean;
+var
+  Bmp: TBGRABitmap;
+begin
+  Bmp := SvgBitmap(AText, AZoom);
+  Result := Bmp <> nil;
+  if Result then
+    try
+      Bmp.SaveToStreamAsPng(ADest);
+    finally
+      Bmp.Free;
+    end;
 end;
 
 { A TColor as CSS, system colors resolved. }
@@ -220,17 +265,33 @@ begin
 end;
 
 procedure TGittanMarkdownPreview.ShowFile(const AFileName, AText: string);
+begin
+  Show(AFileName, AText, '', False);
+end;
+
+procedure TGittanMarkdownPreview.ShowChange(const AFileName, AOld, ANew: string);
+begin
+  Show(AFileName, ANew, AOld, IsSvgPath(AFileName));
+end;
+
+procedure TGittanMarkdownPreview.Show(const AFileName, AText, AOldText: string;
+  ACompare: boolean);
 var
   Same: boolean;
   Y: integer;
 begin
-  if (AFileName = FFileName) and (AText = FText) then
+  if (AFileName = FFileName) and (AText = FText) and (ACompare = FCompare) and
+    (AOldText = FOldText) then
     Exit;
   Same := AFileName = FFileName;
   Y := ScrollY;
   FFileName := AFileName;
   FText := AText;
-  if IsSvgPath(AFileName) then
+  FOldText := AOldText;
+  FCompare := ACompare;
+  if ACompare then
+    ShowSvgChange
+  else if IsSvgPath(AFileName) then
     ShowSvg(AText)
   else if IsHtmlPath(AFileName) then
     LoadHTML(AText, FilenameToURI(AFileName))
@@ -247,20 +308,9 @@ end;
   pixels. One that cannot be read says so. }
 procedure TGittanMarkdownPreview.ShowSvg(const AText: string);
 var
-  Svg: TBGRASVG;
   Size: TPointF;
 begin
-  Size := PointF(0, 0);
-  try
-    Svg := TBGRASVG.CreateFromString(AText);
-    try
-      Size := SvgSize(Svg);
-    finally
-      Svg.Free;
-    end;
-  except
-    Size := PointF(0, 0);
-  end;
+  Size := SvgTextSize(AText);
   Inc(FSvgSerial);
   if (Size.X < 1) or (Size.Y < 1) then
   begin
@@ -274,9 +324,91 @@ begin
     FilenameToURI(FFileName));
 end;
 
-{ The SVG file shown, and an SVG image of a page, drawn as a PNG: the
-  file at the screen's pixels at the width ShowSvg set, an image at its
-  own size, since the page draws it at the PNG's. }
+{ Both sides of a changed SVG, before over after, at one scale: the
+  zoom ShowSvg would give the larger of the two. Each has a caption with
+  its size in pixels and bytes, the new side how many of the pixels
+  differ when the sizes match (counted at the SVG's own size); a side
+  without a version, or one that cannot be drawn, says so in a dotted
+  box. }
+procedure TGittanMarkdownPreview.ShowSvgChange;
+const
+  Suffix: array[0..1] of string = (OldSuffix, '.png');
+var
+  Texts: array[0..1] of string;
+  Sizes: array[0..1] of TPointF;
+  Bmps: array[0..1] of TBGRABitmap;
+  Differing: int64;
+  Html, Detail, Faint: string;
+  Side: integer;
+  Longest: single;
+  Drawn: boolean;
+begin
+  Texts[0] := FOldText;
+  Texts[1] := FText;
+  Longest := 0;
+  for Side := 0 to 1 do
+  begin
+    Sizes[Side] := SvgTextSize(Texts[Side]);
+    if (Sizes[Side].X >= 1) and (Sizes[Side].Y >= 1) then
+      Longest := Max(Longest, Max(Sizes[Side].X, Sizes[Side].Y));
+  end;
+  FSvgZoom := 1;
+  if Longest > 0 then
+    FSvgZoom := EnsureRange(Trunc(SvgMinSide / Longest), 1, SvgMaxZoom);
+  Differing := -1;
+  if (Sizes[0].X >= 1) and (Sizes[1].X >= 1) then
+  begin
+    Bmps[0] := SvgBitmap(Texts[0], 1);
+    Bmps[1] := SvgBitmap(Texts[1], 1);
+    try
+      Differing := DifferingPixels(Bmps[0], Bmps[1]);
+    finally
+      Bmps[0].Free;
+      Bmps[1].Free;
+    end;
+  end;
+  Inc(FSvgSerial);
+  Faint := Css(Mix(FBack, FFore, 0.55));
+  Html := '';
+  for Side := 0 to 1 do
+  begin
+    if Side = 0 then
+      Html := Html + '<p style="margin: 0 0 4px 0"><b>' + rsBefore + '</b>'
+    else
+      Html := Html + '<p style="margin: 24px 0 4px 0"><b>' + rsAfter + '</b>';
+    Detail := '';
+    Drawn := (Texts[Side] <> '') and (Sizes[Side].X >= 1) and (Sizes[Side].Y >= 1);
+    if Drawn then
+    begin
+      Detail := Format(rsImageSize, [Ceil(Sizes[Side].X), Ceil(Sizes[Side].Y)]) +
+        ' · ' + ByteSize(Length(Texts[Side]));
+      if (Side = 1) and (Differing >= 0) then
+        Detail := Detail + ' · ' + DifferingNote(Differing,
+          int64(Ceil(Sizes[1].X)) * Ceil(Sizes[1].Y));
+    end
+    else if Texts[Side] <> '' then
+      Detail := ByteSize(Length(Texts[Side]));
+    if Detail <> '' then
+      Html := Html + '<br><span style="color: ' + Faint + '">' + Detail + '</span>';
+    Html := Html + '</p>';
+    if Texts[Side] = '' then
+      Html := Html + '<p style="text-align: center; color: ' + Faint +
+        '; border: 1px dashed ' + Faint + '; padding: 24px">' + rsNotInVersion + '</p>'
+    else if not Drawn then
+      Html := Html + '<p style="text-align: center; color: ' + Faint +
+        '; border: 1px dashed ' + Faint + '; padding: 24px">' + rsCannotDraw + '</p>'
+    else
+      Html := Html + Format('<p style="text-align: center"><img src="%s%d%s" ' +
+        'style="width: %dpx"></p>', [SvgScheme, FSvgSerial, Suffix[Side],
+        Ceil(Sizes[Side].X * FSvgZoom)]);
+  end;
+  LoadHTML(Html, FilenameToURI(FFileName));
+end;
+
+{ The SVG file shown, both sides of a changed one, and an SVG image of a
+  page, drawn as a PNG: the file at the screen's pixels at the width
+  ShowSvg or ShowSvgChange set, an image at its own size, since the
+  page draws it at the PNG's. }
 procedure TGittanMarkdownPreview.PageResource(Sender: TObject; const URL: string;
   Destination: TStream; var Handled: boolean);
 var
@@ -285,7 +417,10 @@ var
 begin
   if Copy(URL, 1, Length(SvgScheme)) = SvgScheme then
   begin
-    Handled := RenderSvg(FText, FSvgZoom * GetCanvasScaleFactor, Destination);
+    if Copy(URL, Length(URL) - Length(OldSuffix) + 1, MaxInt) = OldSuffix then
+      Handled := RenderSvg(FOldText, FSvgZoom * GetCanvasScaleFactor, Destination)
+    else
+      Handled := RenderSvg(FText, FSvgZoom * GetCanvasScaleFactor, Destination);
     Exit;
   end;
   if not IsSvgPath(URL) or not URIToFilename(URL, Path) or not FileExists(Path) then
@@ -303,6 +438,8 @@ procedure TGittanMarkdownPreview.Clear;
 begin
   FFileName := '';
   FText := '';
+  FOldText := '';
+  FCompare := False;
 end;
 
 procedure TGittanMarkdownPreview.SetColors(ABack, AText, ADim, ALink: TColor;

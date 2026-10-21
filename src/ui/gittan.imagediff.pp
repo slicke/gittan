@@ -73,17 +73,28 @@ function ImageFormatName(const APath: string): string;
   with one decimal. }
 function ByteSize(ABytes: int64): string;
 
+{** How many pixels differ between AOld and ANew, -1 when a side is nil
+  or the sizes differ. Two fully transparent pixels are the same
+  whatever their color. }
+function DifferingPixels(AOld, ANew: TBGRABitmap): int64;
+
+{** The caption's note of ADiffering of APixels pixels: "same pixels",
+  "1.5 % of the pixels differ", or '' when they were not counted (-1). }
+function DifferingNote(ADiffering, APixels: int64): string;
+
+resourcestring
+  rsBefore = 'Before';
+  rsAfter = 'After';
+  rsNotInVersion = 'Not in this version';
+  rsImageSize = '%d × %d';
+
 implementation
 
 uses
   Math;
 
 resourcestring
-  rsBefore = 'Before';
-  rsAfter = 'After';
-  rsNotInVersion = 'Not in this version';
   rsCannotRead = 'Cannot read this image';
-  rsImageSize = '%d × %d';
   rsSamePixels = 'same pixels';
   rsPixelsDiffer = '%s of the pixels differ';
   rsImage = '%s image';
@@ -120,6 +131,38 @@ begin
     Result := FormatFloat('0.0', ABytes / 1024) + ' KB'
   else
     Result := FormatFloat('0.0', ABytes / (1024 * 1024)) + ' MB';
+end;
+
+function DifferingPixels(AOld, ANew: TBGRABitmap): int64;
+var
+  A, B: PBGRAPixel;
+  i: integer;
+begin
+  Result := -1;
+  if (AOld = nil) or (ANew = nil) or (AOld.Width <> ANew.Width) or
+    (AOld.Height <> ANew.Height) then
+    Exit;
+  Result := 0;
+  A := AOld.Data;
+  B := ANew.Data;
+  for i := 0 to AOld.NbPixels - 1 do
+  begin
+    if ((A^.alpha <> 0) or (B^.alpha <> 0)) and (PDWord(A)^ <> PDWord(B)^) then
+      Inc(Result);
+    Inc(A);
+    Inc(B);
+  end;
+end;
+
+function DifferingNote(ADiffering, APixels: int64): string;
+begin
+  if ADiffering = 0 then
+    Result := rsSamePixels
+  else if (ADiffering > 0) and (APixels > 0) then
+    Result := Format(rsPixelsDiffer,
+      [FormatFloat('0.#', Max(0.1, 100 * ADiffering / APixels)) + ' %'])
+  else
+    Result := '';
 end;
 
 { TGittanImageDiff }
@@ -190,28 +233,9 @@ begin
   Invalidate;
 end;
 
-{ How many pixels differ between two images of the same size, -1 when
-  the sizes differ or a side is missing. Two fully transparent pixels
-  are the same whatever their color. }
 procedure TGittanImageDiff.CountDiffering;
-var
-  A, B: PBGRAPixel;
-  i: integer;
 begin
-  FDiffering := -1;
-  if (FImages[0] = nil) or (FImages[1] = nil) or (FImages[0].Width <> FImages[1].Width) or
-    (FImages[0].Height <> FImages[1].Height) then
-    Exit;
-  FDiffering := 0;
-  A := FImages[0].Data;
-  B := FImages[1].Data;
-  for i := 0 to FImages[0].NbPixels - 1 do
-  begin
-    if ((A^.alpha <> 0) or (B^.alpha <> 0)) and (PDWord(A)^ <> PDWord(B)^) then
-      Inc(FDiffering);
-    Inc(A);
-    Inc(B);
-  end;
+  FDiffering := DifferingPixels(FImages[0], FImages[1]);
 end;
 
 procedure TGittanImageDiff.SetColors(ABack, AText, ADim, ALine, ADeleted, AAdded,
@@ -379,11 +403,8 @@ begin
       '  ·  ' + ByteSize(FBytes[ASide]);
     if (FScale > 0) and (FScale <> 1) then
       Detail := Detail + '  ·  ' + IntToStr(Round(FScale * 100)) + ' %';
-    if (ASide = 1) and (FDiffering = 0) then
-      Detail := Detail + '  ·  ' + rsSamePixels
-    else if (ASide = 1) and (FDiffering > 0) then
-      Detail := Detail + '  ·  ' + Format(rsPixelsDiffer,
-        [FormatFloat('0.#', Max(0.1, 100 * FDiffering / FImages[1].NbPixels)) + ' %']);
+    if (ASide = 1) and (FDiffering >= 0) then
+      Detail := Detail + '  ·  ' + DifferingNote(FDiffering, FImages[1].NbPixels);
   end;
   Canvas.Brush.Style := bsClear;
   Canvas.Font.Style := [fsBold];
