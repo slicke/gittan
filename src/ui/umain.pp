@@ -496,6 +496,13 @@ type
       items. }
     FTags: TGittanTags;
     FTagPopup: TGittanPopupList;
+    { The file header's View chip drops this: the view's modes and the
+      history of the file, as the menu items they stand for
+      (FViewItems), each at its row (FViewRows). }
+    FViewPopup: TGittanPopupList;
+    FViewItems: array of TMenuItem;
+    FViewRows: array of integer;
+    FCodeHistoryItem, FGoFileHistoryItem: TMenuItem;
     { The submodules, dropped from the Repository page's tile when there
       is more than one; a pick shows that one's page. }
     FSubListPopup: TGittanPopupList;
@@ -983,6 +990,8 @@ type
     function PreviewTogglePath: string;
     procedure UpdatePreviewToggle;
     procedure HeaderToggle(Sender: TObject);
+    procedure HeaderMenu(Sender: TObject; const AScreenRect: TRect);
+    procedure ViewPopupPick(Sender: TObject; AIndex: integer);
     procedure MdSplitterMoved(Sender: TObject);
     procedure MdTimerTimer(Sender: TObject);
     procedure EditChange(Sender: TObject);
@@ -1793,6 +1802,11 @@ resourcestring
   rsNoTags = 'No tags';
   rsTagNewRow = 'New Tag at HEAD...';
   rsFilterTags = 'Filter tags';
+  rsViewChip = 'View';
+  rsViewChipHint = 'How the file is shown, and its history';
+  rsFilterView = 'Filter';
+  rsViewHeader = 'View';
+  rsHistoryHeader = 'History';
   rsFilterSubmodules = 'Filter submodules';
   rsSubmodulesHeader = 'Submodules';
   rsReflogItem = 'Re&flog...';
@@ -2413,6 +2427,8 @@ begin
   FHeader.ConflictNav.OnNext := @MenuNextConflictClick;
   FHeader.OnAction := @HeaderAction;
   FHeader.OnToggle := @HeaderToggle;
+  FHeader.OnMenu := @HeaderMenu;
+  FHeader.SetMenu(rsViewChip, rsViewChipHint);
   UpdateChangeNav;
   { The banner sits over the header, hidden until something fails. }
   FBanner := TGittanBanner.Create(Self);
@@ -2529,6 +2545,10 @@ begin
   FTagPopup.FilterHint := rsFilterTags;
   FTagPopup.OnPick := @TagPopupPick;
   FTagPopup.OnContext := @TagContext;
+  FViewPopup := TGittanPopupList.Create(Self);
+  FViewPopup.Parent := Self;
+  FViewPopup.FilterHint := rsFilterView;
+  FViewPopup.OnPick := @ViewPopupPick;
   FSubListPopup := TGittanPopupList.Create(Self);
   FSubListPopup.Parent := Self;
   FSubListPopup.FilterHint := rsFilterSubmodules;
@@ -2923,6 +2943,9 @@ begin
     FTagPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
+    FViewPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
+      RGBToColor(100, 160, 240));
     FSubListPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
@@ -2996,6 +3019,9 @@ begin
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
     FTagPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
+      RGBToColor(0, 110, 230));
+    FViewPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
     FSubListPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
@@ -3598,8 +3624,9 @@ begin
   AddItem(GoMenu, rsChangedSymbols, ShortCut(VK_Y, [ssModifier, ssShift]),
     @MenuChangedSymbolsClick);
   AddItem(GoMenu, rsCallers, ShortCut(VK_C, [ssModifier, ssShift]), @MenuCallersClick);
-  AddItem(GoMenu, rsHistory, ShortCut(VK_H, [ssModifier, ssShift]), @MenuHistoryClick);
-  AddItem(GoMenu, rsGoFileHistory, 0, @MenuGoFileHistoryClick);
+  FCodeHistoryItem := AddItem(GoMenu, rsHistory, ShortCut(VK_H, [ssModifier, ssShift]),
+    @MenuHistoryClick);
+  FGoFileHistoryItem := AddItem(GoMenu, rsGoFileHistory, 0, @MenuGoFileHistoryClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextChange, ShortCut(VK_F7, []), @MenuNextChangeClick);
   AddItem(GoMenu, rsPrevChange, ShortCut(VK_F7, [ssShift]), @MenuPrevChangeClick);

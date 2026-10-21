@@ -4,9 +4,10 @@ unit gittan.fileheader;
   the left the badge and path of the file (the directory dimmed, the file
   name in full color, a dot after it while the editor holds unsaved
   changes), on the right its added and deleted line counts, the lexer,
-  the toggle of the file's preview, the actions the view offers as
-  pills (Edit, Save, Revert) and the change navigator for jumping
-  between the changed blocks.
+  the menu chip (View, with a chevron: the view's modes, dropped by
+  whoever owns the header), the toggle of the file's preview, the
+  actions the view offers as pills (Edit, Save, Revert) and the change
+  navigator for jumping between the changed blocks.
 
   It paints itself with the editor's palette in both themes, like the
   summary, and owns the navigator as a child so it can lay out around it.
@@ -15,7 +16,7 @@ unit gittan.fileheader;
 
   On macOS the window's toolbar shows the pills and the navigator
   instead (gittan.toolbar.pp): ShowControls off leaves them out here
-  (the toggle stays, as it belongs to the file shown),
+  (the toggle and the menu chip stay, as they belong to the file shown),
   and OnControlsChange tells when they, or the header's visibility,
   changed, so the toolbar can follow. }
 
@@ -29,6 +30,9 @@ uses
 type
   {** A click on the action pill at AIndex, in the order of SetActions. }
   TGittanHeaderActionEvent = procedure(Sender: TObject; AIndex: integer) of object;
+  {** A click on the menu chip, with its rectangle in screen coordinates
+    for a list to drop down from. }
+  TGittanHeaderMenuEvent = procedure(Sender: TObject; const AScreenRect: TRect) of object;
 
   { TGittanFileHeader }
 
@@ -50,6 +54,9 @@ type
     FToggleOn: boolean;
     FToggleRect: TRect;
     FOnToggle: TNotifyEvent;
+    FMenu, FMenuHint: string;
+    FMenuRect: TRect;
+    FOnMenu: TGittanHeaderMenuEvent;
     FOnAction: TGittanHeaderActionEvent;
     FShowControls: boolean;
     FChangeCurrent, FChangeTotal: integer;
@@ -103,6 +110,10 @@ type
       AOn, with AHint as its tooltip; none for an empty ACaption. A click
       fires OnToggle. SetFile and SetTitle take it away. }
     procedure SetToggle(const ACaption, AHint: string; AOn: boolean);
+    {** The menu chip left of the toggle, ACaption with a chevron and
+      AHint as its tooltip; none for an empty ACaption. It stays through
+      SetFile and SetTitle. A click fires OnMenu. }
+    procedure SetMenu(const ACaption, AHint: string);
     {** Enables or dims the pill at AIndex. }
     procedure SetActionEnabled(AIndex: integer; AEnabled: boolean);
     {** Shows the dot after the file name that marks unsaved changes. }
@@ -126,6 +137,7 @@ type
     property ConflictNav: TGittanChangeNav read FConflictNav;
     property OnAction: TGittanHeaderActionEvent read FOnAction write FOnAction;
     property OnToggle: TNotifyEvent read FOnToggle write FOnToggle;
+    property OnMenu: TGittanHeaderMenuEvent read FOnMenu write FOnMenu;
     {** Whether the pills and the navigator are shown here; True by default. }
     property ShowControls: boolean read FShowControls write SetShowControls;
     property ActionCount: integer read GetActionCount;
@@ -160,8 +172,10 @@ const
   IconSize = 16;
   DotSize = 7;
   SymbolSep = '  ›  ';
-  { What ActionAt gives for the toggle; -1 is nothing. }
+  { What ActionAt gives for the toggle and the menu chip; -1 is nothing. }
   HitToggle = -2;
+  HitMenu = -3;
+  ChevronWidth = 12;
 
 { AFrom moved AWeight of the way to ATo. }
 function Mix(AFrom, ATo: TColor; AWeight: double): TColor;
@@ -370,6 +384,17 @@ begin
   Invalidate;
 end;
 
+procedure TGittanFileHeader.SetMenu(const ACaption, AHint: string);
+begin
+  if (FMenu = ACaption) and (FMenuHint = AHint) then
+    Exit;
+  FMenu := ACaption;
+  FMenuHint := AHint;
+  if FHot = HitMenu then
+    SetHot(-1);
+  Invalidate;
+end;
+
 procedure TGittanFileHeader.SetActionEnabled(AIndex: integer; AEnabled: boolean);
 begin
   if (AIndex < 0) or (AIndex > High(FActionsEnabled)) then
@@ -426,6 +451,8 @@ var
 begin
   if (FToggle <> '') and FToggleRect.Contains(Point(X, Y)) then
     Exit(HitToggle);
+  if (FMenu <> '') and Assigned(FOnMenu) and FMenuRect.Contains(Point(X, Y)) then
+    Exit(HitMenu);
   if not FShowControls then
     Exit(-1);
   for i := 0 to High(FActionRects) do
@@ -445,6 +472,8 @@ begin
     Cursor := crDefault;
   if AValue = HitToggle then
     Hint := FToggleHint
+  else if AValue = HitMenu then
+    Hint := FMenuHint
   else
     Hint := '';
   Invalidate;
@@ -493,12 +522,20 @@ begin
       FOnToggle(Self);
     Exit;
   end;
+  if Index = HitMenu then
+  begin
+    if Assigned(FOnMenu) then
+      FOnMenu(Self, Rect(ClientToScreen(FMenuRect.TopLeft).X,
+        ClientToScreen(FMenuRect.TopLeft).Y, ClientToScreen(FMenuRect.BottomRight).X,
+        ClientToScreen(FMenuRect.BottomRight).Y));
+    Exit;
+  end;
   if Assigned(FOnAction) then
     FOnAction(Self, Index);
 end;
 
-{ Right to left: the navigator, the pills, the toggle, the note, the lexer, the
-  counts; then the badge and the path from the left in the room that is
+{ Right to left: the navigator, the pills, the toggle, the menu chip,
+  the note, the lexer, the counts; then the badge and the path from the left in the room that is
   left, the modified dot after the name, and the symbol the caret is in
   after that when it fits. A path too long for the room loses its
   directory first, then its end. }
@@ -587,6 +624,30 @@ begin
     else
       Canvas.Font.Color := FText;
     Canvas.TextOut(R.Left + PillPad, TextY, FToggle);
+    Right := R.Left - Gap;
+  end;
+  { The menu chip: a pill with a chevron after its caption. }
+  FMenuRect := Rect(0, 0, 0, 0);
+  if (FMenu <> '') and Assigned(FOnMenu) then
+  begin
+    W := Canvas.TextWidth(FMenu) + 2 * PillPad + ChevronWidth;
+    R := Rect(Right - W, PillTop, Right, PillTop + PillHeight);
+    FMenuRect := R;
+    Canvas.Pen.Width := 1;
+    Canvas.Pen.Color := FBorder;
+    Canvas.Brush.Style := bsSolid;
+    Canvas.Brush.Color := FFill;
+    Canvas.RoundRect(R.Left, R.Top, R.Right, R.Bottom, PillHeight, PillHeight);
+    Canvas.Brush.Style := bsClear;
+    if (FPressed = HitMenu) or ((FPressed = -1) and (FHot = HitMenu)) then
+      Canvas.Font.Color := FHotColor
+    else
+      Canvas.Font.Color := FText;
+    Canvas.TextOut(R.Left + PillPad, TextY, FMenu);
+    i := R.Right - PillPad - ChevronWidth div 2 + 2;
+    W := (R.Top + R.Bottom) div 2;
+    Canvas.Pen.Color := Canvas.Font.Color;
+    Canvas.Polyline([Point(i - 3, W - 1), Point(i, W + 2), Point(i + 3, W - 1)]);
     Right := R.Left - Gap;
   end;
   DrawRight(FNote, FDeletedColor);

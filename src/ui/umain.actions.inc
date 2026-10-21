@@ -504,6 +504,86 @@ begin
   Edit.Update;
 end;
 
+{ AShortCut as the menus show it: the macOS symbols (⌃⌥⇧⌘ before the
+  key) on macOS, ShortCutToText elsewhere; '' for none. }
+function ShortcutLabel(AShortCut: TShortCut): string;
+{$IFDEF DARWIN}
+var
+  Key: word;
+  Shift: TShiftState;
+{$ENDIF}
+begin
+  if AShortCut = 0 then
+    Exit('');
+  {$IFDEF DARWIN}
+  ShortCutToKey(AShortCut, Key, Shift);
+  Result := '';
+  if ssCtrl in Shift then
+    Result := Result + '⌃';
+  if ssAlt in Shift then
+    Result := Result + '⌥';
+  if ssShift in Shift then
+    Result := Result + '⇧';
+  if ssMeta in Shift then
+    Result := Result + '⌘';
+  Result := Result + ShortCutToText(ShortCut(Key, []));
+  {$ELSE}
+  Result := ShortCutToText(AShortCut);
+  {$ENDIF}
+end;
+
+{ The file header's View chip drops the view's modes, checked as in the
+  View menu, and the file's histories from the Go menu, each with its
+  shortcut, so the chip also teaches them; only the items the menus
+  enable now. A pick clicks the menu item. }
+procedure TForm1.HeaderMenu(Sender: TObject; const AScreenRect: TRect);
+var
+  n: integer;
+
+  procedure AddRow(AItem: TMenuItem);
+  begin
+    if (AItem = nil) or not AItem.Enabled or not AItem.Visible then
+      Exit;
+    SetLength(FViewItems, n + 1);
+    SetLength(FViewRows, n + 1);
+    FViewItems[n] := AItem;
+    FViewRows[n] := FViewPopup.Add(StringReplace(AItem.Caption, '&', '', [rfReplaceAll]),
+      ShortcutLabel(AItem.ShortCut), AItem.Checked);
+    Inc(n);
+  end;
+
+begin
+  ViewMenuClick(nil);
+  FViewPopup.Clear;
+  FViewItems := nil;
+  FViewRows := nil;
+  n := 0;
+  FViewPopup.AddHeader(rsViewHeader);
+  AddRow(FOnlyChangesItem);
+  AddRow(FSideItem);
+  AddRow(FWrapItem);
+  AddRow(FIgnoreSpaceItem);
+  AddRow(FBlameItem);
+  AddRow(FTranslationsItem);
+  AddRow(FReviewItem);
+  FViewPopup.AddHeader(rsHistoryHeader);
+  AddRow(FCodeHistoryItem);
+  AddRow(FGoFileHistoryItem);
+  FViewPopup.Popup(AScreenRect);
+end;
+
+procedure TForm1.ViewPopupPick(Sender: TObject; AIndex: integer);
+var
+  i: integer;
+begin
+  for i := 0 to High(FViewRows) do
+    if FViewRows[i] = AIndex then
+    begin
+      FViewItems[i].Click;
+      Exit;
+    end;
+end;
+
 procedure TForm1.ViewMenuClick(Sender: TObject);
 begin
   FFoldMenu.Enabled := FoldingShown and Edit.Visible;
