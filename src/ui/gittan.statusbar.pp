@@ -5,7 +5,7 @@ unit gittan.statusbar;
   On the left the repository: its name, the branch as a chip that drops
   the branch list, the commits ahead of and behind the upstream (a click
   lists them), the stashes as a box with their count (a click lists
-  them), what git is in the middle of and the conflicted files as
+  them), these three with a chevron, what git is in the middle of and the conflicted files as
   tinted badges, and the base the work tree is compared against. In the middle a passing message,
   which clears itself after a while, or the progress of a long job. On the
   right the branch's pull request, the number of changed files and the
@@ -754,6 +754,16 @@ var
     Canvas.TextOut(AX + ChipPadX, TextY, AText);
   end;
 
+  { The chevron of a part that drops a list, in the ChevronWidth after
+    AX. }
+  procedure DrawChevron(AX: integer);
+  begin
+    Inc(AX, ChevronWidth div 2 + 1);
+    Canvas.Pen.Color := FDim;
+    Canvas.Polyline([Point(AX - 3, TextY + TextH div 2 - 1),
+      Point(AX, TextY + TextH div 2 + 2), Point(AX + 3, TextY + TextH div 2 - 1)]);
+  end;
+
   function BadgeWidth(const AText: string): integer;
   begin
     Result := Canvas.TextWidth(AText) + 2 * ChipPadX;
@@ -767,11 +777,12 @@ var
     if FBranch <> '' then
       Inc(Result, IconW + Canvas.TextWidth(FBranch) + ChevronWidth + 2 * ChipPadX + Gap);
     if Sync <> '' then
-      Inc(Result, Canvas.TextWidth(Sync) + Gap)
+      Inc(Result, Canvas.TextWidth(Sync) + ChevronWidth + 2 * ChipPadX + Gap)
     else if FSyncShown then
-      Inc(Result, IconW + Gap);
+      Inc(Result, IconW + ChevronWidth + 2 * ChipPadX + Gap);
     if FStashes > 0 then
-      Inc(Result, IconW + Canvas.TextWidth(IntToStr(FStashes)) + 2 * ChipPadX + Gap);
+      Inc(Result, IconW + Canvas.TextWidth(IntToStr(FStashes)) + ChevronWidth +
+        2 * ChipPadX + Gap);
     if FOperation <> '' then
       Inc(Result, BadgeWidth(FOperation) + Gap div 2);
     if FConflicts <> '' then
@@ -922,35 +933,45 @@ begin
     Inc(X, IconW);
     Canvas.Font.Color := FText;
     Canvas.TextOut(X, TextY, S);
-    Inc(X, Canvas.TextWidth(S) + ChevronWidth div 2 + 1);
-    Canvas.Pen.Color := FDim;
-    Canvas.Polyline([Point(X - 3, TextY + TextH div 2 - 1),
-      Point(X, TextY + TextH div 2 + 2), Point(X + 3, TextY + TextH div 2 - 1)]);
-    Inc(X, ChevronWidth div 2 + ChipPadX + Gap - 1);
+    Inc(X, Canvas.TextWidth(S));
+    DrawChevron(X);
+    Inc(X, ChevronWidth + ChipPadX + Gap);
   end;
-  if (Sync <> '') and (X + Canvas.TextWidth(Sync) <= Right) then
+  { The commits ahead and behind, and the stashes, drop lists as the
+    branch does, so they have its chevron too: without it they read as
+    text until the mouse is over them. }
+  if (Sync <> '') and (X + Canvas.TextWidth(Sync) + ChevronWidth <= Right) then
   begin
-    DrawText(spSync, X, Sync, FDim);
-    Inc(X, Canvas.TextWidth(Sync) + Gap);
+    W := Canvas.TextWidth(Sync);
+    FRects[spSync] := ChipRect(X - ChipPadX, W + ChevronWidth + 2 * ChipPadX);
+    DrawHot(spSync);
+    Canvas.Font.Color := FDim;
+    Canvas.TextOut(X, TextY, Sync);
+    DrawChevron(X + W);
+    Inc(X, W + ChevronWidth + ChipPadX + Gap);
   end
-  else if (Sync = '') and FSyncShown and (X + IconW <= Right) then
+  else if (Sync = '') and FSyncShown and (X + IconW + ChevronWidth <= Right) then
   begin
-    FRects[spSync] := ChipRect(X - ChipPadX, IconW - IconGap + 2 * ChipPadX);
+    W := IconW - IconGap;
+    FRects[spSync] := ChipRect(X - ChipPadX, W + ChevronWidth + 2 * ChipPadX);
     DrawHot(spSync);
     DrawStatusIcon(Canvas, HintSync, X, TextY, TextH, FDim);
-    Inc(X, IconW - IconGap + Gap);
+    DrawChevron(X + W);
+    Inc(X, W + ChevronWidth + ChipPadX + Gap);
   end;
   { The stashes: a box with the count after it. }
-  if (FStashes > 0) and (X + IconW + Canvas.TextWidth(IntToStr(FStashes)) <= Right) then
+  if (FStashes > 0) and
+    (X + IconW + Canvas.TextWidth(IntToStr(FStashes)) + ChevronWidth <= Right) then
   begin
     S := IntToStr(FStashes);
-    FRects[spStash] := ChipRect(X - ChipPadX, IconW + Canvas.TextWidth(S) + 2 * ChipPadX);
+    W := IconW + Canvas.TextWidth(S);
+    FRects[spStash] := ChipRect(X - ChipPadX, W + ChevronWidth + 2 * ChipPadX);
     DrawHot(spStash);
     DrawStatusIcon(Canvas, HintStash, X, TextY, TextH, FDim);
-    Inc(X, IconW);
     Canvas.Font.Color := FDim;
-    Canvas.TextOut(X, TextY, S);
-    Inc(X, Canvas.TextWidth(S) + Gap);
+    Canvas.TextOut(X + IconW, TextY, S);
+    DrawChevron(X + W);
+    Inc(X, W + ChevronWidth + ChipPadX + Gap);
   end;
   if (FOperation <> '') and (X + BadgeWidth(FOperation) <= Right) then
   begin
