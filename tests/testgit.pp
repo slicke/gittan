@@ -101,6 +101,8 @@ type
     procedure TestReflog;
     procedure TestParseCleanPreview;
     procedure TestClean;
+    procedure TestParseTreeEntries;
+    procedure TestTreeEntries;
   end;
 
 implementation
@@ -2998,6 +3000,62 @@ begin
   finally
     Paths.Free;
   end;
+end;
+
+procedure TGitRepoTest.TestParseTreeEntries;
+var
+  List: TGittanTreeEntries;
+begin
+  List := ParseTreeEntries('100644 blob aaa     12'#9'a.txt'#0 +
+    '120000 blob bbb      5'#9'link'#0'040000 tree ccc       -'#9'src'#0 +
+    '160000 commit ddd       -'#9'sub'#0'100755 blob eee   7'#9'z run.sh'#0 +
+    'broken'#0, 'dir');
+  AssertEquals(5, Length(List));
+  AssertEquals('folders first', 'src', List[0].Name);
+  AssertTrue(List[0].Kind = tkFolder);
+  AssertEquals(-1, List[0].Size);
+  AssertEquals('dir/src', List[0].Path);
+  AssertEquals('a.txt', List[1].Name);
+  AssertTrue(List[1].Kind = tkFile);
+  AssertEquals(12, List[1].Size);
+  AssertEquals('aaa', List[1].Id);
+  AssertFalse(List[1].Executable);
+  AssertTrue(List[2].Kind = tkLink);
+  AssertTrue(List[3].Kind = tkSubmodule);
+  AssertEquals('z run.sh', List[4].Name);
+  AssertTrue(List[4].Executable);
+  List := ParseTreeEntries('100644 blob aaa 1'#9'a'#0, '');
+  AssertEquals('a', List[0].Path);
+end;
+
+procedure TGitRepoTest.TestTreeEntries;
+var
+  List: TGittanTreeEntries;
+  First: string;
+  Data: RawByteString;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  First := FRepo.CommitId('HEAD');
+  WriteFile('dir sp/new.txt', 'later'#10);
+  Git(['rm', '-q', 'del.txt']);
+  Git(['add', '.']);
+  Commit('later');
+  AssertTrue(FRepo.Error, FRepo.TreeEntries(First, '', List));
+  AssertEquals(5, Length(List));
+  AssertEquals('dir sp', List[0].Name);
+  AssertTrue(List[0].Kind = tkFolder);
+  AssertEquals('a.txt', List[1].Name);
+  AssertEquals(14, List[1].Size);
+  AssertEquals('del.txt', List[2].Name);
+  AssertTrue(FRepo.Error, FRepo.TreeEntries(First, 'dir sp', List));
+  AssertEquals(1, Length(List));
+  AssertEquals('dir sp/fil å.txt', List[0].Path);
+  AssertTrue(FRepo.TreeEntries('HEAD', 'dir sp', List));
+  AssertEquals(2, Length(List));
+  AssertTrue(FRepo.FileBlob('del.txt', First, Data));
+  AssertEquals('gone'#10, Data);
+  AssertFalse('no such folder', FRepo.TreeEntries('HEAD', 'nope', List));
 end;
 
 initialization

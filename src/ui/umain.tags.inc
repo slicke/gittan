@@ -26,6 +26,7 @@ const
   tmCopy = 6;
   tmDelete = 7;
   tmDeleteRemote = 8;
+  tmBrowse = 9;
 
 function TForm1.TagBusy: boolean;
 begin
@@ -121,6 +122,7 @@ begin
   FTagMenu.Items.Clear;
   Add(rsCaShow, tmShow, True);
   Add(rsCaCompare, tmCompare, True);
+  Add(rsCaBrowse, tmBrowse, True);
   FTagMenu.Items.Add(NewLine);
   Add(rsTmCheckout, tmCheckout, not Busy);
   Add(rsCaBranch, tmBranch, FOperation = '');
@@ -146,6 +148,7 @@ begin
   case (Sender as TMenuItem).Tag of
     tmShow: ShowBlameCommit(T.Commit);
     tmCompare: SetBase('refs/tags/' + T.Name);
+    tmBrowse: BrowseCommit(T.Commit, T.Name, T.Subject);
     tmCheckout: CheckoutTagAsk(T);
     tmBranch: BranchAtAsk(T.Name, T.Commit);
     tmPush: StartRemote(rkPushTag, pmAuto, T.Name, FTagRemote);

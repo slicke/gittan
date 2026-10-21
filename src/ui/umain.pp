@@ -28,7 +28,7 @@ uses
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader, gittan.hintbox,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, gittan.mdpreview,
-  gittan.rebase, gittan.rebasedlg, gittan.cleandlg, ATSynEdit_Gaps, md5;
+  gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.repobrowser, ATSynEdit_Gaps, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -1057,6 +1057,7 @@ type
     procedure MenuUndoRevertClick(Sender: TObject);
     function CanClean: boolean;
     procedure MenuCleanClick(Sender: TObject);
+    procedure BrowseCommit(const AHash, AName, ASubject: string);
     function IsChangedPath(const APath: string): boolean;
     procedure ClearRevertUndo;
     procedure BranchContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
@@ -1500,6 +1501,8 @@ resourcestring
   rsNoRemote = 'The repository has no remote';
   rsCaShow = 'Show Commit';
   rsCaCompare = 'Compare with Working Tree';
+  rsCaBrowse = 'Browse Files...';
+  rsBrowseTitle = 'Files at %s';
   rsCaMark = 'Mark for Comparison';
   rsCaUnmark = 'Unmark';
   rsCaCompareMarked = 'Compare with Marked %s';
@@ -5646,6 +5649,7 @@ const
 {$I umain.reflog.inc}
 {$I umain.revert.inc}
 {$I umain.clean.inc}
+{$I umain.repobrowser.inc}
 {$I umain.commit.inc}
 {$I umain.remote.inc}
 {$I umain.mdpreview.inc}

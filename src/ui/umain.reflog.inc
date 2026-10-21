@@ -2,7 +2,7 @@
   The reflog
   ---------------------------------------------------------------------------
   The Branch menu's Reflog... drops HEAD's reflog from the status bar's
-  branch (ShowReflogList), as TortoiseGit's RefLog lists it: every
+  branch (ShowReflogList): every
   place HEAD has been, newest first, by what git wrote of the move
   ("commit: subject", "reset: moving to HEAD~1"), each with its
   commit's short id and age, the ones on HEAD checked. A commit that
@@ -23,6 +23,7 @@ const
   rlResetMixed = 5;
   rlResetHard = 6;
   rlCopy = 7;
+  rlBrowse = 8;
 
 { ASubject with each full commit id in it (git writes one for a reset
   to a commit, "reset: moving to <id>") cut to the short id. }
@@ -126,6 +127,7 @@ begin
   FReflogMenu.Items.Clear;
   Add(nil, rsCaShow, rlShow);
   Add(nil, rsCaCompare, rlCompare);
+  Add(nil, rsCaBrowse, rlBrowse);
   FReflogMenu.Items.Add(NewLine);
   Add(nil, rsCaBranch, rlBranch, FOperation = '');
   Sub := Add(nil, Format(rsCaReset, [StringReplace(ResetTarget, '&', '&&', [rfReplaceAll])]),
@@ -154,6 +156,7 @@ begin
   case (Sender as TMenuItem).Tag of
     rlShow: ShowBlameCommit(E.Commit);
     rlCompare: SetBase(E.Commit);
+    rlBrowse: BrowseCommit(E.Commit, Short, ShortenReflogIds(E.Subject));
     rlBranch: BranchAtAsk(Short, E.Commit);
     rlCopy: Clipboard.AsText := E.Commit;
     rlResetSoft, rlResetMixed, rlResetHard:

@@ -6,8 +6,8 @@
   file under a folder of the tree; File > Revert File... does it to the
   file shown. A new or untracked file is deleted, a rename goes back.
   It asks first. Discard (umain.discard.inc) puts back one block against
-  the version compared with; Revert is whole files against HEAD, as in
-  TortoiseGit, so it is offered only while the work tree is compared
+  the version compared with; Revert is whole files against HEAD, so
+  it is offered only while the work tree is compared
   with HEAD. Before anything changes, what was on disk is saved as blobs
   (TGittanRepo.RevertFiles), and File > Undo Revert writes the latest
   revert back. }

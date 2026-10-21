@@ -1109,8 +1109,8 @@ end;
 
 { The watcher is stopped meanwhile, as for a new base, and the views
   are refreshed from the new branch. When local changes block the
-  switch, a dialog names the files git listed and offers what
-  TortoiseGit does: stash them and switch, or bring them along merged
+  switch, a dialog names the files git listed and offers to stash
+  them and switch, or to bring them along merged
   into the branch's version (`git switch --merge`, which may leave
   conflicts); any other refusal is shown with git's whole message.
   With ADetach ABranch is a tag (or any commit) and HEAD is left on it

@@ -138,6 +138,24 @@ type
     or both (cnAll, `-x`). }
   TGittanCleanKind = (cnUntracked, cnIgnored, cnAll);
 
+  {** What an entry of a commit's tree is: a folder, a file, a symbolic
+    link (its blob holds the target) or a submodule (its commit). }
+  TGittanTreeKind = (tkFolder, tkFile, tkLink, tkSubmodule);
+
+  {** An entry of a folder of a commit's tree (TGittanRepo.TreeEntries):
+    its name in the folder, its path from the root, what it is, its
+    object id, its size in bytes (-1 for a folder or a submodule) and
+    whether it is executable. }
+  TGittanTreeEntry = record
+    Name: string;
+    Path: string;
+    Kind: TGittanTreeKind;
+    Id: string;
+    Size: int64;
+    Executable: boolean;
+  end;
+  TGittanTreeEntries = array of TGittanTreeEntry;
+
   {** A file committed with other content than the work tree's: Text is
     what goes in for Path, the work tree's with some of its changes left
     out (see gittan.leaveout and TGittanRepo.Commit). }
@@ -461,6 +479,11 @@ type
       what that preview would list goes, so a file that became tracked
       meanwhile stays. Nothing is kept to bring them back. }
     function Clean(AKind: TGittanCleanKind; APaths: TStrings): boolean;
+    {** What the folder AFolder (a path from the root, '' for the root)
+      holds in the commit ACommit (`git ls-tree -l -z`, read by
+      ParseTreeEntries): folders first, then the rest, each by name. }
+    function TreeEntries(const ACommit, AFolder: string;
+      out AList: TGittanTreeEntries): boolean;
     {** Resolves the conflict in APath by taking one side whole, as
       `git checkout --ours` or `--theirs` and `git add` do; when that
       side deleted the file it goes (`git rm`). }
@@ -802,6 +825,13 @@ const
   <path>" each, a path quoted C-style unquoted (UnquoteCPath); other
   lines ("Would skip repository <path>") are left out. }
 procedure ParseCleanPreview(const AOutput: string; APaths: TStrings);
+
+{** The entries in what `git ls-tree -l -z` prints for the folder
+  AFolder ('' for the root), each "<mode> <type> <id> <size>\t<name>"
+  ended by a NUL, the size padded and "-" for a folder or a submodule;
+  folders first, then the rest, each by name as git sorts them (bytes).
+  Entries of another shape are skipped. }
+function ParseTreeEntries(const AOutput, AFolder: string): TGittanTreeEntries;
 
 {** APath as git meant it: when it is in double quotes, the quotes
   dropped and the escapes (\", \\, \t, \n, three octal digits for a
@@ -3563,6 +3593,88 @@ begin
   finally
     Lines.Free;
   end;
+end;
+
+function ParseTreeEntries(const AOutput, AFolder: string): TGittanTreeEntries;
+var
+  Fields: TStringList;
+  Head: TStringArray;
+  i, j, n, Tab: integer;
+  E: TGittanTreeEntry;
+
+  function Before(const A, B: TGittanTreeEntry): boolean;
+  begin
+    if (A.Kind = tkFolder) <> (B.Kind = tkFolder) then
+      Result := A.Kind = tkFolder
+    else
+      Result := A.Name < B.Name;
+  end;
+
+begin
+  Result := nil;
+  Fields := TStringList.Create;
+  try
+    SplitNul(AOutput, Fields);
+    SetLength(Result, Fields.Count);
+    n := 0;
+    for i := 0 to Fields.Count - 1 do
+    begin
+      Tab := Pos(#9, Fields[i]);
+      if Tab = 0 then
+        Continue;
+      Head := Copy(Fields[i], 1, Tab - 1).Split([' '], TStringSplitOptions.ExcludeEmpty);
+      if Length(Head) < 4 then
+        Continue;
+      E.Name := Copy(Fields[i], Tab + 1, MaxInt);
+      if E.Name = '' then
+        Continue;
+      if AFolder = '' then
+        E.Path := E.Name
+      else
+        E.Path := AFolder + '/' + E.Name;
+      if Head[1] = 'tree' then
+        E.Kind := tkFolder
+      else if Head[1] = 'commit' then
+        E.Kind := tkSubmodule
+      else if Head[0] = '120000' then
+        E.Kind := tkLink
+      else if Head[1] = 'blob' then
+        E.Kind := tkFile
+      else
+        Continue;
+      E.Id := Head[2];
+      E.Size := StrToInt64Def(Head[3], -1);
+      E.Executable := Head[0] = '100755';
+      { An insertion sort: git gives each folder's entries sorted
+        already, so this only moves the folders up. }
+      j := n;
+      while (j > 0) and Before(E, Result[j - 1]) do
+      begin
+        Result[j] := Result[j - 1];
+        Dec(j);
+      end;
+      Result[j] := E;
+      Inc(n);
+    end;
+    SetLength(Result, n);
+  finally
+    Fields.Free;
+  end;
+end;
+
+{ The tree is named as <commit>:<folder>, which with an empty folder is
+  the commit's root tree, so the names come relative to the folder. }
+function TGittanRepo.TreeEntries(const ACommit, AFolder: string;
+  out AList: TGittanTreeEntries): boolean;
+var
+  Output: string;
+begin
+  AList := nil;
+  if (FRoot = '') or (ACommit = '') then
+    Exit(False);
+  Result := RunGit(FRoot, ['ls-tree', '-l', '-z', ACommit + ':' + AFolder], Output);
+  if Result then
+    AList := ParseTreeEntries(Output, AFolder);
 end;
 
 const

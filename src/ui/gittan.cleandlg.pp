@@ -1,7 +1,7 @@
 unit gittan.cleandlg;
 
-{** The dialog of Clean, what TortoiseGit's clean dialog does with a
-  preview: a box chooses what goes (untracked files, ignored files or
+{** The dialog of Clean: a box chooses what goes (untracked files,
+  ignored files or
   both), and the list under it shows what `git clean -n` says would go
   for that choice (TGittanRepo.CleanPreview), a folder whose every file
   goes as one row ending in a slash, each with a box, all ticked. Tick

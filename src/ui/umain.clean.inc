@@ -1,8 +1,8 @@
 { ---------------------------------------------------------------------------
   Clean
   ---------------------------------------------------------------------------
-  File > Clean... deletes files git does not track, what TortoiseGit's
-  Clean up does: the dialog (gittan.cleandlg) chooses untracked files,
+  File > Clean... deletes files git does not track: the dialog
+  (gittan.cleandlg) chooses untracked files,
   ignored ones or both and lists what git clean -n says would go for
   that choice, each with a box; the ticked ones are deleted with git
   clean. Unlike a revert nothing is saved first, since ignored files

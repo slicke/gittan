@@ -2,7 +2,7 @@
   The commit menu
   ---------------------------------------------------------------------------
   A right click on a commit in the commit graph (or the Menu key) shows
-  what can be done with it, as the log of TortoiseGit does: show it,
+  what can be done with it: show it,
   compare the work tree with it, switch to a branch on it, make a branch
   or a tag there, merge it, cherry-pick or revert it, reset the branch
   to it, copy its id. The menu is built for the commit each time, since
@@ -38,6 +38,7 @@ const
   caMark = 14;
   caCompareMarked = 15;
   caRebase = 16;
+  caBrowse = 17;
 
 procedure TForm1.GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
   const AScreenPos: TPoint);
@@ -100,6 +101,7 @@ begin
   FCommitPopup.Items.Clear;
   Add(nil, rsCaShow, caShow);
   Add(nil, rsCaCompare, caCompare);
+  Add(nil, rsCaBrowse, caBrowse);
   if FMarkHash = ACommit.Hash then
     Add(nil, rsCaUnmark, caMark)
   else
@@ -161,6 +163,11 @@ begin
       FMarkDate := FActionCommit.Date;
     end;
     FGraph.Marked := FMarkHash;
+    Exit;
+  end;
+  if (Sender as TMenuItem).Tag = caBrowse then
+  begin
+    BrowseCommit(Hash, FActionName, FActionCommit.Subject);
     Exit;
   end;
   FGraph.Close;

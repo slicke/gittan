@@ -1,7 +1,7 @@
 { ---------------------------------------------------------------------------
   Interactive rebase
   ---------------------------------------------------------------------------
-  What TortoiseGit's rebase dialog does: the commits of the current
+  The commits of the current
   branch since AOnto in a dialog (gittan.rebasedlg), each to be picked,
   reworded, edited, squashed or fixed up into the one below it, or
   dropped, in any order, then replayed onto AOnto by

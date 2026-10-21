@@ -1,7 +1,7 @@
 unit gittan.rebasedlg;
 
-{** The dialog of an interactive rebase, what TortoiseGit's rebase
-  dialog has: the commits a rebase replays in a list, newest first as
+{** The dialog of an interactive rebase: the commits a rebase
+  replays in a list, newest first as
   the commit graph shows them, each with its action (Pick, Reword,
   Edit, Squash, Fixup or Drop), its subject, its author and its short
   id; under it the action of the highlighted commit in a box, Move Up
