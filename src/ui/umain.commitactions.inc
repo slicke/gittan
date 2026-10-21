@@ -6,7 +6,8 @@
   compare the work tree with it, switch to a branch on it, make a branch
   or a tag there, merge it, cherry-pick or revert it, reset the branch
   to it, copy its id. The menu is built for the commit each time, since
-  what applies depends on it: a merge commit cannot be cherry-picked or
+  what applies depends on it (Rebase Interactively from Here... lists
+  the commits after it, see umain.rebase.inc): a merge commit cannot be cherry-picked or
   reverted here (git wants its mainline), a commit already in HEAD's
   history is not merged or cherry-picked again, and nothing that moves
   HEAD is offered while git is in the middle of something or a job runs.
@@ -36,11 +37,12 @@ const
   caGitHub = 13;
   caMark = 14;
   caCompareMarked = 15;
+  caRebase = 16;
 
 procedure TForm1.GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
   const AScreenPos: TPoint);
 var
-  Busy, InHead, IsMerge: boolean;
+  Busy, InHead, IsHead, IsMerge: boolean;
   Known: string;
   i: integer;
   Item, Sub: TMenuItem;
@@ -78,6 +80,10 @@ begin
   Busy := (FOperation <> '') or (FCommitJob <> nil) or (FRemoteJob <> nil);
   InHead := FRepo.IsAncestor(ACommit.Hash, 'HEAD');
   IsMerge := Length(ACommit.Parents) > 1;
+  IsHead := False;
+  for i := 0 to High(ACommit.Refs) do
+    if ACommit.Refs[i].Kind = grHead then
+      IsHead := True;
   { The commit by the name a person knows it by: a local branch on it,
     else a remote one, else a tag, else its short id. }
   Known := '';
@@ -114,6 +120,7 @@ begin
   Add(nil, Format(rsCaCherryPick, [Amp(FBranch)]), caCherryPick,
     not Busy and not InHead and not IsMerge);
   Add(nil, rsCaRevert, caRevert, not Busy and InHead and not IsMerge);
+  Add(nil, rsCaRebase, caRebase, not Busy and InHead and not IsHead);
   Sub := Add(nil, Format(rsCaReset, [Amp(FBranch)]), 0, not Busy);
   Sub.OnClick := nil;
   Add(Sub, rsCaResetSoft, caResetSoft);
@@ -173,6 +180,8 @@ begin
       Clipboard.AsText := Hash;
     caGitHub:
       OpenOnGitHub([Hash]);
+    caRebase:
+      RebaseInteractiveAsk(Hash, Short, True);
     caBranch, caTag, caMerge, caCherryPick, caRevert, caResetSoft, caResetMixed, caResetHard:
     begin
       Values := nil;

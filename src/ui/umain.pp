@@ -27,7 +27,8 @@ uses
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader, gittan.hintbox,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
-  gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, gittan.mdpreview, ATSynEdit_Gaps, md5;
+  gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, gittan.mdpreview,
+  gittan.rebase, gittan.rebasedlg, ATSynEdit_Gaps, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -1030,6 +1031,7 @@ type
     procedure DeleteGoneBranches;
     procedure MergeIntoCurrent(const ARef: string);
     procedure RebaseOntoAsk(const ARef: string);
+    procedure RebaseInteractiveAsk(const AOnto, AName: string; AFromGraph: boolean);
     procedure CompareSince(const ARef: string);
     procedure CompareCurrentSince(const ARef: string);
     procedure ShowBranchList(AMode: TGittanBranchListMode; const AScreenRect: TRect);
@@ -1432,6 +1434,17 @@ resourcestring
   rsCaReverted = 'Reverted %s';
   rsCaWasReset = 'Reset %s to %s';
   rsCaConflicts = 'Stopped with conflicts: resolve them, then continue';
+  rsCaRebase = 'Rebase Interactively from Here...';
+  rsRebaseChoose = 'Choose Commits...';
+  rsRiTitleFrom = 'Commits of %s after %s';
+  rsRiNothing = '%s has no commits after %s: nothing to rewrite';
+  rsRiMerges = 'The commits of %s since %s include a merge commit, which an interactive rebase would flatten.';
+  rsRiPushed = '%d of these commits are already pushed, so the next push must be forced.';
+  rsRiPushedOne = 'One of these commits is already pushed, so the next push must be forced.';
+  rsRiDone = 'Rebased %s';
+  rsRiStopped = 'The rebase stopped';
+  rsRebaseStoppedAt = 'Stopped at %s to edit it: change the files, then Continue amends them into it';
+  rsRebaseEditNote = 'Stopped at %s to edit it. Continue amends the changes into it and goes on.';
   rsCaFailed = 'Git refused';
   rsSwitched = 'Switched to %s';
   rsSwitchedAlong = 'Switched to %s with your changes';
@@ -5437,6 +5450,7 @@ const
 {$I umain.conflicts.inc}
 {$I umain.commitactions.inc}
 {$I umain.branches.inc}
+{$I umain.rebase.inc}
 {$I umain.stash.inc}
 {$I umain.revert.inc}
 {$I umain.commit.inc}

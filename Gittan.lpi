@@ -112,6 +112,14 @@
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
+        <Filename Value="src/core/gittan.rebase.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
+        <Filename Value="src/ui/gittan.rebasedlg.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
         <Filename Value="src/ui/gittan.statusbar.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>

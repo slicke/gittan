@@ -412,7 +412,16 @@ begin
     Can := False;
   end
   else if Continuing then
-    Note := Format(rsContinueNote, [OperationNoun(FOperation)])
+  begin
+    { An interactive rebase stopped at a commit to edit says which. }
+    Note := '';
+    if FOperation = 'rebasing' then
+      Note := FRepo.RebaseStoppedAt;
+    if Note <> '' then
+      Note := Format(rsRebaseEditNote, [Copy(Note, 1, 7)])
+    else
+      Note := Format(rsContinueNote, [OperationNoun(FOperation)]);
+  end
   else if Whole then
     Note := Format(rsCommitWhole, [FOperation])
   else if (Chosen = 0) and not FCommitAmend.Checked then

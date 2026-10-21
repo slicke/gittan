@@ -9,7 +9,8 @@ unit testgit;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.history, gittan.graph;
+  Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.history, gittan.graph,
+  gittan.rebase;
 
 type
   TGitRepoTest = class(TTestCase)
@@ -85,6 +86,9 @@ type
     procedure TestRevertFiles;
     procedure TestRebaseOnto;
     procedure TestRebaseOntoConflicts;
+    procedure TestRebaseInteractive;
+    procedure TestRebaseInteractiveEdit;
+    procedure TestRebaseInteractiveConflicts;
     procedure TestStashes;
     procedure TestStashConflicts;
   end;
@@ -2034,6 +2038,139 @@ begin
   AssertTrue(FRepo.Error, FRepo.AbortOperation);
   AssertEquals('', FRepo.Operation);
   AssertEquals('topic', FRepo.Branch);
+end;
+
+{ The commits after the first, replayed in another order: the fourth
+  squashed into the third with the messages joined, then the second
+  with another message. }
+procedure TGitRepoTest.TestRebaseInteractive;
+var
+  First, Main: string;
+  Steps: TGittanRebaseSteps;
+  Swap: TGittanRebaseStep;
+  Merges, Conflicts, Stopped: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  First := Trim(Git(['rev-parse', 'HEAD']));
+  Main := Trim(Git(['rev-parse', '--abbrev-ref', 'HEAD']));
+  WriteFile('b.txt', 'b'#10);
+  Commit('second');
+  WriteFile('c.txt', 'c'#10);
+  Commit('third'#10#10'third body');
+  WriteFile('d.txt', 'd'#10);
+  Commit('fourth');
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.Error, FRepo.RebaseSteps(First, Steps, Merges));
+  AssertFalse('merges', Merges);
+  AssertEquals(3, Length(Steps));
+  AssertEquals('second', Steps[0].Subject);
+  AssertEquals('third', Steps[1].Subject);
+  AssertEquals('third body', Steps[1].Body);
+  AssertEquals('third' + LineEnding + LineEnding + 'third body', Steps[1].Message);
+  AssertEquals('fourth', Steps[2].Subject);
+  AssertEquals('Gittan Test', Steps[2].Author);
+  AssertFalse('pushed', Steps[0].Pushed);
+  AssertTrue(Steps[0].Action = raPick);
+
+  Steps[0].Action := raReword;
+  Steps[0].Message := 'second, reworded';
+  Steps[2].Action := raSquash;
+  Swap := Steps[0];
+  Steps[0] := Steps[1];
+  Steps[1] := Steps[2];
+  Steps[2] := Swap;
+  AssertTrue(FRepo.Error, FRepo.RebaseInteractive(First, Steps, Conflicts, Stopped));
+  AssertFalse(Conflicts);
+  AssertFalse(Stopped);
+  AssertEquals('', FRepo.Operation);
+  AssertEquals(Main, FRepo.Branch);
+  AssertEquals('second, reworded|third|files', Trim(Git(['log', '--format=%s', '-n', '3'])).Replace(#10, '|'));
+  AssertEquals('third'#10#10'third body'#10#10'fourth', Trim(Git(['log', '-1', '--format=%B',
+    'HEAD~1'])));
+  AssertEquals('c.txt d.txt', Trim(Git(['diff', '--name-only', 'HEAD~2', 'HEAD~1'])).Replace(#10, ' '));
+  AssertEquals('b.txt', Trim(Git(['diff', '--name-only', 'HEAD~1', 'HEAD'])));
+  AssertFalse('files left', DirectoryExists(IncludeTrailingPathDelimiter(FRepo.GitDir) +
+    'gittan-rebase'));
+
+  { A merge among the commits is reported. }
+  Git(['checkout', '-q', '-b', 'side', First]);
+  WriteFile('s.txt', 's'#10);
+  Commit('side');
+  Git(['checkout', '-q', Main]);
+  Git(['merge', '-q', '--no-ff', '-m', 'merge side', 'side']);
+  AssertTrue(FRepo.Error, FRepo.RebaseSteps(First, Steps, Merges));
+  AssertTrue('merges', Merges);
+  AssertEquals(4, Length(Steps));
+end;
+
+{ An edit stops the rebase after the commit, with nothing in conflict;
+  the Commit section's Continue amends what is changed into it. }
+procedure TGitRepoTest.TestRebaseInteractiveEdit;
+var
+  First: string;
+  Steps: TGittanRebaseSteps;
+  Merges, Conflicts, Stopped: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  First := Trim(Git(['rev-parse', 'HEAD']));
+  WriteFile('b.txt', 'b'#10);
+  Commit('second');
+  WriteFile('c.txt', 'c'#10);
+  Commit('third');
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.Error, FRepo.RebaseSteps(First, Steps, Merges));
+  Steps[0].Action := raEdit;
+  AssertFalse(FRepo.RebaseInteractive(First, Steps, Conflicts, Stopped));
+  AssertTrue('stopped', Stopped);
+  AssertFalse('conflicts', Conflicts);
+  AssertEquals('rebasing', FRepo.Operation);
+  AssertEquals(Steps[0].Hash, FRepo.RebaseStoppedAt);
+  WriteFile('b.txt', 'edited'#10);
+  AssertTrue(FRepo.Error, FRepo.ContinueOperation);
+  AssertEquals('', FRepo.Operation);
+  AssertEquals('', FRepo.RebaseStoppedAt);
+  AssertEquals('third|second|files', Trim(Git(['log', '--format=%s', '-n', '3'])).Replace(#10, '|'));
+  AssertEquals('edited', Trim(Git(['show', 'HEAD~1:b.txt'])));
+  AssertFalse('files left', DirectoryExists(IncludeTrailingPathDelimiter(FRepo.GitDir) +
+    'gittan-rebase'));
+end;
+
+{ Two commits to the same lines in the other order clash; the abort
+  puts the branch back. }
+procedure TGitRepoTest.TestRebaseInteractiveConflicts;
+var
+  First, Head: string;
+  Steps: TGittanRebaseSteps;
+  Swap: TGittanRebaseStep;
+  Merges, Conflicts, Stopped: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  First := Trim(Git(['rev-parse', 'HEAD']));
+  WriteFile('a.txt', 'second'#10);
+  Commit('second');
+  WriteFile('a.txt', 'third'#10);
+  Commit('third');
+  Head := Trim(Git(['rev-parse', 'HEAD']));
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.Error, FRepo.RebaseSteps(First, Steps, Merges));
+  Swap := Steps[0];
+  Steps[0] := Steps[1];
+  Steps[1] := Swap;
+  AssertFalse(FRepo.RebaseInteractive(First, Steps, Conflicts, Stopped));
+  AssertTrue('conflicts', Conflicts);
+  AssertFalse('stopped', Stopped);
+  AssertEquals('rebasing', FRepo.Operation);
+  AssertTrue(FRepo.Error, FRepo.AbortOperation);
+  AssertEquals('', FRepo.Operation);
+  AssertEquals(Head, Trim(Git(['rev-parse', 'HEAD'])));
+  AssertFalse('files left', DirectoryExists(IncludeTrailingPathDelimiter(FRepo.GitDir) +
+    'gittan-rebase'));
 end;
 
 procedure TGitRepoTest.TestCommitActions;

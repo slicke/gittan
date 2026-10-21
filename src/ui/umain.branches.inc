@@ -325,7 +325,8 @@ end;
   are replayed, and that the next push must be forced when some of
   them are pushed already, since they are rewritten. Local changes go
   along (--autostash). One that stops with conflicts leaves them to the
-  Commit section, as a merge does. }
+  Commit section, as a merge does. Choose Commits... opens the
+  interactive rebase's dialog with the same commits instead. }
 procedure TForm1.RebaseOntoAsk(const ARef: string);
 var
   Branch, Msg: string;
@@ -354,9 +355,17 @@ begin
     Msg := Msg + ' ' + rsBmRebasePushedOne
   else if Pushed > 1 then
     Msg := Msg + ' ' + Format(rsBmRebasePushed, [Pushed]);
-  if QuestionDlg(rsBmRebaseTitle, Msg, mtConfirmation, [mrYes, rsRebaseAction, 'IsDefault',
-    mrCancel, rsCancelButton, 'IsCancel'], 0) <> mrYes then
-    Exit;
+  case QuestionDlg(rsBmRebaseTitle, Msg, mtConfirmation, [mrYes, rsRebaseAction, 'IsDefault',
+    mrNo, rsRebaseChoose, mrCancel, rsCancelButton, 'IsCancel'], 0) of
+    mrNo:
+    begin
+      RebaseInteractiveAsk(ARef, ARef, False);
+      Exit;
+    end;
+    mrYes: ;
+    else
+      Exit;
+  end;
   StopWatcher;
   Screen.Cursor := crHourGlass;
   try

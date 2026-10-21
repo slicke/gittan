@@ -10,7 +10,7 @@ unit gittan.git;
 interface
 
 uses
-  Classes, SysUtils, gittan.graph;
+  Classes, SysUtils, gittan.graph, gittan.rebase;
 
 const
   {** Bits added to the kind in the Objects of ChangedPaths: the index
@@ -133,6 +133,8 @@ type
     function IndexPath: string;
     function CopyIndex(const ATarget: string): boolean;
     function WholeTreeActive: boolean;
+    function RebaseFilesFolder: string;
+    procedure CleanRebaseFiles;
     function CompareIndex: string;
     procedure DropTempIndex;
     procedure SetWholeTree(AValue: boolean);
@@ -336,6 +338,30 @@ type
       AConflicts is then set when the rebase stopped with conflicts to
       resolve, which the Commit section carries on. }
     function RebaseOnto(const AOnto: string; out AConflicts: boolean): boolean;
+    {** The commits a rebase onto AOnto would replay, oldest first as
+      git applies them, as steps for RebaseInteractive, each a pick with
+      its own message, Pushed set for those on the branch's upstream.
+      AMerges is set when one of them is a merge commit, which a rebase
+      of this kind flattens. False when AOnto is unknown. }
+    function RebaseSteps(const AOnto: string; out ASteps: TGittanRebaseSteps;
+      out AMerges: boolean): boolean;
+    {** Replays ASteps onto AOnto as `git rebase -i` does, the todo list
+      BuildRebaseTodo makes handed over through GIT_SEQUENCE_EDITOR (a
+      cp of a file in RebaseFilesFolder, inside the git directory), with
+      the message files beside it, local changes stashed and put back
+      (--autostash) and a commit that comes out empty kept (--empty=keep),
+      so an exec line amends the commit it was written for. True when
+      the rebase went through. False when it stopped: AConflicts with
+      conflicts to resolve, AStopped at an edit, or at an exec line
+      that failed, with git's words in Error and the commit in
+      RebaseStoppedAt; the Commit section carries both on. False with
+      neither when git refused. }
+    function RebaseInteractive(const AOnto: string; const ASteps: TGittanRebaseSteps;
+      out AConflicts, AStopped: boolean): boolean;
+    {** The id of the commit an interactive rebase stopped at to edit,
+      empty when it stopped for another reason (conflicts, a failed
+      exec line) or there is no rebase. }
+    function RebaseStoppedAt: string;
     {** What a rebase onto AOnto would replay: ACount commits, of which
       APushed are already on the branch's upstream, so the next push
       after rewriting them must be forced. False when AOnto is unknown. }
@@ -2786,6 +2812,192 @@ begin
     FError := Err;
 end;
 
+{ ---------------------------------------------------------------------------
+  Interactive rebase
+  ---------------------------------------------------------------------------
+  The todo list and the message files go in gittan-rebase in the git
+  directory, where git keeps no files of its own and which stays where
+  it is until the rebase is over, since an exec line reads a message
+  file when its turn comes, maybe after a stop. The folder goes when a
+  rebase ends: here, or in ContinueOperation, SkipOperation and
+  AbortOperation. }
+function TGittanRepo.RebaseFilesFolder: string;
+begin
+  Result := GitDir;
+  if Result <> '' then
+    Result := IncludeTrailingPathDelimiter(Result) + 'gittan-rebase';
+end;
+
+procedure TGittanRepo.CleanRebaseFiles;
+var
+  Folder: string;
+  Info: TSearchRec;
+begin
+  Folder := RebaseFilesFolder;
+  if (Folder = '') or not DirectoryExists(Folder) then
+    Exit;
+  Folder := IncludeTrailingPathDelimiter(Folder);
+  if FindFirst(Folder + '*', faAnyFile, Info) = 0 then
+  try
+    repeat
+      if (Info.Attr and faDirectory) = 0 then
+        DeleteFile(Folder + Info.Name);
+    until FindNext(Info) <> 0;
+  finally
+    FindClose(Info);
+  end;
+  RemoveDir(ExcludeTrailingPathDelimiter(Folder));
+end;
+
+{ The log is read as GraphCommits reads it, the body last since it may
+  hold line breaks; the commits not on the upstream are the ones not
+  pushed, so without an upstream none is. }
+function TGittanRepo.RebaseSteps(const AOnto: string; out ASteps: TGittanRebaseSteps;
+  out AMerges: boolean): boolean;
+var
+  Output, NotPushed: string;
+  Records, Fields: TStringArray;
+  i: integer;
+  Seconds: int64;
+  HasUpstream: boolean;
+begin
+  ASteps := nil;
+  AMerges := False;
+  Result := (FRoot <> '') and RunGit(FRoot, ['log', '--no-color', '--reverse', '-z',
+    '--format=%H%x1f%P%x1f%h%x1f%an%x1f%ct%x1f%s%x1f%b', AOnto + '..HEAD'], Output);
+  if not Result then
+    Exit;
+  HasUpstream := RunGit(FRoot, ['rev-list', AOnto + '..HEAD', '^@{upstream}'], NotPushed);
+  Records := Output.Split([#0]);
+  for i := 0 to High(Records) do
+  begin
+    Fields := Records[i].Split([#31]);
+    if Length(Fields) < 7 then
+      Continue;
+    SetLength(ASteps, Length(ASteps) + 1);
+    with ASteps[High(ASteps)] do
+    begin
+      Hash := Fields[0];
+      if Pos(' ', Trim(Fields[1])) > 0 then
+        AMerges := True;
+      Short := Fields[2];
+      Author := Fields[3];
+      if TryStrToInt64(Fields[4], Seconds) then
+        Date := UnixToDateTime(Seconds)
+      else
+        Date := 0;
+      Subject := Fields[5];
+      Body := TrimRight(Fields[6]);
+      Pushed := HasUpstream and (Pos(Hash, NotPushed) = 0);
+      Action := raPick;
+      Message := OriginalMessage(ASteps[High(ASteps)]);
+    end;
+  end;
+end;
+
+{ Writes AText as it is to AFileName. }
+function WriteRebaseFile(const AFileName, AText: string): boolean;
+var
+  Stream: TFileStream;
+begin
+  try
+    Stream := TFileStream.Create(AFileName, fmCreate);
+    try
+      if AText <> '' then
+        Stream.WriteBuffer(AText[1], Length(AText));
+    finally
+      Stream.Free;
+    end;
+    Result := True;
+  except
+    Result := False;
+  end;
+end;
+
+{ git runs the sequence editor through sh with the todo's path after
+  it, so "cp <file>" writes the prepared list over it; cp is there on
+  every platform git runs on, Git for Windows' sh included. A stop at
+  an edit ends with exit code 0, so what git is in the middle of is
+  read afterwards instead. }
+function TGittanRepo.RebaseInteractive(const AOnto: string; const ASteps: TGittanRebaseSteps;
+  out AConflicts, AStopped: boolean): boolean;
+var
+  Folder, Todo, Output, Err, Ignored: string;
+  MsgFiles: TGittanRebaseFiles;
+  i: integer;
+begin
+  AConflicts := False;
+  AStopped := False;
+  if FRoot = '' then
+    Exit(False);
+  if not CheckRebaseSteps(ASteps, FError) then
+    Exit(False);
+  Folder := RebaseFilesFolder;
+  if Folder = '' then
+    Exit(False);
+  CleanRebaseFiles;
+  Folder := IncludeTrailingPathDelimiter(Folder);
+  Todo := BuildRebaseTodo(ASteps, Folder, MsgFiles);
+  if not ForceDirectories(Folder) or not WriteRebaseFile(Folder + 'todo', Todo) then
+  begin
+    FError := Format('Could not write the rebase files in %s.', [Folder]);
+    Exit(False);
+  end;
+  for i := 0 to High(MsgFiles) do
+    if not WriteRebaseFile(Folder + MsgFiles[i].Name, MsgFiles[i].Text) then
+    begin
+      FError := Format('Could not write the rebase files in %s.', [Folder]);
+      Exit(False);
+    end;
+  Result := RunGitEnv(FRoot, ['rebase', '-i', '--autostash', '--empty=keep', AOnto],
+    ['GIT_SEQUENCE_EDITOR=cp ' + ShellQuote(Folder + 'todo'), 'GIT_EDITOR=:'], Output, Err);
+  if Operation = 'rebasing' then
+  begin
+    AConflicts := RunGitIn(FRoot, ['ls-files', '-u'], Output, Ignored) and (Trim(Output) <> '');
+    AStopped := not AConflicts;
+    FError := ResolveReturns(Trim(Err));
+    Exit(False);
+  end;
+  CleanRebaseFiles;
+  if not Result then
+    FError := Err;
+end;
+
+{ git appends each todo line it has done to "done" in the rebase's
+  state, so the rebase stands at an edit when the last line is one;
+  stopped-sha and amend are written for a conflicted fixup too. }
+function TGittanRepo.RebaseStoppedAt: string;
+var
+  FileName, Line: string;
+  Lines: TStringList;
+  i: integer;
+begin
+  Result := '';
+  if GitDir = '' then
+    Exit;
+  FileName := IncludeTrailingPathDelimiter(GitDir) + 'rebase-merge' + PathDelim + 'done';
+  if not FileExists(FileName) then
+    Exit;
+  Lines := TStringList.Create;
+  try
+    Lines.LoadFromFile(FileName);
+    for i := Lines.Count - 1 downto 0 do
+    begin
+      Line := Trim(Lines[i]);
+      if Line = '' then
+        Continue;
+      if (Pos('edit ', Line) = 1) or (Pos('e ', Line) = 1) then
+      begin
+        Delete(Line, 1, Pos(' ', Line));
+        Result := Trim(Copy(Line, 1, Pos(' ', Line + ' ') - 1));
+      end;
+      Exit;
+    end;
+  finally
+    Lines.Free;
+  end;
+end;
+
 { rev-list counts the commits on HEAD but not on AOnto; those also on the
   upstream are the ones pushed. A branch without an upstream has pushed
   none. }
@@ -2946,7 +3158,11 @@ begin
     Exit(False);
   Result := RunGitEnv(FRoot, [Command, '--continue'], ['GIT_EDITOR=:'], Output, Err);
   if Result then
+  begin
+    if Operation = '' then
+      CleanRebaseFiles;
     Exit;
+  end;
   FError := Err;
   { Stopped at a later commit with conflicts of its own: going on worked. }
   Result := (Operation <> '') and RunGit(FRoot, ['ls-files', '-u'], Output) and
@@ -2964,6 +3180,8 @@ begin
     Exit(False);
   end;
   Result := RunGit(FRoot, [Command, '--skip'], Output);
+  if Result and (Operation = '') then
+    CleanRebaseFiles;
 end;
 
 function TGittanRepo.AbortOperation: boolean;
@@ -2977,6 +3195,8 @@ begin
     Exit(False);
   end;
   Result := RunGit(FRoot, [Command, '--abort'], Output);
+  if Result then
+    CleanRebaseFiles;
 end;
 
 function TGittanRepo.MergeMessage: string;

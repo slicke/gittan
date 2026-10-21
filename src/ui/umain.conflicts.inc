@@ -541,7 +541,7 @@ end;
 
 procedure TForm1.ContinueOperationClick;
 var
-  Noun: string;
+  Noun, StoppedAt: string;
 begin
   if (FRepo.Root = '') or not ContinueMode or (FCommitJob <> nil) or (FRemoteJob <> nil) then
     Exit;
@@ -559,12 +559,25 @@ begin
     Screen.Cursor := crDefault;
   end;
   RefreshRepository;
+  { The banner of the stop that was just got past is not for anything
+    now; one that finishes says so in green. }
+  FBanner.Clear;
   if FConflictFiles > 0 then
     StatusNote(rsStoppedAgain, True)
   else if FOperation <> '' then
-    StatusNote(Format(rsContinuedOn, [Noun]))
+  begin
+    { An interactive rebase stops again at a commit to edit. }
+    StoppedAt := FRepo.RebaseStoppedAt;
+    if (FOperation = 'rebasing') and (StoppedAt <> '') then
+      StatusNote(Format(rsRebaseStoppedAt, [Copy(StoppedAt, 1, 7)]))
+    else
+      StatusNote(Format(rsContinuedOn, [Noun]));
+  end
   else
+  begin
     StatusNote(Format(rsContinued, [Noun]));
+    BannerSuccess(Format(rsContinued, [Noun]));
+  end;
 end;
 
 procedure TForm1.SkipOperationClick(Sender: TObject);
@@ -575,7 +588,10 @@ begin
     [mrYes, rsSkipButton, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
     Exit;
   if FRepo.SkipOperation then
-    StatusNote(rsSkipped)
+  begin
+    FBanner.Clear;
+    StatusNote(rsSkipped);
+  end
   else
     MessageDlg(rsSkipFailed, FRepo.Error, mtError, [mbOK], 0);
   RefreshRepository;
@@ -597,6 +613,7 @@ begin
     if (FMergeMessage <> '') and (FCommitMemo.Text = FMergeMessage) then
       FCommitMemo.Clear;
     FMergeMessage := '';
+    FBanner.Clear;
     StatusNote(Format(rsAborted, [Noun]));
   end
   else
