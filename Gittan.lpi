@@ -172,6 +172,10 @@
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
+        <Filename Value="src/ui/gittan.richdiff.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
         <Filename Value="src/core/gittan.graph.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>

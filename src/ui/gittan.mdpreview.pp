@@ -8,7 +8,10 @@ unit gittan.mdpreview;
   is drawn by BGRABitmap's BGRASVG and handed to the page as a PNG
   through OnResource. A changed SVG is drawn twice, before and after,
   at one scale, each under a caption with its size, the new one telling
-  how many of the pixels differ, as the image view does.
+  how many of the pixels differ, as the image view does. A changed
+  Markdown or HTML page is drawn with its changes marked (see
+  gittan.richdiff): a bar beside the blocks that are new or changed, and
+  the deleted ones struck through where they were.
 
   The page takes its colors from the form, as the image view does, and
   keeps its scroll position when the same file is shown again, so it
@@ -36,11 +39,13 @@ type
     FCompare: boolean;
     FSvgSerial, FSvgZoom: integer;
     FBack, FFore, FDim, FLink: TColor;
+    FDark: boolean;
     FOnOpenFile: TGittanOpenFileEvent;
     procedure ApplyStyle;
     procedure Show(const AFileName, AText, AOldText: string; ACompare: boolean);
     procedure ShowSvg(const AText: string);
     procedure ShowSvgChange;
+    procedure ShowRichDiff;
     procedure PageResource(Sender: TObject; const URL: string; Destination: TStream;
       var Handled: boolean);
     procedure PageLinkActivate(Sender: TObject; const Link: TInkLinkInfo;
@@ -53,9 +58,10 @@ type
       keeps the scroll position. }
     procedure ShowFile(const AFileName, AText: string);
     {** Shows a change of the file AFileName: ANew, its new text, as
-      ShowFile does, but an SVG as AOld and ANew drawn one above the
-      other, before and after. An empty side has no version (an added
-      or a deleted file). }
+      ShowFile does, an SVG as AOld and ANew drawn one above the other,
+      before and after, and a Markdown or HTML page with what changed
+      since AOld marked. An empty side has no version (an added or a
+      deleted file); an added page is shown as it is. }
     procedure ShowChange(const AFileName, AOld, ANew: string);
     {** Forgets the text, so the next ShowFile draws it again. }
     procedure Clear;
@@ -85,7 +91,7 @@ implementation
 
 uses
   LCLIntf, URIParser, Math, BGRABitmap, BGRABitmapTypes, BGRASVG, BGRACanvas2D,
-  gittan.imagediff;
+  InkMarkdown, gittan.imagediff, gittan.richdiff;
 
 resourcestring
   rsCannotReadSvg = 'The SVG cannot be read.';
@@ -248,9 +254,27 @@ end;
   on top, mixed from Color and Font.Color, but shades code toward white,
   which a white page does not show, so code is shaded toward the text
   here. Images are no wider than the
-  column, but never stretched past their own size. }
+  column, but never stretched past their own size. The blocks a rich
+  diff marks get a bar in the margin in the diff's colors (a table row
+  and a list item a tint, since a row draws no border and an item's bar
+  would fall between its bullet and its text), a deleted one struck
+  through. }
 procedure TGittanMarkdownPreview.ApplyStyle;
+var
+  AddedColor, ChangedColor, DeletedColor: TColor;
 begin
+  if FDark then
+  begin
+    AddedColor := RGBToColor(63, 185, 80);
+    ChangedColor := RGBToColor(210, 153, 34);
+    DeletedColor := RGBToColor(248, 81, 73);
+  end
+  else
+  begin
+    AddedColor := RGBToColor(26, 127, 55);
+    ChangedColor := RGBToColor(154, 103, 0);
+    DeletedColor := RGBToColor(207, 34, 46);
+  end;
   Color := FBack;
   Font.Color := FFore;
   StyleSheet.Text :=
@@ -261,7 +285,21 @@ begin
     'a { color: ' + Css(FLink) + '; }' +
     'pre, code { background: ' + Css(Mix(FBack, FFore, 0.07)) + '; }' +
     'pre code { background: transparent; }' +
-    'img { max-width: 100%; width: auto; }';
+    'img { max-width: 100%; width: auto; }' +
+    '.' + RichAddedClass + ', .' + RichChangedClass + ', .' + RichDeletedClass +
+    ' { padding-left: 9px; margin-left: -12px; }' +
+    '.' + RichAddedClass + ' { border-left: 3px solid ' + Css(AddedColor) + '; }' +
+    '.' + RichChangedClass + ' { border-left: 3px solid ' + Css(ChangedColor) + '; }' +
+    '.' + RichDeletedClass + ' { border-left: 3px solid ' + Css(DeletedColor) + '; ' +
+    'color: ' + Css(Mix(FFore, DeletedColor, 0.6)) + '; text-decoration: line-through; }' +
+    'tr.' + RichAddedClass + ' td, li.' + RichAddedClass + ' { background: ' +
+    Css(Mix(FBack, AddedColor, 0.18)) + '; }' +
+    'tr.' + RichChangedClass + ' td, li.' + RichChangedClass + ' { background: ' +
+    Css(Mix(FBack, ChangedColor, 0.18)) + '; }' +
+    'tr.' + RichDeletedClass + ' td, li.' + RichDeletedClass + ' { background: ' +
+    Css(Mix(FBack, DeletedColor, 0.18)) + '; }' +
+    'li.' + RichAddedClass + ', li.' + RichChangedClass + ', li.' + RichDeletedClass +
+    ' { border-left: none; padding-left: 0; margin-left: 0; }';
 end;
 
 procedure TGittanMarkdownPreview.ShowFile(const AFileName, AText: string);
@@ -271,7 +309,8 @@ end;
 
 procedure TGittanMarkdownPreview.ShowChange(const AFileName, AOld, ANew: string);
 begin
-  Show(AFileName, ANew, AOld, IsSvgPath(AFileName));
+  Show(AFileName, ANew, AOld, IsSvgPath(AFileName) or
+    ((AOld <> '') and (AOld <> ANew)));
 end;
 
 procedure TGittanMarkdownPreview.Show(const AFileName, AText, AOldText: string;
@@ -289,8 +328,10 @@ begin
   FText := AText;
   FOldText := AOldText;
   FCompare := ACompare;
-  if ACompare then
+  if ACompare and IsSvgPath(AFileName) then
     ShowSvgChange
+  else if ACompare then
+    ShowRichDiff
   else if IsSvgPath(AFileName) then
     ShowSvg(AText)
   else if IsHtmlPath(AFileName) then
@@ -405,6 +446,17 @@ begin
   LoadHTML(Html, FilenameToURI(FFileName));
 end;
 
+{ The new page with its changes from the old marked, the classes of
+  gittan.richdiff drawn by the style sheet. }
+procedure TGittanMarkdownPreview.ShowRichDiff;
+begin
+  if IsHtmlPath(FFileName) then
+    LoadHTML(MarkRichDiff(FOldText, FText), FilenameToURI(FFileName))
+  else
+    LoadHTML(MarkRichDiff(MarkdownToHTML(FOldText, [imoRawHTML]),
+      MarkdownToHTML(FText, [imoRawHTML])), FilenameToURI(FFileName));
+end;
+
 { The SVG file shown, both sides of a changed one, and an SVG image of a
   page, drawn as a PNG: the file at the screen's pixels at the width
   ShowSvg or ShowSvgChange set, an image at its own size, since the
@@ -449,6 +501,7 @@ begin
   FFore := AText;
   FDim := ADim;
   FLink := ALink;
+  FDark := ADark;
   if ADark then
     ColorScheme := icsDark
   else

@@ -5,9 +5,11 @@
   file in the change view or opened by itself gets FMdPreview right of
   the editor, behind FMdSplitter, at FMdRatio of the panel's width. The
   change view previews the new side (the diff lines that are not
-  deleted ones), an SVG both sides, before over after, a file opened to edits its text as it is typed, a pause
-  of MdPreviewPause after the last key. ShowEditor brings the preview up
-  to date; the views that hide the editor hide it too.
+  deleted ones), an SVG both sides, before over after, a page with its
+  changes from the old side marked; a file opened to edits its text as
+  it is typed, a pause of MdPreviewPause after the last key. ShowEditor
+  brings the preview up to date; the views that hide the editor hide it
+  too.
 
   The file header's Preview toggle switches the same setting for these
   files, and View > Translations for a .po file, the other way of
