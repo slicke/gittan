@@ -1640,10 +1640,10 @@ begin
 end;
 
 { The status bar's parts: the branch drops the branch list up from it,
-  as in the summary; the ahead/behind counts drop up pull, push, fetch
-  and the commit graph; the
-  pull request opens on GitHub; the conflicts drop down the conflicted
-  files; the name and the file count go back to the summary. }
+  as in the summary; the track with the ahead/behind counts drops up
+  pull, push, fetch and the commit graph; the transport buttons take
+  their step (UpdateStatusTransport); the pull request drops its list;
+  the name and the file count go back to the summary. }
 procedure TForm1.StatusPartClick(Sender: TObject; APart: TGittanStatusPart;
   const AScreenRect: TRect);
 begin
@@ -1662,8 +1662,24 @@ begin
       PullChipClick(AScreenRect);
     spUpdate:
       UpdateDialog;
-    spConflicts:
-      ConflictBadgeClick(AScreenRect);
+    spLeft, spPrimary, spRight:
+      StatusStepClick(FStatusSteps[APart], AScreenRect);
+  end;
+end;
+
+{ Resolve drops down the conflicted files, as the conflict badge did;
+  the rest run the menu items and the Commit section's buttons. }
+procedure TForm1.StatusStepClick(AStep: TStatusStep; const AScreenRect: TRect);
+begin
+  case AStep of
+    stepFetch: MenuFetchClick(nil);
+    stepPull: MenuPullClick(nil);
+    stepPush: MenuPushClick(nil);
+    stepContinue: ContinueOperationClick;
+    stepCommit: CommitButtonClick(nil);
+    stepAbort: AbortOperationClick(nil);
+    stepSkip: SkipOperationClick(nil);
+    stepResolve: ConflictBadgeClick(AScreenRect);
   end;
 end;
 

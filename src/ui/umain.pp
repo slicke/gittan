@@ -56,6 +56,11 @@ type
   {** A bisect command RunBisect runs (umain.bisect.inc). }
   TBisectStep = (bsStart, bsMark, bsEnd);
 
+  {** What a transport button of the status bar does: UpdateStatusTransport
+    puts the steps there, StatusStepClick runs them. }
+  TStatusStep = (stepNone, stepFetch, stepPull, stepPush, stepContinue, stepCommit,
+    stepAbort, stepSkip, stepResolve);
+
   {** One row of the change view. Line is the index of its diff line in
     the file's diff, rowGap for a row that stands for the unchanged lines
     GapFrom..GapTo hidden by View > Hide Unchanged Lines, rowFiller for
@@ -143,6 +148,8 @@ type
     FSyntaxTheme: integer;
     FFilePopup, FStatusPopup, FEditPopup: TPopupMenu;
     FStatus: TGittanStatusBar;
+    {** What the status bar's transport buttons do now. }
+    FStatusSteps: array[spLeft..spRight] of TStatusStep;
     FRevealItem, FOpenItem: TMenuItem;
     { The file menu's conflict items (umain.conflicts.inc). }
     FResolveMineItem, FResolveTheirsItem, FMarkResolvedItem: TMenuItem;
@@ -724,6 +731,7 @@ type
     function StatIcon(const AStat: TGittanFileStat): integer;
     function StatHint(const AStat: TGittanFileStat): string;
     procedure UpdateStatus;
+    procedure UpdateStatusTransport;
     {** The checks of a pull request for the status bar: red with the
       failing ones counted, amber with the pending ones, green when all
       passed, or stNormal without checks. }
@@ -1363,6 +1371,7 @@ type
     function FileLineOfRow(AEd: TATSynEdit; ARow: integer): integer;
     procedure StatusPartClick(Sender: TObject; APart: TGittanStatusPart;
       const AScreenRect: TRect);
+    procedure StatusStepClick(AStep: TStatusStep; const AScreenRect: TRect);
     {** Shows AText in the status bar for a while, or an error in the
       banner, its first line as the title. }
     procedure StatusNote(const AText: string; AError: boolean = False);
@@ -2096,6 +2105,17 @@ resourcestring
   rsInSyncHint = 'Up to date with upstream';
   rsNoUpstreamHint = 'No upstream branch';
   rsGraphHint = 'Click to pull, push or show the commit graph';
+  rsOperationStep = '%s · %d of %d';
+  rsResolveStep = 'Resolve %d conflicts';
+  rsResolveOneStep = 'Resolve 1 conflict';
+  rsUpToDateStep = 'Up to date';
+  rsFetchStepHint = 'Fetch from the remote';
+  rsPullStepHint = 'Click to pull them';
+  rsPushStepHint = 'Click to push them';
+  rsPushNewBranchHint = 'Click to push the branch to the remote';
+  rsDivergedHint = 'The branch and its upstream have both moved on';
+  rsAbortStepHint = 'Abort %s';
+  rsSkipStepHint = 'Skip the commit %s stopped at';
   rsCommitGraph = 'Commit &Graph';
   rsPosition = 'Ln %d, Col %d';
   rsPullHintTitle = '#%d %s';
@@ -2407,7 +2427,6 @@ begin
   FStatus.OnPartClick := @StatusPartClick;
   FStatus.PartHint[spBranch] := HintSwitch + ' ' + rsSwitchBranchHint;
   FStatus.PartHint[spFiles] := rsShowSummaryHint;
-  FStatus.PartHint[spConflicts] := rsShowConflictHint;
 
   FillTreeIcons(TreeImages);
   FileTree.Options := FileTree.Options + [tvoRightClickSelect];
@@ -3166,9 +3185,9 @@ end;
   set elsewhere and left alone. }
 procedure TForm1.UpdateStatus;
 var
-  Lexer, Sync: string;
+  Lexer, Sync, Op: string;
   Tone: TGittanStatusTone;
-  Checks: integer;
+  Checks, OpPos, OpTotal: integer;
 begin
   if FView = gvImage then
     Lexer := ImageFormatName(FCurrentPath)
@@ -3192,7 +3211,8 @@ begin
       FStatus.PartHint[spRepo] := '';
     FStatus.SetSync(0, 0, False);
     FStatus.SetStashes(0);
-    FStatus.SetState('', '');
+    FStatus.SetOperation('', 0, 0);
+    FStatus.SetTransport(StatusButton('', ''), StatusButton('', ''), StatusButton('', ''));
     FStatus.SetBase('');
     FStatus.SetPull('', '', stNormal, 0);
     FStatus.SetPullThreads(0, 0);
@@ -3227,12 +3247,17 @@ begin
   else
     FStatus.PartHint[spStash] := HintStash + ' ' + Format(rsStashesHint, [Length(FStashes)]) +
       LineEnding + rsStashListHint;
-  case FConflictFiles of
-    0: FStatus.SetState(FOperation, '');
-    1: FStatus.SetState(FOperation, rsOneConflictedFile);
-    else
-      FStatus.SetState(FOperation, Format(rsConflictedFiles, [FConflictFiles]));
+  { What git is in the middle of, on the track, with a rebase's steps. }
+  if FOperation = '' then
+    FStatus.SetOperation('', 0, 0)
+  else
+  begin
+    Op := UpperCase(Copy(FOperation, 1, 1)) + Copy(FOperation, 2, MaxInt);
+    if FRepo.OperationProgress(OpPos, OpTotal) then
+      Op := Format(rsOperationStep, [Op, OpPos, OpTotal]);
+    FStatus.SetOperation(Op, OpPos, OpTotal);
   end;
+  UpdateStatusTransport;
   FStatus.SetBase(BaseLabel, (BaseActionRef <> '') or (StashOfBase >= 0) or BlameShown);
   if BaseActionRef <> '' then
     FStatus.PartHint[spBase] := rsBaseActionsHint
@@ -3269,6 +3294,105 @@ begin
     else
       FStatus.SetFiles(Format(rsChangedFiles, [FFileCount]));
   end;
+end;
+
+function OperationNoun(const AOperation: string): string; forward;
+
+{ The transport in the middle of the status bar: the primary button is
+  the next step, with what else can be done on its sides. While git is
+  in the middle of something they are Abort, then Resolve (the
+  conflicts) or Continue (Commit Merge for a merge), then Skip where
+  the operation can skip a commit. Otherwise Fetch, then Pull with
+  commits to pull (also when both sides moved on), Push with commits to
+  push or no upstream yet, or Up to date, which does nothing, then Push
+  or Pull as the other one. The buttons rest while a remote job or a
+  commit runs. The side buttons' captions are their hints. }
+procedure TForm1.UpdateStatusTransport;
+var
+  L, P, R: TGittanStatusButton;
+  Busy: boolean;
+  Noun, Tip: string;
+begin
+  Busy := (FRemoteJob <> nil) or (FCommitJob <> nil);
+  FStatusSteps[spLeft] := stepNone;
+  FStatusSteps[spPrimary] := stepNone;
+  FStatusSteps[spRight] := stepNone;
+  R := StatusButton('', '');
+  if (FOperation <> '') and (FOperation <> 'bisecting') then
+  begin
+    Noun := OperationNoun(FOperation);
+    L := StatusButton(Format(rsAbortStepHint, [Noun]), HintFailed, stNormal, not Busy);
+    FStatusSteps[spLeft] := stepAbort;
+    if FConflictFiles > 0 then
+    begin
+      if FConflictFiles = 1 then
+        P := StatusButton(rsResolveOneStep, HintWarn, stBad, not Busy)
+      else
+        P := StatusButton(Format(rsResolveStep, [FConflictFiles]), HintWarn, stBad, not Busy);
+      FStatusSteps[spPrimary] := stepResolve;
+      Tip := rsShowConflictHint;
+    end
+    else if FOperation = 'merging' then
+    begin
+      P := StatusButton(rsCommitMergeButton, HintPlay, stNormal, not Busy);
+      FStatusSteps[spPrimary] := stepCommit;
+      Tip := rsCommitMergeButton;
+    end
+    else
+    begin
+      P := StatusButton(rsContinueButton, HintPlay, stNormal, not Busy and ContinueMode);
+      FStatusSteps[spPrimary] := stepContinue;
+      Tip := Format(rsContinueNote, [Noun]);
+    end;
+    if ContinueMode then
+    begin
+      R := StatusButton(Format(rsSkipStepHint, [Noun]), HintSkip, stNormal, not Busy);
+      FStatusSteps[spRight] := stepSkip;
+    end;
+  end
+  else
+  begin
+    L := StatusButton(rsFetchStepHint, HintFetch, stNormal, not Busy);
+    FStatusSteps[spLeft] := stepFetch;
+    if not FHasUpstream then
+    begin
+      P := StatusButton(rsPushItem, HintUp, stNormal, not Busy);
+      FStatusSteps[spPrimary] := stepPush;
+      Tip := HintSync + ' ' + rsNoUpstreamHint + LineEnding + rsPushNewBranchHint;
+      R := StatusButton(rsGitPullItem, HintDown, stNormal, False);
+      FStatusSteps[spRight] := stepPull;
+    end
+    else if FBehind > 0 then
+    begin
+      P := StatusButton(rsGitPullItem, HintDown, stNormal, not Busy);
+      FStatusSteps[spPrimary] := stepPull;
+      Tip := HintSync + ' ' + Format(rsBehindHint, [FBehind]);
+      if FAhead > 0 then
+        Tip := Tip + LineEnding + Format(rsAheadHint, [FAhead]) + LineEnding + rsDivergedHint;
+      Tip := Tip + LineEnding + rsPullStepHint;
+      R := StatusButton(rsPushItem, HintUp, stNormal, not Busy and (FAhead > 0));
+      FStatusSteps[spRight] := stepPush;
+    end
+    else if FAhead > 0 then
+    begin
+      P := StatusButton(rsPushItem, HintUp, stNormal, not Busy);
+      FStatusSteps[spPrimary] := stepPush;
+      Tip := HintSync + ' ' + Format(rsAheadHint, [FAhead]) + LineEnding + rsPushStepHint;
+      R := StatusButton(rsGitPullItem, HintDown, stNormal, not Busy);
+      FStatusSteps[spRight] := stepPull;
+    end
+    else
+    begin
+      P := StatusButton(rsUpToDateStep, HintPassed, stGood, False);
+      Tip := HintPassed + ' ' + rsInSyncHint;
+      R := StatusButton(rsPushItem, HintUp, stNormal, False);
+      FStatusSteps[spRight] := stepPush;
+    end;
+  end;
+  FStatus.SetTransport(L, P, R);
+  FStatus.PartHint[spLeft] := L.Caption;
+  FStatus.PartHint[spPrimary] := Tip;
+  FStatus.PartHint[spRight] := R.Caption;
 end;
 
 procedure TForm1.StatusNote(const AText: string; AError: boolean);

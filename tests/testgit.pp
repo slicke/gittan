@@ -1120,7 +1120,7 @@ procedure TGitRepoTest.TestOperation;
 var
   Branch, Output: string;
   Stats: TGittanFileStats;
-  Code: integer;
+  Code, Step, Total: integer;
 begin
   MakeHistory;
   AssertTrue(FRepo.Open(FDir));
@@ -1151,9 +1151,15 @@ begin
   AssertTrue('rebase stops', Code <> 0);
   AssertEquals('rebasing', FRepo.Operation);
   AssertEquals('topic', FRepo.RebaseBranch);
+  { The one commit of topic is the first and the last to replay. }
+  AssertTrue('progress', FRepo.OperationProgress(Step, Total));
+  AssertEquals(1, Step);
+  AssertEquals(1, Total);
   Git(['rebase', '--abort']);
   AssertEquals('', FRepo.Operation);
   AssertEquals('', FRepo.RebaseBranch);
+  AssertFalse('no progress', FRepo.OperationProgress(Step, Total));
+  AssertEquals(0, Total);
 end;
 
 procedure TGitRepoTest.TestCommitRange;

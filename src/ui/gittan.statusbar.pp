@@ -1,19 +1,24 @@
 unit gittan.statusbar;
 
-{** The status bar: a strip along the bottom of the window in three zones.
+{** The status bar: a strip along the bottom of the window laid out as a
+  music player's bar, in three zones.
 
-  On the left the repository: its name, the branch as a chip that drops
-  the branch list, the commits ahead of and behind the upstream (a click
-  lists them), the stashes as a box with their count (a click lists
-  them), these three with a chevron, what git is in the middle of and the conflicted files as
-  tinted badges, and the base the work tree is compared against. In the middle a passing message,
-  which clears itself after a while, or the progress of a long job. On the
-  right the branch's pull request, the number of changed files and the
-  caret's line and column.
+  On the left where you are: a tile with the repository's initial, its
+  name over the branch (a chip that drops the branch list) with the base
+  the work tree is compared against after it, and the stashes as a chip
+  with their count. In the middle the next step towards the remote, as
+  the player's transport: a button on each side around the primary one,
+  which says what to do next (Pull, Push, Resolve, Continue, or that the
+  branch is up to date), over a track line with the commits behind on
+  its left and ahead on its right; the track also carries a passing
+  message, the progress of a long job, or how far a rebase has come. On
+  the right what is shown: a newer Gittan, the pull request, the caret's
+  position and the changed files.
 
-  It paints itself with the palette of the file header, like the other
-  bars, since a native status bar keeps the desktop's light look on a dark
-  window on macOS. Each part has its own hint and, where it does
+  The parts give way from the outside in when the window is narrow. It
+  paints itself with the palette of the file header, like the other
+  bars, since a native status bar keeps the desktop's light look on a
+  dark window on macOS. Each part has its own hint and, where it does
   something, its own click. }
 
 {$mode objfpc}{$H+}
@@ -24,9 +29,12 @@ uses
   Classes, SysUtils, Types, Controls, Graphics, ExtCtrls, Forms;
 
 type
-  {** The parts of the bar, from left to right. }
-  TGittanStatusPart = (spNone, spRepo, spBranch, spSync, spStash, spOperation,
-    spConflicts, spBase, spMessage, spProgress, spPull, spFiles, spPosition, spUpdate);
+  {** The parts of the bar: the left zone (the tile and name, the
+    branch, the base, the stashes), the transport (the left button, the
+    primary one, the right button) over the track (the sync counts, or a
+    message or a progress), and the right zone. }
+  TGittanStatusPart = (spNone, spRepo, spBranch, spBase, spStash, spLeft, spPrimary,
+    spRight, spSync, spMessage, spProgress, spUpdate, spPull, spPosition, spFiles);
 
   {** How a message or the pull request reads: in the text color, or
     in green, amber or red. }
@@ -36,6 +44,19 @@ type
     popup to open from. }
   TGittanStatusClickEvent = procedure(Sender: TObject; APart: TGittanStatusPart;
     const AScreenRect: TRect) of object;
+
+  {** A transport button. The primary one reads Caption after its icon;
+    the side ones show the icon alone, and their caption is for the
+    hint. The primary's tone is its fill: the accent for stNormal, a
+    step to take; the hover fill with a green icon for stGood, when
+    there is nothing to do; amber or red for stWarn and stBad. An empty
+    icon hides the button; a disabled one is dimmed and answers no
+    click. }
+  TGittanStatusButton = record
+    Caption, Icon: string;
+    Tone: TGittanStatusTone;
+    Enabled: boolean;
+  end;
 
   { TGittanStatusHint }
 
@@ -60,12 +81,12 @@ type
 
   TGittanStatusBar = class(TCustomControl)
   private
-    FTitle, FBranch, FOperation, FBase, FPull, FPullNote, FFiles, FPosition: string;
-    FUpdate: string;
-    FPullChecks, FPullOpen, FPullThreads: integer;
-    FMessage, FProgressText, FConflicts: string;
-    FAhead, FBehind, FProgressPos, FProgressTotal, FStashes: integer;
+    FTitle, FBranch, FBase, FPull, FPullNote, FFiles, FPosition, FUpdate: string;
+    FOperation, FMessage, FProgressText: string;
+    FPullChecks, FPullOpen, FPullThreads, FStashes: integer;
+    FAhead, FBehind, FProgressPos, FProgressTotal, FOperationPos, FOperationTotal: integer;
     FSyncShown: boolean;
+    FButtons: array[spLeft..spRight] of TGittanStatusButton;
     FPullTone, FMessageTone: TGittanStatusTone;
     FHints: array[TGittanStatusPart] of string;
     FRects: array[TGittanStatusPart] of TRect;
@@ -77,6 +98,7 @@ type
     FTones: array[TGittanStatusTone] of TColor;
     FOnPartClick: TGittanStatusClickEvent;
     function PartAt(X, Y: integer): TGittanStatusPart;
+    function Clickable(APart: TGittanStatusPart): boolean;
     function GetPartHint(APart: TGittanStatusPart): string;
     procedure SetPartHint(APart: TGittanStatusPart; const AValue: string);
     procedure SetHot(AValue: TGittanStatusPart);
@@ -96,23 +118,27 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     {** The name on the left (the repository, or the path of a file opened
-      without one) and the branch; '' hides either. }
+      without one), over the branch; '' hides either. The tile before
+      them shows the name's initial. }
     procedure SetRepository(const ATitle, ABranch: string);
-    {** The commits ahead of and behind the upstream; 0 hides either.
-      With AShown and neither, the part is an icon of two arrows, up
-      and down, so it can still be clicked; without AShown and
-      neither, it is gone. }
-    procedure SetSync(AAhead, ABehind: integer; AShown: boolean);
-    {** How many stashes the repository has, shown as a chip with a box
-      and the count after the sync part; 0 hides it. }
-    procedure SetStashes(ACount: integer);
-    {** What git is in the middle of ("merging") and the conflicted files
-      ("2 conflicted files"), each '' for none. }
-    procedure SetState(const AOperation, AConflicts: string);
-    {** The base label ("vs origin/main"), '' for none; AClickable makes
-      the part answer a click (and show a hand), for a base that has
-      actions. }
+    {** The base label ("vs origin/main") after the branch, '' for none;
+      AClickable makes the part answer a click (and show a hand), for a
+      base that has actions. }
     procedure SetBase(const ABase: string; AClickable: boolean = False);
+    {** How many stashes the repository has, shown as a chip with a box
+      and the count after the name and the branch; 0 hides it. }
+    procedure SetStashes(ACount: integer);
+    {** The three transport buttons; see TGittanStatusButton. }
+    procedure SetTransport(const ALeft, APrimary, ARight: TGittanStatusButton);
+    {** The commits behind and ahead of the upstream on the track's two
+      ends, under the transport. With AShown the track is there even
+      with neither, and a click on it (spSync) lists what can be done
+      with the remote; without AShown there is no track. }
+    procedure SetSync(AAhead, ABehind: integer; AShown: boolean);
+    {** What git is in the middle of ("Rebasing"), on the track in amber
+      with the line filled APos of ATotal when ATotal is above 0; '' for
+      nothing. }
+    procedure SetOperation(const AText: string; APos, ATotal: integer);
     {** The pull request: its number ("#12", '' for none), its state
       ("Approved", "Draft", '' for none) and its checks: an icon in
       ATone (a check for stGood, a cross for stBad, a clock for stWarn,
@@ -129,21 +155,21 @@ type
     procedure SetFiles(const AText: string);
     {** The caret's position ("Ln 12, Col 4"), '' for none. }
     procedure SetPosition(const AText: string);
-    {** A newer Gittan ("Build 109 available") as a green badge at the
-      right edge, '' for none. }
+    {** A newer Gittan ("Build 109 available") as a green badge, '' for
+      none. }
     procedure SetUpdate(const AText: string);
-    {** Shows AText in the middle in ATone, in place of any message before.
+    {** Shows AText on the track in ATone, in place of any message before.
       It clears itself after ASeconds; 0 keeps it until the next message
       or ClearMessage, for a message that says something is under way. }
     procedure ShowMessage(const AText: string; ATone: TGittanStatusTone = stNormal;
       ASeconds: integer = 6);
     procedure ClearMessage;
-    {** Shows a bar filled APos of ATotal with AText before it, in place of
-      a message; ATotal 0 hides it. }
+    {** Shows the track line filled APos of ATotal with AText before it,
+      in place of the sync counts; ATotal 0 hides it. }
     procedure SetProgress(const AText: string; APos, ATotal: integer);
     {** Sets the palette: the background, the text, the dim text, the top
-      border, the fill of a part under the mouse, the progress bar, and
-      the green, amber and red of the tones. }
+      border, the fill of a part under the mouse, the accent (the primary
+      button, the progress), and the green, amber and red of the tones. }
     procedure SetColors(ABack, AText, ADim, ALine, AHover, AAccent, AGood, AWarn,
       ABad: TColor);
     {** Where APart is on the screen, for a list dropped from it by
@@ -157,16 +183,24 @@ type
     property OnPartClick: TGittanStatusClickEvent read FOnPartClick write FOnPartClick;
   end;
 
-{** The parts that answer a click. }
+{** A transport button, for SetTransport. }
+function StatusButton(const ACaption, AIcon: string; ATone: TGittanStatusTone = stNormal;
+  AEnabled: boolean = True): TGittanStatusButton;
+
+{** The parts that answer a click. A transport button answers one while
+  it is enabled, the base while it has actions. }
 const
-  StatusClickable = [spRepo, spBranch, spSync, spStash, spConflicts, spPull, spFiles,
-    spUpdate];
+  StatusClickable = [spRepo, spBranch, spStash, spLeft, spPrimary, spRight, spSync,
+    spUpdate, spPull, spFiles];
 
   {** Markers at the start of a hint line, drawn as icons: a green check,
     a red cross, an amber clock, a globe for a link, two arrows for a
     switch, a folder, a branch, a pull request, a speech bubble for
-    review comments and an arrow up beside one down for the commits
-    to push and pull. Each is followed by a space. }
+    review comments, an arrow up beside one down for the commits to
+    push and pull, a box for the stashes, and for the transport two
+    arrows round a circle (fetch), an arrow down (pull), an arrow up
+    (push), a triangle (continue), a triangle at a bar (skip) and a
+    warning triangle (conflicts). Each is followed by a space. }
   HintPassed = '✓';
   HintFailed = '✕';
   HintPending = '◷';
@@ -178,6 +212,12 @@ const
   HintComment = '💬';
   HintSync = '⇅';
   HintStash = '📦';
+  HintFetch = '⟳';
+  HintDown = '↓';
+  HintUp = '↑';
+  HintPlay = '▶';
+  HintSkip = '⏭';
+  HintWarn = '⚠';
 
 {** Draws the icon of the marker AIcon (HintPassed and the others above)
   in AColor, in a square a little smaller than ASize centered on a line
@@ -191,18 +231,64 @@ uses
   Math;
 
 const
-  BarHeight = 26;
-  Pad = 10;
-  Gap = 14;
+  BarHeight = 56;
+  Pad = 12;
+  Gap = 10;
   ChipPadX = 6;
   ChipPadY = 2;
   ChevronWidth = 12;
-  { Between the icon of the name or the branch and its text. }
+  { Between an icon and its text. }
   IconGap = 5;
-  ProgressWidth = 80;
-  ProgressHeight = 4;
-  { Below this the middle is too narrow for a message to say anything. }
-  MinMessageRoom = 60;
+  { The tile with the initial, and the room after it. }
+  TileSize = 34;
+  TileRadius = 7;
+  TileFontSize = 15;
+  TileGap = 8;
+  { The rows of the left zone. }
+  RowGap = 1;
+  { The transport: the side buttons are circles of PrimaryHeight, the
+    primary a pill of it. }
+  PrimaryHeight = 26;
+  { The room at each end of the primary button's caption. }
+  PrimaryPad = 11;
+  ButtonGap = 12;
+  { The track under the transport. }
+  TrackGap = 4;
+  TrackWidth = 220;
+  TrackNarrow = 140;
+  TrackHeight = 3;
+  { The name and the branch are cut to these. }
+  NameMax = 220;
+  BranchMax = 200;
+
+function StatusButton(const ACaption, AIcon: string; ATone: TGittanStatusTone;
+  AEnabled: boolean): TGittanStatusButton;
+begin
+  Result.Caption := ACaption;
+  Result.Icon := AIcon;
+  Result.Tone := ATone;
+  Result.Enabled := AEnabled;
+end;
+
+function SameButton(const A, B: TGittanStatusButton): boolean;
+begin
+  Result := (A.Caption = B.Caption) and (A.Icon = B.Icon) and (A.Tone = B.Tone) and
+    (A.Enabled = B.Enabled);
+end;
+
+{ The first character of S, UTF-8 sequences kept whole, in upper case
+  when it is ASCII. }
+function Initial(const S: string): string;
+var
+  n: integer;
+begin
+  if S = '' then
+    Exit('');
+  n := 1;
+  while (n < Length(S)) and (Ord(S[n + 1]) and $C0 = $80) do
+    Inc(n);
+  Result := UpperCase(Copy(S, 1, n));
+end;
 
 { AColor laid over ABack at AAlpha (0 to 1), for the badges' tint. }
 function Blend(AColor, ABack: TColor; AAlpha: double): TColor;
@@ -251,7 +337,8 @@ begin
   AIcon := '';
   AText := ALine;
   for M in [HintPassed, HintFailed, HintPending, HintLink, HintSwitch, HintFolder, HintBranch, HintPull,
-    HintComment, HintSync, HintStash] do
+    HintComment, HintSync, HintStash, HintFetch, HintDown, HintUp, HintPlay, HintSkip,
+    HintWarn] do
     if Copy(ALine, 1, Length(M) + 1) = M + ' ' then
     begin
       AIcon := M;
@@ -385,6 +472,61 @@ begin
     ACanvas.RoundRect(L, T, L + S, T + S div 3 + 1, 2, 2);
     ACanvas.Rectangle(L + 1, T + S div 3, L + S - 1, T + S);
     ACanvas.Line(CX - 2, T + S div 3 + 3, CX + 3, T + S div 3 + 3);
+  end
+  else if AIcon = HintFetch then
+  begin
+    { Two arcs round a circle, each with an arrowhead at its clockwise
+      end, as a refresh icon. }
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Pen.Width := 1;
+    ACanvas.Arc(L, T, L + S, T + S, 20 * 16, 140 * 16);
+    ACanvas.Arc(L, T, L + S, T + S, 200 * 16, 140 * 16);
+    ACanvas.Polyline([Point(L + S - 4, T + 1), Point(L + S - 1, T + 4), Point(L + S - 4, T + 6)]);
+    ACanvas.Polyline([Point(L + 3, T + S - 2), Point(L, T + S - 5), Point(L + 3, T + S - 7)]);
+  end
+  else if AIcon = HintDown then
+  begin
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Line(CX, T + 1, CX, T + S - 1);
+    ACanvas.Polyline([Point(CX - 4, T + S - 5), Point(CX, T + S - 1), Point(CX + 4, T + S - 5)]);
+  end
+  else if AIcon = HintUp then
+  begin
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Line(CX, T + 1, CX, T + S - 1);
+    ACanvas.Polyline([Point(CX - 4, T + 5), Point(CX, T + 1), Point(CX + 4, T + 5)]);
+  end
+  else if AIcon = HintPlay then
+  begin
+    { A filled triangle pointing right. }
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Pen.Width := 1;
+    ACanvas.Brush.Style := bsSolid;
+    ACanvas.Brush.Color := AColor;
+    ACanvas.Polygon([Point(L + 3, T + 1), Point(L + S - 1, CY), Point(L + 3, T + S - 1)]);
+    ACanvas.Brush.Style := bsClear;
+  end
+  else if AIcon = HintSkip then
+  begin
+    { A filled triangle at a bar. }
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Pen.Width := 1;
+    ACanvas.Brush.Style := bsSolid;
+    ACanvas.Brush.Color := AColor;
+    ACanvas.Polygon([Point(L + 1, T + 1), Point(L + S - 4, CY), Point(L + 1, T + S - 1)]);
+    ACanvas.Brush.Style := bsClear;
+    ACanvas.Pen.Width := 2;
+    ACanvas.Line(L + S - 2, T + 1, L + S - 2, T + S - 1);
+  end
+  else if AIcon = HintWarn then
+  begin
+    { A warning triangle with a mark in it. }
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Pen.Width := 1;
+    ACanvas.Polygon([Point(CX, T), Point(L + S, T + S - 1), Point(L, T + S - 1)]);
+    ACanvas.Pen.Width := 2;
+    ACanvas.Line(CX, T + 4, CX, T + S - 6);
+    ACanvas.Line(CX, T + S - 4, CX, T + S - 2);
   end;
   ACanvas.Pen.Width := 1;
 end;
@@ -478,6 +620,8 @@ end;
 
 { TGittanStatusBar }
 
+{ TGittanStatusBar }
+
 constructor TGittanStatusBar.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
@@ -513,14 +657,13 @@ begin
   Change(FBranch, ABranch);
 end;
 
-procedure TGittanStatusBar.SetSync(AAhead, ABehind: integer; AShown: boolean);
+procedure TGittanStatusBar.SetBase(const ABase: string; AClickable: boolean);
 begin
-  if (FAhead = AAhead) and (FBehind = ABehind) and (FSyncShown = AShown) then
-    Exit;
-  FAhead := AAhead;
-  FBehind := ABehind;
-  FSyncShown := AShown;
-  Invalidate;
+  if AClickable then
+    Include(FClickable, spBase)
+  else
+    Exclude(FClickable, spBase);
+  Change(FBase, ABase);
 end;
 
 procedure TGittanStatusBar.SetStashes(ACount: integer);
@@ -531,19 +674,35 @@ begin
   Invalidate;
 end;
 
-procedure TGittanStatusBar.SetState(const AOperation, AConflicts: string);
+procedure TGittanStatusBar.SetTransport(const ALeft, APrimary, ARight: TGittanStatusButton);
 begin
-  Change(FOperation, AOperation);
-  Change(FConflicts, AConflicts);
+  if SameButton(FButtons[spLeft], ALeft) and SameButton(FButtons[spPrimary], APrimary) and
+    SameButton(FButtons[spRight], ARight) then
+    Exit;
+  FButtons[spLeft] := ALeft;
+  FButtons[spPrimary] := APrimary;
+  FButtons[spRight] := ARight;
+  Invalidate;
 end;
 
-procedure TGittanStatusBar.SetBase(const ABase: string; AClickable: boolean);
+procedure TGittanStatusBar.SetSync(AAhead, ABehind: integer; AShown: boolean);
 begin
-  if AClickable then
-    Include(FClickable, spBase)
-  else
-    Exclude(FClickable, spBase);
-  Change(FBase, ABase);
+  if (FAhead = AAhead) and (FBehind = ABehind) and (FSyncShown = AShown) then
+    Exit;
+  FAhead := AAhead;
+  FBehind := ABehind;
+  FSyncShown := AShown;
+  Invalidate;
+end;
+
+procedure TGittanStatusBar.SetOperation(const AText: string; APos, ATotal: integer);
+begin
+  if (FOperation = AText) and (FOperationPos = APos) and (FOperationTotal = ATotal) then
+    Exit;
+  FOperation := AText;
+  FOperationPos := APos;
+  FOperationTotal := ATotal;
+  Invalidate;
 end;
 
 procedure TGittanStatusBar.SetPull(const ANumber, ANote: string;
@@ -647,6 +806,13 @@ begin
   FHints[APart] := AValue;
 end;
 
+function TGittanStatusBar.Clickable(APart: TGittanStatusPart): boolean;
+begin
+  Result := APart in FClickable;
+  if Result and (APart in [spLeft, spPrimary, spRight]) then
+    Result := FButtons[APart].Enabled;
+end;
+
 function TGittanStatusBar.HotHint: string;
 begin
   case FHot of
@@ -679,7 +845,7 @@ begin
   FHintWindow.FTones := FTones;
   FHintWindow.FTones[stNormal] := FDim;
   R := FHintWindow.CalcHintRect(Max(200, Width - 2 * Pad), Tip, nil);
-  P := ClientToScreen(Point(FRects[FHot].Left, 0));
+  P := ClientToScreen(Point(FRects[FHot].Left, FRects[FHot].Top));
   Types.OffsetRect(R, P.X, P.Y - R.Bottom - 4);
   MaxRight := ClientToScreen(Point(Width - Pad, 0)).X;
   if R.Right > MaxRight then
@@ -696,99 +862,261 @@ begin
 end;
 
 { Every part is measured and placed here, so the rectangles the mouse is
-  tested against are always those of the last paint. The right zone is
-  placed first, right to left; the left zone takes what it needs of the
-  rest, giving up the base and then the name while a message needs the
-  room; the middle gets what is left. }
+  tested against are always those of the last paint. The three zones are
+  measured first with every part shown; while they do not fit, the parts
+  give way one step at a time, from the outside in (the caret's position
+  and the pull request's state first, the track and the update badge
+  last). Then the left zone is drawn from the left edge, the right zone
+  from the right edge, and the transport and the track centered between
+  them. }
 procedure TGittanStatusBar.Paint;
 var
   P: TGittanStatusPart;
-  TextH, TextY, X, Right, LeftEnd, W, Room, MidWant, IconW: integer;
-  Sync, S, Checks, Threads: string;
-  ShowTitle, ShowBase: boolean;
+  TextH, IconW, X, Y, W, Right, LeftW, MidW, RightW, MidX, MidTop, MidH: integer;
+  Row1Y, Row2Y, TrackW, NumW, Avail, Step, TrackLeft, Fill: integer;
+  ShowName, ShowBase, ShowStash, ShowPull, ShowPullNote, ShowFiles, ShowPosition,
+    ShowUpdate, ShowTrack, TransportShown, TrackNumbers, TrackLine: boolean;
+  Title, Branch, Base, TrackText, Behind, Ahead, Checks, Threads: string;
+  TrackTone: TGittanStatusTone;
+  TrackPart: TGittanStatusPart;
+  TrackPos, TrackTotal: integer;
 
-  function ChipRect(AX, AWidth: integer): TRect;
+  function ChipRect(AX, AY, AWidth, AHeight: integer): TRect;
   begin
-    Result := Rect(AX, TextY - ChipPadY, AX + AWidth, TextY + TextH + ChipPadY);
+    Result := Rect(AX, AY, AX + AWidth, AY + AHeight);
   end;
 
-  { The fill under a clickable part while the mouse is over it. }
+  { The fill under the mouse, for a part that answers a click. }
   procedure DrawHot(APart: TGittanStatusPart);
   begin
-    if (FHot <> APart) or not (APart in FClickable) then
+    if (FHot <> APart) or not Clickable(APart) then
       Exit;
     Canvas.Pen.Style := psClear;
     Canvas.Brush.Style := bsSolid;
     Canvas.Brush.Color := FHover;
-    Canvas.RoundRect(FRects[APart], 8, 8);
+    Canvas.RoundRect(FRects[APart], 6, 6);
     Canvas.Pen.Style := psSolid;
     Canvas.Brush.Style := bsClear;
   end;
 
-  { Text in a rectangle with the chip's padding; clickable parts get the
-    padding so their fill does not hug the letters. }
-  procedure DrawText(APart: TGittanStatusPart; AX: integer; const AText: string;
-    AColor: TColor);
+  procedure DrawChevron(AX, AY: integer);
+  var
+    CX, CY: integer;
   begin
-    FRects[APart] := ChipRect(AX - ChipPadX, Canvas.TextWidth(AText) + 2 * ChipPadX);
-    DrawHot(APart);
-    Canvas.Font.Color := AColor;
-    Canvas.TextOut(AX, TextY, AText);
+    CX := AX + ChevronWidth div 2;
+    CY := AY + TextH div 2;
+    Canvas.Pen.Color := FDim;
+    Canvas.Pen.Width := 1;
+    Canvas.Polyline([Point(CX - 3, CY - 1), Point(CX, CY + 2), Point(CX + 3, CY - 1)]);
   end;
 
-  { A badge: the text in its tone on a tint of the tone. }
-  procedure DrawBadge(APart: TGittanStatusPart; AX: integer; const AText: string;
-    ATone: TGittanStatusTone);
+  function BadgeWidth(const S: string): integer;
   begin
-    FRects[APart] := ChipRect(AX, Canvas.TextWidth(AText) + 2 * ChipPadX);
+    Result := Canvas.TextWidth(S) + 2 * (ChipPadX + 2);
+  end;
+
+  { A badge: the text in its tone on a tint of it, the corners round. }
+  procedure DrawBadge(APart: TGittanStatusPart; AX, AY: integer; const S: string;
+    ATone: TGittanStatusTone);
+  var
+    R: TRect;
+  begin
+    R := ChipRect(AX, AY - ChipPadY, BadgeWidth(S), TextH + 2 * ChipPadY);
+    FRects[APart] := R;
     Canvas.Pen.Style := psClear;
     Canvas.Brush.Style := bsSolid;
-    if FHot = APart then
-      Canvas.Brush.Color := Blend(FTones[ATone], FBack, 0.32)
+    if (FHot = APart) and Clickable(APart) then
+      Canvas.Brush.Color := Blend(FTones[ATone], FBack, 0.3)
     else
       Canvas.Brush.Color := Blend(FTones[ATone], FBack, 0.18);
-    Canvas.RoundRect(FRects[APart], 8, 8);
+    Canvas.RoundRect(R, R.Height, R.Height);
     Canvas.Pen.Style := psSolid;
     Canvas.Brush.Style := bsClear;
     Canvas.Font.Color := FTones[ATone];
-    Canvas.TextOut(AX + ChipPadX, TextY, AText);
+    Canvas.TextOut(AX + ChipPadX + 2, AY, S);
   end;
 
-  { The chevron of a part that drops a list, in the ChevronWidth after
-    AX. }
-  procedure DrawChevron(AX: integer);
+  { A dim text, in a chip rectangle for the mouse. }
+  procedure DrawText(APart: TGittanStatusPart; AX, AY: integer; const S: string;
+    AColor: TColor);
   begin
-    Inc(AX, ChevronWidth div 2 + 1);
-    Canvas.Pen.Color := FDim;
-    Canvas.Polyline([Point(AX - 3, TextY + TextH div 2 - 1),
-      Point(AX, TextY + TextH div 2 + 2), Point(AX + 3, TextY + TextH div 2 - 1)]);
+    FRects[APart] := ChipRect(AX - ChipPadX, AY - ChipPadY, Canvas.TextWidth(S) +
+      2 * ChipPadX, TextH + 2 * ChipPadY);
+    DrawHot(APart);
+    Canvas.Font.Color := AColor;
+    Canvas.TextOut(AX, AY, S);
   end;
 
-  function BadgeWidth(const AText: string): integer;
+  { A side button without an icon keeps its place, so the primary one
+    stays in the middle. }
+  function ButtonWidth(APart: TGittanStatusPart): integer;
   begin
-    Result := Canvas.TextWidth(AText) + 2 * ChipPadX;
+    if (FButtons[APart].Icon = '') and (APart = spPrimary) then
+      Exit(0);
+    if APart = spPrimary then
+    begin
+      { The caption is bold, so it is measured bold. }
+      Canvas.Font.Style := [fsBold];
+      Result := 2 * PrimaryPad + IconW + Canvas.TextWidth(FButtons[APart].Caption);
+      Canvas.Font.Style := [];
+    end
+    else
+      Result := PrimaryHeight;
   end;
 
-  function LeftWidth(ATitle, ABase: boolean): integer;
+  { A side button is a circle with the icon in it, filled under the
+    mouse; the primary a pill filled in its tone with the icon and the
+    caption. }
+  procedure DrawButton(APart: TGittanStatusPart; AX, AY: integer);
+  var
+    B: TGittanStatusButton;
+    R: TRect;
+    FillColor, Ink: TColor;
+    Hot: boolean;
+  begin
+    B := FButtons[APart];
+    if B.Icon = '' then
+      Exit;
+    R := ChipRect(AX, AY, ButtonWidth(APart), PrimaryHeight);
+    FRects[APart] := R;
+    Hot := (FHot = APart) and Clickable(APart);
+    if APart = spPrimary then
+    begin
+      case B.Tone of
+        stGood: FillColor := FHover;
+        stWarn: FillColor := FTones[stWarn];
+        stBad: FillColor := FTones[stBad];
+        else
+          FillColor := FAccent;
+      end;
+      if Hot then
+        FillColor := Blend(FText, FillColor, 0.12);
+      if not B.Enabled then
+        FillColor := Blend(FillColor, FBack, 0.5);
+      case B.Tone of
+        stGood: Ink := FDim;
+        stWarn: Ink := RGBToColor(26, 26, 26);
+        else
+          Ink := clWhite;
+      end;
+      Canvas.Pen.Style := psClear;
+      Canvas.Brush.Style := bsSolid;
+      Canvas.Brush.Color := FillColor;
+      Canvas.RoundRect(R, PrimaryHeight, PrimaryHeight);
+      Canvas.Pen.Style := psSolid;
+      Canvas.Brush.Style := bsClear;
+      X := AX + PrimaryPad;
+      if B.Tone = stGood then
+        DrawStatusIcon(Canvas, B.Icon, X, AY + (PrimaryHeight - TextH) div 2, TextH,
+          FTones[stGood])
+      else
+        DrawStatusIcon(Canvas, B.Icon, X, AY + (PrimaryHeight - TextH) div 2, TextH, Ink);
+      Canvas.Font.Style := [fsBold];
+      Canvas.Font.Color := Ink;
+      Canvas.TextOut(X + IconW, AY + (PrimaryHeight - TextH) div 2, B.Caption);
+      Canvas.Font.Style := [];
+    end
+    else
+    begin
+      if Hot then
+      begin
+        Canvas.Pen.Style := psClear;
+        Canvas.Brush.Style := bsSolid;
+        Canvas.Brush.Color := FHover;
+        Canvas.Ellipse(R);
+        Canvas.Pen.Style := psSolid;
+        Canvas.Brush.Style := bsClear;
+        Ink := FText;
+      end
+      else
+        Ink := FDim;
+      if not B.Enabled then
+        Ink := Blend(FDim, FBack, 0.45);
+      DrawStatusIcon(Canvas, B.Icon, AX + (PrimaryHeight - (TextH - 4)) div 2,
+        AY + (PrimaryHeight - TextH) div 2, TextH, Ink);
+    end;
+  end;
+
+  function PullWidth: integer;
+  begin
+    Result := IconW + Canvas.TextWidth(FPull);
+    if ShowPullNote and (FPullNote <> '') then
+      Inc(Result, Gap div 2 + Canvas.TextWidth(FPullNote));
+    if FPullTone <> stNormal then
+      Inc(Result, Gap div 2 + IconW - IconGap + Canvas.TextWidth(Checks));
+    if FPullThreads > 0 then
+      Inc(Result, Gap div 2 + IconW - IconGap + Canvas.TextWidth(Threads));
+    Inc(Result, 2 * ChipPadX);
+  end;
+
+  { The width of the left zone with the parts shown now. }
+  function LeftWidth: integer;
+  var
+    Block, Row2: integer;
+  begin
+    if (FTitle = '') and (FBranch = '') then
+      Exit(0);
+    Result := TileSize + TileGap;
+    Block := 0;
+    Canvas.Font.Style := [fsBold];
+    if ShowName and (Title <> '') then
+      Block := Canvas.TextWidth(Title) + 2 * ChipPadX;
+    Canvas.Font.Style := [];
+    Row2 := 0;
+    if Branch <> '' then
+      Row2 := IconW + Canvas.TextWidth(Branch) + ChevronWidth + 2 * ChipPadX;
+    if ShowBase and (Base <> '') then
+      Inc(Row2, Gap div 2 + Canvas.TextWidth(Base) + 2 * ChipPadX);
+    Inc(Result, Max(Block, Row2));
+    if ShowStash and (FStashes > 0) then
+      Inc(Result, Gap + IconW + Canvas.TextWidth(IntToStr(FStashes)) + 2 * ChipPadX);
+  end;
+
+  { The width of the transport and the track, the wider of the two. }
+  function MidWidth: integer;
+  var
+    T: integer;
   begin
     Result := 0;
-    if ATitle and (FTitle <> '') then
-      Inc(Result, IconW + Canvas.TextWidth(FTitle) + Gap);
-    if FBranch <> '' then
-      Inc(Result, IconW + Canvas.TextWidth(FBranch) + ChevronWidth + 2 * ChipPadX + Gap);
-    if Sync <> '' then
-      Inc(Result, Canvas.TextWidth(Sync) + ChevronWidth + 2 * ChipPadX + Gap)
-    else if FSyncShown then
-      Inc(Result, IconW + ChevronWidth + 2 * ChipPadX + Gap);
-    if FStashes > 0 then
-      Inc(Result, IconW + Canvas.TextWidth(IntToStr(FStashes)) + ChevronWidth +
-        2 * ChipPadX + Gap);
-    if FOperation <> '' then
-      Inc(Result, BadgeWidth(FOperation) + Gap div 2);
-    if FConflicts <> '' then
-      Inc(Result, BadgeWidth(FConflicts) + Gap div 2);
-    if ABase and (FBase <> '') then
-      Inc(Result, Canvas.TextWidth(FBase) + Gap);
+    if TransportShown then
+      Result := ButtonWidth(spLeft) + ButtonWidth(spPrimary) + ButtonWidth(spRight) +
+        2 * ButtonGap;
+    if not ShowTrack then
+      Exit;
+    if TrackNumbers then
+      T := 2 * NumW + 2 * Gap + TrackW
+    else
+    begin
+      T := Canvas.TextWidth(TrackText);
+      if TrackLine then
+        Inc(T, Gap + TrackW);
+    end;
+    Result := Max(Result, T);
+  end;
+
+  function RightWidth: integer;
+  begin
+    Result := 0;
+    if ShowFiles and (FFiles <> '') then
+      Inc(Result, Canvas.TextWidth(FFiles) + 2 * ChipPadX + Gap);
+    if ShowPosition and (FPosition <> '') then
+      Inc(Result, Canvas.TextWidth(FPosition) + 2 * ChipPadX + Gap);
+    if ShowPull and (FPull <> '') then
+      Inc(Result, PullWidth + Gap);
+    if ShowUpdate and (FUpdate <> '') then
+      Inc(Result, BadgeWidth(FUpdate) + Gap);
+    if Result > 0 then
+      Dec(Result, Gap);
+  end;
+
+  function Needed: integer;
+  begin
+    LeftW := LeftWidth;
+    MidW := MidWidth;
+    RightW := RightWidth;
+    Result := LeftW + MidW + RightW;
+    if MidW > 0 then
+      Inc(Result, 2 * Gap);
   end;
 
 begin
@@ -800,234 +1128,348 @@ begin
   Canvas.Pen.Color := FLine;
   Canvas.Line(0, 0, Width, 0);
   Canvas.Font := Font;
+  Canvas.Font.Style := [];
   Canvas.Brush.Style := bsClear;
   TextH := Canvas.TextHeight('Xg');
-  TextY := (Height + 1 - TextH) div 2;
   IconW := TextH - 4 + IconGap;
 
-  { Right zone, right to left: a newer Gittan, position, files, pull
-    request. }
+  { What the track carries: a message first, then a progress, then the
+    operation, else the sync counts. }
+  Checks := '';
+  if FPullChecks > 0 then
+    Checks := IntToStr(FPullChecks);
+  Threads := '';
+  if FPullOpen > 0 then
+    Threads := IntToStr(FPullOpen);
+  TrackNumbers := False;
+  TrackLine := False;
+  TrackText := '';
+  TrackTone := stNormal;
+  TrackPart := spNone;
+  TrackPos := 0;
+  TrackTotal := 0;
+  if FMessage <> '' then
+  begin
+    TrackText := FMessage;
+    TrackTone := FMessageTone;
+    TrackPart := spMessage;
+  end
+  else if FProgressTotal > 0 then
+  begin
+    TrackText := FProgressText;
+    TrackLine := True;
+    TrackPart := spProgress;
+    TrackPos := FProgressPos;
+    TrackTotal := FProgressTotal;
+    TrackTone := stNormal;
+  end
+  else if FOperation <> '' then
+  begin
+    TrackText := FOperation;
+    TrackLine := FOperationTotal > 0;
+    TrackPos := FOperationPos;
+    TrackTotal := FOperationTotal;
+    TrackTone := stWarn;
+  end
+  else if FSyncShown then
+  begin
+    TrackNumbers := True;
+    TrackPart := spSync;
+  end;
+  ShowTrack := TrackNumbers or (TrackText <> '');
+  TransportShown := FButtons[spPrimary].Icon <> '';
+  Behind := '↓' + IntToStr(FBehind);
+  Ahead := '↑' + IntToStr(FAhead);
+  NumW := Max(Canvas.TextWidth(Behind), Canvas.TextWidth(Ahead));
+  Title := Ellipsize(Canvas, FTitle, NameMax);
+  Branch := Ellipsize(Canvas, FBranch, BranchMax);
+  Base := FBase;
+  TrackW := TrackWidth;
+  ShowName := True;
+  ShowBase := True;
+  ShowStash := True;
+  ShowPull := True;
+  ShowPullNote := True;
+  ShowFiles := True;
+  ShowPosition := True;
+  ShowUpdate := True;
+
+  { Giving way, from the outside in. }
+  Avail := Width - 2 * Pad;
+  Step := 0;
+  while (Needed > Avail) and (Step < 9) do
+  begin
+    Inc(Step);
+    case Step of
+      1: ShowPosition := False;
+      2: ShowPullNote := False;
+      3: ShowFiles := False;
+      4:
+      begin
+        ShowStash := False;
+        ShowBase := False;
+      end;
+      5: ShowName := False;
+      6: TrackW := TrackNarrow;
+      7: ShowPull := False;
+      8: if TrackNumbers or TrackLine then
+          ShowTrack := False;
+      9: ShowUpdate := False;
+    end;
+  end;
+  if Needed > Avail then
+  begin
+    { A message is cut to what is left. }
+    if (TrackText <> '') and not TrackLine then
+    begin
+      TrackText := Ellipsize(Canvas, TrackText, Max(40, Avail - LeftW - RightW - 2 * Gap));
+      Needed;
+    end;
+  end;
+
+  { The rows. }
+  Row1Y := (Height - 2 * TextH - RowGap) div 2;
+  Row2Y := Row1Y + TextH + RowGap;
+  MidH := 0;
+  if TransportShown then
+    MidH := PrimaryHeight;
+  if ShowTrack then
+  begin
+    if MidH > 0 then
+      Inc(MidH, TrackGap);
+    Inc(MidH, TextH);
+  end;
+  MidTop := (Height - MidH) div 2;
+
+  { Left: the tile, the name over the branch and the base, the stashes. }
+  X := Pad;
+  if LeftW > 0 then
+  begin
+    FRects[spRepo] := ChipRect(X, (Height - TileSize) div 2, TileSize, TileSize);
+    Canvas.Pen.Style := psClear;
+    Canvas.Brush.Style := bsSolid;
+    if (FHot = spRepo) and Clickable(spRepo) then
+      Canvas.Brush.Color := Blend(FAccent, FBack, 0.3)
+    else
+      Canvas.Brush.Color := Blend(FAccent, FBack, 0.18);
+    Canvas.RoundRect(FRects[spRepo], TileRadius * 2, TileRadius * 2);
+    Canvas.Pen.Style := psSolid;
+    Canvas.Brush.Style := bsClear;
+    Canvas.Font.Size := TileFontSize;
+    Canvas.Font.Style := [fsBold];
+    Canvas.Font.Color := FAccent;
+    Title := Initial(ExtractFileName(FTitle));
+    if Title = '' then
+      Title := Initial(FBranch);
+    Canvas.TextOut(X + (TileSize - Canvas.TextWidth(Title)) div 2,
+      (Height - Canvas.TextHeight(Title)) div 2, Title);
+    Canvas.Font := Font;
+    Canvas.Font.Style := [];
+    Title := Ellipsize(Canvas, FTitle, NameMax);
+    Inc(X, TileSize + TileGap);
+    W := X;
+    if ShowName and (Title <> '') then
+    begin
+      Canvas.Font.Style := [fsBold];
+      if Branch = '' then
+        Y := (Height - TextH) div 2
+      else
+        Y := Row1Y;
+      { The name shares the tile's click, so the tile's rectangle grows
+        over it. }
+      FRects[spRepo].Right := X + Canvas.TextWidth(Title) + 2 * ChipPadX;
+      Canvas.Font.Color := FText;
+      Canvas.TextOut(X + ChipPadX, Y, Title);
+      Canvas.Font.Style := [];
+      W := FRects[spRepo].Right;
+    end;
+    if Branch <> '' then
+    begin
+      if not (ShowName and (Title <> '')) then
+        Y := (Height - TextH) div 2
+      else
+        Y := Row2Y;
+      FRects[spBranch] := ChipRect(X, Y - ChipPadY, IconW + Canvas.TextWidth(Branch) +
+        ChevronWidth + 2 * ChipPadX, TextH + 2 * ChipPadY);
+      DrawHot(spBranch);
+      DrawStatusIcon(Canvas, HintBranch, X + ChipPadX, Y, TextH, FDim);
+      Canvas.Font.Color := FText;
+      Canvas.TextOut(X + ChipPadX + IconW, Y, Branch);
+      DrawChevron(X + ChipPadX + IconW + Canvas.TextWidth(Branch), Y);
+      W := Max(W, FRects[spBranch].Right);
+      if ShowBase and (Base <> '') then
+      begin
+        DrawText(spBase, FRects[spBranch].Right + Gap div 2 + ChipPadX, Y, Base, FDim);
+        W := Max(W, FRects[spBase].Right);
+      end;
+    end;
+    X := W;
+    if ShowStash and (FStashes > 0) then
+    begin
+      Inc(X, Gap);
+      Y := (Height - TextH) div 2;
+      FRects[spStash] := ChipRect(X, Y - ChipPadY, IconW +
+        Canvas.TextWidth(IntToStr(FStashes)) + 2 * ChipPadX, TextH + 2 * ChipPadY);
+      DrawHot(spStash);
+      DrawStatusIcon(Canvas, HintStash, X + ChipPadX, Y, TextH, FDim);
+      Canvas.Font.Color := FDim;
+      Canvas.TextOut(X + ChipPadX + IconW, Y, IntToStr(FStashes));
+      X := FRects[spStash].Right;
+    end;
+  end;
+  LeftW := X;
+
+  { Right, from the right edge: the files, the position, the pull
+    request, the update. }
   Right := Width - Pad;
-  if FUpdate <> '' then
-  begin
-    W := BadgeWidth(FUpdate);
-    DrawBadge(spUpdate, Right - W, FUpdate, stGood);
-    Dec(Right, W + Gap);
-  end;
-  if FPosition <> '' then
-  begin
-    W := Canvas.TextWidth(FPosition);
-    DrawText(spPosition, Right - W, FPosition, FDim);
-    Dec(Right, W + Gap);
-  end;
-  if FFiles <> '' then
+  Y := (Height - TextH) div 2;
+  if ShowFiles and (FFiles <> '') then
   begin
     W := Canvas.TextWidth(FFiles);
-    DrawText(spFiles, Right - W, FFiles, FDim);
-    Dec(Right, W + Gap + ChipPadX);
+    DrawText(spFiles, Right - W - ChipPadX, Y, FFiles, FDim);
+    Dec(Right, W + 2 * ChipPadX + Gap);
   end;
-  if FPull <> '' then
+  if ShowPosition and (FPosition <> '') then
+  begin
+    W := Canvas.TextWidth(FPosition);
+    DrawText(spPosition, Right - W - ChipPadX, Y, FPosition, FDim);
+    Dec(Right, W + 2 * ChipPadX + Gap);
+  end;
+  if ShowPull and (FPull <> '') then
   begin
     { The pull request icon, the number, the state dimmed, then the
       checks as an icon in their tone with the count of the failing or
       pending ones, and the review threads as a speech bubble with the
-      count of the open ones. It gives way first when the window is
-      narrow. }
-    Checks := '';
-    if FPullChecks > 0 then
-      Checks := IntToStr(FPullChecks);
-    Threads := '';
-    if FPullOpen > 0 then
-      Threads := IntToStr(FPullOpen);
-    W := IconW + Canvas.TextWidth(FPull);
-    if FPullNote <> '' then
-      Inc(W, Gap div 2 + Canvas.TextWidth(FPullNote));
-    if FPullTone <> stNormal then
-      Inc(W, Gap div 2 + IconW - IconGap + Canvas.TextWidth(Checks));
-    if FPullThreads > 0 then
-      Inc(W, Gap div 2 + IconW - IconGap + Canvas.TextWidth(Threads));
-    if Right - W > Width div 3 then
+      count of the open ones. }
+    W := PullWidth;
+    X := Right - W;
+    FRects[spPull] := ChipRect(X, Y - ChipPadY, W, TextH + 2 * ChipPadY);
+    DrawHot(spPull);
+    Inc(X, ChipPadX);
+    DrawStatusIcon(Canvas, HintPull, X, Y, TextH, FDim);
+    Inc(X, IconW);
+    Canvas.Font.Color := FText;
+    Canvas.TextOut(X, Y, FPull);
+    Inc(X, Canvas.TextWidth(FPull));
+    if ShowPullNote and (FPullNote <> '') then
     begin
-      X := Right - W;
-      FRects[spPull] := ChipRect(X - ChipPadX, W + 2 * ChipPadX);
-      DrawHot(spPull);
-      DrawStatusIcon(Canvas, HintPull, X, TextY, TextH, FDim);
-      Inc(X, IconW);
-      Canvas.Font.Color := FText;
-      Canvas.TextOut(X, TextY, FPull);
-      Inc(X, Canvas.TextWidth(FPull));
-      if FPullNote <> '' then
-      begin
-        Inc(X, Gap div 2);
-        Canvas.Font.Color := FDim;
-        Canvas.TextOut(X, TextY, FPullNote);
-        Inc(X, Canvas.TextWidth(FPullNote));
-      end;
-      if FPullTone <> stNormal then
-      begin
-        Inc(X, Gap div 2);
-        case FPullTone of
-          stGood: DrawStatusIcon(Canvas, HintPassed, X, TextY, TextH, FTones[stGood]);
-          stBad: DrawStatusIcon(Canvas, HintFailed, X, TextY, TextH, FTones[stBad]);
-          stWarn: DrawStatusIcon(Canvas, HintPending, X, TextY, TextH, FTones[stWarn]);
-        end;
-        Inc(X, IconW - IconGap);
-        Canvas.Font.Color := FTones[FPullTone];
-        Canvas.TextOut(X, TextY, Checks);
-        Inc(X, Canvas.TextWidth(Checks));
-      end;
-      if FPullThreads > 0 then
-      begin
-        Inc(X, Gap div 2);
-        if FPullOpen > 0 then
-          Canvas.Font.Color := FAccent
-        else
-          Canvas.Font.Color := FDim;
-        DrawStatusIcon(Canvas, HintComment, X, TextY, TextH, Canvas.Font.Color);
-        Inc(X, IconW - IconGap);
-        Canvas.TextOut(X, TextY, Threads);
-      end;
-      Dec(Right, W + Gap + ChipPadX);
+      Inc(X, Gap div 2);
+      Canvas.Font.Color := FDim;
+      Canvas.TextOut(X, Y, FPullNote);
+      Inc(X, Canvas.TextWidth(FPullNote));
     end;
+    if FPullTone <> stNormal then
+    begin
+      Inc(X, Gap div 2);
+      case FPullTone of
+        stGood: DrawStatusIcon(Canvas, HintPassed, X, Y, TextH, FTones[stGood]);
+        stBad: DrawStatusIcon(Canvas, HintFailed, X, Y, TextH, FTones[stBad]);
+        stWarn: DrawStatusIcon(Canvas, HintPending, X, Y, TextH, FTones[stWarn]);
+      end;
+      Inc(X, IconW - IconGap);
+      Canvas.Font.Color := FTones[FPullTone];
+      Canvas.TextOut(X, Y, Checks);
+      Inc(X, Canvas.TextWidth(Checks));
+    end;
+    if FPullThreads > 0 then
+    begin
+      Inc(X, Gap div 2);
+      if FPullOpen > 0 then
+        Canvas.Font.Color := FAccent
+      else
+        Canvas.Font.Color := FDim;
+      DrawStatusIcon(Canvas, HintComment, X, Y, TextH, Canvas.Font.Color);
+      Inc(X, IconW - IconGap);
+      Canvas.TextOut(X, Y, Threads);
+    end;
+    Dec(Right, W + Gap);
   end;
+  if ShowUpdate and (FUpdate <> '') then
+  begin
+    W := BadgeWidth(FUpdate);
+    DrawBadge(spUpdate, Right - W, Y, FUpdate, stGood);
+    Dec(Right, W + Gap);
+  end;
+  RightW := Width - Pad - Right;
 
-  { Left zone. }
-  Sync := '';
-  if FAhead > 0 then
-    Sync := '↑' + IntToStr(FAhead);
-  if FBehind > 0 then
-    Sync := Trim(Sync + ' ↓' + IntToStr(FBehind));
-  if FMessage <> '' then
-    MidWant := Min(Canvas.TextWidth(FMessage), 240)
-  else if FProgressTotal > 0 then
-    MidWant := Canvas.TextWidth(FProgressText) + ProgressWidth + 6
-  else
-    MidWant := 0;
-  Room := Right - Pad;
-  if MidWant > 0 then
-    Dec(Room, MidWant + Gap);
-  ShowBase := LeftWidth(True, True) <= Room;
-  ShowTitle := ShowBase or (LeftWidth(True, False) <= Room);
-
-  { The name and the branch each have an icon before them, a folder and
-    a branch, inside the part so it takes the fill too. }
-  X := Pad;
-  if ShowTitle and (FTitle <> '') then
-  begin
-    S := Ellipsize(Canvas, FTitle, Right - X - IconW);
-    FRects[spRepo] := ChipRect(X - ChipPadX, IconW + Canvas.TextWidth(S) + 2 * ChipPadX);
-    DrawHot(spRepo);
-    DrawStatusIcon(Canvas, HintFolder, X, TextY, TextH, FDim);
-    Inc(X, IconW);
-    Canvas.Font.Color := FText;
-    Canvas.TextOut(X, TextY, S);
-    Inc(X, Canvas.TextWidth(S) + Gap);
-  end;
-  if (FBranch <> '') and (X < Right - IconW - ChevronWidth - 2 * ChipPadX) then
-  begin
-    S := Ellipsize(Canvas, FBranch, Right - X - IconW - ChevronWidth - 2 * ChipPadX);
-    W := IconW + Canvas.TextWidth(S) + ChevronWidth;
-    FRects[spBranch] := ChipRect(X - ChipPadX, W + 2 * ChipPadX);
-    DrawHot(spBranch);
-    DrawStatusIcon(Canvas, HintBranch, X, TextY, TextH, FDim);
-    Inc(X, IconW);
-    Canvas.Font.Color := FText;
-    Canvas.TextOut(X, TextY, S);
-    Inc(X, Canvas.TextWidth(S));
-    DrawChevron(X);
-    Inc(X, ChevronWidth + ChipPadX + Gap);
-  end;
-  { The commits ahead and behind, and the stashes, drop lists as the
-    branch does, so they have its chevron too: without it they read as
-    text until the mouse is over them. }
-  if (Sync <> '') and (X + Canvas.TextWidth(Sync) + ChevronWidth <= Right) then
-  begin
-    W := Canvas.TextWidth(Sync);
-    FRects[spSync] := ChipRect(X - ChipPadX, W + ChevronWidth + 2 * ChipPadX);
-    DrawHot(spSync);
-    Canvas.Font.Color := FDim;
-    Canvas.TextOut(X, TextY, Sync);
-    DrawChevron(X + W);
-    Inc(X, W + ChevronWidth + ChipPadX + Gap);
-  end
-  else if (Sync = '') and FSyncShown and (X + IconW + ChevronWidth <= Right) then
-  begin
-    W := IconW - IconGap;
-    FRects[spSync] := ChipRect(X - ChipPadX, W + ChevronWidth + 2 * ChipPadX);
-    DrawHot(spSync);
-    DrawStatusIcon(Canvas, HintSync, X, TextY, TextH, FDim);
-    DrawChevron(X + W);
-    Inc(X, W + ChevronWidth + ChipPadX + Gap);
-  end;
-  { The stashes: a box with the count after it. }
-  if (FStashes > 0) and
-    (X + IconW + Canvas.TextWidth(IntToStr(FStashes)) + ChevronWidth <= Right) then
-  begin
-    S := IntToStr(FStashes);
-    W := IconW + Canvas.TextWidth(S);
-    FRects[spStash] := ChipRect(X - ChipPadX, W + ChevronWidth + 2 * ChipPadX);
-    DrawHot(spStash);
-    DrawStatusIcon(Canvas, HintStash, X, TextY, TextH, FDim);
-    Canvas.Font.Color := FDim;
-    Canvas.TextOut(X + IconW, TextY, S);
-    DrawChevron(X + W);
-    Inc(X, W + ChevronWidth + ChipPadX + Gap);
-  end;
-  if (FOperation <> '') and (X + BadgeWidth(FOperation) <= Right) then
-  begin
-    DrawBadge(spOperation, X, FOperation, stWarn);
-    Inc(X, BadgeWidth(FOperation) + Gap div 2);
-  end;
-  if (FConflicts <> '') and (X + BadgeWidth(FConflicts) <= Right) then
-  begin
-    DrawBadge(spConflicts, X, FConflicts, stBad);
-    Inc(X, BadgeWidth(FConflicts) + Gap div 2);
-  end;
-  if (FOperation <> '') or (FConflicts <> '') then
-    Inc(X, Gap div 2);
-  if ShowBase and (FBase <> '') and (X + Canvas.TextWidth(FBase) <= Right) then
-  begin
-    DrawText(spBase, X, FBase, FDim);
-    Inc(X, Canvas.TextWidth(FBase) + Gap);
-  end;
-  LeftEnd := X;
-
-  { Middle: the message, else the progress. }
-  Room := Right - LeftEnd;
-  if Room < MinMessageRoom then
+  { Middle: the transport over the track, centered in the window while
+    the zones leave room for that, else between them. }
+  if MidW = 0 then
     Exit;
-  if FMessage <> '' then
+  MidX := (Width - MidW) div 2;
+  if MidX < LeftW + Gap then
+    MidX := LeftW + Gap;
+  if MidX + MidW > Right - Gap then
+    MidX := Max(LeftW + Gap, Right - Gap - MidW);
+  Y := MidTop;
+  if TransportShown then
   begin
-    S := Ellipsize(Canvas, FMessage, Room);
-    FRects[spMessage] := ChipRect(LeftEnd, Canvas.TextWidth(S));
-    if FMessageTone = stNormal then
+    W := ButtonWidth(spLeft) + ButtonWidth(spPrimary) + ButtonWidth(spRight) + 2 * ButtonGap;
+    X := MidX + (MidW - W) div 2;
+    DrawButton(spLeft, X, Y);
+    Inc(X, ButtonWidth(spLeft) + ButtonGap);
+    DrawButton(spPrimary, X, Y);
+    Inc(X, ButtonWidth(spPrimary) + ButtonGap);
+    DrawButton(spRight, X, Y);
+    Inc(Y, PrimaryHeight + TrackGap);
+  end;
+  if not ShowTrack then
+    Exit;
+  if TrackNumbers then
+  begin
+    W := 2 * NumW + 2 * Gap + TrackW;
+    X := MidX + (MidW - W) div 2;
+    FRects[spSync] := ChipRect(X - ChipPadX, Y - ChipPadY, W + 2 * ChipPadX,
+      TextH + 2 * ChipPadY);
+    DrawHot(spSync);
+    if FBehind > 0 then
       Canvas.Font.Color := FText
     else
-      Canvas.Font.Color := FTones[FMessageTone];
-    Canvas.TextOut(LeftEnd, TextY, S);
-  end
-  else if FProgressTotal > 0 then
-  begin
-    S := Ellipsize(Canvas, FProgressText, Room - ProgressWidth - 6);
-    X := LeftEnd;
-    if S <> '' then
-    begin
       Canvas.Font.Color := FDim;
-      Canvas.TextOut(X, TextY, S);
-      Inc(X, Canvas.TextWidth(S) + 6);
-    end;
-    FRects[spProgress] := ChipRect(LeftEnd, X + ProgressWidth - LeftEnd);
+    Canvas.TextOut(X + NumW - Canvas.TextWidth(Behind), Y, Behind);
+    TrackLeft := X + NumW + Gap;
+    if FAhead > 0 then
+      Canvas.Font.Color := FText
+    else
+      Canvas.Font.Color := FDim;
+    Canvas.TextOut(TrackLeft + TrackW + Gap, Y, Ahead);
+    TrackLine := True;
+    TrackTotal := 0;
+  end
+  else
+  begin
+    W := Canvas.TextWidth(TrackText);
+    if TrackLine then
+      Inc(W, Gap + TrackW);
+    X := MidX + (MidW - W) div 2;
+    if TrackPart <> spNone then
+      FRects[TrackPart] := ChipRect(X, Y - ChipPadY, W, TextH + 2 * ChipPadY);
+    Canvas.Font.Color := FTones[TrackTone];
+    if (TrackTone = stNormal) and (TrackPart <> spMessage) then
+      Canvas.Font.Color := FDim;
+    Canvas.TextOut(X, Y, TrackText);
+    TrackLeft := X + Canvas.TextWidth(TrackText) + Gap;
+  end;
+  if TrackLine then
+  begin
     Canvas.Pen.Style := psClear;
     Canvas.Brush.Style := bsSolid;
     Canvas.Brush.Color := FHover;
-    W := (Height - ProgressHeight) div 2;
-    Canvas.RoundRect(X, W, X + ProgressWidth, W + ProgressHeight,
-      ProgressHeight, ProgressHeight);
-    Canvas.Brush.Color := FAccent;
-    Canvas.RoundRect(X, W, X + Max(ProgressHeight, ProgressWidth *
-      Min(FProgressPos, FProgressTotal) div FProgressTotal), W + ProgressHeight,
-      ProgressHeight, ProgressHeight);
+    W := Y + (TextH - TrackHeight) div 2;
+    Canvas.RoundRect(TrackLeft, W, TrackLeft + TrackW, W + TrackHeight, TrackHeight,
+      TrackHeight);
+    if TrackTotal > 0 then
+    begin
+      if TrackTone = stWarn then
+        Canvas.Brush.Color := FTones[stWarn]
+      else
+        Canvas.Brush.Color := FAccent;
+      Fill := Max(TrackHeight, TrackW * Min(TrackPos, TrackTotal) div TrackTotal);
+      Canvas.RoundRect(TrackLeft, W, TrackLeft + Fill, W + TrackHeight, TrackHeight,
+        TrackHeight);
+    end;
     Canvas.Pen.Style := psSolid;
+    Canvas.Brush.Style := bsClear;
   end;
 end;
 
@@ -1036,7 +1478,7 @@ var
   P: TGittanStatusPart;
 begin
   for P := Succ(spNone) to High(P) do
-    if (X >= FRects[P].Left) and (X < FRects[P].Right) and (FRects[P].Right > 0) then
+    if Types.PtInRect(FRects[P], Point(X, Y)) then
       Exit(P);
   Result := spNone;
 end;
@@ -1053,7 +1495,7 @@ begin
   HideHint;
   if HotHint <> '' then
     FHintTimer.Enabled := True;
-  if AValue in FClickable then
+  if Clickable(AValue) then
     Cursor := crHandPoint
   else
     Cursor := crDefault;
@@ -1082,7 +1524,6 @@ begin
     FPressed := PartAt(X, Y);
 end;
 
-{ The click fires on release over the part that was pressed. }
 function TGittanStatusBar.PartScreenRect(APart: TGittanStatusPart): TRect;
 begin
   if (FRects[APart].Right <= FRects[APart].Left) then
@@ -1093,6 +1534,7 @@ begin
   Result.BottomRight := ClientToScreen(Result.BottomRight);
 end;
 
+{ The click fires on release over the part that was pressed. }
 procedure TGittanStatusBar.MouseUp(Button: TMouseButton; Shift: TShiftState;
   X, Y: integer);
 var
@@ -1104,7 +1546,7 @@ begin
     Exit;
   Part := FPressed;
   FPressed := spNone;
-  if (Part = spNone) or (Part <> PartAt(X, Y)) or not (Part in FClickable) or
+  if (Part = spNone) or (Part <> PartAt(X, Y)) or not Clickable(Part) or
     not Assigned(FOnPartClick) then
     Exit;
   R.TopLeft := ClientToScreen(FRects[Part].TopLeft);

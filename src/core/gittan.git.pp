@@ -724,6 +724,12 @@ type
     {** The branch a rebase in progress is rebasing, which HEAD, detached
       meanwhile, no longer names; empty when there is no rebase. }
     function RebaseBranch: string;
+    {** How far a rebase in progress has come: APos of ATotal commits
+      replayed so far, from the counters git keeps beside its todo list
+      (msgnum and end for rebase-merge, next and last for rebase-apply).
+      False, with both 0, when there is no rebase or git has not
+      written them yet. }
+    function OperationProgress(out APos, ATotal: integer): boolean;
     {** Whether Base is a range "A..B" or "A...B": the right side of
       every diff is then the commit B instead of the work tree. }
     function IsRange: boolean;
@@ -1941,6 +1947,50 @@ begin
         Result := '';
       Exit;
     end;
+end;
+
+function TGittanRepo.OperationProgress(out APos, ATotal: integer): boolean;
+
+  function Counter(const AFile: string): integer;
+  var
+    Lines: TStringList;
+  begin
+    Result := 0;
+    if not FileExists(AFile) then
+      Exit;
+    Lines := TStringList.Create;
+    try
+      Lines.LoadFromFile(AFile);
+      if Lines.Count > 0 then
+        Result := StrToIntDef(Trim(Lines[0]), 0);
+    finally
+      Lines.Free;
+    end;
+  end;
+
+var
+  Dir: string;
+begin
+  APos := 0;
+  ATotal := 0;
+  Result := False;
+  Dir := GitDir;
+  if Dir = '' then
+    Exit;
+  Dir := IncludeTrailingPathDelimiter(Dir);
+  if DirectoryExists(Dir + 'rebase-merge') then
+  begin
+    APos := Counter(Dir + 'rebase-merge' + PathDelim + 'msgnum');
+    ATotal := Counter(Dir + 'rebase-merge' + PathDelim + 'end');
+  end
+  else if DirectoryExists(Dir + 'rebase-apply') then
+  begin
+    APos := Counter(Dir + 'rebase-apply' + PathDelim + 'next');
+    ATotal := Counter(Dir + 'rebase-apply' + PathDelim + 'last');
+  end;
+  Result := ATotal > 0;
+  if not Result then
+    APos := 0;
 end;
 
 { Copies the repository's index to ATarget; no index (nothing staged
