@@ -99,6 +99,8 @@ type
     procedure TestTags;
     procedure TestParseReflog;
     procedure TestReflog;
+    procedure TestParseCleanPreview;
+    procedure TestClean;
   end;
 
 implementation
@@ -2930,6 +2932,72 @@ begin
   AssertTrue(FRepo.Error, FRepo.CreateBranch('saved', Second, False));
   AssertTrue(FRepo.Reflog(Log));
   AssertFalse('a branch keeps it now', Log[1].Lost);
+end;
+
+procedure TGitRepoTest.TestParseCleanPreview;
+var
+  Paths: TStringList;
+begin
+  Paths := TStringList.Create;
+  try
+    ParseCleanPreview('Would remove a.txt'#10'Would remove build/'#10 +
+      'Would skip repository sub/'#10'Would remove "q\"uote \303\245\t.txt"'#10, Paths);
+    AssertEquals('a.txt|build/|q"uote å'#9'.txt|', Joined(Paths));
+  finally
+    Paths.Free;
+  end;
+  AssertEquals('plain', UnquoteCPath('plain'));
+  AssertEquals('a\b', UnquoteCPath('"a\\b"'));
+end;
+
+procedure TGitRepoTest.TestClean;
+var
+  Paths: TStringList;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  WriteFile('.gitignore', '*.log'#10'build/'#10);
+  Git(['add', '.gitignore']);
+  Commit('ignore');
+  WriteFile('new.txt', 'n'#10);
+  WriteFile('newdir/x.txt', 'x'#10);
+  WriteFile(QuoteName + '.new', 'q'#10);
+  WriteFile('run.log', 'l'#10);
+  WriteFile('build/out.o', 'o'#10);
+  Paths := TStringList.Create;
+  try
+    AssertTrue(FRepo.Error, FRepo.CleanPreview(cnUntracked, Paths));
+    Paths.Sort;
+    AssertEquals('new.txt|newdir/|' + QuoteName + '.new|', Joined(Paths));
+    AssertTrue(FRepo.Error, FRepo.CleanPreview(cnIgnored, Paths));
+    Paths.Sort;
+    AssertEquals('build/|run.log|', Joined(Paths));
+    AssertTrue(FRepo.Error, FRepo.CleanPreview(cnAll, Paths));
+    AssertEquals(5, Paths.Count);
+
+    { Only the paths chosen go, and an ignored file stays when the
+      untracked ones are cleaned. }
+    Paths.Clear;
+    Paths.Add('newdir/');
+    Paths.Add(QuoteName + '.new');
+    Paths.Add('run.log');
+    AssertTrue(FRepo.Error, FRepo.Clean(cnUntracked, Paths));
+    AssertFalse(DirectoryExists(FDir + PathDelim + 'newdir'));
+    AssertFalse(FileExists(FDir + PathDelim + QuoteName + '.new'));
+    AssertTrue(FileExists(FDir + PathDelim + 'new.txt'));
+    AssertTrue('not untracked, so not cleaned as one', FileExists(FDir + PathDelim + 'run.log'));
+
+    Paths.Clear;
+    Paths.Add('build/');
+    AssertTrue(FRepo.Error, FRepo.Clean(cnIgnored, Paths));
+    AssertFalse(DirectoryExists(FDir + PathDelim + 'build'));
+    AssertTrue(FileExists(FDir + PathDelim + 'run.log'));
+    AssertTrue(FRepo.Error, FRepo.CleanPreview(cnAll, Paths));
+    Paths.Sort;
+    AssertEquals('new.txt|run.log|', Joined(Paths));
+  finally
+    Paths.Free;
+  end;
 end;
 
 initialization

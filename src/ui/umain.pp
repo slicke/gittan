@@ -28,7 +28,7 @@ uses
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader, gittan.hintbox,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, gittan.mdpreview,
-  gittan.rebase, gittan.rebasedlg, ATSynEdit_Gaps, md5;
+  gittan.rebase, gittan.rebasedlg, gittan.cleandlg, ATSynEdit_Gaps, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -150,6 +150,10 @@ type
     FRevertItem, FRevertFileItem, FUndoRevertItem: TMenuItem;
     FFileHistoryItem: TMenuItem;
     FRevertUndo: TStringList;
+    { Clean (umain.clean.inc): the File menu's item and what the dialog
+      deleted last (untracked, ignored or both), offered first again. }
+    FCleanItem: TMenuItem;
+    FCleanKind: TGittanCleanKind;
     { The GitHub items of the editor menu, made only when gh is installed
       (the file menu's is enabled with the rest of its items); the editor the editor menu popped up over and the
       row under the mouse then (-1 below the text), and the commit of
@@ -1051,6 +1055,8 @@ type
     procedure MenuFileHistoryClick(Sender: TObject);
     procedure MenuRevertFileClick(Sender: TObject);
     procedure MenuUndoRevertClick(Sender: TObject);
+    function CanClean: boolean;
+    procedure MenuCleanClick(Sender: TObject);
     function IsChangedPath(const APath: string): boolean;
     procedure ClearRevertUndo;
     procedure BranchContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
@@ -1785,6 +1791,10 @@ resourcestring
   rsIncludeItem = '&Include Change in Commit';
   rsRevertFile = 'Re&vert File...';
   rsUndoRevert = 'Undo Re&vert';
+  rsCleanItem = 'C&lean...';
+  rsCleaned = 'Deleted %d files and folders';
+  rsCleanedOne = 'Deleted %s';
+  rsCleanFailed = 'Could not clean';
   rsRevertChangesItem = 'Revert Changes...';
   rsFileHistoryItem = 'Show History';
   rsRevertTitle = 'Revert';
@@ -3164,6 +3174,7 @@ begin
   FRevertFileItem := AddItem(FileMenu, rsRevertFile, ShortCut(VK_BACK, [ssModifier, ssAlt]),
     @MenuRevertFileClick);
   FUndoRevertItem := AddItem(FileMenu, rsUndoRevert, 0, @MenuUndoRevertClick);
+  FCleanItem := AddItem(FileMenu, rsCleanItem, 0, @MenuCleanClick);
   UpdateDiscardItems;
   FileMenu.OnClick := @FileMenuClick;
   FileMenu.Add(NewLine);
@@ -4292,6 +4303,7 @@ begin
   UpdateDiscardItems;
   FPullRange := '';
   FMarkHash := '';
+  FCleanKind := cnUntracked;
   FMarkName := '';
   AbandonReviewJob;
   ClearReviews;
@@ -5633,6 +5645,7 @@ const
 {$I umain.tags.inc}
 {$I umain.reflog.inc}
 {$I umain.revert.inc}
+{$I umain.clean.inc}
 {$I umain.commit.inc}
 {$I umain.remote.inc}
 {$I umain.mdpreview.inc}

@@ -133,6 +133,11 @@ type
     nothing (rmHard, every change in tracked files lost). }
   TGittanResetMode = (rmSoft, rmMixed, rmHard);
 
+  {** What Clean removes: the files git neither tracks nor ignores
+    (cnUntracked, `git clean`), the ignored ones alone (cnIgnored, `-X`)
+    or both (cnAll, `-x`). }
+  TGittanCleanKind = (cnUntracked, cnIgnored, cnAll);
+
   {** A file committed with other content than the work tree's: Text is
     what goes in for Path, the work tree's with some of its changes left
     out (see gittan.leaveout and TGittanRepo.Commit). }
@@ -446,6 +451,16 @@ type
     {** Moves the branch HEAD is on (or HEAD itself when detached) to the
       commit AHash, keeping what AMode says (`git reset`). }
     function Reset(const AHash: string; AMode: TGittanResetMode): boolean;
+    {** What Clean with AKind would remove, as `git clean -n -d` lists it
+      (read by ParseCleanPreview): paths from the root, a folder whose
+      every file goes as one path ending in a slash. A repository nested
+      in the work tree is never listed. }
+    function CleanPreview(AKind: TGittanCleanKind; APaths: TStrings): boolean;
+    {** Deletes APaths, a choice from CleanPreview with the same AKind,
+      from disk (`git clean -f -d`, folders with what they hold). Only
+      what that preview would list goes, so a file that became tracked
+      meanwhile stays. Nothing is kept to bring them back. }
+    function Clean(AKind: TGittanCleanKind; APaths: TStrings): boolean;
     {** Resolves the conflict in APath by taking one side whole, as
       `git checkout --ours` or `--theirs` and `git add` do; when that
       side deleted the file it goes (`git rm`). }
@@ -782,6 +797,16 @@ const
   ReflogFormat = '%H%x1f%gd%x1f%gs';
   TagFormat = '%(refname:strip=2)%1f%(objectname)%1f%(*objectname)%1f' +
     '%(creatordate:unix)%1f%(contents:subject)';
+
+{** The paths in what `git clean -n` prints, a line "Would remove
+  <path>" each, a path quoted C-style unquoted (UnquoteCPath); other
+  lines ("Would skip repository <path>") are left out. }
+procedure ParseCleanPreview(const AOutput: string; APaths: TStrings);
+
+{** APath as git meant it: when it is in double quotes, the quotes
+  dropped and the escapes (\", \\, \t, \n, three octal digits for a
+  byte...) turned back into what they stand for; else as it is. }
+function UnquoteCPath(const APath: string): string;
 
 {** Whether the file AFileName is binary by git's own rule: a NUL byte
   in its first 8000 bytes. False for a file that cannot be read. }
@@ -3471,6 +3496,122 @@ var
 begin
   Result := (FRoot <> '') and (AHash <> '') and
     RunGit(FRoot, ['reset', '-q', Flags[AMode], AHash], Output);
+end;
+
+{ ---------------------------------------------------------------------------
+  Clean
+  --------------------------------------------------------------------------- }
+
+function UnquoteCPath(const APath: string): string;
+var
+  i, n: integer;
+  C: char;
+begin
+  n := Length(APath);
+  if (n < 2) or (APath[1] <> '"') or (APath[n] <> '"') then
+    Exit(APath);
+  Result := '';
+  i := 2;
+  while i < n do
+  begin
+    C := APath[i];
+    if (C = '\') and (i + 1 < n) then
+    begin
+      Inc(i);
+      C := APath[i];
+      case C of
+        'a': Result := Result + #7;
+        'b': Result := Result + #8;
+        't': Result := Result + #9;
+        'n': Result := Result + #10;
+        'v': Result := Result + #11;
+        'f': Result := Result + #12;
+        'r': Result := Result + #13;
+        '0'..'3':
+          if (i + 2 < n) and (APath[i + 1] in ['0'..'7']) and (APath[i + 2] in ['0'..'7']) then
+          begin
+            Result := Result + Chr((Ord(C) - 48) * 64 + (Ord(APath[i + 1]) - 48) * 8 +
+              Ord(APath[i + 2]) - 48);
+            Inc(i, 2);
+          end
+          else
+            Result := Result + C;
+        else
+          Result := Result + C;
+      end;
+    end
+    else
+      Result := Result + C;
+    Inc(i);
+  end;
+end;
+
+procedure ParseCleanPreview(const AOutput: string; APaths: TStrings);
+const
+  Prefix = 'Would remove ';
+var
+  Lines: TStringList;
+  i: integer;
+begin
+  APaths.Clear;
+  Lines := TStringList.Create;
+  try
+    Lines.Text := AOutput;
+    for i := 0 to Lines.Count - 1 do
+      if (Copy(Lines[i], 1, Length(Prefix)) = Prefix) and (Length(Lines[i]) > Length(Prefix)) then
+        APaths.Add(UnquoteCPath(Copy(Lines[i], Length(Prefix) + 1, MaxInt)));
+  finally
+    Lines.Free;
+  end;
+end;
+
+const
+  CleanFlags: array[TGittanCleanKind] of string = ('-d', '-dX', '-dx');
+
+function TGittanRepo.CleanPreview(AKind: TGittanCleanKind; APaths: TStrings): boolean;
+var
+  Output: string;
+begin
+  APaths.Clear;
+  Result := (FRoot <> '') and RunGit(FRoot, ['clean', '-n', CleanFlags[AKind]], Output);
+  if Result then
+    ParseCleanPreview(Output, APaths);
+end;
+
+{ git clean reads no pathspec file, so the paths go on the command line,
+  a hundred at a time to stay under the length Windows allows. }
+function TGittanRepo.Clean(AKind: TGittanCleanKind; APaths: TStrings): boolean;
+const
+  Batch = 100;
+var
+  Output: string;
+  Args: array of string;
+  i, n: integer;
+begin
+  if FRoot = '' then
+    Exit(False);
+  Result := True;
+  i := 0;
+  while Result and (i < APaths.Count) do
+  begin
+    n := APaths.Count - i;
+    if n > Batch then
+      n := Batch;
+    SetLength(Args, 5 + n);
+    Args[0] := '--literal-pathspecs';
+    Args[1] := 'clean';
+    Args[2] := '-f';
+    Args[3] := CleanFlags[AKind];
+    Args[4] := '--';
+    n := 5;
+    while (n < Length(Args)) and (i < APaths.Count) do
+    begin
+      Args[n] := APaths[i];
+      Inc(n);
+      Inc(i);
+    end;
+    Result := RunGit(FRoot, Args, Output);
+  end;
 end;
 
 { ---------------------------------------------------------------------------

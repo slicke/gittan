@@ -547,6 +547,7 @@ begin
     FRevertFileItem.Enabled := CanRevert and IsChangedPath(FCurrentPath) and
       (FView in [gvChanges, gvImage, gvBinary, gvTranslation]);
     FUndoRevertItem.Enabled := FRevertUndo.Count > 0;
+    FCleanItem.Enabled := CanClean;
   end;
 end;
 

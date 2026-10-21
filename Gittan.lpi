@@ -120,6 +120,10 @@
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
+        <Filename Value="src/ui/gittan.cleandlg.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
         <Filename Value="src/ui/gittan.statusbar.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
