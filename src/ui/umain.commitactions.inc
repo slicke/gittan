@@ -2,8 +2,8 @@
   The commit menu
   ---------------------------------------------------------------------------
   A right click on a commit in the commit graph (or the Menu key) shows
-  what can be done with it: show it,
-  compare the work tree with it, switch to a branch on it, make a branch
+  what can be done with it: show it, compare the work tree with it,
+  write it as a patch, switch to a branch on it, make a branch
   or a tag there, merge it, cherry-pick or revert it, reset the branch
   to it, copy its id. The menu is built for the commit each time, since
   what applies depends on it (Rebase Interactively from Here... lists
@@ -20,7 +20,9 @@
   accent in the graph, which stays open), and the menu of another then
   offers Compare with Marked <name>: the base becomes the range from
   the older of the two to the newer (by their times, FMarkDate), so the
-  views show what changed between them going forward. The Bisect
+  views show what changed between them going forward. The mark also
+  bounds a patch series: Create Patch Series with Marked <name>...
+  writes every commit between the two (umain.patches.inc). The Bisect
   submenu starts a bisect from the commit, or marks it while git
   bisects (umain.bisect.inc). }
 const
@@ -47,6 +49,8 @@ const
   caBisectBad = 21;
   caBisectSkip = 22;
   caBisectEnd = 23;
+  caPatch = 24;
+  caPatchSeries = 25;
 
 procedure TForm1.GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
   const AScreenPos: TPoint);
@@ -117,6 +121,12 @@ begin
     Add(nil, rsCaMark, caMark);
   if (FMarkHash <> '') and (FMarkHash <> ACommit.Hash) then
     Add(nil, Format(rsCaCompareMarked, [Amp(FMarkName)]), caCompareMarked);
+  Add(nil, rsCaPatch, caPatch, not IsMerge);
+  { A series runs along one line of history, so one of the two must be
+    in the other's. }
+  if (FMarkHash <> '') and (FMarkHash <> ACommit.Hash) then
+    Add(nil, Format(rsCaPatchSeries, [Amp(FMarkName)]), caPatchSeries,
+      FRepo.IsAncestor(FMarkHash, ACommit.Hash) or FRepo.IsAncestor(ACommit.Hash, FMarkHash));
   Line;
   for i := 0 to High(ACommit.Refs) do
     if (ACommit.Refs[i].Kind = grBranch) and (ACommit.Refs[i].Name <> FBranch) then
@@ -194,6 +204,20 @@ begin
   if (Sender as TMenuItem).Tag = caBrowse then
   begin
     BrowseCommit(Hash, FActionName, FActionCommit.Subject);
+    Exit;
+  end;
+  { Patches change nothing, so the graph stays open behind the dialog. }
+  if (Sender as TMenuItem).Tag = caPatch then
+  begin
+    CreatePatches('', Hash);
+    Exit;
+  end;
+  if (Sender as TMenuItem).Tag = caPatchSeries then
+  begin
+    if FRepo.IsAncestor(FMarkHash, Hash) then
+      CreatePatches(FMarkHash, Hash)
+    else
+      CreatePatches(Hash, FMarkHash);
     Exit;
   end;
   FGraph.Close;

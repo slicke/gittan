@@ -28,7 +28,7 @@ uses
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader, gittan.hintbox,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, gittan.mdpreview,
-  gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.repobrowser, gittan.clonedlg,
+  gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.repobrowser, gittan.clonedlg,
   gittan.remotesdlg, ATSynEdit_Gaps, md5;
 
 type
@@ -163,6 +163,13 @@ type
     FCloneParent: string;
     FCloneSubmodules: boolean;
     FCleanKind: TGittanCleanKind;
+    { Patches (umain.patches.inc): the File menu's Apply Patches...,
+      where the last series went and whether it had a cover letter,
+      where the last patch applied was picked from and whether patches
+      were committed or went into the work tree alone. }
+    FApplyPatchesItem: TMenuItem;
+    FPatchFolder, FApplyFolder: string;
+    FPatchCover, FApplyCommit: boolean;
     { The GitHub items of the editor menu, made only when gh is installed
       (the file menu's is enabled with the rest of its items); the editor the editor menu popped up over and the
       row under the mouse then (-1 below the text), and the commit of
@@ -1087,6 +1094,10 @@ type
     procedure MenuRemotesClick(Sender: TObject);
     procedure RepoPageEditRemotes(Sender: TObject);
     procedure BrowseCommit(const AHash, AName, ASubject: string);
+    function PatchFolder: string;
+    procedure CreatePatches(const AOlder, ANewer: string);
+    function CanApplyPatches: boolean;
+    procedure MenuApplyPatchesClick(Sender: TObject);
     function IsChangedPath(const APath: string): boolean;
     procedure ClearRevertUndo;
     procedure BranchContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
@@ -1555,6 +1566,8 @@ resourcestring
   rsCaShow = 'Show Commit';
   rsCaCompare = 'Compare with Working Tree';
   rsCaBrowse = 'Browse Files...';
+  rsCaPatch = 'Create Patch...';
+  rsCaPatchSeries = 'Create Patch Series with Marked %s...';
   rsBrowseTitle = 'Files at %s';
   rsCaMark = 'Mark for Comparison';
   rsCaUnmark = 'Unmark';
@@ -1877,6 +1890,21 @@ resourcestring
   rsCleaned = 'Deleted %d files and folders';
   rsCleanedOne = 'Deleted %s';
   rsCleanFailed = 'Could not clean';
+  rsApplyPatchesItem = 'Appl&y Patches...';
+  rsPatchFailed = 'Could not create the patches';
+  rsPatchOnlyMerges = 'git makes no patches of merge commits, and there are only those.';
+  rsPatchWritten = 'Wrote %s';
+  rsPatchesWritten = 'Wrote %d patch files to %s';
+  rsPatchCommitted = 'Committed the patch';
+  rsPatchesCommitted = 'Committed %d patches';
+  rsPatchApplied = 'Applied the patch to the work tree';
+  rsPatchesApplied = 'Applied %d patches to the work tree';
+  rsPatchAmConflicts = 'The patch stopped with conflicts: resolve them, then Continue in the ' +
+    'Commit section';
+  rsPatchConflicts = '%s went in with conflicts to resolve';
+  rsPatchStopped = '%s does not apply: skip it or abort in the Commit section';
+  rsPatchPartly = 'Applied %d of %d patches: %s does not apply';
+  rsApplyFailed = 'Could not apply the patches';
   rsRevertChangesItem = 'Revert Changes...';
   rsFileHistoryItem = 'Show History';
   rsRevertTitle = 'Revert';
@@ -3264,6 +3292,7 @@ begin
     @MenuRevertFileClick);
   FUndoRevertItem := AddItem(FileMenu, rsUndoRevert, 0, @MenuUndoRevertClick);
   FCleanItem := AddItem(FileMenu, rsCleanItem, 0, @MenuCleanClick);
+  FApplyPatchesItem := AddItem(FileMenu, rsApplyPatchesItem, 0, @MenuApplyPatchesClick);
   UpdateDiscardItems;
   FileMenu.OnClick := @FileMenuClick;
   FileMenu.Add(NewLine);
@@ -4393,6 +4422,10 @@ begin
   FPullRange := '';
   FMarkHash := '';
   FCleanKind := cnUntracked;
+  FPatchFolder := '';
+  FApplyFolder := '';
+  FPatchCover := False;
+  FApplyCommit := True;
   FMarkName := '';
   AbandonReviewJob;
   ClearReviews;
@@ -5747,6 +5780,7 @@ const
 {$I umain.bisect.inc}
 {$I umain.revert.inc}
 {$I umain.clean.inc}
+{$I umain.patches.inc}
 {$I umain.clone.inc}
 {$I umain.repobrowser.inc}
 {$I umain.commit.inc}

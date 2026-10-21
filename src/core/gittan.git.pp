@@ -177,6 +177,15 @@ type
   end;
   TGittanTreeEntries = array of TGittanTreeEntry;
 
+  {** A commit a patch series takes (TGittanRepo.PatchCommits): its id,
+    its short id and its subject. }
+  TGittanPatchCommit = record
+    Hash: string;
+    Short: string;
+    Subject: string;
+  end;
+  TGittanPatchCommits = array of TGittanPatchCommit;
+
   {** A file committed with other content than the work tree's: Text is
     what goes in for Path, the work tree's with some of its changes left
     out (see gittan.leaveout and TGittanRepo.Commit). }
@@ -205,6 +214,8 @@ type
     function WholeTreeActive: boolean;
     function RebaseFilesFolder: string;
     procedure CleanRebaseFiles;
+    function PatchRange(const AOlder, ANewer: string; out ARevs: TStringArray;
+      out ARoot: boolean): boolean;
     function CompareIndex: string;
     procedure DropTempIndex;
     procedure SetWholeTree(AValue: boolean);
@@ -539,6 +550,32 @@ type
       ParseTreeEntries): folders first, then the rest, each by name. }
     function TreeEntries(const ACommit, AFolder: string;
       out AList: TGittanTreeEntries): boolean;
+    {** The commits a patch series from AOlder to ANewer takes, oldest
+      first (`git log --no-merges --reverse`): ANewer alone when AOlder
+      is empty, else every commit from AOlder, which must be in ANewer's
+      history, to ANewer, both included. git leaves merge commits out of
+      a series, so they are not listed. }
+    function PatchCommits(const AOlder, ANewer: string;
+      out ACommits: TGittanPatchCommits): boolean;
+    {** Writes the series PatchCommits lists into the folder AFolder, a
+      file per commit numbered from 0001 (`git format-patch`), a file of
+      the same name there overwritten; with ACoverLetter first a
+      0000-cover-letter.patch to fill in. AFiles gets the files written,
+      with their full paths, in order. }
+    function FormatPatches(const AOlder, ANewer, AFolder: string; ACoverLetter: boolean;
+      AFiles: TStrings): boolean;
+    {** Applies the patch files AFiles in their order. With ACommit each
+      becomes a commit with the author, date and message it carries (`git
+      am --3way`, so every file must be a mail as format-patch writes
+      them): one that does not apply stops the am, which the Commit
+      section then carries on (Operation 'applying patches'), with
+      AConflicts set when it stopped with conflicts. Without, the changes
+      go into the work tree alone (`git apply`, a file at a time, each
+      whole or not at all), with a three-way merge that leaves conflicts
+      (AConflicts) when one does not apply as it is; the first that fails
+      stops the rest. AApplied counts the patches that went in. }
+    function ApplyPatches(AFiles: TStrings; ACommit: boolean; out AConflicts: boolean;
+      out AApplied: integer): boolean;
     {** Resolves the conflict in APath by taking one side whole, as
       `git checkout --ours` or `--theirs` and `git add` do; when that
       side deleted the file it goes (`git rm`). }
@@ -895,6 +932,16 @@ procedure ParseCleanPreview(const AOutput: string; APaths: TStrings);
   folders first, then the rest, each by name as git sorts them (bytes).
   Entries of another shape are skipped. }
 function ParseTreeEntries(const AOutput, AFolder: string): TGittanTreeEntries;
+
+{** Whether AText, the start of a patch file, is a mail that `git am`
+  takes: an mbox "From " line first (what format-patch writes), or a
+  header with From: and Subject: before the first empty line. A plain
+  diff is not. Empty lines before it are skipped. }
+function IsMailPatch(const AText: string): boolean;
+
+{** IsMailPatch for the first 8 KB of the file AFileName; False for a
+  file that cannot be read. }
+function IsMailPatchFile(const AFileName: string): boolean;
 
 {** APath as git meant it: when it is in double quotes, the quotes
   dropped and the escapes (\", \\, \t, \n, three octal digits for a
@@ -4094,6 +4141,240 @@ begin
     end;
     Result := RunGit(FRoot, Args, Output);
   end;
+end;
+
+{ ---------------------------------------------------------------------------
+  Patches
+  ---------------------------------------------------------------------------
+  A series from AOlder to ANewer is ANewer without AOlder's parents
+  (rev-parse <commit>^@ lists them), so AOlder is in it. A root commit
+  has none, and format-patch reads a lone commit as "since it", so
+  ARoot asks it for everything from the start instead; log reads the
+  lone commit as its whole history, the same commits. }
+function TGittanRepo.PatchRange(const AOlder, ANewer: string; out ARevs: TStringArray;
+  out ARoot: boolean): boolean;
+var
+  Output: string;
+  Parents: TStringList;
+  i: integer;
+begin
+  ARevs := nil;
+  ARoot := False;
+  if AOlder = '' then
+  begin
+    ARevs := ['-1', ANewer];
+    Exit(True);
+  end;
+  Result := RunGit(FRoot, ['rev-parse', AOlder + '^@'], Output);
+  if not Result then
+    Exit;
+  Parents := TStringList.Create;
+  try
+    Parents.Text := Trim(Output);
+    SetLength(ARevs, 1 + Parents.Count);
+    ARevs[0] := ANewer;
+    for i := 0 to Parents.Count - 1 do
+      ARevs[1 + i] := '^' + Trim(Parents[i]);
+    ARoot := Parents.Count = 0;
+  finally
+    Parents.Free;
+  end;
+end;
+
+function TGittanRepo.PatchCommits(const AOlder, ANewer: string;
+  out ACommits: TGittanPatchCommits): boolean;
+var
+  Output: string;
+  Revs, Args: TStringArray;
+  FromStart: boolean;
+  Lines: TStringList;
+  Fields: TStringArray;
+  i, n: integer;
+begin
+  ACommits := nil;
+  if (FRoot = '') or (ANewer = '') or not PatchRange(AOlder, ANewer, Revs, FromStart) then
+    Exit(False);
+  Args := Concat(['log', '--no-merges', '--reverse', '--format=%H%x1f%h%x1f%s'], Revs);
+  Result := RunGit(FRoot, Args, Output);
+  if not Result then
+    Exit;
+  Lines := TStringList.Create;
+  try
+    Lines.Text := Output;
+    SetLength(ACommits, Lines.Count);
+    n := 0;
+    for i := 0 to Lines.Count - 1 do
+    begin
+      Fields := Lines[i].Split([#31]);
+      if Length(Fields) < 3 then
+        Continue;
+      ACommits[n].Hash := Fields[0];
+      ACommits[n].Short := Fields[1];
+      ACommits[n].Subject := Fields[2];
+      Inc(n);
+    end;
+    SetLength(ACommits, n);
+  finally
+    Lines.Free;
+  end;
+end;
+
+{ format-patch prints the name of every file it writes, a line each. }
+function TGittanRepo.FormatPatches(const AOlder, ANewer, AFolder: string;
+  ACoverLetter: boolean; AFiles: TStrings): boolean;
+var
+  Output: string;
+  Revs, Args: TStringArray;
+  FromStart: boolean;
+  Lines: TStringList;
+  i: integer;
+begin
+  AFiles.Clear;
+  if (FRoot = '') or (ANewer = '') or (AFolder = '') or
+    not PatchRange(AOlder, ANewer, Revs, FromStart) then
+    Exit(False);
+  Args := ['format-patch', '-o', AFolder];
+  if ACoverLetter then
+    Args := Concat(Args, ['--cover-letter']);
+  if FromStart then
+    Args := Concat(Args, ['--root']);
+  Result := RunGit(FRoot, Concat(Args, Revs), Output);
+  if not Result then
+    Exit;
+  Lines := TStringList.Create;
+  try
+    Lines.Text := Output;
+    for i := 0 to Lines.Count - 1 do
+      if Trim(Lines[i]) <> '' then
+        AFiles.Add(ExpandFileName(Trim(Lines[i])));
+  finally
+    Lines.Free;
+  end;
+end;
+
+{ am applies the files one after the other and stops at the first that
+  fails, so what went in is counted as the commits HEAD gained. apply is
+  tried as it is first, since --3way implies --index and so refuses a
+  file whose work tree differs from the index, as one changed but not
+  staged does; the three-way merge is for a patch that does not fit. }
+function TGittanRepo.ApplyPatches(AFiles: TStrings; ACommit: boolean;
+  out AConflicts: boolean; out AApplied: integer): boolean;
+var
+  Output, Err, Before: string;
+  Args: TStringArray;
+  i: integer;
+begin
+  AConflicts := False;
+  AApplied := 0;
+  if (FRoot = '') or (AFiles.Count = 0) then
+    Exit(False);
+  if ACommit then
+  begin
+    if RunGit(FRoot, ['rev-parse', '--verify', '-q', 'HEAD'], Output) then
+      Before := Trim(Output)
+    else
+      Before := '';
+    Args := ['am', '--3way'];
+    for i := 0 to AFiles.Count - 1 do
+      Args := Concat(Args, [AFiles[i]]);
+    Result := RunCommitting(Self, FRoot, Args, AConflicts, Err);
+    if not Result then
+      FError := Err;
+    if Before = '' then
+      Args := ['rev-list', '--count', 'HEAD']
+    else
+      Args := ['rev-list', '--count', Before + '..HEAD'];
+    if RunGitIn(FRoot, Args, Output, Err) then
+      AApplied := StrToIntDef(Trim(Output), 0);
+    Exit;
+  end;
+  Result := True;
+  for i := 0 to AFiles.Count - 1 do
+  begin
+    if not RunGitIn(FRoot, ['apply', AFiles[i]], Output, Err) then
+    begin
+      FError := Err;
+      Result := False;
+      { Applied with conflicts leaves them in the index, and fails. }
+      if not RunGitIn(FRoot, ['apply', '--3way', AFiles[i]], Output, Err) then
+      begin
+        AConflicts := RunGitIn(FRoot, ['ls-files', '-u'], Output, Err) and
+          (Trim(Output) <> '');
+        if AConflicts then
+          Inc(AApplied);
+        Exit;
+      end;
+      Result := True;
+    end;
+    Inc(AApplied);
+  end;
+end;
+
+function IsMailPatch(const AText: string): boolean;
+var
+  Lines: TStringList;
+  i, Colon: integer;
+  From, Subject: boolean;
+  Line: string;
+begin
+  Result := False;
+  Lines := TStringList.Create;
+  try
+    Lines.Text := AText;
+    i := 0;
+    while (i < Lines.Count) and (Trim(Lines[i]) = '') do
+      Inc(i);
+    if i >= Lines.Count then
+      Exit;
+    if Copy(Lines[i], 1, 5) = 'From ' then
+      Exit(True);
+    From := False;
+    Subject := False;
+    while (i < Lines.Count) and (Lines[i] <> '') do
+    begin
+      Line := LowerCase(Lines[i]);
+      if Copy(Line, 1, 5) = 'from:' then
+        From := True
+      else if Copy(Line, 1, 8) = 'subject:' then
+        Subject := True
+      { A header line is a name, a colon and the value, or the value
+        going on after white space; anything else ends the header. }
+      else if not (Line[1] in [' ', #9]) then
+      begin
+        Colon := Pos(':', Line);
+        if (Colon < 2) or (Pos(' ', Copy(Line, 1, Colon - 1)) > 0) then
+          Break;
+      end;
+      Inc(i);
+    end;
+    Result := From and Subject;
+  finally
+    Lines.Free;
+  end;
+end;
+
+function IsMailPatchFile(const AFileName: string): boolean;
+const
+  Probe = 8192;
+var
+  Stream: TFileStream;
+  Text: string;
+  n: integer;
+begin
+  Result := False;
+  try
+    Stream := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
+    try
+      SetLength(Text, Probe);
+      n := Stream.Read(Text[1], Probe);
+      SetLength(Text, n);
+    finally
+      Stream.Free;
+    end;
+  except
+    Exit;
+  end;
+  Result := IsMailPatch(Text);
 end;
 
 { ---------------------------------------------------------------------------

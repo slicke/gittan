@@ -110,6 +110,8 @@ type
     procedure TestEditRemotes;
     procedure TestParseBisectRefs;
     procedure TestBisect;
+    procedure TestIsMailPatch;
+    procedure TestPatches;
   end;
 
 implementation
@@ -3286,6 +3288,118 @@ begin
   AssertEquals(Ids[6], State.Suspects[2]);
   AssertTrue(FRepo.Error, FRepo.BisectEnd);
   AssertEquals('', FRepo.Operation);
+end;
+
+procedure TGitRepoTest.TestIsMailPatch;
+begin
+  AssertTrue(IsMailPatch('From 1234abcd Mon Sep 17 00:00:00 2001'#10'From: A <a@b>'#10));
+  AssertTrue('blank lines first', IsMailPatch(#10#10'From 1234 Mon'#10));
+  AssertTrue('a header alone', IsMailPatch('Date: today'#10'From: A <a@b>'#10 +
+    'Subject: [PATCH] x'#10'  folded on'#10#10'body'#10));
+  AssertTrue('any case', IsMailPatch('FROM: A'#10'SUBJECT: x'#10));
+  AssertFalse('no subject', IsMailPatch('From: A <a@b>'#10#10'Subject: x'#10));
+  AssertFalse('a plain diff', IsMailPatch('diff --git a/x b/x'#10'--- a/x'#10'+++ b/x'#10));
+  AssertFalse('the header ends at a line that is none', IsMailPatch('From: A'#10 +
+    'not a header'#10'Subject: x'#10));
+  AssertFalse(IsMailPatch(''));
+  AssertFalse(IsMailPatchFile(FDir + PathDelim + 'missing.patch'));
+end;
+
+procedure TGitRepoTest.TestPatches;
+var
+  First, Second, Last, Out: string;
+  Commits: TGittanPatchCommits;
+  Files, One: TStringList;
+  Conflicts: boolean;
+  Applied: integer;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  First := Trim(Git(['rev-parse', 'HEAD']));
+  WriteFile('a.txt', 'one'#10'TWO'#10'three'#10);
+  Commit('second');
+  Second := Trim(Git(['rev-parse', 'HEAD']));
+  WriteFile('b.txt', 'b'#10);
+  Commit('third');
+  Last := Trim(Git(['rev-parse', 'HEAD']));
+
+  AssertTrue(FRepo.Error, FRepo.PatchCommits('', Last, Commits));
+  AssertEquals(1, Length(Commits));
+  AssertEquals('third', Commits[0].Subject);
+  AssertEquals(Last, Commits[0].Hash);
+  AssertTrue(FRepo.Error, FRepo.PatchCommits(Second, Last, Commits));
+  AssertEquals(2, Length(Commits));
+  AssertEquals('oldest first', 'second', Commits[0].Subject);
+  AssertTrue(FRepo.Error, FRepo.PatchCommits(First, Last, Commits));
+  AssertEquals('from the root commit', 3, Length(Commits));
+  AssertEquals('files', Commits[0].Subject);
+
+  Out := FDir + PathDelim + 'out';
+  Files := TStringList.Create;
+  One := TStringList.Create;
+  try
+    AssertTrue(FRepo.Error, FRepo.FormatPatches('', Last, Out + '1', True, Files));
+    AssertEquals(2, Files.Count);
+    AssertEquals('0000-cover-letter.patch', ExtractFileName(Files[0]));
+    AssertEquals('0001-third.patch', ExtractFileName(Files[1]));
+    AssertTrue(FRepo.Error, FRepo.FormatPatches(First, Last, Out + '2', False, Files));
+    AssertEquals('from the root commit', 3, Files.Count);
+    AssertTrue(FRepo.Error, FRepo.FormatPatches(Second, Last, Out, False, Files));
+    AssertEquals(2, Files.Count);
+    AssertEquals('0001-second.patch', ExtractFileName(Files[0]));
+    AssertEquals('0002-third.patch', ExtractFileName(Files[1]));
+    AssertTrue(FileExists(Files[1]));
+    AssertTrue(IsMailPatchFile(Files[0]));
+
+    { Committed, as their author made them. }
+    Git(['reset', '-q', '--hard', First]);
+    AssertTrue(FRepo.Error, FRepo.ApplyPatches(Files, True, Conflicts, Applied));
+    AssertEquals(2, Applied);
+    AssertEquals('third'#10'second'#10'files'#10, Git(['log', '--format=%s']));
+
+    { Into the work tree alone. }
+    Git(['reset', '-q', '--hard', First]);
+    AssertTrue(FRepo.Error, FRepo.ApplyPatches(Files, False, Conflicts, Applied));
+    AssertEquals(2, Applied);
+    AssertFalse(Conflicts);
+    AssertEquals(First, Trim(Git(['rev-parse', 'HEAD'])));
+    AssertEquals(' M a.txt'#10'?? b.txt'#10, Git(['status', '--porcelain', '--',
+      'a.txt', 'b.txt']));
+
+    { Changed but not staged, what --3way alone would refuse. }
+    Git(['reset', '-q', '--hard', First]);
+    Git(['clean', '-q', '-f', 'b.txt']);
+    WriteFile('a.txt', 'one'#10'two'#10'three'#10'four'#10);
+    One.Add(Files[0]);
+    AssertTrue(FRepo.Error, FRepo.ApplyPatches(One, False, Conflicts, Applied));
+    AssertEquals(1, Applied);
+
+    { A patch that does not fit merges with conflicts; the rest wait. }
+    Git(['reset', '-q', '--hard', First]);
+    WriteFile('a.txt', 'one'#10'deux'#10'three'#10);
+    Commit('deux');
+    AssertFalse(FRepo.ApplyPatches(Files, False, Conflicts, Applied));
+    AssertTrue(Conflicts);
+    AssertEquals(1, Applied);
+    AssertFalse('the second waits', FileExists(FDir + PathDelim + 'b.txt'));
+    AssertTrue(Pos('a.txt', Git(['ls-files', '-u'])) > 0);
+    AssertEquals('', FRepo.Operation);
+
+    { An am stops there, for the Commit section to carry on. }
+    Git(['reset', '-q', '--hard']);
+    AssertFalse(FRepo.ApplyPatches(Files, True, Conflicts, Applied));
+    AssertTrue(Conflicts);
+    AssertEquals(0, Applied);
+    AssertEquals('applying patches', FRepo.Operation);
+    AssertTrue(FRepo.Error, FRepo.AbortOperation);
+    AssertEquals('', FRepo.Operation);
+    AssertEquals('deux', Trim(Git(['log', '-1', '--format=%s'])));
+  finally
+    One.Free;
+    Files.Free;
+  end;
 end;
 
 initialization

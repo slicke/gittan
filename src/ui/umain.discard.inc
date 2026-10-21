@@ -548,6 +548,7 @@ begin
       (FView in [gvChanges, gvImage, gvBinary, gvTranslation]);
     FUndoRevertItem.Enabled := FRevertUndo.Count > 0;
     FCleanItem.Enabled := CanClean;
+    FApplyPatchesItem.Enabled := CanApplyPatches;
   end;
 end;
 
