@@ -53,6 +53,9 @@ type
     current branch changed since it left it (umain.branches.inc). }
   TGittanBranchListMode = (blSwitch, blMerge, blRebase, blBranchSince, blCurrentSince);
 
+  {** A bisect command RunBisect runs (umain.bisect.inc). }
+  TBisectStep = (bsStart, bsMark, bsEnd);
+
   {** One row of the change view. Line is the index of its diff line in
     the file's diff, rowGap for a row that stands for the unchanged lines
     GapFrom..GapTo hidden by View > Hide Unchanged Lines, rowFiller for
@@ -268,6 +271,12 @@ type
     { Abort and Skip for what git is in the middle of, and the merge
       message filled into the field (umain.conflicts.inc). }
     FAbortButton, FSkipButton: TButton;
+    { Where the bisect stands, and its box over the message
+      (umain.bisect.inc). }
+    FBisect: TGittanBisect;
+    FBisectBox, FBisectRow, FBisectEndRow: TPanel;
+    FBisectNote: TGittanHintBox;
+    FBisectGood, FBisectBad, FBisectSkip, FBisectShow, FBisectEnd: TButton;
     { The commit graph's menu (umain.commitactions.inc), built for the
       commit it is shown for, with that commit and the name it goes by. }
     FCommitPopup: TPopupMenu;
@@ -1170,6 +1179,15 @@ type
     procedure ContinueOperationClick;
     procedure SkipOperationClick(Sender: TObject);
     procedure AbortOperationClick(Sender: TObject);
+    procedure SetupBisect;
+    procedure UpdateBisectState;
+    procedure BisectButtonClick(Sender: TObject);
+    function RunBisect(AStep: TBisectStep; const ACommit: string;
+      AMark: TGittanBisectMark; const AGood: string): boolean;
+    procedure BisectReport(const ADone: string);
+    procedure BisectMarkCommit(const ACommit: string; AMark: TGittanBisectMark);
+    function BisectStartAt(const ABad, AGood: string): boolean;
+    procedure BisectEndClick;
     procedure StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode = pmAuto;
       const AArg: string = ''; const ARemote: string = '');
     procedure RemoteJobDone(Sender: TObject);
@@ -1573,6 +1591,32 @@ resourcestring
   rsCaWasReset = 'Reset %s to %s';
   rsCaConflicts = 'Stopped with conflicts: resolve them, then continue';
   rsCaRebase = 'Rebase Interactively from Here...';
+  rsCaBisect = 'Bisect';
+  rsCaBisectStartGood = 'Start Bisect: This Is Good, %s Is Bad';
+  rsCaBisectStartBad = 'Start Bisect: This Is Bad';
+  rsCaBisectGood = 'Mark as Good';
+  rsCaBisectBad = 'Mark as Bad';
+  rsCaBisectSkip = 'Skip: cannot be tested';
+  rsCaBisectEnd = 'End Bisect';
+  rsBisectGood = 'Good';
+  rsBisectBad = 'Bad';
+  rsBisectSkip = 'Skip';
+  rsBisectShow = 'Show Commit';
+  rsBisectEnd = 'End Bisect';
+  rsBisectWaitBoth = 'Bisecting: mark a commit with the problem as bad and one from before it as good, in the commit graph, or the one checked out here.';
+  rsBisectWaitGood = 'Bisecting: %s is bad. Mark a commit from before the problem as good, in the commit graph, or the one checked out here.';
+  rsBisectWaitBad = 'Bisecting: mark a commit with the problem as bad, in the commit graph, or the one checked out here.';
+  rsBisectTest = 'Test %s, the commit checked out, then mark it Good or Bad, or Skip it when it cannot be tested. %d commits are left to test, about %d steps.';
+  rsBisectTestLast = 'Test %s, the commit checked out, then mark it Good or Bad, or Skip it when it cannot be tested. It is the last one left to test.';
+  rsBisectFound = '%s is the first bad commit: %s';
+  rsBisectSuspects = 'Only skipped commits are left to test: the first bad commit is one of %s.';
+  rsBisectOnlySkipped = 'The bisect cannot narrow it down further';
+  rsBisectStarted = 'Started bisecting';
+  rsBisectMarkedGood = 'Marked %s as good';
+  rsBisectMarkedBad = 'Marked %s as bad';
+  rsBisectSkipped = 'Skipped %s';
+  rsBisectEnded = 'Ended the bisect, back on %s';
+  rsBisectEndedDetached = 'Ended the bisect';
   rsRebaseChoose = 'Choose Commits...';
   rsRiTitleFrom = 'Commits of %s after %s';
   rsRiNothing = '%s has no commits after %s: nothing to rewrite';
@@ -4452,6 +4496,7 @@ begin
   FAhead := ASnap.Ahead;
   FBehind := ASnap.Behind;
   FOperation := ASnap.Operation;
+  FBisect := ASnap.Bisect;
   if (FOperation = 'rebasing') and (ASnap.RebaseBranch <> '') then
     { HEAD is detached while a rebase stops; the branch is the one it
       rebases. }
@@ -5699,6 +5744,7 @@ const
 {$I umain.stash.inc}
 {$I umain.tags.inc}
 {$I umain.reflog.inc}
+{$I umain.bisect.inc}
 {$I umain.revert.inc}
 {$I umain.clean.inc}
 {$I umain.clone.inc}

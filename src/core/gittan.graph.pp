@@ -26,9 +26,9 @@ uses
 
 type
   {** What a ref on a commit is: the branch HEAD is on (or HEAD itself
-    when it is detached), another local branch, a remote-tracking branch
-    or a tag. }
-  TGittanRefKind = (grHead, grBranch, grRemote, grTag);
+    when it is detached), another local branch, a remote-tracking branch,
+    a tag, or a bisect's mark, named "bad", "good" or "skip". }
+  TGittanRefKind = (grHead, grBranch, grRemote, grTag, grBisect);
 
   TGittanGraphRef = record
     Name: string;
@@ -289,7 +289,13 @@ begin
         Add(Part, grRemote);
     end
     else if AnsiStartsStr('refs/tags/', Part) then
-      Add(Copy(Part, Length('refs/tags/') + 1, MaxInt), grTag);
+      Add(Copy(Part, Length('refs/tags/') + 1, MaxInt), grTag)
+    else if Part = 'refs/bisect/bad' then
+      Add('bad', grBisect)
+    else if AnsiStartsStr('refs/bisect/good-', Part) then
+      Add('good', grBisect)
+    else if AnsiStartsStr('refs/bisect/skip-', Part) then
+      Add('skip', grBisect);
     { Anything else (refs/stash, notes) is not shown. }
   end;
 end;

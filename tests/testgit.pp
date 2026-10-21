@@ -108,6 +108,8 @@ type
     procedure TestLooksLikeCloneUrl;
     procedure TestCloneAndInit;
     procedure TestEditRemotes;
+    procedure TestParseBisectRefs;
+    procedure TestBisect;
   end;
 
 implementation
@@ -3173,6 +3175,117 @@ begin
   end;
   AssertTrue(ReadRemotes(FDir, R, Err));
   AssertEquals(0, Length(R));
+end;
+
+procedure TGitRepoTest.TestParseBisectRefs;
+var
+  Bad: string;
+  Good, Skipped: TStringArray;
+begin
+  ParseBisectRefs('b1 refs/bisect/bad'#10'g1 refs/bisect/good-g1'#10 +
+    'g2 refs/bisect/good-g2'#10's1 refs/bisect/skip-s1'#10'odd'#10, Bad, Good, Skipped);
+  AssertEquals('b1', Bad);
+  AssertEquals(2, Length(Good));
+  AssertEquals('g2', Good[1]);
+  AssertEquals(1, Length(Skipped));
+  AssertEquals('s1', Skipped[0]);
+  ParseBisectRefs('', Bad, Good, Skipped);
+  AssertEquals('', Bad);
+  AssertEquals(0, Length(Good));
+end;
+
+{ Eight commits c1..c8, the bug in c5: bad from c5 on. }
+procedure TGitRepoTest.TestBisect;
+var
+  Ids: array[1..8] of string;
+  State: TGittanBisect;
+  Graph: TGittanGraphCommits;
+  i: integer;
+
+  function HasRef(const ARefs: TGittanGraphRefs; const AName: string): boolean;
+  var
+    Ref: TGittanGraphRef;
+  begin
+    Result := False;
+    for Ref in ARefs do
+      if (Ref.Kind = grBisect) and (Ref.Name = AName) then
+        Result := True;
+  end;
+
+  function Buggy: boolean;
+  var
+    Text: TStringList;
+  begin
+    Text := TStringList.Create;
+    try
+      Text.LoadFromFile(FDir + PathDelim + 'n.txt');
+      Result := StrToInt(Trim(Text.Text)) >= 5;
+    finally
+      Text.Free;
+    end;
+  end;
+
+begin
+  Git(['init', '-q']);
+  for i := 1 to 8 do
+  begin
+    WriteFile('n.txt', IntToStr(i) + #10);
+    Commit('c' + IntToStr(i));
+  end;
+  AssertTrue(FRepo.Open(FDir));
+  for i := 8 downto 1 do
+    Ids[i] := FRepo.CommitId('HEAD~' + IntToStr(8 - i));
+  AssertEquals('', FRepo.Operation);
+
+  { Started with the bad commit alone, it waits for a good one. }
+  AssertTrue(FRepo.Error, FRepo.BisectStart(Ids[8], ''));
+  AssertEquals('bisecting', FRepo.Operation);
+  AssertTrue(FRepo.BisectState(State));
+  AssertEquals(Ids[8], State.Bad);
+  AssertEquals(0, Length(State.Good));
+  AssertEquals(-1, State.Left);
+  AssertTrue(FRepo.GraphCommits(Graph));
+  AssertTrue('the graph shows the mark', HasRef(Graph[0].Refs, 'bad'));
+  AssertTrue(FRepo.Error, FRepo.BisectMark(Ids[1], bmGood));
+  AssertTrue(FRepo.BisectState(State));
+  AssertEquals(6, State.Left);
+  AssertTrue('git checked out one to test', FRepo.CommitId('HEAD') <> Ids[8]);
+
+  { Marking what is checked out leads to c5. }
+  for i := 1 to 8 do
+  begin
+    if State.Found <> '' then
+      Break;
+    if Buggy then
+      AssertTrue(FRepo.Error, FRepo.BisectMark('HEAD', bmBad))
+    else
+      AssertTrue(FRepo.Error, FRepo.BisectMark('HEAD', bmGood));
+    AssertTrue(FRepo.BisectState(State));
+  end;
+  AssertEquals(Ids[5], State.Found);
+  AssertEquals('c5', State.Subject);
+  AssertEquals(0, State.Left);
+  AssertFalse('a bad commit is not good too', FRepo.BisectMark(Ids[5], bmGood));
+  AssertTrue(FRepo.Error, FRepo.BisectEnd);
+  AssertEquals('', FRepo.Operation);
+  AssertEquals(Ids[8], FRepo.CommitId('HEAD'));
+
+  { Skipping the neighbours of the bug leaves suspects instead. }
+  AssertTrue(FRepo.Error, FRepo.BisectStart(Ids[8], Ids[1]));
+  AssertTrue(FRepo.Error, FRepo.BisectMark(Ids[3], bmGood));
+  AssertTrue(FRepo.Error, FRepo.BisectMark(Ids[7], bmBad));
+  AssertTrue(FRepo.Error, FRepo.BisectMark(Ids[4], bmSkip));
+  AssertTrue(FRepo.Error, FRepo.BisectMark(Ids[6], bmBad));
+  AssertTrue(FRepo.BisectState(State));
+  AssertEquals(1, State.Left);
+  AssertTrue('only skipped ones left counts as marked', FRepo.BisectMark(Ids[5], bmSkip));
+  AssertTrue(FRepo.BisectState(State));
+  AssertEquals(0, State.Left);
+  AssertEquals('', State.Found);
+  AssertEquals(3, Length(State.Suspects));
+  AssertEquals(Ids[6], State.Suspects[2]);
+  AssertTrue(FRepo.Error, FRepo.BisectEnd);
+  AssertEquals('', FRepo.Operation);
 end;
 
 initialization

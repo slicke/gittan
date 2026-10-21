@@ -1309,7 +1309,9 @@ end;
 
 { The refs as chips from X: the branch HEAD is on filled in the accent,
   other local branches outlined in it, remote branches in the dim color,
-  tags in the tag color; a long name is cut. The chips stop before
+  tags in the tag color, a bisect's marks red for bad, green for good
+  and dim for skip, in shades that read on either background; a long
+  name is cut. The chips stop before
   ARight less some room for the subject. Returns where the subject goes. }
 function TGittanCommitGraph.PaintRefs(ACanvas: TCanvas; const ARefs: TGittanGraphRefs;
   X, ACenterY, ARight: integer): integer;
@@ -1341,6 +1343,13 @@ begin
     case ARefs[i].Kind of
       grHead, grBranch: Edge := FAccent;
       grRemote: Edge := FDim;
+      grBisect:
+        if RefName = 'bad' then
+          Edge := RGBToColor(214, 76, 76)
+        else if RefName = 'good' then
+          Edge := RGBToColor(56, 158, 92)
+        else
+          Edge := FDim;
       else
         Edge := FTag;
     end;

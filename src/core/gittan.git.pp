@@ -99,6 +99,24 @@ type
   end;
   TGittanReflog = array of TGittanReflogEntry;
 
+  {** Where a bisect stands, from the refs git keeps under refs/bisect:
+    the commit marked bad, those marked good and those skipped. Once a
+    bad and a good commit are known, Left is how many commits are left
+    to test (those the bad one has and no good one has, less the bad one
+    and the skipped ones), else -1. When none is left, Found is the
+    first bad commit with its Subject, or, when skipped commits stand in
+    the way, Suspects are the commits it could be, the bad one among
+    them. }
+  TGittanBisect = record
+    Bad, Found, Subject: string;
+    Good, Skipped, Suspects: TStringArray;
+    Left: integer;
+  end;
+
+  {** What a commit is marked as in a bisect: good (from before the
+    bug), bad (with it), or skipped (it cannot be tested). }
+  TGittanBisectMark = (bmGood, bmBad, bmSkip);
+
   TGittanRepoSnapshot = record
     Ok: boolean;
     Error: string;
@@ -112,6 +130,9 @@ type
       the work tree is clean, since only the summary of a clean tree
       shows them. }
     Recent: TGittanCommitLines;
+    {** Where the bisect stands, from BisectState, read only while
+      Operation is "bisecting". }
+    Bisect: TGittanBisect;
   end;
   PGittanRepoSnapshot = ^TGittanRepoSnapshot;
 
@@ -435,6 +456,24 @@ type
       reaches marked Lost (`git rev-list <commits> --not --all`). An
       unborn HEAD has none. }
     function Reflog(out AList: TGittanReflog; ALimit: integer = 1000): boolean;
+    {** Where the bisect in progress stands: the marks from `git
+      for-each-ref refs/bisect` (read by ParseBisectRefs), the commits
+      left from `git rev-list <bad> --not <good>...`. False when git
+      failed. }
+    function BisectState(out AState: TGittanBisect): boolean;
+    {** Starts a bisect (`git bisect start`), with ABad marked bad and
+      AGood good when they are given; with both git checks out the
+      first commit to test. }
+    function BisectStart(const ABad, AGood: string): boolean;
+    {** Marks the commit ACommit (HEAD, the one checked out to test, or
+      another) as AMark (`git bisect good|bad|skip`); git then checks
+      out the next commit to test, or names the first bad one. The mark
+      counts as made when only skipped commits are left to test, which
+      git ends with 2. }
+    function BisectMark(const ACommit: string; AMark: TGittanBisectMark): boolean;
+    {** Ends the bisect (`git bisect reset`): HEAD goes back to the
+      branch or commit it was on when the bisect started. }
+    function BisectEnd: boolean;
     {** Whether the commit AAncestor is in the history of ADescendant. }
     function IsAncestor(const AAncestor, ADescendant: string): boolean;
     {** Merges ARef (a branch, tag or commit) into the branch HEAD is on,
@@ -832,7 +871,15 @@ function ParseTags(const AOutput: string): TGittanTags;
   that do not hold three fields are skipped. }
 function ParseReflog(const AOutput: string): TGittanReflog;
 
+{** The marks of a bisect in AOutput, what `git for-each-ref` prints
+  with BisectFormat: per line the commit and the ref, refs/bisect/bad
+  or refs/bisect/good-<id> or refs/bisect/skip-<id>, separated by a
+  space; into ABad, AGood and ASkipped. Other lines are skipped. }
+procedure ParseBisectRefs(const AOutput: string; out ABad: string;
+  out AGood, ASkipped: TStringArray);
+
 const
+  BisectFormat = '%(objectname) %(refname)';
   ReflogFormat = '%H%x1f%gd%x1f%gs';
   TagFormat = '%(refname:strip=2)%1f%(objectname)%1f%(*objectname)%1f' +
     '%(creatordate:unix)%1f%(contents:subject)';
@@ -3402,6 +3449,144 @@ begin
   end;
 end;
 
+procedure ParseBisectRefs(const AOutput: string; out ABad: string;
+  out AGood, ASkipped: TStringArray);
+var
+  Lines: TStringList;
+  Line, Id, Ref: string;
+  Space: integer;
+begin
+  ABad := '';
+  AGood := nil;
+  ASkipped := nil;
+  Lines := TStringList.Create;
+  try
+    Lines.Text := AOutput;
+    for Line in Lines do
+    begin
+      Space := Pos(' ', Line);
+      if Space = 0 then
+        Continue;
+      Id := Copy(Line, 1, Space - 1);
+      Ref := Trim(Copy(Line, Space + 1, MaxInt));
+      if Ref = 'refs/bisect/bad' then
+        ABad := Id
+      else if AnsiStartsStr('refs/bisect/good-', Ref) then
+      begin
+        SetLength(AGood, Length(AGood) + 1);
+        AGood[High(AGood)] := Id;
+      end
+      else if AnsiStartsStr('refs/bisect/skip-', Ref) then
+      begin
+        SetLength(ASkipped, Length(ASkipped) + 1);
+        ASkipped[High(ASkipped)] := Id;
+      end;
+    end;
+  finally
+    Lines.Free;
+  end;
+end;
+
+function TGittanRepo.BisectState(out AState: TGittanBisect): boolean;
+var
+  Output, Id: string;
+  Args: array of string;
+  Commits: TStringList;
+  i: integer;
+begin
+  AState := Default(TGittanBisect);
+  AState.Left := -1;
+  Result := (FRoot <> '') and RunGit(FRoot, ['for-each-ref', '--format=' + BisectFormat,
+    'refs/bisect'], Output);
+  if not Result then
+    Exit;
+  ParseBisectRefs(Output, AState.Bad, AState.Good, AState.Skipped);
+  if (AState.Bad = '') or (Length(AState.Good) = 0) then
+    Exit;
+  Args := ['rev-list', AState.Bad, '--not'];
+  for Id in AState.Good do
+  begin
+    SetLength(Args, Length(Args) + 1);
+    Args[High(Args)] := Id;
+  end;
+  if not RunGit(FRoot, Args, Output) then
+    Exit(False);
+  Commits := TStringList.Create;
+  try
+    Commits.Text := Output;
+    { The bad commit and the skipped ones are not to test; what is left
+      when none is, are the commits the first bad one could be. }
+    AState.Left := 0;
+    for i := 0 to Commits.Count - 1 do
+      if Commits[i] = AState.Bad then
+        Continue
+      else if AnsiIndexStr(Commits[i], AState.Skipped) >= 0 then
+      begin
+        SetLength(AState.Suspects, Length(AState.Suspects) + 1);
+        AState.Suspects[High(AState.Suspects)] := Commits[i];
+      end
+      else
+        Inc(AState.Left);
+  finally
+    Commits.Free;
+  end;
+  if AState.Left > 0 then
+    AState.Suspects := nil
+  else if Length(AState.Suspects) > 0 then
+  begin
+    SetLength(AState.Suspects, Length(AState.Suspects) + 1);
+    AState.Suspects[High(AState.Suspects)] := AState.Bad;
+  end
+  else
+  begin
+    AState.Found := AState.Bad;
+    if RunGit(FRoot, ['log', '-1', '--format=%s', AState.Found], Output) then
+      AState.Subject := Trim(Output);
+  end;
+end;
+
+function TGittanRepo.BisectStart(const ABad, AGood: string): boolean;
+var
+  Output: string;
+begin
+  if FRoot = '' then
+    Exit(False);
+  if ABad = '' then
+    Result := RunGit(FRoot, ['bisect', 'start'], Output)
+  else if AGood = '' then
+    Result := RunGit(FRoot, ['bisect', 'start', ABad], Output)
+  else
+    Result := RunGit(FRoot, ['bisect', 'start', ABad, AGood], Output);
+end;
+
+{ The commit by its id: git takes HEAD~1 and the like from the commit
+  being tested, not from where the bisect started. }
+function TGittanRepo.BisectMark(const ACommit: string; AMark: TGittanBisectMark): boolean;
+const
+  Words: array[TGittanBisectMark] of string = ('good', 'bad', 'skip');
+var
+  Hash, Output: string;
+begin
+  if FRoot = '' then
+    Exit(False);
+  Hash := CommitId(ACommit);
+  if Hash = '' then
+  begin
+    FError := 'No commit ' + ACommit + '.';
+    Exit(False);
+  end;
+  Result := RunGit(FRoot, ['bisect', Words[AMark], Hash], Output);
+  if not Result and (Pos('only ''skip''ped commits left', FError) > 0) then
+    Result := True;
+end;
+
+function TGittanRepo.BisectEnd: boolean;
+var
+  Output: string;
+begin
+  Result := (FRoot <> '') and RunGit(FRoot, ['bisect', 'reset'], Output);
+end;
+
 function TGittanRepo.DeleteTag(const AName: string): boolean;
 var
   Output: string;
@@ -4380,6 +4565,10 @@ begin
   ASnap.Operation := Operation;
   if ASnap.Operation = 'rebasing' then
     ASnap.RebaseBranch := RebaseBranch;
+  if ASnap.Operation = 'bisecting' then
+    BisectState(ASnap.Bisect)
+  else
+    ASnap.Bisect.Left := -1;
   Stashes(ASnap.Stashes);
   if ASnap.Ok and (Length(ASnap.Stats) = 0) then
     RecentCommits(ASnap.Recent);
@@ -4531,8 +4720,11 @@ var
   Seconds: int64;
 begin
   ACommits := nil;
+  { git leaves a bisect's refs out of the decorations unless asked. }
   Result := (FRoot <> '') and RunGit(FRoot, ['log', '--no-color', '--topo-order',
-    '--decorate=full', '-z', '-n', IntToStr(AMax),
+    '--decorate=full', '--decorate-refs=HEAD', '--decorate-refs=refs/heads/',
+    '--decorate-refs=refs/remotes/', '--decorate-refs=refs/tags/',
+    '--decorate-refs=refs/bisect/', '-z', '-n', IntToStr(AMax),
     '--format=%H%x1f%P%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%s%x1f%b',
     '--branches', '--remotes', '--tags', 'HEAD'], Output);
   if not Result then

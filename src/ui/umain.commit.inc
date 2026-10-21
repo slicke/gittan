@@ -58,8 +58,10 @@ begin
   FCommitBox.ChildSizing.LeftRightSpacing := 8;
   FCommitBox.ChildSizing.TopBottomSpacing := 6;
   FCommitBox.Parent := FCommitPanel;
+  SetupBisect;
   FCommitMemo := TMemo.Create(Self);
   FCommitMemo.Align := alTop;
+  FCommitMemo.Top := 500;
   FCommitMemo.Height := 84;
   FCommitMemo.WordWrap := True;
   FCommitMemo.ScrollBars := ssAutoVertical;
@@ -138,6 +140,9 @@ begin
     FCommitNote.SetColors(RGBToColor(33, 44, 58), RGBToColor(44, 66, 92),
       RGBToColor(56, 34, 36), RGBToColor(100, 50, 54));
     FCommitNote.GlyphColor := RGBToColor(150, 150, 150);
+    FBisectNote.Font.Color := FCommitNote.Font.Color;
+    FBisectNote.SetColors(RGBToColor(33, 44, 58), RGBToColor(44, 66, 92),
+      RGBToColor(56, 34, 36), RGBToColor(100, 50, 54));
   end
   else
   begin
@@ -147,6 +152,9 @@ begin
     FCommitNote.SetColors(RGBToColor(234, 243, 252), RGBToColor(200, 222, 245),
       RGBToColor(253, 236, 236), RGBToColor(242, 198, 198));
     FCommitNote.GlyphColor := RGBToColor(110, 110, 110);
+    FBisectNote.Font.Color := FCommitNote.Font.Color;
+    FBisectNote.SetColors(RGBToColor(234, 243, 252), RGBToColor(200, 222, 245),
+      RGBToColor(253, 236, 236), RGBToColor(242, 198, 198));
   end;
 end;
 
@@ -477,6 +485,7 @@ begin
   else
     FCommitNote.Icon := -1;
   FCommitNote.Visible := Note <> '';
+  UpdateBisectState;
   if FCommitItem <> nil then
     FCommitItem.Enabled := FRepo.Root <> '';
 end;

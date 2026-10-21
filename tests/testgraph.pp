@@ -138,6 +138,12 @@ begin
   AssertTrue(Refs[2].Kind = grTag);
   AssertEquals('feature/x', Refs[3].Name);
   AssertTrue(Refs[3].Kind = grBranch);
+  Refs := ParseGraphRefs('refs/bisect/bad, refs/bisect/good-0123abc, refs/bisect/skip-0123abc');
+  AssertEquals(3, Length(Refs));
+  AssertEquals('bad', Refs[0].Name);
+  AssertTrue(Refs[0].Kind = grBisect);
+  AssertEquals('good', Refs[1].Name);
+  AssertEquals('skip', Refs[2].Name);
   Refs := ParseGraphRefs('HEAD');
   AssertEquals(1, Length(Refs));
   AssertTrue('detached', Refs[0].Kind = grHead);

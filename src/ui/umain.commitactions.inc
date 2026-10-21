@@ -20,7 +20,9 @@
   accent in the graph, which stays open), and the menu of another then
   offers Compare with Marked <name>: the base becomes the range from
   the older of the two to the newer (by their times, FMarkDate), so the
-  views show what changed between them going forward. }
+  views show what changed between them going forward. The Bisect
+  submenu starts a bisect from the commit, or marks it while git
+  bisects (umain.bisect.inc). }
 const
   caShow = 1;
   caCompare = 2;
@@ -39,11 +41,17 @@ const
   caCompareMarked = 15;
   caRebase = 16;
   caBrowse = 17;
+  caBisectStartGood = 18;
+  caBisectStartBad = 19;
+  caBisectGood = 20;
+  caBisectBad = 21;
+  caBisectSkip = 22;
+  caBisectEnd = 23;
 
 procedure TForm1.GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
   const AScreenPos: TPoint);
 var
-  Busy, InHead, IsHead, IsMerge: boolean;
+  Busy, Jobs, InHead, IsHead, IsMerge: boolean;
   Known: string;
   i: integer;
   Item, Sub: TMenuItem;
@@ -78,7 +86,8 @@ begin
   if FRepo.Root = '' then
     Exit;
   FActionCommit := ACommit;
-  Busy := (FOperation <> '') or (FCommitJob <> nil) or (FRemoteJob <> nil);
+  Jobs := (FCommitJob <> nil) or (FRemoteJob <> nil);
+  Busy := (FOperation <> '') or Jobs;
   InHead := FRepo.IsAncestor(ACommit.Hash, 'HEAD');
   IsMerge := Length(ACommit.Parents) > 1;
   IsHead := False;
@@ -128,6 +137,23 @@ begin
   Add(Sub, rsCaResetSoft, caResetSoft);
   Add(Sub, rsCaResetMixed, caResetMixed);
   Add(Sub, rsCaResetHard, caResetHard);
+  Sub := Add(nil, rsCaBisect, 0, not Jobs and ((FOperation = '') or (FOperation = 'bisecting')));
+  Sub.OnClick := nil;
+  if FOperation = 'bisecting' then
+  begin
+    Add(Sub, rsCaBisectGood, caBisectGood);
+    Add(Sub, rsCaBisectBad, caBisectBad);
+    Add(Sub, rsCaBisectSkip, caBisectSkip);
+    Sub.Add(NewLine);
+    Add(Sub, rsCaBisectEnd, caBisectEnd);
+  end
+  else
+  begin
+    { A good commit for the bisect is one HEAD has, so HEAD is bad. }
+    Add(Sub, Format(rsCaBisectStartGood, [Amp(ResetTarget)]), caBisectStartGood,
+      InHead and not IsHead);
+    Add(Sub, rsCaBisectStartBad, caBisectStartBad);
+  end;
   Line;
   Add(nil, rsCopyHash, caCopy);
   if FHasGitHubCli then
@@ -189,6 +215,23 @@ begin
       OpenOnGitHub([Hash]);
     caRebase:
       RebaseInteractiveAsk(Hash, Short, True);
+    caBisectStartGood, caBisectStartBad, caBisectGood, caBisectBad, caBisectSkip:
+    begin
+      case (Sender as TMenuItem).Tag of
+        caBisectStartGood: BisectStartAt('HEAD', Hash);
+        caBisectStartBad: BisectStartAt(Hash, '');
+        caBisectGood: BisectMarkCommit(Hash, bmGood);
+        caBisectBad: BisectMarkCommit(Hash, bmBad);
+        else
+          BisectMarkCommit(Hash, bmSkip);
+      end;
+      { The graph again for the next mark, until the bisect is done. }
+      if (FOperation = 'bisecting') and (FBisect.Found = '') and
+        (Length(FBisect.Suspects) = 0) then
+        ShowCommitGraph;
+    end;
+    caBisectEnd:
+      BisectEndClick;
     caBranch, caTag, caMerge, caCherryPick, caRevert, caResetSoft, caResetMixed, caResetHard:
     begin
       Values := nil;
