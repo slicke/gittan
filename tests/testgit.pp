@@ -97,6 +97,8 @@ type
     procedure TestUpstream;
     procedure TestParseTags;
     procedure TestTags;
+    procedure TestParseReflog;
+    procedure TestReflog;
   end;
 
 implementation
@@ -2881,6 +2883,53 @@ begin
   finally
     RemoveTree(Remote);
   end;
+end;
+
+procedure TGitRepoTest.TestParseReflog;
+var
+  Log: TGittanReflog;
+begin
+  Log := ParseReflog('aaa'#31'HEAD@{1700000000}'#31'reset: moving to HEAD~1'#10 +
+    'bbb'#31'HEAD@{1600000000}'#31'commit: a: b'#10'broken'#31'x'#10);
+  AssertEquals(2, Length(Log));
+  AssertEquals('aaa', Log[0].Commit);
+  AssertEquals(1700000000, Log[0].Time);
+  AssertEquals('reset: moving to HEAD~1', Log[0].Subject);
+  AssertEquals('commit: a: b', Log[1].Subject);
+  AssertFalse(Log[1].Lost);
+end;
+
+procedure TGitRepoTest.TestReflog;
+var
+  Log: TGittanReflog;
+  First, Second: string;
+begin
+  Git(['init', '-q']);
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue('an unborn HEAD has an empty reflog', FRepo.Reflog(Log));
+  AssertEquals(0, Length(Log));
+  MakeHistory;
+  First := FRepo.CommitId('HEAD');
+  WriteFile('a.txt', 'later'#10);
+  Commit('later');
+  Second := FRepo.CommitId('HEAD');
+  AssertTrue(FRepo.Error, FRepo.Reset(First, rmHard));
+  AssertTrue(FRepo.Error, FRepo.Reflog(Log));
+  AssertEquals(3, Length(Log));
+  AssertEquals(First, Log[0].Commit);
+  AssertEquals('reset: moving to ' + First, Log[0].Subject);
+  AssertTrue(Log[0].Time > 0);
+  AssertFalse(Log[0].Lost);
+  AssertEquals(Second, Log[1].Commit);
+  AssertEquals('commit: later', Log[1].Subject);
+  AssertTrue('only the reflog keeps it', Log[1].Lost);
+  AssertFalse(Log[2].Lost);
+  AssertTrue(FRepo.Reflog(Log, 1));
+  AssertEquals(1, Length(Log));
+
+  AssertTrue(FRepo.Error, FRepo.CreateBranch('saved', Second, False));
+  AssertTrue(FRepo.Reflog(Log));
+  AssertFalse('a branch keeps it now', Log[1].Lost);
 end;
 
 initialization

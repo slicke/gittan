@@ -121,7 +121,7 @@ begin
     not Busy and not InHead and not IsMerge);
   Add(nil, rsCaRevert, caRevert, not Busy and InHead and not IsMerge);
   Add(nil, rsCaRebase, caRebase, not Busy and InHead and not IsHead);
-  Sub := Add(nil, Format(rsCaReset, [Amp(FBranch)]), 0, not Busy);
+  Sub := Add(nil, Format(rsCaReset, [Amp(ResetTarget)]), 0, not Busy);
   Sub.OnClick := nil;
   Add(Sub, rsCaResetSoft, caResetSoft);
   Add(Sub, rsCaResetMixed, caResetMixed);
@@ -210,15 +210,7 @@ begin
             caResetSoft: Mode := rmSoft;
             caResetHard: Mode := rmHard;
           end;
-          case Mode of
-            rmSoft: Note := rsCaResetSoftAsk;
-            rmHard: Note := rsCaResetHardAsk;
-            else
-              Note := rsCaResetMixedAsk;
-          end;
-          if QuestionDlg(rsCaResetTitle, Format(rsCaResetAsk, [FBranch, Short]) + LineEnding +
-            LineEnding + Note, mtWarning, [mrYes, rsCaResetAction, mrCancel, rsCancelButton,
-            'IsCancel', 'IsDefault'], 0) <> mrYes then
+          if not ResetAsk(Hash, Short, Mode) then
             Exit;
         end;
       end;
@@ -256,7 +248,7 @@ begin
           else
           begin
             Ok := FRepo.Reset(Hash, Mode);
-            Note := Format(rsCaWasReset, [FBranch, Short]);
+            Note := Format(rsCaWasReset, [ResetTarget, Short]);
           end;
         end;
       finally
@@ -282,4 +274,50 @@ begin
         ShowCommitGraph;
     end;
   end;
+end;
+
+{ What a reset moves: the current branch, or HEAD while it is on none. }
+function TForm1.ResetTarget: string;
+begin
+  if FBranch <> '' then
+    Result := FBranch
+  else
+    Result := 'HEAD';
+end;
+
+{ Asks before a reset to AHash (AShort), saying which commits leave the
+  branch and what AMode keeps. From the reflog the commit may be ahead
+  of HEAD, or on another line, and not only behind it. }
+function TForm1.ResetAsk(const AHash, AShort: string; AMode: TGittanResetMode): boolean;
+var
+  Ask, Note: string;
+  Forward: boolean;
+begin
+  Forward := False;
+  if FRepo.IsAncestor(AHash, 'HEAD') then
+    Ask := rsCaResetAsk
+  else if FRepo.IsAncestor('HEAD', AHash) then
+  begin
+    Ask := rsCaResetForwardAsk;
+    Forward := True;
+  end
+  else
+    Ask := rsCaResetAwayAsk;
+  { Going forward no commit leaves, so only a hard reset loses something. }
+  case AMode of
+    rmSoft: Note := rsCaResetSoftAsk;
+    rmHard: Note := rsCaResetHardAsk;
+    else
+      Note := rsCaResetMixedAsk;
+  end;
+  if Forward then
+    if AMode = rmHard then
+      Note := rsCaResetForwardHardAsk
+    else
+      Note := '';
+  Ask := Format(Ask, [ResetTarget, AShort]);
+  if Note <> '' then
+    Ask := Ask + LineEnding + LineEnding + Note;
+  Result := QuestionDlg(rsCaResetTitle, Ask, mtWarning, [mrYes, rsCaResetAction, mrCancel,
+    rsCancelButton, 'IsCancel', 'IsDefault'], 0) = mrYes;
 end;

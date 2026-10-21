@@ -302,6 +302,7 @@ begin
   FTagsItem.Enabled := Has;
   FNewTagItem.Enabled := Has;
   FPushTagsItem.Enabled := Has and (FRemoteJob = nil) and (FCommitJob = nil);
+  FReflogItem.Enabled := Has;
 end;
 
 { ---------------------------------------------------------------------------

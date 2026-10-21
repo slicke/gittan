@@ -450,6 +450,16 @@ type
     FMenuTag: TGittanTag;
     FTagRemote: string;
     FTagsItem, FNewTagItem, FPushTagsItem: TMenuItem;
+    { The reflog (umain.reflog.inc): HEAD's reflog as the list read it
+      when it opened, the list with, per row, the index in FReflog of
+      its line (ReflogRowHeader for the header), the menu of a line and
+      the line it is for, and the Branch menu's item. }
+    FReflog: TGittanReflog;
+    FReflogPopup: TGittanPopupList;
+    FReflogRows: TIntegerDynArray;
+    FReflogMenu: TPopupMenu;
+    FMenuReflog: TGittanReflogEntry;
+    FReflogItem: TMenuItem;
     { Stashes (umain.stash.inc): what the last snapshot listed, the list
       that drops from the status bar's stash chip with, per row, the
       index in FStashes of its stash (StashRowHeader, StashRowNew for
@@ -1069,11 +1079,18 @@ type
     procedure TagMenuClick(Sender: TObject);
     procedure NewTagAsk;
     procedure CheckoutTagAsk(const ATag: TGittanTag);
-    procedure BranchFromTagAsk(const ATag: TGittanTag);
+    procedure BranchAtAsk(const ALabel, ACommit: string);
     procedure DeleteTagAsk(const ATag: TGittanTag);
     procedure MenuTagsClick(Sender: TObject);
     procedure MenuNewTagClick(Sender: TObject);
     procedure MenuPushTagsClick(Sender: TObject);
+    procedure ShowReflogList(const AScreenRect: TRect);
+    procedure ReflogPopupPick(Sender: TObject; AIndex: integer);
+    procedure ReflogContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
+    procedure ReflogMenuClick(Sender: TObject);
+    procedure MenuReflogClick(Sender: TObject);
+    function ResetTarget: string;
+    function ResetAsk(const AHash, AShort: string; AMode: TGittanResetMode): boolean;
     function StashLabel(const AStash: TGittanStash): string;
     function StashOfBase: integer;
     function StashBusy: boolean;
@@ -1497,9 +1514,12 @@ resourcestring
   rsCaTagMessage = 'Message (optional, makes it annotated)';
   rsCaResetTitle = 'Reset';
   rsCaResetAsk = 'Move %s to %s? The commits after it leave the branch.';
+  rsCaResetForwardAsk = 'Move %s forward to %s? No commit leaves the branch.';
+  rsCaResetAwayAsk = 'Move %s to %s? The commits it has that %1:s lacks leave the branch.';
   rsCaResetSoftAsk = 'Their changes stay staged.';
   rsCaResetMixedAsk = 'Their changes stay in the files, unstaged.';
   rsCaResetHardAsk = 'Their changes and every uncommitted change to a tracked file are lost.';
+  rsCaResetForwardHardAsk = 'Every uncommitted change to a tracked file is lost.';
   rsCaResetAction = 'Reset';
   rsCaBranched = 'Created and switched to %s';
   rsCaTagged = 'Tagged %s as %s';
@@ -1594,6 +1614,11 @@ resourcestring
   rsNoTags = 'No tags';
   rsTagNewRow = 'New Tag at HEAD...';
   rsFilterTags = 'Filter tags';
+  rsReflogItem = 'Re&flog...';
+  rsReflog = 'Where HEAD has been';
+  rsNoReflog = 'The reflog is empty';
+  rsReflogLost = 'only in the reflog';
+  rsFilterReflog = 'Filter the reflog';
   rsTmCheckout = 'Check Out...';
   rsTmPush = 'Push to %s';
   rsTmCopy = 'Copy Name';
@@ -2269,6 +2294,12 @@ begin
   FTagPopup.FilterHint := rsFilterTags;
   FTagPopup.OnPick := @TagPopupPick;
   FTagPopup.OnContext := @TagContext;
+  FReflogMenu := TPopupMenu.Create(Self);
+  FReflogPopup := TGittanPopupList.Create(Self);
+  FReflogPopup.Parent := Self;
+  FReflogPopup.FilterHint := rsFilterReflog;
+  FReflogPopup.OnPick := @ReflogPopupPick;
+  FReflogPopup.OnContext := @ReflogContext;
   { The stash list pops up under the status bar's stash chip. }
   FStashMenu := TPopupMenu.Create(Self);
   FStashPopup := TGittanPopupList.Create(Self);
@@ -2642,6 +2673,9 @@ begin
     FTagPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
+    FReflogPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
+      RGBToColor(100, 160, 240));
     FGraph.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240), RGBToColor(227, 179, 65));
@@ -2709,6 +2743,9 @@ begin
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
     FTagPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
+      RGBToColor(0, 110, 230));
+    FReflogPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
     FGraph.SetColors(clWhite, RGBToColor(30, 30, 30),
@@ -3161,6 +3198,8 @@ begin
   FTagsItem := AddItem(BranchMenu, rsTagsItem, 0, @MenuTagsClick);
   FNewTagItem := AddItem(BranchMenu, rsNewTagItem, 0, @MenuNewTagClick);
   FPushTagsItem := AddItem(BranchMenu, rsPushTagsItem, 0, @MenuPushTagsClick);
+  BranchMenu.Add(NewLine);
+  FReflogItem := AddItem(BranchMenu, rsReflogItem, 0, @MenuReflogClick);
   UpdateBranchItems;
 
   { The Stash menu (umain.stash.inc). }
@@ -5592,6 +5631,7 @@ const
 {$I umain.rebase.inc}
 {$I umain.stash.inc}
 {$I umain.tags.inc}
+{$I umain.reflog.inc}
 {$I umain.revert.inc}
 {$I umain.commit.inc}
 {$I umain.remote.inc}

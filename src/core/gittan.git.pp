@@ -86,6 +86,19 @@ type
   end;
   TGittanTags = array of TGittanTag;
 
+  {** A line of HEAD's reflog: the commit HEAD was on after the move,
+    when HEAD moved there in Unix seconds, what git wrote of the move
+    ("commit: subject", "reset: moving to HEAD~1", "checkout: moving
+    from main to topic") and whether the commit is reachable from no
+    ref, so that only the reflog keeps it. }
+  TGittanReflogEntry = record
+    Commit: string;
+    Time: int64;
+    Subject: string;
+    Lost: boolean;
+  end;
+  TGittanReflog = array of TGittanReflogEntry;
+
   TGittanRepoSnapshot = record
     Ok: boolean;
     Error: string;
@@ -378,6 +391,11 @@ type
     {** Deletes the tag AName on ARemote (`git push <remote> --delete
       refs/tags/<name>`), leaving the local one. Goes to the network. }
     function DeleteRemoteTag(const ARemote, AName: string): boolean;
+    {** The newest ALimit lines of HEAD's reflog, newest first (`git log
+      -g`, read by ParseReflog), those whose commit no ref and not HEAD
+      reaches marked Lost (`git rev-list <commits> --not --all`). An
+      unborn HEAD has none. }
+    function Reflog(out AList: TGittanReflog; ALimit: integer = 1000): boolean;
     {** Whether the commit AAncestor is in the history of ADescendant. }
     function IsAncestor(const AAncestor, ADescendant: string): boolean;
     {** Merges ARef (a branch, tag or commit) into the branch HEAD is on,
@@ -754,7 +772,14 @@ procedure ParseStashSubject(const ASubject: string; out ABranch, AMessage: strin
   skipped. }
 function ParseTags(const AOutput: string): TGittanTags;
 
+{** The lines of HEAD's reflog in AOutput, what `git log -g --date=unix`
+  prints with ReflogFormat: per line the commit, the selector with the
+  time (HEAD@{1700000000}) and the subject, separated by #31. Lines
+  that do not hold three fields are skipped. }
+function ParseReflog(const AOutput: string): TGittanReflog;
+
 const
+  ReflogFormat = '%H%x1f%gd%x1f%gs';
   TagFormat = '%(refname:strip=2)%1f%(objectname)%1f%(*objectname)%1f' +
     '%(creatordate:unix)%1f%(contents:subject)';
 
@@ -3055,6 +3080,86 @@ begin
     '--sort=-creatordate', '--format=' + TagFormat, 'refs/tags'], Output);
   if Result then
     AList := ParseTags(Output);
+end;
+
+function ParseReflog(const AOutput: string): TGittanReflog;
+var
+  Lines: TStringList;
+  Fields: TStringArray;
+  i, n, Open: integer;
+begin
+  Result := nil;
+  Lines := TStringList.Create;
+  try
+    Lines.Text := AOutput;
+    SetLength(Result, Lines.Count);
+    n := 0;
+    for i := 0 to Lines.Count - 1 do
+    begin
+      Fields := Lines[i].Split([#31], 3);
+      if (Length(Fields) < 3) or (Fields[0] = '') then
+        Continue;
+      Result[n].Commit := Fields[0];
+      Open := Pos('@{', Fields[1]);
+      if Open > 0 then
+        Result[n].Time := StrToInt64Def(Copy(Fields[1], Open + 2,
+          Length(Fields[1]) - Open - 2), 0)
+      else
+        Result[n].Time := 0;
+      Result[n].Subject := Fields[2];
+      Result[n].Lost := False;
+      Inc(n);
+    end;
+    SetLength(Result, n);
+  finally
+    Lines.Free;
+  end;
+end;
+
+function TGittanRepo.Reflog(out AList: TGittanReflog; ALimit: integer): boolean;
+var
+  Output: string;
+  Args: array of string;
+  Lost: TStringList;
+  i: integer;
+begin
+  AList := nil;
+  if FRoot = '' then
+    Exit(False);
+  if CommitId('HEAD') = '' then
+    Exit(True);
+  Result := RunGit(FRoot, ['log', '-g', '--date=unix', '--format=' + ReflogFormat,
+    '-n', IntToStr(ALimit), 'HEAD'], Output);
+  if not Result then
+    Exit;
+  AList := ParseReflog(Output);
+  if Length(AList) = 0 then
+    Exit;
+  { What the commits reach and no ref does; a commit of the reflog in it
+    is kept by the reflog alone. A failure only leaves none marked. }
+  Lost := TStringList.Create;
+  try
+    Lost.Sorted := True;
+    Lost.Duplicates := dupIgnore;
+    Args := ['rev-list'];
+    for i := 0 to High(AList) do
+      if Lost.IndexOf(AList[i].Commit) < 0 then
+      begin
+        Lost.Add(AList[i].Commit);
+        SetLength(Args, Length(Args) + 1);
+        Args[High(Args)] := AList[i].Commit;
+      end;
+    Lost.Clear;
+    SetLength(Args, Length(Args) + 2);
+    Args[High(Args) - 1] := '--not';
+    Args[High(Args)] := '--all';
+    if RunGit(FRoot, Args, Output) then
+      Lost.Text := Output;
+    for i := 0 to High(AList) do
+      AList[i].Lost := Lost.IndexOf(AList[i].Commit) >= 0;
+  finally
+    Lost.Free;
+  end;
 end;
 
 function TGittanRepo.DeleteTag(const AName: string): boolean;

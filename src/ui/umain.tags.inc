@@ -147,7 +147,7 @@ begin
     tmShow: ShowBlameCommit(T.Commit);
     tmCompare: SetBase('refs/tags/' + T.Name);
     tmCheckout: CheckoutTagAsk(T);
-    tmBranch: BranchFromTagAsk(T);
+    tmBranch: BranchAtAsk(T.Name, T.Commit);
     tmPush: StartRemote(rkPushTag, pmAuto, T.Name, FTagRemote);
     tmCopy: Clipboard.AsText := T.Name;
     tmDelete: DeleteTagAsk(T);
@@ -197,11 +197,13 @@ begin
       [mrYes, rsTagCheckoutAction, 'IsDefault', mrNo, rsCaBranch, mrCancel, rsCancelButton,
       'IsCancel'], 0) of
     mrYes: SwitchBranch(ATag.Name, True);
-    mrNo: BranchFromTagAsk(ATag);
+    mrNo: BranchAtAsk(ATag.Name, ATag.Commit);
   end;
 end;
 
-procedure TForm1.BranchFromTagAsk(const ATag: TGittanTag);
+{ A branch at ACommit, switched to, after a name; ALabel is what the
+  question calls the commit (a tag, a short id). }
+procedure TForm1.BranchAtAsk(const ALabel, ACommit: string);
 var
   Values: array of string;
 begin
@@ -209,11 +211,11 @@ begin
     Exit;
   SetLength(Values, 1);
   Values[0] := '';
-  if not InputQuery(rsCaBranchTitle, [Format(rsCaBranchPrompt, [ATag.Name])], Values) or
+  if not InputQuery(rsCaBranchTitle, [Format(rsCaBranchPrompt, [ALabel])], Values) or
     (Trim(Values[0]) = '') then
     Exit;
   StopWatcher;
-  if FRepo.CreateBranch(Trim(Values[0]), ATag.Commit, True) then
+  if FRepo.CreateBranch(Trim(Values[0]), ACommit, True) then
   begin
     FSummary.Notice := '';
     RefreshRepository;
