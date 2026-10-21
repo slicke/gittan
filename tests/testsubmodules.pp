@@ -464,7 +464,7 @@ end;
   it with .gitmodules, and refuses a path that is taken. }
 procedure TSubmodulesTest.TestUpdateSyncAdd;
 var
-  Up, Deep, Super, Clone, Lib, Recorded, Output: string;
+  Up, Deep, Super, Clone, Lib, Recorded, Output, Branch: string;
   Repo: TGittanRepo;
   Moved: TStringList;
   List: TGittanSubmodules;
@@ -534,8 +534,10 @@ begin
     AssertTrue(Repo.Error <> '');
     AssertFalse('no repository there', Repo.AddSubmodule(Deep + '-nothing', 'other', ''));
     AssertFalse('git removes what it made', DirectoryExists(Clone + PathDelim + 'other'));
-    AssertTrue(Repo.Error, Repo.AddSubmodule(Up, 'branched', 'main'));
-    AssertEquals('main', Trim(Git(Clone, ['config', '-f', '.gitmodules',
+    { The branch git made, master or main as init.defaultBranch says. }
+    Branch := Trim(Git(Up, ['symbolic-ref', '--short', 'HEAD']));
+    AssertTrue(Repo.Error, Repo.AddSubmodule(Up, 'branched', Branch));
+    AssertEquals(Branch, Trim(Git(Clone, ['config', '-f', '.gitmodules',
       'submodule.branched.branch'])));
   finally
     Moved.Free;

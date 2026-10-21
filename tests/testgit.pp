@@ -2982,6 +2982,8 @@ var
   i, n: integer;
 begin
   MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
   AssertTrue(FRepo.Open(FDir));
   AssertTrue(FRepo.IsTracked('a.txt'));
   AssertTrue(FRepo.IsTracked('dir sp/fil å.txt'));
