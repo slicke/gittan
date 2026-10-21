@@ -131,10 +131,17 @@ resourcestring
   rsSubPageOneBehind = '1 new commit on the remote';
   rsSubPageBehind = '%d new commits on the remote';
   rsSubPageBehindDetail = 'The remote''s branch has commits the recorded one lacks.';
-  rsSubPageAhead = 'The recorded commit is %d past the remote';
-  rsSubPageAheadDetail = 'It may not be pushed in the submodule yet.';
+  rsSubPageOneAhead = 'The recorded commit is 1 commit past the remote''s %s';
+  rsSubPageAhead = 'The recorded commit is %d commits past the remote''s %s';
+  rsSubPageAheadDetail = 'They may not be pushed in the submodule yet, or be on another branch.';
+  rsSubPageHolding = 'They are on %s: set its branch in .gitmodules to follow it.';
+  rsSubPageHoldingMany = 'They are on %s: set one as its branch in .gitmodules to follow it.';
   rsSubPageDiverged = '%d new on the remote, %d only in the recorded commit';
   rsSubPageDivergedDetail = 'The remote''s branch and the recorded commit went apart.';
+  rsSubPageDivergedHolding = 'The recorded commit is on %s.';
+  rsSubPageDefaultName = 'default branch';
+  rsSubPageBranchName = 'branch %s';
+  rsSubPageOutgoing = 'Not on the remote''s branch';
   rsSubPageNotFetched = 'New commits on the remote';
   rsSubPageNotFetchedDetail = 'Fetch in the submodule to list them.';
   rsSubPageFailed = 'Could not ask the remote';
@@ -274,6 +281,8 @@ procedure TGittanSubPage.SetSubmodule(const ASub: TGittanSubmodule;
 var
   Detail: string;
   Tip: TGittanSubmoduleCommit;
+  RefName, Holding: string;
+  RemoteTone: TGittanSubTone;
   i: integer;
 begin
   if FPath <> ASub.Path then
@@ -291,6 +300,21 @@ begin
   else
     FBranchText := Format(rsSubPageBranch, [ASub.Branch]);
 
+  { The remote's branch as the cards name it, and the branches that have
+    the recorded commit when it lacks it. }
+  if Copy(AInfo.RemoteRef, 1, Length('refs/heads/')) = 'refs/heads/' then
+    RefName := Format(rsSubPageBranchName, [Copy(AInfo.RemoteRef, Length('refs/heads/') + 1,
+      MaxInt)])
+  else
+    RefName := rsSubPageDefaultName;
+  Holding := '';
+  for i := 0 to High(AInfo.Holding) do
+  begin
+    if Holding <> '' then
+      Holding := Holding + ', ';
+    Holding := Holding + AInfo.Holding[i];
+  end;
+
   { The cards: the state first, then how it moved. }
   FCards := nil;
   if ASub.Conflict then
@@ -307,9 +331,27 @@ begin
           AddCard(rsSubPageOneBehind, rsSubPageBehindDetail, stnInfo)
         else
           AddCard(Format(rsSubPageBehind, [AInfo.Behind]), rsSubPageBehindDetail, stnInfo);
-      smAhead: AddCard(Format(rsSubPageAhead, [AInfo.Ahead]), rsSubPageAheadDetail, stnWarn);
-      smDiverged: AddCard(Format(rsSubPageDiverged, [AInfo.Behind, AInfo.Ahead]),
-          rsSubPageDivergedDetail, stnWarn);
+      smAhead:
+        begin
+          if Length(AInfo.Holding) > 1 then
+            Detail := Format(rsSubPageHoldingMany, [Holding])
+          else if Holding <> '' then
+            Detail := Format(rsSubPageHolding, [Holding])
+          else
+            Detail := rsSubPageAheadDetail;
+          if AInfo.Ahead = 1 then
+            AddCard(Format(rsSubPageOneAhead, [RefName]), Detail, stnWarn)
+          else
+            AddCard(Format(rsSubPageAhead, [AInfo.Ahead, RefName]), Detail, stnWarn);
+        end;
+      smDiverged:
+        begin
+          if Holding <> '' then
+            Detail := Format(rsSubPageDivergedHolding, [Holding])
+          else
+            Detail := rsSubPageDivergedDetail;
+          AddCard(Format(rsSubPageDiverged, [AInfo.Behind, AInfo.Ahead]), Detail, stnWarn);
+        end;
       smNotFetched: AddCard(rsSubPageNotFetched, rsSubPageNotFetchedDetail, stnInfo);
       smFailed: AddCard(rsSubPageFailed, Trim(AInfo.Error), stnBad);
       else
@@ -359,20 +401,17 @@ begin
     AddRow(srLabeled, rsSubPageRemote, rsSubPageAsking, stnNone)
   else if AInfo.Tip <> '' then
   begin
-    { The remote's commit is described when it is among the new ones,
-      which are newest first, or is the recorded one. }
-    Tip := Default(TGittanSubmoduleCommit);
-    for i := 0 to High(AInfo.Incoming) do
-      if AInfo.Incoming[i].Hash = AInfo.Tip then
-        Tip := AInfo.Incoming[i];
-    if (Tip.Hash = '') and (AInfo.Recorded.Hash = AInfo.Tip) then
-      Tip := AInfo.Recorded;
-    if (Tip.Hash = '') and (AInfo.Current.Hash = AInfo.Tip) then
-      Tip := AInfo.Current;
+    { The remote's commit is described when the submodule has it; blue
+      only when it is new. }
+    Tip := AInfo.TipCommit;
+    if AInfo.Behind > 0 then
+      RemoteTone := stnInfo
+    else
+      RemoteTone := stnNone;
     if AInfo.Tip = ASub.Recorded then
       AddRow(srLabeled, rsSubPageRemote, rsSubPageSameAsRecorded, stnGood)
     else if Tip.Hash <> '' then
-      AddCommit(rsSubPageRemote, Tip, stnInfo)
+      AddCommit(rsSubPageRemote, Tip, RemoteTone)
     else
       AddRow(srLabeled, rsSubPageRemote, Short(AInfo.Tip), stnInfo);
   end
@@ -387,6 +426,7 @@ begin
   { Moved to the remote's commit, the list above has the same ones. }
   if AChange.ToHash <> AInfo.Tip then
     AddList(rsSubPageIncoming, AInfo.Incoming, AInfo.Behind, stnInfo);
+  AddList(rsSubPageOutgoing, AInfo.Outgoing, AInfo.Ahead, stnWarn);
   if FHot > High(FRows) then
     FHot := -1;
   Invalidate;

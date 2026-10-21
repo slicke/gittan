@@ -238,7 +238,7 @@ end;
   fetched. }
 procedure TSubmodulesTest.TestCheck;
 var
-  Up, Super, First: string;
+  Up, Super, First, Lib: string;
   List: TGittanSubmodules;
   Err: string;
   Info: TGittanSubmoduleInfo;
@@ -282,6 +282,28 @@ begin
   AssertEquals(2, Length(Info.Incoming));
   AssertEquals('third', Info.Incoming[0].Subject);
   AssertEquals('second', Info.Incoming[1].Subject);
+  AssertEquals('third', Info.TipCommit.Subject);
+  AssertEquals(0, Length(Info.Outgoing));
+
+  { A recorded commit past the remote's: listed as not on the remote,
+    with the branches that have it once one does. }
+  Lib := IncludeTrailingPathDelimiter(Super) + 'lib';
+  Git(Lib, ['checkout', '-q', Info.Tip]);
+  CommitFile(Lib, 'a.txt', 'fourth');
+  List[0].Recorded := Trim(Git(Lib, ['rev-parse', 'HEAD']));
+  Info := CheckSubmodule(Super, List[0], '');
+  AssertTrue(Info.State = smAhead);
+  AssertEquals(1, Info.Ahead);
+  AssertEquals(0, Info.Behind);
+  AssertEquals(1, Length(Info.Outgoing));
+  AssertEquals('fourth', Info.Outgoing[0].Subject);
+  AssertEquals('third', Info.TipCommit.Subject);
+  AssertEquals(0, Length(Info.Holding));
+  Git(Lib, ['push', '-q', 'origin', 'HEAD:refs/heads/side']);
+  Git(Lib, ['fetch', '-q']);
+  Info := CheckSubmodule(Super, List[0], '');
+  AssertEquals(1, Length(Info.Holding));
+  AssertEquals('origin/side', Info.Holding[0]);
 
   { A branch the remote does not have. }
   List[0].Branch := 'nope';

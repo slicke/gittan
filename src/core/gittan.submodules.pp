@@ -24,6 +24,8 @@ const
   SubmodulesFile = '.gitmodules';
   {** The most incoming commits CheckSubmodule lists. }
   MaxIncoming = 50;
+  { How many branches holding the recorded commit CheckSubmodule names. }
+  MaxHolding = 3;
 
 type
   {** One submodule as .gitmodules and the index describe it: its name
@@ -63,16 +65,22 @@ type
     one when the submodule has them (Hash empty otherwise). Behind and
     Ahead count the commits between the recorded commit and Tip, -1 when
     unknown; Incoming lists the remote's commits that the recorded one
-    lacks, newest first, at most MaxIncoming. Error is git's message for
-    smFailed. }
+    lacks, newest first, at most MaxIncoming, and Outgoing the recorded
+    commit's that the remote lacks. TipCommit describes Tip when the
+    submodule has it. Holding lists the remote-tracking branches of the
+    submodule (origin/main, without origin/HEAD) that have the recorded
+    commit, at most MaxHolding, when the remote's branch lacks it; read
+    from the submodule's own refs, so as of its last fetch. Error is
+    git's message for smFailed. }
   TGittanSubmoduleInfo = record
     Path: string;
     State: TGittanSubmoduleState;
     Initialized: boolean;
     CheckedOut, RemoteRef, Tip, Error: string;
-    Recorded, Current: TGittanSubmoduleCommit;
+    Recorded, Current, TipCommit: TGittanSubmoduleCommit;
     Behind, Ahead: integer;
-    Incoming: TGittanSubmoduleCommits;
+    Incoming, Outgoing: TGittanSubmoduleCommits;
+    Holding: TStringArray;
   end;
 
   {** How a submodule moved between the two sides of what is compared:
@@ -585,6 +593,39 @@ begin
 end;
 
 { The commits of ARange in ADir, newest first, at most MaxIncoming. }
+{ The remote-tracking branches of the submodule at ADir that have AHash,
+  at most MaxHolding, origin/HEAD left out. }
+function HoldingBranches(const ADir, AHash: string): TStringArray;
+var
+  Output, Err, Name: string;
+  Lines: TStringList;
+  i: integer;
+begin
+  Result := nil;
+  if not RunGitIn(ADir, ['for-each-ref', '--format=%(refname:short)%09%(symref)',
+    '--contains', AHash, 'refs/remotes/'], Output, Err) then
+    Exit;
+  Lines := TStringList.Create;
+  try
+    Lines.Text := Output;
+    for i := 0 to Lines.Count - 1 do
+    begin
+      { A symbolic ref, origin/HEAD, names its target after a tab. }
+      if Pos(#9, Lines[i]) = 0 then
+        Continue;
+      Name := Copy(Lines[i], 1, Pos(#9, Lines[i]) - 1);
+      if (Name = '') or (Trim(Copy(Lines[i], Pos(#9, Lines[i]) + 1, MaxInt)) <> '') then
+        Continue;
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := Name;
+      if Length(Result) = MaxHolding then
+        Break;
+    end;
+  finally
+    Lines.Free;
+  end;
+end;
+
 function LogRange(const ADir, ARange: string): TGittanSubmoduleCommits;
 var
   Output, Err: string;
@@ -719,8 +760,14 @@ begin
     Result.State := smBehind
   else
     Result.State := smAhead;
+  Result.TipCommit := DescribeCommit(Dir, Result.Tip);
   if Result.Behind > 0 then
     Result.Incoming := LogRange(Dir, ASub.Recorded + '..' + Result.Tip);
+  if Result.Ahead > 0 then
+  begin
+    Result.Outgoing := LogRange(Dir, Result.Tip + '..' + ASub.Recorded);
+    Result.Holding := HoldingBranches(Dir, ASub.Recorded);
+  end;
 end;
 
 { ---------------------------------------------------------------------------
