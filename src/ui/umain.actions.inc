@@ -365,6 +365,19 @@ begin
   UpdateNumberWidth(FEditOld);
 end;
 
+{ A git older than MinGitMajor.MinGitMinor is said in the banner, at
+  start and when the settings name another git. One that cannot be run,
+  or names no version, is left to the errors of the git calls. }
+procedure TForm1.CheckGitVersion;
+var
+  Version: string;
+  Major, Minor: integer;
+begin
+  if GitVersion(Version, Major, Minor) and not GitVersionSupported(Major, Minor) then
+    BannerError(Format(rsGitTooOld, [Version, MinGitMajor, MinGitMinor]),
+      Format(rsGitTooOldDetail, [MinGitMajor, MinGitMinor, GitExe]));
+end;
+
 { The settings dialog previews the font, the theme and the tab width in
   the editor and puts back the old ones when it is cancelled; the commands
   are saved with the rest when the window closes. A new git or gh runs
@@ -417,6 +430,7 @@ begin
           ClearReviews;
         end;
         MenuRefreshClick(nil);
+        CheckGitVersion;
       end;
     end
     else
@@ -1098,11 +1112,13 @@ end;
   switch, a dialog names the files git listed and offers what
   TortoiseGit does: stash them and switch, or bring them along merged
   into the branch's version (`git switch --merge`, which may leave
-  conflicts); any other refusal is shown with git's whole message. }
-procedure TForm1.SwitchBranch(const ABranch: string);
+  conflicts); any other refusal is shown with git's whole message.
+  With ADetach ABranch is a tag (or any commit) and HEAD is left on it
+  without a branch. }
+procedure TForm1.SwitchBranch(const ABranch: string; ADetach: boolean);
 var
   Files: TStringList;
-  Shown: string;
+  Shown, Switch: string;
   i: integer;
 
   procedure Switched(const ANote: string);
@@ -1116,11 +1132,15 @@ var
 begin
   if FRepo.Root = '' then
     Exit;
+  if ADetach then
+    Switch := rsCheckedOutDetached
+  else
+    Switch := rsSwitched;
   StopWatcher;
   Files := TStringList.Create;
   try
-    if FRepo.Switch(ABranch) then
-      Switched(Format(rsSwitched, [ABranch]))
+    if FRepo.Switch(ABranch, False, ADetach) then
+      Switched(Format(Switch, [ABranch]))
     else if SwitchBlockedFiles(FRepo.Error, Files) then
     begin
       Shown := '';
@@ -1134,7 +1154,7 @@ begin
         mrYes:
           if not FRepo.Stash(Format(rsStashMessage, [ABranch])) then
             BannerError(rsStashFailed, FRepo.Error)
-          else if FRepo.Switch(ABranch) then
+          else if FRepo.Switch(ABranch, False, ADetach) then
             Switched(Format(rsStashedSwitched, [ABranch]))
           else
           begin
@@ -1143,7 +1163,7 @@ begin
               LineEnding + rsStashKept);
           end;
         mrNo:
-          if FRepo.Switch(ABranch, True) then
+          if FRepo.Switch(ABranch, True, ADetach) then
             Switched(Format(rsSwitchedAlong, [ABranch]))
           else
             BannerError(Format(rsSwitchFailed, [ABranch]), FRepo.Error);

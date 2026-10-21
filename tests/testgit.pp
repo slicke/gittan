@@ -91,6 +91,12 @@ type
     procedure TestRebaseInteractiveConflicts;
     procedure TestStashes;
     procedure TestStashConflicts;
+    procedure TestForcePush;
+    procedure TestParseGitVersion;
+    procedure TestGitNotRun;
+    procedure TestUpstream;
+    procedure TestParseTags;
+    procedure TestTags;
   end;
 
 implementation
@@ -2656,6 +2662,225 @@ begin
   AssertEquals('', FRepo.Operation);
   Git(['checkout', '-q', 'HEAD', '--', 'a.txt']);
   AssertTrue(FRepo.Error, FRepo.StashDrop(List[0].Id));
+end;
+
+{ A rebase rewrites a pushed commit: a plain push is rejected, the
+  forced one goes through while the remote is where the last fetch saw
+  it, and is refused as stale once someone else pushed. }
+procedure TGitRepoTest.TestForcePush;
+var
+  Remote, Other, Output: string;
+  Code, Ahead, Behind: integer;
+  Rejected, Stale, Unseen: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  AssertFalse('no upstream', FRepo.ForcePush(Stale, Unseen));
+  AssertFalse(Stale);
+  AssertFalse(Unseen);
+  Remote := FDir + '-remote';
+  Other := FDir + '-other';
+  RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Code,
+    [poStderrToOutPut]);
+  try
+    Git(['remote', 'add', 'origin', Remote]);
+    WriteFile('a.txt', 'pushed'#10);
+    Commit('to rewrite');
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+    Git(['commit', '-q', '--amend', '-m', 'rewritten']);
+    AssertTrue(FRepo.AheadBehind(Ahead, Behind));
+    AssertEquals(1, Ahead);
+    AssertEquals(1, Behind);
+    AssertFalse(FRepo.Push(Rejected));
+    AssertTrue(Rejected);
+    AssertTrue(FRepo.Error, FRepo.ForcePush(Stale, Unseen));
+    AssertTrue(FRepo.AheadBehind(Ahead, Behind));
+    AssertEquals(0, Ahead);
+    AssertEquals(0, Behind);
+    AssertEquals('rewritten', Trim(Git(['log', '-1', '--format=%s', 'origin/' +
+      FRepo.Branch])));
+
+    PushFromOther(Remote, Other, 'other.txt');
+    Git(['commit', '-q', '--amend', '-m', 'again']);
+    AssertFalse('the remote moved', FRepo.ForcePush(Stale, Unseen));
+    AssertTrue(FRepo.Error, Stale);
+    AssertFalse(Unseen);
+
+    { Fetched, so the lease holds, but never taken into the branch. }
+    AssertTrue(FRepo.Error, FRepo.Fetch);
+    AssertFalse('fetched, not taken in', FRepo.ForcePush(Stale, Unseen));
+    AssertFalse(Stale);
+    AssertTrue(FRepo.Error, Unseen);
+    AssertTrue(FRepo.Error, FRepo.Pull(pmRebase, Rejected));
+    AssertTrue('taken in', FRepo.ForcePush(Stale, Unseen));
+  finally
+    RemoveTree(Remote);
+    RemoveTree(Other);
+  end;
+end;
+
+procedure TGitRepoTest.TestParseGitVersion;
+var
+  Version: string;
+  Major, Minor: integer;
+begin
+  AssertTrue(ParseGitVersion('git version 2.39.5 (Apple Git-154)'#10, Version, Major, Minor));
+  AssertEquals('2.39.5', Version);
+  AssertEquals(2, Major);
+  AssertEquals(39, Minor);
+  AssertTrue(ParseGitVersion('git version 2.30.1.windows.1', Version, Major, Minor));
+  AssertEquals('2.30.1', Version);
+  AssertEquals(30, Minor);
+  AssertTrue(ParseGitVersion('git version 3.0', Version, Major, Minor));
+  AssertEquals(3, Major);
+  AssertFalse(ParseGitVersion('hub version 2.14', Version, Major, Minor));
+  AssertFalse(ParseGitVersion('git version abc', Version, Major, Minor));
+  AssertTrue(GitVersionSupported(2, 30));
+  AssertTrue(GitVersionSupported(2, 54));
+  AssertTrue(GitVersionSupported(3, 0));
+  AssertFalse(GitVersionSupported(2, 29));
+  AssertFalse(GitVersionSupported(1, 99));
+  AssertTrue('the git the tests run', GitVersion(Version, Major, Minor));
+  AssertTrue(Version, GitVersionSupported(Major, Minor));
+end;
+
+procedure TGitRepoTest.TestGitNotRun;
+var
+  Output, Err, Missing: string;
+begin
+  AssertEquals('git was not found. Install git, or set the path of one under Tools in ' +
+    'the settings.', GitNotRunMessage('git'));
+  AssertTrue(Pos('Could not run git at /x/git.', GitNotRunMessage('/x/git')) = 1);
+  AssertTrue(IsMissingDeveloperTools('xcode-select: note: No developer tools were found, ' +
+    'requesting install.'));
+  AssertTrue(IsMissingDeveloperTools('xcrun: error: invalid active developer path ' +
+    '(/Library/Developer/CommandLineTools), missing xcrun at: ' +
+    '/Library/Developer/CommandLineTools/usr/bin/xcrun'));
+  AssertFalse(IsMissingDeveloperTools('fatal: not a git repository'));
+  Missing := IncludeTrailingPathDelimiter(FDir) + 'no-such-git';
+  SetGitExe(Missing);
+  try
+    AssertFalse(RunGitIn(FDir, ['--version'], Output, Err));
+    AssertEquals(GitNotRunMessage(Missing), Err);
+    AssertFalse(FRepo.Open(FDir));
+    AssertEquals(GitNotRunMessage(Missing), FRepo.Error);
+  finally
+    SetGitExe('');
+  end;
+  AssertTrue('git again', RunGitIn(FDir, ['--version'], Output, Err));
+end;
+
+procedure TGitRepoTest.TestUpstream;
+var
+  Remote, Output, Main: string;
+  Code: integer;
+  List: TStringList;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  Main := FRepo.Branch;
+  Remote := FDir + '-remote';
+  RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Code,
+    [poStderrToOutPut]);
+  List := TStringList.Create;
+  try
+    AssertTrue(FRepo.Remotes(List));
+    AssertEquals(0, List.Count);
+    AssertEquals('', FRepo.PushRemote);
+    Git(['remote', 'add', 'upstream', Remote]);
+    Git(['remote', 'add', 'origin', Remote]);
+    AssertTrue(FRepo.Remotes(List));
+    AssertEquals('origin|upstream|', Joined(List));
+    AssertEquals('origin', FRepo.PushRemote);
+
+    Git(['branch', 'topic']);
+    AssertTrue(FRepo.Error, FRepo.PushBranch('topic', 'upstream'));
+    AssertEquals('upstream/topic', FRepo.Upstream('topic'));
+    AssertEquals('', FRepo.Upstream(Main));
+    AssertTrue(FRepo.Error, FRepo.SetUpstream(Main, 'upstream/topic'));
+    AssertEquals('upstream/topic', FRepo.Upstream(Main));
+    AssertEquals('the current branch''s remote', 'upstream', FRepo.PushRemote);
+    AssertTrue(FRepo.Error, FRepo.SetUpstream(Main, ''));
+    AssertEquals('', FRepo.Upstream(Main));
+    AssertFalse('no such branch', FRepo.SetUpstream(Main, 'origin/nothing'));
+  finally
+    List.Free;
+    RemoveTree(Remote);
+  end;
+end;
+
+procedure TGitRepoTest.TestParseTags;
+var
+  Tags: TGittanTags;
+begin
+  Tags := ParseTags('v2'#31'aaa'#31'ccc'#31'1700000000'#31'Release: 2'#10 +
+    'v1'#31'bbb'#31#31'1600000000'#31'commit subject'#10'broken'#31'x'#10);
+  AssertEquals(2, Length(Tags));
+  AssertEquals('v2', Tags[0].Name);
+  AssertTrue(Tags[0].Annotated);
+  AssertEquals('an annotated tag names the commit', 'ccc', Tags[0].Commit);
+  AssertEquals(1700000000, Tags[0].Time);
+  AssertEquals('Release: 2', Tags[0].Subject);
+  AssertFalse(Tags[1].Annotated);
+  AssertEquals('bbb', Tags[1].Commit);
+  AssertEquals('commit subject', Tags[1].Subject);
+end;
+
+procedure TGitRepoTest.TestTags;
+var
+  Remote, Output, Head, First: string;
+  Code: integer;
+  Tags: TGittanTags;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  First := FRepo.CommitId('HEAD');
+  AssertTrue(FRepo.CreateTag('v1', 'HEAD', ''));
+  WriteFile('a.txt', 'later'#10);
+  Commit('later');
+  Head := FRepo.CommitId('HEAD');
+  AssertTrue(FRepo.CreateTag('v2', 'HEAD', 'Second release'));
+  AssertTrue(FRepo.Tags(Tags));
+  AssertEquals(2, Length(Tags));
+  { Newest first, and the highest version first when both were made in
+    the same second. }
+  AssertEquals('v2', Tags[0].Name);
+  AssertEquals(Head, Tags[0].Commit);
+  AssertTrue(Tags[0].Annotated);
+  AssertEquals('Second release', Tags[0].Subject);
+  AssertEquals(First, Tags[1].Commit);
+  AssertEquals('files', Tags[1].Subject);
+
+  AssertTrue(FRepo.Error, FRepo.Switch('v1', False, True));
+  AssertEquals(First, FRepo.CommitId('HEAD'));
+  AssertEquals('', Trim(Git(['branch', '--show-current'])));
+  AssertFalse('a tag is no branch', FRepo.Switch('v2'));
+
+  Remote := FDir + '-remote';
+  RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Code,
+    [poStderrToOutPut]);
+  try
+    Git(['remote', 'add', 'origin', Remote]);
+    AssertTrue(FRepo.Error, FRepo.PushTag('origin', 'v1'));
+    RunCommandIndir(Remote, 'git', ['tag'], Output, Code, [poStderrToOutPut]);
+    AssertEquals('v1', Trim(Output));
+    AssertTrue(FRepo.Error, FRepo.PushTag('origin', ''));
+    RunCommandIndir(Remote, 'git', ['tag'], Output, Code, [poStderrToOutPut]);
+    AssertEquals('v1'#10'v2', Trim(AdjustLineBreaks(Output, tlbsLF)));
+    AssertTrue(FRepo.Error, FRepo.DeleteRemoteTag('origin', 'v2'));
+    RunCommandIndir(Remote, 'git', ['tag'], Output, Code, [poStderrToOutPut]);
+    AssertEquals('v1', Trim(Output));
+    AssertTrue(FRepo.Error, FRepo.DeleteTag('v2'));
+    AssertTrue(FRepo.Tags(Tags));
+    AssertEquals(1, Length(Tags));
+    AssertFalse(FRepo.DeleteTag('v2'));
+  finally
+    RemoveTree(Remote);
+  end;
 end;
 
 initialization

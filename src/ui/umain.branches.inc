@@ -9,8 +9,8 @@
   rebase the current branch onto it, show what it changed since it left
   the current one (the range current...branch), what the current one
   changed since it left it (branch...current, as a pull request to it
-  would show) or compare the work tree with it, rename or delete it, and
-  delete it on its remote. Deleting
+  would show) or compare the work tree with it, rename or delete it, set
+  its upstream (ShowUpstreamList), and delete it on its remote. Deleting
   asks first, and asks again for a branch whose commits are in no other
   branch (git -d refuses it), since those commits are then only in the
   reflog. Nothing that moves HEAD is offered while git is in the middle
@@ -33,6 +33,7 @@ const
   bmCompareSince = 7;
   bmRebase = 8;
   bmCurrentSince = 9;
+  bmUpstream = 10;
 
 procedure TForm1.BranchContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
 var
@@ -86,6 +87,7 @@ begin
     FBranchMenu.Items.Add(NewLine);
     Add(rsBmRename, bmRename, (BranchName <> FBranch) or (FOperation = ''));
     Add(rsBmDelete, bmDelete, BranchName <> FBranch);
+    Add(rsBmUpstream, bmUpstream, True);
     Up := FRepo.Upstream(BranchName);
   end
   else
@@ -117,6 +119,7 @@ begin
     bmRebase: RebaseOntoAsk(Ref);
     bmRename: RenameBranchAsk(BranchName);
     bmDelete: DeleteBranchAsk(BranchName);
+    bmUpstream: ShowUpstreamList(BranchName, FStatus.PartScreenRect(spBranch));
     bmDeleteRemote:
       if QuestionDlg(rsBmDeleteRemoteTitle, Format(rsBmDeleteRemoteAsk, [FMenuBranchUpstream]),
         mtWarning, [mrYes, rsBmDeleteAction, mrCancel, rsCancelButton, 'IsCancel',
@@ -294,6 +297,126 @@ begin
   FCompareBranchItem.Enabled := Has;
   FCompareBackItem.Caption := Format(rsBmCompareBackItem, [Current]);
   FCompareBackItem.Enabled := Has;
+  FUpstreamItem.Caption := Format(rsBmUpstreamItem, [Current]);
+  FUpstreamItem.Enabled := Has and (FBranch <> '') and (FOperation = '');
+  FTagsItem.Enabled := Has;
+  FNewTagItem.Enabled := Has;
+  FPushTagsItem.Enabled := Has and (FRemoteJob = nil) and (FCommitJob = nil);
+end;
+
+{ ---------------------------------------------------------------------------
+  The upstream of a branch
+  ---------------------------------------------------------------------------
+  Set Upstream... drops a list for a local branch: per remote that has
+  no branch of its name, Push to <remote>/<branch>, which pushes it there
+  and tracks it (a remote job); Stop Tracking its upstream when it has
+  one; then the remote-tracking branches, the upstream checked, a pick
+  of which tracks it without pushing. }
+procedure TForm1.ShowUpstreamList(const ABranch: string; const AScreenRect: TRect);
+var
+  Remotes, Local, Remote: TStringList;
+  Up: string;
+  i: integer;
+
+  procedure AddRow(const ARow: string);
+  begin
+    FUpstreamRows.Add(ARow);
+  end;
+
+begin
+  if (FRepo.Root = '') or (ABranch = '') then
+    Exit;
+  if not FRepo.HasCommit('refs/heads/' + ABranch) then
+  begin
+    StatusNote(rsUpstreamDetached, True);
+    Exit;
+  end;
+  Remotes := TStringList.Create;
+  Local := TStringList.Create;
+  Remote := TStringList.Create;
+  try
+    if not FRepo.Remotes(Remotes) or not FRepo.Branches(Local, Remote) then
+    begin
+      BannerError(rsCaFailed, FRepo.Error);
+      Exit;
+    end;
+    if Remotes.Count = 0 then
+    begin
+      StatusNote(rsNoRemote, True);
+      Exit;
+    end;
+    Up := FRepo.Upstream(ABranch);
+    FUpstreamBranch := ABranch;
+    FUpstreamPopup.Clear;
+    FUpstreamRows.Clear;
+    FUpstreamPopup.AddHeader(Format(rsUpstreamHeader, [ABranch]));
+    AddRow('');
+    if (FRemoteJob = nil) and (FCommitJob = nil) then
+      for i := 0 to Remotes.Count - 1 do
+        if Remote.IndexOf(Remotes[i] + '/' + ABranch) < 0 then
+        begin
+          FUpstreamPopup.Add(Format(rsUpstreamPush, [Remotes[i], ABranch]), rsPushNewBranch);
+          AddRow('+' + Remotes[i]);
+        end;
+    if Up <> '' then
+    begin
+      FUpstreamPopup.Add(Format(rsUpstreamStop, [Up]));
+      AddRow('-');
+    end;
+    if Remote.Count > 0 then
+    begin
+      FUpstreamPopup.AddHeader(rsUpstreamTrack);
+      AddRow('');
+    end;
+    for i := 0 to Remote.Count - 1 do
+    begin
+      FUpstreamPopup.Add(Remote[i], '', Remote[i] = Up);
+      AddRow('=' + Remote[i]);
+    end;
+    FUpstreamPopup.Popup(AScreenRect);
+  finally
+    Remotes.Free;
+    Local.Free;
+    Remote.Free;
+  end;
+end;
+
+procedure TForm1.UpstreamPopupPick(Sender: TObject; AIndex: integer);
+var
+  Row, Branch, Ref: string;
+begin
+  if (AIndex < 0) or (AIndex >= FUpstreamRows.Count) or (FRepo.Root = '') then
+    Exit;
+  Row := FUpstreamRows[AIndex];
+  Branch := FUpstreamBranch;
+  if (Row = '') or (Branch = '') then
+    Exit;
+  Ref := Copy(Row, 2, MaxInt);
+  case Row[1] of
+    '+': StartRemote(rkPushBranch, pmAuto, Branch, Ref);
+    '-':
+      if FRepo.SetUpstream(Branch, '') then
+      begin
+        RefreshRepository;
+        StatusNote(Format(rsUpstreamStopped, [Branch]));
+      end
+      else
+        BannerError(rsCaFailed, FRepo.Error);
+    '=':
+      if FRepo.SetUpstream(Branch, Ref) then
+      begin
+        RefreshRepository;
+        StatusNote(Format(rsUpstreamSet, [Branch, Ref]));
+      end
+      else
+        BannerError(rsCaFailed, FRepo.Error);
+  end;
+end;
+
+procedure TForm1.MenuUpstreamClick(Sender: TObject);
+begin
+  if (FRepo.Root <> '') and (FBranch <> '') then
+    ShowUpstreamList(FBranch, FStatus.PartScreenRect(spBranch));
 end;
 
 procedure TForm1.BranchMenuOpen(Sender: TObject);

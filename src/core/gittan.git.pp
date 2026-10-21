@@ -73,6 +73,19 @@ type
   end;
   TGittanStashes = array of TGittanStash;
 
+  {** A tag: its name (without refs/tags/), the commit it points at,
+    whether it is annotated (a tag object, with a message and a tagger),
+    when it was made in Unix seconds (the tagger's date of an annotated
+    tag, the commit's of a lightweight one) and the subject of its
+    message, or of the commit's for a lightweight one. }
+  TGittanTag = record
+    Name, Commit: string;
+    Annotated: boolean;
+    Time: int64;
+    Subject: string;
+  end;
+  TGittanTags = array of TGittanTag;
+
   TGittanRepoSnapshot = record
     Ok: boolean;
     Error: string;
@@ -174,8 +187,11 @@ type
       switch would overwrite, an operation in progress, or a name it
       does not know. With AMerge the local changes come along even to
       files the branch changes, merged into its version (`--merge`);
-      where they clash the files are left in conflict. }
-    function Switch(const ABranch: string; AMerge: boolean = False): boolean;
+      where they clash the files are left in conflict. With ADetach
+      ABranch may be any commit, a tag say, and HEAD is left on it
+      without a branch (`--detach`). }
+    function Switch(const ABranch: string; AMerge: boolean = False;
+      ADetach: boolean = False): boolean;
     {** Puts the files APaths (relative to Root) back as HEAD has them,
       in the index and the work tree (`git restore --source=HEAD
       --staged --worktree`); one HEAD lacks, added or untracked, is taken
@@ -283,6 +299,31 @@ type
       nothing was pushed: ARejected is then set when the remote has
       commits the branch lacks, which a pull would bring first. }
     function Push(out ARejected: boolean): boolean;
+    {** Pushes the branch over its upstream even when that loses the
+      upstream's commits the branch lacks, as after a rebase of pushed
+      commits, but only while the upstream is where the last fetch saw
+      it (`--force-with-lease`), so commits someone pushed since are not
+      lost unseen, and only while the branch once held the upstream's
+      tip (`--force-if-includes`), so commits a fetch brought in but
+      nothing took in are not lost either. False without an upstream,
+      and when git refused: AStale is then set when the remote has moved
+      since the last fetch, AUnseen when the upstream has commits that
+      were fetched but never in the branch. }
+    function ForcePush(out AStale, AUnseen: boolean): boolean;
+    {** Pushes the local branch ABranch to a branch of the same name on
+      ARemote and makes that its upstream (`git push -u`). }
+    function PushBranch(const ABranch, ARemote: string): boolean;
+    {** Makes the remote-tracking branch AUpstream (origin/main, say)
+      the upstream of the local branch ABranch, without pushing (`git
+      branch --set-upstream-to`); with AUpstream empty the branch tracks
+      nothing any more (`--unset-upstream`). }
+    function SetUpstream(const ABranch, AUpstream: string): boolean;
+    {** The remotes of the repository (`git remote`), sorted as git
+      lists them. }
+    function Remotes(AList: TStrings): boolean;
+    {** The remote a push goes to: that of the current branch's upstream,
+      else the one RemoteFor gives; empty when there is none. }
+    function PushRemote: string;
     {** Whether the repository has the hook AName (pre-push, say): a file
       of that name in its hooks folder, `core.hooksPath` (husky's
       .husky/_) or .git/hooks. }
@@ -325,6 +366,18 @@ type
     {** Tags the commit AAt as AName: an annotated tag with the message
       AMessage, or a lightweight one when it is empty. }
     function CreateTag(const AName, AAt, AMessage: string): boolean;
+    {** The tags, newest first (`git for-each-ref refs/tags`, by
+      creatordate, those of one second by version, the highest first),
+      read by ParseTags. }
+    function Tags(out AList: TGittanTags): boolean;
+    {** Deletes the tag AName here (`git tag -d`); the remotes keep it. }
+    function DeleteTag(const AName: string): boolean;
+    {** Pushes the tag AName to ARemote, or every tag with AName empty
+      (`git push --tags`). Goes to the network. }
+    function PushTag(const ARemote, AName: string): boolean;
+    {** Deletes the tag AName on ARemote (`git push <remote> --delete
+      refs/tags/<name>`), leaving the local one. Goes to the network. }
+    function DeleteRemoteTag(const ARemote, AName: string): boolean;
     {** Whether the commit AAncestor is in the history of ADescendant. }
     function IsAncestor(const AAncestor, ADescendant: string): boolean;
     {** Merges ARef (a branch, tag or commit) into the branch HEAD is on,
@@ -625,6 +678,42 @@ procedure SetGitExe(const APath: string);
 {** The path git runs by. }
 function GitExe: string;
 
+const
+  {** The oldest git Gittan supports: 2.30, the first with
+    `push --force-if-includes`. }
+  MinGitMajor = 2;
+  MinGitMinor = 30;
+
+{** Reads what `git --version` prints ("git version 2.39.5 (Apple
+  Git-154)", "git version 2.30.1.windows.1") into AVersion (2.39.5),
+  AMajor and AMinor; false when it names no version. }
+function ParseGitVersion(const AText: string; out AVersion: string;
+  out AMajor, AMinor: integer): boolean;
+
+{** The version of the git GitExe runs, as ParseGitVersion reads it;
+  false when git cannot be run or names no version. }
+function GitVersion(out AVersion: string; out AMajor, AMinor: integer): boolean;
+
+{** Whether git AMajor.AMinor is MinGitMajor.MinGitMinor or later. }
+function GitVersionSupported(AMajor, AMinor: integer): boolean;
+
+{** What a git call answers when git could not be started: that none
+  was found, when AExe is the plain "git" SetGitExe falls back to, else
+  that the one at AExe could not be run; both say where to set another. }
+function GitNotRunMessage(const AExe: string): string;
+
+{** Whether AError, what a failed git wrote, is macOS saying the
+  developer tools are not installed: /usr/bin/git only stands in for the
+  git of the Command Line Tools, and says so (and asks to install them)
+  when they are missing or the path xcode-select has is gone. }
+function IsMissingDeveloperTools(const AError: string): boolean;
+
+const
+  {** What a git call answers in place of that. }
+  MissingDeveloperToolsMessage = 'git on macOS comes with the Command Line Tools, which ' +
+    'are not installed. Install them (run xcode-select --install in Terminal, or accept ' +
+    'the dialog macOS shows), or set the path of another git under Tools in the settings.';
+
 {** The bin folder of the node that nvm in ANvmDir (~/.nvm, or NVM_DIR)
   runs by default: the version its alias "default" names, followed
   through the alias files (default → lts/* → lts/krypton → v24.21.0), a
@@ -657,6 +746,17 @@ function SwitchBlockedFiles(const AError: string; AFiles: TStrings): boolean;
   message is then the short id and subject of the commit it was made
   on), and "(no branch)" for a detached HEAD, which gives no branch. }
 procedure ParseStashSubject(const ASubject: string; out ABranch, AMessage: string);
+
+{** The tags in AOutput, what `git for-each-ref` prints with TagFormat:
+  per tag a line of the name, the object, the commit an annotated tag
+  peels to (empty for a lightweight one), the date in Unix seconds and
+  the subject, separated by #31. Lines that do not hold five fields are
+  skipped. }
+function ParseTags(const AOutput: string): TGittanTags;
+
+const
+  TagFormat = '%(refname:strip=2)%1f%(objectname)%1f%(*objectname)%1f' +
+    '%(creatordate:unix)%1f%(contents:subject)';
 
 {** Whether the file AFileName is binary by git's own rule: a NUL byte
   in its first 8000 bytes. False for a file that cannot be read. }
@@ -781,6 +881,68 @@ var
 function ToolSearchPath: string;
 begin
   Result := GToolPath;
+end;
+
+function ParseGitVersion(const AText: string; out AVersion: string;
+  out AMajor, AMinor: integer): boolean;
+const
+  Prefix = 'git version ';
+var
+  Text: string;
+  Parts: TStringArray;
+  i: integer;
+begin
+  AVersion := '';
+  AMajor := 0;
+  AMinor := 0;
+  Text := Trim(AText);
+  if Pos(Prefix, Text) <> 1 then
+    Exit(False);
+  Text := Copy(Text, Length(Prefix) + 1, MaxInt);
+  i := 1;
+  while (i <= Length(Text)) and (Text[i] in ['0'..'9', '.']) do
+    Inc(i);
+  AVersion := Copy(Text, 1, i - 1);
+  { 2.30.1.windows.1 stops at the dot before windows. }
+  while (AVersion <> '') and (AVersion[Length(AVersion)] = '.') do
+    SetLength(AVersion, Length(AVersion) - 1);
+  Parts := AVersion.Split(['.']);
+  Result := (Length(Parts) >= 2) and TryStrToInt(Parts[0], AMajor) and
+    TryStrToInt(Parts[1], AMinor);
+end;
+
+function GitVersion(out AVersion: string; out AMajor, AMinor: integer): boolean;
+var
+  Output, Err: string;
+begin
+  AVersion := '';
+  AMajor := 0;
+  AMinor := 0;
+  Result := RunGitIn(GetTempDir, ['--version'], Output, Err) and
+    ParseGitVersion(Output, AVersion, AMajor, AMinor);
+end;
+
+function GitVersionSupported(AMajor, AMinor: integer): boolean;
+begin
+  Result := (AMajor > MinGitMajor) or ((AMajor = MinGitMajor) and (AMinor >= MinGitMinor));
+end;
+
+function GitNotRunMessage(const AExe: string): string;
+begin
+  if (AExe = '') or (AExe = 'git') then
+    Result := 'git was not found. Install git, or set the path of one under Tools in ' +
+      'the settings.'
+  else
+    Result := Format('Could not run git at %s. Install git, or set the path of one under ' +
+      'Tools in the settings.', [AExe]);
+end;
+
+{ "No developer tools were found" with none installed, "invalid active
+  developer path" when xcode-select points at a folder that is gone. }
+function IsMissingDeveloperTools(const AError: string): boolean;
+begin
+  Result := (Pos('No developer tools were found', AError) > 0) or
+    (Pos('invalid active developer path', AError) > 0);
 end;
 
 procedure SetGitExe(const APath: string);
@@ -1171,7 +1333,7 @@ begin
     try
       P.Execute;
     except
-      AError := 'Could not run git. Is it installed?';
+      AError := GitNotRunMessage(GGitExe);
       Exit(False);
     end;
     repeat
@@ -1206,6 +1368,8 @@ begin
       else
         AError := Trim(AOutput) + LineEnding + AError;
     AOutput := '';
+    if IsMissingDeveloperTools(AError) then
+      AError := MissingDeveloperToolsMessage;
   end;
 end;
 
@@ -1879,16 +2043,19 @@ begin
   end;
 end;
 
-function TGittanRepo.Switch(const ABranch: string; AMerge: boolean): boolean;
+function TGittanRepo.Switch(const ABranch: string; AMerge, ADetach: boolean): boolean;
 var
   Output: string;
+  Args: array of string;
 begin
   if (FRoot = '') or (ABranch = '') then
     Exit(False);
+  Args := ['switch'];
   if AMerge then
-    Result := RunGit(FRoot, ['switch', '--merge', ABranch], Output)
-  else
-    Result := RunGit(FRoot, ['switch', ABranch], Output);
+    Args := Concat(Args, ['--merge']);
+  if ADetach then
+    Args := Concat(Args, ['--detach']);
+  Result := RunGit(FRoot, Concat(Args, [ABranch]), Output);
 end;
 
 function TGittanRepo.RevertFiles(APaths, ASaved: TStrings): boolean;
@@ -2638,6 +2805,86 @@ begin
       (Pos('non-fast-forward', FError) > 0);
 end;
 
+{ The lease is the remote-tracking branch of the upstream: git refuses
+  with "stale info" when the remote's branch is not there. }
+function TGittanRepo.ForcePush(out AStale, AUnseen: boolean): boolean;
+var
+  Name, Remote, Merge: string;
+begin
+  AStale := False;
+  AUnseen := False;
+  Result := False;
+  if FRoot = '' then
+    Exit;
+  if not RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'HEAD'], Name) or (Trim(Name) = '') then
+  begin
+    FError := 'HEAD is not on a branch.';
+    Exit;
+  end;
+  Name := Trim(Name);
+  if not (RunGit(FRoot, ['config', 'branch.' + Name + '.remote'], Remote) and
+    RunGit(FRoot, ['config', 'branch.' + Name + '.merge'], Merge) and
+    (Trim(Remote) <> '') and (Trim(Merge) <> '')) then
+  begin
+    FError := Format('%s has no upstream to push over.', [Name]);
+    Exit;
+  end;
+  Result := RunRemote(['push', '--progress', '--force-with-lease', '--force-if-includes',
+    Trim(Remote), 'HEAD:' + Trim(Merge)]);
+  if not Result then
+  begin
+    AStale := Pos('stale info', FError) > 0;
+    AUnseen := Pos('remote ref updated since checkout', FError) > 0;
+  end;
+end;
+
+function TGittanRepo.PushBranch(const ABranch, ARemote: string): boolean;
+begin
+  if (FRoot = '') or (ABranch = '') or (ARemote = '') then
+    Exit(False);
+  Result := RunRemote(['push', '--progress', '-u', ARemote, 'refs/heads/' + ABranch +
+    ':refs/heads/' + ABranch]);
+end;
+
+function TGittanRepo.SetUpstream(const ABranch, AUpstream: string): boolean;
+var
+  Output: string;
+begin
+  if (FRoot = '') or (ABranch = '') then
+    Exit(False);
+  if AUpstream = '' then
+    Result := RunGit(FRoot, ['branch', '--unset-upstream', ABranch], Output)
+  else
+    Result := RunGit(FRoot, ['branch', '--set-upstream-to=' + AUpstream, ABranch], Output);
+end;
+
+function TGittanRepo.Remotes(AList: TStrings): boolean;
+var
+  Output, Line: string;
+begin
+  AList.Clear;
+  Result := (FRoot <> '') and RunGit(FRoot, ['remote'], Output);
+  if Result then
+    for Line in Output.Split([#10]) do
+      if Trim(Line) <> '' then
+        AList.Add(Trim(Line));
+end;
+
+function TGittanRepo.PushRemote: string;
+var
+  Name: string;
+begin
+  Result := '';
+  if FRoot = '' then
+    Exit;
+  if RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'HEAD'], Name) and (Trim(Name) <> '') and
+    RunGit(FRoot, ['config', 'branch.' + Trim(Name) + '.remote'], Result) then
+    Result := Trim(Result);
+  { "." is the repository itself, for a branch tracking a local one. }
+  if (Result = '') or (Result = '.') then
+    Result := RemoteFor('');
+end;
+
 { rev-parse --git-path gives the hooks folder with core.hooksPath
   honoured, relative to the root when it is inside the work tree. }
 function TGittanRepo.HasHook(const AName: string): boolean;
@@ -2763,6 +3010,75 @@ begin
     Result := RunGit(FRoot, ['tag', '-a', '-m', AMessage, AName, AAt], Output)
   else
     Result := RunGit(FRoot, ['tag', AName, AAt], Output);
+end;
+
+function ParseTags(const AOutput: string): TGittanTags;
+var
+  Lines: TStringList;
+  Fields: TStringArray;
+  i, n: integer;
+begin
+  Result := nil;
+  Lines := TStringList.Create;
+  try
+    Lines.Text := AOutput;
+    SetLength(Result, Lines.Count);
+    n := 0;
+    for i := 0 to Lines.Count - 1 do
+    begin
+      Fields := Lines[i].Split([#31], 5);
+      if (Length(Fields) < 5) or (Fields[0] = '') then
+        Continue;
+      Result[n].Name := Fields[0];
+      Result[n].Annotated := Fields[2] <> '';
+      if Result[n].Annotated then
+        Result[n].Commit := Fields[2]
+      else
+        Result[n].Commit := Fields[1];
+      Result[n].Time := StrToInt64Def(Fields[3], 0);
+      Result[n].Subject := Fields[4];
+      Inc(n);
+    end;
+    SetLength(Result, n);
+  finally
+    Lines.Free;
+  end;
+end;
+
+function TGittanRepo.Tags(out AList: TGittanTags): boolean;
+var
+  Output: string;
+begin
+  AList := nil;
+  { The last --sort is the first key. }
+  Result := (FRoot <> '') and RunGit(FRoot, ['for-each-ref', '--sort=-v:refname',
+    '--sort=-creatordate', '--format=' + TagFormat, 'refs/tags'], Output);
+  if Result then
+    AList := ParseTags(Output);
+end;
+
+function TGittanRepo.DeleteTag(const AName: string): boolean;
+var
+  Output: string;
+begin
+  Result := (FRoot <> '') and (AName <> '') and RunGit(FRoot, ['tag', '-d', AName], Output);
+end;
+
+function TGittanRepo.PushTag(const ARemote, AName: string): boolean;
+begin
+  if (FRoot = '') or (ARemote = '') then
+    Exit(False);
+  if AName = '' then
+    Result := RunRemote(['push', '--progress', ARemote, '--tags'])
+  else
+    Result := RunRemote(['push', '--progress', ARemote, 'refs/tags/' + AName]);
+end;
+
+function TGittanRepo.DeleteRemoteTag(const ARemote, AName: string): boolean;
+begin
+  if (FRoot = '') or (ARemote = '') or (AName = '') then
+    Exit(False);
+  Result := RunRemote(['push', ARemote, '--delete', 'refs/tags/' + AName]);
 end;
 
 function TGittanRepo.IsAncestor(const AAncestor, ADescendant: string): boolean;

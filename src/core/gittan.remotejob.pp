@@ -12,11 +12,16 @@ uses
 
 type
   {** What a TGittanRemoteJob does. }
-  TGittanRemoteKind = (rkFetch, rkPull, rkPush, rkDeleteRemote);
+  TGittanRemoteKind = (rkFetch, rkPull, rkPush, rkDeleteRemote, rkForcePush, rkPushBranch,
+    rkPushTag, rkDeleteRemoteTag);
 
-  {** Runs a fetch, a pull (the way Mode says), a push, or the deletion
-    of the remote branch Arg stands for (a remote-tracking branch such
-    as origin/feature) of the repository at ARoot through TGittanRepo, on a repository of its own.
+  {** Runs a fetch, a pull (the way Mode says), a push, a push with
+    --force-with-lease, or the deletion of the remote branch Arg stands
+    for (a remote-tracking branch such as origin/feature); or with
+    Remote, the push of the local branch Arg to it as its upstream, the
+    push of the tag Arg (every tag with Arg empty) and the deletion of
+    the tag Arg on it; of the repository at ARoot through TGittanRepo,
+    on a repository of its own.
     OnDone is called in the main thread when it is done, unless the job
     has been stopped. A job is never broken off, as a pull stopped
     halfway would leave a merge behind: Stop only drops the handler, and
@@ -24,10 +29,10 @@ type
     starts never runs Execute). }
   TGittanRemoteJob = class(TThread)
   private
-    FRoot, FArg: string;
+    FRoot, FArg, FRemote: string;
     FKind: TGittanRemoteKind;
     FMode: TGittanPullMode;
-    FOk, FDiverged, FRejected: boolean;
+    FOk, FDiverged, FRejected, FStale, FUnseen: boolean;
     FError: string;
     FOnDone, FOnOutput: TNotifyEvent;
     FLock: TRTLCriticalSection;
@@ -41,7 +46,8 @@ type
     procedure Execute; override;
   public
     constructor Create(const ARoot: string; AKind: TGittanRemoteKind;
-      AMode: TGittanPullMode = pmAuto; const AArg: string = '');
+      AMode: TGittanPullMode = pmAuto; const AArg: string = '';
+      const ARemote: string = '');
     destructor Destroy; override;
     {** Drops the handler, and waits for git to end when AWait is set, as
       on quitting. }
@@ -50,6 +56,7 @@ type
     property Kind: TGittanRemoteKind read FKind;
     property Mode: TGittanPullMode read FMode;
     property Arg: string read FArg;
+    property Remote: string read FRemote;
     {** Whether git did it. }
     property Ok: boolean read FOk;
     {** A pull that failed since the branch has diverged from its
@@ -58,6 +65,13 @@ type
     {** A push that failed since the remote has commits the branch
       lacks: a pull would bring them first. }
     property Rejected: boolean read FRejected;
+    {** A forced push that failed since the remote's branch has moved
+      since the last fetch: a fetch would show what the push would lose. }
+    property Stale: boolean read FStale;
+    {** A forced push that failed since the upstream has commits a fetch
+      brought in that were never in the branch: a pull would take them
+      in first. }
+    property Unseen: boolean read FUnseen;
     {** git's reason, when not Ok. }
     property Error: string read FError;
     {** What git and the hooks it runs have written so far, as a
@@ -128,12 +142,13 @@ begin
 end;
 
 constructor TGittanRemoteJob.Create(const ARoot: string; AKind: TGittanRemoteKind;
-  AMode: TGittanPullMode; const AArg: string);
+  AMode: TGittanPullMode; const AArg, ARemote: string);
 begin
   inherited Create(True);
   InitCriticalSection(FLock);
   FRoot := ARoot;
   FArg := AArg;
+  FRemote := ARemote;
   FKind := AKind;
   FMode := AMode;
 end;
@@ -202,6 +217,10 @@ begin
         rkPull: FOk := Repo.Pull(FMode, FDiverged);
         rkPush: FOk := Repo.Push(FRejected);
         rkDeleteRemote: FOk := Repo.DeleteRemoteBranch(FArg);
+        rkForcePush: FOk := Repo.ForcePush(FStale, FUnseen);
+        rkPushBranch: FOk := Repo.PushBranch(FArg, FRemote);
+        rkPushTag: FOk := Repo.PushTag(FRemote, FArg);
+        rkDeleteRemoteTag: FOk := Repo.DeleteRemoteTag(FRemote, FArg);
       end;
     if not FOk then
       FError := Repo.Error;

@@ -9,13 +9,18 @@
   as they run: at once for a push with a pre-push hook, which may run
   the tests, else after NoticeDelay, so a quick fetch shows none. A pull
   that finds the branch diverged asks whether to merge or rebase, a
-  push the remote rejects offers to pull first; any other failure shows
-  git's reason. }
+  push the remote rejects offers to pull first, or, when the upstream
+  has commits the branch lacks (as after a rebase of pushed commits), to
+  force the push with --force-with-lease; a forced push that finds the
+  remote moved since the last fetch offers to fetch. Any other failure
+  shows git's reason. The same job also pushes a branch to a remote it
+  then tracks, pushes tags and deletes a branch or a tag on a remote. }
 const
   saPull = 0;
   saPush = 1;
   saFetch = 2;
   saGraph = 3;
+  saForcePush = 4;
 
 procedure TForm1.UpdateRemoteItems;
 var
@@ -28,12 +33,13 @@ begin
   FFetchItem.Enabled := Can;
   FPullItem.Enabled := Can;
   FPushItem.Enabled := Can;
+  FForcePushItem.Enabled := Can and FHasUpstream;
   UpdateBranchItems;
   UpdateStashItems;
 end;
 
 procedure TForm1.StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode;
-  const AArg: string);
+  const AArg, ARemote: string);
 begin
   if (FRepo.Root = '') or (FRemoteJob <> nil) or (FCommitJob <> nil) then
     Exit;
@@ -43,20 +49,29 @@ begin
     FRemoteHead := FRepo.CommitId('HEAD')
   else
     FRemoteHead := '';
-  FNoticeHook := (AKind = rkPush) and FRepo.HasHook('pre-push');
-  FRemoteJob := TGittanRemoteJob.Create(FRepo.Root, AKind, AMode, AArg);
+  FNoticeHook := (AKind in [rkPush, rkForcePush, rkPushBranch, rkPushTag]) and
+    FRepo.HasHook('pre-push');
+  FRemoteJob := TGittanRemoteJob.Create(FRepo.Root, AKind, AMode, AArg, ARemote);
   FRemoteJob.OnDone := @RemoteJobDone;
   FRemoteJob.OnOutput := @RemoteJobOutput;
   FRemoteJob.Start;
-  case AKind of
-    rkFetch: FStatus.ShowMessage(rsFetching, stNormal, 0);
-    rkPull: FStatus.ShowMessage(rsPulling, stNormal, 0);
-    rkPush: if FNoticeHook then
-        FStatus.ShowMessage(rsRunningHook, stNormal, 0)
-      else
-        FStatus.ShowMessage(rsPushing, stNormal, 0);
-    rkDeleteRemote: FStatus.ShowMessage(Format(rsDeletingRemote, [AArg]), stNormal, 0);
-  end;
+  if FNoticeHook then
+    FStatus.ShowMessage(rsRunningHook, stNormal, 0)
+  else
+    case AKind of
+      rkFetch: FStatus.ShowMessage(rsFetching, stNormal, 0);
+      rkPull: FStatus.ShowMessage(rsPulling, stNormal, 0);
+      rkPush: FStatus.ShowMessage(rsPushing, stNormal, 0);
+      rkForcePush: FStatus.ShowMessage(rsForcePushing, stNormal, 0);
+      rkPushBranch: FStatus.ShowMessage(Format(rsPushingTo, [AArg, ARemote]), stNormal, 0);
+      rkPushTag:
+        if AArg = '' then
+          FStatus.ShowMessage(Format(rsPushingTags, [ARemote]), stNormal, 0)
+        else
+          FStatus.ShowMessage(Format(rsPushingTo, [AArg, ARemote]), stNormal, 0);
+      rkDeleteRemote, rkDeleteRemoteTag:
+        FStatus.ShowMessage(Format(rsDeletingRemote, [AArg]), stNormal, 0);
+    end;
   if FNoticeHook then
     ShowRemoteNotice
   else
@@ -70,14 +85,22 @@ begin
   Result := '';
   if FRemoteJob = nil then
     Exit;
+  if FNoticeHook then
+    Exit(rsNoticeHook);
   case FRemoteJob.Kind of
     rkFetch: Result := rsNoticeFetching;
     rkPull: Result := rsNoticePulling;
-    rkPush: if FNoticeHook then
-        Result := rsNoticeHook
+    rkPush: Result := rsNoticePushing;
+    rkForcePush: Result := rsNoticeForcePushing;
+    rkPushBranch: Result := Format(rsNoticePushingTo, [FRemoteJob.Arg, FRemoteJob.Remote]);
+    rkPushTag:
+      if FRemoteJob.Arg = '' then
+        Result := Format(rsNoticePushingTo, [rsTheTags, FRemoteJob.Remote])
       else
-        Result := rsNoticePushing;
+        Result := Format(rsNoticePushingTo, [FRemoteJob.Arg, FRemoteJob.Remote]);
     rkDeleteRemote: Result := Format(rsNoticeDeleting, [FRemoteJob.Arg]);
+    rkDeleteRemoteTag: Result := Format(rsNoticeDeletingOn, [FRemoteJob.Arg,
+        FRemoteJob.Remote]);
   end;
 end;
 
@@ -122,6 +145,7 @@ var
   Job: TGittanRemoteJob;
   HookFailed: boolean;
   Count: integer;
+  Msg: string;
 begin
   Job := TGittanRemoteJob(Sender);
   if Job <> FRemoteJob then
@@ -165,6 +189,17 @@ begin
         end;
       rkDeleteRemote:
         StatusNote(Format(rsDeletedRemote, [Job.Arg]));
+      rkDeleteRemoteTag:
+        StatusNote(Format(rsDeletedRemoteTag, [Job.Arg, Job.Remote]));
+      rkForcePush:
+        BannerSuccess(Format(rsForcePushed, [FBranch]));
+      rkPushBranch:
+        BannerSuccess(Format(rsPushedBranchTo, [Job.Arg, Job.Remote + '/' + Job.Arg]));
+      rkPushTag:
+        if Job.Arg = '' then
+          BannerSuccess(Format(rsPushedTags, [Job.Remote]))
+        else
+          BannerSuccess(Format(rsPushedTag, [Job.Arg, Job.Remote]));
       rkPush:
         if FRemoteAhead = 1 then
           BannerSuccess(Format(rsPushedOne, [FBranch]))
@@ -182,11 +217,40 @@ begin
       mrYes: StartRemote(rkPull, pmMerge);
       mrNo: StartRemote(rkPull, pmRebase);
     end
+  else if Job.Rejected and FHasUpstream and (FBehind > 0) then
+  begin
+    { The upstream's commits the branch lacks are known here: they are
+      to be pulled in, or, after a rewrite, replaced. }
+    if FBehind = 1 then
+      Msg := Format(rsPushRejectedDivergedOne, [FRepo.Upstream(FBranch)])
+    else
+      Msg := Format(rsPushRejectedDiverged, [FRepo.Upstream(FBranch), FBehind]);
+    case QuestionDlg(rsPushRejectedTitle, Msg + LineEnding + LineEnding + rsPushRejectedForce,
+        mtConfirmation, [mrYes, rsPullAction, 'IsDefault', mrNo, rsForcePushAction, mrCancel,
+        rsCancelButton, 'IsCancel'], 0) of
+      mrYes: StartRemote(rkPull, pmAuto);
+      mrNo: StartRemote(rkForcePush);
+    end;
+  end
   else if Job.Rejected then
   begin
     if QuestionDlg(rsPushRejectedTitle, rsPushRejected, mtConfirmation,
       [mrYes, rsPullAction, 'IsDefault', mrCancel, rsCancelButton, 'IsCancel'], 0) = mrYes then
       StartRemote(rkPull, pmAuto);
+  end
+  else if Job.Unseen then
+  begin
+    if QuestionDlg(rsForceUnseenTitle, Format(rsForceUnseen, [FRepo.Upstream(FBranch)]),
+      mtWarning, [mrYes, rsPullAction, 'IsDefault', mrCancel, rsCancelButton, 'IsCancel'],
+      0) = mrYes then
+      StartRemote(rkPull, pmAuto);
+  end
+  else if Job.Stale then
+  begin
+    if QuestionDlg(rsForceStaleTitle, Format(rsForceStale, [FRepo.Upstream(FBranch)]),
+      mtWarning, [mrYes, rsFetchItem, 'IsDefault', mrCancel, rsCancelButton, 'IsCancel'],
+      0) = mrYes then
+      StartRemote(rkFetch);
   end
   else
     ShowRemoteFailure(Job, HookFailed);
@@ -211,7 +275,7 @@ begin
         Title := rsGitPullFailed;
         Again := rsPullAgain;
       end;
-    rkPush:
+    rkPush, rkForcePush, rkPushBranch, rkPushTag:
       begin
         if AHookFailed then
           Title := rsHookFailed
@@ -226,6 +290,7 @@ begin
   FRetryKind := AJob.Kind;
   FRetryMode := AJob.Mode;
   FRetryArg := AJob.Arg;
+  FRetryRemote := AJob.Remote;
   FStatus.ShowMessage(Title, stBad, StatusErrorSeconds);
   FNotice.DetailFont.Assign(Edit.Font);
   FNotice.Popup(Title, AJob.Error, False, nkBad);
@@ -238,7 +303,7 @@ begin
     0:
       begin
         FNotice.Close;
-        StartRemote(FRetryKind, FRetryMode, FRetryArg);
+        StartRemote(FRetryKind, FRetryMode, FRetryArg, FRetryRemote);
       end;
     1:
       begin
@@ -279,6 +344,39 @@ begin
   StartRemote(rkPush);
 end;
 
+{ Asks first, naming what the upstream loses: its commits the branch
+  lacks, as the last fetch saw them. With none a plain push does. }
+procedure TForm1.ForcePushAsk;
+var
+  Up, Msg: string;
+begin
+  if (FRepo.Root = '') or (FRemoteJob <> nil) or (FCommitJob <> nil) then
+    Exit;
+  if not FHasUpstream then
+  begin
+    StatusNote(Format(rsForceNoUpstream, [FBranch]), True);
+    Exit;
+  end;
+  if FBehind = 0 then
+  begin
+    StartRemote(rkPush);
+    Exit;
+  end;
+  Up := FRepo.Upstream(FBranch);
+  if FBehind = 1 then
+    Msg := Format(rsForceAskOne, [FBranch, Up, Up])
+  else
+    Msg := Format(rsForceAsk, [FBranch, Up, FBehind, Up]);
+  if QuestionDlg(rsForcePushTitle, Msg, mtWarning, [mrYes, rsForcePushAction, mrCancel,
+    rsCancelButton, 'IsCancel', 'IsDefault'], 0) = mrYes then
+    StartRemote(rkForcePush);
+end;
+
+procedure TForm1.MenuForcePushClick(Sender: TObject);
+begin
+  ForcePushAsk;
+end;
+
 { The status bar's "↑2 ↓5": pull and push with their counts, fetch,
   and the commit graph, which a click opened before. }
 procedure TForm1.SyncClick(const AScreenRect: TRect);
@@ -309,6 +407,9 @@ begin
     else if FAhead > 0 then
       Detail := '↑' + IntToStr(FAhead);
     AddAction(saPush, rsPushItem, Detail);
+    { Diverged, as after a rebase of pushed commits. }
+    if FHasUpstream and (FAhead > 0) and (FBehind > 0) then
+      AddAction(saForcePush, rsForcePushItem, Format(rsForcePushDetail, [FBehind]));
     AddAction(saFetch, rsFetchItem, '');
   end;
   AddAction(saGraph, rsCommitGraphItem, '');
@@ -328,6 +429,7 @@ begin
   case FSyncActions[AIndex] of
     saPull: StartRemote(rkPull);
     saPush: StartRemote(rkPush);
+    saForcePush: ForcePushAsk;
     saFetch: StartRemote(rkFetch);
     saGraph: ShowCommitGraph;
   end;

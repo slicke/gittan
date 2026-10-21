@@ -274,7 +274,7 @@ type
     FRemoteJob: TGittanRemoteJob;
     FRemoteAhead: integer;
     FRemoteHead: string;
-    FFetchItem, FPullItem, FPushItem: TMenuItem;
+    FFetchItem, FPullItem, FPushItem, FForcePushItem: TMenuItem;
     FSyncPopup: TGittanPopupList;
     { The actions of a base that is a branch compared through the merge
       base with the current one (umain.branches.inc): the list dropped
@@ -430,7 +430,26 @@ type
       whose captions name the current branch. }
     FBranchListMode: TGittanBranchListMode;
     FSwitchItem, FNewBranchItem, FMergeItem, FRebaseItem, FCompareBranchItem,
-      FCompareBackItem: TMenuItem;
+      FCompareBackItem, FUpstreamItem: TMenuItem;
+    { The upstream list (umain.branches.inc), the branch it is for, and
+      per row what a pick does: '' nothing, '+' and a remote to push
+      there, '-' to stop tracking, '=' and a remote-tracking branch to
+      track it. }
+    FUpstreamPopup: TGittanPopupList;
+    FUpstreamRows: TStringList;
+    FUpstreamBranch: string;
+    { Tags (umain.tags.inc): what the list read when it opened, the list
+      with, per row, the index in FTags of its tag (TagRowHeader,
+      TagRowNew for the others), the menu of a tag and the one it is
+      for, the remote pushes and deletions go to, and the Branch menu's
+      items. }
+    FTags: TGittanTags;
+    FTagPopup: TGittanPopupList;
+    FTagRows: TIntegerDynArray;
+    FTagMenu: TPopupMenu;
+    FMenuTag: TGittanTag;
+    FTagRemote: string;
+    FTagsItem, FNewTagItem, FPushTagsItem: TMenuItem;
     { Stashes (umain.stash.inc): what the last snapshot listed, the list
       that drops from the status bar's stash chip with, per row, the
       index in FStashes of its stash (StashRowHeader, StashRowNew for
@@ -461,7 +480,7 @@ type
     { What a failure notice's first button runs again. }
     FRetryKind: TGittanRemoteKind;
     FRetryMode: TGittanPullMode;
-    FRetryArg: string;
+    FRetryArg, FRetryRemote: string;
     { The list a click on the status bar's pull request drops down, and
       what each of its rows does (the pa* constants). }
     FPullPopup: TGittanPopupList;
@@ -856,6 +875,7 @@ type
     procedure MenuZoomResetClick(Sender: TObject);
     procedure MenuFontClick(Sender: TObject);
     procedure MenuSettingsClick(Sender: TObject);
+    procedure CheckGitVersion;
     procedure PreviewSettings(AFont: TFont; ATheme, ATabSize: integer);
     procedure ApplyEditorFont(AFont: TFont);
     procedure ApplyTabSize(ASize: integer);
@@ -952,7 +972,7 @@ type
     procedure PullChipClick(const AScreenRect: TRect);
     procedure PullPopupPick(Sender: TObject; AIndex: integer);
     procedure ComparePull(const APull: TGittanPullRequest);
-    procedure SwitchBranch(const ABranch: string);
+    procedure SwitchBranch(const ABranch: string; ADetach: boolean = False);
     function ContextFullPath: string;
     procedure MenuCopyPathClick(Sender: TObject);
     procedure MenuCopyRelativePathClick(Sender: TObject);
@@ -1039,6 +1059,21 @@ type
     procedure BranchMenuOpen(Sender: TObject);
     procedure MenuBranchListClick(Sender: TObject);
     procedure MenuNewBranchClick(Sender: TObject);
+    procedure ShowUpstreamList(const ABranch: string; const AScreenRect: TRect);
+    procedure UpstreamPopupPick(Sender: TObject; AIndex: integer);
+    procedure MenuUpstreamClick(Sender: TObject);
+    function TagBusy: boolean;
+    procedure ShowTagList(const AScreenRect: TRect);
+    procedure TagPopupPick(Sender: TObject; AIndex: integer);
+    procedure TagContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
+    procedure TagMenuClick(Sender: TObject);
+    procedure NewTagAsk;
+    procedure CheckoutTagAsk(const ATag: TGittanTag);
+    procedure BranchFromTagAsk(const ATag: TGittanTag);
+    procedure DeleteTagAsk(const ATag: TGittanTag);
+    procedure MenuTagsClick(Sender: TObject);
+    procedure MenuNewTagClick(Sender: TObject);
+    procedure MenuPushTagsClick(Sender: TObject);
     function StashLabel(const AStash: TGittanStash): string;
     function StashOfBase: integer;
     function StashBusy: boolean;
@@ -1092,7 +1127,7 @@ type
     procedure SkipOperationClick(Sender: TObject);
     procedure AbortOperationClick(Sender: TObject);
     procedure StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode = pmAuto;
-      const AArg: string = '');
+      const AArg: string = ''; const ARemote: string = '');
     procedure RemoteJobDone(Sender: TObject);
     procedure RemoteJobOutput(Sender: TObject);
     procedure NoticeTimerTimer(Sender: TObject);
@@ -1104,6 +1139,8 @@ type
     procedure MenuFetchClick(Sender: TObject);
     procedure MenuPullClick(Sender: TObject);
     procedure MenuPushClick(Sender: TObject);
+    procedure ForcePushAsk;
+    procedure MenuForcePushClick(Sender: TObject);
     procedure SyncClick(const AScreenRect: TRect);
     function BaseActionRef: string;
     procedure BaseClick(const AScreenRect: TRect);
@@ -1400,7 +1437,44 @@ resourcestring
   rsRebaseAction = 'Rebase';
   rsPushRejectedTitle = 'The Push Was Rejected';
   rsPushRejected = 'The remote has commits the branch does not have yet. Pull them first?';
+  rsPushRejectedDiverged = '%s has %d commits the branch lacks. Pull them in?';
+  rsPushRejectedDivergedOne = '%s has a commit the branch lacks. Pull it in?';
+  rsPushRejectedForce = 'If the branch was rewritten (rebased or amended) after it was ' +
+    'pushed, force the push instead, which puts the branch''s commits in their place.';
   rsPullAction = 'Pull';
+  rsForcePushMenu = 'Force Push (with &Lease)...';
+  rsForcePushItem = 'Force Push';
+  rsForcePushDetail = 'replaces ↓%d';
+  rsForcePushAction = 'Force Push';
+  rsForcePushTitle = 'Force Push';
+  rsForceAsk = 'Force push %s over %s? The %d commits %s has that the branch lacks are ' +
+    'taken off it. If someone pushed since the last fetch, the push is refused (--force-with-lease).';
+  rsForceAskOne = 'Force push %s over %s? The commit %s has that the branch lacks is ' +
+    'taken off it. If someone pushed since the last fetch, the push is refused (--force-with-lease).';
+  rsForceNoUpstream = '%s has no upstream to force a push over';
+  rsForcePushing = 'Force pushing...';
+  rsNoticeForcePushing = 'Force pushing';
+  rsForcePushed = 'Force pushed %s';
+  rsForceStaleTitle = 'The Remote Has Moved';
+  rsForceStale = '%s has commits pushed since the last fetch, which the forced push would ' +
+    'lose. Fetch them first, to see what they are?';
+  rsForceUnseenTitle = 'The Remote Has Commits Not Taken In';
+  rsForceUnseen = '%s has commits that were fetched but were never in the branch, ' +
+    'someone else''s work maybe, which the forced push would lose. Pull them in first?';
+  rsGitTooOld = 'git %s is older than %d.%d';
+  rsGitTooOldDetail = 'Gittan needs git %d.%d or later, and some of what it does fails with ' +
+    'this one (%s). Update git, or set a newer one in Settings > Tools.';
+  rsPushingTo = 'Pushing %s to %s...';
+  rsPushingTags = 'Pushing the tags to %s...';
+  rsNoticePushingTo = 'Pushing %s to %s';
+  rsTheTags = 'the tags';
+  rsNoticeDeletingOn = 'Deleting %s on %s';
+  rsPushedBranchTo = 'Pushed %s to %s, which it now tracks';
+  rsUpstreamDetached = 'HEAD is on no branch';
+  rsPushedTag = 'Pushed the tag %s to %s';
+  rsPushedTags = 'Pushed the tags to %s';
+  rsDeletedRemoteTag = 'Deleted the tag %s on %s';
+  rsNoRemote = 'The repository has no remote';
   rsCaShow = 'Show Commit';
   rsCaCompare = 'Compare with Working Tree';
   rsCaMark = 'Mark for Comparison';
@@ -1504,6 +1578,35 @@ resourcestring
   rsBmGoneUnmerged = 'These %d have commits that are in no other branch. Delete them too?';
   rsBmGoneDeleted = 'Deleted %d branches';
   rsBmGoneDeletedOne = 'Deleted 1 branch';
+  rsBmUpstream = 'Set Upstream...';
+  rsBmUpstreamItem = 'Set &Upstream of %s...';
+  rsUpstreamHeader = 'Upstream of %s';
+  rsUpstreamPush = 'Push to %s/%s';
+  rsUpstreamStop = 'Stop Tracking %s';
+  rsUpstreamTrack = 'Track a remote branch';
+  rsUpstreamSet = '%s now tracks %s';
+  rsUpstreamStopped = '%s tracks no upstream now';
+  rsFilterUpstreams = 'Filter remote branches';
+  rsTagsItem = '&Tags...';
+  rsNewTagItem = 'New Tag at &HEAD...';
+  rsPushTagsItem = 'Push All Tags';
+  rsTags = 'Tags';
+  rsNoTags = 'No tags';
+  rsTagNewRow = 'New Tag at HEAD...';
+  rsFilterTags = 'Filter tags';
+  rsTmCheckout = 'Check Out...';
+  rsTmPush = 'Push to %s';
+  rsTmCopy = 'Copy Name';
+  rsTmDeleteRemote = 'Delete on %s...';
+  rsTagCheckoutTitle = 'Check Out Tag';
+  rsTagCheckoutAsk = 'Check out %s? HEAD is then on no branch, and commits made there ' +
+    'belong to none. To work on from the tag, create a branch at it instead.';
+  rsTagCheckoutAction = 'Check Out';
+  rsCheckedOutDetached = 'Checked out %s: HEAD is on no branch';
+  rsTagDeleteTitle = 'Delete Tag';
+  rsTagDeleteAsk = 'Delete the tag %s here? The remotes keep theirs.';
+  rsTagDeleted = 'Deleted the tag %s';
+  rsTagDeleteRemoteAsk = 'Delete the tag %s on %s, for everyone who uses it? The local one stays.';
   rsStashMenu = 'Stas&h';
   rsStashAllItem = '&Stash Changes...';
   rsStashChosenItem = 'Stash &Ticked Files...';
@@ -2153,6 +2256,19 @@ begin
   FBranchPopup.FilterHint := rsFilterBranches;
   FBranchPopup.OnPick := @BranchPopupPick;
   FBranchPopup.OnContext := @BranchContext;
+  { The upstream list and the tag list drop from the status bar's
+    branch. }
+  FUpstreamRows := TStringList.Create;
+  FUpstreamPopup := TGittanPopupList.Create(Self);
+  FUpstreamPopup.Parent := Self;
+  FUpstreamPopup.FilterHint := rsFilterUpstreams;
+  FUpstreamPopup.OnPick := @UpstreamPopupPick;
+  FTagMenu := TPopupMenu.Create(Self);
+  FTagPopup := TGittanPopupList.Create(Self);
+  FTagPopup.Parent := Self;
+  FTagPopup.FilterHint := rsFilterTags;
+  FTagPopup.OnPick := @TagPopupPick;
+  FTagPopup.OnContext := @TagContext;
   { The stash list pops up under the status bar's stash chip. }
   FStashMenu := TPopupMenu.Create(Self);
   FStashPopup := TGittanPopupList.Create(Self);
@@ -2263,6 +2379,8 @@ begin
   end
   else if (FSettings.Recent.Count > 0) and DirectoryExists(FSettings.Recent[0]) then
     OpenRepository(FSettings.Recent[0]);
+  { After the repository, whose opening clears the banners. }
+  CheckGitVersion;
 end;
 
 procedure TForm1.FormDestroy(Sender: TObject);
@@ -2284,6 +2402,7 @@ begin
   FBranchNames.Free;
   FBranchRefs.Free;
   FGoneToDelete.Free;
+  FUpstreamRows.Free;
   FGoneBranches.Free;
   StopBlame;
   StopIndexing;
@@ -2517,6 +2636,12 @@ begin
     FStashPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240));
+    FUpstreamPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
+      RGBToColor(100, 160, 240));
+    FTagPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
+      RGBToColor(100, 160, 240));
     FGraph.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
       RGBToColor(100, 160, 240), RGBToColor(227, 179, 65));
@@ -2578,6 +2703,12 @@ begin
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
     FStashPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
+      RGBToColor(0, 110, 230));
+    FUpstreamPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
+      RGBToColor(0, 110, 230));
+    FTagPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
       RGBToColor(0, 110, 230));
     FGraph.SetColors(clWhite, RGBToColor(30, 30, 30),
@@ -2979,6 +3110,8 @@ begin
     @MenuPullClick);
   FPushItem := AddItem(FileMenu, rsPushMenu, ShortCut(VK_P, [ssModifier, ssShift]),
     @MenuPushClick);
+  FForcePushItem := AddItem(FileMenu, rsForcePushMenu, ShortCut(VK_P, [ssModifier, ssShift,
+    ssAlt]), @MenuForcePushClick);
   FFetchItem := AddItem(FileMenu, rsFetchMenu, ShortCut(VK_F, [ssModifier, ssAlt]),
     @MenuFetchClick);
   UpdateRemoteItems;
@@ -3022,6 +3155,12 @@ begin
   FCompareBranchItem.Tag := Ord(blBranchSince);
   FCompareBackItem := AddItem(BranchMenu, '', 0, @MenuBranchListClick);
   FCompareBackItem.Tag := Ord(blCurrentSince);
+  BranchMenu.Add(NewLine);
+  FUpstreamItem := AddItem(BranchMenu, '', 0, @MenuUpstreamClick);
+  BranchMenu.Add(NewLine);
+  FTagsItem := AddItem(BranchMenu, rsTagsItem, 0, @MenuTagsClick);
+  FNewTagItem := AddItem(BranchMenu, rsNewTagItem, 0, @MenuNewTagClick);
+  FPushTagsItem := AddItem(BranchMenu, rsPushTagsItem, 0, @MenuPushTagsClick);
   UpdateBranchItems;
 
   { The Stash menu (umain.stash.inc). }
@@ -5452,6 +5591,7 @@ const
 {$I umain.branches.inc}
 {$I umain.rebase.inc}
 {$I umain.stash.inc}
+{$I umain.tags.inc}
 {$I umain.revert.inc}
 {$I umain.commit.inc}
 {$I umain.remote.inc}
