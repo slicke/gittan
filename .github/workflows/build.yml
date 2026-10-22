@@ -364,15 +364,21 @@ jobs:
 
           # The release is made as a draft, filled, then published, so
           # releases/latest never lacks the packages. A re-run of this job
-          # after a failed upload finds the release made and uploads the
-          # packages again instead of failing on it.
-          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          # after a failed upload finds the draft and uploads the packages
+          # again instead of failing on it; a published release is left as
+          # it is, since --clobber deletes an asset before uploading its
+          # replacement.
+          if ! DRAFT=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --json isDraft --jq .isDraft 2>/dev/null); then
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "Gittan build ${BUILD}" \
               --notes-file notes.md \
               --draft
+          elif [ "$DRAFT" != "true" ]; then
+            echo "$TAG is published already; nothing to do."
+            exit 0
           fi
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
             packages/Gittan-macos-silicon.dmg \
