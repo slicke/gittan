@@ -66,8 +66,8 @@ end;
 
 destructor TGittanCommitJob.Destroy;
 begin
-  FPaths.Free;
   inherited Destroy;
+  FPaths.Free;
 end;
 
 procedure TGittanCommitJob.Execute;

@@ -309,8 +309,8 @@ end;
 
 destructor TGittanPullRequestJob.Destroy;
 begin
-  FGone.Free;
   inherited Destroy;
+  FGone.Free;
 end;
 
 procedure TGittanPullRequestJob.Execute;
