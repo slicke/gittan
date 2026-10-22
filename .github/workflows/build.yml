@@ -359,11 +359,20 @@ jobs:
             echo "Gittan runs the git command line tool, so git must be on your PATH."
           } > notes.md
 
-          gh release create "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "Gittan build ${BUILD}" \
-            --notes-file notes.md \
+          # The release is made as a draft, filled, then published, so
+          # releases/latest never lacks the packages. A re-run of this job
+          # after a failed upload finds the release made and uploads the
+          # packages again instead of failing on it.
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Gittan build ${BUILD}" \
+              --notes-file notes.md \
+              --draft
+          fi
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
             packages/Gittan-macos-silicon.dmg \
             packages/Gittan-windows-x64.zip \
             packages/Gittan-linux-amd64.tar.gz
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
