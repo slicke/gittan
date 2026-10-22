@@ -258,6 +258,11 @@ begin
   AssertTrue(PushTransferStarted('hook'#10'Enumerating objects: 3, done.'));
   AssertTrue(PushTransferStarted('Everything up-to-date'));
   AssertTrue(PushTransferStarted('x'#10'remote: Resolving deltas'));
+  AssertTrue('a deletion', PushTransferStarted('To /git/o.git'#10' - [deleted]         bar'));
+  AssertTrue('a deletion of a ref the remote lacks',
+    PushTransferStarted('error: unable to delete ''nope'': remote ref does not exist'));
+  AssertFalse('the hook said no', PushTransferStarted('hook says no'#10 +
+    'error: failed to push some refs to ''/git/o.git'''));
 end;
 
 procedure TCommitJobTest.TestRemoteJob;

@@ -55,8 +55,9 @@ begin
     FRemoteHead := FRepo.CommitId('HEAD')
   else
     FRemoteHead := '';
-  FNoticeHook := (AKind in [rkPush, rkForcePush, rkPushBranch, rkPushTag]) and
-    FRepo.HasHook('pre-push');
+  { Deleting on a remote is a push too, and runs the hook. }
+  FNoticeHook := (AKind in [rkPush, rkForcePush, rkPushBranch, rkPushTag, rkDeleteRemote,
+    rkDeleteRemoteTag]) and FRepo.HasHook('pre-push');
   FRemoteJob := TGittanRemoteJob.Create(FRepo.Root, AKind, AMode, AArg, ARemote);
   FRemoteJob.OnDone := @RemoteJobDone;
   FRemoteJob.OnOutput := @RemoteJobOutput;
@@ -150,7 +151,10 @@ begin
   if FNoticeHook and PushTransferStarted(Job.Progress) then
   begin
     FNoticeHook := False;
-    FStatus.ShowMessage(rsPushing, stNormal, 0);
+    if Job.Kind in [rkDeleteRemote, rkDeleteRemoteTag] then
+      FStatus.ShowMessage(Format(rsDeletingRemote, [Job.Arg]), stNormal, 0)
+    else
+      FStatus.ShowMessage(rsPushing, stNormal, 0);
     FNotice.Title := RemoteNoticeTitle;
   end;
   if FNotice.Visible then
@@ -343,7 +347,10 @@ begin
         Again := rsTryAgain;
       end;
     else
-      Title := Format(rsDeleteRemoteFailed, [AJob.Arg]);
+      if AHookFailed then
+        Title := rsHookFailed
+      else
+        Title := Format(rsDeleteRemoteFailed, [AJob.Arg]);
       Again := rsTryAgain;
   end;
   FRetryKind := AJob.Kind;

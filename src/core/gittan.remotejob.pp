@@ -114,7 +114,9 @@ procedure AppendTerminalText(var AText: string; var AReturn: boolean; const AChu
 
 {** Whether AProgress, what a push has written so far, shows git itself
   pushing (its object counts, the remote's answer, "Everything
-  up-to-date"), which comes after the pre-push hook has had its say. }
+  up-to-date", the "To <remote>" line a deletion begins with, or a
+  deletion's refusal of a ref the remote lacks), which comes after the
+  pre-push hook has had its say. }
 function PushTransferStarted(const AProgress: string): boolean;
 
 implementation
@@ -147,8 +149,9 @@ end;
 
 function PushTransferStarted(const AProgress: string): boolean;
 const
-  Marks: array[0..5] of string = ('Enumerating objects:', 'Counting objects:',
-    'Compressing objects:', 'Writing objects:', 'Everything up-to-date', 'remote: ');
+  Marks: array[0..7] of string = ('Enumerating objects:', 'Counting objects:',
+    'Compressing objects:', 'Writing objects:', 'Everything up-to-date', 'remote: ', 'To ',
+    'error: unable to delete ');
 var
   Mark: string;
 begin
