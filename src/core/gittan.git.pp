@@ -835,7 +835,10 @@ type
     function Fingerprint: string;
     {** Work tree root, empty when nothing is open. }
     property Root: string read FRoot;
-    {** Message from the last git call that failed. }
+    {** Message from the last git call that failed. A call that succeeds
+      leaves it as it was (a call may fail on the way to its answer and
+      still give one), so it says why only right after a call that
+      returned false. }
     property Error: string read FError;
     {** The commit the work tree is compared against: a branch, tag or
       commit id, or empty for HEAD. A range "A..B" compares the commits A
@@ -1176,8 +1179,9 @@ end;
 var
   GToolPath: string;
   GGitExe: string;
-  { The paths git ran by before: kept, so that a thread starting git while
-    the main thread changes the path copies a string that is not freed. }
+  { The paths git ran by before, once each: kept, so that a thread
+    starting git while the main thread changes the path copies a string
+    that is not freed. }
   GOldGitExes: TStringList;
 
 function ToolSearchPath: string;
@@ -1248,17 +1252,27 @@ begin
 end;
 
 procedure SetGitExe(const APath: string);
+var
+  Exe: string;
+  i: integer;
 begin
-  if GGitExe <> '' then
+  Exe := APath;
+  if Exe = '' then
+    Exe := FindTool('git');
+  if Exe = '' then
+    Exe := 'git';
+  if Exe = GGitExe then
+    Exit;
+  { One string per path git ran by, not one per call: the settings set
+    it again on every save. A path set again is the kept string itself,
+    so the one in use is always kept or new, never a copy freed later. }
+  if (GGitExe <> '') and (GOldGitExes.IndexOf(GGitExe) < 0) then
     GOldGitExes.Add(GGitExe);
-  if APath <> '' then
-    GGitExe := APath
+  i := GOldGitExes.IndexOf(Exe);
+  if i >= 0 then
+    GGitExe := GOldGitExes[i]
   else
-  begin
-    GGitExe := FindTool('git');
-    if GGitExe = '' then
-      GGitExe := 'git';
-  end;
+    GGitExe := Exe;
 end;
 
 function GitExe: string;
