@@ -939,6 +939,12 @@ begin
   AssertEquals('a*b.bin', Info.Name);
   FindClose(Info);
   {$endif}
+  {$ifdef darwin}
+  { A folder that spells a name otherwise (case does not count on
+    macOS's file system) still has the file. }
+  AssertTrue('another case', StatExact(FDir + PathDelim + 'PIC.BIN', Info));
+  FindClose(Info);
+  {$endif}
   AssertTrue(IsBinaryFile(FDir + PathDelim + 'pic.bin') = False);
   WriteFile('pic.bin', 'a'#0'b');
   AssertTrue(IsBinaryFile(FDir + PathDelim + 'pic.bin'));

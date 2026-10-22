@@ -5593,7 +5593,10 @@ end;
   process and the diff on top. A deleted file is not on disk and adds
   nothing; a directory (a submodule) adds its stat alone. }
 { The neighbours a pattern matches come in the folder's order, so the
-  file itself may come after them. }
+  file itself may come after them. A name without a pattern character
+  matches itself alone, and its match is taken as it comes: the folder
+  may spell it otherwise than git does (in another case, or decomposed
+  on macOS), which a comparison would take for a file gone. }
 function StatExact(const AFileName: string; out AInfo: TSearchRec): boolean;
 var
   Name: string;
@@ -5601,6 +5604,8 @@ begin
   Name := ExtractFileName(AFileName);
   if FindFirst(AFileName, faAnyFile, AInfo) <> 0 then
     Exit(False);
+  if LastDelimiter('*?[', Name) = 0 then
+    Exit(True);
   repeat
     if AInfo.Name = Name then
       Exit(True);
