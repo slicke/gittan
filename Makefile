@@ -40,7 +40,8 @@ endif
 LAZFLAGS = --widgetset=$(WIDGETSET)
 
 # Unit tests. tests/gittantests.lpr is a console program over the non-visual
-# units (git, worddiff, settings), built with fpc alone: no LCL, no lazbuild.
+# units in src/core (a tests/test<name>.pp each), built with fpc alone: no
+# LCL, no lazbuild.
 FPC ?= fpc
 TESTBIN := tests/gittantests
 

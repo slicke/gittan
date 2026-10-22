@@ -971,7 +971,8 @@ function ParseTags(const AOutput: string): TGittanTags;
 
 {** The lines of HEAD's reflog in AOutput, what `git log -g --date=unix`
   prints with ReflogFormat: per line the commit, the selector with the
-  time (HEAD@{1700000000}) and the subject, separated by #31. Lines
+  time (HEAD@ and the unix time in braces) and the subject, separated by
+  #31. Lines
   that do not hold three fields are skipped. }
 function ParseReflog(const AOutput: string): TGittanReflog;
 
