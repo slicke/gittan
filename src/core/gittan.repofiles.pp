@@ -155,6 +155,9 @@ begin
       end;
       Lines := TStringList.Create;
       try
+        { git matches the patterns case-sensitively (core.ignoreCase
+          aside), so *.O is another line than *.o. }
+        Lines.CaseSensitive := True;
         Lines.Text := Text;
         if Lines.IndexOf(APattern) >= 0 then
           Exit(True);

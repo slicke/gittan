@@ -96,7 +96,7 @@ A fresh Lazarus knows none of the vendored packages. Register them once with `la
 Then build with make:
 
 ```sh
-make            # build Gittan.lpi (cocoa on macOS, gtk3 on Linux)
+make            # build Gittan.lpi optimized (cocoa on macOS, gtk3 on Linux)
 make run        # build and start
 make debug      # debug info (DWARF 2 on macOS)
 make rebuild    # recompile every unit

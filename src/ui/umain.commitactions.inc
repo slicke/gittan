@@ -289,49 +289,52 @@ begin
         end;
       end;
       StopWatcher;
-      Screen.Cursor := crHourGlass;
-      Conflicts := False;
-      Reopen := True;
       try
-        case (Sender as TMenuItem).Tag of
-          caBranch:
-          begin
-            Ok := FRepo.CreateBranch(Trim(Values[0]), Hash, True);
-            Note := Format(rsCaBranched, [Trim(Values[0])]);
+        Screen.Cursor := crHourGlass;
+        Conflicts := False;
+        Reopen := True;
+        try
+          case (Sender as TMenuItem).Tag of
+            caBranch:
+            begin
+              Ok := FRepo.CreateBranch(Trim(Values[0]), Hash, True);
+              Note := Format(rsCaBranched, [Trim(Values[0])]);
+            end;
+            caTag:
+            begin
+              Ok := FRepo.CreateTag(Trim(Values[0]), Hash, Trim(Values[1]));
+              Note := Format(rsCaTagged, [Short, Trim(Values[0])]);
+            end;
+            caMerge:
+            begin
+              Ok := FRepo.MergeRef(Hash, Conflicts);
+              Note := Format(rsCaMerged, [FActionName]);
+            end;
+            caCherryPick:
+            begin
+              Ok := FRepo.CherryPick(Hash, Conflicts);
+              Note := Format(rsCaPicked, [Short]);
+            end;
+            caRevert:
+            begin
+              Ok := FRepo.RevertCommit(Hash, Conflicts);
+              Note := Format(rsCaReverted, [Short]);
+            end;
+            else
+            begin
+              Ok := FRepo.Reset(Hash, Mode);
+              Note := Format(rsCaWasReset, [ResetTarget, Short]);
+            end;
           end;
-          caTag:
-          begin
-            Ok := FRepo.CreateTag(Trim(Values[0]), Hash, Trim(Values[1]));
-            Note := Format(rsCaTagged, [Short, Trim(Values[0])]);
-          end;
-          caMerge:
-          begin
-            Ok := FRepo.MergeRef(Hash, Conflicts);
-            Note := Format(rsCaMerged, [FActionName]);
-          end;
-          caCherryPick:
-          begin
-            Ok := FRepo.CherryPick(Hash, Conflicts);
-            Note := Format(rsCaPicked, [Short]);
-          end;
-          caRevert:
-          begin
-            Ok := FRepo.RevertCommit(Hash, Conflicts);
-            Note := Format(rsCaReverted, [Short]);
-          end;
-          else
-          begin
-            Ok := FRepo.Reset(Hash, Mode);
-            Note := Format(rsCaWasReset, [ResetTarget, Short]);
-          end;
+        finally
+          Screen.Cursor := crDefault;
         end;
+        FLoadError := '';
+        FSummary.Notice := '';
+        RefreshRepository;
       finally
-        Screen.Cursor := crDefault;
+        StartWatcher;
       end;
-      FLoadError := '';
-      FSummary.Notice := '';
-      RefreshRepository;
-      StartWatcher;
       if Ok then
         StatusNote(Note)
       else if Conflicts then

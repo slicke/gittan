@@ -23,11 +23,14 @@ type
     the file as it is (1-based; where the old lines go when nothing was
     added, which may be one past the last line). Discarding the block
     writes the old lines over the new; undoing that is the same block
-    with the two swapped (see Swapped). }
+    with the two swapped (see Swapped). Resolved is the caller's: the
+    write took the file's last conflict and the file was marked
+    resolved, so undoing it puts the conflict back in the index too. }
   TGittanDiscard = record
     FileName: string;
     Line: integer;
     OldLines, NewLines: TStringArray;
+    Resolved: boolean;
   end;
 
 const
@@ -66,6 +69,7 @@ begin
   Result.OldLines := nil;
   Result.NewLines := nil;
   Result.Line := 1;
+  Result.Resolved := False;
   for i := 0 to AStart - 1 do
     if ALines[i][1] <> '-' then
       Inc(Result.Line);
@@ -96,6 +100,7 @@ begin
   Result.Line := ABlock.Line;
   Result.OldLines := ABlock.NewLines;
   Result.NewLines := ABlock.OldLines;
+  Result.Resolved := ABlock.Resolved;
 end;
 
 function DiscardCount(const ABlock: TGittanDiscard): integer;

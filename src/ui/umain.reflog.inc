@@ -26,7 +26,8 @@ const
   rlBrowse = 8;
 
 { ASubject with each full commit id in it (git writes one for a reset
-  to a commit, "reset: moving to <id>") cut to the short id. }
+  to a commit, "reset: moving to <id>"), SHA-1 or SHA-256, cut to the
+  short id. }
 function ShortenReflogIds(const ASubject: string): string;
 var
   i, Run: integer;
@@ -38,7 +39,7 @@ begin
       Inc(Run)
     else
     begin
-      if Run = 40 then
+      if (Run = 40) or (Run = 64) then
         Result := Result + Copy(ASubject, i - Run, 7)
       else
         Result := Result + Copy(ASubject, i - Run, Run);
@@ -171,16 +172,19 @@ begin
         not ResetAsk(E.Commit, Short, Mode) then
         Exit;
       StopWatcher;
-      Screen.Cursor := crHourGlass;
       try
-        Ok := FRepo.Reset(E.Commit, Mode);
+        Screen.Cursor := crHourGlass;
+        try
+          Ok := FRepo.Reset(E.Commit, Mode);
+        finally
+          Screen.Cursor := crDefault;
+        end;
+        FLoadError := '';
+        FSummary.Notice := '';
+        RefreshRepository;
       finally
-        Screen.Cursor := crDefault;
+        StartWatcher;
       end;
-      FLoadError := '';
-      FSummary.Notice := '';
-      RefreshRepository;
-      StartWatcher;
       if Ok then
         StatusNote(Format(rsCaWasReset, [ResetTarget, Short]))
       else

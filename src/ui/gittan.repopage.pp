@@ -111,7 +111,7 @@ type
 implementation
 
 uses
-  Math, DateUtils, LazUTF8, gittan.reviews, gittan.statusbar;
+  Math, DateUtils, LazUTF8, gittan.reviews, gittan.statusbar, gittan.textfit;
 
 resourcestring
   rsRemotes = 'Remotes';
@@ -280,31 +280,14 @@ end;
 { AText cut from the left with an ellipsis until it fits AMaxWidth, so a
   long path keeps its end, which is the part that tells. }
 function TGittanRepoPage.FitLeft(const AText: string; AMaxWidth: integer): string;
-var
-  Cut: integer;
 begin
-  Result := AText;
-  if Canvas.TextWidth(Result) <= AMaxWidth then
-    Exit;
-  Cut := 1;
-  while (Cut < Length(AText)) and
-    (Canvas.TextWidth('…' + Copy(AText, Cut + 1, MaxInt)) > AMaxWidth) do
-    Inc(Cut);
-  Result := '…' + Copy(AText, Cut + 1, MaxInt);
+  Result := FitTextLeft(Canvas, AText, AMaxWidth);
 end;
 
 { AText cut at the end with an ellipsis until it fits AMaxWidth. }
 function TGittanRepoPage.FitRight(const AText: string; AMaxWidth: integer): string;
-var
-  Len: integer;
 begin
-  Result := AText;
-  if Canvas.TextWidth(Result) <= AMaxWidth then
-    Exit;
-  Len := UTF8Length(AText);
-  while (Len > 1) and (Canvas.TextWidth(UTF8Copy(AText, 1, Len) + '…') > AMaxWidth) do
-    Dec(Len);
-  Result := UTF8Copy(AText, 1, Len) + '…';
+  Result := FitTextRight(Canvas, AText, AMaxWidth);
 end;
 
 procedure TGittanRepoPage.AddLink(const ARect: TRect; const AUrl: string);
@@ -752,8 +735,12 @@ begin
       PaintContributors(Y);
   end;
 
+  { FitHeight sizes the page from the paint before, which a new width
+    may have changed: tiles wrapped into fewer rows leave it too tall.
+    The height follows what was painted, up or down; it does not depend
+    on the height, so this paint is the last. }
   FContentHeight := Y + Pad;
-  if Height < FContentHeight then
+  if Height <> Max(FContentHeight, Constraints.MinHeight) then
     Height := Max(FContentHeight, Constraints.MinHeight);
 end;
 

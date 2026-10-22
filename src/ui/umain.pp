@@ -294,6 +294,9 @@ type
     FCommitNote: TGittanHintBox;
     FCommitItem: TMenuItem;
     FCommitJob: TGittanCommitJob;
+    { The commits still running in a repository no longer open, for
+      their draft (DroppedCommitDone). }
+    FDroppedCommits: TList;
     FCommitDraftFor, FAmendMessage: string;
     { Abort and Skip for what git is in the middle of, and the merge
       message filled into the field (umain.conflicts.inc). }
@@ -415,6 +418,9 @@ type
       each line of FChangeLines in a conflict (see gittan.conflicts),
       set by ShowChanges for a conflicted file, nil otherwise. }
     FOperation: string;
+    {** The branch the rebase in progress is of (head-name), '' for none
+      or a rebase of a detached HEAD. }
+    FRebaseBranch: string;
     FConflictFiles: integer;
     FConflictRoles: TIntegerDynArray;
     FContextFromSummary: boolean;
@@ -422,6 +428,8 @@ type
     FNav: TGittanChangeNav;
     FNavUpdateQueued: boolean;
     FFindBar: TGittanFindBar;
+    { The last match Find selected is in the old side of Side by Side. }
+    FFindInOld: boolean;
     { The symbol bar and the symbols it lists; the symbol index of the
       repository with the state of its building (see umain.index.inc:
       the files git lists, the next of them, how many there are, the one
@@ -535,14 +543,16 @@ type
     FMenuReflog: TGittanReflogEntry;
     FReflogItem: TMenuItem;
     { Stashes (umain.stash.inc): what the last snapshot listed, the list
-      that drops from the status bar's stash chip with, per row, the
-      index in FStashes of its stash (StashRowHeader, StashRowNew for
-      the others), the menu of a stash and the one it is for, the range
+      that drops from the status bar's stash chip with the stashes it
+      shows (FListedStashes, a copy, since a snapshot replaces FStashes
+      while the list is up) and, per row, the index in them of its stash
+      (StashRowHeader, StashRowNew for the others), the menu of a stash and the one it is for, the range
       a compared stash is the base as and the stash it is of, the stash
       the base chip's list is for with its rows, and the Stash menu's
       items. }
     FStashes: TGittanStashes;
     FStashPopup: TGittanPopupList;
+    FListedStashes: TGittanStashes;
     FStashRows: TIntegerDynArray;
     FStashMenu: TPopupMenu;
     FMenuStash: TGittanStash;
@@ -593,6 +603,11 @@ type
     FDark: boolean;
     FBookmarkBandWidth: integer;
     FWatcher: TGittanWatcher;
+    { How many callers are inside a stretch the watcher's refresh must
+      not run under (a modal question, a wait that pumps messages, a
+      refresh), and whether one came meanwhile (HoldRefresh). }
+    FRefreshHold: integer;
+    FRefreshPending, FRefreshQueued: boolean;
     FView: TGittanView;
     FManualLexer: boolean;
     { The change view: the diff lines of the shown file with their
@@ -720,11 +735,15 @@ type
     function AdapterOf(AEd: TATSynEdit): TATAdapterEControl;
     procedure MenuRefreshClick(Sender: TObject);
     procedure WatcherChange(Sender: TObject);
+    procedure HoldRefresh;
+    procedure ReleaseRefresh;
+    procedure RefreshPendingAsync(Data: PtrInt);
     procedure StartWatcher;
     procedure StopWatcher;
     function LoadRepository: boolean;
     procedure ApplySnapshot(const ASnap: TGittanRepoSnapshot);
     procedure RefreshRepository(ASnap: PGittanRepoSnapshot = nil);
+    procedure RefreshRepositoryHeld(ASnap: PGittanRepoSnapshot);
     procedure ShowError(const AMessage: string);
     procedure ShowWelcome(const AError: string);
     procedure WelcomeOpen(Sender: TObject);
@@ -806,7 +825,7 @@ type
     procedure GoToChange(ANext: boolean);
     procedure ShowChangeAt(ARow: integer);
     procedure GoToFirstChange;
-    procedure ShowChanges(const APath: string);
+    function ShowChanges(const APath: string): boolean;
     procedure FillFileTree(const AStats: TGittanFileStats);
     function CompareTreeNodes(Node1, Node2: TTreeNode): integer;
     { umain.diffview.inc }
@@ -981,6 +1000,7 @@ type
     procedure CheckGitVersion;
     procedure PreviewSettings(AFont: TFont; ATheme, ATabSize: integer);
     procedure ApplyEditorFont(AFont: TFont);
+    procedure EditorMetricsChanged;
     procedure ApplyTabSize(ASize: integer);
     procedure FindGitHubCli;
     procedure UpdateGitHubItems;
@@ -1077,6 +1097,8 @@ type
     procedure PullChipClick(const AScreenRect: TRect);
     procedure PullPopupPick(Sender: TObject; AIndex: integer);
     procedure ComparePull(const APull: TGittanPullRequest);
+    procedure StartPullFetch(ANumber: integer; const ARemote, ABaseRef: string);
+    procedure PullFetchDone(AJob: TGittanRemoteJob);
     procedure SwitchBranch(const ABranch: string; ADetach: boolean = False);
     function ContextFullPath: string;
     procedure MenuCopyPathClick(Sender: TObject);
@@ -1143,6 +1165,8 @@ type
     procedure StartCommit;
     procedure CommitJobDone(Sender: TObject);
     procedure StopCommitJob(AWait: boolean);
+    procedure DroppedCommitDone(Sender: TObject);
+    procedure ForgetCommitted(AJob: TGittanCommitJob);
     procedure SaveCommitDraft;
     procedure LoadCommitDraft;
     procedure UpdateRemoteItems;
@@ -1239,6 +1263,8 @@ type
       const AScreenPos: TPoint);
     procedure CommitMenuClick(Sender: TObject);
     function ContinueMode: boolean;
+    function StrayRebase: boolean;
+    function OperationLabel: string;
     function IsConflictPath(const APath: string): boolean;
     function MarkersLeft(const APath: string): integer;
     procedure ResolvePath(const APath: string; AAction: integer);
@@ -1538,6 +1564,7 @@ resourcestring
   rsUpdateLater = 'Remind Me in %d Days';
   rsUpdateNotNow = 'Not Now';
   rsUpdateCurrent = 'Gittan is up to date: build %d is the latest.';
+  rsUpdateNoBuild = 'The latest release, %s, has no build number to compare build %d with.';
   rsUpdateLocalBuild = 'This is a local build, so it is not compared with the releases. The latest release is %s.';
   rsUpdateOpenPage = 'Open Release Page';
   rsUpdateClose = 'Close';
@@ -1936,6 +1963,11 @@ resourcestring
   rsCommitMergeButton = 'Commit Merge';
   rsContinueNote = 'Continue goes on with %s.';
   rsContinueFailed = 'Could not continue %s';
+  rsContinueExtrasTitle = 'Other Changes';
+  rsContinueExtrasAsk = 'Besides the resolved conflicts, these files have changes that ' +
+    'Continue puts in the commit too:%s' + LineEnding + LineEnding +
+    'To keep them out, cancel and put them away first, in a stash or with Discard.';
+  rsContinueExtrasButton = 'Take Them Too';
   rsContinued = 'Finished %s';
   rsContinuedOn = 'Went on with %s';
   rsStoppedAgain = 'Stopped again with conflicts';
@@ -1947,6 +1979,16 @@ resourcestring
   rsAbortAsk = 'Abort %s? The branch and the files go back to how they were before it started.';
   rsAborted = 'Aborted %s';
   rsAbortFailed = 'Could not abort %s';
+  rsStrayRebaseNote = 'git is still rebasing %0:s, but HEAD is on %1:s. Abort takes %0:s back; ' +
+    'Continue would make %0:s what %1:s is.';
+  rsStrayAbortAsk = 'git is still rebasing %0:s, but HEAD is on %1:s.' + LineEnding + LineEnding +
+    'Abort takes %0:s back to how it was before the rebase and checks it out again, ' +
+    'the files with it; %1:s keeps its commits.' + LineEnding + LineEnding +
+    'Forget the Rebase stays on %1:s and keeps the files as they are; git just stops rebasing.';
+  rsQuitButton = 'Forget the Rebase';
+  rsQuit = 'Forgot %s';
+  rsQuitFailed = 'Could not forget %s';
+  rsOperationOf = '%s %s';
   rsIdentityTitle = 'Who Commits?';
   rsIdentityName = 'Name';
   rsIdentityEmail = 'E-mail';
@@ -1979,6 +2021,7 @@ resourcestring
   rsSubSyncFailed = 'Could not sync the submodule URLs';
   rsSubAdding = 'Adding the submodule %s...';
   rsNoticeSubAdding = 'Adding the submodule %s';
+  rsNoticeFetchingPull = 'Fetching pull request #%d';
   rsSubAddedOk = 'Added the submodule %s; commit it with .gitmodules';
   rsSubAddFailed = 'The submodule could not be added';
   rsSubNone = 'none';
@@ -2079,6 +2122,7 @@ resourcestring
   rsDiscardUndone = 'Put the change at line %d of %s back';
   rsDiscardFailed = 'Could not discard the change: %s';
   rsUndoDiscardFailed = 'Could not put the change back: %s';
+  rsUnresolveFailed = 'The markers are back in %s, but git still counts it resolved: %s';
   rsGitignoreLexer = 'Gitignore';
   rsCopyPath = 'Copy &Path';
   rsCopyRelativePath = 'Copy &Relative Path';
@@ -2236,7 +2280,7 @@ const
   rsOpenPull = 'Open Pull Re&quest';
   rsCopyPullUrl = 'Copy Pull Request &URL';
   rsFetchingPull = 'Fetching pull request #%d...';
-  rsPullFailed = 'Could not fetch pull request #%d: %s';
+  rsPullFailed = 'Could not fetch pull request #%d';
   { Bookmark kinds in the editor's second bookmark list, used only for the
     line backgrounds of a diff: an added line, a deleted one, a gap row
     standing for hidden lines, and a filler row of the side-by-side
@@ -2370,6 +2414,7 @@ begin
   FBlameCache := TStringList.Create;
   FBlameCache.CaseSensitive := True;
   FBlameZombies := TList.Create;
+  FDroppedCommits := TList.Create;
   FThreadFlips := TStringList.Create;
   FReviewMeasure := TBitmap.Create;
   FReviewMeasure.SetSize(1, 1);
@@ -2728,6 +2773,7 @@ procedure TForm1.FormDestroy(Sender: TObject);
 begin
   Application.RemoveAsyncCalls(Self);
   StopCommitJob(True);
+  FreeAndNil(FDroppedCommits);
   StopRemoteJob(True);
   StopWatcher;
   AbandonPullJob;
@@ -3279,7 +3325,8 @@ begin
     FStatus.SetOperation('', 0, 0)
   else
   begin
-    Op := UpperCase(Copy(FOperation, 1, 1)) + Copy(FOperation, 2, MaxInt);
+    Op := OperationLabel;
+    Op := UpperCase(Copy(Op, 1, 1)) + Copy(Op, 2, MaxInt);
     if FRepo.OperationProgress(OpPos, OpTotal) then
       Op := Format(rsOperationStep, [Op, OpPos, OpTotal]);
     FStatus.SetOperation(Op, OpPos, OpTotal);
@@ -3369,7 +3416,10 @@ begin
     begin
       P := StatusButton(rsContinueButton, HintPlay, stNormal, not Busy and ContinueMode);
       FStatusSteps[spPrimary] := stepContinue;
-      Tip := Format(rsContinueNote, [Noun]);
+      if StrayRebase then
+        Tip := Format(rsStrayRebaseNote, [FRebaseBranch, FBranch])
+      else
+        Tip := Format(rsContinueNote, [Noun]);
     end;
     if ContinueMode then
     begin
@@ -4493,8 +4543,7 @@ begin
   AEd.OptGutterWidthBookmarks := (Widest + 1) * EditorCharWidth(AEd);
 end;
 
-{ Zooming changes the character width the number band is sized from. The
-  two editors zoom together. }
+{ The two editors zoom together. }
 procedure TForm1.EditChangeZoom(Sender: TObject);
 var
   Other: TATSynEdit;
@@ -4505,9 +4554,21 @@ begin
     Other := FEditOld;
   if Other.OptScaleFont <> TATSynEdit(Sender).OptScaleFont then
     Other.OptScaleFont := TATSynEdit(Sender).OptScaleFont;
+  EditorMetricsChanged;
+end;
+
+{ The editors' font or zoom changed: the number and blame bands are
+  sized from the character width, and the preview's text follows the
+  editor's size. EditChangeZoom calls it, which the wheel and the
+  editor's own keys reach through OnChangeZoom and the menu's Zoom In
+  and Out directly; Actual Size and a new font call it themselves. }
+procedure TForm1.EditorMetricsChanged;
+begin
   UpdateNumberWidth(Edit);
   UpdateNumberWidth(FEditOld);
   ApplyBlame;
+  if FMdPreview.Visible then
+    FMdPreview.SetFontSize(EditorFontSize(Edit));
 end;
 
 { ---------------------------------------------------------------------------
@@ -4742,6 +4803,8 @@ begin
   SaveCommitDraft;
   StopCommitJob(False);
   StopRemoteJob(False);
+  { A failure's notice, which Try Again would run on this one. }
+  FNotice.Close;
   StopWatcher;
   StopIndexing;
   SaveIndex;
@@ -4865,10 +4928,13 @@ begin
   FBehind := ASnap.Behind;
   FOperation := ASnap.Operation;
   FBisect := ASnap.Bisect;
-  if (FOperation = 'rebasing') and (ASnap.RebaseBranch <> '') then
+  FRebaseBranch := ASnap.RebaseBranch;
+  if (FOperation = 'rebasing') and (FRebaseBranch <> '') and ASnap.Detached then
     { HEAD is detached while a rebase stops; the branch is the one it
-      rebases. }
-    FBranch := ASnap.RebaseBranch;
+      rebases. A checkout in a terminal meanwhile leaves the rebase
+      behind on its way: HEAD is on that branch then, and the summary
+      says which branch the rebase is of (OperationLabel). }
+    FBranch := FRebaseBranch;
   FConflictFiles := 0;
   for i := 0 to High(FStats) do
     if FStats[i].Kind = ckConflict then
@@ -4893,7 +4959,7 @@ begin
   end;
   Branch := FBranch;
   if FOperation <> '' then
-    Branch := Branch + ' · ' + FOperation;
+    Branch := Branch + ' · ' + OperationLabel;
   FSummary.SetCommits(ASnap.Recent, FAhead, FBehind, FHasUpstream);
   FSummary.BaseClickable := (BaseActionRef <> '') or (StashOfBase >= 0) or BlameShown;
   if BlameShown then
@@ -4976,9 +5042,48 @@ var
 begin
   { Runs on the main thread while the watcher is held in Synchronize, so
     its snapshot, gathered off the main thread, is copied out and applied
-    without running any git here. }
+    without running any git here. Under a hold it would run in the middle
+    of what holds (a modal question pumps messages, Synchronize's
+    among them): it waits for the hold to end instead. }
+  if FRefreshHold > 0 then
+  begin
+    FRefreshPending := True;
+    Exit;
+  end;
   Snap := FWatcher.Snapshot;
   RefreshRepository(@Snap);
+end;
+
+{ A stretch the watcher's refresh must not run under: FlushEdit's
+  question, which ShowChanges, OpenFile and OpenRepository ask in the
+  middle of their work, a wait that pumps messages (WaitForParse), and
+  RefreshRepository itself. A change the watcher brings meanwhile is
+  read again when the last hold ends, from the message loop, once the
+  callers have returned. }
+procedure TForm1.HoldRefresh;
+begin
+  Inc(FRefreshHold);
+end;
+
+procedure TForm1.ReleaseRefresh;
+begin
+  Dec(FRefreshHold);
+  if (FRefreshHold = 0) and FRefreshPending and not FRefreshQueued then
+  begin
+    FRefreshQueued := True;
+    Application.QueueAsyncCall(@RefreshPendingAsync, 0);
+  end;
+end;
+
+{ Another hold may have begun before the queue ran it (a second modal
+  question); its end queues this again. }
+procedure TForm1.RefreshPendingAsync(Data: PtrInt);
+begin
+  FRefreshQueued := False;
+  if (FRefreshHold > 0) or not FRefreshPending then
+    Exit;
+  FRefreshPending := False;
+  RefreshRepository;
 end;
 
 procedure TForm1.MenuRefreshClick(Sender: TObject);
@@ -5006,12 +5111,25 @@ end;
 { Reloads the repository and keeps what the user looks at: the folders
   closed in the tree, the selected file with its scroll position, or the
   repository diff. A selected file that is no longer changed gives way to
-  the summary, which says so. Filling the tree drops the selection, so
+  the summary, which says so; one the tree filter hides is shown again
+  without being selected. Filling the tree drops the selection, so
   the view is noted first and restored by selecting the file again, which
   runs the usual selection handler. ASnap nil reads the repository here;
   otherwise it is the snapshot the watcher already gathered off the main
-  thread, which is only drawn. }
+  thread, which is only drawn. The refresh holds the watcher's (see
+  HoldRefresh): one that came under it would rebuild the view while
+  this one does. }
 procedure TForm1.RefreshRepository(ASnap: PGittanRepoSnapshot = nil);
+begin
+  HoldRefresh;
+  try
+    RefreshRepositoryHeld(ASnap);
+  finally
+    ReleaseRefresh;
+  end;
+end;
+
+procedure TForm1.RefreshRepositoryHeld(ASnap: PGittanRepoSnapshot);
 var
   Collapsed: TStringList;
   Node: TTreeNode;
@@ -5037,6 +5155,10 @@ begin
     Exit;
   View := FView;
   Path := SelectedPath;
+  { The tree filter may hide the file shown; the tree then selects
+    nothing. }
+  if (Path = '') and (View in [gvChanges, gvImage, gvTranslation, gvBinary]) then
+    Path := FCurrentPath;
   RepoPath := '';
   if (FRepoTree.Selected <> nil) and (FRepoTree.Selected.Data <> nil) then
     RepoPath := FRepoTree.Selected.GetTextPath;
@@ -5096,13 +5218,21 @@ begin
       begin
         KeepFolds;
         SummarySelectFile(nil, Path);
-        if FileTree.Selected = nil then
-        begin
-          FSummary.Notice := Format(rsNoLongerChanged, [Path]);
-          ShowSummary;
-        end
-        else
-          RestoreScroll;
+        if FileTree.Selected <> nil then
+          RestoreScroll
+        { Else the summary is shown when the selection's ShowChanges
+          failed. }
+        else if FView <> gvSummary then
+          if IsChangedPath(Path) then
+          begin
+            if ShowChanges(Path) then
+              RestoreScroll;
+          end
+          else
+          begin
+            FSummary.Notice := Format(rsNoLongerChanged, [Path]);
+            ShowSummary;
+          end;
       end;
     gvRepoDiff:
       begin
@@ -5382,6 +5512,7 @@ var
   Title, DiffText: string;
   Lines: TStringList;
   Spans: TGittanLineSpans;
+  InHeader: boolean;
 begin
   Title := rsRepoDiffTitle;
   if FRepo.Base <> '' then
@@ -5401,23 +5532,27 @@ begin
   FView := gvRepoDiff;
   DiffText := FRepo.Diff;
   ShowText(Edit, DiffText, FLexers.ByName(rsDiffLexer));
-  { The "---"/"+++" file headers are not changes. }
-  for i := 0 to Edit.Strings.Count - 1 do
-    if (Edit.Strings.LinesLen[i] > 0) and
-      (Copy(Edit.Strings.Lines[i], 1, 3) <> '---') and
-      (Copy(Edit.Strings.Lines[i], 1, 3) <> '+++') then
-      MarkLine(Edit, i, char(Edit.Strings.Lines[i][1]));
   { The words that differ, as in the change view. The diff's own lines
     (hunk and file headers) are given a blank marker so they do not
     count as changes; the text keeps its marker column, so the spans
-    are shifted by one. }
+    are shifted by one. A file's header runs from its "diff" line to
+    its first hunk, so a "---"/"+++" line is a header only there: in a
+    hunk it is a deleted "-- comment" or an added "++i;". }
   Lines := TStringList.Create;
   try
     Lines.Text := DiffText;
+    InHeader := False;
     for i := 0 to Lines.Count - 1 do
-      if (Lines[i] = '') or not (Lines[i][1] in ['+', '-']) or
-        (Copy(Lines[i], 1, 3) = '---') or (Copy(Lines[i], 1, 3) = '+++') then
-        Lines[i] := ' ' + Lines[i];
+    begin
+      if Copy(Lines[i], 1, 5) = 'diff ' then
+        InHeader := True
+      else if Copy(Lines[i], 1, 2) = '@@' then
+        InHeader := False;
+      if (Lines[i] = '') or not (Lines[i][1] in ['+', '-']) or InHeader then
+        Lines[i] := ' ' + Lines[i]
+      else if i < Edit.Strings.Count then
+        MarkLine(Edit, i, Lines[i][1]);
+    end;
     WordDiff(Lines, FIgnoreWhitespace, Spans);
     for i := 0 to Min(High(Spans), Edit.Strings.Count - 1) do
       if Spans[i] <> nil then
@@ -5435,8 +5570,10 @@ end;
 { Shows one changed file with its deleted lines kept in place: the diff
   with the whole file as context, built into rows by BuildChangeView. The
   lexer comes from the file name. The gaps the user opened are kept when
-  the same file is shown again, as on a refresh. }
-procedure TForm1.ShowChanges(const APath: string);
+  the same file is shown again, as on a refresh. False when git could
+  not give the diff: the banner says why and the summary is shown, so
+  the tree and the view do not tell of different files. }
+function TForm1.ShowChanges(const APath: string): boolean;
 var
   Lines: TStringList;
   i, c: integer;
@@ -5445,6 +5582,7 @@ begin
   { Asked before the header names the next file, not when the text is
     replaced further down. }
   FlushEdit;
+  Result := False;
   { A binary file has no lines to diff; a new one would be read as
     text. }
   Binary := False;
@@ -5456,8 +5594,11 @@ begin
     if not Binary and not FRepo.FileChanges(APath, Lines) then
     begin
       StatusNote(FRepo.Error, True);
+      FSummary.Notice := '';
+      ShowSummary;
       Exit;
     end;
+    Result := True;
     FChangeLines.Assign(Lines);
     FRawChangeLines.Assign(Lines);
   finally
@@ -6032,8 +6173,8 @@ begin
     ShowSubmodule(Sub)
   else
   begin
-    ShowChanges(Node.GetTextPath);
-    GoToFirstChange;
+    if ShowChanges(Node.GetTextPath) then
+      GoToFirstChange;
   end;
 end;
 

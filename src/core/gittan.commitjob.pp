@@ -8,7 +8,7 @@ unit gittan.commitjob;
 interface
 
 uses
-  Classes, SysUtils, gittan.git;
+  Classes, SysUtils, gittan.git, gittan.job;
 
 type
   {** Commits APaths of the repository at ARoot with AMessage, amending
@@ -18,7 +18,7 @@ type
     never broken off: Stop only drops the handler, and the commit goes on
     to its end. The thread is not terminated for it, since a thread
     terminated before it starts never runs Execute at all. }
-  TGittanCommitJob = class(TThread)
+  TGittanCommitJob = class(TGittanJob)
   private
     FRoot, FMessage: string;
     FPaths: TStringList;
@@ -26,27 +26,22 @@ type
     FParts: TGittanCommitParts;
     FOk: boolean;
     FId, FError: string;
-    FOnDone: TNotifyEvent;
-    procedure Notify;
   protected
     procedure Execute; override;
   public
     constructor Create(const ARoot, AMessage: string; APaths: TStrings;
       AAmend: boolean; const AParts: TGittanCommitParts = nil);
     destructor Destroy; override;
-    {** Drops the handler, and waits for the commit to end when AWait is
-      set, as on quitting, so git is not left halfway. }
-    procedure Stop(AWait: boolean);
     property Root: string read FRoot;
     property Paths: TStringList read FPaths;
     property Amend: boolean read FAmend;
+    property Message: string read FMessage;
     {** Whether the commit was made. }
     property Ok: boolean read FOk;
     {** The new commit, when Ok. }
     property Id: string read FId;
     {** Why nothing was committed (a hook's output, say), when not Ok. }
     property Error: string read FError;
-    property OnDone: TNotifyEvent read FOnDone write FOnDone;
   end;
 
 implementation
@@ -54,7 +49,8 @@ implementation
 constructor TGittanCommitJob.Create(const ARoot, AMessage: string;
   APaths: TStrings; AAmend: boolean; const AParts: TGittanCommitParts);
 begin
-  inherited Create(True);
+  { Never broken off: Stop leaves its git running. }
+  inherited Create(False);
   FRoot := ARoot;
   FMessage := AMessage;
   FPaths := TStringList.Create;
@@ -65,8 +61,8 @@ end;
 
 destructor TGittanCommitJob.Destroy;
 begin
-  FPaths.Free;
   inherited Destroy;
+  FPaths.Free;
 end;
 
 procedure TGittanCommitJob.Execute;
@@ -82,22 +78,7 @@ begin
   finally
     Repo.Free;
   end;
-  Queue(@Notify);
-end;
-
-{ In the main thread, as Stop is, so the handler cannot go between the
-  test and the call. }
-procedure TGittanCommitJob.Notify;
-begin
-  if Assigned(FOnDone) then
-    FOnDone(Self);
-end;
-
-procedure TGittanCommitJob.Stop(AWait: boolean);
-begin
-  FOnDone := nil;
-  if AWait then
-    WaitFor;
+  Done;
 end;
 
 end.

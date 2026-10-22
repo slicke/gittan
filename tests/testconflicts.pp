@@ -267,7 +267,9 @@ begin
     { The conflict is gone now, so writing it again is refused. }
     AssertFalse(DiscardBlock(B, Err));
     AssertEquals(rsDiscardStale, Err);
-    { And Swapped puts it back. }
+    { And Swapped puts it back, keeping whether the file was resolved. }
+    B.Resolved := True;
+    AssertTrue(Swapped(B).Resolved);
     AssertTrue(DiscardBlock(Swapped(B), Err));
     F := TFileStream.Create(FileName, fmOpenRead);
     try

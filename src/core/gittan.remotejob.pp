@@ -9,12 +9,12 @@ unit gittan.remotejob;
 interface
 
 uses
-  Classes, SysUtils, gittan.git;
+  Classes, SysUtils, gittan.git, gittan.job;
 
 type
   {** What a TGittanRemoteJob does. }
   TGittanRemoteKind = (rkFetch, rkPull, rkPush, rkDeleteRemote, rkForcePush, rkPushBranch,
-    rkPushTag, rkDeleteRemoteTag, rkClone, rkSubmoduleUpdate, rkSubmoduleAdd);
+    rkPushTag, rkDeleteRemoteTag, rkClone, rkSubmoduleUpdate, rkSubmoduleAdd, rkFetchPull);
 
   {** Runs a fetch, a pull (the way Mode says), a push, a push with
     --force-with-lease, or the deletion of the remote branch Arg stands
@@ -26,37 +26,36 @@ type
     from the URL Arg, with its submodules when Submodules is set. A
     submodule update updates the submodule at the path Arg, or every one
     with Arg empty; a submodule add clones the URL Arg into Path,
-    following Branch.
+    following Branch. A pull request fetch fetches the pull request
+    numbered Arg from Remote with its base branch Branch, and gives the
+    ref its head is fetched to in HeadRef.
     OnDone is called in the main thread when it is done, unless the job
     has been stopped. A job is never broken off, as a pull stopped
     halfway would leave a merge behind: Stop only drops the handler, and
     the thread is not terminated for it (a thread terminated before it
     starts never runs Execute). }
-  TGittanRemoteJob = class(TThread)
+  TGittanRemoteJob = class(TGittanJob)
   private
     FRoot, FArg, FRemote, FPath, FBranch: string;
     FKind: TGittanRemoteKind;
     FMode: TGittanPullMode;
     FOk, FDiverged, FRejected, FStale, FUnseen, FSubmodules: boolean;
-    FError: string;
-    FOnDone, FOnOutput: TNotifyEvent;
+    FError, FHeadRef: string;
+    FOnOutput: TNotifyEvent;
     FLock: TRTLCriticalSection;
     FProgress: string;
     FReturn, FOutputPending: boolean;
     function GetProgress: string;
     procedure Output(const AText: string);
-    procedure Notify;
     procedure NotifyOutput;
   protected
     procedure Execute; override;
+    procedure Detach; override;
   public
     constructor Create(const ARoot: string; AKind: TGittanRemoteKind;
       AMode: TGittanPullMode = pmAuto; const AArg: string = '';
       const ARemote: string = '');
     destructor Destroy; override;
-    {** Drops the handler, and waits for git to end when AWait is set, as
-      on quitting. }
-    procedure Stop(AWait: boolean);
     property Root: string read FRoot;
     property Kind: TGittanRemoteKind read FKind;
     property Mode: TGittanPullMode read FMode;
@@ -85,13 +84,14 @@ type
       brought in that were never in the branch: a pull would take them
       in first. }
     property Unseen: boolean read FUnseen;
+    {** Where a pull request fetch put the pull request's head. }
+    property HeadRef: string read FHeadRef;
     {** git's reason, when not Ok. }
     property Error: string read FError;
     {** What git and the hooks it runs have written so far, as a
       terminal would show it (a progress line written over keeps its
       last state), the newest ProgressKeep bytes of it. }
     property Progress: string read GetProgress;
-    property OnDone: TNotifyEvent read FOnDone write FOnDone;
     {** Progress has grown; in the main thread, at most once per piece
       read and never after Stop. }
     property OnOutput: TNotifyEvent read FOnOutput write FOnOutput;
@@ -110,7 +110,9 @@ procedure AppendTerminalText(var AText: string; var AReturn: boolean; const AChu
 
 {** Whether AProgress, what a push has written so far, shows git itself
   pushing (its object counts, the remote's answer, "Everything
-  up-to-date"), which comes after the pre-push hook has had its say. }
+  up-to-date", the "To <remote>" line a deletion begins with, or a
+  deletion's refusal of a ref the remote lacks), which comes after the
+  pre-push hook has had its say. }
 function PushTransferStarted(const AProgress: string): boolean;
 
 implementation
@@ -143,8 +145,9 @@ end;
 
 function PushTransferStarted(const AProgress: string): boolean;
 const
-  Marks: array[0..5] of string = ('Enumerating objects:', 'Counting objects:',
-    'Compressing objects:', 'Writing objects:', 'Everything up-to-date', 'remote: ');
+  Marks: array[0..7] of string = ('Enumerating objects:', 'Counting objects:',
+    'Compressing objects:', 'Writing objects:', 'Everything up-to-date', 'remote: ', 'To ',
+    'error: unable to delete ');
 var
   Mark: string;
 begin
@@ -157,7 +160,8 @@ end;
 constructor TGittanRemoteJob.Create(const ARoot: string; AKind: TGittanRemoteKind;
   AMode: TGittanPullMode; const AArg, ARemote: string);
 begin
-  inherited Create(True);
+  { Never broken off: Stop leaves its git running. }
+  inherited Create(False);
   InitCriticalSection(FLock);
   FRoot := ARoot;
   FArg := AArg;
@@ -208,6 +212,13 @@ begin
     Queue(@NotifyOutput);
 end;
 
+{ OnOutput goes with OnDone: no output is told after Stop. }
+procedure TGittanRemoteJob.Detach;
+begin
+  inherited Detach;
+  FOnOutput := nil;
+end;
+
 procedure TGittanRemoteJob.NotifyOutput;
 begin
   EnterCriticalSection(FLock);
@@ -224,7 +235,7 @@ begin
   if FKind = rkClone then
   begin
     FOk := CloneRepository(FArg, FRoot, FSubmodules, FError, @Output);
-    Queue(@Notify);
+    Done;
     Exit;
   end;
   Repo := TGittanRepo.Create;
@@ -242,6 +253,8 @@ begin
         rkDeleteRemoteTag: FOk := Repo.DeleteRemoteTag(FRemote, FArg);
         rkSubmoduleUpdate: FOk := Repo.UpdateSubmodules(FArg);
         rkSubmoduleAdd: FOk := Repo.AddSubmodule(FArg, FPath, FBranch);
+        rkFetchPull: FOk := Repo.FetchPullRequest(FRemote, StrToIntDef(FArg, 0), FBranch,
+            FHeadRef);
         rkClone: ;
       end;
     if not FOk then
@@ -249,23 +262,7 @@ begin
   finally
     Repo.Free;
   end;
-  Queue(@Notify);
-end;
-
-{ In the main thread, as Stop is, so the handler cannot go between the
-  test and the call. }
-procedure TGittanRemoteJob.Notify;
-begin
-  if Assigned(FOnDone) then
-    FOnDone(Self);
-end;
-
-procedure TGittanRemoteJob.Stop(AWait: boolean);
-begin
-  FOnDone := nil;
-  FOnOutput := nil;
-  if AWait then
-    WaitFor;
+  Done;
 end;
 
 end.

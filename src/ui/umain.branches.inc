@@ -146,15 +146,18 @@ begin
   if not InputQuery(rsCaBranchTitle, [rsBmNewPrompt], Values) or (Trim(Values[0]) = '') then
     Exit;
   StopWatcher;
-  if FRepo.CreateBranch(Trim(Values[0]), 'HEAD', True) then
-  begin
-    FSummary.Notice := '';
-    RefreshRepository;
-    StatusNote(Format(rsCaBranched, [Trim(Values[0])]));
-  end
-  else
-    BannerError(rsCaFailed, FRepo.Error);
-  StartWatcher;
+  try
+    if FRepo.CreateBranch(Trim(Values[0]), 'HEAD', True) then
+    begin
+      FSummary.Notice := '';
+      RefreshRepository;
+      StatusNote(Format(rsCaBranched, [Trim(Values[0])]));
+    end
+    else
+      BannerError(rsCaFailed, FRepo.Error);
+  finally
+    StartWatcher;
+  end;
 end;
 
 procedure TForm1.RenameBranchAsk(const AName: string);
@@ -167,14 +170,17 @@ begin
     (Trim(Values[0]) = '') or (Trim(Values[0]) = AName) then
     Exit;
   StopWatcher;
-  if FRepo.RenameBranch(AName, Trim(Values[0])) then
-  begin
-    RefreshRepository;
-    StatusNote(Format(rsBmRenamed, [AName, Trim(Values[0])]));
-  end
-  else
-    BannerError(rsCaFailed, FRepo.Error);
-  StartWatcher;
+  try
+    if FRepo.RenameBranch(AName, Trim(Values[0])) then
+    begin
+      RefreshRepository;
+      StatusNote(Format(rsBmRenamed, [AName, Trim(Values[0])]));
+    end
+    else
+      BannerError(rsCaFailed, FRepo.Error);
+  finally
+    StartWatcher;
+  end;
 end;
 
 { Asks, deletes with -d, and asks again with -D when git says the
@@ -491,15 +497,18 @@ begin
       Exit;
   end;
   StopWatcher;
-  Screen.Cursor := crHourGlass;
   try
-    Ok := FRepo.RebaseOnto(ARef, Conflicts);
+    Screen.Cursor := crHourGlass;
+    try
+      Ok := FRepo.RebaseOnto(ARef, Conflicts);
+    finally
+      Screen.Cursor := crDefault;
+    end;
+    FSummary.Notice := '';
+    RefreshRepository;
   finally
-    Screen.Cursor := crDefault;
+    StartWatcher;
   end;
-  FSummary.Notice := '';
-  RefreshRepository;
-  StartWatcher;
   if Ok then
     StatusNote(Format(rsBmRebased, [Branch, ARef]))
   else if Conflicts then
@@ -623,15 +632,18 @@ var
   Ok, Conflicts: boolean;
 begin
   StopWatcher;
-  Screen.Cursor := crHourGlass;
   try
-    Ok := FRepo.MergeRef(ARef, Conflicts);
+    Screen.Cursor := crHourGlass;
+    try
+      Ok := FRepo.MergeRef(ARef, Conflicts);
+    finally
+      Screen.Cursor := crDefault;
+    end;
+    FSummary.Notice := '';
+    RefreshRepository;
   finally
-    Screen.Cursor := crDefault;
+    StartWatcher;
   end;
-  FSummary.Notice := '';
-  RefreshRepository;
-  StartWatcher;
   if Ok then
     StatusNote(Format(rsCaMerged, [ARef]))
   else if Conflicts then

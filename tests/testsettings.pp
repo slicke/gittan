@@ -20,6 +20,7 @@ type
   published
     procedure TestDefaults;
     procedure TestRoundTrip;
+    procedure TestQuotesAndSpaces;
     procedure TestRecentList;
     procedure TestDamagedFileGivesDefaults;
     procedure TestOldDefaultFont;
@@ -134,6 +135,38 @@ begin
     AssertEquals(2, S.Recent.Count);
     AssertEquals('newest first', '/tmp/b', S.Recent[0]);
     AssertEquals('/tmp/a', S.Recent[1]);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSettingsTest.TestQuotesAndSpaces;
+var
+  S: TGittanSettings;
+begin
+  S := TGittanSettings.Create(FFileName);
+  try
+    S.EditorCommand := '"C:\Program Files\Code\Code.exe"';
+    S.TerminalCommand := '"wt.exe" -d';
+    S.CommitDraft := '"Quoted subject"';
+    S.CommitDraftRepo := '  /tmp/a ';
+    S.GitPath := '"';
+    S.GhPath := '""';
+    S.FontName := 'Menlo';
+    S.Save;
+  finally
+    S.Free;
+  end;
+  S := TGittanSettings.Create(FFileName);
+  try
+    S.Load;
+    AssertEquals('"C:\Program Files\Code\Code.exe"', S.EditorCommand);
+    AssertEquals('"wt.exe" -d', S.TerminalCommand);
+    AssertEquals('"Quoted subject"', S.CommitDraft);
+    AssertEquals('  /tmp/a ', S.CommitDraftRepo);
+    AssertEquals('"', S.GitPath);
+    AssertEquals('""', S.GhPath);
+    AssertEquals('Menlo', S.FontName);
   finally
     S.Free;
   end;

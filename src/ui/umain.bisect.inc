@@ -157,21 +157,24 @@ begin
   if (FRepo.Root = '') or (FCommitJob <> nil) or (FRemoteJob <> nil) then
     Exit;
   StopWatcher;
-  Screen.Cursor := crHourGlass;
   try
-    case AStep of
-      bsStart: Result := FRepo.BisectStart(ACommit, AGood);
-      bsMark: Result := FRepo.BisectMark(ACommit, AMark);
-      else
-        Result := FRepo.BisectEnd;
+    Screen.Cursor := crHourGlass;
+    try
+      case AStep of
+        bsStart: Result := FRepo.BisectStart(ACommit, AGood);
+        bsMark: Result := FRepo.BisectMark(ACommit, AMark);
+        else
+          Result := FRepo.BisectEnd;
+      end;
+    finally
+      Screen.Cursor := crDefault;
     end;
+    FLoadError := '';
+    FSummary.Notice := '';
+    RefreshRepository;
   finally
-    Screen.Cursor := crDefault;
+    StartWatcher;
   end;
-  FLoadError := '';
-  FSummary.Notice := '';
-  RefreshRepository;
-  StartWatcher;
   if not Result then
     BannerError(rsCaFailed, FRepo.Error);
 end;

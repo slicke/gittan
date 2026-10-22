@@ -164,6 +164,20 @@ begin
     Result := 0;
 end;
 
+{ TIniFile trims a value as it writes and reads it, and takes a pair
+  of double quotes around it off as it reads, so a quoted path ("C:\
+  Program Files\...") came back unquoted. A value that starts or ends
+  with a space or a quote is written inside a pair of quotes of its
+  own, which the read takes off again; any other is written as it is,
+  so the file reads as before. }
+function KeepEdges(const AText: string): string;
+begin
+  Result := AText;
+  if (Result <> '') and ((Result[1] <= ' ') or (Result[1] = '"') or
+    (Result[Length(Result)] <= ' ') or (Result[Length(Result)] = '"')) then
+    Result := '"' + Result + '"';
+end;
+
 { An ini value is one line: a line end is written as \n, and so a
   backslash as \\. }
 function EscapeLines(const AText: string): string;
@@ -303,12 +317,12 @@ begin
       Ini.WriteBool(SecWindow, 'Commit', CommitOpen);
       if CommitDraft <> '' then
       begin
-        Ini.WriteString(SecCommit, 'Draft', EscapeLines(CommitDraft));
-        Ini.WriteString(SecCommit, 'Repo', CommitDraftRepo);
+        Ini.WriteString(SecCommit, 'Draft', KeepEdges(EscapeLines(CommitDraft)));
+        Ini.WriteString(SecCommit, 'Repo', KeepEdges(CommitDraftRepo));
       end
       else
         Ini.EraseSection(SecCommit);
-      Ini.WriteString(SecView, 'FontName', FontName);
+      Ini.WriteString(SecView, 'FontName', KeepEdges(FontName));
       Ini.WriteInteger(SecView, 'FontSize', FontSize);
       Ini.WriteInteger(SecView, 'Zoom', Zoom);
       Ini.WriteBool(SecView, 'WordWrap', WordWrap);
@@ -320,12 +334,12 @@ begin
       Ini.WriteBool(SecView, 'ReviewComments', ReviewComments);
       Ini.WriteBool(SecView, 'Translations', Translations);
       Ini.WriteBool(SecView, 'Blame', Blame);
-      Ini.WriteString(SecView, 'SyntaxTheme', SyntaxTheme);
-      Ini.WriteString(SecView, 'EditorCommand', EditorCommand);
-      Ini.WriteString(SecView, 'TerminalCommand', TerminalCommand);
+      Ini.WriteString(SecView, 'SyntaxTheme', KeepEdges(SyntaxTheme));
+      Ini.WriteString(SecView, 'EditorCommand', KeepEdges(EditorCommand));
+      Ini.WriteString(SecView, 'TerminalCommand', KeepEdges(TerminalCommand));
       Ini.WriteInteger(SecView, 'TabSize', TabSize);
-      Ini.WriteString(SecTools, 'Git', GitPath);
-      Ini.WriteString(SecTools, 'Gh', GhPath);
+      Ini.WriteString(SecTools, 'Git', KeepEdges(GitPath));
+      Ini.WriteString(SecTools, 'Gh', KeepEdges(GhPath));
       if UpdateSnoozedUntil > 0 then
         Ini.WriteString(SecUpdate, 'SnoozedUntil',
           FormatDateTime('yyyy"-"mm"-"dd', UpdateSnoozedUntil))
@@ -333,7 +347,7 @@ begin
         Ini.DeleteKey(SecUpdate, 'SnoozedUntil');
       Ini.EraseSection(SecRecent);
       for i := 0 to FRecent.Count - 1 do
-        Ini.WriteString(SecRecent, 'Repo' + IntToStr(i), FRecent[i]);
+        Ini.WriteString(SecRecent, 'Repo' + IntToStr(i), KeepEdges(FRecent[i]));
       Ini.UpdateFile;
     finally
       Ini.Free;

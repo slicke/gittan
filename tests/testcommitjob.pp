@@ -1,14 +1,16 @@
 unit testcommitjob;
 
 {** Tests of gittan.commitjob and gittan.remotejob against a repository made in a temporary
-  folder with the real git. }
+  folder with the real git, and the freeing of a running job, the pull
+  request job of gittan.github among them. }
 
 {$mode objfpc}{$H+}
 
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.commitjob, gittan.remotejob;
+  Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.commitjob, gittan.remotejob,
+  gittan.github;
 
 type
   TCommitJobTest = class(TTestCase)
@@ -28,6 +30,7 @@ type
     procedure TestCommits;
     procedure TestFails;
     procedure TestStopped;
+    procedure TestFreeRunning;
     procedure TestRemoteJob;
     procedure TestRemoteJobProgress;
     procedure TestTerminalText;
@@ -36,7 +39,7 @@ type
 implementation
 
 uses
-  Process;
+  {$ifdef unix}BaseUnix,{$endif} Process;
 
 procedure RemoveTree(const ADir: string);
 var
@@ -95,6 +98,19 @@ begin
     Lines.SaveToFile(IncludeTrailingPathDelimiter(FDir) + AName);
   finally
     Lines.Free;
+  end;
+end;
+
+{ Waits up to five seconds for AFileName to appear. }
+procedure WaitForFile(const AFileName: string);
+var
+  i: integer;
+begin
+  for i := 1 to 500 do
+  begin
+    if FileExists(AFileName) then
+      Exit;
+    Sleep(10);
   end;
 end;
 
@@ -188,6 +204,54 @@ end;
 
 { A push to a bare repository beside the test's, then one with no
   remote left, which fails with git's reason. }
+{ A job freed while it runs waits for its thread before it frees what
+  the thread works with, and says nothing. Each job is freed once the git
+  it runs has started (a job freed before its thread starts never runs):
+  the commit job's in a pre-commit hook, the pull request job's in the
+  "pr" alias of the git that stands in for gh, both of which mark that
+  they started and then take a while. }
+procedure TCommitJobTest.TestFreeRunning;
+const
+  Slow = 'touch started; sleep 0.3';
+var
+  Paths: TStringList;
+  Job: TGittanCommitJob;
+  Pulls: TGittanPullRequestJob;
+  Started: string;
+begin
+  Started := IncludeTrailingPathDelimiter(FDir) + 'started';
+  ForceDirectories(IncludeTrailingPathDelimiter(FDir) + '.git' + PathDelim + 'hooks');
+  WriteFile('.git/hooks/pre-commit', '#!/bin/sh' + LineEnding + Slow);
+  {$ifdef unix}
+  FpChmod(IncludeTrailingPathDelimiter(FDir) + '.git/hooks/pre-commit', &755);
+  {$endif}
+  WriteFile('a.txt', 'a');
+  Paths := TStringList.Create;
+  try
+    Paths.Add('a.txt');
+    Job := TGittanCommitJob.Create(FDir, 'first', Paths, False);
+  finally
+    Paths.Free;
+  end;
+  Job.OnDone := @JobDone;
+  Job.Start;
+  WaitForFile(Started);
+  Job.Free;
+  CheckSynchronize(0);
+  AssertEquals('the commit job', 0, FDone);
+  Git(['rev-parse', '--verify', '-q', 'HEAD']);
+
+  DeleteFile(Started);
+  Git(['config', 'alias.pr', '!' + Slow + '; true']);
+  Pulls := TGittanPullRequestJob.Create(GitExe, FDir, 'main');
+  Pulls.OnDone := @JobDone;
+  Pulls.Start;
+  WaitForFile(Started);
+  Pulls.Free;
+  CheckSynchronize(0);
+  AssertEquals('the pull request job', 0, FDone);
+end;
+
 procedure TCommitJobTest.JobOutput(Sender: TObject);
 begin
   Inc(FOutputs);
@@ -258,6 +322,11 @@ begin
   AssertTrue(PushTransferStarted('hook'#10'Enumerating objects: 3, done.'));
   AssertTrue(PushTransferStarted('Everything up-to-date'));
   AssertTrue(PushTransferStarted('x'#10'remote: Resolving deltas'));
+  AssertTrue('a deletion', PushTransferStarted('To /git/o.git'#10' - [deleted]         bar'));
+  AssertTrue('a deletion of a ref the remote lacks',
+    PushTransferStarted('error: unable to delete ''nope'': remote ref does not exist'));
+  AssertFalse('the hook said no', PushTransferStarted('hook says no'#10 +
+    'error: failed to push some refs to ''/git/o.git'''));
 end;
 
 procedure TCommitJobTest.TestRemoteJob;

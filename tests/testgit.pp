@@ -11,7 +11,7 @@ interface
 uses
   { gittan.repoinfo first: its ParseTags is not the one tested here. }
   Classes, SysUtils, fpcunit, testregistry, gittan.repoinfo, gittan.git, gittan.history,
-  gittan.graph, gittan.rebase;
+  gittan.graph, gittan.rebase, gittan.blame, gittan.conflicts, gittan.discard;
 
 type
   TGitRepoTest = class(TTestCase)
@@ -36,8 +36,10 @@ type
     procedure TestOpenNonRepo;
     procedure TestOpenSubfolderFindsRoot;
     procedure TestChangeStats;
+    procedure TestChangeStatsUnreadable;
     procedure TestFileChanges;
     procedure TestIgnoreWhitespace;
+    procedure TestSuppressBlankEmpty;
     procedure TestUnbornRepository;
     procedure TestBase;
     procedure TestRange;
@@ -45,7 +47,11 @@ type
     procedure TestFiles;
     procedure TestGrep;
     procedure TestSnapshot;
+    procedure TestSnapshotNoIndex;
     procedure TestBlame;
+    procedure TestBlameSha256;
+    procedure TestInputClosed;
+    procedure TestConflictCrlf;
     procedure TestCommitRange;
     procedure TestLineHistory;
     procedure TestRemoteFor;
@@ -79,6 +85,8 @@ type
     procedure TestResolveMerge;
     procedure TestResolveRebase;
     procedure TestMarkResolvedAndAbort;
+    procedure TestUnresolve;
+    procedure TestContinueExtras;
     procedure TestSkip;
     procedure TestCommitActions;
     procedure TestCommitActionConflicts;
@@ -88,6 +96,7 @@ type
     procedure TestMoveAndRemove;
     procedure TestRebaseOnto;
     procedure TestRebaseOntoConflicts;
+    procedure TestRebaseStray;
     procedure TestRebaseInteractive;
     procedure TestRebaseInteractiveEdit;
     procedure TestRebaseInteractiveConflicts;
@@ -101,6 +110,7 @@ type
     procedure TestTags;
     procedure TestParseReflog;
     procedure TestReflog;
+    procedure TestReflogMany;
     procedure TestParseCleanPreview;
     procedure TestClean;
     procedure TestParseTreeEntries;
@@ -122,7 +132,7 @@ procedure SetTestVariable(const AName, AValue: string);
 implementation
 
 uses
-  Process;
+  {$ifdef unix}BaseUnix,{$endif} Types, Process;
 
 const
   { A name git quotes C-style in its line output, to check that the -z
@@ -316,6 +326,35 @@ begin
   AssertEquals('', FRepo.Root);
 end;
 
+{ An untracked file that cannot be read when it is counted (gone since
+  git listed it, or no permission) counts nothing instead of raising out
+  of ChangeStats, which ended the watcher's thread. Root reads a file
+  with mode 0, so the test has nothing to show then (a CI container). }
+procedure TGitRepoTest.TestChangeStatsUnreadable;
+var
+  Stats: TGittanFileStats;
+  S: TGittanFileStat;
+  FileName: string;
+begin
+  {$ifdef unix}
+  if FpGeteuid = 0 then
+    Exit;
+  MakeHistory;
+  WriteFile('locked.txt', 'l1'#10'l2'#10);
+  FileName := IncludeTrailingPathDelimiter(FDir) + 'locked.txt';
+  AssertEquals(0, FpChmod(FileName, 0));
+  try
+    AssertTrue(FRepo.Open(FDir));
+    AssertTrue(FRepo.ChangeStats(Stats));
+    S := FindStat(Stats, 'locked.txt');
+    AssertTrue(S.Kind = ckUntracked);
+    AssertEquals(0, S.Added);
+  finally
+    FpChmod(FileName, &644);
+  end;
+  {$endif}
+end;
+
 procedure TGitRepoTest.TestChangeStats;
 var
   Stats: TGittanFileStats;
@@ -420,6 +459,26 @@ begin
     AssertTrue(FRepo.ChangeStats(Stats));
     AssertEquals(1, Length(Stats));
     AssertEquals(0, Stats[0].Added + Stats[0].Deleted);
+  finally
+    Lines.Free;
+  end;
+end;
+
+procedure TGitRepoTest.TestSuppressBlankEmpty;
+var
+  Lines: TStringList;
+begin
+  Git(['init', '-q']);
+  WriteFile('a.txt', 'one'#10#10'two'#10'three'#10);
+  Commit('first');
+  Git(['config', 'diff.suppressBlankEmpty', 'true']);
+  WriteFile('a.txt', 'one'#10#10'two'#10'drei'#10);
+  AssertTrue(FRepo.Open(FDir));
+  Lines := TStringList.Create;
+  try
+    AssertTrue(FRepo.FileChanges('a.txt', Lines));
+    AssertEquals('the blank context line is kept', ' one| | two|-three|+drei|',
+      Joined(Lines));
   finally
     Lines.Free;
   end;
@@ -564,12 +623,45 @@ begin
   Git(['add', 'a.txt']);
   A := FRepo.Fingerprint;
   AssertTrue('staging seen', A <> B);
+  { A fetch moves the upstream alone, which the ahead and behind counts
+    follow. }
+  Git(['branch', 'up']);
+  Git(['branch', '-q', '--set-upstream-to=up']);
+  A := FRepo.Fingerprint;
+  Git(['update-ref', 'refs/heads/up', Trim(Git(['commit-tree', 'HEAD^{tree}', '-p', 'HEAD',
+    '-m', 'fetched'])), 'HEAD']);
+  B := FRepo.Fingerprint;
+  AssertTrue('a moved upstream seen', A <> B);
+  { A bisect started on a clean tree moves nothing else. }
+  Git(['bisect', 'start']);
+  A := FRepo.Fingerprint;
+  AssertTrue('an operation begun seen', A <> B);
+  Git(['bisect', 'reset']);
 end;
 
 { A snapshot holds the untracked files, and the whole tree comparison
   against it sees only what changed since: an untracked file it holds is
   no change, a new one is added, a deleted one deleted; the repository's
   own index stays as it was. }
+{ A repository with nothing staged since init has no index file; the
+  temporary index must then be absent, not empty, which git refuses
+  (GetTempFileName makes the file on Windows). }
+procedure TGitRepoTest.TestSnapshotNoIndex;
+var
+  Id: string;
+  Stats: TGittanFileStats;
+begin
+  Git(['init', '-q']);
+  WriteFile('a.txt', 'a'#10);
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.Error, FRepo.TakeSnapshot(Id));
+  AssertTrue('a.txt is in the snapshot', Pos('a.txt', Git(['ls-tree', '--name-only', Id])) > 0);
+  FRepo.Base := Id;
+  FRepo.WholeTree := True;
+  AssertTrue(FRepo.Error, FRepo.ChangeStats(Stats));
+  AssertEquals('nothing since the snapshot', 0, Length(Stats));
+end;
+
 procedure TGitRepoTest.TestSnapshot;
 var
   Id, Porcelain: string;
@@ -654,6 +746,8 @@ begin
   MakeHistory;
   WriteFile('b.txt', 'twofold'#10'Two words'#10);
   WriteFile('new/u.txt', 'two'#10);
+  { A user's color setting must not reach the output that is parsed. }
+  Git(['config', 'color.grep', 'always']);
   AssertTrue(FRepo.Open(FDir));
   Words := TStringList.Create;
   try
@@ -711,6 +805,55 @@ begin
   FRepo.DiffSides(Left, Right);
   AssertEquals('first', Left);
   AssertEquals('HEAD', Right);
+
+  { A three-dot range is diffed from the merge base, not from its left
+    end. }
+  Git(['tag', 'second']);
+  Git(['checkout', '-q', '-f', 'first']);
+  WriteFile('b.txt', 'b'#10);
+  Commit('third');
+  Git(['tag', 'third']);
+  FRepo.Base := 'second...third';
+  FRepo.DiffSides(Left, Right);
+  AssertEquals('the merge base', Trim(Git(['rev-parse', 'first'])), Left);
+  AssertEquals('third', Right);
+end;
+
+{ The blame of a repository with SHA-256 ids reads as one with SHA-1. }
+procedure TGitRepoTest.TestBlameSha256;
+var
+  Output, Head: string;
+  Blame: TGittanBlame;
+begin
+  Git(['init', '-q', '--object-format=sha256']);
+  WriteFile('a.txt', 'one'#10'two'#10);
+  Commit('first');
+  WriteFile('a.txt', 'one'#10'two'#10'three'#10);
+  AssertTrue(FRepo.Open(FDir));
+  Head := Trim(Git(['rev-parse', 'HEAD']));
+  AssertEquals(64, Length(Head));
+  AssertTrue(FRepo.Blame('a.txt', '', Output));
+  Blame := TGittanBlame.Create;
+  try
+    AssertTrue(Blame.Parse(Output));
+    AssertEquals(3, Blame.LineCount);
+    AssertEquals(Head, Blame.Commits[Blame.CommitOf(1)].Hash);
+    AssertEquals('first', Blame.Commits[Blame.CommitOf(2)].Summary);
+    AssertTrue(Blame.Commits[Blame.CommitOf(3)].Uncommitted);
+  finally
+    Blame.Free;
+  end;
+end;
+
+{ Nothing is written to git, so a hook or alias that reads its input
+  gets the end of it at once rather than waiting for ever. }
+procedure TGitRepoTest.TestInputClosed;
+var
+  Output, Err: string;
+begin
+  AssertTrue(Err, RunGitIn(FDir, ['-c', 'alias.readall=!cat; echo read', 'readall'],
+    Output, Err));
+  AssertEquals('read', Trim(Output));
 end;
 
 { The range of a commit runs from its parent; a root commit, which has
@@ -764,6 +907,7 @@ end;
 procedure TGitRepoTest.TestFileSize;
 var
   Size: int64;
+  {$ifdef unix}Info: TSearchRec;{$endif}
 begin
   MakeHistory;
   WriteFile('pic.bin', 'one'#0#13#10'two');
@@ -777,6 +921,30 @@ begin
   AssertEquals(5, Size);
   AssertFalse(FRepo.FileSize('none.bin', 'HEAD', Size));
   AssertFalse(FRepo.FileSize('none.bin', '', Size));
+  {$ifdef unix}
+  { A name FindFirst reads as a pattern is that file alone, not a
+    neighbour it matches; Windows allows no * in a name. }
+  WriteFile('aXb.bin', 'neighbour');
+  AssertFalse('gone, the neighbour aside', FRepo.FileSize('a*b.bin', '', Size));
+  WriteFile('a*b.bin', 'ab');
+  AssertTrue(FRepo.FileSize('a*b.bin', '', Size));
+  AssertEquals(2, Size);
+  { Found after the neighbours it matches, whichever the folder lists
+    first. }
+  WriteFile('a0b.bin', 'zero');
+  WriteFile('azb.bin', 'zed');
+  AssertTrue(FRepo.FileSize('a*b.bin', '', Size));
+  AssertEquals(2, Size);
+  AssertTrue(StatExact(FDir + PathDelim + 'a*b.bin', Info));
+  AssertEquals('a*b.bin', Info.Name);
+  FindClose(Info);
+  {$endif}
+  {$ifdef darwin}
+  { A folder that spells a name otherwise (case does not count on
+    macOS's file system) still has the file. }
+  AssertTrue('another case', StatExact(FDir + PathDelim + 'PIC.BIN', Info));
+  FindClose(Info);
+  {$endif}
   AssertTrue(IsBinaryFile(FDir + PathDelim + 'pic.bin') = False);
   WriteFile('pic.bin', 'a'#0'b');
   AssertTrue(IsBinaryFile(FDir + PathDelim + 'pic.bin'));
@@ -1846,8 +2014,9 @@ end;
   SetEnvironmentVariable is the ANSI one, which could not carry an ö).
   On Unix the RTL's GetEnvironmentString reads envp, the array the
   program started with, while a libc-based lookup (fpgetenv on macOS)
-  reads libc's own, so both get the variable: a longer copy of envp
-  with it last. }
+  reads libc's own, so both get the variable: in envp in the place of
+  the one the program started with, if it had it (a process given the
+  name twice may read the first), else in a longer copy of envp, last. }
 {$ifdef windows}
 function SetEnvironmentVariableW(AName, AValue: PWideChar): LongBool; stdcall;
   external 'kernel32' name 'SetEnvironmentVariableW';
@@ -1869,7 +2038,14 @@ begin
   setenv(PChar(AName), PChar(AValue), 1);
   Count := 0;
   while envp[Count] <> nil do
+  begin
+    if StrLComp(envp[Count], PChar(AName + '='), Length(AName) + 1) = 0 then
+    begin
+      envp[Count] := StrNew(PChar(AName + '=' + AValue));
+      Exit;
+    end;
     Inc(Count);
+  end;
   Wider := GetMem((Count + 2) * SizeOf(PChar));
   Move(envp^, Wider^, Count * SizeOf(PChar));
   Wider[Count] := StrNew(PChar(AName + '=' + AValue));
@@ -1946,15 +2122,64 @@ begin
   end;
 end;
 
+{ A conflict in a file with CRLF line ends, with the base between the
+  sides: the change view's lines have no CRs left, so every marker reads
+  as one, and resolving it keeps the file's line ends. }
+procedure TGitRepoTest.TestConflictCrlf;
+var
+  Lines: TStringList;
+  Roles: TIntegerDynArray;
+  Block: TGittanDiscard;
+  Err: string;
+  i: integer;
+begin
+  Git(['init', '-q', '-b', 'main']);
+  Git(['config', 'core.autocrlf', 'false']);
+  Git(['config', 'merge.conflictStyle', 'diff3']);
+  WriteFile('f.txt', 'one'#13#10'two'#13#10'three'#13#10);
+  Commit('base');
+  Git(['checkout', '-q', '-b', 'other']);
+  WriteFile('f.txt', 'one'#13#10'TWO other'#13#10'three'#13#10);
+  Commit('other');
+  Git(['checkout', '-q', 'main']);
+  WriteFile('f.txt', 'one'#13#10'TWO main'#13#10'three'#13#10);
+  Commit('main');
+  GitStops(FDir, ['merge', 'other']);
+  AssertTrue(FRepo.Open(FDir));
+  Lines := TStringList.Create;
+  try
+    AssertTrue(FRepo.FileChanges('f.txt', Lines));
+    { Line by line: Text would join them with LineEnding, CRLF on
+      Windows. }
+    for i := 0 to Lines.Count - 1 do
+      AssertEquals('no CR left in line ' + IntToStr(i), 0, Pos(#13, Lines[i]));
+    Roles := ConflictRoles(Lines);
+    AssertEquals(1, ConflictCount(Roles, Lines));
+    AssertEquals('the four markers', 4, Ord(Roles[1] = crMarker) + Ord(Roles[3] = crMarker) +
+      Ord(Roles[5] = crMarker) + Ord(Roles[7] = crMarker));
+    AssertEquals(crOurs, Roles[2]);
+    AssertEquals(crBase, Roles[4]);
+    AssertEquals(crTheirs, Roles[6]);
+    Block := ResolveBlock(Lines, Roles, 1, cpOurs, FRepo.Root + PathDelim + 'f.txt');
+    AssertTrue(Err, DiscardBlock(Block, Err));
+  finally
+    Lines.Free;
+  end;
+  AssertEquals('one'#13#10'TWO main'#13#10'three'#13#10, FileText(FDir + PathDelim + 'f.txt'));
+end;
+
 procedure TGitRepoTest.TestResolveMerge;
 var
   Branch: string;
 begin
   Branch := MakeDiverged(Self);
+  { git comments the conflicts out of the message with this. }
+  Git(['config', 'core.commentChar', ';']);
   AssertTrue(FRepo.Open(FDir));
   GitStops(FDir, ['merge', 'topic']);
   AssertEquals('merging', FRepo.Operation);
   AssertTrue(FRepo.MergeMessage, Pos('Merge branch ''topic''', FRepo.MergeMessage) = 1);
+  AssertEquals('the comments left out', 0, Pos('Conflicts', FRepo.MergeMessage));
   AssertFalse('conflicts left', FRepo.ContinueOperation);
   AssertEquals('merging', FRepo.Operation);
   AssertTrue(FRepo.Error, FRepo.ResolveConflict('a.txt', csTheirs));
@@ -2002,6 +2227,57 @@ begin
   AssertEquals('', FRepo.Operation);
   AssertEquals('main'#10, FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
   AssertFalse('nothing to abort', FRepo.AbortOperation);
+end;
+
+{ Undo Discard of the pick that took a file's last conflict: the markers
+  are written back and the file is in conflict again, edited or deleted. }
+procedure TGitRepoTest.TestUnresolve;
+begin
+  MakeDiverged(Self);
+  AssertTrue(FRepo.Open(FDir));
+  GitStops(FDir, ['merge', 'topic']);
+  WriteFile('a.txt', 'both'#10);
+  AssertTrue(FRepo.Error, FRepo.MarkResolved('a.txt'));
+  DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'del.txt');
+  AssertTrue(FRepo.Error, FRepo.MarkResolved('del.txt'));
+  AssertEquals('', Git(['ls-files', '-u']));
+  WriteFile('a.txt', '<<<<<<< HEAD'#10'main'#10'======='#10'topic'#10'>>>>>>> topic'#10);
+  AssertTrue(FRepo.Error, FRepo.Unresolve('a.txt'));
+  AssertEquals('<<<<<<< HEAD'#10'main'#10'======='#10'topic'#10'>>>>>>> topic'#10,
+    FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
+  AssertTrue(FRepo.Error, FRepo.Unresolve('del.txt'));
+  AssertEquals(5, Length(Trim(Git(['ls-files', '-u'])).Split([#10])));
+  AssertFalse('conflicts again', FRepo.ContinueOperation);
+  { Nothing kept for a file that never was in conflict. }
+  WriteFile('new.txt', 'new'#10);
+  Git(['add', 'new.txt']);
+  AssertFalse(FRepo.Unresolve('new.txt'));
+end;
+
+{ At a stop with conflicts, the files changed besides them; the
+  resolved ones are no extras, edited again or not. }
+procedure TGitRepoTest.TestContinueExtras;
+var
+  Branch: string;
+  Extras: TStringArray;
+begin
+  Branch := MakeDiverged(Self);
+  AssertTrue(FRepo.Open(FDir));
+  Git(['checkout', '-q', 'topic']);
+  GitStops(FDir, ['rebase', Branch]);
+  AssertTrue(FRepo.Error, FRepo.ResolveConflict('a.txt', csMine));
+  AssertTrue(FRepo.Error, FRepo.ResolveConflict('del.txt', csMine));
+  AssertEquals(0, Length(FRepo.ContinueExtras));
+  WriteFile('a.txt', 'topic, edited'#10);
+  WriteFile('staged.txt', 'new'#10);
+  WriteFile('dir sp/fil å.txt', 'b'#10);
+  Extras := FRepo.ContinueExtras;
+  AssertEquals(2, Length(Extras));
+  AssertEquals('dir sp/fil å.txt', Extras[0]);
+  AssertEquals('staged.txt', Extras[1]);
+  AssertTrue(FRepo.Error, FRepo.ContinueOperation);
+  AssertEquals('', FRepo.Operation);
+  AssertEquals('new', Trim(Git(['show', 'HEAD:staged.txt'])));
 end;
 
 procedure TGitRepoTest.TestSkip;
@@ -2088,6 +2364,47 @@ begin
   AssertTrue(FRepo.Error, FRepo.AbortOperation);
   AssertEquals('', FRepo.Operation);
   AssertEquals('topic', FRepo.Branch);
+end;
+
+{ A rebase left behind: it stopped with conflicts, they were resolved,
+  and a checkout in a terminal put HEAD on another branch, where a commit
+  was made. git still has the rebase going, of the topic branch, while
+  HEAD is on the other one, which the snapshot tells apart; --quit
+  forgets the rebase and keeps HEAD, the commit and the files. }
+procedure TGitRepoTest.TestRebaseStray;
+var
+  Branch, Head: string;
+  Conflicts: boolean;
+  Snap: TGittanRepoSnapshot;
+begin
+  Branch := MakeDiverged(Self);
+  AssertTrue(FRepo.Open(FDir));
+  Git(['checkout', '-q', 'topic']);
+  AssertFalse(FRepo.RebaseOnto(Branch, Conflicts));
+  AssertTrue('conflicts', Conflicts);
+  { Stopped: HEAD is detached, the snapshot names the rebased branch. }
+  AssertTrue(FRepo.Snapshot(Snap));
+  AssertTrue('detached', Snap.Detached);
+  AssertEquals('rebasing', Snap.Operation);
+  AssertEquals('topic', Snap.RebaseBranch);
+  AssertTrue(FRepo.ResolveConflict('a.txt', csMine));
+  AssertTrue(FRepo.MarkResolved('del.txt'));
+  Git(['checkout', '-q', Branch]);
+  WriteFile('b.txt', 'on main'#10);
+  Commit('on main');
+  Head := Trim(Git(['rev-parse', 'HEAD']));
+  AssertTrue(FRepo.Snapshot(Snap));
+  AssertFalse('detached', Snap.Detached);
+  AssertEquals(Branch, Snap.Branch);
+  AssertEquals('rebasing', Snap.Operation);
+  AssertEquals('topic', Snap.RebaseBranch);
+  AssertTrue(FRepo.Error, FRepo.QuitOperation);
+  AssertEquals('', FRepo.Operation);
+  AssertEquals(Branch, FRepo.Branch);
+  AssertEquals(Head, Trim(Git(['rev-parse', 'HEAD'])));
+  AssertEquals('on main', Trim(Git(['log', '-1', '--format=%s', 'HEAD'])));
+  AssertEquals('topic', Trim(Git(['log', '-1', '--format=%s', 'topic'])));
+  AssertFalse(FRepo.QuitOperation);
 end;
 
 { The commits after the first, replayed in another order: the fourth
@@ -2180,6 +2497,7 @@ begin
   AssertEquals('rebasing', FRepo.Operation);
   AssertEquals(Steps[0].Hash, FRepo.RebaseStoppedAt);
   WriteFile('b.txt', 'edited'#10);
+  AssertEquals('an edit stop takes them unasked', 0, Length(FRepo.ContinueExtras));
   AssertTrue(FRepo.Error, FRepo.ContinueOperation);
   AssertEquals('', FRepo.Operation);
   AssertEquals('', FRepo.RebaseStoppedAt);
@@ -2352,6 +2670,10 @@ begin
     AssertFalse(NotMerged);
 
     AssertTrue(FRepo.HasCommit('refs/remotes/origin/work'));
+    { A tag of the same name on the remote makes the bare name
+      ambiguous. }
+    Git(['tag', 'work']);
+    Git(['push', '-q', 'origin', 'refs/tags/work']);
     AssertTrue(FRepo.Error, FRepo.DeleteRemoteBranch('origin/work'));
     AssertFalse(FRepo.HasCommit('refs/remotes/origin/work'));
     RunCommandIndir(Remote, 'git', ['rev-parse', '--verify', '-q', 'refs/heads/work'], R,
@@ -2620,6 +2942,14 @@ begin
   AssertTrue(Branch, Pos(List[0].Id + '^..', Branch) = 1);
   AssertTrue('another commit', Branch <> List[0].Id + '^..' + List[0].Id);
   AssertEquals('a.txt'#10'new.txt'#10, Git(['diff', '--name-only', Branch]));
+  { Gittan's own commits need no identity of the user's: with a name
+    git refuses, the range still gets the commit with the untracked
+    files, and a snapshot is made. }
+  Git(['config', 'user.name', '<>']);
+  AssertTrue(FRepo.StashRange(List[0].Id, Msg));
+  AssertTrue('the commit with the untracked files', Msg <> List[0].Id + '^..' + List[0].Id);
+  AssertTrue(FRepo.Error, FRepo.TakeSnapshot(Msg));
+  Git(['config', '--unset', 'user.name']);
   AssertEquals('what the stash holds', 'untracked'#10, Git(['show',
     Copy(Branch, Pos('..', Branch) + 2, MaxInt) + ':new.txt']));
   AssertFalse(FRepo.StashRange('0000000000000000000000000000000000000000', Branch));
@@ -2972,6 +3302,69 @@ begin
   AssertTrue(FRepo.Error, FRepo.CreateBranch('saved', Second, False));
   AssertTrue(FRepo.Reflog(Log));
   AssertFalse('a branch keeps it now', Log[1].Lost);
+end;
+
+{ More commits only in the reflog than one command line takes on
+  Windows (about 41 characters an id, 32767 at most): every one is
+  still marked lost. The commits are written as files and stored by
+  one hash-object, with no pipe to git's input; the reflog is written
+  as git writes it, newest last. }
+procedure TGitRepoTest.TestReflogMany;
+const
+  Count = 950;
+var
+  Args: array of string;
+  Tree, Line, Prev: string;
+  Ids: TStringList;
+  Log: TGittanReflog;
+  F: TextFile;
+  i, Lost: integer;
+begin
+  MakeHistory;
+  Tree := Trim(Git(['rev-parse', 'HEAD^{tree}']));
+  SetLength(Args, Count + 4);
+  Args[0] := 'hash-object';
+  Args[1] := '-w';
+  Args[2] := '-t';
+  Args[3] := 'commit';
+  for i := 1 to Count do
+  begin
+    WriteFile('c/' + IntToStr(i), 'tree ' + Tree + #10 +
+      'author Gittan Test <test@example.invalid> 1700000000 +0000'#10 +
+      'committer Gittan Test <test@example.invalid> 1700000000 +0000'#10#10 +
+      IntToStr(i) + #10);
+    Args[3 + i] := 'c/' + IntToStr(i);
+  end;
+  Ids := TStringList.Create;
+  try
+    Ids.Text := Git(Args);
+    AssertEquals(Count, Ids.Count);
+    Prev := Trim(Git(['rev-parse', 'HEAD']));
+    AssignFile(F, IncludeTrailingPathDelimiter(FDir) + SetDirSeparators('.git/logs/HEAD'));
+    Append(F);
+    try
+      for i := 0 to Ids.Count - 1 do
+      begin
+        Line := Prev + ' ' + Ids[i] + ' Gittan Test <test@example.invalid> 1700000000 +0000'#9 +
+          'commit: ' + IntToStr(i + 1);
+        Write(F, Line, #10);
+        Prev := Ids[i];
+      end;
+    finally
+      CloseFile(F);
+    end;
+  finally
+    Ids.Free;
+  end;
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.Error, FRepo.Reflog(Log, 1000));
+  AssertEquals(Count + 1, Length(Log));
+  Lost := 0;
+  for i := 0 to High(Log) do
+    if Log[i].Lost then
+      Inc(Lost);
+  AssertEquals('every commit only the reflog keeps', Count, Lost);
+  AssertFalse('HEAD''s commit is on a branch', Log[High(Log)].Lost);
 end;
 
 procedure TGitRepoTest.TestMoveAndRemove;
@@ -3447,6 +3840,14 @@ begin
     AssertEquals('0002-third.patch', ExtractFileName(Files[1]));
     AssertTrue(FileExists(Files[1]));
     AssertTrue(IsMailPatchFile(Files[0]));
+    { A folder given relative is the root's, not this process's. }
+    AssertTrue(FRepo.Error, FRepo.FormatPatches(Second, Last, 'rel', False, One));
+    AssertEquals(2, One.Count);
+    { Root has git's slashes on Windows; the names are expanded. }
+    AssertEquals(ExpandFileName(IncludeTrailingPathDelimiter(FRepo.Root) + 'rel' + PathDelim +
+      '0001-second.patch'), One[0]);
+    AssertTrue(FileExists(One[0]));
+    One.Clear;
 
     { Committed, as their author made them. }
     Git(['reset', '-q', '--hard', First]);

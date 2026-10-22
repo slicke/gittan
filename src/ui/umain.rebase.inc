@@ -56,16 +56,19 @@ begin
   if not EditRebase(Steps, Title, Note) then
     Exit;
   StopWatcher;
-  Screen.Cursor := crHourGlass;
   try
-    Ok := FRepo.RebaseInteractive(AOnto, Steps, Conflicts, Stopped);
+    Screen.Cursor := crHourGlass;
+    try
+      Ok := FRepo.RebaseInteractive(AOnto, Steps, Conflicts, Stopped);
+    finally
+      Screen.Cursor := crDefault;
+    end;
+    FLoadError := '';
+    FSummary.Notice := '';
+    RefreshRepository;
   finally
-    Screen.Cursor := crDefault;
+    StartWatcher;
   end;
-  FLoadError := '';
-  FSummary.Notice := '';
-  RefreshRepository;
-  StartWatcher;
   if Ok then
   begin
     StatusNote(Format(rsRiDone, [FBranch]));

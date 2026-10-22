@@ -122,6 +122,8 @@ type
     Error: string;
     Stats: TGittanFileStats;
     Branch, DefaultBranch, MergeBase, Operation, RebaseBranch: string;
+    {** HEAD is on no branch: Branch is then the short commit id. }
+    Detached: boolean;
     HasUpstream: boolean;
     Ahead, Behind: integer;
     {** The stashes, newest first, from Stashes. }
@@ -200,10 +202,16 @@ type
   TGittanRepo = class
   private
     FRoot: string;
+    { The git directory, found by Open with the root. }
+    FGitDir: string;
     FError: string;
     FBase: string;
     FWholeTree: boolean;
     FTempIndex: string;
+    { Inside a ChangeStats (FIndexPass > 0) the temporary index is
+      brought up to date once (FIndexAdded), not by every diff of it. }
+    FIndexPass: integer;
+    FIndexAdded: boolean;
     FIgnoreWhitespace: boolean;
     FOnOutput: TGittanOutputEvent;
     function RunGit(const ADir: string; const AArgs: array of string;
@@ -211,6 +219,7 @@ type
     function RunRemote(const AArgs: array of string): boolean;
     function IndexPath: string;
     function CopyIndex(const ATarget: string): boolean;
+    function CommitTree(const ATree, AParent, AMessage: string; out AId: string): boolean;
     function WholeTreeActive: boolean;
     function RebaseFilesFolder: string;
     procedure CleanRebaseFiles;
@@ -613,6 +622,11 @@ type
     {** Marks APath resolved as it is in the work tree (`git add`), or
       deleted when it is gone from there (`git rm`). }
     function MarkResolved(const APath: string): boolean;
+    {** Puts APath back in conflict after MarkResolved or `git add`: the
+      base, ours and theirs return to the index from what git kept of
+      them when it was resolved (`git update-index --unresolve`), the
+      work tree as it is. False when git kept nothing to bring back. }
+    function Unresolve(const APath: string): boolean;
     {** Goes on with what git is in the middle of (Operation), once the
       conflicts are resolved: the tracked files' changes are staged
       first (`git add -u`), since they are what the stopped commit
@@ -622,12 +636,25 @@ type
       again at a later commit, which leaves it rebasing with new
       conflicts and is no failure. }
     function ContinueOperation: boolean;
+    {** The tracked files changed in the work tree besides the conflicts
+      resolved at this stop (the paths git keeps resolve-undo stages
+      for), which ContinueOperation's `add -u` would take into the
+      commit too, sorted. None at a stop without conflicts, such as an
+      edit stop of an interactive rebase, where the changes are what
+      the commit is stopped for. }
+    function ContinueExtras: TStringArray;
     {** Leaves out the commit a rebase, cherry-pick, revert or am
       stopped at (`--skip`) and goes on with the rest. }
     function SkipOperation: boolean;
     {** Gives up what git is in the middle of (`--abort`): the branch and
       the work tree go back to how they were before it started. }
     function AbortOperation: boolean;
+    {** Forgets what git is in the middle of (`--quit`): HEAD, the index
+      and the work tree stay as they are, git just stops rebasing (or
+      cherry-picking, reverting, applying patches). For a rebase left
+      behind by a checkout to another branch, where --abort would check
+      the rebased branch out again. Not for a merge. }
+    function QuitOperation: boolean;
     {** The message git prepared for the merge, cherry-pick or revert in
       progress (MERGE_MSG in the git directory), its comment lines left
       out; empty when there is none. }
@@ -683,6 +710,8 @@ type
     {** The current branch, the short commit id when HEAD is detached, or
       empty when nothing is open. }
     function Branch: string;
+    {** The same, with ADetached true when HEAD is on no branch. }
+    function Branch(out ADetached: boolean): string;
     {** The remote-tracking branch the repository was cloned from, such as
       origin/main: what the remote's HEAD points at, else main or master
       on the remote RemoteFor gives, else empty. }
@@ -760,7 +789,9 @@ type
     function FileChanges(const APath: string; ALines: TStrings): boolean;
     {** The two commits a diff of a file is between: ALeft is Base (HEAD
       by default), ARight the right commit of a range, or empty for the
-      work tree. }
+      work tree. For a three-dot range A...B ALeft is the merge base of
+      A and B, which is what git diffs B against (A itself when git
+      finds none). }
     procedure DiffSides(out ALeft, ARight: string);
     {** The bytes of APath as it is in the commit ARef (`git cat-file
       blob`, no filter applied), or in the work tree when ARef is empty.
@@ -804,7 +835,10 @@ type
     function Fingerprint: string;
     {** Work tree root, empty when nothing is open. }
     property Root: string read FRoot;
-    {** Message from the last git call that failed. }
+    {** Message from the last git call that failed. A call that succeeds
+      leaves it as it was (a call may fail on the way to its answer and
+      still give one), so it says why only right after a call that
+      returned false. }
     property Error: string read FError;
     {** The commit the work tree is compared against: a branch, tag or
       commit id, or empty for HEAD. A range "A..B" compares the commits A
@@ -946,7 +980,8 @@ function ParseTags(const AOutput: string): TGittanTags;
 
 {** The lines of HEAD's reflog in AOutput, what `git log -g --date=unix`
   prints with ReflogFormat: per line the commit, the selector with the
-  time (HEAD@{1700000000}) and the subject, separated by #31. Lines
+  time (HEAD@ and the unix time in braces) and the subject, separated by
+  #31. Lines
   that do not hold three fields are skipped. }
 function ParseReflog(const AOutput: string): TGittanReflog;
 
@@ -993,6 +1028,14 @@ function UnquoteCPath(const APath: string): string;
 {** Whether the file AFileName is binary by git's own rule: a NUL byte
   in its first 8000 bytes. False for a file that cannot be read. }
 function IsBinaryFile(const AFileName: string): boolean;
+
+{** FindFirst for the file AFileName itself, which FindFirst reads as a
+  pattern: on Unix a *, ? or [...] in a name also matches its
+  neighbours, and FindFirst gives whichever it finds first (a deleted
+  a*b.txt gave aXb.txt's size and time). Only the file of that very name
+  counts; AInfo is closed when there is none, else the caller closes
+  it. }
+function StatExact(const AFileName: string; out AInfo: TSearchRec): boolean;
 
 {** Runs git in ADir as TGittanRepo does (see Running git) and answers
   whether it succeeded, with its standard output in AOutput and, on
@@ -1068,6 +1111,7 @@ function ProcessArg(const S: string): string;
 implementation
 
 uses
+  {$ifdef unix}BaseUnix,{$endif}
   Process, Pipes, md5, StrUtils, DateUtils;
 
 { ---------------------------------------------------------------------------
@@ -1135,8 +1179,9 @@ end;
 var
   GToolPath: string;
   GGitExe: string;
-  { The paths git ran by before: kept, so that a thread starting git while
-    the main thread changes the path copies a string that is not freed. }
+  { The paths git ran by before, once each: kept, so that a thread
+    starting git while the main thread changes the path copies a string
+    that is not freed. }
   GOldGitExes: TStringList;
 
 function ToolSearchPath: string;
@@ -1207,17 +1252,27 @@ begin
 end;
 
 procedure SetGitExe(const APath: string);
+var
+  Exe: string;
+  i: integer;
 begin
-  if GGitExe <> '' then
+  Exe := APath;
+  if Exe = '' then
+    Exe := FindTool('git');
+  if Exe = '' then
+    Exe := 'git';
+  if Exe = GGitExe then
+    Exit;
+  { One string per path git ran by, not one per call: the settings set
+    it again on every save. A path set again is the kept string itself,
+    so the one in use is always kept or new, never a copy freed later. }
+  if (GGitExe <> '') and (GOldGitExes.IndexOf(GGitExe) < 0) then
     GOldGitExes.Add(GGitExe);
-  if APath <> '' then
-    GGitExe := APath
+  i := GOldGitExes.IndexOf(Exe);
+  if i >= 0 then
+    GGitExe := GOldGitExes[i]
   else
-  begin
-    GGitExe := FindTool('git');
-    if GGitExe = '' then
-      GGitExe := 'git';
-  end;
+    GGitExe := Exe;
 end;
 
 function GitExe: string;
@@ -1551,84 +1606,189 @@ begin
     AOnOutput(Chunk);
 end;
 
-function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
-  out AOutput, AError: string; const AIndexFile: string;
+{ Waits until git writes or ends, so RunGitEnv does not sleep past the
+  end of a git call that takes a few milliseconds. On Unix git's pipes
+  are watched, for a tenth of a second at most: its exit closes them,
+  which wakes the wait too. A pipe at its end stays readable with nothing
+  to read, so it is left out from then on (AOutOpen, AErrOpen); with
+  both ended only git's exit is left to wait for. On Windows a pipe
+  cannot be waited on, the process is: the wait ends when git does, and
+  what git writes meanwhile waits in the pipe, so the wait is as short
+  as the sleep it replaces, or git would stand still on a full pipe. }
+{$ifdef windows}
+{ Declared here rather than taken from the Windows unit, whose DeleteFile
+  and others would hide SysUtils' own. }
+function WaitForSingleObject(AHandle: THandle; AMilliseconds: DWord): DWord;
+  stdcall; external 'kernel32' name 'WaitForSingleObject';
+{$endif}
+
+procedure WaitForGit(P: TProcess; var AOutOpen, AErrOpen: boolean);
+{$ifdef unix}
+const
+  Timeout = 100;
+var
+  Fds: TFDSet;
+  Tv: TTimeVal;
+  Top: cint;
+begin
+  if not AOutOpen and not AErrOpen then
+  begin
+    P.WaitOnExit;
+    Exit;
+  end;
+  fpFD_ZERO(Fds);
+  Top := 0;
+  if AOutOpen then
+  begin
+    fpFD_SET(P.Output.Handle, Fds);
+    Top := P.Output.Handle;
+  end;
+  if AErrOpen then
+  begin
+    fpFD_SET(P.Stderr.Handle, Fds);
+    if P.Stderr.Handle > Top then
+      Top := P.Stderr.Handle;
+  end;
+  Tv.tv_sec := 0;
+  Tv.tv_usec := Timeout * 1000;
+  if fpSelect(Top + 1, @Fds, nil, nil, @Tv) <= 0 then
+    Exit;
+  { Readable with nothing in it: the end of the pipe. }
+  if AOutOpen and (fpFD_ISSET(P.Output.Handle, Fds) = 1) and
+    (P.Output.NumBytesAvailable = 0) then
+    AOutOpen := False;
+  if AErrOpen and (fpFD_ISSET(P.Stderr.Handle, Fds) = 1) and
+    (P.Stderr.NumBytesAvailable = 0) then
+    AErrOpen := False;
+end;
+{$else}
+const
+  Timeout = 10;
+begin
+  WaitForSingleObject(P.ProcessHandle, Timeout);
+end;
+{$endif}
+
+{ Runs AExe in ADir with AArgs, in the environment with ASkip (prefixes
+  like "NAME=") and the names of AEnv left out and AEnv added; false,
+  with nothing read, when AExe cannot be started. Both pipes are read
+  as the tool writes, so a long command's progress can be shown and
+  neither pipe fills up and blocks it; what is left once it has ended
+  is read after it. AStatus is its exit code. }
+function RunTool(const AExe, ADir: string; const AArgs, ASkip, AEnv: array of string;
+  out AOutput, AError: string; out AStatus: integer;
   AOnOutput: TGittanOutputEvent): boolean;
 var
   P: TProcess;
   Skip: array of string;
-  Status, i: integer;
-  Got: boolean;
+  i: integer;
+  Got, OutOpen, ErrOpen: boolean;
 begin
   AOutput := '';
   AError := '';
+  AStatus := -1;
   P := TProcess.Create(nil);
   try
-    P.Executable := GGitExe;
+    P.Executable := AExe;
     P.CurrentDirectory := ADir;
-    P.Parameters.Add('-c');
-    P.Parameters.Add('core.quotepath=false');
     for i := 0 to High(AArgs) do
       P.Parameters.Add(ProcessArg(AArgs[i]));
-    SetLength(Skip, 4 + Length(AEnv));
-    Skip[0] := 'LC_ALL=';
-    Skip[1] := 'GIT_TERMINAL_PROMPT=';
-    Skip[2] := 'GIT_INDEX_FILE=';
-    Skip[3] := 'GIT_OPTIONAL_LOCKS=';
+    SetLength(Skip, Length(ASkip) + Length(AEnv));
+    for i := 0 to High(ASkip) do
+      Skip[i] := ASkip[i];
     for i := 0 to High(AEnv) do
-      Skip[4 + i] := Copy(AEnv[i], 1, Pos('=', AEnv[i]));
+      Skip[Length(ASkip) + i] := Copy(AEnv[i], 1, Pos('=', AEnv[i]));
     CopyEnvironment(P, Skip);
     for i := 0 to High(AEnv) do
       P.Environment.Add(AEnv[i]);
-    P.Environment.Add('LC_ALL=C');
-    P.Environment.Add('GIT_TERMINAL_PROMPT=0');
-    { git status refreshes the index when it may, under index.lock; the
-      watcher's poll would then make a commit started meanwhile fail. }
-    P.Environment.Add('GIT_OPTIONAL_LOCKS=0');
-    if AIndexFile <> '' then
-      P.Environment.Add('GIT_INDEX_FILE=' + AIndexFile);
     P.Options := [poNoConsole, poUsePipes];
-    { Both pipes are read as git writes, so a long command's progress
-      can be shown and neither pipe fills up and blocks git; what is
-      left once git has ended is read after it. }
     try
       P.Execute;
     except
-      AError := GitNotRunMessage(GGitExe);
       Exit(False);
     end;
+    { Nothing is written to the tool, so its input ends at once: a hook
+      or an alias that reads it would otherwise wait for ever, and the
+      app with it. }
+    P.CloseInput;
+    OutOpen := True;
+    ErrOpen := True;
     repeat
       Got := ReadPipe(P.Output, AOutput, AOnOutput);
       if ReadPipe(P.Stderr, AError, AOnOutput) then
         Got := True;
       if not Got then
         if P.Running then
-          Sleep(10)
+          WaitForGit(P, OutOpen, ErrOpen)
         else
           Break;
     until False;
     while ReadPipe(P.Output, AOutput, AOnOutput) do;
     while ReadPipe(P.Stderr, AError, AOnOutput) do;
-    Status := P.ExitStatus;
+    AStatus := P.ExitStatus;
+    Result := True;
   finally
     P.Free;
   end;
-  { A failed git's reason is what it wrote, on both streams in their
-    order: a pre-push hook's output (husky's "pre-push script failed",
-    the tests it ran) is on stdout, git's own "failed to push some refs"
-    on stderr, and either alone says little. Progress is read as the
-    terminal last showed it. }
+end;
+
+{ A failed tool's reason is what it wrote, on both streams in their
+  order: a pre-push hook's output (husky's "pre-push script failed", the
+  tests it ran) is on stdout, git's own "failed to push some refs" on
+  stderr, and either alone says little. Progress is read as the terminal
+  last showed it. AOutput is emptied. }
+procedure JoinFailure(var AOutput, AError: string);
+begin
+  AError := Trim(ResolveReturns(AError));
+  AOutput := ResolveReturns(AOutput);
+  if Trim(AOutput) <> '' then
+    if AError = '' then
+      AError := Trim(AOutput)
+    else
+      AError := Trim(AOutput) + LineEnding + AError;
+  AOutput := '';
+end;
+
+function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
+  out AOutput, AError: string; const AIndexFile: string;
+  AOnOutput: TGittanOutputEvent): boolean;
+var
+  Args, Env: array of string;
+  Status, i: integer;
+begin
+  SetLength(Args, 4 + Length(AArgs));
+  Args[0] := '-c';
+  Args[1] := 'core.quotepath=false';
+  { With it git writes a blank context line as an empty line, not a
+    space, and the readers of a hunk would lose the line. }
+  Args[2] := '-c';
+  Args[3] := 'diff.suppressBlankEmpty=false';
+  for i := 0 to High(AArgs) do
+    Args[4 + i] := AArgs[i];
+  SetLength(Env, Length(AEnv) + 4);
+  for i := 0 to High(AEnv) do
+    Env[i] := AEnv[i];
+  i := Length(AEnv);
+  Env[i] := 'LC_ALL=C';
+  Env[i + 1] := 'GIT_TERMINAL_PROMPT=0';
+  { git status refreshes the index when it may, under index.lock; the
+    watcher's poll would then make a commit started meanwhile fail. }
+  Env[i + 2] := 'GIT_OPTIONAL_LOCKS=0';
+  if AIndexFile <> '' then
+    Env[i + 3] := 'GIT_INDEX_FILE=' + AIndexFile
+  else
+    SetLength(Env, i + 3);
+  { The user's own GIT_INDEX_FILE goes even when none is given. }
+  if not RunTool(GGitExe, ADir, Args, ['GIT_INDEX_FILE='], Env, AOutput, AError,
+    Status, AOnOutput) then
+  begin
+    AError := GitNotRunMessage(GGitExe);
+    Exit(False);
+  end;
   Result := Status = 0;
   if not Result then
   begin
-    AError := Trim(ResolveReturns(AError));
-    AOutput := ResolveReturns(AOutput);
-    if Trim(AOutput) <> '' then
-      if AError = '' then
-        AError := Trim(AOutput)
-      else
-        AError := Trim(AOutput) + LineEnding + AError;
-    AOutput := '';
+    JoinFailure(AOutput, AError);
     if IsMissingDeveloperTools(AError) then
       AError := MissingDeveloperToolsMessage;
   end;
@@ -1701,44 +1861,17 @@ end;
 function RunGitHubCli(const AExe, ADir: string; const AArgs: array of string;
   out AOutput, AError: string): boolean;
 var
-  P: TProcess;
-  Status, i: integer;
+  Status: integer;
 begin
-  AOutput := '';
-  AError := '';
-  P := TProcess.Create(nil);
-  try
-    P.Executable := AExe;
-    P.CurrentDirectory := ADir;
-    for i := 0 to High(AArgs) do
-      P.Parameters.Add(ProcessArg(AArgs[i]));
-    CopyEnvironment(P, ['GH_PROMPT_DISABLED=', 'GH_NO_UPDATE_NOTIFIER=']);
-    P.Environment.Add('GH_PROMPT_DISABLED=1');
-    P.Environment.Add('GH_NO_UPDATE_NOTIFIER=1');
-    P.Options := [poNoConsole];
-    if P.RunCommandLoop(AOutput, AError, Status) <> 0 then
-    begin
-      AError := 'Could not run ' + AExe;
-      Exit(False);
-    end;
-  finally
-    P.Free;
+  if not RunTool(AExe, ADir, AArgs, [], ['GH_PROMPT_DISABLED=1',
+    'GH_NO_UPDATE_NOTIFIER=1'], AOutput, AError, Status, nil) then
+  begin
+    AError := 'Could not run ' + AExe;
+    Exit(False);
   end;
-  { A failed git's reason is what it wrote, on both streams in their
-    order: a pre-push hook's output (husky's "pre-push script failed",
-    the tests it ran) is on stdout, git's own "failed to push some refs"
-    on stderr, and either alone says little. }
   Result := Status = 0;
   if not Result then
-  begin
-    AError := Trim(AError);
-    if Trim(AOutput) <> '' then
-      if AError = '' then
-        AError := Trim(AOutput)
-      else
-        AError := Trim(AOutput) + LineEnding + AError;
-    AOutput := '';
-  end;
+    JoinFailure(AOutput, AError);
 end;
 
 { The NUL-separated fields of the output of a git command run with -z; a
@@ -1760,6 +1893,23 @@ begin
 end;
 
 { Writes AText to AFileName byte for byte. }
+{ AList as git reads a --pathspec-from-file with --pathspec-file-nul:
+  each entry ended by a NUL. }
+function NulList(AList: TStrings): string;
+var
+  i: integer;
+begin
+  Result := '';
+  for i := 0 to AList.Count - 1 do
+    Result := Result + AList[i] + #0;
+end;
+
+procedure AddArg(var AArgs: TStringArray; const S: string);
+begin
+  SetLength(AArgs, Length(AArgs) + 1);
+  AArgs[High(AArgs)] := S;
+end;
+
 procedure WriteBytes(const AFileName, AText: string);
 var
   Stream: TFileStream;
@@ -1784,6 +1934,7 @@ end;
 function TGittanRepo.Open(const ADir: string): boolean;
 var
   Top: string;
+  Lines: TStringArray;
 begin
   Close;
   if not DirectoryExists(ADir) then
@@ -1791,9 +1942,14 @@ begin
     FError := Format('Folder not found: %s', [ADir]);
     Exit(False);
   end;
-  Result := RunGit(ADir, ['rev-parse', '--show-toplevel'], Top);
+  Result := RunGit(ADir, ['rev-parse', '--show-toplevel', '--absolute-git-dir'], Top);
   if Result then
-    FRoot := Trim(Top)
+  begin
+    Lines := Trim(Top).Split([#10]);
+    FRoot := Trim(Lines[0]);
+    if Length(Lines) > 1 then
+      FGitDir := Trim(Lines[1]);
+  end
   { git's message is in English (RunGit sets LC_ALL=C), so the common
     case gets a shorter one; any other failure keeps git's own. }
   else if Pos('not a git repository', FError) > 0 then
@@ -1804,6 +1960,7 @@ procedure TGittanRepo.Close;
 begin
   DropTempIndex;
   FRoot := '';
+  FGitDir := '';
   FError := '';
   FBase := '';
   FWholeTree := False;
@@ -1884,11 +2041,7 @@ end;
 
 function TGittanRepo.GitDir: string;
 begin
-  Result := '';
-  if (FRoot <> '') and RunGit(FRoot, ['rev-parse', '--absolute-git-dir'], Result) then
-    Result := Trim(Result)
-  else
-    Result := '';
+  Result := FGitDir;
 end;
 
 { A rebase keeps its state in rebase-merge (the default backend) or
@@ -1994,7 +2147,10 @@ begin
 end;
 
 { Copies the repository's index to ATarget; no index (nothing staged
-  since init) leaves ATarget absent, which git takes as empty. }
+  since init) leaves ATarget absent, which git takes as empty. On
+  Windows GetTempFileName has made the file already, and git refuses
+  an empty one ("index file smaller than expected"), so it is
+  deleted. }
 function TGittanRepo.CopyIndex(const ATarget: string): boolean;
 var
   Source: string;
@@ -2003,7 +2159,11 @@ begin
   Result := True;
   Source := IndexPath;
   if (Source = '') or not FileExists(Source) then
+  begin
+    if FileExists(ATarget) then
+      Result := DeleteFile(ATarget);
     Exit;
+  end;
   Stream := TMemoryStream.Create;
   try
     try
@@ -2015,6 +2175,25 @@ begin
   finally
     Stream.Free;
   end;
+end;
+
+{ A commit Gittan makes for itself (a snapshot, a stash with its
+  untracked files), reachable from nothing and never shared: it gets an
+  identity of its own, since commit-tree refuses to run without a name
+  and an e-mail, which a fresh machine (or a CI runner) does not have.
+  commit-tree signs only with -S, whatever commit.gpgSign says. AParent
+  may be empty. }
+function TGittanRepo.CommitTree(const ATree, AParent, AMessage: string;
+  out AId: string): boolean;
+var
+  Args: array of string;
+begin
+  Args := ['-c', 'user.name=Gittan', '-c', 'user.email=gittan@localhost', 'commit-tree',
+    ATree, '-m', AMessage];
+  if AParent <> '' then
+    Args := Concat(Args, ['-p', AParent]);
+  Result := RunGit(FRoot, Args, AId);
+  AId := Trim(AId);
 end;
 
 function TGittanRepo.WholeTreeActive: boolean;
@@ -2041,7 +2220,11 @@ begin
       Exit;
     end;
   end;
-  RunGit(FRoot, ['add', '-A', '-N'], Output, FTempIndex);
+  if (FIndexPass = 0) or not FIndexAdded then
+  begin
+    RunGit(FRoot, ['add', '-A', '-N'], Output, FTempIndex);
+    FIndexAdded := FIndexPass > 0;
+  end;
   Result := FTempIndex;
 end;
 
@@ -2177,19 +2360,9 @@ begin
       RunGit(FRoot, ['write-tree'], Tree, Index);
     if not Result then
       Exit;
-    Tree := Trim(Tree);
-    { commit-tree refuses to run without a name and an e-mail, which a
-      fresh machine (or a CI runner) does not have; the snapshot is never
-      shared, so it gets an identity of its own. }
-    if RunGit(FRoot, ['rev-parse', '--verify', '-q', 'HEAD'], Head) then
-      Result := RunGit(FRoot, ['-c', 'user.name=Gittan', '-c',
-        'user.email=gittan@localhost', 'commit-tree', Tree, '-p', Trim(Head),
-        '-m', 'Gittan snapshot'], AId)
-    else
-      Result := RunGit(FRoot, ['-c', 'user.name=Gittan', '-c',
-        'user.email=gittan@localhost', 'commit-tree', Tree, '-m',
-        'Gittan snapshot'], AId);
-    AId := Trim(AId);
+    if not RunGit(FRoot, ['rev-parse', '--verify', '-q', 'HEAD'], Head) then
+      Head := '';
+    Result := CommitTree(Trim(Tree), Trim(Head), 'Gittan snapshot', AId);
   finally
     DeleteFile(Index);
     DeleteFile(Index + '.lock');
@@ -2271,7 +2444,9 @@ begin
 end;
 
 { Appends the refs under AGroup (refs/heads, refs/remotes or refs/tags),
-  most recently committed first, to AList. A symbolic ref such as
+  newest first, to AList: by creatordate, the commit's date for a branch
+  or a lightweight tag and the tagger's for an annotated one, which has
+  no committerdate and sorted last. A symbolic ref such as
   origin/HEAD (short name "origin") is skipped: it only points at
   another one in the list. }
 function TGittanRepo.RefGroup(const AGroup: string; AList: TStrings): boolean;
@@ -2281,7 +2456,7 @@ var
   Tab: integer;
 begin
   Result := RunGit(FRoot, ['for-each-ref', '--format=%(refname:short)%09%(symref)',
-    '--sort=-committerdate', AGroup], Output);
+    '--sort=-creatordate', AGroup], Output);
   if not Result then
     Exit;
   Raw := TStringList.Create;
@@ -2368,15 +2543,6 @@ var
   Output, Entry, Path, Id, ListFile: string;
   Fields, Chosen, Paths, InHead, Restore, Remove: TStringList;
   i: integer;
-
-  function NulList(AList: TStrings): string;
-  var
-    j: integer;
-  begin
-    Result := '';
-    for j := 0 to AList.Count - 1 do
-      Result := Result + AList[j] + #0;
-  end;
 
 begin
   ASaved.Clear;
@@ -2545,28 +2711,22 @@ end;
 function TGittanRepo.Stash(const AMessage: string; APaths: TStrings): boolean;
 var
   Output, SpecFile, Nul: string;
-  Args: array of string;
+  Args: TStringArray;
   i: integer;
-
-  procedure Arg(const S: string);
-  begin
-    SetLength(Args, Length(Args) + 1);
-    Args[High(Args)] := S;
-  end;
 
 begin
   if FRoot = '' then
     Exit(False);
   Args := nil;
   if (APaths <> nil) and (APaths.Count > 0) then
-    Arg('--literal-pathspecs');
-  Arg('stash');
-  Arg('push');
-  Arg('-u');
+    AddArg(Args, '--literal-pathspecs');
+  AddArg(Args, 'stash');
+  AddArg(Args, 'push');
+  AddArg(Args, '-u');
   if AMessage <> '' then
   begin
-    Arg('-m');
-    Arg(AMessage);
+    AddArg(Args, '-m');
+    AddArg(Args, AMessage);
   end;
   SpecFile := '';
   try
@@ -2577,8 +2737,8 @@ begin
         Nul := Nul + APaths[i] + #0;
       SpecFile := GetTempFileName(GetTempDir, 'gittan-stash-');
       WriteBytes(SpecFile, Nul);
-      Arg('--pathspec-from-file=' + SpecFile);
-      Arg('--pathspec-file-nul');
+      AddArg(Args, '--pathspec-from-file=' + SpecFile);
+      AddArg(Args, '--pathspec-file-nul');
     end;
     Result := RunGit(FRoot, Args, Output);
   finally
@@ -2792,9 +2952,9 @@ begin
     DeleteFile(Index);
     if RunGit(FRoot, ['read-tree', '-i', '-m', Empty, AId, AId + '^3'], Output, Index) and
       RunGit(FRoot, ['write-tree'], Tree, Index) and
-      RunGit(FRoot, ['commit-tree', Trim(Tree), '-p', AId + '^', '-m',
-      'Gittan: the stash ' + AId + ' with its untracked files'], Output) then
-      ARange := AId + '^..' + Trim(Output);
+      CommitTree(Trim(Tree), AId + '^', 'Gittan: the stash ' + AId +
+      ' with its untracked files', Output) then
+      ARange := AId + '^..' + Output;
   finally
     DeleteFile(Index);
   end;
@@ -2832,24 +2992,9 @@ function TGittanRepo.Commit(const AMessage: string; APaths: TStrings;
 var
   Output, Entry, Path, XY, Op, Err, SpecFile, AddFile, MsgFile, PartFile, Index: string;
   Fields, Chosen, Spec, Added, Untrack: TStringList;
-  Args: array of string;
+  Args: TStringArray;
   Whole: boolean;
   i: integer;
-
-  procedure Arg(const S: string);
-  begin
-    SetLength(Args, Length(Args) + 1);
-    Args[High(Args)] := S;
-  end;
-
-  function NulList(AList: TStrings): string;
-  var
-    j: integer;
-  begin
-    Result := '';
-    for j := 0 to AList.Count - 1 do
-      Result := Result + AList[j] + #0;
-  end;
 
   { Writes AParts over their paths in the index AIndex ('' for the
     repository's): each text goes in as a blob, through the filters of
@@ -2911,12 +3056,12 @@ var
       Exit;
     WriteBytes(MsgFile, AMessage);
     Args := nil;
-    Arg('commit');
-    Arg('-q');
-    Arg('-F');
-    Arg(MsgFile);
+    AddArg(Args, 'commit');
+    AddArg(Args, '-q');
+    AddArg(Args, '-F');
+    AddArg(Args, MsgFile);
     if AAmend then
-      Arg('--amend');
+      AddArg(Args, '--amend');
     Result := RunGit(FRoot, Args, Output, Index);
     if not Result then
       Exit;
@@ -3007,21 +3152,21 @@ begin
       Exit(False);
     WriteBytes(MsgFile, AMessage);
     Args := nil;
-    Arg('--literal-pathspecs');
-    Arg('commit');
-    Arg('-q');
-    Arg('-F');
-    Arg(MsgFile);
+    AddArg(Args, '--literal-pathspecs');
+    AddArg(Args, 'commit');
+    AddArg(Args, '-q');
+    AddArg(Args, '-F');
+    AddArg(Args, MsgFile);
     if AAmend then
-      Arg('--amend');
+      AddArg(Args, '--amend');
     if not Whole then
     begin
-      Arg('--only');
+      AddArg(Args, '--only');
       if Spec.Count > 0 then
       begin
         WriteBytes(SpecFile, NulList(Spec));
-        Arg('--pathspec-from-file=' + SpecFile);
-        Arg('--pathspec-file-nul');
+        AddArg(Args, '--pathspec-from-file=' + SpecFile);
+        AddArg(Args, '--pathspec-file-nul');
       end;
     end;
     Result := RunGit(FRoot, Args, Output);
@@ -3338,18 +3483,21 @@ begin
   Result := (FRoot <> '') and RunGit(FRoot, ['remote', 'add', '--', AName, AUrl], Output);
 end;
 
+{ No "--": before git parsed options for remote rename and remove, it
+  counted the arguments and took "--" for a name, and the supported git
+  goes back to 2.30. }
 function TGittanRepo.RenameRemote(const AOld, ANew: string): boolean;
 var
   Output: string;
 begin
-  Result := (FRoot <> '') and RunGit(FRoot, ['remote', 'rename', '--', AOld, ANew], Output);
+  Result := (FRoot <> '') and RunGit(FRoot, ['remote', 'rename', AOld, ANew], Output);
 end;
 
 function TGittanRepo.RemoveRemote(const AName: string): boolean;
 var
   Output: string;
 begin
-  Result := (FRoot <> '') and RunGit(FRoot, ['remote', 'remove', '--', AName], Output);
+  Result := (FRoot <> '') and RunGit(FRoot, ['remote', 'remove', AName], Output);
 end;
 
 { git config exits with 5 when there is no push URL to unset. }
@@ -3493,7 +3641,9 @@ begin
     FError := Format('%s is not a branch of a remote.', [ARef]);
     Exit(False);
   end;
-  Result := RunRemote(['push', Remote, '--delete', OnRemote]);
+  { Qualified, as DeleteRemoteTag's is: a tag of the same name on the
+    remote makes the bare name ambiguous, and git refuses it. }
+  Result := RunRemote(['push', Remote, '--delete', 'refs/heads/' + OnRemote]);
 end;
 
 function TGittanRepo.CreateTag(const AName, AAt, AMessage: string): boolean;
@@ -3587,12 +3737,18 @@ begin
   end;
 end;
 
+{ The commits go to rev-list a hundred at a time: the newest thousand
+  ids on one command line passed the length Windows allows, the call
+  failed and none was marked. What a batch reaches is reached, so the
+  batches together give what all of them at once would. }
 function TGittanRepo.Reflog(out AList: TGittanReflog; ALimit: integer): boolean;
+const
+  Batch = 100;
 var
   Output: string;
   Args: array of string;
-  Lost: TStringList;
-  i: integer;
+  Ids, Lost: TStringList;
+  i, j, n: integer;
 begin
   AList := nil;
   if FRoot = '' then
@@ -3608,27 +3764,35 @@ begin
     Exit;
   { What the commits reach and no ref does; a commit of the reflog in it
     is kept by the reflog alone. A failure only leaves none marked. }
+  Ids := TStringList.Create;
   Lost := TStringList.Create;
   try
+    Ids.Sorted := True;
+    Ids.Duplicates := dupIgnore;
+    for i := 0 to High(AList) do
+      Ids.Add(AList[i].Commit);
     Lost.Sorted := True;
     Lost.Duplicates := dupIgnore;
-    Args := ['rev-list'];
-    for i := 0 to High(AList) do
-      if Lost.IndexOf(AList[i].Commit) < 0 then
-      begin
-        Lost.Add(AList[i].Commit);
-        SetLength(Args, Length(Args) + 1);
-        Args[High(Args)] := AList[i].Commit;
-      end;
-    Lost.Clear;
-    SetLength(Args, Length(Args) + 2);
-    Args[High(Args) - 1] := '--not';
-    Args[High(Args)] := '--all';
-    if RunGit(FRoot, Args, Output) then
-      Lost.Text := Output;
+    i := 0;
+    while i < Ids.Count do
+    begin
+      n := Ids.Count - i;
+      if n > Batch then
+        n := Batch;
+      SetLength(Args, n + 3);
+      Args[0] := 'rev-list';
+      for j := 0 to n - 1 do
+        Args[1 + j] := Ids[i + j];
+      Args[n + 1] := '--not';
+      Args[n + 2] := '--all';
+      if RunGit(FRoot, Args, Output) then
+        Lost.AddText(Output);
+      Inc(i, n);
+    end;
     for i := 0 to High(AList) do
       AList[i].Lost := Lost.IndexOf(AList[i].Commit) >= 0;
   finally
+    Ids.Free;
     Lost.Free;
   end;
 end;
@@ -3962,19 +4126,12 @@ begin
   end;
 end;
 
-{ Writes AText as it is to AFileName. }
+{ Writes AText as it is to AFileName; false, rather than an exception,
+  when it cannot. }
 function WriteRebaseFile(const AFileName, AText: string): boolean;
-var
-  Stream: TFileStream;
 begin
   try
-    Stream := TFileStream.Create(AFileName, fmCreate);
-    try
-      if AText <> '' then
-        Stream.WriteBuffer(AText[1], Length(AText));
-    finally
-      Stream.Free;
-    end;
+    WriteBytes(AFileName, AText);
     Result := True;
   except
     Result := False;
@@ -4393,11 +4550,14 @@ begin
   end;
 end;
 
-{ format-patch prints the name of every file it writes, a line each. }
+{ format-patch prints the name of every file it writes, a line each,
+  relative to where git runs when the folder is: the folder is made
+  absolute against the root first, so the names are too, whatever this
+  process's current folder is. }
 function TGittanRepo.FormatPatches(const AOlder, ANewer, AFolder: string;
   ACoverLetter: boolean; AFiles: TStrings): boolean;
 var
-  Output: string;
+  Output, Folder: string;
   Revs, Args: TStringArray;
   FromStart: boolean;
   Lines: TStringList;
@@ -4407,7 +4567,10 @@ begin
   if (FRoot = '') or (ANewer = '') or (AFolder = '') or
     not PatchRange(AOlder, ANewer, Revs, FromStart) then
     Exit(False);
-  Args := ['format-patch', '-o', AFolder];
+  Folder := AFolder;
+  if (ExtractFileDrive(Folder) = '') and not (Folder[1] in AllowDirectorySeparators) then
+    Folder := IncludeTrailingPathDelimiter(FRoot) + Folder;
+  Args := ['format-patch', '-o', Folder];
   if ACoverLetter then
     Args := Concat(Args, ['--cover-letter']);
   if FromStart then
@@ -4614,6 +4777,20 @@ begin
     Result := RunGit(FRoot, ['--literal-pathspecs', 'rm', '-q', '--', APath], Output);
 end;
 
+function TGittanRepo.Unresolve(const APath: string): boolean;
+var
+  Output: string;
+begin
+  if FRoot = '' then
+    Exit(False);
+  if not RunGit(FRoot, ['update-index', '--unresolve', '--', APath], Output) then
+    Exit(False);
+  { git says nothing when it has no stages kept for the path. }
+  Result := ConflictStages(FRoot, APath) <> '';
+  if not Result then
+    FError := 'git kept no conflict to bring back';
+end;
+
 { The command of the operation in progress, '' for none (or bisect,
   which has no --continue). }
 function OperationCommand(const AOperation: string): string;
@@ -4668,6 +4845,50 @@ begin
     (Trim(Output) <> '');
 end;
 
+function TGittanRepo.ContinueExtras: TStringArray;
+var
+  Output, Err, Entry: string;
+  Fields, Resolved: TStringList;
+  Tab: integer;
+begin
+  Result := nil;
+  if FRoot = '' then
+    Exit;
+  Fields := TStringList.Create;
+  Resolved := TStringList.Create;
+  try
+    Resolved.Sorted := True;
+    Resolved.Duplicates := dupIgnore;
+    Resolved.CaseSensitive := True;
+    if not RunGitIn(FRoot, ['ls-files', '--resolve-undo', '-z'], Output, Err) then
+      Exit;
+    SplitNul(Output, Fields);
+    for Entry in Fields do
+    begin
+      { "<mode> <id> <stage>\t<path>", one line for each stage kept }
+      Tab := Pos(#9, Entry);
+      if Tab > 0 then
+        Resolved.Add(Copy(Entry, Tab + 1, MaxInt));
+    end;
+    if Resolved.Count = 0 then
+      Exit;
+    if not RunGitIn(FRoot, ['diff', '--name-only', '-z'], Output, Err) then
+      Exit;
+    Fields.Clear;
+    SplitNul(Output, Fields);
+    Fields.Sort;
+    for Entry in Fields do
+      if Resolved.IndexOf(Entry) < 0 then
+      begin
+        SetLength(Result, Length(Result) + 1);
+        Result[High(Result)] := Entry;
+      end;
+  finally
+    Resolved.Free;
+    Fields.Free;
+  end;
+end;
+
 function TGittanRepo.SkipOperation: boolean;
 var
   Command, Output: string;
@@ -4698,20 +4919,45 @@ begin
     CleanRebaseFiles;
 end;
 
+function TGittanRepo.QuitOperation: boolean;
+var
+  Command, Output: string;
+begin
+  Command := OperationCommand(Operation);
+  if (FRoot = '') or (Command = '') or (Command = 'merge') then
+  begin
+    FError := 'Git is not in the middle of anything to forget.';
+    Exit(False);
+  end;
+  Result := RunGit(FRoot, [Command, '--quit'], Output);
+  if Result then
+    CleanRebaseFiles;
+end;
+
+{ The comment lines git wrote start with core.commentString or
+  core.commentChar, # when neither is set. "auto" has git pick a
+  character the message does not start a line with, which cannot be
+  told afterwards; # stands in then. }
 function TGittanRepo.MergeMessage: string;
 var
-  Dir, Line: string;
+  Dir, Line, Comment: string;
   Lines: TStringList;
 begin
   Result := '';
   Dir := GitDir;
   if (Dir = '') or not FileExists(IncludeTrailingPathDelimiter(Dir) + 'MERGE_MSG') then
     Exit;
+  if not RunGit(FRoot, ['config', '--get', 'core.commentString'], Comment) and
+    not RunGit(FRoot, ['config', '--get', 'core.commentChar'], Comment) then
+    Comment := '';
+  Comment := TrimRight(Comment);
+  if (Comment = '') or (Comment = 'auto') then
+    Comment := '#';
   Lines := TStringList.Create;
   try
     Lines.LoadFromFile(IncludeTrailingPathDelimiter(Dir) + 'MERGE_MSG');
     for Line in Lines do
-      if (Line = '') or (Line[1] <> '#') then
+      if not Line.StartsWith(Comment) then
         Result := Result + Line + #10;
   finally
     Lines.Free;
@@ -4764,7 +5010,7 @@ begin
   AOutput := '';
   if (FRoot = '') or (AWords.Count = 0) then
     Exit(False);
-  SetLength(Args, 10 + 2 * AWords.Count);
+  SetLength(Args, 11 + 2 * AWords.Count);
   Args[0] := 'grep';
   Args[1] := '-z';
   Args[2] := '-n';
@@ -4772,7 +5018,9 @@ begin
   Args[4] := '-F';
   Args[5] := '-I';
   Args[6] := '--untracked';
-  n := 7;
+  { color.ui or color.grep set to always would color the matches. }
+  Args[7] := '--no-color';
+  n := 8;
   if AIgnoreCase then
   begin
     Args[n] := '-i';
@@ -4884,7 +5132,7 @@ end;
 
 { Git's own heuristic: a NUL byte in the first 8000 bytes makes a file
   binary. A text file has one line per line feed, plus an unterminated last
-  line. }
+  line. A file gone or unreadable since git listed it counts nothing. }
 procedure CountNewFile(const AFileName: string; var AStat: TGittanFileStat);
 const
   Probe = 8000;
@@ -4897,31 +5145,36 @@ begin
   AStat.Added := 0;
   AStat.Deleted := 0;
   AStat.Binary := False;
-  Stream := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
   try
-    Seen := 0;
-    LastByte := 10;
-    repeat
-      Got := Stream.Read(Buffer, SizeOf(Buffer));
-      for i := 0 to Got - 1 do
-      begin
-        if (Buffer[i] = 0) and (Seen + i < Probe) then
+    Stream := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
+    try
+      Seen := 0;
+      LastByte := 10;
+      repeat
+        Got := Stream.Read(Buffer, SizeOf(Buffer));
+        for i := 0 to Got - 1 do
         begin
-          AStat.Binary := True;
-          AStat.Added := 0;
-          Exit;
+          if (Buffer[i] = 0) and (Seen + i < Probe) then
+          begin
+            AStat.Binary := True;
+            AStat.Added := 0;
+            Exit;
+          end;
+          if Buffer[i] = 10 then
+            Inc(AStat.Added);
         end;
-        if Buffer[i] = 10 then
-          Inc(AStat.Added);
-      end;
-      if Got > 0 then
-        LastByte := Buffer[Got - 1];
-      Inc(Seen, Got);
-    until Got = 0;
-    if (Seen > 0) and (LastByte <> 10) then
-      Inc(AStat.Added);
-  finally
-    Stream.Free;
+        if Got > 0 then
+          LastByte := Buffer[Got - 1];
+        Inc(Seen, Got);
+      until Got = 0;
+      if (Seen > 0) and (LastByte <> 10) then
+        Inc(AStat.Added);
+    finally
+      Stream.Free;
+    end;
+  except
+    AStat.Added := 0;
+    AStat.Binary := False;
   end;
 end;
 
@@ -4955,21 +5208,29 @@ end;
   are against HEAD, so staged and unstaged changes are both in. }
 function TGittanRepo.ChangeStats(out AStats: TGittanFileStats): boolean;
 var
-  Paths, Num: TStringList;
+  Paths, Num, ByPath: TStringList;
   Output, Entry, Path, Counts, FileName: string;
   i, Tab1, Tab2, Idx: integer;
 begin
   AStats := nil;
   Paths := TStringList.Create;
   Num := TStringList.Create;
+  { The paths sorted, each with its index in AStats, so the counts of
+    thousands of changed files are not each looked for from the top. }
+  ByPath := TStringList.Create;
+  Inc(FIndexPass);
   try
     Paths.CaseSensitive := True;
     Result := ChangedPaths(Paths);
     if not Result then
       Exit;
+    ByPath.CaseSensitive := True;
+    ByPath.Duplicates := dupIgnore;
+    ByPath.Sorted := True;
     SetLength(AStats, Paths.Count);
     for i := 0 to Paths.Count - 1 do
     begin
+      ByPath.AddObject(Paths[i], TObject(PtrInt(i)));
       AStats[i] := Default(TGittanFileStat);
       AStats[i].Path := Paths[i];
       AStats[i].Kind := TGittanChangeKind(PtrUInt(Paths.Objects[i]) and 15);
@@ -4987,9 +5248,9 @@ begin
       if Tab2 = 0 then
         Continue;
       Path := Copy(Entry, Tab2 + 1, MaxInt);
-      Idx := Paths.IndexOf(Path);
-      if Idx < 0 then
+      if not ByPath.Find(Path, Idx) then
         Continue;
+      Idx := PtrInt(ByPath.Objects[Idx]);
       Counts := Copy(Entry, 1, Tab1 - 1);
       if Counts = '-' then
         AStats[Idx].Binary := True
@@ -5007,6 +5268,10 @@ begin
           CountNewFile(FileName, AStats[i]);
       end;
   finally
+    Dec(FIndexPass);
+    if FIndexPass = 0 then
+      FIndexAdded := False;
+    ByPath.Free;
     Num.Free;
     Paths.Free;
   end;
@@ -5023,7 +5288,7 @@ begin
   ASnap.Ok := ChangeStats(ASnap.Stats);
   if not ASnap.Ok then
     ASnap.Error := FError;
-  ASnap.Branch := Branch;
+  ASnap.Branch := Branch(ASnap.Detached);
   ASnap.DefaultBranch := DefaultBranch;
   if not MergeBase(ASnap.DefaultBranch, ASnap.MergeBase) then
     ASnap.MergeBase := '';
@@ -5266,16 +5531,28 @@ begin
 end;
 
 function TGittanRepo.Branch: string;
+var
+  Detached: boolean;
+begin
+  Result := Branch(Detached);
+end;
+
+function TGittanRepo.Branch(out ADetached: boolean): string;
 begin
   Result := '';
+  ADetached := False;
   if FRoot = '' then
     Exit;
   if RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'HEAD'], Result) then
     Result := Trim(Result)
-  else if RunGit(FRoot, ['rev-parse', '--short', 'HEAD'], Result) then
-    Result := Trim(Result)
   else
-    Result := '';
+  begin
+    ADetached := True;
+    if RunGit(FRoot, ['rev-parse', '--short', 'HEAD'], Result) then
+      Result := Trim(Result)
+    else
+      Result := '';
+  end;
 end;
 
 { X is the index column, Y the work tree. A "U" in either (or both sides
@@ -5315,6 +5592,28 @@ end;
   hashing the changed files is what one costs in reading, without the
   process and the diff on top. A deleted file is not on disk and adds
   nothing; a directory (a submodule) adds its stat alone. }
+{ The neighbours a pattern matches come in the folder's order, so the
+  file itself may come after them. A name without a pattern character
+  matches itself alone, and its match is taken as it comes: the folder
+  may spell it otherwise than git does (in another case, or decomposed
+  on macOS), which a comparison would take for a file gone. }
+function StatExact(const AFileName: string; out AInfo: TSearchRec): boolean;
+var
+  Name: string;
+begin
+  Name := ExtractFileName(AFileName);
+  if FindFirst(AFileName, faAnyFile, AInfo) <> 0 then
+    Exit(False);
+  if LastDelimiter('*?[', Name) = 0 then
+    Exit(True);
+  repeat
+    if AInfo.Name = Name then
+      Exit(True);
+  until FindNext(AInfo) <> 0;
+  FindClose(AInfo);
+  Result := False;
+end;
+
 function TGittanRepo.Fingerprint: string;
 var
   Paths: TStringList;
@@ -5345,6 +5644,12 @@ begin
       FBase + '^{commit}'], Id) then
       Result := Result + ' ' + Trim(Id);
     Result := Result + #10;
+    { The upstream, which a fetch moves alone and the ahead and behind
+      counts follow, and what git is in the middle of, which a bisect
+      started on a clean tree changes alone. }
+    if RunGit(FRoot, ['rev-parse', '--verify', '-q', '@{upstream}'], Id) then
+      Result := Result + 'upstream ' + Trim(Id) + #10;
+    Result := Result + 'operation ' + Operation + #10;
     { The stashes, which the status bar counts and lists. }
     if RunGit(FRoot, ['stash', 'list', '--format=%H'], Id) then
       Result := Result + 'stash ' + StringReplace(Trim(Id), #10, ' ', [rfReplaceAll]) + #10;
@@ -5356,7 +5661,7 @@ begin
     for i := 0 to Paths.Count - 1 do
     begin
       FileName := FullPath(Paths[i]);
-      if FindFirst(FileName, faAnyFile, Info) <> 0 then
+      if not StatExact(FileName, Info) then
         Continue;
       Result := Result + Paths[i] + #9 + FormatDateTime('yyyymmddhhnnsszzz', Info.TimeStamp) + #9 + IntToStr(Info.Size);
       if Info.Attr and faDirectory = 0 then
@@ -5451,7 +5756,7 @@ begin
       TryStrToInt64(Trim(Output), ASize);
     Exit;
   end;
-  Result := FindFirst(FullPath(APath), faAnyFile, Info) = 0;
+  Result := StatExact(FullPath(APath), Info);
   if Result then
   begin
     ASize := Info.Size;
@@ -5463,9 +5768,16 @@ end;
   Blame
   --------------------------------------------------------------------------- }
 procedure TGittanRepo.DiffSides(out ALeft, ARight: string);
+var
+  Output: string;
 begin
   if IsRange then
-    SplitRange(ALeft, ARight)
+  begin
+    SplitRange(ALeft, ARight);
+    if (Pos('...', FBase) > 0) and RunGit(FRoot, ['merge-base', ALeft, ARight], Output) and
+      (Trim(Output) <> '') then
+      ALeft := Trim(Output);
+  end
   else
   begin
     ALeft := DiffBase;
@@ -5572,43 +5884,37 @@ end;
 function TGittanRepo.LineHistory(const APath, ARef: string; AFrom, ATo, AMax: integer;
   out AOutput: string): boolean;
 var
-  Args: array of string;
-
-  procedure Add(const AArg: string);
-  begin
-    SetLength(Args, Length(Args) + 1);
-    Args[High(Args)] := AArg;
-  end;
+  Args: TStringArray;
 
 begin
   AOutput := '';
   if FRoot = '' then
     Exit(False);
   Args := nil;
-  Add('log');
-  Add('--no-color');
-  Add('--no-ext-diff');
-  Add('-n');
-  Add(IntToStr(AMax));
-  Add('--format=%x01%H%x1f%an%x1f%at%x1f%s');
+  AddArg(Args, 'log');
+  AddArg(Args, '--no-color');
+  AddArg(Args, '--no-ext-diff');
+  AddArg(Args, '-n');
+  AddArg(Args, IntToStr(AMax));
+  AddArg(Args, '--format=%x01%H%x1f%an%x1f%at%x1f%s');
   if FIgnoreWhitespace then
-    Add('-w');
+    AddArg(Args, '-w');
   if AFrom > 0 then
   begin
     { -L takes no path list: the file is part of the range. }
-    Add('-L');
-    Add(Format('%d,%d:%s', [AFrom, ATo, APath]));
+    AddArg(Args, '-L');
+    AddArg(Args, Format('%d,%d:%s', [AFrom, ATo, APath]));
     if ARef <> '' then
-      Add(ARef);
+      AddArg(Args, ARef);
   end
   else
   begin
-    Add('-p');
-    Add('--no-renames');
+    AddArg(Args, '-p');
+    AddArg(Args, '--no-renames');
     if ARef <> '' then
-      Add(ARef);
-    Add('--');
-    Add(APath);
+      AddArg(Args, ARef);
+    AddArg(Args, '--');
+    AddArg(Args, APath);
   end;
   Result := RunGit(FRoot, Args, AOutput);
 end;

@@ -98,6 +98,10 @@ type
       looked for in and the author, both in lower case. }
     FMetaFull, FMetaAge, FSubjects, FSearch, FAuthorKeys: array of string;
     FSubjectRoom: TIntegerDynArray;
+    { The length of the longest short id, which follows core.abbrev and
+      the size of the repository (seven at least): the column is as
+      wide as that many zeros. }
+    FIdChars: integer;
     { The commit of every row shown: all of them, or those the filter
       keeps. }
     FShown: TIntegerDynArray;
@@ -327,7 +331,11 @@ begin
   FGraph.PaintRows(Canvas);
 end;
 
+{ The mouse over empty space under the rows keeps the row the keys
+  chose, which Enter and the Menu key act on. }
 procedure TGittanGraphRows.MouseMove(Shift: TShiftState; X, Y: integer);
+var
+  Row: integer;
 begin
   inherited MouseMove(Shift, X, Y);
   if FGraph.FStatsOn then
@@ -335,7 +343,9 @@ begin
     FGraph.StatsHover(X, Y);
     Exit;
   end;
-  FGraph.SetCurrent(FGraph.RowAt(Y));
+  Row := FGraph.RowAt(Y);
+  if Row >= 0 then
+    FGraph.SetCurrent(Row);
   FGraph.SetFooterHot(FGraph.FooterAt(Y) and FGraph.FooterClickable);
 end;
 
@@ -622,8 +632,10 @@ begin
   SetLength(FSearch, Length(FCommits));
   SetLength(FAuthorKeys, Length(FCommits));
   SetLength(FShown, Length(FCommits));
+  FIdChars := 7;
   for r := 0 to High(FCommits) do
   begin
+    FIdChars := Max(FIdChars, Length(FCommits[r].Short));
     FMetaAge[r] := '';
     if FCommits[r].Date > 0 then
       FMetaAge[r] := ReviewAge(FCommits[r].Date, LocalTimeToUniversal(Now));
@@ -1375,7 +1387,7 @@ begin
     ACanvas.Font.Color := FDim;
   ACanvas.TextOut(Right - ACanvas.TextWidth(C.Short), TextY, C.Short);
   ACanvas.Font.Style := [];
-  Dec(Right, ACanvas.TextWidth('0000000') + 4);
+  Dec(Right, ACanvas.TextWidth(StringOfChar('0', FIdChars)) + 4);
   Mark := '';
   if C.Unpushed then
   begin

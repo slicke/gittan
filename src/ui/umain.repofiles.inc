@@ -351,11 +351,16 @@ procedure TForm1.FlushEdit;
 begin
   if (FEditPath = '') or not Edit.Modified then
     Exit;
-  if QuestionDlg(rsAppName, Format(rsSaveAsk, [ExtractFileName(FEditPath)]),
-    mtConfirmation, [mrYes, rsSaveAction, 'IsDefault', mrNo, rsDontSave], 0) = mrYes then
-    SaveEdit(False)
-  else
-    Edit.Modified := False;
+  HoldRefresh;
+  try
+    if QuestionDlg(rsAppName, Format(rsSaveAsk, [ExtractFileName(FEditPath)]),
+      mtConfirmation, [mrYes, rsSaveAction, 'IsDefault', mrNo, rsDontSave], 0) = mrYes then
+      SaveEdit(False)
+    else
+      Edit.Modified := False;
+  finally
+    ReleaseRefresh;
+  end;
 end;
 
 { Ends the edit: the editor is read-only again. The pills go with the

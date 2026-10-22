@@ -144,7 +144,7 @@ type
 implementation
 
 uses
-  Math, LCLIntf;
+  Math, LCLIntf, gittan.textfit;
 
 resourcestring
   rsNoMatches = 'No matches';
@@ -704,16 +704,7 @@ begin
       ACanvas.Font.Color := FText;
     end;
     Room := FRows.Width - Pad - X - DetailWidth;
-    Shown := Item.Caption;
-    while (Shown <> '') and (ACanvas.TextWidth(Shown + '…') > Room) do
-    begin
-      Shown := Copy(Shown, 1, Length(Shown) - 1);
-      { Keep UTF-8 sequences whole. }
-      while (Shown <> '') and (Ord(Shown[Length(Shown)]) and $C0 = $80) do
-        Shown := Copy(Shown, 1, Length(Shown) - 1);
-    end;
-    if Shown <> Item.Caption then
-      Shown := Shown + '…';
+    Shown := FitTextRight(ACanvas, Item.Caption, Room);
     ACanvas.TextOut(X, TextY, Shown);
     if Item.Detail <> '' then
     begin

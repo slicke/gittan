@@ -55,8 +55,9 @@ begin
     FRemoteHead := FRepo.CommitId('HEAD')
   else
     FRemoteHead := '';
-  FNoticeHook := (AKind in [rkPush, rkForcePush, rkPushBranch, rkPushTag]) and
-    FRepo.HasHook('pre-push');
+  { Deleting on a remote is a push too, and runs the hook. }
+  FNoticeHook := (AKind in [rkPush, rkForcePush, rkPushBranch, rkPushTag, rkDeleteRemote,
+    rkDeleteRemoteTag]) and FRepo.HasHook('pre-push');
   FRemoteJob := TGittanRemoteJob.Create(FRepo.Root, AKind, AMode, AArg, ARemote);
   FRemoteJob.OnDone := @RemoteJobDone;
   FRemoteJob.OnOutput := @RemoteJobOutput;
@@ -119,6 +120,7 @@ begin
       else
         Result := Format(rsNoticeSubUpdating, [FRemoteJob.Arg]);
     rkSubmoduleAdd: Result := Format(rsNoticeSubAdding, [FRemoteJob.Path]);
+    rkFetchPull: Result := Format(rsNoticeFetchingPull, [StrToIntDef(FRemoteJob.Arg, 0)]);
   end;
 end;
 
@@ -149,7 +151,10 @@ begin
   if FNoticeHook and PushTransferStarted(Job.Progress) then
   begin
     FNoticeHook := False;
-    FStatus.ShowMessage(rsPushing, stNormal, 0);
+    if Job.Kind in [rkDeleteRemote, rkDeleteRemoteTag] then
+      FStatus.ShowMessage(Format(rsDeletingRemote, [Job.Arg]), stNormal, 0)
+    else
+      FStatus.ShowMessage(rsPushing, stNormal, 0);
     FNotice.Title := RemoteNoticeTitle;
   end;
   if FNotice.Visible then
@@ -189,6 +194,11 @@ begin
   RefreshRepository;
   UpdateRemoteItems;
   UpdateCommitState;
+  if Job.Kind = rkFetchPull then
+  begin
+    PullFetchDone(Job);
+    Exit;
+  end;
   if Job.Kind in [rkSubmoduleUpdate, rkSubmoduleAdd] then
   begin
     SubmoduleRemoteDone(Job);
@@ -331,8 +341,16 @@ begin
         Title := rsSubAddFailed;
         Again := rsTryAgain;
       end;
+    rkFetchPull:
+      begin
+        Title := Format(rsPullFailed, [StrToIntDef(AJob.Arg, 0)]);
+        Again := rsTryAgain;
+      end;
     else
-      Title := Format(rsDeleteRemoteFailed, [AJob.Arg]);
+      if AHookFailed then
+        Title := rsHookFailed
+      else
+        Title := Format(rsDeleteRemoteFailed, [AJob.Arg]);
       Again := rsTryAgain;
   end;
   FRetryKind := AJob.Kind;
@@ -355,11 +373,17 @@ begin
     0:
       begin
         FNotice.Close;
+        { The failure was of the repository that was open then; a clone
+          is of none. }
+        if (FRetryKind <> rkClone) and (FRetryRoot <> FRepo.Root) then
+          Exit;
         if FRetryKind = rkClone then
           StartClone(FRetryArg, FRetryRoot, FRetrySubmodules)
         { The dialog again, as the URL or path may be what was wrong. }
         else if FRetryKind = rkSubmoduleAdd then
           AddSubmoduleAsk(FRetryArg, FRetryPath, FRetryBranch)
+        else if FRetryKind = rkFetchPull then
+          StartPullFetch(StrToIntDef(FRetryArg, 0), FRetryRemote, FRetryBranch)
         else
           StartRemote(FRetryKind, FRetryMode, FRetryArg, FRetryRemote);
       end;

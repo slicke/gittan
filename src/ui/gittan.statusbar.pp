@@ -228,7 +228,7 @@ procedure DrawStatusIcon(ACanvas: TCanvas; const AIcon: string; X, Y, ASize: int
 implementation
 
 uses
-  Math;
+  Math, gittan.textfit;
 
 const
   BarHeight = 56;
@@ -305,22 +305,13 @@ begin
     Mix(Blue(AColor), Blue(ABack)));
 end;
 
-{ S cut to AWidth on ACanvas with an ellipsis, keeping UTF-8 sequences
-  whole. }
+{ S cut to AWidth on ACanvas with an ellipsis; nothing when not even
+  one character fits. }
 function Ellipsize(ACanvas: TCanvas; const S: string; AWidth: integer): string;
 begin
-  Result := S;
-  if ACanvas.TextWidth(Result) <= AWidth then
-    Exit;
-  while (Result <> '') and (ACanvas.TextWidth(Result + '…') > AWidth) do
-  begin
-    Result := Copy(Result, 1, Length(Result) - 1);
-    while (Result <> '') and (Ord(Result[Length(Result)]) and $C0 = $80) do
-      Result := Copy(Result, 1, Length(Result) - 1);
-  end;
-  if Result = '' then
-    Exit;
-  Result := Result + '…';
+  Result := FitTextRight(ACanvas, S, AWidth);
+  if Result = Ellipsis then
+    Result := '';
 end;
 
 const
@@ -1473,10 +1464,16 @@ begin
   end;
 end;
 
+{ The repository's rectangle grows over its name, which spans both rows
+  beside the tile, so the branch chip and the base under the name are
+  tested first. }
 function TGittanStatusBar.PartAt(X, Y: integer): TGittanStatusPart;
 var
   P: TGittanStatusPart;
 begin
+  for P in [spBranch, spBase] do
+    if Types.PtInRect(FRects[P], Point(X, Y)) then
+      Exit(P);
   for P := Succ(spNone) to High(P) do
     if Types.PtInRect(FRects[P], Point(X, Y)) then
       Exit(P);

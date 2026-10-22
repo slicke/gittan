@@ -43,6 +43,7 @@ type
     FOnOpenFile: TGittanOpenFileEvent;
     procedure ApplyStyle;
     procedure Show(const AFileName, AText, AOldText: string; ACompare: boolean);
+    procedure Load;
     procedure ShowSvg(const AText: string);
     procedure ShowSvgChange;
     procedure ShowRichDiff;
@@ -328,20 +329,26 @@ begin
   FText := AText;
   FOldText := AOldText;
   FCompare := ACompare;
-  if ACompare and IsSvgPath(AFileName) then
-    ShowSvgChange
-  else if ACompare then
-    ShowRichDiff
-  else if IsSvgPath(AFileName) then
-    ShowSvg(AText)
-  else if IsHtmlPath(AFileName) then
-    LoadHTML(AText, FilenameToURI(AFileName))
-  else
-    LoadMarkdown(AText, FilenameToURI(AFileName));
-  { Every load is a step of the page's history; the preview has none. }
-  ClearHistory;
+  Load;
   if Same then
     ScrollTo(Y);
+end;
+
+{ Puts the text kept in the fields on the page. Every load is a step of
+  the page's history; the preview has none. }
+procedure TGittanMarkdownPreview.Load;
+begin
+  if FCompare and IsSvgPath(FFileName) then
+    ShowSvgChange
+  else if FCompare then
+    ShowRichDiff
+  else if IsSvgPath(FFileName) then
+    ShowSvg(FText)
+  else if IsHtmlPath(FFileName) then
+    LoadHTML(FText, FilenameToURI(FFileName))
+  else
+    LoadMarkdown(FText, FilenameToURI(FFileName));
+  ClearHistory;
 end;
 
 { The SVG centered on a page of its own, at its size or, a small one, a
@@ -532,10 +539,20 @@ begin
   end;
 end;
 
+{ The page takes the size as it loads, so a page shown is loaded again
+  at the new size, where it was scrolled to. }
 procedure TGittanMarkdownPreview.SetFontSize(ASize: integer);
+var
+  Y: integer;
 begin
-  if Font.Size <> ASize then
-    Font.Size := ASize;
+  if Font.Size = ASize then
+    Exit;
+  Font.Size := ASize;
+  if FFileName = '' then
+    Exit;
+  Y := ScrollY;
+  Load;
+  ScrollTo(Y);
 end;
 
 { A heading of this page scrolls there; another local file goes to the

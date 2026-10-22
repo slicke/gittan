@@ -94,7 +94,12 @@ var
   i, Count: integer;
 begin
   Result := nil;
-  WaitForParse(AAdapter);
+  HoldRefresh;
+  try
+    WaitForParse(AAdapter);
+  finally
+    ReleaseRefresh;
+  end;
   Client := AAdapter.AnClient;
   if Client = nil then
     Exit;

@@ -537,6 +537,10 @@ begin
       Note := rsCommitNothing;
     Can := False;
   end;
+  { A rebase left behind by a checkout: a commit on this branch is fine,
+    the note says what the Abort button does instead. }
+  if (Note = '') and StrayRebase then
+    Note := Format(rsStrayRebaseNote, [FRebaseBranch, FBranch]);
   if not Continuing and (Trim(FCommitMemo.Text) = '') then
     Can := False;
   if CommitChoosing and (Total > 0) then
@@ -567,8 +571,10 @@ begin
   else
     FCommitButton.Caption := rsCommitButton;
   FCommitButton.Enabled := Can;
-  { git keeps the message of a commit it carries on with. }
-  FCommitMemo.ReadOnly := Busy or Continuing;
+  { git keeps the message of a commit it carries on with. A fetch, pull
+    or push leaves the message alone, so it can be written meanwhile;
+    Amend waits, since a pull may move HEAD, whose message it reads. }
+  FCommitMemo.ReadOnly := (FCommitJob <> nil) or Continuing;
   FCommitMemo.Enabled := not Continuing;
   FCommitAmend.Visible := FOperation = '';
   FCommitAmend.Enabled := not Busy;
@@ -782,17 +788,82 @@ begin
 end;
 
 { A commit is never broken off: one still running when the repository
-  changes goes on without a handler, and quitting waits for it. }
+  changes goes on in FDroppedCommits, and quitting waits for it and for
+  those. The message of one that was made is no draft any more. }
 procedure TForm1.StopCommitJob(AWait: boolean);
+var
+  Job: TGittanCommitJob;
+  i: integer;
 begin
+  if AWait then
+  begin
+    { Stop's wait lets queued calls through: another dropped job's
+      DroppedCommitDone would take it out of the list being walked, and
+      FCommitJob's CommitDone refresh the repository being closed. }
+    for i := 0 to FDroppedCommits.Count - 1 do
+      TGittanCommitJob(FDroppedCommits[i]).OnDone := nil;
+    if FCommitJob <> nil then
+      FCommitJob.OnDone := nil;
+    for i := 0 to FDroppedCommits.Count - 1 do
+    begin
+      Job := TGittanCommitJob(FDroppedCommits[i]);
+      Job.Stop(True);
+      ForgetCommitted(Job);
+      Job.Free;
+    end;
+    FDroppedCommits.Clear;
+  end;
   if FCommitJob = nil then
     Exit;
   FCommitJob.Stop(AWait);
   if AWait then
-    FCommitJob.Free
+  begin
+    ForgetCommitted(FCommitJob);
+    FCommitJob.Free;
+  end
   else
-    FBlameZombies.Add(FCommitJob);
+  begin
+    FCommitJob.OnDone := @DroppedCommitDone;
+    FDroppedCommits.Add(FCommitJob);
+  end;
   FCommitJob := nil;
+end;
+
+{ A commit that ends after its repository was left: its message was
+  saved as the draft when it was left, and may be in the field again
+  when the repository was opened again since. Kept out of FBlameZombies
+  until now, since freeing a finished job drops its notification. }
+procedure TForm1.DroppedCommitDone(Sender: TObject);
+var
+  Job: TGittanCommitJob;
+begin
+  Job := TGittanCommitJob(Sender);
+  FDroppedCommits.Remove(Job);
+  ForgetCommitted(Job);
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+end;
+
+{ Clears the draft slot and the field where they still hold the message
+  AJob committed. }
+procedure TForm1.ForgetCommitted(AJob: TGittanCommitJob);
+
+  function Same(const AText: string): boolean;
+  begin
+    Result := Trim(AdjustLineBreaks(AText)) = Trim(AdjustLineBreaks(AJob.Message));
+  end;
+
+begin
+  if not AJob.Ok then
+    Exit;
+  if (FSettings.CommitDraftRepo = AJob.Root) and Same(FSettings.CommitDraft) then
+  begin
+    FSettings.CommitDraft := '';
+    FSettings.CommitDraftRepo := '';
+  end;
+  if (FCommitMemo <> nil) and (FCommitDraftFor = AJob.Root) and
+    Same(FCommitMemo.Text) then
+    FCommitMemo.Clear;
 end;
 
 { The message goes to the settings' one slot for the repository it was

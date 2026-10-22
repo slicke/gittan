@@ -13,7 +13,7 @@ unit gittan.history;
 interface
 
 uses
-  Classes, SysUtils, Math, gittan.git, gittan.blame;
+  Classes, SysUtils, Math, gittan.git, gittan.blame, gittan.job;
 
 type
   {** One hunk of a commit's diff: the lines with their ' ', '+' or '-'
@@ -87,29 +87,22 @@ type
     message is then in Error) or found nothing; Take hands it over, else
     the job frees it. Set OnDone, then call Start; Stop ends the thread
     without a notification. }
-  TGittanHistoryJob = class(TThread)
+  TGittanHistoryJob = class(TGittanJob)
   private
     FRoot, FPath, FRef: string;
     FFrom, FTo, FMax: integer;
     FIgnoreWhitespace: boolean;
     FHistory: TGittanHistory;
     FError: string;
-    FOnDone: TNotifyEvent;
-    procedure Notify;
   protected
     procedure Execute; override;
   public
     constructor Create(const ARoot, APath, ARef: string; AFrom, ATo, AMax: integer;
       AIgnoreWhitespace: boolean);
     destructor Destroy; override;
-    {** Drops the handler and ends the thread; a result still on its way
-      is thrown away. Waits for a running git only when AWait is set. }
-    procedure Stop(AWait: boolean);
     function Take: TGittanHistory;
     property History: TGittanHistory read FHistory;
     property Error: string read FError;
-    {** Called in the main thread when git is done. }
-    property OnDone: TNotifyEvent read FOnDone write FOnDone;
   end;
 
 implementation
@@ -483,9 +476,6 @@ end;
 
 destructor TGittanHistoryJob.Destroy;
 begin
-  if not Finished then
-    Stop(True);
-  { Removes a Notify still waiting in the thread queue. }
   inherited Destroy;
   FHistory.Free;
 end;
@@ -511,26 +501,11 @@ begin
   finally
     Repo.Free;
   end;
-  if not Terminated then
-    Queue(@Notify);
-end;
-
-procedure TGittanHistoryJob.Notify;
-begin
-  if Assigned(FOnDone) and not Terminated then
-    FOnDone(Self);
+  Done;
 end;
 
 { WaitFor on the main thread runs the queued calls while it waits, so the
   handler is dropped first: a Notify already queued then does nothing. }
-procedure TGittanHistoryJob.Stop(AWait: boolean);
-begin
-  FOnDone := nil;
-  Terminate;
-  if AWait then
-    WaitFor;
-end;
-
 function TGittanHistoryJob.Take: TGittanHistory;
 begin
   Result := FHistory;

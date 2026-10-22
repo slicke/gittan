@@ -13,7 +13,7 @@ unit gittan.blame;
 interface
 
 uses
-  Classes, SysUtils, Types, gittan.git;
+  Classes, SysUtils, Types, gittan.git, gittan.job;
 
 type
   {** One commit a blame names. Uncommitted is set for the lines the
@@ -59,13 +59,11 @@ type
     blame (a file it does not know, or one the commit lacks); TakeOld
     and TakeNew hand them over, else the job frees them. Set OnDone,
     then call Start; Stop ends the thread without a notification. }
-  TGittanBlameJob = class(TThread)
+  TGittanBlameJob = class(TGittanJob)
   private
     FRoot, FPath, FOldRef, FNewRef: string;
     FIgnoreWhitespace: boolean;
     FOld, FNew: TGittanBlame;
-    FOnDone: TNotifyEvent;
-    procedure Notify;
     function Run(ARepo: TGittanRepo; const ARef: string): TGittanBlame;
   protected
     procedure Execute; override;
@@ -73,9 +71,6 @@ type
     constructor Create(const ARoot, APath, AOldRef, ANewRef: string;
       AIgnoreWhitespace: boolean);
     destructor Destroy; override;
-    {** Drops the handler and ends the thread; a result still on its way
-      is thrown away. Waits for a running git only when AWait is set. }
-    procedure Stop(AWait: boolean);
     function TakeOld: TGittanBlame;
     function TakeNew: TGittanBlame;
     property Path: string read FPath;
@@ -83,8 +78,6 @@ type
     property NewRef: string read FNewRef;
     property OldBlame: TGittanBlame read FOld;
     property NewBlame: TGittanBlame read FNew;
-    {** Called in the main thread when both sides are done. }
-    property OnDone: TNotifyEvent read FOnDone write FOnDone;
   end;
 
 {** The age of a commit made at ATime as seen at ANow, both in Unix
@@ -102,7 +95,10 @@ uses
   DateUtils;
 
 const
-  HashLength = 40;
+  { A commit id in hex: SHA-1, or SHA-256 in a repository made with
+    --object-format=sha256. }
+  Sha1Length = 40;
+  Sha256Length = 64;
 
 { ---------------------------------------------------------------------------
   Parsing
@@ -126,17 +122,18 @@ begin
 end;
 
 { Whether ALine is a group header; AFinal is then the line's number in
-  the file. }
-function HeaderLine(const ALine: string; out AFinal: integer): boolean;
+  the file and AHashLength the length of the commit id it starts with. }
+function HeaderLine(const ALine: string; out AFinal, AHashLength: integer): boolean;
 var
   p, q: integer;
 begin
   Result := False;
   AFinal := 0;
-  if (Length(ALine) < HashLength + 4) or (ALine[HashLength + 1] <> ' ') or
-    not IsHex(ALine, 1, HashLength) then
+  AHashLength := Pos(' ', ALine) - 1;
+  if ((AHashLength <> Sha1Length) and (AHashLength <> Sha256Length)) or
+    (Length(ALine) < AHashLength + 4) or not IsHex(ALine, 1, AHashLength) then
     Exit;
-  p := Pos(' ', ALine, HashLength + 2);
+  p := Pos(' ', ALine, AHashLength + 2);
   if p = 0 then
     Exit;
   q := Pos(' ', ALine, p + 1);
@@ -157,7 +154,7 @@ end;
 
 function TGittanBlame.Parse(const AOutput: string): boolean;
 var
-  Start, Stop, Final, Current, p: integer;
+  Start, Stop, Final, HashLength, Current, p: integer;
   Line, Key, Value: string;
 begin
   FCommits := nil;
@@ -173,7 +170,7 @@ begin
     Start := Stop + 1;
     if (Line <> '') and (Line[1] = #9) then
       Continue;
-    if HeaderLine(Line, Final) then
+    if HeaderLine(Line, Final, HashLength) then
     begin
       Current := IndexOf(Copy(Line, 1, HashLength));
       if Current < 0 then
@@ -272,9 +269,6 @@ end;
 
 destructor TGittanBlameJob.Destroy;
 begin
-  if not Finished then
-    Stop(True);
-  { Removes a Notify still waiting in the thread queue. }
   inherited Destroy;
   FOld.Free;
   FNew.Free;
@@ -306,26 +300,11 @@ begin
   finally
     Repo.Free;
   end;
-  if not Terminated then
-    Queue(@Notify);
-end;
-
-procedure TGittanBlameJob.Notify;
-begin
-  if Assigned(FOnDone) and not Terminated then
-    FOnDone(Self);
+  Done;
 end;
 
 { WaitFor on the main thread runs the queued calls while it waits, so the
   handler is dropped first: a Notify already queued then does nothing. }
-procedure TGittanBlameJob.Stop(AWait: boolean);
-begin
-  FOnDone := nil;
-  Terminate;
-  if AWait then
-    WaitFor;
-end;
-
 function TGittanBlameJob.TakeOld: TGittanBlame;
 begin
   Result := FOld;

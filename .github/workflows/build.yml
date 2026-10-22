@@ -109,52 +109,102 @@ jobs:
           submodules: recursive
 
       # ===================== TOOLCHAINS =====================
+      # The installers come from download.lazarus-ide.org or SourceForge,
+      # either of which is slow at times, so they are kept in the Actions
+      # cache and downloaded only on a miss. Change the key with the files.
+      - name: Restore the toolchain downloads
+        id: toolchain-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/toolchain
+          key: toolchain-${{ matrix.os_target }}-lazarus-5.0RC1
+
       - name: Install Lazarus/FPC (Linux)
         if: matrix.os_target == 'linux'
         env:
-          FPC_LAZ_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20Linux%20amd64%20DEB/Lazarus%205.0RC1/fpc-laz_3.2.2-210709_amd64.deb/download
-          FPC_SRC_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20Linux%20amd64%20DEB/Lazarus%205.0RC1/fpc-src_3.2.2-210709_amd64.deb/download
-          LAZ_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20Linux%20amd64%20DEB/Lazarus%205.0RC1/lazarus-project_5.0.0-0_amd64.deb/download
+          # The folder on download.lazarus-ide.org and on SourceForge.
+          LAZ_FOLDER: Lazarus%20Linux%20amd64%20DEB/Lazarus%205.0RC1
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y build-essential curl \
             libgtk-3-dev
-          # SourceForge mirrors flake; retry hard before failing the job.
-          # --connect-timeout and the speed guard abort a stalled or
-          # half-open transfer (which is not an error, so --retry-all-errors
-          # alone would wait on it forever) so the retry can take over.
-          CURL_RETRY="--retry 5 --retry-delay 5 --retry-all-errors \
-            --connect-timeout 30 --speed-limit 1024 --speed-time 60"
-          curl -fsSL $CURL_RETRY -o fpc-laz.deb "$FPC_LAZ_URL"
-          curl -fsSL $CURL_RETRY -o fpc-src.deb "$FPC_SRC_URL"
-          curl -fsSL $CURL_RETRY -o lazarus.deb "$LAZ_URL"
-          sudo dpkg -i fpc-laz.deb fpc-src.deb lazarus.deb || true
+          # The Lazarus project's own server is the fast one (5 MB/s where
+          # SourceForge gave 300 KB/s); SourceForge, whose mirrors flake and
+          # crawl, takes every other attempt. --connect-timeout and the
+          # speed guard abort a stalled, half-open or crawling transfer
+          # (which is not an error to curl, so it would wait on it forever),
+          # and fetch tries again from where it stopped (-C -), from either
+          # source, so nothing fetched is lost.
+          CURL_OPTS="--connect-timeout 30 --speed-limit 102400 --speed-time 30"
+          DL="$RUNNER_TEMP/toolchain"
+          mkdir -p "$DL"
+          fetch() {
+            [ -s "$DL/$1" ] && { echo "$1 from the cache"; return; }
+            for TRY in 1 2 3 4 5 6 7 8 9 10; do
+              if [ $((TRY % 2)) = 1 ]; then
+                URL="https://download.lazarus-ide.org/$LAZ_FOLDER/$2"
+              else
+                URL="https://sourceforge.net/projects/lazarus/files/$LAZ_FOLDER/$2/download"
+              fi
+              if curl -fsSL -C - $CURL_OPTS \
+                -w "$1: %{size_download} bytes at %{speed_download} B/s from %{url_effective}\n" \
+                -o "$DL/$1.part" "$URL"; then
+                mv "$DL/$1.part" "$DL/$1"
+                return
+              fi
+              echo "$1: attempt $TRY stopped at $(wc -c < "$DL/$1.part" 2>/dev/null || echo 0) bytes"
+              sleep 5
+            done
+            return 1
+          }
+          fetch fpc-laz.deb fpc-laz_3.2.2-210709_amd64.deb
+          fetch fpc-src.deb fpc-src_3.2.2-210709_amd64.deb
+          fetch lazarus.deb lazarus-project_5.0.0-0_amd64.deb
+          sudo dpkg -i "$DL/fpc-laz.deb" "$DL/fpc-src.deb" "$DL/lazarus.deb" || true
           sudo apt-get -f install -y
-          rm -f fpc-laz.deb fpc-src.deb lazarus.deb
           fpc -iV
           lazbuild --version
 
       - name: Install Lazarus/FPC (macOS)
         if: matrix.os_target == 'macos'
-        # A stalled mirror must not burn the whole 90-minute job budget.
-        timeout-minutes: 30
+        # A stalled mirror must not burn the whole 90-minute job budget, but
+        # the two files are 620 MB, which takes half an hour when only a
+        # slow SourceForge (300 KB/s) answers and the cache is empty.
+        timeout-minutes: 60
         env:
-          FPC_DMG_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20macOS%20aarch64/Lazarus%205.0RC1/fpc-3.2.4rc2.intelarm64-macosx.dmg/download
-          LAZ_ZIP_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20macOS%20aarch64/Lazarus%205.0RC1/lazarus-darwin-aarch64-5.0RC1.zip/download
+          LAZ_FOLDER: Lazarus%20macOS%20aarch64/Lazarus%205.0RC1
           HOMEBREW_NO_AUTO_UPDATE: "1"
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: |
           set -euo pipefail
-          # The speed guard aborts a stalled or half-open transfer (not an
-          # error, so --retry-all-errors would otherwise wait on it forever)
-          # so the retry can take over instead of hanging the job.
-          CURL_RETRY="--retry 5 --retry-delay 5 --retry-all-errors \
-            --connect-timeout 30 --speed-limit 1024 --speed-time 60"
+          # As on Linux: the Lazarus server first, SourceForge every other
+          # attempt; a stalled or crawling transfer is aborted and fetch goes
+          # on from where it stopped.
+          CURL_OPTS="--connect-timeout 30 --speed-limit 102400 --speed-time 30"
           DL="$RUNNER_TEMP/toolchain"
           mkdir -p "$DL"
-          curl -fsSL $CURL_RETRY -o "$DL/fpc.dmg" "$FPC_DMG_URL"
-          curl -fsSL $CURL_RETRY -o "$DL/lazarus.zip" "$LAZ_ZIP_URL"
+          fetch() {
+            [ -s "$DL/$1" ] && { echo "$1 from the cache"; return; }
+            for TRY in 1 2 3 4 5 6 7 8 9 10; do
+              if [ $((TRY % 2)) = 1 ]; then
+                URL="https://download.lazarus-ide.org/$LAZ_FOLDER/$2"
+              else
+                URL="https://sourceforge.net/projects/lazarus/files/$LAZ_FOLDER/$2/download"
+              fi
+              if curl -fsSL -C - $CURL_OPTS \
+                -w "$1: %{size_download} bytes at %{speed_download} B/s from %{url_effective}\n" \
+                -o "$DL/$1.part" "$URL"; then
+                mv "$DL/$1.part" "$DL/$1"
+                return
+              fi
+              echo "$1: attempt $TRY stopped at $(wc -c < "$DL/$1.part" 2>/dev/null || echo 0) bytes"
+              sleep 5
+            done
+            return 1
+          }
+          fetch fpc.dmg fpc-3.2.4rc2.intelarm64-macosx.dmg
+          fetch lazarus.zip lazarus-darwin-aarch64-5.0RC1.zip
 
           MNT="$(mktemp -d)"
           hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DL/fpc.dmg"
@@ -208,19 +258,48 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          curl.exe -L --fail --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --speed-limit 1024 --speed-time 60 -o lazarus-5.0RC1.exe "https://sourceforge.net/projects/lazarus/files/Lazarus%20Windows%2064%20bits/Lazarus%205.0RC1/lazarus-5.0RC1-fpc-3.2.2-win64.exe/download"
-          # SourceForge sometimes answers with an HTML page; check for the MZ header.
-          $fs = [System.IO.File]::OpenRead('lazarus-5.0RC1.exe')
+          $dl = Join-Path $env:RUNNER_TEMP 'toolchain'
+          $exe = Join-Path $dl 'lazarus-5.0RC1.exe'
+          New-Item -ItemType Directory -Force -Path $dl | Out-Null
+          if (Test-Path $exe) {
+            Write-Host "lazarus-5.0RC1.exe from the cache"
+          } else {
+            # As on Linux: the Lazarus server first, SourceForge every other
+            # attempt; a crawling transfer is aborted and the next attempt
+            # goes on from where it stopped.
+            $folder = 'Lazarus%20Windows%2064%20bits/Lazarus%205.0RC1'
+            $file = 'lazarus-5.0RC1-fpc-3.2.2-win64.exe'
+            $done = $false
+            for ($try = 1; $try -le 10 -and -not $done; $try++) {
+              if ($try % 2 -eq 1) { $url = "https://download.lazarus-ide.org/$folder/$file" }
+              else { $url = "https://sourceforge.net/projects/lazarus/files/$folder/$file/download" }
+              curl.exe -sSL --fail -C - --connect-timeout 30 --speed-limit 102400 --speed-time 30 -w "lazarus-5.0RC1.exe: %{size_download} bytes at %{speed_download} B/s from %{url_effective}\n" -o "$exe.part" $url
+              if ($LASTEXITCODE -eq 0) { $done = $true } else { Write-Host "Attempt $try stopped"; Start-Sleep 5 }
+            }
+            if (-not $done) { throw "Downloading Lazarus failed" }
+            Move-Item "$exe.part" $exe
+          }
+          # A mirror sometimes answers with an HTML page; check for the MZ header.
+          $fs = [System.IO.File]::OpenRead($exe)
           $mz = New-Object byte[] 2
           $null = $fs.Read($mz, 0, 2)
           $fs.Close()
           if (($mz[0] -ne 0x4D) -or ($mz[1] -ne 0x5A)) {
+            Remove-Item $exe
             throw "lazarus-5.0RC1.exe is not a Windows executable; the mirror likely returned a web page."
           }
-          Start-Process '.\lazarus-5.0RC1.exe' -ArgumentList '/VERYSILENT','/SP-','/NORESTART','/DIR=C:\Lazarus' -Wait
-          Remove-Item 'lazarus-5.0RC1.exe'
+          Start-Process $exe -ArgumentList '/VERYSILENT','/SP-','/NORESTART','/DIR=C:\Lazarus' -Wait
           Add-Content $env:GITHUB_PATH 'C:\Lazarus'
           & 'C:\Lazarus\lazbuild.exe' --version
+
+      # Saved here rather than at the end of the job, so a build that
+      # fails later still keeps the downloads for the next run.
+      - name: Save the toolchain downloads
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/toolchain
+          key: ${{ steps.toolchain-cache.outputs.cache-primary-key }}
 
       # ===================== VENDORED PACKAGES =====================
       - name: Register vendored packages
@@ -264,6 +343,9 @@ jobs:
           cp -R Gittan.app dist/
           rm -f dist/Gittan.app/Contents/MacOS/Gittan
           cp Gittan dist/Gittan.app/Contents/MacOS/Gittan
+          # FPC's -Xs leaves the symbols in on macOS; strip them (27 MB to
+          # 12 MB with the smart linking of the Release mode).
+          strip dist/Gittan.app/Contents/MacOS/Gittan
           cp -R lexlib dist/Gittan.app/Contents/Resources/
           # Apple Silicon refuses unsigned code; sign ad hoc.
           codesign --force --deep --sign - dist/Gittan.app
@@ -280,7 +362,7 @@ jobs:
           rm -rf lexlib && mkdir -p lexlib
           find vendor/CudaText-lexers lexers -mindepth 2 -maxdepth 2 \( -name '*.lcf' -o -name '*.cuda-lexmap' \) -exec cp -p {} lexlib/ \;
           echo "Copied $(ls lexlib/*.lcf | wc -l) lexers to lexlib/"
-          lazbuild --lazarusdir='C:\Lazarus' --widgetset=win32 Gittan.lpi
+          lazbuild --lazarusdir='C:\Lazarus' --widgetset=win32 --bm=Release Gittan.lpi
           # The unit tests, as `make test` builds them: a console program
           # compiled with the fpc that comes with the Lazarus installer.
           FPC="$(find /c/Lazarus/fpc -name fpc.exe -path '*x86_64-win64*' | head -n1)"
@@ -359,11 +441,29 @@ jobs:
             echo "Gittan runs the git command line tool, so git must be on your PATH."
           } > notes.md
 
-          gh release create "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "Gittan build ${BUILD}" \
-            --notes-file notes.md \
+          # The release is made as a draft, filled, then published, so
+          # releases/latest never lacks the packages. A re-run of this job
+          # after a failed upload finds the draft and uploads the packages
+          # again instead of failing on it; a published release is left as
+          # it is, since --clobber deletes an asset before uploading its
+          # replacement.
+          if ! DRAFT=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --json isDraft --jq .isDraft 2>/dev/null); then
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Gittan build ${BUILD}" \
+              --notes-file notes.md \
+              --draft
+          elif [ "$DRAFT" != "true" ]; then
+            echo "$TAG is published already; nothing to do."
+            exit 0
+          fi
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
             packages/Gittan-macos-silicon.dmg \
             packages/Gittan-windows-x64.zip \
             packages/Gittan-linux-amd64.tar.gz
+          # --latest: releases/latest, which the app's update check reads,
+          # must move to it, not be left to how GitHub treats a published
+          # draft.
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
