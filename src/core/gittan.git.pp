@@ -3615,12 +3615,18 @@ begin
   end;
 end;
 
+{ The commits go to rev-list a hundred at a time: the newest thousand
+  ids on one command line passed the length Windows allows, the call
+  failed and none was marked. What a batch reaches is reached, so the
+  batches together give what all of them at once would. }
 function TGittanRepo.Reflog(out AList: TGittanReflog; ALimit: integer): boolean;
+const
+  Batch = 100;
 var
   Output: string;
   Args: array of string;
-  Lost: TStringList;
-  i: integer;
+  Ids, Lost: TStringList;
+  i, j, n: integer;
 begin
   AList := nil;
   if FRoot = '' then
@@ -3636,27 +3642,35 @@ begin
     Exit;
   { What the commits reach and no ref does; a commit of the reflog in it
     is kept by the reflog alone. A failure only leaves none marked. }
+  Ids := TStringList.Create;
   Lost := TStringList.Create;
   try
+    Ids.Sorted := True;
+    Ids.Duplicates := dupIgnore;
+    for i := 0 to High(AList) do
+      Ids.Add(AList[i].Commit);
     Lost.Sorted := True;
     Lost.Duplicates := dupIgnore;
-    Args := ['rev-list'];
-    for i := 0 to High(AList) do
-      if Lost.IndexOf(AList[i].Commit) < 0 then
-      begin
-        Lost.Add(AList[i].Commit);
-        SetLength(Args, Length(Args) + 1);
-        Args[High(Args)] := AList[i].Commit;
-      end;
-    Lost.Clear;
-    SetLength(Args, Length(Args) + 2);
-    Args[High(Args) - 1] := '--not';
-    Args[High(Args)] := '--all';
-    if RunGit(FRoot, Args, Output) then
-      Lost.Text := Output;
+    i := 0;
+    while i < Ids.Count do
+    begin
+      n := Ids.Count - i;
+      if n > Batch then
+        n := Batch;
+      SetLength(Args, n + 3);
+      Args[0] := 'rev-list';
+      for j := 0 to n - 1 do
+        Args[1 + j] := Ids[i + j];
+      Args[n + 1] := '--not';
+      Args[n + 2] := '--all';
+      if RunGit(FRoot, Args, Output) then
+        Lost.AddText(Output);
+      Inc(i, n);
+    end;
     for i := 0 to High(AList) do
       AList[i].Lost := Lost.IndexOf(AList[i].Commit) >= 0;
   finally
+    Ids.Free;
     Lost.Free;
   end;
 end;

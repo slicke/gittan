@@ -106,6 +106,7 @@ type
     procedure TestTags;
     procedure TestParseReflog;
     procedure TestReflog;
+    procedure TestReflogMany;
     procedure TestParseCleanPreview;
     procedure TestClean;
     procedure TestParseTreeEntries;
@@ -3128,6 +3129,75 @@ begin
   AssertTrue(FRepo.Error, FRepo.CreateBranch('saved', Second, False));
   AssertTrue(FRepo.Reflog(Log));
   AssertFalse('a branch keeps it now', Log[1].Lost);
+end;
+
+{ More commits only in the reflog than one command line takes on
+  Windows (about 41 characters an id, 32767 at most): every one is
+  still marked lost. The commits come from one fast-import, the reflog
+  is written as git writes it, newest last. }
+procedure TGitRepoTest.TestReflogMany;
+const
+  Count = 950;
+var
+  P: TProcess;
+  Stream, Line, Prev: string;
+  Ids: TStringList;
+  Log: TGittanReflog;
+  F: TextFile;
+  i, Lost: integer;
+begin
+  MakeHistory;
+  Stream := '';
+  for i := 1 to Count do
+    Stream := Stream + 'commit refs/heads/gone'#10 +
+      'committer Gittan Test <test@example.invalid> 1700000000 +0000'#10 +
+      'data ' + IntToStr(Length(IntToStr(i))) + #10 + IntToStr(i) + #10;
+  P := TProcess.Create(nil);
+  try
+    P.Executable := 'git';
+    P.CurrentDirectory := FDir;
+    P.Parameters.Add('fast-import');
+    P.Parameters.Add('--quiet');
+    P.Options := [poUsePipes, poStderrToOutPut];
+    P.Execute;
+    P.Input.WriteBuffer(Stream[1], Length(Stream));
+    P.CloseInput;
+    P.WaitOnExit;
+    AssertEquals('fast-import', 0, P.ExitCode);
+  finally
+    P.Free;
+  end;
+  Ids := TStringList.Create;
+  try
+    Ids.Text := Git(['rev-list', '--reverse', 'gone']);
+    AssertEquals(Count, Ids.Count);
+    Git(['update-ref', '-d', 'refs/heads/gone']);
+    Prev := Trim(Git(['rev-parse', 'HEAD']));
+    AssignFile(F, IncludeTrailingPathDelimiter(FDir) + SetDirSeparators('.git/logs/HEAD'));
+    Append(F);
+    try
+      for i := 0 to Ids.Count - 1 do
+      begin
+        Line := Prev + ' ' + Ids[i] + ' Gittan Test <test@example.invalid> 1700000000 +0000'#9 +
+          'commit: ' + IntToStr(i + 1);
+        Write(F, Line, #10);
+        Prev := Ids[i];
+      end;
+    finally
+      CloseFile(F);
+    end;
+  finally
+    Ids.Free;
+  end;
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.Error, FRepo.Reflog(Log, 1000));
+  AssertEquals(Count + 1, Length(Log));
+  Lost := 0;
+  for i := 0 to High(Log) do
+    if Log[i].Lost then
+      Inc(Lost);
+  AssertEquals('every commit only the reflog keeps', Count, Lost);
+  AssertFalse('HEAD''s commit is on a branch', Log[High(Log)].Lost);
 end;
 
 procedure TGitRepoTest.TestMoveAndRemove;
