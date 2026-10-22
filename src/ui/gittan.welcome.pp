@@ -147,6 +147,8 @@ end;
 procedure TGittanWelcome.SetRecent(ARoots: TStrings);
 begin
   FRecent.Assign(ARoots);
+  { The rows of the last paint are not these. }
+  FRowRects := nil;
   FHot := hotNone;
   Invalidate;
 end;
@@ -193,7 +195,7 @@ begin
     if PtInRect(FButtonRects[i], P) then
       Exit(hotButton - i);
   for i := 0 to High(FRowRects) do
-    if PtInRect(FRowRects[i], P) and not RecentMissing(i) then
+    if (i < FRecent.Count) and PtInRect(FRowRects[i], P) and not RecentMissing(i) then
       Exit(i);
   Result := hotNone;
 end;
