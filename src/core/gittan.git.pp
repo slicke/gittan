@@ -4909,7 +4909,7 @@ end;
 
 { Git's own heuristic: a NUL byte in the first 8000 bytes makes a file
   binary. A text file has one line per line feed, plus an unterminated last
-  line. }
+  line. A file gone or unreadable since git listed it counts nothing. }
 procedure CountNewFile(const AFileName: string; var AStat: TGittanFileStat);
 const
   Probe = 8000;
@@ -4922,31 +4922,36 @@ begin
   AStat.Added := 0;
   AStat.Deleted := 0;
   AStat.Binary := False;
-  Stream := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
   try
-    Seen := 0;
-    LastByte := 10;
-    repeat
-      Got := Stream.Read(Buffer, SizeOf(Buffer));
-      for i := 0 to Got - 1 do
-      begin
-        if (Buffer[i] = 0) and (Seen + i < Probe) then
+    Stream := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
+    try
+      Seen := 0;
+      LastByte := 10;
+      repeat
+        Got := Stream.Read(Buffer, SizeOf(Buffer));
+        for i := 0 to Got - 1 do
         begin
-          AStat.Binary := True;
-          AStat.Added := 0;
-          Exit;
+          if (Buffer[i] = 0) and (Seen + i < Probe) then
+          begin
+            AStat.Binary := True;
+            AStat.Added := 0;
+            Exit;
+          end;
+          if Buffer[i] = 10 then
+            Inc(AStat.Added);
         end;
-        if Buffer[i] = 10 then
-          Inc(AStat.Added);
-      end;
-      if Got > 0 then
-        LastByte := Buffer[Got - 1];
-      Inc(Seen, Got);
-    until Got = 0;
-    if (Seen > 0) and (LastByte <> 10) then
-      Inc(AStat.Added);
-  finally
-    Stream.Free;
+        if Got > 0 then
+          LastByte := Buffer[Got - 1];
+        Inc(Seen, Got);
+      until Got = 0;
+      if (Seen > 0) and (LastByte <> 10) then
+        Inc(AStat.Added);
+    finally
+      Stream.Free;
+    end;
+  except
+    AStat.Added := 0;
+    AStat.Binary := False;
   end;
 end;
 

@@ -84,7 +84,9 @@ end;
   wakes it at once instead of after a whole interval. git runs in this
   thread, the snapshot too; only Notify reaches the main thread. It goes
   through Synchronize, not Queue, so the thread is held while the main
-  thread reads FSnapshot and does not overwrite it on the next tick. }
+  thread reads FSnapshot and does not overwrite it on the next tick. A poll
+  that fails (a file gone between git's listing and the read, say) is
+  tried again on the next tick instead of ending the thread. }
 procedure TGittanWatcher.Execute;
 var
   Fingerprint: string;
@@ -99,14 +101,17 @@ begin
     RTLEventWaitFor(FWake, FInterval);
     if Terminated then
       Break;
-    Fingerprint := FRepo.Fingerprint;
-    if Fingerprint <> FLast then
-    begin
-      FLast := Fingerprint;
-      FRepo.Snapshot(FSnapshot);
-      if Terminated then
-        Break;
-      Synchronize(@Notify);
+    try
+      Fingerprint := FRepo.Fingerprint;
+      if Fingerprint <> FLast then
+      begin
+        FRepo.Snapshot(FSnapshot);
+        if Terminated then
+          Break;
+        FLast := Fingerprint;
+        Synchronize(@Notify);
+      end;
+    except
     end;
   end;
 end;

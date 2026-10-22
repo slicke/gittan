@@ -36,6 +36,7 @@ type
     procedure TestOpenNonRepo;
     procedure TestOpenSubfolderFindsRoot;
     procedure TestChangeStats;
+    procedure TestChangeStatsUnreadable;
     procedure TestFileChanges;
     procedure TestIgnoreWhitespace;
     procedure TestUnbornRepository;
@@ -123,7 +124,7 @@ procedure SetTestVariable(const AName, AValue: string);
 implementation
 
 uses
-  Process;
+  {$ifdef unix}BaseUnix,{$endif} Process;
 
 const
   { A name git quotes C-style in its line output, to check that the -z
@@ -315,6 +316,32 @@ begin
   AssertTrue(FileExists(IncludeTrailingPathDelimiter(FRepo.Root) + 'a.txt'));
   FRepo.Close;
   AssertEquals('', FRepo.Root);
+end;
+
+{ An untracked file that cannot be read when it is counted (gone since
+  git listed it, or no permission) counts nothing instead of raising out
+  of ChangeStats, which ended the watcher's thread. }
+procedure TGitRepoTest.TestChangeStatsUnreadable;
+var
+  Stats: TGittanFileStats;
+  S: TGittanFileStat;
+  FileName: string;
+begin
+  {$ifdef unix}
+  MakeHistory;
+  WriteFile('locked.txt', 'l1'#10'l2'#10);
+  FileName := IncludeTrailingPathDelimiter(FDir) + 'locked.txt';
+  AssertEquals(0, FpChmod(FileName, 0));
+  try
+    AssertTrue(FRepo.Open(FDir));
+    AssertTrue(FRepo.ChangeStats(Stats));
+    S := FindStat(Stats, 'locked.txt');
+    AssertTrue(S.Kind = ckUntracked);
+    AssertEquals(0, S.Added);
+  finally
+    FpChmod(FileName, &644);
+  end;
+  {$endif}
 end;
 
 procedure TGitRepoTest.TestChangeStats;
