@@ -51,20 +51,23 @@ end;
 
 procedure TForm1.BuildChangeView;
 var
-  n, i, j, k, r, d0, a0, Dels, Adds: integer;
+  n, i, j, k, r, d0, a0, Dels, Adds, NRows, NLeft, NRight, NBlocks: integer;
   Keep: array of boolean;
   OldNum, NewNum: TIntegerDynArray;
   Rows, LeftRows, RightRows: TGittanRows;
   Lexer: TecSyntAnalyzer;
 
-  procedure AddRow(var ARows: TGittanRows; ALine, AFrom, ATo: integer;
-    AHidden: boolean = False);
+  { ARows is sized for the most rows it can get and ACount counts the
+    ones used, so a file of many thousand lines is not copied once per
+    row; the arrays are cut to their count at the end. }
+  procedure AddRow(var ARows: TGittanRows; var ACount: integer;
+    ALine, AFrom, ATo: integer; AHidden: boolean = False);
   begin
-    SetLength(ARows, Length(ARows) + 1);
-    ARows[High(ARows)].Line := ALine;
-    ARows[High(ARows)].GapFrom := AFrom;
-    ARows[High(ARows)].GapTo := ATo;
-    ARows[High(ARows)].Hidden := AHidden;
+    ARows[ACount].Line := ALine;
+    ARows[ACount].GapFrom := AFrom;
+    ARows[ACount].GapTo := ATo;
+    ARows[ACount].Hidden := AHidden;
+    Inc(ACount);
   end;
 
   function Marker(const ARow: TGittanRow): char;
@@ -84,13 +87,15 @@ begin
   WordDiff(FChangeLines, FIgnoreWhitespace, FWordSpans);
   { The blocks of changed lines, which the headings are kept by. The
     code tree of the text goes with the text, which is replaced here. }
-  FBlockStarts := nil;
+  SetLength(FBlockStarts, n);
+  NBlocks := 0;
   for i := 0 to n - 1 do
     if (FChangeLines[i][1] <> ' ') and ((i = 0) or (FChangeLines[i - 1][1] = ' ')) then
     begin
-      SetLength(FBlockStarts, Length(FBlockStarts) + 1);
-      FBlockStarts[High(FBlockStarts)] := i;
+      FBlockStarts[NBlocks] := i;
+      Inc(NBlocks);
     end;
+  SetLength(FBlockStarts, NBlocks);
   FRangesValid := False;
   { Which diff lines are shown: all, or the changed ones with their
     context and the gaps the user opened. }
@@ -119,25 +124,27 @@ begin
         Keep[FThreadRows[k]] := True;
   end;
   { The rows of the unified view: a shown line, or a gap row followed by
-    the run of hidden lines it stands for. }
-  Rows := nil;
+    the run of hidden lines it stands for: at most a gap row per line. }
+  SetLength(Rows, 2 * n);
+  NRows := 0;
   i := 0;
   while i < n do
   begin
     if Keep[i] then
-      AddRow(Rows, i, 0, 0)
+      AddRow(Rows, NRows, i, 0, 0)
     else
     begin
       j := i;
       while (j + 1 < n) and not Keep[j + 1] do
         Inc(j);
-      AddRow(Rows, rowGap, i, j);
+      AddRow(Rows, NRows, rowGap, i, j);
       for k := i to j do
-        AddRow(Rows, k, 0, 0, True);
+        AddRow(Rows, NRows, k, 0, 0, True);
       i := j;
     end;
     Inc(i);
   end;
+  SetLength(Rows, NRows);
   Lexer := FLexers.ForFile(FCurrentPath, FRepo.Root);
   FBuildingView := True;
   try
@@ -154,16 +161,19 @@ begin
     end;
   { Side by side: a context or gap row goes to both sides; a run of
     deleted lines and the run of added lines after it go to the old and
-    the new side, the shorter padded with fillers. }
-  LeftRows := nil;
-  RightRows := nil;
+    the new side, the shorter padded with fillers, so neither side gets
+    more rows than the unified view has. }
+  SetLength(LeftRows, Length(Rows));
+  SetLength(RightRows, Length(Rows));
+  NLeft := 0;
+  NRight := 0;
   r := 0;
   while r < Length(Rows) do
   begin
     if Marker(Rows[r]) = ' ' then
     begin
-      AddRow(LeftRows, Rows[r].Line, Rows[r].GapFrom, Rows[r].GapTo, Rows[r].Hidden);
-      AddRow(RightRows, Rows[r].Line, Rows[r].GapFrom, Rows[r].GapTo, Rows[r].Hidden);
+      AddRow(LeftRows, NLeft, Rows[r].Line, Rows[r].GapFrom, Rows[r].GapTo, Rows[r].Hidden);
+      AddRow(RightRows, NRight, Rows[r].Line, Rows[r].GapFrom, Rows[r].GapTo, Rows[r].Hidden);
       Inc(r);
       Continue;
     end;
@@ -178,15 +188,17 @@ begin
     for k := 0 to Max(Dels, Adds) - 1 do
     begin
       if k < Dels then
-        AddRow(LeftRows, Rows[d0 + k].Line, 0, 0)
+        AddRow(LeftRows, NLeft, Rows[d0 + k].Line, 0, 0)
       else
-        AddRow(LeftRows, rowFiller, 0, 0);
+        AddRow(LeftRows, NLeft, rowFiller, 0, 0);
       if k < Adds then
-        AddRow(RightRows, Rows[a0 + k].Line, 0, 0)
+        AddRow(RightRows, NRight, Rows[a0 + k].Line, 0, 0)
       else
-        AddRow(RightRows, rowFiller, 0, 0);
+        AddRow(RightRows, NRight, rowFiller, 0, 0);
     end;
   end;
+  SetLength(LeftRows, NLeft);
+  SetLength(RightRows, NRight);
     FRows := RightRows;
     FRowsOld := LeftRows;
     SetHotDiscard(Edit, -1, -1, -1);
