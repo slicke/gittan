@@ -3741,8 +3741,9 @@ begin
     { A folder given relative is the root's, not this process's. }
     AssertTrue(FRepo.Error, FRepo.FormatPatches(Second, Last, 'rel', False, One));
     AssertEquals(2, One.Count);
-    AssertEquals(IncludeTrailingPathDelimiter(FRepo.Root) + 'rel' + PathDelim + '0001-second.patch',
-      One[0]);
+    { Root has git's slashes on Windows; the names are expanded. }
+    AssertEquals(ExpandFileName(IncludeTrailingPathDelimiter(FRepo.Root) + 'rel' + PathDelim +
+      '0001-second.patch'), One[0]);
     AssertTrue(FileExists(One[0]));
     One.Clear;
 
