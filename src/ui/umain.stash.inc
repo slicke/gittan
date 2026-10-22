@@ -197,14 +197,17 @@ begin
       Exit;
     Before := Length(FStashes);
     StopWatcher;
-    if AChosenOnly then
-      Ok := FRepo.Stash(Trim(Values[0]), Paths)
-    else
-      Ok := FRepo.Stash(Trim(Values[0]));
-    Err := FRepo.Error;
-    FSummary.Notice := '';
-    RefreshRepository;
-    StartWatcher;
+    try
+      if AChosenOnly then
+        Ok := FRepo.Stash(Trim(Values[0]), Paths)
+      else
+        Ok := FRepo.Stash(Trim(Values[0]));
+      Err := FRepo.Error;
+      FSummary.Notice := '';
+      RefreshRepository;
+    finally
+      StartWatcher;
+    end;
     if not Ok then
       BannerError(rsStashFailed, Err)
     else if Length(FStashes) = Before then
@@ -232,20 +235,23 @@ begin
   if StashBusy then
     Exit;
   StopWatcher;
-  Screen.Cursor := crHourGlass;
   try
-    Ok := FRepo.StashApply(AStash.Id, APop, Conflicts);
+    Screen.Cursor := crHourGlass;
+    try
+      Ok := FRepo.StashApply(AStash.Id, APop, Conflicts);
+    finally
+      Screen.Cursor := crDefault;
+    end;
+    { The refresh runs git too, which may leave a reason of its own. }
+    Err := FRepo.Error;
+    FSummary.Notice := '';
+    if (FStashRange <> '') and (FRepo.Base = FStashRange) then
+      SetBase('')
+    else
+      RefreshRepository;
   finally
-    Screen.Cursor := crDefault;
+    StartWatcher;
   end;
-  { The refresh runs git too, which may leave a reason of its own. }
-  Err := FRepo.Error;
-  FSummary.Notice := '';
-  if (FStashRange <> '') and (FRepo.Base = FStashRange) then
-    SetBase('')
-  else
-    RefreshRepository;
-  StartWatcher;
   if Ok and APop then
     StatusNote(Format(rsStashPopped, [StashLabel(AStash)]))
   else if Ok then
@@ -264,17 +270,20 @@ begin
     [mrYes, rsDropAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
     Exit;
   StopWatcher;
-  if FRepo.StashDrop(AStash.Id) then
-  begin
-    if ComparingStash(AStash.Id) then
-      SetBase('')
+  try
+    if FRepo.StashDrop(AStash.Id) then
+    begin
+      if ComparingStash(AStash.Id) then
+        SetBase('')
+      else
+        RefreshRepository;
+      StatusNote(Format(rsStashDropped, [StashLabel(AStash)]));
+    end
     else
-      RefreshRepository;
-    StatusNote(Format(rsStashDropped, [StashLabel(AStash)]));
-  end
-  else
-    BannerError(rsCaFailed, FRepo.Error);
-  StartWatcher;
+      BannerError(rsCaFailed, FRepo.Error);
+  finally
+    StartWatcher;
+  end;
 end;
 
 procedure TForm1.BranchFromStashAsk(AStash: TGittanStash);
@@ -289,19 +298,22 @@ begin
     (Trim(Values[0]) = '') then
     Exit;
   StopWatcher;
-  if FRepo.StashBranch(Trim(Values[0]), AStash.Id) then
-  begin
-    FLoadError := '';
-    FSummary.Notice := '';
-    if ComparingStash(AStash.Id) then
-      SetBase('')
+  try
+    if FRepo.StashBranch(Trim(Values[0]), AStash.Id) then
+    begin
+      FLoadError := '';
+      FSummary.Notice := '';
+      if ComparingStash(AStash.Id) then
+        SetBase('')
+      else
+        RefreshRepository;
+      StatusNote(Format(rsStashBranched, [Trim(Values[0])]));
+    end
     else
-      RefreshRepository;
-    StatusNote(Format(rsStashBranched, [Trim(Values[0])]));
-  end
-  else
-    BannerError(rsCaFailed, FRepo.Error);
-  StartWatcher;
+      BannerError(rsCaFailed, FRepo.Error);
+  finally
+    StartWatcher;
+  end;
 end;
 
 { Whether the stash AId is the one compared against. }

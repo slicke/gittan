@@ -102,16 +102,19 @@ begin
       not ChooseApplyPatches(Files, FApplyCommit, FApplyFolder) then
       Exit;
     StopWatcher;
-    Screen.Cursor := crHourGlass;
     try
-      Ok := FRepo.ApplyPatches(Files, FApplyCommit, Conflicts, Applied);
+      Screen.Cursor := crHourGlass;
+      try
+        Ok := FRepo.ApplyPatches(Files, FApplyCommit, Conflicts, Applied);
+      finally
+        Screen.Cursor := crDefault;
+      end;
+      FLoadError := '';
+      FSummary.Notice := '';
+      RefreshRepository;
     finally
-      Screen.Cursor := crDefault;
+      StartWatcher;
     end;
-    FLoadError := '';
-    FSummary.Notice := '';
-    RefreshRepository;
-    StartWatcher;
     { The file that stopped it: the one after those that went in, or for
       apply's conflicts the last that went in. }
     Failed := Applied;

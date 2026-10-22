@@ -218,15 +218,18 @@ begin
     (Trim(Values[0]) = '') then
     Exit;
   StopWatcher;
-  if FRepo.CreateBranch(Trim(Values[0]), ACommit, True) then
-  begin
-    FSummary.Notice := '';
-    RefreshRepository;
-    StatusNote(Format(rsCaBranched, [Trim(Values[0])]));
-  end
-  else
-    BannerError(rsCaFailed, FRepo.Error);
-  StartWatcher;
+  try
+    if FRepo.CreateBranch(Trim(Values[0]), ACommit, True) then
+    begin
+      FSummary.Notice := '';
+      RefreshRepository;
+      StatusNote(Format(rsCaBranched, [Trim(Values[0])]));
+    end
+    else
+      BannerError(rsCaFailed, FRepo.Error);
+  finally
+    StartWatcher;
+  end;
 end;
 
 procedure TForm1.DeleteTagAsk(const ATag: TGittanTag);

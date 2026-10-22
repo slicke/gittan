@@ -1299,44 +1299,47 @@ begin
   else
     Switch := rsSwitched;
   StopWatcher;
-  Files := TStringList.Create;
   try
-    if FRepo.Switch(ABranch, False, ADetach) then
-      Switched(Format(Switch, [ABranch]))
-    else if SwitchBlockedFiles(FRepo.Error, Files) then
-    begin
-      Shown := '';
-      for i := 0 to Min(Files.Count, 10) - 1 do
-        Shown := Shown + LineEnding + '  ' + Files[i];
-      if Files.Count > 10 then
-        Shown := Shown + LineEnding + '  ' + Format(rsSwitchMore, [Files.Count - 10]);
-      case QuestionDlg(rsSwitchBlockedTitle, Format(rsSwitchBlocked, [ABranch]) + LineEnding +
-          Shown, mtWarning, [mrYes, rsStashAndSwitch, 'IsDefault', mrNo, rsBringChanges,
-          mrCancel, rsCancelButton, 'IsCancel'], 0) of
-        mrYes:
-          if not FRepo.Stash(Format(rsStashMessage, [ABranch])) then
-            BannerError(rsStashFailed, FRepo.Error)
-          else if FRepo.Switch(ABranch, False, ADetach) then
-            Switched(Format(rsStashedSwitched, [ABranch]))
-          else
-          begin
-            RefreshRepository;
-            BannerError(Format(rsSwitchFailed, [ABranch]), FRepo.Error + LineEnding +
-              LineEnding + rsStashKept);
-          end;
-        mrNo:
-          if FRepo.Switch(ABranch, True, ADetach) then
-            Switched(Format(rsSwitchedAlong, [ABranch]))
-          else
-            BannerError(Format(rsSwitchFailed, [ABranch]), FRepo.Error);
-      end;
-    end
-    else
-      BannerError(Format(rsSwitchFailed, [ABranch]), FRepo.Error);
+    Files := TStringList.Create;
+    try
+      if FRepo.Switch(ABranch, False, ADetach) then
+        Switched(Format(Switch, [ABranch]))
+      else if SwitchBlockedFiles(FRepo.Error, Files) then
+      begin
+        Shown := '';
+        for i := 0 to Min(Files.Count, 10) - 1 do
+          Shown := Shown + LineEnding + '  ' + Files[i];
+        if Files.Count > 10 then
+          Shown := Shown + LineEnding + '  ' + Format(rsSwitchMore, [Files.Count - 10]);
+        case QuestionDlg(rsSwitchBlockedTitle, Format(rsSwitchBlocked, [ABranch]) + LineEnding +
+            Shown, mtWarning, [mrYes, rsStashAndSwitch, 'IsDefault', mrNo, rsBringChanges,
+            mrCancel, rsCancelButton, 'IsCancel'], 0) of
+          mrYes:
+            if not FRepo.Stash(Format(rsStashMessage, [ABranch])) then
+              BannerError(rsStashFailed, FRepo.Error)
+            else if FRepo.Switch(ABranch, False, ADetach) then
+              Switched(Format(rsStashedSwitched, [ABranch]))
+            else
+            begin
+              RefreshRepository;
+              BannerError(Format(rsSwitchFailed, [ABranch]), FRepo.Error + LineEnding +
+                LineEnding + rsStashKept);
+            end;
+          mrNo:
+            if FRepo.Switch(ABranch, True, ADetach) then
+              Switched(Format(rsSwitchedAlong, [ABranch]))
+            else
+              BannerError(Format(rsSwitchFailed, [ABranch]), FRepo.Error);
+        end;
+      end
+      else
+        BannerError(Format(rsSwitchFailed, [ABranch]), FRepo.Error);
+    finally
+      Files.Free;
+    end;
   finally
-    Files.Free;
+    StartWatcher;
   end;
-  StartWatcher;
 end;
 
 procedure TForm1.MenuCopyPathClick(Sender: TObject);
@@ -2341,22 +2344,25 @@ begin
   Prev := FRepo.Base;
   PrevSnapshot := FRepo.WholeTree;
   StopWatcher;
-  if ARef <> FBlameRange then
-    FBlameRange := '';
-  FRepo.Base := ARef;
-  FRepo.WholeTree := ASnapshot;
-  FLoadError := '';
-  RefreshRepository;
-  if FLoadError <> '' then
-  begin
-    FRepo.Base := Prev;
-    FRepo.WholeTree := PrevSnapshot;
-    FBlameRange := '';
+  try
+    if ARef <> FBlameRange then
+      FBlameRange := '';
+    FRepo.Base := ARef;
+    FRepo.WholeTree := ASnapshot;
+    FLoadError := '';
     RefreshRepository;
-    FSummary.Notice := FLoadError;
-    ShowSummary;
+    if FLoadError <> '' then
+    begin
+      FRepo.Base := Prev;
+      FRepo.WholeTree := PrevSnapshot;
+      FBlameRange := '';
+      RefreshRepository;
+      FSummary.Notice := FLoadError;
+      ShowSummary;
+    end;
+  finally
+    StartWatcher;
   end;
-  StartWatcher;
   { Comparing with a pull request shows its comments. }
   StartReviewJob(False);
 end;

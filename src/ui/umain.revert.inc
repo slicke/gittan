@@ -50,26 +50,29 @@ begin
     Exit;
   Saved := TStringList.Create;
   StopWatcher;
-  if FRepo.RevertFiles(APaths, Saved) then
-  begin
-    FRevertUndo.AddObject(ALabel, Saved);
-    Saved := nil;
-    StatusNote(Format(rsReverted, [ALabel]));
-  end
-  else
-  begin
-    { What was saved before git failed can still come back. }
-    if Saved.Count > 0 then
+  try
+    if FRepo.RevertFiles(APaths, Saved) then
     begin
       FRevertUndo.AddObject(ALabel, Saved);
       Saved := nil;
+      StatusNote(Format(rsReverted, [ALabel]));
+    end
+    else
+    begin
+      { What was saved before git failed can still come back. }
+      if Saved.Count > 0 then
+      begin
+        FRevertUndo.AddObject(ALabel, Saved);
+        Saved := nil;
+      end;
+      BannerError(rsRevertFailed, FRepo.Error);
     end;
-    BannerError(rsRevertFailed, FRepo.Error);
+    Saved.Free;
+    FSummary.Notice := '';
+    RefreshRepository;
+  finally
+    StartWatcher;
   end;
-  Saved.Free;
-  FSummary.Notice := '';
-  RefreshRepository;
-  StartWatcher;
   UpdateDiscardItems;
 end;
 
@@ -117,17 +120,20 @@ begin
   Shown := FRevertUndo[FRevertUndo.Count - 1];
   Saved := TStringList(FRevertUndo.Objects[FRevertUndo.Count - 1]);
   FRevertUndo.Delete(FRevertUndo.Count - 1);
+  StopWatcher;
   try
-    StopWatcher;
-    if FRepo.RestoreReverted(Saved) then
-      StatusNote(Format(rsRevertUndone, [Shown]))
-    else
-      StatusNote(Format(rsRevertUndoFailed, [FRepo.Error]), True);
+    try
+      if FRepo.RestoreReverted(Saved) then
+        StatusNote(Format(rsRevertUndone, [Shown]))
+      else
+        StatusNote(Format(rsRevertUndoFailed, [FRepo.Error]), True);
+    finally
+      Saved.Free;
+    end;
+    RefreshRepository;
   finally
-    Saved.Free;
+    StartWatcher;
   end;
-  RefreshRepository;
-  StartWatcher;
   UpdateDiscardItems;
 end;
 

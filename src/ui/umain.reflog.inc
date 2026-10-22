@@ -172,16 +172,19 @@ begin
         not ResetAsk(E.Commit, Short, Mode) then
         Exit;
       StopWatcher;
-      Screen.Cursor := crHourGlass;
       try
-        Ok := FRepo.Reset(E.Commit, Mode);
+        Screen.Cursor := crHourGlass;
+        try
+          Ok := FRepo.Reset(E.Commit, Mode);
+        finally
+          Screen.Cursor := crDefault;
+        end;
+        FLoadError := '';
+        FSummary.Notice := '';
+        RefreshRepository;
       finally
-        Screen.Cursor := crDefault;
+        StartWatcher;
       end;
-      FLoadError := '';
-      FSummary.Notice := '';
-      RefreshRepository;
-      StartWatcher;
       if Ok then
         StatusNote(Format(rsCaWasReset, [ResetTarget, Short]))
       else

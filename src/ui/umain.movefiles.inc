@@ -43,10 +43,13 @@ begin
     Exit;
   end;
   StopWatcher;
-  Ok := FRepo.MovePath(Old, New);
-  FSummary.Notice := '';
-  RefreshRepository;
-  StartWatcher;
+  try
+    Ok := FRepo.MovePath(Old, New);
+    FSummary.Notice := '';
+    RefreshRepository;
+  finally
+    StartWatcher;
+  end;
   if Ok then
     StatusNote(Format(rsMoved, [Old, New]))
   else
@@ -68,17 +71,20 @@ begin
     'IsCancel', 'IsDefault'], 0);
   if not (Answer in [mrYes, mrNo]) then
     Exit;
-  Paths := TStringList.Create;
+  StopWatcher;
   try
-    Paths.Add(Path);
-    StopWatcher;
-    Ok := FRepo.RemovePaths(Paths, Answer = mrYes);
+    Paths := TStringList.Create;
+    try
+      Paths.Add(Path);
+      Ok := FRepo.RemovePaths(Paths, Answer = mrYes);
+    finally
+      Paths.Free;
+    end;
+    FSummary.Notice := '';
+    RefreshRepository;
   finally
-    Paths.Free;
+    StartWatcher;
   end;
-  FSummary.Notice := '';
-  RefreshRepository;
-  StartWatcher;
   if not Ok then
     BannerError(Format(rsRemoveFailed, [Path]), FRepo.Error)
   else if Answer = mrYes then

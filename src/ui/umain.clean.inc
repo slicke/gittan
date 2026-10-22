@@ -26,15 +26,18 @@ begin
     if not ChooseClean(FRepo, FCleanKind, Paths) then
       Exit;
     StopWatcher;
-    Screen.Cursor := crHourGlass;
     try
-      Ok := FRepo.Clean(FCleanKind, Paths);
+      Screen.Cursor := crHourGlass;
+      try
+        Ok := FRepo.Clean(FCleanKind, Paths);
+      finally
+        Screen.Cursor := crDefault;
+      end;
+      FSummary.Notice := '';
+      RefreshRepository;
     finally
-      Screen.Cursor := crDefault;
+      StartWatcher;
     end;
-    FSummary.Notice := '';
-    RefreshRepository;
-    StartWatcher;
     if Ok then
     begin
       if Paths.Count = 1 then
