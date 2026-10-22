@@ -42,6 +42,13 @@ endif
 
 LAZFLAGS = --widgetset=$(WIDGETSET)
 
+# Gittan.lpi has two build modes: Release (-O2, no debug info, smart linked
+# and stripped, its units in lib/<cpu>-<os>-release) for build, rebuild and
+# run, which CI ships, and Default (debug info, line info) for debug.
+# lazbuild's --opt can add flags but never take -g away, so a mode it is.
+RELEASE_MODE := --bm=Release
+DEBUG_MODE := --bm=Default
+
 # Unit tests. tests/gittantests.lpr is a console program over the non-visual
 # units in src/core (a tests/test<name>.pp each), built with fpc alone: no
 # LCL, no lazbuild.
@@ -94,7 +101,7 @@ all: build
 
 help:
 	@echo "Targets:"
-	@echo "  build     Build $(LPI) (default)"
+	@echo "  build     Build $(LPI) optimized, without debug info (default)"
 	@echo "  debug     Build with debug info (DWARF 2 on macOS)"
 	@echo "  rebuild   Build with every unit recompiled (-B)"
 	@echo "  run       Build, then start Gittan (RUN_ARGS forwards arguments)"
@@ -105,15 +112,15 @@ help:
 	@echo "Current: WIDGETSET=$(WIDGETSET) LAZBUILD=$(LAZBUILD)"
 
 build: lexlib
-	"$(LAZBUILD)" $(LAZFLAGS) $(LPI)
+	"$(LAZBUILD)" $(LAZFLAGS) $(RELEASE_MODE) $(LPI)
 	$(bundle_icon)
 
 debug: lexlib
-	"$(LAZBUILD)" $(LAZFLAGS) $(DEBUG_FLAGS) $(LPI)
+	"$(LAZBUILD)" $(LAZFLAGS) $(DEBUG_MODE) $(DEBUG_FLAGS) $(LPI)
 	$(bundle_icon)
 
 rebuild: lexlib
-	"$(LAZBUILD)" -B $(LAZFLAGS) $(LPI)
+	"$(LAZBUILD)" -B $(LAZFLAGS) $(RELEASE_MODE) $(LPI)
 	$(bundle_icon)
 
 icons:

@@ -29,7 +29,10 @@ $LexersSrc = 'vendor\CudaText-lexers'
 $LexersOwn = 'lexers'
 $LexLib = 'lexlib'
 $LazFlags = @('--widgetset=win32')
-$DebugFlags = @('--opt=-g', '--opt=-gl')
+# Gittan.lpi's Release mode (-O2, no debug info, smart linked, stripped) for
+# build, rebuild and run, as CI ships it; its Default mode for debug.
+$ReleaseFlags = @('--bm=Release')
+$DebugFlags = @('--bm=Default', '--opt=-g', '--opt=-gl')
 
 $lazCandidates = @('C:\lazarus\lazbuild.exe', 'C:\fpcupdeluxe\lazarus\lazbuild.exe')
 
@@ -99,12 +102,12 @@ $target = if ($MakeArgs.Count -ge 1) { $MakeArgs[0].ToLower() } else { 'build' }
 $rest = if ($MakeArgs.Count -gt 1) { @($MakeArgs[1..($MakeArgs.Count - 1)]) } else { @() }
 
 switch ($target) {
-    'build' { Invoke-Lazbuild (@($LazFlags) + $rest); exit 0 }
+    'build' { Invoke-Lazbuild (@($LazFlags) + $ReleaseFlags + $rest); exit 0 }
     'debug' { Invoke-Lazbuild (@($LazFlags) + $DebugFlags + $rest); exit 0 }
-    'rebuild' { Invoke-Lazbuild (@('--build-all') + $LazFlags + $rest); exit 0 }
+    'rebuild' { Invoke-Lazbuild (@('--build-all') + $LazFlags + $ReleaseFlags + $rest); exit 0 }
     'run' {
         # Arguments after 'run' go to Gittan, not lazbuild.
-        Invoke-Lazbuild $LazFlags
+        Invoke-Lazbuild (@($LazFlags) + $ReleaseFlags)
         $startArgs = @{ FilePath = (Join-Path $PSScriptRoot 'Gittan.exe'); WorkingDirectory = $PSScriptRoot }
         if ($rest.Count -gt 0) {
             $startArgs.ArgumentList = @($rest | ForEach-Object {

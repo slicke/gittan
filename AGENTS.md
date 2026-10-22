@@ -15,6 +15,7 @@ This file applies to the Gittan repository root and its subdirectories.
 ## macOS linking
 - Darwin targets link with Apple's ld. The first ld of Xcode/CLT 27 rejected the Objective-C method lists FPC 3.2.x emits ("malformed method list atom"), and Gittan linked through LLVM's `ld64.lld` for a while; ld-27037 (August 2026) links them again. On "malformed method list atom", update Xcode or the Command Line Tools.
 - Debug builds on macOS must use DWARF 2 (`-gw2`); FPC 3.2.x's DWARF 3 writer fails on Objective-C classes.
+- `Gittan.lpi` has two build modes. `make`, `make rebuild`, `make run`, `.\make.ps1 build` and CI use Release (`--bm=Release`: `-O2`, no debug or line info, smart linking `-CX -XX`, `-Xs`, its units in `lib/<cpu>-<os>-release`); `make debug` uses Default (DWARF 2, line info, `-O1`). lazbuild's `--opt` cannot take `-g` away, which is why it is a mode. On macOS `-Xs` leaves the symbols in, so the CI's macOS leg runs `strip` on the bundle's binary before signing it. A new compiler option that both builds need goes in both modes.
 
 ## CI
 - `.github/workflows/build.yml` builds on every push to main and every PR: macOS arm64 (cocoa, `.dmg`), Windows x64 (win32, `.zip`) and Linux amd64 (gtk3, `.tar.gz`), each with `lexlib/` beside the executable (in `Contents/Resources` for the bundle). The toolchain is Lazarus 5.0RC1 on every leg (FPC 3.2.4rc2 on macOS, 3.2.2 elsewhere).

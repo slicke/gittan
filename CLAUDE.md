@@ -7,7 +7,7 @@ Gittan is a Free Pascal/Lazarus desktop app. AGENTS.md contains the working rule
 ## Commands
 
 ```sh
-make            # build Gittan.lpi (cocoa on macOS)
+make            # build Gittan.lpi optimized, no debug info (cocoa on macOS)
 make debug      # debug info, DWARF 2 on macOS
 make rebuild    # recompile every unit
 make run        # build and start
