@@ -989,6 +989,7 @@ type
     procedure CheckGitVersion;
     procedure PreviewSettings(AFont: TFont; ATheme, ATabSize: integer);
     procedure ApplyEditorFont(AFont: TFont);
+    procedure EditorMetricsChanged;
     procedure ApplyTabSize(ASize: integer);
     procedure FindGitHubCli;
     procedure UpdateGitHubItems;
@@ -4530,8 +4531,7 @@ begin
   AEd.OptGutterWidthBookmarks := (Widest + 1) * EditorCharWidth(AEd);
 end;
 
-{ Zooming changes the character width the number band is sized from. The
-  two editors zoom together. }
+{ The two editors zoom together. }
 procedure TForm1.EditChangeZoom(Sender: TObject);
 var
   Other: TATSynEdit;
@@ -4542,9 +4542,21 @@ begin
     Other := FEditOld;
   if Other.OptScaleFont <> TATSynEdit(Sender).OptScaleFont then
     Other.OptScaleFont := TATSynEdit(Sender).OptScaleFont;
+  EditorMetricsChanged;
+end;
+
+{ The editors' font or zoom changed: the number and blame bands are
+  sized from the character width, and the preview's text follows the
+  editor's size. EditChangeZoom calls it, which the wheel and the
+  editor's own keys reach through OnChangeZoom and the menu's Zoom In
+  and Out directly; Actual Size and a new font call it themselves. }
+procedure TForm1.EditorMetricsChanged;
+begin
   UpdateNumberWidth(Edit);
   UpdateNumberWidth(FEditOld);
   ApplyBlame;
+  if FMdPreview.Visible then
+    FMdPreview.SetFontSize(EditorFontSize(Edit));
 end;
 
 { ---------------------------------------------------------------------------

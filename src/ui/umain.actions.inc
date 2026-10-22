@@ -325,22 +325,25 @@ end;
 { ---------------------------------------------------------------------------
   View options
   --------------------------------------------------------------------------- }
+{ DoScaleFontDelta fires no OnChangeZoom (only the wheel and the
+  editor's own keys do), so the menu's zoom calls the handler itself. }
 procedure TForm1.MenuZoomInClick(Sender: TObject);
 begin
   Edit.DoScaleFontDelta(True, True);
+  EditChangeZoom(Edit);
 end;
 
 procedure TForm1.MenuZoomOutClick(Sender: TObject);
 begin
   Edit.DoScaleFontDelta(False, True);
+  EditChangeZoom(Edit);
 end;
 
 procedure TForm1.MenuZoomResetClick(Sender: TObject);
 begin
   Edit.OptScaleFont := 0;
   FEditOld.OptScaleFont := 0;
-  UpdateNumberWidth(Edit);
-  UpdateNumberWidth(FEditOld);
+  EditorMetricsChanged;
 end;
 
 procedure TForm1.MenuFontClick(Sender: TObject);
@@ -363,8 +366,7 @@ begin
   FEditOld.Font.Assign(AFont);
   Edit.Update(True);
   FEditOld.Update(True);
-  UpdateNumberWidth(Edit);
-  UpdateNumberWidth(FEditOld);
+  EditorMetricsChanged;
 end;
 
 { A git older than MinGitMajor.MinGitMinor is said in the banner, at
