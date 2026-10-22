@@ -122,6 +122,8 @@ type
     Error: string;
     Stats: TGittanFileStats;
     Branch, DefaultBranch, MergeBase, Operation, RebaseBranch: string;
+    {** HEAD is on no branch: Branch is then the short commit id. }
+    Detached: boolean;
     HasUpstream: boolean;
     Ahead, Behind: integer;
     {** The stashes, newest first, from Stashes. }
@@ -628,6 +630,12 @@ type
     {** Gives up what git is in the middle of (`--abort`): the branch and
       the work tree go back to how they were before it started. }
     function AbortOperation: boolean;
+    {** Forgets what git is in the middle of (`--quit`): HEAD, the index
+      and the work tree stay as they are, git just stops rebasing (or
+      cherry-picking, reverting, applying patches). For a rebase left
+      behind by a checkout to another branch, where --abort would check
+      the rebased branch out again. Not for a merge. }
+    function QuitOperation: boolean;
     {** The message git prepared for the merge, cherry-pick or revert in
       progress (MERGE_MSG in the git directory), its comment lines left
       out; empty when there is none. }
@@ -683,6 +691,8 @@ type
     {** The current branch, the short commit id when HEAD is detached, or
       empty when nothing is open. }
     function Branch: string;
+    {** The same, with ADetached true when HEAD is on no branch. }
+    function Branch(out ADetached: boolean): string;
     {** The remote-tracking branch the repository was cloned from, such as
       origin/main: what the remote's HEAD points at, else main or master
       on the remote RemoteFor gives, else empty. }
@@ -4698,6 +4708,21 @@ begin
     CleanRebaseFiles;
 end;
 
+function TGittanRepo.QuitOperation: boolean;
+var
+  Command, Output: string;
+begin
+  Command := OperationCommand(Operation);
+  if (FRoot = '') or (Command = '') or (Command = 'merge') then
+  begin
+    FError := 'Git is not in the middle of anything to forget.';
+    Exit(False);
+  end;
+  Result := RunGit(FRoot, [Command, '--quit'], Output);
+  if Result then
+    CleanRebaseFiles;
+end;
+
 function TGittanRepo.MergeMessage: string;
 var
   Dir, Line: string;
@@ -5023,7 +5048,7 @@ begin
   ASnap.Ok := ChangeStats(ASnap.Stats);
   if not ASnap.Ok then
     ASnap.Error := FError;
-  ASnap.Branch := Branch;
+  ASnap.Branch := Branch(ASnap.Detached);
   ASnap.DefaultBranch := DefaultBranch;
   if not MergeBase(ASnap.DefaultBranch, ASnap.MergeBase) then
     ASnap.MergeBase := '';
@@ -5266,16 +5291,28 @@ begin
 end;
 
 function TGittanRepo.Branch: string;
+var
+  Detached: boolean;
+begin
+  Result := Branch(Detached);
+end;
+
+function TGittanRepo.Branch(out ADetached: boolean): string;
 begin
   Result := '';
+  ADetached := False;
   if FRoot = '' then
     Exit;
   if RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'HEAD'], Result) then
     Result := Trim(Result)
-  else if RunGit(FRoot, ['rev-parse', '--short', 'HEAD'], Result) then
-    Result := Trim(Result)
   else
-    Result := '';
+  begin
+    ADetached := True;
+    if RunGit(FRoot, ['rev-parse', '--short', 'HEAD'], Result) then
+      Result := Trim(Result)
+    else
+      Result := '';
+  end;
 end;
 
 { X is the index column, Y the work tree. A "U" in either (or both sides

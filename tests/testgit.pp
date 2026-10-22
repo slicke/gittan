@@ -88,6 +88,7 @@ type
     procedure TestMoveAndRemove;
     procedure TestRebaseOnto;
     procedure TestRebaseOntoConflicts;
+    procedure TestRebaseStray;
     procedure TestRebaseInteractive;
     procedure TestRebaseInteractiveEdit;
     procedure TestRebaseInteractiveConflicts;
@@ -2088,6 +2089,47 @@ begin
   AssertTrue(FRepo.Error, FRepo.AbortOperation);
   AssertEquals('', FRepo.Operation);
   AssertEquals('topic', FRepo.Branch);
+end;
+
+{ A rebase left behind: it stopped with conflicts, they were resolved,
+  and a checkout in a terminal put HEAD on another branch, where a commit
+  was made. git still has the rebase going, of the topic branch, while
+  HEAD is on the other one, which the snapshot tells apart; --quit
+  forgets the rebase and keeps HEAD, the commit and the files. }
+procedure TGitRepoTest.TestRebaseStray;
+var
+  Branch, Head: string;
+  Conflicts: boolean;
+  Snap: TGittanRepoSnapshot;
+begin
+  Branch := MakeDiverged(Self);
+  AssertTrue(FRepo.Open(FDir));
+  Git(['checkout', '-q', 'topic']);
+  AssertFalse(FRepo.RebaseOnto(Branch, Conflicts));
+  AssertTrue('conflicts', Conflicts);
+  { Stopped: HEAD is detached, the snapshot names the rebased branch. }
+  AssertTrue(FRepo.Snapshot(Snap));
+  AssertTrue('detached', Snap.Detached);
+  AssertEquals('rebasing', Snap.Operation);
+  AssertEquals('topic', Snap.RebaseBranch);
+  AssertTrue(FRepo.ResolveConflict('a.txt', csMine));
+  AssertTrue(FRepo.MarkResolved('del.txt'));
+  Git(['checkout', '-q', Branch]);
+  WriteFile('b.txt', 'on main'#10);
+  Commit('on main');
+  Head := Trim(Git(['rev-parse', 'HEAD']));
+  AssertTrue(FRepo.Snapshot(Snap));
+  AssertFalse('detached', Snap.Detached);
+  AssertEquals(Branch, Snap.Branch);
+  AssertEquals('rebasing', Snap.Operation);
+  AssertEquals('topic', Snap.RebaseBranch);
+  AssertTrue(FRepo.Error, FRepo.QuitOperation);
+  AssertEquals('', FRepo.Operation);
+  AssertEquals(Branch, FRepo.Branch);
+  AssertEquals(Head, Trim(Git(['rev-parse', 'HEAD'])));
+  AssertEquals('on main', Trim(Git(['log', '-1', '--format=%s', 'HEAD'])));
+  AssertEquals('topic', Trim(Git(['log', '-1', '--format=%s', 'topic'])));
+  AssertFalse(FRepo.QuitOperation);
 end;
 
 { The commits after the first, replayed in another order: the fourth

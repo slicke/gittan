@@ -415,6 +415,9 @@ type
       each line of FChangeLines in a conflict (see gittan.conflicts),
       set by ShowChanges for a conflicted file, nil otherwise. }
     FOperation: string;
+    {** The branch the rebase in progress is of (head-name), '' for none
+      or a rebase of a detached HEAD. }
+    FRebaseBranch: string;
     FConflictFiles: integer;
     FConflictRoles: TIntegerDynArray;
     FContextFromSummary: boolean;
@@ -1239,6 +1242,8 @@ type
       const AScreenPos: TPoint);
     procedure CommitMenuClick(Sender: TObject);
     function ContinueMode: boolean;
+    function StrayRebase: boolean;
+    function OperationLabel: string;
     function IsConflictPath(const APath: string): boolean;
     function MarkersLeft(const APath: string): integer;
     procedure ResolvePath(const APath: string; AAction: integer);
@@ -1947,6 +1952,16 @@ resourcestring
   rsAbortAsk = 'Abort %s? The branch and the files go back to how they were before it started.';
   rsAborted = 'Aborted %s';
   rsAbortFailed = 'Could not abort %s';
+  rsStrayRebaseNote = 'git is still rebasing %0:s, but HEAD is on %1:s. Abort takes %0:s back; ' +
+    'Continue would make %0:s what %1:s is.';
+  rsStrayAbortAsk = 'git is still rebasing %0:s, but HEAD is on %1:s.' + LineEnding + LineEnding +
+    'Abort takes %0:s back to how it was before the rebase and checks it out again, ' +
+    'the files with it; %1:s keeps its commits.' + LineEnding + LineEnding +
+    'Forget the Rebase stays on %1:s and keeps the files as they are; git just stops rebasing.';
+  rsQuitButton = 'Forget the Rebase';
+  rsQuit = 'Forgot %s';
+  rsQuitFailed = 'Could not forget %s';
+  rsOperationOf = '%s %s';
   rsIdentityTitle = 'Who Commits?';
   rsIdentityName = 'Name';
   rsIdentityEmail = 'E-mail';
@@ -3279,7 +3294,8 @@ begin
     FStatus.SetOperation('', 0, 0)
   else
   begin
-    Op := UpperCase(Copy(FOperation, 1, 1)) + Copy(FOperation, 2, MaxInt);
+    Op := OperationLabel;
+    Op := UpperCase(Copy(Op, 1, 1)) + Copy(Op, 2, MaxInt);
     if FRepo.OperationProgress(OpPos, OpTotal) then
       Op := Format(rsOperationStep, [Op, OpPos, OpTotal]);
     FStatus.SetOperation(Op, OpPos, OpTotal);
@@ -3369,7 +3385,10 @@ begin
     begin
       P := StatusButton(rsContinueButton, HintPlay, stNormal, not Busy and ContinueMode);
       FStatusSteps[spPrimary] := stepContinue;
-      Tip := Format(rsContinueNote, [Noun]);
+      if StrayRebase then
+        Tip := Format(rsStrayRebaseNote, [FRebaseBranch, FBranch])
+      else
+        Tip := Format(rsContinueNote, [Noun]);
     end;
     if ContinueMode then
     begin
@@ -4865,10 +4884,13 @@ begin
   FBehind := ASnap.Behind;
   FOperation := ASnap.Operation;
   FBisect := ASnap.Bisect;
-  if (FOperation = 'rebasing') and (ASnap.RebaseBranch <> '') then
+  FRebaseBranch := ASnap.RebaseBranch;
+  if (FOperation = 'rebasing') and (FRebaseBranch <> '') and ASnap.Detached then
     { HEAD is detached while a rebase stops; the branch is the one it
-      rebases. }
-    FBranch := ASnap.RebaseBranch;
+      rebases. A checkout in a terminal meanwhile leaves the rebase
+      behind on its way: HEAD is on that branch then, and the summary
+      says which branch the rebase is of (OperationLabel). }
+    FBranch := FRebaseBranch;
   FConflictFiles := 0;
   for i := 0 to High(FStats) do
     if FStats[i].Kind = ckConflict then
@@ -4893,7 +4915,7 @@ begin
   end;
   Branch := FBranch;
   if FOperation <> '' then
-    Branch := Branch + ' · ' + FOperation;
+    Branch := Branch + ' · ' + OperationLabel;
   FSummary.SetCommits(ASnap.Recent, FAhead, FBehind, FHasUpstream);
   FSummary.BaseClickable := (BaseActionRef <> '') or (StashOfBase >= 0) or BlameShown;
   if BlameShown then

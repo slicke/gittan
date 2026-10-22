@@ -46,8 +46,30 @@ end;
   on with Continue rather than a commit of its own. }
 function TForm1.ContinueMode: boolean;
 begin
-  Result := (FOperation = 'rebasing') or (FOperation = 'applying patches') or
-    (FOperation = 'cherry-picking') or (FOperation = 'reverting');
+  Result := ((FOperation = 'rebasing') and not StrayRebase) or
+    (FOperation = 'applying patches') or (FOperation = 'cherry-picking') or
+    (FOperation = 'reverting');
+end;
+
+{ A rebase left behind: it stopped, and a checkout in a terminal put HEAD
+  on another branch (git allows it once the conflicts are resolved). git
+  still counts the rebase as going on, and its --continue would set the
+  rebased branch to HEAD, so Continue and Skip are off; Abort checks the
+  rebased branch out again as it was, and Forget the Rebase (--quit)
+  keeps HEAD where it is. }
+function TForm1.StrayRebase: boolean;
+begin
+  Result := (FOperation = 'rebasing') and (FRebaseBranch <> '') and (FBranch <> FRebaseBranch);
+end;
+
+{ The operation for the summary and the status bar: "rebasing", or
+  "rebasing feature" while the rebase is of a branch HEAD is not on. }
+function TForm1.OperationLabel: string;
+begin
+  if StrayRebase then
+    Result := Format(rsOperationOf, [FOperation, FRebaseBranch])
+  else
+    Result := FOperation;
 end;
 
 function TForm1.IsConflictPath(const APath: string): boolean;
@@ -614,7 +636,31 @@ begin
   if (FRepo.Root = '') or (FOperation = '') then
     Exit;
   Noun := OperationNoun(FOperation);
-  if QuestionDlg(rsAbortTitle, Format(rsAbortAsk, [Noun]), mtConfirmation,
+  if StrayRebase then
+  begin
+    { HEAD is on another branch: offer to forget the rebase too, which
+      keeps the branch and the files as they are. }
+    case QuestionDlg(rsAbortTitle, Format(rsStrayAbortAsk, [FRebaseBranch, FBranch]),
+        mtConfirmation, [mrYes, rsAbortButton, mrNo, rsQuitButton, mrCancel, rsCancelButton,
+        'IsCancel', 'IsDefault'], 0) of
+      mrYes: ;
+      mrNo:
+      begin
+        if FRepo.QuitOperation then
+        begin
+          FBanner.Clear;
+          StatusNote(Format(rsQuit, [Noun]));
+        end
+        else
+          MessageDlg(Format(rsQuitFailed, [Noun]), FRepo.Error, mtError, [mbOK], 0);
+        RefreshRepository;
+        Exit;
+      end;
+      else
+        Exit;
+    end;
+  end
+  else if QuestionDlg(rsAbortTitle, Format(rsAbortAsk, [Noun]), mtConfirmation,
     [mrYes, rsAbortButton, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
     Exit;
   if FRepo.AbortOperation then

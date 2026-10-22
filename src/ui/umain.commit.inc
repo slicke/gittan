@@ -537,6 +537,10 @@ begin
       Note := rsCommitNothing;
     Can := False;
   end;
+  { A rebase left behind by a checkout: a commit on this branch is fine,
+    the note says what the Abort button does instead. }
+  if (Note = '') and StrayRebase then
+    Note := Format(rsStrayRebaseNote, [FRebaseBranch, FBranch]);
   if not Continuing and (Trim(FCommitMemo.Text) = '') then
     Can := False;
   if CommitChoosing and (Total > 0) then
