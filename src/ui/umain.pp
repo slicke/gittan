@@ -541,14 +541,16 @@ type
     FMenuReflog: TGittanReflogEntry;
     FReflogItem: TMenuItem;
     { Stashes (umain.stash.inc): what the last snapshot listed, the list
-      that drops from the status bar's stash chip with, per row, the
-      index in FStashes of its stash (StashRowHeader, StashRowNew for
-      the others), the menu of a stash and the one it is for, the range
+      that drops from the status bar's stash chip with the stashes it
+      shows (FListedStashes, a copy, since a snapshot replaces FStashes
+      while the list is up) and, per row, the index in them of its stash
+      (StashRowHeader, StashRowNew for the others), the menu of a stash and the one it is for, the range
       a compared stash is the base as and the stash it is of, the stash
       the base chip's list is for with its rows, and the Stash menu's
       items. }
     FStashes: TGittanStashes;
     FStashPopup: TGittanPopupList;
+    FListedStashes: TGittanStashes;
     FStashRows: TIntegerDynArray;
     FStashMenu: TPopupMenu;
     FMenuStash: TGittanStash;

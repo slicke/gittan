@@ -71,6 +71,7 @@ begin
     Exit;
   Compared := StashOfBase;
   FStashPopup.Clear;
+  FListedStashes := Copy(FStashes);
   FStashRows := nil;
   if (FFileCount > 0) and not StashBusy and (FConflictFiles = 0) then
   begin
@@ -104,8 +105,8 @@ begin
     StashRowHeader: ;
     StashRowNew: StashChangesAsk(False);
     else
-      if FStashRows[AIndex] <= High(FStashes) then
-        CompareStash(FStashes[FStashRows[AIndex]]);
+      if FStashRows[AIndex] <= High(FListedStashes) then
+        CompareStash(FListedStashes[FStashRows[AIndex]]);
   end;
 end;
 
@@ -127,9 +128,9 @@ var
 
 begin
   if (AIndex < 0) or (AIndex > High(FStashRows)) or (FStashRows[AIndex] < 0) or
-    (FStashRows[AIndex] > High(FStashes)) then
+    (FStashRows[AIndex] > High(FListedStashes)) then
     Exit;
-  FMenuStash := FStashes[FStashRows[AIndex]];
+  FMenuStash := FListedStashes[FStashRows[AIndex]];
   Busy := StashBusy;
   FStashMenu.Items.Clear;
   Add(rsSmApply, smApply, not Busy);
