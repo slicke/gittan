@@ -1655,59 +1655,47 @@ begin
 end;
 {$endif}
 
-function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
-  out AOutput, AError: string; const AIndexFile: string;
+{ Runs AExe in ADir with AArgs, in the environment with ASkip (prefixes
+  like "NAME=") and the names of AEnv left out and AEnv added; false,
+  with nothing read, when AExe cannot be started. Both pipes are read
+  as the tool writes, so a long command's progress can be shown and
+  neither pipe fills up and blocks it; what is left once it has ended
+  is read after it. AStatus is its exit code. }
+function RunTool(const AExe, ADir: string; const AArgs, ASkip, AEnv: array of string;
+  out AOutput, AError: string; out AStatus: integer;
   AOnOutput: TGittanOutputEvent): boolean;
 var
   P: TProcess;
   Skip: array of string;
-  Status, i: integer;
+  i: integer;
   Got, OutOpen, ErrOpen: boolean;
 begin
   AOutput := '';
   AError := '';
+  AStatus := -1;
   P := TProcess.Create(nil);
   try
-    P.Executable := GGitExe;
+    P.Executable := AExe;
     P.CurrentDirectory := ADir;
-    P.Parameters.Add('-c');
-    P.Parameters.Add('core.quotepath=false');
-    { With it git writes a blank context line as an empty line, not a
-      space, and the readers of a hunk would lose the line. }
-    P.Parameters.Add('-c');
-    P.Parameters.Add('diff.suppressBlankEmpty=false');
     for i := 0 to High(AArgs) do
       P.Parameters.Add(ProcessArg(AArgs[i]));
-    SetLength(Skip, 4 + Length(AEnv));
-    Skip[0] := 'LC_ALL=';
-    Skip[1] := 'GIT_TERMINAL_PROMPT=';
-    Skip[2] := 'GIT_INDEX_FILE=';
-    Skip[3] := 'GIT_OPTIONAL_LOCKS=';
+    SetLength(Skip, Length(ASkip) + Length(AEnv));
+    for i := 0 to High(ASkip) do
+      Skip[i] := ASkip[i];
     for i := 0 to High(AEnv) do
-      Skip[4 + i] := Copy(AEnv[i], 1, Pos('=', AEnv[i]));
+      Skip[Length(ASkip) + i] := Copy(AEnv[i], 1, Pos('=', AEnv[i]));
     CopyEnvironment(P, Skip);
     for i := 0 to High(AEnv) do
       P.Environment.Add(AEnv[i]);
-    P.Environment.Add('LC_ALL=C');
-    P.Environment.Add('GIT_TERMINAL_PROMPT=0');
-    { git status refreshes the index when it may, under index.lock; the
-      watcher's poll would then make a commit started meanwhile fail. }
-    P.Environment.Add('GIT_OPTIONAL_LOCKS=0');
-    if AIndexFile <> '' then
-      P.Environment.Add('GIT_INDEX_FILE=' + AIndexFile);
     P.Options := [poNoConsole, poUsePipes];
-    { Both pipes are read as git writes, so a long command's progress
-      can be shown and neither pipe fills up and blocks git; what is
-      left once git has ended is read after it. }
     try
       P.Execute;
     except
-      AError := GitNotRunMessage(GGitExe);
       Exit(False);
     end;
-    { Nothing is written to git, so its input ends at once: a hook or an
-      alias that reads it would otherwise wait for ever, and the app with
-      it. }
+    { Nothing is written to the tool, so its input ends at once: a hook
+      or an alias that reads it would otherwise wait for ever, and the
+      app with it. }
     P.CloseInput;
     OutOpen := True;
     ErrOpen := True;
@@ -1723,26 +1711,70 @@ begin
     until False;
     while ReadPipe(P.Output, AOutput, AOnOutput) do;
     while ReadPipe(P.Stderr, AError, AOnOutput) do;
-    Status := P.ExitStatus;
+    AStatus := P.ExitStatus;
+    Result := True;
   finally
     P.Free;
   end;
-  { A failed git's reason is what it wrote, on both streams in their
-    order: a pre-push hook's output (husky's "pre-push script failed",
-    the tests it ran) is on stdout, git's own "failed to push some refs"
-    on stderr, and either alone says little. Progress is read as the
-    terminal last showed it. }
+end;
+
+{ A failed tool's reason is what it wrote, on both streams in their
+  order: a pre-push hook's output (husky's "pre-push script failed", the
+  tests it ran) is on stdout, git's own "failed to push some refs" on
+  stderr, and either alone says little. Progress is read as the terminal
+  last showed it. AOutput is emptied. }
+procedure JoinFailure(var AOutput, AError: string);
+begin
+  AError := Trim(ResolveReturns(AError));
+  AOutput := ResolveReturns(AOutput);
+  if Trim(AOutput) <> '' then
+    if AError = '' then
+      AError := Trim(AOutput)
+    else
+      AError := Trim(AOutput) + LineEnding + AError;
+  AOutput := '';
+end;
+
+function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
+  out AOutput, AError: string; const AIndexFile: string;
+  AOnOutput: TGittanOutputEvent): boolean;
+var
+  Args, Env: array of string;
+  Status, i: integer;
+begin
+  SetLength(Args, 4 + Length(AArgs));
+  Args[0] := '-c';
+  Args[1] := 'core.quotepath=false';
+  { With it git writes a blank context line as an empty line, not a
+    space, and the readers of a hunk would lose the line. }
+  Args[2] := '-c';
+  Args[3] := 'diff.suppressBlankEmpty=false';
+  for i := 0 to High(AArgs) do
+    Args[4 + i] := AArgs[i];
+  SetLength(Env, Length(AEnv) + 4);
+  for i := 0 to High(AEnv) do
+    Env[i] := AEnv[i];
+  i := Length(AEnv);
+  Env[i] := 'LC_ALL=C';
+  Env[i + 1] := 'GIT_TERMINAL_PROMPT=0';
+  { git status refreshes the index when it may, under index.lock; the
+    watcher's poll would then make a commit started meanwhile fail. }
+  Env[i + 2] := 'GIT_OPTIONAL_LOCKS=0';
+  if AIndexFile <> '' then
+    Env[i + 3] := 'GIT_INDEX_FILE=' + AIndexFile
+  else
+    SetLength(Env, i + 3);
+  { The user's own GIT_INDEX_FILE goes even when none is given. }
+  if not RunTool(GGitExe, ADir, Args, ['GIT_INDEX_FILE='], Env, AOutput, AError,
+    Status, AOnOutput) then
+  begin
+    AError := GitNotRunMessage(GGitExe);
+    Exit(False);
+  end;
   Result := Status = 0;
   if not Result then
   begin
-    AError := Trim(ResolveReturns(AError));
-    AOutput := ResolveReturns(AOutput);
-    if Trim(AOutput) <> '' then
-      if AError = '' then
-        AError := Trim(AOutput)
-      else
-        AError := Trim(AOutput) + LineEnding + AError;
-    AOutput := '';
+    JoinFailure(AOutput, AError);
     if IsMissingDeveloperTools(AError) then
       AError := MissingDeveloperToolsMessage;
   end;
@@ -1815,44 +1847,17 @@ end;
 function RunGitHubCli(const AExe, ADir: string; const AArgs: array of string;
   out AOutput, AError: string): boolean;
 var
-  P: TProcess;
-  Status, i: integer;
+  Status: integer;
 begin
-  AOutput := '';
-  AError := '';
-  P := TProcess.Create(nil);
-  try
-    P.Executable := AExe;
-    P.CurrentDirectory := ADir;
-    for i := 0 to High(AArgs) do
-      P.Parameters.Add(ProcessArg(AArgs[i]));
-    CopyEnvironment(P, ['GH_PROMPT_DISABLED=', 'GH_NO_UPDATE_NOTIFIER=']);
-    P.Environment.Add('GH_PROMPT_DISABLED=1');
-    P.Environment.Add('GH_NO_UPDATE_NOTIFIER=1');
-    P.Options := [poNoConsole];
-    if P.RunCommandLoop(AOutput, AError, Status) <> 0 then
-    begin
-      AError := 'Could not run ' + AExe;
-      Exit(False);
-    end;
-  finally
-    P.Free;
+  if not RunTool(AExe, ADir, AArgs, [], ['GH_PROMPT_DISABLED=1',
+    'GH_NO_UPDATE_NOTIFIER=1'], AOutput, AError, Status, nil) then
+  begin
+    AError := 'Could not run ' + AExe;
+    Exit(False);
   end;
-  { A failed git's reason is what it wrote, on both streams in their
-    order: a pre-push hook's output (husky's "pre-push script failed",
-    the tests it ran) is on stdout, git's own "failed to push some refs"
-    on stderr, and either alone says little. }
   Result := Status = 0;
   if not Result then
-  begin
-    AError := Trim(AError);
-    if Trim(AOutput) <> '' then
-      if AError = '' then
-        AError := Trim(AOutput)
-      else
-        AError := Trim(AOutput) + LineEnding + AError;
-    AOutput := '';
-  end;
+    JoinFailure(AOutput, AError);
 end;
 
 { The NUL-separated fields of the output of a git command run with -z; a
