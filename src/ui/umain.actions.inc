@@ -236,18 +236,57 @@ begin
 end;
 
 procedure TForm1.FindText(const AText: string; ANext, AFromStart: boolean);
+type
+  { A match: X and Y in the editor, Old when it is in the old side's
+    text. The two sides of Side by Side have the same rows, so the
+    matches are ordered by row, the old side first, then by column. }
+  TMatch = record
+    X, Y: integer;
+    Old: boolean;
+  end;
 var
-  Needle, S: UnicodeString;
-  Matches: array of TPoint;
-  Count, i, p, Idx: integer;
-  Start: TPoint;
+  Needle: UnicodeString;
+  Matches: array of TMatch;
+  Count, i, Idx: integer;
+  Start: TMatch;
+  Ed: TATSynEdit;
   Caret: TATCaretItem;
 
-  function Compare(const A, B: TPoint): integer;
+  function Compare(const A, B: TMatch): integer;
   begin
     Result := A.Y - B.Y;
     if Result = 0 then
+      Result := Ord(B.Old) - Ord(A.Old);
+    if Result = 0 then
       Result := A.X - B.X;
+  end;
+
+  procedure Search(AEd: TATSynEdit; ARow: integer; AOld: boolean);
+  var
+    S: UnicodeString;
+    p: integer;
+  begin
+    S := UnicodeLowerCase(AEd.Strings.Lines[ARow]);
+    p := Pos(Needle, S);
+    while (p > 0) and (Count < MaxMatches) do
+    begin
+      if Count = Length(Matches) then
+        SetLength(Matches, Count * 2);
+      Matches[Count].X := p - 1;
+      Matches[Count].Y := ARow;
+      Matches[Count].Old := AOld;
+      Inc(Count);
+      p := Pos(Needle, S, p + 1);
+    end;
+  end;
+
+  { The deleted lines of Side by Side are only in the old side's text;
+    its other lines are the new side's too and are found there. }
+  function DeletedRow(ARow: integer): boolean;
+  begin
+    Result := FEditOld.Visible and (ARow <= High(FRowsOld)) and
+      (ARow < FEditOld.Strings.Count) and (FRowsOld[ARow].Line >= 0) and
+      (FChangeLines[FRowsOld[ARow].Line][1] = '-');
   end;
 
 begin
@@ -263,22 +302,12 @@ begin
   SetLength(Matches, 64);
   for i := 0 to Edit.Strings.Count - 1 do
   begin
+    if DeletedRow(i) then
+      Search(FEditOld, i, True);
     { A hidden line of the change view cannot be shown; a folded one is
       unfolded when the match is in it. }
-    if not FoldingShown and Edit.IsLineFolded(i) then
-      Continue;
-    S := UnicodeLowerCase(Edit.Strings.Lines[i]);
-    p := Pos(Needle, S);
-    while p > 0 do
-    begin
-      if Count = Length(Matches) then
-        SetLength(Matches, Count * 2);
-      Matches[Count] := Point(p - 1, i);
-      Inc(Count);
-      if Count >= MaxMatches then
-        Break;
-      p := Pos(Needle, S, p + 1);
-    end;
+    if FoldingShown or not Edit.IsLineFolded(i) then
+      Search(Edit, i, False);
     if Count >= MaxMatches then
       Break;
   end;
@@ -287,10 +316,30 @@ begin
     FFindBar.SetMatches(0, 0);
     Exit;
   end;
-  Caret := Edit.Carets[0];
-  Start := Point(Caret.PosX, Caret.PosY);
-  if (Caret.EndY >= 0) and (Compare(Point(Caret.EndX, Caret.EndY), Start) < 0) then
-    Start := Point(Caret.EndX, Caret.EndY);
+  { The search goes on from the side the user is in, or else the side of
+    the last match. }
+  if FEditOld.Visible and (FEditOld.Focused or (FFindInOld and not Edit.Focused)) then
+    Ed := FEditOld
+  else
+    Ed := Edit;
+  Caret := Ed.Carets[0];
+  Start.X := Caret.PosX;
+  Start.Y := Caret.PosY;
+  Start.Old := Ed = FEditOld;
+  if (Caret.EndY >= 0) and ((Caret.EndY < Start.Y) or
+    ((Caret.EndY = Start.Y) and (Caret.EndX < Start.X))) then
+  begin
+    Start.X := Caret.EndX;
+    Start.Y := Caret.EndY;
+  end;
+  { A caret, not a selection, at the start of a new side's row has not
+    passed the old side's line beside it, where the view puts it on a
+    new file. }
+  if FEditOld.Visible and not Start.Old and (Start.X = 0) and (Caret.EndY < 0) then
+  begin
+    Start.Old := True;
+    Start.X := -1;
+  end;
   Idx := -1;
   if ANext then
   begin
@@ -315,9 +364,22 @@ begin
     if Idx < 0 then
       Idx := Count - 1;
   end;
+  FFindInOld := Matches[Idx].Old;
+  if FFindInOld then
+    Ed := FEditOld
+  else
+    Ed := Edit;
   { The caret lands after the match, the selection covers it. }
-  Edit.DoGotoPos(Point(Matches[Idx].X + Length(Needle), Matches[Idx].Y), Matches[Idx],
-    10, 5, True, FoldAction);
+  Ed.DoGotoPos(Point(Matches[Idx].X + Length(Needle), Matches[Idx].Y),
+    Point(Matches[Idx].X, Matches[Idx].Y), 10, 5, True, FoldAction);
+  { The old side follows the new one (SyncOldSide), so a match in the
+    old side scrolls the new side there first. }
+  if FFindInOld then
+  begin
+    Edit.LineTop := FEditOld.LineTop;
+    Edit.ColumnLeft := FEditOld.ColumnLeft;
+    Edit.Update;
+  end;
   SyncOldSide;
   FFindBar.SetMatches(Idx + 1, Count);
 end;

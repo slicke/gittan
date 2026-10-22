@@ -428,6 +428,8 @@ type
     FNav: TGittanChangeNav;
     FNavUpdateQueued: boolean;
     FFindBar: TGittanFindBar;
+    { The last match Find selected is in the old side of Side by Side. }
+    FFindInOld: boolean;
     { The symbol bar and the symbols it lists; the symbol index of the
       repository with the state of its building (see umain.index.inc:
       the files git lists, the next of them, how many there are, the one
