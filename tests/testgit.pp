@@ -2797,6 +2797,14 @@ begin
   AssertTrue(Branch, Pos(List[0].Id + '^..', Branch) = 1);
   AssertTrue('another commit', Branch <> List[0].Id + '^..' + List[0].Id);
   AssertEquals('a.txt'#10'new.txt'#10, Git(['diff', '--name-only', Branch]));
+  { Gittan's own commits need no identity of the user's: with a name
+    git refuses, the range still gets the commit with the untracked
+    files, and a snapshot is made. }
+  Git(['config', 'user.name', '<>']);
+  AssertTrue(FRepo.StashRange(List[0].Id, Msg));
+  AssertTrue('the commit with the untracked files', Msg <> List[0].Id + '^..' + List[0].Id);
+  AssertTrue(FRepo.Error, FRepo.TakeSnapshot(Msg));
+  Git(['config', '--unset', 'user.name']);
   AssertEquals('what the stash holds', 'untracked'#10, Git(['show',
     Copy(Branch, Pos('..', Branch) + 2, MaxInt) + ':new.txt']));
   AssertFalse(FRepo.StashRange('0000000000000000000000000000000000000000', Branch));

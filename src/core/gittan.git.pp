@@ -213,6 +213,7 @@ type
     function RunRemote(const AArgs: array of string): boolean;
     function IndexPath: string;
     function CopyIndex(const ATarget: string): boolean;
+    function CommitTree(const ATree, AParent, AMessage: string; out AId: string): boolean;
     function WholeTreeActive: boolean;
     function RebaseFilesFolder: string;
     procedure CleanRebaseFiles;
@@ -2052,6 +2053,25 @@ begin
   end;
 end;
 
+{ A commit Gittan makes for itself (a snapshot, a stash with its
+  untracked files), reachable from nothing and never shared: it gets an
+  identity of its own, since commit-tree refuses to run without a name
+  and an e-mail, which a fresh machine (or a CI runner) does not have.
+  commit-tree signs only with -S, whatever commit.gpgSign says. AParent
+  may be empty. }
+function TGittanRepo.CommitTree(const ATree, AParent, AMessage: string;
+  out AId: string): boolean;
+var
+  Args: array of string;
+begin
+  Args := ['-c', 'user.name=Gittan', '-c', 'user.email=gittan@localhost', 'commit-tree',
+    ATree, '-m', AMessage];
+  if AParent <> '' then
+    Args := Concat(Args, ['-p', AParent]);
+  Result := RunGit(FRoot, Args, AId);
+  AId := Trim(AId);
+end;
+
 function TGittanRepo.WholeTreeActive: boolean;
 begin
   Result := FWholeTree and (FBase <> '') and not IsRange;
@@ -2212,19 +2232,9 @@ begin
       RunGit(FRoot, ['write-tree'], Tree, Index);
     if not Result then
       Exit;
-    Tree := Trim(Tree);
-    { commit-tree refuses to run without a name and an e-mail, which a
-      fresh machine (or a CI runner) does not have; the snapshot is never
-      shared, so it gets an identity of its own. }
-    if RunGit(FRoot, ['rev-parse', '--verify', '-q', 'HEAD'], Head) then
-      Result := RunGit(FRoot, ['-c', 'user.name=Gittan', '-c',
-        'user.email=gittan@localhost', 'commit-tree', Tree, '-p', Trim(Head),
-        '-m', 'Gittan snapshot'], AId)
-    else
-      Result := RunGit(FRoot, ['-c', 'user.name=Gittan', '-c',
-        'user.email=gittan@localhost', 'commit-tree', Tree, '-m',
-        'Gittan snapshot'], AId);
-    AId := Trim(AId);
+    if not RunGit(FRoot, ['rev-parse', '--verify', '-q', 'HEAD'], Head) then
+      Head := '';
+    Result := CommitTree(Trim(Tree), Trim(Head), 'Gittan snapshot', AId);
   finally
     DeleteFile(Index);
     DeleteFile(Index + '.lock');
@@ -2827,9 +2837,9 @@ begin
     DeleteFile(Index);
     if RunGit(FRoot, ['read-tree', '-i', '-m', Empty, AId, AId + '^3'], Output, Index) and
       RunGit(FRoot, ['write-tree'], Tree, Index) and
-      RunGit(FRoot, ['commit-tree', Trim(Tree), '-p', AId + '^', '-m',
-      'Gittan: the stash ' + AId + ' with its untracked files'], Output) then
-      ARange := AId + '^..' + Trim(Output);
+      CommitTree(Trim(Tree), AId + '^', 'Gittan: the stash ' + AId +
+      ' with its untracked files', Output) then
+      ARange := AId + '^..' + Output;
   finally
     DeleteFile(Index);
   end;
