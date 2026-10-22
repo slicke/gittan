@@ -76,6 +76,10 @@ begin
       0) = mrYes then
       OpenURL(FUpdateRelease.Url);
   end
+  { A release tagged other than build-<n> cannot be compared, and says
+    nothing of whether this build is current. }
+  else if FUpdateRelease.Build < 0 then
+    BannerInfo(Format(rsUpdateNoBuild, [FUpdateRelease.Name, CurrentBuild]))
   else
     BannerInfo(Format(rsUpdateCurrent, [CurrentBuild]));
 end;

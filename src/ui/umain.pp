@@ -1553,6 +1553,7 @@ resourcestring
   rsUpdateLater = 'Remind Me in %d Days';
   rsUpdateNotNow = 'Not Now';
   rsUpdateCurrent = 'Gittan is up to date: build %d is the latest.';
+  rsUpdateNoBuild = 'The latest release, %s, has no build number to compare build %d with.';
   rsUpdateLocalBuild = 'This is a local build, so it is not compared with the releases. The latest release is %s.';
   rsUpdateOpenPage = 'Open Release Page';
   rsUpdateClose = 'Close';
