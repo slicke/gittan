@@ -4768,6 +4768,8 @@ begin
   SaveCommitDraft;
   StopCommitJob(False);
   StopRemoteJob(False);
+  { A failure's notice, which Try Again would run on this one. }
+  FNotice.Close;
   StopWatcher;
   StopIndexing;
   SaveIndex;

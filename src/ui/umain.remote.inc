@@ -355,6 +355,10 @@ begin
     0:
       begin
         FNotice.Close;
+        { The failure was of the repository that was open then; a clone
+          is of none. }
+        if (FRetryKind <> rkClone) and (FRetryRoot <> FRepo.Root) then
+          Exit;
         if FRetryKind = rkClone then
           StartClone(FRetryArg, FRetryRoot, FRetrySubmodules)
         { The dialog again, as the URL or path may be what was wrong. }
