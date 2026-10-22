@@ -15,6 +15,7 @@ type
     procedure TestAddNewestFirst;
     procedure TestLimit;
     procedure TestSaveLoad;
+    procedure TestSaveLoadLocale;
     procedure TestBrokenFile;
     procedure TestCaption;
   end;
@@ -88,6 +89,40 @@ begin
     L.Free;
     DeleteFile(FileName);
     RemoveDir(ExtractFileDir(FileName));
+  end;
+end;
+
+{ A locale whose time separator is not a colon (Finnish has a dot) neither
+  changes the file nor loses the snapshots. }
+procedure TSnapshotsTest.TestSaveLoadLocale;
+var
+  L: TGittanSnapshots;
+  FileName: string;
+  Lines: TStringList;
+  T: TDateTime;
+  Separator: char;
+begin
+  FileName := IncludeTrailingPathDelimiter(GetTempDir) + 'gittan-snapshots-locale-' +
+    IntToStr(GetProcessID) + '.txt';
+  T := EncodeDate(2026, 10, 13) + EncodeTime(17, 5, 9, 0);
+  Separator := DefaultFormatSettings.TimeSeparator;
+  DefaultFormatSettings.TimeSeparator := '.';
+  Lines := TStringList.Create;
+  L := TGittanSnapshots.Create;
+  try
+    L.Add('1111', T);
+    L.Save(FileName);
+    Lines.LoadFromFile(FileName);
+    AssertEquals('1111'#9'2026-10-13 17:05:09', Lines[1]);
+    L.Clear;
+    L.Load(FileName);
+    AssertEquals(1, L.Count);
+    AssertEquals(T, L[0].Time, 1 / 86400 / 2);
+  finally
+    DefaultFormatSettings.TimeSeparator := Separator;
+    L.Free;
+    Lines.Free;
+    DeleteFile(FileName);
   end;
 end;
 

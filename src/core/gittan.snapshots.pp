@@ -55,6 +55,17 @@ const
   Header = 'gittan-snapshots 1';
   TimeFormat = 'yyyy-mm-dd hh:nn:ss';
 
+{ The settings TimeFormat is written and read with, so the file is the same
+  in every locale (a locale's TimeSeparator would replace the colons). }
+function FileFormat: TFormatSettings;
+begin
+  Result := DefaultFormatSettings;
+  Result.ShortDateFormat := 'yyyy-mm-dd';
+  Result.DateSeparator := '-';
+  Result.LongTimeFormat := 'hh:nn:ss';
+  Result.TimeSeparator := ':';
+end;
+
 { TGittanSnapshots }
 
 function TGittanSnapshots.GetCount: integer;
@@ -115,16 +126,10 @@ var
   Line: string;
   Tab, i: integer;
   Time: TDateTime;
-  Fmt: TFormatSettings;
 begin
   Clear;
   if not FileExists(AFileName) then
     Exit;
-  Fmt := DefaultFormatSettings;
-  Fmt.ShortDateFormat := 'yyyy-mm-dd';
-  Fmt.DateSeparator := '-';
-  Fmt.LongTimeFormat := 'hh:nn:ss';
-  Fmt.TimeSeparator := ':';
   Lines := TStringList.Create;
   try
     try
@@ -140,7 +145,7 @@ begin
       Tab := Pos(#9, Line);
       if Tab = 0 then
         Continue;
-      if not TryStrToDateTime(Copy(Line, Tab + 1, MaxInt), Time, Fmt) then
+      if not TryStrToDateTime(Copy(Line, Tab + 1, MaxInt), Time, FileFormat) then
         Continue;
       SetLength(FItems, Length(FItems) + 1);
       FItems[High(FItems)].Id := Copy(Line, 1, Tab - 1);
@@ -156,13 +161,15 @@ end;
 procedure TGittanSnapshots.Save(const AFileName: string);
 var
   Lines: TStringList;
+  Fmt: TFormatSettings;
   i: integer;
 begin
+  Fmt := FileFormat;
   Lines := TStringList.Create;
   try
     Lines.Add(Header);
     for i := 0 to High(FItems) do
-      Lines.Add(FItems[i].Id + #9 + FormatDateTime(TimeFormat, FItems[i].Time));
+      Lines.Add(FItems[i].Id + #9 + FormatDateTime(TimeFormat, FItems[i].Time, Fmt));
     ForceDirectories(ExtractFileDir(AFileName));
     Lines.SaveToFile(AFileName);
   finally
