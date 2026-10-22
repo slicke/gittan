@@ -4835,20 +4835,30 @@ begin
     CleanRebaseFiles;
 end;
 
+{ The comment lines git wrote start with core.commentString or
+  core.commentChar, # when neither is set. "auto" has git pick a
+  character the message does not start a line with, which cannot be
+  told afterwards; # stands in then. }
 function TGittanRepo.MergeMessage: string;
 var
-  Dir, Line: string;
+  Dir, Line, Comment: string;
   Lines: TStringList;
 begin
   Result := '';
   Dir := GitDir;
   if (Dir = '') or not FileExists(IncludeTrailingPathDelimiter(Dir) + 'MERGE_MSG') then
     Exit;
+  if not RunGit(FRoot, ['config', '--get', 'core.commentString'], Comment) and
+    not RunGit(FRoot, ['config', '--get', 'core.commentChar'], Comment) then
+    Comment := '';
+  Comment := TrimRight(Comment);
+  if (Comment = '') or (Comment = 'auto') then
+    Comment := '#';
   Lines := TStringList.Create;
   try
     Lines.LoadFromFile(IncludeTrailingPathDelimiter(Dir) + 'MERGE_MSG');
     for Line in Lines do
-      if (Line = '') or (Line[1] <> '#') then
+      if not Line.StartsWith(Comment) then
         Result := Result + Line + #10;
   finally
     Lines.Free;

@@ -2048,10 +2048,13 @@ var
   Branch: string;
 begin
   Branch := MakeDiverged(Self);
+  { git comments the conflicts out of the message with this. }
+  Git(['config', 'core.commentChar', ';']);
   AssertTrue(FRepo.Open(FDir));
   GitStops(FDir, ['merge', 'topic']);
   AssertEquals('merging', FRepo.Operation);
   AssertTrue(FRepo.MergeMessage, Pos('Merge branch ''topic''', FRepo.MergeMessage) = 1);
+  AssertEquals('the comments left out', 0, Pos('Conflicts', FRepo.MergeMessage));
   AssertFalse('conflicts left', FRepo.ContinueOperation);
   AssertEquals('merging', FRepo.Operation);
   AssertTrue(FRepo.Error, FRepo.ResolveConflict('a.txt', csTheirs));
