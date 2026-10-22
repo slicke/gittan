@@ -7,8 +7,10 @@ Usage:
 
  - Finds lazbuild as Trndi's make.ps1 does: LAZBUILD, then PATH, then
    C:\lazarus\lazbuild.exe and C:\fpcupdeluxe\lazarus\lazbuild.exe.
- - With no fpc on PATH (fpcupdeluxe puts none there), uses the fpc\bin\<cpu>-win64
-   found beside lazbuild's directory, for the test target.
+ - With no fpc on PATH (neither installer puts it there), uses the one that
+   came with lazbuild, for the test target: fpc\bin\<cpu>-win64 beside
+   fpcupdeluxe's lazarus folder, or fpc\<version>\bin\<cpu>-win64 inside the
+   Lazarus installer's folder.
  - Every build copies the lexers into lexlib\ first, as the Makefile does.
  - Arguments after a target go to lazbuild (to Gittan for run, to the test
    runner for test); unknown arguments are forwarded to lazbuild as they are.
@@ -39,15 +41,24 @@ function Find-Lazbuild {
 }
 $laz = Find-Lazbuild
 
-# fpcupdeluxe keeps FPC beside its Lazarus, in fpc\bin\<cpu>-win64, and puts
-# neither on PATH; lazbuild finds it through its lazarus.cfg, the test target
-# calls fpc by name. PATH changes for this process only.
+# fpcupdeluxe keeps FPC beside its Lazarus, in fpc\bin\<cpu>-win64, and the
+# Lazarus installer inside it, in fpc\<version>\bin\<cpu>-win64; neither
+# puts it on PATH. lazbuild finds it through its lazarus.cfg, the test target
+# calls fpc by name. The native CPU's first, the newest version first. PATH
+# changes for this process only.
 if ($laz -and -not (Get-Command fpc -ErrorAction SilentlyContinue)) {
-    $fpcRoot = Join-Path (Split-Path -Parent (Split-Path -Parent $laz)) 'fpc\bin'
+    $lazDir = Split-Path -Parent $laz
     $nativeCpu = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'aarch64' } else { 'x86_64' }
-    $fpcBin = @(Join-Path $fpcRoot "$nativeCpu-win64") +
-        @(Get-ChildItem $fpcRoot -Directory -ErrorAction SilentlyContinue |
-            ForEach-Object { $_.FullName }) |
+    $binRoots = @(Join-Path (Split-Path -Parent $lazDir) 'fpc\bin') +
+        @(Get-ChildItem (Join-Path $lazDir 'fpc') -Directory -ErrorAction SilentlyContinue |
+            Sort-Object { try { [version]$_.Name } catch { [version]'0.0' } } -Descending |
+            ForEach-Object { Join-Path $_.FullName 'bin' })
+    $fpcBin = $binRoots | ForEach-Object {
+            $root = $_
+            @(Join-Path $root "$nativeCpu-win64") +
+                @(Get-ChildItem $root -Directory -ErrorAction SilentlyContinue |
+                    ForEach-Object { $_.FullName })
+        } |
         Where-Object { Test-Path (Join-Path $_ 'fpc.exe') } | Select-Object -First 1
     if ($fpcBin) { $env:PATH = "$fpcBin;$env:PATH" }
 }
