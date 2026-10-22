@@ -5532,6 +5532,12 @@ begin
       FBase + '^{commit}'], Id) then
       Result := Result + ' ' + Trim(Id);
     Result := Result + #10;
+    { The upstream, which a fetch moves alone and the ahead and behind
+      counts follow, and what git is in the middle of, which a bisect
+      started on a clean tree changes alone. }
+    if RunGit(FRoot, ['rev-parse', '--verify', '-q', '@{upstream}'], Id) then
+      Result := Result + 'upstream ' + Trim(Id) + #10;
+    Result := Result + 'operation ' + Operation + #10;
     { The stashes, which the status bar counts and lists. }
     if RunGit(FRoot, ['stash', 'list', '--format=%H'], Id) then
       Result := Result + 'stash ' + StringReplace(Trim(Id), #10, ' ', [rfReplaceAll]) + #10;

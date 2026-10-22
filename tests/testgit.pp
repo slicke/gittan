@@ -620,6 +620,20 @@ begin
   Git(['add', 'a.txt']);
   A := FRepo.Fingerprint;
   AssertTrue('staging seen', A <> B);
+  { A fetch moves the upstream alone, which the ahead and behind counts
+    follow. }
+  Git(['branch', 'up']);
+  Git(['branch', '-q', '--set-upstream-to=up']);
+  A := FRepo.Fingerprint;
+  Git(['update-ref', 'refs/heads/up', Trim(Git(['commit-tree', 'HEAD^{tree}', '-p', 'HEAD',
+    '-m', 'fetched'])), 'HEAD']);
+  B := FRepo.Fingerprint;
+  AssertTrue('a moved upstream seen', A <> B);
+  { A bisect started on a clean tree moves nothing else. }
+  Git(['bisect', 'start']);
+  A := FRepo.Fingerprint;
+  AssertTrue('an operation begun seen', A <> B);
+  Git(['bisect', 'reset']);
 end;
 
 { A snapshot holds the untracked files, and the whole tree comparison
