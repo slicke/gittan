@@ -205,6 +205,9 @@ begin
   AssertTrue(AddIgnorePattern(Name, '*.o'));
   AssertEquals('a line already there is not added again', '*.o' + LineEnding,
     ReadAll('.gitignore'));
+  AssertTrue(AddIgnorePattern(Name, '*.O'));
+  AssertEquals('another case is another pattern', '*.o' + LineEnding + '*.O' + LineEnding,
+    ReadAll('.gitignore'));
 end;
 
 initialization
