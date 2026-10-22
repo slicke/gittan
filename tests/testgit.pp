@@ -762,6 +762,18 @@ begin
   FRepo.DiffSides(Left, Right);
   AssertEquals('first', Left);
   AssertEquals('HEAD', Right);
+
+  { A three-dot range is diffed from the merge base, not from its left
+    end. }
+  Git(['tag', 'second']);
+  Git(['checkout', '-q', '-f', 'first']);
+  WriteFile('b.txt', 'b'#10);
+  Commit('third');
+  Git(['tag', 'third']);
+  FRepo.Base := 'second...third';
+  FRepo.DiffSides(Left, Right);
+  AssertEquals('the merge base', Trim(Git(['rev-parse', 'first'])), Left);
+  AssertEquals('third', Right);
 end;
 
 { The range of a commit runs from its parent; a root commit, which has

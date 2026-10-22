@@ -782,7 +782,9 @@ type
     function FileChanges(const APath: string; ALines: TStrings): boolean;
     {** The two commits a diff of a file is between: ALeft is Base (HEAD
       by default), ARight the right commit of a range, or empty for the
-      work tree. }
+      work tree. For a three-dot range A...B ALeft is the merge base of
+      A and B, which is what git diffs B against (A itself when git
+      finds none). }
     procedure DiffSides(out ALeft, ARight: string);
     {** The bytes of APath as it is in the commit ARef (`git cat-file
       blob`, no filter applied), or in the work tree when ARef is empty.
@@ -5579,9 +5581,16 @@ end;
   Blame
   --------------------------------------------------------------------------- }
 procedure TGittanRepo.DiffSides(out ALeft, ARight: string);
+var
+  Output: string;
 begin
   if IsRange then
-    SplitRange(ALeft, ARight)
+  begin
+    SplitRange(ALeft, ARight);
+    if (Pos('...', FBase) > 0) and RunGit(FRoot, ['merge-base', ALeft, ARight], Output) and
+      (Trim(Output) <> '') then
+      ALeft := Trim(Output);
+  end
   else
   begin
     ALeft := DiffBase;
