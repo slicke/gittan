@@ -629,6 +629,13 @@ type
       again at a later commit, which leaves it rebasing with new
       conflicts and is no failure. }
     function ContinueOperation: boolean;
+    {** The tracked files changed in the work tree besides the conflicts
+      resolved at this stop (the paths git keeps resolve-undo stages
+      for), which ContinueOperation's `add -u` would take into the
+      commit too, sorted. None at a stop without conflicts, such as an
+      edit stop of an interactive rebase, where the changes are what
+      the commit is stopped for. }
+    function ContinueExtras: TStringArray;
     {** Leaves out the commit a rebase, cherry-pick, revert or am
       stopped at (`--skip`) and goes on with the rest. }
     function SkipOperation: boolean;
@@ -4695,6 +4702,50 @@ begin
   { Stopped at a later commit with conflicts of its own: going on worked. }
   Result := (Operation <> '') and RunGit(FRoot, ['ls-files', '-u'], Output) and
     (Trim(Output) <> '');
+end;
+
+function TGittanRepo.ContinueExtras: TStringArray;
+var
+  Output, Err, Entry: string;
+  Fields, Resolved: TStringList;
+  Tab: integer;
+begin
+  Result := nil;
+  if FRoot = '' then
+    Exit;
+  Fields := TStringList.Create;
+  Resolved := TStringList.Create;
+  try
+    Resolved.Sorted := True;
+    Resolved.Duplicates := dupIgnore;
+    Resolved.CaseSensitive := True;
+    if not RunGitIn(FRoot, ['ls-files', '--resolve-undo', '-z'], Output, Err) then
+      Exit;
+    SplitNul(Output, Fields);
+    for Entry in Fields do
+    begin
+      { "<mode> <id> <stage>\t<path>", one line for each stage kept }
+      Tab := Pos(#9, Entry);
+      if Tab > 0 then
+        Resolved.Add(Copy(Entry, Tab + 1, MaxInt));
+    end;
+    if Resolved.Count = 0 then
+      Exit;
+    if not RunGitIn(FRoot, ['diff', '--name-only', '-z'], Output, Err) then
+      Exit;
+    Fields.Clear;
+    SplitNul(Output, Fields);
+    Fields.Sort;
+    for Entry in Fields do
+      if Resolved.IndexOf(Entry) < 0 then
+      begin
+        SetLength(Result, Length(Result) + 1);
+        Result[High(Result)] := Entry;
+      end;
+  finally
+    Resolved.Free;
+    Fields.Free;
+  end;
 end;
 
 function TGittanRepo.SkipOperation: boolean;

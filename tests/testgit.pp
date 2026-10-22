@@ -81,6 +81,7 @@ type
     procedure TestResolveRebase;
     procedure TestMarkResolvedAndAbort;
     procedure TestUnresolve;
+    procedure TestContinueExtras;
     procedure TestSkip;
     procedure TestCommitActions;
     procedure TestCommitActionConflicts;
@@ -2058,6 +2059,32 @@ begin
   AssertFalse(FRepo.Unresolve('new.txt'));
 end;
 
+{ At a stop with conflicts, the files changed besides them; the
+  resolved ones are no extras, edited again or not. }
+procedure TGitRepoTest.TestContinueExtras;
+var
+  Branch: string;
+  Extras: TStringArray;
+begin
+  Branch := MakeDiverged(Self);
+  AssertTrue(FRepo.Open(FDir));
+  Git(['checkout', '-q', 'topic']);
+  GitStops(FDir, ['rebase', Branch]);
+  AssertTrue(FRepo.Error, FRepo.ResolveConflict('a.txt', csMine));
+  AssertTrue(FRepo.Error, FRepo.ResolveConflict('del.txt', csMine));
+  AssertEquals(0, Length(FRepo.ContinueExtras));
+  WriteFile('a.txt', 'topic, edited'#10);
+  WriteFile('staged.txt', 'new'#10);
+  WriteFile('dir sp/fil å.txt', 'b'#10);
+  Extras := FRepo.ContinueExtras;
+  AssertEquals(2, Length(Extras));
+  AssertEquals('dir sp/fil å.txt', Extras[0]);
+  AssertEquals('staged.txt', Extras[1]);
+  AssertTrue(FRepo.Error, FRepo.ContinueOperation);
+  AssertEquals('', FRepo.Operation);
+  AssertEquals('new', Trim(Git(['show', 'HEAD:staged.txt'])));
+end;
+
 procedure TGitRepoTest.TestSkip;
 var
   Branch: string;
@@ -2275,6 +2302,7 @@ begin
   AssertEquals('rebasing', FRepo.Operation);
   AssertEquals(Steps[0].Hash, FRepo.RebaseStoppedAt);
   WriteFile('b.txt', 'edited'#10);
+  AssertEquals('an edit stop takes them unasked', 0, Length(FRepo.ContinueExtras));
   AssertTrue(FRepo.Error, FRepo.ContinueOperation);
   AssertEquals('', FRepo.Operation);
   AssertEquals('', FRepo.RebaseStoppedAt);

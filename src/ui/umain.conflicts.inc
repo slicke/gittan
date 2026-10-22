@@ -573,13 +573,32 @@ begin
   ResolvePath(FContextPath, 2);
 end;
 
+{ The tracked changes go into the commit with the resolved conflicts
+  (a rebase goes on with none left out); others than the conflicts' are
+  asked about first, as they may be work of another kind. An edit stop
+  has no conflicts, and its changes are what it stopped for. }
 procedure TForm1.ContinueOperationClick;
 var
-  Noun, StoppedAt: string;
+  Noun, StoppedAt, Shown: string;
+  Extras: TStringArray;
+  i: integer;
 begin
   if (FRepo.Root = '') or not ContinueMode or (FCommitJob <> nil) or (FRemoteJob <> nil) then
     Exit;
   Noun := OperationNoun(FOperation);
+  Extras := FRepo.ContinueExtras;
+  if Extras <> nil then
+  begin
+    Shown := '';
+    for i := 0 to Min(Length(Extras), 10) - 1 do
+      Shown := Shown + LineEnding + '  ' + Extras[i];
+    if Length(Extras) > 10 then
+      Shown := Shown + LineEnding + '  ' + Format(rsSwitchMore, [Length(Extras) - 10]);
+    if QuestionDlg(rsContinueExtrasTitle, Format(rsContinueExtrasAsk, [Shown]), mtConfirmation,
+      [mrYes, rsContinueExtrasButton, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'],
+      0) <> mrYes then
+      Exit;
+  end;
   Screen.Cursor := crHourGlass;
   try
     if not FRepo.ContinueOperation then

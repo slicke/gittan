@@ -1946,6 +1946,11 @@ resourcestring
   rsCommitMergeButton = 'Commit Merge';
   rsContinueNote = 'Continue goes on with %s.';
   rsContinueFailed = 'Could not continue %s';
+  rsContinueExtrasTitle = 'Other Changes';
+  rsContinueExtrasAsk = 'Besides the resolved conflicts, these files have changes that ' +
+    'Continue puts in the commit too:%s' + LineEnding + LineEnding +
+    'To keep them out, cancel and put them away first, in a stash or with Discard.';
+  rsContinueExtrasButton = 'Take Them Too';
   rsContinued = 'Finished %s';
   rsContinuedOn = 'Went on with %s';
   rsStoppedAgain = 'Stopped again with conflicts';
