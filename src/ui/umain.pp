@@ -1085,6 +1085,8 @@ type
     procedure PullChipClick(const AScreenRect: TRect);
     procedure PullPopupPick(Sender: TObject; AIndex: integer);
     procedure ComparePull(const APull: TGittanPullRequest);
+    procedure StartPullFetch(ANumber: integer; const ARemote, ABaseRef: string);
+    procedure PullFetchDone(AJob: TGittanRemoteJob);
     procedure SwitchBranch(const ABranch: string; ADetach: boolean = False);
     function ContextFullPath: string;
     procedure MenuCopyPathClick(Sender: TObject);
@@ -2006,6 +2008,7 @@ resourcestring
   rsSubSyncFailed = 'Could not sync the submodule URLs';
   rsSubAdding = 'Adding the submodule %s...';
   rsNoticeSubAdding = 'Adding the submodule %s';
+  rsNoticeFetchingPull = 'Fetching pull request #%d';
   rsSubAddedOk = 'Added the submodule %s; commit it with .gitmodules';
   rsSubAddFailed = 'The submodule could not be added';
   rsSubNone = 'none';
@@ -2264,7 +2267,7 @@ const
   rsOpenPull = 'Open Pull Re&quest';
   rsCopyPullUrl = 'Copy Pull Request &URL';
   rsFetchingPull = 'Fetching pull request #%d...';
-  rsPullFailed = 'Could not fetch pull request #%d: %s';
+  rsPullFailed = 'Could not fetch pull request #%d';
   { Bookmark kinds in the editor's second bookmark list, used only for the
     line backgrounds of a diff: an added line, a deleted one, a gap row
     standing for hidden lines, and a filler row of the side-by-side

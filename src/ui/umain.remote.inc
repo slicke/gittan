@@ -119,6 +119,7 @@ begin
       else
         Result := Format(rsNoticeSubUpdating, [FRemoteJob.Arg]);
     rkSubmoduleAdd: Result := Format(rsNoticeSubAdding, [FRemoteJob.Path]);
+    rkFetchPull: Result := Format(rsNoticeFetchingPull, [StrToIntDef(FRemoteJob.Arg, 0)]);
   end;
 end;
 
@@ -189,6 +190,11 @@ begin
   RefreshRepository;
   UpdateRemoteItems;
   UpdateCommitState;
+  if Job.Kind = rkFetchPull then
+  begin
+    PullFetchDone(Job);
+    Exit;
+  end;
   if Job.Kind in [rkSubmoduleUpdate, rkSubmoduleAdd] then
   begin
     SubmoduleRemoteDone(Job);
@@ -331,6 +337,11 @@ begin
         Title := rsSubAddFailed;
         Again := rsTryAgain;
       end;
+    rkFetchPull:
+      begin
+        Title := Format(rsPullFailed, [StrToIntDef(AJob.Arg, 0)]);
+        Again := rsTryAgain;
+      end;
     else
       Title := Format(rsDeleteRemoteFailed, [AJob.Arg]);
       Again := rsTryAgain;
@@ -364,6 +375,8 @@ begin
         { The dialog again, as the URL or path may be what was wrong. }
         else if FRetryKind = rkSubmoduleAdd then
           AddSubmoduleAsk(FRetryArg, FRetryPath, FRetryBranch)
+        else if FRetryKind = rkFetchPull then
+          StartPullFetch(StrToIntDef(FRetryArg, 0), FRetryRemote, FRetryBranch)
         else
           StartRemote(FRetryKind, FRetryMode, FRetryArg, FRetryRemote);
       end;

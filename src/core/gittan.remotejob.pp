@@ -14,7 +14,7 @@ uses
 type
   {** What a TGittanRemoteJob does. }
   TGittanRemoteKind = (rkFetch, rkPull, rkPush, rkDeleteRemote, rkForcePush, rkPushBranch,
-    rkPushTag, rkDeleteRemoteTag, rkClone, rkSubmoduleUpdate, rkSubmoduleAdd);
+    rkPushTag, rkDeleteRemoteTag, rkClone, rkSubmoduleUpdate, rkSubmoduleAdd, rkFetchPull);
 
   {** Runs a fetch, a pull (the way Mode says), a push, a push with
     --force-with-lease, or the deletion of the remote branch Arg stands
@@ -26,7 +26,9 @@ type
     from the URL Arg, with its submodules when Submodules is set. A
     submodule update updates the submodule at the path Arg, or every one
     with Arg empty; a submodule add clones the URL Arg into Path,
-    following Branch.
+    following Branch. A pull request fetch fetches the pull request
+    numbered Arg from Remote with its base branch Branch, and gives the
+    ref its head is fetched to in HeadRef.
     OnDone is called in the main thread when it is done, unless the job
     has been stopped. A job is never broken off, as a pull stopped
     halfway would leave a merge behind: Stop only drops the handler, and
@@ -38,7 +40,7 @@ type
     FKind: TGittanRemoteKind;
     FMode: TGittanPullMode;
     FOk, FDiverged, FRejected, FStale, FUnseen, FSubmodules: boolean;
-    FError: string;
+    FError, FHeadRef: string;
     FOnDone, FOnOutput: TNotifyEvent;
     FLock: TRTLCriticalSection;
     FProgress: string;
@@ -85,6 +87,8 @@ type
       brought in that were never in the branch: a pull would take them
       in first. }
     property Unseen: boolean read FUnseen;
+    {** Where a pull request fetch put the pull request's head. }
+    property HeadRef: string read FHeadRef;
     {** git's reason, when not Ok. }
     property Error: string read FError;
     {** What git and the hooks it runs have written so far, as a
@@ -242,6 +246,8 @@ begin
         rkDeleteRemoteTag: FOk := Repo.DeleteRemoteTag(FRemote, FArg);
         rkSubmoduleUpdate: FOk := Repo.UpdateSubmodules(FArg);
         rkSubmoduleAdd: FOk := Repo.AddSubmodule(FArg, FPath, FBranch);
+        rkFetchPull: FOk := Repo.FetchPullRequest(FRemote, StrToIntDef(FArg, 0), FBranch,
+            FHeadRef);
         rkClone: ;
       end;
     if not FOk then

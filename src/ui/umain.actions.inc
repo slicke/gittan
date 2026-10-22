@@ -2000,27 +2000,45 @@ begin
 end;
 
 { Fetches APull and compares with it: the range from where it left its
-  base to its head, what GitHub shows as its changes. }
+  base to its head, what GitHub shows as its changes. The fetch is a
+  remote job (umain.remote.inc), so the window goes on while it runs;
+  PullFetchDone compares. Not while another remote job or a commit
+  runs. }
 procedure TForm1.ComparePull(const APull: TGittanPullRequest);
-var
-  Pull: TGittanPullRequest;
-  Remote, HeadRef: string;
 begin
   if FRepo.Root = '' then
     Exit;
-  Pull := APull;
-  FStatus.ShowMessage(Format(rsFetchingPull, [Pull.Number]), stNormal, 0);
-  Remote := FRepo.RemoteFor(RepoPathOfUrl(Pull.Url));
-  FStatus.ClearMessage;
-  if not FRepo.FetchPullRequest(Remote, Pull.Number, Pull.BaseRef, HeadRef) then
+  StartPullFetch(APull.Number, FRepo.RemoteFor(RepoPathOfUrl(APull.Url)), APull.BaseRef);
+end;
+
+procedure TForm1.StartPullFetch(ANumber: integer; const ARemote, ABaseRef: string);
+begin
+  if (FRepo.Root = '') or (FRemoteJob <> nil) or (FCommitJob <> nil) then
+    Exit;
+  FNoticeHook := False;
+  FRemoteHead := '';
+  FRemoteAhead := FAhead;
+  FRemoteJob := TGittanRemoteJob.Create(FRepo.Root, rkFetchPull, pmAuto, IntToStr(ANumber),
+    ARemote);
+  FRemoteJob.Branch := ABaseRef;
+  FRemoteJob.OnDone := @RemoteJobDone;
+  FRemoteJob.OnOutput := @RemoteJobOutput;
+  FRemoteJob.Start;
+  FStatus.ShowMessage(Format(rsFetchingPull, [ANumber]), stNormal, 0);
+  FNoticeTimer.Enabled := True;
+  UpdateRemoteItems;
+  UpdateCommitState;
+end;
+
+procedure TForm1.PullFetchDone(AJob: TGittanRemoteJob);
+begin
+  if not AJob.Ok then
   begin
-    FSummary.Notice := Format(rsPullFailed, [Pull.Number, FRepo.Error]);
-    ShowSummary;
-    UpdateStatus;
+    ShowRemoteFailure(AJob, False);
     Exit;
   end;
-  FPullRange := Remote + '/' + Pull.BaseRef + '...' + HeadRef;
-  FPullNumber := Pull.Number;
+  FPullRange := AJob.Remote + '/' + AJob.Branch + '...' + AJob.HeadRef;
+  FPullNumber := StrToIntDef(AJob.Arg, 0);
   SetBase(FPullRange);
 end;
 
