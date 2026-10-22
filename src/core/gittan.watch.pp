@@ -28,6 +28,7 @@ type
     FWake: PRTLEvent;
     FInterval: integer;
     FLast: string;
+    FFailed: boolean;
     FSnapshot: TGittanRepoSnapshot;
     FOnChange: TNotifyEvent;
     procedure Notify;
@@ -86,10 +87,13 @@ end;
   through Synchronize, not Queue, so the thread is held while the main
   thread reads FSnapshot and does not overwrite it on the next tick. A poll
   that fails (a file gone between git's listing and the read, say) is
-  tried again on the next tick instead of ending the thread. }
+  tried again on the next tick instead of ending the thread. So is a
+  snapshot that fails: its fingerprint is not kept, and the form hears
+  of the failure once, not on every tick it goes on failing. }
 procedure TGittanWatcher.Execute;
 var
   Fingerprint: string;
+  Ok: boolean;
 begin
   if not FRepo.Open(FRoot) then
     Exit;
@@ -105,11 +109,14 @@ begin
       Fingerprint := FRepo.Fingerprint;
       if Fingerprint <> FLast then
       begin
-        FRepo.Snapshot(FSnapshot);
+        Ok := FRepo.Snapshot(FSnapshot);
         if Terminated then
           Break;
-        FLast := Fingerprint;
-        Synchronize(@Notify);
+        if Ok then
+          FLast := Fingerprint;
+        if Ok or not FFailed then
+          Synchronize(@Notify);
+        FFailed := not Ok;
       end;
     except
     end;
