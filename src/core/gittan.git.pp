@@ -615,6 +615,11 @@ type
     {** Marks APath resolved as it is in the work tree (`git add`), or
       deleted when it is gone from there (`git rm`). }
     function MarkResolved(const APath: string): boolean;
+    {** Puts APath back in conflict after MarkResolved or `git add`: the
+      base, ours and theirs return to the index from what git kept of
+      them when it was resolved (`git update-index --unresolve`), the
+      work tree as it is. False when git kept nothing to bring back. }
+    function Unresolve(const APath: string): boolean;
     {** Goes on with what git is in the middle of (Operation), once the
       conflicts are resolved: the tracked files' changes are staged
       first (`git add -u`), since they are what the stopped commit
@@ -4622,6 +4627,20 @@ begin
     Result := RunGit(FRoot, ['--literal-pathspecs', 'add', '--', APath], Output)
   else
     Result := RunGit(FRoot, ['--literal-pathspecs', 'rm', '-q', '--', APath], Output);
+end;
+
+function TGittanRepo.Unresolve(const APath: string): boolean;
+var
+  Output: string;
+begin
+  if FRoot = '' then
+    Exit(False);
+  if not RunGit(FRoot, ['update-index', '--unresolve', '--', APath], Output) then
+    Exit(False);
+  { git says nothing when it has no stages kept for the path. }
+  Result := ConflictStages(FRoot, APath) <> '';
+  if not Result then
+    FError := 'git kept no conflict to bring back';
 end;
 
 { The command of the operation in progress, '' for none (or bisect,

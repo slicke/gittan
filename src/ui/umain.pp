@@ -2099,6 +2099,7 @@ resourcestring
   rsDiscardUndone = 'Put the change at line %d of %s back';
   rsDiscardFailed = 'Could not discard the change: %s';
   rsUndoDiscardFailed = 'Could not put the change back: %s';
+  rsUnresolveFailed = 'The markers are back in %s, but git still counts it resolved: %s';
   rsGitignoreLexer = 'Gitignore';
   rsCopyPath = 'Copy &Path';
   rsCopyRelativePath = 'Copy &Relative Path';

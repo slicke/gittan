@@ -80,6 +80,7 @@ type
     procedure TestResolveMerge;
     procedure TestResolveRebase;
     procedure TestMarkResolvedAndAbort;
+    procedure TestUnresolve;
     procedure TestSkip;
     procedure TestCommitActions;
     procedure TestCommitActionConflicts;
@@ -2030,6 +2031,31 @@ begin
   AssertEquals('', FRepo.Operation);
   AssertEquals('main'#10, FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
   AssertFalse('nothing to abort', FRepo.AbortOperation);
+end;
+
+{ Undo Discard of the pick that took a file's last conflict: the markers
+  are written back and the file is in conflict again, edited or deleted. }
+procedure TGitRepoTest.TestUnresolve;
+begin
+  MakeDiverged(Self);
+  AssertTrue(FRepo.Open(FDir));
+  GitStops(FDir, ['merge', 'topic']);
+  WriteFile('a.txt', 'both'#10);
+  AssertTrue(FRepo.Error, FRepo.MarkResolved('a.txt'));
+  DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'del.txt');
+  AssertTrue(FRepo.Error, FRepo.MarkResolved('del.txt'));
+  AssertEquals('', Git(['ls-files', '-u']));
+  WriteFile('a.txt', '<<<<<<< HEAD'#10'main'#10'======='#10'topic'#10'>>>>>>> topic'#10);
+  AssertTrue(FRepo.Error, FRepo.Unresolve('a.txt'));
+  AssertEquals('<<<<<<< HEAD'#10'main'#10'======='#10'topic'#10'>>>>>>> topic'#10,
+    FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
+  AssertTrue(FRepo.Error, FRepo.Unresolve('del.txt'));
+  AssertEquals(5, Length(Trim(Git(['ls-files', '-u'])).Split([#10])));
+  AssertFalse('conflicts again', FRepo.ContinueOperation);
+  { Nothing kept for a file that never was in conflict. }
+  WriteFile('new.txt', 'new'#10);
+  Git(['add', 'new.txt']);
+  AssertFalse(FRepo.Unresolve('new.txt'));
 end;
 
 procedure TGitRepoTest.TestSkip;

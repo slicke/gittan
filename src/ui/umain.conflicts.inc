@@ -313,6 +313,8 @@ begin
     Marked := FRepo.MarkResolved(Path);
     if not Marked then
       StatusNote(Format(rsResolveFailed, [Path, FRepo.Error]), True);
+    { Undo Discard puts the conflict back in the index too. }
+    FDiscards[High(FDiscards)].Resolved := Marked;
   end;
   RefreshRepository;
   UpdateDiscardItems;

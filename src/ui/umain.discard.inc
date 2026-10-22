@@ -500,7 +500,9 @@ end;
 
 { Writes the latest discarded block back, shows its file when another
   is shown, and refreshes. A block the file no longer holds the lines of
-  is dropped too: an older one is no better. }
+  is dropped too: an older one is no better. The pick that took a
+  file's last conflict marked it resolved; its markers back, the file is
+  in conflict again, or a commit would take them. }
 procedure TForm1.MenuUndoDiscardClick(Sender: TObject);
 var
   B: TGittanDiscard;
@@ -520,10 +522,14 @@ begin
   end;
   Path := ExtractRelativePath(IncludeTrailingPathDelimiter(FRepo.Root), B.FileName);
   Path := StringReplace(Path, PathDelim, '/', [rfReplaceAll]);
+  Ok := not B.Resolved or FRepo.Unresolve(Path);
   RefreshRepository;
   if (FView <> gvChanges) or (FCurrentPath <> Path) then
     ShowRepoFile(Path);
-  StatusNote(Format(rsDiscardUndone, [B.Line, Path]));
+  if Ok then
+    StatusNote(Format(rsDiscardUndone, [B.Line, Path]))
+  else
+    StatusNote(Format(rsUnresolveFailed, [Path, FRepo.Error]), True);
 end;
 
 { File > Discard Change acts on the block the caret is in. }

@@ -198,6 +198,7 @@ var
   Text: string;
 begin
   Result.FileName := AFileName;
+  Result.Resolved := False;
   Result.OldLines := nil;
   Result.NewLines := nil;
   Result.Line := 1;
