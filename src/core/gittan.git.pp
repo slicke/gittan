@@ -208,6 +208,10 @@ type
     FBase: string;
     FWholeTree: boolean;
     FTempIndex: string;
+    { Inside a ChangeStats (FIndexPass > 0) the temporary index is
+      brought up to date once (FIndexAdded), not by every diff of it. }
+    FIndexPass: integer;
+    FIndexAdded: boolean;
     FIgnoreWhitespace: boolean;
     FOnOutput: TGittanOutputEvent;
     function RunGit(const ADir: string; const AArgs: array of string;
@@ -2180,7 +2184,11 @@ begin
       Exit;
     end;
   end;
-  RunGit(FRoot, ['add', '-A', '-N'], Output, FTempIndex);
+  if (FIndexPass = 0) or not FIndexAdded then
+  begin
+    RunGit(FRoot, ['add', '-A', '-N'], Output, FTempIndex);
+    FIndexAdded := FIndexPass > 0;
+  end;
   Result := FTempIndex;
 end;
 
@@ -5201,21 +5209,29 @@ end;
   are against HEAD, so staged and unstaged changes are both in. }
 function TGittanRepo.ChangeStats(out AStats: TGittanFileStats): boolean;
 var
-  Paths, Num: TStringList;
+  Paths, Num, ByPath: TStringList;
   Output, Entry, Path, Counts, FileName: string;
   i, Tab1, Tab2, Idx: integer;
 begin
   AStats := nil;
   Paths := TStringList.Create;
   Num := TStringList.Create;
+  { The paths sorted, each with its index in AStats, so the counts of
+    thousands of changed files are not each looked for from the top. }
+  ByPath := TStringList.Create;
+  Inc(FIndexPass);
   try
     Paths.CaseSensitive := True;
     Result := ChangedPaths(Paths);
     if not Result then
       Exit;
+    ByPath.CaseSensitive := True;
+    ByPath.Duplicates := dupIgnore;
+    ByPath.Sorted := True;
     SetLength(AStats, Paths.Count);
     for i := 0 to Paths.Count - 1 do
     begin
+      ByPath.AddObject(Paths[i], TObject(PtrInt(i)));
       AStats[i] := Default(TGittanFileStat);
       AStats[i].Path := Paths[i];
       AStats[i].Kind := TGittanChangeKind(PtrUInt(Paths.Objects[i]) and 15);
@@ -5233,9 +5249,9 @@ begin
       if Tab2 = 0 then
         Continue;
       Path := Copy(Entry, Tab2 + 1, MaxInt);
-      Idx := Paths.IndexOf(Path);
-      if Idx < 0 then
+      if not ByPath.Find(Path, Idx) then
         Continue;
+      Idx := PtrInt(ByPath.Objects[Idx]);
       Counts := Copy(Entry, 1, Tab1 - 1);
       if Counts = '-' then
         AStats[Idx].Binary := True
@@ -5253,6 +5269,10 @@ begin
           CountNewFile(FileName, AStats[i]);
       end;
   finally
+    Dec(FIndexPass);
+    if FIndexPass = 0 then
+      FIndexAdded := False;
+    ByPath.Free;
     Num.Free;
     Paths.Free;
   end;
