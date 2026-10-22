@@ -1094,6 +1094,7 @@ function ProcessArg(const S: string): string;
 implementation
 
 uses
+  {$ifdef unix}BaseUnix,{$endif}
   Process, Pipes, md5, StrUtils, DateUtils;
 
 { ---------------------------------------------------------------------------
@@ -1577,6 +1578,69 @@ begin
     AOnOutput(Chunk);
 end;
 
+{ Waits until git writes or ends, so RunGitEnv does not sleep past the
+  end of a git call that takes a few milliseconds. On Unix git's pipes
+  are watched, for a tenth of a second at most: its exit closes them,
+  which wakes the wait too. A pipe at its end stays readable with nothing
+  to read, so it is left out from then on (AOutOpen, AErrOpen); with
+  both ended only git's exit is left to wait for. On Windows a pipe
+  cannot be waited on, the process is: the wait ends when git does, and
+  what git writes meanwhile waits in the pipe, so the wait is as short
+  as the sleep it replaces, or git would stand still on a full pipe. }
+{$ifdef windows}
+{ Declared here rather than taken from the Windows unit, whose DeleteFile
+  and others would hide SysUtils' own. }
+function WaitForSingleObject(AHandle: THandle; AMilliseconds: DWord): DWord;
+  stdcall; external 'kernel32' name 'WaitForSingleObject';
+{$endif}
+
+procedure WaitForGit(P: TProcess; var AOutOpen, AErrOpen: boolean);
+{$ifdef unix}
+const
+  Timeout = 100;
+var
+  Fds: TFDSet;
+  Tv: TTimeVal;
+  Top: cint;
+begin
+  if not AOutOpen and not AErrOpen then
+  begin
+    P.WaitOnExit;
+    Exit;
+  end;
+  fpFD_ZERO(Fds);
+  Top := 0;
+  if AOutOpen then
+  begin
+    fpFD_SET(P.Output.Handle, Fds);
+    Top := P.Output.Handle;
+  end;
+  if AErrOpen then
+  begin
+    fpFD_SET(P.Stderr.Handle, Fds);
+    if P.Stderr.Handle > Top then
+      Top := P.Stderr.Handle;
+  end;
+  Tv.tv_sec := 0;
+  Tv.tv_usec := Timeout * 1000;
+  if fpSelect(Top + 1, @Fds, nil, nil, @Tv) <= 0 then
+    Exit;
+  { Readable with nothing in it: the end of the pipe. }
+  if AOutOpen and (fpFD_ISSET(P.Output.Handle, Fds) = 1) and
+    (P.Output.NumBytesAvailable = 0) then
+    AOutOpen := False;
+  if AErrOpen and (fpFD_ISSET(P.Stderr.Handle, Fds) = 1) and
+    (P.Stderr.NumBytesAvailable = 0) then
+    AErrOpen := False;
+end;
+{$else}
+const
+  Timeout = 10;
+begin
+  WaitForSingleObject(P.ProcessHandle, Timeout);
+end;
+{$endif}
+
 function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
   out AOutput, AError: string; const AIndexFile: string;
   AOnOutput: TGittanOutputEvent): boolean;
@@ -1584,7 +1648,7 @@ var
   P: TProcess;
   Skip: array of string;
   Status, i: integer;
-  Got: boolean;
+  Got, OutOpen, ErrOpen: boolean;
 begin
   AOutput := '';
   AError := '';
@@ -1627,13 +1691,15 @@ begin
       AError := GitNotRunMessage(GGitExe);
       Exit(False);
     end;
+    OutOpen := True;
+    ErrOpen := True;
     repeat
       Got := ReadPipe(P.Output, AOutput, AOnOutput);
       if ReadPipe(P.Stderr, AError, AOnOutput) then
         Got := True;
       if not Got then
         if P.Running then
-          Sleep(10)
+          WaitForGit(P, OutOpen, ErrOpen)
         else
           Break;
     until False;
