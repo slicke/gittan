@@ -15,6 +15,7 @@ type
   published
     procedure TestParse;
     procedure TestParseUncommitted;
+    procedure TestParseSha256;
     procedure TestParseGarbage;
     procedure TestAge;
   end;
@@ -88,6 +89,36 @@ begin
       'filename a.txt'#10#9'x'#10));
     AssertEquals(1, Blame.LineCount);
     AssertTrue(Blame.Commits[0].Uncommitted);
+  finally
+    Blame.Free;
+  end;
+end;
+
+{ A repository made with --object-format=sha256 names its commits with
+  64 hex digits, the uncommitted lines with 64 zeros. }
+procedure TBlameTest.TestParseSha256;
+var
+  Blame: TGittanBlame;
+  Hash: string;
+begin
+  Hash := StringOfChar('c', 64);
+  Blame := TGittanBlame.Create;
+  try
+    AssertTrue(Blame.Parse(Hash + ' 1 1 1'#10'author Cleo'#10 +
+      'author-time 1700000000'#10'summary Long ids'#10'filename a.txt'#10 +
+      #9'one'#10 + StringOfChar('0', 64) + ' 2 2 1'#10 +
+      'author Not Committed Yet'#10'author-time 1700000000'#10 +
+      'summary Version of a.txt from a.txt'#10'filename a.txt'#10#9'two'#10 +
+      Hash + ' 3 3 1'#10#9'three'#10));
+    AssertEquals(3, Blame.LineCount);
+    AssertEquals(2, Length(Blame.Commits));
+    AssertEquals(Hash, Blame.Commits[0].Hash);
+    AssertEquals('Cleo', Blame.Commits[0].Author);
+    AssertFalse(Blame.Commits[0].Uncommitted);
+    AssertTrue(Blame.Commits[1].Uncommitted);
+    AssertEquals(0, Blame.CommitOf(3));
+    { An id of another length is no header. }
+    AssertFalse(Blame.Parse(StringOfChar('c', 50) + ' 1 1 1'#10#9'x'#10));
   finally
     Blame.Free;
   end;

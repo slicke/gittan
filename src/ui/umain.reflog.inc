@@ -26,7 +26,8 @@ const
   rlBrowse = 8;
 
 { ASubject with each full commit id in it (git writes one for a reset
-  to a commit, "reset: moving to <id>") cut to the short id. }
+  to a commit, "reset: moving to <id>"), SHA-1 or SHA-256, cut to the
+  short id. }
 function ShortenReflogIds(const ASubject: string): string;
 var
   i, Run: integer;
@@ -38,7 +39,7 @@ begin
       Inc(Run)
     else
     begin
-      if Run = 40 then
+      if (Run = 40) or (Run = 64) then
         Result := Result + Copy(ASubject, i - Run, 7)
       else
         Result := Result + Copy(ASubject, i - Run, Run);

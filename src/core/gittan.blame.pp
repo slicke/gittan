@@ -102,7 +102,10 @@ uses
   DateUtils;
 
 const
-  HashLength = 40;
+  { A commit id in hex: SHA-1, or SHA-256 in a repository made with
+    --object-format=sha256. }
+  Sha1Length = 40;
+  Sha256Length = 64;
 
 { ---------------------------------------------------------------------------
   Parsing
@@ -126,17 +129,18 @@ begin
 end;
 
 { Whether ALine is a group header; AFinal is then the line's number in
-  the file. }
-function HeaderLine(const ALine: string; out AFinal: integer): boolean;
+  the file and AHashLength the length of the commit id it starts with. }
+function HeaderLine(const ALine: string; out AFinal, AHashLength: integer): boolean;
 var
   p, q: integer;
 begin
   Result := False;
   AFinal := 0;
-  if (Length(ALine) < HashLength + 4) or (ALine[HashLength + 1] <> ' ') or
-    not IsHex(ALine, 1, HashLength) then
+  AHashLength := Pos(' ', ALine) - 1;
+  if ((AHashLength <> Sha1Length) and (AHashLength <> Sha256Length)) or
+    (Length(ALine) < AHashLength + 4) or not IsHex(ALine, 1, AHashLength) then
     Exit;
-  p := Pos(' ', ALine, HashLength + 2);
+  p := Pos(' ', ALine, AHashLength + 2);
   if p = 0 then
     Exit;
   q := Pos(' ', ALine, p + 1);
@@ -157,7 +161,7 @@ end;
 
 function TGittanBlame.Parse(const AOutput: string): boolean;
 var
-  Start, Stop, Final, Current, p: integer;
+  Start, Stop, Final, HashLength, Current, p: integer;
   Line, Key, Value: string;
 begin
   FCommits := nil;
@@ -173,7 +177,7 @@ begin
     Start := Stop + 1;
     if (Line <> '') and (Line[1] = #9) then
       Continue;
-    if HeaderLine(Line, Final) then
+    if HeaderLine(Line, Final, HashLength) then
     begin
       Current := IndexOf(Copy(Line, 1, HashLength));
       if Current < 0 then

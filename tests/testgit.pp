@@ -11,7 +11,7 @@ interface
 uses
   { gittan.repoinfo first: its ParseTags is not the one tested here. }
   Classes, SysUtils, fpcunit, testregistry, gittan.repoinfo, gittan.git, gittan.history,
-  gittan.graph, gittan.rebase;
+  gittan.graph, gittan.rebase, gittan.blame;
 
 type
   TGitRepoTest = class(TTestCase)
@@ -49,6 +49,7 @@ type
     procedure TestSnapshot;
     procedure TestSnapshotNoIndex;
     procedure TestBlame;
+    procedure TestBlameSha256;
     procedure TestCommitRange;
     procedure TestLineHistory;
     procedure TestRemoteFor;
@@ -814,6 +815,32 @@ begin
   FRepo.DiffSides(Left, Right);
   AssertEquals('the merge base', Trim(Git(['rev-parse', 'first'])), Left);
   AssertEquals('third', Right);
+end;
+
+{ The blame of a repository with SHA-256 ids reads as one with SHA-1. }
+procedure TGitRepoTest.TestBlameSha256;
+var
+  Output, Head: string;
+  Blame: TGittanBlame;
+begin
+  Git(['init', '-q', '--object-format=sha256']);
+  WriteFile('a.txt', 'one'#10'two'#10);
+  Commit('first');
+  WriteFile('a.txt', 'one'#10'two'#10'three'#10);
+  AssertTrue(FRepo.Open(FDir));
+  Head := Trim(Git(['rev-parse', 'HEAD']));
+  AssertEquals(64, Length(Head));
+  AssertTrue(FRepo.Blame('a.txt', '', Output));
+  Blame := TGittanBlame.Create;
+  try
+    AssertTrue(Blame.Parse(Output));
+    AssertEquals(3, Blame.LineCount);
+    AssertEquals(Head, Blame.Commits[Blame.CommitOf(1)].Hash);
+    AssertEquals('first', Blame.Commits[Blame.CommitOf(2)].Summary);
+    AssertTrue(Blame.Commits[Blame.CommitOf(3)].Uncommitted);
+  finally
+    Blame.Free;
+  end;
 end;
 
 { The range of a commit runs from its parent; a root commit, which has
