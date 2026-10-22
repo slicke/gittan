@@ -1879,6 +1879,23 @@ begin
 end;
 
 { Writes AText to AFileName byte for byte. }
+{ AList as git reads a --pathspec-from-file with --pathspec-file-nul:
+  each entry ended by a NUL. }
+function NulList(AList: TStrings): string;
+var
+  i: integer;
+begin
+  Result := '';
+  for i := 0 to AList.Count - 1 do
+    Result := Result + AList[i] + #0;
+end;
+
+procedure AddArg(var AArgs: TStringArray; const S: string);
+begin
+  SetLength(AArgs, Length(AArgs) + 1);
+  AArgs[High(AArgs)] := S;
+end;
+
 procedure WriteBytes(const AFileName, AText: string);
 var
   Stream: TFileStream;
@@ -2513,15 +2530,6 @@ var
   Fields, Chosen, Paths, InHead, Restore, Remove: TStringList;
   i: integer;
 
-  function NulList(AList: TStrings): string;
-  var
-    j: integer;
-  begin
-    Result := '';
-    for j := 0 to AList.Count - 1 do
-      Result := Result + AList[j] + #0;
-  end;
-
 begin
   ASaved.Clear;
   if (FRoot = '') or (APaths.Count = 0) then
@@ -2689,28 +2697,22 @@ end;
 function TGittanRepo.Stash(const AMessage: string; APaths: TStrings): boolean;
 var
   Output, SpecFile, Nul: string;
-  Args: array of string;
+  Args: TStringArray;
   i: integer;
-
-  procedure Arg(const S: string);
-  begin
-    SetLength(Args, Length(Args) + 1);
-    Args[High(Args)] := S;
-  end;
 
 begin
   if FRoot = '' then
     Exit(False);
   Args := nil;
   if (APaths <> nil) and (APaths.Count > 0) then
-    Arg('--literal-pathspecs');
-  Arg('stash');
-  Arg('push');
-  Arg('-u');
+    AddArg(Args, '--literal-pathspecs');
+  AddArg(Args, 'stash');
+  AddArg(Args, 'push');
+  AddArg(Args, '-u');
   if AMessage <> '' then
   begin
-    Arg('-m');
-    Arg(AMessage);
+    AddArg(Args, '-m');
+    AddArg(Args, AMessage);
   end;
   SpecFile := '';
   try
@@ -2721,8 +2723,8 @@ begin
         Nul := Nul + APaths[i] + #0;
       SpecFile := GetTempFileName(GetTempDir, 'gittan-stash-');
       WriteBytes(SpecFile, Nul);
-      Arg('--pathspec-from-file=' + SpecFile);
-      Arg('--pathspec-file-nul');
+      AddArg(Args, '--pathspec-from-file=' + SpecFile);
+      AddArg(Args, '--pathspec-file-nul');
     end;
     Result := RunGit(FRoot, Args, Output);
   finally
@@ -2976,24 +2978,9 @@ function TGittanRepo.Commit(const AMessage: string; APaths: TStrings;
 var
   Output, Entry, Path, XY, Op, Err, SpecFile, AddFile, MsgFile, PartFile, Index: string;
   Fields, Chosen, Spec, Added, Untrack: TStringList;
-  Args: array of string;
+  Args: TStringArray;
   Whole: boolean;
   i: integer;
-
-  procedure Arg(const S: string);
-  begin
-    SetLength(Args, Length(Args) + 1);
-    Args[High(Args)] := S;
-  end;
-
-  function NulList(AList: TStrings): string;
-  var
-    j: integer;
-  begin
-    Result := '';
-    for j := 0 to AList.Count - 1 do
-      Result := Result + AList[j] + #0;
-  end;
 
   { Writes AParts over their paths in the index AIndex ('' for the
     repository's): each text goes in as a blob, through the filters of
@@ -3055,12 +3042,12 @@ var
       Exit;
     WriteBytes(MsgFile, AMessage);
     Args := nil;
-    Arg('commit');
-    Arg('-q');
-    Arg('-F');
-    Arg(MsgFile);
+    AddArg(Args, 'commit');
+    AddArg(Args, '-q');
+    AddArg(Args, '-F');
+    AddArg(Args, MsgFile);
     if AAmend then
-      Arg('--amend');
+      AddArg(Args, '--amend');
     Result := RunGit(FRoot, Args, Output, Index);
     if not Result then
       Exit;
@@ -3151,21 +3138,21 @@ begin
       Exit(False);
     WriteBytes(MsgFile, AMessage);
     Args := nil;
-    Arg('--literal-pathspecs');
-    Arg('commit');
-    Arg('-q');
-    Arg('-F');
-    Arg(MsgFile);
+    AddArg(Args, '--literal-pathspecs');
+    AddArg(Args, 'commit');
+    AddArg(Args, '-q');
+    AddArg(Args, '-F');
+    AddArg(Args, MsgFile);
     if AAmend then
-      Arg('--amend');
+      AddArg(Args, '--amend');
     if not Whole then
     begin
-      Arg('--only');
+      AddArg(Args, '--only');
       if Spec.Count > 0 then
       begin
         WriteBytes(SpecFile, NulList(Spec));
-        Arg('--pathspec-from-file=' + SpecFile);
-        Arg('--pathspec-file-nul');
+        AddArg(Args, '--pathspec-from-file=' + SpecFile);
+        AddArg(Args, '--pathspec-file-nul');
       end;
     end;
     Result := RunGit(FRoot, Args, Output);
@@ -4125,19 +4112,12 @@ begin
   end;
 end;
 
-{ Writes AText as it is to AFileName. }
+{ Writes AText as it is to AFileName; false, rather than an exception,
+  when it cannot. }
 function WriteRebaseFile(const AFileName, AText: string): boolean;
-var
-  Stream: TFileStream;
 begin
   try
-    Stream := TFileStream.Create(AFileName, fmCreate);
-    try
-      if AText <> '' then
-        Stream.WriteBuffer(AText[1], Length(AText));
-    finally
-      Stream.Free;
-    end;
+    WriteBytes(AFileName, AText);
     Result := True;
   except
     Result := False;
@@ -5885,43 +5865,37 @@ end;
 function TGittanRepo.LineHistory(const APath, ARef: string; AFrom, ATo, AMax: integer;
   out AOutput: string): boolean;
 var
-  Args: array of string;
-
-  procedure Add(const AArg: string);
-  begin
-    SetLength(Args, Length(Args) + 1);
-    Args[High(Args)] := AArg;
-  end;
+  Args: TStringArray;
 
 begin
   AOutput := '';
   if FRoot = '' then
     Exit(False);
   Args := nil;
-  Add('log');
-  Add('--no-color');
-  Add('--no-ext-diff');
-  Add('-n');
-  Add(IntToStr(AMax));
-  Add('--format=%x01%H%x1f%an%x1f%at%x1f%s');
+  AddArg(Args, 'log');
+  AddArg(Args, '--no-color');
+  AddArg(Args, '--no-ext-diff');
+  AddArg(Args, '-n');
+  AddArg(Args, IntToStr(AMax));
+  AddArg(Args, '--format=%x01%H%x1f%an%x1f%at%x1f%s');
   if FIgnoreWhitespace then
-    Add('-w');
+    AddArg(Args, '-w');
   if AFrom > 0 then
   begin
     { -L takes no path list: the file is part of the range. }
-    Add('-L');
-    Add(Format('%d,%d:%s', [AFrom, ATo, APath]));
+    AddArg(Args, '-L');
+    AddArg(Args, Format('%d,%d:%s', [AFrom, ATo, APath]));
     if ARef <> '' then
-      Add(ARef);
+      AddArg(Args, ARef);
   end
   else
   begin
-    Add('-p');
-    Add('--no-renames');
+    AddArg(Args, '-p');
+    AddArg(Args, '--no-renames');
     if ARef <> '' then
-      Add(ARef);
-    Add('--');
-    Add(APath);
+      AddArg(Args, ARef);
+    AddArg(Args, '--');
+    AddArg(Args, APath);
   end;
   Result := RunGit(FRoot, Args, AOutput);
 end;
