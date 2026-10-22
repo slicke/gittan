@@ -601,6 +601,11 @@ type
     FDark: boolean;
     FBookmarkBandWidth: integer;
     FWatcher: TGittanWatcher;
+    { How many callers are inside a stretch the watcher's refresh must
+      not run under (a modal question, a wait that pumps messages, a
+      refresh), and whether one came meanwhile (HoldRefresh). }
+    FRefreshHold: integer;
+    FRefreshPending, FRefreshQueued: boolean;
     FView: TGittanView;
     FManualLexer: boolean;
     { The change view: the diff lines of the shown file with their
@@ -728,11 +733,15 @@ type
     function AdapterOf(AEd: TATSynEdit): TATAdapterEControl;
     procedure MenuRefreshClick(Sender: TObject);
     procedure WatcherChange(Sender: TObject);
+    procedure HoldRefresh;
+    procedure ReleaseRefresh;
+    procedure RefreshPendingAsync(Data: PtrInt);
     procedure StartWatcher;
     procedure StopWatcher;
     function LoadRepository: boolean;
     procedure ApplySnapshot(const ASnap: TGittanRepoSnapshot);
     procedure RefreshRepository(ASnap: PGittanRepoSnapshot = nil);
+    procedure RefreshRepositoryHeld(ASnap: PGittanRepoSnapshot);
     procedure ShowError(const AMessage: string);
     procedure ShowWelcome(const AError: string);
     procedure WelcomeOpen(Sender: TObject);
@@ -5031,9 +5040,48 @@ var
 begin
   { Runs on the main thread while the watcher is held in Synchronize, so
     its snapshot, gathered off the main thread, is copied out and applied
-    without running any git here. }
+    without running any git here. Under a hold it would run in the middle
+    of what holds (a modal question pumps messages, Synchronize's
+    among them): it waits for the hold to end instead. }
+  if FRefreshHold > 0 then
+  begin
+    FRefreshPending := True;
+    Exit;
+  end;
   Snap := FWatcher.Snapshot;
   RefreshRepository(@Snap);
+end;
+
+{ A stretch the watcher's refresh must not run under: FlushEdit's
+  question, which ShowChanges, OpenFile and OpenRepository ask in the
+  middle of their work, a wait that pumps messages (WaitForParse), and
+  RefreshRepository itself. A change the watcher brings meanwhile is
+  read again when the last hold ends, from the message loop, once the
+  callers have returned. }
+procedure TForm1.HoldRefresh;
+begin
+  Inc(FRefreshHold);
+end;
+
+procedure TForm1.ReleaseRefresh;
+begin
+  Dec(FRefreshHold);
+  if (FRefreshHold = 0) and FRefreshPending and not FRefreshQueued then
+  begin
+    FRefreshQueued := True;
+    Application.QueueAsyncCall(@RefreshPendingAsync, 0);
+  end;
+end;
+
+{ Another hold may have begun before the queue ran it (a second modal
+  question); its end queues this again. }
+procedure TForm1.RefreshPendingAsync(Data: PtrInt);
+begin
+  FRefreshQueued := False;
+  if (FRefreshHold > 0) or not FRefreshPending then
+    Exit;
+  FRefreshPending := False;
+  RefreshRepository;
 end;
 
 procedure TForm1.MenuRefreshClick(Sender: TObject);
@@ -5066,8 +5114,20 @@ end;
   the view is noted first and restored by selecting the file again, which
   runs the usual selection handler. ASnap nil reads the repository here;
   otherwise it is the snapshot the watcher already gathered off the main
-  thread, which is only drawn. }
+  thread, which is only drawn. The refresh holds the watcher's (see
+  HoldRefresh): one that came under it would rebuild the view while
+  this one does. }
 procedure TForm1.RefreshRepository(ASnap: PGittanRepoSnapshot = nil);
+begin
+  HoldRefresh;
+  try
+    RefreshRepositoryHeld(ASnap);
+  finally
+    ReleaseRefresh;
+  end;
+end;
+
+procedure TForm1.RefreshRepositoryHeld(ASnap: PGittanRepoSnapshot);
 var
   Collapsed: TStringList;
   Node: TTreeNode;
