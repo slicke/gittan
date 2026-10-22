@@ -814,7 +814,7 @@ type
     procedure GoToChange(ANext: boolean);
     procedure ShowChangeAt(ARow: integer);
     procedure GoToFirstChange;
-    procedure ShowChanges(const APath: string);
+    function ShowChanges(const APath: string): boolean;
     procedure FillFileTree(const AStats: TGittanFileStats);
     function CompareTreeNodes(Node1, Node2: TTreeNode): integer;
     { umain.diffview.inc }
@@ -5142,16 +5142,19 @@ begin
         SummarySelectFile(nil, Path);
         if FileTree.Selected <> nil then
           RestoreScroll
-        else if IsChangedPath(Path) then
-        begin
-          ShowChanges(Path);
-          RestoreScroll;
-        end
-        else
-        begin
-          FSummary.Notice := Format(rsNoLongerChanged, [Path]);
-          ShowSummary;
-        end;
+        { Else the summary is shown when the selection's ShowChanges
+          failed. }
+        else if FView <> gvSummary then
+          if IsChangedPath(Path) then
+          begin
+            if ShowChanges(Path) then
+              RestoreScroll;
+          end
+          else
+          begin
+            FSummary.Notice := Format(rsNoLongerChanged, [Path]);
+            ShowSummary;
+          end;
       end;
     gvRepoDiff:
       begin
@@ -5484,8 +5487,10 @@ end;
 { Shows one changed file with its deleted lines kept in place: the diff
   with the whole file as context, built into rows by BuildChangeView. The
   lexer comes from the file name. The gaps the user opened are kept when
-  the same file is shown again, as on a refresh. }
-procedure TForm1.ShowChanges(const APath: string);
+  the same file is shown again, as on a refresh. False when git could
+  not give the diff: the banner says why and the summary is shown, so
+  the tree and the view do not tell of different files. }
+function TForm1.ShowChanges(const APath: string): boolean;
 var
   Lines: TStringList;
   i, c: integer;
@@ -5494,6 +5499,7 @@ begin
   { Asked before the header names the next file, not when the text is
     replaced further down. }
   FlushEdit;
+  Result := False;
   { A binary file has no lines to diff; a new one would be read as
     text. }
   Binary := False;
@@ -5505,8 +5511,11 @@ begin
     if not Binary and not FRepo.FileChanges(APath, Lines) then
     begin
       StatusNote(FRepo.Error, True);
+      FSummary.Notice := '';
+      ShowSummary;
       Exit;
     end;
+    Result := True;
     FChangeLines.Assign(Lines);
     FRawChangeLines.Assign(Lines);
   finally
@@ -6081,8 +6090,8 @@ begin
     ShowSubmodule(Sub)
   else
   begin
-    ShowChanges(Node.GetTextPath);
-    GoToFirstChange;
+    if ShowChanges(Node.GetTextPath) then
+      GoToFirstChange;
   end;
 end;
 
