@@ -571,8 +571,10 @@ begin
   else
     FCommitButton.Caption := rsCommitButton;
   FCommitButton.Enabled := Can;
-  { git keeps the message of a commit it carries on with. }
-  FCommitMemo.ReadOnly := Busy or Continuing;
+  { git keeps the message of a commit it carries on with. A fetch, pull
+    or push leaves the message alone, so it can be written meanwhile;
+    Amend waits, since a pull may move HEAD, whose message it reads. }
+  FCommitMemo.ReadOnly := (FCommitJob <> nil) or Continuing;
   FCommitMemo.Enabled := not Continuing;
   FCommitAmend.Visible := FOperation = '';
   FCommitAmend.Enabled := not Busy;
