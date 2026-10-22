@@ -66,6 +66,10 @@ end;
 
 destructor TGittanCommitJob.Destroy;
 begin
+  { WaitFor in the main thread lets queued calls through while it waits,
+    the Notify of a job freed while it runs among them, which then has
+    no one to tell. }
+  FOnDone := nil;
   inherited Destroy;
   FPaths.Free;
 end;
