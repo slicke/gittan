@@ -109,9 +109,9 @@ jobs:
           submodules: recursive
 
       # ===================== TOOLCHAINS =====================
-      # The installers come from SourceForge, whose mirrors are sometimes
-      # slow enough to take half an hour, so they are kept in the Actions
-      # cache and downloaded only on a miss. Change the key with the URLs.
+      # The installers come from download.lazarus-ide.org or SourceForge,
+      # either of which is slow at times, so they are kept in the Actions
+      # cache and downloaded only on a miss. Change the key with the files.
       - name: Restore the toolchain downloads
         id: toolchain-cache
         uses: actions/cache/restore@v6
@@ -122,28 +122,34 @@ jobs:
       - name: Install Lazarus/FPC (Linux)
         if: matrix.os_target == 'linux'
         env:
-          FPC_LAZ_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20Linux%20amd64%20DEB/Lazarus%205.0RC1/fpc-laz_3.2.2-210709_amd64.deb/download
-          FPC_SRC_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20Linux%20amd64%20DEB/Lazarus%205.0RC1/fpc-src_3.2.2-210709_amd64.deb/download
-          LAZ_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20Linux%20amd64%20DEB/Lazarus%205.0RC1/lazarus-project_5.0.0-0_amd64.deb/download
+          # The folder on download.lazarus-ide.org and on SourceForge.
+          LAZ_FOLDER: Lazarus%20Linux%20amd64%20DEB/Lazarus%205.0RC1
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y build-essential curl \
             libgtk-3-dev
-          # SourceForge mirrors flake and crawl. --connect-timeout and the
+          # The Lazarus project's own server is the fast one (5 MB/s where
+          # SourceForge gave 300 KB/s); SourceForge, whose mirrors flake and
+          # crawl, takes every other attempt. --connect-timeout and the
           # speed guard abort a stalled, half-open or crawling transfer
           # (which is not an error to curl, so it would wait on it forever),
-          # and fetch tries again from where it stopped (-C -), from the
-          # mirror SourceForge picks next, so nothing fetched is lost.
+          # and fetch tries again from where it stopped (-C -), from either
+          # source, so nothing fetched is lost.
           CURL_OPTS="--connect-timeout 30 --speed-limit 102400 --speed-time 30"
           DL="$RUNNER_TEMP/toolchain"
           mkdir -p "$DL"
           fetch() {
             [ -s "$DL/$1" ] && { echo "$1 from the cache"; return; }
             for TRY in 1 2 3 4 5 6 7 8 9 10; do
+              if [ $((TRY % 2)) = 1 ]; then
+                URL="https://download.lazarus-ide.org/$LAZ_FOLDER/$2"
+              else
+                URL="https://sourceforge.net/projects/lazarus/files/$LAZ_FOLDER/$2/download"
+              fi
               if curl -fsSL -C - $CURL_OPTS \
                 -w "$1: %{size_download} bytes at %{speed_download} B/s from %{url_effective}\n" \
-                -o "$DL/$1.part" "$2"; then
+                -o "$DL/$1.part" "$URL"; then
                 mv "$DL/$1.part" "$DL/$1"
                 return
               fi
@@ -152,9 +158,9 @@ jobs:
             done
             return 1
           }
-          fetch fpc-laz.deb "$FPC_LAZ_URL"
-          fetch fpc-src.deb "$FPC_SRC_URL"
-          fetch lazarus.deb "$LAZ_URL"
+          fetch fpc-laz.deb fpc-laz_3.2.2-210709_amd64.deb
+          fetch fpc-src.deb fpc-src_3.2.2-210709_amd64.deb
+          fetch lazarus.deb lazarus-project_5.0.0-0_amd64.deb
           sudo dpkg -i "$DL/fpc-laz.deb" "$DL/fpc-src.deb" "$DL/lazarus.deb" || true
           sudo apt-get -f install -y
           fpc -iV
@@ -163,27 +169,32 @@ jobs:
       - name: Install Lazarus/FPC (macOS)
         if: matrix.os_target == 'macos'
         # A stalled mirror must not burn the whole 90-minute job budget, but
-        # the two files are 620 MB, which a slow SourceForge (300 KB/s)
-        # takes half an hour over when the cache is empty.
+        # the two files are 620 MB, which takes half an hour when only a
+        # slow SourceForge (300 KB/s) answers and the cache is empty.
         timeout-minutes: 60
         env:
-          FPC_DMG_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20macOS%20aarch64/Lazarus%205.0RC1/fpc-3.2.4rc2.intelarm64-macosx.dmg/download
-          LAZ_ZIP_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20macOS%20aarch64/Lazarus%205.0RC1/lazarus-darwin-aarch64-5.0RC1.zip/download
+          LAZ_FOLDER: Lazarus%20macOS%20aarch64/Lazarus%205.0RC1
           HOMEBREW_NO_AUTO_UPDATE: "1"
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: |
           set -euo pipefail
-          # As on Linux: a stalled or crawling transfer is aborted and fetch
-          # goes on from where it stopped.
+          # As on Linux: the Lazarus server first, SourceForge every other
+          # attempt; a stalled or crawling transfer is aborted and fetch goes
+          # on from where it stopped.
           CURL_OPTS="--connect-timeout 30 --speed-limit 102400 --speed-time 30"
           DL="$RUNNER_TEMP/toolchain"
           mkdir -p "$DL"
           fetch() {
             [ -s "$DL/$1" ] && { echo "$1 from the cache"; return; }
             for TRY in 1 2 3 4 5 6 7 8 9 10; do
+              if [ $((TRY % 2)) = 1 ]; then
+                URL="https://download.lazarus-ide.org/$LAZ_FOLDER/$2"
+              else
+                URL="https://sourceforge.net/projects/lazarus/files/$LAZ_FOLDER/$2/download"
+              fi
               if curl -fsSL -C - $CURL_OPTS \
                 -w "$1: %{size_download} bytes at %{speed_download} B/s from %{url_effective}\n" \
-                -o "$DL/$1.part" "$2"; then
+                -o "$DL/$1.part" "$URL"; then
                 mv "$DL/$1.part" "$DL/$1"
                 return
               fi
@@ -192,8 +203,8 @@ jobs:
             done
             return 1
           }
-          fetch fpc.dmg "$FPC_DMG_URL"
-          fetch lazarus.zip "$LAZ_ZIP_URL"
+          fetch fpc.dmg fpc-3.2.4rc2.intelarm64-macosx.dmg
+          fetch lazarus.zip lazarus-darwin-aarch64-5.0RC1.zip
 
           MNT="$(mktemp -d)"
           hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DL/fpc.dmg"
@@ -253,18 +264,22 @@ jobs:
           if (Test-Path $exe) {
             Write-Host "lazarus-5.0RC1.exe from the cache"
           } else {
-            # As on Linux: a crawling transfer is aborted and the next
-            # attempt goes on from where it stopped.
-            $url = "https://sourceforge.net/projects/lazarus/files/Lazarus%20Windows%2064%20bits/Lazarus%205.0RC1/lazarus-5.0RC1-fpc-3.2.2-win64.exe/download"
+            # As on Linux: the Lazarus server first, SourceForge every other
+            # attempt; a crawling transfer is aborted and the next attempt
+            # goes on from where it stopped.
+            $folder = 'Lazarus%20Windows%2064%20bits/Lazarus%205.0RC1'
+            $file = 'lazarus-5.0RC1-fpc-3.2.2-win64.exe'
             $done = $false
             for ($try = 1; $try -le 10 -and -not $done; $try++) {
+              if ($try % 2 -eq 1) { $url = "https://download.lazarus-ide.org/$folder/$file" }
+              else { $url = "https://sourceforge.net/projects/lazarus/files/$folder/$file/download" }
               curl.exe -sSL --fail -C - --connect-timeout 30 --speed-limit 102400 --speed-time 30 -w "lazarus-5.0RC1.exe: %{size_download} bytes at %{speed_download} B/s from %{url_effective}\n" -o "$exe.part" $url
               if ($LASTEXITCODE -eq 0) { $done = $true } else { Write-Host "Attempt $try stopped"; Start-Sleep 5 }
             }
             if (-not $done) { throw "Downloading Lazarus failed" }
             Move-Item "$exe.part" $exe
           }
-          # SourceForge sometimes answers with an HTML page; check for the MZ header.
+          # A mirror sometimes answers with an HTML page; check for the MZ header.
           $fs = [System.IO.File]::OpenRead($exe)
           $mz = New-Object byte[] 2
           $null = $fs.Read($mz, 0, 2)
