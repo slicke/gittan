@@ -573,6 +573,7 @@ procedure TForm1.EditMouseUp(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: integer);
 var
   Row, Col, From, To_, Down, Up, All, Heading: integer;
+  Symbol: string;
 begin
   if Button <> mbLeft then
     Exit;
@@ -601,8 +602,13 @@ begin
   From := FRows[Row].GapFrom;
   To_ := FRows[Row].GapTo;
   Col := TATSynEdit(Sender).Carets[0].PosX;
-  GapRowText(To_ - From + 1, GapHeading(To_), Down, Up, All, Heading);
-  if (Heading >= 0) and (Col >= Heading) then
+  Symbol := GapHeading(To_);
+  GapRowText(To_ - From + 1, Symbol, Down, Up, All, Heading);
+  { A click on the symbol's name opens nothing; one right of it opens the
+    run, as on a gap row without a name. The caret stops at the end of
+    the row, so such a click is at the name's end. }
+  if (Heading >= 0) and (Col >= Heading) and
+    (Col < Heading + Length(UTF8Decode(Symbol))) then
     Exit;
   if (All >= 0) and (Col < All) then
   begin
