@@ -5487,6 +5487,21 @@ end;
   hashing the changed files is what one costs in reading, without the
   process and the diff on top. A deleted file is not on disk and adds
   nothing; a directory (a submodule) adds its stat alone. }
+{ FindFirst on AFileName itself, which it reads as a pattern: on Unix a
+  *, ? or [...] in a name may match a neighbour, which FindFirst gives
+  when the file itself is gone (a deleted a*b.txt gave aXb.txt's size
+  and time). Only the file of that very name counts; AInfo is closed
+  when there is none. }
+function StatExact(const AFileName: string; out AInfo: TSearchRec): boolean;
+begin
+  Result := FindFirst(AFileName, faAnyFile, AInfo) = 0;
+  if Result and (AInfo.Name <> ExtractFileName(AFileName)) then
+  begin
+    FindClose(AInfo);
+    Result := False;
+  end;
+end;
+
 function TGittanRepo.Fingerprint: string;
 var
   Paths: TStringList;
@@ -5528,7 +5543,7 @@ begin
     for i := 0 to Paths.Count - 1 do
     begin
       FileName := FullPath(Paths[i]);
-      if FindFirst(FileName, faAnyFile, Info) <> 0 then
+      if not StatExact(FileName, Info) then
         Continue;
       Result := Result + Paths[i] + #9 + FormatDateTime('yyyymmddhhnnsszzz', Info.TimeStamp) + #9 + IntToStr(Info.Size);
       if Info.Attr and faDirectory = 0 then
@@ -5623,7 +5638,7 @@ begin
       TryStrToInt64(Trim(Output), ASize);
     Exit;
   end;
-  Result := FindFirst(FullPath(APath), faAnyFile, Info) = 0;
+  Result := StatExact(FullPath(APath), Info);
   if Result then
   begin
     ASize := Info.Size;

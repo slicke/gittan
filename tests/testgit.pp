@@ -866,6 +866,15 @@ begin
   AssertEquals(5, Size);
   AssertFalse(FRepo.FileSize('none.bin', 'HEAD', Size));
   AssertFalse(FRepo.FileSize('none.bin', '', Size));
+  {$ifdef unix}
+  { A name FindFirst reads as a pattern is that file alone, not a
+    neighbour it matches; Windows allows no * in a name. }
+  WriteFile('aXb.bin', 'neighbour');
+  AssertFalse('gone, the neighbour aside', FRepo.FileSize('a*b.bin', '', Size));
+  WriteFile('a*b.bin', 'ab');
+  AssertTrue(FRepo.FileSize('a*b.bin', '', Size));
+  AssertEquals(2, Size);
+  {$endif}
   AssertTrue(IsBinaryFile(FDir + PathDelim + 'pic.bin') = False);
   WriteFile('pic.bin', 'a'#0'b');
   AssertTrue(IsBinaryFile(FDir + PathDelim + 'pic.bin'));
