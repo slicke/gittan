@@ -1691,6 +1691,10 @@ begin
       AError := GitNotRunMessage(GGitExe);
       Exit(False);
     end;
+    { Nothing is written to git, so its input ends at once: a hook or an
+      alias that reads it would otherwise wait for ever, and the app with
+      it. }
+    P.CloseInput;
     OutOpen := True;
     ErrOpen := True;
     repeat

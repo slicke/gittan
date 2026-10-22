@@ -50,6 +50,7 @@ type
     procedure TestSnapshotNoIndex;
     procedure TestBlame;
     procedure TestBlameSha256;
+    procedure TestInputClosed;
     procedure TestCommitRange;
     procedure TestLineHistory;
     procedure TestRemoteFor;
@@ -841,6 +842,17 @@ begin
   finally
     Blame.Free;
   end;
+end;
+
+{ Nothing is written to git, so a hook or alias that reads its input
+  gets the end of it at once rather than waiting for ever. }
+procedure TGitRepoTest.TestInputClosed;
+var
+  Output, Err: string;
+begin
+  AssertTrue(Err, RunGitIn(FDir, ['-c', 'alias.readall=!cat; echo read', 'readall'],
+    Output, Err));
+  AssertEquals('read', Trim(Output));
 end;
 
 { The range of a commit runs from its parent; a root commit, which has
