@@ -202,6 +202,8 @@ type
   TGittanRepo = class
   private
     FRoot: string;
+    { The git directory, found by Open with the root. }
+    FGitDir: string;
     FError: string;
     FBase: string;
     FWholeTree: boolean;
@@ -1019,6 +1021,14 @@ function UnquoteCPath(const APath: string): string;
 {** Whether the file AFileName is binary by git's own rule: a NUL byte
   in its first 8000 bytes. False for a file that cannot be read. }
 function IsBinaryFile(const AFileName: string): boolean;
+
+{** FindFirst for the file AFileName itself, which FindFirst reads as a
+  pattern: on Unix a *, ? or [...] in a name also matches its
+  neighbours, and FindFirst gives whichever it finds first (a deleted
+  a*b.txt gave aXb.txt's size and time). Only the file of that very name
+  counts; AInfo is closed when there is none, else the caller closes
+  it. }
+function StatExact(const AFileName: string; out AInfo: TSearchRec): boolean;
 
 {** Runs git in ADir as TGittanRepo does (see Running git) and answers
   whether it succeeded, with its standard output in AOutput and, on
@@ -1884,6 +1894,7 @@ end;
 function TGittanRepo.Open(const ADir: string): boolean;
 var
   Top: string;
+  Lines: TStringArray;
 begin
   Close;
   if not DirectoryExists(ADir) then
@@ -1891,9 +1902,14 @@ begin
     FError := Format('Folder not found: %s', [ADir]);
     Exit(False);
   end;
-  Result := RunGit(ADir, ['rev-parse', '--show-toplevel'], Top);
+  Result := RunGit(ADir, ['rev-parse', '--show-toplevel', '--absolute-git-dir'], Top);
   if Result then
-    FRoot := Trim(Top)
+  begin
+    Lines := Trim(Top).Split([#10]);
+    FRoot := Trim(Lines[0]);
+    if Length(Lines) > 1 then
+      FGitDir := Trim(Lines[1]);
+  end
   { git's message is in English (RunGit sets LC_ALL=C), so the common
     case gets a shorter one; any other failure keeps git's own. }
   else if Pos('not a git repository', FError) > 0 then
@@ -1904,6 +1920,7 @@ procedure TGittanRepo.Close;
 begin
   DropTempIndex;
   FRoot := '';
+  FGitDir := '';
   FError := '';
   FBase := '';
   FWholeTree := False;
@@ -1984,11 +2001,7 @@ end;
 
 function TGittanRepo.GitDir: string;
 begin
-  Result := '';
-  if (FRoot <> '') and RunGit(FRoot, ['rev-parse', '--absolute-git-dir'], Result) then
-    Result := Trim(Result)
-  else
-    Result := '';
+  Result := FGitDir;
 end;
 
 { A rebase keeps its state in rebase-merge (the default backend) or
@@ -5560,19 +5573,21 @@ end;
   hashing the changed files is what one costs in reading, without the
   process and the diff on top. A deleted file is not on disk and adds
   nothing; a directory (a submodule) adds its stat alone. }
-{ FindFirst on AFileName itself, which it reads as a pattern: on Unix a
-  *, ? or [...] in a name may match a neighbour, which FindFirst gives
-  when the file itself is gone (a deleted a*b.txt gave aXb.txt's size
-  and time). Only the file of that very name counts; AInfo is closed
-  when there is none. }
+{ The neighbours a pattern matches come in the folder's order, so the
+  file itself may come after them. }
 function StatExact(const AFileName: string; out AInfo: TSearchRec): boolean;
+var
+  Name: string;
 begin
-  Result := FindFirst(AFileName, faAnyFile, AInfo) = 0;
-  if Result and (AInfo.Name <> ExtractFileName(AFileName)) then
-  begin
-    FindClose(AInfo);
-    Result := False;
-  end;
+  Name := ExtractFileName(AFileName);
+  if FindFirst(AFileName, faAnyFile, AInfo) <> 0 then
+    Exit(False);
+  repeat
+    if AInfo.Name = Name then
+      Exit(True);
+  until FindNext(AInfo) <> 0;
+  FindClose(AInfo);
+  Result := False;
 end;
 
 function TGittanRepo.Fingerprint: string;

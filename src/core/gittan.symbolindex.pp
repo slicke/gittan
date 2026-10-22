@@ -129,7 +129,8 @@ var
 begin
   ASize := 0;
   ATime := 0;
-  Result := FindFirst(AFileName, faAnyFile, Info) = 0;
+  { A name with a * or ? in it is a pattern to FindFirst. }
+  Result := StatExact(AFileName, Info);
   if Result then
   begin
     ASize := Info.Size;

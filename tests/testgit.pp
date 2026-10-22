@@ -906,6 +906,7 @@ end;
 procedure TGitRepoTest.TestFileSize;
 var
   Size: int64;
+  {$ifdef unix}Info: TSearchRec;{$endif}
 begin
   MakeHistory;
   WriteFile('pic.bin', 'one'#0#13#10'two');
@@ -927,6 +928,15 @@ begin
   WriteFile('a*b.bin', 'ab');
   AssertTrue(FRepo.FileSize('a*b.bin', '', Size));
   AssertEquals(2, Size);
+  { Found after the neighbours it matches, whichever the folder lists
+    first. }
+  WriteFile('a0b.bin', 'zero');
+  WriteFile('azb.bin', 'zed');
+  AssertTrue(FRepo.FileSize('a*b.bin', '', Size));
+  AssertEquals(2, Size);
+  AssertTrue(StatExact(FDir + PathDelim + 'a*b.bin', Info));
+  AssertEquals('a*b.bin', Info.Name);
+  FindClose(Info);
   {$endif}
   AssertTrue(IsBinaryFile(FDir + PathDelim + 'pic.bin') = False);
   WriteFile('pic.bin', 'a'#0'b');
