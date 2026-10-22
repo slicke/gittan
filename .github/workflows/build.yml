@@ -130,20 +130,27 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential curl \
             libgtk-3-dev
-          # SourceForge mirrors flake; retry hard before failing the job.
-          # --connect-timeout and the speed guard abort a stalled, half-open
-          # or crawling transfer (which is not an error, so --retry-all-errors
-          # alone would wait on it forever) and --max-time a slow one, so the
-          # retry can take over, from the mirror SourceForge picks next.
-          CURL_RETRY="--retry 5 --retry-delay 5 --retry-all-errors \
-            --connect-timeout 30 --speed-limit 102400 --speed-time 30 --max-time 600"
+          # SourceForge mirrors flake and crawl. --connect-timeout and the
+          # speed guard abort a stalled, half-open or crawling transfer
+          # (which is not an error to curl, so it would wait on it forever),
+          # and fetch tries again from where it stopped (-C -), from the
+          # mirror SourceForge picks next, so nothing fetched is lost.
+          CURL_OPTS="--connect-timeout 30 --speed-limit 102400 --speed-time 30"
           DL="$RUNNER_TEMP/toolchain"
           mkdir -p "$DL"
           fetch() {
             [ -s "$DL/$1" ] && { echo "$1 from the cache"; return; }
-            curl -fsSL $CURL_RETRY -w "$1: %{size_download} bytes at %{speed_download} B/s from %{url_effective}\n" \
-              -o "$DL/$1.part" "$2"
-            mv "$DL/$1.part" "$DL/$1"
+            for TRY in 1 2 3 4 5 6 7 8 9 10; do
+              if curl -fsSL -C - $CURL_OPTS \
+                -w "$1: %{size_download} bytes at %{speed_download} B/s from %{url_effective}\n" \
+                -o "$DL/$1.part" "$2"; then
+                mv "$DL/$1.part" "$DL/$1"
+                return
+              fi
+              echo "$1: attempt $TRY stopped at $(wc -c < "$DL/$1.part" 2>/dev/null || echo 0) bytes"
+              sleep 5
+            done
+            return 1
           }
           fetch fpc-laz.deb "$FPC_LAZ_URL"
           fetch fpc-src.deb "$FPC_SRC_URL"
@@ -155,8 +162,10 @@ jobs:
 
       - name: Install Lazarus/FPC (macOS)
         if: matrix.os_target == 'macos'
-        # A stalled mirror must not burn the whole 90-minute job budget.
-        timeout-minutes: 30
+        # A stalled mirror must not burn the whole 90-minute job budget, but
+        # the two files are 620 MB, which a slow SourceForge (300 KB/s)
+        # takes half an hour over when the cache is empty.
+        timeout-minutes: 60
         env:
           FPC_DMG_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20macOS%20aarch64/Lazarus%205.0RC1/fpc-3.2.4rc2.intelarm64-macosx.dmg/download
           LAZ_ZIP_URL: https://sourceforge.net/projects/lazarus/files/Lazarus%20macOS%20aarch64/Lazarus%205.0RC1/lazarus-darwin-aarch64-5.0RC1.zip/download
@@ -164,18 +173,24 @@ jobs:
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: |
           set -euo pipefail
-          # As on Linux: the speed guard and --max-time abort a stalled or
-          # crawling transfer so the retry can try the next mirror instead
-          # of hanging the job.
-          CURL_RETRY="--retry 5 --retry-delay 5 --retry-all-errors \
-            --connect-timeout 30 --speed-limit 102400 --speed-time 30 --max-time 600"
+          # As on Linux: a stalled or crawling transfer is aborted and fetch
+          # goes on from where it stopped.
+          CURL_OPTS="--connect-timeout 30 --speed-limit 102400 --speed-time 30"
           DL="$RUNNER_TEMP/toolchain"
           mkdir -p "$DL"
           fetch() {
             [ -s "$DL/$1" ] && { echo "$1 from the cache"; return; }
-            curl -fsSL $CURL_RETRY -w "$1: %{size_download} bytes at %{speed_download} B/s from %{url_effective}\n" \
-              -o "$DL/$1.part" "$2"
-            mv "$DL/$1.part" "$DL/$1"
+            for TRY in 1 2 3 4 5 6 7 8 9 10; do
+              if curl -fsSL -C - $CURL_OPTS \
+                -w "$1: %{size_download} bytes at %{speed_download} B/s from %{url_effective}\n" \
+                -o "$DL/$1.part" "$2"; then
+                mv "$DL/$1.part" "$DL/$1"
+                return
+              fi
+              echo "$1: attempt $TRY stopped at $(wc -c < "$DL/$1.part" 2>/dev/null || echo 0) bytes"
+              sleep 5
+            done
+            return 1
           }
           fetch fpc.dmg "$FPC_DMG_URL"
           fetch lazarus.zip "$LAZ_ZIP_URL"
@@ -238,10 +253,15 @@ jobs:
           if (Test-Path $exe) {
             Write-Host "lazarus-5.0RC1.exe from the cache"
           } else {
-            # As on Linux: the speed guard and --max-time move a crawling
-            # transfer on to the next mirror.
-            curl.exe -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --speed-limit 102400 --speed-time 30 --max-time 600 -w "lazarus-5.0RC1.exe: %{size_download} bytes at %{speed_download} B/s from %{url_effective}\n" -o "$exe.part" "https://sourceforge.net/projects/lazarus/files/Lazarus%20Windows%2064%20bits/Lazarus%205.0RC1/lazarus-5.0RC1-fpc-3.2.2-win64.exe/download"
-            if ($LASTEXITCODE -ne 0) { throw "Downloading Lazarus failed" }
+            # As on Linux: a crawling transfer is aborted and the next
+            # attempt goes on from where it stopped.
+            $url = "https://sourceforge.net/projects/lazarus/files/Lazarus%20Windows%2064%20bits/Lazarus%205.0RC1/lazarus-5.0RC1-fpc-3.2.2-win64.exe/download"
+            $done = $false
+            for ($try = 1; $try -le 10 -and -not $done; $try++) {
+              curl.exe -sSL --fail -C - --connect-timeout 30 --speed-limit 102400 --speed-time 30 -w "lazarus-5.0RC1.exe: %{size_download} bytes at %{speed_download} B/s from %{url_effective}\n" -o "$exe.part" $url
+              if ($LASTEXITCODE -eq 0) { $done = $true } else { Write-Host "Attempt $try stopped"; Start-Sleep 5 }
+            }
+            if (-not $done) { throw "Downloading Lazarus failed" }
             Move-Item "$exe.part" $exe
           }
           # SourceForge sometimes answers with an HTML page; check for the MZ header.
