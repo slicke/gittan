@@ -250,7 +250,7 @@ type
 implementation
 
 uses
-  Math, DateUtils, LazUTF8;
+  Math, DateUtils, LazUTF8, gittan.textfit;
 
 resourcestring
   rsOneFile = '1 changed file';
@@ -1348,17 +1348,7 @@ begin
   Canvas.Brush.Style := bsClear;
   if Canvas.TextWidth(Dir + FileName) > Room then
     Dir := '';
-  while (FileName <> '') and (Canvas.TextWidth(FileName + '…') > Room) do
-  begin
-    FileName := Copy(FileName, 1, Length(FileName) - 1);
-    { Keep UTF-8 sequences whole. }
-    while (FileName <> '') and (Ord(FileName[Length(FileName)]) and $C0 = $80) do
-      FileName := Copy(FileName, 1, Length(FileName) - 1);
-    if FileName = ExtractFileName(Stat.Path) then
-      Break;
-  end;
-  if FileName <> ExtractFileName(Stat.Path) then
-    FileName := FileName + '…';
+  FileName := FitTextRight(Canvas, FileName, Room);
   if Dir <> '' then
   begin
     Canvas.Font.Color := FDim;

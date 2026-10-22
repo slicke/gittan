@@ -110,7 +110,7 @@ type
 implementation
 
 uses
-  Math, LCLIntf;
+  Math, LCLIntf, gittan.textfit;
 
 const
   Pad = 24;
@@ -498,13 +498,7 @@ begin
   LineHeight := Max(1, Canvas.TextHeight('Xg'));
   for i := FTop to Min(High(FLines), FTop + FShown - 1) do
   begin
-    Line := FLines[i];
-    if Canvas.TextWidth(Line) > Width - 2 * Pad then
-    begin
-      while (Line <> '') and (Canvas.TextWidth(Line + '…') > Width - 2 * Pad) do
-        SetLength(Line, Length(Line) - 1);
-      Line := Line + '…';
-    end;
+    Line := FitTextRight(Canvas, FLines[i], Width - 2 * Pad);
     Canvas.TextOut(Pad, Y + (i - FTop) * LineHeight, Line);
   end;
   { A thin bar at the right says where the lines in view are. }

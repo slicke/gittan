@@ -92,7 +92,7 @@ type
 implementation
 
 uses
-  Math, gittan.statusbar;
+  Math, LazUTF8, gittan.statusbar, gittan.textfit;
 
 resourcestring
   rsOpenButton = 'Open Repository…';
@@ -215,17 +215,8 @@ end;
 { AText cut from the left with an ellipsis until it fits AMaxWidth, so a
   long path keeps its end, which is the part that tells. }
 function TGittanWelcome.FitLeft(const AText: string; AMaxWidth: integer): string;
-var
-  Cut: integer;
 begin
-  Result := AText;
-  if Canvas.TextWidth(Result) <= AMaxWidth then
-    Exit;
-  Cut := 1;
-  while (Cut < Length(AText)) and
-    (Canvas.TextWidth('…' + Copy(AText, Cut + 1, MaxInt)) > AMaxWidth) do
-    Inc(Cut);
-  Result := '…' + Copy(AText, Cut + 1, MaxInt);
+  Result := FitTextLeft(Canvas, AText, AMaxWidth);
 end;
 
 { The error broken into lines no wider than AWidth with the canvas font:
@@ -233,8 +224,8 @@ end;
   after a slash, or anywhere when there is no slash either. }
 procedure TGittanWelcome.WrapError(AWidth: integer; ALines: TStrings);
 var
-  Line, Word, Rest: string;
-  i, Cut, Best: integer;
+  Line, Word, Head: string;
+  i, Best: integer;
   Words: TStringArray;
 begin
   ALines.Clear;
@@ -253,21 +244,15 @@ begin
     Line := Word;
     while Canvas.TextWidth(Line) > AWidth do
     begin
-      { The longest head that fits, ending after a slash when one is
-        there; a head of at least one character, so the loop ends. }
-      Best := 0;
-      Cut := 1;
-      while (Cut < Length(Line)) and (Canvas.TextWidth(Copy(Line, 1, Cut)) <= AWidth) do
-      begin
-        if Line[Cut] = '/' then
-          Best := Cut;
-        Inc(Cut);
-      end;
+      { The longest head that fits, of whole characters, ending after
+        a slash when one is there; a head of at least one character, so
+        the loop ends. }
+      Head := UTF8Copy(Line, 1, FittingChars(Canvas, Line, UTF8Length(Line), AWidth));
+      Best := LastDelimiter('/', Head);
       if Best = 0 then
-        Best := Max(1, Cut - 1);
-      Rest := Copy(Line, Best + 1, MaxInt);
+        Best := Length(Head);
       ALines.Add(Copy(Line, 1, Best));
-      Line := Rest;
+      Line := Copy(Line, Best + 1, MaxInt);
     end;
   end;
   if Line <> '' then

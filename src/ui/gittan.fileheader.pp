@@ -156,6 +156,9 @@ type
 
 implementation
 
+uses
+  gittan.textfit;
+
 resourcestring
   rsBinary = 'binary';
   rsStaged = 'staged';
@@ -683,18 +686,7 @@ begin
   FileName := FName;
   if Canvas.TextWidth(Prefix + FileName) > Room then
     Prefix := '';
-  if Canvas.TextWidth(FileName) > Room then
-  begin
-    S := FileName;
-    while (S <> '') and (Canvas.TextWidth(S + '…') > Room) do
-    begin
-      S := Copy(S, 1, Length(S) - 1);
-      { Keep UTF-8 sequences whole. }
-      while (S <> '') and (Ord(S[Length(S)]) and $C0 = $80) do
-        S := Copy(S, 1, Length(S) - 1);
-    end;
-    FileName := S + '…';
-  end;
+  FileName := FitTextRight(Canvas, FileName, Room);
   if Prefix <> '' then
   begin
     Canvas.Font.Color := FDim;

@@ -105,7 +105,7 @@ type
 implementation
 
 uses
-  Math, Clipbrd;
+  Math, Clipbrd, gittan.textfit;
 
 resourcestring
   rsBannerCopy = 'Copy';
@@ -464,12 +464,7 @@ begin
   if not FExpanded and (First <> '') then
   begin
     Room := Right - Gap - X;
-    if Canvas.TextWidth(First) > Room then
-    begin
-      while (Length(First) > 0) and (Canvas.TextWidth(First + '…') > Room) do
-        SetLength(First, Length(First) - 1);
-      First := First + '…';
-    end;
+    First := FitTextRight(Canvas, First, Room);
     if Room > 0 then
     begin
       Canvas.Font.Color := FDim;
