@@ -13,7 +13,7 @@ unit gittan.blame;
 interface
 
 uses
-  Classes, SysUtils, Types, gittan.git;
+  Classes, SysUtils, Types, gittan.git, gittan.job;
 
 type
   {** One commit a blame names. Uncommitted is set for the lines the
@@ -59,13 +59,11 @@ type
     blame (a file it does not know, or one the commit lacks); TakeOld
     and TakeNew hand them over, else the job frees them. Set OnDone,
     then call Start; Stop ends the thread without a notification. }
-  TGittanBlameJob = class(TThread)
+  TGittanBlameJob = class(TGittanJob)
   private
     FRoot, FPath, FOldRef, FNewRef: string;
     FIgnoreWhitespace: boolean;
     FOld, FNew: TGittanBlame;
-    FOnDone: TNotifyEvent;
-    procedure Notify;
     function Run(ARepo: TGittanRepo; const ARef: string): TGittanBlame;
   protected
     procedure Execute; override;
@@ -73,9 +71,6 @@ type
     constructor Create(const ARoot, APath, AOldRef, ANewRef: string;
       AIgnoreWhitespace: boolean);
     destructor Destroy; override;
-    {** Drops the handler and ends the thread; a result still on its way
-      is thrown away. Waits for a running git only when AWait is set. }
-    procedure Stop(AWait: boolean);
     function TakeOld: TGittanBlame;
     function TakeNew: TGittanBlame;
     property Path: string read FPath;
@@ -83,8 +78,6 @@ type
     property NewRef: string read FNewRef;
     property OldBlame: TGittanBlame read FOld;
     property NewBlame: TGittanBlame read FNew;
-    {** Called in the main thread when both sides are done. }
-    property OnDone: TNotifyEvent read FOnDone write FOnDone;
   end;
 
 {** The age of a commit made at ATime as seen at ANow, both in Unix
@@ -276,9 +269,6 @@ end;
 
 destructor TGittanBlameJob.Destroy;
 begin
-  if not Finished then
-    Stop(True);
-  { Removes a Notify still waiting in the thread queue. }
   inherited Destroy;
   FOld.Free;
   FNew.Free;
@@ -310,26 +300,11 @@ begin
   finally
     Repo.Free;
   end;
-  if not Terminated then
-    Queue(@Notify);
-end;
-
-procedure TGittanBlameJob.Notify;
-begin
-  if Assigned(FOnDone) and not Terminated then
-    FOnDone(Self);
+  Done;
 end;
 
 { WaitFor on the main thread runs the queued calls while it waits, so the
   handler is dropped first: a Notify already queued then does nothing. }
-procedure TGittanBlameJob.Stop(AWait: boolean);
-begin
-  FOnDone := nil;
-  Terminate;
-  if AWait then
-    WaitFor;
-end;
-
 function TGittanBlameJob.TakeOld: TGittanBlame;
 begin
   Result := FOld;

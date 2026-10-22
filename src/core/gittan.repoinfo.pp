@@ -13,7 +13,7 @@ unit gittan.repoinfo;
 interface
 
 uses
-  Classes, SysUtils, gittan.git;
+  Classes, SysUtils, gittan.git, gittan.job;
 
 type
   {** A remote: its name, the URL it fetches from, the one it pushes to
@@ -109,25 +109,18 @@ type
 
   {** GatherRepoInfo on a thread, with OnDone raised in the main thread
     once the facts are in. }
-  TGittanRepoInfoJob = class(TThread)
+  TGittanRepoInfoJob = class(TGittanJob)
   private
     FRoot: string;
     FMaxContributors, FMaxTags: integer;
     FInfo: TGittanRepoInfo;
-    FOnDone: TNotifyEvent;
-    procedure Notify;
   protected
     procedure Execute; override;
   public
     constructor Create(const ARoot: string; AMaxContributors, AMaxTags: integer);
     destructor Destroy; override;
-    {** Drops the handler and ends the thread; a result still on its way
-      is thrown away. Waits for a running git only when AWait is set. }
-    procedure Stop(AWait: boolean);
     property Info: TGittanRepoInfo read FInfo;
     property Root: string read FRoot;
-    {** Called in the main thread when git is done. }
-    property OnDone: TNotifyEvent read FOnDone write FOnDone;
   end;
 
 implementation
@@ -600,31 +593,13 @@ end;
 
 destructor TGittanRepoInfoJob.Destroy;
 begin
-  if not Finished then
-    Stop(True);
-  { Removes a Notify still waiting in the thread queue. }
   inherited Destroy;
 end;
 
 procedure TGittanRepoInfoJob.Execute;
 begin
   FInfo := GatherRepoInfo(FRoot, FMaxContributors, FMaxTags);
-  if not Terminated then
-    Queue(@Notify);
-end;
-
-procedure TGittanRepoInfoJob.Notify;
-begin
-  if Assigned(FOnDone) and not Terminated then
-    FOnDone(Self);
-end;
-
-procedure TGittanRepoInfoJob.Stop(AWait: boolean);
-begin
-  FOnDone := nil;
-  Terminate;
-  if AWait then
-    WaitFor;
+  Done;
 end;
 
 end.

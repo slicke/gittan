@@ -9,7 +9,7 @@ unit gittan.remotejob;
 interface
 
 uses
-  Classes, SysUtils, gittan.git;
+  Classes, SysUtils, gittan.git, gittan.job;
 
 type
   {** What a TGittanRemoteJob does. }
@@ -34,31 +34,28 @@ type
     halfway would leave a merge behind: Stop only drops the handler, and
     the thread is not terminated for it (a thread terminated before it
     starts never runs Execute). }
-  TGittanRemoteJob = class(TThread)
+  TGittanRemoteJob = class(TGittanJob)
   private
     FRoot, FArg, FRemote, FPath, FBranch: string;
     FKind: TGittanRemoteKind;
     FMode: TGittanPullMode;
     FOk, FDiverged, FRejected, FStale, FUnseen, FSubmodules: boolean;
     FError, FHeadRef: string;
-    FOnDone, FOnOutput: TNotifyEvent;
+    FOnOutput: TNotifyEvent;
     FLock: TRTLCriticalSection;
     FProgress: string;
     FReturn, FOutputPending: boolean;
     function GetProgress: string;
     procedure Output(const AText: string);
-    procedure Notify;
     procedure NotifyOutput;
   protected
     procedure Execute; override;
+    procedure Detach; override;
   public
     constructor Create(const ARoot: string; AKind: TGittanRemoteKind;
       AMode: TGittanPullMode = pmAuto; const AArg: string = '';
       const ARemote: string = '');
     destructor Destroy; override;
-    {** Drops the handler, and waits for git to end when AWait is set, as
-      on quitting. }
-    procedure Stop(AWait: boolean);
     property Root: string read FRoot;
     property Kind: TGittanRemoteKind read FKind;
     property Mode: TGittanPullMode read FMode;
@@ -95,7 +92,6 @@ type
       terminal would show it (a progress line written over keeps its
       last state), the newest ProgressKeep bytes of it. }
     property Progress: string read GetProgress;
-    property OnDone: TNotifyEvent read FOnDone write FOnDone;
     {** Progress has grown; in the main thread, at most once per piece
       read and never after Stop. }
     property OnOutput: TNotifyEvent read FOnOutput write FOnOutput;
@@ -164,7 +160,8 @@ end;
 constructor TGittanRemoteJob.Create(const ARoot: string; AKind: TGittanRemoteKind;
   AMode: TGittanPullMode; const AArg, ARemote: string);
 begin
-  inherited Create(True);
+  { Never broken off: Stop leaves its git running. }
+  inherited Create(False);
   InitCriticalSection(FLock);
   FRoot := ARoot;
   FArg := AArg;
@@ -215,6 +212,13 @@ begin
     Queue(@NotifyOutput);
 end;
 
+{ OnOutput goes with OnDone: no output is told after Stop. }
+procedure TGittanRemoteJob.Detach;
+begin
+  inherited Detach;
+  FOnOutput := nil;
+end;
+
 procedure TGittanRemoteJob.NotifyOutput;
 begin
   EnterCriticalSection(FLock);
@@ -231,7 +235,7 @@ begin
   if FKind = rkClone then
   begin
     FOk := CloneRepository(FArg, FRoot, FSubmodules, FError, @Output);
-    Queue(@Notify);
+    Done;
     Exit;
   end;
   Repo := TGittanRepo.Create;
@@ -258,23 +262,7 @@ begin
   finally
     Repo.Free;
   end;
-  Queue(@Notify);
-end;
-
-{ In the main thread, as Stop is, so the handler cannot go between the
-  test and the call. }
-procedure TGittanRemoteJob.Notify;
-begin
-  if Assigned(FOnDone) then
-    FOnDone(Self);
-end;
-
-procedure TGittanRemoteJob.Stop(AWait: boolean);
-begin
-  FOnDone := nil;
-  FOnOutput := nil;
-  if AWait then
-    WaitFor;
+  Done;
 end;
 
 end.

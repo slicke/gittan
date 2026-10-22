@@ -11,7 +11,7 @@ unit gittan.reviews;
 interface
 
 uses
-  Classes, SysUtils;
+  Classes, SysUtils, gittan.job;
 
 type
   {** One comment of a thread. Created is in UTC, 0 when GitHub gave no
@@ -99,22 +99,17 @@ type
     ("owner/repo") with gh, every page of them, in a thread. OnDone is
     called in the main thread when it is done, as long as the job has
     not been stopped; Error is gh's message when it failed. }
-  TGittanReviewJob = class(TThread)
+  TGittanReviewJob = class(TGittanJob)
   private
     FExe, FRoot, FRepoPath: string;
     FNumber: integer;
     FThreads: TGittanReviewThreads;
     FNotes: TGittanPullNotes;
     FHeadOid, FError: string;
-    FOnDone: TNotifyEvent;
-    procedure Notify;
   protected
     procedure Execute; override;
   public
     constructor Create(const AExe, ARoot, ARepoPath: string; ANumber: integer);
-    {** Drops the handler and ends the thread; a result still on its way
-      is thrown away. }
-    procedure Stop;
     property Number: integer read FNumber;
     property RepoPath: string read FRepoPath;
     property Threads: TGittanReviewThreads read FThreads;
@@ -122,7 +117,6 @@ type
     property Notes: TGittanPullNotes read FNotes;
     property HeadOid: string read FHeadOid;
     property Error: string read FError;
-    property OnDone: TNotifyEvent read FOnDone write FOnDone;
   end;
 
 implementation
@@ -523,20 +517,7 @@ begin
     end;
     Inc(Pages);
   until not HasNext or (Pages >= 20);
-  if not Terminated then
-    Queue(@Notify);
-end;
-
-procedure TGittanReviewJob.Notify;
-begin
-  if Assigned(FOnDone) and not Terminated then
-    FOnDone(Self);
-end;
-
-procedure TGittanReviewJob.Stop;
-begin
-  FOnDone := nil;
-  Terminate;
+  Done;
 end;
 
 end.

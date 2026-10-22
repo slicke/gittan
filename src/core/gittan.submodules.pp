@@ -17,7 +17,7 @@ unit gittan.submodules;
 interface
 
 uses
-  Classes, SysUtils;
+  Classes, SysUtils, gittan.job;
 
 const
   {** The file at the root that names the submodules. }
@@ -175,24 +175,18 @@ function SubmoduleFolder(const AList: TGittanSubmodules): string;
 type
   {** Runs CheckSubmodule in a thread. OnDone is called in the main thread
     when it is done, as long as the job has not been stopped. }
-  TGittanSubmoduleJob = class(TThread)
+  TGittanSubmoduleJob = class(TGittanJob)
   private
     FRoot, FSuperBranch: string;
     FSub: TGittanSubmodule;
     FInfo: TGittanSubmoduleInfo;
-    FOnDone: TNotifyEvent;
-    procedure Notify;
   protected
     procedure Execute; override;
   public
     constructor Create(const ARoot: string; const ASub: TGittanSubmodule;
       const ASuperBranch: string);
-    {** Drops the handler and ends the thread; a result still on its way
-      is thrown away. Waits for a running git only when AWait is set. }
-    procedure Stop(AWait: boolean);
     property Sub: TGittanSubmodule read FSub;
     property Info: TGittanSubmoduleInfo read FInfo;
-    property OnDone: TNotifyEvent read FOnDone write FOnDone;
   end;
 
 implementation
@@ -786,22 +780,7 @@ end;
 procedure TGittanSubmoduleJob.Execute;
 begin
   FInfo := CheckSubmodule(FRoot, FSub, FSuperBranch);
-  if not Terminated then
-    Queue(@Notify);
-end;
-
-procedure TGittanSubmoduleJob.Notify;
-begin
-  if Assigned(FOnDone) and not Terminated then
-    FOnDone(Self);
-end;
-
-procedure TGittanSubmoduleJob.Stop(AWait: boolean);
-begin
-  FOnDone := nil;
-  Terminate;
-  if AWait then
-    WaitFor;
+  Done;
 end;
 
 end.

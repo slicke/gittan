@@ -13,7 +13,7 @@ unit gittan.update;
 interface
 
 uses
-  Classes, SysUtils;
+  Classes, SysUtils, gittan.job;
 
 const
   {** The build number CI compiled in, from the environment variable
@@ -40,26 +40,20 @@ type
 
   {** Asks GitHub for the latest release in a thread and calls OnDone on
     the main thread with the result. }
-  TGittanUpdateJob = class(TThread)
+  TGittanUpdateJob = class(TGittanJob)
   private
     FRelease: TGittanRelease;
     FOk: boolean;
     FError: string;
-    FOnDone: TNotifyEvent;
-    procedure Notify;
   protected
     procedure Execute; override;
   public
     constructor Create;
-    {** Drops the handler and ends the thread; a result still on its way
-      is thrown away. Waits for a running curl only when AWait is set. }
-    procedure Stop(AWait: boolean);
     {** Whether GitHub answered with a release. }
     property Ok: boolean read FOk;
     property Release: TGittanRelease read FRelease;
     {** Why there is no answer (no network, no curl), else empty. }
     property Error: string read FError;
-    property OnDone: TNotifyEvent read FOnDone write FOnDone;
   end;
 
 {** The build number in a tag such as build-109, -1 for any other tag. }
@@ -197,22 +191,7 @@ begin
     if not FOk then
       FError := 'GitHub did not answer with a release.';
   end;
-  if not Terminated then
-    Queue(@Notify);
-end;
-
-procedure TGittanUpdateJob.Notify;
-begin
-  if Assigned(FOnDone) and not Terminated then
-    FOnDone(Self);
-end;
-
-procedure TGittanUpdateJob.Stop(AWait: boolean);
-begin
-  FOnDone := nil;
-  Terminate;
-  if AWait then
-    WaitFor;
+  Done;
 end;
 
 end.

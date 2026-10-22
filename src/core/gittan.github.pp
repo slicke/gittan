@@ -10,7 +10,7 @@ unit gittan.github;
 interface
 
 uses
-  Classes, SysUtils;
+  Classes, SysUtils, gittan.job;
 
 type
   {** One pull request as gh pr view and gh pr list describe it. State is
@@ -62,7 +62,7 @@ type
     request is not a failure: HasPull is false and Error empty. The job
     also asks the remotes which local branches track a branch that is
     gone from them (GoneBranches), as GitHub deletes a merged one. }
-  TGittanPullRequestJob = class(TThread)
+  TGittanPullRequestJob = class(TGittanJob)
   private
     FExe, FRoot, FBranch: string;
     FPull: TGittanPullRequest;
@@ -70,16 +70,11 @@ type
     FGone: TStringList;
     FPulls: TGittanPullRequests;
     FError: string;
-    FOnDone: TNotifyEvent;
-    procedure Notify;
   protected
     procedure Execute; override;
   public
     constructor Create(const AExe, ARoot, ABranch: string);
     destructor Destroy; override;
-    {** Drops the handler and ends the thread; a result still on its way
-      is thrown away. Waits for a running gh only when AWait is set. }
-    procedure Stop(AWait: boolean);
     property Branch: string read FBranch;
     property Pull: TGittanPullRequest read FPull;
     property HasPull: boolean read FHasPull;
@@ -89,7 +84,6 @@ type
     {** gh's message when the list could not be read (no GitHub remote,
       not logged in), else empty. }
     property Error: string read FError;
-    property OnDone: TNotifyEvent read FOnDone write FOnDone;
   end;
 
 implementation
@@ -334,22 +328,7 @@ begin
     FError := Err;
   if not Terminated then
     GoneUpstreamsIn(FRoot, FGone);
-  if not Terminated then
-    Queue(@Notify);
-end;
-
-procedure TGittanPullRequestJob.Notify;
-begin
-  if Assigned(FOnDone) and not Terminated then
-    FOnDone(Self);
-end;
-
-procedure TGittanPullRequestJob.Stop(AWait: boolean);
-begin
-  FOnDone := nil;
-  Terminate;
-  if AWait then
-    WaitFor;
+  Done;
 end;
 
 end.
