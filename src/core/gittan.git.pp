@@ -4896,7 +4896,7 @@ begin
   AOutput := '';
   if (FRoot = '') or (AWords.Count = 0) then
     Exit(False);
-  SetLength(Args, 10 + 2 * AWords.Count);
+  SetLength(Args, 11 + 2 * AWords.Count);
   Args[0] := 'grep';
   Args[1] := '-z';
   Args[2] := '-n';
@@ -4904,7 +4904,9 @@ begin
   Args[4] := '-F';
   Args[5] := '-I';
   Args[6] := '--untracked';
-  n := 7;
+  { color.ui or color.grep set to always would color the matches. }
+  Args[7] := '--no-color';
+  n := 8;
   if AIgnoreCase then
   begin
     Args[n] := '-i';

@@ -726,6 +726,8 @@ begin
   MakeHistory;
   WriteFile('b.txt', 'twofold'#10'Two words'#10);
   WriteFile('new/u.txt', 'two'#10);
+  { A user's color setting must not reach the output that is parsed. }
+  Git(['config', 'color.grep', 'always']);
   AssertTrue(FRepo.Open(FDir));
   Words := TStringList.Create;
   try
