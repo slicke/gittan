@@ -5045,7 +5045,8 @@ end;
 { Reloads the repository and keeps what the user looks at: the folders
   closed in the tree, the selected file with its scroll position, or the
   repository diff. A selected file that is no longer changed gives way to
-  the summary, which says so. Filling the tree drops the selection, so
+  the summary, which says so; one the tree filter hides is shown again
+  without being selected. Filling the tree drops the selection, so
   the view is noted first and restored by selecting the file again, which
   runs the usual selection handler. ASnap nil reads the repository here;
   otherwise it is the snapshot the watcher already gathered off the main
@@ -5076,6 +5077,10 @@ begin
     Exit;
   View := FView;
   Path := SelectedPath;
+  { The tree filter may hide the file shown; the tree then selects
+    nothing. }
+  if (Path = '') and (View in [gvChanges, gvImage, gvTranslation, gvBinary]) then
+    Path := FCurrentPath;
   RepoPath := '';
   if (FRepoTree.Selected <> nil) and (FRepoTree.Selected.Data <> nil) then
     RepoPath := FRepoTree.Selected.GetTextPath;
@@ -5135,13 +5140,18 @@ begin
       begin
         KeepFolds;
         SummarySelectFile(nil, Path);
-        if FileTree.Selected = nil then
+        if FileTree.Selected <> nil then
+          RestoreScroll
+        else if IsChangedPath(Path) then
+        begin
+          ShowChanges(Path);
+          RestoreScroll;
+        end
+        else
         begin
           FSummary.Notice := Format(rsNoLongerChanged, [Path]);
           ShowSummary;
-        end
-        else
-          RestoreScroll;
+        end;
       end;
     gvRepoDiff:
       begin
