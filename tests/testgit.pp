@@ -2125,6 +2125,7 @@ var
   Roles: TIntegerDynArray;
   Block: TGittanDiscard;
   Err: string;
+  i: integer;
 begin
   Git(['init', '-q', '-b', 'main']);
   Git(['config', 'core.autocrlf', 'false']);
@@ -2142,7 +2143,10 @@ begin
   Lines := TStringList.Create;
   try
     AssertTrue(FRepo.FileChanges('f.txt', Lines));
-    AssertEquals('no CR left', 0, Pos(#13, Lines.Text));
+    { Line by line: Text would join them with LineEnding, CRLF on
+      Windows. }
+    for i := 0 to Lines.Count - 1 do
+      AssertEquals('no CR left in line ' + IntToStr(i), 0, Pos(#13, Lines[i]));
     Roles := ConflictRoles(Lines);
     AssertEquals(1, ConflictCount(Roles, Lines));
     AssertEquals('the four markers', 4, Ord(Roles[1] = crMarker) + Ord(Roles[3] = crMarker) +
