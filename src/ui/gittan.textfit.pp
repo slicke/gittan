@@ -19,13 +19,13 @@ const
 
 {** AText cut at the end with an ellipsis until it fits AWidth on
   ACanvas; AText itself when it fits, the ellipsis alone when not even
-  one character does. }
+  one character does, nothing when the ellipsis does not either. }
 function FitTextRight(ACanvas: TCanvas; const AText: string; AWidth: integer): string;
 
 {** AText cut at the start with an ellipsis until it fits AWidth on
   ACanvas, so a long path keeps its end, which is the part that tells;
   AText itself when it fits, the ellipsis alone when not even one
-  character does. }
+  character does, nothing when the ellipsis does not either. }
 function FitTextLeft(ACanvas: TCanvas; const AText: string; AWidth: integer): string;
 
 {** The number of characters at the start of AText (ACount characters
@@ -45,6 +45,8 @@ begin
   Result := AText;
   if ACanvas.TextWidth(Result) <= AWidth then
     Exit;
+  if ACanvas.TextWidth(Ellipsis) > AWidth then
+    Exit('');
   { The longest head of Lo characters that fits with the ellipsis. }
   Lo := 0;
   Hi := UTF8Length(AText) - 1;
@@ -66,6 +68,8 @@ begin
   Result := AText;
   if ACanvas.TextWidth(Result) <= AWidth then
     Exit;
+  if ACanvas.TextWidth(Ellipsis) > AWidth then
+    Exit('');
   { The longest tail of Lo characters that fits after the ellipsis. }
   Len := UTF8Length(AText);
   Lo := 0;
