@@ -47,6 +47,7 @@ type
     procedure TestFiles;
     procedure TestGrep;
     procedure TestSnapshot;
+    procedure TestSnapshotNoIndex;
     procedure TestBlame;
     procedure TestCommitRange;
     procedure TestLineHistory;
@@ -622,6 +623,25 @@ end;
   against it sees only what changed since: an untracked file it holds is
   no change, a new one is added, a deleted one deleted; the repository's
   own index stays as it was. }
+{ A repository with nothing staged since init has no index file; the
+  temporary index must then be absent, not empty, which git refuses
+  (GetTempFileName makes the file on Windows). }
+procedure TGitRepoTest.TestSnapshotNoIndex;
+var
+  Id: string;
+  Stats: TGittanFileStats;
+begin
+  Git(['init', '-q']);
+  WriteFile('a.txt', 'a'#10);
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.Error, FRepo.TakeSnapshot(Id));
+  AssertTrue('a.txt is in the snapshot', Pos('a.txt', Git(['ls-tree', '--name-only', Id])) > 0);
+  FRepo.Base := Id;
+  FRepo.WholeTree := True;
+  AssertTrue(FRepo.Error, FRepo.ChangeStats(Stats));
+  AssertEquals('nothing since the snapshot', 0, Length(Stats));
+end;
+
 procedure TGitRepoTest.TestSnapshot;
 var
   Id, Porcelain: string;

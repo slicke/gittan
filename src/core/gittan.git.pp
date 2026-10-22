@@ -2022,7 +2022,10 @@ begin
 end;
 
 { Copies the repository's index to ATarget; no index (nothing staged
-  since init) leaves ATarget absent, which git takes as empty. }
+  since init) leaves ATarget absent, which git takes as empty. On
+  Windows GetTempFileName has made the file already, and git refuses
+  an empty one ("index file smaller than expected"), so it is
+  deleted. }
 function TGittanRepo.CopyIndex(const ATarget: string): boolean;
 var
   Source: string;
@@ -2031,7 +2034,11 @@ begin
   Result := True;
   Source := IndexPath;
   if (Source = '') or not FileExists(Source) then
+  begin
+    if FileExists(ATarget) then
+      Result := DeleteFile(ATarget);
     Exit;
+  end;
   Stream := TMemoryStream.Create;
   try
     try
