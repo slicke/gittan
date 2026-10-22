@@ -40,6 +40,7 @@ type
     property Root: string read FRoot;
     property Paths: TStringList read FPaths;
     property Amend: boolean read FAmend;
+    property Message: string read FMessage;
     {** Whether the commit was made. }
     property Ok: boolean read FOk;
     {** The new commit, when Ok. }

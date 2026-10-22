@@ -294,6 +294,9 @@ type
     FCommitNote: TGittanHintBox;
     FCommitItem: TMenuItem;
     FCommitJob: TGittanCommitJob;
+    { The commits still running in a repository no longer open, for
+      their draft (DroppedCommitDone). }
+    FDroppedCommits: TList;
     FCommitDraftFor, FAmendMessage: string;
     { Abort and Skip for what git is in the middle of, and the merge
       message filled into the field (umain.conflicts.inc). }
@@ -1146,6 +1149,8 @@ type
     procedure StartCommit;
     procedure CommitJobDone(Sender: TObject);
     procedure StopCommitJob(AWait: boolean);
+    procedure DroppedCommitDone(Sender: TObject);
+    procedure ForgetCommitted(AJob: TGittanCommitJob);
     procedure SaveCommitDraft;
     procedure LoadCommitDraft;
     procedure UpdateRemoteItems;
@@ -2385,6 +2390,7 @@ begin
   FBlameCache := TStringList.Create;
   FBlameCache.CaseSensitive := True;
   FBlameZombies := TList.Create;
+  FDroppedCommits := TList.Create;
   FThreadFlips := TStringList.Create;
   FReviewMeasure := TBitmap.Create;
   FReviewMeasure.SetSize(1, 1);
@@ -2743,6 +2749,7 @@ procedure TForm1.FormDestroy(Sender: TObject);
 begin
   Application.RemoveAsyncCalls(Self);
   StopCommitJob(True);
+  FreeAndNil(FDroppedCommits);
   StopRemoteJob(True);
   StopWatcher;
   AbandonPullJob;
