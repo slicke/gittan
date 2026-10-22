@@ -1590,6 +1590,10 @@ begin
     P.CurrentDirectory := ADir;
     P.Parameters.Add('-c');
     P.Parameters.Add('core.quotepath=false');
+    { With it git writes a blank context line as an empty line, not a
+      space, and the readers of a hunk would lose the line. }
+    P.Parameters.Add('-c');
+    P.Parameters.Add('diff.suppressBlankEmpty=false');
     for i := 0 to High(AArgs) do
       P.Parameters.Add(ProcessArg(AArgs[i]));
     SetLength(Skip, 4 + Length(AEnv));

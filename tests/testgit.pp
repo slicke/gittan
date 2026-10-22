@@ -39,6 +39,7 @@ type
     procedure TestChangeStatsUnreadable;
     procedure TestFileChanges;
     procedure TestIgnoreWhitespace;
+    procedure TestSuppressBlankEmpty;
     procedure TestUnbornRepository;
     procedure TestBase;
     procedure TestRange;
@@ -450,6 +451,26 @@ begin
     AssertTrue(FRepo.ChangeStats(Stats));
     AssertEquals(1, Length(Stats));
     AssertEquals(0, Stats[0].Added + Stats[0].Deleted);
+  finally
+    Lines.Free;
+  end;
+end;
+
+procedure TGitRepoTest.TestSuppressBlankEmpty;
+var
+  Lines: TStringList;
+begin
+  Git(['init', '-q']);
+  WriteFile('a.txt', 'one'#10#10'two'#10'three'#10);
+  Commit('first');
+  Git(['config', 'diff.suppressBlankEmpty', 'true']);
+  WriteFile('a.txt', 'one'#10#10'two'#10'drei'#10);
+  AssertTrue(FRepo.Open(FDir));
+  Lines := TStringList.Create;
+  try
+    AssertTrue(FRepo.FileChanges('a.txt', Lines));
+    AssertEquals('the blank context line is kept', ' one| | two|-three|+drei|',
+      Joined(Lines));
   finally
     Lines.Free;
   end;
