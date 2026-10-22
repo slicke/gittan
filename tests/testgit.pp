@@ -3133,45 +3133,39 @@ end;
 
 { More commits only in the reflog than one command line takes on
   Windows (about 41 characters an id, 32767 at most): every one is
-  still marked lost. The commits come from one fast-import, the reflog
-  is written as git writes it, newest last. }
+  still marked lost. The commits are written as files and stored by
+  one hash-object, with no pipe to git's input; the reflog is written
+  as git writes it, newest last. }
 procedure TGitRepoTest.TestReflogMany;
 const
   Count = 950;
 var
-  P: TProcess;
-  Stream, Line, Prev: string;
+  Args: array of string;
+  Tree, Line, Prev: string;
   Ids: TStringList;
   Log: TGittanReflog;
   F: TextFile;
   i, Lost: integer;
 begin
   MakeHistory;
-  Stream := '';
+  Tree := Trim(Git(['rev-parse', 'HEAD^{tree}']));
+  SetLength(Args, Count + 4);
+  Args[0] := 'hash-object';
+  Args[1] := '-w';
+  Args[2] := '-t';
+  Args[3] := 'commit';
   for i := 1 to Count do
-    Stream := Stream + 'commit refs/heads/gone'#10 +
-      'committer Gittan Test <test@example.invalid> 1700000000 +0000'#10 +
-      'data ' + IntToStr(Length(IntToStr(i))) + #10 + IntToStr(i) + #10;
-  P := TProcess.Create(nil);
-  try
-    P.Executable := 'git';
-    P.CurrentDirectory := FDir;
-    P.Parameters.Add('fast-import');
-    P.Parameters.Add('--quiet');
-    P.Options := [poUsePipes, poStderrToOutPut];
-    P.Execute;
-    P.Input.WriteBuffer(Stream[1], Length(Stream));
-    P.CloseInput;
-    P.WaitOnExit;
-    AssertEquals('fast-import', 0, P.ExitCode);
-  finally
-    P.Free;
+  begin
+    WriteFile('c/' + IntToStr(i), 'tree ' + Tree + #10 +
+      'author Gittan Test <test@example.invalid> 1700000000 +0000'#10 +
+      'committer Gittan Test <test@example.invalid> 1700000000 +0000'#10#10 +
+      IntToStr(i) + #10);
+    Args[3 + i] := 'c/' + IntToStr(i);
   end;
   Ids := TStringList.Create;
   try
-    Ids.Text := Git(['rev-list', '--reverse', 'gone']);
+    Ids.Text := Git(Args);
     AssertEquals(Count, Ids.Count);
-    Git(['update-ref', '-d', 'refs/heads/gone']);
     Prev := Trim(Git(['rev-parse', 'HEAD']));
     AssignFile(F, IncludeTrailingPathDelimiter(FDir) + SetDirSeparators('.git/logs/HEAD'));
     Append(F);
