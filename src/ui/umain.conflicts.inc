@@ -130,8 +130,10 @@ begin
       Side := rsSideMine
     else
       Side := rsSideTheirs;
+    { Taking one side drops the other's changes, with no undo: Cancel is
+      the default, as for Revert, Remove and Clean. }
     if QuestionDlg(rsResolveTitle, Format(rsResolveAsk, [APath, Side]), mtConfirmation,
-      [mrYes, rsResolveAction, 'IsDefault', mrCancel, rsCancelButton, 'IsCancel'], 0) <> mrYes then
+      [mrYes, rsResolveAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
       Exit;
     if AAction = 0 then
       Ok := FRepo.ResolveConflict(APath, csMine)
