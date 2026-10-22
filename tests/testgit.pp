@@ -11,7 +11,7 @@ interface
 uses
   { gittan.repoinfo first: its ParseTags is not the one tested here. }
   Classes, SysUtils, fpcunit, testregistry, gittan.repoinfo, gittan.git, gittan.history,
-  gittan.graph, gittan.rebase, gittan.blame;
+  gittan.graph, gittan.rebase, gittan.blame, gittan.conflicts, gittan.discard;
 
 type
   TGitRepoTest = class(TTestCase)
@@ -51,6 +51,7 @@ type
     procedure TestBlame;
     procedure TestBlameSha256;
     procedure TestInputClosed;
+    procedure TestConflictCrlf;
     procedure TestCommitRange;
     procedure TestLineHistory;
     procedure TestRemoteFor;
@@ -131,7 +132,7 @@ procedure SetTestVariable(const AName, AValue: string);
 implementation
 
 uses
-  {$ifdef unix}BaseUnix,{$endif} Process;
+  {$ifdef unix}BaseUnix,{$endif} Types, Process;
 
 const
   { A name git quotes C-style in its line output, to check that the -z
@@ -2113,6 +2114,48 @@ begin
   finally
     F.Free;
   end;
+end;
+
+{ A conflict in a file with CRLF line ends, with the base between the
+  sides: the change view's lines have no CRs left, so every marker reads
+  as one, and resolving it keeps the file's line ends. }
+procedure TGitRepoTest.TestConflictCrlf;
+var
+  Lines: TStringList;
+  Roles: TIntegerDynArray;
+  Block: TGittanDiscard;
+  Err: string;
+begin
+  Git(['init', '-q', '-b', 'main']);
+  Git(['config', 'core.autocrlf', 'false']);
+  Git(['config', 'merge.conflictStyle', 'diff3']);
+  WriteFile('f.txt', 'one'#13#10'two'#13#10'three'#13#10);
+  Commit('base');
+  Git(['checkout', '-q', '-b', 'other']);
+  WriteFile('f.txt', 'one'#13#10'TWO other'#13#10'three'#13#10);
+  Commit('other');
+  Git(['checkout', '-q', 'main']);
+  WriteFile('f.txt', 'one'#13#10'TWO main'#13#10'three'#13#10);
+  Commit('main');
+  GitStops(FDir, ['merge', 'other']);
+  AssertTrue(FRepo.Open(FDir));
+  Lines := TStringList.Create;
+  try
+    AssertTrue(FRepo.FileChanges('f.txt', Lines));
+    AssertEquals('no CR left', 0, Pos(#13, Lines.Text));
+    Roles := ConflictRoles(Lines);
+    AssertEquals(1, ConflictCount(Roles, Lines));
+    AssertEquals('the four markers', 4, Ord(Roles[1] = crMarker) + Ord(Roles[3] = crMarker) +
+      Ord(Roles[5] = crMarker) + Ord(Roles[7] = crMarker));
+    AssertEquals(crOurs, Roles[2]);
+    AssertEquals(crBase, Roles[4]);
+    AssertEquals(crTheirs, Roles[6]);
+    Block := ResolveBlock(Lines, Roles, 1, cpOurs, FRepo.Root + PathDelim + 'f.txt');
+    AssertTrue(Err, DiscardBlock(Block, Err));
+  finally
+    Lines.Free;
+  end;
+  AssertEquals('one'#13#10'TWO main'#13#10'three'#13#10, FileText(FDir + PathDelim + 'f.txt'));
 end;
 
 procedure TGitRepoTest.TestResolveMerge;
