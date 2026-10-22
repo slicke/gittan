@@ -735,8 +735,12 @@ begin
       PaintContributors(Y);
   end;
 
+  { FitHeight sizes the page from the paint before, which a new width
+    may have changed: tiles wrapped into fewer rows leave it too tall.
+    The height follows what was painted, up or down; it does not depend
+    on the height, so this paint is the last. }
   FContentHeight := Y + Pad;
-  if Height < FContentHeight then
+  if Height <> Max(FContentHeight, Constraints.MinHeight) then
     Height := Max(FContentHeight, Constraints.MinHeight);
 end;
 
