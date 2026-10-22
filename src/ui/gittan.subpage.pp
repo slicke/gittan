@@ -72,6 +72,7 @@ type
     function ToneColor(ATone: TGittanSubTone): TColor;
     function FitRight(const AText: string; AMaxWidth: integer): string;
     function LabelWidth: integer;
+    function IdWidth: integer;
     function RowAt(Y: integer): integer;
     procedure SetHot(AValue: integer);
     procedure SetUrlHot(AValue: boolean);
@@ -471,6 +472,18 @@ begin
   Inc(Result, IconSize + Gap div 2 + 2 + Gap * 2);
 end;
 
+{ The column of the short ids, as wide as the longest (seven characters
+  at least; its length follows core.abbrev and the repository's size). }
+function TGittanSubPage.IdWidth: integer;
+var
+  i, n: integer;
+begin
+  n := 7;
+  for i := 0 to High(FRows) do
+    n := Max(n, Length(FRows[i].Commit.Short));
+  Result := Canvas.TextWidth(StringOfChar('0', n));
+end;
+
 function TGittanSubPage.RowAt(Y: integer): integer;
 var
   i: integer;
@@ -632,7 +645,7 @@ begin
   else
     Canvas.Font.Color := FDim;
   Canvas.TextOut(Right - Canvas.TextWidth(Row.Commit.Short), TextY, Row.Commit.Short);
-  Dec(Right, Canvas.TextWidth('0000000') + Gap + Gap div 2);
+  Dec(Right, IdWidth + Gap + Gap div 2);
   Meta := Row.Commit.Author;
   if Row.Commit.Date <> '' then
   begin
