@@ -3386,18 +3386,21 @@ begin
   Result := (FRoot <> '') and RunGit(FRoot, ['remote', 'add', '--', AName, AUrl], Output);
 end;
 
+{ No "--": before git parsed options for remote rename and remove, it
+  counted the arguments and took "--" for a name, and the supported git
+  goes back to 2.30. }
 function TGittanRepo.RenameRemote(const AOld, ANew: string): boolean;
 var
   Output: string;
 begin
-  Result := (FRoot <> '') and RunGit(FRoot, ['remote', 'rename', '--', AOld, ANew], Output);
+  Result := (FRoot <> '') and RunGit(FRoot, ['remote', 'rename', AOld, ANew], Output);
 end;
 
 function TGittanRepo.RemoveRemote(const AName: string): boolean;
 var
   Output: string;
 begin
-  Result := (FRoot <> '') and RunGit(FRoot, ['remote', 'remove', '--', AName], Output);
+  Result := (FRoot <> '') and RunGit(FRoot, ['remote', 'remove', AName], Output);
 end;
 
 { git config exits with 5 when there is no push URL to unset. }
