@@ -22,7 +22,11 @@ uses
 { Every git the tests start reads this file as the user's config and no
   system config, so what the developer has set (signed commits, a hooks
   path, core.autocrlf=true, which Git for Windows sets system-wide and
-  which makes a checkout write CRLF) does not change what git does. }
+  which makes a checkout write CRLF) does not change what git does. The
+  settings a parent process passes in the environment (GIT_CONFIG_COUNT
+  with its keys and values, and GIT_CONFIG_PARAMETERS, which git -c
+  sets for what it runs) come after the config files, so they are
+  cleared too. }
 function IsolateGitConfig: string;
 var
   Lines: TStringList;
@@ -46,6 +50,8 @@ begin
   end;
   SetTestVariable('GIT_CONFIG_GLOBAL', Result);
   SetTestVariable('GIT_CONFIG_NOSYSTEM', '1');
+  SetTestVariable('GIT_CONFIG_COUNT', '0');
+  SetTestVariable('GIT_CONFIG_PARAMETERS', '');
 end;
 
 var

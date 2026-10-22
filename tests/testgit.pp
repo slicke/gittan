@@ -325,7 +325,8 @@ end;
 
 { An untracked file that cannot be read when it is counted (gone since
   git listed it, or no permission) counts nothing instead of raising out
-  of ChangeStats, which ended the watcher's thread. }
+  of ChangeStats, which ended the watcher's thread. Root reads a file
+  with mode 0, so the test has nothing to show then (a CI container). }
 procedure TGitRepoTest.TestChangeStatsUnreadable;
 var
   Stats: TGittanFileStats;
@@ -333,6 +334,8 @@ var
   FileName: string;
 begin
   {$ifdef unix}
+  if FpGeteuid = 0 then
+    Exit;
   MakeHistory;
   WriteFile('locked.txt', 'l1'#10'l2'#10);
   FileName := IncludeTrailingPathDelimiter(FDir) + 'locked.txt';
@@ -1932,8 +1935,9 @@ end;
   SetEnvironmentVariable is the ANSI one, which could not carry an ö).
   On Unix the RTL's GetEnvironmentString reads envp, the array the
   program started with, while a libc-based lookup (fpgetenv on macOS)
-  reads libc's own, so both get the variable: a longer copy of envp
-  with it last. }
+  reads libc's own, so both get the variable: in envp in the place of
+  the one the program started with, if it had it (a process given the
+  name twice may read the first), else in a longer copy of envp, last. }
 {$ifdef windows}
 function SetEnvironmentVariableW(AName, AValue: PWideChar): LongBool; stdcall;
   external 'kernel32' name 'SetEnvironmentVariableW';
@@ -1955,7 +1959,14 @@ begin
   setenv(PChar(AName), PChar(AValue), 1);
   Count := 0;
   while envp[Count] <> nil do
+  begin
+    if StrLComp(envp[Count], PChar(AName + '='), Length(AName) + 1) = 0 then
+    begin
+      envp[Count] := StrNew(PChar(AName + '=' + AValue));
+      Exit;
+    end;
     Inc(Count);
+  end;
   Wider := GetMem((Count + 2) * SizeOf(PChar));
   Move(envp^, Wider^, Count * SizeOf(PChar));
   Wider[Count] := StrNew(PChar(AName + '=' + AValue));
