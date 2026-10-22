@@ -463,4 +463,7 @@ jobs:
             packages/Gittan-macos-silicon.dmg \
             packages/Gittan-windows-x64.zip \
             packages/Gittan-linux-amd64.tar.gz
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+          # --latest: releases/latest, which the app's update check reads,
+          # must move to it, not be left to how GitHub treats a published
+          # draft.
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
