@@ -5434,6 +5434,7 @@ var
   Title, DiffText: string;
   Lines: TStringList;
   Spans: TGittanLineSpans;
+  InHeader: boolean;
 begin
   Title := rsRepoDiffTitle;
   if FRepo.Base <> '' then
@@ -5453,23 +5454,27 @@ begin
   FView := gvRepoDiff;
   DiffText := FRepo.Diff;
   ShowText(Edit, DiffText, FLexers.ByName(rsDiffLexer));
-  { The "---"/"+++" file headers are not changes. }
-  for i := 0 to Edit.Strings.Count - 1 do
-    if (Edit.Strings.LinesLen[i] > 0) and
-      (Copy(Edit.Strings.Lines[i], 1, 3) <> '---') and
-      (Copy(Edit.Strings.Lines[i], 1, 3) <> '+++') then
-      MarkLine(Edit, i, char(Edit.Strings.Lines[i][1]));
   { The words that differ, as in the change view. The diff's own lines
     (hunk and file headers) are given a blank marker so they do not
     count as changes; the text keeps its marker column, so the spans
-    are shifted by one. }
+    are shifted by one. A file's header runs from its "diff" line to
+    its first hunk, so a "---"/"+++" line is a header only there: in a
+    hunk it is a deleted "-- comment" or an added "++i;". }
   Lines := TStringList.Create;
   try
     Lines.Text := DiffText;
+    InHeader := False;
     for i := 0 to Lines.Count - 1 do
-      if (Lines[i] = '') or not (Lines[i][1] in ['+', '-']) or
-        (Copy(Lines[i], 1, 3) = '---') or (Copy(Lines[i], 1, 3) = '+++') then
-        Lines[i] := ' ' + Lines[i];
+    begin
+      if Copy(Lines[i], 1, 5) = 'diff ' then
+        InHeader := True
+      else if Copy(Lines[i], 1, 2) = '@@' then
+        InHeader := False;
+      if (Lines[i] = '') or not (Lines[i][1] in ['+', '-']) or InHeader then
+        Lines[i] := ' ' + Lines[i]
+      else if i < Edit.Strings.Count then
+        MarkLine(Edit, i, Lines[i][1]);
+    end;
     WordDiff(Lines, FIgnoreWhitespace, Spans);
     for i := 0 to Min(High(Spans), Edit.Strings.Count - 1) do
       if Spans[i] <> nil then
