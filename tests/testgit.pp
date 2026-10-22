@@ -2542,6 +2542,10 @@ begin
     AssertFalse(NotMerged);
 
     AssertTrue(FRepo.HasCommit('refs/remotes/origin/work'));
+    { A tag of the same name on the remote makes the bare name
+      ambiguous. }
+    Git(['tag', 'work']);
+    Git(['push', '-q', 'origin', 'refs/tags/work']);
     AssertTrue(FRepo.Error, FRepo.DeleteRemoteBranch('origin/work'));
     AssertFalse(FRepo.HasCommit('refs/remotes/origin/work'));
     RunCommandIndir(Remote, 'git', ['rev-parse', '--verify', '-q', 'refs/heads/work'], R,

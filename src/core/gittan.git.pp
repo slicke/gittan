@@ -2317,7 +2317,9 @@ begin
 end;
 
 { Appends the refs under AGroup (refs/heads, refs/remotes or refs/tags),
-  most recently committed first, to AList. A symbolic ref such as
+  newest first, to AList: by creatordate, the commit's date for a branch
+  or a lightweight tag and the tagger's for an annotated one, which has
+  no committerdate and sorted last. A symbolic ref such as
   origin/HEAD (short name "origin") is skipped: it only points at
   another one in the list. }
 function TGittanRepo.RefGroup(const AGroup: string; AList: TStrings): boolean;
@@ -2327,7 +2329,7 @@ var
   Tab: integer;
 begin
   Result := RunGit(FRoot, ['for-each-ref', '--format=%(refname:short)%09%(symref)',
-    '--sort=-committerdate', AGroup], Output);
+    '--sort=-creatordate', AGroup], Output);
   if not Result then
     Exit;
   Raw := TStringList.Create;
@@ -3539,7 +3541,9 @@ begin
     FError := Format('%s is not a branch of a remote.', [ARef]);
     Exit(False);
   end;
-  Result := RunRemote(['push', Remote, '--delete', OnRemote]);
+  { Qualified, as DeleteRemoteTag's is: a tag of the same name on the
+    remote makes the bare name ambiguous, and git refuses it. }
+  Result := RunRemote(['push', Remote, '--delete', 'refs/heads/' + OnRemote]);
 end;
 
 function TGittanRepo.CreateTag(const AName, AAt, AMessage: string): boolean;
