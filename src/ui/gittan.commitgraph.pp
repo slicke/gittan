@@ -331,7 +331,11 @@ begin
   FGraph.PaintRows(Canvas);
 end;
 
+{ The mouse over empty space under the rows keeps the row the keys
+  chose, which Enter and the Menu key act on. }
 procedure TGittanGraphRows.MouseMove(Shift: TShiftState; X, Y: integer);
+var
+  Row: integer;
 begin
   inherited MouseMove(Shift, X, Y);
   if FGraph.FStatsOn then
@@ -339,7 +343,9 @@ begin
     FGraph.StatsHover(X, Y);
     Exit;
   end;
-  FGraph.SetCurrent(FGraph.RowAt(Y));
+  Row := FGraph.RowAt(Y);
+  if Row >= 0 then
+    FGraph.SetCurrent(Row);
   FGraph.SetFooterHot(FGraph.FooterAt(Y) and FGraph.FooterClickable);
 end;
 
