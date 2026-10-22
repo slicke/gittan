@@ -797,6 +797,13 @@ var
 begin
   if AWait then
   begin
+    { Stop's wait lets queued calls through: another dropped job's
+      DroppedCommitDone would take it out of the list being walked, and
+      FCommitJob's CommitDone refresh the repository being closed. }
+    for i := 0 to FDroppedCommits.Count - 1 do
+      TGittanCommitJob(FDroppedCommits[i]).OnDone := nil;
+    if FCommitJob <> nil then
+      FCommitJob.OnDone := nil;
     for i := 0 to FDroppedCommits.Count - 1 do
     begin
       Job := TGittanCommitJob(FDroppedCommits[i]);
