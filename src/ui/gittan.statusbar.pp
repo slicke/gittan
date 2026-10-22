@@ -1464,10 +1464,16 @@ begin
   end;
 end;
 
+{ The repository's rectangle grows over its name, which spans both rows
+  beside the tile, so the branch chip and the base under the name are
+  tested first. }
 function TGittanStatusBar.PartAt(X, Y: integer): TGittanStatusPart;
 var
   P: TGittanStatusPart;
 begin
+  for P in [spBranch, spBase] do
+    if Types.PtInRect(FRects[P], Point(X, Y)) then
+      Exit(P);
   for P := Succ(spNone) to High(P) do
     if Types.PtInRect(FRects[P], Point(X, Y)) then
       Exit(P);
