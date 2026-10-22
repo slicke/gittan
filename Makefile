@@ -5,12 +5,15 @@ LPI ?= Gittan.lpi
 
 # Unix: the macOS installer leaves lazbuild in /Applications/lazarus and
 # fpcupdeluxe keeps it under ~/fpcupdeluxe, neither on PATH. Try those, as
-# Trndi's Makefile does, when LAZBUILD was not set and PATH has none.
+# Trndi's Makefile does, when LAZBUILD was not set and PATH has none. The
+# shell tests the paths, since wildcard and firstword split at spaces (a
+# home folder with one in its name); the recipes quote $(LAZBUILD).
 ifneq ($(OS),Windows_NT)
   ifeq ($(origin LAZBUILD),file)
     ifeq ($(shell command -v lazbuild 2>/dev/null),)
-      LAZBUILD_FOUND := $(firstword $(wildcard /Applications/lazarus/lazbuild \
-        $(HOME)/fpcupdeluxe/lazarus/lazbuild))
+      LAZBUILD_FOUND := $(shell for f in /Applications/lazarus/lazbuild \
+        "$(HOME)/fpcupdeluxe/lazarus/lazbuild"; do \
+        if [ -x "$$f" ]; then echo "$$f"; break; fi; done)
       ifneq ($(LAZBUILD_FOUND),)
         LAZBUILD := $(LAZBUILD_FOUND)
       endif
@@ -102,15 +105,15 @@ help:
 	@echo "Current: WIDGETSET=$(WIDGETSET) LAZBUILD=$(LAZBUILD)"
 
 build: lexlib
-	$(LAZBUILD) $(LAZFLAGS) $(LPI)
+	"$(LAZBUILD)" $(LAZFLAGS) $(LPI)
 	$(bundle_icon)
 
 debug: lexlib
-	$(LAZBUILD) $(LAZFLAGS) $(DEBUG_FLAGS) $(LPI)
+	"$(LAZBUILD)" $(LAZFLAGS) $(DEBUG_FLAGS) $(LPI)
 	$(bundle_icon)
 
 rebuild: lexlib
-	$(LAZBUILD) -B $(LAZFLAGS) $(LPI)
+	"$(LAZBUILD)" -B $(LAZFLAGS) $(LPI)
 	$(bundle_icon)
 
 icons:
@@ -132,7 +135,7 @@ else
 endif
 
 run: build
-	$(RUN_EXE) $(RUN_ARGS)
+	"$(RUN_EXE)" $(RUN_ARGS)
 
 test:
 	@mkdir -p tests/lib
