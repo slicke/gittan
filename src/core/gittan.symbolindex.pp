@@ -80,6 +80,24 @@ begin
   Result := StringReplace(Result, #13, '\r', [rfReplaceAll]);
 end;
 
+{ The fields of a line at its tabs. Not DelimitedText, which reads a
+  field that starts with a double quote as quoted (a JSON key, "use
+  strict";) even with StrictDelimiter set. }
+procedure SplitTabs(const S: string; AFields: TStrings);
+var
+  Start, i: integer;
+begin
+  AFields.Clear;
+  Start := 1;
+  for i := 1 to Length(S) do
+    if S[i] = #9 then
+    begin
+      AFields.Add(Copy(S, Start, i - Start));
+      Start := i + 1;
+    end;
+  AFields.Add(Copy(S, Start, MaxInt));
+end;
+
 function Unescape(const S: string): string;
 var
   i: integer;
@@ -242,8 +260,6 @@ begin
   Lines := TStringList.Create;
   Fields := TStringList.Create;
   try
-    Fields.Delimiter := #9;
-    Fields.StrictDelimiter := True;
     try
       Lines.LoadFromFile(AFileName);
     except
@@ -254,7 +270,7 @@ begin
     E := nil;
     for i := 1 to Lines.Count - 1 do
     begin
-      Fields.DelimitedText := Lines[i];
+      SplitTabs(Lines[i], Fields);
       if (Fields.Count = 4) and (Fields[0] = 'F') then
       begin
         E := Add(Unescape(Fields[1]));

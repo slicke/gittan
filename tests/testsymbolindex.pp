@@ -101,7 +101,7 @@ begin
     E.Size := 123;
     E.Time := 456;
     E.Indexed := True;
-    SetLength(E.Items, 2);
+    SetLength(E.Items, 3);
     E.Items[0].Name := 'TFoo.Bar';
     E.Items[0].Row := 10;
     E.Items[0].Col := 17;
@@ -110,6 +110,14 @@ begin
     E.Items[1].Name := 'baz';
     E.Items[1].Row := 20;
     E.Items[1].Line := '';
+    { A field starting with a double quote is no quoted field. }
+    E.Items[2].Name := '"key"';
+    E.Items[2].Line := '"use strict";';
+    E := Index.Add('"quoted".json');
+    E.Indexed := True;
+    SetLength(E.Items, 1);
+    E.Items[0].Name := '"name"';
+    E.Items[0].Line := '"name": "x",';
     Index.Add('queued.pp');
     E := Index.Add('empty.pp');
     E.Indexed := True;
@@ -120,12 +128,12 @@ begin
   Index := TGittanSymbolIndex.Create;
   try
     Index.Load(FFileName);
-    AssertEquals('queued entries are not saved', 2, Index.Count);
+    AssertEquals('queued entries are not saved', 3, Index.Count);
     E := Index.Find('dir/a b.pp');
     AssertNotNull(E);
     AssertTrue(E.Indexed);
     AssertTrue(Index.IsCurrent('dir/a b.pp', 123, 456));
-    AssertEquals(2, Length(E.Items));
+    AssertEquals(3, Length(E.Items));
     AssertEquals('TFoo.Bar', E.Items[0].Name);
     AssertEquals(10, E.Items[0].Row);
     AssertEquals(17, E.Items[0].Col);
@@ -133,6 +141,12 @@ begin
     AssertEquals('procedure TFoo.Bar;'#9'{ tab \ backslash }', E.Items[0].Line);
     AssertEquals('baz', E.Items[1].Name);
     AssertEquals('', E.Items[1].Line);
+    AssertEquals('"key"', E.Items[2].Name);
+    AssertEquals('"use strict";', E.Items[2].Line);
+    E := Index.Find('"quoted".json');
+    AssertNotNull(E);
+    AssertEquals('"name"', E.Items[0].Name);
+    AssertEquals('"name": "x",', E.Items[0].Line);
     AssertEquals(0, Length(Index.Find('empty.pp').Items));
   finally
     Index.Free;
