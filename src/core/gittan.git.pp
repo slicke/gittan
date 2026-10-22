@@ -4457,11 +4457,14 @@ begin
   end;
 end;
 
-{ format-patch prints the name of every file it writes, a line each. }
+{ format-patch prints the name of every file it writes, a line each,
+  relative to where git runs when the folder is: the folder is made
+  absolute against the root first, so the names are too, whatever this
+  process's current folder is. }
 function TGittanRepo.FormatPatches(const AOlder, ANewer, AFolder: string;
   ACoverLetter: boolean; AFiles: TStrings): boolean;
 var
-  Output: string;
+  Output, Folder: string;
   Revs, Args: TStringArray;
   FromStart: boolean;
   Lines: TStringList;
@@ -4471,7 +4474,10 @@ begin
   if (FRoot = '') or (ANewer = '') or (AFolder = '') or
     not PatchRange(AOlder, ANewer, Revs, FromStart) then
     Exit(False);
-  Args := ['format-patch', '-o', AFolder];
+  Folder := AFolder;
+  if (ExtractFileDrive(Folder) = '') and not (Folder[1] in AllowDirectorySeparators) then
+    Folder := IncludeTrailingPathDelimiter(FRoot) + Folder;
+  Args := ['format-patch', '-o', Folder];
   if ACoverLetter then
     Args := Concat(Args, ['--cover-letter']);
   if FromStart then

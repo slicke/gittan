@@ -3715,6 +3715,13 @@ begin
     AssertEquals('0002-third.patch', ExtractFileName(Files[1]));
     AssertTrue(FileExists(Files[1]));
     AssertTrue(IsMailPatchFile(Files[0]));
+    { A folder given relative is the root's, not this process's. }
+    AssertTrue(FRepo.Error, FRepo.FormatPatches(Second, Last, 'rel', False, One));
+    AssertEquals(2, One.Count);
+    AssertEquals(IncludeTrailingPathDelimiter(FRepo.Root) + 'rel' + PathDelim + '0001-second.patch',
+      One[0]);
+    AssertTrue(FileExists(One[0]));
+    One.Clear;
 
     { Committed, as their author made them. }
     Git(['reset', '-q', '--hard', First]);
