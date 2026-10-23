@@ -85,7 +85,7 @@ type
 implementation
 
 uses
-  gittan.textfit, gittan.theme;
+  gittan.textfit, gittan.theme, Forms;
 
 const
   PadX = 8;
@@ -289,7 +289,7 @@ begin
     DrawStatusIcon(Canvas, FGlyph, Px(PadX), Px(PadY) - 1, Px(IconSize) + 2, FGlyphColor)
   else if HasIcon then
     FImages.DrawForPPI(Canvas, Px(PadX), Px(PadY), FIcon, IconSize,
-      Font.PixelsPerInch, GetCanvasScaleFactor);
+      Screen.PixelsPerInch, GetCanvasScaleFactor);
   Canvas.Pen.Width := 1;
   Canvas.Font := Font;
   Canvas.Brush.Style := bsClear;

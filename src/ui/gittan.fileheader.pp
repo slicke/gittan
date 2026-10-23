@@ -159,7 +159,7 @@ type
 implementation
 
 uses
-  gittan.textfit, gittan.theme, gittan.statusbar;
+  gittan.textfit, gittan.theme, gittan.statusbar, Forms;
 
 resourcestring
   rsBinary = 'binary';
@@ -665,7 +665,7 @@ begin
   if (FIcon >= 0) and (FImages <> nil) then
   begin
     FImages.DrawForPPI(Canvas, X, (Height - 1 - Px(IconSize)) div 2, FIcon,
-      IconSize, Font.PixelsPerInch, GetCanvasScaleFactor);
+      IconSize, Screen.PixelsPerInch, GetCanvasScaleFactor);
     Inc(X, Px(IconSize) + Px(Gap) div 2 + 2);
   end;
   Room := Right - X;

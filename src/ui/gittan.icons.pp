@@ -231,6 +231,8 @@ begin
   AImages.Width := 16;
   AImages.Height := 16;
   AImages.RegisterResolutions([16, 32]);
+  { A tree draws the 32 px set, scaled, above 100 %. }
+  AImages.Scaled := True;
   AddIcon(AImages, DrawFolder(16), DrawFolder(32));
   for Kind := Low(TGittanChangeKind) to High(TGittanChangeKind) do
     AddIcon(AImages, DrawBadge(16, Kind, bfTint), DrawBadge(32, Kind, bfTint));
@@ -279,6 +281,8 @@ begin
   AImages.Width := 16;
   AImages.Height := 16;
   AImages.RegisterResolutions([16, 32]);
+  { A tree draws the 32 px set, scaled, above 100 %. }
+  AImages.Scaled := True;
   for Mark := Low(TCheckMark) to High(TCheckMark) do
     AddIcon(AImages, DrawCheck(16, Mark), DrawCheck(32, Mark));
 end;

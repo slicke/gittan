@@ -277,7 +277,7 @@ type
 implementation
 
 uses
-  Math, DateUtils, LazUTF8, gittan.textfit, gittan.theme;
+  Math, DateUtils, LazUTF8, gittan.textfit, gittan.theme, Forms;
 
 resourcestring
   rsOneFile = '1 changed file';
@@ -1430,7 +1430,7 @@ begin
   X := Px(Pad);
   if (FImages <> nil) and (AIndex <= High(FIconIndex)) then
     FImages.DrawForPPI(Canvas, X, ATop + (Px(RowHeight) - Px(IconSize)) div 2,
-      FIconIndex[AIndex], IconSize, Font.PixelsPerInch, GetCanvasScaleFactor);
+      FIconIndex[AIndex], IconSize, Screen.PixelsPerInch, GetCanvasScaleFactor);
   Inc(X, Px(IconSize) + Px(Gap) div 2 + 2);
 
   CountsX := Width - Px(Pad) - BarWidth - Px(Gap) - 2 * Px(CountWidth) - Px(Gap) div 2;
