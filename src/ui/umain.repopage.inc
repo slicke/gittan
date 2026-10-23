@@ -32,15 +32,16 @@ procedure TForm1.SetupSideNav;
 begin
   FSideNav := TGittanSideNav.Create(Self);
   FSideNav.Large := True;
+  { Home alone is large: six large rows left the tree under them too
+    little room in a window 800 high. }
   FSideNav.AddRow(rsNavHome, niHome);
-  FSideNav.AddRow(rsNavGraph, niGraph);
-  FSideNav.AddRow(rsNavRepository, niRepository);
-  FSideNav.AddRow(rsNavCommands, niCommands);
-  FSideNav.AddRow(rsNavFiles, niFiles);
-  FSideNav.AddRow(rsNavPulls, niPull);
+  FSideNav.AddRow(rsNavGraph, niGraph, True);
+  FSideNav.AddRow(rsNavRepository, niRepository, True);
+  FSideNav.AddRow(rsNavCommands, niCommands, True);
+  FSideNav.AddRow(rsNavFiles, niFiles, True);
+  FSideNav.AddRow(rsNavPulls, niPull, True);
   FSideNav.SetRowVisible(navPulls, FHasGitHubCli);
   FSideNav.AddRow(rsNavRecent, niClock, True);
-  FSideNav.AddRow(rsNavSettings, niTools, True);
   FSideNav.Heading := rsNavChanges;
   FSideNav.ShowToggle(rsNavHide, rsNavShow);
   FSideNav.OnPick := @SideNavPick;
@@ -68,7 +69,6 @@ begin
     navFiles: MenuFilesClick(Sender);
     navPulls: MenuPullsClick(Sender);
     navRecent: ShowRecentList(FSideNav.RowScreenRect(AIndex));
-    navSettings: MenuSettingsClick(Sender);
   end;
 end;
 

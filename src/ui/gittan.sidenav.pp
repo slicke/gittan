@@ -10,8 +10,8 @@ unit gittan.sidenav;
   text, so they read as navigation over the list of files and not as
   rows of it; the settings dialog keeps them small. A row added small
   stays at the small size under the large ones, a little apart from
-  them, for what opens a dialog or a list rather than a page: Recent,
-  Settings. A click raises OnPick with the row's index; whoever owns the sidebar shows the page and
+  them: the main window makes Home alone large, so that the tree under
+  the rows keeps its room, and the other pages and Recent small. A click raises OnPick with the row's index; whoever owns the sidebar shows the page and
   sets Selected, so the rows follow the view and never lead it. Under
   the rows a Heading names what the sidebar lists below them, as the
   music app writes Library over its playlists: a dim bold title with a
@@ -403,22 +403,24 @@ begin
     Result := FRowHeight;
 end;
 
-{ The first small row stands SmallGap under the large ones; a hidden
-  row is skipped. }
+{ The first small row stands SmallGap under the large ones, and the rows
+  after it with it; a hidden row is skipped. }
 function TGittanSideNav.RowTop(AIndex: integer): integer;
 var
   i, Prev: integer;
 begin
   Result := Px(PadY);
   Prev := -1;
-  for i := 0 to AIndex - 1 do
+  for i := 0 to AIndex do
   begin
-    Inc(Result, RowHeightOf(i));
-    if not FHidden[i] then
-      Prev := i;
+    if FHidden[i] then
+      Continue;
+    if FSmall[i] and ((Prev < 0) or not FSmall[Prev]) then
+      Inc(Result, Px(SmallGap));
+    if i < AIndex then
+      Inc(Result, RowHeightOf(i));
+    Prev := i;
   end;
-  if FSmall[AIndex] and not FHidden[AIndex] and ((Prev < 0) or not FSmall[Prev]) then
-    Inc(Result, Px(SmallGap));
 end;
 
 { Folded, the first row alone. }

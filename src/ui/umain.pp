@@ -1613,7 +1613,6 @@ resourcestring
   rsNavGraph = 'Graph';
   rsNavRepository = 'Repository';
   rsNavRecent = 'Recent';
-  rsNavSettings = 'Settings';
   rsNavCommands = 'Commands';
   rsNavChanges = 'Changes';
   rsNavPulls = 'Pull Requests';
@@ -2352,9 +2351,8 @@ const
   navCommands = 3;
   navFiles = 4;
   navPulls = 5;
-  { The small rows under them: lists and dialogs, never selected. }
+  { The last row: a list, never selected. }
   navRecent = 6;
-  navSettings = 7;
   { Scrolling on past the bottom of a file goes to the next one, and
     past the top to the previous: the wheel delta the pull needs (120 is
     one notch of a mouse wheel, 8 one pixel of a trackpad on macOS), the
