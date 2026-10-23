@@ -301,23 +301,17 @@ end;
   parent. Measured on a bitmap: the panel may have no handle yet. }
 function TGittanPopupList.ContentWidth: integer;
 var
-  Measure: TBitmap;
+  C: TCanvas;
   i, W: integer;
 begin
   Result := MinWidth;
-  Measure := TBitmap.Create;
-  try
-    Measure.Canvas.Font := Font;
-    for i := 0 to High(FItems) do
-    begin
-      W := 2 * (Border + Pad) + CheckWidth + ScrollRoom +
-        Measure.Canvas.TextWidth(FItems[i].Caption);
-      if FItems[i].Detail <> '' then
-        Inc(W, Gap + Measure.Canvas.TextWidth(FItems[i].Detail));
-      Result := Max(Result, W);
-    end;
-  finally
-    Measure.Free;
+  C := MeasureCanvas(Font);
+  for i := 0 to High(FItems) do
+  begin
+    W := 2 * (Border + Pad) + CheckWidth + ScrollRoom + C.TextWidth(FItems[i].Caption);
+    if FItems[i].Detail <> '' then
+      Inc(W, Gap + C.TextWidth(FItems[i].Detail));
+    Result := Max(Result, W);
   end;
   Result := Min(Result, MaxWidth);
   if Parent <> nil then

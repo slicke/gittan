@@ -84,6 +84,9 @@ type
 
 implementation
 
+uses
+  gittan.textfit;
+
 const
   PadX = 8;
   PadY = 6;
@@ -230,22 +233,16 @@ end;
   the box may have no handle yet. }
 function TGittanHintBox.TextHeight(AWidth: integer): integer;
 var
-  Bmp: TBitmap;
+  C: TCanvas;
   R: TRect;
 begin
-  Bmp := TBitmap.Create;
-  try
-    Bmp.SetSize(1, 1);
-    Bmp.Canvas.Font := Font;
-    R := Rect(0, 0, Max(AWidth, 1), 0);
-    DrawText(Bmp.Canvas.Handle, PChar(FText), Length(FText), R,
-      DT_CALCRECT or DT_WORDBREAK or DT_NOPREFIX);
-    Result := R.Bottom - R.Top;
-    if FLink <> '' then
-      Inc(Result, LinkGap + Bmp.Canvas.TextHeight('Xg'));
-  finally
-    Bmp.Free;
-  end;
+  C := MeasureCanvas(Font);
+  R := Rect(0, 0, Max(AWidth, 1), 0);
+  DrawText(C.Handle, PChar(FText), Length(FText), R,
+    DT_CALCRECT or DT_WORDBREAK or DT_NOPREFIX);
+  Result := R.Bottom - R.Top;
+  if FLink <> '' then
+    Inc(Result, LinkGap + C.TextHeight('Xg'));
 end;
 
 procedure TGittanHintBox.CalculatePreferredSize(var PreferredWidth,

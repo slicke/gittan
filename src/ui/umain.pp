@@ -1499,7 +1499,8 @@ implementation
 {$R *.lfm}
 
 uses
-  Clipbrd, LCLIntf, Process, FileUtil, LazFileUtils, DateUtils, StrUtils, LazUTF8, LCLProc
+  Clipbrd, LCLIntf, Process, FileUtil, LazFileUtils, DateUtils, StrUtils, LazUTF8, LCLProc,
+  gittan.textfit
   {$IFDEF LCLCocoa}, CocoaConfig, gittan.titlebar{$ENDIF};
 
 resourcestring
@@ -4550,16 +4551,11 @@ end;
 
 function EditorCharWidth(AEd: TATSynEdit): integer;
 var
-  Bmp: TBitmap;
+  C: TCanvas;
 begin
-  Bmp := TBitmap.Create;
-  try
-    Bmp.Canvas.Font.Name := AEd.Font.Name;
-    Bmp.Canvas.Font.Size := EditorFontSize(AEd);
-    Result := Max(1, Bmp.Canvas.TextWidth(ATEditorOptions.SampleChar));
-  finally
-    Bmp.Free;
-  end;
+  C := MeasureCanvas(AEd.Font);
+  C.Font.Size := EditorFontSize(AEd);
+  Result := Max(1, C.TextWidth(ATEditorOptions.SampleChar));
 end;
 
 { The bookmark band holds the line numbers while the change view is shown:

@@ -134,6 +134,9 @@ procedure ThemeSideNav(ANav: TGittanSideNav; ADark: boolean; AText: TColor);
 
 implementation
 
+uses
+  gittan.textfit;
+
 const
   RowHeight = 26;
   PadX = 8;
@@ -210,19 +213,10 @@ end;
 procedure TGittanSideNav.FitHeight;
 var
   H: integer;
-  Bmp: TBitmap;
 begin
   H := 2 * PadY + RowsHeight;
   if FHeading <> '' then
-  begin
-    Bmp := TBitmap.Create;
-    try
-      Bmp.Canvas.Font := Font;
-      Inc(H, HeadingTop + Bmp.Canvas.TextHeight('Xg') + HeadingGap + 1 + HeadingBottom);
-    finally
-      Bmp.Free;
-    end;
-  end;
+    Inc(H, HeadingTop + MeasureCanvas(Font).TextHeight('Xg') + HeadingGap + 1 + HeadingBottom);
   Height := H;
 end;
 

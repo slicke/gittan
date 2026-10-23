@@ -600,18 +600,13 @@ end;
   font until the first paint settles it. }
 procedure TGittanSummary.UpdateHeight;
 var
-  Measure: TBitmap;
+  C: TCanvas;
   TitleHeight, BodyHeight: integer;
 begin
-  Measure := TBitmap.Create;
-  try
-    Measure.Canvas.Font := Font;
-    BodyHeight := Measure.Canvas.TextHeight('Xg');
-    Measure.Canvas.Font.Size := TitleFontSize;
-    TitleHeight := Measure.Canvas.TextHeight('Xg');
-  finally
-    Measure.Free;
-  end;
+  C := MeasureCanvas(Font);
+  BodyHeight := C.TextHeight('Xg');
+  C.Font.Size := TitleFontSize;
+  TitleHeight := C.TextHeight('Xg');
   FRowsTop := Pad + TitleHeight + 6 + HeaderBlockHeight(FMeasure.Canvas) + Pad;
   if FNotice <> '' then
     Inc(FRowsTop, RowHeight);
