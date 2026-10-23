@@ -361,6 +361,7 @@ begin
   FRetrySubmodules := AJob.Submodules;
   FRetryPath := AJob.Path;
   FRetryBranch := AJob.Branch;
+  FNoticeCommit := False;
   FStatus.ShowMessage(Title, stBad, StatusErrorSeconds);
   FNotice.DetailFont.Assign(Edit.Font);
   FNotice.Popup(Title, AJob.Error, False, nkBad);
@@ -373,6 +374,13 @@ begin
     0:
       begin
         FNotice.Close;
+        { The message and the files chosen stay after a failed commit;
+          a notice of one is closed when another repository opens. }
+        if FNoticeCommit then
+        begin
+          StartCommit;
+          Exit;
+        end;
         { The failure was of the repository that was open then; a clone
           is of none. }
         if (FRetryKind <> rkClone) and (FRetryRoot <> FRepo.Root) then
@@ -389,7 +397,7 @@ begin
       end;
     1:
       begin
-        Clipboard.AsText := FNotice.Detail;
+        Clipboard.AsText := FNotice.PlainDetail;
         StatusNote(rsOutputCopied);
       end;
   end;

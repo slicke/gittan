@@ -772,7 +772,7 @@ begin
   UpdateCommitState;
   UpdateRemoteItems;
   if not Job.Ok then
-    BannerError(rsCommitFailed, Job.Error)
+    ShowCommitFailure(Job.Error)
   { A branch that can be pushed as it is (it has an upstream and is not
     behind it, so an amended pushed commit is left to Force Push) is
     offered the push in a banner; otherwise the status bar says it. }
@@ -785,6 +785,15 @@ begin
   end
   else
     StatusNote(Format(rsCommitted, [Copy(Job.Id, 1, 7), Subject]));
+end;
+
+procedure TForm1.ShowCommitFailure(const AError: string);
+begin
+  FNoticeCommit := True;
+  FStatus.ShowMessage(rsCommitFailed, stBad, StatusErrorSeconds);
+  FNotice.DetailFont.Assign(Edit.Font);
+  FNotice.Popup(rsCommitFailed, AError, False, nkBad);
+  FNotice.SetButtons([rsCommitAgain, rsCopyOutput]);
 end;
 
 { A commit is never broken off: one still running when the repository
