@@ -23,7 +23,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Controls, Graphics, Forms, ExtCtrls, LCLType,
-  LCLVersion, LMessages, gittan.console;
+  gittan.console, gittan.popuphook;
 
 type
   {** How the notice's title is colored. }
@@ -52,6 +52,7 @@ type
     FButtonRects: array of TRect;
     FHotButton: integer;
     FOnButton: TGittanNoticeButtonEvent;
+    FHook: TGittanPopupHook;
     procedure SetCloseHot(AValue: boolean);
     procedure SetHotButton(AValue: integer);
     procedure SetTitle(const AValue: string);
@@ -63,13 +64,6 @@ type
     function GetDetailFont: TFont;
     function GetPlainDetail: string;
     procedure Place;
-    function Owns(AControl: TControl): boolean;
-    {$IF lcl_fullversion >= 4990000}
-    procedure UserInput(Sender: TObject; var Message: TLMessage);
-    {$ELSE}
-    procedure UserInput(Sender: TObject; Msg: cardinal);
-    {$ENDIF}
-    procedure Hook(AOn: boolean);
   protected
     procedure Paint; override;
     procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
@@ -136,6 +130,9 @@ const
 constructor TGittanNotice.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  { Unlike the lists, the notice stays up when Gittan goes to the
+    background. }
+  FHook := TGittanPopupHook.Create(Self, @Close, False);
   ControlStyle := ControlStyle + [csOpaque];
   Visible := False;
   FConsole := TGittanConsole.Create(Self);
@@ -152,7 +149,7 @@ end;
 
 destructor TGittanNotice.Destroy;
 begin
-  Hook(False);
+  FHook.Hook(False);
   FIconBitmap.Free;
   inherited Destroy;
 end;
@@ -251,7 +248,7 @@ begin
   BringToFront;
   FTimer.Enabled := ABusy;
   Invalidate;
-  Hook(True);
+  FHook.Hook(True);
 end;
 
 procedure TGittanNotice.SetButtons(const ACaptions: array of string);
@@ -271,7 +268,7 @@ procedure TGittanNotice.Close;
 begin
   if not Visible then
     Exit;
-  Hook(False);
+  FHook.Hook(False);
   FTimer.Enabled := False;
   Visible := False;
 end;
@@ -331,47 +328,6 @@ begin
       H - Pad - ButtonHeight, X, H - Pad);
     X := FButtonRects[i].Left - ButtonGap;
   end;
-end;
-
-function TGittanNotice.Owns(AControl: TControl): boolean;
-begin
-  Result := False;
-  while AControl <> nil do
-  begin
-    if AControl = Self then
-      Exit(True);
-    AControl := AControl.Parent;
-  end;
-end;
-
-{ A mouse button pressed outside closes the notice. Cocoa passes a stale
-  message here, so the buttons are asked as well. }
-{$IF lcl_fullversion >= 4990000}
-procedure TGittanNotice.UserInput(Sender: TObject; var Message: TLMessage);
-var
-  Msg: cardinal;
-begin
-  Msg := Message.msg;
-{$ELSE}
-procedure TGittanNotice.UserInput(Sender: TObject; Msg: cardinal);
-begin
-{$ENDIF}
-  if not Visible then
-    Exit;
-  if (Sender is TControl) and Owns(TControl(Sender)) then
-    Exit;
-  if (Msg = LM_LBUTTONDOWN) or (Msg = LM_RBUTTONDOWN) or (Msg = LM_MBUTTONDOWN) or
-    (GetKeyState(VK_LBUTTON) < 0) or (GetKeyState(VK_RBUTTON) < 0) or
-    (GetKeyState(VK_MBUTTON) < 0) then
-    Close;
-end;
-
-procedure TGittanNotice.Hook(AOn: boolean);
-begin
-  if AOn then
-    Application.AddOnUserInputHandler(@UserInput, True)
-  else
-    Application.RemoveOnUserInputHandler(@UserInput);
 end;
 
 function TGittanNotice.ButtonAt(X, Y: integer): integer;

@@ -29,7 +29,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Controls, Graphics, StdCtrls, Forms, LCLType,
-  LCLVersion, LMessages;
+  gittan.popuphook;
 
 type
   TGittanPopupPickEvent = procedure(Sender: TObject; AIndex: integer) of object;
@@ -75,7 +75,7 @@ type
     FCurrent: integer;
     FAnchor: TRect;
     FAbove, FFilterVisible: boolean;
-    FReturnFocus: TWinControl;
+    FHook: TGittanPopupHook;
     FBack, FText, FDim, FHover, FLine, FAccent: TColor;
     FFilterHint: string;
     FOnPick: TGittanPopupPickEvent;
@@ -97,19 +97,9 @@ type
     procedure EditChange(Sender: TObject);
     procedure EditKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
     procedure KeyInput(var Key: word);
-    { Lazarus 4.99 passes the whole message, by reference. }
-    {$IF lcl_fullversion >= 4990000}
-    procedure UserInput(Sender: TObject; var Message: TLMessage);
-    {$ELSE}
-    procedure UserInput(Sender: TObject; Msg: cardinal);
-    {$ENDIF}
-    procedure AppDeactivate(Sender: TObject);
-    function Owns(AControl: TControl): boolean;
-    procedure Hook(AOn: boolean);
   protected
     procedure Paint; override;
     procedure Resize; override;
-    procedure Notification(AComponent: TComponent; Operation: TOperation); override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -220,6 +210,7 @@ end;
 constructor TGittanPopupList.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  FHook := TGittanPopupHook.Create(Self, @Close, True);
   ControlStyle := ControlStyle + [csOpaque];
   Visible := False;
   FCurrent := -1;
@@ -243,7 +234,7 @@ end;
 
 destructor TGittanPopupList.Destroy;
 begin
-  Hook(False);
+  FHook.Hook(False);
   inherited Destroy;
 end;
 
@@ -441,12 +432,7 @@ begin
   FAbove := (Height > RoomBelow) and (RoomAbove > RoomBelow);
   if FAbove then
     Layout;
-  FReturnFocus := nil;
-  if (Screen.ActiveControl <> nil) and not Owns(Screen.ActiveControl) then
-  begin
-    FReturnFocus := Screen.ActiveControl;
-    FReturnFocus.FreeNotification(Self);
-  end;
+  FHook.SaveFocus;
   Visible := True;
   BringToFront;
   if FFilterVisible then
@@ -456,18 +442,16 @@ begin
   end
   else if FRows.CanFocus then
     FRows.SetFocus;
-  Hook(True);
+  FHook.Hook(True);
 end;
 
 procedure TGittanPopupList.Dismiss;
 begin
   if not Visible then
     Exit;
-  Hook(False);
+  FHook.Hook(False);
   Visible := False;
-  if (FReturnFocus <> nil) and FReturnFocus.CanFocus then
-    FReturnFocus.SetFocus;
-  FReturnFocus := nil;
+  FHook.RestoreFocus;
 end;
 
 procedure TGittanPopupList.Close;
@@ -580,68 +564,6 @@ begin
       Exit;
   end;
   Key := 0;
-end;
-
-function TGittanPopupList.Owns(AControl: TControl): boolean;
-begin
-  Result := False;
-  while AControl <> nil do
-  begin
-    if AControl = Self then
-      Exit(True);
-    AControl := AControl.Parent;
-  end;
-end;
-
-{ Every mouse press and key goes through here before it is delivered.
-  A press on a control outside the panel closes it. The message says
-  which it was on most widgetsets; Cocoa passes the last key message
-  instead, so the mouse buttons are asked as well. A key goes to the
-  focused control, inside the panel while it is up. }
-{$IF lcl_fullversion >= 4990000}
-procedure TGittanPopupList.UserInput(Sender: TObject; var Message: TLMessage);
-var
-  Msg: cardinal;
-begin
-  Msg := Message.msg;
-{$ELSE}
-procedure TGittanPopupList.UserInput(Sender: TObject; Msg: cardinal);
-begin
-{$ENDIF}
-  if not Visible then
-    Exit;
-  if (Sender is TControl) and Owns(TControl(Sender)) then
-    Exit;
-  if (Msg = LM_LBUTTONDOWN) or (Msg = LM_RBUTTONDOWN) or (Msg = LM_MBUTTONDOWN) or
-    (GetKeyState(VK_LBUTTON) < 0) or (GetKeyState(VK_RBUTTON) < 0) or
-    (GetKeyState(VK_MBUTTON) < 0) then
-    Close;
-end;
-
-procedure TGittanPopupList.AppDeactivate(Sender: TObject);
-begin
-  Close;
-end;
-
-procedure TGittanPopupList.Hook(AOn: boolean);
-begin
-  if AOn then
-  begin
-    Application.AddOnUserInputHandler(@UserInput, True);
-    Application.AddOnDeactivateHandler(@AppDeactivate, True);
-  end
-  else
-  begin
-    Application.RemoveOnUserInputHandler(@UserInput);
-    Application.RemoveOnDeactivateHandler(@AppDeactivate);
-  end;
-end;
-
-procedure TGittanPopupList.Notification(AComponent: TComponent; Operation: TOperation);
-begin
-  inherited Notification(AComponent, Operation);
-  if (Operation = opRemove) and (AComponent = FReturnFocus) then
-    FReturnFocus := nil;
 end;
 
 { The border around the panel and the divider under the field. }
