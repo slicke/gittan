@@ -6,7 +6,8 @@
   Home and Explore over the library: Home is the summary, what the
   repository's name in the status bar shows, Commands the page of the
   repository's own commands (umain.commands.inc), Files the files of
-  HEAD (umain.files.inc), and Repository is a
+  HEAD (umain.files.inc), Pull Requests the open ones on GitHub
+  (umain.pulls.inc, with gh), and Repository is a
   page about the repository itself (gittan.repopage): its branch and
   upstream, how many commits since when, branches, tags, tracked files,
   submodules and the size of its objects, then its remotes, a web
@@ -36,6 +37,8 @@ begin
   FSideNav.AddRow(rsNavRepository, niRepository);
   FSideNav.AddRow(rsNavCommands, niCommands);
   FSideNav.AddRow(rsNavFiles, niFiles);
+  FSideNav.AddRow(rsNavPulls, niPull);
+  FSideNav.SetRowVisible(navPulls, FHasGitHubCli);
   FSideNav.AddRow(rsNavRecent, niClock, True);
   FSideNav.AddRow(rsNavSettings, niTools, True);
   FSideNav.Heading := rsNavChanges;
@@ -63,6 +66,7 @@ begin
     navRepository: MenuRepoInfoClick(Sender);
     navCommands: MenuCommandsClick(Sender);
     navFiles: MenuFilesClick(Sender);
+    navPulls: MenuPullsClick(Sender);
     navRecent: ShowRecentList(FSideNav.RowScreenRect(AIndex));
     navSettings: MenuSettingsClick(Sender);
   end;

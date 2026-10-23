@@ -557,6 +557,14 @@ begin
     Item.Visible := FHasGitHubCli;
   if FReviewItem <> nil then
     FReviewItem.Enabled := FHasGitHubCli;
+  { The Pull Requests page needs gh too: its row, its menu item, and
+    the page itself when gh goes while it shows. }
+  if FPullsItem <> nil then
+    FPullsItem.Visible := FHasGitHubCli;
+  if FSideNav <> nil then
+    FSideNav.SetRowVisible(navPulls, FHasGitHubCli);
+  if not FHasGitHubCli and (FView = gvPulls) then
+    ShowSummary;
 end;
 
 procedure TForm1.MenuWrapClick(Sender: TObject);
@@ -1997,6 +2005,7 @@ begin
   FPullJob.Start;
   if not AKeep then
     RebuildPullMenu;
+  UpdatePullPage;
 end;
 
 { A poll waits for a job still running; that job's end sets the timer
@@ -2038,6 +2047,7 @@ begin
   FSummary.SetUpstreamGone(FGoneBranches.IndexOf(FBranch) >= 0);
   UpdateStatus;
   RebuildPullMenu;
+  UpdatePullPage;
   { The review comments follow at the same pace. }
   StartReviewJob(True);
   { Ask again later, more often while checks run; not when gh failed
@@ -2160,6 +2170,7 @@ const
   paWorkingTree = 2;
   paOpen = 3;
   paCopy = 4;
+  paList = 5;
 
 { A click on the status bar's pull request: compare with it, which
   shows its changes as GitHub does and its review comments where they
@@ -2206,6 +2217,7 @@ begin
     AddAction(paOpen, rsOpenPullOnGitHub, '');
     AddAction(paCopy, rsCopyPullLink, '');
   end;
+  AddAction(paList, rsAllPulls, '');
   FPullPopup.Popup(AScreenRect);
 end;
 
@@ -2221,6 +2233,7 @@ begin
     paWorkingTree: SetBase('');
     paOpen: MenuOpenPullClick(Sender);
     paCopy: MenuCopyPullUrlClick(Sender);
+    paList: ShowPulls;
   end;
 end;
 

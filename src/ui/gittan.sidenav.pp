@@ -3,7 +3,8 @@ unit gittan.sidenav;
 {** The rows at the top of the sidebar that open the pages of a
   repository, as a music app lists Home and Explore over the library:
   Home, the summary, Graph, the commit graph, Repository, the page
-  about the repository itself, Commands and Files. Each row is an icon and a name; the row
+  about the repository itself, Commands, Files and Pull Requests, the
+  last hidden (SetRowVisible) while gh is missing. Each row is an icon and a name; the row
   of the page shown is filled, and the one under the mouse tinted. Set
   Large, the rows are as tall as the music app's, with a larger icon and
   text, so they read as navigation over the list of files and not as
@@ -40,12 +41,13 @@ uses
 type
   {** What a row's icon shows: a house, a trunk of commits with a
     branch for the graph, a book for the repository, a terminal with
-    its prompt for the commands, a page for the heading over the files,
-    a clock for the recent repositories, a window of text for the
+    its prompt for the commands, a page for the files, a pull request
+    (a branch's commits meeting the trunk) for the pull requests, a
+    clock for the recent repositories, a window of text for the
     settings' Editor page or sliders for its Tools page and for the
     settings themselves. }
-  TGittanNavIcon = (niHome, niGraph, niRepository, niCommands, niFiles, niClock, niEditor,
-    niTools);
+  TGittanNavIcon = (niHome, niGraph, niRepository, niCommands, niFiles, niPull, niClock,
+    niEditor, niTools);
 
   {** A click on a row, with its index. }
   TGittanNavPickEvent = procedure(Sender: TObject; AIndex: integer) of object;
@@ -57,6 +59,7 @@ type
     FCaptions: array of string;
     FIcons: array of TGittanNavIcon;
     FSmall: array of boolean;
+    FHidden: array of boolean;
     FHeading: string;
     FLarge: boolean;
     FRowHeight, FIconSize, FIconGap: integer;
@@ -101,6 +104,9 @@ type
     {** A row's rectangle in screen coordinates, for a list to drop
       from. }
     function RowScreenRect(AIndex: integer): TRect;
+    {** Hides a row (its place closes up) or shows it again, for a row
+      whose page needs a tool that may be missing. }
+    procedure SetRowVisible(AIndex: integer; AVisible: boolean);
     {** The palette: the background, the text, the dim icons and
       heading, the tint under the mouse, the fill of the selected row
       and the line under the heading. }
@@ -330,6 +336,19 @@ begin
   FCaptions[Result] := ACaption;
   FIcons[Result] := AIcon;
   FSmall[Result] := ASmall;
+  SetLength(FHidden, Result + 1);
+  FHidden[Result] := False;
+  FitHeight;
+  Invalidate;
+end;
+
+procedure TGittanSideNav.SetRowVisible(AIndex: integer; AVisible: boolean);
+begin
+  if (AIndex < 0) or (AIndex > High(FHidden)) or (FHidden[AIndex] = not AVisible) then
+    Exit;
+  FHidden[AIndex] := not AVisible;
+  if FHot = AIndex then
+    FHot := -1;
   FitHeight;
   Invalidate;
 end;
@@ -373,23 +392,32 @@ begin
   Invalidate;
 end;
 
+{ A hidden row takes no height. }
 function TGittanSideNav.RowHeightOf(AIndex: integer): integer;
 begin
-  if FSmall[AIndex] then
+  if FHidden[AIndex] then
+    Result := 0
+  else if FSmall[AIndex] then
     Result := Px(RowHeight)
   else
     Result := FRowHeight;
 end;
 
-{ The first small row stands SmallGap under the large ones. }
+{ The first small row stands SmallGap under the large ones; a hidden
+  row is skipped. }
 function TGittanSideNav.RowTop(AIndex: integer): integer;
 var
-  i: integer;
+  i, Prev: integer;
 begin
   Result := Px(PadY);
+  Prev := -1;
   for i := 0 to AIndex - 1 do
+  begin
     Inc(Result, RowHeightOf(i));
-  if FSmall[AIndex] and ((AIndex = 0) or not FSmall[AIndex - 1]) then
+    if not FHidden[i] then
+      Prev := i;
+  end;
+  if FSmall[AIndex] and not FHidden[AIndex] and ((Prev < 0) or not FSmall[Prev]) then
     Inc(Result, Px(SmallGap));
 end;
 
@@ -403,7 +431,11 @@ begin
   if FCollapsed then
     Last := 0
   else
+  begin
     Last := High(FCaptions);
+    while (Last > 0) and FHidden[Last] do
+      Dec(Last);
+  end;
   Result := RowTop(Last) + RowHeightOf(Last) - Px(PadY);
 end;
 
@@ -414,7 +446,7 @@ begin
   Result := -1;
   for i := 0 to High(FCaptions) do
   begin
-    if (Y >= RowTop(i)) and (Y < RowTop(i) + RowHeightOf(i)) then
+    if not FHidden[i] and (Y >= RowTop(i)) and (Y < RowTop(i) + RowHeightOf(i)) then
       Exit(i);
     if FCollapsed then
       Exit;
@@ -487,6 +519,24 @@ begin
       Canvas.Polyline([Point(Mid, Eave - ASize div 5), Point(Mid + ASize div 5, Eave),
         Point(Mid, Eave + ASize div 5)]);
       Canvas.Line(X + ASize div 2, Y + ASize * 5 div 7, X + ASize - 3, Y + ASize * 5 div 7);
+    end;
+    niPull:
+    begin
+      { A pull request: the trunk's two commits down the left, and a
+        branch's commit at the right whose line comes in to the top. }
+      Eave := Max(2, ASize div 6);  { a commit's radius }
+      Mid := X + Eave;  { the trunk }
+      Canvas.Line(Mid, Y + 2 * Eave, Mid, Y + ASize - 2 * Eave);
+      Canvas.Polyline([Point(X + ASize - Eave - 1, Y + ASize - 2 * Eave),
+        Point(X + ASize - Eave - 1, Y + ASize div 2), Point(X + ASize div 2, Y + Eave),
+        Point(Mid + 2 * Eave, Y + Eave)]);
+      Canvas.Brush.Style := bsSolid;
+      Canvas.Brush.Color := AColor;
+      Canvas.Ellipse(Mid - Eave, Y, Mid + Eave + 1, Y + 2 * Eave + 1);
+      Canvas.Ellipse(Mid - Eave, Y + ASize - 2 * Eave, Mid + Eave + 1, Y + ASize + 1);
+      Canvas.Ellipse(X + ASize - 2 * Eave - 1, Y + ASize - 2 * Eave, X + ASize,
+        Y + ASize + 1);
+      Canvas.Brush.Style := bsClear;
     end;
     niFiles:
     begin
@@ -591,6 +641,8 @@ begin
   begin
     if FCollapsed and (i > 0) then
       Break;
+    if FHidden[i] then
+      Continue;
     R := RowRect(i);
     if FSmall[i] then
     begin
