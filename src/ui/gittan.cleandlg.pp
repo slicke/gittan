@@ -320,7 +320,10 @@ begin
   F := TCleanForm.Create(Screen.ActiveForm);
   try
     F.FRepo := ARepo;
+    { OnChange would fill the list here already on some widgetsets. }
+    F.FKindBox.OnChange := nil;
     F.FKindBox.ItemIndex := Ord(AKind);
+    F.FKindBox.OnChange := @F.KindBoxChange;
     F.Fill;
     Result := F.ShowModal = mrOK;
     if Result then
