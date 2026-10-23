@@ -25,7 +25,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Controls, Graphics, ImgList, gittan.git, gittan.icons,
-  gittan.reviews, gittan.statusbar;
+  gittan.reviews, gittan.statusbar, gittan.github;
 
 type
   TGittanSelectFileEvent = procedure(Sender: TObject; const APath: string) of object;
@@ -40,6 +40,8 @@ type
   TGittanSelectCommitEvent = procedure(Sender: TObject; const AHash: string) of object;
   {** A click on a link to AUrl. }
   TGittanOpenUrlEvent = procedure(Sender: TObject; const AUrl: string) of object;
+  {** A card of a pull request waiting for the user's review was clicked. }
+  TGittanPullSelectEvent = procedure(Sender: TObject; const APull: TGittanPullRequest) of object;
   {** A click on Rebase (ARebase) or Merge in the row of a branch behind
     the default branch. }
   TGittanBehindActionEvent = procedure(Sender: TObject; ARebase: boolean) of object;
@@ -79,6 +81,17 @@ type
     FNotesWidth, FNotesHeight: integer;
     { The note whose link is under the mouse, -1 for none. }
     FLinkHot: integer;
+    { The open pull requests waiting for the user's review, a card each
+      under the conversation; FReviewRects and FReviewLinks are the
+      cards and their GitHub links as last painted, FReviewHot and
+      FReviewLinkHot the ones under the mouse (-1 for none), and
+      FReviewHeight the section's height, heading included, 0 without
+      any. }
+    FReviewPulls: TGittanPullRequests;
+    FReviewRects, FReviewLinks: array of TRect;
+    FReviewHot, FReviewLinkHot: integer;
+    FReviewHeight: integer;
+    FOnSelectPull: TGittanPullSelectEvent;
     { The commit compared with its parent, shown in a card under the
       header; an empty Hash shows none. FCardSubject is its subject and
       FCardLines its body, wrapped at FCardWidth (-1 to lay them out
@@ -160,6 +173,13 @@ type
     function LinkAt(X, Y: integer): integer;
     procedure LayoutNotes;
     procedure PaintNotes(var Y: integer);
+    function ReviewAt(X, Y: integer): integer;
+    function ReviewLinkAt(X, Y: integer): integer;
+    procedure SetReviewHot(AValue: integer);
+    procedure SetReviewLinkHot(AValue: integer);
+    function ReviewCardHeight(ACanvas: TCanvas): integer;
+    procedure LayoutReview;
+    procedure PaintReview(var Y: integer);
     procedure LayoutCard;
     procedure PaintCard(var Y: integer);
     procedure SetBackHot(AValue: boolean);
@@ -216,6 +236,9 @@ type
     {** Shows ANotes, the conversation of a pull request, under the
       heading ATitle; no notes shows none. }
     procedure SetNotes(const ATitle: string; const ANotes: TGittanPullNotes);
+    {** Shows APulls, the open pull requests waiting for the user's
+      review, as cards under the conversation; nil shows none. }
+    procedure SetReviewPulls(const APulls: TGittanPullRequests);
     {** Shows ACommit, the commit the files are compared through (with
       its parent), in a card under the header with ABody, the rest of
       its message; an empty Hash shows none. }
@@ -270,6 +293,9 @@ type
     property OnSelectCommit: TGittanSelectCommitEvent read FOnSelectCommit write FOnSelectCommit;
     {** A click on a note's link to GitHub. }
     property OnOpenUrl: TGittanOpenUrlEvent read FOnOpenUrl write FOnOpenUrl;
+    {** A card of a pull request waiting for the user's review was
+      clicked; without it the cards do not light up. }
+    property OnSelectPull: TGittanPullSelectEvent read FOnSelectPull write FOnSelectPull;
     {** A click on the commit card's link back to the working tree. }
     property OnBackClick: TNotifyEvent read FOnBackClick write FOnBackClick;
   end;
@@ -303,6 +329,10 @@ resourcestring
   rsNoteChangesRequested = 'requested changes';
   rsNoteDismissed = 'review dismissed';
   rsNoteLink = 'GitHub ↗';
+  rsNeedsReview = 'Needs your review';
+  rsReviewInto = '%s → %s';
+  rsReviewOpened = 'opened %s';
+  rsReviewDraft = 'draft';
   rsBackToTree = 'Back to Working Tree';
 
 const
@@ -352,6 +382,8 @@ begin
   FHot := -1;
   FActionHot := -1;
   FLinkHot := -1;
+  FReviewHot := -1;
+  FReviewLinkHot := -1;
   FCommitHot := -1;
   FBehindHot := -1;
   FNotOnRemote := -1;
@@ -534,7 +566,8 @@ end;
 { A clean tree with nothing else to show: no commits, no conversation. }
 function TGittanSummary.CentersClean: boolean;
 begin
-  Result := (Length(FStats) = 0) and not ShowsCommits and (Length(FNotes) = 0);
+  Result := (Length(FStats) = 0) and not ShowsCommits and (Length(FNotes) = 0) and
+    (Length(FReviewPulls) = 0);
 end;
 
 { "Working tree clean", or "No changes vs base" when the tree is
@@ -616,6 +649,8 @@ begin
   Inc(FRowsTop, FCardHeight);
   LayoutNotes;
   Inc(FRowsTop, FNotesHeight);
+  LayoutReview;
+  Inc(FRowsTop, FReviewHeight);
   PlaceCommits;
   Height := Max(FContentHeight, Constraints.MinHeight);
 end;
@@ -859,6 +894,187 @@ begin
     end;
   end;
   Inc(Y, FNotesHeight);
+end;
+
+{ Whether the cards would show the same: the same pull requests, as
+  titled and last changed. }
+function SamePulls(const A, B: TGittanPullRequests): boolean;
+var
+  i: integer;
+begin
+  Result := Length(A) = Length(B);
+  if Result then
+    for i := 0 to High(A) do
+      if (A[i].Number <> B[i].Number) or (A[i].Title <> B[i].Title) or
+        (A[i].Author <> B[i].Author) or (A[i].Updated <> B[i].Updated) or
+        (A[i].IsDraft <> B[i].IsDraft) then
+        Exit(False);
+end;
+
+procedure TGittanSummary.SetReviewPulls(const APulls: TGittanPullRequests);
+begin
+  if SamePulls(APulls, FReviewPulls) then
+    Exit;
+  FReviewPulls := Copy(APulls);
+  FReviewRects := nil;
+  FReviewLinks := nil;
+  FReviewHot := -1;
+  FReviewLinkHot := -1;
+  UpdateHeight;
+  Invalidate;
+end;
+
+function TGittanSummary.ReviewAt(X, Y: integer): integer;
+var
+  i: integer;
+begin
+  Result := -1;
+  if not Assigned(FOnSelectPull) then
+    Exit;
+  for i := 0 to High(FReviewRects) do
+    if PtInRect(FReviewRects[i], Point(X, Y)) then
+      Exit(i);
+end;
+
+function TGittanSummary.ReviewLinkAt(X, Y: integer): integer;
+var
+  i: integer;
+begin
+  Result := -1;
+  for i := 0 to High(FReviewLinks) do
+    if PtInRect(FReviewLinks[i], Point(X, Y)) then
+      Exit(i);
+end;
+
+procedure TGittanSummary.SetReviewHot(AValue: integer);
+begin
+  if FReviewHot = AValue then
+    Exit;
+  FReviewHot := AValue;
+  Invalidate;
+end;
+
+procedure TGittanSummary.SetReviewLinkHot(AValue: integer);
+begin
+  if FReviewLinkHot = AValue then
+    Exit;
+  FReviewLinkHot := AValue;
+  Invalidate;
+end;
+
+{ A card has two lines: the number and title, and who opened it. }
+function TGittanSummary.ReviewCardHeight(ACanvas: TCanvas): integer;
+begin
+  Result := 2 * Px(NotePadY) + 2 * ACanvas.TextHeight('Xg') + 4;
+end;
+
+procedure TGittanSummary.LayoutReview;
+var
+  C: TCanvas;
+begin
+  FReviewHeight := 0;
+  if Length(FReviewPulls) = 0 then
+    Exit;
+  C := FMeasure.Canvas;
+  C.Font := Font;
+  FReviewHeight := C.TextHeight('Xg') + Px(NoteGap) +
+    Length(FReviewPulls) * (ReviewCardHeight(C) + Px(NoteGap)) + Px(Pad) div 2;
+end;
+
+{ The second line of a card: who opened it, "head → base", how long ago
+  and whether it is a draft, with dots between. }
+function ReviewLine(const APull: TGittanPullRequest): string;
+
+  procedure Add(const APart: string);
+  begin
+    if APart = '' then
+      Exit;
+    if Result <> '' then
+      Result := Result + ' · ';
+    Result := Result + APart;
+  end;
+
+begin
+  Result := '';
+  Add(APull.Author);
+  if (APull.HeadRef <> '') and (APull.BaseRef <> '') then
+    Add(Format(rsReviewInto, [APull.HeadRef, APull.BaseRef]));
+  if APull.Created > 0 then
+    Add(Format(rsReviewOpened, [ReviewAge(APull.Created, LocalTimeToUniversal(Now))]));
+  if APull.IsDraft then
+    Add(rsReviewDraft);
+end;
+
+{ "Needs your review", then a card per pull request as the Pull Requests
+  page draws one: the number dimmed and the title in bold, under them
+  who opened it with the link to GitHub at the right; the card under
+  the mouse is filled with the hover color. Y is advanced past the
+  section. }
+procedure TGittanSummary.PaintReview(var Y: integer);
+var
+  i, X, Right, LineHeight, CardH: integer;
+  Card, LinkR: TRect;
+  Number: string;
+begin
+  if Length(FReviewPulls) = 0 then
+    Exit;
+  Canvas.Font := Font;
+  Canvas.Brush.Style := bsClear;
+  LineHeight := Canvas.TextHeight('Xg');
+  CardH := ReviewCardHeight(Canvas);
+  Canvas.Font.Style := [fsBold];
+  Canvas.Font.Color := FDim;
+  Canvas.TextOut(Px(Pad), Y, rsNeedsReview);
+  Canvas.Font.Style := [];
+  Inc(Y, LineHeight + Px(NoteGap));
+  SetLength(FReviewRects, Length(FReviewPulls));
+  SetLength(FReviewLinks, Length(FReviewPulls));
+  for i := 0 to High(FReviewPulls) do
+  begin
+    Card := Rect(Px(Pad), Y, Width - Px(Pad), Y + CardH);
+    FReviewRects[i] := Card;
+    FReviewLinks[i] := Rect(0, 0, 0, 0);
+    Canvas.Pen.Color := FLine;
+    Canvas.Brush.Style := bsSolid;
+    if i = FReviewHot then
+      Canvas.Brush.Color := FHover
+    else
+      Canvas.Brush.Color := FSelectedBack;
+    Canvas.RoundRect(Card, 8, 8);
+    Canvas.Brush.Style := bsClear;
+
+    X := Card.Left + Px(NotePadX);
+    Right := Card.Right - Px(NotePadX);
+    Number := '#' + IntToStr(FReviewPulls[i].Number);
+    Canvas.Font.Color := FDim;
+    Canvas.TextOut(X, Card.Top + Px(NotePadY), Number);
+    Inc(X, Canvas.TextWidth(Number) + Px(Gap) div 2);
+    Canvas.Font.Style := [fsBold];
+    Canvas.Font.Color := FText;
+    Canvas.TextOut(X, Card.Top + Px(NotePadY),
+      FitTextRight(Canvas, FReviewPulls[i].Title, Max(0, Right - X)));
+    Canvas.Font.Style := [];
+
+    X := Card.Left + Px(NotePadX);
+    if (FReviewPulls[i].Url <> '') and Assigned(FOnOpenUrl) then
+    begin
+      LinkR := Rect(Right - Canvas.TextWidth(rsNoteLink),
+        Card.Top + Px(NotePadY) + LineHeight + 4, Right,
+        Card.Top + Px(NotePadY) + 2 * LineHeight + 4);
+      FReviewLinks[i] := LinkR;
+      Canvas.Font.Color := FLink;
+      if i = FReviewLinkHot then
+        Canvas.Font.Style := [fsUnderline];
+      Canvas.TextOut(LinkR.Left, LinkR.Top, rsNoteLink);
+      Canvas.Font.Style := [];
+      Right := LinkR.Left - Px(Gap);
+    end;
+    Canvas.Font.Color := FDim;
+    Canvas.TextOut(X, Card.Top + Px(NotePadY) + LineHeight + 4,
+      FitTextRight(Canvas, ReviewLine(FReviewPulls[i]), Max(0, Right - X)));
+    Inc(Y, CardH + Px(NoteGap));
+  end;
+  Inc(Y, Px(Pad) div 2);
 end;
 
 procedure TGittanSummary.SetCommit(const ACommit: TGittanCommitLine; const ABody: string);
@@ -1779,6 +1995,7 @@ begin
     PaintBehind(Y);
   PaintCard(Y);
   PaintNotes(Y);
+  PaintReview(Y);
   if Y <> FRowsTop then
   begin
     FRowsTop := Y;
@@ -1800,13 +2017,16 @@ begin
   SetActionHot(ActionAt(X, Y));
   SetCommitHot(CommitAt(Y));
   SetLinkHot(LinkAt(X, Y));
+  SetReviewHot(ReviewAt(X, Y));
+  SetReviewLinkHot(ReviewLinkAt(X, Y));
   SetBranchHot(BranchClickable and PtInRect(FBranchRect, Point(X, Y)));
   SetBaseHot((FBaseRect.Right > FBaseRect.Left) and PtInRect(FBaseRect, Point(X, Y)));
   SetSyncHot((FSyncRect.Right > FSyncRect.Left) and PtInRect(FSyncRect, Point(X, Y)));
   SetBackHot(Assigned(FOnBackClick) and PtInRect(FBackRect, Point(X, Y)));
   if Assigned(FOnBehindAction) then
     SetBehindHot(BehindAt(X, Y));
-  if (FLinkHot >= 0) or (FActionHot >= 0) or FBackHot or (FBehindHot >= 0) then
+  if (FLinkHot >= 0) or (FActionHot >= 0) or FBackHot or (FBehindHot >= 0) or
+    (FReviewHot >= 0) or (FReviewLinkHot >= 0) then
     Cursor := crHandPoint
   else if not (FBranchHot or FBaseHot or FSyncHot) then
     Cursor := crDefault;
@@ -1819,6 +2039,8 @@ begin
   SetActionHot(-1);
   SetCommitHot(-1);
   SetLinkHot(-1);
+  SetReviewHot(-1);
+  SetReviewLinkHot(-1);
   SetBranchHot(False);
   SetBaseHot(False);
   SetSyncHot(False);
@@ -1868,6 +2090,16 @@ begin
   if (Button = mbLeft) and Assigned(FOnOpenUrl) and (LinkAt(X, Y) >= 0) then
   begin
     FOnOpenUrl(Self, FNotes[LinkAt(X, Y)].Url);
+    Exit;
+  end;
+  if (Button = mbLeft) and Assigned(FOnOpenUrl) and (ReviewLinkAt(X, Y) >= 0) then
+  begin
+    FOnOpenUrl(Self, FReviewPulls[ReviewLinkAt(X, Y)].Url);
+    Exit;
+  end;
+  if (Button = mbLeft) and (ReviewAt(X, Y) >= 0) then
+  begin
+    FOnSelectPull(Self, FReviewPulls[ReviewAt(X, Y)]);
     Exit;
   end;
   Row := CommitAt(Y);

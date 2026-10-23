@@ -10,7 +10,9 @@
   and is asked for again each time it is shown; a card compares with
   its pull request as Compare With > Pull Requests does, the one
   compared against leads back to the working tree, and Refresh asks gh
-  again. See spec/github.md. }
+  again. The summary's "Needs your review" cards, the open pull requests
+  the job found waiting for the user's review, compare the same way
+  (SummarySelectPull). See spec/github.md. }
 
 procedure TForm1.SetupPullPage;
 begin
@@ -65,6 +67,7 @@ begin
   FPullPage.SetRepository(ExtractFileName(FRepo.Root), FRepo.Root);
   FPullPage.SetPulls(FPulls, FPullError, FPullJob <> nil);
   FPullPage.SetBranchPull(FPull, FHasPull);
+  FPullPage.SetReviewPulls(FReviewPulls);
   if (FPullRange <> '') and (FRepo.Base = FPullRange) and FRepo.IsRange then
     FPullPage.SetComparing(FPullNumber)
   else
@@ -74,6 +77,11 @@ begin
 end;
 
 procedure TForm1.PullPageCompare(Sender: TObject; const APull: TGittanPullRequest);
+begin
+  ComparePull(APull);
+end;
+
+procedure TForm1.SummarySelectPull(Sender: TObject; const APull: TGittanPullRequest);
 begin
   ComparePull(APull);
 end;

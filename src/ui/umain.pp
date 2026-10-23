@@ -231,6 +231,9 @@ type
       the current one. }
     FGoneBranches: TStringList;
     FPulls: TGittanPullRequests;
+    { The open pull requests waiting for the user's review, which the
+      summary lists and the Pull Requests page marks. }
+    FReviewPulls: TGittanPullRequests;
     FPullError, FPullKey: string;
     FPullMenu, FOpenPullItem, FCopyPullItem: TMenuItem;
     FPullRange: string;
@@ -854,6 +857,7 @@ type
     procedure ShowPulls;
     procedure UpdatePullPage;
     procedure PullPageCompare(Sender: TObject; const APull: TGittanPullRequest);
+    procedure SummarySelectPull(Sender: TObject; const APull: TGittanPullRequest);
     procedure PullPageWorkingTree(Sender: TObject);
     procedure PullPageRefresh(Sender: TObject);
     procedure SetupFilesPage;
@@ -2749,6 +2753,7 @@ begin
   FSummary.OnSyncClick := @SummarySyncClick;
   FSummary.OnBehindAction := @SummaryBehindAction;
   FSummary.OnOpenUrl := @SummaryOpenUrl;
+  FSummary.OnSelectPull := @SummarySelectPull;
   FSummary.OnSelectCommit := @SummarySelectCommit;
   FSummary.OnBackClick := @SummaryBackClick;
   FSummary.OnRowAction := @SummaryRowAction;

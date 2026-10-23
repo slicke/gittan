@@ -5,7 +5,9 @@ unit gittan.pullpage;
   under them who opened it, its branches, when it was opened and last
   changed, what it changes and its labels, and at the right its state
   (Draft, Approved, Changes requested, Review required) and its checks
-  as chips in their colors. The branch's own pull request, when it has
+  as chips in their colors, and "Needs your review" in the warning
+  color on one waiting for the user's review (SetReviewPulls, from the
+  same job). The branch's own pull request, when it has
   one, stands first under its own heading, also when it is merged or
   closed and so not among the open ones. A card fills under the mouse
   and a click raises OnCompare with the pull request, for the owner to
@@ -44,6 +46,8 @@ type
     FHasBranchPull, FLoading: boolean;
     FError: string;
     FComparing: integer;
+    { The numbers of the pull requests waiting for the user's review. }
+    FReviewNumbers: array of integer;
     FBack, FText, FDim, FHover, FLine, FLink, FOk, FWarn, FErrorColor, FCard: TColor;
     FLinkRects: array of TRect;
     FLinkUrls: array of string;
@@ -56,6 +60,7 @@ type
     FOnWorkingTree, FOnRefresh: TNotifyEvent;
     FOnOpenUrl: TGittanOpenUrlEvent;
     function LinkAt(X, Y: integer): integer;
+    function NeedsReview(ANumber: integer): boolean;
     procedure SetHot(AValue: integer);
     procedure AddLink(const ARect: TRect; const AUrl: string);
     procedure PaintHeading(var Y: integer; const ATitle, ADetail: string);
@@ -86,6 +91,9 @@ type
     procedure SetBranchPull(const APull: TGittanPullRequest; AHas: boolean);
     {** The number of the pull request compared against, 0 for none. }
     procedure SetComparing(ANumber: integer);
+    {** The pull requests waiting for the user's review, whose cards get
+      a chip saying so; nil for none. }
+    procedure SetReviewPulls(const APulls: TGittanPullRequests);
     {** The palette: the background, the text, the dim text, the fill
       under the mouse, the dividers, the links, the ok, the warning and
       the error colors. }
@@ -121,6 +129,7 @@ resourcestring
   rsNoPulls = 'No open pull requests.';
   rsGitHubLink = 'GitHub ↗';
   rsComparing = 'Comparing';
+  rsNeedsReview = 'Needs your review';
   rsChecksOk = '✓ checks';
   rsChecksFailing = '%d failing';
   rsChecksPending = '%d pending';
@@ -207,6 +216,35 @@ begin
   FComparing := ANumber;
   Layout;
   Invalidate;
+end;
+
+procedure TGittanPullPage.SetReviewPulls(const APulls: TGittanPullRequests);
+var
+  i: integer;
+  Same: boolean;
+begin
+  Same := Length(APulls) = Length(FReviewNumbers);
+  if Same then
+    for i := 0 to High(APulls) do
+      if APulls[i].Number <> FReviewNumbers[i] then
+        Same := False;
+  if Same then
+    Exit;
+  SetLength(FReviewNumbers, Length(APulls));
+  for i := 0 to High(APulls) do
+    FReviewNumbers[i] := APulls[i].Number;
+  Layout;
+  Invalidate;
+end;
+
+function TGittanPullPage.NeedsReview(ANumber: integer): boolean;
+var
+  i: integer;
+begin
+  Result := False;
+  for i := 0 to High(FReviewNumbers) do
+    if FReviewNumbers[i] = ANumber then
+      Exit(True);
 end;
 
 procedure TGittanPullPage.SetColors(ABack, AText, ADim, AHover, ALine, ALink, AOk, AWarn,
@@ -417,7 +455,8 @@ end;
 { A card: the number dimmed and the title in bold, the chips of the
   state and the checks at the right, the second line under them with
   the GitHub link at its right end. The card compared against has a
-  stripe in the link color and a Comparing chip. }
+  stripe in the link color and a Comparing chip, and one waiting for
+  the user's review a chip saying so. }
 procedure TGittanPullPage.PaintCard(var Y: integer; const APull: TGittanPullRequest;
   const ALink: string);
 var
@@ -480,6 +519,8 @@ begin
       Tone := FDim;
     Right := PaintChip(Right, ChipTop, Note, Tone) - Px(Gap) div 2;
   end;
+  if NeedsReview(APull.Number) then
+    Right := PaintChip(Right, ChipTop, rsNeedsReview, FWarn) - Px(Gap) div 2;
   if Comparing then
     Right := PaintChip(Right, ChipTop, rsComparing, FLink) - Px(Gap) div 2;
 

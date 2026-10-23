@@ -65,18 +65,21 @@ function IssueNumber(const ASummary: string): integer;
 type
   {** Runs gh pr view for the branch checked out in a repository (ABranch
     only says which; empty skips it) and gh pr list, in a thread, since
-    both go to the network. OnDone is called in the main thread when both are
-    done, as long as the job has not been stopped. A branch with no pull
-    request is not a failure: HasPull is false and Error empty. The job
-    also asks the remotes which local branches track a branch that is
-    gone from them (GoneBranches), as GitHub deletes a merged one. }
+    both go to the network, and gh pr list again with
+    review-requested:@me for the open pull requests waiting for the
+    user's review (ReviewPulls). OnDone is called in the main thread
+    when all are done, as long as the job has not been stopped. A branch
+    with no pull request is not a failure: HasPull is false and Error
+    empty. The job also asks the remotes which local branches track a
+    branch that is gone from them (GoneBranches), as GitHub deletes a
+    merged one. }
   TGittanPullRequestJob = class(TGittanJob)
   private
     FExe, FRoot, FBranch: string;
     FPull: TGittanPullRequest;
     FHasPull: boolean;
     FGone: TStringList;
-    FPulls: TGittanPullRequests;
+    FPulls, FReviewPulls: TGittanPullRequests;
     FError: string;
   protected
     procedure Execute; override;
@@ -89,6 +92,10 @@ type
     {** The local branches whose upstream is deleted on its remote. }
     property GoneBranches: TStringList read FGone;
     property Pulls: TGittanPullRequests read FPulls;
+    {** The open pull requests whose review is asked of the user gh is
+      logged in as, or of a team they are on (GitHub's own
+      review-requested:@me search); empty when gh could not list them. }
+    property ReviewPulls: TGittanPullRequests read FReviewPulls;
     {** gh's message when the list could not be read (no GitHub remote,
       not logged in), else empty. }
     property Error: string read FError;
@@ -360,6 +367,18 @@ begin
   end
   else
     FError := Err;
+  if Terminated then
+    Exit;
+  { Those waiting for the user's review, by GitHub's own search, which
+    knows who gh is logged in as and the teams they are on; a review
+    given clears the request, so these are the ones still to do. }
+  if (FError = '') and RunGitHubCli(FExe, FRoot, ['pr', 'list', '--state', 'open',
+    '--limit', '50', '--search', 'review-requested:@me', '--json', PullRequestFields],
+    Output, Err) then
+  begin
+    if not ParsePullRequests(Output, FReviewPulls) then
+      FReviewPulls := nil;
+  end;
   if not Terminated then
     GoneUpstreamsIn(FRoot, FGone);
   Done;
