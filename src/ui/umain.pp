@@ -461,6 +461,9 @@ type
     FIndexAdapter: TATAdapterEControl;
     FIndexTimer: TTimer;
     FIndexing, FIndexSaveNeeded: boolean;
+    { A file is being loaded into FIndexEdit, which pumps messages for a
+      large one (IndexNext). }
+    FIndexLoading: boolean;
     FHoverTimer: TTimer;
     { The hint of the file under the mouse in the tree and the timer
       that shows it, see FileTreeMouseMove. }
