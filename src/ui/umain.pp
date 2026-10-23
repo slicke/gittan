@@ -336,7 +336,6 @@ type
     { The base popup's items while a commit is shown (see BlameShown):
       back to the working tree and copy its id; -1 otherwise. }
     FBaseBackIndex, FBaseCopyIndex: integer;
-    FSyncActions: TIntegerDynArray;
     FSubPanel: TPanel;
     FSubHeader: TGittanSectionHeader;
     FSubTree: TTreeView;
@@ -521,8 +520,8 @@ type
     FUpstreamRows: TStringList;
     FUpstreamBranch: string;
     { Tags (umain.tags.inc): what the list read when it opened, the list
-      with, per row, the index in FTags of its tag (TagRowHeader,
-      TagRowNew for the others), the menu of a tag and the one it is
+      with, as each row's tag, the index in FTags of its tag (TagRowNew
+      for the New row), the menu of a tag and the one it is
       for, the remote pushes and deletions go to, and the Branch menu's
       items. }
     FTags: TGittanTags;
@@ -539,33 +538,30 @@ type
     FSubListPopup: TGittanPopupList;
     { The popup's index of each submodule's row, in FSubmodules' order. }
     FSubListRows: array of integer;
-    FTagRows: TIntegerDynArray;
     FTagMenu: TPopupMenu;
     FMenuTag: TGittanTag;
     FTagRemote: string;
     FTagsItem, FNewTagItem, FPushTagsItem: TMenuItem;
     { The reflog (umain.reflog.inc): HEAD's reflog as the list read it
-      when it opened, the list with, per row, the index in FReflog of
-      its line (ReflogRowHeader for the header), the menu of a line and
+      when it opened, the list with, as each row's tag, the index in
+      FReflog of its line, the menu of a line and
       the line it is for, and the Branch menu's item. }
     FReflog: TGittanReflog;
     FReflogPopup: TGittanPopupList;
-    FReflogRows: TIntegerDynArray;
     FReflogMenu: TPopupMenu;
     FMenuReflog: TGittanReflogEntry;
     FReflogItem: TMenuItem;
     { Stashes (umain.stash.inc): what the last snapshot listed, the list
       that drops from the status bar's stash chip with the stashes it
       shows (FListedStashes, a copy, since a snapshot replaces FStashes
-      while the list is up) and, per row, the index in them of its stash
-      (StashRowHeader, StashRowNew for the others), the menu of a stash and the one it is for, the range
+      while the list is up) and, as each row's tag, the index in them of
+      its stash (StashRowNew for the New row), the menu of a stash and the one it is for, the range
       a compared stash is the base as and the stash it is of, the stash
       the base chip's list is for with its rows, and the Stash menu's
       items. }
     FStashes: TGittanStashes;
     FStashPopup: TGittanPopupList;
     FListedStashes: TGittanStashes;
-    FStashRows: TIntegerDynArray;
     FStashMenu: TPopupMenu;
     FMenuStash: TGittanStash;
     FStashRange, FStashRangeId, FBaseStashId: string;
@@ -1254,6 +1250,8 @@ type
     procedure NewTagAsk;
     procedure CheckoutTagAsk(const ATag: TGittanTag);
     procedure BranchAtAsk(const ALabel, ACommit: string);
+    function NewBranchAsk(const APrompt, ACommit: string): boolean;
+    function TagAtAsk(const AShort, ACommit: string): boolean;
     procedure DeleteTagAsk(const ATag: TGittanTag);
     procedure MenuTagsClick(Sender: TObject);
     procedure MenuNewTagClick(Sender: TObject);
@@ -1265,6 +1263,7 @@ type
     procedure MenuReflogClick(Sender: TObject);
     function ResetTarget: string;
     function ResetAsk(const AHash, AShort: string; AMode: TGittanResetMode): boolean;
+    function ResetToAsk(const AHash, AShort: string; AMode: TGittanResetMode): boolean;
     function StashLabel(const AStash: TGittanStash): string;
     function StashOfBase: integer;
     procedure ShowStashList(const AScreenRect: TRect);
@@ -1381,6 +1380,7 @@ type
     procedure AddSubmoduleAsk(const AUrl, APath, ABranch: string);
     procedure SubmoduleRemoteDone(AJob: TGittanRemoteJob);
     function PopupSubmodule: integer;
+    function PopupSubmodulePath: string;
     procedure SubPopupPopup(Sender: TObject);
     procedure MenuSubUpdateAllClick(Sender: TObject);
     procedure MenuSubSyncAllClick(Sender: TObject);

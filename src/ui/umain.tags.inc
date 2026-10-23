@@ -15,8 +15,7 @@
   pushing and deleting there run as remote jobs. The tags are read when
   the list opens, not with every snapshot. }
 const
-  { The rows of the list that are no tag, in FTagRows. }
-  TagRowHeader = -1;
+  { The tag of the list's New row; a tag's row has its index. }
   TagRowNew = -2;
   tmShow = 1;
   tmCompare = 2;
@@ -32,13 +31,6 @@ procedure TForm1.ShowTagList(const AScreenRect: TRect);
 var
   i: integer;
   Head, Detail, Subject: string;
-
-  procedure AddRow(ARow: integer);
-  begin
-    SetLength(FTagRows, Length(FTagRows) + 1);
-    FTagRows[High(FTagRows)] := ARow;
-  end;
-
 begin
   if FRepo.Root = '' then
     Exit;
@@ -50,17 +42,12 @@ begin
   FTagRemote := FRepo.PushRemote;
   Head := FRepo.CommitId('HEAD');
   FTagPopup.Clear;
-  FTagRows := nil;
   if Head <> '' then
-  begin
-    FTagPopup.Add(rsTagNewRow);
-    AddRow(TagRowNew);
-  end;
+    FTagPopup.Add(rsTagNewRow, '', False, TagRowNew);
   if Length(FTags) = 0 then
     FTagPopup.AddHeader(rsNoTags)
   else
     FTagPopup.AddHeader(rsTags);
-  AddRow(TagRowHeader);
   for i := 0 to High(FTags) do
   begin
     Subject := FTags[i].Subject;
@@ -70,29 +57,27 @@ begin
       BlameAge(FTags[i].Time, DateTimeToUnix(Now, False));
     if Subject <> '' then
       Detail := Detail + ' · ' + Subject;
-    FTagPopup.Add(FTags[i].Name, Detail, FTags[i].Commit = Head);
-    AddRow(i);
+    FTagPopup.Add(FTags[i].Name, Detail, FTags[i].Commit = Head, i);
   end;
   FTagPopup.Popup(AScreenRect);
 end;
 
 procedure TForm1.TagPopupPick(Sender: TObject; AIndex: integer);
+var
+  Row: PtrInt;
 begin
-  if (AIndex < 0) or (AIndex > High(FTagRows)) then
-    Exit;
-  case FTagRows[AIndex] of
-    TagRowHeader: ;
-    TagRowNew: NewTagAsk;
-    else
-      if FTagRows[AIndex] <= High(FTags) then
-        ShowBlameCommit(FTags[FTagRows[AIndex]].Commit);
-  end;
+  Row := FTagPopup.TagOf(AIndex);
+  if Row = TagRowNew then
+    NewTagAsk
+  else if (Row >= 0) and (Row <= High(FTags)) then
+    ShowBlameCommit(FTags[Row].Commit);
 end;
 
 procedure TForm1.TagContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
 var
   Busy: boolean;
   Remote: string;
+  Row: PtrInt;
 
   procedure Add(const ACaption: string; ATag: integer; AEnabled: boolean);
   var
@@ -107,10 +92,10 @@ var
   end;
 
 begin
-  if (AIndex < 0) or (AIndex > High(FTagRows)) or (FTagRows[AIndex] < 0) or
-    (FTagRows[AIndex] > High(FTags)) then
+  Row := FTagPopup.TagOf(AIndex);
+  if (Row < 0) or (Row > High(FTags)) then
     Exit;
-  FMenuTag := FTags[FTagRows[AIndex]];
+  FMenuTag := FTags[Row];
   Busy := not RepoReady;
   Remote := StringReplace(FTagRemote, '&', '&&', [rfReplaceAll]);
   FTagMenu.Items.Clear;
@@ -160,27 +145,42 @@ end;
   Create Tag Here... in the commit graph asks. }
 procedure TForm1.NewTagAsk;
 var
-  Values: array of string;
   Short: string;
 begin
   if FRepo.Root = '' then
     Exit;
   Short := Copy(FRepo.CommitId('HEAD'), 1, 7);
-  if Short = '' then
-    Exit;
+  if Short <> '' then
+    TagAtAsk(Short, 'HEAD');
+end;
+
+{ A tag at ACommit (AShort in the question) after a name and an optional
+  message, which makes it annotated. True when it was made. }
+function TForm1.TagAtAsk(const AShort, ACommit: string): boolean;
+var
+  Values: array of string;
+begin
+  Result := False;
   SetLength(Values, 2);
   Values[0] := '';
   Values[1] := '';
-  if not InputQuery(rsCaTagTitle, [Format(rsCaTagPrompt, [Short]), rsCaTagMessage], Values) or
+  if not InputQuery(rsCaTagTitle, [Format(rsCaTagPrompt, [AShort]), rsCaTagMessage], Values) or
     (Trim(Values[0]) = '') then
     Exit;
-  if FRepo.CreateTag(Trim(Values[0]), 'HEAD', Trim(Values[1])) then
-  begin
-    RefreshRepository;
-    StatusNote(Format(rsCaTagged, [Short, Trim(Values[0])]));
-  end
-  else
-    BannerError(rsCaFailed, FRepo.Error);
+  StopWatcher;
+  try
+    Result := FRepo.CreateTag(Trim(Values[0]), ACommit, Trim(Values[1]));
+    if Result then
+    begin
+      FSummary.Notice := '';
+      RefreshRepository;
+      StatusNote(Format(rsCaTagged, [AShort, Trim(Values[0])]));
+    end
+    else
+      BannerError(rsCaFailed, FRepo.Error);
+  finally
+    StartWatcher;
+  end;
 end;
 
 { A tag is no branch: checking one out leaves HEAD detached, where a
@@ -201,19 +201,26 @@ end;
 { A branch at ACommit, switched to, after a name; ALabel is what the
   question calls the commit (a tag, a short id). }
 procedure TForm1.BranchAtAsk(const ALabel, ACommit: string);
+begin
+  if (FRepo.Root <> '') and (FOperation = '') then
+    NewBranchAsk(Format(rsCaBranchPrompt, [ALabel]), ACommit);
+end;
+
+{ Asks a name with APrompt and makes a branch of it at ACommit, switched
+  to. True when it was made. }
+function TForm1.NewBranchAsk(const APrompt, ACommit: string): boolean;
 var
   Values: array of string;
 begin
-  if (FRepo.Root = '') or (FOperation <> '') then
-    Exit;
+  Result := False;
   SetLength(Values, 1);
   Values[0] := '';
-  if not InputQuery(rsCaBranchTitle, [Format(rsCaBranchPrompt, [ALabel])], Values) or
-    (Trim(Values[0]) = '') then
+  if not InputQuery(rsCaBranchTitle, [APrompt], Values) or (Trim(Values[0]) = '') then
     Exit;
   StopWatcher;
   try
-    if FRepo.CreateBranch(Trim(Values[0]), ACommit, True) then
+    Result := FRepo.CreateBranch(Trim(Values[0]), ACommit, True);
+    if Result then
     begin
       FSummary.Notice := '';
       RefreshRepository;

@@ -488,9 +488,7 @@ procedure TForm1.SyncClick(const AScreenRect: TRect);
 
   procedure AddAction(AAction: integer; const ACaption, ADetail: string);
   begin
-    FSyncPopup.Add(ACaption, ADetail);
-    SetLength(FSyncActions, Length(FSyncActions) + 1);
-    FSyncActions[High(FSyncActions)] := AAction;
+    FSyncPopup.Add(ACaption, ADetail, False, AAction);
   end;
 
 var
@@ -499,7 +497,6 @@ begin
   if FRepo.Root = '' then
     Exit;
   FSyncPopup.Clear;
-  FSyncActions := nil;
   if FRemoteJob = nil then
   begin
     Detail := '';
@@ -529,9 +526,7 @@ end;
 
 procedure TForm1.SyncPopupPick(Sender: TObject; AIndex: integer);
 begin
-  if (AIndex < 0) or (AIndex > High(FSyncActions)) then
-    Exit;
-  case FSyncActions[AIndex] of
+  case FSyncPopup.TagOf(AIndex) of
     saPull: StartRemote(rkPull);
     saPush: StartRemote(rkPush);
     saForcePush: ForcePushAsk;

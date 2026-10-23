@@ -633,6 +633,18 @@ begin
     Result := -1;
 end;
 
+{ The path of the section's selected submodule, '' for none. }
+function TForm1.PopupSubmodulePath: string;
+var
+  Index: integer;
+begin
+  Index := PopupSubmodule;
+  if Index >= 0 then
+    Result := FSubmodules[Index].Path
+  else
+    Result := '';
+end;
+
 procedure TForm1.SubPopupPopup(Sender: TObject);
 var
   Index: integer;
@@ -662,28 +674,37 @@ begin
 end;
 
 procedure TForm1.MenuSubUpdateClick(Sender: TObject);
+var
+  Path: string;
 begin
-  if PopupSubmodule >= 0 then
-    UpdateSubmodulesAsk(FSubmodules[PopupSubmodule].Path);
+  Path := PopupSubmodulePath;
+  if Path <> '' then
+    UpdateSubmodulesAsk(Path);
 end;
 
 procedure TForm1.MenuSubSyncClick(Sender: TObject);
+var
+  Path: string;
 begin
-  if PopupSubmodule >= 0 then
-    SyncSubmodulesNow(FSubmodules[PopupSubmodule].Path);
+  Path := PopupSubmodulePath;
+  if Path <> '' then
+    SyncSubmodulesNow(Path);
 end;
 
 procedure TForm1.MenuSubOpenClick(Sender: TObject);
+var
+  Path: string;
 begin
-  if PopupSubmodule < 0 then
-    Exit;
-  OpenRepository(IncludeTrailingPathDelimiter(FRepo.Root) +
-    SetDirSeparators(FSubmodules[PopupSubmodule].Path));
+  Path := PopupSubmodulePath;
+  if Path <> '' then
+    OpenRepository(IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(Path));
 end;
 
 procedure TForm1.MenuSubCopyPathClick(Sender: TObject);
+var
+  Path: string;
 begin
-  if PopupSubmodule >= 0 then
-    Clipboard.AsText := IncludeTrailingPathDelimiter(FRepo.Root) +
-      SetDirSeparators(FSubmodules[PopupSubmodule].Path);
+  Path := PopupSubmodulePath;
+  if Path <> '' then
+    Clipboard.AsText := IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(Path);
 end;

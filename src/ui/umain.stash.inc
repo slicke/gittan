@@ -18,8 +18,7 @@
   with every snapshot of the repository (FStashes), so one made or
   dropped in a terminal shows up through the watcher. }
 const
-  { The rows of the list that are no stash, in FStashRows. }
-  StashRowHeader = -1;
+  { The tag of the list's New row; a stash's row has its index. }
   StashRowNew = -2;
   smApply = 1;
   smPop = 2;
@@ -53,30 +52,18 @@ var
   i: integer;
   Detail: string;
   Compared: integer;
-
-  procedure AddRow(ARow: integer);
-  begin
-    SetLength(FStashRows, Length(FStashRows) + 1);
-    FStashRows[High(FStashRows)] := ARow;
-  end;
-
 begin
   if FRepo.Root = '' then
     Exit;
   Compared := StashOfBase;
   FStashPopup.Clear;
   FListedStashes := Copy(FStashes);
-  FStashRows := nil;
   if (FFileCount > 0) and RepoReady and (FConflictFiles = 0) then
-  begin
-    FStashPopup.Add(rsStashNewRow);
-    AddRow(StashRowNew);
-  end;
+    FStashPopup.Add(rsStashNewRow, '', False, StashRowNew);
   if Length(FStashes) = 0 then
     FStashPopup.AddHeader(rsNoStashes)
   else
     FStashPopup.AddHeader(rsStashes);
-  AddRow(StashRowHeader);
   for i := 0 to High(FStashes) do
   begin
     Detail := FStashes[i].Branch;
@@ -85,28 +72,26 @@ begin
     Detail := Detail + BlameAge(FStashes[i].Time, DateTimeToUnix(Now, False));
     if FStashes[i].Untracked then
       Detail := Detail + ' · ' + rsStashUntracked;
-    FStashPopup.Add(StashLabel(FStashes[i]), Detail, i = Compared);
-    AddRow(i);
+    FStashPopup.Add(StashLabel(FStashes[i]), Detail, i = Compared, i);
   end;
   FStashPopup.Popup(AScreenRect);
 end;
 
 procedure TForm1.StashPopupPick(Sender: TObject; AIndex: integer);
+var
+  Row: PtrInt;
 begin
-  if (AIndex < 0) or (AIndex > High(FStashRows)) then
-    Exit;
-  case FStashRows[AIndex] of
-    StashRowHeader: ;
-    StashRowNew: StashChangesAsk(False);
-    else
-      if FStashRows[AIndex] <= High(FListedStashes) then
-        CompareStash(FListedStashes[FStashRows[AIndex]]);
-  end;
+  Row := FStashPopup.TagOf(AIndex);
+  if Row = StashRowNew then
+    StashChangesAsk(False)
+  else if (Row >= 0) and (Row <= High(FListedStashes)) then
+    CompareStash(FListedStashes[Row]);
 end;
 
 procedure TForm1.StashContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
 var
   Busy: boolean;
+  Row: PtrInt;
 
   procedure Add(const ACaption: string; ATag: integer; AEnabled: boolean);
   var
@@ -121,10 +106,10 @@ var
   end;
 
 begin
-  if (AIndex < 0) or (AIndex > High(FStashRows)) or (FStashRows[AIndex] < 0) or
-    (FStashRows[AIndex] > High(FListedStashes)) then
+  Row := FStashPopup.TagOf(AIndex);
+  if (Row < 0) or (Row > High(FListedStashes)) then
     Exit;
-  FMenuStash := FListedStashes[FStashRows[AIndex]];
+  FMenuStash := FListedStashes[Row];
   Busy := not RepoReady;
   FStashMenu.Items.Clear;
   Add(rsSmApply, smApply, not Busy);

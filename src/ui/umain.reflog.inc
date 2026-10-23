@@ -14,8 +14,6 @@
   branch to it and copy its id. The reflog is read when the list opens,
   not with every snapshot. }
 const
-  { The rows of the list that are no line of the reflog, in FReflogRows. }
-  ReflogRowHeader = -1;
   rlShow = 1;
   rlCompare = 2;
   rlBranch = 3;
@@ -54,13 +52,6 @@ var
   i: integer;
   Head, Detail, Subject: string;
   Now64: int64;
-
-  procedure AddRow(ARow: integer);
-  begin
-    SetLength(FReflogRows, Length(FReflogRows) + 1);
-    FReflogRows[High(FReflogRows)] := ARow;
-  end;
-
 begin
   if FRepo.Root = '' then
     Exit;
@@ -72,12 +63,10 @@ begin
   Head := FRepo.CommitId('HEAD');
   Now64 := DateTimeToUnix(Now, False);
   FReflogPopup.Clear;
-  FReflogRows := nil;
   if Length(FReflog) = 0 then
     FReflogPopup.AddHeader(rsNoReflog)
   else
     FReflogPopup.AddHeader(rsReflog);
-  AddRow(ReflogRowHeader);
   for i := 0 to High(FReflog) do
   begin
     Subject := ShortenReflogIds(FReflog[i].Subject);
@@ -86,24 +75,25 @@ begin
     Detail := Copy(FReflog[i].Commit, 1, 7) + ' · ' + BlameAge(FReflog[i].Time, Now64);
     if FReflog[i].Lost then
       Detail := Detail + ' · ' + rsReflogLost;
-    FReflogPopup.Add(Subject, Detail, FReflog[i].Commit = Head);
-    AddRow(i);
+    FReflogPopup.Add(Subject, Detail, FReflog[i].Commit = Head, i);
   end;
   FReflogPopup.Popup(AScreenRect);
 end;
 
 procedure TForm1.ReflogPopupPick(Sender: TObject; AIndex: integer);
+var
+  Row: PtrInt;
 begin
-  if (AIndex < 0) or (AIndex > High(FReflogRows)) or (FReflogRows[AIndex] < 0) or
-    (FReflogRows[AIndex] > High(FReflog)) then
-    Exit;
-  ShowBlameCommit(FReflog[FReflogRows[AIndex]].Commit);
+  Row := FReflogPopup.TagOf(AIndex);
+  if (Row >= 0) and (Row <= High(FReflog)) then
+    ShowBlameCommit(FReflog[Row].Commit);
 end;
 
 procedure TForm1.ReflogContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
 var
   Busy: boolean;
   Sub: TMenuItem;
+  Row: PtrInt;
 
   function Add(AParent: TMenuItem; const ACaption: string; ATag: integer;
     AEnabled: boolean = True): TMenuItem;
@@ -120,10 +110,10 @@ var
   end;
 
 begin
-  if (AIndex < 0) or (AIndex > High(FReflogRows)) or (FReflogRows[AIndex] < 0) or
-    (FReflogRows[AIndex] > High(FReflog)) then
+  Row := FReflogPopup.TagOf(AIndex);
+  if (Row < 0) or (Row > High(FReflog)) then
     Exit;
-  FMenuReflog := FReflog[FReflogRows[AIndex]];
+  FMenuReflog := FReflog[Row];
   Busy := RepoBusy;
   FReflogMenu.Items.Clear;
   Add(nil, rsCaShow, rlShow);
@@ -146,8 +136,6 @@ procedure TForm1.ReflogMenuClick(Sender: TObject);
 var
   E: TGittanReflogEntry;
   Short: string;
-  Mode: TGittanResetMode;
-  Ok: boolean;
 begin
   E := FMenuReflog;
   if (FRepo.Root = '') or (E.Commit = '') then
@@ -160,35 +148,9 @@ begin
     rlBrowse: BrowseCommit(E.Commit, Short, ShortenReflogIds(E.Subject));
     rlBranch: BranchAtAsk(Short, E.Commit);
     rlCopy: Clipboard.AsText := E.Commit;
-    rlResetSoft, rlResetMixed, rlResetHard:
-    begin
-      case (Sender as TMenuItem).Tag of
-        rlResetSoft: Mode := rmSoft;
-        rlResetHard: Mode := rmHard;
-        else
-          Mode := rmMixed;
-      end;
-      if RepoBusy or not ResetAsk(E.Commit, Short, Mode) then
-        Exit;
-      StopWatcher;
-      try
-        Screen.Cursor := crHourGlass;
-        try
-          Ok := FRepo.Reset(E.Commit, Mode);
-        finally
-          Screen.Cursor := crDefault;
-        end;
-        FLoadError := '';
-        FSummary.Notice := '';
-        RefreshRepository;
-      finally
-        StartWatcher;
-      end;
-      if Ok then
-        StatusNote(Format(rsCaWasReset, [ResetTarget, Short]))
-      else
-        BannerError(rsCaFailed, FRepo.Error);
-    end;
+    rlResetSoft: ResetToAsk(E.Commit, Short, rmSoft);
+    rlResetMixed: ResetToAsk(E.Commit, Short, rmMixed);
+    rlResetHard: ResetToAsk(E.Commit, Short, rmHard);
   end;
 end;
 

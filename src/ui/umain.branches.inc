@@ -141,23 +141,7 @@ begin
     DeleteGoneBranches;
     Exit;
   end;
-  SetLength(Values, 1);
-  Values[0] := '';
-  if not InputQuery(rsCaBranchTitle, [rsBmNewPrompt], Values) or (Trim(Values[0]) = '') then
-    Exit;
-  StopWatcher;
-  try
-    if FRepo.CreateBranch(Trim(Values[0]), 'HEAD', True) then
-    begin
-      FSummary.Notice := '';
-      RefreshRepository;
-      StatusNote(Format(rsCaBranched, [Trim(Values[0])]));
-    end
-    else
-      BannerError(rsCaFailed, FRepo.Error);
-  finally
-    StartWatcher;
-  end;
+  NewBranchAsk(rsBmNewPrompt, 'HEAD');
 end;
 
 procedure TForm1.RenameBranchAsk(const AName: string);

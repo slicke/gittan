@@ -39,6 +39,7 @@ type
   TGittanPopupItem = record
     Caption, Detail: string;
     Header, Checked: boolean;
+    Tag: PtrInt;
   end;
 
   TGittanPopupList = class;
@@ -116,9 +117,12 @@ type
     procedure Clear;
     {** Adds an item and returns its index, the one OnPick reports.
       ADetail is shown dimmed on the right; AChecked marks it as the
-      current choice. }
+      current choice; ATag is the caller's, for TagOf. }
     function Add(const ACaption: string; const ADetail: string = '';
-      AChecked: boolean = False): integer;
+      AChecked: boolean = False; ATag: PtrInt = 0): integer;
+    {** The tag the item at AIndex was added with, -1 for a header or an
+      index out of range. }
+    function TagOf(AIndex: integer): PtrInt;
     {** Adds a header, the dimmed name of the group of items that
       follow. It cannot be picked. }
     procedure AddHeader(const ACaption: string);
@@ -251,7 +255,7 @@ begin
 end;
 
 function TGittanPopupList.Add(const ACaption: string; const ADetail: string;
-  AChecked: boolean): integer;
+  AChecked: boolean; ATag: PtrInt): integer;
 begin
   Result := Length(FItems);
   SetLength(FItems, Result + 1);
@@ -259,6 +263,15 @@ begin
   FItems[Result].Detail := ADetail;
   FItems[Result].Header := False;
   FItems[Result].Checked := AChecked;
+  FItems[Result].Tag := ATag;
+end;
+
+function TGittanPopupList.TagOf(AIndex: integer): PtrInt;
+begin
+  if (AIndex < 0) or (AIndex > High(FItems)) or FItems[AIndex].Header then
+    Result := -1
+  else
+    Result := FItems[AIndex].Tag;
 end;
 
 procedure TGittanPopupList.AddHeader(const ACaption: string);
