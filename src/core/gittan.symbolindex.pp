@@ -112,7 +112,9 @@ begin
   if Result then
   begin
     ASize := Info.Size;
-    ATime := Info.Time;
+    { In seconds; Time, the DOS-packed stamp, is deprecated. An index
+      written with it is read once more. }
+    ATime := Round(Info.TimeStamp * SecsPerDay);
     FindClose(Info);
   end;
 end;

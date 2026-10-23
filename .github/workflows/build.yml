@@ -353,23 +353,23 @@ jobs:
           ln -s /Applications dist/Applications
           hdiutil create -volname Gittan -srcfolder dist -ov -format UDZO Gittan-macos-silicon.dmg
 
-      - name: Build and package (Windows)
+      - name: Build and test (Windows)
+        if: matrix.os_target == 'windows'
+        shell: pwsh
+        run: |
+          # No make on the Windows runner: make.ps1 has the same targets.
+          # build copies the lexers into lexlib\ first; test finds the fpc
+          # the Lazarus installer put under C:\Lazarus\fpc\<version>.
+          ./make.ps1 build --lazarusdir=C:\Lazarus
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./make.ps1 test
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Package (Windows)
         if: matrix.os_target == 'windows'
         shell: bash
         run: |
           set -euo pipefail
-          # No make on the Windows runner; this is what `make lexlib` does.
-          rm -rf lexlib && mkdir -p lexlib
-          find vendor/CudaText-lexers lexers -mindepth 2 -maxdepth 2 \( -name '*.lcf' -o -name '*.cuda-lexmap' \) -exec cp -p {} lexlib/ \;
-          echo "Copied $(ls lexlib/*.lcf | wc -l) lexers to lexlib/"
-          lazbuild --lazarusdir='C:\Lazarus' --widgetset=win32 --bm=Release Gittan.lpi
-          # The unit tests, as `make test` builds them: a console program
-          # compiled with the fpc that comes with the Lazarus installer.
-          FPC="$(find /c/Lazarus/fpc -name fpc.exe -path '*x86_64-win64*' | head -n1)"
-          [ -n "$FPC" ] || { echo "::error::fpc.exe not found under C:\Lazarus\fpc"; exit 1; }
-          mkdir -p tests/lib
-          "$FPC" -Mobjfpc -Sh -O1 -Fusrc/core -FUtests/lib -FEtests tests/gittantests.lpr
-          tests/gittantests.exe --all --format=plain
           mkdir -p dist/Gittan
           cp Gittan.exe dist/Gittan/
           cp -r lexlib dist/Gittan/

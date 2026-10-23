@@ -450,6 +450,7 @@ var
   Keys: TStringList;
   i, k: integer;
 begin
+  Result := nil;
   SetLength(Result, Length(ANew));
   Keys := TStringList.Create;
   try
