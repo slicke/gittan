@@ -90,8 +90,9 @@ function PackageRunner(const ARoot: string): string;
   Reads the three files; nothing runs. }
 function DiscoverRepoCommands(const ARoot: string): TGittanRepoCommands;
 
-{** The MD5 of the commands file's text under ARoot, '' without the
-  file. }
+{** The SHA-256 of the commands file's text under ARoot, '' without the
+  file: a hash that cannot be collided, so a trusted file cannot be
+  swapped for another of the same hash. }
 function CommandsFileHash(const ARoot: string): string;
 
 {** What a new commands file holds: an example with its lines commented
@@ -123,6 +124,9 @@ type
     function GetElapsedMs: int64;
     procedure AddOutput(const AChunk: string);
     procedure NotifyOutput;
+    {$ifdef unix}
+    procedure ForkChild(Sender: TObject);
+    {$endif}
   protected
     procedure Execute; override;
     procedure Detach; override;
@@ -153,7 +157,7 @@ implementation
 
 uses
   {$ifdef unix}BaseUnix,{$endif}
-  Process, md5, fpjson, jsonparser, gittan.git, gittan.textfile;
+  Process, fpjson, jsonparser, gittan.git, gittan.textfile, gittan.sha256;
 
 { ---------------------------------------------------------------------------
   The commands file
@@ -475,7 +479,7 @@ begin
   if (ARoot = '') or not FileExists(Name) then
     Result := ''
   else
-    Result := MD5Print(MD5String(ReadFileBytes(Name)));
+    Result := SHA256Print(SHA256String(ReadFileBytes(Name)));
 end;
 
 { ---------------------------------------------------------------------------
@@ -560,30 +564,12 @@ begin
 end;
 
 {$ifdef unix}
-{ The processes under APid, through pgrep -P, deepest first, so a child
-  is ended before the parent that would start another. }
-procedure KillTree(APid: integer);
-var
-  Output: string;
-  Lines: TStringList;
-  i, Child: integer;
+{ In the child, before the shell starts: a session of its own, so the
+  shell and what it starts are a process group that EndProcess ends
+  together. }
+procedure TGittanCommandJob.ForkChild(Sender: TObject);
 begin
-  if RunCommand('pgrep', ['-P', IntToStr(APid)], Output, [poNoConsole, poUsePipes]) then
-  begin
-    Lines := TStringList.Create;
-    try
-      Lines.Text := Output;
-      for i := 0 to Lines.Count - 1 do
-      begin
-        Child := StrToIntDef(Trim(Lines[i]), 0);
-        if Child > 0 then
-          KillTree(Child);
-      end;
-    finally
-      Lines.Free;
-    end;
-  end;
-  FpKill(APid, SIGTERM);
+  FpSetsid;
 end;
 {$endif}
 
@@ -594,7 +580,9 @@ var
 {$endif}
 begin
   {$ifdef unix}
-  KillTree(P.ProcessID);
+  { The group is not there yet when the child has not reached setsid. }
+  if FpKill(-P.ProcessID, SIGTERM) <> 0 then
+    FpKill(P.ProcessID, SIGTERM);
   {$else}
   { cmd.exe's children (node under npm) go with it. }
   RunCommand('taskkill', ['/PID', IntToStr(P.ProcessID), '/T', '/F'], Output,
@@ -650,6 +638,9 @@ begin
     P.Environment.Add('FORCE_COLOR=1');
     P.Environment.Add('CLICOLOR_FORCE=1');
     P.Options := [poNoConsole, poUsePipes, poStderrToOutPut];
+    {$ifdef unix}
+    P.OnForkEvent := @ForkChild;
+    {$endif}
     try
       P.Execute;
       FStarted := True;
@@ -666,6 +657,13 @@ begin
       otherwise wait for ever. }
     P.CloseInput;
     repeat
+      { Asked on every pass: a command that writes all the time would
+        otherwise never be ended. }
+      if FKill and not FKilled and P.Running then
+      begin
+        FKilled := True;
+        EndProcess(P);
+      end;
       N := P.Output.NumBytesAvailable;
       if N > 0 then
       begin
@@ -678,14 +676,7 @@ begin
         end;
       end
       else if P.Running then
-      begin
-        if FKill and not FKilled then
-        begin
-          FKilled := True;
-          EndProcess(P);
-        end;
-        Sleep(30);
-      end
+        Sleep(30)
       else
         Break;
     until False;

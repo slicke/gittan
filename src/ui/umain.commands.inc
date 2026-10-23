@@ -279,6 +279,12 @@ begin
   {$ELSE}
   if AShift * [ssShift, ssAlt, ssCtrl, ssMeta] <> [ssCtrl, ssAlt] then
     Exit;
+  {$IFDEF WINDOWS}
+  { Windows reports AltGr as Ctrl+Alt: AltGr and a letter types a
+    character (€, @) on many layouts, and is left to it. }
+  if GetKeyState(VK_RMENU) < 0 then
+    Exit;
+  {$ENDIF}
   {$ENDIF}
   if not (((AKey >= VK_A) and (AKey <= VK_Z)) or ((AKey >= VK_0) and (AKey <= VK_9))) then
     Exit;

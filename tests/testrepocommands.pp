@@ -315,7 +315,7 @@ begin
   AssertEquals('', CommandsFileHash(''));
   Put('.gittan/commands.ini', '[a]'#10'command = x'#10);
   H := CommandsFileHash(FDir);
-  AssertEquals(32, Length(H));
+  AssertEquals('SHA-256 in hex', 64, Length(H));
   AssertEquals('the same text, the same hash', H, CommandsFileHash(FDir));
   Put('.gittan/commands.ini', '[a]'#10'command = y'#10);
   AssertTrue('another text, another hash', H <> CommandsFileHash(FDir));

@@ -57,8 +57,8 @@ type
     function LineHeight: integer;
     procedure ScrollTo(ATop: integer);
     {** Scrolls as the wheel turned by AWheelDelta over it would, unless
-      FollowEnd is on. }
-    procedure Wheel(AWheelDelta: integer);
+      FollowEnd is on; true when the lines moved. }
+    function Wheel(AWheelDelta: integer): boolean;
     {** The text as the program wrote it; setting it shows its end. }
     property Text: string read FText write SetText;
     function PlainText: string;
@@ -200,19 +200,25 @@ begin
   Invalidate;
 end;
 
-procedure TGittanConsole.Wheel(AWheelDelta: integer);
+{ True when the lines moved; at an end, or with nothing to scroll, the
+  wheel goes on to the scroll box the console stands in. }
+function TGittanConsole.Wheel(AWheelDelta: integer): boolean;
+var
+  Was: integer;
 begin
+  Result := False;
   if FFollowEnd or (LineCount <= Shown) then
     Exit;
   FTop := Max(0, Min(FTop, LineCount - Shown));
+  Was := FTop;
   ScrollTo(FTop - Sign(AWheelDelta) * Max(1, Abs(AWheelDelta) div 40));
+  Result := FTop <> Was;
 end;
 
 function TGittanConsole.DoMouseWheel(Shift: TShiftState; WheelDelta: integer;
   MousePos: TPoint): boolean;
 begin
-  Result := True;
-  Wheel(WheelDelta);
+  Result := Wheel(WheelDelta);
 end;
 
 procedure TGittanConsole.Paint;

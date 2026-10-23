@@ -316,23 +316,23 @@ begin
   Canvas.Ellipse(X, Y, X + Px(IconSize), Y + Px(IconSize));
   Canvas.Pen.Style := psSolid;
   Canvas.Pen.Color := clWhite;
-  Canvas.Pen.Width := 2;
+  Canvas.Pen.Width := Max(2, Px(2));
   CX := X + Px(IconSize) div 2;
   case AKind of
     bkError:
       begin
-        Canvas.Line(CX, Y + 4, CX, Y + 9);
-        Canvas.Line(CX, Y + 11, CX, Y + 13);
+        Canvas.Line(CX, Y + Px(4), CX, Y + Px(9));
+        Canvas.Line(CX, Y + Px(11), CX, Y + Px(13));
       end;
     bkInfo:
       begin
-        Canvas.Line(CX, Y + 4, CX, Y + 6);
-        Canvas.Line(CX, Y + 8, CX, Y + 13);
+        Canvas.Line(CX, Y + Px(4), CX, Y + Px(6));
+        Canvas.Line(CX, Y + Px(8), CX, Y + Px(13));
       end;
     bkSuccess:
       begin
-        Canvas.Line(X + 4, Y + 8, X + 7, Y + 11);
-        Canvas.Line(X + 7, Y + 11, X + 12, Y + 5);
+        Canvas.Line(X + Px(4), Y + Px(8), X + Px(7), Y + Px(11));
+        Canvas.Line(X + Px(7), Y + Px(11), X + Px(12), Y + Px(5));
       end;
   end;
   Canvas.Pen.Width := 1;

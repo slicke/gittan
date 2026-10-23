@@ -1782,7 +1782,7 @@ end;
   open after it, for a terminal's -e. }
 function ShellLineIn(const ARoot, ACommand: string): string;
 begin
-  Result := 'cd ' + QuotedStr(ARoot) + ' && ' + ACommand + '; exec ${SHELL:-sh}';
+  Result := 'cd ' + gittan.cli.ShellQuote(ARoot) + ' && ' + ACommand + '; exec ${SHELL:-sh}';
 end;
 
 { A terminal in the repository root, running ACommand there when it is
@@ -1794,7 +1794,10 @@ end;
   or cmd.exe runs it with /K, so the window stays; on Linux the first
   terminal found on PATH is started in the root, since every terminal
   starts in its working directory but each names the option
-  differently, and given the command with -e. }
+  differently, and given sh -c and the line as arguments of their own:
+  after -- for gnome-terminal, whose -e takes one string, -x for
+  xfce4-terminal, and -e for the rest (x-terminal-emulator takes -e as
+  xterm does, whichever terminal it is). }
 procedure TForm1.OpenTerminal(const ACommand: string);
 {$IF not defined(DARWIN) and not defined(WINDOWS)}
 const
@@ -1825,7 +1828,7 @@ begin
   begin
     { The line goes into an AppleScript string: its backslashes and
       quotes escaped. }
-    Script := 'cd ' + QuotedStr(FRepo.Root) + ' && ' + ACommand;
+    Script := 'cd ' + gittan.cli.ShellQuote(FRepo.Root) + ' && ' + ACommand;
     Script := StringReplace(Script, '\', '\\', [rfReplaceAll]);
     Script := StringReplace(Script, '"', '\"', [rfReplaceAll]);
     RunDetached('osascript', ['-e', 'tell application "Terminal" to do script "' +
@@ -1850,8 +1853,14 @@ begin
     begin
       if ACommand = '' then
         RunDetached(T, [], FRepo.Root)
+      else if T = 'gnome-terminal' then
+        RunDetached(T, ['--', 'sh', '-c', ShellLineIn(FRepo.Root, ACommand)],
+          FRepo.Root)
+      else if T = 'xfce4-terminal' then
+        RunDetached(T, ['-x', 'sh', '-c', ShellLineIn(FRepo.Root, ACommand)],
+          FRepo.Root)
       else
-        RunDetached(T, ['-e', 'sh -c ' + QuotedStr(ShellLineIn(FRepo.Root, ACommand))],
+        RunDetached(T, ['-e', 'sh', '-c', ShellLineIn(FRepo.Root, ACommand)],
           FRepo.Root);
       Exit;
     end;
