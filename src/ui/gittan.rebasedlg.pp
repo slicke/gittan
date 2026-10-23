@@ -471,7 +471,8 @@ begin
     Ord('E'): Act := raEdit;
     Ord('S'): Act := raSquash;
     Ord('F'): Act := raFixup;
-    Ord('D'), VK_DELETE: Act := raDrop;
+    { Backspace is the key a Mac keyboard labels Delete. }
+    Ord('D'), VK_DELETE, VK_BACK: Act := raDrop;
     else
       Exit;
   end;

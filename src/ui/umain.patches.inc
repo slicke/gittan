@@ -44,7 +44,7 @@ begin
     Exit;
   end;
   Folder := PatchFolder;
-  if not ChoosePatchSeries(Commits, Folder, FPatchCover) then
+  if not ChoosePatchSeries(Commits, Folder, FPatchCover, FRepo.Root) then
     Exit;
   FPatchFolder := Folder;
   Files := TStringList.Create;
