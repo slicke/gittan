@@ -134,7 +134,9 @@ end;
 
 procedure TForm1.FocusTreeAsync(Data: PtrInt);
 begin
-  if FileTree.CanFocus then
+  { CanFocus leaves the form out, and SetFocus raises while it is not
+    shown. }
+  if Visible and Enabled and FileTree.CanFocus then
     FileTree.SetFocus;
 end;
 

@@ -95,7 +95,10 @@ begin
     FIndexAdapter.OnParseBegin := @AdapterParseBegin;
     FIndexAdapter.OnParseDone := @IndexParseDone;
   end;
-  IndexNext;
+  { From the message loop: OpenRepository runs in FormCreate too, and
+    loading a large file pumps messages for its progress, which ran
+    calls queued for the shown window (FocusTreeAsync) before it was. }
+  Application.QueueAsyncCall(@IndexNextAsync, 0);
 end;
 
 { Takes the next file of the queue that needs parsing and starts its
@@ -163,6 +166,10 @@ end;
 
 procedure TForm1.IndexNextAsync(Data: PtrInt);
 begin
+  { A second StartIndexing queues a second call; the file it started
+    is waited for. }
+  if FIndexTimer.Enabled then
+    Exit;
   IndexNext;
 end;
 
