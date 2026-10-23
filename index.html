@@ -571,7 +571,7 @@
       <img class="icon" src="assets/icon-256.png" alt="Gittan icon" width="88" height="88">
     </picture>
     <p class="name"><em>Git</em> <em>T</em>ree <em>A</em>nalyzer &amp; <em>N</em>avigator</p>
-    <div><a class="pill" href="#workflow"><b>New</b> Interactive rebase, bisect and partial commits <span aria-hidden="true">→</span></a></div>
+    <div><a class="pill" href="#tour"><b>New</b> Commands, Files and Pull Requests pages <span aria-hidden="true">→</span></a></div>
     <h1>Understand every change.<br><em>Then commit it.</em></h1>
     <span class="strandline" aria-hidden="true"><svg class="strand"><use href="#strand"/></svg></span>
     <p class="tag">Gittan is a free, native git client built around the diff. See what you changed as you change it, who wrote each line and the history behind it, then commit, sync and merge without leaving it.</p>
@@ -593,7 +593,7 @@
           <source srcset="assets/shots/unified-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
           <source srcset="assets/shots/unified-dark.png" media="(prefers-color-scheme: dark)" data-dark>
           <source srcset="assets/shots/unified-light.avif" type="image/avif">
-          <img src="assets/shots/unified-light.png" width="1280" height="800" fetchpriority="high" alt="Gittan showing the changes to a Vue component: Home, Graph and Repository over the changed files with check boxes in the sidebar, the diff with the added lines in green on the right, Reviewed, Skip in Commit and Discard pills at the end of the block under the mouse, the Commit section under the tree, and the status bar with the repository, its branch and a Pull button over one commit behind and two ahead">
+          <img src="assets/shots/unified-light.png" width="1280" height="800" fetchpriority="high" alt="Gittan showing the changes to a Vue component: Home over Graph, Repository, Commands, Files, Pull Requests and Recent in the sidebar, the changed files with check boxes under them, the diff with the added lines in green on the right, Reviewed, Skip in Commit and Discard pills at the end of the block under the mouse, the Commit section under the tree, and the status bar with the repository, its branch and a Pull button over one commit behind and two ahead">
         </picture>
       </div>
     </div>
@@ -617,7 +617,8 @@
         <button role="tab" id="b-repo" aria-selected="false" aria-controls="t-repo" tabindex="-1"><b>Repository</b></button>
         <button role="tab" id="b-graph" aria-selected="false" aria-controls="t-graph" tabindex="-1"><b>Commit graph</b></button>
         <button role="tab" id="b-stats" aria-selected="false" aria-controls="t-stats" tabindex="-1"><b>Statistics</b></button>
-        <button role="tab" id="b-browse" aria-selected="false" aria-controls="t-browse" tabindex="-1"><b>Browse files</b></button>
+        <button role="tab" id="b-files" aria-selected="false" aria-controls="t-files" tabindex="-1"><b>Files</b></button>
+        <button role="tab" id="b-commands" aria-selected="false" aria-controls="t-commands" tabindex="-1"><b>Commands</b></button>
         <button role="tab" id="b-submodule" aria-selected="false" aria-controls="t-submodule" tabindex="-1"><b>Submodules</b></button>
         <button role="tab" id="b-clean" aria-selected="false" aria-controls="t-clean" tabindex="-1"><b>Clean tree</b></button>
       </div>
@@ -628,7 +629,7 @@
             <source srcset="assets/shots/history-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/history-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/history-light.avif" type="image/avif">
-            <img src="assets/shots/history-light.png" width="1280" height="800" loading="lazy" alt="History of lines 1 to 39 in TrailCard.vue: four commits and the change not committed yet listed at the top, each with its own color and the author's initial, and the earlier versions of each line shown under it in that color">
+            <img src="assets/shots/history-light.png" width="1280" height="800" loading="lazy" alt="History of lines 1 to 19 in TrailCard.vue: four commits and the change not committed yet listed at the top, each with its own color and the author's initial, and the earlier versions of each line shown under it in that color">
           </picture></div>
         </figure>
         <figure id="t-blame" role="tabpanel" aria-labelledby="b-blame">
@@ -664,16 +665,16 @@
             <source srcset="assets/shots/summary-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/summary-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/summary-light.avif" type="image/avif">
-            <img src="assets/shots/summary-light.png" width="1280" height="800" loading="lazy" alt="The repository summary: six changed files with added and deleted line counts and bars, one marked staged, and a submodule moved from 64a3db3 to af86be3; Home, Graph and Repository head the sidebar, and the status bar offers Pull with one commit behind and two ahead">
+            <img src="assets/shots/summary-light.png" width="1280" height="800" loading="lazy" alt="The repository summary: six changed files with added and deleted line counts and bars, one marked staged, and a submodule moved from 64a3db3 to af86be3; Home heads the sidebar over Graph, Repository, Commands, Files, Pull Requests and Recent, and the status bar offers Pull with one commit behind and two ahead">
           </picture></div>
         </figure>
         <figure id="t-repo" role="tabpanel" aria-labelledby="b-repo">
-          <figcaption><b>The Repository page</b> (<kbd>⌘⇧I</kbd>) sums up the repository itself in tiles that lead on: Commits opens the graph, Branches and Tags drop their lists, Files browses the tree of HEAD. The remotes can be edited from here, and a click on an author shows their commits.</figcaption>
+          <figcaption><b>The Repository page</b> (<kbd>⌘⇧I</kbd>) sums up the repository itself in tiles that lead on: Commits opens the graph, Branches and Tags drop their lists, Files opens the Files page at HEAD. The remotes can be edited from here, and a click on an author shows their commits.</figcaption>
           <div class="frame"><picture>
             <source srcset="assets/shots/repo-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/repo-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/repo-light.avif" type="image/avif">
-            <img src="assets/shots/repo-light.png" width="1280" height="800" loading="lazy" alt="The Repository page of trailhead: main tracking origin/main with the last commit yesterday, then tiles for 15 commits since 4 Aug 2026, 3 branches, the tag v0.1.0, 17 tracked files, one submodule and 496 KiB, the origin remote with Edit Remotes, and three contributors with their initials, a bar and their share of the commits">
+            <img src="assets/shots/repo-light.png" width="1280" height="800" loading="lazy" alt="The Repository page of trailhead: main tracking origin/main with the last commit 3 days ago, then tiles for 15 commits since 4 Aug 2026, 3 branches, the tag v0.1.0, 17 tracked files, one submodule and 496 KiB, the origin remote with Edit Remotes, and three contributors with their initials, a bar and their share of the commits">
           </picture></div>
         </figure>
         <figure id="t-graph" role="tabpanel" aria-labelledby="b-graph">
@@ -694,13 +695,22 @@
             <img src="assets/shots/stats-light.png" width="1280" height="800" loading="lazy" alt="The commit graph's statistics: 19 commits by 3 authors as weekly bars from August to October stacked in each author's color, the week of 5 October under the mouse with six commits, and rows for Sam Okafor, Maja Lindqvist and Inés Moreau with their own weeks">
           </picture></div>
         </figure>
-        <figure id="t-browse" role="tabpanel" aria-labelledby="b-browse">
-          <figcaption><b>Browse the files</b> of any commit or tag as they were then, from its menu in the graph. Text shows in the editor's font and images scaled to fit; open a file in its app or save it somewhere else.</figcaption>
+        <figure id="t-files" role="tabpanel" aria-labelledby="b-files">
+          <figcaption><b>Files</b> in the sidebar, or <kbd>⌘5</kbd>, shows the tree of HEAD one folder at a time, with crumbs leading back up. Browse Files… on a commit, a tag or a reflog entry opens it as it was then. A file opens read-only in the editor under its lexer, an image scaled to fit, and Open or Save As takes it out.</figcaption>
           <div class="frame"><picture>
-            <source srcset="assets/shots/browse-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
-            <source srcset="assets/shots/browse-dark.png" media="(prefers-color-scheme: dark)" data-dark>
-            <source srcset="assets/shots/browse-light.avif" type="image/avif">
-            <img src="assets/shots/browse-light.png" width="1280" height="800" loading="lazy" alt="The window Files at ca56ce3: the tree of that commit with src/components open and TrailCard.vue picked, the file's text at that commit on the right with its size, and Open, Save As and Close buttons">
+            <source srcset="assets/shots/files-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/files-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/files-light.avif" type="image/avif">
+            <img src="assets/shots/files-light.png" width="1280" height="800" loading="lazy" alt="The Files page of trailhead at main, Say what unit the climb is in: crumbs trailhead › src over the folders components, data, stores and utils and the files App.vue, main.ts, style.css and types.ts with their sizes, and Files marked in the sidebar">
+          </picture></div>
+        </figure>
+        <figure id="t-commands" role="tabpanel" aria-labelledby="b-commands">
+          <figcaption><b>Commands</b> in the sidebar, or <kbd>⌘4</kbd>, turns a repository's own commands into buttons: the scripts of <code>package.json</code>, the targets of a Makefile and what <code>.gittan/commands.ini</code> adds. A click runs one in the root with its output live under the buttons, and a key from the file runs it from any view with <kbd>⌃⌘</kbd>, once you have trusted the file.</figcaption>
+          <div class="frame"><picture>
+            <source srcset="assets/shots/commands-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/commands-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/commands-light.avif" type="image/avif">
+            <img src="assets/shots/commands-light.png" width="1280" height="800" loading="lazy" alt="The Commands page of trailhead: graph, authors and icons from .gittan/commands.ini with their shortcuts, and the scripts dev, build and preview from package.json, dev and build with shortcuts too, and Commands marked in the sidebar">
           </picture></div>
         </figure>
         <figure id="t-submodule" role="tabpanel" aria-labelledby="b-submodule">
@@ -780,7 +790,7 @@
             <source srcset="assets/shots/stashes-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/stashes-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/stashes-light.avif" type="image/avif">
-            <img src="assets/shots/stashes-light.png" width="1280" height="800" loading="lazy" alt="The stash list over the status bar: Stash Changes, then Chart legend on elevation-chart two days old with untracked files and Try a dark map style on main five days old, the latter checked; the summary shows that stash's one changed file against its base, labeled vs stash: Try a dark map style">
+            <img src="assets/shots/stashes-light.png" width="1280" height="800" loading="lazy" alt="The stash list over the status bar: Stash Changes, then Chart legend on elevation-chart four days old with untracked files and Try a dark map style on main seven days old, the latter checked; the summary shows that stash's one changed file against its base, labeled vs stash: Try a dark map style">
           </picture></div>
         </figure>
         <figure id="t-rebase" role="tabpanel" aria-labelledby="b-rebase">
@@ -1225,7 +1235,7 @@
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
         <h3>Pull request reviews</h3>
-        <p>With the <code>gh</code> CLI signed in, the status bar shows the branch's pull request and its checks, and the review comments appear under the lines they are about.</p>
+        <p>With the <code>gh</code> CLI signed in, the status bar shows the branch's pull request and its checks, Pull Requests in the sidebar lists the open ones, Home names those waiting for your review, and the review comments appear under the lines they are about.</p>
       </div>
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/></svg></div>
@@ -1234,13 +1244,13 @@
       </div>
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
-        <h3>Browse any commit</h3>
-        <p>Browse Files… on a commit, a tag or a reflog entry shows the whole tree as it was then. Open a file from it, or save it.</p>
+        <h3>Files of any commit</h3>
+        <p>The Files page shows the tree of HEAD, and Browse Files… on a commit, a tag or a reflog entry the tree as it was then. Open a file from it, or save it.</p>
       </div>
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg></div>
-        <h3>Statistics</h3>
-        <p>The graph's Statistics toggle counts the commits per week and per author, for the whole log or only what the search finds.</p>
+        <h3>Your own commands</h3>
+        <p>The scripts of <code>package.json</code>, the targets of a Makefile and <code>.gittan/commands.ini</code> become buttons on the Commands page, their output drawn as a terminal draws it.</p>
       </div>
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5v14"/><path d="M11 10h6"/><path d="M11 14h4"/></svg></div>
