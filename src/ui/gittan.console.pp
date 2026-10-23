@@ -70,7 +70,7 @@ type
 implementation
 
 uses
-  Math;
+  Math, gittan.theme;
 
 const
   ScrollBarWidth = 4;
@@ -87,18 +87,6 @@ const
 function RGBColor(ARGB: longint): TColor;
 begin
   Result := RGBToColor((ARGB shr 16) and $FF, (ARGB shr 8) and $FF, ARGB and $FF);
-end;
-
-function Blend(A, B: TColor; APercent: integer): TColor;
-var
-  CA, CB: TColor;
-begin
-  CA := ColorToRGB(A);
-  CB := ColorToRGB(B);
-  Result := RGBToColor(
-    (Red(CA) * (100 - APercent) + Red(CB) * APercent) div 100,
-    (Green(CA) * (100 - APercent) + Green(CB) * APercent) div 100,
-    (Blue(CA) * (100 - APercent) + Blue(CB) * APercent) div 100);
 end;
 
 { TGittanConsole }
@@ -270,7 +258,7 @@ begin
           Back := Swap;
         end;
         if taDim in Style.Attrs then
-          Fore := Blend(Fore, Back, 50);
+          Fore := MixColor(Fore, Back, 0.5);
         Styles := [];
         if taBold in Style.Attrs then
           Include(Styles, fsBold);

@@ -228,7 +228,7 @@ procedure DrawStatusIcon(ACanvas: TCanvas; const AIcon: string; X, Y, ASize: int
 implementation
 
 uses
-  Math, gittan.textfit;
+  Math, gittan.textfit, gittan.theme;
 
 const
   BarHeight = 56;
@@ -288,21 +288,6 @@ begin
   while (n < Length(S)) and (Ord(S[n + 1]) and $C0 = $80) do
     Inc(n);
   Result := UpperCase(Copy(S, 1, n));
-end;
-
-{ AColor laid over ABack at AAlpha (0 to 1), for the badges' tint. }
-function Blend(AColor, ABack: TColor; AAlpha: double): TColor;
-
-  function Mix(A, B: byte): byte;
-  begin
-    Result := Round(B + (A - B) * AAlpha);
-  end;
-
-begin
-  AColor := ColorToRGB(AColor);
-  ABack := ColorToRGB(ABack);
-  Result := RGBToColor(Mix(Red(AColor), Red(ABack)), Mix(Green(AColor), Green(ABack)),
-    Mix(Blue(AColor), Blue(ABack)));
 end;
 
 { S cut to AWidth on ACanvas with an ellipsis; nothing when not even
@@ -917,9 +902,9 @@ var
     Canvas.Pen.Style := psClear;
     Canvas.Brush.Style := bsSolid;
     if (FHot = APart) and Clickable(APart) then
-      Canvas.Brush.Color := Blend(FTones[ATone], FBack, 0.3)
+      Canvas.Brush.Color := MixColor(FBack, FTones[ATone], 0.3)
     else
-      Canvas.Brush.Color := Blend(FTones[ATone], FBack, 0.18);
+      Canvas.Brush.Color := MixColor(FBack, FTones[ATone], 0.18);
     Canvas.RoundRect(R, R.Height, R.Height);
     Canvas.Pen.Style := psSolid;
     Canvas.Brush.Style := bsClear;
@@ -981,9 +966,9 @@ var
           FillColor := FAccent;
       end;
       if Hot then
-        FillColor := Blend(FText, FillColor, 0.12);
+        FillColor := MixColor(FillColor, FText, 0.12);
       if not B.Enabled then
-        FillColor := Blend(FillColor, FBack, 0.5);
+        FillColor := MixColor(FBack, FillColor, 0.5);
       case B.Tone of
         stGood: Ink := FDim;
         stWarn: Ink := RGBToColor(26, 26, 26);
@@ -1022,7 +1007,7 @@ var
       else
         Ink := FDim;
       if not B.Enabled then
-        Ink := Blend(FDim, FBack, 0.45);
+        Ink := MixColor(FBack, FDim, 0.45);
       DrawStatusIcon(Canvas, B.Icon, AX + (PrimaryHeight - (TextH - 4)) div 2,
         AY + (PrimaryHeight - TextH) div 2, TextH, Ink);
     end;
@@ -1240,9 +1225,9 @@ begin
     Canvas.Pen.Style := psClear;
     Canvas.Brush.Style := bsSolid;
     if (FHot = spRepo) and Clickable(spRepo) then
-      Canvas.Brush.Color := Blend(FAccent, FBack, 0.3)
+      Canvas.Brush.Color := MixColor(FBack, FAccent, 0.3)
     else
-      Canvas.Brush.Color := Blend(FAccent, FBack, 0.18);
+      Canvas.Brush.Color := MixColor(FBack, FAccent, 0.18);
     Canvas.RoundRect(FRects[spRepo], TileRadius * 2, TileRadius * 2);
     Canvas.Pen.Style := psSolid;
     Canvas.Brush.Style := bsClear;

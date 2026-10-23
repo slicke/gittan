@@ -92,7 +92,7 @@ implementation
 
 uses
   LCLIntf, URIParser, Math, BGRABitmap, BGRABitmapTypes, BGRASVG, BGRACanvas2D,
-  InkMarkdown, gittan.imagediff, gittan.richdiff;
+  InkMarkdown, gittan.imagediff, gittan.richdiff, gittan.theme;
 
 resourcestring
   rsCannotReadSvg = 'The SVG cannot be read.';
@@ -222,18 +222,6 @@ begin
   Result := Format('#%.2x%.2x%.2x', [Red(c), Green(c), Blue(c)]);
 end;
 
-{ AFrom moved AWeight of the way to ATo. }
-function Mix(AFrom, ATo: TColor; AWeight: double): TColor;
-var
-  f, t: longint;
-begin
-  f := ColorToRGB(AFrom);
-  t := ColorToRGB(ATo);
-  Result := RGBToColor(Round(Red(f) + (Red(t) - Red(f)) * AWeight),
-    Round(Green(f) + (Green(t) - Green(f)) * AWeight),
-    Round(Blue(f) + (Blue(t) - Blue(f)) * AWeight));
-end;
-
 constructor TGittanMarkdownPreview.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
@@ -284,7 +272,7 @@ begin
     'line-height: 1.5; margin: 0; padding: 16px 24px; }' +
     'h1, h2 { padding-bottom: 0.3em; border-bottom: 1px solid ' + Css(FDim) + '; }' +
     'a { color: ' + Css(FLink) + '; }' +
-    'pre, code { background: ' + Css(Mix(FBack, FFore, 0.07)) + '; }' +
+    'pre, code { background: ' + Css(MixColor(FBack, FFore, 0.07)) + '; }' +
     'pre code { background: transparent; }' +
     'img { max-width: 100%; width: auto; }' +
     '.' + RichAddedClass + ', .' + RichChangedClass + ', .' + RichDeletedClass +
@@ -292,13 +280,13 @@ begin
     '.' + RichAddedClass + ' { border-left: 3px solid ' + Css(AddedColor) + '; }' +
     '.' + RichChangedClass + ' { border-left: 3px solid ' + Css(ChangedColor) + '; }' +
     '.' + RichDeletedClass + ' { border-left: 3px solid ' + Css(DeletedColor) + '; ' +
-    'color: ' + Css(Mix(FFore, DeletedColor, 0.6)) + '; text-decoration: line-through; }' +
+    'color: ' + Css(MixColor(FFore, DeletedColor, 0.6)) + '; text-decoration: line-through; }' +
     'tr.' + RichAddedClass + ' td, li.' + RichAddedClass + ' { background: ' +
-    Css(Mix(FBack, AddedColor, 0.18)) + '; }' +
+    Css(MixColor(FBack, AddedColor, 0.18)) + '; }' +
     'tr.' + RichChangedClass + ' td, li.' + RichChangedClass + ' { background: ' +
-    Css(Mix(FBack, ChangedColor, 0.18)) + '; }' +
+    Css(MixColor(FBack, ChangedColor, 0.18)) + '; }' +
     'tr.' + RichDeletedClass + ' td, li.' + RichDeletedClass + ' { background: ' +
-    Css(Mix(FBack, DeletedColor, 0.18)) + '; }' +
+    Css(MixColor(FBack, DeletedColor, 0.18)) + '; }' +
     'li.' + RichAddedClass + ', li.' + RichChangedClass + ', li.' + RichDeletedClass +
     ' { border-left: none; padding-left: 0; margin-left: 0; }';
 end;
@@ -416,7 +404,7 @@ begin
     end;
   end;
   Inc(FSvgSerial);
-  Faint := Css(Mix(FBack, FFore, 0.55));
+  Faint := Css(MixColor(FBack, FFore, 0.55));
   Html := '';
   for Side := 0 to 1 do
   begin

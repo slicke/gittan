@@ -90,6 +90,20 @@ type
     property OnStateClick: TTVExpandedEvent read FOnStateClick write FOnStateClick;
   end;
 
+  {** The colors the self-painted controls share in one appearance
+    (TForm1.Palette): the gutter's shade the bars and headers sit on,
+    the text and its dim kind, the divider lines, the popup lists'
+    background, hovered row and border, a raised part of a bar, the
+    accent, the added, deleted and warning tones, the pills, and the
+    note boxes of the Commit section (info, error, each with its border). }
+  TGittanPalette = record
+    Shade, Text, Dim, Line: TColor;
+    Popup, Hover, Border, Raised: TColor;
+    Accent, Added, Deleted, Warning: TColor;
+    Pill, PillText: TColor;
+    NoteInfo, NoteInfoLine, NoteError, NoteErrorLine: TColor;
+  end;
+
   { TForm1 }
 
   TForm1 = class(TForm)
@@ -741,6 +755,7 @@ type
     FReviewMeasure: TBitmap;
     { The thread a click on its card folds when the button comes up. }
     FGapToggle: string;
+    function Palette: TGittanPalette;
     procedure ApplyTheme;
     procedure ApplyEditorColors(AEd: TATSynEdit);
     procedure SetupEditor(AEd: TATSynEdit);
@@ -3031,7 +3046,55 @@ begin
   AEd.Invalidate;
 end;
 
+function TForm1.Palette: TGittanPalette;
+begin
+  Result.Shade := SidebarShade(FDark);
+  if FDark then
+  begin
+    Result.Text := Edit.Colors.TextFont;
+    Result.Dim := RGBToColor(150, 150, 150);
+    Result.Line := RGBToColor(62, 62, 62);
+    Result.Popup := Result.Shade;
+    Result.Hover := RGBToColor(58, 58, 59);
+    Result.Border := RGBToColor(85, 85, 86);
+    Result.Raised := RGBToColor(58, 58, 59);
+    Result.Accent := RGBToColor(100, 160, 240);
+    Result.Added := RGBToColor(63, 185, 80);
+    Result.Deleted := RGBToColor(248, 81, 73);
+    Result.Warning := RGBToColor(227, 179, 65);
+    Result.Pill := RGBToColor(50, 50, 51);
+    Result.PillText := RGBToColor(200, 200, 200);
+    Result.NoteInfo := RGBToColor(33, 44, 58);
+    Result.NoteInfoLine := RGBToColor(44, 66, 92);
+    Result.NoteError := RGBToColor(56, 34, 36);
+    Result.NoteErrorLine := RGBToColor(100, 50, 54);
+  end
+  else
+  begin
+    Result.Text := RGBToColor(30, 30, 30);
+    Result.Dim := RGBToColor(110, 110, 110);
+    Result.Line := RGBToColor(222, 222, 222);
+    Result.Popup := clWhite;
+    Result.Hover := RGBToColor(235, 235, 235);
+    Result.Border := RGBToColor(205, 205, 205);
+    Result.Raised := RGBToColor(232, 232, 232);
+    Result.Accent := RGBToColor(0, 110, 230);
+    Result.Added := RGBToColor(26, 127, 55);
+    Result.Deleted := RGBToColor(207, 34, 46);
+    Result.Warning := RGBToColor(154, 103, 0);
+    Result.Pill := clWhite;
+    Result.PillText := RGBToColor(70, 70, 70);
+    Result.NoteInfo := RGBToColor(234, 243, 252);
+    Result.NoteInfoLine := RGBToColor(200, 222, 245);
+    Result.NoteError := RGBToColor(253, 236, 236);
+    Result.NoteErrorLine := RGBToColor(242, 198, 198);
+  end;
+end;
+
 procedure TForm1.ApplyTheme;
+var
+  P: TGittanPalette;
+  List: TGittanPopupList;
 begin
   ApplyEditorColors(Edit);
   ApplyEditorColors(FEditOld);
@@ -3042,167 +3105,52 @@ begin
     HistoryColor(5, htSwatch)]);
   { The header and the find bar take the gutter's shade; the navigator
     pills sit on it. }
+  P := Palette;
+  FHeader.SetColors(P.Shade, P.Text, P.Dim, P.Added, P.Deleted, P.Line);
+  FHeader.SetPillColors(P.Pill, P.Border, P.Accent);
+  FNav.SetColors(P.Shade, P.Pill, P.Border, P.PillText, P.Accent);
+  FFindBar.SetColors(P.Shade, P.Text, P.Dim, P.Line);
+  FFindBar.Nav.SetColors(P.Shade, P.Pill, P.Border, P.PillText, P.Accent);
+  FSymbolBar.SetColors(P.Shade, P.Text, P.Dim, P.Line);
+  for List in [FBranchPopup, FStashPopup, FUpstreamPopup, FTagPopup, FViewPopup,
+    FSubListPopup, FReflogPopup, FPullPopup, FSyncPopup, FRecentPopup, FBasePopup,
+    FConflictPopup] do
+    List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
+  FGraph.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent, P.Warning);
+  FBanner.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Line, P.Accent, P.Deleted, P.Added);
+  FDiscardPills.SetColors(P.Popup, P.Text, P.Border, P.Accent, P.Added, P.Deleted);
+  FStatus.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Raised, P.Accent, P.Added,
+    P.Warning, P.Deleted);
+  FPullFill := P.Pill;
+  FPullBorder := P.Border;
+  FPullText := P.PillText;
+  FBandTrack := P.Line;
+  FBandFill := P.Accent;
   if FDark then
   begin
-    FHeader.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(63, 185, 80), RGBToColor(248, 81, 73),
-      RGBToColor(62, 62, 62));
-    FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(62, 62, 62), RGBToColor(248, 81, 73),
-      RGBToColor(63, 185, 80), RGBToColor(58, 58, 60), RGBToColor(44, 44, 46));
-    FBinaryView.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(44, 44, 46));
-    FNav.SetColors(RGBToColor(37, 37, 38), RGBToColor(50, 50, 51),
-      RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240));
-    FHeader.ConflictNav.SetColors(RGBToColor(37, 37, 38), RGBToColor(58, 46, 68),
+    FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim, P.Line, P.Deleted,
+      P.Added, RGBToColor(58, 58, 60), RGBToColor(44, 44, 46));
+    FBinaryView.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim,
+      RGBToColor(44, 44, 46));
+    FHeader.ConflictNav.SetColors(P.Shade, RGBToColor(58, 46, 68),
       RGBToColor(120, 80, 160), RGBToColor(210, 170, 245), RGBToColor(240, 215, 255));
-    FHeader.SetPillColors(RGBToColor(50, 50, 51), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FFindBar.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(62, 62, 62));
-    FSymbolBar.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(62, 62, 62));
-    FFindBar.Nav.SetColors(RGBToColor(37, 37, 38), RGBToColor(50, 50, 51),
-      RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240));
-    FBranchPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FStashPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FUpstreamPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FTagPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FViewPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FSubListPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FReflogPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FGraph.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240), RGBToColor(227, 179, 65));
-    FNotice.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(0, 110, 230), RGBToColor(241, 112, 112));
-    FBanner.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(62, 62, 62), RGBToColor(62, 62, 62),
-      RGBToColor(100, 160, 240), RGBToColor(248, 81, 73), RGBToColor(63, 185, 80));
-    FPullPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FSyncPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FRecentPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FBasePopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FConflictPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FDiscardPills.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(85, 85, 86), RGBToColor(100, 160, 240), RGBToColor(63, 185, 80),
-      RGBToColor(248, 81, 73));
-    FStatus.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(62, 62, 62), RGBToColor(58, 58, 59),
-      RGBToColor(100, 160, 240), RGBToColor(63, 185, 80), RGBToColor(227, 179, 65),
-      RGBToColor(248, 81, 73));
-    FPullFill := RGBToColor(50, 50, 51);
-    FPullBorder := RGBToColor(85, 85, 86);
-    FPullText := RGBToColor(200, 200, 200);
+    { The notice's accent is the light one in both, its red a softer one. }
+    FNotice.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, RGBToColor(0, 110, 230),
+      RGBToColor(241, 112, 112));
     FPullBar := RGBToColor(40, 80, 130);
     FLinkColor := RGBToColor(78, 161, 255);
-    FBandTrack := RGBToColor(62, 62, 62);
-    FBandFill := RGBToColor(100, 160, 240);
   end
   else
   begin
-    FHeader.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(26, 127, 55), RGBToColor(207, 34, 46),
-      RGBToColor(222, 222, 222));
-    FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
-      RGBToColor(110, 110, 110), RGBToColor(222, 222, 222), RGBToColor(207, 34, 46),
-      RGBToColor(26, 127, 55), RGBToColor(255, 255, 255), RGBToColor(230, 230, 230));
-    FBinaryView.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
-      RGBToColor(110, 110, 110), RGBToColor(246, 246, 246));
-    FNav.SetColors(RGBToColor(246, 246, 246), clWhite,
-      RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
-    FHeader.ConflictNav.SetColors(RGBToColor(246, 246, 246), RGBToColor(248, 240, 255),
+    FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim, P.Line, P.Deleted,
+      P.Added, RGBToColor(255, 255, 255), RGBToColor(230, 230, 230));
+    FBinaryView.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim, P.Shade);
+    FHeader.ConflictNav.SetColors(P.Shade, RGBToColor(248, 240, 255),
       RGBToColor(190, 160, 220), RGBToColor(110, 50, 160), RGBToColor(155, 63, 200));
-    FHeader.SetPillColors(clWhite, RGBToColor(205, 205, 205), RGBToColor(0, 110, 230));
-    FFindBar.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(222, 222, 222));
-    FSymbolBar.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(222, 222, 222));
-    FFindBar.Nav.SetColors(RGBToColor(246, 246, 246), clWhite,
-      RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
-    FBranchPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FStashPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FUpstreamPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FTagPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FViewPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FSubListPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FReflogPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FGraph.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230), RGBToColor(154, 103, 0));
-    FNotice.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230), RGBToColor(200, 40, 40));
-    FBanner.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(222, 222, 222), RGBToColor(222, 222, 222),
-      RGBToColor(0, 110, 230), RGBToColor(207, 34, 46), RGBToColor(26, 127, 55));
-    FPullPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FSyncPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FRecentPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FBasePopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FConflictPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FDiscardPills.SetColors(clWhite, RGBToColor(30, 30, 30), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230), RGBToColor(26, 127, 55), RGBToColor(207, 34, 46));
-    FStatus.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(222, 222, 222), RGBToColor(232, 232, 232),
-      RGBToColor(0, 110, 230), RGBToColor(26, 127, 55), RGBToColor(154, 103, 0),
-      RGBToColor(207, 34, 46));
-    FPullFill := clWhite;
-    FPullBorder := RGBToColor(205, 205, 205);
-    FPullText := RGBToColor(70, 70, 70);
+    FNotice.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent,
+      RGBToColor(200, 40, 40));
     FPullBar := RGBToColor(205, 225, 250);
     FLinkColor := RGBToColor(0, 102, 204);
-    FBandTrack := RGBToColor(222, 222, 222);
-    FBandFill := RGBToColor(0, 110, 230);
   end;
   FSummaryBox.Color := Edit.Colors.TextBG;
   if FDark then

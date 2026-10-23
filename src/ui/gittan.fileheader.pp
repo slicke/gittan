@@ -157,7 +157,7 @@ type
 implementation
 
 uses
-  gittan.textfit;
+  gittan.textfit, gittan.theme;
 
 resourcestring
   rsBinary = 'binary';
@@ -179,18 +179,6 @@ const
   HitToggle = -2;
   HitMenu = -3;
   ChevronWidth = 12;
-
-{ AFrom moved AWeight of the way to ATo. }
-function Mix(AFrom, ATo: TColor; AWeight: double): TColor;
-var
-  f, t: longint;
-begin
-  f := ColorToRGB(AFrom);
-  t := ColorToRGB(ATo);
-  Result := RGBToColor(Round(Red(f) + (Red(t) - Red(f)) * AWeight),
-    Round(Green(f) + (Green(t) - Green(f)) * AWeight),
-    Round(Blue(f) + (Blue(t) - Blue(f)) * AWeight));
-end;
 
 { TGittanFileHeader }
 
@@ -613,7 +601,7 @@ begin
     if FToggleOn then
     begin
       Canvas.Pen.Color := FHotColor;
-      Canvas.Brush.Color := Mix(FFill, FHotColor, 0.18);
+      Canvas.Brush.Color := MixColor(FFill, FHotColor, 0.18);
     end
     else
     begin
