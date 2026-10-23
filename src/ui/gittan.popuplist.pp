@@ -138,7 +138,7 @@ type
 implementation
 
 uses
-  Math, LCLIntf, gittan.textfit;
+  Math, LCLIntf, gittan.textfit, gittan.theme;
 
 resourcestring
   rsNoMatches = 'No matches';
@@ -304,18 +304,18 @@ var
   C: TCanvas;
   i, W: integer;
 begin
-  Result := MinWidth;
+  Result := Px(MinWidth);
   C := MeasureCanvas(Font);
   for i := 0 to High(FItems) do
   begin
-    W := 2 * (Border + Pad) + CheckWidth + ScrollRoom + C.TextWidth(FItems[i].Caption);
+    W := 2 * (Border + Px(Pad)) + Px(CheckWidth) + Px(ScrollRoom) + C.TextWidth(FItems[i].Caption);
     if FItems[i].Detail <> '' then
-      Inc(W, Gap + C.TextWidth(FItems[i].Detail));
+      Inc(W, Px(Gap) + C.TextWidth(FItems[i].Detail));
     Result := Max(Result, W);
   end;
-  Result := Min(Result, MaxWidth);
+  Result := Min(Result, Px(MaxWidth));
   if Parent <> nil then
-    Result := Min(Result, Parent.ClientWidth - 2 * Pad);
+    Result := Min(Result, Parent.ClientWidth - 2 * Px(Pad));
 end;
 
 { The rows that match the filter (any part of the caption, ignoring
@@ -361,16 +361,16 @@ var
 begin
   Rows := Max(1, Min(Length(FShown), MaxVisibleRows));
   if FFilterVisible then
-    ListTop := Border + Pad div 2 + FEdit.Height + Pad div 2 + 1
+    ListTop := Border + Px(Pad) div 2 + FEdit.Height + Px(Pad) div 2 + 1
   else
-    ListTop := Border + Pad div 2;
-  H := ListTop + Rows * RowHeight + Pad div 2 + Border;
+    ListTop := Border + Px(Pad) div 2;
+  H := ListTop + Rows * Px(RowHeight) + Px(Pad) div 2 + Border;
   if Parent <> nil then
   begin
     if FAbove then
-      Top := Max(0, FAnchor.Top - Offset - H)
+      Top := Max(0, FAnchor.Top - Px(Offset) - H)
     else
-      Top := Min(FAnchor.Bottom + Offset, Max(0, Parent.ClientHeight - H));
+      Top := Min(FAnchor.Bottom + Px(Offset), Max(0, Parent.ClientHeight - H));
   end;
   Height := H;
   Arrange;
@@ -387,15 +387,15 @@ begin
   FEdit.Visible := FFilterVisible;
   if FFilterVisible then
   begin
-    FEdit.SetBounds(Border + Pad, Border + Pad div 2, Width - 2 * (Border + Pad),
+    FEdit.SetBounds(Border + Px(Pad), Border + Px(Pad) div 2, Width - 2 * (Border + Px(Pad)),
       FEdit.Height);
-    ListTop := FEdit.Top + FEdit.Height + Pad div 2 + 1;
+    ListTop := FEdit.Top + FEdit.Height + Px(Pad) div 2 + 1;
   end
   else
-    ListTop := Border + Pad div 2;
+    ListTop := Border + Px(Pad) div 2;
   FBox.SetBounds(Border, ListTop, Width - 2 * Border,
-    Max(RowHeight, Height - ListTop - Pad div 2 - Border));
-  FRows.Height := Max(1, Length(FShown)) * RowHeight;
+    Max(Px(RowHeight), Height - ListTop - Px(Pad) div 2 - Border));
+  FRows.Height := Max(1, Length(FShown)) * Px(RowHeight);
 end;
 
 procedure TGittanPopupList.Resize;
@@ -419,8 +419,8 @@ begin
   W := ContentWidth;
   Width := W;
   Left := Max(0, Min(FAnchor.Left, Parent.ClientWidth - W));
-  RoomBelow := Parent.ClientHeight - FAnchor.Bottom - Offset;
-  RoomAbove := FAnchor.Top - Offset;
+  RoomBelow := Parent.ClientHeight - FAnchor.Bottom - Px(Offset);
+  RoomAbove := FAnchor.Top - Px(Offset);
   FAbove := False;
   Fill;
   FAbove := (Height > RoomBelow) and (RoomAbove > RoomBelow);
@@ -486,7 +486,7 @@ begin
   Result := -1;
   if Y < 0 then
     Exit;
-  Result := Y div RowHeight;
+  Result := Y div Px(RowHeight);
   if (Result > High(FShown)) or FItems[FShown[Result]].Header then
     Result := -1;
 end;
@@ -520,12 +520,12 @@ var
 begin
   if FCurrent < 0 then
     Exit;
-  RowTop := FCurrent * RowHeight;
+  RowTop := FCurrent * Px(RowHeight);
   Pos := FBox.VertScrollBar.Position;
   if RowTop < Pos then
     FBox.VertScrollBar.Position := RowTop
-  else if RowTop + RowHeight > Pos + FBox.ClientHeight then
-    FBox.VertScrollBar.Position := RowTop + RowHeight - FBox.ClientHeight;
+  else if RowTop + Px(RowHeight) > Pos + FBox.ClientHeight then
+    FBox.VertScrollBar.Position := RowTop + Px(RowHeight) - FBox.ClientHeight;
 end;
 
 procedure TGittanPopupList.EditChange(Sender: TObject);
@@ -552,7 +552,7 @@ begin
     VK_APPS:
       if FCurrent >= 0 then
         Context(FRows.ClientToScreen(Point(FRows.ClientWidth div 3,
-          (FCurrent + 1) * RowHeight)));
+          (FCurrent + 1) * Px(RowHeight))));
     VK_TAB: ;
     else
       Exit;
@@ -592,21 +592,21 @@ begin
   if Length(FShown) = 0 then
   begin
     ACanvas.Font.Color := FDim;
-    ACanvas.TextOut(Pad + CheckWidth, (RowHeight - LineHeight) div 2, rsNoMatches);
+    ACanvas.TextOut(Px(Pad) + Px(CheckWidth), (Px(RowHeight) - LineHeight) div 2, rsNoMatches);
     Exit;
   end;
   for i := 0 to High(FShown) do
   begin
     Item := FItems[FShown[i]];
-    Y := i * RowHeight;
-    TextY := Y + (RowHeight - LineHeight) div 2;
-    CenterY := Y + RowHeight div 2;
+    Y := i * Px(RowHeight);
+    TextY := Y + (Px(RowHeight) - LineHeight) div 2;
+    CenterY := Y + Px(RowHeight) div 2;
     if (i = FCurrent) and not Item.Header then
     begin
       ACanvas.Pen.Style := psClear;
       ACanvas.Brush.Style := bsSolid;
       ACanvas.Brush.Color := FHover;
-      ACanvas.RoundRect(Pad div 2, Y + 1, FRows.Width - Pad div 2, Y + RowHeight - 1, 8, 8);
+      ACanvas.RoundRect(Px(Pad) div 2, Y + 1, FRows.Width - Px(Pad) div 2, Y + Px(RowHeight) - 1, 8, 8);
       ACanvas.Pen.Style := psSolid;
       ACanvas.Brush.Style := bsClear;
     end;
@@ -614,31 +614,31 @@ begin
     begin
       ACanvas.Pen.Color := FAccent;
       ACanvas.Pen.Width := 2;
-      X := Pad + 2;
+      X := Px(Pad) + 2;
       ACanvas.Polyline([Point(X, CenterY), Point(X + 4, CenterY + 4),
         Point(X + 11, CenterY - 4)]);
       ACanvas.Pen.Width := 1;
     end;
     DetailWidth := 0;
     if Item.Detail <> '' then
-      DetailWidth := ACanvas.TextWidth(Item.Detail) + Gap;
+      DetailWidth := ACanvas.TextWidth(Item.Detail) + Px(Gap);
     if Item.Header then
     begin
-      X := Pad;
+      X := Px(Pad);
       ACanvas.Font.Color := FDim;
     end
     else
     begin
-      X := Pad + CheckWidth;
+      X := Px(Pad) + Px(CheckWidth);
       ACanvas.Font.Color := FText;
     end;
-    Room := FRows.Width - Pad - X - DetailWidth;
+    Room := FRows.Width - Px(Pad) - X - DetailWidth;
     Shown := FitTextRight(ACanvas, Item.Caption, Room);
     ACanvas.TextOut(X, TextY, Shown);
     if Item.Detail <> '' then
     begin
       ACanvas.Font.Color := FDim;
-      ACanvas.TextOut(FRows.Width - Pad - ACanvas.TextWidth(Item.Detail), TextY,
+      ACanvas.TextOut(FRows.Width - Px(Pad) - ACanvas.TextWidth(Item.Detail), TextY,
         Item.Detail);
     end;
   end;

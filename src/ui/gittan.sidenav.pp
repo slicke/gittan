@@ -82,6 +82,8 @@ type
     procedure DrawIcon(AIcon: TGittanNavIcon; X, Y, ASize: integer; AColor: TColor;
       AWidth: integer = 1);
   protected
+    procedure DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+      const AXProportion, AYProportion: double); override;
     procedure Paint; override;
     procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
     procedure MouseLeave; override;
@@ -135,7 +137,7 @@ procedure ThemeSideNav(ANav: TGittanSideNav; ADark: boolean; AText: TColor);
 implementation
 
 uses
-  gittan.textfit;
+  gittan.textfit, gittan.theme;
 
 const
   RowHeight = 26;
@@ -199,10 +201,10 @@ begin
   ControlStyle := ControlStyle + [csOpaque];
   FSelected := -1;
   FHot := -1;
-  FRowHeight := RowHeight;
-  FIconSize := IconSize;
-  FIconGap := IconGap;
-  Height := 2 * PadY;
+  FRowHeight := Px(RowHeight);
+  FIconSize := Px(IconSize);
+  FIconGap := Px(IconGap);
+  Height := 2 * Px(PadY);
   SetColors(clBtnFace, clWindowText, clGrayText, clBtnShadow, clHighlight,
     clBtnShadow);
 end;
@@ -214,9 +216,9 @@ procedure TGittanSideNav.FitHeight;
 var
   H: integer;
 begin
-  H := 2 * PadY + RowsHeight;
+  H := 2 * Px(PadY) + RowsHeight;
   if FHeading <> '' then
-    Inc(H, HeadingTop + MeasureCanvas(Font).TextHeight('Xg') + HeadingGap + 1 + HeadingBottom);
+    Inc(H, Px(HeadingTop) + MeasureCanvas(Font).TextHeight('Xg') + Px(HeadingGap) + 1 + Px(HeadingBottom));
   Height := H;
 end;
 
@@ -227,15 +229,15 @@ begin
   FLarge := AValue;
   if AValue then
   begin
-    FRowHeight := LargeRowHeight;
-    FIconSize := LargeIconSize;
-    FIconGap := LargeIconGap;
+    FRowHeight := Px(LargeRowHeight);
+    FIconSize := Px(LargeIconSize);
+    FIconGap := Px(LargeIconGap);
   end
   else
   begin
-    FRowHeight := RowHeight;
-    FIconSize := IconSize;
-    FIconGap := IconGap;
+    FRowHeight := Px(RowHeight);
+    FIconSize := Px(IconSize);
+    FIconGap := Px(IconGap);
   end;
   FitHeight;
   Invalidate;
@@ -288,9 +290,9 @@ begin
   if not FToggle or (Length(FCaptions) = 0) then
     Exit(Rect(0, 0, 0, 0));
   Row := RowRect(0);
-  R := Row.Right - PadX + (ToggleBox - ToggleIconWidth) div 2;
-  T := Row.Top + (Row.Height - ToggleBox) div 2;
-  Result := Rect(R - ToggleBox, T, R, T + ToggleBox);
+  R := Row.Right - Px(PadX) + (Px(ToggleBox) - Px(ToggleIconWidth)) div 2;
+  T := Row.Top + (Row.Height - Px(ToggleBox)) div 2;
+  Result := Rect(R - Px(ToggleBox), T, R, T + Px(ToggleBox));
 end;
 
 procedure TGittanSideNav.SetHotToggle(AValue: boolean);
@@ -372,7 +374,7 @@ end;
 function TGittanSideNav.RowHeightOf(AIndex: integer): integer;
 begin
   if FSmall[AIndex] then
-    Result := RowHeight
+    Result := Px(RowHeight)
   else
     Result := FRowHeight;
 end;
@@ -382,11 +384,11 @@ function TGittanSideNav.RowTop(AIndex: integer): integer;
 var
   i: integer;
 begin
-  Result := PadY;
+  Result := Px(PadY);
   for i := 0 to AIndex - 1 do
     Inc(Result, RowHeightOf(i));
   if FSmall[AIndex] and ((AIndex = 0) or not FSmall[AIndex - 1]) then
-    Inc(Result, SmallGap);
+    Inc(Result, Px(SmallGap));
 end;
 
 { Folded, the first row alone. }
@@ -400,7 +402,7 @@ begin
     Last := 0
   else
     Last := High(FCaptions);
-  Result := RowTop(Last) + RowHeightOf(Last) - PadY;
+  Result := RowTop(Last) + RowHeightOf(Last) - Px(PadY);
 end;
 
 function TGittanSideNav.RowAt(Y: integer): integer;
@@ -419,7 +421,7 @@ end;
 
 function TGittanSideNav.RowRect(AIndex: integer): TRect;
 begin
-  Result := Rect(PadX, RowTop(AIndex), Width - PadX, RowTop(AIndex) + RowHeightOf(AIndex));
+  Result := Rect(Px(PadX), RowTop(AIndex), Width - Px(PadX), RowTop(AIndex) + RowHeightOf(AIndex));
 end;
 
 { The icons are drawn with lines in AColor, in a square ASize wide with
@@ -527,19 +529,19 @@ begin
     Canvas.Pen.Style := psClear;
     Canvas.Brush.Style := bsSolid;
     Canvas.Brush.Color := FHover;
-    Canvas.RoundRect(R, ToggleRadius, ToggleRadius);
+    Canvas.RoundRect(R, Px(ToggleRadius), Px(ToggleRadius));
   end;
-  X := R.Left + (R.Width - ToggleIconWidth) div 2;
-  Y := R.Top + (R.Height - ToggleIconHeight) div 2;
+  X := R.Left + (R.Width - Px(ToggleIconWidth)) div 2;
+  Y := R.Top + (R.Height - Px(ToggleIconHeight)) div 2;
   Canvas.Pen.Style := psSolid;
   Canvas.Pen.Color := AColor;
   Canvas.Pen.Width := 1;
   Canvas.Brush.Style := bsClear;
-  Canvas.RoundRect(X, Y, X + ToggleIconWidth + 1, Y + ToggleIconHeight + 1, 3, 3);
-  Split := X + ToggleIconWidth div 3;
-  Canvas.Line(Split, Y + 1, Split, Y + ToggleIconHeight);
-  Mid := Y + ToggleIconHeight div 2;
-  CX := (Split + X + ToggleIconWidth) div 2;
+  Canvas.RoundRect(X, Y, X + Px(ToggleIconWidth) + 1, Y + Px(ToggleIconHeight) + 1, 3, 3);
+  Split := X + Px(ToggleIconWidth) div 3;
+  Canvas.Line(Split, Y + 1, Split, Y + Px(ToggleIconHeight));
+  Mid := Y + Px(ToggleIconHeight) div 2;
+  CX := (Split + X + Px(ToggleIconWidth)) div 2;
   Canvas.Line(CX - 2, Mid, CX + 3, Mid);
   if FCollapsed then
     Canvas.Polyline([Point(CX, Mid - 2), Point(CX + 2, Mid), Point(CX, Mid + 2)])
@@ -559,19 +561,19 @@ begin
   TextH := Canvas.TextHeight('Xg');
   if FHeading <> '' then
   begin
-    Y := 2 * PadY + RowsHeight + HeadingTop;
+    Y := 2 * Px(PadY) + RowsHeight + Px(HeadingTop);
     { The page is drawn one in from X. }
-    DrawIcon(niFiles, HeadingLeft - 1, Y + (TextH - HeadingIconSize) div 2,
-      HeadingIconSize, FDim);
+    DrawIcon(niFiles, Px(HeadingLeft) - 1, Y + (TextH - Px(HeadingIconSize)) div 2,
+      Px(HeadingIconSize), FDim);
     Canvas.Brush.Style := bsClear;
     Canvas.Font.Style := [fsBold];
     Canvas.Font.Color := FDim;
-    Canvas.TextOut(HeadingTextLeft, Y, FHeading);
+    Canvas.TextOut(Px(HeadingTextLeft), Y, FHeading);
     Canvas.Font.Style := [];
-    Inc(Y, TextH + HeadingGap);
+    Inc(Y, TextH + Px(HeadingGap));
     Canvas.Pen.Style := psSolid;
     Canvas.Pen.Color := FLine;
-    Canvas.Line(HeadingLeft, Y, Width - HeadingLeft, Y);
+    Canvas.Line(Px(HeadingLeft), Y, Width - Px(HeadingLeft), Y);
   end;
   for i := 0 to High(FCaptions) do
   begin
@@ -581,8 +583,8 @@ begin
     if FSmall[i] then
     begin
       Canvas.Font := Font;
-      Icon := IconSize;
-      Gap := IconGap;
+      Icon := Px(IconSize);
+      Gap := Px(IconGap);
     end
     else
     begin
@@ -600,7 +602,7 @@ begin
         Canvas.Brush.Color := FSelectedBack
       else
         Canvas.Brush.Color := FHover;
-      Canvas.RoundRect(R, Radius, Radius);
+      Canvas.RoundRect(R, Px(Radius), Px(Radius));
       Canvas.Pen.Style := psSolid;
     end;
     Canvas.Brush.Style := bsClear;
@@ -610,16 +612,16 @@ begin
     else
       PenW := LargePenWidth;
     if i = FSelected then
-      DrawIcon(FIcons[i], R.Left + PadX, R.Top + (R.Height - Icon) div 2, Icon, FText, PenW)
+      DrawIcon(FIcons[i], R.Left + Px(PadX), R.Top + (R.Height - Icon) div 2, Icon, FText, PenW)
     else
-      DrawIcon(FIcons[i], R.Left + PadX, R.Top + (R.Height - Icon) div 2, Icon, FDim, PenW);
+      DrawIcon(FIcons[i], R.Left + Px(PadX), R.Top + (R.Height - Icon) div 2, Icon, FDim, PenW);
     Canvas.Pen.Width := 1;
     Canvas.Font.Color := FText;
     if i = FSelected then
       Canvas.Font.Style := [fsBold]
     else
       Canvas.Font.Style := [];
-    Canvas.TextOut(R.Left + PadX + Icon + Gap, TextY, FCaptions[i]);
+    Canvas.TextOut(R.Left + Px(PadX) + Icon + Gap, TextY, FCaptions[i]);
   end;
   if FToggle then
   begin
@@ -635,7 +637,7 @@ procedure TGittanSideNav.MouseMove(Shift: TShiftState; X, Y: integer);
 begin
   inherited MouseMove(Shift, X, Y);
   SetHotToggle(FToggle and PtInRect(ToggleRect, Point(X, Y)));
-  if FHotToggle or (X < PadX) or (X >= Width - PadX) then
+  if FHotToggle or (X < Px(PadX)) or (X >= Width - Px(PadX)) then
     SetHot(-1)
   else
     SetHot(RowAt(Y));
@@ -669,8 +671,18 @@ begin
     Exit;
   end;
   Row := RowAt(Y);
-  if (Row >= 0) and (X >= PadX) and (X < Width - PadX) and Assigned(FOnPick) then
+  if (Row >= 0) and (X >= Px(PadX)) and (X < Width - Px(PadX)) and Assigned(FOnPick) then
     FOnPick(Self, Row);
+end;
+
+{ The form scales every control by its DPI after FormCreate, this one's
+  height too, which is already the screen's: set it again. }
+procedure TGittanSideNav.DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+  const AXProportion, AYProportion: double);
+begin
+  inherited DoAutoAdjustLayout(AMode, AXProportion, AYProportion);
+  if AMode = lapAutoAdjustForDPI then
+    FitHeight;
 end;
 
 end.

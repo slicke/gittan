@@ -59,6 +59,7 @@ Details of each area live in `spec/`. Read the file that matches what you are ab
 - Unit files must use the `.pp` extension. Formatting follows `JCFSettings.xml` (JEDI Code Formatter).
 - When a unit grows large (like a main form), break code out into `.inc` include files.
 - PasDoc `{** ... }` comments on public APIs in interfaces; banner-style comments in implementations.
+- A control that paints itself takes its lengths (row heights, margins, icon sizes, radii) through `Px` in `gittan.theme`, which scales a 96-DPI value to the screen's: its text comes in the scaled font (`Scaled` is on), so unscaled rows clip it on Windows and GTK above 100 %. Cocoa reports 96, so `Px` changes nothing on macOS. The form scales every control created in FormCreate once more after it (`TCustomForm.AfterConstruction` runs `AutoAdjustLayout` after `DoCreate`), heights and border spacing included, so a control that sets its own height or its children's from `Px` sets them again in a `DoAutoAdjustLayout` override for `lapAutoAdjustForDPI`.
 - Cross-platform gotcha: `{$IFDEF UNIX}` does not cover Haiku. Use `{$IF DEFINED(UNIX) OR DEFINED(HAIKU)}` where both apply.
 - Do not edit `backup/` directories, `link*.res`, or other generated artifacts.
 - Update documentation when behavior or workflow changes: the matching `spec/` file for an area, AGENTS.md for the rules that apply everywhere. A new area gets a spec file and a line in the Specs list.

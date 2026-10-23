@@ -42,6 +42,8 @@ type
     procedure NavNext(Sender: TObject);
     procedure Search(ANext, AFromStart: boolean);
   protected
+    procedure DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+      const AXProportion, AYProportion: double); override;
     procedure Paint; override;
     procedure Resize; override;
     procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
@@ -72,7 +74,7 @@ type
 implementation
 
 uses
-  Math;
+  Math, gittan.theme;
 
 resourcestring
   rsNotFound = 'Not found';
@@ -92,16 +94,16 @@ constructor TGittanFindBar.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
   ControlStyle := ControlStyle + [csOpaque];
-  Height := BarHeight;
+  Height := Px(BarHeight);
   FEdit := TEdit.Create(Self);
   FEdit.Parent := Self;
-  FEdit.Width := EditWidth;
+  FEdit.Width := Px(EditWidth);
   FEdit.TextHint := rsFindHint;
   FEdit.OnChange := @EditChange;
   FEdit.OnKeyDown := @EditKeyDown;
   FNav := TGittanChangeNav.Create(Self);
   FNav.Parent := Self;
-  FNav.Height := NavHeight;
+  FNav.Height := Px(NavHeight);
   FNav.OnPrev := @NavPrev;
   FNav.OnNext := @NavNext;
   FNav.Visible := False;
@@ -183,10 +185,10 @@ end;
 
 function TGittanFindBar.CloseRect: TRect;
 begin
-  Result.Left := Width - Pad - CloseSize;
-  Result.Top := (Height - 1 - CloseSize) div 2;
-  Result.Right := Result.Left + CloseSize;
-  Result.Bottom := Result.Top + CloseSize;
+  Result.Left := Width - Px(Pad) - Px(CloseSize);
+  Result.Top := (Height - 1 - Px(CloseSize)) div 2;
+  Result.Right := Result.Left + Px(CloseSize);
+  Result.Bottom := Result.Top + Px(CloseSize);
 end;
 
 { The field on the left, the pill after it, the note after the pill; the
@@ -197,10 +199,10 @@ begin
   { The constructor resizes before the children exist. }
   if (FEdit = nil) or (FNav = nil) then
     Exit;
-  FEdit.Left := Pad;
+  FEdit.Left := Px(Pad);
   FEdit.Top := (Height - 1 - FEdit.Height) div 2;
-  FEdit.Width := Min(EditWidth, Max(80, Width - 3 * Pad - FNav.Width - CloseSize));
-  FNav.Left := FEdit.Left + FEdit.Width + Gap;
+  FEdit.Width := Min(Px(EditWidth), Max(80, Width - 3 * Px(Pad) - FNav.Width - Px(CloseSize)));
+  FNav.Left := FEdit.Left + FEdit.Width + Px(Gap);
   FNav.Top := (Height - 1 - FNav.Height) div 2;
 end;
 
@@ -219,7 +221,7 @@ begin
   TextY := (Height - 1 - Canvas.TextHeight('Xg')) div 2;
   if FNotFound then
   begin
-    X := FEdit.Left + FEdit.Width + Gap;
+    X := FEdit.Left + FEdit.Width + Px(Gap);
     Canvas.Font.Color := FDim;
     Canvas.TextOut(X, TextY, rsNotFound);
   end;
@@ -264,6 +266,20 @@ begin
   inherited MouseUp(Button, Shift, X, Y);
   if (Button = mbLeft) and CloseRect.Contains(Point(X, Y)) and Assigned(FOnClose) then
     FOnClose(Self);
+end;
+
+{ The form scales every control by its DPI after FormCreate, this one's
+  height too, which is already the screen's: set it again. }
+procedure TGittanFindBar.DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+  const AXProportion, AYProportion: double);
+begin
+  inherited DoAutoAdjustLayout(AMode, AXProportion, AYProportion);
+  if AMode = lapAutoAdjustForDPI then
+  begin
+    Height := Px(BarHeight);
+    FNav.Height := Px(NavHeight);
+    FNav.Refit;
+  end;
 end;
 
 end.
