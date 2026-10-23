@@ -5,7 +5,8 @@
   field, open the pages of a repository as a music app's sidebar has
   Home and Explore over the library: Home is the summary, what the
   repository's name in the status bar shows, Commands the page of the
-  repository's own commands (umain.commands.inc), and Repository is a
+  repository's own commands (umain.commands.inc), Files the files of
+  HEAD (umain.files.inc), and Repository is a
   page about the repository itself (gittan.repopage): its branch and
   upstream, how many commits since when, branches, tags, tracked files,
   submodules and the size of its objects, then its remotes, a web
@@ -17,7 +18,7 @@
   View > Repository Info (Cmd+Shift+I) opens the page too. The tiles and
   the authors lead on (RepoPageOpenTarget): the commits to the commit
   graph, the branches and the tags to their lists, dropped from the
-  tile, the files to the tree of HEAD in the repository browser, the
+  tile, the files to the Files page, the
   submodules to a submodule's page (from a list when there are more),
   an author to the commit graph filtered to them. }
 
@@ -34,9 +35,10 @@ begin
   FSideNav.AddRow(rsNavGraph, niGraph);
   FSideNav.AddRow(rsNavRepository, niRepository);
   FSideNav.AddRow(rsNavCommands, niCommands);
+  FSideNav.AddRow(rsNavFiles, niFiles);
   FSideNav.AddRow(rsNavRecent, niClock, True);
   FSideNav.AddRow(rsNavSettings, niTools, True);
-  FSideNav.Heading := rsNavFiles;
+  FSideNav.Heading := rsNavChanges;
   FSideNav.ShowToggle(rsNavHide, rsNavShow);
   FSideNav.OnPick := @SideNavPick;
   FNavViewRow := -1;
@@ -60,6 +62,7 @@ begin
     navGraph: MenuCommitGraphClick(Sender);
     navRepository: MenuRepoInfoClick(Sender);
     navCommands: MenuCommandsClick(Sender);
+    navFiles: MenuFilesClick(Sender);
     navRecent: ShowRecentList(FSideNav.RowScreenRect(AIndex));
     navSettings: MenuSettingsClick(Sender);
   end;
@@ -112,8 +115,6 @@ end;
 procedure TForm1.RepoPageOpenTarget(Sender: TObject; ATarget: TGittanRepoTarget;
   const AName: string; const AScreenRect: TRect);
 var
-  Head: TGittanCommitLine;
-  Body: string;
   i: integer;
 begin
   if FRepo.Root = '' then
@@ -126,11 +127,7 @@ begin
     rtTags:
       ShowTagList(AScreenRect);
     rtFiles:
-      if FRepo.CommitDetails('HEAD', Head, Body) then
-        if FBranch <> '' then
-          BrowseCommit(Head.Hash, FBranch, Head.Subject)
-        else
-          BrowseCommit(Head.Hash, Head.Short, Head.Subject);
+      ShowFiles;
     rtSubmodules:
       if Length(FSubmodules) = 1 then
         ShowSubmodule(0)
@@ -177,10 +174,7 @@ begin
     Exit;
   LeaveEditorViews;
   FView := gvRepoInfo;
-  FWelcome.Visible := False;
-  FSummary.Visible := False;
-  FSubPage.Visible := False;
-  FCommandPage.Visible := False;
+  HideBoxPages;
   FRepoPage.SetRepository(ExtractFileName(FRepo.Root), FRepo.Root);
   FRepoPage.Visible := True;
   FRepoPage.FitHeight(FSummaryBox.ClientHeight);

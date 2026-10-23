@@ -2,8 +2,8 @@ unit gittan.sidenav;
 
 {** The rows at the top of the sidebar that open the pages of a
   repository, as a music app lists Home and Explore over the library:
-  Home, the summary, Graph, the commit graph, and Repository, the page
-  about the repository itself. Each row is an icon and a name; the row
+  Home, the summary, Graph, the commit graph, Repository, the page
+  about the repository itself, Commands and Files. Each row is an icon and a name; the row
   of the page shown is filled, and the one under the mouse tinted. Set
   Large, the rows are as tall as the music app's, with a larger icon and
   text, so they read as navigation over the list of files and not as

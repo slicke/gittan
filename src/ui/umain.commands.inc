@@ -71,10 +71,7 @@ begin
     FGraph.Close;
   LeaveEditorViews;
   FView := gvCommands;
-  FWelcome.Visible := False;
-  FSummary.Visible := False;
-  FSubPage.Visible := False;
-  FRepoPage.Visible := False;
+  HideBoxPages;
   if FCommandPage.Root <> FRepo.Root then
     LoadRepoCommands;
   FCommandPage.Visible := True;

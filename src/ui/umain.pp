@@ -29,7 +29,7 @@ uses
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader, gittan.hintbox,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, gittan.mdpreview,
-  gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.repobrowser, gittan.clonedlg,
+  gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.clonedlg,
   gittan.remotesdlg, gittan.submoduledlg, ATSynEdit_Gaps, md5;
 
 type
@@ -38,9 +38,12 @@ type
     history of a piece of code (Go > Code History), a submodule, a
     changed image, side by side (gittan.imagediff), a translation file
     with its originals beside its translations (umain.translations.inc),
-    or a binary file, changed or opened (gittan.binaryview). }
+    a binary file, changed or opened (gittan.binaryview), the Commands
+    page, the Files page (gittan.filespage, umain.files.inc) or a file of
+    the commit it lists, read-only in the editor (or in the image or the
+    binary view). }
   TGittanView = (gvSummary, gvRepoInfo, gvChanges, gvRepoDiff, gvFile, gvHistory, gvSubmodule,
-    gvImage, gvTranslation, gvBinary, gvCommands);
+    gvImage, gvTranslation, gvBinary, gvCommands, gvFiles, gvBlob);
 
   {** The three strengths of a commit's color in the history view: the
     faint tint of its rows, the shade of the words it changed, and the
@@ -522,6 +525,13 @@ type
     FCommandJob: TGittanCommandJob;
     FCommandName: string;
     FCommandRead: integer;
+    { The Files page, in the box too (umain.files.inc): whether it
+      follows HEAD (else it shows the commit Browse Files... picked),
+      and the file of its commit shown in the editor: its path, its
+      commit and what the page calls it. }
+    FFilesPage: TGittanFilesPage;
+    FFilesHead: boolean;
+    FBlobPath, FBlobCommit, FBlobName: string;
     { The page of a submodule, in the box too (umain.submodules.inc). }
     FSubPage: TGittanSubPage;
     FRepoInfoJob: TGittanRepoInfoJob;
@@ -833,6 +843,20 @@ type
     procedure StartRepoInfoJob;
     procedure AbandonRepoInfoJob;
     procedure RepoInfoJobDone(Sender: TObject);
+    procedure HideBoxPages;
+    procedure SetupFilesPage;
+    procedure MenuFilesClick(Sender: TObject);
+    procedure ShowFiles;
+    procedure ShowFilesAt(const AHash, AName, ASubject: string);
+    procedure RefreshFilesPage;
+    function FilesPageRead(Sender: TObject; const AFolder: string;
+      out AList: TGittanTreeEntries; out AError: string): boolean;
+    procedure FilesPageOpen(Sender: TObject; const AEntry: TGittanTreeEntry);
+    procedure FilesPageFolderChange(Sender: TObject);
+    procedure ShowBlob(const APath: string);
+    function BlobData(out AData: RawByteString): boolean;
+    procedure OpenBlobOutside;
+    procedure SaveBlobAs;
     procedure SetupCommandPage;
     function CommandsTrusted: boolean;
     procedure LoadRepoCommands;
@@ -1531,7 +1555,7 @@ implementation
 
 uses
   Clipbrd, LCLIntf, Process, FileUtil, LazFileUtils, DateUtils, StrUtils, LazUTF8, LCLProc,
-  gittan.textfit
+  LConvEncoding, gittan.textfit
   {$IFDEF LCLCocoa}, CocoaConfig, gittan.titlebar{$ENDIF};
 
 resourcestring
@@ -1575,6 +1599,14 @@ resourcestring
   rsNavRecent = 'Recent';
   rsNavSettings = 'Settings';
   rsNavCommands = 'Commands';
+  rsNavChanges = 'Changes';
+  rsFilesMenu = '&Files';
+  rsAtCommit = 'at %s';
+  rsBlobOpen = 'Open';
+  rsBlobSaveAs = 'Save As…';
+  rsBlobReadFailed = 'Could not read %s: %s';
+  rsBlobWriteFailed = 'Could not write %s: %s';
+  rsFilesSubmoduleUnknown = '%s is not among the submodules of this work tree';
   rsNoRecent = 'No recent repositories';
   rsNavFiles = 'Files';
   rsNavHide = 'Hide navigation';
@@ -2300,9 +2332,10 @@ const
   navGraph = 1;
   navRepository = 2;
   navCommands = 3;
+  navFiles = 4;
   { The small rows under them: lists and dialogs, never selected. }
-  navRecent = 4;
-  navSettings = 5;
+  navRecent = 5;
+  navSettings = 6;
   { Scrolling on past the bottom of a file goes to the next one, and
     past the top to the previous: the wheel delta the pull needs (120 is
     one notch of a mouse wheel, 8 one pixel of a trackpad on macOS), the
@@ -2810,8 +2843,9 @@ begin
   FRepoPage.OnOpenUrl := @SummaryOpenUrl;
   FRepoPage.OnEditRemotes := @RepoPageEditRemotes;
   FRepoPage.OnOpenTarget := @RepoPageOpenTarget;
-  { And the Commands page. }
+  { And the Commands page, and the Files page. }
   SetupCommandPage;
+  SetupFilesPage;
   { So does the page of a submodule. }
   FSubPage := TGittanSubPage.Create(Self);
   FSubPage.Parent := FSummaryBox;
@@ -3220,6 +3254,9 @@ begin
     FCommandPage.SetCardColor(RGBToColor(40, 40, 41));
     FCommandPage.Console.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
       RGBToColor(62, 62, 62));
+    FFilesPage.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(62, 62, 62),
+      FLinkColor, RGBToColor(248, 81, 73));
     FSubPage.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(45, 45, 46), RGBToColor(62, 62, 62),
       RGBToColor(40, 40, 41), FLinkColor, RGBToColor(63, 185, 80),
@@ -3243,6 +3280,9 @@ begin
     FCommandPage.SetCardColor(RGBToColor(245, 245, 246));
     FCommandPage.Console.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
       RGBToColor(222, 222, 222));
+    FFilesPage.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(222, 222, 222),
+      FLinkColor, RGBToColor(207, 34, 46));
     FSubPage.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(243, 243, 243), RGBToColor(222, 222, 222),
       RGBToColor(245, 245, 246), FLinkColor, RGBToColor(26, 127, 55),
@@ -3313,9 +3353,11 @@ var
 begin
   if FView = gvImage then
     Lexer := ImageFormatName(FCurrentPath)
+  else if (FView = gvBlob) and FImageDiff.Visible then
+    Lexer := ImageFormatName(FBlobPath)
   else if FView = gvTranslation then
     Lexer := FPoStats
-  else if FView in [gvBinary, gvSubmodule] then
+  else if (FView in [gvBinary, gvSubmodule]) or ((FView = gvBlob) and FBinaryView.Visible) then
     Lexer := ''
   else if FAdapter.Lexer = nil then
     Lexer := rsPlainText
@@ -3619,7 +3661,8 @@ var
 begin
   { Edit.Visible is no test: a file's view is built before ShowEditor
     shows the editor. }
-  if (Edit.Carets.Count = 0) or not (FView in [gvChanges, gvFile]) then
+  if (Edit.Carets.Count = 0) or not ((FView in [gvChanges, gvFile]) or
+    ((FView = gvBlob) and not FImageDiff.Visible and not FBinaryView.Visible)) then
   begin
     FStatus.SetPosition('');
     Exit;
@@ -3805,6 +3848,7 @@ begin
   AddItem(ViewMenu, rsRepoDiff, ShortCut(VK_2, [ssModifier]), @MenuRepoDiffClick);
   AddItem(ViewMenu, rsCommitGraph, ShortCut(VK_3, [ssModifier]), @MenuCommitGraphClick);
   AddItem(ViewMenu, rsCommandsMenu, ShortCut(VK_4, [ssModifier]), @MenuCommandsClick);
+  AddItem(ViewMenu, rsFilesMenu, ShortCut(VK_5, [ssModifier]), @MenuFilesClick);
   ViewMenu.Add(NewLine);
   FCompareMenu := AddItem(ViewMenu, rsCompareWith, 0, nil);
   RebuildCompareMenu;
@@ -4006,6 +4050,7 @@ begin
     gvChanges: Result := FLexers.ForFile(FCurrentPath, FRepo.Root);
     gvRepoDiff: Result := FLexers.ByName(rsDiffLexer);
     gvFile: Result := FLexers.ForFile(Edit.FileName);
+    gvBlob: Result := FLexers.ForFile(FBlobPath, FRepo.Root);
     gvHistory: Result := FLexers.ForFile(FHistoryPath, FRepo.Root);
     else
       Result := nil;
@@ -4363,7 +4408,7 @@ end;
   row alignment; the history view hides lines as the change view does. }
 function TForm1.FoldingShown: boolean;
 begin
-  Result := (FView = gvFile) or ((FView = gvChanges) and not FOnlyChanges and
+  Result := (FView in [gvFile, gvBlob]) or ((FView = gvChanges) and not FOnlyChanges and
     not FSideBySide);
 end;
 
@@ -4397,7 +4442,7 @@ end;
 function TForm1.FileLineOfRow(ARow: integer): integer;
 begin
   Result := 0;
-  if FView = gvFile then
+  if FView in [gvFile, gvBlob] then
     Result := ARow + 1
   else if (FView = gvChanges) and (ARow >= 0) and (ARow <= High(FRows)) and
     (FRows[ARow].Line >= 0) and (FRows[ARow].Line <= High(FNewNum)) then
@@ -4432,6 +4477,8 @@ function TForm1.FoldPath: string;
 begin
   if FView = gvFile then
     Result := Edit.FileName
+  else if FView = gvBlob then
+    Result := FBlobPath
   else
     Result := FCurrentPath;
 end;
@@ -4674,7 +4721,7 @@ begin
   Result := nil;
   { The editor keeps the text of the file before an image or a binary
     file. }
-  if FView in [gvImage, gvBinary] then
+  if (FView in [gvImage, gvBinary]) or ((FView = gvBlob) and not Edit.Visible) then
     Exit;
   { The translation view keeps its own blocks: the changed entries, or
     the ones that need work. }
@@ -5069,8 +5116,7 @@ begin
     since the snapshot says it changed. }
   if FView = gvRepoInfo then
   begin
-    FSummary.Visible := False;
-    FSubPage.Visible := False;
+    HideBoxPages;
     FRepoPage.SetRepository(ExtractFileName(FRepo.Root), FRepo.Root);
     FRepoPage.Visible := True;
     StartRepoInfoJob;
@@ -5079,11 +5125,17 @@ begin
   LoadRepoCommands;
   if FView = gvCommands then
   begin
-    FSummary.Visible := False;
-    FSubPage.Visible := False;
-    FRepoPage.Visible := False;
+    HideBoxPages;
     FCommandPage.Visible := True;
     FCommandPage.FitHeight(FSummaryBox.ClientHeight);
+  end;
+  { The Files page follows HEAD, which a commit moved. }
+  if FView = gvFiles then
+  begin
+    HideBoxPages;
+    FFilesPage.Visible := True;
+    RefreshFilesPage;
+    FFilesPage.FitHeight(FSummaryBox.ClientHeight);
   end;
   RebuildCompareMenu;
   FTerminalItem.Enabled := FRepo.Root <> '';
@@ -5366,13 +5418,11 @@ begin
   LeaveEditorViews;
   FSummaryBox.Visible := True;
   FView := gvSummary;
-  { The Repository page, the Commands page and the page of a submodule
-    give the box back. }
-  if FRepoPage.Visible or FSubPage.Visible or FCommandPage.Visible then
+  { The Repository, Commands and Files pages and the page of a
+    submodule give the box back. }
+  if FRepoPage.Visible or FSubPage.Visible or FCommandPage.Visible or FFilesPage.Visible then
   begin
-    FRepoPage.Visible := False;
-    FSubPage.Visible := False;
-    FCommandPage.Visible := False;
+    HideBoxPages;
     FSummary.Visible := FRepo.Root <> '';
   end;
   if FRepo.Root <> '' then
@@ -5386,6 +5436,20 @@ begin
   FSubTree.Selected := nil;
   if FRepo.Root <> '' then
     UpdateStatus;
+end;
+
+{ Hides every page of the box, for the one about to show. The welcome
+  view is shown at startup, before the later pages exist. }
+procedure TForm1.HideBoxPages;
+begin
+  FWelcome.Visible := False;
+  FSummary.Visible := False;
+  FRepoPage.Visible := False;
+  FSubPage.Visible := False;
+  if FCommandPage <> nil then
+    FCommandPage.Visible := False;
+  if FFilesPage <> nil then
+    FFilesPage.Visible := False;
 end;
 
 { Hides the editor and what goes with it, for a page in the box. }
@@ -5527,6 +5591,7 @@ begin
   FRepoPage.FitHeight(FSummaryBox.ClientHeight);
   FSubPage.FitHeight(FSummaryBox.ClientHeight);
   FCommandPage.FitHeight(FSummaryBox.ClientHeight);
+  FFilesPage.FitHeight(FSummaryBox.ClientHeight);
 end;
 
 { The welcome view takes the summary's place in the box, with AError
@@ -5536,16 +5601,11 @@ procedure TForm1.ShowWelcome(const AError: string);
 begin
   FWelcome.SetError(AError);
   AbandonRepoInfoJob;
-  { The welcome view is shown at startup, before the page exists. }
+  { The welcome view is shown at startup, before the pages exist. }
   if FCommandPage <> nil then
-  begin
     AbandonCommandJob(False);
-    FCommandPage.Visible := False;
-  end;
   FRepoCommands := nil;
-  FSummary.Visible := False;
-  FRepoPage.Visible := False;
-  FSubPage.Visible := False;
+  HideBoxPages;
   SetNavRow(-1);
   FTreeClean := False;
   FWelcome.Visible := True;
@@ -6385,7 +6445,7 @@ const
 {$I umain.clean.inc}
 {$I umain.patches.inc}
 {$I umain.clone.inc}
-{$I umain.repobrowser.inc}
+{$I umain.files.inc}
 {$I umain.commit.inc}
 {$I umain.remote.inc}
 {$I umain.mdpreview.inc}

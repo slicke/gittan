@@ -397,9 +397,7 @@ begin
   FManualLexer := False;
   FView := gvSubmodule;
   FSubShown := Sub.Path;
-  FWelcome.Visible := False;
-  FSummary.Visible := False;
-  FRepoPage.Visible := False;
+  HideBoxPages;
   FSubPage.SetSubmodule(Sub, Info, Change, Checking, FBranch);
   FSubPage.Visible := True;
   FSubPage.FitHeight(FSummaryBox.ClientHeight);

@@ -477,6 +477,15 @@ begin
       SaveEdit(True);
     Exit;
   end;
+  { Open and Save As... on a file of the Files page (umain.files.inc). }
+  if FView = gvBlob then
+  begin
+    if AIndex = 0 then
+      OpenBlobOutside
+    else
+      SaveBlobAs;
+    Exit;
+  end;
   if ConflictHeaderAction(AIndex) then
     Exit;
   if FView = gvSubmodule then

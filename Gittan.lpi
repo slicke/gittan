@@ -168,10 +168,6 @@
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="src/ui/gittan.repobrowser.pp"/>
-        <IsPartOfProject Value="True"/>
-      </Unit>
-      <Unit>
         <Filename Value="src/ui/gittan.clonedlg.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>

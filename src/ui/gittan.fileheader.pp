@@ -94,6 +94,9 @@ type
     {** Shows "staged" or "partly staged" before the counts, or nothing
       when AStaged is false. }
     procedure SetStage(AStaged, AUnstaged: boolean);
+    {** A dim detail in the stage's place, where a file of a commit
+      names its commit; '' for none. SetFile and SetTitle clear it. }
+    procedure SetDetail(const ADetail: string);
     {** The lexer name shown on the right. }
     procedure SetLexer(const ALexer: string);
     {** The symbol the caret is in, shown dimmed after the file name, or
@@ -256,6 +259,14 @@ begin
     FStage := rsPartlyStaged
   else
     FStage := rsStaged;
+  Invalidate;
+end;
+
+procedure TGittanFileHeader.SetDetail(const ADetail: string);
+begin
+  if FStage = ADetail then
+    Exit;
+  FStage := ADetail;
   Invalidate;
 end;
 
