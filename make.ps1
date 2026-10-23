@@ -2,7 +2,7 @@
 make.ps1 - the Makefile's targets for Windows, where there is no make.
 
 Usage:
-  .\make.ps1 [build|debug|rebuild|run|lexlib|test|clean|help] [lazbuild-args...]
+  .\make.ps1 [build|debug|rebuild|run|lexlib|deps|ide|test|clean|help] [lazbuild-args...]
   .\make.ps1 [lazbuild-args...]
 
  - Finds lazbuild as Trndi's make.ps1 does: LAZBUILD, then PATH, then
@@ -33,6 +33,19 @@ $LazFlags = @('--widgetset=win32')
 # build, rebuild and run, as CI ships it; its Default mode for debug.
 $ReleaseFlags = @('--bm=Release')
 $DebugFlags = @('--bm=Default', '--opt=-g', '--opt=-gl')
+
+# Vendored packages, in dependency order, as VENDOR_PACKAGES in the Makefile
+# and in .github/workflows/build.yml; a new package goes in all three.
+$VendorPackages = @(
+    'vendor\ATFlatControls\atflatcontrols\atflatcontrols_package.lpk',
+    'vendor\EncConv\encconv\encconv_package.lpk',
+    'vendor\BGRABitmap\bgrabitmap\bgrabitmappack.lpk',
+    'vendor\ATSynEdit\atsynedit\atsynedit_package.lpk',
+    'vendor\EControl\econtrol\econtrol_package.lpk',
+    'vendor\ATSynEdit_Ex\atsynedit_ex\atsynedit_ex_package.lpk',
+    'vendor\metadarkstyle\metadarkstyle.lpk',
+    'vendor\lazink\lazink.lpk'
+)
 
 $lazCandidates = @('C:\lazarus\lazbuild.exe', 'C:\fpcupdeluxe\lazarus\lazbuild.exe')
 
@@ -118,6 +131,26 @@ switch ($target) {
         exit 0
     }
     'lexlib' { Copy-Lexers; exit 0 }
+    'deps' {
+        Need-Lazbuild
+        foreach ($lpk in $VendorPackages) {
+            if (-not (Test-Path $lpk)) {
+                Write-Error "$lpk is missing; run: git submodule update --init"
+                exit 1
+            }
+            & $laz --add-package-link $lpk
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            & $laz @LazFlags @rest $lpk
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
+        exit 0
+    }
+    'ide' {
+        # The IDE's own build profile, its widgetset too.
+        Need-Lazbuild
+        & $laz --build-ide= @rest
+        exit $LASTEXITCODE
+    }
     'test' {
         if (-not (Get-Command fpc -ErrorAction SilentlyContinue)) {
             Write-Error 'fpc not found on PATH or beside lazbuild.'; exit 1
@@ -140,6 +173,8 @@ switch ($target) {
         Write-Host '  debug     Build with debug info'
         Write-Host '  rebuild   Build with every unit recompiled'
         Write-Host "  run       Build, then start Gittan (arguments after 'run' go to Gittan)"
+        Write-Host '  deps      Register the vendored packages with lazbuild and compile them'
+        Write-Host '  ide       Rebuild the Lazarus IDE (after ATSynEdit, ATFlatControls, EncConv or BGRABitmap moves)'
         Write-Host '  test      Build and run the unit tests in tests\'
         Write-Host "  lexlib    Copy the lexers from $LexersSrc and $LexersOwn into $LexLib\ (part of every build)"
         Write-Host "  clean     Remove lib\, $LexLib\, the test build and the binary"
