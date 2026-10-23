@@ -101,16 +101,18 @@ begin
   Touch('.github/workflows/build.yml');
   Touch('.github/CODEOWNERS');
   Touch('.github/ISSUE_TEMPLATE/bug.md');
+  Touch('.gittan/commands.ini');
   Touch('README.md');
   L := TStringList.Create;
   try
     ListRepoFiles(FDir, L);
-    AssertEquals(5, L.Count);
+    AssertEquals(6, L.Count);
     AssertEquals('the root files in their fixed order', '.gitignore', L[0]);
     AssertEquals('.editorconfig', L[1]);
     AssertEquals('then .github sorted by path', '.github/CODEOWNERS', L[2]);
     AssertEquals('.github/ISSUE_TEMPLATE/bug.md', L[3]);
     AssertEquals('.github/workflows/build.yml', L[4]);
+    AssertEquals('then .gittan', '.gittan/commands.ini', L[5]);
   finally
     L.Free;
   end;
@@ -156,6 +158,7 @@ begin
   AssertTrue(IsRepoFile('.editorconfig'));
   AssertTrue(IsRepoFile('.github/workflows/ci.yml'));
   AssertTrue(IsRepoFile('.github/CODEOWNERS'));
+  AssertTrue(IsRepoFile('.gittan/commands.ini'));
   AssertFalse('a source file', IsRepoFile('src/main.pas'));
   AssertFalse('a root file not in the list', IsRepoFile('README.md'));
   AssertFalse('an ignore file in a folder', IsRepoFile('src/.gitignore'));

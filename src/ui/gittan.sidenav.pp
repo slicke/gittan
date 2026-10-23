@@ -39,11 +39,13 @@ uses
 
 type
   {** What a row's icon shows: a house, a trunk of commits with a
-    branch for the graph, a book for the repository, a page for the
-    heading over the files, a clock for the recent repositories, a
-    window of text for the settings' Editor page or sliders for its
-    Tools page and for the settings themselves. }
-  TGittanNavIcon = (niHome, niGraph, niRepository, niFiles, niClock, niEditor, niTools);
+    branch for the graph, a book for the repository, a terminal with
+    its prompt for the commands, a page for the heading over the files,
+    a clock for the recent repositories, a window of text for the
+    settings' Editor page or sliders for its Tools page and for the
+    settings themselves. }
+  TGittanNavIcon = (niHome, niGraph, niRepository, niCommands, niFiles, niClock, niEditor,
+    niTools);
 
   {** A click on a row, with its index. }
   TGittanNavPickEvent = procedure(Sender: TObject; AIndex: integer) of object;
@@ -475,6 +477,16 @@ begin
       Canvas.Line(Mid, Y + 1, Mid, Y + ASize);
       Canvas.Line(X + ASize div 2, Y + ASize * 2 div 7, X + ASize - 2, Y + ASize * 2 div 7);
       Canvas.Line(X + ASize div 2, Y + ASize div 2, X + ASize - 2, Y + ASize div 2);
+    end;
+    niCommands:
+    begin
+      { A terminal: a window with a prompt's chevron and a cursor line. }
+      Canvas.RoundRect(X, Y, X + ASize + 1, Y + ASize + 1, 3, 3);
+      Mid := X + ASize * 2 div 7;
+      Eave := Y + ASize div 2;
+      Canvas.Polyline([Point(Mid, Eave - ASize div 5), Point(Mid + ASize div 5, Eave),
+        Point(Mid, Eave + ASize div 5)]);
+      Canvas.Line(X + ASize div 2, Y + ASize * 5 div 7, X + ASize - 3, Y + ASize * 5 div 7);
     end;
     niFiles:
     begin

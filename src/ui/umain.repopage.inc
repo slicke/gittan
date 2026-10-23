@@ -1,11 +1,12 @@
 { ---------------------------------------------------------------------------
   The sidebar's pages: Home and Repository
   ---------------------------------------------------------------------------
-  Two rows at the top of the sidebar (gittan.sidenav), under the filter
+  The rows at the top of the sidebar (gittan.sidenav), under the filter
   field, open the pages of a repository as a music app's sidebar has
   Home and Explore over the library: Home is the summary, what the
-  repository's name in the status bar shows, and Repository is a page
-  about the repository itself (gittan.repopage): its branch and
+  repository's name in the status bar shows, Commands the page of the
+  repository's own commands (umain.commands.inc), and Repository is a
+  page about the repository itself (gittan.repopage): its branch and
   upstream, how many commits since when, branches, tags, tracked files,
   submodules and the size of its objects, then its remotes, a web
   address among them being a link, and the authors with the most
@@ -32,6 +33,7 @@ begin
   FSideNav.AddRow(rsNavHome, niHome);
   FSideNav.AddRow(rsNavGraph, niGraph);
   FSideNav.AddRow(rsNavRepository, niRepository);
+  FSideNav.AddRow(rsNavCommands, niCommands);
   FSideNav.AddRow(rsNavRecent, niClock, True);
   FSideNav.AddRow(rsNavSettings, niTools, True);
   FSideNav.Heading := rsNavFiles;
@@ -57,6 +59,7 @@ begin
     navHome: MenuSummaryClick(Sender);
     navGraph: MenuCommitGraphClick(Sender);
     navRepository: MenuRepoInfoClick(Sender);
+    navCommands: MenuCommandsClick(Sender);
     navRecent: ShowRecentList(FSideNav.RowScreenRect(AIndex));
     navSettings: MenuSettingsClick(Sender);
   end;
@@ -177,6 +180,7 @@ begin
   FWelcome.Visible := False;
   FSummary.Visible := False;
   FSubPage.Visible := False;
+  FCommandPage.Visible := False;
   FRepoPage.SetRepository(ExtractFileName(FRepo.Root), FRepo.Root);
   FRepoPage.Visible := True;
   FRepoPage.FitHeight(FSummaryBox.ClientHeight);

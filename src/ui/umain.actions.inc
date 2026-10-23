@@ -130,6 +130,7 @@ begin
   FSettings.CommitOpen := FCommitHeader.Expanded;
   StopCommitJob(True);
   StopRemoteJob(True);
+  AbandonCommandJob(True);
   SaveCommitDraft;
   { The defaults are not written, so they follow the screen and a later
     Gittan's choice. }
@@ -430,6 +431,8 @@ procedure TForm1.ApplyEditorFont(AFont: TFont);
 begin
   Edit.Font.Assign(AFont);
   FEditOld.Font.Assign(AFont);
+  if FCommandPage <> nil then
+    FCommandPage.Console.Font.Assign(AFont);
   Edit.Update(True);
   FEditOld.Update(True);
   EditorMetricsChanged;
@@ -1555,8 +1558,8 @@ begin
     OpenOnGitHub([IntToStr(FPopupIssue)]);
 end;
 
-{ Runs ACommand, words separated by spaces, with APath appended. }
-procedure RunCommandWith(const ACommand, APath: string);
+{ Runs ACommand, words separated by spaces, with AArgs appended. }
+procedure RunCommandWith(const ACommand: string; const AArgs: array of string);
 var
   Words: TStringList;
   Args: array of string;
@@ -1569,10 +1572,11 @@ begin
     Words.DelimitedText := Trim(ACommand);
     if Words.Count = 0 then
       Exit;
-    SetLength(Args, Words.Count);
+    SetLength(Args, Words.Count - 1 + Length(AArgs));
     for i := 1 to Words.Count - 1 do
       Args[i - 1] := Words[i];
-    Args[High(Args)] := APath;
+    for i := 0 to High(AArgs) do
+      Args[Words.Count - 1 + i] := AArgs[i];
     RunDetached(Words[0], Args);
   finally
     Words.Free;
@@ -1588,7 +1592,7 @@ begin
   if Trim(FSettings.EditorCommand) = '' then
     OpenDocument(ContextFullPath)
   else
-    RunCommandWith(FSettings.EditorCommand, ContextFullPath);
+    RunCommandWith(FSettings.EditorCommand, [ContextFullPath]);
 end;
 
 { The commit graph: the newest GraphLimit commits of every branch, in
@@ -1759,11 +1763,29 @@ begin
     Clipboard.AsText := FRepo.Root;
 end;
 
-{ The terminal command from the settings file, with the repository root
-  appended; the platform's terminal when none is set. On Linux the first
-  terminal found on PATH is started in the root, since every terminal
-  starts in its working directory but each names the option differently. }
 procedure TForm1.MenuOpenTerminalClick(Sender: TObject);
+begin
+  OpenTerminal('');
+end;
+
+{ The shell line that runs ACommand in ARoot and keeps the terminal
+  open after it, for a terminal's -e. }
+function ShellLineIn(const ARoot, ACommand: string): string;
+begin
+  Result := 'cd ' + QuotedStr(ARoot) + ' && ' + ACommand + '; exec ${SHELL:-sh}';
+end;
+
+{ A terminal in the repository root, running ACommand there when it is
+  not empty (a command of the repository marked for the terminal, see
+  umain.commands.inc). The terminal command from the settings file gets
+  the root appended, and the command after it; the platform's terminal
+  when none is set. On macOS Terminal is told through osascript to
+  cd into the root and run the command; on Windows Windows Terminal
+  or cmd.exe runs it with /K, so the window stays; on Linux the first
+  terminal found on PATH is started in the root, since every terminal
+  starts in its working directory but each names the option
+  differently, and given the command with -e. }
+procedure TForm1.OpenTerminal(const ACommand: string);
 {$IF not defined(DARWIN) and not defined(WINDOWS)}
 const
   Terminals: array[0..4] of string = ('x-terminal-emulator', 'gnome-terminal',
@@ -1771,27 +1793,56 @@ const
 var
   T: string;
 {$ENDIF}
+{$IFDEF DARWIN}
+var
+  Script: string;
+{$ENDIF}
 begin
   if FRepo.Root = '' then
     Exit;
   if Trim(FSettings.TerminalCommand) <> '' then
   begin
-    RunCommandWith(FSettings.TerminalCommand, FRepo.Root);
+    if ACommand = '' then
+      RunCommandWith(FSettings.TerminalCommand, [FRepo.Root])
+    else
+      RunCommandWith(FSettings.TerminalCommand, [FRepo.Root, ACommand]);
     Exit;
   end;
   {$IFDEF DARWIN}
-  RunDetached('open', ['-a', 'Terminal', FRepo.Root]);
+  if ACommand = '' then
+    RunDetached('open', ['-a', 'Terminal', FRepo.Root])
+  else
+  begin
+    { The line goes into an AppleScript string: its backslashes and
+      quotes escaped. }
+    Script := 'cd ' + QuotedStr(FRepo.Root) + ' && ' + ACommand;
+    Script := StringReplace(Script, '\', '\\', [rfReplaceAll]);
+    Script := StringReplace(Script, '"', '\"', [rfReplaceAll]);
+    RunDetached('osascript', ['-e', 'tell application "Terminal" to do script "' +
+      Script + '"', '-e', 'tell application "Terminal" to activate']);
+  end;
   {$ELSE}
   {$IFDEF WINDOWS}
   if FindDefaultExecutablePath('wt.exe') <> '' then
-    RunDetached('wt.exe', ['-d', FRepo.Root])
+  begin
+    if ACommand = '' then
+      RunDetached('wt.exe', ['-d', FRepo.Root])
+    else
+      RunDetached('wt.exe', ['-d', FRepo.Root, 'cmd.exe', '/K', ACommand]);
+  end
+  else if ACommand = '' then
+    RunDetached('cmd.exe', ['/C', 'start', 'cmd.exe'], FRepo.Root)
   else
-    RunDetached('cmd.exe', ['/C', 'start', 'cmd.exe'], FRepo.Root);
+    RunDetached('cmd.exe', ['/C', 'start', 'cmd.exe', '/K', ACommand], FRepo.Root);
   {$ELSE}
   for T in Terminals do
     if FindDefaultExecutablePath(T) <> '' then
     begin
-      RunDetached(T, [], FRepo.Root);
+      if ACommand = '' then
+        RunDetached(T, [], FRepo.Root)
+      else
+        RunDetached(T, ['-e', 'sh -c ' + QuotedStr(ShellLineIn(FRepo.Root, ACommand))],
+          FRepo.Root);
       Exit;
     end;
   {$ENDIF}

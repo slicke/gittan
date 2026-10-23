@@ -25,6 +25,7 @@ type
     procedure TestDamagedFileGivesDefaults;
     procedure TestOldDefaultFont;
     procedure TestDefaultFontSize;
+    procedure TestTrust;
   end;
 
 implementation
@@ -250,6 +251,35 @@ begin
   AssertEquals('a large screen gets a size up', DefaultFontSize(1080) + 1,
     DefaultFontSize(1440));
   AssertEquals(DefaultFontSize(1080) + 2, DefaultFontSize(2160));
+end;
+
+procedure TSettingsTest.TestTrust;
+var
+  S: TGittanSettings;
+begin
+  S := TGittanSettings.Create(FFileName);
+  try
+    AssertTrue('no file needs no trust', S.CommandsTrusted('/tmp/a', ''));
+    AssertFalse(S.CommandsTrusted('/tmp/a', 'abc'));
+    S.TrustCommands('/tmp/a', 'abc');
+    AssertTrue(S.CommandsTrusted('/tmp/a', 'abc'));
+    AssertFalse('another text asks again', S.CommandsTrusted('/tmp/a', 'def'));
+    AssertFalse('another root', S.CommandsTrusted('/tmp/b', 'abc'));
+    S.TrustCommands('/tmp/a', 'def');
+    S.TrustCommands('/tmp/b', '');
+    S.Save;
+  finally
+    S.Free;
+  end;
+  S := TGittanSettings.Create(FFileName);
+  try
+    S.Load;
+    AssertTrue('the newest hash is kept', S.CommandsTrusted('/tmp/a', 'def'));
+    AssertFalse(S.CommandsTrusted('/tmp/a', 'abc'));
+    AssertFalse('an empty hash trusts nothing', S.CommandsTrusted('/tmp/b', 'x'));
+  finally
+    S.Free;
+  end;
 end;
 
 initialization

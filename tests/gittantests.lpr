@@ -18,7 +18,7 @@ uses
   testgithub, testconflicts, testcli, testsymbolchanges,
   testcallers, testrepofiles, testdiscard, testkeep, testleaveout, testsubmodules, testupdate,
   testreviews, testgraph, testpofile, testcommitjob, testrepoinfo, testrebase, testcommitstats, testwatch, testjob, testterminal,
-  testtextfile;
+  testtextfile, testrepocommands;
 
 { Every git the tests start reads this file as the user's config and no
   system config, so what the developer has set (signed commits, a hooks

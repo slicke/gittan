@@ -18,6 +18,7 @@ uses
   gittan.lexers, gittan.git, gittan.github, gittan.conflicts, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.welcome, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.sidenav, gittan.repoinfo, gittan.repopage, gittan.subpage,
+  gittan.repocommands, gittan.commandpage,
   gittan.settingsdlg, gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   {$IFDEF LCLCocoa}gittan.toolbar, gittan.memohint,{$ENDIF}
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
@@ -39,7 +40,7 @@ type
     with its originals beside its translations (umain.translations.inc),
     or a binary file, changed or opened (gittan.binaryview). }
   TGittanView = (gvSummary, gvRepoInfo, gvChanges, gvRepoDiff, gvFile, gvHistory, gvSubmodule,
-    gvImage, gvTranslation, gvBinary);
+    gvImage, gvTranslation, gvBinary, gvCommands);
 
   {** The three strengths of a commit's color in the history view: the
     faint tint of its rows, the shade of the words it changed, and the
@@ -512,6 +513,15 @@ type
       for while the commit graph is open. }
     FNavViewRow: integer;
     FRepoPage: TGittanRepoPage;
+    { The Commands page, in the box too, the repository's commands
+      shown on it, the hash of its commands file and the command
+      running (umain.commands.inc). }
+    FCommandPage: TGittanCommandPage;
+    FRepoCommands: TGittanRepoCommands;
+    FCommandsHash: string;
+    FCommandJob: TGittanCommandJob;
+    FCommandName: string;
+    FCommandRead: integer;
     { The page of a submodule, in the box too (umain.submodules.inc). }
     FSubPage: TGittanSubPage;
     FRepoInfoJob: TGittanRepoInfoJob;
@@ -823,6 +833,22 @@ type
     procedure StartRepoInfoJob;
     procedure AbandonRepoInfoJob;
     procedure RepoInfoJobDone(Sender: TObject);
+    procedure SetupCommandPage;
+    function CommandsTrusted: boolean;
+    procedure LoadRepoCommands;
+    procedure MenuCommandsClick(Sender: TObject);
+    procedure ShowCommands;
+    procedure CommandPageRun(Sender: TObject; AIndex: integer);
+    procedure RunRepoCommand(AIndex: integer; AByKey: boolean);
+    procedure CommandJobOutput(Sender: TObject);
+    procedure CommandJobDone(Sender: TObject);
+    procedure AbandonCommandJob(AWait: boolean);
+    procedure CommandPageStop(Sender: TObject);
+    procedure CommandPageTrust(Sender: TObject);
+    procedure CommandPageEditFile(Sender: TObject);
+    procedure CommandPageCopyOutput(Sender: TObject);
+    function CommandKey(AKey: word; AShift: TShiftState): boolean;
+    procedure OpenTerminal(const ACommand: string);
     procedure ShowEditor;
     procedure ShowImageChanges(const APath: string);
     procedure ShowBinaryChanges(const APath: string);
@@ -1431,9 +1457,7 @@ type
     {$IFDEF LCLCocoa}
     procedure ToolbarSearchKey(Sender: TObject; var Key: word);
     {$ENDIF}
-    {$IFDEF LCLGtk3}
     procedure FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
-    {$ENDIF}
     procedure HeaderControlsChange(Sender: TObject);
     procedure MenuFilterFilesClick(Sender: TObject);
     procedure AbandonPullJob;
@@ -1539,11 +1563,18 @@ resourcestring
   rsSummary = '&Summary';
   rsRepoDiff = '&Repository Diff';
   rsRepoInfo = 'Repository &Info';
+  rsCommandsMenu = '&Commands';
+  rsCommandStillRunning = '%s is still running';
+  rsCommandDone = '%s finished in %s';
+  rsCommandFailed = '%s failed with exit code %d';
+  rsCommandStopped = '%s was stopped';
+  rsCommandNoStart = '%s could not be started';
   rsNavHome = 'Home';
   rsNavGraph = 'Graph';
   rsNavRepository = 'Repository';
   rsNavRecent = 'Recent';
   rsNavSettings = 'Settings';
+  rsNavCommands = 'Commands';
   rsNoRecent = 'No recent repositories';
   rsNavFiles = 'Files';
   rsNavHide = 'Hide navigation';
@@ -2268,9 +2299,10 @@ const
   navHome = 0;
   navGraph = 1;
   navRepository = 2;
+  navCommands = 3;
   { The small rows under them: lists and dialogs, never selected. }
-  navRecent = 3;
-  navSettings = 4;
+  navRecent = 4;
+  navSettings = 5;
   { Scrolling on past the bottom of a file goes to the next one, and
     past the top to the previous: the wheel delta the pull needs (120 is
     one notch of a mouse wheel, 8 one pixel of a trackpad on macOS), the
@@ -2778,6 +2810,8 @@ begin
   FRepoPage.OnOpenUrl := @SummaryOpenUrl;
   FRepoPage.OnEditRemotes := @RepoPageEditRemotes;
   FRepoPage.OnOpenTarget := @RepoPageOpenTarget;
+  { And the Commands page. }
+  SetupCommandPage;
   { So does the page of a submodule. }
   FSubPage := TGittanSubPage.Create(Self);
   FSubPage.Parent := FSummaryBox;
@@ -3180,6 +3214,12 @@ begin
       RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(62, 62, 62),
       FLinkColor, FLinkColor, RGBToColor(248, 81, 73));
     FRepoPage.SetCardColor(RGBToColor(40, 40, 41));
+    FCommandPage.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(62, 62, 62),
+      FLinkColor, RGBToColor(63, 185, 80), RGBToColor(248, 81, 73));
+    FCommandPage.SetCardColor(RGBToColor(40, 40, 41));
+    FCommandPage.Console.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
+      RGBToColor(62, 62, 62));
     FSubPage.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(45, 45, 46), RGBToColor(62, 62, 62),
       RGBToColor(40, 40, 41), FLinkColor, RGBToColor(63, 185, 80),
@@ -3197,6 +3237,12 @@ begin
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(222, 222, 222),
       FLinkColor, FLinkColor, RGBToColor(207, 34, 46));
     FRepoPage.SetCardColor(RGBToColor(245, 245, 246));
+    FCommandPage.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(222, 222, 222),
+      FLinkColor, RGBToColor(26, 127, 55), RGBToColor(207, 34, 46));
+    FCommandPage.SetCardColor(RGBToColor(245, 245, 246));
+    FCommandPage.Console.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
+      RGBToColor(222, 222, 222));
     FSubPage.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(243, 243, 243), RGBToColor(222, 222, 222),
       RGBToColor(245, 245, 246), FLinkColor, RGBToColor(26, 127, 55),
@@ -3758,6 +3804,7 @@ begin
   AddItem(ViewMenu, rsRepoInfo, ShortCut(VK_I, [ssModifier, ssShift]), @MenuRepoInfoClick);
   AddItem(ViewMenu, rsRepoDiff, ShortCut(VK_2, [ssModifier]), @MenuRepoDiffClick);
   AddItem(ViewMenu, rsCommitGraph, ShortCut(VK_3, [ssModifier]), @MenuCommitGraphClick);
+  AddItem(ViewMenu, rsCommandsMenu, ShortCut(VK_4, [ssModifier]), @MenuCommandsClick);
   ViewMenu.Add(NewLine);
   FCompareMenu := AddItem(ViewMenu, rsCompareWith, 0, nil);
   RebuildCompareMenu;
@@ -5028,6 +5075,16 @@ begin
     FRepoPage.Visible := True;
     StartRepoInfoJob;
   end;
+  { The commands follow the files: an edit of the file or a pull. }
+  LoadRepoCommands;
+  if FView = gvCommands then
+  begin
+    FSummary.Visible := False;
+    FSubPage.Visible := False;
+    FRepoPage.Visible := False;
+    FCommandPage.Visible := True;
+    FCommandPage.FitHeight(FSummaryBox.ClientHeight);
+  end;
   RebuildCompareMenu;
   FTerminalItem.Enabled := FRepo.Root <> '';
   UpdateBranchItems;
@@ -5309,11 +5366,13 @@ begin
   LeaveEditorViews;
   FSummaryBox.Visible := True;
   FView := gvSummary;
-  { The Repository page and the page of a submodule give the box back. }
-  if FRepoPage.Visible or FSubPage.Visible then
+  { The Repository page, the Commands page and the page of a submodule
+    give the box back. }
+  if FRepoPage.Visible or FSubPage.Visible or FCommandPage.Visible then
   begin
     FRepoPage.Visible := False;
     FSubPage.Visible := False;
+    FCommandPage.Visible := False;
     FSummary.Visible := FRepo.Root <> '';
   end;
   if FRepo.Root <> '' then
@@ -5467,6 +5526,7 @@ begin
   FWelcome.FitHeight(FSummaryBox.ClientHeight);
   FRepoPage.FitHeight(FSummaryBox.ClientHeight);
   FSubPage.FitHeight(FSummaryBox.ClientHeight);
+  FCommandPage.FitHeight(FSummaryBox.ClientHeight);
 end;
 
 { The welcome view takes the summary's place in the box, with AError
@@ -5476,6 +5536,13 @@ procedure TForm1.ShowWelcome(const AError: string);
 begin
   FWelcome.SetError(AError);
   AbandonRepoInfoJob;
+  { The welcome view is shown at startup, before the page exists. }
+  if FCommandPage <> nil then
+  begin
+    AbandonCommandJob(False);
+    FCommandPage.Visible := False;
+  end;
+  FRepoCommands := nil;
   FSummary.Visible := False;
   FRepoPage.Visible := False;
   FSubPage.Visible := False;
@@ -5912,6 +5979,7 @@ begin
     FToolbar.OnSearchChange := @TreeFilterChange;
     FToolbar.OnSearchKey := @ToolbarSearchKey;
     FToolbar.OnAction := @HeaderAction;
+    FToolbar.OnName := @MenuCommandsClick;
     FToolbar.OnPrev := @MenuPrevChangeClick;
     FToolbar.OnNext := @MenuNextChangeClick;
     FToolbar.OnConflictPrev := @MenuPrevConflictClick;
@@ -5927,11 +5995,12 @@ begin
   {$ENDIF}
   {$IFDEF LCLGtk3}
   FOwnBar := TGittanGtkTitleBar.Create(Self);
-  { Alt and a letter opens the menu it underlines, as the hidden menu
-    bar would. }
+  {$ENDIF}
+  { The keys of the commands (umain.commands.inc) from any view, and on
+    GTK Alt and a letter, which opens the menu it underlines as the
+    hidden menu bar would. }
   KeyPreview := True;
   OnKeyDown := @FormKeyDown;
-  {$ENDIF}
   {$IFDEF OWNBAR}
   FOwnBar.Title := rsAppShortName;
   FOwnBar.Align := alTop;
@@ -6097,16 +6166,22 @@ begin
   Result := FTreeFilter.Text;
 end;
 
-{$IFDEF LCLGtk3}
-{ Alt and a letter opens the menu with that accelerator from the title
-  bar, as the menu bar would have before the bar hid its names. }
+{ A command's key runs it (CommandKey). On GTK Alt and a letter opens
+  the menu with that accelerator from the title bar, as the menu bar
+  would have before the bar hid its names. }
 procedure TForm1.FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
 begin
+  if CommandKey(Key, Shift) then
+  begin
+    Key := 0;
+    Exit;
+  end;
+  {$IFDEF LCLGtk3}
   if (Shift * [ssAlt, ssCtrl, ssShift, ssMeta] = [ssAlt]) and (Key >= VK_A) and
     (Key <= VK_Z) and (FOwnBar <> nil) and FOwnBar.OpenMenuByKey(Chr(Key)) then
     Key := 0;
+  {$ENDIF}
 end;
-{$ENDIF}
 
 {$IFDEF LCLCocoa}
 { The search field passes Escape (when it is empty), Enter and Down on
@@ -6292,6 +6367,7 @@ const
 {$I umain.history.inc}
 {$I umain.repofiles.inc}
 {$I umain.repopage.inc}
+{$I umain.commands.inc}
 {$I umain.submodules.inc}
 {$I umain.update.inc}
 {$I umain.reviews.inc}
