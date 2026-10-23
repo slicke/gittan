@@ -12,7 +12,8 @@ unit gittan.summary;
   instead of the totals, a large check with how far the branch is from
   its upstream, and its newest commits instead of rows while some are
   not pushed; otherwise the check stands alone in the middle, as the
-  empty view's icon does.
+  empty view's icon does. A branch behind the default branch gets a row
+  under the header that says how far, with Rebase and Merge.
 
   It paints itself so it matches the editor's palette in both themes. It
   sizes its height to its content and is meant to sit in a TScrollBox,
@@ -39,6 +40,9 @@ type
   TGittanSelectCommitEvent = procedure(Sender: TObject; const AHash: string) of object;
   {** A click on a link to AUrl. }
   TGittanOpenUrlEvent = procedure(Sender: TObject; const AUrl: string) of object;
+  {** A click on Rebase (ARebase) or Merge in the row of a branch behind
+    the default branch. }
+  TGittanBehindActionEvent = procedure(Sender: TObject; ARebase: boolean) of object;
 
   {** A note of the conversation as laid out: its wrapped text, and its
     top and height below the start of the section. }
@@ -123,7 +127,18 @@ type
     FSyncRect: TRect;
     FSyncHot: boolean;
     FOnSyncClick: TGittanBranchClickEvent;
+    { How many commits of FBehindRef (the default branch) the branch
+      lacks, 0 for no row; the row's Rebase and Merge pills as last
+      painted, and the one under the mouse, -1 for none. }
+    FBehindCount: integer;
+    FBehindRef: string;
+    FBehindRects: array[0..1] of TRect;
+    FBehindHot: integer;
+    FOnBehindAction: TGittanBehindActionEvent;
     procedure SetSyncHot(AValue: boolean);
+    function BehindAt(X, Y: integer): integer;
+    procedure SetBehindHot(AValue: integer);
+    procedure PaintBehind(var Y: integer);
     function BranchClickable: boolean;
     procedure SetBranchHot(AValue: boolean);
     procedure SetBaseHot(AValue: boolean);
@@ -211,6 +226,10 @@ type
     {** Whether the upstream is deleted on the remote, which the sync
       line then says in place of the counts. }
     procedure SetUpstreamGone(AGone: boolean);
+    {** Shows a row under the header saying the branch lacks ACount
+      commits of ARef, the default branch, with Rebase and Merge, which
+      raise OnBehindAction; 0 shows none. }
+    procedure SetBehind(ACount: integer; const ARef: string);
     {** The color of the notes' links. }
     property LinkColor: TColor read FLink write FLink;
     {** The image list the file badges come from. }
@@ -239,6 +258,8 @@ type
       which is drawn as a chip under the mouse while this is set and the
       branch has an upstream. }
     property OnSyncClick: TGittanBranchClickEvent read FOnSyncClick write FOnSyncClick;
+    {** A click on Rebase or Merge in the row of SetBehind. }
+    property OnBehindAction: TGittanBehindActionEvent read FOnBehindAction write FOnBehindAction;
     {** A click on a commit's row. }
     property OnSelectCommit: TGittanSelectCommitEvent read FOnSelectCommit write FOnSelectCommit;
     {** A click on a note's link to GitHub. }
@@ -261,6 +282,10 @@ resourcestring
   rsNotPushed = '%d not pushed';
   rsNotPulled = '%d not pulled';
   rsInSync = 'up to date with upstream';
+  rsBehindOne = '1 commit behind %s';
+  rsBehindMany = '%d commits behind %s';
+  rsBehindRebase = 'Rebase';
+  rsBehindMerge = 'Merge';
   rsUpstreamGone = '✕ upstream deleted on remote';
   rsBinary = 'binary';
   rsStaged = 'staged';
@@ -320,6 +345,7 @@ begin
   FActionHot := -1;
   FLinkHot := -1;
   FCommitHot := -1;
+  FBehindHot := -1;
   FNotesWidth := -1;
   FCardWidth := -1;
   FLink := clHighlight;
@@ -385,6 +411,88 @@ begin
     Exit;
   FUpstreamGone := AGone;
   Invalidate;
+end;
+
+procedure TGittanSummary.SetBehind(ACount: integer; const ARef: string);
+begin
+  if ARef = '' then
+    ACount := 0;
+  if (FBehindCount = ACount) and (FBehindRef = ARef) then
+    Exit;
+  FBehindCount := ACount;
+  FBehindRef := ARef;
+  FBehindHot := -1;
+  FBehindRects[0] := Rect(0, 0, 0, 0);
+  FBehindRects[1] := Rect(0, 0, 0, 0);
+  UpdateHeight;
+  Invalidate;
+end;
+
+function TGittanSummary.BehindAt(X, Y: integer): integer;
+var
+  i: integer;
+begin
+  Result := -1;
+  if FBehindCount > 0 then
+    for i := 0 to 1 do
+      if PtInRect(FBehindRects[i], Point(X, Y)) then
+        Exit(i);
+end;
+
+procedure TGittanSummary.SetBehindHot(AValue: integer);
+begin
+  if FBehindHot = AValue then
+    Exit;
+  FBehindHot := AValue;
+  Invalidate;
+end;
+
+{ "↓ 12 commits behind origin/main" and the Rebase and Merge pills, as a
+  row's pill is drawn, in the row above the files. Y is advanced past
+  it. }
+procedure TGittanSummary.PaintBehind(var Y: integer);
+var
+  X, TextY, BodyHeight, W, i: integer;
+  Part: string;
+  R: TRect;
+begin
+  Canvas.Font := Font;
+  Canvas.Brush.Style := bsClear;
+  BodyHeight := Canvas.TextHeight('Xg');
+  TextY := Y + (RowHeight - BodyHeight) div 2;
+  X := Pad;
+  if FBehindCount = 1 then
+    Part := Format(rsBehindOne, [FBehindRef])
+  else
+    Part := Format(rsBehindMany, [FBehindCount, FBehindRef]);
+  Canvas.Font.Color := FText;
+  Canvas.TextOut(X, TextY, '↓ ' + Part);
+  Inc(X, Canvas.TextWidth('↓ ' + Part) + Gap);
+  for i := 0 to 1 do
+  begin
+    if i = 0 then
+      Part := rsBehindRebase
+    else
+      Part := rsBehindMerge;
+    W := Canvas.TextWidth(Part) + 2 * ChipPadX;
+    R := Rect(X, TextY - ChipPadY, X + W, TextY + BodyHeight + ChipPadY);
+    FBehindRects[i] := R;
+    Canvas.Pen.Color := FLine;
+    Canvas.Brush.Style := bsSolid;
+    if i = FBehindHot then
+      Canvas.Brush.Color := FHover
+    else
+      Canvas.Brush.Color := FBack;
+    Canvas.RoundRect(R, R.Height, R.Height);
+    Canvas.Brush.Style := bsClear;
+    if i = FBehindHot then
+      Canvas.Font.Color := FLink
+    else
+      Canvas.Font.Color := FText;
+    Canvas.TextOut(X + ChipPadX, TextY, Part);
+    Inc(X, W + Gap div 2);
+  end;
+  Inc(Y, RowHeight);
 end;
 
 function TGittanSummary.ShowsCommits: boolean;
@@ -493,6 +601,8 @@ begin
   end;
   FRowsTop := Pad + TitleHeight + 6 + HeaderBlockHeight(FMeasure.Canvas) + Pad;
   if FNotice <> '' then
+    Inc(FRowsTop, RowHeight);
+  if FBehindCount > 0 then
     Inc(FRowsTop, RowHeight);
   LayoutCard;
   Inc(FRowsTop, FCardHeight);
@@ -1677,6 +1787,8 @@ begin
   PaintHeader(Y);
   if FNotice <> '' then
     PaintNotice(Y);
+  if FBehindCount > 0 then
+    PaintBehind(Y);
   PaintCard(Y);
   PaintNotes(Y);
   if Y <> FRowsTop then
@@ -1704,7 +1816,9 @@ begin
   SetBaseHot((FBaseRect.Right > FBaseRect.Left) and PtInRect(FBaseRect, Point(X, Y)));
   SetSyncHot((FSyncRect.Right > FSyncRect.Left) and PtInRect(FSyncRect, Point(X, Y)));
   SetBackHot(Assigned(FOnBackClick) and PtInRect(FBackRect, Point(X, Y)));
-  if (FLinkHot >= 0) or (FActionHot >= 0) or FBackHot then
+  if Assigned(FOnBehindAction) then
+    SetBehindHot(BehindAt(X, Y));
+  if (FLinkHot >= 0) or (FActionHot >= 0) or FBackHot or (FBehindHot >= 0) then
     Cursor := crHandPoint
   else if not (FBranchHot or FBaseHot or FSyncHot) then
     Cursor := crDefault;
@@ -1721,6 +1835,7 @@ begin
   SetBaseHot(False);
   SetSyncHot(False);
   SetBackHot(False);
+  SetBehindHot(-1);
 end;
 
 procedure TGittanSummary.MouseUp(Button: TMouseButton; Shift: TShiftState;
@@ -1755,6 +1870,11 @@ begin
     FOnSyncClick(Self, Rect(ClientToScreen(FSyncRect.TopLeft).X,
       ClientToScreen(FSyncRect.TopLeft).Y, ClientToScreen(FSyncRect.BottomRight).X,
       ClientToScreen(FSyncRect.BottomRight).Y));
+    Exit;
+  end;
+  if (Button = mbLeft) and Assigned(FOnBehindAction) and (BehindAt(X, Y) >= 0) then
+  begin
+    FOnBehindAction(Self, BehindAt(X, Y) = 0);
     Exit;
   end;
   if (Button = mbLeft) and Assigned(FOnOpenUrl) and (LinkAt(X, Y) >= 0) then

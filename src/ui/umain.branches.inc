@@ -625,6 +625,33 @@ begin
     RebaseOntoAsk(FBaseActionRef);
 end;
 
+{ The count is as of the last fetch, so the default branch is fetched
+  first, and the rebase or merge is of what the remote has now. }
+procedure TForm1.SummaryBehindAction(Sender: TObject; ARebase: boolean);
+begin
+  if (FRepo.Root = '') or (FDefaultBranch = '') or (FBranch = '') or (FOperation <> '') or
+    (FRemoteJob <> nil) or (FCommitJob <> nil) then
+    Exit;
+  FAfterFetchRef := FDefaultBranch;
+  FAfterFetchBranch := FBranch;
+  FAfterFetchRebase := ARebase;
+  StartRemote(rkFetch);
+end;
+
+procedure TForm1.AfterFetch;
+var
+  Ref: string;
+begin
+  Ref := FAfterFetchRef;
+  FAfterFetchRef := '';
+  if (Ref = '') or (FAfterFetchBranch <> FBranch) or (FOperation <> '') then
+    Exit;
+  if FAfterFetchRebase then
+    RebaseOntoAsk(Ref)
+  else
+    MergeIntoCurrent(Ref);
+end;
+
 { A merge of ARef into the branch HEAD is on, with git's message; one
   that stops with conflicts leaves them to the Commit section. }
 procedure TForm1.MergeIntoCurrent(const ARef: string);

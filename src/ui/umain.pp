@@ -58,8 +58,8 @@ type
 
   {** What a transport button of the status bar does: UpdateStatusTransport
     puts the steps there, StatusStepClick runs them. }
-  TStatusStep = (stepNone, stepFetch, stepPull, stepPush, stepContinue, stepCommit,
-    stepAbort, stepSkip, stepResolve);
+  TStatusStep = (stepNone, stepFetch, stepPull, stepPush, stepForcePush, stepContinue,
+    stepCommit, stepAbort, stepSkip, stepResolve);
 
   {** One row of the change view. Line is the index of its diff line in
     the file's diff, rowGap for a row that stands for the unchanged lines
@@ -413,6 +413,15 @@ type
     FDefaultBranch, FMergeBase: string;
     FHasUpstream: boolean;
     FAhead, FBehind: integer;
+    { The branch was rewritten since it was pushed (the snapshot's
+      Rewritten): Force Push is the next step, not Pull. }
+    FRewritten: boolean;
+    { Rebase or Merge in the summary's row of a branch behind the default
+      branch fetches first: the ref to rebase onto (FAfterFetchRebase) or
+      merge once the fetch is done, and the branch it is for; '' while
+      none waits. }
+    FAfterFetchRef, FAfterFetchBranch: string;
+    FAfterFetchRebase: boolean;
     { What git is in the middle of ("merging", "rebasing", ...) and how
       many files have conflicts, read by LoadRepository; and the role of
       each line of FChangeLines in a conflict (see gittan.conflicts),
@@ -1207,6 +1216,14 @@ type
     procedure DeleteGoneBranches;
     procedure MergeIntoCurrent(const ARef: string);
     procedure RebaseOntoAsk(const ARef: string);
+    {** Rebase (ARebase) or Merge in the summary's row of a branch behind
+      the default branch: a fetch, then the rebase's question or the
+      merge (AfterFetch). }
+    procedure SummaryBehindAction(Sender: TObject; ARebase: boolean);
+    {** Runs the rebase or merge SummaryBehindAction waits with, after a
+      fetch that went through, when the branch is still the one it was
+      for. }
+    procedure AfterFetch;
     procedure RebaseInteractiveAsk(const AOnto, AName: string; AFromGraph: boolean);
     procedure CompareSince(const ARef: string);
     procedure CompareCurrentSince(const ARef: string);
@@ -2172,6 +2189,10 @@ resourcestring
   rsPushStepHint = 'Click to push them';
   rsPushNewBranchHint = 'Click to push the branch to the remote';
   rsDivergedHint = 'The branch and its upstream have both moved on';
+  rsRewrittenHint = 'Rewritten since it was pushed (rebased or amended)';
+  rsRewrittenReplacesOne = 'A force push replaces the 1 commit only the upstream has';
+  rsRewrittenReplaces = 'A force push replaces the %d commits only the upstream has';
+  rsForcePushStepHint = 'Click to force push (with lease)';
   rsAbortStepHint = 'Abort %s';
   rsSkipStepHint = 'Skip the commit %s stopped at';
   rsCommitGraph = 'Commit &Graph';
@@ -2598,6 +2619,7 @@ begin
   FSummary.OnBranchClick := @SummaryBranchClick;
   FSummary.OnBaseClick := @SummaryBaseClick;
   FSummary.OnSyncClick := @SummarySyncClick;
+  FSummary.OnBehindAction := @SummaryBehindAction;
   FSummary.OnOpenUrl := @SummaryOpenUrl;
   FSummary.OnSelectCommit := @SummarySelectCommit;
   FSummary.OnBackClick := @SummaryBackClick;
@@ -3377,9 +3399,10 @@ function OperationNoun(const AOperation: string): string; forward;
   in the middle of something they are Abort, then Resolve (the
   conflicts) or Continue (Commit Merge for a merge), then Skip where
   the operation can skip a commit. Otherwise Fetch, then Pull with
-  commits to pull (also when both sides moved on), Push with commits to
-  push or no upstream yet, or Up to date, which does nothing, then Push
-  or Pull as the other one. The buttons rest while a remote job or a
+  commits to pull (also when both sides moved on), Force Push when the
+  branch was rewritten since it was pushed (then Pull beside it), Push
+  with commits to push or no upstream yet, or Up to date, which does
+  nothing, then Push or Pull as the other one. The buttons rest while a remote job or a
   commit runs. The side buttons' captions are their hints. }
 procedure TForm1.UpdateStatusTransport;
 var
@@ -3437,6 +3460,20 @@ begin
       FStatusSteps[spPrimary] := stepPush;
       Tip := HintSync + ' ' + rsNoUpstreamHint + LineEnding + rsPushNewBranchHint;
       R := StatusButton(rsGitPullItem, HintDown, stNormal, False);
+      FStatusSteps[spRight] := stepPull;
+    end
+    else if FRewritten and (FAhead > 0) and (FBehind > 0) then
+    begin
+      { Pulling would bring the replaced commits back. }
+      P := StatusButton(rsForcePushItem, HintUp, stNormal, not Busy);
+      FStatusSteps[spPrimary] := stepForcePush;
+      Tip := HintSync + ' ' + rsRewrittenHint + LineEnding;
+      if FBehind = 1 then
+        Tip := Tip + rsRewrittenReplacesOne
+      else
+        Tip := Tip + Format(rsRewrittenReplaces, [FBehind]);
+      Tip := Tip + LineEnding + rsForcePushStepHint;
+      R := StatusButton(rsGitPullItem, HintDown, stNormal, not Busy);
       FStatusSteps[spRight] := stepPull;
     end
     else if FBehind > 0 then
@@ -4926,6 +4963,7 @@ begin
   FHasUpstream := ASnap.HasUpstream;
   FAhead := ASnap.Ahead;
   FBehind := ASnap.Behind;
+  FRewritten := ASnap.Rewritten;
   FOperation := ASnap.Operation;
   FBisect := ASnap.Bisect;
   FRebaseBranch := ASnap.RebaseBranch;
@@ -4961,6 +4999,12 @@ begin
   if FOperation <> '' then
     Branch := Branch + ' · ' + OperationLabel;
   FSummary.SetCommits(ASnap.Recent, FAhead, FBehind, FHasUpstream);
+  { Not in the middle of a merge or rebase, which the Commit section
+    finishes first. }
+  if FOperation = '' then
+    FSummary.SetBehind(ASnap.BehindDefault, FDefaultBranch)
+  else
+    FSummary.SetBehind(0, '');
   FSummary.BaseClickable := (BaseActionRef <> '') or (StashOfBase >= 0) or BlameShown;
   if BlameShown then
     FSummary.SetCommit(FBlameCommit, FBlameBody)

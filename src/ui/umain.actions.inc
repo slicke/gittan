@@ -1746,6 +1746,7 @@ begin
     stepFetch: MenuFetchClick(nil);
     stepPull: MenuPullClick(nil);
     stepPush: MenuPushClick(nil);
+    stepForcePush: ForcePushAsk;
     stepContinue: ContinueOperationClick;
     stepCommit: CommitButtonClick(nil);
     stepAbort: AbortOperationClick(nil);

@@ -169,6 +169,7 @@ var
   HookFailed: boolean;
   Count: integer;
   Msg: string;
+  Choice: TModalResult;
 begin
   Job := TGittanRemoteJob(Sender);
   if Job <> FRemoteJob then
@@ -206,11 +207,16 @@ begin
       ShowRemoteFailure(Job, False);
     Exit;
   end;
+  { A rebase or merge waits only for the fetch it started. }
+  if not (Job.Ok and (Job.Kind = rkFetch)) then
+    FAfterFetchRef := '';
   if Job.Ok then
   begin
     case Job.Kind of
       rkFetch:
-        if FHasUpstream and (FBehind = 1) then
+        if FAfterFetchRef <> '' then
+          AfterFetch
+        else if FHasUpstream and (FBehind = 1) then
           StatusNote(rsFetchedBehindOne)
         else if FHasUpstream and (FBehind > 1) then
           StatusNote(Format(rsFetchedBehind, [FBehind]))
@@ -268,9 +274,17 @@ begin
       Msg := Format(rsPushRejectedDivergedOne, [FRepo.Upstream(FBranch)])
     else
       Msg := Format(rsPushRejectedDiverged, [FRepo.Upstream(FBranch), FBehind]);
-    case QuestionDlg(rsPushRejectedTitle, Msg + LineEnding + LineEnding + rsPushRejectedForce,
-        mtConfirmation, [mrYes, rsPullAction, 'IsDefault', mrNo, rsForcePushAction, mrCancel,
-        rsCancelButton, 'IsCancel'], 0) of
+    { Force Push first for a branch rewritten here, whose upstream holds
+      only what it replaced. }
+    if FRewritten then
+      Choice := QuestionDlg(rsPushRejectedTitle, Msg + LineEnding + LineEnding +
+        rsPushRejectedForce, mtConfirmation, [mrNo, rsForcePushAction, 'IsDefault', mrYes,
+        rsPullAction, mrCancel, rsCancelButton, 'IsCancel'], 0)
+    else
+      Choice := QuestionDlg(rsPushRejectedTitle, Msg + LineEnding + LineEnding +
+        rsPushRejectedForce, mtConfirmation, [mrYes, rsPullAction, 'IsDefault', mrNo,
+        rsForcePushAction, mrCancel, rsCancelButton, 'IsCancel'], 0);
+    case Choice of
       mrYes: StartRemote(rkPull, pmAuto);
       mrNo: StartRemote(rkForcePush);
     end;
@@ -403,6 +417,7 @@ begin
     Exit;
   FNoticeTimer.Enabled := False;
   FNotice.Close;
+  FAfterFetchRef := '';
   FRemoteJob.Stop(AWait);
   if AWait then
     FRemoteJob.Free

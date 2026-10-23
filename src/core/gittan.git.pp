@@ -126,6 +126,14 @@ type
     Detached: boolean;
     HasUpstream: boolean;
     Ahead, Behind: integer;
+    {** How many commits of DefaultBranch the branch lacks, from
+      BehindDefault; 0 on a detached HEAD. }
+    BehindDefault: integer;
+    {** The branch and its upstream have both moved on, and the
+      upstream's tip is one the branch had (UpstreamInReflog): the
+      branch was rewritten since it was pushed, by a rebase or an amend,
+      and a force push, not a pull, is the next step. }
+    Rewritten: boolean;
     {** The stashes, newest first, from Stashes. }
     Stashes: TGittanStashes;
     {** The newest commits of HEAD, from RecentCommits; read only when
@@ -716,6 +724,20 @@ type
       origin/main: what the remote's HEAD points at, else main or master
       on the remote RemoteFor gives, else empty. }
     function DefaultBranch: string;
+    {** How many commits of ADefault (DefaultBranch, as of the last
+      fetch) HEAD lacks, for the branch ABranch HEAD is on: what a
+      rebase onto it or a merge of it would bring in. 0 when ADefault
+      is ABranch's upstream or ABranch's own name on the remote (the
+      sync line counts that, and a pull brings it in), or when git
+      cannot tell. }
+    function BehindDefault(const ABranch, ADefault: string): integer;
+    {** Whether the tip of the local branch ABranch's upstream is reached
+      from one of the branch's newest reflog entries, as push
+      --force-if-includes asks: the upstream holds nothing the branch
+      never had, so a branch that has moved away from it was rewritten
+      here, and no one else pushed to it since the last fetch. False
+      without an upstream or a reflog. }
+    function UpstreamInReflog(const ABranch: string): boolean;
     {** The merge base of ARef and HEAD, the commit the branch left ARef
       at; false when either is unknown or they share no history. }
     function MergeBase(const ARef: string; out AHash: string): boolean;
@@ -5293,6 +5315,10 @@ begin
   if not MergeBase(ASnap.DefaultBranch, ASnap.MergeBase) then
     ASnap.MergeBase := '';
   ASnap.HasUpstream := AheadBehind(ASnap.Ahead, ASnap.Behind);
+  if not ASnap.Detached then
+    ASnap.BehindDefault := BehindDefault(ASnap.Branch, ASnap.DefaultBranch);
+  ASnap.Rewritten := ASnap.HasUpstream and not ASnap.Detached and (ASnap.Ahead > 0) and
+    (ASnap.Behind > 0) and UpstreamInReflog(ASnap.Branch);
   ASnap.Operation := Operation;
   if ASnap.Operation = 'rebasing' then
     ASnap.RebaseBranch := RebaseBranch;
@@ -5325,6 +5351,47 @@ begin
     if HasCommit(Remote + '/' + Name) then
       Exit(Remote + '/' + Name);
   Result := '';
+end;
+
+function TGittanRepo.BehindDefault(const ABranch, ADefault: string): integer;
+var
+  Remote, Name: string;
+begin
+  Result := 0;
+  if (FRoot = '') or (ABranch = '') or (ADefault = '') or (Upstream(ABranch) = ADefault) or
+    (SplitRemoteRef(ADefault, Remote, Name) and (Name = ABranch)) then
+    Exit;
+  Result := CountCommits('HEAD', ADefault);
+  if Result < 0 then
+    Result := 0;
+end;
+
+{ The upstream's commits none of the entries reach are counted: none
+  means one of them reaches the tip. The newest entries are enough, and
+  keep the command line short. }
+function TGittanRepo.UpstreamInReflog(const ABranch: string): boolean;
+const
+  MaxEntries = 100;
+var
+  Up, Output: string;
+  Args: array of string;
+  Hash: string;
+begin
+  Result := False;
+  if (FRoot = '') or (ABranch = '') or
+    not RunGit(FRoot, ['rev-parse', '--verify', '-q', ABranch + '@{upstream}'], Up) then
+    Exit;
+  Up := Trim(Up);
+  if (Up = '') or not RunGit(FRoot, ['reflog', 'show', '-n', IntToStr(MaxEntries),
+    '--format=%H', 'refs/heads/' + ABranch, '--'], Output) then
+    Exit;
+  Args := ['rev-list', '--count', Up, '--not'];
+  for Hash in Output.Split([#10]) do
+    if Trim(Hash) <> '' then
+      Insert(Trim(Hash), Args, Length(Args));
+  if Length(Args) = 4 then
+    Exit;
+  Result := RunGit(FRoot, Args, Output) and (Trim(Output) = '0');
 end;
 
 function TGittanRepo.MergeBase(const ARef: string; out AHash: string): boolean;
