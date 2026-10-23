@@ -298,6 +298,9 @@ type
       their draft (DroppedCommitDone). }
     FDroppedCommits: TList;
     FCommitDraftFor, FAmendMessage: string;
+    { FocusTreeAsync ran before the window was shown; FormActivate tries
+      again. }
+    FFocusTreePending: boolean;
     { Abort and Skip for what git is in the middle of, and the merge
       message filled into the field (umain.conflicts.inc). }
     FAbortButton, FSkipButton: TButton;
@@ -1137,6 +1140,7 @@ type
     procedure SetupSubmodules;
     procedure SetupCommit;
     procedure FocusTreeAsync(Data: PtrInt);
+    procedure FormActivate(Sender: TObject);
     procedure CommitHintAsync(Data: PtrInt);
     procedure CommitHeaderCheck(Sender: TObject);
     procedure SetAllChosen(AValue: boolean);
