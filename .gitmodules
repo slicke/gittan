@@ -22,7 +22,6 @@
 [submodule "vendor/metadarkstyle"]
 	path = vendor/metadarkstyle
 	url = https://github.com/zamtmn/metadarkstyle.git
-	ignore = untracked
 [submodule "vendor/lazink"]
 	path = vendor/lazink
 	url = https://github.com/slicke/LazInk.git
