@@ -48,7 +48,7 @@ type
     function IsCurrent(const APath: string; ASize, ATime: int64): boolean;
     procedure Clear;
     {** Reads the index from AFileName; a missing or damaged file gives
-      an empty index. }
+      an empty index, and a file of another version is deleted unread. }
     procedure Load(const AFileName: string);
     {** Writes the indexed entries to AFileName, making its folder. }
     procedure Save(const AFileName: string);
@@ -73,7 +73,34 @@ uses
   gittan.textfile;
 
 const
-  IndexHeader = 'gittan-index 1';
+  { Version 1 kept the whole row of each symbol and could run to tens
+    of gigabytes for a minified file; such a file is deleted unread. }
+  IndexHeader = 'gittan-index 2';
+
+{ Whether the file AFileName starts with the line IndexHeader, read
+  without reading the rest. }
+function HasIndexHeader(const AFileName: string): boolean;
+var
+  F: TFileStream;
+  Head: string;
+  n: integer;
+begin
+  Result := False;
+  try
+    F := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyWrite);
+    try
+      SetLength(Head, Length(IndexHeader) + 1);
+      n := F.Read(Head[1], Length(Head));
+    finally
+      F.Free;
+    end;
+  except
+    Exit;
+  end;
+  SetLength(Head, n);
+  Result := (Copy(Head, 1, Length(IndexHeader)) = IndexHeader) and
+    ((n = Length(IndexHeader)) or (Head[n] in [#10, #13]));
+end;
 
 function Escape(const S: string): string;
 begin
@@ -238,6 +265,12 @@ begin
   Clear;
   if not FileExists(AFileName) then
     Exit;
+  if not HasIndexHeader(AFileName) then
+  begin
+    { An index of another version, or no index: it is rebuilt. }
+    DeleteFile(AFileName);
+    Exit;
+  end;
   Lines := TStringList.Create;
   Fields := TStringList.Create;
   try

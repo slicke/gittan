@@ -16,7 +16,9 @@ interface
 
 type
   {** A symbol of a file's code tree: its name, the row and column of
-    its name (0-based), its nesting depth, and the text of its row. }
+    its name (0-based), its nesting depth, and the text of its row, or of
+    the part of it around the name when the row is longer than
+    MaxSymbolLine (see SymbolLineSpan). }
   TGittanSymbol = record
     Name: string;
     Row, Col, Depth: integer;
@@ -30,6 +32,10 @@ const
   srAnywhere = 1;
   srNameIgnoringCase = 2;
   srName = 3;
+  { The most characters of its row a symbol keeps. A minified file is
+    one row of thousands of symbols, and the whole row for each made an
+    index of tens of gigabytes. }
+  MaxSymbolLine = 200;
 
 {** How well the code tree name AName stands for the word AWord. }
 function SymbolRank(const AName, AWord: string): integer;
@@ -45,6 +51,12 @@ function BestSymbol(const ASymbols: TGittanSymbols; const AWord: string;
   "Bar" in "TFoo.Bar", "Foo" in "class Foo"), or '' when there is none. }
 function NameIdentifier(const AName: string): string;
 
+{** The part of a row of ALineLen characters a symbol whose name is at
+  ACol (0-based) keeps: AFrom (1-based) and ACount, at most MaxSymbolLine
+  characters, from a little before the name, so the keyword before it
+  shows; the whole row when it is short enough. }
+procedure SymbolLineSpan(ALineLen, ACol: SizeInt; out AFrom, ACount: SizeInt);
+
 {** Whether C can be part of an identifier: a letter, digit or underscore
   (a non-ASCII byte counts as a letter). }
 function IsWordChar(C: char): boolean;
@@ -57,6 +69,20 @@ uses
 function IsWordChar(C: char): boolean;
 begin
   Result := C in ['A'..'Z', 'a'..'z', '0'..'9', '_', #128..#255];
+end;
+
+procedure SymbolLineSpan(ALineLen, ACol: SizeInt; out AFrom, ACount: SizeInt);
+begin
+  AFrom := 1;
+  ACount := ALineLen;
+  if ALineLen <= MaxSymbolLine then
+    Exit;
+  ACount := MaxSymbolLine;
+  AFrom := ACol + 1 - MaxSymbolLine div 4;
+  if AFrom > ALineLen - MaxSymbolLine + 1 then
+    AFrom := ALineLen - MaxSymbolLine + 1;
+  if AFrom < 1 then
+    AFrom := 1;
 end;
 
 function SymbolRank(const AName, AWord: string): integer;

@@ -132,12 +132,28 @@ begin
     keys once the window is up. }
   Application.QueueAsyncCall(@FocusTreeAsync, 0);
   Application.QueueAsyncCall(@CommitHintAsync, 0);
+  OnActivate := @FormActivate;
 end;
 
 procedure TForm1.FocusTreeAsync(Data: PtrInt);
 begin
-  if FileTree.CanFocus then
+  { CanFocus leaves the form out, and SetFocus raises while it is not
+    shown. Something that pumps messages in FormCreate runs this before
+    the window is up; it is tried again when the window is activated. }
+  FFocusTreePending := not (Visible and Enabled and FileTree.CanFocus);
+  if not FFocusTreePending then
     FileTree.SetFocus;
+end;
+
+{ The window became active: the tree takes the focus FocusTreeAsync
+  could not give it, from the message loop, once Cocoa has made its
+  first responder. }
+procedure TForm1.FormActivate(Sender: TObject);
+begin
+  if not FFocusTreePending then
+    Exit;
+  FFocusTreePending := False;
+  Application.QueueAsyncCall(@FocusTreeAsync, 0);
 end;
 
 { Cocoa shows no TextHint in a memo (see gittan.memohint); the hint is
