@@ -1196,14 +1196,7 @@ begin
         X + IconW + Canvas.TextWidth(FBranch) + ChevronWidth + ChipPadX,
         TextY + BodyHeight + ChipPadY);
       if FBranchHot then
-      begin
-        Canvas.Pen.Style := psClear;
-        Canvas.Brush.Style := bsSolid;
-        Canvas.Brush.Color := FHover;
-        Canvas.RoundRect(FBranchRect, 8, 8);
-        Canvas.Pen.Style := psSolid;
-        Canvas.Brush.Style := bsClear;
-      end;
+        FillHover(Canvas, FBranchRect, 8, FHover);
     end;
     DrawStatusIcon(Canvas, HintBranch, X, TextY, BodyHeight, FDim);
     Canvas.Pen.Width := 1;
@@ -1215,9 +1208,7 @@ begin
     if BranchClickable then
     begin
       Inc(X, ChevronWidth div 2 + 1);
-      Canvas.Pen.Color := FDim;
-      Canvas.Polyline([Point(X - 3, TextY + BodyHeight div 2 - 1),
-        Point(X, TextY + BodyHeight div 2 + 2), Point(X + 3, TextY + BodyHeight div 2 - 1)]);
+      DrawChevron(Canvas, X, TextY + BodyHeight div 2, FDim);
       Inc(X, ChevronWidth div 2 + ChipPadX);
     end;
     Inc(X, Gap);
@@ -1233,24 +1224,14 @@ begin
       FBaseRect := Rect(X - ChipPadX, TextY - ChipPadY,
         X + Canvas.TextWidth(FBase) + ChevronWidth + ChipPadX, TextY + BodyHeight + ChipPadY);
       if FBaseHot then
-      begin
-        Canvas.Pen.Style := psClear;
-        Canvas.Brush.Style := bsSolid;
-        Canvas.Brush.Color := FHover;
-        Canvas.RoundRect(FBaseRect, 8, 8);
-        Canvas.Pen.Style := psSolid;
-        Canvas.Brush.Style := bsClear;
-      end;
+        FillHover(Canvas, FBaseRect, 8, FHover);
     end;
     Canvas.Font.Color := FText;
     Canvas.TextOut(X, TextY, FBase);
     if FBaseRect.Right > FBaseRect.Left then
     begin
       Inc(X, Canvas.TextWidth(FBase) + ChevronWidth div 2 + 1);
-      Canvas.Pen.Width := 1;
-      Canvas.Pen.Color := FDim;
-      Canvas.Polyline([Point(X - 3, TextY + BodyHeight div 2 - 1),
-        Point(X, TextY + BodyHeight div 2 + 2), Point(X + 3, TextY + BodyHeight div 2 - 1)]);
+      DrawChevron(Canvas, X, TextY + BodyHeight div 2, FDim);
     end;
   end;
   Inc(Y, TitleHeight + 6);
@@ -1651,14 +1632,7 @@ begin
     FSyncRect := Rect(X - ChipPadX, Y - ChipPadY, X + PaintSync(0, 0, False) + ChipPadX,
       Y + Canvas.TextHeight('Xg') + ChipPadY);
     if FSyncHot then
-    begin
-      Canvas.Pen.Style := psClear;
-      Canvas.Brush.Style := bsSolid;
-      Canvas.Brush.Color := FHover;
-      Canvas.RoundRect(FSyncRect, 8, 8);
-      Canvas.Pen.Style := psSolid;
-      Canvas.Brush.Style := bsClear;
-    end;
+      FillHover(Canvas, FSyncRect, 8, FHover);
   end;
   if FHasUpstream and FUpstreamGone then
     Part(rsUpstreamGone, FDeleted)
@@ -1704,14 +1678,8 @@ begin
     HashWidth := Max(HashWidth, Canvas.TextWidth(FCommits[i].Short));
   for i := 0 to High(FCommits) do
     if i = FCommitHot then
-    begin
-      Canvas.Pen.Style := psClear;
-      Canvas.Brush.Style := bsSolid;
-      Canvas.Brush.Color := FHover;
-      Canvas.RoundRect(Pad div 2, FCommitsTop + i * RowHeight, Width - Pad div 2,
-        FCommitsTop + (i + 1) * RowHeight, 8, 8);
-      Canvas.Pen.Style := psSolid;
-    end;
+      FillHover(Canvas, Rect(Pad div 2, FCommitsTop + i * RowHeight, Width - Pad div 2,
+        FCommitsTop + (i + 1) * RowHeight), 8, FHover);
   if Length(FCommits) > 1 then
   begin
     LineX := Pad + IconSize div 2;

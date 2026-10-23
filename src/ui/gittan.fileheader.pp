@@ -157,7 +157,7 @@ type
 implementation
 
 uses
-  gittan.textfit, gittan.theme;
+  gittan.textfit, gittan.theme, gittan.statusbar;
 
 resourcestring
   rsBinary = 'binary';
@@ -637,8 +637,7 @@ begin
     Canvas.TextOut(R.Left + PillPad, TextY, FMenu);
     i := R.Right - PillPad - ChevronWidth div 2 + 2;
     W := (R.Top + R.Bottom) div 2;
-    Canvas.Pen.Color := Canvas.Font.Color;
-    Canvas.Polyline([Point(i - 3, W - 1), Point(i, W + 2), Point(i + 3, W - 1)]);
+    DrawChevron(Canvas, i, W, Canvas.Font.Color);
     Right := R.Left - Gap;
   end;
   DrawRight(FNote, FDeletedColor);
