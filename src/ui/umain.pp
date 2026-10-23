@@ -298,6 +298,9 @@ type
       their draft (DroppedCommitDone). }
     FDroppedCommits: TList;
     FCommitDraftFor, FAmendMessage: string;
+    { FocusTreeAsync ran before the window was shown; FormActivate tries
+      again. }
+    FFocusTreePending: boolean;
     { Abort and Skip for what git is in the middle of, and the merge
       message filled into the field (umain.conflicts.inc). }
     FAbortButton, FSkipButton: TButton;
@@ -458,6 +461,9 @@ type
     FIndexAdapter: TATAdapterEControl;
     FIndexTimer: TTimer;
     FIndexing, FIndexSaveNeeded: boolean;
+    { A file is being loaded into FIndexEdit, which pumps messages for a
+      large one (IndexNext). }
+    FIndexLoading: boolean;
     FHoverTimer: TTimer;
     { The hint of the file under the mouse in the tree and the timer
       that shows it, see FileTreeMouseMove. }
@@ -1137,6 +1143,7 @@ type
     procedure SetupSubmodules;
     procedure SetupCommit;
     procedure FocusTreeAsync(Data: PtrInt);
+    procedure FormActivate(Sender: TObject);
     procedure CommitHintAsync(Data: PtrInt);
     procedure CommitHeaderCheck(Sender: TObject);
     procedure SetAllChosen(AValue: boolean);

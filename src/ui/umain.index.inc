@@ -95,7 +95,10 @@ begin
     FIndexAdapter.OnParseBegin := @AdapterParseBegin;
     FIndexAdapter.OnParseDone := @IndexParseDone;
   end;
-  IndexNext;
+  { From the message loop: OpenRepository runs in FormCreate too, and
+    loading a large file pumps messages for its progress, which ran
+    calls queued for the shown window (FocusTreeAsync) before it was. }
+  Application.QueueAsyncCall(@IndexNextAsync, 0);
 end;
 
 { Takes the next file of the queue that needs parsing and starts its
@@ -140,18 +143,26 @@ begin
     if E.Indexed then
       Continue;
     FIndexCurrent := Path;
-    if (FIndexAdapter.Lexer = Lexer) and not FIndexAdapter.IsParsingBusy then
-    begin
-      { Loading the text starts the parse through the change event. }
-      FIndexEdit.LoadFromFile(Full, []);
-      FIndexEdit.FileName := Full;
-    end
-    else
-    begin
-      FIndexAdapter.Lexer := nil;
-      FIndexEdit.LoadFromFile(Full, []);
-      FIndexEdit.FileName := Full;
-      SetEditorLexer(FIndexEdit, Lexer);
+    { Loading a large file pumps messages for its progress, and the timer
+      is not on yet: a queued IndexNextAsync must not load the next file
+      into the editor meanwhile. }
+    FIndexLoading := True;
+    try
+      if (FIndexAdapter.Lexer = Lexer) and not FIndexAdapter.IsParsingBusy then
+      begin
+        { Loading the text starts the parse through the change event. }
+        FIndexEdit.LoadFromFile(Full, []);
+        FIndexEdit.FileName := Full;
+      end
+      else
+      begin
+        FIndexAdapter.Lexer := nil;
+        FIndexEdit.LoadFromFile(Full, []);
+        FIndexEdit.FileName := Full;
+        SetEditorLexer(FIndexEdit, Lexer);
+      end;
+    finally
+      FIndexLoading := False;
     end;
     FIndexTimer.Enabled := True;
     Exit;
@@ -163,6 +174,10 @@ end;
 
 procedure TForm1.IndexNextAsync(Data: PtrInt);
 begin
+  { A second StartIndexing queues a second call; the file it started
+    is waited for, and so is one still loading. }
+  if FIndexTimer.Enabled or FIndexLoading then
+    Exit;
   IndexNext;
 end;
 
