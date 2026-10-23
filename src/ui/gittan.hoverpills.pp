@@ -81,7 +81,7 @@ type
 implementation
 
 uses
-  Math;
+  Math, gittan.theme;
 
 const
   { Around the pills, inside the box; between the pills; inside a pill
@@ -162,23 +162,23 @@ begin
       FHints[i] := '';
   SetLength(FRects, Length(FCaptions));
   Canvas.Font := Font;
-  PillH := Canvas.TextHeight('Xg') + 2 * PillRise;
-  H := PillH + 2 * Pad;
-  X := Pad;
+  PillH := Canvas.TextHeight('Xg') + 2 * Px(PillRise);
+  H := PillH + 2 * Px(Pad);
+  X := Px(Pad);
   for i := 0 to High(FCaptions) do
   begin
-    W := Canvas.TextWidth(FCaptions[i]) + 2 * PillPad;
+    W := Canvas.TextWidth(FCaptions[i]) + 2 * Px(PillPad);
     if (i < Length(FIcons)) and (FIcons[i + 1] in ['k', 'd']) then
-      W := W + ArrowWidth(PillH) + ArrowGap;
+      W := W + ArrowWidth(PillH) + Px(ArrowGap);
     if (i > 0) and (i < Length(FIcons)) and (FIcons[i + 1] = 'd') then
-      X := X + DiscardGap;
-    FRects[i] := Rect(X, Pad, X + W, Pad + PillH);
-    X := X + W + PillGap;
+      X := X + Px(DiscardGap);
+    FRects[i] := Rect(X, Px(Pad), X + W, Px(Pad) + PillH);
+    X := X + W + Px(PillGap);
   end;
-  W := X - PillGap + Pad;
+  W := X - Px(PillGap) + Px(Pad);
   Anchor.TopLeft := Parent.ScreenToClient(AAnchor.TopLeft);
   Anchor.BottomRight := Parent.ScreenToClient(AAnchor.BottomRight);
-  X := Max(0, Min(Anchor.Right - Offset - W, Parent.ClientWidth - W));
+  X := Max(0, Min(Anchor.Right - Px(Offset) - W, Parent.ClientWidth - W));
   i := Max(0, Min((Anchor.Top + Anchor.Bottom - H) div 2, Parent.ClientHeight - H));
   if Same and (Left = X) and (Top = i) and (Width = W) and (Height = H) then
     Exit;
@@ -314,14 +314,14 @@ begin
       Ink := FHotColor
     else
       Ink := FText;
-    X := R.Left + PillPad;
+    X := R.Left + Px(PillPad);
     if (i < Length(FIcons)) and (FIcons[i + 1] in ['k', 'd']) then
     begin
       if FIcons[i + 1] = 'k' then
         DrawCheck(X, R.Top, R.Height, FKeepColor)
       else
         DrawArrow(X, R.Top, R.Height, FDiscardColor);
-      X := X + ArrowWidth(R.Height) + ArrowGap;
+      X := X + ArrowWidth(R.Height) + Px(ArrowGap);
     end;
     Canvas.Font.Color := Ink;
     TextY := R.Top + (R.Height - Canvas.TextHeight(FCaptions[i])) div 2;

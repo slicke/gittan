@@ -277,7 +277,7 @@ type
 implementation
 
 uses
-  Math, DateUtils, LazUTF8, gittan.textfit;
+  Math, DateUtils, LazUTF8, gittan.textfit, gittan.theme, Forms;
 
 resourcestring
   rsOneFile = '1 changed file';
@@ -472,23 +472,23 @@ begin
   Canvas.Font := Font;
   Canvas.Brush.Style := bsClear;
   BodyHeight := Canvas.TextHeight('Xg');
-  TextY := Y + (RowHeight - BodyHeight) div 2;
-  X := Pad;
+  TextY := Y + (Px(RowHeight) - BodyHeight) div 2;
+  X := Px(Pad);
   if FBehindCount = 1 then
     Part := Format(rsBehindOne, [FBehindRef])
   else
     Part := Format(rsBehindMany, [FBehindCount, FBehindRef]);
   Canvas.Font.Color := FText;
   Canvas.TextOut(X, TextY, '↓ ' + Part);
-  Inc(X, Canvas.TextWidth('↓ ' + Part) + Gap);
+  Inc(X, Canvas.TextWidth('↓ ' + Part) + Px(Gap));
   for i := 0 to 1 do
   begin
     if i = 0 then
       Part := rsBehindRebase
     else
       Part := rsBehindMerge;
-    W := Canvas.TextWidth(Part) + 2 * ChipPadX;
-    R := Rect(X, TextY - ChipPadY, X + W, TextY + BodyHeight + ChipPadY);
+    W := Canvas.TextWidth(Part) + 2 * Px(ChipPadX);
+    R := Rect(X, TextY - Px(ChipPadY), X + W, TextY + BodyHeight + Px(ChipPadY));
     FBehindRects[i] := R;
     Canvas.Pen.Color := FLine;
     Canvas.Brush.Style := bsSolid;
@@ -502,10 +502,10 @@ begin
       Canvas.Font.Color := FLink
     else
       Canvas.Font.Color := FText;
-    Canvas.TextOut(X + ChipPadX, TextY, Part);
-    Inc(X, W + Gap div 2);
+    Canvas.TextOut(X + Px(ChipPadX), TextY, Part);
+    Inc(X, W + Px(Gap) div 2);
   end;
-  Inc(Y, RowHeight);
+  Inc(Y, Px(RowHeight));
 end;
 
 function TGittanSummary.ShowsCommits: boolean;
@@ -522,13 +522,13 @@ var
 begin
   FMeasure.Canvas.Font := Font;
   BodyHeight := FMeasure.Canvas.TextHeight('Xg');
-  FCommitsTop := FRowsTop + BodyHeight + NoteGap;
+  FCommitsTop := FRowsTop + BodyHeight + Px(NoteGap);
   if ShowsCommits then
-    FContentHeight := FCommitsTop + Length(FCommits) * RowHeight + Pad
+    FContentHeight := FCommitsTop + Length(FCommits) * Px(RowHeight) + Px(Pad)
   else if CentersClean then
-    FContentHeight := FRowsTop + CenterBlockHeight(FMeasure.Canvas) + 2 * Pad
+    FContentHeight := FRowsTop + CenterBlockHeight(FMeasure.Canvas) + 2 * Px(Pad)
   else
-    FContentHeight := FRowsTop + Max(Length(FStats), 2) * RowHeight + Pad;
+    FContentHeight := FRowsTop + Max(Length(FStats), 2) * Px(RowHeight) + Px(Pad);
 end;
 
 { A clean tree with nothing else to show: no commits, no conversation. }
@@ -564,7 +564,7 @@ begin
   Result := ACanvas.TextHeight('Xg');
   if HasSyncLine then
     Inc(Result, 2 + BodyHeight);
-  Result := Max(Result, HeaderCheck);
+  Result := Max(Result, Px(HeaderCheck));
 end;
 
 { The height of the clean state in the middle: the check, the text and
@@ -576,7 +576,7 @@ begin
   ACanvas.Font := Font;
   BodyHeight := ACanvas.TextHeight('Xg');
   ACanvas.Font.Size := CleanFontSize;
-  Result := CenterCheck + Gap + ACanvas.TextHeight('Xg');
+  Result := Px(CenterCheck) + Px(Gap) + ACanvas.TextHeight('Xg');
   if HasSyncLine then
     Inc(Result, 4 + BodyHeight);
 end;
@@ -607,11 +607,11 @@ begin
   BodyHeight := C.TextHeight('Xg');
   C.Font.Size := TitleFontSize;
   TitleHeight := C.TextHeight('Xg');
-  FRowsTop := Pad + TitleHeight + 6 + HeaderBlockHeight(FMeasure.Canvas) + Pad;
+  FRowsTop := Px(Pad) + TitleHeight + 6 + HeaderBlockHeight(FMeasure.Canvas) + Px(Pad);
   if FNotice <> '' then
-    Inc(FRowsTop, RowHeight);
+    Inc(FRowsTop, Px(RowHeight));
   if FBehindCount > 0 then
-    Inc(FRowsTop, RowHeight);
+    Inc(FRowsTop, Px(RowHeight));
   LayoutCard;
   Inc(FRowsTop, FCardHeight);
   LayoutNotes;
@@ -725,9 +725,9 @@ begin
   C := FMeasure.Canvas;
   C.Font := Font;
   LineHeight := C.TextHeight('Xg');
-  Inner := Max(40, Width - 2 * Pad - 2 * NotePadX - NoteStripe);
+  Inner := Max(40, Width - 2 * Px(Pad) - 2 * Px(NotePadX) - Px(NoteStripe));
   { The section's heading. }
-  At := LineHeight + NoteGap;
+  At := LineHeight + Px(NoteGap);
   SetLength(FNoteBoxes, Length(FNotes));
   Paras := TStringList.Create;
   try
@@ -747,16 +747,16 @@ begin
       end;
       Box.Top := At;
       { The header line, then the text under a little room. }
-      Box.Height := 2 * NotePadY + LineHeight;
+      Box.Height := 2 * Px(NotePadY) + LineHeight;
       if Length(Box.Lines) > 0 then
         Inc(Box.Height, 4 + Length(Box.Lines) * LineHeight);
       FNoteBoxes[i] := Box;
-      Inc(At, Box.Height + NoteGap);
+      Inc(At, Box.Height + Px(NoteGap));
     end;
   finally
     Paras.Free;
   end;
-  FNotesHeight := At + Pad div 2;
+  FNotesHeight := At + Px(Pad) div 2;
 end;
 
 { The heading, then a card per note: a stripe in the color of the
@@ -778,11 +778,11 @@ begin
   Canvas.Brush.Style := bsClear;
   Canvas.Font.Style := [fsBold];
   Canvas.Font.Color := FDim;
-  Canvas.TextOut(Pad, Y, FNotesTitle);
+  Canvas.TextOut(Px(Pad), Y, FNotesTitle);
   for i := 0 to High(FNoteBoxes) do
   begin
     At := Y + FNoteBoxes[i].Top;
-    Card := Rect(Pad, At, Width - Pad, At + FNoteBoxes[i].Height);
+    Card := Rect(Px(Pad), At, Width - Px(Pad), At + FNoteBoxes[i].Height);
     case FNotes[i].Kind of
       pnApproved:
       begin
@@ -811,19 +811,19 @@ begin
     Canvas.RoundRect(Card, 8, 8);
     Canvas.Pen.Style := psClear;
     Canvas.Brush.Color := Tone;
-    Canvas.RoundRect(Card.Left, Card.Top, Card.Left + 2 * NoteStripe, Card.Bottom, 4, 4);
+    Canvas.RoundRect(Card.Left, Card.Top, Card.Left + 2 * Px(NoteStripe), Card.Bottom, 4, 4);
     Canvas.Brush.Color := FSelectedBack;
-    Canvas.FillRect(Card.Left + NoteStripe, Card.Top + 1, Card.Left + 2 * NoteStripe,
+    Canvas.FillRect(Card.Left + Px(NoteStripe), Card.Top + 1, Card.Left + 2 * Px(NoteStripe),
       Card.Bottom - 1);
     Canvas.Pen.Style := psSolid;
     Canvas.Brush.Style := bsClear;
 
-    X := Card.Left + NoteStripe + NotePadX;
-    At := Card.Top + NotePadY;
+    X := Card.Left + Px(NoteStripe) + Px(NotePadX);
+    At := Card.Top + Px(NotePadY);
     Canvas.Font.Style := [fsBold];
     Canvas.Font.Color := FText;
     Canvas.TextOut(X, At, FNotes[i].Author);
-    Inc(X, Canvas.TextWidth(FNotes[i].Author) + Gap div 2);
+    Inc(X, Canvas.TextWidth(FNotes[i].Author) + Px(Gap) div 2);
     Canvas.Font.Style := [];
     if FNotes[i].Kind in [pnApproved, pnChangesRequested] then
       Canvas.Font.Color := Tone
@@ -840,8 +840,8 @@ begin
     FNoteBoxes[i].LinkRect := Rect(0, 0, 0, 0);
     if FNotes[i].Url <> '' then
     begin
-      FNoteBoxes[i].LinkRect := Rect(Card.Right - NotePadX - Canvas.TextWidth(rsNoteLink),
-        At, Card.Right - NotePadX, At + LineHeight);
+      FNoteBoxes[i].LinkRect := Rect(Card.Right - Px(NotePadX) - Canvas.TextWidth(rsNoteLink),
+        At, Card.Right - Px(NotePadX), At + LineHeight);
       Canvas.Font.Color := FLink;
       if i = FLinkHot then
         Canvas.Font.Style := [fsUnderline];
@@ -851,7 +851,7 @@ begin
 
     Inc(At, LineHeight + 4);
     Canvas.Font.Color := FText;
-    X := Card.Left + NoteStripe + NotePadX;
+    X := Card.Left + Px(NoteStripe) + Px(NotePadX);
     for k := 0 to High(FNoteBoxes[i].Lines) do
     begin
       Canvas.TextOut(X, At, FNoteBoxes[i].Lines[k]);
@@ -896,8 +896,8 @@ begin
   C := FMeasure.Canvas;
   C.Font := Font;
   LineHeight := C.TextHeight('Xg');
-  Inner := Max(40, Width - 2 * Pad - 2 * NotePadX - NoteStripe);
-  SubjectRoom := Max(40, Inner - C.TextWidth(rsBackToTree) - Gap);
+  Inner := Max(40, Width - 2 * Px(Pad) - 2 * Px(NotePadX) - Px(NoteStripe));
+  SubjectRoom := Max(40, Inner - C.TextWidth(rsBackToTree) - Px(Gap));
   C.Font.Style := [fsBold];
   WrapText(C, FCommit.Subject, SubjectRoom, FCardSubject);
   if Length(FCardSubject) > SubjectMaxLines then
@@ -937,10 +937,10 @@ begin
     SetLength(FCardLines, NoteMaxLines);
     FCardLines[High(FCardLines)] := '…';
   end;
-  FCardHeight := 2 * NotePadY + (Length(FCardSubject) + 1) * LineHeight + 2;
+  FCardHeight := 2 * Px(NotePadY) + (Length(FCardSubject) + 1) * LineHeight + 2;
   if Length(FCardLines) > 0 then
     Inc(FCardHeight, 6 + Length(FCardLines) * LineHeight);
-  Inc(FCardHeight, NoteGap + Pad div 2);
+  Inc(FCardHeight, Px(NoteGap) + Px(Pad) div 2);
 end;
 
 { A card as a note's, with a stripe in the link color: the subject in
@@ -960,24 +960,24 @@ begin
     Exit;
   Canvas.Font := Font;
   LineHeight := Canvas.TextHeight('Xg');
-  Card := Rect(Pad, Y, Width - Pad, Y + FCardHeight - NoteGap - Pad div 2);
+  Card := Rect(Px(Pad), Y, Width - Px(Pad), Y + FCardHeight - Px(NoteGap) - Px(Pad) div 2);
   Canvas.Pen.Color := FLine;
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := FSelectedBack;
   Canvas.RoundRect(Card, 8, 8);
   Canvas.Pen.Style := psClear;
   Canvas.Brush.Color := FLink;
-  Canvas.RoundRect(Card.Left, Card.Top, Card.Left + 2 * NoteStripe, Card.Bottom, 4, 4);
+  Canvas.RoundRect(Card.Left, Card.Top, Card.Left + 2 * Px(NoteStripe), Card.Bottom, 4, 4);
   Canvas.Brush.Color := FSelectedBack;
-  Canvas.FillRect(Card.Left + NoteStripe, Card.Top + 1, Card.Left + 2 * NoteStripe,
+  Canvas.FillRect(Card.Left + Px(NoteStripe), Card.Top + 1, Card.Left + 2 * Px(NoteStripe),
     Card.Bottom - 1);
   Canvas.Pen.Style := psSolid;
   Canvas.Brush.Style := bsClear;
 
-  X := Card.Left + NoteStripe + NotePadX;
-  At := Card.Top + NotePadY;
-  FBackRect := Rect(Card.Right - NotePadX - Canvas.TextWidth(rsBackToTree), At,
-    Card.Right - NotePadX, At + LineHeight);
+  X := Card.Left + Px(NoteStripe) + Px(NotePadX);
+  At := Card.Top + Px(NotePadY);
+  FBackRect := Rect(Card.Right - Px(NotePadX) - Canvas.TextWidth(rsBackToTree), At,
+    Card.Right - Px(NotePadX), At + LineHeight);
   Canvas.Font.Color := FLink;
   if FBackHot then
     Canvas.Font.Style := [fsUnderline];
@@ -1113,7 +1113,7 @@ begin
   Result := -1;
   if Y < FRowsTop then
     Exit;
-  Result := (Y - FRowsTop) div RowHeight;
+  Result := (Y - FRowsTop) div Px(RowHeight);
   if Result > High(FStats) then
     Result := -1;
 end;
@@ -1123,7 +1123,7 @@ begin
   Result := -1;
   if not ShowsCommits or (Y < FCommitsTop) then
     Exit;
-  Result := (Y - FCommitsTop) div RowHeight;
+  Result := (Y - FCommitsTop) div Px(RowHeight);
   if Result > High(FCommits) then
     Result := -1;
 end;
@@ -1178,8 +1178,8 @@ begin
   Canvas.Font.Style := [fsBold];
   Canvas.Font.Color := FText;
   TitleHeight := Canvas.TextHeight('Xg');
-  Canvas.TextOut(Pad, Y, FRepoName);
-  X := Pad + Canvas.TextWidth(FRepoName) + Gap;
+  Canvas.TextOut(Px(Pad), Y, FRepoName);
+  X := Px(Pad) + Canvas.TextWidth(FRepoName) + Px(Gap);
   Canvas.Font.Size := Font.Size;
   Canvas.Font.Style := [];
   FBranchRect := Rect(0, 0, 0, 0);
@@ -1189,12 +1189,12 @@ begin
   if FBranch <> '' then
   begin
     TextY := Y + TitleHeight - BodyHeight - 3;
-    IconW := BodyHeight - 4 + IconGap;
+    IconW := BodyHeight - 4 + Px(IconGap);
     if BranchClickable then
     begin
-      FBranchRect := Rect(X - ChipPadX, TextY - ChipPadY,
-        X + IconW + Canvas.TextWidth(FBranch) + ChevronWidth + ChipPadX,
-        TextY + BodyHeight + ChipPadY);
+      FBranchRect := Rect(X - Px(ChipPadX), TextY - Px(ChipPadY),
+        X + IconW + Canvas.TextWidth(FBranch) + Px(ChevronWidth) + Px(ChipPadX),
+        TextY + BodyHeight + Px(ChipPadY));
       if FBranchHot then
         FillHover(Canvas, FBranchRect, 8, FHover);
     end;
@@ -1207,11 +1207,11 @@ begin
     Inc(X, Canvas.TextWidth(FBranch));
     if BranchClickable then
     begin
-      Inc(X, ChevronWidth div 2 + 1);
+      Inc(X, Px(ChevronWidth) div 2 + 1);
       DrawChevron(Canvas, X, TextY + BodyHeight div 2, FDim);
-      Inc(X, ChevronWidth div 2 + ChipPadX);
+      Inc(X, Px(ChevronWidth) div 2 + Px(ChipPadX));
     end;
-    Inc(X, Gap);
+    Inc(X, Px(Gap));
   end;
   FBaseRect := Rect(0, 0, 0, 0);
   FSyncRect := Rect(0, 0, 0, 0);
@@ -1221,8 +1221,8 @@ begin
     { A base with actions is a chip like the branch, with a chevron. }
     if FBaseClickable and Assigned(FOnBaseClick) then
     begin
-      FBaseRect := Rect(X - ChipPadX, TextY - ChipPadY,
-        X + Canvas.TextWidth(FBase) + ChevronWidth + ChipPadX, TextY + BodyHeight + ChipPadY);
+      FBaseRect := Rect(X - Px(ChipPadX), TextY - Px(ChipPadY),
+        X + Canvas.TextWidth(FBase) + Px(ChevronWidth) + Px(ChipPadX), TextY + BodyHeight + Px(ChipPadY));
       if FBaseHot then
         FillHover(Canvas, FBaseRect, 8, FHover);
     end;
@@ -1230,7 +1230,7 @@ begin
     Canvas.TextOut(X, TextY, FBase);
     if FBaseRect.Right > FBaseRect.Left then
     begin
-      Inc(X, Canvas.TextWidth(FBase) + ChevronWidth div 2 + 1);
+      Inc(X, Canvas.TextWidth(FBase) + Px(ChevronWidth) div 2 + 1);
       DrawChevron(Canvas, X, TextY + BodyHeight div 2, FDim);
     end;
   end;
@@ -1243,7 +1243,7 @@ begin
     Inc(Added, FStats[i].Added);
     Inc(Deleted, FStats[i].Deleted);
   end;
-  X := Pad;
+  X := Px(Pad);
   if (Length(FStats) = 0) and not CentersClean then
     PaintCleanHeader(Y);
   if Length(FStats) > 0 then
@@ -1254,15 +1254,15 @@ begin
       Heading := Format(rsManyFiles, [Length(FStats)]);
     Canvas.Font.Color := FDim;
     Canvas.TextOut(X, Y, Heading);
-    Inc(X, Canvas.TextWidth(Heading) + Gap);
+    Inc(X, Canvas.TextWidth(Heading) + Px(Gap));
     Canvas.Font.Color := FAdded;
     Heading := '+' + IntToStr(Added);
     Canvas.TextOut(X, Y, Heading);
-    Inc(X, Canvas.TextWidth(Heading) + Gap div 2);
+    Inc(X, Canvas.TextWidth(Heading) + Px(Gap) div 2);
     Canvas.Font.Color := FDeleted;
     Heading := '−' + IntToStr(Deleted);
     Canvas.TextOut(X, Y, Heading);
-    Inc(X, Canvas.TextWidth(Heading) + Gap);
+    Inc(X, Canvas.TextWidth(Heading) + Px(Gap));
     { The whole change as one bar: the added share in green, the
       deleted in red. }
     if Added + Deleted > 0 then
@@ -1270,25 +1270,25 @@ begin
       Canvas.Pen.Style := psClear;
       Canvas.Brush.Style := bsSolid;
       Canvas.Brush.Color := FDeleted;
-      Canvas.RoundRect(X, Y + (BodyHeight - BarHeight) div 2, X + TotalBarWidth,
-        Y + (BodyHeight + BarHeight) div 2, BarHeight, BarHeight);
+      Canvas.RoundRect(X, Y + (BodyHeight - Px(BarHeight)) div 2, X + Px(TotalBarWidth),
+        Y + (BodyHeight + Px(BarHeight)) div 2, Px(BarHeight), Px(BarHeight));
       if Added > 0 then
       begin
         Canvas.Brush.Color := FAdded;
-        Canvas.RoundRect(X, Y + (BodyHeight - BarHeight) div 2,
-          X + Max(BarHeight, Round(Added / (Added + Deleted) * TotalBarWidth)),
-          Y + (BodyHeight + BarHeight) div 2, BarHeight, BarHeight);
+        Canvas.RoundRect(X, Y + (BodyHeight - Px(BarHeight)) div 2,
+          X + Max(Px(BarHeight), Round(Added / (Added + Deleted) * Px(TotalBarWidth))),
+          Y + (BodyHeight + Px(BarHeight)) div 2, Px(BarHeight), Px(BarHeight));
       end;
       Canvas.Pen.Style := psSolid;
       Canvas.Brush.Style := bsClear;
-      Inc(X, TotalBarWidth + Gap);
+      Inc(X, Px(TotalBarWidth) + Px(Gap));
     end;
-    PaintKinds(Y, X, Width - Pad);
+    PaintKinds(Y, X, Width - Px(Pad));
   end;
-  Inc(Y, HeaderBlockHeight(Canvas) + Pad div 2);
+  Inc(Y, HeaderBlockHeight(Canvas) + Px(Pad) div 2);
   Canvas.Pen.Color := FLine;
-  Canvas.Line(Pad, Y, Width - Pad, Y);
-  Inc(Y, Pad div 2);
+  Canvas.Line(Px(Pad), Y, Width - Px(Pad), Y);
+  Inc(Y, Px(Pad) div 2);
 end;
 
 { How many files of each kind, as a dot in the kind's color and a dim
@@ -1310,9 +1310,9 @@ begin
   Total := 0;
   for Kind := Low(Kind) to High(Kind) do
     if Counts[Kind] > 0 then
-      Inc(Total, DotSize + Gap div 2 + Canvas.TextWidth(Format(KindCount[Kind],
-        [Counts[Kind]])) + Gap);
-  Dec(Total, Gap);
+      Inc(Total, Px(DotSize) + Px(Gap) div 2 + Canvas.TextWidth(Format(KindCount[Kind],
+        [Counts[Kind]])) + Px(Gap));
+  Dec(Total, Px(Gap));
   if (Total <= 0) or (ALeft + Total > ARight) then
     Exit;
   X := ARight - Total;
@@ -1322,21 +1322,21 @@ begin
       Canvas.Pen.Style := psClear;
       Canvas.Brush.Style := bsSolid;
       Canvas.Brush.Color := KindColor(Kind);
-      Canvas.Ellipse(X, Y + (BodyHeight - DotSize) div 2, X + DotSize,
-        Y + (BodyHeight + DotSize) div 2);
+      Canvas.Ellipse(X, Y + (BodyHeight - Px(DotSize)) div 2, X + Px(DotSize),
+        Y + (BodyHeight + Px(DotSize)) div 2);
       Canvas.Pen.Style := psSolid;
       Canvas.Brush.Style := bsClear;
-      Inc(X, DotSize + Gap div 2);
+      Inc(X, Px(DotSize) + Px(Gap) div 2);
       KindText := Format(KindCount[Kind], [Counts[Kind]]);
       Canvas.TextOut(X, Y, KindText);
-      Inc(X, Canvas.TextWidth(KindText) + Gap);
+      Inc(X, Canvas.TextWidth(KindText) + Px(Gap));
     end;
 end;
 
 { The bars of the rows share the width: a sixth of it, within bounds. }
 function TGittanSummary.BarWidth: integer;
 begin
-  Result := Min(MaxBarWidth, Max(MinBarWidth, Width div 6));
+  Result := Min(Px(MaxBarWidth), Max(Px(MinBarWidth), Width div 6));
 end;
 
 { An info disc with an "i" and the notice text, in the row above the
@@ -1347,19 +1347,19 @@ var
 begin
   Canvas.Font := Font;
   Canvas.Brush.Style := bsClear;
-  X := Pad;
-  CenterY := Y + RowHeight div 2;
+  X := Px(Pad);
+  CenterY := Y + Px(RowHeight) div 2;
   Canvas.Pen.Color := FDim;
   Canvas.Brush.Style := bsClear;
-  Canvas.Ellipse(X, CenterY - CheckSize div 2, X + CheckSize, CenterY + CheckSize div 2);
+  Canvas.Ellipse(X, CenterY - Px(CheckSize) div 2, X + Px(CheckSize), CenterY + Px(CheckSize) div 2);
   Canvas.Font.Style := [fsBold];
   Canvas.Font.Color := FDim;
-  Canvas.TextOut(X + (CheckSize - Canvas.TextWidth('i')) div 2,
+  Canvas.TextOut(X + (Px(CheckSize) - Canvas.TextWidth('i')) div 2,
     CenterY - Canvas.TextHeight('i') div 2, 'i');
   Canvas.Font.Style := [];
-  Canvas.TextOut(X + CheckSize + Gap div 2 + 2,
+  Canvas.TextOut(X + Px(CheckSize) + Px(Gap) div 2 + 2,
     CenterY - Canvas.TextHeight('Xg') div 2, FNotice);
-  Inc(Y, RowHeight);
+  Inc(Y, Px(RowHeight));
 end;
 
 { The bar compares this file's change with the largest one: the added part
@@ -1373,7 +1373,7 @@ begin
   Canvas.Pen.Style := psClear;
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := FLine;
-  Canvas.RoundRect(X, Y, X + BarWidth, Y + BarHeight, BarHeight, BarHeight);
+  Canvas.RoundRect(X, Y, X + BarWidth, Y + Px(BarHeight), Px(BarHeight), Px(BarHeight));
   if AMax = 0 then
     Exit;
   AddedWidth := Round(AStat.Added / AMax * BarWidth);
@@ -1386,13 +1386,13 @@ begin
   if AddedWidth > 0 then
   begin
     Canvas.Brush.Color := FAdded;
-    Canvas.RoundRect(X, Y, X + AddedWidth, Y + BarHeight, BarHeight, BarHeight);
+    Canvas.RoundRect(X, Y, X + AddedWidth, Y + Px(BarHeight), Px(BarHeight), Px(BarHeight));
   end;
   if DeletedWidth > 0 then
   begin
     Canvas.Brush.Color := FDeleted;
     Canvas.RoundRect(X + AddedWidth, Y, X + AddedWidth + DeletedWidth,
-      Y + BarHeight, BarHeight, BarHeight);
+      Y + Px(BarHeight), Px(BarHeight), Px(BarHeight));
   end;
   Canvas.Pen.Style := psSolid;
 end;
@@ -1415,7 +1415,7 @@ begin
     FActionRects[AIndex] := Rect(0, 0, 0, 0);
   Canvas.Font := Font;
   BodyHeight := Canvas.TextHeight('Xg');
-  TextY := ATop + (RowHeight - BodyHeight) div 2;
+  TextY := ATop + (Px(RowHeight) - BodyHeight) div 2;
   if (AIndex = FHot) or (Stat.Path = FSelected) then
   begin
     Canvas.Pen.Style := psClear;
@@ -1424,24 +1424,24 @@ begin
       Canvas.Brush.Color := FHover
     else
       Canvas.Brush.Color := FSelectedBack;
-    Canvas.RoundRect(Pad div 2, ATop, Width - Pad div 2, ATop + RowHeight, 8, 8);
+    Canvas.RoundRect(Px(Pad) div 2, ATop, Width - Px(Pad) div 2, ATop + Px(RowHeight), 8, 8);
     Canvas.Pen.Style := psSolid;
   end;
-  X := Pad;
+  X := Px(Pad);
   if (FImages <> nil) and (AIndex <= High(FIconIndex)) then
-    FImages.DrawForPPI(Canvas, X, ATop + (RowHeight - IconSize) div 2,
-      FIconIndex[AIndex], IconSize, Font.PixelsPerInch, GetCanvasScaleFactor);
-  Inc(X, IconSize + Gap div 2 + 2);
+    FImages.DrawForPPI(Canvas, X, ATop + (Px(RowHeight) - Px(IconSize)) div 2,
+      FIconIndex[AIndex], IconSize, Screen.PixelsPerInch, GetCanvasScaleFactor);
+  Inc(X, Px(IconSize) + Px(Gap) div 2 + 2);
 
-  CountsX := Width - Pad - BarWidth - Gap - 2 * CountWidth - Gap div 2;
+  CountsX := Width - Px(Pad) - BarWidth - Px(Gap) - 2 * Px(CountWidth) - Px(Gap) div 2;
   RowText := '';
   if AIndex <= High(FRowTexts) then
     RowText := FRowTexts[AIndex];
   if RowText <> '' then
-    CountsX := Min(CountsX, Width - Pad - Canvas.TextWidth(RowText));
-  Room := CountsX - Gap - X;
+    CountsX := Min(CountsX, Width - Px(Pad) - Canvas.TextWidth(RowText));
+  Room := CountsX - Px(Gap) - X;
   if RowAction <> '' then
-    Dec(Room, Canvas.TextWidth(RowAction) + 2 * ChipPadX + Gap);
+    Dec(Room, Canvas.TextWidth(RowAction) + 2 * Px(ChipPadX) + Px(Gap));
   Dir := ExtractFilePath(Stat.Path);
   FileName := ExtractFileName(Stat.Path);
   Canvas.Brush.Style := bsClear;
@@ -1456,13 +1456,13 @@ begin
   end;
   Canvas.Font.Color := FText;
   Canvas.TextOut(X, TextY, FileName);
-  Inc(X, Canvas.TextWidth(FileName) + Gap);
+  Inc(X, Canvas.TextWidth(FileName) + Px(Gap));
   { The pill, outlined on the row's fill, its text in the link color
     under the mouse. }
   if (RowAction <> '') and (AIndex <= High(FActionRects)) then
   begin
-    W := Canvas.TextWidth(RowAction) + 2 * ChipPadX;
-    R := Rect(X, TextY - ChipPadY, X + W, TextY + BodyHeight + ChipPadY);
+    W := Canvas.TextWidth(RowAction) + 2 * Px(ChipPadX);
+    R := Rect(X, TextY - Px(ChipPadY), X + W, TextY + BodyHeight + Px(ChipPadY));
     FActionRects[AIndex] := R;
     Canvas.Pen.Color := FLine;
     Canvas.Brush.Style := bsSolid;
@@ -1473,8 +1473,8 @@ begin
       Canvas.Font.Color := FLink
     else
       Canvas.Font.Color := FText;
-    Canvas.TextOut(X + ChipPadX, TextY, RowAction);
-    Inc(X, W + Gap);
+    Canvas.TextOut(X + Px(ChipPadX), TextY, RowAction);
+    Inc(X, W + Px(Gap));
   end;
   { What the index holds, when the path left room for it. }
   if Stat.Staged then
@@ -1483,7 +1483,7 @@ begin
       Count := rsPartlyStaged
     else
       Count := rsStaged;
-    if X + Canvas.TextWidth(Count) <= CountsX - Gap then
+    if X + Canvas.TextWidth(Count) <= CountsX - Px(Gap) then
     begin
       Canvas.Font.Color := FDim;
       Canvas.TextOut(X, TextY, Count);
@@ -1493,13 +1493,13 @@ begin
   if RowText <> '' then
   begin
     Canvas.Font.Color := FDim;
-    Canvas.TextOut(Width - Pad - Canvas.TextWidth(RowText), TextY, RowText);
+    Canvas.TextOut(Width - Px(Pad) - Canvas.TextWidth(RowText), TextY, RowText);
     Exit;
   end;
   if Stat.Binary then
   begin
     Canvas.Font.Color := FDim;
-    Canvas.TextOut(CountsX + 2 * CountWidth + Gap div 2 - Canvas.TextWidth(rsBinary),
+    Canvas.TextOut(CountsX + 2 * Px(CountWidth) + Px(Gap) div 2 - Canvas.TextWidth(rsBinary),
       TextY, rsBinary);
   end
   else
@@ -1510,13 +1510,13 @@ begin
     else
       Canvas.Font.Color := FDim;
     Count := '+' + IntToStr(Stat.Added);
-    Canvas.TextOut(CountsX + CountWidth - Canvas.TextWidth(Count), TextY, Count);
+    Canvas.TextOut(CountsX + Px(CountWidth) - Canvas.TextWidth(Count), TextY, Count);
     if Stat.Deleted > 0 then
       Canvas.Font.Color := FDeleted
     else
       Canvas.Font.Color := FDim;
     Count := '−' + IntToStr(Stat.Deleted);
-    Canvas.TextOut(CountsX + 2 * CountWidth + Gap div 2 - Canvas.TextWidth(Count),
+    Canvas.TextOut(CountsX + 2 * Px(CountWidth) + Px(Gap) div 2 - Canvas.TextWidth(Count),
       TextY, Count);
   end;
 
@@ -1524,7 +1524,7 @@ begin
   for i := 0 to High(FStats) do
     if (i > High(FRowTexts)) or (FRowTexts[i] = '') then
       MaxChange := Max(MaxChange, FStats[i].Added + FStats[i].Deleted);
-  PaintBar(Width - Pad - BarWidth, ATop + (RowHeight - BarHeight) div 2, Stat,
+  PaintBar(Width - Px(Pad) - BarWidth, ATop + (Px(RowHeight) - Px(BarHeight)) div 2, Stat,
     MaxChange);
 end;
 
@@ -1561,8 +1561,8 @@ begin
   BodyHeight := Canvas.TextHeight('Xg');
   Canvas.Font.Size := CleanFontSize;
   TextHeight := Canvas.TextHeight('Xg');
-  DrawCheck(Pad, Y + (BlockHeight - HeaderCheck) div 2, HeaderCheck);
-  X := Pad + HeaderCheck + Gap;
+  DrawCheck(Px(Pad), Y + (BlockHeight - Px(HeaderCheck)) div 2, Px(HeaderCheck));
+  X := Px(Pad) + Px(HeaderCheck) + Px(Gap);
   TextY := Y + (BlockHeight - TextHeight - IfThen(HasSyncLine, 2 + BodyHeight, 0)) div 2;
   Canvas.Brush.Style := bsClear;
   Canvas.Font.Color := FText;
@@ -1578,10 +1578,10 @@ procedure TGittanSummary.PaintCleanCentered;
 var
   BlockTop, CenterX, TextHeight: integer;
 begin
-  BlockTop := Max(FRowsTop + Pad, (Height - CenterBlockHeight(Canvas)) div 2);
+  BlockTop := Max(FRowsTop + Px(Pad), (Height - CenterBlockHeight(Canvas)) div 2);
   CenterX := Width div 2;
-  DrawCheck(CenterX - CenterCheck div 2, BlockTop, CenterCheck);
-  Inc(BlockTop, CenterCheck + Gap);
+  DrawCheck(CenterX - Px(CenterCheck) div 2, BlockTop, Px(CenterCheck));
+  Inc(BlockTop, Px(CenterCheck) + Px(Gap));
   Canvas.Font := Font;
   Canvas.Font.Size := CleanFontSize;
   Canvas.Font.Color := FText;
@@ -1629,8 +1629,8 @@ begin
   if ADraw and Assigned(FOnSyncClick) and HasSyncLine and not
     (FHasUpstream and FUpstreamGone) then
   begin
-    FSyncRect := Rect(X - ChipPadX, Y - ChipPadY, X + PaintSync(0, 0, False) + ChipPadX,
-      Y + Canvas.TextHeight('Xg') + ChipPadY);
+    FSyncRect := Rect(X - Px(ChipPadX), Y - Px(ChipPadY), X + PaintSync(0, 0, False) + Px(ChipPadX),
+      Y + Canvas.TextHeight('Xg') + Px(ChipPadY));
     if FSyncHot then
       FillHover(Canvas, FSyncRect, 8, FHover);
   end;
@@ -1671,26 +1671,26 @@ begin
   Canvas.Brush.Style := bsClear;
   Canvas.Font.Style := [fsBold];
   Canvas.Font.Color := FDim;
-  Canvas.TextOut(Pad, FCommitsTop - NoteGap - BodyHeight, rsRecentCommits);
+  Canvas.TextOut(Px(Pad), FCommitsTop - Px(NoteGap) - BodyHeight, rsRecentCommits);
   Canvas.Font.Style := [];
   HashWidth := 0;
   for i := 0 to High(FCommits) do
     HashWidth := Max(HashWidth, Canvas.TextWidth(FCommits[i].Short));
   for i := 0 to High(FCommits) do
     if i = FCommitHot then
-      FillHover(Canvas, Rect(Pad div 2, FCommitsTop + i * RowHeight, Width - Pad div 2,
-        FCommitsTop + (i + 1) * RowHeight), 8, FHover);
+      FillHover(Canvas, Rect(Px(Pad) div 2, FCommitsTop + i * Px(RowHeight), Width - Px(Pad) div 2,
+        FCommitsTop + (i + 1) * Px(RowHeight)), 8, FHover);
   if Length(FCommits) > 1 then
   begin
-    LineX := Pad + IconSize div 2;
+    LineX := Px(Pad) + Px(IconSize) div 2;
     Canvas.Pen.Color := FLine;
     Canvas.Pen.Width := 2;
-    Canvas.Line(LineX, FCommitsTop + RowHeight div 2, LineX,
-      FCommitsTop + High(FCommits) * RowHeight + RowHeight div 2);
+    Canvas.Line(LineX, FCommitsTop + Px(RowHeight) div 2, LineX,
+      FCommitsTop + High(FCommits) * Px(RowHeight) + Px(RowHeight) div 2);
     Canvas.Pen.Width := 1;
   end;
   for i := 0 to High(FCommits) do
-    PaintCommit(i, FCommitsTop + i * RowHeight, HashWidth);
+    PaintCommit(i, FCommitsTop + i * Px(RowHeight), HashWidth);
 end;
 
 { A dot on the line, filled in the link color when the commit is not
@@ -1705,9 +1705,9 @@ var
 begin
   Commit := FCommits[AIndex];
   Canvas.Font := Font;
-  TextY := ATop + (RowHeight - Canvas.TextHeight('Xg')) div 2;
-  CenterX := Pad + IconSize div 2;
-  CenterY := ATop + RowHeight div 2;
+  TextY := ATop + (Px(RowHeight) - Canvas.TextHeight('Xg')) div 2;
+  CenterX := Px(Pad) + Px(IconSize) div 2;
+  CenterY := ATop + Px(RowHeight) div 2;
   Canvas.Brush.Style := bsSolid;
   if Commit.Unpushed then
   begin
@@ -1723,17 +1723,17 @@ begin
       Canvas.Brush.Color := FBack;
   end;
   Canvas.Pen.Width := 2;
-  Canvas.Ellipse(CenterX - DotSize div 2 - 1, CenterY - DotSize div 2 - 1,
-    CenterX + DotSize div 2 + 1, CenterY + DotSize div 2 + 1);
+  Canvas.Ellipse(CenterX - Px(DotSize) div 2 - 1, CenterY - Px(DotSize) div 2 - 1,
+    CenterX + Px(DotSize) div 2 + 1, CenterY + Px(DotSize) div 2 + 1);
   Canvas.Pen.Width := 1;
   Canvas.Brush.Style := bsClear;
 
-  Right := Width - Pad;
+  Right := Width - Px(Pad);
   Canvas.Font.Color := FDim;
   Canvas.TextOut(Right - Canvas.TextWidth(Commit.Short), TextY, Commit.Short);
-  Dec(Right, AHashWidth + Gap + Gap div 2);
+  Dec(Right, AHashWidth + Px(Gap) + Px(Gap) div 2);
 
-  X := Pad + IconSize + Gap div 2 + 2;
+  X := Px(Pad) + Px(IconSize) + Px(Gap) div 2 + 2;
   Meta := Commit.Author;
   if Commit.Date > 0 then
   begin
@@ -1741,14 +1741,14 @@ begin
       Meta := Meta + ' · ';
     Meta := Meta + ReviewAge(Commit.Date, LocalTimeToUniversal(Now));
   end;
-  if Right - Canvas.TextWidth(Meta) - Gap - X < Width div 3 then
+  if Right - Canvas.TextWidth(Meta) - Px(Gap) - X < Width div 3 then
     Meta := ReviewAge(Commit.Date, LocalTimeToUniversal(Now));
-  if Right - Canvas.TextWidth(Meta) - Gap - X < Width div 4 then
+  if Right - Canvas.TextWidth(Meta) - Px(Gap) - X < Width div 4 then
     Meta := '';
   if Meta <> '' then
   begin
     Canvas.TextOut(Right - Canvas.TextWidth(Meta), TextY, Meta);
-    Dec(Right, Canvas.TextWidth(Meta) + Gap + Gap div 2);
+    Dec(Right, Canvas.TextWidth(Meta) + Px(Gap) + Px(Gap) div 2);
   end;
 
   Room := Right - X;
@@ -1771,7 +1771,7 @@ begin
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := FBack;
   Canvas.FillRect(ClientRect);
-  Y := Pad;
+  Y := Px(Pad);
   PaintHeader(Y);
   if FNotice <> '' then
     PaintNotice(Y);
@@ -1790,7 +1790,7 @@ begin
   if ShowsCommits then
     PaintCommits;
   for i := 0 to High(FStats) do
-    PaintRow(i, FRowsTop + i * RowHeight);
+    PaintRow(i, FRowsTop + i * Px(RowHeight));
 end;
 
 procedure TGittanSummary.MouseMove(Shift: TShiftState; X, Y: integer);

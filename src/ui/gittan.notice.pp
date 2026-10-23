@@ -107,7 +107,7 @@ type
 implementation
 
 uses
-  Math, LCLIntf;
+  Math, LCLIntf, gittan.theme;
 
 const
   Pad = 24;
@@ -290,43 +290,43 @@ begin
   if Parent = nil then
     Exit;
   if FBusy then
-    W := BusyWidth
+    W := Px(BusyWidth)
   else
-    W := ReportWidth;
-  W := Max(240, Min(W, Parent.ClientWidth - 2 * Margin));
+    W := Px(ReportWidth);
+  W := Max(240, Min(W, Parent.ClientWidth - 2 * Px(Margin)));
   Canvas.Font := Font;
-  ButtonHeight := Canvas.TextHeight('Xg') + 2 * ButtonPadY;
+  ButtonHeight := Canvas.TextHeight('Xg') + 2 * Px(ButtonPadY);
   Canvas.Font.Style := [fsBold];
   Canvas.Font.Size := Max(Font.Size, 13) + 1;
   TitleHeight := Canvas.TextHeight('Xg');
   Canvas.Font := FConsole.Font;
   LineHeight := Max(1, Canvas.TextHeight('Xg'));
-  H := 2 * Pad + TitleHeight;
+  H := 2 * Px(Pad) + TitleHeight;
   if (FIcon <> nil) and not FIcon.Empty then
-    Inc(H, IconSize + Gap);
-  DetailTop := H - Pad + Gap;
+    Inc(H, Px(IconSize) + Px(Gap));
+  DetailTop := H - Px(Pad) + Px(Gap);
   if Length(FButtons) > 0 then
-    Inc(H, Gap + ButtonHeight);
-  Room := Parent.ClientHeight - 2 * Margin - H - Gap;
+    Inc(H, Px(Gap) + ButtonHeight);
+  Room := Parent.ClientHeight - 2 * Px(Margin) - H - Px(Gap);
   FShown := Max(0, Min(Min(FConsole.LineCount, MaxShown), Room div LineHeight));
   if FShown > 0 then
-    Inc(H, Gap + FShown * LineHeight);
+    Inc(H, Px(Gap) + FShown * LineHeight);
   SetBounds((Parent.ClientWidth - W) div 2, (Parent.ClientHeight - H) div 2, W, H);
   { The bar goes in the right padding, as far in as the close button. }
-  FConsole.SetBounds(Pad, DetailTop, W - Pad - Pad div 2, FShown * LineHeight);
+  FConsole.SetBounds(Px(Pad), DetailTop, W - Px(Pad) - Px(Pad) div 2, FShown * LineHeight);
   FConsole.Visible := FShown > 0;
-  FCloseRect := Rect(W - Pad - CloseSize + 10, Pad - CloseSize div 2 - 2,
-    W - Pad + 10, Pad + CloseSize div 2 - 2);
+  FCloseRect := Rect(W - Px(Pad) - Px(CloseSize) + 10, Px(Pad) - Px(CloseSize) div 2 - 2,
+    W - Px(Pad) + 10, Px(Pad) + Px(CloseSize) div 2 - 2);
   { The buttons from the right: the first, the default, at the right
     end, as macOS places it. }
   SetLength(FButtonRects, Length(FButtons));
   Canvas.Font := Font;
-  X := W - Pad;
+  X := W - Px(Pad);
   for i := 0 to High(FButtons) do
   begin
-    FButtonRects[i] := Rect(X - Canvas.TextWidth(FButtons[i]) - 2 * ButtonPadX,
-      H - Pad - ButtonHeight, X, H - Pad);
-    X := FButtonRects[i].Left - ButtonGap;
+    FButtonRects[i] := Rect(X - Canvas.TextWidth(FButtons[i]) - 2 * Px(ButtonPadX),
+      H - Px(Pad) - ButtonHeight, X, H - Px(Pad));
+    X := FButtonRects[i].Left - Px(ButtonGap);
   end;
 end;
 
@@ -409,7 +409,7 @@ begin
   Canvas.Pen.Color := FLine;
   Canvas.Brush.Style := bsClear;
   Canvas.Rectangle(0, 0, Width, Height);
-  Y := Pad;
+  Y := Px(Pad);
 
   if (FIcon <> nil) and not FIcon.Empty then
   begin
@@ -419,13 +419,13 @@ begin
     if FIconBitmap = nil then
     begin
       FIcon.Current := FIcon.GetBestIndexForSize(
-        Size(Round(IconSize * GetCanvasScaleFactor), Round(IconSize * GetCanvasScaleFactor)));
+        Size(Round(Px(IconSize) * GetCanvasScaleFactor), Round(Px(IconSize) * GetCanvasScaleFactor)));
       FIconBitmap := TBitmap.Create;
       FIconBitmap.LoadFromRawImage(FIcon.RawImage, False);
     end;
-    Canvas.StretchDraw(Rect((Width - IconSize) div 2, Y, (Width + IconSize) div 2,
-      Y + IconSize), FIconBitmap);
-    Inc(Y, IconSize + Gap);
+    Canvas.StretchDraw(Rect((Width - Px(IconSize)) div 2, Y, (Width + Px(IconSize)) div 2,
+      Y + Px(IconSize)), FIconBitmap);
+    Inc(Y, Px(IconSize) + Px(Gap));
   end;
 
   { The dots follow the title without moving it. }
@@ -464,7 +464,7 @@ begin
       end;
       Canvas.RoundRect(Left, Top, Right, Bottom, 8, 8);
       Canvas.Brush.Style := bsClear;
-      Canvas.TextOut(Left + ButtonPadX, Top + ButtonPadY, FButtons[i]);
+      Canvas.TextOut(Left + Px(ButtonPadX), Top + Px(ButtonPadY), FButtons[i]);
     end;
   end;
 

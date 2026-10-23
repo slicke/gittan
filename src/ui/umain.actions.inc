@@ -63,7 +63,9 @@ begin
   for i := 0 to High(ContextChoices) do
     if ContextChoices[i] = FSettings.ContextLines then
       FContextLines := ContextChoices[i];
-  { The window where it was, if that is still on a screen. }
+  { The window where it was, if that is still on a screen. The sizes are
+    kept at 96 DPI: this runs in FormCreate, and the form scales its size
+    and the tree's width to the screen's after it, its place not. }
   if (FSettings.Width > 0) and (FSettings.Height > 0) then
   begin
     R := Rect(FSettings.Left, FSettings.Top, FSettings.Left + FSettings.Width,
@@ -119,7 +121,9 @@ begin
     FSettings.Width := Width;
     FSettings.Height := Height;
   end;
-  FSettings.TreeWidth := FTreePanel.Width;
+  FSettings.Width := MulDiv(FSettings.Width, 96, Screen.PixelsPerInch);
+  FSettings.Height := MulDiv(FSettings.Height, 96, Screen.PixelsPerInch);
+  FSettings.TreeWidth := MulDiv(FTreePanel.Width, 96, Screen.PixelsPerInch);
   FSettings.NavOpen := not FSideNav.Collapsed;
   FSettings.RepoFilesOpen := FRepoHeader.Expanded;
   FSettings.SubmodulesOpen := FSubHeader.Expanded;
