@@ -2351,7 +2351,8 @@ end;
 
 { How far a branch is behind the default branch: the commits of
   origin/main it lacks, none for a branch that tracks it, for the
-  default branch's own name, or on a detached HEAD. }
+  default branch's own name, or on a detached HEAD. A branch without an
+  upstream also counts its commits on no remote. }
 procedure TGitRepoTest.TestBehindDefault;
 var
   Main: string;
@@ -2378,14 +2379,21 @@ begin
   AssertEquals(2, FRepo.BehindDefault('side', 'origin/main'));
   AssertTrue(FRepo.Snapshot(Snap));
   AssertEquals(2, Snap.BehindDefault);
+  AssertEquals('side is on no remote', 1, Snap.NotOnRemote);
+  AssertEquals(1, FRepo.NotOnRemotes);
+  AssertTrue('its commit is not pushed', Snap.Recent[0].Unpushed);
+  AssertFalse('the history is on origin/main', Snap.Recent[1].Unpushed);
   AssertEquals('the default branch itself', 0, FRepo.BehindDefault('main', 'origin/main'));
   AssertEquals('no default branch', 0, FRepo.BehindDefault('side', ''));
   Git(['branch', '-q', '-u', 'origin/main']);
   AssertEquals('tracks it', 0, FRepo.BehindDefault('side', 'origin/main'));
+  AssertTrue(FRepo.Snapshot(Snap));
+  AssertEquals('with an upstream', -1, Snap.NotOnRemote);
   Git(['branch', '-q', '--unset-upstream']);
   Git(['checkout', '-q', '--detach']);
   AssertTrue(FRepo.Snapshot(Snap));
   AssertEquals('detached', 0, Snap.BehindDefault);
+  AssertEquals('detached', -1, Snap.NotOnRemote);
 end;
 
 { An amend of a pushed commit leaves the upstream's tip in the branch's

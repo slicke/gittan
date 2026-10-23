@@ -416,6 +416,9 @@ type
     { The branch was rewritten since it was pushed (the snapshot's
       Rewritten): Force Push is the next step, not Pull. }
     FRewritten: boolean;
+    { A branch without an upstream: its commits on no remote, -1 without
+      a remote (the snapshot's NotOnRemote). }
+    FNotOnRemote: integer;
     { Rebase or Merge in the summary's row of a branch behind the default
       branch fetches first: the ref to rebase onto (FAfterFetchRebase) or
       merge once the fetch is done, and the branch it is for; '' while
@@ -2179,6 +2182,7 @@ resourcestring
   rsBehindHint = '%d commits not pulled yet';
   rsInSyncHint = 'Up to date with upstream';
   rsNoUpstreamHint = 'No upstream branch';
+  rsNotOnRemoteHint = '%d commits on no remote yet';
   rsGraphHint = 'Click to pull, push or show the commit graph';
   rsOperationStep = '%s · %d of %d';
   rsResolveStep = 'Resolve %d conflicts';
@@ -3320,7 +3324,7 @@ begin
   if FHasUpstream then
     FStatus.SetSync(FAhead, FBehind, True)
   else
-    FStatus.SetSync(0, 0, True);
+    FStatus.SetSync(Max(0, FNotOnRemote), 0, True);
   { The counts, or that there is nothing to push or pull, then what a
     click does. }
   Sync := '';
@@ -3332,6 +3336,8 @@ begin
   begin
     if FHasUpstream then
       Sync := rsInSyncHint
+    else if FNotOnRemote > 0 then
+      Sync := rsNoUpstreamHint + LineEnding + Format(rsNotOnRemoteHint, [FNotOnRemote])
     else
       Sync := rsNoUpstreamHint;
   end;
@@ -4998,7 +5004,8 @@ begin
   Branch := FBranch;
   if FOperation <> '' then
     Branch := Branch + ' · ' + OperationLabel;
-  FSummary.SetCommits(ASnap.Recent, FAhead, FBehind, FHasUpstream);
+  FNotOnRemote := ASnap.NotOnRemote;
+  FSummary.SetCommits(ASnap.Recent, FAhead, FBehind, FHasUpstream, FNotOnRemote);
   { Not in the middle of a merge or rebase, which the Commit section
     finishes first. }
   if FOperation = '' then

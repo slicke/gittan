@@ -98,6 +98,9 @@ type
     FCommits: TGittanCommitLines;
     FAhead, FBehind: integer;
     FHasUpstream: boolean;
+    { A branch without an upstream: how many of its commits are on no
+      remote, -1 without a remote (or with an upstream). }
+    FNotOnRemote: integer;
     { The upstream is deleted on the remote: the sync line says so, in
       red after a cross, in place of the counts. }
     FUpstreamGone: boolean;
@@ -172,6 +175,7 @@ type
     procedure PaintCleanHeader(Y: integer);
     procedure PaintCleanCentered;
     function PaintSync(X, Y: integer; ADraw: boolean = True): integer;
+    function HasSyncLine: boolean;
     procedure PaintHeader(var Y: integer);
     procedure PaintRow(AIndex, ATop: integer);
     procedure PaintBar(X, Y: integer; const AStat: TGittanFileStat; AMax: integer);
@@ -219,10 +223,12 @@ type
     {** Shows ACommits, the newest commits of HEAD, under "Working tree
       clean", and after it how many commits the branch is ahead of
       (AAhead) and behind (ABehind) its upstream when it has one
-      (AHasUpstream). The commits show only while there are no changed
-      files and some are not pushed. }
+      (AHasUpstream), or, without one, how many are on no remote yet
+      (ANotOnRemote; -1 says nothing, as without a remote). The commits
+      show only while there are no changed files and some are not
+      pushed. }
     procedure SetCommits(const ACommits: TGittanCommitLines;
-      AAhead, ABehind: integer; AHasUpstream: boolean);
+      AAhead, ABehind: integer; AHasUpstream: boolean; ANotOnRemote: integer = -1);
     {** Whether the upstream is deleted on the remote, which the sync
       line then says in place of the counts. }
     procedure SetUpstreamGone(AGone: boolean);
@@ -282,6 +288,8 @@ resourcestring
   rsNotPushed = '%d not pushed';
   rsNotPulled = '%d not pulled';
   rsInSync = 'up to date with upstream';
+  rsNotOnRemote = '%d not on the remote yet';
+  rsBranchNotOnRemote = 'branch not on the remote yet';
   rsBehindOne = '1 commit behind %s';
   rsBehindMany = '%d commits behind %s';
   rsBehindRebase = 'Rebase';
@@ -346,6 +354,7 @@ begin
   FLinkHot := -1;
   FCommitHot := -1;
   FBehindHot := -1;
+  FNotOnRemote := -1;
   FNotesWidth := -1;
   FCardWidth := -1;
   FLink := clHighlight;
@@ -391,20 +400,24 @@ begin
 end;
 
 procedure TGittanSummary.SetCommits(const ACommits: TGittanCommitLines;
-  AAhead, ABehind: integer; AHasUpstream: boolean);
+  AAhead, ABehind: integer; AHasUpstream: boolean; ANotOnRemote: integer);
 begin
   FCommits := Copy(ACommits);
   FAhead := AAhead;
   FBehind := ABehind;
   FHasUpstream := AHasUpstream;
+  if AHasUpstream then
+    FNotOnRemote := -1
+  else
+    FNotOnRemote := ANotOnRemote;
   FCommitHot := -1;
   UpdateHeight;
   Invalidate;
 end;
 
-{ The commits are listed while some wait to be pushed; a branch that is
-  pushed, or has no upstream to push to, has nothing to act on, so its
-  clean state stands alone. }
+{ The commits are listed while some wait to be pushed, to the upstream
+  or, for a branch without one, to the remote; a branch that is pushed
+  has nothing to act on, so its clean state stands alone. }
 procedure TGittanSummary.SetUpstreamGone(AGone: boolean);
 begin
   if FUpstreamGone = AGone then
@@ -497,8 +510,8 @@ end;
 
 function TGittanSummary.ShowsCommits: boolean;
 begin
-  Result := (Length(FStats) = 0) and (Length(FCommits) > 0) and FHasUpstream
-    and (FAhead > 0);
+  Result := (Length(FStats) = 0) and (Length(FCommits) > 0) and
+    ((FHasUpstream and (FAhead > 0)) or (FNotOnRemote > 0));
 end;
 
 { Under a clean tree the commits take the place of the file rows, after
@@ -549,7 +562,7 @@ begin
     Exit(0);
   ACanvas.Font.Size := CleanFontSize;
   Result := ACanvas.TextHeight('Xg');
-  if FHasUpstream then
+  if HasSyncLine then
     Inc(Result, 2 + BodyHeight);
   Result := Max(Result, HeaderCheck);
 end;
@@ -564,7 +577,7 @@ begin
   BodyHeight := ACanvas.TextHeight('Xg');
   ACanvas.Font.Size := CleanFontSize;
   Result := CenterCheck + Gap + ACanvas.TextHeight('Xg');
-  if FHasUpstream then
+  if HasSyncLine then
     Inc(Result, 4 + BodyHeight);
 end;
 
@@ -1574,7 +1587,7 @@ begin
   TextHeight := Canvas.TextHeight('Xg');
   DrawCheck(Pad, Y + (BlockHeight - HeaderCheck) div 2, HeaderCheck);
   X := Pad + HeaderCheck + Gap;
-  TextY := Y + (BlockHeight - TextHeight - IfThen(FHasUpstream, 2 + BodyHeight, 0)) div 2;
+  TextY := Y + (BlockHeight - TextHeight - IfThen(HasSyncLine, 2 + BodyHeight, 0)) div 2;
   Canvas.Brush.Style := bsClear;
   Canvas.Font.Color := FText;
   Canvas.TextOut(X, TextY, CleanText);
@@ -1637,7 +1650,8 @@ begin
   Canvas.Brush.Style := bsClear;
   { The line is a chip while a click drops the sync list: filled under
     the mouse, as the branch chip is. }
-  if ADraw and Assigned(FOnSyncClick) and FHasUpstream and not FUpstreamGone then
+  if ADraw and Assigned(FOnSyncClick) and HasSyncLine and not
+    (FHasUpstream and FUpstreamGone) then
   begin
     FSyncRect := Rect(X - ChipPadX, Y - ChipPadY, X + PaintSync(0, 0, False) + ChipPadX,
       Y + Canvas.TextHeight('Xg') + ChipPadY);
@@ -1661,8 +1675,19 @@ begin
       Part('↓ ' + Format(rsNotPulled, [FBehind]), FText);
     if (FAhead = 0) and (FBehind = 0) then
       Part(rsInSync, FDim);
-  end;
+  end
+  else if FNotOnRemote > 0 then
+    Part('↑ ' + Format(rsNotOnRemote, [FNotOnRemote]), FLink)
+  else if FNotOnRemote = 0 then
+    Part(rsBranchNotOnRemote, FDim);
   Result := X - StartX;
+end;
+
+{ A line under the clean text: the upstream's counts, or, for a branch
+  without one in a repository with a remote, that it is not there. }
+function TGittanSummary.HasSyncLine: boolean;
+begin
+  Result := FHasUpstream or (FNotOnRemote >= 0);
 end;
 
 { The heading, then a row per commit, the dots joined by a line down the

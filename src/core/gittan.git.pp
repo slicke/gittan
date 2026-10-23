@@ -129,6 +129,11 @@ type
     {** How many commits of DefaultBranch the branch lacks, from
       BehindDefault; 0 on a detached HEAD. }
     BehindDefault: integer;
+    {** For a branch without an upstream in a repository with a remote,
+      how many of its commits no remote-tracking branch has, from
+      NotOnRemotes (0 when all are there); -1 with an upstream, without
+      a remote or on a detached HEAD. }
+    NotOnRemote: integer;
     {** The branch and its upstream have both moved on, and the
       upstream's tip is one the branch had (UpstreamInReflog): the
       branch was rewritten since it was pushed, by a rebase or an amend,
@@ -738,6 +743,10 @@ type
       here, and no one else pushed to it since the last fetch. False
       without an upstream or a reflog. }
     function UpstreamInReflog(const ABranch: string): boolean;
+    {** How many commits HEAD reaches that no remote-tracking branch
+      does (as of the last fetch): what a push of a branch new on the
+      remote would bring there. -1 when git cannot tell. }
+    function NotOnRemotes: integer;
     {** The merge base of ARef and HEAD, the commit the branch left ARef
       at; false when either is unknown or they share no history. }
     function MergeBase(const ARef: string; out AHash: string): boolean;
@@ -5317,6 +5326,10 @@ begin
   ASnap.HasUpstream := AheadBehind(ASnap.Ahead, ASnap.Behind);
   if not ASnap.Detached then
     ASnap.BehindDefault := BehindDefault(ASnap.Branch, ASnap.DefaultBranch);
+  if ASnap.HasUpstream or ASnap.Detached or (RemoteFor('') = '') then
+    ASnap.NotOnRemote := -1
+  else
+    ASnap.NotOnRemote := NotOnRemotes;
   ASnap.Rewritten := ASnap.HasUpstream and not ASnap.Detached and (ASnap.Ahead > 0) and
     (ASnap.Behind > 0) and UpstreamInReflog(ASnap.Branch);
   ASnap.Operation := Operation;
@@ -5364,6 +5377,15 @@ begin
   Result := CountCommits('HEAD', ADefault);
   if Result < 0 then
     Result := 0;
+end;
+
+function TGittanRepo.NotOnRemotes: integer;
+var
+  Output: string;
+begin
+  if (FRoot = '') or not RunGit(FRoot, ['rev-list', '--count', 'HEAD', '--not', '--remotes'],
+    Output) or not TryStrToInt(Trim(Output), Result) then
+    Result := -1;
 end;
 
 { The upstream's commits none of the entries reach are counted: none
@@ -5461,7 +5483,8 @@ end;
 { The fields are split at unit separators, the subject last since it
   may hold anything. The commits not pushed are the newest of those on
   HEAD and not on the upstream: at most AMax of them, in the same order
-  as the log, so every one of them in the log's first AMax is found. }
+  as the log, so every one of them in the log's first AMax is found.
+  Without an upstream they are those on no remote, when there is one. }
 function TGittanRepo.RecentCommits(out ACommits: TGittanCommitLines;
   AMax: integer): boolean;
 var
@@ -5477,7 +5500,9 @@ begin
   if not Result then
     Exit;
   if not RunGit(FRoot, ['rev-list', '-n', IntToStr(AMax), '@{upstream}..HEAD'], Ahead) then
-    Ahead := '';
+    if (RemoteFor('') = '') or not RunGit(FRoot, ['rev-list', '-n', IntToStr(AMax), 'HEAD',
+      '--not', '--remotes'], Ahead) then
+      Ahead := '';
   Lines := TStringList.Create;
   try
     Lines.Text := Output;
