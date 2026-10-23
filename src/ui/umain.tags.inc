@@ -28,12 +28,6 @@ const
   tmDeleteRemote = 8;
   tmBrowse = 9;
 
-function TForm1.TagBusy: boolean;
-begin
-  Result := (FRepo.Root = '') or (FCommitJob <> nil) or (FRemoteJob <> nil) or
-    (FOperation <> '');
-end;
-
 procedure TForm1.ShowTagList(const AScreenRect: TRect);
 var
   i: integer;
@@ -117,7 +111,7 @@ begin
     (FTagRows[AIndex] > High(FTags)) then
     Exit;
   FMenuTag := FTags[FTagRows[AIndex]];
-  Busy := TagBusy;
+  Busy := not RepoReady;
   Remote := StringReplace(FTagRemote, '&', '&&', [rfReplaceAll]);
   FTagMenu.Items.Clear;
   Add(rsCaShow, tmShow, True);
@@ -194,7 +188,7 @@ end;
   tag too. }
 procedure TForm1.CheckoutTagAsk(const ATag: TGittanTag);
 begin
-  if TagBusy then
+  if not RepoReady then
     Exit;
   case QuestionDlg(rsTagCheckoutTitle, Format(rsTagCheckoutAsk, [ATag.Name]), mtConfirmation,
       [mrYes, rsTagCheckoutAction, 'IsDefault', mrNo, rsCaBranch, mrCancel, rsCancelButton,

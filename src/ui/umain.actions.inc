@@ -1502,23 +1502,11 @@ end;
   is not one of the new side (a gap, a filler, a deleted line, the old
   side, or a history row, whose lines are of several versions). }
 function TForm1.FileLineOfRow(AEd: TATSynEdit; ARow: integer): integer;
-var
-  Line: integer;
 begin
-  Result := 0;
-  if (AEd <> Edit) or (ARow < 0) then
-    Exit;
-  case FView of
-    gvFile:
-      Result := ARow + 1;
-    gvChanges:
-      if ARow <= High(FRows) then
-      begin
-        Line := FRows[ARow].Line;
-        if (Line >= 0) and (Line <= High(FNewNum)) then
-          Result := FNewNum[Line];
-      end;
-  end;
+  if AEd = Edit then
+    Result := FileLineOfRow(ARow)
+  else
+    Result := 0;
 end;
 
 procedure TForm1.MenuOpenOnGitHubClick(Sender: TObject);

@@ -27,10 +27,8 @@ begin
       if Copy(FStats[i].Path, 1, Length(Prefix)) = Prefix then
         AList.Add(FStats[i].Path);
   end
-  else if FContextPath <> '' then
-    for i := 0 to High(FStats) do
-      if FStats[i].Path = FContextPath then
-        AList.Add(FContextPath);
+  else if IsChangedPath(FContextPath) then
+    AList.Add(FContextPath);
 end;
 
 function TForm1.CanRevert: boolean;
@@ -138,15 +136,8 @@ begin
 end;
 
 function TForm1.IsChangedPath(const APath: string): boolean;
-var
-  i: integer;
 begin
-  Result := False;
-  if APath = '' then
-    Exit;
-  for i := 0 to High(FStats) do
-    if FStats[i].Path = APath then
-      Exit(True);
+  Result := StatIndexOf(APath) >= 0;
 end;
 
 { The reverts of the previous repository are not for this one. }

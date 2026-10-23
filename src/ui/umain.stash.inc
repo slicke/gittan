@@ -48,12 +48,6 @@ begin
       Exit(i);
 end;
 
-function TForm1.StashBusy: boolean;
-begin
-  Result := (FRepo.Root = '') or (FCommitJob <> nil) or (FRemoteJob <> nil) or
-    (FOperation <> '');
-end;
-
 procedure TForm1.ShowStashList(const AScreenRect: TRect);
 var
   i: integer;
@@ -73,7 +67,7 @@ begin
   FStashPopup.Clear;
   FListedStashes := Copy(FStashes);
   FStashRows := nil;
-  if (FFileCount > 0) and not StashBusy and (FConflictFiles = 0) then
+  if (FFileCount > 0) and RepoReady and (FConflictFiles = 0) then
   begin
     FStashPopup.Add(rsStashNewRow);
     AddRow(StashRowNew);
@@ -131,7 +125,7 @@ begin
     (FStashRows[AIndex] > High(FListedStashes)) then
     Exit;
   FMenuStash := FListedStashes[FStashRows[AIndex]];
-  Busy := StashBusy;
+  Busy := not RepoReady;
   FStashMenu.Items.Clear;
   Add(rsSmApply, smApply, not Busy);
   Add(rsSmPop, smPop, not Busy);
@@ -172,7 +166,7 @@ var
   Before, Count: integer;
   Ok: boolean;
 begin
-  if StashBusy or (FConflictFiles > 0) then
+  if not RepoReady or (FConflictFiles > 0) then
     Exit;
   Paths := TStringList.Create;
   try
@@ -232,7 +226,7 @@ var
   Ok, Conflicts: boolean;
   Err: string;
 begin
-  if StashBusy then
+  if not RepoReady then
     Exit;
   StopWatcher;
   try
@@ -290,7 +284,7 @@ procedure TForm1.BranchFromStashAsk(AStash: TGittanStash);
 var
   Values: array of string;
 begin
-  if StashBusy then
+  if not RepoReady then
     Exit;
   SetLength(Values, 1);
   Values[0] := '';
@@ -385,7 +379,7 @@ begin
   if FStashAllItem = nil then
     Exit;
   Has := (FRepo <> nil) and (FRepo.Root <> '');
-  Busy := not Has or StashBusy;
+  Busy := not Has or not RepoReady;
   Chosen := 0;
   if Has and CommitChoosing then
     for i := 0 to High(FStats) do

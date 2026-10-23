@@ -91,7 +91,7 @@ begin
     Exit;
   FActionCommit := ACommit;
   Jobs := (FCommitJob <> nil) or (FRemoteJob <> nil);
-  Busy := (FOperation <> '') or Jobs;
+  Busy := RepoBusy;
   InHead := FRepo.IsAncestor(ACommit.Hash, 'HEAD');
   IsMerge := Length(ACommit.Parents) > 1;
   IsHead := False;

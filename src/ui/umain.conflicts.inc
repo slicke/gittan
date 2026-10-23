@@ -76,12 +76,8 @@ function TForm1.IsConflictPath(const APath: string): boolean;
 var
   i: integer;
 begin
-  Result := False;
-  if APath = '' then
-    Exit;
-  for i := 0 to High(FStats) do
-    if FStats[i].Path = APath then
-      Exit(FStats[i].Kind = ckConflict);
+  i := StatIndexOf(APath);
+  Result := (i >= 0) and (FStats[i].Kind = ckConflict);
 end;
 
 { How many conflicts are left in the file APath on disk, by its markers. }

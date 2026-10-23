@@ -309,20 +309,14 @@ end;
   resolved. A submodule's node is a leaf with a stat of its own. }
 function TForm1.CommitStatOf(ANode: TTreeNode): integer;
 var
-  Path: string;
   i: integer;
 begin
   Result := -1;
   if ANode.Count > 0 then
     Exit;
-  Path := ANode.GetTextPath;
-  for i := 0 to High(FStats) do
-    if FStats[i].Path = Path then
-    begin
-      if FStats[i].Kind <> ckConflict then
-        Result := i;
-      Exit;
-    end;
+  i := StatIndexOf(ANode.GetTextPath);
+  if (i >= 0) and (FStats[i].Kind <> ckConflict) then
+    Result := i;
 end;
 
 { Sets every node's box: a file's from CommitChosen, mixed when changes

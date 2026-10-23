@@ -915,7 +915,7 @@ type
     procedure DiscardThis(const ABlock: TGittanDiscard);
     { umain.leaveout.inc }
     function CanLeaveOut: boolean;
-    function CommitStatIndex(const APath: string): integer;
+    function StatIndexOf(const APath: string): integer;
     function ShownFileChosen: boolean;
     procedure ApplyLeftOut;
     function LineLeftOut(ALine: integer): boolean;
@@ -1027,6 +1027,8 @@ type
     procedure SetFoldBand(AEd: TATSynEdit; AVisible: boolean);
     function FoldAction: TATEditorActionIfFolded;
     function FileLineOfRow(ARow: integer): integer;
+    function RepoBusy: boolean;
+    function RepoReady: boolean;
     function FoldPath: string;
     procedure KeepFolds;
     procedure RestoreFolds;
@@ -1245,7 +1247,6 @@ type
     procedure ShowUpstreamList(const ABranch: string; const AScreenRect: TRect);
     procedure UpstreamPopupPick(Sender: TObject; AIndex: integer);
     procedure MenuUpstreamClick(Sender: TObject);
-    function TagBusy: boolean;
     procedure ShowTagList(const AScreenRect: TRect);
     procedure TagPopupPick(Sender: TObject; AIndex: integer);
     procedure TagContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
@@ -1266,7 +1267,6 @@ type
     function ResetAsk(const AHash, AShort: string; AMode: TGittanResetMode): boolean;
     function StashLabel(const AStash: TGittanStash): string;
     function StashOfBase: integer;
-    function StashBusy: boolean;
     procedure ShowStashList(const AScreenRect: TRect);
     procedure StashPopupPick(Sender: TObject; AIndex: integer);
     procedure StashContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
@@ -4388,6 +4388,29 @@ begin
     Result := FNewNum[FRows[ARow].Line];
 end;
 
+{ An operation (merge, rebase, cherry-pick, bisect...) is under way, or a
+  commit or a remote job runs: nothing that moves HEAD or the index may
+  start. }
+function TForm1.RepoBusy: boolean;
+begin
+  Result := (FOperation <> '') or (FCommitJob <> nil) or (FRemoteJob <> nil);
+end;
+
+{ A repository is open and not busy. }
+function TForm1.RepoReady: boolean;
+begin
+  Result := (FRepo.Root <> '') and not RepoBusy;
+end;
+
+{ The index in FStats of APath, -1 when it is not changed. }
+function TForm1.StatIndexOf(const APath: string): integer;
+begin
+  for Result := 0 to High(FStats) do
+    if FStats[Result].Path = APath then
+      Exit;
+  Result := -1;
+end;
+
 { The path of the shown text, for KeepFolds. }
 function TForm1.FoldPath: string;
 begin
@@ -5641,13 +5664,11 @@ begin
   { Asked before the header names the next file, not when the text is
     replaced further down. }
   FlushEdit;
+  i := StatIndexOf(APath);
   Result := False;
   { A binary file has no lines to diff; a new one would be read as
     text. }
-  Binary := False;
-  for i := 0 to High(FStats) do
-    if FStats[i].Path = APath then
-      Binary := FStats[i].Binary;
+  Binary := (i >= 0) and FStats[i].Binary;
   Lines := TStringList.Create;
   try
     if not Binary and not FRepo.FileChanges(APath, Lines) then
@@ -5681,23 +5702,21 @@ begin
   FConflictRoles := nil;
   FConflictStarts := nil;
   FConflictEnds := nil;
-  for i := 0 to High(FStats) do
-    if FStats[i].Path = APath then
+  if i >= 0 then
+  begin
+    FHeader.SetFile(APath, StatIcon(FStats[i]));
+    FHeader.SetCounts(FStats[i].Added, FStats[i].Deleted, FStats[i].Binary);
+    FHeader.SetStage(FStats[i].Staged, FStats[i].Unstaged);
+    if FStats[i].Kind = ckConflict then
     begin
-      FHeader.SetFile(APath, StatIcon(FStats[i]));
-      FHeader.SetCounts(FStats[i].Added, FStats[i].Deleted, FStats[i].Binary);
-      FHeader.SetStage(FStats[i].Staged, FStats[i].Unstaged);
-      if FStats[i].Kind = ckConflict then
-      begin
-        FConflictRoles := ConflictRoles(FChangeLines);
-        FConflictStarts := ConflictStarts(FConflictRoles, FChangeLines);
-        SetLength(FConflictEnds, Length(FConflictStarts));
-        for c := 0 to High(FConflictStarts) do
-          FConflictEnds[c] := ConflictEnd(FChangeLines, FConflictRoles, FConflictStarts[c]);
-        FHeader.SetActions([rsUseMine, rsUseTheirs, rsMarkResolved]);
-      end;
-      Break;
+      FConflictRoles := ConflictRoles(FChangeLines);
+      FConflictStarts := ConflictStarts(FConflictRoles, FChangeLines);
+      SetLength(FConflictEnds, Length(FConflictStarts));
+      for c := 0 to High(FConflictStarts) do
+        FConflictEnds[c] := ConflictEnd(FChangeLines, FConflictRoles, FConflictStarts[c]);
+      FHeader.SetActions([rsUseMine, rsUseTheirs, rsMarkResolved]);
     end;
+  end;
   if IsImagePath(APath) then
   begin
     ShowImageChanges(APath);
@@ -6252,12 +6271,9 @@ begin
   if (Node <> nil) and (Node.Data <> nil) then
   begin
     Path := Node.GetTextPath;
-    for i := 0 to High(FStats) do
-      if FStats[i].Path = Path then
-      begin
-        Tip := StatHint(FStats[i]) + FileThreadsHint(Path);
-        Break;
-      end;
+    i := StatIndexOf(Path);
+    if i >= 0 then
+      Tip := StatHint(FStats[i]) + FileThreadsHint(Path);
   end
   else if Node <> nil then
   begin

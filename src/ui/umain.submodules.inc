@@ -86,9 +86,9 @@ begin
   begin
     Result := Result + #0 + FSubmodules[i].Path + #1 + FSubmodules[i].Recorded +
       #1 + FSubmodules[i].Branch + #1 + FSubmodules[i].Url;
-    for j := 0 to High(FStats) do
-      if FStats[j].Path = FSubmodules[i].Path then
-        Result := Result + #1 + IntToStr(Ord(FStats[j].Kind));
+    j := StatIndexOf(FSubmodules[i].Path);
+    if j >= 0 then
+      Result := Result + #1 + IntToStr(Ord(FStats[j].Kind));
   end;
 end;
 
@@ -108,13 +108,10 @@ begin
   SetLength(FSubChanges, Length(FSubmodules));
   for i := 0 to High(FSubmodules) do
   begin
-    FSubChanges[i] := Default(TGittanSubmoduleChange);
-    for j := 0 to High(FStats) do
-      if FStats[j].Path = FSubmodules[i].Path then
-      begin
-        FSubChanges[i] := CompareSubmodule(FRepo.Root, FSubmodules[i], FromSide, ToSide);
-        Break;
-      end;
+    if IsChangedPath(FSubmodules[i].Path) then
+      FSubChanges[i] := CompareSubmodule(FRepo.Root, FSubmodules[i], FromSide, ToSide)
+    else
+      FSubChanges[i] := Default(TGittanSubmoduleChange);
   end;
   if SubmoduleKey <> FSubKey then
     StartSubmoduleJobs;
@@ -224,10 +221,11 @@ begin
     begin
       Node := FSubTree.Items.AddChild(nil, SubmoduleRowText(i));
       Node.Data := Pointer(PtrInt(i + 1));
-      RowIcon := iconFolder;
-      for j := 0 to High(FStats) do
-        if FStats[j].Path = FSubmodules[i].Path then
-          RowIcon := FolderIcon(FStats[j].Kind);
+      j := StatIndexOf(FSubmodules[i].Path);
+      if j >= 0 then
+        RowIcon := FolderIcon(FStats[j].Kind)
+      else
+        RowIcon := iconFolder;
       Node.ImageIndex := RowIcon;
       Node.SelectedIndex := RowIcon;
       if (i <= High(FSubInfos)) and (FSubInfos[i].State in [smBehind, smDiverged, smNotFetched]) then

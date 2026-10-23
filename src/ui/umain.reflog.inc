@@ -124,7 +124,7 @@ begin
     (FReflogRows[AIndex] > High(FReflog)) then
     Exit;
   FMenuReflog := FReflog[FReflogRows[AIndex]];
-  Busy := (FOperation <> '') or (FCommitJob <> nil) or (FRemoteJob <> nil);
+  Busy := RepoBusy;
   FReflogMenu.Items.Clear;
   Add(nil, rsCaShow, rlShow);
   Add(nil, rsCaCompare, rlCompare);
@@ -168,8 +168,7 @@ begin
         else
           Mode := rmMixed;
       end;
-      if (FOperation <> '') or (FCommitJob <> nil) or (FRemoteJob <> nil) or
-        not ResetAsk(E.Commit, Short, Mode) then
+      if RepoBusy or not ResetAsk(E.Commit, Short, Mode) then
         Exit;
       StopWatcher;
       try

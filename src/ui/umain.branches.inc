@@ -70,7 +70,7 @@ begin
     Ref := BranchName;
   FMenuBranch := BranchName;
   FMenuBranchRef := Ref;
-  Busy := (FOperation <> '') or (FCommitJob <> nil) or (FRemoteJob <> nil);
+  Busy := RepoBusy;
   FBranchMenu.Items.Clear;
   if BranchName <> FBranch then
   begin
@@ -288,7 +288,7 @@ begin
   if FMergeItem = nil then
     Exit;
   Has := (FRepo <> nil) and (FRepo.Root <> '');
-  Busy := (FOperation <> '') or (FCommitJob <> nil) or (FRemoteJob <> nil);
+  Busy := RepoBusy;
   if Has and (FBranch <> '') then
     Current := StringReplace(FBranch, '&', '&&', [rfReplaceAll])
   else
@@ -440,7 +440,7 @@ begin
     Exit;
   Mode := TGittanBranchListMode((Sender as TMenuItem).Tag);
   if (Mode in [blMerge, blRebase]) and
-    ((FOperation <> '') or (FCommitJob <> nil) or (FRemoteJob <> nil) or (FBranch = '')) then
+    (RepoBusy or (FBranch = '')) then
     Exit;
   ShowBranchList(Mode, FStatus.PartScreenRect(spBranch));
 end;
@@ -464,8 +464,7 @@ var
   Ok, Conflicts: boolean;
 begin
   Branch := FBranch;
-  if (FRepo.Root = '') or (Branch = '') or (FOperation <> '') or (FCommitJob <> nil) or
-    (FRemoteJob <> nil) then
+  if not RepoReady or (Branch = '') then
     Exit;
   if not FRepo.CommitsToRebase(ARef, Count, Pushed) then
   begin
@@ -536,7 +535,7 @@ begin
   Base := FRepo.Base;
   Dots := Pos('...', Base);
   if (FRepo.Root = '') or (FBranch = '') or (Dots = 0) or (Base = FPullRange) or
-    (Base = FBlameRange) or (FOperation <> '') or (FCommitJob <> nil) or (FRemoteJob <> nil) then
+    (Base = FBlameRange) or RepoBusy then
     Exit;
   LeftSide := Copy(Base, 1, Dots - 1);
   if (LeftSide = FBranch) or (LeftSide = 'HEAD') then
@@ -629,8 +628,7 @@ end;
   first, and the rebase or merge is of what the remote has now. }
 procedure TForm1.SummaryBehindAction(Sender: TObject; ARebase: boolean);
 begin
-  if (FRepo.Root = '') or (FDefaultBranch = '') or (FBranch = '') or (FOperation <> '') or
-    (FRemoteJob <> nil) or (FCommitJob <> nil) then
+  if not RepoReady or (FDefaultBranch = '') or (FBranch = '') then
     Exit;
   FAfterFetchRef := FDefaultBranch;
   FAfterFetchBranch := FBranch;

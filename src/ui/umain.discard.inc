@@ -36,9 +36,9 @@ begin
   Result := False;
   if (FRepo = nil) or (FView <> gvChanges) or (FCurrentPath = '') or FRepo.IsRange then
     Exit;
-  for i := 0 to High(FStats) do
-    if FStats[i].Path = FCurrentPath then
-      Exit(not FStats[i].Binary and (FStats[i].Kind in [ckModified, ckRenamed, ckDeleted]));
+  i := StatIndexOf(FCurrentPath);
+  Result := (i >= 0) and not FStats[i].Binary and
+    (FStats[i].Kind in [ckModified, ckRenamed, ckDeleted]);
 end;
 
 { The diff line on row ARow: the new side's, or the old side's where

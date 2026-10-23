@@ -251,13 +251,8 @@ var
 begin
   FIgnoreMenu.Clear;
   FExcludeMenu.Clear;
-  Untracked := False;
-  for i := 0 to High(FStats) do
-    if FStats[i].Path = APath then
-    begin
-      Untracked := FStats[i].Kind = ckUntracked;
-      Break;
-    end;
+  i := StatIndexOf(APath);
+  Untracked := (i >= 0) and (FStats[i].Kind = ckUntracked);
   Patterns := IgnorePatterns(APath);
   for i := 0 to High(Patterns) do
   begin
