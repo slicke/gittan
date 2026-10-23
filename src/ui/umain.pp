@@ -90,6 +90,20 @@ type
     property OnStateClick: TTVExpandedEvent read FOnStateClick write FOnStateClick;
   end;
 
+  {** The colors the self-painted controls share in one appearance
+    (TForm1.Palette): the gutter's shade the bars and headers sit on,
+    the text and its dim kind, the divider lines, the popup lists'
+    background, hovered row and border, a raised part of a bar, the
+    accent, the added, deleted and warning tones, the pills, and the
+    note boxes of the Commit section (info, error, each with its border). }
+  TGittanPalette = record
+    Shade, Text, Dim, Line: TColor;
+    Popup, Hover, Border, Raised: TColor;
+    Accent, Added, Deleted, Warning: TColor;
+    Pill, PillText: TColor;
+    NoteInfo, NoteInfoLine, NoteError, NoteErrorLine: TColor;
+  end;
+
   { TForm1 }
 
   TForm1 = class(TForm)
@@ -336,7 +350,6 @@ type
     { The base popup's items while a commit is shown (see BlameShown):
       back to the working tree and copy its id; -1 otherwise. }
     FBaseBackIndex, FBaseCopyIndex: integer;
-    FSyncActions: TIntegerDynArray;
     FSubPanel: TPanel;
     FSubHeader: TGittanSectionHeader;
     FSubTree: TTreeView;
@@ -521,8 +534,8 @@ type
     FUpstreamRows: TStringList;
     FUpstreamBranch: string;
     { Tags (umain.tags.inc): what the list read when it opened, the list
-      with, per row, the index in FTags of its tag (TagRowHeader,
-      TagRowNew for the others), the menu of a tag and the one it is
+      with, as each row's tag, the index in FTags of its tag (TagRowNew
+      for the New row), the menu of a tag and the one it is
       for, the remote pushes and deletions go to, and the Branch menu's
       items. }
     FTags: TGittanTags;
@@ -539,33 +552,30 @@ type
     FSubListPopup: TGittanPopupList;
     { The popup's index of each submodule's row, in FSubmodules' order. }
     FSubListRows: array of integer;
-    FTagRows: TIntegerDynArray;
     FTagMenu: TPopupMenu;
     FMenuTag: TGittanTag;
     FTagRemote: string;
     FTagsItem, FNewTagItem, FPushTagsItem: TMenuItem;
     { The reflog (umain.reflog.inc): HEAD's reflog as the list read it
-      when it opened, the list with, per row, the index in FReflog of
-      its line (ReflogRowHeader for the header), the menu of a line and
+      when it opened, the list with, as each row's tag, the index in
+      FReflog of its line, the menu of a line and
       the line it is for, and the Branch menu's item. }
     FReflog: TGittanReflog;
     FReflogPopup: TGittanPopupList;
-    FReflogRows: TIntegerDynArray;
     FReflogMenu: TPopupMenu;
     FMenuReflog: TGittanReflogEntry;
     FReflogItem: TMenuItem;
     { Stashes (umain.stash.inc): what the last snapshot listed, the list
       that drops from the status bar's stash chip with the stashes it
       shows (FListedStashes, a copy, since a snapshot replaces FStashes
-      while the list is up) and, per row, the index in them of its stash
-      (StashRowHeader, StashRowNew for the others), the menu of a stash and the one it is for, the range
+      while the list is up) and, as each row's tag, the index in them of
+      its stash (StashRowNew for the New row), the menu of a stash and the one it is for, the range
       a compared stash is the base as and the stash it is of, the stash
       the base chip's list is for with its rows, and the Stash menu's
       items. }
     FStashes: TGittanStashes;
     FStashPopup: TGittanPopupList;
     FListedStashes: TGittanStashes;
-    FStashRows: TIntegerDynArray;
     FStashMenu: TPopupMenu;
     FMenuStash: TGittanStash;
     FStashRange, FStashRangeId, FBaseStashId: string;
@@ -745,6 +755,7 @@ type
     FReviewMeasure: TBitmap;
     { The thread a click on its card folds when the button comes up. }
     FGapToggle: string;
+    function Palette: TGittanPalette;
     procedure ApplyTheme;
     procedure ApplyEditorColors(AEd: TATSynEdit);
     procedure SetupEditor(AEd: TATSynEdit);
@@ -915,7 +926,7 @@ type
     procedure DiscardThis(const ABlock: TGittanDiscard);
     { umain.leaveout.inc }
     function CanLeaveOut: boolean;
-    function CommitStatIndex(const APath: string): integer;
+    function StatIndexOf(const APath: string): integer;
     function ShownFileChosen: boolean;
     procedure ApplyLeftOut;
     function LineLeftOut(ALine: integer): boolean;
@@ -1027,6 +1038,8 @@ type
     procedure SetFoldBand(AEd: TATSynEdit; AVisible: boolean);
     function FoldAction: TATEditorActionIfFolded;
     function FileLineOfRow(ARow: integer): integer;
+    function RepoBusy: boolean;
+    function RepoReady: boolean;
     function FoldPath: string;
     procedure KeepFolds;
     procedure RestoreFolds;
@@ -1245,7 +1258,6 @@ type
     procedure ShowUpstreamList(const ABranch: string; const AScreenRect: TRect);
     procedure UpstreamPopupPick(Sender: TObject; AIndex: integer);
     procedure MenuUpstreamClick(Sender: TObject);
-    function TagBusy: boolean;
     procedure ShowTagList(const AScreenRect: TRect);
     procedure TagPopupPick(Sender: TObject; AIndex: integer);
     procedure TagContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
@@ -1253,6 +1265,8 @@ type
     procedure NewTagAsk;
     procedure CheckoutTagAsk(const ATag: TGittanTag);
     procedure BranchAtAsk(const ALabel, ACommit: string);
+    function NewBranchAsk(const APrompt, ACommit: string): boolean;
+    function TagAtAsk(const AShort, ACommit: string): boolean;
     procedure DeleteTagAsk(const ATag: TGittanTag);
     procedure MenuTagsClick(Sender: TObject);
     procedure MenuNewTagClick(Sender: TObject);
@@ -1264,9 +1278,9 @@ type
     procedure MenuReflogClick(Sender: TObject);
     function ResetTarget: string;
     function ResetAsk(const AHash, AShort: string; AMode: TGittanResetMode): boolean;
+    function ResetToAsk(const AHash, AShort: string; AMode: TGittanResetMode): boolean;
     function StashLabel(const AStash: TGittanStash): string;
     function StashOfBase: integer;
-    function StashBusy: boolean;
     procedure ShowStashList(const AScreenRect: TRect);
     procedure StashPopupPick(Sender: TObject; AIndex: integer);
     procedure StashContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
@@ -1381,6 +1395,7 @@ type
     procedure AddSubmoduleAsk(const AUrl, APath, ABranch: string);
     procedure SubmoduleRemoteDone(AJob: TGittanRemoteJob);
     function PopupSubmodule: integer;
+    function PopupSubmodulePath: string;
     procedure SubPopupPopup(Sender: TObject);
     procedure MenuSubUpdateAllClick(Sender: TObject);
     procedure MenuSubSyncAllClick(Sender: TObject);
@@ -1484,7 +1499,8 @@ implementation
 {$R *.lfm}
 
 uses
-  Clipbrd, LCLIntf, Process, FileUtil, LazFileUtils, DateUtils, StrUtils, LazUTF8, LCLProc
+  Clipbrd, LCLIntf, Process, FileUtil, LazFileUtils, DateUtils, StrUtils, LazUTF8, LCLProc,
+  gittan.textfit
   {$IFDEF LCLCocoa}, CocoaConfig, gittan.titlebar{$ENDIF};
 
 resourcestring
@@ -2403,6 +2419,19 @@ const
   { Matches beyond this are not counted; the find bar says "10000+". }
   MaxMatches = 10000;
 
+{ A menu item under AParent, owned by AParent's menu, for the context
+  menus that are filled as they open. }
+function AddMenuItem(AParent: TMenuItem; const ACaption: string; ATag: integer;
+  AEnabled: boolean; AOnClick: TNotifyEvent): TMenuItem;
+begin
+  Result := TMenuItem.Create(AParent.Owner);
+  Result.Caption := ACaption;
+  Result.Tag := ATag;
+  Result.Enabled := AEnabled;
+  Result.OnClick := AOnClick;
+  AParent.Add(Result);
+end;
+
 { TForm1 }
 
 { TTreeView }
@@ -3018,7 +3047,55 @@ begin
   AEd.Invalidate;
 end;
 
+function TForm1.Palette: TGittanPalette;
+begin
+  Result.Shade := SidebarShade(FDark);
+  if FDark then
+  begin
+    Result.Text := Edit.Colors.TextFont;
+    Result.Dim := RGBToColor(150, 150, 150);
+    Result.Line := RGBToColor(62, 62, 62);
+    Result.Popup := Result.Shade;
+    Result.Hover := RGBToColor(58, 58, 59);
+    Result.Border := RGBToColor(85, 85, 86);
+    Result.Raised := RGBToColor(58, 58, 59);
+    Result.Accent := RGBToColor(100, 160, 240);
+    Result.Added := RGBToColor(63, 185, 80);
+    Result.Deleted := RGBToColor(248, 81, 73);
+    Result.Warning := RGBToColor(227, 179, 65);
+    Result.Pill := RGBToColor(50, 50, 51);
+    Result.PillText := RGBToColor(200, 200, 200);
+    Result.NoteInfo := RGBToColor(33, 44, 58);
+    Result.NoteInfoLine := RGBToColor(44, 66, 92);
+    Result.NoteError := RGBToColor(56, 34, 36);
+    Result.NoteErrorLine := RGBToColor(100, 50, 54);
+  end
+  else
+  begin
+    Result.Text := RGBToColor(30, 30, 30);
+    Result.Dim := RGBToColor(110, 110, 110);
+    Result.Line := RGBToColor(222, 222, 222);
+    Result.Popup := clWhite;
+    Result.Hover := RGBToColor(235, 235, 235);
+    Result.Border := RGBToColor(205, 205, 205);
+    Result.Raised := RGBToColor(232, 232, 232);
+    Result.Accent := RGBToColor(0, 110, 230);
+    Result.Added := RGBToColor(26, 127, 55);
+    Result.Deleted := RGBToColor(207, 34, 46);
+    Result.Warning := RGBToColor(154, 103, 0);
+    Result.Pill := clWhite;
+    Result.PillText := RGBToColor(70, 70, 70);
+    Result.NoteInfo := RGBToColor(234, 243, 252);
+    Result.NoteInfoLine := RGBToColor(200, 222, 245);
+    Result.NoteError := RGBToColor(253, 236, 236);
+    Result.NoteErrorLine := RGBToColor(242, 198, 198);
+  end;
+end;
+
 procedure TForm1.ApplyTheme;
+var
+  P: TGittanPalette;
+  List: TGittanPopupList;
 begin
   ApplyEditorColors(Edit);
   ApplyEditorColors(FEditOld);
@@ -3029,167 +3106,52 @@ begin
     HistoryColor(5, htSwatch)]);
   { The header and the find bar take the gutter's shade; the navigator
     pills sit on it. }
+  P := Palette;
+  FHeader.SetColors(P.Shade, P.Text, P.Dim, P.Added, P.Deleted, P.Line);
+  FHeader.SetPillColors(P.Pill, P.Border, P.Accent);
+  FNav.SetColors(P.Shade, P.Pill, P.Border, P.PillText, P.Accent);
+  FFindBar.SetColors(P.Shade, P.Text, P.Dim, P.Line);
+  FFindBar.Nav.SetColors(P.Shade, P.Pill, P.Border, P.PillText, P.Accent);
+  FSymbolBar.SetColors(P.Shade, P.Text, P.Dim, P.Line);
+  for List in [FBranchPopup, FStashPopup, FUpstreamPopup, FTagPopup, FViewPopup,
+    FSubListPopup, FReflogPopup, FPullPopup, FSyncPopup, FRecentPopup, FBasePopup,
+    FConflictPopup] do
+    List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
+  FGraph.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent, P.Warning);
+  FBanner.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Line, P.Accent, P.Deleted, P.Added);
+  FDiscardPills.SetColors(P.Popup, P.Text, P.Border, P.Accent, P.Added, P.Deleted);
+  FStatus.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Raised, P.Accent, P.Added,
+    P.Warning, P.Deleted);
+  FPullFill := P.Pill;
+  FPullBorder := P.Border;
+  FPullText := P.PillText;
+  FBandTrack := P.Line;
+  FBandFill := P.Accent;
   if FDark then
   begin
-    FHeader.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(63, 185, 80), RGBToColor(248, 81, 73),
-      RGBToColor(62, 62, 62));
-    FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(62, 62, 62), RGBToColor(248, 81, 73),
-      RGBToColor(63, 185, 80), RGBToColor(58, 58, 60), RGBToColor(44, 44, 46));
-    FBinaryView.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(44, 44, 46));
-    FNav.SetColors(RGBToColor(37, 37, 38), RGBToColor(50, 50, 51),
-      RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240));
-    FHeader.ConflictNav.SetColors(RGBToColor(37, 37, 38), RGBToColor(58, 46, 68),
+    FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim, P.Line, P.Deleted,
+      P.Added, RGBToColor(58, 58, 60), RGBToColor(44, 44, 46));
+    FBinaryView.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim,
+      RGBToColor(44, 44, 46));
+    FHeader.ConflictNav.SetColors(P.Shade, RGBToColor(58, 46, 68),
       RGBToColor(120, 80, 160), RGBToColor(210, 170, 245), RGBToColor(240, 215, 255));
-    FHeader.SetPillColors(RGBToColor(50, 50, 51), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FFindBar.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(62, 62, 62));
-    FSymbolBar.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(62, 62, 62));
-    FFindBar.Nav.SetColors(RGBToColor(37, 37, 38), RGBToColor(50, 50, 51),
-      RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240));
-    FBranchPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FStashPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FUpstreamPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FTagPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FViewPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FSubListPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FReflogPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FGraph.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240), RGBToColor(227, 179, 65));
-    FNotice.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(0, 110, 230), RGBToColor(241, 112, 112));
-    FBanner.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(62, 62, 62), RGBToColor(62, 62, 62),
-      RGBToColor(100, 160, 240), RGBToColor(248, 81, 73), RGBToColor(63, 185, 80));
-    FPullPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FSyncPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FRecentPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FBasePopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FConflictPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FDiscardPills.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(85, 85, 86), RGBToColor(100, 160, 240), RGBToColor(63, 185, 80),
-      RGBToColor(248, 81, 73));
-    FStatus.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(62, 62, 62), RGBToColor(58, 58, 59),
-      RGBToColor(100, 160, 240), RGBToColor(63, 185, 80), RGBToColor(227, 179, 65),
-      RGBToColor(248, 81, 73));
-    FPullFill := RGBToColor(50, 50, 51);
-    FPullBorder := RGBToColor(85, 85, 86);
-    FPullText := RGBToColor(200, 200, 200);
+    { The notice's accent is the light one in both, its red a softer one. }
+    FNotice.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, RGBToColor(0, 110, 230),
+      RGBToColor(241, 112, 112));
     FPullBar := RGBToColor(40, 80, 130);
     FLinkColor := RGBToColor(78, 161, 255);
-    FBandTrack := RGBToColor(62, 62, 62);
-    FBandFill := RGBToColor(100, 160, 240);
   end
   else
   begin
-    FHeader.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(26, 127, 55), RGBToColor(207, 34, 46),
-      RGBToColor(222, 222, 222));
-    FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
-      RGBToColor(110, 110, 110), RGBToColor(222, 222, 222), RGBToColor(207, 34, 46),
-      RGBToColor(26, 127, 55), RGBToColor(255, 255, 255), RGBToColor(230, 230, 230));
-    FBinaryView.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
-      RGBToColor(110, 110, 110), RGBToColor(246, 246, 246));
-    FNav.SetColors(RGBToColor(246, 246, 246), clWhite,
-      RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
-    FHeader.ConflictNav.SetColors(RGBToColor(246, 246, 246), RGBToColor(248, 240, 255),
+    FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim, P.Line, P.Deleted,
+      P.Added, RGBToColor(255, 255, 255), RGBToColor(230, 230, 230));
+    FBinaryView.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim, P.Shade);
+    FHeader.ConflictNav.SetColors(P.Shade, RGBToColor(248, 240, 255),
       RGBToColor(190, 160, 220), RGBToColor(110, 50, 160), RGBToColor(155, 63, 200));
-    FHeader.SetPillColors(clWhite, RGBToColor(205, 205, 205), RGBToColor(0, 110, 230));
-    FFindBar.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(222, 222, 222));
-    FSymbolBar.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(222, 222, 222));
-    FFindBar.Nav.SetColors(RGBToColor(246, 246, 246), clWhite,
-      RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
-    FBranchPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FStashPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FUpstreamPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FTagPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FViewPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FSubListPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FReflogPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FGraph.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230), RGBToColor(154, 103, 0));
-    FNotice.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230), RGBToColor(200, 40, 40));
-    FBanner.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(222, 222, 222), RGBToColor(222, 222, 222),
-      RGBToColor(0, 110, 230), RGBToColor(207, 34, 46), RGBToColor(26, 127, 55));
-    FPullPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FSyncPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FRecentPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FBasePopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FConflictPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FDiscardPills.SetColors(clWhite, RGBToColor(30, 30, 30), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230), RGBToColor(26, 127, 55), RGBToColor(207, 34, 46));
-    FStatus.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(222, 222, 222), RGBToColor(232, 232, 232),
-      RGBToColor(0, 110, 230), RGBToColor(26, 127, 55), RGBToColor(154, 103, 0),
-      RGBToColor(207, 34, 46));
-    FPullFill := clWhite;
-    FPullBorder := RGBToColor(205, 205, 205);
-    FPullText := RGBToColor(70, 70, 70);
+    FNotice.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent,
+      RGBToColor(200, 40, 40));
     FPullBar := RGBToColor(205, 225, 250);
     FLinkColor := RGBToColor(0, 102, 204);
-    FBandTrack := RGBToColor(222, 222, 222);
-    FBandFill := RGBToColor(0, 110, 230);
   end;
   FSummaryBox.Color := Edit.Colors.TextBG;
   if FDark then
@@ -4388,6 +4350,29 @@ begin
     Result := FNewNum[FRows[ARow].Line];
 end;
 
+{ An operation (merge, rebase, cherry-pick, bisect...) is under way, or a
+  commit or a remote job runs: nothing that moves HEAD or the index may
+  start. }
+function TForm1.RepoBusy: boolean;
+begin
+  Result := (FOperation <> '') or (FCommitJob <> nil) or (FRemoteJob <> nil);
+end;
+
+{ A repository is open and not busy. }
+function TForm1.RepoReady: boolean;
+begin
+  Result := (FRepo.Root <> '') and not RepoBusy;
+end;
+
+{ The index in FStats of APath, -1 when it is not changed. }
+function TForm1.StatIndexOf(const APath: string): integer;
+begin
+  for Result := 0 to High(FStats) do
+    if FStats[Result].Path = APath then
+      Exit;
+  Result := -1;
+end;
+
 { The path of the shown text, for KeepFolds. }
 function TForm1.FoldPath: string;
 begin
@@ -4566,16 +4551,11 @@ end;
 
 function EditorCharWidth(AEd: TATSynEdit): integer;
 var
-  Bmp: TBitmap;
+  C: TCanvas;
 begin
-  Bmp := TBitmap.Create;
-  try
-    Bmp.Canvas.Font.Name := AEd.Font.Name;
-    Bmp.Canvas.Font.Size := EditorFontSize(AEd);
-    Result := Max(1, Bmp.Canvas.TextWidth(ATEditorOptions.SampleChar));
-  finally
-    Bmp.Free;
-  end;
+  C := MeasureCanvas(AEd.Font);
+  C.Font.Size := EditorFontSize(AEd);
+  Result := Max(1, C.TextWidth(ATEditorOptions.SampleChar));
 end;
 
 { The bookmark band holds the line numbers while the change view is shown:
@@ -5641,13 +5621,11 @@ begin
   { Asked before the header names the next file, not when the text is
     replaced further down. }
   FlushEdit;
+  i := StatIndexOf(APath);
   Result := False;
   { A binary file has no lines to diff; a new one would be read as
     text. }
-  Binary := False;
-  for i := 0 to High(FStats) do
-    if FStats[i].Path = APath then
-      Binary := FStats[i].Binary;
+  Binary := (i >= 0) and FStats[i].Binary;
   Lines := TStringList.Create;
   try
     if not Binary and not FRepo.FileChanges(APath, Lines) then
@@ -5681,23 +5659,21 @@ begin
   FConflictRoles := nil;
   FConflictStarts := nil;
   FConflictEnds := nil;
-  for i := 0 to High(FStats) do
-    if FStats[i].Path = APath then
+  if i >= 0 then
+  begin
+    FHeader.SetFile(APath, StatIcon(FStats[i]));
+    FHeader.SetCounts(FStats[i].Added, FStats[i].Deleted, FStats[i].Binary);
+    FHeader.SetStage(FStats[i].Staged, FStats[i].Unstaged);
+    if FStats[i].Kind = ckConflict then
     begin
-      FHeader.SetFile(APath, StatIcon(FStats[i]));
-      FHeader.SetCounts(FStats[i].Added, FStats[i].Deleted, FStats[i].Binary);
-      FHeader.SetStage(FStats[i].Staged, FStats[i].Unstaged);
-      if FStats[i].Kind = ckConflict then
-      begin
-        FConflictRoles := ConflictRoles(FChangeLines);
-        FConflictStarts := ConflictStarts(FConflictRoles, FChangeLines);
-        SetLength(FConflictEnds, Length(FConflictStarts));
-        for c := 0 to High(FConflictStarts) do
-          FConflictEnds[c] := ConflictEnd(FChangeLines, FConflictRoles, FConflictStarts[c]);
-        FHeader.SetActions([rsUseMine, rsUseTheirs, rsMarkResolved]);
-      end;
-      Break;
+      FConflictRoles := ConflictRoles(FChangeLines);
+      FConflictStarts := ConflictStarts(FConflictRoles, FChangeLines);
+      SetLength(FConflictEnds, Length(FConflictStarts));
+      for c := 0 to High(FConflictStarts) do
+        FConflictEnds[c] := ConflictEnd(FChangeLines, FConflictRoles, FConflictStarts[c]);
+      FHeader.SetActions([rsUseMine, rsUseTheirs, rsMarkResolved]);
     end;
+  end;
   if IsImagePath(APath) then
   begin
     ShowImageChanges(APath);
@@ -6252,12 +6228,9 @@ begin
   if (Node <> nil) and (Node.Data <> nil) then
   begin
     Path := Node.GetTextPath;
-    for i := 0 to High(FStats) do
-      if FStats[i].Path = Path then
-      begin
-        Tip := StatHint(FStats[i]) + FileThreadsHint(Path);
-        Break;
-      end;
+    i := StatIndexOf(Path);
+    if i >= 0 then
+      Tip := StatHint(FStats[i]) + FileThreadsHint(Path);
   end
   else if Node <> nil then
   begin

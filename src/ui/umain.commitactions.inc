@@ -70,15 +70,9 @@ var
   function Add(AParent: TMenuItem; const ACaption: string; ATag: integer;
     AEnabled: boolean = True): TMenuItem;
   begin
-    Result := TMenuItem.Create(FCommitPopup);
-    Result.Caption := ACaption;
-    Result.Tag := ATag;
-    Result.Enabled := AEnabled;
-    Result.OnClick := @CommitMenuClick;
     if AParent = nil then
-      FCommitPopup.Items.Add(Result)
-    else
-      AParent.Add(Result);
+      AParent := FCommitPopup.Items;
+    Result := AddMenuItem(AParent, ACaption, ATag, AEnabled, @CommitMenuClick);
   end;
 
   procedure Line;
@@ -91,7 +85,7 @@ begin
     Exit;
   FActionCommit := ACommit;
   Jobs := (FCommitJob <> nil) or (FRemoteJob <> nil);
-  Busy := (FOperation <> '') or Jobs;
+  Busy := RepoBusy;
   InHead := FRepo.IsAncestor(ACommit.Hash, 'HEAD');
   IsMerge := Length(ACommit.Parents) > 1;
   IsHead := False;
@@ -177,9 +171,7 @@ end;
 procedure TForm1.CommitMenuClick(Sender: TObject);
 var
   Hash, Short, Note: string;
-  Values: array of string;
   Ok, Conflicts, Reopen: boolean;
-  Mode: TGittanResetMode;
 begin
   Hash := FActionCommit.Hash;
   Short := FActionCommit.Short;
@@ -256,38 +248,23 @@ begin
     end;
     caBisectEnd:
       BisectEndClick;
-    caBranch, caTag, caMerge, caCherryPick, caRevert, caResetSoft, caResetMixed, caResetHard:
+    caBranch:
+      if NewBranchAsk(Format(rsCaBranchPrompt, [Short]), Hash) then
+        ShowCommitGraph;
+    caTag:
+      if TagAtAsk(Short, Hash) then
+        ShowCommitGraph;
+    caResetSoft:
+      if ResetToAsk(Hash, Short, rmSoft) then
+        ShowCommitGraph;
+    caResetMixed:
+      if ResetToAsk(Hash, Short, rmMixed) then
+        ShowCommitGraph;
+    caResetHard:
+      if ResetToAsk(Hash, Short, rmHard) then
+        ShowCommitGraph;
+    caMerge, caCherryPick, caRevert:
     begin
-      Values := nil;
-      Mode := rmMixed;
-      case (Sender as TMenuItem).Tag of
-        caBranch:
-        begin
-          SetLength(Values, 1);
-          Values[0] := '';
-          if not InputQuery(rsCaBranchTitle, [Format(rsCaBranchPrompt, [Short])], Values) or
-            (Trim(Values[0]) = '') then
-            Exit;
-        end;
-        caTag:
-        begin
-          SetLength(Values, 2);
-          Values[0] := '';
-          Values[1] := '';
-          if not InputQuery(rsCaTagTitle, [Format(rsCaTagPrompt, [Short]), rsCaTagMessage],
-            Values) or (Trim(Values[0]) = '') then
-            Exit;
-        end;
-        caResetSoft, caResetMixed, caResetHard:
-        begin
-          case (Sender as TMenuItem).Tag of
-            caResetSoft: Mode := rmSoft;
-            caResetHard: Mode := rmHard;
-          end;
-          if not ResetAsk(Hash, Short, Mode) then
-            Exit;
-        end;
-      end;
       StopWatcher;
       try
         Screen.Cursor := crHourGlass;
@@ -295,16 +272,6 @@ begin
         Reopen := True;
         try
           case (Sender as TMenuItem).Tag of
-            caBranch:
-            begin
-              Ok := FRepo.CreateBranch(Trim(Values[0]), Hash, True);
-              Note := Format(rsCaBranched, [Trim(Values[0])]);
-            end;
-            caTag:
-            begin
-              Ok := FRepo.CreateTag(Trim(Values[0]), Hash, Trim(Values[1]));
-              Note := Format(rsCaTagged, [Short, Trim(Values[0])]);
-            end;
             caMerge:
             begin
               Ok := FRepo.MergeRef(Hash, Conflicts);
@@ -315,15 +282,10 @@ begin
               Ok := FRepo.CherryPick(Hash, Conflicts);
               Note := Format(rsCaPicked, [Short]);
             end;
-            caRevert:
+            else
             begin
               Ok := FRepo.RevertCommit(Hash, Conflicts);
               Note := Format(rsCaReverted, [Short]);
-            end;
-            else
-            begin
-              Ok := FRepo.Reset(Hash, Mode);
-              Note := Format(rsCaWasReset, [ResetTarget, Short]);
             end;
           end;
         finally
@@ -397,4 +359,31 @@ begin
     Ask := Ask + LineEnding + LineEnding + Note;
   Result := QuestionDlg(rsCaResetTitle, Ask, mtWarning, [mrYes, rsCaResetAction, mrCancel,
     rsCancelButton, 'IsCancel', 'IsDefault'], 0) = mrYes;
+end;
+
+{ A reset to AHash (AShort) with AMode after ResetAsk, from the commit
+  menu and the reflog. True when it was done. }
+function TForm1.ResetToAsk(const AHash, AShort: string; AMode: TGittanResetMode): boolean;
+begin
+  Result := False;
+  if RepoBusy or not ResetAsk(AHash, AShort, AMode) then
+    Exit;
+  StopWatcher;
+  try
+    Screen.Cursor := crHourGlass;
+    try
+      Result := FRepo.Reset(AHash, AMode);
+    finally
+      Screen.Cursor := crDefault;
+    end;
+    FLoadError := '';
+    FSummary.Notice := '';
+    RefreshRepository;
+  finally
+    StartWatcher;
+  end;
+  if Result then
+    StatusNote(Format(rsCaWasReset, [ResetTarget, AShort]))
+  else
+    BannerError(rsCaFailed, FRepo.Error);
 end;

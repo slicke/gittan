@@ -42,7 +42,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Controls, Graphics, Forms, StdCtrls, ExtCtrls,
-  LCLType, LCLVersion, LMessages, gittan.graph, gittan.commitstats;
+  LCLType, LMessages, gittan.graph, gittan.commitstats, gittan.popuphook;
 
 type
   TGittanGraphPickEvent = procedure(Sender: TObject; const AHash: string) of object;
@@ -131,7 +131,7 @@ type
     { The most commits one author made in one week, which the authors'
       bars are drawn against. }
     FStatsAuthorMax: integer;
-    FReturnFocus: TWinControl;
+    FHook: TGittanPopupHook;
     FBack, FText, FDim, FHover, FLine, FAccent, FTag: TColor;
     FLaneColors: array of TColor;
     FOnPick: TGittanGraphPickEvent;
@@ -139,7 +139,6 @@ type
     FOnMore: TNotifyEvent;
     FOnPathCommits: TGittanGraphPathEvent;
     FOnClose: TNotifyEvent;
-    FKeeper: TControl;
     procedure Context(const AScreenPos: TPoint);
     function LaneColor(AIndex: integer): TColor;
     function LaneX(ALane: integer): integer;
@@ -190,14 +189,8 @@ type
     procedure EditChange(Sender: TObject);
     procedure EditKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
     procedure TimerTick(Sender: TObject);
-    {$IF lcl_fullversion >= 4990000}
-    procedure UserInput(Sender: TObject; var Message: TLMessage);
-    {$ELSE}
-    procedure UserInput(Sender: TObject; Msg: cardinal);
-    {$ENDIF}
-    procedure AppDeactivate(Sender: TObject);
-    function Owns(AControl: TControl): boolean;
-    procedure Hook(AOn: boolean);
+    function GetKeeper: TControl;
+    procedure SetKeeper(AValue: TControl);
   protected
     procedure Paint; override;
     procedure Resize; override;
@@ -205,7 +198,6 @@ type
     procedure MouseLeave; override;
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
       override;
-    procedure Notification(AComponent: TComponent; Operation: TOperation); override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -248,7 +240,7 @@ type
     {** A control whose clicks leave the panel open, as its own do, so
       that a row of it can close the panel on the click's release
       instead of the press closing it and the release opening it again. }
-    property Keeper: TControl read FKeeper write FKeeper;
+    property Keeper: TControl read GetKeeper write SetKeeper;
   end;
 
 implementation
@@ -396,6 +388,7 @@ end;
 constructor TGittanCommitGraph.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  FHook := TGittanPopupHook.Create(Self, @Close, True);
   ControlStyle := ControlStyle + [csOpaque];
   Visible := False;
   FCurrent := -1;
@@ -433,7 +426,7 @@ end;
 destructor TGittanCommitGraph.Destroy;
 begin
   Application.RemoveAsyncCalls(Self);
-  Hook(False);
+  FHook.Hook(False);
   FPathHashes.Free;
   inherited Destroy;
 end;
@@ -694,12 +687,7 @@ begin
   FEdit.Text := AFilter;
   ApplyFilter;
   Place;
-  FReturnFocus := nil;
-  if (Screen.ActiveControl <> nil) and not Owns(Screen.ActiveControl) then
-  begin
-    FReturnFocus := Screen.ActiveControl;
-    FReturnFocus.FreeNotification(Self);
-  end;
+  FHook.SaveFocus;
   Visible := True;
   BringToFront;
   FBox.VertScrollBar.Position := 0;
@@ -708,7 +696,7 @@ begin
     FEdit.SetFocus
   else if FRows.CanFocus then
     FRows.SetFocus;
-  Hook(True);
+  FHook.Hook(True);
 end;
 
 procedure TGittanCommitGraph.Replace(const ACommits: TGittanGraphCommits; AMore: boolean);
@@ -907,11 +895,9 @@ begin
   FTimer.Enabled := False;
   if not Visible then
     Exit;
-  Hook(False);
+  FHook.Hook(False);
   Visible := False;
-  if (FReturnFocus <> nil) and FReturnFocus.CanFocus then
-    FReturnFocus.SetFocus;
-  FReturnFocus := nil;
+  FHook.RestoreFocus;
   if Assigned(FOnClose) then
     FOnClose(Self);
 end;
@@ -1086,64 +1072,14 @@ begin
     SetStatsOn(not FStatsOn);
 end;
 
-function TGittanCommitGraph.Owns(AControl: TControl): boolean;
+function TGittanCommitGraph.GetKeeper: TControl;
 begin
-  Result := False;
-  while AControl <> nil do
-  begin
-    if AControl = Self then
-      Exit(True);
-    AControl := AControl.Parent;
-  end;
+  Result := FHook.Keeper;
 end;
 
-{ As in the popup list: a mouse press on a control outside the panel
-  closes it, unless on the Keeper; Cocoa passes the last key message
-  instead of the press, so the buttons are asked as well. }
-{$IF lcl_fullversion >= 4990000}
-procedure TGittanCommitGraph.UserInput(Sender: TObject; var Message: TLMessage);
-var
-  Msg: cardinal;
+procedure TGittanCommitGraph.SetKeeper(AValue: TControl);
 begin
-  Msg := Message.msg;
-{$ELSE}
-procedure TGittanCommitGraph.UserInput(Sender: TObject; Msg: cardinal);
-begin
-{$ENDIF}
-  if not Visible then
-    Exit;
-  if (Sender is TControl) and (Owns(TControl(Sender)) or (Sender = FKeeper)) then
-    Exit;
-  if (Msg = LM_LBUTTONDOWN) or (Msg = LM_RBUTTONDOWN) or (Msg = LM_MBUTTONDOWN) or
-    (GetKeyState(VK_LBUTTON) < 0) or (GetKeyState(VK_RBUTTON) < 0) or
-    (GetKeyState(VK_MBUTTON) < 0) then
-    Close;
-end;
-
-procedure TGittanCommitGraph.AppDeactivate(Sender: TObject);
-begin
-  Close;
-end;
-
-procedure TGittanCommitGraph.Hook(AOn: boolean);
-begin
-  if AOn then
-  begin
-    Application.AddOnUserInputHandler(@UserInput, True);
-    Application.AddOnDeactivateHandler(@AppDeactivate, True);
-  end
-  else
-  begin
-    Application.RemoveOnUserInputHandler(@UserInput);
-    Application.RemoveOnDeactivateHandler(@AppDeactivate);
-  end;
-end;
-
-procedure TGittanCommitGraph.Notification(AComponent: TComponent; Operation: TOperation);
-begin
-  inherited Notification(AComponent, Operation);
-  if (Operation = opRemove) and (AComponent = FReturnFocus) then
-    FReturnFocus := nil;
+  FHook.Keeper := AValue;
 end;
 
 { The border, the header (the title, the branch and how far it is from

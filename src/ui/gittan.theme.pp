@@ -30,6 +30,10 @@ function ColorLuminance(C: TColor): double;
   bright is returned as is. System colors are not RGB and are left alone. }
 function LightenForDark(AColor: TColor): TColor;
 
+{** AFrom moved AWeight of the way to ATo, 0 to 1, channel by channel;
+  system colors are resolved first. }
+function MixColor(AFrom, ATo: TColor; AWeight: double): TColor;
+
 implementation
 
 uses
@@ -81,6 +85,17 @@ begin
     Exit;
   K := (DarkTextLuminance - Lum) / (255 - Lum);
   Result := RGBToColor(Up(Red(AColor)), Up(Green(AColor)), Up(Blue(AColor)));
+end;
+
+function MixColor(AFrom, ATo: TColor; AWeight: double): TColor;
+var
+  f, t: longint;
+begin
+  f := ColorToRGB(AFrom);
+  t := ColorToRGB(ATo);
+  Result := RGBToColor(Round(Red(f) + (Red(t) - Red(f)) * AWeight),
+    Round(Green(f) + (Green(t) - Green(f)) * AWeight),
+    Round(Blue(f) + (Blue(t) - Blue(f)) * AWeight));
 end;
 
 end.

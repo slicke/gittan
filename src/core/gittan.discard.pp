@@ -61,6 +61,9 @@ function DiscardCount(const ABlock: TGittanDiscard): integer;
 
 implementation
 
+uses
+  gittan.textfile;
+
 function DiffBlock(ALines: TStrings; AStart: integer; const AFileName: string): TGittanDiscard;
 var
   i, Old, New: integer;
@@ -110,21 +113,13 @@ begin
     Result := Length(ABlock.NewLines);
 end;
 
-{ A line without the CR a CRLF file ends it with. }
-function Bare(const ALine: string): string;
-begin
-  Result := ALine;
-  if (Result <> '') and (Result[Length(Result)] = #13) then
-    SetLength(Result, Length(Result) - 1);
-end;
-
 function DiscardBlock(const ABlock: TGittanDiscard; out AError: string): boolean;
 var
   F: TFileStream;
   Text, Eol: string;
   Lines: TStringList;
   Out: TStringBuilder;
-  i, p, Start, Count: integer;
+  i, p, Count: integer;
   FinalNewline: boolean;
 begin
   Result := False;
@@ -132,16 +127,7 @@ begin
   try
     Text := '';
     if FileExists(ABlock.FileName) then
-    begin
-      F := TFileStream.Create(ABlock.FileName, fmOpenRead or fmShareDenyNone);
-      try
-        SetLength(Text, F.Size);
-        if F.Size > 0 then
-          F.ReadBuffer(Text[1], F.Size);
-      finally
-        F.Free;
-      end;
-    end
+      Text := ReadFileBytes(ABlock.FileName)
     else if (ABlock.Line <> 1) or (Length(ABlock.NewLines) > 0) then
     begin
       AError := rsDiscardNoFile;
@@ -154,17 +140,9 @@ begin
     Out := TStringBuilder.Create;
     try
       FinalNewline := (Text = '') or (Text[Length(Text)] = #10);
-      Start := 1;
-      for i := 1 to Length(Text) do
-        if Text[i] = #10 then
-        begin
-          Lines.Add(Copy(Text, Start, i - Start));
-          Start := i + 1;
-        end;
-      if Start <= Length(Text) then
-        Lines.Add(Copy(Text, Start, MaxInt));
+      SplitLf(Text, Lines);
       Eol := #10;
-      if (Lines.Count > 0) and (Lines[0] <> Bare(Lines[0])) then
+      if (Lines.Count > 0) and (Lines[0] <> BareLine(Lines[0])) then
         Eol := #13#10;
       Count := Length(ABlock.NewLines);
       p := ABlock.Line - 1;
@@ -174,7 +152,7 @@ begin
         Exit;
       end;
       for i := 0 to Count - 1 do
-        if Bare(Lines[p + i]) <> ABlock.NewLines[i] then
+        if BareLine(Lines[p + i]) <> ABlock.NewLines[i] then
         begin
           AError := rsDiscardStale;
           Exit;

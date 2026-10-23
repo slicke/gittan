@@ -1143,7 +1143,7 @@ implementation
 
 uses
   {$ifdef unix}BaseUnix,{$endif}
-  Process, Pipes, md5, StrUtils, DateUtils;
+  Process, Pipes, md5, StrUtils, DateUtils, gittan.textfile;
 
 { ---------------------------------------------------------------------------
   The environment
@@ -5884,7 +5884,6 @@ end;
 function TGittanRepo.FileBlob(const APath, ARef: string; out AData: RawByteString): boolean;
 var
   Output: string;
-  Stream: TFileStream;
 begin
   AData := '';
   if (FRoot = '') or (APath = '') then
@@ -5900,14 +5899,7 @@ begin
   if not Result then
     Exit;
   try
-    Stream := TFileStream.Create(FullPath(APath), fmOpenRead or fmShareDenyNone);
-    try
-      SetLength(AData, Stream.Size);
-      if Length(AData) > 0 then
-        Stream.ReadBuffer(AData[1], Length(AData));
-    finally
-      Stream.Free;
-    end;
+    AData := ReadFileBytes(FullPath(APath));
   except
     AData := '';
     Result := False;

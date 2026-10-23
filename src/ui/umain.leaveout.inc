@@ -24,18 +24,7 @@
 function TForm1.CanLeaveOut: boolean;
 begin
   Result := CanDiscard and CommitChoosing and (FCommitJob = nil) and
-    (FConflictRoles = nil) and (CommitStatIndex(FCurrentPath) >= 0);
-end;
-
-{ The index in FStats of APath, -1 when it is not changed. }
-function TForm1.CommitStatIndex(const APath: string): integer;
-var
-  i: integer;
-begin
-  for i := 0 to High(FStats) do
-    if FStats[i].Path = APath then
-      Exit(i);
-  Result := -1;
+    (FConflictRoles = nil) and (StatIndexOf(FCurrentPath) >= 0);
 end;
 
 { Whether the shown file goes into the commit at all. }
@@ -43,7 +32,7 @@ function TForm1.ShownFileChosen: boolean;
 var
   i: integer;
 begin
-  i := CommitStatIndex(FCurrentPath);
+  i := StatIndexOf(FCurrentPath);
   Result := (i >= 0) and CommitChosen(i);
 end;
 
@@ -137,7 +126,7 @@ begin
   if AllLeftOut(FRawChangeLines, FLeftOut.Items(FCurrentPath)) then
   begin
     FLeftOut.Clear(FCurrentPath);
-    i := CommitStatIndex(FCurrentPath);
+    i := StatIndexOf(FCurrentPath);
     SetCommitChosen(i, False);
     StatusNote(Format(rsLeftOutFile, [FCurrentPath]));
   end
@@ -155,7 +144,7 @@ var
   b, k, i, Line: integer;
   Drop: array of boolean;
 begin
-  i := CommitStatIndex(FCurrentPath);
+  i := StatIndexOf(FCurrentPath);
   if not CommitChosen(i) then
   begin
     FLeftOut.Clear(FCurrentPath);

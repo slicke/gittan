@@ -33,6 +33,11 @@ function FitTextLeft(ACanvas: TCanvas; const AText: string; AWidth: integer): st
   a caller breaking a line always moves on. }
 function FittingChars(ACanvas: TCanvas; const AText: string; ACount, AWidth: integer): integer;
 
+{** A canvas with AFont to measure text on, for a control that may have
+  no handle yet: one small bitmap kept for the program, its font set
+  again on every call, so the result is good until the next call. }
+function MeasureCanvas(AFont: TFont): TCanvas;
+
 implementation
 
 uses
@@ -104,4 +109,20 @@ begin
   Result := Lo;
 end;
 
+var
+  GMeasure: TBitmap = nil;
+
+function MeasureCanvas(AFont: TFont): TCanvas;
+begin
+  if GMeasure = nil then
+  begin
+    GMeasure := TBitmap.Create;
+    GMeasure.SetSize(1, 1);
+  end;
+  GMeasure.Canvas.Font := AFont;
+  Result := GMeasure.Canvas;
+end;
+
+finalization
+  GMeasure.Free;
 end.

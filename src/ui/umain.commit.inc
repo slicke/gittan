@@ -189,35 +189,22 @@ end;
   with the accent of the tree's boxes, or red for conflicts; the native
   controls keep the desktop's look. }
 procedure TForm1.ColorCommit;
+var
+  P: TGittanPalette;
 begin
   if FCommitHeader = nil then
     Exit;
+  P := Palette;
+  FCommitHeader.SetColors(P.Shade, P.Text, P.Dim, P.Raised, P.Line);
   if FDark then
-  begin
-    FCommitHeader.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(62, 62, 62));
-    FCommitNote.Font.Color := RGBToColor(200, 200, 200);
-    FCommitNote.LinkColor := RGBToColor(100, 160, 240);
-    FCommitNote.SetColors(RGBToColor(33, 44, 58), RGBToColor(44, 66, 92),
-      RGBToColor(56, 34, 36), RGBToColor(100, 50, 54));
-    FCommitNote.GlyphColor := RGBToColor(150, 150, 150);
-    FBisectNote.Font.Color := FCommitNote.Font.Color;
-    FBisectNote.SetColors(RGBToColor(33, 44, 58), RGBToColor(44, 66, 92),
-      RGBToColor(56, 34, 36), RGBToColor(100, 50, 54));
-  end
+    FCommitNote.Font.Color := RGBToColor(200, 200, 200)
   else
-  begin
-    FCommitHeader.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(232, 232, 232), RGBToColor(222, 222, 222));
     FCommitNote.Font.Color := RGBToColor(60, 60, 60);
-    FCommitNote.LinkColor := RGBToColor(0, 110, 230);
-    FCommitNote.SetColors(RGBToColor(234, 243, 252), RGBToColor(200, 222, 245),
-      RGBToColor(253, 236, 236), RGBToColor(242, 198, 198));
-    FCommitNote.GlyphColor := RGBToColor(110, 110, 110);
-    FBisectNote.Font.Color := FCommitNote.Font.Color;
-    FBisectNote.SetColors(RGBToColor(234, 243, 252), RGBToColor(200, 222, 245),
-      RGBToColor(253, 236, 236), RGBToColor(242, 198, 198));
-  end;
+  FCommitNote.LinkColor := P.Accent;
+  FCommitNote.SetColors(P.NoteInfo, P.NoteInfoLine, P.NoteError, P.NoteErrorLine);
+  FCommitNote.GlyphColor := P.Dim;
+  FBisectNote.Font.Color := FCommitNote.Font.Color;
+  FBisectNote.SetColors(P.NoteInfo, P.NoteInfoLine, P.NoteError, P.NoteErrorLine);
   UpdateSubjectCount;
 end;
 
@@ -309,20 +296,14 @@ end;
   resolved. A submodule's node is a leaf with a stat of its own. }
 function TForm1.CommitStatOf(ANode: TTreeNode): integer;
 var
-  Path: string;
   i: integer;
 begin
   Result := -1;
   if ANode.Count > 0 then
     Exit;
-  Path := ANode.GetTextPath;
-  for i := 0 to High(FStats) do
-    if FStats[i].Path = Path then
-    begin
-      if FStats[i].Kind <> ckConflict then
-        Result := i;
-      Exit;
-    end;
+  i := StatIndexOf(ANode.GetTextPath);
+  if (i >= 0) and (FStats[i].Kind <> ckConflict) then
+    Result := i;
 end;
 
 { Sets every node's box: a file's from CommitChosen, mixed when changes

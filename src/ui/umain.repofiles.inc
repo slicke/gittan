@@ -41,20 +41,13 @@ end;
 
 { The header takes the file header's palette, the gutter's shade. }
 procedure TForm1.ColorRepoHeader;
+var
+  P: TGittanPalette;
 begin
-  if FDark then
-    FRepoHeader.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(62, 62, 62))
-  else
-    FRepoHeader.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(232, 232, 232), RGBToColor(222, 222, 222));
+  P := Palette;
+  FRepoHeader.SetColors(P.Shade, P.Text, P.Dim, P.Raised, P.Line);
   if FSubHeader <> nil then
-    if FDark then
-      FSubHeader.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-        RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(62, 62, 62))
-    else
-      FSubHeader.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-        RGBToColor(110, 110, 110), RGBToColor(232, 232, 232), RGBToColor(222, 222, 222));
+    FSubHeader.SetColors(P.Shade, P.Text, P.Dim, P.Raised, P.Line);
 end;
 
 { Fills the section's tree from ListRepoFiles: the root files in their
@@ -251,13 +244,8 @@ var
 begin
   FIgnoreMenu.Clear;
   FExcludeMenu.Clear;
-  Untracked := False;
-  for i := 0 to High(FStats) do
-    if FStats[i].Path = APath then
-    begin
-      Untracked := FStats[i].Kind = ckUntracked;
-      Break;
-    end;
+  i := StatIndexOf(APath);
+  Untracked := (i >= 0) and (FStats[i].Kind = ckUntracked);
   Patterns := IgnorePatterns(APath);
   for i := 0 to High(Patterns) do
   begin

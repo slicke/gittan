@@ -126,7 +126,7 @@ type
 implementation
 
 uses
-  IniFiles;
+  IniFiles, gittan.textfile;
 
 const
   SecWindow = 'Window';
@@ -179,34 +179,12 @@ begin
 end;
 
 { An ini value is one line: a line end is written as \n, and so a
-  backslash as \\. }
+  backslash as \\; UnescapeC reads it. }
 function EscapeLines(const AText: string): string;
 begin
   Result := StringReplace(AText, '\', '\\', [rfReplaceAll]);
   Result := StringReplace(Result, #13#10, #10, [rfReplaceAll]);
   Result := StringReplace(Result, #10, '\n', [rfReplaceAll]);
-end;
-
-function UnescapeLines(const AText: string): string;
-var
-  i: integer;
-begin
-  Result := '';
-  i := 1;
-  while i <= Length(AText) do
-  begin
-    if (AText[i] = '\') and (i < Length(AText)) then
-    begin
-      Inc(i);
-      if AText[i] = 'n' then
-        Result := Result + #10
-      else
-        Result := Result + AText[i];
-    end
-    else
-      Result := Result + AText[i];
-    Inc(i);
-  end;
 end;
 
 { TGittanSettings }
@@ -253,7 +231,7 @@ begin
       RepoFilesOpen := Ini.ReadBool(SecWindow, 'RepoFiles', False);
       SubmodulesOpen := Ini.ReadBool(SecWindow, 'Submodules', True);
       CommitOpen := Ini.ReadBool(SecWindow, 'Commit', True);
-      CommitDraft := UnescapeLines(Ini.ReadString(SecCommit, 'Draft', ''));
+      CommitDraft := UnescapeC(Ini.ReadString(SecCommit, 'Draft', ''));
       CommitDraftRepo := Ini.ReadString(SecCommit, 'Repo', '');
       FontName := Ini.ReadString(SecView, 'FontName', '');
       FontSize := Ini.ReadInteger(SecView, 'FontSize', 0);

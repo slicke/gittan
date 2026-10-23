@@ -105,7 +105,7 @@ type
 implementation
 
 uses
-  Math, Clipbrd, gittan.textfit, gittan.terminal;
+  Math, Clipbrd, gittan.textfit, gittan.terminal, gittan.theme;
 
 resourcestring
   rsBannerCopy = 'Copy';
@@ -122,18 +122,6 @@ const
   MaxLines = 14;
   MaxItems = 10;
   TintPercent = 14;
-
-function Blend(A, B: TColor; APercent: integer): TColor;
-var
-  CA, CB: TColor;
-begin
-  CA := ColorToRGB(A);
-  CB := ColorToRGB(B);
-  Result := RGBToColor(
-    (Red(CA) * (100 - APercent) + Red(CB) * APercent) div 100,
-    (Green(CA) * (100 - APercent) + Green(CB) * APercent) div 100,
-    (Blue(CA) * (100 - APercent) + Blue(CB) * APercent) div 100);
-end;
 
 { TGittanBanner }
 
@@ -391,7 +379,7 @@ begin
     else
       Tone := FAccent;
   end;
-  Back := Blend(FBack, Tone, TintPercent);
+  Back := MixColor(FBack, Tone, TintPercent / 100);
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := Back;
   Canvas.FillRect(ClientRect);

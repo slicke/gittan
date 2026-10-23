@@ -58,6 +58,9 @@ type
 
 implementation
 
+uses
+  gittan.textfit;
+
 const
   NavHeight = 30;
   CounterPadding = 6;
@@ -86,22 +89,14 @@ begin
 end;
 
 procedure TGittanChangeNav.SetPosition(ACurrent, ATotal: integer);
-var
-  Measure: TBitmap;
 begin
   FCurrent := ACurrent;
   FTotal := ATotal;
   { The width follows the counter text, measured on a bitmap so it works
     before the handle exists; the right anchor keeps the pill in place
     while it grows. }
-  Measure := TBitmap.Create;
-  try
-    Measure.Canvas.Font := Font;
-    Width := 2 * ButtonWidth + Measure.Canvas.TextWidth(CounterText) +
-      2 * CounterPadding;
-  finally
-    Measure.Free;
-  end;
+  Width := 2 * ButtonWidth + MeasureCanvas(Font).TextWidth(CounterText) +
+    2 * CounterPadding;
   Invalidate;
 end;
 
