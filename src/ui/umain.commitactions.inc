@@ -70,15 +70,9 @@ var
   function Add(AParent: TMenuItem; const ACaption: string; ATag: integer;
     AEnabled: boolean = True): TMenuItem;
   begin
-    Result := TMenuItem.Create(FCommitPopup);
-    Result.Caption := ACaption;
-    Result.Tag := ATag;
-    Result.Enabled := AEnabled;
-    Result.OnClick := @CommitMenuClick;
     if AParent = nil then
-      FCommitPopup.Items.Add(Result)
-    else
-      AParent.Add(Result);
+      AParent := FCommitPopup.Items;
+    Result := AddMenuItem(AParent, ACaption, ATag, AEnabled, @CommitMenuClick);
   end;
 
   procedure Line;

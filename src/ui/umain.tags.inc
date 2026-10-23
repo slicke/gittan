@@ -80,15 +80,8 @@ var
   Row: PtrInt;
 
   procedure Add(const ACaption: string; ATag: integer; AEnabled: boolean);
-  var
-    Item: TMenuItem;
   begin
-    Item := TMenuItem.Create(FTagMenu);
-    Item.Caption := ACaption;
-    Item.Tag := ATag;
-    Item.Enabled := AEnabled;
-    Item.OnClick := @TagMenuClick;
-    FTagMenu.Items.Add(Item);
+    AddMenuItem(FTagMenu.Items, ACaption, ATag, AEnabled, @TagMenuClick);
   end;
 
 begin

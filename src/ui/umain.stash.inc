@@ -94,15 +94,8 @@ var
   Row: PtrInt;
 
   procedure Add(const ACaption: string; ATag: integer; AEnabled: boolean);
-  var
-    Item: TMenuItem;
   begin
-    Item := TMenuItem.Create(FStashMenu);
-    Item.Caption := ACaption;
-    Item.Tag := ATag;
-    Item.Enabled := AEnabled;
-    Item.OnClick := @StashMenuClick;
-    FStashMenu.Items.Add(Item);
+    AddMenuItem(FStashMenu.Items, ACaption, ATag, AEnabled, @StashMenuClick);
   end;
 
 begin

@@ -47,15 +47,8 @@ var
   end;
 
   procedure Add(const ACaption: string; ATag: integer; AEnabled: boolean);
-  var
-    Item: TMenuItem;
   begin
-    Item := TMenuItem.Create(FBranchMenu);
-    Item.Caption := ACaption;
-    Item.Tag := ATag;
-    Item.Enabled := AEnabled;
-    Item.OnClick := @BranchMenuClick;
-    FBranchMenu.Items.Add(Item);
+    AddMenuItem(FBranchMenu.Items, ACaption, ATag, AEnabled, @BranchMenuClick);
   end;
 
 begin

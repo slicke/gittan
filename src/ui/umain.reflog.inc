@@ -98,15 +98,9 @@ var
   function Add(AParent: TMenuItem; const ACaption: string; ATag: integer;
     AEnabled: boolean = True): TMenuItem;
   begin
-    Result := TMenuItem.Create(FReflogMenu);
-    Result.Caption := ACaption;
-    Result.Tag := ATag;
-    Result.Enabled := AEnabled;
-    Result.OnClick := @ReflogMenuClick;
     if AParent = nil then
-      FReflogMenu.Items.Add(Result)
-    else
-      AParent.Add(Result);
+      AParent := FReflogMenu.Items;
+    Result := AddMenuItem(AParent, ACaption, ATag, AEnabled, @ReflogMenuClick);
   end;
 
 begin

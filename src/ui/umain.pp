@@ -2403,6 +2403,19 @@ const
   { Matches beyond this are not counted; the find bar says "10000+". }
   MaxMatches = 10000;
 
+{ A menu item under AParent, owned by AParent's menu, for the context
+  menus that are filled as they open. }
+function AddMenuItem(AParent: TMenuItem; const ACaption: string; ATag: integer;
+  AEnabled: boolean; AOnClick: TNotifyEvent): TMenuItem;
+begin
+  Result := TMenuItem.Create(AParent.Owner);
+  Result.Caption := ACaption;
+  Result.Tag := ATag;
+  Result.Enabled := AEnabled;
+  Result.OnClick := AOnClick;
+  AParent.Add(Result);
+end;
+
 { TForm1 }
 
 { TTreeView }
