@@ -576,10 +576,14 @@ type
       ahead/behind counts or View > Commit Graph. }
     FGraph: TGittanCommitGraph;
     { The notice over the form while a fetch, pull or push runs: at once
-      when a pre-push hook has to run first, else after NoticeDelay. }
+      when a pre-push hook has to run first, else after NoticeDelay; and
+      what a failed one or a failed commit said. }
     FNotice: TGittanNotice;
     FNoticeTimer: TTimer;
     FNoticeHook: boolean;
+    { The notice tells of a failed commit: its first button commits
+      again. }
+    FNoticeCommit: boolean;
     { The banner over the file header and the summary: what failed, until
       it is closed (BannerError). }
     FBanner: TGittanBanner;
@@ -1175,6 +1179,9 @@ type
     procedure MenuCommitClick(Sender: TObject);
     function EnsureIdentity: boolean;
     procedure StartCommit;
+    {** The notice with a failed commit's reason (a hook's output, in
+      its colors), Commit Again and Copy Output. }
+    procedure ShowCommitFailure(const AError: string);
     procedure CommitJobDone(Sender: TObject);
     procedure StopCommitJob(AWait: boolean);
     procedure DroppedCommitDone(Sender: TObject);
@@ -1638,6 +1645,7 @@ resourcestring
   rsSubjectCount = '%d/%d';
   rsSubjectCountHint = 'Characters in the first line. git log and GitHub cut it after %d.';
   rsCommitFailed = 'The commit failed';
+  rsCommitAgain = 'Commit Again';
   rsFetchMenu = '&Fetch';
   rsPullMenu = '&Pull';
   rsPushMenu = 'P&ush';

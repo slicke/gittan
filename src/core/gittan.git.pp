@@ -1767,16 +1767,20 @@ end;
   order: a pre-push hook's output (husky's "pre-push script failed", the
   tests it ran) is on stdout, git's own "failed to push some refs" on
   stderr, and either alone says little. Progress is read as the terminal
-  last showed it. AOutput is emptied. }
+  last showed it. Blank space is trimmed but not an escape sequence (a
+  hook's color) at the start, which Trim would cut the ESC of. AOutput
+  is emptied. }
 procedure JoinFailure(var AOutput, AError: string);
+const
+  Blank: array[0..3] of char = (' ', #9, #10, #13);
 begin
-  AError := Trim(ResolveReturns(AError));
-  AOutput := ResolveReturns(AOutput);
-  if Trim(AOutput) <> '' then
+  AError := ResolveReturns(AError).Trim(Blank);
+  AOutput := ResolveReturns(AOutput).Trim(Blank);
+  if AOutput <> '' then
     if AError = '' then
-      AError := Trim(AOutput)
+      AError := AOutput
     else
-      AError := Trim(AOutput) + LineEnding + AError;
+      AError := AOutput + LineEnding + AError;
   AOutput := '';
 end;
 

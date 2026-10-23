@@ -105,7 +105,7 @@ type
 implementation
 
 uses
-  Math, Clipbrd, gittan.textfit;
+  Math, Clipbrd, gittan.textfit, gittan.terminal;
 
 resourcestring
   rsBannerCopy = 'Copy';
@@ -187,9 +187,15 @@ procedure TGittanBanner.AddAction(const ATitle, ADetail: string;
   AOnAction: TNotifyEvent);
 var
   Item: TItem;
+  Detail: string;
 begin
+  { Output a program wrote in color loses its escape sequences; the
+    notice is where it shows in color. }
+  Detail := ADetail;
+  if Pos(#27, Detail) > 0 then
+    Detail := TerminalPlainText(Detail);
   if (Length(FItems) > 0) and (Current.Title = ATitle) and
-    (Current.Detail = ADetail) and (Current.Kind = AKind) and
+    (Current.Detail = Detail) and (Current.Kind = AKind) and
     (Current.Action = AAction) then
   begin
     ShowCurrent;
@@ -198,7 +204,7 @@ begin
   if Length(FItems) >= MaxItems then
     Delete(FItems, 0, 1);
   Item.Title := ATitle;
-  Item.Detail := ADetail;
+  Item.Detail := Detail;
   Item.Kind := AKind;
   Item.Seconds := ASeconds;
   Item.Action := AAction;

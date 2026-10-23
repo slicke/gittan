@@ -1507,8 +1507,9 @@ begin
 end;
 
 { Amend without paths changes only the message; a hook that fails
-  stops the commit, with its output as the error, and the untracked
-  file added for it is untracked again. }
+  stops the commit, with its output as the error (its color sequence at
+  the start kept), and the untracked file added for it is untracked
+  again. }
 procedure TGitRepoTest.TestCommitAmendAndHook;
 var
   Paths: TStringList;
@@ -1532,7 +1533,7 @@ begin
     AssertEquals('M  a.txt'#0, Git(['status', '--porcelain', '-z']));
 
     WriteFile('.git/hooks/pre-commit',
-      '#!/bin/sh'#10'echo "hook says no" >&2'#10'exit 1'#10);
+      '#!/bin/sh'#10'printf ''\033[31mhook says no\033[0m\n'' >&2'#10'exit 1'#10);
     Hook := IncludeTrailingPathDelimiter(FDir) + SetDirSeparators('.git/hooks/pre-commit');
     {$ifdef UNIX}
     RunCommandIndir(FDir, 'chmod', ['+x', Hook], Text, Code, []);
@@ -1540,7 +1541,7 @@ begin
     WriteFile('new.txt', 'new'#10);
     Paths.Add('new.txt');
     AssertFalse(FRepo.Commit('blocked', Paths, False, Id));
-    AssertTrue(FRepo.Error, Pos('hook says no', FRepo.Error) > 0);
+    AssertEquals(FRepo.Error, 1, Pos(#27'[31mhook says no', FRepo.Error));
     AssertEquals('M  a.txt'#0'?? new.txt'#0, Git(['status', '--porcelain', '-z']));
   finally
     Paths.Free;
