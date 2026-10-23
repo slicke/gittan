@@ -136,6 +136,14 @@
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
+        <Filename Value="src/ui/gittan.console.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
+        <Filename Value="src/core/gittan.terminal.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
         <Filename Value="src/core/gittan.keep.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
@@ -157,10 +165,6 @@
       </Unit>
       <Unit>
         <Filename Value="src/ui/gittan.patchdlg.pp"/>
-        <IsPartOfProject Value="True"/>
-      </Unit>
-      <Unit>
-        <Filename Value="src/ui/gittan.repobrowser.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>

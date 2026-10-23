@@ -112,7 +112,7 @@ type
 implementation
 
 uses
-  Math, LazUTF8, gittan.repoinfo, gittan.statusbar;
+  Math, LazUTF8, gittan.repoinfo, gittan.statusbar, gittan.theme;
 
 resourcestring
   rsSubPageDefaultBranch = 'the remote''s default branch';
@@ -469,7 +469,7 @@ begin
   for i := 0 to High(FRows) do
     if FRows[i].Kind = srLabeled then
       Result := Max(Result, Canvas.TextWidth(FRows[i].Caption));
-  Inc(Result, IconSize + Gap div 2 + 2 + Gap * 2);
+  Inc(Result, Px(IconSize) + Px(Gap) div 2 + 2 + Px(Gap) * 2);
 end;
 
 { The column of the short ids, as wide as the longest (seven characters
@@ -490,7 +490,7 @@ var
 begin
   for i := 0 to Min(High(FRows), High(FRowTops)) do
     if (FRows[i].Kind in [srCommit, srLabeled]) and (FRows[i].Commit.Hash <> '') and
-      (Y >= FRowTops[i]) and (Y < FRowTops[i] + RowHeight) then
+      (Y >= FRowTops[i]) and (Y < FRowTops[i] + Px(RowHeight)) then
       Exit(i);
   Result := -1;
 end;
@@ -523,29 +523,29 @@ begin
   Canvas.Font.Size := CardTitleSize;
   Canvas.Font.Style := [fsBold];
   TitleH := Canvas.TextHeight('Xg');
-  CardH := CardPadY * 2 + TitleH;
+  CardH := Px(CardPadY) * 2 + TitleH;
   if FCards[AIndex].Detail <> '' then
     Inc(CardH, BodyH + 2);
-  R := Rect(Pad, Y, Width - Pad, Y + CardH);
+  R := Rect(Px(Pad), Y, Width - Px(Pad), Y + CardH);
   Canvas.Pen.Style := psClear;
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := FCard;
-  Canvas.RoundRect(R, CardRadius, CardRadius);
+  Canvas.RoundRect(R, Px(CardRadius), Px(CardRadius));
   { The disc, ringed in a lighter shade of the tone while asking. }
-  DiscY := Y + CardPadY + (TitleH - DiscSize) div 2;
+  DiscY := Y + Px(CardPadY) + (TitleH - Px(DiscSize)) div 2;
   Canvas.Brush.Color := ToneColor(FCards[AIndex].Tone);
-  Canvas.Ellipse(R.Left + CardPadX, DiscY, R.Left + CardPadX + DiscSize, DiscY + DiscSize);
+  Canvas.Ellipse(R.Left + Px(CardPadX), DiscY, R.Left + Px(CardPadX) + Px(DiscSize), DiscY + Px(DiscSize));
   Canvas.Pen.Style := psSolid;
   Canvas.Brush.Style := bsClear;
-  TextX := R.Left + CardPadX + DiscSize + Gap;
+  TextX := R.Left + Px(CardPadX) + Px(DiscSize) + Px(Gap);
   Canvas.Font.Color := FText;
-  Canvas.TextOut(TextX, Y + CardPadY, FitRight(FCards[AIndex].Title, R.Right - CardPadX - TextX));
+  Canvas.TextOut(TextX, Y + Px(CardPadY), FitRight(FCards[AIndex].Title, R.Right - Px(CardPadX) - TextX));
   if FCards[AIndex].Detail <> '' then
   begin
     Canvas.Font := Font;
     Canvas.Font.Color := FDim;
-    Canvas.TextOut(TextX, Y + CardPadY + TitleH + 2,
-      FitRight(FCards[AIndex].Detail, R.Right - CardPadX - TextX));
+    Canvas.TextOut(TextX, Y + Px(CardPadY) + TitleH + 2,
+      FitRight(FCards[AIndex].Detail, R.Right - Px(CardPadX) - TextX));
   end;
   Inc(Y, CardH);
 end;
@@ -564,24 +564,24 @@ begin
   Canvas.Font := Font;
   Canvas.Brush.Style := bsClear;
   TextH := Canvas.TextHeight('Xg');
-  TextY := ATop + (RowHeight - TextH) div 2;
-  CenterX := Pad + IconSize div 2;
-  CenterY := ATop + RowHeight div 2;
+  TextY := ATop + (Px(RowHeight) - TextH) div 2;
+  CenterX := Px(Pad) + Px(IconSize) div 2;
+  CenterY := ATop + Px(RowHeight) div 2;
   case Row.Kind of
     srHeading:
       begin
         Canvas.Font.Style := [fsBold];
         Canvas.Font.Color := FDim;
-        TextY := ATop + RowHeight - TextH - 6;
-        Canvas.TextOut(Pad, TextY, Row.Caption);
+        TextY := ATop + Px(RowHeight) - TextH - 6;
+        Canvas.TextOut(Px(Pad), TextY, Row.Caption);
         Canvas.Pen.Color := FLine;
-        Canvas.Line(Pad, ATop + RowHeight - 1, Width - Pad, ATop + RowHeight - 1);
+        Canvas.Line(Px(Pad), ATop + Px(RowHeight) - 1, Width - Px(Pad), ATop + Px(RowHeight) - 1);
         Exit;
       end;
     srMore:
       begin
         Canvas.Font.Color := FDim;
-        Canvas.TextOut(Pad + IconSize + Gap div 2 + 2, TextY, Row.Text);
+        Canvas.TextOut(Px(Pad) + Px(IconSize) + Px(Gap) div 2 + 2, TextY, Row.Text);
         Exit;
       end;
   end;
@@ -590,7 +590,7 @@ begin
     Canvas.Pen.Style := psClear;
     Canvas.Brush.Style := bsSolid;
     Canvas.Brush.Color := FHover;
-    Canvas.RoundRect(Pad div 2, ATop, Width - Pad div 2, ATop + RowHeight, 8, 8);
+    Canvas.RoundRect(Px(Pad) div 2, ATop, Width - Px(Pad) div 2, ATop + Px(RowHeight), 8, 8);
     Canvas.Pen.Style := psSolid;
     Canvas.Brush.Style := bsClear;
   end;
@@ -602,7 +602,7 @@ begin
     if not Row.First then
       Canvas.Line(CenterX, ATop, CenterX, CenterY);
     if not Row.Last then
-      Canvas.Line(CenterX, CenterY, CenterX, ATop + RowHeight);
+      Canvas.Line(CenterX, CenterY, CenterX, ATop + Px(RowHeight));
   end;
   Canvas.Pen.Width := 2;
   Canvas.Brush.Style := bsSolid;
@@ -619,19 +619,19 @@ begin
     Canvas.Pen.Color := ToneColor(Row.Tone);
     Canvas.Brush.Color := ToneColor(Row.Tone);
   end;
-  Canvas.Ellipse(CenterX - DotSize div 2 - 1, CenterY - DotSize div 2 - 1,
-    CenterX + DotSize div 2 + 1, CenterY + DotSize div 2 + 1);
+  Canvas.Ellipse(CenterX - Px(DotSize) div 2 - 1, CenterY - Px(DotSize) div 2 - 1,
+    CenterX + Px(DotSize) div 2 + 1, CenterY + Px(DotSize) div 2 + 1);
   Canvas.Pen.Width := 1;
   Canvas.Brush.Style := bsClear;
 
-  X := Pad + IconSize + Gap div 2 + 2;
+  X := Px(Pad) + Px(IconSize) + Px(Gap) div 2 + 2;
   if Row.Kind = srLabeled then
   begin
     Canvas.Font.Color := FDim;
     Canvas.TextOut(X, TextY, Row.Caption);
-    X := Pad + ALabelWidth;
+    X := Px(Pad) + ALabelWidth;
   end;
-  Right := Width - Pad;
+  Right := Width - Px(Pad);
   if Row.Commit.Hash = '' then
   begin
     Canvas.Font.Color := FDim;
@@ -645,7 +645,7 @@ begin
   else
     Canvas.Font.Color := FDim;
   Canvas.TextOut(Right - Canvas.TextWidth(Row.Commit.Short), TextY, Row.Commit.Short);
-  Dec(Right, IdWidth + Gap + Gap div 2);
+  Dec(Right, IdWidth + Px(Gap) + Px(Gap) div 2);
   Meta := Row.Commit.Author;
   if Row.Commit.Date <> '' then
   begin
@@ -655,16 +655,16 @@ begin
   end;
   { The subject keeps room for a few words: the author goes first, then
     the date. }
-  if Right - Canvas.TextWidth(Meta) - Gap - X < SubjectRoom then
+  if Right - Canvas.TextWidth(Meta) - Px(Gap) - X < Px(SubjectRoom) then
     Meta := Row.Commit.Date;
-  if Right - Canvas.TextWidth(Meta) - Gap - X < SubjectRoom div 2 then
+  if Right - Canvas.TextWidth(Meta) - Px(Gap) - X < Px(SubjectRoom) div 2 then
     Meta := '';
   if Meta <> '' then
   begin
     MetaW := Canvas.TextWidth(Meta);
     Canvas.Font.Color := FDim;
     Canvas.TextOut(Right - MetaW, TextY, Meta);
-    Dec(Right, MetaW + Gap + Gap div 2);
+    Dec(Right, MetaW + Px(Gap) + Px(Gap) div 2);
   end;
   Canvas.Font.Color := FText;
   Canvas.TextOut(X, TextY, FitRight(Row.Commit.Subject, Right - X));
@@ -681,7 +681,7 @@ begin
   Canvas.Font := Font;
   Canvas.Brush.Style := bsClear;
   TextH := Canvas.TextHeight('Xg');
-  Y := Pad;
+  Y := Px(Pad);
 
   { The name, then where it comes from: the URL with a globe when it is
     a web address, else a folder, and the branch it follows. }
@@ -689,12 +689,12 @@ begin
   Canvas.Font.Style := [fsBold];
   Canvas.Font.Color := FText;
   TitleH := Canvas.TextHeight('Xg');
-  Canvas.TextOut(Pad, Y, FName);
+  Canvas.TextOut(Px(Pad), Y, FName);
   Inc(Y, TitleH + 4);
   Canvas.Font := Font;
   Canvas.Brush.Style := bsClear;
   IconW := TextH - 4 + 5;
-  X := Pad;
+  X := Px(Pad);
   FUrlRect := Rect(0, 0, 0, 0);
   if FUrl <> '' then
   begin
@@ -705,7 +705,7 @@ begin
     Canvas.Pen.Width := 1;
     Canvas.Brush.Style := bsClear;
     Inc(X, IconW);
-    Shown := FitRight(FUrl, Max(80, (Width - 2 * Pad) * 2 div 3));
+    Shown := FitRight(FUrl, Max(80, (Width - 2 * Px(Pad)) * 2 div 3));
     if FWeb <> '' then
     begin
       FUrlRect := Rect(X, Y, X + Canvas.TextWidth(Shown), Y + TextH);
@@ -717,36 +717,36 @@ begin
       Canvas.Font.Color := FText;
     Canvas.TextOut(X, Y, Shown);
     Canvas.Font.Style := [];
-    Inc(X, Canvas.TextWidth(Shown) + Gap * 2);
+    Inc(X, Canvas.TextWidth(Shown) + Px(Gap) * 2);
   end;
-  if X + IconW + Canvas.TextWidth(FBranchText) > Width - Pad then
+  if X + IconW + Canvas.TextWidth(FBranchText) > Width - Px(Pad) then
   begin
     Inc(Y, TextH + 6);
-    X := Pad;
+    X := Px(Pad);
   end;
   DrawStatusIcon(Canvas, HintBranch, X, Y, TextH, FDim);
   Canvas.Pen.Width := 1;
   Canvas.Brush.Style := bsClear;
   Canvas.Font.Color := FDim;
-  Canvas.TextOut(X + IconW, Y, FitRight(FBranchText, Width - Pad - X - IconW));
-  Inc(Y, TextH + Pad);
+  Canvas.TextOut(X + IconW, Y, FitRight(FBranchText, Width - Px(Pad) - X - IconW));
+  Inc(Y, TextH + Px(Pad));
 
   for i := 0 to High(FCards) do
   begin
     PaintCard(Y, i);
-    Inc(Y, Gap div 2 + 2);
+    Inc(Y, Px(Gap) div 2 + 2);
   end;
-  Inc(Y, HeadingTopGap - Gap div 2 - 2);
+  Inc(Y, Px(HeadingTopGap) - Px(Gap) div 2 - 2);
 
   LabelW := LabelWidth;
   SetLength(FRowTops, Length(FRows));
   for i := 0 to High(FRows) do
   begin
     if (FRows[i].Kind = srHeading) and (i > 0) then
-      Inc(Y, HeadingTopGap);
+      Inc(Y, Px(HeadingTopGap));
     FRowTops[i] := Y;
     PaintRow(i, Y, LabelW);
-    Inc(Y, RowHeight);
+    Inc(Y, Px(RowHeight));
     if FRows[i].Kind = srHeading then
       Inc(Y, 4);
   end;
@@ -755,7 +755,7 @@ begin
     may have changed: tiles wrapped into fewer rows leave it too tall.
     The height follows what was painted, up or down; it does not depend
     on the height, so this paint is the last. }
-  FContentHeight := Y + Pad;
+  FContentHeight := Y + Px(Pad);
   if Height <> Max(FContentHeight, Constraints.MinHeight) then
     Height := Max(FContentHeight, Constraints.MinHeight);
 end;

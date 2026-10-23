@@ -18,6 +18,7 @@ uses
   gittan.lexers, gittan.git, gittan.github, gittan.conflicts, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.welcome, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.sidenav, gittan.repoinfo, gittan.repopage, gittan.subpage,
+  gittan.repocommands, gittan.commandpage,
   gittan.settingsdlg, gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   {$IFDEF LCLCocoa}gittan.toolbar, gittan.memohint,{$ENDIF}
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
@@ -28,7 +29,7 @@ uses
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader, gittan.hintbox,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, gittan.mdpreview,
-  gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.repobrowser, gittan.clonedlg,
+  gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
   gittan.remotesdlg, gittan.submoduledlg, ATSynEdit_Gaps, md5;
 
 type
@@ -37,9 +38,13 @@ type
     history of a piece of code (Go > Code History), a submodule, a
     changed image, side by side (gittan.imagediff), a translation file
     with its originals beside its translations (umain.translations.inc),
-    or a binary file, changed or opened (gittan.binaryview). }
+    a binary file, changed or opened (gittan.binaryview), the Commands
+    page, the Files page (gittan.filespage, umain.files.inc), a file of
+    the commit it lists, read-only in the editor (or in the image or the
+    binary view), or the Pull Requests page (gittan.pullpage,
+    umain.pulls.inc). }
   TGittanView = (gvSummary, gvRepoInfo, gvChanges, gvRepoDiff, gvFile, gvHistory, gvSubmodule,
-    gvImage, gvTranslation, gvBinary);
+    gvImage, gvTranslation, gvBinary, gvCommands, gvFiles, gvBlob, gvPulls);
 
   {** The three strengths of a commit's color in the history view: the
     faint tint of its rows, the shade of the words it changed, and the
@@ -58,8 +63,8 @@ type
 
   {** What a transport button of the status bar does: UpdateStatusTransport
     puts the steps there, StatusStepClick runs them. }
-  TStatusStep = (stepNone, stepFetch, stepPull, stepPush, stepContinue, stepCommit,
-    stepAbort, stepSkip, stepResolve);
+  TStatusStep = (stepNone, stepFetch, stepPull, stepPush, stepForcePush, stepContinue,
+    stepCommit, stepAbort, stepSkip, stepResolve);
 
   {** One row of the change view. Line is the index of its diff line in
     the file's diff, rowGap for a row that stands for the unchanged lines
@@ -88,6 +93,20 @@ type
       override;
   public
     property OnStateClick: TTVExpandedEvent read FOnStateClick write FOnStateClick;
+  end;
+
+  {** The colors the self-painted controls share in one appearance
+    (TForm1.Palette): the gutter's shade the bars and headers sit on,
+    the text and its dim kind, the divider lines, the popup lists'
+    background, hovered row and border, a raised part of a bar, the
+    accent, the added, deleted and warning tones, the pills, and the
+    note boxes of the Commit section (info, error, each with its border). }
+  TGittanPalette = record
+    Shade, Text, Dim, Line: TColor;
+    Popup, Hover, Border, Raised: TColor;
+    Accent, Added, Deleted, Warning: TColor;
+    Pill, PillText: TColor;
+    NoteInfo, NoteInfoLine, NoteError, NoteErrorLine: TColor;
   end;
 
   { TForm1 }
@@ -212,6 +231,9 @@ type
       the current one. }
     FGoneBranches: TStringList;
     FPulls: TGittanPullRequests;
+    { The open pull requests waiting for the user's review, which the
+      summary lists and the Pull Requests page marks. }
+    FReviewPulls: TGittanPullRequests;
     FPullError, FPullKey: string;
     FPullMenu, FOpenPullItem, FCopyPullItem: TMenuItem;
     FPullRange: string;
@@ -339,7 +361,6 @@ type
     { The base popup's items while a commit is shown (see BlameShown):
       back to the working tree and copy its id; -1 otherwise. }
     FBaseBackIndex, FBaseCopyIndex: integer;
-    FSyncActions: TIntegerDynArray;
     FSubPanel: TPanel;
     FSubHeader: TGittanSectionHeader;
     FSubTree: TTreeView;
@@ -416,6 +437,18 @@ type
     FDefaultBranch, FMergeBase: string;
     FHasUpstream: boolean;
     FAhead, FBehind: integer;
+    { The branch was rewritten since it was pushed (the snapshot's
+      Rewritten): Force Push is the next step, not Pull. }
+    FRewritten: boolean;
+    { A branch without an upstream: its commits on no remote, -1 without
+      a remote (the snapshot's NotOnRemote). }
+    FNotOnRemote: integer;
+    { Rebase or Merge in the summary's row of a branch behind the default
+      branch fetches first: the ref to rebase onto (FAfterFetchRebase) or
+      merge once the fetch is done, and the branch it is for; '' while
+      none waits. }
+    FAfterFetchRef, FAfterFetchBranch: string;
+    FAfterFetchRebase: boolean;
     { What git is in the middle of ("merging", "rebasing", ...) and how
       many files have conflicts, read by LoadRepository; and the role of
       each line of FChangeLines in a conflict (see gittan.conflicts),
@@ -487,6 +520,26 @@ type
       for while the commit graph is open. }
     FNavViewRow: integer;
     FRepoPage: TGittanRepoPage;
+    { The Commands page, in the box too, the repository's commands
+      shown on it, the hash of its commands file and the command
+      running (umain.commands.inc). }
+    FCommandPage: TGittanCommandPage;
+    FRepoCommands: TGittanRepoCommands;
+    FCommandsHash: string;
+    FCommandJob: TGittanCommandJob;
+    FCommandName: string;
+    FCommandRead: integer;
+    { The Files page, in the box too (umain.files.inc): whether it
+      follows HEAD (else it shows the commit Browse Files... picked),
+      and the file of its commit shown in the editor: its path, its
+      commit and what the page calls it. }
+    FFilesPage: TGittanFilesPage;
+    FFilesHead: boolean;
+    FBlobPath, FBlobCommit, FBlobName: string;
+    { The Pull Requests page, in the box too, and its View menu item,
+      both there only with gh (umain.pulls.inc). }
+    FPullPage: TGittanPullPage;
+    FPullsItem: TMenuItem;
     { The page of a submodule, in the box too (umain.submodules.inc). }
     FSubPage: TGittanSubPage;
     FRepoInfoJob: TGittanRepoInfoJob;
@@ -515,8 +568,8 @@ type
     FUpstreamRows: TStringList;
     FUpstreamBranch: string;
     { Tags (umain.tags.inc): what the list read when it opened, the list
-      with, per row, the index in FTags of its tag (TagRowHeader,
-      TagRowNew for the others), the menu of a tag and the one it is
+      with, as each row's tag, the index in FTags of its tag (TagRowNew
+      for the New row), the menu of a tag and the one it is
       for, the remote pushes and deletions go to, and the Branch menu's
       items. }
     FTags: TGittanTags;
@@ -533,33 +586,30 @@ type
     FSubListPopup: TGittanPopupList;
     { The popup's index of each submodule's row, in FSubmodules' order. }
     FSubListRows: array of integer;
-    FTagRows: TIntegerDynArray;
     FTagMenu: TPopupMenu;
     FMenuTag: TGittanTag;
     FTagRemote: string;
     FTagsItem, FNewTagItem, FPushTagsItem: TMenuItem;
     { The reflog (umain.reflog.inc): HEAD's reflog as the list read it
-      when it opened, the list with, per row, the index in FReflog of
-      its line (ReflogRowHeader for the header), the menu of a line and
+      when it opened, the list with, as each row's tag, the index in
+      FReflog of its line, the menu of a line and
       the line it is for, and the Branch menu's item. }
     FReflog: TGittanReflog;
     FReflogPopup: TGittanPopupList;
-    FReflogRows: TIntegerDynArray;
     FReflogMenu: TPopupMenu;
     FMenuReflog: TGittanReflogEntry;
     FReflogItem: TMenuItem;
     { Stashes (umain.stash.inc): what the last snapshot listed, the list
       that drops from the status bar's stash chip with the stashes it
       shows (FListedStashes, a copy, since a snapshot replaces FStashes
-      while the list is up) and, per row, the index in them of its stash
-      (StashRowHeader, StashRowNew for the others), the menu of a stash and the one it is for, the range
+      while the list is up) and, as each row's tag, the index in them of
+      its stash (StashRowNew for the New row), the menu of a stash and the one it is for, the range
       a compared stash is the base as and the stash it is of, the stash
       the base chip's list is for with its rows, and the Stash menu's
       items. }
     FStashes: TGittanStashes;
     FStashPopup: TGittanPopupList;
     FListedStashes: TGittanStashes;
-    FStashRows: TIntegerDynArray;
     FStashMenu: TPopupMenu;
     FMenuStash: TGittanStash;
     FStashRange, FStashRangeId, FBaseStashId: string;
@@ -570,10 +620,14 @@ type
       ahead/behind counts or View > Commit Graph. }
     FGraph: TGittanCommitGraph;
     { The notice over the form while a fetch, pull or push runs: at once
-      when a pre-push hook has to run first, else after NoticeDelay. }
+      when a pre-push hook has to run first, else after NoticeDelay; and
+      what a failed one or a failed commit said. }
     FNotice: TGittanNotice;
     FNoticeTimer: TTimer;
     FNoticeHook: boolean;
+    { The notice tells of a failed commit: its first button commits
+      again. }
+    FNoticeCommit: boolean;
     { The banner over the file header and the summary: what failed, until
       it is closed (BannerError). }
     FBanner: TGittanBanner;
@@ -735,6 +789,7 @@ type
     FReviewMeasure: TBitmap;
     { The thread a click on its card folds when the button comes up. }
     FGapToggle: string;
+    function Palette: TGittanPalette;
     procedure ApplyTheme;
     procedure ApplyEditorColors(AEd: TATSynEdit);
     procedure SetupEditor(AEd: TATSynEdit);
@@ -796,6 +851,44 @@ type
     procedure StartRepoInfoJob;
     procedure AbandonRepoInfoJob;
     procedure RepoInfoJobDone(Sender: TObject);
+    procedure HideBoxPages;
+    procedure SetupPullPage;
+    procedure MenuPullsClick(Sender: TObject);
+    procedure ShowPulls;
+    procedure UpdatePullPage;
+    procedure PullPageCompare(Sender: TObject; const APull: TGittanPullRequest);
+    procedure SummarySelectPull(Sender: TObject; const APull: TGittanPullRequest);
+    procedure PullPageWorkingTree(Sender: TObject);
+    procedure PullPageRefresh(Sender: TObject);
+    procedure SetupFilesPage;
+    procedure MenuFilesClick(Sender: TObject);
+    procedure ShowFiles;
+    procedure ShowFilesAt(const AHash, AName, ASubject: string);
+    procedure RefreshFilesPage;
+    function FilesPageRead(Sender: TObject; const AFolder: string;
+      out AList: TGittanTreeEntries; out AError: string): boolean;
+    procedure FilesPageOpen(Sender: TObject; const AEntry: TGittanTreeEntry);
+    procedure FilesPageFolderChange(Sender: TObject);
+    procedure ShowBlob(const APath: string);
+    function BlobData(out AData: RawByteString): boolean;
+    procedure OpenBlobOutside;
+    procedure SaveBlobAs;
+    procedure SetupCommandPage;
+    function CommandsTrusted: boolean;
+    procedure LoadRepoCommands;
+    procedure MenuCommandsClick(Sender: TObject);
+    procedure ShowCommands;
+    procedure CommandPageRun(Sender: TObject; AIndex: integer);
+    procedure RunRepoCommand(AIndex: integer; AByKey: boolean);
+    procedure CommandJobOutput(Sender: TObject);
+    procedure CommandJobDone(Sender: TObject);
+    procedure AbandonCommandJob(AWait: boolean);
+    procedure CommandPageStop(Sender: TObject);
+    procedure CommandPageTrust(Sender: TObject);
+    procedure CommandPageEditFile(Sender: TObject);
+    procedure CommandPageCopyOutput(Sender: TObject);
+    function CommandKey(AKey: word; AShift: TShiftState): boolean;
+    procedure OpenTerminal(const ACommand: string);
     procedure ShowEditor;
     procedure ShowImageChanges(const APath: string);
     procedure ShowBinaryChanges(const APath: string);
@@ -905,7 +998,7 @@ type
     procedure DiscardThis(const ABlock: TGittanDiscard);
     { umain.leaveout.inc }
     function CanLeaveOut: boolean;
-    function CommitStatIndex(const APath: string): integer;
+    function StatIndexOf(const APath: string): integer;
     function ShownFileChosen: boolean;
     procedure ApplyLeftOut;
     function LineLeftOut(ALine: integer): boolean;
@@ -1017,6 +1110,8 @@ type
     procedure SetFoldBand(AEd: TATSynEdit; AVisible: boolean);
     function FoldAction: TATEditorActionIfFolded;
     function FileLineOfRow(ARow: integer): integer;
+    function RepoBusy: boolean;
+    function RepoReady: boolean;
     function FoldPath: string;
     procedure KeepFolds;
     procedure RestoreFolds;
@@ -1170,6 +1265,9 @@ type
     procedure MenuCommitClick(Sender: TObject);
     function EnsureIdentity: boolean;
     procedure StartCommit;
+    {** The notice with a failed commit's reason (a hook's output, in
+      its colors), Commit Again and Copy Output. }
+    procedure ShowCommitFailure(const AError: string);
     procedure CommitJobDone(Sender: TObject);
     procedure StopCommitJob(AWait: boolean);
     procedure DroppedCommitDone(Sender: TObject);
@@ -1214,6 +1312,14 @@ type
     procedure DeleteGoneBranches;
     procedure MergeIntoCurrent(const ARef: string);
     procedure RebaseOntoAsk(const ARef: string);
+    {** Rebase (ARebase) or Merge in the summary's row of a branch behind
+      the default branch: a fetch, then the rebase's question or the
+      merge (AfterFetch). }
+    procedure SummaryBehindAction(Sender: TObject; ARebase: boolean);
+    {** Runs the rebase or merge SummaryBehindAction waits with, after a
+      fetch that went through, when the branch is still the one it was
+      for. }
+    procedure AfterFetch;
     procedure RebaseInteractiveAsk(const AOnto, AName: string; AFromGraph: boolean);
     procedure CompareSince(const ARef: string);
     procedure CompareCurrentSince(const ARef: string);
@@ -1225,7 +1331,6 @@ type
     procedure ShowUpstreamList(const ABranch: string; const AScreenRect: TRect);
     procedure UpstreamPopupPick(Sender: TObject; AIndex: integer);
     procedure MenuUpstreamClick(Sender: TObject);
-    function TagBusy: boolean;
     procedure ShowTagList(const AScreenRect: TRect);
     procedure TagPopupPick(Sender: TObject; AIndex: integer);
     procedure TagContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
@@ -1233,6 +1338,8 @@ type
     procedure NewTagAsk;
     procedure CheckoutTagAsk(const ATag: TGittanTag);
     procedure BranchAtAsk(const ALabel, ACommit: string);
+    function NewBranchAsk(const APrompt, ACommit: string): boolean;
+    function TagAtAsk(const AShort, ACommit: string): boolean;
     procedure DeleteTagAsk(const ATag: TGittanTag);
     procedure MenuTagsClick(Sender: TObject);
     procedure MenuNewTagClick(Sender: TObject);
@@ -1244,9 +1351,9 @@ type
     procedure MenuReflogClick(Sender: TObject);
     function ResetTarget: string;
     function ResetAsk(const AHash, AShort: string; AMode: TGittanResetMode): boolean;
+    function ResetToAsk(const AHash, AShort: string; AMode: TGittanResetMode): boolean;
     function StashLabel(const AStash: TGittanStash): string;
     function StashOfBase: integer;
-    function StashBusy: boolean;
     procedure ShowStashList(const AScreenRect: TRect);
     procedure StashPopupPick(Sender: TObject; AIndex: integer);
     procedure StashContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
@@ -1361,6 +1468,7 @@ type
     procedure AddSubmoduleAsk(const AUrl, APath, ABranch: string);
     procedure SubmoduleRemoteDone(AJob: TGittanRemoteJob);
     function PopupSubmodule: integer;
+    function PopupSubmodulePath: string;
     procedure SubPopupPopup(Sender: TObject);
     procedure MenuSubUpdateAllClick(Sender: TObject);
     procedure MenuSubSyncAllClick(Sender: TObject);
@@ -1389,9 +1497,7 @@ type
     {$IFDEF LCLCocoa}
     procedure ToolbarSearchKey(Sender: TObject; var Key: word);
     {$ENDIF}
-    {$IFDEF LCLGtk3}
     procedure FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
-    {$ENDIF}
     procedure HeaderControlsChange(Sender: TObject);
     procedure MenuFilterFilesClick(Sender: TObject);
     procedure AbandonPullJob;
@@ -1464,7 +1570,8 @@ implementation
 {$R *.lfm}
 
 uses
-  Clipbrd, LCLIntf, Process, FileUtil, LazFileUtils, DateUtils, StrUtils, LazUTF8, LCLProc
+  Clipbrd, LCLIntf, Process, FileUtil, LazFileUtils, DateUtils, StrUtils, LazUTF8, LCLProc,
+  LConvEncoding, gittan.textfit
   {$IFDEF LCLCocoa}, CocoaConfig, gittan.titlebar{$ENDIF};
 
 resourcestring
@@ -1496,11 +1603,27 @@ resourcestring
   rsSummary = '&Summary';
   rsRepoDiff = '&Repository Diff';
   rsRepoInfo = 'Repository &Info';
+  rsCommandsMenu = '&Commands';
+  rsCommandStillRunning = '%s is still running';
+  rsCommandDone = '%s finished in %s';
+  rsCommandFailed = '%s failed with exit code %d';
+  rsCommandStopped = '%s was stopped';
+  rsCommandNoStart = '%s could not be started';
   rsNavHome = 'Home';
   rsNavGraph = 'Graph';
   rsNavRepository = 'Repository';
   rsNavRecent = 'Recent';
-  rsNavSettings = 'Settings';
+  rsNavCommands = 'Commands';
+  rsNavChanges = 'Changes';
+  rsNavPulls = 'Pull Requests';
+  rsAllPulls = 'All Pull Requests';
+  rsFilesMenu = '&Files';
+  rsAtCommit = 'at %s';
+  rsBlobOpen = 'Open';
+  rsBlobSaveAs = 'Save As…';
+  rsBlobReadFailed = 'Could not read %s: %s';
+  rsBlobWriteFailed = 'Could not write %s: %s';
+  rsFilesSubmoduleUnknown = '%s is not among the submodules of this work tree';
   rsNoRecent = 'No recent repositories';
   rsNavFiles = 'Files';
   rsNavHide = 'Hide navigation';
@@ -1625,6 +1748,7 @@ resourcestring
   rsSubjectCount = '%d/%d';
   rsSubjectCountHint = 'Characters in the first line. git log and GitHub cut it after %d.';
   rsCommitFailed = 'The commit failed';
+  rsCommitAgain = 'Commit Again';
   rsFetchMenu = '&Fetch';
   rsPullMenu = '&Pull';
   rsPushMenu = 'P&ush';
@@ -2169,6 +2293,7 @@ resourcestring
   rsBehindHint = '%d commits not pulled yet';
   rsInSyncHint = 'Up to date with upstream';
   rsNoUpstreamHint = 'No upstream branch';
+  rsNotOnRemoteHint = '%d commits on no remote yet';
   rsGraphHint = 'Click to pull, push or show the commit graph';
   rsOperationStep = '%s · %d of %d';
   rsResolveStep = 'Resolve %d conflicts';
@@ -2179,6 +2304,10 @@ resourcestring
   rsPushStepHint = 'Click to push them';
   rsPushNewBranchHint = 'Click to push the branch to the remote';
   rsDivergedHint = 'The branch and its upstream have both moved on';
+  rsRewrittenHint = 'Rewritten since it was pushed (rebased or amended)';
+  rsRewrittenReplacesOne = 'A force push replaces the 1 commit only the upstream has';
+  rsRewrittenReplaces = 'A force push replaces the %d commits only the upstream has';
+  rsForcePushStepHint = 'Click to force push (with lease)';
   rsAbortStepHint = 'Abort %s';
   rsSkipStepHint = 'Skip the commit %s stopped at';
   rsCommitGraph = 'Commit &Graph';
@@ -2219,9 +2348,11 @@ const
   navHome = 0;
   navGraph = 1;
   navRepository = 2;
-  { The small rows under them: lists and dialogs, never selected. }
-  navRecent = 3;
-  navSettings = 4;
+  navCommands = 3;
+  navFiles = 4;
+  navPulls = 5;
+  { The last row: a list, never selected. }
+  navRecent = 6;
   { Scrolling on past the bottom of a file goes to the next one, and
     past the top to the previous: the wheel delta the pull needs (120 is
     one notch of a mouse wheel, 8 one pixel of a trackpad on macOS), the
@@ -2376,6 +2507,19 @@ const
   ContextChoices: array[0..3] of integer = (1, 3, 5, 10);
   { Matches beyond this are not counted; the find bar says "10000+". }
   MaxMatches = 10000;
+
+{ A menu item under AParent, owned by AParent's menu, for the context
+  menus that are filled as they open. }
+function AddMenuItem(AParent: TMenuItem; const ACaption: string; ATag: integer;
+  AEnabled: boolean; AOnClick: TNotifyEvent): TMenuItem;
+begin
+  Result := TMenuItem.Create(AParent.Owner);
+  Result.Caption := ACaption;
+  Result.Tag := ATag;
+  Result.Enabled := AEnabled;
+  Result.OnClick := AOnClick;
+  AParent.Add(Result);
+end;
 
 { TForm1 }
 
@@ -2605,7 +2749,9 @@ begin
   FSummary.OnBranchClick := @SummaryBranchClick;
   FSummary.OnBaseClick := @SummaryBaseClick;
   FSummary.OnSyncClick := @SummarySyncClick;
+  FSummary.OnBehindAction := @SummaryBehindAction;
   FSummary.OnOpenUrl := @SummaryOpenUrl;
+  FSummary.OnSelectPull := @SummarySelectPull;
   FSummary.OnSelectCommit := @SummarySelectCommit;
   FSummary.OnBackClick := @SummaryBackClick;
   FSummary.OnRowAction := @SummaryRowAction;
@@ -2715,6 +2861,10 @@ begin
   FRepoPage.OnOpenUrl := @SummaryOpenUrl;
   FRepoPage.OnEditRemotes := @RepoPageEditRemotes;
   FRepoPage.OnOpenTarget := @RepoPageOpenTarget;
+  { And the Commands page, and the Files page. }
+  SetupCommandPage;
+  SetupFilesPage;
+  SetupPullPage;
   { So does the page of a submodule. }
   FSubPage := TGittanSubPage.Create(Self);
   FSubPage.Parent := FSummaryBox;
@@ -2991,7 +3141,55 @@ begin
   AEd.Invalidate;
 end;
 
+function TForm1.Palette: TGittanPalette;
+begin
+  Result.Shade := SidebarShade(FDark);
+  if FDark then
+  begin
+    Result.Text := Edit.Colors.TextFont;
+    Result.Dim := RGBToColor(150, 150, 150);
+    Result.Line := RGBToColor(62, 62, 62);
+    Result.Popup := Result.Shade;
+    Result.Hover := RGBToColor(58, 58, 59);
+    Result.Border := RGBToColor(85, 85, 86);
+    Result.Raised := RGBToColor(58, 58, 59);
+    Result.Accent := RGBToColor(100, 160, 240);
+    Result.Added := RGBToColor(63, 185, 80);
+    Result.Deleted := RGBToColor(248, 81, 73);
+    Result.Warning := RGBToColor(227, 179, 65);
+    Result.Pill := RGBToColor(50, 50, 51);
+    Result.PillText := RGBToColor(200, 200, 200);
+    Result.NoteInfo := RGBToColor(33, 44, 58);
+    Result.NoteInfoLine := RGBToColor(44, 66, 92);
+    Result.NoteError := RGBToColor(56, 34, 36);
+    Result.NoteErrorLine := RGBToColor(100, 50, 54);
+  end
+  else
+  begin
+    Result.Text := RGBToColor(30, 30, 30);
+    Result.Dim := RGBToColor(110, 110, 110);
+    Result.Line := RGBToColor(222, 222, 222);
+    Result.Popup := clWhite;
+    Result.Hover := RGBToColor(235, 235, 235);
+    Result.Border := RGBToColor(205, 205, 205);
+    Result.Raised := RGBToColor(232, 232, 232);
+    Result.Accent := RGBToColor(0, 110, 230);
+    Result.Added := RGBToColor(26, 127, 55);
+    Result.Deleted := RGBToColor(207, 34, 46);
+    Result.Warning := RGBToColor(154, 103, 0);
+    Result.Pill := clWhite;
+    Result.PillText := RGBToColor(70, 70, 70);
+    Result.NoteInfo := RGBToColor(234, 243, 252);
+    Result.NoteInfoLine := RGBToColor(200, 222, 245);
+    Result.NoteError := RGBToColor(253, 236, 236);
+    Result.NoteErrorLine := RGBToColor(242, 198, 198);
+  end;
+end;
+
 procedure TForm1.ApplyTheme;
+var
+  P: TGittanPalette;
+  List: TGittanPopupList;
 begin
   ApplyEditorColors(Edit);
   ApplyEditorColors(FEditOld);
@@ -3002,167 +3200,52 @@ begin
     HistoryColor(5, htSwatch)]);
   { The header and the find bar take the gutter's shade; the navigator
     pills sit on it. }
+  P := Palette;
+  FHeader.SetColors(P.Shade, P.Text, P.Dim, P.Added, P.Deleted, P.Line);
+  FHeader.SetPillColors(P.Pill, P.Border, P.Accent);
+  FNav.SetColors(P.Shade, P.Pill, P.Border, P.PillText, P.Accent);
+  FFindBar.SetColors(P.Shade, P.Text, P.Dim, P.Line);
+  FFindBar.Nav.SetColors(P.Shade, P.Pill, P.Border, P.PillText, P.Accent);
+  FSymbolBar.SetColors(P.Shade, P.Text, P.Dim, P.Line);
+  for List in [FBranchPopup, FStashPopup, FUpstreamPopup, FTagPopup, FViewPopup,
+    FSubListPopup, FReflogPopup, FPullPopup, FSyncPopup, FRecentPopup, FBasePopup,
+    FConflictPopup] do
+    List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
+  FGraph.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent, P.Warning);
+  FBanner.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Line, P.Accent, P.Deleted, P.Added);
+  FDiscardPills.SetColors(P.Popup, P.Text, P.Border, P.Accent, P.Added, P.Deleted);
+  FStatus.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Raised, P.Accent, P.Added,
+    P.Warning, P.Deleted);
+  FPullFill := P.Pill;
+  FPullBorder := P.Border;
+  FPullText := P.PillText;
+  FBandTrack := P.Line;
+  FBandFill := P.Accent;
   if FDark then
   begin
-    FHeader.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(63, 185, 80), RGBToColor(248, 81, 73),
-      RGBToColor(62, 62, 62));
-    FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(62, 62, 62), RGBToColor(248, 81, 73),
-      RGBToColor(63, 185, 80), RGBToColor(58, 58, 60), RGBToColor(44, 44, 46));
-    FBinaryView.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(44, 44, 46));
-    FNav.SetColors(RGBToColor(37, 37, 38), RGBToColor(50, 50, 51),
-      RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240));
-    FHeader.ConflictNav.SetColors(RGBToColor(37, 37, 38), RGBToColor(58, 46, 68),
+    FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim, P.Line, P.Deleted,
+      P.Added, RGBToColor(58, 58, 60), RGBToColor(44, 44, 46));
+    FBinaryView.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim,
+      RGBToColor(44, 44, 46));
+    FHeader.ConflictNav.SetColors(P.Shade, RGBToColor(58, 46, 68),
       RGBToColor(120, 80, 160), RGBToColor(210, 170, 245), RGBToColor(240, 215, 255));
-    FHeader.SetPillColors(RGBToColor(50, 50, 51), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FFindBar.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(62, 62, 62));
-    FSymbolBar.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(62, 62, 62));
-    FFindBar.Nav.SetColors(RGBToColor(37, 37, 38), RGBToColor(50, 50, 51),
-      RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240));
-    FBranchPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FStashPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FUpstreamPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FTagPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FViewPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FSubListPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FReflogPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FGraph.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240), RGBToColor(227, 179, 65));
-    FNotice.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(0, 110, 230), RGBToColor(241, 112, 112));
-    FBanner.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(62, 62, 62), RGBToColor(62, 62, 62),
-      RGBToColor(100, 160, 240), RGBToColor(248, 81, 73), RGBToColor(63, 185, 80));
-    FPullPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FSyncPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FRecentPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FBasePopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FConflictPopup.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(85, 85, 86),
-      RGBToColor(100, 160, 240));
-    FDiscardPills.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(85, 85, 86), RGBToColor(100, 160, 240), RGBToColor(63, 185, 80),
-      RGBToColor(248, 81, 73));
-    FStatus.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(62, 62, 62), RGBToColor(58, 58, 59),
-      RGBToColor(100, 160, 240), RGBToColor(63, 185, 80), RGBToColor(227, 179, 65),
-      RGBToColor(248, 81, 73));
-    FPullFill := RGBToColor(50, 50, 51);
-    FPullBorder := RGBToColor(85, 85, 86);
-    FPullText := RGBToColor(200, 200, 200);
+    { The notice's accent is the light one in both, its red a softer one. }
+    FNotice.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, RGBToColor(0, 110, 230),
+      RGBToColor(241, 112, 112));
     FPullBar := RGBToColor(40, 80, 130);
     FLinkColor := RGBToColor(78, 161, 255);
-    FBandTrack := RGBToColor(62, 62, 62);
-    FBandFill := RGBToColor(100, 160, 240);
   end
   else
   begin
-    FHeader.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(26, 127, 55), RGBToColor(207, 34, 46),
-      RGBToColor(222, 222, 222));
-    FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
-      RGBToColor(110, 110, 110), RGBToColor(222, 222, 222), RGBToColor(207, 34, 46),
-      RGBToColor(26, 127, 55), RGBToColor(255, 255, 255), RGBToColor(230, 230, 230));
-    FBinaryView.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
-      RGBToColor(110, 110, 110), RGBToColor(246, 246, 246));
-    FNav.SetColors(RGBToColor(246, 246, 246), clWhite,
-      RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
-    FHeader.ConflictNav.SetColors(RGBToColor(246, 246, 246), RGBToColor(248, 240, 255),
+    FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim, P.Line, P.Deleted,
+      P.Added, RGBToColor(255, 255, 255), RGBToColor(230, 230, 230));
+    FBinaryView.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim, P.Shade);
+    FHeader.ConflictNav.SetColors(P.Shade, RGBToColor(248, 240, 255),
       RGBToColor(190, 160, 220), RGBToColor(110, 50, 160), RGBToColor(155, 63, 200));
-    FHeader.SetPillColors(clWhite, RGBToColor(205, 205, 205), RGBToColor(0, 110, 230));
-    FFindBar.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(222, 222, 222));
-    FSymbolBar.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(222, 222, 222));
-    FFindBar.Nav.SetColors(RGBToColor(246, 246, 246), clWhite,
-      RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
-    FBranchPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FStashPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FUpstreamPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FTagPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FViewPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FSubListPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FReflogPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FGraph.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230), RGBToColor(154, 103, 0));
-    FNotice.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230), RGBToColor(200, 40, 40));
-    FBanner.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(222, 222, 222), RGBToColor(222, 222, 222),
-      RGBToColor(0, 110, 230), RGBToColor(207, 34, 46), RGBToColor(26, 127, 55));
-    FPullPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FSyncPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FRecentPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FBasePopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FConflictPopup.SetColors(clWhite, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230));
-    FDiscardPills.SetColors(clWhite, RGBToColor(30, 30, 30), RGBToColor(205, 205, 205),
-      RGBToColor(0, 110, 230), RGBToColor(26, 127, 55), RGBToColor(207, 34, 46));
-    FStatus.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(222, 222, 222), RGBToColor(232, 232, 232),
-      RGBToColor(0, 110, 230), RGBToColor(26, 127, 55), RGBToColor(154, 103, 0),
-      RGBToColor(207, 34, 46));
-    FPullFill := clWhite;
-    FPullBorder := RGBToColor(205, 205, 205);
-    FPullText := RGBToColor(70, 70, 70);
+    FNotice.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent,
+      RGBToColor(200, 40, 40));
     FPullBar := RGBToColor(205, 225, 250);
     FLinkColor := RGBToColor(0, 102, 204);
-    FBandTrack := RGBToColor(222, 222, 222);
-    FBandFill := RGBToColor(0, 110, 230);
   end;
   FSummaryBox.Color := Edit.Colors.TextBG;
   if FDark then
@@ -3184,6 +3267,19 @@ begin
       RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(62, 62, 62),
       FLinkColor, FLinkColor, RGBToColor(248, 81, 73));
     FRepoPage.SetCardColor(RGBToColor(40, 40, 41));
+    FCommandPage.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(62, 62, 62),
+      FLinkColor, RGBToColor(63, 185, 80), RGBToColor(248, 81, 73));
+    FCommandPage.SetCardColor(RGBToColor(40, 40, 41));
+    FCommandPage.Console.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
+      RGBToColor(62, 62, 62));
+    FFilesPage.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(62, 62, 62),
+      FLinkColor, RGBToColor(248, 81, 73));
+    FPullPage.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(62, 62, 62),
+      FLinkColor, RGBToColor(63, 185, 80), RGBToColor(227, 179, 65), RGBToColor(248, 81, 73));
+    FPullPage.SetCardColor(RGBToColor(40, 40, 41));
     FSubPage.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(45, 45, 46), RGBToColor(62, 62, 62),
       RGBToColor(40, 40, 41), FLinkColor, RGBToColor(63, 185, 80),
@@ -3201,6 +3297,19 @@ begin
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(222, 222, 222),
       FLinkColor, FLinkColor, RGBToColor(207, 34, 46));
     FRepoPage.SetCardColor(RGBToColor(245, 245, 246));
+    FCommandPage.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(222, 222, 222),
+      FLinkColor, RGBToColor(26, 127, 55), RGBToColor(207, 34, 46));
+    FCommandPage.SetCardColor(RGBToColor(245, 245, 246));
+    FCommandPage.Console.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
+      RGBToColor(222, 222, 222));
+    FFilesPage.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(222, 222, 222),
+      FLinkColor, RGBToColor(207, 34, 46));
+    FPullPage.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(222, 222, 222),
+      FLinkColor, RGBToColor(26, 127, 55), RGBToColor(154, 103, 0), RGBToColor(207, 34, 46));
+    FPullPage.SetCardColor(RGBToColor(245, 245, 246));
     FSubPage.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(243, 243, 243), RGBToColor(222, 222, 222),
       RGBToColor(245, 245, 246), FLinkColor, RGBToColor(26, 127, 55),
@@ -3271,9 +3380,11 @@ var
 begin
   if FView = gvImage then
     Lexer := ImageFormatName(FCurrentPath)
+  else if (FView = gvBlob) and FImageDiff.Visible then
+    Lexer := ImageFormatName(FBlobPath)
   else if FView = gvTranslation then
     Lexer := FPoStats
-  else if FView in [gvBinary, gvSubmodule] then
+  else if (FView in [gvBinary, gvSubmodule]) or ((FView = gvBlob) and FBinaryView.Visible) then
     Lexer := ''
   else if FAdapter.Lexer = nil then
     Lexer := rsPlainText
@@ -3305,7 +3416,7 @@ begin
   if FHasUpstream then
     FStatus.SetSync(FAhead, FBehind, True)
   else
-    FStatus.SetSync(0, 0, True);
+    FStatus.SetSync(Max(0, FNotOnRemote), 0, True);
   { The counts, or that there is nothing to push or pull, then what a
     click does. }
   Sync := '';
@@ -3317,6 +3428,8 @@ begin
   begin
     if FHasUpstream then
       Sync := rsInSyncHint
+    else if FNotOnRemote > 0 then
+      Sync := rsNoUpstreamHint + LineEnding + Format(rsNotOnRemoteHint, [FNotOnRemote])
     else
       Sync := rsNoUpstreamHint;
   end;
@@ -3348,6 +3461,12 @@ begin
     FStatus.PartHint[spBase] := rsStashActionsHint
   else
     FStatus.PartHint[spBase] := '';
+  { The page marks the pull request compared against. }
+  if FPullPage <> nil then
+    if (FPullRange <> '') and (FRepo.Base = FPullRange) and FRepo.IsRange then
+      FPullPage.SetComparing(FPullNumber)
+    else
+      FPullPage.SetComparing(0);
   if FHasPull then
   begin
     Tone := PullChecks(FPull, Checks);
@@ -3384,9 +3503,10 @@ function OperationNoun(const AOperation: string): string; forward;
   in the middle of something they are Abort, then Resolve (the
   conflicts) or Continue (Commit Merge for a merge), then Skip where
   the operation can skip a commit. Otherwise Fetch, then Pull with
-  commits to pull (also when both sides moved on), Push with commits to
-  push or no upstream yet, or Up to date, which does nothing, then Push
-  or Pull as the other one. The buttons rest while a remote job or a
+  commits to pull (also when both sides moved on), Force Push when the
+  branch was rewritten since it was pushed (then Pull beside it), Push
+  with commits to push or no upstream yet, or Up to date, which does
+  nothing, then Push or Pull as the other one. The buttons rest while a remote job or a
   commit runs. The side buttons' captions are their hints. }
 procedure TForm1.UpdateStatusTransport;
 var
@@ -3444,6 +3564,20 @@ begin
       FStatusSteps[spPrimary] := stepPush;
       Tip := HintSync + ' ' + rsNoUpstreamHint + LineEnding + rsPushNewBranchHint;
       R := StatusButton(rsGitPullItem, HintDown, stNormal, False);
+      FStatusSteps[spRight] := stepPull;
+    end
+    else if FRewritten and (FAhead > 0) and (FBehind > 0) then
+    begin
+      { Pulling would bring the replaced commits back. }
+      P := StatusButton(rsForcePushItem, HintUp, stNormal, not Busy);
+      FStatusSteps[spPrimary] := stepForcePush;
+      Tip := HintSync + ' ' + rsRewrittenHint + LineEnding;
+      if FBehind = 1 then
+        Tip := Tip + rsRewrittenReplacesOne
+      else
+        Tip := Tip + Format(rsRewrittenReplaces, [FBehind]);
+      Tip := Tip + LineEnding + rsForcePushStepHint;
+      R := StatusButton(rsGitPullItem, HintDown, stNormal, not Busy);
       FStatusSteps[spRight] := stepPull;
     end
     else if FBehind > 0 then
@@ -3560,7 +3694,8 @@ var
 begin
   { Edit.Visible is no test: a file's view is built before ShowEditor
     shows the editor. }
-  if (Edit.Carets.Count = 0) or not (FView in [gvChanges, gvFile]) then
+  if (Edit.Carets.Count = 0) or not ((FView in [gvChanges, gvFile]) or
+    ((FView = gvBlob) and not FImageDiff.Visible and not FBinaryView.Visible)) then
   begin
     FStatus.SetPosition('');
     Exit;
@@ -3745,6 +3880,11 @@ begin
   AddItem(ViewMenu, rsRepoInfo, ShortCut(VK_I, [ssModifier, ssShift]), @MenuRepoInfoClick);
   AddItem(ViewMenu, rsRepoDiff, ShortCut(VK_2, [ssModifier]), @MenuRepoDiffClick);
   AddItem(ViewMenu, rsCommitGraph, ShortCut(VK_3, [ssModifier]), @MenuCommitGraphClick);
+  AddItem(ViewMenu, rsCommandsMenu, ShortCut(VK_4, [ssModifier]), @MenuCommandsClick);
+  AddItem(ViewMenu, rsFilesMenu, ShortCut(VK_5, [ssModifier]), @MenuFilesClick);
+  FPullsItem := AddItem(ViewMenu, rsPullRequests, ShortCut(VK_6, [ssModifier]),
+    @MenuPullsClick);
+  FPullsItem.Visible := FHasGitHubCli;
   ViewMenu.Add(NewLine);
   FCompareMenu := AddItem(ViewMenu, rsCompareWith, 0, nil);
   RebuildCompareMenu;
@@ -3946,6 +4086,7 @@ begin
     gvChanges: Result := FLexers.ForFile(FCurrentPath, FRepo.Root);
     gvRepoDiff: Result := FLexers.ByName(rsDiffLexer);
     gvFile: Result := FLexers.ForFile(Edit.FileName);
+    gvBlob: Result := FLexers.ForFile(FBlobPath, FRepo.Root);
     gvHistory: Result := FLexers.ForFile(FHistoryPath, FRepo.Root);
     else
       Result := nil;
@@ -4303,7 +4444,7 @@ end;
   row alignment; the history view hides lines as the change view does. }
 function TForm1.FoldingShown: boolean;
 begin
-  Result := (FView = gvFile) or ((FView = gvChanges) and not FOnlyChanges and
+  Result := (FView in [gvFile, gvBlob]) or ((FView = gvChanges) and not FOnlyChanges and
     not FSideBySide);
 end;
 
@@ -4337,11 +4478,34 @@ end;
 function TForm1.FileLineOfRow(ARow: integer): integer;
 begin
   Result := 0;
-  if FView = gvFile then
+  if FView in [gvFile, gvBlob] then
     Result := ARow + 1
   else if (FView = gvChanges) and (ARow >= 0) and (ARow <= High(FRows)) and
     (FRows[ARow].Line >= 0) and (FRows[ARow].Line <= High(FNewNum)) then
     Result := FNewNum[FRows[ARow].Line];
+end;
+
+{ An operation (merge, rebase, cherry-pick, bisect...) is under way, or a
+  commit or a remote job runs: nothing that moves HEAD or the index may
+  start. }
+function TForm1.RepoBusy: boolean;
+begin
+  Result := (FOperation <> '') or (FCommitJob <> nil) or (FRemoteJob <> nil);
+end;
+
+{ A repository is open and not busy. }
+function TForm1.RepoReady: boolean;
+begin
+  Result := (FRepo.Root <> '') and not RepoBusy;
+end;
+
+{ The index in FStats of APath, -1 when it is not changed. }
+function TForm1.StatIndexOf(const APath: string): integer;
+begin
+  for Result := 0 to High(FStats) do
+    if FStats[Result].Path = APath then
+      Exit;
+  Result := -1;
 end;
 
 { The path of the shown text, for KeepFolds. }
@@ -4349,6 +4513,8 @@ function TForm1.FoldPath: string;
 begin
   if FView = gvFile then
     Result := Edit.FileName
+  else if FView = gvBlob then
+    Result := FBlobPath
   else
     Result := FCurrentPath;
 end;
@@ -4522,16 +4688,11 @@ end;
 
 function EditorCharWidth(AEd: TATSynEdit): integer;
 var
-  Bmp: TBitmap;
+  C: TCanvas;
 begin
-  Bmp := TBitmap.Create;
-  try
-    Bmp.Canvas.Font.Name := AEd.Font.Name;
-    Bmp.Canvas.Font.Size := EditorFontSize(AEd);
-    Result := Max(1, Bmp.Canvas.TextWidth(ATEditorOptions.SampleChar));
-  finally
-    Bmp.Free;
-  end;
+  C := MeasureCanvas(AEd.Font);
+  C.Font.Size := EditorFontSize(AEd);
+  Result := Max(1, C.TextWidth(ATEditorOptions.SampleChar));
 end;
 
 { The bookmark band holds the line numbers while the change view is shown:
@@ -4596,7 +4757,7 @@ begin
   Result := nil;
   { The editor keeps the text of the file before an image or a binary
     file. }
-  if FView in [gvImage, gvBinary] then
+  if (FView in [gvImage, gvBinary]) or ((FView = gvBlob) and not Edit.Visible) then
     Exit;
   { The translation view keeps its own blocks: the changed entries, or
     the ones that need work. }
@@ -4933,6 +5094,7 @@ begin
   FHasUpstream := ASnap.HasUpstream;
   FAhead := ASnap.Ahead;
   FBehind := ASnap.Behind;
+  FRewritten := ASnap.Rewritten;
   FOperation := ASnap.Operation;
   FBisect := ASnap.Bisect;
   FRebaseBranch := ASnap.RebaseBranch;
@@ -4967,7 +5129,14 @@ begin
   Branch := FBranch;
   if FOperation <> '' then
     Branch := Branch + ' · ' + OperationLabel;
-  FSummary.SetCommits(ASnap.Recent, FAhead, FBehind, FHasUpstream);
+  FNotOnRemote := ASnap.NotOnRemote;
+  FSummary.SetCommits(ASnap.Recent, FAhead, FBehind, FHasUpstream, FNotOnRemote);
+  { Not in the middle of a merge or rebase, which the Commit section
+    finishes first. }
+  if FOperation = '' then
+    FSummary.SetBehind(ASnap.BehindDefault, FDefaultBranch)
+  else
+    FSummary.SetBehind(0, '');
   FSummary.BaseClickable := (BaseActionRef <> '') or (StashOfBase >= 0) or BlameShown;
   if BlameShown then
     FSummary.SetCommit(FBlameCommit, FBlameBody)
@@ -4983,11 +5152,32 @@ begin
     since the snapshot says it changed. }
   if FView = gvRepoInfo then
   begin
-    FSummary.Visible := False;
-    FSubPage.Visible := False;
+    HideBoxPages;
     FRepoPage.SetRepository(ExtractFileName(FRepo.Root), FRepo.Root);
     FRepoPage.Visible := True;
     StartRepoInfoJob;
+  end;
+  { The commands follow the files: an edit of the file or a pull. }
+  LoadRepoCommands;
+  if FView = gvCommands then
+  begin
+    HideBoxPages;
+    FCommandPage.Visible := True;
+    FCommandPage.FitHeight(FSummaryBox.ClientHeight);
+  end;
+  { The Files page follows HEAD, which a commit moved. }
+  if FView = gvFiles then
+  begin
+    HideBoxPages;
+    FFilesPage.Visible := True;
+    RefreshFilesPage;
+    FFilesPage.FitHeight(FSummaryBox.ClientHeight);
+  end;
+  if FView = gvPulls then
+  begin
+    HideBoxPages;
+    FPullPage.Visible := True;
+    FPullPage.FitHeight(FSummaryBox.ClientHeight);
   end;
   RebuildCompareMenu;
   FTerminalItem.Enabled := FRepo.Root <> '';
@@ -5270,11 +5460,12 @@ begin
   LeaveEditorViews;
   FSummaryBox.Visible := True;
   FView := gvSummary;
-  { The Repository page and the page of a submodule give the box back. }
-  if FRepoPage.Visible or FSubPage.Visible then
+  { The Repository, Commands, Files and Pull Requests pages and the
+    page of a submodule give the box back. }
+  if FRepoPage.Visible or FSubPage.Visible or FCommandPage.Visible or FFilesPage.Visible or
+    FPullPage.Visible then
   begin
-    FRepoPage.Visible := False;
-    FSubPage.Visible := False;
+    HideBoxPages;
     FSummary.Visible := FRepo.Root <> '';
   end;
   if FRepo.Root <> '' then
@@ -5288,6 +5479,22 @@ begin
   FSubTree.Selected := nil;
   if FRepo.Root <> '' then
     UpdateStatus;
+end;
+
+{ Hides every page of the box, for the one about to show. The welcome
+  view is shown at startup, before the later pages exist. }
+procedure TForm1.HideBoxPages;
+begin
+  FWelcome.Visible := False;
+  FSummary.Visible := False;
+  FRepoPage.Visible := False;
+  FSubPage.Visible := False;
+  if FCommandPage <> nil then
+    FCommandPage.Visible := False;
+  if FFilesPage <> nil then
+    FFilesPage.Visible := False;
+  if FPullPage <> nil then
+    FPullPage.Visible := False;
 end;
 
 { Hides the editor and what goes with it, for a page in the box. }
@@ -5428,6 +5635,9 @@ begin
   FWelcome.FitHeight(FSummaryBox.ClientHeight);
   FRepoPage.FitHeight(FSummaryBox.ClientHeight);
   FSubPage.FitHeight(FSummaryBox.ClientHeight);
+  FCommandPage.FitHeight(FSummaryBox.ClientHeight);
+  FFilesPage.FitHeight(FSummaryBox.ClientHeight);
+  FPullPage.FitHeight(FSummaryBox.ClientHeight);
 end;
 
 { The welcome view takes the summary's place in the box, with AError
@@ -5437,9 +5647,11 @@ procedure TForm1.ShowWelcome(const AError: string);
 begin
   FWelcome.SetError(AError);
   AbandonRepoInfoJob;
-  FSummary.Visible := False;
-  FRepoPage.Visible := False;
-  FSubPage.Visible := False;
+  { The welcome view is shown at startup, before the pages exist. }
+  if FCommandPage <> nil then
+    AbandonCommandJob(False);
+  FRepoCommands := nil;
+  HideBoxPages;
   SetNavRow(-1);
   FTreeClean := False;
   FWelcome.Visible := True;
@@ -5589,13 +5801,11 @@ begin
   { Asked before the header names the next file, not when the text is
     replaced further down. }
   FlushEdit;
+  i := StatIndexOf(APath);
   Result := False;
   { A binary file has no lines to diff; a new one would be read as
     text. }
-  Binary := False;
-  for i := 0 to High(FStats) do
-    if FStats[i].Path = APath then
-      Binary := FStats[i].Binary;
+  Binary := (i >= 0) and FStats[i].Binary;
   Lines := TStringList.Create;
   try
     if not Binary and not FRepo.FileChanges(APath, Lines) then
@@ -5629,23 +5839,21 @@ begin
   FConflictRoles := nil;
   FConflictStarts := nil;
   FConflictEnds := nil;
-  for i := 0 to High(FStats) do
-    if FStats[i].Path = APath then
+  if i >= 0 then
+  begin
+    FHeader.SetFile(APath, StatIcon(FStats[i]));
+    FHeader.SetCounts(FStats[i].Added, FStats[i].Deleted, FStats[i].Binary);
+    FHeader.SetStage(FStats[i].Staged, FStats[i].Unstaged);
+    if FStats[i].Kind = ckConflict then
     begin
-      FHeader.SetFile(APath, StatIcon(FStats[i]));
-      FHeader.SetCounts(FStats[i].Added, FStats[i].Deleted, FStats[i].Binary);
-      FHeader.SetStage(FStats[i].Staged, FStats[i].Unstaged);
-      if FStats[i].Kind = ckConflict then
-      begin
-        FConflictRoles := ConflictRoles(FChangeLines);
-        FConflictStarts := ConflictStarts(FConflictRoles, FChangeLines);
-        SetLength(FConflictEnds, Length(FConflictStarts));
-        for c := 0 to High(FConflictStarts) do
-          FConflictEnds[c] := ConflictEnd(FChangeLines, FConflictRoles, FConflictStarts[c]);
-        FHeader.SetActions([rsUseMine, rsUseTheirs, rsMarkResolved]);
-      end;
-      Break;
+      FConflictRoles := ConflictRoles(FChangeLines);
+      FConflictStarts := ConflictStarts(FConflictRoles, FChangeLines);
+      SetLength(FConflictEnds, Length(FConflictStarts));
+      for c := 0 to High(FConflictStarts) do
+        FConflictEnds[c] := ConflictEnd(FChangeLines, FConflictRoles, FConflictStarts[c]);
+      FHeader.SetActions([rsUseMine, rsUseTheirs, rsMarkResolved]);
     end;
+  end;
   if IsImagePath(APath) then
   begin
     ShowImageChanges(APath);
@@ -5877,6 +6085,7 @@ begin
     FToolbar.OnSearchChange := @TreeFilterChange;
     FToolbar.OnSearchKey := @ToolbarSearchKey;
     FToolbar.OnAction := @HeaderAction;
+    FToolbar.OnName := @MenuCommandsClick;
     FToolbar.OnPrev := @MenuPrevChangeClick;
     FToolbar.OnNext := @MenuNextChangeClick;
     FToolbar.OnConflictPrev := @MenuPrevConflictClick;
@@ -5892,11 +6101,12 @@ begin
   {$ENDIF}
   {$IFDEF LCLGtk3}
   FOwnBar := TGittanGtkTitleBar.Create(Self);
-  { Alt and a letter opens the menu it underlines, as the hidden menu
-    bar would. }
+  {$ENDIF}
+  { The keys of the commands (umain.commands.inc) from any view, and on
+    GTK Alt and a letter, which opens the menu it underlines as the
+    hidden menu bar would. }
   KeyPreview := True;
   OnKeyDown := @FormKeyDown;
-  {$ENDIF}
   {$IFDEF OWNBAR}
   FOwnBar.Title := rsAppShortName;
   FOwnBar.Align := alTop;
@@ -6062,16 +6272,22 @@ begin
   Result := FTreeFilter.Text;
 end;
 
-{$IFDEF LCLGtk3}
-{ Alt and a letter opens the menu with that accelerator from the title
-  bar, as the menu bar would have before the bar hid its names. }
+{ A command's key runs it (CommandKey). On GTK Alt and a letter opens
+  the menu with that accelerator from the title bar, as the menu bar
+  would have before the bar hid its names. }
 procedure TForm1.FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
 begin
+  if CommandKey(Key, Shift) then
+  begin
+    Key := 0;
+    Exit;
+  end;
+  {$IFDEF LCLGtk3}
   if (Shift * [ssAlt, ssCtrl, ssShift, ssMeta] = [ssAlt]) and (Key >= VK_A) and
     (Key <= VK_Z) and (FOwnBar <> nil) and FOwnBar.OpenMenuByKey(Chr(Key)) then
     Key := 0;
+  {$ENDIF}
 end;
-{$ENDIF}
 
 {$IFDEF LCLCocoa}
 { The search field passes Escape (when it is empty), Enter and Down on
@@ -6200,12 +6416,9 @@ begin
   if (Node <> nil) and (Node.Data <> nil) then
   begin
     Path := Node.GetTextPath;
-    for i := 0 to High(FStats) do
-      if FStats[i].Path = Path then
-      begin
-        Tip := StatHint(FStats[i]) + FileThreadsHint(Path);
-        Break;
-      end;
+    i := StatIndexOf(Path);
+    if i >= 0 then
+      Tip := StatHint(FStats[i]) + FileThreadsHint(Path);
   end
   else if Node <> nil then
   begin
@@ -6260,6 +6473,7 @@ const
 {$I umain.history.inc}
 {$I umain.repofiles.inc}
 {$I umain.repopage.inc}
+{$I umain.commands.inc}
 {$I umain.submodules.inc}
 {$I umain.update.inc}
 {$I umain.reviews.inc}
@@ -6277,7 +6491,8 @@ const
 {$I umain.clean.inc}
 {$I umain.patches.inc}
 {$I umain.clone.inc}
-{$I umain.repobrowser.inc}
+{$I umain.files.inc}
+{$I umain.pulls.inc}
 {$I umain.commit.inc}
 {$I umain.remote.inc}
 {$I umain.mdpreview.inc}

@@ -39,15 +39,7 @@ function AllLeftOut(ALines: TStrings; const ALeftOut: array of TGittanKeep): boo
 implementation
 
 uses
-  gittan.discard;
-
-{ A line without the CR a CRLF file ends it with. }
-function Bare(const ALine: string): string;
-begin
-  Result := ALine;
-  if (Result <> '') and (Result[Length(Result)] = #13) then
-    SetLength(Result, Length(Result) - 1);
-end;
+  gittan.discard, gittan.textfile;
 
 function LeaveOutText(const AText: RawByteString; ALines: TStrings;
   const ALeftOut: array of TGittanKeep; out AResult: RawByteString;
@@ -59,7 +51,7 @@ var
   Pairs: TGittanKeepArray;
   Found: array of boolean;
   Cr: string;
-  i, k, Old, Next, Left, Start, Emitted: integer;
+  i, k, Old, Next, Left, Emitted: integer;
   FinalNewline: boolean;
 
   procedure Emit(const ALine: string);
@@ -74,7 +66,7 @@ var
     in the result when AUse is set. False when it is not there. }
   function Take(const ANew: string; AUse: boolean): boolean;
   begin
-    Result := (Next < FileLines.Count) and (Bare(FileLines[Next]) = ANew);
+    Result := (Next < FileLines.Count) and (BareLine(FileLines[Next]) = ANew);
     if not Result then
       Exit;
     if AUse then
@@ -103,17 +95,9 @@ begin
       LF; a line put back gets the CR when the file's first line has
       one. }
     FinalNewline := (AText = '') or (AText[Length(AText)] = #10);
-    Start := 1;
-    for i := 1 to Length(AText) do
-      if AText[i] = #10 then
-      begin
-        FileLines.Add(Copy(AText, Start, i - Start));
-        Start := i + 1;
-      end;
-    if Start <= Length(AText) then
-      FileLines.Add(Copy(AText, Start, MaxInt));
+    SplitLf(AText, FileLines);
     Cr := '';
-    if (FileLines.Count > 0) and (FileLines[0] <> Bare(FileLines[0])) then
+    if (FileLines.Count > 0) and (FileLines[0] <> BareLine(FileLines[0])) then
       Cr := #13;
     Next := 0;
     Emitted := 0;

@@ -41,20 +41,13 @@ end;
 
 { The header takes the file header's palette, the gutter's shade. }
 procedure TForm1.ColorRepoHeader;
+var
+  P: TGittanPalette;
 begin
-  if FDark then
-    FRepoHeader.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(62, 62, 62))
-  else
-    FRepoHeader.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(232, 232, 232), RGBToColor(222, 222, 222));
+  P := Palette;
+  FRepoHeader.SetColors(P.Shade, P.Text, P.Dim, P.Raised, P.Line);
   if FSubHeader <> nil then
-    if FDark then
-      FSubHeader.SetColors(RGBToColor(37, 37, 38), Edit.Colors.TextFont,
-        RGBToColor(150, 150, 150), RGBToColor(58, 58, 59), RGBToColor(62, 62, 62))
-    else
-      FSubHeader.SetColors(RGBToColor(246, 246, 246), RGBToColor(30, 30, 30),
-        RGBToColor(110, 110, 110), RGBToColor(232, 232, 232), RGBToColor(222, 222, 222));
+    FSubHeader.SetColors(P.Shade, P.Text, P.Dim, P.Raised, P.Line);
 end;
 
 { Fills the section's tree from ListRepoFiles: the root files in their
@@ -129,8 +122,24 @@ end;
   and the rows in view, within half the tree panel, or a third of it
   each while both the Repository and the Submodules sections show. }
 procedure TForm1.LayoutRepoFiles;
+const
+  { The least the tree of changed files keeps of the panel. }
+  MinFileTree = 80;
 var
-  Limit: integer;
+  Limit, Room, Open: integer;
+
+  { A panel at the bottom grows or shrinks at its top edge: alBottom
+    orders the panels by their bottom edges, and one that kept its top
+    could end up above the one it stood under. }
+  procedure SetHeight(APanel: TPanel; AHeight: integer);
+  begin
+    APanel.SetBounds(APanel.Left, APanel.Top + APanel.Height - AHeight, APanel.Width, AHeight);
+  end;
+
+  function Opened(APanel: TPanel; AHeader: TGittanSectionHeader): boolean;
+  begin
+    Result := (APanel <> nil) and APanel.Visible and AHeader.Expanded;
+  end;
 
   function SectionHeight(AHeader: TGittanSectionHeader; ATree: TTreeView): integer;
   var
@@ -138,8 +147,14 @@ var
     Node: TTreeNode;
   begin
     Result := AHeader.Height;
-    ATree.Visible := AHeader.Expanded;
-    if not AHeader.Expanded then
+    RowHeight := ATree.DefaultItemHeight;
+    if RowHeight < 8 then
+      RowHeight := 20;
+    { A list with no room for a row is not shown at all: a tree view
+      laid out 0 px high never draws its rows on Cocoa, even once it
+      has room. }
+    ATree.Visible := AHeader.Expanded and (Limit >= RowHeight);
+    if not ATree.Visible then
       Exit;
     Rows := 0;
     Node := ATree.Items.GetFirstVisibleNode;
@@ -148,9 +163,6 @@ var
       Inc(Rows);
       Node := Node.GetNextVisible;
     end;
-    RowHeight := ATree.DefaultItemHeight;
-    if RowHeight < 8 then
-      RowHeight := 20;
     Result := Result + Min(Rows * RowHeight + 4, Limit);
   end;
 
@@ -158,9 +170,25 @@ begin
   Limit := FTreePanel.ClientHeight div 2;
   if (FSubPanel <> nil) and FSubPanel.Visible and FRepoPanel.Visible then
     Limit := FTreePanel.ClientHeight div 3;
-  FRepoPanel.Height := SectionHeight(FRepoHeader, FRepoTree);
+  { The lists share what the page rows, the headers and the Commit
+    section leave, less the tree of changed files' share, which got
+    nothing when the window was low (nine submodules and the Commit
+    section took it all, and the tree never drew again). }
+  Room := FTreePanel.ClientHeight - Px(MinFileTree);
+  if FSideNav <> nil then
+    Dec(Room, FSideNav.Top + FSideNav.Height);
+  if (FCommitPanel <> nil) and FCommitPanel.Visible then
+    Dec(Room, FCommitPanel.Height);
+  if FRepoPanel.Visible then
+    Dec(Room, FRepoHeader.Height);
+  if (FSubPanel <> nil) and FSubPanel.Visible then
+    Dec(Room, FSubHeader.Height);
+  Open := Ord(Opened(FRepoPanel, FRepoHeader)) + Ord(Opened(FSubPanel, FSubHeader));
+  if Open > 0 then
+    Limit := Min(Limit, Max(0, Room) div Open);
+  SetHeight(FRepoPanel, SectionHeight(FRepoHeader, FRepoTree));
   if FSubPanel <> nil then
-    FSubPanel.Height := SectionHeight(FSubHeader, FSubTree);
+    SetHeight(FSubPanel, SectionHeight(FSubHeader, FSubTree));
 end;
 
 procedure TForm1.RepoHeaderToggle(Sender: TObject);
@@ -251,13 +279,8 @@ var
 begin
   FIgnoreMenu.Clear;
   FExcludeMenu.Clear;
-  Untracked := False;
-  for i := 0 to High(FStats) do
-    if FStats[i].Path = APath then
-    begin
-      Untracked := FStats[i].Kind = ckUntracked;
-      Break;
-    end;
+  i := StatIndexOf(APath);
+  Untracked := (i >= 0) and (FStats[i].Kind = ckUntracked);
   Patterns := IgnorePatterns(APath);
   for i := 0 to High(Patterns) do
   begin
@@ -452,6 +475,15 @@ begin
       RevertEdit
     else
       SaveEdit(True);
+    Exit;
+  end;
+  { Open and Save As... on a file of the Files page (umain.files.inc). }
+  if FView = gvBlob then
+  begin
+    if AIndex = 0 then
+      OpenBlobOutside
+    else
+      SaveBlobAs;
     Exit;
   end;
   if ConflictHeaderAction(AIndex) then

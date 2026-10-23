@@ -21,8 +21,7 @@ var
   Pushed, i: integer;
   Title, Note, StoppedAt: string;
 begin
-  if (FRepo.Root = '') or (FBranch = '') or (FOperation <> '') or (FCommitJob <> nil) or
-    (FRemoteJob <> nil) then
+  if not RepoReady or (FBranch = '') then
     Exit;
   if not FRepo.RebaseSteps(AOnto, Steps, Merges) then
   begin

@@ -82,42 +82,17 @@ function ChangedEntries(const AOld, ANew: TGittanPoEntries): TBooleanDynArray;
 
 implementation
 
+uses
+  gittan.textfile;
+
 function IsPoPath(const APath: string): boolean;
 begin
   Result := LowerCase(ExtractFileExt(APath)) = '.po';
 end;
 
 function PoUnescape(const AText: string): string;
-var
-  i, n: integer;
 begin
-  Result := '';
-  SetLength(Result, Length(AText));
-  n := 0;
-  i := 1;
-  while i <= Length(AText) do
-  begin
-    Inc(n);
-    if (AText[i] = '\') and (i < Length(AText)) then
-    begin
-      Inc(i);
-      case AText[i] of
-        'n': Result[n] := #10;
-        't': Result[n] := #9;
-        'r': Result[n] := #13;
-        'a': Result[n] := #7;
-        'b': Result[n] := #8;
-        'f': Result[n] := #12;
-        'v': Result[n] := #11;
-        else
-          Result[n] := AText[i];
-      end;
-    end
-    else
-      Result[n] := AText[i];
-    Inc(i);
-  end;
-  SetLength(Result, n);
+  Result := UnescapeC(AText);
 end;
 
 { What stands between the first and the last quote of ALine, unescaped;
@@ -475,6 +450,7 @@ var
   Keys: TStringList;
   i, k: integer;
 begin
+  Result := nil;
   SetLength(Result, Length(ANew));
   Keys := TStringList.Create;
   try

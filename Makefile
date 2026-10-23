@@ -64,6 +64,22 @@ LEXERS_SRC := vendor/CudaText-lexers
 LEXERS_OWN := lexers
 LEXLIB := lexlib
 
+# Vendored packages, in dependency order: the list is VENDOR_PACKAGES in
+# .github/workflows/build.yml, and a new package goes in both. `make deps`
+# registers each with --add-package-link and compiles it, after a fresh clone
+# or a submodule move; `make ide` rebuilds the Lazarus IDE, which is built with
+# ATSynEdit, ATFlatControls, EncConv and BGRABitmap, with the IDE's own build
+# profile (its widgetset too).
+VENDOR_PACKAGES := \
+  vendor/ATFlatControls/atflatcontrols/atflatcontrols_package.lpk \
+  vendor/EncConv/encconv/encconv_package.lpk \
+  vendor/BGRABitmap/bgrabitmap/bgrabitmappack.lpk \
+  vendor/ATSynEdit/atsynedit/atsynedit_package.lpk \
+  vendor/EControl/econtrol/econtrol_package.lpk \
+  vendor/ATSynEdit_Ex/atsynedit_ex/atsynedit_ex_package.lpk \
+  vendor/metadarkstyle/metadarkstyle.lpk \
+  vendor/lazink/lazink.lpk
+
 # Application icon. icons/gittan-source.png is the artwork, the motif cut out
 # of its background, and icons/gittan-source-mac.png the motif on its macOS
 # tile; `make icons` sizes them with tools/makeicons.swift (macOS only) into
@@ -95,7 +111,7 @@ define bundle_icon
 endef
 endif
 
-.PHONY: all build debug rebuild run clean help lexlib icons test
+.PHONY: all build debug rebuild run clean help lexlib icons test deps ide
 
 all: build
 
@@ -107,6 +123,8 @@ help:
 	@echo "  run       Build, then start Gittan (RUN_ARGS forwards arguments)"
 	@echo "  test      Build and run the unit tests in tests/ (TEST_ARGS forwards options)"
 	@echo "  lexlib    Copy the lexers from $(LEXERS_SRC) and $(LEXERS_OWN) into $(LEXLIB)/ (part of every build)"
+	@echo "  deps      Register the vendored packages with lazbuild and compile them"
+	@echo "  ide       Rebuild the Lazarus IDE (after ATSynEdit, ATFlatControls, EncConv or BGRABitmap moves)"
 	@echo "  icons     Regenerate the icons from ICON_SRC=$(ICON_SRC) and ICON_MAC_SRC=$(ICON_MAC_SRC) (macOS only)"
 	@echo "  clean     Remove lib/, $(LEXLIB)/, the test build and the binary"
 	@echo "Current: WIDGETSET=$(WIDGETSET) LAZBUILD=$(LAZBUILD)"
@@ -122,6 +140,17 @@ debug: lexlib
 rebuild: lexlib
 	"$(LAZBUILD)" -B $(LAZFLAGS) $(RELEASE_MODE) $(LPI)
 	$(bundle_icon)
+
+deps:
+	@set -e; for lpk in $(VENDOR_PACKAGES); do \
+	  if [ ! -f "$$lpk" ]; then \
+	    echo "$$lpk is missing; run: git submodule update --init"; exit 1; fi; \
+	  "$(LAZBUILD)" --add-package-link "$$lpk"; \
+	  "$(LAZBUILD)" $(LAZFLAGS) "$$lpk"; \
+	done
+
+ide:
+	"$(LAZBUILD)" --build-ide=
 
 icons:
 	swift tools/makeicons.swift "$(ICON_SRC)" "$(ICON_MAC_SRC)" icons Gittan.ico

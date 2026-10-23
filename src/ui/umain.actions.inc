@@ -63,7 +63,9 @@ begin
   for i := 0 to High(ContextChoices) do
     if ContextChoices[i] = FSettings.ContextLines then
       FContextLines := ContextChoices[i];
-  { The window where it was, if that is still on a screen. }
+  { The window where it was, if that is still on a screen. The sizes are
+    kept at 96 DPI: this runs in FormCreate, and the form scales its size
+    and the tree's width to the screen's after it, its place not. }
   if (FSettings.Width > 0) and (FSettings.Height > 0) then
   begin
     R := Rect(FSettings.Left, FSettings.Top, FSettings.Left + FSettings.Width,
@@ -119,13 +121,16 @@ begin
     FSettings.Width := Width;
     FSettings.Height := Height;
   end;
-  FSettings.TreeWidth := FTreePanel.Width;
+  FSettings.Width := MulDiv(FSettings.Width, 96, Screen.PixelsPerInch);
+  FSettings.Height := MulDiv(FSettings.Height, 96, Screen.PixelsPerInch);
+  FSettings.TreeWidth := MulDiv(FTreePanel.Width, 96, Screen.PixelsPerInch);
   FSettings.NavOpen := not FSideNav.Collapsed;
   FSettings.RepoFilesOpen := FRepoHeader.Expanded;
   FSettings.SubmodulesOpen := FSubHeader.Expanded;
   FSettings.CommitOpen := FCommitHeader.Expanded;
   StopCommitJob(True);
   StopRemoteJob(True);
+  AbandonCommandJob(True);
   SaveCommitDraft;
   { The defaults are not written, so they follow the screen and a later
     Gittan's choice. }
@@ -426,6 +431,8 @@ procedure TForm1.ApplyEditorFont(AFont: TFont);
 begin
   Edit.Font.Assign(AFont);
   FEditOld.Font.Assign(AFont);
+  if FCommandPage <> nil then
+    FCommandPage.Console.Font.Assign(AFont);
   Edit.Update(True);
   FEditOld.Update(True);
   EditorMetricsChanged;
@@ -493,6 +500,8 @@ begin
           FHasPull := False;
           FPulls := nil;
           FPullError := '';
+          FReviewPulls := nil;
+          FSummary.SetReviewPulls(nil);
           ClearReviews;
         end;
         MenuRefreshClick(nil);
@@ -550,6 +559,14 @@ begin
     Item.Visible := FHasGitHubCli;
   if FReviewItem <> nil then
     FReviewItem.Enabled := FHasGitHubCli;
+  { The Pull Requests page needs gh too: its row, its menu item, and
+    the page itself when gh goes while it shows. }
+  if FPullsItem <> nil then
+    FPullsItem.Visible := FHasGitHubCli;
+  if FSideNav <> nil then
+    FSideNav.SetRowVisible(navPulls, FHasGitHubCli);
+  if not FHasGitHubCli and (FView = gvPulls) then
+    ShowSummary;
 end;
 
 procedure TForm1.MenuWrapClick(Sender: TObject);
@@ -1502,23 +1519,11 @@ end;
   is not one of the new side (a gap, a filler, a deleted line, the old
   side, or a history row, whose lines are of several versions). }
 function TForm1.FileLineOfRow(AEd: TATSynEdit; ARow: integer): integer;
-var
-  Line: integer;
 begin
-  Result := 0;
-  if (AEd <> Edit) or (ARow < 0) then
-    Exit;
-  case FView of
-    gvFile:
-      Result := ARow + 1;
-    gvChanges:
-      if ARow <= High(FRows) then
-      begin
-        Line := FRows[ARow].Line;
-        if (Line >= 0) and (Line <= High(FNewNum)) then
-          Result := FNewNum[Line];
-      end;
-  end;
+  if AEd = Edit then
+    Result := FileLineOfRow(ARow)
+  else
+    Result := 0;
 end;
 
 procedure TForm1.MenuOpenOnGitHubClick(Sender: TObject);
@@ -1563,8 +1568,8 @@ begin
     OpenOnGitHub([IntToStr(FPopupIssue)]);
 end;
 
-{ Runs ACommand, words separated by spaces, with APath appended. }
-procedure RunCommandWith(const ACommand, APath: string);
+{ Runs ACommand, words separated by spaces, with AArgs appended. }
+procedure RunCommandWith(const ACommand: string; const AArgs: array of string);
 var
   Words: TStringList;
   Args: array of string;
@@ -1577,10 +1582,11 @@ begin
     Words.DelimitedText := Trim(ACommand);
     if Words.Count = 0 then
       Exit;
-    SetLength(Args, Words.Count);
+    SetLength(Args, Words.Count - 1 + Length(AArgs));
     for i := 1 to Words.Count - 1 do
       Args[i - 1] := Words[i];
-    Args[High(Args)] := APath;
+    for i := 0 to High(AArgs) do
+      Args[Words.Count - 1 + i] := AArgs[i];
     RunDetached(Words[0], Args);
   finally
     Words.Free;
@@ -1596,7 +1602,7 @@ begin
   if Trim(FSettings.EditorCommand) = '' then
     OpenDocument(ContextFullPath)
   else
-    RunCommandWith(FSettings.EditorCommand, ContextFullPath);
+    RunCommandWith(FSettings.EditorCommand, [ContextFullPath]);
 end;
 
 { The commit graph: the newest GraphLimit commits of every branch, in
@@ -1746,6 +1752,7 @@ begin
     stepFetch: MenuFetchClick(nil);
     stepPull: MenuPullClick(nil);
     stepPush: MenuPushClick(nil);
+    stepForcePush: ForcePushAsk;
     stepContinue: ContinueOperationClick;
     stepCommit: CommitButtonClick(nil);
     stepAbort: AbortOperationClick(nil);
@@ -1766,11 +1773,32 @@ begin
     Clipboard.AsText := FRepo.Root;
 end;
 
-{ The terminal command from the settings file, with the repository root
-  appended; the platform's terminal when none is set. On Linux the first
-  terminal found on PATH is started in the root, since every terminal
-  starts in its working directory but each names the option differently. }
 procedure TForm1.MenuOpenTerminalClick(Sender: TObject);
+begin
+  OpenTerminal('');
+end;
+
+{ The shell line that runs ACommand in ARoot and keeps the terminal
+  open after it, for a terminal's -e. }
+function ShellLineIn(const ARoot, ACommand: string): string;
+begin
+  Result := 'cd ' + gittan.cli.ShellQuote(ARoot) + ' && ' + ACommand + '; exec ${SHELL:-sh}';
+end;
+
+{ A terminal in the repository root, running ACommand there when it is
+  not empty (a command of the repository marked for the terminal, see
+  umain.commands.inc). The terminal command from the settings file gets
+  the root appended, and the command after it; the platform's terminal
+  when none is set. On macOS Terminal is told through osascript to
+  cd into the root and run the command; on Windows Windows Terminal
+  or cmd.exe runs it with /K, so the window stays; on Linux the first
+  terminal found on PATH is started in the root, since every terminal
+  starts in its working directory but each names the option
+  differently, and given sh -c and the line as arguments of their own:
+  after -- for gnome-terminal, whose -e takes one string, -x for
+  xfce4-terminal, and -e for the rest (x-terminal-emulator takes -e as
+  xterm does, whichever terminal it is). }
+procedure TForm1.OpenTerminal(const ACommand: string);
 {$IF not defined(DARWIN) and not defined(WINDOWS)}
 const
   Terminals: array[0..4] of string = ('x-terminal-emulator', 'gnome-terminal',
@@ -1778,27 +1806,62 @@ const
 var
   T: string;
 {$ENDIF}
+{$IFDEF DARWIN}
+var
+  Script: string;
+{$ENDIF}
 begin
   if FRepo.Root = '' then
     Exit;
   if Trim(FSettings.TerminalCommand) <> '' then
   begin
-    RunCommandWith(FSettings.TerminalCommand, FRepo.Root);
+    if ACommand = '' then
+      RunCommandWith(FSettings.TerminalCommand, [FRepo.Root])
+    else
+      RunCommandWith(FSettings.TerminalCommand, [FRepo.Root, ACommand]);
     Exit;
   end;
   {$IFDEF DARWIN}
-  RunDetached('open', ['-a', 'Terminal', FRepo.Root]);
+  if ACommand = '' then
+    RunDetached('open', ['-a', 'Terminal', FRepo.Root])
+  else
+  begin
+    { The line goes into an AppleScript string: its backslashes and
+      quotes escaped. }
+    Script := 'cd ' + gittan.cli.ShellQuote(FRepo.Root) + ' && ' + ACommand;
+    Script := StringReplace(Script, '\', '\\', [rfReplaceAll]);
+    Script := StringReplace(Script, '"', '\"', [rfReplaceAll]);
+    RunDetached('osascript', ['-e', 'tell application "Terminal" to do script "' +
+      Script + '"', '-e', 'tell application "Terminal" to activate']);
+  end;
   {$ELSE}
   {$IFDEF WINDOWS}
   if FindDefaultExecutablePath('wt.exe') <> '' then
-    RunDetached('wt.exe', ['-d', FRepo.Root])
+  begin
+    if ACommand = '' then
+      RunDetached('wt.exe', ['-d', FRepo.Root])
+    else
+      RunDetached('wt.exe', ['-d', FRepo.Root, 'cmd.exe', '/K', ACommand]);
+  end
+  else if ACommand = '' then
+    RunDetached('cmd.exe', ['/C', 'start', 'cmd.exe'], FRepo.Root)
   else
-    RunDetached('cmd.exe', ['/C', 'start', 'cmd.exe'], FRepo.Root);
+    RunDetached('cmd.exe', ['/C', 'start', 'cmd.exe', '/K', ACommand], FRepo.Root);
   {$ELSE}
   for T in Terminals do
     if FindDefaultExecutablePath(T) <> '' then
     begin
-      RunDetached(T, [], FRepo.Root);
+      if ACommand = '' then
+        RunDetached(T, [], FRepo.Root)
+      else if T = 'gnome-terminal' then
+        RunDetached(T, ['--', 'sh', '-c', ShellLineIn(FRepo.Root, ACommand)],
+          FRepo.Root)
+      else if T = 'xfce4-terminal' then
+        RunDetached(T, ['-x', 'sh', '-c', ShellLineIn(FRepo.Root, ACommand)],
+          FRepo.Root)
+      else
+        RunDetached(T, ['-e', 'sh', '-c', ShellLineIn(FRepo.Root, ACommand)],
+          FRepo.Root);
       Exit;
     end;
   {$ENDIF}
@@ -1947,12 +2010,15 @@ begin
     FPullError := '';
     FGoneBranches.Clear;
     FSummary.SetUpstreamGone(False);
+    FReviewPulls := nil;
+    FSummary.SetReviewPulls(nil);
   end;
   FPullJob := TGittanPullRequestJob.Create(FGitHubCli, FRepo.Root, FBranch);
   FPullJob.OnDone := @PullJobDone;
   FPullJob.Start;
   if not AKeep then
     RebuildPullMenu;
+  UpdatePullPage;
 end;
 
 { A poll waits for a job still running; that job's end sets the timer
@@ -1992,8 +2058,11 @@ begin
   FPullError := Job.Error;
   FGoneBranches.Assign(Job.GoneBranches);
   FSummary.SetUpstreamGone(FGoneBranches.IndexOf(FBranch) >= 0);
+  FReviewPulls := Job.ReviewPulls;
+  FSummary.SetReviewPulls(FReviewPulls);
   UpdateStatus;
   RebuildPullMenu;
+  UpdatePullPage;
   { The review comments follow at the same pace. }
   StartReviewJob(True);
   { Ask again later, more often while checks run; not when gh failed
@@ -2116,6 +2185,7 @@ const
   paWorkingTree = 2;
   paOpen = 3;
   paCopy = 4;
+  paList = 5;
 
 { A click on the status bar's pull request: compare with it, which
   shows its changes as GitHub does and its review comments where they
@@ -2162,6 +2232,7 @@ begin
     AddAction(paOpen, rsOpenPullOnGitHub, '');
     AddAction(paCopy, rsCopyPullLink, '');
   end;
+  AddAction(paList, rsAllPulls, '');
   FPullPopup.Popup(AScreenRect);
 end;
 
@@ -2177,6 +2248,7 @@ begin
     paWorkingTree: SetBase('');
     paOpen: MenuOpenPullClick(Sender);
     paCopy: MenuCopyPullUrlClick(Sender);
+    paList: ShowPulls;
   end;
 end;
 

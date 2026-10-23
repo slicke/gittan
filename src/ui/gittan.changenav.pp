@@ -35,6 +35,8 @@ type
     procedure SetSuffix(const AValue: string);
     procedure DrawArrow(ACenterX, ACenterY: integer; AUp: boolean; AColor: TColor);
   protected
+    procedure DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+      const AXProportion, AYProportion: double); override;
     procedure Paint; override;
     procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
     procedure MouseLeave; override;
@@ -50,6 +52,8 @@ type
     procedure SetColors(ABack, AFill, ABorder, AText, AHot: TColor);
     {** Shows ACurrent of ATotal changes; ACurrent is 0 before the first. }
     procedure SetPosition(ACurrent, ATotal: integer);
+    {** Sizes the width again for the height, which the owner sets. }
+    procedure Refit;
     {** A word after the counter ("1 / 3 conflicts"), none by default. }
     property Suffix: string read FSuffix write SetSuffix;
     property OnPrev: TNotifyEvent read FOnPrev write FOnPrev;
@@ -57,6 +61,9 @@ type
   end;
 
 implementation
+
+uses
+  gittan.textfit, gittan.theme;
 
 const
   NavHeight = 30;
@@ -68,8 +75,8 @@ constructor TGittanChangeNav.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
   ControlStyle := ControlStyle + [csOpaque];
-  Height := NavHeight;
-  Width := 3 * NavHeight;
+  Height := Px(NavHeight);
+  Width := 3 * Px(NavHeight);
   Cursor := crHandPoint;
   SetColors(clWindow, clBtnFace, clBtnShadow, clWindowText, clHighlight);
 end;
@@ -86,22 +93,14 @@ begin
 end;
 
 procedure TGittanChangeNav.SetPosition(ACurrent, ATotal: integer);
-var
-  Measure: TBitmap;
 begin
   FCurrent := ACurrent;
   FTotal := ATotal;
   { The width follows the counter text, measured on a bitmap so it works
     before the handle exists; the right anchor keeps the pill in place
     while it grows. }
-  Measure := TBitmap.Create;
-  try
-    Measure.Canvas.Font := Font;
-    Width := 2 * ButtonWidth + Measure.Canvas.TextWidth(CounterText) +
-      2 * CounterPadding;
-  finally
-    Measure.Free;
-  end;
+  Width := 2 * ButtonWidth + MeasureCanvas(Font).TextWidth(CounterText) +
+    2 * Px(CounterPadding);
   Invalidate;
 end;
 
@@ -110,6 +109,11 @@ begin
   if FSuffix = AValue then
     Exit;
   FSuffix := AValue;
+  SetPosition(FCurrent, FTotal);
+end;
+
+procedure TGittanChangeNav.Refit;
+begin
   SetPosition(FCurrent, FTotal);
 end;
 
@@ -247,6 +251,16 @@ begin
     npNext: if Assigned(FOnNext) then
         FOnNext(Self);
   end;
+end;
+
+{ The form scales every control by its DPI after FormCreate, this one's
+  height too, which is already the screen's: set it again. }
+procedure TGittanChangeNav.DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+  const AXProportion, AYProportion: double);
+begin
+  inherited DoAutoAdjustLayout(AMode, AXProportion, AYProportion);
+  if AMode = lapAutoAdjustForDPI then
+    Refit;
 end;
 
 end.

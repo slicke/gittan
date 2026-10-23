@@ -29,7 +29,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Controls, Graphics, StdCtrls, Forms, LCLType,
-  LCLVersion, LMessages;
+  gittan.popuphook;
 
 type
   TGittanPopupPickEvent = procedure(Sender: TObject; AIndex: integer) of object;
@@ -39,6 +39,7 @@ type
   TGittanPopupItem = record
     Caption, Detail: string;
     Header, Checked: boolean;
+    Tag: PtrInt;
   end;
 
   TGittanPopupList = class;
@@ -74,7 +75,7 @@ type
     FCurrent: integer;
     FAnchor: TRect;
     FAbove, FFilterVisible: boolean;
-    FReturnFocus: TWinControl;
+    FHook: TGittanPopupHook;
     FBack, FText, FDim, FHover, FLine, FAccent: TColor;
     FFilterHint: string;
     FOnPick: TGittanPopupPickEvent;
@@ -96,19 +97,9 @@ type
     procedure EditChange(Sender: TObject);
     procedure EditKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
     procedure KeyInput(var Key: word);
-    { Lazarus 4.99 passes the whole message, by reference. }
-    {$IF lcl_fullversion >= 4990000}
-    procedure UserInput(Sender: TObject; var Message: TLMessage);
-    {$ELSE}
-    procedure UserInput(Sender: TObject; Msg: cardinal);
-    {$ENDIF}
-    procedure AppDeactivate(Sender: TObject);
-    function Owns(AControl: TControl): boolean;
-    procedure Hook(AOn: boolean);
   protected
     procedure Paint; override;
     procedure Resize; override;
-    procedure Notification(AComponent: TComponent; Operation: TOperation); override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -116,9 +107,12 @@ type
     procedure Clear;
     {** Adds an item and returns its index, the one OnPick reports.
       ADetail is shown dimmed on the right; AChecked marks it as the
-      current choice. }
+      current choice; ATag is the caller's, for TagOf. }
     function Add(const ACaption: string; const ADetail: string = '';
-      AChecked: boolean = False): integer;
+      AChecked: boolean = False; ATag: PtrInt = 0): integer;
+    {** The tag the item at AIndex was added with, -1 for a header or an
+      index out of range. }
+    function TagOf(AIndex: integer): PtrInt;
     {** Adds a header, the dimmed name of the group of items that
       follow. It cannot be picked. }
     procedure AddHeader(const ACaption: string);
@@ -144,7 +138,7 @@ type
 implementation
 
 uses
-  Math, LCLIntf, gittan.textfit;
+  Math, LCLIntf, gittan.textfit, gittan.theme;
 
 resourcestring
   rsNoMatches = 'No matches';
@@ -216,6 +210,7 @@ end;
 constructor TGittanPopupList.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  FHook := TGittanPopupHook.Create(Self, @Close, True);
   ControlStyle := ControlStyle + [csOpaque];
   Visible := False;
   FCurrent := -1;
@@ -239,7 +234,7 @@ end;
 
 destructor TGittanPopupList.Destroy;
 begin
-  Hook(False);
+  FHook.Hook(False);
   inherited Destroy;
 end;
 
@@ -251,7 +246,7 @@ begin
 end;
 
 function TGittanPopupList.Add(const ACaption: string; const ADetail: string;
-  AChecked: boolean): integer;
+  AChecked: boolean; ATag: PtrInt): integer;
 begin
   Result := Length(FItems);
   SetLength(FItems, Result + 1);
@@ -259,6 +254,15 @@ begin
   FItems[Result].Detail := ADetail;
   FItems[Result].Header := False;
   FItems[Result].Checked := AChecked;
+  FItems[Result].Tag := ATag;
+end;
+
+function TGittanPopupList.TagOf(AIndex: integer): PtrInt;
+begin
+  if (AIndex < 0) or (AIndex > High(FItems)) or FItems[AIndex].Header then
+    Result := -1
+  else
+    Result := FItems[AIndex].Tag;
 end;
 
 procedure TGittanPopupList.AddHeader(const ACaption: string);
@@ -297,27 +301,21 @@ end;
   parent. Measured on a bitmap: the panel may have no handle yet. }
 function TGittanPopupList.ContentWidth: integer;
 var
-  Measure: TBitmap;
+  C: TCanvas;
   i, W: integer;
 begin
-  Result := MinWidth;
-  Measure := TBitmap.Create;
-  try
-    Measure.Canvas.Font := Font;
-    for i := 0 to High(FItems) do
-    begin
-      W := 2 * (Border + Pad) + CheckWidth + ScrollRoom +
-        Measure.Canvas.TextWidth(FItems[i].Caption);
-      if FItems[i].Detail <> '' then
-        Inc(W, Gap + Measure.Canvas.TextWidth(FItems[i].Detail));
-      Result := Max(Result, W);
-    end;
-  finally
-    Measure.Free;
+  Result := Px(MinWidth);
+  C := MeasureCanvas(Font);
+  for i := 0 to High(FItems) do
+  begin
+    W := 2 * (Border + Px(Pad)) + Px(CheckWidth) + Px(ScrollRoom) + C.TextWidth(FItems[i].Caption);
+    if FItems[i].Detail <> '' then
+      Inc(W, Px(Gap) + C.TextWidth(FItems[i].Detail));
+    Result := Max(Result, W);
   end;
-  Result := Min(Result, MaxWidth);
+  Result := Min(Result, Px(MaxWidth));
   if Parent <> nil then
-    Result := Min(Result, Parent.ClientWidth - 2 * Pad);
+    Result := Min(Result, Parent.ClientWidth - 2 * Px(Pad));
 end;
 
 { The rows that match the filter (any part of the caption, ignoring
@@ -363,16 +361,16 @@ var
 begin
   Rows := Max(1, Min(Length(FShown), MaxVisibleRows));
   if FFilterVisible then
-    ListTop := Border + Pad div 2 + FEdit.Height + Pad div 2 + 1
+    ListTop := Border + Px(Pad) div 2 + FEdit.Height + Px(Pad) div 2 + 1
   else
-    ListTop := Border + Pad div 2;
-  H := ListTop + Rows * RowHeight + Pad div 2 + Border;
+    ListTop := Border + Px(Pad) div 2;
+  H := ListTop + Rows * Px(RowHeight) + Px(Pad) div 2 + Border;
   if Parent <> nil then
   begin
     if FAbove then
-      Top := Max(0, FAnchor.Top - Offset - H)
+      Top := Max(0, FAnchor.Top - Px(Offset) - H)
     else
-      Top := Min(FAnchor.Bottom + Offset, Max(0, Parent.ClientHeight - H));
+      Top := Min(FAnchor.Bottom + Px(Offset), Max(0, Parent.ClientHeight - H));
   end;
   Height := H;
   Arrange;
@@ -389,15 +387,15 @@ begin
   FEdit.Visible := FFilterVisible;
   if FFilterVisible then
   begin
-    FEdit.SetBounds(Border + Pad, Border + Pad div 2, Width - 2 * (Border + Pad),
+    FEdit.SetBounds(Border + Px(Pad), Border + Px(Pad) div 2, Width - 2 * (Border + Px(Pad)),
       FEdit.Height);
-    ListTop := FEdit.Top + FEdit.Height + Pad div 2 + 1;
+    ListTop := FEdit.Top + FEdit.Height + Px(Pad) div 2 + 1;
   end
   else
-    ListTop := Border + Pad div 2;
+    ListTop := Border + Px(Pad) div 2;
   FBox.SetBounds(Border, ListTop, Width - 2 * Border,
-    Max(RowHeight, Height - ListTop - Pad div 2 - Border));
-  FRows.Height := Max(1, Length(FShown)) * RowHeight;
+    Max(Px(RowHeight), Height - ListTop - Px(Pad) div 2 - Border));
+  FRows.Height := Max(1, Length(FShown)) * Px(RowHeight);
 end;
 
 procedure TGittanPopupList.Resize;
@@ -421,19 +419,14 @@ begin
   W := ContentWidth;
   Width := W;
   Left := Max(0, Min(FAnchor.Left, Parent.ClientWidth - W));
-  RoomBelow := Parent.ClientHeight - FAnchor.Bottom - Offset;
-  RoomAbove := FAnchor.Top - Offset;
+  RoomBelow := Parent.ClientHeight - FAnchor.Bottom - Px(Offset);
+  RoomAbove := FAnchor.Top - Px(Offset);
   FAbove := False;
   Fill;
   FAbove := (Height > RoomBelow) and (RoomAbove > RoomBelow);
   if FAbove then
     Layout;
-  FReturnFocus := nil;
-  if (Screen.ActiveControl <> nil) and not Owns(Screen.ActiveControl) then
-  begin
-    FReturnFocus := Screen.ActiveControl;
-    FReturnFocus.FreeNotification(Self);
-  end;
+  FHook.SaveFocus;
   Visible := True;
   BringToFront;
   if FFilterVisible then
@@ -443,18 +436,16 @@ begin
   end
   else if FRows.CanFocus then
     FRows.SetFocus;
-  Hook(True);
+  FHook.Hook(True);
 end;
 
 procedure TGittanPopupList.Dismiss;
 begin
   if not Visible then
     Exit;
-  Hook(False);
+  FHook.Hook(False);
   Visible := False;
-  if (FReturnFocus <> nil) and FReturnFocus.CanFocus then
-    FReturnFocus.SetFocus;
-  FReturnFocus := nil;
+  FHook.RestoreFocus;
 end;
 
 procedure TGittanPopupList.Close;
@@ -495,7 +486,7 @@ begin
   Result := -1;
   if Y < 0 then
     Exit;
-  Result := Y div RowHeight;
+  Result := Y div Px(RowHeight);
   if (Result > High(FShown)) or FItems[FShown[Result]].Header then
     Result := -1;
 end;
@@ -529,12 +520,12 @@ var
 begin
   if FCurrent < 0 then
     Exit;
-  RowTop := FCurrent * RowHeight;
+  RowTop := FCurrent * Px(RowHeight);
   Pos := FBox.VertScrollBar.Position;
   if RowTop < Pos then
     FBox.VertScrollBar.Position := RowTop
-  else if RowTop + RowHeight > Pos + FBox.ClientHeight then
-    FBox.VertScrollBar.Position := RowTop + RowHeight - FBox.ClientHeight;
+  else if RowTop + Px(RowHeight) > Pos + FBox.ClientHeight then
+    FBox.VertScrollBar.Position := RowTop + Px(RowHeight) - FBox.ClientHeight;
 end;
 
 procedure TGittanPopupList.EditChange(Sender: TObject);
@@ -561,74 +552,12 @@ begin
     VK_APPS:
       if FCurrent >= 0 then
         Context(FRows.ClientToScreen(Point(FRows.ClientWidth div 3,
-          (FCurrent + 1) * RowHeight)));
+          (FCurrent + 1) * Px(RowHeight))));
     VK_TAB: ;
     else
       Exit;
   end;
   Key := 0;
-end;
-
-function TGittanPopupList.Owns(AControl: TControl): boolean;
-begin
-  Result := False;
-  while AControl <> nil do
-  begin
-    if AControl = Self then
-      Exit(True);
-    AControl := AControl.Parent;
-  end;
-end;
-
-{ Every mouse press and key goes through here before it is delivered.
-  A press on a control outside the panel closes it. The message says
-  which it was on most widgetsets; Cocoa passes the last key message
-  instead, so the mouse buttons are asked as well. A key goes to the
-  focused control, inside the panel while it is up. }
-{$IF lcl_fullversion >= 4990000}
-procedure TGittanPopupList.UserInput(Sender: TObject; var Message: TLMessage);
-var
-  Msg: cardinal;
-begin
-  Msg := Message.msg;
-{$ELSE}
-procedure TGittanPopupList.UserInput(Sender: TObject; Msg: cardinal);
-begin
-{$ENDIF}
-  if not Visible then
-    Exit;
-  if (Sender is TControl) and Owns(TControl(Sender)) then
-    Exit;
-  if (Msg = LM_LBUTTONDOWN) or (Msg = LM_RBUTTONDOWN) or (Msg = LM_MBUTTONDOWN) or
-    (GetKeyState(VK_LBUTTON) < 0) or (GetKeyState(VK_RBUTTON) < 0) or
-    (GetKeyState(VK_MBUTTON) < 0) then
-    Close;
-end;
-
-procedure TGittanPopupList.AppDeactivate(Sender: TObject);
-begin
-  Close;
-end;
-
-procedure TGittanPopupList.Hook(AOn: boolean);
-begin
-  if AOn then
-  begin
-    Application.AddOnUserInputHandler(@UserInput, True);
-    Application.AddOnDeactivateHandler(@AppDeactivate, True);
-  end
-  else
-  begin
-    Application.RemoveOnUserInputHandler(@UserInput);
-    Application.RemoveOnDeactivateHandler(@AppDeactivate);
-  end;
-end;
-
-procedure TGittanPopupList.Notification(AComponent: TComponent; Operation: TOperation);
-begin
-  inherited Notification(AComponent, Operation);
-  if (Operation = opRemove) and (AComponent = FReturnFocus) then
-    FReturnFocus := nil;
 end;
 
 { The border around the panel and the divider under the field. }
@@ -663,21 +592,21 @@ begin
   if Length(FShown) = 0 then
   begin
     ACanvas.Font.Color := FDim;
-    ACanvas.TextOut(Pad + CheckWidth, (RowHeight - LineHeight) div 2, rsNoMatches);
+    ACanvas.TextOut(Px(Pad) + Px(CheckWidth), (Px(RowHeight) - LineHeight) div 2, rsNoMatches);
     Exit;
   end;
   for i := 0 to High(FShown) do
   begin
     Item := FItems[FShown[i]];
-    Y := i * RowHeight;
-    TextY := Y + (RowHeight - LineHeight) div 2;
-    CenterY := Y + RowHeight div 2;
+    Y := i * Px(RowHeight);
+    TextY := Y + (Px(RowHeight) - LineHeight) div 2;
+    CenterY := Y + Px(RowHeight) div 2;
     if (i = FCurrent) and not Item.Header then
     begin
       ACanvas.Pen.Style := psClear;
       ACanvas.Brush.Style := bsSolid;
       ACanvas.Brush.Color := FHover;
-      ACanvas.RoundRect(Pad div 2, Y + 1, FRows.Width - Pad div 2, Y + RowHeight - 1, 8, 8);
+      ACanvas.RoundRect(Px(Pad) div 2, Y + 1, FRows.Width - Px(Pad) div 2, Y + Px(RowHeight) - 1, 8, 8);
       ACanvas.Pen.Style := psSolid;
       ACanvas.Brush.Style := bsClear;
     end;
@@ -685,31 +614,31 @@ begin
     begin
       ACanvas.Pen.Color := FAccent;
       ACanvas.Pen.Width := 2;
-      X := Pad + 2;
+      X := Px(Pad) + 2;
       ACanvas.Polyline([Point(X, CenterY), Point(X + 4, CenterY + 4),
         Point(X + 11, CenterY - 4)]);
       ACanvas.Pen.Width := 1;
     end;
     DetailWidth := 0;
     if Item.Detail <> '' then
-      DetailWidth := ACanvas.TextWidth(Item.Detail) + Gap;
+      DetailWidth := ACanvas.TextWidth(Item.Detail) + Px(Gap);
     if Item.Header then
     begin
-      X := Pad;
+      X := Px(Pad);
       ACanvas.Font.Color := FDim;
     end
     else
     begin
-      X := Pad + CheckWidth;
+      X := Px(Pad) + Px(CheckWidth);
       ACanvas.Font.Color := FText;
     end;
-    Room := FRows.Width - Pad - X - DetailWidth;
+    Room := FRows.Width - Px(Pad) - X - DetailWidth;
     Shown := FitTextRight(ACanvas, Item.Caption, Room);
     ACanvas.TextOut(X, TextY, Shown);
     if Item.Detail <> '' then
     begin
       ACanvas.Font.Color := FDim;
-      ACanvas.TextOut(FRows.Width - Pad - ACanvas.TextWidth(Item.Detail), TextY,
+      ACanvas.TextOut(FRows.Width - Px(Pad) - ACanvas.TextWidth(Item.Detail), TextY,
         Item.Detail);
     end;
   end;

@@ -107,6 +107,9 @@ type
 
 implementation
 
+uses
+  gittan.textfile;
+
 { ---------------------------------------------------------------------------
   Parsing
   ---------------------------------------------------------------------------
@@ -174,7 +177,7 @@ end;
 
 function TGittanHistory.Parse(const AOutput: string): boolean;
 var
-  Start, Stop, Current, Hunk, Kept, i: integer;
+  Start, Current, Hunk, Kept, i: integer;
   Line: string;
   OldStart, NewStart: integer;
 
@@ -189,13 +192,8 @@ begin
   Current := -1;
   Hunk := -1;
   Start := 1;
-  while Start <= Length(AOutput) do
+  while NextLine(AOutput, Start, Line) do
   begin
-    Stop := Pos(#10, AOutput, Start);
-    if Stop = 0 then
-      Stop := Length(AOutput) + 1;
-    Line := Copy(AOutput, Start, Stop - Start);
-    Start := Stop + 1;
     if Line = '' then
       Continue;
     if Line[1] = HeaderMark then

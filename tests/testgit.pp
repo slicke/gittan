@@ -95,6 +95,8 @@ type
     procedure TestRevertFiles;
     procedure TestMoveAndRemove;
     procedure TestRebaseOnto;
+    procedure TestBehindDefault;
+    procedure TestUpstreamInReflog;
     procedure TestRebaseOntoConflicts;
     procedure TestRebaseStray;
     procedure TestRebaseInteractive;
@@ -1505,8 +1507,9 @@ begin
 end;
 
 { Amend without paths changes only the message; a hook that fails
-  stops the commit, with its output as the error, and the untracked
-  file added for it is untracked again. }
+  stops the commit, with its output as the error (its color sequence at
+  the start kept), and the untracked file added for it is untracked
+  again. }
 procedure TGitRepoTest.TestCommitAmendAndHook;
 var
   Paths: TStringList;
@@ -1530,7 +1533,7 @@ begin
     AssertEquals('M  a.txt'#0, Git(['status', '--porcelain', '-z']));
 
     WriteFile('.git/hooks/pre-commit',
-      '#!/bin/sh'#10'echo "hook says no" >&2'#10'exit 1'#10);
+      '#!/bin/sh'#10'printf ''\033[31mhook says no\033[0m\n'' >&2'#10'exit 1'#10);
     Hook := IncludeTrailingPathDelimiter(FDir) + SetDirSeparators('.git/hooks/pre-commit');
     {$ifdef UNIX}
     RunCommandIndir(FDir, 'chmod', ['+x', Hook], Text, Code, []);
@@ -1538,7 +1541,7 @@ begin
     WriteFile('new.txt', 'new'#10);
     Paths.Add('new.txt');
     AssertFalse(FRepo.Commit('blocked', Paths, False, Id));
-    AssertTrue(FRepo.Error, Pos('hook says no', FRepo.Error) > 0);
+    AssertEquals(FRepo.Error, 1, Pos(#27'[31mhook says no', FRepo.Error));
     AssertEquals('M  a.txt'#0'?? new.txt'#0, Git(['status', '--porcelain', '-z']));
   finally
     Paths.Free;
@@ -2345,6 +2348,88 @@ begin
   AssertTrue(FRepo.CommitsToRebase(Main, Count, Pushed));
   AssertEquals(2, Count);
   AssertEquals('rewritten, so no longer on pub', 0, Pushed);
+end;
+
+{ How far a branch is behind the default branch: the commits of
+  origin/main it lacks, none for a branch that tracks it, for the
+  default branch's own name, or on a detached HEAD. A branch without an
+  upstream also counts its commits on no remote. }
+procedure TGitRepoTest.TestBehindDefault;
+var
+  Main: string;
+  Snap: TGittanRepoSnapshot;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Main := FRepo.Branch;
+  Git(['remote', 'add', 'origin', 'https://example.invalid/repo.git']);
+  Git(['checkout', '-q', '-b', 'side']);
+  WriteFile('b.txt', 'b'#10);
+  Commit('side');
+  Git(['checkout', '-q', Main]);
+  WriteFile('c.txt', 'c'#10);
+  Commit('main one');
+  WriteFile('d.txt', 'd'#10);
+  Commit('main two');
+  Git(['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+  Git(['checkout', '-q', 'side']);
+
+  AssertEquals('origin/main', FRepo.DefaultBranch);
+  AssertEquals(2, FRepo.BehindDefault('side', 'origin/main'));
+  AssertTrue(FRepo.Snapshot(Snap));
+  AssertEquals(2, Snap.BehindDefault);
+  AssertEquals('side is on no remote', 1, Snap.NotOnRemote);
+  AssertEquals(1, FRepo.NotOnRemotes);
+  AssertTrue('its commit is not pushed', Snap.Recent[0].Unpushed);
+  AssertFalse('the history is on origin/main', Snap.Recent[1].Unpushed);
+  AssertEquals('the default branch itself', 0, FRepo.BehindDefault('main', 'origin/main'));
+  AssertEquals('no default branch', 0, FRepo.BehindDefault('side', ''));
+  Git(['branch', '-q', '-u', 'origin/main']);
+  AssertEquals('tracks it', 0, FRepo.BehindDefault('side', 'origin/main'));
+  AssertTrue(FRepo.Snapshot(Snap));
+  AssertEquals('with an upstream', -1, Snap.NotOnRemote);
+  Git(['branch', '-q', '--unset-upstream']);
+  Git(['checkout', '-q', '--detach']);
+  AssertTrue(FRepo.Snapshot(Snap));
+  AssertEquals('detached', 0, Snap.BehindDefault);
+  AssertEquals('detached', -1, Snap.NotOnRemote);
+end;
+
+{ An amend of a pushed commit leaves the upstream's tip in the branch's
+  reflog, so the branch counts as rewritten; a commit pushed to the
+  upstream from elsewhere does not, so a pull is the next step then. }
+procedure TGitRepoTest.TestUpstreamInReflog;
+var
+  Snap: TGittanRepoSnapshot;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Git(['checkout', '-q', '-b', 'side']);
+  WriteFile('b.txt', 'b'#10);
+  Commit('side');
+  Git(['branch', 'pub']);
+  Git(['branch', '-q', '-u', 'pub']);
+  AssertFalse('nothing to replace', FRepo.Snapshot(Snap) and Snap.Rewritten);
+
+  Git(['commit', '-q', '--amend', '-m', 'side, amended']);
+  AssertTrue(FRepo.UpstreamInReflog('side'));
+  AssertTrue(FRepo.Snapshot(Snap));
+  AssertEquals(1, Snap.Ahead);
+  AssertEquals(1, Snap.Behind);
+  AssertTrue('amended', Snap.Rewritten);
+
+  Git(['checkout', '-q', 'pub']);
+  WriteFile('c.txt', 'c'#10);
+  Commit('pushed from elsewhere');
+  Git(['checkout', '-q', 'side']);
+  AssertFalse(FRepo.UpstreamInReflog('side'));
+  AssertTrue(FRepo.Snapshot(Snap));
+  AssertFalse('a commit the branch never had', Snap.Rewritten);
+  AssertFalse('no upstream', FRepo.UpstreamInReflog('pub'));
 end;
 
 { A rebase that stops with conflicts is left for the Commit section,

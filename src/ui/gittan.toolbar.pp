@@ -52,6 +52,7 @@ type
     FOnSearchKey: TGittanToolbarKeyEvent;
     FOnAction: TGittanToolbarActionEvent;
     FOnPrev, FOnNext, FOnConflictPrev, FOnConflictNext: TNotifyEvent;
+    FOnName: TNotifyEvent;
     function GetSearchText: string;
     procedure Update;
   public
@@ -82,6 +83,8 @@ type
     property OnNext: TNotifyEvent read FOnNext write FOnNext;
     property OnConflictPrev: TNotifyEvent read FOnConflictPrev write FOnConflictPrev;
     property OnConflictNext: TNotifyEvent read FOnConflictNext write FOnConflictNext;
+    {** A click on the name at the left. }
+    property OnName: TNotifyEvent read FOnName write FOnName;
   end;
 
 implementation
@@ -127,6 +130,7 @@ type
     procedure searchChanged(sender: id); message 'gittanSearchChanged:';
     procedure actionClicked(sender: id); message 'gittanActionClicked:';
     procedure navClicked(sender: id); message 'gittanNavClicked:';
+    procedure nameClicked(sender: id); message 'gittanNameClicked:';
   end;
 
 const
@@ -172,6 +176,20 @@ begin
   Result.autorelease;
 end;
 
+{ The name at the left as a button without a border, so a click on it
+  reaches ATarget as gittanNameClicked: and it still reads as a label. }
+function MakeNameButton(const AText: string; ATarget: id): NSButton;
+begin
+  Result := NSButton.alloc.initWithFrame(NSMakeRect(0, 0, 10, 10));
+  Result.setTitle(NSStr(AText));
+  Result.setBordered(False);
+  Result.setFont(NSFont.boldSystemFontOfSize(15));
+  Result.setTarget(ATarget);
+  Result.setAction(objcselector('gittanNameClicked:'));
+  Result.sizeToFit;
+  Result.autorelease;
+end;
+
 { The up and down arrows that step the changes (or the conflicts, with
   ConflictNavTag), sending gittanNavClicked: to ATarget. }
 function MakeNav(ATarget: id; ATag: integer): NSSegmentedControl;
@@ -200,7 +218,7 @@ begin
   if itemIdentifier.isEqualToString(NSStr(IdName)) then
   begin
     Result := NSToolbarItem.alloc.initWithItemIdentifier(itemIdentifier);
-    Result.setView(MakeLabel('Gittan', NSFont.boldSystemFontOfSize(15)));
+    Result.setView(MakeNameButton('Gittan', Self));
   end
   else if itemIdentifier.isEqualToString(NSStr(IdSearch)) then
   begin
@@ -305,6 +323,12 @@ procedure TGittanToolbarDelegate.actionClicked(sender: id);
 begin
   if Assigned(Owner.FOnAction) then
     Owner.FOnAction(Owner, NSToolbarItem(sender).tag);
+end;
+
+procedure TGittanToolbarDelegate.nameClicked(sender: id);
+begin
+  if Assigned(Owner.FOnName) then
+    Owner.FOnName(Owner);
 end;
 
 procedure TGittanToolbarDelegate.navClicked(sender: id);

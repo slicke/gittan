@@ -44,7 +44,7 @@ begin
     Exit;
   end;
   Folder := PatchFolder;
-  if not ChoosePatchSeries(Commits, Folder, FPatchCover) then
+  if not ChoosePatchSeries(Commits, Folder, FPatchCover, FRepo.Root) then
     Exit;
   FPatchFolder := Folder;
   Files := TStringList.Create;
@@ -81,8 +81,7 @@ end;
 { am moves HEAD, so nothing else may be under way; apply goes along. }
 function TForm1.CanApplyPatches: boolean;
 begin
-  Result := (FRepo.Root <> '') and (FOperation = '') and (FCommitJob = nil) and
-    (FRemoteJob = nil);
+  Result := RepoReady;
 end;
 
 procedure TForm1.MenuApplyPatchesClick(Sender: TObject);

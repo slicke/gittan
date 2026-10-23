@@ -46,6 +46,8 @@ type
     procedure ListKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
     procedure ListDblClick(Sender: TObject);
   protected
+    procedure DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+      const AXProportion, AYProportion: double); override;
     procedure Paint; override;
     procedure Resize; override;
     procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
@@ -76,7 +78,7 @@ type
 implementation
 
 uses
-  Math;
+  Math, gittan.theme;
 
 resourcestring
   rsSymbolHint = 'Symbol';
@@ -108,7 +110,7 @@ begin
   FDetails := TStringList.Create;
   FEdit := TEdit.Create(Self);
   FEdit.Parent := Self;
-  FEdit.Width := EditWidth;
+  FEdit.Width := Px(EditWidth);
   FEdit.TextHint := rsSymbolHint;
   FEdit.OnChange := @EditChange;
   FEdit.OnKeyDown := @EditKeyDown;
@@ -117,7 +119,7 @@ begin
   FList.BorderStyle := bsNone;
   FList.OnKeyDown := @ListKeyDown;
   FList.OnDblClick := @ListDblClick;
-  Height := RowHeight + ListHeight + Pad;
+  Height := Px(RowHeight) + Px(ListHeight) + Px(Pad);
   SetColors(clWindow, clWindowText, clGrayText, clBtnShadow);
 end;
 
@@ -313,10 +315,10 @@ end;
 
 function TGittanSymbolBar.CloseRect: TRect;
 begin
-  Result.Left := Width - Pad - CloseSize;
-  Result.Top := (RowHeight - CloseSize) div 2;
-  Result.Right := Result.Left + CloseSize;
-  Result.Bottom := Result.Top + CloseSize;
+  Result.Left := Width - Px(Pad) - Px(CloseSize);
+  Result.Top := (Px(RowHeight) - Px(CloseSize)) div 2;
+  Result.Right := Result.Left + Px(CloseSize);
+  Result.Bottom := Result.Top + Px(CloseSize);
 end;
 
 { The field on the left of the top row, the cross on its right; the
@@ -327,13 +329,13 @@ begin
   { The constructor resizes before the children exist. }
   if (FEdit = nil) or (FList = nil) then
     Exit;
-  FEdit.Left := Pad;
-  FEdit.Top := (RowHeight - FEdit.Height) div 2;
-  FEdit.Width := Min(EditWidth, Max(80, Width - 3 * Pad - CloseSize));
-  FList.Left := Pad;
-  FList.Top := RowHeight;
-  FList.Width := Max(10, Width - 2 * Pad);
-  FList.Height := Max(10, Height - RowHeight - Pad);
+  FEdit.Left := Px(Pad);
+  FEdit.Top := (Px(RowHeight) - FEdit.Height) div 2;
+  FEdit.Width := Min(Px(EditWidth), Max(80, Width - 3 * Px(Pad) - Px(CloseSize)));
+  FList.Left := Px(Pad);
+  FList.Top := Px(RowHeight);
+  FList.Width := Max(10, Width - 2 * Px(Pad));
+  FList.Height := Max(10, Height - Px(RowHeight) - Px(Pad));
 end;
 
 procedure TGittanSymbolBar.Paint;
@@ -386,6 +388,16 @@ begin
   inherited MouseUp(Button, Shift, X, Y);
   if (Button = mbLeft) and CloseRect.Contains(Point(X, Y)) then
     Close;
+end;
+
+{ The form scales every control by its DPI after FormCreate, this one's
+  height too, which is already the screen's: set it again. }
+procedure TGittanSymbolBar.DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+  const AXProportion, AYProportion: double);
+begin
+  inherited DoAutoAdjustLayout(AMode, AXProportion, AYProportion);
+  if AMode = lapAutoAdjustForDPI then
+    Height := Px(RowHeight) + Px(ListHeight) + Px(Pad);
 end;
 
 end.

@@ -15,12 +15,14 @@ unit gittan.patchdlg;
 interface
 
 uses
-  Classes, SysUtils, Forms, Controls, StdCtrls, ExtCtrls, Dialogs, gittan.git;
+  Classes, SysUtils, Forms, Controls, StdCtrls, ExtCtrls, Dialogs, LazFileUtils,
+  gittan.git;
 
 {** Asks where the patches of ACommits go, starting with AFolder and
-  ACoverLetter. True when Create was pressed, with the choices in them. }
+  ACoverLetter; a relative folder is taken from ARoot, the repository.
+  True when Create was pressed, with the choices in them. }
 function ChoosePatchSeries(const ACommits: TGittanPatchCommits; var AFolder: string;
-  var ACoverLetter: boolean): boolean;
+  var ACoverLetter: boolean; const ARoot: string): boolean;
 
 {** Asks how to apply the patch files AFiles (full paths), which the
   dialog may add to, take from or start choosing in AFolder when empty,
@@ -99,6 +101,7 @@ type
   private
     FFolder: TEdit;
     FCover: TCheckBox;
+    FRoot: string;
     FInto, FError: TLabel;
     FCount: integer;
     procedure Check;
@@ -287,7 +290,8 @@ var
 begin
   Folder := Trim(FFolder.Text);
   if Folder <> '' then
-    Folder := ExcludeTrailingPathDelimiter(ExpandFileName(Folder));
+    Folder := ExcludeTrailingPathDelimiter(ExpandFileName(
+      CreateAbsolutePath(Folder, FRoot)));
   n := FCount;
   if FCover.Checked then
     Inc(n);
@@ -330,7 +334,7 @@ begin
 end;
 
 function ChoosePatchSeries(const ACommits: TGittanPatchCommits; var AFolder: string;
-  var ACoverLetter: boolean): boolean;
+  var ACoverLetter: boolean; const ARoot: string): boolean;
 var
   F: TSeriesForm;
   i: integer;
@@ -344,6 +348,7 @@ begin
     for i := 0 to High(ACommits) do
       F.FList.Items.Add(ACommits[i].Short + '   ' + ACommits[i].Subject);
     F.FCount := Length(ACommits);
+    F.FRoot := ARoot;
     F.FFolder.Text := AFolder;
     F.FCover.Checked := ACoverLetter;
     F.FCover.OnClick := @F.FolderChange;
@@ -351,7 +356,8 @@ begin
     Result := F.ShowModal = mrOK;
     if Result then
     begin
-      AFolder := ExcludeTrailingPathDelimiter(ExpandFileName(Trim(F.FFolder.Text)));
+      AFolder := ExcludeTrailingPathDelimiter(ExpandFileName(
+        CreateAbsolutePath(Trim(F.FFolder.Text), ARoot)));
       ACoverLetter := F.FCover.Checked;
     end;
   finally

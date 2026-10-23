@@ -325,21 +325,23 @@ function ChooseClone(var AUrl, AParent: string; var ASubmodules: boolean;
   out ATarget: string): boolean;
 var
   F: TCloneForm;
-  Clip: string;
+  Clip, Url: string;
 begin
   ATarget := '';
   F := TCloneForm.Create(Screen.ActiveForm);
   try
-    if AUrl = '' then
+    { The clipboard only fills the field; AUrl stays as it came on Cancel. }
+    Url := AUrl;
+    if Url = '' then
     begin
       Clip := '';
       if Clipboard.HasFormat(CF_TEXT) then
         Clip := Trim(Clipboard.AsText);
       if LooksLikeCloneUrl(Clip) then
-        AUrl := Clip;
+        Url := Clip;
     end;
     F.FParent.Text := AParent;
-    F.FUrl.Text := AUrl;
+    F.FUrl.Text := Url;
     F.FSubmodules.Checked := ASubmodules;
     F.Check;
     Result := F.ShowModal = mrOK;

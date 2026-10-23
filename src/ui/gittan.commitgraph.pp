@@ -42,7 +42,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Controls, Graphics, Forms, StdCtrls, ExtCtrls,
-  LCLType, LCLVersion, LMessages, gittan.graph, gittan.commitstats;
+  LCLType, LMessages, gittan.graph, gittan.commitstats, gittan.popuphook;
 
 type
   TGittanGraphPickEvent = procedure(Sender: TObject; const AHash: string) of object;
@@ -131,7 +131,7 @@ type
     { The most commits one author made in one week, which the authors'
       bars are drawn against. }
     FStatsAuthorMax: integer;
-    FReturnFocus: TWinControl;
+    FHook: TGittanPopupHook;
     FBack, FText, FDim, FHover, FLine, FAccent, FTag: TColor;
     FLaneColors: array of TColor;
     FOnPick: TGittanGraphPickEvent;
@@ -139,7 +139,6 @@ type
     FOnMore: TNotifyEvent;
     FOnPathCommits: TGittanGraphPathEvent;
     FOnClose: TNotifyEvent;
-    FKeeper: TControl;
     procedure Context(const AScreenPos: TPoint);
     function LaneColor(AIndex: integer): TColor;
     function LaneX(ALane: integer): integer;
@@ -190,14 +189,8 @@ type
     procedure EditChange(Sender: TObject);
     procedure EditKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
     procedure TimerTick(Sender: TObject);
-    {$IF lcl_fullversion >= 4990000}
-    procedure UserInput(Sender: TObject; var Message: TLMessage);
-    {$ELSE}
-    procedure UserInput(Sender: TObject; Msg: cardinal);
-    {$ENDIF}
-    procedure AppDeactivate(Sender: TObject);
-    function Owns(AControl: TControl): boolean;
-    procedure Hook(AOn: boolean);
+    function GetKeeper: TControl;
+    procedure SetKeeper(AValue: TControl);
   protected
     procedure Paint; override;
     procedure Resize; override;
@@ -205,7 +198,6 @@ type
     procedure MouseLeave; override;
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
       override;
-    procedure Notification(AComponent: TComponent; Operation: TOperation); override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -248,14 +240,14 @@ type
     {** A control whose clicks leave the panel open, as its own do, so
       that a row of it can close the panel on the click's release
       instead of the press closing it and the release opening it again. }
-    property Keeper: TControl read FKeeper write FKeeper;
+    property Keeper: TControl read GetKeeper write SetKeeper;
   end;
 
 implementation
 
 uses
   Math, DateUtils, LazUTF8, LazFileUtils, LCLIntf, gittan.reviews, gittan.statusbar,
-  gittan.repoinfo;
+  gittan.repoinfo, gittan.theme;
 
 resourcestring
   rsGraphTitle = 'Commit Graph';
@@ -396,6 +388,7 @@ end;
 constructor TGittanCommitGraph.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  FHook := TGittanPopupHook.Create(Self, @Close, True);
   ControlStyle := ControlStyle + [csOpaque];
   Visible := False;
   FCurrent := -1;
@@ -433,7 +426,7 @@ end;
 destructor TGittanCommitGraph.Destroy;
 begin
   Application.RemoveAsyncCalls(Self);
-  Hook(False);
+  FHook.Hook(False);
   FPathHashes.Free;
   inherited Destroy;
 end;
@@ -482,7 +475,7 @@ end;
 
 function TGittanCommitGraph.LaneX(ALane: integer): integer;
 begin
-  Result := Pad + Min(ALane, MaxLanes - 1) * LaneWidth + LaneWidth div 2;
+  Result := Px(Pad) + Min(ALane, MaxLanes - 1) * Px(LaneWidth) + Px(LaneWidth) div 2;
 end;
 
 { The lanes drawn: one while the filter shows a flat list. }
@@ -497,7 +490,7 @@ end;
 { Where the text starts, right of the widest row's lanes. }
 function TGittanCommitGraph.GraphRight: integer;
 begin
-  Result := Pad + Max(1, Min(ShownLanes, MaxLanes)) * LaneWidth + Gap;
+  Result := Px(Pad) + Max(1, Min(ShownLanes, MaxLanes)) * Px(LaneWidth) + Px(Gap);
 end;
 
 { A last row for the cut of the log or the count of the matches. }
@@ -510,9 +503,9 @@ end;
 function TGittanCommitGraph.ContentHeight: integer;
 begin
   if FStatsOn and (Length(FShown) > 0) then
-    Result := StatsAuthorsTop + Length(FStats.Authors) * RowHeight + Pad div 2
+    Result := StatsAuthorsTop + Length(FStats.Authors) * Px(RowHeight) + Px(Pad) div 2
   else
-    Result := Max(1, Length(FShown) + Ord(HasFooter)) * RowHeight;
+    Result := Max(1, Length(FShown) + Ord(HasFooter)) * Px(RowHeight);
 end;
 
 { What the rows control gets of the content: all of it unless it is
@@ -694,12 +687,7 @@ begin
   FEdit.Text := AFilter;
   ApplyFilter;
   Place;
-  FReturnFocus := nil;
-  if (Screen.ActiveControl <> nil) and not Owns(Screen.ActiveControl) then
-  begin
-    FReturnFocus := Screen.ActiveControl;
-    FReturnFocus.FreeNotification(Self);
-  end;
+  FHook.SaveFocus;
   Visible := True;
   BringToFront;
   FBox.VertScrollBar.Position := 0;
@@ -708,7 +696,7 @@ begin
     FEdit.SetFocus
   else if FRows.CanFocus then
     FRows.SetFocus;
-  Hook(True);
+  FHook.Hook(True);
 end;
 
 procedure TGittanCommitGraph.Replace(const ACommits: TGittanGraphCommits; AMore: boolean);
@@ -856,9 +844,9 @@ var
 begin
   if Parent = nil then
     Exit;
-  W := Max(200, Min(MaxPanelWidth, Parent.ClientWidth - 2 * Margin));
-  H := HeaderHeight + ContentHeight + Pad div 2 + Border;
-  H := Max(HeaderHeight + RowHeight, Min(H, Parent.ClientHeight - 2 * Margin));
+  W := Max(200, Min(Px(MaxPanelWidth), Parent.ClientWidth - 2 * Px(Margin)));
+  H := Px(HeaderHeight) + ContentHeight + Px(Pad) div 2 + Border;
+  H := Max(Px(HeaderHeight) + Px(RowHeight), Min(H, Parent.ClientHeight - 2 * Px(Margin)));
   SetBounds((Parent.ClientWidth - W) div 2, (Parent.ClientHeight - H) div 2, W, H);
   Arrange;
 end;
@@ -875,22 +863,22 @@ var
 begin
   if (FBox = nil) or (FRows = nil) or (FEdit = nil) then
     Exit;
-  FBox.SetBounds(Border, HeaderHeight, Width - 2 * Border,
-    Max(RowHeight, Height - HeaderHeight - Border));
+  FBox.SetBounds(Border, Px(HeaderHeight), Width - 2 * Border,
+    Max(Px(RowHeight), Height - Px(HeaderHeight) - Border));
   FRows.Height := PhysHeight;
-  FCloseRect := Rect(Width - Pad - CloseSize + 4, (HeaderHeight - CloseSize) div 2,
-    Width - Pad + 4, (HeaderHeight + CloseSize) div 2);
-  W := Min(EditWidth, Width div 3);
-  FEdit.SetBounds(FCloseRect.Left - Gap - W, (HeaderHeight - FEdit.Height) div 2, W,
+  FCloseRect := Rect(Width - Px(Pad) - Px(CloseSize) + 4, (Px(HeaderHeight) - Px(CloseSize)) div 2,
+    Width - Px(Pad) + 4, (Px(HeaderHeight) + Px(CloseSize)) div 2);
+  W := Min(Px(EditWidth), Width div 3);
+  FEdit.SetBounds(FCloseRect.Left - Px(Gap) - W, (Px(HeaderHeight) - FEdit.Height) div 2, W,
     FEdit.Height);
   if HandleAllocated then
   begin
     Canvas.Font := Font;
-    W := Canvas.TextWidth(rsGraphStats) + 4 * ChipPadX;
+    W := Canvas.TextWidth(rsGraphStats) + 4 * Px(ChipPadX);
   end
   else
     W := 90;
-  FStatsRect := Rect(FEdit.Left - Gap - W, FEdit.Top, FEdit.Left - Gap, FEdit.Top + FEdit.Height);
+  FStatsRect := Rect(FEdit.Left - Px(Gap) - W, FEdit.Top, FEdit.Left - Px(Gap), FEdit.Top + FEdit.Height);
 end;
 
 procedure TGittanCommitGraph.Resize;
@@ -907,11 +895,9 @@ begin
   FTimer.Enabled := False;
   if not Visible then
     Exit;
-  Hook(False);
+  FHook.Hook(False);
   Visible := False;
-  if (FReturnFocus <> nil) and FReturnFocus.CanFocus then
-    FReturnFocus.SetFocus;
-  FReturnFocus := nil;
+  FHook.RestoreFocus;
   if Assigned(FOnClose) then
     FOnClose(Self);
 end;
@@ -944,14 +930,14 @@ begin
   Result := -1;
   if (Y < 0) or FStatsOn then
     Exit;
-  Result := (Y + RowShift) div RowHeight;
+  Result := (Y + RowShift) div Px(RowHeight);
   if Result > High(FShown) then
     Result := -1;
 end;
 
 function TGittanCommitGraph.FooterAt(Y: integer): boolean;
 begin
-  Result := not FStatsOn and HasFooter and (Y >= 0) and ((Y + RowShift) div RowHeight = Length(FShown));
+  Result := not FStatsOn and HasFooter and (Y >= 0) and ((Y + RowShift) div Px(RowHeight) = Length(FShown));
 end;
 
 procedure TGittanCommitGraph.SetCurrent(AValue: integer);
@@ -1001,10 +987,10 @@ var
 begin
   if (FCurrent < 0) or FStatsOn then
     Exit;
-  RowTop := FCurrent * RowHeight;
-  RowBottom := RowTop + RowHeight;
+  RowTop := FCurrent * Px(RowHeight);
+  RowBottom := RowTop + Px(RowHeight);
   if (FCurrent = High(FShown)) and HasFooter then
-    Inc(RowBottom, RowHeight);
+    Inc(RowBottom, Px(RowHeight));
   Pos := LogicalTop;
   if RowTop < Pos then
     SetLogicalTop(RowTop)
@@ -1019,15 +1005,15 @@ procedure TGittanCommitGraph.KeyInput(var Key: word);
 var
   Page: integer;
 begin
-  Page := Max(1, FBox.ClientHeight div RowHeight - 1);
+  Page := Max(1, FBox.ClientHeight div Px(RowHeight) - 1);
   { The statistics have no rows to move to: the keys scroll. }
   if FStatsOn then
   begin
     case Key of
-      VK_UP: SetLogicalTop(LogicalTop - RowHeight);
-      VK_DOWN: SetLogicalTop(LogicalTop + RowHeight);
-      VK_PRIOR: SetLogicalTop(LogicalTop - Page * RowHeight);
-      VK_NEXT: SetLogicalTop(LogicalTop + Page * RowHeight);
+      VK_UP: SetLogicalTop(LogicalTop - Px(RowHeight));
+      VK_DOWN: SetLogicalTop(LogicalTop + Px(RowHeight));
+      VK_PRIOR: SetLogicalTop(LogicalTop - Page * Px(RowHeight));
+      VK_NEXT: SetLogicalTop(LogicalTop + Page * Px(RowHeight));
       VK_HOME: SetLogicalTop(0);
       VK_END: SetLogicalTop(TotalHeight);
       VK_ESCAPE: Close;
@@ -1050,7 +1036,7 @@ begin
     VK_APPS:
       if FCurrent >= 0 then
         Context(FRows.ClientToScreen(Point(LaneX(ShownLanes),
-          (FCurrent + 1) * RowHeight - RowShift)));
+          (FCurrent + 1) * Px(RowHeight) - RowShift)));
     VK_TAB: ;
     else
       Exit;
@@ -1086,64 +1072,14 @@ begin
     SetStatsOn(not FStatsOn);
 end;
 
-function TGittanCommitGraph.Owns(AControl: TControl): boolean;
+function TGittanCommitGraph.GetKeeper: TControl;
 begin
-  Result := False;
-  while AControl <> nil do
-  begin
-    if AControl = Self then
-      Exit(True);
-    AControl := AControl.Parent;
-  end;
+  Result := FHook.Keeper;
 end;
 
-{ As in the popup list: a mouse press on a control outside the panel
-  closes it, unless on the Keeper; Cocoa passes the last key message
-  instead of the press, so the buttons are asked as well. }
-{$IF lcl_fullversion >= 4990000}
-procedure TGittanCommitGraph.UserInput(Sender: TObject; var Message: TLMessage);
-var
-  Msg: cardinal;
+procedure TGittanCommitGraph.SetKeeper(AValue: TControl);
 begin
-  Msg := Message.msg;
-{$ELSE}
-procedure TGittanCommitGraph.UserInput(Sender: TObject; Msg: cardinal);
-begin
-{$ENDIF}
-  if not Visible then
-    Exit;
-  if (Sender is TControl) and (Owns(TControl(Sender)) or (Sender = FKeeper)) then
-    Exit;
-  if (Msg = LM_LBUTTONDOWN) or (Msg = LM_RBUTTONDOWN) or (Msg = LM_MBUTTONDOWN) or
-    (GetKeyState(VK_LBUTTON) < 0) or (GetKeyState(VK_RBUTTON) < 0) or
-    (GetKeyState(VK_MBUTTON) < 0) then
-    Close;
-end;
-
-procedure TGittanCommitGraph.AppDeactivate(Sender: TObject);
-begin
-  Close;
-end;
-
-procedure TGittanCommitGraph.Hook(AOn: boolean);
-begin
-  if AOn then
-  begin
-    Application.AddOnUserInputHandler(@UserInput, True);
-    Application.AddOnDeactivateHandler(@AppDeactivate, True);
-  end
-  else
-  begin
-    Application.RemoveOnUserInputHandler(@UserInput);
-    Application.RemoveOnDeactivateHandler(@AppDeactivate);
-  end;
-end;
-
-procedure TGittanCommitGraph.Notification(AComponent: TComponent; Operation: TOperation);
-begin
-  inherited Notification(AComponent, Operation);
-  if (Operation = opRemove) and (AComponent = FReturnFocus) then
-    FReturnFocus := nil;
+  FHook.Keeper := AValue;
 end;
 
 { The border, the header (the title, the branch and how far it is from
@@ -1170,16 +1106,16 @@ begin
   Canvas.Pen.Color := FLine;
   Canvas.Brush.Style := bsClear;
   Canvas.Rectangle(0, 0, Width, Height);
-  Canvas.Line(Border, HeaderHeight - 1, Width - Border, HeaderHeight - 1);
+  Canvas.Line(Border, Px(HeaderHeight) - 1, Width - Border, Px(HeaderHeight) - 1);
 
   Canvas.Font := Font;
   BodyHeight := Canvas.TextHeight('Xg');
-  CenterY := HeaderHeight div 2;
+  CenterY := Px(HeaderHeight) div 2;
   Canvas.Font.Style := [fsBold];
   Canvas.Font.Size := Max(Font.Size, 13) + 1;
   Canvas.Font.Color := FText;
-  Canvas.TextOut(Pad, CenterY - Canvas.TextHeight('Xg') div 2, rsGraphTitle);
-  X := Pad + Canvas.TextWidth(rsGraphTitle) + 2 * Gap;
+  Canvas.TextOut(Px(Pad), CenterY - Canvas.TextHeight('Xg') div 2, rsGraphTitle);
+  X := Px(Pad) + Canvas.TextWidth(rsGraphTitle) + 2 * Px(Gap);
   Canvas.Font := Font;
   Y := CenterY - BodyHeight div 2;
   if FBranch <> '' then
@@ -1268,29 +1204,29 @@ begin
     ACanvas.Brush.Style := bsClear;
     ACanvas.Font.Color := FDim;
     if FFiltered then
-      ACanvas.TextOut(Pad, (RowHeight - ACanvas.TextHeight('Xg')) div 2, rsGraphNoMatch)
+      ACanvas.TextOut(Px(Pad), (Px(RowHeight) - ACanvas.TextHeight('Xg')) div 2, rsGraphNoMatch)
     else
-      ACanvas.TextOut(Pad, (RowHeight - ACanvas.TextHeight('Xg')) div 2, rsGraphEmpty);
+      ACanvas.TextOut(Px(Pad), (Px(RowHeight) - ACanvas.TextHeight('Xg')) div 2, rsGraphEmpty);
     Exit;
   end;
   R := ACanvas.ClipRect;
   if IsRectEmpty(R) then
     R := FRows.ClientRect;
   Up := RowShift;
-  First := Max(0, (R.Top + Up) div RowHeight);
-  Last := Min(High(FShown), (R.Bottom + Up) div RowHeight);
+  First := Max(0, (R.Top + Up) div Px(RowHeight));
+  Last := Min(High(FShown), (R.Bottom + Up) div Px(RowHeight));
   for i := First to Last do
-    PaintRow(ACanvas, i, i * RowHeight - Up);
-  if HasFooter and (R.Bottom + Up >= Length(FShown) * RowHeight) then
+    PaintRow(ACanvas, i, i * Px(RowHeight) - Up);
+  if HasFooter and (R.Bottom + Up >= Length(FShown) * Px(RowHeight)) then
   begin
-    FootTop := Length(FShown) * RowHeight - Up;
+    FootTop := Length(FShown) * Px(RowHeight) - Up;
     if FFooterHot then
     begin
       ACanvas.Pen.Style := psClear;
       ACanvas.Brush.Style := bsSolid;
       ACanvas.Brush.Color := FHover;
-      ACanvas.RoundRect(Pad div 2, FootTop + 1, FRows.Width - Pad div 2,
-        FootTop + RowHeight - 1, 8, 8);
+      ACanvas.RoundRect(Px(Pad) div 2, FootTop + 1, FRows.Width - Px(Pad) div 2,
+        FootTop + Px(RowHeight) - 1, 8, 8);
       ACanvas.Pen.Style := psSolid;
     end;
     ACanvas.Brush.Style := bsClear;
@@ -1298,7 +1234,7 @@ begin
       ACanvas.Font.Color := FAccent
     else
       ACanvas.Font.Color := FDim;
-    ACanvas.TextOut(GraphRight, FootTop + (RowHeight - ACanvas.TextHeight('Xg')) div 2,
+    ACanvas.TextOut(GraphRight, FootTop + (Px(RowHeight) - ACanvas.TextHeight('Xg')) div 2,
       FooterText);
   end;
 end;
@@ -1318,14 +1254,14 @@ var
 begin
   Index := FShown[ARow];
   C := FCommits[Index];
-  CenterY := ATop + RowHeight div 2;
-  Bottom := ATop + RowHeight;
+  CenterY := ATop + Px(RowHeight) div 2;
+  Bottom := ATop + Px(RowHeight);
   if ARow = FCurrent then
   begin
     ACanvas.Pen.Style := psClear;
     ACanvas.Brush.Style := bsSolid;
     ACanvas.Brush.Color := FHover;
-    ACanvas.RoundRect(Pad div 2, ATop + 1, FRows.Width - Pad div 2, Bottom - 1, 8, 8);
+    ACanvas.RoundRect(Px(Pad) div 2, ATop + 1, FRows.Width - Px(Pad) div 2, Bottom - 1, 8, 8);
     ACanvas.Pen.Style := psSolid;
   end;
 
@@ -1363,21 +1299,21 @@ begin
     else
       ACanvas.Brush.Color := FBack;
     ACanvas.Brush.Style := bsSolid;
-    ACanvas.Ellipse(X - HeadRadius, CenterY - HeadRadius, X + HeadRadius + 1,
-      CenterY + HeadRadius + 1);
+    ACanvas.Ellipse(X - Px(HeadRadius), CenterY - Px(HeadRadius), X + Px(HeadRadius) + 1,
+      CenterY + Px(HeadRadius) + 1);
     ACanvas.Pen.Width := 1;
   end;
   ACanvas.Pen.Style := psClear;
   ACanvas.Brush.Style := bsSolid;
   ACanvas.Brush.Color := LaneColor(C.Color);
-  ACanvas.Ellipse(X - DotRadius, CenterY - DotRadius, X + DotRadius + 1,
-    CenterY + DotRadius + 1);
+  ACanvas.Ellipse(X - Px(DotRadius), CenterY - Px(DotRadius), X + Px(DotRadius) + 1,
+    CenterY + Px(DotRadius) + 1);
   ACanvas.Pen.Style := psSolid;
   ACanvas.Brush.Style := bsClear;
 
   ACanvas.Font := Font;
   TextY := CenterY - ACanvas.TextHeight('Xg') div 2;
-  Right := FRows.Width - Pad - ScrollRoom;
+  Right := FRows.Width - Px(Pad) - Px(ScrollRoom);
   if (FMarked <> '') and (C.Hash = FMarked) then
   begin
     ACanvas.Font.Style := [fsBold];
@@ -1401,19 +1337,19 @@ begin
   end;
   if Mark <> '' then
     ACanvas.TextOut(Right - ACanvas.TextWidth(Mark), TextY, Mark);
-  Dec(Right, ACanvas.TextWidth('↑') + Gap + Gap div 2);
+  Dec(Right, ACanvas.TextWidth('↑') + Px(Gap) + Px(Gap) div 2);
 
   X := GraphRight;
   Meta := FMetaFull[Index];
-  if Right - ACanvas.TextWidth(Meta) - Gap - X < FRows.Width div 3 then
+  if Right - ACanvas.TextWidth(Meta) - Px(Gap) - X < FRows.Width div 3 then
     Meta := FMetaAge[Index];
-  if Right - ACanvas.TextWidth(Meta) - Gap - X < FRows.Width div 4 then
+  if Right - ACanvas.TextWidth(Meta) - Px(Gap) - X < FRows.Width div 4 then
     Meta := '';
   if Meta <> '' then
   begin
     ACanvas.Font.Color := FDim;
     ACanvas.TextOut(Right - ACanvas.TextWidth(Meta), TextY, Meta);
-    Dec(Right, ACanvas.TextWidth(Meta) + Gap + Gap div 2);
+    Dec(Right, ACanvas.TextWidth(Meta) + Px(Gap) + Px(Gap) div 2);
   end;
 
   X := PaintRefs(ACanvas, C.Refs, X, CenterY, Right);
@@ -1470,7 +1406,7 @@ var
   L, R, i, j: integer;
 begin
   StatsPlot(L, R);
-  FStats := CommitStats(FCommits, FShown, Max(1, (R - L) div MinWeekWidth),
+  FStats := CommitStats(FCommits, FShown, Max(1, (R - L) div Px(MinWeekWidth)),
     Now - LocalTimeToUniversal(Now));
   FStatsAuthorMax := 1;
   for i := 0 to High(FStats.Authors) do
@@ -1483,16 +1419,16 @@ end;
 { Where the weeks are drawn, right of the names and counts. }
 function TGittanCommitGraph.StatsPlot(out ALeft, ARight: integer): boolean;
 begin
-  ALeft := Pad + Min(StatsLabelWidth, (Width - 2 * Border) * 2 div 5);
-  ARight := Width - 2 * Border - Pad - ScrollRoom;
-  Result := ARight - ALeft >= MinWeekWidth;
+  ALeft := Px(Pad) + Min(Px(StatsLabelWidth), (Width - 2 * Border) * 2 div 5);
+  ARight := Width - 2 * Border - Px(Pad) - Px(ScrollRoom);
+  Result := ARight - ALeft >= Px(MinWeekWidth);
 end;
 
 { The line over the bars, the bars and the dates under them come
   first; the authors' rows start here. }
 function TGittanCommitGraph.StatsAuthorsTop: integer;
 begin
-  Result := Pad div 2 + RowHeight + Gap div 2 + ChartHeight + RowHeight + Gap;
+  Result := Px(Pad) div 2 + Px(RowHeight) + Px(Gap) div 2 + Px(ChartHeight) + Px(RowHeight) + Px(Gap);
 end;
 
 procedure TGittanCommitGraph.StatsHover(X, Y: integer);
@@ -1504,13 +1440,13 @@ begin
   if (X >= 0) and StatsPlot(L, R) then
   begin
     Inc(Y, RowShift);
-    ChartTop := Pad div 2 + RowHeight + Gap div 2;
+    ChartTop := Px(Pad) div 2 + Px(RowHeight) + Px(Gap) div 2;
     if (Length(FStats.Weeks) > 0) and (X >= L) and (X < R) and (Y >= ChartTop) and
       (Y < StatsAuthorsTop) then
       Week := Min(High(FStats.Weeks), Trunc((X - L) / ((R - L) / Length(FStats.Weeks))));
     if Y >= StatsAuthorsTop then
     begin
-      Author := (Y - StatsAuthorsTop) div RowHeight;
+      Author := (Y - StatsAuthorsTop) div Px(RowHeight);
       if Author > High(FStats.Authors) then
         Author := -1;
     end;
@@ -1583,7 +1519,7 @@ var
   begin
     AX0 := L + Round(AWeek * ColW);
     AX1 := L + Round((AWeek + 1) * ColW);
-    if AX1 - AX0 >= MinWeekWidth then
+    if AX1 - AX0 >= Px(MinWeekWidth) then
       Dec(AX1);
     AX1 := Max(AX1, AX0 + 1);
   end;
@@ -1651,12 +1587,12 @@ begin
   end;
   ACanvas.Brush.Style := bsClear;
   ACanvas.Font.Color := FDim;
-  ACanvas.TextOut(Pad, Pad div 2 + (RowHeight - TextH) div 2 - Up,
-    FitText(ACanvas, Line, FRows.Width - 2 * Pad - ScrollRoom));
+  ACanvas.TextOut(Px(Pad), Px(Pad) div 2 + (Px(RowHeight) - TextH) div 2 - Up,
+    FitText(ACanvas, Line, FRows.Width - 2 * Px(Pad) - Px(ScrollRoom)));
 
   { The bars, with the names column left of them. }
-  ChartTop := Pad div 2 + RowHeight + Gap div 2 - Up;
-  ChartBottom := ChartTop + ChartHeight;
+  ChartTop := Px(Pad) div 2 + Px(RowHeight) + Px(Gap) div 2 - Up;
+  ChartBottom := ChartTop + Px(ChartHeight);
   Most := 1;
   for i := 0 to n - 1 do
     Most := Max(Most, FStats.Weeks[i]);
@@ -1664,8 +1600,8 @@ begin
   ACanvas.Font.Color := FText;
   Count := GroupDigits(FStats.Commits);
   CountW := ACanvas.TextWidth(Count);
-  ACanvas.TextOut(L - Gap - CountW, ChartTop, Count);
-  ACanvas.TextOut(Pad, ChartTop, FitText(ACanvas, rsStatsAll, L - 2 * Gap - Pad - CountW));
+  ACanvas.TextOut(L - Px(Gap) - CountW, ChartTop, Count);
+  ACanvas.TextOut(Px(Pad), ChartTop, FitText(ACanvas, rsStatsAll, L - 2 * Px(Gap) - Px(Pad) - CountW));
   ACanvas.Font.Style := [];
   ACanvas.Font.Color := FDim;
   if n = 0 then
@@ -1687,7 +1623,7 @@ begin
       if FStats.Authors[a].Weeks[i] = 0 then
         Continue;
       Inc(Sum, FStats.Authors[a].Weeks[i]);
-      RowTop := ChartBottom - Max(1, Round(Sum * (ChartHeight - 2) / Most));
+      RowTop := ChartBottom - Max(1, Round(Sum * (Px(ChartHeight) - 2) / Most));
       if RowTop < Y then
         Fill(X0, RowTop, X1, Y, AuthorColor(a));
       Y := RowTop;
@@ -1699,54 +1635,54 @@ begin
   if n > 0 then
   begin
     ACanvas.Font.Color := FDim;
-    ACanvas.TextOut(Pad, ChartTop + TextH + 4, FitText(ACanvas,
-      Format(rsStatsMostWeek, [GroupDigits(Most)]), L - 2 * Gap - Pad));
+    ACanvas.TextOut(Px(Pad), ChartTop + TextH + 4, FitText(ACanvas,
+      Format(rsStatsMostWeek, [GroupDigits(Most)]), L - 2 * Px(Gap) - Px(Pad)));
     Part := FormatDateTime(DateFormat, FStats.FirstWeek);
     ACanvas.TextOut(L, ChartBottom + 4, Part);
     if n > 1 then
     begin
       Line := FormatDateTime(DateFormat, FStats.FirstWeek + 7 * (n - 1));
-      if R - ACanvas.TextWidth(Line) > L + ACanvas.TextWidth(Part) + Gap then
+      if R - ACanvas.TextWidth(Line) > L + ACanvas.TextWidth(Part) + Px(Gap) then
         ACanvas.TextOut(R - ACanvas.TextWidth(Line), ChartBottom + 4, Line);
     end;
   end;
-  Y := StatsAuthorsTop - Gap div 2 - Up;
+  Y := StatsAuthorsTop - Px(Gap) div 2 - Up;
   ACanvas.Pen.Color := FLine;
-  ACanvas.Line(Pad div 2, Y, FRows.Width - Pad div 2, Y);
+  ACanvas.Line(Px(Pad) div 2, Y, FRows.Width - Px(Pad) div 2, Y);
 
   { The authors, only those in view. }
-  for a := Max(0, (Clip.Top + Up - StatsAuthorsTop) div RowHeight) to
-    Min(High(FStats.Authors), (Clip.Bottom + Up - StatsAuthorsTop) div RowHeight) do
+  for a := Max(0, (Clip.Top + Up - StatsAuthorsTop) div Px(RowHeight)) to
+    Min(High(FStats.Authors), (Clip.Bottom + Up - StatsAuthorsTop) div Px(RowHeight)) do
   begin
-    RowTop := StatsAuthorsTop + a * RowHeight - Up;
+    RowTop := StatsAuthorsTop + a * Px(RowHeight) - Up;
     if a = FStatsAuthor then
     begin
       ACanvas.Pen.Style := psClear;
       ACanvas.Brush.Style := bsSolid;
       ACanvas.Brush.Color := FHover;
-      ACanvas.RoundRect(Pad div 2, RowTop + 1, FRows.Width - Pad div 2, RowTop + RowHeight - 1, 8, 8);
+      ACanvas.RoundRect(Px(Pad) div 2, RowTop + 1, FRows.Width - Px(Pad) div 2, RowTop + Px(RowHeight) - 1, 8, 8);
       ACanvas.Pen.Style := psSolid;
     end;
     ACanvas.Pen.Style := psClear;
     ACanvas.Brush.Style := bsSolid;
     ACanvas.Brush.Color := AuthorColor(a);
-    Y := RowTop + RowHeight div 2;
-    ACanvas.RoundRect(Pad, Y - 5, Pad + 10, Y + 5, 4, 4);
+    Y := RowTop + Px(RowHeight) div 2;
+    ACanvas.RoundRect(Px(Pad), Y - 5, Px(Pad) + 10, Y + 5, 4, 4);
     ACanvas.Pen.Style := psSolid;
     ACanvas.Brush.Style := bsClear;
     Count := GroupDigits(FStats.Authors[a].Total);
     CountW := ACanvas.TextWidth(Count);
     ACanvas.Font.Color := FDim;
-    ACanvas.TextOut(L - Gap - CountW, Y - TextH div 2, Count);
+    ACanvas.TextOut(L - Px(Gap) - CountW, Y - TextH div 2, Count);
     ACanvas.Font.Color := FText;
-    ACanvas.TextOut(Pad + 18, Y - TextH div 2, FitText(ACanvas, FStats.Authors[a].Name,
-      L - 2 * Gap - Pad - 18 - CountW));
+    ACanvas.TextOut(Px(Pad) + 18, Y - TextH div 2, FitText(ACanvas, FStats.Authors[a].Name,
+      L - 2 * Px(Gap) - Px(Pad) - 18 - CountW));
     for i := 0 to n - 1 do
       if FStats.Authors[a].Weeks[i] > 0 then
       begin
         WeekX(i, X0, X1);
-        Fill(X0, RowTop + RowHeight - 5 - Max(1, Round(FStats.Authors[a].Weeks[i] *
-          (RowHeight - 10) / FStatsAuthorMax)), X1, RowTop + RowHeight - 5, AuthorColor(a));
+        Fill(X0, RowTop + Px(RowHeight) - 5 - Max(1, Round(FStats.Authors[a].Weeks[i] *
+          (Px(RowHeight) - 10) / FStatsAuthorMax)), X1, RowTop + Px(RowHeight) - 5, AuthorColor(a));
       end;
     ACanvas.Brush.Style := bsClear;
   end;
@@ -1821,7 +1757,7 @@ begin
       ACanvas.Font.Style := [fsBold]
     else
       ACanvas.Font.Style := [];
-    W := ACanvas.TextWidth(RefName) + 2 * ChipPadX;
+    W := ACanvas.TextWidth(RefName) + 2 * Px(ChipPadX);
     if X + W > ARight - 80 then
       Break;
     case ARefs[i].Kind of
@@ -1858,10 +1794,10 @@ begin
     ACanvas.RoundRect(X, ACenterY - H div 2, X + W, ACenterY - H div 2 + H, H, H);
     ACanvas.Brush.Style := bsClear;
     ACanvas.Font.Color := Ink;
-    ACanvas.TextOut(X + ChipPadX, ACenterY - TextH div 2, RefName);
-    Inc(X, W + ChipGap);
+    ACanvas.TextOut(X + Px(ChipPadX), ACenterY - TextH div 2, RefName);
+    Inc(X, W + Px(ChipGap));
   end;
-  Result := X + ChipGap;
+  Result := X + Px(ChipGap);
 end;
 
 end.

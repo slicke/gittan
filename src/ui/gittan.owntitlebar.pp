@@ -72,6 +72,8 @@ type
     function BandFillWidth(APos, ATotal: integer): integer;
     function MenuOf(AForm: TCustomForm): TMainMenu;
   protected
+    procedure DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+      const AXProportion, AYProportion: double); override;
     {** The part at a point of the bar, with the index of the menu name or
       the action; a disabled action still counts. }
     function PartAt(X, Y: integer; out AIndex: integer): TGittanTitlePart;
@@ -726,6 +728,22 @@ begin
     Canvas.FillRect(Types.Rect(0, 0, W, i));
     Canvas.Brush.Color := FBandTrack;
     Canvas.FillRect(Types.Rect(W, 0, Width, i));
+  end;
+end;
+
+{ The form scales every control by its DPI after FormCreate, this one's
+  height too, which is already the screen's: set it again. }
+procedure TGittanOwnTitleBar.DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+  const AXProportion, AYProportion: double);
+begin
+  inherited DoAutoAdjustLayout(AMode, AXProportion, AYProportion);
+  if AMode = lapAutoAdjustForDPI then
+  begin
+    Height := Scale96ToScreen(TitleBarHeight);
+    FNav.Height := Scale96ToScreen(NavHeight);
+    FConflictNav.Height := Scale96ToScreen(NavHeight);
+    FNav.Refit;
+    FConflictNav.Refit;
   end;
 end;
 

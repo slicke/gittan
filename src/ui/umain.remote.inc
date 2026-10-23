@@ -169,6 +169,7 @@ var
   HookFailed: boolean;
   Count: integer;
   Msg: string;
+  Choice: TModalResult;
 begin
   Job := TGittanRemoteJob(Sender);
   if Job <> FRemoteJob then
@@ -206,11 +207,16 @@ begin
       ShowRemoteFailure(Job, False);
     Exit;
   end;
+  { A rebase or merge waits only for the fetch it started. }
+  if not (Job.Ok and (Job.Kind = rkFetch)) then
+    FAfterFetchRef := '';
   if Job.Ok then
   begin
     case Job.Kind of
       rkFetch:
-        if FHasUpstream and (FBehind = 1) then
+        if FAfterFetchRef <> '' then
+          AfterFetch
+        else if FHasUpstream and (FBehind = 1) then
           StatusNote(rsFetchedBehindOne)
         else if FHasUpstream and (FBehind > 1) then
           StatusNote(Format(rsFetchedBehind, [FBehind]))
@@ -268,9 +274,17 @@ begin
       Msg := Format(rsPushRejectedDivergedOne, [FRepo.Upstream(FBranch)])
     else
       Msg := Format(rsPushRejectedDiverged, [FRepo.Upstream(FBranch), FBehind]);
-    case QuestionDlg(rsPushRejectedTitle, Msg + LineEnding + LineEnding + rsPushRejectedForce,
-        mtConfirmation, [mrYes, rsPullAction, 'IsDefault', mrNo, rsForcePushAction, mrCancel,
-        rsCancelButton, 'IsCancel'], 0) of
+    { Force Push first for a branch rewritten here, whose upstream holds
+      only what it replaced. }
+    if FRewritten then
+      Choice := QuestionDlg(rsPushRejectedTitle, Msg + LineEnding + LineEnding +
+        rsPushRejectedForce, mtConfirmation, [mrNo, rsForcePushAction, 'IsDefault', mrYes,
+        rsPullAction, mrCancel, rsCancelButton, 'IsCancel'], 0)
+    else
+      Choice := QuestionDlg(rsPushRejectedTitle, Msg + LineEnding + LineEnding +
+        rsPushRejectedForce, mtConfirmation, [mrYes, rsPullAction, 'IsDefault', mrNo,
+        rsForcePushAction, mrCancel, rsCancelButton, 'IsCancel'], 0);
+    case Choice of
       mrYes: StartRemote(rkPull, pmAuto);
       mrNo: StartRemote(rkForcePush);
     end;
@@ -361,6 +375,7 @@ begin
   FRetrySubmodules := AJob.Submodules;
   FRetryPath := AJob.Path;
   FRetryBranch := AJob.Branch;
+  FNoticeCommit := False;
   FStatus.ShowMessage(Title, stBad, StatusErrorSeconds);
   FNotice.DetailFont.Assign(Edit.Font);
   FNotice.Popup(Title, AJob.Error, False, nkBad);
@@ -373,6 +388,13 @@ begin
     0:
       begin
         FNotice.Close;
+        { The message and the files chosen stay after a failed commit;
+          a notice of one is closed when another repository opens. }
+        if FNoticeCommit then
+        begin
+          StartCommit;
+          Exit;
+        end;
         { The failure was of the repository that was open then; a clone
           is of none. }
         if (FRetryKind <> rkClone) and (FRetryRoot <> FRepo.Root) then
@@ -389,7 +411,7 @@ begin
       end;
     1:
       begin
-        Clipboard.AsText := FNotice.Detail;
+        Clipboard.AsText := FNotice.PlainDetail;
         StatusNote(rsOutputCopied);
       end;
   end;
@@ -403,6 +425,7 @@ begin
     Exit;
   FNoticeTimer.Enabled := False;
   FNotice.Close;
+  FAfterFetchRef := '';
   FRemoteJob.Stop(AWait);
   if AWait then
     FRemoteJob.Free
@@ -465,9 +488,7 @@ procedure TForm1.SyncClick(const AScreenRect: TRect);
 
   procedure AddAction(AAction: integer; const ACaption, ADetail: string);
   begin
-    FSyncPopup.Add(ACaption, ADetail);
-    SetLength(FSyncActions, Length(FSyncActions) + 1);
-    FSyncActions[High(FSyncActions)] := AAction;
+    FSyncPopup.Add(ACaption, ADetail, False, AAction);
   end;
 
 var
@@ -476,7 +497,6 @@ begin
   if FRepo.Root = '' then
     Exit;
   FSyncPopup.Clear;
-  FSyncActions := nil;
   if FRemoteJob = nil then
   begin
     Detail := '';
@@ -506,9 +526,7 @@ end;
 
 procedure TForm1.SyncPopupPick(Sender: TObject; AIndex: integer);
 begin
-  if (AIndex < 0) or (AIndex > High(FSyncActions)) then
-    Exit;
-  case FSyncActions[AIndex] of
+  case FSyncPopup.TagOf(AIndex) of
     saPull: StartRemote(rkPull);
     saPush: StartRemote(rkPush);
     saForcePush: ForcePushAsk;

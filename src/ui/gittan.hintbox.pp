@@ -84,6 +84,9 @@ type
 
 implementation
 
+uses
+  gittan.textfit, gittan.theme, Forms;
+
 const
   PadX = 8;
   PadY = 6;
@@ -102,7 +105,7 @@ begin
   FGlyphColor := clGrayText;
   FLinkColor := clHighlight;
   AutoSize := True;
-  Height := IconSize + 2 * PadY;
+  Height := Px(IconSize) + 2 * Px(PadY);
   SetColors(clInfoBk, clBtnShadow, clInfoBk, clBtnShadow);
 end;
 
@@ -221,38 +224,32 @@ end;
 
 function TGittanHintBox.TextLeft: integer;
 begin
-  Result := PadX;
+  Result := Px(PadX);
   if HasIcon then
-    Inc(Result, IconSize + Gap);
+    Inc(Result, Px(IconSize) + Px(Gap));
 end;
 
 { The height of the text wrapped to AWidth, measured on a bitmap since
   the box may have no handle yet. }
 function TGittanHintBox.TextHeight(AWidth: integer): integer;
 var
-  Bmp: TBitmap;
+  C: TCanvas;
   R: TRect;
 begin
-  Bmp := TBitmap.Create;
-  try
-    Bmp.SetSize(1, 1);
-    Bmp.Canvas.Font := Font;
-    R := Rect(0, 0, Max(AWidth, 1), 0);
-    DrawText(Bmp.Canvas.Handle, PChar(FText), Length(FText), R,
-      DT_CALCRECT or DT_WORDBREAK or DT_NOPREFIX);
-    Result := R.Bottom - R.Top;
-    if FLink <> '' then
-      Inc(Result, LinkGap + Bmp.Canvas.TextHeight('Xg'));
-  finally
-    Bmp.Free;
-  end;
+  C := MeasureCanvas(Font);
+  R := Rect(0, 0, Max(AWidth, 1), 0);
+  DrawText(C.Handle, PChar(FText), Length(FText), R,
+    DT_CALCRECT or DT_WORDBREAK or DT_NOPREFIX);
+  Result := R.Bottom - R.Top;
+  if FLink <> '' then
+    Inc(Result, Px(LinkGap) + C.TextHeight('Xg'));
 end;
 
 procedure TGittanHintBox.CalculatePreferredSize(var PreferredWidth,
   PreferredHeight: integer; WithThemeSpace: boolean);
 begin
   PreferredWidth := Width;
-  PreferredHeight := Max(TextHeight(Width - TextLeft - PadX), IconSize) + 2 * PadY;
+  PreferredHeight := Max(TextHeight(Width - TextLeft - Px(PadX)), Px(IconSize)) + 2 * Px(PadY);
 end;
 
 { A new width wraps the text anew. }
@@ -287,19 +284,19 @@ begin
     Canvas.Pen.Color := FLine;
   end;
   Canvas.Pen.Width := 1;
-  Canvas.RoundRect(0, 0, Width, Height, Corner, Corner);
+  Canvas.RoundRect(0, 0, Width, Height, Px(Corner), Px(Corner));
   if FGlyph <> '' then
-    DrawStatusIcon(Canvas, FGlyph, PadX, PadY - 1, IconSize + 2, FGlyphColor)
+    DrawStatusIcon(Canvas, FGlyph, Px(PadX), Px(PadY) - 1, Px(IconSize) + 2, FGlyphColor)
   else if HasIcon then
-    FImages.DrawForPPI(Canvas, PadX, PadY, FIcon, IconSize,
-      Font.PixelsPerInch, GetCanvasScaleFactor);
+    FImages.DrawForPPI(Canvas, Px(PadX), Px(PadY), FIcon, IconSize,
+      Screen.PixelsPerInch, GetCanvasScaleFactor);
   Canvas.Pen.Width := 1;
   Canvas.Font := Font;
   Canvas.Brush.Style := bsClear;
-  R := Rect(TextLeft, PadY, Width - PadX, Height - PadY);
+  R := Rect(TextLeft, Px(PadY), Width - Px(PadX), Height - Px(PadY));
   { One line sits in the middle of the icon. }
-  if TextHeight(R.Right - R.Left) < IconSize then
-    OffsetRect(R, 0, (IconSize - Canvas.TextHeight('Xg')) div 2);
+  if TextHeight(R.Right - R.Left) < Px(IconSize) then
+    OffsetRect(R, 0, (Px(IconSize) - Canvas.TextHeight('Xg')) div 2);
   Style := Canvas.TextStyle;
   Style.Wordbreak := True;
   Style.SingleLine := False;
@@ -308,7 +305,7 @@ begin
   FLinkRect := Rect(0, 0, 0, 0);
   if FLink <> '' then
   begin
-    R.Top := Height - PadY - Canvas.TextHeight('Xg');
+    R.Top := Height - Px(PadY) - Canvas.TextHeight('Xg');
     FLinkRect := Rect(R.Left, R.Top, R.Left + Canvas.TextWidth(FLink),
       R.Top + Canvas.TextHeight('Xg'));
     Canvas.Font.Color := FLinkColor;

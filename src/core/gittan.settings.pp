@@ -38,6 +38,7 @@ type
   TGittanSettings = class
   private
     FRecent: TStringList;
+    FTrust: TStringList;
     FFileName: string;
   public
     {** The window bounds, or a zero Width when none were saved. }
@@ -117,6 +118,14 @@ type
     {** Puts ARoot first in the recent list, dropping a duplicate and the
       oldest beyond MaxRecent. }
     procedure AddRecent(const ARoot: string);
+    {** Whether the commands file of the repository at ARoot, whose
+      text has the hash AHash (CommandsFileHash), has been trusted:
+      the file's commands and keys run only then. A repository without
+      the file (AHash empty) needs no trust. }
+    function CommandsTrusted(const ARoot, AHash: string): boolean;
+    {** Trusts the commands file of ARoot as it is now; a change of its
+      text asks again. }
+    procedure TrustCommands(const ARoot, AHash: string);
     {** The recently opened repositories, newest first. }
     property Recent: TStringList read FRecent;
     {** The ini file the settings are read from and written to. }
@@ -126,7 +135,7 @@ type
 implementation
 
 uses
-  IniFiles;
+  IniFiles, md5, gittan.textfile;
 
 const
   SecWindow = 'Window';
@@ -135,6 +144,7 @@ const
   SecUpdate = 'Update';
   SecCommit = 'Commit';
   SecTools = 'Tools';
+  SecTrust = 'Trust';
   ConfigFolder = 'Gittan';
 
 {** The folder the ini file lives in. GetAppConfigDir names it after
@@ -179,34 +189,12 @@ begin
 end;
 
 { An ini value is one line: a line end is written as \n, and so a
-  backslash as \\. }
+  backslash as \\; UnescapeC reads it. }
 function EscapeLines(const AText: string): string;
 begin
   Result := StringReplace(AText, '\', '\\', [rfReplaceAll]);
   Result := StringReplace(Result, #13#10, #10, [rfReplaceAll]);
   Result := StringReplace(Result, #10, '\n', [rfReplaceAll]);
-end;
-
-function UnescapeLines(const AText: string): string;
-var
-  i: integer;
-begin
-  Result := '';
-  i := 1;
-  while i <= Length(AText) do
-  begin
-    if (AText[i] = '\') and (i < Length(AText)) then
-    begin
-      Inc(i);
-      if AText[i] = 'n' then
-        Result := Result + #10
-      else
-        Result := Result + AText[i];
-    end
-    else
-      Result := Result + AText[i];
-    Inc(i);
-  end;
 end;
 
 { TGittanSettings }
@@ -216,6 +204,7 @@ begin
   inherited Create;
   FRecent := TStringList.Create;
   FRecent.CaseSensitive := True;
+  FTrust := TStringList.Create;
   if AFileName <> '' then
     FFileName := AFileName
   else
@@ -228,6 +217,7 @@ end;
 
 destructor TGittanSettings.Destroy;
 begin
+  FTrust.Free;
   FRecent.Free;
   inherited Destroy;
 end;
@@ -253,7 +243,7 @@ begin
       RepoFilesOpen := Ini.ReadBool(SecWindow, 'RepoFiles', False);
       SubmodulesOpen := Ini.ReadBool(SecWindow, 'Submodules', True);
       CommitOpen := Ini.ReadBool(SecWindow, 'Commit', True);
-      CommitDraft := UnescapeLines(Ini.ReadString(SecCommit, 'Draft', ''));
+      CommitDraft := UnescapeC(Ini.ReadString(SecCommit, 'Draft', ''));
       CommitDraftRepo := Ini.ReadString(SecCommit, 'Repo', '');
       FontName := Ini.ReadString(SecView, 'FontName', '');
       FontSize := Ini.ReadInteger(SecView, 'FontSize', 0);
@@ -281,6 +271,7 @@ begin
       GitPath := Ini.ReadString(SecTools, 'Git', '');
       GhPath := Ini.ReadString(SecTools, 'Gh', '');
       UpdateSnoozedUntil := ReadDay(Ini.ReadString(SecUpdate, 'SnoozedUntil', ''));
+      Ini.ReadSectionValues(SecTrust, FTrust);
       FRecent.Clear;
       for i := 0 to MaxRecent - 1 do
       begin
@@ -348,6 +339,9 @@ begin
       Ini.EraseSection(SecRecent);
       for i := 0 to FRecent.Count - 1 do
         Ini.WriteString(SecRecent, 'Repo' + IntToStr(i), KeepEdges(FRecent[i]));
+      Ini.EraseSection(SecTrust);
+      for i := 0 to FTrust.Count - 1 do
+        Ini.WriteString(SecTrust, FTrust.Names[i], FTrust.ValueFromIndex[i]);
       Ini.UpdateFile;
     finally
       Ini.Free;
@@ -355,6 +349,25 @@ begin
   except
     { Nothing to do; the next run starts with what was saved before. }
   end;
+end;
+
+{ The key of a root in the Trust section: its MD5, since a path may
+  hold what an ini key cannot. }
+function TrustKey(const ARoot: string): string;
+begin
+  Result := MD5Print(MD5String(ARoot));
+end;
+
+function TGittanSettings.CommandsTrusted(const ARoot, AHash: string): boolean;
+begin
+  Result := (AHash = '') or (FTrust.Values[TrustKey(ARoot)] = AHash);
+end;
+
+procedure TGittanSettings.TrustCommands(const ARoot, AHash: string);
+begin
+  if AHash = '' then
+    Exit;
+  FTrust.Values[TrustKey(ARoot)] := AHash;
 end;
 
 procedure TGittanSettings.AddRecent(const ARoot: string);

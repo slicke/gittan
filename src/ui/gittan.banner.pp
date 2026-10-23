@@ -67,6 +67,8 @@ type
     procedure DrawIcon(X, Y: integer; AColor: TColor; AKind: TGittanBannerKind);
     procedure Changed;
   protected
+    procedure DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+      const AXProportion, AYProportion: double); override;
     procedure Paint; override;
     procedure Resize; override;
     procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
@@ -105,7 +107,7 @@ type
 implementation
 
 uses
-  Math, Clipbrd, gittan.textfit;
+  Math, Clipbrd, gittan.textfit, gittan.terminal, gittan.theme;
 
 resourcestring
   rsBannerCopy = 'Copy';
@@ -123,25 +125,13 @@ const
   MaxItems = 10;
   TintPercent = 14;
 
-function Blend(A, B: TColor; APercent: integer): TColor;
-var
-  CA, CB: TColor;
-begin
-  CA := ColorToRGB(A);
-  CB := ColorToRGB(B);
-  Result := RGBToColor(
-    (Red(CA) * (100 - APercent) + Red(CB) * APercent) div 100,
-    (Green(CA) * (100 - APercent) + Green(CB) * APercent) div 100,
-    (Blue(CA) * (100 - APercent) + Blue(CB) * APercent) div 100);
-end;
-
 { TGittanBanner }
 
 constructor TGittanBanner.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
   ControlStyle := ControlStyle + [csOpaque];
-  Height := RowHeight;
+  Height := Px(RowHeight);
   FDetailFont := TFont.Create;
   FDetailFont.Assign(Font);
   FTimer := TTimer.Create(Self);
@@ -187,9 +177,15 @@ procedure TGittanBanner.AddAction(const ATitle, ADetail: string;
   AOnAction: TNotifyEvent);
 var
   Item: TItem;
+  Detail: string;
 begin
+  { Output a program wrote in color loses its escape sequences; the
+    notice is where it shows in color. }
+  Detail := ADetail;
+  if Pos(#27, Detail) > 0 then
+    Detail := TerminalPlainText(Detail);
   if (Length(FItems) > 0) and (Current.Title = ATitle) and
-    (Current.Detail = ADetail) and (Current.Kind = AKind) and
+    (Current.Detail = Detail) and (Current.Kind = AKind) and
     (Current.Action = AAction) then
   begin
     ShowCurrent;
@@ -198,7 +194,7 @@ begin
   if Length(FItems) >= MaxItems then
     Delete(FItems, 0, 1);
   Item.Title := ATitle;
-  Item.Detail := ADetail;
+  Item.Detail := Detail;
   Item.Kind := AKind;
   Item.Seconds := ASeconds;
   Item.Action := AAction;
@@ -278,9 +274,9 @@ procedure TGittanBanner.UpdateHeight;
 var
   H: integer;
 begin
-  H := RowHeight;
+  H := Px(RowHeight);
   if FExpanded then
-    H := H + Min(Length(FLines), MaxLines + 1) * LineHeight(FDetailFont) + Pad;
+    H := H + Min(Length(FLines), MaxLines + 1) * LineHeight(FDetailFont) + Px(Pad);
   if H <> Height then
   begin
     Height := H;
@@ -317,26 +313,26 @@ begin
   Canvas.Pen.Style := psClear;
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := AColor;
-  Canvas.Ellipse(X, Y, X + IconSize, Y + IconSize);
+  Canvas.Ellipse(X, Y, X + Px(IconSize), Y + Px(IconSize));
   Canvas.Pen.Style := psSolid;
   Canvas.Pen.Color := clWhite;
-  Canvas.Pen.Width := 2;
-  CX := X + IconSize div 2;
+  Canvas.Pen.Width := Max(2, Px(2));
+  CX := X + Px(IconSize) div 2;
   case AKind of
     bkError:
       begin
-        Canvas.Line(CX, Y + 4, CX, Y + 9);
-        Canvas.Line(CX, Y + 11, CX, Y + 13);
+        Canvas.Line(CX, Y + Px(4), CX, Y + Px(9));
+        Canvas.Line(CX, Y + Px(11), CX, Y + Px(13));
       end;
     bkInfo:
       begin
-        Canvas.Line(CX, Y + 4, CX, Y + 6);
-        Canvas.Line(CX, Y + 8, CX, Y + 13);
+        Canvas.Line(CX, Y + Px(4), CX, Y + Px(6));
+        Canvas.Line(CX, Y + Px(8), CX, Y + Px(13));
       end;
     bkSuccess:
       begin
-        Canvas.Line(X + 4, Y + 8, X + 7, Y + 11);
-        Canvas.Line(X + 7, Y + 11, X + 12, Y + 5);
+        Canvas.Line(X + Px(4), Y + Px(8), X + Px(7), Y + Px(11));
+        Canvas.Line(X + Px(7), Y + Px(11), X + Px(12), Y + Px(5));
       end;
   end;
   Canvas.Pen.Width := 1;
@@ -355,8 +351,8 @@ var
     W: integer;
   begin
     W := Canvas.TextWidth(ACaption);
-    Result := Rect(Right - W - 6, (RowHeight - CloseSize) div 2, Right,
-      (RowHeight + CloseSize) div 2);
+    Result := Rect(Right - W - 6, (Px(RowHeight) - Px(CloseSize)) div 2, Right,
+      (Px(RowHeight) + Px(CloseSize)) div 2);
     if FHotPart = APart then
     begin
       Canvas.Pen.Style := psClear;
@@ -368,7 +364,7 @@ var
     Canvas.Brush.Style := bsClear;
     Canvas.Font.Color := Tone;
     Canvas.TextOut(Result.Left + 3, TextY, ACaption);
-    Right := Result.Left - Gap div 2;
+    Right := Result.Left - Px(Gap) div 2;
   end;
 
 begin
@@ -385,7 +381,7 @@ begin
     else
       Tone := FAccent;
   end;
-  Back := Blend(FBack, Tone, TintPercent);
+  Back := MixColor(FBack, Tone, TintPercent / 100);
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := Back;
   Canvas.FillRect(ClientRect);
@@ -393,13 +389,13 @@ begin
   Canvas.Line(0, Height - 1, Width, Height - 1);
 
   Canvas.Font := Font;
-  TextY := (RowHeight - Canvas.TextHeight('Xg')) div 2;
-  DrawIcon(Pad, (RowHeight - IconSize) div 2, Tone, Item.Kind);
+  TextY := (Px(RowHeight) - Canvas.TextHeight('Xg')) div 2;
+  DrawIcon(Px(Pad), (Px(RowHeight) - Px(IconSize)) div 2, Tone, Item.Kind);
 
   { The close button at the right end, then the count, the action, Copy
     and Details leftward. }
-  FCloseRect := Rect(Width - Pad - CloseSize + 4, (RowHeight - CloseSize) div 2,
-    Width - Pad + 4, (RowHeight + CloseSize) div 2);
+  FCloseRect := Rect(Width - Px(Pad) - Px(CloseSize) + 4, (Px(RowHeight) - Px(CloseSize)) div 2,
+    Width - Px(Pad) + 4, (Px(RowHeight) + Px(CloseSize)) div 2);
   if FHotPart = bpClose then
   begin
     Canvas.Pen.Style := psClear;
@@ -415,14 +411,14 @@ begin
     Canvas.Line(Right - 7, Top + 7, Left + 7, Bottom - 7);
   end;
   Canvas.Pen.Width := 1;
-  Right := FCloseRect.Left - Gap;
+  Right := FCloseRect.Left - Px(Gap);
   Canvas.Brush.Style := bsClear;
   if Length(FItems) > 1 then
   begin
     S := '+' + IntToStr(Length(FItems) - 1);
     Canvas.Font.Color := FDim;
     Canvas.TextOut(Right - Canvas.TextWidth(S), TextY, S);
-    Right := Right - Canvas.TextWidth(S) - Gap;
+    Right := Right - Canvas.TextWidth(S) - Px(Gap);
   end;
   if (Item.Action <> '') and Assigned(Item.OnAction) then
   begin
@@ -441,18 +437,18 @@ begin
 
   { The title, then the first detail line in what is left; Details goes
     in when there is more to see. }
-  X := Pad + IconSize + Gap;
+  X := Px(Pad) + Px(IconSize) + Px(Gap);
   Canvas.Font.Style := [fsBold];
   Canvas.Font.Color := FText;
   Canvas.TextOut(X, TextY, Item.Title);
-  Inc(X, Canvas.TextWidth(Item.Title) + Gap);
+  Inc(X, Canvas.TextWidth(Item.Title) + Px(Gap));
   Canvas.Font.Style := [];
   if Length(FLines) > 0 then
     First := Trim(FLines[0])
   else
     First := '';
   FDetailsRect := Rect(0, 0, 0, 0);
-  if (Length(FLines) > 1) or (X + Canvas.TextWidth(First) > Right - Gap) or
+  if (Length(FLines) > 1) or (X + Canvas.TextWidth(First) > Right - Px(Gap)) or
     (FExpanded and (First <> '')) then
   begin
     if FExpanded then
@@ -463,12 +459,12 @@ begin
   end;
   if not FExpanded and (First <> '') then
   begin
-    Room := Right - Gap - X;
+    Room := Right - Px(Gap) - X;
     First := FitTextRight(Canvas, First, Room);
     if Room > 0 then
     begin
       Canvas.Font.Color := FDim;
-      Canvas.TextRect(Rect(X, 0, X + Room, RowHeight), X, TextY, First);
+      Canvas.TextRect(Rect(X, 0, X + Room, Px(RowHeight)), X, TextY, First);
     end;
   end;
 
@@ -478,11 +474,11 @@ begin
     Canvas.Font := FDetailFont;
     Canvas.Font.Color := FText;
     Canvas.Brush.Style := bsClear;
-    X := Pad + IconSize + Gap;
-    Y := RowHeight;
+    X := Px(Pad) + Px(IconSize) + Px(Gap);
+    Y := Px(RowHeight);
     for i := 0 to Min(High(FLines), MaxLines - 1) do
     begin
-      Canvas.TextRect(Rect(X, Y, Width - Pad, Y + LH), X, Y, FLines[i]);
+      Canvas.TextRect(Rect(X, Y, Width - Px(Pad), Y + LH), X, Y, FLines[i]);
       Inc(Y, LH);
     end;
     if Length(FLines) > MaxLines then
@@ -567,6 +563,16 @@ begin
         Invalidate;
       end;
   end;
+end;
+
+{ The form scales every control by its DPI after FormCreate, this one's
+  height too, which is already the screen's: set it again. }
+procedure TGittanBanner.DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+  const AXProportion, AYProportion: double);
+begin
+  inherited DoAutoAdjustLayout(AMode, AXProportion, AYProportion);
+  if AMode = lapAutoAdjustForDPI then
+    UpdateHeight;
 end;
 
 end.

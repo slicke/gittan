@@ -126,6 +126,19 @@ type
     Detached: boolean;
     HasUpstream: boolean;
     Ahead, Behind: integer;
+    {** How many commits of DefaultBranch the branch lacks, from
+      BehindDefault; 0 on a detached HEAD. }
+    BehindDefault: integer;
+    {** For a branch without an upstream in a repository with a remote,
+      how many of its commits no remote-tracking branch has, from
+      NotOnRemotes (0 when all are there); -1 with an upstream, without
+      a remote or on a detached HEAD. }
+    NotOnRemote: integer;
+    {** The branch and its upstream have both moved on, and the
+      upstream's tip is one the branch had (UpstreamInReflog): the
+      branch was rewritten since it was pushed, by a rebase or an amend,
+      and a force push, not a pull, is the next step. }
+    Rewritten: boolean;
     {** The stashes, newest first, from Stashes. }
     Stashes: TGittanStashes;
     {** The newest commits of HEAD, from RecentCommits; read only when
@@ -716,6 +729,24 @@ type
       origin/main: what the remote's HEAD points at, else main or master
       on the remote RemoteFor gives, else empty. }
     function DefaultBranch: string;
+    {** How many commits of ADefault (DefaultBranch, as of the last
+      fetch) HEAD lacks, for the branch ABranch HEAD is on: what a
+      rebase onto it or a merge of it would bring in. 0 when ADefault
+      is ABranch's upstream or ABranch's own name on the remote (the
+      sync line counts that, and a pull brings it in), or when git
+      cannot tell. }
+    function BehindDefault(const ABranch, ADefault: string): integer;
+    {** Whether the tip of the local branch ABranch's upstream is reached
+      from one of the branch's newest reflog entries, as push
+      --force-if-includes asks: the upstream holds nothing the branch
+      never had, so a branch that has moved away from it was rewritten
+      here, and no one else pushed to it since the last fetch. False
+      without an upstream or a reflog. }
+    function UpstreamInReflog(const ABranch: string): boolean;
+    {** How many commits HEAD reaches that no remote-tracking branch
+      does (as of the last fetch): what a push of a branch new on the
+      remote would bring there. -1 when git cannot tell. }
+    function NotOnRemotes: integer;
     {** The merge base of ARef and HEAD, the commit the branch left ARef
       at; false when either is unknown or they share no history. }
     function MergeBase(const ARef: string; out AHash: string): boolean;
@@ -1112,7 +1143,7 @@ implementation
 
 uses
   {$ifdef unix}BaseUnix,{$endif}
-  Process, Pipes, md5, StrUtils, DateUtils;
+  Process, Pipes, md5, StrUtils, DateUtils, gittan.textfile;
 
 { ---------------------------------------------------------------------------
   The environment
@@ -1736,16 +1767,20 @@ end;
   order: a pre-push hook's output (husky's "pre-push script failed", the
   tests it ran) is on stdout, git's own "failed to push some refs" on
   stderr, and either alone says little. Progress is read as the terminal
-  last showed it. AOutput is emptied. }
+  last showed it. Blank space is trimmed but not an escape sequence (a
+  hook's color) at the start, which Trim would cut the ESC of. AOutput
+  is emptied. }
 procedure JoinFailure(var AOutput, AError: string);
+const
+  Blank: array[0..3] of char = (' ', #9, #10, #13);
 begin
-  AError := Trim(ResolveReturns(AError));
-  AOutput := ResolveReturns(AOutput);
-  if Trim(AOutput) <> '' then
+  AError := ResolveReturns(AError).Trim(Blank);
+  AOutput := ResolveReturns(AOutput).Trim(Blank);
+  if AOutput <> '' then
     if AError = '' then
-      AError := Trim(AOutput)
+      AError := AOutput
     else
-      AError := Trim(AOutput) + LineEnding + AError;
+      AError := AOutput + LineEnding + AError;
   AOutput := '';
 end;
 
@@ -5293,6 +5328,14 @@ begin
   if not MergeBase(ASnap.DefaultBranch, ASnap.MergeBase) then
     ASnap.MergeBase := '';
   ASnap.HasUpstream := AheadBehind(ASnap.Ahead, ASnap.Behind);
+  if not ASnap.Detached then
+    ASnap.BehindDefault := BehindDefault(ASnap.Branch, ASnap.DefaultBranch);
+  if ASnap.HasUpstream or ASnap.Detached or (RemoteFor('') = '') then
+    ASnap.NotOnRemote := -1
+  else
+    ASnap.NotOnRemote := NotOnRemotes;
+  ASnap.Rewritten := ASnap.HasUpstream and not ASnap.Detached and (ASnap.Ahead > 0) and
+    (ASnap.Behind > 0) and UpstreamInReflog(ASnap.Branch);
   ASnap.Operation := Operation;
   if ASnap.Operation = 'rebasing' then
     ASnap.RebaseBranch := RebaseBranch;
@@ -5325,6 +5368,56 @@ begin
     if HasCommit(Remote + '/' + Name) then
       Exit(Remote + '/' + Name);
   Result := '';
+end;
+
+function TGittanRepo.BehindDefault(const ABranch, ADefault: string): integer;
+var
+  Remote, Name: string;
+begin
+  Result := 0;
+  if (FRoot = '') or (ABranch = '') or (ADefault = '') or (Upstream(ABranch) = ADefault) or
+    (SplitRemoteRef(ADefault, Remote, Name) and (Name = ABranch)) then
+    Exit;
+  Result := CountCommits('HEAD', ADefault);
+  if Result < 0 then
+    Result := 0;
+end;
+
+function TGittanRepo.NotOnRemotes: integer;
+var
+  Output: string;
+begin
+  if (FRoot = '') or not RunGit(FRoot, ['rev-list', '--count', 'HEAD', '--not', '--remotes'],
+    Output) or not TryStrToInt(Trim(Output), Result) then
+    Result := -1;
+end;
+
+{ The upstream's commits none of the entries reach are counted: none
+  means one of them reaches the tip. The newest entries are enough, and
+  keep the command line short. }
+function TGittanRepo.UpstreamInReflog(const ABranch: string): boolean;
+const
+  MaxEntries = 100;
+var
+  Up, Output: string;
+  Args: array of string;
+  Hash: string;
+begin
+  Result := False;
+  if (FRoot = '') or (ABranch = '') or
+    not RunGit(FRoot, ['rev-parse', '--verify', '-q', ABranch + '@{upstream}'], Up) then
+    Exit;
+  Up := Trim(Up);
+  if (Up = '') or not RunGit(FRoot, ['reflog', 'show', '-n', IntToStr(MaxEntries),
+    '--format=%H', 'refs/heads/' + ABranch, '--'], Output) then
+    Exit;
+  Args := ['rev-list', '--count', Up, '--not'];
+  for Hash in Output.Split([#10]) do
+    if Trim(Hash) <> '' then
+      Insert(Trim(Hash), Args, Length(Args));
+  if Length(Args) = 4 then
+    Exit;
+  Result := RunGit(FRoot, Args, Output) and (Trim(Output) = '0');
 end;
 
 function TGittanRepo.MergeBase(const ARef: string; out AHash: string): boolean;
@@ -5394,7 +5487,8 @@ end;
 { The fields are split at unit separators, the subject last since it
   may hold anything. The commits not pushed are the newest of those on
   HEAD and not on the upstream: at most AMax of them, in the same order
-  as the log, so every one of them in the log's first AMax is found. }
+  as the log, so every one of them in the log's first AMax is found.
+  Without an upstream they are those on no remote, when there is one. }
 function TGittanRepo.RecentCommits(out ACommits: TGittanCommitLines;
   AMax: integer): boolean;
 var
@@ -5410,7 +5504,9 @@ begin
   if not Result then
     Exit;
   if not RunGit(FRoot, ['rev-list', '-n', IntToStr(AMax), '@{upstream}..HEAD'], Ahead) then
-    Ahead := '';
+    if (RemoteFor('') = '') or not RunGit(FRoot, ['rev-list', '-n', IntToStr(AMax), 'HEAD',
+      '--not', '--remotes'], Ahead) then
+      Ahead := '';
   Lines := TStringList.Create;
   try
     Lines.Text := Output;
@@ -5788,7 +5884,6 @@ end;
 function TGittanRepo.FileBlob(const APath, ARef: string; out AData: RawByteString): boolean;
 var
   Output: string;
-  Stream: TFileStream;
 begin
   AData := '';
   if (FRoot = '') or (APath = '') then
@@ -5804,14 +5899,7 @@ begin
   if not Result then
     Exit;
   try
-    Stream := TFileStream.Create(FullPath(APath), fmOpenRead or fmShareDenyNone);
-    try
-      SetLength(AData, Stream.Size);
-      if Length(AData) > 0 then
-        Stream.ReadBuffer(AData[1], Length(AData));
-    finally
-      Stream.Free;
-    end;
+    AData := ReadFileBytes(FullPath(APath));
   except
     AData := '';
     Result := False;

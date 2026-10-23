@@ -30,11 +30,21 @@ function ColorLuminance(C: TColor): double;
   bright is returned as is. System colors are not RGB and are left alone. }
 function LightenForDark(AColor: TColor): TColor;
 
+{** AFrom moved AWeight of the way to ATo, 0 to 1, channel by channel;
+  system colors are resolved first. }
+function MixColor(AFrom, ATo: TColor; AWeight: double): TColor;
+
+{** AValue, a length in pixels at 96 DPI, at the screen's DPI, for the
+  controls that paint themselves: their text comes in the scaled font,
+  so their rows, margins and icons have to grow with it. Cocoa reports
+  96 whatever the display, so this is AValue on macOS and at 100 %. }
+function Px(AValue: integer): integer;
+
 implementation
 
 uses
   {$IFDEF LCLWin32}uDarkStyleParams,{$ENDIF}
-  LCLType, Themes;
+  LCLType, Themes, Forms;
 
 { Black and the lexers' other dark colors are blended toward white until
   they reach this brightness. The editor's dark text color sits at 224, so
@@ -81,6 +91,22 @@ begin
     Exit;
   K := (DarkTextLuminance - Lum) / (255 - Lum);
   Result := RGBToColor(Up(Red(AColor)), Up(Green(AColor)), Up(Blue(AColor)));
+end;
+
+function MixColor(AFrom, ATo: TColor; AWeight: double): TColor;
+var
+  f, t: longint;
+begin
+  f := ColorToRGB(AFrom);
+  t := ColorToRGB(ATo);
+  Result := RGBToColor(Round(Red(f) + (Red(t) - Red(f)) * AWeight),
+    Round(Green(f) + (Green(t) - Green(f)) * AWeight),
+    Round(Blue(f) + (Blue(t) - Blue(f)) * AWeight));
+end;
+
+function Px(AValue: integer): integer;
+begin
+  Result := MulDiv(AValue, Screen.PixelsPerInch, 96);
 end;
 
 end.

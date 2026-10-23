@@ -69,6 +69,9 @@ function IndexCacheDir: string;
 
 implementation
 
+uses
+  gittan.textfile;
+
 const
   { Version 1 kept the whole row of each symbol and could run to tens
     of gigabytes for a minified file; such a file is deleted unread. }
@@ -125,31 +128,6 @@ begin
   AFields.Add(Copy(S, Start, MaxInt));
 end;
 
-function Unescape(const S: string): string;
-var
-  i: integer;
-begin
-  Result := '';
-  i := 1;
-  while i <= Length(S) do
-  begin
-    if (S[i] = '\') and (i < Length(S)) then
-    begin
-      Inc(i);
-      case S[i] of
-        't': Result += #9;
-        'n': Result += #10;
-        'r': Result += #13;
-        else
-          Result += S[i];
-      end;
-    end
-    else
-      Result += S[i];
-    Inc(i);
-  end;
-end;
-
 function FileStamp(const AFileName: string; out ASize, ATime: int64): boolean;
 var
   Info: TSearchRec;
@@ -161,7 +139,9 @@ begin
   if Result then
   begin
     ASize := Info.Size;
-    ATime := Info.Time;
+    { In seconds; Time, the DOS-packed stamp, is deprecated. An index
+      written with it is read once more. }
+    ATime := Round(Info.TimeStamp * SecsPerDay);
     FindClose(Info);
   end;
 end;
@@ -307,7 +287,7 @@ begin
       SplitTabs(Lines[i], Fields);
       if (Fields.Count = 4) and (Fields[0] = 'F') then
       begin
-        E := Add(Unescape(Fields[1]));
+        E := Add(UnescapeC(Fields[1]));
         E.Size := StrToInt64Def(Fields[2], -1);
         E.Time := StrToInt64Def(Fields[3], -1);
         E.Indexed := True;
@@ -320,8 +300,8 @@ begin
         E.Items[n].Row := StrToIntDef(Fields[1], 0);
         E.Items[n].Col := StrToIntDef(Fields[2], 0);
         E.Items[n].Depth := StrToIntDef(Fields[3], 0);
-        E.Items[n].Name := Unescape(Fields[4]);
-        E.Items[n].Line := Unescape(Fields[5]);
+        E.Items[n].Name := UnescapeC(Fields[4]);
+        E.Items[n].Line := UnescapeC(Fields[5]);
       end
       else
       begin

@@ -3,7 +3,8 @@ unit gittan.notice;
 {** A notice: a panel in the middle of the form that says what is going
   on, with the application icon above a title and the last lines of a
   detail text under it, such as what a pre-push hook writes while it
-  runs, or why a push failed. Like the popup list and the commit graph
+  runs, or why a push or a commit failed, drawn by a TGittanConsole
+  with the colors the hook asks for. Like the popup list and the commit graph
   it is a child of the form, placed over whatever the form shows; unlike
   them it takes no focus, so a commit message being typed goes on, and
   it stays when the application goes to the background, so a long hook
@@ -22,7 +23,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Controls, Graphics, Forms, ExtCtrls, LCLType,
-  LCLVersion, LMessages;
+  gittan.console, gittan.popuphook;
 
 type
   {** How the notice's title is colored. }
@@ -41,35 +42,28 @@ type
     FDots: integer;
     FIcon: TIcon;
     FIconBitmap: TBitmap;
-    FDetailFont: TFont;
+    FConsole: TGittanConsole;
     FBack, FText, FDim, FHover, FLine, FAccent, FBad: TColor;
     FCloseRect: TRect;
     FTimer: TTimer;
-    FLines: TStringArray;
-    { The first detail line in view, and how many fit. }
-    FTop, FShown: integer;
+    { How many detail lines fit. }
+    FShown: integer;
     FButtons: TStringArray;
     FButtonRects: array of TRect;
     FHotButton: integer;
     FOnButton: TGittanNoticeButtonEvent;
+    FHook: TGittanPopupHook;
     procedure SetCloseHot(AValue: boolean);
     procedure SetHotButton(AValue: integer);
     procedure SetTitle(const AValue: string);
     procedure SetDetail(const AValue: string);
     procedure SetBusy(AValue: boolean);
     procedure TimerTimer(Sender: TObject);
-    procedure TakeLines;
     function MaxShown: integer;
     function ButtonAt(X, Y: integer): integer;
-    procedure ScrollTo(ATop: integer);
+    function GetDetailFont: TFont;
+    function GetPlainDetail: string;
     procedure Place;
-    function Owns(AControl: TControl): boolean;
-    {$IF lcl_fullversion >= 4990000}
-    procedure UserInput(Sender: TObject; var Message: TLMessage);
-    {$ELSE}
-    procedure UserInput(Sender: TObject; Msg: cardinal);
-    {$ENDIF}
-    procedure Hook(AOn: boolean);
   protected
     procedure Paint; override;
     procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
@@ -98,19 +92,22 @@ type
     {** Keeps it in the middle when the parent is resized. }
     procedure Recenter;
     property Title: string read FTitle write SetTitle;
-    {** The text whose last lines are shown, as a terminal shows it. }
+    {** The text whose last lines are shown, as a terminal shows it,
+      with its colors. }
     property Detail: string read FDetail write SetDetail;
+    {** Detail without its escape sequences, for the clipboard. }
+    property PlainDetail: string read GetPlainDetail;
     property Busy: boolean read FBusy write SetBusy;
     property Kind: TGittanNoticeKind read FKind;
     {** The detail's font: the editor's, so a hook's output lines up. }
-    property DetailFont: TFont read FDetailFont;
+    property DetailFont: TFont read GetDetailFont;
     property OnButton: TGittanNoticeButtonEvent read FOnButton write FOnButton;
   end;
 
 implementation
 
 uses
-  Math, LCLIntf, gittan.textfit;
+  Math, LCLIntf, gittan.theme;
 
 const
   Pad = 24;
@@ -127,17 +124,20 @@ const
   ButtonPadX = 14;
   ButtonPadY = 6;
   ButtonGap = 8;
-  ScrollBarWidth = 4;
 
 { TGittanNotice }
 
 constructor TGittanNotice.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  { Unlike the lists, the notice stays up when Gittan goes to the
+    background. }
+  FHook := TGittanPopupHook.Create(Self, @Close, False);
   ControlStyle := ControlStyle + [csOpaque];
   Visible := False;
-  FDetailFont := TFont.Create;
-  FDetailFont.Assign(Font);
+  FConsole := TGittanConsole.Create(Self);
+  FConsole.Parent := Self;
+  FConsole.Visible := False;
   FTimer := TTimer.Create(Self);
   FTimer.Enabled := False;
   FTimer.Interval := DotPause;
@@ -149,9 +149,8 @@ end;
 
 destructor TGittanNotice.Destroy;
 begin
-  Hook(False);
+  FHook.Hook(False);
   FIconBitmap.Free;
-  FDetailFont.Free;
   inherited Destroy;
 end;
 
@@ -172,7 +171,18 @@ begin
   FAccent := AAccent;
   FBad := ABad;
   Color := ABack;
+  FConsole.SetColors(ABack, AText, ALine);
   Invalidate;
+end;
+
+function TGittanNotice.GetDetailFont: TFont;
+begin
+  Result := FConsole.Font;
+end;
+
+function TGittanNotice.GetPlainDetail: string;
+begin
+  Result := FConsole.PlainText;
 end;
 
 procedure TGittanNotice.SetTitle(const AValue: string);
@@ -188,7 +198,7 @@ begin
   if FDetail = AValue then
     Exit;
   FDetail := AValue;
-  TakeLines;
+  FConsole.Text := AValue;
   if Visible then
     Place;
   Invalidate;
@@ -199,6 +209,7 @@ begin
   if FBusy = AValue then
     Exit;
   FBusy := AValue;
+  FConsole.FollowEnd := AValue;
   FTimer.Enabled := AValue and Visible;
   if Visible then
     Place;
@@ -219,29 +230,6 @@ begin
     Result := ReportLines;
 end;
 
-{ The detail's lines, trailing blank ones left out; the view is at the
-  end, where a failure says what went wrong. }
-procedure TGittanNotice.TakeLines;
-var
-  Last: integer;
-begin
-  FLines := FDetail.Split([#10]);
-  Last := High(FLines);
-  while (Last >= 0) and (Trim(FLines[Last]) = '') do
-    Dec(Last);
-  SetLength(FLines, Last + 1);
-  FTop := MaxInt;
-end;
-
-procedure TGittanNotice.ScrollTo(ATop: integer);
-begin
-  ATop := Max(0, Min(ATop, Length(FLines) - FShown));
-  if ATop = FTop then
-    Exit;
-  FTop := ATop;
-  Invalidate;
-end;
-
 procedure TGittanNotice.Popup(const ATitle, ADetail: string; ABusy: boolean;
   AKind: TGittanNoticeKind);
 begin
@@ -252,13 +240,15 @@ begin
   FButtons := nil;
   FHotButton := -1;
   FCloseHot := False;
-  TakeLines;
+  { The view is at the end, where a failure says what went wrong. }
+  FConsole.Text := ADetail;
+  FConsole.FollowEnd := ABusy;
   Place;
   Visible := True;
   BringToFront;
   FTimer.Enabled := ABusy;
   Invalidate;
-  Hook(True);
+  FHook.Hook(True);
 end;
 
 procedure TGittanNotice.SetButtons(const ACaptions: array of string);
@@ -278,7 +268,7 @@ procedure TGittanNotice.Close;
 begin
   if not Visible then
     Exit;
-  Hook(False);
+  FHook.Hook(False);
   FTimer.Enabled := False;
   Visible := False;
 end;
@@ -291,92 +281,53 @@ end;
 
 { In the middle of the parent, as wide as it allows up to BusyWidth or
   ReportWidth, as high as the icon, the title, the detail lines and the
-  buttons need; the lines that do not fit are scrolled to. }
+  buttons need; the console under the title scrolls the lines that do
+  not fit. }
 procedure TGittanNotice.Place;
 var
-  W, H, TitleHeight, LineHeight, ButtonHeight, Room, X, i: integer;
+  W, H, TitleHeight, LineHeight, ButtonHeight, Room, X, i, DetailTop: integer;
 begin
   if Parent = nil then
     Exit;
   if FBusy then
-    W := BusyWidth
+    W := Px(BusyWidth)
   else
-    W := ReportWidth;
-  W := Max(240, Min(W, Parent.ClientWidth - 2 * Margin));
+    W := Px(ReportWidth);
+  W := Max(240, Min(W, Parent.ClientWidth - 2 * Px(Margin)));
   Canvas.Font := Font;
-  ButtonHeight := Canvas.TextHeight('Xg') + 2 * ButtonPadY;
+  ButtonHeight := Canvas.TextHeight('Xg') + 2 * Px(ButtonPadY);
   Canvas.Font.Style := [fsBold];
   Canvas.Font.Size := Max(Font.Size, 13) + 1;
   TitleHeight := Canvas.TextHeight('Xg');
-  Canvas.Font := FDetailFont;
+  Canvas.Font := FConsole.Font;
   LineHeight := Max(1, Canvas.TextHeight('Xg'));
-  H := 2 * Pad + TitleHeight;
+  H := 2 * Px(Pad) + TitleHeight;
   if (FIcon <> nil) and not FIcon.Empty then
-    Inc(H, IconSize + Gap);
+    Inc(H, Px(IconSize) + Px(Gap));
+  DetailTop := H - Px(Pad) + Px(Gap);
   if Length(FButtons) > 0 then
-    Inc(H, Gap + ButtonHeight);
-  Room := Parent.ClientHeight - 2 * Margin - H - Gap;
-  FShown := Max(0, Min(Min(Length(FLines), MaxShown), Room div LineHeight));
+    Inc(H, Px(Gap) + ButtonHeight);
+  Room := Parent.ClientHeight - 2 * Px(Margin) - H - Px(Gap);
+  FShown := Max(0, Min(Min(FConsole.LineCount, MaxShown), Room div LineHeight));
   if FShown > 0 then
-    Inc(H, Gap + FShown * LineHeight);
+    Inc(H, Px(Gap) + FShown * LineHeight);
   SetBounds((Parent.ClientWidth - W) div 2, (Parent.ClientHeight - H) div 2, W, H);
-  FTop := Max(0, Min(FTop, Length(FLines) - FShown));
-  if FBusy then
-    FTop := Max(0, Length(FLines) - FShown);
-  FCloseRect := Rect(W - Pad - CloseSize + 10, Pad - CloseSize div 2 - 2,
-    W - Pad + 10, Pad + CloseSize div 2 - 2);
+  { The bar goes in the right padding, as far in as the close button. }
+  FConsole.SetBounds(Px(Pad), DetailTop, W - Px(Pad) - Px(Pad) div 2, FShown * LineHeight);
+  FConsole.Visible := FShown > 0;
+  FCloseRect := Rect(W - Px(Pad) - Px(CloseSize) + 10, Px(Pad) - Px(CloseSize) div 2 - 2,
+    W - Px(Pad) + 10, Px(Pad) + Px(CloseSize) div 2 - 2);
   { The buttons from the right: the first, the default, at the right
     end, as macOS places it. }
   SetLength(FButtonRects, Length(FButtons));
   Canvas.Font := Font;
-  X := W - Pad;
+  X := W - Px(Pad);
   for i := 0 to High(FButtons) do
   begin
-    FButtonRects[i] := Rect(X - Canvas.TextWidth(FButtons[i]) - 2 * ButtonPadX,
-      H - Pad - ButtonHeight, X, H - Pad);
-    X := FButtonRects[i].Left - ButtonGap;
+    FButtonRects[i] := Rect(X - Canvas.TextWidth(FButtons[i]) - 2 * Px(ButtonPadX),
+      H - Px(Pad) - ButtonHeight, X, H - Px(Pad));
+    X := FButtonRects[i].Left - Px(ButtonGap);
   end;
-end;
-
-function TGittanNotice.Owns(AControl: TControl): boolean;
-begin
-  Result := False;
-  while AControl <> nil do
-  begin
-    if AControl = Self then
-      Exit(True);
-    AControl := AControl.Parent;
-  end;
-end;
-
-{ A mouse button pressed outside closes the notice. Cocoa passes a stale
-  message here, so the buttons are asked as well. }
-{$IF lcl_fullversion >= 4990000}
-procedure TGittanNotice.UserInput(Sender: TObject; var Message: TLMessage);
-var
-  Msg: cardinal;
-begin
-  Msg := Message.msg;
-{$ELSE}
-procedure TGittanNotice.UserInput(Sender: TObject; Msg: cardinal);
-begin
-{$ENDIF}
-  if not Visible then
-    Exit;
-  if (Sender is TControl) and Owns(TControl(Sender)) then
-    Exit;
-  if (Msg = LM_LBUTTONDOWN) or (Msg = LM_RBUTTONDOWN) or (Msg = LM_MBUTTONDOWN) or
-    (GetKeyState(VK_LBUTTON) < 0) or (GetKeyState(VK_RBUTTON) < 0) or
-    (GetKeyState(VK_MBUTTON) < 0) then
-    Close;
-end;
-
-procedure TGittanNotice.Hook(AOn: boolean);
-begin
-  if AOn then
-    Application.AddOnUserInputHandler(@UserInput, True)
-  else
-    Application.RemoveOnUserInputHandler(@UserInput);
 end;
 
 function TGittanNotice.ButtonAt(X, Y: integer): integer;
@@ -443,16 +394,14 @@ end;
 function TGittanNotice.DoMouseWheel(Shift: TShiftState; WheelDelta: integer;
   MousePos: TPoint): boolean;
 begin
+  { Over the title or the buttons: the console scrolls. }
   Result := True;
-  if FBusy or (Length(FLines) <= FShown) then
-    Exit;
-  ScrollTo(FTop - Sign(WheelDelta) * Max(1, Abs(WheelDelta) div 40));
+  FConsole.Wheel(WheelDelta);
 end;
 
 procedure TGittanNotice.Paint;
 var
-  X, Y, LineHeight, i, BarTop, BarHeight: integer;
-  Line: string;
+  X, Y, i: integer;
 begin
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := FBack;
@@ -460,7 +409,7 @@ begin
   Canvas.Pen.Color := FLine;
   Canvas.Brush.Style := bsClear;
   Canvas.Rectangle(0, 0, Width, Height);
-  Y := Pad;
+  Y := Px(Pad);
 
   if (FIcon <> nil) and not FIcon.Empty then
   begin
@@ -470,13 +419,13 @@ begin
     if FIconBitmap = nil then
     begin
       FIcon.Current := FIcon.GetBestIndexForSize(
-        Size(Round(IconSize * GetCanvasScaleFactor), Round(IconSize * GetCanvasScaleFactor)));
+        Size(Round(Px(IconSize) * GetCanvasScaleFactor), Round(Px(IconSize) * GetCanvasScaleFactor)));
       FIconBitmap := TBitmap.Create;
       FIconBitmap.LoadFromRawImage(FIcon.RawImage, False);
     end;
-    Canvas.StretchDraw(Rect((Width - IconSize) div 2, Y, (Width + IconSize) div 2,
-      Y + IconSize), FIconBitmap);
-    Inc(Y, IconSize + Gap);
+    Canvas.StretchDraw(Rect((Width - Px(IconSize)) div 2, Y, (Width + Px(IconSize)) div 2,
+      Y + Px(IconSize)), FIconBitmap);
+    Inc(Y, Px(IconSize) + Px(Gap));
   end;
 
   { The dots follow the title without moving it. }
@@ -491,30 +440,6 @@ begin
   Canvas.TextOut(X, Y, FTitle);
   if FBusy then
     Canvas.TextOut(X + Canvas.TextWidth(FTitle), Y, StringOfChar('.', FDots));
-  Inc(Y, Canvas.TextHeight('Xg') + Gap);
-
-  Canvas.Font := FDetailFont;
-  Canvas.Font.Color := FText;
-  LineHeight := Max(1, Canvas.TextHeight('Xg'));
-  for i := FTop to Min(High(FLines), FTop + FShown - 1) do
-  begin
-    Line := FitTextRight(Canvas, FLines[i], Width - 2 * Pad);
-    Canvas.TextOut(Pad, Y + (i - FTop) * LineHeight, Line);
-  end;
-  { A thin bar at the right says where the lines in view are. }
-  if (FShown > 0) and (Length(FLines) > FShown) then
-  begin
-    BarHeight := Max(12, FShown * LineHeight * FShown div Length(FLines));
-    BarTop := Y + (FShown * LineHeight - BarHeight) * FTop div
-      Max(1, Length(FLines) - FShown);
-    Canvas.Pen.Style := psClear;
-    Canvas.Brush.Style := bsSolid;
-    Canvas.Brush.Color := FLine;
-    Canvas.RoundRect(Width - Pad div 2 - ScrollBarWidth, BarTop, Width - Pad div 2,
-      BarTop + BarHeight, ScrollBarWidth, ScrollBarWidth);
-    Canvas.Pen.Style := psSolid;
-    Canvas.Brush.Style := bsClear;
-  end;
 
   Canvas.Font := Font;
   for i := 0 to High(FButtons) do
@@ -539,7 +464,7 @@ begin
       end;
       Canvas.RoundRect(Left, Top, Right, Bottom, 8, 8);
       Canvas.Brush.Style := bsClear;
-      Canvas.TextOut(Left + ButtonPadX, Top + ButtonPadY, FButtons[i]);
+      Canvas.TextOut(Left + Px(ButtonPadX), Top + Px(ButtonPadY), FButtons[i]);
     end;
   end;
 

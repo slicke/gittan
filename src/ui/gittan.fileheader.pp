@@ -70,6 +70,8 @@ type
     function ActionAt(X, Y: integer): integer;
     procedure SetHot(AValue: integer);
   protected
+    procedure DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+      const AXProportion, AYProportion: double); override;
     procedure Paint; override;
     procedure VisibleChanged; override;
     procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
@@ -92,6 +94,9 @@ type
     {** Shows "staged" or "partly staged" before the counts, or nothing
       when AStaged is false. }
     procedure SetStage(AStaged, AUnstaged: boolean);
+    {** A dim detail in the stage's place, where a file of a commit
+      names its commit; '' for none. SetFile and SetTitle clear it. }
+    procedure SetDetail(const ADetail: string);
     {** The lexer name shown on the right. }
     procedure SetLexer(const ALexer: string);
     {** The symbol the caret is in, shown dimmed after the file name, or
@@ -157,7 +162,7 @@ type
 implementation
 
 uses
-  gittan.textfit;
+  gittan.textfit, gittan.theme, gittan.statusbar, Forms;
 
 resourcestring
   rsBinary = 'binary';
@@ -180,25 +185,13 @@ const
   HitMenu = -3;
   ChevronWidth = 12;
 
-{ AFrom moved AWeight of the way to ATo. }
-function Mix(AFrom, ATo: TColor; AWeight: double): TColor;
-var
-  f, t: longint;
-begin
-  f := ColorToRGB(AFrom);
-  t := ColorToRGB(ATo);
-  Result := RGBToColor(Round(Red(f) + (Red(t) - Red(f)) * AWeight),
-    Round(Green(f) + (Green(t) - Green(f)) * AWeight),
-    Round(Blue(f) + (Blue(t) - Blue(f)) * AWeight));
-end;
-
 { TGittanFileHeader }
 
 constructor TGittanFileHeader.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
   ControlStyle := ControlStyle + [csOpaque];
-  Height := HeaderHeight;
+  Height := Px(HeaderHeight);
   FIcon := -1;
   FHot := -1;
   FPressed := -1;
@@ -206,25 +199,25 @@ begin
   ShowHint := True;
   FNav := TGittanChangeNav.Create(Self);
   FNav.Parent := Self;
-  FNav.Height := NavHeight;
+  FNav.Height := Px(NavHeight);
   FNav.Anchors := [akRight, akTop];
   FNav.AnchorSideRight.Control := Self;
   FNav.AnchorSideRight.Side := asrRight;
   FNav.AnchorSideTop.Control := Self;
   FNav.AnchorSideTop.Side := asrCenter;
-  FNav.BorderSpacing.Right := Pad - 2;
+  FNav.BorderSpacing.Right := Px(Pad) - 2;
   FNav.Visible := False;
   { Left of the change navigator; a file with conflicts has changes, so
     the one it is anchored to is shown whenever it is. }
   FConflictNav := TGittanChangeNav.Create(Self);
   FConflictNav.Parent := Self;
-  FConflictNav.Height := NavHeight;
+  FConflictNav.Height := Px(NavHeight);
   FConflictNav.Anchors := [akRight, akTop];
   FConflictNav.AnchorSideRight.Control := FNav;
   FConflictNav.AnchorSideRight.Side := asrLeft;
   FConflictNav.AnchorSideTop.Control := Self;
   FConflictNav.AnchorSideTop.Side := asrCenter;
-  FConflictNav.BorderSpacing.Right := Gap div 2;
+  FConflictNav.BorderSpacing.Right := Px(Gap) div 2;
   FConflictNav.Visible := False;
   SetColors(clWindow, clWindowText, clGrayText, clGreen, clRed, clBtnShadow);
   SetPillColors(clBtnFace, clBtnShadow, clHighlight);
@@ -266,6 +259,14 @@ begin
     FStage := rsPartlyStaged
   else
     FStage := rsStaged;
+  Invalidate;
+end;
+
+procedure TGittanFileHeader.SetDetail(const ADetail: string);
+begin
+  if FStage = ADetail then
+    Exit;
+  FStage := ADetail;
   Invalidate;
 end;
 
@@ -555,7 +556,7 @@ var
     Canvas.Font.Color := AColor;
     Dec(Right, Canvas.TextWidth(AText));
     Canvas.TextOut(Right, TextY, AText);
-    Dec(Right, Gap);
+    Dec(Right, Px(Gap));
   end;
 
 begin
@@ -568,25 +569,25 @@ begin
   Canvas.Font := Font;
   Canvas.Brush.Style := bsClear;
   TextY := (Height - 1 - Canvas.TextHeight('Xg')) div 2;
-  Right := Width - Pad;
+  Right := Width - Px(Pad);
   if FNav.Visible then
-    Dec(Right, FNav.Width + Gap);
+    Dec(Right, FNav.Width + Px(Gap));
   if FConflictNav.Visible then
-    Dec(Right, FConflictNav.Width + Gap div 2);
+    Dec(Right, FConflictNav.Width + Px(Gap) div 2);
   { The pills, the last one rightmost. }
-  PillTop := (Height - 1 - PillHeight) div 2;
+  PillTop := (Height - 1 - Px(PillHeight)) div 2;
   for i := High(FActions) downto 0 do
   begin
     if not FShowControls then
       Break;
-    W := Canvas.TextWidth(FActions[i]) + 2 * PillPad;
-    R := Rect(Right - W, PillTop, Right, PillTop + PillHeight);
+    W := Canvas.TextWidth(FActions[i]) + 2 * Px(PillPad);
+    R := Rect(Right - W, PillTop, Right, PillTop + Px(PillHeight));
     FActionRects[i] := R;
     Canvas.Pen.Color := FBorder;
     Canvas.Pen.Width := 1;
     Canvas.Brush.Style := bsSolid;
     Canvas.Brush.Color := FFill;
-    Canvas.RoundRect(R.Left, R.Top, R.Right, R.Bottom, PillHeight, PillHeight);
+    Canvas.RoundRect(R.Left, R.Top, R.Right, R.Bottom, Px(PillHeight), Px(PillHeight));
     Canvas.Brush.Style := bsClear;
     if not FActionsEnabled[i] then
       Canvas.Font.Color := FDim
@@ -594,64 +595,63 @@ begin
       Canvas.Font.Color := FHotColor
     else
       Canvas.Font.Color := FText;
-    Canvas.TextOut(R.Left + PillPad, TextY, FActions[i]);
+    Canvas.TextOut(R.Left + Px(PillPad), TextY, FActions[i]);
     Right := R.Left;
     if i = 0 then
-      Dec(Right, Gap)
+      Dec(Right, Px(Gap))
     else
-      Dec(Right, PillGap);
+      Dec(Right, Px(PillGap));
   end;
   { The toggle, tinted in the accent while it is on. }
   FToggleRect := Rect(0, 0, 0, 0);
   if FToggle <> '' then
   begin
-    W := Canvas.TextWidth(FToggle) + 2 * PillPad;
-    R := Rect(Right - W, PillTop, Right, PillTop + PillHeight);
+    W := Canvas.TextWidth(FToggle) + 2 * Px(PillPad);
+    R := Rect(Right - W, PillTop, Right, PillTop + Px(PillHeight));
     FToggleRect := R;
     Canvas.Pen.Width := 1;
     Canvas.Brush.Style := bsSolid;
     if FToggleOn then
     begin
       Canvas.Pen.Color := FHotColor;
-      Canvas.Brush.Color := Mix(FFill, FHotColor, 0.18);
+      Canvas.Brush.Color := MixColor(FFill, FHotColor, 0.18);
     end
     else
     begin
       Canvas.Pen.Color := FBorder;
       Canvas.Brush.Color := FFill;
     end;
-    Canvas.RoundRect(R.Left, R.Top, R.Right, R.Bottom, PillHeight, PillHeight);
+    Canvas.RoundRect(R.Left, R.Top, R.Right, R.Bottom, Px(PillHeight), Px(PillHeight));
     Canvas.Brush.Style := bsClear;
     if FToggleOn or (FPressed = HitToggle) or ((FPressed = -1) and (FHot = HitToggle)) then
       Canvas.Font.Color := FHotColor
     else
       Canvas.Font.Color := FText;
-    Canvas.TextOut(R.Left + PillPad, TextY, FToggle);
-    Right := R.Left - Gap;
+    Canvas.TextOut(R.Left + Px(PillPad), TextY, FToggle);
+    Right := R.Left - Px(Gap);
   end;
   { The menu chip: a pill with a chevron after its caption. }
   FMenuRect := Rect(0, 0, 0, 0);
   if (FMenu <> '') and Assigned(FOnMenu) then
   begin
-    W := Canvas.TextWidth(FMenu) + 2 * PillPad + ChevronWidth;
-    R := Rect(Right - W, PillTop, Right, PillTop + PillHeight);
+    W := Canvas.TextWidth(FMenu) + 2 * Px(PillPad) + Px(ChevronWidth);
+    R := Rect(Right - W, PillTop, Right, PillTop + Px(PillHeight));
     FMenuRect := R;
     Canvas.Pen.Width := 1;
     Canvas.Pen.Color := FBorder;
     Canvas.Brush.Style := bsSolid;
     Canvas.Brush.Color := FFill;
-    Canvas.RoundRect(R.Left, R.Top, R.Right, R.Bottom, PillHeight, PillHeight);
+    Canvas.RoundRect(R.Left, R.Top, R.Right, R.Bottom, Px(PillHeight), Px(PillHeight));
     Canvas.Brush.Style := bsClear;
     if (FPressed = HitMenu) or ((FPressed = -1) and (FHot = HitMenu)) then
       Canvas.Font.Color := FHotColor
     else
       Canvas.Font.Color := FText;
-    Canvas.TextOut(R.Left + PillPad, TextY, FMenu);
-    i := R.Right - PillPad - ChevronWidth div 2 + 2;
+    Canvas.TextOut(R.Left + Px(PillPad), TextY, FMenu);
+    i := R.Right - Px(PillPad) - Px(ChevronWidth) div 2 + 2;
     W := (R.Top + R.Bottom) div 2;
-    Canvas.Pen.Color := Canvas.Font.Color;
-    Canvas.Polyline([Point(i - 3, W - 1), Point(i, W + 2), Point(i + 3, W - 1)]);
-    Right := R.Left - Gap;
+    DrawChevron(Canvas, i, W, Canvas.Font.Color);
+    Right := R.Left - Px(Gap);
   end;
   DrawRight(FNote, FDeletedColor);
   DrawRight(FLexer, FDim);
@@ -664,7 +664,7 @@ begin
         DrawRight('−' + IntToStr(FDeleted), FDeletedColor)
       else
         DrawRight('−0', FDim);
-      Right := Right + Gap div 2;
+      Right := Right + Px(Gap) div 2;
       if FAdded > 0 then
         DrawRight('+' + IntToStr(FAdded), FAddedColor)
       else
@@ -672,16 +672,16 @@ begin
     end;
   DrawRight(FStage, FDim);
 
-  X := Pad;
+  X := Px(Pad);
   if (FIcon >= 0) and (FImages <> nil) then
   begin
-    FImages.DrawForPPI(Canvas, X, (Height - 1 - IconSize) div 2, FIcon,
-      IconSize, Font.PixelsPerInch, GetCanvasScaleFactor);
-    Inc(X, IconSize + Gap div 2 + 2);
+    FImages.DrawForPPI(Canvas, X, (Height - 1 - Px(IconSize)) div 2, FIcon,
+      IconSize, Screen.PixelsPerInch, GetCanvasScaleFactor);
+    Inc(X, Px(IconSize) + Px(Gap) div 2 + 2);
   end;
   Room := Right - X;
   if FModified then
-    Dec(Room, DotSize + Gap div 2);
+    Dec(Room, Px(DotSize) + Px(Gap) div 2);
   Prefix := FPrefix;
   FileName := FName;
   if Canvas.TextWidth(Prefix + FileName) > Room then
@@ -698,14 +698,14 @@ begin
   Inc(X, Canvas.TextWidth(FileName));
   if FModified then
   begin
-    Inc(X, Gap div 2);
+    Inc(X, Px(Gap) div 2);
     Canvas.Pen.Color := FText;
     Canvas.Brush.Style := bsSolid;
     Canvas.Brush.Color := FText;
-    PillTop := (Height - 1 - DotSize) div 2;
-    Canvas.Ellipse(X, PillTop, X + DotSize, PillTop + DotSize);
+    PillTop := (Height - 1 - Px(DotSize)) div 2;
+    Canvas.Ellipse(X, PillTop, X + Px(DotSize), PillTop + Px(DotSize));
     Canvas.Brush.Style := bsClear;
-    Inc(X, DotSize);
+    Inc(X, Px(DotSize));
   end;
   if FSymbol = '' then
     Exit;
@@ -714,6 +714,24 @@ begin
     Exit;
   Canvas.Font.Color := FDim;
   Canvas.TextOut(X, TextY, S);
+end;
+
+{ The form scales every control by its DPI after FormCreate, this one's
+  height too, which is already the screen's: set it again. }
+procedure TGittanFileHeader.DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+  const AXProportion, AYProportion: double);
+begin
+  inherited DoAutoAdjustLayout(AMode, AXProportion, AYProportion);
+  if AMode = lapAutoAdjustForDPI then
+  begin
+    Height := Px(HeaderHeight);
+    FNav.Height := Px(NavHeight);
+    FNav.BorderSpacing.Right := Px(Pad) - 2;
+    FNav.Refit;
+    FConflictNav.Height := Px(NavHeight);
+    FConflictNav.BorderSpacing.Right := Px(Gap) div 2;
+    FConflictNav.Refit;
+  end;
 end;
 
 end.

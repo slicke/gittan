@@ -8,7 +8,7 @@ unit testgithub;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.github;
+  Classes, SysUtils, DateUtils, fpcunit, testregistry, gittan.github;
 
 type
   TGitHubTest = class(TTestCase)
@@ -28,7 +28,11 @@ const
   OnePull = '{"author":{"id":"U_1","is_bot":false,"login":"ada","name":"Ada"},' +
     '"baseRefName":"main","headRefName":"fix/thing","isDraft":false,"number":12,' +
     '"reviewDecision":"APPROVED","state":"OPEN","title":"Fix the thing",' +
-    '"url":"https://github.com/owner/repo/pull/12"}';
+    '"url":"https://github.com/owner/repo/pull/12",' +
+    '"createdAt":"2026-10-20T12:34:56Z","updatedAt":"2026-10-22T08:00:00Z",' +
+    '"additions":120,"deletions":30,"changedFiles":4,' +
+    '"labels":[{"name":"bug","color":"d73a4a"},{"name":"","color":"ffffff"},' +
+    '{"name":"ui","color":"0075ca"}]}';
 
 procedure TGitHubTest.TestParsePullRequest;
 var
@@ -45,6 +49,12 @@ begin
   AssertEquals('ada', Pull.Author);
   AssertFalse(Pull.IsDraft);
   AssertEquals(0, Pull.ChecksPassed + Pull.ChecksFailed + Pull.ChecksPending);
+  AssertEquals(EncodeDateTime(2026, 10, 20, 12, 34, 56, 0), Pull.Created);
+  AssertEquals(EncodeDateTime(2026, 10, 22, 8, 0, 0, 0), Pull.Updated);
+  AssertEquals(120, Pull.Additions);
+  AssertEquals(30, Pull.Deletions);
+  AssertEquals(4, Pull.ChangedFiles);
+  AssertEquals('bug, ui', Pull.Labels);
 end;
 
 procedure TGitHubTest.TestParsePullRequests;
@@ -61,6 +71,9 @@ begin
   AssertTrue(Pulls[1].IsDraft);
   AssertEquals('', Pulls[1].Author);
   AssertEquals('', Pulls[1].ReviewDecision);
+  AssertEquals(0, Pulls[1].Created);
+  AssertEquals(0, Pulls[1].Additions);
+  AssertEquals('', Pulls[1].Labels);
 end;
 
 procedure TGitHubTest.TestParseBad;

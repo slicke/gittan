@@ -40,6 +40,8 @@ type
     procedure SetDetail(const AValue: string);
     procedure SetExpanded(AValue: boolean);
   protected
+    procedure DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+      const AXProportion, AYProportion: double); override;
     procedure Paint; override;
     procedure MouseEnter; override;
     procedure MouseLeave; override;
@@ -70,6 +72,9 @@ type
 
 implementation
 
+
+uses
+  gittan.theme;
 const
   HeaderHeight = 26;
   Pad = 10;
@@ -82,7 +87,7 @@ constructor TGittanSectionHeader.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
   ControlStyle := ControlStyle + [csOpaque];
-  Height := HeaderHeight;
+  Height := Px(HeaderHeight);
   Cursor := crHandPoint;
   FCheckIndex := -1;
   SetColors(clBtnFace, clWindowText, clGrayText, clBtnFace, clBtnShadow);
@@ -144,30 +149,30 @@ begin
   Canvas.Pen.Width := 1;
   Canvas.Line(0, 0, Width, 0);
   { The chevron: to the right while folded, down while unfolded. }
-  X := Pad + ChevronSize;
+  X := Px(Pad) + Px(ChevronSize);
   Y := Height div 2;
   Canvas.Pen.Color := FDim;
   Canvas.Pen.Width := 2;
   if FExpanded then
   begin
-    Canvas.Line(X - ChevronSize, Y - ChevronSize div 2, X, Y + ChevronSize div 2);
-    Canvas.Line(X, Y + ChevronSize div 2, X + ChevronSize + 1, Y - ChevronSize div 2 - 1);
+    Canvas.Line(X - Px(ChevronSize), Y - Px(ChevronSize) div 2, X, Y + Px(ChevronSize) div 2);
+    Canvas.Line(X, Y + Px(ChevronSize) div 2, X + Px(ChevronSize) + 1, Y - Px(ChevronSize) div 2 - 1);
   end
   else
   begin
-    Canvas.Line(X - ChevronSize div 2, Y - ChevronSize, X + ChevronSize div 2, Y);
-    Canvas.Line(X + ChevronSize div 2, Y, X - ChevronSize div 2 - 1, Y + ChevronSize + 1);
+    Canvas.Line(X - Px(ChevronSize) div 2, Y - Px(ChevronSize), X + Px(ChevronSize) div 2, Y);
+    Canvas.Line(X + Px(ChevronSize) div 2, Y, X - Px(ChevronSize) div 2 - 1, Y + Px(ChevronSize) + 1);
   end;
   Canvas.Pen.Width := 1;
   Canvas.Font := Font;
   Canvas.Brush.Style := bsClear;
   TextY := (Height - Canvas.TextHeight('Xg')) div 2;
-  X := Pad + 2 * ChevronSize + Gap;
+  X := Px(Pad) + 2 * Px(ChevronSize) + Px(Gap);
   { The title is dim and bold, as the Files heading over the tree. }
   Canvas.Font.Style := [fsBold];
   Canvas.Font.Color := FDim;
   Canvas.TextOut(X, TextY, FTitle);
-  Inc(X, Canvas.TextWidth(FTitle) + Gap);
+  Inc(X, Canvas.TextWidth(FTitle) + Px(Gap));
   Canvas.Font.Style := [];
   FCheckRect := Rect(0, 0, 0, 0);
   if (FCheckIndex >= 0) and (FCheckImages <> nil) and
@@ -176,7 +181,7 @@ begin
     FCheckRect := Bounds(X, (Height - FCheckImages.Height) div 2, FCheckImages.Width,
       FCheckImages.Height);
     FCheckImages.Draw(Canvas, FCheckRect.Left, FCheckRect.Top, FCheckIndex);
-    Inc(X, FCheckImages.Width + Gap div 2);
+    Inc(X, FCheckImages.Width + Px(Gap) div 2);
   end;
   if FDetail <> '' then
     Canvas.TextOut(X, TextY, FDetail);
@@ -214,6 +219,16 @@ begin
     if Assigned(FOnToggle) then
       FOnToggle(Self);
   end;
+end;
+
+{ The form scales every control by its DPI after FormCreate, this one's
+  height too, which is already the screen's: set it again. }
+procedure TGittanSectionHeader.DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+  const AXProportion, AYProportion: double);
+begin
+  inherited DoAutoAdjustLayout(AMode, AXProportion, AYProportion);
+  if AMode = lapAutoAdjustForDPI then
+    Height := Px(HeaderHeight);
 end;
 
 end.

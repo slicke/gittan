@@ -297,20 +297,22 @@ function ChooseSubmodule(const ARoot, AFolder: string; const ATaken: TStringArra
   var AUrl, APath, ABranch: string): boolean;
 var
   F: TSubmoduleForm;
-  Clip: string;
+  Clip, Url: string;
 begin
   F := TSubmoduleForm.Create(Screen.ActiveForm);
   try
     F.FRoot := ExcludeTrailingPathDelimiter(ARoot);
     F.FFolder := AFolder;
     F.FTaken := ATaken;
-    if AUrl = '' then
+    { The clipboard only fills the field; AUrl stays as it came on Cancel. }
+    Url := AUrl;
+    if Url = '' then
     begin
       Clip := '';
       if Clipboard.HasFormat(CF_TEXT) then
         Clip := Trim(Clipboard.AsText);
       if LooksLikeCloneUrl(Clip) then
-        AUrl := Clip;
+        Url := Clip;
     end;
     if APath <> '' then
     begin
@@ -318,7 +320,7 @@ begin
       F.FPathTyped := True;
     end;
     F.FBranch.Text := ABranch;
-    F.FUrl.Text := AUrl;
+    F.FUrl.Text := Url;
     F.Check;
     Result := F.ShowModal = mrOK;
     if Result then

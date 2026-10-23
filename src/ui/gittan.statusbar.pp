@@ -108,6 +108,8 @@ type
     procedure HideHint;
     procedure Change(var AField: string; const AValue: string);
   protected
+    procedure DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+      const AXProportion, AYProportion: double); override;
     procedure Paint; override;
     procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
     procedure MouseLeave; override;
@@ -225,10 +227,19 @@ const
 procedure DrawStatusIcon(ACanvas: TCanvas; const AIcon: string; X, Y, ASize: integer;
   AColor: TColor);
 
+{** Fills ARect in AColor with round corners ARadius across and no
+  border, as a hovered chip or row is drawn in the status bar and the
+  summary; the pen is solid and the brush clear again after. }
+procedure FillHover(ACanvas: TCanvas; const ARect: TRect; ARadius: integer; AColor: TColor);
+
+{** The small chevron pointing down, in AColor and centered on CX, CY,
+  that ends a chip dropping a list. }
+procedure DrawChevron(ACanvas: TCanvas; CX, CY: integer; AColor: TColor);
+
 implementation
 
 uses
-  Math, gittan.textfit;
+  Math, gittan.textfit, gittan.theme;
 
 const
   BarHeight = 56;
@@ -290,21 +301,6 @@ begin
   Result := UpperCase(Copy(S, 1, n));
 end;
 
-{ AColor laid over ABack at AAlpha (0 to 1), for the badges' tint. }
-function Blend(AColor, ABack: TColor; AAlpha: double): TColor;
-
-  function Mix(A, B: byte): byte;
-  begin
-    Result := Round(B + (A - B) * AAlpha);
-  end;
-
-begin
-  AColor := ColorToRGB(AColor);
-  ABack := ColorToRGB(ABack);
-  Result := RGBToColor(Mix(Red(AColor), Red(ABack)), Mix(Green(AColor), Green(ABack)),
-    Mix(Blue(AColor), Blue(ABack)));
-end;
-
 { S cut to AWidth on ACanvas with an ellipsis; nothing when not even
   one character fits. }
 function Ellipsize(ACanvas: TCanvas; const S: string; AWidth: integer): string;
@@ -342,6 +338,23 @@ end;
   have the palette's colors and the same weight on every system. ASize
   is the line height; the icon takes a square a little smaller,
   centered. }
+procedure FillHover(ACanvas: TCanvas; const ARect: TRect; ARadius: integer; AColor: TColor);
+begin
+  ACanvas.Pen.Style := psClear;
+  ACanvas.Brush.Style := bsSolid;
+  ACanvas.Brush.Color := AColor;
+  ACanvas.RoundRect(ARect, ARadius, ARadius);
+  ACanvas.Pen.Style := psSolid;
+  ACanvas.Brush.Style := bsClear;
+end;
+
+procedure DrawChevron(ACanvas: TCanvas; CX, CY: integer; AColor: TColor);
+begin
+  ACanvas.Pen.Color := AColor;
+  ACanvas.Pen.Width := 1;
+  ACanvas.Polyline([Point(CX - 3, CY - 1), Point(CX, CY + 2), Point(CX + 3, CY - 1)]);
+end;
+
 procedure DrawStatusIcon(ACanvas: TCanvas; const AIcon: string; X, Y, ASize: integer;
   AColor: TColor);
 var
@@ -558,12 +571,12 @@ begin
       H := Canvas.TextWidth(LineText);
       Canvas.Font.Style := [];
       if LineIcon <> '' then
-        Inc(H, LineH + HintIconGap);
+        Inc(H, LineH + Px(HintIconGap));
       W := Max(W, H);
     end;
     W := Min(W, MaxWidth);
-    H := Lines.Count * LineH + Max(0, Lines.Count - 1) * HintLineGap;
-    Result := Rect(0, 0, W + 2 * HintPad, H + 2 * HintPad);
+    H := Lines.Count * LineH + Max(0, Lines.Count - 1) * Px(HintLineGap);
+    Result := Rect(0, 0, W + 2 * Px(HintPad), H + 2 * Px(HintPad));
   finally
     Lines.Free;
   end;
@@ -585,15 +598,15 @@ begin
     Lines.Text := Caption;
     Canvas.Font := Font;
     LineH := Canvas.TextHeight('Xg');
-    Y := HintPad;
+    Y := Px(HintPad);
     for i := 0 to Lines.Count - 1 do
     begin
       SplitLine(Lines[i], LineIcon, LineText);
-      X := HintPad;
+      X := Px(HintPad);
       if LineIcon <> '' then
       begin
         DrawIcon(LineIcon, X, Y, LineH);
-        Inc(X, LineH + HintIconGap);
+        Inc(X, LineH + Px(HintIconGap));
       end;
       if (i = 0) and (Lines.Count > 1) then
         Canvas.Font.Style := [fsBold]
@@ -602,7 +615,7 @@ begin
       Canvas.Font.Color := FText;
       Canvas.Brush.Style := bsClear;
       Canvas.TextOut(X, Y, LineText);
-      Inc(Y, LineH + HintLineGap);
+      Inc(Y, LineH + Px(HintLineGap));
     end;
   finally
     Lines.Free;
@@ -617,7 +630,7 @@ constructor TGittanStatusBar.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
   ControlStyle := ControlStyle + [csOpaque];
-  Height := BarHeight;
+  Height := Px(BarHeight);
   FTimer := TTimer.Create(Self);
   FTimer.Enabled := False;
   FTimer.OnTimer := @TimerTimer;
@@ -835,12 +848,12 @@ begin
   FHintWindow.FLine := FLine;
   FHintWindow.FTones := FTones;
   FHintWindow.FTones[stNormal] := FDim;
-  R := FHintWindow.CalcHintRect(Max(200, Width - 2 * Pad), Tip, nil);
+  R := FHintWindow.CalcHintRect(Max(200, Width - 2 * Px(Pad)), Tip, nil);
   P := ClientToScreen(Point(FRects[FHot].Left, FRects[FHot].Top));
   Types.OffsetRect(R, P.X, P.Y - R.Bottom - 4);
-  MaxRight := ClientToScreen(Point(Width - Pad, 0)).X;
+  MaxRight := ClientToScreen(Point(Width - Px(Pad), 0)).X;
   if R.Right > MaxRight then
-    Types.OffsetRect(R, Max(ClientToScreen(Point(Pad, 0)).X - R.Left,
+    Types.OffsetRect(R, Max(ClientToScreen(Point(Px(Pad), 0)).X - R.Left,
       MaxRight - R.Right), 0);
   FHintWindow.ActivateHint(R, Tip);
 end;
@@ -880,30 +893,13 @@ var
   { The fill under the mouse, for a part that answers a click. }
   procedure DrawHot(APart: TGittanStatusPart);
   begin
-    if (FHot <> APart) or not Clickable(APart) then
-      Exit;
-    Canvas.Pen.Style := psClear;
-    Canvas.Brush.Style := bsSolid;
-    Canvas.Brush.Color := FHover;
-    Canvas.RoundRect(FRects[APart], 6, 6);
-    Canvas.Pen.Style := psSolid;
-    Canvas.Brush.Style := bsClear;
-  end;
-
-  procedure DrawChevron(AX, AY: integer);
-  var
-    CX, CY: integer;
-  begin
-    CX := AX + ChevronWidth div 2;
-    CY := AY + TextH div 2;
-    Canvas.Pen.Color := FDim;
-    Canvas.Pen.Width := 1;
-    Canvas.Polyline([Point(CX - 3, CY - 1), Point(CX, CY + 2), Point(CX + 3, CY - 1)]);
+    if (FHot = APart) and Clickable(APart) then
+      FillHover(Canvas, FRects[APart], 6, FHover);
   end;
 
   function BadgeWidth(const S: string): integer;
   begin
-    Result := Canvas.TextWidth(S) + 2 * (ChipPadX + 2);
+    Result := Canvas.TextWidth(S) + 2 * (Px(ChipPadX) + 2);
   end;
 
   { A badge: the text in its tone on a tint of it, the corners round. }
@@ -912,27 +908,27 @@ var
   var
     R: TRect;
   begin
-    R := ChipRect(AX, AY - ChipPadY, BadgeWidth(S), TextH + 2 * ChipPadY);
+    R := ChipRect(AX, AY - Px(ChipPadY), BadgeWidth(S), TextH + 2 * Px(ChipPadY));
     FRects[APart] := R;
     Canvas.Pen.Style := psClear;
     Canvas.Brush.Style := bsSolid;
     if (FHot = APart) and Clickable(APart) then
-      Canvas.Brush.Color := Blend(FTones[ATone], FBack, 0.3)
+      Canvas.Brush.Color := MixColor(FBack, FTones[ATone], 0.3)
     else
-      Canvas.Brush.Color := Blend(FTones[ATone], FBack, 0.18);
+      Canvas.Brush.Color := MixColor(FBack, FTones[ATone], 0.18);
     Canvas.RoundRect(R, R.Height, R.Height);
     Canvas.Pen.Style := psSolid;
     Canvas.Brush.Style := bsClear;
     Canvas.Font.Color := FTones[ATone];
-    Canvas.TextOut(AX + ChipPadX + 2, AY, S);
+    Canvas.TextOut(AX + Px(ChipPadX) + 2, AY, S);
   end;
 
   { A dim text, in a chip rectangle for the mouse. }
   procedure DrawText(APart: TGittanStatusPart; AX, AY: integer; const S: string;
     AColor: TColor);
   begin
-    FRects[APart] := ChipRect(AX - ChipPadX, AY - ChipPadY, Canvas.TextWidth(S) +
-      2 * ChipPadX, TextH + 2 * ChipPadY);
+    FRects[APart] := ChipRect(AX - Px(ChipPadX), AY - Px(ChipPadY), Canvas.TextWidth(S) +
+      2 * Px(ChipPadX), TextH + 2 * Px(ChipPadY));
     DrawHot(APart);
     Canvas.Font.Color := AColor;
     Canvas.TextOut(AX, AY, S);
@@ -948,11 +944,11 @@ var
     begin
       { The caption is bold, so it is measured bold. }
       Canvas.Font.Style := [fsBold];
-      Result := 2 * PrimaryPad + IconW + Canvas.TextWidth(FButtons[APart].Caption);
+      Result := 2 * Px(PrimaryPad) + IconW + Canvas.TextWidth(FButtons[APart].Caption);
       Canvas.Font.Style := [];
     end
     else
-      Result := PrimaryHeight;
+      Result := Px(PrimaryHeight);
   end;
 
   { A side button is a circle with the icon in it, filled under the
@@ -968,7 +964,7 @@ var
     B := FButtons[APart];
     if B.Icon = '' then
       Exit;
-    R := ChipRect(AX, AY, ButtonWidth(APart), PrimaryHeight);
+    R := ChipRect(AX, AY, ButtonWidth(APart), Px(PrimaryHeight));
     FRects[APart] := R;
     Hot := (FHot = APart) and Clickable(APart);
     if APart = spPrimary then
@@ -981,9 +977,9 @@ var
           FillColor := FAccent;
       end;
       if Hot then
-        FillColor := Blend(FText, FillColor, 0.12);
+        FillColor := MixColor(FillColor, FText, 0.12);
       if not B.Enabled then
-        FillColor := Blend(FillColor, FBack, 0.5);
+        FillColor := MixColor(FBack, FillColor, 0.5);
       case B.Tone of
         stGood: Ink := FDim;
         stWarn: Ink := RGBToColor(26, 26, 26);
@@ -993,18 +989,18 @@ var
       Canvas.Pen.Style := psClear;
       Canvas.Brush.Style := bsSolid;
       Canvas.Brush.Color := FillColor;
-      Canvas.RoundRect(R, PrimaryHeight, PrimaryHeight);
+      Canvas.RoundRect(R, Px(PrimaryHeight), Px(PrimaryHeight));
       Canvas.Pen.Style := psSolid;
       Canvas.Brush.Style := bsClear;
-      X := AX + PrimaryPad;
+      X := AX + Px(PrimaryPad);
       if B.Tone = stGood then
-        DrawStatusIcon(Canvas, B.Icon, X, AY + (PrimaryHeight - TextH) div 2, TextH,
+        DrawStatusIcon(Canvas, B.Icon, X, AY + (Px(PrimaryHeight) - TextH) div 2, TextH,
           FTones[stGood])
       else
-        DrawStatusIcon(Canvas, B.Icon, X, AY + (PrimaryHeight - TextH) div 2, TextH, Ink);
+        DrawStatusIcon(Canvas, B.Icon, X, AY + (Px(PrimaryHeight) - TextH) div 2, TextH, Ink);
       Canvas.Font.Style := [fsBold];
       Canvas.Font.Color := Ink;
-      Canvas.TextOut(X + IconW, AY + (PrimaryHeight - TextH) div 2, B.Caption);
+      Canvas.TextOut(X + IconW, AY + (Px(PrimaryHeight) - TextH) div 2, B.Caption);
       Canvas.Font.Style := [];
     end
     else
@@ -1022,9 +1018,9 @@ var
       else
         Ink := FDim;
       if not B.Enabled then
-        Ink := Blend(FDim, FBack, 0.45);
-      DrawStatusIcon(Canvas, B.Icon, AX + (PrimaryHeight - (TextH - 4)) div 2,
-        AY + (PrimaryHeight - TextH) div 2, TextH, Ink);
+        Ink := MixColor(FBack, FDim, 0.45);
+      DrawStatusIcon(Canvas, B.Icon, AX + (Px(PrimaryHeight) - (TextH - 4)) div 2,
+        AY + (Px(PrimaryHeight) - TextH) div 2, TextH, Ink);
     end;
   end;
 
@@ -1032,12 +1028,12 @@ var
   begin
     Result := IconW + Canvas.TextWidth(FPull);
     if ShowPullNote and (FPullNote <> '') then
-      Inc(Result, Gap div 2 + Canvas.TextWidth(FPullNote));
+      Inc(Result, Px(Gap) div 2 + Canvas.TextWidth(FPullNote));
     if FPullTone <> stNormal then
-      Inc(Result, Gap div 2 + IconW - IconGap + Canvas.TextWidth(Checks));
+      Inc(Result, Px(Gap) div 2 + IconW - Px(IconGap) + Canvas.TextWidth(Checks));
     if FPullThreads > 0 then
-      Inc(Result, Gap div 2 + IconW - IconGap + Canvas.TextWidth(Threads));
-    Inc(Result, 2 * ChipPadX);
+      Inc(Result, Px(Gap) div 2 + IconW - Px(IconGap) + Canvas.TextWidth(Threads));
+    Inc(Result, 2 * Px(ChipPadX));
   end;
 
   { The width of the left zone with the parts shown now. }
@@ -1047,20 +1043,20 @@ var
   begin
     if (FTitle = '') and (FBranch = '') then
       Exit(0);
-    Result := TileSize + TileGap;
+    Result := Px(TileSize) + Px(TileGap);
     Block := 0;
     Canvas.Font.Style := [fsBold];
     if ShowName and (Title <> '') then
-      Block := Canvas.TextWidth(Title) + 2 * ChipPadX;
+      Block := Canvas.TextWidth(Title) + 2 * Px(ChipPadX);
     Canvas.Font.Style := [];
     Row2 := 0;
     if Branch <> '' then
-      Row2 := IconW + Canvas.TextWidth(Branch) + ChevronWidth + 2 * ChipPadX;
+      Row2 := IconW + Canvas.TextWidth(Branch) + Px(ChevronWidth) + 2 * Px(ChipPadX);
     if ShowBase and (Base <> '') then
-      Inc(Row2, Gap div 2 + Canvas.TextWidth(Base) + 2 * ChipPadX);
+      Inc(Row2, Px(Gap) div 2 + Canvas.TextWidth(Base) + 2 * Px(ChipPadX));
     Inc(Result, Max(Block, Row2));
     if ShowStash and (FStashes > 0) then
-      Inc(Result, Gap + IconW + Canvas.TextWidth(IntToStr(FStashes)) + 2 * ChipPadX);
+      Inc(Result, Px(Gap) + IconW + Canvas.TextWidth(IntToStr(FStashes)) + 2 * Px(ChipPadX));
   end;
 
   { The width of the transport and the track, the wider of the two. }
@@ -1071,16 +1067,16 @@ var
     Result := 0;
     if TransportShown then
       Result := ButtonWidth(spLeft) + ButtonWidth(spPrimary) + ButtonWidth(spRight) +
-        2 * ButtonGap;
+        2 * Px(ButtonGap);
     if not ShowTrack then
       Exit;
     if TrackNumbers then
-      T := 2 * NumW + 2 * Gap + TrackW
+      T := 2 * NumW + 2 * Px(Gap) + TrackW
     else
     begin
       T := Canvas.TextWidth(TrackText);
       if TrackLine then
-        Inc(T, Gap + TrackW);
+        Inc(T, Px(Gap) + TrackW);
     end;
     Result := Max(Result, T);
   end;
@@ -1089,15 +1085,15 @@ var
   begin
     Result := 0;
     if ShowFiles and (FFiles <> '') then
-      Inc(Result, Canvas.TextWidth(FFiles) + 2 * ChipPadX + Gap);
+      Inc(Result, Canvas.TextWidth(FFiles) + 2 * Px(ChipPadX) + Px(Gap));
     if ShowPosition and (FPosition <> '') then
-      Inc(Result, Canvas.TextWidth(FPosition) + 2 * ChipPadX + Gap);
+      Inc(Result, Canvas.TextWidth(FPosition) + 2 * Px(ChipPadX) + Px(Gap));
     if ShowPull and (FPull <> '') then
-      Inc(Result, PullWidth + Gap);
+      Inc(Result, PullWidth + Px(Gap));
     if ShowUpdate and (FUpdate <> '') then
-      Inc(Result, BadgeWidth(FUpdate) + Gap);
+      Inc(Result, BadgeWidth(FUpdate) + Px(Gap));
     if Result > 0 then
-      Dec(Result, Gap);
+      Dec(Result, Px(Gap));
   end;
 
   function Needed: integer;
@@ -1107,7 +1103,7 @@ var
     RightW := RightWidth;
     Result := LeftW + MidW + RightW;
     if MidW > 0 then
-      Inc(Result, 2 * Gap);
+      Inc(Result, 2 * Px(Gap));
   end;
 
 begin
@@ -1122,7 +1118,7 @@ begin
   Canvas.Font.Style := [];
   Canvas.Brush.Style := bsClear;
   TextH := Canvas.TextHeight('Xg');
-  IconW := TextH - 4 + IconGap;
+  IconW := TextH - 4 + Px(IconGap);
 
   { What the track carries: a message first, then a progress, then the
     operation, else the sync counts. }
@@ -1172,10 +1168,10 @@ begin
   Behind := '↓' + IntToStr(FBehind);
   Ahead := '↑' + IntToStr(FAhead);
   NumW := Max(Canvas.TextWidth(Behind), Canvas.TextWidth(Ahead));
-  Title := Ellipsize(Canvas, FTitle, NameMax);
-  Branch := Ellipsize(Canvas, FBranch, BranchMax);
+  Title := Ellipsize(Canvas, FTitle, Px(NameMax));
+  Branch := Ellipsize(Canvas, FBranch, Px(BranchMax));
   Base := FBase;
-  TrackW := TrackWidth;
+  TrackW := Px(TrackWidth);
   ShowName := True;
   ShowBase := True;
   ShowStash := True;
@@ -1186,7 +1182,7 @@ begin
   ShowUpdate := True;
 
   { Giving way, from the outside in. }
-  Avail := Width - 2 * Pad;
+  Avail := Width - 2 * Px(Pad);
   Step := 0;
   while (Needed > Avail) and (Step < 9) do
   begin
@@ -1201,7 +1197,7 @@ begin
         ShowBase := False;
       end;
       5: ShowName := False;
-      6: TrackW := TrackNarrow;
+      6: TrackW := Px(TrackNarrow);
       7: ShowPull := False;
       8: if TrackNumbers or TrackLine then
           ShowTrack := False;
@@ -1213,37 +1209,37 @@ begin
     { A message is cut to what is left. }
     if (TrackText <> '') and not TrackLine then
     begin
-      TrackText := Ellipsize(Canvas, TrackText, Max(40, Avail - LeftW - RightW - 2 * Gap));
+      TrackText := Ellipsize(Canvas, TrackText, Max(40, Avail - LeftW - RightW - 2 * Px(Gap)));
       Needed;
     end;
   end;
 
   { The rows. }
-  Row1Y := (Height - 2 * TextH - RowGap) div 2;
-  Row2Y := Row1Y + TextH + RowGap;
+  Row1Y := (Height - 2 * TextH - Px(RowGap)) div 2;
+  Row2Y := Row1Y + TextH + Px(RowGap);
   MidH := 0;
   if TransportShown then
-    MidH := PrimaryHeight;
+    MidH := Px(PrimaryHeight);
   if ShowTrack then
   begin
     if MidH > 0 then
-      Inc(MidH, TrackGap);
+      Inc(MidH, Px(TrackGap));
     Inc(MidH, TextH);
   end;
   MidTop := (Height - MidH) div 2;
 
   { Left: the tile, the name over the branch and the base, the stashes. }
-  X := Pad;
+  X := Px(Pad);
   if LeftW > 0 then
   begin
-    FRects[spRepo] := ChipRect(X, (Height - TileSize) div 2, TileSize, TileSize);
+    FRects[spRepo] := ChipRect(X, (Height - Px(TileSize)) div 2, Px(TileSize), Px(TileSize));
     Canvas.Pen.Style := psClear;
     Canvas.Brush.Style := bsSolid;
     if (FHot = spRepo) and Clickable(spRepo) then
-      Canvas.Brush.Color := Blend(FAccent, FBack, 0.3)
+      Canvas.Brush.Color := MixColor(FBack, FAccent, 0.3)
     else
-      Canvas.Brush.Color := Blend(FAccent, FBack, 0.18);
-    Canvas.RoundRect(FRects[spRepo], TileRadius * 2, TileRadius * 2);
+      Canvas.Brush.Color := MixColor(FBack, FAccent, 0.18);
+    Canvas.RoundRect(FRects[spRepo], Px(TileRadius) * 2, Px(TileRadius) * 2);
     Canvas.Pen.Style := psSolid;
     Canvas.Brush.Style := bsClear;
     Canvas.Font.Size := TileFontSize;
@@ -1252,12 +1248,12 @@ begin
     Title := Initial(ExtractFileName(FTitle));
     if Title = '' then
       Title := Initial(FBranch);
-    Canvas.TextOut(X + (TileSize - Canvas.TextWidth(Title)) div 2,
+    Canvas.TextOut(X + (Px(TileSize) - Canvas.TextWidth(Title)) div 2,
       (Height - Canvas.TextHeight(Title)) div 2, Title);
     Canvas.Font := Font;
     Canvas.Font.Style := [];
-    Title := Ellipsize(Canvas, FTitle, NameMax);
-    Inc(X, TileSize + TileGap);
+    Title := Ellipsize(Canvas, FTitle, Px(NameMax));
+    Inc(X, Px(TileSize) + Px(TileGap));
     W := X;
     if ShowName and (Title <> '') then
     begin
@@ -1268,9 +1264,9 @@ begin
         Y := Row1Y;
       { The name shares the tile's click, so the tile's rectangle grows
         over it. }
-      FRects[spRepo].Right := X + Canvas.TextWidth(Title) + 2 * ChipPadX;
+      FRects[spRepo].Right := X + Canvas.TextWidth(Title) + 2 * Px(ChipPadX);
       Canvas.Font.Color := FText;
-      Canvas.TextOut(X + ChipPadX, Y, Title);
+      Canvas.TextOut(X + Px(ChipPadX), Y, Title);
       Canvas.Font.Style := [];
       W := FRects[spRepo].Right;
     end;
@@ -1280,31 +1276,32 @@ begin
         Y := (Height - TextH) div 2
       else
         Y := Row2Y;
-      FRects[spBranch] := ChipRect(X, Y - ChipPadY, IconW + Canvas.TextWidth(Branch) +
-        ChevronWidth + 2 * ChipPadX, TextH + 2 * ChipPadY);
+      FRects[spBranch] := ChipRect(X, Y - Px(ChipPadY), IconW + Canvas.TextWidth(Branch) +
+        Px(ChevronWidth) + 2 * Px(ChipPadX), TextH + 2 * Px(ChipPadY));
       DrawHot(spBranch);
-      DrawStatusIcon(Canvas, HintBranch, X + ChipPadX, Y, TextH, FDim);
+      DrawStatusIcon(Canvas, HintBranch, X + Px(ChipPadX), Y, TextH, FDim);
       Canvas.Font.Color := FText;
-      Canvas.TextOut(X + ChipPadX + IconW, Y, Branch);
-      DrawChevron(X + ChipPadX + IconW + Canvas.TextWidth(Branch), Y);
+      Canvas.TextOut(X + Px(ChipPadX) + IconW, Y, Branch);
+      DrawChevron(Canvas, X + Px(ChipPadX) + IconW + Canvas.TextWidth(Branch) + Px(ChevronWidth) div 2,
+        Y + TextH div 2, FDim);
       W := Max(W, FRects[spBranch].Right);
       if ShowBase and (Base <> '') then
       begin
-        DrawText(spBase, FRects[spBranch].Right + Gap div 2 + ChipPadX, Y, Base, FDim);
+        DrawText(spBase, FRects[spBranch].Right + Px(Gap) div 2 + Px(ChipPadX), Y, Base, FDim);
         W := Max(W, FRects[spBase].Right);
       end;
     end;
     X := W;
     if ShowStash and (FStashes > 0) then
     begin
-      Inc(X, Gap);
+      Inc(X, Px(Gap));
       Y := (Height - TextH) div 2;
-      FRects[spStash] := ChipRect(X, Y - ChipPadY, IconW +
-        Canvas.TextWidth(IntToStr(FStashes)) + 2 * ChipPadX, TextH + 2 * ChipPadY);
+      FRects[spStash] := ChipRect(X, Y - Px(ChipPadY), IconW +
+        Canvas.TextWidth(IntToStr(FStashes)) + 2 * Px(ChipPadX), TextH + 2 * Px(ChipPadY));
       DrawHot(spStash);
-      DrawStatusIcon(Canvas, HintStash, X + ChipPadX, Y, TextH, FDim);
+      DrawStatusIcon(Canvas, HintStash, X + Px(ChipPadX), Y, TextH, FDim);
       Canvas.Font.Color := FDim;
-      Canvas.TextOut(X + ChipPadX + IconW, Y, IntToStr(FStashes));
+      Canvas.TextOut(X + Px(ChipPadX) + IconW, Y, IntToStr(FStashes));
       X := FRects[spStash].Right;
     end;
   end;
@@ -1312,19 +1309,19 @@ begin
 
   { Right, from the right edge: the files, the position, the pull
     request, the update. }
-  Right := Width - Pad;
+  Right := Width - Px(Pad);
   Y := (Height - TextH) div 2;
   if ShowFiles and (FFiles <> '') then
   begin
     W := Canvas.TextWidth(FFiles);
-    DrawText(spFiles, Right - W - ChipPadX, Y, FFiles, FDim);
-    Dec(Right, W + 2 * ChipPadX + Gap);
+    DrawText(spFiles, Right - W - Px(ChipPadX), Y, FFiles, FDim);
+    Dec(Right, W + 2 * Px(ChipPadX) + Px(Gap));
   end;
   if ShowPosition and (FPosition <> '') then
   begin
     W := Canvas.TextWidth(FPosition);
-    DrawText(spPosition, Right - W - ChipPadX, Y, FPosition, FDim);
-    Dec(Right, W + 2 * ChipPadX + Gap);
+    DrawText(spPosition, Right - W - Px(ChipPadX), Y, FPosition, FDim);
+    Dec(Right, W + 2 * Px(ChipPadX) + Px(Gap));
   end;
   if ShowPull and (FPull <> '') then
   begin
@@ -1334,9 +1331,9 @@ begin
       count of the open ones. }
     W := PullWidth;
     X := Right - W;
-    FRects[spPull] := ChipRect(X, Y - ChipPadY, W, TextH + 2 * ChipPadY);
+    FRects[spPull] := ChipRect(X, Y - Px(ChipPadY), W, TextH + 2 * Px(ChipPadY));
     DrawHot(spPull);
-    Inc(X, ChipPadX);
+    Inc(X, Px(ChipPadX));
     DrawStatusIcon(Canvas, HintPull, X, Y, TextH, FDim);
     Inc(X, IconW);
     Canvas.Font.Color := FText;
@@ -1344,86 +1341,86 @@ begin
     Inc(X, Canvas.TextWidth(FPull));
     if ShowPullNote and (FPullNote <> '') then
     begin
-      Inc(X, Gap div 2);
+      Inc(X, Px(Gap) div 2);
       Canvas.Font.Color := FDim;
       Canvas.TextOut(X, Y, FPullNote);
       Inc(X, Canvas.TextWidth(FPullNote));
     end;
     if FPullTone <> stNormal then
     begin
-      Inc(X, Gap div 2);
+      Inc(X, Px(Gap) div 2);
       case FPullTone of
         stGood: DrawStatusIcon(Canvas, HintPassed, X, Y, TextH, FTones[stGood]);
         stBad: DrawStatusIcon(Canvas, HintFailed, X, Y, TextH, FTones[stBad]);
         stWarn: DrawStatusIcon(Canvas, HintPending, X, Y, TextH, FTones[stWarn]);
       end;
-      Inc(X, IconW - IconGap);
+      Inc(X, IconW - Px(IconGap));
       Canvas.Font.Color := FTones[FPullTone];
       Canvas.TextOut(X, Y, Checks);
       Inc(X, Canvas.TextWidth(Checks));
     end;
     if FPullThreads > 0 then
     begin
-      Inc(X, Gap div 2);
+      Inc(X, Px(Gap) div 2);
       if FPullOpen > 0 then
         Canvas.Font.Color := FAccent
       else
         Canvas.Font.Color := FDim;
       DrawStatusIcon(Canvas, HintComment, X, Y, TextH, Canvas.Font.Color);
-      Inc(X, IconW - IconGap);
+      Inc(X, IconW - Px(IconGap));
       Canvas.TextOut(X, Y, Threads);
     end;
-    Dec(Right, W + Gap);
+    Dec(Right, W + Px(Gap));
   end;
   if ShowUpdate and (FUpdate <> '') then
   begin
     W := BadgeWidth(FUpdate);
     DrawBadge(spUpdate, Right - W, Y, FUpdate, stGood);
-    Dec(Right, W + Gap);
+    Dec(Right, W + Px(Gap));
   end;
-  RightW := Width - Pad - Right;
+  RightW := Width - Px(Pad) - Right;
 
   { Middle: the transport over the track, centered in the window while
     the zones leave room for that, else between them. }
   if MidW = 0 then
     Exit;
   MidX := (Width - MidW) div 2;
-  if MidX < LeftW + Gap then
-    MidX := LeftW + Gap;
-  if MidX + MidW > Right - Gap then
-    MidX := Max(LeftW + Gap, Right - Gap - MidW);
+  if MidX < LeftW + Px(Gap) then
+    MidX := LeftW + Px(Gap);
+  if MidX + MidW > Right - Px(Gap) then
+    MidX := Max(LeftW + Px(Gap), Right - Px(Gap) - MidW);
   Y := MidTop;
   if TransportShown then
   begin
-    W := ButtonWidth(spLeft) + ButtonWidth(spPrimary) + ButtonWidth(spRight) + 2 * ButtonGap;
+    W := ButtonWidth(spLeft) + ButtonWidth(spPrimary) + ButtonWidth(spRight) + 2 * Px(ButtonGap);
     X := MidX + (MidW - W) div 2;
     DrawButton(spLeft, X, Y);
-    Inc(X, ButtonWidth(spLeft) + ButtonGap);
+    Inc(X, ButtonWidth(spLeft) + Px(ButtonGap));
     DrawButton(spPrimary, X, Y);
-    Inc(X, ButtonWidth(spPrimary) + ButtonGap);
+    Inc(X, ButtonWidth(spPrimary) + Px(ButtonGap));
     DrawButton(spRight, X, Y);
-    Inc(Y, PrimaryHeight + TrackGap);
+    Inc(Y, Px(PrimaryHeight) + Px(TrackGap));
   end;
   if not ShowTrack then
     Exit;
   if TrackNumbers then
   begin
-    W := 2 * NumW + 2 * Gap + TrackW;
+    W := 2 * NumW + 2 * Px(Gap) + TrackW;
     X := MidX + (MidW - W) div 2;
-    FRects[spSync] := ChipRect(X - ChipPadX, Y - ChipPadY, W + 2 * ChipPadX,
-      TextH + 2 * ChipPadY);
+    FRects[spSync] := ChipRect(X - Px(ChipPadX), Y - Px(ChipPadY), W + 2 * Px(ChipPadX),
+      TextH + 2 * Px(ChipPadY));
     DrawHot(spSync);
     if FBehind > 0 then
       Canvas.Font.Color := FText
     else
       Canvas.Font.Color := FDim;
     Canvas.TextOut(X + NumW - Canvas.TextWidth(Behind), Y, Behind);
-    TrackLeft := X + NumW + Gap;
+    TrackLeft := X + NumW + Px(Gap);
     if FAhead > 0 then
       Canvas.Font.Color := FText
     else
       Canvas.Font.Color := FDim;
-    Canvas.TextOut(TrackLeft + TrackW + Gap, Y, Ahead);
+    Canvas.TextOut(TrackLeft + TrackW + Px(Gap), Y, Ahead);
     TrackLine := True;
     TrackTotal := 0;
   end
@@ -1431,33 +1428,33 @@ begin
   begin
     W := Canvas.TextWidth(TrackText);
     if TrackLine then
-      Inc(W, Gap + TrackW);
+      Inc(W, Px(Gap) + TrackW);
     X := MidX + (MidW - W) div 2;
     if TrackPart <> spNone then
-      FRects[TrackPart] := ChipRect(X, Y - ChipPadY, W, TextH + 2 * ChipPadY);
+      FRects[TrackPart] := ChipRect(X, Y - Px(ChipPadY), W, TextH + 2 * Px(ChipPadY));
     Canvas.Font.Color := FTones[TrackTone];
     if (TrackTone = stNormal) and (TrackPart <> spMessage) then
       Canvas.Font.Color := FDim;
     Canvas.TextOut(X, Y, TrackText);
-    TrackLeft := X + Canvas.TextWidth(TrackText) + Gap;
+    TrackLeft := X + Canvas.TextWidth(TrackText) + Px(Gap);
   end;
   if TrackLine then
   begin
     Canvas.Pen.Style := psClear;
     Canvas.Brush.Style := bsSolid;
     Canvas.Brush.Color := FHover;
-    W := Y + (TextH - TrackHeight) div 2;
-    Canvas.RoundRect(TrackLeft, W, TrackLeft + TrackW, W + TrackHeight, TrackHeight,
-      TrackHeight);
+    W := Y + (TextH - Px(TrackHeight)) div 2;
+    Canvas.RoundRect(TrackLeft, W, TrackLeft + TrackW, W + Px(TrackHeight), Px(TrackHeight),
+      Px(TrackHeight));
     if TrackTotal > 0 then
     begin
       if TrackTone = stWarn then
         Canvas.Brush.Color := FTones[stWarn]
       else
         Canvas.Brush.Color := FAccent;
-      Fill := Max(TrackHeight, TrackW * Min(TrackPos, TrackTotal) div TrackTotal);
-      Canvas.RoundRect(TrackLeft, W, TrackLeft + Fill, W + TrackHeight, TrackHeight,
-        TrackHeight);
+      Fill := Max(Px(TrackHeight), TrackW * Min(TrackPos, TrackTotal) div TrackTotal);
+      Canvas.RoundRect(TrackLeft, W, TrackLeft + Fill, W + Px(TrackHeight), Px(TrackHeight),
+        Px(TrackHeight));
     end;
     Canvas.Pen.Style := psSolid;
     Canvas.Brush.Style := bsClear;
@@ -1549,6 +1546,16 @@ begin
   R.TopLeft := ClientToScreen(FRects[Part].TopLeft);
   R.BottomRight := ClientToScreen(FRects[Part].BottomRight);
   FOnPartClick(Self, Part, R);
+end;
+
+{ The form scales every control by its DPI after FormCreate, this one's
+  height too, which is already the screen's: set it again. }
+procedure TGittanStatusBar.DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+  const AXProportion, AYProportion: double);
+begin
+  inherited DoAutoAdjustLayout(AMode, AXProportion, AYProportion);
+  if AMode = lapAutoAdjustForDPI then
+    Height := Px(BarHeight);
 end;
 
 end.

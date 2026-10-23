@@ -19,9 +19,10 @@ const
     each when it exists. }
   RepoRootFiles: array[0..4] of string = ('.gitignore', '.gitattributes',
     '.gitmodules', '.mailmap', '.editorconfig');
-  {** The folder of the work tree root whose files the section lists,
-    all of them, after the root files. }
-  RepoFolder = '.github';
+  {** The folders of the work tree root whose files the section lists,
+    all of them, after the root files, in this order: GitHub's and
+    Gittan's own (see repo-commands.md). }
+  RepoFolders: array[0..1] of string = ('.github', '.gittan');
   {** The ignore file inside the git directory that is not committed. }
   ExcludeFile = 'info/exclude';
   {** What the exclude file is called where it is shown. }
@@ -29,12 +30,13 @@ const
 
 {** Lists the repository's own files under ARoot as paths relative to it
   with "/" separators: the RepoRootFiles that exist, in that order, then
-  every file under RepoFolder, folders walked, sorted by path. }
+  every file under each of RepoFolders, folders walked, sorted by path. }
 procedure ListRepoFiles(const ARoot: string; AList: TStrings);
 
 {** Whether ARelPath, relative to the root with "/" separators, is one
   of the repository's own files: a RepoRootFiles name or a file under
-  RepoFolder. These are the files the editor lets the user change. }
+  one of RepoFolders. These are the files the editor lets the user
+  change. }
 function IsRepoFile(const ARelPath: string): boolean;
 
 {** The gitignore patterns that would hide APath, a path relative to the
@@ -51,6 +53,9 @@ function IgnorePatterns(const APath: string): TStringArray;
 function AddIgnorePattern(const AFileName, APattern: string): boolean;
 
 implementation
+
+uses
+  gittan.textfile;
 
 { Adds every file under ADir (a full path) to AList as ARel + its name,
   walking into the folders. }
@@ -87,16 +92,19 @@ begin
   for Name in RepoRootFiles do
     if FileExists(Root + Name) then
       AList.Add(Name);
-  if not DirectoryExists(Root + RepoFolder) then
-    Exit;
-  Folder := TStringList.Create;
-  try
-    AddFolder(Root + RepoFolder, RepoFolder + '/', Folder);
-    Folder.CaseSensitive := False;
-    Folder.Sort;
-    AList.AddStrings(Folder);
-  finally
-    Folder.Free;
+  for Name in RepoFolders do
+  begin
+    if not DirectoryExists(Root + Name) then
+      Continue;
+    Folder := TStringList.Create;
+    try
+      AddFolder(Root + Name, Name + '/', Folder);
+      Folder.CaseSensitive := False;
+      Folder.Sort;
+      AList.AddStrings(Folder);
+    finally
+      Folder.Free;
+    end;
   end;
 end;
 
@@ -107,7 +115,10 @@ begin
   for Name in RepoRootFiles do
     if ARelPath = Name then
       Exit(True);
-  Result := Copy(ARelPath, 1, Length(RepoFolder) + 1) = RepoFolder + '/';
+  for Name in RepoFolders do
+    if Copy(ARelPath, 1, Length(Name) + 1) = Name + '/' then
+      Exit(True);
+  Result := False;
 end;
 
 function IgnorePatterns(const APath: string): TStringArray;
@@ -145,14 +156,7 @@ begin
     Text := '';
     if FileExists(AFileName) then
     begin
-      F := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
-      try
-        SetLength(Text, F.Size);
-        if F.Size > 0 then
-          F.ReadBuffer(Text[1], F.Size);
-      finally
-        F.Free;
-      end;
+      Text := ReadFileBytes(AFileName);
       Lines := TStringList.Create;
       try
         { git matches the patterns case-sensitively (core.ignoreCase

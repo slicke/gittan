@@ -2,8 +2,9 @@ unit gittan.github;
 
 {** GitHub through gh, GitHub's command line tool: the pull request of a
   branch and the open pull requests of a repository, read from the JSON
-  gh prints, and a job that fetches both in a thread. Nothing here needs
-  the LCL. }
+  gh prints (with when each was opened and changed, what it changes
+  and its labels, for the Pull Requests page), and a job that fetches
+  both in a thread. Nothing here needs the LCL. }
 
 {$mode objfpc}{$H+}
 
@@ -24,13 +25,20 @@ type
       (or were skipped or neutral), failed (or were cancelled, timed out,
       or need action) and are still running or queued. }
     ChecksPassed, ChecksFailed, ChecksPending: integer;
+    { When it was opened and last changed, in UTC (0 when gh gave
+      none), what it changes, and the names of its labels joined with
+      ", ". }
+    Created, Updated: TDateTime;
+    Additions, Deletions, ChangedFiles: integer;
+    Labels: string;
   end;
   TGittanPullRequests = array of TGittanPullRequest;
 
 const
   {** The fields asked of gh, the ones the record holds. }
   PullRequestFields = 'number,title,state,reviewDecision,url,headRefName,baseRefName,' +
-    'author,isDraft,statusCheckRollup';
+    'author,isDraft,statusCheckRollup,createdAt,updatedAt,additions,deletions,changedFiles,' +
+    'labels';
 
 {** Reads the object gh pr view --json prints. }
 function ParsePullRequest(const AJson: string; out APull: TGittanPullRequest): boolean;
@@ -57,18 +65,21 @@ function IssueNumber(const ASummary: string): integer;
 type
   {** Runs gh pr view for the branch checked out in a repository (ABranch
     only says which; empty skips it) and gh pr list, in a thread, since
-    both go to the network. OnDone is called in the main thread when both are
-    done, as long as the job has not been stopped. A branch with no pull
-    request is not a failure: HasPull is false and Error empty. The job
-    also asks the remotes which local branches track a branch that is
-    gone from them (GoneBranches), as GitHub deletes a merged one. }
+    both go to the network, and gh pr list again with
+    review-requested:@me for the open pull requests waiting for the
+    user's review (ReviewPulls). OnDone is called in the main thread
+    when all are done, as long as the job has not been stopped. A branch
+    with no pull request is not a failure: HasPull is false and Error
+    empty. The job also asks the remotes which local branches track a
+    branch that is gone from them (GoneBranches), as GitHub deletes a
+    merged one. }
   TGittanPullRequestJob = class(TGittanJob)
   private
     FExe, FRoot, FBranch: string;
     FPull: TGittanPullRequest;
     FHasPull: boolean;
     FGone: TStringList;
-    FPulls: TGittanPullRequests;
+    FPulls, FReviewPulls: TGittanPullRequests;
     FError: string;
   protected
     procedure Execute; override;
@@ -81,6 +92,10 @@ type
     {** The local branches whose upstream is deleted on its remote. }
     property GoneBranches: TStringList read FGone;
     property Pulls: TGittanPullRequests read FPulls;
+    {** The open pull requests whose review is asked of the user gh is
+      logged in as, or of a team they are on (GitHub's own
+      review-requested:@me search); empty when gh could not list them. }
+    property ReviewPulls: TGittanPullRequests read FReviewPulls;
     {** gh's message when the list could not be read (no GitHub remote,
       not logged in), else empty. }
     property Error: string read FError;
@@ -89,7 +104,15 @@ type
 implementation
 
 uses
-  fpjson, jsonparser, gittan.git;
+  DateUtils, fpjson, jsonparser, gittan.git;
+
+{ A time as gh prints it, "2026-10-20T12:34:56Z", in UTC; 0 when the
+  field is missing or not a time. }
+function TimeOf(AObject: TJSONObject; const AName: string): TDateTime;
+begin
+  if not TryISO8601ToDate(AObject.Get(AName, ''), Result, True) then
+    Result := 0;
+end;
 
 { A CheckRun has a status (COMPLETED, IN_PROGRESS, QUEUED, ...) and, once
   completed, a conclusion; a StatusContext (the older commit status API)
@@ -116,8 +139,9 @@ end;
 
 function ReadPull(AObject: TJSONObject; out APull: TGittanPullRequest): boolean;
 var
-  Author, Checks: TJSONData;
+  Author, Checks, Labels: TJSONData;
   i: integer;
+  Name: string;
 begin
   APull := Default(TGittanPullRequest);
   Result := AObject.IndexOfName('number') >= 0;
@@ -139,6 +163,23 @@ begin
     for i := 0 to TJSONArray(Checks).Count - 1 do
       if TJSONArray(Checks)[i].JSONType = jtObject then
         CountCheck(TJSONObject(TJSONArray(Checks)[i]), APull);
+  APull.Created := TimeOf(AObject, 'createdAt');
+  APull.Updated := TimeOf(AObject, 'updatedAt');
+  APull.Additions := AObject.Get('additions', 0);
+  APull.Deletions := AObject.Get('deletions', 0);
+  APull.ChangedFiles := AObject.Get('changedFiles', 0);
+  Labels := AObject.Find('labels');
+  if (Labels <> nil) and (Labels.JSONType = jtArray) then
+    for i := 0 to TJSONArray(Labels).Count - 1 do
+      if TJSONArray(Labels)[i].JSONType = jtObject then
+      begin
+        Name := TJSONObject(TJSONArray(Labels)[i]).Get('name', '');
+        if Name = '' then
+          Continue;
+        if APull.Labels <> '' then
+          APull.Labels := APull.Labels + ', ';
+        APull.Labels := APull.Labels + Name;
+      end;
 end;
 
 function ParsePullRequest(const AJson: string; out APull: TGittanPullRequest): boolean;
@@ -326,6 +367,18 @@ begin
   end
   else
     FError := Err;
+  if Terminated then
+    Exit;
+  { Those waiting for the user's review, by GitHub's own search, which
+    knows who gh is logged in as and the teams they are on; a review
+    given clears the request, so these are the ones still to do. }
+  if (FError = '') and RunGitHubCli(FExe, FRoot, ['pr', 'list', '--state', 'open',
+    '--limit', '50', '--search', 'review-requested:@me', '--json', PullRequestFields],
+    Output, Err) then
+  begin
+    if not ParsePullRequests(Output, FReviewPulls) then
+      FReviewPulls := nil;
+  end;
   if not Terminated then
     GoneUpstreamsIn(FRoot, FGone);
   Done;
