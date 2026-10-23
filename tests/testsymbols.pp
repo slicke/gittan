@@ -19,6 +19,7 @@ type
     procedure TestEmpty;
     procedure TestNameIdentifier;
     procedure TestBestSymbol;
+    procedure TestSymbolLineSpan;
   end;
 
 implementation
@@ -84,6 +85,29 @@ begin
   AssertEquals(0, BestSymbol(S, 'foo', -1));
   AssertEquals(-1, BestSymbol(S, 'baz', -1));
   AssertEquals(-1, BestSymbol(nil, 'bar', -1));
+end;
+
+procedure TSymbolsTest.TestSymbolLineSpan;
+var
+  From, Count: SizeInt;
+begin
+  SymbolLineSpan(30, 10, From, Count);
+  AssertEquals('short row whole', 1, From);
+  AssertEquals(30, Count);
+  SymbolLineSpan(MaxSymbolLine, 10, From, Count);
+  AssertEquals(1, From);
+  AssertEquals(MaxSymbolLine, Count);
+  { A minified row: a part around the name, a little before it. }
+  SymbolLineSpan(2000000, 1000000, From, Count);
+  AssertEquals(MaxSymbolLine, Count);
+  AssertTrue('name inside', (From <= 1000001) and (1000001 < From + Count));
+  AssertTrue('some text before the name', From < 1000001 - 10);
+  SymbolLineSpan(2000000, 5, From, Count);
+  AssertEquals('near the start', 1, From);
+  AssertEquals(MaxSymbolLine, Count);
+  SymbolLineSpan(2000000, 1999999, From, Count);
+  AssertEquals('near the end', 2000000 - MaxSymbolLine + 1, From);
+  AssertEquals(MaxSymbolLine, Count);
 end;
 
 initialization

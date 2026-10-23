@@ -82,7 +82,8 @@ end;
 { The code tree of AAdapter's text, which AEd shows, as a flat list in
   file order: each range's name on one line, the position of its
   identifier token (the name in its header, else its first token), its
-  nesting depth and the text of its row, with the first and the last row
+  nesting depth and the text of its row (around the name, at most
+  MaxSymbolLine characters), with the first and the last row
   the range spans (a range the lexer never closed runs to the end of the
   text). Waits for the parse. }
 function TForm1.CodeRanges(AAdapter: TATAdapterEControl; AEd: TATSynEdit): TGittanCodeRanges;
@@ -92,6 +93,7 @@ var
   Title: string;
   P: TPoint;
   i, Count: integer;
+  Len, From, Part: SizeInt;
 begin
   Result := nil;
   HoldRefresh;
@@ -123,7 +125,18 @@ begin
       Result[Count].Symbol.Col := P.X;
       Result[Count].Symbol.Line := '';
       if AEd.Strings.IsIndexValid(P.Y) then
-        Result[Count].Symbol.Line := UTF8Encode(AEd.Strings.Lines[P.Y]);
+      begin
+        { Only the part of a long row around the name, read without
+          copying the row: a minified row is megabytes. }
+        Len := AEd.Strings.LinesLen[P.Y];
+        SymbolLineSpan(Len, P.X, From, Part);
+        Result[Count].Symbol.Line :=
+          UTF8Encode(AEd.Strings.LineSub(P.Y, From, Part));
+        if From > 1 then
+          Result[Count].Symbol.Line := '…' + Result[Count].Symbol.Line;
+        if From + Part <= Len then
+          Result[Count].Symbol.Line := Result[Count].Symbol.Line + '…';
+      end;
       Result[Count].Symbol.Depth := 0;
       Outer := R.Parent;
       while Outer <> nil do

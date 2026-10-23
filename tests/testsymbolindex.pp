@@ -164,7 +164,7 @@ begin
     AssertEquals(0, Index.Count);
     L := TStringList.Create;
     try
-      L.Add('gittan-index 1');
+      L.Add('gittan-index 2');
       L.Add('F'#9'a.pp'#9'1'#9'2');
       L.Add('garbage');
       L.SaveToFile(FFileName);
@@ -173,6 +173,27 @@ begin
     end;
     Index.Load(FFileName);
     AssertEquals('damaged file gives nothing', 0, Index.Count);
+    { Version 1 could be tens of gigabytes: deleted, not read. }
+    L := TStringList.Create;
+    try
+      L.Add('gittan-index 1');
+      L.Add('F'#9'a.pp'#9'1'#9'2');
+      L.SaveToFile(FFileName);
+    finally
+      L.Free;
+    end;
+    Index.Load(FFileName);
+    AssertEquals('old version gives nothing', 0, Index.Count);
+    AssertFalse('old version deleted', FileExists(FFileName));
+    L := TStringList.Create;
+    try
+      L.Add('gittan-index 23');
+      L.SaveToFile(FFileName);
+    finally
+      L.Free;
+    end;
+    Index.Load(FFileName);
+    AssertFalse('a header that only starts alike', FileExists(FFileName));
   finally
     Index.Free;
   end;
