@@ -111,7 +111,7 @@ type
 implementation
 
 uses
-  Math, DateUtils, LazUTF8, gittan.reviews, gittan.statusbar, gittan.textfit;
+  Math, DateUtils, LazUTF8, gittan.reviews, gittan.statusbar, gittan.textfit, gittan.theme;
 
 resourcestring
   rsRemotes = 'Remotes';
@@ -303,22 +303,22 @@ procedure TGittanRepoPage.PaintHeading(var Y: integer; const ATitle, ADetail: st
 var
   TextH, X: integer;
 begin
-  Inc(Y, Pad);
+  Inc(Y, Px(Pad));
   Canvas.Font := Font;
   Canvas.Font.Style := [fsBold];
   Canvas.Font.Color := FDim;
   Canvas.Brush.Style := bsClear;
   TextH := Canvas.TextHeight('Xg');
-  Canvas.TextOut(Pad, Y, ATitle);
-  X := Pad + Canvas.TextWidth(ATitle);
+  Canvas.TextOut(Px(Pad), Y, ATitle);
+  X := Px(Pad) + Canvas.TextWidth(ATitle);
   Canvas.Font.Style := [];
   if ADetail <> '' then
-    Canvas.TextOut(X + Gap div 2, Y, ADetail);
-  Inc(Y, TextH + Gap div 2);
+    Canvas.TextOut(X + Px(Gap) div 2, Y, ADetail);
+  Inc(Y, TextH + Px(Gap) div 2);
   Canvas.Pen.Style := psSolid;
   Canvas.Pen.Color := FLine;
-  Canvas.Line(Pad, Y, Width - Pad, Y);
-  Inc(Y, Gap div 2);
+  Canvas.Line(Px(Pad), Y, Width - Px(Pad), Y);
+  Inc(Y, Px(Gap) div 2);
 end;
 
 { ACaption as a link at the right edge, on the line of a heading whose
@@ -329,7 +329,7 @@ var
 begin
   Canvas.Font := Font;
   Canvas.Brush.Style := bsClear;
-  R := Rect(Width - Pad - Canvas.TextWidth(ACaption), ATop, Width - Pad,
+  R := Rect(Width - Px(Pad) - Canvas.TextWidth(ACaption), ATop, Width - Px(Pad),
     ATop + Canvas.TextHeight('Xg'));
   AddLink(R, ALink);
   Canvas.Font.Color := FLink;
@@ -352,21 +352,21 @@ begin
   Canvas.Font := Font;
   Canvas.Brush.Style := bsClear;
   TextH := Canvas.TextHeight('Xg');
-  TextY := Y + (RemoteRow - TextH) div 2;
+  TextY := Y + (Px(RemoteRow) - TextH) div 2;
   IconW := TextH - 4 + 6;
   if ARemote.Web <> '' then
-    DrawStatusIcon(Canvas, HintLink, Pad, TextY, TextH, FDim)
+    DrawStatusIcon(Canvas, HintLink, Px(Pad), TextY, TextH, FDim)
   else
-    DrawStatusIcon(Canvas, HintFolder, Pad, TextY, TextH, FDim);
+    DrawStatusIcon(Canvas, HintFolder, Px(Pad), TextY, TextH, FDim);
   Canvas.Pen.Width := 1;
   Canvas.Brush.Style := bsClear;
-  X := Pad + IconW;
+  X := Px(Pad) + IconW;
   Canvas.Font.Style := [fsBold];
   Canvas.Font.Color := FText;
-  Canvas.TextOut(X, TextY, FitRight(ARemote.Name, ANameWidth - Gap));
+  Canvas.TextOut(X, TextY, FitRight(ARemote.Name, ANameWidth - Px(Gap)));
   Canvas.Font.Style := [];
   Inc(X, ANameWidth);
-  Shown := FitRight(ARemote.Url, Width - Pad - X);
+  Shown := FitRight(ARemote.Url, Width - Px(Pad) - X);
   if ARemote.Web <> '' then
   begin
     R := Rect(X, TextY, X + Canvas.TextWidth(Shown), TextY + TextH);
@@ -379,11 +379,11 @@ begin
     Canvas.Font.Color := FText;
   Canvas.TextOut(X, TextY, Shown);
   Canvas.Font.Style := [];
-  Inc(Y, RemoteRow);
+  Inc(Y, Px(RemoteRow));
   if (ARemote.PushUrl <> '') and (ARemote.PushUrl <> ARemote.Url) then
   begin
     Canvas.Font.Color := FDim;
-    Canvas.TextOut(X, Y - 4, FitRight(Format(rsPushUrl, [ARemote.PushUrl]), Width - Pad - X));
+    Canvas.TextOut(X, Y - 4, FitRight(Format(rsPushUrl, [ARemote.PushUrl]), Width - Px(Pad) - X));
     Inc(Y, TextH + 2);
   end;
 end;
@@ -457,20 +457,20 @@ begin
   Add(rsSizeLabel, FormatKiB(FInfo.SizeKiB), rsObjects, -1);
 
   n := Length(Labels);
-  MaxCols := Max(1, (Width - 2 * Pad + TileGap) div (TileMinWidth + TileGap));
+  MaxCols := Max(1, (Width - 2 * Px(Pad) + Px(TileGap)) div (Px(TileMinWidth) + Px(TileGap)));
   Rows := (n + MaxCols - 1) div MaxCols;
   Cols := (n + Rows - 1) div Rows;
-  TileW := (Width - 2 * Pad - (Cols - 1) * TileGap) div Cols;
+  TileW := (Width - 2 * Px(Pad) - (Cols - 1) * Px(TileGap)) div Cols;
   Canvas.Font := Font;
   BodyH := Canvas.TextHeight('Xg');
   Canvas.Font.Size := TileValueSize;
   Canvas.Font.Style := [fsBold];
   ValueH := Canvas.TextHeight('Xg');
-  TileH := 2 * TilePadY + 2 * BodyH + ValueH + 2;
+  TileH := 2 * Px(TilePadY) + 2 * BodyH + ValueH + 2;
   for i := 0 to n - 1 do
   begin
-    X := Pad + (i mod Cols) * (TileW + TileGap);
-    TileY := Y + (i div Cols) * (TileH + TileGap);
+    X := Px(Pad) + (i mod Cols) * (TileW + Px(TileGap));
+    TileY := Y + (i div Cols) * (TileH + Px(TileGap));
     R := Rect(X, TileY, X + TileW, TileY + TileH);
     Canvas.Pen.Style := psClear;
     Canvas.Brush.Style := bsSolid;
@@ -481,24 +481,24 @@ begin
         Canvas.Brush.Color := FHover;
       AddLink(R, TileLink + IntToStr(Targets[i]));
     end;
-    Canvas.RoundRect(R, TileRadius, TileRadius);
+    Canvas.RoundRect(R, Px(TileRadius), Px(TileRadius));
     Canvas.Pen.Style := psSolid;
     Canvas.Brush.Style := bsClear;
-    Inner := TileW - 2 * TilePadX;
+    Inner := TileW - 2 * Px(TilePadX);
     Canvas.Font := Font;
     Canvas.Font.Color := FDim;
-    Canvas.TextOut(X + TilePadX, TileY + TilePadY, FitRight(Labels[i], Inner));
+    Canvas.TextOut(X + Px(TilePadX), TileY + Px(TilePadY), FitRight(Labels[i], Inner));
     Canvas.Font.Size := TileValueSize;
     Canvas.Font.Style := [fsBold];
     Canvas.Font.Color := FText;
-    Canvas.TextOut(X + TilePadX, TileY + TilePadY + BodyH, FitRight(Values[i], Inner));
+    Canvas.TextOut(X + Px(TilePadX), TileY + Px(TilePadY) + BodyH, FitRight(Values[i], Inner));
     Canvas.Font := Font;
     Canvas.Font.Color := FDim;
     if Details[i] <> '' then
-      Canvas.TextOut(X + TilePadX, TileY + TilePadY + BodyH + ValueH + 2,
+      Canvas.TextOut(X + Px(TilePadX), TileY + Px(TilePadY) + BodyH + ValueH + 2,
         FitRight(Details[i], Inner));
   end;
-  Inc(Y, Rows * TileH + (Rows - 1) * TileGap);
+  Inc(Y, Rows * TileH + (Rows - 1) * Px(TileGap));
 end;
 
 { The initials of AName: the first letters of its first and last word,
@@ -538,16 +538,16 @@ begin
     Most := Max(Most, FInfo.Contributors[i].Commits);
     NameCol := Max(NameCol, Canvas.TextWidth(FInfo.Contributors[i].Name));
   end;
-  NameCol := Min(NameCol, MaxNameWidth) + 2 * Gap;
+  NameCol := Min(NameCol, Px(MaxNameWidth)) + 2 * Px(Gap);
   ShareW := Canvas.TextWidth('100%');
   for i := 0 to High(FInfo.Contributors) do
   begin
-    CenterY := Y + ContributorRow div 2;
+    CenterY := Y + Px(ContributorRow) div 2;
     TextY := CenterY - TextH div 2;
     { The row leads to the author's commits, filled under the mouse. }
     if Assigned(FOnOpenTarget) then
     begin
-      R := Rect(Pad - 6, Y + 1, Width - Pad + 6, Y + ContributorRow - 1);
+      R := Rect(Px(Pad) - 6, Y + 1, Width - Px(Pad) + 6, Y + Px(ContributorRow) - 1);
       if FHot = Length(FLinkRects) then
       begin
         Canvas.Pen.Style := psClear;
@@ -564,8 +564,8 @@ begin
     Canvas.Pen.Style := psClear;
     Canvas.Brush.Style := bsSolid;
     Canvas.Brush.Color := LaneColor(i);
-    Canvas.Ellipse(Pad, CenterY - AvatarSize div 2, Pad + AvatarSize,
-      CenterY + AvatarSize div 2);
+    Canvas.Ellipse(Px(Pad), CenterY - Px(AvatarSize) div 2, Px(Pad) + Px(AvatarSize),
+      CenterY + Px(AvatarSize) div 2);
     Canvas.Pen.Style := psSolid;
     Canvas.Brush.Style := bsClear;
     Mark := Initials(FInfo.Contributors[i].Name);
@@ -575,20 +575,20 @@ begin
     Canvas.Font.Style := [fsBold];
     Canvas.Font.Color := FBack;
     InitialsH := Canvas.TextHeight(Mark);
-    Canvas.TextOut(Pad + (AvatarSize - Canvas.TextWidth(Mark)) div 2,
+    Canvas.TextOut(Px(Pad) + (Px(AvatarSize) - Canvas.TextWidth(Mark)) div 2,
       CenterY - InitialsH div 2, Mark);
     Canvas.Font := Font;
     Canvas.Brush.Style := bsClear;
 
-    X := Pad + AvatarSize + Gap;
+    X := Px(Pad) + Px(AvatarSize) + Px(Gap);
     Canvas.Font.Color := FText;
-    Canvas.TextOut(X, TextY, FitRight(FInfo.Contributors[i].Name, NameCol - Gap));
+    Canvas.TextOut(X, TextY, FitRight(FInfo.Contributors[i].Name, NameCol - Px(Gap)));
 
     { The bar, left out when there is no room for it, then the count and
       the share right after it, in columns of their own. }
     BarX := X + NameCol;
-    BarRight := Width - Pad - ShareW - 2 * Gap - Canvas.TextWidth('00 000');
-    BarW := Min(BarWidth, BarRight - BarX);
+    BarRight := Width - Px(Pad) - ShareW - 2 * Px(Gap) - Canvas.TextWidth('00 000');
+    BarW := Min(Px(BarWidth), BarRight - BarX);
     if BarW < 40 then
       BarW := 0;
     if FInfo.Commits > 0 then
@@ -597,29 +597,29 @@ begin
       Share := '';
     Count := GroupDigits(FInfo.Contributors[i].Commits);
     CountW := Canvas.TextWidth(Count);
-    X := BarX + BarW + Gap + Canvas.TextWidth('00 000');
+    X := BarX + BarW + Px(Gap) + Canvas.TextWidth('00 000');
     Canvas.Font.Color := FText;
     Canvas.TextOut(X - CountW, TextY, Count);
     Canvas.Font.Color := FDim;
-    Canvas.TextOut(X + Gap + ShareW - Canvas.TextWidth(Share), TextY, Share);
+    Canvas.TextOut(X + Px(Gap) + ShareW - Canvas.TextWidth(Share), TextY, Share);
 
     if BarW > 0 then
     begin
-      R := Rect(BarX, CenterY - BarHeight div 2, BarX + BarW, CenterY + BarHeight div 2);
+      R := Rect(BarX, CenterY - Px(BarHeight) div 2, BarX + BarW, CenterY + Px(BarHeight) div 2);
       Canvas.Pen.Style := psClear;
       Canvas.Brush.Style := bsSolid;
       Canvas.Brush.Color := FHover;
-      Canvas.RoundRect(R, BarHeight, BarHeight);
+      Canvas.RoundRect(R, Px(BarHeight), Px(BarHeight));
       if Most > 0 then
       begin
-        R.Right := BarX + Max(BarHeight, BarW * FInfo.Contributors[i].Commits div Most);
+        R.Right := BarX + Max(Px(BarHeight), BarW * FInfo.Contributors[i].Commits div Most);
         Canvas.Brush.Color := LaneColor(i);
-        Canvas.RoundRect(R, BarHeight, BarHeight);
+        Canvas.RoundRect(R, Px(BarHeight), Px(BarHeight));
       end;
       Canvas.Pen.Style := psSolid;
       Canvas.Brush.Style := bsClear;
     end;
-    Inc(Y, ContributorRow);
+    Inc(Y, Px(ContributorRow));
   end;
 end;
 
@@ -636,7 +636,7 @@ begin
   Canvas.Font := Font;
   Canvas.Brush.Style := bsClear;
   TextH := Canvas.TextHeight('Xg');
-  Y := Pad;
+  Y := Px(Pad);
 
   { The name with the branch after it, as the summary's header has it,
     and what the branch tracks; the path under them. }
@@ -644,8 +644,8 @@ begin
   Canvas.Font.Style := [fsBold];
   Canvas.Font.Color := FText;
   TitleH := Canvas.TextHeight('Xg');
-  Canvas.TextOut(Pad, Y, FName);
-  X := Pad + Canvas.TextWidth(FName) + Gap;
+  Canvas.TextOut(Px(Pad), Y, FName);
+  X := Px(Pad) + Canvas.TextWidth(FName) + Px(Gap);
   Canvas.Font := Font;
   Canvas.Brush.Style := bsClear;
   if FHasInfo then
@@ -659,7 +659,7 @@ begin
       Inc(X, TextH - 4 + 5);
       Canvas.Font.Color := FText;
       Canvas.TextOut(X, TextY, FInfo.Branch);
-      Inc(X, Canvas.TextWidth(FInfo.Branch) + Gap);
+      Inc(X, Canvas.TextWidth(FInfo.Branch) + Px(Gap));
       if FInfo.Upstream <> '' then
         Detail := Format(rsUpstreamOf, [FInfo.Upstream])
       else
@@ -671,49 +671,49 @@ begin
       Detail := Detail + ' · ' + Format(rsLastCommit,
         [ReviewAge(FInfo.LastCommit, LocalTimeToUniversal(Now))]);
     Canvas.Font.Color := FDim;
-    Canvas.TextOut(X, TextY, FitRight(Detail, Max(0, Width - Pad - X)));
+    Canvas.TextOut(X, TextY, FitRight(Detail, Max(0, Width - Px(Pad) - X)));
   end;
   Inc(Y, TitleH + 2);
   Canvas.Font.Color := FDim;
-  Canvas.TextOut(Pad, Y, FitLeft(FRoot, Width - 2 * Pad));
+  Canvas.TextOut(Px(Pad), Y, FitLeft(FRoot, Width - 2 * Px(Pad)));
   Inc(Y, TextH);
   if FLoading or (FHasInfo and not FInfo.Ok) then
   begin
-    Inc(Y, Gap div 2);
+    Inc(Y, Px(Gap) div 2);
     if FLoading then
     begin
       Canvas.Font.Color := FDim;
-      Canvas.TextOut(Pad, Y, rsLoading);
+      Canvas.TextOut(Px(Pad), Y, rsLoading);
     end
     else
     begin
       Canvas.Font.Color := FErrorColor;
-      Canvas.TextOut(Pad, Y, FitRight(Trim(FInfo.Error), Width - 2 * Pad));
+      Canvas.TextOut(Px(Pad), Y, FitRight(Trim(FInfo.Error), Width - 2 * Px(Pad)));
     end;
     Inc(Y, TextH);
   end;
 
   if FHasInfo then
   begin
-    Inc(Y, Pad);
+    Inc(Y, Px(Pad));
     PaintTiles(Y);
 
     HeadingTop := Y;
     PaintHeading(Y, rsRemotes, '');
     if Assigned(FOnEditRemotes) then
-      PaintAction(HeadingTop + Pad, rsEditRemotes, EditRemotesLink);
+      PaintAction(HeadingTop + Px(Pad), rsEditRemotes, EditRemotesLink);
     Canvas.Font := Font;
     Canvas.Font.Style := [fsBold];
     NameW := 0;
     for i := 0 to High(FInfo.Remotes) do
       NameW := Max(NameW, Canvas.TextWidth(FInfo.Remotes[i].Name));
-    NameW := Min(NameW, MaxNameWidth) + 2 * Gap;
+    NameW := Min(NameW, Px(MaxNameWidth)) + 2 * Px(Gap);
     if Length(FInfo.Remotes) = 0 then
     begin
       Canvas.Font := Font;
       Canvas.Font.Color := FDim;
-      Canvas.TextOut(Pad, Y + (RemoteRow - TextH) div 2, rsNoRemotes);
-      Inc(Y, RemoteRow);
+      Canvas.TextOut(Px(Pad), Y + (Px(RemoteRow) - TextH) div 2, rsNoRemotes);
+      Inc(Y, Px(RemoteRow));
     end
     else
       for i := 0 to High(FInfo.Remotes) do
@@ -728,8 +728,8 @@ begin
     begin
       Canvas.Font := Font;
       Canvas.Font.Color := FDim;
-      Canvas.TextOut(Pad, Y + (RowHeight - TextH) div 2, rsNone);
-      Inc(Y, RowHeight);
+      Canvas.TextOut(Px(Pad), Y + (Px(RowHeight) - TextH) div 2, rsNone);
+      Inc(Y, Px(RowHeight));
     end
     else
       PaintContributors(Y);
@@ -739,7 +739,7 @@ begin
     may have changed: tiles wrapped into fewer rows leave it too tall.
     The height follows what was painted, up or down; it does not depend
     on the height, so this paint is the last. }
-  FContentHeight := Y + Pad;
+  FContentHeight := Y + Px(Pad);
   if Height <> Max(FContentHeight, Constraints.MinHeight) then
     Height := Max(FContentHeight, Constraints.MinHeight);
 end;
