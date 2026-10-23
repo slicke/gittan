@@ -43,6 +43,8 @@ begin
     edge, and a section shown later would otherwise be put under it. }
   FCommitPanel.Top := MaxInt div 2;
   FCommitPanel.Parent := FTreePanel;
+  { A note in it makes it taller, which the sections above give back. }
+  FCommitPanel.OnResize := @TreePanelResize;
   FCommitHeader := TGittanSectionHeader.Create(Self);
   FCommitHeader.Title := rsCommitSection;
   FCommitHeader.Align := alTop;
