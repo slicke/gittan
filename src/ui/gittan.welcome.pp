@@ -92,7 +92,7 @@ type
 implementation
 
 uses
-  Math, LazUTF8, gittan.statusbar, gittan.textfit;
+  Math, LazUTF8, gittan.statusbar, gittan.textfit, gittan.theme;
 
 resourcestring
   rsOpenButton = 'Open Repository…';
@@ -277,7 +277,7 @@ begin
   Canvas.Font := Font;
   Canvas.Brush.Style := bsClear;
   LineHeight := Canvas.TextHeight('Xg');
-  ColWidth := Min(ColumnWidth, Width - 2 * Pad);
+  ColWidth := Min(Px(ColumnWidth), Width - 2 * Px(Pad));
   ColLeft := (Width - ColWidth) div 2;
   HasIcon := (FIcon <> nil) and not FIcon.Empty;
 
@@ -295,25 +295,25 @@ begin
   Captions[2] := rsInitButton;
   KeyWidth := 0;
   if FShortcut <> '' then
-    KeyWidth := Gap + Canvas.TextWidth(FShortcut) + 2 * KeyPadX;
-  RowWidth := KeyWidth + 2 * Gap;
+    KeyWidth := Px(Gap) + Canvas.TextWidth(FShortcut) + 2 * Px(KeyPadX);
+  RowWidth := KeyWidth + 2 * Px(Gap);
   { The key caps stand a little apart from the next button. }
   if KeyWidth > 0 then
-    Inc(RowWidth, Gap);
+    Inc(RowWidth, Px(Gap));
   for i := 0 to High(Captions) do
   begin
-    ButtonWidths[i] := Canvas.TextWidth(Captions[i]) + 2 * ButtonPadX;
+    ButtonWidths[i] := Canvas.TextWidth(Captions[i]) + 2 * Px(ButtonPadX);
     Inc(RowWidth, ButtonWidths[i]);
   end;
-  Stacked := RowWidth > Width - 2 * Pad;
-  ButtonHeight := LineHeight + 2 * ButtonPadY;
+  Stacked := RowWidth > Width - 2 * Px(Pad);
+  ButtonHeight := LineHeight + 2 * Px(ButtonPadY);
   if Stacked then
     ButtonRows := Length(Captions)
   else
     ButtonRows := 1;
   Total := 0;
   if HasIcon then
-    Inc(Total, IconSize + Gap);
+    Inc(Total, Px(IconSize) + Px(Gap));
   Inc(Total, TitleHeight + 2);
   if FTagline <> '' then
     Inc(Total, LineHeight);
@@ -324,19 +324,19 @@ begin
     begin
       WrapError(ColWidth, ErrLines);
       ErrHeight := ErrLines.Count * LineHeight;
-      Inc(Total, Gap + ErrHeight);
+      Inc(Total, Px(Gap) + ErrHeight);
     end;
-    Inc(Total, Pad + ButtonRows * ButtonHeight + (ButtonRows - 1) * Gap div 2);
+    Inc(Total, Px(Pad) + ButtonRows * ButtonHeight + (ButtonRows - 1) * Px(Gap) div 2);
     if FRecent.Count > 0 then
-      Inc(Total, Pad + LineHeight + Gap div 2 + 1 + Gap div 2 + FRecent.Count * RowHeight);
-    Inc(Total, Pad + LineHeight);
-    FContentHeight := Total + 2 * Pad;
+      Inc(Total, Px(Pad) + LineHeight + Px(Gap) div 2 + 1 + Px(Gap) div 2 + FRecent.Count * Px(RowHeight));
+    Inc(Total, Px(Pad) + LineHeight);
+    FContentHeight := Total + 2 * Px(Pad);
     if Height < FContentHeight then
     begin
       Height := Max(FContentHeight, Constraints.MinHeight);
       Exit;
     end;
-    BlockTop := Max(Pad, (Height - Total) * 2 div 5);
+    BlockTop := Max(Px(Pad), (Height - Total) * 2 div 5);
     Y := BlockTop;
 
     if HasIcon then
@@ -348,13 +348,13 @@ begin
       if FIconBitmap = nil then
       begin
         FIcon.Current := FIcon.GetBestIndexForSize(
-          Size(Round(IconSize * GetCanvasScaleFactor), Round(IconSize * GetCanvasScaleFactor)));
+          Size(Round(Px(IconSize) * GetCanvasScaleFactor), Round(Px(IconSize) * GetCanvasScaleFactor)));
         FIconBitmap := TBitmap.Create;
         FIconBitmap.LoadFromRawImage(FIcon.RawImage, False);
       end;
-      Canvas.StretchDraw(Rect((Width - IconSize) div 2, Y, (Width + IconSize) div 2,
-        Y + IconSize), FIconBitmap);
-      Inc(Y, IconSize + Gap);
+      Canvas.StretchDraw(Rect((Width - Px(IconSize)) div 2, Y, (Width + Px(IconSize)) div 2,
+        Y + Px(IconSize)), FIconBitmap);
+      Inc(Y, Px(IconSize) + Px(Gap));
     end;
 
     Canvas.Font.Size := TitleFontSize;
@@ -373,7 +373,7 @@ begin
 
     if FError <> '' then
     begin
-      Inc(Y, Gap);
+      Inc(Y, Px(Gap));
       Canvas.Font.Color := FErrorColor;
       for i := 0 to ErrLines.Count - 1 do
         Canvas.TextOut((Width - Canvas.TextWidth(ErrLines[i])) div 2,
@@ -383,7 +383,7 @@ begin
 
     { The buttons, as one centered group, or each centered under the one
       before; the open button's shortcut beside it. }
-    Inc(Y, Pad);
+    Inc(Y, Px(Pad));
     if Stacked then
       X := 0
     else
@@ -409,21 +409,21 @@ begin
       Canvas.RoundRect(FButtonRects[i], 10, 10);
       Canvas.Brush.Style := bsClear;
       Canvas.Font.Color := FText;
-      Canvas.TextOut(X + ButtonPadX, Y + ButtonPadY, Captions[i]);
-      X := FButtonRects[i].Right + Gap;
+      Canvas.TextOut(X + Px(ButtonPadX), Y + Px(ButtonPadY), Captions[i]);
+      X := FButtonRects[i].Right + Px(Gap);
       if (i = 0) and (FShortcut <> '') then
       begin
         { The shortcut as a key cap: a small rounded frame in dim. }
-        TextY := Y + ButtonPadY;
-        R := Rect(X, TextY - KeyPadY, X + KeyWidth - Gap, TextY + LineHeight + KeyPadY);
+        TextY := Y + Px(ButtonPadY);
+        R := Rect(X, TextY - Px(KeyPadY), X + KeyWidth - Px(Gap), TextY + LineHeight + Px(KeyPadY));
         Canvas.Pen.Color := FLine;
         Canvas.RoundRect(R, 6, 6);
         Canvas.Font.Color := FDim;
-        Canvas.TextOut(X + KeyPadX, TextY, FShortcut);
-        X := R.Right + 2 * Gap;
+        Canvas.TextOut(X + Px(KeyPadX), TextY, FShortcut);
+        X := R.Right + 2 * Px(Gap);
       end;
       if Stacked and (i < High(Captions)) then
-        Inc(Y, ButtonHeight + Gap div 2);
+        Inc(Y, ButtonHeight + Px(Gap) div 2);
     end;
     Inc(Y, ButtonHeight);
 
@@ -432,16 +432,16 @@ begin
     SetLength(FRowRects, FRecent.Count);
     if FRecent.Count > 0 then
     begin
-      Inc(Y, Pad);
+      Inc(Y, Px(Pad));
       Canvas.Font.Color := FDim;
       Canvas.TextOut(ColLeft, Y, rsRecent);
-      Inc(Y, LineHeight + Gap div 2);
+      Inc(Y, LineHeight + Px(Gap) div 2);
       Canvas.Pen.Color := FLine;
       Canvas.Line(ColLeft, Y, ColLeft + ColWidth, Y);
-      Inc(Y, 1 + Gap div 2);
+      Inc(Y, 1 + Px(Gap) div 2);
       for i := 0 to FRecent.Count - 1 do
       begin
-        FRowRects[i] := Rect(ColLeft - RowPadX, Y, ColLeft + ColWidth + RowPadX, Y + RowHeight);
+        FRowRects[i] := Rect(ColLeft - Px(RowPadX), Y, ColLeft + ColWidth + Px(RowPadX), Y + Px(RowHeight));
         Missing := RecentMissing(i);
         if FHot = i then
         begin
@@ -452,13 +452,13 @@ begin
           Canvas.Pen.Style := psSolid;
           Canvas.Brush.Style := bsClear;
         end;
-        DrawStatusIcon(Canvas, HintFolder, ColLeft + 2, Y + (RowHeight - FolderSize) div 2,
-          FolderSize, FDim);
+        DrawStatusIcon(Canvas, HintFolder, ColLeft + 2, Y + (Px(RowHeight) - Px(FolderSize)) div 2,
+          Px(FolderSize), FDim);
         Canvas.Brush.Style := bsClear;
-        X := ColLeft + FolderSize + Gap;
+        X := ColLeft + Px(FolderSize) + Px(Gap);
         RepoName := ExtractFileName(ExcludeTrailingPathDelimiter(FRecent[i]));
         Path := FRecent[i];
-        TextY := Y + (RowHeight - 2 * LineHeight) div 2;
+        TextY := Y + (Px(RowHeight) - 2 * LineHeight) div 2;
         if Missing then
           Canvas.Font.Color := FDim
         else
@@ -467,13 +467,13 @@ begin
         NameWidth := Canvas.TextWidth(RepoName);
         Canvas.Font.Color := FDim;
         if Missing then
-          Canvas.TextOut(X + NameWidth + Gap div 2, TextY, '· ' + rsNotFound);
+          Canvas.TextOut(X + NameWidth + Px(Gap) div 2, TextY, '· ' + rsNotFound);
         Canvas.TextOut(X, TextY + LineHeight, FitLeft(Path, ColLeft + ColWidth - X));
-        Inc(Y, RowHeight);
+        Inc(Y, Px(RowHeight));
       end;
     end;
 
-    Inc(Y, Pad);
+    Inc(Y, Px(Pad));
     Canvas.Font.Color := FDim;
     Canvas.TextOut((Width - Canvas.TextWidth(rsDrop)) div 2, Y, rsDrop);
   finally
