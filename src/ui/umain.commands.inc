@@ -127,6 +127,10 @@ begin
   FCommandJob := TGittanCommandJob.Create(FRepo.Root, Cmd.Command);
   FCommandJob.OnOutput := @CommandJobOutput;
   FCommandJob.OnDone := @CommandJobDone;
+  { The editor's font, as the notice's detail takes it: ApplyEditorFont
+    reaches the console only when the font changes, and the font read
+    from the settings at start never went through it. }
+  FCommandPage.Console.Font.Assign(Edit.Font);
   FCommandPage.Console.Text := '';
   FCommandPage.Console.FollowEnd := True;
   FCommandPage.SetRun(Cmd.Name, True, -1, 0, True, False);
