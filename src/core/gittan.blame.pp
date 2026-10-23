@@ -92,7 +92,7 @@ function BlameDate(ATime: int64): string;
 implementation
 
 uses
-  DateUtils;
+  DateUtils, gittan.textfile;
 
 const
   { A commit id in hex: SHA-1, or SHA-256 in a repository made with
@@ -154,20 +154,15 @@ end;
 
 function TGittanBlame.Parse(const AOutput: string): boolean;
 var
-  Start, Stop, Final, HashLength, Current, p: integer;
+  Start, Final, HashLength, Current, p: integer;
   Line, Key, Value: string;
 begin
   FCommits := nil;
   FLines := nil;
   Current := -1;
   Start := 1;
-  while Start <= Length(AOutput) do
+  while NextLine(AOutput, Start, Line) do
   begin
-    Stop := Pos(#10, AOutput, Start);
-    if Stop = 0 then
-      Stop := Length(AOutput) + 1;
-    Line := Copy(AOutput, Start, Stop - Start);
-    Start := Stop + 1;
     if (Line <> '') and (Line[1] = #9) then
       Continue;
     if HeaderLine(Line, Final, HashLength) then

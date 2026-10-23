@@ -52,6 +52,9 @@ function AddIgnorePattern(const AFileName, APattern: string): boolean;
 
 implementation
 
+uses
+  gittan.textfile;
+
 { Adds every file under ADir (a full path) to AList as ARel + its name,
   walking into the folders. }
 procedure AddFolder(const ADir, ARel: string; AList: TStrings);
@@ -145,14 +148,7 @@ begin
     Text := '';
     if FileExists(AFileName) then
     begin
-      F := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
-      try
-        SetLength(Text, F.Size);
-        if F.Size > 0 then
-          F.ReadBuffer(Text[1], F.Size);
-      finally
-        F.Free;
-      end;
+      Text := ReadFileBytes(AFileName);
       Lines := TStringList.Create;
       try
         { git matches the patterns case-sensitively (core.ignoreCase
