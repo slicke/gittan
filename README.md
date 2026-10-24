@@ -5,7 +5,7 @@
 <h1 align="center">Gittan</h1>
 
 <p align="center"><strong>Git Tree Analyzer &amp; Navigator</strong><br>
-A free, native git client built around the diff. See what you changed as you change it, who wrote each line and the history behind it, then commit, sync and merge without leaving it.</p>
+A free, native git client built around the diff. See what you changed as you change it, who wrote each line and the history behind it, then commit, sync and merge without leaving it. The AI features are off until you turn them on.</p>
 
 <p align="center">
   <a href="https://github.com/slicke/gittan/releases/latest">Download</a> ·
@@ -33,7 +33,7 @@ Packaged builds for every platform are on the [Releases page](https://github.com
 | Windows (x64) | `Gittan-windows-x64.zip` |
 | Linux (amd64, GTK 3) | `Gittan-linux-amd64.tar.gz` |
 
-Gittan needs git 2.30 or later on your `PATH`. The macOS build is signed ad hoc, so macOS blocks it at first: drag it to Applications, then run `xattr -cr /Applications/Gittan.app` in Terminal. The GitHub features (pull requests and review comments) use the `gh` CLI when it is installed and signed in. The AI features, off until you turn them on, use [Claude Code](https://code.claude.com/docs) or [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli) with your own sign-in.
+Gittan needs git 2.30 or later on your `PATH`. The macOS build is signed ad hoc, so macOS blocks it at first: drag it to Applications, then run `xattr -cr /Applications/Gittan.app` in Terminal. The GitHub features (pull requests and review comments) use the `gh` CLI when it is installed and signed in. The AI features use [Claude Code](https://code.claude.com/docs) or [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli) with your own sign-in.
 
 ## What it does
 
