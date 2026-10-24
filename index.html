@@ -410,6 +410,14 @@
   @keyframes blink { 50% { opacity: 0; } }
   .commitbox .go { display: grid; place-items: center; padding: 0 14px; border-radius: 8px; font-size: 13px; font-weight: 650; background: var(--ink); color: var(--ink-fg); }
   .commitbox .amend { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--fg-muted); }
+  .mini.settings div { display: flex; align-items: center; gap: 8px; }
+  .mini.settings .n { margin-left: auto; color: var(--fg-faint); }
+  .rdo { flex: none; width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--line-strong); background: var(--bg-elev); position: relative; }
+  .rdo.on { border-color: var(--accent); }
+  .rdo.on::after { content: ""; position: absolute; inset: 2.5px; border-radius: 50%; background: var(--accent); }
+  .aicard { margin-top: 10px; font-size: 12.5px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); border-left: 3px solid #8b5cf6; background: var(--bg-elev); color: var(--fg-muted); }
+  .aicard b { color: var(--fg); font-weight: 650; }
+  .aicard .who { color: #8b5cf6; font-weight: 600; margin-right: 6px; }
   .uipills { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
   .uipills span { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--bg-elev); color: var(--fg-muted); }
   .uipills .hot { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
@@ -571,7 +579,7 @@
       <img class="icon" src="assets/icon-256.png" alt="Gittan icon" width="88" height="88">
     </picture>
     <p class="name"><em>Git</em> <em>T</em>ree <em>A</em>nalyzer &amp; <em>N</em>avigator</p>
-    <div><a class="pill" href="#tour"><b>New</b> AI review and commit messages, with Claude Code or Copilot <span aria-hidden="true">→</span></a></div>
+    <div><a class="pill" href="#ai"><b>New</b> AI review and commit messages, off until you turn them on <span aria-hidden="true">→</span></a></div>
     <h1>Understand every change.<br><em>Then commit it.</em></h1>
     <span class="strandline" aria-hidden="true"><svg class="strand"><use href="#strand"/></svg></span>
     <p class="tag">Gittan is a free, native git client built around the diff. See what you changed as you change it, who wrote each line and the history behind it, then commit, sync and merge without leaving it.</p>
@@ -940,6 +948,22 @@
             <div>Chart legend<i>elevation-chart · 1d</i></div>
             <div class="sel">Try a dark map style<i>main · 4d</i></div>
           </div>
+        </div>
+      </div>
+
+      <div class="story wide reveal" id="ai">
+        <div>
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2z"/><path d="M19 17l.8 2.2L22 20l-2.2.8L19 23l-.8-2.2L16 20l2.2-.8z"/></svg></div>
+          <h3>AI when you want it</h3>
+          <p>Off until you turn it on in the settings. Then pick Claude Code or GitHub Copilot, whichever you already use: Gittan runs its command line tool in the repository with your own sign-in, and has no account or API key of its own. <b>✦ AI</b> in the Commit section writes the message for the ticked files, short and in the style of the recent commits, and Review Changes with AI (<kbd>⌘⌥R</kbd>) puts what it finds under the lines it is about. The agent may read the repository to check a finding, but gets no tool that writes, runs a command or goes to the network, and nothing is sent until you ask.</p>
+        </div>
+        <div class="art" aria-hidden="true">
+          <div class="mini settings">
+            <div><span class="cbx on"></span>Turn on the AI features</div>
+            <div style="padding-left:32px"><span class="rdo on"></span>Claude Code<span class="n">claude</span></div>
+            <div style="padding-left:32px"><span class="rdo"></span>GitHub Copilot<span class="n">copilot</span></div>
+          </div>
+          <div class="aicard"><span class="who">✦ Claude Code</span><b>Bug</b> · Two fetches race, and the older answer can win.</div>
         </div>
       </div>
     </div>
