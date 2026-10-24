@@ -708,41 +708,66 @@ end;
 { The editor paints a line's gutter over the gaps under it as well, and
   centers the number the change view puts there (gutter decor) in that
   height. Over the cards the gutter is painted plain again and the
-  number put back next to its line. Called from OnDrawEditor. }
+  number put back next to its line. The block staples, the lines the
+  editor draws down a block of code after the text, run through the
+  cards under its lines, so the cards are painted again over them.
+  Called from OnDrawEditor, which comes after both. }
 procedure TForm1.DrawGapGutter(AEd: TATSynEdit; C: TCanvas);
 var
-  Band, i, d, Line, Y, CharH, Below: integer;
+  Band, i, g, First, d, Line, Y, CharH, Below, GapTop: integer;
   Decor: PATGutterDecorItem;
 begin
   if (AEd.Gaps.Count = 0) or (FView <> gvChanges) then
     Exit;
   Band := AEd.Gutter.FindIndexByTag(ATEditorOptions.GutterTagBookmarks);
   CharH := AEd.TextCharSize.Y;
-  C.Font.Name := AEd.Font.Name;
-  C.Font.Size := EditorFontSize(AEd);
-  C.Font.Style := [];
-  C.Clipping := True;
-  C.ClipRect := Rect(0, AEd.RectMain.Top, AEd.RectMain.Left, AEd.RectMain.Bottom);
   try
     i := 0;
     while i < AEd.Gaps.Count do
     begin
       Line := AEd.Gaps[i].LineIndex;
       { The gaps of one line, in a row. }
+      First := i;
       Below := 0;
       while (i < AEd.Gaps.Count) and (AEd.Gaps[i].LineIndex = Line) do
       begin
         Inc(Below, AEd.Gaps[i].Size);
         Inc(i);
       end;
-      if (Line < 0) or not AEd.Strings.IsIndexValid(Line) or AEd.IsLineFolded(Line) then
+      if Line < 0 then
+      begin
+        { The gaps before the first line end where it starts. }
+        if AEd.Strings.Count = 0 then
+          Continue;
+        Y := -1;
+        GapTop := AEd.CaretPosToClientPos(Point(0, 0)).Y - Below;
+      end
+      else
+      begin
+        if not AEd.Strings.IsIndexValid(Line) or AEd.IsLineFolded(Line) then
+          Continue;
+        Y := AEd.CaretPosToClientPos(Point(0, Line)).Y;
+        { Under the last row of a wrapped line. }
+        GapTop := AEd.CaretPosToClientPos(Point(AEd.Strings.LinesLen[Line], Line)).Y + CharH;
+      end;
+      if (GapTop + Below < AEd.RectMain.Top) or (GapTop >= AEd.RectMain.Bottom) then
         Continue;
-      Y := AEd.CaretPosToClientPos(Point(0, Line)).Y;
-      if (Y + CharH + Below < AEd.RectMain.Top) or (Y >= AEd.RectMain.Bottom) then
+      for g := First to i - 1 do
+      begin
+        EditDrawGap(AEd, C, Rect(AEd.RectMain.Left, GapTop, AEd.RectMain.Right,
+          GapTop + AEd.Gaps[g].Size), AEd.Gaps[g]);
+        Inc(GapTop, AEd.Gaps[g].Size);
+      end;
+      if Line < 0 then
         Continue;
+      C.Font.Name := AEd.Font.Name;
+      C.Font.Size := EditorFontSize(AEd);
+      C.Font.Style := [];
+      C.Clipping := True;
+      C.ClipRect := Rect(0, AEd.RectMain.Top, AEd.RectMain.Left, AEd.RectMain.Bottom);
       C.Brush.Style := bsSolid;
       C.Brush.Color := AEd.Colors.GutterBG;
-      C.FillRect(Rect(0, Y + CharH, AEd.RectMain.Left, Y + CharH + Below));
+      C.FillRect(Rect(0, GapTop - Below, AEd.RectMain.Left, GapTop));
       if Band < 0 then
         Continue;
       for d := 0 to AEd.GutterDecor.Count - 1 do

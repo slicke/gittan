@@ -33,7 +33,7 @@ Packaged builds for every platform are on the [Releases page](https://github.com
 | Windows (x64) | `Gittan-windows-x64.zip` |
 | Linux (amd64, GTK 3) | `Gittan-linux-amd64.tar.gz` |
 
-Gittan needs git 2.30 or later on your `PATH`. The macOS build is signed ad hoc, so macOS blocks it at first: drag it to Applications, then run `xattr -cr /Applications/Gittan.app` in Terminal. The GitHub features (pull requests and review comments) use the `gh` CLI when it is installed and signed in.
+Gittan needs git 2.30 or later on your `PATH`. The macOS build is signed ad hoc, so macOS blocks it at first: drag it to Applications, then run `xattr -cr /Applications/Gittan.app` in Terminal. The GitHub features (pull requests and review comments) use the `gh` CLI when it is installed and signed in. The AI features, off until you turn them on, use [Claude Code](https://code.claude.com/docs) or [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli) with your own sign-in.
 
 ## What it does
 
@@ -42,6 +42,8 @@ Gittan needs git 2.30 or later on your `PATH`. The macOS build is signed ad hoc,
 **History beside the code.** Blame puts who last changed each line, and when, in a column beside the diff. Code History lays the earlier versions of the selected lines, or the function the caret is in, under the lines themselves, one color per commit. The commit graph draws every branch and tag, marks what is not pushed or not pulled, and filters as you type (`author:`, `since:`, `until:`, `path:`). Browse the files of any commit as they were then, or turn the graph into commits per week and author.
 
 **Commit, sync and merge.** Tick the files that belong together, skip a block of a file for a later commit, write the message and commit. Pull, push and fetch sit in the status bar with the ahead and behind counts; a failed command tells in a banner with git's reason instead of a dialog. Branches, stashes, tags, reflog, remotes, clone and init, patches, cherry-pick, revert, reset, interactive rebase, bisect, and a conflict view with Use Mine, Use Theirs and one conflict at a time. Anything that would throw work away asks first.
+
+**AI when you want it.** Turn it on in the settings and pick Claude Code or GitHub Copilot, whichever you already use; Gittan runs its command line tool in the repository with your own sign-in and has no account or API key of its own. ✦ AI in the Commit section writes the message for the ticked files, short and in the style of the repository's recent commits. Review Changes with AI goes through what the diff compares and puts what it finds, bugs, risks and questions, as cards under the lines they are about, beside a pull request's review comments. The agent may read the repository to check a finding but gets no tool that writes, runs a command or goes to the network, and nothing is sent until you ask.
 
 **At home on each desktop.** The actions sit in the title bar on every platform, the window follows the system's dark mode (on Windows the native controls too), and Tools > Install CLI Command gives you a `gittan` command that opens a folder in it.
 
