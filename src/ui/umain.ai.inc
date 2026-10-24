@@ -5,10 +5,11 @@
   copilot, run in the repository (gittan.ai). Nothing of it shows until
   the settings turn the features on (AI page, off by default, since the
   changes go to the agent's provider) and the command of the agent they
-  pick is found. The first feature is the Write button in the commit
-  row: the agent writes the message for the ticked files, which goes
-  into the field when the field is as it was when the button was
-  clicked. A click while it writes stops it. }
+  pick is found. The first feature is AI at the right end of the Commit
+  header, and File > Write Commit Message (Shift+Cmd+K): the agent
+  writes the message for the ticked files, which goes into the field
+  when the field is as it was when it was asked. Either again while it
+  writes stops it. }
 
 { The agent the settings pick, its command by the path they give, else
   where it is found, and its model. }
@@ -33,30 +34,41 @@ begin
 end;
 
 { Shown with the features on and nothing for git to carry on with (a
-  merge or a rebase has its message); while it writes the button stops
-  it, otherwise it needs files ticked (or Amend, which describes HEAD)
-  and no commit running. }
-procedure TForm1.UpdateMessageButton;
+  merge or a rebase has its message); while it writes it stops it,
+  otherwise it needs files ticked (or Amend, which describes HEAD) and
+  no commit running. The menu item stays in the menu while the features
+  are on, disabled when the header has no AI. }
+procedure TForm1.UpdateMessageAction;
+var
+  Shown, Can: boolean;
 begin
-  if FMessageButton = nil then
+  if (FCommitHeader = nil) or (FMessageItem = nil) then
     Exit;
-  FMessageButton.Visible := AIAvailable and (FOperation = '') and CommitChoosing;
+  Shown := AIAvailable and (FOperation = '') and CommitChoosing;
   if FMessageJob <> nil then
   begin
-    FMessageButton.Caption := rsWritingMessage;
-    FMessageButton.Hint := Format(rsWritingMessageHint, [AgentNames[FAgent]]);
-    FMessageButton.Enabled := True;
+    FCommitHeader.Action := rsWritingMessage;
+    FCommitHeader.ActionHint := Format(rsWritingMessageHint, [AgentNames[FAgent]]);
+    FMessageItem.Caption := rsStopMessageMenu;
+    Can := True;
   end
   else
   begin
-    FMessageButton.Caption := rsWriteMessage;
-    FMessageButton.Hint := Format(rsWriteMessageHint, [AgentNames[FAgent]]);
-    FMessageButton.Enabled := (FCommitJob = nil) and ((FChosenCount > 0) or
-      FCommitAmend.Checked);
+    FCommitHeader.Action := rsWriteMessage;
+    FCommitHeader.ActionHint := Format(rsWriteMessageHint, [AgentNames[FAgent]]);
+    FMessageItem.Caption := rsWriteMessageMenu;
+    Can := (FCommitJob = nil) and ((FChosenCount > 0) or FCommitAmend.Checked);
   end;
+  if not Shown then
+    FCommitHeader.Action := '';
+  FCommitHeader.ActionEnabled := Can;
+  FMessageItem.Visible := AIAvailable;
+  FMessageItem.Enabled := Shown and Can;
 end;
 
-procedure TForm1.MessageButtonClick(Sender: TObject);
+{ From the header or the menu: the section unfolds, so the message is
+  seen when it comes. }
+procedure TForm1.MessageActionClick(Sender: TObject);
 begin
   if FMessageJob <> nil then
   begin
@@ -65,7 +77,14 @@ begin
     UpdateCommitState;
   end
   else
+  begin
+    if not FCommitHeader.Expanded then
+    begin
+      FCommitHeader.Expanded := True;
+      CommitHeaderToggle(nil);
+    end;
     StartMessageJob;
+  end;
 end;
 
 procedure TForm1.StartMessageJob;

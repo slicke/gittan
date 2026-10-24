@@ -11,7 +11,10 @@ unit gittan.sectionheader;
   shows or hides the content and sizes it. It can show a check box
   between the title and the detail (CheckIndex, an image of
   CheckImages, as the rows under it draw theirs), whose click raises
-  OnCheck instead: the Commit section ticks every file with it. }
+  OnCheck instead: the Commit section ticks every file with it. It can
+  also show an action at the right end (Action), a link in ActionColor
+  underlined under the mouse, whose click raises OnAction instead: the
+  Commit section's AI. }
 
 {$mode objfpc}{$H+}
 
@@ -35,7 +38,17 @@ type
     { The check box as last painted, empty without one. }
     FCheckRect: TRect;
     FOnCheck: TNotifyEvent;
+    FAction, FActionHint: string;
+    FActionEnabled, FActionHot: boolean;
+    FActionColor: TColor;
+    { The action as last painted, empty without one. }
+    FActionRect: TRect;
+    FOnAction: TNotifyEvent;
     procedure SetCheckIndex(AValue: integer);
+    procedure SetAction(const AValue: string);
+    procedure SetActionEnabled(AValue: boolean);
+    procedure SetActionColor(AValue: TColor);
+    function OverAction(X, Y: integer): boolean;
     procedure SetTitle(const AValue: string);
     procedure SetDetail(const AValue: string);
     procedure SetExpanded(AValue: boolean);
@@ -45,6 +58,7 @@ type
     procedure Paint; override;
     procedure MouseEnter; override;
     procedure MouseLeave; override;
+    procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
       override;
   public
@@ -68,6 +82,17 @@ type
     property CheckIndex: integer read FCheckIndex write SetCheckIndex;
     {** A click on the check box, which leaves Expanded alone. }
     property OnCheck: TNotifyEvent read FOnCheck write FOnCheck;
+    {** The action's text at the right end, '' (the default) for none. }
+    property Action: string read FAction write SetAction;
+    {** The hint shown over the action, and only there. }
+    property ActionHint: string read FActionHint write FActionHint;
+    {** Whether a click on the action raises OnAction; a disabled one is
+      dimmed and its click does nothing, not even fold. }
+    property ActionEnabled: boolean read FActionEnabled write SetActionEnabled;
+    {** The action's color while it is enabled: the link color. }
+    property ActionColor: TColor read FActionColor write SetActionColor;
+    {** A click on the action, which leaves Expanded alone. }
+    property OnAction: TNotifyEvent read FOnAction write FOnAction;
   end;
 
 implementation
@@ -90,6 +115,9 @@ begin
   Height := Px(HeaderHeight);
   Cursor := crHandPoint;
   FCheckIndex := -1;
+  FActionEnabled := True;
+  FActionColor := clHighlight;
+  ShowHint := True;
   SetColors(clBtnFace, clWindowText, clGrayText, clBtnFace, clBtnShadow);
 end;
 
@@ -109,6 +137,43 @@ begin
     Exit;
   FCheckIndex := AValue;
   Invalidate;
+end;
+
+procedure TGittanSectionHeader.SetAction(const AValue: string);
+begin
+  if FAction = AValue then
+    Exit;
+  FAction := AValue;
+  if FAction = '' then
+  begin
+    FActionHot := False;
+    Hint := '';
+  end;
+  Invalidate;
+end;
+
+procedure TGittanSectionHeader.SetActionEnabled(AValue: boolean);
+begin
+  if FActionEnabled = AValue then
+    Exit;
+  FActionEnabled := AValue;
+  Invalidate;
+end;
+
+procedure TGittanSectionHeader.SetActionColor(AValue: TColor);
+begin
+  if FActionColor = AValue then
+    Exit;
+  FActionColor := AValue;
+  Invalidate;
+end;
+
+{ The action takes the header's height and a few pixels either side,
+  being short. }
+function TGittanSectionHeader.OverAction(X, Y: integer): boolean;
+begin
+  Result := not FActionRect.IsEmpty and PtInRect(Rect(FActionRect.Left - 4, 0,
+    FActionRect.Right + 4, Height), Point(X, Y));
 end;
 
 procedure TGittanSectionHeader.SetTitle(const AValue: string);
@@ -185,6 +250,21 @@ begin
   end;
   if FDetail <> '' then
     Canvas.TextOut(X, TextY, FDetail);
+  { The action at the right end, as a link. }
+  FActionRect := Rect(0, 0, 0, 0);
+  if FAction <> '' then
+  begin
+    if FActionEnabled then
+      Canvas.Font.Color := FActionColor
+    else
+      Canvas.Font.Color := FDim;
+    if FActionHot and FActionEnabled then
+      Canvas.Font.Style := [fsUnderline];
+    X := Width - Px(Pad) - Canvas.TextWidth(FAction);
+    FActionRect := Bounds(X, TextY, Canvas.TextWidth(FAction), Canvas.TextHeight(FAction));
+    Canvas.TextOut(X, TextY, FAction);
+    Canvas.Font.Style := [];
+  end;
 end;
 
 procedure TGittanSectionHeader.MouseEnter;
@@ -198,6 +278,25 @@ procedure TGittanSectionHeader.MouseLeave;
 begin
   inherited MouseLeave;
   FHot := False;
+  FActionHot := False;
+  Invalidate;
+end;
+
+{ The action is underlined under the mouse, and the hint is its own
+  there and none elsewhere. }
+procedure TGittanSectionHeader.MouseMove(Shift: TShiftState; X, Y: integer);
+var
+  Over: boolean;
+begin
+  inherited MouseMove(Shift, X, Y);
+  Over := OverAction(X, Y);
+  if Over = FActionHot then
+    Exit;
+  FActionHot := Over;
+  if Over then
+    Hint := FActionHint
+  else
+    Hint := '';
   Invalidate;
 end;
 
@@ -210,6 +309,12 @@ begin
     PtInRect(Rect(FCheckRect.Left - 3, 0, FCheckRect.Right + 3, Height), Point(X, Y)) then
   begin
     FOnCheck(Self);
+    Exit;
+  end;
+  if (Button = mbLeft) and OverAction(X, Y) then
+  begin
+    if FActionEnabled and Assigned(FOnAction) then
+      FOnAction(Self);
     Exit;
   end;
   if (Button = mbLeft) and PtInRect(ClientRect, Point(X, Y)) then

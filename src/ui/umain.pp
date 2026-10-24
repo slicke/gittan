@@ -150,13 +150,13 @@ type
     FGitHubItems: array of TMenuItem;
     { The AI features (umain.ai.inc, gittan.ai), shown only once the
       settings turn them on and the agent's command is found: the agent
-      the settings pick and its command, the
-      button in the commit row that writes the message, the job writing
+      the settings pick, its command and model, File > Write Commit
+      Message (the Commit header's AI does the same), the job writing
       it, and the field's text when it started, which the message
       replaces only while it is unchanged. }
     FAgent: TGittanAgent;
     FAgentCli, FAgentModel: string;
-    FMessageButton: TButton;
+    FMessageItem: TMenuItem;
     FMessageJob: TGittanMessageJob;
     FMessageFrom: string;
     { The width of a tab in the editors, in characters. }
@@ -1117,10 +1117,11 @@ type
     procedure FindAgentCli;
     {** Whether the AI features are on and the agent's command is there. }
     function AIAvailable: boolean;
-    {** Shows the Write button when AIAvailable, enabled as the commit
-      section allows; from UpdateCommitState. }
-    procedure UpdateMessageButton;
-    procedure MessageButtonClick(Sender: TObject);
+    {** Shows AI in the Commit header and File > Write Commit Message
+      when AIAvailable, enabled as the commit section allows; from
+      UpdateCommitState. }
+    procedure UpdateMessageAction;
+    procedure MessageActionClick(Sender: TObject);
     procedure StartMessageJob;
     procedure MessageJobDone(Sender: TObject);
     {** Stops a message being written: the agent is ended and its answer
@@ -1753,7 +1754,9 @@ resourcestring
   rsCommitButton = 'Commit';
   rsCommitAmendButton = 'Amend Commit';
   rsCommitAmend = 'Amend';
-  rsWriteMessage = '✦ Write';
+  rsWriteMessage = '✦ AI';
+  rsWriteMessageMenu = 'Write Commit Message';
+  rsStopMessageMenu = 'Stop Writing Commit Message';
   rsWriteMessageHint = 'Write the message with %s from the ticked files';
   rsWritingMessage = 'Stop';
   rsWritingMessageHint = '%s is writing the message; click to stop';
@@ -3822,6 +3825,9 @@ begin
   FCommitItem := AddItem(FileMenu, rsCommitMenu, ShortCut(VK_K, [ssModifier]),
     @MenuCommitClick);
   FCommitItem.Enabled := False;
+  FMessageItem := AddItem(FileMenu, rsWriteMessageMenu, ShortCut(VK_K, [ssModifier,
+    ssShift]), @MessageActionClick);
+  FMessageItem.Visible := False;
   FPullItem := AddItem(FileMenu, rsPullMenu, ShortCut(VK_L, [ssModifier, ssShift]),
     @MenuPullClick);
   FPushItem := AddItem(FileMenu, rsPushMenu, ShortCut(VK_P, [ssModifier, ssShift]),

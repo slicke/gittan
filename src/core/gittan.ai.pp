@@ -135,11 +135,17 @@ uses
   fpjson, jsonparser, gittan.git;
 
 const
+  { Short, whatever the repository's own messages are like: a model told
+    only to follow the conventions wrote pages, describing every file it
+    read. }
   CommitPrompt = 'Write the git commit message for the changes given on standard ' +
-    'input, which are what will be committed. Follow the conventions of this ' +
-    'repository: its recent commit subjects are given, and its own instructions ' +
-    'may say more. You may read its files for context. Answer with the message ' +
-    'alone, ready for git commit: no preamble, no explanation, no code fences, no ' +
+    'input, which are what will be committed. Keep it short: a subject line of at ' +
+    'most 72 characters and, only when the change needs explaining, a blank line ' +
+    'and a body of a few lines wrapped at 72 columns. Say what changed and why, ' +
+    'not what each file or line does. Take the style (language, tense, prefixes) ' +
+    'from the recent commit subjects given. Read the repository''s files only when ' +
+    'the diff alone leaves the change unclear. Answer with the message alone, ' +
+    'ready for git commit: no preamble, no explanation, no code fences, no ' +
     'trailers.';
 
 function AgentOfKey(const AKey: string): TGittanAgent;

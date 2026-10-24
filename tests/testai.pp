@@ -247,6 +247,7 @@ begin
   AssertTrue(Pos('--output-format json', Line) > 0);
   AssertTrue('read-only tools', Pos('--tools Read,Grep,Glob', Line) > 0);
   AssertEquals('no model without one', 0, Pos('--model', Line));
+  AssertTrue('the message is asked to be short', Pos('at most 72 characters', Args[1]) > 0);
   Args := CommitMessageArgs(gaClaude, 'haiku');
   AssertEquals('haiku', Args[High(Args)]);
   AssertEquals('--model', Args[High(Args) - 1]);

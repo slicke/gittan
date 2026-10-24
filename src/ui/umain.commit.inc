@@ -52,6 +52,9 @@ begin
   FCommitHeader.OnToggle := @CommitHeaderToggle;
   FCommitHeader.CheckImages := FCheckImages;
   FCommitHeader.OnCheck := @CommitHeaderCheck;
+  { AI at the header's right end while the AI features are on
+    (umain.ai.inc). }
+  FCommitHeader.OnAction := @MessageActionClick;
   FCommitHeader.Parent := FCommitPanel;
   FCommitBox := TPanel.Create(Self);
   FCommitBox.BevelOuter := bvNone;
@@ -87,18 +90,6 @@ begin
   FCommitAmend.Align := alLeft;
   FCommitAmend.OnClick := @CommitAmendClick;
   FCommitAmend.Parent := FCommitRow;
-  { Write, after Amend, while the AI features are on (umain.ai.inc). }
-  FMessageButton := TButton.Create(Self);
-  FMessageButton.Caption := rsWriteMessage;
-  FMessageButton.Hint := rsWriteMessageHint;
-  FMessageButton.ShowHint := True;
-  FMessageButton.Align := alLeft;
-  FMessageButton.AutoSize := True;
-  FMessageButton.Left := 500;
-  FMessageButton.BorderSpacing.Left := 4;
-  FMessageButton.Visible := False;
-  FMessageButton.OnClick := @MessageButtonClick;
-  FMessageButton.Parent := FCommitRow;
   FAbortButton := TButton.Create(Self);
   FAbortButton.Caption := rsAbortButton;
   FAbortButton.Align := alLeft;
@@ -226,6 +217,7 @@ begin
     Exit;
   P := Palette;
   FCommitHeader.SetColors(P.Shade, P.Text, P.Dim, P.Raised, P.Line);
+  FCommitHeader.ActionColor := P.Accent;
   if FDark then
     FCommitNote.Font.Color := RGBToColor(200, 200, 200)
   else
@@ -593,7 +585,7 @@ begin
   FAbortButton.Enabled := not Busy;
   FSkipButton.Visible := Continuing;
   FSkipButton.Enabled := not Busy;
-  UpdateMessageButton;
+  UpdateMessageAction;
   FCommitNote.Text := Note;
   { The conflicts lead on to the first of them. }
   if (FRepo.Base = '') and (FConflictFiles > 0) then
