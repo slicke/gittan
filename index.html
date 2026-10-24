@@ -571,7 +571,7 @@
       <img class="icon" src="assets/icon-256.png" alt="Gittan icon" width="88" height="88">
     </picture>
     <p class="name"><em>Git</em> <em>T</em>ree <em>A</em>nalyzer &amp; <em>N</em>avigator</p>
-    <div><a class="pill" href="#tour"><b>New</b> Commands, Files and Pull Requests pages <span aria-hidden="true">→</span></a></div>
+    <div><a class="pill" href="#tour"><b>New</b> AI review and commit messages, with Claude Code or Copilot <span aria-hidden="true">→</span></a></div>
     <h1>Understand every change.<br><em>Then commit it.</em></h1>
     <span class="strandline" aria-hidden="true"><svg class="strand"><use href="#strand"/></svg></span>
     <p class="tag">Gittan is a free, native git client built around the diff. See what you changed as you change it, who wrote each line and the history behind it, then commit, sync and merge without leaving it.</p>
@@ -619,6 +619,7 @@
         <button role="tab" id="b-stats" aria-selected="false" aria-controls="t-stats" tabindex="-1"><b>Statistics</b></button>
         <button role="tab" id="b-files" aria-selected="false" aria-controls="t-files" tabindex="-1"><b>Files</b></button>
         <button role="tab" id="b-commands" aria-selected="false" aria-controls="t-commands" tabindex="-1"><b>Commands</b></button>
+        <button role="tab" id="b-ai" aria-selected="false" aria-controls="t-ai" tabindex="-1"><b>AI review</b></button>
         <button role="tab" id="b-submodule" aria-selected="false" aria-controls="t-submodule" tabindex="-1"><b>Submodules</b></button>
         <button role="tab" id="b-clean" aria-selected="false" aria-controls="t-clean" tabindex="-1"><b>Clean tree</b></button>
       </div>
@@ -711,6 +712,15 @@
             <source srcset="assets/shots/commands-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/commands-light.avif" type="image/avif">
             <img src="assets/shots/commands-light.png" width="1280" height="800" loading="lazy" alt="The Commands page of trailhead: graph, authors and icons from .gittan/commands.ini with their shortcuts, and the scripts dev, build and preview from package.json, dev and build with shortcuts too, and Commands marked in the sidebar">
+          </picture></div>
+        </figure>
+        <figure id="t-ai" role="tabpanel" aria-labelledby="b-ai">
+          <figcaption><b>AI review</b>, once you turn it on, runs Claude Code or GitHub Copilot, whichever you already use, on what the diff compares, with your own sign-in. View &gt; Review Changes with AI, or <kbd>⌘⌥R</kbd>, puts what it finds under the lines it is about, as bugs, risks or questions, beside a pull request's comments. <b>✦ AI</b> in the Commit section writes the message for the ticked files. The agent may read the repository but gets no tool that writes, runs a command or goes to the network.</figcaption>
+          <div class="frame"><picture>
+            <source srcset="assets/shots/ai-review-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/ai-review-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/ai-review-light.avif" type="image/avif">
+            <img src="assets/shots/ai-review-light.png" width="1280" height="800" loading="lazy" alt="The new file useForecast.ts with two cards from Claude Code under its lines, each marked Bug: one under watchEffect saying two fetches race and the older answer can win, one under the fetch saying res.ok is never checked; the tree counts 2 findings on useForecast.ts and 1 on TrailCard.vue, and ✦ AI sits in the Commit header">
           </picture></div>
         </figure>
         <figure id="t-submodule" role="tabpanel" aria-labelledby="b-submodule">
@@ -857,7 +867,7 @@
         <div>
           <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M3 12h5.5"/><path d="M15.5 12H21"/></svg></div>
           <h3>Commit what you see</h3>
-          <p>Every changed file in the tree has a check box. Untick what should wait, or leave one block of a file out with Skip in Commit, write the message at the bottom of the panel and commit with <kbd>⌘↩</kbd>. Files go in as the diff shows them, and your hooks and signing run as git is set up to. Amend picks up the last message, and a branch that can be pushed offers Push right after.</p>
+          <p>Every changed file in the tree has a check box. Untick what should wait, or leave one block of a file out with Skip in Commit, write the message at the bottom of the panel and commit with <kbd>⌘↩</kbd>. Files go in as the diff shows them, and your hooks and signing run as git is set up to. Amend picks up the last message, ✦ AI writes one if you have turned the AI features on, and a branch that can be pushed offers Push right after.</p>
         </div>
         <div class="art" aria-hidden="true">
           <div class="mini tree">
@@ -1235,7 +1245,7 @@
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
         <h3>Pull request reviews</h3>
-        <p>With the <code>gh</code> CLI signed in, the status bar shows the branch's pull request and its checks, Pull Requests in the sidebar lists the open ones, Home names those waiting for your review, and the review comments appear under the lines they are about.</p>
+        <p>With the <code>gh</code> CLI signed in, the status bar shows the branch's pull request and its checks, Pull Requests in the sidebar lists the open ones, Home names those waiting for your review, and the review comments appear under the lines they are about, as an AI review's findings do.</p>
       </div>
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/></svg></div>
