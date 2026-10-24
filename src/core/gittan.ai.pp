@@ -649,13 +649,14 @@ var
 begin
   Lines := TStringList.Create;
   try
-    Lines.Text := Trim(AText);
+    Lines.Text := Trim(AText); //split on LF, CR or CRLF, whatever the agent wrote
     if (Lines.Count >= 2) and (Copy(Trim(Lines[0]), 1, 3) = '```') and
       (Trim(Lines[Lines.Count - 1]) = '```') then
     begin
       Lines.Delete(Lines.Count - 1);
       Lines.Delete(0);
     end;
+    Lines.LineBreak := #10; //a commit message's lines end in LF on Windows too
     Result := Trim(Lines.Text);
   finally
     Lines.Free;

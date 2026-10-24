@@ -237,6 +237,9 @@ begin
   AssertEquals('Subject'#10#10'Body', CleanCommitMessage(#10'Subject'#10#10'Body'#10#10));
   AssertEquals('Subject'#10#10'Body', CleanCommitMessage('```'#10'Subject'#10#10'Body'#10'```'));
   AssertEquals('Subject', CleanCommitMessage('```text'#10'Subject'#10'```'#10));
+  { An agent on Windows ends its lines in CRLF; the message ends them in
+    LF there too. }
+  AssertEquals('Subject'#10#10'Body', CleanCommitMessage('Subject'#13#10#13#10'Body'#13#10));
   { A fence inside the body stays. }
   AssertEquals('Subject'#10#10'```'#10'code'#10'```', CleanCommitMessage(
     'Subject'#10#10'```'#10'code'#10'```'));
