@@ -159,6 +159,14 @@ type
     FMessageItem: TMenuItem;
     FMessageJob: TGittanMessageJob;
     FMessageFrom: string;
+    { The AI review (umain.ai.inc): View > Review Changes with AI and
+      Clear AI Review, the job while it runs, and its findings with the
+      comparison they were made for (AIReviewKey), which the change view
+      shows among the threads (FShown) while that comparison is shown. }
+    FAIReviewItem, FAIClearItem: TMenuItem;
+    FAIReviewJob: TGittanAIReviewJob;
+    FAIThreads: TGittanReviewThreads;
+    FAIThreadsKey: string;
     { The width of a tab in the editors, in characters. }
     FTabSize: integer;
     FSyntaxMenu, FAutoLexerItem, FPlainTextItem: TMenuItem;
@@ -791,6 +799,10 @@ type
     FReviewItem: TMenuItem;
     FReviewJob: TGittanReviewJob;
     FThreads: TGittanReviewThreads;
+    { The threads the change view shows: the pull request's while they
+      apply, then the AI review's (CollectShownThreads). FThreadRows and
+      the gaps' Tags index it. }
+    FShown: TGittanReviewThreads;
     FThreadsNumber: integer;
     FThreadsRepo, FThreadsHead, FThreadsKey, FReviewError: string;
     FThreadRows: TIntegerDynArray;
@@ -1043,6 +1055,10 @@ type
     procedure AbandonReviewJob;
     procedure ReviewJobDone(Sender: TObject);
     procedure PlaceThreads;
+    function PullThreadsShown: boolean;
+    procedure CollectShownThreads;
+    function ThreadAuthor(AThread, AComment: integer): string;
+    function AgentColor: TColor;
     function ThreadId(AThread: integer): string;
     function ThreadOpen(AThread: integer): boolean;
     procedure ReviewFont(C: TCanvas; AKind: integer);
@@ -1127,6 +1143,15 @@ type
     {** Stops a message being written: the agent is ended and its answer
       thrown away. }
     procedure AbandonMessageJob;
+    {** What the change view compares, for the AI review's findings: the
+      repository, the base and whether the whole tree is compared. }
+    function AIReviewKey: string;
+    procedure UpdateAIReviewItems;
+    procedure MenuAIReviewClick(Sender: TObject);
+    procedure MenuAIClearClick(Sender: TObject);
+    procedure StartAIReview;
+    procedure AIReviewDone(Sender: TObject);
+    procedure AbandonAIReview;
     procedure MenuWrapClick(Sender: TObject);
     procedure MenuFoldClick(Sender: TObject);
     procedure ViewMenuClick(Sender: TObject);
@@ -1755,6 +1780,17 @@ resourcestring
   rsCommitAmendButton = 'Amend Commit';
   rsCommitAmend = 'Amend';
   rsWriteMessage = '✦ AI';
+  rsAIReviewMenu = 'Review Changes with AI';
+  rsAIReviewStopMenu = 'Stop AI Review';
+  rsAIClearMenu = 'Clear AI Review';
+  rsAIReviewing = '%s is reviewing the changes...';
+  rsAIReviewFailed = '%s could not review the changes';
+  rsAIReviewNone = '%s found nothing to point out.';
+  rsAIReviewOne = '%s found one thing to look at.';
+  rsAIReviewMany = '%s found %d things to look at.';
+  rsSeverityBug = 'Bug';
+  rsSeverityRisk = 'Risk';
+  rsSeverityQuestion = 'Question';
   rsWriteMessageMenu = 'Write Commit Message';
   rsStopMessageMenu = 'Stop Writing Commit Message';
   rsWriteMessageHint = 'Write the message with %s from the ticked files';
@@ -2964,6 +3000,7 @@ procedure TForm1.FormDestroy(Sender: TObject);
 begin
   Application.RemoveAsyncCalls(Self);
   AbandonMessageJob;
+  AbandonAIReview;
   StopCommitJob(True);
   FreeAndNil(FDroppedCommits);
   StopRemoteJob(True);
@@ -3973,6 +4010,11 @@ begin
     @MenuReviewCommentsClick);
   FReviewItem.Checked := FShowComments;
   FReviewItem.Enabled := FHasGitHubCli;
+  FAIReviewItem := AddItem(ViewMenu, rsAIReviewMenu, ShortCut(VK_R, [ssModifier, ssAlt]),
+    @MenuAIReviewClick);
+  FAIReviewItem.Visible := False;
+  FAIClearItem := AddItem(ViewMenu, rsAIClearMenu, 0, @MenuAIClearClick);
+  FAIClearItem.Visible := False;
   ViewMenu.Add(NewLine);
   AddItem(ViewMenu, rsZoomIn, ShortCut(VK_OEM_PLUS, [ssModifier]), @MenuZoomInClick);
   AddItem(ViewMenu, rsZoomOut, ShortCut(VK_OEM_MINUS, [ssModifier]), @MenuZoomOutClick);
@@ -5008,6 +5050,9 @@ begin
   LeaveEdit;
   SaveCommitDraft;
   AbandonMessageJob;
+  AbandonAIReview;
+  FAIThreads := nil;
+  FAIThreadsKey := '';
   StopCommitJob(False);
   StopRemoteJob(False);
   { A failure's notice, which Try Again would run on this one. }

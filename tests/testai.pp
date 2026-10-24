@@ -10,7 +10,7 @@ unit testai;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.ai;
+  Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.reviews, gittan.ai;
 
 type
   TAiTest = class(TTestCase)
@@ -38,6 +38,12 @@ type
     procedure TestAgentOfKey;
     procedure TestReadClaudeAnswer;
     procedure TestReadCopilotAnswer;
+    procedure TestNumberDiff;
+    procedure TestParseFindings;
+    procedure TestParseFindingsAround;
+    procedure TestReviewChangesWorkTree;
+    procedure TestReviewChangesRange;
+    procedure TestReviewArgs;
   end;
 
 implementation
@@ -314,6 +320,131 @@ begin
   AssertEquals('No authentication information found.', Error);
   AssertFalse(ReadAgentAnswer(gaCopilot, True, '  ', '', Msg, Error));
   AssertEquals(Format(rsAgentNoAnswer, ['GitHub Copilot']), Error);
+end;
+
+procedure TAiTest.TestNumberDiff;
+var
+  Text: string;
+begin
+  Text := NumberDiff('diff --git a/x.txt b/x.txt'#10'--- a/x.txt'#10'+++ b/x.txt'#10 +
+    '@@ -10,3 +10,3 @@ func'#10' keep'#10'-old'#10'+new'#10' tail'#10 +
+    '@@ -40 +40,2 @@'#10' same'#10'+added'#10);
+  AssertTrue('headers stay', Pos(#10'--- a/x.txt'#10, Text) > 0);
+  AssertTrue('hunk headers stay', Pos(#10'@@ -10,3 +10,3 @@ func'#10, Text) > 0);
+  AssertTrue('context on the new side', Pos(#10'N10  keep'#10, Text) > 0);
+  AssertTrue('a removed line on the old side', Pos(#10'O11 -old'#10, Text) > 0);
+  AssertTrue('an added line on the new side', Pos(#10'N11 +new'#10, Text) > 0);
+  AssertTrue('both sides go on after it', Pos(#10'N12  tail'#10, Text) > 0);
+  AssertTrue('a hunk without a count', Pos(#10'N40  same'#10'N41 +added'#10, Text) > 0);
+end;
+
+procedure TAiTest.TestParseFindings;
+var
+  T: TGittanReviewThreads;
+begin
+  AssertTrue(ParseReviewFindings('[{"path":"src/a.pp","line":12,"side":"new",' +
+    '"severity":"Bug","body":"Off by one."},{"path":"b/src/b.pp","line":"7",' +
+    '"side":"old","severity":"risk","body":"Gone check."},{"path":"","line":3,' +
+    '"body":"no path"},{"path":"c","line":0,"body":"no line"},{"path":"d","line":4,' +
+    '"body":"  "}]', 'Claude Code', T));
+  AssertEquals('the ones without a path, a line or a body are left out', 2, Length(T));
+  AssertEquals('src/a.pp', T[0].Path);
+  AssertEquals(12, T[0].Line);
+  AssertFalse(T[0].LeftSide);
+  AssertEquals('bug', T[0].Severity);
+  AssertEquals('Claude Code', T[0].Agent);
+  AssertEquals('Claude Code', T[0].Comments[0].Author);
+  AssertEquals('Off by one.', T[0].Comments[0].Body);
+  AssertEquals('', T[0].Comments[0].Url);
+  AssertEquals('a diff path loses its prefix', 'src/b.pp', T[1].Path);
+  AssertEquals('a line given as text', 7, T[1].Line);
+  AssertTrue(T[1].LeftSide);
+  AssertTrue('no findings', ParseReviewFindings('[]', 'Claude Code', T));
+  AssertEquals(0, Length(T));
+end;
+
+procedure TAiTest.TestParseFindingsAround;
+var
+  T: TGittanReviewThreads;
+  Many: string;
+  i: integer;
+begin
+  AssertTrue('in a fence after a sentence', ParseReviewFindings('Here they are:'#10 +
+    '```json'#10'[{"path":"a","line":1,"body":"x [y]"}]'#10'```', 'GitHub Copilot', T));
+  AssertEquals(1, Length(T));
+  AssertEquals('x [y]', T[0].Comments[0].Body);
+  AssertFalse('no array', ParseReviewFindings('Nothing to point out.', 'Claude Code', T));
+  AssertFalse('not JSON', ParseReviewFindings('[oops', 'Claude Code', T));
+  Many := '[';
+  for i := 1 to 15 do
+  begin
+    if i > 1 then
+      Many := Many + ',';
+    Many := Many + Format('{"path":"a","line":%d,"body":"b"}', [i]);
+  end;
+  AssertTrue(ParseReviewFindings(Many + ']', 'Claude Code', T));
+  AssertEquals('at most the limit', ReviewMaxFindings, Length(T));
+end;
+
+procedure TAiTest.TestReviewChangesWorkTree;
+var
+  Paths: TStringList;
+  Text, Error: string;
+begin
+  WriteFile('a.txt', 'one'#10'two');
+  Git(['add', '.']);
+  Git(['commit', '-q', '-m', 'First']);
+  WriteFile('a.txt', 'one'#10'two'#10'three');
+  WriteFile('new.txt', 'fresh');
+  Paths := TStringList.Create;
+  try
+    Paths.Add('a.txt');
+    Paths.Add('new.txt');
+    Error := '';
+    AssertTrue(Error, ReviewChanges(FDir, '', False, Paths, Text, Error));
+  finally
+    Paths.Free;
+  end;
+  AssertTrue('numbered', Pos('N3 +three', Text) > 0);
+  AssertTrue('an untracked file is in it', Pos('N1 +fresh', Text) > 0);
+  AssertTrue('the summary', Pos('git diff --stat', Text) > 0);
+end;
+
+procedure TAiTest.TestReviewChangesRange;
+var
+  Paths: TStringList;
+  Text, Error: string;
+begin
+  WriteFile('a.txt', 'one');
+  Git(['add', '.']);
+  Git(['commit', '-q', '-m', 'First']);
+  Git(['tag', 'start']);
+  WriteFile('a.txt', 'two');
+  Git(['commit', '-q', '-am', 'Second']);
+  WriteFile('a.txt', 'not committed');
+  Paths := TStringList.Create;
+  try
+    Error := '';
+    AssertTrue(Error, ReviewChanges(FDir, 'start..HEAD', True, Paths, Text, Error));
+  finally
+    Paths.Free;
+  end;
+  AssertTrue('the range', Pos('O1 -one', Text) > 0);
+  AssertTrue(Pos('N1 +two', Text) > 0);
+  AssertEquals('the work tree is no part of a range', 0, Pos('not committed', Text));
+end;
+
+procedure TAiTest.TestReviewArgs;
+var
+  Line: string;
+begin
+  Line := string.Join(' ', ReviewArgs(gaClaude, ''));
+  AssertTrue('more turns, to check findings', Pos('--max-turns ' +
+    IntToStr(ReviewMaxTurns), Line) > 0);
+  AssertTrue('asks for a JSON array', Pos('JSON array', ReviewArgs(gaClaude, '')[1]) > 0);
+  AssertTrue('copilot gets the prompt on its input', Pos('Review the changes',
+    ReviewInput(gaCopilot, 'the diff')) = 1);
+  AssertEquals('the diff', ReviewInput(gaClaude, 'the diff'));
 end;
 
 initialization

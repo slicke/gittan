@@ -26,12 +26,17 @@ type
     Line) of a file. Line is in the pull request's head, or with LeftSide
     in its base (a removed line); 0 when the thread is outdated (the line
     changed since) or is on the whole file (OnFile). OriginalLine is the
-    line in the commit the comment was made on. }
+    line in the commit the comment was made on. A thread an AI agent
+    wrote (gittan.ai) has the agent's name in Agent and how much the
+    finding weighs in Severity (bug, risk, question); its Line is the
+    shown diff's own, in the old side with LeftSide, and it has one
+    comment, with no address. }
   TGittanReviewThread = record
     Path: string;
     Line, StartLine, OriginalLine: integer;
     LeftSide, Resolved, Outdated, OnFile: boolean;
     Comments: TGittanReviewComments;
+    Agent, Severity: string;
   end;
   TGittanReviewThreads = array of TGittanReviewThread;
 

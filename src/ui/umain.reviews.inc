@@ -16,11 +16,17 @@
   The cards are gaps of the editor (TATGaps): room under a line that the
   editor leaves to OnDrawGap, outside the text, so the lexer, the line
   numbers and the rows are untouched. A gap's Tag is the index of its
-  thread in FThreads; in the side-by-side view the other side gets an
+  thread in FShown; in the side-by-side view the other side gets an
   empty gap of the same height (Tag -1), so the rows stay in step. A
   resolved or outdated thread starts folded to one line; a click on a
   card folds or unfolds it, a click on "GitHub ↗" opens it in the
-  browser. }
+  browser.
+
+  The view shows FShown: the pull request's threads while they apply
+  (PullThreadsShown) and the findings of an AI review (umain.ai.inc)
+  while the comparison is the one they were made for. A finding is on
+  the view's own lines, so it is placed as it is, without the mapping;
+  its card has the agent's color and no link. }
 
 const
   { The kinds of the lines of a card, in the Objects of its layout. }
@@ -127,6 +133,7 @@ begin
   FReviewError := '';
   FMapDiffKey := '';
   FSummary.SetNotes('', nil);
+  CollectShownThreads;
   FileTree.Invalidate;
 end;
 
@@ -205,6 +212,7 @@ begin
   if Key = FThreadsKey then
     Exit;
   FThreadsKey := Key;
+  CollectShownThreads;
   FileTree.Invalidate;
   RebuildIfChanges;
 end;
@@ -216,30 +224,29 @@ procedure TForm1.PlaceThreads;
 var
   ByNew, ByOld: TIntegerDynArray;
   i, t, Line: integer;
-  Exact, LeftOk, Any: boolean;
+  Exact, LeftOk, Any, AnyPull: boolean;
   Err: string;
 begin
-  SetLength(FThreadRows, Length(FThreads));
+  CollectShownThreads;
+  SetLength(FThreadRows, Length(FShown));
   for t := 0 to High(FThreadRows) do
     FThreadRows[t] := threadElsewhere;
-  if not FShowComments or (FView <> gvChanges) or (FThreadsNumber = 0) or
-    (FCurrentPath = '') then
+  if (FView <> gvChanges) or (FCurrentPath = '') then
     Exit;
   Exact := ReviewExact;
-  { A range other than the pull request's: the new side is some other
-    commit. }
-  if not Exact and FRepo.IsRange then
-    Exit;
   Any := False;
-  for t := 0 to High(FThreads) do
-    if FThreads[t].Path = FCurrentPath then
+  AnyPull := False;
+  for t := 0 to High(FShown) do
+    if FShown[t].Path = FCurrentPath then
     begin
       FThreadRows[t] := threadOnTop;
       Any := True;
+      if FShown[t].Agent = '' then
+        AnyPull := True;
     end;
   if not Any then
     Exit;
-  if not Exact and (FMapDiffKey <> FThreadsHead + #0 + FCurrentPath) then
+  if AnyPull and not Exact and (FMapDiffKey <> FThreadsHead + #0 + FCurrentPath) then
   begin
     FMapDiffKey := FThreadsHead + #0 + FCurrentPath;
     { The head may not be here (not fetched): the lines are taken as they
@@ -262,19 +269,20 @@ begin
       ByOld[FOldNum[i]] := i;
   LeftOk := Exact or ((FMergeBase <> '') and (FRepo.Base = FMergeBase) and
     not FRepo.WholeTree);
-  for t := 0 to High(FThreads) do
+  for t := 0 to High(FShown) do
   begin
-    if (FThreadRows[t] <> threadOnTop) or (FThreads[t].Line <= 0) then
+    if (FThreadRows[t] <> threadOnTop) or (FShown[t].Line <= 0) then
       Continue;
-    Line := FThreads[t].Line;
-    if FThreads[t].LeftSide then
+    Line := FShown[t].Line;
+    if FShown[t].LeftSide then
     begin
-      if LeftOk and (Line <= High(ByOld)) then
+      { A finding's old side is the view's own. }
+      if (LeftOk or (FShown[t].Agent <> '')) and (Line <= High(ByOld)) then
         FThreadRows[t] := ByOld[Line];
     end
     else
     begin
-      if not Exact then
+      if not Exact and (FShown[t].Agent = '') then
         Line := MapLine(FMapDiff, Line);
       if (Line > 0) and (Line <= High(ByNew)) then
         FThreadRows[t] := ByNew[Line];
@@ -282,11 +290,31 @@ begin
   end;
 end;
 
+{ Whether the pull request's threads apply to what the view shows: the
+  comments are on, and the new side is the work tree or the pull
+  request's own head. }
+function TForm1.PullThreadsShown: boolean;
+begin
+  Result := FShowComments and (FThreadsNumber <> 0) and (ReviewExact or
+    not FRepo.IsRange);
+end;
+
+{ FShown: the pull request's threads while they apply, then the AI
+  review's findings while the comparison is the one they were made for. }
+procedure TForm1.CollectShownThreads;
+begin
+  FShown := nil;
+  if PullThreadsShown then
+    FShown := Copy(FThreads);
+  if (Length(FAIThreads) > 0) and (FAIThreadsKey = AIReviewKey) then
+    FShown := Concat(FShown, FAIThreads);
+end;
+
 { What keeps a thread's fold apart from its default: the address of its
   first comment. }
 function TForm1.ThreadId(AThread: integer): string;
 begin
-  with FThreads[AThread] do
+  with FShown[AThread] do
     if Comments[0].Url <> '' then
       Result := Comments[0].Url
     else
@@ -295,9 +323,43 @@ end;
 
 function TForm1.ThreadOpen(AThread: integer): boolean;
 begin
-  Result := not FThreads[AThread].Resolved and not FThreads[AThread].Outdated;
+  Result := not FShown[AThread].Resolved and not FShown[AThread].Outdated;
   if FThreadFlips.IndexOf(ThreadId(AThread)) >= 0 then
     Result := not Result;
+end;
+
+{ How much a finding weighs, as its card says it; empty for a thread of
+  GitHub's, which has none, and a word the agent made up is shown as it
+  came. }
+function SeverityLabel(const ASeverity: string): string;
+begin
+  if ASeverity = 'bug' then
+    Result := rsSeverityBug
+  else if ASeverity = 'risk' then
+    Result := rsSeverityRisk
+  else if ASeverity = 'question' then
+    Result := rsSeverityQuestion
+  else
+    Result := ASeverity;
+end;
+
+{ Who wrote comment AComment of AThread as its card names them: an AI
+  agent with a sparkle before its name. }
+function TForm1.ThreadAuthor(AThread, AComment: integer): string;
+begin
+  Result := FShown[AThread].Comments[AComment].Author;
+  if FShown[AThread].Agent <> '' then
+    Result := '✦ ' + Result;
+end;
+
+{ The stripe of an open finding's card, apart from GitHub's link color:
+  a violet that reads on either background. }
+function TForm1.AgentColor: TColor;
+begin
+  if FDark then
+    Result := RGBToColor(163, 113, 247)
+  else
+    Result := RGBToColor(130, 80, 223);
 end;
 
 { The fonts of a card: the interface font, scaled with the editor's
@@ -420,7 +482,7 @@ var
 begin
   ALines.Clear;
   C := FReviewMeasure.Canvas;
-  with FThreads[AThread] do
+  with FShown[AThread] do
   begin
     if not ThreadOpen(AThread) then
     begin
@@ -447,14 +509,15 @@ begin
       Head := '▸ ';
       if Note <> '' then
         Head := Head + Note + ' · ';
-      Head := Head + Comments[0].Author;
+      Head := Head + ThreadAuthor(AThread, 0);
       if Length(Comments) > 1 then
         Head := Head + Format(rsReviewReplies, [Length(Comments) - 1]);
       Add(Head + ': ' + S, rlFolded);
       Exit;
     end;
-    { What the place of the thread says, when there is something to say. }
-    Note := '';
+    { What the place of the thread says, when there is something to say:
+      for a finding, first how much it weighs. }
+    Note := SeverityLabel(Severity);
     if Resolved then
       Note := rsReviewResolved;
     if Outdated then
@@ -480,7 +543,7 @@ begin
     begin
       if k > 0 then
         Add('', rlRule);
-      Head := Comments[k].Author;
+      Head := ThreadAuthor(AThread, k);
       S := ReviewAge(Comments[k].Created, LocalTimeToUniversal(Now));
       if S <> '' then
         Head := Head + ' · ' + S;
@@ -573,15 +636,15 @@ var
 begin
   Edit.Gaps.Clear;
   FEditOld.Gaps.Clear;
-  if (FView = gvChanges) and (Length(FThreadRows) = Length(FThreads)) then
+  if (FView = gvChanges) and (Length(FThreadRows) = Length(FShown)) then
   begin
     Side := Length(FRowsOld) > 0;
-    for t := 0 to High(FThreads) do
+    for t := 0 to High(FShown) do
     begin
       if FThreadRows[t] = threadElsewhere then
         Continue;
       Ed := Edit;
-      if Side and FThreads[t].LeftSide and (FThreadRows[t] >= 0) then
+      if Side and FShown[t].LeftSide and (FThreadRows[t] >= 0) then
       begin
         Ed := FEditOld;
         Row := FindRow(FRowsOld, FThreadRows[t]);
@@ -718,13 +781,13 @@ var
   Card: TRect;
   Fill, Border, Dim, Accent, CodeFill: TColor;
   i, y, H, Kind, W, Side, Right: integer;
-  First: boolean;
+  First, HasLink: boolean;
 begin
   Ed := TATSynEdit(Sender);
   C.Brush.Style := bsSolid;
   C.Brush.Color := Ed.Colors.TextBG;
   C.FillRect(ARect);
-  if (AGap.Tag < 0) or (AGap.Tag > High(FThreads)) then
+  if (AGap.Tag < 0) or (AGap.Tag > High(FShown)) then
     Exit;
   { The card was laid out for another width: lay out again once the
     paint is done. }
@@ -748,11 +811,14 @@ begin
     Dim := RGBToColor(110, 110, 110);
     CodeFill := RGBToColor(234, 238, 242);
   end;
-  if ThreadOpen(AGap.Tag) and not FThreads[AGap.Tag].Resolved and
-    not FThreads[AGap.Tag].Outdated then
-    Accent := FLinkColor
+  HasLink := FShown[AGap.Tag].Comments[0].Url <> '';
+  if not ThreadOpen(AGap.Tag) or FShown[AGap.Tag].Resolved or
+    FShown[AGap.Tag].Outdated then
+    Accent := Border
+  else if FShown[AGap.Tag].Agent <> '' then
+    Accent := AgentColor
   else
-    Accent := Border;
+    Accent := FLinkColor;
   W := ReviewCardWidth(ARect.Width);
   Card := Rect(ARect.Left + ReviewMargin, ARect.Top + ReviewMargin,
     ARect.Left + ReviewMargin + W, ARect.Bottom - ReviewMargin);
@@ -793,7 +859,7 @@ begin
       else
         C.Font.Color := Ed.Colors.TextFont;
       Right := Card.Right - ReviewPadX;
-      if First and (Kind in [rlHeader, rlFolded]) then
+      if First and HasLink and (Kind in [rlHeader, rlFolded]) then
       begin
         { The link takes the right end of the first header. }
         ReviewFont(C, rlNote);
@@ -807,7 +873,7 @@ begin
       if Kind <> rlRule then
         C.TextRect(Rect(Card.Left + ReviewPadX, y, Right, y + H),
           Card.Left + ReviewPadX, y + 2, FitText(C, Lines[i], Right - Card.Left - ReviewPadX));
-      if First and (Kind in [rlHeader, rlFolded]) then
+      if First and HasLink and (Kind in [rlHeader, rlFolded]) then
       begin
         First := False;
         ReviewFont(C, rlNote);
@@ -834,7 +900,7 @@ var
   Lines: TStringList;
   W, y, i, Kind, H, LinkLeft: integer;
 begin
-  if (AGapItem = nil) or (AGapItem.Tag < 0) or (AGapItem.Tag > High(FThreads)) then
+  if (AGapItem = nil) or (AGapItem.Tag < 0) or (AGapItem.Tag > High(FShown)) then
     Exit;
   Ed := TATSynEdit(Sender);
   W := ReviewCardWidth(ReviewGapWidth(Ed));
@@ -846,7 +912,7 @@ begin
     begin
       Kind := PtrInt(Lines.Objects[i]);
       H := ReviewLineHeight(Kind);
-      if Kind in [rlHeader, rlFolded] then
+      if (Kind in [rlHeader, rlFolded]) and (FShown[AGapItem.Tag].Comments[0].Url <> '') then
       begin
         ReviewFont(FReviewMeasure.Canvas, rlNote);
         LinkLeft := ReviewMargin + W - ReviewPadX -
@@ -854,8 +920,7 @@ begin
         if (APos.Y >= y) and (APos.Y < y + H) and (APos.X >= LinkLeft) and
           (APos.X <= ReviewMargin + W - ReviewPadX) then
         begin
-          if FThreads[AGapItem.Tag].Comments[0].Url <> '' then
-            OpenURL(FThreads[AGapItem.Tag].Comments[0].Url);
+          OpenURL(FShown[AGapItem.Tag].Comments[0].Url);
           Exit;
         end;
         Break;
@@ -888,21 +953,19 @@ begin
 end;
 
 { The threads of APath the tree marks it with: AOpen neither resolved
-  nor outdated, AAll every one; none while the change view shows no
-  comments (see PlaceThreads). }
+  nor outdated, AAll every one, of those the change view shows
+  (FShown). }
 procedure TForm1.FileThreads(const APath: string; out AOpen, AAll: integer);
 var
   t: integer;
 begin
   AOpen := 0;
   AAll := 0;
-  if not FShowComments or (FThreadsNumber = 0) or (FRepo.IsRange and not ReviewExact) then
-    Exit;
-  for t := 0 to High(FThreads) do
-    if FThreads[t].Path = APath then
+  for t := 0 to High(FShown) do
+    if FShown[t].Path = APath then
     begin
       Inc(AAll);
-      if not FThreads[t].Resolved and not FThreads[t].Outdated then
+      if not FShown[t].Resolved and not FShown[t].Outdated then
         Inc(AOpen);
     end;
 end;

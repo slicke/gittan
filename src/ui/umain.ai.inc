@@ -9,7 +9,12 @@
   header, and File > Write Commit Message (Shift+Cmd+K): the agent
   writes the message for the ticked files, which goes into the field
   when the field is as it was when it was asked. Either again while it
-  writes stops it. }
+  writes stops it.
+
+  The second is View > Review Changes with AI (Alt+Cmd+R): the agent
+  reviews what the change view compares, and its findings are cards in
+  the change view among a pull request's threads (see umain.reviews.inc),
+  kept for that comparison until the next review or Clear AI Review. }
 
 { The agent the settings pick, its command by the path they give, else
   where it is found, and its model. }
@@ -64,6 +69,7 @@ begin
   FCommitHeader.ActionEnabled := Can;
   FMessageItem.Visible := AIAvailable;
   FMessageItem.Enabled := Shown and Can;
+  UpdateAIReviewItems;
 end;
 
 { From the header or the menu: the section unfolds, so the message is
@@ -142,4 +148,115 @@ begin
   FMessageJob.Stop(False);
   FBlameZombies.Add(FMessageJob);
   FMessageJob := nil;
+end;
+
+function TForm1.AIReviewKey: string;
+begin
+  Result := FRepo.Root + #0 + FRepo.Base + #0 + BoolToStr(FRepo.WholeTree, True);
+end;
+
+{ The review's items show while the features are on; Clear while there
+  are findings for what is compared. }
+procedure TForm1.UpdateAIReviewItems;
+begin
+  if FAIReviewItem = nil then
+    Exit;
+  FAIReviewItem.Visible := AIAvailable;
+  FAIClearItem.Visible := AIAvailable;
+  if FAIReviewJob <> nil then
+    FAIReviewItem.Caption := rsAIReviewStopMenu
+  else
+    FAIReviewItem.Caption := rsAIReviewMenu;
+  FAIReviewItem.Enabled := FRepo.Root <> '';
+  FAIClearItem.Enabled := (Length(FAIThreads) > 0) and (FAIThreadsKey = AIReviewKey);
+end;
+
+procedure TForm1.MenuAIReviewClick(Sender: TObject);
+begin
+  if FAIReviewJob <> nil then
+  begin
+    AbandonAIReview;
+    FStatus.ShowMessage('', stNormal, 0);
+    UpdateAIReviewItems;
+  end
+  else
+    StartAIReview;
+end;
+
+procedure TForm1.MenuAIClearClick(Sender: TObject);
+begin
+  FAIThreads := nil;
+  FAIThreadsKey := '';
+  CollectShownThreads;
+  FileTree.Invalidate;
+  RebuildIfChanges;
+  UpdateAIReviewItems;
+end;
+
+{ Reviews what the change view compares: a range as it is, else the
+  work tree's changed files against the base. }
+procedure TForm1.StartAIReview;
+var
+  Paths: TStringList;
+  i: integer;
+begin
+  if (FAIReviewJob <> nil) or not AIAvailable or (FRepo.Root = '') then
+    Exit;
+  Paths := TStringList.Create;
+  try
+    for i := 0 to High(FStats) do
+      Paths.Add(FStats[i].Path);
+    FAIReviewJob := TGittanAIReviewJob.Create(FRepo.Root, FAgent, FAgentCli, FAgentModel,
+      FRepo.Base, FRepo.IsRange, Paths, AIReviewKey);
+  finally
+    Paths.Free;
+  end;
+  FAIReviewJob.OnDone := @AIReviewDone;
+  FAIReviewJob.Start;
+  FStatus.ShowMessage(Format(rsAIReviewing, [AgentNames[FAgent]]), stNormal, 0);
+  UpdateAIReviewItems;
+end;
+
+{ The findings replace those held, and show while their comparison is
+  the one shown; the status bar says how many there are. }
+procedure TForm1.AIReviewDone(Sender: TObject);
+var
+  Job: TGittanAIReviewJob;
+  Agent: string;
+begin
+  Job := TGittanAIReviewJob(Sender);
+  if Job <> FAIReviewJob then
+    Exit;
+  FAIReviewJob := nil;
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+  FStatus.ShowMessage('', stNormal, 0);
+  Agent := AgentNames[Job.Agent];
+  if not Job.Ok then
+  begin
+    BannerError(Format(rsAIReviewFailed, [Agent]), Job.Error);
+    UpdateAIReviewItems;
+    Exit;
+  end;
+  FAIThreads := Job.Threads;
+  FAIThreadsKey := Job.Key;
+  if Length(FAIThreads) = 0 then
+    StatusNote(Format(rsAIReviewNone, [Agent]))
+  else if Length(FAIThreads) = 1 then
+    StatusNote(Format(rsAIReviewOne, [Agent]))
+  else
+    StatusNote(Format(rsAIReviewMany, [Agent, Length(FAIThreads)]));
+  CollectShownThreads;
+  FileTree.Invalidate;
+  RebuildIfChanges;
+  UpdateAIReviewItems;
+end;
+
+procedure TForm1.AbandonAIReview;
+begin
+  if FAIReviewJob = nil then
+    Exit;
+  FAIReviewJob.Stop(False);
+  FBlameZombies.Add(FAIReviewJob);
+  FAIReviewJob := nil;
 end;

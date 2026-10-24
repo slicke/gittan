@@ -499,7 +499,10 @@ begin
       FSettings.CopilotModel := V.AgentModels[gaCopilot];
       FindAgentCli;
       if not AIAvailable then
+      begin
         AbandonMessageJob;
+        AbandonAIReview;
+      end;
       UpdateCommitState;
       if (V.GitPath <> FSettings.GitPath) or (V.GhPath <> FSettings.GhPath) then
       begin

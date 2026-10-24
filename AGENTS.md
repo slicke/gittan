@@ -55,7 +55,7 @@ Details of each area live in `spec/`. Read the file that matches what you are ab
 - [spec/branches-stash-tags.md](spec/branches-stash-tags.md): Interactive rebase, branches, stashes, tags, reflog, bisect and patches. Read when touching `umain.rebase.inc`, `umain.branches.inc`, `umain.stash.inc`, `umain.tags.inc`, `umain.reflog.inc`, `umain.bisect.inc`, `umain.patches.inc`.
 - [spec/change-view.md](spec/change-view.md): The change view: rows, folding, side by side, word diff, navigation. Read when touching `umain.diffview.inc`, `BuildChangeView`, `ShowChanges`, line numbers, gaps, Hide Unchanged Lines, Side by Side, `gittan.worddiff`, F7 stepping, folding.
 - [spec/special-views.md](spec/special-views.md): Image, binary and translation views. Read when touching `gittan.imagediff`, `gittan.binaryview`, `gittan.pofile`, `umain.translations.inc`.
-- [spec/ai.md](spec/ai.md): AI features through Claude Code or GitHub Copilot. Read when touching `gittan.ai`, `umain.ai.inc`, the AI page of the settings, AI in the Commit header, File > Write Commit Message or `RunAgentCli`.
+- [spec/ai.md](spec/ai.md): AI features through Claude Code or GitHub Copilot. Read when touching `gittan.ai`, `umain.ai.inc`, the AI review's cards in the change view, the AI page of the settings, AI in the Commit header, File > Write Commit Message or `RunAgentCli`.
 - [spec/file-actions.md](spec/file-actions.md): Discard, leave out, keep, revert, rename, remove, clean and context menus. Read when touching `gittan.discard`, `gittan.keep`, `gittan.leaveout`, `umain.discard.inc`, `umain.leaveout.inc`, `umain.revert.inc`, `umain.movefiles.inc`, `umain.clean.inc`, the file and editor popup menus.
 
 ## Editing Guidance
