@@ -3,9 +3,10 @@ unit gittan.settingsdlg;
 {** The settings dialog (Gittan > Settings on macOS, Tools > Settings
   elsewhere), in two pages picked in a sidebar of the main window's kind,
   as the system's settings have: Editor, the editor font and its size,
-  the width of a tab and the syntax theme, with a sample; and Tools, the
+  the width of a tab and the syntax theme, with a sample; Tools, the
   commands Open in Editor and Open in Terminal run, and the git and gh to
-  run in place of those found on PATH. The other view options are in the
+  run in place of those found on PATH; and AI, whether the AI features
+  show, the agent they run, and its command and model (see gittan.ai). The other view options are in the
   View menu, and the window remembers its own state.
 
   The font and the theme are previewed twice: in the main editor, where
@@ -21,7 +22,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Forms, Controls, Graphics, Dialogs, StdCtrls,
-  ExtCtrls, Spin, ATSynEdit, gittan.lexers, gittan.sidenav;
+  ExtCtrls, Spin, ATSynEdit, gittan.lexers, gittan.sidenav, gittan.ai;
 
 type
   {** Shows AFont, the theme ATheme (an index into SyntaxThemes) and a tab
@@ -36,6 +37,12 @@ type
     EditorCommand, TerminalCommand: string;
     {** Paths of git and gh; empty for the ones found on PATH. }
     GitPath, GhPath: string;
+    {** Whether the AI features show, the agent they run, and each
+      agent's command (empty for the one found) and model (empty for its
+      own choice). }
+    AIEnabled: boolean;
+    Agent: TGittanAgent;
+    AgentPaths, AgentModels: array[TGittanAgent] of string;
   end;
 
 {** Shows the dialog with AFont and AValues in it, its bottom right corner
@@ -59,6 +66,20 @@ resourcestring
   rsSettingsTitle = 'Settings';
   rsEditorPage = 'Editor';
   rsToolsPage = 'Tools';
+  rsAIPage = 'AI';
+  rsAIEnabled = 'Turn on the AI features';
+  rsAINote = 'They run the agent picked here in the repository, with your own ' +
+    'login, to write a commit message from the ticked files. The changes are sent ' +
+    'to its provider: Anthropic for Claude Code, GitHub for Copilot. Off until ' +
+    'turned on here.';
+  rsAgent = 'Agent';
+  rsAgentPath = '%s, %s''s command line tool';
+  rsAgentDefault = 'The %s on PATH';
+  rsAgentNotFound = 'Not found on PATH; install %s to use the AI features.';
+  rsAgentModel = 'Model';
+  rsAgentModelDefault = '%s''s default';
+  rsClaudeModelNote = 'An alias such as haiku or sonnet, or a model''s full name.';
+  rsCopilotModelNote = 'A model''s name, or auto to let Copilot pick.';
   rsEditorFont = 'Editor font';
   rsChangeFont = '&Change...';
   rsTabWidth = 'Tab width';
@@ -206,14 +227,20 @@ type
     FFontLabel: TLabel;
     FSizeEdit, FTabEdit: TSpinEdit;
     FThemeBox: TComboBox;
-    FEditorEdit, FTerminalEdit, FGitEdit, FGhEdit: TEdit;
-    FGitNote, FGhNote: TLabel;
+    FEditorEdit, FTerminalEdit, FGitEdit, FGhEdit, FAgentEdit, FModelEdit: TEdit;
+    FGitNote, FGhNote, FAgentLabel, FAgentNote, FModelNote: TLabel;
+    FAIBox: TCheckBox;
+    { The agent picked, and each agent's command and model as edited:
+      the fields show the picked one's (ShowAgent). }
+    FAgentBox: TComboBox;
+    FAgent: TGittanAgent;
+    FAgentPaths, FAgentModels: array[TGittanAgent] of string;
     { The sidebar with a row per page, and the content beside it: the
       box of each page, which sizes itself, one shown at a time, and the
       buttons under them. FBox is the one Place puts controls in. }
     FNavPanel, FContent: TPanel;
     FNav: TGittanSideNav;
-    FEditorBox, FToolsBox: TPanel;
+    FEditorBox, FToolsBox, FAIPage: TPanel;
     FBox: TWinControl;
     FPreview: TSettingsPreview;
     FNextTop: integer;
@@ -243,6 +270,9 @@ type
     procedure TabChange(Sender: TObject);
     procedure ThemeChange(Sender: TObject);
     procedure ToolChange(Sender: TObject);
+    procedure AIChange(Sender: TObject);
+    procedure AgentChange(Sender: TObject);
+    procedure ShowAgent;
     procedure ShowTool(AEdit: TEdit; ANote: TLabel; const AName, ANotFound: string);
     procedure SampleClick(Sender: TObject);
     procedure ShowSample;
@@ -261,6 +291,7 @@ var
   Lbl: TLabel;
   Btn, OK, Cancel: TButton;
   i: integer;
+  A: TGittanAgent;
 begin
   inherited CreateNew(AOwner);
   FFont := TFont.Create;
@@ -295,6 +326,7 @@ begin
   FContent.Parent := Self;
   FEditorBox := AddPage(rsEditorPage, niEditor);
   FToolsBox := AddPage(rsToolsPage, niTools);
+  FAIPage := AddPage(rsAIPage, niAI);
 
   { The Editor page: the font's name, then the size and Change... on the
     right, which alRight orders by Left. }
@@ -399,6 +431,35 @@ begin
   FGitEdit := AddTool(rsGitPath, rsGitDefault, FGitNote);
   FGhEdit := AddTool(rsGhPath, rsGhDefault, FGhNote);
 
+  { The AI page: the switch and what it means, then the agent, its
+    command and its model, which follow the switch; the labels name the
+    agent picked (ShowAgent). }
+  FBox := FAIPage;
+  FAIBox := TCheckBox.Create(Self);
+  FAIBox.Caption := rsAIEnabled;
+  FAIBox.OnChange := @AIChange;
+  Place(FAIBox, 0);
+  Lbl := AddLabel(rsAINote, 4);
+  Lbl.Font.Color := clGrayText;
+  Lbl.WordWrap := True;
+  AddLabel(rsAgent, 16);
+  FAgentBox := TComboBox.Create(Self);
+  FAgentBox.Style := csDropDownList;
+  for A in TGittanAgent do
+    FAgentBox.Items.Add(AgentNames[A]);
+  FAgentBox.OnChange := @AgentChange;
+  Place(FAgentBox, 4);
+  FAgentLabel := AddLabel('', 16);
+  FAgentEdit := AddEdit('');
+  FAgentEdit.OnChange := @ToolChange;
+  FAgentNote := AddLabel('', 4);
+  FAgentNote.Font.Color := clGrayText;
+  FAgentNote.WordWrap := True;
+  AddLabel(rsAgentModel, 16);
+  FModelEdit := AddEdit('');
+  FModelNote := AddLabel('', 4);
+  FModelNote.Font.Color := clGrayText;
+
   { OK on the right on macOS, Cancel on the right elsewhere. }
   FBox := FContent;
   Row := AddRow(16);
@@ -436,8 +497,11 @@ begin
   inherited DoShow;
   FToolsBox.GetPreferredSize(W, H, False, True);
   Tallest := Max(FEditorBox.Height, H);
+  FAIPage.GetPreferredSize(W, H, False, True);
+  Tallest := Max(Tallest, H);
   FEditorBox.Constraints.MinHeight := Tallest;
   FToolsBox.Constraints.MinHeight := Tallest;
+  FAIPage.Constraints.MinHeight := Tallest;
   SetBounds(FCorner.X - Width, FCorner.Y - Height, Width, Height);
   MakeFullyVisible;
 end;
@@ -486,10 +550,13 @@ begin
   try
     FEditorBox.Visible := False;
     FToolsBox.Visible := False;
-    if AIndex = 0 then
-      Box := FEditorBox
-    else
-      Box := FToolsBox;
+    FAIPage.Visible := False;
+    case AIndex of
+      0: Box := FEditorBox;
+      1: Box := FToolsBox;
+      else
+        Box := FAIPage;
+    end;
     Box.Top := 0;
     Box.Visible := True;
   finally
@@ -688,8 +755,46 @@ procedure TSettingsForm.ToolChange(Sender: TObject);
 begin
   if Sender = FGitEdit then
     ShowTool(FGitEdit, FGitNote, 'git', rsToolNotFound)
+  else if Sender = FGhEdit then
+    ShowTool(FGhEdit, FGhNote, 'gh', rsGhNotFound)
   else
-    ShowTool(FGhEdit, FGhNote, 'gh', rsGhNotFound);
+    ShowTool(FAgentEdit, FAgentNote, AgentCommands[FAgent],
+      Format(rsAgentNotFound, [AgentNames[FAgent]]));
+end;
+
+{ The agent and its fields matter only with the features on. }
+procedure TSettingsForm.AIChange(Sender: TObject);
+begin
+  FAgentBox.Enabled := FAIBox.Checked;
+  FAgentEdit.Enabled := FAIBox.Checked;
+  FModelEdit.Enabled := FAIBox.Checked;
+end;
+
+{ What was typed for the agent left is kept, and the fields show the
+  one picked. }
+procedure TSettingsForm.AgentChange(Sender: TObject);
+begin
+  FAgentPaths[FAgent] := Trim(FAgentEdit.Text);
+  FAgentModels[FAgent] := Trim(FModelEdit.Text);
+  FAgent := TGittanAgent(Max(0, FAgentBox.ItemIndex));
+  ShowAgent;
+end;
+
+{ The picked agent's command and model in the fields, and the labels,
+  hints and notes that name it. }
+procedure TSettingsForm.ShowAgent;
+begin
+  FAgentBox.ItemIndex := Ord(FAgent);
+  FAgentLabel.Caption := Format(rsAgentPath, [AgentCommands[FAgent], AgentNames[FAgent]]);
+  FAgentEdit.TextHint := Format(rsAgentDefault, [AgentCommands[FAgent]]);
+  FAgentEdit.Text := FAgentPaths[FAgent];
+  FModelEdit.TextHint := Format(rsAgentModelDefault, [AgentNames[FAgent]]);
+  FModelEdit.Text := FAgentModels[FAgent];
+  if FAgent = gaCopilot then
+    FModelNote.Caption := rsCopilotModelNote
+  else
+    FModelNote.Caption := rsClaudeModelNote;
+  ToolChange(FAgentEdit);
 end;
 
 { The note under AEdit for the tool AName: with the field empty, where
@@ -703,7 +808,11 @@ begin
   Path := Trim(AEdit.Text);
   if Path = '' then
   begin
-    Path := FindTool(AName);
+    { claude may be where its own installer put it, off PATH. }
+    if AEdit = FAgentEdit then
+      Path := FindAgent(FAgent, '')
+    else
+      Path := FindTool(AName);
     if Path <> '' then
       ANote.Caption := Format(rsToolFound, [Path])
     else
@@ -735,6 +844,12 @@ begin
     F.FGhEdit.Text := AValues.GhPath;
     F.ToolChange(F.FGitEdit);
     F.ToolChange(F.FGhEdit);
+    F.FAIBox.Checked := AValues.AIEnabled;
+    F.FAgent := AValues.Agent;
+    F.FAgentPaths := AValues.AgentPaths;
+    F.FAgentModels := AValues.AgentModels;
+    F.ShowAgent;
+    F.AIChange(nil);
     F.FPreview := APreview;
     F.FLexers := ALexers;
     F.FTemplate := ATemplate;
@@ -751,6 +866,12 @@ begin
       AValues.TerminalCommand := Trim(F.FTerminalEdit.Text);
       AValues.GitPath := Trim(F.FGitEdit.Text);
       AValues.GhPath := Trim(F.FGhEdit.Text);
+      AValues.AIEnabled := F.FAIBox.Checked;
+      { The fields hold the picked agent's; the other's are as kept. }
+      F.AgentChange(nil);
+      AValues.Agent := F.FAgent;
+      AValues.AgentPaths := F.FAgentPaths;
+      AValues.AgentModels := F.FAgentModels;
     end;
   finally
     F.Free;

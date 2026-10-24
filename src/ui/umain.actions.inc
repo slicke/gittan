@@ -478,6 +478,12 @@ begin
     V.TerminalCommand := FSettings.TerminalCommand;
     V.GitPath := FSettings.GitPath;
     V.GhPath := FSettings.GhPath;
+    V.AIEnabled := FSettings.AIEnabled;
+    V.Agent := AgentOfKey(FSettings.AIAgent);
+    V.AgentPaths[gaClaude] := FSettings.ClaudePath;
+    V.AgentModels[gaClaude] := FSettings.ClaudeModel;
+    V.AgentPaths[gaCopilot] := FSettings.CopilotPath;
+    V.AgentModels[gaCopilot] := FSettings.CopilotModel;
     Corner := EditorPanel.ClientToScreen(Point(EditorPanel.ClientWidth -
       Scale96ToForm(Margin), EditorPanel.ClientHeight - Scale96ToForm(Margin)));
     if EditSettings(F, V, @PreviewSettings, FLexers, Edit, Corner) then
@@ -485,6 +491,16 @@ begin
       PreviewSettings(F, V.Theme, V.TabSize);
       FSettings.EditorCommand := V.EditorCommand;
       FSettings.TerminalCommand := V.TerminalCommand;
+      FSettings.AIEnabled := V.AIEnabled;
+      FSettings.AIAgent := AgentCommands[V.Agent];
+      FSettings.ClaudePath := V.AgentPaths[gaClaude];
+      FSettings.ClaudeModel := V.AgentModels[gaClaude];
+      FSettings.CopilotPath := V.AgentPaths[gaCopilot];
+      FSettings.CopilotModel := V.AgentModels[gaCopilot];
+      FindAgentCli;
+      if not AIAvailable then
+        AbandonMessageJob;
+      UpdateCommitState;
       if (V.GitPath <> FSettings.GitPath) or (V.GhPath <> FSettings.GhPath) then
       begin
         FSettings.GitPath := V.GitPath;

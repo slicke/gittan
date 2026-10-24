@@ -24,6 +24,9 @@ type
     pre-push hook's output, say). Called in the thread the command runs
     in. }
   TGittanOutputEvent = procedure(const AText: string) of object;
+  {** Asked while a tool runs, in the thread it runs in: True ends the
+    tool (a job that was told to stop). }
+  TGittanCancelEvent = function: boolean of object;
 type
   {** What happened to a changed file, condensed from the two status columns
     of `git status --porcelain`. }
@@ -989,6 +992,15 @@ function FnmNodeBin(const AFnmDir: string): string;
 function RunGitHubCli(const AExe, ADir: string; const AArgs: array of string;
   out AOutput, AError: string): boolean;
 
+{** Runs an AI agent's command line tool (AExe: claude, copilot) in ADir
+  with AArgs and AInput on its standard input, and answers whether it
+  exited with 0, with its standard output in AOutput, kept on failure
+  too (claude -p --output-format json says why there), and its standard
+  error in AError. ACancel is asked as it runs; when it
+  answers True claude is ended and the result is False. }
+function RunAgentCli(const AExe, ADir: string; const AArgs: array of string;
+  const AInput: string; ACancel: TGittanCancelEvent; out AOutput, AError: string): boolean;
+
 {** The files a refused switch or checkout names in AError, git's
   message, as those it "would overwrite" (local changes, or untracked
   files the branch has), each on a line of its own after a tab; false
@@ -1705,10 +1717,15 @@ end;
   with nothing read, when AExe cannot be started. Both pipes are read
   as the tool writes, so a long command's progress can be shown and
   neither pipe fills up and blocks it; what is left once it has ended
-  is read after it. AStatus is its exit code. }
+  is read after it. AStatus is its exit code. AInput is written to the
+  tool's input before its input is closed: a tool that reads all of it
+  before it writes (claude -p) takes any length, one that writes first
+  could block on a full pipe while it is written. ACancel, when given,
+  is asked on every pass of the reading loop, and True ends the tool. }
 function RunTool(const AExe, ADir: string; const AArgs, ASkip, AEnv: array of string;
   out AOutput, AError: string; out AStatus: integer;
-  AOnOutput: TGittanOutputEvent): boolean;
+  AOnOutput: TGittanOutputEvent; const AInput: string = '';
+  ACancel: TGittanCancelEvent = nil): boolean;
 var
   P: TProcess;
   Skip: array of string;
@@ -1738,13 +1755,25 @@ begin
     except
       Exit(False);
     end;
-    { Nothing is written to the tool, so its input ends at once: a hook
-      or an alias that reads it would otherwise wait for ever, and the
-      app with it. }
+    { The input ends once AInput is written (at once without one): a
+      hook or an alias that reads it would otherwise wait for ever, and
+      the app with it. A tool that ended before reading it all breaks the
+      pipe, which is no failure of the run. }
+    if AInput <> '' then
+      try
+        P.Input.WriteBuffer(AInput[1], Length(AInput));
+      except
+      end;
     P.CloseInput;
     OutOpen := True;
     ErrOpen := True;
     repeat
+      if Assigned(ACancel) and ACancel() then
+      begin
+        P.Terminate(1);
+        AStatus := -1;
+        Exit(False);
+      end;
       Got := ReadPipe(P.Output, AOutput, AOnOutput);
       if ReadPipe(P.Stderr, AError, AOnOutput) then
         Got := True;
@@ -1907,6 +1936,22 @@ begin
   Result := Status = 0;
   if not Result then
     JoinFailure(AOutput, AError);
+end;
+
+function RunAgentCli(const AExe, ADir: string; const AArgs: array of string;
+  const AInput: string; ACancel: TGittanCancelEvent; out AOutput, AError: string): boolean;
+var
+  Status: integer;
+begin
+  if not RunTool(AExe, ADir, AArgs, [], [], AOutput, AError, Status, nil, AInput,
+    ACancel) then
+  begin
+    if (AError = '') and not (Assigned(ACancel) and ACancel()) then
+      AError := 'Could not run ' + AExe;
+    Exit(False);
+  end;
+  Result := Status = 0;
+  AError := Trim(ResolveReturns(AError));
 end;
 
 { The NUL-separated fields of the output of a git command run with -z; a

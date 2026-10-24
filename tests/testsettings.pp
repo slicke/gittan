@@ -60,6 +60,11 @@ begin
     AssertEquals('no tab width picked', 0, S.TabSize);
     AssertEquals('', S.GitPath);
     AssertEquals('', S.GhPath);
+    AssertFalse('the AI features start off', S.AIEnabled);
+    AssertEquals('', S.ClaudePath);
+    AssertEquals('', S.ClaudeModel);
+    AssertEquals('', S.AIAgent);
+    AssertEquals('', S.CopilotPath);
   finally
     S.Free;
   end;
@@ -96,6 +101,12 @@ begin
     S.GitPath := '/opt/homebrew/bin/git';
     S.GhPath := 'C:\Program Files\GitHub CLI\gh.exe';
     S.SyntaxTheme := 'Delphi';
+    S.AIEnabled := True;
+    S.ClaudePath := '/Users/me/.local/bin/claude';
+    S.ClaudeModel := 'haiku';
+    S.AIAgent := 'copilot';
+    S.CopilotPath := '/opt/homebrew/bin/copilot';
+    S.CopilotModel := 'auto';
     S.UpdateSnoozedUntil := EncodeDate(2026, 10, 29) + 0.5;
     S.AddRecent('/tmp/a');
     S.AddRecent('/tmp/b');
@@ -131,6 +142,12 @@ begin
     AssertEquals('/opt/homebrew/bin/git', S.GitPath);
     AssertEquals('C:\Program Files\GitHub CLI\gh.exe', S.GhPath);
     AssertEquals('Delphi', S.SyntaxTheme);
+    AssertTrue(S.AIEnabled);
+    AssertEquals('/Users/me/.local/bin/claude', S.ClaudePath);
+    AssertEquals('haiku', S.ClaudeModel);
+    AssertEquals('copilot', S.AIAgent);
+    AssertEquals('/opt/homebrew/bin/copilot', S.CopilotPath);
+    AssertEquals('auto', S.CopilotModel);
     AssertEquals('the day, without the time', EncodeDate(2026, 10, 29),
       S.UpdateSnoozedUntil, 0);
     AssertEquals(2, S.Recent.Count);

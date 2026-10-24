@@ -87,6 +87,18 @@ begin
   FCommitAmend.Align := alLeft;
   FCommitAmend.OnClick := @CommitAmendClick;
   FCommitAmend.Parent := FCommitRow;
+  { Write, after Amend, while the AI features are on (umain.ai.inc). }
+  FMessageButton := TButton.Create(Self);
+  FMessageButton.Caption := rsWriteMessage;
+  FMessageButton.Hint := rsWriteMessageHint;
+  FMessageButton.ShowHint := True;
+  FMessageButton.Align := alLeft;
+  FMessageButton.AutoSize := True;
+  FMessageButton.Left := 500;
+  FMessageButton.BorderSpacing.Left := 4;
+  FMessageButton.Visible := False;
+  FMessageButton.OnClick := @MessageButtonClick;
+  FMessageButton.Parent := FCommitRow;
   FAbortButton := TButton.Create(Self);
   FAbortButton.Caption := rsAbortButton;
   FAbortButton.Align := alLeft;
@@ -581,6 +593,7 @@ begin
   FAbortButton.Enabled := not Busy;
   FSkipButton.Visible := Continuing;
   FSkipButton.Enabled := not Busy;
+  UpdateMessageButton;
   FCommitNote.Text := Note;
   { The conflicts lead on to the first of them. }
   if (FRepo.Base = '') and (FConflictFiles > 0) then

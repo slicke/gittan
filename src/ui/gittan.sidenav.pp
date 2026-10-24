@@ -45,9 +45,9 @@ type
     (a branch's commits meeting the trunk) for the pull requests, a
     clock for the recent repositories, a window of text for the
     settings' Editor page or sliders for its Tools page and for the
-    settings themselves. }
+    settings themselves, and a sparkle for its AI page. }
   TGittanNavIcon = (niHome, niGraph, niRepository, niCommands, niFiles, niPull, niClock,
-    niEditor, niTools);
+    niEditor, niTools, niAI);
 
   {** A click on a row, with its index. }
   TGittanNavPickEvent = procedure(Sender: TObject; AIndex: integer) of object;
@@ -577,6 +577,22 @@ begin
       Canvas.Ellipse(X + ASize - 5, Mid - 2, X + ASize, Mid + 3);
       Canvas.Ellipse(X + 2, Eave - 2, X + 7, Eave + 3);
       Canvas.Brush.Style := bsClear;
+    end;
+    niAI:
+    begin
+      { A sparkle: a star of four points, its sides drawn in to the
+        middle, and a small one at the top right. }
+      Mid := X + ASize * 3 div 7;
+      Eave := Y + ASize * 4 div 7;
+      Canvas.Polygon([Point(Mid, Eave - ASize * 3 div 7), Point(Mid + ASize div 9,
+        Eave - ASize div 9), Point(Mid + ASize * 3 div 7, Eave), Point(Mid + ASize div 9,
+        Eave + ASize div 9), Point(Mid, Eave + ASize * 3 div 7), Point(Mid - ASize div 9,
+        Eave + ASize div 9), Point(Mid - ASize * 3 div 7, Eave), Point(Mid - ASize div 9,
+        Eave - ASize div 9)]);
+      Mid := X + ASize - ASize div 7;
+      Eave := Y + ASize div 7;
+      Canvas.Line(Mid - ASize div 7, Eave, Mid + ASize div 7 + 1, Eave);
+      Canvas.Line(Mid, Eave - ASize div 7, Mid, Eave + ASize div 7 + 1);
     end;
   end;
 end;

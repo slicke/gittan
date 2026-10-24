@@ -28,7 +28,7 @@ uses
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader, gittan.hintbox,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
-  gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.remotejob, gittan.mdpreview,
+  gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
   gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
   gittan.remotesdlg, gittan.submoduledlg, ATSynEdit_Gaps, md5;
 
@@ -148,6 +148,17 @@ type
     FGitHubCli: string;
     FHasGitHubCli: boolean;
     FGitHubItems: array of TMenuItem;
+    { The AI features (umain.ai.inc, gittan.ai), shown only once the
+      settings turn them on and the agent's command is found: the agent
+      the settings pick and its command, the
+      button in the commit row that writes the message, the job writing
+      it, and the field's text when it started, which the message
+      replaces only while it is unchanged. }
+    FAgent: TGittanAgent;
+    FAgentCli, FAgentModel: string;
+    FMessageButton: TButton;
+    FMessageJob: TGittanMessageJob;
+    FMessageFrom: string;
     { The width of a tab in the editors, in characters. }
     FTabSize: integer;
     FSyntaxMenu, FAutoLexerItem, FPlainTextItem: TMenuItem;
@@ -1103,6 +1114,18 @@ type
     procedure ApplyTabSize(ASize: integer);
     procedure FindGitHubCli;
     procedure UpdateGitHubItems;
+    procedure FindAgentCli;
+    {** Whether the AI features are on and the agent's command is there. }
+    function AIAvailable: boolean;
+    {** Shows the Write button when AIAvailable, enabled as the commit
+      section allows; from UpdateCommitState. }
+    procedure UpdateMessageButton;
+    procedure MessageButtonClick(Sender: TObject);
+    procedure StartMessageJob;
+    procedure MessageJobDone(Sender: TObject);
+    {** Stops a message being written: the agent is ended and its answer
+      thrown away. }
+    procedure AbandonMessageJob;
     procedure MenuWrapClick(Sender: TObject);
     procedure MenuFoldClick(Sender: TObject);
     procedure ViewMenuClick(Sender: TObject);
@@ -1730,6 +1753,13 @@ resourcestring
   rsCommitButton = 'Commit';
   rsCommitAmendButton = 'Amend Commit';
   rsCommitAmend = 'Amend';
+  rsWriteMessage = '✦ Write';
+  rsWriteMessageHint = 'Write the message with %s from the ticked files';
+  rsWritingMessage = 'Stop';
+  rsWritingMessageHint = '%s is writing the message; click to stop';
+  rsWritingStatus = '%s is writing the message...';
+  rsMessageFailed = '%s wrote no message';
+  rsMessageChanged = '%s''s message was not used: the field changed meanwhile.';
   rsCommitting = 'Committing...';
   rsCommitMessageHint = {$IFDEF DARWIN}'Message (⌘↩ to commit)'{$ELSE}'Message (Ctrl+Enter to commit)'{$ENDIF};
   rsCommitCount = '%d of %d';
@@ -2550,6 +2580,7 @@ begin
   FSettings.Load;
   SetGitExe(FSettings.GitPath);
   FindGitHubCli;
+  FindAgentCli;
   FTabSize := FSettings.TabSize;
   if FTabSize <= 0 then
     FTabSize := DefaultTabSize;
@@ -2929,6 +2960,7 @@ end;
 procedure TForm1.FormDestroy(Sender: TObject);
 begin
   Application.RemoveAsyncCalls(Self);
+  AbandonMessageJob;
   StopCommitJob(True);
   FreeAndNil(FDroppedCommits);
   StopRemoteJob(True);
@@ -4969,6 +5001,7 @@ begin
   FlushEdit;
   LeaveEdit;
   SaveCommitDraft;
+  AbandonMessageJob;
   StopCommitJob(False);
   StopRemoteJob(False);
   { A failure's notice, which Try Again would run on this one. }
@@ -6494,6 +6527,7 @@ const
 {$I umain.files.inc}
 {$I umain.pulls.inc}
 {$I umain.commit.inc}
+{$I umain.ai.inc}
 {$I umain.remote.inc}
 {$I umain.mdpreview.inc}
 

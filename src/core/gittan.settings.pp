@@ -102,6 +102,16 @@ type
       gh found on ToolSearchPath, and when there is none the features
       that need GitHub are off. }
     GhPath: string;
+    {** Whether the AI features show (see gittan.ai): off until the user
+      turns them on, since they send the changes to the agent's
+      provider. }
+    AIEnabled: boolean;
+    {** The agent they run, by its key (AgentOfKey): claude or copilot. }
+    AIAgent: string;
+    {** Each agent's command, as a path to it (empty runs the one
+      FindAgent finds), and the model it runs with (empty for its own
+      choice). }
+    ClaudePath, ClaudeModel, CopilotPath, CopilotModel: string;
     {** The day until which a newer Gittan is not pointed out, 0 for no
       such wait: Remind Me Later in the update dialog sets it. Kept as a
       date alone. }
@@ -145,6 +155,7 @@ const
   SecCommit = 'Commit';
   SecTools = 'Tools';
   SecTrust = 'Trust';
+  SecAI = 'AI';
   ConfigFolder = 'Gittan';
 
 {** The folder the ini file lives in. GetAppConfigDir names it after
@@ -270,6 +281,12 @@ begin
       TabSize := Ini.ReadInteger(SecView, 'TabSize', 0);
       GitPath := Ini.ReadString(SecTools, 'Git', '');
       GhPath := Ini.ReadString(SecTools, 'Gh', '');
+      AIEnabled := Ini.ReadBool(SecAI, 'Enabled', False);
+      AIAgent := Ini.ReadString(SecAI, 'Agent', '');
+      ClaudePath := Ini.ReadString(SecAI, 'Claude', '');
+      ClaudeModel := Ini.ReadString(SecAI, 'ClaudeModel', '');
+      CopilotPath := Ini.ReadString(SecAI, 'Copilot', '');
+      CopilotModel := Ini.ReadString(SecAI, 'CopilotModel', '');
       UpdateSnoozedUntil := ReadDay(Ini.ReadString(SecUpdate, 'SnoozedUntil', ''));
       Ini.ReadSectionValues(SecTrust, FTrust);
       FRecent.Clear;
@@ -331,6 +348,12 @@ begin
       Ini.WriteInteger(SecView, 'TabSize', TabSize);
       Ini.WriteString(SecTools, 'Git', KeepEdges(GitPath));
       Ini.WriteString(SecTools, 'Gh', KeepEdges(GhPath));
+      Ini.WriteBool(SecAI, 'Enabled', AIEnabled);
+      Ini.WriteString(SecAI, 'Agent', AIAgent);
+      Ini.WriteString(SecAI, 'Claude', KeepEdges(ClaudePath));
+      Ini.WriteString(SecAI, 'ClaudeModel', KeepEdges(ClaudeModel));
+      Ini.WriteString(SecAI, 'Copilot', KeepEdges(CopilotPath));
+      Ini.WriteString(SecAI, 'CopilotModel', KeepEdges(CopilotModel));
       if UpdateSnoozedUntil > 0 then
         Ini.WriteString(SecUpdate, 'SnoozedUntil',
           FormatDateTime('yyyy"-"mm"-"dd', UpdateSnoozedUntil))
