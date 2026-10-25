@@ -963,6 +963,11 @@ function ParseGitVersion(const AText: string; out AVersion: string;
   false when git cannot be run or names no version. }
 function GitVersion(out AVersion: string; out AMajor, AMinor: integer): boolean;
 
+{** As GitVersion, for the git at AExe (a path, or a name on PATH): the
+  settings ask about the one in their field before it is saved. }
+function GitVersionOf(const AExe: string; out AVersion: string;
+  out AMajor, AMinor: integer): boolean;
+
 {** Whether git AMajor.AMinor is MinGitMajor.MinGitMinor or later. }
 function GitVersionSupported(AMajor, AMinor: integer): boolean;
 
@@ -1272,14 +1277,8 @@ begin
 end;
 
 function GitVersion(out AVersion: string; out AMajor, AMinor: integer): boolean;
-var
-  Output, Err: string;
 begin
-  AVersion := '';
-  AMajor := 0;
-  AMinor := 0;
-  Result := RunGitIn(GetTempDir, ['--version'], Output, Err) and
-    ParseGitVersion(Output, AVersion, AMajor, AMinor);
+  Result := GitVersionOf(GGitExe, AVersion, AMajor, AMinor);
 end;
 
 function GitVersionSupported(AMajor, AMinor: integer): boolean;
@@ -1931,6 +1930,20 @@ begin
   Result := RunGitIn(ADir, AArgs, AOutput, Err, AIndexFile);
   if not Result then
     FError := Err;
+end;
+
+function GitVersionOf(const AExe: string; out AVersion: string;
+  out AMajor, AMinor: integer): boolean;
+var
+  Output, Err: string;
+  Status: integer;
+begin
+  AVersion := '';
+  AMajor := 0;
+  AMinor := 0;
+  Result := (AExe <> '') and RunTool(AExe, GetTempDir, ['--version'], [], ['LC_ALL=C'],
+    Output, Err, Status, nil) and (Status = 0) and
+    ParseGitVersion(Output, AVersion, AMajor, AMinor);
 end;
 
 function RunGitHubCli(const AExe, ADir: string; const AArgs: array of string;

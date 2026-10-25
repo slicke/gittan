@@ -1196,7 +1196,12 @@ begin
       Lines.Add(Format(rsVersionGittan, [CurrentBuild]))
     else
       Lines.Add(Format(rsVersionGittanLocal, [{$I %DATE%}]));
-    if GitVersion(Version, Major, Minor) then
+    { The git and gh the fields name, saved or not, as the notes under
+      them find them. }
+    Exe := Trim(FGitEdit.Text);
+    if Exe = '' then
+      Exe := FindTool('git');
+    if GitVersionOf(Exe, Version, Major, Minor) then
       Lines.Add('git ' + Version)
     else
       Lines.Add(Format(rsVersionNotFound, ['git']));
