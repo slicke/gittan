@@ -850,6 +850,8 @@ type
     procedure UpdateCaption;
     procedure BuildMenu;
     procedure BuildSyntaxMenu;
+    procedure AddLexerItems;
+    procedure LexersLoaded(Sender: TObject);
     procedure MenuOpenClick(Sender: TObject);
     procedure MenuOpenRepoClick(Sender: TObject);
     procedure MenuSyntaxClick(Sender: TObject);
@@ -2963,10 +2965,9 @@ begin
   FRepo := TGittanRepo.Create;
   FSnapshots := TGittanSnapshots.Create;
   FLexers := TGittanLexers.Create;
+  FLexers.OnLoaded := @LexersLoaded;
   if not FLexers.Load then
     FStatus.ShowMessage(rsNoLexers, stBad, 0);
-  if FLexers.Errors <> '' then
-    DebugLn(FLexers.Errors);
   FDark := IsDarkMode;
   ApplyTheme;
 
@@ -4095,10 +4096,6 @@ end;
   item caption is the lexer name; the hint keeps it without the
   accelerator ampersands the widgetset may insert. }
 procedure TForm1.BuildSyntaxMenu;
-var
-  Names: TStringList;
-  Group, Item: TMenuItem;
-  LexName, Initial, LastInitial: string;
 begin
   FAutoLexerItem := TMenuItem.Create(FSyntaxMenu);
   FAutoLexerItem.Caption := rsAutomatic;
@@ -4109,7 +4106,17 @@ begin
   FPlainTextItem.OnClick := @MenuSyntaxClick;
   FSyntaxMenu.Add(FPlainTextItem);
   FSyntaxMenu.Add(NewLine);
+  if FLexers.Loaded then
+    AddLexerItems;
+end;
 
+{ The lexers in groups by initial, once they are loaded. }
+procedure TForm1.AddLexerItems;
+var
+  Names: TStringList;
+  Group, Item: TMenuItem;
+  LexName, Initial, LastInitial: string;
+begin
   Names := TStringList.Create;
   try
     FLexers.GetNames(Names);
@@ -4135,6 +4142,21 @@ begin
     end;
   finally
     Names.Free;
+  end;
+end;
+
+{ The lexers load in a thread (TGittanLexers.Load); the Syntax menu gets
+  them when they are in, unless it is not built yet and takes them itself. }
+procedure TForm1.LexersLoaded(Sender: TObject);
+begin
+  if FLexers.Errors <> '' then
+    DebugLn(FLexers.Errors);
+  if not FLexers.HasLexers then
+    FStatus.ShowMessage(rsNoLexers, stBad, 0);
+  if FSyntaxMenu <> nil then
+  begin
+    AddLexerItems;
+    UpdateSyntaxChecks;
   end;
 end;
 
