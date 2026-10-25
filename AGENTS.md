@@ -67,6 +67,7 @@ Details of each area live in `spec/`. Read the file that matches what you are ab
 - Cross-platform gotcha: `{$IFDEF UNIX}` does not cover Haiku. Use `{$IF DEFINED(UNIX) OR DEFINED(HAIKU)}` where both apply.
 - Do not edit `backup/` directories, `link*.res`, or other generated artifacts.
 - Update documentation when behavior or workflow changes: the matching `spec/` file for an area, AGENTS.md for the rules that apply everywhere. A new area gets a spec file and a line in the Specs list.
+- `CHANGELOG.md` lists the changes for users, under Unreleased until a build publishes them: a change someone would notice (a feature, a behavior, a fix of a shipped build, a build or platform fix) gets a line there, in plain words; a fix of work not yet in a build does not.
 
 ## Validation
 - After code changes, run the narrowest relevant build target first.
