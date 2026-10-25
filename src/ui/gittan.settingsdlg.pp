@@ -631,11 +631,34 @@ begin
   OK.BorderSpacing.Left := Scale96ToScreen(8);
 end;
 
+{ Update jobs dropped by a dialog that closed while they ran, freed once
+  they have finished, as the main form frees its jobs: freeing one at
+  once would wait for curl, up to FetchSeconds. }
+var
+  GUpdateZombies: TList;
+
+procedure FreeFinishedUpdateJobs(AWait: boolean);
+var
+  i: integer;
+begin
+  for i := GUpdateZombies.Count - 1 downto 0 do
+    if AWait or TThread(GUpdateZombies[i]).Finished then
+    begin
+      TThread(GUpdateZombies[i]).Free;
+      GUpdateZombies.Delete(i);
+    end;
+end;
+
 destructor TSettingsForm.Destroy;
 begin
   Application.RemoveAsyncCalls(Self);
-  { curl gives up after FetchSeconds. }
-  FUpdateJob.Free;
+  { A check still running is dropped, not waited for. }
+  if FUpdateJob <> nil then
+  begin
+    FUpdateJob.Stop(False);
+    GUpdateZombies.Add(FUpdateJob);
+    FUpdateJob := nil;
+  end;
   FAppIconShown.Free;
   FAppIcon.Free;
   { The lexer belongs to the main form's list. }
@@ -645,7 +668,7 @@ begin
 end;
 
 { The content has its size once the form has laid itself out, just before
-  it shows: both pages are held at the height of the taller (the one not
+  it shows: the pages are held at the height of the tallest (one not
   shown has its preferred height, not a laid out one), so the form keeps
   its size when the page changes, and goes to its corner, or over the
   middle of the main window when it opens on About. }
@@ -655,8 +678,12 @@ var
   Main: TCustomForm;
 begin
   inherited DoShow;
-  FToolsBox.GetPreferredSize(W, H, False, True);
+  { The Editor page is laid out when it is the one shown, else (opened on
+    About) it has its preferred height too. }
+  FEditorBox.GetPreferredSize(W, H, False, True);
   Tallest := Max(FEditorBox.Height, H);
+  FToolsBox.GetPreferredSize(W, H, False, True);
+  Tallest := Max(Tallest, H);
   FAIPage.GetPreferredSize(W, H, False, True);
   Tallest := Max(Tallest, H);
   FAboutPage.GetPreferredSize(W, H, False, True);
@@ -1064,6 +1091,7 @@ procedure TSettingsForm.UpdateClick(Sender: TObject);
 begin
   if FUpdateJob <> nil then
     Exit;
+  FreeFinishedUpdateJobs(False);
   ShowUpdateLink(rsUpdateChecking, '');
   FUpdateJob := TGittanUpdateJob.Create;
   FUpdateJob.OnDone := @UpdateDone;
@@ -1278,4 +1306,10 @@ begin
   end;
 end;
 
+initialization
+  GUpdateZombies := TList.Create;
+
+finalization
+  FreeFinishedUpdateJobs(True);
+  FreeAndNil(GUpdateZombies);
 end.
