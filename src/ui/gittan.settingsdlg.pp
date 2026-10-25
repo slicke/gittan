@@ -66,7 +66,7 @@ function EditSettings(AFont: TFont; var AValues: TSettingsValues;
 implementation
 
 uses
-  Math, StrUtils, Process, Clipbrd, LCLIntf, LCLVersion, InterfaceBase, LCLPlatformDef,
+  Math, StrUtils, Process, Clipbrd, LCLIntf, LCLType, LCLVersion, InterfaceBase, LCLPlatformDef,
   ec_SyntAnal, ATSynEdit_Adapter_EControl, ATSynEdit_Globals,
   gittan.syntaxthemes, gittan.git, gittan.theme;
 
