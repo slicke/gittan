@@ -350,7 +350,7 @@ end;
   the room that is left, narrower when there is little. }
 procedure TGittanOwnTitleBar.Layout;
 var
-  Right, LeftEdge, X, W, H, i, Room, SearchW: integer;
+  Right, LeftEdge, X, W, H, i, Room, SearchW, SearchH: integer;
   Menu: TMainMenu;
   Item: TMenuItem;
   S: string;
@@ -411,14 +411,20 @@ begin
 
   Room := Right - LeftEdge;
   SearchW := Min(Scale96ToForm(SearchWidth), Room);
+  { The box holds the field with a pixel of its border above and below: a
+    GTK 3 entry is taller than SearchHeight even without a frame (34 px in
+    Adwaita) and painted over the box's top and bottom edge. }
+  SearchH := Scale96ToForm(SearchHeight);
+  if FSearch <> nil then
+    SearchH := Max(SearchH, Min(FSearch.Height + 2, H - 2));
   if SearchW < Scale96ToForm(SearchMin) then
     FSearchRect := Types.Rect(0, 0, 0, 0)
   else
   begin
     X := (Width - SearchW) div 2;
     X := Max(LeftEdge, Min(X, Right - SearchW));
-    FSearchRect := Types.Rect(X, (H - Scale96ToForm(SearchHeight)) div 2, X + SearchW,
-      (H + Scale96ToForm(SearchHeight)) div 2);
+    FSearchRect := Types.Rect(X, (H - SearchH) div 2, X + SearchW,
+      (H + SearchH) div 2);
   end;
   W := Scale96ToForm(SearchHeight);
   FClearRect := Types.Rect(FSearchRect.Right - W, FSearchRect.Top, FSearchRect.Right,
