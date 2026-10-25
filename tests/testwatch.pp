@@ -3,7 +3,8 @@ unit testwatch;
 {** Tests of gittan.watch: a watcher on a repository made in a temporary
   folder with the real git, polling every 50 ms. Its notification goes
   through Synchronize, which the test lets through as the application's
-  message loop would. }
+  message loop would. The open job's notification goes through Queue,
+  let through the same way. }
 
 {$mode objfpc}{$H+}
 
@@ -18,6 +19,9 @@ type
     FDir: string;
     FChanges: integer;
     FPaths: string;
+    FOpenDone: integer;
+    procedure OpenDone(Sender: TObject);
+    function RunOpenJob(const ADir: string): TGittanOpenJob;
     procedure Git(const AArgs: array of string);
     procedure WriteFile(const AName, AContent: string);
     procedure WatcherChange(Sender: TObject);
@@ -28,6 +32,8 @@ type
   published
     procedure TestChange;
     procedure TestStop;
+    procedure TestOpenJob;
+    procedure TestOpenJobNoRepository;
   end;
 
 implementation
@@ -164,6 +170,71 @@ begin
   Watcher.Free;
   AssertTrue('Free waited the interval out', MilliSecondsBetween(Now, Start) < 2000);
   AssertEquals(0, FChanges);
+end;
+
+procedure TWatchTest.OpenDone(Sender: TObject);
+begin
+  Inc(FOpenDone);
+end;
+
+{ Runs an open job on ADir and lets its notification through. }
+function TWatchTest.RunOpenJob(const ADir: string): TGittanOpenJob;
+var
+  Start: TDateTime;
+begin
+  Result := TGittanOpenJob.Create(ADir);
+  Result.OnDone := @OpenDone;
+  Result.Start;
+  Start := Now;
+  while (FOpenDone = 0) and (MilliSecondsBetween(Now, Start) < 10000) do
+    CheckSynchronize(10);
+  AssertEquals('done once', 1, FOpenDone);
+end;
+
+{ The job finds the root from a folder inside the work tree and takes
+  the snapshot with the changes, the branch and the refs. }
+procedure TWatchTest.TestOpenJob;
+var
+  Job: TGittanOpenJob;
+  Snap: TGittanRepoSnapshot;
+begin
+  ForceDirectories(IncludeTrailingPathDelimiter(FDir) + 'sub');
+  WriteFile('b.txt', 'b');
+  Job := RunOpenJob(IncludeTrailingPathDelimiter(FDir) + 'sub');
+  try
+    AssertTrue('opened', Job.Opened);
+    AssertEquals('the root', ExtractFileName(FDir), ExtractFileName(Job.Root));
+    AssertTrue('the git dir', Job.GitDir <> '');
+    Snap := Job.Snapshot;
+    AssertTrue('the snapshot', Snap.Ok);
+    AssertEquals('the change', 1, Length(Snap.Stats));
+    AssertEquals('b.txt', Snap.Stats[0].Path);
+    AssertEquals('the branch as the one ref', 1, Length(Snap.Refs));
+    AssertEquals(Snap.Branch, Snap.Refs[0]);
+  finally
+    Job.Free;
+  end;
+end;
+
+procedure TWatchTest.TestOpenJobNoRepository;
+var
+  Job: TGittanOpenJob;
+  Dir: string;
+begin
+  Dir := FDir + '-none';
+  ForceDirectories(Dir);
+  try
+    Job := RunOpenJob(Dir);
+    try
+      AssertFalse('opened', Job.Opened);
+      AssertEquals('', Job.Root);
+      AssertTrue('the reason', Job.Error <> '');
+    finally
+      Job.Free;
+    end;
+  finally
+    RemoveTree(Dir);
+  end;
 end;
 
 initialization

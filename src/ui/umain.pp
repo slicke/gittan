@@ -682,6 +682,11 @@ type
     FDark: boolean;
     FBookmarkBandWidth: integer;
     FWatcher: TGittanWatcher;
+    { The repository being opened, and what to do once it is. }
+    FOpenJob: TGittanOpenJob;
+    FOnOpened: TNotifyEvent;
+    { The branches and tags of the last snapshot, for Compare With. }
+    FRefs: TStringArray;
     { How many callers are inside a stretch the watcher's refresh must
       not run under (a modal question, a wait that pumps messages, a
       refresh), and whether one came meanwhile (HoldRefresh). }
@@ -823,6 +828,9 @@ type
     procedure ReleaseRefresh;
     procedure RefreshPendingAsync(Data: PtrInt);
     procedure OpenAtStartAsync(Data: PtrInt);
+    procedure OpenJobDone(Sender: TObject);
+    procedure AbandonOpenJob;
+    procedure ClearRepositoryViews(const AError: string);
     procedure StartWatcher;
     procedure StopWatcher;
     function LoadRepository: boolean;
@@ -1349,6 +1357,9 @@ type
     function CloneParent: string;
     procedure StartClone(const AUrl, ATarget: string; ASubmodules: boolean);
     procedure CloneDone(AJob: TGittanRemoteJob);
+    procedure ClonedOpened(Sender: TObject);
+    procedure InitAlreadyOpened(Sender: TObject);
+    procedure InitDoneOpened(Sender: TObject);
     procedure MenuCloneClick(Sender: TObject);
     procedure MenuInitClick(Sender: TObject);
     function CanEditRemotes: boolean;
@@ -1617,8 +1628,11 @@ type
       name. }
     procedure OpenFile(AFileName: string);
     {** Opens the git repository containing ADir, lists its changed files in
-      the tree and shows the uncommitted changes as a diff in the editor. }
-    procedure OpenRepository(const ADir: string);
+      the tree and shows the uncommitted changes as a diff in the editor.
+      The git work runs in a thread (TGittanOpenJob), so the repository
+      is open only once it is done; AOnOpened is called then, if it
+      opened. }
+    procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil);
   end;
 
 var
@@ -1651,6 +1665,7 @@ resourcestring
   rsInitDone = 'Made %s a new repository';
   rsRemotesItem = 'Re&motes...';
   rsCloning = 'Cloning %s...';
+  rsOpening = 'Opening %s...';
   rsNoticeCloning = 'Cloning %s';
   rsCloneFailed = 'The clone failed';
   rsCloneAgain = 'Clone Again';
@@ -2998,12 +3013,12 @@ end;
 { Opening a repository runs some twenty git commands one after the other,
   which takes seconds on Windows, where a process is slow to start; queued
   from FormCreate it runs once the window is shown and painted. A folder
-  or file dropped on the Dock icon at launch may be open by then
-  (FormDropFiles), and stays. }
+  or file dropped on the Dock icon at launch may be open or opening by
+  then (FormDropFiles), and stays. }
 procedure TForm1.OpenAtStartAsync(Data: PtrInt);
 begin
   { gittan [file | folder], else the repository of the last run. }
-  if (FRepo.Root <> '') or (FView <> gvSummary) then
+  if (FRepo.Root <> '') or (FOpenJob <> nil) or (FView <> gvSummary) then
     { opened already }
   else if ParamCount > 0 then
   begin
@@ -3031,6 +3046,7 @@ begin
   AbandonReviewJob;
   AbandonUpdateJob;
   AbandonSubmoduleJobs;
+  AbandonOpenJob;
   FreeAndNil(FSubJobs);
   ClearRevertUndo;
   FreeAndNil(FKeeps);
@@ -4289,6 +4305,8 @@ end;
   clears, and a const would then name freed memory. }
 procedure TForm1.OpenFile(AFileName: string);
 begin
+  { A file dropped while a repository opens is shown instead. }
+  AbandonOpenJob;
   FlushEdit;
   LeaveEdit;
   if FTranslations and IsPoPath(AFileName) then
@@ -5090,7 +5108,7 @@ end;
   The editor shows the work tree's uncommitted changes as a unified diff
   under the Diff lexer; the file tree lists the changed files and the status
   bar counts them. }
-procedure TForm1.OpenRepository(const ADir: string);
+procedure TForm1.OpenRepository(const ADir: string; AOnOpened: TNotifyEvent);
 begin
   { Open closes the previous repository even when it fails. }
   FlushEdit;
@@ -5135,13 +5153,60 @@ begin
   FSubShown := '';
   { Its failures are not this one's. }
   FBanner.Clear;
-  if not FRepo.Open(ADir) then
+  { Nothing is open while the job runs: the views are emptied, so no
+    click reaches the previous repository, and the commit message box
+    is no one's. }
+  AbandonOpenJob;
+  FRepo.Close;
+  FCommitDraftFor := '';
+  ClearRepositoryViews('');
+  UpdateCaption;
+  UpdateCommitState;
+  FStatus.ShowMessage(Format(rsOpening,
+    [ExtractFileName(ExcludeTrailingPathDelimiter(ADir))]), stNormal, 0);
+  FOnOpened := AOnOpened;
+  FOpenJob := TGittanOpenJob.Create(ADir);
+  FOpenJob.OnDone := @OpenJobDone;
+  FOpenJob.Start;
+end;
+
+{ The job is dropped; its result, if it comes, is thrown away. It is
+  freed later from the zombie list, as a blame job is. }
+procedure TForm1.AbandonOpenJob;
+begin
+  FOnOpened := nil;
+  if FOpenJob = nil then
+    Exit;
+  FOpenJob.Stop(False);
+  FBlameZombies.Add(FOpenJob);
+  FOpenJob := nil;
+  FStatus.ClearMessage;
+end;
+
+{ The repository is open in the job's thread, with its snapshot: the
+  form takes it and draws it, and only then runs git again itself. }
+procedure TForm1.OpenJobDone(Sender: TObject);
+var
+  Job: TGittanOpenJob;
+  Snap: TGittanRepoSnapshot;
+  OnOpened: TNotifyEvent;
+begin
+  Job := TGittanOpenJob(Sender);
+  if Job <> FOpenJob then
+    Exit;
+  FOpenJob := nil;
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+  OnOpened := FOnOpened;
+  FOnOpened := nil;
+  FStatus.ClearMessage;
+  if not Job.Opened then
   begin
-    FCommitDraftFor := '';
-    ShowError(FRepo.Error);
+    ShowError(Job.Error);
     UpdateCommitState;
     Exit;
   end;
+  FRepo.OpenAt(Job.Root, Job.GitDir);
   LoadCommitDraft;
   { The exclude file lives in the git directory, which git names (a
     work tree's is elsewhere), once per open: the section lists it and
@@ -5152,7 +5217,9 @@ begin
   UpdateCaption;
   FSummary.Selected := '';
   LoadSnapshots;
-  if not LoadRepository then
+  Snap := Job.Snapshot;
+  ApplySnapshot(Snap);
+  if not Snap.Ok then
     ShowError(FLoadError)
   else
   begin
@@ -5162,11 +5229,24 @@ begin
     StartIndexing;
   end;
   StartWatcher;
+  if Assigned(OnOpened) then
+    OnOpened(Self);
 end;
 
 { A failure to open or read a repository is shown where the hint was: in
   the empty view, not in a dialog, so the next attempt is one drop away. }
 procedure TForm1.ShowError(const AMessage: string);
+begin
+  ClearRepositoryViews(AMessage);
+  { The welcome view keeps the error; the bar's copy clears itself, so
+    it is not left behind when a repository opens. }
+  FStatus.ShowMessage(AMessage, stBad, StatusErrorSeconds);
+  UpdateCaption;
+end;
+
+{ The views of no repository: the trees and the counts emptied, and the
+  welcome view, with AError under its title. }
+procedure TForm1.ClearRepositoryViews(const AError: string);
 begin
   FileTree.Items.Clear;
   FRepoTree.Items.Clear;
@@ -5179,13 +5259,9 @@ begin
   FSubPanel.Visible := False;
   FStats := nil;
   FFileCount := 0;
-  ShowWelcome(AMessage);
+  ShowWelcome(AError);
   ShowSummary;
   UpdateStatus;
-  { The welcome view keeps the error; the bar's copy clears itself, so
-    it is not left behind when a repository opens. }
-  FStatus.ShowMessage(AMessage, stBad, StatusErrorSeconds);
-  UpdateCaption;
 end;
 
 { Reads the branch and the changed files of the open repository into the
@@ -5241,6 +5317,7 @@ begin
       Inc(FConflictFiles);
   FFileCount := Length(FStats);
   FStashes := ASnap.Stashes;
+  FRefs := ASnap.Refs;
   FillFileTree(FStats);
   UpdateCommitState;
   FillRepoFiles;

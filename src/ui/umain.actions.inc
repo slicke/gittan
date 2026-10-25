@@ -1958,8 +1958,9 @@ end;
   View > Compare With lists the branches and tags, then the snapshots of
   the repository; the chosen one becomes the repository's Base, and every
   diff, count and the watcher follow it. The list is rebuilt with the
-  repository. A snapshot item carries Tag 1: the base is then compared
-  with WholeTree, since the snapshot holds the untracked files. }
+  repository, from the refs its snapshot read off the main thread. A
+  snapshot item carries Tag 1: the base is then compared with WholeTree,
+  since the snapshot holds the untracked files. }
 procedure TForm1.RebuildCompareMenu;
 var
   Refs: TStringList;
@@ -1988,7 +1989,7 @@ begin
   Refs := TStringList.Create;
   try
     if FRepo.Root <> '' then
-      FRepo.Refs(Refs);
+      Refs.AddStrings(FRefs);
     if (FRepo.Base <> '') and not FRepo.WholeTree and (FRepo.Base <> FPullRange) and
       (FRepo.Base <> FStashRange) and (FRepo.Base <> FMergeBase) and
       (Refs.IndexOf(FRepo.Base) < 0) then

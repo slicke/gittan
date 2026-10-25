@@ -54,9 +54,24 @@ begin
     ShowRemoteFailure(AJob, False);
     Exit;
   end;
-  OpenRepository(AJob.Root);
-  if FRepo.Root <> '' then
-    BannerSuccess(Format(rsCloned, [ExtractFileName(ExcludeTrailingPathDelimiter(AJob.Root))]));
+  OpenRepository(AJob.Root, @ClonedOpened);
+end;
+
+{ The notes after a clone or an init wait for the repository, which
+  opens in a thread. }
+procedure TForm1.ClonedOpened(Sender: TObject);
+begin
+  BannerSuccess(Format(rsCloned, [ExtractFileName(FRepo.Root)]));
+end;
+
+procedure TForm1.InitAlreadyOpened(Sender: TObject);
+begin
+  StatusNote(Format(rsInitAlready, [ExtractFileName(FRepo.Root)]));
+end;
+
+procedure TForm1.InitDoneOpened(Sender: TObject);
+begin
+  BannerSuccess(Format(rsInitDone, [ExtractFileName(FRepo.Root)]));
 end;
 
 procedure TForm1.MenuCloneClick(Sender: TObject);
@@ -98,9 +113,7 @@ begin
   end;
   if FileExists(Dir + PathDelim + '.git') or DirectoryExists(Dir + PathDelim + '.git') then
   begin
-    OpenRepository(Dir);
-    if FRepo.Root <> '' then
-      StatusNote(Format(rsInitAlready, [ExtractFileName(Dir)]));
+    OpenRepository(Dir, @InitAlreadyOpened);
     Exit;
   end;
   Probe := TGittanRepo.Create;
@@ -123,9 +136,7 @@ begin
       BannerError(Format(rsInitFailed, [Dir]), Err);
     Exit;
   end;
-  OpenRepository(Dir);
-  if FRepo.Root <> '' then
-    BannerSuccess(Format(rsInitDone, [ExtractFileName(Dir)]));
+  OpenRepository(Dir, @InitDoneOpened);
 end;
 
 function TForm1.CanEditRemotes: boolean;

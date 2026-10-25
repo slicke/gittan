@@ -151,6 +151,8 @@ type
     {** Where the bisect stands, from BisectState, read only while
       Operation is "bisecting". }
     Bisect: TGittanBisect;
+    {** The branches and tags, from Refs: what Base can be set to. }
+    Refs: TStringArray;
   end;
   PGittanRepoSnapshot = ^TGittanRepoSnapshot;
 
@@ -255,6 +257,10 @@ type
       message in Error, when ADir is not inside a work tree. }
     destructor Destroy; override;
     function Open(const ADir: string): boolean;
+    {** Takes the repository another TGittanRepo opened (a thread's, see
+      TGittanOpenJob), with the root and git directory it found, without
+      running git. }
+    procedure OpenAt(const ARoot, AGitDir: string);
     {** Forgets the repository. }
     procedure Close;
     {** Unified diff of the work tree against Base (HEAD by default), or
@@ -2039,6 +2045,13 @@ begin
     case gets a shorter one; any other failure keeps git's own. }
   else if Pos('not a git repository', FError) > 0 then
     FError := Format('Not a git repository: %s', [ADir]);
+end;
+
+procedure TGittanRepo.OpenAt(const ARoot, AGitDir: string);
+begin
+  Close;
+  FRoot := ARoot;
+  FGitDir := AGitDir;
 end;
 
 procedure TGittanRepo.Close;
@@ -5382,6 +5395,8 @@ end;
   filled in as far as git answered, as LoadRepository used to do call by
   call. }
 function TGittanRepo.Snapshot(out ASnap: TGittanRepoSnapshot): boolean;
+var
+  List: TStringList;
 begin
   ASnap := Default(TGittanRepoSnapshot);
   ASnap.Ok := ChangeStats(ASnap.Stats);
@@ -5410,6 +5425,13 @@ begin
   Stashes(ASnap.Stashes);
   if ASnap.Ok and (Length(ASnap.Stats) = 0) then
     RecentCommits(ASnap.Recent);
+  List := TStringList.Create;
+  try
+    Refs(List);
+    ASnap.Refs := List.ToStringArray;
+  finally
+    List.Free;
+  end;
   Result := ASnap.Ok;
 end;
 
