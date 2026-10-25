@@ -3056,6 +3056,9 @@ end;
 procedure TForm1.FormDestroy(Sender: TObject);
 begin
   Application.RemoveAsyncCalls(Self);
+  { First: the waits below let queued calls through, and OpenJobDone
+    would draw the repository into the form on its way out. }
+  AbandonOpenJob;
   AbandonMessageJob;
   AbandonAIReview;
   StopCommitJob(True);
@@ -3066,7 +3069,6 @@ begin
   AbandonReviewJob;
   AbandonUpdateJob;
   AbandonSubmoduleJobs;
-  AbandonOpenJob;
   FreeAndNil(FSubJobs);
   ClearRevertUndo;
   FreeAndNil(FKeeps);
