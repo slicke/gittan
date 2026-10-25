@@ -1198,7 +1198,8 @@ end;
 { The icon as a square as wide as the box, in the middle of its height
   (alLeft makes the box as high as the text beside it), resampled to
   the screen's pixels (twice its points on a Retina screen), which Cocoa
-  then draws pixel for pixel. }
+  then draws pixel for pixel. The box is filled first: gtk3 leaves what
+  was there before, the page that was shown, under the icon's alpha. }
 procedure TSettingsForm.AppIconPaint(Sender: TObject);
 var
   Box: TPaintBox;
@@ -1214,6 +1215,8 @@ begin
     FAppIcon.ResampleFilter := rfBestQuality;
     FAppIconShown := FAppIcon.Resample(Pixels, Pixels, rmFineResample) as TBGRABitmap;
   end;
+  Box.Canvas.Brush.Color := Box.GetColorResolvingParent;
+  Box.Canvas.FillRect(Box.ClientRect);
   FAppIconShown.Draw(Box.Canvas, Rect(0, Y, Side, Y + Side), False);
 end;
 
