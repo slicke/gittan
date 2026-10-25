@@ -828,6 +828,8 @@ type
     procedure ReleaseRefresh;
     procedure RefreshPendingAsync(Data: PtrInt);
     procedure OpenAtStartAsync(Data: PtrInt);
+    function StartRepository: string;
+    function OpeningText(const ADir: string): string;
     procedure OpenJobDone(Sender: TObject);
     procedure AbandonOpenJob;
     procedure ClearRepositoryViews(const AError: string);
@@ -3007,7 +3009,30 @@ begin
   OnCloseQuery := @FormCloseQuery;
   UpdateCaption;
   ShowSummary;
+  { The welcome view says what opens, rather than offer its buttons
+    until it does. }
+  if StartRepository <> '' then
+    FWelcome.SetBusy(OpeningText(StartRepository));
   Application.QueueAsyncCall(@OpenAtStartAsync, 0);
+end;
+
+{ The folder on the command line, else the repository of the last run
+  when there is no argument; empty for a file or nothing to open. }
+function TForm1.StartRepository: string;
+begin
+  Result := '';
+  if ParamCount > 0 then
+  begin
+    if DirectoryExists(ParamStr(1)) then
+      Result := ParamStr(1);
+  end
+  else if (FSettings.Recent.Count > 0) and DirectoryExists(FSettings.Recent[0]) then
+    Result := FSettings.Recent[0];
+end;
+
+function TForm1.OpeningText(const ADir: string): string;
+begin
+  Result := Format(rsOpening, [ExtractFileName(ExcludeTrailingPathDelimiter(ADir))]);
 end;
 
 { Opening a repository runs some twenty git commands one after the other,
@@ -3020,15 +3045,10 @@ begin
   { gittan [file | folder], else the repository of the last run. }
   if (FRepo.Root <> '') or (FOpenJob <> nil) or (FView <> gvSummary) then
     { opened already }
+  else if StartRepository <> '' then
+    OpenRepository(StartRepository)
   else if ParamCount > 0 then
-  begin
-    if DirectoryExists(ParamStr(1)) then
-      OpenRepository(ParamStr(1))
-    else
-      OpenFile(ParamStr(1));
-  end
-  else if (FSettings.Recent.Count > 0) and DirectoryExists(FSettings.Recent[0]) then
-    OpenRepository(FSettings.Recent[0]);
+    OpenFile(ParamStr(1));
   { After the repository, whose opening clears the banners. }
   CheckGitVersion;
 end;
@@ -5160,10 +5180,9 @@ begin
   FRepo.Close;
   FCommitDraftFor := '';
   ClearRepositoryViews('');
+  FWelcome.SetBusy(OpeningText(ADir));
   UpdateCaption;
   UpdateCommitState;
-  FStatus.ShowMessage(Format(rsOpening,
-    [ExtractFileName(ExcludeTrailingPathDelimiter(ADir))]), stNormal, 0);
   FOnOpened := AOnOpened;
   FOpenJob := TGittanOpenJob.Create(ADir);
   FOpenJob.OnDone := @OpenJobDone;
@@ -5180,7 +5199,6 @@ begin
   FOpenJob.Stop(False);
   FBlameZombies.Add(FOpenJob);
   FOpenJob := nil;
-  FStatus.ClearMessage;
 end;
 
 { The repository is open in the job's thread, with its snapshot: the
@@ -5199,7 +5217,6 @@ begin
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
   OnOpened := FOnOpened;
   FOnOpened := nil;
-  FStatus.ClearMessage;
   if not Job.Opened then
   begin
     ShowError(Job.Error);
@@ -5854,6 +5871,7 @@ end;
 procedure TForm1.ShowWelcome(const AError: string);
 begin
   FWelcome.SetError(AError);
+  FWelcome.SetBusy('');
   AbandonRepoInfoJob;
   { The welcome view is shown at startup, before the pages exist. }
   if FCommandPage <> nil then
