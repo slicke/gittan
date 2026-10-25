@@ -45,9 +45,10 @@ type
     (a branch's commits meeting the trunk) for the pull requests, a
     clock for the recent repositories, a window of text for the
     settings' Editor page or sliders for its Tools page and for the
-    settings themselves, and a sparkle for its AI page. }
+    settings themselves, a sparkle for its AI page and an i in a circle
+    for its About page. }
   TGittanNavIcon = (niHome, niGraph, niRepository, niCommands, niFiles, niPull, niClock,
-    niEditor, niTools, niAI);
+    niEditor, niTools, niAI, niAbout);
 
   {** A click on a row, with its index. }
   TGittanNavPickEvent = procedure(Sender: TObject; AIndex: integer) of object;
@@ -593,6 +594,17 @@ begin
       Eave := Y + ASize div 7;
       Canvas.Line(Mid - ASize div 7, Eave, Mid + ASize div 7 + 1, Eave);
       Canvas.Line(Mid, Eave - ASize div 7, Mid, Eave + ASize div 7 + 1);
+    end;
+    niAbout:
+    begin
+      { An i in a circle: its dot, then its stem. }
+      Canvas.Ellipse(X, Y, X + ASize + 1, Y + ASize + 1);
+      Mid := X + ASize div 2;
+      Canvas.Brush.Style := bsSolid;
+      Canvas.Brush.Color := AColor;
+      Canvas.Ellipse(Mid - 1, Y + ASize * 2 div 7 - 1, Mid + 2, Y + ASize * 2 div 7 + 2);
+      Canvas.Brush.Style := bsClear;
+      Canvas.Line(Mid, Y + ASize * 3 div 7 + 1, Mid, Y + ASize * 11 div 14 + 1);
     end;
   end;
 end;

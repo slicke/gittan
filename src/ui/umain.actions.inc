@@ -455,8 +455,9 @@ end;
   the editor and puts back the old ones when it is cancelled; the commands
   are saved with the rest when the window closes. A new git or gh runs
   from here on: the repository is read again with it, and the GitHub
-  features follow whether gh is there now. }
-procedure TForm1.MenuSettingsClick(Sender: TObject);
+  features follow whether gh is there now. APage is the page it opens
+  on. }
+procedure TForm1.OpenSettings(APage: TSettingsPage);
 const
   Margin = 24;
 var
@@ -486,7 +487,7 @@ begin
     V.AgentModels[gaCopilot] := FSettings.CopilotModel;
     Corner := EditorPanel.ClientToScreen(Point(EditorPanel.ClientWidth -
       Scale96ToForm(Margin), EditorPanel.ClientHeight - Scale96ToForm(Margin)));
-    if EditSettings(F, V, @PreviewSettings, FLexers, Edit, Corner) then
+    if EditSettings(F, V, @PreviewSettings, FLexers, Edit, Corner, APage) then
     begin
       PreviewSettings(F, V.Theme, V.TabSize);
       FSettings.EditorCommand := V.EditorCommand;
@@ -533,6 +534,17 @@ begin
     F.Free;
     OldFont.Free;
   end;
+end;
+
+procedure TForm1.MenuSettingsClick(Sender: TObject);
+begin
+  OpenSettings(pgEditor);
+end;
+
+{ About Gittan is the settings' last page. }
+procedure TForm1.MenuAboutClick(Sender: TObject);
+begin
+  OpenSettings(pgAbout);
 end;
 
 procedure TForm1.PreviewSettings(AFont: TFont; ATheme, ATabSize: integer);

@@ -1122,7 +1122,9 @@ type
     procedure MenuZoomOutClick(Sender: TObject);
     procedure MenuZoomResetClick(Sender: TObject);
     procedure MenuFontClick(Sender: TObject);
+    procedure OpenSettings(APage: TSettingsPage);
     procedure MenuSettingsClick(Sender: TObject);
+    procedure MenuAboutClick(Sender: TObject);
     procedure CheckGitVersion;
     procedure PreviewSettings(AFont: TFont; ATheme, ATabSize: integer);
     procedure ApplyEditorFont(AFont: TFont);
@@ -1739,6 +1741,7 @@ resourcestring
   rsUninstallCli = '&Uninstall CLI Command';
   rsCheckUpdates = 'Check for &Updates...';
   rsSettings = 'Se&ttings...';
+  rsAbout = '&About Gittan';
   rsUpdateTitle = 'Gittan Updates';
   rsUpdateBadge = 'Build %d available';
   rsUpdateHint = '%s is out; this is build %d.';
@@ -3843,10 +3846,13 @@ var
 
 begin
   Main := TMainMenu.Create(Self);
-  { On macOS Settings is in the application menu, which the LCL builds
-    when the menu is set, with these items first, before Services. }
+  { On macOS About Gittan and Settings are in the application menu,
+    which the LCL builds when the menu is set, with these items first,
+    before Services. }
   {$IFDEF LCLCocoa}
   Item := TMenuItem.Create(Self);
+  AddItem(Item, rsAbout, 0, @MenuAboutClick);
+  Item.Add(NewLine);
   AddItem(Item, rsSettings, ShortCut(VK_OEM_COMMA, [ssModifier]), @MenuSettingsClick);
   CocoaConfigMenu.appMenu.customMenus := Item;
   {$ENDIF}
@@ -4080,6 +4086,7 @@ begin
   {$IFNDEF LCLCocoa}
   ToolsMenu.Add(NewLine);
   AddItem(ToolsMenu, rsSettings, ShortCut(VK_OEM_COMMA, [ssModifier]), @MenuSettingsClick);
+  AddItem(ToolsMenu, rsAbout, 0, @MenuAboutClick);
   {$ENDIF}
 end;
 
