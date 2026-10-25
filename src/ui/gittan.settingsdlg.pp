@@ -53,7 +53,8 @@ type
 
 {** Shows the dialog with AFont and AValues in it, its bottom right corner
   at ACorner (screen coordinates) so the code in the middle of the window
-  stays in view. APreview gets every change of the font, the theme or the
+  stays in view, or over the middle of the window on About, which has
+  nothing to preview. APreview gets every change of the font, the theme or the
   tab width. The sample editor takes its lexers from ALexers and its
   colors and zoom from ATemplate, the main editor. On OK the arguments are
   changed and the result is True; on Cancel they are left alone, and the
@@ -297,6 +298,9 @@ type
     FNextTop: integer;
     FLoading: boolean;
     FCorner: TPoint;
+    { Over the middle of the window that opened it instead, when it opens
+      on About, which has nothing to preview. }
+    FCentered: boolean;
     FSampleEdit: TATSynEdit;
     FAdapter: TATAdapterEControl;
     FLexers: TGittanLexers;
@@ -643,10 +647,12 @@ end;
 { The content has its size once the form has laid itself out, just before
   it shows: both pages are held at the height of the taller (the one not
   shown has its preferred height, not a laid out one), so the form keeps
-  its size when the page changes, and goes to its corner. }
+  its size when the page changes, and goes to its corner, or over the
+  middle of the main window when it opens on About. }
 procedure TSettingsForm.DoShow;
 var
   W, H, Tallest: integer;
+  Main: TCustomForm;
 begin
   inherited DoShow;
   FToolsBox.GetPreferredSize(W, H, False, True);
@@ -659,7 +665,14 @@ begin
   FToolsBox.Constraints.MinHeight := Tallest;
   FAIPage.Constraints.MinHeight := Tallest;
   FAboutPage.Constraints.MinHeight := Tallest;
-  SetBounds(FCorner.X - Width, FCorner.Y - Height, Width, Height);
+  if FCentered and (Owner is TCustomForm) then
+  begin
+    Main := TCustomForm(Owner);
+    SetBounds(Main.Left + (Main.Width - Width) div 2,
+      Main.Top + (Main.Height - Height) div 2, Width, Height);
+  end
+  else
+    SetBounds(FCorner.X - Width, FCorner.Y - Height, Width, Height);
   MakeFullyVisible;
 end;
 
@@ -1241,6 +1254,7 @@ begin
     F.ApplyTheme;
     F.ShowSample;
     F.FCorner := ACorner;
+    F.FCentered := APage = pgAbout;
     F.ShowPage(Ord(APage));
     Result := F.ShowModal = mrOK;
     if Result then
