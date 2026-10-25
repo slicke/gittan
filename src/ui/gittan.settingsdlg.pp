@@ -68,8 +68,7 @@ implementation
 uses
   Math, StrUtils, Process, Clipbrd, LCLIntf, LCLVersion, InterfaceBase, LCLPlatformDef,
   ec_SyntAnal, ATSynEdit_Adapter_EControl, ATSynEdit_Globals,
-  gittan.syntaxthemes, gittan.git, gittan.theme
-  {$IFDEF LCLGtk3}, LazGtk3, Gtk3Widgets, Gtk3Objects{$ENDIF};
+  gittan.syntaxthemes, gittan.git, gittan.theme;
 
 resourcestring
   rsSettingsTitle = 'Settings';
@@ -1196,29 +1195,10 @@ begin
   end;
 end;
 
-{$IFDEF LCLGtk3}
-{ Paints AControl's box with its window's background as gtk's theme
-  draws it, in device coordinates as BGRABitmap draws on gtk3. }
-procedure FillWithWindowBackground(AControl: TGraphicControl);
-var
-  R: TRect;
-begin
-  R := AControl.ClientRect;
-  LPtoDP(AControl.Canvas.Handle, R, 2);
-  gtk_render_background(gtk_widget_get_style_context(
-    TGtk3Widget(GetParentForm(AControl).Handle).Widget),
-    TGtk3DeviceContext(AControl.Canvas.Handle).pcr,
-    R.Left, R.Top, R.Right - R.Left, R.Bottom - R.Top);
-end;
-{$ENDIF}
-
 { The icon as a square as wide as the box, in the middle of its height
   (alLeft makes the box as high as the text beside it), resampled to
   the screen's pixels (twice its points on a Retina screen), which Cocoa
-  then draws pixel for pixel. Under gtk3 the box gets the window's
-  background first: gtk3 leaves what was there before, the page that was
-  shown, under the icon's alpha, and no LCL color is the theme's (clForm
-  and the box's own clDefault are white where the window is gray). }
+  then draws pixel for pixel. }
 procedure TSettingsForm.AppIconPaint(Sender: TObject);
 var
   Box: TPaintBox;
@@ -1234,9 +1214,6 @@ begin
     FAppIcon.ResampleFilter := rfBestQuality;
     FAppIconShown := FAppIcon.Resample(Pixels, Pixels, rmFineResample) as TBGRABitmap;
   end;
-  {$IFDEF LCLGtk3}
-  FillWithWindowBackground(Box);
-  {$ENDIF}
   FAppIconShown.Draw(Box.Canvas, Rect(0, Y, Side, Y + Side), False);
 end;
 
