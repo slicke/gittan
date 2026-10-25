@@ -28,6 +28,8 @@ type
     FOriginalStyle: array of TFontStyles;
     FChooseDir: string;
     FThread: TThread;
+    { Inside Finish's wait, which lets queued calls through. }
+    FFinishing: boolean;
     FOnLoaded: TNotifyEvent;
     FThemeSet, FThemeDark: boolean;
     FTheme: integer;
@@ -174,11 +176,12 @@ end;
 
 destructor TGittanLexers.Destroy;
 begin
-  if FThread <> nil then
-  begin
-    FThread.WaitFor;
-    FreeAndNil(FThread);
-  end;
+  { A load still running is waited for through Finish, not told of: the
+    owner is going too. Waiting on FThread here would let the queued
+    Finish through, which frees the thread under the wait. }
+  FOnLoaded := nil;
+  FThemeSet := False;
+  Finish;
   FreeAndNil(FList);
   inherited Destroy;
 end;
@@ -211,17 +214,30 @@ end;
 
 { Queued by the thread when it is done, and called by everything that
   needs the lexers: waits for the thread, applies the theme asked for
-  meanwhile and tells the owner. FThread is cleared first: WaitFor runs
-  the queued call in the main thread, which must find the load finished. }
+  meanwhile and tells the owner. WaitFor in the main thread lets queued
+  calls through, the thread's own Finish among them and any other that
+  comes to ask for a lexer: those wait for the load too, without taking
+  the thread (a second WaitFor would join it twice), and leave freeing
+  it, the theme and OnLoaded to the call that waited first. FThread is
+  cleared only when the load is done, so no call finds the list while
+  the thread still fills it. }
 procedure TGittanLexers.Finish;
 var
   T: TThread;
 begin
   if FThread = nil then
     Exit;
+  if FFinishing then
+  begin
+    while not FThread.Finished do
+      CheckSynchronize(100);
+    Exit;
+  end;
+  FFinishing := True;
   T := FThread;
-  FThread := nil;
   T.WaitFor;
+  FThread := nil;
+  FFinishing := False;
   T.Free;
   if FThemeSet then
     ApplyTheme(FThemeDark, FTheme);
