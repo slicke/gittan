@@ -377,6 +377,9 @@ begin
     Result := MostVoted(Votes, ALexers);
     if Result < 0 then
       Result := ALexers.IndexOf(PreferredLexer(Ext));
+    { EControl takes -1 for no lexer at all, not for its own choice. }
+    if Result < 0 then
+      Result := 0;
   finally
     Exts.Free;
     Votes.Free;

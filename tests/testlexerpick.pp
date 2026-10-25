@@ -149,6 +149,7 @@ procedure TLexerPickTest.TestPreferredLexer;
 begin
   AssertEquals('Pascal', PreferredLexer('inc'));
   AssertEquals('Pascal', PreferredLexer('INC'));
+  AssertEquals('Pascal', PreferredLexer('pp'));
   AssertEquals('', PreferredLexer('xyz'));
 end;
 
