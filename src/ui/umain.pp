@@ -333,7 +333,7 @@ type
       tree while it chooses what to commit. }
     FTickSepItem, FTickAllItem, FUntickAllItem: TMenuItem;
     FCommitNote: TGittanHintBox;
-    FCommitItem: TMenuItem;
+    FCommitItem, FIdentityItem: TMenuItem;
     FCommitJob: TGittanCommitJob;
     { The commits still running in a repository no longer open, for
       their draft (DroppedCommitDone). }
@@ -1804,6 +1804,7 @@ resourcestring
   rsRepoFiles = 'Config';
   rsCommitSection = 'Commit';
   rsCommitMenu = 'Co&mmit...';
+  rsIdentityMenu = 'Who Commits...';
   rsCommitButton = 'Commit';
   rsCommitAmendButton = 'Amend Commit';
   rsCommitAmend = 'Amend';
@@ -3928,6 +3929,9 @@ begin
   FMessageItem := AddItem(FileMenu, rsWriteMessageMenu, ShortCut(VK_K, [ssModifier,
     ssShift]), @MessageActionClick);
   FMessageItem.Visible := False;
+  { The person in the Commit header, for the keyboard. }
+  FIdentityItem := AddItem(FileMenu, rsIdentityMenu, 0, @IdentityClick);
+  FIdentityItem.Enabled := False;
   FPullItem := AddItem(FileMenu, rsPullMenu, ShortCut(VK_L, [ssModifier, ssShift]),
     @MenuPullClick);
   FPushItem := AddItem(FileMenu, rsPushMenu, ShortCut(VK_P, [ssModifier, ssShift]),

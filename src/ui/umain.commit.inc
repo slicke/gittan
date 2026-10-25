@@ -619,6 +619,8 @@ begin
   UpdateBisectState;
   if FCommitItem <> nil then
     FCommitItem.Enabled := FRepo.Root <> '';
+  if FIdentityItem <> nil then
+    FIdentityItem.Enabled := FRepo.Root <> '';
 end;
 
 procedure TForm1.CommitNoteLink(Sender: TObject);

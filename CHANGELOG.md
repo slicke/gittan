@@ -7,7 +7,7 @@ Gittan's builds are numbered: every push to main publishes `build-<n>`. The chan
 ### New
 
 - **About page.** Settings has an About page last, opened from Gittan > About Gittan on macOS and Tools > About Gittan elsewhere. It shows the icon, the name, the build number, a Check for Updates of its own that answers beside the button, and what Gittan runs on and with: the build, git, gh and the AI agent's versions, the system, the CPU, the widgetset, Free Pascal and the LCL. Copy puts those lines on the clipboard for a bug report. The page links to gittan.app and the source and lists the licenses. Opened on About, the dialog is centered over the main window.
-- **Who commits.** The Commit section's header has a person icon before the AI sparkle. Its hint says which name and e-mail commits are made under, and whether they are this repository's own. Clicking it opens a dialog with the two fields and an "Only for this repository" option. The same dialog asks for a name and e-mail the first time you commit on a machine without them. Saving global values clears any repository-local ones, which would otherwise take precedence.
+- **Who commits.** The Commit section's header has a person icon before the AI sparkle. Its hint says which name and e-mail commits are made under, and whether they are this repository's own. Clicking it, or File > Who Commits..., opens a dialog with the two fields and an "Only for this repository" option. The same dialog asks for a name and e-mail the first time you commit on a machine without them. Saving global values clears any repository-local ones, which would otherwise take precedence.
 
 ### Improved
 
