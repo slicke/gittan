@@ -187,23 +187,35 @@ begin
   FDir := ADir;
 end;
 
+{ An exception out of the open or the snapshot (a file gone under the
+  read, say) is a failed open with its message, not the end of the
+  thread: without Done the form would wait for the job for ever, with
+  nothing open meanwhile. }
 procedure TGittanOpenJob.Execute;
 var
   Repo: TGittanRepo;
 begin
   Repo := TGittanRepo.Create;
   try
-    Repo.IgnoreWhitespace := FIgnoreWhitespace;
-    FOpened := Repo.Open(FDir);
-    if FOpened then
-    begin
-      FRoot := Repo.Root;
-      FGitDir := Repo.GitDir;
-      if not Terminated then
-        Repo.Snapshot(FSnapshot);
-    end
-    else
-      FError := Repo.Error;
+    try
+      Repo.IgnoreWhitespace := FIgnoreWhitespace;
+      FOpened := Repo.Open(FDir);
+      if FOpened then
+      begin
+        FRoot := Repo.Root;
+        FGitDir := Repo.GitDir;
+        if not Terminated then
+          Repo.Snapshot(FSnapshot);
+      end
+      else
+        FError := Repo.Error;
+    except
+      on E: Exception do
+      begin
+        FOpened := False;
+        FError := E.Message;
+      end;
+    end;
   finally
     Repo.Free;
   end;
