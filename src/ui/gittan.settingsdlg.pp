@@ -289,6 +289,8 @@ type
     FLinks: array of TLabel;
     FLinkColor: TColor;
     FVersionsLabel: TLabel;
+    { Whether the versions are in; a change of a tool, the AI switch or
+      the agent drops it, so the page shown again reads them anew. }
     FVersionsRead: boolean;
     FOK: TButton;
     { Gittan's icon as loaded, and as resampled for the screen's pixels. }
@@ -969,8 +971,10 @@ begin
   Preview;
 end;
 
+{ The versions on About name the tools as the fields have them. }
 procedure TSettingsForm.ToolChange(Sender: TObject);
 begin
+  FVersionsRead := False;
   if Sender = FGitEdit then
     ShowTool(FGitEdit, FGitNote, 'git', rsToolNotFound)
   else if Sender = FGhEdit then
@@ -983,6 +987,7 @@ end;
 { The agent and its fields matter only with the features on. }
 procedure TSettingsForm.AIChange(Sender: TObject);
 begin
+  FVersionsRead := False;
   FAgentBox.Enabled := FAIBox.Checked;
   FAgentEdit.Enabled := FAIBox.Checked;
   FModelEdit.Enabled := FAIBox.Checked;
