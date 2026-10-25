@@ -822,6 +822,7 @@ type
     procedure HoldRefresh;
     procedure ReleaseRefresh;
     procedure RefreshPendingAsync(Data: PtrInt);
+    procedure OpenAtStartAsync(Data: PtrInt);
     procedure StartWatcher;
     procedure StopWatcher;
     function LoadRepository: boolean;
@@ -2991,8 +2992,20 @@ begin
   OnCloseQuery := @FormCloseQuery;
   UpdateCaption;
   ShowSummary;
+  Application.QueueAsyncCall(@OpenAtStartAsync, 0);
+end;
+
+{ Opening a repository runs some twenty git commands one after the other,
+  which takes seconds on Windows, where a process is slow to start; queued
+  from FormCreate it runs once the window is shown and painted. A folder
+  or file dropped on the Dock icon at launch may be open by then
+  (FormDropFiles), and stays. }
+procedure TForm1.OpenAtStartAsync(Data: PtrInt);
+begin
   { gittan [file | folder], else the repository of the last run. }
-  if ParamCount > 0 then
+  if (FRepo.Root <> '') or (FView <> gvSummary) then
+    { opened already }
+  else if ParamCount > 0 then
   begin
     if DirectoryExists(ParamStr(1)) then
       OpenRepository(ParamStr(1))
