@@ -55,6 +55,10 @@ begin
   { AI at the header's right end while the AI features are on
     (umain.ai.inc). }
   FCommitHeader.OnAction := @MessageActionClick;
+  { Before it the person, the name and e-mail commits are made under. }
+  FCommitHeader.PersonShown := True;
+  FCommitHeader.OnPerson := @IdentityClick;
+  FCommitHeader.OnMouseEnter := @CommitHeaderEnter;
   FCommitHeader.Parent := FCommitPanel;
   FCommitBox := TPanel.Create(Self);
   FCommitBox.BevelOuter := bvNone;
@@ -688,25 +692,56 @@ begin
   end;
 end;
 
-{ git refuses to commit without a name and an e-mail; a fresh machine
-  has neither, so they are asked for once and kept in the global config,
-  as git itself would tell one to. }
-function TForm1.EnsureIdentity: boolean;
+function TForm1.EditIdentity: boolean;
 var
-  Values: array of string;
+  Who, Mail: string;
+  Local: boolean;
+begin
+  Who := FRepo.UserName;
+  Mail := FRepo.UserEmail;
+  Local := FRepo.HasLocalIdentity;
+  Result := ChooseIdentity(Who, Mail, Local);
+  if not Result then
+    Exit;
+  Result := FRepo.SetIdentity(Who, Mail, not Local);
+  if not Result then
+    StatusNote(FRepo.Error, True);
+end;
+
+{ git refuses to commit without a name and an e-mail; a fresh machine
+  has neither, so they are asked for once, kept in the global config as
+  git itself would tell one to unless the repository is to have its
+  own. }
+function TForm1.EnsureIdentity: boolean;
 begin
   if (FRepo.UserName <> '') and (FRepo.UserEmail <> '') then
     Exit(True);
-  SetLength(Values, 2);
-  Values[0] := FRepo.UserName;
-  Values[1] := FRepo.UserEmail;
-  Result := InputQuery(rsIdentityTitle, [rsIdentityName, rsIdentityEmail], Values) and
-    (Trim(Values[0]) <> '') and (Trim(Values[1]) <> '');
-  if not Result then
-    Exit;
-  Result := FRepo.SetIdentity(Trim(Values[0]), Trim(Values[1]), True);
-  if not Result then
-    StatusNote(FRepo.Error, True);
+  Result := EditIdentity;
+end;
+
+procedure TForm1.IdentityClick(Sender: TObject);
+begin
+  if FRepo.Root <> '' then
+    EditIdentity;
+end;
+
+{ The hint over the person says who commits; read as the mouse comes
+  in, so a change made with git outside is seen too. }
+procedure TForm1.CommitHeaderEnter(Sender: TObject);
+var
+  Who, Mail, Where: string;
+begin
+  Who := FRepo.UserName;
+  Mail := FRepo.UserEmail;
+  if (Who = '') or (Mail = '') then
+    FCommitHeader.PersonHint := rsIdentityNone
+  else
+  begin
+    Where := '';
+    if FRepo.HasLocalIdentity then
+      Where := rsIdentityHintLocal;
+    FCommitHeader.PersonHint := Format(rsIdentityHint, [Who, Mail, Where]);
+  end;
 end;
 
 procedure TForm1.StartCommit;

@@ -14,7 +14,9 @@ unit gittan.sectionheader;
   OnCheck instead: the Commit section ticks every file with it. It can
   also show an action at the right end (Action), a link in ActionColor
   underlined under the mouse, whose click raises OnAction instead: the
-  Commit section's AI. }
+  Commit section's AI. Before the action it can show a person
+  (PersonShown), dim and in the text color under the mouse, whose click
+  raises OnPerson: the Commit section's name and e-mail. }
 
 {$mode objfpc}{$H+}
 
@@ -44,6 +46,14 @@ type
     { The action as last painted, empty without one. }
     FActionRect: TRect;
     FOnAction: TNotifyEvent;
+    FPersonShown, FPersonHot: boolean;
+    FPersonHint: string;
+    { The person as last painted, empty without one. }
+    FPersonRect: TRect;
+    FOnPerson: TNotifyEvent;
+    procedure SetPersonShown(AValue: boolean);
+    function OverPerson(X, Y: integer): boolean;
+    procedure DrawPerson(const ARect: TRect);
     procedure SetCheckIndex(AValue: integer);
     procedure SetAction(const AValue: string);
     procedure SetActionEnabled(AValue: boolean);
@@ -93,18 +103,28 @@ type
     property ActionColor: TColor read FActionColor write SetActionColor;
     {** A click on the action, which leaves Expanded alone. }
     property OnAction: TNotifyEvent read FOnAction write FOnAction;
+    {** Whether the person shows before the action. }
+    property PersonShown: boolean read FPersonShown write SetPersonShown;
+    {** The hint shown over the person, and only there. }
+    property PersonHint: string read FPersonHint write FPersonHint;
+    {** A click on the person, which leaves Expanded alone. }
+    property OnPerson: TNotifyEvent read FOnPerson write FOnPerson;
+    {** As the mouse comes in, before any hint shows: time to set
+      PersonHint. }
+    property OnMouseEnter;
   end;
 
 implementation
 
 
 uses
-  gittan.theme;
+  Math, gittan.theme;
 const
   HeaderHeight = 26;
   Pad = 10;
   ChevronSize = 4;
   Gap = 8;
+  PersonSize = 14;
 
 { TGittanSectionHeader }
 
@@ -174,6 +194,55 @@ function TGittanSectionHeader.OverAction(X, Y: integer): boolean;
 begin
   Result := not FActionRect.IsEmpty and PtInRect(Rect(FActionRect.Left - 4, 0,
     FActionRect.Right + 4, Height), Point(X, Y));
+end;
+
+procedure TGittanSectionHeader.SetPersonShown(AValue: boolean);
+begin
+  if FPersonShown = AValue then
+    Exit;
+  FPersonShown := AValue;
+  if not FPersonShown then
+  begin
+    FPersonHot := False;
+    Hint := '';
+  end;
+  Invalidate;
+end;
+
+function TGittanSectionHeader.OverPerson(X, Y: integer): boolean;
+begin
+  Result := not FPersonRect.IsEmpty and PtInRect(Rect(FPersonRect.Left - 4, 0,
+    FPersonRect.Right + 4, Height), Point(X, Y));
+end;
+
+{ A head over the shoulders, filled in the pen's color: the shoulders
+  are the top half of an ellipse, as a polygon, since Cocoa draws no
+  chord. }
+procedure TGittanSectionHeader.DrawPerson(const ARect: TRect);
+const
+  Steps = 12;
+var
+  Pts: array[0..Steps] of TPoint;
+  W, H, Cx, Head, Body, Rx, Ry, i: integer;
+  A: double;
+begin
+  W := ARect.Width;
+  H := ARect.Height;
+  Cx := ARect.Left + W div 2;
+  Head := W * 3 div 7;
+  Canvas.Brush.Style := bsSolid;
+  Canvas.Brush.Color := Canvas.Pen.Color;
+  Canvas.Ellipse(Cx - Head div 2, ARect.Top, Cx - Head div 2 + Head, ARect.Top + Head);
+  Body := ARect.Top + Head + Max(1, H div 12);
+  Rx := W div 2;
+  Ry := ARect.Bottom - Body;
+  for i := 0 to Steps do
+  begin
+    A := Pi * i / Steps;
+    Pts[i] := Point(Cx + Round(Rx * Cos(A)), ARect.Bottom - Round(Ry * Sin(A)));
+  end;
+  Canvas.Polygon(Pts);
+  Canvas.Brush.Style := bsClear;
 end;
 
 procedure TGittanSectionHeader.SetTitle(const AValue: string);
@@ -265,6 +334,21 @@ begin
     Canvas.TextOut(X, TextY, FAction);
     Canvas.Font.Style := [];
   end;
+  { The person before the action, or at the right end without one. }
+  FPersonRect := Rect(0, 0, 0, 0);
+  if FPersonShown then
+  begin
+    if FActionRect.IsEmpty then
+      X := Width - Px(Pad) - Px(PersonSize)
+    else
+      X := FActionRect.Left - Px(Gap) - Px(PersonSize);
+    FPersonRect := Bounds(X, (Height - Px(PersonSize)) div 2, Px(PersonSize), Px(PersonSize));
+    if FPersonHot then
+      Canvas.Pen.Color := FText
+    else
+      Canvas.Pen.Color := FDim;
+    DrawPerson(FPersonRect);
+  end;
 end;
 
 procedure TGittanSectionHeader.MouseEnter;
@@ -279,22 +363,27 @@ begin
   inherited MouseLeave;
   FHot := False;
   FActionHot := False;
+  FPersonHot := False;
   Invalidate;
 end;
 
-{ The action is underlined under the mouse, and the hint is its own
-  there and none elsewhere. }
+{ The action is underlined under the mouse and the person lit, and the
+  hint is theirs there and none elsewhere. }
 procedure TGittanSectionHeader.MouseMove(Shift: TShiftState; X, Y: integer);
 var
-  Over: boolean;
+  Over, OverP: boolean;
 begin
   inherited MouseMove(Shift, X, Y);
   Over := OverAction(X, Y);
-  if Over = FActionHot then
+  OverP := not Over and OverPerson(X, Y);
+  if (Over = FActionHot) and (OverP = FPersonHot) then
     Exit;
   FActionHot := Over;
+  FPersonHot := OverP;
   if Over then
     Hint := FActionHint
+  else if OverP then
+    Hint := FPersonHint
   else
     Hint := '';
   Invalidate;
@@ -315,6 +404,12 @@ begin
   begin
     if FActionEnabled and Assigned(FOnAction) then
       FOnAction(Self);
+    Exit;
+  end;
+  if (Button = mbLeft) and OverPerson(X, Y) then
+  begin
+    if Assigned(FOnPerson) then
+      FOnPerson(Self);
     Exit;
   end;
   if (Button = mbLeft) and PtInRect(ClientRect, Point(X, Y)) then

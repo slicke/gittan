@@ -885,6 +885,10 @@ begin
   AssertTrue(FRepo.SetIdentity('Gittan Test', 'test@example.invalid', False));
   AssertEquals('Gittan Test', FRepo.UserName);
   AssertEquals('test@example.invalid', FRepo.UserEmail);
+  AssertTrue(FRepo.HasLocalIdentity);
+  Git(['config', '--unset', 'user.name']);
+  Git(['config', '--unset', 'user.email']);
+  AssertFalse(FRepo.HasLocalIdentity);
 end;
 
 { The bytes come back as they are, a NUL and a CR LF included. }

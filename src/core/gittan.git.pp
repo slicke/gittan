@@ -679,8 +679,13 @@ type
       user.email`), empty when none is set. }
     function UserEmail: string;
     {** Sets the name and e-mail commits are made under: in the user's
-      global git config with AGlobal, else in the repository's own. }
+      global git config with AGlobal, else in the repository's own. With
+      AGlobal the repository's own are unset, since they would go
+      before the global ones. }
     function SetIdentity(const AName, AEmail: string; AGlobal: boolean): boolean;
+    {** Whether the repository sets a name or an e-mail of its own
+      (`git config --local`), which go before the global ones. }
+    function HasLocalIdentity: boolean;
     {** The remote whose URL holds ARepoPath ("owner/repo", compared
       without regard to case), else origin, else the first remote, else
       empty. }
@@ -2375,6 +2380,20 @@ begin
     Scope := '--local';
   Result := (FRoot <> '') and RunGit(FRoot, ['config', Scope, 'user.name', AName], Output) and
     RunGit(FRoot, ['config', Scope, 'user.email', AEmail], Output);
+  { git exits with 5 when there is nothing to unset. }
+  if Result and AGlobal then
+  begin
+    RunGit(FRoot, ['config', '--local', '--unset', 'user.name'], Output);
+    RunGit(FRoot, ['config', '--local', '--unset', 'user.email'], Output);
+  end;
+end;
+
+function TGittanRepo.HasLocalIdentity: boolean;
+var
+  Output: string;
+begin
+  Result := (FRoot <> '') and (RunGit(FRoot, ['config', '--local', 'user.name'], Output) or
+    RunGit(FRoot, ['config', '--local', 'user.email'], Output));
 end;
 
 function TGittanRepo.RemoteFor(const ARepoPath: string): string;

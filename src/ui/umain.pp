@@ -30,7 +30,7 @@ uses
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
   gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
-  gittan.remotesdlg, gittan.submoduledlg, ATSynEdit_Gaps, md5;
+  gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, ATSynEdit_Gaps, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -1312,7 +1312,12 @@ type
     procedure CommitAmendClick(Sender: TObject);
     procedure CommitButtonClick(Sender: TObject);
     procedure MenuCommitClick(Sender: TObject);
+    {** Asks for the name and e-mail to commit under, the global ones
+      or the repository's own; False when cancelled or git failed. }
+    function EditIdentity: boolean;
     function EnsureIdentity: boolean;
+    procedure IdentityClick(Sender: TObject);
+    procedure CommitHeaderEnter(Sender: TObject);
     procedure StartCommit;
     {** The notice with a failed commit's reason (a hook's output, in
       its colors), Commit Again and Copy Output. }
@@ -2189,9 +2194,9 @@ resourcestring
   rsQuit = 'Forgot %s';
   rsQuitFailed = 'Could not forget %s';
   rsOperationOf = '%s %s';
-  rsIdentityTitle = 'Who Commits?';
-  rsIdentityName = 'Name';
-  rsIdentityEmail = 'E-mail';
+  rsIdentityHint = 'Commits as %s <%s>%s. Click to change.';
+  rsIdentityHintLocal = ' (this repository only)';
+  rsIdentityNone = 'Git has no name or e-mail to commit under. Click to set them.';
   rsSubmodules = 'Submodules';
   rsSubmodulesNewer = '%d · ↓%d';
   rsSubOpen = 'Open';
