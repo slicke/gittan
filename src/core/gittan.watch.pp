@@ -19,12 +19,13 @@ type
     for HEAD), every AInterval milliseconds
     through its own TGittanRepo and fires OnChange, in the main thread,
     whenever the repository's Fingerprint differs from the previous one.
-    The first poll only takes the baseline. Set OnChange, then call Start;
-    Free stops the thread and drops any pending notification. }
+    The first poll only takes the baseline. Set OnChange (and
+    IgnoreWhitespace, which the snapshot's counts follow), then call
+    Start; Free stops the thread and drops any pending notification. }
   TGittanWatcher = class(TThread)
   private
     FRoot, FBase: string;
-    FWholeTree: boolean;
+    FWholeTree, FIgnoreWhitespace: boolean;
     FRepo: TGittanRepo;
     FWake: PRTLEvent;
     FInterval: integer;
@@ -44,6 +45,10 @@ type
     procedure Stop;
     {** Called in the main thread after the repository changed. }
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
+    {** Passed on to the thread's TGittanRepo before the first poll, so
+      the snapshot counts changed lines as the form does. Set it before
+      Start. }
+    property IgnoreWhitespace: boolean read FIgnoreWhitespace write FIgnoreWhitespace;
     {** The repository as it was when the last OnChange fired, gathered in
       the watcher thread so the main thread only draws it. Read it from the
       OnChange handler; the thread is held in Synchronize meanwhile, so it
@@ -55,11 +60,12 @@ type
     thread, through its own TGittanRepo, with OnDone raised in the main
     thread once both are in: opening a repository runs some twenty git
     commands, which take seconds on Windows. The main thread then takes
-    the repository with TGittanRepo.OpenAt and draws the snapshot. }
+    the repository with TGittanRepo.OpenAt and draws the snapshot. Set
+    IgnoreWhitespace before Start, as the form's own repository has it. }
   TGittanOpenJob = class(TGittanJob)
   private
     FDir, FRoot, FGitDir, FError: string;
-    FOpened: boolean;
+    FOpened, FIgnoreWhitespace: boolean;
     FSnapshot: TGittanRepoSnapshot;
   protected
     procedure Execute; override;
@@ -73,6 +79,9 @@ type
     property Error: string read FError;
     {** The snapshot of the opened repository, compared against HEAD. }
     property Snapshot: TGittanRepoSnapshot read FSnapshot;
+    {** Given to the job's TGittanRepo before Open, so the snapshot's
+      counts leave whitespace changes out when the setting is on. }
+    property IgnoreWhitespace: boolean read FIgnoreWhitespace write FIgnoreWhitespace;
   end;
 
 implementation
@@ -124,6 +133,7 @@ begin
     Exit;
   FRepo.Base := FBase;
   FRepo.WholeTree := FWholeTree;
+  FRepo.IgnoreWhitespace := FIgnoreWhitespace;
   FLast := FRepo.Fingerprint;
   while not Terminated do
   begin
@@ -183,6 +193,7 @@ var
 begin
   Repo := TGittanRepo.Create;
   try
+    Repo.IgnoreWhitespace := FIgnoreWhitespace;
     FOpened := Repo.Open(FDir);
     if FOpened then
     begin

@@ -5188,6 +5188,7 @@ begin
   FOnOpened := AOnOpened;
   FOpenJob := TGittanOpenJob.Create(ADir);
   FOpenJob.OnDone := @OpenJobDone;
+  FOpenJob.IgnoreWhitespace := FIgnoreWhitespace;
   FOpenJob.Start;
 end;
 
@@ -5452,6 +5453,7 @@ begin
   FWatcher := TGittanWatcher.Create(FRepo.Root, FRepo.Base, FRepo.WholeTree,
     WatchInterval);
   FWatcher.OnChange := @WatcherChange;
+  FWatcher.IgnoreWhitespace := FRepo.IgnoreWhitespace;
   FWatcher.Start;
 end;
 

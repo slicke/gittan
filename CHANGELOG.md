@@ -18,6 +18,7 @@ Gittan's builds are numbered: every push to main publishes `build-<n>`. The chan
 ### Fixed
 
 - **.pp files are highlighted as Pascal again.** Pascal and Puppet both claim the extension, and when the neighbouring files did not settle it, the file showed as plain text.
+- **Ignore Whitespace holds through a refresh.** With View > Ignore Whitespace on, the line counts a background refresh brought in still counted whitespace-only changes until the next refresh you ran yourself. Opening a repository and the watcher's refreshes now count as the setting says.
 
 ### Building
 
