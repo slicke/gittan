@@ -2396,6 +2396,12 @@ begin
   Result := Trim(Result);
 end;
 
+{ A key with several values (a config edited by hand) is set with
+  --replace-all and taken out with --unset-all, where a plain set or
+  --unset refuses it, and the local ones would then go before the
+  global ones just saved. The identity read back is the one git would
+  commit under; one that differs (a worktree or an included config
+  still overrides it) is a failure with its reason, not a silent one. }
 function TGittanRepo.SetIdentity(const AName, AEmail: string; AGlobal: boolean): boolean;
 var
   Output, Scope: string;
@@ -2404,14 +2410,20 @@ begin
     Scope := '--global'
   else
     Scope := '--local';
-  Result := (FRoot <> '') and RunGit(FRoot, ['config', Scope, 'user.name', AName], Output) and
-    RunGit(FRoot, ['config', Scope, 'user.email', AEmail], Output);
+  Result := (FRoot <> '') and
+    RunGit(FRoot, ['config', Scope, '--replace-all', 'user.name', AName], Output) and
+    RunGit(FRoot, ['config', Scope, '--replace-all', 'user.email', AEmail], Output);
+  if not Result then
+    Exit;
   { git exits with 5 when there is nothing to unset. }
-  if Result and AGlobal then
+  if AGlobal then
   begin
-    RunGit(FRoot, ['config', '--local', '--unset', 'user.name'], Output);
-    RunGit(FRoot, ['config', '--local', '--unset', 'user.email'], Output);
+    RunGit(FRoot, ['config', '--local', '--unset-all', 'user.name'], Output);
+    RunGit(FRoot, ['config', '--local', '--unset-all', 'user.email'], Output);
   end;
+  Result := (UserName = Trim(AName)) and (UserEmail = Trim(AEmail));
+  if not Result then
+    FError := 'The name and e-mail were saved, but another git config overrides them.';
 end;
 
 function TGittanRepo.HasLocalIdentity: boolean;
