@@ -112,6 +112,9 @@ type
 
   TRepoFrame = class;
 
+  {** What to call once a repository has opened, in the order asked. }
+  TOpenedEvents = array of TNotifyEvent;
+
   { TRepoWindow }
 
   {** The window the frames are in (uwindow's TGittanWindow), as a frame
@@ -146,6 +149,9 @@ type
     {** Go > Next Tab and Previous Tab: the frame ADelta tabs on, round
       the ends. }
     procedure StepTab(ADelta: integer); virtual; abstract;
+    {** Shows AFrame's tab: a frame in the background that has to ask
+      the user something comes forward first. }
+    procedure ShowFrame(AFrame: TRepoFrame); virtual; abstract;
   end;
 
   { TRepoFrame }
@@ -181,8 +187,9 @@ type
   private
     { The window the frame is in, from Init. }
     FWindow: TRepoWindow;
-    { The folder an open job is opening, for the tab while it runs. }
-    FOpeningDir: string;
+    { The folder an open job is opening, for the tab while it runs, and
+      the root git names for it, which the window gave (OpenRepository). }
+    FOpeningDir, FOpeningRoot: string;
     { Something happened while the frame was in the background (MarkNews):
       its tab has a dot until it is shown. }
     FHasNews: boolean;
@@ -775,7 +782,7 @@ type
     FWatcher: TGittanWatcher;
     { The repository being opened, and what to do once it is. }
     FOpenJob: TGittanOpenJob;
-    FOnOpened: TNotifyEvent;
+    FOnOpened: TOpenedEvents;
     { The branches and tags of the last snapshot, for Compare With. }
     FRefs: TStringArray;
     { How many callers are inside a stretch the watcher's refresh must
@@ -1769,6 +1776,12 @@ type
     function RepoRoot: string;
     {** The folder an open job is opening, '' when none runs. }
     property OpeningDir: string read FOpeningDir;
+    {** The root of the repository opening, as the window found it
+      (TRepoFrame.OpenRepository's ARoot); '' when none opens. }
+    property OpeningRoot: string read FOpeningRoot;
+    {** AEvent is called with this frame as Sender once the repository
+      opening now has opened, after any asked for before. }
+    procedure WhenOpened(AEvent: TNotifyEvent);
     {** Something happened while the frame was in the background: a
       banner or a notice, a job that ended, files or commits that came;
       cleared when it is shown. }
@@ -1781,8 +1794,12 @@ type
     {** The file being edited has changes not saved, which
       FormCloseQuery asks about. }
     function NeedsSave: boolean;
-    {** The welcome view says ADir is opening, before it does. }
+    {** The welcome view says ADir is opening, before it does; '' gives
+      it its buttons back. }
     procedure ShowOpening(const ADir: string);
+    {** AFrame is closing: an open this frame runs for it no longer calls
+      it back (TRepoWindow.OpenRepository's AOnOpened). }
+    procedure DropCallbacksOf(AFrame: TRepoFrame);
     {** Says the lexers' folder was not found. }
     procedure ShowNoLexers;
     {** Banners a git older than the one Gittan needs. }
@@ -1818,7 +1835,8 @@ type
       The git work runs in a thread (TGittanOpenJob), so the repository
       is open only once it is done; AOnOpened is called then, if it
       opened. }
-    procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil);
+    procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil;
+      const ARoot: string = '');
   end;
 
 implementation
@@ -3254,6 +3272,9 @@ begin
   UpdateCaption;
   ColorSidebar;
   UpdateIndexBand;
+  { Remind Me Later may have been answered in another tab. }
+  if App.UpdateOk then
+    ShowUpdateBadge;
 end;
 
 function TRepoFrame.IsBlank: boolean;
@@ -3326,7 +3347,32 @@ end;
 
 procedure TRepoFrame.ShowOpening(const ADir: string);
 begin
-  FWelcome.SetBusy(OpeningText(ADir));
+  if ADir = '' then
+    FWelcome.SetBusy('')
+  else
+    FWelcome.SetBusy(OpeningText(ADir));
+end;
+
+procedure TRepoFrame.DropCallbacksOf(AFrame: TRepoFrame);
+var
+  i, n: integer;
+begin
+  n := 0;
+  for i := 0 to High(FOnOpened) do
+    if TMethod(FOnOpened[i]).Data <> Pointer(AFrame) then
+    begin
+      FOnOpened[n] := FOnOpened[i];
+      Inc(n);
+    end;
+  SetLength(FOnOpened, n);
+end;
+
+procedure TRepoFrame.WhenOpened(AEvent: TNotifyEvent);
+begin
+  if not Assigned(AEvent) then
+    Exit;
+  SetLength(FOnOpened, Length(FOnOpened) + 1);
+  FOnOpened[High(FOnOpened)] := AEvent;
 end;
 
 procedure TRepoFrame.ShowNoLexers;
@@ -5475,7 +5521,8 @@ end;
   The editor shows the work tree's uncommitted changes as a unified diff
   under the Diff lexer; the file tree lists the changed files and the status
   bar counts them. }
-procedure TRepoFrame.OpenRepository(const ADir: string; AOnOpened: TNotifyEvent);
+procedure TRepoFrame.OpenRepository(const ADir: string; AOnOpened: TNotifyEvent;
+  const ARoot: string);
 begin
   { Open closes the previous repository even when it fails. }
   FlushEdit;
@@ -5533,8 +5580,10 @@ begin
   ClearRepositoryViews('');
   FWelcome.SetBusy(OpeningText(ADir));
   UpdateCommitState;
-  FOnOpened := AOnOpened;
+  FOnOpened := nil;
+  WhenOpened(AOnOpened);
   FOpeningDir := ADir;
+  FOpeningRoot := ARoot;
   FOpenJob := TGittanOpenJob.Create(ADir);
   FOpenJob.OnDone := @OpenJobDone;
   FOpenJob.IgnoreWhitespace := FIgnoreWhitespace;
@@ -5549,6 +5598,7 @@ procedure TRepoFrame.AbandonOpenJob;
 begin
   FOnOpened := nil;
   FOpeningDir := '';
+  FOpeningRoot := '';
   if FOpenJob = nil then
     Exit;
   FOpenJob.Stop(False);
@@ -5562,13 +5612,15 @@ procedure TRepoFrame.OpenJobDone(Sender: TObject);
 var
   Job: TGittanOpenJob;
   Snap: TGittanRepoSnapshot;
-  OnOpened: TNotifyEvent;
+  OnOpened: TOpenedEvents;
+  i: integer;
 begin
   Job := TGittanOpenJob(Sender);
   if Job <> FOpenJob then
     Exit;
   FOpenJob := nil;
   FOpeningDir := '';
+  FOpeningRoot := '';
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
   OnOpened := FOnOpened;
@@ -5603,8 +5655,8 @@ begin
     StartIndexing;
   end;
   StartWatcher;
-  if Assigned(OnOpened) then
-    OnOpened(Self);
+  for i := 0 to High(OnOpened) do
+    OnOpened[i](Self);
 end;
 
 { A failure to open or read a repository is shown where the hint was: in

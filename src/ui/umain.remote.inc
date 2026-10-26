@@ -302,6 +302,10 @@ begin
     end;
     Exit;
   end;
+  { A question names no repository: a frame in the background shows its
+    tab before it asks. }
+  if Job.Diverged or Job.Rejected or Job.Unseen or Job.Stale then
+    FWindow.ShowFrame(Self);
   if Job.Diverged then
     case QuestionDlg(rsPullDivergedTitle, rsPullDiverged, mtConfirmation,
         [mrYes, rsMergeAction, 'IsDefault', mrNo, rsRebaseAction, mrCancel,
