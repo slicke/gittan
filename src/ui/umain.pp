@@ -835,6 +835,9 @@ type
     procedure ClearRepositoryViews(const AError: string);
     procedure StartWatcher;
     procedure StopWatcher;
+    function WatchPace: integer;
+    procedure AppActivate(Sender: TObject);
+    procedure AppDeactivate(Sender: TObject);
     function LoadRepository: boolean;
     procedure ApplySnapshot(const ASnap: TGittanRepoSnapshot);
     procedure RefreshRepository(ASnap: PGittanRepoSnapshot = nil);
@@ -2599,8 +2602,10 @@ const
   HistoryStep = 5;
   WholeFileLines = 1000000;
 
-  { How often the watcher asks git whether the repository changed. }
+  { How often the watcher asks git whether the repository changed, and
+    how often while another application is in front. }
   WatchInterval = 2000;
+  WatchIdleInterval = 10000;
   { The choices of View > Context Lines. }
   ContextChoices: array[0..3] of integer = (1, 3, 5, 10);
   { Matches beyond this are not counted; the find bar says "10000+". }
@@ -2706,6 +2711,8 @@ begin
   FUpdateTimer.Interval := UpdateFirstCheck;
   FUpdateTimer.OnTimer := @UpdateTimerTimer;
   FUpdateTimer.Enabled := CurrentBuild >= 0;
+  Application.AddOnActivateHandler(@AppActivate);
+  Application.AddOnDeactivateHandler(@AppDeactivate);
   FBookmarkBandWidth := Edit.OptGutterWidthBookmarks;
   { The second editor shows the old side of the side-by-side view, left
     of the first, which then shows the new side. It has its own adapter,
@@ -3065,6 +3072,8 @@ begin
   StopCommitJob(True);
   FreeAndNil(FDroppedCommits);
   StopRemoteJob(True);
+  Application.RemoveOnActivateHandler(@AppActivate);
+  Application.RemoveOnDeactivateHandler(@AppDeactivate);
   StopWatcher;
   AbandonPullJob;
   AbandonReviewJob;
@@ -5448,14 +5457,17 @@ end;
   A branch switch, a commit or an edit in another program happens behind
   Gittan's back, so a watcher thread polls git and RefreshRepository
   reloads the views in place when something changed. View > Refresh does
-  the same by hand. }
+  the same by hand. While another application is in front it polls
+  every WatchIdleInterval only, which spares the git processes and the
+  wakeups, yet still follows a tree edited beside Gittan; coming back
+  to the front polls at once. }
 procedure TForm1.StartWatcher;
 begin
   StopWatcher;
   if FRepo.Root = '' then
     Exit;
   FWatcher := TGittanWatcher.Create(FRepo.Root, FRepo.Base, FRepo.WholeTree,
-    WatchInterval);
+    WatchPace);
   FWatcher.OnChange := @WatcherChange;
   FWatcher.IgnoreWhitespace := FRepo.IgnoreWhitespace;
   FWatcher.Start;
@@ -5464,6 +5476,28 @@ end;
 procedure TForm1.StopWatcher;
 begin
   FreeAndNil(FWatcher);
+end;
+
+function TForm1.WatchPace: integer;
+begin
+  if Application.Active then
+    Result := WatchInterval
+  else
+    Result := WatchIdleInterval;
+end;
+
+procedure TForm1.AppActivate(Sender: TObject);
+begin
+  if FWatcher = nil then
+    Exit;
+  FWatcher.Interval := WatchInterval;
+  FWatcher.Poll;
+end;
+
+procedure TForm1.AppDeactivate(Sender: TObject);
+begin
+  if FWatcher <> nil then
+    FWatcher.Interval := WatchIdleInterval;
 end;
 
 procedure TForm1.WatcherChange(Sender: TObject);

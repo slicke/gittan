@@ -34,6 +34,7 @@ type
     procedure TestChange;
     procedure TestIgnoreWhitespace;
     procedure TestStop;
+    procedure TestPoll;
     procedure TestOpenJob;
     procedure TestOpenJobIgnoreWhitespace;
     procedure TestOpenJobNoRepository;
@@ -199,6 +200,32 @@ begin
   Watcher.Free;
   AssertTrue('Free waited the interval out', MilliSecondsBetween(Now, Start) < 2000);
   AssertEquals(0, FChanges);
+end;
+
+{ Poll looks at once, in the middle of a long interval; the interval
+  set meanwhile is the wait after it. }
+procedure TWatchTest.TestPoll;
+var
+  Watcher: TGittanWatcher;
+begin
+  Watcher := TGittanWatcher.Create(FDir, '', False, 60000);
+  try
+    Watcher.OnChange := @WatcherChange;
+    Watcher.Start;
+    Pump(500);
+    WriteFile('b.txt', 'b');
+    Watcher.Interval := 50;
+    Pump(500);
+    AssertEquals('the interval waited out first', 0, FChanges);
+    Watcher.Poll;
+    Pump(5000, 1);
+    AssertEquals('the poll', 1, FChanges);
+    WriteFile('a.txt', 'changed');
+    Pump(5000, 2);
+    AssertEquals('the new interval', 2, FChanges);
+  finally
+    Watcher.Free;
+  end;
 end;
 
 procedure TWatchTest.OpenDone(Sender: TObject);
