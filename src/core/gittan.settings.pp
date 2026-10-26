@@ -98,6 +98,9 @@ type
     {** The git to run, as a path to it; empty runs the git found on
       ToolSearchPath (see gittan.git). }
     GitPath: string;
+    {** Whether the GitHub features are on (pull requests, the GitHub page,
+      review comments); on unless the user turns them off. }
+    GitHubEnabled: boolean;
     {** gh, GitHub's command line tool, as a path to it; empty runs the
       gh found on ToolSearchPath, and when there is none the features
       that need GitHub are off. }
@@ -156,6 +159,8 @@ const
   SecTools = 'Tools';
   SecTrust = 'Trust';
   SecAI = 'AI';
+  { A section per forge, the service that hosts the repositories. }
+  SecGitHub = 'GitHub';
   ConfigFolder = 'Gittan';
 
 {** The folder the ini file lives in. GetAppConfigDir names it after
@@ -224,6 +229,7 @@ begin
   SubmodulesOpen := True;
   CommitOpen := True;
   Translations := True;
+  GitHubEnabled := True;
 end;
 
 destructor TGittanSettings.Destroy;
@@ -280,7 +286,9 @@ begin
       TerminalCommand := Ini.ReadString(SecView, 'TerminalCommand', '');
       TabSize := Ini.ReadInteger(SecView, 'TabSize', 0);
       GitPath := Ini.ReadString(SecTools, 'Git', '');
-      GhPath := Ini.ReadString(SecTools, 'Gh', '');
+      GitHubEnabled := Ini.ReadBool(SecGitHub, 'Enabled', True);
+      { Earlier versions kept gh's path with git's. }
+      GhPath := Ini.ReadString(SecGitHub, 'Cli', Ini.ReadString(SecTools, 'Gh', ''));
       AIEnabled := Ini.ReadBool(SecAI, 'Enabled', False);
       AIAgent := Ini.ReadString(SecAI, 'Agent', '');
       ClaudePath := Ini.ReadString(SecAI, 'Claude', '');
@@ -347,7 +355,9 @@ begin
       Ini.WriteString(SecView, 'TerminalCommand', KeepEdges(TerminalCommand));
       Ini.WriteInteger(SecView, 'TabSize', TabSize);
       Ini.WriteString(SecTools, 'Git', KeepEdges(GitPath));
-      Ini.WriteString(SecTools, 'Gh', KeepEdges(GhPath));
+      Ini.DeleteKey(SecTools, 'Gh');
+      Ini.WriteBool(SecGitHub, 'Enabled', GitHubEnabled);
+      Ini.WriteString(SecGitHub, 'Cli', KeepEdges(GhPath));
       Ini.WriteBool(SecAI, 'Enabled', AIEnabled);
       Ini.WriteString(SecAI, 'Agent', AIAgent);
       Ini.WriteString(SecAI, 'Claude', KeepEdges(ClaudePath));

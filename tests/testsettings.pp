@@ -26,6 +26,7 @@ type
     procedure TestOldDefaultFont;
     procedure TestDefaultFontSize;
     procedure TestTrust;
+    procedure TestOldGhPath;
   end;
 
 implementation
@@ -60,6 +61,7 @@ begin
     AssertEquals('no tab width picked', 0, S.TabSize);
     AssertEquals('', S.GitPath);
     AssertEquals('', S.GhPath);
+    AssertTrue('the GitHub features start on', S.GitHubEnabled);
     AssertFalse('the AI features start off', S.AIEnabled);
     AssertEquals('', S.ClaudePath);
     AssertEquals('', S.ClaudeModel);
@@ -100,6 +102,7 @@ begin
     S.TabSize := 4;
     S.GitPath := '/opt/homebrew/bin/git';
     S.GhPath := 'C:\Program Files\GitHub CLI\gh.exe';
+    S.GitHubEnabled := False;
     S.SyntaxTheme := 'Delphi';
     S.AIEnabled := True;
     S.ClaudePath := '/Users/me/.local/bin/claude';
@@ -141,6 +144,7 @@ begin
     AssertEquals(4, S.TabSize);
     AssertEquals('/opt/homebrew/bin/git', S.GitPath);
     AssertEquals('C:\Program Files\GitHub CLI\gh.exe', S.GhPath);
+    AssertFalse(S.GitHubEnabled);
     AssertEquals('Delphi', S.SyntaxTheme);
     AssertTrue(S.AIEnabled);
     AssertEquals('/Users/me/.local/bin/claude', S.ClaudePath);
@@ -296,6 +300,35 @@ begin
     AssertFalse('an empty hash trusts nothing', S.CommandsTrusted('/tmp/b', 'x'));
   finally
     S.Free;
+  end;
+end;
+
+{ gh's path was kept in Tools with git's; it is read from there and
+  moved to the GitHub section. }
+procedure TSettingsTest.TestOldGhPath;
+var
+  S: TGittanSettings;
+  Ini: TStringList;
+begin
+  Ini := TStringList.Create;
+  try
+    Ini.Add('[Tools]');
+    Ini.Add('Gh=/opt/gh/bin/gh');
+    Ini.SaveToFile(FFileName);
+    S := TGittanSettings.Create(FFileName);
+    try
+      S.Load;
+      AssertEquals('/opt/gh/bin/gh', S.GhPath);
+      AssertTrue(S.GitHubEnabled);
+      S.Save;
+    finally
+      S.Free;
+    end;
+    Ini.LoadFromFile(FFileName);
+    AssertEquals('the old key is gone', -1, Ini.IndexOf('Gh=/opt/gh/bin/gh'));
+    AssertTrue('the path is under GitHub', Ini.IndexOf('Cli=/opt/gh/bin/gh') >= 0);
+  finally
+    Ini.Free;
   end;
 end;
 

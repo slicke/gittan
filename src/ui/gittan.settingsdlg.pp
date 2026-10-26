@@ -4,9 +4,11 @@ unit gittan.settingsdlg;
   elsewhere), in pages picked in a sidebar of the main window's kind,
   as the system's settings have: Editor, the editor font and its size,
   the width of a tab and the syntax theme, with a sample; Tools, the
-  commands Open in Editor and Open in Terminal run, and the git and gh to
-  run in place of those found on PATH; and AI, whether the AI features
-  show, the agent they run, and its command and model (see gittan.ai);
+  commands Open in Editor and Open in Terminal run, and the git to run in
+  place of the one found on PATH; Hosting, a block per service that hosts
+  repositories (GitHub alone so far) with whether its features are on and
+  the command line tool they run; AI, whether the AI features show, the
+  agent they run, and its command and model (see gittan.ai);
   and About (also Gittan > About Gittan on macOS, Tools > About Gittan
   elsewhere), the build, a check for a newer one, what Gittan runs on
   and with, for a bug report, and the licenses. The other view options
@@ -29,7 +31,7 @@ uses
 
 type
   {** The pages, in the sidebar's order. }
-  TSettingsPage = (pgEditor, pgTools, pgAI, pgAbout);
+  TSettingsPage = (pgEditor, pgTools, pgHosting, pgAI, pgAbout);
 
   {** Shows AFont, the theme ATheme (an index into SyntaxThemes) and a tab
     ATabSize characters wide in the editor while the dialog is open. }
@@ -43,6 +45,8 @@ type
     EditorCommand, TerminalCommand: string;
     {** Paths of git and gh; empty for the ones found on PATH. }
     GitPath, GhPath: string;
+    {** Whether the GitHub features are on. }
+    GitHubEnabled: boolean;
     {** Whether the AI features show, the agent they run, and each
       agent's command (empty for the one found) and model (empty for its
       own choice). }
@@ -74,6 +78,7 @@ resourcestring
   rsSettingsTitle = 'Settings';
   rsEditorPage = 'Editor';
   rsToolsPage = 'Tools';
+  rsHostingPage = 'Hosting';
   rsAIPage = 'AI';
   rsAboutPage = 'About';
   rsAIEnabled = 'Turn on the AI features';
@@ -115,6 +120,11 @@ resourcestring
   rsToolFound = 'Found: %s';
   rsToolNotFound = 'Not found on PATH.';
   rsGhNotFound = 'Not found on PATH; the GitHub features are off.';
+  rsGitHub = 'GitHub';
+  rsGitHubEnabled = 'Turn on the GitHub features';
+  rsGitHubNote = 'Pull requests, their checks and review comments, and the ' +
+    'GitHub page. They run gh with its own login, for a repository with a ' +
+    'remote on GitHub.';
   rsToolTyped = 'Run in place of the one on PATH.';
   rsToolMissing = 'There is no such file.';
   rsAboutName = 'Gittan';
@@ -133,6 +143,7 @@ resourcestring
   rsVersionGittanLocal = 'Gittan, a local build of %s';
   rsVersionNotFound = '%s not found';
   rsVersionAIOff = 'The AI features are off';
+  rsVersionGitHubOff = 'The GitHub features are off';
   rsVersionLibraries = 'Free Pascal %s, LCL %s';
   rsCopyVersions = 'Co&py';
   rsWebsite = 'gittan.app';
@@ -268,7 +279,7 @@ type
     FThemeBox: TComboBox;
     FEditorEdit, FTerminalEdit, FGitEdit, FGhEdit, FAgentEdit, FModelEdit: TEdit;
     FGitNote, FGhNote, FAgentLabel, FAgentNote, FModelNote: TLabel;
-    FAIBox: TCheckBox;
+    FAIBox, FGitHubBox: TCheckBox;
     { The agent picked, and each agent's command and model as edited:
       the fields show the picked one's (ShowAgent). }
     FAgentBox: TComboBox;
@@ -279,7 +290,7 @@ type
       buttons under them. FBox is the one Place puts controls in. }
     FNavPanel, FContent: TPanel;
     FNav: TGittanSideNav;
-    FEditorBox, FToolsBox, FAIPage, FAboutPage: TPanel;
+    FEditorBox, FToolsBox, FHostingPage, FAIPage, FAboutPage: TPanel;
     { The About page's update check and what it found (FUpdateLink, a
       link when there is a page to go to), its links in the accent
       (FLinkColor), and what Gittan runs on and with, read the first
@@ -289,8 +300,8 @@ type
     FLinks: array of TLabel;
     FLinkColor: TColor;
     FVersionsLabel: TLabel;
-    { Whether the versions are in; a change of a tool, the AI switch or
-      the agent drops it, so the page shown again reads them anew. }
+    { Whether the versions are in; a change of a tool, a switch or the
+      agent drops it, so the page shown again reads them anew. }
     FVersionsRead: boolean;
     FOK: TButton;
     { Gittan's icon as loaded, and as resampled for the screen's pixels. }
@@ -336,6 +347,7 @@ type
     procedure ThemeChange(Sender: TObject);
     procedure ToolChange(Sender: TObject);
     procedure AIChange(Sender: TObject);
+    procedure GitHubChange(Sender: TObject);
     procedure AgentChange(Sender: TObject);
     procedure ShowAgent;
     procedure ShowTool(AEdit: TEdit; ANote: TLabel; const AName, ANotFound: string);
@@ -416,6 +428,7 @@ begin
   FContent.Parent := Self;
   FEditorBox := AddPage(rsEditorPage, niEditor);
   FToolsBox := AddPage(rsToolsPage, niTools);
+  FHostingPage := AddPage(rsHostingPage, niForge);
   FAIPage := AddPage(rsAIPage, niAI);
   FAboutPage := AddPage(rsAboutPage, niAbout);
 
@@ -509,7 +522,7 @@ begin
   FAdapter.AddEditor(FSampleEdit);
 
   { The Tools page: each command with a note on what an empty field does,
-    each tool with a note on what will run (ShowTool). }
+    git with a note on what will run (ShowTool). }
   FBox := FToolsBox;
   AddLabel(rsEditorCommand, 0);
   FEditorEdit := AddEdit(rsEditorDefault);
@@ -520,6 +533,19 @@ begin
   AddLabel(rsTerminalNote, 4).Font.Color := clGrayText;
 
   FGitEdit := AddTool(rsGitPath, rsGitDefault, FGitNote);
+
+  { The Hosting page: a block per service under its name, the switch and
+    what it means, then the tool, which follows the switch. Another
+    service is another block. }
+  FBox := FHostingPage;
+  AddLabel(rsGitHub, 0).Font.Style := [fsBold];
+  FGitHubBox := TCheckBox.Create(Self);
+  FGitHubBox.Caption := rsGitHubEnabled;
+  FGitHubBox.OnChange := @GitHubChange;
+  Place(FGitHubBox, 8);
+  Lbl := AddLabel(rsGitHubNote, 4);
+  Lbl.Font.Color := clGrayText;
+  Lbl.WordWrap := True;
   FGhEdit := AddTool(rsGhPath, rsGhDefault, FGhNote);
 
   { The AI page: the switch and what it means, then the agent, its
@@ -686,12 +712,15 @@ begin
   Tallest := Max(FEditorBox.Height, H);
   FToolsBox.GetPreferredSize(W, H, False, True);
   Tallest := Max(Tallest, H);
+  FHostingPage.GetPreferredSize(W, H, False, True);
+  Tallest := Max(Tallest, H);
   FAIPage.GetPreferredSize(W, H, False, True);
   Tallest := Max(Tallest, H);
   FAboutPage.GetPreferredSize(W, H, False, True);
   Tallest := Max(Tallest, H);
   FEditorBox.Constraints.MinHeight := Tallest;
   FToolsBox.Constraints.MinHeight := Tallest;
+  FHostingPage.Constraints.MinHeight := Tallest;
   FAIPage.Constraints.MinHeight := Tallest;
   FAboutPage.Constraints.MinHeight := Tallest;
   if FCentered and (Owner is TCustomForm) then
@@ -749,11 +778,13 @@ begin
   try
     FEditorBox.Visible := False;
     FToolsBox.Visible := False;
+    FHostingPage.Visible := False;
     FAIPage.Visible := False;
     FAboutPage.Visible := False;
     case TSettingsPage(AIndex) of
       pgEditor: Box := FEditorBox;
       pgTools: Box := FToolsBox;
+      pgHosting: Box := FHostingPage;
       pgAI: Box := FAIPage;
       else
         Box := FAboutPage;
@@ -993,6 +1024,13 @@ begin
   FModelEdit.Enabled := FAIBox.Checked;
 end;
 
+{ gh's field matters only with the GitHub features on. }
+procedure TSettingsForm.GitHubChange(Sender: TObject);
+begin
+  FVersionsRead := False;
+  FGhEdit.Enabled := FGitHubBox.Checked;
+end;
+
 { What was typed for the agent left is kept, and the fields show the
   one picked. }
 procedure TSettingsForm.AgentChange(Sender: TObject);
@@ -1208,7 +1246,9 @@ begin
     Exe := Trim(FGhEdit.Text);
     if Exe = '' then
       Exe := FindTool('gh');
-    if (Exe <> '') and RunGitHubCli(Exe, GetUserDir, ['--version'], Output, Error) then
+    if not FGitHubBox.Checked then
+      Lines.Add(rsVersionGitHubOff)
+    else if (Exe <> '') and RunGitHubCli(Exe, GetUserDir, ['--version'], Output, Error) then
       Lines.Add('gh ' + VersionOf(Output, 'gh version '))
     else
       Lines.Add(Format(rsVersionNotFound, ['gh']));
@@ -1280,6 +1320,8 @@ begin
     F.FGhEdit.Text := AValues.GhPath;
     F.ToolChange(F.FGitEdit);
     F.ToolChange(F.FGhEdit);
+    F.FGitHubBox.Checked := AValues.GitHubEnabled;
+    F.GitHubChange(nil);
     F.FAIBox.Checked := AValues.AIEnabled;
     F.FAgent := AValues.Agent;
     F.FAgentPaths := AValues.AgentPaths;
@@ -1304,6 +1346,7 @@ begin
       AValues.TerminalCommand := Trim(F.FTerminalEdit.Text);
       AValues.GitPath := Trim(F.FGitEdit.Text);
       AValues.GhPath := Trim(F.FGhEdit.Text);
+      AValues.GitHubEnabled := F.FGitHubBox.Checked;
       AValues.AIEnabled := F.FAIBox.Checked;
       { The fields hold the picked agent's; the other's are as kept. }
       F.AgentChange(nil);

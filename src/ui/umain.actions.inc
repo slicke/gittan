@@ -503,6 +503,7 @@ begin
     V.TerminalCommand := FSettings.TerminalCommand;
     V.GitPath := FSettings.GitPath;
     V.GhPath := FSettings.GhPath;
+    V.GitHubEnabled := FSettings.GitHubEnabled;
     V.AIEnabled := FSettings.AIEnabled;
     V.Agent := AgentOfKey(FSettings.AIAgent);
     V.AgentPaths[gaClaude] := FSettings.ClaudePath;
@@ -529,10 +530,12 @@ begin
         AbandonAIReview;
       end;
       UpdateCommitState;
-      if (V.GitPath <> FSettings.GitPath) or (V.GhPath <> FSettings.GhPath) then
+      if (V.GitPath <> FSettings.GitPath) or (V.GhPath <> FSettings.GhPath) or
+        (V.GitHubEnabled <> FSettings.GitHubEnabled) then
       begin
         FSettings.GitPath := V.GitPath;
         FSettings.GhPath := V.GhPath;
+        FSettings.GitHubEnabled := V.GitHubEnabled;
         SetGitExe(FSettings.GitPath);
         FindGitHubCli;
         UpdateGitHubItems;
@@ -600,10 +603,14 @@ begin
   FEditOld.Update(True);
 end;
 
-{ gh by the path the settings give, else as found on ToolSearchPath. }
+{ gh by the path the settings give, else as found on ToolSearchPath; none
+  while the GitHub features are turned off, which hides them as a missing
+  gh does. }
 procedure TForm1.FindGitHubCli;
 begin
-  if FSettings.GhPath <> '' then
+  if not FSettings.GitHubEnabled then
+    FGitHubCli := ''
+  else if FSettings.GhPath <> '' then
     FGitHubCli := FSettings.GhPath
   else
     FGitHubCli := FindTool('gh');
