@@ -321,6 +321,93 @@ begin
 end;
 
 { ---------------------------------------------------------------------------
+  Git LFS in .gitattributes
+  ---------------------------------------------------------------------------
+  Track with Git LFS offers the file's patterns (LfsTrackPatterns: its
+  extension, the file itself) that the root .gitattributes does not
+  track yet, for a file in the work tree; Stop Tracking those of its
+  patterns it tracks (LfsPatternsOf). They write the file as git lfs
+  track and untrack do, without git-lfs; files already committed are
+  left as they are, and move when they are committed next. The pattern
+  is kept in the item's Hint, as for the ignore menus; the caption
+  shows a [[:space:]] as the space it stands for. }
+procedure TForm1.FillLfsMenus(const APath: string);
+var
+  Attrs, Pattern: string;
+  Tracked: TStringArray;
+
+  procedure AddTo(AMenu: TMenuItem; const APattern: string; AClick: TNotifyEvent);
+  var
+    Item: TMenuItem;
+  begin
+    Item := TMenuItem.Create(AMenu);
+    Item.Caption := StringReplace(StringReplace(APattern, '[[:space:]]', ' ', [rfReplaceAll]),
+      '&', '&&', [rfReplaceAll]);
+    Item.Hint := APattern;
+    Item.OnClick := AClick;
+    AMenu.Add(Item);
+  end;
+
+begin
+  FLfsTrackMenu.Clear;
+  FLfsUntrackMenu.Clear;
+  Attrs := '';
+  if (FRepo.Root <> '') and (APath <> '') then
+    try
+      if FileExists(IncludeTrailingPathDelimiter(FRepo.Root) + RepoRootFiles[1]) then
+        Attrs := ReadFileBytes(IncludeTrailingPathDelimiter(FRepo.Root) + RepoRootFiles[1]);
+    except
+      Attrs := '';
+    end;
+  Tracked := LfsTrackedPatterns(Attrs);
+  if (APath <> '') and FileExists(ContextFullPath) then
+    for Pattern in LfsTrackPatterns(APath) do
+      if AnsiIndexStr(Pattern, Tracked) < 0 then
+        AddTo(FLfsTrackMenu, Pattern, @MenuLfsTrackClick);
+  if APath <> '' then
+    for Pattern in LfsPatternsOf(Attrs, APath) do
+      AddTo(FLfsUntrackMenu, Pattern, @MenuLfsUntrackClick);
+  FLfsTrackMenu.Enabled := FLfsTrackMenu.Count > 0;
+  FLfsUntrackMenu.Enabled := FLfsUntrackMenu.Count > 0;
+end;
+
+{ The banner reads the state again: the repository may have files in
+  Git LFS now, or none. }
+procedure TForm1.MenuLfsTrackClick(Sender: TObject);
+var
+  Item: TMenuItem;
+begin
+  Item := Sender as TMenuItem;
+  if FRepo.Root = '' then
+    Exit;
+  if AddLfsTrack(IncludeTrailingPathDelimiter(FRepo.Root) + RepoRootFiles[1], Item.Hint) then
+  begin
+    StatusNote(Format(rsLfsTracked, [Item.Hint]));
+    FLfsChecked := '';
+    RefreshRepository;
+  end
+  else
+    StatusNote(Format(rsIgnoreFailed, [RepoRootFiles[1]]), True);
+end;
+
+procedure TForm1.MenuLfsUntrackClick(Sender: TObject);
+var
+  Item: TMenuItem;
+begin
+  Item := Sender as TMenuItem;
+  if FRepo.Root = '' then
+    Exit;
+  if RemoveLfsTrack(IncludeTrailingPathDelimiter(FRepo.Root) + RepoRootFiles[1], Item.Hint) then
+  begin
+    StatusNote(Format(rsLfsUntracked, [Item.Hint]));
+    FLfsChecked := '';
+    RefreshRepository;
+  end
+  else
+    StatusNote(Format(rsIgnoreFailed, [RepoRootFiles[1]]), True);
+end;
+
+{ ---------------------------------------------------------------------------
   Editing the repository's files
   ---------------------------------------------------------------------------
   The editor is a viewer, except for the files the Config section

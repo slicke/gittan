@@ -1140,6 +1140,8 @@ begin
   { Filled with the patterns for the file when the menu pops up. }
   FIgnoreMenu := AddItem(FFilePopup, rsAddToIgnore, nil);
   FExcludeMenu := AddItem(FFilePopup, rsAddToExclude, nil);
+  FLfsTrackMenu := AddItem(FFilePopup, rsLfsTrackMenu, nil);
+  FLfsUntrackMenu := AddItem(FFilePopup, rsLfsUntrackMenu, nil);
   { Over the tree while it chooses what to commit (FilePopupPopup). }
   FTickSepItem := TMenuItem.Create(FFilePopup);
   FTickSepItem.Caption := '-';
@@ -1231,6 +1233,7 @@ begin
   FResolveTheirsItem.Enabled := FResolveMineItem.Enabled;
   FMarkResolvedItem.Enabled := FResolveMineItem.Enabled;
   FillIgnoreMenus(FContextPath);
+  FillLfsMenus(FContextPath);
   FTickSepItem.Visible := (FFilePopup.PopupComponent = FileTree) and CommitChoosing and
     (FChoosableCount > 0);
   FTickAllItem.Visible := FTickSepItem.Visible;

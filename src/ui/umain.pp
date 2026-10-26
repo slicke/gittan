@@ -26,7 +26,7 @@ uses
   {$IFDEF LCLGtk3}gittan.gtktitlebar,{$ENDIF}
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
-  gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader, gittan.hintbox,
+  gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.textfile, gittan.sectionheader, gittan.hintbox,
   gittan.forge, gittan.forgepage,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
@@ -313,6 +313,9 @@ type
     FRepoHeader: TGittanSectionHeader;
     FRepoTree: TTreeView;
     FIgnoreMenu, FExcludeMenu: TMenuItem;
+    { Track with Git LFS and Stop Tracking with Git LFS, filled with the
+      file's patterns as the menu pops up (FillLfsMenus). }
+    FLfsTrackMenu, FLfsUntrackMenu: TMenuItem;
     { The Submodules section under it (umain.submodules.inc): the
       submodules from gittan.submodules, what their jobs found out
       (FSubInfos, one per submodule, smUnknown while its job runs), the
@@ -1642,6 +1645,9 @@ type
     procedure MenuSubCopyPathClick(Sender: TObject);
     procedure FillIgnoreMenus(const APath: string);
     procedure MenuIgnoreClick(Sender: TObject);
+    procedure FillLfsMenus(const APath: string);
+    procedure MenuLfsTrackClick(Sender: TObject);
+    procedure MenuLfsUntrackClick(Sender: TObject);
     function RepoFileName(const AFileName: string): boolean;
     procedure BeginEdit(const AFileName: string);
     procedure FlushEdit;
@@ -2390,6 +2396,12 @@ resourcestring
   rsAddToExclude = 'Add to .git/info/e&xclude';
   rsIgnoreAdded = 'Added %s to %s';
   rsIgnoreFailed = 'Could not write %s';
+  rsLfsTrackMenu = 'Track with Git &LFS';
+  rsLfsUntrackMenu = 'Stop Tracking with Git LFS';
+  rsLfsTracked = 'Git LFS tracks %s now; files already committed move to it the next time ' +
+    'they are committed';
+  rsLfsUntracked = 'Git LFS no longer tracks %s; files committed from now on go into git ' +
+    'itself';
   rsSave = '&Save';
   rsEditAction = 'Edit';
   rsSaveAction = 'Save';
