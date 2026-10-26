@@ -154,7 +154,8 @@ end;
 procedure TForm1.ShowBlob(const APath: string);
 var
   Data: RawByteString;
-  Shown: string;
+  Shown, Oid: string;
+  Size: int64;
 begin
   if (FRepo.Root = '') or (FFilesPage.Commit = '') then
     Exit;
@@ -191,10 +192,18 @@ begin
     ApplyLayout;
     FImageDiff.Visible := True;
   end
-  { git's own rule for a binary file: a NUL in the first 8000 bytes. }
-  else if Pos(#0, Copy(Data, 1, 8000)) > 0 then
+  { git's own rule for a binary file: a NUL in the first 8000 bytes; a
+    file in Git LFS not downloaded is one too, of the size its pointer
+    gives. }
+  else if (Pos(#0, Copy(Data, 1, 8000)) > 0) or ParseLfsPointer(Data, Oid, Size) then
   begin
-    FBinaryView.SetFile(APath, Length(Data));
+    if ParseLfsPointer(Data, Oid, Size) then
+    begin
+      FBinaryView.SetFile(APath, Size);
+      FBinaryView.SetNote(rsLfsNotDownloaded);
+    end
+    else
+      FBinaryView.SetFile(APath, Length(Data));
     Edit.Visible := False;
     HideMarkdownPreview;
     FImageDiff.Visible := False;

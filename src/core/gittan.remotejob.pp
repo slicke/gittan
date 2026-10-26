@@ -1,8 +1,8 @@
 unit gittan.remotejob;
 
-{** Fetch, pull, push, clone and the submodules' update and add run in a
-  thread: they go to the network, which can take its time, and the
-  window must not hang meanwhile. }
+{** Fetch, pull, push, clone, the submodules' update and add and a Git
+  LFS download run in a thread: they go to the network, which can take
+  its time, and the window must not hang meanwhile. }
 
 {$mode objfpc}{$H+}
 
@@ -14,7 +14,7 @@ uses
 type
   {** What a TGittanRemoteJob does. }
   TGittanRemoteKind = (rkFetch, rkPull, rkPush, rkDeleteRemote, rkForcePush, rkPushBranch,
-    rkPushTag, rkDeleteRemoteTag, rkClone, rkSubmoduleUpdate, rkSubmoduleAdd, rkFetchPull);
+    rkPushTag, rkDeleteRemoteTag, rkClone, rkSubmoduleUpdate, rkSubmoduleAdd, rkFetchPull, rkLfsFetch);
 
   {** Runs a fetch, a pull (the way Mode says), a push, a push with
     --force-with-lease, or the deletion of the remote branch Arg stands
@@ -29,7 +29,8 @@ type
     following Branch. A pull request fetch fetches the pull request
     numbered Arg from Remote, its head at PullRef (the forge's), with its
     base branch Branch, and gives the ref its head is fetched to in
-    HeadRef.
+    HeadRef. A Git LFS download fetches the object of the path Arg as
+    it is in each of Refs (see TGittanRepo.LfsDownload).
     OnDone is called in the main thread when it is done, unless the job
     has been stopped. A job is never broken off, as a pull stopped
     halfway would leave a merge behind: Stop only drops the handler, and
@@ -42,6 +43,7 @@ type
     FMode: TGittanPullMode;
     FOk, FDiverged, FRejected, FStale, FUnseen, FSubmodules: boolean;
     FError, FHeadRef: string;
+    FRefs: TStringArray;
     FOnOutput: TNotifyEvent;
     FLock: TRTLCriticalSection;
     FProgress: string;
@@ -72,6 +74,9 @@ type
     property Branch: string read FBranch write FBranch;
     {** For a pull request fetch, the ref the remote serves its head at. }
     property PullRef: string read FPullRef write FPullRef;
+    {** For a Git LFS download, the commits whose version of Arg is
+      wanted, an empty one for the work tree; set before Start. }
+    property Refs: TStringArray read FRefs write FRefs;
     {** Whether git did it. }
     property Ok: boolean read FOk;
     {** A pull that failed since the branch has diverged from its
@@ -258,6 +263,7 @@ begin
         rkSubmoduleAdd: FOk := Repo.AddSubmodule(FArg, FPath, FBranch);
         rkFetchPull: FOk := Repo.FetchPullRequest(FRemote, StrToIntDef(FArg, 0), FPullRef,
             FBranch, FHeadRef);
+        rkLfsFetch: FOk := Repo.LfsDownload(FArg, FRefs);
         rkClone: ;
       end;
     if not FOk then

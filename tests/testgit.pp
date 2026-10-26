@@ -58,6 +58,9 @@ type
     procedure TestUserName;
     procedure TestFileBlob;
     procedure TestFileSize;
+    procedure TestLfsPointer;
+    procedure TestLfsFiles;
+    procedure TestLfsDownload;
     procedure TestFetchPullRequest;
     procedure TestDefaultBranchAndMergeBase;
     procedure TestAheadBehind;
@@ -974,6 +977,165 @@ begin
   WriteFile('pic.bin', 'a'#0'b');
   AssertTrue(IsBinaryFile(FDir + PathDelim + 'pic.bin'));
   AssertFalse(IsBinaryFile(FDir + PathDelim + 'none.bin'));
+end;
+
+function LfsPointer(const AOid: string; ASize: int64): string;
+begin
+  Result := 'version https://git-lfs.github.com/spec/v1'#10'oid sha256:' + AOid + #10 +
+    'size ' + IntToStr(ASize) + #10;
+end;
+
+procedure TGitRepoTest.TestLfsPointer;
+var
+  Oid: string;
+  Size: int64;
+begin
+  AssertTrue(ParseLfsPointer(LfsPointer(StringOfChar('a', 64), 12345), Oid, Size));
+  AssertEquals(StringOfChar('a', 64), Oid);
+  AssertEquals(12345, Size);
+  AssertTrue('an extension', ParseLfsPointer('version https://git-lfs.github.com/spec/v1'#10 +
+    'ext-0-foo sha256:' + StringOfChar('c', 64) + #10'oid sha256:' + StringOfChar('b', 64) +
+    #10'size 0'#10, Oid, Size));
+  AssertEquals(StringOfChar('b', 64), Oid);
+  AssertEquals(0, Size);
+  AssertTrue('hawser', ParseLfsPointer('version https://hawser.github.com/spec/v1'#10 +
+    'oid sha256:' + StringOfChar('1', 64) + #10'size 3'#10, Oid, Size));
+  AssertFalse('no last line feed', ParseLfsPointer(Copy(LfsPointer(StringOfChar('a', 64), 1),
+    1, 108), Oid, Size));
+  AssertEquals('', Oid);
+  AssertFalse('another version', ParseLfsPointer(StringReplace(LfsPointer(StringOfChar('a', 64), 1),
+    'v1', 'v2', []), Oid, Size));
+  AssertFalse('upper case', ParseLfsPointer(LfsPointer(StringOfChar('A', 64), 1), Oid, Size));
+  AssertFalse('short oid', ParseLfsPointer(LfsPointer(StringOfChar('a', 63), 1), Oid, Size));
+  AssertFalse('negative size', ParseLfsPointer(LfsPointer(StringOfChar('a', 64), -1), Oid, Size));
+  AssertFalse('no size', ParseLfsPointer('version https://git-lfs.github.com/spec/v1'#10 +
+    'oid sha256:' + StringOfChar('a', 64) + #10, Oid, Size));
+  AssertFalse('too long', ParseLfsPointer(LfsPointer(StringOfChar('a', 64), 1) +
+    'x-pad ' + StringOfChar('x', 1000) + #10, Oid, Size));
+  AssertFalse('text', ParseLfsPointer('version 1'#10, Oid, Size));
+  AssertFalse('empty', ParseLfsPointer('', Oid, Size));
+end;
+
+{ git-lfs is not needed: without its filter git keeps the pointer as it
+  is, which is what git holds with it, and the object is put in the
+  store by hand. }
+procedure TGitRepoTest.TestLfsFiles;
+var
+  OldOid, NewOid: string;
+  Data: RawByteString;
+  Size: int64;
+  Stats: TGittanFileStats;
+  Tree: TGittanRepo;
+
+  procedure Store(const AOid, AContent: string);
+  var
+    Stream: TFileStream;
+  begin
+    ForceDirectories(ExtractFileDir(FRepo.LfsObjectFile(AOid)));
+    Stream := TFileStream.Create(FRepo.LfsObjectFile(AOid), fmCreate);
+    try
+      Stream.WriteBuffer(AContent[1], Length(AContent));
+    finally
+      Stream.Free;
+    end;
+  end;
+
+begin
+  MakeHistory;
+  OldOid := StringOfChar('a', 64);
+  NewOid := StringOfChar('b', 64);
+  WriteFile('.gitattributes', '*.psd filter=lfs diff=lfs merge=lfs -text'#10);
+  WriteFile('art.psd', LfsPointer(OldOid, 9));
+  Commit('Add art');
+  WriteFile('art.psd', LfsPointer(NewOid, 7));
+  AssertTrue(FRepo.Open(FDir));
+  AssertEquals(IncludeTrailingPathDelimiter(FRepo.GitDir) + 'lfs' + PathDelim + 'objects' +
+    PathDelim + 'aa' + PathDelim + 'aa' + PathDelim + OldOid, FRepo.LfsObjectFile(OldOid));
+  { Not downloaded: the pointer. }
+  AssertTrue(FRepo.FileBlob('art.psd', 'HEAD', Data));
+  AssertEquals(LfsPointer(OldOid, 9), Data);
+  AssertTrue(FRepo.FileBlob('art.psd', '', Data));
+  AssertEquals(LfsPointer(NewOid, 7), Data);
+  AssertTrue(FRepo.LfsMissing('art.psd', 'HEAD'));
+  AssertTrue(FRepo.LfsMissing('art.psd', ''));
+  AssertFalse(FRepo.LfsMissing('a.txt', 'HEAD'));
+  AssertFalse(FRepo.LfsMissing('a.txt', ''));
+  AssertFalse(FRepo.LfsMissing('none.psd', 'HEAD'));
+  Store(OldOid, 'old'#0'image');
+  Store(NewOid, 'new'#0'img');
+  AssertFalse(FRepo.LfsMissing('art.psd', 'HEAD'));
+  AssertFalse(FRepo.LfsMissing('art.psd', ''));
+  AssertTrue(FRepo.FileBlob('art.psd', 'HEAD', Data));
+  AssertEquals('old'#0'image', Data);
+  AssertTrue(FRepo.FileBlob('art.psd', '', Data));
+  AssertEquals('new'#0'img', Data);
+  AssertTrue(FRepo.FileSize('art.psd', 'HEAD', Size));
+  AssertEquals(9, Size);
+  AssertTrue(FRepo.FileSize('art.psd', '', Size));
+  AssertEquals(7, Size);
+  AssertTrue(FRepo.FileSize('a.txt', 'HEAD', Size));
+  AssertEquals(14, Size);
+  { Binary, not the pointers' lines. }
+  AssertTrue(FRepo.ChangeStats(Stats));
+  AssertTrue(FindStat(Stats, 'art.psd').Binary);
+  AssertEquals(0, FindStat(Stats, 'art.psd').Added);
+  { A linked worktree reads the store of the common folder. }
+  Git(['worktree', 'add', '-q', 'wt']);
+  Tree := TGittanRepo.Create;
+  try
+    AssertTrue(Tree.Open(FDir + PathDelim + 'wt'));
+    AssertTrue(Tree.FileBlob('art.psd', 'HEAD', Data));
+    AssertEquals('old'#0'image', Data);
+  finally
+    Tree.Free;
+  end;
+  Git(['config', 'lfs.storage', 'elsewhere']);
+  AssertEquals(IncludeTrailingPathDelimiter(FRepo.GitDir) + 'elsewhere' + PathDelim + 'objects' +
+    PathDelim + 'aa' + PathDelim + 'aa' + PathDelim + OldOid, FRepo.LfsObjectFile(OldOid));
+  AssertTrue(FRepo.FileBlob('art.psd', 'HEAD', Data));
+  AssertEquals(LfsPointer(OldOid, 9), Data);
+end;
+
+{ With git-lfs (GitHub's runners have it) a real download from a remote
+  in a folder, which git-lfs serves itself; without it the message that
+  says so. The clone checks out with smudge skipped, as
+  GIT_LFS_SKIP_SMUDGE would, so only pointers come. }
+procedure TGitRepoTest.TestLfsDownload;
+var
+  Data: RawByteString;
+begin
+  Git(['init', '-q', 'up']);
+  if FindTool('git-lfs') = '' then
+  begin
+    AssertTrue(FRepo.Open(FDir + PathDelim + 'up'));
+    AssertFalse(FRepo.LfsDownload('art.psd', ['']));
+    AssertTrue(FRepo.Error, Pos('Git LFS is not installed', FRepo.Error) = 1);
+    Exit;
+  end;
+  Git(['-C', 'up', 'lfs', 'install', '--local']);
+  WriteFile('up/.gitattributes', '*.psd filter=lfs diff=lfs merge=lfs -text'#10);
+  WriteFile('up/art.psd', 'one'#0'image');
+  Git(['-C', 'up', 'add', '-A']);
+  Git(['-C', 'up', 'commit', '-q', '-m', 'one']);
+  WriteFile('up/art.psd', 'two'#0'image!');
+  Git(['-C', 'up', 'commit', '-q', '-a', '-m', 'two']);
+  Git(['clone', '-q', '--no-checkout', 'up', 'down']);
+  Git(['-C', 'down', 'lfs', 'install', '--local', '--skip-smudge']);
+  Git(['-C', 'down', 'reset', '-q', '--hard']);
+  Git(['-C', 'down', 'lfs', 'install', '--local', '--force']);
+  AssertTrue(FRepo.Open(FDir + PathDelim + 'down'));
+  AssertTrue(FRepo.LfsMissing('art.psd', ''));
+  AssertTrue(FRepo.LfsMissing('art.psd', 'HEAD~1'));
+  AssertTrue(FRepo.Error, FRepo.LfsDownload('art.psd', ['HEAD~1', '']));
+  AssertFalse(FRepo.LfsMissing('art.psd', ''));
+  AssertFalse(FRepo.LfsMissing('art.psd', 'HEAD~1'));
+  AssertTrue(FRepo.FileBlob('art.psd', '', Data));
+  AssertEquals('two'#0'image!', Data);
+  AssertTrue(FRepo.FileBlob('art.psd', 'HEAD~1', Data));
+  AssertEquals('one'#0'image', Data);
+  Git(['-C', 'down', 'remote', 'remove', 'origin']);
+  AssertFalse(FRepo.LfsDownload('art.psd', ['HEAD']));
+  AssertEquals('The repository has no remote to download from.', FRepo.Error);
 end;
 
 { A bare repository stands in for GitHub: it serves the pull request as

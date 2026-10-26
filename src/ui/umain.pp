@@ -678,6 +678,11 @@ type
       path and branch, for Try Again after an add. }
     FRetryRoot, FRetryPath, FRetryBranch: string;
     FRetrySubmodules: boolean;
+    { A Git LFS download's commits, an empty one for the work tree: the
+      one StartRemote hands its job (FLfsRefs), the failed one's for Try
+      Again (FRetryRefs), and the sides of the image or binary file shown
+      that are not downloaded (FLfsSides), for the header's Download. }
+    FLfsRefs, FRetryRefs, FLfsSides: TStringArray;
     { The list a click on the status bar's pull request drops down, and
       what each of its rows does (the pa* constants). }
     FPullPopup: TGittanPopupList;
@@ -969,6 +974,7 @@ type
     procedure ShowEditor;
     procedure ShowImageChanges(const APath: string);
     procedure ShowBinaryChanges(const APath: string);
+    procedure StartLfsDownload(const APath: string; const ARefs: TStringArray);
     procedure ShowBinaryFile(const AFileName: string);
     function SidesShown: boolean;
     function ShowsChangedFile: boolean;
@@ -2295,6 +2301,12 @@ resourcestring
   rsSubUpdated = 'Updated %s';
   rsSubUpdatedAll = 'Updated the submodules';
   rsSubUpdateFailed = 'The submodule update failed';
+  rsLfsDownloadAction = 'Download';
+  rsLfsNotDownloaded = 'Not downloaded from Git LFS';
+  rsLfsDownloading = 'Downloading %s from Git LFS...';
+  rsNoticeLfsDownloading = 'Downloading %s from Git LFS';
+  rsLfsDownloaded = 'Downloaded %s';
+  rsLfsDownloadFailed = 'The Git LFS download failed';
   rsSubUpdateAgain = 'Update Again';
   rsSubSynced = 'Synced the URL of %s';
   rsSubSyncedAll = 'Synced the URLs of the submodules';
@@ -5895,12 +5907,22 @@ var
   OldRef, NewRef: string;
   OldData, NewData: RawByteString;
   HasOld, HasNew: boolean;
+  Oid: string;
+  Size: int64;
 begin
   AbandonHistoryJob;
   FRepo.DiffSides(OldRef, NewRef);
   HasOld := FRepo.FileBlob(APath, OldRef, OldData);
   HasNew := FRepo.FileBlob(APath, NewRef, NewData);
   FImageDiff.SetImages(OldData, NewData, HasOld, HasNew);
+  { FileBlob gives a pointer only for an object not downloaded. }
+  FLfsSides := nil;
+  if HasOld and ParseLfsPointer(OldData, Oid, Size) then
+    FLfsSides := Concat(FLfsSides, [OldRef]);
+  if HasNew and ParseLfsPointer(NewData, Oid, Size) then
+    FLfsSides := Concat(FLfsSides, [NewRef]);
+  if FLfsSides <> nil then
+    FHeader.SetActions([rsLfsDownloadAction]);
   FView := gvImage;
   FSymbolBar.Visible := False;
   FFindBar.Visible := False;
@@ -5929,6 +5951,16 @@ begin
   HasOld := FRepo.FileSize(APath, OldRef, OldSize);
   HasNew := FRepo.FileSize(APath, NewRef, NewSize);
   FBinaryView.SetChange(APath, HasOld, HasNew, OldSize, NewSize);
+  FLfsSides := nil;
+  if HasOld and FRepo.LfsMissing(APath, OldRef) then
+    FLfsSides := Concat(FLfsSides, [OldRef]);
+  if HasNew and FRepo.LfsMissing(APath, NewRef) then
+    FLfsSides := Concat(FLfsSides, [NewRef]);
+  if FLfsSides <> nil then
+  begin
+    FBinaryView.SetNote(rsLfsNotDownloaded);
+    FHeader.SetActions([rsLfsDownloadAction]);
+  end;
   FView := gvBinary;
   FSymbolBar.Visible := False;
   FFindBar.Visible := False;

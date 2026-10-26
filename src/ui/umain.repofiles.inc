@@ -488,6 +488,12 @@ begin
   end;
   if ConflictHeaderAction(AIndex) then
     Exit;
+  { Download, the one pill of an image or binary file in Git LFS. }
+  if (FView in [gvImage, gvBinary]) and (FLfsSides <> nil) then
+  begin
+    StartLfsDownload(FCurrentPath, FLfsSides);
+    Exit;
+  end;
   if FView = gvSubmodule then
   begin
     if AIndex = FSubUpdatePill then

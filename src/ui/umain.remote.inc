@@ -61,6 +61,8 @@ begin
   FRemoteJob := TGittanRemoteJob.Create(FRepo.Root, AKind, AMode, AArg, ARemote);
   FRemoteJob.OnDone := @RemoteJobDone;
   FRemoteJob.OnOutput := @RemoteJobOutput;
+  if AKind = rkLfsFetch then
+    FRemoteJob.Refs := FLfsRefs;
   FRemoteJob.Start;
   if FNoticeHook then
     FStatus.ShowMessage(rsRunningHook, stNormal, 0)
@@ -83,6 +85,8 @@ begin
           FStatus.ShowMessage(rsSubUpdatingAll, stNormal, 0)
         else
           FStatus.ShowMessage(Format(rsSubUpdating, [AArg]), stNormal, 0);
+      rkLfsFetch:
+        FStatus.ShowMessage(Format(rsLfsDownloading, [ExtractFileName(AArg)]), stNormal, 0);
     end;
   if FNoticeHook then
     ShowRemoteNotice
@@ -121,6 +125,7 @@ begin
         Result := Format(rsNoticeSubUpdating, [FRemoteJob.Arg]);
     rkSubmoduleAdd: Result := Format(rsNoticeSubAdding, [FRemoteJob.Path]);
     rkFetchPull: Result := Format(rsNoticeFetchingPull, [StrToIntDef(FRemoteJob.Arg, 0)]);
+    rkLfsFetch: Result := Format(rsNoticeLfsDownloading, [ExtractFileName(FRemoteJob.Arg)]);
   end;
 end;
 
@@ -198,6 +203,20 @@ begin
   if Job.Kind = rkFetchPull then
   begin
     PullFetchDone(Job);
+    Exit;
+  end;
+  { The file is shown again, as the version downloaded into the store
+    left the work tree as it was when it was of a commit. }
+  if Job.Kind = rkLfsFetch then
+  begin
+    if not Job.Ok then
+      ShowRemoteFailure(Job, False)
+    else
+    begin
+      StatusNote(Format(rsLfsDownloaded, [ExtractFileName(Job.Arg)]));
+      if (FView in [gvImage, gvBinary]) and (FCurrentPath = Job.Arg) then
+        ShowChanges(Job.Arg);
+    end;
     Exit;
   end;
   if Job.Kind in [rkSubmoduleUpdate, rkSubmoduleAdd] then
@@ -360,6 +379,11 @@ begin
         Title := Format(rsPullFailed, [StrToIntDef(AJob.Arg, 0)]);
         Again := rsTryAgain;
       end;
+    rkLfsFetch:
+      begin
+        Title := rsLfsDownloadFailed;
+        Again := rsTryAgain;
+      end;
     else
       if AHookFailed then
         Title := rsHookFailed
@@ -375,6 +399,7 @@ begin
   FRetrySubmodules := AJob.Submodules;
   FRetryPath := AJob.Path;
   FRetryBranch := AJob.Branch;
+  FRetryRefs := AJob.Refs;
   FNoticeCommit := False;
   FStatus.ShowMessage(Title, stBad, StatusErrorSeconds);
   FNotice.DetailFont.Assign(Edit.Font);
@@ -406,6 +431,8 @@ begin
           AddSubmoduleAsk(FRetryArg, FRetryPath, FRetryBranch)
         else if FRetryKind = rkFetchPull then
           StartPullFetch(StrToIntDef(FRetryArg, 0), FRetryRemote, FRetryBranch)
+        else if FRetryKind = rkLfsFetch then
+          StartLfsDownload(FRetryArg, FRetryRefs)
         else
           StartRemote(FRetryKind, FRetryMode, FRetryArg, FRetryRemote);
       end;
@@ -432,6 +459,14 @@ begin
   else
     FBlameZombies.Add(FRemoteJob);
   FRemoteJob := nil;
+end;
+
+{ The file's versions ARefs (an empty one for the work tree) from Git
+  LFS, for the header's Download. }
+procedure TForm1.StartLfsDownload(const APath: string; const ARefs: TStringArray);
+begin
+  FLfsRefs := ARefs;
+  StartRemote(rkLfsFetch, pmAuto, APath);
 end;
 
 procedure TForm1.MenuFetchClick(Sender: TObject);
