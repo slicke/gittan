@@ -24,7 +24,8 @@ unit uwindow;
   shown, made or closed); File > New Tab (Cmd+T) and the plus make an
   empty one, File > Close Tab (Cmd+W), the cross and a middle click
   close one, Go > Next Tab and Previous Tab (Cmd+Shift+] and [, and
-  Ctrl+Tab and Ctrl+Shift+Tab) step round them. Closing the last tab
+  Ctrl+Tab and Ctrl+Shift+Tab) step round them, and Cmd with a digit
+  (Ctrl elsewhere) shows that tab, 9 the last one. Closing the last tab
   leaves an empty one. The repositories open in the tabs are kept in
   the settings (Tabs, ActiveTab) and open again at the next start. }
 
@@ -484,7 +485,23 @@ end;
   that accelerator from the title bar, as the menu bar would have
   before the bar hid its names. }
 procedure TGittanWindow.FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
+var
+  Index: integer;
 begin
+  { Cmd with a digit (Ctrl elsewhere) shows that tab, 9 the last one, as
+    in a web browser; no menu item has those keys. }
+  if (Key >= VK_1) and (Key <= VK_9) and (Shift * [ssShift, ssAlt, ssCtrl, ssMeta] =
+    [{$IFDEF DARWIN}ssMeta{$ELSE}ssCtrl{$ENDIF}]) then
+  begin
+    if Key = VK_9 then
+      Index := FFrames.Count - 1
+    else
+      Index := Key - VK_1;
+    if Index < FFrames.Count then
+      ActivateFrame(Frames[Index]);
+    Key := 0;
+    Exit;
+  end;
   if (Key = VK_TAB) and (Shift * [ssCtrl, ssAlt, ssMeta] = [ssCtrl]) then
   begin
     if ssShift in Shift then

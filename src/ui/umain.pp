@@ -2699,6 +2699,7 @@ const
   PullPollIdle = 300000;
   { How often the submodules' remotes are asked again; ms. }
   SubmodulePoll = 300000;
+  ViewKeys = {$IFDEF DARWIN}[ssModifier, ssAlt]{$ELSE}[ssModifier, ssShift]{$ENDIF};
   rsReveal = {$IFDEF DARWIN}'Reveal in &Finder'{$ELSE}
     {$IFDEF WINDOWS}'Show in &Explorer'{$ELSE}'Show in &File Manager'{$ENDIF}{$ENDIF};
   rsEditCopy = '&Copy';
@@ -4323,16 +4324,20 @@ begin
   ViewMenu := TMenuItem.Create(Main);
   ViewMenu.Caption := rsView;
   Main.Items.Add(ViewMenu);
-  AddItem(ViewMenu, rsSummary, ShortCut(VK_1, [ssModifier]), @MenuSummaryClick);
+  { Cmd with a digit picks a tab (uwindow), so the views take Cmd+Option
+    with it on macOS, where Cmd+Shift+3 to 5 are the system's screen
+    shots, and Ctrl+Shift elsewhere, where Ctrl+Alt is the repository
+    commands' and AltGr types characters with the digits. }
+  AddItem(ViewMenu, rsSummary, ShortCut(VK_1, ViewKeys), @MenuSummaryClick);
   AddItem(ViewMenu, rsRepoInfo, ShortCut(VK_I, [ssModifier, ssShift]), @MenuRepoInfoClick);
-  AddItem(ViewMenu, rsRepoDiff, ShortCut(VK_2, [ssModifier]), @MenuRepoDiffClick);
-  AddItem(ViewMenu, rsCommitGraph, ShortCut(VK_3, [ssModifier]), @MenuCommitGraphClick);
-  AddItem(ViewMenu, rsCommandsMenu, ShortCut(VK_4, [ssModifier]), @MenuCommandsClick);
-  AddItem(ViewMenu, rsFilesMenu, ShortCut(VK_5, [ssModifier]), @MenuFilesClick);
-  FPullsItem := AddItem(ViewMenu, rsPullRequests, ShortCut(VK_6, [ssModifier]),
+  AddItem(ViewMenu, rsRepoDiff, ShortCut(VK_2, ViewKeys), @MenuRepoDiffClick);
+  AddItem(ViewMenu, rsCommitGraph, ShortCut(VK_3, ViewKeys), @MenuCommitGraphClick);
+  AddItem(ViewMenu, rsCommandsMenu, ShortCut(VK_4, ViewKeys), @MenuCommandsClick);
+  AddItem(ViewMenu, rsFilesMenu, ShortCut(VK_5, ViewKeys), @MenuFilesClick);
+  FPullsItem := AddItem(ViewMenu, rsPullRequests, ShortCut(VK_6, ViewKeys),
     @MenuPullsClick);
   FPullsItem.Visible := Assigned(FForge);
-  FForgeItem := AddItem(ViewMenu, rsForgeMenu, ShortCut(VK_7, [ssModifier]),
+  FForgeItem := AddItem(ViewMenu, rsForgeMenu, ShortCut(VK_7, ViewKeys),
     @MenuForgeClick);
   FForgeItem.Visible := Assigned(FForge);
   ViewMenu.Add(NewLine);
