@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, develop ]
   workflow_dispatch: {}
 
 # ---------------------------------------------------------------------------------
@@ -18,7 +18,8 @@ on:
 # As in Trndi, a push to main publishes a release: the version job takes the
 # next build number from the "build-<n>" tags (100 when there is none), and
 # the publish job creates the release "build-<n>" with the three packages and
-# the commits since the previous build as its notes. PRs only upload artifacts.
+# the commits since the previous build as its notes. PRs, to main or develop,
+# only upload artifacts.
 # Every leg also builds and runs the unit tests in tests/ (`make test`).
 #
 # The toolchain is Lazarus 5.0RC1 (Trndi pins 4.8). One thing differs from
