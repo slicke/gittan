@@ -151,6 +151,8 @@ type
     {** Where the bisect stands, from BisectState, read only while
       Operation is "bisecting". }
     Bisect: TGittanBisect;
+    {** The branches and tags, from Refs: what Base can be set to. }
+    Refs: TStringArray;
   end;
   PGittanRepoSnapshot = ^TGittanRepoSnapshot;
 
@@ -255,6 +257,10 @@ type
       message in Error, when ADir is not inside a work tree. }
     destructor Destroy; override;
     function Open(const ADir: string): boolean;
+    {** Takes the repository another TGittanRepo opened (a thread's, see
+      TGittanOpenJob), with the root and git directory it found, without
+      running git. }
+    procedure OpenAt(const ARoot, AGitDir: string);
     {** Forgets the repository. }
     procedure Close;
     {** Unified diff of the work tree against Base (HEAD by default), or
@@ -679,8 +685,13 @@ type
       user.email`), empty when none is set. }
     function UserEmail: string;
     {** Sets the name and e-mail commits are made under: in the user's
-      global git config with AGlobal, else in the repository's own. }
+      global git config with AGlobal, else in the repository's own. With
+      AGlobal the repository's own are unset, since they would go
+      before the global ones. }
     function SetIdentity(const AName, AEmail: string; AGlobal: boolean): boolean;
+    {** Whether the repository sets a name or an e-mail of its own
+      (`git config --local`), which go before the global ones. }
+    function HasLocalIdentity: boolean;
     {** The remote whose URL holds ARepoPath ("owner/repo", compared
       without regard to case), else origin, else the first remote, else
       empty. }
@@ -951,6 +962,11 @@ function ParseGitVersion(const AText: string; out AVersion: string;
 {** The version of the git GitExe runs, as ParseGitVersion reads it;
   false when git cannot be run or names no version. }
 function GitVersion(out AVersion: string; out AMajor, AMinor: integer): boolean;
+
+{** As GitVersion, for the git at AExe (a path, or a name on PATH): the
+  settings ask about the one in their field before it is saved. }
+function GitVersionOf(const AExe: string; out AVersion: string;
+  out AMajor, AMinor: integer): boolean;
 
 {** Whether git AMajor.AMinor is MinGitMajor.MinGitMinor or later. }
 function GitVersionSupported(AMajor, AMinor: integer): boolean;
@@ -1261,14 +1277,8 @@ begin
 end;
 
 function GitVersion(out AVersion: string; out AMajor, AMinor: integer): boolean;
-var
-  Output, Err: string;
 begin
-  AVersion := '';
-  AMajor := 0;
-  AMinor := 0;
-  Result := RunGitIn(GetTempDir, ['--version'], Output, Err) and
-    ParseGitVersion(Output, AVersion, AMajor, AMinor);
+  Result := GitVersionOf(GGitExe, AVersion, AMajor, AMinor);
 end;
 
 function GitVersionSupported(AMajor, AMinor: integer): boolean;
@@ -1922,6 +1932,20 @@ begin
     FError := Err;
 end;
 
+function GitVersionOf(const AExe: string; out AVersion: string;
+  out AMajor, AMinor: integer): boolean;
+var
+  Output, Err: string;
+  Status: integer;
+begin
+  AVersion := '';
+  AMajor := 0;
+  AMinor := 0;
+  Result := (AExe <> '') and RunTool(AExe, GetTempDir, ['--version'], [], ['LC_ALL=C'],
+    Output, Err, Status, nil) and (Status = 0) and
+    ParseGitVersion(Output, AVersion, AMajor, AMinor);
+end;
+
 function RunGitHubCli(const AExe, ADir: string; const AArgs: array of string;
   out AOutput, AError: string): boolean;
 var
@@ -2034,6 +2058,13 @@ begin
     case gets a shorter one; any other failure keeps git's own. }
   else if Pos('not a git repository', FError) > 0 then
     FError := Format('Not a git repository: %s', [ADir]);
+end;
+
+procedure TGittanRepo.OpenAt(const ARoot, AGitDir: string);
+begin
+  Close;
+  FRoot := ARoot;
+  FGitDir := AGitDir;
 end;
 
 procedure TGittanRepo.Close;
@@ -2365,6 +2396,12 @@ begin
   Result := Trim(Result);
 end;
 
+{ A key with several values (a config edited by hand) is set with
+  --replace-all and taken out with --unset-all, where a plain set or
+  --unset refuses it, and the local ones would then go before the
+  global ones just saved. The identity read back is the one git would
+  commit under; one that differs (a worktree or an included config
+  still overrides it) is a failure with its reason, not a silent one. }
 function TGittanRepo.SetIdentity(const AName, AEmail: string; AGlobal: boolean): boolean;
 var
   Output, Scope: string;
@@ -2373,8 +2410,28 @@ begin
     Scope := '--global'
   else
     Scope := '--local';
-  Result := (FRoot <> '') and RunGit(FRoot, ['config', Scope, 'user.name', AName], Output) and
-    RunGit(FRoot, ['config', Scope, 'user.email', AEmail], Output);
+  Result := (FRoot <> '') and
+    RunGit(FRoot, ['config', Scope, '--replace-all', 'user.name', AName], Output) and
+    RunGit(FRoot, ['config', Scope, '--replace-all', 'user.email', AEmail], Output);
+  if not Result then
+    Exit;
+  { git exits with 5 when there is nothing to unset. }
+  if AGlobal then
+  begin
+    RunGit(FRoot, ['config', '--local', '--unset-all', 'user.name'], Output);
+    RunGit(FRoot, ['config', '--local', '--unset-all', 'user.email'], Output);
+  end;
+  Result := (UserName = Trim(AName)) and (UserEmail = Trim(AEmail));
+  if not Result then
+    FError := 'The name and e-mail were saved, but another git config overrides them.';
+end;
+
+function TGittanRepo.HasLocalIdentity: boolean;
+var
+  Output: string;
+begin
+  Result := (FRoot <> '') and (RunGit(FRoot, ['config', '--local', 'user.name'], Output) or
+    RunGit(FRoot, ['config', '--local', 'user.email'], Output));
 end;
 
 function TGittanRepo.RemoteFor(const ARepoPath: string): string;
@@ -5363,6 +5420,8 @@ end;
   filled in as far as git answered, as LoadRepository used to do call by
   call. }
 function TGittanRepo.Snapshot(out ASnap: TGittanRepoSnapshot): boolean;
+var
+  List: TStringList;
 begin
   ASnap := Default(TGittanRepoSnapshot);
   ASnap.Ok := ChangeStats(ASnap.Stats);
@@ -5391,6 +5450,13 @@ begin
   Stashes(ASnap.Stashes);
   if ASnap.Ok and (Length(ASnap.Stats) = 0) then
     RecentCommits(ASnap.Recent);
+  List := TStringList.Create;
+  try
+    Refs(List);
+    ASnap.Refs := List.ToStringArray;
+  finally
+    List.Free;
+  end;
   Result := ASnap.Ok;
 end;
 

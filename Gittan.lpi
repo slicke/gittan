@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CONFIG>
   <ProjectOptions>
-    <Version Value="12"/>
+    <Version Value="13"/>
     <General>
       <SessionStorage Value="InProjectDir"/>
       <Title Value="Git Tree Analyzer &amp; Navigator"/>
@@ -15,6 +15,7 @@
     </General>
     <VersionInfo>
       <UseVersionInfo Value="True"/>
+      <MinorVersionNr Value="5"/>
       <StringTable FileDescription="Git Tree Analyzer &amp; Navigator" InternalName="Gittan" OriginalFilename="Gittan.exe" ProductName="Git Tree Analyzer &amp; Navigator"/>
     </VersionInfo>
     <BuildModes>
@@ -177,6 +178,10 @@
       </Unit>
       <Unit>
         <Filename Value="src/ui/gittan.submoduledlg.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
+        <Filename Value="src/ui/gittan.identitydlg.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>

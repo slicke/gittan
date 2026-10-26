@@ -41,7 +41,7 @@ Details of each area live in `spec/`. Read the file that matches what you are ab
 - [spec/git-core.md](spec/git-core.md): The git wrapper, comparisons and the repository state. Read when touching `gittan.git`, `TGittanRepo`, `FindTool`, git/gh paths, the compare base (`Base`, ranges, merge base, snapshots), the watcher, or `ChangeStats`.
 - [spec/github.md](spec/github.md): GitHub: pull requests, the Pull Requests page and review comments. Read when touching `gittan.github`, `gittan.reviews`, `umain.reviews.inc`, `gittan.pullpage`, `umain.pulls.inc`, the pull request chip, the Pull Requests row or Compare With > Pull Requests.
 - [spec/app-shell.md](spec/app-shell.md): Opening repositories, settings, the CLI command and updates. Read when touching File > Open, `gittan.settings`, the settings dialog, `gittan.cli`, `gittan.update`, the window caption or `UpdateStatus`.
-- [spec/commit-and-remote.md](spec/commit-and-remote.md): Commit, fetch, pull, push, clone and remotes. Read when touching `TGittanRepo.Commit`, `gittan.commitjob`, `gittan.remotejob`, `gittan.terminal`, `gittan.console`, `umain.commit.inc`, `umain.remote.inc`, `umain.clone.inc`, the notice panel, or the Commit section.
+- [spec/commit-and-remote.md](spec/commit-and-remote.md): Commit, fetch, pull, push, clone and remotes. Read when touching `TGittanRepo.Commit`, `gittan.commitjob`, `gittan.remotejob`, `gittan.identitydlg`, `gittan.terminal`, `gittan.console`, `umain.commit.inc`, `umain.remote.inc`, `umain.clone.inc`, the notice panel, or the Commit section.
 - [spec/conflicts.md](spec/conflicts.md): Conflicts. Read when touching `gittan.conflicts`, `umain.conflicts.inc`, merge/rebase state in the Commit section, or the conflict navigator.
 - [spec/blame-and-history.md](spec/blame-and-history.md): Blame and code history. Read when touching `gittan.blame`, `gittan.history`, `umain.blame.inc`, `umain.history.inc`, Go > Code History.
 - [spec/code-navigation.md](spec/code-navigation.md): Find, go to definition, symbols and callers. Read when touching `gittan.findbar`, `umain.gotodef.inc`, the symbol index (`gittan.symbolindex`), the symbol bar, changed symbols or callers.
@@ -67,6 +67,7 @@ Details of each area live in `spec/`. Read the file that matches what you are ab
 - Cross-platform gotcha: `{$IFDEF UNIX}` does not cover Haiku. Use `{$IF DEFINED(UNIX) OR DEFINED(HAIKU)}` where both apply.
 - Do not edit `backup/` directories, `link*.res`, or other generated artifacts.
 - Update documentation when behavior or workflow changes: the matching `spec/` file for an area, AGENTS.md for the rules that apply everywhere. A new area gets a spec file and a line in the Specs list.
+- `CHANGELOG.md` lists the changes for users, under Unreleased until a build publishes them: a change someone would notice (a feature, a behavior, a fix of a shipped build, a build or platform fix) gets a line there, in plain words; a fix of work not yet in a build does not.
 
 ## Validation
 - After code changes, run the narrowest relevant build target first.

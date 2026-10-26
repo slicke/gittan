@@ -41,9 +41,17 @@ begin
 end;
 
 procedure TForm1.ApplySettings;
+const
+  { The share of the screen's work area a window with no place of its
+    own takes. }
+  FirstShare = 0.7;
+  { At most this at 96 DPI, so it is not a band across a wide screen. }
+  FirstMaxWidth = 1600;
+  FirstMaxHeight = 1000;
 var
-  R: TRect;
-  i: integer;
+  R, Area: TRect;
+  i, W, H: integer;
+  Placed: boolean;
 begin
   FOnlyChanges := FSettings.OnlyChanges;
   FSideBySide := FSettings.SideBySide;
@@ -66,13 +74,29 @@ begin
   { The window where it was, if that is still on a screen. The sizes are
     kept at 96 DPI: this runs in FormCreate, and the form scales its size
     and the tree's width to the screen's after it, its place not. }
+  Placed := False;
   if (FSettings.Width > 0) and (FSettings.Height > 0) then
   begin
     R := Rect(FSettings.Left, FSettings.Top, FSettings.Left + FSettings.Width,
       FSettings.Top + FSettings.Height);
-    if IntersectRect(R, R, Screen.DesktopRect) and (R.Width > 100) and
-      (R.Height > 100) then
+    Placed := IntersectRect(R, R, Screen.DesktopRect) and (R.Width > 100) and
+      (R.Height > 100);
+    if Placed then
       SetBounds(FSettings.Left, FSettings.Top, FSettings.Width, FSettings.Height);
+  end;
+  { Else FirstShare of the main screen's work area, no smaller than the
+    designed size and no larger than FirstMaxWidth by FirstMaxHeight, in
+    its middle: the place in the screen's pixels, the
+    size at 96 DPI for the form to scale. }
+  if not Placed then
+  begin
+    Area := Screen.PrimaryMonitor.WorkareaRect;
+    W := Min(Area.Width, Max(Scale96ToScreen(Width), Min(Scale96ToScreen(FirstMaxWidth),
+      Round(Area.Width * FirstShare))));
+    H := Min(Area.Height, Max(Scale96ToScreen(Height), Min(Scale96ToScreen(FirstMaxHeight),
+      Round(Area.Height * FirstShare))));
+    SetBounds(Area.Left + (Area.Width - W) div 2, Area.Top + (Area.Height - H) div 2,
+      MulDiv(W, 96, Screen.PixelsPerInch), MulDiv(H, 96, Screen.PixelsPerInch));
   end;
   if FSettings.Maximized then
     WindowState := wsMaximized;
@@ -455,8 +479,9 @@ end;
   the editor and puts back the old ones when it is cancelled; the commands
   are saved with the rest when the window closes. A new git or gh runs
   from here on: the repository is read again with it, and the GitHub
-  features follow whether gh is there now. }
-procedure TForm1.MenuSettingsClick(Sender: TObject);
+  features follow whether gh is there now. APage is the page it opens
+  on. }
+procedure TForm1.OpenSettings(APage: TSettingsPage);
 const
   Margin = 24;
 var
@@ -486,7 +511,7 @@ begin
     V.AgentModels[gaCopilot] := FSettings.CopilotModel;
     Corner := EditorPanel.ClientToScreen(Point(EditorPanel.ClientWidth -
       Scale96ToForm(Margin), EditorPanel.ClientHeight - Scale96ToForm(Margin)));
-    if EditSettings(F, V, @PreviewSettings, FLexers, Edit, Corner) then
+    if EditSettings(F, V, @PreviewSettings, FLexers, Edit, Corner, APage) then
     begin
       PreviewSettings(F, V.Theme, V.TabSize);
       FSettings.EditorCommand := V.EditorCommand;
@@ -533,6 +558,17 @@ begin
     F.Free;
     OldFont.Free;
   end;
+end;
+
+procedure TForm1.MenuSettingsClick(Sender: TObject);
+begin
+  OpenSettings(pgEditor);
+end;
+
+{ About Gittan is the settings' last page. }
+procedure TForm1.MenuAboutClick(Sender: TObject);
+begin
+  OpenSettings(pgAbout);
 end;
 
 procedure TForm1.PreviewSettings(AFont: TFont; ATheme, ATabSize: integer);
@@ -1922,8 +1958,9 @@ end;
   View > Compare With lists the branches and tags, then the snapshots of
   the repository; the chosen one becomes the repository's Base, and every
   diff, count and the watcher follow it. The list is rebuilt with the
-  repository. A snapshot item carries Tag 1: the base is then compared
-  with WholeTree, since the snapshot holds the untracked files. }
+  repository, from the refs its snapshot read off the main thread. A
+  snapshot item carries Tag 1: the base is then compared with WholeTree,
+  since the snapshot holds the untracked files. }
 procedure TForm1.RebuildCompareMenu;
 var
   Refs: TStringList;
@@ -1952,7 +1989,7 @@ begin
   Refs := TStringList.Create;
   try
     if FRepo.Root <> '' then
-      FRepo.Refs(Refs);
+      Refs.AddStrings(FRefs);
     if (FRepo.Base <> '') and not FRepo.WholeTree and (FRepo.Base <> FPullRange) and
       (FRepo.Base <> FStashRange) and (FRepo.Base <> FMergeBase) and
       (Refs.IndexOf(FRepo.Base) < 0) then

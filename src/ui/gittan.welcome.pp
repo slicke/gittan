@@ -9,7 +9,8 @@ unit gittan.welcome;
   as rows to click, each with its name and path; a repository whose folder
   is gone is listed dimmed and does not react. An error is shown in red
   under the name, wrapped to the column, so the next attempt is one click
-  or one drop away.
+  or one drop away. While a repository opens it shows only that, in place
+  of the error, the buttons and the list.
 
   It paints itself in the editor's palette, like the summary, and sizes
   its height to its content so it can sit in the same TScrollBox: the
@@ -31,7 +32,7 @@ type
 
   TGittanWelcome = class(TCustomControl)
   private
-    FTitle, FTagline, FError, FShortcut: string;
+    FTitle, FTagline, FError, FShortcut, FBusy: string;
     FRecent: TStringList;
     FIcon: TIcon;
     FIconBitmap: TBitmap;
@@ -65,6 +66,10 @@ type
     procedure SetRecent(ARoots: TStrings);
     {** The error shown under the title; empty shows none. }
     procedure SetError(const AMessage: string);
+    {** What is being done (a repository opening), shown dim under the
+      title in place of the error, the buttons and the recent
+      repositories, which take no clicks meanwhile; empty shows them. }
+    procedure SetBusy(const AMessage: string);
     {** The palette: the background, the text, the dim text, the hovered
       button or row, the line of the borders and the divider, and the
       error text. }
@@ -161,6 +166,16 @@ begin
   Invalidate;
 end;
 
+procedure TGittanWelcome.SetBusy(const AMessage: string);
+begin
+  if FBusy = AMessage then
+    Exit;
+  FBusy := AMessage;
+  FHot := hotNone;
+  Cursor := crDefault;
+  Invalidate;
+end;
+
 procedure TGittanWelcome.SetColors(ABack, AText, ADim, AHover, ALine,
   AError: TColor);
 begin
@@ -190,6 +205,8 @@ var
   P: TPoint;
   i: integer;
 begin
+  if FBusy <> '' then
+    Exit(hotNone);
   P := Point(X, Y);
   for i := 0 to High(FButtonRects) do
     if PtInRect(FButtonRects[i], P) then
@@ -320,16 +337,21 @@ begin
   ErrHeight := 0;
   ErrLines := TStringList.Create;
   try
-    if FError <> '' then
+    if FBusy <> '' then
+      Inc(Total, Px(Pad) + LineHeight)
+    else
     begin
-      WrapError(ColWidth, ErrLines);
-      ErrHeight := ErrLines.Count * LineHeight;
-      Inc(Total, Px(Gap) + ErrHeight);
+      if FError <> '' then
+      begin
+        WrapError(ColWidth, ErrLines);
+        ErrHeight := ErrLines.Count * LineHeight;
+        Inc(Total, Px(Gap) + ErrHeight);
+      end;
+      Inc(Total, Px(Pad) + ButtonRows * ButtonHeight + (ButtonRows - 1) * Px(Gap) div 2);
+      if FRecent.Count > 0 then
+        Inc(Total, Px(Pad) + LineHeight + Px(Gap) div 2 + 1 + Px(Gap) div 2 + FRecent.Count * Px(RowHeight));
+      Inc(Total, Px(Pad) + LineHeight);
     end;
-    Inc(Total, Px(Pad) + ButtonRows * ButtonHeight + (ButtonRows - 1) * Px(Gap) div 2);
-    if FRecent.Count > 0 then
-      Inc(Total, Px(Pad) + LineHeight + Px(Gap) div 2 + 1 + Px(Gap) div 2 + FRecent.Count * Px(RowHeight));
-    Inc(Total, Px(Pad) + LineHeight);
     FContentHeight := Total + 2 * Px(Pad);
     if Height < FContentHeight then
     begin
@@ -369,6 +391,17 @@ begin
       Canvas.Font.Color := FDim;
       Canvas.TextOut((Width - Canvas.TextWidth(FTagline)) div 2, Y, FTagline);
       Inc(Y, LineHeight);
+    end;
+
+    if FBusy <> '' then
+    begin
+      for i := 0 to High(FButtonRects) do
+        FButtonRects[i] := Rect(0, 0, 0, 0);
+      FRowRects := nil;
+      Inc(Y, Px(Pad));
+      Canvas.Font.Color := FDim;
+      Canvas.TextOut((Width - Canvas.TextWidth(FBusy)) div 2, Y, FBusy);
+      Exit;
     end;
 
     if FError <> '' then

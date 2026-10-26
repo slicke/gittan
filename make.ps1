@@ -146,9 +146,11 @@ switch ($target) {
         exit 0
     }
     'ide' {
-        # The IDE's own build profile, its widgetset too.
+        # The IDE's own build profile, its widgetset too. The arguments go
+        # first: built with FPC 3.3.1, lazbuild takes one after an empty
+        # --build-ide= for a short option and stops.
         Need-Lazbuild
-        & $laz --build-ide= @rest
+        & $laz @rest --build-ide=
         exit $LASTEXITCODE
     }
     'test' {

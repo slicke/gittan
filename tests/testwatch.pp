@@ -3,7 +3,8 @@ unit testwatch;
 {** Tests of gittan.watch: a watcher on a repository made in a temporary
   folder with the real git, polling every 50 ms. Its notification goes
   through Synchronize, which the test lets through as the application's
-  message loop would. }
+  message loop would. The open job's notification goes through Queue,
+  let through the same way. }
 
 {$mode objfpc}{$H+}
 
@@ -16,8 +17,12 @@ type
   TWatchTest = class(TTestCase)
   private
     FDir: string;
-    FChanges: integer;
+    FChanges, FAdded: integer;
     FPaths: string;
+    FOpenDone: integer;
+    procedure OpenDone(Sender: TObject);
+    function RunOpenJob(const ADir: string;
+      AIgnoreWhitespace: boolean = False): TGittanOpenJob;
     procedure Git(const AArgs: array of string);
     procedure WriteFile(const AName, AContent: string);
     procedure WatcherChange(Sender: TObject);
@@ -27,7 +32,11 @@ type
     procedure TearDown; override;
   published
     procedure TestChange;
+    procedure TestIgnoreWhitespace;
     procedure TestStop;
+    procedure TestOpenJob;
+    procedure TestOpenJobIgnoreWhitespace;
+    procedure TestOpenJobNoRepository;
   end;
 
 implementation
@@ -105,8 +114,12 @@ begin
   Inc(FChanges);
   Snap := TGittanWatcher(Sender).Snapshot;
   FPaths := '';
+  FAdded := 0;
   for i := 0 to High(Snap.Stats) do
+  begin
     FPaths := FPaths + Snap.Stats[i].Path + ';';
+    FAdded := FAdded + Snap.Stats[i].Added;
+  end;
 end;
 
 { Lets the watcher's notifications through for AMilliseconds, or until
@@ -149,6 +162,28 @@ begin
   end;
 end;
 
+{ The watcher's snapshot counts as the form does: with IgnoreWhitespace
+  a change of whitespace alone is a changed file with no changed line. }
+procedure TWatchTest.TestIgnoreWhitespace;
+var
+  Watcher: TGittanWatcher;
+begin
+  Watcher := TGittanWatcher.Create(FDir, '', False, 50);
+  try
+    Watcher.OnChange := @WatcherChange;
+    Watcher.IgnoreWhitespace := True;
+    Watcher.Start;
+    Pump(400);
+    WriteFile('a.txt', 'a  ');
+    Pump(5000, 1);
+    AssertEquals('the edit', 1, FChanges);
+    AssertEquals('a.txt;', FPaths);
+    AssertEquals('no line counted', 0, FAdded);
+  finally
+    Watcher.Free;
+  end;
+end;
+
 { Free wakes the thread from its wait rather than waiting the interval
   out. }
 procedure TWatchTest.TestStop;
@@ -164,6 +199,102 @@ begin
   Watcher.Free;
   AssertTrue('Free waited the interval out', MilliSecondsBetween(Now, Start) < 2000);
   AssertEquals(0, FChanges);
+end;
+
+procedure TWatchTest.OpenDone(Sender: TObject);
+begin
+  Inc(FOpenDone);
+end;
+
+{ Runs an open job on ADir and lets its notification through. }
+function TWatchTest.RunOpenJob(const ADir: string;
+  AIgnoreWhitespace: boolean): TGittanOpenJob;
+var
+  Start: TDateTime;
+begin
+  FOpenDone := 0;
+  Result := TGittanOpenJob.Create(ADir);
+  Result.OnDone := @OpenDone;
+  Result.IgnoreWhitespace := AIgnoreWhitespace;
+  Result.Start;
+  Start := Now;
+  while (FOpenDone = 0) and (MilliSecondsBetween(Now, Start) < 10000) do
+    CheckSynchronize(10);
+  AssertEquals('done once', 1, FOpenDone);
+end;
+
+{ The job finds the root from a folder inside the work tree and takes
+  the snapshot with the changes, the branch and the refs. }
+procedure TWatchTest.TestOpenJob;
+var
+  Job: TGittanOpenJob;
+  Snap: TGittanRepoSnapshot;
+begin
+  ForceDirectories(IncludeTrailingPathDelimiter(FDir) + 'sub');
+  WriteFile('b.txt', 'b');
+  Job := RunOpenJob(IncludeTrailingPathDelimiter(FDir) + 'sub');
+  try
+    AssertTrue('opened', Job.Opened);
+    AssertEquals('the root', ExtractFileName(FDir), ExtractFileName(Job.Root));
+    AssertTrue('the git dir', Job.GitDir <> '');
+    Snap := Job.Snapshot;
+    AssertTrue('the snapshot', Snap.Ok);
+    AssertEquals('the change', 1, Length(Snap.Stats));
+    AssertEquals('b.txt', Snap.Stats[0].Path);
+    AssertEquals('the branch as the one ref', 1, Length(Snap.Refs));
+    AssertEquals(Snap.Branch, Snap.Refs[0]);
+  finally
+    Job.Free;
+  end;
+end;
+
+{ The job's snapshot follows the whitespace setting: the counts of a
+  change of whitespace alone are zero with it, one line without. }
+procedure TWatchTest.TestOpenJobIgnoreWhitespace;
+var
+  Job: TGittanOpenJob;
+  Snap: TGittanRepoSnapshot;
+begin
+  WriteFile('a.txt', 'a  ');
+  Job := RunOpenJob(FDir, True);
+  try
+    Snap := Job.Snapshot;
+    AssertTrue('the snapshot', Snap.Ok);
+    AssertEquals('the change', 1, Length(Snap.Stats));
+    AssertEquals('added, ignored', 0, Snap.Stats[0].Added);
+    AssertEquals('deleted, ignored', 0, Snap.Stats[0].Deleted);
+  finally
+    Job.Free;
+  end;
+  Job := RunOpenJob(FDir);
+  try
+    Snap := Job.Snapshot;
+    AssertEquals('added, counted', 1, Snap.Stats[0].Added);
+    AssertEquals('deleted, counted', 1, Snap.Stats[0].Deleted);
+  finally
+    Job.Free;
+  end;
+end;
+
+procedure TWatchTest.TestOpenJobNoRepository;
+var
+  Job: TGittanOpenJob;
+  Dir: string;
+begin
+  Dir := FDir + '-none';
+  ForceDirectories(Dir);
+  try
+    Job := RunOpenJob(Dir);
+    try
+      AssertFalse('opened', Job.Opened);
+      AssertEquals('', Job.Root);
+      AssertTrue('the reason', Job.Error <> '');
+    finally
+      Job.Free;
+    end;
+  finally
+    RemoveTree(Dir);
+  end;
 end;
 
 initialization

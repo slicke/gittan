@@ -885,6 +885,22 @@ begin
   AssertTrue(FRepo.SetIdentity('Gittan Test', 'test@example.invalid', False));
   AssertEquals('Gittan Test', FRepo.UserName);
   AssertEquals('test@example.invalid', FRepo.UserEmail);
+  AssertTrue(FRepo.HasLocalIdentity);
+  Git(['config', '--unset', 'user.name']);
+  Git(['config', '--unset', 'user.email']);
+  AssertFalse(FRepo.HasLocalIdentity);
+  { A key with several values is replaced, and the global choice takes
+    every local one out (the global config is the test's own, see
+    gittantests.lpr). }
+  Git(['config', '--add', 'user.name', 'Someone Else']);
+  Git(['config', '--add', 'user.name', 'Someone Else']);
+  AssertTrue('local over two', FRepo.SetIdentity('Gittan Local', 'local@example.invalid', False));
+  AssertEquals('Gittan Local', FRepo.UserName);
+  Git(['config', '--add', 'user.name', 'Someone Else']);
+  AssertTrue('global over two', FRepo.SetIdentity('Gittan Global', 'global@example.invalid', True));
+  AssertFalse('local left', FRepo.HasLocalIdentity);
+  AssertEquals('Gittan Global', FRepo.UserName);
+  AssertEquals('global@example.invalid', FRepo.UserEmail);
 end;
 
 { The bytes come back as they are, a NUL and a CR LF included. }

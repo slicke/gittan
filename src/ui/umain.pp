@@ -30,7 +30,7 @@ uses
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
   gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
-  gittan.remotesdlg, gittan.submoduledlg, ATSynEdit_Gaps, md5;
+  gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, ATSynEdit_Gaps, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -333,7 +333,7 @@ type
       tree while it chooses what to commit. }
     FTickSepItem, FTickAllItem, FUntickAllItem: TMenuItem;
     FCommitNote: TGittanHintBox;
-    FCommitItem: TMenuItem;
+    FCommitItem, FIdentityItem: TMenuItem;
     FCommitJob: TGittanCommitJob;
     { The commits still running in a repository no longer open, for
       their draft (DroppedCommitDone). }
@@ -682,6 +682,11 @@ type
     FDark: boolean;
     FBookmarkBandWidth: integer;
     FWatcher: TGittanWatcher;
+    { The repository being opened, and what to do once it is. }
+    FOpenJob: TGittanOpenJob;
+    FOnOpened: TNotifyEvent;
+    { The branches and tags of the last snapshot, for Compare With. }
+    FRefs: TStringArray;
     { How many callers are inside a stretch the watcher's refresh must
       not run under (a modal question, a wait that pumps messages, a
       refresh), and whether one came meanwhile (HoldRefresh). }
@@ -822,6 +827,12 @@ type
     procedure HoldRefresh;
     procedure ReleaseRefresh;
     procedure RefreshPendingAsync(Data: PtrInt);
+    procedure OpenAtStartAsync(Data: PtrInt);
+    function StartRepository: string;
+    function OpeningText(const ADir: string): string;
+    procedure OpenJobDone(Sender: TObject);
+    procedure AbandonOpenJob;
+    procedure ClearRepositoryViews(const AError: string);
     procedure StartWatcher;
     procedure StopWatcher;
     function LoadRepository: boolean;
@@ -850,6 +861,8 @@ type
     procedure UpdateCaption;
     procedure BuildMenu;
     procedure BuildSyntaxMenu;
+    procedure AddLexerItems;
+    procedure LexersLoaded(Sender: TObject);
     procedure MenuOpenClick(Sender: TObject);
     procedure MenuOpenRepoClick(Sender: TObject);
     procedure MenuSyntaxClick(Sender: TObject);
@@ -1122,7 +1135,9 @@ type
     procedure MenuZoomOutClick(Sender: TObject);
     procedure MenuZoomResetClick(Sender: TObject);
     procedure MenuFontClick(Sender: TObject);
+    procedure OpenSettings(APage: TSettingsPage);
     procedure MenuSettingsClick(Sender: TObject);
+    procedure MenuAboutClick(Sender: TObject);
     procedure CheckGitVersion;
     procedure PreviewSettings(AFont: TFont; ATheme, ATabSize: integer);
     procedure ApplyEditorFont(AFont: TFont);
@@ -1312,7 +1327,12 @@ type
     procedure CommitAmendClick(Sender: TObject);
     procedure CommitButtonClick(Sender: TObject);
     procedure MenuCommitClick(Sender: TObject);
+    {** Asks for the name and e-mail to commit under, the global ones
+      or the repository's own; False when cancelled or git failed. }
+    function EditIdentity: boolean;
     function EnsureIdentity: boolean;
+    procedure IdentityClick(Sender: TObject);
+    procedure CommitHeaderEnter(Sender: TObject);
     procedure StartCommit;
     {** The notice with a failed commit's reason (a hook's output, in
       its colors), Commit Again and Copy Output. }
@@ -1339,6 +1359,9 @@ type
     function CloneParent: string;
     procedure StartClone(const AUrl, ATarget: string; ASubmodules: boolean);
     procedure CloneDone(AJob: TGittanRemoteJob);
+    procedure ClonedOpened(Sender: TObject);
+    procedure InitAlreadyOpened(Sender: TObject);
+    procedure InitDoneOpened(Sender: TObject);
     procedure MenuCloneClick(Sender: TObject);
     procedure MenuInitClick(Sender: TObject);
     function CanEditRemotes: boolean;
@@ -1607,8 +1630,11 @@ type
       name. }
     procedure OpenFile(AFileName: string);
     {** Opens the git repository containing ADir, lists its changed files in
-      the tree and shows the uncommitted changes as a diff in the editor. }
-    procedure OpenRepository(const ADir: string);
+      the tree and shows the uncommitted changes as a diff in the editor.
+      The git work runs in a thread (TGittanOpenJob), so the repository
+      is open only once it is done; AOnOpened is called then, if it
+      opened. }
+    procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil);
   end;
 
 var
@@ -1641,6 +1667,7 @@ resourcestring
   rsInitDone = 'Made %s a new repository';
   rsRemotesItem = 'Re&motes...';
   rsCloning = 'Cloning %s...';
+  rsOpening = 'Opening %s...';
   rsNoticeCloning = 'Cloning %s';
   rsCloneFailed = 'The clone failed';
   rsCloneAgain = 'Clone Again';
@@ -1734,6 +1761,7 @@ resourcestring
   rsUninstallCli = '&Uninstall CLI Command';
   rsCheckUpdates = 'Check for &Updates...';
   rsSettings = 'Se&ttings...';
+  rsAbout = '&About Gittan';
   rsUpdateTitle = 'Gittan Updates';
   rsUpdateBadge = 'Build %d available';
   rsUpdateHint = '%s is out; this is build %d.';
@@ -1776,6 +1804,7 @@ resourcestring
   rsRepoFiles = 'Config';
   rsCommitSection = 'Commit';
   rsCommitMenu = 'Co&mmit...';
+  rsIdentityMenu = 'Who Commits...';
   rsCommitButton = 'Commit';
   rsCommitAmendButton = 'Amend Commit';
   rsCommitAmend = 'Amend';
@@ -2189,9 +2218,9 @@ resourcestring
   rsQuit = 'Forgot %s';
   rsQuitFailed = 'Could not forget %s';
   rsOperationOf = '%s %s';
-  rsIdentityTitle = 'Who Commits?';
-  rsIdentityName = 'Name';
-  rsIdentityEmail = 'E-mail';
+  rsIdentityHint = 'Commits as %s <%s>%s. Click to change.';
+  rsIdentityHintLocal = ' (this repository only)';
+  rsIdentityNone = 'Git has no name or e-mail to commit under. Click to set them.';
   rsSubmodules = 'Submodules';
   rsSubmodulesNewer = '%d · ↓%d';
   rsSubOpen = 'Open';
@@ -2955,10 +2984,9 @@ begin
   FRepo := TGittanRepo.Create;
   FSnapshots := TGittanSnapshots.Create;
   FLexers := TGittanLexers.Create;
+  FLexers.OnLoaded := @LexersLoaded;
   if not FLexers.Load then
     FStatus.ShowMessage(rsNoLexers, stBad, 0);
-  if FLexers.Errors <> '' then
-    DebugLn(FLexers.Errors);
   FDark := IsDarkMode;
   ApplyTheme;
 
@@ -2982,16 +3010,46 @@ begin
   OnCloseQuery := @FormCloseQuery;
   UpdateCaption;
   ShowSummary;
-  { gittan [file | folder], else the repository of the last run. }
+  { The welcome view says what opens, rather than offer its buttons
+    until it does. }
+  if StartRepository <> '' then
+    FWelcome.SetBusy(OpeningText(StartRepository));
+  Application.QueueAsyncCall(@OpenAtStartAsync, 0);
+end;
+
+{ The folder on the command line, else the repository of the last run
+  when there is no argument; empty for a file or nothing to open. }
+function TForm1.StartRepository: string;
+begin
+  Result := '';
   if ParamCount > 0 then
   begin
     if DirectoryExists(ParamStr(1)) then
-      OpenRepository(ParamStr(1))
-    else
-      OpenFile(ParamStr(1));
+      Result := ParamStr(1);
   end
   else if (FSettings.Recent.Count > 0) and DirectoryExists(FSettings.Recent[0]) then
-    OpenRepository(FSettings.Recent[0]);
+    Result := FSettings.Recent[0];
+end;
+
+function TForm1.OpeningText(const ADir: string): string;
+begin
+  Result := Format(rsOpening, [ExtractFileName(ExcludeTrailingPathDelimiter(ADir))]);
+end;
+
+{ Opening a repository runs some twenty git commands one after the other,
+  which takes seconds on Windows, where a process is slow to start; queued
+  from FormCreate it runs once the window is shown and painted. A folder
+  or file dropped on the Dock icon at launch may be open or opening by
+  then (FormDropFiles), and stays. }
+procedure TForm1.OpenAtStartAsync(Data: PtrInt);
+begin
+  { gittan [file | folder], else the repository of the last run. }
+  if (FRepo.Root <> '') or (FOpenJob <> nil) or (FView <> gvSummary) then
+    { opened already }
+  else if StartRepository <> '' then
+    OpenRepository(StartRepository)
+  else if ParamCount > 0 then
+    OpenFile(ParamStr(1));
   { After the repository, whose opening clears the banners. }
   CheckGitVersion;
 end;
@@ -2999,6 +3057,9 @@ end;
 procedure TForm1.FormDestroy(Sender: TObject);
 begin
   Application.RemoveAsyncCalls(Self);
+  { First: the waits below let queued calls through, and OpenJobDone
+    would draw the repository into the form on its way out. }
+  AbandonOpenJob;
   AbandonMessageJob;
   AbandonAIReview;
   StopCommitJob(True);
@@ -3838,10 +3899,13 @@ var
 
 begin
   Main := TMainMenu.Create(Self);
-  { On macOS Settings is in the application menu, which the LCL builds
-    when the menu is set, with these items first, before Services. }
+  { On macOS About Gittan and Settings are in the application menu,
+    which the LCL builds when the menu is set, with these items first,
+    before Services. }
   {$IFDEF LCLCocoa}
   Item := TMenuItem.Create(Self);
+  AddItem(Item, rsAbout, 0, @MenuAboutClick);
+  Item.Add(NewLine);
   AddItem(Item, rsSettings, ShortCut(VK_OEM_COMMA, [ssModifier]), @MenuSettingsClick);
   CocoaConfigMenu.appMenu.customMenus := Item;
   {$ENDIF}
@@ -3865,6 +3929,9 @@ begin
   FMessageItem := AddItem(FileMenu, rsWriteMessageMenu, ShortCut(VK_K, [ssModifier,
     ssShift]), @MessageActionClick);
   FMessageItem.Visible := False;
+  { The person in the Commit header, for the keyboard. }
+  FIdentityItem := AddItem(FileMenu, rsIdentityMenu, 0, @IdentityClick);
+  FIdentityItem.Enabled := False;
   FPullItem := AddItem(FileMenu, rsPullMenu, ShortCut(VK_L, [ssModifier, ssShift]),
     @MenuPullClick);
   FPushItem := AddItem(FileMenu, rsPushMenu, ShortCut(VK_P, [ssModifier, ssShift]),
@@ -4075,6 +4142,7 @@ begin
   {$IFNDEF LCLCocoa}
   ToolsMenu.Add(NewLine);
   AddItem(ToolsMenu, rsSettings, ShortCut(VK_OEM_COMMA, [ssModifier]), @MenuSettingsClick);
+  AddItem(ToolsMenu, rsAbout, 0, @MenuAboutClick);
   {$ENDIF}
 end;
 
@@ -4083,10 +4151,6 @@ end;
   item caption is the lexer name; the hint keeps it without the
   accelerator ampersands the widgetset may insert. }
 procedure TForm1.BuildSyntaxMenu;
-var
-  Names: TStringList;
-  Group, Item: TMenuItem;
-  LexName, Initial, LastInitial: string;
 begin
   FAutoLexerItem := TMenuItem.Create(FSyntaxMenu);
   FAutoLexerItem.Caption := rsAutomatic;
@@ -4097,7 +4161,17 @@ begin
   FPlainTextItem.OnClick := @MenuSyntaxClick;
   FSyntaxMenu.Add(FPlainTextItem);
   FSyntaxMenu.Add(NewLine);
+  if FLexers.Loaded then
+    AddLexerItems;
+end;
 
+{ The lexers in groups by initial, once they are loaded. }
+procedure TForm1.AddLexerItems;
+var
+  Names: TStringList;
+  Group, Item: TMenuItem;
+  LexName, Initial, LastInitial: string;
+begin
   Names := TStringList.Create;
   try
     FLexers.GetNames(Names);
@@ -4123,6 +4197,21 @@ begin
     end;
   finally
     Names.Free;
+  end;
+end;
+
+{ The lexers load in a thread (TGittanLexers.Load); the Syntax menu gets
+  them when they are in, unless it is not built yet and takes them itself. }
+procedure TForm1.LexersLoaded(Sender: TObject);
+begin
+  if FLexers.Errors <> '' then
+    DebugLn(FLexers.Errors);
+  if not FLexers.HasLexers then
+    FStatus.ShowMessage(rsNoLexers, stBad, 0);
+  if FSyntaxMenu <> nil then
+  begin
+    AddLexerItems;
+    UpdateSyntaxChecks;
   end;
 end;
 
@@ -4242,6 +4331,8 @@ end;
   clears, and a const would then name freed memory. }
 procedure TForm1.OpenFile(AFileName: string);
 begin
+  { A file dropped while a repository opens is shown instead. }
+  AbandonOpenJob;
   FlushEdit;
   LeaveEdit;
   if FTranslations and IsPoPath(AFileName) then
@@ -5043,7 +5134,7 @@ end;
   The editor shows the work tree's uncommitted changes as a unified diff
   under the Diff lexer; the file tree lists the changed files and the status
   bar counts them. }
-procedure TForm1.OpenRepository(const ADir: string);
+procedure TForm1.OpenRepository(const ADir: string; AOnOpened: TNotifyEvent);
 begin
   { Open closes the previous repository even when it fails. }
   FlushEdit;
@@ -5088,13 +5179,58 @@ begin
   FSubShown := '';
   { Its failures are not this one's. }
   FBanner.Clear;
-  if not FRepo.Open(ADir) then
+  { Nothing is open while the job runs: the views are emptied, so no
+    click reaches the previous repository, and the commit message box
+    is no one's. }
+  AbandonOpenJob;
+  FRepo.Close;
+  FCommitDraftFor := '';
+  ClearRepositoryViews('');
+  FWelcome.SetBusy(OpeningText(ADir));
+  UpdateCaption;
+  UpdateCommitState;
+  FOnOpened := AOnOpened;
+  FOpenJob := TGittanOpenJob.Create(ADir);
+  FOpenJob.OnDone := @OpenJobDone;
+  FOpenJob.IgnoreWhitespace := FIgnoreWhitespace;
+  FOpenJob.Start;
+end;
+
+{ The job is dropped; its result, if it comes, is thrown away. It is
+  freed later from the zombie list, as a blame job is. }
+procedure TForm1.AbandonOpenJob;
+begin
+  FOnOpened := nil;
+  if FOpenJob = nil then
+    Exit;
+  FOpenJob.Stop(False);
+  FBlameZombies.Add(FOpenJob);
+  FOpenJob := nil;
+end;
+
+{ The repository is open in the job's thread, with its snapshot: the
+  form takes it and draws it, and only then runs git again itself. }
+procedure TForm1.OpenJobDone(Sender: TObject);
+var
+  Job: TGittanOpenJob;
+  Snap: TGittanRepoSnapshot;
+  OnOpened: TNotifyEvent;
+begin
+  Job := TGittanOpenJob(Sender);
+  if Job <> FOpenJob then
+    Exit;
+  FOpenJob := nil;
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+  OnOpened := FOnOpened;
+  FOnOpened := nil;
+  if not Job.Opened then
   begin
-    FCommitDraftFor := '';
-    ShowError(FRepo.Error);
+    ShowError(Job.Error);
     UpdateCommitState;
     Exit;
   end;
+  FRepo.OpenAt(Job.Root, Job.GitDir);
   LoadCommitDraft;
   { The exclude file lives in the git directory, which git names (a
     work tree's is elsewhere), once per open: the section lists it and
@@ -5105,7 +5241,9 @@ begin
   UpdateCaption;
   FSummary.Selected := '';
   LoadSnapshots;
-  if not LoadRepository then
+  Snap := Job.Snapshot;
+  ApplySnapshot(Snap);
+  if not Snap.Ok then
     ShowError(FLoadError)
   else
   begin
@@ -5115,11 +5253,24 @@ begin
     StartIndexing;
   end;
   StartWatcher;
+  if Assigned(OnOpened) then
+    OnOpened(Self);
 end;
 
 { A failure to open or read a repository is shown where the hint was: in
   the empty view, not in a dialog, so the next attempt is one drop away. }
 procedure TForm1.ShowError(const AMessage: string);
+begin
+  ClearRepositoryViews(AMessage);
+  { The welcome view keeps the error; the bar's copy clears itself, so
+    it is not left behind when a repository opens. }
+  FStatus.ShowMessage(AMessage, stBad, StatusErrorSeconds);
+  UpdateCaption;
+end;
+
+{ The views of no repository: the trees and the counts emptied, and the
+  welcome view, with AError under its title. }
+procedure TForm1.ClearRepositoryViews(const AError: string);
 begin
   FileTree.Items.Clear;
   FRepoTree.Items.Clear;
@@ -5132,13 +5283,9 @@ begin
   FSubPanel.Visible := False;
   FStats := nil;
   FFileCount := 0;
-  ShowWelcome(AMessage);
+  ShowWelcome(AError);
   ShowSummary;
   UpdateStatus;
-  { The welcome view keeps the error; the bar's copy clears itself, so
-    it is not left behind when a repository opens. }
-  FStatus.ShowMessage(AMessage, stBad, StatusErrorSeconds);
-  UpdateCaption;
 end;
 
 { Reads the branch and the changed files of the open repository into the
@@ -5194,6 +5341,7 @@ begin
       Inc(FConflictFiles);
   FFileCount := Length(FStats);
   FStashes := ASnap.Stashes;
+  FRefs := ASnap.Refs;
   FillFileTree(FStats);
   UpdateCommitState;
   FillRepoFiles;
@@ -5309,6 +5457,7 @@ begin
   FWatcher := TGittanWatcher.Create(FRepo.Root, FRepo.Base, FRepo.WholeTree,
     WatchInterval);
   FWatcher.OnChange := @WatcherChange;
+  FWatcher.IgnoreWhitespace := FRepo.IgnoreWhitespace;
   FWatcher.Start;
 end;
 
@@ -5730,6 +5879,7 @@ end;
 procedure TForm1.ShowWelcome(const AError: string);
 begin
   FWelcome.SetError(AError);
+  FWelcome.SetBusy('');
   AbandonRepoInfoJob;
   { The welcome view is shown at startup, before the pages exist. }
   if FCommandPage <> nil then

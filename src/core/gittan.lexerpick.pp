@@ -88,9 +88,10 @@ end;
 
 function PreferredLexer(const AExt: string): string;
 const
-  Table: array[0..5] of record Ext, Lexer: string; end = (
+  Table: array[0..6] of record Ext, Lexer: string; end = (
     (Ext: 'inc'; Lexer: 'Pascal'),
     (Ext: 'p'; Lexer: 'Pascal'),
+    (Ext: 'pp'; Lexer: 'Pascal'),
     (Ext: 'h'; Lexer: 'C++'),
     (Ext: 'c'; Lexer: 'C'),
     (Ext: 'sql'; Lexer: 'SQL'),

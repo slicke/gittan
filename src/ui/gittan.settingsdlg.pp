@@ -1,13 +1,16 @@
 unit gittan.settingsdlg;
 
 {** The settings dialog (Gittan > Settings on macOS, Tools > Settings
-  elsewhere), in two pages picked in a sidebar of the main window's kind,
+  elsewhere), in pages picked in a sidebar of the main window's kind,
   as the system's settings have: Editor, the editor font and its size,
   the width of a tab and the syntax theme, with a sample; Tools, the
   commands Open in Editor and Open in Terminal run, and the git and gh to
   run in place of those found on PATH; and AI, whether the AI features
-  show, the agent they run, and its command and model (see gittan.ai). The other view options are in the
-  View menu, and the window remembers its own state.
+  show, the agent they run, and its command and model (see gittan.ai);
+  and About (also Gittan > About Gittan on macOS, Tools > About Gittan
+  elsewhere), the build, a check for a newer one, what Gittan runs on
+  and with, for a bug report, and the licenses. The other view options
+  are in the View menu, and the window remembers its own state.
 
   The font and the theme are previewed twice: in the main editor, where
   every change goes at once through the caller's preview handler, which puts
@@ -22,9 +25,12 @@ interface
 
 uses
   Classes, SysUtils, Types, Forms, Controls, Graphics, Dialogs, StdCtrls,
-  ExtCtrls, Spin, ATSynEdit, gittan.lexers, gittan.sidenav, gittan.ai;
+  ExtCtrls, Spin, BGRABitmap, BGRABitmapTypes, ATSynEdit, gittan.lexers, gittan.sidenav, gittan.ai, gittan.update;
 
 type
+  {** The pages, in the sidebar's order. }
+  TSettingsPage = (pgEditor, pgTools, pgAI, pgAbout);
+
   {** Shows AFont, the theme ATheme (an index into SyntaxThemes) and a tab
     ATabSize characters wide in the editor while the dialog is open. }
   TSettingsPreview = procedure(AFont: TFont; ATheme, ATabSize: integer) of object;
@@ -47,19 +53,21 @@ type
 
 {** Shows the dialog with AFont and AValues in it, its bottom right corner
   at ACorner (screen coordinates) so the code in the middle of the window
-  stays in view. APreview gets every change of the font, the theme or the
+  stays in view, or over the middle of the window on About, which has
+  nothing to preview. APreview gets every change of the font, the theme or the
   tab width. The sample editor takes its lexers from ALexers and its
   colors and zoom from ATemplate, the main editor. On OK the arguments are
   changed and the result is True; on Cancel they are left alone, and the
-  caller undoes the preview. }
+  caller undoes the preview. APage is the page shown first. }
 function EditSettings(AFont: TFont; var AValues: TSettingsValues;
   APreview: TSettingsPreview; ALexers: TGittanLexers; ATemplate: TATSynEdit;
-  ACorner: TPoint): boolean;
+  ACorner: TPoint; APage: TSettingsPage = pgEditor): boolean;
 
 implementation
 
 uses
-  Math, ec_SyntAnal, ATSynEdit_Adapter_EControl, ATSynEdit_Globals,
+  Math, StrUtils, Process, Clipbrd, LCLIntf, LCLType, LCLVersion, InterfaceBase, LCLPlatformDef,
+  ec_SyntAnal, ATSynEdit_Adapter_EControl, ATSynEdit_Globals,
   gittan.syntaxthemes, gittan.git, gittan.theme;
 
 resourcestring
@@ -67,6 +75,7 @@ resourcestring
   rsEditorPage = 'Editor';
   rsToolsPage = 'Tools';
   rsAIPage = 'AI';
+  rsAboutPage = 'About';
   rsAIEnabled = 'Turn on the AI features';
   rsAINote = 'They run the agent picked here in the repository, with your own ' +
     'login, to write a commit message from the ticked files. The changes are sent ' +
@@ -108,6 +117,30 @@ resourcestring
   rsGhNotFound = 'Not found on PATH; the GitHub features are off.';
   rsToolTyped = 'Run in place of the one on PATH.';
   rsToolMissing = 'There is no such file.';
+  rsAboutName = 'Gittan';
+  rsAboutTagline = 'Git Tree Analyzer & Navigator';
+  rsAboutBuild = 'Build %d';
+  rsAboutLocalBuild = 'A local build of %s';
+  rsAboutText = 'A free, native git client built around the diff.';
+  rsCheckUpdates = 'Check for &Updates';
+  rsUpdateChecking = 'Asking GitHub...';
+  rsUpdateCurrent = 'This is the latest build.';
+  rsUpdateDownload = 'Download %s';
+  rsUpdateLatest = 'The latest release is %s';
+  rsUpdateFailed = 'Could not ask GitHub: %s';
+  rsRunsOn = 'What it runs on and with';
+  rsVersionGittan = 'Gittan build %d';
+  rsVersionGittanLocal = 'Gittan, a local build of %s';
+  rsVersionNotFound = '%s not found';
+  rsVersionAIOff = 'The AI features are off';
+  rsVersionLibraries = 'Free Pascal %s, LCL %s';
+  rsCopyVersions = 'Co&py';
+  rsWebsite = 'gittan.app';
+  rsSource = 'Source code on GitHub';
+  rsLicenses = 'Gittan is free software under the GNU General Public License 3. ' +
+    'It is built with Free Pascal and Lazarus; ATSynEdit, ATSynEdit_Ex and ' +
+    'ATFlatControls (MPL 2.0 or LGPL); EControl (for open source); EncConv, ' +
+    'BGRABitmap and MetaDarkStyle (LGPL); LazInk (0BSD) and the lexers of CudaText.';
   rsOK = 'OK';
   rsCancel = 'Cancel';
 
@@ -125,6 +158,12 @@ const
   ContentMargin = 16;
   {** The content's least width at 96 dpi: the sample's lines. }
   ContentWidth = 500;
+  {** The icon on the About page at 96 dpi. }
+  AboutIconSize = 64;
+  {** The lines ShowVersions writes, held while they are read. }
+  VersionLines = 6;
+  GittanSite = 'https://gittan.app';
+  GittanSource = 'https://github.com/slicke/gittan';
 
 type
   TSample = record
@@ -240,12 +279,30 @@ type
       buttons under them. FBox is the one Place puts controls in. }
     FNavPanel, FContent: TPanel;
     FNav: TGittanSideNav;
-    FEditorBox, FToolsBox, FAIPage: TPanel;
+    FEditorBox, FToolsBox, FAIPage, FAboutPage: TPanel;
+    { The About page's update check and what it found (FUpdateLink, a
+      link when there is a page to go to), its links in the accent
+      (FLinkColor), and what Gittan runs on and with, read the first
+      time the page shows. }
+    FUpdateJob: TGittanUpdateJob;
+    FUpdateLink: TLabel;
+    FLinks: array of TLabel;
+    FLinkColor: TColor;
+    FVersionsLabel: TLabel;
+    { Whether the versions are in; a change of a tool, the AI switch or
+      the agent drops it, so the page shown again reads them anew. }
+    FVersionsRead: boolean;
+    FOK: TButton;
+    { Gittan's icon as loaded, and as resampled for the screen's pixels. }
+    FAppIcon, FAppIconShown: TBGRABitmap;
     FBox: TWinControl;
     FPreview: TSettingsPreview;
     FNextTop: integer;
     FLoading: boolean;
     FCorner: TPoint;
+    { Over the middle of the window that opened it instead, when it opens
+      on About, which has nothing to preview. }
+    FCentered: boolean;
     FSampleEdit: TATSynEdit;
     FAdapter: TATAdapterEControl;
     FLexers: TGittanLexers;
@@ -259,6 +316,14 @@ type
     function AddButton(ARow: TPanel; const ACaption: string;
       AResult: TModalResult): TButton;
     function AddPage(const ACaption: string; AIcon: TGittanNavIcon): TPanel;
+    function AddLink(ARow: TPanel; const ACaption, AUrl: string): TLabel;
+    procedure LinkClick(Sender: TObject);
+    procedure UpdateClick(Sender: TObject);
+    procedure UpdateDone(Sender: TObject);
+    procedure ShowUpdateLink(const ACaption, AUrl: string);
+    procedure ReadVersions(Data: PtrInt);
+    procedure CopyVersionsClick(Sender: TObject);
+    procedure AppIconPaint(Sender: TObject);
     procedure NavPick(Sender: TObject; AIndex: integer);
     procedure ShowPage(AIndex: integer);
     procedure ApplyTheme;
@@ -285,11 +350,36 @@ type
     destructor Destroy; override;
   end;
 
+{ Gittan's icon at its largest, from the executable's resources (the
+  LCL has no application icon on macOS); nil when there is none. }
+function LoadAppIcon: TBGRABitmap;
+var
+  Icon: TIcon;
+begin
+  Result := nil;
+  Icon := TIcon.Create;
+  try
+    if not Application.Icon.Empty then
+      Icon.Assign(Application.Icon)
+    else if FindResource(HInstance, 'MAINICON', RT_GROUP_ICON) <> 0 then
+      Icon.LoadFromResourceName(HInstance, 'MAINICON');
+    if Icon.Empty then
+      Exit;
+    Icon.Current := Icon.GetBestIndexForSize(Size(1024, 1024));
+    Result := TBGRABitmap.Create;
+    Result.Assign(Icon);
+  finally
+    Icon.Free;
+  end;
+end;
+
 constructor TSettingsForm.Create(AOwner: TComponent);
 var
   Row: TPanel;
   Lbl: TLabel;
   Btn, OK, Cancel: TButton;
+  Box: TPaintBox;
+  Inner: TPanel;
   i: integer;
   A: TGittanAgent;
 begin
@@ -327,6 +417,7 @@ begin
   FEditorBox := AddPage(rsEditorPage, niEditor);
   FToolsBox := AddPage(rsToolsPage, niTools);
   FAIPage := AddPage(rsAIPage, niAI);
+  FAboutPage := AddPage(rsAboutPage, niAbout);
 
   { The Editor page: the font's name, then the size and Change... on the
     right, which alRight orders by Left. }
@@ -460,11 +551,75 @@ begin
   FModelNote := AddLabel('', 4);
   FModelNote.Font.Color := clGrayText;
 
+  { The About page: the icon, and beside it the name, the build and what
+    Gittan is; the update check, its answer beside it; what Gittan runs
+    on and with (ReadVersions), Copy and the links; the licenses. }
+  FBox := FAboutPage;
+  Row := AddRow(0);
+  FAppIcon := LoadAppIcon;
+  Box := TPaintBox.Create(Self);
+  Box.Width := Scale96ToScreen(AboutIconSize);
+  Box.Height := Scale96ToScreen(AboutIconSize);
+  Box.Align := alLeft;
+  Box.BorderSpacing.Right := Scale96ToScreen(14);
+  Box.OnPaint := @AppIconPaint;
+  Box.Visible := FAppIcon <> nil;
+  Box.Parent := Row;
+  Inner := TPanel.Create(Self);
+  Inner.BevelOuter := bvNone;
+  Inner.AutoSize := True;
+  Inner.Align := alClient;
+  Inner.Parent := Row;
+  FBox := Inner;
+  Lbl := AddLabel(rsAboutName, 0);
+  Lbl.Font.Size := 20;
+  Lbl.Font.Style := [fsBold];
+  Lbl := AddLabel(rsAboutTagline, 0);
+  Lbl.ShowAccelChar := False;
+  if CurrentBuild >= 0 then
+    Lbl := AddLabel(Format(rsAboutBuild, [CurrentBuild]), 6)
+  else
+    Lbl := AddLabel(Format(rsAboutLocalBuild, [{$I %DATE%}]), 6);
+  Lbl.Font.Color := clGrayText;
+  FBox := FAboutPage;
+  AddLabel(rsAboutText, 12);
+
+  Row := AddRow(16);
+  Btn := TButton.Create(Self);
+  Btn.Caption := rsCheckUpdates;
+  Btn.AutoSize := True;
+  Btn.Align := alLeft;
+  Btn.OnClick := @UpdateClick;
+  Btn.Parent := Row;
+  FUpdateLink := AddLink(Row, '', '');
+  FUpdateLink.Layout := tlCenter;
+  FUpdateLink.BorderSpacing.Left := Scale96ToScreen(10);
+
+  AddLabel(rsRunsOn, 16);
+  FVersionsLabel := AddLabel(DupeString(LineEnding, VersionLines - 1), 4);
+  FVersionsLabel.ShowAccelChar := False;
+  FVersionsLabel.Font.Color := clGrayText;
+  Row := AddRow(8);
+  Btn := TButton.Create(Self);
+  Btn.Caption := rsCopyVersions;
+  Btn.AutoSize := True;
+  Btn.Align := alLeft;
+  Btn.BorderSpacing.Right := Scale96ToScreen(14);
+  Btn.OnClick := @CopyVersionsClick;
+  Btn.Parent := Row;
+  AddLink(Row, rsWebsite, GittanSite).Layout := tlCenter;
+  AddLink(Row, rsSource, GittanSource).Layout := tlCenter;
+
+  Lbl := AddLabel(rsLicenses, 16);
+  Lbl.Font.Color := clGrayText;
+  Lbl.WordWrap := True;
+
   { OK on the right on macOS, Cancel on the right elsewhere. }
   FBox := FContent;
   Row := AddRow(16);
   OK := AddButton(Row, rsOK, mrOK);
   OK.Default := True;
+  FOK := OK;
   Cancel := AddButton(Row, rsCancel, mrCancel);
   Cancel.Cancel := True;
   {$IFDEF DARWIN}
@@ -478,8 +633,36 @@ begin
   OK.BorderSpacing.Left := Scale96ToScreen(8);
 end;
 
+{ Update jobs dropped by a dialog that closed while they ran, freed once
+  they have finished, as the main form frees its jobs: freeing one at
+  once would wait for curl, up to FetchSeconds. }
+var
+  GUpdateZombies: TList;
+
+procedure FreeFinishedUpdateJobs(AWait: boolean);
+var
+  i: integer;
+begin
+  for i := GUpdateZombies.Count - 1 downto 0 do
+    if AWait or TThread(GUpdateZombies[i]).Finished then
+    begin
+      TThread(GUpdateZombies[i]).Free;
+      GUpdateZombies.Delete(i);
+    end;
+end;
+
 destructor TSettingsForm.Destroy;
 begin
+  Application.RemoveAsyncCalls(Self);
+  { A check still running is dropped, not waited for. }
+  if FUpdateJob <> nil then
+  begin
+    FUpdateJob.Stop(False);
+    GUpdateZombies.Add(FUpdateJob);
+    FUpdateJob := nil;
+  end;
+  FAppIconShown.Free;
+  FAppIcon.Free;
   { The lexer belongs to the main form's list. }
   FAdapter.Lexer := nil;
   FFont.Free;
@@ -487,22 +670,38 @@ begin
 end;
 
 { The content has its size once the form has laid itself out, just before
-  it shows: both pages are held at the height of the taller (the one not
+  it shows: the pages are held at the height of the tallest (one not
   shown has its preferred height, not a laid out one), so the form keeps
-  its size when the page changes, and goes to its corner. }
+  its size when the page changes, and goes to its corner, or over the
+  middle of the main window when it opens on About. }
 procedure TSettingsForm.DoShow;
 var
   W, H, Tallest: integer;
+  Main: TCustomForm;
 begin
   inherited DoShow;
-  FToolsBox.GetPreferredSize(W, H, False, True);
+  { The Editor page is laid out when it is the one shown, else (opened on
+    About) it has its preferred height too. }
+  FEditorBox.GetPreferredSize(W, H, False, True);
   Tallest := Max(FEditorBox.Height, H);
+  FToolsBox.GetPreferredSize(W, H, False, True);
+  Tallest := Max(Tallest, H);
   FAIPage.GetPreferredSize(W, H, False, True);
+  Tallest := Max(Tallest, H);
+  FAboutPage.GetPreferredSize(W, H, False, True);
   Tallest := Max(Tallest, H);
   FEditorBox.Constraints.MinHeight := Tallest;
   FToolsBox.Constraints.MinHeight := Tallest;
   FAIPage.Constraints.MinHeight := Tallest;
-  SetBounds(FCorner.X - Width, FCorner.Y - Height, Width, Height);
+  FAboutPage.Constraints.MinHeight := Tallest;
+  if FCentered and (Owner is TCustomForm) then
+  begin
+    Main := TCustomForm(Owner);
+    SetBounds(Main.Left + (Main.Width - Width) div 2,
+      Main.Top + (Main.Height - Height) div 2, Width, Height);
+  end
+  else
+    SetBounds(FCorner.X - Width, FCorner.Y - Height, Width, Height);
   MakeFullyVisible;
 end;
 
@@ -551,11 +750,13 @@ begin
     FEditorBox.Visible := False;
     FToolsBox.Visible := False;
     FAIPage.Visible := False;
-    case AIndex of
-      0: Box := FEditorBox;
-      1: Box := FToolsBox;
+    FAboutPage.Visible := False;
+    case TSettingsPage(AIndex) of
+      pgEditor: Box := FEditorBox;
+      pgTools: Box := FToolsBox;
+      pgAI: Box := FAIPage;
       else
-        Box := FAIPage;
+        Box := FAboutPage;
     end;
     Box.Top := 0;
     Box.Visible := True;
@@ -563,6 +764,16 @@ begin
     EnableAutoSizing;
   end;
   FNav.Selected := AIndex;
+  { The About page's first control is Check for Updates, which the
+    focus would make the default button. }
+  if (Box = FAboutPage) and not Box.ContainsControl(ActiveControl) then
+    ActiveControl := FOK;
+  { git, gh and the agent are asked once the page is drawn. }
+  if (Box = FAboutPage) and not FVersionsRead then
+  begin
+    FVersionsRead := True;
+    Application.QueueAsyncCall(@ReadVersions, 0);
+  end;
 end;
 
 { The sidebar in the main window's shade, its rows in the editor's text
@@ -571,8 +782,17 @@ procedure TSettingsForm.ApplyTheme;
 var
   Dark: boolean;
   TextColor: TColor;
+  Link: TLabel;
 begin
   Dark := IsDarkMode;
+  { The main window's accent. }
+  if Dark then
+    FLinkColor := RGBToColor(100, 160, 240)
+  else
+    FLinkColor := RGBToColor(0, 110, 230);
+  for Link in FLinks do
+    if Link.Hint <> '' then
+      Link.Font.Color := FLinkColor;
   FNavPanel.Color := SidebarShade(Dark);
   if FTemplate <> nil then
     TextColor := FTemplate.Colors.TextFont
@@ -751,8 +971,10 @@ begin
   Preview;
 end;
 
+{ The versions on About name the tools as the fields have them. }
 procedure TSettingsForm.ToolChange(Sender: TObject);
 begin
+  FVersionsRead := False;
   if Sender = FGitEdit then
     ShowTool(FGitEdit, FGitNote, 'git', rsToolNotFound)
   else if Sender = FGhEdit then
@@ -765,6 +987,7 @@ end;
 { The agent and its fields matter only with the features on. }
 procedure TSettingsForm.AIChange(Sender: TObject);
 begin
+  FVersionsRead := False;
   FAgentBox.Enabled := FAIBox.Checked;
   FAgentEdit.Enabled := FAIBox.Checked;
   FModelEdit.Enabled := FAIBox.Checked;
@@ -824,9 +1047,222 @@ begin
     ANote.Caption := rsToolMissing;
 end;
 
+{ A link in ARow after what is there, to AUrl, which its hint shows; one
+  without a URL reads as plain text. }
+function TSettingsForm.AddLink(ARow: TPanel; const ACaption, AUrl: string): TLabel;
+begin
+  Result := TLabel.Create(Self);
+  Result.Caption := ACaption;
+  Result.ShowAccelChar := False;
+  Result.Hint := AUrl;
+  Result.ShowHint := AUrl <> '';
+  if AUrl <> '' then
+    Result.Cursor := crHandPoint;
+  Result.OnClick := @LinkClick;
+  Result.Align := alLeft;
+  Result.Left := ARow.ControlCount * 1000;
+  Result.BorderSpacing.Right := Scale96ToScreen(14);
+  Result.Parent := ARow;
+  SetLength(FLinks, Length(FLinks) + 1);
+  FLinks[High(FLinks)] := Result;
+end;
+
+procedure TSettingsForm.LinkClick(Sender: TObject);
+begin
+  if TLabel(Sender).Hint <> '' then
+    OpenURL(TLabel(Sender).Hint);
+end;
+
+{ The answer beside the button: a link when there is a page to go to,
+  else a note. }
+procedure TSettingsForm.ShowUpdateLink(const ACaption, AUrl: string);
+begin
+  FUpdateLink.Caption := ACaption;
+  FUpdateLink.Hint := AUrl;
+  FUpdateLink.ShowHint := AUrl <> '';
+  if AUrl <> '' then
+  begin
+    FUpdateLink.Cursor := crHandPoint;
+    FUpdateLink.Font.Color := FLinkColor;
+  end
+  else
+  begin
+    FUpdateLink.Cursor := crDefault;
+    FUpdateLink.Font.Color := clGrayText;
+  end;
+end;
+
+procedure TSettingsForm.UpdateClick(Sender: TObject);
+begin
+  if FUpdateJob <> nil then
+    Exit;
+  FreeFinishedUpdateJobs(False);
+  ShowUpdateLink(rsUpdateChecking, '');
+  FUpdateJob := TGittanUpdateJob.Create;
+  FUpdateJob.OnDone := @UpdateDone;
+  FUpdateJob.Start;
+end;
+
+{ As the main window's check answers from the menu, without the
+  snooze: a newer build to download, the latest release when this
+  build cannot be compared with it (a local one, or a release tagged
+  other than build-<n>), or that this is the latest. }
+procedure TSettingsForm.UpdateDone(Sender: TObject);
+var
+  Latest: TGittanRelease;
+begin
+  Latest := FUpdateJob.Release;
+  if not FUpdateJob.Ok then
+    ShowUpdateLink(Format(rsUpdateFailed, [FUpdateJob.Error]), '')
+  else if IsNewerRelease(Latest, CurrentBuild) then
+    ShowUpdateLink(Format(rsUpdateDownload, [Latest.Name]), Latest.Url)
+  else if (CurrentBuild < 0) or (Latest.Build < 0) then
+    ShowUpdateLink(Format(rsUpdateLatest, [Latest.Name]), Latest.Url)
+  else
+    ShowUpdateLink(rsUpdateCurrent, '');
+  FreeAndNil(FUpdateJob);
+end;
+
+{ The name of the system and its version. }
+function SystemName: string;
+{$IF defined(LINUX)}
+var
+  Lines: TStringList;
+{$ENDIF}
+begin
+  {$IF defined(DARWIN)}
+  if RunCommand('/usr/bin/sw_vers', ['-productVersion'], Result, [poNoConsole]) then
+    Result := 'macOS ' + Trim(Result)
+  else
+    Result := 'macOS';
+  {$ELSEIF defined(WINDOWS)}
+  Result := Format('Windows %d.%d.%d', [Win32MajorVersion, Win32MinorVersion,
+    Win32BuildNumber]);
+  {$ELSEIF defined(LINUX)}
+  Result := 'Linux';
+  Lines := TStringList.Create;
+  try
+    try
+      Lines.LoadFromFile('/etc/os-release');
+      Lines.NameValueSeparator := '=';
+      if Lines.Values['PRETTY_NAME'] <> '' then
+        Result := AnsiDequotedStr(Lines.Values['PRETTY_NAME'], '"');
+    except
+      on EFOpenError do ;
+    end;
+  finally
+    Lines.Free;
+  end;
+  {$ELSE}
+  Result := {$I %FPCTARGETOS%};
+  {$ENDIF}
+end;
+
+{ The first word of a tool's first line after APrefix ("gh version 2.62.0
+  (2024-11-14)" gives 2.62.0, claude's "2.1.0 (Claude Code)" 2.1.0). }
+function VersionOf(const AOutput, APrefix: string): string;
+var
+  Line: string;
+  i: integer;
+begin
+  Line := Trim(AOutput);
+  i := Pos(LineEnding, Line);
+  if i > 0 then
+    Line := Copy(Line, 1, i - 1);
+  if Pos(APrefix, Line) = 1 then
+    Delete(Line, 1, Length(APrefix));
+  Line := Trim(Line);
+  i := Pos(' ', Line);
+  if i > 0 then
+    Line := Copy(Line, 1, i - 1);
+  Result := Line;
+end;
+
+{ What Gittan runs on and with: the build, git, gh and the agent (as the
+  fields name them now), the system and the libraries; VersionLines in
+  all. }
+procedure TSettingsForm.ReadVersions(Data: PtrInt);
+var
+  Lines: TStringList;
+  Version, Output, Error, Exe: string;
+  Major, Minor: integer;
+  OldCursor: TCursor;
+begin
+  OldCursor := Screen.Cursor;
+  Screen.Cursor := crHourGlass;
+  Lines := TStringList.Create;
+  try
+    if CurrentBuild >= 0 then
+      Lines.Add(Format(rsVersionGittan, [CurrentBuild]))
+    else
+      Lines.Add(Format(rsVersionGittanLocal, [{$I %DATE%}]));
+    { The git and gh the fields name, saved or not, as the notes under
+      them find them. }
+    Exe := Trim(FGitEdit.Text);
+    if Exe = '' then
+      Exe := FindTool('git');
+    if GitVersionOf(Exe, Version, Major, Minor) then
+      Lines.Add('git ' + Version)
+    else
+      Lines.Add(Format(rsVersionNotFound, ['git']));
+    Exe := Trim(FGhEdit.Text);
+    if Exe = '' then
+      Exe := FindTool('gh');
+    if (Exe <> '') and RunGitHubCli(Exe, GetUserDir, ['--version'], Output, Error) then
+      Lines.Add('gh ' + VersionOf(Output, 'gh version '))
+    else
+      Lines.Add(Format(rsVersionNotFound, ['gh']));
+    if not FAIBox.Checked then
+      Lines.Add(rsVersionAIOff)
+    else
+    begin
+      Exe := FindAgent(FAgent, Trim(FAgentEdit.Text));
+      if (Exe <> '') and RunAgentCli(Exe, GetUserDir, ['--version'], '', nil,
+        Output, Error) then
+        Lines.Add(AgentNames[FAgent] + ' ' + VersionOf(Output, ''))
+      else
+        Lines.Add(Format(rsVersionNotFound, [AgentNames[FAgent]]));
+    end;
+    Lines.Add(Format('%s, %s, %s', [SystemName, {$I %FPCTARGETCPU%},
+      LCLPlatformDisplayNames[WidgetSet.LCLPlatform]]));
+    Lines.Add(Format(rsVersionLibraries, [{$I %FPCVERSION%}, lcl_version]));
+    FVersionsLabel.Caption := TrimRight(Lines.Text);
+  finally
+    Lines.Free;
+    Screen.Cursor := OldCursor;
+  end;
+end;
+
+{ The icon as a square as wide as the box, in the middle of its height
+  (alLeft makes the box as high as the text beside it), resampled to
+  the screen's pixels (twice its points on a Retina screen), which Cocoa
+  then draws pixel for pixel. }
+procedure TSettingsForm.AppIconPaint(Sender: TObject);
+var
+  Box: TPaintBox;
+  Side, Y, Pixels: integer;
+begin
+  Box := TPaintBox(Sender);
+  Side := Min(Box.Width, Box.Height);
+  Y := (Box.Height - Side) div 2;
+  Pixels := Round(Side * Box.GetCanvasScaleFactor);
+  if (FAppIconShown = nil) or (FAppIconShown.Width <> Pixels) then
+  begin
+    FreeAndNil(FAppIconShown);
+    FAppIcon.ResampleFilter := rfBestQuality;
+    FAppIconShown := FAppIcon.Resample(Pixels, Pixels, rmFineResample) as TBGRABitmap;
+  end;
+  FAppIconShown.Draw(Box.Canvas, Rect(0, Y, Side, Y + Side), False);
+end;
+
+procedure TSettingsForm.CopyVersionsClick(Sender: TObject);
+begin
+  Clipboard.AsText := FVersionsLabel.Caption;
+end;
+
 function EditSettings(AFont: TFont; var AValues: TSettingsValues;
   APreview: TSettingsPreview; ALexers: TGittanLexers; ATemplate: TATSynEdit;
-  ACorner: TPoint): boolean;
+  ACorner: TPoint; APage: TSettingsPage): boolean;
 var
   F: TSettingsForm;
 begin
@@ -856,6 +1292,8 @@ begin
     F.ApplyTheme;
     F.ShowSample;
     F.FCorner := ACorner;
+    F.FCentered := APage = pgAbout;
+    F.ShowPage(Ord(APage));
     Result := F.ShowModal = mrOK;
     if Result then
     begin
@@ -878,4 +1316,10 @@ begin
   end;
 end;
 
+initialization
+  GUpdateZombies := TList.Create;
+
+finalization
+  FreeFinishedUpdateJobs(True);
+  FreeAndNil(GUpdateZombies);
 end.
