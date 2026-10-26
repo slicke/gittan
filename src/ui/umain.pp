@@ -696,6 +696,12 @@ type
       that looks once a minute whether one is due, and what StartRemote
       was asked meanwhile, run once it is done (FPendingRemote). }
     FAutoFetchJob: TGittanRemoteJob;
+    { Where the repository stands with Git LFS: the job reading it, the
+      root and HEAD it last read it for (FLfsChecked, so a snapshot of
+      the same commit does not read it again) and the banner shown for
+      it (FLfsShown), not shown again once closed until it changes. }
+    FLfsCheckJob: TGittanLfsCheckJob;
+    FLfsChecked, FLfsShown: string;
     FAutoFetchTimer: TTimer;
     FPendingRemote: boolean;
     FPendingKind: TGittanRemoteKind;
@@ -993,6 +999,11 @@ type
     procedure ShowImageChanges(const APath: string);
     procedure ShowBinaryChanges(const APath: string);
     procedure StartLfsDownload(const APath: string; const ARefs: TStringArray);
+    procedure CheckLfs;
+    procedure LfsCheckDone(Sender: TObject);
+    procedure LfsGetClick(Sender: TObject);
+    procedure LfsInstallClick(Sender: TObject);
+    procedure LfsPullClick(Sender: TObject);
     procedure AutoFetchTimerTimer(Sender: TObject);
     procedure AutoFetchDone(Sender: TObject);
     procedure ShowBinaryFile(const AFileName: string);
@@ -2340,6 +2351,29 @@ resourcestring
   rsLfsDownloaded = 'Downloaded %s';
   rsLfsDownloadFailed = 'The Git LFS download failed';
   rsWaitingForFetch = 'Waiting for the background fetch...';
+  rsLfsMissingTitle = 'Git LFS is not installed';
+  rsLfsMissingDetail = 'This repository keeps %d files in Git LFS. Without git-lfs they ' +
+    'check out as small pointer files, and committing one would put its content in git ' +
+    'itself. Install Git LFS, then run "git lfs install" once.';
+  rsLfsGetAction = 'Get Git LFS';
+  rsLfsNotSetUpTitle = 'Git LFS is not set up';
+  rsLfsNotSetUpDetail = 'git-lfs is installed but "git lfs install" has not been run, so ' +
+    'the %d files in Git LFS check out as pointer files and committing one would put its ' +
+    'content in git itself. Set Up runs it: it adds the Git LFS filter to your global git ' +
+    'config and its hooks to this repository.';
+  rsLfsSetUpAction = 'Set Up';
+  rsLfsPointersOne = '1 file from Git LFS is not downloaded';
+  rsLfsPointers = '%d files from Git LFS are not downloaded';
+  rsLfsPointersDetail = 'The work tree holds their pointers. Download All fetches them from ' +
+    'the remote.';
+  rsLfsPullAction = 'Download All';
+  rsLfsPulling = 'Downloading the files from Git LFS...';
+  rsNoticeLfsPulling = 'Downloading the files from Git LFS';
+  rsLfsPulled = 'Downloaded the files from Git LFS';
+  rsLfsInstalling = 'Setting up Git LFS...';
+  rsNoticeLfsInstalling = 'Setting up Git LFS';
+  rsLfsInstalled = 'Git LFS is set up';
+  rsLfsInstallFailed = 'Setting up Git LFS failed';
   rsSubUpdateAgain = 'Update Again';
   rsSubSynced = 'Synced the URL of %s';
   rsSubSyncedAll = 'Synced the URLs of the submodules';
@@ -5313,6 +5347,8 @@ begin
   FSubShown := '';
   { Its failures are not this one's. }
   FBanner.Clear;
+  FLfsChecked := '';
+  FLfsShown := '';
   { Nothing is open while the job runs: the views are emptied, so no
     click reaches the previous repository, and the commit message box
     is no one's. }
@@ -5555,6 +5591,7 @@ begin
   FTerminalItem.Enabled := FRepo.Root <> '';
   UpdateBranchItems;
   UpdateStashItems;
+  CheckLfs;
 end;
 
 { The badge of a file: solid when the index holds all of its change,

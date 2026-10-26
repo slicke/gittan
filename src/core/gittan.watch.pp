@@ -89,6 +89,27 @@ type
     property IgnoreWhitespace: boolean read FIgnoreWhitespace write FIgnoreWhitespace;
   end;
 
+  {** Reads where the repository at ARoot stands with Git LFS
+    (TGittanRepo.LfsState) on a thread, since it lists the files in Git
+    LFS and reads those small enough to be pointers; OnDone is raised
+    in the main thread with State, Ok false when git failed. Head is
+    the commit it was asked for, for the caller to tell whether it is
+    still the one checked out. }
+  TGittanLfsCheckJob = class(TGittanJob)
+  private
+    FRoot, FHead: string;
+    FOk: boolean;
+    FState: TGittanLfsState;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const ARoot, AHead: string);
+    property Root: string read FRoot;
+    property Head: string read FHead;
+    property Ok: boolean read FOk;
+    property State: TGittanLfsState read FState;
+  end;
+
 implementation
 
 { TGittanWatcher }
@@ -226,6 +247,32 @@ begin
         FOpened := False;
         FError := E.Message;
       end;
+    end;
+  finally
+    Repo.Free;
+  end;
+  Done;
+end;
+
+{ TGittanLfsCheckJob }
+
+constructor TGittanLfsCheckJob.Create(const ARoot, AHead: string);
+begin
+  inherited Create(True);
+  FRoot := ARoot;
+  FHead := AHead;
+end;
+
+procedure TGittanLfsCheckJob.Execute;
+var
+  Repo: TGittanRepo;
+begin
+  Repo := TGittanRepo.Create;
+  try
+    try
+      FOk := Repo.Open(FRoot) and not Terminated and Repo.LfsState(FState);
+    except
+      FOk := False;
     end;
   finally
     Repo.Free;

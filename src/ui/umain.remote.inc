@@ -99,6 +99,8 @@ begin
           FStatus.ShowMessage(Format(rsSubUpdating, [AArg]), stNormal, 0);
       rkLfsFetch:
         FStatus.ShowMessage(Format(rsLfsDownloading, [ExtractFileName(AArg)]), stNormal, 0);
+      rkLfsPull: FStatus.ShowMessage(rsLfsPulling, stNormal, 0);
+      rkLfsInstall: FStatus.ShowMessage(rsLfsInstalling, stNormal, 0);
     end;
   if FNoticeHook then
     ShowRemoteNotice
@@ -138,6 +140,8 @@ begin
     rkSubmoduleAdd: Result := Format(rsNoticeSubAdding, [FRemoteJob.Path]);
     rkFetchPull: Result := Format(rsNoticeFetchingPull, [StrToIntDef(FRemoteJob.Arg, 0)]);
     rkLfsFetch: Result := Format(rsNoticeLfsDownloading, [ExtractFileName(FRemoteJob.Arg)]);
+    rkLfsPull: Result := rsNoticeLfsPulling;
+    rkLfsInstall: Result := rsNoticeLfsInstalling;
   end;
 end;
 
@@ -219,16 +223,23 @@ begin
   end;
   { The file is shown again, as the version downloaded into the store
     left the work tree as it was when it was of a commit. }
-  if Job.Kind = rkLfsFetch then
+  if Job.Kind in [rkLfsFetch, rkLfsPull, rkLfsInstall] then
   begin
     if not Job.Ok then
       ShowRemoteFailure(Job, False)
     else
     begin
-      StatusNote(Format(rsLfsDownloaded, [ExtractFileName(Job.Arg)]));
-      if (FView in [gvImage, gvBinary]) and (FCurrentPath = Job.Arg) then
-        ShowChanges(Job.Arg);
+      case Job.Kind of
+        rkLfsFetch: StatusNote(Format(rsLfsDownloaded, [ExtractFileName(Job.Arg)]));
+        rkLfsPull: BannerSuccess(rsLfsPulled);
+        rkLfsInstall: BannerSuccess(rsLfsInstalled);
+      end;
+      if (FView in [gvImage, gvBinary]) and (FCurrentPath <> '') then
+        ShowChanges(FCurrentPath);
     end;
+    { The work tree may hold files in place of pointers now. }
+    FLfsChecked := '';
+    CheckLfs;
     Exit;
   end;
   if Job.Kind in [rkSubmoduleUpdate, rkSubmoduleAdd] then
@@ -391,9 +402,14 @@ begin
         Title := Format(rsPullFailed, [StrToIntDef(AJob.Arg, 0)]);
         Again := rsTryAgain;
       end;
-    rkLfsFetch:
+    rkLfsFetch, rkLfsPull:
       begin
         Title := rsLfsDownloadFailed;
+        Again := rsTryAgain;
+      end;
+    rkLfsInstall:
+      begin
+        Title := rsLfsInstallFailed;
         Again := rsTryAgain;
       end;
     else
@@ -461,6 +477,13 @@ end;
 procedure TForm1.StopRemoteJob(AWait: boolean);
 begin
   FPendingRemote := False;
+  { The Git LFS check reads only, and is dropped rather than waited for. }
+  if FLfsCheckJob <> nil then
+  begin
+    FLfsCheckJob.Stop(False);
+    FBlameZombies.Add(FLfsCheckJob);
+    FLfsCheckJob := nil;
+  end;
   if FAutoFetchJob <> nil then
   begin
     FAutoFetchJob.Stop(AWait);
@@ -481,6 +504,112 @@ begin
   else
     FBlameZombies.Add(FRemoteJob);
   FRemoteJob := nil;
+end;
+
+{ ---------------------------------------------------------------------------
+  Git LFS in the banner
+  ---------------------------------------------------------------------------
+  Once per commit checked out (the root and HEAD, FLfsChecked), after
+  every snapshot that changed something, a job reads where the
+  repository stands with Git LFS (TGittanRepo.LfsState). A repository
+  with files in Git LFS gets a banner while something is wrong, the
+  worst first: git-lfs not installed (a link to its site) or not set up
+  (Set Up runs git lfs install), both red, as a commit would put the
+  files' content in git; else, when files of the work tree are their
+  pointers, a note with Download All (git lfs pull). A banner closed
+  is not shown again until what it says changes (FLfsShown). }
+procedure TForm1.CheckLfs;
+var
+  Key: string;
+begin
+  if (FRepo.Root = '') or (FLfsCheckJob <> nil) then
+    Exit;
+  Key := FRepo.Root + #0 + FRepo.CommitId('HEAD');
+  if Key = FLfsChecked then
+    Exit;
+  FLfsChecked := Key;
+  FLfsCheckJob := TGittanLfsCheckJob.Create(FRepo.Root, Key);
+  FLfsCheckJob.OnDone := @LfsCheckDone;
+  FLfsCheckJob.Start;
+end;
+
+procedure TForm1.LfsCheckDone(Sender: TObject);
+var
+  Job: TGittanLfsCheckJob;
+  State: TGittanLfsState;
+  Title, Detail, ActionText, Key: string;
+  Kind: TGittanBannerKind;
+  Handler: TNotifyEvent;
+begin
+  Job := TGittanLfsCheckJob(Sender);
+  if Job <> FLfsCheckJob then
+    Exit;
+  FLfsCheckJob := nil;
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+  { Another repository, or a commit checked out meanwhile: read again. }
+  if Job.Root <> FRepo.Root then
+    Exit;
+  if Job.Head <> FLfsChecked then
+  begin
+    CheckLfs;
+    Exit;
+  end;
+  if not Job.Ok then
+    Exit;
+  State := Job.State;
+  Key := '';
+  Kind := bkError;
+  Handler := nil;
+  if State.Files = 0 then
+  else if not State.Installed then
+  begin
+    Title := rsLfsMissingTitle;
+    Detail := Format(rsLfsMissingDetail, [State.Files]);
+    ActionText := rsLfsGetAction;
+    Handler := @LfsGetClick;
+    Key := 'missing';
+  end
+  else if not State.SetUp then
+  begin
+    Title := rsLfsNotSetUpTitle;
+    Detail := Format(rsLfsNotSetUpDetail, [State.Files]);
+    ActionText := rsLfsSetUpAction;
+    Handler := @LfsInstallClick;
+    Key := 'setup';
+  end
+  else if State.Pointers > 0 then
+  begin
+    if State.Pointers = 1 then
+      Title := rsLfsPointersOne
+    else
+      Title := Format(rsLfsPointers, [State.Pointers]);
+    Detail := rsLfsPointersDetail;
+    ActionText := rsLfsPullAction;
+    Handler := @LfsPullClick;
+    Kind := bkInfo;
+    Key := 'pointers' + IntToStr(State.Pointers);
+  end;
+  if Key = FLfsShown then
+    Exit;
+  FLfsShown := Key;
+  if Key <> '' then
+    FBanner.AddAction(Title, Detail, Kind, 0, ActionText, Handler);
+end;
+
+procedure TForm1.LfsGetClick(Sender: TObject);
+begin
+  OpenURL('https://git-lfs.com');
+end;
+
+procedure TForm1.LfsInstallClick(Sender: TObject);
+begin
+  StartRemote(rkLfsInstall);
+end;
+
+procedure TForm1.LfsPullClick(Sender: TObject);
+begin
+  StartRemote(rkLfsPull);
 end;
 
 { ---------------------------------------------------------------------------

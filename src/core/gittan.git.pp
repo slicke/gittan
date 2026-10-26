@@ -120,6 +120,17 @@ type
     bug), bad (with it), or skipped (it cannot be tested). }
   TGittanBisectMark = (bmGood, bmBad, bmSkip);
 
+  {** Where a repository stands with Git LFS (TGittanRepo.LfsState):
+    whether it has files in Git LFS (Files, those with filter=lfs),
+    whether git-lfs is on the tool path (Installed) and set up in git's
+    config (SetUp: `git lfs install` gives filter.lfs.process or
+    .smudge), and how many of the files are pointers in the work tree,
+    not downloaded or never checked out (Pointers). }
+  TGittanLfsState = record
+    Files, Pointers: integer;
+    Installed, SetUp: boolean;
+  end;
+
   TGittanRepoSnapshot = record
     Ok: boolean;
     Error: string;
@@ -889,6 +900,17 @@ type
       Error, when git-lfs is not installed, there is no remote or it
       failed. }
     function LfsDownload(const APath: string; const ARefs: array of string): boolean;
+    {** Where the repository stands with Git LFS. False when git failed. }
+    function LfsState(out AState: TGittanLfsState): boolean;
+    {** Downloads every Git LFS file of HEAD and puts them in place of
+      their pointers in the work tree (`git lfs pull`), from the default
+      remote. False, with the reason in Error, as for LfsDownload. }
+    function LfsPull: boolean;
+    {** Sets Git LFS up for the user (`git lfs install`: the filter in
+      the global config, the hooks in this repository) and puts the
+      files of the work tree in place of their pointers from what the
+      store has. }
+    function LfsInstall: boolean;
     {** The output of `git blame --porcelain` for APath as it is in the
       commit ARef, or in the work tree when ARef is empty, with
       IgnoreWhitespace passed on as -w. Returns false when git failed: a
@@ -993,6 +1015,8 @@ function GitExe: string;
 const
   {** The oldest git Gittan supports: 2.30, the first with
     `push --force-if-includes`. }
+  LfsMissingMessage = 'Git LFS is not installed. Install it from https://git-lfs.com, ' +
+    'then run "git lfs install" once.';
   MinGitMajor = 2;
   MinGitMinor = 30;
 
@@ -6274,6 +6298,70 @@ end;
 { git lfs fetch takes refs only after a remote, the one a push goes to.
   The work tree's pointer is HEAD's as a rule, and git lfs checkout then
   puts the file in its place, which it does for a pointer alone. }
+{ The files with filter=lfs as git's attributes give them (the attr
+  pathspec), each read only when it is small enough to be a pointer. }
+function TGittanRepo.LfsState(out AState: TGittanLfsState): boolean;
+const
+  PointerMax = 1024;
+var
+  Output, Path, Oid: string;
+  Paths: TStringList;
+  Info: TSearchRec;
+  Size: int64;
+begin
+  AState := Default(TGittanLfsState);
+  if FRoot = '' then
+    Exit(False);
+  Result := RunGit(FRoot, ['ls-files', '-z', '--', ':(attr:filter=lfs)'], Output);
+  if not Result then
+    Exit;
+  Paths := TStringList.Create;
+  try
+    SplitNul(Output, Paths);
+    AState.Files := Paths.Count;
+    for Path in Paths do
+      if StatExact(FullPath(Path), Info) then
+      begin
+        Size := Info.Size;
+        FindClose(Info);
+        if (Size < PointerMax) and ParseLfsPointer(ReadFileBytes(FullPath(Path)), Oid, Size) then
+          Inc(AState.Pointers);
+      end;
+  finally
+    Paths.Free;
+  end;
+  if AState.Files = 0 then
+    Exit;
+  AState.Installed := FindTool('git-lfs') <> '';
+  AState.SetUp := (RunGit(FRoot, ['config', 'filter.lfs.process'], Output) and
+    (Trim(Output) <> '')) or (RunGit(FRoot, ['config', 'filter.lfs.smudge'], Output) and
+    (Trim(Output) <> ''));
+end;
+
+function TGittanRepo.LfsPull: boolean;
+begin
+  if (FRoot = '') then
+    Exit(False);
+  if FindTool('git-lfs') = '' then
+  begin
+    FError := LfsMissingMessage;
+    Exit(False);
+  end;
+  Result := RunRemote(['lfs', 'pull']);
+end;
+
+function TGittanRepo.LfsInstall: boolean;
+begin
+  if (FRoot = '') then
+    Exit(False);
+  if FindTool('git-lfs') = '' then
+  begin
+    FError := LfsMissingMessage;
+    Exit(False);
+  end;
+  Result := RunRemote(['lfs', 'install']) and RunRemote(['lfs', 'checkout']);
+end;
+
 function TGittanRepo.LfsDownload(const APath: string; const ARefs: array of string): boolean;
 var
   Args, Wanted: array of string;
@@ -6285,8 +6373,7 @@ begin
     Exit;
   if FindTool('git-lfs') = '' then
   begin
-    FError := 'Git LFS is not installed. Install it from https://git-lfs.com, then run ' +
-      '"git lfs install" once.';
+    FError := LfsMissingMessage;
     Exit;
   end;
   Remote := PushRemote;

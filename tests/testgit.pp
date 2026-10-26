@@ -1027,6 +1027,7 @@ var
   Size: int64;
   Stats: TGittanFileStats;
   Tree: TGittanRepo;
+  State: TGittanLfsState;
 
   procedure Store(const AOid, AContent: string);
   var
@@ -1043,6 +1044,10 @@ var
 
 begin
   MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.LfsState(State));
+  AssertEquals('no file in Git LFS', 0, State.Files);
+  AssertFalse('not looked for without one', State.Installed);
   OldOid := StringOfChar('a', 64);
   NewOid := StringOfChar('b', 64);
   WriteFile('.gitattributes', '*.psd filter=lfs diff=lfs merge=lfs -text'#10);
@@ -1050,6 +1055,20 @@ begin
   Commit('Add art');
   WriteFile('art.psd', LfsPointer(NewOid, 7));
   AssertTrue(FRepo.Open(FDir));
+  WriteFile('real.psd', 'real'#0'content');
+  Git(['add', 'real.psd']);
+  Git(['commit', '-q', '-m', 'Add art']);
+  AssertTrue(FRepo.LfsState(State));
+  AssertEquals(2, State.Files);
+  AssertEquals('the pointer in the work tree', 1, State.Pointers);
+  AssertEquals(FindTool('git-lfs') <> '', State.Installed);
+  AssertFalse('the tests'' config has no filter', State.SetUp);
+  Git(['config', 'filter.lfs.process', 'git-lfs filter-process']);
+  AssertTrue(FRepo.LfsState(State));
+  AssertTrue(State.SetUp);
+  Git(['config', '--unset', 'filter.lfs.process']);
+  Git(['rm', '-q', 'real.psd']);
+  Git(['commit', '-q', '-m', 'Drop the real one']);
   AssertEquals(IncludeTrailingPathDelimiter(FRepo.GitDir) + 'lfs' + PathDelim + 'objects' +
     PathDelim + 'aa' + PathDelim + 'aa' + PathDelim + OldOid, FRepo.LfsObjectFile(OldOid));
   { Not downloaded: the pointer. }
@@ -1104,6 +1123,7 @@ end;
 procedure TGitRepoTest.TestLfsDownload;
 var
   Data: RawByteString;
+  State: TGittanLfsState;
 begin
   Git(['init', '-q', 'up']);
   if FindTool('git-lfs') = '' then
@@ -1134,6 +1154,17 @@ begin
   AssertEquals('two'#0'image!', Data);
   AssertTrue(FRepo.FileBlob('art.psd', 'HEAD~1', Data));
   AssertEquals('one'#0'image', Data);
+  { The whole work tree again: a pointer back in place of the file. }
+  Git(['-C', 'down', 'lfs', 'install', '--local', '--skip-smudge']);
+  DeleteFile(FDir + PathDelim + 'down' + PathDelim + 'art.psd');
+  Git(['-C', 'down', 'checkout', '-q', '--', 'art.psd']);
+  Git(['-C', 'down', 'lfs', 'install', '--local', '--force']);
+  AssertTrue(FRepo.LfsState(State));
+  AssertEquals(1, State.Pointers);
+  AssertTrue(State.SetUp);
+  AssertTrue(FRepo.Error, FRepo.LfsPull);
+  AssertTrue(FRepo.LfsState(State));
+  AssertEquals(0, State.Pointers);
   Git(['-C', 'down', 'remote', 'remove', 'origin']);
   AssertFalse(FRepo.LfsDownload('art.psd', ['HEAD']));
   AssertEquals('The repository has no remote to download from.', FRepo.Error);

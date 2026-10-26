@@ -38,6 +38,7 @@ type
     procedure TestOpenJob;
     procedure TestOpenJobIgnoreWhitespace;
     procedure TestOpenJobNoRepository;
+    procedure TestLfsCheckJob;
   end;
 
 implementation
@@ -298,6 +299,36 @@ begin
     Snap := Job.Snapshot;
     AssertEquals('added, counted', 1, Snap.Stats[0].Added);
     AssertEquals('deleted, counted', 1, Snap.Stats[0].Deleted);
+  finally
+    Job.Free;
+  end;
+end;
+
+{ A file in Git LFS whose work tree holds its pointer; git-lfs is not
+  needed for that. }
+procedure TWatchTest.TestLfsCheckJob;
+var
+  Job: TGittanLfsCheckJob;
+  Start: TDateTime;
+begin
+  WriteFile('.gitattributes', '*.psd filter=lfs diff=lfs merge=lfs -text'#10);
+  WriteFile('art.psd', 'version https://git-lfs.github.com/spec/v1'#10'oid sha256:' +
+    StringOfChar('a', 64) + #10'size 9'#10);
+  Git(['add', '-A']);
+  Git(['commit', '-q', '-m', 'art']);
+  FOpenDone := 0;
+  Job := TGittanLfsCheckJob.Create(FDir, 'abc');
+  try
+    Job.OnDone := @OpenDone;
+    Job.Start;
+    Start := Now;
+    while (FOpenDone = 0) and (MilliSecondsBetween(Now, Start) < 10000) do
+      CheckSynchronize(10);
+    AssertEquals('done once', 1, FOpenDone);
+    AssertTrue(Job.Ok);
+    AssertEquals('abc', Job.Head);
+    AssertEquals(1, Job.State.Files);
+    AssertEquals(1, Job.State.Pointers);
   finally
     Job.Free;
   end;

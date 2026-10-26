@@ -14,7 +14,8 @@ uses
 type
   {** What a TGittanRemoteJob does. }
   TGittanRemoteKind = (rkFetch, rkPull, rkPush, rkDeleteRemote, rkForcePush, rkPushBranch,
-    rkPushTag, rkDeleteRemoteTag, rkClone, rkSubmoduleUpdate, rkSubmoduleAdd, rkFetchPull, rkLfsFetch);
+    rkPushTag, rkDeleteRemoteTag, rkClone, rkSubmoduleUpdate, rkSubmoduleAdd, rkFetchPull, rkLfsFetch, rkLfsPull,
+    rkLfsInstall);
 
   {** Runs a fetch, a pull (the way Mode says), a push, a push with
     --force-with-lease, or the deletion of the remote branch Arg stands
@@ -30,7 +31,9 @@ type
     numbered Arg from Remote, its head at PullRef (the forge's), with its
     base branch Branch, and gives the ref its head is fetched to in
     HeadRef. A Git LFS download fetches the object of the path Arg as
-    it is in each of Refs (see TGittanRepo.LfsDownload).
+    it is in each of Refs (see TGittanRepo.LfsDownload); a pull of Git
+    LFS downloads every file of HEAD (LfsPull), and an install sets Git
+    LFS up (LfsInstall).
     OnDone is called in the main thread when it is done, unless the job
     has been stopped. A job is never broken off, as a pull stopped
     halfway would leave a merge behind: Stop only drops the handler, and
@@ -264,6 +267,8 @@ begin
         rkFetchPull: FOk := Repo.FetchPullRequest(FRemote, StrToIntDef(FArg, 0), FPullRef,
             FBranch, FHeadRef);
         rkLfsFetch: FOk := Repo.LfsDownload(FArg, FRefs);
+        rkLfsPull: FOk := Repo.LfsPull;
+        rkLfsInstall: FOk := Repo.LfsInstall;
         rkClone: ;
       end;
     if not FOk then
