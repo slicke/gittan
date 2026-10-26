@@ -93,6 +93,14 @@ function RepoPathOfUrl(const AUrl: string): string;
   the number for an issue or pull request. }
 function GitHubWebArgs(const ATarget: TGittanWebTarget): TStringArray;
 
+{** The repository ("owner/name"), the file and the line (0 for none)
+  of a GitHub address of a file in a commit or on a branch:
+  "https://github.com/owner/name/blob/<ref>/src/a.pp#L10-L20" gives
+  owner/name, src/a.pp and 10. The ref is taken as one part of the
+  address, so a branch with a / in its name gives a wrong path. }
+function GitHubFileOfUrl(const AUrl: string; out ARepo, APath: string;
+  out ALine: integer): boolean;
+
 type
   {** GitHub through gh (Cli, a path to it). }
   TGittanGitHubForge = class(TGittanForge)
@@ -106,6 +114,8 @@ type
     function AccountJob(const ARoot: string): TGittanForgeJob; override;
     function WebUrl(const ARoot: string; const ATarget: TGittanWebTarget;
       out AUrl, AError: string): boolean; override;
+    function FileOfWebUrl(const AUrl: string; out ARepo, APath: string;
+      out ALine: integer): boolean; override;
     function PullRef(ANumber: integer): string; override;
   end;
 
@@ -986,6 +996,72 @@ begin
   Result := RunGh(Cli, ARoot, Args, AUrl, AError);
   AUrl := Trim(AUrl);
   Result := Result and (AUrl <> '');
+end;
+
+function GitHubFileOfUrl(const AUrl: string; out ARepo, APath: string;
+  out ALine: integer): boolean;
+var
+  Rest, Fragment: string;
+  Parts: TStringArray;
+  p, i: integer;
+begin
+  Result := False;
+  ARepo := '';
+  APath := '';
+  ALine := 0;
+  p := Pos('://', AUrl);
+  if (p = 0) or not SameText(Copy(AUrl, 1, p - 1), 'https') and
+    not SameText(Copy(AUrl, 1, p - 1), 'http') then
+    Exit;
+  Rest := Copy(AUrl, p + 3, MaxInt);
+  Fragment := '';
+  p := Pos('#', Rest);
+  if p > 0 then
+  begin
+    Fragment := Copy(Rest, p + 1, MaxInt);
+    SetLength(Rest, p - 1);
+  end;
+  p := Pos('?', Rest);
+  if p > 0 then
+    SetLength(Rest, p - 1);
+  Parts := Rest.Split('/');
+  { github.com, owner, name, blob, the ref, then the path. }
+  if (Length(Parts) < 6) or not (SameText(Parts[0], 'github.com') or
+    SameText(Parts[0], 'www.github.com')) or (Parts[1] = '') or (Parts[2] = '') or
+    (Parts[3] <> 'blob') or (Parts[4] = '') then
+    Exit;
+  ARepo := Parts[1] + '/' + Parts[2];
+  for i := 5 to High(Parts) do
+  begin
+    if Parts[i] = '' then
+      Exit;
+    if APath <> '' then
+      APath := APath + '/';
+    APath := APath + Parts[i];
+  end;
+  { A space and the like come escaped. }
+  p := Pos('%', APath);
+  while (p > 0) and (p + 2 <= Length(APath)) do
+  begin
+    i := StrToIntDef('$' + Copy(APath, p + 1, 2), -1);
+    if i >= 0 then
+      APath := Copy(APath, 1, p - 1) + Chr(i) + Copy(APath, p + 3, MaxInt);
+    p := Pos('%', APath, p + 1);
+  end;
+  if (Fragment <> '') and (Fragment[1] = 'L') then
+  begin
+    p := 2;
+    while (p <= Length(Fragment)) and (Fragment[p] in ['0'..'9']) do
+      Inc(p);
+    ALine := StrToIntDef(Copy(Fragment, 2, p - 2), 0);
+  end;
+  Result := True;
+end;
+
+function TGittanGitHubForge.FileOfWebUrl(const AUrl: string; out ARepo, APath: string;
+  out ALine: integer): boolean;
+begin
+  Result := GitHubFileOfUrl(AUrl, ARepo, APath, ALine);
 end;
 
 function TGittanGitHubForge.PullRef(ANumber: integer): string;

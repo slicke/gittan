@@ -841,6 +841,8 @@ type
     FReviewInk: THTMLLayoutCache;
     { The thread a click on its card folds when the button comes up. }
     FGapToggle: string;
+    { The link in a card a click opens when the button comes up. }
+    FGapLink: string;
     function Palette: TGittanPalette;
     procedure ApplyTheme;
     procedure ApplyEditorColors(AEd: TATSynEdit);
@@ -1131,6 +1133,7 @@ type
       AGap: TATGapItem);
     procedure EditClickGap(Sender: TObject; AGapItem: TATGapItem; APos: TPoint);
     procedure ToggleThreadNow;
+    procedure OpenGapLinkAsync(Data: PtrInt);
     function ReviewHint(ANumber: integer): string;
     procedure FileThreads(const APath: string; out AOpen, AAll: integer);
     function FileThreadsHint(const APath: string): string;
@@ -1296,6 +1299,9 @@ type
       const AScreenPos: TPoint);
     procedure SummaryBranchClick(Sender: TObject; const AScreenRect: TRect);
     procedure SummaryOpenUrl(Sender: TObject; const AUrl: string);
+    function RepoFileExists(const APath: string): boolean;
+    procedure OpenCommentLink(const AUrl: string);
+    procedure ShowFileLine(const APath: string; ALine: integer);
     procedure SummarySelectCommit(Sender: TObject; const AHash: string);
     procedure BranchPopupPick(Sender: TObject; AIndex: integer);
     procedure ShowCommitGraph(const AFilter: string = '');
@@ -2905,6 +2911,7 @@ begin
   FSummary.OnSyncClick := @SummarySyncClick;
   FSummary.OnBehindAction := @SummaryBehindAction;
   FSummary.OnOpenUrl := @SummaryOpenUrl;
+  FSummary.OnFileExists := @RepoFileExists;
   FSummary.ForgeName := ForgeName;
   FSummary.OnReviewClick := @SummaryReviewClick;
   FSummary.OnSelectCommit := @SummarySelectCommit;

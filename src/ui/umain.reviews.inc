@@ -74,7 +74,84 @@ end;
 { The link of a note in the summary's conversation. }
 procedure TForm1.SummaryOpenUrl(Sender: TObject; const AUrl: string);
 begin
-  OpenURL(AUrl);
+  OpenCommentLink(AUrl);
+end;
+
+{ Whether APath (with /) is a file of the work tree, for LinkFilePaths. }
+function TForm1.RepoFileExists(const APath: string): boolean;
+var
+  Full: string;
+begin
+  if FRepo.Root = '' then
+    Exit(False);
+  Full := IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(APath);
+  Result := FileExists(Full) and not DirectoryExists(Full);
+end;
+
+{ A link in a comment: a file of the repository (LinkFilePaths, or the
+  forge's address of one of a repository a remote holds) is shown at its
+  line, anything else goes to the browser. }
+procedure TForm1.OpenCommentLink(const AUrl: string);
+var
+  Repo, Path: string;
+  Line: integer;
+begin
+  if FileOfLink(AUrl, Path, Line) or (Assigned(FForge) and
+    FForge.FileOfWebUrl(AUrl, Repo, Path, Line) and FRepo.HasRemoteFor(Repo) and
+    RepoFileExists(Path)) then
+    ShowFileLine(Path, Line)
+  else
+    OpenURL(AUrl);
+end;
+
+{ Shows the file APath of the repository (ShowRepoFile) with the caret
+  on line ALine (0 for none) of it, in the middle of the view: in the
+  change view the row of the new
+  side that holds it, the gap that hides it opened. }
+procedure TForm1.ShowFileLine(const APath: string; ALine: integer);
+
+  function RowOf(ALine: integer): integer;
+  var
+    i: integer;
+  begin
+    for i := 0 to Edit.Strings.Count - 1 do
+      if FileLineOfRow(i) = ALine then
+        Exit(i);
+    Result := -1;
+  end;
+
+var
+  Row, i: integer;
+begin
+  if APath <> ShownRelPath then
+    ShowRepoFile(APath);
+  if (ALine <= 0) or not Edit.Visible or (ShownRelPath <> APath) then
+    Exit;
+  Row := RowOf(ALine);
+  if Row < 0 then
+    Exit;
+  if (FView = gvChanges) and Edit.IsLineFolded(Row) and (Row <= High(FRows)) then
+    for i := 0 to High(FRows) do
+      if (FRows[i].Line = rowGap) and (FRows[i].GapFrom <= FRows[Row].Line) and
+        (FRows[Row].Line <= FRows[i].GapTo) then
+      begin
+        ExpandGap(FRows[i].GapFrom, FRows[i].GapTo);
+        Row := RowOf(ALine);
+        if Row < 0 then
+          Exit;
+        Break;
+      end;
+  { As a symbol picked in another file: the wrap info of the text just
+    loaded, and no line top kept from showing it. The editor centers a
+    row only when it is out of sight (an indent of 100 or more, negative
+    to count from the top either way), so the view starts at the top: a
+    row in the first screen stays where it is. }
+  Edit.UpdateWrapInfo(True);
+  Edit.LineTopTodo := 0;
+  Edit.LineTop := 0;
+  Edit.DoGotoPos(Point(0, Row), Point(-1, -1), 10, -100, True, FoldAction);
+  if Edit.CanFocus then
+    Edit.SetFocus;
 end;
 
 procedure TForm1.MenuReviewCommentsClick(Sender: TObject);
@@ -472,7 +549,8 @@ var
   procedure FlushProse;
   begin
     if Trim(Prose) <> '' then
-      Result.AddObject(MarkdownToInk(Prose, [imoInlineHTML]), ReviewRow(rlMarkup, Depth, -1, 0));
+      Result.AddObject(MarkdownToInk(LinkFilePaths(Prose, @RepoFileExists), [imoInlineHTML]),
+        ReviewRow(rlMarkup, Depth, -1, 0));
     Prose := '';
   end;
 
@@ -1117,7 +1195,7 @@ begin
           end;
         end;
       end;
-      { A link in the text opens, when it goes to the web. }
+      { A link in the text opens, when it goes to the web or to a file. }
       if (Kind = rlMarkup) and (APos.Y >= y) and (APos.Y < y + H) then
       begin
         ReviewFont(FReviewMeasure.Canvas, rlBody);
@@ -1126,9 +1204,10 @@ begin
           ReviewMargin + W - ReviewPadX, y + H), Lines[i], ReviewInkOptions,
           APos.X, APos.Y, FReviewInk);
         if Hit.OnLink and (AnsiStartsText('https://', Hit.LinkName) or
-          AnsiStartsText('http://', Hit.LinkName) or AnsiStartsText('mailto:', Hit.LinkName)) then
+          AnsiStartsText('http://', Hit.LinkName) or AnsiStartsText('mailto:', Hit.LinkName) or
+          AnsiStartsText(FileLinkScheme, Hit.LinkName)) then
         begin
-          OpenURL(Hit.LinkName);
+          FGapLink := Hit.LinkName;
           Exit;
         end;
       end;
@@ -1143,6 +1222,19 @@ begin
     height under a button still down would have the editor select text
     from where the button went down to where it came up. }
   FGapToggle := ThreadId(AGapItem.Tag);
+end;
+
+{ The link a click on a card asked for (FGapLink), once the button is
+  up and the editor done with it: a file shown in its place would get
+  the caret where the button came up. }
+procedure TForm1.OpenGapLinkAsync(Data: PtrInt);
+var
+  Link: string;
+begin
+  Link := FGapLink;
+  FGapLink := '';
+  if Link <> '' then
+    OpenCommentLink(Link);
 end;
 
 { The fold asked for by a click on a card or on a <details> block in

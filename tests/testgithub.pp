@@ -24,6 +24,7 @@ type
     procedure TestChecks;
     procedure TestIssueNumber;
     procedure TestWebArgs;
+    procedure TestFileOfUrl;
     procedure TestForge;
   end;
 
@@ -251,6 +252,25 @@ begin
   finally
     Forge.Free;
   end;
+end;
+
+procedure TGitHubTest.TestFileOfUrl;
+var
+  Repo, Path: string;
+  Line: integer;
+begin
+  AssertTrue(GitHubFileOfUrl('https://github.com/owner/repo/blob/abc123/src/a%20b.pp#L10-L20',
+    Repo, Path, Line));
+  AssertEquals('owner/repo', Repo);
+  AssertEquals('src/a b.pp', Path);
+  AssertEquals(10, Line);
+  AssertTrue(GitHubFileOfUrl('https://github.com/o/r/blob/main/README.md?plain=1', Repo, Path, Line));
+  AssertEquals('README.md', Path);
+  AssertEquals(0, Line);
+  AssertFalse('a folder', GitHubFileOfUrl('https://github.com/o/r/tree/main/src', Repo, Path, Line));
+  AssertFalse('a pull request', GitHubFileOfUrl('https://github.com/o/r/pull/3', Repo, Path, Line));
+  AssertFalse('another host', GitHubFileOfUrl('https://example.com/o/r/blob/main/a.pp',
+    Repo, Path, Line));
 end;
 
 initialization

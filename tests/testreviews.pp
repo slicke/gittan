@@ -14,6 +14,8 @@ uses
 
 type
   TReviewsTest = class(TTestCase)
+  private
+    function IsFile(const APath: string): boolean;
   published
     procedure TestParseThreads;
     procedure TestParsePages;
@@ -27,6 +29,9 @@ type
     procedure TestCommentMarkdown;
     procedure TestCommentMarkdownCode;
     procedure TestCommentParts;
+    procedure TestLinkFilePaths;
+    procedure TestLinkFilePathsLeftAlone;
+    procedure TestFileOfLink;
   end;
 
 implementation
@@ -273,6 +278,67 @@ begin
   AssertEquals('Bare', P[7].Text);
   AssertEquals(0, P[8].Depth);
   AssertEquals('Outro', P[8].Text);
+end;
+
+{ The files of a pretend repository. }
+function TReviewsTest.IsFile(const APath: string): boolean;
+begin
+  Result := (APath = 'src/ui/umain.pp') or (APath = 'README.md') or (APath = 'a/b-c.pp');
+end;
+
+procedure TReviewsTest.TestLinkFilePaths;
+begin
+  AssertEquals('See [src/ui/umain.pp](gittan-file:src/ui/umain.pp) here.',
+    LinkFilePaths('See src/ui/umain.pp here.', @IsFile));
+  AssertEquals('the line', '[src/ui/umain.pp:42](gittan-file:src/ui/umain.pp#L42), then',
+    LinkFilePaths('src/ui/umain.pp:42, then', @IsFile));
+  AssertEquals('a range', 'In [src/ui/umain.pp:42-50](gittan-file:src/ui/umain.pp#L42).',
+    LinkFilePaths('In src/ui/umain.pp:42-50.', @IsFile));
+  AssertEquals('GitHub''s anchor', '[./src/ui/umain.pp#L7-L9](gittan-file:src/ui/umain.pp#L7)',
+    LinkFilePaths('./src/ui/umain.pp#L7-L9', @IsFile));
+  AssertEquals('a name alone with a dot', '([README.md](gittan-file:README.md))',
+    LinkFilePaths('(README.md)', @IsFile));
+  AssertEquals('a dash in it', '[a/b-c.pp](gittan-file:a/b-c.pp)', LinkFilePaths('a/b-c.pp', @IsFile));
+  AssertEquals('code', 'Open [`src/ui/umain.pp:3`](gittan-file:src/ui/umain.pp#L3)',
+    LinkFilePaths('Open `src/ui/umain.pp:3`', @IsFile));
+  AssertEquals('escaped backticks', '\`[README.md](gittan-file:README.md)\`',
+    LinkFilePaths('\`README.md\`', @IsFile));
+  AssertEquals('lines', 'x [README.md](gittan-file:README.md)' + LineEnding +
+    'y [README.md](gittan-file:README.md)' + LineEnding,
+    LinkFilePaths('x README.md'#10'y README.md'#10, @IsFile));
+end;
+
+procedure TReviewsTest.TestLinkFilePathsLeftAlone;
+const
+  Fenced = '```' + LineEnding + 'src/ui/umain.pp' + LineEnding + '```';
+begin
+  AssertEquals('not a file', 'see src/ui/other.pp and 1.2.3',
+    LinkFilePaths('see src/ui/other.pp and 1.2.3', @IsFile));
+  AssertEquals('a link', '[x](src/ui/umain.pp) and [src/ui/umain.pp](https://a.b)',
+    LinkFilePaths('[x](src/ui/umain.pp) and [src/ui/umain.pp](https://a.b)', @IsFile));
+  AssertEquals('a URL', 'https://example.com/src/ui/umain.pp done',
+    LinkFilePaths('https://example.com/src/ui/umain.pp done', @IsFile));
+  AssertEquals('a tag', '<a href="README.md">', LinkFilePaths('<a href="README.md">', @IsFile));
+  AssertEquals('fenced code', Fenced, LinkFilePaths(Fenced, @IsFile));
+  AssertEquals('code with more in it', '`cat README.md`', LinkFilePaths('`cat README.md`', @IsFile));
+  AssertEquals('part of a word', 'x@README.md', LinkFilePaths('x@README.md', @IsFile));
+  AssertEquals('out of the repository', '../README.md /README.md',
+    LinkFilePaths('../README.md /README.md', @IsFile));
+end;
+
+procedure TReviewsTest.TestFileOfLink;
+var
+  Path: string;
+  Line: integer;
+begin
+  AssertTrue(FileOfLink('gittan-file:src/a.pp#L42', Path, Line));
+  AssertEquals('src/a.pp', Path);
+  AssertEquals(42, Line);
+  AssertTrue(FileOfLink('gittan-file:README.md', Path, Line));
+  AssertEquals('README.md', Path);
+  AssertEquals(0, Line);
+  AssertFalse(FileOfLink('https://github.com/o/r', Path, Line));
+  AssertFalse(FileOfLink('gittan-file:', Path, Line));
 end;
 
 initialization

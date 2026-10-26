@@ -281,6 +281,11 @@ type
       the reason in AError when there is none (no remote on the forge). }
     function WebUrl(const ARoot: string; const ATarget: TGittanWebTarget;
       out AUrl, AError: string): boolean; virtual; abstract;
+    {** The repository ("owner/name"), the file and the line (0 for none)
+      of the web address of a file on the forge in some commit or on some
+      branch, as a comment links to it; false for any other address. }
+    function FileOfWebUrl(const AUrl: string; out ARepo, APath: string;
+      out ALine: integer): boolean; virtual; abstract;
     {** The ref a remote of the forge serves pull request ANumber's head
       at, for git fetch: "refs/pull/12/head". }
     function PullRef(ANumber: integer): string; virtual; abstract;

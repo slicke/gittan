@@ -578,6 +578,11 @@ begin
   if Button <> mbLeft then
     Exit;
   { A click on a review comment's card (see EditClickGap). }
+  if FGapLink <> '' then
+  begin
+    Application.QueueAsyncCall(@OpenGapLinkAsync, 0);
+    Exit;
+  end;
   if FGapToggle <> '' then
   begin
     ToggleThreadNow;

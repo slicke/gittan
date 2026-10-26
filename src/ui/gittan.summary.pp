@@ -146,6 +146,7 @@ type
     FOnContextFile: TGittanContextFileEvent;
     FOnBranchClick: TGittanBranchClickEvent;
     FOnOpenUrl: TGittanOpenUrlEvent;
+    FOnFileExists: TGittanPathTest;
     FRowsTop: integer;
     { The height the content needs; the control is at least as high as
       the box it fills, see FitHeight. }
@@ -319,6 +320,10 @@ type
     property ForgeName: string read FForgeName write FForgeName;
     {** A click on a note's link to the forge. }
     property OnOpenUrl: TGittanOpenUrlEvent read FOnOpenUrl write FOnOpenUrl;
+    {** Whether a path is a file of the repository: a path in a note's
+      text that is one becomes a link to it (LinkFilePaths), which goes to
+      OnOpenUrl. }
+    property OnFileExists: TGittanPathTest read FOnFileExists write FOnFileExists;
     {** A click on the row counting the pull requests waiting for the
       user's review, with the chip's rectangle in screen coordinates
       for a list to drop from; without it the row is not a chip. }
@@ -822,7 +827,10 @@ begin
       Row := Default(TGittanSummaryNoteRow);
       Row.Depth := Parts[k].Depth;
       Row.Detail := -1;
-      Row.Markup := MarkdownToInk(Parts[k].Text, [imoInlineHTML]);
+      if (Parts[k].Kind = cpText) and Assigned(FOnFileExists) then
+        Row.Markup := MarkdownToInk(LinkFilePaths(Parts[k].Text, FOnFileExists), [imoInlineHTML])
+      else
+        Row.Markup := MarkdownToInk(Parts[k].Text, [imoInlineHTML]);
       if Parts[k].Kind = cpDetails then
       begin
         Row.Detail := k;
@@ -911,7 +919,7 @@ begin
 end;
 
 { The address of the link in a note's text at X, Y, when it goes to the
-  web; '' elsewhere. }
+  web or to a file of the repository; '' elsewhere. }
 function TGittanSummary.TextLinkAt(X, Y: integer): string;
 var
   i, k: integer;
@@ -931,7 +939,8 @@ begin
         Hit := HTMLHitTest(FMeasure.Canvas, R, FNoteBoxes[i].Rows[k].Markup,
           NoteInkOptions, X, Y, FInk);
         if Hit.OnLink and (AnsiStartsText('https://', Hit.LinkName) or
-          AnsiStartsText('http://', Hit.LinkName) or AnsiStartsText('mailto:', Hit.LinkName)) then
+          AnsiStartsText('http://', Hit.LinkName) or AnsiStartsText('mailto:', Hit.LinkName) or
+          AnsiStartsText(FileLinkScheme, Hit.LinkName)) then
           Result := Hit.LinkName;
         Exit;
       end;
