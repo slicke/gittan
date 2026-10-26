@@ -23,6 +23,7 @@ type
     procedure TestFeedback;
     procedure TestNotes;
     procedure TestFindClones;
+    procedure TestSiblingRepositories;
   end;
 
 implementation
@@ -233,6 +234,55 @@ begin
     Roots.Clear;
     FindClones(Pulls, Roots);
     AssertEquals('', Pulls[0].Clone);
+  finally
+    Roots.Free;
+    RemoveTree(ExcludeTrailingPathDelimiter(Dir));
+  end;
+end;
+
+{ A folder holding .git, a folder or a file, is a repository; others,
+  and plain files, are not, and the folders of the repositories added
+  are not looked beside again. }
+procedure TForgeTest.TestSiblingRepositories;
+var
+  Dir: string;
+  Roots: TStringList;
+
+  procedure Touch(const APath: string);
+  begin
+    with TStringList.Create do
+    try
+      SaveToFile(APath);
+    finally
+      Free;
+    end;
+  end;
+
+begin
+  Dir := IncludeTrailingPathDelimiter(GetTempDir) + 'gittan-siblings-' + IntToStr(GetProcessID) +
+    '-' + IntToStr(Random(MaxInt)) + PathDelim;
+  Roots := TStringList.Create;
+  try
+    ForceDirectories(Dir + 'kod' + PathDelim + 'b' + PathDelim + '.git');
+    ForceDirectories(Dir + 'kod' + PathDelim + 'a' + PathDelim + '.git');
+    ForceDirectories(Dir + 'kod' + PathDelim + 'here' + PathDelim + '.git');
+    ForceDirectories(Dir + 'kod' + PathDelim + 'notes');
+    ForceDirectories(Dir + 'kod' + PathDelim + 'wt');
+    Touch(Dir + 'kod' + PathDelim + 'wt' + PathDelim + '.git');
+    Touch(Dir + 'kod' + PathDelim + 'file.txt');
+    ForceDirectories(Dir + 'kod' + PathDelim + 'a' + PathDelim + 'inner' + PathDelim + '.git');
+    ForceDirectories(Dir + 'other' + PathDelim + 'c' + PathDelim + '.git');
+    Roots.Add(Dir + 'kod' + PathDelim + 'here');
+    Roots.Add(Dir + 'other' + PathDelim + 'c');
+    Roots.Add(Dir + 'gone' + PathDelim + 'x');
+    AddSiblingRepositories(Roots);
+    AssertEquals(6, Roots.Count);
+    AssertEquals(Dir + 'kod' + PathDelim + 'here', Roots[0]);
+    AssertEquals(Dir + 'other' + PathDelim + 'c', Roots[1]);
+    AssertEquals(Dir + 'gone' + PathDelim + 'x', Roots[2]);
+    AssertEquals(Dir + 'kod' + PathDelim + 'a', Roots[3]);
+    AssertEquals(Dir + 'kod' + PathDelim + 'b', Roots[4]);
+    AssertEquals(Dir + 'kod' + PathDelim + 'wt', Roots[5]);
   finally
     Roots.Free;
     RemoveTree(ExcludeTrailingPathDelimiter(Dir));

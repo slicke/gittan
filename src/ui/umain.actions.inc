@@ -493,6 +493,7 @@ begin
     V.GitPath := FSettings.GitPath;
     V.GhPath := FSettings.GhPath;
     V.GitHubEnabled := FSettings.GitHubEnabled;
+    V.CloneSiblings := FSettings.CloneSiblings;
     V.AIEnabled := FSettings.AIEnabled;
     V.Agent := AgentOfKey(FSettings.AIAgent);
     V.AgentPaths[gaClaude] := FSettings.ClaudePath;
@@ -506,6 +507,7 @@ begin
       PreviewSettings(F, V.Theme, V.TabSize);
       FSettings.EditorCommand := V.EditorCommand;
       FSettings.TerminalCommand := V.TerminalCommand;
+      FSettings.CloneSiblings := V.CloneSiblings;
       FSettings.AIEnabled := V.AIEnabled;
       FSettings.AIAgent := AgentCommands[V.Agent];
       FSettings.ClaudePath := V.AgentPaths[gaClaude];

@@ -108,6 +108,10 @@ type
     {** Whether the GitHub page leaves out the user's pull requests that
       nobody but them has commented on or reviewed. }
     HideWithoutFeedback: boolean;
+    {** Whether the GitHub page looks for a clone of a pull request's
+      repository beside the recent repositories too, in the folders they
+      are in, besides among them; off unless the user turns it on. }
+    CloneSiblings: boolean;
     {** Whether the AI features show (see gittan.ai): off until the user
       turns them on, since they send the changes to the agent's
       provider. }
@@ -293,6 +297,7 @@ begin
       { Earlier versions kept gh's path with git's. }
       GhPath := Ini.ReadString(SecGitHub, 'Cli', Ini.ReadString(SecTools, 'Gh', ''));
       HideWithoutFeedback := Ini.ReadBool(SecGitHub, 'HideWithoutFeedback', False);
+      CloneSiblings := Ini.ReadBool(SecGitHub, 'CloneSiblings', False);
       AIEnabled := Ini.ReadBool(SecAI, 'Enabled', False);
       AIAgent := Ini.ReadString(SecAI, 'Agent', '');
       ClaudePath := Ini.ReadString(SecAI, 'Claude', '');
@@ -363,6 +368,7 @@ begin
       Ini.WriteBool(SecGitHub, 'Enabled', GitHubEnabled);
       Ini.WriteString(SecGitHub, 'Cli', KeepEdges(GhPath));
       Ini.WriteBool(SecGitHub, 'HideWithoutFeedback', HideWithoutFeedback);
+      Ini.WriteBool(SecGitHub, 'CloneSiblings', CloneSiblings);
       Ini.WriteBool(SecAI, 'Enabled', AIEnabled);
       Ini.WriteString(SecAI, 'Agent', AIAgent);
       Ini.WriteString(SecAI, 'Claude', KeepEdges(ClaudePath));

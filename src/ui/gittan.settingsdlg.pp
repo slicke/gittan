@@ -6,8 +6,9 @@ unit gittan.settingsdlg;
   the width of a tab and the syntax theme, with a sample; Tools, the
   commands Open in Editor and Open in Terminal run, and the git to run in
   place of the one found on PATH; Hosting, a block per service that hosts
-  repositories (GitHub alone so far) with whether its features are on and
-  the command line tool they run; AI, whether the AI features show, the
+  repositories (GitHub alone so far) with whether its features are on,
+  the command line tool they run and, for GitHub, whether its page looks
+  for clones beside the recent repositories; AI, whether the AI features show, the
   agent they run, and its command and model (see gittan.ai);
   and About (also Gittan > About Gittan on macOS, Tools > About Gittan
   elsewhere), the build, a check for a newer one, what Gittan runs on
@@ -45,8 +46,9 @@ type
     EditorCommand, TerminalCommand: string;
     {** Paths of git and gh; empty for the ones found on PATH. }
     GitPath, GhPath: string;
-    {** Whether the GitHub features are on. }
-    GitHubEnabled: boolean;
+    {** Whether the GitHub features are on, and whether the GitHub page
+      looks for clones beside the recent repositories. }
+    GitHubEnabled, CloneSiblings: boolean;
     {** Whether the AI features show, the agent they run, and each
       agent's command (empty for the one found) and model (empty for its
       own choice). }
@@ -125,6 +127,10 @@ resourcestring
   rsGitHubNote = 'Pull requests, their checks and review comments, and the ' +
     'GitHub page. They run gh with its own login, for a repository with a ' +
     'remote on GitHub.';
+  rsCloneSiblings = 'Look for clones beside the recent repositories';
+  rsCloneSiblingsNote = 'A pull request on the GitHub page links to a clone of its ' +
+    'repository among the recent ones. With this on, the repositories in the folders ' +
+    'they are in count too.';
   rsToolTyped = 'Run in place of the one on PATH.';
   rsToolMissing = 'There is no such file.';
   rsAboutName = 'Gittan';
@@ -279,7 +285,7 @@ type
     FThemeBox: TComboBox;
     FEditorEdit, FTerminalEdit, FGitEdit, FGhEdit, FAgentEdit, FModelEdit: TEdit;
     FGitNote, FGhNote, FAgentLabel, FAgentNote, FModelNote: TLabel;
-    FAIBox, FGitHubBox: TCheckBox;
+    FAIBox, FGitHubBox, FSiblingsBox: TCheckBox;
     { The agent picked, and each agent's command and model as edited:
       the fields show the picked one's (ShowAgent). }
     FAgentBox: TComboBox;
@@ -547,6 +553,12 @@ begin
   Lbl.Font.Color := clGrayText;
   Lbl.WordWrap := True;
   FGhEdit := AddTool(rsGhPath, rsGhDefault, FGhNote);
+  FSiblingsBox := TCheckBox.Create(Self);
+  FSiblingsBox.Caption := rsCloneSiblings;
+  Place(FSiblingsBox, 16);
+  Lbl := AddLabel(rsCloneSiblingsNote, 4);
+  Lbl.Font.Color := clGrayText;
+  Lbl.WordWrap := True;
 
   { The AI page: the switch and what it means, then the agent, its
     command and its model, which follow the switch; the labels name the
@@ -1029,6 +1041,7 @@ procedure TSettingsForm.GitHubChange(Sender: TObject);
 begin
   FVersionsRead := False;
   FGhEdit.Enabled := FGitHubBox.Checked;
+  FSiblingsBox.Enabled := FGitHubBox.Checked;
 end;
 
 { What was typed for the agent left is kept, and the fields show the
@@ -1327,6 +1340,7 @@ begin
     F.ToolChange(F.FGitEdit);
     F.ToolChange(F.FGhEdit);
     F.FGitHubBox.Checked := AValues.GitHubEnabled;
+    F.FSiblingsBox.Checked := AValues.CloneSiblings;
     F.GitHubChange(nil);
     F.FAIBox.Checked := AValues.AIEnabled;
     F.FAgent := AValues.Agent;
@@ -1353,6 +1367,7 @@ begin
       AValues.GitPath := Trim(F.FGitEdit.Text);
       AValues.GhPath := Trim(F.FGhEdit.Text);
       AValues.GitHubEnabled := F.FGitHubBox.Checked;
+      AValues.CloneSiblings := F.FSiblingsBox.Checked;
       AValues.AIEnabled := F.FAIBox.Checked;
       { The fields hold the picked agent's; the other's are as kept. }
       F.AgentChange(nil);

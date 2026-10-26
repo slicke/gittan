@@ -138,6 +138,11 @@ function IssueNumber(const ASummary: string): integer;
   its repository; a root that is gone or no repository is passed over.
   Runs git once per root, in the caller's thread. }
 procedure FindClones(var APulls: TGittanForgePulls; ARoots: TStrings);
+{** Adds to ARoots, after them, the repositories beside them: the
+  folders in each of their parent folders that hold a .git (a folder,
+  or a file as a worktree or a submodule has), in name order, each once
+  and none already in ARoots. }
+procedure AddSiblingRepositories(ARoots: TStrings);
 
 {** Whether a pull request listed as waiting for the user's review
   still is: one the user is asked for in person now, whatever they
@@ -219,6 +224,7 @@ type
     FForgeName, FRoot, FLogin, FError: string;
     FMine, FReview: TGittanForgePulls;
     FClones: TStringList;
+    FSiblings: boolean;
   protected
     {** The login and the two lists, the review list as the forge gives
       it; false with the reason in AError when they could not be read. }
@@ -232,6 +238,9 @@ type
     {** The roots of the repositories to look for clones in, the likeliest
       first (FindClones), set before the job starts; empty looks for none. }
     property Clones: TStringList read FClones;
+    {** Whether the repositories beside Clones are looked in too, after
+      them (AddSiblingRepositories). }
+    property Siblings: boolean read FSiblings write FSiblings;
     property ForgeName: string read FForgeName;
     property Login: string read FLogin;
     property Mine: TGittanForgePulls read FMine;
@@ -410,6 +419,46 @@ begin
   end;
 end;
 
+procedure AddSiblingRepositories(ARoots: TStrings);
+var
+  Parents, Found: TStringList;
+  Info: TSearchRec;
+  Parent, Dir: string;
+  i, j: integer;
+begin
+  Parents := TStringList.Create;
+  Found := TStringList.Create;
+  try
+    for i := 0 to ARoots.Count - 1 do
+    begin
+      Parent := ExtractFileDir(ExcludeTrailingPathDelimiter(ARoots[i]));
+      if (Parent = '') or (Parents.IndexOf(Parent) >= 0) then
+        Continue;
+      Parents.Add(Parent);
+      Found.Clear;
+      if FindFirst(IncludeTrailingPathDelimiter(Parent) + '*', faDirectory, Info) = 0 then
+      try
+        repeat
+          if (Info.Attr and faDirectory = 0) or (Info.Name = '.') or (Info.Name = '..') then
+            Continue;
+          Dir := IncludeTrailingPathDelimiter(Parent) + Info.Name;
+          if FileExists(Dir + PathDelim + '.git') or DirectoryExists(Dir + PathDelim + '.git') then
+            Found.Add(Dir);
+        until FindNext(Info) <> 0;
+      finally
+        FindClose(Info);
+      end;
+      Found.Sort;
+      for j := 0 to Found.Count - 1 do
+        if ARoots.IndexOf(Found[j]) < 0 then
+          ARoots.Add(Found[j]);
+    end;
+  finally
+    Parents.Free;
+    Found.Free;
+  end;
+end;
+
 procedure FindClones(var APulls: TGittanForgePulls; ARoots: TStrings);
 var
   Urls: string;
@@ -537,6 +586,8 @@ begin
   else
   begin
     FReview := StillToReview(FReview);
+    if FSiblings then
+      AddSiblingRepositories(FClones);
     FindClones(FMine, FClones);
     FindClones(FReview, FClones);
   end;

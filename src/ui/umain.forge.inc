@@ -14,8 +14,9 @@
   that nobody else has answered, kept in the settings
   (HideWithoutFeedback). A card of a pull request of the open
   repository (HasRemoteFor) compares with it as the Pull Requests page
-  does; one of another repository with a clone among the recent ones
-  (the job's FindClones) opens that clone and compares with it there;
+  does; one of another repository with a clone among the recent ones,
+  or beside them while CloneSiblings is on (the job's FindClones and
+  AddSiblingRepositories), opens that clone and compares with it there;
   any other opens on the forge. GitHub is the only forge so far. See
   spec/github.md. }
 
@@ -84,6 +85,7 @@ begin
     Exit;
   FForgeJob := FForge.AccountJob(FRepo.Root);
   FForgeJob.Clones.Assign(FSettings.Recent);
+  FForgeJob.Siblings := FSettings.CloneSiblings;
   FForgeJob.OnDone := @ForgeJobDone;
   FForgeJob.Start;
   UpdateForgePage;
