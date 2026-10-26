@@ -21,11 +21,11 @@ unit gittan.sidenav;
   page.
 
   With ShowToggle, the first row holds a button at its right end that
-  folds the other rows and the heading away, as a music app's sidebar
-  folds at the button beside its name: a window with its sidebar and an
-  arrow into it, which points out again while they are folded, when
-  the first row alone is left over the heading and whatever the sidebar
-  lists. Collapsed tells the state and OnCollapse reports a change of
+  folds the other rows up into it, as a music app's sidebar folds at
+  the button beside its name: a window with a band across its top and
+  an arrow up into it, which points down again while they are folded,
+  when the first row alone is left over the heading and whatever the
+  sidebar lists. Collapsed tells the state and OnCollapse reports a change of
   it.
 
   It paints itself in the sidebar's shade, as the section headers do,
@@ -630,12 +630,12 @@ begin
   end;
 end;
 
-{ The folding button: a window with its sidebar along the left and an
-  arrow in the rest, pointing into the sidebar while the rows show, out
-  of it while they are folded. }
+{ The folding button: a window with a band across its top and an arrow
+  in the rest, pointing up into the band while the rows show, since they
+  fold up into the first row, and down out of it while they are folded. }
 procedure TGittanSideNav.DrawToggle(const R: TRect; AColor: TColor);
 var
-  X, Y, Split, Mid, CX: integer;
+  X, Y, Split, Mid, CY: integer;
 begin
   if FHotToggle then
   begin
@@ -651,15 +651,15 @@ begin
   Canvas.Pen.Width := 1;
   Canvas.Brush.Style := bsClear;
   Canvas.RoundRect(X, Y, X + Px(ToggleIconWidth) + 1, Y + Px(ToggleIconHeight) + 1, 3, 3);
-  Split := X + Px(ToggleIconWidth) div 3;
-  Canvas.Line(Split, Y + 1, Split, Y + Px(ToggleIconHeight));
-  Mid := Y + Px(ToggleIconHeight) div 2;
-  CX := (Split + X + Px(ToggleIconWidth)) div 2;
-  Canvas.Line(CX - 2, Mid, CX + 3, Mid);
+  Split := Y + Px(ToggleIconHeight) div 3;
+  Canvas.Line(X + 1, Split, X + Px(ToggleIconWidth), Split);
+  Mid := X + Px(ToggleIconWidth) div 2;
+  CY := (Split + Y + Px(ToggleIconHeight)) div 2;
+  Canvas.Line(Mid, CY - 2, Mid, CY + 3);
   if FCollapsed then
-    Canvas.Polyline([Point(CX, Mid - 2), Point(CX + 2, Mid), Point(CX, Mid + 2)])
+    Canvas.Polyline([Point(Mid - 2, CY), Point(Mid, CY + 2), Point(Mid + 2, CY)])
   else
-    Canvas.Polyline([Point(CX, Mid - 2), Point(CX - 2, Mid), Point(CX, Mid + 2)]);
+    Canvas.Polyline([Point(Mid - 2, CY), Point(Mid, CY - 2), Point(Mid + 2, CY)]);
 end;
 
 procedure TGittanSideNav.Paint;
