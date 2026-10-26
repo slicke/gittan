@@ -9,7 +9,7 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, Menus, ComCtrls,
-  ExtCtrls, StdCtrls, LCLType, LazLoggerBase, Math, Types,
+  ExtCtrls, StdCtrls, LCLType, LazLoggerBase, Math, Types, contnrs, InkDraw,
   ATSynEdit, ATSynEdit_Adapter_EControl, ATSynEdit_Bookmarks, ATSynEdit_Commands,
   ATSynEdit_Carets, ATSynEdit_Gutter_Decor, ATSynEdit_Globals, ATStringProc,
   ATStringProc_WordJump,
@@ -832,6 +832,10 @@ type
     FThreadFlips: TStringList;
     FReviewWidths: array[0..1] of integer;
     FReviewMeasure: TBitmap;
+    { The parts of a comment's body by the body (ReviewSegments), and the
+      layouts LazInk made of their Markdown. }
+    FReviewSegments: TFPObjectHashTable;
+    FReviewInk: THTMLLayoutCache;
     { The thread a click on its card folds when the button comes up. }
     FGapToggle: string;
     function Palette: TGittanPalette;
@@ -1107,6 +1111,9 @@ type
     function ThreadOpen(AThread: integer): boolean;
     procedure ReviewFont(C: TCanvas; AKind: integer);
     function ReviewLineHeight(AKind: integer): integer;
+    function ReviewSegments(const ABody: string): TStrings;
+    function ReviewInkOptions: THTMLOptions;
+    function ReviewRowHeight(ALines: TStrings; I, AInner: integer): integer;
     procedure ReviewLayout(AThread, AInner: integer; ALines: TStrings);
     function ReviewCardHeight(AThread, AWidth: integer): integer;
     function ReviewGapWidth(AEd: TATSynEdit): integer;
@@ -1678,7 +1685,7 @@ implementation
 
 uses
   Clipbrd, LCLIntf, Process, FileUtil, LazFileUtils, DateUtils, StrUtils, LazUTF8, LCLProc,
-  LConvEncoding, gittan.textfit
+  LConvEncoding, InkMarkdown, gittan.textfit
   {$IFDEF LCLCocoa}, CocoaConfig, gittan.titlebar{$ENDIF};
 
 resourcestring
@@ -2707,6 +2714,8 @@ begin
   FThreadFlips := TStringList.Create;
   FReviewMeasure := TBitmap.Create;
   FReviewMeasure.SetSize(1, 1);
+  FReviewSegments := TFPObjectHashTable.Create(True);
+  FReviewInk := THTMLLayoutCache.Create;
   FBlameCols := 12;
   FSideRatio := 0.5;
   FMdRatio := 0.5;
@@ -3153,6 +3162,8 @@ begin
   FreeAndNil(FSymbolFiles);
   FreeAndNil(FThreadFlips);
   FreeAndNil(FReviewMeasure);
+  FreeAndNil(FReviewSegments);
+  FreeAndNil(FReviewInk);
   FreeAndNil(FCommitOn);
   FreeAndNil(FCommitOff);
 

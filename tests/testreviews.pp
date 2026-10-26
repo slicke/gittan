@@ -24,6 +24,8 @@ type
     procedure TestMapLineChanged;
     procedure TestMapLineRemoved;
     procedure TestReviewAge;
+    procedure TestCommentMarkdown;
+    procedure TestCommentMarkdownCode;
   end;
 
 implementation
@@ -196,6 +198,48 @@ begin
   AssertEquals('yesterday', ReviewAge(IncHour(Now_, -30), Now_));
   AssertEquals('4 days ago', ReviewAge(IncDay(Now_, -4), Now_));
   AssertEquals('2026-08-01', ReviewAge(EncodeDateTime(2026, 8, 1, 0, 0, 0, 0), Now_));
+end;
+
+procedure TReviewsTest.TestCommentMarkdown;
+const
+  NL = LineEnding;
+begin
+  AssertEquals('plain Markdown as it is', '**Bug**: off by one.' + NL + NL + 'Use `<=`.',
+    CommentMarkdown('**Bug**: off by one.'#10#10'Use `<=`.'));
+  AssertEquals('comments go', 'Before' + NL + NL + 'after',
+    CommentMarkdown('Before'#10'<!-- fingerprinting:abc'#10'more -->'#10#10'after<!-- x -->'));
+  AssertEquals('a details block folds to its summary',
+    'Intro' + NL + NL + '▸ 🤖 Prompt for AI Agents' + NL + NL + 'Outro',
+    CommentMarkdown('Intro'#10'<details>'#10'<summary>🤖 Prompt for AI Agents</summary>'#10#10 +
+    'Inside'#10'<details><summary>Nested</summary>Deeper</details>'#10'```'#10'</details>'#10'```'#10 +
+    '</details>'#10'Outro'));
+  AssertEquals('a details block without summary', '▸ Details',
+    CommentMarkdown('<details>Hidden</details>'));
+  AssertEquals('one left open', 'A' + NL + NL + '▸ Open',
+    CommentMarkdown('A'#10'<details><summary>Open</summary>'#10'never closed'));
+  AssertEquals('img and a', 'See [the docs](https://x.y/d) logo',
+    CommentMarkdown('See <a href="https://x.y/d">the docs</a> <img src="l.png" alt="logo"/>'));
+  AssertEquals('block tags break lines', 'One' + NL + NL + 'Two' + NL + NL + '- three',
+    CommentMarkdown('<p>One</p><div>Two<ul><li>three</li></ul></div>'));
+  AssertEquals('headings are bold', '**Summary by CodeRabbit**' + NL + NL + '**Walk** x' + NL + '#hashtag',
+    CommentMarkdown('## Summary by CodeRabbit ##'#10#10'**Walk** x'#10'#hashtag'));
+  AssertEquals('other tags are left', 'Vec<T> and <b>bold</b><br> a < b',
+    CommentMarkdown('Vec<T> and <b>bold</b><br/> a < b'));
+end;
+
+procedure TReviewsTest.TestCommentMarkdownCode;
+const
+  NL = LineEnding;
+begin
+  AssertEquals('a fence keeps its tags and blank lines',
+    '```html' + NL + '<p>x</p>' + NL + NL + NL + '<!-- y -->' + NL + '```',
+    CommentMarkdown('```html'#10'<p>x</p>'#10#10#10'<!-- y -->'#10'```'));
+  AssertEquals('a heading in a fence stays', '```' + NL + '# not a heading' + NL + '```',
+    CommentMarkdown('```'#10'# not a heading'#10'```'));
+  AssertEquals('a code span too', 'Write `<details>` here',
+    CommentMarkdown('Write `<details>` here'));
+  AssertEquals('a suggestion stays', '```suggestion' + NL + 'x := 1;' + NL + '```',
+    CommentMarkdown('```suggestion'#10'x := 1;'#10'```'));
 end;
 
 initialization

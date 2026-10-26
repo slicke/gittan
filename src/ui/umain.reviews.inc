@@ -36,6 +36,8 @@ const
   rlCode = 4;
   rlRule = 5;
   rlFolded = 6;
+  { Markdown, as LazInk's inline markup, wrapped as it is drawn. }
+  rlMarkup = 7;
   { Room around a card, inside it, and the most it widens to. }
   ReviewMargin = 6;
   ReviewPadX = 12;
@@ -412,16 +414,92 @@ begin
   Result := Max(120, Min(AWidth - 2 * ReviewMargin, ReviewMaxWidth));
 end;
 
+{ The parts of a comment's body as its card shows them, kept by the body
+  (FReviewSegments), since a card is laid out at every paint: the text
+  between fences as one rlMarkup each (CommentMarkdown, then LazInk's
+  inline markup, with only the inline HTML it trusts), a fence's lines
+  as rlCode, and the label of a suggestion as rlNote before its code. }
+function TForm1.ReviewSegments(const ABody: string): TStrings;
+var
+  Parts: TStringList;
+  Prose: string;
+  i: integer;
+  InCode: boolean;
+
+  procedure FlushProse;
+  begin
+    if Trim(Prose) <> '' then
+      Result.AddObject(MarkdownToInk(Prose, [imoInlineHTML]), TObject(PtrInt(rlMarkup)));
+    Prose := '';
+  end;
+
+begin
+  Result := TStrings(FReviewSegments.Items[ABody]);
+  if Result <> nil then
+    Exit;
+  Result := TStringList.Create;
+  FReviewSegments.Add(ABody, Result);
+  Parts := TStringList.Create;
+  try
+    Parts.Text := CommentMarkdown(ABody);
+    Prose := '';
+    InCode := False;
+    for i := 0 to Parts.Count - 1 do
+    begin
+      if Copy(TrimLeft(Parts[i]), 1, 3) = '```' then
+      begin
+        InCode := not InCode;
+        if InCode then
+        begin
+          FlushProse;
+          if Pos('suggestion', TrimLeft(Parts[i])) = 4 then
+            Result.AddObject(rsReviewSuggestion, TObject(PtrInt(rlNote)));
+        end;
+        Continue;
+      end;
+      if InCode then
+        Result.AddObject(StringReplace(Parts[i], #9, '    ', [rfReplaceAll]), TObject(PtrInt(rlCode)))
+      else
+        Prose := Prose + Parts[i] + LineEnding;
+    end;
+    FlushProse;
+  finally
+    Parts.Free;
+  end;
+end;
+
+{ How LazInk draws the text of a card: links in the link color. }
+function TForm1.ReviewInkOptions: THTMLOptions;
+begin
+  Result := DefaultHTMLOptions;
+  Result.LinkColor := FLinkColor;
+end;
+
+{ The height of line I of a card laid out AInner wide: a kind's line
+  height, or the height Markdown takes wrapped at that width. }
+function TForm1.ReviewRowHeight(ALines: TStrings; I, AInner: integer): integer;
+var
+  C: TCanvas;
+begin
+  if PtrInt(ALines.Objects[I]) <> rlMarkup then
+    Exit(ReviewLineHeight(PtrInt(ALines.Objects[I])));
+  C := FReviewMeasure.Canvas;
+  ReviewFont(C, rlBody);
+  Result := HTMLTextExtentOpt(C, Rect(0, 0, AInner, 100000), [], ALines[I],
+    ReviewInkOptions, FReviewInk).cy + 4;
+end;
+
 { The lines of the card of AThread, AInner wide: the text in Strings,
-  the kind in Objects. Text is wrapped at words; code (between ```
-  fences) is not. }
+  the kind in Objects. Headers and notes are wrapped at words; the
+  Markdown of a comment is one rlMarkup that LazInk wraps; code (between
+  ``` fences) is not wrapped. }
 procedure TForm1.ReviewLayout(AThread, AInner: integer; ALines: TStrings);
 var
   C: TCanvas;
   Note, S, Head: string;
   Parts: TStringList;
+  Segs: TStrings;
   i, k: integer;
-  InCode, Blank: boolean;
 
   procedure Add(const AText: string; AKind: integer);
   begin
@@ -492,15 +570,16 @@ begin
         Note := rsReviewOutdated
       else
         Note := '';
-      { The first line of text of the first comment. }
+      { The first line of text of the first comment, without its
+        markup. }
       S := '';
       Parts := TStringList.Create;
       try
-        Parts.Text := Comments[0].Body;
+        Parts.Text := CommentMarkdown(Comments[0].Body);
         for i := 0 to Parts.Count - 1 do
           if (Trim(Parts[i]) <> '') and (Copy(Trim(Parts[i]), 1, 3) <> '```') then
           begin
-            S := Trim(Parts[i]);
+            S := Trim(HTMLPlainText(MarkdownToInk(Parts[i], [imoInlineHTML])));
             Break;
           end;
       finally
@@ -548,42 +627,9 @@ begin
       if S <> '' then
         Head := Head + ' · ' + S;
       Add(Head, rlHeader);
-      Parts := TStringList.Create;
-      try
-        Parts.Text := Comments[k].Body;
-        while (Parts.Count > 0) and (Trim(Parts[Parts.Count - 1]) = '') do
-          Parts.Delete(Parts.Count - 1);
-        InCode := False;
-        Blank := False;
-        for i := 0 to Parts.Count - 1 do
-        begin
-          S := Parts[i];
-          if Copy(TrimLeft(S), 1, 3) = '```' then
-          begin
-            InCode := not InCode;
-            if InCode and (Pos('suggestion', TrimLeft(S)) = 4) then
-              Add(rsReviewSuggestion, rlNote);
-            Continue;
-          end;
-          if InCode then
-          begin
-            Add(StringReplace(S, #9, '    ', [rfReplaceAll]), rlCode);
-            Continue;
-          end;
-          { One blank line between paragraphs, none at the start. }
-          if Trim(S) = '' then
-          begin
-            Blank := True;
-            Continue;
-          end;
-          if Blank and (ALines.Count > 0) and (PtrInt(ALines.Objects[ALines.Count - 1]) <> rlHeader) then
-            Add('', rlBody);
-          Blank := False;
-          Wrap(TrimRight(S), rlBody);
-        end;
-      finally
-        Parts.Free;
-      end;
+      Segs := ReviewSegments(Comments[k].Body);
+      for i := 0 to Segs.Count - 1 do
+        Add(Segs[i], PtrInt(Segs.Objects[i]));
     end;
   end;
 end;
@@ -598,7 +644,7 @@ begin
     ReviewLayout(AThread, ReviewCardWidth(AWidth) - 2 * ReviewPadX, Lines);
     Result := 2 * ReviewMargin + 2 * ReviewPadY;
     for i := 0 to Lines.Count - 1 do
-      Inc(Result, ReviewLineHeight(PtrInt(Lines.Objects[i])));
+      Inc(Result, ReviewRowHeight(Lines, i, ReviewCardWidth(AWidth) - 2 * ReviewPadX));
   finally
     Lines.Free;
   end;
@@ -863,8 +909,18 @@ begin
     for i := 0 to Lines.Count - 1 do
     begin
       Kind := PtrInt(Lines.Objects[i]);
-      H := ReviewLineHeight(Kind);
+      H := ReviewRowHeight(Lines, i, W - 2 * ReviewPadX);
       ReviewFont(C, Kind);
+      if Kind = rlMarkup then
+      begin
+        ReviewFont(C, rlBody);
+        C.Font.Color := Ed.Colors.TextFont;
+        C.Brush.Style := bsClear;
+        HTMLDrawOpt(C, Rect(Card.Left + ReviewPadX, y + 2, Card.Right - ReviewPadX, y + H), [],
+          Lines[i], ReviewInkOptions, FReviewInk);
+        Inc(y, H);
+        Continue;
+      end;
       case Kind of
         rlRule:
           begin
@@ -918,13 +974,16 @@ begin
   end;
 end;
 
-{ A click on "GitHub ↗" opens the thread on GitHub; anywhere else on the
-  card it folds or unfolds. APos is in the gap. }
+{ A click on "GitHub ↗" opens the thread on GitHub, one on a link in a
+  comment opens the link; anywhere else on the card it folds or unfolds.
+  APos is in the gap. }
 procedure TForm1.EditClickGap(Sender: TObject; AGapItem: TATGapItem; APos: TPoint);
 var
   Ed: TATSynEdit;
   Lines: TStringList;
   W, y, i, Kind, H, LinkLeft: integer;
+  LinkDone: boolean;
+  Hit: THTMLHitInfo;
 begin
   if (AGapItem = nil) or (AGapItem.Tag < 0) or (AGapItem.Tag > High(FShown)) then
     Exit;
@@ -934,22 +993,40 @@ begin
   try
     ReviewLayout(AGapItem.Tag, W - 2 * ReviewPadX, Lines);
     y := ReviewMargin + ReviewPadY;
+    LinkDone := False;
     for i := 0 to Lines.Count - 1 do
     begin
       Kind := PtrInt(Lines.Objects[i]);
-      H := ReviewLineHeight(Kind);
-      if (Kind in [rlHeader, rlFolded]) and (FShown[AGapItem.Tag].Comments[0].Url <> '') then
+      H := ReviewRowHeight(Lines, i, W - 2 * ReviewPadX);
+      if not LinkDone and (Kind in [rlHeader, rlFolded]) then
       begin
-        ReviewFont(FReviewMeasure.Canvas, rlNote);
-        LinkLeft := ReviewMargin + W - ReviewPadX -
-          FReviewMeasure.Canvas.TextWidth(Format(rsReviewLink, [ForgeName]));
-        if (APos.Y >= y) and (APos.Y < y + H) and (APos.X >= LinkLeft) and
-          (APos.X <= ReviewMargin + W - ReviewPadX) then
+        LinkDone := True;
+        if FShown[AGapItem.Tag].Comments[0].Url <> '' then
         begin
-          OpenURL(FShown[AGapItem.Tag].Comments[0].Url);
+          ReviewFont(FReviewMeasure.Canvas, rlNote);
+          LinkLeft := ReviewMargin + W - ReviewPadX -
+            FReviewMeasure.Canvas.TextWidth(Format(rsReviewLink, [ForgeName]));
+          if (APos.Y >= y) and (APos.Y < y + H) and (APos.X >= LinkLeft) and
+            (APos.X <= ReviewMargin + W - ReviewPadX) then
+          begin
+            OpenURL(FShown[AGapItem.Tag].Comments[0].Url);
+            Exit;
+          end;
+        end;
+      end;
+      { A link in the text opens, when it goes to the web. }
+      if (Kind = rlMarkup) and (APos.Y >= y) and (APos.Y < y + H) then
+      begin
+        ReviewFont(FReviewMeasure.Canvas, rlBody);
+        Hit := HTMLHitTest(FReviewMeasure.Canvas, Rect(ReviewMargin + ReviewPadX, y + 2,
+          ReviewMargin + W - ReviewPadX, y + H), Lines[i], ReviewInkOptions,
+          APos.X, APos.Y, FReviewInk);
+        if Hit.OnLink and (AnsiStartsText('https://', Hit.LinkName) or
+          AnsiStartsText('http://', Hit.LinkName) or AnsiStartsText('mailto:', Hit.LinkName)) then
+        begin
+          OpenURL(Hit.LinkName);
           Exit;
         end;
-        Break;
       end;
       Inc(y, H);
     end;

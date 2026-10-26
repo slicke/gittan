@@ -71,6 +71,18 @@ function ReviewAge(AThen, ANow: TDateTime): string;
 {** The threads that are neither resolved nor outdated. }
 function OpenThreads(const AThreads: TGittanReviewThreads): integer;
 
+{** The Markdown of a comment's body as a card shows it, the HTML a bot
+  writes in it (CodeRabbit's, say) made Markdown or taken out: HTML
+  comments go, a <details> block becomes "▸ " and its <summary> on a
+  line of its own, the rest of it left out, an <img> its alt text, an
+  <a href> a Markdown link, and the block tags (p, div, table, lists,
+  headings and the like) go with a line break or a blank line in their
+  place; a heading is bold, as a card has no room for a big one. Code
+  (fenced or between backticks) is left as it is, and
+  inline tags and anything else that looks like a tag (Vec<T>) are left
+  for the Markdown converter to pass or show. }
+function CommentMarkdown(const ABody: string): string;
+
 type
   {** Reads the review threads of pull request Number of RepoPath
     ("owner/name") and the notes of its conversation, every page of
@@ -213,6 +225,309 @@ begin
   for i := 0 to High(AThreads) do
     if not AThreads[i].Resolved and not AThreads[i].Outdated then
       Inc(Result);
+end;
+
+{ ---------------------------------------------------------------------------
+  The body as a card shows it
+  --------------------------------------------------------------------------- }
+
+{ The value of attribute AName in the tag ATag ("<img alt="x" ...>"),
+  quoted with " or ' or not at all; '' when it has none. }
+function TagAttr(const ATag, AName: string): string;
+var
+  L: string;
+  p, q: integer;
+  Quote: char;
+begin
+  Result := '';
+  L := LowerCase(ATag);
+  p := Pos(' ' + AName + '=', L);
+  if p = 0 then
+    Exit;
+  Inc(p, Length(AName) + 2);
+  if (p <= Length(ATag)) and (ATag[p] in ['"', '''']) then
+  begin
+    Quote := ATag[p];
+    Inc(p);
+    q := p;
+    while (q <= Length(ATag)) and (ATag[q] <> Quote) do
+      Inc(q);
+  end
+  else
+  begin
+    q := p;
+    while (q <= Length(ATag)) and not (ATag[q] in [' ', '>', '/']) do
+      Inc(q);
+  end;
+  Result := Copy(ATag, p, q - p);
+end;
+
+function CommentMarkdown(const ABody: string): string;
+const
+  { Tags that stand for a blank line, and for a line break. }
+  ParaTags: array[0..13] of string = ('p', 'div', 'table', 'blockquote', 'ul', 'ol',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'center', 'hr');
+  LineTags: array[0..2] of string = ('tr', 'li', 'dt');
+  { Tags that go without a trace. }
+  GoneTags: array[0..8] of string = ('td', 'th', 'thead', 'tbody', 'tfoot', 'picture',
+    'source', 'dd', 'dl');
+var
+  Lines: TStringList;
+  Out, Summary, Href, Tag, Name, S, Fence: string;
+  i, p, q, Depth: integer;
+  InComment, InSummary, Closing: boolean;
+
+  function IsIn(const AName: string; const AList: array of string): boolean;
+  var
+    k: integer;
+  begin
+    for k := 0 to High(AList) do
+      if AList[k] = AName then
+        Exit(True);
+    Result := False;
+  end;
+
+  { Text that goes to the result: to the summary being read while inside
+    a <details>, nowhere else inside one. }
+  procedure Emit(const AText: string);
+  begin
+    if Depth = 0 then
+      Out := Out + AText
+    else if InSummary and (Depth = 1) then
+      Summary := Summary + AText;
+  end;
+
+  { The fence a line opens or closes, ``` or ~~~ and longer; '' for a
+    line that is not one. }
+  function FenceOf(const ALine: string): string;
+  var
+    T: string;
+    n: integer;
+  begin
+    Result := '';
+    T := TrimLeft(ALine);
+    if (Length(ALine) - Length(T) > 3) or (Length(T) < 3) or not (T[1] in ['`', '~']) then
+      Exit;
+    n := 1;
+    while (n < Length(T)) and (T[n + 1] = T[1]) do
+      Inc(n);
+    if n >= 3 then
+      Result := Copy(T, 1, n);
+  end;
+
+  { What a <details> block shows: its summary on a line, "Details" as
+    GitHub says when it has none. }
+  function SummaryLine: string;
+  begin
+    Result := Trim(StringReplace(Summary, LineEnding, ' ', [rfReplaceAll]));
+    if Result = '' then
+      Result := 'Details';
+    Result := '▸ ' + Result;
+  end;
+
+begin
+  Out := '';
+  Summary := '';
+  Href := '';
+  Fence := '';
+  Depth := 0;
+  InComment := False;
+  InSummary := False;
+  Lines := TStringList.Create;
+  try
+    Lines.Text := ABody;
+    for i := 0 to Lines.Count - 1 do
+    begin
+      S := Lines[i];
+      { A line of code, or the fence around it, as it is. }
+      if not InComment then
+      begin
+        if Fence <> '' then
+        begin
+          if (FenceOf(S) <> '') and (Copy(TrimLeft(S), 1, Length(Fence)) = Fence) and
+            (Trim(Copy(TrimLeft(S), Length(Fence) + 1, MaxInt)) = '') then
+            Fence := '';
+          Emit(S + LineEnding);
+          Continue;
+        end;
+        if FenceOf(S) <> '' then
+        begin
+          Fence := FenceOf(S);
+          Emit(S + LineEnding);
+          Continue;
+        end;
+      end;
+      p := 1;
+      while p <= Length(S) do
+      begin
+        if InComment then
+        begin
+          q := Pos('-->', Copy(S, p, MaxInt));
+          if q = 0 then
+            p := Length(S) + 1
+          else
+          begin
+            Inc(p, q + 2);
+            InComment := False;
+          end;
+          Continue;
+        end;
+        if Copy(S, p, 4) = '<!--' then
+        begin
+          InComment := True;
+          Inc(p, 4);
+          Continue;
+        end;
+        { A code span, as it is. }
+        if S[p] = '`' then
+        begin
+          q := p + 1;
+          while (q <= Length(S)) and (S[q] <> '`') do
+            Inc(q);
+          if q > Length(S) then
+          begin
+            Emit(Copy(S, p, MaxInt));
+            Break;
+          end;
+          Emit(Copy(S, p, q - p + 1));
+          p := q + 1;
+          Continue;
+        end;
+        if S[p] <> '<' then
+        begin
+          Emit(S[p]);
+          Inc(p);
+          Continue;
+        end;
+        { A tag: "<", maybe "/", a name, anything up to ">" on the line. }
+        q := p + 1;
+        Closing := (q <= Length(S)) and (S[q] = '/');
+        if Closing then
+          Inc(q);
+        Name := '';
+        while (q <= Length(S)) and (S[q] in ['a'..'z', 'A'..'Z', '0'..'9']) and
+          ((Name <> '') or (S[q] in ['a'..'z', 'A'..'Z'])) do
+        begin
+          Name := Name + LowerCase(S[q]);
+          Inc(q);
+        end;
+        while (q <= Length(S)) and (S[q] <> '>') and (S[q] <> '<') do
+          Inc(q);
+        if (Name = '') or (q > Length(S)) or (S[q] <> '>') or
+          not ((S[p + 1 + Ord(Closing) + Length(Name)] in [' ', '>', '/', #9])) then
+        begin
+          Emit('<');
+          Inc(p);
+          Continue;
+        end;
+        Tag := Copy(S, p, q - p + 1);
+        p := q + 1;
+        if Name = 'details' then
+        begin
+          if not Closing then
+          begin
+            Inc(Depth);
+            if Depth = 1 then
+              Summary := '';
+          end
+          else if Depth > 0 then
+          begin
+            Dec(Depth);
+            InSummary := False;
+            if Depth = 0 then
+              Out := Out + LineEnding + LineEnding + SummaryLine + LineEnding + LineEnding;
+          end;
+        end
+        else if Name = 'summary' then
+          InSummary := not Closing and (Depth = 1)
+        else if Name = 'img' then
+          Emit(TagAttr(Tag, 'alt'))
+        else if Name = 'a' then
+        begin
+          if not Closing then
+          begin
+            Href := TagAttr(Tag, 'href');
+            if Href <> '' then
+              Emit('[');
+          end
+          else if Href <> '' then
+          begin
+            Emit('](' + Href + ')');
+            Href := '';
+          end;
+        end
+        else if Name = 'br' then
+          Emit('<br>')
+        else if IsIn(Name, ParaTags) then
+          Emit(LineEnding + LineEnding)
+        else if IsIn(Name, LineTags) then
+        begin
+          Emit(LineEnding);
+          if (Name = 'li') and not Closing then
+            Emit('- ');
+        end
+        else if IsIn(Name, GoneTags) then
+          Emit(' ')
+        else
+          Emit(Tag);
+      end;
+      Emit(LineEnding);
+    end;
+  finally
+    Lines.Free;
+  end;
+  { A <details> left open still shows its summary. }
+  if Depth > 0 then
+    Out := Out + LineEnding + LineEnding + SummaryLine;
+  { What was taken out leaves blank lines: one between paragraphs is
+    enough, none at the start. Code keeps its own. }
+  Lines := TStringList.Create;
+  try
+    Lines.Text := Out;
+    Result := '';
+    Fence := '';
+    S := '';
+    for i := 0 to Lines.Count - 1 do
+    begin
+      if Fence <> '' then
+      begin
+        if (FenceOf(Lines[i]) <> '') and (Copy(TrimLeft(Lines[i]), 1, Length(Fence)) = Fence) then
+          Fence := '';
+      end
+      else
+      begin
+        if Trim(Lines[i]) = '' then
+        begin
+          if (Result <> '') and (S <> '') then
+            Result := Result + LineEnding;
+          S := '';
+          Continue;
+        end;
+        Fence := FenceOf(Lines[i]);
+        { A heading is bold text: a card has no room for a big one. }
+        if Fence = '' then
+        begin
+          S := TrimLeft(Lines[i]);
+          p := 1;
+          while (p <= Length(S)) and (p <= 6) and (S[p] = '#') do
+            Inc(p);
+          if (p > 1) and (p <= Length(S)) and (S[p] = ' ') and
+            (Length(Lines[i]) - Length(S) < 4) then
+          begin
+            S := Trim(TrimRight(Copy(S, p + 1, MaxInt)));
+            while (S <> '') and (S[Length(S)] = '#') do
+              Delete(S, Length(S), 1);
+            Lines[i] := '**' + Trim(S) + '**';
+          end;
+        end;
+      end;
+      S := Lines[i];
+      Result := Result + Lines[i] + LineEnding;
+    end;
+    Result := TrimRight(Result);
+  finally
+    Lines.Free;
+  end;
 end;
 
 { ---------------------------------------------------------------------------
