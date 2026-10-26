@@ -195,6 +195,7 @@ begin
   Job := TGittanRemoteJob(Sender);
   if Job <> FRemoteJob then
     Exit;
+  MarkNews;
   { The push stopped before git reported anything of its own: the
     pre-push hook said no. }
   HookFailed := FNoticeHook and not PushTransferStarted(Job.Progress);
@@ -432,6 +433,7 @@ begin
   FStatus.ShowMessage(Title, stBad, StatusErrorSeconds);
   FNotice.DetailFont.Assign(Edit.Font);
   FNotice.Popup(Title, AJob.Error, False, nkBad);
+  MarkNews;
   FNotice.SetButtons([Again, rsCopyOutput]);
 end;
 

@@ -29,7 +29,7 @@ uses
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.textfile, gittan.sectionheader, gittan.hintbox,
   gittan.forge, gittan.forgepage,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
-  gittan.app, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
+  gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
   gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
   gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, ATSynEdit_Gaps, md5;
 
@@ -183,6 +183,9 @@ type
     FWindow: TRepoWindow;
     { The folder an open job is opening, for the tab while it runs. }
     FOpeningDir: string;
+    { Something happened while the frame was in the background (MarkNews):
+      its tab has a dot until it is shown. }
+    FHasNews: boolean;
     { The menu bar's menu and, on macOS, the items the application menu
       starts with; the window shows this frame's while it is active. }
     FMainMenu: TMainMenu;
@@ -322,6 +325,8 @@ type
       FillFileTree keeps only the files whose path holds FTreeFilterText,
       the field's text in lower case. }
     FTreePanel: TPanel;
+    { The search box over the tree and the edit inside it. }
+    FSearchBox: TGittanSearchBox;
     FTreeFilter: TEdit;
     FTreeFilterText: string;
     { Whether git reported no change, for the check FileTreeAdvancedCustomDraw
@@ -952,6 +957,7 @@ type
     function PullHint(const APull: TGittanPullRequest): string;
     procedure UpdateSyntaxChecks;
     procedure UpdateCaption;
+    procedure MarkNews;
     procedure MenuNewTabClick(Sender: TObject);
     procedure MenuCloseTabClick(Sender: TObject);
     procedure MenuNextTabClick(Sender: TObject);
@@ -1763,6 +1769,10 @@ type
     function RepoRoot: string;
     {** The folder an open job is opening, '' when none runs. }
     property OpeningDir: string read FOpeningDir;
+    {** Something happened while the frame was in the background: a
+      banner or a notice, a job that ended, files or commits that came;
+      cleared when it is shown. }
+    property HasNews: boolean read FHasNews;
     {** The tab's name: the repository's folder, the one opening, the
       file open without one, or New Tab. }
     function TabTitle: string;
@@ -3227,6 +3237,7 @@ end;
 
 procedure TRepoFrame.Activated;
 begin
+  FHasNews := False;
   {$IFDEF LCLCocoa}
   CocoaConfigMenu.appMenu.customMenus := FAppMenuItem;
   {$ENDIF}
@@ -3280,6 +3291,17 @@ end;
 function TRepoFrame.NeedsSave: boolean;
 begin
   Result := (FEditPath <> '') and Edit.Modified;
+end;
+
+{ Something the user would want to see happened; a frame in the
+  background has its tab show it (TRepoWindow.FrameChanged). }
+procedure TRepoFrame.MarkNews;
+begin
+  if (FWindow = nil) or FWindow.IsActive(Self) or FHasNews or
+    (csDestroying in ComponentState) then
+    Exit;
+  FHasNews := True;
+  FWindow.FrameChanged(Self);
 end;
 
 procedure TRepoFrame.MenuNewTabClick(Sender: TObject);
@@ -4070,18 +4092,21 @@ end;
 
 procedure TRepoFrame.BannerError(const ATitle, ADetail: string);
 begin
+  MarkNews;
   FBanner.DetailFont.Assign(Edit.Font);
   FBanner.Add(ATitle, ADetail, bkError);
 end;
 
 procedure TRepoFrame.BannerInfo(const ATitle: string; const ADetail: string);
 begin
+  MarkNews;
   FBanner.DetailFont.Assign(Edit.Font);
   FBanner.Add(ATitle, ADetail, bkInfo, BannerInfoSeconds);
 end;
 
 procedure TRepoFrame.BannerSuccess(const ATitle: string; const ADetail: string);
 begin
+  MarkNews;
   FBanner.DetailFont.Assign(Edit.Font);
   FBanner.Add(ATitle, ADetail, bkSuccess, BannerInfoSeconds);
 end;
@@ -5497,6 +5522,8 @@ begin
   FBanner.Clear;
   FLfsChecked := '';
   FLfsShown := '';
+  { The next snapshot is the first of this repository (MarkNews). }
+  FSnapHead := '';
   { Nothing is open while the job runs: the views are emptied, so no
     click reaches the previous repository, and the commit message box
     is no one's. }
@@ -5637,6 +5664,12 @@ var
 begin
   if not ASnap.Ok then
     FLoadError := ASnap.Error;
+  { Files that changed in number, or commits that came, are news for a
+    frame in the background; the first snapshot after an open is not,
+    so the tabs opened at start come up without. }
+  if (FSnapHead <> '') and ((Length(ASnap.Stats) <> Length(FStats)) or
+    (ASnap.Behind <> FBehind) or (ASnap.Head <> FSnapHead)) then
+    MarkNews;
   ClearBlameCache;
   { The files a comment's paths link to may have come or gone. }
   FReviewSegments.Clear;
@@ -6662,13 +6695,15 @@ begin
   FTreePanel.Left := 0;
   FTreePanel.Align := alLeft;
   FTreePanel.Parent := Self;
-  FTreeFilter := TEdit.Create(Self);
+  FSearchBox := TGittanSearchBox.Create(Self);
+  FSearchBox.Align := alTop;
+  FSearchBox.BorderSpacing.Around := 6;
+  FSearchBox.OnChange := @TreeFilterChange;
+  FSearchBox.Parent := FTreePanel;
+  FSearchBox.FitHeight;
+  FTreeFilter := FSearchBox.Edit;
   FTreeFilter.TextHint := rsFilterHint;
-  FTreeFilter.Align := alTop;
-  FTreeFilter.BorderSpacing.Around := 4;
-  FTreeFilter.OnChange := @TreeFilterChange;
   FTreeFilter.OnKeyDown := @TreeFilterKeyDown;
-  FTreeFilter.Parent := FTreePanel;
   SetupSideNav;
   FileTree.Parent := FTreePanel;
   FileTree.Align := alClient;
@@ -6692,7 +6727,7 @@ end;
   frame's own. }
 procedure TRepoFrame.SetupTitleBar;
 begin
-  FTreeFilter.BorderSpacing.Top := FTitleBarHeight;
+  FSearchBox.BorderSpacing.Top := FTitleBarHeight;
   PlaceUnderTitleBar;
   TreeSplitter.BorderSpacing.Top := FTitleBarHeight;
   ColorSidebar;
@@ -6735,6 +6770,12 @@ begin
     Exit;
   Shade := SidebarShade(FDark);
   FTreePanel.Color := Shade;
+  if FDark then
+    FSearchBox.SetColors(RGBToColor(48, 48, 49), RGBToColor(66, 66, 67),
+      Edit.Colors.TextFont, RGBToColor(140, 140, 140), RGBToColor(220, 220, 220))
+  else
+    FSearchBox.SetColors(clWhite, RGBToColor(212, 212, 212), RGBToColor(30, 30, 30),
+      RGBToColor(130, 130, 130), RGBToColor(40, 40, 40));
   Color := Shade;
   FWindow.Color := Shade;
   FileTree.BackgroundColor := Shade;
@@ -6751,11 +6792,11 @@ begin
     if FDark then
       OwnBar.SetColors(Shade, Edit.Colors.TextBG, Edit.Colors.TextFont,
         RGBToColor(150, 150, 150), RGBToColor(55, 55, 56), RGBToColor(85, 85, 86),
-        RGBToColor(62, 62, 63))
+        RGBToColor(62, 62, 63), RGBToColor(100, 160, 240))
     else
       OwnBar.SetColors(Shade, Edit.Colors.TextBG, RGBToColor(30, 30, 30),
         RGBToColor(110, 110, 110), clWhite, RGBToColor(205, 205, 205),
-        RGBToColor(229, 229, 229));
+        RGBToColor(229, 229, 229), RGBToColor(0, 110, 230));
   {$ENDIF}
 end;
 
@@ -6766,11 +6807,6 @@ var
   Handler: TNotifyEvent;
 begin
   FTreeFilterText := LowerCase(Trim(FTreeFilter.Text));
-  {$IFDEF OWNBAR}
-  { The clear button shows while there is text. }
-  if OwnBar <> nil then
-    OwnBar.Invalidate;
-  {$ENDIF}
   Handler := FileTree.OnSelectionChanged;
   FileTree.OnSelectionChanged := nil;
   try

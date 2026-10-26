@@ -285,12 +285,11 @@ begin
 end;
 
 { Lines a pixel wide, as the caption buttons of GNOME and Windows 11
-  draw them: a dash, a square, two squares, a cross; a magnifier and a
-  small cross for the search field. }
+  draw them: a dash, a square, two squares, a cross. }
 procedure TGittanGtkTitleBar.DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
   AColor: TColor);
 var
-  CX, CY, H, D, R: integer;
+  CX, CY, H, D: integer;
 begin
   CX := (AR.Left + AR.Right) div 2;
   CY := (AR.Top + AR.Bottom) div 2;
@@ -318,21 +317,6 @@ begin
       begin
         Canvas.Line(CX - H, CY - H, CX + H + 1, CY + H + 1);
         Canvas.Line(CX - H, CY + H, CX + H + 1, CY - H - 1);
-      end;
-    tgSearch:
-      begin
-        { The glass up and left of the center, the handle down and
-          right. }
-        R := Scale96ToForm(4);
-        Canvas.Ellipse(CX - R - 1, CY - R - 1, CX + R - 1, CY + R - 1);
-        D := Scale96ToForm(2);
-        Canvas.Line(CX + D, CY + D, CX + R + D, CY + R + D);
-      end;
-    tgClear:
-      begin
-        D := Scale96ToForm(3);
-        Canvas.Line(CX - D, CY - D, CX + D + 1, CY + D + 1);
-        Canvas.Line(CX - D, CY + D, CX + D + 1, CY - D - 1);
       end;
   end;
 end;

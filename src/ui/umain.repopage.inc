@@ -55,7 +55,7 @@ begin
   FGraph.OnClose := @GraphClosed;
   { Under the filter field: the alTop controls keep the order of their
     tops. }
-  FSideNav.Top := FTreeFilter.Top + FTreeFilter.Height + 1;
+  FSideNav.Top := FSearchBox.Top + FSearchBox.Height + 1;
   FSideNav.Align := alTop;
   FSideNav.Parent := FTreePanel;
 end;

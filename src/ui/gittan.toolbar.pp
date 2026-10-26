@@ -10,7 +10,9 @@
   filled, then a plus that opens a new tab.
 
   The strip draws the tabs itself in the system's colors, so it follows
-  the window's appearance. A click on a tab selects it at once; the
+  the window's appearance; a tab with news (something happened in its
+  frame while another was shown) has a blue dot before its name. A
+  click on a tab selects it at once; the
   cross on the shown or hovered tab, or a middle click, closes it; the
   plus asks for a new tab. A press on the empty part moves the window
   and a double click there zooms it, as on the title bar. The full path
@@ -45,6 +47,7 @@ type
     FDelegate: NSObject;
     FStrip: NSView;
     FCaptions, FHints: array of string;
+    FMarks: array of boolean;
     FActive: integer;
     { The tab under the mouse (-1 for none), whether the mouse is on its
       cross, on the plus; the cross or plus pressed (-1 for none,
@@ -73,8 +76,10 @@ type
     class function Install(AHandle: PtrUInt): TGittanToolbar;
     destructor Destroy; override;
     {** The tabs, left to right: ACaptions are their names, AHints their
-      tooltips (the paths), AActive the one shown. }
-    procedure SetTabs(const ACaptions, AHints: array of string; AActive: integer);
+      tooltips (the paths), AMarks those with news (a dot before the
+      name), AActive the one shown. }
+    procedure SetTabs(const ACaptions, AHints: array of string;
+      const AMarks: array of boolean; AActive: integer);
     {** A click on a tab: show it. }
     property OnSelect: TGittanTabEvent read FOnSelect write FOnSelect;
     {** The cross or a middle click on a tab: close it. }
@@ -89,6 +94,10 @@ uses
   SysUtils, Math, cocoa_extra;
 
 type
+  NSColorSystemBlue = objccategory external (NSColor)
+    class function systemBlueColor: NSColor; message 'systemBlueColor'; { 10.10 }
+  end;
+
   NSWindowDrag = objccategory external (NSWindow)
     procedure performWindowDragWithEvent(event: NSEvent);
       message 'performWindowDragWithEvent:'; { 10.11 }
@@ -308,15 +317,17 @@ begin
 end;
 
 procedure TGittanToolbar.SetTabs(const ACaptions, AHints: array of string;
-  AActive: integer);
+  const AMarks: array of boolean; AActive: integer);
 var
   i: integer;
 begin
   SetLength(FCaptions, Length(ACaptions));
   SetLength(FHints, Length(ACaptions));
+  SetLength(FMarks, Length(ACaptions));
   for i := 0 to High(ACaptions) do
   begin
     FCaptions[i] := ACaptions[i];
+    FMarks[i] := (i <= High(AMarks)) and AMarks[i];
     if i <= High(AHints) then
       FHints[i] := AHints[i]
     else
@@ -438,6 +449,15 @@ begin
         Text, NSForegroundColorAttributeName, Para, NSParagraphStyleAttributeName, nil);
       T := NSMakeRect(R.origin.x + 10, R.origin.y + (R.size.height - LineH) / 2,
         R.size.width - 20 - CrossSize, LineH);
+      { News: a dot before the name, which moves over for it. }
+      if FMarks[i] then
+      begin
+        NSColor.systemBlueColor.setFill;
+        NSBezierPath.bezierPathWithOvalInRect(NSMakeRect(T.origin.x,
+          R.origin.y + R.size.height / 2 - 3, 6, 6)).fill;
+        T.origin.x := T.origin.x + 11;
+        T.size.width := T.size.width - 11;
+      end;
       NSStr(FCaptions[i]).drawInRect_withAttributes(T, Attrs);
       if Shown or (i = FHot) then
       begin

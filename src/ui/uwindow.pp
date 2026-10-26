@@ -563,6 +563,7 @@ end;
 procedure TGittanWindow.UpdateTabs;
 var
   Captions, Hints: array of string;
+  Marks: array of boolean;
   i: integer;
 begin
   if (csDestroying in ComponentState) or (FFrames = nil) then
@@ -571,17 +572,20 @@ begin
   Hints := nil;
   SetLength(Captions, FFrames.Count);
   SetLength(Hints, FFrames.Count);
+  Marks := nil;
+  SetLength(Marks, FFrames.Count);
   for i := 0 to FFrames.Count - 1 do
   begin
     Captions[i] := Frames[i].TabTitle;
     Hints[i] := Frames[i].TabHint;
+    Marks[i] := Frames[i].HasNews;
   end;
   {$IFDEF LCLCocoa}
   if FToolbar <> nil then
-    FToolbar.SetTabs(Captions, Hints, FFrames.IndexOf(FActive));
+    FToolbar.SetTabs(Captions, Hints, Marks, FFrames.IndexOf(FActive));
   {$ENDIF}
   {$IFDEF OWNBAR}
-  FOwnBar.SetTabs(Captions, Hints, FFrames.IndexOf(FActive));
+  FOwnBar.SetTabs(Captions, Hints, Marks, FFrames.IndexOf(FActive));
   {$ENDIF}
 end;
 

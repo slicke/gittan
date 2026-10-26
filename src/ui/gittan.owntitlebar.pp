@@ -20,7 +20,7 @@
 
   The tabs: the shown one is a filled, rounded box, a hovered one a
   fainter box, the others their names with a faint line between two of
-  them; the cross on the shown and the hovered tab, or a middle click,
+  them; a tab with news has a dot in the accent before its name; the cross on the shown and the hovered tab, or a middle click,
   closes one (OnTabClose), a press on a tab shows it (OnTabSelect), the
   plus asks for a new one (OnNewTab). The tooltip is the path of the tab
   under the mouse.
@@ -55,10 +55,8 @@ type
     tpMinimize, tpMaximize, tpClose);
 
   {** The glyphs a descendant draws: the caption buttons' (restore for
-    maximize while the window is maximized). tgSearch and tgClear are
-    left from the search field the bar had. }
-  TGittanTitleGlyph = (tgMinimize, tgMaximize, tgRestore, tgClose, tgSearch,
-    tgClear);
+    maximize while the window is maximized). }
+  TGittanTitleGlyph = (tgMinimize, tgMaximize, tgRestore, tgClose);
 
   { TGittanOwnTitleBar }
 
@@ -66,6 +64,7 @@ type
   private
     FSplitControl: TControl;
     FCaptions, FHints: array of string;
+    FMarks: array of boolean;
     FTabActive: integer;
     FMenuRect, FPlusRect, FMinRect, FMaxRect, FCloseRect: TRect;
     FHotPart, FPressedPart, FHotButton, FPressedButton: TGittanTitlePart;
@@ -73,7 +72,7 @@ type
     FMenuOpen: boolean;
     FPopup: TPopupMenu;
     FActive: boolean;
-    FSide, FMain, FText, FDim, FTabFill, FTabBorder, FButtonHot: TColor;
+    FSide, FMain, FText, FDim, FTabFill, FTabBorder, FButtonHot, FMark: TColor;
     FBandPos, FBandTotal: integer;
     FBandTrack, FBandFill: TColor;
     FTitle: string;
@@ -127,13 +126,16 @@ type
       none has it. }
     function OpenMenuByKey(AKey: char): boolean;
     {** The tabs, left to right: ACaptions are their names, AHints their
-      tooltips (the paths), AActive the one shown. }
-    procedure SetTabs(const ACaptions, AHints: array of string; AActive: integer);
+      tooltips (the paths), AMarks those with news (a dot before the
+      name), AActive the one shown. }
+    procedure SetTabs(const ACaptions, AHints: array of string;
+      const AMarks: array of boolean; AActive: integer);
     {** The bar's colors: the shade over the sidebar and the background
       over the rest, the text and the dim text, the shown tab's fill and
-      border, and a caption button (or a hovered tab) under the mouse. }
+      border, a caption button (or a hovered tab) under the mouse, and
+      the dot of a tab with news. }
     procedure SetColors(ASide, AMain, AText, ADim, ATabFill, ATabBorder,
-      AButtonHot: TColor);
+      AButtonHot, AMark: TColor);
     {** Shows the band along the top edge, APos of ATotal filled, in the
       colors ATrack and AFill; ATotal 0 hides it. }
     procedure SetBand(APos, ATotal: integer; ATrack, AFill: TColor);
@@ -194,7 +196,7 @@ begin
   FPopup := TPopupMenu.Create(Self);
   FPopup.OnClose := @PopupClose;
   SetColors(clBtnFace, clWindow, clWindowText, clGrayText, clBtnFace,
-    clBtnShadow, clBtnFace);
+    clBtnShadow, clBtnFace, clHighlight);
 end;
 
 procedure TGittanOwnTitleBar.SetActive(AValue: boolean);
@@ -206,8 +208,9 @@ begin
 end;
 
 procedure TGittanOwnTitleBar.SetColors(ASide, AMain, AText, ADim, ATabFill,
-  ATabBorder, AButtonHot: TColor);
+  ATabBorder, AButtonHot, AMark: TColor);
 begin
+  FMark := AMark;
   FSide := ASide;
   FMain := AMain;
   FText := AText;
@@ -220,15 +223,17 @@ begin
 end;
 
 procedure TGittanOwnTitleBar.SetTabs(const ACaptions, AHints: array of string;
-  AActive: integer);
+  const AMarks: array of boolean; AActive: integer);
 var
   i: integer;
 begin
   SetLength(FCaptions, Length(ACaptions));
   SetLength(FHints, Length(ACaptions));
+  SetLength(FMarks, Length(ACaptions));
   for i := 0 to High(ACaptions) do
   begin
     FCaptions[i] := ACaptions[i];
+    FMarks[i] := (i <= High(AMarks)) and AMarks[i];
     if i <= High(AHints) then
       FHints[i] := AHints[i]
     else
@@ -710,8 +715,20 @@ begin
     else
       Canvas.Font.Color := FDim;
     C := CrossRect(R);
-    Canvas.TextRect(Types.Rect(R.Left + Scale96ToForm(10), R.Top, C.Left - Scale96ToForm(4),
-      R.Bottom), R.Left + Scale96ToForm(10), TextY, FCaptions[i]);
+    { News: a dot before the name, which moves over for it. }
+    L := R.Left + Scale96ToForm(10);
+    if FMarks[i] then
+    begin
+      W := Scale96ToForm(6);
+      Canvas.Brush.Style := bsSolid;
+      Canvas.Brush.Color := FMark;
+      Canvas.Pen.Color := FMark;
+      Canvas.Ellipse(L, (R.Top + R.Bottom - W) div 2, L + W, (R.Top + R.Bottom + W) div 2);
+      Canvas.Brush.Style := bsClear;
+      Inc(L, W + Scale96ToForm(5));
+    end;
+    Canvas.TextRect(Types.Rect(L, R.Top, C.Left - Scale96ToForm(4), R.Bottom), L, TextY,
+      FCaptions[i]);
     if Shown or Hover then
     begin
       if Hover and (FHotPart = tpTabClose) then

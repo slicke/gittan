@@ -878,6 +878,7 @@ begin
   if Job <> FCommitJob then
     Exit;
   FCommitJob := nil;
+  MarkNews;
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
   if Job.Ok then
@@ -923,6 +924,7 @@ begin
   FStatus.ShowMessage(rsCommitFailed, stBad, StatusErrorSeconds);
   FNotice.DetailFont.Assign(Edit.Font);
   FNotice.Popup(rsCommitFailed, AError, False, nkBad);
+  MarkNews;
   FNotice.SetButtons([rsCommitAgain, rsCopyOutput]);
 end;
 

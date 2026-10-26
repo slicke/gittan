@@ -75,8 +75,6 @@ const
   GlyphMaximize = #$EE#$A4#$A2;
   GlyphRestore = #$EE#$A4#$A3;
   GlyphClose = #$EE#$A2#$BB;
-  GlyphSearch = #$EE#$9C#$A1;
-  GlyphClear = #$EE#$9C#$91;
 
   WM_NCMOUSELEAVE = $02A2;
   TME_NONCLIENT = $00000010;
@@ -372,10 +370,8 @@ begin
     tgMinimize: S := GlyphMinimize;
     tgMaximize: S := GlyphMaximize;
     tgRestore: S := GlyphRestore;
-    tgClose: S := GlyphClose;
-    tgSearch: S := GlyphSearch;
   else
-    S := GlyphClear;
+    S := GlyphClose;
   end;
   Canvas.Font.Name := FGlyphFont;
   Canvas.Font.Height := -Scale96ToForm(10);
