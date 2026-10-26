@@ -5,17 +5,6 @@
   here before the menu is built, so its check marks match; they are
   written when the window closes. }
 
-{ A path with the home folder shortened to "~", for menus. }
-function ShortPath(const APath: string): string;
-var
-  Home: string;
-begin
-  Result := APath;
-  Home := ExcludeTrailingPathDelimiter(GetUserDir);
-  if (Home <> '') and (Copy(APath, 1, Length(Home)) = Home) then
-    Result := '~' + Copy(APath, Length(Home) + 1, MaxInt);
-end;
-
 { Starts AExe with AArgs, in ADir when given, and does not wait for it. }
 procedure RunDetached(const AExe: string; const AArgs: array of string;
   const ADir: string = '');
@@ -504,6 +493,7 @@ begin
     V.GitPath := FSettings.GitPath;
     V.GhPath := FSettings.GhPath;
     V.GitHubEnabled := FSettings.GitHubEnabled;
+    V.CloneSiblings := FSettings.CloneSiblings;
     V.AIEnabled := FSettings.AIEnabled;
     V.Agent := AgentOfKey(FSettings.AIAgent);
     V.AgentPaths[gaClaude] := FSettings.ClaudePath;
@@ -517,6 +507,7 @@ begin
       PreviewSettings(F, V.Theme, V.TabSize);
       FSettings.EditorCommand := V.EditorCommand;
       FSettings.TerminalCommand := V.TerminalCommand;
+      FSettings.CloneSiblings := V.CloneSiblings;
       FSettings.AIEnabled := V.AIEnabled;
       FSettings.AIAgent := AgentCommands[V.Agent];
       FSettings.ClaudePath := V.AgentPaths[gaClaude];

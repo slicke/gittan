@@ -9,14 +9,17 @@ unit gittan.forgepage;
   chips, "Asked again" on one the user is asked to review once more
   after reviewing it, and under them the repository, who opened it and
   when it was opened and last changed, with a link to the forge at the
-  right end. A checkbox under the left column's heading leaves out the
-  user's pull requests nobody but them has commented on or reviewed
+  right end, and under that link one to the pull request's local clone
+  (its Clone) when it is not the open repository (SetOpenRoot). A
+  checkbox under the left column's heading leaves out the user's pull
+  requests nobody but them has commented on or reviewed
   (HideWithoutFeedback, OnHideChange). A card fills under the mouse
-  and a click raises OnPick with the pull request, for the owner to
-  compare with it when it is the open repository's, else to open it
-  on the forge. The line under the title names the login and says
-  while the forge is asked, with Refresh (OnRefresh) at its right; the
-  forge's failure (not logged in) shows in the error color.
+  and a click raises OnPick with the pull request, as one on its
+  clone's link does, for the owner to compare with it when it is the
+  open repository's, else in its clone, else to open it on the forge.
+  The line under the title names the login and says while the forge
+  is asked, with Refresh (OnRefresh) at its right; the forge's failure
+  (not logged in) shows in the error color.
 
   It paints itself in the editor's palette, like the Pull Requests
   page, and sizes its height to its content so it can sit in the same
@@ -38,7 +41,7 @@ type
 
   TGittanForgePage = class(TCustomControl)
   private
-    FForge, FLogin, FError: string;
+    FForge, FLogin, FError, FOpenRoot: string;
     FMine, FReview: TGittanForgePulls;
     { FMine as shown: without the ones with no feedback while FHide. }
     FShownMine: TGittanForgePulls;
@@ -89,6 +92,10 @@ type
     procedure SetForge(const AName: string);
     {** The login the forge knows the user as; empty before it answered. }
     procedure SetLogin(const ALogin: string);
+    {** The root of the open repository, empty when none is open: a card
+      whose clone it is has no link to it, since its click compares
+      there. }
+    procedure SetOpenRoot(const ARoot: string);
     {** The pull requests the user wrote and those waiting for their
       review, the forge's message when it failed (else ''), and whether
       it is being asked now. }
@@ -133,6 +140,7 @@ resourcestring
   rsNoMine = 'No open pull requests of yours.';
   rsNoReview = 'Nothing waiting for your review.';
   rsForgeLink = '%s ↗';
+  rsCloneLink = 'Open %s';
   rsDraft = 'Draft';
   rsApproved = 'Approved';
   rsChangesRequested = 'Changes requested';
@@ -191,6 +199,15 @@ begin
   if FLogin = ALogin then
     Exit;
   FLogin := ALogin;
+  Layout;
+  Invalidate;
+end;
+
+procedure TGittanForgePage.SetOpenRoot(const ARoot: string);
+begin
+  if FOpenRoot = ARoot then
+    Exit;
+  FOpenRoot := ARoot;
   Layout;
   Invalidate;
 end;
@@ -468,18 +485,26 @@ end;
 
 { A card between ALeft and ARight: the number dimmed and the title in
   bold, the chips of the state and the checks at the right, the second
-  line under them with the forge link at its right end. }
+  line under them with the forge link at its right end, and the link to
+  its clone under that, which ALink, the card's own, picks too. }
 procedure TGittanForgePage.PaintCard(var Y: integer; const APull: TGittanForgePull;
   ALeft, ARight: integer; const ALink: string);
 var
   R, LinkR: TRect;
   TextH, CardH, Right, X, ChipTop: integer;
-  Number, Line, ForgeLink: string;
+  Number, Line, ForgeLink, CloneLink: string;
+  Lines: integer;
+  HasClone: boolean;
 begin
   FC.Font := Font;
   FC.Brush.Style := bsClear;
   TextH := FC.TextHeight('Xg');
-  CardH := 2 * Px(CardPadY) + 2 * TextH + 4;
+  HasClone := (APull.Clone <> '') and Assigned(FOnPick) and
+    not SameFileName(APull.Clone, FOpenRoot);
+  Lines := 2;
+  if HasClone then
+    Lines := 3;
+  CardH := 2 * Px(CardPadY) + Lines * TextH + 4 * (Lines - 1);
   R := Rect(ALeft, Y, ARight, Y + CardH);
   FC.Pen.Style := psClear;
   FC.Brush.Style := bsSolid;
@@ -544,6 +569,23 @@ begin
   Line := PullLine(APull);
   FC.Font.Color := FDim;
   FC.TextOut(X, R.Top + Px(CardPadY) + TextH + 4, FitTextRight(FC, Line, Max(0, Right - X)));
+
+  { The clone's link, under the forge's, its path cut at its start to
+    the card. }
+  if HasClone then
+  begin
+    Right := R.Right - Px(CardPadX);
+    CloneLink := Format(rsCloneLink, [FitTextLeft(FC, ShortPath(APull.Clone),
+      Max(0, Right - X - FC.TextWidth(Format(rsCloneLink, ['']))))]);
+    LinkR := Rect(Right - FC.TextWidth(CloneLink), R.Top + Px(CardPadY) + 2 * TextH + 8,
+      Right, R.Top + Px(CardPadY) + 3 * TextH + 8);
+    AddLink(LinkR, ALink);
+    FC.Font.Color := FLink;
+    if FHot = High(FLinkRects) then
+      FC.Font.Style := [fsUnderline];
+    FC.TextOut(LinkR.Left, LinkR.Top, CloneLink);
+    FC.Font.Style := [];
+  end;
   Inc(Y, CardH + Px(CardGap));
 end;
 

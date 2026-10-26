@@ -72,7 +72,8 @@ type
     request a review clears, and a new one brings back); Feedback
     whether someone other than its author, and not a bot, has commented
     on it or reviewed it (among its last thirty comments and last thirty
-    reviews). }
+    reviews); Clone the root of a local clone of its repository, from
+    the folders the job was given (FindClones), else empty. }
   TGittanForgePull = record
     Repo: string;
     Number: integer;
@@ -83,6 +84,7 @@ type
     MyReview: TGittanReviewVerdict;
     IsDraft, Requested, Feedback: boolean;
     Created, Updated: TDateTime;
+    Clone: string;
   end;
   TGittanForgePulls = array of TGittanForgePull;
 
@@ -130,6 +132,17 @@ function ReviewDecisionNote(ADecision: TGittanReviewDecision): string;
   "#123" (a digit must follow the sign, and the sign must not follow a
   word, so "C#5" is not one); 0 when it names none. }
 function IssueNumber(const ASummary: string): integer;
+
+{** Fills in the Clone of each of APulls with the first of ARoots (the
+  roots of repositories, the likeliest first) one of whose remotes holds
+  its repository; a root that is gone or no repository is passed over.
+  Runs git once per root, in the caller's thread. }
+procedure FindClones(var APulls: TGittanForgePulls; ARoots: TStrings);
+{** Adds to ARoots, after them, the repositories beside them: the
+  folders in each of their parent folders that hold a .git (a folder,
+  or a file as a worktree or a submodule has), in name order, each once
+  and none already in ARoots. }
+procedure AddSiblingRepositories(ARoots: TStrings);
 
 {** Whether a pull request listed as waiting for the user's review
   still is: one the user is asked for in person now, whatever they
@@ -210,6 +223,8 @@ type
   private
     FForgeName, FRoot, FLogin, FError: string;
     FMine, FReview: TGittanForgePulls;
+    FClones: TStringList;
+    FSiblings: boolean;
   protected
     {** The login and the two lists, the review list as the forge gives
       it; false with the reason in AError when they could not be read. }
@@ -219,6 +234,13 @@ type
     property Root: string read FRoot;
   public
     constructor Create(const AForgeName, ARoot: string);
+    destructor Destroy; override;
+    {** The roots of the repositories to look for clones in, the likeliest
+      first (FindClones), set before the job starts; empty looks for none. }
+    property Clones: TStringList read FClones;
+    {** Whether the repositories beside Clones are looked in too, after
+      them (AddSiblingRepositories). }
+    property Siblings: boolean read FSiblings write FSiblings;
     property ForgeName: string read FForgeName;
     property Login: string read FLogin;
     property Mine: TGittanForgePulls read FMine;
@@ -397,6 +419,66 @@ begin
   end;
 end;
 
+procedure AddSiblingRepositories(ARoots: TStrings);
+var
+  Parents, Found: TStringList;
+  Info: TSearchRec;
+  Parent, Dir: string;
+  i, j: integer;
+begin
+  Parents := TStringList.Create;
+  Found := TStringList.Create;
+  try
+    for i := 0 to ARoots.Count - 1 do
+    begin
+      Parent := ExtractFileDir(ExcludeTrailingPathDelimiter(ARoots[i]));
+      if (Parent = '') or (Parents.IndexOf(Parent) >= 0) then
+        Continue;
+      Parents.Add(Parent);
+      Found.Clear;
+      if FindFirst(IncludeTrailingPathDelimiter(Parent) + '*', faDirectory, Info) = 0 then
+      try
+        repeat
+          if (Info.Attr and faDirectory = 0) or (Info.Name = '.') or (Info.Name = '..') then
+            Continue;
+          Dir := IncludeTrailingPathDelimiter(Parent) + Info.Name;
+          if FileExists(Dir + PathDelim + '.git') or DirectoryExists(Dir + PathDelim + '.git') then
+            Found.Add(Dir);
+        until FindNext(Info) <> 0;
+      finally
+        FindClose(Info);
+      end;
+      Found.Sort;
+      for j := 0 to Found.Count - 1 do
+        if ARoots.IndexOf(Found[j]) < 0 then
+          ARoots.Add(Found[j]);
+    end;
+  finally
+    Parents.Free;
+    Found.Free;
+  end;
+end;
+
+procedure FindClones(var APulls: TGittanForgePulls; ARoots: TStrings);
+var
+  Urls: string;
+  i, j: integer;
+begin
+  for j := 0 to High(APulls) do
+    APulls[j].Clone := '';
+  for i := 0 to ARoots.Count - 1 do
+  begin
+    if not DirectoryExists(ARoots[i]) then
+      Continue;
+    Urls := RemoteUrlsIn(ARoots[i]);
+    if Urls = '' then
+      Continue;
+    for j := 0 to High(APulls) do
+      if (APulls[j].Clone = '') and RemoteUrlsHold(Urls, APulls[j].Repo) then
+        APulls[j].Clone := ARoots[i];
+  end;
+end;
+
 function NeedsMyReview(const APull: TGittanForgePull): boolean;
 begin
   Result := APull.Requested or not (APull.MyReview in [rvApproved, rvChangesRequested]);
@@ -485,6 +567,13 @@ begin
   inherited Create(True);
   FForgeName := AForgeName;
   FRoot := ARoot;
+  FClones := TStringList.Create;
+end;
+
+destructor TGittanForgeJob.Destroy;
+begin
+  FClones.Free;
+  inherited Destroy;
 end;
 
 procedure TGittanForgeJob.Execute;
@@ -495,7 +584,13 @@ begin
       FError := 'Could not read the answer of ' + FForgeName + '.';
   end
   else
+  begin
     FReview := StillToReview(FReview);
+    if FSiblings then
+      AddSiblingRepositories(FClones);
+    FindClones(FMine, FClones);
+    FindClones(FReview, FClones);
+  end;
   if Terminated then
     Exit;
   if (FError = '') and (Length(FMine) = 0) and (Length(FReview) = 0) and (FLogin = '') then
