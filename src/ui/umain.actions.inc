@@ -491,6 +491,8 @@ begin
     V.EditorCommand := FSettings.EditorCommand;
     V.TerminalCommand := FSettings.TerminalCommand;
     V.GitPath := FSettings.GitPath;
+    V.AutoFetch := FSettings.AutoFetch;
+    V.AutoFetchMinutes := FSettings.AutoFetchMinutes;
     V.GhPath := FSettings.GhPath;
     V.GitHubEnabled := FSettings.GitHubEnabled;
     V.CloneSiblings := FSettings.CloneSiblings;
@@ -508,6 +510,8 @@ begin
       FSettings.EditorCommand := V.EditorCommand;
       FSettings.TerminalCommand := V.TerminalCommand;
       FSettings.CloneSiblings := V.CloneSiblings;
+      FSettings.AutoFetch := V.AutoFetch;
+      FSettings.AutoFetchMinutes := V.AutoFetchMinutes;
       FSettings.AIEnabled := V.AIEnabled;
       FSettings.AIAgent := AgentCommands[V.Agent];
       FSettings.ClaudePath := V.AgentPaths[gaClaude];

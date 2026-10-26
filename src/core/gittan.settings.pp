@@ -18,6 +18,10 @@ const
   {** The width of a tab in the editor when none was picked: git's own,
     what a diff shows in a terminal and on GitHub. }
   DefaultTabSize = 8;
+  {** How often the background fetch runs, in minutes. }
+  DefaultAutoFetchMinutes = 10;
+  MinAutoFetchMinutes = 1;
+  MaxAutoFetchMinutes = 240;
   {** The editor font when none was picked: the platform's own monospaced
     font (what Terminal and Xcode, Visual Studio or the desktop use). }
   DefaultFontName = {$IFDEF DARWIN}'Menlo'{$ELSE}{$IFDEF WINDOWS}'Consolas'
@@ -98,6 +102,11 @@ type
     {** The git to run, as a path to it; empty runs the git found on
       ToolSearchPath (see gittan.git). }
     GitPath: string;
+    {** Whether the open repository is fetched in the background once
+      AutoFetchMinutes have passed since it was last fetched; on unless
+      the user turns it off. }
+    AutoFetch: boolean;
+    AutoFetchMinutes: integer;
     {** Whether the GitHub features are on (pull requests, the GitHub page,
       review comments); on unless the user turns them off. }
     GitHubEnabled: boolean;
@@ -155,7 +164,7 @@ type
 implementation
 
 uses
-  IniFiles, md5, gittan.textfile;
+  Math, IniFiles, md5, gittan.textfile;
 
 const
   SecWindow = 'Window';
@@ -234,6 +243,8 @@ begin
     FFileName := IncludeTrailingPathDelimiter(ConfigDir) + 'gittan.ini';
   ContextLines := 3;
   SubmodulesOpen := True;
+  AutoFetch := True;
+  AutoFetchMinutes := DefaultAutoFetchMinutes;
   CommitOpen := True;
   Translations := True;
   GitHubEnabled := True;
@@ -293,6 +304,9 @@ begin
       TerminalCommand := Ini.ReadString(SecView, 'TerminalCommand', '');
       TabSize := Ini.ReadInteger(SecView, 'TabSize', 0);
       GitPath := Ini.ReadString(SecTools, 'Git', '');
+      AutoFetch := Ini.ReadBool(SecTools, 'AutoFetch', True);
+      AutoFetchMinutes := EnsureRange(Ini.ReadInteger(SecTools, 'AutoFetchMinutes',
+        DefaultAutoFetchMinutes), MinAutoFetchMinutes, MaxAutoFetchMinutes);
       GitHubEnabled := Ini.ReadBool(SecGitHub, 'Enabled', True);
       { Earlier versions kept gh's path with git's. }
       GhPath := Ini.ReadString(SecGitHub, 'Cli', Ini.ReadString(SecTools, 'Gh', ''));
@@ -364,6 +378,8 @@ begin
       Ini.WriteString(SecView, 'TerminalCommand', KeepEdges(TerminalCommand));
       Ini.WriteInteger(SecView, 'TabSize', TabSize);
       Ini.WriteString(SecTools, 'Git', KeepEdges(GitPath));
+      Ini.WriteBool(SecTools, 'AutoFetch', AutoFetch);
+      Ini.WriteInteger(SecTools, 'AutoFetchMinutes', AutoFetchMinutes);
       Ini.DeleteKey(SecTools, 'Gh');
       Ini.WriteBool(SecGitHub, 'Enabled', GitHubEnabled);
       Ini.WriteString(SecGitHub, 'Cli', KeepEdges(GhPath));

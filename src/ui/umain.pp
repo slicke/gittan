@@ -691,6 +691,16 @@ type
       Again (FRetryRefs), and the sides of the image or binary file shown
       that are not downloaded (FLfsSides), for the header's Download. }
     FLfsRefs, FRetryRefs, FLfsSides: TStringArray;
+    { The background fetch (umain.remote.inc): its job, apart from
+      FRemoteJob so the rest of the form is never busy for it, the timer
+      that looks once a minute whether one is due, and what StartRemote
+      was asked meanwhile, run once it is done (FPendingRemote). }
+    FAutoFetchJob: TGittanRemoteJob;
+    FAutoFetchTimer: TTimer;
+    FPendingRemote: boolean;
+    FPendingKind: TGittanRemoteKind;
+    FPendingMode: TGittanPullMode;
+    FPendingArg, FPendingRemoteName: string;
     { The list a click on the status bar's pull request drops down, and
       what each of its rows does (the pa* constants). }
     FPullPopup: TGittanPopupList;
@@ -983,6 +993,8 @@ type
     procedure ShowImageChanges(const APath: string);
     procedure ShowBinaryChanges(const APath: string);
     procedure StartLfsDownload(const APath: string; const ARefs: TStringArray);
+    procedure AutoFetchTimerTimer(Sender: TObject);
+    procedure AutoFetchDone(Sender: TObject);
     procedure ShowBinaryFile(const AFileName: string);
     function SidesShown: boolean;
     function ShowsChangedFile: boolean;
@@ -2327,6 +2339,7 @@ resourcestring
   rsNoticeLfsDownloading = 'Downloading %s from Git LFS';
   rsLfsDownloaded = 'Downloaded %s';
   rsLfsDownloadFailed = 'The Git LFS download failed';
+  rsWaitingForFetch = 'Waiting for the background fetch...';
   rsSubUpdateAgain = 'Update Again';
   rsSubSynced = 'Synced the URL of %s';
   rsSubSyncedAll = 'Synced the URLs of the submodules';
@@ -2669,6 +2682,8 @@ const
   PillPause = 250;
   { Before the notice shows for a fetch, pull or push without a hook. }
   NoticeDelay = 1000;
+  { How often the timer looks whether a background fetch is due. }
+  AutoFetchCheck = 60000;
   { How long one parse may take before a lookup or the indexer gives up
     on it. }
   ParseTimeout = 3000;
@@ -3078,6 +3093,9 @@ begin
   FNoticeTimer.Enabled := False;
   FNoticeTimer.Interval := NoticeDelay;
   FNoticeTimer.OnTimer := @NoticeTimerTimer;
+  FAutoFetchTimer := TTimer.Create(Self);
+  FAutoFetchTimer.Interval := AutoFetchCheck;
+  FAutoFetchTimer.OnTimer := @AutoFetchTimerTimer;
   ShowWelcome('');
 
   FRepo := TGittanRepo.Create;

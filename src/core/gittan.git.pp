@@ -407,6 +407,10 @@ type
     {** Fetches every remote, dropping the remote-tracking branches
       whose branch is gone from it (`git fetch --all --prune`). }
     function Fetch: boolean;
+    {** When the repository was last fetched, from anywhere: the time
+      FETCH_HEAD was written (`rev-parse --git-path`, so a linked
+      worktree's own). 0 when it never was. }
+    function LastFetch: TDateTime;
     {** Pulls the branch's upstream into it, the way AMode says. False,
       with git's reason in Error, when nothing was pulled; ADiverged is
       then set when the branch and its upstream both have commits the
@@ -3605,6 +3609,32 @@ begin
   Result := RunRemote(['fetch', '--all', '--prune', '--progress']);
 end;
 
+{ A path git or git-lfs takes as it is: from the root on Unix, from a
+  drive or a share on Windows. }
+function IsAbsolutePath(const APath: string): boolean;
+begin
+  {$ifdef windows}
+  Result := (Length(APath) >= 3) and (APath[2] = ':') and (APath[3] in ['\', '/']) or
+    (Length(APath) >= 2) and (APath[1] in ['\', '/']) and (APath[2] in ['\', '/']);
+  {$else}
+  Result := (APath <> '') and (APath[1] = '/');
+  {$endif}
+end;
+
+function TGittanRepo.LastFetch: TDateTime;
+var
+  Name: string;
+begin
+  Result := 0;
+  if (FRoot = '') or not RunGit(FRoot, ['rev-parse', '--git-path', 'FETCH_HEAD'], Name) then
+    Exit;
+  Name := Trim(Name);
+  if (Name <> '') and not IsAbsolutePath(Name) then
+    Name := IncludeTrailingPathDelimiter(FRoot) + Name;
+  if (Name = '') or not FileAge(Name, Result) then
+    Result := 0;
+end;
+
 { Whether the config says how to pull: then pmAuto leaves it to git. }
 function PullConfigured(const ARoot, ABranch: string): boolean;
 var
@@ -5995,18 +6025,6 @@ begin
     AOid := Oid;
     ASize := Size;
   end;
-end;
-
-{ A path git or git-lfs takes as it is: from the root on Unix, from a
-  drive or a share on Windows. }
-function IsAbsolutePath(const APath: string): boolean;
-begin
-  {$ifdef windows}
-  Result := (Length(APath) >= 3) and (APath[2] = ':') and (APath[3] in ['\', '/']) or
-    (Length(APath) >= 2) and (APath[1] in ['\', '/']) and (APath[2] in ['\', '/']);
-  {$else}
-  Result := (APath <> '') and (APath[1] = '/');
-  {$endif}
 end;
 
 function TGittanRepo.LfsObjectFile(const AOid: string): string;

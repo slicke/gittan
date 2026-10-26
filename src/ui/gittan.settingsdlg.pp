@@ -46,6 +46,10 @@ type
     EditorCommand, TerminalCommand: string;
     {** Paths of git and gh; empty for the ones found on PATH. }
     GitPath, GhPath: string;
+    {** Whether the open repository is fetched in the background, and
+      how many minutes apart. }
+    AutoFetch: boolean;
+    AutoFetchMinutes: integer;
     {** Whether the GitHub features are on, and whether the GitHub page
       looks for clones beside the recent repositories. }
     GitHubEnabled, CloneSiblings: boolean;
@@ -74,7 +78,8 @@ implementation
 uses
   Math, StrUtils, Process, Clipbrd, LCLIntf, LCLType, LCLVersion, InterfaceBase, LCLPlatformDef,
   ec_SyntAnal, ATSynEdit_Adapter_EControl, ATSynEdit_Globals,
-  gittan.syntaxthemes, gittan.git, gittan.theme, gittan.forge, gittan.github;
+  gittan.syntaxthemes, gittan.git, gittan.theme, gittan.forge, gittan.github,
+  gittan.settings;
 
 resourcestring
   rsSettingsTitle = 'Settings';
@@ -117,6 +122,11 @@ resourcestring
   rsTerminalNote = 'The repository''s folder is appended.';
   rsGitPath = 'git';
   rsGitDefault = 'The git on PATH';
+  rsAutoFetch = 'Fetch in the background every';
+  rsAutoFetchMinutes = 'minutes';
+  rsAutoFetchNote = 'Brings in what is new on the remotes of the open repository, so the ' +
+    'counts of what to pull stay current. It shows nothing, and waits for the time to pass ' +
+    'since the last fetch, from Gittan or anywhere else.';
   rsGhPath = 'gh, GitHub''s command line tool';
   rsGhDefault = 'The gh on PATH';
   rsToolFound = 'Found: %s';
@@ -281,11 +291,11 @@ type
   private
     FFont: TFont;
     FFontLabel: TLabel;
-    FSizeEdit, FTabEdit: TSpinEdit;
+    FSizeEdit, FTabEdit, FAutoFetchEdit: TSpinEdit;
     FThemeBox: TComboBox;
     FEditorEdit, FTerminalEdit, FGitEdit, FGhEdit, FAgentEdit, FModelEdit: TEdit;
     FGitNote, FGhNote, FAgentLabel, FAgentNote, FModelNote: TLabel;
-    FAIBox, FGitHubBox, FSiblingsBox: TCheckBox;
+    FAIBox, FGitHubBox, FSiblingsBox, FAutoFetchBox: TCheckBox;
     { The agent picked, and each agent's command and model as edited:
       the fields show the picked one's (ShowAgent). }
     FAgentBox: TComboBox;
@@ -354,6 +364,7 @@ type
     procedure ToolChange(Sender: TObject);
     procedure AIChange(Sender: TObject);
     procedure GitHubChange(Sender: TObject);
+    procedure AutoFetchChange(Sender: TObject);
     procedure AgentChange(Sender: TObject);
     procedure ShowAgent;
     procedure ShowTool(AEdit: TEdit; ANote: TLabel; const AName, ANotFound: string);
@@ -539,6 +550,33 @@ begin
   AddLabel(rsTerminalNote, 4).Font.Color := clGrayText;
 
   FGitEdit := AddTool(rsGitPath, rsGitDefault, FGitNote);
+
+  { The background fetch: the switch, the minutes and their unit on one
+    row (alLeft orders by Left), what it does under them. }
+  Row := AddRow(16);
+  FAutoFetchBox := TCheckBox.Create(Self);
+  FAutoFetchBox.Caption := rsAutoFetch;
+  FAutoFetchBox.Align := alLeft;
+  FAutoFetchBox.OnChange := @AutoFetchChange;
+  FAutoFetchBox.Parent := Row;
+  FAutoFetchEdit := TSpinEdit.Create(Self);
+  FAutoFetchEdit.MinValue := MinAutoFetchMinutes;
+  FAutoFetchEdit.MaxValue := MaxAutoFetchMinutes;
+  FAutoFetchEdit.Width := Scale96ToScreen(64);
+  FAutoFetchEdit.Align := alLeft;
+  FAutoFetchEdit.Left := 1000;
+  FAutoFetchEdit.BorderSpacing.Left := Scale96ToScreen(6);
+  FAutoFetchEdit.Parent := Row;
+  Lbl := TLabel.Create(Self);
+  Lbl.Caption := rsAutoFetchMinutes;
+  Lbl.Align := alLeft;
+  Lbl.Left := 2000;
+  Lbl.Layout := tlCenter;
+  Lbl.BorderSpacing.Left := Scale96ToScreen(6);
+  Lbl.Parent := Row;
+  Lbl := AddLabel(rsAutoFetchNote, 4);
+  Lbl.Font.Color := clGrayText;
+  Lbl.WordWrap := True;
 
   { The Hosting page: a block per service under its name, the switch and
     what it means, then the tool, which follows the switch. Another
@@ -1037,6 +1075,11 @@ begin
 end;
 
 { gh's field matters only with the GitHub features on. }
+procedure TSettingsForm.AutoFetchChange(Sender: TObject);
+begin
+  FAutoFetchEdit.Enabled := FAutoFetchBox.Checked;
+end;
+
 procedure TSettingsForm.GitHubChange(Sender: TObject);
 begin
   FVersionsRead := False;
@@ -1336,6 +1379,9 @@ begin
     F.FEditorEdit.Text := AValues.EditorCommand;
     F.FTerminalEdit.Text := AValues.TerminalCommand;
     F.FGitEdit.Text := AValues.GitPath;
+    F.FAutoFetchBox.Checked := AValues.AutoFetch;
+    F.FAutoFetchEdit.Value := AValues.AutoFetchMinutes;
+    F.AutoFetchChange(nil);
     F.FGhEdit.Text := AValues.GhPath;
     F.ToolChange(F.FGitEdit);
     F.ToolChange(F.FGhEdit);
@@ -1365,6 +1411,8 @@ begin
       AValues.EditorCommand := Trim(F.FEditorEdit.Text);
       AValues.TerminalCommand := Trim(F.FTerminalEdit.Text);
       AValues.GitPath := Trim(F.FGitEdit.Text);
+      AValues.AutoFetch := F.FAutoFetchBox.Checked;
+      AValues.AutoFetchMinutes := F.FAutoFetchEdit.Value;
       AValues.GhPath := Trim(F.FGhEdit.Text);
       AValues.GitHubEnabled := F.FGitHubBox.Checked;
       AValues.CloneSiblings := F.FSiblingsBox.Checked;

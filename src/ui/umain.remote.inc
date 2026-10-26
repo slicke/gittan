@@ -49,6 +49,18 @@ procedure TForm1.StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode;
 begin
   if (FRepo.Root = '') or (FRemoteJob <> nil) or (FCommitJob <> nil) then
     Exit;
+  { Two fetches or a fetch and a pull would fight over the same refs:
+    this one waits for the background fetch, which is quick. }
+  if FAutoFetchJob <> nil then
+  begin
+    FPendingRemote := True;
+    FPendingKind := AKind;
+    FPendingMode := AMode;
+    FPendingArg := AArg;
+    FPendingRemoteName := ARemote;
+    FStatus.ShowMessage(rsWaitingForFetch, stNormal, 0);
+    Exit;
+  end;
   FRemoteAhead := FAhead;
   { What a pull brings in is counted from here when it is done. }
   if AKind = rkPull then
@@ -448,6 +460,16 @@ end;
   changes goes on without a handler, and quitting waits for it. }
 procedure TForm1.StopRemoteJob(AWait: boolean);
 begin
+  FPendingRemote := False;
+  if FAutoFetchJob <> nil then
+  begin
+    FAutoFetchJob.Stop(AWait);
+    if AWait then
+      FAutoFetchJob.Free
+    else
+      FBlameZombies.Add(FAutoFetchJob);
+    FAutoFetchJob := nil;
+  end;
   if FRemoteJob = nil then
     Exit;
   FNoticeTimer.Enabled := False;
@@ -459,6 +481,53 @@ begin
   else
     FBlameZombies.Add(FRemoteJob);
   FRemoteJob := nil;
+end;
+
+{ ---------------------------------------------------------------------------
+  The background fetch
+  ---------------------------------------------------------------------------
+  Once AutoFetchMinutes have passed since the repository was last
+  fetched (FETCH_HEAD, so a fetch from the menu or a terminal counts
+  too), a plain fetch runs in a job of its own, with no notice and no
+  message, and only a repository with a remote is fetched. When it is
+  done the counts follow; a failure (offline, a key that needs its
+  passphrase) is left unsaid, as the next one may well work. A fetch,
+  pull or push asked for meanwhile waits for it (see StartRemote). }
+procedure TForm1.AutoFetchTimerTimer(Sender: TObject);
+var
+  Last: TDateTime;
+begin
+  if not FSettings.AutoFetch or (FRepo.Root = '') or (FAutoFetchJob <> nil) or
+    (FRemoteJob <> nil) then
+    Exit;
+  Last := FRepo.LastFetch;
+  if (Last > 0) and ((Now - Last) * MinsPerDay < FSettings.AutoFetchMinutes) then
+    Exit;
+  if FRepo.RemoteFor('') = '' then
+    Exit;
+  FAutoFetchJob := TGittanRemoteJob.Create(FRepo.Root, rkFetch);
+  FAutoFetchJob.OnDone := @AutoFetchDone;
+  FAutoFetchJob.Start;
+end;
+
+procedure TForm1.AutoFetchDone(Sender: TObject);
+var
+  Job: TGittanRemoteJob;
+begin
+  Job := TGittanRemoteJob(Sender);
+  if Job <> FAutoFetchJob then
+    Exit;
+  FAutoFetchJob := nil;
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+  if Job.Ok and (Job.Root = FRepo.Root) then
+    RefreshRepository;
+  if FPendingRemote then
+  begin
+    FPendingRemote := False;
+    FStatus.ShowMessage('', stNormal, 0);
+    StartRemote(FPendingKind, FPendingMode, FPendingArg, FPendingRemoteName);
+  end;
 end;
 
 { The file's versions ARefs (an empty one for the work tree) from Git

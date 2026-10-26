@@ -61,6 +61,7 @@ type
     procedure TestLfsPointer;
     procedure TestLfsFiles;
     procedure TestLfsDownload;
+    procedure TestLastFetch;
     procedure TestFetchPullRequest;
     procedure TestDefaultBranchAndMergeBase;
     procedure TestAheadBehind;
@@ -1136,6 +1137,28 @@ begin
   Git(['-C', 'down', 'remote', 'remove', 'origin']);
   AssertFalse(FRepo.LfsDownload('art.psd', ['HEAD']));
   AssertEquals('The repository has no remote to download from.', FRepo.Error);
+end;
+
+{ The repository fetched from itself writes FETCH_HEAD, in the root's
+  .git and in a linked worktree's own folder. }
+procedure TGitRepoTest.TestLastFetch;
+var
+  Tree: TGittanRepo;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  AssertEquals('never fetched', 0, FRepo.LastFetch, 0);
+  Git(['remote', 'add', 'self', '.']);
+  Git(['fetch', '-q', 'self']);
+  AssertTrue('just now', Abs(Now - FRepo.LastFetch) < 1 / 24 / 60);
+  Git(['worktree', 'add', '-q', 'wt']);
+  Tree := TGittanRepo.Create;
+  try
+    AssertTrue(Tree.Open(FDir + PathDelim + 'wt'));
+    AssertEquals('the worktree never fetched', 0, Tree.LastFetch, 0);
+  finally
+    Tree.Free;
+  end;
 end;
 
 { A bare repository stands in for GitHub: it serves the pull request as

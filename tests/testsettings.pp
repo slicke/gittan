@@ -62,6 +62,8 @@ begin
     AssertEquals('', S.GitPath);
     AssertEquals('', S.GhPath);
     AssertTrue('the GitHub features start on', S.GitHubEnabled);
+    AssertTrue('the background fetch starts on', S.AutoFetch);
+    AssertEquals(DefaultAutoFetchMinutes, S.AutoFetchMinutes);
     AssertFalse(S.HideWithoutFeedback);
     AssertFalse('the AI features start off', S.AIEnabled);
     AssertEquals('', S.ClaudePath);
@@ -104,6 +106,8 @@ begin
     S.GitPath := '/opt/homebrew/bin/git';
     S.GhPath := 'C:\Program Files\GitHub CLI\gh.exe';
     S.GitHubEnabled := False;
+    S.AutoFetch := False;
+    S.AutoFetchMinutes := 30;
     S.HideWithoutFeedback := True;
     S.SyntaxTheme := 'Delphi';
     S.AIEnabled := True;
@@ -147,6 +151,8 @@ begin
     AssertEquals('/opt/homebrew/bin/git', S.GitPath);
     AssertEquals('C:\Program Files\GitHub CLI\gh.exe', S.GhPath);
     AssertFalse(S.GitHubEnabled);
+    AssertFalse(S.AutoFetch);
+    AssertEquals(30, S.AutoFetchMinutes);
     AssertTrue(S.HideWithoutFeedback);
     AssertEquals('Delphi', S.SyntaxTheme);
     AssertTrue(S.AIEnabled);
