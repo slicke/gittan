@@ -21,9 +21,9 @@ begin
   Result := FCloneParent;
   if (Result <> '') and DirectoryExists(Result) then
     Exit;
-  if FSettings.Recent.Count > 0 then
+  if App.Settings.Recent.Count > 0 then
   begin
-    Result := ExtractFileDir(ExcludeTrailingPathDelimiter(FSettings.Recent[0]));
+    Result := ExtractFileDir(ExcludeTrailingPathDelimiter(App.Settings.Recent[0]));
     if DirectoryExists(Result) then
       Exit;
   end;

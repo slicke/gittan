@@ -128,7 +128,7 @@ begin
     end;
     if FIndex.IsCurrent(Path, Size, Time) then
       Continue;
-    Lexer := FLexers.ForFile(Path, FRepo.Root);
+    Lexer := App.Lexers.ForFile(Path, FRepo.Root);
     if Lexer = nil then
     begin
       FIndex.Remove(Path);
@@ -237,7 +237,7 @@ begin
   end;
   if FIndex.IsCurrent(ARelPath, Size, Time) then
     Exit(FIndex.Find(ARelPath).Items);
-  Lexer := FLexers.ForFile(ARelPath, FRepo.Root);
+  Lexer := App.Lexers.ForFile(ARelPath, FRepo.Root);
   if Lexer = nil then
     Exit;
   if Size <= MaxIndexedSize then

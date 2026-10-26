@@ -1,95 +1,47 @@
 { ---------------------------------------------------------------------------
   A newer Gittan
   ---------------------------------------------------------------------------
-  A build from CI knows its number (gittan.update). A little after start,
-  and every UpdatePoll ms after that, a TGittanUpdateJob asks GitHub for
-  the latest release; when it is newer, the status bar shows a green
-  badge ("Build 109 available") unless Remind Me Later was chosen less
-  than UpdateSnoozeDays ago. A click on the badge, or Tools > Check for
-  Updates, opens the dialog: Download opens the release's page, Remind Me
-  Later hides the badge for UpdateSnoozeDays. The menu's check always
-  answers, also when Gittan is up to date, a local build or offline. A
-  local build never checks by itself. }
+  A build from CI knows its number (gittan.update). The check itself,
+  a little after start and every UpdatePoll ms after that, is App's
+  (gittan.app); when the latest release is newer, the status bar shows a
+  green badge ("Build 109 available") unless Remind Me Later was chosen
+  less than UpdateSnoozeDays ago. A click on the badge, or Tools > Check
+  for Updates, opens the dialog: Download opens the release's page,
+  Remind Me Later hides the badge for UpdateSnoozeDays. The menu's check
+  always answers, also when Gittan is up to date, a local build or
+  offline. A local build never checks by itself. }
 
-procedure TForm1.StartUpdateCheck(AManual: boolean);
+procedure TForm1.UpdateChecked(Sender: TObject; AManual: boolean);
 begin
-  { A check under way answers the menu too when it ends. }
-  FUpdateManual := FUpdateManual or AManual;
-  if FUpdateJob <> nil then
-    Exit;
-  FUpdateTimer.Enabled := False;
-  FUpdateJob := TGittanUpdateJob.Create;
-  FUpdateJob.OnDone := @UpdateJobDone;
-  FUpdateJob.Start;
-end;
-
-procedure TForm1.UpdateTimerTimer(Sender: TObject);
-begin
-  FUpdateTimer.Enabled := False;
-  StartUpdateCheck(False);
-end;
-
-procedure TForm1.AbandonUpdateJob;
-begin
-  FUpdateTimer.Enabled := False;
-  if FUpdateJob = nil then
-    Exit;
-  FUpdateJob.Stop(False);
-  FBlameZombies.Add(FUpdateJob);
-  FUpdateJob := nil;
-end;
-
-procedure TForm1.UpdateJobDone(Sender: TObject);
-var
-  Job: TGittanUpdateJob;
-  Manual: boolean;
-begin
-  Job := TGittanUpdateJob(Sender);
-  if Job <> FUpdateJob then
-    Exit;
-  FUpdateJob := nil;
-  FBlameZombies.Add(Job);
-  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
-  Manual := FUpdateManual;
-  FUpdateManual := False;
-  if CurrentBuild >= 0 then
-  begin
-    FUpdateTimer.Interval := UpdatePoll;
-    FUpdateTimer.Enabled := True;
-  end;
-  if Job.Ok then
-  begin
-    FUpdateRelease := Job.Release;
-    FHasUpdate := IsNewerRelease(FUpdateRelease, CurrentBuild);
+  if App.UpdateOk then
     ShowUpdateBadge;
-  end;
-  if not Manual then
+  if not AManual then
     Exit;
-  if not Job.Ok then
-    BannerError(rsUpdateTitle, Format(rsUpdateFailed, [Job.Error]))
-  else if FHasUpdate then
+  if not App.UpdateOk then
+    BannerError(rsUpdateTitle, Format(rsUpdateFailed, [App.UpdateError]))
+  else if App.HasUpdate then
     UpdateDialog
   else if CurrentBuild < 0 then
   begin
-    if QuestionDlg(rsUpdateTitle, Format(rsUpdateLocalBuild, [FUpdateRelease.Name]),
+    if QuestionDlg(rsUpdateTitle, Format(rsUpdateLocalBuild, [App.UpdateRelease.Name]),
       mtInformation, [mrYes, rsUpdateOpenPage, mrCancel, rsUpdateClose, 'IsDefault'],
       0) = mrYes then
-      OpenURL(FUpdateRelease.Url);
+      OpenURL(App.UpdateRelease.Url);
   end
   { A release tagged other than build-<n> cannot be compared, and says
     nothing of whether this build is current. }
-  else if FUpdateRelease.Build < 0 then
-    BannerInfo(Format(rsUpdateNoBuild, [FUpdateRelease.Name, CurrentBuild]))
+  else if App.UpdateRelease.Build < 0 then
+    BannerInfo(Format(rsUpdateNoBuild, [App.UpdateRelease.Name, CurrentBuild]))
   else
     BannerInfo(Format(rsUpdateCurrent, [CurrentBuild]));
 end;
 
 procedure TForm1.ShowUpdateBadge;
 begin
-  if FHasUpdate and (Date >= FSettings.UpdateSnoozedUntil) then
+  if App.UpdateDue then
   begin
-    FStatus.SetUpdate(Format(rsUpdateBadge, [FUpdateRelease.Build]));
-    FStatus.PartHint[spUpdate] := Format(rsUpdateHint, [FUpdateRelease.Name,
+    FStatus.SetUpdate(Format(rsUpdateBadge, [App.UpdateRelease.Build]));
+    FStatus.PartHint[spUpdate] := Format(rsUpdateHint, [App.UpdateRelease.Name,
       CurrentBuild]) + LineEnding + HintLink + ' ' + rsUpdateHintClick;
   end
   else
@@ -98,15 +50,15 @@ end;
 
 procedure TForm1.UpdateDialog;
 begin
-  case QuestionDlg(rsUpdateTitle, Format(rsUpdateAvailable, [FUpdateRelease.Name,
+  case QuestionDlg(rsUpdateTitle, Format(rsUpdateAvailable, [App.UpdateRelease.Name,
       CurrentBuild]), mtInformation, [mrYes, rsUpdateDownload, 'IsDefault',
       mrIgnore, Format(rsUpdateLater, [UpdateSnoozeDays]), mrCancel, rsUpdateNotNow,
       'IsCancel'], 0) of
     mrYes:
-      OpenURL(FUpdateRelease.Url);
+      OpenURL(App.UpdateRelease.Url);
     mrIgnore:
     begin
-      FSettings.UpdateSnoozedUntil := Date + UpdateSnoozeDays;
+      App.SnoozeUpdate;
       ShowUpdateBadge;
     end;
   end;
@@ -114,5 +66,5 @@ end;
 
 procedure TForm1.MenuCheckUpdatesClick(Sender: TObject);
 begin
-  StartUpdateCheck(True);
+  App.CheckForUpdate(True);
 end;

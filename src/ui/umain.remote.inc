@@ -626,11 +626,11 @@ procedure TForm1.AutoFetchTimerTimer(Sender: TObject);
 var
   Last: TDateTime;
 begin
-  if not FSettings.AutoFetch or (FRepo.Root = '') or (FAutoFetchJob <> nil) or
+  if not App.Settings.AutoFetch or (FRepo.Root = '') or (FAutoFetchJob <> nil) or
     (FRemoteJob <> nil) then
     Exit;
   Last := FRepo.LastFetch;
-  if (Last > 0) and ((Now - Last) * MinsPerDay < FSettings.AutoFetchMinutes) then
+  if (Last > 0) and ((Now - Last) * MinsPerDay < App.Settings.AutoFetchMinutes) then
     Exit;
   if FRepo.RemoteFor('') = '' then
     Exit;

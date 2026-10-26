@@ -33,7 +33,7 @@ end;
 
 function TForm1.CommandsTrusted: boolean;
 begin
-  Result := FSettings.CommandsTrusted(FRepo.Root, FCommandsHash);
+  Result := App.Settings.CommandsTrusted(FRepo.Root, FCommandsHash);
 end;
 
 { Reads the commands again (three small files) and hands them to the
@@ -220,8 +220,8 @@ procedure TForm1.CommandPageTrust(Sender: TObject);
 begin
   if FRepo.Root = '' then
     Exit;
-  FSettings.TrustCommands(FRepo.Root, FCommandsHash);
-  FSettings.Save;
+  App.Settings.TrustCommands(FRepo.Root, FCommandsHash);
+  App.Settings.Save;
   FCommandPage.SetCommands(FRepoCommands, FCommandsHash <> '', CommandsTrusted);
 end;
 

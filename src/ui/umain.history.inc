@@ -401,7 +401,7 @@ begin
   FRows := Rows;
   FRowsOld := nil;
   FillChangeEditor(Edit, Rows, False, OldNum, NewNum,
-    FLexers.ForFile(FHistoryPath, FRepo.Root));
+    App.Lexers.ForFile(FHistoryPath, FRepo.Root));
   { The tints, styles and shades on top of the plain rows. }
   for c := 0 to High(FHistory.Commits) do
     MarkSwatch(Edit, c, c);

@@ -145,7 +145,7 @@ begin
     Inc(i);
   end;
   SetLength(Rows, NRows);
-  Lexer := FLexers.ForFile(FCurrentPath, FRepo.Root);
+  Lexer := App.Lexers.ForFile(FCurrentPath, FRepo.Root);
   FBuildingView := True;
   try
     if not FSideBySide then

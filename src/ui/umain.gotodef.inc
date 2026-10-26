@@ -597,7 +597,7 @@ begin
     n := 0;
     for i := 0 to High(Callers) do
     begin
-      Lexer := FLexers.ForFile(Callers[i].Path, FRepo.Root);
+      Lexer := App.Lexers.ForFile(Callers[i].Path, FRepo.Root);
       if (Lexer = nil) or LexerIsProse(Lexer.LexerName) then
         Continue;
       E := FIndex.Find(Callers[i].Path);

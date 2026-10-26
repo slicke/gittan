@@ -216,7 +216,7 @@ begin
     Shown := Data;
     if FindInvalidUTF8Codepoint(PChar(Shown), Length(Shown)) >= 0 then
       Shown := CP1252ToUTF8(Shown);
-    ShowText(Edit, Shown, FLexers.ForFile(APath, FRepo.Root));
+    ShowText(Edit, Shown, App.Lexers.ForFile(APath, FRepo.Root));
     UpdateChangeNav;
     ShowEditor;
   end;

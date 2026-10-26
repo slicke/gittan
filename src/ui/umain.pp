@@ -29,7 +29,7 @@ uses
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.textfile, gittan.sectionheader, gittan.hintbox,
   gittan.forge, gittan.forgepage,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
-  gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
+  gittan.app, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
   gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
   gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, ATSynEdit_Gaps, md5;
 
@@ -135,9 +135,7 @@ type
     procedure FormDropFiles(Sender: TObject; const FileNames: array of string);
   private
     FAdapter, FAdapterOld: TATAdapterEControl;
-    FLexers: TGittanLexers;
     FRepo: TGittanRepo;
-    FSettings: TGittanSettings;
     { The editor's font size when none was picked (DefaultFontSize for
       the screen the window opened on). }
     FDefaultFontSize: integer;
@@ -267,14 +265,6 @@ type
     FPullMenu, FOpenPullItem, FCopyPullItem: TMenuItem;
     FPullRange: string;
     FPullNumber: integer;
-    { A newer Gittan (umain.update.inc): the check under way, the timer
-      that starts the next, whether the menu asked for the one under way,
-      and the latest release, FHasUpdate when it is newer than this
-      build. }
-    FUpdateJob: TGittanUpdateJob;
-    FUpdateTimer: TTimer;
-    FUpdateManual, FHasUpdate: boolean;
-    FUpdateRelease: TGittanRelease;
     { The tree sits in a panel under a filter field (Go > Filter Files):
       FillFileTree keeps only the files whose path holds FTreeFilterText,
       the field's text in lower case. }
@@ -735,7 +725,6 @@ type
     FFileCount: integer;
     FStats: TGittanFileStats;
     FLoadError: string;
-    FAppIcon: TIcon;
     FDark: boolean;
     FBookmarkBandWidth: integer;
     FWatcher: TGittanWatcher;
@@ -1675,10 +1664,7 @@ type
     procedure HeaderControlsChange(Sender: TObject);
     procedure MenuFilterFilesClick(Sender: TObject);
     procedure AbandonPullJob;
-    procedure StartUpdateCheck(AManual: boolean);
-    procedure UpdateTimerTimer(Sender: TObject);
-    procedure AbandonUpdateJob;
-    procedure UpdateJobDone(Sender: TObject);
+    procedure UpdateChecked(Sender: TObject; AManual: boolean);
     procedure ShowUpdateBadge;
     procedure UpdateDialog;
     procedure MenuCheckUpdatesClick(Sender: TObject);
@@ -2625,11 +2611,6 @@ const
   PullPollIdle = 300000;
   { How often the submodules' remotes are asked again; ms. }
   SubmodulePoll = 300000;
-  { The first look for a newer Gittan after start, then how often it is
-    looked for again; ms. Remind Me Later waits UpdateSnoozeDays. }
-  UpdateFirstCheck = 5000;
-  UpdatePoll = 6 * 60 * 60 * 1000;
-  UpdateSnoozeDays = 14;
   rsReveal = {$IFDEF DARWIN}'Reveal in &Finder'{$ELSE}
     {$IFDEF WINDOWS}'Show in &Explorer'{$ELSE}'Show in &File Manager'{$ENDIF}{$ENDIF};
   rsEditCopy = '&Copy';
@@ -2799,12 +2780,12 @@ end;
 
 procedure TForm1.FormCreate(Sender: TObject);
 begin
-  FSettings := TGittanSettings.Create;
-  FSettings.Load;
-  SetGitExe(FSettings.GitPath);
+  { First: everything below reads the settings. }
+  CreateApp;
+  App.OnUpdateChecked := @UpdateChecked;
   FindForge;
   FindAgentCli;
-  FTabSize := FSettings.TabSize;
+  FTabSize := App.Settings.TabSize;
   if FTabSize <= 0 then
     FTabSize := DefaultTabSize;
   FChangeLines := TStringList.Create;
@@ -2858,11 +2839,6 @@ begin
   FPullTimer := TTimer.Create(Self);
   FPullTimer.Enabled := False;
   FPullTimer.OnTimer := @PullTimerTimer;
-  { A local build has no number to compare, so only the menu checks. }
-  FUpdateTimer := TTimer.Create(Self);
-  FUpdateTimer.Interval := UpdateFirstCheck;
-  FUpdateTimer.OnTimer := @UpdateTimerTimer;
-  FUpdateTimer.Enabled := CurrentBuild >= 0;
   Application.AddOnActivateHandler(@AppActivate);
   Application.AddOnDeactivateHandler(@AppDeactivate);
   FBookmarkBandWidth := Edit.OptGutterWidthBookmarks;
@@ -3097,21 +3073,14 @@ begin
   FPillTimer.Interval := PillPause;
   FPillTimer.OnTimer := @PillTimerTimer;
   FResolveIndex := -1;
-  { The welcome view shares the summary's box and draws the application
-    icon from its own copy: Application.Icon keeps to its small image. }
-  FAppIcon := TIcon.Create;
-  try
-    FAppIcon.LoadFromResourceName(HInstance, 'MAINICON');
-  except
-    FreeAndNil(FAppIcon);
-  end;
+  { The welcome view shares the summary's box. }
   FCloneSubmodules := True;
   FWelcome := TGittanWelcome.Create(Self);
   FWelcome.Parent := FSummaryBox;
   FWelcome.Title := 'Gittan';
   FWelcome.Tagline := rsTagline;
   FWelcome.Shortcut := {$IFDEF DARWIN}'⇧⌘O'{$ELSE}'Ctrl+Shift+O'{$ENDIF};
-  FWelcome.SetIcon(FAppIcon);
+  FWelcome.SetIcon(App.Icon);
   FWelcome.OnOpen := @WelcomeOpen;
   FWelcome.OnOpenRecent := @WelcomeOpenRecent;
   FWelcome.OnClone := @WelcomeClone;
@@ -3138,7 +3107,7 @@ begin
   { The notice over the form, with the same icon. }
   FNotice := TGittanNotice.Create(Self);
   FNotice.Parent := Self;
-  FNotice.SetIcon(FAppIcon);
+  FNotice.SetIcon(App.Icon);
   FNotice.OnButton := @NoticeButton;
   FNoticeTimer := TTimer.Create(Self);
   FNoticeTimer.Enabled := False;
@@ -3151,9 +3120,8 @@ begin
 
   FRepo := TGittanRepo.Create;
   FSnapshots := TGittanSnapshots.Create;
-  FLexers := TGittanLexers.Create;
-  FLexers.OnLoaded := @LexersLoaded;
-  if not FLexers.Load then
+  App.Lexers.OnLoaded := @LexersLoaded;
+  if not App.Lexers.Load then
     FStatus.ShowMessage(rsNoLexers, stBad, 0);
   FDark := IsDarkMode;
   ApplyTheme;
@@ -3195,8 +3163,8 @@ begin
     if DirectoryExists(ParamStr(1)) then
       Result := ParamStr(1);
   end
-  else if (FSettings.Recent.Count > 0) and DirectoryExists(FSettings.Recent[0]) then
-    Result := FSettings.Recent[0];
+  else if (App.Settings.Recent.Count > 0) and DirectoryExists(App.Settings.Recent[0]) then
+    Result := App.Settings.Recent[0];
 end;
 
 function TForm1.OpeningText(const ADir: string): string;
@@ -3239,7 +3207,8 @@ begin
   AbandonPullJob;
   AbandonForgeJob;
   AbandonReviewJob;
-  AbandonUpdateJob;
+  App.OnUpdateChecked := nil;
+  App.Lexers.OnLoaded := nil;
   AbandonSubmoduleJobs;
   FreeAndNil(FSubJobs);
   FreeAndNil(FForge);
@@ -3262,10 +3231,8 @@ begin
     FScratchAdapter.Lexer := nil;
   if FIndexAdapter <> nil then
     FIndexAdapter.Lexer := nil;
-  FreeAndNil(FLexers);
   FreeAndNil(FRepo);
   FreeAndNil(FSnapshots);
-  FreeAndNil(FAppIcon);
   {$IFDEF LCLCocoa}
   FreeAndNil(FToolbar);
   {$ENDIF}
@@ -3279,8 +3246,8 @@ begin
   FreeAndNil(FReviewInk);
   FreeAndNil(FCommitOn);
   FreeAndNil(FCommitOff);
-
-  FreeAndNil(FSettings);
+  { Last: the lexers go with it, which the adapters above let go of. }
+  FreeApp;
 end;
 
 { The options both editors share: read-only, every line numbered (the
@@ -3500,7 +3467,7 @@ var
 begin
   ApplyEditorColors(Edit);
   ApplyEditorColors(FEditOld);
-  FLexers.ApplyTheme(FDark, FSyntaxTheme);
+  App.Lexers.ApplyTheme(FDark, FSyntaxTheme);
   { The graph's lanes take the history view's hues. }
   FGraph.SetLaneColors([HistoryColor(0, htSwatch), HistoryColor(1, htSwatch),
     HistoryColor(2, htSwatch), HistoryColor(3, htSwatch), HistoryColor(4, htSwatch),
@@ -4346,7 +4313,7 @@ begin
   FPlainTextItem.OnClick := @MenuSyntaxClick;
   FSyntaxMenu.Add(FPlainTextItem);
   FSyntaxMenu.Add(NewLine);
-  if FLexers.Loaded then
+  if App.Lexers.Loaded then
     AddLexerItems;
 end;
 
@@ -4359,7 +4326,7 @@ var
 begin
   Names := TStringList.Create;
   try
-    FLexers.GetNames(Names);
+    App.Lexers.GetNames(Names);
     Group := nil;
     LastInitial := '';
     for LexName in Names do
@@ -4389,9 +4356,9 @@ end;
   them when they are in, unless it is not built yet and takes them itself. }
 procedure TForm1.LexersLoaded(Sender: TObject);
 begin
-  if FLexers.Errors <> '' then
-    DebugLn(FLexers.Errors);
-  if not FLexers.HasLexers then
+  if App.Lexers.Errors <> '' then
+    DebugLn(App.Lexers.Errors);
+  if not App.Lexers.HasLexers then
     FStatus.ShowMessage(rsNoLexers, stBad, 0);
   if FSyntaxMenu <> nil then
   begin
@@ -4419,7 +4386,7 @@ begin
   if Sender = FPlainTextItem then
     SetLexer(nil)
   else
-    SetLexer(FLexers.ByName(TMenuItem(Sender).Hint));
+    SetLexer(App.Lexers.ByName(TMenuItem(Sender).Hint));
 end;
 
 procedure TForm1.MenuAutoLexerClick(Sender: TObject);
@@ -4437,11 +4404,11 @@ end;
 function TForm1.AutoLexer: TecSyntAnalyzer;
 begin
   case FView of
-    gvChanges: Result := FLexers.ForFile(FCurrentPath, FRepo.Root);
-    gvRepoDiff: Result := FLexers.ByName(rsDiffLexer);
-    gvFile: Result := FLexers.ForFile(Edit.FileName);
-    gvBlob: Result := FLexers.ForFile(FBlobPath, FRepo.Root);
-    gvHistory: Result := FLexers.ForFile(FHistoryPath, FRepo.Root);
+    gvChanges: Result := App.Lexers.ForFile(FCurrentPath, FRepo.Root);
+    gvRepoDiff: Result := App.Lexers.ByName(rsDiffLexer);
+    gvFile: Result := App.Lexers.ForFile(Edit.FileName);
+    gvBlob: Result := App.Lexers.ForFile(FBlobPath, FRepo.Root);
+    gvHistory: Result := App.Lexers.ForFile(FHistoryPath, FRepo.Root);
     else
       Result := nil;
   end;
@@ -4550,9 +4517,9 @@ begin
     BeginEdit(AFileName);
   { The exclude file has .gitignore's syntax but not its name. }
   if (AFileName <> '') and (AFileName = FExcludePath) then
-    SetLexer(FLexers.ByName(rsGitignoreLexer))
+    SetLexer(App.Lexers.ByName(rsGitignoreLexer))
   else
-    SetLexer(FLexers.ForFile(AFileName));
+    SetLexer(App.Lexers.ForFile(AFileName));
   UpdateChangeNav;
   ShowEditor;
   UpdateCaption;
@@ -5434,7 +5401,7 @@ begin
     ShowError(FLoadError)
   else
   begin
-    FSettings.AddRecent(FRepo.Root);
+    App.Settings.AddRecent(FRepo.Root);
     RebuildRecentMenu;
     ShowSummary;
     StartIndexing;
@@ -6229,7 +6196,7 @@ begin
   FManualLexer := False;
   FView := gvRepoDiff;
   DiffText := FRepo.Diff;
-  ShowText(Edit, DiffText, FLexers.ByName(rsDiffLexer));
+  ShowText(Edit, DiffText, App.Lexers.ByName(rsDiffLexer));
   { The words that differ, as in the change view. The diff's own lines
     (hunk and file headers) are given a blank marker so they do not
     count as changes; the text keeps its marker column, so the spans

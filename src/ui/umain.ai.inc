@@ -20,22 +20,22 @@
   where it is found, and its model. }
 procedure TForm1.FindAgentCli;
 begin
-  FAgent := AgentOfKey(FSettings.AIAgent);
+  FAgent := AgentOfKey(App.Settings.AIAgent);
   if FAgent = gaCopilot then
   begin
-    FAgentCli := FindAgent(FAgent, FSettings.CopilotPath);
-    FAgentModel := FSettings.CopilotModel;
+    FAgentCli := FindAgent(FAgent, App.Settings.CopilotPath);
+    FAgentModel := App.Settings.CopilotModel;
   end
   else
   begin
-    FAgentCli := FindAgent(FAgent, FSettings.ClaudePath);
-    FAgentModel := FSettings.ClaudeModel;
+    FAgentCli := FindAgent(FAgent, App.Settings.ClaudePath);
+    FAgentModel := App.Settings.ClaudeModel;
   end;
 end;
 
 function TForm1.AIAvailable: boolean;
 begin
-  Result := FSettings.AIEnabled and (FAgentCli <> '');
+  Result := App.Settings.AIEnabled and (FAgentCli <> '');
 end;
 
 { Shown with the features on and nothing for git to carry on with (a

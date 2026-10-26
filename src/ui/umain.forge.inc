@@ -28,7 +28,7 @@ begin
   FForgePage.SetForge(ForgeName);
   FForgePage.OnPick := @ForgePagePick;
   FForgePage.OnRefresh := @ForgePageRefresh;
-  FForgePage.HideWithoutFeedback := FSettings.HideWithoutFeedback;
+  FForgePage.HideWithoutFeedback := App.Settings.HideWithoutFeedback;
   FForgePage.OnHideChange := @ForgePageHideChange;
   FForgePage.OnOpenUrl := @SummaryOpenUrl;
 end;
@@ -84,8 +84,8 @@ begin
   if not Assigned(FForge) or (FRepo.Root = '') or (FForgeJob <> nil) then
     Exit;
   FForgeJob := FForge.AccountJob(FRepo.Root);
-  FForgeJob.Clones.Assign(FSettings.Recent);
-  FForgeJob.Siblings := FSettings.CloneSiblings;
+  FForgeJob.Clones.Assign(App.Settings.Recent);
+  FForgeJob.Siblings := App.Settings.CloneSiblings;
   FForgeJob.OnDone := @ForgeJobDone;
   FForgeJob.Start;
   UpdateForgePage;
@@ -171,7 +171,7 @@ end;
 { The checkbox: the settings keep it, and the page's new height. }
 procedure TForm1.ForgePageHideChange(Sender: TObject);
 begin
-  FSettings.HideWithoutFeedback := FForgePage.HideWithoutFeedback;
+  App.Settings.HideWithoutFeedback := FForgePage.HideWithoutFeedback;
   if FForgePage.Visible then
     FForgePage.FitHeight(FSummaryBox.ClientHeight);
 end;

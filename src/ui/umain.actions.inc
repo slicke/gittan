@@ -42,36 +42,36 @@ var
   i, W, H: integer;
   Placed: boolean;
 begin
-  FOnlyChanges := FSettings.OnlyChanges;
-  FSideBySide := FSettings.SideBySide;
-  FMdPreviewOn := FSettings.MarkdownPreview;
-  FWordWrap := FSettings.WordWrap;
-  FIgnoreWhitespace := FSettings.IgnoreWhitespace;
-  FBlameOn := FSettings.Blame;
-  FShowComments := FSettings.ReviewComments;
-  FTranslations := FSettings.Translations;
-  FSyntaxTheme := FindSyntaxTheme(FSettings.SyntaxTheme);
+  FOnlyChanges := App.Settings.OnlyChanges;
+  FSideBySide := App.Settings.SideBySide;
+  FMdPreviewOn := App.Settings.MarkdownPreview;
+  FWordWrap := App.Settings.WordWrap;
+  FIgnoreWhitespace := App.Settings.IgnoreWhitespace;
+  FBlameOn := App.Settings.Blame;
+  FShowComments := App.Settings.ReviewComments;
+  FTranslations := App.Settings.Translations;
+  FSyntaxTheme := FindSyntaxTheme(App.Settings.SyntaxTheme);
   if FSyntaxTheme < 0 then
     FSyntaxTheme := DefaultSyntaxTheme;
   if FSyntaxTheme <> DefaultSyntaxTheme then
-    FLexers.ApplyTheme(FDark, FSyntaxTheme);
+    App.Lexers.ApplyTheme(FDark, FSyntaxTheme);
   FRepo.IgnoreWhitespace := FIgnoreWhitespace;
   FContextLines := ContextChoices[1];
   for i := 0 to High(ContextChoices) do
-    if ContextChoices[i] = FSettings.ContextLines then
+    if ContextChoices[i] = App.Settings.ContextLines then
       FContextLines := ContextChoices[i];
   { The window where it was, if that is still on a screen. The sizes are
     kept at 96 DPI: this runs in FormCreate, and the form scales its size
     and the tree's width to the screen's after it, its place not. }
   Placed := False;
-  if (FSettings.Width > 0) and (FSettings.Height > 0) then
+  if (App.Settings.Width > 0) and (App.Settings.Height > 0) then
   begin
-    R := Rect(FSettings.Left, FSettings.Top, FSettings.Left + FSettings.Width,
-      FSettings.Top + FSettings.Height);
+    R := Rect(App.Settings.Left, App.Settings.Top, App.Settings.Left + App.Settings.Width,
+      App.Settings.Top + App.Settings.Height);
     Placed := IntersectRect(R, R, Screen.DesktopRect) and (R.Width > 100) and
       (R.Height > 100);
     if Placed then
-      SetBounds(FSettings.Left, FSettings.Top, FSettings.Width, FSettings.Height);
+      SetBounds(App.Settings.Left, App.Settings.Top, App.Settings.Width, App.Settings.Height);
   end;
   { Else FirstShare of the main screen's work area, no smaller than the
     designed size and no larger than FirstMaxWidth by FirstMaxHeight, in
@@ -87,87 +87,87 @@ begin
     SetBounds(Area.Left + (Area.Width - W) div 2, Area.Top + (Area.Height - H) div 2,
       MulDiv(W, 96, Screen.PixelsPerInch), MulDiv(H, 96, Screen.PixelsPerInch));
   end;
-  if FSettings.Maximized then
+  if App.Settings.Maximized then
     WindowState := wsMaximized;
   { The editor font as picked, else the platform's, its size from the
     height of the screen the window is on. }
   FDefaultFontSize := DefaultFontSize(MulDiv(Screen.MonitorFromRect(BoundsRect)
     .BoundsRect.Height, 96, Screen.PixelsPerInch));
-  if FSettings.FontName <> '' then
-    Edit.Font.Name := FSettings.FontName
+  if App.Settings.FontName <> '' then
+    Edit.Font.Name := App.Settings.FontName
   else
     Edit.Font.Name := DefaultFontName;
-  if FSettings.FontSize > 0 then
-    Edit.Font.Size := FSettings.FontSize
+  if App.Settings.FontSize > 0 then
+    Edit.Font.Size := App.Settings.FontSize
   else
     Edit.Font.Size := FDefaultFontSize;
   FEditOld.Font.Assign(Edit.Font);
-  if FSettings.Zoom > 0 then
+  if App.Settings.Zoom > 0 then
   begin
-    Edit.OptScaleFont := FSettings.Zoom;
-    FEditOld.OptScaleFont := FSettings.Zoom;
+    Edit.OptScaleFont := App.Settings.Zoom;
+    FEditOld.OptScaleFont := App.Settings.Zoom;
   end;
-  if FSettings.TreeWidth > 80 then
-    FTreePanel.Width := FSettings.TreeWidth;
-  FSideNav.Collapsed := not FSettings.NavOpen;
-  FRepoHeader.Expanded := FSettings.RepoFilesOpen;
-  FSubHeader.Expanded := FSettings.SubmodulesOpen;
-  FCommitHeader.Expanded := FSettings.CommitOpen;
+  if App.Settings.TreeWidth > 80 then
+    FTreePanel.Width := App.Settings.TreeWidth;
+  FSideNav.Collapsed := not App.Settings.NavOpen;
+  FRepoHeader.Expanded := App.Settings.RepoFilesOpen;
+  FSubHeader.Expanded := App.Settings.SubmodulesOpen;
+  FCommitHeader.Expanded := App.Settings.CommitOpen;
   FCommitBox.Visible := FCommitHeader.Expanded;
   LayoutRepoFiles;
 end;
 
 procedure TForm1.FormClose(Sender: TObject; var CloseAction: TCloseAction);
 begin
-  FSettings.Maximized := WindowState = wsMaximized;
-  if FSettings.Maximized then
+  App.Settings.Maximized := WindowState = wsMaximized;
+  if App.Settings.Maximized then
   begin
-    FSettings.Left := RestoredLeft;
-    FSettings.Top := RestoredTop;
-    FSettings.Width := RestoredWidth;
-    FSettings.Height := RestoredHeight;
+    App.Settings.Left := RestoredLeft;
+    App.Settings.Top := RestoredTop;
+    App.Settings.Width := RestoredWidth;
+    App.Settings.Height := RestoredHeight;
   end
   else
   begin
-    FSettings.Left := Left;
-    FSettings.Top := Top;
-    FSettings.Width := Width;
-    FSettings.Height := Height;
+    App.Settings.Left := Left;
+    App.Settings.Top := Top;
+    App.Settings.Width := Width;
+    App.Settings.Height := Height;
   end;
-  FSettings.Width := MulDiv(FSettings.Width, 96, Screen.PixelsPerInch);
-  FSettings.Height := MulDiv(FSettings.Height, 96, Screen.PixelsPerInch);
-  FSettings.TreeWidth := MulDiv(FTreePanel.Width, 96, Screen.PixelsPerInch);
-  FSettings.NavOpen := not FSideNav.Collapsed;
-  FSettings.RepoFilesOpen := FRepoHeader.Expanded;
-  FSettings.SubmodulesOpen := FSubHeader.Expanded;
-  FSettings.CommitOpen := FCommitHeader.Expanded;
+  App.Settings.Width := MulDiv(App.Settings.Width, 96, Screen.PixelsPerInch);
+  App.Settings.Height := MulDiv(App.Settings.Height, 96, Screen.PixelsPerInch);
+  App.Settings.TreeWidth := MulDiv(FTreePanel.Width, 96, Screen.PixelsPerInch);
+  App.Settings.NavOpen := not FSideNav.Collapsed;
+  App.Settings.RepoFilesOpen := FRepoHeader.Expanded;
+  App.Settings.SubmodulesOpen := FSubHeader.Expanded;
+  App.Settings.CommitOpen := FCommitHeader.Expanded;
   StopCommitJob(True);
   StopRemoteJob(True);
   AbandonCommandJob(True);
   SaveCommitDraft;
   { The defaults are not written, so they follow the screen and a later
     Gittan's choice. }
-  FSettings.FontName := Edit.Font.Name;
-  if SameText(FSettings.FontName, DefaultFontName) then
-    FSettings.FontName := '';
-  FSettings.FontSize := Edit.Font.Size;
-  if FSettings.FontSize = FDefaultFontSize then
-    FSettings.FontSize := 0;
-  FSettings.Zoom := Edit.OptScaleFont;
-  FSettings.TabSize := FTabSize;
+  App.Settings.FontName := Edit.Font.Name;
+  if SameText(App.Settings.FontName, DefaultFontName) then
+    App.Settings.FontName := '';
+  App.Settings.FontSize := Edit.Font.Size;
+  if App.Settings.FontSize = FDefaultFontSize then
+    App.Settings.FontSize := 0;
+  App.Settings.Zoom := Edit.OptScaleFont;
+  App.Settings.TabSize := FTabSize;
   if FTabSize = DefaultTabSize then
-    FSettings.TabSize := 0;
-  FSettings.WordWrap := FWordWrap;
-  FSettings.OnlyChanges := FOnlyChanges;
-  FSettings.ContextLines := FContextLines;
-  FSettings.SideBySide := FSideBySide;
-  FSettings.MarkdownPreview := FMdPreviewOn;
-  FSettings.IgnoreWhitespace := FIgnoreWhitespace;
-  FSettings.Blame := FBlameOn;
-  FSettings.ReviewComments := FShowComments;
-  FSettings.Translations := FTranslations;
-  FSettings.SyntaxTheme := SyntaxThemes[FSyntaxTheme].Name;
-  FSettings.Save;
+    App.Settings.TabSize := 0;
+  App.Settings.WordWrap := FWordWrap;
+  App.Settings.OnlyChanges := FOnlyChanges;
+  App.Settings.ContextLines := FContextLines;
+  App.Settings.SideBySide := FSideBySide;
+  App.Settings.MarkdownPreview := FMdPreviewOn;
+  App.Settings.IgnoreWhitespace := FIgnoreWhitespace;
+  App.Settings.Blame := FBlameOn;
+  App.Settings.ReviewComments := FShowComments;
+  App.Settings.Translations := FTranslations;
+  App.Settings.SyntaxTheme := SyntaxThemes[FSyntaxTheme].Name;
+  App.Settings.Save;
   SaveIndex;
 end;
 
@@ -180,22 +180,22 @@ var
   i: integer;
 begin
   FRecentMenu.Clear;
-  for i := 0 to FSettings.Recent.Count - 1 do
+  for i := 0 to App.Settings.Recent.Count - 1 do
   begin
     Item := TMenuItem.Create(FRecentMenu);
-    Item.Caption := ShortPath(FSettings.Recent[i]);
-    Item.Hint := FSettings.Recent[i];
+    Item.Caption := ShortPath(App.Settings.Recent[i]);
+    Item.Hint := App.Settings.Recent[i];
     Item.OnClick := @MenuRecentClick;
     FRecentMenu.Add(Item);
   end;
-  if FSettings.Recent.Count > 0 then
+  if App.Settings.Recent.Count > 0 then
     FRecentMenu.Add(NewLine);
   Item := TMenuItem.Create(FRecentMenu);
   Item.Caption := rsClearMenu;
-  Item.Enabled := FSettings.Recent.Count > 0;
+  Item.Enabled := App.Settings.Recent.Count > 0;
   Item.OnClick := @MenuClearRecentClick;
   FRecentMenu.Add(Item);
-  FWelcome.SetRecent(FSettings.Recent);
+  FWelcome.SetRecent(App.Settings.Recent);
 end;
 
 procedure TForm1.MenuRecentClick(Sender: TObject);
@@ -205,7 +205,7 @@ end;
 
 procedure TForm1.MenuClearRecentClick(Sender: TObject);
 begin
-  FSettings.Recent.Clear;
+  App.Settings.Recent.Clear;
   RebuildRecentMenu;
 end;
 
@@ -488,36 +488,36 @@ begin
     OldTabSize := FTabSize;
     V.Theme := FSyntaxTheme;
     V.TabSize := FTabSize;
-    V.EditorCommand := FSettings.EditorCommand;
-    V.TerminalCommand := FSettings.TerminalCommand;
-    V.GitPath := FSettings.GitPath;
-    V.AutoFetch := FSettings.AutoFetch;
-    V.AutoFetchMinutes := FSettings.AutoFetchMinutes;
-    V.GhPath := FSettings.GhPath;
-    V.GitHubEnabled := FSettings.GitHubEnabled;
-    V.CloneSiblings := FSettings.CloneSiblings;
-    V.AIEnabled := FSettings.AIEnabled;
-    V.Agent := AgentOfKey(FSettings.AIAgent);
-    V.AgentPaths[gaClaude] := FSettings.ClaudePath;
-    V.AgentModels[gaClaude] := FSettings.ClaudeModel;
-    V.AgentPaths[gaCopilot] := FSettings.CopilotPath;
-    V.AgentModels[gaCopilot] := FSettings.CopilotModel;
+    V.EditorCommand := App.Settings.EditorCommand;
+    V.TerminalCommand := App.Settings.TerminalCommand;
+    V.GitPath := App.Settings.GitPath;
+    V.AutoFetch := App.Settings.AutoFetch;
+    V.AutoFetchMinutes := App.Settings.AutoFetchMinutes;
+    V.GhPath := App.Settings.GhPath;
+    V.GitHubEnabled := App.Settings.GitHubEnabled;
+    V.CloneSiblings := App.Settings.CloneSiblings;
+    V.AIEnabled := App.Settings.AIEnabled;
+    V.Agent := AgentOfKey(App.Settings.AIAgent);
+    V.AgentPaths[gaClaude] := App.Settings.ClaudePath;
+    V.AgentModels[gaClaude] := App.Settings.ClaudeModel;
+    V.AgentPaths[gaCopilot] := App.Settings.CopilotPath;
+    V.AgentModels[gaCopilot] := App.Settings.CopilotModel;
     Corner := EditorPanel.ClientToScreen(Point(EditorPanel.ClientWidth -
       Scale96ToForm(Margin), EditorPanel.ClientHeight - Scale96ToForm(Margin)));
-    if EditSettings(F, V, @PreviewSettings, FLexers, Edit, Corner, APage) then
+    if EditSettings(F, V, @PreviewSettings, App.Lexers, Edit, Corner, APage) then
     begin
       PreviewSettings(F, V.Theme, V.TabSize);
-      FSettings.EditorCommand := V.EditorCommand;
-      FSettings.TerminalCommand := V.TerminalCommand;
-      FSettings.CloneSiblings := V.CloneSiblings;
-      FSettings.AutoFetch := V.AutoFetch;
-      FSettings.AutoFetchMinutes := V.AutoFetchMinutes;
-      FSettings.AIEnabled := V.AIEnabled;
-      FSettings.AIAgent := AgentCommands[V.Agent];
-      FSettings.ClaudePath := V.AgentPaths[gaClaude];
-      FSettings.ClaudeModel := V.AgentModels[gaClaude];
-      FSettings.CopilotPath := V.AgentPaths[gaCopilot];
-      FSettings.CopilotModel := V.AgentModels[gaCopilot];
+      App.Settings.EditorCommand := V.EditorCommand;
+      App.Settings.TerminalCommand := V.TerminalCommand;
+      App.Settings.CloneSiblings := V.CloneSiblings;
+      App.Settings.AutoFetch := V.AutoFetch;
+      App.Settings.AutoFetchMinutes := V.AutoFetchMinutes;
+      App.Settings.AIEnabled := V.AIEnabled;
+      App.Settings.AIAgent := AgentCommands[V.Agent];
+      App.Settings.ClaudePath := V.AgentPaths[gaClaude];
+      App.Settings.ClaudeModel := V.AgentModels[gaClaude];
+      App.Settings.CopilotPath := V.AgentPaths[gaCopilot];
+      App.Settings.CopilotModel := V.AgentModels[gaCopilot];
       FindAgentCli;
       if not AIAvailable then
       begin
@@ -525,13 +525,13 @@ begin
         AbandonAIReview;
       end;
       UpdateCommitState;
-      if (V.GitPath <> FSettings.GitPath) or (V.GhPath <> FSettings.GhPath) or
-        (V.GitHubEnabled <> FSettings.GitHubEnabled) then
+      if (V.GitPath <> App.Settings.GitPath) or (V.GhPath <> App.Settings.GhPath) or
+        (V.GitHubEnabled <> App.Settings.GitHubEnabled) then
       begin
-        FSettings.GitPath := V.GitPath;
-        FSettings.GhPath := V.GhPath;
-        FSettings.GitHubEnabled := V.GitHubEnabled;
-        SetGitExe(FSettings.GitPath);
+        App.Settings.GitPath := V.GitPath;
+        App.Settings.GhPath := V.GhPath;
+        App.Settings.GitHubEnabled := V.GitHubEnabled;
+        SetGitExe(App.Settings.GitPath);
         FindForge;
         UpdateForgeItems;
         if not Assigned(FForge) then
@@ -606,10 +606,10 @@ procedure TForm1.FindForge;
 var
   Cli: string;
 begin
-  if not FSettings.GitHubEnabled then
+  if not App.Settings.GitHubEnabled then
     Cli := ''
-  else if FSettings.GhPath <> '' then
-    Cli := FSettings.GhPath
+  else if App.Settings.GhPath <> '' then
+    Cli := App.Settings.GhPath
   else
     Cli := FindTool(TGittanGitHubForge.CliName);
   if Assigned(FForge) and (FForge.Cli = Cli) then
@@ -1688,10 +1688,10 @@ procedure TForm1.MenuOpenInEditorClick(Sender: TObject);
 begin
   if FContextPath = '' then
     Exit;
-  if Trim(FSettings.EditorCommand) = '' then
+  if Trim(App.Settings.EditorCommand) = '' then
     OpenDocument(ContextFullPath)
   else
-    RunCommandWith(FSettings.EditorCommand, [ContextFullPath]);
+    RunCommandWith(App.Settings.EditorCommand, [ContextFullPath]);
 end;
 
 { The commit graph: the newest GraphLimit commits of every branch, in
@@ -1902,12 +1902,12 @@ var
 begin
   if FRepo.Root = '' then
     Exit;
-  if Trim(FSettings.TerminalCommand) <> '' then
+  if Trim(App.Settings.TerminalCommand) <> '' then
   begin
     if ACommand = '' then
-      RunCommandWith(FSettings.TerminalCommand, [FRepo.Root])
+      RunCommandWith(App.Settings.TerminalCommand, [FRepo.Root])
     else
-      RunCommandWith(FSettings.TerminalCommand, [FRepo.Root, ACommand]);
+      RunCommandWith(App.Settings.TerminalCommand, [FRepo.Root, ACommand]);
     Exit;
   end;
   {$IFDEF DARWIN}

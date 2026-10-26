@@ -83,19 +83,19 @@ var
   i: integer;
 begin
   FRecentPopup.Clear;
-  if FSettings.Recent.Count = 0 then
+  if App.Settings.Recent.Count = 0 then
     FRecentPopup.AddHeader(rsNoRecent);
-  for i := 0 to FSettings.Recent.Count - 1 do
-    FRecentPopup.Add(ShortPath(FSettings.Recent[i]), '',
-      (FRepo.Root <> '') and SameFileName(FSettings.Recent[i], FRepo.Root));
+  for i := 0 to App.Settings.Recent.Count - 1 do
+    FRecentPopup.Add(ShortPath(App.Settings.Recent[i]), '',
+      (FRepo.Root <> '') and SameFileName(App.Settings.Recent[i], FRepo.Root));
   FRecentPopup.Add(StripHotkey(rsOpenRepo));
   FRecentPopup.Popup(AAnchor);
 end;
 
 procedure TForm1.RecentPopupPick(Sender: TObject; AIndex: integer);
 begin
-  if AIndex < FSettings.Recent.Count then
-    OpenRepository(FSettings.Recent[AIndex])
+  if AIndex < App.Settings.Recent.Count then
+    OpenRepository(App.Settings.Recent[AIndex])
   else
     MenuOpenRepoClick(Sender);
 end;

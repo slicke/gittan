@@ -996,10 +996,10 @@ procedure TForm1.ForgetCommitted(AJob: TGittanCommitJob);
 begin
   if not AJob.Ok then
     Exit;
-  if (FSettings.CommitDraftRepo = AJob.Root) and Same(FSettings.CommitDraft) then
+  if (App.Settings.CommitDraftRepo = AJob.Root) and Same(App.Settings.CommitDraft) then
   begin
-    FSettings.CommitDraft := '';
-    FSettings.CommitDraftRepo := '';
+    App.Settings.CommitDraft := '';
+    App.Settings.CommitDraftRepo := '';
   end;
   if (FCommitMemo <> nil) and (FCommitDraftFor = AJob.Root) and
     Same(FCommitMemo.Text) then
@@ -1015,13 +1015,13 @@ begin
     Exit;
   if Trim(FCommitMemo.Text) <> '' then
   begin
-    FSettings.CommitDraft := FCommitMemo.Text;
-    FSettings.CommitDraftRepo := FCommitDraftFor;
+    App.Settings.CommitDraft := FCommitMemo.Text;
+    App.Settings.CommitDraftRepo := FCommitDraftFor;
   end
-  else if FSettings.CommitDraftRepo = FCommitDraftFor then
+  else if App.Settings.CommitDraftRepo = FCommitDraftFor then
   begin
-    FSettings.CommitDraft := '';
-    FSettings.CommitDraftRepo := '';
+    App.Settings.CommitDraft := '';
+    App.Settings.CommitDraftRepo := '';
   end;
 end;
 
@@ -1038,8 +1038,8 @@ begin
   FSignOff := FRepo.SignOff;
   FSkipHooks := False;
   UpdateCommitOptions;
-  if (FRepo.Root <> '') and (FSettings.CommitDraftRepo = FRepo.Root) then
-    FCommitMemo.Text := FSettings.CommitDraft
+  if (FRepo.Root <> '') and (App.Settings.CommitDraftRepo = FRepo.Root) then
+    FCommitMemo.Text := App.Settings.CommitDraft
   else
     FCommitMemo.Clear;
   UpdateCommitState;
