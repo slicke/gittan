@@ -19,7 +19,8 @@ unit uwindow;
   that has it open already (or is opening it), else opens it in the
   shown frame while that one is empty, else in a new frame.
 
-  On macOS the toolbar's tab strip shows the frames, a tab each with the
+  The tabs show the frames, in the toolbar's tab strip on macOS and in
+  the own title bar on Windows and GTK 3, a tab each with the
   frame's TabTitle and TabHint (UpdateTabs, whenever one changes, is
   shown, made or closed); File > New Tab (Cmd+T) and the plus make an
   empty one, File > Close Tab (Cmd+W), the cross and a middle click
@@ -79,11 +80,9 @@ type
     procedure UpdateTabs;
     procedure SaveTabs;
     procedure CloseFrameAsync(Data: PtrInt);
-    {$IFDEF LCLCocoa}
     procedure TabSelect(Sender: TObject; AIndex: integer);
     procedure TabClose(Sender: TObject; AIndex: integer);
     procedure TabNew(Sender: TObject);
-    {$ENDIF}
   public
     procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil);
       override;
@@ -199,6 +198,9 @@ begin
   FOwnBar.Title := rsAppShortName;
   FOwnBar.Align := alTop;
   FOwnBar.Parent := Self;
+  FOwnBar.OnTabSelect := @TabSelect;
+  FOwnBar.OnTabClose := @TabClose;
+  FOwnBar.OnNewTab := @TabNew;
   {$ENDIF}
   {$IFDEF LCLWin32}
   InstallTitleBar(Self, TGittanWinTitleBar(FOwnBar));
@@ -565,9 +567,6 @@ var
 begin
   if (csDestroying in ComponentState) or (FFrames = nil) then
     Exit;
-  {$IFDEF LCLCocoa}
-  if FToolbar = nil then
-    Exit;
   Captions := nil;
   Hints := nil;
   SetLength(Captions, FFrames.Count);
@@ -577,7 +576,12 @@ begin
     Captions[i] := Frames[i].TabTitle;
     Hints[i] := Frames[i].TabHint;
   end;
-  FToolbar.SetTabs(Captions, Hints, FFrames.IndexOf(FActive));
+  {$IFDEF LCLCocoa}
+  if FToolbar <> nil then
+    FToolbar.SetTabs(Captions, Hints, FFrames.IndexOf(FActive));
+  {$ENDIF}
+  {$IFDEF OWNBAR}
+  FOwnBar.SetTabs(Captions, Hints, FFrames.IndexOf(FActive));
   {$ENDIF}
 end;
 
@@ -661,7 +665,6 @@ begin
   ActivateFrame(Frames[Index]);
 end;
 
-{$IFDEF LCLCocoa}
 procedure TGittanWindow.TabSelect(Sender: TObject; AIndex: integer);
 begin
   if (AIndex >= 0) and (AIndex < FFrames.Count) then
@@ -678,6 +681,5 @@ procedure TGittanWindow.TabNew(Sender: TObject);
 begin
   NewTab;
 end;
-{$ENDIF}
 
 end.

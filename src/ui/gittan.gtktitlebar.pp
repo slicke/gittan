@@ -7,8 +7,8 @@
   (gtk_window_set_titlebar), so GTK keeps the shadow, the corners and the
   resize border and the strip is gone, and TGittanGtkTitleBar, aligned
   at the top of the form, takes its place: the bar of gittan.owntitlebar
-  (the name, the menus, the search field, the navigator, the pills and
-  the caption buttons) with the GTK parts of it. GTK only takes the
+  (the menu button, the tabs and the caption buttons) with the GTK parts
+  of it. GTK only takes the
   title bar from a window it has not realized, and the LCL realizes the
   form's window as it creates it (which InstallTitleBar makes it do,
   since the form has no handle yet while it is created), so the window
@@ -29,9 +29,8 @@
   menu bar's items, kept hidden through the show_all the LCL runs when
   it shows the form, and lets the bar be a pixel high: the LCL subtracts
   the bar's height from the form's, and takes a height of 0 as the menu
-  height of its own) and the bar shows them; a click pops the item's
-  submenu under the name (gtk_menu_popup_at_widget), and its "deactivate"
-  tells the bar when it closed. The caption glyphs are drawn with lines.
+  height of its own) and the bar's menu button drops a copy of the menu
+  as a popup. The caption glyphs are drawn with lines.
 
   The unit uses GTK; umain keeps it behind LCLGtk3. }
 unit gittan.gtktitlebar;
@@ -52,15 +51,12 @@ type
   private
     FPressPoint: TPoint;
     FDragArmed: boolean;
-    FHookedMenus: TList;
     procedure BeginMove;
     procedure ShowWindowMenu;
   protected
     function Maximized: boolean; override;
     procedure DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
       AColor: TColor); override;
-    procedure ShowMenu(AIndex: integer; AItem: TMenuItem; const ARect: TRect);
-      override;
     procedure CaptionButtonClick(APart: TGittanTitlePart); override;
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
       override;
@@ -127,12 +123,6 @@ begin
   Result := False;
 end;
 
-procedure MenuDeactivated(AShell: PGtkMenuShell; AData: gpointer); cdecl;
-begin
-  if (LiveBar <> nil) and (AData = Pointer(LiveBar)) then
-    LiveBar.MenuClosed;
-end;
-
 procedure InstallTitleBar(AForm: TCustomForm; ABar: TGittanGtkTitleBar);
 var
   Win: PGtkWindow;
@@ -165,14 +155,12 @@ constructor TGittanGtkTitleBar.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
   ControlStyle := ControlStyle - [csCaptureMouse];
-  FHookedMenus := TList.Create;
 end;
 
 destructor TGittanGtkTitleBar.Destroy;
 begin
   if LiveBar = Self then
     LiveBar := nil;
-  FHookedMenus.Free;
   inherited Destroy;
 end;
 
@@ -347,37 +335,6 @@ begin
         Canvas.Line(CX - D, CY + D, CX + D + 1, CY - D - 1);
       end;
   end;
-end;
-
-{ The item's submenu, under the name: anchored at the bar's bottom left
-  corner and shifted right to the name (rect-anchor-dx). The item's own
-  OnClick runs first, as the menu bar would run it when the menu opens
-  (the Branch menu names the current branch in its items). Its
-  "deactivate" is connected once per menu. }
-procedure TGittanGtkTitleBar.ShowMenu(AIndex: integer; AItem: TMenuItem;
-  const ARect: TRect);
-var
-  Sub: PGtkWidget;
-begin
-  if Assigned(AItem.OnClick) then
-    AItem.Click;
-  Sub := nil;
-  if AItem.HandleAllocated then
-    Sub := gtk_menu_item_get_submenu(PGtkMenuItem(TGtk3MenuItem(AItem.Handle).Widget));
-  if (Sub = nil) or not HandleAllocated then
-  begin
-    MenuClosed;
-    Exit;
-  end;
-  if FHookedMenus.IndexOf(Sub) < 0 then
-  begin
-    g_signal_connect_data(PGObject(Sub), 'deactivate', TGCallback(@MenuDeactivated),
-      Self, nil, G_CONNECT_DEFAULT);
-    FHookedMenus.Add(Sub);
-  end;
-  g_object_set(PGObject(Sub), 'rect-anchor-dx', [ARect.Left, nil]);
-  gtk_menu_popup_at_widget(PGtkMenu(Sub), TGtk3Widget(Handle).Widget,
-    GDK_GRAVITY_SOUTH_WEST, GDK_GRAVITY_NORTH_WEST, nil);
 end;
 
 procedure TGittanGtkTitleBar.HideNativeMenu;

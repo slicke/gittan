@@ -1,25 +1,41 @@
 { A title bar the form draws itself (Windows and GTK 3).
 
-  TGittanOwnTitleBar, aligned at the top of the form, stands in for the
-  window's caption, as in VS Code or Windows Terminal: the name and the
-  menus on the left, the file filter as a rounded search field in the
-  middle, and on the right the change navigator, the actions the view
-  offers (the file header's pills) and the minimize, maximize and close
-  buttons. It lays out and paints all of that, tells which part a point
-  is in and runs the pills, the search field and the menu names.
+  TGittanOwnTitleBar, aligned at the top of the window, stands in for
+  the window's caption, as Firefox's tab bar does: a menu button on the
+  left, then a tab per open repository and a plus that opens a new tab,
+  and on the right the minimize, maximize and close buttons. It lays out
+  and paints all of that, tells which part a point is in and runs the
+  menu button and the tabs. The empty part is the caption: it moves the
+  window, and a double click maximizes it.
+
+  The menu button drops the window's menu as a popup: one item per menu
+  of the menu bar, each with its items under it. The popup is built
+  anew each time from the menu bar's menu (MenuOf), whose top items'
+  OnClick runs first as a menu bar runs it when the menu opens, so the
+  checks and the enabled states are those of the moment; each item of
+  the popup clicks the item it copies, so the menu's own handlers run
+  with their own item as Sender. Alt and a letter drops the menu with
+  that accelerator the same way, from the menu button (OpenMenuByKey).
+  The menu bar itself stays on the window, hidden, for its shortcuts.
+
+  The tabs: the shown one is a filled, rounded box, a hovered one a
+  fainter box, the others their names with a faint line between two of
+  them; the cross on the shown and the hovered tab, or a middle click,
+  closes one (OnTabClose), a press on a tab shows it (OnTabSelect), the
+  plus asks for a new one (OnNewTab). The tooltip is the path of the tab
+  under the mouse.
 
   What the window system does differs: how the window is moved,
-  maximized, minimized and closed, how a menu drops down, which glyphs
-  the caption buttons get. A descendant per widgetset supplies that
-  through Maximized, ShowMenu, CaptionButtonClick and DrawGlyph:
-  gittan.wintitlebar on Windows, where the window's non-client messages
-  answer the mouse on the empty parts and the caption buttons, and
-  gittan.gtktitlebar on GTK 3, where the bar takes the mouse itself and
-  asks GTK.
+  maximized, minimized and closed, which glyphs the caption buttons get.
+  A descendant per widgetset supplies that through Maximized,
+  CaptionButtonClick and DrawGlyph: gittan.wintitlebar on Windows, where
+  the window's non-client messages answer the mouse on the empty parts
+  and the caption buttons, and gittan.gtktitlebar on GTK 3, where the bar
+  takes the mouse itself and asks GTK.
 
   SetBand draws a progress band along the bar's top edge, as the band
   over the title bar on macOS (gittan.titlebar): the bar paints it, in
-  the strip above its menus, field and pills. }
+  the strip above its tabs. }
 unit gittan.owntitlebar;
 
 {$mode objfpc}{$H+}
@@ -27,21 +43,20 @@ unit gittan.owntitlebar;
 interface
 
 uses
-  Classes, SysUtils, Controls, Graphics, StdCtrls, Menus, Types, Forms,
-  gittan.changenav;
+  Classes, SysUtils, Controls, Graphics, Menus, Types, Forms;
 
 type
-  {** A click on the action at AIndex, in the order of SetActions. }
-  TGittanTitleActionEvent = procedure(Sender: TObject; AIndex: integer) of object;
+  {** Something done to the tab at AIndex, in the order of SetTabs. }
+  TGittanTitleTabEvent = procedure(Sender: TObject; AIndex: integer) of object;
 
-  {** What a point of the bar is: a menu name, the search field, the clear
-    button, an action, a caption button, or nothing (a drag area). }
-  TGittanTitlePart = (tpNone, tpMenu, tpSearch, tpClear, tpAction,
+  {** What a point of the bar is: the menu button, a tab, a tab's cross,
+    the plus, a caption button, or nothing (the caption, a drag area). }
+  TGittanTitlePart = (tpNone, tpMenu, tpTab, tpTabClose, tpPlus,
     tpMinimize, tpMaximize, tpClose);
 
   {** The glyphs a descendant draws: the caption buttons' (restore for
-    maximize while the window is maximized), the search field's
-    magnifier and its clear button. }
+    maximize while the window is maximized). tgSearch and tgClear are
+    left from the search field the bar had. }
   TGittanTitleGlyph = (tgMinimize, tgMaximize, tgRestore, tgClose, tgSearch,
     tgClear);
 
@@ -49,33 +64,35 @@ type
 
   TGittanOwnTitleBar = class(TCustomControl)
   private
-    FSearch: TCustomEdit;
-    FNav, FConflictNav: TGittanChangeNav;
     FSplitControl: TControl;
-    FActions: array of string;
-    FEnabled: array of boolean;
-    FActionRects: array of TRect;
-    FMenuRects: array of TRect;
-    FMenuItems: array of TMenuItem;
-    FSearchRect, FClearRect, FMinRect, FMaxRect, FCloseRect: TRect;
+    FCaptions, FHints: array of string;
+    FTabActive: integer;
+    FMenuRect, FPlusRect, FMinRect, FMaxRect, FCloseRect: TRect;
     FHotPart, FPressedPart, FHotButton, FPressedButton: TGittanTitlePart;
-    FHotIndex, FPressedIndex, FOpenMenu: integer;
+    FHotIndex, FPressedIndex: integer;
+    FMenuOpen: boolean;
+    FPopup: TPopupMenu;
     FActive: boolean;
-    FSide, FMain, FText, FDim, FPillFill, FPillBorder, FHotColor: TColor;
-    FSearchFill, FSearchBorder, FButtonHot: TColor;
+    FSide, FMain, FText, FDim, FTabFill, FTabBorder, FButtonHot: TColor;
     FBandPos, FBandTotal: integer;
     FBandTrack, FBandFill: TColor;
     FTitle: string;
-    FOnAction: TGittanTitleActionEvent;
-    procedure SetSearch(AValue: TCustomEdit);
+    FOnTabSelect, FOnTabClose: TGittanTitleTabEvent;
+    FOnNewTab: TNotifyEvent;
     procedure SetActive(AValue: boolean);
     function BandFillWidth(APos, ATotal: integer): integer;
     function MenuOf(AForm: TCustomForm): TMainMenu;
+    function TabWidth: integer;
+    function TabRect(AIndex: integer): TRect;
+    function CrossRect(const ATab: TRect): TRect;
+    procedure CopyItems(ASource, ATarget: TMenuItem);
+    procedure PopupItemClick(Sender: TObject);
+    procedure PopupClose(Sender: TObject);
+    procedure DropMenu(AOnly: TMenuItem);
   protected
     procedure DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
       const AXProportion, AYProportion: double); override;
-    {** The part at a point of the bar, with the index of the menu name or
-      the action; a disabled action still counts. }
+    {** The part at a point of the bar, with the index of the tab. }
     function PartAt(X, Y: integer; out AIndex: integer): TGittanTitlePart;
     procedure SetHot(APart: TGittanTitlePart; AIndex: integer);
     procedure Paint; override;
@@ -93,58 +110,36 @@ type
       font as it found it. }
     procedure DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
       AColor: TColor); virtual; abstract;
-    {** Drops the submenu of AItem, the AIndexth visible item of the main
-      menu, down from ARect, the name's rectangle in the bar; the name is
-      drawn as open until MenuClosed is called, when the menu has gone. }
-    procedure ShowMenu(AIndex: integer; AItem: TMenuItem; const ARect: TRect);
-      virtual; abstract;
     {** A click released on a caption button the bar itself saw the mouse
       on (on Windows the form sees it instead, and this is not called). }
     procedure CaptionButtonClick(APart: TGittanTitlePart); virtual;
-    {** The menu ShowMenu opened has closed: the name is drawn plain. }
-    procedure MenuClosed;
   public
     constructor Create(AOwner: TComponent); override;
     {** The caption button under the mouse or pressed, tpNone for none;
       set by a form that sees the mouse there itself (Windows). }
     procedure SetButtonState(AHot, APressed: TGittanTitlePart);
-    {** Places the menus, the search field, the navigator and the pills;
-      again after the menu changed. }
+    {** Places the menu button, the tabs, the plus and the caption
+      buttons; again after the tabs changed. }
     procedure Layout;
-    {** Opens the menu with the name at AIndex, in the order of the main
-      menu's visible items. }
-    procedure OpenMenu(AIndex: integer);
-    {** Opens the menu whose name has the accelerator AKey; False when
+    {** Drops the whole menu from the menu button. }
+    procedure OpenMenu;
+    {** Drops the menu whose name has the accelerator AKey; False when
       none has it. }
     function OpenMenuByKey(AKey: char): boolean;
-    {** The action buttons, left to right, each enabled as AEnabled says;
-      none for an empty array. }
-    procedure SetActions(const ACaptions: array of string;
-      const AEnabled: array of boolean);
-    {** Shows the navigator at ACurrent of ATotal changes, or hides it when
-      ATotal is 0. }
-    procedure SetChanges(ACurrent, ATotal: integer);
-    {** Shows ACurrent of ATotal conflicts in the conflict navigator, or
-      hides it when ATotal is 0. }
-    procedure SetConflicts(ACurrent, ATotal: integer);
+    {** The tabs, left to right: ACaptions are their names, AHints their
+      tooltips (the paths), AActive the one shown. }
+    procedure SetTabs(const ACaptions, AHints: array of string; AActive: integer);
     {** The bar's colors: the shade over the sidebar and the background
-      over the rest, the text and the dim text, the pills' fill, border
-      and text under the mouse, the search field's fill and border, and a
-      caption button under the mouse. }
-    procedure SetColors(ASide, AMain, AText, ADim, APillFill, APillBorder, AHot,
-      ASearchFill, ASearchBorder, AButtonHot: TColor);
+      over the rest, the text and the dim text, the shown tab's fill and
+      border, and a caption button (or a hovered tab) under the mouse. }
+    procedure SetColors(ASide, AMain, AText, ADim, ATabFill, ATabBorder,
+      AButtonHot: TColor);
     {** Shows the band along the top edge, APos of ATotal filled, in the
       colors ATrack and AFill; ATotal 0 hides it. }
     procedure SetBand(APos, ATotal: integer; ATrack, AFill: TColor);
-    {** The filter field, borderless, laid out inside the rounded box. }
-    property Search: TCustomEdit read FSearch write SetSearch;
     {** The control whose right edge ends the sidebar's shade. }
     property SplitControl: TControl read FSplitControl write FSplitControl;
-    property Nav: TGittanChangeNav read FNav;
-    {** The conflict navigator, left of the other one while SetConflicts
-      gave it a count. }
-    property ConflictNav: TGittanChangeNav read FConflictNav;
-    {** The name on the left. }
+    {** The application's name, the menu button's tooltip. }
     property Title: string read FTitle write FTitle;
     {** Whether the window is the active one; the text dims when not. }
     property Active: boolean read FActive write SetActive;
@@ -152,7 +147,9 @@ type
     property PressedButton: TGittanTitlePart read FPressedButton;
     {** The dim text color, for a descendant's glyphs. }
     property DimColor: TColor read FDim;
-    property OnAction: TGittanTitleActionEvent read FOnAction write FOnAction;
+    property OnTabSelect: TGittanTitleTabEvent read FOnTabSelect write FOnTabSelect;
+    property OnTabClose: TGittanTitleTabEvent read FOnTabClose write FOnTabClose;
+    property OnNewTab: TNotifyEvent read FOnNewTab write FOnNewTab;
   end;
 
 const
@@ -162,20 +159,19 @@ const
 implementation
 
 uses
-  Math, LCLIntf;
+  Math, LCLIntf, LCLType;
 
 const
-  Pad = 12;
-  Gap = 8;
-  MenuPad = 8;
-  SearchWidth = 320;
-  SearchHeight = 28;
-  SearchMin = 140;
-  PillHeight = 24;
-  PillPad = 10;
-  PillGap = 6;
+  Pad = 8;
+  Gap = 6;
+  MenuButtonWidth = 36;
+  TabHeight = 30;
+  MaxTabWidth = 220;
+  MinTabWidth = 64;
+  TabGap = 3;
+  PlusSize = 26;
+  CrossSize = 18;
   ButtonWidth = 46;
-  NavHeight = 26;
   BandHeight = 3;
   { The least the band's fill is wide: a rounded window corner (Windows
     11, GNOME) hides its first pixels. }
@@ -192,31 +188,13 @@ begin
   Height := Scale96ToScreen(TitleBarHeight);
   FHotIndex := -1;
   FPressedIndex := -1;
-  FOpenMenu := -1;
+  FTabActive := -1;
   FActive := True;
-  FNav := TGittanChangeNav.Create(Self);
-  FNav.Parent := Self;
-  FNav.Height := Scale96ToScreen(NavHeight);
-  FNav.Visible := False;
-  FConflictNav := TGittanChangeNav.Create(Self);
-  FConflictNav.Parent := Self;
-  FConflictNav.Height := Scale96ToScreen(NavHeight);
-  FConflictNav.Visible := False;
+  ShowHint := True;
+  FPopup := TPopupMenu.Create(Self);
+  FPopup.OnClose := @PopupClose;
   SetColors(clBtnFace, clWindow, clWindowText, clGrayText, clBtnFace,
-    clBtnShadow, clHighlight, clWindow, clBtnShadow, clBtnFace);
-end;
-
-procedure TGittanOwnTitleBar.SetSearch(AValue: TCustomEdit);
-begin
-  FSearch := AValue;
-  if FSearch = nil then
-    Exit;
-  FSearch.Parent := Self;
-  FSearch.Align := alNone;
-  FSearch.BorderStyle := bsNone;
-  FSearch.BorderSpacing.Around := 0;
-  FSearch.BorderSpacing.Top := 0;
-  Layout;
+    clBtnShadow, clBtnFace);
 end;
 
 procedure TGittanOwnTitleBar.SetActive(AValue: boolean);
@@ -227,78 +205,40 @@ begin
   Invalidate;
 end;
 
-procedure TGittanOwnTitleBar.SetColors(ASide, AMain, AText, ADim, APillFill,
-  APillBorder, AHot, ASearchFill, ASearchBorder, AButtonHot: TColor);
+procedure TGittanOwnTitleBar.SetColors(ASide, AMain, AText, ADim, ATabFill,
+  ATabBorder, AButtonHot: TColor);
 begin
   FSide := ASide;
   FMain := AMain;
   FText := AText;
   FDim := ADim;
-  FPillFill := APillFill;
-  FPillBorder := APillBorder;
-  FHotColor := AHot;
-  FSearchFill := ASearchFill;
-  FSearchBorder := ASearchBorder;
+  FTabFill := ATabFill;
+  FTabBorder := ATabBorder;
   FButtonHot := AButtonHot;
   Color := AMain;
-  if FSearch <> nil then
-  begin
-    FSearch.Color := ASearchFill;
-    FSearch.Font.Color := AText;
-  end;
   Invalidate;
 end;
 
-procedure TGittanOwnTitleBar.SetActions(const ACaptions: array of string;
-  const AEnabled: array of boolean);
+procedure TGittanOwnTitleBar.SetTabs(const ACaptions, AHints: array of string;
+  AActive: integer);
 var
   i: integer;
-  Same: boolean;
 begin
-  Same := Length(ACaptions) = Length(FActions);
-  if Same then
-    for i := 0 to High(ACaptions) do
-      if (FActions[i] <> ACaptions[i]) or
-        (FEnabled[i] <> ((i > High(AEnabled)) or AEnabled[i])) then
-        Same := False;
-  if Same then
-    Exit;
-  SetLength(FActions, Length(ACaptions));
-  SetLength(FEnabled, Length(ACaptions));
-  SetLength(FActionRects, Length(ACaptions));
+  SetLength(FCaptions, Length(ACaptions));
+  SetLength(FHints, Length(ACaptions));
   for i := 0 to High(ACaptions) do
   begin
-    FActions[i] := ACaptions[i];
-    FEnabled[i] := (i > High(AEnabled)) or AEnabled[i];
+    FCaptions[i] := ACaptions[i];
+    if i <= High(AHints) then
+      FHints[i] := AHints[i]
+    else
+      FHints[i] := '';
   end;
-  FHotPart := tpNone;
-  FPressedPart := tpNone;
+  FTabActive := AActive;
+  if FHotIndex > High(FCaptions) then
+    SetHot(tpNone, -1);
   Layout;
   Invalidate;
-end;
-
-procedure TGittanOwnTitleBar.SetChanges(ACurrent, ATotal: integer);
-begin
-  if ATotal > 0 then
-    FNav.SetPosition(ACurrent, ATotal);
-  if FNav.Visible <> (ATotal > 0) then
-  begin
-    FNav.Visible := ATotal > 0;
-    Layout;
-    Invalidate;
-  end;
-end;
-
-procedure TGittanOwnTitleBar.SetConflicts(ACurrent, ATotal: integer);
-begin
-  if ATotal > 0 then
-    FConflictNav.SetPosition(ACurrent, ATotal);
-  if FConflictNav.Visible <> (ATotal > 0) then
-  begin
-    FConflictNav.Visible := ATotal > 0;
-    Layout;
-    Invalidate;
-  end;
 end;
 
 function TGittanOwnTitleBar.BandFillWidth(APos, ATotal: integer): integer;
@@ -345,98 +285,60 @@ begin
     Result := AForm.Menu;
 end;
 
-{ Right to left: the caption buttons, the pills, the navigator; from the
-  left the name and the menus; the search field centered on the bar in
-  the room that is left, narrower when there is little. }
+{ The tabs share the room between the menu button and the plus, which
+  follows the last of them, evenly, within MinTabWidth and MaxTabWidth. }
+function TGittanOwnTitleBar.TabWidth: integer;
+var
+  Room: integer;
+begin
+  Room := FMinRect.Left - Scale96ToForm(Gap) - Scale96ToForm(PlusSize + Gap) -
+    (FMenuRect.Right + Scale96ToForm(Gap));
+  if Length(FCaptions) = 0 then
+    Exit(Scale96ToForm(MaxTabWidth));
+  Result := Max(Scale96ToForm(MinTabWidth), Min(Scale96ToForm(MaxTabWidth),
+    Room div Length(FCaptions)));
+end;
+
+function TGittanOwnTitleBar.TabRect(AIndex: integer): TRect;
+var
+  W, X, H: integer;
+begin
+  W := TabWidth;
+  X := FMenuRect.Right + Scale96ToForm(Gap) + AIndex * W;
+  H := Scale96ToForm(TabHeight);
+  Result := Types.Rect(X, (Height - H) div 2 + 1, X + W - Scale96ToForm(TabGap),
+    (Height + H) div 2 + 1);
+end;
+
+function TGittanOwnTitleBar.CrossRect(const ATab: TRect): TRect;
+var
+  S: integer;
+begin
+  S := Scale96ToForm(CrossSize);
+  Result := Types.Rect(ATab.Right - S - Scale96ToForm(6), ATab.Top + (ATab.Height - S) div 2,
+    ATab.Right - Scale96ToForm(6), ATab.Top + (ATab.Height - S) div 2 + S);
+end;
+
+{ From the right the caption buttons; from the left the menu button,
+  the tabs and the plus after them. }
 procedure TGittanOwnTitleBar.Layout;
 var
-  Right, LeftEdge, X, W, H, i, Room, SearchW, SearchH: integer;
-  Menu: TMainMenu;
-  Item: TMenuItem;
-  S: string;
+  W, H, X, S: integer;
 begin
-  if not HandleAllocated then
+  { Setting the height in Create resizes the bar before it has a form to
+    scale by. }
+  if GetParentForm(Self) = nil then
     Exit;
   H := Height;
-  Canvas.Font := Font;
   W := Scale96ToForm(ButtonWidth);
   FCloseRect := Types.Rect(Width - W, 0, Width, H);
   FMaxRect := Types.Rect(FCloseRect.Left - W, 0, FCloseRect.Left, H);
   FMinRect := Types.Rect(FMaxRect.Left - W, 0, FMaxRect.Left, H);
-  Right := FMinRect.Left - Scale96ToForm(Gap);
-  for i := High(FActions) downto 0 do
-  begin
-    W := Canvas.TextWidth(FActions[i]) + 2 * Scale96ToForm(PillPad);
-    FActionRects[i] := Types.Rect(Right - W, (H - Scale96ToForm(PillHeight)) div 2,
-      Right, (H + Scale96ToForm(PillHeight)) div 2);
-    Right := FActionRects[i].Left - Scale96ToForm(PillGap);
-  end;
-  if FNav.Visible then
-  begin
-    FNav.SetBounds(Right - FNav.Width, (H - FNav.Height) div 2, FNav.Width,
-      FNav.Height);
-    Right := FNav.Left - Scale96ToForm(Gap);
-  end;
-  if FConflictNav.Visible then
-  begin
-    FConflictNav.SetBounds(Right - FConflictNav.Width, (H - FConflictNav.Height) div 2,
-      FConflictNav.Width, FConflictNav.Height);
-    Right := FConflictNav.Left - Scale96ToForm(Gap);
-  end;
-
-  { The name is bold. }
-  Canvas.Font.Style := [fsBold];
-  X := Scale96ToForm(Pad) + Canvas.TextWidth(FTitle) +
-    Scale96ToForm(Pad);
-  Canvas.Font.Style := [];
-  Menu := MenuOf(GetParentForm(Self));
-  SetLength(FMenuRects, 0);
-  SetLength(FMenuItems, 0);
-  if Menu <> nil then
-    for i := 0 to Menu.Items.Count - 1 do
-    begin
-      Item := Menu.Items[i];
-      if not Item.Visible then
-        Continue;
-      S := StripHotkey(Item.Caption);
-      W := Canvas.TextWidth(S) + 2 * Scale96ToForm(MenuPad);
-      SetLength(FMenuRects, Length(FMenuRects) + 1);
-      SetLength(FMenuItems, Length(FMenuItems) + 1);
-      FMenuRects[High(FMenuRects)] := Types.Rect(X, (H - Scale96ToForm(PillHeight)) div 2,
-        X + W, (H + Scale96ToForm(PillHeight)) div 2);
-      FMenuItems[High(FMenuItems)] := Item;
-      Inc(X, W);
-    end;
-  LeftEdge := X + Scale96ToForm(Gap);
-
-  Room := Right - LeftEdge;
-  SearchW := Min(Scale96ToForm(SearchWidth), Room);
-  { The box holds the field with a pixel of its border above and below: a
-    GTK 3 entry is taller than SearchHeight even without a frame (34 px in
-    Adwaita) and painted over the box's top and bottom edge. }
-  SearchH := Scale96ToForm(SearchHeight);
-  if FSearch <> nil then
-    SearchH := Max(SearchH, Min(FSearch.Height + 2, H - 2));
-  if SearchW < Scale96ToForm(SearchMin) then
-    FSearchRect := Types.Rect(0, 0, 0, 0)
-  else
-  begin
-    X := (Width - SearchW) div 2;
-    X := Max(LeftEdge, Min(X, Right - SearchW));
-    FSearchRect := Types.Rect(X, (H - SearchH) div 2, X + SearchW,
-      (H + SearchH) div 2);
-  end;
-  W := Scale96ToForm(SearchHeight);
-  FClearRect := Types.Rect(FSearchRect.Right - W, FSearchRect.Top, FSearchRect.Right,
-    FSearchRect.Bottom);
-  if FSearch <> nil then
-  begin
-    FSearch.Visible := not FSearchRect.IsEmpty;
-    if FSearch.Visible then
-      FSearch.SetBounds(FSearchRect.Left + W, FSearchRect.Top +
-        (FSearchRect.Height - FSearch.Height) div 2, FSearchRect.Width - 2 * W,
-        FSearch.Height);
-  end;
+  S := Scale96ToForm(PlusSize);
+  FMenuRect := Types.Rect(Scale96ToForm(Pad), (H - S) div 2,
+    Scale96ToForm(Pad + MenuButtonWidth), (H + S) div 2);
+  X := FMenuRect.Right + Scale96ToForm(Gap) + Length(FCaptions) * TabWidth;
+  FPlusRect := Types.Rect(X, (H - S) div 2 + 1, X + S, (H + S) div 2 + 1);
 end;
 
 procedure TGittanOwnTitleBar.Resize;
@@ -449,6 +351,7 @@ function TGittanOwnTitleBar.PartAt(X, Y: integer; out AIndex: integer): TGittanT
 var
   i: integer;
   P: TPoint;
+  R: TRect;
 begin
   AIndex := -1;
   P := Types.Point(X, Y);
@@ -458,22 +361,23 @@ begin
     Exit(tpMaximize);
   if FMinRect.Contains(P) then
     Exit(tpMinimize);
-  for i := 0 to High(FMenuRects) do
-    if FMenuRects[i].Contains(P) then
+  if FMenuRect.Contains(P) then
+    Exit(tpMenu);
+  if FPlusRect.Contains(P) then
+    Exit(tpPlus);
+  for i := 0 to High(FCaptions) do
+  begin
+    R := TabRect(i);
+    if R.Right > FMinRect.Left then
+      Break;
+    if R.Contains(P) then
     begin
       AIndex := i;
-      Exit(tpMenu);
+      if CrossRect(R).Contains(P) then
+        Exit(tpTabClose);
+      Exit(tpTab);
     end;
-  for i := 0 to High(FActionRects) do
-    if FActionRects[i].Contains(P) then
-    begin
-      AIndex := i;
-      Exit(tpAction);
-    end;
-  if (FSearch <> nil) and (FSearch.Text <> '') and FClearRect.Contains(P) then
-    Exit(tpClear);
-  if FSearchRect.Contains(P) then
-    Exit(tpSearch);
+  end;
   Result := tpNone;
 end;
 
@@ -481,12 +385,17 @@ procedure TGittanOwnTitleBar.SetHot(APart: TGittanTitlePart; AIndex: integer);
 begin
   if (FHotPart = APart) and (FHotIndex = AIndex) then
     Exit;
+  if (AIndex >= 0) and (AIndex <> FHotIndex) and (AIndex <= High(FHints)) then
+  begin
+    Hint := FHints[AIndex];
+    Application.CancelHint;
+  end
+  else if APart = tpMenu then
+    Hint := FTitle
+  else if AIndex < 0 then
+    Hint := '';
   FHotPart := APart;
   FHotIndex := AIndex;
-  if APart = tpSearch then
-    Cursor := crIBeam
-  else
-    Cursor := crDefault;
   Invalidate;
 end;
 
@@ -497,8 +406,6 @@ var
 begin
   inherited MouseMove(Shift, X, Y);
   Part := PartAt(X, Y, Index);
-  if (Part = tpAction) and not FEnabled[Index] then
-    Part := tpNone;
   SetHot(Part, Index);
 end;
 
@@ -516,6 +423,8 @@ begin
   end;
 end;
 
+{ A tab is shown as it is pressed; the menu button drops the menu at
+  once; the cross, the plus and the caption buttons act on release. }
 procedure TGittanOwnTitleBar.MouseDown(Button: TMouseButton; Shift: TShiftState;
   X, Y: integer);
 var
@@ -523,15 +432,21 @@ var
   Part: TGittanTitlePart;
 begin
   inherited MouseDown(Button, Shift, X, Y);
+  Part := PartAt(X, Y, Index);
+  if Button = mbMiddle then
+  begin
+    FPressedPart := Part;
+    FPressedIndex := Index;
+    Exit;
+  end;
   if Button <> mbLeft then
     Exit;
-  Part := PartAt(X, Y, Index);
   case Part of
-    tpMenu: OpenMenu(Index);
-    tpSearch:
-      if (FSearch <> nil) and FSearch.CanFocus then
-        FSearch.SetFocus;
-    tpAction, tpClear, tpMinimize, tpMaximize, tpClose:
+    tpMenu: OpenMenu;
+    tpTab:
+      if Assigned(FOnTabSelect) then
+        FOnTabSelect(Self, Index);
+    tpTabClose, tpPlus, tpMinimize, tpMaximize, tpClose:
       begin
         FPressedPart := Part;
         FPressedIndex := Index;
@@ -540,8 +455,6 @@ begin
   end;
 end;
 
-{ A pill, the clear button or a caption button acts on release over
-  itself. }
 procedure TGittanOwnTitleBar.MouseUp(Button: TMouseButton; Shift: TShiftState;
   X, Y: integer);
 var
@@ -549,24 +462,29 @@ var
   Part, Pressed: TGittanTitlePart;
 begin
   inherited MouseUp(Button, Shift, X, Y);
-  if Button <> mbLeft then
-    Exit;
   Pressed := FPressedPart;
   FPressedPart := tpNone;
-  Invalidate;
   Part := PartAt(X, Y, Index);
+  { A middle click on a tab closes it. }
+  if Button = mbMiddle then
+  begin
+    if (Part in [tpTab, tpTabClose]) and (Pressed in [tpTab, tpTabClose]) and
+      (Index = FPressedIndex) and Assigned(FOnTabClose) then
+      FOnTabClose(Self, Index);
+    Exit;
+  end;
+  if Button <> mbLeft then
+    Exit;
+  Invalidate;
   if (Part <> Pressed) or (Index <> FPressedIndex) then
     Exit;
   case Part of
-    tpClear:
-      begin
-        FSearch.Text := '';
-        if FSearch.CanFocus then
-          FSearch.SetFocus;
-      end;
-    tpAction:
-      if FEnabled[Index] and Assigned(FOnAction) then
-        FOnAction(Self, Index);
+    tpTabClose:
+      if Assigned(FOnTabClose) then
+        FOnTabClose(Self, Index);
+    tpPlus:
+      if Assigned(FOnNewTab) then
+        FOnNewTab(Self);
     tpMinimize, tpMaximize, tpClose:
       CaptionButtonClick(Part);
   end;
@@ -576,38 +494,114 @@ procedure TGittanOwnTitleBar.CaptionButtonClick(APart: TGittanTitlePart);
 begin
 end;
 
-{ The name is drawn as open before the menu drops, in case the
-  widgetset's menu runs a loop of its own until it closes. }
-procedure TGittanOwnTitleBar.OpenMenu(AIndex: integer);
+{ ASource's items as items of ATarget that click them: captions, keys,
+  checks and enabled states as they are now, and submenus copied in
+  turn. A separator stays one. }
+procedure TGittanOwnTitleBar.CopyItems(ASource, ATarget: TMenuItem);
+var
+  i: integer;
+  Src, Item: TMenuItem;
 begin
-  if (AIndex < 0) or (AIndex > High(FMenuItems)) then
-    Exit;
-  FOpenMenu := AIndex;
-  Invalidate;
-  Update;
-  ShowMenu(AIndex, FMenuItems[AIndex], FMenuRects[AIndex]);
+  for i := 0 to ASource.Count - 1 do
+  begin
+    Src := ASource.Items[i];
+    if not Src.Visible then
+      Continue;
+    Item := TMenuItem.Create(FPopup);
+    Item.Caption := Src.Caption;
+    if not Src.IsLine then
+    begin
+      Item.ShortCut := Src.ShortCut;
+      Item.Enabled := Src.Enabled;
+      Item.Checked := Src.Checked;
+      Item.RadioItem := Src.RadioItem;
+      Item.GroupIndex := Src.GroupIndex;
+      Item.Tag := PtrInt(Src);
+      if Src.Count > 0 then
+        CopyItems(Src, Item)
+      else
+        Item.OnClick := @PopupItemClick;
+    end;
+    ATarget.Add(Item);
+  end;
 end;
 
-procedure TGittanOwnTitleBar.MenuClosed;
+procedure TGittanOwnTitleBar.PopupItemClick(Sender: TObject);
 begin
-  FOpenMenu := -1;
+  TMenuItem(TMenuItem(Sender).Tag).Click;
+end;
+
+procedure TGittanOwnTitleBar.PopupClose(Sender: TObject);
+begin
+  FMenuOpen := False;
   SetHot(tpNone, -1);
   Invalidate;
 end;
 
+{ The popup under the menu button: every menu of the menu bar as a
+  submenu, or AOnly's items alone. A top item's OnClick runs first, as
+  the menu bar runs it when the menu opens (the Branch menu names the
+  current branch in its items, the Tools menu checks the CLI command). }
+procedure TGittanOwnTitleBar.DropMenu(AOnly: TMenuItem);
+var
+  Menu: TMainMenu;
+  Item: TMenuItem;
+  i: integer;
+  P: TPoint;
+begin
+  Menu := MenuOf(GetParentForm(Self));
+  if Menu = nil then
+    Exit;
+  FPopup.Items.Clear;
+  if AOnly <> nil then
+  begin
+    if Assigned(AOnly.OnClick) then
+      AOnly.Click;
+    CopyItems(AOnly, FPopup.Items);
+  end
+  else
+    for i := 0 to Menu.Items.Count - 1 do
+    begin
+      if not Menu.Items[i].Visible then
+        Continue;
+      if Assigned(Menu.Items[i].OnClick) then
+        Menu.Items[i].Click;
+      Item := TMenuItem.Create(FPopup);
+      Item.Caption := Menu.Items[i].Caption;
+      CopyItems(Menu.Items[i], Item);
+      FPopup.Items.Add(Item);
+    end;
+  FMenuOpen := True;
+  Invalidate;
+  Update;
+  P := ClientToScreen(Types.Point(FMenuRect.Left, Height));
+  FPopup.PopUp(P.X, P.Y);
+end;
+
+procedure TGittanOwnTitleBar.OpenMenu;
+begin
+  DropMenu(nil);
+end;
+
 function TGittanOwnTitleBar.OpenMenuByKey(AKey: char): boolean;
 var
+  Menu: TMainMenu;
   i, p: integer;
   S: string;
 begin
   Result := False;
-  for i := 0 to High(FMenuItems) do
+  Menu := MenuOf(GetParentForm(Self));
+  if Menu = nil then
+    Exit;
+  for i := 0 to Menu.Items.Count - 1 do
   begin
-    S := FMenuItems[i].Caption;
+    if not Menu.Items[i].Visible then
+      Continue;
+    S := Menu.Items[i].Caption;
     p := System.Pos('&', S);
     if (p > 0) and (p < Length(S)) and (UpCase(S[p + 1]) = UpCase(AKey)) then
     begin
-      OpenMenu(i);
+      DropMenu(Menu.Items[i]);
       Exit(True);
     end;
   end;
@@ -615,18 +609,11 @@ end;
 
 procedure TGittanOwnTitleBar.Paint;
 var
-  Split, i, TextY, W: integer;
-  R: TRect;
+  Split, i, TextY, Mid, W, L: integer;
+  R, C: TRect;
   Ink: TColor;
   Glyph: TGittanTitleGlyph;
-
-  procedure FillPill(const AR: TRect; AFill, ABorder: TColor);
-  begin
-    Canvas.Pen.Color := ABorder;
-    Canvas.Brush.Style := bsSolid;
-    Canvas.Brush.Color := AFill;
-    Canvas.RoundRect(AR.Left, AR.Top, AR.Right, AR.Bottom, AR.Height, AR.Height);
-  end;
+  Shown, Hover: boolean;
 
   procedure DrawButton(APart: TGittanTitlePart; const AR: TRect; AGlyph: TGittanTitleGlyph);
   var
@@ -650,6 +637,22 @@ var
     DrawGlyph(AGlyph, AR, Fore);
   end;
 
+  procedure Line(X1, Y1, X2, Y2: integer; AColor: TColor);
+  begin
+    Canvas.Pen.Color := AColor;
+    Canvas.Pen.Width := Max(1, Scale96ToForm(1));
+    Canvas.Line(X1, Y1, X2, Y2);
+  end;
+
+  procedure HotBox(const AR: TRect; AColor: TColor);
+  begin
+    Canvas.Brush.Style := bsSolid;
+    Canvas.Brush.Color := AColor;
+    Canvas.Pen.Color := AColor;
+    Canvas.RoundRect(AR.Left, AR.Top, AR.Right, AR.Bottom, Scale96ToForm(8),
+      Scale96ToForm(8));
+  end;
+
 begin
   if FSplitControl <> nil then
     Split := FSplitControl.Left + FSplitControl.Width
@@ -664,58 +667,75 @@ begin
     Ink := FText
   else
     Ink := FDim;
-
   Canvas.Font := Font;
-  TextY := (Height - Canvas.TextHeight('Xg')) div 2;
-  Canvas.Brush.Style := bsClear;
-  Canvas.Font.Style := [fsBold];
-  Canvas.Font.Color := Ink;
-  Canvas.TextOut(Scale96ToForm(Pad), TextY, FTitle);
-  Canvas.Font.Style := [];
+  TextY := (Height - Canvas.TextHeight('Xg')) div 2 + 1;
 
-  for i := 0 to High(FMenuRects) do
+  { The menu button: three lines. }
+  if FMenuOpen or (FHotPart = tpMenu) then
+    HotBox(FMenuRect, FButtonHot);
+  Mid := (FMenuRect.Left + FMenuRect.Right) div 2;
+  W := Scale96ToForm(7);
+  for i := -1 to 1 do
   begin
-    R := FMenuRects[i];
-    if (FOpenMenu = i) or ((FHotPart = tpMenu) and (FHotIndex = i)) then
+    L := (FMenuRect.Top + FMenuRect.Bottom) div 2 + i * Scale96ToForm(5);
+    Line(Mid - W, L, Mid + W, L, Ink);
+  end;
+
+  for i := 0 to High(FCaptions) do
+  begin
+    R := TabRect(i);
+    if R.Right > FMinRect.Left then
+      Break;
+    Shown := i = FTabActive;
+    Hover := (FHotIndex = i) and (FHotPart in [tpTab, tpTabClose]);
+    if Shown then
     begin
       Canvas.Brush.Style := bsSolid;
-      Canvas.Brush.Color := FButtonHot;
-      Canvas.Pen.Color := FButtonHot;
-      Canvas.RoundRect(R.Left, R.Top, R.Right, R.Bottom, 8, 8);
-    end;
+      Canvas.Brush.Color := FTabFill;
+      Canvas.Pen.Color := FTabBorder;
+      Canvas.Pen.Width := 1;
+      Canvas.RoundRect(R.Left, R.Top, R.Right, R.Bottom, Scale96ToForm(10),
+        Scale96ToForm(10));
+    end
+    else if Hover then
+      HotBox(R, FButtonHot)
+    { A faint line parts two tabs that are neither shown nor hovered. }
+    else if (i < High(FCaptions)) and (i + 1 <> FTabActive) and
+      not ((FHotIndex = i + 1) and (FHotPart in [tpTab, tpTabClose])) then
+      Line(R.Right + Scale96ToForm(TabGap) div 2, R.Top + Scale96ToForm(7),
+        R.Right + Scale96ToForm(TabGap) div 2, R.Bottom - Scale96ToForm(7), FTabBorder);
     Canvas.Brush.Style := bsClear;
-    Canvas.Font.Color := Ink;
-    Canvas.TextOut(R.Left + Scale96ToForm(MenuPad), TextY,
-      StripHotkey(FMenuItems[i].Caption));
-  end;
-
-  if not FSearchRect.IsEmpty then
-  begin
-    FillPill(FSearchRect, FSearchFill, FSearchBorder);
-    W := FSearchRect.Height;
-    DrawGlyph(tgSearch, Types.Rect(FSearchRect.Left, FSearchRect.Top,
-      FSearchRect.Left + W, FSearchRect.Bottom), FDim);
-    if (FSearch <> nil) and (FSearch.Text <> '') then
-      if FHotPart = tpClear then
-        DrawGlyph(tgClear, FClearRect, Ink)
-      else
-        DrawGlyph(tgClear, FClearRect, FDim);
-  end;
-
-  for i := 0 to High(FActions) do
-  begin
-    R := FActionRects[i];
-    FillPill(R, FPillFill, FPillBorder);
-    Canvas.Brush.Style := bsClear;
-    if not FEnabled[i] then
-      Canvas.Font.Color := FDim
-    else if ((FPressedPart = tpAction) and (FPressedIndex = i)) or
-      ((FPressedPart = tpNone) and (FHotPart = tpAction) and (FHotIndex = i)) then
-      Canvas.Font.Color := FHotColor
+    if Shown then
+      Canvas.Font.Color := Ink
     else
-      Canvas.Font.Color := Ink;
-    Canvas.TextOut(R.Left + Scale96ToForm(PillPad), TextY, FActions[i]);
+      Canvas.Font.Color := FDim;
+    C := CrossRect(R);
+    Canvas.TextRect(Types.Rect(R.Left + Scale96ToForm(10), R.Top, C.Left - Scale96ToForm(4),
+      R.Bottom), R.Left + Scale96ToForm(10), TextY, FCaptions[i]);
+    if Shown or Hover then
+    begin
+      if Hover and (FHotPart = tpTabClose) then
+      begin
+        Canvas.Brush.Style := bsSolid;
+        Canvas.Brush.Color := FTabBorder;
+        Canvas.Pen.Color := FTabBorder;
+        Canvas.Ellipse(C);
+      end;
+      W := Scale96ToForm(4);
+      Line(C.Left + W + 1, C.Top + W + 1, C.Right - W, C.Bottom - W, FDim);
+      Line(C.Right - W - 1, C.Top + W + 1, C.Left + W, C.Bottom - W, FDim);
+    end;
   end;
+
+  { The plus. }
+  if FHotPart = tpPlus then
+    HotBox(FPlusRect, FButtonHot);
+  Mid := (FPlusRect.Left + FPlusRect.Right) div 2;
+  L := (FPlusRect.Top + FPlusRect.Bottom) div 2;
+  W := Scale96ToForm(6);
+  Line(Mid - W, L, Mid + W + 1, L, FDim);
+  Line(Mid, L - W, Mid, L + W + 1, FDim);
+  Canvas.Pen.Width := 1;
 
   DrawButton(tpMinimize, FMinRect, tgMinimize);
   if Maximized then
@@ -744,13 +764,7 @@ procedure TGittanOwnTitleBar.DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPo
 begin
   inherited DoAutoAdjustLayout(AMode, AXProportion, AYProportion);
   if AMode = lapAutoAdjustForDPI then
-  begin
     Height := Scale96ToScreen(TitleBarHeight);
-    FNav.Height := Scale96ToScreen(NavHeight);
-    FConflictNav.Height := Scale96ToScreen(NavHeight);
-    FNav.Refit;
-    FConflictNav.Refit;
-  end;
 end;
 
 end.

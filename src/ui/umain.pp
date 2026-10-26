@@ -6746,30 +6746,16 @@ begin
   EditorPanel.Color := Edit.Colors.TextBG;
   {$IFDEF OWNBAR}
   { The title bar runs the sidebar's shade over the sidebar and the
-    editor's background over the rest, with the header's pills. }
+    editor's background over the rest, with the tabs on it. }
   if OwnBar <> nil then
     if FDark then
-    begin
       OwnBar.SetColors(Shade, Edit.Colors.TextBG, Edit.Colors.TextFont,
-        RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(85, 85, 86),
-        RGBToColor(100, 160, 240), RGBToColor(50, 50, 51), RGBToColor(70, 70, 71),
-        RGBToColor(62, 62, 63));
-      OwnBar.Nav.SetColors(Edit.Colors.TextBG, RGBToColor(50, 50, 51),
-        RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240));
-      OwnBar.ConflictNav.SetColors(Edit.Colors.TextBG, RGBToColor(58, 46, 68),
-        RGBToColor(120, 80, 160), RGBToColor(210, 170, 245), RGBToColor(240, 215, 255));
-    end
+        RGBToColor(150, 150, 150), RGBToColor(55, 55, 56), RGBToColor(85, 85, 86),
+        RGBToColor(62, 62, 63))
     else
-    begin
       OwnBar.SetColors(Shade, Edit.Colors.TextBG, RGBToColor(30, 30, 30),
         RGBToColor(110, 110, 110), clWhite, RGBToColor(205, 205, 205),
-        RGBToColor(0, 110, 230), clWhite, RGBToColor(205, 205, 205),
         RGBToColor(229, 229, 229));
-      OwnBar.Nav.SetColors(Edit.Colors.TextBG, clWhite,
-        RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
-      OwnBar.ConflictNav.SetColors(Edit.Colors.TextBG, RGBToColor(248, 240, 255),
-        RGBToColor(190, 160, 220), RGBToColor(110, 50, 160), RGBToColor(155, 63, 200));
-    end;
   {$ENDIF}
 end;
 
