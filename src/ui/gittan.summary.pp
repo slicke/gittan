@@ -58,12 +58,14 @@ type
   {** A note of the conversation as laid out: the parts of its text
     shown, the height they are drawn in (Cut when they are taller and
     an ellipsis follows), and its top and height below the start of the
-    section. TextRect is where the last paint drew the text. }
+    section. Long when the text is taller than a card shows, so a line
+    under it shows more or less of it (MoreRect, where the last paint
+    drew its link). TextRect is where the last paint drew the text. }
   TGittanSummaryNoteBox = record
     Top, Height, TextHeight: integer;
     Rows: array of TGittanSummaryNoteRow;
-    Cut: boolean;
-    LinkRect, TextRect: TRect;
+    Cut, Long: boolean;
+    LinkRect, TextRect, MoreRect: TRect;
   end;
 
   { TGittanSummary }
@@ -91,8 +93,9 @@ type
     { The width the notes were laid out at, -1 when they are to be laid
       out again; their height, title included, 0 without notes. }
     FNotesWidth, FNotesHeight: integer;
-    { The note whose link is under the mouse, -1 for none. }
-    FLinkHot: integer;
+    { The note whose link is under the mouse, -1 for none; FMoreHot the
+      note whose Show more or Show less is. }
+    FLinkHot, FMoreHot: integer;
     { The open pull requests waiting for the user's review, counted in
       a row under the conversation, a chip that drops a list of them
       through OnReviewClick; FReviewRect is the chip as last painted,
@@ -194,6 +197,8 @@ type
     function TextLinkAt(X, Y: integer): string;
     function NoteDetailsKey(ANote, ADetail: integer): string;
     function NoteDetailsAt(X, Y: integer): string;
+    function NoteMoreAt(X, Y: integer): integer;
+    procedure SetMoreHot(AValue: integer);
     procedure LayoutNotes;
     procedure PaintNotes(var Y: integer);
     procedure SetReviewHot(AValue: boolean);
@@ -356,6 +361,8 @@ resourcestring
   rsNoteChangesRequested = 'requested changes';
   rsNoteDismissed = 'review dismissed';
   rsNoteLink = '%s ↗';
+  rsNoteMore = 'Show more';
+  rsNoteLess = 'Show less';
   rsReviewOne = '1 pull request needs your review';
   rsReviewMany = '%d pull requests need your review';
   rsReviewOpened = 'opened %s';
@@ -411,6 +418,7 @@ begin
   FHot := -1;
   FActionHot := -1;
   FLinkHot := -1;
+  FMoreHot := -1;
   FCommitHot := -1;
   FBehindHot := -1;
   FNotOnRemote := -1;
@@ -698,6 +706,7 @@ begin
   FNotes := Copy(ANotes);
   FNotesWidth := -1;
   FLinkHot := -1;
+  FMoreHot := -1;
   UpdateHeight;
   Invalidate;
 end;
@@ -772,8 +781,10 @@ end;
   note's parts (CommentParts) as LazInk lays their Markdown out at that
   width, a <details> block as its summary after "▸", and after "▾" with
   the parts in it indented when it is open (FNotesOpen). The text is at
-  most NoteMaxLines lines high with an ellipsis after, unless a block in
-  it is open, since that was asked for. }
+  most NoteMaxLines lines high with an ellipsis and Show more after,
+  unless a block in it is open, since that was asked for, or Show more
+  was clicked (NoteDetailsKey with -1 in FNotesOpen), when Show less
+  follows it. }
 procedure TGittanSummary.LayoutNotes;
 var
   C: TCanvas;
@@ -835,7 +846,8 @@ begin
       SetLength(Box.Rows, Length(Box.Rows) + 1);
       Box.Rows[High(Box.Rows)] := Row;
     end;
-    Box.Cut := not AnyOpen and (Box.TextHeight > NoteMaxLines * LineHeight);
+    Box.Long := not AnyOpen and (Box.TextHeight > NoteMaxLines * LineHeight);
+    Box.Cut := Box.Long and (FNotesOpen.IndexOf(NoteDetailsKey(i, -1)) < 0);
     if Box.Cut then
       Box.TextHeight := NoteMaxLines * LineHeight;
     Box.Top := At;
@@ -843,7 +855,7 @@ begin
     Box.Height := 2 * Px(NotePadY) + LineHeight;
     if Box.TextHeight > 0 then
       Inc(Box.Height, 4 + Box.TextHeight);
-    if Box.Cut then
+    if Box.Long then
       Inc(Box.Height, LineHeight);
     FNoteBoxes[i] := Box;
     Inc(At, Box.Height + Px(NoteGap));
@@ -852,7 +864,8 @@ begin
 end;
 
 { The key in FNotesOpen of <details> block ADetail (its part) of note
-  ANote: the note's address, else its place, and the part. }
+  ANote: the note's address, else its place, and the part; ADetail -1
+  is the whole text, shown past NoteMaxLines. }
 function TGittanSummary.NoteDetailsKey(ANote, ADetail: integer): string;
 begin
   if FNotes[ANote].Url <> '' then
@@ -860,6 +873,17 @@ begin
   else
     Result := IntToStr(ANote);
   Result := Result + '#' + IntToStr(ADetail);
+end;
+
+{ The note whose Show more or Show less is at X, Y; -1 elsewhere. }
+function TGittanSummary.NoteMoreAt(X, Y: integer): integer;
+var
+  i: integer;
+begin
+  Result := -1;
+  for i := 0 to High(FNoteBoxes) do
+    if PtInRect(FNoteBoxes[i].MoreRect, Point(X, Y)) then
+      Exit(i);
 end;
 
 { The key of the <details> block whose summary is at X, Y; '' elsewhere. }
@@ -1037,10 +1061,25 @@ begin
       Canvas.Font := Font;
       Canvas.Brush.Style := bsClear;
     end;
-    if FNoteBoxes[i].Cut then
+    FNoteBoxes[i].MoreRect := Rect(0, 0, 0, 0);
+    if FNoteBoxes[i].Long then
     begin
-      Canvas.Font.Color := FDim;
-      Canvas.TextOut(X, FNoteBoxes[i].TextRect.Bottom, '…');
+      At := FNoteBoxes[i].TextRect.Bottom;
+      if FNoteBoxes[i].Cut then
+      begin
+        Canvas.Font.Color := FDim;
+        Canvas.TextOut(X, At, '… ');
+        Inc(X, Canvas.TextWidth('… '));
+        Link := rsNoteMore;
+      end
+      else
+        Link := rsNoteLess;
+      FNoteBoxes[i].MoreRect := Rect(X, At, X + Canvas.TextWidth(Link), At + LineHeight);
+      Canvas.Font.Color := FLink;
+      if i = FMoreHot then
+        Canvas.Font.Style := [fsUnderline];
+      Canvas.TextOut(X, At, Link);
+      Canvas.Font.Style := [];
     end;
   end;
   Inc(Y, FNotesHeight);
@@ -1334,6 +1373,14 @@ begin
   if FLinkHot = AValue then
     Exit;
   FLinkHot := AValue;
+  Invalidate;
+end;
+
+procedure TGittanSummary.SetMoreHot(AValue: integer);
+begin
+  if FMoreHot = AValue then
+    Exit;
+  FMoreHot := AValue;
   Invalidate;
 end;
 
@@ -2098,6 +2145,7 @@ begin
   SetLinkHot(LinkAt(X, Y));
   FTextLinkHot := TextLinkAt(X, Y) <> '';
   FDetailsHot := NoteDetailsAt(X, Y) <> '';
+  SetMoreHot(NoteMoreAt(X, Y));
   SetReviewHot((FReviewRect.Right > FReviewRect.Left) and PtInRect(FReviewRect, Point(X, Y)));
   SetBranchHot(BranchClickable and PtInRect(FBranchRect, Point(X, Y)));
   SetBaseHot((FBaseRect.Right > FBaseRect.Left) and PtInRect(FBaseRect, Point(X, Y)));
@@ -2106,7 +2154,7 @@ begin
   if Assigned(FOnBehindAction) then
     SetBehindHot(BehindAt(X, Y));
   if (FLinkHot >= 0) or (FActionHot >= 0) or FBackHot or (FBehindHot >= 0) or FTextLinkHot or
-    FDetailsHot then
+    FDetailsHot or (FMoreHot >= 0) then
     Cursor := crHandPoint
   else if not (FBranchHot or FBaseHot or FSyncHot or FReviewHot) then
     Cursor := crDefault;
@@ -2119,6 +2167,7 @@ begin
   SetActionHot(-1);
   SetCommitHot(-1);
   SetLinkHot(-1);
+  SetMoreHot(-1);
   FTextLinkHot := False;
   FDetailsHot := False;
   SetReviewHot(False);
@@ -2179,10 +2228,14 @@ begin
     FOnOpenUrl(Self, TextLinkAt(X, Y));
     Exit;
   end;
-  { The summary of a <details> block opens or closes it. }
-  if (Button = mbLeft) and (NoteDetailsAt(X, Y) <> '') then
+  { The summary of a <details> block opens or closes it, Show more and
+    Show less the whole text. }
+  if (Button = mbLeft) and ((NoteDetailsAt(X, Y) <> '') or (NoteMoreAt(X, Y) >= 0)) then
   begin
-    Key := NoteDetailsAt(X, Y);
+    if NoteMoreAt(X, Y) >= 0 then
+      Key := NoteDetailsKey(NoteMoreAt(X, Y), -1)
+    else
+      Key := NoteDetailsAt(X, Y);
     if FNotesOpen.IndexOf(Key) >= 0 then
       FNotesOpen.Delete(FNotesOpen.IndexOf(Key))
     else
