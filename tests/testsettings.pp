@@ -22,6 +22,7 @@ type
     procedure TestRoundTrip;
     procedure TestQuotesAndSpaces;
     procedure TestRecentList;
+    procedure TestTabs;
     procedure TestDamagedFileGivesDefaults;
     procedure TestOldDefaultFont;
     procedure TestDefaultFontSize;
@@ -220,6 +221,44 @@ begin
     AssertEquals('/repo/' + IntToStr(MaxRecent), S.Recent[0]);
     AssertEquals('/repo/' + IntToStr(MaxRecent + 3), S.Recent[1]);
     AssertEquals(-1, S.Recent.IndexOf('/repo/3'));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSettingsTest.TestTabs;
+var
+  S: TGittanSettings;
+begin
+  S := TGittanSettings.Create(FFileName);
+  try
+    AssertEquals('none by default', 0, S.Tabs.Count);
+    S.Tabs.Add('/repo/a');
+    S.Tabs.Add('/repo/b c');
+    S.Tabs.Add('/repo/d');
+    S.ActiveTab := 1;
+    S.Save;
+  finally
+    S.Free;
+  end;
+  S := TGittanSettings.Create(FFileName);
+  try
+    S.Load;
+    AssertEquals(3, S.Tabs.Count);
+    AssertEquals('/repo/b c', S.Tabs[1]);
+    AssertEquals(1, S.ActiveTab);
+    S.Tabs.Clear;
+    S.Tabs.Add('/repo/a');
+    S.ActiveTab := 5;
+    S.Save;
+  finally
+    S.Free;
+  end;
+  S := TGittanSettings.Create(FFileName);
+  try
+    S.Load;
+    AssertEquals('fewer tabs drop the rest', 1, S.Tabs.Count);
+    AssertEquals('an active tab past the end is the first', 0, S.ActiveTab);
   finally
     S.Free;
   end;

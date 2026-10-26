@@ -42,9 +42,12 @@ type
   TGittanSettings = class
   private
     FRecent: TStringList;
+    FTabs: TStringList;
     FTrust: TStringList;
     FFileName: string;
   public
+    {** The tab shown when the window closed, an index into Tabs. }
+    ActiveTab: integer;
     {** The window bounds, or a zero Width when none were saved. }
     Left, Top, Width, Height: integer;
     Maximized: boolean;
@@ -157,6 +160,9 @@ type
     procedure TrustCommands(const ARoot, AHash: string);
     {** The recently opened repositories, newest first. }
     property Recent: TStringList read FRecent;
+    {** The repositories open in the window's tabs when it closed, left
+      to right, which open again at the next start; section Tabs. }
+    property Tabs: TStringList read FTabs;
     {** The ini file the settings are read from and written to. }
     property FileName: string read FFileName;
   end;
@@ -170,6 +176,7 @@ const
   SecWindow = 'Window';
   SecView = 'View';
   SecRecent = 'Recent';
+  SecTabs = 'Tabs';
   SecUpdate = 'Update';
   SecCommit = 'Commit';
   SecTools = 'Tools';
@@ -236,6 +243,7 @@ begin
   inherited Create;
   FRecent := TStringList.Create;
   FRecent.CaseSensitive := True;
+  FTabs := TStringList.Create;
   FTrust := TStringList.Create;
   if AFileName <> '' then
     FFileName := AFileName
@@ -254,6 +262,7 @@ destructor TGittanSettings.Destroy;
 begin
   FTrust.Free;
   FRecent.Free;
+  FTabs.Free;
   inherited Destroy;
 end;
 
@@ -327,6 +336,17 @@ begin
         if S <> '' then
           FRecent.Add(S);
       end;
+      FTabs.Clear;
+      i := 0;
+      repeat
+        S := Ini.ReadString(SecTabs, 'Repo' + IntToStr(i), '');
+        if S <> '' then
+          FTabs.Add(S);
+        Inc(i);
+      until S = '';
+      ActiveTab := Ini.ReadInteger(SecTabs, 'Active', 0);
+      if (ActiveTab < 0) or (ActiveTab >= FTabs.Count) then
+        ActiveTab := 0;
     finally
       Ini.Free;
     end;
@@ -399,6 +419,11 @@ begin
       Ini.EraseSection(SecRecent);
       for i := 0 to FRecent.Count - 1 do
         Ini.WriteString(SecRecent, 'Repo' + IntToStr(i), KeepEdges(FRecent[i]));
+      Ini.EraseSection(SecTabs);
+      for i := 0 to FTabs.Count - 1 do
+        Ini.WriteString(SecTabs, 'Repo' + IntToStr(i), KeepEdges(FTabs[i]));
+      if FTabs.Count > 0 then
+        Ini.WriteInteger(SecTabs, 'Active', ActiveTab);
       Ini.EraseSection(SecTrust);
       for i := 0 to FTrust.Count - 1 do
         Ini.WriteString(SecTrust, FTrust.Names[i], FTrust.ValueFromIndex[i]);

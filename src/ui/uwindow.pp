@@ -16,9 +16,17 @@ unit uwindow;
   App's news goes to every frame: the lexers loaded, a newer build.
 
   OpenRepository is the one way a repository opens: it shows the frame
-  that has it open already, else opens it in the shown frame while that
-  one is empty, else in a new frame. For now no tabs show the frames;
-  they come next. }
+  that has it open already (or is opening it), else opens it in the
+  shown frame while that one is empty, else in a new frame.
+
+  On macOS the toolbar's tab strip shows the frames, a tab each with the
+  frame's TabTitle and TabHint (UpdateTabs, whenever one changes, is
+  shown, made or closed); File > New Tab (Cmd+T) and the plus make an
+  empty one, File > Close Tab (Cmd+W), the cross and a middle click
+  close one, Go > Next Tab and Previous Tab (Cmd+Shift+] and [, and
+  Ctrl+Tab and Ctrl+Shift+Tab) step round them. Closing the last tab
+  leaves an empty one. The repositories open in the tabs are kept in
+  the settings (Tabs, ActiveTab) and open again at the next start. }
 
 {$mode objfpc}{$H+}
 
@@ -67,8 +75,13 @@ type
     procedure FormActivate(Sender: TObject);
     procedure LexersLoaded(Sender: TObject);
     procedure UpdateChecked(Sender: TObject; AManual: boolean);
+    procedure UpdateTabs;
+    procedure SaveTabs;
+    procedure CloseFrameAsync(Data: PtrInt);
     {$IFDEF LCLCocoa}
-    procedure ToolbarName(Sender: TObject);
+    procedure TabSelect(Sender: TObject; AIndex: integer);
+    procedure TabClose(Sender: TObject; AIndex: integer);
+    procedure TabNew(Sender: TObject);
     {$ENDIF}
   public
     procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil);
@@ -78,6 +91,10 @@ type
     {$IFDEF OWNBAR}
     function OwnBar: TGittanOwnTitleBar; override;
     {$ENDIF}
+    procedure FrameChanged(AFrame: TRepoFrame); override;
+    procedure NewTab; override;
+    procedure CloseFrame(AFrame: TRepoFrame); override;
+    procedure StepTab(ADelta: integer); override;
     {** A new, empty frame, shown. }
     function NewFrame: TRepoFrame;
     {** Shows AFrame and hides the one shown before. }
@@ -94,8 +111,12 @@ implementation
 
 {$R *.lfm}
 
+{$IFDEF OWNBAR}
 resourcestring
+  { The name the own title bar shows. }
   rsAppShortName = 'Gittan';
+{$ENDIF}
+
 
 procedure TGittanWindow.FormCreate(Sender: TObject);
 var
@@ -123,7 +144,9 @@ begin
     FActive.ShowNoLexers;
   { The welcome view says what opens, rather than offer its buttons
     until it does. }
-  if StartRepository <> '' then
+  if App.Settings.Tabs.Count > 0 then
+    FActive.ShowOpening(App.Settings.Tabs[0])
+  else if StartRepository <> '' then
     FActive.ShowOpening(StartRepository);
   Application.QueueAsyncCall(@OpenAtStartAsync, 0);
 end;
@@ -156,9 +179,13 @@ end;
 procedure TGittanWindow.SetupChrome;
 begin
   {$IFDEF LCLCocoa}
-  FToolbar := TGittanToolbar.Install(Handle, rsAppShortName);
+  FToolbar := TGittanToolbar.Install(Handle);
   if FToolbar <> nil then
-    FToolbar.OnName := @ToolbarName;
+  begin
+    FToolbar.OnSelect := @TabSelect;
+    FToolbar.OnClose := @TabClose;
+    FToolbar.OnNew := @TabNew;
+  end;
   FTitleBarHeight := ExtendUnderTitleBar(Handle);
   {$ENDIF}
   {$IFDEF LCLWin32}
@@ -229,6 +256,7 @@ begin
   if Old <> nil then
     Old.Visible := False;
   AFrame.Activated;
+  UpdateTabs;
 end;
 
 function TGittanWindow.IsActive(AFrame: TRepoFrame): boolean;
@@ -271,11 +299,12 @@ var
   Target: TRepoFrame;
   i: integer;
 begin
-  Root := RepositoryRootOf(ADir);
+  Root := ExcludeTrailingPathDelimiter(RepositoryRootOf(ADir));
   if Root <> '' then
     for i := 0 to FFrames.Count - 1 do
-      if SameFileName(ExcludeTrailingPathDelimiter(Frames[i].RepoRoot),
-        ExcludeTrailingPathDelimiter(Root)) then
+      if SameFileName(ExcludeTrailingPathDelimiter(Frames[i].RepoRoot), Root) or
+        ((Frames[i].OpeningDir <> '') and SameFileName(ExcludeTrailingPathDelimiter(
+        RepositoryRootOf(Frames[i].OpeningDir)), Root)) then
       begin
         ActivateFrame(Frames[i]);
         if Assigned(AOnOpened) then
@@ -309,15 +338,45 @@ end;
   or file dropped on the Dock icon at launch may be open or opening by
   then (FormDropFiles), and stays. }
 procedure TGittanWindow.OpenAtStartAsync(Data: PtrInt);
+var
+  Tabs: TStringList;
+  Shown: TRepoFrame;
+  i: integer;
 begin
-  { gittan [file | folder], else the repository of the last run. }
-  if not FActive.IsBlank then
-    { opened already }
-  else if StartRepository <> '' then
-    OpenRepository(StartRepository)
-  else if ParamCount > 0 then
-    FActive.OpenFile(ParamStr(1));
-  { After the repository, whose opening clears the banners. }
+  { The tabs of the last run, the one shown then shown again; then
+    gittan [file | folder] in its own tab, else, with no tabs kept (a
+    settings file from before tabs), the repository of the last run. }
+  Shown := nil;
+  if FActive.IsBlank then
+  begin
+    Tabs := TStringList.Create;
+    try
+      Tabs.Assign(App.Settings.Tabs);
+      for i := 0 to Tabs.Count - 1 do
+        if DirectoryExists(Tabs[i]) then
+        begin
+          OpenRepository(Tabs[i]);
+          if i = App.Settings.ActiveTab then
+            Shown := FActive;
+        end;
+      if Shown <> nil then
+        ActivateFrame(Shown);
+      if ParamCount > 0 then
+      begin
+        if DirectoryExists(ParamStr(1)) then
+          OpenRepository(ParamStr(1))
+        else if FActive.IsBlank then
+          FActive.OpenFile(ParamStr(1))
+        else
+          NewFrame.OpenFile(ParamStr(1));
+      end
+      else if (Tabs.Count = 0) and (StartRepository <> '') then
+        OpenRepository(StartRepository);
+    finally
+      Tabs.Free;
+    end;
+  end;
+  { After the repositories, whose opening clears the banners. }
   FActive.CheckGitVersion;
 end;
 
@@ -395,6 +454,7 @@ var
   i: integer;
 begin
   SavePlace;
+  SaveTabs;
   for i := 0 to FFrames.Count - 1 do
     if Frames[i] <> FActive then
       Frames[i].FormClose(Sender, CloseAction);
@@ -425,6 +485,15 @@ end;
   before the bar hid its names. }
 procedure TGittanWindow.FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
 begin
+  if (Key = VK_TAB) and (Shift * [ssCtrl, ssAlt, ssMeta] = [ssCtrl]) then
+  begin
+    if ssShift in Shift then
+      StepTab(-1)
+    else
+      StepTab(1);
+    Key := 0;
+    Exit;
+  end;
   FActive.FormKeyDown(Sender, Key, Shift);
   {$IFDEF LCLGtk3}
   if (Key <> 0) and (Shift * [ssAlt, ssCtrl, ssShift, ssMeta] = [ssAlt]) and
@@ -467,10 +536,130 @@ begin
       Frames[i].ShowUpdateBadge;
 end;
 
-{$IFDEF LCLCocoa}
-procedure TGittanWindow.ToolbarName(Sender: TObject);
+procedure TGittanWindow.FrameChanged(AFrame: TRepoFrame);
 begin
-  FActive.ShowCommandsPage;
+  UpdateTabs;
+end;
+
+procedure TGittanWindow.UpdateTabs;
+var
+  Captions, Hints: array of string;
+  i: integer;
+begin
+  if (csDestroying in ComponentState) or (FFrames = nil) then
+    Exit;
+  {$IFDEF LCLCocoa}
+  if FToolbar = nil then
+    Exit;
+  Captions := nil;
+  Hints := nil;
+  SetLength(Captions, FFrames.Count);
+  SetLength(Hints, FFrames.Count);
+  for i := 0 to FFrames.Count - 1 do
+  begin
+    Captions[i] := Frames[i].TabTitle;
+    Hints[i] := Frames[i].TabHint;
+  end;
+  FToolbar.SetTabs(Captions, Hints, FFrames.IndexOf(FActive));
+  {$ENDIF}
+end;
+
+{ The repositories open in the tabs, left to right, and the shown one's
+  place among them; a tab without one is left out. }
+procedure TGittanWindow.SaveTabs;
+var
+  i: integer;
+begin
+  App.Settings.Tabs.Clear;
+  App.Settings.ActiveTab := 0;
+  for i := 0 to FFrames.Count - 1 do
+    if Frames[i].RepoRoot <> '' then
+    begin
+      if Frames[i] = FActive then
+        App.Settings.ActiveTab := App.Settings.Tabs.Count;
+      App.Settings.Tabs.Add(Frames[i].RepoRoot);
+    end;
+end;
+
+procedure TGittanWindow.NewTab;
+begin
+  NewFrame;
+end;
+
+{ From the message loop: the menu item that asks is the frame's own. }
+procedure TGittanWindow.CloseFrame(AFrame: TRepoFrame);
+begin
+  Application.QueueAsyncCall(@CloseFrameAsync, PtrInt(AFrame));
+end;
+
+{ A frame with unsaved changes is shown before it asks, and stays when
+  they are kept. It saves what closing the window saves, and the tab to
+  its right is shown, else the one to its left, else a new empty one. }
+procedure TGittanWindow.CloseFrameAsync(Data: PtrInt);
+var
+  Frame, Neighbour: TRepoFrame;
+  Index: integer;
+  CanClose: boolean;
+  CloseAction: TCloseAction;
+begin
+  Frame := TRepoFrame(Data);
+  Index := FFrames.IndexOf(Frame);
+  if Index < 0 then
+    Exit;
+  if Frame.NeedsSave then
+    ActivateFrame(Frame);
+  CanClose := True;
+  Frame.FormCloseQuery(Self, CanClose);
+  if not CanClose then
+    Exit;
+  CloseAction := caFree;
+  Frame.FormClose(Self, CloseAction);
+  FFrames.Delete(Index);
+  if Frame = FActive then
+  begin
+    FActive := nil;
+    if Index < FFrames.Count then
+      Neighbour := Frames[Index]
+    else if Index > 0 then
+      Neighbour := Frames[Index - 1]
+    else
+      Neighbour := nil;
+    if Neighbour <> nil then
+      ActivateFrame(Neighbour)
+    else
+      NewFrame;
+  end;
+  Frame.Free;
+  UpdateTabs;
+end;
+
+procedure TGittanWindow.StepTab(ADelta: integer);
+var
+  Index: integer;
+begin
+  if FFrames.Count < 2 then
+    Exit;
+  Index := FFrames.IndexOf(FActive) + ADelta;
+  Index := ((Index mod FFrames.Count) + FFrames.Count) mod FFrames.Count;
+  ActivateFrame(Frames[Index]);
+end;
+
+{$IFDEF LCLCocoa}
+procedure TGittanWindow.TabSelect(Sender: TObject; AIndex: integer);
+begin
+  if (AIndex >= 0) and (AIndex < FFrames.Count) then
+    ActivateFrame(Frames[AIndex]);
+end;
+
+procedure TGittanWindow.TabClose(Sender: TObject; AIndex: integer);
+begin
+  if (AIndex >= 0) and (AIndex < FFrames.Count) then
+    CloseFrame(Frames[AIndex]);
+end;
+
+procedure TGittanWindow.TabNew(Sender: TObject);
+begin
+  NewTab;
 end;
 {$ENDIF}
 

@@ -135,6 +135,17 @@ type
     {** The window's own title bar on Windows and GTK 3. }
     function OwnBar: TGittanOwnTitleBar; virtual; abstract;
     {$ENDIF}
+    {** AFrame's name or path changed (TabTitle, TabHint): its tab and,
+      while it is shown, the window's caption follow. }
+    procedure FrameChanged(AFrame: TRepoFrame); virtual; abstract;
+    {** File > New Tab: a new, empty frame, shown. }
+    procedure NewTab; virtual; abstract;
+    {** File > Close Tab: closes AFrame, from the message loop, after
+      asking about unsaved changes. }
+    procedure CloseFrame(AFrame: TRepoFrame); virtual; abstract;
+    {** Go > Next Tab and Previous Tab: the frame ADelta tabs on, round
+      the ends. }
+    procedure StepTab(ADelta: integer); virtual; abstract;
   end;
 
   { TRepoFrame }
@@ -170,6 +181,8 @@ type
   private
     { The window the frame is in, from Init. }
     FWindow: TRepoWindow;
+    { The folder an open job is opening, for the tab while it runs. }
+    FOpeningDir: string;
     { The menu bar's menu and, on macOS, the items the application menu
       starts with; the window shows this frame's while it is active. }
     FMainMenu: TMainMenu;
@@ -939,6 +952,10 @@ type
     function PullHint(const APull: TGittanPullRequest): string;
     procedure UpdateSyntaxChecks;
     procedure UpdateCaption;
+    procedure MenuNewTabClick(Sender: TObject);
+    procedure MenuCloseTabClick(Sender: TObject);
+    procedure MenuNextTabClick(Sender: TObject);
+    procedure MenuPrevTabClick(Sender: TObject);
     {$IFDEF OWNBAR}
     function OwnBar: TGittanOwnTitleBar;
     {$ENDIF}
@@ -1744,6 +1761,16 @@ type
     function IsBlank: boolean;
     {** The root of the open repository, '' for none. }
     function RepoRoot: string;
+    {** The folder an open job is opening, '' when none runs. }
+    property OpeningDir: string read FOpeningDir;
+    {** The tab's name: the repository's folder, the one opening, the
+      file open without one, or New Tab. }
+    function TabTitle: string;
+    {** The tab's tooltip: the repository's or the file's path. }
+    function TabHint: string;
+    {** The file being edited has changes not saved, which
+      FormCloseQuery asks about. }
+    function NeedsSave: boolean;
     {** The welcome view says ADir is opening, before it does. }
     procedure ShowOpening(const ADir: string);
     {** Says the lexers' folder was not found. }
@@ -1799,6 +1826,11 @@ resourcestring
   rsFile = '&File';
   rsOpen = '&Open...';
   rsOpenRepo = 'Open &Repository...';
+  rsNewTab = 'New &Tab';
+  rsNewTabTitle = 'New Tab';
+  rsCloseTab = 'Close Ta&b';
+  rsNextTab = 'Next Tab';
+  rsPrevTab = 'Previous Tab';
   rsOpenRecent = 'Open Re&cent';
   rsCloneItem = 'Clo&ne Repository...';
   rsInitItem = '&Init Repository...';
@@ -3222,6 +3254,53 @@ begin
   Result := FRepo.Root;
 end;
 
+function TRepoFrame.TabTitle: string;
+begin
+  if FRepo.Root <> '' then
+    Result := ExtractFileName(ExcludeTrailingPathDelimiter(FRepo.Root))
+  else if FOpenJob <> nil then
+    Result := ExtractFileName(ExcludeTrailingPathDelimiter(FOpeningDir))
+  else if Edit.FileName <> '' then
+    Result := ExtractFileName(Edit.FileName)
+  else
+    Result := rsNewTabTitle;
+end;
+
+function TRepoFrame.TabHint: string;
+begin
+  if FRepo.Root <> '' then
+    Result := FRepo.Root
+  else if FOpenJob <> nil then
+    Result := FOpeningDir
+  else
+    Result := Edit.FileName;
+end;
+
+function TRepoFrame.NeedsSave: boolean;
+begin
+  Result := (FEditPath <> '') and Edit.Modified;
+end;
+
+procedure TRepoFrame.MenuNewTabClick(Sender: TObject);
+begin
+  FWindow.NewTab;
+end;
+
+procedure TRepoFrame.MenuCloseTabClick(Sender: TObject);
+begin
+  FWindow.CloseFrame(Self);
+end;
+
+procedure TRepoFrame.MenuNextTabClick(Sender: TObject);
+begin
+  FWindow.StepTab(1);
+end;
+
+procedure TRepoFrame.MenuPrevTabClick(Sender: TObject);
+begin
+  FWindow.StepTab(-1);
+end;
+
 procedure TRepoFrame.ShowOpening(const ADir: string);
 begin
   FWelcome.SetBusy(OpeningText(ADir));
@@ -3706,6 +3785,9 @@ procedure TRepoFrame.UpdateCaption;
 var
   Title: string;
 begin
+  { Nothing to tell a window the frame is leaving. }
+  if csDestroying in ComponentState then
+    Exit;
   if FRepo.Root <> '' then
     Title := ExtractFileName(FRepo.Root) + ' - ' + rsAppName
   else if Edit.FileName <> '' then
@@ -3717,6 +3799,7 @@ begin
   {$ENDIF}
   if FWindow.IsActive(Self) then
     FWindow.Caption := Title;
+  FWindow.FrameChanged(Self);
 end;
 
 { The status bar shows the repository whenever one is open: its name,
@@ -4134,6 +4217,7 @@ begin
   FileMenu := TMenuItem.Create(Main);
   FileMenu.Caption := rsFile;
   Main.Items.Add(FileMenu);
+  AddItem(FileMenu, rsNewTab, ShortCut(VK_T, [ssModifier]), @MenuNewTabClick);
   AddItem(FileMenu, rsOpenRepo, ShortCut(VK_O, [ssModifier, ssShift]), @MenuOpenRepoClick);
   FRecentMenu := AddItem(FileMenu, rsOpenRecent, 0, nil);
   RebuildRecentMenu;
@@ -4142,6 +4226,7 @@ begin
   AddItem(FileMenu, rsOpen, ShortCut(VK_O, [ssModifier]), @MenuOpenClick);
   FSaveItem := AddItem(FileMenu, rsSave, ShortCut(VK_S, [ssModifier]), @MenuSaveClick);
   FSaveItem.Enabled := False;
+  AddItem(FileMenu, rsCloseTab, ShortCut(VK_W, [ssModifier]), @MenuCloseTabClick);
   FileMenu.Add(NewLine);
   FCommitItem := AddItem(FileMenu, rsCommitMenu, ShortCut(VK_K, [ssModifier]),
     @MenuCommitClick);
@@ -4329,13 +4414,16 @@ begin
   GoMenu := TMenuItem.Create(Main);
   GoMenu.Caption := rsGo;
   Main.Items.Add(GoMenu);
+  AddItem(GoMenu, rsNextTab, ShortCut(VK_OEM_6, [ssModifier, ssShift]), @MenuNextTabClick);
+  AddItem(GoMenu, rsPrevTab, ShortCut(VK_OEM_4, [ssModifier, ssShift]), @MenuPrevTabClick);
+  GoMenu.Add(NewLine);
   AddItem(GoMenu, rsFind, ShortCut(VK_F, [ssModifier]), @MenuFindClick);
   AddItem(GoMenu, rsFindNext, ShortCut(VK_G, [ssModifier]), @MenuFindNextClick);
   AddItem(GoMenu, rsFindPrev, ShortCut(VK_G, [ssModifier, ssShift]), @MenuFindPrevClick);
   AddItem(GoMenu, rsFilterFiles, ShortCut(VK_F, [ssModifier, ssShift]), @MenuFilterFilesClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsGoToDefinition, ShortCut(VK_F12, []), @MenuGoToDefinitionClick);
-  AddItem(GoMenu, rsGoToSymbol, ShortCut(VK_T, [ssModifier]), @MenuGoToSymbolClick);
+  AddItem(GoMenu, rsGoToSymbol, ShortCut(VK_P, [ssModifier]), @MenuGoToSymbolClick);
   AddItem(GoMenu, rsGoToRepoSymbol, ShortCut(VK_T, [ssModifier, ssShift]),
     @MenuGoToRepoSymbolClick);
   { Cmd+Y alone is the editor's delete-line key, which gets the key first. }
@@ -5412,13 +5500,15 @@ begin
   FCommitDraftFor := '';
   ClearRepositoryViews('');
   FWelcome.SetBusy(OpeningText(ADir));
-  UpdateCaption;
   UpdateCommitState;
   FOnOpened := AOnOpened;
+  FOpeningDir := ADir;
   FOpenJob := TGittanOpenJob.Create(ADir);
   FOpenJob.OnDone := @OpenJobDone;
   FOpenJob.IgnoreWhitespace := FIgnoreWhitespace;
   FOpenJob.Start;
+  { After the job is set, so the tab names the folder opening. }
+  UpdateCaption;
 end;
 
 { The job is dropped; its result, if it comes, is thrown away. It is
@@ -5426,6 +5516,7 @@ end;
 procedure TRepoFrame.AbandonOpenJob;
 begin
   FOnOpened := nil;
+  FOpeningDir := '';
   if FOpenJob = nil then
     Exit;
   FOpenJob.Stop(False);
@@ -5445,6 +5536,7 @@ begin
   if Job <> FOpenJob then
     Exit;
   FOpenJob := nil;
+  FOpeningDir := '';
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
   OnOpened := FOnOpened;
@@ -5453,6 +5545,7 @@ begin
   begin
     ShowError(Job.Error);
     UpdateCommitState;
+    UpdateCaption;
     Exit;
   end;
   FRepo.OpenAt(Job.Root, Job.GitDir);
