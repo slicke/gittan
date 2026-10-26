@@ -547,6 +547,12 @@ begin
           FReviewPulls := nil;
           FSummary.SetReviewPulls(nil);
           FGitHubLogin := '';
+          AbandonForgeJob;
+          FForgeMine := nil;
+          FForgeReview := nil;
+          FForgeLogin := '';
+          FForgeError := '';
+          UpdateForgePage;
           ClearReviews;
         end;
         MenuRefreshClick(nil);
@@ -615,13 +621,18 @@ begin
     Item.Visible := FHasGitHubCli;
   if FReviewItem <> nil then
     FReviewItem.Enabled := FHasGitHubCli;
-  { The Pull Requests page needs gh too: its row, its menu item, and
-    the page itself when gh goes while it shows. }
+  { The Pull Requests and GitHub pages need gh too: their rows, their
+    menu items, and the page itself when gh goes while it shows. }
   if FPullsItem <> nil then
     FPullsItem.Visible := FHasGitHubCli;
+  if FForgeItem <> nil then
+    FForgeItem.Visible := FHasGitHubCli;
   if FSideNav <> nil then
+  begin
     FSideNav.SetRowVisible(navPulls, FHasGitHubCli);
-  if not FHasGitHubCli and (FView = gvPulls) then
+    FSideNav.SetRowVisible(navForge, FHasGitHubCli);
+  end;
+  if not FHasGitHubCli and (FView in [gvPulls, gvForge]) then
     ShowSummary;
 end;
 

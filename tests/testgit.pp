@@ -872,8 +872,15 @@ begin
   { Unknown: origin when there is one, else the first remote git lists. }
   AssertEquals('origin', FRepo.RemoteFor('nobody/nothing'));
   AssertEquals('origin', FRepo.RemoteFor(''));
+  { HasRemoteFor never falls back, and wants the whole path. }
+  AssertTrue(FRepo.HasRemoteFor('foo/bar'));
+  AssertTrue(FRepo.HasRemoteFor('ME/BAR'));
+  AssertFalse(FRepo.HasRemoteFor('foo/ba'));
+  AssertFalse(FRepo.HasRemoteFor('nobody/nothing'));
+  AssertFalse(FRepo.HasRemoteFor(''));
   Git(['remote', 'remove', 'origin']);
   AssertEquals('upstream', FRepo.RemoteFor('nobody/nothing'));
+  AssertFalse(FRepo.HasRemoteFor('me/bar'));
 end;
 
 procedure TGitRepoTest.TestUserName;

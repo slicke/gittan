@@ -3,8 +3,8 @@ unit gittan.sidenav;
 {** The rows at the top of the sidebar that open the pages of a
   repository, as a music app lists Home and Explore over the library:
   Home, the summary, Graph, the commit graph, Repository, the page
-  about the repository itself, Commands, Files and Pull Requests, the
-  last hidden (SetRowVisible) while gh is missing. Each row is an icon and a name; the row
+  about the repository itself, Commands, Files, Pull Requests and
+  GitHub, the last two hidden (SetRowVisible) while gh is missing. Each row is an icon and a name; the row
   of the page shown is filled, and the one under the mouse tinted. Set
   Large, the rows are as tall as the music app's, with a larger icon and
   text, so they read as navigation over the list of files and not as
@@ -43,12 +43,13 @@ type
     branch for the graph, a book for the repository, a terminal with
     its prompt for the commands, a page for the files, a pull request
     (a branch's commits meeting the trunk) for the pull requests, a
+    globe for a forge (GitHub) across every repository, a
     clock for the recent repositories, a window of text for the
     settings' Editor page or sliders for its Tools page and for the
     settings themselves, a sparkle for its AI page and an i in a circle
     for its About page. }
-  TGittanNavIcon = (niHome, niGraph, niRepository, niCommands, niFiles, niPull, niClock,
-    niEditor, niTools, niAI, niAbout);
+  TGittanNavIcon = (niHome, niGraph, niRepository, niCommands, niFiles, niPull, niForge,
+    niClock, niEditor, niTools, niAI, niAbout);
 
   {** A click on a row, with its index. }
   TGittanNavPickEvent = procedure(Sender: TObject; AIndex: integer) of object;
@@ -540,6 +541,15 @@ begin
       Canvas.Ellipse(X + ASize - 2 * Eave - 1, Y + ASize - 2 * Eave, X + ASize,
         Y + ASize + 1);
       Canvas.Brush.Style := bsClear;
+    end;
+    niForge:
+    begin
+      { A globe: the disc, a meridian and the equator. }
+      Canvas.Ellipse(X, Y, X + ASize + 1, Y + ASize + 1);
+      Mid := X + ASize div 2;
+      Eave := Max(2, ASize * 2 div 7);
+      Canvas.Ellipse(Mid - Eave, Y, Mid + Eave + 1, Y + ASize + 1);
+      Canvas.Line(X, Y + ASize div 2, X + ASize + 1, Y + ASize div 2);
     end;
     niFiles:
     begin

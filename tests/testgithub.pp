@@ -35,7 +35,9 @@ const
     '"labels":[{"name":"bug","color":"d73a4a"},{"name":"","color":"ffffff"},' +
     '{"name":"ui","color":"0075ca"}],' +
     '"latestReviews":[{"author":{"login":"bob"},"state":"APPROVED"},' +
-    '{"author":null,"state":"COMMENTED"},{"author":{"login":"eve"},"state":"COMMENTED"}]}';
+    '{"author":null,"state":"COMMENTED"},{"author":{"login":"eve"},"state":"COMMENTED"}],' +
+    '"reviewRequests":[{"__typename":"Team","name":"Core","slug":"core"},' +
+    '{"__typename":"User","login":"dan"}]}';
 
 procedure TGitHubTest.TestParsePullRequest;
 var
@@ -63,11 +65,14 @@ begin
   AssertEquals('APPROVED', Pull.Reviews[0].State);
   AssertEquals('eve', Pull.Reviews[1].Login);
   AssertEquals('COMMENTED', Pull.Reviews[1].State);
+  AssertEquals(1, Length(Pull.Requested));
+  AssertEquals('dan', Pull.Requested[0]);
 end;
 
 { A pull request whose latest review by the login approved it or asked
-  for changes is left out; one only commented on, or whose review was
-  dismissed, stays, as does every one without a login. }
+  for changes is left out, unless the login is asked again in person;
+  one only commented on, or whose review was dismissed, stays, as does
+  every one without a login. }
 procedure TGitHubTest.TestWithoutReviewed;
 var
   Pulls, Left: TGittanPullRequests;
@@ -76,16 +81,19 @@ begin
     ',{"number":3,"title":"Changes","latestReviews":[{"author":{"login":"Bob"},"state":"CHANGES_REQUESTED"}]}' +
     ',{"number":4,"title":"Dismissed","latestReviews":[{"author":{"login":"bob"},"state":"DISMISSED"}]}' +
     ',{"number":5,"title":"Nobody","latestReviews":[]}' +
-    ',{"number":6,"title":"No field"}]', Pulls));
-  AssertEquals(5, Length(Pulls));
+    ',{"number":6,"title":"No field"}' +
+    ',{"number":7,"title":"Asked again","latestReviews":[{"author":{"login":"bob"},"state":"APPROVED"}],' +
+    '"reviewRequests":[{"__typename":"User","login":"bob"}]}]', Pulls));
+  AssertEquals(6, Length(Pulls));
   Left := WithoutReviewed(Pulls, 'bob');
-  AssertEquals(3, Length(Left));
+  AssertEquals(4, Length(Left));
   AssertEquals(4, Left[0].Number);
   AssertEquals(5, Left[1].Number);
   AssertEquals(6, Left[2].Number);
+  AssertEquals(7, Left[3].Number);
   Left := WithoutReviewed(Pulls, 'eve');
-  AssertEquals(5, Length(Left));
-  AssertEquals(5, Length(WithoutReviewed(Pulls, '')));
+  AssertEquals(6, Length(Left));
+  AssertEquals(6, Length(WithoutReviewed(Pulls, '')));
   AssertEquals(0, Length(WithoutReviewed(nil, 'bob')));
 end;
 

@@ -27,6 +27,7 @@ uses
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.sectionheader, gittan.hintbox,
+  gittan.forge, gittan.forgepage,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
   gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
@@ -44,7 +45,7 @@ type
     binary view), or the Pull Requests page (gittan.pullpage,
     umain.pulls.inc). }
   TGittanView = (gvSummary, gvRepoInfo, gvChanges, gvRepoDiff, gvFile, gvHistory, gvSubmodule,
-    gvImage, gvTranslation, gvBinary, gvCommands, gvFiles, gvBlob, gvPulls);
+    gvImage, gvTranslation, gvBinary, gvCommands, gvFiles, gvBlob, gvPulls, gvForge);
 
   {** The three strengths of a commit's color in the history view: the
     faint tint of its rows, the shade of the words it changed, and the
@@ -565,6 +566,13 @@ type
       both there only with gh (umain.pulls.inc). }
     FPullPage: TGittanPullPage;
     FPullsItem: TMenuItem;
+    { The forge page (umain.forge.inc): the user's pull requests across
+      every repository, as the forge job last read them. }
+    FForgePage: TGittanForgePage;
+    FForgeItem: TMenuItem;
+    FForgeJob: TGittanForgeJob;
+    FForgeMine, FForgeReview: TGittanForgePulls;
+    FForgeLogin, FForgeError: string;
     { The page of a submodule, in the box too (umain.submodules.inc). }
     FSubPage: TGittanSubPage;
     FRepoInfoJob: TGittanRepoInfoJob;
@@ -897,6 +905,15 @@ type
     procedure AbandonRepoInfoJob;
     procedure RepoInfoJobDone(Sender: TObject);
     procedure HideBoxPages;
+    procedure SetupForgePage;
+    procedure MenuForgeClick(Sender: TObject);
+    procedure ShowForge;
+    procedure UpdateForgePage;
+    procedure StartForgeJob;
+    procedure AbandonForgeJob;
+    procedure ForgeJobDone(Sender: TObject);
+    procedure ForgePagePick(Sender: TObject; const APull: TGittanForgePull);
+    procedure ForgePageRefresh(Sender: TObject);
     procedure SetupPullPage;
     procedure MenuPullsClick(Sender: TObject);
     procedure ShowPulls;
@@ -1702,6 +1719,7 @@ resourcestring
   rsNavCommands = 'Commands';
   rsNavChanges = 'Changes';
   rsNavPulls = 'Pull Requests';
+  rsNavForge = 'GitHub';
   rsAllPulls = 'All Pull Requests';
   rsNeedsReviewHeader = 'Needs your review';
   rsFilesMenu = '&Files';
@@ -2460,8 +2478,9 @@ const
   navCommands = 3;
   navFiles = 4;
   navPulls = 5;
+  navForge = 6;
   { The last row: a list, never selected. }
-  navRecent = 6;
+  navRecent = 7;
   { Scrolling on past the bottom of a file goes to the next one, and
     past the top to the previous: the wheel delta the pull needs (120 is
     one notch of a mouse wheel, 8 one pixel of a trackpad on macOS), the
@@ -2519,6 +2538,7 @@ const
   rsHintStaged = '%s · staged';
   rsHintPartlyStaged = '%s · partly staged';
   rsPullRequests = 'Pull Re&quests';
+  rsForgeMenu = 'Git&Hub';
   rsPullLoading = 'Loading...';
   rsNoPulls = 'No open pull requests';
   rsPullItem = '#%d %s';
@@ -2982,6 +3002,7 @@ begin
   SetupCommandPage;
   SetupFilesPage;
   SetupPullPage;
+  SetupForgePage;
   { So does the page of a submodule. }
   FSubPage := TGittanSubPage.Create(Self);
   FSubPage.Parent := FSummaryBox;
@@ -3087,6 +3108,7 @@ begin
   Application.RemoveOnDeactivateHandler(@AppDeactivate);
   StopWatcher;
   AbandonPullJob;
+  AbandonForgeJob;
   AbandonReviewJob;
   AbandonUpdateJob;
   AbandonSubmoduleJobs;
@@ -3433,6 +3455,10 @@ begin
       RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(62, 62, 62),
       FLinkColor, RGBToColor(63, 185, 80), RGBToColor(227, 179, 65), RGBToColor(248, 81, 73));
     FPullPage.SetCardColor(RGBToColor(40, 40, 41));
+    FForgePage.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(62, 62, 62),
+      FLinkColor, RGBToColor(63, 185, 80), RGBToColor(227, 179, 65), RGBToColor(248, 81, 73));
+    FForgePage.SetCardColor(RGBToColor(40, 40, 41));
     FSubPage.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(45, 45, 46), RGBToColor(62, 62, 62),
       RGBToColor(40, 40, 41), FLinkColor, RGBToColor(63, 185, 80),
@@ -3463,6 +3489,10 @@ begin
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(222, 222, 222),
       FLinkColor, RGBToColor(26, 127, 55), RGBToColor(154, 103, 0), RGBToColor(207, 34, 46));
     FPullPage.SetCardColor(RGBToColor(245, 245, 246));
+    FForgePage.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(222, 222, 222),
+      FLinkColor, RGBToColor(26, 127, 55), RGBToColor(154, 103, 0), RGBToColor(207, 34, 46));
+    FForgePage.SetCardColor(RGBToColor(245, 245, 246));
     FSubPage.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(243, 243, 243), RGBToColor(222, 222, 222),
       RGBToColor(245, 245, 246), FLinkColor, RGBToColor(26, 127, 55),
@@ -4047,6 +4077,9 @@ begin
   FPullsItem := AddItem(ViewMenu, rsPullRequests, ShortCut(VK_6, [ssModifier]),
     @MenuPullsClick);
   FPullsItem.Visible := FHasGitHubCli;
+  FForgeItem := AddItem(ViewMenu, rsForgeMenu, ShortCut(VK_7, [ssModifier]),
+    @MenuForgeClick);
+  FForgeItem.Visible := FHasGitHubCli;
   ViewMenu.Add(NewLine);
   FCompareMenu := AddItem(ViewMenu, rsCompareWith, 0, nil);
   RebuildCompareMenu;
@@ -5431,6 +5464,12 @@ begin
     FPullPage.Visible := True;
     FPullPage.FitHeight(FSummaryBox.ClientHeight);
   end;
+  if FView = gvForge then
+  begin
+    HideBoxPages;
+    FForgePage.Visible := True;
+    FForgePage.FitHeight(FSummaryBox.ClientHeight);
+  end;
   RebuildCompareMenu;
   FTerminalItem.Enabled := FRepo.Root <> '';
   UpdateBranchItems;
@@ -5738,10 +5777,10 @@ begin
   LeaveEditorViews;
   FSummaryBox.Visible := True;
   FView := gvSummary;
-  { The Repository, Commands, Files and Pull Requests pages and the
-    page of a submodule give the box back. }
+  { The Repository, Commands, Files, Pull Requests and forge pages and
+    the page of a submodule give the box back. }
   if FRepoPage.Visible or FSubPage.Visible or FCommandPage.Visible or FFilesPage.Visible or
-    FPullPage.Visible then
+    FPullPage.Visible or FForgePage.Visible then
   begin
     HideBoxPages;
     FSummary.Visible := FRepo.Root <> '';
@@ -5773,6 +5812,8 @@ begin
     FFilesPage.Visible := False;
   if FPullPage <> nil then
     FPullPage.Visible := False;
+  if FForgePage <> nil then
+    FForgePage.Visible := False;
 end;
 
 { Hides the editor and what goes with it, for a page in the box. }
@@ -5916,6 +5957,7 @@ begin
   FCommandPage.FitHeight(FSummaryBox.ClientHeight);
   FFilesPage.FitHeight(FSummaryBox.ClientHeight);
   FPullPage.FitHeight(FSummaryBox.ClientHeight);
+  FForgePage.FitHeight(FSummaryBox.ClientHeight);
 end;
 
 { The welcome view takes the summary's place in the box, with AError
@@ -6772,6 +6814,7 @@ const
 {$I umain.clone.inc}
 {$I umain.files.inc}
 {$I umain.pulls.inc}
+{$I umain.forge.inc}
 {$I umain.commit.inc}
 {$I umain.ai.inc}
 {$I umain.remote.inc}

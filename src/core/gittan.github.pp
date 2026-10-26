@@ -37,8 +37,11 @@ type
     Additions, Deletions, ChangedFiles: integer;
     Labels: string;
     { The latest review of each reviewer (latestReviews): who and its
-      state, APPROVED, CHANGES_REQUESTED, COMMENTED or DISMISSED. }
+      state, APPROVED, CHANGES_REQUESTED, COMMENTED or DISMISSED; and
+      the logins of the users a review is asked of now
+      (reviewRequests, teams left out). }
     Reviews: array of TGittanLatestReview;
+    Requested: array of string;
   end;
   TGittanPullRequests = array of TGittanPullRequest;
 
@@ -46,7 +49,7 @@ const
   {** The fields asked of gh, the ones the record holds. }
   PullRequestFields = 'number,title,state,reviewDecision,url,headRefName,baseRefName,' +
     'author,isDraft,statusCheckRollup,createdAt,updatedAt,additions,deletions,changedFiles,' +
-    'labels,latestReviews';
+    'labels,latestReviews,reviewRequests';
 
 {** Reads the object gh pr view --json prints. }
 function ParsePullRequest(const AJson: string; out APull: TGittanPullRequest): boolean;
@@ -56,8 +59,9 @@ function ParsePullRequests(const AJson: string; out APulls: TGittanPullRequests)
   changes on (their latest review): GitHub's review-requested search
   keeps a pull request asked of a team the user is on after their
   review, which only a personal request loses. A review that only
-  commented, or was dismissed, leaves the pull request in. An empty
-  ALogin leaves all in. }
+  commented, or was dismissed, leaves the pull request in, and so does
+  a request made of ALogin in person after their review (Requested).
+  An empty ALogin leaves all in. }
 function WithoutReviewed(const APulls: TGittanPullRequests;
   const ALogin: string): TGittanPullRequests;
 {** The short line of the status bar: "PR #12 · Approved", "PR #12 · Draft",
@@ -162,7 +166,7 @@ end;
 
 function ReadPull(AObject: TJSONObject; out APull: TGittanPullRequest): boolean;
 var
-  Author, Checks, Labels, Reviews, Reviewer: TJSONData;
+  Author, Checks, Labels, Reviews, Reviewer, Requests: TJSONData;
   i, n: integer;
   Name: string;
 begin
@@ -216,6 +220,18 @@ begin
         APull.Reviews[n].Login := TJSONObject(Reviewer).Get('login', '');
         APull.Reviews[n].State := TJSONObject(TJSONArray(Reviews)[i]).Get('state', '');
       end;
+  Requests := AObject.Find('reviewRequests');
+  if (Requests <> nil) and (Requests.JSONType = jtArray) then
+    for i := 0 to TJSONArray(Requests).Count - 1 do
+      if TJSONArray(Requests)[i].JSONType = jtObject then
+      begin
+        Name := TJSONObject(TJSONArray(Requests)[i]).Get('login', '');
+        if Name = '' then
+          Continue;
+        n := Length(APull.Requested);
+        SetLength(APull.Requested, n + 1);
+        APull.Requested[n] := Name;
+      end;
 end;
 
 function WithoutReviewed(const APulls: TGittanPullRequests;
@@ -237,6 +253,10 @@ begin
         ((APulls[i].Reviews[j].State = 'APPROVED') or
         (APulls[i].Reviews[j].State = 'CHANGES_REQUESTED')) then
         Reviewed := True;
+    { Asked again, in person, after the review. }
+    for j := 0 to High(APulls[i].Requested) do
+      if SameText(APulls[i].Requested[j], ALogin) then
+        Reviewed := False;
     if Reviewed then
       Continue;
     Result[n] := APulls[i];

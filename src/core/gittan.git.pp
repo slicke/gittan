@@ -696,6 +696,10 @@ type
       without regard to case), else origin, else the first remote, else
       empty. }
     function RemoteFor(const ARepoPath: string): string;
+    {** Whether a remote's URL holds ARepoPath ("owner/repo", compared
+      without regard to case) as its path: followed by nothing, ".git"
+      or a slash. }
+    function HasRemoteFor(const ARepoPath: string): boolean;
     {** Fetches pull request ANumber of ARemote (a GitHub remote, which
       serves it as refs/pull/N/head) into refs/gittan/pr/N, the name given
       in AHeadRef, and ABaseRef along with it, so the remote-tracking
@@ -2470,6 +2474,34 @@ begin
   end;
   if HasOrigin then
     Result := 'origin';
+end;
+
+function TGittanRepo.HasRemoteFor(const ARepoPath: string): boolean;
+var
+  Output, Line, Lower, Rest: string;
+  Raw: TStringList;
+  p: integer;
+begin
+  Result := False;
+  if (FRoot = '') or (ARepoPath = '') or not RunGit(FRoot, ['config', '--get-regexp',
+    '^remote\..*\.url$'], Output) then
+    Exit;
+  Raw := TStringList.Create;
+  try
+    Raw.Text := Output;
+    for Line in Raw do
+    begin
+      Lower := LowerCase(Line);
+      p := Pos(LowerCase(ARepoPath), Lower);
+      if (p = 0) or (p <= Pos(' ', Lower)) then
+        Continue;
+      Rest := Copy(Lower, p + Length(ARepoPath), MaxInt);
+      if (Rest = '') or (Rest = '.git') or (Rest[1] = '/') then
+        Exit(True);
+    end;
+  finally
+    Raw.Free;
+  end;
 end;
 
 function TGittanRepo.FetchPullRequest(const ARemote: string; ANumber: integer;

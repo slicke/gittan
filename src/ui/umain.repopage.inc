@@ -7,7 +7,8 @@
   repository's name in the status bar shows, Commands the page of the
   repository's own commands (umain.commands.inc), Files the files of
   HEAD (umain.files.inc), Pull Requests the open ones on GitHub
-  (umain.pulls.inc, with gh), and Repository is a
+  (umain.pulls.inc, with gh), GitHub the user's own across every
+  repository (umain.forge.inc, with gh), and Repository is a
   page about the repository itself (gittan.repopage): its branch and
   upstream, how many commits since when, branches, tags, tracked files,
   submodules and the size of its objects, then its remotes, a web
@@ -41,6 +42,8 @@ begin
   FSideNav.AddRow(rsNavFiles, niFiles, True);
   FSideNav.AddRow(rsNavPulls, niPull, True);
   FSideNav.SetRowVisible(navPulls, FHasGitHubCli);
+  FSideNav.AddRow(rsNavForge, niForge, True);
+  FSideNav.SetRowVisible(navForge, FHasGitHubCli);
   FSideNav.AddRow(rsNavRecent, niClock, True);
   FSideNav.Heading := rsNavChanges;
   FSideNav.ShowToggle(rsNavHide, rsNavShow);
@@ -68,6 +71,7 @@ begin
     navCommands: MenuCommandsClick(Sender);
     navFiles: MenuFilesClick(Sender);
     navPulls: MenuPullsClick(Sender);
+    navForge: MenuForgeClick(Sender);
     navRecent: ShowRecentList(FSideNav.RowScreenRect(AIndex));
   end;
 end;
