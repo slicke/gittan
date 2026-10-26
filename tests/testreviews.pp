@@ -1,15 +1,16 @@
 unit testreviews;
 
-{** Tests of gittan.reviews: GitHub's answer for the review threads of a
-  pull request, the mapping of a line through a diff and the age of a
-  comment. The fetch itself is not tested; it needs the network. }
+{** Tests of gittan.reviews: the review threads of a pull request as
+  gittan.github reads them from GitHub's answer, the mapping of a line
+  through a diff and the age of a comment. The fetch itself is not
+  tested; it needs the network. }
 
 {$mode objfpc}{$H+}
 
 interface
 
 uses
-  Classes, SysUtils, DateUtils, fpcunit, testregistry, gittan.reviews;
+  Classes, SysUtils, DateUtils, fpcunit, testregistry, gittan.reviews, gittan.github;
 
 type
   TReviewsTest = class(TTestCase)

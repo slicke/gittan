@@ -997,11 +997,11 @@ begin
     Git(['push', '-q', 'origin', 'HEAD:refs/pull/7/head']);
     Git(['reset', '-q', '--hard', 'HEAD^']);
     AssertTrue(FRepo.Open(FDir));
-    AssertTrue(FRepo.FetchPullRequest('origin', 7, Branch, HeadRef));
+    AssertTrue(FRepo.FetchPullRequest('origin', 7, 'refs/pull/7/head', Branch, HeadRef));
     AssertEquals('refs/gittan/pr/7', HeadRef);
     AssertEquals(Head, Trim(Git(['rev-parse', HeadRef])));
     AssertTrue(FRepo.HasCommit('origin/' + Branch));
-    AssertFalse(FRepo.FetchPullRequest('origin', 8, Branch, HeadRef));
+    AssertFalse(FRepo.FetchPullRequest('origin', 8, 'refs/pull/8/head', Branch, HeadRef));
     FRepo.Base := 'origin/' + Branch + '...' + HeadRef;
     AssertTrue(FRepo.IsRange);
   finally

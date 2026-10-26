@@ -537,11 +537,11 @@ begin
         FSettings.GhPath := V.GhPath;
         FSettings.GitHubEnabled := V.GitHubEnabled;
         SetGitExe(FSettings.GitPath);
-        FindGitHubCli;
-        UpdateGitHubItems;
-        if not FHasGitHubCli then
+        FindForge;
+        UpdateForgeItems;
+        if not Assigned(FForge) then
         begin
-          { What the gh that is gone had found. }
+          { What the forge that is gone had found. }
           AbandonPullJob;
           FPullKey := '';
           FHasPull := False;
@@ -549,7 +549,7 @@ begin
           FPullError := '';
           FReviewPulls := nil;
           FSummary.SetReviewPulls(nil);
-          FGitHubLogin := '';
+          FPullLogin := '';
           AbandonForgeJob;
           FForgeMine := nil;
           FForgeReview := nil;
@@ -603,43 +603,75 @@ begin
   FEditOld.Update(True);
 end;
 
-{ gh by the path the settings give, else as found on ToolSearchPath; none
-  while the GitHub features are turned off, which hides them as a missing
-  gh does. }
-procedure TForm1.FindGitHubCli;
+{ The forge, GitHub through gh: gh by the path the settings give, else
+  as found on ToolSearchPath; none while the GitHub features are turned
+  off, which hides them as a missing gh does. A forge already made with
+  the same tool is kept. }
+procedure TForm1.FindForge;
+var
+  Cli: string;
 begin
   if not FSettings.GitHubEnabled then
-    FGitHubCli := ''
+    Cli := ''
   else if FSettings.GhPath <> '' then
-    FGitHubCli := FSettings.GhPath
+    Cli := FSettings.GhPath
   else
-    FGitHubCli := FindTool('gh');
-  FHasGitHubCli := FGitHubCli <> '';
+    Cli := FindTool(TGittanGitHubForge.CliName);
+  if Assigned(FForge) and (FForge.Cli = Cli) then
+    Exit;
+  FreeAndNil(FForge);
+  if Cli <> '' then
+    FForge := TGittanGitHubForge.Create(Cli);
 end;
 
-{ Shows the menu items that need gh when there is one, hides them
-  otherwise. The Compare With menu and a commit's menu are built when
-  they open and look at the flag themselves. }
-procedure TForm1.UpdateGitHubItems;
-var
-  Item: TMenuItem;
+{ The forge's name, empty without one (when what is named after it is
+  hidden). }
+function TForm1.ForgeName: string;
 begin
-  for Item in FGitHubItems do
-    Item.Visible := FHasGitHubCli;
+  if Assigned(FForge) then
+    Result := FForge.Name
+  else
+    Result := '';
+end;
+
+{ Shows the menu items that need the forge when there is one, named
+  after it, and hides them otherwise. The Compare With menu and a
+  commit's menu are built when they open and look themselves. }
+procedure TForm1.UpdateForgeItems;
+var
+  i: integer;
+begin
+  for i := 0 to High(FForgeItems) do
+  begin
+    FForgeItems[i].Visible := Assigned(FForge);
+    if FForgeCaptions[i] <> '' then
+      FForgeItems[i].Caption := Format(FForgeCaptions[i], [ForgeName]);
+  end;
   if FReviewItem <> nil then
-    FReviewItem.Enabled := FHasGitHubCli;
-  { The Pull Requests and GitHub pages need gh too: their rows, their
-    menu items, and the page itself when gh goes while it shows. }
+    FReviewItem.Enabled := Assigned(FForge);
+  { The Pull Requests and forge pages need the forge too: their rows,
+    their menu items, the names they show, and the page itself when the
+    forge goes while it shows. }
   if FPullsItem <> nil then
-    FPullsItem.Visible := FHasGitHubCli;
+    FPullsItem.Visible := Assigned(FForge);
   if FForgeItem <> nil then
-    FForgeItem.Visible := FHasGitHubCli;
+  begin
+    FForgeItem.Visible := Assigned(FForge);
+    FForgeItem.Caption := Format(rsForgeMenu, [ForgeName]);
+  end;
   if FSideNav <> nil then
   begin
-    FSideNav.SetRowVisible(navPulls, FHasGitHubCli);
-    FSideNav.SetRowVisible(navForge, FHasGitHubCli);
+    FSideNav.SetRowVisible(navPulls, Assigned(FForge));
+    FSideNav.SetRowVisible(navForge, Assigned(FForge));
+    FSideNav.SetRowCaption(navForge, ForgeName);
   end;
-  if not FHasGitHubCli and (FView in [gvPulls, gvForge]) then
+  if FPullPage <> nil then
+    FPullPage.SetForge(ForgeName);
+  if FForgePage <> nil then
+    FForgePage.SetForge(ForgeName);
+  if FSummary <> nil then
+    FSummary.ForgeName := ForgeName;
+  if not Assigned(FForge) and (FView in [gvPulls, gvForge]) then
     ShowSummary;
 end;
 
@@ -1070,16 +1102,19 @@ var
     APopup.Items.Add(Result);
   end;
 
-  { An item (a separator with no caption) shown only when gh is there. }
-  function AddGitHubItem(APopup: TPopupMenu; const ACaption: string;
+  { An item (a separator with no caption) shown only while there is a
+    forge, its caption AFormat with the forge's name in place of %s. }
+  function AddForgeItem(APopup: TPopupMenu; const AFormat: string;
     AClick: TNotifyEvent): TMenuItem;
   begin
-    if ACaption = '' then
+    if AFormat = '' then
       Result := AddItem(APopup, '-', nil)
     else
-      Result := AddItem(APopup, ACaption, AClick);
-    SetLength(FGitHubItems, Length(FGitHubItems) + 1);
-    FGitHubItems[High(FGitHubItems)] := Result;
+      Result := AddItem(APopup, Format(AFormat, [ForgeName]), AClick);
+    SetLength(FForgeItems, Length(FForgeItems) + 1);
+    FForgeItems[High(FForgeItems)] := Result;
+    SetLength(FForgeCaptions, Length(FForgeCaptions) + 1);
+    FForgeCaptions[High(FForgeCaptions)] := AFormat;
   end;
 
 begin
@@ -1093,8 +1128,8 @@ begin
   FRevealItem := AddItem(FFilePopup, rsReveal, @MenuRevealClick);
   FOpenItem := AddItem(FFilePopup, rsOpenInEditor, @MenuOpenInEditorClick);
   FFileHistoryItem := AddItem(FFilePopup, rsFileHistoryItem, @MenuFileHistoryClick);
-  AddGitHubItem(FFilePopup, rsOpenOnGitHub, @MenuOpenOnGitHubClick);
-  AddGitHubItem(FFilePopup, rsCopyGitHubUrl, @MenuCopyGitHubUrlClick);
+  AddForgeItem(FFilePopup, rsOpenOnForge, @MenuOpenOnForgeClick);
+  AddForgeItem(FFilePopup, rsCopyForgeUrl, @MenuCopyForgeUrlClick);
   Item := TMenuItem.Create(FFilePopup);
   Item.Caption := '-';
   FFilePopup.Items.Add(Item);
@@ -1133,14 +1168,14 @@ begin
   FResolveEditItem := AddItem(FEditPopup, rsResolveHere, @MenuResolveEditClick);
   FShowCommitItem := AddItem(FEditPopup, rsShowCommit, @MenuShowCommitClick);
   FCopyHashItem := AddItem(FEditPopup, rsCopyHash, @MenuCopyHashClick);
-  AddGitHubItem(FEditPopup, '', nil);
-  FGitHubEditItem := AddGitHubItem(FEditPopup, rsOpenOnGitHub, @MenuOpenLineOnGitHubClick);
-  AddGitHubItem(FEditPopup, rsCopyGitHubUrl, @MenuCopyLineGitHubUrlClick);
-  FGitHubCommitItem := AddGitHubItem(FEditPopup, rsOpenCommitOnGitHub,
-    @MenuOpenCommitOnGitHubClick);
+  AddForgeItem(FEditPopup, '', nil);
+  FForgeEditItem := AddForgeItem(FEditPopup, rsOpenOnForge, @MenuOpenLineOnForgeClick);
+  AddForgeItem(FEditPopup, rsCopyForgeUrl, @MenuCopyLineForgeUrlClick);
+  FForgeCommitItem := AddForgeItem(FEditPopup, rsOpenCommitOnForge,
+    @MenuOpenCommitOnForgeClick);
   { Shown for a commit whose summary names an issue (EditPopupPopup). }
-  FGitHubIssueItem := AddItem(FEditPopup, Format(rsOpenIssueOnGitHub, [0]),
-    @MenuOpenIssueOnGitHubClick);
+  FForgeIssueItem := AddItem(FEditPopup, Format(rsOpenIssueOnForge, [0, ForgeName]),
+    @MenuOpenIssueOnForgeClick);
   Edit.PopupText := FEditPopup;
   FEditOld.PopupText := FEditPopup;
 
@@ -1152,11 +1187,11 @@ begin
   Item.Caption := '-';
   FStatusPopup.Items.Add(Item);
   AddItem(FStatusPopup, rsOpenTerminal, @MenuOpenTerminalClick);
-  AddGitHubItem(FStatusPopup, '', nil);
-  FOpenPullItem := AddGitHubItem(FStatusPopup, rsOpenPull, @MenuOpenPullClick);
-  FCopyPullItem := AddGitHubItem(FStatusPopup, rsCopyPullUrl, @MenuCopyPullUrlClick);
+  AddForgeItem(FStatusPopup, '', nil);
+  FOpenPullItem := AddForgeItem(FStatusPopup, rsOpenPull, @MenuOpenPullClick);
+  FCopyPullItem := AddForgeItem(FStatusPopup, rsCopyPullUrl, @MenuCopyPullUrlClick);
   FStatus.PopupMenu := FStatusPopup;
-  UpdateGitHubItems;
+  UpdateForgeItems;
 end;
 
 procedure TForm1.FilePopupPopup(Sender: TObject);
@@ -1495,10 +1530,10 @@ begin
   end;
   FShowCommitItem.Enabled := FPopupHash <> '';
   FCopyHashItem.Enabled := FPopupHash <> '';
-  FGitHubEditItem.Enabled := (FRepo.Root <> '') and (FCurrentPath <> '');
-  FGitHubCommitItem.Enabled := FPopupHash <> '';
-  FGitHubIssueItem.Visible := FHasGitHubCli and (FPopupIssue > 0);
-  FGitHubIssueItem.Caption := Format(rsOpenIssueOnGitHub, [FPopupIssue]);
+  FForgeEditItem.Enabled := (FRepo.Root <> '') and (FCurrentPath <> '');
+  FForgeCommitItem.Enabled := FPopupHash <> '';
+  FForgeIssueItem.Visible := Assigned(FForge) and (FPopupIssue > 0);
+  FForgeIssueItem.Caption := Format(rsOpenIssueOnForge, [FPopupIssue, ForgeName]);
   FResolveEditItem.Visible := CanResolveBlocks;
   FResolveEditItem.Enabled := (FPopupEd = Edit) and (ConflictAtRow(FPopupRow) >= 0);
 end;
@@ -1531,62 +1566,44 @@ begin
   FPopupEd.DoCommand(cCommand_SelectAll, TATCommandInvoke.MenuContext);
 end;
 
-{ The address of the page of the repository on GitHub that gh browse
-  finds for AArgs: gh only prints it (--no-browser). A failure (no
-  GitHub remote, say) is told in the status bar instead of going
-  unseen. }
-function TForm1.GitHubUrl(const AArgs: array of string; out AUrl: string): boolean;
+{ The address of ATarget's page on the forge: the forge's tool only
+  prints it. A failure (no remote on the forge, say) is told in the
+  status bar instead of going unseen. }
+function TForm1.ForgeUrl(const ATarget: TGittanWebTarget; out AUrl: string): boolean;
 var
-  Args: array of string;
   Err: string;
-  i: integer;
 begin
   AUrl := '';
   Result := False;
-  if not FHasGitHubCli or (FRepo.Root = '') then
+  if not Assigned(FForge) or (FRepo.Root = '') then
     Exit;
-  SetLength(Args, Length(AArgs) + 2);
-  Args[0] := 'browse';
-  Args[1] := '--no-browser';
-  for i := 0 to High(AArgs) do
-    Args[i + 2] := AArgs[i];
-  Result := RunGitHubCli(FGitHubCli, FRepo.Root, Args, AUrl, Err) and (Trim(AUrl) <> '');
-  AUrl := Trim(AUrl);
+  Result := FForge.WebUrl(FRepo.Root, ATarget, AUrl, Err);
   if not Result then
   begin
     Err := Trim(Err);
     if Pos(LineEnding, Err) > 0 then
       Err := Copy(Err, 1, Pos(LineEnding, Err) - 1);
-    StatusNote(Format(rsGitHubFailed, [Err]), True);
+    StatusNote(Format(rsForgeFailed, [FForge.CliName, Err]), True);
   end;
 end;
 
-procedure TForm1.OpenOnGitHub(const AArgs: array of string);
+procedure TForm1.OpenOnForge(const ATarget: TGittanWebTarget);
 var
   Url: string;
 begin
-  if GitHubUrl(AArgs, Url) then
+  if ForgeUrl(ATarget, Url) then
     OpenURL(Url);
 end;
 
-{ The gh browse arguments for a file, at ALine when it is above 0, in
-  the version the view shows: the right commit of a range (what a blame
-  click or Compare With > Other set), else the branch, since the work
-  tree has no page. }
-function TForm1.FileGitHubArgs(const APath: string; ALine: integer): TStringArray;
+{ A file at ALine when it is above 0, in the version the view shows:
+  the right commit of a range (what a blame click or Compare With >
+  Other set), else the branch, since the work tree has no page. }
+function TForm1.FileWebTarget(const APath: string; ALine: integer): TGittanWebTarget;
 var
-  Target, OldRef, NewRef: string;
+  OldRef, NewRef: string;
 begin
-  Target := APath;
-  if ALine > 0 then
-    Target := Target + ':' + IntToStr(ALine);
   FRepo.DiffSides(OldRef, NewRef);
-  if NewRef <> '' then
-    Result := [Target, '--commit=' + NewRef]
-  else if FBranch <> '' then
-    Result := [Target, '--branch', FBranch]
-  else
-    Result := [Target];
+  Result := FileTarget(APath, ALine, NewRef, FBranch);
 end;
 
 { The line of the shown file that row ARow of AEd holds, 0 when the row
@@ -1600,46 +1617,46 @@ begin
     Result := 0;
 end;
 
-procedure TForm1.MenuOpenOnGitHubClick(Sender: TObject);
+procedure TForm1.MenuOpenOnForgeClick(Sender: TObject);
 begin
   if FContextPath <> '' then
-    OpenOnGitHub(FileGitHubArgs(FContextPath, 0));
+    OpenOnForge(FileWebTarget(FContextPath, 0));
 end;
 
-procedure TForm1.MenuCopyGitHubUrlClick(Sender: TObject);
+procedure TForm1.MenuCopyForgeUrlClick(Sender: TObject);
 var
   Url: string;
 begin
-  if (FContextPath <> '') and GitHubUrl(FileGitHubArgs(FContextPath, 0), Url) then
+  if (FContextPath <> '') and ForgeUrl(FileWebTarget(FContextPath, 0), Url) then
     Clipboard.AsText := Url;
 end;
 
-procedure TForm1.MenuOpenLineOnGitHubClick(Sender: TObject);
+procedure TForm1.MenuOpenLineOnForgeClick(Sender: TObject);
 begin
   if FCurrentPath <> '' then
-    OpenOnGitHub(FileGitHubArgs(FCurrentPath, FileLineOfRow(FPopupEd, FPopupRow)));
+    OpenOnForge(FileWebTarget(FCurrentPath, FileLineOfRow(FPopupEd, FPopupRow)));
 end;
 
-procedure TForm1.MenuCopyLineGitHubUrlClick(Sender: TObject);
+procedure TForm1.MenuCopyLineForgeUrlClick(Sender: TObject);
 var
   Url: string;
 begin
   if (FCurrentPath <> '') and
-    GitHubUrl(FileGitHubArgs(FCurrentPath, FileLineOfRow(FPopupEd, FPopupRow)), Url) then
+    ForgeUrl(FileWebTarget(FCurrentPath, FileLineOfRow(FPopupEd, FPopupRow)), Url) then
     Clipboard.AsText := Url;
 end;
 
-procedure TForm1.MenuOpenCommitOnGitHubClick(Sender: TObject);
+procedure TForm1.MenuOpenCommitOnForgeClick(Sender: TObject);
 begin
   if FPopupHash <> '' then
-    OpenOnGitHub([FPopupHash]);
+    OpenOnForge(CommitTarget(FPopupHash));
 end;
 
-{ gh browse with a number opens the issue or the pull request. }
-procedure TForm1.MenuOpenIssueOnGitHubClick(Sender: TObject);
+{ A number opens the issue or the pull request. }
+procedure TForm1.MenuOpenIssueOnForgeClick(Sender: TObject);
 begin
   if FPopupIssue > 0 then
-    OpenOnGitHub([IntToStr(FPopupIssue)]);
+    OpenOnForge(IssueTarget(FPopupIssue));
 end;
 
 { Runs ACommand, words separated by spaces, with AArgs appended. }
@@ -2032,7 +2049,7 @@ begin
   Item.OnClick := @MenuTakeSnapshotClick;
   FCompareMenu.Add(Item);
   FPullMenu := nil;
-  if FHasGitHubCli then
+  if Assigned(FForge) then
   begin
     FPullMenu := TMenuItem.Create(FCompareMenu);
     FPullMenu.Caption := rsPullRequests;
@@ -2064,14 +2081,14 @@ end;
 { ---------------------------------------------------------------------------
   Pull requests
   ---------------------------------------------------------------------------
-  gh goes to the network, so the job runs in a thread: once per
+  The forge is on the network, so the job runs in a thread: once per
   repository and branch, and again on View > Refresh (AForce). A job
   still running for something else is abandoned like a blame job. }
 procedure TForm1.StartPullJob(AForce: boolean; AKeep: boolean);
 var
   Key: string;
 begin
-  if not FHasGitHubCli then
+  if not Assigned(FForge) then
     Exit;
   Key := FRepo.Root + #0 + FBranch;
   if (FRepo.Root = '') or (not AForce and (Key = FPullKey)) then
@@ -2088,7 +2105,7 @@ begin
     FReviewPulls := nil;
     FSummary.SetReviewPulls(nil);
   end;
-  FPullJob := TGittanPullRequestJob.Create(FGitHubCli, FRepo.Root, FBranch, FGitHubLogin);
+  FPullJob := FForge.PullJob(FRepo.Root, FBranch, FPullLogin);
   FPullJob.OnDone := @PullJobDone;
   FPullJob.Start;
   if not AKeep then
@@ -2134,7 +2151,7 @@ begin
   FGoneBranches.Assign(Job.GoneBranches);
   FSummary.SetUpstreamGone(FGoneBranches.IndexOf(FBranch) >= 0);
   FReviewPulls := Job.ReviewPulls;
-  FGitHubLogin := Job.Login;
+  FPullLogin := Job.Login;
   FSummary.SetReviewPulls(FReviewPulls);
   UpdateStatus;
   RebuildPullMenu;
@@ -2220,12 +2237,13 @@ procedure TForm1.ComparePull(const APull: TGittanPullRequest);
 begin
   if FRepo.Root = '' then
     Exit;
-  StartPullFetch(APull.Number, FRepo.RemoteFor(RepoPathOfUrl(APull.Url)), APull.BaseRef);
+  StartPullFetch(APull.Number, FRepo.RemoteFor(APull.Repo), APull.BaseRef);
 end;
 
 procedure TForm1.StartPullFetch(ANumber: integer; const ARemote, ABaseRef: string);
 begin
-  if (FRepo.Root = '') or (FRemoteJob <> nil) or (FCommitJob <> nil) then
+  if (FRepo.Root = '') or not Assigned(FForge) or (FRemoteJob <> nil) or
+    (FCommitJob <> nil) then
     Exit;
   FNoticeHook := False;
   FRemoteHead := '';
@@ -2233,6 +2251,7 @@ begin
   FRemoteJob := TGittanRemoteJob.Create(FRepo.Root, rkFetchPull, pmAuto, IntToStr(ANumber),
     ARemote);
   FRemoteJob.Branch := ABaseRef;
+  FRemoteJob.PullRef := FForge.PullRef(ANumber);
   FRemoteJob.OnDone := @RemoteJobDone;
   FRemoteJob.OnOutput := @RemoteJobOutput;
   FRemoteJob.Start;
@@ -2305,7 +2324,7 @@ begin
     not FRepo.WholeTree);
   if FPull.Url <> '' then
   begin
-    AddAction(paOpen, rsOpenPullOnGitHub, '');
+    AddAction(paOpen, Format(rsOpenPullOnForge, [ForgeName]), '');
     AddAction(paCopy, rsCopyPullLink, '');
   end;
   AddAction(paList, rsAllPulls, '');
@@ -2377,7 +2396,7 @@ begin
   AddChecks(APull.ChecksPending, HintPending, rsPullHintPendingOne, rsPullHintPending);
   AddChecks(APull.ChecksPassed, HintPassed, rsPullHintPassedOne, rsPullHintPassed);
   Result := Result + ReviewHint(APull.Number);
-  Result := Result + LineEnding + HintLink + ' ' + rsPullHintOpen;
+  Result := Result + LineEnding + HintLink + ' ' + Format(rsPullHintOpen, [ForgeName]);
 end;
 
 procedure TForm1.MenuCopyPullUrlClick(Sender: TObject);

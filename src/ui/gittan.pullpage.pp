@@ -1,7 +1,8 @@
 unit gittan.pullpage;
 
 {** The Pull Requests page: the open pull requests of the repository as
-  gh lists them (gittan.github), each a card with its number and title,
+  the forge lists them (gittan.forge; its name from SetForge), each a
+  card with its number and title,
   under them who opened it, its branches, when it was opened and last
   changed, what it changes and its labels, and at the right its state
   (Draft, Approved, Changes requested, Review required) and its checks
@@ -13,11 +14,12 @@ unit gittan.pullpage;
   and a click raises OnCompare with the pull request, for the owner to
   compare with it as Compare With > Pull Requests does; the one
   compared against has a stripe in the link color and says so, and a
-  click on it raises OnWorkingTree instead. "GitHub ↗" at the right
-  end of a card's second line raises OnOpenUrl. The heading of the open
-  ones offers Refresh (OnRefresh). While gh is asked the page says so
-  under the name, keeping what it had; gh's failure (no GitHub remote,
-  not logged in) shows in the error color.
+  click on it raises OnWorkingTree instead. "GitHub ↗" (the forge's
+  name) at the right end of a card's second line raises OnOpenUrl. The
+  heading of the open ones offers Refresh (OnRefresh). While the forge
+  is asked the page says so under the name, keeping what it had; its
+  failure (no remote on the forge, not logged in) shows in the error
+  color.
 
   It paints itself in the editor's palette, like the Repository page,
   and sizes its height to its content so it can sit in the same
@@ -30,7 +32,7 @@ unit gittan.pullpage;
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Graphics, gittan.github, gittan.summary;
+  Classes, SysUtils, Types, Controls, Graphics, gittan.forge, gittan.summary;
 
 type
   {** A click on a card: the pull request. }
@@ -40,7 +42,7 @@ type
 
   TGittanPullPage = class(TCustomControl)
   private
-    FName, FRoot: string;
+    FName, FRoot, FForge: string;
     FPulls: TGittanPullRequests;
     FBranchPull: TGittanPullRequest;
     FHasBranchPull, FLoading: boolean;
@@ -83,8 +85,11 @@ type
     {** The repository shown: its name over its root. Another root
       drops the pull requests of the one before. }
     procedure SetRepository(const AName, ARoot: string);
-    {** The open pull requests, gh's message when it failed (else ''),
-      and whether gh is being asked now. }
+    {** The forge the pull requests are on, by name: its links and the
+      note while it is asked. }
+    procedure SetForge(const AName: string);
+    {** The open pull requests, the forge's message when it failed (else
+      ''), and whether it is being asked now. }
     procedure SetPulls(const APulls: TGittanPullRequests; const AError: string;
       ALoading: boolean);
     {** The branch's own pull request, or none (AHas false). }
@@ -125,9 +130,9 @@ resourcestring
   rsOneOpen = '1 open';
   rsManyOpen = '%d open';
   rsRefresh = 'Refresh';
-  rsLoading = 'Asking GitHub…';
+  rsLoading = 'Asking %s…';
   rsNoPulls = 'No open pull requests.';
-  rsGitHubLink = 'GitHub ↗';
+  rsForgeLink = '%s ↗';
   rsComparing = 'Comparing';
   rsNeedsReview = 'Needs your review';
   rsChecksOk = '✓ checks';
@@ -182,6 +187,15 @@ begin
   end;
   FName := AName;
   FRoot := ARoot;
+  Layout;
+  Invalidate;
+end;
+
+procedure TGittanPullPage.SetForge(const AName: string);
+begin
+  if AName = FForge then
+    Exit;
+  FForge := AName;
   Layout;
   Invalidate;
 end;
@@ -301,7 +315,7 @@ function TGittanPullPage.LinkAt(X, Y: integer): integer;
 var
   i: integer;
 begin
-  { The last link added wins: the GitHub link lies on its card. }
+  { The last link added wins: the forge link lies on its card. }
   for i := High(FLinkRects) downto 0 do
     if PtInRect(FLinkRects[i], Point(X, Y)) then
       Exit(i);
@@ -454,7 +468,7 @@ end;
 
 { A card: the number dimmed and the title in bold, the chips of the
   state and the checks at the right, the second line under them with
-  the GitHub link at its right end. The card compared against has a
+  the forge link at its right end. The card compared against has a
   stripe in the link color and a Comparing chip, and one waiting for
   the user's review a chip saying so. }
 procedure TGittanPullPage.PaintCard(var Y: integer; const APull: TGittanPullRequest;
@@ -462,7 +476,7 @@ procedure TGittanPullPage.PaintCard(var Y: integer; const APull: TGittanPullRequ
 var
   R, LinkR: TRect;
   TextH, CardH, Right, X, ChipTop: integer;
-  Number, Note, Line: string;
+  Number, Note, Line, Link: string;
   Comparing: boolean;
   Tone: TColor;
 begin
@@ -507,13 +521,13 @@ begin
   Note := PullRequestNote(APull);
   if Note <> '' then
   begin
-    if APull.State = 'MERGED' then
+    if APull.State = prMerged then
       Tone := FLink
-    else if (APull.State = 'CLOSED') or APull.IsDraft then
+    else if (APull.State = prClosed) or APull.IsDraft then
       Tone := FDim
-    else if APull.ReviewDecision = 'APPROVED' then
+    else if APull.ReviewDecision = rdApproved then
       Tone := FOk
-    else if APull.ReviewDecision = 'CHANGES_REQUESTED' then
+    else if APull.ReviewDecision = rdChangesRequested then
       Tone := FErrorColor
     else
       Tone := FDim;
@@ -535,18 +549,19 @@ begin
   FC.TextOut(X, R.Top + Px(CardPadY), FitTextRight(FC, APull.Title, Max(0, Right - X)));
   FC.Font.Style := [];
 
-  { The second line, with the GitHub link at its right end. }
+  { The second line, with the forge link at its right end. }
   X := R.Left + Px(CardPadX);
   Right := R.Right - Px(CardPadX);
   if (APull.Url <> '') and Assigned(FOnOpenUrl) then
   begin
-    LinkR := Rect(Right - FC.TextWidth(rsGitHubLink), R.Top + Px(CardPadY) + TextH + 4,
+    Link := Format(rsForgeLink, [FForge]);
+    LinkR := Rect(Right - FC.TextWidth(Link), R.Top + Px(CardPadY) + TextH + 4,
       Right, R.Top + Px(CardPadY) + 2 * TextH + 4);
     AddLink(LinkR, APull.Url);
     FC.Font.Color := FLink;
     if FHot = High(FLinkRects) then
       FC.Font.Style := [fsUnderline];
-    FC.TextOut(LinkR.Left, LinkR.Top, rsGitHubLink);
+    FC.TextOut(LinkR.Left, LinkR.Top, Link);
     FC.Font.Style := [];
     Right := LinkR.Left - Px(Gap);
   end;
@@ -578,8 +593,8 @@ begin
   Y := Px(Pad);
 
   { The name with the page's title after it, under them the repository
-    on GitHub as the first pull request's address names it, else the
-    path; while gh is asked, that it is. }
+    on the forge as the first pull request names it, else the path;
+    while the forge is asked, that it is. }
   FC.Font.Size := TitleFontSize;
   FC.Font.Style := [fsBold];
   FC.Font.Color := FText;
@@ -593,13 +608,13 @@ begin
   Inc(Y, TitleH + 2);
   Where := '';
   if Length(FPulls) > 0 then
-    Where := RepoPathOfUrl(FPulls[0].Url)
+    Where := FPulls[0].Repo
   else if FHasBranchPull then
-    Where := RepoPathOfUrl(FBranchPull.Url);
+    Where := FBranchPull.Repo;
   if Where = '' then
     Where := FRoot;
   if FLoading then
-    Where := Where + ' · ' + rsLoading;
+    Where := Where + ' · ' + Format(rsLoading, [FForge]);
   FC.TextOut(Px(Pad), Y, FitTextLeft(FC, Where, Width - 2 * Px(Pad)));
   Inc(Y, TextH);
 

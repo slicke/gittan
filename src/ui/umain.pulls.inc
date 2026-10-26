@@ -1,16 +1,16 @@
 { ---------------------------------------------------------------------------
   The Pull Requests page
   ---------------------------------------------------------------------------
-  The open pull requests of the repository as gh lists them
+  The open pull requests of the repository as the forge lists them
   (gittan.pullpage), in the box, from the sidebar's Pull Requests row,
   View > Pull Requests (Cmd+6) and All Pull Requests in the list the
   status bar's pull request chip drops; the row and the item show only
-  with gh (UpdateGitHubItems). The page shows what the pull request job
+  while there is a forge (UpdateForgeItems). The page shows what the pull request job
   (umain.actions.inc) last read, the branch's own pull request first,
   and is asked for again each time it is shown; a card compares with
   its pull request as Compare With > Pull Requests does, the one
-  compared against leads back to the working tree, and Refresh asks gh
-  again. The summary's row counting the open pull requests the job
+  compared against leads back to the working tree, and Refresh asks the
+  forge again. The summary's row counting the open pull requests the job
   found waiting for the user's review drops a list of them
   (SummaryReviewClick): a pick compares the same way, and All Pull
   Requests opens the page. See spec/github.md. }
@@ -24,11 +24,12 @@ begin
   FPullPage.OnWorkingTree := @PullPageWorkingTree;
   FPullPage.OnRefresh := @PullPageRefresh;
   FPullPage.OnOpenUrl := @SummaryOpenUrl;
+  FPullPage.SetForge(ForgeName);
 end;
 
 procedure TForm1.MenuPullsClick(Sender: TObject);
 begin
-  if (FRepo.Root <> '') and FHasGitHubCli then
+  if (FRepo.Root <> '') and Assigned(FForge) then
     ShowPulls;
 end;
 
@@ -36,7 +37,7 @@ end;
   does, and gh is asked again, keeping what it had meanwhile. }
 procedure TForm1.ShowPulls;
 begin
-  if (FRepo.Root = '') or not FHasGitHubCli then
+  if (FRepo.Root = '') or not Assigned(FForge) then
     Exit;
   if FGraph.Visible then
     FGraph.Close;

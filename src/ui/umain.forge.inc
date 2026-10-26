@@ -1,28 +1,28 @@
 { ---------------------------------------------------------------------------
   The forge page: the user's pull requests across every repository
   ---------------------------------------------------------------------------
-  The sidebar's GitHub row and View > GitHub (Cmd+7) open the forge page
-  (gittan.forgepage): the open pull requests the user wrote at the
-  left, the open ones waiting for their review at the right, across
-  every repository of the forge, read by a TGittanForgeJob
-  (gittan.forge; GitHub through gh, with one GraphQL query) each time
-  the page is shown and on Refresh, the page keeping what it had
-  meanwhile; the row and the item show only with gh (UpdateGitHubItems).
+  The sidebar's row and the View menu's item named after the forge
+  (GitHub, Cmd+7) open the forge page (gittan.forgepage): the open pull
+  requests the user wrote at the left, the open ones waiting for their
+  review at the right, across every repository of the forge, read by
+  the forge's AccountJob (gittan.forge; GitHub's runs one GraphQL query
+  through gh) each time the page is shown and on Refresh, the page
+  keeping what it had meanwhile; the row and the item show only while
+  there is a forge (UpdateForgeItems).
   The ones the user has reviewed are left out, unless they are asked
   again (NeedsMyReview); the page's checkbox leaves out the user's own
   that nobody else has answered, kept in the settings
   (HideWithoutFeedback). A card of a pull request of the open
   repository (HasRemoteFor) compares with it as the Pull Requests page
   does; one of another repository opens on the forge. GitHub is the
-  only forge so far; another adds a kind and a job to gittan.forge and
-  a page per forge here. See spec/github.md. }
+  only forge so far. See spec/github.md. }
 
 procedure TForm1.SetupForgePage;
 begin
   FForgePage := TGittanForgePage.Create(Self);
   FForgePage.Parent := FSummaryBox;
   FForgePage.Visible := False;
-  FForgePage.SetForge(ForgeName(fkGitHub));
+  FForgePage.SetForge(ForgeName);
   FForgePage.OnPick := @ForgePagePick;
   FForgePage.OnRefresh := @ForgePageRefresh;
   FForgePage.HideWithoutFeedback := FSettings.HideWithoutFeedback;
@@ -32,7 +32,7 @@ end;
 
 procedure TForm1.MenuForgeClick(Sender: TObject);
 begin
-  if (FRepo.Root <> '') and FHasGitHubCli then
+  if (FRepo.Root <> '') and Assigned(FForge) then
     ShowForge;
 end;
 
@@ -40,7 +40,7 @@ end;
   page does, and the forge is asked again, keeping what it had. }
 procedure TForm1.ShowForge;
 begin
-  if (FRepo.Root = '') or not FHasGitHubCli then
+  if (FRepo.Root = '') or not Assigned(FForge) then
     Exit;
   if FGraph.Visible then
     FGraph.Close;
@@ -77,9 +77,9 @@ end;
   its answer. }
 procedure TForm1.StartForgeJob;
 begin
-  if not FHasGitHubCli or (FRepo.Root = '') or (FForgeJob <> nil) then
+  if not Assigned(FForge) or (FRepo.Root = '') or (FForgeJob <> nil) then
     Exit;
-  FForgeJob := TGittanGitHubForgeJob.Create(FGitHubCli, FRepo.Root);
+  FForgeJob := FForge.AccountJob(FRepo.Root);
   FForgeJob.OnDone := @ForgeJobDone;
   FForgeJob.Start;
   UpdateForgePage;
@@ -110,9 +110,9 @@ begin
     FForgeLogin := Job.Login;
     FForgeMine := Job.Mine;
     FForgeReview := Job.Review;
-    { The pull request job asks gh for the same login; spare it. }
-    if FGitHubLogin = '' then
-      FGitHubLogin := Job.Login;
+    { The pull request job asks the forge for the same login; spare it. }
+    if FPullLogin = '' then
+      FPullLogin := Job.Login;
   end;
   UpdateForgePage;
 end;
@@ -127,6 +127,7 @@ begin
   begin
     Pull := Default(TGittanPullRequest);
     Pull.Number := APull.Number;
+    Pull.Repo := APull.Repo;
     Pull.Title := APull.Title;
     Pull.Url := APull.Url;
     Pull.HeadRef := APull.HeadRef;

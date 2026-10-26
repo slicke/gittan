@@ -27,7 +27,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Controls, Graphics, ImgList, gittan.git, gittan.icons,
-  gittan.reviews, gittan.statusbar, gittan.github;
+  gittan.reviews, gittan.statusbar, gittan.forge;
 
 type
   TGittanSelectFileEvent = procedure(Sender: TObject; const APath: string) of object;
@@ -87,6 +87,7 @@ type
       FReviewHot whether the mouse is over it, FReviewHeight the row's
       height, 0 without any. }
     FReviewPulls: TGittanPullRequests;
+    FForgeName: string;
     FReviewRect: TRect;
     FReviewHot: boolean;
     FReviewHeight: integer;
@@ -286,7 +287,9 @@ type
     property OnBehindAction: TGittanBehindActionEvent read FOnBehindAction write FOnBehindAction;
     {** A click on a commit's row. }
     property OnSelectCommit: TGittanSelectCommitEvent read FOnSelectCommit write FOnSelectCommit;
-    {** A click on a note's link to GitHub. }
+    {** The forge the notes are on, by name, for their links. }
+    property ForgeName: string read FForgeName write FForgeName;
+    {** A click on a note's link to the forge. }
     property OnOpenUrl: TGittanOpenUrlEvent read FOnOpenUrl write FOnOpenUrl;
     {** A click on the row counting the pull requests waiting for the
       user's review, with the chip's rectangle in screen coordinates
@@ -329,7 +332,7 @@ resourcestring
   rsNoteApproved = 'approved';
   rsNoteChangesRequested = 'requested changes';
   rsNoteDismissed = 'review dismissed';
-  rsNoteLink = 'GitHub ↗';
+  rsNoteLink = '%s ↗';
   rsReviewOne = '1 pull request needs your review';
   rsReviewMany = '%d pull requests need your review';
   rsReviewOpened = 'opened %s';
@@ -365,7 +368,7 @@ const
   IconGap = 5;
   { A note's card: room inside it, between cards, the colored stripe at
     its left, and the most lines of text it shows (the rest is on
-    GitHub). }
+    the forge). }
   NotePadX = 12;
   NotePadY = 8;
   NoteGap = 8;
@@ -801,7 +804,7 @@ procedure TGittanSummary.PaintNotes(var Y: integer);
 var
   i, k, X, LineHeight, At: integer;
   Card: TRect;
-  What, Age: string;
+  What, Age, Link: string;
   Tone: TColor;
 begin
   LayoutNotes;
@@ -874,12 +877,13 @@ begin
     FNoteBoxes[i].LinkRect := Rect(0, 0, 0, 0);
     if FNotes[i].Url <> '' then
     begin
-      FNoteBoxes[i].LinkRect := Rect(Card.Right - Px(NotePadX) - Canvas.TextWidth(rsNoteLink),
+      Link := Format(rsNoteLink, [FForgeName]);
+      FNoteBoxes[i].LinkRect := Rect(Card.Right - Px(NotePadX) - Canvas.TextWidth(Link),
         At, Card.Right - Px(NotePadX), At + LineHeight);
       Canvas.Font.Color := FLink;
       if i = FLinkHot then
         Canvas.Font.Style := [fsUnderline];
-      Canvas.TextOut(FNoteBoxes[i].LinkRect.Left, At, rsNoteLink);
+      Canvas.TextOut(FNoteBoxes[i].LinkRect.Left, At, Link);
       Canvas.Font.Style := [];
     end;
 

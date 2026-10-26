@@ -27,8 +27,9 @@ type
     submodule update updates the submodule at the path Arg, or every one
     with Arg empty; a submodule add clones the URL Arg into Path,
     following Branch. A pull request fetch fetches the pull request
-    numbered Arg from Remote with its base branch Branch, and gives the
-    ref its head is fetched to in HeadRef.
+    numbered Arg from Remote, its head at PullRef (the forge's), with its
+    base branch Branch, and gives the ref its head is fetched to in
+    HeadRef.
     OnDone is called in the main thread when it is done, unless the job
     has been stopped. A job is never broken off, as a pull stopped
     halfway would leave a merge behind: Stop only drops the handler, and
@@ -36,7 +37,7 @@ type
     starts never runs Execute). }
   TGittanRemoteJob = class(TGittanJob)
   private
-    FRoot, FArg, FRemote, FPath, FBranch: string;
+    FRoot, FArg, FRemote, FPath, FBranch, FPullRef: string;
     FKind: TGittanRemoteKind;
     FMode: TGittanPullMode;
     FOk, FDiverged, FRejected, FStale, FUnseen, FSubmodules: boolean;
@@ -69,6 +70,8 @@ type
     {** The branch a submodule add follows, empty for the remote's
       default; set before Start. }
     property Branch: string read FBranch write FBranch;
+    {** For a pull request fetch, the ref the remote serves its head at. }
+    property PullRef: string read FPullRef write FPullRef;
     {** Whether git did it. }
     property Ok: boolean read FOk;
     {** A pull that failed since the branch has diverged from its
@@ -253,8 +256,8 @@ begin
         rkDeleteRemoteTag: FOk := Repo.DeleteRemoteTag(FRemote, FArg);
         rkSubmoduleUpdate: FOk := Repo.UpdateSubmodules(FArg);
         rkSubmoduleAdd: FOk := Repo.AddSubmodule(FArg, FPath, FBranch);
-        rkFetchPull: FOk := Repo.FetchPullRequest(FRemote, StrToIntDef(FArg, 0), FBranch,
-            FHeadRef);
+        rkFetchPull: FOk := Repo.FetchPullRequest(FRemote, StrToIntDef(FArg, 0), FPullRef,
+            FBranch, FHeadRef);
         rkClone: ;
       end;
     if not FOk then

@@ -1,7 +1,7 @@
 unit gittan.forgepage;
 
 {** The forge page: the user's pull requests across every repository
-  of a forge (gittan.forge; GitHub, through gh), in two columns: at
+  of a forge (gittan.forge; its name from SetForge), in two columns: at
   the left the open ones they wrote, at the right the open ones
   waiting for their review, under each other when the page is narrow.
   A card has the number and the title, at the right its state (Draft,
@@ -497,21 +497,21 @@ begin
   { The chips, right to left: the checks, the state, asked again. }
   Right := R.Right - Px(CardPadX);
   ChipTop := R.Top + Px(CardPadY);
-  if (APull.Checks = 'FAILURE') or (APull.Checks = 'ERROR') then
-    Right := PaintChip(Right, ChipTop, rsChecksFailing, FErrorColor) - Px(Gap) div 2
-  else if (APull.Checks = 'PENDING') or (APull.Checks = 'EXPECTED') then
-    Right := PaintChip(Right, ChipTop, rsChecksPending, FWarn) - Px(Gap) div 2
-  else if APull.Checks = 'SUCCESS' then
-    Right := PaintChip(Right, ChipTop, rsChecksOk, FOk) - Px(Gap) div 2;
+  case APull.Checks of
+    chkFailed: Right := PaintChip(Right, ChipTop, rsChecksFailing, FErrorColor) - Px(Gap) div 2;
+    chkPending: Right := PaintChip(Right, ChipTop, rsChecksPending, FWarn) - Px(Gap) div 2;
+    chkPassed: Right := PaintChip(Right, ChipTop, rsChecksOk, FOk) - Px(Gap) div 2;
+  end;
   if APull.IsDraft then
     Right := PaintChip(Right, ChipTop, rsDraft, FDim) - Px(Gap) div 2
-  else if APull.ReviewDecision = 'APPROVED' then
-    Right := PaintChip(Right, ChipTop, rsApproved, FOk) - Px(Gap) div 2
-  else if APull.ReviewDecision = 'CHANGES_REQUESTED' then
-    Right := PaintChip(Right, ChipTop, rsChangesRequested, FErrorColor) - Px(Gap) div 2
-  else if APull.ReviewDecision = 'REVIEW_REQUIRED' then
-    Right := PaintChip(Right, ChipTop, rsReviewRequired, FDim) - Px(Gap) div 2;
-  if APull.Requested and (APull.MyReview <> '') then
+  else
+    case APull.ReviewDecision of
+      rdApproved: Right := PaintChip(Right, ChipTop, rsApproved, FOk) - Px(Gap) div 2;
+      rdChangesRequested:
+        Right := PaintChip(Right, ChipTop, rsChangesRequested, FErrorColor) - Px(Gap) div 2;
+      rdReviewRequired: Right := PaintChip(Right, ChipTop, rsReviewRequired, FDim) - Px(Gap) div 2;
+    end;
+  if APull.Requested and (APull.MyReview <> rvNone) then
     Right := PaintChip(Right, ChipTop, rsAskedAgain, FWarn) - Px(Gap) div 2;
 
   { The number and the title. }

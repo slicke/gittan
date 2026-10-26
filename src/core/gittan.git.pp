@@ -700,13 +700,13 @@ type
       without regard to case) as its path: followed by nothing, ".git"
       or a slash. }
     function HasRemoteFor(const ARepoPath: string): boolean;
-    {** Fetches pull request ANumber of ARemote (a GitHub remote, which
-      serves it as refs/pull/N/head) into refs/gittan/pr/N, the name given
-      in AHeadRef, and ABaseRef along with it, so the remote-tracking
-      branch of the base is current too. Nothing in the work tree or the
-      branches changes. }
+    {** Fetches pull request ANumber of ARemote, which serves its head at
+      APullRef (the forge's PullRef: refs/pull/N/head on GitHub), into
+      refs/gittan/pr/N, the name given in AHeadRef, and ABaseRef along
+      with it, so the remote-tracking branch of the base is current too.
+      Nothing in the work tree or the branches changes. }
     function FetchPullRequest(const ARemote: string; ANumber: integer;
-      const ABaseRef: string; out AHeadRef: string): boolean;
+      const APullRef, ABaseRef: string; out AHeadRef: string): boolean;
     {** Records the work tree as it is now, untracked files included, in
       a commit of its own (parent HEAD when there is one, no branch points
       at it), and returns its id: a Base to compare against later, with
@@ -1005,11 +1005,11 @@ function NvmNodeBin(const ANvmDir: string): string;
   version installed. Empty when none is. }
 function FnmNodeBin(const AFnmDir: string): string;
 
-{** Runs gh (AExe, from FindTool('gh')) in ADir and answers whether it
-  succeeded, with its standard output in AOutput and, on failure, its
-  message in AError. gh runs with its prompts and its update notice off,
-  since nobody could answer the one and the other would land in stderr. }
-function RunGitHubCli(const AExe, ADir: string; const AArgs: array of string;
+{** Runs a command line tool (AExe: a forge's, gh) in ADir with AArgs and
+  AEnv ("NAME=value") added to the environment, and answers whether it
+  exited with 0, with its standard output in AOutput and, on failure,
+  its message in AError (what it printed on both, as git's failures). }
+function RunCli(const AExe, ADir: string; const AArgs, AEnv: array of string;
   out AOutput, AError: string): boolean;
 
 {** Runs an AI agent's command line tool (AExe: claude, copilot) in ADir
@@ -1950,13 +1950,12 @@ begin
     ParseGitVersion(Output, AVersion, AMajor, AMinor);
 end;
 
-function RunGitHubCli(const AExe, ADir: string; const AArgs: array of string;
+function RunCli(const AExe, ADir: string; const AArgs, AEnv: array of string;
   out AOutput, AError: string): boolean;
 var
   Status: integer;
 begin
-  if not RunTool(AExe, ADir, AArgs, [], ['GH_PROMPT_DISABLED=1',
-    'GH_NO_UPDATE_NOTIFIER=1'], AOutput, AError, Status, nil) then
+  if not RunTool(AExe, ADir, AArgs, [], AEnv, AOutput, AError, Status, nil) then
   begin
     AError := 'Could not run ' + AExe;
     Exit(False);
@@ -2505,13 +2504,14 @@ begin
 end;
 
 function TGittanRepo.FetchPullRequest(const ARemote: string; ANumber: integer;
-  const ABaseRef: string; out AHeadRef: string): boolean;
+  const APullRef, ABaseRef: string; out AHeadRef: string): boolean;
 var
   Output: string;
 begin
   AHeadRef := 'refs/gittan/pr/' + IntToStr(ANumber);
-  Result := (FRoot <> '') and (ARemote <> '') and RunGit(FRoot, ['fetch', '--no-tags',
-    '-q', ARemote, ABaseRef, '+refs/pull/' + IntToStr(ANumber) + '/head:' + AHeadRef],
+  Result := (FRoot <> '') and (ARemote <> '') and (APullRef <> '') and
+    RunGit(FRoot, ['fetch', '--no-tags', '-q', ARemote, ABaseRef, '+' + APullRef + ':' +
+    AHeadRef],
     Output);
 end;
 

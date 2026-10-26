@@ -141,14 +141,17 @@ type
     { The editor's font size when none was picked (DefaultFontSize for
       the screen the window opened on). }
     FDefaultFontSize: integer;
-    { gh, GitHub's command line tool: the path the settings give, else
-      the one FindTool gives (run it by that, PATH may not reach it), and
-      whether there is one. The features that need GitHub are offered
-      only when it is there: the menu items in FGitHubItems are shown
-      then, hidden otherwise (UpdateGitHubItems). }
-    FGitHubCli: string;
-    FHasGitHubCli: boolean;
-    FGitHubItems: array of TMenuItem;
+    { The forge the repositories are on (gittan.forge; GitHub through
+      gh, the only one so far), made by FindForge with the tool's path
+      the settings give, else the one FindTool gives (run it by that,
+      PATH may not reach it); nil while the tool is missing or the
+      features are turned off. The features that need the forge are
+      offered only when it is there: the menu items in FForgeItems are
+      shown then, hidden otherwise, and named after it from the formats
+      in FForgeCaptions (UpdateForgeItems). }
+    FForge: TGittanForge;
+    FForgeItems: array of TMenuItem;
+    FForgeCaptions: array of string;
     { The AI features (umain.ai.inc, gittan.ai), shown only once the
       settings turn them on and the agent's command is found: the agent
       the settings pick, its command and model, File > Write Commit
@@ -223,7 +226,7 @@ type
       (the file menu's is enabled with the rest of its items); the editor the editor menu popped up over and the
       row under the mouse then (-1 below the text), and the commit of
       that row, for Open Commit on GitHub. }
-    FGitHubEditItem, FGitHubCommitItem, FGitHubIssueItem: TMenuItem;
+    FForgeEditItem, FForgeCommitItem, FForgeIssueItem: TMenuItem;
     FShowCommitItem, FCopyHashItem: TMenuItem;
     FPopupEd: TATSynEdit;
     FPopupRow: integer;
@@ -254,12 +257,12 @@ type
     { The open pull requests waiting for the user's review, which the
       summary counts in a row that drops FReviewPopup (a row per pull
       request tagged with its index plus one, All Pull Requests tagged
-      0) and the Pull Requests page marks; FGitHubLogin the login gh is
-      logged in as, as the last pull request job answered, for the next
-      one. }
+      0) and the Pull Requests page marks; FPullLogin the login the
+      forge knows the user by, as the last pull request job answered,
+      for the next one. }
     FReviewPulls: TGittanPullRequests;
     FReviewPopup: TGittanPopupList;
-    FGitHubLogin: string;
+    FPullLogin: string;
     FPullError, FPullKey: string;
     FPullMenu, FOpenPullItem, FCopyPullItem: TMenuItem;
     FPullRange: string;
@@ -1171,8 +1174,9 @@ type
     procedure ApplyEditorFont(AFont: TFont);
     procedure EditorMetricsChanged;
     procedure ApplyTabSize(ASize: integer);
-    procedure FindGitHubCli;
-    procedure UpdateGitHubItems;
+    procedure FindForge;
+    function ForgeName: string;
+    procedure UpdateForgeItems;
     procedure FindAgentCli;
     {** Whether the AI features are on and the agent's command is there. }
     function AIAvailable: boolean;
@@ -1301,16 +1305,16 @@ type
     procedure EditPopupPopup(Sender: TObject);
     procedure MenuEditCopyClick(Sender: TObject);
     procedure MenuEditSelectAllClick(Sender: TObject);
-    procedure MenuOpenOnGitHubClick(Sender: TObject);
-    procedure MenuCopyGitHubUrlClick(Sender: TObject);
-    procedure MenuOpenLineOnGitHubClick(Sender: TObject);
-    procedure MenuCopyLineGitHubUrlClick(Sender: TObject);
-    procedure MenuOpenCommitOnGitHubClick(Sender: TObject);
-    procedure MenuOpenIssueOnGitHubClick(Sender: TObject);
+    procedure MenuOpenOnForgeClick(Sender: TObject);
+    procedure MenuCopyForgeUrlClick(Sender: TObject);
+    procedure MenuOpenLineOnForgeClick(Sender: TObject);
+    procedure MenuCopyLineForgeUrlClick(Sender: TObject);
+    procedure MenuOpenCommitOnForgeClick(Sender: TObject);
+    procedure MenuOpenIssueOnForgeClick(Sender: TObject);
     procedure MenuShowCommitClick(Sender: TObject);
     procedure MenuCopyHashClick(Sender: TObject);
-    function GitHubUrl(const AArgs: array of string; out AUrl: string): boolean;
-    procedure OpenOnGitHub(const AArgs: array of string);
+    function ForgeUrl(const ATarget: TGittanWebTarget; out AUrl: string): boolean;
+    procedure OpenOnForge(const ATarget: TGittanWebTarget);
     {** Runs the pull request job. AForce asks again for the same
       repository and branch; AKeep keeps the data shown meanwhile, for a
       poll, where clearing it would blink the chip and the menu. }
@@ -1614,7 +1618,7 @@ type
     procedure MenuComparePullClick(Sender: TObject);
     procedure MenuOpenPullClick(Sender: TObject);
     procedure MenuCopyPullUrlClick(Sender: TObject);
-    function FileGitHubArgs(const APath: string; ALine: integer): TStringArray;
+    function FileWebTarget(const APath: string; ALine: integer): TGittanWebTarget;
     function FileLineOfRow(AEd: TATSynEdit; ARow: integer): integer;
     procedure StatusPartClick(Sender: TObject; APart: TGittanStatusPart;
       const AScreenRect: TRect);
@@ -1720,7 +1724,6 @@ resourcestring
   rsNavCommands = 'Commands';
   rsNavChanges = 'Changes';
   rsNavPulls = 'Pull Requests';
-  rsNavForge = 'GitHub';
   rsAllPulls = 'All Pull Requests';
   rsNeedsReviewHeader = 'Needs your review';
   rsFilesMenu = '&Files';
@@ -2447,10 +2450,10 @@ resourcestring
   rsPullHintFailedOne = '1 check failing';
   rsPullHintPending = '%d checks pending';
   rsPullHintPendingOne = '1 check pending';
-  rsPullHintOpen = 'Click to compare with it or open it on GitHub';
+  rsPullHintOpen = 'Click to compare with it or open it on %s';
   rsComparePull = 'Compare With This Pull Request';
   rsCompareWorkingTree = 'Compare With the Working Tree';
-  rsOpenPullOnGitHub = 'Open on GitHub';
+  rsOpenPullOnForge = 'Open on %s';
   rsCopyPullLink = 'Copy Link';
   rsPositionOld = 'Ln %d (old), Col %d';
   rsReviewComments = 'Review &Comments';
@@ -2462,7 +2465,7 @@ resourcestring
   rsReviewRemovedLine = 'On removed line %d';
   rsReviewReplies = ' (+%d)';
   rsReviewSuggestion = 'Suggested change:';
-  rsReviewLink = 'GitHub ↗';
+  rsReviewLink = '%s ↗';
   rsReviewOpen = '%d open review threads';
   rsReviewOpenOne = '1 open review thread';
   rsReviewFailed = 'Could not fetch the review comments';
@@ -2517,13 +2520,14 @@ const
     {$IFDEF WINDOWS}'Show in &Explorer'{$ELSE}'Show in &File Manager'{$ENDIF}{$ENDIF};
   rsEditCopy = '&Copy';
   rsEditSelectAll = 'Select &All';
-  rsOpenOnGitHub = 'Open on &GitHub';
-  rsOpenCommitOnGitHub = 'Open Co&mmit on GitHub';
-  rsCopyGitHubUrl = 'Copy GitHub &URL';
-  rsOpenIssueOnGitHub = 'Open #%d on GitHub';
+  rsOpenOnForge = 'Open on &%s';
+  rsOpenCommitOnForge = 'Open Co&mmit on %s';
+  rsCopyForgeUrl = 'Copy %s &URL';
+  rsOpenIssueOnForge = 'Open #%d on %s';
   rsShowCommit = 'Show Comm&it';
   rsCopyHash = 'Copy Commit &Hash';
-  rsGitHubFailed = 'gh: %s';
+  { The forge's tool and its message. }
+  rsForgeFailed = '%s: %s';
   rsFilterFiles = 'Fi&lter Files';
   rsMergeBase = '%s (Merge Base)';
   rsVsMergeBase = '%s (merge base)';
@@ -2539,7 +2543,8 @@ const
   rsHintStaged = '%s · staged';
   rsHintPartlyStaged = '%s · partly staged';
   rsPullRequests = 'Pull Re&quests';
-  rsForgeMenu = 'Git&Hub';
+  { The forge's name, with its first letter the accelerator. }
+  rsForgeMenu = '&%s';
   rsPullLoading = 'Loading...';
   rsNoPulls = 'No open pull requests';
   rsPullItem = '#%d %s';
@@ -2681,7 +2686,7 @@ begin
   FSettings := TGittanSettings.Create;
   FSettings.Load;
   SetGitExe(FSettings.GitPath);
-  FindGitHubCli;
+  FindForge;
   FindAgentCli;
   FTabSize := FSettings.TabSize;
   if FTabSize <= 0 then
@@ -2886,6 +2891,7 @@ begin
   FSummary.OnSyncClick := @SummarySyncClick;
   FSummary.OnBehindAction := @SummaryBehindAction;
   FSummary.OnOpenUrl := @SummaryOpenUrl;
+  FSummary.ForgeName := ForgeName;
   FSummary.OnReviewClick := @SummaryReviewClick;
   FSummary.OnSelectCommit := @SummarySelectCommit;
   FSummary.OnBackClick := @SummaryBackClick;
@@ -3114,6 +3120,7 @@ begin
   AbandonUpdateJob;
   AbandonSubmoduleJobs;
   FreeAndNil(FSubJobs);
+  FreeAndNil(FForge);
   ClearRevertUndo;
   FreeAndNil(FKeeps);
   FreeAndNil(FLeftOut);
@@ -4077,10 +4084,10 @@ begin
   AddItem(ViewMenu, rsFilesMenu, ShortCut(VK_5, [ssModifier]), @MenuFilesClick);
   FPullsItem := AddItem(ViewMenu, rsPullRequests, ShortCut(VK_6, [ssModifier]),
     @MenuPullsClick);
-  FPullsItem.Visible := FHasGitHubCli;
+  FPullsItem.Visible := Assigned(FForge);
   FForgeItem := AddItem(ViewMenu, rsForgeMenu, ShortCut(VK_7, [ssModifier]),
     @MenuForgeClick);
-  FForgeItem.Visible := FHasGitHubCli;
+  FForgeItem.Visible := Assigned(FForge);
   ViewMenu.Add(NewLine);
   FCompareMenu := AddItem(ViewMenu, rsCompareWith, 0, nil);
   RebuildCompareMenu;
@@ -4130,7 +4137,7 @@ begin
   FReviewItem := AddItem(ViewMenu, rsReviewComments, ShortCut(VK_M, [ssModifier, ssShift]),
     @MenuReviewCommentsClick);
   FReviewItem.Checked := FShowComments;
-  FReviewItem.Enabled := FHasGitHubCli;
+  FReviewItem.Enabled := Assigned(FForge);
   FAIReviewItem := AddItem(ViewMenu, rsAIReviewMenu, ShortCut(VK_R, [ssModifier, ssAlt]),
     @MenuAIReviewClick);
   FAIReviewItem.Visible := False;

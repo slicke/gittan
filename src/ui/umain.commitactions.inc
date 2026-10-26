@@ -38,7 +38,7 @@ const
   caResetMixed = 10;
   caResetHard = 11;
   caCopy = 12;
-  caGitHub = 13;
+  caForge = 13;
   caMark = 14;
   caCompareMarked = 15;
   caRebase = 16;
@@ -160,8 +160,8 @@ begin
   end;
   Line;
   Add(nil, rsCopyHash, caCopy);
-  if FHasGitHubCli then
-    Add(nil, rsOpenCommitOnGitHub, caGitHub);
+  if Assigned(FForge) then
+    Add(nil, Format(rsOpenCommitOnForge, [ForgeName]), caForge);
   FCommitPopup.PopUp(AScreenPos.X, AScreenPos.Y);
 end;
 
@@ -227,8 +227,8 @@ begin
       SwitchBranch((Sender as TMenuItem).Hint);
     caCopy:
       Clipboard.AsText := Hash;
-    caGitHub:
-      OpenOnGitHub([Hash]);
+    caForge:
+      OpenOnForge(CommitTarget(Hash));
     caRebase:
       RebaseInteractiveAsk(Hash, Short, True);
     caBisectStartGood, caBisectStartBad, caBisectGood, caBisectBad, caBisectSkip:

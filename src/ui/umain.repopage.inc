@@ -41,9 +41,9 @@ begin
   FSideNav.AddRow(rsNavCommands, niCommands, True);
   FSideNav.AddRow(rsNavFiles, niFiles, True);
   FSideNav.AddRow(rsNavPulls, niPull, True);
-  FSideNav.SetRowVisible(navPulls, FHasGitHubCli);
-  FSideNav.AddRow(rsNavForge, niForge, True);
-  FSideNav.SetRowVisible(navForge, FHasGitHubCli);
+  FSideNav.SetRowVisible(navPulls, Assigned(FForge));
+  FSideNav.AddRow(ForgeName, niForge, True);
+  FSideNav.SetRowVisible(navForge, Assigned(FForge));
   FSideNav.AddRow(rsNavRecent, niClock, True);
   FSideNav.Heading := rsNavChanges;
   FSideNav.ShowToggle(rsNavHide, rsNavShow);

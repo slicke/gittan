@@ -95,21 +95,21 @@ var
 begin
   ANumber := 0;
   ARepoPath := '';
-  if not FShowComments or not FHasGitHubCli or (FRepo.Root = '') then
+  if not FShowComments or not Assigned(FForge) or (FRepo.Root = '') then
     Exit(False);
   if (FPullRange <> '') and (FRepo.Base = FPullRange) and FRepo.IsRange then
   begin
     ANumber := FPullNumber;
     for i := 0 to High(FPulls) do
       if FPulls[i].Number = FPullNumber then
-        ARepoPath := RepoPathOfUrl(FPulls[i].Url);
+        ARepoPath := FPulls[i].Repo;
     if (ARepoPath = '') and FHasPull and (FPull.Number = FPullNumber) then
-      ARepoPath := RepoPathOfUrl(FPull.Url);
+      ARepoPath := FPull.Repo;
   end
   else if FHasPull and not FRepo.IsRange then
   begin
     ANumber := FPull.Number;
-    ARepoPath := RepoPathOfUrl(FPull.Url);
+    ARepoPath := FPull.Repo;
   end;
   Result := (ANumber > 0) and (ARepoPath <> '');
 end;
@@ -169,7 +169,7 @@ begin
     (FReviewJob.RepoPath = RepoPath) then
     Exit;
   AbandonReviewJob;
-  FReviewJob := TGittanReviewJob.Create(FGitHubCli, FRepo.Root, RepoPath, Number);
+  FReviewJob := FForge.ReviewJob(FRepo.Root, RepoPath, Number);
   FReviewJob.OnDone := @ReviewJobDone;
   FReviewJob.Start;
 end;
@@ -888,7 +888,7 @@ begin
       begin
         { The link takes the right end of the first header. }
         ReviewFont(C, rlNote);
-        Right := Right - C.TextWidth(rsReviewLink) - ReviewPadX;
+        Right := Right - C.TextWidth(Format(rsReviewLink, [ForgeName])) - ReviewPadX;
         ReviewFont(C, Kind);
         if Kind = rlFolded then
           C.Font.Color := Dim
@@ -905,7 +905,8 @@ begin
         C.Font.Color := FLinkColor;
         C.Brush.Color := Fill;
         C.Brush.Style := bsSolid;
-        C.TextOut(Card.Right - ReviewPadX - C.TextWidth(rsReviewLink), y + 2, rsReviewLink);
+        C.TextOut(Card.Right - ReviewPadX - C.TextWidth(Format(rsReviewLink, [ForgeName])), y + 2,
+          Format(rsReviewLink, [ForgeName]));
         C.Brush.Style := bsClear;
       end;
       Inc(y, H);
@@ -941,7 +942,7 @@ begin
       begin
         ReviewFont(FReviewMeasure.Canvas, rlNote);
         LinkLeft := ReviewMargin + W - ReviewPadX -
-          FReviewMeasure.Canvas.TextWidth(rsReviewLink);
+          FReviewMeasure.Canvas.TextWidth(Format(rsReviewLink, [ForgeName]));
         if (APos.Y >= y) and (APos.Y < y + H) and (APos.X >= LinkLeft) and
           (APos.X <= ReviewMargin + W - ReviewPadX) then
         begin

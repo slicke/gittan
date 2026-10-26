@@ -1,15 +1,16 @@
 unit testforge;
 
-{** Tests of gittan.forge: the answer of the forge query read into pull
-  requests, which of those waiting for the user's review still are,
-  and which have had an answer from someone but their author. }
+{** Tests of gittan.forge: which pull requests waiting for the user's
+  review still are, and which have had an answer from someone but their
+  author; with GitHub's answer to its forge query (gittan.github) read
+  into them. }
 
 {$mode objfpc}{$H+}
 
 interface
 
 uses
-  Classes, SysUtils, DateUtils, fpcunit, testregistry, gittan.forge;
+  Classes, SysUtils, DateUtils, fpcunit, testregistry, gittan.forge, gittan.github;
 
 type
   TForgeTest = class(TTestCase)
@@ -18,7 +19,7 @@ type
     procedure TestParseErrors;
     procedure TestNeedsMyReview;
     procedure TestFeedback;
-    procedure TestForgeName;
+    procedure TestNotes;
   end;
 
 implementation
@@ -62,10 +63,10 @@ begin
   AssertEquals('slicke', MinePulls[0].Author);
   AssertEquals('develop', MinePulls[0].HeadRef);
   AssertEquals('main', MinePulls[0].BaseRef);
-  AssertEquals('OPEN', MinePulls[0].State);
-  AssertEquals('REVIEW_REQUIRED', MinePulls[0].ReviewDecision);
-  AssertEquals('SUCCESS', MinePulls[0].Checks);
-  AssertEquals('', MinePulls[0].MyReview);
+  AssertTrue('open', MinePulls[0].State = prOpen);
+  AssertTrue('review required', MinePulls[0].ReviewDecision = rdReviewRequired);
+  AssertTrue('checks passed', MinePulls[0].Checks = chkPassed);
+  AssertTrue('no review of mine', MinePulls[0].MyReview = rvNone);
   AssertFalse(MinePulls[0].Requested);
   AssertFalse(MinePulls[0].IsDraft);
   { A bot's comment and the author's own do not count. }
@@ -77,9 +78,9 @@ begin
   AssertEquals('owner/repo', ReviewPulls[0].Repo);
   AssertEquals(12, ReviewPulls[0].Number);
   AssertTrue(ReviewPulls[0].IsDraft);
-  AssertEquals('', ReviewPulls[0].ReviewDecision);
-  AssertEquals('', ReviewPulls[0].Checks);
-  AssertEquals('APPROVED', ReviewPulls[0].MyReview);
+  AssertTrue('no decision', ReviewPulls[0].ReviewDecision = rdNone);
+  AssertTrue('no checks', ReviewPulls[0].Checks = chkNone);
+  AssertTrue('approved by me', ReviewPulls[0].MyReview = rvApproved);
   AssertTrue(ReviewPulls[0].Requested);
   AssertTrue(ReviewPulls[0].Feedback);
 end;
@@ -110,13 +111,13 @@ var
 begin
   Pull := Default(TGittanForgePull);
   AssertTrue(NeedsMyReview(Pull));
-  Pull.MyReview := 'COMMENTED';
+  Pull.MyReview := rvCommented;
   AssertTrue(NeedsMyReview(Pull));
-  Pull.MyReview := 'DISMISSED';
+  Pull.MyReview := rvDismissed;
   AssertTrue(NeedsMyReview(Pull));
-  Pull.MyReview := 'APPROVED';
+  Pull.MyReview := rvApproved;
   AssertFalse(NeedsMyReview(Pull));
-  Pull.MyReview := 'CHANGES_REQUESTED';
+  Pull.MyReview := rvChangesRequested;
   AssertFalse(NeedsMyReview(Pull));
   { Asked again after the review. }
   Pull.Requested := True;
@@ -126,7 +127,7 @@ begin
   Pulls[0].Number := 1;
   Pulls[1] := Default(TGittanForgePull);
   Pulls[1].Number := 2;
-  Pulls[1].MyReview := 'APPROVED';
+  Pulls[1].MyReview := rvApproved;
   Pulls[2] := Pull;
   Pulls[2].Number := 3;
   Left := StillToReview(Pulls);
@@ -156,9 +157,12 @@ begin
   AssertEquals(0, Length(WithFeedback(nil)));
 end;
 
-procedure TForgeTest.TestForgeName;
+procedure TForgeTest.TestNotes;
 begin
-  AssertEquals('GitHub', ForgeName(fkGitHub));
+  AssertEquals('Approved', ReviewDecisionNote(rdApproved));
+  AssertEquals('Changes requested', ReviewDecisionNote(rdChangesRequested));
+  AssertEquals('Review required', ReviewDecisionNote(rdReviewRequired));
+  AssertEquals('', ReviewDecisionNote(rdNone));
 end;
 
 initialization

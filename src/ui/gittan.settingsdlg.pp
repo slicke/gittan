@@ -72,7 +72,7 @@ implementation
 uses
   Math, StrUtils, Process, Clipbrd, LCLIntf, LCLType, LCLVersion, InterfaceBase, LCLPlatformDef,
   ec_SyntAnal, ATSynEdit_Adapter_EControl, ATSynEdit_Globals,
-  gittan.syntaxthemes, gittan.git, gittan.theme;
+  gittan.syntaxthemes, gittan.git, gittan.theme, gittan.forge, gittan.github;
 
 resourcestring
   rsSettingsTitle = 'Settings';
@@ -1221,6 +1221,7 @@ end;
   all. }
 procedure TSettingsForm.ReadVersions(Data: PtrInt);
 var
+  Forge: TGittanForge;
   Lines: TStringList;
   Version, Output, Error, Exe: string;
   Major, Minor: integer;
@@ -1245,13 +1246,18 @@ begin
       Lines.Add(Format(rsVersionNotFound, ['git']));
     Exe := Trim(FGhEdit.Text);
     if Exe = '' then
-      Exe := FindTool('gh');
-    if not FGitHubBox.Checked then
-      Lines.Add(rsVersionGitHubOff)
-    else if (Exe <> '') and RunGitHubCli(Exe, GetUserDir, ['--version'], Output, Error) then
-      Lines.Add('gh ' + VersionOf(Output, 'gh version '))
-    else
-      Lines.Add(Format(rsVersionNotFound, ['gh']));
+      Exe := FindTool(TGittanGitHubForge.CliName);
+    Forge := TGittanGitHubForge.Create(Exe);
+    try
+      if not FGitHubBox.Checked then
+        Lines.Add(rsVersionGitHubOff)
+      else if Forge.Version(Version) then
+        Lines.Add(Forge.CliName + ' ' + Version)
+      else
+        Lines.Add(Format(rsVersionNotFound, [Forge.CliName]));
+    finally
+      Forge.Free;
+    end;
     if not FAIBox.Checked then
       Lines.Add(rsVersionAIOff)
     else

@@ -1,10 +1,10 @@
 unit gittan.reviews;
 
-{** The review comments of a pull request: its threads as GitHub's
-  GraphQL API gives them through gh, the notes of its conversation that
-  are on no line, a job that fetches them in a
-  thread, and the mapping of a line of the pull request's head to the
-  same line in the work tree. Nothing here needs the LCL. }
+{** The review comments of a pull request: its threads, the notes of its
+  conversation that are on no line, the base of the job that reads them
+  in a thread (a forge's, see gittan.forge; GitHub's reads them in
+  gittan.github), and the mapping of a line of the pull request's head
+  to the same line in the work tree. Nothing here needs the LCL. }
 
 {$mode objfpc}{$H+}
 
@@ -56,34 +56,6 @@ type
   end;
   TGittanPullNotes = array of TGittanPullNote;
 
-const
-  {** The GraphQL query for one page of the threads of a pull request;
-    $after is the cursor of the page before, left out for the first. }
-  ReviewThreadsQuery =
-    'query($owner:String!,$name:String!,$number:Int!,$after:String){' +
-    'repository(owner:$owner,name:$name){pullRequest(number:$number){' +
-    'headRefOid reviews(last:100){nodes{state body author{login} submittedAt url}} ' +
-    'comments(last:100){nodes{author{login} body createdAt url}} ' +
-    'reviewThreads(first:100,after:$after){' +
-    'pageInfo{hasNextPage endCursor} nodes{' +
-    'isResolved isOutdated path line startLine originalLine diffSide subjectType ' +
-    'comments(first:100){nodes{author{login} body createdAt url}}}}}}}';
-
-{** Reads one page of the answer to ReviewThreadsQuery and adds its
-  threads to AThreads. AHeadOid is the commit at the head of the pull
-  request; ACursor the cursor of the next page when AHasNext. False when
-  the text is not such an answer. }
-function ParseReviewThreads(const AJson: string; var AThreads: TGittanReviewThreads;
-  out AHeadOid: string; out AHasNext: boolean; out ACursor: string): boolean;
-
-{** Reads the conversation of the pull request from an answer to
-  ReviewThreadsQuery into ANotes, oldest first: its comments, and its
-  reviews that were submitted with text or that approved, requested
-  changes or were dismissed; a review that only commented on lines has
-  nothing to show here, and a pending one is not submitted yet. False
-  when the text is not such an answer. }
-function ParsePullNotes(const AJson: string; out ANotes: TGittanPullNotes): boolean;
-
 {** The line ALine of a file, counted in the old side of ADiff (what
   `git diff -U0` prints for the file), on the new side: shifted by the
   lines added and removed above it, or, for a line ADiff changes, the
@@ -100,26 +72,36 @@ function ReviewAge(AThen, ANow: TDateTime): string;
 function OpenThreads(const AThreads: TGittanReviewThreads): integer;
 
 type
-  {** Fetches the review threads of pull request ANumber of ARepoPath
-    ("owner/repo") with gh, every page of them, in a thread. OnDone is
-    called in the main thread when it is done, as long as the job has
-    not been stopped; Error is gh's message when it failed. }
+  {** Reads the review threads of pull request Number of RepoPath
+    ("owner/name") and the notes of its conversation, every page of
+    them, in a thread. OnDone is called in the main thread when it is
+    done, as long as the job has not been stopped; Error is the forge's
+    or its tool's message when it failed. A forge (gittan.forge) fills in
+    Ask, which sets Threads, Notes and HeadOid through the protected
+    fields. }
   TGittanReviewJob = class(TGittanJob)
   private
-    FExe, FRoot, FRepoPath: string;
+    FRoot, FRepoPath: string;
     FNumber: integer;
+    FError: string;
+  protected
     FThreads: TGittanReviewThreads;
     FNotes: TGittanPullNotes;
-    FHeadOid, FError: string;
-  protected
+    FHeadOid: string;
+    {** Reads the threads, the notes and the head commit; false with the
+      reason in AError when they could not be read. May return early
+      when Terminated. }
+    function Ask(out AError: string): boolean; virtual; abstract;
     procedure Execute; override;
+    property Root: string read FRoot;
   public
-    constructor Create(const AExe, ARoot, ARepoPath: string; ANumber: integer);
+    constructor Create(const ARoot, ARepoPath: string; ANumber: integer);
     property Number: integer read FNumber;
     property RepoPath: string read FRepoPath;
     property Threads: TGittanReviewThreads read FThreads;
     {** The conversation, from the first page. }
     property Notes: TGittanPullNotes read FNotes;
+    {** The commit at the head of the pull request. }
     property HeadOid: string read FHeadOid;
     property Error: string read FError;
   end;
@@ -127,242 +109,7 @@ type
 implementation
 
 uses
-  Math, fpjson, jsonparser, DateUtils, gittan.git;
-
-{ A path through nested objects, nil when a step is missing or not an
-  object. }
-function Dig(AData: TJSONData; const ANames: array of string): TJSONData;
-var
-  i: integer;
-begin
-  Result := AData;
-  for i := 0 to High(ANames) do
-  begin
-    if (Result = nil) or (Result.JSONType <> jtObject) then
-      Exit(nil);
-    Result := TJSONObject(Result).Find(ANames[i]);
-  end;
-end;
-
-{ An integer field that may be null. }
-function IntOf(AObject: TJSONObject; const AName: string): integer;
-var
-  Data: TJSONData;
-begin
-  Data := AObject.Find(AName);
-  if (Data <> nil) and (Data.JSONType = jtNumber) then
-    Result := Data.AsInteger
-  else
-    Result := 0;
-end;
-
-function StrOf(AObject: TJSONObject; const AName: string): string;
-var
-  Data: TJSONData;
-begin
-  Data := AObject.Find(AName);
-  if (Data <> nil) and (Data.JSONType = jtString) then
-    Result := Data.AsString
-  else
-    Result := '';
-end;
-
-{ The login of a comment's author; a deleted account has none. }
-function AuthorOf(AObject: TJSONObject): string;
-var
-  Author: TJSONData;
-begin
-  Result := '';
-  Author := AObject.Find('author');
-  if (Author <> nil) and (Author.JSONType = jtObject) then
-    Result := StrOf(TJSONObject(Author), 'login');
-  if Result = '' then
-    Result := 'ghost';
-end;
-
-function BodyOf(AObject: TJSONObject): string;
-begin
-  Result := StringReplace(StrOf(AObject, 'body'), #13#10, #10, [rfReplaceAll]);
-end;
-
-function TimeOf(AObject: TJSONObject; const AName: string): TDateTime;
-begin
-  if not TryISO8601ToDate(StrOf(AObject, AName), Result, True) then
-    Result := 0;
-end;
-
-function ReadComment(AObject: TJSONObject): TGittanReviewComment;
-begin
-  Result := Default(TGittanReviewComment);
-  Result.Author := AuthorOf(AObject);
-  Result.Body := BodyOf(AObject);
-  Result.Url := StrOf(AObject, 'url');
-  Result.Created := TimeOf(AObject, 'createdAt');
-end;
-
-function ReadThread(AObject: TJSONObject; out AThread: TGittanReviewThread): boolean;
-var
-  Nodes: TJSONData;
-  i, n: integer;
-begin
-  AThread := Default(TGittanReviewThread);
-  AThread.Path := StrOf(AObject, 'path');
-  Result := AThread.Path <> '';
-  if not Result then
-    Exit;
-  AThread.Line := IntOf(AObject, 'line');
-  AThread.StartLine := IntOf(AObject, 'startLine');
-  AThread.OriginalLine := IntOf(AObject, 'originalLine');
-  AThread.LeftSide := StrOf(AObject, 'diffSide') = 'LEFT';
-  AThread.Resolved := AObject.Get('isResolved', False);
-  AThread.Outdated := AObject.Get('isOutdated', False);
-  AThread.OnFile := StrOf(AObject, 'subjectType') = 'FILE';
-  if AThread.OnFile then
-    AThread.Line := 0;
-  Nodes := Dig(AObject, ['comments', 'nodes']);
-  if (Nodes = nil) or (Nodes.JSONType <> jtArray) then
-    Exit;
-  SetLength(AThread.Comments, Nodes.Count);
-  n := 0;
-  for i := 0 to Nodes.Count - 1 do
-    if Nodes.Items[i].JSONType = jtObject then
-    begin
-      AThread.Comments[n] := ReadComment(TJSONObject(Nodes.Items[i]));
-      Inc(n);
-    end;
-  SetLength(AThread.Comments, n);
-end;
-
-function ParseReviewThreads(const AJson: string; var AThreads: TGittanReviewThreads;
-  out AHeadOid: string; out AHasNext: boolean; out ACursor: string): boolean;
-var
-  Data, Pull, Threads, Info, Nodes: TJSONData;
-  Thread: TGittanReviewThread;
-  i: integer;
-begin
-  AHeadOid := '';
-  AHasNext := False;
-  ACursor := '';
-  Result := False;
-  try
-    Data := GetJSON(AJson);
-  except
-    Exit;
-  end;
-  try
-    Pull := Dig(Data, ['data', 'repository', 'pullRequest']);
-    if (Pull = nil) or (Pull.JSONType <> jtObject) then
-      Exit;
-    AHeadOid := StrOf(TJSONObject(Pull), 'headRefOid');
-    Threads := Dig(Pull, ['reviewThreads']);
-    if (Threads = nil) or (Threads.JSONType <> jtObject) then
-      Exit;
-    Info := Dig(Threads, ['pageInfo']);
-    if (Info <> nil) and (Info.JSONType = jtObject) then
-    begin
-      AHasNext := TJSONObject(Info).Get('hasNextPage', False);
-      ACursor := StrOf(TJSONObject(Info), 'endCursor');
-      AHasNext := AHasNext and (ACursor <> '');
-    end;
-    Nodes := Dig(Threads, ['nodes']);
-    if (Nodes <> nil) and (Nodes.JSONType = jtArray) then
-      for i := 0 to Nodes.Count - 1 do
-        if (Nodes.Items[i].JSONType = jtObject) and
-          ReadThread(TJSONObject(Nodes.Items[i]), Thread) and (Length(Thread.Comments) > 0) then
-        begin
-          SetLength(AThreads, Length(AThreads) + 1);
-          AThreads[High(AThreads)] := Thread;
-        end;
-    Result := True;
-  finally
-    Data.Free;
-  end;
-end;
-
-function ParsePullNotes(const AJson: string; out ANotes: TGittanPullNotes): boolean;
-var
-  Data, Pull, Nodes: TJSONData;
-  Node: TJSONObject;
-  Note: TGittanPullNote;
-  State: string;
-  i, j: integer;
-
-  procedure Add;
-  begin
-    SetLength(ANotes, Length(ANotes) + 1);
-    ANotes[High(ANotes)] := Note;
-  end;
-
-begin
-  ANotes := nil;
-  Result := False;
-  try
-    Data := GetJSON(AJson);
-  except
-    Exit;
-  end;
-  try
-    Pull := Dig(Data, ['data', 'repository', 'pullRequest']);
-    if (Pull = nil) or (Pull.JSONType <> jtObject) then
-      Exit;
-    Nodes := Dig(Pull, ['comments', 'nodes']);
-    if (Nodes <> nil) and (Nodes.JSONType = jtArray) then
-      for i := 0 to Nodes.Count - 1 do
-        if Nodes.Items[i].JSONType = jtObject then
-        begin
-          Node := TJSONObject(Nodes.Items[i]);
-          Note := Default(TGittanPullNote);
-          Note.Kind := pnComment;
-          Note.Author := AuthorOf(Node);
-          Note.Body := Trim(BodyOf(Node));
-          Note.Url := StrOf(Node, 'url');
-          Note.Created := TimeOf(Node, 'createdAt');
-          if Note.Body <> '' then
-            Add;
-        end;
-    Nodes := Dig(Pull, ['reviews', 'nodes']);
-    if (Nodes <> nil) and (Nodes.JSONType = jtArray) then
-      for i := 0 to Nodes.Count - 1 do
-        if Nodes.Items[i].JSONType = jtObject then
-        begin
-          Node := TJSONObject(Nodes.Items[i]);
-          Note := Default(TGittanPullNote);
-          State := StrOf(Node, 'state');
-          if State = 'APPROVED' then
-            Note.Kind := pnApproved
-          else if State = 'CHANGES_REQUESTED' then
-            Note.Kind := pnChangesRequested
-          else if State = 'DISMISSED' then
-            Note.Kind := pnDismissed
-          else if State = 'COMMENTED' then
-            Note.Kind := pnCommented
-          else
-            Continue;
-          Note.Author := AuthorOf(Node);
-          Note.Body := Trim(BodyOf(Node));
-          Note.Url := StrOf(Node, 'url');
-          Note.Created := TimeOf(Node, 'submittedAt');
-          if (Note.Body <> '') or (Note.Kind <> pnCommented) then
-            Add;
-        end;
-    { Comments and reviews each come in order; together they are sorted
-      by time, keeping that order among equal times. }
-    for i := 1 to High(ANotes) do
-    begin
-      Note := ANotes[i];
-      j := i - 1;
-      while (j >= 0) and (ANotes[j].Created > Note.Created) do
-      begin
-        ANotes[j + 1] := ANotes[j];
-        Dec(j);
-      end;
-      ANotes[j + 1] := Note;
-    end;
-    Result := True;
-  finally
-    Data.Free;
-  end;
-end;
+  Math, DateUtils;
 
 { "-12,3" or "+7" of a hunk header: the start and the count (1 when
   left out). }
@@ -472,57 +219,20 @@ end;
   The job
   --------------------------------------------------------------------------- }
 
-constructor TGittanReviewJob.Create(const AExe, ARoot, ARepoPath: string; ANumber: integer);
+constructor TGittanReviewJob.Create(const ARoot, ARepoPath: string; ANumber: integer);
 begin
   inherited Create(True);
-  FExe := AExe;
   FRoot := ARoot;
   FRepoPath := ARepoPath;
   FNumber := ANumber;
 end;
 
 procedure TGittanReviewJob.Execute;
-var
-  Owner, Name, Output, Err, Cursor, Head: string;
-  HasNext: boolean;
-  Pages, p: integer;
 begin
-  p := Pos('/', FRepoPath);
-  Owner := Copy(FRepoPath, 1, p - 1);
-  Name := Copy(FRepoPath, p + 1, MaxInt);
-  Cursor := '';
-  Pages := 0;
-  repeat
-    { -f passes the names as strings even when they look like numbers;
-      -F types the number. }
-    if Cursor = '' then
-      HasNext := RunGitHubCli(FExe, FRoot, ['api', 'graphql', '-f', 'owner=' + Owner,
-        '-f', 'name=' + Name, '-F', 'number=' + IntToStr(FNumber),
-        '-f', 'query=' + ReviewThreadsQuery], Output, Err)
-    else
-      HasNext := RunGitHubCli(FExe, FRoot, ['api', 'graphql', '-f', 'owner=' + Owner,
-        '-f', 'name=' + Name, '-F', 'number=' + IntToStr(FNumber),
-        '-f', 'after=' + Cursor, '-f', 'query=' + ReviewThreadsQuery], Output, Err);
-    if Terminated then
-      Exit;
-    if not HasNext then
-    begin
-      FError := Err;
-      Break;
-    end;
-    if not ParseReviewThreads(Output, FThreads, Head, HasNext, Cursor) then
-    begin
-      FError := 'Could not read the review comments gh fetched.';
-      Break;
-    end;
-    if Pages = 0 then
-    begin
-      FHeadOid := Head;
-      ParsePullNotes(Output, FNotes);
-    end;
-    Inc(Pages);
-  until not HasNext or (Pages >= 20);
-  Done;
+  if not Ask(FError) and (FError = '') then
+    FError := 'Could not read the review comments.';
+  if not Terminated then
+    Done;
 end;
 
 end.

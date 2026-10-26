@@ -3,8 +3,9 @@ unit gittan.sidenav;
 {** The rows at the top of the sidebar that open the pages of a
   repository, as a music app lists Home and Explore over the library:
   Home, the summary, Graph, the commit graph, Repository, the page
-  about the repository itself, Commands, Files, Pull Requests and
-  GitHub, the last two hidden (SetRowVisible) while gh is missing. Each row is an icon and a name; the row
+  about the repository itself, Commands, Files, Pull Requests and the
+  forge's own (GitHub, named by SetRowCaption), the last two hidden
+  (SetRowVisible) while the forge's tool is missing. Each row is an icon and a name; the row
   of the page shown is filled, and the one under the mouse tinted. Set
   Large, the rows are as tall as the music app's, with a larger icon and
   text, so they read as navigation over the list of files and not as
@@ -109,6 +110,8 @@ type
     {** Hides a row (its place closes up) or shows it again, for a row
       whose page needs a tool that may be missing. }
     procedure SetRowVisible(AIndex: integer; AVisible: boolean);
+    {** Names a row anew, for a row named after a forge. }
+    procedure SetRowCaption(AIndex: integer; const ACaption: string);
     {** The palette: the background, the text, the dim icons and
       heading, the tint under the mouse, the fill of the selected row
       and the line under the heading. }
@@ -352,6 +355,14 @@ begin
   if FHot = AIndex then
     FHot := -1;
   FitHeight;
+  Invalidate;
+end;
+
+procedure TGittanSideNav.SetRowCaption(AIndex: integer; const ACaption: string);
+begin
+  if (AIndex < 0) or (AIndex > High(FCaptions)) or (FCaptions[AIndex] = ACaption) then
+    Exit;
+  FCaptions[AIndex] := ACaption;
   Invalidate;
 end;
 
