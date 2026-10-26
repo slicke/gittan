@@ -53,6 +53,12 @@ begin
     this one waits for the background fetch, which is quick. }
   if FAutoFetchJob <> nil then
   begin
+    { One waits; a second is refused rather than put in its place. }
+    if FPendingRemote then
+    begin
+      FStatus.ShowMessage(rsAlreadyWaiting, stNormal, 0);
+      Exit;
+    end;
     FPendingRemote := True;
     FPendingKind := AKind;
     FPendingMode := AMode;
@@ -528,9 +534,17 @@ procedure TRepoFrame.CheckLfs;
 var
   Key: string;
 begin
-  if (FRepo.Root = '') or (FLfsCheckJob <> nil) then
+  if FRepo.Root = '' then
     Exit;
   Key := FRepo.Root + #0 + FSnapHead;
+  { A check under way for another commit: LfsCheckDone sees the key
+    changed and reads again. }
+  if FLfsCheckJob <> nil then
+  begin
+    if Key <> FLfsChecked then
+      FLfsChecked := '';
+    Exit;
+  end;
   if Key = FLfsChecked then
     Exit;
   FLfsChecked := Key;
@@ -561,8 +575,12 @@ begin
     CheckLfs;
     Exit;
   end;
+  { Read again with the next snapshot. }
   if not Job.Ok then
+  begin
+    FLfsChecked := '';
     Exit;
+  end;
   State := Job.State;
   Key := '';
   Kind := bkError;
@@ -627,19 +645,39 @@ end;
   message, and only a repository with a remote is fetched. When it is
   done the counts follow; a failure (offline, a key that needs its
   passphrase) is left unsaid, as the next one may well work. A fetch,
-  pull or push asked for meanwhile waits for it (see StartRemote). }
+  pull or push asked for meanwhile waits for it (see StartRemote).
+
+  A failure leaves FETCH_HEAD as it was, so the try itself is kept
+  (FAutoFetchTried): the next waits AutoFetchMinutes, twice that after
+  two failures in a row and so on, up to AutoFetchBackoffMax times; a
+  repository without a remote waits as after a failure. Nothing runs
+  git before the wait is over. }
 procedure TRepoFrame.AutoFetchTimerTimer(Sender: TObject);
+const
+  AutoFetchBackoffMax = 8;
 var
   Last: TDateTime;
+  Wait: integer;
 begin
   if not App.Settings.AutoFetch or (FRepo.Root = '') or (FAutoFetchJob <> nil) or
     (FRemoteJob <> nil) then
     Exit;
+  if FAutoFetchFails > 0 then
+  begin
+    Wait := App.Settings.AutoFetchMinutes * Min(AutoFetchBackoffMax,
+      1 shl Min(FAutoFetchFails - 1, 3));
+    if (Now - FAutoFetchTried) * MinsPerDay < Wait then
+      Exit;
+  end;
   Last := FRepo.LastFetch;
   if (Last > 0) and ((Now - Last) * MinsPerDay < App.Settings.AutoFetchMinutes) then
     Exit;
+  FAutoFetchTried := Now;
   if FRepo.RemoteFor('') = '' then
+  begin
+    FAutoFetchFails := 1;
     Exit;
+  end;
   FAutoFetchJob := TGittanRemoteJob.Create(FRepo.Root, rkFetch);
   FAutoFetchJob.OnDone := @AutoFetchDone;
   FAutoFetchJob.Start;
@@ -655,6 +693,11 @@ begin
   FAutoFetchJob := nil;
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+  if Job.Root = FRepo.Root then
+    if Job.Ok then
+      FAutoFetchFails := 0
+    else
+      Inc(FAutoFetchFails);
   if Job.Ok and (Job.Root = FRepo.Root) then
     RefreshRepository;
   if FPendingRemote then

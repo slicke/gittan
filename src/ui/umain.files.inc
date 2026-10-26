@@ -195,9 +195,9 @@ begin
   { git's own rule for a binary file: a NUL in the first 8000 bytes; a
     file in Git LFS not downloaded is one too, of the size its pointer
     gives. }
-  else if (Pos(#0, Copy(Data, 1, 8000)) > 0) or ParseLfsPointer(Data, Oid, Size) then
+  else if ParseLfsPointer(Data, Oid, Size) or (Pos(#0, Copy(Data, 1, 8000)) > 0) then
   begin
-    if ParseLfsPointer(Data, Oid, Size) then
+    if Oid <> '' then
     begin
       FBinaryView.SetFile(APath, Size);
       FBinaryView.SetNote(rsLfsNotDownloaded);

@@ -90,6 +90,11 @@ type
     FNotesTitle: string;
     FNotes: TGittanPullNotes;
     FNoteBoxes: array of TGittanSummaryNoteBox;
+    { Each note's parts (CommentParts) and their markup (MarkdownToInk,
+      the paths linked), made once per SetNotes: a new width lays them
+      out again without parsing them or asking for the files again. }
+    FNoteParts: array of TGittanCommentParts;
+    FNoteMarkup: array of TStringArray;
     { The width the notes were laid out at, -1 when they are to be laid
       out again; their height, title included, 0 without notes. }
     FNotesWidth, FNotesHeight: integer;
@@ -709,6 +714,8 @@ procedure TGittanSummary.SetNotes(const ATitle: string; const ANotes: TGittanPul
 begin
   FNotesTitle := ATitle;
   FNotes := Copy(ANotes);
+  FNoteParts := nil;
+  FNoteMarkup := nil;
   FNotesWidth := -1;
   FLinkHot := -1;
   FMoreHot := -1;
@@ -812,11 +819,28 @@ begin
   Inner := Max(40, Width - 2 * Px(Pad) - 2 * Px(NotePadX) - Px(NoteStripe));
   { The section's heading. }
   At := LineHeight + Px(NoteGap);
+  if Length(FNoteParts) <> Length(FNotes) then
+  begin
+    SetLength(FNoteParts, Length(FNotes));
+    SetLength(FNoteMarkup, Length(FNotes));
+    for i := 0 to High(FNotes) do
+    begin
+      Parts := CommentParts(FNotes[i].Body);
+      FNoteParts[i] := Parts;
+      SetLength(FNoteMarkup[i], Length(Parts));
+      for k := 0 to High(Parts) do
+        if (Parts[k].Kind = cpText) and Assigned(FOnFileExists) then
+          FNoteMarkup[i][k] := MarkdownToInk(LinkFilePaths(Parts[k].Text, FOnFileExists),
+            [imoInlineHTML])
+        else
+          FNoteMarkup[i][k] := MarkdownToInk(Parts[k].Text, [imoInlineHTML]);
+    end;
+  end;
   SetLength(FNoteBoxes, Length(FNotes));
   for i := 0 to High(FNotes) do
   begin
     Box := Default(TGittanSummaryNoteBox);
-    Parts := CommentParts(FNotes[i].Body);
+    Parts := FNoteParts[i];
     HideBelow := MaxInt;
     AnyOpen := False;
     for k := 0 to High(Parts) do
@@ -827,10 +851,7 @@ begin
       Row := Default(TGittanSummaryNoteRow);
       Row.Depth := Parts[k].Depth;
       Row.Detail := -1;
-      if (Parts[k].Kind = cpText) and Assigned(FOnFileExists) then
-        Row.Markup := MarkdownToInk(LinkFilePaths(Parts[k].Text, FOnFileExists), [imoInlineHTML])
-      else
-        Row.Markup := MarkdownToInk(Parts[k].Text, [imoInlineHTML]);
+      Row.Markup := FNoteMarkup[i][k];
       if Parts[k].Kind = cpDetails then
       begin
         Row.Detail := k;

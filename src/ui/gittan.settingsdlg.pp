@@ -79,7 +79,7 @@ uses
   Math, StrUtils, Process, Clipbrd, LCLIntf, LCLType, LCLVersion, InterfaceBase, LCLPlatformDef,
   ec_SyntAnal, ATSynEdit_Adapter_EControl, ATSynEdit_Globals,
   gittan.syntaxthemes, gittan.git, gittan.theme, gittan.forge, gittan.github,
-  gittan.settings;
+  gittan.settings, gittan.job;
 
 resourcestring
   rsSettingsTitle = 'Settings';
@@ -319,6 +319,8 @@ type
     { Whether the versions are in; a change of a tool, a switch or the
       agent drops it, so the page shown again reads them anew. }
     FVersionsRead: boolean;
+    { The versions being read (ReadVersions), nil when none is. }
+    FVersionsJob: TThread;
     FOK: TButton;
     { Gittan's icon as loaded, and as resampled for the screen's pixels. }
     FAppIcon, FAppIconShown: TBGRABitmap;
@@ -349,6 +351,7 @@ type
     procedure UpdateDone(Sender: TObject);
     procedure ShowUpdateLink(const ACaption, AUrl: string);
     procedure ReadVersions(Data: PtrInt);
+    procedure VersionsDone(Sender: TObject);
     procedure CopyVersionsClick(Sender: TObject);
     procedure AppIconPaint(Sender: TObject);
     procedure NavPick(Sender: TObject; AIndex: integer);
@@ -736,6 +739,12 @@ begin
     FUpdateJob.Stop(False);
     GUpdateZombies.Add(FUpdateJob);
     FUpdateJob := nil;
+  end;
+  if FVersionsJob <> nil then
+  begin
+    TGittanJob(FVersionsJob).Stop(False);
+    GUpdateZombies.Add(FVersionsJob);
+    FVersionsJob := nil;
   end;
   FAppIconShown.Free;
   FAppIcon.Free;
@@ -1272,40 +1281,39 @@ begin
   Result := Line;
 end;
 
-{ What Gittan runs on and with: the build, git, gh and the agent (as the
-  fields name them now), the system and the libraries; VersionLines in
-  all. }
-procedure TSettingsForm.ReadVersions(Data: PtrInt);
+type
+  { The versions About lists, read in a thread: git, gh and the agent
+    each start a process (the agent node, a second or more), which would
+    hold the dialog still. The tools are found in the main thread. }
+  TVersionsJob = class(TGittanJob)
+  protected
+    procedure Execute; override;
+  public
+    GitExe, GhExe, AgentExe, AgentName, Platform: string;
+    GitHubOn, AIOn: boolean;
+    Text: string;
+  end;
+
+procedure TVersionsJob.Execute;
 var
   Forge: TGittanForge;
   Lines: TStringList;
-  Version, Output, Error, Exe: string;
+  Version, Output, Error: string;
   Major, Minor: integer;
-  OldCursor: TCursor;
 begin
-  OldCursor := Screen.Cursor;
-  Screen.Cursor := crHourGlass;
   Lines := TStringList.Create;
   try
     if CurrentBuild >= 0 then
       Lines.Add(Format(rsVersionGittan, [CurrentBuild]))
     else
       Lines.Add(Format(rsVersionGittanLocal, [{$I %DATE%}]));
-    { The git and gh the fields name, saved or not, as the notes under
-      them find them. }
-    Exe := Trim(FGitEdit.Text);
-    if Exe = '' then
-      Exe := FindTool('git');
-    if GitVersionOf(Exe, Version, Major, Minor) then
+    if GitVersionOf(GitExe, Version, Major, Minor) then
       Lines.Add('git ' + Version)
     else
       Lines.Add(Format(rsVersionNotFound, ['git']));
-    Exe := Trim(FGhEdit.Text);
-    if Exe = '' then
-      Exe := FindTool(TGittanGitHubForge.CliName);
-    Forge := TGittanGitHubForge.Create(Exe);
+    Forge := TGittanGitHubForge.Create(GhExe);
     try
-      if not FGitHubBox.Checked then
+      if not GitHubOn then
         Lines.Add(rsVersionGitHubOff)
       else if Forge.Version(Version) then
         Lines.Add(Forge.CliName + ' ' + Version)
@@ -1314,25 +1322,64 @@ begin
     finally
       Forge.Free;
     end;
-    if not FAIBox.Checked then
+    if not AIOn then
       Lines.Add(rsVersionAIOff)
+    else if (AgentExe <> '') and RunAgentCli(AgentExe, GetUserDir, ['--version'], '', nil,
+      Output, Error) then
+      Lines.Add(AgentName + ' ' + VersionOf(Output, ''))
     else
-    begin
-      Exe := FindAgent(FAgent, Trim(FAgentEdit.Text));
-      if (Exe <> '') and RunAgentCli(Exe, GetUserDir, ['--version'], '', nil,
-        Output, Error) then
-        Lines.Add(AgentNames[FAgent] + ' ' + VersionOf(Output, ''))
-      else
-        Lines.Add(Format(rsVersionNotFound, [AgentNames[FAgent]]));
-    end;
-    Lines.Add(Format('%s, %s, %s', [SystemName, {$I %FPCTARGETCPU%},
-      LCLPlatformDisplayNames[WidgetSet.LCLPlatform]]));
+      Lines.Add(Format(rsVersionNotFound, [AgentName]));
+    Lines.Add(Format('%s, %s, %s', [SystemName, {$I %FPCTARGETCPU%}, Platform]));
     Lines.Add(Format(rsVersionLibraries, [{$I %FPCVERSION%}, lcl_version]));
-    FVersionsLabel.Caption := TrimRight(Lines.Text);
+    Text := TrimRight(Lines.Text);
   finally
     Lines.Free;
-    Screen.Cursor := OldCursor;
   end;
+  Done;
+end;
+
+{ What Gittan runs on and with: the build, git, gh and the agent (as the
+  fields name them now), the system and the libraries; VersionLines in
+  all. The tools are found here, their versions asked in a TVersionsJob;
+  one still running for fields since changed is dropped. }
+procedure TSettingsForm.ReadVersions(Data: PtrInt);
+var
+  Job: TVersionsJob;
+begin
+  if FVersionsJob <> nil then
+  begin
+    TGittanJob(FVersionsJob).Stop(False);
+    GUpdateZombies.Add(FVersionsJob);
+    FVersionsJob := nil;
+  end;
+  FreeFinishedUpdateJobs(False);
+  Job := TVersionsJob.Create(False);
+  { The git and gh the fields name, saved or not, as the notes under
+    them find them. }
+  Job.GitExe := Trim(FGitEdit.Text);
+  if Job.GitExe = '' then
+    Job.GitExe := FindTool('git');
+  Job.GhExe := Trim(FGhEdit.Text);
+  if Job.GhExe = '' then
+    Job.GhExe := FindTool(TGittanGitHubForge.CliName);
+  Job.GitHubOn := FGitHubBox.Checked;
+  Job.AIOn := FAIBox.Checked;
+  if Job.AIOn then
+    Job.AgentExe := FindAgent(FAgent, Trim(FAgentEdit.Text));
+  Job.AgentName := AgentNames[FAgent];
+  Job.Platform := LCLPlatformDisplayNames[WidgetSet.LCLPlatform];
+  Job.OnDone := @VersionsDone;
+  FVersionsJob := Job;
+  Job.Start;
+end;
+
+procedure TSettingsForm.VersionsDone(Sender: TObject);
+begin
+  if Sender <> FVersionsJob then
+    Exit;
+  FVersionsLabel.Caption := TVersionsJob(Sender).Text;
+  FVersionsJob := nil;
+  GUpdateZombies.Add(Sender);
 end;
 
 { The icon as a square as wide as the box, in the middle of its height

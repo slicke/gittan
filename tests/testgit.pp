@@ -1123,7 +1123,10 @@ begin
   finally
     Tree.Free;
   end;
+  { The store folder is found once per open: lfs.storage set later
+    counts from the next. }
   Git(['config', 'lfs.storage', 'elsewhere']);
+  AssertTrue(FRepo.Open(FDir));
   AssertEquals(IncludeTrailingPathDelimiter(FRepo.GitDir) + 'elsewhere' + PathDelim + 'objects' +
     PathDelim + 'aa' + PathDelim + 'aa' + PathDelim + OldOid, FRepo.LfsObjectFile(OldOid));
   AssertTrue(FRepo.FileBlob('art.psd', 'HEAD', Data));

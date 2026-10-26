@@ -754,6 +754,11 @@ type
     FSnapHead: string;
     FAutoFetchTimer: TTimer;
     FPendingRemote: boolean;
+    { The background fetch's last try and how many in a row failed (or
+      found no remote): the next waits AutoFetchMinutes, doubled for
+      each failure up to AutoFetchBackoffMax times. }
+    FAutoFetchTried: TDateTime;
+    FAutoFetchFails: integer;
     FPendingKind: TGittanRemoteKind;
     FPendingMode: TGittanPullMode;
     FPendingArg, FPendingRemoteName, FPendingBranch: string;
@@ -2464,6 +2469,7 @@ resourcestring
   rsLfsDownloaded = 'Downloaded %s';
   rsLfsDownloadFailed = 'The Git LFS download failed';
   rsWaitingForFetch = 'Waiting for the background fetch...';
+  rsAlreadyWaiting = 'Another action is already waiting for the background fetch.';
   rsLfsMissingTitle = 'Git LFS is not installed';
   rsLfsMissingDetail = 'This repository keeps %d files in Git LFS. Without git-lfs they ' +
     'check out as small pointer files, and committing one would put its content in git ' +
@@ -5569,6 +5575,8 @@ begin
   FBanner.Clear;
   FLfsChecked := '';
   FLfsShown := '';
+  FAutoFetchTried := 0;
+  FAutoFetchFails := 0;
   { The next snapshot is the first of this repository (MarkNews). }
   FSnapHead := '';
   { Nothing is open while the job runs: the views are emptied, so no

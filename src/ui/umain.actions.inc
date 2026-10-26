@@ -2192,6 +2192,11 @@ begin
   { It would fight the background fetch over the remote's refs too. }
   if FAutoFetchJob <> nil then
   begin
+    if FPendingRemote then
+    begin
+      FStatus.ShowMessage(rsAlreadyWaiting, stNormal, 0);
+      Exit;
+    end;
     FPendingRemote := True;
     FPendingKind := rkFetchPull;
     FPendingArg := IntToStr(ANumber);

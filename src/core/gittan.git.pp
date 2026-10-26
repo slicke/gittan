@@ -241,6 +241,9 @@ type
     FRoot: string;
     { The git directory, found by Open with the root. }
     FGitDir: string;
+    { Git LFS's store folder (LfsObjectFile) and FETCH_HEAD's path
+      (LastFetch), '' until they are asked for. }
+    FLfsStore, FFetchHead: string;
     FError: string;
     FBase: string;
     FWholeTree: boolean;
@@ -257,6 +260,8 @@ type
     function StoredSize(const APath, ARef: string; out ASize: int64): boolean;
     function LfsPointerAt(const APath, ARef: string; AStoredSize: int64; out AOid: string;
       out ASize: int64): boolean;
+    function LfsStore: string;
+    function LfsInstalled: boolean;
     function IndexPath: string;
     function CopyIndex(const ATarget: string): boolean;
     function CommitTree(const ATree, AParent, AMessage: string; out AId: string): boolean;
@@ -422,7 +427,7 @@ type
     function Fetch: boolean;
     {** When the repository was last fetched, from anywhere: the time
       FETCH_HEAD was written (`rev-parse --git-path`, so a linked
-      worktree's own). 0 when it never was. }
+      worktree's own, asked once per open). 0 when it never was. }
     function LastFetch: TDateTime;
     {** Pulls the branch's upstream into it, the way AMode says. False,
       with git's reason in Error, when nothing was pulled; ADiverged is
@@ -895,7 +900,8 @@ type
     {** Where Git LFS keeps the object AOid (an oid of ParseLfsPointer):
       lfs/objects/<2>/<2>/<oid> in the common git directory, which a
       linked worktree names in its commondir file, or under lfs.storage
-      when that is set. The file need not exist. }
+      when that is set; the folder is found once per open. The file need
+      not exist. }
     function LfsObjectFile(const AOid: string): string;
     {** Whether APath in the commit ARef, or in the work tree when ARef is
       empty, is a Git LFS pointer whose object the local store lacks. }
@@ -1170,8 +1176,12 @@ function IsBinaryFile(const AFileName: string): boolean;
   it. }
 function StatExact(const AFileName: string; out AInfo: TSearchRec): boolean;
 
+const
+  {** A Git LFS pointer is shorter than this, in bytes (Git LFS's spec). }
+  LfsPointerMax = 1024;
+
 {** Whether AData is a Git LFS pointer, the text git holds in place of a
-  file kept in Git LFS's store: under 1024 bytes, lines ending in a line
+  file kept in Git LFS's store: under LfsPointerMax bytes, lines ending in a line
   feed, the version line first, an oid of sha256 and a size. AOid is the
   oid's 64 hex digits, ASize the size of the file it stands for. }
 function ParseLfsPointer(const AData: RawByteString; out AOid: string;
@@ -2201,6 +2211,8 @@ begin
   DropTempIndex;
   FRoot := '';
   FGitDir := '';
+  FLfsStore := '';
+  FFetchHead := '';
   FError := '';
   FBase := '';
   FWholeTree := False;
@@ -3676,11 +3688,18 @@ var
   Name: string;
 begin
   Result := 0;
-  if (FRoot = '') or not RunGit(FRoot, ['rev-parse', '--git-path', 'FETCH_HEAD'], Name) then
+  if FRoot = '' then
     Exit;
-  Name := Trim(Name);
-  if (Name <> '') and not IsAbsolutePath(Name) then
-    Name := IncludeTrailingPathDelimiter(FRoot) + Name;
+  if FFetchHead = '' then
+  begin
+    if not RunGit(FRoot, ['rev-parse', '--git-path', 'FETCH_HEAD'], Name) then
+      Exit;
+    Name := Trim(Name);
+    if (Name <> '') and not IsAbsolutePath(Name) then
+      Name := IncludeTrailingPathDelimiter(FRoot) + Name;
+    FFetchHead := Name;
+  end;
+  Name := FFetchHead;
   if (Name = '') or not FileAge(Name, Result) then
     Result := 0;
 end;
@@ -6032,7 +6051,6 @@ end;
 function ParseLfsPointer(const AData: RawByteString; out AOid: string;
   out ASize: int64): boolean;
 const
-  PointerMax = 1024;
   OidPrefix = 'sha256:';
 var
   Lines: TStringArray;
@@ -6043,7 +6061,7 @@ begin
   AOid := '';
   ASize := 0;
   Result := False;
-  if (Length(AData) >= PointerMax) or (AData = '') or (AData[Length(AData)] <> #10) then
+  if (Length(AData) >= LfsPointerMax) or (AData = '') or (AData[Length(AData)] <> #10) then
     Exit;
   Lines := string(Copy(AData, 1, Length(AData) - 1)).Split([#10]);
   if (Lines[0] <> 'version https://git-lfs.github.com/spec/v1') and
@@ -6078,12 +6096,14 @@ begin
   end;
 end;
 
-function TGittanRepo.LfsObjectFile(const AOid: string): string;
+{ Git LFS's store folder, found once per open: a commondir file and
+  lfs.storage (a git config) are read the first time only. }
+function TGittanRepo.LfsStore: string;
 var
   Common, Storage, Err: string;
 begin
-  Result := '';
-  if (FGitDir = '') or (Length(AOid) < 4) then
+  Result := FLfsStore;
+  if (Result <> '') or (FGitDir = '') then
     Exit;
   Common := FGitDir;
   if FileExists(IncludeTrailingPathDelimiter(FGitDir) + 'commondir') then
@@ -6105,8 +6125,34 @@ begin
   end
   else
     Storage := IncludeTrailingPathDelimiter(Common) + 'lfs';
-  Result := IncludeTrailingPathDelimiter(Storage) + 'objects' + PathDelim +
+  FLfsStore := Storage;
+  Result := Storage;
+end;
+
+function TGittanRepo.LfsObjectFile(const AOid: string): string;
+begin
+  Result := '';
+  if (Length(AOid) < 4) or (LfsStore = '') then
+    Exit;
+  Result := IncludeTrailingPathDelimiter(LfsStore) + 'objects' + PathDelim +
     Copy(AOid, 1, 2) + PathDelim + Copy(AOid, 3, 2) + PathDelim + AOid;
+end;
+
+var
+  { Git LFS was found once: it stays (a removal while Gittan runs is
+    told by git lfs itself). A miss is asked again, after an install. }
+  LfsFound: boolean;
+
+{ Git LFS as git finds it: git-lfs on the PATH, or in git's own exec
+  path, where Git for Windows keeps it (mingw64\bin, not on the PATH). }
+function TGittanRepo.LfsInstalled: boolean;
+var
+  Output, Err: string;
+begin
+  { RunGitIn, so a miss leaves FError alone. }
+  if not LfsFound then
+    LfsFound := (FindTool('git-lfs') <> '') or RunGitIn(FRoot, ['lfs', 'version'], Output, Err);
+  Result := LfsFound;
 end;
 
 { AData read in its place when it is a Git LFS pointer whose object the
@@ -6280,8 +6326,6 @@ end;
   of AStoredSize bytes, are not read. }
 function TGittanRepo.LfsPointerAt(const APath, ARef: string; AStoredSize: int64;
   out AOid: string; out ASize: int64): boolean;
-const
-  PointerMax = 1024;
 var
   Output: string;
   Data: RawByteString;
@@ -6289,7 +6333,7 @@ begin
   AOid := '';
   ASize := 0;
   Result := False;
-  if AStoredSize >= PointerMax then
+  if AStoredSize >= LfsPointerMax then
     Exit;
   if ARef <> '' then
     Result := RunGit(FRoot, ['cat-file', 'blob', ARef + ':' + APath], Output) and
@@ -6340,8 +6384,6 @@ end;
 { The files with filter=lfs as git's attributes give them (the attr
   pathspec), each read only when it is small enough to be a pointer. }
 function TGittanRepo.LfsState(out AState: TGittanLfsState): boolean;
-const
-  PointerMax = 1024;
 var
   Output, Path, Oid: string;
   Paths: TStringList;
@@ -6363,15 +6405,21 @@ begin
       begin
         Size := Info.Size;
         FindClose(Info);
-        if (Size < PointerMax) and ParseLfsPointer(ReadFileBytes(FullPath(Path)), Oid, Size) then
-          Inc(AState.Pointers);
+        { A file that cannot be read now (locked on Windows) counts as
+          neither, rather than end the whole check. }
+        if Size < LfsPointerMax then
+          try
+            if ParseLfsPointer(ReadFileBytes(FullPath(Path)), Oid, Size) then
+              Inc(AState.Pointers);
+          except
+          end;
       end;
   finally
     Paths.Free;
   end;
   if AState.Files = 0 then
     Exit;
-  AState.Installed := FindTool('git-lfs') <> '';
+  AState.Installed := LfsInstalled;
   AState.SetUp := (RunGit(FRoot, ['config', 'filter.lfs.process'], Output) and
     (Trim(Output) <> '')) or (RunGit(FRoot, ['config', 'filter.lfs.smudge'], Output) and
     (Trim(Output) <> ''));
@@ -6381,7 +6429,7 @@ function TGittanRepo.LfsPull: boolean;
 begin
   if (FRoot = '') then
     Exit(False);
-  if FindTool('git-lfs') = '' then
+  if not LfsInstalled then
   begin
     FError := LfsMissingMessage;
     Exit(False);
@@ -6393,7 +6441,7 @@ function TGittanRepo.LfsInstall: boolean;
 begin
   if (FRoot = '') then
     Exit(False);
-  if FindTool('git-lfs') = '' then
+  if not LfsInstalled then
   begin
     FError := LfsMissingMessage;
     Exit(False);
@@ -6425,7 +6473,7 @@ begin
   Result := False;
   if (FRoot = '') or (APath = '') then
     Exit;
-  if FindTool('git-lfs') = '' then
+  if not LfsInstalled then
   begin
     FError := LfsMissingMessage;
     Exit;
