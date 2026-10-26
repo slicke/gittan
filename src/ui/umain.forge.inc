@@ -151,16 +151,21 @@ begin
   else if (APull.Clone <> '') and DirectoryExists(APull.Clone) then
   begin
     FForgeClonePull := ForgePullRequest(APull);
-    OpenRepository(APull.Clone, @ForgeCloneOpened);
+    FWindow.OpenRepository(APull.Clone, @ForgeCloneOpened);
   end
   else if APull.Url <> '' then
     SummaryOpenUrl(Self, APull.Url);
 end;
 
+{ Sender is the frame the clone opened in (TRepoWindow.OpenRepository);
+  the pull request is this one's. }
 procedure TRepoFrame.ForgeCloneOpened(Sender: TObject);
+var
+  Target: TRepoFrame;
 begin
-  if (FRepo.Root <> '') and FRepo.HasRemoteFor(FForgeClonePull.Repo) then
-    ComparePull(FForgeClonePull);
+  Target := TRepoFrame(Sender);
+  if (Target.FRepo.Root <> '') and Target.FRepo.HasRemoteFor(FForgeClonePull.Repo) then
+    Target.ComparePull(FForgeClonePull);
 end;
 
 procedure TRepoFrame.ForgePageRefresh(Sender: TObject);

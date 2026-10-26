@@ -146,7 +146,7 @@ end;
 
 procedure TRepoFrame.MenuRecentClick(Sender: TObject);
 begin
-  OpenRepository(TMenuItem(Sender).Hint);
+  FWindow.OpenRepository(TMenuItem(Sender).Hint);
 end;
 
 procedure TRepoFrame.MenuClearRecentClick(Sender: TObject);

@@ -201,8 +201,8 @@ begin
   LayoutRepoFiles;
   {$IFDEF OWNBAR}
   { The title bar's shade follows the sidebar's width. }
-  if FOwnBar <> nil then
-    FOwnBar.Invalidate;
+  if OwnBar <> nil then
+    OwnBar.Invalidate;
   {$ENDIF}
 end;
 

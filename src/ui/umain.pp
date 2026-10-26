@@ -20,7 +20,7 @@ uses
   gittan.sidenav, gittan.repoinfo, gittan.repopage, gittan.subpage,
   gittan.repocommands, gittan.commandpage,
   gittan.settingsdlg, gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
-  {$IFDEF LCLCocoa}gittan.toolbar, gittan.memohint,{$ENDIF}
+  {$IFDEF LCLCocoa}gittan.memohint,{$ENDIF}
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
   {$IFDEF LCLWin32}gittan.wintitlebar,{$ENDIF}
   {$IFDEF LCLGtk3}gittan.gtktitlebar,{$ENDIF}
@@ -110,6 +110,33 @@ type
     NoteInfo, NoteInfoLine, NoteError, NoteErrorLine: TColor;
   end;
 
+  TRepoFrame = class;
+
+  { TRepoWindow }
+
+  {** The window the frames are in (uwindow's TGittanWindow), as a frame
+    sees it: the frames leave the window's chrome, the opening of a
+    repository and the choice of the frame shown to it. }
+  TRepoWindow = class(TForm)
+  public
+    {** Opens the repository at ADir: shows the frame that has it open,
+      else opens it in the frame shown while that one is empty, else in
+      a new frame. AOnOpened as TRepoFrame.OpenRepository, called with
+      the frame that has it as Sender, also when it was open already. }
+    procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil);
+      virtual; abstract;
+    {** Whether AFrame is the frame shown, the one whose menu, caption
+      and title bar the window has. }
+    function IsActive(AFrame: TRepoFrame): boolean; virtual; abstract;
+    {** The height of the strip the title bar covers on macOS, where the
+      content reaches under it; 0 elsewhere. }
+    function TitleBarHeight: integer; virtual; abstract;
+    {$IFDEF OWNBAR}
+    {** The window's own title bar on Windows and GTK 3. }
+    function OwnBar: TGittanOwnTitleBar; virtual; abstract;
+    {$ENDIF}
+  end;
+
   { TRepoFrame }
 
   {** One repository in the window: the sidebar, the editor and the views
@@ -117,9 +144,11 @@ type
     jobs, timers and state behind them. The window (uwindow) creates it,
     places it over its client area and calls Init, and passes its own
     events on (FormClose, FormCloseQuery, FormKeyDown, FormActivate,
-    FormDropFiles). For now it still drives the window itself through
-    FWindow: the menu, the caption, the toolbar or own title bar, and
-    the active control. }
+    FormDropFiles). Several can be open; the window shows one at a time
+    (Activated) and the others go on in the background. The one shown
+    gives the window its menu and caption, the shade and band of its
+    title bar; a repository to open goes to the window, which picks the
+    frame (TRepoWindow.OpenRepository). }
   TRepoFrame = class(TFrame)
     Edit: TATSynEdit;
     EditorPanel: TPanel;
@@ -140,7 +169,11 @@ type
     procedure TreeHintTimerTimer(Sender: TObject);
   private
     { The window the frame is in, from Init. }
-    FWindow: TForm;
+    FWindow: TRepoWindow;
+    { The menu bar's menu and, on macOS, the items the application menu
+      starts with; the window shows this frame's while it is active. }
+    FMainMenu: TMainMenu;
+    FAppMenuItem: TMenuItem;
     FAdapter, FAdapterOld: TATAdapterEControl;
     FRepo: TGittanRepo;
     { The editor's font size when none was picked (DefaultFontSize for
@@ -282,24 +315,11 @@ type
       paints in the empty tree; a filter that hides every file does not
       count. }
     FTreeClean: boolean;
-    {$IFDEF LCLCocoa}
-    { The window's toolbar on macOS 11 and later (SetupTitleBar): the
-      name, the filter as a native search field in place of FTreeFilter,
-      and the header's navigator and pills. nil before macOS 11. }
-    FToolbar: TGittanToolbar;
-    {$ENDIF}
-    {$IFDEF OWNBAR}
-    { The window's own title bar on Windows and GTK 3 (SetupTitleBar): the
-      name, the menus, the filter field, the header's navigator and pills
-      and the caption buttons, in the strip the window system's title bar
-      had. A TGittanWinTitleBar or a TGittanGtkTitleBar. }
-    FOwnBar: TGittanOwnTitleBar;
-    {$ENDIF}
     { The height of the strip the title bar covers on macOS, where the
-      content reaches under it (SetupTitleBar); 0 elsewhere. }
+      content reaches under it (TRepoWindow.TitleBarHeight); 0 elsewhere. }
     FTitleBarHeight: integer;
     { The track and the fill of the indexing's band over the title bar
-      (ShowTitleBand, or FOwnBar.SetBand on Windows and GTK 3, from UpdateIndexBand), set by ApplyTheme. }
+      (ShowTitleBand, or the own title bar's SetBand on Windows and GTK 3, from UpdateIndexBand), set by ApplyTheme. }
     FBandTrack, FBandFill: TColor;
     { The Config section at the bottom of the tree panel
       (umain.repofiles.inc): the repository's own files from
@@ -886,8 +906,6 @@ type
     procedure HoldRefresh;
     procedure ReleaseRefresh;
     procedure RefreshPendingAsync(Data: PtrInt);
-    procedure OpenAtStartAsync(Data: PtrInt);
-    function StartRepository: string;
     function OpeningText(const ADir: string): string;
     procedure OpenJobDone(Sender: TObject);
     procedure AbandonOpenJob;
@@ -921,10 +939,12 @@ type
     function PullHint(const APull: TGittanPullRequest): string;
     procedure UpdateSyntaxChecks;
     procedure UpdateCaption;
+    {$IFDEF OWNBAR}
+    function OwnBar: TGittanOwnTitleBar;
+    {$ENDIF}
     procedure BuildMenu;
     procedure BuildSyntaxMenu;
     procedure AddLexerItems;
-    procedure LexersLoaded(Sender: TObject);
     procedure MenuOpenClick(Sender: TObject);
     procedure MenuOpenRepoClick(Sender: TObject);
     procedure MenuSyntaxClick(Sender: TObject);
@@ -1224,7 +1244,6 @@ type
     procedure OpenSettings(APage: TSettingsPage);
     procedure MenuSettingsClick(Sender: TObject);
     procedure MenuAboutClick(Sender: TObject);
-    procedure CheckGitVersion;
     procedure PreviewSettings(AFont: TFont; ATheme, ATabSize: integer);
     procedure ApplyEditorFont(AFont: TFont);
     procedure EditorMetricsChanged;
@@ -1660,15 +1679,8 @@ type
     procedure MenuSaveClick(Sender: TObject);
     procedure TreeFilterChange(Sender: TObject);
     procedure TreeFilterKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
-    function TreeFilterQuery: string;
-    {$IFDEF LCLCocoa}
-    procedure ToolbarSearchKey(Sender: TObject; var Key: word);
-    {$ENDIF}
-    procedure HeaderControlsChange(Sender: TObject);
     procedure MenuFilterFilesClick(Sender: TObject);
     procedure AbandonPullJob;
-    procedure UpdateChecked(Sender: TObject; AManual: boolean);
-    procedure ShowUpdateBadge;
     procedure UpdateDialog;
     procedure MenuCheckUpdatesClick(Sender: TObject);
     procedure PullJobDone(Sender: TObject);
@@ -1721,8 +1733,36 @@ type
       it then drives (FWindow). It runs in the window's FormCreate, so
       the window scales what it makes to the screen afterwards, as it
       did when this was the form's own FormCreate. }
-    procedure Init(AWindow: TForm);
+    procedure Init(AWindow: TRepoWindow);
     destructor Destroy; override;
+    {** The window shows this frame now: its menu, its caption, the
+      shade and band of the title bar. }
+    procedure Activated;
+    {** Nothing shown: no repository, none opening and no file; the
+      window opens a repository in such a frame rather than in a new
+      one. }
+    function IsBlank: boolean;
+    {** The root of the open repository, '' for none. }
+    function RepoRoot: string;
+    {** The welcome view says ADir is opening, before it does. }
+    procedure ShowOpening(const ADir: string);
+    {** Says the lexers' folder was not found. }
+    procedure ShowNoLexers;
+    {** Banners a git older than the one Gittan needs. }
+    procedure CheckGitVersion;
+    {** The lexers are in (App.Lexers.OnLoaded, through the window). }
+    procedure LexersLoaded(Sender: TObject);
+    {** A check for a newer build ended (App.OnUpdateChecked, through
+      the window): the badge, and when AManual the answer, which only
+      the frame shown gives. }
+    procedure UpdateChecked(Sender: TObject; AManual: boolean);
+    procedure ShowUpdateBadge;
+    {** The Commands page, from the name in the macOS toolbar. }
+    procedure ShowCommandsPage;
+    {$IFDEF LCLCocoa}
+    {** The application menu's first items, set before the menu. }
+    property AppMenuItem: TMenuItem read FAppMenuItem;
+    {$ENDIF}
     {** The window's events, which the window passes on. FormClose
       saves the settings. }
     procedure FormClose(Sender: TObject; var CloseAction: TCloseAction);
@@ -2794,10 +2834,10 @@ begin
   inherited MouseDown(Button, Shift, X, Y);
 end;
 
-procedure TRepoFrame.Init(AWindow: TForm);
+procedure TRepoFrame.Init(AWindow: TRepoWindow);
 begin
   FWindow := AWindow;
-  App.OnUpdateChecked := @UpdateChecked;
+  FTitleBarHeight := FWindow.TitleBarHeight;
   FindForge;
   FindAgentCli;
   FTabSize := App.Settings.TabSize;
@@ -3135,9 +3175,6 @@ begin
 
   FRepo := TGittanRepo.Create;
   FSnapshots := TGittanSnapshots.Create;
-  App.Lexers.OnLoaded := @LexersLoaded;
-  if not App.Lexers.Load then
-    FStatus.ShowMessage(rsNoLexers, stBad, 0);
   FDark := IsDarkMode;
   ApplyTheme;
 
@@ -3148,59 +3185,72 @@ begin
   SetupTitleBar;
   ApplySettings;
   BuildMenu;
-  {$IFDEF OWNBAR}
-  { The title bar lists the menus. }
-  FOwnBar.Layout;
-  {$ENDIF}
-  {$IFDEF LCLGtk3}
-  TGittanGtkTitleBar(FOwnBar).HideNativeMenu;
-  {$ENDIF}
   BuildPopups;
   ApplyWrap;
-  UpdateCaption;
   ShowSummary;
-  { The welcome view says what opens, rather than offer its buttons
-    until it does. }
-  if StartRepository <> '' then
-    FWelcome.SetBusy(OpeningText(StartRepository));
-  Application.QueueAsyncCall(@OpenAtStartAsync, 0);
+  if App.UpdateOk then
+    ShowUpdateBadge;
 end;
 
-{ The folder on the command line, else the repository of the last run
-  when there is no argument; empty for a file or nothing to open. }
-function TRepoFrame.StartRepository: string;
+procedure TRepoFrame.Activated;
 begin
-  Result := '';
-  if ParamCount > 0 then
-  begin
-    if DirectoryExists(ParamStr(1)) then
-      Result := ParamStr(1);
-  end
-  else if (App.Settings.Recent.Count > 0) and DirectoryExists(App.Settings.Recent[0]) then
-    Result := App.Settings.Recent[0];
+  {$IFDEF LCLCocoa}
+  CocoaConfigMenu.appMenu.customMenus := FAppMenuItem;
+  {$ENDIF}
+  FWindow.Menu := FMainMenu;
+  {$IFDEF OWNBAR}
+  { The title bar lists the menus and runs its shade to this frame's
+    splitter. }
+  OwnBar.SplitControl := TreeSplitter;
+  OwnBar.Layout;
+  {$ENDIF}
+  {$IFDEF LCLGtk3}
+  TGittanGtkTitleBar(OwnBar).HideNativeMenu;
+  {$ENDIF}
+  UpdateCaption;
+  ColorSidebar;
+  UpdateIndexBand;
 end;
+
+function TRepoFrame.IsBlank: boolean;
+begin
+  Result := (FRepo.Root = '') and (FOpenJob = nil) and (FView = gvSummary);
+end;
+
+function TRepoFrame.RepoRoot: string;
+begin
+  Result := FRepo.Root;
+end;
+
+procedure TRepoFrame.ShowOpening(const ADir: string);
+begin
+  FWelcome.SetBusy(OpeningText(ADir));
+end;
+
+procedure TRepoFrame.ShowNoLexers;
+begin
+  FStatus.ShowMessage(rsNoLexers, stBad, 0);
+end;
+
+procedure TRepoFrame.ShowCommandsPage;
+begin
+  MenuCommandsClick(nil);
+end;
+
+{$IFDEF OWNBAR}
+{ The window's title bar while this frame is shown, else nil: a frame in
+  the background leaves it alone. }
+function TRepoFrame.OwnBar: TGittanOwnTitleBar;
+begin
+  Result := nil;
+  if (FWindow <> nil) and FWindow.IsActive(Self) then
+    Result := FWindow.OwnBar;
+end;
+{$ENDIF}
 
 function TRepoFrame.OpeningText(const ADir: string): string;
 begin
   Result := Format(rsOpening, [ExtractFileName(ExcludeTrailingPathDelimiter(ADir))]);
-end;
-
-{ Opening a repository runs some twenty git commands one after the other,
-  which takes seconds on Windows, where a process is slow to start; queued
-  from FormCreate it runs once the window is shown and painted. A folder
-  or file dropped on the Dock icon at launch may be open or opening by
-  then (FormDropFiles), and stays. }
-procedure TRepoFrame.OpenAtStartAsync(Data: PtrInt);
-begin
-  { gittan [file | folder], else the repository of the last run. }
-  if (FRepo.Root <> '') or (FOpenJob <> nil) or (FView <> gvSummary) then
-    { opened already }
-  else if StartRepository <> '' then
-    OpenRepository(StartRepository)
-  else if ParamCount > 0 then
-    OpenFile(ParamStr(1));
-  { After the repository, whose opening clears the banners. }
-  CheckGitVersion;
 end;
 
 destructor TRepoFrame.Destroy;
@@ -3220,8 +3270,6 @@ begin
   AbandonPullJob;
   AbandonForgeJob;
   AbandonReviewJob;
-  App.OnUpdateChecked := nil;
-  App.Lexers.OnLoaded := nil;
   AbandonSubmoduleJobs;
   FreeAndNil(FSubJobs);
   FreeAndNil(FForge);
@@ -3246,9 +3294,6 @@ begin
     FIndexAdapter.Lexer := nil;
   FreeAndNil(FRepo);
   FreeAndNil(FSnapshots);
-  {$IFDEF LCLCocoa}
-  FreeAndNil(FToolbar);
-  {$ENDIF}
   FreeAndNil(FChangeLines);
   FreeAndNil(FIndex);
   FreeAndNil(FIndexQueue);
@@ -3640,7 +3685,7 @@ begin
   if Length(FileNames) = 0 then
     Exit;
   if DirectoryExists(FileNames[0]) then
-    OpenRepository(FileNames[0])
+    FWindow.OpenRepository(FileNames[0])
   else
     OpenFile(FileNames[0]);
 end;
@@ -3650,7 +3695,7 @@ begin
   if FRepo.Root <> '' then
     DirDialog.InitialDir := FRepo.Root;
   if DirDialog.Execute then
-    OpenRepository(DirDialog.FileName);
+    FWindow.OpenRepository(DirDialog.FileName);
 end;
 
 { The window is named after the repository, or the file when none is
@@ -3670,7 +3715,8 @@ begin
   {$IFDEF LCLCocoa}
   Title := StringReplace(Title, '&', '&&', [rfReplaceAll]);
   {$ENDIF}
-  FWindow.Caption := Title;
+  if FWindow.IsActive(Self) then
+    FWindow.Caption := Title;
 end;
 
 { The status bar shows the repository whenever one is open: its name,
@@ -4073,6 +4119,7 @@ var
 
 begin
   Main := TMainMenu.Create(Self);
+  FMainMenu := Main;
   { On macOS About Gittan and Settings are in the application menu,
     which the LCL builds when the menu is set, with these items first,
     before Services. }
@@ -4081,9 +4128,8 @@ begin
   AddItem(Item, rsAbout, 0, @MenuAboutClick);
   Item.Add(NewLine);
   AddItem(Item, rsSettings, ShortCut(VK_OEM_COMMA, [ssModifier]), @MenuSettingsClick);
-  CocoaConfigMenu.appMenu.customMenus := Item;
+  FAppMenuItem := Item;
   {$ENDIF}
-  FWindow.Menu := Main;
 
   FileMenu := TMenuItem.Create(Main);
   FileMenu.Caption := rsFile;
@@ -6136,7 +6182,7 @@ end;
 
 procedure TRepoFrame.WelcomeOpenRecent(Sender: TObject; const ARoot: string);
 begin
-  OpenRepository(ARoot);
+  FWindow.OpenRepository(ARoot);
 end;
 
 procedure TRepoFrame.WelcomeClone(Sender: TObject);
@@ -6541,64 +6587,14 @@ end;
   the controls at the top of both, the filter field and the header or
   the summary, are moved down by the strip's height, and the splitter
   too, which otherwise showed its cursor where a drag moved the window.
-  On Windows and GTK 3 the form draws the title bar itself
-  (gittan.owntitlebar; gittan.wintitlebar and gittan.gtktitlebar), with
-  the name, the menus, the filter field, the header's navigator and
-  pills and the caption buttons in it. }
+  The window makes the strip and the toolbar in it (uwindow); on Windows
+  and GTK 3 it draws the title bar itself (gittan.owntitlebar), with the
+  name, the menus and the caption buttons, above the frames. The filter
+  field over the tree, the header's navigator and its pills are the
+  frame's own. }
 procedure TRepoFrame.SetupTitleBar;
 begin
-  {$IFDEF LCLCocoa}
-  { The toolbar first: it makes the strip taller. }
-  FToolbar := TGittanToolbar.Install(FWindow.Handle, rsAppShortName, rsFilterHint);
-  if FToolbar <> nil then
-  begin
-    FTreeFilter.Visible := False;
-    FToolbar.OnSearchChange := @TreeFilterChange;
-    FToolbar.OnSearchKey := @ToolbarSearchKey;
-    FToolbar.OnAction := @HeaderAction;
-    FToolbar.OnName := @MenuCommandsClick;
-    FToolbar.OnPrev := @MenuPrevChangeClick;
-    FToolbar.OnNext := @MenuNextChangeClick;
-    FToolbar.OnConflictPrev := @MenuPrevConflictClick;
-    FToolbar.OnConflictNext := @MenuNextConflictClick;
-    FHeader.ShowControls := False;
-    FHeader.OnControlsChange := @HeaderControlsChange;
-    HeaderControlsChange(nil);
-  end;
-  FTitleBarHeight := ExtendUnderTitleBar(FWindow.Handle);
-  {$ENDIF}
-  {$IFDEF LCLWin32}
-  FOwnBar := TGittanWinTitleBar.Create(Self);
-  {$ENDIF}
-  {$IFDEF LCLGtk3}
-  FOwnBar := TGittanGtkTitleBar.Create(Self);
-  {$ENDIF}
-  {$IFDEF OWNBAR}
-  FOwnBar.Title := rsAppShortName;
-  FOwnBar.Align := alTop;
-  FOwnBar.Parent := Self;
-  FOwnBar.SplitControl := TreeSplitter;
-  FOwnBar.Search := FTreeFilter;
-  FOwnBar.OnAction := @HeaderAction;
-  FOwnBar.Nav.OnPrev := @MenuPrevChangeClick;
-  FOwnBar.Nav.OnNext := @MenuNextChangeClick;
-  FOwnBar.ConflictNav.Suffix := rsConflictsSuffix;
-  FOwnBar.ConflictNav.OnPrev := @MenuPrevConflictClick;
-  FOwnBar.ConflictNav.OnNext := @MenuNextConflictClick;
-  FHeader.ShowControls := False;
-  FHeader.OnControlsChange := @HeaderControlsChange;
-  HeaderControlsChange(nil);
-  {$ENDIF}
-  {$IFDEF LCLWin32}
-  InstallTitleBar(FWindow, TGittanWinTitleBar(FOwnBar));
-  {$ENDIF}
-  {$IFDEF LCLGtk3}
-  InstallTitleBar(FWindow, TGittanGtkTitleBar(FOwnBar));
-  {$ENDIF}
   FTreeFilter.BorderSpacing.Top := FTitleBarHeight;
-  { With the toolbar's field in its place the page rows are at the top. }
-  if not FTreeFilter.Visible then
-    FSideNav.BorderSpacing.Top := FTitleBarHeight;
   PlaceUnderTitleBar;
   TreeSplitter.BorderSpacing.Top := FTitleBarHeight;
   ColorSidebar;
@@ -6611,6 +6607,8 @@ end;
   big files of a large repository take seconds between those. }
 procedure TRepoFrame.UpdateIndexBand;
 begin
+  if not FWindow.IsActive(Self) then
+    Exit;
   {$IFDEF LCLCocoa}
   if FIndexing then
     ShowTitleBand(FWindow.Handle, FIndexPos, FIndexTotal, ColorToRGB(FBandTrack),
@@ -6619,12 +6617,10 @@ begin
     HideTitleBand(FWindow.Handle);
   {$ENDIF}
   {$IFDEF OWNBAR}
-  if FOwnBar = nil then
-    Exit;
   if FIndexing then
-    FOwnBar.SetBand(FIndexPos, FIndexTotal, FBandTrack, FBandFill)
+    OwnBar.SetBand(FIndexPos, FIndexTotal, FBandTrack, FBandFill)
   else
-    FOwnBar.SetBand(0, 0, FBandTrack, FBandFill);
+    OwnBar.SetBand(0, 0, FBandTrack, FBandFill);
   {$ENDIF}
 end;
 
@@ -6653,27 +6649,27 @@ begin
   {$IFDEF OWNBAR}
   { The title bar runs the sidebar's shade over the sidebar and the
     editor's background over the rest, with the header's pills. }
-  if FOwnBar <> nil then
+  if OwnBar <> nil then
     if FDark then
     begin
-      FOwnBar.SetColors(Shade, Edit.Colors.TextBG, Edit.Colors.TextFont,
+      OwnBar.SetColors(Shade, Edit.Colors.TextBG, Edit.Colors.TextFont,
         RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(85, 85, 86),
         RGBToColor(100, 160, 240), RGBToColor(50, 50, 51), RGBToColor(70, 70, 71),
         RGBToColor(62, 62, 63));
-      FOwnBar.Nav.SetColors(Edit.Colors.TextBG, RGBToColor(50, 50, 51),
+      OwnBar.Nav.SetColors(Edit.Colors.TextBG, RGBToColor(50, 50, 51),
         RGBToColor(85, 85, 86), RGBToColor(200, 200, 200), RGBToColor(100, 160, 240));
-      FOwnBar.ConflictNav.SetColors(Edit.Colors.TextBG, RGBToColor(58, 46, 68),
+      OwnBar.ConflictNav.SetColors(Edit.Colors.TextBG, RGBToColor(58, 46, 68),
         RGBToColor(120, 80, 160), RGBToColor(210, 170, 245), RGBToColor(240, 215, 255));
     end
     else
     begin
-      FOwnBar.SetColors(Shade, Edit.Colors.TextBG, RGBToColor(30, 30, 30),
+      OwnBar.SetColors(Shade, Edit.Colors.TextBG, RGBToColor(30, 30, 30),
         RGBToColor(110, 110, 110), clWhite, RGBToColor(205, 205, 205),
         RGBToColor(0, 110, 230), clWhite, RGBToColor(205, 205, 205),
         RGBToColor(229, 229, 229));
-      FOwnBar.Nav.SetColors(Edit.Colors.TextBG, clWhite,
+      OwnBar.Nav.SetColors(Edit.Colors.TextBG, clWhite,
         RGBToColor(205, 205, 205), RGBToColor(70, 70, 70), RGBToColor(0, 110, 230));
-      FOwnBar.ConflictNav.SetColors(Edit.Colors.TextBG, RGBToColor(248, 240, 255),
+      OwnBar.ConflictNav.SetColors(Edit.Colors.TextBG, RGBToColor(248, 240, 255),
         RGBToColor(190, 160, 220), RGBToColor(110, 50, 160), RGBToColor(155, 63, 200));
     end;
   {$ENDIF}
@@ -6685,11 +6681,11 @@ procedure TRepoFrame.TreeFilterChange(Sender: TObject);
 var
   Handler: TNotifyEvent;
 begin
-  FTreeFilterText := LowerCase(Trim(TreeFilterQuery));
+  FTreeFilterText := LowerCase(Trim(FTreeFilter.Text));
   {$IFDEF OWNBAR}
   { The clear button shows while there is text. }
-  if FOwnBar <> nil then
-    FOwnBar.Invalidate;
+  if OwnBar <> nil then
+    OwnBar.Invalidate;
   {$ENDIF}
   Handler := FileTree.OnSelectionChanged;
   FileTree.OnSelectionChanged := nil;
@@ -6710,7 +6706,7 @@ begin
     VK_ESCAPE:
       begin
         Key := 0;
-        if TreeFilterQuery <> '' then
+        if FTreeFilter.Text <> '' then
           FTreeFilter.Text := ''
         else if FileTree.CanFocus then
           FileTree.SetFocus;
@@ -6728,101 +6724,18 @@ begin
   end;
 end;
 
-{ The filter's text: the toolbar's search field on macOS, else the
-  field over the tree. }
-function TRepoFrame.TreeFilterQuery: string;
-begin
-  {$IFDEF LCLCocoa}
-  if FToolbar <> nil then
-    Exit(FToolbar.SearchText);
-  {$ENDIF}
-  Result := FTreeFilter.Text;
-end;
 
-{ A command's key runs it (CommandKey). On GTK Alt and a letter opens
-  the menu with that accelerator from the title bar, as the menu bar
-  would have before the bar hid its names. }
+{ A command's key runs it (CommandKey). }
 procedure TRepoFrame.FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
 begin
   if CommandKey(Key, Shift) then
-  begin
     Key := 0;
-    Exit;
-  end;
-  {$IFDEF LCLGtk3}
-  if (Shift * [ssAlt, ssCtrl, ssShift, ssMeta] = [ssAlt]) and (Key >= VK_A) and
-    (Key <= VK_Z) and (FOwnBar <> nil) and FOwnBar.OpenMenuByKey(Chr(Key)) then
-    Key := 0;
-  {$ENDIF}
 end;
 
-{$IFDEF LCLCocoa}
-{ The search field passes Escape (when it is empty), Enter and Down on
-  as the field over the tree takes them. The form does not know the
-  field and still has the control focused before it as the active one,
-  so focusing that again would do nothing. }
-procedure TRepoFrame.ToolbarSearchKey(Sender: TObject; var Key: word);
-begin
-  FWindow.ActiveControl := nil;
-  TreeFilterKeyDown(Sender, Key, []);
-end;
-{$ENDIF}
 
-{ The toolbar (macOS) or the title bar (Windows, GTK 3) shows the header's
-  navigator and pills, none while the header is hidden (the summary). }
-procedure TRepoFrame.HeaderControlsChange(Sender: TObject);
-var
-  Captions: array of string;
-  States: array of boolean;
-  i, Current, Total, ConflictCurrent, ConflictTotal: integer;
-begin
-  Captions := nil;
-  States := nil;
-  Current := 0;
-  Total := 0;
-  ConflictCurrent := 0;
-  ConflictTotal := 0;
-  if FHeader.Visible then
-  begin
-    SetLength(Captions, FHeader.ActionCount);
-    SetLength(States, FHeader.ActionCount);
-    for i := 0 to FHeader.ActionCount - 1 do
-    begin
-      Captions[i] := FHeader.ActionCaption[i];
-      States[i] := FHeader.ActionEnabled[i];
-    end;
-    Current := FHeader.ChangeCurrent;
-    Total := FHeader.ChangeTotal;
-    ConflictCurrent := FHeader.ConflictCurrent;
-    ConflictTotal := FHeader.ConflictTotal;
-  end;
-  {$IFDEF LCLCocoa}
-  if FToolbar <> nil then
-  begin
-    FToolbar.SetConflicts(ConflictCurrent, ConflictTotal, rsConflictsSuffix);
-    FToolbar.SetChanges(Current, Total);
-    FToolbar.SetActions(Captions, States);
-  end;
-  {$ENDIF}
-  {$IFDEF OWNBAR}
-  if FOwnBar <> nil then
-  begin
-    FOwnBar.SetConflicts(ConflictCurrent, ConflictTotal);
-    FOwnBar.SetChanges(Current, Total);
-    FOwnBar.SetActions(Captions, States);
-  end;
-  {$ENDIF}
-end;
 
 procedure TRepoFrame.MenuFilterFilesClick(Sender: TObject);
 begin
-  {$IFDEF LCLCocoa}
-  if FToolbar <> nil then
-  begin
-    FToolbar.FocusSearch;
-    Exit;
-  end;
-  {$ENDIF}
   if FTreeFilter.CanFocus then
   begin
     FTreeFilter.SetFocus;

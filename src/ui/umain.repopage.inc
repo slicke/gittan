@@ -95,7 +95,7 @@ end;
 procedure TRepoFrame.RecentPopupPick(Sender: TObject; AIndex: integer);
 begin
   if AIndex < App.Settings.Recent.Count then
-    OpenRepository(App.Settings.Recent[AIndex])
+    FWindow.OpenRepository(App.Settings.Recent[AIndex])
   else
     MenuOpenRepoClick(Sender);
 end;

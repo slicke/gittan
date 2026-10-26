@@ -54,24 +54,29 @@ begin
     ShowRemoteFailure(AJob, False);
     Exit;
   end;
-  OpenRepository(AJob.Root, @ClonedOpened);
+  FWindow.OpenRepository(AJob.Root, @ClonedOpened);
 end;
 
 { The notes after a clone or an init wait for the repository, which
   opens in a thread. }
+{ Sender is the frame the repository opened in, which may be another
+  one (TRepoWindow.OpenRepository). }
 procedure TRepoFrame.ClonedOpened(Sender: TObject);
 begin
-  BannerSuccess(Format(rsCloned, [ExtractFileName(FRepo.Root)]));
+  with TRepoFrame(Sender) do
+    BannerSuccess(Format(rsCloned, [ExtractFileName(FRepo.Root)]));
 end;
 
 procedure TRepoFrame.InitAlreadyOpened(Sender: TObject);
 begin
-  StatusNote(Format(rsInitAlready, [ExtractFileName(FRepo.Root)]));
+  with TRepoFrame(Sender) do
+    StatusNote(Format(rsInitAlready, [ExtractFileName(FRepo.Root)]));
 end;
 
 procedure TRepoFrame.InitDoneOpened(Sender: TObject);
 begin
-  BannerSuccess(Format(rsInitDone, [ExtractFileName(FRepo.Root)]));
+  with TRepoFrame(Sender) do
+    BannerSuccess(Format(rsInitDone, [ExtractFileName(FRepo.Root)]));
 end;
 
 procedure TRepoFrame.MenuCloneClick(Sender: TObject);
@@ -113,7 +118,7 @@ begin
   end;
   if FileExists(Dir + PathDelim + '.git') or DirectoryExists(Dir + PathDelim + '.git') then
   begin
-    OpenRepository(Dir, @InitAlreadyOpened);
+    FWindow.OpenRepository(Dir, @InitAlreadyOpened);
     Exit;
   end;
   Probe := TGittanRepo.Create;
@@ -136,7 +141,7 @@ begin
       BannerError(Format(rsInitFailed, [Dir]), Err);
     Exit;
   end;
-  OpenRepository(Dir, @InitDoneOpened);
+  FWindow.OpenRepository(Dir, @InitDoneOpened);
 end;
 
 function TRepoFrame.CanEditRemotes: boolean;

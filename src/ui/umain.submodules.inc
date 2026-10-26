@@ -446,7 +446,7 @@ procedure TRepoFrame.OpenShownSubmodule;
 begin
   if (FRepo.Root = '') or (FSubShown = '') then
     Exit;
-  OpenRepository(IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(FSubShown));
+  FWindow.OpenRepository(IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(FSubShown));
 end;
 
 { After a refresh: the shown submodule again, or the summary when it is
@@ -695,7 +695,7 @@ var
 begin
   Path := PopupSubmodulePath;
   if Path <> '' then
-    OpenRepository(IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(Path));
+    FWindow.OpenRepository(IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(Path));
 end;
 
 procedure TRepoFrame.MenuSubCopyPathClick(Sender: TObject);
