@@ -1728,6 +1728,20 @@ begin
     AssertFalse(FRepo.Commit('blocked', Paths, False, Id));
     AssertEquals(FRepo.Error, 1, Pos(#27'[31mhook says no', FRepo.Error));
     AssertEquals('M  a.txt'#0'?? new.txt'#0, Git(['status', '--porcelain', '-z']));
+    { Past the hook, signed off. }
+    AssertTrue(FRepo.Error, FRepo.Commit('past the hook', Paths, False, Id, nil,
+      [coNoVerify, coSignOff]));
+    AssertTrue(FRepo.HeadMessage(Text));
+    AssertEquals(Text, 1, Pos('past the hook'#10#10'Signed-off-by: ', Text));
+    AssertEquals('new'#10, HeadFile(FDir, 'new.txt'));
+
+    AssertFalse(FRepo.SignOff);
+    AssertTrue(FRepo.SetSignOff(True));
+    AssertTrue(FRepo.SignOff);
+    AssertEquals('true', Trim(Git(['config', '--local', 'gittan.signOff'])));
+    AssertTrue(FRepo.SetSignOff(False));
+    AssertFalse(FRepo.SignOff);
+    AssertTrue('off when off', FRepo.SetSignOff(False));
   finally
     Paths.Free;
   end;
@@ -1810,14 +1824,15 @@ begin
     AssertFalse(FRepo.Commit('blocked', Paths, False, Id, Parts));
     AssertTrue(FRepo.Error, Pos('hook says no', FRepo.Error) > 0);
     AssertEquals(' M a.txt'#0'M  staged.txt'#0, Git(['status', '--porcelain', '-z']));
-    DeleteFile(Hook);
 
-    AssertTrue(FRepo.Error, FRepo.Commit('amended', Paths, True, Id, Parts));
+    { Through the temporary index too: past the hook, signed off. }
+    AssertTrue(FRepo.Error, FRepo.Commit('amended', Paths, True, Id, Parts,
+      [coNoVerify, coSignOff]));
     AssertEquals(Parent, Trim(Git(['rev-parse', 'HEAD~1'])));
     AssertEquals('ONE'#10'two'#10'THREE'#10, HeadFile(FDir, 'a.txt'));
     AssertEquals('the amended commit keeps its files', 'new'#10, HeadFile(FDir, 'new.txt'));
     AssertTrue(FRepo.HeadMessage(Text));
-    AssertEquals('amended', Text);
+    AssertEquals(Text, 1, Pos('amended'#10#10'Signed-off-by: ', Text));
     AssertEquals('M  staged.txt'#0, Git(['status', '--porcelain', '-z']));
   finally
     Paths.Free;

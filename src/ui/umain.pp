@@ -331,6 +331,14 @@ type
     FCommitHeader: TGittanSectionHeader;
     FCommitMemo: TMemo;
     FCommitAmend: TCheckBox;
+    { After Amend: "⌄", or the option that is on ("Sign-off ⌄") in the
+      accent, whose click drops the menu of Sign Off (kept in the
+      repository's config, FSignOff) and Skip Hooks (this commit only,
+      FSkipHooks). }
+    FCommitOptions: TLabel;
+    FCommitOptionsMenu: TPopupMenu;
+    FSignOffItem, FSkipHooksItem: TMenuItem;
+    FSignOff, FSkipHooks: boolean;
     FCommitButton: TButton;
     { The length of the message's first line, by the Commit button, once
       it is past SubjectSoftLimit; in the warning color past
@@ -1381,6 +1389,10 @@ type
     procedure CommitMemoChange(Sender: TObject);
     procedure CommitMemoKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
     procedure CommitAmendClick(Sender: TObject);
+    procedure CommitOptionsClick(Sender: TObject);
+    procedure SignOffItemClick(Sender: TObject);
+    procedure SkipHooksItemClick(Sender: TObject);
+    procedure UpdateCommitOptions;
     procedure CommitButtonClick(Sender: TObject);
     procedure MenuCommitClick(Sender: TObject);
     {** Asks for the name and e-mail to commit under, the global ones
@@ -1865,6 +1877,14 @@ resourcestring
   rsCommitButton = 'Commit';
   rsCommitAmendButton = 'Amend Commit';
   rsCommitAmend = 'Amend';
+  rsSignOffItem = 'Sign Off';
+  rsSkipHooksItem = 'Skip Hooks';
+  rsSignOffShort = 'Sign-off';
+  rsSkipHooksShort = 'No hooks';
+  rsCommitOptionsCount = '%d options';
+  rsCommitOptionsHint = 'Commit options: Sign Off adds a Signed-off-by line with your name ' +
+    '(kept for this repository), Skip Hooks commits without the pre-commit and commit-msg ' +
+    'hooks (this commit only)';
   rsWriteMessage = '✦ AI';
   rsAIReviewMenu = 'Review Changes with AI';
   rsAIReviewStopMenu = 'Stop AI Review';

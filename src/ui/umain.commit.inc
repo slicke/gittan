@@ -94,6 +94,25 @@ begin
   FCommitAmend.Align := alLeft;
   FCommitAmend.OnClick := @CommitAmendClick;
   FCommitAmend.Parent := FCommitRow;
+  FCommitOptions := TLabel.Create(Self);
+  FCommitOptions.Align := alLeft;
+  FCommitOptions.Left := 500;
+  FCommitOptions.Layout := tlCenter;
+  FCommitOptions.BorderSpacing.Left := 2;
+  FCommitOptions.Cursor := crHandPoint;
+  FCommitOptions.ShowHint := True;
+  FCommitOptions.Hint := rsCommitOptionsHint;
+  FCommitOptions.OnClick := @CommitOptionsClick;
+  FCommitOptions.Parent := FCommitRow;
+  FCommitOptionsMenu := TPopupMenu.Create(Self);
+  FSignOffItem := TMenuItem.Create(FCommitOptionsMenu);
+  FSignOffItem.Caption := rsSignOffItem;
+  FSignOffItem.OnClick := @SignOffItemClick;
+  FCommitOptionsMenu.Items.Add(FSignOffItem);
+  FSkipHooksItem := TMenuItem.Create(FCommitOptionsMenu);
+  FSkipHooksItem.Caption := rsSkipHooksItem;
+  FSkipHooksItem.OnClick := @SkipHooksItemClick;
+  FCommitOptionsMenu.Items.Add(FSkipHooksItem);
   FAbortButton := TButton.Create(Self);
   FAbortButton.Caption := rsAbortButton;
   FAbortButton.Align := alLeft;
@@ -229,6 +248,7 @@ begin
   FCommitNote.LinkColor := P.Accent;
   FCommitNote.SetColors(P.NoteInfo, P.NoteInfoLine, P.NoteError, P.NoteErrorLine);
   FCommitNote.GlyphColor := P.Dim;
+  UpdateCommitOptions;
   FBisectNote.Font.Color := FCommitNote.Font.Color;
   FBisectNote.SetColors(P.NoteInfo, P.NoteInfoLine, P.NoteError, P.NoteErrorLine);
   UpdateSubjectCount;
@@ -585,6 +605,10 @@ begin
   FCommitMemo.Enabled := not Continuing;
   FCommitAmend.Visible := FOperation = '';
   FCommitAmend.Enabled := not Busy;
+  { A merge's commit takes them too; carrying on with a rebase or a
+    cherry-pick does not commit through Commit. }
+  FCommitOptions.Visible := not Continuing;
+  FCommitOptions.Enabled := not Busy;
   FAbortButton.Visible := (FOperation <> '') and (FOperation <> 'bisecting');
   FAbortButton.Enabled := not Busy;
   FSkipButton.Visible := Continuing;
@@ -646,6 +670,64 @@ begin
     if FCommitButton.Enabled then
       CommitButtonClick(Sender);
   end;
+end;
+
+{ "⌄" alone, or the option that is on ("2 options" for both) before it
+  in the accent, so a commit that would be signed off or skip the hooks
+  says so beside Amend. }
+procedure TForm1.UpdateCommitOptions;
+var
+  Shown: string;
+begin
+  if FCommitOptions = nil then
+    Exit;
+  Shown := '';
+  if FSignOff then
+    Shown := rsSignOffShort;
+  { Both would not fit beside Amend and Commit; the menu says which. }
+  if FSkipHooks then
+    if Shown = '' then
+      Shown := rsSkipHooksShort
+    else
+      Shown := Format(rsCommitOptionsCount, [2]);
+  if Shown = '' then
+    FCommitOptions.Caption := '⌄'
+  else
+    FCommitOptions.Caption := Shown + ' ⌄';
+  if Shown = '' then
+    FCommitOptions.Font.Color := Palette.Dim
+  else
+    FCommitOptions.Font.Color := Palette.Accent;
+end;
+
+{ The menu under the label, its items ticked as they are; Sign Off is
+  read again, as git config may have changed it from outside. }
+procedure TForm1.CommitOptionsClick(Sender: TObject);
+var
+  At: TPoint;
+begin
+  if (FRepo.Root = '') or not FCommitOptions.Enabled then
+    Exit;
+  FSignOff := FRepo.SignOff;
+  FSignOffItem.Checked := FSignOff;
+  FSkipHooksItem.Checked := FSkipHooks;
+  UpdateCommitOptions;
+  At := FCommitOptions.ClientToScreen(Point(0, FCommitOptions.Height));
+  FCommitOptionsMenu.PopUp(At.X, At.Y);
+end;
+
+procedure TForm1.SignOffItemClick(Sender: TObject);
+begin
+  if not FRepo.SetSignOff(not FSignOff) then
+    StatusNote(FRepo.Error, True);
+  FSignOff := FRepo.SignOff;
+  UpdateCommitOptions;
+end;
+
+procedure TForm1.SkipHooksItemClick(Sender: TObject);
+begin
+  FSkipHooks := not FSkipHooks;
+  UpdateCommitOptions;
 end;
 
 { Amend takes HEAD's message into an empty field, and gives it back
@@ -750,6 +832,7 @@ procedure TForm1.StartCommit;
 var
   Paths: TStringList;
   Parts: TGittanCommitParts;
+  Options: TGittanCommitOptions;
   Err: string;
 begin
   if (FCommitJob <> nil) or (FRemoteJob <> nil) or not FCommitButton.Enabled or
@@ -765,8 +848,13 @@ begin
       BannerError(rsCommitFailed, Err);
       Exit;
     end;
+    Options := [];
+    if FSignOff then
+      Include(Options, coSignOff);
+    if FSkipHooks then
+      Include(Options, coNoVerify);
     FCommitJob := TGittanCommitJob.Create(FRepo.Root, FCommitMemo.Text, Paths,
-      FCommitAmend.Checked, Parts);
+      FCommitAmend.Checked, Parts, Options);
   finally
     Paths.Free;
   end;
@@ -803,6 +891,8 @@ begin
     FCommitAmend.Checked := False;
     FAmendMessage := '';
     FMergeMessage := '';
+    FSkipHooks := False;
+    UpdateCommitOptions;
     FCommitOn.Clear;
     FCommitOff.Clear;
     FLeftOut.ClearAll;
@@ -945,6 +1035,9 @@ begin
   FAmendMessage := '';
   FMergeMessage := '';
   FCommitDraftFor := FRepo.Root;
+  FSignOff := FRepo.SignOff;
+  FSkipHooks := False;
+  UpdateCommitOptions;
   if (FRepo.Root <> '') and (FSettings.CommitDraftRepo = FRepo.Root) then
     FCommitMemo.Text := FSettings.CommitDraft
   else

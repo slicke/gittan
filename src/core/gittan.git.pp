@@ -215,6 +215,12 @@ type
   end;
   TGittanCommitParts = array of TGittanCommitPart;
 
+  {** How a commit is made besides its message and files: with a
+    Signed-off-by line of the committer (`--signoff`), and without the
+    pre-commit and commit-msg hooks (`--no-verify`). }
+  TGittanCommitOption = (coSignOff, coNoVerify);
+  TGittanCommitOptions = set of TGittanCommitOption;
+
   {** One opened repository. Open finds the work tree root for a folder, and
     the other calls run inside that root. }
   TGittanRepo = class
@@ -379,9 +385,11 @@ type
       temporary index, HEAD's tree with APaths added and AParts written
       over them, and the real index takes the committed paths as the new
       HEAD has them, so what was left out shows as not staged; during a
-      merge, a cherry-pick or a revert AParts go into the real index. }
+      merge, a cherry-pick or a revert AParts go into the real index.
+      AOptions add a sign-off or skip the hooks. }
     function Commit(const AMessage: string; APaths: TStrings; AAmend: boolean;
-      out AId: string; const AParts: TGittanCommitParts = nil): boolean;
+      out AId: string; const AParts: TGittanCommitParts = nil;
+      AOptions: TGittanCommitOptions = []): boolean;
     {** The whole message of HEAD, without its trailing line ends; false
       before the first commit. }
     function HeadMessage(out AMessage: string): boolean;
@@ -695,6 +703,12 @@ type
     {** Whether the repository sets a name or an e-mail of its own
       (`git config --local`), which go before the global ones. }
     function HasLocalIdentity: boolean;
+    {** Whether commits in the repository are signed off, as Gittan keeps
+      it in the repository's own config (`gittan.signOff`), so it holds
+      for that repository and its worktrees alone. }
+    function SignOff: boolean;
+    {** Keeps ASignOff for SignOff, unsetting the key when off. }
+    function SetSignOff(ASignOff: boolean): boolean;
     {** The remote whose URL holds ARepoPath ("owner/repo", compared
       without regard to case), else origin, else the first remote, else
       empty. }
@@ -2503,6 +2517,27 @@ begin
     RunGit(FRoot, ['config', '--local', 'user.email'], Output));
 end;
 
+function TGittanRepo.SignOff: boolean;
+var
+  Output: string;
+begin
+  Result := (FRoot <> '') and RunGit(FRoot, ['config', '--local', '--bool', 'gittan.signOff'],
+    Output) and (Trim(Output) = 'true');
+end;
+
+{ --unset fails (5) when the key is not there, which is what off is. }
+function TGittanRepo.SetSignOff(ASignOff: boolean): boolean;
+var
+  Output, Err: string;
+begin
+  if FRoot = '' then
+    Exit(False);
+  if ASignOff then
+    Exit(RunGit(FRoot, ['config', '--local', 'gittan.signOff', 'true'], Output));
+  RunGitIn(FRoot, ['config', '--local', '--unset-all', 'gittan.signOff'], Output, Err);
+  Result := not SignOff;
+end;
+
 function TGittanRepo.RemoteFor(const ARepoPath: string): string;
 var
   Output, Line, Name: string;
@@ -3207,13 +3242,30 @@ end;
   added, such a path is left to the index, which already says it is
   gone. }
 function TGittanRepo.Commit(const AMessage: string; APaths: TStrings;
-  AAmend: boolean; out AId: string; const AParts: TGittanCommitParts): boolean;
+  AAmend: boolean; out AId: string; const AParts: TGittanCommitParts;
+  AOptions: TGittanCommitOptions): boolean;
 var
   Output, Entry, Path, XY, Op, Err, SpecFile, AddFile, MsgFile, PartFile, Index: string;
   Fields, Chosen, Spec, Added, Untrack: TStringList;
   Args: TStringArray;
   Whole: boolean;
   i: integer;
+
+  { -F with the message, then --amend, --signoff and --no-verify as
+    asked. }
+  procedure AddCommitArgs;
+  begin
+    AddArg(Args, 'commit');
+    AddArg(Args, '-q');
+    AddArg(Args, '-F');
+    AddArg(Args, MsgFile);
+    if AAmend then
+      AddArg(Args, '--amend');
+    if coSignOff in AOptions then
+      AddArg(Args, '--signoff');
+    if coNoVerify in AOptions then
+      AddArg(Args, '--no-verify');
+  end;
 
   { Writes AParts over their paths in the index AIndex ('' for the
     repository's): each text goes in as a blob, through the filters of
@@ -3275,12 +3327,7 @@ var
       Exit;
     WriteBytes(MsgFile, AMessage);
     Args := nil;
-    AddArg(Args, 'commit');
-    AddArg(Args, '-q');
-    AddArg(Args, '-F');
-    AddArg(Args, MsgFile);
-    if AAmend then
-      AddArg(Args, '--amend');
+    AddCommitArgs;
     Result := RunGit(FRoot, Args, Output, Index);
     if not Result then
       Exit;
@@ -3372,12 +3419,7 @@ begin
     WriteBytes(MsgFile, AMessage);
     Args := nil;
     AddArg(Args, '--literal-pathspecs');
-    AddArg(Args, 'commit');
-    AddArg(Args, '-q');
-    AddArg(Args, '-F');
-    AddArg(Args, MsgFile);
-    if AAmend then
-      AddArg(Args, '--amend');
+    AddCommitArgs;
     if not Whole then
     begin
       AddArg(Args, '--only');
