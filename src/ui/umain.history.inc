@@ -25,7 +25,7 @@
   Definition work as they do there; Side by Side and Hide Unchanged
   Lines do not apply. }
 
-procedure TForm1.MenuHistoryClick(Sender: TObject);
+procedure TRepoFrame.MenuHistoryClick(Sender: TObject);
 var
   Path, Title: string;
   FromRow, ToRow, FromLine, ToLine: integer;
@@ -71,7 +71,7 @@ end;
   click is not the piece), else the innermost code tree range around the
   caret, named. False for neither, when the whole file is followed. A
   selection that ends at the start of a row does not include that row. }
-function TForm1.ChunkRows(out AFrom, ATo: integer; out AName: string): boolean;
+function TRepoFrame.ChunkRows(out AFrom, ATo: integer; out AName: string): boolean;
 var
   X1, Y1, X2, Y2: integer;
   Sel: boolean;
@@ -92,7 +92,7 @@ end;
 
 { The rows of the innermost range of AAdapter's code tree (see CodeTree)
   that holds row ARow, with the range's name. Waits for the parse. }
-function TForm1.EnclosingRange(AAdapter: TATAdapterEControl; ARow: integer;
+function TRepoFrame.EnclosingRange(AAdapter: TATAdapterEControl; ARow: integer;
   out AFrom, ATo: integer; out AName: string): boolean;
 var
   Client: TecClientSyntAnalyzer;
@@ -143,7 +143,7 @@ end;
   else in the base, so the lines added in the work tree, which the base
   does not have, do not shift the range. False when no row has a number
   there: the lines are all new. }
-function TForm1.ChunkLines(AFromRow, AToRow: integer; out AFrom, ATo: integer): boolean;
+function TRepoFrame.ChunkLines(AFromRow, AToRow: integer; out AFrom, ATo: integer): boolean;
 var
   Nums: TIntegerDynArray;
   r, Line, n: integer;
@@ -178,7 +178,7 @@ end;
 
 { The commit the lines are counted in, and the history starts from: the
   right commit of a range, else the base (HEAD by default). }
-function TForm1.HistoryRef: string;
+function TRepoFrame.HistoryRef: string;
 var
   OldRef, NewRef: string;
 begin
@@ -191,7 +191,7 @@ end;
 
 { Fetches the commits, one more than shown to know whether there are
   older ones. A job still running is given up, as in StartBlame. }
-procedure TForm1.StartHistory;
+procedure TRepoFrame.StartHistory;
 begin
   AbandonHistoryJob;
   FHistoryJob := TGittanHistoryJob.Create(FRepo.Root, FHistoryPath, FHistoryRef,
@@ -201,7 +201,7 @@ begin
   FStatus.ShowMessage(rsHistoryLoading, stNormal, 0);
 end;
 
-procedure TForm1.AbandonHistoryJob;
+procedure TRepoFrame.AbandonHistoryJob;
 begin
   if FHistoryJob = nil then
     Exit;
@@ -215,7 +215,7 @@ end;
 { The job is done: the commits, and the uncommitted changes before them,
   make the view. The job is freed from the message loop, as a blame
   job is. }
-procedure TForm1.HistoryJobDone(Sender: TObject);
+procedure TRepoFrame.HistoryJobDone(Sender: TObject);
 var
   Job: TGittanHistoryJob;
 begin
@@ -248,7 +248,7 @@ end;
   changed any of the lines: the file's diff against HEAD, cut to the
   lines of the range (an added line between two of them included), as
   a hunk. Read afresh, since the view may be rebuilt on a refresh. }
-procedure TForm1.AddUncommittedHistory;
+procedure TRepoFrame.AddUncommittedHistory;
 var
   Lines: TStringList;
   OldNum, NewNum: TIntegerDynArray;
@@ -302,7 +302,7 @@ end;
 
 { Shows the history in the editor, with the header naming the piece and
   counting the lines added and deleted over all the commits shown. }
-procedure TForm1.ShowHistory;
+procedure TRepoFrame.ShowHistory;
 var
   Added, Deleted, a, d, c: integer;
 begin
@@ -346,7 +346,7 @@ end;
   blank row, then the layered rows, each tinted by its commit, an older
   version in italics and a removed line struck through, with the words
   that changed between a version and the one before it shaded. }
-procedure TForm1.BuildHistoryView;
+procedure TRepoFrame.BuildHistoryView;
 var
   Rows: TGittanRows;
   OldNum, NewNum: TIntegerDynArray;
@@ -437,7 +437,7 @@ begin
 end;
 
 { Shades ASpans of row ARow in the word tone of commit ACommit. }
-procedure TForm1.MarkHistoryWords(AEd: TATSynEdit; ARow: integer;
+procedure TRepoFrame.MarkHistoryWords(AEd: TATSynEdit; ARow: integer;
   const ASpans: TGittanSpans; ACommit: integer);
 var
   Part: TATLinePart;
@@ -454,7 +454,7 @@ end;
 
 { Colors the swatch, the first character of legend row ARow, in the
   swatch tone of commit ACommit. }
-procedure TForm1.MarkSwatch(AEd: TATSynEdit; ARow, ACommit: integer);
+procedure TRepoFrame.MarkSwatch(AEd: TATSynEdit; ARow, ACommit: integer);
 var
   Part: TATLinePart;
 begin
@@ -465,7 +465,7 @@ begin
 end;
 
 { How many lines commit AIndex added and deleted in the range. }
-procedure TForm1.HistoryCounts(AIndex: integer; out AAdded, ADeleted: integer);
+procedure TRepoFrame.HistoryCounts(AIndex: integer; out AAdded, ADeleted: integer);
 var
   h, i: integer;
 begin
@@ -496,7 +496,7 @@ end;
 { The initials band is shown in the history view, on the new side,
   which is the only one the view uses; its width follows the zoom, as
   the blame band's does. }
-procedure TForm1.SetInitialBand(AEd: TATSynEdit);
+procedure TRepoFrame.SetInitialBand(AEd: TATSynEdit);
 var
   Band, W: integer;
   Shown: boolean;
@@ -532,7 +532,7 @@ end;
   commit's rows, the letter in its swatch tone, so the badge reads as
   part of its row. A line older than the history has no badge. Only the
   first row of a wrapped line gets one. }
-procedure TForm1.DrawInitials(AEd: TATSynEdit; C: TCanvas);
+procedure TRepoFrame.DrawInitials(AEd: TATSynEdit; C: TCanvas);
 var
   Band, W, CharH, Y, Key, Radius, Pad: integer;
   Item: TATWrapItem;
@@ -594,7 +594,7 @@ end;
 { The legend row of commit AIndex: the swatch (colored by MarkSwatch),
   its short hash, date, author and summary ("Not committed" for the
   uncommitted changes), and the lines it added and deleted. }
-function TForm1.HistoryHeaderText(AIndex: integer): string;
+function TRepoFrame.HistoryHeaderText(AIndex: integer): string;
 var
   Info: TGittanBlameCommit;
   Added, Deleted: integer;
@@ -614,7 +614,7 @@ end;
 
 { A click on a legend row shows its commit; a click on the more row
   fetches HistoryStep older commits, at the same scroll position. }
-procedure TForm1.HistoryClick(ARow: integer);
+procedure TRepoFrame.HistoryClick(ARow: integer);
 begin
   if (FHistory = nil) or (ARow < 0) or (ARow > High(FRows)) then
     Exit;
@@ -633,7 +633,7 @@ end;
 { Shows commit AIndex of the history against its parent, which lists
   its files, and opens the file at the first line of the commit's hunk.
   Compare With > HEAD (Working Tree) goes back. }
-procedure TForm1.ShowHistoryCommit(AIndex: integer);
+procedure TRepoFrame.ShowHistoryCommit(AIndex: integer);
 var
   Commit: TGittanHistoryCommit;
   Path: string;

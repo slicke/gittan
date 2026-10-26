@@ -17,14 +17,14 @@
 { The folder patches are written to: the last one's, else <name>-patches
   beside the repository, so they land neither in its work tree nor
   loose among the folders next to it. }
-function TForm1.PatchFolder: string;
+function TRepoFrame.PatchFolder: string;
 begin
   Result := FPatchFolder;
   if Result = '' then
     Result := ExcludeTrailingPathDelimiter(FRepo.Root) + '-patches';
 end;
 
-procedure TForm1.CreatePatches(const AOlder, ANewer: string);
+procedure TRepoFrame.CreatePatches(const AOlder, ANewer: string);
 var
   Commits: TGittanPatchCommits;
   Files: TStringList;
@@ -79,12 +79,12 @@ begin
 end;
 
 { am moves HEAD, so nothing else may be under way; apply goes along. }
-function TForm1.CanApplyPatches: boolean;
+function TRepoFrame.CanApplyPatches: boolean;
 begin
   Result := RepoReady;
 end;
 
-procedure TForm1.MenuApplyPatchesClick(Sender: TObject);
+procedure TRepoFrame.MenuApplyPatchesClick(Sender: TObject);
 var
   Files: TStringList;
   Ok, Conflicts: boolean;

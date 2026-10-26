@@ -16,7 +16,7 @@
   (gittan.commitjob), since hooks take their time. The message is kept
   in the settings until it is committed, for the repository it was
   written in. }
-procedure TForm1.SetupCommit;
+procedure TRepoFrame.SetupCommit;
 begin
   FCommitOn := TStringList.Create;
   FCommitOn.CaseSensitive := True;
@@ -158,15 +158,14 @@ begin
     keys once the window is up. }
   Application.QueueAsyncCall(@FocusTreeAsync, 0);
   Application.QueueAsyncCall(@CommitHintAsync, 0);
-  OnActivate := @FormActivate;
 end;
 
-procedure TForm1.FocusTreeAsync(Data: PtrInt);
+procedure TRepoFrame.FocusTreeAsync(Data: PtrInt);
 begin
   { CanFocus leaves the form out, and SetFocus raises while it is not
     shown. Something that pumps messages in FormCreate runs this before
     the window is up; it is tried again when the window is activated. }
-  FFocusTreePending := not (Visible and Enabled and FileTree.CanFocus);
+  FFocusTreePending := not (FWindow.Visible and FWindow.Enabled and FileTree.CanFocus);
   if not FFocusTreePending then
     FileTree.SetFocus;
 end;
@@ -174,7 +173,7 @@ end;
 { The window became active: the tree takes the focus FocusTreeAsync
   could not give it, from the message loop, once Cocoa has made its
   first responder. }
-procedure TForm1.FormActivate(Sender: TObject);
+procedure TRepoFrame.FormActivate(Sender: TObject);
 begin
   if not FFocusTreePending then
     Exit;
@@ -184,7 +183,7 @@ end;
 
 { Cocoa shows no TextHint in a memo (see gittan.memohint); the hint is
   set on the text view once the window has made it. }
-procedure TForm1.CommitHintAsync(Data: PtrInt);
+procedure TRepoFrame.CommitHintAsync(Data: PtrInt);
 begin
   {$IFDEF LCLCocoa}
   if FCommitMemo.HandleAllocated then
@@ -195,7 +194,7 @@ end;
 { The first line's length shows once it is past SubjectSoftLimit, in
   the warning color past SubjectHardLimit, where git log --oneline and
   GitHub cut it. }
-procedure TForm1.UpdateSubjectCount;
+procedure TRepoFrame.UpdateSubjectCount;
 var
   Len: integer;
 begin
@@ -223,7 +222,7 @@ end;
 
 { The Push the banner after a commit offers: as File > Push, while
   nothing else runs. }
-procedure TForm1.CommitPushClick(Sender: TObject);
+procedure TRepoFrame.CommitPushClick(Sender: TObject);
 begin
   if FPushItem.Enabled then
     StartRemote(rkPush);
@@ -232,7 +231,7 @@ end;
 { The header in the other sections' palette, the note in a box tinted
   with the accent of the tree's boxes, or red for conflicts; the native
   controls keep the desktop's look. }
-procedure TForm1.ColorCommit;
+procedure TRepoFrame.ColorCommit;
 var
   P: TGittanPalette;
 begin
@@ -256,7 +255,7 @@ end;
 
 { The header's box ticks every file that can be chosen, or none when
   all of them were, as a folder's box does for the files under it. }
-procedure TForm1.CommitHeaderCheck(Sender: TObject);
+procedure TRepoFrame.CommitHeaderCheck(Sender: TObject);
 begin
   SetAllChosen(FCommitHeader.CheckIndex <> checkOn);
 end;
@@ -264,7 +263,7 @@ end;
 { Chooses every changed file (AValue) or none, the filter's hidden ones
   too, as the header's count counts them; the changes left out of the
   files go, as with a folder's box. }
-procedure TForm1.SetAllChosen(AValue: boolean);
+procedure TRepoFrame.SetAllChosen(AValue: boolean);
 var
   i: integer;
 begin
@@ -280,17 +279,17 @@ begin
   UpdateCommitState;
 end;
 
-procedure TForm1.MenuTickAllClick(Sender: TObject);
+procedure TRepoFrame.MenuTickAllClick(Sender: TObject);
 begin
   SetAllChosen(True);
 end;
 
-procedure TForm1.MenuUntickAllClick(Sender: TObject);
+procedure TRepoFrame.MenuUntickAllClick(Sender: TObject);
 begin
   SetAllChosen(False);
 end;
 
-procedure TForm1.CommitHeaderToggle(Sender: TObject);
+procedure TRepoFrame.CommitHeaderToggle(Sender: TObject);
 begin
   FCommitBox.Visible := FCommitHeader.Expanded;
   LayoutRepoFiles;
@@ -298,14 +297,14 @@ end;
 
 { Whether the tree's boxes choose what to commit: the work tree is
   compared with HEAD, so the tree is what a commit would take. }
-function TForm1.CommitChoosing: boolean;
+function TRepoFrame.CommitChoosing: boolean;
 begin
   Result := (FRepo.Root <> '') and (FRepo.Base = '') and not ContinueMode;
 end;
 
 { Whether FStats[AIndex] is chosen: as flipped, else unless git does
   not track it yet. }
-function TForm1.CommitChosen(AIndex: integer): boolean;
+function TRepoFrame.CommitChosen(AIndex: integer): boolean;
 var
   Path: string;
 begin
@@ -317,7 +316,7 @@ begin
   Result := FStats[AIndex].Kind <> ckUntracked;
 end;
 
-procedure TForm1.SetCommitChosen(AIndex: integer; AValue: boolean);
+procedure TRepoFrame.SetCommitChosen(AIndex: integer; AValue: boolean);
 var
   Path: string;
   i: integer;
@@ -340,7 +339,7 @@ end;
 { The index in FStats of the file at ANode, -1 for a folder or a file
   that cannot be chosen: a conflict, which a commit refuses until it is
   resolved. A submodule's node is a leaf with a stat of its own. }
-function TForm1.CommitStatOf(ANode: TTreeNode): integer;
+function TRepoFrame.CommitStatOf(ANode: TTreeNode): integer;
 var
   i: integer;
 begin
@@ -355,7 +354,7 @@ end;
 { Sets every node's box: a file's from CommitChosen, mixed when changes
   of it are left out (see umain.leaveout.inc), a folder's from the
   files under it, none for a conflict or while not choosing. }
-procedure TForm1.ApplyCommitChecks;
+procedure TRepoFrame.ApplyCommitChecks;
 var
   Node: TTreeNode;
   Choosing: boolean;
@@ -424,7 +423,7 @@ end;
 { A file's box flips it, a mixed one takes it whole; a folder's chooses
   every file under it, or none when all of them were. Either way the
   changes left out of the files go. }
-procedure TForm1.FlipCommitNode(ANode: TTreeNode);
+procedure TRepoFrame.FlipCommitNode(ANode: TTreeNode);
 var
   Value: boolean;
 
@@ -460,12 +459,12 @@ begin
   UpdateCommitState;
 end;
 
-procedure TForm1.FileTreeStateClick(Sender: TObject; Node: TTreeNode);
+procedure TRepoFrame.FileTreeStateClick(Sender: TObject; Node: TTreeNode);
 begin
   FlipCommitNode(Node);
 end;
 
-procedure TForm1.FileTreeKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
+procedure TRepoFrame.FileTreeKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
 begin
   if (Key = VK_SPACE) and (Shift = []) and (FileTree.Selected <> nil) then
   begin
@@ -476,7 +475,7 @@ end;
 
 { The chosen files, from every changed file, not only those the
   filter leaves in the tree; the header's count says how many. }
-procedure TForm1.ChosenCommitPaths(AList: TStrings);
+procedure TRepoFrame.ChosenCommitPaths(AList: TStrings);
 var
   i: integer;
 begin
@@ -489,7 +488,7 @@ end;
 { The header's count, the button and the note follow the choice, the
   message, Amend and what the repository is in the middle of. The note
   says why the button is off, when that is not plain to see. }
-procedure TForm1.UpdateCommitState;
+procedure TRepoFrame.UpdateCommitState;
 var
   Chosen, Total, i: integer;
   Whole, Continuing, Busy, Can: boolean;
@@ -647,12 +646,12 @@ begin
     FIdentityItem.Enabled := FRepo.Root <> '';
 end;
 
-procedure TForm1.CommitNoteLink(Sender: TObject);
+procedure TRepoFrame.CommitNoteLink(Sender: TObject);
 begin
   GoToConflict(True);
 end;
 
-procedure TForm1.CommitMemoChange(Sender: TObject);
+procedure TRepoFrame.CommitMemoChange(Sender: TObject);
 begin
   UpdateCommitState;
   UpdateSubjectCount;
@@ -662,7 +661,7 @@ begin
   {$ENDIF}
 end;
 
-procedure TForm1.CommitMemoKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
+procedure TRepoFrame.CommitMemoKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
 begin
   if (Key = VK_RETURN) and (ssModifier in Shift) then
   begin
@@ -675,7 +674,7 @@ end;
 { "⌄" alone, or the option that is on ("2 options" for both) before it
   in the accent, so a commit that would be signed off or skip the hooks
   says so beside Amend. }
-procedure TForm1.UpdateCommitOptions;
+procedure TRepoFrame.UpdateCommitOptions;
 var
   Shown: string;
 begin
@@ -702,7 +701,7 @@ end;
 
 { The menu under the label, its items ticked as they are; Sign Off is
   read again, as git config may have changed it from outside. }
-procedure TForm1.CommitOptionsClick(Sender: TObject);
+procedure TRepoFrame.CommitOptionsClick(Sender: TObject);
 var
   At: TPoint;
 begin
@@ -716,7 +715,7 @@ begin
   FCommitOptionsMenu.PopUp(At.X, At.Y);
 end;
 
-procedure TForm1.SignOffItemClick(Sender: TObject);
+procedure TRepoFrame.SignOffItemClick(Sender: TObject);
 begin
   if not FRepo.SetSignOff(not FSignOff) then
     StatusNote(FRepo.Error, True);
@@ -724,7 +723,7 @@ begin
   UpdateCommitOptions;
 end;
 
-procedure TForm1.SkipHooksItemClick(Sender: TObject);
+procedure TRepoFrame.SkipHooksItemClick(Sender: TObject);
 begin
   FSkipHooks := not FSkipHooks;
   UpdateCommitOptions;
@@ -732,7 +731,7 @@ end;
 
 { Amend takes HEAD's message into an empty field, and gives it back
   when it is turned off unchanged. }
-procedure TForm1.CommitAmendClick(Sender: TObject);
+procedure TRepoFrame.CommitAmendClick(Sender: TObject);
 var
   Message: string;
 begin
@@ -751,7 +750,7 @@ begin
   UpdateCommitState;
 end;
 
-procedure TForm1.CommitButtonClick(Sender: TObject);
+procedure TRepoFrame.CommitButtonClick(Sender: TObject);
 begin
   if ContinueMode then
     ContinueOperationClick
@@ -760,7 +759,7 @@ begin
 end;
 
 { File > Commit: the section unfolded and the message field focused. }
-procedure TForm1.MenuCommitClick(Sender: TObject);
+procedure TRepoFrame.MenuCommitClick(Sender: TObject);
 begin
   if FRepo.Root = '' then
     Exit;
@@ -776,7 +775,7 @@ begin
   end;
 end;
 
-function TForm1.EditIdentity: boolean;
+function TRepoFrame.EditIdentity: boolean;
 var
   Who, Mail: string;
   Local: boolean;
@@ -796,14 +795,14 @@ end;
   has neither, so they are asked for once, kept in the global config as
   git itself would tell one to unless the repository is to have its
   own. }
-function TForm1.EnsureIdentity: boolean;
+function TRepoFrame.EnsureIdentity: boolean;
 begin
   if (FRepo.UserName <> '') and (FRepo.UserEmail <> '') then
     Exit(True);
   Result := EditIdentity;
 end;
 
-procedure TForm1.IdentityClick(Sender: TObject);
+procedure TRepoFrame.IdentityClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
     EditIdentity;
@@ -811,7 +810,7 @@ end;
 
 { The hint over the person says who commits; read as the mouse comes
   in, so a change made with git outside is seen too. }
-procedure TForm1.CommitHeaderEnter(Sender: TObject);
+procedure TRepoFrame.CommitHeaderEnter(Sender: TObject);
 var
   Who, Mail, Where: string;
 begin
@@ -828,7 +827,7 @@ begin
   end;
 end;
 
-procedure TForm1.StartCommit;
+procedure TRepoFrame.StartCommit;
 var
   Paths: TStringList;
   Parts: TGittanCommitParts;
@@ -869,7 +868,7 @@ end;
   shows what is left; on failure all stay, and git's reason (a hook's
   output, say) is shown in full. The job is freed from the message loop,
   since its notification comes from inside Execute. }
-procedure TForm1.CommitJobDone(Sender: TObject);
+procedure TRepoFrame.CommitJobDone(Sender: TObject);
 var
   Job: TGittanCommitJob;
   Subject: string;
@@ -918,7 +917,7 @@ begin
     StatusNote(Format(rsCommitted, [Copy(Job.Id, 1, 7), Subject]));
 end;
 
-procedure TForm1.ShowCommitFailure(const AError: string);
+procedure TRepoFrame.ShowCommitFailure(const AError: string);
 begin
   FNoticeCommit := True;
   FStatus.ShowMessage(rsCommitFailed, stBad, StatusErrorSeconds);
@@ -930,7 +929,7 @@ end;
 { A commit is never broken off: one still running when the repository
   changes goes on in FDroppedCommits, and quitting waits for it and for
   those. The message of one that was made is no draft any more. }
-procedure TForm1.StopCommitJob(AWait: boolean);
+procedure TRepoFrame.StopCommitJob(AWait: boolean);
 var
   Job: TGittanCommitJob;
   i: integer;
@@ -973,7 +972,7 @@ end;
   saved as the draft when it was left, and may be in the field again
   when the repository was opened again since. Kept out of FBlameZombies
   until now, since freeing a finished job drops its notification. }
-procedure TForm1.DroppedCommitDone(Sender: TObject);
+procedure TRepoFrame.DroppedCommitDone(Sender: TObject);
 var
   Job: TGittanCommitJob;
 begin
@@ -986,7 +985,7 @@ end;
 
 { Clears the draft slot and the field where they still hold the message
   AJob committed. }
-procedure TForm1.ForgetCommitted(AJob: TGittanCommitJob);
+procedure TRepoFrame.ForgetCommitted(AJob: TGittanCommitJob);
 
   function Same(const AText: string): boolean;
   begin
@@ -1009,7 +1008,7 @@ end;
 { The message goes to the settings' one slot for the repository it was
   written in; an empty field clears the slot only when it is that
   repository's, so opening another one keeps the draft. }
-procedure TForm1.SaveCommitDraft;
+procedure TRepoFrame.SaveCommitDraft;
 begin
   if (FCommitMemo = nil) or (FCommitDraftFor = '') then
     Exit;
@@ -1027,7 +1026,7 @@ end;
 
 { After a repository is opened: its draft, if the slot holds one, and
   nothing chosen by hand. }
-procedure TForm1.LoadCommitDraft;
+procedure TRepoFrame.LoadCommitDraft;
 begin
   FCommitOn.Clear;
   FCommitOff.Clear;

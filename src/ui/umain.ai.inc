@@ -18,7 +18,7 @@
 
 { The agent the settings pick, its command by the path they give, else
   where it is found, and its model. }
-procedure TForm1.FindAgentCli;
+procedure TRepoFrame.FindAgentCli;
 begin
   FAgent := AgentOfKey(App.Settings.AIAgent);
   if FAgent = gaCopilot then
@@ -33,7 +33,7 @@ begin
   end;
 end;
 
-function TForm1.AIAvailable: boolean;
+function TRepoFrame.AIAvailable: boolean;
 begin
   Result := App.Settings.AIEnabled and (FAgentCli <> '');
 end;
@@ -43,7 +43,7 @@ end;
   otherwise it needs files ticked (or Amend, which describes HEAD) and
   no commit running. The menu item stays in the menu while the features
   are on, disabled when the header has no AI. }
-procedure TForm1.UpdateMessageAction;
+procedure TRepoFrame.UpdateMessageAction;
 var
   Shown, Can: boolean;
 begin
@@ -74,7 +74,7 @@ end;
 
 { From the header or the menu: the section unfolds, so the message is
   seen when it comes. }
-procedure TForm1.MessageActionClick(Sender: TObject);
+procedure TRepoFrame.MessageActionClick(Sender: TObject);
 begin
   if FMessageJob <> nil then
   begin
@@ -93,7 +93,7 @@ begin
   end;
 end;
 
-procedure TForm1.StartMessageJob;
+procedure TRepoFrame.StartMessageJob;
 var
   Paths: TStringList;
 begin
@@ -118,7 +118,7 @@ end;
   the agent wrote; a failure says the agent's reason in a banner. The
   job is freed from the message loop, since its notification comes from
   inside Execute. }
-procedure TForm1.MessageJobDone(Sender: TObject);
+procedure TRepoFrame.MessageJobDone(Sender: TObject);
 var
   Job: TGittanMessageJob;
 begin
@@ -141,7 +141,7 @@ begin
   UpdateCommitState;
 end;
 
-procedure TForm1.AbandonMessageJob;
+procedure TRepoFrame.AbandonMessageJob;
 begin
   if FMessageJob = nil then
     Exit;
@@ -150,14 +150,14 @@ begin
   FMessageJob := nil;
 end;
 
-function TForm1.AIReviewKey: string;
+function TRepoFrame.AIReviewKey: string;
 begin
   Result := FRepo.Root + #0 + FRepo.Base + #0 + BoolToStr(FRepo.WholeTree, True);
 end;
 
 { The review's items show while the features are on; Clear while there
   are findings for what is compared. }
-procedure TForm1.UpdateAIReviewItems;
+procedure TRepoFrame.UpdateAIReviewItems;
 begin
   if FAIReviewItem = nil then
     Exit;
@@ -171,7 +171,7 @@ begin
   FAIClearItem.Enabled := (Length(FAIThreads) > 0) and (FAIThreadsKey = AIReviewKey);
 end;
 
-procedure TForm1.MenuAIReviewClick(Sender: TObject);
+procedure TRepoFrame.MenuAIReviewClick(Sender: TObject);
 begin
   if FAIReviewJob <> nil then
   begin
@@ -183,7 +183,7 @@ begin
     StartAIReview;
 end;
 
-procedure TForm1.MenuAIClearClick(Sender: TObject);
+procedure TRepoFrame.MenuAIClearClick(Sender: TObject);
 begin
   FAIThreads := nil;
   FAIThreadsKey := '';
@@ -195,7 +195,7 @@ end;
 
 { Reviews what the change view compares: a range as it is, else the
   work tree's changed files against the base. }
-procedure TForm1.StartAIReview;
+procedure TRepoFrame.StartAIReview;
 var
   Paths: TStringList;
   i: integer;
@@ -219,7 +219,7 @@ end;
 
 { The findings replace those held, and show while their comparison is
   the one shown; the status bar says how many there are. }
-procedure TForm1.AIReviewDone(Sender: TObject);
+procedure TRepoFrame.AIReviewDone(Sender: TObject);
 var
   Job: TGittanAIReviewJob;
   Agent: string;
@@ -252,7 +252,7 @@ begin
   UpdateAIReviewItems;
 end;
 
-procedure TForm1.AbandonAIReview;
+procedure TRepoFrame.AbandonAIReview;
 begin
   if FAIReviewJob = nil then
     Exit;

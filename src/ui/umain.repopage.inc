@@ -29,7 +29,7 @@ const
   MaxContributors = 8;
   MaxNewestTags = 3;
 
-procedure TForm1.SetupSideNav;
+procedure TRepoFrame.SetupSideNav;
 begin
   FSideNav := TGittanSideNav.Create(Self);
   FSideNav.Large := True;
@@ -60,7 +60,7 @@ begin
   FSideNav.Parent := FTreePanel;
 end;
 
-procedure TForm1.SideNavPick(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.SideNavPick(Sender: TObject; AIndex: integer);
 begin
   if (AIndex <> navGraph) and FGraph.Visible then
     FGraph.Close;
@@ -78,7 +78,7 @@ end;
 
 { The Recent row's list: the recent repositories as File > Open Recent
   names them, the open one checked, then Open Repository... }
-procedure TForm1.ShowRecentList(const AAnchor: TRect);
+procedure TRepoFrame.ShowRecentList(const AAnchor: TRect);
 var
   i: integer;
 begin
@@ -92,7 +92,7 @@ begin
   FRecentPopup.Popup(AAnchor);
 end;
 
-procedure TForm1.RecentPopupPick(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.RecentPopupPick(Sender: TObject; AIndex: integer);
 begin
   if AIndex < App.Settings.Recent.Count then
     OpenRepository(App.Settings.Recent[AIndex])
@@ -102,7 +102,7 @@ end;
 
 { The row of the view shown; the Graph row stands in for it while the
   commit graph is open, and takes over again when it closes. }
-procedure TForm1.SetNavRow(ARow: integer);
+procedure TRepoFrame.SetNavRow(ARow: integer);
 begin
   FNavViewRow := ARow;
   { At startup the sidebar is not built yet. }
@@ -114,13 +114,13 @@ begin
     FSideNav.Selected := ARow;
 end;
 
-procedure TForm1.GraphClosed(Sender: TObject);
+procedure TRepoFrame.GraphClosed(Sender: TObject);
 begin
   if FSideNav <> nil then
     FSideNav.Selected := FNavViewRow;
 end;
 
-procedure TForm1.RepoPageOpenTarget(Sender: TObject; ATarget: TGittanRepoTarget;
+procedure TRepoFrame.RepoPageOpenTarget(Sender: TObject; ATarget: TGittanRepoTarget;
   const AName: string; const AScreenRect: TRect);
 var
   i: integer;
@@ -156,7 +156,7 @@ begin
   end;
 end;
 
-procedure TForm1.SubListPopupPick(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.SubListPopupPick(Sender: TObject; AIndex: integer);
 var
   i: integer;
 begin
@@ -168,7 +168,7 @@ begin
     end;
 end;
 
-procedure TForm1.MenuRepoInfoClick(Sender: TObject);
+procedure TRepoFrame.MenuRepoInfoClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
     ShowRepoInfo;
@@ -176,7 +176,7 @@ end;
 
 { The page takes the summary's place in the box, as the welcome view
   does, and the facts are read again. }
-procedure TForm1.ShowRepoInfo;
+procedure TRepoFrame.ShowRepoInfo;
 begin
   if FRepo.Root = '' then
     Exit;
@@ -200,7 +200,7 @@ end;
 
 { One job at a time; a start while one runs is remembered and run
   when it is done, so the page ends up with the latest facts. }
-procedure TForm1.StartRepoInfoJob;
+procedure TRepoFrame.StartRepoInfoJob;
 begin
   if FRepo.Root = '' then
     Exit;
@@ -217,7 +217,7 @@ end;
 
 { The job is dropped; its result, if it comes, is thrown away. It is
   freed later from the zombie list, as a blame job is. }
-procedure TForm1.AbandonRepoInfoJob;
+procedure TRepoFrame.AbandonRepoInfoJob;
 begin
   FRepoInfoAgain := False;
   if FRepoInfoJob = nil then
@@ -228,7 +228,7 @@ begin
   FRepoPage.SetLoading(False);
 end;
 
-procedure TForm1.RepoInfoJobDone(Sender: TObject);
+procedure TRepoFrame.RepoInfoJobDone(Sender: TObject);
 var
   Job: TGittanRepoInfoJob;
 begin

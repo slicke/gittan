@@ -14,7 +14,7 @@
   the Commit section, whose Continue goes on with it; the stop at an
   edit is said in the status bar and under the Commit button. The
   watcher is stopped meanwhile, as for a switch. }
-procedure TForm1.RebaseInteractiveAsk(const AOnto, AName: string; AFromGraph: boolean);
+procedure TRepoFrame.RebaseInteractiveAsk(const AOnto, AName: string; AFromGraph: boolean);
 var
   Steps: TGittanRebaseSteps;
   Merges, Ok, Conflicts, Stopped: boolean;

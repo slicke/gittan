@@ -11,7 +11,7 @@
   always answers, also when Gittan is up to date, a local build or
   offline. A local build never checks by itself. }
 
-procedure TForm1.UpdateChecked(Sender: TObject; AManual: boolean);
+procedure TRepoFrame.UpdateChecked(Sender: TObject; AManual: boolean);
 begin
   if App.UpdateOk then
     ShowUpdateBadge;
@@ -36,7 +36,7 @@ begin
     BannerInfo(Format(rsUpdateCurrent, [CurrentBuild]));
 end;
 
-procedure TForm1.ShowUpdateBadge;
+procedure TRepoFrame.ShowUpdateBadge;
 begin
   if App.UpdateDue then
   begin
@@ -48,7 +48,7 @@ begin
     FStatus.SetUpdate('');
 end;
 
-procedure TForm1.UpdateDialog;
+procedure TRepoFrame.UpdateDialog;
 begin
   case QuestionDlg(rsUpdateTitle, Format(rsUpdateAvailable, [App.UpdateRelease.Name,
       CurrentBuild]), mtInformation, [mrYes, rsUpdateDownload, 'IsDefault',
@@ -64,7 +64,7 @@ begin
   end;
 end;
 
-procedure TForm1.MenuCheckUpdatesClick(Sender: TObject);
+procedure TRepoFrame.MenuCheckUpdatesClick(Sender: TObject);
 begin
   App.CheckForUpdate(True);
 end;

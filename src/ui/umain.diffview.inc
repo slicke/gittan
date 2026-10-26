@@ -49,7 +49,7 @@ begin
   end;
 end;
 
-procedure TForm1.BuildChangeView;
+procedure TRepoFrame.BuildChangeView;
 var
   n, i, j, k, r, d0, a0, Dels, Adds, NRows, NLeft, NRight, NBlocks: integer;
   Keep: array of boolean;
@@ -221,7 +221,7 @@ end;
   gap, filler, commit header, more or hidden row has neither number nor
   state. The history view (umain.history.inc) builds its rows into the
   same fields and fills the editor through here too. }
-procedure TForm1.FillChangeEditor(AEd: TATSynEdit; const ARows: TGittanRows;
+procedure TRepoFrame.FillChangeEditor(AEd: TATSynEdit; const ARows: TGittanRows;
   AOldSide: boolean; const AOldNum, ANewNum: TIntegerDynArray;
   ALexer: TecSyntAnalyzer);
 var
@@ -341,7 +341,7 @@ end;
 { The row at ARow, or the first shown row after it: a caret on a hidden
   row would make the editor unfold the lexer range around it, and show
   the hidden lines. }
-function TForm1.VisibleRow(ARow: integer): integer;
+function TRepoFrame.VisibleRow(ARow: integer): integer;
 var
   Last: integer;
 begin
@@ -360,7 +360,7 @@ end;
   anywhere opens it. AHeading, the symbol the changes after the gap are
   in, ends the row, from column AHeadingCol (-1 without one); a click on
   it does nothing. }
-function TForm1.GapRowText(ACount: integer; const AHeading: string;
+function TRepoFrame.GapRowText(ACount: integer; const AHeading: string;
   out ADown, AUp, AAll, AHeadingCol: integer): string;
 const
   Sep = '   ';
@@ -395,7 +395,7 @@ end;
   name of the symbol around the first block of changes after the gap,
   as far as UpdateSymbolHeadings has found the names; '' for no block
   (the gap runs to the end) or no symbol. }
-function TForm1.GapHeading(AGapTo: integer): string;
+function TRepoFrame.GapHeading(AGapTo: integer): string;
 var
   b: integer;
 begin
@@ -414,7 +414,7 @@ end;
   side-by-side view the marker of the line it stands opposite ('-' on
   the new side, '+' on the old), so a symbol on one side counts the
   lines the other side has. }
-function TForm1.RowMarkers(const ARows: TGittanRows; AOldSide: boolean): string;
+function TRepoFrame.RowMarkers(const ARows: TGittanRows; AOldSide: boolean): string;
 var
   i: integer;
 begin
@@ -434,7 +434,7 @@ begin
 end;
 
 { The rows of AEd as UTF-8, for the move and rename detection. }
-function TForm1.RowTexts(AEd: TATSynEdit): TStringList;
+function TRepoFrame.RowTexts(AEd: TATSynEdit): TStringList;
 var
   i: integer;
 begin
@@ -452,7 +452,7 @@ end;
   the parse of that text finds the same names and ends it. A lexer that
   reads a heading as code could name the blocks differently each time,
   so a file is rebuilt for its headings only twice. }
-procedure TForm1.UpdateSymbolHeadings;
+procedure TRepoFrame.UpdateSymbolHeadings;
 var
   RowOf, RowOfOld: TIntegerDynArray;
   Names: array of string;
@@ -523,7 +523,7 @@ begin
   end;
 end;
 
-procedure TForm1.RebuildForHeadingsAsync(Data: PtrInt);
+procedure TRepoFrame.RebuildForHeadingsAsync(Data: PtrInt);
 begin
   if FView = gvChanges then
     RebuildIfChanges;
@@ -531,7 +531,7 @@ end;
 
 { The file header names the symbol the caret is in, from the code tree
   of the last parse while the text is the one it parsed. }
-procedure TForm1.UpdateSymbolCrumb;
+procedure TRepoFrame.UpdateSymbolCrumb;
 var
   i: integer;
 begin
@@ -546,7 +546,7 @@ end;
 
 { Opens the hidden lines AFrom..ATo of the diff: the view is rebuilt with
   them kept, at the same scroll position. }
-procedure TForm1.ExpandGap(AFrom, ATo: integer);
+procedure TRepoFrame.ExpandGap(AFrom, ATo: integer);
 var
   TopLine, CaretY: integer;
 begin
@@ -569,7 +569,7 @@ end;
   HistoryClick). Cmd+click (Ctrl+click elsewhere) goes to the definition
   of the clicked word. The editor put the caret on the clicked position
   on mouse down. }
-procedure TForm1.EditMouseUp(Sender: TObject; Button: TMouseButton;
+procedure TRepoFrame.EditMouseUp(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: integer);
 var
   Row, Col, From, To_, Down, Up, All, Heading: integer;
@@ -629,7 +629,7 @@ end;
 { The two sides scroll together. The event fires after a paint, so the
   other side is moved only when it differs; its own event then finds
   nothing to do. }
-procedure TForm1.EditorScroll(Sender: TObject);
+procedure TRepoFrame.EditorScroll(Sender: TObject);
 var
   Src, Dst: TATSynEdit;
 begin
@@ -659,7 +659,7 @@ end;
   they can still be apart: the pixels scrolled into it, or with the
   review comments' cards (umain.reviews.inc), into the gaps under it or
   over the first line (position -1), which both sides have the same. }
-procedure TForm1.MatchScrollPixels(ASrc, ADst: TATSynEdit);
+procedure TRepoFrame.MatchScrollPixels(ASrc, ADst: TATSynEdit);
 var
   Info: TATEditorScrollInfo;
 begin
@@ -678,7 +678,7 @@ end;
   is built or moved by the program the old side is put in step here.
   An old side that was just shown has no layout yet and ignores the
   scroll position, so the sync is repeated from the message loop. }
-procedure TForm1.SyncOldSide;
+procedure TRepoFrame.SyncOldSide;
 begin
   if not FEditOld.Visible then
     Exit;
@@ -686,7 +686,7 @@ begin
   Application.QueueAsyncCall(@SyncOldSideAsync, 0);
 end;
 
-procedure TForm1.SyncOldSideAsync(Data: PtrInt);
+procedure TRepoFrame.SyncOldSideAsync(Data: PtrInt);
 begin
   if not FEditOld.Visible then
     Exit;
@@ -711,7 +711,7 @@ end;
 
 { The width the two sides share: the panel's, less the Markdown preview
   and its splitter when they are shown. }
-function TForm1.SidesWidth: integer;
+function TRepoFrame.SidesWidth: integer;
 begin
   Result := EditorPanel.ClientWidth - FSideSplitter.Width;
   if FMdPreview.Visible then
@@ -720,7 +720,7 @@ end;
 
 { The old side and the Markdown preview keep their shares of the width
   when the panel resizes. }
-procedure TForm1.EditorPanelResize(Sender: TObject);
+procedure TRepoFrame.EditorPanelResize(Sender: TObject);
 begin
   if FGraph <> nil then
     FGraph.Recenter;
@@ -732,7 +732,7 @@ begin
     FEditOld.Width := Round(SidesWidth * FSideRatio);
 end;
 
-procedure TForm1.SideSplitterMoved(Sender: TObject);
+procedure TRepoFrame.SideSplitterMoved(Sender: TObject);
 begin
   if SidesWidth > 0 then
     FSideRatio := FEditOld.Width / SidesWidth;
@@ -741,7 +741,7 @@ end;
 { Shows the old side next to the editor in the side-by-side change view
   and the translation view, hides it in every other view. Word wrap is
   off while the two sides are shown: wrapped rows would not line up. }
-procedure TForm1.ApplyLayout;
+procedure TRepoFrame.ApplyLayout;
 var
   Side: boolean;
 begin
@@ -755,7 +755,7 @@ begin
   ApplyWrap;
 end;
 
-procedure TForm1.ApplyWrap;
+procedure TRepoFrame.ApplyWrap;
 var
   Mode: TATEditorWrapMode;
 begin
@@ -771,7 +771,7 @@ end;
 
 { After a view option changed: the change view is built again at the
   same place, other views are left alone. }
-procedure TForm1.RebuildIfChanges;
+procedure TRepoFrame.RebuildIfChanges;
 var
   TopLine, CaretY: integer;
 begin

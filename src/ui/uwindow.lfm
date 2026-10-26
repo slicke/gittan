@@ -1,0 +1,14 @@
+object GittanWindow: TGittanWindow
+  Left = 319
+  Height = 600
+  Top = 30
+  Width = 900
+  AllowDropFiles = True
+  Caption = 'Git Tree Analyzer & Navigator'
+  ClientHeight = 600
+  ClientWidth = 900
+  OnCreate = FormCreate
+  OnDestroy = FormDestroy
+  OnDropFiles = FormDropFiles
+  LCLVersion = '4.8.0.0'
+end

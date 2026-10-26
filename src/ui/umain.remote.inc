@@ -24,7 +24,7 @@ const
   saGraph = 3;
   saForcePush = 4;
 
-procedure TForm1.UpdateRemoteItems;
+procedure TRepoFrame.UpdateRemoteItems;
 var
   Can: boolean;
 begin
@@ -44,7 +44,7 @@ begin
   UpdateStashItems;
 end;
 
-procedure TForm1.StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode;
+procedure TRepoFrame.StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode;
   const AArg, ARemote: string);
 begin
   if (FRepo.Root = '') or (FRemoteJob <> nil) or (FCommitJob <> nil) then
@@ -110,7 +110,7 @@ begin
   UpdateCommitState;
 end;
 
-function TForm1.RemoteNoticeTitle: string;
+function TRepoFrame.RemoteNoticeTitle: string;
 begin
   Result := '';
   if FRemoteJob = nil then
@@ -147,7 +147,7 @@ end;
 
 { The notice shows the output in the editor's font, as a terminal
   would. }
-procedure TForm1.ShowRemoteNotice;
+procedure TRepoFrame.ShowRemoteNotice;
 begin
   FNoticeTimer.Enabled := False;
   if FRemoteJob = nil then
@@ -156,13 +156,13 @@ begin
   FNotice.Popup(RemoteNoticeTitle, FRemoteJob.Progress, True);
 end;
 
-procedure TForm1.NoticeTimerTimer(Sender: TObject);
+procedure TRepoFrame.NoticeTimerTimer(Sender: TObject);
 begin
   ShowRemoteNotice;
 end;
 
 { Once git itself reports the push, the hook has had its say. }
-procedure TForm1.RemoteJobOutput(Sender: TObject);
+procedure TRepoFrame.RemoteJobOutput(Sender: TObject);
 var
   Job: TGittanRemoteJob;
 begin
@@ -184,7 +184,7 @@ end;
 
 { The tree, the counts and the graph follow at once; then what came of
   it, or the choice git left to the user. }
-procedure TForm1.RemoteJobDone(Sender: TObject);
+procedure TRepoFrame.RemoteJobDone(Sender: TObject);
 var
   Job: TGittanRemoteJob;
   HookFailed: boolean;
@@ -359,7 +359,7 @@ end;
   output with it, in the editor's font with the end in view and the rest
   a scroll away, under a red title, with the same again and a copy of
   the output as its buttons. The status bar says it too, for a while. }
-procedure TForm1.ShowRemoteFailure(AJob: TGittanRemoteJob; AHookFailed: boolean);
+procedure TRepoFrame.ShowRemoteFailure(AJob: TGittanRemoteJob; AHookFailed: boolean);
 var
   Title, Again: string;
 begin
@@ -435,7 +435,7 @@ begin
   FNotice.SetButtons([Again, rsCopyOutput]);
 end;
 
-procedure TForm1.NoticeButton(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.NoticeButton(Sender: TObject; AIndex: integer);
 begin
   case AIndex of
     0:
@@ -474,7 +474,7 @@ end;
 
 { A job is never broken off: one still running when the repository
   changes goes on without a handler, and quitting waits for it. }
-procedure TForm1.StopRemoteJob(AWait: boolean);
+procedure TRepoFrame.StopRemoteJob(AWait: boolean);
 begin
   FPendingRemote := False;
   { The Git LFS check reads only, and is dropped rather than waited for. }
@@ -518,7 +518,7 @@ end;
   files' content in git; else, when files of the work tree are their
   pointers, a note with Download All (git lfs pull). A banner closed
   is not shown again until what it says changes (FLfsShown). }
-procedure TForm1.CheckLfs;
+procedure TRepoFrame.CheckLfs;
 var
   Key: string;
 begin
@@ -533,7 +533,7 @@ begin
   FLfsCheckJob.Start;
 end;
 
-procedure TForm1.LfsCheckDone(Sender: TObject);
+procedure TRepoFrame.LfsCheckDone(Sender: TObject);
 var
   Job: TGittanLfsCheckJob;
   State: TGittanLfsState;
@@ -597,17 +597,17 @@ begin
     FBanner.AddAction(Title, Detail, Kind, 0, ActionText, Handler);
 end;
 
-procedure TForm1.LfsGetClick(Sender: TObject);
+procedure TRepoFrame.LfsGetClick(Sender: TObject);
 begin
   OpenURL('https://git-lfs.com');
 end;
 
-procedure TForm1.LfsInstallClick(Sender: TObject);
+procedure TRepoFrame.LfsInstallClick(Sender: TObject);
 begin
   StartRemote(rkLfsInstall);
 end;
 
-procedure TForm1.LfsPullClick(Sender: TObject);
+procedure TRepoFrame.LfsPullClick(Sender: TObject);
 begin
   StartRemote(rkLfsPull);
 end;
@@ -622,7 +622,7 @@ end;
   done the counts follow; a failure (offline, a key that needs its
   passphrase) is left unsaid, as the next one may well work. A fetch,
   pull or push asked for meanwhile waits for it (see StartRemote). }
-procedure TForm1.AutoFetchTimerTimer(Sender: TObject);
+procedure TRepoFrame.AutoFetchTimerTimer(Sender: TObject);
 var
   Last: TDateTime;
 begin
@@ -639,7 +639,7 @@ begin
   FAutoFetchJob.Start;
 end;
 
-procedure TForm1.AutoFetchDone(Sender: TObject);
+procedure TRepoFrame.AutoFetchDone(Sender: TObject);
 var
   Job: TGittanRemoteJob;
 begin
@@ -664,30 +664,30 @@ end;
 
 { The file's versions ARefs (an empty one for the work tree) from Git
   LFS, for the header's Download. }
-procedure TForm1.StartLfsDownload(const APath: string; const ARefs: TStringArray);
+procedure TRepoFrame.StartLfsDownload(const APath: string; const ARefs: TStringArray);
 begin
   FLfsRefs := ARefs;
   StartRemote(rkLfsFetch, pmAuto, APath);
 end;
 
-procedure TForm1.MenuFetchClick(Sender: TObject);
+procedure TRepoFrame.MenuFetchClick(Sender: TObject);
 begin
   StartRemote(rkFetch);
 end;
 
-procedure TForm1.MenuPullClick(Sender: TObject);
+procedure TRepoFrame.MenuPullClick(Sender: TObject);
 begin
   StartRemote(rkPull);
 end;
 
-procedure TForm1.MenuPushClick(Sender: TObject);
+procedure TRepoFrame.MenuPushClick(Sender: TObject);
 begin
   StartRemote(rkPush);
 end;
 
 { Asks first, naming what the upstream loses: its commits the branch
   lacks, as the last fetch saw them. With none a plain push does. }
-procedure TForm1.ForcePushAsk;
+procedure TRepoFrame.ForcePushAsk;
 var
   Up, Msg: string;
 begin
@@ -713,14 +713,14 @@ begin
     StartRemote(rkForcePush);
 end;
 
-procedure TForm1.MenuForcePushClick(Sender: TObject);
+procedure TRepoFrame.MenuForcePushClick(Sender: TObject);
 begin
   ForcePushAsk;
 end;
 
 { The status bar's "↑2 ↓5": pull and push with their counts, fetch,
   and the commit graph, which a click opened before. }
-procedure TForm1.SyncClick(const AScreenRect: TRect);
+procedure TRepoFrame.SyncClick(const AScreenRect: TRect);
 
   procedure AddAction(AAction: integer; const ACaption, ADetail: string);
   begin
@@ -755,12 +755,12 @@ begin
 end;
 
 { The summary's sync line ("↑ 3 not pushed") drops the same list. }
-procedure TForm1.SummarySyncClick(Sender: TObject; const AScreenRect: TRect);
+procedure TRepoFrame.SummarySyncClick(Sender: TObject; const AScreenRect: TRect);
 begin
   SyncClick(AScreenRect);
 end;
 
-procedure TForm1.SyncPopupPick(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.SyncPopupPick(Sender: TObject; AIndex: integer);
 begin
   case FSyncPopup.TagOf(AIndex) of
     saPull: StartRemote(rkPull);

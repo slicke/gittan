@@ -88,7 +88,14 @@
       <Unit>
         <Filename Value="src/ui/umain.pp"/>
         <IsPartOfProject Value="True"/>
-        <ComponentName Value="Form1"/>
+        <ComponentName Value="RepoFrame"/>
+        <HasResources Value="True"/>
+        <ResourceBaseClass Value="Frame"/>
+      </Unit>
+      <Unit>
+        <Filename Value="src/ui/uwindow.pp"/>
+        <IsPartOfProject Value="True"/>
+        <ComponentName Value="GittanWindow"/>
         <HasResources Value="True"/>
         <ResourceBaseClass Value="Form"/>
       </Unit>

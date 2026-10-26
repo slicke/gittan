@@ -13,7 +13,7 @@ uses
   {$IFDEF LCLWin32}
   uDarkStyleParams, uMetaDarkStyle, uDarkStyleSchemes,
   {$ENDIF}
-  Forms, umain
+  Forms, uwindow
   { you can add units after this };
 
 {$R *.res}
@@ -39,7 +39,7 @@ begin
     inset to Apple's grid. }
   Application.Icon.Clear;
   {$ENDIF}
-  Application.CreateForm(TForm1, Form1);
+  Application.CreateForm(TGittanWindow, GittanWindow);
   Application.Run;
 end.
 

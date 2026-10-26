@@ -20,7 +20,7 @@
   any other opens on the forge. GitHub is the only forge so far. See
   spec/github.md. }
 
-procedure TForm1.SetupForgePage;
+procedure TRepoFrame.SetupForgePage;
 begin
   FForgePage := TGittanForgePage.Create(Self);
   FForgePage.Parent := FSummaryBox;
@@ -33,7 +33,7 @@ begin
   FForgePage.OnOpenUrl := @SummaryOpenUrl;
 end;
 
-procedure TForm1.MenuForgeClick(Sender: TObject);
+procedure TRepoFrame.MenuForgeClick(Sender: TObject);
 begin
   if (FRepo.Root <> '') and Assigned(FForge) then
     ShowForge;
@@ -41,7 +41,7 @@ end;
 
 { The page takes the summary's place in the box, as the Pull Requests
   page does, and the forge is asked again, keeping what it had. }
-procedure TForm1.ShowForge;
+procedure TRepoFrame.ShowForge;
 begin
   if (FRepo.Root = '') or not Assigned(FForge) then
     Exit;
@@ -66,7 +66,7 @@ begin
 end;
 
 { What the job last read, to the page, and whether one runs. }
-procedure TForm1.UpdateForgePage;
+procedure TRepoFrame.UpdateForgePage;
 begin
   if FForgePage = nil then
     Exit;
@@ -79,7 +79,7 @@ end;
 
 { Asks the forge, one job at a time: a start while one runs waits for
   its answer. }
-procedure TForm1.StartForgeJob;
+procedure TRepoFrame.StartForgeJob;
 begin
   if not Assigned(FForge) or (FRepo.Root = '') or (FForgeJob <> nil) then
     Exit;
@@ -91,7 +91,7 @@ begin
   UpdateForgePage;
 end;
 
-procedure TForm1.AbandonForgeJob;
+procedure TRepoFrame.AbandonForgeJob;
 begin
   if FForgeJob = nil then
     Exit;
@@ -100,7 +100,7 @@ begin
   FForgeJob := nil;
 end;
 
-procedure TForm1.ForgeJobDone(Sender: TObject);
+procedure TRepoFrame.ForgeJobDone(Sender: TObject);
 var
   Job: TGittanForgeJob;
 begin
@@ -144,7 +144,7 @@ end;
 { A card: compare with the pull request when the open repository has a
   remote for its repository, else open its clone and compare there when
   it has one, else open it on the forge. }
-procedure TForm1.ForgePagePick(Sender: TObject; const APull: TGittanForgePull);
+procedure TRepoFrame.ForgePagePick(Sender: TObject; const APull: TGittanForgePull);
 begin
   if (FRepo.Root <> '') and (APull.Repo <> '') and FRepo.HasRemoteFor(APull.Repo) then
     ComparePull(ForgePullRequest(APull))
@@ -157,19 +157,19 @@ begin
     SummaryOpenUrl(Self, APull.Url);
 end;
 
-procedure TForm1.ForgeCloneOpened(Sender: TObject);
+procedure TRepoFrame.ForgeCloneOpened(Sender: TObject);
 begin
   if (FRepo.Root <> '') and FRepo.HasRemoteFor(FForgeClonePull.Repo) then
     ComparePull(FForgeClonePull);
 end;
 
-procedure TForm1.ForgePageRefresh(Sender: TObject);
+procedure TRepoFrame.ForgePageRefresh(Sender: TObject);
 begin
   StartForgeJob;
 end;
 
 { The checkbox: the settings keep it, and the page's new height. }
-procedure TForm1.ForgePageHideChange(Sender: TObject);
+procedure TRepoFrame.ForgePageHideChange(Sender: TObject);
 begin
   App.Settings.HideWithoutFeedback := FForgePage.HideWithoutFeedback;
   if FForgePage.Visible then

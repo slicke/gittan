@@ -27,7 +27,7 @@ const
   tmDeleteRemote = 8;
   tmBrowse = 9;
 
-procedure TForm1.ShowTagList(const AScreenRect: TRect);
+procedure TRepoFrame.ShowTagList(const AScreenRect: TRect);
 var
   i: integer;
   Head, Detail, Subject: string;
@@ -62,7 +62,7 @@ begin
   FTagPopup.Popup(AScreenRect);
 end;
 
-procedure TForm1.TagPopupPick(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.TagPopupPick(Sender: TObject; AIndex: integer);
 var
   Row: PtrInt;
 begin
@@ -73,7 +73,7 @@ begin
     ShowBlameCommit(FTags[Row].Commit);
 end;
 
-procedure TForm1.TagContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
+procedure TRepoFrame.TagContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
 var
   Busy: boolean;
   Remote: string;
@@ -109,7 +109,7 @@ begin
   FTagMenu.PopUp(AScreenPos.X, AScreenPos.Y);
 end;
 
-procedure TForm1.TagMenuClick(Sender: TObject);
+procedure TRepoFrame.TagMenuClick(Sender: TObject);
 var
   T: TGittanTag;
 begin
@@ -136,7 +136,7 @@ end;
 
 { A name and an optional message, which makes the tag annotated, as
   Create Tag Here... in the commit graph asks. }
-procedure TForm1.NewTagAsk;
+procedure TRepoFrame.NewTagAsk;
 var
   Short: string;
 begin
@@ -149,7 +149,7 @@ end;
 
 { A tag at ACommit (AShort in the question) after a name and an optional
   message, which makes it annotated. True when it was made. }
-function TForm1.TagAtAsk(const AShort, ACommit: string): boolean;
+function TRepoFrame.TagAtAsk(const AShort, ACommit: string): boolean;
 var
   Values: array of string;
 begin
@@ -179,7 +179,7 @@ end;
 { A tag is no branch: checking one out leaves HEAD detached, where a
   commit belongs to no branch, so the question offers a branch at the
   tag too. }
-procedure TForm1.CheckoutTagAsk(const ATag: TGittanTag);
+procedure TRepoFrame.CheckoutTagAsk(const ATag: TGittanTag);
 begin
   if not RepoReady then
     Exit;
@@ -193,7 +193,7 @@ end;
 
 { A branch at ACommit, switched to, after a name; ALabel is what the
   question calls the commit (a tag, a short id). }
-procedure TForm1.BranchAtAsk(const ALabel, ACommit: string);
+procedure TRepoFrame.BranchAtAsk(const ALabel, ACommit: string);
 begin
   if (FRepo.Root <> '') and (FOperation = '') then
     NewBranchAsk(Format(rsCaBranchPrompt, [ALabel]), ACommit);
@@ -201,7 +201,7 @@ end;
 
 { Asks a name with APrompt and makes a branch of it at ACommit, switched
   to. True when it was made. }
-function TForm1.NewBranchAsk(const APrompt, ACommit: string): boolean;
+function TRepoFrame.NewBranchAsk(const APrompt, ACommit: string): boolean;
 var
   Values: array of string;
 begin
@@ -226,7 +226,7 @@ begin
   end;
 end;
 
-procedure TForm1.DeleteTagAsk(const ATag: TGittanTag);
+procedure TRepoFrame.DeleteTagAsk(const ATag: TGittanTag);
 begin
   if QuestionDlg(rsTagDeleteTitle, Format(rsTagDeleteAsk, [ATag.Name]), mtConfirmation,
     [mrYes, rsBmDeleteAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
@@ -240,18 +240,18 @@ begin
     BannerError(rsCaFailed, FRepo.Error);
 end;
 
-procedure TForm1.MenuTagsClick(Sender: TObject);
+procedure TRepoFrame.MenuTagsClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
     ShowTagList(FStatus.PartScreenRect(spBranch));
 end;
 
-procedure TForm1.MenuNewTagClick(Sender: TObject);
+procedure TRepoFrame.MenuNewTagClick(Sender: TObject);
 begin
   NewTagAsk;
 end;
 
-procedure TForm1.MenuPushTagsClick(Sender: TObject);
+procedure TRepoFrame.MenuPushTagsClick(Sender: TObject);
 var
   Remote: string;
 begin

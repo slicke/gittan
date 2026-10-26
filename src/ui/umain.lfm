@@ -1,15 +1,11 @@
-object Form1: TForm1
-  Left = 319
+object RepoFrame: TRepoFrame
+  Left = 0
   Height = 600
-  Top = 30
+  Top = 0
   Width = 900
-  AllowDropFiles = True
-  Caption = 'Git Tree Analyzer & Navigator'
   ClientHeight = 600
   ClientWidth = 900
-  OnCreate = FormCreate
-  OnDestroy = FormDestroy
-  OnDropFiles = FormDropFiles
+  TabOrder = 0
   LCLVersion = '4.8.0.0'
   object FileTree: TTreeView
     Left = 0

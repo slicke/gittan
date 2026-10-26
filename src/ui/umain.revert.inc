@@ -14,7 +14,7 @@
 
 { The changed files the file menu acts on: the file, or every one under
   the folder of the tree. }
-procedure TForm1.RevertTargets(AList: TStrings);
+procedure TRepoFrame.RevertTargets(AList: TStrings);
 var
   i: integer;
   Prefix: string;
@@ -31,13 +31,13 @@ begin
     AList.Add(FContextPath);
 end;
 
-function TForm1.CanRevert: boolean;
+function TRepoFrame.CanRevert: boolean;
 begin
   Result := (FRepo.Root <> '') and (FRepo.Base = '') and (FCommitJob = nil) and
     (FRemoteJob = nil);
 end;
 
-procedure TForm1.RevertPaths(APaths: TStrings; const ALabel: string);
+procedure TRepoFrame.RevertPaths(APaths: TStrings; const ALabel: string);
 var
   Saved: TStringList;
 begin
@@ -74,7 +74,7 @@ begin
   UpdateDiscardItems;
 end;
 
-procedure TForm1.MenuRevertChangesClick(Sender: TObject);
+procedure TRepoFrame.MenuRevertChangesClick(Sender: TObject);
 var
   Paths: TStringList;
   Shown: string;
@@ -93,7 +93,7 @@ begin
 end;
 
 { File > Revert File: the file the view shows. }
-procedure TForm1.MenuRevertFileClick(Sender: TObject);
+procedure TRepoFrame.MenuRevertFileClick(Sender: TObject);
 var
   Paths: TStringList;
 begin
@@ -108,7 +108,7 @@ begin
   end;
 end;
 
-procedure TForm1.MenuUndoRevertClick(Sender: TObject);
+procedure TRepoFrame.MenuUndoRevertClick(Sender: TObject);
 var
   Saved: TStringList;
   Shown: string;
@@ -135,13 +135,13 @@ begin
   UpdateDiscardItems;
 end;
 
-function TForm1.IsChangedPath(const APath: string): boolean;
+function TRepoFrame.IsChangedPath(const APath: string): boolean;
 begin
   Result := StatIndexOf(APath) >= 0;
 end;
 
 { The reverts of the previous repository are not for this one. }
-procedure TForm1.ClearRevertUndo;
+procedure TRepoFrame.ClearRevertUndo;
 var
   i: integer;
 begin

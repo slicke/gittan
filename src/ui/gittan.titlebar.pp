@@ -21,8 +21,18 @@
   high (seen 2026-10-16: a TCustomControl under about 25 px shows
   nothing, a taller one fills its whole bounds with its color).
 
-  The unit uses CocoaAll alone; umain keeps it behind LCLCocoa, so the
-  other widgetsets never see it. }
+  Under a full size content view AppKit gives every scroll view that
+  reaches under the title bar the bar's height as a top inset, and the
+  LCL makes every windowed control one (TCocoaScrollView and its
+  TCocoaManualScrollHost). The LCL places their content itself, and a
+  view whose inset came after the LCL had placed it was scrolled down
+  by the inset (seen 2026-10-26, once the form's content moved into a
+  frame: the sidebar and the summary sat a title bar's height low). A
+  category on TCocoaScrollView turns the automatic insets off for all
+  of them, the frame's, its panels' and those made later alike.
+
+  The unit uses CocoaAll and the LCL's Cocoa units; umain keeps it
+  behind LCLCocoa, so the other widgetsets never see it. }
 unit gittan.titlebar;
 
 {$mode objfpc}{$H+}
@@ -49,7 +59,18 @@ procedure HideTitleBand(AHandle: PtrUInt);
 implementation
 
 uses
-  Math, CocoaAll, cocoa_extra;
+  Math, CocoaAll, cocoa_extra, CocoaScrolling;
+
+type
+  { No inset from the title bar for the LCL's scroll views (see above). }
+  TCocoaScrollViewNoTitleInset = objccategory(TCocoaScrollView)
+    function automaticallyAdjustsContentInsets: ObjCBOOL; reintroduce;
+  end;
+
+function TCocoaScrollViewNoTitleInset.automaticallyAdjustsContentInsets: ObjCBOOL;
+begin
+  Result := False;
+end;
 
 const
   BandHeight = 3;

@@ -19,7 +19,7 @@
   commits, so they run on the main thread with the watcher stopped, as a
   switch does. }
 
-procedure TForm1.SetupBisect;
+procedure TRepoFrame.SetupBisect;
 
   function Row(ATop: integer): TPanel;
   begin
@@ -84,7 +84,7 @@ end;
 
 { The box shows while git bisects; Good, Bad and Skip while there is
   something to mark, Show Commit once the first bad commit is found. }
-procedure TForm1.UpdateBisectState;
+procedure TRepoFrame.UpdateBisectState;
 var
   Note, Ids: string;
   Busy, Done: boolean;
@@ -130,7 +130,7 @@ begin
   FBisectEnd.Enabled := not Busy;
 end;
 
-procedure TForm1.BisectButtonClick(Sender: TObject);
+procedure TRepoFrame.BisectButtonClick(Sender: TObject);
 begin
   if Sender = FBisectGood then
     BisectMarkCommit('HEAD', bmGood)
@@ -150,7 +150,7 @@ end;
 { Runs AStep, a bisect command, with the watcher stopped and the
   repository read again after it; false, with git's reason in a banner,
   when git refused. }
-function TForm1.RunBisect(AStep: TBisectStep; const ACommit: string;
+function TRepoFrame.RunBisect(AStep: TBisectStep; const ACommit: string;
   AMark: TGittanBisectMark; const AGood: string): boolean;
 begin
   Result := False;
@@ -181,7 +181,7 @@ end;
 
 { Says where the bisect stands after a mark or a start: the first bad
   commit, or the suspects, in a banner, else what was marked. }
-procedure TForm1.BisectReport(const ADone: string);
+procedure TRepoFrame.BisectReport(const ADone: string);
 begin
   if FBisect.Found <> '' then
     BannerSuccess(Format(rsBisectFound, [Copy(FBisect.Found, 1, 7), FBisect.Subject]))
@@ -191,7 +191,7 @@ begin
     StatusNote(ADone);
 end;
 
-procedure TForm1.BisectMarkCommit(const ACommit: string; AMark: TGittanBisectMark);
+procedure TRepoFrame.BisectMarkCommit(const ACommit: string; AMark: TGittanBisectMark);
 var
   Short, Done: string;
 begin
@@ -210,7 +210,7 @@ begin
 end;
 
 { ABad and AGood as BisectStart takes them. }
-function TForm1.BisectStartAt(const ABad, AGood: string): boolean;
+function TRepoFrame.BisectStartAt(const ABad, AGood: string): boolean;
 begin
   Result := False;
   if FOperation <> '' then
@@ -220,7 +220,7 @@ begin
     BisectReport(rsBisectStarted);
 end;
 
-procedure TForm1.BisectEndClick;
+procedure TRepoFrame.BisectEndClick;
 begin
   if FOperation <> 'bisecting' then
     Exit;

@@ -970,7 +970,7 @@ begin
   SetLexer(Lexer);
 end;
 
-{ As TForm1.SetEditorLexer: a change event from line 0 starts the parse. }
+{ As TRepoFrame.SetEditorLexer: a change event from line 0 starts the parse. }
 procedure TSettingsForm.SetLexer(ALexer: TecSyntAnalyzer);
 begin
   FAdapter.Lexer := ALexer;
@@ -980,7 +980,7 @@ begin
 end;
 
 { Shows the chosen sample, its button down and the others up. The text is
-  set as TForm1.ShowText sets it, with the wrap info rebuilt. }
+  set as TRepoFrame.ShowText sets it, with the wrap info rebuilt. }
 procedure TSettingsForm.ShowSample;
 var
   i: integer;

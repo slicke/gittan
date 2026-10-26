@@ -8,13 +8,13 @@
   (git rm --cached) or to delete it too; git refuses to delete a file
   with changes not committed, and its message is shown. }
 
-function TForm1.CanMoveFiles: boolean;
+function TRepoFrame.CanMoveFiles: boolean;
 begin
   Result := (FRepo.Root <> '') and (FCommitJob = nil) and (FRemoteJob = nil) and
     (FContextFolder = '') and FRepo.IsTracked(FContextPath);
 end;
 
-procedure TForm1.MenuMoveFileClick(Sender: TObject);
+procedure TRepoFrame.MenuMoveFileClick(Sender: TObject);
 var
   Values: array of string;
   Old, New, Part: string;
@@ -56,7 +56,7 @@ begin
     BannerError(Format(rsMoveFailed, [Old]), FRepo.Error);
 end;
 
-procedure TForm1.MenuRemoveFileClick(Sender: TObject);
+procedure TRepoFrame.MenuRemoveFileClick(Sender: TObject);
 var
   Paths: TStringList;
   Path: string;

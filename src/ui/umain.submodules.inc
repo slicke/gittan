@@ -22,7 +22,7 @@
   its node in the file tree, the page then with a card for how it moved
   (CompareSubmodule) and the commits it moved by. File > Submodules and the section's menu update, sync and add
   submodules (at the end of this file). }
-procedure TForm1.SetupSubmodules;
+procedure TRepoFrame.SetupSubmodules;
 
   function AddItem(const ACaption: string; AClick: TNotifyEvent): TMenuItem;
   begin
@@ -77,7 +77,7 @@ end;
 { What the jobs depend on: the submodules with their recorded commits
   and branches, and whether git status reports each one changed, which
   it does when its checkout moved. }
-function TForm1.SubmoduleKey: string;
+function TRepoFrame.SubmoduleKey: string;
 var
   i, j: integer;
 begin
@@ -94,7 +94,7 @@ end;
 
 { Lists the submodules again (from ApplySnapshot, so the watcher keeps
   them current) and starts the jobs when what they depend on changed. }
-procedure TForm1.FillSubmodules;
+procedure TRepoFrame.FillSubmodules;
 var
   List: TGittanSubmodules;
   Err, FromSide, ToSide: string;
@@ -118,7 +118,7 @@ begin
   FillSubmoduleTree;
 end;
 
-function TForm1.SubmoduleAt(const APath: string): integer;
+function TRepoFrame.SubmoduleAt(const APath: string): integer;
 var
   i: integer;
 begin
@@ -128,7 +128,7 @@ begin
   Result := -1;
 end;
 
-function TForm1.SubmoduleMoveText(AIndex: integer): string;
+function TRepoFrame.SubmoduleMoveText(AIndex: integer): string;
 
   function Short(const AHash: string): string;
   begin
@@ -151,7 +151,7 @@ end;
   in; after a refresh, which empties both, it is selected in the file
   tree when it is changed, else in the Submodules section: one selection
   among the trees. }
-procedure TForm1.SelectShownSubmodule;
+procedure TRepoFrame.SelectShownSubmodule;
 var
   Node, InFiles, InSubs: TTreeNode;
   FileHandler, SubHandler: TNotifyEvent;
@@ -188,7 +188,7 @@ begin
 end;
 
 { The row of submodule AIndex: its path and what the remote holds. }
-function TForm1.SubmoduleRowText(AIndex: integer): string;
+function TRepoFrame.SubmoduleRowText(AIndex: integer): string;
 var
   Info: TGittanSubmoduleInfo;
 begin
@@ -207,7 +207,7 @@ end;
 
 { One row per submodule, Data its index + 1; the shown one stays
   selected. The header counts them, and the ones the remote is ahead of. }
-procedure TForm1.FillSubmoduleTree;
+procedure TRepoFrame.FillSubmoduleTree;
 var
   Node: TTreeNode;
   RowIcon, Newer, i, j: integer;
@@ -249,7 +249,7 @@ end;
 
 { One job per submodule, so a slow remote holds up only its own row.
   The rows keep nothing of the previous jobs unless AKeep. }
-procedure TForm1.StartSubmoduleJobs(AKeep: boolean);
+procedure TRepoFrame.StartSubmoduleJobs(AKeep: boolean);
 var
   Job: TGittanSubmoduleJob;
   i: integer;
@@ -274,7 +274,7 @@ begin
 end;
 
 { A poll waits for jobs still running; their end sets the timer again. }
-procedure TForm1.SubTimerTimer(Sender: TObject);
+procedure TRepoFrame.SubTimerTimer(Sender: TObject);
 begin
   FSubTimer.Enabled := False;
   if (FRepo.Root = '') or (FSubJobs.Count > 0) or (Length(FSubmodules) = 0) then
@@ -282,7 +282,7 @@ begin
   StartSubmoduleJobs(True);
 end;
 
-procedure TForm1.AbandonSubmoduleJobs;
+procedure TRepoFrame.AbandonSubmoduleJobs;
 var
   i: integer;
 begin
@@ -312,7 +312,7 @@ begin
     #0 + BoolToStr(AInfo.Initialized, True);
 end;
 
-procedure TForm1.SubmoduleJobDone(Sender: TObject);
+procedure TRepoFrame.SubmoduleJobDone(Sender: TObject);
 var
   Job: TGittanSubmoduleJob;
   Node: TTreeNode;
@@ -347,7 +347,7 @@ begin
   end;
 end;
 
-procedure TForm1.SubTreeSelectionChanged(Sender: TObject);
+procedure TRepoFrame.SubTreeSelectionChanged(Sender: TObject);
 var
   Node: TTreeNode;
 begin
@@ -366,7 +366,7 @@ end;
   repository of its own when it is checked out and an Update pill while
   it is not checked out at the recorded commit. The page keeps its
   scroll position while it shows the same submodule. }
-procedure TForm1.ShowSubmodule(AIndex: integer);
+procedure TRepoFrame.ShowSubmodule(AIndex: integer);
 var
   Sub: TGittanSubmodule;
   Info: TGittanSubmoduleInfo;
@@ -435,14 +435,14 @@ begin
 end;
 
 { A click on a commit of the submodule's page copies its id. }
-procedure TForm1.SubPageCopyCommit(Sender: TObject; const AHash: string);
+procedure TRepoFrame.SubPageCopyCommit(Sender: TObject; const AHash: string);
 begin
   Clipboard.AsText := AHash;
   StatusNote(Format(rsSubCopied, [Copy(AHash, 1, 7)]), False);
 end;
 
 { The Open pill: the submodule as a repository of its own. }
-procedure TForm1.OpenShownSubmodule;
+procedure TRepoFrame.OpenShownSubmodule;
 begin
   if (FRepo.Root = '') or (FSubShown = '') then
     Exit;
@@ -451,7 +451,7 @@ end;
 
 { After a refresh: the shown submodule again, or the summary when it is
   gone. }
-procedure TForm1.RestoreSubmodule;
+procedure TRepoFrame.RestoreSubmodule;
 var
   i: integer;
 begin
@@ -477,13 +477,13 @@ end;
   that would move a submodule back to the recorded commit asks first.
   A sync only writes the config. Then the remotes are asked again. }
 
-function TForm1.CanSubmoduleAction: boolean;
+function TRepoFrame.CanSubmoduleAction: boolean;
 begin
   Result := (FRepo <> nil) and (FRepo.Root <> '') and (FRemoteJob = nil) and
     (FCommitJob = nil);
 end;
 
-procedure TForm1.UpdateSubmoduleItems;
+procedure TRepoFrame.UpdateSubmoduleItems;
 var
   Can: boolean;
 begin
@@ -497,7 +497,7 @@ end;
 
 { What changed in the submodules is asked of their remotes again, and
   the shown one is shown again, as View > Refresh does. }
-procedure TForm1.RecheckSubmodules;
+procedure TRepoFrame.RecheckSubmodules;
 begin
   if FRepo.Root = '' then
     Exit;
@@ -510,7 +510,7 @@ end;
 { Every submodule with APath empty. One checked out at another commit
   than the recorded one is moved back by the update, which may be what
   was not wanted: the user moved it to record the new commit. }
-procedure TForm1.UpdateSubmodulesAsk(const APath: string);
+procedure TRepoFrame.UpdateSubmodulesAsk(const APath: string);
 var
   Moved: TStringList;
   List: string;
@@ -541,7 +541,7 @@ begin
   StartRemote(rkSubmoduleUpdate, pmAuto, APath);
 end;
 
-procedure TForm1.SyncSubmodulesNow(const APath: string);
+procedure TRepoFrame.SyncSubmodulesNow(const APath: string);
 var
   Ok: boolean;
 begin
@@ -565,7 +565,7 @@ end;
 { The dialog starts with AUrl, APath and ABranch: empty from the menu,
   what failed for Try Again. The add runs as a clone does, its notice
   shown at once. }
-procedure TForm1.AddSubmoduleAsk(const AUrl, APath, ABranch: string);
+procedure TRepoFrame.AddSubmoduleAsk(const AUrl, APath, ABranch: string);
 var
   Url, Path, Branch: string;
   Taken: TStringArray;
@@ -601,7 +601,7 @@ end;
 
 { From RemoteJobDone after the refresh, for an update or an add that
   went through: the submodules are asked again, and a new one is shown. }
-procedure TForm1.SubmoduleRemoteDone(AJob: TGittanRemoteJob);
+procedure TRepoFrame.SubmoduleRemoteDone(AJob: TGittanRemoteJob);
 var
   Index: integer;
 begin
@@ -622,7 +622,7 @@ begin
 end;
 
 { The submodule of the section's selected row, -1 for none. }
-function TForm1.PopupSubmodule: integer;
+function TRepoFrame.PopupSubmodule: integer;
 begin
   Result := -1;
   if (FSubTree.Selected <> nil) and (FSubTree.Selected.Data <> nil) then
@@ -632,7 +632,7 @@ begin
 end;
 
 { The path of the section's selected submodule, '' for none. }
-function TForm1.PopupSubmodulePath: string;
+function TRepoFrame.PopupSubmodulePath: string;
 var
   Index: integer;
 begin
@@ -643,7 +643,7 @@ begin
     Result := '';
 end;
 
-procedure TForm1.SubPopupPopup(Sender: TObject);
+procedure TRepoFrame.SubPopupPopup(Sender: TObject);
 var
   Index: integer;
   Can: boolean;
@@ -656,22 +656,22 @@ begin
     FSubInfos[Index].Initialized;
 end;
 
-procedure TForm1.MenuSubUpdateAllClick(Sender: TObject);
+procedure TRepoFrame.MenuSubUpdateAllClick(Sender: TObject);
 begin
   UpdateSubmodulesAsk('');
 end;
 
-procedure TForm1.MenuSubSyncAllClick(Sender: TObject);
+procedure TRepoFrame.MenuSubSyncAllClick(Sender: TObject);
 begin
   SyncSubmodulesNow('');
 end;
 
-procedure TForm1.MenuSubAddClick(Sender: TObject);
+procedure TRepoFrame.MenuSubAddClick(Sender: TObject);
 begin
   AddSubmoduleAsk('', '', '');
 end;
 
-procedure TForm1.MenuSubUpdateClick(Sender: TObject);
+procedure TRepoFrame.MenuSubUpdateClick(Sender: TObject);
 var
   Path: string;
 begin
@@ -680,7 +680,7 @@ begin
     UpdateSubmodulesAsk(Path);
 end;
 
-procedure TForm1.MenuSubSyncClick(Sender: TObject);
+procedure TRepoFrame.MenuSubSyncClick(Sender: TObject);
 var
   Path: string;
 begin
@@ -689,7 +689,7 @@ begin
     SyncSubmodulesNow(Path);
 end;
 
-procedure TForm1.MenuSubOpenClick(Sender: TObject);
+procedure TRepoFrame.MenuSubOpenClick(Sender: TObject);
 var
   Path: string;
 begin
@@ -698,7 +698,7 @@ begin
     OpenRepository(IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(Path));
 end;
 
-procedure TForm1.MenuSubCopyPathClick(Sender: TObject);
+procedure TRepoFrame.MenuSubCopyPathClick(Sender: TObject);
 var
   Path: string;
 begin

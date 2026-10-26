@@ -97,7 +97,7 @@ type
   end;
 
   {** The colors the self-painted controls share in one appearance
-    (TForm1.Palette): the gutter's shade the bars and headers sit on,
+    (TRepoFrame.Palette): the gutter's shade the bars and headers sit on,
     the text and its dim kind, the divider lines, the popup lists'
     background, hovered row and border, a raised part of a bar, the
     accent, the added, deleted and warning tones, the pills, and the
@@ -110,9 +110,17 @@ type
     NoteInfo, NoteInfoLine, NoteError, NoteErrorLine: TColor;
   end;
 
-  { TForm1 }
+  { TRepoFrame }
 
-  TForm1 = class(TForm)
+  {** One repository in the window: the sidebar, the editor and the views
+    beside it, the status bar, the popups and notices over them, and the
+    jobs, timers and state behind them. The window (uwindow) creates it,
+    places it over its client area and calls Init, and passes its own
+    events on (FormClose, FormCloseQuery, FormKeyDown, FormActivate,
+    FormDropFiles). For now it still drives the window itself through
+    FWindow: the menu, the caption, the toolbar or own title bar, and
+    the active control. }
+  TRepoFrame = class(TFrame)
     Edit: TATSynEdit;
     EditorPanel: TPanel;
     DirDialog: TSelectDirectoryDialog;
@@ -130,10 +138,9 @@ type
     procedure FileTreeMouseMove(Sender: TObject; Shift: TShiftState; X, Y: integer);
     procedure FileTreeMouseLeave(Sender: TObject);
     procedure TreeHintTimerTimer(Sender: TObject);
-    procedure FormCreate(Sender: TObject);
-    procedure FormDestroy(Sender: TObject);
-    procedure FormDropFiles(Sender: TObject; const FileNames: array of string);
   private
+    { The window the frame is in, from Init. }
+    FWindow: TForm;
     FAdapter, FAdapterOld: TATAdapterEControl;
     FRepo: TGittanRepo;
     { The editor's font size when none was picked (DefaultFontSize for
@@ -1201,7 +1208,6 @@ type
     procedure ShowHistoryCommit(AIndex: integer);
     { umain.actions.inc }
     procedure ApplySettings;
-    procedure FormClose(Sender: TObject; var CloseAction: TCloseAction);
     procedure RebuildRecentMenu;
     procedure MenuRecentClick(Sender: TObject);
     procedure MenuClearRecentClick(Sender: TObject);
@@ -1386,7 +1392,6 @@ type
     procedure SetupSubmodules;
     procedure SetupCommit;
     procedure FocusTreeAsync(Data: PtrInt);
-    procedure FormActivate(Sender: TObject);
     procedure CommitHintAsync(Data: PtrInt);
     procedure CommitHeaderCheck(Sender: TObject);
     procedure SetAllChosen(AValue: boolean);
@@ -1653,14 +1658,12 @@ type
     procedure HeaderAction(Sender: TObject; AIndex: integer);
     procedure EditChangeModified(Sender: TObject);
     procedure MenuSaveClick(Sender: TObject);
-    procedure FormCloseQuery(Sender: TObject; var CanClose: boolean);
     procedure TreeFilterChange(Sender: TObject);
     procedure TreeFilterKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
     function TreeFilterQuery: string;
     {$IFDEF LCLCocoa}
     procedure ToolbarSearchKey(Sender: TObject; var Key: word);
     {$ENDIF}
-    procedure FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
     procedure HeaderControlsChange(Sender: TObject);
     procedure MenuFilterFilesClick(Sender: TObject);
     procedure AbandonPullJob;
@@ -1714,6 +1717,22 @@ type
     procedure SaveSnapshots;
 
   public
+    {** Builds what the frame shows, once it is placed in AWindow, which
+      it then drives (FWindow). It runs in the window's FormCreate, so
+      the window scales what it makes to the screen afterwards, as it
+      did when this was the form's own FormCreate. }
+    procedure Init(AWindow: TForm);
+    destructor Destroy; override;
+    {** The window's events, which the window passes on. FormClose
+      saves the settings. }
+    procedure FormClose(Sender: TObject; var CloseAction: TCloseAction);
+    procedure FormCloseQuery(Sender: TObject; var CanClose: boolean);
+    procedure FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
+    procedure FormActivate(Sender: TObject);
+    {** A dropped folder opens as a repository, a dropped file as a
+      file; also what Cocoa hands over when Gittan is asked to open a
+      path (the gittan command, the Dock icon). }
+    procedure FormDropFiles(Sender: TObject; const FileNames: array of string);
     {** Loads a file into the editor and picks its lexer from the file
       name. }
     procedure OpenFile(AFileName: string);
@@ -1724,9 +1743,6 @@ type
       opened. }
     procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil);
   end;
-
-var
-  Form1: TForm1;
 
 implementation
 
@@ -2755,7 +2771,7 @@ begin
   AParent.Add(Result);
 end;
 
-{ TForm1 }
+{ TRepoFrame }
 
 { TTreeView }
 
@@ -2778,10 +2794,9 @@ begin
   inherited MouseDown(Button, Shift, X, Y);
 end;
 
-procedure TForm1.FormCreate(Sender: TObject);
+procedure TRepoFrame.Init(AWindow: TForm);
 begin
-  { First: everything below reads the settings. }
-  CreateApp;
+  FWindow := AWindow;
   App.OnUpdateChecked := @UpdateChecked;
   FindForge;
   FindAgentCli;
@@ -3142,8 +3157,6 @@ begin
   {$ENDIF}
   BuildPopups;
   ApplyWrap;
-  OnClose := @FormClose;
-  OnCloseQuery := @FormCloseQuery;
   UpdateCaption;
   ShowSummary;
   { The welcome view says what opens, rather than offer its buttons
@@ -3155,7 +3168,7 @@ end;
 
 { The folder on the command line, else the repository of the last run
   when there is no argument; empty for a file or nothing to open. }
-function TForm1.StartRepository: string;
+function TRepoFrame.StartRepository: string;
 begin
   Result := '';
   if ParamCount > 0 then
@@ -3167,7 +3180,7 @@ begin
     Result := App.Settings.Recent[0];
 end;
 
-function TForm1.OpeningText(const ADir: string): string;
+function TRepoFrame.OpeningText(const ADir: string): string;
 begin
   Result := Format(rsOpening, [ExtractFileName(ExcludeTrailingPathDelimiter(ADir))]);
 end;
@@ -3177,7 +3190,7 @@ end;
   from FormCreate it runs once the window is shown and painted. A folder
   or file dropped on the Dock icon at launch may be open or opening by
   then (FormDropFiles), and stays. }
-procedure TForm1.OpenAtStartAsync(Data: PtrInt);
+procedure TRepoFrame.OpenAtStartAsync(Data: PtrInt);
 begin
   { gittan [file | folder], else the repository of the last run. }
   if (FRepo.Root <> '') or (FOpenJob <> nil) or (FView <> gvSummary) then
@@ -3190,7 +3203,7 @@ begin
   CheckGitVersion;
 end;
 
-procedure TForm1.FormDestroy(Sender: TObject);
+destructor TRepoFrame.Destroy;
 begin
   Application.RemoveAsyncCalls(Self);
   { First: the waits below let queued calls through, and OpenJobDone
@@ -3246,19 +3259,31 @@ begin
   FreeAndNil(FReviewInk);
   FreeAndNil(FCommitOn);
   FreeAndNil(FCommitOff);
-  { Last: the lexers go with it, which the adapters above let go of. }
-  FreeApp;
+  inherited Destroy;
 end;
 
 { The options both editors share: read-only, every line numbered (the
   change view numbers lines itself, see SetRowNumbers, and the file view
   should look the same), fold icons only under the mouse, and the line
   states band hidden until a diff is shown. }
-procedure TForm1.SetupEditor(AEd: TATSynEdit);
+procedure TRepoFrame.SetupEditor(AEd: TATSynEdit);
 var
   Actions: TATEditorMouseActions;
 begin
   AEd.ModeReadOnly := True;
+  { ATSynEdit draws a 1 px frame in Colors.BorderLine by default; the
+    editors sit edge to edge with the header, the sidebar and the
+    status bar, which it showed as a box around the text. }
+  AEd.OptBorderVisible := False;
+  {$IFDEF LCLCocoa}
+  { ATSynEdit takes the system scroll bars' width off its client
+    whenever it shows them, also macOS's overlay scrollers that take no
+    room: the minimap and the last line stopped a bar's width short of
+    the bottom and the right edge. Without them the wheel, the trackpad
+    and the minimap still scroll. }
+  AEd.OptScrollStyleHorz := TATEditorScrollbarStyle.Hide;
+  AEd.OptScrollStyleVert := TATEditorScrollbarStyle.Hide;
+  {$ENDIF}
   {$IFDEF LCLGtk3}
   { ATSynEdit paints into a bitmap of its own only where the widgetset
     can draw outside Paint (EditorDoubleBufferedNeeded), and straight
@@ -3320,7 +3345,7 @@ begin
   AEd.OnClickGap := @EditClickGap;
 end;
 
-function TForm1.AdapterOf(AEd: TATSynEdit): TATAdapterEControl;
+function TRepoFrame.AdapterOf(AEd: TATSynEdit): TATAdapterEControl;
 begin
   if AEd = FEditOld then
     Result := FAdapterOld
@@ -3335,7 +3360,7 @@ end;
 { The desktop theme can change while Gittan runs. The LCL has no event for
   it, so the timer asks every other second; the check is a system color or
   registry lookup. }
-procedure TForm1.ThemeTimerTimer(Sender: TObject);
+procedure TRepoFrame.ThemeTimerTimer(Sender: TObject);
 begin
   if IsDarkMode <> FDark then
   begin
@@ -3351,7 +3376,7 @@ end;
   through MetaDarkStyle (Gittan.lpr). The editor has
   its own palette, light by default, and the lexer colors are tuned for a
   white background, so both are set here from FDark. }
-procedure TForm1.ApplyEditorColors(AEd: TATSynEdit);
+procedure TRepoFrame.ApplyEditorColors(AEd: TATSynEdit);
 var
   i: integer;
 begin
@@ -3415,7 +3440,7 @@ begin
   AEd.Invalidate;
 end;
 
-function TForm1.Palette: TGittanPalette;
+function TRepoFrame.Palette: TGittanPalette;
 begin
   Result.Shade := SidebarShade(FDark);
   if FDark then
@@ -3460,7 +3485,7 @@ begin
   end;
 end;
 
-procedure TForm1.ApplyTheme;
+procedure TRepoFrame.ApplyTheme;
 var
   P: TGittanPalette;
   List: TGittanPopupList;
@@ -3610,7 +3635,7 @@ begin
 end;
 
 { A dropped folder opens as a repository, a dropped file as a file. }
-procedure TForm1.FormDropFiles(Sender: TObject; const FileNames: array of string);
+procedure TRepoFrame.FormDropFiles(Sender: TObject; const FileNames: array of string);
 begin
   if Length(FileNames) = 0 then
     Exit;
@@ -3620,7 +3645,7 @@ begin
     OpenFile(FileNames[0]);
 end;
 
-procedure TForm1.MenuOpenRepoClick(Sender: TObject);
+procedure TRepoFrame.MenuOpenRepoClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
     DirDialog.InitialDir := FRepo.Root;
@@ -3632,7 +3657,7 @@ end;
   open; the header names the file, so the title does not change with it.
   Cocoa reads an ampersand in a window title as an accelerator and drops
   it, so there every ampersand is doubled. }
-procedure TForm1.UpdateCaption;
+procedure TRepoFrame.UpdateCaption;
 var
   Title: string;
 begin
@@ -3645,7 +3670,7 @@ begin
   {$IFDEF LCLCocoa}
   Title := StringReplace(Title, '&', '&&', [rfReplaceAll]);
   {$ENDIF}
-  Caption := Title;
+  FWindow.Caption := Title;
 end;
 
 { The status bar shows the repository whenever one is open: its name,
@@ -3654,7 +3679,7 @@ end;
   changed files (the header names the file and its lexer). Without one it
   shows the path of a plain file. Messages and the caret's position are
   set elsewhere and left alone. }
-procedure TForm1.UpdateStatus;
+procedure TRepoFrame.UpdateStatus;
 var
   Lexer, Sync, Op: string;
   Tone: TGittanStatusTone;
@@ -3790,7 +3815,7 @@ function OperationNoun(const AOperation: string): string; forward;
   with commits to push or no upstream yet, or Up to date, which does
   nothing, then Push or Pull as the other one. The buttons rest while a remote job or a
   commit runs. The side buttons' captions are their hints. }
-procedure TForm1.UpdateStatusTransport;
+procedure TRepoFrame.UpdateStatusTransport;
 var
   L, P, R: TGittanStatusButton;
   Busy: boolean;
@@ -3895,7 +3920,7 @@ begin
   FStatus.PartHint[spRight] := R.Caption;
 end;
 
-procedure TForm1.StatusNote(const AText: string; AError: boolean);
+procedure TRepoFrame.StatusNote(const AText: string; AError: boolean);
 var
   S: string;
   i: integer;
@@ -3913,25 +3938,25 @@ begin
     FStatus.ShowMessage(AText, stNormal, StatusNoteSeconds);
 end;
 
-procedure TForm1.BannerError(const ATitle, ADetail: string);
+procedure TRepoFrame.BannerError(const ATitle, ADetail: string);
 begin
   FBanner.DetailFont.Assign(Edit.Font);
   FBanner.Add(ATitle, ADetail, bkError);
 end;
 
-procedure TForm1.BannerInfo(const ATitle: string; const ADetail: string);
+procedure TRepoFrame.BannerInfo(const ATitle: string; const ADetail: string);
 begin
   FBanner.DetailFont.Assign(Edit.Font);
   FBanner.Add(ATitle, ADetail, bkInfo, BannerInfoSeconds);
 end;
 
-procedure TForm1.BannerSuccess(const ATitle: string; const ADetail: string);
+procedure TRepoFrame.BannerSuccess(const ATitle: string; const ADetail: string);
 begin
   FBanner.DetailFont.Assign(Edit.Font);
   FBanner.Add(ATitle, ADetail, bkSuccess, BannerInfoSeconds);
 end;
 
-procedure TForm1.BannerChange(Sender: TObject);
+procedure TRepoFrame.BannerChange(Sender: TObject);
 begin
   PlaceUnderTitleBar;
 end;
@@ -3939,7 +3964,7 @@ end;
 { The banner is the first alTop control of the panel when shown (Top 0
   puts it before the header), and takes the strip's height as its own
   spacing so the header under it does not leave a gap. }
-procedure TForm1.PlaceUnderTitleBar;
+procedure TRepoFrame.PlaceUnderTitleBar;
 begin
   EditorPanel.DisableAlign;
   try
@@ -3969,7 +3994,7 @@ end;
   or the old side's for a deleted line, since the rows of the view are
   not the file's lines. The column counts characters from 1. The
   repository diff and the history have no file line to name. }
-procedure TForm1.UpdateStatusPosition;
+procedure TRepoFrame.UpdateStatusPosition;
 var
   Row, Col, Line: integer;
   Old: boolean;
@@ -4002,7 +4027,7 @@ end;
 
 { The Syntax menu marks the lexer in use and, when it was picked from the
   file name, Automatic as well. }
-procedure TForm1.UpdateSyntaxChecks;
+procedure TRepoFrame.UpdateSyntaxChecks;
 var
   Group, Item: TMenuItem;
   Current: string;
@@ -4030,7 +4055,7 @@ end;
 { ---------------------------------------------------------------------------
   Menus
   --------------------------------------------------------------------------- }
-procedure TForm1.BuildMenu;
+procedure TRepoFrame.BuildMenu;
 var
   Main: TMainMenu;
   FileMenu, BranchMenu, StashMenu, ViewMenu, GoMenu, ToolsMenu, Item, Sub: TMenuItem;
@@ -4058,7 +4083,7 @@ begin
   AddItem(Item, rsSettings, ShortCut(VK_OEM_COMMA, [ssModifier]), @MenuSettingsClick);
   CocoaConfigMenu.appMenu.customMenus := Item;
   {$ENDIF}
-  Menu := Main;
+  FWindow.Menu := Main;
 
   FileMenu := TMenuItem.Create(Main);
   FileMenu.Caption := rsFile;
@@ -4302,7 +4327,7 @@ end;
   (hundreds of entries), grouped into one submenu per initial letter. The
   item caption is the lexer name; the hint keeps it without the
   accelerator ampersands the widgetset may insert. }
-procedure TForm1.BuildSyntaxMenu;
+procedure TRepoFrame.BuildSyntaxMenu;
 begin
   FAutoLexerItem := TMenuItem.Create(FSyntaxMenu);
   FAutoLexerItem.Caption := rsAutomatic;
@@ -4318,7 +4343,7 @@ begin
 end;
 
 { The lexers in groups by initial, once they are loaded. }
-procedure TForm1.AddLexerItems;
+procedure TRepoFrame.AddLexerItems;
 var
   Names: TStringList;
   Group, Item: TMenuItem;
@@ -4354,7 +4379,7 @@ end;
 
 { The lexers load in a thread (TGittanLexers.Load); the Syntax menu gets
   them when they are in, unless it is not built yet and takes them itself. }
-procedure TForm1.LexersLoaded(Sender: TObject);
+procedure TRepoFrame.LexersLoaded(Sender: TObject);
 begin
   if App.Lexers.Errors <> '' then
     DebugLn(App.Lexers.Errors);
@@ -4367,7 +4392,7 @@ begin
   end;
 end;
 
-procedure TForm1.MenuOpenClick(Sender: TObject);
+procedure TRepoFrame.MenuOpenClick(Sender: TObject);
 var
   Dlg: TOpenDialog;
 begin
@@ -4380,7 +4405,7 @@ begin
   end;
 end;
 
-procedure TForm1.MenuSyntaxClick(Sender: TObject);
+procedure TRepoFrame.MenuSyntaxClick(Sender: TObject);
 begin
   FManualLexer := True;
   if Sender = FPlainTextItem then
@@ -4389,7 +4414,7 @@ begin
     SetLexer(App.Lexers.ByName(TMenuItem(Sender).Hint));
 end;
 
-procedure TForm1.MenuAutoLexerClick(Sender: TObject);
+procedure TRepoFrame.MenuAutoLexerClick(Sender: TObject);
 begin
   FManualLexer := False;
   SetLexer(AutoLexer);
@@ -4401,7 +4426,7 @@ end;
 
 { The lexer the shown text gets by itself: from the file name, or the
   Diff lexer for the repository diff. }
-function TForm1.AutoLexer: TecSyntAnalyzer;
+function TRepoFrame.AutoLexer: TecSyntAnalyzer;
 begin
   case FView of
     gvChanges: Result := App.Lexers.ForFile(FCurrentPath, FRepo.Root);
@@ -4414,7 +4439,7 @@ begin
   end;
 end;
 
-procedure TForm1.SetEditorLexer(AEd: TATSynEdit; ALexer: TecSyntAnalyzer);
+procedure TRepoFrame.SetEditorLexer(AEd: TATSynEdit; ALexer: TecSyntAnalyzer);
 begin
   AdapterOf(AEd).Lexer := ALexer;
   { Assigning a lexer does not parse anything yet; a change event from line 0
@@ -4426,7 +4451,7 @@ end;
 
 { Both editors show the same file, so they get the same lexer; the old
   side only while it is shown. }
-procedure TForm1.SetLexer(ALexer: TecSyntAnalyzer);
+procedure TRepoFrame.SetLexer(ALexer: TecSyntAnalyzer);
 begin
   SetEditorLexer(Edit, ALexer);
   if FEditOld.Visible then
@@ -4438,7 +4463,7 @@ end;
   read-only ATSynEdit ignores assignments to Text, so read-only mode is
   lifted while the text is replaced. Loading does not clear the second
   bookmark list, so the diff colors are dropped here. }
-procedure TForm1.ShowText(AEd: TATSynEdit; const AText: string;
+procedure TRepoFrame.ShowText(AEd: TATSynEdit; const AText: string;
   ALexer: TecSyntAnalyzer);
 var
   i: integer;
@@ -4481,7 +4506,7 @@ end;
 
 { AFileName is not a const: callers pass FEditPath, which LeaveEdit
   clears, and a const would then name freed memory. }
-procedure TForm1.OpenFile(AFileName: string);
+procedure TRepoFrame.OpenFile(AFileName: string);
 begin
   { A file dropped while a repository opens is shown instead. }
   AbandonOpenJob;
@@ -4537,7 +4562,7 @@ begin
   Result := Max(-1, Min(ACommit, 127));
 end;
 
-procedure TForm1.EditCalcBookmarkColor(Sender: TObject; ABookmarkKind: integer;
+procedure TRepoFrame.EditCalcBookmarkColor(Sender: TObject; ABookmarkKind: integer;
   var AColor: TColor);
 begin
   { A faint tint of the editor background, so the syntax colors still
@@ -4588,7 +4613,7 @@ end;
 { The shade of a word that differs, on top of the line's tint: the same
   hue, strong enough to be told from the line, faint enough for the
   syntax colors to read. }
-function TForm1.WordColor(ATag: integer): TColor;
+function TRepoFrame.WordColor(ATag: integer): TColor;
 begin
   Result := clNone;
   if FDark then
@@ -4607,7 +4632,7 @@ end;
   the editor's attribs: a line part with only a background color, so the
   lexer's text color stays. AOffset is added to every span, for a text
   that keeps the diff marker in its first column. }
-procedure TForm1.MarkWords(AEd: TATSynEdit; ARow: integer; const ASpans: TGittanSpans;
+procedure TRepoFrame.MarkWords(AEd: TATSynEdit; ARow: integer; const ASpans: TGittanSpans;
   AChange: char; AOffset: integer);
 var
   Part: TATLinePart;
@@ -4663,7 +4688,7 @@ const
   palette's colors in turn, as tints of the editor background in the
   way of the diff colors. A line older than the history (AIndex -1)
   gets a grey. }
-function TForm1.HistoryColor(AIndex: integer; ATone: THistoryTone): TColor;
+function TRepoFrame.HistoryColor(AIndex: integer; ATone: THistoryTone): TColor;
 var
   C: array[0..2] of byte;
 begin
@@ -4685,7 +4710,7 @@ end;
 { Sets row ARow, a legend row of the history view, in bold and in the
   editor's text color: the lexer would otherwise color the words of
   the summary as code. The swatch at its start is colored on top. }
-procedure TForm1.MarkHeader(AEd: TATSynEdit; ARow: integer);
+procedure TRepoFrame.MarkHeader(AEd: TATSynEdit; ARow: integer);
 var
   Part: TATLinePart;
 begin
@@ -4696,7 +4721,7 @@ begin
     TATMarkerTags.Init(tagHistoryHeader, 0), @Part);
 end;
 
-procedure TForm1.RecolorWords(AEd: TATSynEdit);
+procedure TRepoFrame.RecolorWords(AEd: TATSynEdit);
 var
   Item: TATMarkerItem;
   i: integer;
@@ -4737,7 +4762,7 @@ end;
   which paints a strip in the state's color: "added" for an added line,
   "changed" for a deleted one. ShowText clears the states and shows the
   band. }
-procedure TForm1.MarkLine(AEd: TATSynEdit; ALine: integer; AChange: char);
+procedure TRepoFrame.MarkLine(AEd: TATSynEdit; ALine: integer; AChange: char);
 begin
   case AChange of
     '+':
@@ -4754,7 +4779,7 @@ begin
 end;
 
 { The background alone, for a gap or filler row. }
-procedure TForm1.MarkRow(AEd: TATSynEdit; ARow, AKind: integer);
+procedure TRepoFrame.MarkRow(AEd: TATSynEdit; ARow, AKind: integer);
 begin
   AEd.BookmarkSetForLine_2(ARow, AKind, '', TATBookmarkAutoDelete.DontDelete,
     False, 0);
@@ -4765,7 +4790,7 @@ end;
   them through the folding mechanism (see BuildChangeView), which a fold
   or unfold of a lexer range would disturb; Side by Side would lose its
   row alignment; the history view hides lines as the change view does. }
-function TForm1.FoldingShown: boolean;
+function TRepoFrame.FoldingShown: boolean;
 begin
   Result := (FView in [gvFile, gvBlob]) or ((FView = gvChanges) and not FOnlyChanges and
     not FSideBySide);
@@ -4773,7 +4798,7 @@ end;
 
 { The fold band lets the ranges of the lexer (functions, classes,
   blocks) be folded by a click; it is shown where FoldingShown allows. }
-procedure TForm1.SetFoldBand(AEd: TATSynEdit; AVisible: boolean);
+procedure TRepoFrame.SetFoldBand(AEd: TATSynEdit; AVisible: boolean);
 var
   Band: integer;
 begin
@@ -4787,7 +4812,7 @@ end;
 
 { A jump to a folded line unfolds it where folding is shown; elsewhere a
   hidden line is the diff's, which a jump must leave hidden. }
-function TForm1.FoldAction: TATEditorActionIfFolded;
+function TRepoFrame.FoldAction: TATEditorActionIfFolded;
 begin
   if FoldingShown then
     Result := TATEditorActionIfFolded.Unfold
@@ -4798,7 +4823,7 @@ end;
 { The line of the file shown in ARow, 1-based, for KeepFolds: the row
   itself in the file view, the line of the new file in the change view
   (0 for a deleted line, a gap or a filler). }
-function TForm1.FileLineOfRow(ARow: integer): integer;
+function TRepoFrame.FileLineOfRow(ARow: integer): integer;
 begin
   Result := 0;
   if FView in [gvFile, gvBlob] then
@@ -4811,19 +4836,19 @@ end;
 { An operation (merge, rebase, cherry-pick, bisect...) is under way, or a
   commit or a remote job runs: nothing that moves HEAD or the index may
   start. }
-function TForm1.RepoBusy: boolean;
+function TRepoFrame.RepoBusy: boolean;
 begin
   Result := (FOperation <> '') or (FCommitJob <> nil) or (FRemoteJob <> nil);
 end;
 
 { A repository is open and not busy. }
-function TForm1.RepoReady: boolean;
+function TRepoFrame.RepoReady: boolean;
 begin
   Result := (FRepo.Root <> '') and not RepoBusy;
 end;
 
 { The index in FStats of APath, -1 when it is not changed. }
-function TForm1.StatIndexOf(const APath: string): integer;
+function TRepoFrame.StatIndexOf(const APath: string): integer;
 begin
   for Result := 0 to High(FStats) do
     if FStats[Result].Path = APath then
@@ -4832,7 +4857,7 @@ begin
 end;
 
 { The path of the shown text, for KeepFolds. }
-function TForm1.FoldPath: string;
+function TRepoFrame.FoldPath: string;
 begin
   if FView = gvFile then
     Result := Edit.FileName
@@ -4846,7 +4871,7 @@ end;
   same file again (a refresh, a view option), by the file line they
   start on; RestoreFolds folds them again once the lexer has parsed the
   new text. }
-procedure TForm1.KeepFolds;
+procedure TRepoFrame.KeepFolds;
 var
   i, Line: integer;
   R: PATFoldRange;
@@ -4873,7 +4898,7 @@ end;
 
 { From AdapterParseDone: folds the first range on each line KeepFolds
   remembered, when the text is the same file's and may be folded. }
-procedure TForm1.RestoreFolds;
+procedure TRepoFrame.RestoreFolds;
 var
   i, j, Line: integer;
   R: PATFoldRange;
@@ -4910,7 +4935,7 @@ end;
   changed since the file was loaded or saved; a freshly set text has every
   line marked as new. Gittan shows it only for a diff, with the states set
   by MarkLine. }
-procedure TForm1.SetLineStatesBand(AEd: TATSynEdit; AVisible: boolean);
+procedure TRepoFrame.SetLineStatesBand(AEd: TATSynEdit; AVisible: boolean);
 var
   Band: integer;
 begin
@@ -4933,7 +4958,7 @@ end;
 
 { ANumbers holds one number per row, 0 for none; AKinds the bookmark
   kind of the row, which colors the number. }
-procedure TForm1.SetRowNumbers(AEd: TATSynEdit; const ANumbers, AKinds: TIntegerDynArray);
+procedure TRepoFrame.SetRowNumbers(AEd: TATSynEdit; const ANumbers, AKinds: TIntegerDynArray);
 var
   Decor: TATGutterDecorData;
   Band, i: integer;
@@ -4964,7 +4989,7 @@ end;
 { An added line's number takes the strip's green, a deleted line's (on
   the old side) its red, a fuzzy entry's in the translation view an
   amber; the rest the gutter's usual color. }
-function TForm1.LineNumberColor(AKind: integer): TColor;
+function TRepoFrame.LineNumberColor(AKind: integer): TColor;
 begin
   case AKind of
     bmAdded: Result := Edit.Colors.StateAdded;
@@ -4980,7 +5005,7 @@ begin
 end;
 
 { Back to the editor's own numbering. }
-procedure TForm1.ResetLineNumbers(AEd: TATSynEdit);
+procedure TRepoFrame.ResetLineNumbers(AEd: TATSynEdit);
 var
   Band: integer;
 begin
@@ -5022,7 +5047,7 @@ end;
   room for the widest number (its text has the trailing space) and one
   character of indent. The band width is reapplied by the editor on every
   update, so the option is set rather than the band. }
-procedure TForm1.UpdateNumberWidth(AEd: TATSynEdit);
+procedure TRepoFrame.UpdateNumberWidth(AEd: TATSynEdit);
 var
   Widest, i: integer;
 begin
@@ -5035,7 +5060,7 @@ begin
 end;
 
 { The two editors zoom together. }
-procedure TForm1.EditChangeZoom(Sender: TObject);
+procedure TRepoFrame.EditChangeZoom(Sender: TObject);
 var
   Other: TATSynEdit;
 begin
@@ -5053,7 +5078,7 @@ end;
   editor's size. EditChangeZoom calls it, which the wheel and the
   editor's own keys reach through OnChangeZoom and the menu's Zoom In
   and Out directly; Actual Size and a new font call it themselves. }
-procedure TForm1.EditorMetricsChanged;
+procedure TRepoFrame.EditorMetricsChanged;
 begin
   UpdateNumberWidth(Edit);
   UpdateNumberWidth(FEditOld);
@@ -5072,7 +5097,7 @@ end;
   bookmark list is sorted by line; a block starts where the line before is
   not marked. A gap row is not a change; a filler row of the side-by-side
   view stands for a deleted line and is part of its block. }
-function TForm1.ChangeBlocks: TIntegerDynArray;
+function TRepoFrame.ChangeBlocks: TIntegerDynArray;
 var
   Marks: TATBookmarks;
   Line, Prev, i, n: integer;
@@ -5108,7 +5133,7 @@ end;
 { The navigator in the header is shown only while the text has changes to
   jump to. Its counter names the last block the caret has reached, 0
   before the first. }
-procedure TForm1.UpdateChangeNav;
+procedure TRepoFrame.UpdateChangeNav;
 var
   Blocks: TIntegerDynArray;
   Cur, Current, i: integer;
@@ -5152,7 +5177,7 @@ end;
   editor, while the navigator was its child, recompute its scroll position
   from a half-updated state and scroll sideways. So the update waits for
   the message loop. }
-procedure TForm1.EditChangeCaretPos(Sender: TObject);
+procedure TRepoFrame.EditChangeCaretPos(Sender: TObject);
 begin
   if FNavUpdateQueued then
     Exit;
@@ -5160,7 +5185,7 @@ begin
   Application.QueueAsyncCall(@UpdateChangeNavAsync, 0);
 end;
 
-procedure TForm1.UpdateChangeNavAsync(Data: PtrInt);
+procedure TRepoFrame.UpdateChangeNavAsync(Data: PtrInt);
 begin
   FNavUpdateQueued := False;
   UpdateChangeNav;
@@ -5171,7 +5196,7 @@ end;
   the next (or previous) changed file in the tree, and wraps around in
   the file only when there is no other. The block lands a few lines below
   the top edge so its context stays in view. }
-procedure TForm1.GoToChange(ANext: boolean);
+procedure TRepoFrame.GoToChange(ANext: boolean);
 var
   Blocks: TIntegerDynArray;
   Cur, Target, i: integer;
@@ -5228,7 +5253,7 @@ end;
 
 { The caret goes to ARow, which lands a few lines below the top edge so
   the context above it stays in view. }
-procedure TForm1.ShowChangeAt(ARow: integer);
+procedure TRepoFrame.ShowChangeAt(ARow: integer);
 begin
   if FoldingShown then
     Edit.DoUnfoldLine(ARow);
@@ -5243,7 +5268,7 @@ end;
   conflict, with the caret on it so that Next Change goes on to the
   second. A change that is already on the first screen leaves the top of
   the file in view. }
-procedure TForm1.GoToFirstChange;
+procedure TRepoFrame.GoToFirstChange;
 var
   Blocks: TIntegerDynArray;
   Target, Row: integer;
@@ -5270,12 +5295,12 @@ begin
   end;
 end;
 
-procedure TForm1.MenuNextChangeClick(Sender: TObject);
+procedure TRepoFrame.MenuNextChangeClick(Sender: TObject);
 begin
   GoToChange(True);
 end;
 
-procedure TForm1.MenuPrevChangeClick(Sender: TObject);
+procedure TRepoFrame.MenuPrevChangeClick(Sender: TObject);
 begin
   GoToChange(False);
 end;
@@ -5286,7 +5311,7 @@ end;
   The editor shows the work tree's uncommitted changes as a unified diff
   under the Diff lexer; the file tree lists the changed files and the status
   bar counts them. }
-procedure TForm1.OpenRepository(const ADir: string; AOnOpened: TNotifyEvent);
+procedure TRepoFrame.OpenRepository(const ADir: string; AOnOpened: TNotifyEvent);
 begin
   { Open closes the previous repository even when it fails. }
   FlushEdit;
@@ -5352,7 +5377,7 @@ end;
 
 { The job is dropped; its result, if it comes, is thrown away. It is
   freed later from the zombie list, as a blame job is. }
-procedure TForm1.AbandonOpenJob;
+procedure TRepoFrame.AbandonOpenJob;
 begin
   FOnOpened := nil;
   if FOpenJob = nil then
@@ -5364,7 +5389,7 @@ end;
 
 { The repository is open in the job's thread, with its snapshot: the
   form takes it and draws it, and only then runs git again itself. }
-procedure TForm1.OpenJobDone(Sender: TObject);
+procedure TRepoFrame.OpenJobDone(Sender: TObject);
 var
   Job: TGittanOpenJob;
   Snap: TGittanRepoSnapshot;
@@ -5413,7 +5438,7 @@ end;
 
 { A failure to open or read a repository is shown where the hint was: in
   the empty view, not in a dialog, so the next attempt is one drop away. }
-procedure TForm1.ShowError(const AMessage: string);
+procedure TRepoFrame.ShowError(const AMessage: string);
 begin
   ClearRepositoryViews(AMessage);
   { The welcome view keeps the error; the bar's copy clears itself, so
@@ -5424,7 +5449,7 @@ end;
 
 { The views of no repository: the trees and the counts emptied, and the
   welcome view, with AError under its title. }
-procedure TForm1.ClearRepositoryViews(const AError: string);
+procedure TRepoFrame.ClearRepositoryViews(const AError: string);
 begin
   FileTree.Items.Clear;
   FRepoTree.Items.Clear;
@@ -5448,7 +5473,7 @@ end;
 { Gathers the repository and draws it, all on this thread: the load when a
   repository is opened, where a short wait is expected. The watcher path
   gathers the snapshot in its own thread and calls ApplySnapshot alone. }
-function TForm1.LoadRepository: boolean;
+function TRepoFrame.LoadRepository: boolean;
 var
   Snap: TGittanRepoSnapshot;
 begin
@@ -5459,7 +5484,7 @@ end;
 { Draws a snapshot of the repository into the views, on the main thread.
   The git work that built it is ApplySnapshot's caller's business: it is
   done on this thread by LoadRepository, in the watcher thread otherwise. }
-procedure TForm1.ApplySnapshot(const ASnap: TGittanRepoSnapshot);
+procedure TRepoFrame.ApplySnapshot(const ASnap: TGittanRepoSnapshot);
 var
   Icons: array of integer;
   Texts, Actions: array of string;
@@ -5583,7 +5608,7 @@ end;
 
 { The badge of a file: solid when the index holds all of its change,
   ringed when it holds part of it. }
-function TForm1.StatIcon(const AStat: TGittanFileStat): integer;
+function TRepoFrame.StatIcon(const AStat: TGittanFileStat): integer;
 begin
   if AStat.Staged then
     Result := StagedIcon(AStat.Kind, AStat.Unstaged)
@@ -5593,7 +5618,7 @@ end;
 
 { What a file's badge means: the kind of change, and how much of it is
   staged. }
-function TForm1.StatHint(const AStat: TGittanFileStat): string;
+function TRepoFrame.StatHint(const AStat: TGittanFileStat): string;
 const
   KindNames: array[TGittanChangeKind] of string = (rsKindModified,
     rsKindAdded, rsKindDeleted, rsKindRenamed, rsKindUntracked, rsKindConflict);
@@ -5616,7 +5641,7 @@ end;
   every WatchIdleInterval only, which spares the git processes and the
   wakeups, yet still follows a tree edited beside Gittan; coming back
   to the front polls at once. }
-procedure TForm1.StartWatcher;
+procedure TRepoFrame.StartWatcher;
 begin
   StopWatcher;
   if FRepo.Root = '' then
@@ -5628,12 +5653,12 @@ begin
   FWatcher.Start;
 end;
 
-procedure TForm1.StopWatcher;
+procedure TRepoFrame.StopWatcher;
 begin
   FreeAndNil(FWatcher);
 end;
 
-function TForm1.WatchPace: integer;
+function TRepoFrame.WatchPace: integer;
 begin
   if Application.Active then
     Result := WatchInterval
@@ -5641,7 +5666,7 @@ begin
     Result := WatchIdleInterval;
 end;
 
-procedure TForm1.AppActivate(Sender: TObject);
+procedure TRepoFrame.AppActivate(Sender: TObject);
 begin
   if FWatcher = nil then
     Exit;
@@ -5649,13 +5674,13 @@ begin
   FWatcher.Poll;
 end;
 
-procedure TForm1.AppDeactivate(Sender: TObject);
+procedure TRepoFrame.AppDeactivate(Sender: TObject);
 begin
   if FWatcher <> nil then
     FWatcher.Interval := WatchIdleInterval;
 end;
 
-procedure TForm1.WatcherChange(Sender: TObject);
+procedure TRepoFrame.WatcherChange(Sender: TObject);
 var
   Snap: TGittanRepoSnapshot;
 begin
@@ -5679,12 +5704,12 @@ end;
   RefreshRepository itself. A change the watcher brings meanwhile is
   read again when the last hold ends, from the message loop, once the
   callers have returned. }
-procedure TForm1.HoldRefresh;
+procedure TRepoFrame.HoldRefresh;
 begin
   Inc(FRefreshHold);
 end;
 
-procedure TForm1.ReleaseRefresh;
+procedure TRepoFrame.ReleaseRefresh;
 begin
   Dec(FRefreshHold);
   if (FRefreshHold = 0) and FRefreshPending and not FRefreshQueued then
@@ -5696,7 +5721,7 @@ end;
 
 { Another hold may have begun before the queue ran it (a second modal
   question); its end queues this again. }
-procedure TForm1.RefreshPendingAsync(Data: PtrInt);
+procedure TRepoFrame.RefreshPendingAsync(Data: PtrInt);
 begin
   FRefreshQueued := False;
   if (FRefreshHold > 0) or not FRefreshPending then
@@ -5705,7 +5730,7 @@ begin
   RefreshRepository;
 end;
 
-procedure TForm1.MenuRefreshClick(Sender: TObject);
+procedure TRepoFrame.MenuRefreshClick(Sender: TObject);
 begin
   RefreshRepository;
   StartPullJob(True);
@@ -5720,7 +5745,7 @@ end;
 
 { The path of the selected file in the tree, empty when none or a folder
   is selected. }
-function TForm1.SelectedPath: string;
+function TRepoFrame.SelectedPath: string;
 begin
   Result := '';
   if (FileTree.Selected <> nil) and (FileTree.Selected.Data <> nil) then
@@ -5738,7 +5763,7 @@ end;
   thread, which is only drawn. The refresh holds the watcher's (see
   HoldRefresh): one that came under it would rebuild the view while
   this one does. }
-procedure TForm1.RefreshRepository(ASnap: PGittanRepoSnapshot = nil);
+procedure TRepoFrame.RefreshRepository(ASnap: PGittanRepoSnapshot = nil);
 begin
   HoldRefresh;
   try
@@ -5748,7 +5773,7 @@ begin
   end;
 end;
 
-procedure TForm1.RefreshRepositoryHeld(ASnap: PGittanRepoSnapshot);
+procedure TRepoFrame.RefreshRepositoryHeld(ASnap: PGittanRepoSnapshot);
 var
   Collapsed: TStringList;
   Node: TTreeNode;
@@ -5877,7 +5902,7 @@ end;
   The summary and the editor share the space right of the tree; one of
   them is shown. The summary is the view of the repository, the editor the
   view of one file or of the raw repository diff. }
-procedure TForm1.ShowSummary;
+procedure TRepoFrame.ShowSummary;
 begin
   LeaveEditorViews;
   FSummaryBox.Visible := True;
@@ -5905,7 +5930,7 @@ end;
 
 { Hides every page of the box, for the one about to show. The welcome
   view is shown at startup, before the later pages exist. }
-procedure TForm1.HideBoxPages;
+procedure TRepoFrame.HideBoxPages;
 begin
   FWelcome.Visible := False;
   FSummary.Visible := False;
@@ -5922,7 +5947,7 @@ begin
 end;
 
 { Hides the editor and what goes with it, for a page in the box. }
-procedure TForm1.LeaveEditorViews;
+procedure TRepoFrame.LeaveEditorViews;
 begin
   FlushEdit;
   LeaveEdit;
@@ -5941,7 +5966,7 @@ begin
 end;
 
 { FView is set before the call: the layout depends on it. }
-procedure TForm1.ShowEditor;
+procedure TRepoFrame.ShowEditor;
 begin
   { A history still being fetched is for a view that is no longer shown. }
   if FView <> gvHistory then
@@ -5964,7 +5989,7 @@ end;
   one side by side in FImageDiff, in the editor's place, under the file
   header. The editor's text is left as it was; FView keeps the views
   of text (find, blame, the navigator) away from it. }
-procedure TForm1.ShowImageChanges(const APath: string);
+procedure TRepoFrame.ShowImageChanges(const APath: string);
 var
   OldRef, NewRef: string;
   OldData, NewData: RawByteString;
@@ -6002,7 +6027,7 @@ end;
 
 { A binary file in the change view: its sizes before and after in
   FBinaryView, in the editor's place, as an image is shown. }
-procedure TForm1.ShowBinaryChanges(const APath: string);
+procedure TRepoFrame.ShowBinaryChanges(const APath: string);
 var
   OldRef, NewRef: string;
   OldSize, NewSize: int64;
@@ -6039,7 +6064,7 @@ begin
 end;
 
 { A binary file from File > Open: its size, in the editor's place. }
-procedure TForm1.ShowBinaryFile(const AFileName: string);
+procedure TRepoFrame.ShowBinaryFile(const AFileName: string);
 var
   Info: TSearchRec;
   Size: int64;
@@ -6073,7 +6098,7 @@ begin
 end;
 
 { The summary paints its own background; it must cover the scroll box. }
-procedure TForm1.SummaryBoxResize(Sender: TObject);
+procedure TRepoFrame.SummaryBoxResize(Sender: TObject);
 begin
   FSummary.FitHeight(FSummaryBox.ClientHeight);
   FWelcome.FitHeight(FSummaryBox.ClientHeight);
@@ -6088,7 +6113,7 @@ end;
 { The welcome view takes the summary's place in the box, with AError
   under its title when opening a repository failed; it stays until a
   repository loads, see LoadRepository. }
-procedure TForm1.ShowWelcome(const AError: string);
+procedure TRepoFrame.ShowWelcome(const AError: string);
 begin
   FWelcome.SetError(AError);
   FWelcome.SetBusy('');
@@ -6104,29 +6129,29 @@ begin
   FWelcome.FitHeight(FSummaryBox.ClientHeight);
 end;
 
-procedure TForm1.WelcomeOpen(Sender: TObject);
+procedure TRepoFrame.WelcomeOpen(Sender: TObject);
 begin
   MenuOpenRepoClick(Sender);
 end;
 
-procedure TForm1.WelcomeOpenRecent(Sender: TObject; const ARoot: string);
+procedure TRepoFrame.WelcomeOpenRecent(Sender: TObject; const ARoot: string);
 begin
   OpenRepository(ARoot);
 end;
 
-procedure TForm1.WelcomeClone(Sender: TObject);
+procedure TRepoFrame.WelcomeClone(Sender: TObject);
 begin
   MenuCloneClick(Sender);
 end;
 
-procedure TForm1.WelcomeInit(Sender: TObject);
+procedure TRepoFrame.WelcomeInit(Sender: TObject);
 begin
   MenuInitClick(Sender);
 end;
 
 { A click on a file in the summary selects it in the tree, which shows its
   changes. The tree's node texts are the path components. }
-procedure TForm1.SummarySelectFile(Sender: TObject; const APath: string);
+procedure TRepoFrame.SummarySelectFile(Sender: TObject; const APath: string);
 var
   Node: TTreeNode;
   Sub: integer;
@@ -6154,7 +6179,7 @@ begin
   end;
 end;
 
-procedure TForm1.MenuSummaryClick(Sender: TObject);
+procedure TRepoFrame.MenuSummaryClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
   begin
@@ -6163,7 +6188,7 @@ begin
   end;
 end;
 
-procedure TForm1.MenuRepoDiffClick(Sender: TObject);
+procedure TRepoFrame.MenuRepoDiffClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
     ShowRepoDiff;
@@ -6171,7 +6196,7 @@ end;
 
 { The work tree's uncommitted changes as one unified diff under the Diff
   lexer, with the +/- lines colored like the change view. }
-procedure TForm1.ShowRepoDiff;
+procedure TRepoFrame.ShowRepoDiff;
 var
   i, Added, Deleted: integer;
   Title, DiffText: string;
@@ -6238,7 +6263,7 @@ end;
   the same file is shown again, as on a refresh. False when git could
   not give the diff: the banner says why and the summary is shown, so
   the tree and the view do not tell of different files. }
-function TForm1.ShowChanges(const APath: string): boolean;
+function TRepoFrame.ShowChanges(const APath: string): boolean;
 var
   Lines: TStringList;
   i, c: integer;
@@ -6346,7 +6371,7 @@ end;
   folder icon. A folder is never opened; a submodule shows ShowSubmodule.
   git lists paths sorted, so the folder node of the previous
   path is reused when the folder repeats. }
-procedure TForm1.FillFileTree(const AStats: TGittanFileStats);
+procedure TRepoFrame.FillFileTree(const AStats: TGittanFileStats);
 var
   Path, Dir, Part: string;
   DirNode, Node, LastDir: TTreeNode;
@@ -6437,7 +6462,7 @@ end;
   in gray, so it stays quiet beside the green one in the summary: a
   large disc with a check cut out of it, with "No changes" under it, in
   the middle of the tree. }
-procedure TForm1.FileTreeAdvancedCustomDraw(Sender: TCustomTreeView;
+procedure TRepoFrame.FileTreeAdvancedCustomDraw(Sender: TCustomTreeView;
   const ARect: TRect; Stage: TCustomDrawStage; var DefaultDraw: boolean);
 const
   Disc = 40;
@@ -6484,7 +6509,7 @@ end;
   The tree comes from umain.lfm aligned left on the form; it is moved
   into a panel of the same width under a native edit field, so the
   splitter sizes the panel and the settings keep its width. }
-procedure TForm1.SetupTreeFilter;
+procedure TRepoFrame.SetupTreeFilter;
 begin
   FTreePanel := TPanel.Create(Self);
   FTreePanel.BevelOuter := bvNone;
@@ -6520,11 +6545,11 @@ end;
   (gittan.owntitlebar; gittan.wintitlebar and gittan.gtktitlebar), with
   the name, the menus, the filter field, the header's navigator and
   pills and the caption buttons in it. }
-procedure TForm1.SetupTitleBar;
+procedure TRepoFrame.SetupTitleBar;
 begin
   {$IFDEF LCLCocoa}
   { The toolbar first: it makes the strip taller. }
-  FToolbar := TGittanToolbar.Install(Handle, rsAppShortName, rsFilterHint);
+  FToolbar := TGittanToolbar.Install(FWindow.Handle, rsAppShortName, rsFilterHint);
   if FToolbar <> nil then
   begin
     FTreeFilter.Visible := False;
@@ -6540,7 +6565,7 @@ begin
     FHeader.OnControlsChange := @HeaderControlsChange;
     HeaderControlsChange(nil);
   end;
-  FTitleBarHeight := ExtendUnderTitleBar(Handle);
+  FTitleBarHeight := ExtendUnderTitleBar(FWindow.Handle);
   {$ENDIF}
   {$IFDEF LCLWin32}
   FOwnBar := TGittanWinTitleBar.Create(Self);
@@ -6548,11 +6573,6 @@ begin
   {$IFDEF LCLGtk3}
   FOwnBar := TGittanGtkTitleBar.Create(Self);
   {$ENDIF}
-  { The keys of the commands (umain.commands.inc) from any view, and on
-    GTK Alt and a letter, which opens the menu it underlines as the
-    hidden menu bar would. }
-  KeyPreview := True;
-  OnKeyDown := @FormKeyDown;
   {$IFDEF OWNBAR}
   FOwnBar.Title := rsAppShortName;
   FOwnBar.Align := alTop;
@@ -6570,10 +6590,10 @@ begin
   HeaderControlsChange(nil);
   {$ENDIF}
   {$IFDEF LCLWin32}
-  InstallTitleBar(Self, TGittanWinTitleBar(FOwnBar));
+  InstallTitleBar(FWindow, TGittanWinTitleBar(FOwnBar));
   {$ENDIF}
   {$IFDEF LCLGtk3}
-  InstallTitleBar(Self, TGittanGtkTitleBar(FOwnBar));
+  InstallTitleBar(FWindow, TGittanGtkTitleBar(FOwnBar));
   {$ENDIF}
   FTreeFilter.BorderSpacing.Top := FTitleBarHeight;
   { With the toolbar's field in its place the page rows are at the top. }
@@ -6589,14 +6609,14 @@ end;
   GTK 3; the status bar has its own bar). It is
   shown for every file, not only when the status bar is updated: the
   big files of a large repository take seconds between those. }
-procedure TForm1.UpdateIndexBand;
+procedure TRepoFrame.UpdateIndexBand;
 begin
   {$IFDEF LCLCocoa}
   if FIndexing then
-    ShowTitleBand(Handle, FIndexPos, FIndexTotal, ColorToRGB(FBandTrack),
+    ShowTitleBand(FWindow.Handle, FIndexPos, FIndexTotal, ColorToRGB(FBandTrack),
       ColorToRGB(FBandFill))
   else
-    HideTitleBand(Handle);
+    HideTitleBand(FWindow.Handle);
   {$ENDIF}
   {$IFDEF OWNBAR}
   if FOwnBar = nil then
@@ -6613,7 +6633,7 @@ end;
   status bar, and the form too, for the notch above the splitter; the
   editor panel takes the editor's background, which shows in the strip
   above the header or the summary. }
-procedure TForm1.ColorSidebar;
+procedure TRepoFrame.ColorSidebar;
 var
   Shade: TColor;
 begin
@@ -6622,6 +6642,7 @@ begin
   Shade := SidebarShade(FDark);
   FTreePanel.Color := Shade;
   Color := Shade;
+  FWindow.Color := Shade;
   FileTree.BackgroundColor := Shade;
   ThemeSideNav(FSideNav, FDark, Edit.Colors.TextFont);
   if FRepoTree <> nil then
@@ -6660,7 +6681,7 @@ end;
 
 { Rebuilds the tree for the new filter and keeps the shown file selected
   without reloading it. }
-procedure TForm1.TreeFilterChange(Sender: TObject);
+procedure TRepoFrame.TreeFilterChange(Sender: TObject);
 var
   Handler: TNotifyEvent;
 begin
@@ -6683,7 +6704,7 @@ end;
 
 { Escape clears the filter, or leaves the field when it is empty; Enter
   and Down go to the tree. }
-procedure TForm1.TreeFilterKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
+procedure TRepoFrame.TreeFilterKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
 begin
   case Key of
     VK_ESCAPE:
@@ -6709,7 +6730,7 @@ end;
 
 { The filter's text: the toolbar's search field on macOS, else the
   field over the tree. }
-function TForm1.TreeFilterQuery: string;
+function TRepoFrame.TreeFilterQuery: string;
 begin
   {$IFDEF LCLCocoa}
   if FToolbar <> nil then
@@ -6721,7 +6742,7 @@ end;
 { A command's key runs it (CommandKey). On GTK Alt and a letter opens
   the menu with that accelerator from the title bar, as the menu bar
   would have before the bar hid its names. }
-procedure TForm1.FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
+procedure TRepoFrame.FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
 begin
   if CommandKey(Key, Shift) then
   begin
@@ -6740,16 +6761,16 @@ end;
   as the field over the tree takes them. The form does not know the
   field and still has the control focused before it as the active one,
   so focusing that again would do nothing. }
-procedure TForm1.ToolbarSearchKey(Sender: TObject; var Key: word);
+procedure TRepoFrame.ToolbarSearchKey(Sender: TObject; var Key: word);
 begin
-  ActiveControl := nil;
+  FWindow.ActiveControl := nil;
   TreeFilterKeyDown(Sender, Key, []);
 end;
 {$ENDIF}
 
 { The toolbar (macOS) or the title bar (Windows, GTK 3) shows the header's
   navigator and pills, none while the header is hidden (the summary). }
-procedure TForm1.HeaderControlsChange(Sender: TObject);
+procedure TRepoFrame.HeaderControlsChange(Sender: TObject);
 var
   Captions: array of string;
   States: array of boolean;
@@ -6793,7 +6814,7 @@ begin
   {$ENDIF}
 end;
 
-procedure TForm1.MenuFilterFilesClick(Sender: TObject);
+procedure TRepoFrame.MenuFilterFilesClick(Sender: TObject);
 begin
   {$IFDEF LCLCocoa}
   if FToolbar <> nil then
@@ -6810,7 +6831,7 @@ begin
 end;
 
 { Folders before files, then by name ignoring case. }
-function TForm1.CompareTreeNodes(Node1, Node2: TTreeNode): integer;
+function TRepoFrame.CompareTreeNodes(Node1, Node2: TTreeNode): integer;
 begin
   Result := Ord(Node1.Data <> nil) - Ord(Node2.Data <> nil);
   if Result = 0 then
@@ -6820,7 +6841,7 @@ end;
 { Selecting a file shows its changes, a submodule how it moved. Folders
   only expand. A deleted file still has a diff: every line of it,
   deleted. }
-procedure TForm1.FileTreeSelectionChanged(Sender: TObject);
+procedure TRepoFrame.FileTreeSelectionChanged(Sender: TObject);
 var
   Node: TTreeNode;
   Sub: integer;
@@ -6851,7 +6872,7 @@ end;
   The tree's own hint is set only when the timer fires and cleared when
   the mouse moves to another row, since the LCL's hint does not follow a
   hint that changes within one control on Cocoa. }
-procedure TForm1.FileTreeMouseMove(Sender: TObject; Shift: TShiftState; X, Y: integer);
+procedure TRepoFrame.FileTreeMouseMove(Sender: TObject; Shift: TShiftState; X, Y: integer);
 var
   Node: TTreeNode;
   Tip, Path: string;
@@ -6882,7 +6903,7 @@ begin
   FTreeHintTimer.Enabled := Tip <> '';
 end;
 
-procedure TForm1.FileTreeMouseLeave(Sender: TObject);
+procedure TRepoFrame.FileTreeMouseLeave(Sender: TObject);
 begin
   FTreeHintTimer.Enabled := False;
   if FileTree.Hint <> '' then
@@ -6894,7 +6915,7 @@ begin
   FTreeHintNode := nil;
 end;
 
-procedure TForm1.TreeHintTimerTimer(Sender: TObject);
+procedure TRepoFrame.TreeHintTimerTimer(Sender: TObject);
 begin
   FTreeHintTimer.Enabled := False;
   if FTreeHint = '' then
@@ -6946,3 +6967,4 @@ const
 {$I umain.mdpreview.inc}
 
 end.
+

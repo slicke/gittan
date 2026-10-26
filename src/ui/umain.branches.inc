@@ -35,7 +35,7 @@ const
   bmCurrentSince = 9;
   bmUpstream = 10;
 
-procedure TForm1.BranchContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
+procedure TRepoFrame.BranchContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
 var
   BranchName, Ref, Up: string;
   Busy, IsRemote: boolean;
@@ -94,7 +94,7 @@ begin
   FBranchMenu.PopUp(AScreenPos.X, AScreenPos.Y);
 end;
 
-procedure TForm1.BranchMenuClick(Sender: TObject);
+procedure TRepoFrame.BranchMenuClick(Sender: TObject);
 var
   BranchName, Ref: string;
 begin
@@ -122,7 +122,7 @@ begin
 end;
 
 { The branch list's own rows: New Branch... and Delete Gone Branches.... }
-function TForm1.BranchAction(const AName: string): boolean;
+function TRepoFrame.BranchAction(const AName: string): boolean;
 var
   Values: array of string;
 begin
@@ -137,7 +137,7 @@ begin
   NewBranchAsk(rsBmNewPrompt, 'HEAD');
 end;
 
-procedure TForm1.RenameBranchAsk(const AName: string);
+procedure TRepoFrame.RenameBranchAsk(const AName: string);
 var
   Values: array of string;
 begin
@@ -162,7 +162,7 @@ end;
 
 { Asks, deletes with -d, and asks again with -D when git says the
   branch is not merged. }
-procedure TForm1.DeleteBranchAsk(const AName: string);
+procedure TRepoFrame.DeleteBranchAsk(const AName: string);
 var
   NotMerged, Ok: boolean;
 begin
@@ -190,7 +190,7 @@ end;
 { The branches whose upstream is gone, the current one left out: the
   merged ones go with -d, then those that are not merged, listed, after
   a second question. }
-procedure TForm1.DeleteGoneBranches;
+procedure TRepoFrame.DeleteGoneBranches;
 var
   Names, Unmerged: TStringList;
   NotMerged: boolean;
@@ -235,7 +235,7 @@ end;
 { What the branch ARef did since it left the current one, through their
   merge base, as a pull request from it would show; HEAD while git is
   in the middle of something, when FBranch may not be HEAD. }
-procedure TForm1.CompareSince(const ARef: string);
+procedure TRepoFrame.CompareSince(const ARef: string);
 begin
   if (FOperation = '') and FRepo.HasCommit('refs/heads/' + FBranch) then
     SetBase(FBranch + '...' + ARef)
@@ -245,7 +245,7 @@ end;
 
 { What the current branch did since it left ARef, through their merge
   base, as a pull request to ARef would show. }
-procedure TForm1.CompareCurrentSince(const ARef: string);
+procedure TRepoFrame.CompareCurrentSince(const ARef: string);
 begin
   if (FOperation = '') and FRepo.HasCommit('refs/heads/' + FBranch) then
     SetBase(ARef + '...' + FBranch)
@@ -257,7 +257,7 @@ end;
   HEAD not while git is in the middle of something or a job runs, and
   captioned with the current branch. Called as the menu opens and
   whenever the repository or a job changes, for the shortcuts. }
-procedure TForm1.UpdateBranchItems;
+procedure TRepoFrame.UpdateBranchItems;
 var
   Has, Busy: boolean;
   Current: string;
@@ -296,7 +296,7 @@ end;
   and tracks it (a remote job); Stop Tracking its upstream when it has
   one; then the remote-tracking branches, the upstream checked, a pick
   of which tracks it without pushing. }
-procedure TForm1.ShowUpstreamList(const ABranch: string; const AScreenRect: TRect);
+procedure TRepoFrame.ShowUpstreamList(const ABranch: string; const AScreenRect: TRect);
 var
   Remotes, Local, Remote: TStringList;
   Up: string;
@@ -365,7 +365,7 @@ begin
   end;
 end;
 
-procedure TForm1.UpstreamPopupPick(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.UpstreamPopupPick(Sender: TObject; AIndex: integer);
 var
   Row, Branch, Ref: string;
 begin
@@ -397,19 +397,19 @@ begin
   end;
 end;
 
-procedure TForm1.MenuUpstreamClick(Sender: TObject);
+procedure TRepoFrame.MenuUpstreamClick(Sender: TObject);
 begin
   if (FRepo.Root <> '') and (FBranch <> '') then
     ShowUpstreamList(FBranch, FStatus.PartScreenRect(spBranch));
 end;
 
-procedure TForm1.BranchMenuOpen(Sender: TObject);
+procedure TRepoFrame.BranchMenuOpen(Sender: TObject);
 begin
   UpdateBranchItems;
 end;
 
 { The list drops from the status bar's branch, where a click drops it. }
-procedure TForm1.MenuBranchListClick(Sender: TObject);
+procedure TRepoFrame.MenuBranchListClick(Sender: TObject);
 var
   Mode: TGittanBranchListMode;
 begin
@@ -422,7 +422,7 @@ begin
   ShowBranchList(Mode, FStatus.PartScreenRect(spBranch));
 end;
 
-procedure TForm1.MenuNewBranchClick(Sender: TObject);
+procedure TRepoFrame.MenuNewBranchClick(Sender: TObject);
 begin
   if (FRepo.Root <> '') and (FOperation = '') then
     BranchAction(BranchNew);
@@ -434,7 +434,7 @@ end;
   along (--autostash). One that stops with conflicts leaves them to the
   Commit section, as a merge does. Choose Commits... opens the
   interactive rebase's dialog with the same commits instead. }
-procedure TForm1.RebaseOntoAsk(const ARef: string);
+procedure TRepoFrame.RebaseOntoAsk(const ARef: string);
 var
   Branch, Msg: string;
   Count, Pushed: integer;
@@ -503,7 +503,7 @@ end;
   into <current> and Rebase <current> onto <branch>, so looking comes
   first and the action is at hand. Not while git is in the middle of
   something or a job runs, nor for a pull request's or a blame range. }
-function TForm1.BaseActionRef: string;
+function TRepoFrame.BaseActionRef: string;
 var
   Base, LeftSide: string;
   Dots: integer;
@@ -521,18 +521,18 @@ end;
 
 { A commit compared with its parent (a click in the commit graph, the
   blame band or the summary's commits), with its card in the summary. }
-function TForm1.BlameShown: boolean;
+function TRepoFrame.BlameShown: boolean;
 begin
   Result := (FRepo.Root <> '') and (FBlameRange <> '') and (FRepo.Base = FBlameRange) and
     (FBlameCommit.Hash <> '');
 end;
 
-procedure TForm1.SummaryBackClick(Sender: TObject);
+procedure TRepoFrame.SummaryBackClick(Sender: TObject);
 begin
   SetBase('');
 end;
 
-procedure TForm1.BaseClick(const AScreenRect: TRect);
+procedure TRepoFrame.BaseClick(const AScreenRect: TRect);
 var
   Ref: string;
 begin
@@ -566,7 +566,7 @@ begin
   FBasePopup.Popup(AScreenRect);
 end;
 
-procedure TForm1.SummaryBaseClick(Sender: TObject; const AScreenRect: TRect);
+procedure TRepoFrame.SummaryBaseClick(Sender: TObject; const AScreenRect: TRect);
 begin
   BaseClick(AScreenRect);
 end;
@@ -574,7 +574,7 @@ end;
 { The compared branch stays the base through the merge or rebase, so
   the summary shows what is left of the difference: nothing after a
   merge or a rebase that went through. }
-procedure TForm1.BasePopupPick(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.BasePopupPick(Sender: TObject; AIndex: integer);
 begin
   if FBaseStashId <> '' then
   begin
@@ -603,7 +603,7 @@ end;
 
 { The count is as of the last fetch, so the default branch is fetched
   first, and the rebase or merge is of what the remote has now. }
-procedure TForm1.SummaryBehindAction(Sender: TObject; ARebase: boolean);
+procedure TRepoFrame.SummaryBehindAction(Sender: TObject; ARebase: boolean);
 begin
   if not RepoReady or (FDefaultBranch = '') or (FBranch = '') then
     Exit;
@@ -613,7 +613,7 @@ begin
   StartRemote(rkFetch);
 end;
 
-procedure TForm1.AfterFetch;
+procedure TRepoFrame.AfterFetch;
 var
   Ref: string;
 begin
@@ -629,7 +629,7 @@ end;
 
 { A merge of ARef into the branch HEAD is on, with git's message; one
   that stops with conflicts leaves them to the Commit section. }
-procedure TForm1.MergeIntoCurrent(const ARef: string);
+procedure TRepoFrame.MergeIntoCurrent(const ARef: string);
 var
   Ok, Conflicts: boolean;
 begin

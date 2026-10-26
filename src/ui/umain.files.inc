@@ -16,7 +16,7 @@
   pills. A submodule's row shows the submodule's page when it is one
   of the work tree's. See spec/files-page.md. }
 
-procedure TForm1.SetupFilesPage;
+procedure TRepoFrame.SetupFilesPage;
 begin
   FFilesPage := TGittanFilesPage.Create(Self);
   FFilesPage.Parent := FSummaryBox;
@@ -27,7 +27,7 @@ begin
   FFilesPage.OnFolderChange := @FilesPageFolderChange;
 end;
 
-procedure TForm1.MenuFilesClick(Sender: TObject);
+procedure TRepoFrame.MenuFilesClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
     ShowFiles;
@@ -35,7 +35,7 @@ end;
 
 { HEAD's files, named by the branch, or the short id on a detached
   HEAD; before the first commit the page says there is none. }
-procedure TForm1.ShowFiles;
+procedure TRepoFrame.ShowFiles;
 var
   Head: TGittanCommitLine;
   Body: string;
@@ -52,7 +52,7 @@ begin
 end;
 
 { Browse Files... on a commit: its files, under its name. }
-procedure TForm1.BrowseCommit(const AHash, AName, ASubject: string);
+procedure TRepoFrame.BrowseCommit(const AHash, AName, ASubject: string);
 begin
   if (FRepo.Root = '') or (AHash = '') then
     Exit;
@@ -62,7 +62,7 @@ end;
 
 { The page takes the summary's place in the box, as the Repository page
   does; an empty AHash is a repository with no commit yet. }
-procedure TForm1.ShowFilesAt(const AHash, AName, ASubject: string);
+procedure TRepoFrame.ShowFilesAt(const AHash, AName, ASubject: string);
 begin
   if FRepo.Root = '' then
     Exit;
@@ -91,7 +91,7 @@ end;
 
 { After a snapshot while the page shows HEAD: the new HEAD, when a
   commit moved it; the page keeps its folder. }
-procedure TForm1.RefreshFilesPage;
+procedure TRepoFrame.RefreshFilesPage;
 var
   Head: TGittanCommitLine;
   Body: string;
@@ -107,7 +107,7 @@ begin
     FFilesPage.SetCommit(Head.Hash, Head.Short, Head.Subject);
 end;
 
-function TForm1.FilesPageRead(Sender: TObject; const AFolder: string;
+function TRepoFrame.FilesPageRead(Sender: TObject; const AFolder: string;
   out AList: TGittanTreeEntries; out AError: string): boolean;
 begin
   AError := '';
@@ -122,12 +122,12 @@ begin
 end;
 
 { Another folder: from its top. }
-procedure TForm1.FilesPageFolderChange(Sender: TObject);
+procedure TRepoFrame.FilesPageFolderChange(Sender: TObject);
 begin
   FSummaryBox.VertScrollBar.Position := 0;
 end;
 
-procedure TForm1.FilesPageOpen(Sender: TObject; const AEntry: TGittanTreeEntry);
+procedure TRepoFrame.FilesPageOpen(Sender: TObject; const AEntry: TGittanTreeEntry);
 var
   i: integer;
 begin
@@ -151,7 +151,7 @@ end;
   file's lexer (not valid UTF-8 read as Windows-1252), an image in the
   image view as a new image, anything else binary in the binary view,
   with its size. }
-procedure TForm1.ShowBlob(const APath: string);
+procedure TRepoFrame.ShowBlob(const APath: string);
 var
   Data: RawByteString;
   Shown, Oid: string;
@@ -229,7 +229,7 @@ begin
 end;
 
 { The shown file's bytes again, for Open and Save As... }
-function TForm1.BlobData(out AData: RawByteString): boolean;
+function TRepoFrame.BlobData(out AData: RawByteString): boolean;
 begin
   Result := (FView = gvBlob) and (FRepo.Root <> '') and (FBlobCommit <> '');
   if not Result then
@@ -247,7 +247,7 @@ end;
 { Into gittan-<short id> in the temporary directory, under its path,
   so the application names it as it was named and two commits do not
   share a copy. }
-procedure TForm1.OpenBlobOutside;
+procedure TRepoFrame.OpenBlobOutside;
 var
   Data: RawByteString;
   FileName: string;
@@ -276,7 +276,7 @@ begin
   OpenDocument(FileName);
 end;
 
-procedure TForm1.SaveBlobAs;
+procedure TRepoFrame.SaveBlobAs;
 var
   Dlg: TSaveDialog;
   Data: RawByteString;

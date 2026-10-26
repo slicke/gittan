@@ -15,7 +15,7 @@
   (SummaryReviewClick): a pick compares the same way, and All Pull
   Requests opens the page. See spec/github.md. }
 
-procedure TForm1.SetupPullPage;
+procedure TRepoFrame.SetupPullPage;
 begin
   FPullPage := TGittanPullPage.Create(Self);
   FPullPage.Parent := FSummaryBox;
@@ -27,7 +27,7 @@ begin
   FPullPage.SetForge(ForgeName);
 end;
 
-procedure TForm1.MenuPullsClick(Sender: TObject);
+procedure TRepoFrame.MenuPullsClick(Sender: TObject);
 begin
   if (FRepo.Root <> '') and Assigned(FForge) then
     ShowPulls;
@@ -35,7 +35,7 @@ end;
 
 { The page takes the summary's place in the box, as the Repository page
   does, and gh is asked again, keeping what it had meanwhile. }
-procedure TForm1.ShowPulls;
+procedure TRepoFrame.ShowPulls;
 begin
   if (FRepo.Root = '') or not Assigned(FForge) then
     Exit;
@@ -62,7 +62,7 @@ end;
 { What the job knows, to the page: the open pull requests, gh's message
   when it failed, whether it is being asked, the branch's own pull
   request and the one compared against. }
-procedure TForm1.UpdatePullPage;
+procedure TRepoFrame.UpdatePullPage;
 begin
   if FPullPage = nil then
     Exit;
@@ -78,7 +78,7 @@ begin
     FPullPage.FitHeight(FSummaryBox.ClientHeight);
 end;
 
-procedure TForm1.PullPageCompare(Sender: TObject; const APull: TGittanPullRequest);
+procedure TRepoFrame.PullPageCompare(Sender: TObject; const APull: TGittanPullRequest);
 begin
   ComparePull(APull);
 end;
@@ -87,7 +87,7 @@ end;
   row per pull request, its number and title with who opened it and
   when dimmed, the one compared against checked, then All Pull
   Requests. }
-procedure TForm1.SummaryReviewClick(Sender: TObject; const AScreenRect: TRect);
+procedure TRepoFrame.SummaryReviewClick(Sender: TObject; const AScreenRect: TRect);
 var
   i: integer;
 begin
@@ -103,7 +103,7 @@ begin
   FReviewPopup.Popup(AScreenRect);
 end;
 
-procedure TForm1.ReviewPopupPick(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.ReviewPopupPick(Sender: TObject; AIndex: integer);
 var
   Pick: PtrInt;
 begin
@@ -114,12 +114,12 @@ begin
     ComparePull(FReviewPulls[Pick - 1]);
 end;
 
-procedure TForm1.PullPageWorkingTree(Sender: TObject);
+procedure TRepoFrame.PullPageWorkingTree(Sender: TObject);
 begin
   SetBase('');
 end;
 
-procedure TForm1.PullPageRefresh(Sender: TObject);
+procedure TRepoFrame.PullPageRefresh(Sender: TObject);
 begin
   if (FRepo.Root = '') or (FPullJob <> nil) then
     Exit;
