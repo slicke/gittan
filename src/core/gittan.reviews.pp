@@ -71,16 +71,36 @@ function ReviewAge(AThen, ANow: TDateTime): string;
 {** The threads that are neither resolved nor outdated. }
 function OpenThreads(const AThreads: TGittanReviewThreads): integer;
 
-{** The Markdown of a comment's body as a card shows it, the HTML a bot
-  writes in it (CodeRabbit's, say) made Markdown or taken out: HTML
-  comments go, a <details> block becomes "▸ " and its <summary> on a
-  line of its own, the rest of it left out, an <img> its alt text, an
-  <a href> a Markdown link, and the block tags (p, div, table, lists,
-  headings and the like) go with a line break or a blank line in their
-  place; a heading is bold, as a card has no room for a big one. Code
-  (fenced or between backticks) is left as it is, and
-  inline tags and anything else that looks like a tag (Vec<T>) are left
-  for the Markdown converter to pass or show. }
+type
+  {** What a part of a comment's body is: Markdown, or a <details> block
+    (its summary). }
+  TGittanCommentPartKind = (cpText, cpDetails);
+
+  {** A part of a comment's body. Text is Markdown, or for a cpDetails
+    its summary, on one line ("Details" when it has none). A cpDetails
+    at Depth d holds the parts after it deeper than d, up to the next
+    one at d or above. }
+  TGittanCommentPart = record
+    Kind: TGittanCommentPartKind;
+    Depth: integer;
+    Text: string;
+  end;
+  TGittanCommentParts = array of TGittanCommentPart;
+
+{** A comment's body as a card shows it, cut at its <details> blocks,
+  the HTML a bot writes in it (CodeRabbit's, say) made Markdown or taken
+  out: HTML comments go, an <img> becomes its alt text, an <a href> a
+  Markdown link, and the block tags (p, div, table, lists, headings and
+  the like) go with a line break or a blank line in their place; a
+  heading is bold, as a card has no room for a big one. Code (fenced or
+  between backticks) is left as it is, and inline tags and anything
+  else that looks like a tag (Vec<T>) are left for the Markdown
+  converter to pass or show. }
+function CommentParts(const ABody: string): TGittanCommentParts;
+
+{** The Markdown of a comment's body with its <details> blocks folded:
+  the parts of CommentParts at the top, a block as "▸ " and its summary
+  on a line of its own. }
 function CommentMarkdown(const ABody: string): string;
 
 type
@@ -262,7 +282,7 @@ begin
   Result := Copy(ATag, p, q - p);
 end;
 
-function CommentMarkdown(const ABody: string): string;
+function CommentParts(const ABody: string): TGittanCommentParts;
 const
   { Tags that stand for a blank line, and for a line break. }
   ParaTags: array[0..13] of string = ('p', 'div', 'table', 'blockquote', 'ul', 'ol',
@@ -276,6 +296,8 @@ var
   Out, Summary, Href, Tag, Name, S, Fence: string;
   i, p, q, Depth: integer;
   InComment, InSummary, Closing: boolean;
+  { The parts of the <details> blocks open, innermost last. }
+  Open: array of integer;
 
   function IsIn(const AName: string; const AList: array of string): boolean;
   var
@@ -287,14 +309,14 @@ var
     Result := False;
   end;
 
-  { Text that goes to the result: to the summary being read while inside
-    a <details>, nowhere else inside one. }
+  { Text that goes to the part being read, or to the summary being
+    read. }
   procedure Emit(const AText: string);
   begin
-    if Depth = 0 then
-      Out := Out + AText
-    else if InSummary and (Depth = 1) then
-      Summary := Summary + AText;
+    if InSummary then
+      Summary := Summary + AText
+    else
+      Out := Out + AText;
   end;
 
   { The fence a line opens or closes, ``` or ~~~ and longer; '' for a
@@ -315,17 +337,81 @@ var
       Result := Copy(T, 1, n);
   end;
 
-  { What a <details> block shows: its summary on a line, "Details" as
-    GitHub says when it has none. }
-  function SummaryLine: string;
+  { AText with one blank line between paragraphs, none at the start or
+    the end, since what was taken out leaves blank lines, and its
+    headings bold. Code keeps its own. }
+  function Tidy(const AText: string): string;
+  var
+    L: TStringList;
+    T, Last, Code: string;
+    k, n: integer;
   begin
-    Result := Trim(StringReplace(Summary, LineEnding, ' ', [rfReplaceAll]));
-    if Result = '' then
-      Result := 'Details';
-    Result := '▸ ' + Result;
+    Result := '';
+    L := TStringList.Create;
+    try
+      L.Text := AText;
+      Code := '';
+      Last := '';
+      for k := 0 to L.Count - 1 do
+      begin
+        if Code <> '' then
+        begin
+          if (FenceOf(L[k]) <> '') and (Copy(TrimLeft(L[k]), 1, Length(Code)) = Code) then
+            Code := '';
+        end
+        else
+        begin
+          if Trim(L[k]) = '' then
+          begin
+            if (Result <> '') and (Last <> '') then
+              Result := Result + LineEnding;
+            Last := '';
+            Continue;
+          end;
+          Code := FenceOf(L[k]);
+          { A heading is bold text: a card has no room for a big one. }
+          if Code = '' then
+          begin
+            T := TrimLeft(L[k]);
+            n := 1;
+            while (n <= Length(T)) and (n <= 6) and (T[n] = '#') do
+              Inc(n);
+            if (n > 1) and (n <= Length(T)) and (T[n] = ' ') and
+              (Length(L[k]) - Length(T) < 4) then
+            begin
+              T := Trim(Copy(T, n + 1, MaxInt));
+              while (T <> '') and (T[Length(T)] = '#') do
+                Delete(T, Length(T), 1);
+              L[k] := '**' + Trim(T) + '**';
+            end;
+          end;
+        end;
+        Last := L[k];
+        Result := Result + L[k] + LineEnding;
+      end;
+      Result := TrimRight(Result);
+    finally
+      L.Free;
+    end;
+  end;
+
+  { The text read so far as a part at the depth it is in. }
+  procedure Flush;
+  begin
+    Out := Tidy(Out);
+    if Out <> '' then
+    begin
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)].Kind := cpText;
+      Result[High(Result)].Depth := Depth;
+      Result[High(Result)].Text := Out;
+    end;
+    Out := '';
   end;
 
 begin
+  Result := nil;
+  Open := nil;
   Out := '';
   Summary := '';
   Href := '';
@@ -424,22 +510,39 @@ begin
         p := q + 1;
         if Name = 'details' then
         begin
+          InSummary := False;
           if not Closing then
           begin
+            Flush;
+            SetLength(Result, Length(Result) + 1);
+            Result[High(Result)].Kind := cpDetails;
+            Result[High(Result)].Depth := Depth;
+            Result[High(Result)].Text := '';
+            SetLength(Open, Length(Open) + 1);
+            Open[High(Open)] := High(Result);
             Inc(Depth);
-            if Depth = 1 then
-              Summary := '';
           end
           else if Depth > 0 then
           begin
+            Flush;
+            SetLength(Open, Length(Open) - 1);
             Dec(Depth);
-            InSummary := False;
-            if Depth = 0 then
-              Out := Out + LineEnding + LineEnding + SummaryLine + LineEnding + LineEnding;
           end;
         end
         else if Name = 'summary' then
-          InSummary := not Closing and (Depth = 1)
+        begin
+          if not Closing and (Length(Open) > 0) then
+          begin
+            InSummary := True;
+            Summary := '';
+          end
+          else if Closing and InSummary then
+          begin
+            InSummary := False;
+            Result[Open[High(Open)]].Text :=
+              Trim(StringReplace(Summary, LineEnding, ' ', [rfReplaceAll]));
+          end;
+        end
         else if Name = 'img' then
           Emit(TagAttr(Tag, 'alt'))
         else if Name = 'a' then
@@ -476,58 +579,30 @@ begin
   finally
     Lines.Free;
   end;
-  { A <details> left open still shows its summary. }
-  if Depth > 0 then
-    Out := Out + LineEnding + LineEnding + SummaryLine;
-  { What was taken out leaves blank lines: one between paragraphs is
-    enough, none at the start. Code keeps its own. }
-  Lines := TStringList.Create;
-  try
-    Lines.Text := Out;
-    Result := '';
-    Fence := '';
-    S := '';
-    for i := 0 to Lines.Count - 1 do
+  { A <details> left open holds the rest. }
+  Flush;
+  for i := 0 to High(Result) do
+    if (Result[i].Kind = cpDetails) and (Result[i].Text = '') then
+      Result[i].Text := 'Details';
+end;
+
+function CommentMarkdown(const ABody: string): string;
+var
+  Parts: TGittanCommentParts;
+  i: integer;
+begin
+  Result := '';
+  Parts := CommentParts(ABody);
+  for i := 0 to High(Parts) do
+    if Parts[i].Depth = 0 then
     begin
-      if Fence <> '' then
-      begin
-        if (FenceOf(Lines[i]) <> '') and (Copy(TrimLeft(Lines[i]), 1, Length(Fence)) = Fence) then
-          Fence := '';
-      end
+      if Result <> '' then
+        Result := Result + LineEnding + LineEnding;
+      if Parts[i].Kind = cpDetails then
+        Result := Result + '▸ ' + Parts[i].Text
       else
-      begin
-        if Trim(Lines[i]) = '' then
-        begin
-          if (Result <> '') and (S <> '') then
-            Result := Result + LineEnding;
-          S := '';
-          Continue;
-        end;
-        Fence := FenceOf(Lines[i]);
-        { A heading is bold text: a card has no room for a big one. }
-        if Fence = '' then
-        begin
-          S := TrimLeft(Lines[i]);
-          p := 1;
-          while (p <= Length(S)) and (p <= 6) and (S[p] = '#') do
-            Inc(p);
-          if (p > 1) and (p <= Length(S)) and (S[p] = ' ') and
-            (Length(Lines[i]) - Length(S) < 4) then
-          begin
-            S := Trim(TrimRight(Copy(S, p + 1, MaxInt)));
-            while (S <> '') and (S[Length(S)] = '#') do
-              Delete(S, Length(S), 1);
-            Lines[i] := '**' + Trim(S) + '**';
-          end;
-        end;
-      end;
-      S := Lines[i];
-      Result := Result + Lines[i] + LineEnding;
+        Result := Result + Parts[i].Text;
     end;
-    Result := TrimRight(Result);
-  finally
-    Lines.Free;
-  end;
 end;
 
 { ---------------------------------------------------------------------------

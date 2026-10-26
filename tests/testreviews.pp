@@ -26,6 +26,7 @@ type
     procedure TestReviewAge;
     procedure TestCommentMarkdown;
     procedure TestCommentMarkdownCode;
+    procedure TestCommentParts;
   end;
 
 implementation
@@ -240,6 +241,38 @@ begin
     CommentMarkdown('Write `<details>` here'));
   AssertEquals('a suggestion stays', '```suggestion' + NL + 'x := 1;' + NL + '```',
     CommentMarkdown('```suggestion'#10'x := 1;'#10'```'));
+end;
+
+procedure TReviewsTest.TestCommentParts;
+var
+  P: TGittanCommentParts;
+begin
+  P := CommentParts('Intro'#10'<details>'#10'<summary>Outer <b>one</b></summary>'#10#10 +
+    'Inside'#10'<details><summary>Nested</summary>Deeper</details>'#10'```'#10'</details>'#10'```'#10 +
+    'After'#10'</details>'#10'<details>Bare</details>'#10'Outro');
+  AssertEquals(9, Length(P));
+  AssertTrue(P[0].Kind = cpText);
+  AssertEquals(0, P[0].Depth);
+  AssertEquals('Intro', P[0].Text);
+  AssertTrue(P[1].Kind = cpDetails);
+  AssertEquals(0, P[1].Depth);
+  AssertEquals('Outer <b>one</b>', P[1].Text);
+  AssertEquals(1, P[2].Depth);
+  AssertEquals('Inside', P[2].Text);
+  AssertTrue(P[3].Kind = cpDetails);
+  AssertEquals(1, P[3].Depth);
+  AssertEquals('Nested', P[3].Text);
+  AssertEquals(2, P[4].Depth);
+  AssertEquals('Deeper', P[4].Text);
+  AssertEquals('a fence inside keeps its tag', 1, P[5].Depth);
+  AssertEquals('```' + LineEnding + '</details>' + LineEnding + '```' + LineEnding + 'After', P[5].Text);
+  AssertTrue(P[6].Kind = cpDetails);
+  AssertEquals(0, P[6].Depth);
+  AssertEquals('Details', P[6].Text);
+  AssertEquals('the text of a block without summary', 1, P[7].Depth);
+  AssertEquals('Bare', P[7].Text);
+  AssertEquals(0, P[8].Depth);
+  AssertEquals('Outro', P[8].Text);
 end;
 
 initialization

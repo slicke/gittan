@@ -38,12 +38,16 @@ const
   rlFolded = 6;
   { Markdown, as LazInk's inline markup, wrapped as it is drawn. }
   rlMarkup = 7;
+  { The summary of a <details> block, as markup, after "▸" or "▾". }
+  rlDetails = 8;
   { Room around a card, inside it, and the most it widens to. }
   ReviewMargin = 6;
   ReviewPadX = 12;
   ReviewPadY = 7;
   ReviewMaxWidth = 860;
   ReviewRuleHeight = 11;
+  { How far the text in a <details> block is indented, per level. }
+  ReviewIndent = 14;
   { FThreadRows: a thread of another file, one at the top of this one. }
   threadElsewhere = -2;
   threadOnTop = -1;
@@ -414,22 +418,61 @@ begin
   Result := Max(120, Min(AWidth - 2 * ReviewMargin, ReviewMaxWidth));
 end;
 
+{ What a line of a card's layout has in its Objects: its kind, how
+  deep in <details> blocks it is, the block it is the summary of (its
+  part in CommentParts, -1 for none) and the comment it is in. }
+function ReviewRow(AKind, ADepth, ADetail, AComment: integer): TObject;
+begin
+  Result := TObject(PtrInt(AKind or (Min(ADepth, 15) shl 4) or ((ADetail + 1) shl 8) or
+    (AComment shl 20)));
+end;
+
+function RowKind(AObject: TObject): integer;
+begin
+  Result := PtrUInt(AObject) and $F;
+end;
+
+function RowDepth(AObject: TObject): integer;
+begin
+  Result := (PtrUInt(AObject) shr 4) and $F;
+end;
+
+function RowDetail(AObject: TObject): integer;
+begin
+  Result := ((PtrUInt(AObject) shr 8) and $FFF) - 1;
+end;
+
+function RowComment(AObject: TObject): integer;
+begin
+  Result := (PtrUInt(AObject) shr 20) and $FFF;
+end;
+
+{ The key in FThreadFlips of <details> block ADetail of comment AComment
+  of AThread: there when the block is open. }
+function TForm1.DetailsKey(AThread, AComment, ADetail: integer): string;
+begin
+  Result := ThreadId(AThread) + '#' + IntToStr(AComment) + '#' + IntToStr(ADetail);
+end;
+
 { The parts of a comment's body as its card shows them, kept by the body
-  (FReviewSegments), since a card is laid out at every paint: the text
-  between fences as one rlMarkup each (CommentMarkdown, then LazInk's
-  inline markup, with only the inline HTML it trusts), a fence's lines
-  as rlCode, and the label of a suggestion as rlNote before its code. }
+  (FReviewSegments), since a card is laid out at every paint, with their
+  depth in <details> blocks in the Objects (ReviewRow, comment 0): the
+  summary of a block as rlDetails, the text between fences as one
+  rlMarkup each (CommentParts, then LazInk's inline markup, with only
+  the inline HTML it trusts), a fence's lines as rlCode, and the label
+  of a suggestion as rlNote before its code. }
 function TForm1.ReviewSegments(const ABody: string): TStrings;
 var
-  Parts: TStringList;
+  Parts: TGittanCommentParts;
+  Lines: TStringList;
   Prose: string;
-  i: integer;
+  k, i, Depth: integer;
   InCode: boolean;
 
   procedure FlushProse;
   begin
     if Trim(Prose) <> '' then
-      Result.AddObject(MarkdownToInk(Prose, [imoInlineHTML]), TObject(PtrInt(rlMarkup)));
+      Result.AddObject(MarkdownToInk(Prose, [imoInlineHTML]), ReviewRow(rlMarkup, Depth, -1, 0));
     Prose := '';
   end;
 
@@ -439,32 +482,44 @@ begin
     Exit;
   Result := TStringList.Create;
   FReviewSegments.Add(ABody, Result);
-  Parts := TStringList.Create;
+  Parts := CommentParts(ABody);
+  Lines := TStringList.Create;
   try
-    Parts.Text := CommentMarkdown(ABody);
-    Prose := '';
-    InCode := False;
-    for i := 0 to Parts.Count - 1 do
+    for k := 0 to High(Parts) do
     begin
-      if Copy(TrimLeft(Parts[i]), 1, 3) = '```' then
+      Depth := Parts[k].Depth;
+      if Parts[k].Kind = cpDetails then
       begin
-        InCode := not InCode;
-        if InCode then
-        begin
-          FlushProse;
-          if Pos('suggestion', TrimLeft(Parts[i])) = 4 then
-            Result.AddObject(rsReviewSuggestion, TObject(PtrInt(rlNote)));
-        end;
+        Result.AddObject(MarkdownToInk(Parts[k].Text, [imoInlineHTML]),
+          ReviewRow(rlDetails, Depth, k, 0));
         Continue;
       end;
-      if InCode then
-        Result.AddObject(StringReplace(Parts[i], #9, '    ', [rfReplaceAll]), TObject(PtrInt(rlCode)))
-      else
-        Prose := Prose + Parts[i] + LineEnding;
+      Lines.Text := Parts[k].Text;
+      Prose := '';
+      InCode := False;
+      for i := 0 to Lines.Count - 1 do
+      begin
+        if Copy(TrimLeft(Lines[i]), 1, 3) = '```' then
+        begin
+          InCode := not InCode;
+          if InCode then
+          begin
+            FlushProse;
+            if Pos('suggestion', TrimLeft(Lines[i])) = 4 then
+              Result.AddObject(rsReviewSuggestion, ReviewRow(rlNote, Depth, -1, 0));
+          end;
+          Continue;
+        end;
+        if InCode then
+          Result.AddObject(StringReplace(Lines[i], #9, '    ', [rfReplaceAll]),
+            ReviewRow(rlCode, Depth, -1, 0))
+        else
+          Prose := Prose + Lines[i] + LineEnding;
+      end;
+      FlushProse;
     end;
-    FlushProse;
   finally
-    Parts.Free;
+    Lines.Free;
   end;
 end;
 
@@ -476,34 +531,37 @@ begin
 end;
 
 { The height of line I of a card laid out AInner wide: a kind's line
-  height, or the height Markdown takes wrapped at that width. }
+  height, or the height Markdown takes wrapped at that width less its
+  indent. }
 function TForm1.ReviewRowHeight(ALines: TStrings; I, AInner: integer): integer;
 var
   C: TCanvas;
 begin
-  if PtrInt(ALines.Objects[I]) <> rlMarkup then
-    Exit(ReviewLineHeight(PtrInt(ALines.Objects[I])));
+  if not (RowKind(ALines.Objects[I]) in [rlMarkup, rlDetails]) then
+    Exit(ReviewLineHeight(RowKind(ALines.Objects[I])));
   C := FReviewMeasure.Canvas;
   ReviewFont(C, rlBody);
-  Result := HTMLTextExtentOpt(C, Rect(0, 0, AInner, 100000), [], ALines[I],
-    ReviewInkOptions, FReviewInk).cy + 4;
+  Result := HTMLTextExtentOpt(C, Rect(0, 0, Max(40, AInner - RowDepth(ALines.Objects[I]) * ReviewIndent),
+    100000), [], ALines[I], ReviewInkOptions, FReviewInk).cy + 4;
 end;
 
 { The lines of the card of AThread, AInner wide: the text in Strings,
-  the kind in Objects. Headers and notes are wrapped at words; the
-  Markdown of a comment is one rlMarkup that LazInk wraps; code (between
-  ``` fences) is not wrapped. }
+  the kind and the rest in Objects (ReviewRow). Headers and notes are
+  wrapped at words; the Markdown of a comment is one rlMarkup that
+  LazInk wraps; code (between ``` fences) is not wrapped. A <details>
+  block is its summary after "▸", and with "▾" the lines in it too
+  when it is open (DetailsKey in FThreadFlips). }
 procedure TForm1.ReviewLayout(AThread, AInner: integer; ALines: TStrings);
 var
   C: TCanvas;
   Note, S, Head: string;
   Parts: TStringList;
   Segs: TStrings;
-  i, k: integer;
+  i, k, Depth, HideBelow: integer;
 
   procedure Add(const AText: string; AKind: integer);
   begin
-    ALines.AddObject(AText, TObject(PtrInt(AKind)));
+    ALines.AddObject(AText, ReviewRow(AKind, 0, -1, 0));
   end;
 
   { Breaks AText into lines no wider than AInner, at spaces, or inside a
@@ -628,8 +686,28 @@ begin
         Head := Head + ' · ' + S;
       Add(Head, rlHeader);
       Segs := ReviewSegments(Comments[k].Body);
+      { The lines deeper than a closed block are left out. }
+      HideBelow := MaxInt;
       for i := 0 to Segs.Count - 1 do
-        Add(Segs[i], PtrInt(Segs.Objects[i]));
+      begin
+        Depth := RowDepth(Segs.Objects[i]);
+        if Depth > HideBelow then
+          Continue;
+        HideBelow := MaxInt;
+        S := Segs[i];
+        if RowKind(Segs.Objects[i]) = rlDetails then
+        begin
+          if FThreadFlips.IndexOf(DetailsKey(AThread, k, RowDetail(Segs.Objects[i]))) >= 0 then
+            S := '▾ ' + S
+          else
+          begin
+            S := '▸ ' + S;
+            HideBelow := Depth;
+          end;
+        end;
+        ALines.AddObject(S, ReviewRow(RowKind(Segs.Objects[i]), Depth,
+          RowDetail(Segs.Objects[i]), k));
+      end;
     end;
   end;
 end;
@@ -851,7 +929,7 @@ var
   Lines: TStringList;
   Card: TRect;
   Fill, Border, Dim, Accent, CodeFill: TColor;
-  i, y, H, Kind, W, Side, Right: integer;
+  i, y, H, Kind, W, Side, Right, Indent, k: integer;
   First, HasLink: boolean;
 begin
   Ed := TATSynEdit(Sender);
@@ -908,15 +986,29 @@ begin
     First := True;
     for i := 0 to Lines.Count - 1 do
     begin
-      Kind := PtrInt(Lines.Objects[i]);
+      Kind := RowKind(Lines.Objects[i]);
       H := ReviewRowHeight(Lines, i, W - 2 * ReviewPadX);
+      { A line in a <details> block is indented, a rule down the left of
+        each level. }
+      Indent := RowDepth(Lines.Objects[i]) * ReviewIndent;
+      k := RowDepth(Lines.Objects[i]);
+      C.Pen.Color := Border;
+      while k > 0 do
+      begin
+        C.Line(Card.Left + ReviewPadX + (k - 1) * ReviewIndent + 4, y,
+          Card.Left + ReviewPadX + (k - 1) * ReviewIndent + 4, y + H);
+        Dec(k);
+      end;
       ReviewFont(C, Kind);
-      if Kind = rlMarkup then
+      if Kind in [rlMarkup, rlDetails] then
       begin
         ReviewFont(C, rlBody);
-        C.Font.Color := Ed.Colors.TextFont;
+        if Kind = rlDetails then
+          C.Font.Color := Dim
+        else
+          C.Font.Color := Ed.Colors.TextFont;
         C.Brush.Style := bsClear;
-        HTMLDrawOpt(C, Rect(Card.Left + ReviewPadX, y + 2, Card.Right - ReviewPadX, y + H), [],
+        HTMLDrawOpt(C, Rect(Card.Left + ReviewPadX + Indent, y + 2, Card.Right - ReviewPadX, y + H), [],
           Lines[i], ReviewInkOptions, FReviewInk);
         Inc(y, H);
         Continue;
@@ -931,7 +1023,7 @@ begin
           begin
             C.Brush.Style := bsSolid;
             C.Brush.Color := CodeFill;
-            C.FillRect(Rect(Card.Left + ReviewPadX - 4, y, Card.Right - ReviewPadX + 4, y + H));
+            C.FillRect(Rect(Card.Left + ReviewPadX + Indent - 4, y, Card.Right - ReviewPadX + 4, y + H));
           end;
       end;
       C.Brush.Style := bsClear;
@@ -952,8 +1044,9 @@ begin
           C.Font.Color := Ed.Colors.TextFont;
       end;
       if Kind <> rlRule then
-        C.TextRect(Rect(Card.Left + ReviewPadX, y, Right, y + H),
-          Card.Left + ReviewPadX, y + 2, FitText(C, Lines[i], Right - Card.Left - ReviewPadX));
+        C.TextRect(Rect(Card.Left + ReviewPadX + Indent, y, Right, y + H),
+          Card.Left + ReviewPadX + Indent, y + 2,
+          FitText(C, Lines[i], Right - Card.Left - ReviewPadX - Indent));
       if First and HasLink and (Kind in [rlHeader, rlFolded]) then
       begin
         First := False;
@@ -975,7 +1068,8 @@ begin
 end;
 
 { A click on "GitHub ↗" opens the thread on GitHub, one on a link in a
-  comment opens the link; anywhere else on the card it folds or unfolds.
+  comment opens the link, one on the summary of a <details> block opens
+  or closes the block; anywhere else on the card it folds or unfolds.
   APos is in the gap. }
 procedure TForm1.EditClickGap(Sender: TObject; AGapItem: TATGapItem; APos: TPoint);
 var
@@ -996,8 +1090,17 @@ begin
     LinkDone := False;
     for i := 0 to Lines.Count - 1 do
     begin
-      Kind := PtrInt(Lines.Objects[i]);
+      Kind := RowKind(Lines.Objects[i]);
       H := ReviewRowHeight(Lines, i, W - 2 * ReviewPadX);
+      { The summary of a <details> block opens or closes it, when the
+        button is up, as a card folds. }
+      if (Kind = rlDetails) and (APos.Y >= y) and (APos.Y < y + H) and
+        (APos.X <= ReviewMargin + W) then
+      begin
+        FGapToggle := DetailsKey(AGapItem.Tag, RowComment(Lines.Objects[i]),
+          RowDetail(Lines.Objects[i]));
+        Exit;
+      end;
       if not LinkDone and (Kind in [rlHeader, rlFolded]) then
       begin
         LinkDone := True;
@@ -1018,7 +1121,8 @@ begin
       if (Kind = rlMarkup) and (APos.Y >= y) and (APos.Y < y + H) then
       begin
         ReviewFont(FReviewMeasure.Canvas, rlBody);
-        Hit := HTMLHitTest(FReviewMeasure.Canvas, Rect(ReviewMargin + ReviewPadX, y + 2,
+        Hit := HTMLHitTest(FReviewMeasure.Canvas, Rect(ReviewMargin + ReviewPadX +
+          RowDepth(Lines.Objects[i]) * ReviewIndent, y + 2,
           ReviewMargin + W - ReviewPadX, y + H), Lines[i], ReviewInkOptions,
           APos.X, APos.Y, FReviewInk);
         if Hit.OnLink and (AnsiStartsText('https://', Hit.LinkName) or
@@ -1041,7 +1145,8 @@ begin
   FGapToggle := ThreadId(AGapItem.Tag);
 end;
 
-{ The fold asked for by a click on a card, when the button came up. }
+{ The fold asked for by a click on a card or on a <details> block in
+  it (DetailsKey), when the button came up. }
 procedure TForm1.ToggleThreadNow;
 var
   i: integer;

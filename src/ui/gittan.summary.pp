@@ -46,13 +46,22 @@ type
     the default branch. }
   TGittanBehindActionEvent = procedure(Sender: TObject; ARebase: boolean) of object;
 
-  {** A note of the conversation as laid out: its text as LazInk's
-    markup, the height it is drawn in (Cut when the text is taller and
+  {** A part of a note's text as laid out (CommentParts): LazInk's
+    markup, how deep in <details> blocks it is, the part it is when it
+    is the summary of one (-1 for text), and its top and height below
+    the top of the text. }
+  TGittanSummaryNoteRow = record
+    Markup: string;
+    Depth, Detail, Top, Height: integer;
+  end;
+
+  {** A note of the conversation as laid out: the parts of its text
+    shown, the height they are drawn in (Cut when they are taller and
     an ellipsis follows), and its top and height below the start of the
     section. TextRect is where the last paint drew the text. }
   TGittanSummaryNoteBox = record
     Top, Height, TextHeight: integer;
-    Markup: string;
+    Rows: array of TGittanSummaryNoteRow;
     Cut: boolean;
     LinkRect, TextRect: TRect;
   end;
@@ -125,8 +134,11 @@ type
     FMeasure: TBitmap;
     { The layouts of the notes' Markdown. }
     FInk: THTMLLayoutCache;
-    { Whether the mouse is on a link in a note's text. }
-    FTextLinkHot: boolean;
+    { Whether the mouse is on a link in a note's text, or on the summary
+      of a <details> block in it. }
+    FTextLinkHot, FDetailsHot: boolean;
+    { The <details> blocks of the notes that are open (NoteDetailsKey). }
+    FNotesOpen: TStringList;
     FOnSelectFile: TGittanSelectFileEvent;
     FOnContextFile: TGittanContextFileEvent;
     FOnBranchClick: TGittanBranchClickEvent;
@@ -180,6 +192,8 @@ type
     function LinkAt(X, Y: integer): integer;
     function NoteInkOptions: THTMLOptions;
     function TextLinkAt(X, Y: integer): string;
+    function NoteDetailsKey(ANote, ADetail: integer): string;
+    function NoteDetailsAt(X, Y: integer): string;
     procedure LayoutNotes;
     procedure PaintNotes(var Y: integer);
     procedure SetReviewHot(AValue: boolean);
@@ -382,6 +396,8 @@ const
   NotePadY = 8;
   NoteGap = 8;
   NoteStripe = 3;
+  { How far the text in a <details> block is indented, per level. }
+  NoteIndent = 14;
   NoteMaxLines = 12;
   { The most lines a commit's subject takes in its card. }
   SubjectMaxLines = 3;
@@ -403,6 +419,7 @@ begin
   FLink := clHighlight;
   FMeasure := TBitmap.Create;
   FInk := THTMLLayoutCache.Create;
+  FNotesOpen := TStringList.Create;
   SetColors(clWindow, clWindowText, clGrayText, clBtnFace, clBtnFace, clGreen,
     clRed, clBtnShadow);
   { The height follows the content; the scroll box it sits in scrolls. }
@@ -414,6 +431,7 @@ destructor TGittanSummary.Destroy;
 begin
   FMeasure.Free;
   FInk.Free;
+  FNotesOpen.Free;
   inherited Destroy;
 end;
 
@@ -741,14 +759,29 @@ begin
   end;
 end;
 
+{ Where the last paint drew part K of ABox's text, past its indent. }
+function NoteRowRect(const ABox: TGittanSummaryNoteBox; K: integer): TRect;
+begin
+  Result := ABox.TextRect;
+  Inc(Result.Left, ABox.Rows[K].Depth * Px(NoteIndent));
+  Inc(Result.Top, ABox.Rows[K].Top);
+  Result.Bottom := Result.Top + ABox.Rows[K].Height;
+end;
+
 { Lays the notes out at the control's width, when it changed: each
-  note's Markdown (CommentMarkdown) as LazInk lays it out at that width,
-  at most NoteMaxLines lines high with an ellipsis after. }
+  note's parts (CommentParts) as LazInk lays their Markdown out at that
+  width, a <details> block as its summary after "▸", and after "▾" with
+  the parts in it indented when it is open (FNotesOpen). The text is at
+  most NoteMaxLines lines high with an ellipsis after, unless a block in
+  it is open, since that was asked for. }
 procedure TGittanSummary.LayoutNotes;
 var
   C: TCanvas;
-  Inner, LineHeight, i, At: integer;
+  Inner, LineHeight, i, k, At, HideBelow: integer;
   Box: TGittanSummaryNoteBox;
+  Parts: TGittanCommentParts;
+  Row: TGittanSummaryNoteRow;
+  AnyOpen: boolean;
 begin
   if FNotesWidth = Width then
     Exit;
@@ -767,15 +800,44 @@ begin
   for i := 0 to High(FNotes) do
   begin
     Box := Default(TGittanSummaryNoteBox);
-    if Trim(FNotes[i].Body) <> '' then
+    Parts := CommentParts(FNotes[i].Body);
+    HideBelow := MaxInt;
+    AnyOpen := False;
+    for k := 0 to High(Parts) do
     begin
-      Box.Markup := MarkdownToInk(CommentMarkdown(FNotes[i].Body), [imoInlineHTML]);
-      Box.TextHeight := HTMLTextExtentOpt(C, Rect(0, 0, Inner, 100000), [], Box.Markup,
-        NoteInkOptions, FInk).cy;
-      Box.Cut := Box.TextHeight > NoteMaxLines * LineHeight;
-      if Box.Cut then
-        Box.TextHeight := NoteMaxLines * LineHeight;
+      if Parts[k].Depth > HideBelow then
+        Continue;
+      HideBelow := MaxInt;
+      Row := Default(TGittanSummaryNoteRow);
+      Row.Depth := Parts[k].Depth;
+      Row.Detail := -1;
+      Row.Markup := MarkdownToInk(Parts[k].Text, [imoInlineHTML]);
+      if Parts[k].Kind = cpDetails then
+      begin
+        Row.Detail := k;
+        if FNotesOpen.IndexOf(NoteDetailsKey(i, k)) >= 0 then
+        begin
+          Row.Markup := '▾ ' + Row.Markup;
+          AnyOpen := True;
+        end
+        else
+        begin
+          Row.Markup := '▸ ' + Row.Markup;
+          HideBelow := Parts[k].Depth;
+        end;
+      end;
+      if Length(Box.Rows) > 0 then
+        Inc(Box.TextHeight, Px(4));
+      Row.Top := Box.TextHeight;
+      Row.Height := HTMLTextExtentOpt(C, Rect(0, 0, Max(40, Inner - Row.Depth * Px(NoteIndent)),
+        100000), [], Row.Markup, NoteInkOptions, FInk).cy;
+      Inc(Box.TextHeight, Row.Height);
+      SetLength(Box.Rows, Length(Box.Rows) + 1);
+      Box.Rows[High(Box.Rows)] := Row;
     end;
+    Box.Cut := not AnyOpen and (Box.TextHeight > NoteMaxLines * LineHeight);
+    if Box.Cut then
+      Box.TextHeight := NoteMaxLines * LineHeight;
     Box.Top := At;
     { The header line, then the text under a little room. }
     Box.Height := 2 * Px(NotePadY) + LineHeight;
@@ -789,6 +851,34 @@ begin
   FNotesHeight := At + Px(Pad) div 2;
 end;
 
+{ The key in FNotesOpen of <details> block ADetail (its part) of note
+  ANote: the note's address, else its place, and the part. }
+function TGittanSummary.NoteDetailsKey(ANote, ADetail: integer): string;
+begin
+  if FNotes[ANote].Url <> '' then
+    Result := FNotes[ANote].Url
+  else
+    Result := IntToStr(ANote);
+  Result := Result + '#' + IntToStr(ADetail);
+end;
+
+{ The key of the <details> block whose summary is at X, Y; '' elsewhere. }
+function TGittanSummary.NoteDetailsAt(X, Y: integer): string;
+var
+  i, k: integer;
+begin
+  Result := '';
+  for i := 0 to High(FNoteBoxes) do
+    if PtInRect(FNoteBoxes[i].TextRect, Point(X, Y)) then
+    begin
+      for k := 0 to High(FNoteBoxes[i].Rows) do
+        if (FNoteBoxes[i].Rows[k].Detail >= 0) and
+          PtInRect(NoteRowRect(FNoteBoxes[i], k), Point(X, Y)) then
+          Exit(NoteDetailsKey(i, FNoteBoxes[i].Rows[k].Detail));
+      Exit;
+    end;
+end;
+
 { How LazInk draws a note's text: links in the link color. }
 function TGittanSummary.NoteInkOptions: THTMLOptions;
 begin
@@ -800,19 +890,27 @@ end;
   web; '' elsewhere. }
 function TGittanSummary.TextLinkAt(X, Y: integer): string;
 var
-  i: integer;
+  i, k: integer;
   Hit: THTMLHitInfo;
+  R: TRect;
 begin
   Result := '';
   for i := 0 to High(FNoteBoxes) do
     if PtInRect(FNoteBoxes[i].TextRect, Point(X, Y)) then
     begin
       FMeasure.Canvas.Font := Font;
-      Hit := HTMLHitTest(FMeasure.Canvas, FNoteBoxes[i].TextRect, FNoteBoxes[i].Markup,
-        NoteInkOptions, X, Y, FInk);
-      if Hit.OnLink and (AnsiStartsText('https://', Hit.LinkName) or
-        AnsiStartsText('http://', Hit.LinkName) or AnsiStartsText('mailto:', Hit.LinkName)) then
-        Result := Hit.LinkName;
+      for k := 0 to High(FNoteBoxes[i].Rows) do
+      begin
+        R := NoteRowRect(FNoteBoxes[i], k);
+        if not PtInRect(R, Point(X, Y)) then
+          Continue;
+        Hit := HTMLHitTest(FMeasure.Canvas, R, FNoteBoxes[i].Rows[k].Markup,
+          NoteInkOptions, X, Y, FInk);
+        if Hit.OnLink and (AnsiStartsText('https://', Hit.LinkName) or
+          AnsiStartsText('http://', Hit.LinkName) or AnsiStartsText('mailto:', Hit.LinkName)) then
+          Result := Hit.LinkName;
+        Exit;
+      end;
       Exit;
     end;
 end;
@@ -823,8 +921,8 @@ end;
   the section. }
 procedure TGittanSummary.PaintNotes(var Y: integer);
 var
-  i, X, LineHeight, At: integer;
-  Card: TRect;
+  i, k, d, X, LineHeight, At: integer;
+  Card, R: TRect;
   What, Age, Link: string;
   Tone: TColor;
 begin
@@ -917,7 +1015,22 @@ begin
       Canvas.Clipping := True;
       Canvas.ClipRect := FNoteBoxes[i].TextRect;
       try
-        HTMLDrawOpt(Canvas, FNoteBoxes[i].TextRect, [], FNoteBoxes[i].Markup, NoteInkOptions, FInk);
+        for k := 0 to High(FNoteBoxes[i].Rows) do
+        begin
+          R := NoteRowRect(FNoteBoxes[i], k);
+          { A rule down the left of each level of <details> a part is in. }
+          Canvas.Pen.Color := FLine;
+          for d := 1 to FNoteBoxes[i].Rows[k].Depth do
+            Canvas.Line(X + (d - 1) * Px(NoteIndent) + Px(4), R.Top,
+              X + (d - 1) * Px(NoteIndent) + Px(4), R.Bottom);
+          Canvas.Font := Font;
+          if FNoteBoxes[i].Rows[k].Detail >= 0 then
+            Canvas.Font.Color := FDim
+          else
+            Canvas.Font.Color := FText;
+          Canvas.Brush.Style := bsClear;
+          HTMLDrawOpt(Canvas, R, [], FNoteBoxes[i].Rows[k].Markup, NoteInkOptions, FInk);
+        end;
       finally
         Canvas.Clipping := False;
       end;
@@ -1984,6 +2097,7 @@ begin
   SetCommitHot(CommitAt(Y));
   SetLinkHot(LinkAt(X, Y));
   FTextLinkHot := TextLinkAt(X, Y) <> '';
+  FDetailsHot := NoteDetailsAt(X, Y) <> '';
   SetReviewHot((FReviewRect.Right > FReviewRect.Left) and PtInRect(FReviewRect, Point(X, Y)));
   SetBranchHot(BranchClickable and PtInRect(FBranchRect, Point(X, Y)));
   SetBaseHot((FBaseRect.Right > FBaseRect.Left) and PtInRect(FBaseRect, Point(X, Y)));
@@ -1991,7 +2105,8 @@ begin
   SetBackHot(Assigned(FOnBackClick) and PtInRect(FBackRect, Point(X, Y)));
   if Assigned(FOnBehindAction) then
     SetBehindHot(BehindAt(X, Y));
-  if (FLinkHot >= 0) or (FActionHot >= 0) or FBackHot or (FBehindHot >= 0) or FTextLinkHot then
+  if (FLinkHot >= 0) or (FActionHot >= 0) or FBackHot or (FBehindHot >= 0) or FTextLinkHot or
+    FDetailsHot then
     Cursor := crHandPoint
   else if not (FBranchHot or FBaseHot or FSyncHot or FReviewHot) then
     Cursor := crDefault;
@@ -2005,6 +2120,7 @@ begin
   SetCommitHot(-1);
   SetLinkHot(-1);
   FTextLinkHot := False;
+  FDetailsHot := False;
   SetReviewHot(False);
   SetBranchHot(False);
   SetBaseHot(False);
@@ -2017,6 +2133,7 @@ procedure TGittanSummary.MouseUp(Button: TMouseButton; Shift: TShiftState;
   X, Y: integer);
 var
   Row: integer;
+  Key: string;
 begin
   inherited MouseUp(Button, Shift, X, Y);
   if (Button = mbLeft) and BranchClickable and PtInRect(FBranchRect, Point(X, Y)) then
@@ -2060,6 +2177,19 @@ begin
   if (Button = mbLeft) and Assigned(FOnOpenUrl) and (TextLinkAt(X, Y) <> '') then
   begin
     FOnOpenUrl(Self, TextLinkAt(X, Y));
+    Exit;
+  end;
+  { The summary of a <details> block opens or closes it. }
+  if (Button = mbLeft) and (NoteDetailsAt(X, Y) <> '') then
+  begin
+    Key := NoteDetailsAt(X, Y);
+    if FNotesOpen.IndexOf(Key) >= 0 then
+      FNotesOpen.Delete(FNotesOpen.IndexOf(Key))
+    else
+      FNotesOpen.Add(Key);
+    FNotesWidth := -1;
+    UpdateHeight;
+    Invalidate;
     Exit;
   end;
   if (Button = mbLeft) and (FReviewRect.Right > FReviewRect.Left) and

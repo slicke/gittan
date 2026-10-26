@@ -1111,6 +1111,7 @@ type
     function ThreadOpen(AThread: integer): boolean;
     procedure ReviewFont(C: TCanvas; AKind: integer);
     function ReviewLineHeight(AKind: integer): integer;
+    function DetailsKey(AThread, AComment, ADetail: integer): string;
     function ReviewSegments(const ABody: string): TStrings;
     function ReviewInkOptions: THTMLOptions;
     function ReviewRowHeight(ALines: TStrings; I, AInner: integer): integer;
