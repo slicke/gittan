@@ -15,6 +15,7 @@ type
   published
     procedure TestParsePullRequest;
     procedure TestParsePullRequests;
+    procedure TestWithoutReviewed;
     procedure TestParseBad;
     procedure TestStatus;
     procedure TestRepoPathOfUrl;
@@ -32,7 +33,9 @@ const
     '"createdAt":"2026-10-20T12:34:56Z","updatedAt":"2026-10-22T08:00:00Z",' +
     '"additions":120,"deletions":30,"changedFiles":4,' +
     '"labels":[{"name":"bug","color":"d73a4a"},{"name":"","color":"ffffff"},' +
-    '{"name":"ui","color":"0075ca"}]}';
+    '{"name":"ui","color":"0075ca"}],' +
+    '"latestReviews":[{"author":{"login":"bob"},"state":"APPROVED"},' +
+    '{"author":null,"state":"COMMENTED"},{"author":{"login":"eve"},"state":"COMMENTED"}]}';
 
 procedure TGitHubTest.TestParsePullRequest;
 var
@@ -55,6 +58,35 @@ begin
   AssertEquals(30, Pull.Deletions);
   AssertEquals(4, Pull.ChangedFiles);
   AssertEquals('bug, ui', Pull.Labels);
+  AssertEquals(2, Length(Pull.Reviews));
+  AssertEquals('bob', Pull.Reviews[0].Login);
+  AssertEquals('APPROVED', Pull.Reviews[0].State);
+  AssertEquals('eve', Pull.Reviews[1].Login);
+  AssertEquals('COMMENTED', Pull.Reviews[1].State);
+end;
+
+{ A pull request whose latest review by the login approved it or asked
+  for changes is left out; one only commented on, or whose review was
+  dismissed, stays, as does every one without a login. }
+procedure TGitHubTest.TestWithoutReviewed;
+var
+  Pulls, Left: TGittanPullRequests;
+begin
+  AssertTrue(ParsePullRequests('[' + OnePull +
+    ',{"number":3,"title":"Changes","latestReviews":[{"author":{"login":"Bob"},"state":"CHANGES_REQUESTED"}]}' +
+    ',{"number":4,"title":"Dismissed","latestReviews":[{"author":{"login":"bob"},"state":"DISMISSED"}]}' +
+    ',{"number":5,"title":"Nobody","latestReviews":[]}' +
+    ',{"number":6,"title":"No field"}]', Pulls));
+  AssertEquals(5, Length(Pulls));
+  Left := WithoutReviewed(Pulls, 'bob');
+  AssertEquals(3, Length(Left));
+  AssertEquals(4, Left[0].Number);
+  AssertEquals(5, Left[1].Number);
+  AssertEquals(6, Left[2].Number);
+  Left := WithoutReviewed(Pulls, 'eve');
+  AssertEquals(5, Length(Left));
+  AssertEquals(5, Length(WithoutReviewed(Pulls, '')));
+  AssertEquals(0, Length(WithoutReviewed(nil, 'bob')));
 end;
 
 procedure TGitHubTest.TestParsePullRequests;

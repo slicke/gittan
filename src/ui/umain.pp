@@ -251,8 +251,14 @@ type
     FGoneBranches: TStringList;
     FPulls: TGittanPullRequests;
     { The open pull requests waiting for the user's review, which the
-      summary lists and the Pull Requests page marks. }
+      summary counts in a row that drops FReviewPopup (a row per pull
+      request tagged with its index plus one, All Pull Requests tagged
+      0) and the Pull Requests page marks; FGitHubLogin the login gh is
+      logged in as, as the last pull request job answered, for the next
+      one. }
     FReviewPulls: TGittanPullRequests;
+    FReviewPopup: TGittanPopupList;
+    FGitHubLogin: string;
     FPullError, FPullKey: string;
     FPullMenu, FOpenPullItem, FCopyPullItem: TMenuItem;
     FPullRange: string;
@@ -896,7 +902,8 @@ type
     procedure ShowPulls;
     procedure UpdatePullPage;
     procedure PullPageCompare(Sender: TObject; const APull: TGittanPullRequest);
-    procedure SummarySelectPull(Sender: TObject; const APull: TGittanPullRequest);
+    procedure SummaryReviewClick(Sender: TObject; const AScreenRect: TRect);
+    procedure ReviewPopupPick(Sender: TObject; AIndex: integer);
     procedure PullPageWorkingTree(Sender: TObject);
     procedure PullPageRefresh(Sender: TObject);
     procedure SetupFilesPage;
@@ -1696,6 +1703,7 @@ resourcestring
   rsNavChanges = 'Changes';
   rsNavPulls = 'Pull Requests';
   rsAllPulls = 'All Pull Requests';
+  rsNeedsReviewHeader = 'Needs your review';
   rsFilesMenu = '&Files';
   rsAtCommit = 'at %s';
   rsBlobOpen = 'Open';
@@ -2857,7 +2865,7 @@ begin
   FSummary.OnSyncClick := @SummarySyncClick;
   FSummary.OnBehindAction := @SummaryBehindAction;
   FSummary.OnOpenUrl := @SummaryOpenUrl;
-  FSummary.OnSelectPull := @SummarySelectPull;
+  FSummary.OnReviewClick := @SummaryReviewClick;
   FSummary.OnSelectCommit := @SummarySelectCommit;
   FSummary.OnBackClick := @SummaryBackClick;
   FSummary.OnRowAction := @SummaryRowAction;
@@ -2918,6 +2926,9 @@ begin
   FPullPopup := TGittanPopupList.Create(Self);
   FPullPopup.Parent := Self;
   FPullPopup.OnPick := @PullPopupPick;
+  FReviewPopup := TGittanPopupList.Create(Self);
+  FReviewPopup.Parent := Self;
+  FReviewPopup.OnPick := @ReviewPopupPick;
   FSyncPopup := TGittanPopupList.Create(Self);
   FSyncPopup.Parent := Self;
   FSyncPopup.OnPick := @SyncPopupPick;
@@ -3350,8 +3361,8 @@ begin
   FFindBar.Nav.SetColors(P.Shade, P.Pill, P.Border, P.PillText, P.Accent);
   FSymbolBar.SetColors(P.Shade, P.Text, P.Dim, P.Line);
   for List in [FBranchPopup, FStashPopup, FUpstreamPopup, FTagPopup, FViewPopup,
-    FSubListPopup, FReflogPopup, FPullPopup, FSyncPopup, FRecentPopup, FBasePopup,
-    FConflictPopup] do
+    FSubListPopup, FReflogPopup, FPullPopup, FReviewPopup, FSyncPopup, FRecentPopup,
+    FBasePopup, FConflictPopup] do
     List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
   FGraph.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent, P.Warning);
   FBanner.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Line, P.Accent, P.Deleted, P.Added);

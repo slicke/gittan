@@ -546,6 +546,7 @@ begin
           FPullError := '';
           FReviewPulls := nil;
           FSummary.SetReviewPulls(nil);
+          FGitHubLogin := '';
           ClearReviews;
         end;
         MenuRefreshClick(nil);
@@ -2069,7 +2070,7 @@ begin
     FReviewPulls := nil;
     FSummary.SetReviewPulls(nil);
   end;
-  FPullJob := TGittanPullRequestJob.Create(FGitHubCli, FRepo.Root, FBranch);
+  FPullJob := TGittanPullRequestJob.Create(FGitHubCli, FRepo.Root, FBranch, FGitHubLogin);
   FPullJob.OnDone := @PullJobDone;
   FPullJob.Start;
   if not AKeep then
@@ -2115,6 +2116,7 @@ begin
   FGoneBranches.Assign(Job.GoneBranches);
   FSummary.SetUpstreamGone(FGoneBranches.IndexOf(FBranch) >= 0);
   FReviewPulls := Job.ReviewPulls;
+  FGitHubLogin := Job.Login;
   FSummary.SetReviewPulls(FReviewPulls);
   UpdateStatus;
   RebuildPullMenu;

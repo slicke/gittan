@@ -14,6 +14,11 @@ uses
   Classes, SysUtils, gittan.job;
 
 type
+  {** The latest review a reviewer gave a pull request. }
+  TGittanLatestReview = record
+    Login, State: string;
+  end;
+
   {** One pull request as gh pr view and gh pr list describe it. State is
     OPEN, CLOSED or MERGED; ReviewDecision is APPROVED, CHANGES_REQUESTED,
     REVIEW_REQUIRED or empty when no review is asked for. }
@@ -31,6 +36,9 @@ type
     Created, Updated: TDateTime;
     Additions, Deletions, ChangedFiles: integer;
     Labels: string;
+    { The latest review of each reviewer (latestReviews): who and its
+      state, APPROVED, CHANGES_REQUESTED, COMMENTED or DISMISSED. }
+    Reviews: array of TGittanLatestReview;
   end;
   TGittanPullRequests = array of TGittanPullRequest;
 
@@ -38,12 +46,20 @@ const
   {** The fields asked of gh, the ones the record holds. }
   PullRequestFields = 'number,title,state,reviewDecision,url,headRefName,baseRefName,' +
     'author,isDraft,statusCheckRollup,createdAt,updatedAt,additions,deletions,changedFiles,' +
-    'labels';
+    'labels,latestReviews';
 
 {** Reads the object gh pr view --json prints. }
 function ParsePullRequest(const AJson: string; out APull: TGittanPullRequest): boolean;
 {** Reads the array gh pr list --json prints. }
 function ParsePullRequests(const AJson: string; out APulls: TGittanPullRequests): boolean;
+{** APulls without the ones ALogin has already approved or requested
+  changes on (their latest review): GitHub's review-requested search
+  keeps a pull request asked of a team the user is on after their
+  review, which only a personal request loses. A review that only
+  commented, or was dismissed, leaves the pull request in. An empty
+  ALogin leaves all in. }
+function WithoutReviewed(const APulls: TGittanPullRequests;
+  const ALogin: string): TGittanPullRequests;
 {** The short line of the status bar: "PR #12 · Approved", "PR #12 · Draft",
   "PR #12 · Merged", with the review decision in words, and the checks
   after it when there are any: "checks ✓", "2 checks failing" or
@@ -67,7 +83,10 @@ type
     only says which; empty skips it) and gh pr list, in a thread, since
     both go to the network, and gh pr list again with
     review-requested:@me for the open pull requests waiting for the
-    user's review (ReviewPulls). OnDone is called in the main thread
+    user's review (ReviewPulls), less the ones the user has reviewed
+    (WithoutReviewed, by the login gh is logged in as, ALogin, which
+    the job asks gh for when none is given: Login after the job for
+    the next one). OnDone is called in the main thread
     when all are done, as long as the job has not been stopped. A branch
     with no pull request is not a failure: HasPull is false and Error
     empty. The job also asks the remotes which local branches track a
@@ -75,7 +94,7 @@ type
     merged one. }
   TGittanPullRequestJob = class(TGittanJob)
   private
-    FExe, FRoot, FBranch: string;
+    FExe, FRoot, FBranch, FLogin: string;
     FPull: TGittanPullRequest;
     FHasPull: boolean;
     FGone: TStringList;
@@ -84,9 +103,12 @@ type
   protected
     procedure Execute; override;
   public
-    constructor Create(const AExe, ARoot, ABranch: string);
+    constructor Create(const AExe, ARoot, ABranch: string; const ALogin: string = '');
     destructor Destroy; override;
     property Branch: string read FBranch;
+    {** The login gh is logged in as, as given or as gh answered;
+      empty when gh could not say. }
+    property Login: string read FLogin;
     property Pull: TGittanPullRequest read FPull;
     property HasPull: boolean read FHasPull;
     {** The local branches whose upstream is deleted on its remote. }
@@ -94,7 +116,8 @@ type
     property Pulls: TGittanPullRequests read FPulls;
     {** The open pull requests whose review is asked of the user gh is
       logged in as, or of a team they are on (GitHub's own
-      review-requested:@me search); empty when gh could not list them. }
+      review-requested:@me search), without the ones they have reviewed;
+      empty when gh could not list them. }
     property ReviewPulls: TGittanPullRequests read FReviewPulls;
     {** gh's message when the list could not be read (no GitHub remote,
       not logged in), else empty. }
@@ -139,8 +162,8 @@ end;
 
 function ReadPull(AObject: TJSONObject; out APull: TGittanPullRequest): boolean;
 var
-  Author, Checks, Labels: TJSONData;
-  i: integer;
+  Author, Checks, Labels, Reviews, Reviewer: TJSONData;
+  i, n: integer;
   Name: string;
 begin
   APull := Default(TGittanPullRequest);
@@ -180,6 +203,46 @@ begin
           APull.Labels := APull.Labels + ', ';
         APull.Labels := APull.Labels + Name;
       end;
+  Reviews := AObject.Find('latestReviews');
+  if (Reviews <> nil) and (Reviews.JSONType = jtArray) then
+    for i := 0 to TJSONArray(Reviews).Count - 1 do
+      if TJSONArray(Reviews)[i].JSONType = jtObject then
+      begin
+        Reviewer := TJSONObject(TJSONArray(Reviews)[i]).Find('author');
+        if (Reviewer = nil) or (Reviewer.JSONType <> jtObject) then
+          Continue;
+        n := Length(APull.Reviews);
+        SetLength(APull.Reviews, n + 1);
+        APull.Reviews[n].Login := TJSONObject(Reviewer).Get('login', '');
+        APull.Reviews[n].State := TJSONObject(TJSONArray(Reviews)[i]).Get('state', '');
+      end;
+end;
+
+function WithoutReviewed(const APulls: TGittanPullRequests;
+  const ALogin: string): TGittanPullRequests;
+var
+  i, j, n: integer;
+  Reviewed: boolean;
+begin
+  Result := nil;
+  if ALogin = '' then
+    Exit(Copy(APulls));
+  n := 0;
+  SetLength(Result, Length(APulls));
+  for i := 0 to High(APulls) do
+  begin
+    Reviewed := False;
+    for j := 0 to High(APulls[i].Reviews) do
+      if SameText(APulls[i].Reviews[j].Login, ALogin) and
+        ((APulls[i].Reviews[j].State = 'APPROVED') or
+        (APulls[i].Reviews[j].State = 'CHANGES_REQUESTED')) then
+        Reviewed := True;
+    if Reviewed then
+      Continue;
+    Result[n] := APulls[i];
+    Inc(n);
+  end;
+  SetLength(Result, n);
 end;
 
 function ParsePullRequest(const AJson: string; out APull: TGittanPullRequest): boolean;
@@ -333,12 +396,14 @@ end;
   The job
   --------------------------------------------------------------------------- }
 
-constructor TGittanPullRequestJob.Create(const AExe, ARoot, ABranch: string);
+constructor TGittanPullRequestJob.Create(const AExe, ARoot, ABranch: string;
+  const ALogin: string);
 begin
   inherited Create(True);
   FExe := AExe;
   FRoot := ARoot;
   FBranch := ABranch;
+  FLogin := ALogin;
   FGone := TStringList.Create;
 end;
 
@@ -370,8 +435,9 @@ begin
   if Terminated then
     Exit;
   { Those waiting for the user's review, by GitHub's own search, which
-    knows who gh is logged in as and the teams they are on; a review
-    given clears the request, so these are the ones still to do. }
+    knows who gh is logged in as and the teams they are on. A review
+    given clears a personal request but not a team's, so the ones the
+    user has reviewed are taken out by their login, asked of gh once. }
   if (FError = '') and RunGitHubCli(FExe, FRoot, ['pr', 'list', '--state', 'open',
     '--limit', '50', '--search', 'review-requested:@me', '--json', PullRequestFields],
     Output, Err) then
@@ -379,6 +445,12 @@ begin
     if not ParsePullRequests(Output, FReviewPulls) then
       FReviewPulls := nil;
   end;
+  if Terminated then
+    Exit;
+  if (FLogin = '') and (Length(FReviewPulls) > 0) and
+    RunGitHubCli(FExe, FRoot, ['api', 'user', '--jq', '.login'], Output, Err) then
+    FLogin := Trim(Output);
+  FReviewPulls := WithoutReviewed(FReviewPulls, FLogin);
   if not Terminated then
     GoneUpstreamsIn(FRoot, FGone);
   Done;

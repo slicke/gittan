@@ -10,9 +10,10 @@
   and is asked for again each time it is shown; a card compares with
   its pull request as Compare With > Pull Requests does, the one
   compared against leads back to the working tree, and Refresh asks gh
-  again. The summary's "Needs your review" cards, the open pull requests
-  the job found waiting for the user's review, compare the same way
-  (SummarySelectPull). See spec/github.md. }
+  again. The summary's row counting the open pull requests the job
+  found waiting for the user's review drops a list of them
+  (SummaryReviewClick): a pick compares the same way, and All Pull
+  Requests opens the page. See spec/github.md. }
 
 procedure TForm1.SetupPullPage;
 begin
@@ -81,9 +82,35 @@ begin
   ComparePull(APull);
 end;
 
-procedure TForm1.SummarySelectPull(Sender: TObject; const APull: TGittanPullRequest);
+{ The list the summary's "N pull requests need your review" drops: a
+  row per pull request, its number and title with who opened it and
+  when dimmed, the one compared against checked, then All Pull
+  Requests. }
+procedure TForm1.SummaryReviewClick(Sender: TObject; const AScreenRect: TRect);
+var
+  i: integer;
 begin
-  ComparePull(APull);
+  if (FRepo.Root = '') or (Length(FReviewPulls) = 0) then
+    Exit;
+  FReviewPopup.Clear;
+  FReviewPopup.AddHeader(rsNeedsReviewHeader);
+  for i := 0 to High(FReviewPulls) do
+    FReviewPopup.Add(Format(rsPullHintTitle, [FReviewPulls[i].Number, FReviewPulls[i].Title]),
+      ReviewPullLine(FReviewPulls[i]), (FPullRange <> '') and (FRepo.Base = FPullRange) and
+      FRepo.IsRange and (FPullNumber = FReviewPulls[i].Number), i + 1);
+  FReviewPopup.Add(rsAllPulls, '', False, 0);
+  FReviewPopup.Popup(AScreenRect);
+end;
+
+procedure TForm1.ReviewPopupPick(Sender: TObject; AIndex: integer);
+var
+  Pick: PtrInt;
+begin
+  Pick := FReviewPopup.TagOf(AIndex);
+  if Pick = 0 then
+    ShowPulls
+  else if (Pick > 0) and (Pick <= Length(FReviewPulls)) then
+    ComparePull(FReviewPulls[Pick - 1]);
 end;
 
 procedure TForm1.PullPageWorkingTree(Sender: TObject);
