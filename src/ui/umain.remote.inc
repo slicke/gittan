@@ -524,7 +524,7 @@ var
 begin
   if (FRepo.Root = '') or (FLfsCheckJob <> nil) then
     Exit;
-  Key := FRepo.Root + #0 + FRepo.CommitId('HEAD');
+  Key := FRepo.Root + #0 + FSnapHead;
   if Key = FLfsChecked then
     Exit;
   FLfsChecked := Key;
@@ -655,7 +655,10 @@ begin
   begin
     FPendingRemote := False;
     FStatus.ShowMessage('', stNormal, 0);
-    StartRemote(FPendingKind, FPendingMode, FPendingArg, FPendingRemoteName);
+    if FPendingKind = rkFetchPull then
+      StartPullFetch(StrToIntDef(FPendingArg, 0), FPendingRemoteName, FPendingBranch)
+    else
+      StartRemote(FPendingKind, FPendingMode, FPendingArg, FPendingRemoteName);
   end;
 end;
 

@@ -885,6 +885,11 @@ begin
   Git(['remote', 'remove', 'origin']);
   AssertEquals('upstream', FRepo.RemoteFor('nobody/nothing'));
   AssertFalse(FRepo.HasRemoteFor('me/bar'));
+  { Another owner whose name ends with the one asked for is not it. }
+  Git(['remote', 'add', 'fork', 'https://github.com/notme/bar.git']);
+  AssertFalse(FRepo.HasRemoteFor('me/bar'));
+  AssertEquals('upstream', FRepo.RemoteFor('me/bar'));
+  AssertTrue(FRepo.HasRemoteFor('notme/bar'));
 end;
 
 procedure TGitRepoTest.TestUserName;
@@ -1025,6 +1030,7 @@ var
   OldOid, NewOid: string;
   Data: RawByteString;
   Size: int64;
+  Missing: boolean;
   Stats: TGittanFileStats;
   Tree: TGittanRepo;
   State: TGittanLfsState;
@@ -1081,6 +1087,12 @@ begin
   AssertFalse(FRepo.LfsMissing('a.txt', 'HEAD'));
   AssertFalse(FRepo.LfsMissing('a.txt', ''));
   AssertFalse(FRepo.LfsMissing('none.psd', 'HEAD'));
+  { FileSize tells the same, from the one read of the pointer. }
+  AssertTrue(FRepo.FileSize('art.psd', 'HEAD', Size, Missing));
+  AssertEquals(9, Size);
+  AssertTrue(Missing);
+  AssertTrue(FRepo.FileSize('a.txt', '', Size, Missing));
+  AssertFalse(Missing);
   Store(OldOid, 'old'#0'image');
   Store(NewOid, 'new'#0'img');
   AssertFalse(FRepo.LfsMissing('art.psd', 'HEAD'));
@@ -1089,6 +1101,8 @@ begin
   AssertEquals('old'#0'image', Data);
   AssertTrue(FRepo.FileBlob('art.psd', '', Data));
   AssertEquals('new'#0'img', Data);
+  AssertTrue(FRepo.FileSize('art.psd', 'HEAD', Size, Missing));
+  AssertFalse(Missing);
   AssertTrue(FRepo.FileSize('art.psd', 'HEAD', Size));
   AssertEquals(9, Size);
   AssertTrue(FRepo.FileSize('art.psd', '', Size));
@@ -1136,6 +1150,7 @@ begin
   Git(['-C', 'up', 'lfs', 'install', '--local']);
   WriteFile('up/.gitattributes', '*.psd filter=lfs diff=lfs merge=lfs -text'#10);
   WriteFile('up/art.psd', 'one'#0'image');
+  WriteFile('up/a,b [v2].psd', 'odd'#0'name');
   Git(['-C', 'up', 'add', '-A']);
   Git(['-C', 'up', 'commit', '-q', '-m', 'one']);
   WriteFile('up/art.psd', 'two'#0'image!');
@@ -1154,6 +1169,12 @@ begin
   AssertEquals('two'#0'image!', Data);
   AssertTrue(FRepo.FileBlob('art.psd', 'HEAD~1', Data));
   AssertEquals('one'#0'image', Data);
+  { A name git-lfs would read as two patterns, one with a set in it. }
+  AssertTrue(FRepo.LfsMissing('a,b [v2].psd', ''));
+  AssertTrue(FRepo.Error, FRepo.LfsDownload('a,b [v2].psd', ['']));
+  AssertFalse(FRepo.LfsMissing('a,b [v2].psd', ''));
+  AssertTrue(FRepo.FileBlob('a,b [v2].psd', '', Data));
+  AssertEquals('odd'#0'name', Data);
   { The whole work tree again: a pointer back in place of the file. }
   Git(['-C', 'down', 'lfs', 'install', '--local', '--skip-smudge']);
   DeleteFile(FDir + PathDelim + 'down' + PathDelim + 'art.psd');
@@ -2724,6 +2745,7 @@ begin
   { Stopped: HEAD is detached, the snapshot names the rebased branch. }
   AssertTrue(FRepo.Snapshot(Snap));
   AssertTrue('detached', Snap.Detached);
+  AssertEquals(FRepo.CommitId('HEAD'), Snap.Head);
   AssertEquals('rebasing', Snap.Operation);
   AssertEquals('topic', Snap.RebaseBranch);
   AssertTrue(FRepo.ResolveConflict('a.txt', csMine));

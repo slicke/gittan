@@ -765,12 +765,29 @@ begin
               Result := Result + Copy(S, p, q - p);
             p := q;
           end;
-          { A link, with its address, as it is. }
+          { A link, with its address, as it is: this bracket's own ]
+            (nested ones counted) right before a (. Any other bracket,
+            a task's [ ] or an index, is text, its paths linked. }
           '[':
           begin
-            q := Pos('](', S, p);
+            q := p + 1;
+            k := 1;
+            while q <= Length(S) do
+            begin
+              if S[q] = '\' then
+                Inc(q)
+              else if S[q] = '[' then
+                Inc(k)
+              else if S[q] = ']' then
+              begin
+                Dec(k);
+                if k = 0 then
+                  Break;
+              end;
+              Inc(q);
+            end;
             n := 0;
-            if q > 0 then
+            if (q < Length(S)) and (S[q + 1] = '(') then
               n := Pos(')', S, q);
             if n > 0 then
             begin

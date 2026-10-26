@@ -215,6 +215,7 @@ begin
   FThreadsKey := '';
   FReviewError := '';
   FMapDiffKey := '';
+  FReviewSegments.Clear;
   FSummary.SetNotes('', nil);
   CollectShownThreads;
   FileTree.Invalidate;
@@ -295,6 +296,8 @@ begin
   if Key = FThreadsKey then
     Exit;
   FThreadsKey := Key;
+  { The bodies of the threads gone are dropped with the rest. }
+  FReviewSegments.Clear;
   CollectShownThreads;
   FileTree.Invalidate;
   RebuildIfChanges;
@@ -532,7 +535,9 @@ begin
 end;
 
 { The parts of a comment's body as its card shows them, kept by the body
-  (FReviewSegments), since a card is laid out at every paint, with their
+  (FReviewSegments, emptied when the threads or the work tree change,
+  since the paths it links are the files there), since a card is laid
+  out at every paint, with their
   depth in <details> blocks in the Objects (ReviewRow, comment 0): the
   summary of a block as rlDetails, the text between fences as one
   rlMarkup each (CommentParts, then LazInk's inline markup, with only

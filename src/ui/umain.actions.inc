@@ -2243,6 +2243,17 @@ begin
   if (FRepo.Root = '') or not Assigned(FForge) or (FRemoteJob <> nil) or
     (FCommitJob <> nil) then
     Exit;
+  { It would fight the background fetch over the remote's refs too. }
+  if FAutoFetchJob <> nil then
+  begin
+    FPendingRemote := True;
+    FPendingKind := rkFetchPull;
+    FPendingArg := IntToStr(ANumber);
+    FPendingRemoteName := ARemote;
+    FPendingBranch := ABaseRef;
+    FStatus.ShowMessage(rsWaitingForFetch, stNormal, 0);
+    Exit;
+  end;
   FNoticeHook := False;
   FRemoteHead := '';
   FRemoteAhead := FAhead;

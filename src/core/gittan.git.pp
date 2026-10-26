@@ -138,6 +138,8 @@ type
     Branch, DefaultBranch, MergeBase, Operation, RebaseBranch: string;
     {** HEAD is on no branch: Branch is then the short commit id. }
     Detached: boolean;
+    {** The id of the commit HEAD is on; empty before the first commit. }
+    Head: string;
     HasUpstream: boolean;
     Ahead, Behind: integer;
     {** How many commits of DefaultBranch the branch lacks, from
@@ -884,7 +886,12 @@ type
       or in the work tree when ARef is empty, without reading it; for a
       Git LFS pointer the size it gives. Returns false when the version
       has no such file. }
-    function FileSize(const APath, ARef: string; out ASize: int64): boolean;
+    function FileSize(const APath, ARef: string; out ASize: int64): boolean; overload;
+    {** FileSize, and in ALfsMissing whether the version is a Git LFS
+      pointer whose object the local store lacks (LfsMissing), from one
+      read of the pointer. }
+    function FileSize(const APath, ARef: string; out ASize: int64;
+      out ALfsMissing: boolean): boolean; overload;
     {** Where Git LFS keeps the object AOid (an oid of ParseLfsPointer):
       lfs/objects/<2>/<2>/<oid> in the common git directory, which a
       linked worktree names in its commondir file, or under lfs.storage
@@ -1962,21 +1969,32 @@ end;
 
 function RemoteUrlsHold(const AUrls, ARepoPath: string): boolean;
 var
-  Line, Lower, Rest: string;
-  p: integer;
+  Line, Lower, Path, Rest: string;
+  p, Url: integer;
 begin
   Result := False;
   if ARepoPath = '' then
     Exit;
+  Path := LowerCase(ARepoPath);
   for Line in AUrls.Split([#10]) do
   begin
     Lower := LowerCase(TrimRight(Line));
-    p := Pos(LowerCase(ARepoPath), Lower);
-    if (p = 0) or (p <= Pos(' ', Lower)) then
+    Url := Pos(' ', Lower);
+    if Url = 0 then
       Continue;
-    Rest := Copy(Lower, p + Length(ARepoPath), MaxInt);
-    if (Rest = '') or (Rest = '.git') or (Rest[1] = '/') then
-      Exit(True);
+    { The path starts after a slash, or the colon of user@host:owner/repo,
+      so another owner whose name ends with this one is not it. }
+    p := PosEx(Path, Lower, Url + 1);
+    while p > 0 do
+    begin
+      if Lower[p - 1] in ['/', ':'] then
+      begin
+        Rest := Copy(Lower, p + Length(Path), MaxInt);
+        if (Rest = '') or (Rest = '.git') or (Rest[1] = '/') then
+          Exit(True);
+      end;
+      p := PosEx(Path, Lower, p + 1);
+    end;
   end;
 end;
 
@@ -2562,8 +2580,16 @@ begin
     Exit(False);
   if ASignOff then
     Exit(RunGit(FRoot, ['config', '--local', 'gittan.signOff', 'true'], Output));
+  { --unset-all fails when the key is not there, which is no failure. }
   RunGitIn(FRoot, ['config', '--local', '--unset-all', 'gittan.signOff'], Output, Err);
   Result := not SignOff;
+  if Result then
+    Exit;
+  Err := Trim(Err);
+  if Err <> '' then
+    FError := Err
+  else
+    FError := 'Sign-off is still on: another git config sets gittan.signOff.';
 end;
 
 function TGittanRepo.RemoteFor(const ARepoPath: string): string;
@@ -2594,7 +2620,7 @@ begin
       if Result = '' then
         Result := Name;
       HasOrigin := HasOrigin or (Name = 'origin');
-      if (ARepoPath <> '') and (Pos(LowerCase(ARepoPath), LowerCase(Line)) > p) then
+      if RemoteUrlsHold(Line, ARepoPath) then
         Exit(Name);
     end;
   finally
@@ -5606,6 +5632,7 @@ begin
   if not ASnap.Ok then
     ASnap.Error := FError;
   ASnap.Branch := Branch(ASnap.Detached);
+  ASnap.Head := CommitId('HEAD');
   ASnap.DefaultBranch := DefaultBranch;
   if not MergeBase(ASnap.DefaultBranch, ASnap.MergeBase) then
     ASnap.MergeBase := '';
@@ -6278,12 +6305,24 @@ end;
 
 function TGittanRepo.FileSize(const APath, ARef: string; out ASize: int64): boolean;
 var
+  Missing: boolean;
+begin
+  Result := FileSize(APath, ARef, ASize, Missing);
+end;
+
+function TGittanRepo.FileSize(const APath, ARef: string; out ASize: int64;
+  out ALfsMissing: boolean): boolean;
+var
   Oid: string;
   Size: int64;
 begin
+  ALfsMissing := False;
   Result := StoredSize(APath, ARef, ASize);
   if Result and LfsPointerAt(APath, ARef, ASize, Oid, Size) then
+  begin
     ASize := Size;
+    ALfsMissing := not FileExists(LfsObjectFile(Oid));
+  end;
 end;
 
 function TGittanRepo.LfsMissing(const APath, ARef: string): boolean;
@@ -6362,10 +6401,25 @@ begin
   Result := RunRemote(['lfs', 'install']) and RunRemote(['lfs', 'checkout']);
 end;
 
+{ APath as a pattern of git-lfs, which takes --include as patterns
+  between commas and checkout's paths as patterns too: a comma or a
+  wildcard becomes ?, which matches it (and at most a file whose name
+  differs there, downloaded along with it). git-lfs has no escape for a
+  comma, and a backslash is a path separator to it on Windows. }
+function LfsPattern(const APath: string): string;
+var
+  i: integer;
+begin
+  Result := APath;
+  for i := 1 to Length(Result) do
+    if Result[i] in [',', '*', '?', '[', ']', '\', '!', '{', '}'] then
+      Result[i] := '?';
+end;
+
 function TGittanRepo.LfsDownload(const APath: string; const ARefs: array of string): boolean;
 var
   Args, Wanted: array of string;
-  Ref, Name, Remote: string;
+  Ref, Name, Remote, Pattern: string;
   WorkTree: boolean;
 begin
   Result := False;
@@ -6397,8 +6451,9 @@ begin
   end;
   if Wanted = nil then
     Wanted := ['HEAD'];
-  Args := Concat(['lfs', 'fetch', '--include=' + APath, Remote], Wanted);
-  Result := RunRemote(Args) and (not WorkTree or RunRemote(['lfs', 'checkout', '--', APath]));
+  Pattern := LfsPattern(APath);
+  Args := Concat(['lfs', 'fetch', '--include=' + Pattern, Remote], Wanted);
+  Result := RunRemote(Args) and (not WorkTree or RunRemote(['lfs', 'checkout', '--', Pattern]));
 end;
 
 { ---------------------------------------------------------------------------

@@ -697,7 +697,9 @@ type
     { The background fetch (umain.remote.inc): its job, apart from
       FRemoteJob so the rest of the form is never busy for it, the timer
       that looks once a minute whether one is due, and what StartRemote
-      was asked meanwhile, run once it is done (FPendingRemote). }
+      was asked meanwhile, run once it is done (FPendingRemote; for a
+      pull request's fetch, rkFetchPull, its number in FPendingArg and
+      its base in FPendingBranch). }
     FAutoFetchJob: TGittanRemoteJob;
     { Where the repository stands with Git LFS: the job reading it, the
       root and HEAD it last read it for (FLfsChecked, so a snapshot of
@@ -705,11 +707,14 @@ type
       it (FLfsShown), not shown again once closed until it changes. }
     FLfsCheckJob: TGittanLfsCheckJob;
     FLfsChecked, FLfsShown: string;
+    { The commit HEAD was on in the last snapshot, the key's half that
+      CheckLfs reads without running git on this thread. }
+    FSnapHead: string;
     FAutoFetchTimer: TTimer;
     FPendingRemote: boolean;
     FPendingKind: TGittanRemoteKind;
     FPendingMode: TGittanPullMode;
-    FPendingArg, FPendingRemoteName: string;
+    FPendingArg, FPendingRemoteName, FPendingBranch: string;
     { The list a click on the status bar's pull request drops down, and
       what each of its rows does (the pa* constants). }
     FPullPopup: TGittanPopupList;
@@ -5497,8 +5502,11 @@ begin
   if not ASnap.Ok then
     FLoadError := ASnap.Error;
   ClearBlameCache;
+  { The files a comment's paths link to may have come or gone. }
+  FReviewSegments.Clear;
   FStats := ASnap.Stats;
   FBranch := ASnap.Branch;
+  FSnapHead := ASnap.Head;
   { The pull request is looked up for the branch HEAD is on, the detached
     id during a rebase, so this runs before the rebase branch stands in. }
   StartPullJob(False);
@@ -6031,17 +6039,17 @@ procedure TForm1.ShowBinaryChanges(const APath: string);
 var
   OldRef, NewRef: string;
   OldSize, NewSize: int64;
-  HasOld, HasNew: boolean;
+  HasOld, HasNew, OldMissing, NewMissing: boolean;
 begin
   AbandonHistoryJob;
   FRepo.DiffSides(OldRef, NewRef);
-  HasOld := FRepo.FileSize(APath, OldRef, OldSize);
-  HasNew := FRepo.FileSize(APath, NewRef, NewSize);
+  HasOld := FRepo.FileSize(APath, OldRef, OldSize, OldMissing);
+  HasNew := FRepo.FileSize(APath, NewRef, NewSize, NewMissing);
   FBinaryView.SetChange(APath, HasOld, HasNew, OldSize, NewSize);
   FLfsSides := nil;
-  if HasOld and FRepo.LfsMissing(APath, OldRef) then
+  if HasOld and OldMissing then
     FLfsSides := Concat(FLfsSides, [OldRef]);
-  if HasNew and FRepo.LfsMissing(APath, NewRef) then
+  if HasNew and NewMissing then
     FLfsSides := Concat(FLfsSides, [NewRef]);
   if FLfsSides <> nil then
   begin

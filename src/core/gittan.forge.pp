@@ -577,8 +577,8 @@ end;
 
 destructor TGittanForgeJob.Destroy;
 begin
-  FClones.Free;
   inherited Destroy;
+  FClones.Free;
 end;
 
 procedure TGittanForgeJob.Execute;

@@ -306,6 +306,11 @@ begin
   AssertEquals('lines', 'x [README.md](gittan-file:README.md)' + LineEnding +
     'y [README.md](gittan-file:README.md)' + LineEnding,
     LinkFilePaths('x README.md'#10'y README.md'#10, @IsFile));
+  AssertEquals('a task before a link',
+    '- [ ] fix [README.md](gittan-file:README.md), see [docs](https://a.b)',
+    LinkFilePaths('- [ ] fix README.md, see [docs](https://a.b)', @IsFile));
+  AssertEquals('an index', 'a[i] in [README.md](gittan-file:README.md)',
+    LinkFilePaths('a[i] in README.md', @IsFile));
 end;
 
 procedure TReviewsTest.TestLinkFilePathsLeftAlone;
@@ -316,6 +321,8 @@ begin
     LinkFilePaths('see src/ui/other.pp and 1.2.3', @IsFile));
   AssertEquals('a link', '[x](src/ui/umain.pp) and [src/ui/umain.pp](https://a.b)',
     LinkFilePaths('[x](src/ui/umain.pp) and [src/ui/umain.pp](https://a.b)', @IsFile));
+  AssertEquals('a link with brackets in it', '[a [README.md] b](https://a.b)',
+    LinkFilePaths('[a [README.md] b](https://a.b)', @IsFile));
   AssertEquals('a URL', 'https://example.com/src/ui/umain.pp done',
     LinkFilePaths('https://example.com/src/ui/umain.pp done', @IsFile));
   AssertEquals('a tag', '<a href="README.md">', LinkFilePaths('<a href="README.md">', @IsFile));
