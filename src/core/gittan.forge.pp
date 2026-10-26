@@ -26,12 +26,14 @@ type
     ERROR or EXPECTED, empty without checks; MyReview the state of the
     user's latest review of it, empty without one; Requested whether
     the user is asked for a review now, in person (a request a review
-    clears, and a new one brings back). }
+    clears, and a new one brings back); Feedback whether someone other
+    than its author, and not a bot, has commented on it or reviewed it
+    (among its last thirty comments and last thirty reviews). }
   TGittanForgePull = record
     Repo: string;
     Number: integer;
     Title, Url, Author, HeadRef, BaseRef, State, ReviewDecision, Checks, MyReview: string;
-    IsDraft, Requested: boolean;
+    IsDraft, Requested, Feedback: boolean;
     Created, Updated: TDateTime;
   end;
   TGittanForgePulls = array of TGittanForgePull;
@@ -39,7 +41,8 @@ type
 const
   {** The GraphQL query gh runs: the login, the open pull requests the
     user wrote and the open ones a review is asked of them for (in
-    person or through a team), fifty of each, newest first. }
+    person or through a team), fifty of each, newest first, with who
+    wrote each one's last thirty comments and reviews. }
   ForgeQuery =
     'query { viewer { login } ' +
     'mine: search(query: "is:pr is:open author:@me archived:false sort:updated-desc", ' +
@@ -50,6 +53,8 @@ const
     'createdAt updatedAt author { login } repository { nameWithOwner } ' +
     'headRefName baseRefName viewerLatestReview { state } ' +
     'viewerLatestReviewRequest { id } ' +
+    'comments(last: 30) { nodes { author { __typename login } } } ' +
+    'reviews(last: 30) { nodes { author { __typename login } } } ' +
     'commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } }';
 
 {** The name of a forge, "GitHub". }
@@ -73,6 +78,10 @@ function NeedsMyReview(const APull: TGittanForgePull): boolean;
 {** AReview without the pull requests the user has reviewed, by
   NeedsMyReview. }
 function StillToReview(const AReview: TGittanForgePulls): TGittanForgePulls;
+
+{** APulls without the ones nobody but their author has answered (no
+  Feedback). }
+function WithFeedback(const APulls: TGittanForgePulls): TGittanForgePulls;
 
 type
   {** Asks a forge for the user's pull requests in a thread. Kind says
@@ -150,6 +159,34 @@ begin
     Result := TJSONObject(Inner).Get(AName, '');
 end;
 
+{ Whether a node of AField's nodes has an author who is not AAuthor
+  and not a bot (a deleted user's author is null and counts too, as
+  someone else). }
+function OthersIn(AObject: TJSONObject; const AField, AAuthor: string): boolean;
+var
+  Field, Nodes, Author: TJSONData;
+  i: integer;
+begin
+  Result := False;
+  Field := AObject.Find(AField);
+  if (Field = nil) or (Field.JSONType <> jtObject) then
+    Exit;
+  Nodes := TJSONObject(Field).Find('nodes');
+  if (Nodes = nil) or (Nodes.JSONType <> jtArray) then
+    Exit;
+  for i := 0 to TJSONArray(Nodes).Count - 1 do
+  begin
+    if TJSONArray(Nodes)[i].JSONType <> jtObject then
+      Continue;
+    Author := TJSONObject(TJSONArray(Nodes)[i]).Find('author');
+    if (Author = nil) or (Author.JSONType <> jtObject) then
+      Exit(True);
+    if (TJSONObject(Author).Get('__typename', '') <> 'Bot') and
+      not SameText(TJSONObject(Author).Get('login', ''), AAuthor) then
+      Exit(True);
+  end;
+end;
+
 function ReadForgePull(AObject: TJSONObject; out APull: TGittanForgePull): boolean;
 var
   Request, Commits, Node, Commit, Rollup: TJSONData;
@@ -173,6 +210,8 @@ begin
   APull.MyReview := NestedString(AObject, 'viewerLatestReview', 'state');
   Request := AObject.Find('viewerLatestReviewRequest');
   APull.Requested := (Request <> nil) and (Request.JSONType = jtObject);
+  APull.Feedback := OthersIn(AObject, 'comments', APull.Author) or
+    OthersIn(AObject, 'reviews', APull.Author);
   { commits.nodes[0].commit.statusCheckRollup.state }
   Commits := AObject.Find('commits');
   if (Commits <> nil) and (Commits.JSONType = jtObject) then
@@ -271,6 +310,22 @@ begin
     if NeedsMyReview(AReview[i]) then
     begin
       Result[n] := AReview[i];
+      Inc(n);
+    end;
+  SetLength(Result, n);
+end;
+
+function WithFeedback(const APulls: TGittanForgePulls): TGittanForgePulls;
+var
+  i, n: integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(APulls));
+  n := 0;
+  for i := 0 to High(APulls) do
+    if APulls[i].Feedback then
+    begin
+      Result[n] := APulls[i];
       Inc(n);
     end;
   SetLength(Result, n);

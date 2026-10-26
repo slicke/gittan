@@ -1,8 +1,8 @@
 unit testforge;
 
 {** Tests of gittan.forge: the answer of the forge query read into pull
-  requests, and which of those waiting for the user's review still
-  are. }
+  requests, which of those waiting for the user's review still are,
+  and which have had an answer from someone but their author. }
 
 {$mode objfpc}{$H+}
 
@@ -17,6 +17,7 @@ type
     procedure TestParseAnswer;
     procedure TestParseErrors;
     procedure TestNeedsMyReview;
+    procedure TestFeedback;
     procedure TestForgeName;
   end;
 
@@ -29,6 +30,9 @@ const
     '"author":{"login":"slicke"},"repository":{"nameWithOwner":"slicke/gittan"},' +
     '"headRefName":"develop","baseRefName":"main","viewerLatestReview":null,' +
     '"viewerLatestReviewRequest":null,' +
+    '"comments":{"nodes":[{"author":{"__typename":"Bot","login":"codecov"}},' +
+    '{"author":{"__typename":"User","login":"slicke"}}]},' +
+    '"reviews":{"nodes":[{"author":{"__typename":"User","login":"Slicke"}}]},' +
     '"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}';
   Review = '{"number":12,"title":"Fix the thing","url":"https://github.com/owner/repo/pull/12",' +
     '"isDraft":true,"state":"OPEN","reviewDecision":null,' +
@@ -36,6 +40,8 @@ const
     '"author":{"login":"ada"},"repository":{"nameWithOwner":"owner/repo"},' +
     '"headRefName":"fix/thing","baseRefName":"main",' +
     '"viewerLatestReview":{"state":"APPROVED"},"viewerLatestReviewRequest":{"id":"RR_1"},' +
+    '"comments":{"nodes":[]},' +
+    '"reviews":{"nodes":[{"author":{"__typename":"User","login":"slicke"}}]},' +
     '"commits":{"nodes":[{"commit":{"statusCheckRollup":null}}]}}';
   Answer = '{"data":{"viewer":{"login":"slicke"},"mine":{"issueCount":1,"nodes":[' + Mine +
     ']},"review":{"issueCount":2,"nodes":[' + Review + ',{"__typename":"Issue"}]}}}';
@@ -62,6 +68,8 @@ begin
   AssertEquals('', MinePulls[0].MyReview);
   AssertFalse(MinePulls[0].Requested);
   AssertFalse(MinePulls[0].IsDraft);
+  { A bot's comment and the author's own do not count. }
+  AssertFalse(MinePulls[0].Feedback);
   AssertEquals(EncodeDateTime(2026, 10, 24, 10, 0, 0, 0), MinePulls[0].Created);
   AssertEquals(EncodeDateTime(2026, 10, 25, 10, 0, 0, 0), MinePulls[0].Updated);
   { The issue among the nodes is skipped. }
@@ -73,6 +81,7 @@ begin
   AssertEquals('', ReviewPulls[0].Checks);
   AssertEquals('APPROVED', ReviewPulls[0].MyReview);
   AssertTrue(ReviewPulls[0].Requested);
+  AssertTrue(ReviewPulls[0].Feedback);
 end;
 
 procedure TForgeTest.TestParseErrors;
@@ -125,6 +134,26 @@ begin
   AssertEquals(1, Left[0].Number);
   AssertEquals(3, Left[1].Number);
   AssertEquals(0, Length(StillToReview(nil)));
+end;
+
+procedure TForgeTest.TestFeedback;
+const
+  Ghost = '{"data":{"mine":{"nodes":[{"number":1,"author":{"login":"me"},' +
+    '"comments":{"nodes":[{"author":null}]}},{"number":2,"author":{"login":"me"}}]}}}';
+var
+  Login, Error: string;
+  MinePulls, ReviewPulls, Left: TGittanForgePulls;
+begin
+  { A deleted user's comment is someone else's; no comments at all is
+    no feedback. }
+  AssertTrue(ParseForgeAnswer(Ghost, Login, MinePulls, ReviewPulls, Error));
+  AssertEquals(2, Length(MinePulls));
+  AssertTrue(MinePulls[0].Feedback);
+  AssertFalse(MinePulls[1].Feedback);
+  Left := WithFeedback(MinePulls);
+  AssertEquals(1, Length(Left));
+  AssertEquals(1, Left[0].Number);
+  AssertEquals(0, Length(WithFeedback(nil)));
 end;
 
 procedure TForgeTest.TestForgeName;

@@ -62,6 +62,7 @@ begin
     AssertEquals('', S.GitPath);
     AssertEquals('', S.GhPath);
     AssertTrue('the GitHub features start on', S.GitHubEnabled);
+    AssertFalse(S.HideWithoutFeedback);
     AssertFalse('the AI features start off', S.AIEnabled);
     AssertEquals('', S.ClaudePath);
     AssertEquals('', S.ClaudeModel);
@@ -103,6 +104,7 @@ begin
     S.GitPath := '/opt/homebrew/bin/git';
     S.GhPath := 'C:\Program Files\GitHub CLI\gh.exe';
     S.GitHubEnabled := False;
+    S.HideWithoutFeedback := True;
     S.SyntaxTheme := 'Delphi';
     S.AIEnabled := True;
     S.ClaudePath := '/Users/me/.local/bin/claude';
@@ -145,6 +147,7 @@ begin
     AssertEquals('/opt/homebrew/bin/git', S.GitPath);
     AssertEquals('C:\Program Files\GitHub CLI\gh.exe', S.GhPath);
     AssertFalse(S.GitHubEnabled);
+    AssertTrue(S.HideWithoutFeedback);
     AssertEquals('Delphi', S.SyntaxTheme);
     AssertTrue(S.AIEnabled);
     AssertEquals('/Users/me/.local/bin/claude', S.ClaudePath);

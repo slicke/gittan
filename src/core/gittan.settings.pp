@@ -105,6 +105,9 @@ type
       gh found on ToolSearchPath, and when there is none the features
       that need GitHub are off. }
     GhPath: string;
+    {** Whether the GitHub page leaves out the user's pull requests that
+      nobody but them has commented on or reviewed. }
+    HideWithoutFeedback: boolean;
     {** Whether the AI features show (see gittan.ai): off until the user
       turns them on, since they send the changes to the agent's
       provider. }
@@ -289,6 +292,7 @@ begin
       GitHubEnabled := Ini.ReadBool(SecGitHub, 'Enabled', True);
       { Earlier versions kept gh's path with git's. }
       GhPath := Ini.ReadString(SecGitHub, 'Cli', Ini.ReadString(SecTools, 'Gh', ''));
+      HideWithoutFeedback := Ini.ReadBool(SecGitHub, 'HideWithoutFeedback', False);
       AIEnabled := Ini.ReadBool(SecAI, 'Enabled', False);
       AIAgent := Ini.ReadString(SecAI, 'Agent', '');
       ClaudePath := Ini.ReadString(SecAI, 'Claude', '');
@@ -358,6 +362,7 @@ begin
       Ini.DeleteKey(SecTools, 'Gh');
       Ini.WriteBool(SecGitHub, 'Enabled', GitHubEnabled);
       Ini.WriteString(SecGitHub, 'Cli', KeepEdges(GhPath));
+      Ini.WriteBool(SecGitHub, 'HideWithoutFeedback', HideWithoutFeedback);
       Ini.WriteBool(SecAI, 'Enabled', AIEnabled);
       Ini.WriteString(SecAI, 'Agent', AIAgent);
       Ini.WriteString(SecAI, 'Claude', KeepEdges(ClaudePath));

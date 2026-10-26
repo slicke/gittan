@@ -9,7 +9,9 @@
   the page is shown and on Refresh, the page keeping what it had
   meanwhile; the row and the item show only with gh (UpdateGitHubItems).
   The ones the user has reviewed are left out, unless they are asked
-  again (NeedsMyReview). A card of a pull request of the open
+  again (NeedsMyReview); the page's checkbox leaves out the user's own
+  that nobody else has answered, kept in the settings
+  (HideWithoutFeedback). A card of a pull request of the open
   repository (HasRemoteFor) compares with it as the Pull Requests page
   does; one of another repository opens on the forge. GitHub is the
   only forge so far; another adds a kind and a job to gittan.forge and
@@ -23,6 +25,8 @@ begin
   FForgePage.SetForge(ForgeName(fkGitHub));
   FForgePage.OnPick := @ForgePagePick;
   FForgePage.OnRefresh := @ForgePageRefresh;
+  FForgePage.HideWithoutFeedback := FSettings.HideWithoutFeedback;
+  FForgePage.OnHideChange := @ForgePageHideChange;
   FForgePage.OnOpenUrl := @SummaryOpenUrl;
 end;
 
@@ -142,4 +146,12 @@ end;
 procedure TForm1.ForgePageRefresh(Sender: TObject);
 begin
   StartForgeJob;
+end;
+
+{ The checkbox: the settings keep it, and the page's new height. }
+procedure TForm1.ForgePageHideChange(Sender: TObject);
+begin
+  FSettings.HideWithoutFeedback := FForgePage.HideWithoutFeedback;
+  if FForgePage.Visible then
+    FForgePage.FitHeight(FSummaryBox.ClientHeight);
 end;

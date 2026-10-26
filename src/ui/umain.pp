@@ -914,6 +914,7 @@ type
     procedure ForgeJobDone(Sender: TObject);
     procedure ForgePagePick(Sender: TObject; const APull: TGittanForgePull);
     procedure ForgePageRefresh(Sender: TObject);
+    procedure ForgePageHideChange(Sender: TObject);
     procedure SetupPullPage;
     procedure MenuPullsClick(Sender: TObject);
     procedure ShowPulls;
