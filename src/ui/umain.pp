@@ -575,6 +575,9 @@ type
     FForgeItem: TMenuItem;
     FForgeJob: TGittanForgeJob;
     FForgeMine, FForgeReview: TGittanForgePulls;
+    { The pull request a card of the forge page compares with once its
+      clone, which it opened, is open. }
+    FForgeClonePull: TGittanPullRequest;
     FForgeLogin, FForgeError: string;
     { The page of a submodule, in the box too (umain.submodules.inc). }
     FSubPage: TGittanSubPage;
@@ -920,6 +923,7 @@ type
     procedure AbandonForgeJob;
     procedure ForgeJobDone(Sender: TObject);
     procedure ForgePagePick(Sender: TObject; const APull: TGittanForgePull);
+    procedure ForgeCloneOpened(Sender: TObject);
     procedure ForgePageRefresh(Sender: TObject);
     procedure ForgePageHideChange(Sender: TObject);
     procedure SetupPullPage;

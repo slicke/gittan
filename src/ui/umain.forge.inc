@@ -14,8 +14,10 @@
   that nobody else has answered, kept in the settings
   (HideWithoutFeedback). A card of a pull request of the open
   repository (HasRemoteFor) compares with it as the Pull Requests page
-  does; one of another repository opens on the forge. GitHub is the
-  only forge so far. See spec/github.md. }
+  does; one of another repository with a clone among the recent ones
+  (the job's FindClones) opens that clone and compares with it there;
+  any other opens on the forge. GitHub is the only forge so far. See
+  spec/github.md. }
 
 procedure TForm1.SetupForgePage;
 begin
@@ -68,6 +70,7 @@ begin
   if FForgePage = nil then
     Exit;
   FForgePage.SetLogin(FForgeLogin);
+  FForgePage.SetOpenRoot(FRepo.Root);
   FForgePage.SetPulls(FForgeMine, FForgeReview, FForgeError, FForgeJob <> nil);
   if FForgePage.Visible then
     FForgePage.FitHeight(FSummaryBox.ClientHeight);
@@ -80,6 +83,7 @@ begin
   if not Assigned(FForge) or (FRepo.Root = '') or (FForgeJob <> nil) then
     Exit;
   FForgeJob := FForge.AccountJob(FRepo.Root);
+  FForgeJob.Clones.Assign(FSettings.Recent);
   FForgeJob.OnDone := @ForgeJobDone;
   FForgeJob.Start;
   UpdateForgePage;
@@ -117,31 +121,44 @@ begin
   UpdateForgePage;
 end;
 
+{ The forge page's pull request as the open repository's are kept. }
+function ForgePullRequest(const APull: TGittanForgePull): TGittanPullRequest;
+begin
+  Result := Default(TGittanPullRequest);
+  Result.Number := APull.Number;
+  Result.Repo := APull.Repo;
+  Result.Title := APull.Title;
+  Result.Url := APull.Url;
+  Result.HeadRef := APull.HeadRef;
+  Result.BaseRef := APull.BaseRef;
+  Result.Author := APull.Author;
+  Result.State := APull.State;
+  Result.ReviewDecision := APull.ReviewDecision;
+  Result.IsDraft := APull.IsDraft;
+  Result.Created := APull.Created;
+  Result.Updated := APull.Updated;
+end;
+
 { A card: compare with the pull request when the open repository has a
-  remote for its repository, else open it on the forge. }
+  remote for its repository, else open its clone and compare there when
+  it has one, else open it on the forge. }
 procedure TForm1.ForgePagePick(Sender: TObject; const APull: TGittanForgePull);
-var
-  Pull: TGittanPullRequest;
 begin
   if (FRepo.Root <> '') and (APull.Repo <> '') and FRepo.HasRemoteFor(APull.Repo) then
+    ComparePull(ForgePullRequest(APull))
+  else if (APull.Clone <> '') and DirectoryExists(APull.Clone) then
   begin
-    Pull := Default(TGittanPullRequest);
-    Pull.Number := APull.Number;
-    Pull.Repo := APull.Repo;
-    Pull.Title := APull.Title;
-    Pull.Url := APull.Url;
-    Pull.HeadRef := APull.HeadRef;
-    Pull.BaseRef := APull.BaseRef;
-    Pull.Author := APull.Author;
-    Pull.State := APull.State;
-    Pull.ReviewDecision := APull.ReviewDecision;
-    Pull.IsDraft := APull.IsDraft;
-    Pull.Created := APull.Created;
-    Pull.Updated := APull.Updated;
-    ComparePull(Pull);
+    FForgeClonePull := ForgePullRequest(APull);
+    OpenRepository(APull.Clone, @ForgeCloneOpened);
   end
   else if APull.Url <> '' then
     SummaryOpenUrl(Self, APull.Url);
+end;
+
+procedure TForm1.ForgeCloneOpened(Sender: TObject);
+begin
+  if (FRepo.Root <> '') and FRepo.HasRemoteFor(FForgeClonePull.Repo) then
+    ComparePull(FForgeClonePull);
 end;
 
 procedure TForm1.ForgePageRefresh(Sender: TObject);

@@ -5,17 +5,6 @@
   here before the menu is built, so its check marks match; they are
   written when the window closes. }
 
-{ A path with the home folder shortened to "~", for menus. }
-function ShortPath(const APath: string): string;
-var
-  Home: string;
-begin
-  Result := APath;
-  Home := ExcludeTrailingPathDelimiter(GetUserDir);
-  if (Home <> '') and (Copy(APath, 1, Length(Home)) = Home) then
-    Result := '~' + Copy(APath, Length(Home) + 1, MaxInt);
-end;
-
 { Starts AExe with AArgs, in ADir when given, and does not wait for it. }
 procedure RunDetached(const AExe: string; const AArgs: array of string;
   const ADir: string = '');

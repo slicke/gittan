@@ -1158,6 +1158,16 @@ function ResolveReturns(const AText: string): string;
   For threads: it goes to the network. }
 procedure GoneUpstreamsIn(const ADir: string; AList: TStrings);
 
+{** The URLs of the remotes of the repository in ADir, a line each as
+  `git config --get-regexp ^remote\..*\.url$` prints them ("remote.<name>.url
+  <url>"); empty when it has none or ADir is no repository. For threads. }
+function RemoteUrlsIn(const ADir: string): string;
+
+{** Whether one of AUrls (as RemoteUrlsIn gives them) holds ARepoPath
+  ("owner/repo", compared without regard to case) as its path: followed
+  by nothing, ".git" or a slash. }
+function RemoteUrlsHold(const AUrls, ARepoPath: string): boolean;
+
 {** S quoted as the C runtime of Windows splits a command line: in double
   quotes, with a quote inside escaped and the backslashes before it or
   before the closing quote doubled; S as it is when it holds no space, tab
@@ -1872,6 +1882,34 @@ begin
   end;
 end;
 
+function RemoteUrlsIn(const ADir: string): string;
+var
+  Err: string;
+begin
+  if not RunGitIn(ADir, ['config', '--get-regexp', '^remote\..*\.url$'], Result, Err) then
+    Result := '';
+end;
+
+function RemoteUrlsHold(const AUrls, ARepoPath: string): boolean;
+var
+  Line, Lower, Rest: string;
+  p: integer;
+begin
+  Result := False;
+  if ARepoPath = '' then
+    Exit;
+  for Line in AUrls.Split([#10]) do
+  begin
+    Lower := LowerCase(TrimRight(Line));
+    p := Pos(LowerCase(ARepoPath), Lower);
+    if (p = 0) or (p <= Pos(' ', Lower)) then
+      Continue;
+    Rest := Copy(Lower, p + Length(ARepoPath), MaxInt);
+    if (Rest = '') or (Rest = '.git') or (Rest[1] = '/') then
+      Exit(True);
+  end;
+end;
+
 { Each line of for-each-ref is "branch<TAB>remote<TAB>refs/heads/x",
   the last two empty without an upstream; each of ls-remote's is
   "<id><TAB>refs/heads/x". }
@@ -2477,30 +2515,10 @@ end;
 
 function TGittanRepo.HasRemoteFor(const ARepoPath: string): boolean;
 var
-  Output, Line, Lower, Rest: string;
-  Raw: TStringList;
-  p: integer;
+  Output: string;
 begin
-  Result := False;
-  if (FRoot = '') or (ARepoPath = '') or not RunGit(FRoot, ['config', '--get-regexp',
-    '^remote\..*\.url$'], Output) then
-    Exit;
-  Raw := TStringList.Create;
-  try
-    Raw.Text := Output;
-    for Line in Raw do
-    begin
-      Lower := LowerCase(Line);
-      p := Pos(LowerCase(ARepoPath), Lower);
-      if (p = 0) or (p <= Pos(' ', Lower)) then
-        Continue;
-      Rest := Copy(Lower, p + Length(ARepoPath), MaxInt);
-      if (Rest = '') or (Rest = '.git') or (Rest[1] = '/') then
-        Exit(True);
-    end;
-  finally
-    Raw.Free;
-  end;
+  Result := (FRoot <> '') and (ARepoPath <> '') and RunGit(FRoot, ['config', '--get-regexp',
+    '^remote\..*\.url$'], Output) and RemoteUrlsHold(Output, ARepoPath);
 end;
 
 function TGittanRepo.FetchPullRequest(const ARemote: string; ANumber: integer;
