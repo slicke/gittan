@@ -132,7 +132,9 @@ var
 begin
   Result := APath;
   Home := ExcludeTrailingPathDelimiter(GetUserDir);
-  if (Home <> '') and (Copy(APath, 1, Length(Home)) = Home) then
+  { /home/al is no start of /home/alice. }
+  if (Home <> '') and (Copy(APath, 1, Length(Home)) = Home) and
+    ((Length(APath) = Length(Home)) or (APath[Length(Home) + 1] in AllowDirectorySeparators)) then
     Result := '~' + Copy(APath, Length(Home) + 1, MaxInt);
 end;
 

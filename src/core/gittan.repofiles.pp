@@ -218,6 +218,25 @@ begin
   end;
 end;
 
+{ AText as a part of a pattern that matches it alone: each of git's
+  wildcards and a backslash after a backslash, a space as [[:space:]],
+  since .gitattributes parts a line at spaces. }
+function LiteralPattern(const AText: string): string;
+var
+  i: integer;
+begin
+  Result := '';
+  for i := 1 to Length(AText) do
+    case AText[i] of
+      '[', ']', '*', '?', '\':
+        Result := Result + '\' + AText[i];
+      ' ':
+        Result := Result + '[[:space:]]';
+    else
+      Result := Result + AText[i];
+    end;
+end;
+
 function LfsTrackPatterns(const APath: string): TStringArray;
 var
   Ext: string;
@@ -227,8 +246,8 @@ begin
     Exit;
   Ext := ExtractFileExt(APath);
   if (Ext <> '') and (Ext <> ExtractFileName(APath)) then
-    Result := ['*' + StringReplace(Ext, ' ', '[[:space:]]', [rfReplaceAll])];
-  Result := Concat(Result, ['/' + StringReplace(APath, ' ', '[[:space:]]', [rfReplaceAll])]);
+    Result := ['*' + LiteralPattern(Ext)];
+  Result := Concat(Result, ['/' + LiteralPattern(APath)]);
 end;
 
 { The pattern of a line of attributes and whether it has filter=lfs; a

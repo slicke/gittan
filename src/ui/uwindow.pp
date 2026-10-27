@@ -38,7 +38,7 @@ unit uwindow;
 interface
 
 uses
-  Classes, SysUtils, Types, Math, LCLType, Forms, Controls, gittan.app,
+  Classes, SysUtils, Types, Math, LCLType, Forms, Controls, Graphics, gittan.app,
   gittan.git, umain
   {$IFDEF LCLCocoa}, gittan.toolbar, gittan.titlebar{$ENDIF}
   {$IFDEF OWNBAR}, gittan.owntitlebar{$ENDIF}
@@ -100,6 +100,8 @@ type
     procedure CloseFrame(AFrame: TRepoFrame); override;
     procedure StepTab(ADelta: integer); override;
     procedure ShowFrame(AFrame: TRepoFrame); override;
+    procedure SettingsChanged(AFont: TFont; ATheme, ATabSize: integer; ATools: boolean);
+      override;
     {** A new, empty frame, shown. }
     function NewFrame: TRepoFrame;
     {** Shows AFrame and hides the one shown before. }
@@ -515,9 +517,9 @@ begin
       Exit;
     if Frames[i] <> FActive then
     begin
-      Frames[i].FormCloseQuery(Sender, CanClose);
-      if not CanClose then
+      if Frames[i].NeedsSave then
         ActivateFrame(Frames[i]);
+      Frames[i].FormCloseQuery(Sender, CanClose);
     end;
   end;
 end;
@@ -725,6 +727,19 @@ begin
   Index := FFrames.IndexOf(FActive) + ADelta;
   Index := ((Index mod FFrames.Count) + FFrames.Count) mod FFrames.Count;
   ActivateFrame(Frames[Index]);
+end;
+
+{ The shown tab last, so its view is the one read again last. }
+procedure TGittanWindow.SettingsChanged(AFont: TFont; ATheme, ATabSize: integer;
+  ATools: boolean);
+var
+  i: integer;
+begin
+  for i := 0 to FFrames.Count - 1 do
+    if Frames[i] <> FActive then
+      Frames[i].SettingsChanged(AFont, ATheme, ATabSize, ATools);
+  if FActive <> nil then
+    FActive.SettingsChanged(AFont, ATheme, ATabSize, ATools);
 end;
 
 procedure TGittanWindow.ShowFrame(AFrame: TRepoFrame);

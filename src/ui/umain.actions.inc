@@ -424,6 +424,7 @@ var
   OldTheme, OldTabSize: integer;
   V: TSettingsValues;
   Corner: TPoint;
+  Tools: boolean;
 begin
   OldFont := TFont.Create;
   F := TFont.Create;
@@ -452,7 +453,7 @@ begin
       Scale96ToForm(Margin), EditorPanel.ClientHeight - Scale96ToForm(Margin)));
     if EditSettings(F, V, @PreviewSettings, App.Lexers, Edit, Corner, APage) then
     begin
-      PreviewSettings(F, V.Theme, V.TabSize);
+      { Once for all: what the settings keep. }
       App.Settings.EditorCommand := V.EditorCommand;
       App.Settings.TerminalCommand := V.TerminalCommand;
       App.Settings.CloneSiblings := V.CloneSiblings;
@@ -464,44 +465,17 @@ begin
       App.Settings.ClaudeModel := V.AgentModels[gaClaude];
       App.Settings.CopilotPath := V.AgentPaths[gaCopilot];
       App.Settings.CopilotModel := V.AgentModels[gaCopilot];
-      FindAgentCli;
-      if not AIAvailable then
-      begin
-        AbandonMessageJob;
-        AbandonAIReview;
-      end;
-      UpdateCommitState;
-      if (V.GitPath <> App.Settings.GitPath) or (V.GhPath <> App.Settings.GhPath) or
-        (V.GitHubEnabled <> App.Settings.GitHubEnabled) then
+      Tools := (V.GitPath <> App.Settings.GitPath) or (V.GhPath <> App.Settings.GhPath) or
+        (V.GitHubEnabled <> App.Settings.GitHubEnabled);
+      if Tools then
       begin
         App.Settings.GitPath := V.GitPath;
         App.Settings.GhPath := V.GhPath;
         App.Settings.GitHubEnabled := V.GitHubEnabled;
         SetGitExe(App.Settings.GitPath);
-        FindForge;
-        UpdateForgeItems;
-        if not Assigned(FForge) then
-        begin
-          { What the forge that is gone had found. }
-          AbandonPullJob;
-          FPullKey := '';
-          FHasPull := False;
-          FPulls := nil;
-          FPullError := '';
-          FReviewPulls := nil;
-          FSummary.SetReviewPulls(nil);
-          FPullLogin := '';
-          AbandonForgeJob;
-          FForgeMine := nil;
-          FForgeReview := nil;
-          FForgeLogin := '';
-          FForgeError := '';
-          UpdateForgePage;
-          ClearReviews;
-        end;
-        MenuRefreshClick(nil);
-        CheckGitVersion;
       end;
+      { Then every tab, this one with them. }
+      FWindow.SettingsChanged(F, V.Theme, V.TabSize, Tools);
     end
     else
       PreviewSettings(OldFont, OldTheme, OldTabSize);
@@ -509,6 +483,48 @@ begin
     F.Free;
     OldFont.Free;
   end;
+end;
+
+{ A tab takes what the settings dialog changed, whichever tab opened it:
+  the editors' font, theme and tab size, the agent, and when git, gh or
+  the GitHub switch changed, the forge, with what a forge that is gone
+  had found, and the repository read again. }
+procedure TRepoFrame.SettingsChanged(AFont: TFont; ATheme, ATabSize: integer;
+  ATools: boolean);
+begin
+  PreviewSettings(AFont, ATheme, ATabSize);
+  FindAgentCli;
+  if not AIAvailable then
+  begin
+    AbandonMessageJob;
+    AbandonAIReview;
+  end;
+  UpdateCommitState;
+  if not ATools then
+    Exit;
+  FindForge;
+  UpdateForgeItems;
+  if not Assigned(FForge) then
+  begin
+    { What the forge that is gone had found. }
+    AbandonPullJob;
+    FPullKey := '';
+    FHasPull := False;
+    FPulls := nil;
+    FPullError := '';
+    FReviewPulls := nil;
+    FSummary.SetReviewPulls(nil);
+    FPullLogin := '';
+    AbandonForgeJob;
+    FForgeMine := nil;
+    FForgeReview := nil;
+    FForgeLogin := '';
+    FForgeError := '';
+    UpdateForgePage;
+    ClearReviews;
+  end;
+  MenuRefreshClick(nil);
+  CheckGitVersion;
 end;
 
 procedure TRepoFrame.MenuSettingsClick(Sender: TObject);

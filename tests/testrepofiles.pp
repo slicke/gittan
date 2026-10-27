@@ -229,6 +229,9 @@ begin
   P := LfsTrackPatterns('big file.bin');
   AssertEquals('*.bin', P[0]);
   AssertEquals('/big[[:space:]]file.bin', P[1]);
+  { [draft] would be a class of characters to git. }
+  P := LfsTrackPatterns('art/[draft]*.psd');
+  AssertEquals('/art/\[draft\]\*.psd', P[1]);
   P := LfsTrackPatterns('Makefile');
   AssertEquals(1, Length(P));
   AssertEquals('/Makefile', P[0]);

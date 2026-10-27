@@ -152,6 +152,11 @@ type
     {** Shows AFrame's tab: a frame in the background that has to ask
       the user something comes forward first. }
     procedure ShowFrame(AFrame: TRepoFrame); virtual; abstract;
+    {** The settings dialog was closed with OK: every frame takes the
+      editor's font, the syntax theme and the tab size, the agent and,
+      when ATools, git, gh and the forge (TRepoFrame.SettingsChanged). }
+    procedure SettingsChanged(AFont: TFont; ATheme, ATabSize: integer; ATools: boolean);
+      virtual; abstract;
   end;
 
   { TRepoFrame }
@@ -1802,6 +1807,10 @@ type
     {** The welcome view says ADir is opening, before it does; '' gives
       it its buttons back. }
     procedure ShowOpening(const ADir: string);
+    {** The settings changed (TRepoWindow.SettingsChanged): AFont, ATheme
+      and ATabSize in the editors, the agent found again, and with
+      ATools the forge and the repository read again. }
+    procedure SettingsChanged(AFont: TFont; ATheme, ATabSize: integer; ATools: boolean);
     {** AFrame is closing: an open this frame runs for it no longer calls
       it back (TRepoWindow.OpenRepository's AOnOpened). }
     procedure DropCallbacksOf(AFrame: TRepoFrame);

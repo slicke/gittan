@@ -77,15 +77,19 @@ begin
   OpenCommentLink(AUrl);
 end;
 
-{ Whether APath (with /) is a file of the work tree, for LinkFilePaths. }
+{ Whether APath (with /) is a file of the work tree, for LinkFilePaths
+  and the links of a comment, which anyone can write: a path that ..
+  takes out of the root is none (an absolute one is read under it). }
 function TRepoFrame.RepoFileExists(const APath: string): boolean;
 var
-  Full: string;
+  Root, Full: string;
 begin
-  if FRepo.Root = '' then
+  if (FRepo.Root = '') or (APath = '') then
     Exit(False);
-  Full := IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(APath);
-  Result := FileExists(Full) and not DirectoryExists(Full);
+  Root := IncludeTrailingPathDelimiter(ExpandFileName(FRepo.Root));
+  Full := ExpandFileName(Root + SetDirSeparators(APath));
+  Result := (Copy(Full, 1, Length(Root)) = Root) and FileExists(Full) and
+    not DirectoryExists(Full);
 end;
 
 { A link in a comment: a file of the repository (LinkFilePaths, or the
@@ -96,9 +100,16 @@ var
   Repo, Path: string;
   Line: integer;
 begin
-  if FileOfLink(AUrl, Path, Line) or (Assigned(FForge) and
-    FForge.FileOfWebUrl(AUrl, Repo, Path, Line) and FRepo.HasRemoteFor(Repo) and
-    RepoFileExists(Path)) then
+  { Gittan's own link, which LinkFilePaths gives a file that is there,
+    or one a comment wrote in its place: a file of the work tree only,
+    and never the browser. }
+  if FileOfLink(AUrl, Path, Line) then
+  begin
+    if RepoFileExists(Path) then
+      ShowFileLine(Path, Line);
+  end
+  else if Assigned(FForge) and FForge.FileOfWebUrl(AUrl, Repo, Path, Line) and
+    FRepo.HasRemoteFor(Repo) and RepoFileExists(Path) then
     ShowFileLine(Path, Line)
   else
     OpenURL(AUrl);
