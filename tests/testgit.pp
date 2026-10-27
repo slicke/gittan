@@ -31,6 +31,7 @@ type
     procedure TearDown; override;
   published
     procedure TestWindowsArg;
+    procedure TestInsteadOf;
     procedure TestChangeKind;
     procedure TestStageFlags;
     procedure TestOpenNonRepo;
@@ -259,6 +260,22 @@ end;
 { As the C runtime of Windows reads it back: 2n backslashes and a quote
   are n backslashes and the end of the quotes, 2n+1 and a quote are n and
   a quote; other backslashes are themselves. }
+procedure TGitRepoTest.TestInsteadOf;
+begin
+  { The longest prefix wins; a URL no rule fits stays as it is; the
+    rules' lines are left out. }
+  AssertEquals('remote.origin.url git@github.com:slicke/gittan.git'#10 +
+    'remote.up.url https://example.org/a.git'#10 +
+    'remote.work.url https://ghe.example.com/team/x'#10,
+    ApplyInsteadOf('url.git@github.com:.insteadof gh:'#10 +
+    'remote.origin.url gh:slicke/gittan.git'#10 +
+    'url.https://ghe.example.com/.insteadof work:'#10 +
+    'url.https://ghe.example.com/team/.insteadof work:t/'#10 +
+    'remote.up.url https://example.org/a.git'#10 +
+    'remote.work.url work:t/x'#10));
+  AssertEquals('', ApplyInsteadOf(''));
+end;
+
 procedure TGitRepoTest.TestWindowsArg;
 begin
   AssertEquals('plain', WindowsArg('plain'));

@@ -166,8 +166,8 @@ type
     Bisect: TGittanBisect;
     {** The branches and tags, from Refs: what Base can be set to. }
     Refs: TStringArray;
-    {** The remotes' URLs, from RemoteUrlsIn: which forge the repository
-      is on (gittan.forge's ForgeClassFor). }
+    {** The remotes' URLs as git reaches them, from ResolvedRemoteUrlsIn:
+      which forge the repository is on (gittan.forge's ForgeClassFor). }
     RemoteUrls: string;
   end;
   PGittanRepoSnapshot = ^TGittanRepoSnapshot;
@@ -1253,6 +1253,18 @@ procedure GoneUpstreamsIn(const ADir: string; AList: TStrings);
   <url>"); empty when it has none or ADir is no repository. For threads. }
 function RemoteUrlsIn(const ADir: string): string;
 
+{** The URLs of the remotes of the repository in ADir as git reaches
+  them: as RemoteUrlsIn gives them, each rewritten by the
+  url.<base>.insteadOf rules of the config (ApplyInsteadOf), read with
+  them in one git config. For threads. }
+function ResolvedRemoteUrlsIn(const ADir: string): string;
+
+{** AConfig's remote URLs (the lines `git config --get-regexp` prints for
+  ^remote\..*\.url$ and ^url\..*\.insteadof$ together) each rewritten as
+  git does: the longest insteadOf value the URL starts with is replaced
+  by its base. Gives the remote lines alone, "remote.<name>.url <url>". }
+function ApplyInsteadOf(const AConfig: string): string;
+
 {** Whether one of AUrls (as RemoteUrlsIn gives them) holds ARepoPath
   ("owner/repo", compared without regard to case) as its path: followed
   by nothing, ".git" or a slash. }
@@ -1978,6 +1990,67 @@ var
 begin
   if not RunGitIn(ADir, ['config', '--get-regexp', '^remote\..*\.url$'], Result, Err) then
     Result := '';
+end;
+
+function ResolvedRemoteUrlsIn(const ADir: string): string;
+var
+  Output, Err: string;
+begin
+  if not RunGitIn(ADir, ['config', '--get-regexp',
+    '^(remote\..*\.url|url\..*\.insteadof)$'], Output, Err) then
+    Exit('');
+  Result := ApplyInsteadOf(Output);
+end;
+
+function ApplyInsteadOf(const AConfig: string): string;
+const
+  UrlKey = 'url.';
+  InsteadKey = '.insteadof';
+var
+  Lines: TStringArray;
+  Bases, Prefixes: array of string;
+  Line, Key, Value, Best: string;
+  p, i, BestLen: integer;
+begin
+  Result := '';
+  Lines := AConfig.Split([#10]);
+  Bases := nil;
+  Prefixes := nil;
+  for Line in Lines do
+  begin
+    p := Pos(' ', Line);
+    if p = 0 then
+      Continue;
+    Key := Copy(Line, 1, p - 1);
+    if (Copy(LowerCase(Key), 1, Length(UrlKey)) = UrlKey) and
+      (LowerCase(Copy(Key, Length(Key) - Length(InsteadKey) + 1, MaxInt)) = InsteadKey) then
+    begin
+      SetLength(Bases, Length(Bases) + 1);
+      SetLength(Prefixes, Length(Prefixes) + 1);
+      Bases[High(Bases)] := Copy(Key, Length(UrlKey) + 1,
+        Length(Key) - Length(UrlKey) - Length(InsteadKey));
+      Prefixes[High(Prefixes)] := TrimRight(Copy(Line, p + 1, MaxInt));
+    end;
+  end;
+  for Line in Lines do
+  begin
+    p := Pos(' ', Line);
+    if (p = 0) or (Copy(LowerCase(Line), 1, Length('remote.')) <> 'remote.') then
+      Continue;
+    Key := Copy(Line, 1, p - 1);
+    Value := TrimRight(Copy(Line, p + 1, MaxInt));
+    Best := '';
+    BestLen := 0;
+    for i := 0 to High(Prefixes) do
+      if (Length(Prefixes[i]) > BestLen) and (Copy(Value, 1, Length(Prefixes[i])) = Prefixes[i]) then
+      begin
+        BestLen := Length(Prefixes[i]);
+        Best := Bases[i];
+      end;
+    if BestLen > 0 then
+      Value := Best + Copy(Value, BestLen + 1, MaxInt);
+    Result := Result + Key + ' ' + Value + #10;
+  end;
 end;
 
 function RemoteUrlsHold(const AUrls, ARepoPath: string): boolean;
@@ -5684,7 +5757,7 @@ begin
   finally
     List.Free;
   end;
-  ASnap.RemoteUrls := RemoteUrlsIn(FRoot);
+  ASnap.RemoteUrls := ResolvedRemoteUrlsIn(FRoot);
   Result := ASnap.Ok;
 end;
 

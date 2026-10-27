@@ -337,11 +337,26 @@ procedure RegisterForge(AClass: TGittanForgeClass);
 function ForgeClass: TGittanForgeClass;
 {** Every forge registered, in the order they were. }
 function RegisteredForges: TGittanForgeClasses;
-{** The forge of a repository whose remotes are AUrls (as RemoteUrlsIn
-  gives them, a "remote.<name>.url <url>" line each): the first
-  registered that hosts one of them, the remotes taken in order; nil
-  when none does (no remote, or none on a known forge). }
-function ForgeClassFor(const AUrls: string): TGittanForgeClass;
+{** The forge of a repository whose remotes are AUrls (as
+  ResolvedRemoteUrlsIn gives them, a "remote.<name>.url <url>" line
+  each): the first registered that hosts one of them, the remotes taken
+  in order; a host of an ssh URL no forge takes is looked up in ASshConfig
+  (SshHostName; the text of ~/.ssh/config, UserSshConfig) and asked
+  again, so github-work aliasing github.com is GitHub. Nil when none
+  does (no remote, or none on a known forge). }
+function ForgeClassFor(const AUrls: string; const ASshConfig: string): TGittanForgeClass;
+  overload;
+{** As above with the user's ~/.ssh/config, read only when a host needs
+  it. }
+function ForgeClassFor(const AUrls: string): TGittanForgeClass; overload;
+{** The host name ssh connects to for AHost by AConfig (an ssh_config's
+  text): the HostName of the first Host block whose patterns match it
+  (* and ? wildcards, ! to exclude, case ignored; %h is AHost), the
+  lines before the first Host applying to all; AHost itself when none
+  sets one. Match blocks and Include are not followed. }
+function SshHostName(const AHost, AConfig: string): string;
+{** The text of the user's ~/.ssh/config, empty when there is none. }
+function UserSshConfig: string;
 {** The host of a remote's URL in lower case, without the user and the
   port: "github.com" of https://github.com/o/r.git, git@github.com:o/r.git
   and ssh://git@github.com:22/o/r; empty for a local path or a file://
@@ -374,24 +389,163 @@ begin
   Result := Copy(Forges);
 end;
 
-function ForgeClassFor(const AUrls: string): TGittanForgeClass;
+{ The registered forge that hosts AHost, nil for none. }
+function ForgeOfHost(const AHost: string): TGittanForgeClass;
 var
-  Line, Host: string;
-  p, i: integer;
+  i: integer;
+begin
+  for i := 0 to High(Forges) do
+    if Forges[i].HostsRemote(AHost) then
+      Exit(Forges[i]);
+  Result := nil;
+end;
+
+{ Whether AUrl goes over ssh: user@host:path, or an ssh:// URL. }
+function IsSshUrl(const AUrl: string): boolean;
+var
+  p: integer;
+begin
+  p := Pos('://', AUrl);
+  if p = 0 then
+    Result := RemoteHost(AUrl) <> ''
+  else
+    Result := Pos('ssh', LowerCase(Copy(AUrl, 1, p - 1))) > 0;
+end;
+
+function ForgeClassFor(const AUrls: string; const ASshConfig: string): TGittanForgeClass;
+var
+  Line, Url, Host: string;
+  p: integer;
 begin
   for Line in AUrls.Split([#10]) do
   begin
     p := Pos(' ', Line);
     if p = 0 then
       Continue;
-    Host := RemoteHost(Copy(Line, p + 1, MaxInt));
+    Url := Trim(Copy(Line, p + 1, MaxInt));
+    Host := RemoteHost(Url);
     if Host = '' then
       Continue;
-    for i := 0 to High(Forges) do
-      if Forges[i].HostsRemote(Host) then
-        Exit(Forges[i]);
+    Result := ForgeOfHost(Host);
+    if Result <> nil then
+      Exit;
+    if IsSshUrl(Url) and (ASshConfig <> '') then
+    begin
+      Result := ForgeOfHost(LowerCase(SshHostName(Host, ASshConfig)));
+      if Result <> nil then
+        Exit;
+    end;
   end;
   Result := nil;
+end;
+
+function ForgeClassFor(const AUrls: string): TGittanForgeClass;
+begin
+  { The config only when a host is not known as it is. }
+  Result := ForgeClassFor(AUrls, '');
+  if Result = nil then
+    Result := ForgeClassFor(AUrls, UserSshConfig);
+end;
+
+{ Whether AText matches APattern, * any run and ? any one character,
+  case ignored. }
+function GlobMatch(const AText, APattern: string): boolean;
+
+  function Match(t, p: integer): boolean;
+  begin
+    while p <= Length(APattern) do
+    begin
+      case APattern[p] of
+        '*':
+          begin
+            while (p <= Length(APattern)) and (APattern[p] = '*') do
+              Inc(p);
+            if p > Length(APattern) then
+              Exit(True);
+            while t <= Length(AText) do
+            begin
+              if Match(t, p) then
+                Exit(True);
+              Inc(t);
+            end;
+            Exit(False);
+          end;
+        '?':
+          if t > Length(AText) then
+            Exit(False);
+      else
+        if (t > Length(AText)) or (LowerCase(AText[t]) <> LowerCase(APattern[p])) then
+          Exit(False);
+      end;
+      Inc(t);
+      Inc(p);
+    end;
+    Result := t > Length(AText);
+  end;
+
+begin
+  Result := Match(1, 1);
+end;
+
+function SshHostName(const AHost, AConfig: string): string;
+var
+  Line, Keyword, Args, Pattern: string;
+  Applies, Any, Excluded: boolean;
+  p: integer;
+begin
+  Applies := True;
+  for Line in AConfig.Split([#10]) do
+  begin
+    Args := Trim(Line);
+    p := Pos('#', Args);
+    if p > 0 then
+      Args := Trim(Copy(Args, 1, p - 1));
+    if Args = '' then
+      Continue;
+    { "Keyword value" or "Keyword=value". }
+    p := 1;
+    while (p <= Length(Args)) and not (Args[p] in [' ', #9, '=']) do
+      Inc(p);
+    Keyword := LowerCase(Copy(Args, 1, p - 1));
+    Args := Trim(Copy(Args, p, MaxInt));
+    if (Args <> '') and (Args[1] = '=') then
+      Args := Trim(Copy(Args, 2, MaxInt));
+    if Keyword = 'host' then
+    begin
+      Any := False;
+      Excluded := False;
+      for Pattern in Args.Split([' ', #9], TStringSplitOptions.ExcludeEmpty) do
+        if (Pattern[1] = '!') and GlobMatch(AHost, Copy(Pattern, 2, MaxInt)) then
+          Excluded := True
+        else if (Pattern[1] <> '!') and GlobMatch(AHost, Pattern) then
+          Any := True;
+      Applies := Any and not Excluded;
+    end
+    else if Keyword = 'match' then
+      Applies := False
+    else if Applies and (Keyword = 'hostname') and (Args <> '') then
+      Exit(StringReplace(Args, '%h', AHost, [rfReplaceAll]));
+  end;
+  Result := AHost;
+end;
+
+function UserSshConfig: string;
+var
+  Lines: TStringList;
+begin
+  Result := '';
+  Lines := TStringList.Create;
+  try
+    try
+      Lines.LoadFromFile(IncludeTrailingPathDelimiter(GetUserDir) + '.ssh' +
+        PathDelim + 'config');
+      Result := Lines.Text;
+    except
+      Result := '';
+    end;
+  finally
+    Lines.Free;
+  end;
 end;
 
 function RemoteHost(const AUrl: string): string;

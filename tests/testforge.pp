@@ -28,6 +28,7 @@ type
     procedure TestPullRequestOf;
     procedure TestRemoteHost;
     procedure TestForgeFor;
+    procedure TestSshAlias;
   end;
 
 implementation
@@ -428,6 +429,26 @@ begin
   AssertTrue(ForgeClassFor('') = nil);
   { Where no repository decides, the first registered. }
   AssertTrue(ForgeClass = TGittanGitHubForge);
+end;
+
+procedure TForgeTest.TestSshAlias;
+const
+  Config = '# work'#10'Host github-work gh-*'#10'  HostName github.com'#10 +
+    '  User git'#10#10'Host !nope *.lan'#10'    HostName=%h.example.org'#10 +
+    'Match host other'#10'  HostName example.org'#10;
+begin
+  AssertEquals('github.com', SshHostName('github-work', Config));
+  AssertEquals('github.com', SshHostName('GH-two', Config));
+  AssertEquals('box.lan.example.org', SshHostName('box.lan', Config));
+  AssertEquals('other', SshHostName('other', Config));
+  AssertEquals('plain', SshHostName('plain', ''));
+  { The alias of an ssh remote is looked up; an https host is not. }
+  AssertTrue(ForgeClassFor('remote.origin.url git@github-work:org/repo.git'#10, Config) =
+    TGittanGitHubForge);
+  AssertTrue(ForgeClassFor('remote.origin.url ssh://git@github-work/org/repo'#10, Config) =
+    TGittanGitHubForge);
+  AssertTrue(ForgeClassFor('remote.origin.url https://github-work/org/repo'#10, Config) = nil);
+  AssertTrue(ForgeClassFor('remote.origin.url git@github-work:org/repo.git'#10, '') = nil);
 end;
 
 initialization

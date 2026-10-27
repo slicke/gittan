@@ -48,6 +48,6 @@ Write the parsing as plain functions of the tool's output (JSON, mostly) and tes
 
 ## Still to do when a second forge arrives
 
-- The forge view shows one forge, `ForgeClass` (the first registered, GitHub), with its filters' settings in `[GitHub]`. With two forges on, it needs a way to show the other's pull requests, a switch in its head or tabs of its own, and the filters a section per forge.
+- The forge view shows one forge, the first registered that is on and whose tool is found, with its filters' settings in `[GitHub]`. With two forges on, it needs a way to show the other's pull requests, a switch in its head or tabs of its own, and the filters a section per forge.
 - `ForgeClassFor` takes the first forge that hosts one of the remotes, the remotes in git's order. A repository with remotes on two forges gets the first; a setting per repository may be wanted then.
 - The texts of the pull request features name the forge through `Name`; check that none of them says something only true of GitHub ("gh", "GitHub Actions") for the new one.

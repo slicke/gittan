@@ -7,8 +7,8 @@ unit uforge;
   and GTK 3, whose tabs are the view's own meanwhile; the globe again,
   Escape or Close GitHub (Cmd+W) goes back to the repository. It is one for the window, since what it
   shows is the user's and not a repository's, and it is there only
-  while there is a forge (gh found and GitHub on in the settings:
-  App.ForgeCli), which SettingsChanged finds again.
+  while there is a forge (the first registered that is on and whose
+  tool is found: App.ForgeCli), which SettingsChanged finds again.
 
   The content is the forge page (gittan.forgepage) in a scroll box, as
   the Pull Requests page sits in a repository frame's: the open pull
@@ -205,18 +205,30 @@ begin
   BuildMenu;
 end;
 
-{ The forge from the settings, kept while its tool's path stays the
-  same, as a repository frame finds its own. }
+{ The first registered forge that is on and whose tool is found, kept
+  while it and its tool's path stay the same, as a repository frame
+  finds its own. }
 procedure TForgeView.FindForge;
 var
+  Forge, Found: TGittanForgeClass;
   Cli: string;
 begin
-  Cli := App.ForgeCli;
-  if Assigned(FForge) and (FForge.Cli = Cli) then
+  Found := nil;
+  Cli := '';
+  for Forge in RegisteredForges do
+  begin
+    Cli := App.ForgeCli(Forge);
+    if Cli <> '' then
+    begin
+      Found := Forge;
+      Break;
+    end;
+  end;
+  if Assigned(FForge) and (FForge.ClassType = Found) and (FForge.Cli = Cli) then
     Exit;
   FreeAndNil(FForge);
-  if Cli <> '' then
-    FForge := ForgeClass.Create(Cli);
+  if Found <> nil then
+    FForge := Found.Create(Cli);
   FPage.SetForge(ForgeName);
   if FCloseItem <> nil then
     FCloseItem.Caption := Format(rsCloseForge, [ForgeName]);
