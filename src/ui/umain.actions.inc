@@ -1772,7 +1772,8 @@ end;
 { The status bar's parts: the branch drops the branch list up from it,
   as in the summary; the track with the ahead/behind counts drops up
   pull, push, fetch and the commit graph; the transport buttons take
-  their step (UpdateStatusTransport); the pull request drops its list;
+  their step (UpdateStatusTransport); the cross after the base ends the
+  comparison; the pull request drops its list;
   the name and the file count go back to the summary. }
 procedure TRepoFrame.StatusPartClick(Sender: TObject; APart: TGittanStatusPart;
   const AScreenRect: TRect);
@@ -1784,6 +1785,8 @@ begin
       SummaryBranchClick(Sender, AScreenRect);
     spBase:
       BaseClick(AScreenRect);
+    spBaseClose:
+      SetBase('');
     spSync:
       SyncClick(AScreenRect);
     spStash:

@@ -2669,6 +2669,7 @@ resourcestring
   rsBaseActionsHint = 'Merge or rebase';
   rsBlameActionsHint = 'Back to the working tree, or copy the commit id';
   rsBackToTree = 'Back to Working Tree';
+  rsEndCompareHint = 'End the comparison: back to the working tree';
   rsCopyCommitId = 'Copy Commit ID';
   rsShowSummaryHint = 'Show the summary';
   rsShowConflictHint = 'Show the conflicted files';
@@ -3997,7 +3998,9 @@ begin
     FStatus.SetOperation(Op, OpPos, OpTotal);
   end;
   UpdateStatusTransport;
-  FStatus.SetBase(BaseLabel, (BaseActionRef <> '') or (StashOfBase >= 0) or BlameShown);
+  FStatus.SetBase(BaseLabel, (BaseActionRef <> '') or (StashOfBase >= 0) or BlameShown,
+    FRepo.Base <> '');
+  FStatus.PartHint[spBaseClose] := rsEndCompareHint;
   if BaseActionRef <> '' then
     FStatus.PartHint[spBase] := rsBaseActionsHint
   else if BlameShown then

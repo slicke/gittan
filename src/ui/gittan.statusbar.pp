@@ -34,11 +34,11 @@ uses
 
 type
   {** The parts of the bar: the left zone (the tile and name, the
-    branch, the base, the stashes), the transport (the left button, the
-    primary one, the right button) over the track (the sync counts, or a
-    message or a progress), and the right zone. }
-  TGittanStatusPart = (spNone, spRepo, spBranch, spBase, spStash, spLeft, spPrimary,
-    spRight, spSync, spMessage, spProgress, spUpdate, spPull, spPosition, spFiles);
+    branch, the base and its cross, the stashes), the transport (the left
+    button, the primary one, the right button) over the track (the sync
+    counts, or a message or a progress), and the right zone. }
+  TGittanStatusPart = (spNone, spRepo, spBranch, spBase, spBaseClose, spStash, spLeft,
+    spPrimary, spRight, spSync, spMessage, spProgress, spUpdate, spPull, spPosition, spFiles);
 
   {** How a message or the pull request reads: in the text color, or
     in green, amber or red. }
@@ -89,7 +89,7 @@ type
     FOperation, FMessage, FProgressText: string;
     FPullChecks, FPullOpen, FPullThreads, FStashes: integer;
     FAhead, FBehind, FProgressPos, FProgressTotal, FOperationPos, FOperationTotal: integer;
-    FSyncShown: boolean;
+    FSyncShown, FBaseClosable: boolean;
     FButtons: array[spLeft..spRight] of TGittanStatusButton;
     FPullTone, FMessageTone: TGittanStatusTone;
     FMessageIcon: string;
@@ -134,8 +134,10 @@ type
     procedure SetRepository(const ATitle, ABranch: string);
     {** The base label ("vs origin/main") after the branch, '' for none;
       AClickable makes the part answer a click (and show a hand), for a
-      base that has actions. }
-    procedure SetBase(const ABase: string; AClickable: boolean = False);
+      base that has actions. AClosable puts a cross after it (spBaseClose),
+      for a comparison that a click ends. }
+    procedure SetBase(const ABase: string; AClickable: boolean = False;
+      AClosable: boolean = False);
     {** How many stashes the repository has, shown as a chip with a box
       and the count after the name and the branch; 0 hides it. }
     procedure SetStashes(ACount: integer);
@@ -704,12 +706,22 @@ begin
   Change(FBranch, ABranch);
 end;
 
-procedure TGittanStatusBar.SetBase(const ABase: string; AClickable: boolean);
+procedure TGittanStatusBar.SetBase(const ABase: string; AClickable, AClosable: boolean);
 begin
   if AClickable then
     Include(FClickable, spBase)
   else
     Exclude(FClickable, spBase);
+  AClosable := AClosable and (ABase <> '');
+  if AClosable then
+    Include(FClickable, spBaseClose)
+  else
+    Exclude(FClickable, spBaseClose);
+  if AClosable <> FBaseClosable then
+  begin
+    FBaseClosable := AClosable;
+    Invalidate;
+  end;
   Change(FBase, ABase);
 end;
 
@@ -1021,6 +1033,34 @@ var
     Canvas.TextOut(AX, AY, S);
   end;
 
+  { The cross after the base, a square of the text's height on its row,
+    on a filled circle under the mouse. }
+  procedure DrawClose(AX, AY: integer);
+  var
+    R: TRect;
+    Inset: integer;
+  begin
+    R := ChipRect(AX, AY, TextH, TextH);
+    FRects[spBaseClose] := R;
+    if FHot = spBaseClose then
+    begin
+      Canvas.Pen.Style := psClear;
+      Canvas.Brush.Style := bsSolid;
+      Canvas.Brush.Color := FHover;
+      Canvas.Ellipse(R);
+      Canvas.Pen.Style := psSolid;
+      Canvas.Brush.Style := bsClear;
+      Canvas.Pen.Color := FText;
+    end
+    else
+      Canvas.Pen.Color := FDim;
+    Inset := TextH * 3 div 10;
+    Canvas.Pen.Width := Max(1, Px(3) div 2);
+    Canvas.Line(R.Left + Inset, R.Top + Inset, R.Right - Inset, R.Bottom - Inset);
+    Canvas.Line(R.Right - Inset, R.Top + Inset, R.Left + Inset, R.Bottom - Inset);
+    Canvas.Pen.Width := 1;
+  end;
+
   { A side button without an icon keeps its place, so the primary one
     stays in the middle. }
   function ButtonWidth(APart: TGittanStatusPart): integer;
@@ -1140,7 +1180,11 @@ var
     if Branch <> '' then
       Row2 := IconW + Canvas.TextWidth(Branch) + Px(ChevronWidth) + 2 * Px(ChipPadX);
     if ShowBase and (Base <> '') then
+    begin
       Inc(Row2, Px(Gap) div 2 + Canvas.TextWidth(Base) + 2 * Px(ChipPadX));
+      if FBaseClosable then
+        Inc(Row2, TextH);
+    end;
     Inc(Result, Max(Block, Row2));
     if ShowStash and (FStashes > 0) then
       Inc(Result, Px(Gap) + IconW + Canvas.TextWidth(IntToStr(FStashes)) + 2 * Px(ChipPadX));
@@ -1399,6 +1443,11 @@ begin
       begin
         DrawText(spBase, FRects[spBranch].Right + Px(Gap) div 2 + Px(ChipPadX), Y, Base, FDim);
         W := Max(W, FRects[spBase].Right);
+        if FBaseClosable then
+        begin
+          DrawClose(FRects[spBase].Right, Y);
+          W := Max(W, FRects[spBaseClose].Right);
+        end;
       end;
     end;
     X := W;
@@ -1619,12 +1668,12 @@ end;
 
 { The repository's rectangle grows over its name, which spans both rows
   beside the tile, so the branch chip and the base under the name are
-  tested first. }
+  tested first (the base's cross with them). }
 function TGittanStatusBar.PartAt(X, Y: integer): TGittanStatusPart;
 var
   P: TGittanStatusPart;
 begin
-  for P in [spBranch, spBase] do
+  for P in [spBranch, spBase, spBaseClose] do
     if Types.PtInRect(FRects[P], Point(X, Y)) then
       Exit(P);
   for P := Succ(spNone) to High(P) do
