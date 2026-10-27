@@ -17,7 +17,7 @@ unit gittan.forgepage;
   section's heading, or under it when they do not fit there, narrow it
   (MineFilters, ReviewFilters, OnFilterChange; FilterPulls): the
   user's own to those with feedback, those that need attention, no
-  drafts; the ones waiting for review to those asked of the user in
+  drafts, the stale ones; the ones waiting for review to those asked of the user in
   person, no drafts. A card fills under the mouse
   and a click raises OnPick with the pull request, as one on its
   clone's link does, for the owner to compare with it when it is the
@@ -151,7 +151,7 @@ type
       content needs beyond that. }
     procedure FitHeight(AMin: integer);
     {** The filters of the user's pull requests (ffFeedback,
-      ffAttention, ffNoDrafts) and of those waiting for their review
+      ffAttention, ffNoDrafts, ffStale) and of those waiting for their review
       (ffAskedOfMe, ffNoDrafts); a click on a chip changes them and
       raises OnFilterChange. }
     property MineFilters: TGittanForgeFilters read FMineFilters write SetMineFilters;
@@ -186,6 +186,7 @@ resourcestring
   rsAttentionChip = 'Needs attention';
   rsNoDraftsChip = 'No drafts';
   rsAskedOfMeChip = 'Asked of me';
+  rsStaleChip = 'Stale';
   rsNoMatch = 'None of them match the filters.';
   rsLoading = 'Asking %s…';
   rsNoMine = 'No open pull requests of yours.';
@@ -233,7 +234,7 @@ const
   FilterPadY = 2;
   FilterGap = 6;
   { The filters each section has, as chips. }
-  MineChips: array[0..2] of TGittanForgeFilter = (ffFeedback, ffAttention, ffNoDrafts);
+  MineChips: array[0..3] of TGittanForgeFilter = (ffFeedback, ffAttention, ffNoDrafts, ffStale);
   ReviewChips: array[0..1] of TGittanForgeFilter = (ffAskedOfMe, ffNoDrafts);
   { The dot pulsing while the forge is asked: its size, its timer's
     step and the steps of one pulse. }
@@ -334,6 +335,7 @@ begin
     ffAttention: Result := rsAttentionChip;
     ffNoDrafts: Result := rsNoDraftsChip;
     ffAskedOfMe: Result := rsAskedOfMeChip;
+    ffStale: Result := rsStaleChip;
   else
     Result := '';
   end;
@@ -1045,8 +1047,8 @@ begin
     PaintNote(Y, FError, FErrorColor, L, R);
 
   { The section, as its filters leave it. }
-  FShownMine := FilterPulls(FMine, FMineFilters);
-  FShownReview := FilterPulls(FReview, FReviewFilters);
+  FShownMine := FilterPulls(FMine, FMineFilters, LocalTimeToUniversal(Now));
+  FShownReview := FilterPulls(FReview, FReviewFilters, LocalTimeToUniversal(Now));
   if FSection = fsReview then
     PaintSection(Y, rsReviewGroup, FShownReview, Length(FReview), rsCaughtUp, rsNoReview,
       ReviewLink, True, ReviewChips, FReviewFilters, L, R)

@@ -124,8 +124,8 @@ type
       user's pull requests only the ones that need attention (changes
       asked for, checks failing), and no drafts; of the ones waiting for
       their review only the ones asked of them in person, and no
-      drafts. }
-    OnlyNeedsAttention, HideDrafts, OnlyAskedOfMe, HideReviewDrafts: boolean;
+      drafts; of the user's only the stale ones. }
+    OnlyNeedsAttention, HideDrafts, OnlyAskedOfMe, HideReviewDrafts, OnlyStale: boolean;
     {** Whether the GitHub page looks for a clone of a pull request's
       repository beside the recent repositories too, in the folders they
       are in, besides among them; off unless the user turns it on. }
@@ -330,6 +330,7 @@ begin
       HideDrafts := Ini.ReadBool(SecGitHub, 'HideDrafts', False);
       OnlyAskedOfMe := Ini.ReadBool(SecGitHub, 'OnlyAskedOfMe', False);
       HideReviewDrafts := Ini.ReadBool(SecGitHub, 'HideReviewDrafts', False);
+      OnlyStale := Ini.ReadBool(SecGitHub, 'OnlyStale', False);
       CloneSiblings := Ini.ReadBool(SecGitHub, 'CloneSiblings', False);
       AIEnabled := Ini.ReadBool(SecAI, 'Enabled', False);
       AIAgent := Ini.ReadString(SecAI, 'Agent', '');
@@ -418,6 +419,7 @@ begin
       Ini.WriteBool(SecGitHub, 'HideDrafts', HideDrafts);
       Ini.WriteBool(SecGitHub, 'OnlyAskedOfMe', OnlyAskedOfMe);
       Ini.WriteBool(SecGitHub, 'HideReviewDrafts', HideReviewDrafts);
+      Ini.WriteBool(SecGitHub, 'OnlyStale', OnlyStale);
       Ini.WriteBool(SecGitHub, 'CloneSiblings', CloneSiblings);
       Ini.WriteBool(SecAI, 'Enabled', AIEnabled);
       Ini.WriteString(SecAI, 'Agent', AIAgent);

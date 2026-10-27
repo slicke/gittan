@@ -18,6 +18,10 @@ interface
 uses
   Classes, SysUtils, gittan.job, gittan.reviews;
 
+const
+  {** A pull request unchanged this many days is stale (IsStale). }
+  StaleDays = 30;
+
 type
   {** Where a pull request stands. }
   TGittanPullState = (prOpen, prClosed, prMerged);
@@ -91,8 +95,8 @@ type
   {** What a list of the user's pull requests can be narrowed to: the
     ones with Feedback, the ones that need attention (NeedsAttention),
     no drafts, the ones the user is asked to review in person
-    (Requested). }
-  TGittanForgeFilter = (ffFeedback, ffAttention, ffNoDrafts, ffAskedOfMe);
+    (Requested), the stale ones (IsStale). }
+  TGittanForgeFilter = (ffFeedback, ffAttention, ffNoDrafts, ffAskedOfMe, ffStale);
   TGittanForgeFilters = set of TGittanForgeFilter;
 
   {** What a web address is asked for: a file (Path, at Line when above
@@ -167,11 +171,16 @@ function WithFeedback(const APulls: TGittanForgePulls): TGittanForgePulls;
 {** Whether APull needs its author to act: changes were asked for or
   its checks fail. }
 function NeedsAttention(const APull: TGittanForgePull): boolean;
-{** Whether APull passes AFilter. }
-function PassesFilter(const APull: TGittanForgePull; AFilter: TGittanForgeFilter): boolean;
-{** APulls without the ones that fail any of AFilters, in their order. }
-function FilterPulls(const APulls: TGittanForgePulls;
-  AFilters: TGittanForgeFilters): TGittanForgePulls;
+{** Whether APull has not changed for StaleDays at ANow (UTC): its
+  last change, or its opening when it has none, that long ago. }
+function IsStale(const APull: TGittanForgePull; ANow: TDateTime): boolean;
+{** Whether APull passes AFilter at ANow (UTC). }
+function PassesFilter(const APull: TGittanForgePull; AFilter: TGittanForgeFilter;
+  ANow: TDateTime): boolean;
+{** APulls without the ones that fail any of AFilters at ANow (UTC), in
+  their order. }
+function FilterPulls(const APulls: TGittanForgePulls; AFilters: TGittanForgeFilters;
+  ANow: TDateTime): TGittanForgePulls;
 {** APull as a TGittanPullRequest, for what works on the repository's
   own pull requests (a comparison): the fields both have, the rest
   empty. }
@@ -545,20 +554,32 @@ begin
   Result := (APull.ReviewDecision = rdChangesRequested) or (APull.Checks = chkFailed);
 end;
 
-function PassesFilter(const APull: TGittanForgePull; AFilter: TGittanForgeFilter): boolean;
+function IsStale(const APull: TGittanForgePull; ANow: TDateTime): boolean;
+var
+  Changed: TDateTime;
+begin
+  Changed := APull.Updated;
+  if Changed <= 0 then
+    Changed := APull.Created;
+  Result := (Changed > 0) and (ANow - Changed >= StaleDays);
+end;
+
+function PassesFilter(const APull: TGittanForgePull; AFilter: TGittanForgeFilter;
+  ANow: TDateTime): boolean;
 begin
   case AFilter of
     ffFeedback: Result := APull.Feedback;
     ffAttention: Result := NeedsAttention(APull);
     ffNoDrafts: Result := not APull.IsDraft;
     ffAskedOfMe: Result := APull.Requested;
+    ffStale: Result := IsStale(APull, ANow);
   else
     Result := True;
   end;
 end;
 
-function FilterPulls(const APulls: TGittanForgePulls;
-  AFilters: TGittanForgeFilters): TGittanForgePulls;
+function FilterPulls(const APulls: TGittanForgePulls; AFilters: TGittanForgeFilters;
+  ANow: TDateTime): TGittanForgePulls;
 var
   i, n: integer;
   F: TGittanForgeFilter;
@@ -571,7 +592,7 @@ begin
   begin
     Keep := True;
     for F in AFilters do
-      Keep := Keep and PassesFilter(APulls[i], F);
+      Keep := Keep and PassesFilter(APulls[i], F, ANow);
     if Keep then
     begin
       Result[n] := APulls[i];

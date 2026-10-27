@@ -70,6 +70,7 @@ begin
     AssertFalse(S.HideDrafts);
     AssertFalse(S.OnlyAskedOfMe);
     AssertFalse(S.HideReviewDrafts);
+    AssertFalse(S.OnlyStale);
     AssertFalse('the AI features start off', S.AIEnabled);
     AssertEquals('', S.ClaudePath);
     AssertEquals('', S.ClaudeModel);
@@ -116,6 +117,7 @@ begin
     S.HideWithoutFeedback := True;
     S.OnlyNeedsAttention := True;
     S.HideReviewDrafts := True;
+    S.OnlyStale := True;
     S.SyntaxTheme := 'Delphi';
     S.AIEnabled := True;
     S.ClaudePath := '/Users/me/.local/bin/claude';
@@ -165,6 +167,7 @@ begin
     AssertFalse(S.HideDrafts);
     AssertFalse(S.OnlyAskedOfMe);
     AssertTrue(S.HideReviewDrafts);
+    AssertTrue(S.OnlyStale);
     AssertEquals('Delphi', S.SyntaxTheme);
     AssertTrue(S.AIEnabled);
     AssertEquals('/Users/me/.local/bin/claude', S.ClaudePath);

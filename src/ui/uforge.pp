@@ -533,6 +533,8 @@ begin
     Include(Mine, ffAttention);
   if App.Settings.HideDrafts then
     Include(Mine, ffNoDrafts);
+  if App.Settings.OnlyStale then
+    Include(Mine, ffStale);
   Review := [];
   if App.Settings.OnlyAskedOfMe then
     Include(Review, ffAskedOfMe);
@@ -547,6 +549,7 @@ begin
   App.Settings.HideWithoutFeedback := ffFeedback in FPage.MineFilters;
   App.Settings.OnlyNeedsAttention := ffAttention in FPage.MineFilters;
   App.Settings.HideDrafts := ffNoDrafts in FPage.MineFilters;
+  App.Settings.OnlyStale := ffStale in FPage.MineFilters;
   App.Settings.OnlyAskedOfMe := ffAskedOfMe in FPage.ReviewFilters;
   App.Settings.HideReviewDrafts := ffNoDrafts in FPage.ReviewFilters;
   FPage.FitHeight(FBox.ClientHeight);

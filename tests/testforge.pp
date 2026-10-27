@@ -166,8 +166,10 @@ end;
 procedure TForgeTest.TestFilters;
 var
   Pulls, Left: TGittanForgePulls;
+  Now_: TDateTime;
   i: integer;
 begin
+  Now_ := EncodeDateTime(2026, 10, 27, 12, 0, 0, 0);
   Pulls := nil;
   SetLength(Pulls, 4);
   for i := 0 to 3 do
@@ -186,21 +188,36 @@ begin
   AssertTrue(NeedsAttention(Pulls[1]));
   AssertFalse(NeedsAttention(Pulls[2]));
   AssertFalse(NeedsAttention(Pulls[3]));
-  AssertEquals(4, Length(FilterPulls(Pulls, [])));
-  Left := FilterPulls(Pulls, [ffAttention]);
+  AssertEquals(4, Length(FilterPulls(Pulls, [], Now_)));
+  Left := FilterPulls(Pulls, [ffAttention], Now_);
   AssertEquals(2, Length(Left));
   AssertEquals(1, Left[0].Number);
   AssertEquals(2, Left[1].Number);
   { The filters together: every one must pass. }
-  Left := FilterPulls(Pulls, [ffAttention, ffNoDrafts]);
+  Left := FilterPulls(Pulls, [ffAttention, ffNoDrafts], Now_);
   AssertEquals(1, Length(Left));
   AssertEquals(1, Left[0].Number);
-  Left := FilterPulls(Pulls, [ffAskedOfMe]);
+  Left := FilterPulls(Pulls, [ffAskedOfMe], Now_);
   AssertEquals(1, Length(Left));
   AssertEquals(3, Left[0].Number);
-  AssertEquals(3, Length(FilterPulls(Pulls, [ffNoDrafts])));
-  AssertEquals(1, Length(FilterPulls(Pulls, [ffFeedback])));
-  AssertEquals(0, Length(FilterPulls(nil, [ffFeedback])));
+  AssertEquals(3, Length(FilterPulls(Pulls, [ffNoDrafts], Now_)));
+  AssertEquals(1, Length(FilterPulls(Pulls, [ffFeedback], Now_)));
+  AssertEquals(0, Length(FilterPulls(nil, [ffFeedback], Now_)));
+  { Stale: unchanged for StaleDays, by the last change or else the
+    opening; no dates at all is not stale. }
+  Pulls[0].Created := IncDay(Now_, -100);
+  Pulls[0].Updated := IncDay(Now_, -2);
+  Pulls[1].Created := IncDay(Now_, -100);
+  Pulls[1].Updated := IncDay(Now_, -31);
+  Pulls[2].Created := IncDay(Now_, -40);
+  AssertFalse(IsStale(Pulls[0], Now_));
+  AssertTrue(IsStale(Pulls[1], Now_));
+  AssertTrue(IsStale(Pulls[2], Now_));
+  AssertFalse(IsStale(Pulls[3], Now_));
+  Left := FilterPulls(Pulls, [ffStale], Now_);
+  AssertEquals(2, Length(Left));
+  AssertEquals(2, Left[0].Number);
+  AssertEquals(3, Left[1].Number);
 end;
 
 procedure TForgeTest.TestNotes;
