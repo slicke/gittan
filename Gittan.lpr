@@ -13,7 +13,9 @@ uses
   {$IFDEF LCLWin32}
   uDarkStyleParams, uMetaDarkStyle, uDarkStyleSchemes,
   {$ENDIF}
-  Forms, uwindow
+  Forms, uwindow,
+  { The forges, which register themselves as they load. }
+  gittan.github
   { you can add units after this };
 
 {$R *.res}

@@ -78,7 +78,7 @@ implementation
 uses
   Math, StrUtils, Process, Clipbrd, LCLIntf, LCLType, LCLVersion, InterfaceBase, LCLPlatformDef,
   ec_SyntAnal, ATSynEdit_Adapter_EControl, ATSynEdit_Globals,
-  gittan.syntaxthemes, gittan.git, gittan.theme, gittan.forge, gittan.github,
+  gittan.syntaxthemes, gittan.git, gittan.theme, gittan.forge,
   gittan.settings, gittan.job;
 
 resourcestring
@@ -1311,7 +1311,7 @@ begin
       Lines.Add('git ' + Version)
     else
       Lines.Add(Format(rsVersionNotFound, ['git']));
-    Forge := TGittanGitHubForge.Create(GhExe);
+    Forge := ForgeClass.Create(GhExe);
     try
       if not GitHubOn then
         Lines.Add(rsVersionGitHubOff)
@@ -1361,7 +1361,7 @@ begin
     Job.GitExe := FindTool('git');
   Job.GhExe := Trim(FGhEdit.Text);
   if Job.GhExe = '' then
-    Job.GhExe := FindTool(TGittanGitHubForge.CliName);
+    Job.GhExe := FindTool(ForgeClass.CliName);
   Job.GitHubOn := FGitHubBox.Checked;
   Job.AIOn := FAIBox.Checked;
   if Job.AIOn then

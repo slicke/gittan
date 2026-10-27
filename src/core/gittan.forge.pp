@@ -8,8 +8,10 @@ unit gittan.forge;
   its name, the tool it runs, the jobs it makes, the address of a file,
   a commit or an issue, and where a remote serves a pull request's head.
   Nothing here names a forge; GitHub is TGittanGitHubForge in
-  gittan.github, and another forge is a unit of its own beside it.
-  Nothing here needs the LCL. }
+  gittan.github, and another forge is a unit of its own beside it,
+  which registers its class as it loads (RegisterForge), so the rest of
+  Gittan makes one through ForgeClass without naming it. Nothing here
+  needs the LCL. }
 
 {$mode objfpc}{$H+}
 
@@ -320,10 +322,33 @@ type
   end;
   TGittanForgeClass = class of TGittanForge;
 
+{** Adds AClass to the forges Gittan knows; a forge's unit calls it in
+  its initialization. }
+procedure RegisterForge(AClass: TGittanForgeClass);
+{** The forge Gittan uses, the first registered (GitHub, the one forge
+  so far); nil while none is. }
+function ForgeClass: TGittanForgeClass;
+
 implementation
 
 uses
   gittan.git;
+
+var
+  Forges: array of TGittanForgeClass;
+
+procedure RegisterForge(AClass: TGittanForgeClass);
+begin
+  SetLength(Forges, Length(Forges) + 1);
+  Forges[High(Forges)] := AClass;
+end;
+
+function ForgeClass: TGittanForgeClass;
+begin
+  if Length(Forges) = 0 then
+    Exit(nil);
+  Result := Forges[0];
+end;
 
 function FileTarget(const APath: string; ALine: integer;
   const ACommit, ABranch: string): TGittanWebTarget;

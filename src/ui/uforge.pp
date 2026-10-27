@@ -136,7 +136,7 @@ type
 implementation
 
 uses
-  LCLIntf, gittan.app, gittan.github, gittan.theme, gittan.textfit;
+  LCLIntf, gittan.app, gittan.theme, gittan.textfit;
 
 resourcestring
   rsFile = '&File';
@@ -216,7 +216,7 @@ begin
     Exit;
   FreeAndNil(FForge);
   if Cli <> '' then
-    FForge := TGittanGitHubForge.Create(Cli);
+    FForge := ForgeClass.Create(Cli);
   FPage.SetForge(ForgeName);
   if FCloseItem <> nil then
     FCloseItem.Caption := Format(rsCloseForge, [ForgeName]);

@@ -569,7 +569,7 @@ begin
     Exit;
   FreeAndNil(FForge);
   if Cli <> '' then
-    FForge := TGittanGitHubForge.Create(Cli);
+    FForge := ForgeClass.Create(Cli);
 end;
 
 { The forge's name, empty without one (when what is named after it is

@@ -24,7 +24,7 @@ interface
 
 uses
   Classes, SysUtils, Graphics, ExtCtrls, gittan.settings, gittan.lexers,
-  gittan.update, gittan.git, gittan.github;
+  gittan.update, gittan.git, gittan.forge;
 
 const
   {** A check for a newer build a little after start, then this far
@@ -70,7 +70,7 @@ type
     {** The path of the forge's tool (gh), as the settings give it: GhPath
       when set, else the one on the search path; '' while GitHub is off
       or gh is not found. Whoever needs the forge makes one of it
-      (TGittanGitHubForge) and keeps it while the path stays the same. }
+      (ForgeClass) and keeps it while the path stays the same. }
     function ForgeCli: string;
     property Settings: TGittanSettings read FSettings;
     property Lexers: TGittanLexers read FLexers;
@@ -208,12 +208,12 @@ end;
 
 function TGittanApp.ForgeCli: string;
 begin
-  if not FSettings.GitHubEnabled then
+  if not FSettings.GitHubEnabled or (ForgeClass = nil) then
     Result := ''
   else if FSettings.GhPath <> '' then
     Result := FSettings.GhPath
   else
-    Result := FindTool(TGittanGitHubForge.CliName);
+    Result := FindTool(ForgeClass.CliName);
 end;
 
 end.

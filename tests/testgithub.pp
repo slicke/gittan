@@ -15,6 +15,7 @@ uses
 type
   TGitHubTest = class(TTestCase)
   published
+    procedure TestRegistered;
     procedure TestParsePullRequest;
     procedure TestParsePullRequests;
     procedure TestWithoutReviewed;
@@ -43,6 +44,23 @@ const
     '{"author":null,"state":"COMMENTED"},{"author":{"login":"eve"},"state":"COMMENTED"}],' +
     '"reviewRequests":[{"__typename":"Team","name":"Core","slug":"core"},' +
     '{"__typename":"User","login":"dan"}]}';
+
+procedure TGitHubTest.TestRegistered;
+var
+  Forge: TGittanForge;
+begin
+  { The unit registers its forge as it loads, which the rest of Gittan
+    makes through ForgeClass without naming it. }
+  AssertTrue(ForgeClass = TGittanGitHubForge);
+  AssertEquals('gh', ForgeClass.CliName);
+  Forge := ForgeClass.Create('/usr/bin/gh');
+  try
+    AssertEquals('GitHub', Forge.Name);
+    AssertEquals('/usr/bin/gh', Forge.Cli);
+  finally
+    Forge.Free;
+  end;
+end;
 
 procedure TGitHubTest.TestParsePullRequest;
 var

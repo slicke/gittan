@@ -10,7 +10,9 @@ unit gittan.github;
   address of a file, a commit or an issue (GitHubWebArgs). GitHub's words
   (OPEN, APPROVED, SUCCESS) are turned into gittan.forge's kinds here
   and go no further. Every gh runs through RunGh, with its prompts and
-  its update notice off. Nothing here needs the LCL. }
+  its update notice off. The unit registers the forge as it loads
+  (RegisterForge), so nothing outside it names TGittanGitHubForge.
+  Nothing here needs the LCL. }
 
 {$mode objfpc}{$H+}
 
@@ -1068,5 +1070,8 @@ function TGittanGitHubForge.PullRef(ANumber: integer): string;
 begin
   Result := 'refs/pull/' + IntToStr(ANumber) + '/head';
 end;
+
+initialization
+  RegisterForge(TGittanGitHubForge);
 
 end.
