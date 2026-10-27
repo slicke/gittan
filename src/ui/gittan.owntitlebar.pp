@@ -176,7 +176,7 @@ const
 implementation
 
 uses
-  Math, LCLIntf, LCLType, gittan.statusbar;
+  Math, LCLIntf, LCLType, gittan.statusbar, gittan.theme;
 
 const
   Pad = 8;
@@ -808,8 +808,10 @@ begin
   Canvas.Pen.Width := 1;
 
   { The banner: a ribbon from the top edge with a notch at its foot, in
-    the accent with a white globe while the forge view is shown, else
-    in the shown tab's fill (the hover color under the mouse). }
+    the accent with a white globe while the forge view is shown, else a
+    little of the text color in the background, a little more under the
+    mouse, as on macOS: the tab fill is the background itself in the
+    light theme. }
   if FForgeVisible then
   begin
     R := FForgeRect;
@@ -817,9 +819,9 @@ begin
     if FForgeShown then
       Canvas.Brush.Color := FMark
     else if FHotPart = tpForge then
-      Canvas.Brush.Color := FButtonHot
+      Canvas.Brush.Color := MixColor(FMain, FText, 0.16)
     else
-      Canvas.Brush.Color := FTabFill;
+      Canvas.Brush.Color := MixColor(FMain, FText, 0.08);
     Canvas.Pen.Color := Canvas.Brush.Color;
     Canvas.Pen.Width := 1;
     W := Scale96ToForm(ForgeNotch);
