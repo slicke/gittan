@@ -1075,8 +1075,9 @@ begin
   Git(['config', '--unset', 'filter.lfs.process']);
   Git(['rm', '-q', 'real.psd']);
   Git(['commit', '-q', '-m', 'Drop the real one']);
-  AssertEquals(IncludeTrailingPathDelimiter(FRepo.GitDir) + 'lfs' + PathDelim + 'objects' +
-    PathDelim + 'aa' + PathDelim + 'aa' + PathDelim + OldOid, FRepo.LfsObjectFile(OldOid));
+  AssertEquals(ExpandFileName(IncludeTrailingPathDelimiter(FRepo.GitDir) + 'lfs') + PathDelim +
+    'objects' + PathDelim + 'aa' + PathDelim + 'aa' + PathDelim + OldOid,
+    FRepo.LfsObjectFile(OldOid));
   { Not downloaded: the pointer. }
   AssertTrue(FRepo.FileBlob('art.psd', 'HEAD', Data));
   AssertEquals(LfsPointer(OldOid, 9), Data);
@@ -1127,8 +1128,9 @@ begin
     counts from the next. }
   Git(['config', 'lfs.storage', 'elsewhere']);
   AssertTrue(FRepo.Open(FDir));
-  AssertEquals(IncludeTrailingPathDelimiter(FRepo.GitDir) + 'elsewhere' + PathDelim + 'objects' +
-    PathDelim + 'aa' + PathDelim + 'aa' + PathDelim + OldOid, FRepo.LfsObjectFile(OldOid));
+  AssertEquals(ExpandFileName(IncludeTrailingPathDelimiter(FRepo.GitDir) + 'elsewhere') + PathDelim +
+    'objects' + PathDelim + 'aa' + PathDelim + 'aa' + PathDelim + OldOid,
+    FRepo.LfsObjectFile(OldOid));
   AssertTrue(FRepo.FileBlob('art.psd', 'HEAD', Data));
   AssertEquals(LfsPointer(OldOid, 9), Data);
 end;

@@ -6125,8 +6125,10 @@ begin
   end
   else
     Storage := IncludeTrailingPathDelimiter(Common) + 'lfs';
-  FLfsStore := Storage;
-  Result := Storage;
+  { In the system's separators whichever way it came: git names the git
+    directory with / on Windows too. }
+  FLfsStore := ExpandFileName(Storage);
+  Result := FLfsStore;
 end;
 
 function TGittanRepo.LfsObjectFile(const AOid: string): string;
