@@ -37,9 +37,15 @@ type
     repository is picked by its remotes; it is never made. }
   TExampleForge = class(TGittanForge)
   public
+    class function Name: string; override;
     class function CliName: string; override;
     class function HostsRemote(const AHost: string): boolean; override;
   end;
+
+class function TExampleForge.Name: string;
+begin
+  Result := 'Example';
+end;
 
 class function TExampleForge.CliName: string;
 begin

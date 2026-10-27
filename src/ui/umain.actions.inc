@@ -425,6 +425,8 @@ var
   V: TSettingsValues;
   Corner: TPoint;
   Tools: boolean;
+  Forges: TGittanForgeClasses;
+  i: integer;
 begin
   OldFont := TFont.Create;
   F := TFont.Create;
@@ -440,8 +442,14 @@ begin
     V.GitPath := App.Settings.GitPath;
     V.AutoFetch := App.Settings.AutoFetch;
     V.AutoFetchMinutes := App.Settings.AutoFetchMinutes;
-    V.GhPath := App.Settings.GhPath;
-    V.GitHubEnabled := App.Settings.GitHubEnabled;
+    Forges := RegisteredForges;
+    SetLength(V.ForgePaths, Length(Forges));
+    SetLength(V.ForgeOn, Length(Forges));
+    for i := 0 to High(Forges) do
+    begin
+      V.ForgePaths[i] := App.Settings.ForgeCliPath(Forges[i].Name);
+      V.ForgeOn[i] := App.Settings.ForgeEnabled(Forges[i].Name);
+    end;
     V.CloneSiblings := App.Settings.CloneSiblings;
     V.AIEnabled := App.Settings.AIEnabled;
     V.Agent := AgentOfKey(App.Settings.AIAgent);
@@ -465,13 +473,18 @@ begin
       App.Settings.ClaudeModel := V.AgentModels[gaClaude];
       App.Settings.CopilotPath := V.AgentPaths[gaCopilot];
       App.Settings.CopilotModel := V.AgentModels[gaCopilot];
-      Tools := (V.GitPath <> App.Settings.GitPath) or (V.GhPath <> App.Settings.GhPath) or
-        (V.GitHubEnabled <> App.Settings.GitHubEnabled);
+      Tools := V.GitPath <> App.Settings.GitPath;
+      for i := 0 to High(Forges) do
+        Tools := Tools or (V.ForgePaths[i] <> App.Settings.ForgeCliPath(Forges[i].Name)) or
+          (V.ForgeOn[i] <> App.Settings.ForgeEnabled(Forges[i].Name));
       if Tools then
       begin
         App.Settings.GitPath := V.GitPath;
-        App.Settings.GhPath := V.GhPath;
-        App.Settings.GitHubEnabled := V.GitHubEnabled;
+        for i := 0 to High(Forges) do
+        begin
+          App.Settings.SetForgeCliPath(Forges[i].Name, V.ForgePaths[i]);
+          App.Settings.SetForgeEnabled(Forges[i].Name, V.ForgeOn[i]);
+        end;
         SetGitExe(App.Settings.GitPath);
       end;
       { Then every tab, this one with them. }

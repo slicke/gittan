@@ -44,6 +44,8 @@ type
     FRecent: TStringList;
     FTabs: TStringList;
     FTrust: TStringList;
+    { Each forge's switch and tool, by its name. }
+    FForgeOff, FForgeClis: TStringList;
     FFileName: string;
   public
     {** The tab shown when the window closed, an index into Tabs. }
@@ -110,13 +112,6 @@ type
       the user turns it off. }
     AutoFetch: boolean;
     AutoFetchMinutes: integer;
-    {** Whether the GitHub features are on (pull requests, the GitHub page,
-      review comments); on unless the user turns them off. }
-    GitHubEnabled: boolean;
-    {** gh, GitHub's command line tool, as a path to it; empty runs the
-      gh found on ToolSearchPath, and when there is none the features
-      that need GitHub are off. }
-    GhPath: string;
     {** Whether the GitHub page leaves out the user's pull requests that
       nobody but them has commented on or reviewed. }
     HideWithoutFeedback: boolean;
@@ -146,6 +141,17 @@ type
     UpdateSnoozedUntil: TDateTime;
     {** AFileName names the ini file; empty picks gittan.ini in the
       user's configuration folder. }
+    {** Whether the features of the forge named AName (gittan.forge's
+      Name: pull requests, the forge view, review comments) are on; on
+      unless the user turns them off. Kept in the forge's own section,
+      for every registered forge. }
+    function ForgeEnabled(const AName: string): boolean;
+    procedure SetForgeEnabled(const AName: string; AValue: boolean);
+    {** The forge's command line tool (gh for GitHub) as a path to it;
+      empty runs the one found on ToolSearchPath, and when there is none
+      the forge's features are off. }
+    function ForgeCliPath(const AName: string): string;
+    procedure SetForgeCliPath(const AName, AValue: string);
     constructor Create(const AFileName: string = '');
     destructor Destroy; override;
     {** Reads the file; missing keys keep their defaults. }
@@ -176,7 +182,7 @@ type
 implementation
 
 uses
-  Math, IniFiles, md5, gittan.textfile;
+  Math, IniFiles, md5, gittan.textfile, gittan.forge;
 
 const
   SecWindow = 'Window';
@@ -251,6 +257,10 @@ begin
   FRecent.CaseSensitive := True;
   FTabs := TStringList.Create;
   FTrust := TStringList.Create;
+  FForgeOff := TStringList.Create;
+  FForgeOff.CaseSensitive := False;
+  FForgeClis := TStringList.Create;
+  FForgeClis.CaseSensitive := False;
   if AFileName <> '' then
     FFileName := AFileName
   else
@@ -261,21 +271,60 @@ begin
   AutoFetchMinutes := DefaultAutoFetchMinutes;
   CommitOpen := True;
   Translations := True;
-  GitHubEnabled := True;
 end;
 
 destructor TGittanSettings.Destroy;
 begin
+  FForgeClis.Free;
+  FForgeOff.Free;
   FTrust.Free;
   FRecent.Free;
   FTabs.Free;
   inherited Destroy;
 end;
 
+function TGittanSettings.ForgeEnabled(const AName: string): boolean;
+begin
+  Result := FForgeOff.IndexOf(AName) < 0;
+end;
+
+procedure TGittanSettings.SetForgeEnabled(const AName: string; AValue: boolean);
+var
+  i: integer;
+begin
+  i := FForgeOff.IndexOf(AName);
+  if AValue and (i >= 0) then
+    FForgeOff.Delete(i)
+  else if not AValue and (i < 0) then
+    FForgeOff.Add(AName);
+end;
+
+function TGittanSettings.ForgeCliPath(const AName: string): string;
+var
+  i: integer;
+begin
+  i := FForgeClis.IndexOfName(AName);
+  if i < 0 then
+    Exit('');
+  Result := FForgeClis.ValueFromIndex[i];
+end;
+
+procedure TGittanSettings.SetForgeCliPath(const AName, AValue: string);
+var
+  i: integer;
+begin
+  i := FForgeClis.IndexOfName(AName);
+  if i >= 0 then
+    FForgeClis.Delete(i);
+  if AValue <> '' then
+    FForgeClis.Add(AName + '=' + AValue);
+end;
+
 procedure TGittanSettings.Load;
 var
   Ini: TIniFile;
   i: integer;
+  Forge: TGittanForgeClass;
   S: string;
 begin
   if not FileExists(FFileName) then
@@ -322,9 +371,16 @@ begin
       AutoFetch := Ini.ReadBool(SecTools, 'AutoFetch', True);
       AutoFetchMinutes := EnsureRange(Ini.ReadInteger(SecTools, 'AutoFetchMinutes',
         DefaultAutoFetchMinutes), MinAutoFetchMinutes, MaxAutoFetchMinutes);
-      GitHubEnabled := Ini.ReadBool(SecGitHub, 'Enabled', True);
-      { Earlier versions kept gh's path with git's. }
-      GhPath := Ini.ReadString(SecGitHub, 'Cli', Ini.ReadString(SecTools, 'Gh', ''));
+      { Every forge registered, in its own section; earlier versions
+        kept gh's path with git's, under its tool's name. }
+      FForgeOff.Clear;
+      FForgeClis.Clear;
+      for Forge in RegisteredForges do
+      begin
+        SetForgeEnabled(Forge.Name, Ini.ReadBool(Forge.Name, 'Enabled', True));
+        SetForgeCliPath(Forge.Name, Ini.ReadString(Forge.Name, 'Cli',
+          Ini.ReadString(SecTools, Forge.CliName, '')));
+      end;
       HideWithoutFeedback := Ini.ReadBool(SecGitHub, 'HideWithoutFeedback', False);
       OnlyNeedsAttention := Ini.ReadBool(SecGitHub, 'OnlyNeedsAttention', False);
       HideDrafts := Ini.ReadBool(SecGitHub, 'HideDrafts', False);
@@ -370,6 +426,7 @@ procedure TGittanSettings.Save;
 var
   Ini: TIniFile;
   i: integer;
+  Forge: TGittanForgeClass;
 begin
   try
     ForceDirectories(ExtractFileDir(FFileName));
@@ -411,9 +468,12 @@ begin
       Ini.WriteString(SecTools, 'Git', KeepEdges(GitPath));
       Ini.WriteBool(SecTools, 'AutoFetch', AutoFetch);
       Ini.WriteInteger(SecTools, 'AutoFetchMinutes', AutoFetchMinutes);
-      Ini.DeleteKey(SecTools, 'Gh');
-      Ini.WriteBool(SecGitHub, 'Enabled', GitHubEnabled);
-      Ini.WriteString(SecGitHub, 'Cli', KeepEdges(GhPath));
+      for Forge in RegisteredForges do
+      begin
+        Ini.DeleteKey(SecTools, Forge.CliName);
+        Ini.WriteBool(Forge.Name, 'Enabled', ForgeEnabled(Forge.Name));
+        Ini.WriteString(Forge.Name, 'Cli', KeepEdges(ForgeCliPath(Forge.Name)));
+      end;
       Ini.WriteBool(SecGitHub, 'HideWithoutFeedback', HideWithoutFeedback);
       Ini.WriteBool(SecGitHub, 'OnlyNeedsAttention', OnlyNeedsAttention);
       Ini.WriteBool(SecGitHub, 'HideDrafts', HideDrafts);

@@ -107,7 +107,7 @@ type
   {** GitHub through gh (Cli, a path to it). }
   TGittanGitHubForge = class(TGittanForge)
   public
-    function Name: string; override;
+    class function Name: string; override;
     class function CliName: string; override;
     {** github.com, and the GitHub Enterprise hosts gh is logged in to
       (GhHosts of the hosts.yml in GhConfigDir). }
@@ -1010,7 +1010,7 @@ begin
   end;
 end;
 
-function TGittanGitHubForge.Name: string;
+class function TGittanGitHubForge.Name: string;
 begin
   Result := 'GitHub';
 end;

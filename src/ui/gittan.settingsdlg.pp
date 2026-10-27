@@ -44,15 +44,20 @@ type
     Theme: integer;
     TabSize: integer;
     EditorCommand, TerminalCommand: string;
-    {** Paths of git and gh; empty for the ones found on PATH. }
-    GitPath, GhPath: string;
+    {** The path of git; empty for the one found on PATH. }
+    GitPath: string;
+    {** Each registered forge's (gittan.forge's RegisteredForges, in
+      their order): whether its features are on, and the path of its
+      tool, empty for the one found on PATH. }
+    ForgeOn: array of boolean;
+    ForgePaths: TStringArray;
     {** Whether the open repository is fetched in the background, and
       how many minutes apart. }
     AutoFetch: boolean;
     AutoFetchMinutes: integer;
-    {** Whether the GitHub features are on, and whether the GitHub page
-      looks for clones beside the recent repositories. }
-    GitHubEnabled, CloneSiblings: boolean;
+    {** Whether the forge view looks for clones beside the recent
+      repositories. }
+    CloneSiblings: boolean;
     {** Whether the AI features show, the agent they run, and each
       agent's command (empty for the one found) and model (empty for its
       own choice). }
@@ -127,18 +132,17 @@ resourcestring
   rsAutoFetchNote = 'Brings in what is new on the remotes of the open repository, so the ' +
     'counts of what to pull stay current. It shows nothing, and waits for the time to pass ' +
     'since the last fetch, from Gittan or anywhere else.';
-  rsGhPath = 'gh, GitHub''s command line tool';
-  rsGhDefault = 'The gh on PATH';
+  rsForgeTool = '%s, %s''s command line tool';
+  rsForgeToolDefault = 'The %s on PATH';
   rsToolFound = 'Found: %s';
   rsToolNotFound = 'Not found on PATH.';
-  rsGhNotFound = 'Not found on PATH; the GitHub features are off.';
-  rsGitHub = 'GitHub';
-  rsGitHubEnabled = 'Turn on the GitHub features';
-  rsGitHubNote = 'Pull requests, their checks and review comments, and the ' +
-    'GitHub page. They run gh with its own login, for a repository with a ' +
-    'remote on GitHub.';
+  rsForgeNotFound = 'Not found on PATH; the %s features are off.';
+  rsForgeEnabled = 'Turn on the %s features';
+  rsForgeNote = 'Pull requests, their checks and review comments, and the ' +
+    '%0:s page. They run %1:s with its own login, for a repository with a ' +
+    'remote on %0:s.';
   rsCloneSiblings = 'Look for clones beside the recent repositories';
-  rsCloneSiblingsNote = 'A pull request on the GitHub page links to a clone of its ' +
+  rsCloneSiblingsNote = 'A pull request on the %s page links to a clone of its ' +
     'repository among the recent ones. With this on, the repositories in the folders ' +
     'they are in count too.';
   rsToolTyped = 'Run in place of the one on PATH.';
@@ -159,7 +163,7 @@ resourcestring
   rsVersionGittanLocal = 'Gittan, a local build of %s';
   rsVersionNotFound = '%s not found';
   rsVersionAIOff = 'The AI features are off';
-  rsVersionGitHubOff = 'The GitHub features are off';
+  rsVersionForgeOff = 'The %s features are off';
   rsVersionLibraries = 'Free Pascal %s, LCL %s';
   rsCopyVersions = 'Co&py';
   rsWebsite = 'gittan.app';
@@ -293,9 +297,15 @@ type
     FFontLabel: TLabel;
     FSizeEdit, FTabEdit, FAutoFetchEdit: TSpinEdit;
     FThemeBox: TComboBox;
-    FEditorEdit, FTerminalEdit, FGitEdit, FGhEdit, FAgentEdit, FModelEdit: TEdit;
-    FGitNote, FGhNote, FAgentLabel, FAgentNote, FModelNote: TLabel;
-    FAIBox, FGitHubBox, FSiblingsBox, FAutoFetchBox: TCheckBox;
+    FEditorEdit, FTerminalEdit, FGitEdit, FAgentEdit, FModelEdit: TEdit;
+    FGitNote, FAgentLabel, FAgentNote, FModelNote: TLabel;
+    FAIBox, FSiblingsBox, FAutoFetchBox: TCheckBox;
+    { The Hosting page's block of each registered forge (FForges, in
+      their order): its switch, its tool's field and the note under it. }
+    FForges: TGittanForgeClasses;
+    FForgeBoxes: array of TCheckBox;
+    FForgeEdits: array of TEdit;
+    FForgeNotes: array of TLabel;
     { The agent picked, and each agent's command and model as edited:
       the fields show the picked one's (ShowAgent). }
     FAgentBox: TComboBox;
@@ -366,7 +376,7 @@ type
     procedure ThemeChange(Sender: TObject);
     procedure ToolChange(Sender: TObject);
     procedure AIChange(Sender: TObject);
-    procedure GitHubChange(Sender: TObject);
+    procedure ForgeChange(Sender: TObject);
     procedure AutoFetchChange(Sender: TObject);
     procedure AgentChange(Sender: TObject);
     procedure ShowAgent;
@@ -581,25 +591,40 @@ begin
   Lbl.Font.Color := clGrayText;
   Lbl.WordWrap := True;
 
-  { The Hosting page: a block per service under its name, the switch and
-    what it means, then the tool, which follows the switch. Another
-    service is another block. }
+  { The Hosting page: a block per registered forge under its name, the
+    switch and what it means, then the tool, which follows the switch;
+    the first forge's, whose is the forge view, has the clones' switch
+    too. }
   FBox := FHostingPage;
-  AddLabel(rsGitHub, 0).Font.Style := [fsBold];
-  FGitHubBox := TCheckBox.Create(Self);
-  FGitHubBox.Caption := rsGitHubEnabled;
-  FGitHubBox.OnChange := @GitHubChange;
-  Place(FGitHubBox, 8);
-  Lbl := AddLabel(rsGitHubNote, 4);
-  Lbl.Font.Color := clGrayText;
-  Lbl.WordWrap := True;
-  FGhEdit := AddTool(rsGhPath, rsGhDefault, FGhNote);
-  FSiblingsBox := TCheckBox.Create(Self);
-  FSiblingsBox.Caption := rsCloneSiblings;
-  Place(FSiblingsBox, 16);
-  Lbl := AddLabel(rsCloneSiblingsNote, 4);
-  Lbl.Font.Color := clGrayText;
-  Lbl.WordWrap := True;
+  FForges := RegisteredForges;
+  SetLength(FForgeBoxes, Length(FForges));
+  SetLength(FForgeEdits, Length(FForges));
+  SetLength(FForgeNotes, Length(FForges));
+  for i := 0 to High(FForges) do
+  begin
+    if i = 0 then
+      AddLabel(FForges[i].Name, 0).Font.Style := [fsBold]
+    else
+      AddLabel(FForges[i].Name, 24).Font.Style := [fsBold];
+    FForgeBoxes[i] := TCheckBox.Create(Self);
+    FForgeBoxes[i].Caption := Format(rsForgeEnabled, [FForges[i].Name]);
+    FForgeBoxes[i].OnChange := @ForgeChange;
+    Place(FForgeBoxes[i], 8);
+    Lbl := AddLabel(Format(rsForgeNote, [FForges[i].Name, FForges[i].CliName]), 4);
+    Lbl.Font.Color := clGrayText;
+    Lbl.WordWrap := True;
+    FForgeEdits[i] := AddTool(Format(rsForgeTool, [FForges[i].CliName, FForges[i].Name]),
+      Format(rsForgeToolDefault, [FForges[i].CliName]), FForgeNotes[i]);
+    if i = 0 then
+    begin
+      FSiblingsBox := TCheckBox.Create(Self);
+      FSiblingsBox.Caption := rsCloneSiblings;
+      Place(FSiblingsBox, 16);
+      Lbl := AddLabel(Format(rsCloneSiblingsNote, [FForges[i].Name]), 4);
+      Lbl.Font.Color := clGrayText;
+      Lbl.WordWrap := True;
+    end;
+  end;
 
   { The AI page: the switch and what it means, then the agent, its
     command and its model, which follow the switch; the labels name the
@@ -1063,15 +1088,24 @@ end;
 
 { The versions on About name the tools as the fields have them. }
 procedure TSettingsForm.ToolChange(Sender: TObject);
+var
+  i: integer;
 begin
   FVersionsRead := False;
   if Sender = FGitEdit then
-    ShowTool(FGitEdit, FGitNote, 'git', rsToolNotFound)
-  else if Sender = FGhEdit then
-    ShowTool(FGhEdit, FGhNote, 'gh', rsGhNotFound)
-  else
-    ShowTool(FAgentEdit, FAgentNote, AgentCommands[FAgent],
-      Format(rsAgentNotFound, [AgentNames[FAgent]]));
+  begin
+    ShowTool(FGitEdit, FGitNote, 'git', rsToolNotFound);
+    Exit;
+  end;
+  for i := 0 to High(FForges) do
+    if Sender = FForgeEdits[i] then
+    begin
+      ShowTool(FForgeEdits[i], FForgeNotes[i], FForges[i].CliName,
+        Format(rsForgeNotFound, [FForges[i].Name]));
+      Exit;
+    end;
+  ShowTool(FAgentEdit, FAgentNote, AgentCommands[FAgent],
+    Format(rsAgentNotFound, [AgentNames[FAgent]]));
 end;
 
 { The agent and its fields matter only with the features on. }
@@ -1083,17 +1117,22 @@ begin
   FModelEdit.Enabled := FAIBox.Checked;
 end;
 
-{ gh's field matters only with the GitHub features on. }
 procedure TSettingsForm.AutoFetchChange(Sender: TObject);
 begin
   FAutoFetchEdit.Enabled := FAutoFetchBox.Checked;
 end;
 
-procedure TSettingsForm.GitHubChange(Sender: TObject);
+{ A forge's tool matters only with its features on; the clones' switch
+  with the first forge's, whose is the forge view. }
+procedure TSettingsForm.ForgeChange(Sender: TObject);
+var
+  i: integer;
 begin
   FVersionsRead := False;
-  FGhEdit.Enabled := FGitHubBox.Checked;
-  FSiblingsBox.Enabled := FGitHubBox.Checked;
+  for i := 0 to High(FForges) do
+    FForgeEdits[i].Enabled := FForgeBoxes[i].Checked;
+  if Length(FForges) > 0 then
+    FSiblingsBox.Enabled := FForgeBoxes[0].Checked;
 end;
 
 { What was typed for the agent left is kept, and the fields show the
@@ -1289,8 +1328,12 @@ type
   protected
     procedure Execute; override;
   public
-    GitExe, GhExe, AgentExe, AgentName, Platform: string;
-    GitHubOn, AIOn: boolean;
+    GitExe, AgentExe, AgentName, Platform: string;
+    { Each registered forge's tool and whether it is on. }
+    Forges: TGittanForgeClasses;
+    ForgeExes: TStringArray;
+    ForgeOn: array of boolean;
+    AIOn: boolean;
     Text: string;
   end;
 
@@ -1299,7 +1342,7 @@ var
   Forge: TGittanForge;
   Lines: TStringList;
   Version, Output, Error: string;
-  Major, Minor: integer;
+  Major, Minor, i: integer;
 begin
   Lines := TStringList.Create;
   try
@@ -1311,16 +1354,19 @@ begin
       Lines.Add('git ' + Version)
     else
       Lines.Add(Format(rsVersionNotFound, ['git']));
-    Forge := ForgeClass.Create(GhExe);
-    try
-      if not GitHubOn then
-        Lines.Add(rsVersionGitHubOff)
-      else if Forge.Version(Version) then
-        Lines.Add(Forge.CliName + ' ' + Version)
-      else
-        Lines.Add(Format(rsVersionNotFound, [Forge.CliName]));
-    finally
-      Forge.Free;
+    for i := 0 to High(Forges) do
+    begin
+      Forge := Forges[i].Create(ForgeExes[i]);
+      try
+        if not ForgeOn[i] then
+          Lines.Add(Format(rsVersionForgeOff, [Forge.Name]))
+        else if Forge.Version(Version) then
+          Lines.Add(Forge.CliName + ' ' + Version)
+        else
+          Lines.Add(Format(rsVersionNotFound, [Forge.CliName]));
+      finally
+        Forge.Free;
+      end;
     end;
     if not AIOn then
       Lines.Add(rsVersionAIOff)
@@ -1345,6 +1391,7 @@ end;
 procedure TSettingsForm.ReadVersions(Data: PtrInt);
 var
   Job: TVersionsJob;
+  i: integer;
 begin
   if FVersionsJob <> nil then
   begin
@@ -1359,10 +1406,16 @@ begin
   Job.GitExe := Trim(FGitEdit.Text);
   if Job.GitExe = '' then
     Job.GitExe := FindTool('git');
-  Job.GhExe := Trim(FGhEdit.Text);
-  if Job.GhExe = '' then
-    Job.GhExe := FindTool(ForgeClass.CliName);
-  Job.GitHubOn := FGitHubBox.Checked;
+  Job.Forges := Copy(FForges);
+  SetLength(Job.ForgeExes, Length(FForges));
+  SetLength(Job.ForgeOn, Length(FForges));
+  for i := 0 to High(FForges) do
+  begin
+    Job.ForgeExes[i] := Trim(FForgeEdits[i].Text);
+    if Job.ForgeExes[i] = '' then
+      Job.ForgeExes[i] := FindTool(FForges[i].CliName);
+    Job.ForgeOn[i] := FForgeBoxes[i].Checked;
+  end;
   Job.AIOn := FAIBox.Checked;
   if Job.AIOn then
     Job.AgentExe := FindAgent(FAgent, Trim(FAgentEdit.Text));
@@ -1414,6 +1467,7 @@ function EditSettings(AFont: TFont; var AValues: TSettingsValues;
   ACorner: TPoint; APage: TSettingsPage): boolean;
 var
   F: TSettingsForm;
+  i: integer;
 begin
   F := TSettingsForm.Create(Screen.ActiveForm);
   try
@@ -1429,12 +1483,17 @@ begin
     F.FAutoFetchBox.Checked := AValues.AutoFetch;
     F.FAutoFetchEdit.Value := AValues.AutoFetchMinutes;
     F.AutoFetchChange(nil);
-    F.FGhEdit.Text := AValues.GhPath;
     F.ToolChange(F.FGitEdit);
-    F.ToolChange(F.FGhEdit);
-    F.FGitHubBox.Checked := AValues.GitHubEnabled;
-    F.FSiblingsBox.Checked := AValues.CloneSiblings;
-    F.GitHubChange(nil);
+    for i := 0 to High(F.FForges) do
+    begin
+      if i <= High(AValues.ForgePaths) then
+        F.FForgeEdits[i].Text := AValues.ForgePaths[i];
+      F.ToolChange(F.FForgeEdits[i]);
+      F.FForgeBoxes[i].Checked := (i > High(AValues.ForgeOn)) or AValues.ForgeOn[i];
+    end;
+    if F.FSiblingsBox <> nil then
+      F.FSiblingsBox.Checked := AValues.CloneSiblings;
+    F.ForgeChange(nil);
     F.FAIBox.Checked := AValues.AIEnabled;
     F.FAgent := AValues.Agent;
     F.FAgentPaths := AValues.AgentPaths;
@@ -1460,9 +1519,15 @@ begin
       AValues.GitPath := Trim(F.FGitEdit.Text);
       AValues.AutoFetch := F.FAutoFetchBox.Checked;
       AValues.AutoFetchMinutes := F.FAutoFetchEdit.Value;
-      AValues.GhPath := Trim(F.FGhEdit.Text);
-      AValues.GitHubEnabled := F.FGitHubBox.Checked;
-      AValues.CloneSiblings := F.FSiblingsBox.Checked;
+      SetLength(AValues.ForgePaths, Length(F.FForges));
+      SetLength(AValues.ForgeOn, Length(F.FForges));
+      for i := 0 to High(F.FForges) do
+      begin
+        AValues.ForgePaths[i] := Trim(F.FForgeEdits[i].Text);
+        AValues.ForgeOn[i] := F.FForgeBoxes[i].Checked;
+      end;
+      if F.FSiblingsBox <> nil then
+        AValues.CloneSiblings := F.FSiblingsBox.Checked;
       AValues.AIEnabled := F.FAIBox.Checked;
       { The fields hold the picked agent's; the other's are as kept. }
       F.AgentChange(nil);

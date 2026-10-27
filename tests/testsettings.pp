@@ -8,7 +8,9 @@ unit testsettings;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.settings;
+  Classes, SysUtils, fpcunit, testregistry, gittan.settings,
+  { GitHub registers itself, so the settings keep its section. }
+  gittan.github;
 
 type
   TSettingsTest = class(TTestCase)
@@ -61,8 +63,8 @@ begin
     AssertEquals('', S.CommitDraft);
     AssertEquals('no tab width picked', 0, S.TabSize);
     AssertEquals('', S.GitPath);
-    AssertEquals('', S.GhPath);
-    AssertTrue('the GitHub features start on', S.GitHubEnabled);
+    AssertEquals('', S.ForgeCliPath('GitHub'));
+    AssertTrue('the GitHub features start on', S.ForgeEnabled('GitHub'));
     AssertTrue('the background fetch starts on', S.AutoFetch);
     AssertEquals(DefaultAutoFetchMinutes, S.AutoFetchMinutes);
     AssertFalse(S.HideWithoutFeedback);
@@ -110,8 +112,8 @@ begin
     S.EditorCommand := 'code -g';
     S.TabSize := 4;
     S.GitPath := '/opt/homebrew/bin/git';
-    S.GhPath := 'C:\Program Files\GitHub CLI\gh.exe';
-    S.GitHubEnabled := False;
+    S.SetForgeCliPath('GitHub', 'C:\Program Files\GitHub CLI\gh.exe');
+    S.SetForgeEnabled('GitHub', False);
     S.AutoFetch := False;
     S.AutoFetchMinutes := 30;
     S.HideWithoutFeedback := True;
@@ -158,8 +160,8 @@ begin
     AssertEquals('code -g', S.EditorCommand);
     AssertEquals(4, S.TabSize);
     AssertEquals('/opt/homebrew/bin/git', S.GitPath);
-    AssertEquals('C:\Program Files\GitHub CLI\gh.exe', S.GhPath);
-    AssertFalse(S.GitHubEnabled);
+    AssertEquals('C:\Program Files\GitHub CLI\gh.exe', S.ForgeCliPath('GitHub'));
+    AssertFalse(S.ForgeEnabled('GitHub'));
     AssertFalse(S.AutoFetch);
     AssertEquals(30, S.AutoFetchMinutes);
     AssertTrue(S.HideWithoutFeedback);
@@ -196,7 +198,7 @@ begin
     S.CommitDraft := '"Quoted subject"';
     S.CommitDraftRepo := '  /tmp/a ';
     S.GitPath := '"';
-    S.GhPath := '""';
+    S.SetForgeCliPath('GitHub', '""');
     S.FontName := 'Menlo';
     S.Save;
   finally
@@ -210,7 +212,7 @@ begin
     AssertEquals('"Quoted subject"', S.CommitDraft);
     AssertEquals('  /tmp/a ', S.CommitDraftRepo);
     AssertEquals('"', S.GitPath);
-    AssertEquals('""', S.GhPath);
+    AssertEquals('""', S.ForgeCliPath('GitHub'));
     AssertEquals('Menlo', S.FontName);
   finally
     S.Free;
@@ -379,8 +381,8 @@ begin
     S := TGittanSettings.Create(FFileName);
     try
       S.Load;
-      AssertEquals('/opt/gh/bin/gh', S.GhPath);
-      AssertTrue(S.GitHubEnabled);
+      AssertEquals('/opt/gh/bin/gh', S.ForgeCliPath('GitHub'));
+      AssertTrue(S.ForgeEnabled('GitHub'));
       S.Save;
     finally
       S.Free;

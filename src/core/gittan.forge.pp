@@ -288,8 +288,9 @@ type
     FCli: string;
   public
     constructor Create(const ACli: string); virtual;
-    {** The forge's name, as the interface shows it: "GitHub". }
-    function Name: string; virtual; abstract;
+    {** The forge's name, as the interface shows it and the settings
+      keep its section under: "GitHub". }
+    class function Name: string; virtual; abstract;
     {** The name of its tool, as found on the search path: "gh". }
     class function CliName: string; virtual; abstract;
     {** Whether a remote on AHost (as RemoteHost gives it, "github.com")
@@ -325,6 +326,7 @@ type
     function PullRef(ANumber: integer): string; virtual; abstract;
   end;
   TGittanForgeClass = class of TGittanForge;
+  TGittanForgeClasses = array of TGittanForgeClass;
 
 {** Adds AClass to the forges Gittan knows; a forge's unit calls it in
   its initialization. }
@@ -333,6 +335,8 @@ procedure RegisterForge(AClass: TGittanForgeClass);
   user's pull requests across every repository: the first registered
   (GitHub, the one forge so far); nil while none is. }
 function ForgeClass: TGittanForgeClass;
+{** Every forge registered, in the order they were. }
+function RegisteredForges: TGittanForgeClasses;
 {** The forge of a repository whose remotes are AUrls (as RemoteUrlsIn
   gives them, a "remote.<name>.url <url>" line each): the first
   registered that hosts one of them, the remotes taken in order; nil
@@ -363,6 +367,11 @@ begin
   if Length(Forges) = 0 then
     Exit(nil);
   Result := Forges[0];
+end;
+
+function RegisteredForges: TGittanForgeClasses;
+begin
+  Result := Copy(Forges);
 end;
 
 function ForgeClassFor(const AUrls: string): TGittanForgeClass;
