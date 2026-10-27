@@ -76,7 +76,8 @@ type
     procedure BoxResize(Sender: TObject);
     procedure PagePick(Sender: TObject; const APull: TGittanForgePull);
     procedure PageRefresh(Sender: TObject);
-    procedure PageHideChange(Sender: TObject);
+    procedure LoadFilters;
+    procedure PageFilterChange(Sender: TObject);
     procedure PageOpenUrl(Sender: TObject; const AUrl: string);
     procedure ThemeTimerTimer(Sender: TObject);
     procedure FileMenuClick(Sender: TObject);
@@ -191,8 +192,8 @@ begin
   FPage.Parent := FBox;
   FPage.OnPick := @PagePick;
   FPage.OnRefresh := @PageRefresh;
-  FPage.HideWithoutFeedback := App.Settings.HideWithoutFeedback;
-  FPage.OnHideChange := @PageHideChange;
+  LoadFilters;
+  FPage.OnFilterChange := @PageFilterChange;
   FPage.OnOpenUrl := @PageOpenUrl;
   FThemeTimer := TTimer.Create(Self);
   FThemeTimer.Interval := 2000;
@@ -520,9 +521,34 @@ begin
 end;
 
 { The checkbox: the settings keep it, and the page's new height. }
-procedure TForgeView.PageHideChange(Sender: TObject);
+{ The page's filters from the settings, a flag each. }
+procedure TForgeView.LoadFilters;
+var
+  Mine, Review: TGittanForgeFilters;
 begin
-  App.Settings.HideWithoutFeedback := FPage.HideWithoutFeedback;
+  Mine := [];
+  if App.Settings.HideWithoutFeedback then
+    Include(Mine, ffFeedback);
+  if App.Settings.OnlyNeedsAttention then
+    Include(Mine, ffAttention);
+  if App.Settings.HideDrafts then
+    Include(Mine, ffNoDrafts);
+  Review := [];
+  if App.Settings.OnlyAskedOfMe then
+    Include(Review, ffAskedOfMe);
+  if App.Settings.HideReviewDrafts then
+    Include(Review, ffNoDrafts);
+  FPage.MineFilters := Mine;
+  FPage.ReviewFilters := Review;
+end;
+
+procedure TForgeView.PageFilterChange(Sender: TObject);
+begin
+  App.Settings.HideWithoutFeedback := ffFeedback in FPage.MineFilters;
+  App.Settings.OnlyNeedsAttention := ffAttention in FPage.MineFilters;
+  App.Settings.HideDrafts := ffNoDrafts in FPage.MineFilters;
+  App.Settings.OnlyAskedOfMe := ffAskedOfMe in FPage.ReviewFilters;
+  App.Settings.HideReviewDrafts := ffNoDrafts in FPage.ReviewFilters;
   FPage.FitHeight(FBox.ClientHeight);
 end;
 

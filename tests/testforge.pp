@@ -21,6 +21,7 @@ type
     procedure TestParseErrors;
     procedure TestNeedsMyReview;
     procedure TestFeedback;
+    procedure TestFilters;
     procedure TestNotes;
     procedure TestFindClones;
     procedure TestSiblingRepositories;
@@ -160,6 +161,46 @@ begin
   AssertEquals(1, Length(Left));
   AssertEquals(1, Left[0].Number);
   AssertEquals(0, Length(WithFeedback(nil)));
+end;
+
+procedure TForgeTest.TestFilters;
+var
+  Pulls, Left: TGittanForgePulls;
+  i: integer;
+begin
+  Pulls := nil;
+  SetLength(Pulls, 4);
+  for i := 0 to 3 do
+  begin
+    Pulls[i] := Default(TGittanForgePull);
+    Pulls[i].Number := i + 1;
+  end;
+  Pulls[0].ReviewDecision := rdChangesRequested;
+  Pulls[0].Feedback := True;
+  Pulls[1].Checks := chkFailed;
+  Pulls[1].IsDraft := True;
+  Pulls[2].Requested := True;
+  Pulls[2].Checks := chkPending;
+  Pulls[3].ReviewDecision := rdApproved;
+  AssertTrue(NeedsAttention(Pulls[0]));
+  AssertTrue(NeedsAttention(Pulls[1]));
+  AssertFalse(NeedsAttention(Pulls[2]));
+  AssertFalse(NeedsAttention(Pulls[3]));
+  AssertEquals(4, Length(FilterPulls(Pulls, [])));
+  Left := FilterPulls(Pulls, [ffAttention]);
+  AssertEquals(2, Length(Left));
+  AssertEquals(1, Left[0].Number);
+  AssertEquals(2, Left[1].Number);
+  { The filters together: every one must pass. }
+  Left := FilterPulls(Pulls, [ffAttention, ffNoDrafts]);
+  AssertEquals(1, Length(Left));
+  AssertEquals(1, Left[0].Number);
+  Left := FilterPulls(Pulls, [ffAskedOfMe]);
+  AssertEquals(1, Length(Left));
+  AssertEquals(3, Left[0].Number);
+  AssertEquals(3, Length(FilterPulls(Pulls, [ffNoDrafts])));
+  AssertEquals(1, Length(FilterPulls(Pulls, [ffFeedback])));
+  AssertEquals(0, Length(FilterPulls(nil, [ffFeedback])));
 end;
 
 procedure TForgeTest.TestNotes;

@@ -66,6 +66,10 @@ begin
     AssertTrue('the background fetch starts on', S.AutoFetch);
     AssertEquals(DefaultAutoFetchMinutes, S.AutoFetchMinutes);
     AssertFalse(S.HideWithoutFeedback);
+    AssertFalse(S.OnlyNeedsAttention);
+    AssertFalse(S.HideDrafts);
+    AssertFalse(S.OnlyAskedOfMe);
+    AssertFalse(S.HideReviewDrafts);
     AssertFalse('the AI features start off', S.AIEnabled);
     AssertEquals('', S.ClaudePath);
     AssertEquals('', S.ClaudeModel);
@@ -110,6 +114,8 @@ begin
     S.AutoFetch := False;
     S.AutoFetchMinutes := 30;
     S.HideWithoutFeedback := True;
+    S.OnlyNeedsAttention := True;
+    S.HideReviewDrafts := True;
     S.SyntaxTheme := 'Delphi';
     S.AIEnabled := True;
     S.ClaudePath := '/Users/me/.local/bin/claude';
@@ -155,6 +161,10 @@ begin
     AssertFalse(S.AutoFetch);
     AssertEquals(30, S.AutoFetchMinutes);
     AssertTrue(S.HideWithoutFeedback);
+    AssertTrue(S.OnlyNeedsAttention);
+    AssertFalse(S.HideDrafts);
+    AssertFalse(S.OnlyAskedOfMe);
+    AssertTrue(S.HideReviewDrafts);
     AssertEquals('Delphi', S.SyntaxTheme);
     AssertTrue(S.AIEnabled);
     AssertEquals('/Users/me/.local/bin/claude', S.ClaudePath);

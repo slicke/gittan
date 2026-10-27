@@ -88,6 +88,13 @@ type
   end;
   TGittanForgePulls = array of TGittanForgePull;
 
+  {** What a list of the user's pull requests can be narrowed to: the
+    ones with Feedback, the ones that need attention (NeedsAttention),
+    no drafts, the ones the user is asked to review in person
+    (Requested). }
+  TGittanForgeFilter = (ffFeedback, ffAttention, ffNoDrafts, ffAskedOfMe);
+  TGittanForgeFilters = set of TGittanForgeFilter;
+
   {** What a web address is asked for: a file (Path, at Line when above
     0, in Commit, else on Branch, else the default branch), a commit
     (Commit), or an issue or pull request (Number). }
@@ -157,6 +164,14 @@ function StillToReview(const AReview: TGittanForgePulls): TGittanForgePulls;
 {** APulls without the ones nobody but their author has answered (no
   Feedback). }
 function WithFeedback(const APulls: TGittanForgePulls): TGittanForgePulls;
+{** Whether APull needs its author to act: changes were asked for or
+  its checks fail. }
+function NeedsAttention(const APull: TGittanForgePull): boolean;
+{** Whether APull passes AFilter. }
+function PassesFilter(const APull: TGittanForgePull; AFilter: TGittanForgeFilter): boolean;
+{** APulls without the ones that fail any of AFilters, in their order. }
+function FilterPulls(const APulls: TGittanForgePulls;
+  AFilters: TGittanForgeFilters): TGittanForgePulls;
 {** APull as a TGittanPullRequest, for what works on the repository's
   own pull requests (a comparison): the fields both have, the rest
   empty. }
@@ -522,6 +537,47 @@ begin
       Result[n] := APulls[i];
       Inc(n);
     end;
+  SetLength(Result, n);
+end;
+
+function NeedsAttention(const APull: TGittanForgePull): boolean;
+begin
+  Result := (APull.ReviewDecision = rdChangesRequested) or (APull.Checks = chkFailed);
+end;
+
+function PassesFilter(const APull: TGittanForgePull; AFilter: TGittanForgeFilter): boolean;
+begin
+  case AFilter of
+    ffFeedback: Result := APull.Feedback;
+    ffAttention: Result := NeedsAttention(APull);
+    ffNoDrafts: Result := not APull.IsDraft;
+    ffAskedOfMe: Result := APull.Requested;
+  else
+    Result := True;
+  end;
+end;
+
+function FilterPulls(const APulls: TGittanForgePulls;
+  AFilters: TGittanForgeFilters): TGittanForgePulls;
+var
+  i, n: integer;
+  F: TGittanForgeFilter;
+  Keep: boolean;
+begin
+  Result := nil;
+  SetLength(Result, Length(APulls));
+  n := 0;
+  for i := 0 to High(APulls) do
+  begin
+    Keep := True;
+    for F in AFilters do
+      Keep := Keep and PassesFilter(APulls[i], F);
+    if Keep then
+    begin
+      Result[n] := APulls[i];
+      Inc(n);
+    end;
+  end;
   SetLength(Result, n);
 end;
 

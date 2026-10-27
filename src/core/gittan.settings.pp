@@ -120,6 +120,12 @@ type
     {** Whether the GitHub page leaves out the user's pull requests that
       nobody but them has commented on or reviewed. }
     HideWithoutFeedback: boolean;
+    {** The GitHub page's other filters, all off by default: of the
+      user's pull requests only the ones that need attention (changes
+      asked for, checks failing), and no drafts; of the ones waiting for
+      their review only the ones asked of them in person, and no
+      drafts. }
+    OnlyNeedsAttention, HideDrafts, OnlyAskedOfMe, HideReviewDrafts: boolean;
     {** Whether the GitHub page looks for a clone of a pull request's
       repository beside the recent repositories too, in the folders they
       are in, besides among them; off unless the user turns it on. }
@@ -320,6 +326,10 @@ begin
       { Earlier versions kept gh's path with git's. }
       GhPath := Ini.ReadString(SecGitHub, 'Cli', Ini.ReadString(SecTools, 'Gh', ''));
       HideWithoutFeedback := Ini.ReadBool(SecGitHub, 'HideWithoutFeedback', False);
+      OnlyNeedsAttention := Ini.ReadBool(SecGitHub, 'OnlyNeedsAttention', False);
+      HideDrafts := Ini.ReadBool(SecGitHub, 'HideDrafts', False);
+      OnlyAskedOfMe := Ini.ReadBool(SecGitHub, 'OnlyAskedOfMe', False);
+      HideReviewDrafts := Ini.ReadBool(SecGitHub, 'HideReviewDrafts', False);
       CloneSiblings := Ini.ReadBool(SecGitHub, 'CloneSiblings', False);
       AIEnabled := Ini.ReadBool(SecAI, 'Enabled', False);
       AIAgent := Ini.ReadString(SecAI, 'Agent', '');
@@ -404,6 +414,10 @@ begin
       Ini.WriteBool(SecGitHub, 'Enabled', GitHubEnabled);
       Ini.WriteString(SecGitHub, 'Cli', KeepEdges(GhPath));
       Ini.WriteBool(SecGitHub, 'HideWithoutFeedback', HideWithoutFeedback);
+      Ini.WriteBool(SecGitHub, 'OnlyNeedsAttention', OnlyNeedsAttention);
+      Ini.WriteBool(SecGitHub, 'HideDrafts', HideDrafts);
+      Ini.WriteBool(SecGitHub, 'OnlyAskedOfMe', OnlyAskedOfMe);
+      Ini.WriteBool(SecGitHub, 'HideReviewDrafts', HideReviewDrafts);
       Ini.WriteBool(SecGitHub, 'CloneSiblings', CloneSiblings);
       Ini.WriteBool(SecAI, 'Enabled', AIEnabled);
       Ini.WriteString(SecAI, 'Agent', AIAgent);
