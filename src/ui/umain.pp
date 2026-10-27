@@ -237,6 +237,11 @@ type
     FAIReviewJob: TGittanAIReviewJob;
     FAIThreads: TGittanReviewThreads;
     FAIThreadsKey: string;
+    { Where something is (umain.ai.inc): the sparkle in the filter field
+      asks the agent, and the files it names drop from the field. }
+    FFindJob: TGittanFindJob;
+    FFindPopup: TGittanPopupList;
+    FFoundFiles: TGittanFoundFiles;
     { The width of a tab in the editors, in characters. }
     FTabSize: integer;
     FSyntaxMenu, FAutoLexerItem, FPlainTextItem: TMenuItem;
@@ -1313,6 +1318,15 @@ type
     procedure StartAIReview;
     procedure AIReviewDone(Sender: TObject);
     procedure AbandonAIReview;
+    {** Shows the sparkle in the filter field while AIAvailable, lit
+      while the agent looks. }
+    procedure UpdateFindAction;
+    procedure SearchBoxAction(Sender: TObject);
+    procedure StartFindJob(const AQuestion: string);
+    procedure FindJobDone(Sender: TObject);
+    procedure FindPopupPick(Sender: TObject; AIndex: integer);
+    procedure ShowFoundAsync(Data: PtrInt);
+    procedure AbandonFindJob;
     procedure MenuWrapClick(Sender: TObject);
     procedure MenuFoldClick(Sender: TObject);
     procedure ViewMenuClick(Sender: TObject);
@@ -2044,6 +2058,13 @@ resourcestring
   rsAIReviewNone = '%s found nothing to point out.';
   rsAIReviewOne = '%s found one thing to look at.';
   rsAIReviewMany = '%s found %d things to look at.';
+  rsFindHint = 'Ask %s which files hold what you type';
+  rsFindStopHint = 'Stop %s looking';
+  rsFindEmpty = 'Type what you are looking for, then ask %s with the sparkle.';
+  rsFindLooking = '%s is looking for "%s"...';
+  rsFindHeader = 'Files for "%s"';
+  rsFindNone = '%s found no file for "%s".';
+  rsFindFailed = '%s could not find it';
   rsSeverityBug = 'Bug';
   rsSeverityRisk = 'Risk';
   rsSeverityQuestion = 'Question';
@@ -3188,6 +3209,9 @@ begin
   FRecentPopup := TGittanPopupList.Create(Self);
   FRecentPopup.Parent := Self;
   FRecentPopup.OnPick := @RecentPopupPick;
+  FFindPopup := TGittanPopupList.Create(Self);
+  FFindPopup.Parent := Self;
+  FFindPopup.OnPick := @FindPopupPick;
   FBasePopup := TGittanPopupList.Create(Self);
   FBasePopup.Parent := Self;
   FBasePopup.OnPick := @BasePopupPick;
@@ -3424,6 +3448,7 @@ begin
   AbandonOpenJob;
   AbandonMessageJob;
   AbandonAIReview;
+  AbandonFindJob;
   StopCommitJob(True);
   FreeAndNil(FDroppedCommits);
   StopRemoteJob(True);
@@ -3716,7 +3741,7 @@ begin
   FSymbolBar.SetColors(P.Shade, P.Text, P.Dim, P.Line);
   for List in [FBranchPopup, FStashPopup, FUpstreamPopup, FTagPopup, FViewPopup,
     FSubListPopup, FReflogPopup, FPullPopup, FReviewPopup, FSyncPopup, FRecentPopup,
-    FBasePopup, FConflictPopup] do
+    FBasePopup, FConflictPopup, FFindPopup] do
     List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
   FGraph.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent, P.Warning);
   FBanner.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Line, P.Accent, P.Deleted, P.Added);
@@ -5545,6 +5570,7 @@ begin
   SaveCommitDraft;
   AbandonMessageJob;
   AbandonAIReview;
+  AbandonFindJob;
   FAIThreads := nil;
   FAIThreadsKey := '';
   StopCommitJob(False);
@@ -6768,11 +6794,14 @@ begin
   FSearchBox.Align := alTop;
   FSearchBox.BorderSpacing.Around := 6;
   FSearchBox.OnChange := @TreeFilterChange;
+  FSearchBox.OnAction := @SearchBoxAction;
+  FSearchBox.ShowHint := True;
   FSearchBox.Parent := FTreePanel;
   FSearchBox.FitHeight;
   FTreeFilter := FSearchBox.Edit;
   FTreeFilter.TextHint := rsFilterHint;
   FTreeFilter.OnKeyDown := @TreeFilterKeyDown;
+  UpdateFindAction;
   SetupSideNav;
   FileTree.Parent := FTreePanel;
   FileTree.Align := alClient;
@@ -6888,8 +6917,11 @@ begin
 end;
 
 { Escape clears the filter, or leaves the field when it is empty; Enter
-  and Down go to the tree. }
+  and Down go to the tree, Cmd+Enter (Ctrl+Enter elsewhere) asks the
+  agent where it is, as the sparkle does. }
 procedure TRepoFrame.TreeFilterKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
+var
+  Asks: boolean;
 begin
   case Key of
     VK_ESCAPE:
@@ -6902,8 +6934,11 @@ begin
       end;
     VK_RETURN, VK_DOWN:
       begin
+        Asks := (Key = VK_RETURN) and (ssModifier in Shift) and FSearchBox.ShowAction;
         Key := 0;
-        if FileTree.CanFocus then
+        if Asks then
+          SearchBoxAction(nil)
+        else if FileTree.CanFocus then
         begin
           if (FileTree.Selected = nil) and (FileTree.Items.Count > 0) then
             FileTree.Selected := FileTree.Items.GetFirstNode;

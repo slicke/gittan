@@ -44,6 +44,8 @@ type
     procedure TestReviewChangesWorkTree;
     procedure TestReviewChangesRange;
     procedure TestReviewArgs;
+    procedure TestParseFoundFiles;
+    procedure TestFindArgs;
   end;
 
 implementation
@@ -448,6 +450,53 @@ begin
   AssertTrue('copilot gets the prompt on its input', Pos('Review the changes',
     ReviewInput(gaCopilot, 'the diff')) = 1);
   AssertEquals('the diff', ReviewInput(gaClaude, 'the diff'));
+end;
+
+procedure TAiTest.TestParseFoundFiles;
+var
+  F: TGittanFoundFiles;
+  Many: string;
+  i: integer;
+begin
+  AssertTrue(ParseFoundFiles('Here:'#10'```json'#10'[{"path":"src/a.pp","line":12,' +
+    '"why":" The parser "},{"path":"./src\\b.pp","line":"7"},{"path":"","line":3},' +
+    '{"path":"c.pp","line":-4}]'#10'```', F));
+  AssertEquals('the one without a path is left out', 3, Length(F));
+  AssertEquals('src/a.pp', F[0].Path);
+  AssertEquals(12, F[0].Line);
+  AssertEquals('The parser', F[0].Why);
+  AssertEquals('./ off, backslashes made /', 'src/b.pp', F[1].Path);
+  AssertEquals('a line given as text', 7, F[1].Line);
+  AssertEquals('no why', '', F[1].Why);
+  AssertEquals('a negative line is the file', 0, F[2].Line);
+  AssertTrue('none', ParseFoundFiles('[]', F));
+  AssertEquals(0, Length(F));
+  AssertFalse('no array', ParseFoundFiles('It is in the parser.', F));
+  Many := '[';
+  for i := 1 to 15 do
+  begin
+    if i > 1 then
+      Many := Many + ',';
+    Many := Many + Format('{"path":"f%d"}', [i]);
+  end;
+  AssertTrue(ParseFoundFiles(Many + ']', F));
+  AssertEquals('at most the limit', FindMaxFiles, Length(F));
+end;
+
+procedure TAiTest.TestFindArgs;
+var
+  Line: string;
+begin
+  Line := string.Join(' ', FindArgs(gaClaude, 'haiku'));
+  AssertTrue(Pos('--max-turns ' + IntToStr(FindMaxTurns), Line) > 0);
+  AssertTrue(Pos('--model haiku', Line) > 0);
+  AssertTrue('read-only tools', Pos('--tools Read,Grep,Glob', Line) > 0);
+  AssertTrue('asks for a JSON array', Pos('JSON array', FindArgs(gaClaude, '')[1]) > 0);
+  AssertEquals('the question alone for claude', 'the parser',
+    FindInput(gaClaude, 'the parser'));
+  AssertTrue('copilot gets the prompt, then the question', Pos('Find where',
+    FindInput(gaCopilot, 'the parser')) = 1);
+  AssertTrue(Pos('the parser', FindInput(gaCopilot, 'the parser')) > 0);
 end;
 
 initialization

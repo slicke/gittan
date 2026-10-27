@@ -498,7 +498,9 @@ begin
   begin
     AbandonMessageJob;
     AbandonAIReview;
+    AbandonFindJob;
   end;
+  UpdateFindAction;
   UpdateCommitState;
   if not ATools then
     Exit;

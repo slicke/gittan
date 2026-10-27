@@ -260,3 +260,140 @@ begin
   FBlameZombies.Add(FAIReviewJob);
   FAIReviewJob := nil;
 end;
+
+{ The third is the sparkle in the filter field: the agent is asked
+  which files hold what the field says, and they drop from the field to
+  be picked. }
+procedure TRepoFrame.UpdateFindAction;
+begin
+  if FSearchBox = nil then
+    Exit;
+  FSearchBox.ShowAction := AIAvailable;
+  FSearchBox.ActionBusy := FFindJob <> nil;
+  if FFindJob <> nil then
+    FSearchBox.ActionHint := Format(rsFindStopHint, [AgentNames[FAgent]])
+  else
+    FSearchBox.ActionHint := Format(rsFindHint, [AgentNames[FAgent]]);
+end;
+
+{ The sparkle or Cmd+Enter: asks about the field's text, or stops the
+  agent while it looks. }
+procedure TRepoFrame.SearchBoxAction(Sender: TObject);
+var
+  Question: string;
+begin
+  if FFindJob <> nil then
+  begin
+    AbandonFindJob;
+    FStatus.ShowMessage('', stNormal, 0);
+    UpdateFindAction;
+    Exit;
+  end;
+  Question := Trim(FTreeFilter.Text);
+  if Question = '' then
+  begin
+    StatusNote(Format(rsFindEmpty, [AgentNames[FAgent]]));
+    if FTreeFilter.CanFocus then
+      FTreeFilter.SetFocus;
+    Exit;
+  end;
+  StartFindJob(Question);
+end;
+
+procedure TRepoFrame.StartFindJob(const AQuestion: string);
+begin
+  if (FFindJob <> nil) or not AIAvailable or (FRepo.Root = '') then
+    Exit;
+  FFindJob := TGittanFindJob.Create(FRepo.Root, FAgent, FAgentCli, FAgentModel,
+    AQuestion);
+  FFindJob.OnDone := @FindJobDone;
+  FFindJob.Start;
+  FStatus.ShowMessage(Format(rsFindLooking, [AgentNames[FAgent], AQuestion]),
+    stNormal, 0);
+  UpdateFindAction;
+end;
+
+{ The files the agent named that are in the work tree, under the field;
+  none is a status note, a failure a banner. The list cuts a caption at
+  its end and gives the detail its whole width, so the why is cut to a
+  part of the list's width here, and the path at its start, keeping the
+  file's name. }
+procedure TRepoFrame.FindJobDone(Sender: TObject);
+const
+  { What the list gives the caption and the detail, at its widest. }
+  FindRoom = 360;
+  WhyRoom = 170;
+var
+  Job: TGittanFindJob;
+  Agent, Item, Why: string;
+  i: integer;
+  P: TPoint;
+  C: TCanvas;
+begin
+  Job := TGittanFindJob(Sender);
+  if Job <> FFindJob then
+    Exit;
+  FFindJob := nil;
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+  FStatus.ShowMessage('', stNormal, 0);
+  UpdateFindAction;
+  Agent := AgentNames[Job.Agent];
+  if not Job.Ok then
+  begin
+    BannerError(Format(rsFindFailed, [Agent]), Job.Error);
+    Exit;
+  end;
+  FFoundFiles := nil;
+  for i := 0 to High(Job.Files) do
+    if RepoFileExists(Job.Files[i].Path) then
+      Insert(Job.Files[i], FFoundFiles, Length(FFoundFiles));
+  if Length(FFoundFiles) = 0 then
+  begin
+    StatusNote(Format(rsFindNone, [Agent, Job.Question]));
+    Exit;
+  end;
+  FFindPopup.Clear;
+  FFindPopup.AddHeader(Format(rsFindHeader, [Job.Question]));
+  C := MeasureCanvas(Font);
+  for i := 0 to High(FFoundFiles) do
+  begin
+    Why := FitTextRight(C, FFoundFiles[i].Why, Px(WhyRoom));
+    Item := FFoundFiles[i].Path;
+    if FFoundFiles[i].Line > 0 then
+      Item := Item + ':' + IntToStr(FFoundFiles[i].Line);
+    Item := FitTextLeft(C, Item, Px(FindRoom) - C.TextWidth(Why) - Px(10));
+    FFindPopup.Add(Item, Why, False, i);
+  end;
+  P := FSearchBox.ClientToScreen(Point(0, 0));
+  FFindPopup.Popup(Rect(P.X, P.Y, P.X + FSearchBox.Width, P.Y + FSearchBox.Height));
+end;
+
+procedure TRepoFrame.FindPopupPick(Sender: TObject; AIndex: integer);
+var
+  i: PtrInt;
+begin
+  i := FFindPopup.TagOf(AIndex);
+  if (i < 0) or (i > High(FFoundFiles)) then
+    Exit;
+  { The question was the agent's, not a filter of the tree. }
+  FTreeFilter.Text := '';
+  Application.QueueAsyncCall(@ShowFoundAsync, i);
+end;
+
+{ After the list has closed and given the focus back to the field, so
+  the editor keeps the focus ShowFileLine gives it. }
+procedure TRepoFrame.ShowFoundAsync(Data: PtrInt);
+begin
+  if Data <= High(FFoundFiles) then
+    ShowFileLine(FFoundFiles[Data].Path, FFoundFiles[Data].Line);
+end;
+
+procedure TRepoFrame.AbandonFindJob;
+begin
+  if FFindJob = nil then
+    Exit;
+  FFindJob.Stop(False);
+  FBlameZombies.Add(FFindJob);
+  FFindJob := nil;
+end;

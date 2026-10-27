@@ -8,7 +8,8 @@ unit gittan.ai;
   Copilot .github/copilot-instructions.md). Gittan links no API of its
   own.
 
-  The features: a commit message, and a review of the changes shown.
+  The features: a commit message, a review of the changes shown, and
+  where something is in the repository.
   The commit message: the changes that would be
   committed are collected as a diff (CommitChanges), given to the agent
   on its standard input with the repository's recent subjects, and its
@@ -16,7 +17,9 @@ unit gittan.ai;
   diff the change view shows, its lines numbered on both sides
   (NumberDiff), so the agent names lines as the view counts them, and
   its findings (ParseReviewFindings) are review threads the change view
-  shows as it shows a pull request's. The agent may
+  shows as it shows a pull request's. Where something is: the user's
+  words on the agent's input, and the files it names (ParseFoundFiles)
+  a list to pick from under the filter field. The agent may
   read the repository's files for context, but gets no tool that writes,
   runs a command or goes to the network. The features are off until
   they are turned on in the settings, since the changes go to the
@@ -53,6 +56,11 @@ const
   ReviewMaxTurns = 20;
   {** The most findings of a review kept; the prompt asks for fewer. }
   ReviewMaxFindings = 10;
+  {** The most turns claude may take to find where something is, each a
+    search or a read. }
+  FindMaxTurns = 20;
+  {** The most files of an answer to where something is kept. }
+  FindMaxFiles = 10;
 
 {** The agent whose key (AgentCommands) is AKey; Claude Code for any
   other, the first the settings offered. }
@@ -69,6 +77,17 @@ const
     '{"path": the file as the diff names it, "line": the number after N or O, ' +
     '"side": "new" for N or "old" for O, "severity": "bug", "risk" or "question", ' +
     '"body": a few sentences in Markdown}.';
+
+type
+  {** A file the agent named for where something is: its path in the
+    repository (with /), the line it is at (0 for the file as a whole)
+    and a few words on what is there. }
+  TGittanFoundFile = record
+    Path: string;
+    Line: integer;
+    Why: string;
+  end;
+  TGittanFoundFiles = array of TGittanFoundFile;
 
 function AgentOfKey(const AKey: string): TGittanAgent;
 
@@ -99,6 +118,11 @@ function CommitMessageInput(AAgent: TGittanAgent; const AChanges: string): strin
 {** AgentArgs and AgentInput for a review. }
 function ReviewArgs(AAgent: TGittanAgent; const AModel: string): TStringArray;
 function ReviewInput(AAgent: TGittanAgent; const AChanges: string): string;
+
+{** AgentArgs and AgentInput for finding where AQuestion, the user's
+  words, is in the repository. }
+function FindArgs(AAgent: TGittanAgent; const AModel: string): TStringArray;
+function FindInput(AAgent: TGittanAgent; const AQuestion: string): string;
 
 {** What a commit of APaths in the work tree of the repository at ARoot
   would change, amending HEAD with AAmend, as the agent is given it: the
@@ -138,6 +162,14 @@ function NumberDiff(const ADiff: string): string;
   array is no finding. }
 function ParseReviewFindings(const AText, AAgent: string;
   out AThreads: TGittanReviewThreads): boolean;
+
+{** The files of an answer to where something is in AText: a JSON array
+  of objects with path, line and why, which may come inside a code fence
+  or after a sentence. Each with a path is kept, "./" taken off it and
+  its backslashes made /, a missing or negative line 0, at most
+  FindMaxFiles. False when AText holds no such array; an empty array is
+  no file. }
+function ParseFoundFiles(const AText: string; out AFiles: TGittanFoundFiles): boolean;
 
 {** Reads what claude -p --output-format json printed: the answer in
   AText, or why there is none in AError (claude's own error, or the turn
@@ -221,9 +253,34 @@ type
     property Error: string read FError;
   end;
 
+  {** Asks the agent where AQuestion is in the repository at ARoot (see
+    FindArgs), in a thread. Stop ends the agent. }
+  TGittanFindJob = class(TGittanJob)
+  private
+    FRoot, FExe, FModel, FQuestion: string;
+    FAgent: TGittanAgent;
+    FOk: boolean;
+    FFiles: TGittanFoundFiles;
+    FError: string;
+    function Cancelled: boolean;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const ARoot: string; AAgent: TGittanAgent;
+      const AExe, AModel, AQuestion: string);
+    property Agent: TGittanAgent read FAgent;
+    property Question: string read FQuestion;
+    {** Whether the agent answered with files, none among them too. }
+    property Ok: boolean read FOk;
+    property Files: TGittanFoundFiles read FFiles;
+    {** Why there are none, when not Ok. }
+    property Error: string read FError;
+  end;
+
 resourcestring
   rsNothingToReview = 'There are no changes to review.';
   rsReviewNotRead = 'The answer was no list of findings: %s';
+  rsFoundNotRead = 'The answer was no list of files: %s';
   rsNothingToDescribe = 'There are no changes to describe.';
   rsAgentNoAnswer = '%s gave no answer.';
   rsClaudeTurns = 'Claude Code stopped after %d turns without an answer.';
@@ -246,6 +303,17 @@ const
     'the diff alone leaves the change unclear. Answer with the message alone, ' +
     'ready for git commit: no preamble, no explanation, no code fences, no ' +
     'trailers.';
+
+  { The files that hold it, as a list to pick from: a model asked where
+    something is otherwise answers in prose, and names a folder or a
+    file it has not opened. }
+  FindPrompt = 'Find where in this repository the thing asked about on standard ' +
+    'input is: the files that define, implement or handle it. Search and read the ' +
+    'repository''s files to be sure; name only files that are there. Answer with a ' +
+    'JSON array alone, no code fences, the best match first, at most 10 files, ' +
+    'fewer is better, and an empty array when nothing fits, each {"path": the file ' +
+    'relative to the repository root with /, "line": the line where it is, 0 for ' +
+    'the file as a whole, "why": a few words on what is there}.';
 
 function AgentOfKey(const AKey: string): TGittanAgent;
 var
@@ -322,6 +390,16 @@ end;
 function ReviewInput(AAgent: TGittanAgent; const AChanges: string): string;
 begin
   Result := AgentInput(AAgent, ReviewPrompt, AChanges);
+end;
+
+function FindArgs(AAgent: TGittanAgent; const AModel: string): TStringArray;
+begin
+  Result := AgentArgs(AAgent, FindPrompt, AModel, FindMaxTurns);
+end;
+
+function FindInput(AAgent: TGittanAgent; const AQuestion: string): string;
+begin
+  Result := AgentInput(AAgent, FindPrompt, AQuestion);
 end;
 
 { ADiff up to MessageDiffKeep bytes, cut at a line end, with a line that
@@ -597,6 +675,57 @@ begin
   end;
 end;
 
+function ParseFoundFiles(const AText: string; out AFiles: TGittanFoundFiles): boolean;
+var
+  Data: TJSONData;
+  Item: TJSONObject;
+  Found: TGittanFoundFile;
+  First, Last, i, n: integer;
+begin
+  AFiles := nil;
+  { The array from its first bracket to its last, whatever is around it. }
+  First := Pos('[', AText);
+  Last := LastDelimiter(']', AText);
+  if (First = 0) or (Last < First) then
+    Exit(False);
+  try
+    Data := GetJSON(Copy(AText, First, Last - First + 1));
+  except
+    Exit(False);
+  end;
+  try
+    Result := Data is TJSONArray;
+    if not Result then
+      Exit;
+    n := 0;
+    SetLength(AFiles, Min(Data.Count, FindMaxFiles));
+    for i := 0 to Data.Count - 1 do
+    begin
+      if n >= Length(AFiles) then
+        Break;
+      if not (Data.Items[i] is TJSONObject) then
+        Continue;
+      Item := TJSONObject(Data.Items[i]);
+      Found := Default(TGittanFoundFile);
+      Found.Path := StringReplace(Trim(Item.Get('path', '')), '\', '/', [rfReplaceAll]);
+      if Copy(Found.Path, 1, 2) = './' then
+        Delete(Found.Path, 1, 2);
+      if Found.Path = '' then
+        Continue;
+      if Item.Find('line') is TJSONNumber then
+        Found.Line := Max(0, Item.Get('line', 0))
+      else
+        Found.Line := Max(0, StrToIntDef(Item.Get('line', ''), 0));
+      Found.Why := Trim(Item.Get('why', ''));
+      AFiles[n] := Found;
+      Inc(n);
+    end;
+    SetLength(AFiles, n);
+  finally
+    Data.Free;
+  end;
+end;
+
 function ParseClaudeResult(const AOutput: string; out AText, AError: string): boolean;
 var
   Data: TJSONData;
@@ -819,6 +948,43 @@ begin
     FOk := ParseReviewFindings(Answer, AgentNames[FAgent], FThreads);
     if not FOk then
       FError := Format(rsReviewNotRead, [Copy(Trim(Answer), 1, 300)]);
+  end;
+  Done;
+end;
+
+{ TGittanFindJob }
+
+constructor TGittanFindJob.Create(const ARoot: string; AAgent: TGittanAgent;
+  const AExe, AModel, AQuestion: string);
+begin
+  { Given up on Stop: Execute asks Cancelled while the agent runs. }
+  inherited Create(True);
+  FRoot := ARoot;
+  FAgent := AAgent;
+  FExe := AExe;
+  FModel := AModel;
+  FQuestion := AQuestion;
+end;
+
+function TGittanFindJob.Cancelled: boolean;
+begin
+  Result := Terminated;
+end;
+
+procedure TGittanFindJob.Execute;
+var
+  Output, Errors, Answer: string;
+  Exited: boolean;
+begin
+  Exited := RunAgentCli(FExe, FRoot, FindArgs(FAgent, FModel),
+    FindInput(FAgent, FQuestion), @Cancelled, Output, Errors);
+  if Terminated then
+    Exit;
+  if ReadAgentText(FAgent, Exited, Output, Errors, Answer, FError) then
+  begin
+    FOk := ParseFoundFiles(Answer, FFiles);
+    if not FOk then
+      FError := Format(rsFoundNotRead, [Copy(Trim(Answer), 1, 300)]);
   end;
   Done;
 end;

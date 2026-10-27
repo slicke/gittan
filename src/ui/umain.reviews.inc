@@ -161,6 +161,10 @@ begin
   Edit.LineTopTodo := 0;
   Edit.LineTop := 0;
   Edit.DoGotoPos(Point(0, Row), Point(-1, -1), 10, -100, True, FoldAction);
+  { An editor not painted since it was shown has no bottom line yet, and
+    takes the row for one in sight: the top is set from its height. }
+  if Edit.LineBottom <= 0 then
+    Edit.LineTop := Max(0, Row - Edit.GetVisibleLines div 2);
   if Edit.CanFocus then
     Edit.SetFocus;
 end;
