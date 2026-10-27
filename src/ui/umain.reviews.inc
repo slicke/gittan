@@ -161,10 +161,15 @@ begin
   Edit.LineTopTodo := 0;
   Edit.LineTop := 0;
   Edit.DoGotoPos(Point(0, Row), Point(-1, -1), 10, -100, True, FoldAction);
-  { An editor not painted since it was shown has no bottom line yet, and
-    takes the row for one in sight: the top is set from its height. }
+  { An editor not painted since it was shown (no bottom line yet) only
+    takes the caret from DoGotoPos, neither scrolled nor told of the
+    move: the top is set from its height, and the caret's position
+    passed on to the header and the status bar. }
   if Edit.LineBottom <= 0 then
+  begin
     Edit.LineTop := Max(0, Row - Edit.GetVisibleLines div 2);
+    EditChangeCaretPos(Edit);
+  end;
   if Edit.CanFocus then
     Edit.SetFocus;
 end;
