@@ -3,8 +3,10 @@
   TGittanOwnTitleBar, aligned at the top of the window, stands in for
   the window's caption, as Firefox's tab bar does: a menu button on the
   left, then a tab per open repository and a plus that opens a new tab,
-  a globe before the caption buttons (SetForge: there while there is a
-  forge, filled while the forge view is shown, OnForge), and on the
+  a banner before the caption buttons, a ribbon hanging from the top
+  edge with a notch at its foot and a globe in it (SetForge: there
+  while there is a forge, in the accent while the forge view is shown,
+  OnForge), and on the
   right the minimize, maximize and close buttons. It lays out
   and paints all of that, tells which part a point is in and runs the
   menu button and the tabs. The empty part is the caption: it moves the
@@ -137,9 +139,9 @@ type
       name), AActive the one shown. }
     procedure SetTabs(const ACaptions, AHints: array of string;
       const AMarks: array of boolean; AActive: integer);
-    {** The globe before the caption buttons: shown while AVisible
-      (there is a forge), filled while AShown (the forge view is shown),
-      AHint its hint (the forge's name). }
+    {** The banner before the caption buttons: shown while AVisible
+      (there is a forge), in the accent while AShown (the forge view is
+      shown), AHint its hint (the forge's name). }
     procedure SetForge(AVisible, AShown: boolean; const AHint: string);
     {** The bar's colors: the shade over the sidebar and the background
       over the rest, the text and the dim text, the shown tab's fill and
@@ -163,7 +165,7 @@ type
     property OnTabSelect: TGittanTitleTabEvent read FOnTabSelect write FOnTabSelect;
     property OnTabClose: TGittanTitleTabEvent read FOnTabClose write FOnTabClose;
     property OnNewTab: TNotifyEvent read FOnNewTab write FOnNewTab;
-    {** The globe: the forge view, or back from it. }
+    {** The banner: the forge view, or back from it. }
     property OnForge: TNotifyEvent read FOnForge write FOnForge;
   end;
 
@@ -185,8 +187,11 @@ const
   MinTabWidth = 64;
   TabGap = 3;
   PlusSize = 26;
-  { The globe's button, and the icon in it. }
-  ForgeSize = 28;
+  { The banner: its width, the room it leaves under it, the depth of
+    the notch at its foot, and the globe in it. }
+  ForgeWidth = 30;
+  ForgeFoot = 4;
+  ForgeNotch = 7;
   ForgeIconSize = 20;
   CrossSize = 18;
   ButtonWidth = 46;
@@ -365,10 +370,10 @@ begin
   FCloseRect := Types.Rect(Width - W, 0, Width, H);
   FMaxRect := Types.Rect(FCloseRect.Left - W, 0, FCloseRect.Left, H);
   FMinRect := Types.Rect(FMaxRect.Left - W, 0, FMaxRect.Left, H);
-  S := Scale96ToForm(ForgeSize);
+  S := Scale96ToForm(ForgeWidth);
   X := FMinRect.Left - Scale96ToForm(Gap) - S;
   if FForgeVisible then
-    FForgeRect := Types.Rect(X, (H - S) div 2 + 1, X + S, (H + S) div 2 + 1)
+    FForgeRect := Types.Rect(X, 0, X + S, H - Scale96ToForm(ForgeFoot))
   else
     FForgeRect := Types.Rect(0, 0, 0, 0);
   S := Scale96ToForm(PlusSize);
@@ -664,7 +669,7 @@ procedure TGittanOwnTitleBar.Paint;
 var
   Split, i, TextY, Mid, W, L: integer;
   R, C: TRect;
-  Ink: TColor;
+  Ink, GlobeInk: TColor;
   Glyph: TGittanTitleGlyph;
   Shown, Hover: boolean;
 
@@ -802,28 +807,35 @@ begin
   Line(Mid, L - W, Mid, L + W + 1, FDim);
   Canvas.Pen.Width := 1;
 
-  { The globe: a box as the shown tab's while the forge view is shown,
-    the hover fill under the mouse. }
+  { The banner: a ribbon from the top edge with a notch at its foot, in
+    the accent with a white globe while the forge view is shown, else
+    in the shown tab's fill (the hover color under the mouse). }
   if FForgeVisible then
   begin
     R := FForgeRect;
+    Canvas.Brush.Style := bsSolid;
     if FForgeShown then
-    begin
-      Canvas.Brush.Style := bsSolid;
-      Canvas.Brush.Color := FTabFill;
-      Canvas.Pen.Color := FTabBorder;
-      Canvas.Pen.Width := 1;
-      Canvas.RoundRect(R.Left, R.Top, R.Right, R.Bottom, Scale96ToForm(8), Scale96ToForm(8));
-    end
+      Canvas.Brush.Color := FMark
     else if FHotPart = tpForge then
-      HotBox(R, FButtonHot);
-    W := Scale96ToForm(ForgeIconSize);
-    if FForgeShown then
-      Canvas.Pen.Color := Ink
+      Canvas.Brush.Color := FButtonHot
     else
-      Canvas.Pen.Color := FDim;
-    DrawStatusIcon(Canvas, HintLink, R.Left + (R.Width - W) div 2, R.Top + (R.Height - W) div 2,
-      W, Canvas.Pen.Color);
+      Canvas.Brush.Color := FTabFill;
+    Canvas.Pen.Color := Canvas.Brush.Color;
+    Canvas.Pen.Width := 1;
+    W := Scale96ToForm(ForgeNotch);
+    Canvas.Polygon([Types.Point(R.Left, R.Top), Types.Point(R.Right - 1, R.Top),
+      Types.Point(R.Right - 1, R.Bottom), Types.Point((R.Left + R.Right) div 2, R.Bottom - W),
+      Types.Point(R.Left, R.Bottom)]);
+    L := Scale96ToForm(ForgeIconSize);
+    if FForgeShown then
+      GlobeInk := clWhite
+    else if FHotPart = tpForge then
+      GlobeInk := Ink
+    else
+      GlobeInk := FDim;
+    { The icon is a square ASize - 4 wide at its left. }
+    DrawStatusIcon(Canvas, HintLink, R.Left + (R.Width - (L - 4)) div 2,
+      (R.Bottom - W - L) div 2 + 1, L, GlobeInk);
     Canvas.Pen.Width := 1;
   end;
 
