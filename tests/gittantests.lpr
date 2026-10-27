@@ -17,7 +17,7 @@ uses
   testsymbolindex, testsnapshots, testblame, testhistory, testsyntaxthemes,
   testgithub, testconflicts, testcli, testsymbolchanges,
   testcallers, testrepofiles, testdiscard, testkeep, testleaveout, testsubmodules, testupdate,
-  testreviews, testgraph, testpofile, testcommitjob, testrepoinfo, testrebase, testcommitstats, testwatch, testjob, testterminal,
+  testreviews, testgraph, testpofile, testcommitjob, testrepoinfo, testrebase, testcommitstats, testwatch, testjob, testterminal, testhttp,
   testtextfile, testrepocommands, testsha256, testai, testforge, testlfslocks;
 
 { Every git the tests start reads this file as the user's config and no

@@ -3,10 +3,10 @@ unit gittan.update;
 {** Is there a newer Gittan on GitHub? Modelled on Trndi's update check.
   Every push to main publishes a release tagged build-<n>, and CI compiles
   that number into the build it packages (GITTAN_BUILD, see GittanBuild).
-  The check asks GitHub's API for the latest release with curl, as Gittan
-  runs git and gh rather than linking a TLS library, and a release is newer
-  when its tag's number is above ours. A local build has no number, so it
-  is never told about one. No LCL: the form shows the result. }
+  The check asks GitHub's API for the latest release (gittan.http), and a
+  release is newer when its tag's number is above ours. A local build has
+  no number, so it is never told about one. No LCL: the form shows the
+  result. }
 
 {$mode objfpc}{$H+}
 
@@ -52,7 +52,8 @@ type
     {** Whether GitHub answered with a release. }
     property Ok: boolean read FOk;
     property Release: TGittanRelease read FRelease;
-    {** Why there is no answer (no network, no curl), else empty. }
+    {** Why there is no answer (no network, an error from GitHub), else
+      empty. }
     property Error: string read FError;
   end;
 
@@ -70,20 +71,20 @@ function ParseRelease(const AJson: string; out ARelease: TGittanRelease): boolea
   build (ACurrent -1) or a release without a build number. }
 function IsNewerRelease(const ARelease: TGittanRelease; ACurrent: integer): boolean;
 
-{** Runs curl for AUrl and answers whether it succeeded, with the body in
-  ABody and, on failure, curl's message in AError. }
+{** Asks GitHub's API for AUrl and answers whether it answered with a
+  success, with the body in ABody and, on failure, why in AError. }
 function FetchUrl(const AUrl: string; out ABody, AError: string): boolean;
 
 implementation
 
 uses
-  Process, fpjson, jsonparser;
+  fpjson, jsonparser, gittan.http;
 
 const
   TagPrefix = 'build-';
   { Long enough for a slow network, short enough not to keep a thread
     hanging at exit. }
-  FetchSeconds = '10';
+  FetchSeconds = 10;
 
 function BuildOfTag(const ATag: string): integer;
 begin
@@ -140,38 +141,22 @@ begin
   Result := (ACurrent >= 0) and (ARelease.Build > ACurrent);
 end;
 
-{ curl comes with macOS, Windows 10 and later, and nearly every Linux. -f
-  makes an HTTP error a failure, -sS keeps the progress meter out but the
-  message in. GitHub's API refuses a request without a User-Agent. }
 function FetchUrl(const AUrl: string; out ABody, AError: string): boolean;
 var
-  P: TProcess;
-  Status: integer;
+  Response: TGittanHttpResponse;
 begin
-  ABody := '';
-  AError := '';
-  P := TProcess.Create(nil);
-  try
-    P.Executable := 'curl';
-    P.Parameters.AddStrings(['-fsSL', '--max-time', FetchSeconds,
-      '-H', 'Accept: application/vnd.github+json', '-A', 'Gittan', AUrl]);
-    P.Options := [poNoConsole];
-    try
-      if P.RunCommandLoop(ABody, AError, Status) <> 0 then
-      begin
-        AError := 'Could not run curl';
-        Exit(False);
-      end;
-    except
-      AError := 'Could not run curl';
-      Exit(False);
-    end;
-  finally
-    P.Free;
+  Response := HttpGet(AUrl, ['Accept: application/vnd.github+json'], FetchSeconds);
+  Result := HttpOk(Response);
+  if Result then
+  begin
+    ABody := Response.Body;
+    AError := '';
+  end
+  else
+  begin
+    ABody := '';
+    AError := HttpFailure(Response);
   end;
-  Result := Status = 0;
-  if not Result then
-    AError := Trim(AError);
 end;
 
 { TGittanUpdateJob }

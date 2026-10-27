@@ -34,3 +34,4 @@ What changes for you in each build of Gittan, newest first. Changes land under U
 ### Fixes
 
 - A file opened from a link in a comment, or from the agent's answer, now scrolls to its line, and the status bar and the header follow it.
+- Checking for updates no longer runs curl: it goes through the system's own networking (libcurl on Linux) and its proxy settings.

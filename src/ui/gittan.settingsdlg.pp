@@ -732,7 +732,7 @@ end;
 
 { Update jobs dropped by a dialog that closed while they ran, freed once
   they have finished, as the main form frees its jobs: freeing one at
-  once would wait for curl, up to FetchSeconds. }
+  once would wait for the request, up to FetchSeconds. }
 var
   GUpdateZombies: TList;
 
