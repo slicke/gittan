@@ -46,8 +46,10 @@ type
   end;
 
 {** The locks git-lfs prints with --json: a list, or with --verify an
-  object of "ours" and "theirs" lists, which sets Ours. False when
-  AJson is neither. }
+  object of "ours" and "theirs" lists, which sets Ours (AVerified: it
+  was that object, so Ours is known). False when AJson is neither. }
+function ParseLfsLocks(const AJson: string; out ALocks: TGittanLfsLocks;
+  out AVerified: boolean): boolean;
 function ParseLfsLocks(const AJson: string; out ALocks: TGittanLfsLocks): boolean;
 {** The index of the lock on APath in ALocks, -1 when none. }
 function LfsLockIndex(const ALocks: TGittanLfsLocks; const APath: string): integer;
@@ -61,7 +63,8 @@ implementation
 uses
   fpjson, jsonparser, DateUtils;
 
-function ParseLfsLocks(const AJson: string; out ALocks: TGittanLfsLocks): boolean;
+function ParseLfsLocks(const AJson: string; out ALocks: TGittanLfsLocks;
+  out AVerified: boolean): boolean;
 var
   Data: TJSONData;
 
@@ -94,6 +97,7 @@ var
 
 begin
   ALocks := nil;
+  AVerified := False;
   Result := False;
   try
     Data := GetJSON(AJson);
@@ -110,11 +114,19 @@ begin
     begin
       AddList(TJSONObject(Data).Find('ours'), True);
       AddList(TJSONObject(Data).Find('theirs'), False);
+      AVerified := True;
       Result := True;
     end;
   finally
     Data.Free;
   end;
+end;
+
+function ParseLfsLocks(const AJson: string; out ALocks: TGittanLfsLocks): boolean;
+var
+  Verified: boolean;
+begin
+  Result := ParseLfsLocks(AJson, ALocks, Verified);
 end;
 
 function LfsLockIndex(const ALocks: TGittanLfsLocks; const APath: string): integer;
@@ -132,12 +144,15 @@ var
   Output, Err, VerifyErr: string;
   Local: TGittanLfsLocks;
   i: integer;
+  Verified: boolean;
 begin
   ALocks := nil;
   AError := '';
   Env := RemoteEnvironmentIn(ARoot);
+  { Only the split into ours and theirs says whose each lock is; a
+    plain list from --verify is marked below as the one without. }
   if RunGitEnv(ARoot, ['lfs', 'locks', '--verify', '--json'], Env, Output, VerifyErr) and
-    ParseLfsLocks(Output, ALocks) then
+    ParseLfsLocks(Output, ALocks, Verified) and Verified then
     Exit(True);
   Result := RunGitEnv(ARoot, ['lfs', 'locks', '--json'], Env, Output, Err) and
     ParseLfsLocks(Output, ALocks);

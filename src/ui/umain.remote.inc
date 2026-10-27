@@ -615,7 +615,8 @@ begin
   State := Job.State;
   FLfsLockable.Clear;
   FLfsLockable.AddStrings(State.Lockable);
-  if State.Installed then
+  FLfsInstalled := State.Installed;
+  if FLfsInstalled then
     StartLfsLocks
   else
     FLfsLocks := nil;

@@ -131,6 +131,7 @@ begin
     Exit;
   end;
   FCommandName := Cmd.Name;
+  FCommandSource := Cmd.Source;
   FCommandRead := 0;
   FCommandJob := TGittanCommandJob.Create(FRepo.Root, Cmd.Command);
   FCommandJob.OnOutput := @CommandJobOutput;
@@ -141,7 +142,7 @@ begin
   FCommandPage.Console.Font.Assign(Edit.Font);
   FCommandPage.Console.Text := '';
   FCommandPage.Console.FollowEnd := True;
-  FCommandPage.SetRun(Cmd.Name, True, -1, 0, True, False);
+  FCommandPage.SetRun(Cmd.Name, Cmd.Source, True, -1, 0, True, False);
   FCommandJob.Start;
   ShowCommands;
   { No further than the panel's end needs: the console fills the box
@@ -178,8 +179,8 @@ begin
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
   FCommandPage.Console.FollowEnd := False;
-  FCommandPage.SetRun(FCommandName, False, Job.ExitCode, Job.ElapsedMs, Job.Started,
-    Job.Killed);
+  FCommandPage.SetRun(FCommandName, FCommandSource, False, Job.ExitCode, Job.ElapsedMs,
+    Job.Started, Job.Killed);
   if FCommandPage.Visible then
     FCommandPage.FitHeight(FSummaryBox.ClientHeight);
   { The page says it in red too, so the status bar's note is enough. }
@@ -215,7 +216,7 @@ begin
     Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
   end;
   FCommandPage.Console.FollowEnd := False;
-  FCommandPage.SetRun(FCommandName, False, -1, Job.ElapsedMs, True, True);
+  FCommandPage.SetRun(FCommandName, FCommandSource, False, -1, Job.ElapsedMs, True, True);
 end;
 
 { Stop on the page: the job ends it, and its end comes as Killed. }

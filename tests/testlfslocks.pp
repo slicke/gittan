@@ -43,10 +43,12 @@ end;
 procedure TLfsLocksTest.TestParse;
 var
   Locks: TGittanLfsLocks;
+  Verified: boolean;
 begin
   AssertTrue(ParseLfsLocks('{"ours":[{"id":"3","path":"art/a.psd","owner":{"name":"Sam"},' +
     '"locked_at":"2026-10-27T09:30:00Z"}],"theirs":[{"id":"7","path":"b.psd",' +
-    '"owner":{"name":"Maja"},"locked_at":"2026-10-26T08:00:00+02:00"}]}', Locks));
+    '"owner":{"name":"Maja"},"locked_at":"2026-10-26T08:00:00+02:00"}]}', Locks, Verified));
+  AssertTrue(Verified);
   AssertEquals(2, Length(Locks));
   AssertEquals('3', Locks[0].Id);
   AssertEquals('art/a.psd', Locks[0].Path);
@@ -62,7 +64,8 @@ begin
   { The plain list knows no owner of its own; a lock without a path is
     left out, a missing date is 0. }
   AssertTrue(ParseLfsLocks('[{"id":"1","path":"c.bin","owner":{"name":"Inés"}},{"id":"2"}]',
-    Locks));
+    Locks, Verified));
+  AssertFalse(Verified);
   AssertEquals(1, Length(Locks));
   AssertFalse(Locks[0].Ours);
   AssertEquals(0, Locks[0].LockedAt, 0);

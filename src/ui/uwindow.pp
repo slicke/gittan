@@ -492,7 +492,11 @@ begin
         Exit;
       end;
   if (FActive <> nil) and FActive.IsBlank then
-    Target := FActive
+  begin
+    Target := FActive;
+    { Opened from the forge view: the frame takes the window back. }
+    ActivateFrame(Target);
+  end
   else
     Target := NewFrame;
   Target.OpenRepository(ADir, AOnOpened, Root);

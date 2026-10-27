@@ -20,10 +20,12 @@ const
   lmShow = 3;
 
 { Starts the job, or has it read again when it is done, since a lock
-  may have changed meanwhile. }
+  may have changed meanwhile. Not without git-lfs, which every fetch
+  would otherwise run in vain. }
 procedure TRepoFrame.StartLfsLocks;
 begin
-  if (FRepo.Root = '') or (FLfsLockable.Count = 0) and (FLfsLocks = nil) then
+  if (FRepo.Root = '') or not FLfsInstalled or
+    (FLfsLockable.Count = 0) and (FLfsLocks = nil) then
     Exit;
   if FLfsLocksJob <> nil then
   begin

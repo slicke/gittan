@@ -645,6 +645,7 @@ type
     FCommandsHash: string;
     FCommandJob: TGittanCommandJob;
     FCommandName: string;
+    FCommandSource: TGittanCommandSource;
     FCommandRead: integer;
     { The Files page, in the box too (umain.files.inc): whether it
       follows HEAD (else it shows the commit Browse Files... picked),
@@ -774,11 +775,13 @@ type
       it (FLfsShown), not shown again once closed until it changes. }
     FLfsCheckJob: TGittanLfsCheckJob;
     FLfsChecked, FLfsShown: string;
-    { Git LFS locks (umain.lfslocks.inc): the files that may be locked,
-      as the check read them (sorted), the locks the job last read,
+    { Git LFS locks (umain.lfslocks.inc): whether git-lfs is installed,
+      as the check found, the files that may be locked, as it read
+      them (sorted), the locks the job last read,
       the job and whether to read again when it is done, the header's
       note of a lock, the file menu's items, File > Git LFS Locks...,
       its list, the locks it shows and the one its menu is for. }
+    FLfsInstalled: boolean;
     FLfsLockable: TStringList;
     FLfsLocks, FListedLocks: TGittanLfsLocks;
     FLfsLocksJob: TGittanLfsLocksJob;
@@ -5712,6 +5715,7 @@ begin
   FBanner.Clear;
   FLfsChecked := '';
   FLfsShown := '';
+  FLfsInstalled := False;
   FLfsLockable.Clear;
   FLfsLocks := nil;
   FLockNote := '';

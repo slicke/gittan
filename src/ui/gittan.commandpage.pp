@@ -59,6 +59,7 @@ type
     FCommands: TGittanRepoCommands;
     FHasFile, FTrusted: boolean;
     FRunName: string;
+    FRunSource: TGittanCommandSource;
     FHasRun, FRunning, FRunStarted, FRunKilled, FStopping, FPulse: boolean;
     FExitCode: integer;
     FElapsedMs: int64;
@@ -115,11 +116,12 @@ type
     {** The commands, whether the commands file exists and whether it
       is trusted. }
     procedure SetCommands(const ACommands: TGittanRepoCommands; AHasFile, ATrusted: boolean);
-    {** The command AName is running (ARunning), or has ended with
-      AExitCode after AElapsedMs; AStarted false when the shell could
-      not start it, AKilled when Stop ended it. }
-    procedure SetRun(const AName: string; ARunning: boolean; AExitCode: integer;
-      AElapsedMs: int64; AStarted, AKilled: boolean);
+    {** The command AName of ASource (a script and a target may share
+      a name) is running (ARunning), or has ended with AExitCode after
+      AElapsedMs; AStarted false when the shell could not start it,
+      AKilled when Stop ended it. }
+    procedure SetRun(const AName: string; ASource: TGittanCommandSource;
+      ARunning: boolean; AExitCode: integer; AElapsedMs: int64; AStarted, AKilled: boolean);
     {** The palette: the background, the text, the dim text, the fill
       under the mouse, the dividers, the links, the ok state and the
       error state. }
@@ -309,12 +311,13 @@ begin
   Invalidate;
 end;
 
-procedure TGittanCommandPage.SetRun(const AName: string; ARunning: boolean;
-  AExitCode: integer; AElapsedMs: int64; AStarted, AKilled: boolean);
+procedure TGittanCommandPage.SetRun(const AName: string; ASource: TGittanCommandSource;
+  ARunning: boolean; AExitCode: integer; AElapsedMs: int64; AStarted, AKilled: boolean);
 begin
   if ARunning and not FRunning then
     FRunStart := GetTickCount64;
   FRunName := AName;
+  FRunSource := ASource;
   FHasRun := True;
   FRunning := ARunning;
   FStopping := False;
@@ -617,7 +620,7 @@ begin
       names no script or target always. }
     Off := ((ASource = csFile) and not FTrusted) or (Cmd.Command = '');
     Leads := not Off and not FRunning and Assigned(FOnRun);
-    Busy := FRunning and (Cmd.Name = FRunName) and (Cmd.Source = ASource);
+    Busy := FRunning and (Cmd.Name = FRunName) and (Cmd.Source = FRunSource);
     { The terminal's link goes first, as LinkAt takes the first that
       holds the point; it leads while another command runs here too. }
     TermY := (TileY + Px(TilePadY)) + BodyH + Px(4) + (CodeH - Px(TermH)) div 2;
@@ -658,7 +661,8 @@ begin
     FC.Brush.Style := bsSolid;
     if Hot or Busy then
       FC.Brush.Color := FLink
-    else if FHasRun and (Cmd.Name = FRunName) and not FRunning then
+    else if FHasRun and (Cmd.Name = FRunName) and (Cmd.Source = FRunSource) and
+      not FRunning then
     begin
       RunState(StateColor);
       FC.Brush.Color := StateColor;
@@ -796,7 +800,8 @@ var
   i: integer;
 begin
   for i := 0 to High(FCommands) do
-    if (FCommands[i].Name = FRunName) and (FCommands[i].Command <> '') then
+    if (FCommands[i].Name = FRunName) and (FCommands[i].Source = FRunSource) and
+      (FCommands[i].Command <> '') then
     begin
       if (FCommands[i].Source = csFile) and not FTrusted then
         Exit(-1);
