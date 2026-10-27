@@ -1076,7 +1076,9 @@ type
     procedure MenuCommandsClick(Sender: TObject);
     procedure ShowCommands;
     procedure CommandPageRun(Sender: TObject; AIndex: integer);
-    procedure RunRepoCommand(AIndex: integer; AByKey: boolean);
+    procedure CommandPageRunInTerminal(Sender: TObject; AIndex: integer);
+    procedure RunRepoCommand(AIndex: integer; AByKey: boolean;
+      AInTerminal: boolean = False);
     procedure CommandJobOutput(Sender: TObject);
     procedure CommandJobDone(Sender: TObject);
     procedure AbandonCommandJob(AWait: boolean);

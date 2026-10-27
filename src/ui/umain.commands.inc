@@ -25,6 +25,7 @@ begin
   FCommandPage.ShortcutPrefix := 'Ctrl+Alt+';
   {$ENDIF}
   FCommandPage.OnRun := @CommandPageRun;
+  FCommandPage.OnRunInTerminal := @CommandPageRunInTerminal;
   FCommandPage.OnStop := @CommandPageStop;
   FCommandPage.OnTrust := @CommandPageTrust;
   FCommandPage.OnEditFile := @CommandPageEditFile;
@@ -93,11 +94,17 @@ begin
   RunRepoCommand(AIndex, False);
 end;
 
-{ Runs the command at AIndex: in a terminal when it asks for one, else
-  in a job whose output the page shows. The file's commands, and the
+procedure TRepoFrame.CommandPageRunInTerminal(Sender: TObject; AIndex: integer);
+begin
+  RunRepoCommand(AIndex, False, True);
+end;
+
+{ Runs the command at AIndex: in a terminal when it asks for one or
+  AInTerminal (the tile's terminal), else in a job whose output the
+  page shows. The file's commands, and the
   keys it gives (AByKey), wait for the file to be trusted: the page is
   shown with its card instead. }
-procedure TRepoFrame.RunRepoCommand(AIndex: integer; AByKey: boolean);
+procedure TRepoFrame.RunRepoCommand(AIndex: integer; AByKey, AInTerminal: boolean);
 var
   Cmd: TGittanRepoCommand;
 begin
@@ -112,7 +119,7 @@ begin
     ShowCommands;
     Exit;
   end;
-  if Cmd.Terminal then
+  if Cmd.Terminal or AInTerminal then
   begin
     OpenTerminal(Cmd.Command);
     Exit;

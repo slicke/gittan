@@ -24,7 +24,9 @@ unit gittan.commandpage;
 
   The tiles of every group share one grid, so a group of one has a tile
   as wide as the others; a tile has a run mark at the left and what
-  runs in CodeFont (the editor's).
+  runs in CodeFont (the editor's); under the mark a terminal raises
+  OnRunInTerminal, for a command that keeps running (a dev server, a
+  watch), also while another runs here.
 
   It paints itself in the editor's palette, like the Repository page,
   and sizes its height to its content so it can sit in the same
@@ -74,7 +76,7 @@ type
     { The canvas the content is painted on: the control's in Paint, a
       measuring one in Layout. }
     FC: TCanvas;
-    FOnRun: TGittanCommandIndexEvent;
+    FOnRun, FOnRunInTerminal: TGittanCommandIndexEvent;
     FOnStop, FOnTrust, FOnEditFile, FOnCopyOutput: TNotifyEvent;
     function LinkAt(X, Y: integer): integer;
     procedure SetHot(AValue: integer);
@@ -88,6 +90,7 @@ type
     procedure PaintButton(const R: TRect; const ACaption, ALink: string;
       AFill, ATextColor: TColor);
     procedure PaintStateMark(X, Y, ASize: integer; AColor: TColor);
+    procedure PaintTerminalIcon(X, Y, ASize: integer; AColor: TColor);
     procedure PaintOutput(var Y: integer);
     function RunState(out AColor: TColor): string;
     function RunIndex: integer;
@@ -142,6 +145,9 @@ type
       while nothing has run. }
     property OutputTop: integer read FOutputTop;
     property OnRun: TGittanCommandIndexEvent read FOnRun write FOnRun;
+    {** A click on a tile's terminal, with the command's index. }
+    property OnRunInTerminal: TGittanCommandIndexEvent read FOnRunInTerminal
+      write FOnRunInTerminal;
     property OnStop: TNotifyEvent read FOnStop write FOnStop;
     property OnTrust: TNotifyEvent read FOnTrust write FOnTrust;
     {** Edit… or Create… at the right of the first group's heading. }
@@ -182,12 +188,14 @@ resourcestring
   rsStop = 'Stop';
   rsCopy = 'Copy';
   rsRunAgain = 'Run Again';
+  rsRunInTerminal = 'Run in Terminal';
   rsTerminalTile = 'in a terminal';
   rsNoSuchTarget = 'no script or target named %s';
 
 const
   RunLink = 'gittan:run:';
   AgainLink = 'gittan:again';
+  TerminalLink = 'gittan:terminal:';
   StopLink = 'gittan:stop';
   CopyLink = 'gittan:copy';
   TrustLink = 'gittan:trust';
@@ -210,6 +218,10 @@ const
   MarkW = 7;
   MarkH = 9;
   MarkGap = 10;
+  { The terminal under the run mark, which the mark's column is as wide
+    as. }
+  TermW = 13;
+  TermH = 11;
   CardPad = 14;
   ButtonPadX = 12;
   ButtonPadY = 5;
@@ -250,6 +262,7 @@ begin
   FConsole.Parent := Self;
   FConsole.Visible := False;
   FCodeFont := TFont.Create;
+  ShowHint := True;
   FTimer := TTimer.Create(Self);
   FTimer.Enabled := False;
   FTimer.Interval := PulseMs;
@@ -386,6 +399,10 @@ begin
     Cursor := crDefault
   else
     Cursor := crHandPoint;
+  if (AValue >= 0) and (Copy(FLinkUrls[AValue], 1, Length(TerminalLink)) = TerminalLink) then
+    Hint := rsRunInTerminal
+  else
+    Hint := '';
   Invalidate;
 end;
 
@@ -551,10 +568,11 @@ procedure TGittanCommandPage.PaintTiles(var Y: integer; ASource: TGittanCommandS
 var
   Indexes: array of integer;
   n, Rows, Cols, TileW, TileH, BodyH, CodeH, i, X, TileY, TextX, NameY, Inner, ChipW,
-  ChipH, Right, MarkY, j, k: integer;
+  ChipH, Right, MarkX, MarkY, j, k, TermY: integer;
   Detail, Chip: string;
   R, ChipR: TRect;
-  Off, Leads, Hot, Busy: boolean;
+  Off, Leads, Hot, TermHot, Busy: boolean;
+  TermR: TRect;
   Cmd: TGittanRepoCommand;
   StateColor: TColor;
 begin
@@ -600,6 +618,17 @@ begin
     Off := ((ASource = csFile) and not FTrusted) or (Cmd.Command = '');
     Leads := not Off and not FRunning and Assigned(FOnRun);
     Busy := FRunning and (Cmd.Name = FRunName) and (Cmd.Source = ASource);
+    { The terminal's link goes first, as LinkAt takes the first that
+      holds the point; it leads while another command runs here too. }
+    TermY := (TileY + Px(TilePadY)) + BodyH + Px(4) + (CodeH - Px(TermH)) div 2;
+    TermR := Rect(X + Px(TilePadX) - Px(4), TermY - Px(4), X + Px(TilePadX) + Px(TermW) + Px(4),
+      TermY + Px(TermH) + Px(4));
+    TermHot := False;
+    if not Off and Assigned(FOnRunInTerminal) then
+    begin
+      TermHot := FHot = Length(FLinkRects);
+      AddLink(TermR, TerminalLink + IntToStr(Indexes[i]));
+    end;
     Hot := Leads and (FHot = Length(FLinkRects));
     if Leads then
       AddLink(R, RunLink + IntToStr(Indexes[i]));
@@ -613,7 +642,7 @@ begin
     else
       FC.Pen.Color := MixColor(FCard, FLine, 0.5);
     FC.Brush.Style := bsSolid;
-    if Hot then
+    if Hot or TermHot then
       FC.Brush.Color := FHover
     else
       FC.Brush.Color := FCard;
@@ -638,11 +667,19 @@ begin
       FC.Brush.Color := MixColor(FDim, FCard, 0.5)
     else
       FC.Brush.Color := FDim;
-    FC.Polygon([Point(TextX, MarkY), Point(TextX + Px(MarkW), MarkY + Px(MarkH) div 2),
-      Point(TextX, MarkY + Px(MarkH))]);
+    MarkX := TextX + (Px(TermW) - Px(MarkW)) div 2;
+    FC.Polygon([Point(MarkX, MarkY), Point(MarkX + Px(MarkW), MarkY + Px(MarkH) div 2),
+      Point(MarkX, MarkY + Px(MarkH))]);
     FC.Pen.Style := psSolid;
     FC.Brush.Style := bsClear;
-    Inc(TextX, Px(MarkW) + Px(MarkGap));
+    { The terminal under it, in the link color under the mouse. }
+    if TermHot then
+      PaintTerminalIcon(TextX, TermY, Px(TermW), FLink)
+    else if Off then
+      PaintTerminalIcon(TextX, TermY, Px(TermW), MixColor(FDim, FCard, 0.5))
+    else
+      PaintTerminalIcon(TextX, TermY, Px(TermW), FDim);
+    Inc(TextX, Px(TermW) + Px(MarkGap));
     Right := X + TileW - Px(TilePadX);
 
     { The chip of the shortcut, on the name's line. }
@@ -850,6 +887,25 @@ begin
   end;
   FC.Pen.Style := psSolid;
   FC.Brush.Style := bsClear;
+end;
+
+{ A terminal in a box ASize wide at X, Y, as the sidebar's Commands
+  row has it: a window with a prompt's chevron and a cursor line. }
+procedure TGittanCommandPage.PaintTerminalIcon(X, Y, ASize: integer; AColor: TColor);
+var
+  H, Mid, MidY: integer;
+begin
+  H := ASize * TermH div TermW;
+  FC.Pen.Style := psSolid;
+  FC.Pen.Width := 1;
+  FC.Pen.Color := AColor;
+  FC.Brush.Style := bsClear;
+  FC.RoundRect(X, Y, X + ASize, Y + H, 3, 3);
+  Mid := X + ASize * 2 div 7;
+  MidY := Y + H div 2;
+  FC.Polyline([Point(Mid, MidY - H div 5), Point(Mid + H div 5, MidY),
+    Point(Mid, MidY + H div 5)]);
+  FC.Line(X + ASize div 2, Y + H * 5 div 7, X + ASize - 3, Y + H * 5 div 7);
 end;
 
 { The output's panel: the bar with the state, the name, the time and
@@ -1070,6 +1126,12 @@ begin
     n := StrToIntDef(Copy(FLinkUrls[i], Length(RunLink) + 1, MaxInt), -1);
     if Assigned(FOnRun) and (n >= 0) and (n <= High(FCommands)) then
       FOnRun(Self, n);
+  end
+  else if Copy(FLinkUrls[i], 1, Length(TerminalLink)) = TerminalLink then
+  begin
+    n := StrToIntDef(Copy(FLinkUrls[i], Length(TerminalLink) + 1, MaxInt), -1);
+    if Assigned(FOnRunInTerminal) and (n >= 0) and (n <= High(FCommands)) then
+      FOnRunInTerminal(Self, n);
   end
   else if FLinkUrls[i] = AgainLink then
   begin
