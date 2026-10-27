@@ -30,9 +30,10 @@ const
   {** The most turns claude may take to find where something is, each a
     search or a read. }
   FindMaxTurns = 20;
-  {** The most turns claude may take for each task. }
+  {** The most turns claude may take for each task; the second round of
+    a find is never a tool's, and gets the find's. }
   TaskTurns: array[TGittanAITask] of integer = (MessageMaxTurns, ReviewMaxTurns,
-    FindMaxTurns);
+    FindMaxTurns, FindMaxTurns);
 
 type
   {** A tool: Path is its command, Model the model it runs with (empty
@@ -107,6 +108,7 @@ function VersionOf(const AOutput, APrefix: string): string;
 
 resourcestring
   rsClaudeTurns = 'Claude Code stopped after %d turns without an answer.';
+  rsClaudeTurnLimit = 'Claude Code stopped at its turn limit without an answer.';
 
 implementation
 
@@ -145,7 +147,12 @@ begin
     if Obj.Get('is_error', False) or (Obj.Get('subtype', 'success') <> 'success') then
     begin
       if Obj.Get('subtype', '') = 'error_max_turns' then
-        AError := Format(rsClaudeTurns, [Obj.Get('num_turns', MessageMaxTurns)])
+      begin
+        if Obj.Find('num_turns') is TJSONNumber then
+          AError := Format(rsClaudeTurns, [Obj.Get('num_turns', 0)])
+        else
+          AError := rsClaudeTurnLimit;
+      end
       else if Trim(AText) <> '' then
         AError := Trim(AText)
       else

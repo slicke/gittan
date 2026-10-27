@@ -21,7 +21,6 @@ uses
   testtextfile, testrepocommands, testsha256, testai, testagentcli, testopenai, testforge,
   testlfslocks;
 
-
 { Every git the tests start reads this file as the user's config and no
   system config, so what the developer has set (signed commits, a hooks
   path, core.autocrlf=true, which Git for Windows sets system-wide and
@@ -68,7 +67,6 @@ begin
     system's page on the way, so "ändrad" comes back broken. }
   SetMultiByteConversionCodePage(CP_UTF8);
   SetMultiByteRTLFileSystemCodePage(CP_UTF8);
-
   GitConfig := IsolateGitConfig;
   App := TTestRunner.Create(nil);
   try

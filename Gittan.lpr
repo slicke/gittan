@@ -17,7 +17,6 @@ uses
   { The forges and the AI agents, which register themselves as they
     load. }
   gittan.github, gittan.agentcli, gittan.openai
-
   { you can add units after this };
 
 {$R *.res}

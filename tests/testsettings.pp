@@ -188,7 +188,6 @@ begin
     AssertEquals('sk-or-v1-abc', S.OpenAIKey);
     AssertEquals('openai/gpt-4o-mini', S.OpenAIModel);
     AssertEquals('the day, without the time', EncodeDate(2026, 10, 29),
-
       S.UpdateSnoozedUntil, 0);
     AssertEquals(2, S.Recent.Count);
     AssertEquals('newest first', '/tmp/b', S.Recent[0]);

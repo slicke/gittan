@@ -10,7 +10,7 @@ unit gittan.settings;
 interface
 
 uses
-  Classes, SysUtils, gittan.ai;
+  Classes, SysUtils;
 
 const
   {** How many repositories File > Open Recent lists. }
@@ -130,7 +130,7 @@ type
       provider. }
     AIEnabled: boolean;
     {** The agent they run, by its key (AgentOfKey): claude, copilot
-      or openai. AgentSetup gives the fields below for one. }
+      or openai. }
     AIAgent: string;
     {** Each agent's command, as a path to it (empty runs the one
       TGittanAI.Find finds), and the model it runs with (empty for its
@@ -154,12 +154,7 @@ type
       Name; gh for GitHub) as a path to it, kept in the forge's own
       section; empty runs the one found on ToolSearchPath, and when there
       is none the forge's features are off. }
-    {** AAgent's fields: its command's path or its server (APath), its
-      key (AKey, empty for a command) and its model (AModel), as the
-      settings hold them. }
-    procedure AgentSetup(AAgent: TGittanAgent; out APath, AKey, AModel: string);
     function ForgeCliPath(const AName: string): string;
-
     procedure SetForgeCliPath(const AName, AValue: string);
     {** AFileName names the ini file; empty picks gittan.ini in the
       user's configuration folder. }
@@ -293,31 +288,7 @@ begin
   inherited Destroy;
 end;
 
-procedure TGittanSettings.AgentSetup(AAgent: TGittanAgent; out APath, AKey, AModel: string);
-begin
-  AKey := '';
-  case AAgent of
-    gaCopilot:
-    begin
-      APath := CopilotPath;
-      AModel := CopilotModel;
-    end;
-    gaOpenAI:
-    begin
-      APath := OpenAIUrl;
-      AKey := OpenAIKey;
-      AModel := OpenAIModel;
-    end;
-    else
-    begin
-      APath := ClaudePath;
-      AModel := ClaudeModel;
-    end;
-  end;
-end;
-
 function TGittanSettings.ForgeCliPath(const AName: string): string;
-
 var
   i: integer;
 begin
@@ -516,7 +487,6 @@ begin
       Ini.WriteString(SecAI, 'OpenAIUrl', KeepEdges(OpenAIUrl));
       Ini.WriteString(SecAI, 'OpenAIKey', KeepEdges(OpenAIKey));
       Ini.WriteString(SecAI, 'OpenAIModel', KeepEdges(OpenAIModel));
-
       if UpdateSnoozedUntil > 0 then
         Ini.WriteString(SecUpdate, 'SnoozedUntil',
           FormatDateTime('yyyy"-"mm"-"dd', UpdateSnoozedUntil))

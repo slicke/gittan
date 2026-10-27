@@ -33,7 +33,25 @@ begin
   AIClass := AIClassOf(Agent);
   if AIClass = nil then
     Exit;
-  App.Settings.AgentSetup(Agent, Path, Key, Model);
+  Key := '';
+  case Agent of
+    gaCopilot:
+    begin
+      Path := App.Settings.CopilotPath;
+      Model := App.Settings.CopilotModel;
+    end;
+    gaOpenAI:
+    begin
+      Path := App.Settings.OpenAIUrl;
+      Key := App.Settings.OpenAIKey;
+      Model := App.Settings.OpenAIModel;
+    end;
+    else
+    begin
+      Path := App.Settings.ClaudePath;
+      Model := App.Settings.ClaudeModel;
+    end;
+  end;
   FAI := AIClass.Create(AIClass.Find(Trim(Path)), Trim(Key), Trim(Model));
 end;
 
@@ -317,7 +335,6 @@ begin
     Exit;
   FFindJob := TGittanFindJob.Create(FRepo.Root, FAI, AQuestion);
   FFindJob.OnDone := @FindJobDone;
-
   FFindJob.Start;
   FStatus.ShowBusy(Format(rsFindLooking, [AgentName, AQuestion]),
     HintSparkle);

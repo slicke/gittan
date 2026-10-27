@@ -25,8 +25,10 @@ unit gittan.ai;
   them, and its findings (ParseReviewFindings) are review threads the
   change view shows as it shows a pull request's. Where something is:
   the user's words (with the repository's file list for a model that
-  cannot search, FindListInput), and the files it names
-  (ParseFoundFiles) a list to pick from under the filter field. The
+  cannot search, FindListInput, which then gets the files it named
+  with their lines numbered in a second round, FindLinesInput, for
+  their lines), and the files it names (ParseFoundFiles) a list to
+  pick from under the filter field. The
   features are off until they are turned on in the settings, since the
   changes go to the agent's provider. }
 
@@ -42,8 +44,10 @@ type
     an OpenAI-compatible API. Each has a class (AIClassOf). }
   TGittanAgent = (gaClaude, gaCopilot, gaOpenAI);
 
-  {** What an agent is asked to do. }
-  TGittanAITask = (atMessage, atReview, atFind);
+  {** What an agent is asked to do; atLocate is the second round of a
+    find for a model that cannot read files, the lines in the files it
+    named. }
+  TGittanAITask = (atMessage, atReview, atFind, atLocate);
 
 const
   {** What the agents are called in the interface; an API's model is
@@ -216,6 +220,22 @@ function RepoFileList(const ARoot: string; out AList, AError: string): boolean;
   AFiles (RepoFileList). }
 function FindListInput(const AQuestion, AFiles: string): string;
 
+{** What such a model gets for the lines, once it named AFiles
+  (ParseFoundFiles of its first answer): AQuestion, then each file of
+  AFiles that is in the work tree at ARoot (none out of it) with its
+  lines numbered ("12: text"), cut at its share of MessageDiffKeep with
+  a line that says so, the share split among the files that are there
+  and only that much of a file read; a binary file (one with a NUL in
+  what is read) is named without its text. Empty when none of them is
+  there. }
+function FindLinesInput(const ARoot, AQuestion: string;
+  const AFiles: TGittanFoundFiles): string;
+
+{** Puts the lines of ALines, the model's second answer, into AFiles by
+  path: a file's line and, when given, its why; a file ALines does not
+  name keeps line 0. }
+procedure MergeFoundLines(var AFiles: TGittanFoundFiles; const ALines: TGittanFoundFiles);
+
 {** The files of an answer to where something is in AText: a JSON array
   of objects with path, line and why, which may come inside a code fence
   or after a sentence. Each with a path is kept, "./" taken off it and
@@ -304,13 +324,15 @@ type
   end;
 
   {** Asks the agent where AQuestion is in the repository (a model that
-    cannot search gets the file list with it, RepoFileList). }
+    cannot search gets the file list with it, RepoFileList, and then
+    the files it named with their text, for their lines). }
   TGittanFindJob = class(TGittanAgentJob)
   private
     FQuestion: string;
     FOk: boolean;
     FFiles: TGittanFoundFiles;
     FError: string;
+    procedure LocateLines;
   protected
     procedure Execute; override;
   public
@@ -386,6 +408,19 @@ const
     'the line where it is, 0 for the file as a whole, "why": a few words on what ' +
     'is there}.';
 
+  { The lines, once a model that cannot search has named the files from
+    their paths: their text, numbered, which it reads as a tool would
+    have. }
+  LocatePromptStart = 'Find the lines where the thing asked about below is: the ' +
+    'question is followed by the files that may hold it, each with its lines ' +
+    'numbered. ';
+  LocateReadNote = 'You may read the repository''s files for more. ';
+  LocateSentNote = 'Judge by the text given alone. ';
+  LocatePromptEnd = 'Answer with a JSON array alone, no code fences, the best match ' +
+    'first, one entry for a file at most and none for a file that does not hold ' +
+    'it, each {"path": the file as given, "line": the number of the line where ' +
+    'it is defined, implemented or handled, "why": a few words on what is there}.';
+
 var
   AIClasses: array[TGittanAgent] of TGittanAIClass;
 
@@ -422,11 +457,16 @@ begin
         Result := ReviewPromptStart + ReviewReadNote + ReviewPromptEnd
       else
         Result := ReviewPromptStart + ReviewSentNote + ReviewPromptEnd;
-    else
+    atFind:
       if AReadsFiles then
         Result := FindPromptStart + FindReadNote + FindPromptEnd
       else
         Result := FindPromptStart + FindSentNote + FindPromptEnd;
+    else
+      if AReadsFiles then
+        Result := LocatePromptStart + LocateReadNote + LocatePromptEnd
+      else
+        Result := LocatePromptStart + LocateSentNote + LocatePromptEnd;
   end;
 end;
 
@@ -540,6 +580,124 @@ function FindListInput(const AQuestion, AFiles: string): string;
 begin
   Result := 'The question: ' + AQuestion + LineEnding + LineEnding +
     'The repository''s files:' + LineEnding + AFiles;
+end;
+
+{ AText with its lines numbered from 1, "12: text". }
+function NumberLines(const AText: string): string;
+var
+  Lines: TStringList;
+  Text: TStringBuilder;
+  i: integer;
+begin
+  Lines := TStringList.Create;
+  Text := TStringBuilder.Create;
+  try
+    Lines.Text := AText;
+    for i := 0 to Lines.Count - 1 do
+    begin
+      Text.Append(IntToStr(i + 1));
+      Text.Append(': ');
+      Text.Append(Lines[i]);
+      Text.Append(#10);
+    end;
+    Result := Text.ToString;
+  finally
+    Text.Free;
+    Lines.Free;
+  end;
+end;
+
+{ Whether APath, as the model gave it, stays in the repository: not
+  absolute, no .. in it. }
+function InsideRepo(const APath: string): boolean;
+begin
+  Result := (APath <> '') and (APath[1] <> '/') and (Pos(':', APath) = 0) and
+    (Pos('/../', '/' + APath + '/') = 0);
+end;
+
+function FindLinesInput(const ARoot, AQuestion: string;
+  const AFiles: TGittanFoundFiles): string;
+var
+  Names: array of string;
+  Count, Share, Cut, i: integer;
+  Whole: int64;
+  Text: string;
+  Stream: TFileStream;
+begin
+  Result := '';
+  { The files that are there share the budget; one named but out of the
+    repository or missing takes none of it. }
+  Count := 0;
+  SetLength(Names, Length(AFiles));
+  for i := 0 to High(AFiles) do
+    if InsideRepo(AFiles[i].Path) then
+    begin
+      Names[i] := IncludeTrailingPathDelimiter(ARoot) +
+        StringReplace(AFiles[i].Path, '/', PathDelim, [rfReplaceAll]);
+      if FileExists(Names[i]) then
+        Inc(Count)
+      else
+        Names[i] := '';
+    end;
+  if Count = 0 then
+    Exit;
+  Share := MessageDiffKeep div Count;
+  for i := 0 to High(AFiles) do
+  begin
+    if Names[i] = '' then
+      Continue;
+    { Only the share is read: a big file is neither loaded nor numbered
+      whole. }
+    try
+      Stream := TFileStream.Create(Names[i], fmOpenRead or fmShareDenyNone);
+      try
+        Whole := Stream.Size;
+        SetLength(Text, Min(Whole, Share));
+        if Text <> '' then
+          Stream.ReadBuffer(Text[1], Length(Text));
+      finally
+        Stream.Free;
+      end;
+    except
+      Continue;
+    end;
+    Result := Result + 'File: ' + AFiles[i].Path + LineEnding;
+    if Pos(#0, Text) > 0 then
+      Result := Result + '[A binary file; its text is not shown.]' + LineEnding
+    else
+    begin
+      { Cut at a line end before it is numbered. }
+      if Whole > Share then
+      begin
+        Cut := Length(Text);
+        while (Cut > 0) and (Text[Cut] <> #10) do
+          Dec(Cut);
+        SetLength(Text, Cut);
+      end;
+      Result := Result + NumberLines(Text);
+      if Whole > Share then
+        Result := Result + Format('[The file is cut here: %d of its %d bytes are ' +
+          'left out.]', [Whole - Length(Text), Whole]) + LineEnding;
+    end;
+    Result := Result + LineEnding;
+  end;
+  if Result <> '' then
+    Result := 'The question: ' + AQuestion + LineEnding + LineEnding + Result;
+end;
+
+procedure MergeFoundLines(var AFiles: TGittanFoundFiles; const ALines: TGittanFoundFiles);
+var
+  i, j: integer;
+begin
+  for i := 0 to High(AFiles) do
+    for j := 0 to High(ALines) do
+      if (ALines[j].Path = AFiles[i].Path) and (ALines[j].Line > 0) then
+      begin
+        AFiles[i].Line := ALines[j].Line;
+        if ALines[j].Why <> '' then
+          AFiles[i].Why := ALines[j].Why;
+        Break;
+      end;
 end;
 
 const
@@ -1036,9 +1194,29 @@ begin
   begin
     FOk := ParseFoundFiles(Answer, FFiles);
     if not FOk then
-      FError := Format(rsFoundNotRead, [Copy(Trim(Answer), 1, 300)]);
+      FError := Format(rsFoundNotRead, [Copy(Trim(Answer), 1, 300)])
+    else if not FAI.ReadsFiles and (Length(FFiles) > 0) then
+      LocateLines;
   end;
+  if Terminated then
+    Exit;
   Done;
+end;
+
+{ The second round for a model that cannot read files: the files it
+  named with their text, for their lines. An answer that is none leaves
+  the files as they are, without lines, since they are still worth
+  showing. }
+procedure TGittanFindJob.LocateLines;
+var
+  Input, Answer, Why: string;
+  Lines: TGittanFoundFiles;
+begin
+  Input := FindLinesInput(FRoot, FQuestion, FFiles);
+  if (Input = '') or Terminated then
+    Exit;
+  if Ask(atLocate, Input, Answer, Why) and ParseFoundFiles(Answer, Lines) then
+    MergeFoundLines(FFiles, Lines);
 end;
 
 end.

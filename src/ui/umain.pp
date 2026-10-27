@@ -1345,7 +1345,6 @@ type
     function AIAvailable: boolean;
     {** The agent's name for the hints and messages (TGittanAI.Title). }
     function AgentName: string;
-
     {** Shows AI in the Commit header and File > Write Commit Message
       when AIAvailable, enabled as the commit section allows; from
       UpdateCommitState. }
@@ -3558,7 +3557,6 @@ begin
   FreeAndNil(FAI);
   StopCommitJob(True);
   FreeAndNil(FDroppedCommits);
-
   StopRemoteJob(True);
   Application.RemoveOnActivateHandler(@AppActivate);
   Application.RemoveOnDeactivateHandler(@AppDeactivate);

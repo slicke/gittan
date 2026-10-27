@@ -191,6 +191,9 @@ begin
   AssertTrue(ParseClaudeResult('{"type":"result","subtype":"error_max_turns",' +
     '"is_error":false,"num_turns":10,"result":""}', Text, Error));
   AssertEquals(Format(rsClaudeTurns, [10]), Error);
+  AssertTrue(ParseClaudeResult('{"type":"result","subtype":"error_max_turns",' +
+    '"is_error":true}', Text, Error));
+  AssertEquals('the limit without a count', rsClaudeTurnLimit, Error);
   AssertTrue(ParseClaudeResult('{"type":"result","subtype":"success","is_error":false,' +
     '"result":""}', Text, Error));
   AssertEquals('an empty answer is none', Format(rsAgentNoAnswer, ['Claude Code']), Error);
@@ -277,7 +280,6 @@ begin
   end;
 end;
 
-
 procedure TAgentCliTest.TestTitle;
 var
   AI, Copy: TGittanAI;
@@ -308,6 +310,5 @@ begin
 end;
 
 initialization
-
   RegisterTest(TAgentCliTest);
 end.

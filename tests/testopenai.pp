@@ -117,9 +117,12 @@ begin
   AssertFalse('an error as a string', ParseChatAnswer('{"error":"model not found"}',
     Text, Error));
   AssertEquals('model not found', Error);
+  AssertFalse('an error beside a choice', ParseChatAnswer('{"error":{"message":' +
+    '"Rate limited"},"choices":[{"message":{"content":"Half an answer"}}]}', Text, Error));
+  AssertEquals('Rate limited', Error);
+  AssertEquals('', Text);
 end;
 
 initialization
-
   RegisterTest(TOpenAITest);
 end.

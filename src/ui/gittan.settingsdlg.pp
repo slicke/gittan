@@ -100,9 +100,10 @@ resourcestring
   rsAINote = 'They run the agent picked here in the repository, with your own ' +
     'login, or ask a model at an OpenAI-compatible API with your key, to write a ' +
     'commit message from the ticked files, review the changes and find where ' +
-    'something is. The changes are sent to its provider: Anthropic for Claude ' +
-    'Code, GitHub for Copilot, the server named for the API. Off until turned on ' +
-    'here.';
+    'something is. The changes are sent to its provider (Anthropic for Claude ' +
+    'Code, GitHub for Copilot, the server named for the API), and when you ask ' +
+    'where something is, so is the text of the files an API''s model picks. Off ' +
+    'until turned on here.';
   rsAgent = 'Agent';
   rsAgentPath = '%s, %s''s command line tool';
   rsAgentDefault = 'The %s on PATH';
@@ -115,6 +116,7 @@ resourcestring
   rsApiUrlNote = 'The base URL of an OpenAI-compatible API: OpenAI''s when empty, ' +
     'https://openrouter.ai/api/v1 for OpenRouter, http://localhost:11434/v1 for a ' +
     'local Ollama.';
+  rsApiUrlScheme = 'The server is a URL, starting with http:// or https://.';
   rsApiKey = 'API key';
   rsApiKeyNote = 'Kept in Gittan''s settings file. Leave it empty for a local server ' +
     'that needs none.';
@@ -1110,6 +1112,7 @@ end;
 procedure TSettingsForm.ToolChange(Sender: TObject);
 var
   i: integer;
+  Server: string;
 begin
   FVersionsRead := False;
   if Sender = FGitEdit then
@@ -1124,17 +1127,24 @@ begin
         Format(rsForgeNotFound, [FForges[i].Name]));
       Exit;
     end;
-  { An API has no command to look for; its model note says when the
-    model it needs is missing. }
+  { An API has no command to look for: its server's note says when the
+    server is no URL, its model's when the model it needs is missing. }
   if ApiAgent then
   begin
-    FAgentNote.Caption := rsApiUrlNote;
+    Server := LowerCase(Trim(FAgentEdit.Text));
+    if (Server = '') or (Pos('http://', Server) = 1) or (Pos('https://', Server) = 1) then
+      FAgentNote.Caption := rsApiUrlNote
+    else
+      FAgentNote.Caption := rsApiUrlScheme;
     if Trim(FModelEdit.Text) = '' then
       FModelNote.Caption := rsApiModelMissing
     else
       FModelNote.Caption := rsApiModelNote;
     Exit;
   end;
+  { A tool's model is not looked for. }
+  if Sender = FModelEdit then
+    Exit;
   ShowTool(FAgentEdit, FAgentNote, AgentCommands[FAgent],
     Format(rsAgentNotFound, [AgentNames[FAgent]]));
 end;
@@ -1188,7 +1198,7 @@ end;
 
 { The picked agent's command and model in the fields, and the labels,
   hints and notes that name it; for an API the command field is its
-  server and the key's field shows. }
+  server, the key's field shows, and ToolChange gives the notes. }
 procedure TSettingsForm.ShowAgent;
 begin
   FAgentBox.ItemIndex := Ord(FAgent);
@@ -1204,16 +1214,16 @@ begin
       AgentNames[FAgent]]);
     FAgentEdit.TextHint := Format(rsAgentDefault, [AgentCommands[FAgent]]);
     FModelEdit.TextHint := Format(rsAgentModelDefault, [AgentNames[FAgent]]);
+    if FAgent = gaCopilot then
+      FModelNote.Caption := rsCopilotModelNote
+    else
+      FModelNote.Caption := rsClaudeModelNote;
   end;
   FAgentEdit.Text := FAgentPaths[FAgent];
   FKeyLabel.Visible := ApiAgent;
   FKeyEdit.Visible := ApiAgent;
   FKeyNote.Visible := ApiAgent;
   FModelEdit.Text := FAgentModels[FAgent];
-  if FAgent = gaCopilot then
-    FModelNote.Caption := rsCopilotModelNote
-  else
-    FModelNote.Caption := rsClaudeModelNote;
   ToolChange(FAgentEdit);
 end;
 
@@ -1387,7 +1397,6 @@ var
   Lines: TStringList;
   Version: string;
   Major, Minor, i: integer;
-
 begin
   Lines := TStringList.Create;
   try
@@ -1580,7 +1589,6 @@ begin
       AValues.AgentModels := F.FAgentModels;
       AValues.ApiKey := Trim(F.FKeyEdit.Text);
     end;
-
   finally
     F.Free;
   end;

@@ -476,7 +476,6 @@ begin
       App.Settings.OpenAIUrl := V.AgentPaths[gaOpenAI];
       App.Settings.OpenAIModel := V.AgentModels[gaOpenAI];
       App.Settings.OpenAIKey := V.ApiKey;
-
       Tools := (V.GitPath <> App.Settings.GitPath) or
         (V.HostingEnabled <> App.Settings.HostingEnabled);
       for i := 0 to High(Forges) do
@@ -509,7 +508,6 @@ procedure TRepoFrame.SettingsChanged(AFont: TFont; ATheme, ATabSize: integer;
 begin
   PreviewSettings(AFont, ATheme, ATabSize);
   FindAI;
-
   if not AIAvailable then
   begin
     AbandonMessageJob;

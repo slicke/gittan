@@ -47,8 +47,9 @@ function ChatRequestBody(const AModel, ASystem, AUser: string): string;
 
 {** The answer in ABody, what the API sent back: the first choice's
   message in AText, trimmed, and True; else False with the API's reason
-  in AError (its error's message, or that the model answered with no
-  text), empty when ABody is no answer of the API at all. }
+  in AError (its error's message, which counts even beside a choice, or
+  that the model answered with no text), empty when ABody is no answer
+  of the API at all. }
 function ParseChatAnswer(const ABody: string; out AText, AError: string): boolean;
 
 {** Asks AModel at the API whose base is AUrl, with AKey as the bearer
@@ -133,6 +134,10 @@ begin
           AText := AText + TJSONObject(Part).Get('text', '');
       end;
     AText := Trim(AText);
+    { An error beside a choice (OpenRouter sends both at times) is the
+      answer. }
+    if AError <> '' then
+      AText := '';
     Result := AText <> '';
     if not Result and (AError = '') and (Data.FindPath('choices') <> nil) then
       AError := rsChatEmpty;

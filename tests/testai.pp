@@ -41,6 +41,8 @@ type
     procedure TestTaskPrompt;
     procedure TestRepoFileList;
     procedure TestFindListInput;
+    procedure TestFindLinesInput;
+    procedure TestMergeFoundLines;
   end;
 
 implementation
@@ -353,8 +355,10 @@ begin
   AssertTrue('the find prompt says the list follows', Pos('paths of the repository',
     TaskPrompt(atFind, False)) > 0);
   AssertTrue(Pos('JSON array', TaskPrompt(atFind, False)) > 0);
+  AssertTrue('the second round says the text follows', Pos('lines numbered',
+    TaskPrompt(atLocate, False)) > 0);
+  AssertTrue(Pos('JSON array', TaskPrompt(atLocate, False)) > 0);
 end;
-
 
 procedure TAiTest.TestRepoFileList;
 var
@@ -382,7 +386,91 @@ begin
   AssertTrue(Pos('files:'#10'a.txt'#10'b.txt', Text) > 0);
 end;
 
-initialization
+procedure TAiTest.TestFindLinesInput;
+var
+  Files: TGittanFoundFiles;
+  Text, Big: string;
+  Stream: TFileStream;
+  i: integer;
+begin
+  WriteFile('a.pas', 'one'#10'two'#10'three');
+  ForceDirectories(FDir + PathDelim + 'sub');
+  WriteFile('sub' + PathDelim + 'b.txt', 'four');
+  Stream := TFileStream.Create(IncludeTrailingPathDelimiter(FDir) + 'bin.dat', fmCreate);
+  try
+    Text := 'x'#0'y';
+    Stream.WriteBuffer(Text[1], Length(Text));
+  finally
+    Stream.Free;
+  end;
+  SetLength(Files, 5);
+  Files[0].Path := 'a.pas';
+  Files[1].Path := 'missing.txt';
+  Files[2].Path := 'sub/b.txt';
+  Files[3].Path := 'bin.dat';
+  Files[4].Path := '../' + ExtractFileName(FDir) + '/a.pas';
+  Text := FindLinesInput(FDir, 'the parser', Files);
+  AssertEquals(1, Pos('The question: the parser', Text));
+  AssertTrue('each line numbered', Pos('File: a.pas' + LineEnding +
+    '1: one'#10'2: two'#10'3: three'#10, Text) > 0);
+  AssertTrue('a file in a folder, by its path with /', Pos('File: sub/b.txt' +
+    LineEnding + '1: four'#10, Text) > 0);
+  AssertEquals('a file that is not there is left out', 0, Pos('missing.txt', Text));
+  AssertTrue('a binary file is named without its text', Pos('File: bin.dat' +
+    LineEnding + '[A binary file', Text) > 0);
+  AssertEquals('no path out of the repository', 0, Pos('..', Text));
+  AssertEquals('none there', '', FindLinesInput(FDir, 'q', Copy(Files, 1, 1)));
+  { A file past its share of the budget (the whole of it, for one file
+    that is there) is cut at a line end before it is numbered: its first
+    80000 bytes end in line 3119. }
+  Big := '';
+  for i := 1 to 10000 do
+    Big := Big + 'line ' + IntToStr(i) + ' of the big file' + #10;
+  Stream := TFileStream.Create(IncludeTrailingPathDelimiter(FDir) + 'big.txt', fmCreate);
+  try
+    Stream.WriteBuffer(Big[1], Length(Big));
+  finally
+    Stream.Free;
+  end;
+  SetLength(Files, 2);
+  Files[0].Path := 'big.txt';
+  Files[1].Path := 'missing.txt';
+  Text := FindLinesInput(FDir, 'q', Files);
+  AssertTrue('the lines within the budget; a missing file takes no share of it',
+    Pos(#10'3119: line 3119 of', Text) > 0);
+  AssertEquals('none past it', 0, Pos(#10'3120: ', Text));
+  AssertTrue('says how much is cut', Pos(Format('[The file is cut here: %d of its %d ' +
+    'bytes are left out.]', [Length(Big) - Pos('line 3120 of', Big) + 1, Length(Big)]),
+    Text) > 0);
+end;
 
+procedure TAiTest.TestMergeFoundLines;
+var
+  Files, Lines: TGittanFoundFiles;
+begin
+  SetLength(Files, 2);
+  Files[0].Path := 'a.pas';
+  Files[0].Why := 'the parser';
+  Files[1].Path := 'b.pas';
+  Files[1].Why := 'its tests';
+  SetLength(Lines, 2);
+  Lines[0].Path := 'b.pas';
+  Lines[0].Line := 7;
+  Lines[1].Path := 'a.pas';
+  Lines[1].Line := 42;
+  Lines[1].Why := 'ParseIt';
+  MergeFoundLines(Files, Lines);
+  AssertEquals('the first answer''s order', 'a.pas', Files[0].Path);
+  AssertEquals(42, Files[0].Line);
+  AssertEquals('a why given replaces', 'ParseIt', Files[0].Why);
+  AssertEquals(7, Files[1].Line);
+  AssertEquals('a why not given stays', 'its tests', Files[1].Why);
+  SetLength(Lines, 0);
+  Files[0].Line := 0;
+  MergeFoundLines(Files, Lines);
+  AssertEquals('a file not named again keeps 0', 0, Files[0].Line);
+end;
+
+initialization
   RegisterTest(TAiTest);
 end.

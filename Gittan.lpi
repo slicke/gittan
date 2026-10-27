@@ -223,7 +223,6 @@
         <Filename Value="src/core/gittan.openai.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
-
       <Unit>
         <Filename Value="src/core/gittan.conflicts.pp"/>
         <IsPartOfProject Value="True"/>
