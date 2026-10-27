@@ -190,8 +190,9 @@ begin
 end;
 
 { The pull request whose comments the change view shows: the one
-  compared against, else the branch's own as long as the view's new side
-  is the work tree. }
+  compared against, else the branch's own while it is open and the view's
+  new side is the work tree (a merged or closed one's review is over, and
+  a long-lived branch such as develop always has one behind it). }
 function TRepoFrame.ReviewTarget(out ANumber: integer; out ARepoPath: string): boolean;
 var
   i: integer;
@@ -209,7 +210,7 @@ begin
     if (ARepoPath = '') and FHasPull and (FPull.Number = FPullNumber) then
       ARepoPath := FPull.Repo;
   end
-  else if FHasPull and not FRepo.IsRange then
+  else if FHasPull and (FPull.State = prOpen) and not FRepo.IsRange then
   begin
     ANumber := FPull.Number;
     ARepoPath := FPull.Repo;
