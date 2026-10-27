@@ -51,6 +51,7 @@ begin
   end;
   FRepoCommands := DiscoverRepoCommands(FRepo.Root);
   FCommandsHash := CommandsFileHash(FRepo.Root);
+  FCommandPage.CodeFont.Assign(Edit.Font);
   FCommandPage.SetRepository(ExtractFileName(FRepo.Root), FRepo.Root);
   FCommandPage.SetCommands(FRepoCommands, FCommandsHash <> '', CommandsTrusted);
 end;

@@ -18,6 +18,10 @@ unit gittan.commandpage;
   editor's font) that fills the rest of the box it sits in, at least
   ConsoleMinHeight.
 
+  The tiles of every group share one grid, so a group of one has a tile
+  as wide as the others; a tile has a run mark at the left and what
+  runs in CodeFont (the editor's).
+
   It paints itself in the editor's palette, like the Repository page,
   and sizes its height to its content so it can sit in the same
   TScrollBox: Layout paints the content on a measuring canvas to know
@@ -52,6 +56,7 @@ type
     FExitCode: integer;
     FElapsedMs: int64;
     FConsole: TGittanConsole;
+    FCodeFont: TFont;
     FShortcutPrefix: string;
     FBack, FText, FDim, FHover, FLine, FLink, FOk, FErrorColor, FCard: TColor;
     FLinkRects: array of TRect;
@@ -73,6 +78,7 @@ type
     procedure PaintTrustCard(var Y: integer);
     procedure PaintTiles(var Y: integer; ASource: TGittanCommandSource);
     function GroupCount(ASource: TGittanCommandSource): integer;
+    function ColumnCount: integer;
     procedure PaintContent;
     procedure Layout;
   protected
@@ -84,6 +90,7 @@ type
       override;
   public
     constructor Create(AOwner: TComponent); override;
+    destructor Destroy; override;
     {** The repository shown: its name over its root. Another root
       drops the commands and the run of the one before. }
     procedure SetRepository(const AName, ARoot: string);
@@ -107,6 +114,9 @@ type
     procedure FitHeight(AMin: integer);
     {** The console the output goes to. }
     property Console: TGittanConsole read FConsole;
+    {** The font of what a tile runs: the editor's. Layout after a
+      change. }
+    property CodeFont: TFont read FCodeFont;
     {** What a shortcut's chip starts with: "⌃⌘" or "Ctrl+Alt+". }
     property ShortcutPrefix: string read FShortcutPrefix write FShortcutPrefix;
     {** Whether a command is running. }
@@ -170,7 +180,7 @@ const
   TitleFontSize = 20;
   { The tiles: their least width, the gap between them, the padding in
     them, the corner radius; the chip of a shortcut. }
-  TileMinWidth = 220;
+  TileMinWidth = 240;
   TileGap = 10;
   TilePadX = 14;
   TilePadY = 10;
@@ -178,6 +188,11 @@ const
   ChipPadX = 6;
   ChipPadY = 2;
   ChipRadius = 6;
+  { The run mark at the left of a tile: its width, its height and the
+    space after it. }
+  MarkW = 7;
+  MarkH = 9;
+  MarkGap = 10;
   CardPad = 14;
   ButtonPadX = 12;
   ButtonPadY = 5;
@@ -213,6 +228,13 @@ begin
   FConsole := TGittanConsole.Create(Self);
   FConsole.Parent := Self;
   FConsole.Visible := False;
+  FCodeFont := TFont.Create;
+end;
+
+destructor TGittanCommandPage.Destroy;
+begin
+  FCodeFont.Free;
+  inherited Destroy;
 end;
 
 procedure TGittanCommandPage.SetRepository(const AName, ARoot: string);
@@ -483,18 +505,27 @@ begin
   Inc(Y, Px(Gap));
 end;
 
-{ The tiles of one source: as many in a row as fit at TileMinWidth,
-  the rows as even as they can be. Each has the name, under it what
-  runs dimmed, and at the right its shortcut as a chip. The running
+{ How many tiles a row of the grid holds: as many as fit at
+  TileMinWidth. }
+function TGittanCommandPage.ColumnCount: integer;
+begin
+  Result := Max(1, (Width - 2 * Px(Pad) + Px(TileGap)) div (Px(TileMinWidth) + Px(TileGap)));
+end;
+
+{ The tiles of one source by name, in the grid every group shares.
+  Each has the run mark, the name, under it what runs dimmed, and at
+  the right its shortcut as a chip. The running
   one says so; the file's are dimmed and lead nowhere while the file
   is not trusted; none leads anywhere while one runs. }
 procedure TGittanCommandPage.PaintTiles(var Y: integer; ASource: TGittanCommandSource);
 var
   Indexes: array of integer;
-  n, MaxCols, Rows, Cols, TileW, TileH, BodyH, i, X, TileY, Inner, ChipW, ChipH, Right: integer;
+  n, Rows, Cols, TileW, TileH, BodyH, CodeH, i, X, TileY, TextX, NameY, Inner, ChipW,
+  ChipH, Right, MarkY, j, k: integer;
   Detail, Chip: string;
   R, ChipR: TRect;
-  Off, Leads: boolean;
+  Off, Leads, Hot, Busy: boolean;
+  Cmd: TGittanRepoCommand;
 begin
   Indexes := nil;
   for i := 0 to High(FCommands) do
@@ -506,86 +537,140 @@ begin
   n := Length(Indexes);
   if n = 0 then
     Exit;
-  MaxCols := Max(1, (Width - 2 * Px(Pad) + Px(TileGap)) div (Px(TileMinWidth) + Px(TileGap)));
-  Rows := (n + MaxCols - 1) div MaxCols;
-  Cols := (n + Rows - 1) div Rows;
+  { By name, whatever the order of the file they come from. }
+  for i := 1 to n - 1 do
+  begin
+    j := i;
+    while (j > 0) and (CompareText(FCommands[Indexes[j - 1]].Name,
+        FCommands[Indexes[j]].Name) > 0) do
+    begin
+      k := Indexes[j];
+      Indexes[j] := Indexes[j - 1];
+      Indexes[j - 1] := k;
+      Dec(j);
+    end;
+  end;
+  Cols := ColumnCount;
+  Rows := (n + Cols - 1) div Cols;
   TileW := (Width - 2 * Px(Pad) - (Cols - 1) * Px(TileGap)) div Cols;
   FC.Font := Font;
   BodyH := FC.TextHeight('Xg');
-  TileH := 2 * Px(TilePadY) + 2 * BodyH + 4;
+  FC.Font := FCodeFont;
+  CodeH := FC.TextHeight('Xg');
+  TileH := 2 * Px(TilePadY) + BodyH + Px(4) + CodeH;
   for i := 0 to n - 1 do
   begin
+    Cmd := FCommands[Indexes[i]];
     X := Px(Pad) + (i mod Cols) * (TileW + Px(TileGap));
     TileY := Y + (i div Cols) * (TileH + Px(TileGap));
     R := Rect(X, TileY, X + TileW, TileY + TileH);
     { The file's are off while it is not trusted, and a section that
       names no script or target always. }
-    Off := ((ASource = csFile) and not FTrusted) or (FCommands[Indexes[i]].Command = '');
+    Off := ((ASource = csFile) and not FTrusted) or (Cmd.Command = '');
     Leads := not Off and not FRunning and Assigned(FOnRun);
+    Busy := FRunning and (Cmd.Name = FRunName) and (Cmd.Source = ASource);
+    Hot := Leads and (FHot = Length(FLinkRects));
+    if Leads then
+      AddLink(R, RunLink + IntToStr(Indexes[i]));
+
+    { The tile, with a hairline round it; the running one's in the
+      link color. }
+    FC.Pen.Style := psSolid;
+    FC.Pen.Width := 1;
+    if Busy then
+      FC.Pen.Color := FLink
+    else
+      FC.Pen.Color := MixColor(FCard, FLine, 0.5);
+    FC.Brush.Style := bsSolid;
+    if Hot then
+      FC.Brush.Color := FHover
+    else
+      FC.Brush.Color := FCard;
+    FC.RoundRect(R, Px(TileRadius), Px(TileRadius));
+    FC.Brush.Style := bsClear;
+    NameY := TileY + Px(TilePadY);
+
+    { The run mark, in the link color under the mouse and while it
+      runs, faint while the tile leads nowhere. }
+    MarkY := NameY + (BodyH - Px(MarkH)) div 2;
+    TextX := X + Px(TilePadX);
     FC.Pen.Style := psClear;
     FC.Brush.Style := bsSolid;
-    FC.Brush.Color := FCard;
-    if Leads then
-    begin
-      if FHot = Length(FLinkRects) then
-        FC.Brush.Color := FHover;
-      AddLink(R, RunLink + IntToStr(Indexes[i]));
-    end;
-    FC.RoundRect(R, Px(TileRadius), Px(TileRadius));
+    if Hot or Busy then
+      FC.Brush.Color := FLink
+    else if Off then
+      FC.Brush.Color := MixColor(FDim, FCard, 0.5)
+    else
+      FC.Brush.Color := FDim;
+    FC.Polygon([Point(TextX, MarkY), Point(TextX + Px(MarkW), MarkY + Px(MarkH) div 2),
+      Point(TextX, MarkY + Px(MarkH))]);
     FC.Pen.Style := psSolid;
     FC.Brush.Style := bsClear;
+    Inc(TextX, Px(MarkW) + Px(MarkGap));
     Right := X + TileW - Px(TilePadX);
-    { The chip of the shortcut, dimmed while the file is not trusted. }
-    if FCommands[Indexes[i]].Key <> #0 then
+
+    { The chip of the shortcut, on the name's line. }
+    if Cmd.Key <> #0 then
     begin
-      Chip := FShortcutPrefix + FCommands[Indexes[i]].Key;
+      Chip := FShortcutPrefix + Cmd.Key;
       FC.Font := Font;
       FC.Font.Size := Max(7, Font.Size - 2);
       if Font.Size <= 0 then
         FC.Font.Size := 9;
       ChipW := FC.TextWidth(Chip) + 2 * Px(ChipPadX);
       ChipH := FC.TextHeight(Chip) + 2 * Px(ChipPadY);
-      ChipR := Rect(Right - ChipW, TileY + Px(TilePadY), Right, TileY + Px(TilePadY) + ChipH);
+      ChipR := Rect(Right - ChipW, NameY + (BodyH - ChipH) div 2, Right,
+        NameY + (BodyH - ChipH) div 2 + ChipH);
       FC.Pen.Style := psClear;
       FC.Brush.Style := bsSolid;
-      FC.Brush.Color := FHover;
+      if Hot then
+        FC.Brush.Color := FCard
+      else
+        FC.Brush.Color := FHover;
       FC.RoundRect(ChipR, Px(ChipRadius), Px(ChipRadius));
       FC.Pen.Style := psSolid;
       FC.Brush.Style := bsClear;
       FC.Font.Color := FDim;
       FC.TextOut(ChipR.Left + Px(ChipPadX), ChipR.Top + Px(ChipPadY), Chip);
-      FC.Font := Font;
-      FC.Brush.Style := bsClear;
       Right := ChipR.Left - Px(Gap) div 2;
     end;
-    Inner := Right - (X + Px(TilePadX));
+
+    FC.Font := Font;
+    FC.Brush.Style := bsClear;
     FC.Font.Style := [fsBold];
     if Off then
       FC.Font.Color := FDim
     else
       FC.Font.Color := FText;
-    FC.TextOut(X + Px(TilePadX), TileY + Px(TilePadY), FitTextRight(FC,
-      FCommands[Indexes[i]].Name, Inner));
-    FC.Font.Style := [];
-    Inner := X + TileW - Px(TilePadX) - (X + Px(TilePadX));
-    if FRunning and (FCommands[Indexes[i]].Name = FRunName) and
-      (FCommands[Indexes[i]].Source = ASource) then
+    FC.TextOut(TextX, NameY, FitTextRight(FC, Cmd.Name, Right - TextX));
+
+    { What runs, in the code font; a target's is make and its name. }
+    Inner := X + TileW - Px(TilePadX) - TextX;
+    if Busy then
     begin
+      FC.Font := Font;
       Detail := rsRunningTile;
       FC.Font.Color := FLink;
     end
     else
     begin
-      if FCommands[Indexes[i]].Command = '' then
-        Detail := Format(rsNoSuchTarget, [FCommands[Indexes[i]].Name])
+      FC.Font := FCodeFont;
+      if Cmd.Command = '' then
+      begin
+        FC.Font := Font;
+        Detail := Format(rsNoSuchTarget, [Cmd.Name]);
+      end
+      else if Cmd.Detail <> '' then
+        Detail := Cmd.Detail
       else
-        Detail := FCommands[Indexes[i]].Detail;
-      if FCommands[Indexes[i]].Terminal then
+        Detail := Cmd.Command;
+      if Cmd.Terminal then
         Detail := Detail + ' · ' + rsTerminalTile;
       FC.Font.Color := FDim;
     end;
-    FC.TextOut(X + Px(TilePadX), TileY + Px(TilePadY) + BodyH + 4, FitTextRight(FC,
-      Detail, Inner));
+    FC.Brush.Style := bsClear;
+    FC.TextOut(TextX, NameY + BodyH + Px(4) + (CodeH - FC.TextHeight('Xg')) div 2,
+      FitTextRight(FC, Detail, Inner));
   end;
   Inc(Y, Rows * TileH + (Rows - 1) * Px(TileGap));
 end;
