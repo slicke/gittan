@@ -32,7 +32,7 @@ type
   private
     FImages: array[0..1] of TBGRABitmap;
     FScaled: array[0..1] of TBGRABitmap;
-    FHas, FBroken: array[0..1] of boolean;
+    FHas, FBroken, FLfs: array[0..1] of boolean;
     FBytes: array[0..1] of int64;
     FScale: double;
     FDiffering: int64;
@@ -52,7 +52,8 @@ type
     destructor Destroy; override;
     {** The two versions as the bytes of their files: AOld the one
       compared against, ANew the new one. AHasOld or AHasNew false for
-      a side without a version. }
+      a side without a version. A Git LFS pointer is a version not
+      downloaded, which says so with the size it gives. }
     procedure SetImages(const AOld, ANew: RawByteString; AHasOld, AHasNew: boolean);
     {** The palette: the background, the captions, the dim details and
       the dotted box, the line under the captions, the old and the new
@@ -91,10 +92,11 @@ resourcestring
 implementation
 
 uses
-  Math;
+  Math, gittan.git;
 
 resourcestring
   rsCannotRead = 'Cannot read this image';
+  rsNotDownloaded = 'Not downloaded (Git LFS)';
   rsSamePixels = 'same pixels';
   rsPixelsDiffer = '%s of the pixels differ';
   rsImage = '%s image';
@@ -192,6 +194,7 @@ begin
     FreeAndNil(FScaled[i]);
     FHas[i] := False;
     FBroken[i] := False;
+    FLfs[i] := False;
     FBytes[i] := 0;
   end;
   FScale := 0;
@@ -203,6 +206,8 @@ procedure TGittanImageDiff.SetImages(const AOld, ANew: RawByteString;
 var
   Data: array[0..1] of RawByteString;
   Stream: TStringStream;
+  Oid: string;
+  Size: int64;
   i: integer;
 begin
   ClearImages;
@@ -215,6 +220,13 @@ begin
     if not FHas[i] then
       Continue;
     FBytes[i] := Length(Data[i]);
+    if ParseLfsPointer(Data[i], Oid, Size) then
+    begin
+      FLfs[i] := True;
+      FBroken[i] := True;
+      FBytes[i] := Size;
+      Continue;
+    end;
     Stream := TStringStream.Create(Data[i]);
     try
       try
@@ -392,6 +404,11 @@ begin
   Note := '';
   if not FHas[ASide] then
     Note := rsNotInVersion
+  else if FLfs[ASide] then
+  begin
+    Note := rsNotDownloaded;
+    Detail := ByteSize(FBytes[ASide]);
+  end
   else if FBroken[ASide] then
   begin
     Note := rsCannotRead;

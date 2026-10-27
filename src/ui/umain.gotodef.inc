@@ -17,12 +17,12 @@
   Tag keeps whether its data is complete (1) or not (0), which
   WaitForParse polls. The end is reported from the message loop, after
   the parser's public data is updated. }
-procedure TForm1.AdapterParseBegin(Sender: TObject);
+procedure TRepoFrame.AdapterParseBegin(Sender: TObject);
 begin
   TComponent(Sender).Tag := 0;
 end;
 
-procedure TForm1.AdapterParseDone(Sender: TObject; ATime: integer);
+procedure TRepoFrame.AdapterParseDone(Sender: TObject; ATime: integer);
 begin
   TComponent(Sender).Tag := 1;
   { The ranges folded before a refresh are folded again. }
@@ -56,7 +56,7 @@ end;
 { The word at APos in AEd (the word before it when APos is right after
   one), as the editor's word jumping sees it, with its bounds on the
   line. }
-function TForm1.WordAt(AEd: TATSynEdit; APos: TPoint; out AStart, AEnd: integer): string;
+function TRepoFrame.WordAt(AEd: TATSynEdit; APos: TPoint; out AStart, AEnd: integer): string;
 var
   S: UnicodeString;
 begin
@@ -86,7 +86,7 @@ end;
   MaxSymbolLine characters), with the first and the last row
   the range spans (a range the lexer never closed runs to the end of the
   text). Waits for the parse. }
-function TForm1.CodeRanges(AAdapter: TATAdapterEControl; AEd: TATSynEdit): TGittanCodeRanges;
+function TRepoFrame.CodeRanges(AAdapter: TATAdapterEControl; AEd: TATSynEdit): TGittanCodeRanges;
 var
   Client: TecClientSyntAnalyzer;
   R, Outer: TecTextRange;
@@ -161,7 +161,7 @@ begin
 end;
 
 { The symbols of CodeRanges without their spans. }
-function TForm1.CodeTree(AAdapter: TATAdapterEControl; AEd: TATSynEdit): TGittanSymbols;
+function TRepoFrame.CodeTree(AAdapter: TATAdapterEControl; AEd: TATSynEdit): TGittanSymbols;
 var
   Ranges: TGittanCodeRanges;
   i: integer;
@@ -176,7 +176,7 @@ end;
   AWord, Y = -1 when there is none. A symbol at row ASkipRow is left
   out, so a lookup from the definition itself goes on to the other
   files. }
-function TForm1.FindDefinition(AAdapter: TATAdapterEControl; AEd: TATSynEdit;
+function TRepoFrame.FindDefinition(AAdapter: TATAdapterEControl; AEd: TATSynEdit;
   const AWord: string; ASkipRow: integer): TPoint;
 var
   Symbols: TGittanSymbols;
@@ -191,7 +191,7 @@ end;
 
 { Parses the file at AFileName with ALexer in the hidden editor, made on
   the first lookup, and answers its adapter. }
-function TForm1.ParseScratch(const AFileName: string; ALexer: TecSyntAnalyzer): TATAdapterEControl;
+function TRepoFrame.ParseScratch(const AFileName: string; ALexer: TecSyntAnalyzer): TATAdapterEControl;
 begin
   if FScratch = nil then
   begin
@@ -233,7 +233,7 @@ end;
 { Moves AEd to the word at APos and selects it. A definition on a hidden
   row of the change view opens the gap that hides it; the view is built
   anew then, so the lookup runs again on the new rows. }
-procedure TForm1.JumpToDefinition(AEd: TATSynEdit; APos: TPoint; const AWord: string);
+procedure TRepoFrame.JumpToDefinition(AEd: TATSynEdit; APos: TPoint; const AWord: string);
 var
   S: UnicodeString;
   N1, N2, i: integer;
@@ -281,7 +281,7 @@ end;
   editor: looks the word under the caret up in the text of AEd, then in
   the new side when AEd is the old one, then in the other changed files
   of the repository. }
-procedure TForm1.GoToDefinition(AEd: TATSynEdit);
+procedure TRepoFrame.GoToDefinition(AEd: TATSynEdit);
 var
   Word, RelPath: string;
   P: TPoint;
@@ -330,7 +330,7 @@ begin
   StatusNote(Format(rsNoDefinition, [Word]));
 end;
 
-procedure TForm1.MenuGoToDefinitionClick(Sender: TObject);
+procedure TRepoFrame.MenuGoToDefinitionClick(Sender: TObject);
 begin
   if FEditOld.Visible and FEditOld.Focused then
     GoToDefinition(FEditOld)
@@ -340,7 +340,7 @@ end;
 
 { Go > Go to Symbol: lists the symbols of the shown file in the symbol
   bar. }
-procedure TForm1.MenuGoToSymbolClick(Sender: TObject);
+procedure TRepoFrame.MenuGoToSymbolClick(Sender: TObject);
 var
   Names: TStringList;
   Depths: TIntegerDynArray;
@@ -372,7 +372,7 @@ end;
   changed files first, in tree order, parsed on demand as the index may
   not have reached them, then the rest of the index as far as it has
   got. FSymbolFiles keeps the file of each. }
-procedure TForm1.MenuGoToRepoSymbolClick(Sender: TObject);
+procedure TRepoFrame.MenuGoToRepoSymbolClick(Sender: TObject);
 var
   Names, Details: TStringList;
   Seen: TStringList;
@@ -453,7 +453,7 @@ end;
   the code tree of the text laid over the markers of the rows. In the
   side-by-side view the wholly deleted symbols come from the old side.
   The Lines of both sides are the caller's to free. }
-function TForm1.ShownSymbolChanges(out ANew, AOld: TGittanSideText): TGittanSymbolChanges;
+function TRepoFrame.ShownSymbolChanges(out ANew, AOld: TGittanSideText): TGittanSymbolChanges;
 begin
   ANew := Default(TGittanSideText);
   AOld := Default(TGittanSideText);
@@ -472,7 +472,7 @@ end;
 { Go > Changed Symbols: lists the changed symbols of the shown file in
   the symbol bar, each with how it changed. FSymbolOnOld remembers which
   are only in the old side's text, so a pick goes there. }
-procedure TForm1.MenuChangedSymbolsClick(Sender: TObject);
+procedure TRepoFrame.MenuChangedSymbolsClick(Sender: TObject);
 var
   NewSide, OldSide: TGittanSideText;
   Changes: TGittanSymbolChanges;
@@ -533,7 +533,7 @@ end;
   symbol the index puts the row in (or the file name), the file and row,
   and the text. A pick on a use opens the file there (FSymbolPlaces); a
   second changed symbol with the same identifier only points up. }
-procedure TForm1.MenuCallersClick(Sender: TObject);
+procedure TRepoFrame.MenuCallersClick(Sender: TObject);
 var
   NewSide, OldSide: TGittanSideText;
   Changes: TGittanSymbolChanges;
@@ -597,7 +597,7 @@ begin
     n := 0;
     for i := 0 to High(Callers) do
     begin
-      Lexer := FLexers.ForFile(Callers[i].Path, FRepo.Root);
+      Lexer := App.Lexers.ForFile(Callers[i].Path, FRepo.Root);
       if (Lexer = nil) or LexerIsProse(Lexer.LexerName) then
         Continue;
       E := FIndex.Find(Callers[i].Path);
@@ -696,7 +696,7 @@ end;
   may share the identifier), else by its identifier, as Go to Definition
   does. A use of a changed symbol (FSymbolPlaces) is a row of that file
   as it is, so it is jumped to directly. }
-procedure TForm1.SymbolBarPick(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.SymbolBarPick(Sender: TObject; AIndex: integer);
 var
   Symbol: TGittanSymbol;
   Path, Ident: string;
@@ -747,7 +747,7 @@ begin
 end;
 
 
-procedure TForm1.SymbolBarClose(Sender: TObject);
+procedure TRepoFrame.SymbolBarClose(Sender: TObject);
 begin
   FSymbolBar.Visible := False;
   if Edit.Visible and Edit.CanFocus then
@@ -760,7 +760,7 @@ end;
 
 { The number the gutter shows for ARow: the change view's own (the decor
   text, see SetRowNumbers), else the editor's. }
-function TForm1.RowLabel(AEd: TATSynEdit; ARow: integer): string;
+function TRepoFrame.RowLabel(AEd: TATSynEdit; ARow: integer): string;
 var
   i: integer;
 begin
@@ -772,7 +772,7 @@ end;
 
 { Forgets the word under the mouse: the hint, the timer and the link
   underline. }
-procedure TForm1.ClearHover;
+procedure TRepoFrame.ClearHover;
 begin
   FHoverTimer.Enabled := False;
   if FHoverEd <> nil then
@@ -797,7 +797,7 @@ end;
 { Follows the mouse over the text: a new word under it starts the hover
   timer over; with Cmd (Ctrl elsewhere) held the word is underlined and
   the cursor is a hand, as a link to its definition. }
-procedure TForm1.EditMouseMove(Sender: TObject; Shift: TShiftState; X, Y: integer);
+procedure TRepoFrame.EditMouseMove(Sender: TObject; Shift: TShiftState; X, Y: integer);
 var
   Ed: TATSynEdit;
   Details: TATEditorPosDetails;
@@ -875,7 +875,7 @@ begin
 end;
 
 { The mouse that went from the band onto its pills keeps the block. }
-procedure TForm1.EditMouseLeave(Sender: TObject);
+procedure TRepoFrame.EditMouseLeave(Sender: TObject);
 begin
   if not MouseOnDiscardPills then
     SetHotDiscard(TATSynEdit(Sender), -1, -1, -1);
@@ -888,7 +888,7 @@ end;
   hint for itself), then in the new side when the mouse is on the old
   one, then in the other changed files, is shown as a hint: where it
   is, and the line that defines it. }
-procedure TForm1.HoverTimerTimer(Sender: TObject);
+procedure TRepoFrame.HoverTimerTimer(Sender: TObject);
 var
   Ed: TATSynEdit;
   Word: string;
@@ -916,7 +916,7 @@ begin
   end;
 end;
 
-procedure TForm1.HoverLookup(Ed: TATSynEdit; const Word: string);
+procedure TRepoFrame.HoverLookup(Ed: TATSynEdit; const Word: string);
 var
   Where, Line, RelPath: string;
   P: TPoint;

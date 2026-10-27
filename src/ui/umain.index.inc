@@ -42,12 +42,12 @@ end;
 
 { The index file of the open repository: in the cache folder, named by
   a hash of the root. }
-function TForm1.IndexFileName: string;
+function TRepoFrame.IndexFileName: string;
 begin
   Result := IndexCacheDir + MD5Print(MD5String(FRepo.Root)) + '.txt';
 end;
 
-procedure TForm1.SaveIndex;
+procedure TRepoFrame.SaveIndex;
 begin
   if (FRepo.Root = '') or not FIndexSaveNeeded then
     Exit;
@@ -60,7 +60,7 @@ begin
   end;
 end;
 
-procedure TForm1.StopIndexing;
+procedure TRepoFrame.StopIndexing;
 begin
   FIndexing := False;
   FIndexTimer.Enabled := False;
@@ -69,7 +69,7 @@ end;
 
 { Reads the index of the open repository and queues its files; see the
   section comment. }
-procedure TForm1.StartIndexing;
+procedure TRepoFrame.StartIndexing;
 begin
   StopIndexing;
   FIndex.Load(IndexFileName);
@@ -103,7 +103,7 @@ end;
 
 { Takes the next file of the queue that needs parsing and starts its
   parse; ends the indexing when the queue is done. }
-procedure TForm1.IndexNext;
+procedure TRepoFrame.IndexNext;
 var
   Path, Full: string;
   Size, Time: int64;
@@ -128,7 +128,7 @@ begin
     end;
     if FIndex.IsCurrent(Path, Size, Time) then
       Continue;
-    Lexer := FLexers.ForFile(Path, FRepo.Root);
+    Lexer := App.Lexers.ForFile(Path, FRepo.Root);
     if Lexer = nil then
     begin
       FIndex.Remove(Path);
@@ -172,7 +172,7 @@ begin
   UpdateStatus;
 end;
 
-procedure TForm1.IndexNextAsync(Data: PtrInt);
+procedure TRepoFrame.IndexNextAsync(Data: PtrInt);
 begin
   { A second StartIndexing queues a second call; the file it started
     is waited for, and so is one still loading. }
@@ -184,7 +184,7 @@ end;
 { The parse of the current file is done: its symbols go into the index
   and the next file follows from the message loop, since this runs
   inside the adapter's event. }
-procedure TForm1.IndexParseDone(Sender: TObject; ATime: integer);
+procedure TRepoFrame.IndexParseDone(Sender: TObject; ATime: integer);
 var
   E: TGittanIndexEntry;
 begin
@@ -203,7 +203,7 @@ end;
 
 { The current file's parse never reported: the file is entered without
   symbols and the indexing goes on. }
-procedure TForm1.IndexTimerTimer(Sender: TObject);
+procedure TRepoFrame.IndexTimerTimer(Sender: TObject);
 var
   E: TGittanIndexEntry;
 begin
@@ -219,7 +219,7 @@ end;
 { The symbols of the changed file ARelPath as it is in the work tree:
   from the index when it is current, else parsed now in the scratch
   editor and put there. Nil for a file that is gone or has no lexer. }
-function TForm1.FileSymbols(const ARelPath: string): TGittanSymbols;
+function TRepoFrame.FileSymbols(const ARelPath: string): TGittanSymbols;
 var
   Full: string;
   Size, Time: int64;
@@ -237,7 +237,7 @@ begin
   end;
   if FIndex.IsCurrent(ARelPath, Size, Time) then
     Exit(FIndex.Find(ARelPath).Items);
-  Lexer := FLexers.ForFile(ARelPath, FRepo.Root);
+  Lexer := App.Lexers.ForFile(ARelPath, FRepo.Root);
   if Lexer = nil then
     Exit;
   if Size <= MaxIndexedSize then
@@ -269,7 +269,7 @@ end;
 { The path of the shown file relative to the repository root: the
   changed file, or the file opened on its own when it is inside the
   repository; '' otherwise. }
-function TForm1.ShownRelPath: string;
+function TRepoFrame.ShownRelPath: string;
 var
   Root: string;
 begin
@@ -286,7 +286,7 @@ end;
 { The definition of AWord in the repository outside the shown file: the
   changed files first, in tree order, parsed on demand, then the rest
   of the index as far as it has got. }
-function TForm1.FindInRepo(const AWord: string; out APath: string;
+function TRepoFrame.FindInRepo(const AWord: string; out APath: string;
   out ASymbol: TGittanSymbol): boolean;
 var
   Shown, Path: string;
@@ -348,7 +348,7 @@ end;
 
 { Shows the file ARelPath of the repository: through the tree when it
   is a changed file, else on its own, as File > Open does. }
-procedure TForm1.ShowRepoFile(const ARelPath: string);
+procedure TRepoFrame.ShowRepoFile(const ARelPath: string);
 var
   Node: TTreeNode;
 begin

@@ -24,7 +24,7 @@ const
   saGraph = 3;
   saForcePush = 4;
 
-procedure TForm1.UpdateRemoteItems;
+procedure TRepoFrame.UpdateRemoteItems;
 var
   Can: boolean;
 begin
@@ -44,11 +44,29 @@ begin
   UpdateStashItems;
 end;
 
-procedure TForm1.StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode;
+procedure TRepoFrame.StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode;
   const AArg, ARemote: string);
 begin
   if (FRepo.Root = '') or (FRemoteJob <> nil) or (FCommitJob <> nil) then
     Exit;
+  { Two fetches or a fetch and a pull would fight over the same refs:
+    this one waits for the background fetch, which is quick. }
+  if FAutoFetchJob <> nil then
+  begin
+    { One waits; a second is refused rather than put in its place. }
+    if FPendingRemote then
+    begin
+      FStatus.ShowMessage(rsAlreadyWaiting, stNormal, 0);
+      Exit;
+    end;
+    FPendingRemote := True;
+    FPendingKind := AKind;
+    FPendingMode := AMode;
+    FPendingArg := AArg;
+    FPendingRemoteName := ARemote;
+    FStatus.ShowMessage(rsWaitingForFetch, stNormal, 0);
+    Exit;
+  end;
   FRemoteAhead := FAhead;
   { What a pull brings in is counted from here when it is done. }
   if AKind = rkPull then
@@ -61,6 +79,8 @@ begin
   FRemoteJob := TGittanRemoteJob.Create(FRepo.Root, AKind, AMode, AArg, ARemote);
   FRemoteJob.OnDone := @RemoteJobDone;
   FRemoteJob.OnOutput := @RemoteJobOutput;
+  if AKind = rkLfsFetch then
+    FRemoteJob.Refs := FLfsRefs;
   FRemoteJob.Start;
   if FNoticeHook then
     FStatus.ShowMessage(rsRunningHook, stNormal, 0)
@@ -83,6 +103,10 @@ begin
           FStatus.ShowMessage(rsSubUpdatingAll, stNormal, 0)
         else
           FStatus.ShowMessage(Format(rsSubUpdating, [AArg]), stNormal, 0);
+      rkLfsFetch:
+        FStatus.ShowMessage(Format(rsLfsDownloading, [ExtractFileName(AArg)]), stNormal, 0);
+      rkLfsPull: FStatus.ShowMessage(rsLfsPulling, stNormal, 0);
+      rkLfsInstall: FStatus.ShowMessage(rsLfsInstalling, stNormal, 0);
     end;
   if FNoticeHook then
     ShowRemoteNotice
@@ -92,7 +116,7 @@ begin
   UpdateCommitState;
 end;
 
-function TForm1.RemoteNoticeTitle: string;
+function TRepoFrame.RemoteNoticeTitle: string;
 begin
   Result := '';
   if FRemoteJob = nil then
@@ -121,12 +145,15 @@ begin
         Result := Format(rsNoticeSubUpdating, [FRemoteJob.Arg]);
     rkSubmoduleAdd: Result := Format(rsNoticeSubAdding, [FRemoteJob.Path]);
     rkFetchPull: Result := Format(rsNoticeFetchingPull, [StrToIntDef(FRemoteJob.Arg, 0)]);
+    rkLfsFetch: Result := Format(rsNoticeLfsDownloading, [ExtractFileName(FRemoteJob.Arg)]);
+    rkLfsPull: Result := rsNoticeLfsPulling;
+    rkLfsInstall: Result := rsNoticeLfsInstalling;
   end;
 end;
 
 { The notice shows the output in the editor's font, as a terminal
   would. }
-procedure TForm1.ShowRemoteNotice;
+procedure TRepoFrame.ShowRemoteNotice;
 begin
   FNoticeTimer.Enabled := False;
   if FRemoteJob = nil then
@@ -135,13 +162,13 @@ begin
   FNotice.Popup(RemoteNoticeTitle, FRemoteJob.Progress, True);
 end;
 
-procedure TForm1.NoticeTimerTimer(Sender: TObject);
+procedure TRepoFrame.NoticeTimerTimer(Sender: TObject);
 begin
   ShowRemoteNotice;
 end;
 
 { Once git itself reports the push, the hook has had its say. }
-procedure TForm1.RemoteJobOutput(Sender: TObject);
+procedure TRepoFrame.RemoteJobOutput(Sender: TObject);
 var
   Job: TGittanRemoteJob;
 begin
@@ -163,7 +190,7 @@ end;
 
 { The tree, the counts and the graph follow at once; then what came of
   it, or the choice git left to the user. }
-procedure TForm1.RemoteJobDone(Sender: TObject);
+procedure TRepoFrame.RemoteJobDone(Sender: TObject);
 var
   Job: TGittanRemoteJob;
   HookFailed: boolean;
@@ -174,6 +201,7 @@ begin
   Job := TGittanRemoteJob(Sender);
   if Job <> FRemoteJob then
     Exit;
+  MarkNews;
   { The push stopped before git reported anything of its own: the
     pre-push hook said no. }
   HookFailed := FNoticeHook and not PushTransferStarted(Job.Progress);
@@ -198,6 +226,27 @@ begin
   if Job.Kind = rkFetchPull then
   begin
     PullFetchDone(Job);
+    Exit;
+  end;
+  { The file is shown again, as the version downloaded into the store
+    left the work tree as it was when it was of a commit. }
+  if Job.Kind in [rkLfsFetch, rkLfsPull, rkLfsInstall] then
+  begin
+    if not Job.Ok then
+      ShowRemoteFailure(Job, False)
+    else
+    begin
+      case Job.Kind of
+        rkLfsFetch: StatusNote(Format(rsLfsDownloaded, [ExtractFileName(Job.Arg)]));
+        rkLfsPull: BannerSuccess(rsLfsPulled);
+        rkLfsInstall: BannerSuccess(rsLfsInstalled);
+      end;
+      if (FView in [gvImage, gvBinary]) and (FCurrentPath <> '') then
+        ShowChanges(FCurrentPath);
+    end;
+    { The work tree may hold files in place of pointers now. }
+    FLfsChecked := '';
+    CheckLfs;
     Exit;
   end;
   if Job.Kind in [rkSubmoduleUpdate, rkSubmoduleAdd] then
@@ -259,6 +308,10 @@ begin
     end;
     Exit;
   end;
+  { A question names no repository: a frame in the background shows its
+    tab before it asks. }
+  if Job.Diverged or Job.Rejected or Job.Unseen or Job.Stale then
+    FWindow.ShowFrame(Self);
   if Job.Diverged then
     case QuestionDlg(rsPullDivergedTitle, rsPullDiverged, mtConfirmation,
         [mrYes, rsMergeAction, 'IsDefault', mrNo, rsRebaseAction, mrCancel,
@@ -317,7 +370,7 @@ end;
   output with it, in the editor's font with the end in view and the rest
   a scroll away, under a red title, with the same again and a copy of
   the output as its buttons. The status bar says it too, for a while. }
-procedure TForm1.ShowRemoteFailure(AJob: TGittanRemoteJob; AHookFailed: boolean);
+procedure TRepoFrame.ShowRemoteFailure(AJob: TGittanRemoteJob; AHookFailed: boolean);
 var
   Title, Again: string;
 begin
@@ -360,6 +413,16 @@ begin
         Title := Format(rsPullFailed, [StrToIntDef(AJob.Arg, 0)]);
         Again := rsTryAgain;
       end;
+    rkLfsFetch, rkLfsPull:
+      begin
+        Title := rsLfsDownloadFailed;
+        Again := rsTryAgain;
+      end;
+    rkLfsInstall:
+      begin
+        Title := rsLfsInstallFailed;
+        Again := rsTryAgain;
+      end;
     else
       if AHookFailed then
         Title := rsHookFailed
@@ -375,14 +438,16 @@ begin
   FRetrySubmodules := AJob.Submodules;
   FRetryPath := AJob.Path;
   FRetryBranch := AJob.Branch;
+  FRetryRefs := AJob.Refs;
   FNoticeCommit := False;
   FStatus.ShowMessage(Title, stBad, StatusErrorSeconds);
   FNotice.DetailFont.Assign(Edit.Font);
   FNotice.Popup(Title, AJob.Error, False, nkBad);
+  MarkNews;
   FNotice.SetButtons([Again, rsCopyOutput]);
 end;
 
-procedure TForm1.NoticeButton(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.NoticeButton(Sender: TObject; AIndex: integer);
 begin
   case AIndex of
     0:
@@ -406,6 +471,8 @@ begin
           AddSubmoduleAsk(FRetryArg, FRetryPath, FRetryBranch)
         else if FRetryKind = rkFetchPull then
           StartPullFetch(StrToIntDef(FRetryArg, 0), FRetryRemote, FRetryBranch)
+        else if FRetryKind = rkLfsFetch then
+          StartLfsDownload(FRetryArg, FRetryRefs)
         else
           StartRemote(FRetryKind, FRetryMode, FRetryArg, FRetryRemote);
       end;
@@ -419,8 +486,25 @@ end;
 
 { A job is never broken off: one still running when the repository
   changes goes on without a handler, and quitting waits for it. }
-procedure TForm1.StopRemoteJob(AWait: boolean);
+procedure TRepoFrame.StopRemoteJob(AWait: boolean);
 begin
+  FPendingRemote := False;
+  { The Git LFS check reads only, and is dropped rather than waited for. }
+  if FLfsCheckJob <> nil then
+  begin
+    FLfsCheckJob.Stop(False);
+    FBlameZombies.Add(FLfsCheckJob);
+    FLfsCheckJob := nil;
+  end;
+  if FAutoFetchJob <> nil then
+  begin
+    FAutoFetchJob.Stop(AWait);
+    if AWait then
+      FAutoFetchJob.Free
+    else
+      FBlameZombies.Add(FAutoFetchJob);
+    FAutoFetchJob := nil;
+  end;
   if FRemoteJob = nil then
     Exit;
   FNoticeTimer.Enabled := False;
@@ -434,24 +518,225 @@ begin
   FRemoteJob := nil;
 end;
 
-procedure TForm1.MenuFetchClick(Sender: TObject);
+{ ---------------------------------------------------------------------------
+  Git LFS in the banner
+  ---------------------------------------------------------------------------
+  Once per commit checked out (the root and HEAD, FLfsChecked), after
+  every snapshot that changed something, a job reads where the
+  repository stands with Git LFS (TGittanRepo.LfsState). A repository
+  with files in Git LFS gets a banner while something is wrong, the
+  worst first: git-lfs not installed (a link to its site) or not set up
+  (Set Up runs git lfs install), both red, as a commit would put the
+  files' content in git; else, when files of the work tree are their
+  pointers, a note with Download All (git lfs pull). A banner closed
+  is not shown again until what it says changes (FLfsShown). }
+procedure TRepoFrame.CheckLfs;
+var
+  Key: string;
+begin
+  if FRepo.Root = '' then
+    Exit;
+  Key := FRepo.Root + #0 + FSnapHead;
+  { A check under way for another commit: LfsCheckDone sees the key
+    changed and reads again. }
+  if FLfsCheckJob <> nil then
+  begin
+    if Key <> FLfsChecked then
+      FLfsChecked := '';
+    Exit;
+  end;
+  if Key = FLfsChecked then
+    Exit;
+  FLfsChecked := Key;
+  FLfsCheckJob := TGittanLfsCheckJob.Create(FRepo.Root, Key);
+  FLfsCheckJob.OnDone := @LfsCheckDone;
+  FLfsCheckJob.Start;
+end;
+
+procedure TRepoFrame.LfsCheckDone(Sender: TObject);
+var
+  Job: TGittanLfsCheckJob;
+  State: TGittanLfsState;
+  Title, Detail, ActionText, Key: string;
+  Kind: TGittanBannerKind;
+  Handler: TNotifyEvent;
+begin
+  Job := TGittanLfsCheckJob(Sender);
+  if Job <> FLfsCheckJob then
+    Exit;
+  FLfsCheckJob := nil;
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+  { Another repository, or a commit checked out meanwhile: read again. }
+  if Job.Root <> FRepo.Root then
+    Exit;
+  if Job.Head <> FLfsChecked then
+  begin
+    CheckLfs;
+    Exit;
+  end;
+  { Read again with the next snapshot. }
+  if not Job.Ok then
+  begin
+    FLfsChecked := '';
+    Exit;
+  end;
+  State := Job.State;
+  Key := '';
+  Kind := bkError;
+  Handler := nil;
+  if State.Files = 0 then
+  else if not State.Installed then
+  begin
+    Title := rsLfsMissingTitle;
+    Detail := Format(rsLfsMissingDetail, [State.Files]);
+    ActionText := rsLfsGetAction;
+    Handler := @LfsGetClick;
+    Key := 'missing';
+  end
+  else if not State.SetUp then
+  begin
+    Title := rsLfsNotSetUpTitle;
+    Detail := Format(rsLfsNotSetUpDetail, [State.Files]);
+    ActionText := rsLfsSetUpAction;
+    Handler := @LfsInstallClick;
+    Key := 'setup';
+  end
+  else if State.Pointers > 0 then
+  begin
+    if State.Pointers = 1 then
+      Title := rsLfsPointersOne
+    else
+      Title := Format(rsLfsPointers, [State.Pointers]);
+    Detail := rsLfsPointersDetail;
+    ActionText := rsLfsPullAction;
+    Handler := @LfsPullClick;
+    Kind := bkInfo;
+    Key := 'pointers' + IntToStr(State.Pointers);
+  end;
+  if Key = FLfsShown then
+    Exit;
+  FLfsShown := Key;
+  if Key <> '' then
+    FBanner.AddAction(Title, Detail, Kind, 0, ActionText, Handler);
+end;
+
+procedure TRepoFrame.LfsGetClick(Sender: TObject);
+begin
+  OpenURL('https://git-lfs.com');
+end;
+
+procedure TRepoFrame.LfsInstallClick(Sender: TObject);
+begin
+  StartRemote(rkLfsInstall);
+end;
+
+procedure TRepoFrame.LfsPullClick(Sender: TObject);
+begin
+  StartRemote(rkLfsPull);
+end;
+
+{ ---------------------------------------------------------------------------
+  The background fetch
+  ---------------------------------------------------------------------------
+  Once AutoFetchMinutes have passed since the repository was last
+  fetched (FETCH_HEAD, so a fetch from the menu or a terminal counts
+  too), a plain fetch runs in a job of its own, with no notice and no
+  message, and only a repository with a remote is fetched. When it is
+  done the counts follow; a failure (offline, a key that needs its
+  passphrase) is left unsaid, as the next one may well work. A fetch,
+  pull or push asked for meanwhile waits for it (see StartRemote).
+
+  A failure leaves FETCH_HEAD as it was, so the try itself is kept
+  (FAutoFetchTried): the next waits AutoFetchMinutes, twice that after
+  two failures in a row and so on, up to AutoFetchBackoffMax times; a
+  repository without a remote waits as after a failure. Nothing runs
+  git before the wait is over. }
+procedure TRepoFrame.AutoFetchTimerTimer(Sender: TObject);
+const
+  AutoFetchBackoffMax = 8;
+var
+  Last: TDateTime;
+  Wait: integer;
+begin
+  if not App.Settings.AutoFetch or (FRepo.Root = '') or (FAutoFetchJob <> nil) or
+    (FRemoteJob <> nil) then
+    Exit;
+  if FAutoFetchFails > 0 then
+  begin
+    Wait := App.Settings.AutoFetchMinutes * Min(AutoFetchBackoffMax,
+      1 shl Min(FAutoFetchFails - 1, 3));
+    if (Now - FAutoFetchTried) * MinsPerDay < Wait then
+      Exit;
+  end;
+  Last := FRepo.LastFetch;
+  if (Last > 0) and ((Now - Last) * MinsPerDay < App.Settings.AutoFetchMinutes) then
+    Exit;
+  FAutoFetchTried := Now;
+  if FRepo.RemoteFor('') = '' then
+  begin
+    FAutoFetchFails := 1;
+    Exit;
+  end;
+  FAutoFetchJob := TGittanRemoteJob.Create(FRepo.Root, rkFetch);
+  FAutoFetchJob.OnDone := @AutoFetchDone;
+  FAutoFetchJob.Start;
+end;
+
+procedure TRepoFrame.AutoFetchDone(Sender: TObject);
+var
+  Job: TGittanRemoteJob;
+begin
+  Job := TGittanRemoteJob(Sender);
+  if Job <> FAutoFetchJob then
+    Exit;
+  FAutoFetchJob := nil;
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+  if Job.Root = FRepo.Root then
+    if Job.Ok then
+      FAutoFetchFails := 0
+    else
+      Inc(FAutoFetchFails);
+  if Job.Ok and (Job.Root = FRepo.Root) then
+    RefreshRepository;
+  if FPendingRemote then
+  begin
+    FPendingRemote := False;
+    FStatus.ShowMessage('', stNormal, 0);
+    if FPendingKind = rkFetchPull then
+      StartPullFetch(StrToIntDef(FPendingArg, 0), FPendingRemoteName, FPendingBranch)
+    else
+      StartRemote(FPendingKind, FPendingMode, FPendingArg, FPendingRemoteName);
+  end;
+end;
+
+{ The file's versions ARefs (an empty one for the work tree) from Git
+  LFS, for the header's Download. }
+procedure TRepoFrame.StartLfsDownload(const APath: string; const ARefs: TStringArray);
+begin
+  FLfsRefs := ARefs;
+  StartRemote(rkLfsFetch, pmAuto, APath);
+end;
+
+procedure TRepoFrame.MenuFetchClick(Sender: TObject);
 begin
   StartRemote(rkFetch);
 end;
 
-procedure TForm1.MenuPullClick(Sender: TObject);
+procedure TRepoFrame.MenuPullClick(Sender: TObject);
 begin
   StartRemote(rkPull);
 end;
 
-procedure TForm1.MenuPushClick(Sender: TObject);
+procedure TRepoFrame.MenuPushClick(Sender: TObject);
 begin
   StartRemote(rkPush);
 end;
 
 { Asks first, naming what the upstream loses: its commits the branch
   lacks, as the last fetch saw them. With none a plain push does. }
-procedure TForm1.ForcePushAsk;
+procedure TRepoFrame.ForcePushAsk;
 var
   Up, Msg: string;
 begin
@@ -477,14 +762,14 @@ begin
     StartRemote(rkForcePush);
 end;
 
-procedure TForm1.MenuForcePushClick(Sender: TObject);
+procedure TRepoFrame.MenuForcePushClick(Sender: TObject);
 begin
   ForcePushAsk;
 end;
 
 { The status bar's "↑2 ↓5": pull and push with their counts, fetch,
   and the commit graph, which a click opened before. }
-procedure TForm1.SyncClick(const AScreenRect: TRect);
+procedure TRepoFrame.SyncClick(const AScreenRect: TRect);
 
   procedure AddAction(AAction: integer; const ACaption, ADetail: string);
   begin
@@ -519,12 +804,12 @@ begin
 end;
 
 { The summary's sync line ("↑ 3 not pushed") drops the same list. }
-procedure TForm1.SummarySyncClick(Sender: TObject; const AScreenRect: TRect);
+procedure TRepoFrame.SummarySyncClick(Sender: TObject; const AScreenRect: TRect);
 begin
   SyncClick(AScreenRect);
 end;
 
-procedure TForm1.SyncPopupPick(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.SyncPopupPick(Sender: TObject; AIndex: integer);
 begin
   case FSyncPopup.TagOf(AIndex) of
     saPull: StartRemote(rkPull);

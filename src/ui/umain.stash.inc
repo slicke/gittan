@@ -27,7 +27,7 @@ const
   smDrop = 5;
 
 { The message as the list and the notes show it, cut to a line. }
-function TForm1.StashLabel(const AStash: TGittanStash): string;
+function TRepoFrame.StashLabel(const AStash: TGittanStash): string;
 begin
   Result := AStash.Message;
   if Length(Result) > 60 then
@@ -35,7 +35,7 @@ begin
 end;
 
 { The index in FStashes of the stash compared against, -1 for none. }
-function TForm1.StashOfBase: integer;
+function TRepoFrame.StashOfBase: integer;
 var
   i: integer;
 begin
@@ -47,7 +47,7 @@ begin
       Exit(i);
 end;
 
-procedure TForm1.ShowStashList(const AScreenRect: TRect);
+procedure TRepoFrame.ShowStashList(const AScreenRect: TRect);
 var
   i: integer;
   Detail: string;
@@ -77,7 +77,7 @@ begin
   FStashPopup.Popup(AScreenRect);
 end;
 
-procedure TForm1.StashPopupPick(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.StashPopupPick(Sender: TObject; AIndex: integer);
 var
   Row: PtrInt;
 begin
@@ -88,7 +88,7 @@ begin
     CompareStash(FListedStashes[Row]);
 end;
 
-procedure TForm1.StashContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
+procedure TRepoFrame.StashContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
 var
   Busy: boolean;
   Row: PtrInt;
@@ -115,7 +115,7 @@ begin
   FStashMenu.PopUp(AScreenPos.X, AScreenPos.Y);
 end;
 
-procedure TForm1.StashMenuClick(Sender: TObject);
+procedure TRepoFrame.StashMenuClick(Sender: TObject);
 var
   Stash: TGittanStash;
 begin
@@ -136,7 +136,7 @@ end;
   stash after HEAD), and stashes every change, or with AChosenOnly the
   files ticked in the tree. git makes no stash when there is nothing
   to save, which the count of stashes after the refresh tells. }
-procedure TForm1.StashChangesAsk(AChosenOnly: boolean);
+procedure TRepoFrame.StashChangesAsk(AChosenOnly: boolean);
 var
   Paths: TStringList;
   Values: array of string;
@@ -199,7 +199,7 @@ end;
   by value here and in the others that refresh, since one given as
   FStashes[i] is gone with the array once the refresh lists them
   again. }
-procedure TForm1.ApplyStash(AStash: TGittanStash; APop: boolean);
+procedure TRepoFrame.ApplyStash(AStash: TGittanStash; APop: boolean);
 var
   Ok, Conflicts: boolean;
   Err: string;
@@ -234,7 +234,7 @@ begin
     BannerError(rsStashApplyFailed, Err);
 end;
 
-procedure TForm1.DropStashAsk(AStash: TGittanStash);
+procedure TRepoFrame.DropStashAsk(AStash: TGittanStash);
 begin
   if (FCommitJob <> nil) or (FRemoteJob <> nil) then
     Exit;
@@ -258,7 +258,7 @@ begin
   end;
 end;
 
-procedure TForm1.BranchFromStashAsk(AStash: TGittanStash);
+procedure TRepoFrame.BranchFromStashAsk(AStash: TGittanStash);
 var
   Values: array of string;
 begin
@@ -289,12 +289,12 @@ begin
 end;
 
 { Whether the stash AId is the one compared against. }
-function TForm1.ComparingStash(const AId: string): boolean;
+function TRepoFrame.ComparingStash(const AId: string): boolean;
 begin
   Result := (FStashRange <> '') and (FRepo.Base = FStashRange) and (FStashRangeId = AId);
 end;
 
-procedure TForm1.CompareStash(AStash: TGittanStash);
+procedure TRepoFrame.CompareStash(AStash: TGittanStash);
 var
   Range: string;
 begin
@@ -312,7 +312,7 @@ end;
 
 { The base chip while a stash is compared against: Apply, Pop and
   Drop. }
-procedure TForm1.StashBaseClick(const AScreenRect: TRect);
+procedure TRepoFrame.StashBaseClick(const AScreenRect: TRect);
 var
   i: integer;
 begin
@@ -329,7 +329,7 @@ begin
   FBasePopup.Popup(AScreenRect);
 end;
 
-procedure TForm1.StashBasePick(AIndex: integer);
+procedure TRepoFrame.StashBasePick(AIndex: integer);
 var
   i: integer;
 begin
@@ -349,7 +349,7 @@ end;
   applying with a stash, none while git is in the middle of something
   or a commit, fetch, pull or push runs. Called as the menu opens and
   whenever the repository or a job changes, for the shortcuts. }
-procedure TForm1.UpdateStashItems;
+procedure TRepoFrame.UpdateStashItems;
 var
   Has, Busy: boolean;
   Chosen, i: integer;
@@ -370,34 +370,34 @@ begin
   FStashListItem.Enabled := Has;
 end;
 
-procedure TForm1.StashMenuOpen(Sender: TObject);
+procedure TRepoFrame.StashMenuOpen(Sender: TObject);
 begin
   UpdateStashItems;
 end;
 
-procedure TForm1.MenuStashAllClick(Sender: TObject);
+procedure TRepoFrame.MenuStashAllClick(Sender: TObject);
 begin
   StashChangesAsk(False);
 end;
 
-procedure TForm1.MenuStashChosenClick(Sender: TObject);
+procedure TRepoFrame.MenuStashChosenClick(Sender: TObject);
 begin
   StashChangesAsk(True);
 end;
 
-procedure TForm1.MenuPopStashClick(Sender: TObject);
+procedure TRepoFrame.MenuPopStashClick(Sender: TObject);
 begin
   if Length(FStashes) > 0 then
     ApplyStash(FStashes[0], True);
 end;
 
-procedure TForm1.MenuApplyStashClick(Sender: TObject);
+procedure TRepoFrame.MenuApplyStashClick(Sender: TObject);
 begin
   if Length(FStashes) > 0 then
     ApplyStash(FStashes[0], False);
 end;
 
-procedure TForm1.MenuStashListClick(Sender: TObject);
+procedure TRepoFrame.MenuStashListClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
     ShowStashList(FStatus.PartScreenRect(spStash));

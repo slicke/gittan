@@ -38,7 +38,7 @@ const
   caResetMixed = 10;
   caResetHard = 11;
   caCopy = 12;
-  caGitHub = 13;
+  caForge = 13;
   caMark = 14;
   caCompareMarked = 15;
   caRebase = 16;
@@ -52,7 +52,7 @@ const
   caPatch = 24;
   caPatchSeries = 25;
 
-procedure TForm1.GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
+procedure TRepoFrame.GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
   const AScreenPos: TPoint);
 var
   Busy, Jobs, InHead, IsHead, IsMerge: boolean;
@@ -160,15 +160,15 @@ begin
   end;
   Line;
   Add(nil, rsCopyHash, caCopy);
-  if FHasGitHubCli then
-    Add(nil, rsOpenCommitOnGitHub, caGitHub);
+  if Assigned(FForge) then
+    Add(nil, Format(rsOpenCommitOnForge, [ForgeName]), caForge);
   FCommitPopup.PopUp(AScreenPos.X, AScreenPos.Y);
 end;
 
 { A new branch is asked a name for and switched to; a tag a name and a
   message, which makes it annotated (none, a lightweight one); a reset
   asks first, saying what it keeps. }
-procedure TForm1.CommitMenuClick(Sender: TObject);
+procedure TRepoFrame.CommitMenuClick(Sender: TObject);
 var
   Hash, Short, Note: string;
   Ok, Conflicts, Reopen: boolean;
@@ -227,8 +227,8 @@ begin
       SwitchBranch((Sender as TMenuItem).Hint);
     caCopy:
       Clipboard.AsText := Hash;
-    caGitHub:
-      OpenOnGitHub([Hash]);
+    caForge:
+      OpenOnForge(CommitTarget(Hash));
     caRebase:
       RebaseInteractiveAsk(Hash, Short, True);
     caBisectStartGood, caBisectStartBad, caBisectGood, caBisectBad, caBisectSkip:
@@ -316,7 +316,7 @@ begin
 end;
 
 { What a reset moves: the current branch, or HEAD while it is on none. }
-function TForm1.ResetTarget: string;
+function TRepoFrame.ResetTarget: string;
 begin
   if FBranch <> '' then
     Result := FBranch
@@ -327,7 +327,7 @@ end;
 { Asks before a reset to AHash (AShort), saying which commits leave the
   branch and what AMode keeps. From the reflog the commit may be ahead
   of HEAD, or on another line, and not only behind it. }
-function TForm1.ResetAsk(const AHash, AShort: string; AMode: TGittanResetMode): boolean;
+function TRepoFrame.ResetAsk(const AHash, AShort: string; AMode: TGittanResetMode): boolean;
 var
   Ask, Note: string;
   Forward: boolean;
@@ -363,7 +363,7 @@ end;
 
 { A reset to AHash (AShort) with AMode after ResetAsk, from the commit
   menu and the reflog. True when it was done. }
-function TForm1.ResetToAsk(const AHash, AShort: string; AMode: TGittanResetMode): boolean;
+function TRepoFrame.ResetToAsk(const AHash, AShort: string; AMode: TGittanResetMode): boolean;
 begin
   Result := False;
   if RepoBusy or not ResetAsk(AHash, AShort, AMode) then

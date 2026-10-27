@@ -5,13 +5,12 @@
   client area (WM_NCCALCSIZE keeps the top edge where the window's top
   is; the sides and the bottom keep their frame, so resizing and the
   shadow stay native) and TGittanWinTitleBar, aligned at the top of the
-  form, takes its place: the bar of gittan.owntitlebar (the name, the
-  menus, the search field, the navigator, the pills and the caption
-  buttons) with the Windows parts of it.
+  form, takes its place: the bar of gittan.owntitlebar (the menu button,
+  the tabs and the caption buttons) with the Windows parts of it.
 
   Windows asks the form what is under the mouse (WM_NCHITTEST). The bar
-  answers HTTRANSPARENT for everything but its menus, the search field
-  and the pills, so the form is asked; the form answers HTCAPTION for
+  answers HTTRANSPARENT for everything but its menu button, its tabs and
+  its plus, so the form is asked; the form answers HTCAPTION for
   the bar's empty parts (a drag moves the window, a double click
   maximizes it, a right click opens the system menu) and the caption
   button codes for the buttons, HTMAXBUTTON giving Windows 11 its snap
@@ -20,9 +19,9 @@
   pressed, in Segoe Fluent Icons.
 
   The menu stays on the window, under the bar: commands are looked up
-  in it and its shortcuts work. A click on a menu name in the bar opens
-  that submenu with TrackPopupMenuEx, owned by the form, and Alt with a
-  letter opens the menu it underlines there instead of the hidden bar.
+  in it and its shortcuts work. The bar's menu button drops a copy of it
+  as a popup, and Alt with a letter drops the menu it underlines there
+  instead of the hidden bar.
   Windows still draws the hidden bar, and the line under it (white in
   dark mode; MetaDarkStyle paints over it at the top of the client area,
   now the window's top), over the client area when the window is
@@ -52,8 +51,6 @@ type
     function Maximized: boolean; override;
     procedure DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
       AColor: TColor); override;
-    procedure ShowMenu(AIndex: integer; AItem: TMenuItem; const ARect: TRect);
-      override;
     procedure CreateWnd; override;
   public
     constructor Create(AOwner: TComponent); override;
@@ -78,8 +75,6 @@ const
   GlyphMaximize = #$EE#$A4#$A2;
   GlyphRestore = #$EE#$A4#$A3;
   GlyphClose = #$EE#$A2#$BB;
-  GlyphSearch = #$EE#$9C#$A1;
-  GlyphClear = #$EE#$9C#$91;
 
   WM_NCMOUSELEAVE = $02A2;
   TME_NONCLIENT = $00000010;
@@ -375,10 +370,8 @@ begin
     tgMinimize: S := GlyphMinimize;
     tgMaximize: S := GlyphMaximize;
     tgRestore: S := GlyphRestore;
-    tgClose: S := GlyphClose;
-    tgSearch: S := GlyphSearch;
   else
-    S := GlyphClear;
+    S := GlyphClose;
   end;
   Canvas.Font.Name := FGlyphFont;
   Canvas.Font.Height := -Scale96ToForm(10);
@@ -387,31 +380,6 @@ begin
   Canvas.TextOut(AR.Left + (AR.Width - Canvas.TextWidth(S)) div 2,
     AR.Top + (AR.Height - Canvas.TextHeight(S)) div 2, S);
   Canvas.Font := Font;
-end;
-
-{ The submenu under the name, owned by the form so that its commands go
-  where the menu bar's would. TrackPopupMenuEx returns when the menu
-  closes. The menu bar holds the visible items only, as the bar's
-  indexes count. }
-procedure TGittanWinTitleBar.ShowMenu(AIndex: integer; AItem: TMenuItem;
-  const ARect: TRect);
-var
-  Form: TCustomForm;
-  Menu: HMENU;
-  P: TPoint;
-begin
-  Form := GetParentForm(Self);
-  if Form <> nil then
-  begin
-    Menu := GetMenu(Form.Handle);
-    if Menu <> 0 then
-    begin
-      P := ClientToScreen(Types.Point(ARect.Left, Height));
-      TrackPopupMenuEx(GetSubMenu(Menu, AIndex), TPM_LEFTALIGN or TPM_TOPALIGN or
-        TPM_LEFTBUTTON, P.X, P.Y, Form.Handle, nil);
-    end;
-  end;
-  MenuClosed;
 end;
 
 end.

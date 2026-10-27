@@ -1,18 +1,21 @@
 unit testreviews;
 
-{** Tests of gittan.reviews: GitHub's answer for the review threads of a
-  pull request, the mapping of a line through a diff and the age of a
-  comment. The fetch itself is not tested; it needs the network. }
+{** Tests of gittan.reviews: the review threads of a pull request as
+  gittan.github reads them from GitHub's answer, the mapping of a line
+  through a diff and the age of a comment. The fetch itself is not
+  tested; it needs the network. }
 
 {$mode objfpc}{$H+}
 
 interface
 
 uses
-  Classes, SysUtils, DateUtils, fpcunit, testregistry, gittan.reviews;
+  Classes, SysUtils, DateUtils, fpcunit, testregistry, gittan.reviews, gittan.github;
 
 type
   TReviewsTest = class(TTestCase)
+  private
+    function IsFile(const APath: string): boolean;
   published
     procedure TestParseThreads;
     procedure TestParsePages;
@@ -23,6 +26,12 @@ type
     procedure TestMapLineChanged;
     procedure TestMapLineRemoved;
     procedure TestReviewAge;
+    procedure TestCommentMarkdown;
+    procedure TestCommentMarkdownCode;
+    procedure TestCommentParts;
+    procedure TestLinkFilePaths;
+    procedure TestLinkFilePathsLeftAlone;
+    procedure TestFileOfLink;
   end;
 
 implementation
@@ -195,6 +204,148 @@ begin
   AssertEquals('yesterday', ReviewAge(IncHour(Now_, -30), Now_));
   AssertEquals('4 days ago', ReviewAge(IncDay(Now_, -4), Now_));
   AssertEquals('2026-08-01', ReviewAge(EncodeDateTime(2026, 8, 1, 0, 0, 0, 0), Now_));
+end;
+
+procedure TReviewsTest.TestCommentMarkdown;
+const
+  NL = LineEnding;
+begin
+  AssertEquals('plain Markdown as it is', '**Bug**: off by one.' + NL + NL + 'Use `<=`.',
+    CommentMarkdown('**Bug**: off by one.'#10#10'Use `<=`.'));
+  AssertEquals('comments go', 'Before' + NL + NL + 'after',
+    CommentMarkdown('Before'#10'<!-- fingerprinting:abc'#10'more -->'#10#10'after<!-- x -->'));
+  AssertEquals('a details block folds to its summary',
+    'Intro' + NL + NL + '▸ 🤖 Prompt for AI Agents' + NL + NL + 'Outro',
+    CommentMarkdown('Intro'#10'<details>'#10'<summary>🤖 Prompt for AI Agents</summary>'#10#10 +
+    'Inside'#10'<details><summary>Nested</summary>Deeper</details>'#10'```'#10'</details>'#10'```'#10 +
+    '</details>'#10'Outro'));
+  AssertEquals('a details block without summary', '▸ Details',
+    CommentMarkdown('<details>Hidden</details>'));
+  AssertEquals('one left open', 'A' + NL + NL + '▸ Open',
+    CommentMarkdown('A'#10'<details><summary>Open</summary>'#10'never closed'));
+  AssertEquals('img and a', 'See [the docs](https://x.y/d) logo',
+    CommentMarkdown('See <a href="https://x.y/d">the docs</a> <img src="l.png" alt="logo"/>'));
+  AssertEquals('block tags break lines', 'One' + NL + NL + 'Two' + NL + NL + '- three',
+    CommentMarkdown('<p>One</p><div>Two<ul><li>three</li></ul></div>'));
+  AssertEquals('headings are bold', '**Summary by CodeRabbit**' + NL + NL + '**Walk** x' + NL + '#hashtag',
+    CommentMarkdown('## Summary by CodeRabbit ##'#10#10'**Walk** x'#10'#hashtag'));
+  AssertEquals('other tags are left', 'Vec<T> and <b>bold</b><br> a < b',
+    CommentMarkdown('Vec<T> and <b>bold</b><br/> a < b'));
+end;
+
+procedure TReviewsTest.TestCommentMarkdownCode;
+const
+  NL = LineEnding;
+begin
+  AssertEquals('a fence keeps its tags and blank lines',
+    '```html' + NL + '<p>x</p>' + NL + NL + NL + '<!-- y -->' + NL + '```',
+    CommentMarkdown('```html'#10'<p>x</p>'#10#10#10'<!-- y -->'#10'```'));
+  AssertEquals('a heading in a fence stays', '```' + NL + '# not a heading' + NL + '```',
+    CommentMarkdown('```'#10'# not a heading'#10'```'));
+  AssertEquals('a code span too', 'Write `<details>` here',
+    CommentMarkdown('Write `<details>` here'));
+  AssertEquals('a suggestion stays', '```suggestion' + NL + 'x := 1;' + NL + '```',
+    CommentMarkdown('```suggestion'#10'x := 1;'#10'```'));
+end;
+
+procedure TReviewsTest.TestCommentParts;
+var
+  P: TGittanCommentParts;
+begin
+  P := CommentParts('Intro'#10'<details>'#10'<summary>Outer <b>one</b></summary>'#10#10 +
+    'Inside'#10'<details><summary>Nested</summary>Deeper</details>'#10'```'#10'</details>'#10'```'#10 +
+    'After'#10'</details>'#10'<details>Bare</details>'#10'Outro');
+  AssertEquals(9, Length(P));
+  AssertTrue(P[0].Kind = cpText);
+  AssertEquals(0, P[0].Depth);
+  AssertEquals('Intro', P[0].Text);
+  AssertTrue(P[1].Kind = cpDetails);
+  AssertEquals(0, P[1].Depth);
+  AssertEquals('Outer <b>one</b>', P[1].Text);
+  AssertEquals(1, P[2].Depth);
+  AssertEquals('Inside', P[2].Text);
+  AssertTrue(P[3].Kind = cpDetails);
+  AssertEquals(1, P[3].Depth);
+  AssertEquals('Nested', P[3].Text);
+  AssertEquals(2, P[4].Depth);
+  AssertEquals('Deeper', P[4].Text);
+  AssertEquals('a fence inside keeps its tag', 1, P[5].Depth);
+  AssertEquals('```' + LineEnding + '</details>' + LineEnding + '```' + LineEnding + 'After', P[5].Text);
+  AssertTrue(P[6].Kind = cpDetails);
+  AssertEquals(0, P[6].Depth);
+  AssertEquals('Details', P[6].Text);
+  AssertEquals('the text of a block without summary', 1, P[7].Depth);
+  AssertEquals('Bare', P[7].Text);
+  AssertEquals(0, P[8].Depth);
+  AssertEquals('Outro', P[8].Text);
+end;
+
+{ The files of a pretend repository. }
+function TReviewsTest.IsFile(const APath: string): boolean;
+begin
+  Result := (APath = 'src/ui/umain.pp') or (APath = 'README.md') or (APath = 'a/b-c.pp');
+end;
+
+procedure TReviewsTest.TestLinkFilePaths;
+begin
+  AssertEquals('See [src/ui/umain.pp](gittan-file:src/ui/umain.pp) here.',
+    LinkFilePaths('See src/ui/umain.pp here.', @IsFile));
+  AssertEquals('the line', '[src/ui/umain.pp:42](gittan-file:src/ui/umain.pp#L42), then',
+    LinkFilePaths('src/ui/umain.pp:42, then', @IsFile));
+  AssertEquals('a range', 'In [src/ui/umain.pp:42-50](gittan-file:src/ui/umain.pp#L42).',
+    LinkFilePaths('In src/ui/umain.pp:42-50.', @IsFile));
+  AssertEquals('GitHub''s anchor', '[./src/ui/umain.pp#L7-L9](gittan-file:src/ui/umain.pp#L7)',
+    LinkFilePaths('./src/ui/umain.pp#L7-L9', @IsFile));
+  AssertEquals('a name alone with a dot', '([README.md](gittan-file:README.md))',
+    LinkFilePaths('(README.md)', @IsFile));
+  AssertEquals('a dash in it', '[a/b-c.pp](gittan-file:a/b-c.pp)', LinkFilePaths('a/b-c.pp', @IsFile));
+  AssertEquals('code', 'Open [`src/ui/umain.pp:3`](gittan-file:src/ui/umain.pp#L3)',
+    LinkFilePaths('Open `src/ui/umain.pp:3`', @IsFile));
+  AssertEquals('escaped backticks', '\`[README.md](gittan-file:README.md)\`',
+    LinkFilePaths('\`README.md\`', @IsFile));
+  AssertEquals('lines', 'x [README.md](gittan-file:README.md)' + LineEnding +
+    'y [README.md](gittan-file:README.md)' + LineEnding,
+    LinkFilePaths('x README.md'#10'y README.md'#10, @IsFile));
+  AssertEquals('a task before a link',
+    '- [ ] fix [README.md](gittan-file:README.md), see [docs](https://a.b)',
+    LinkFilePaths('- [ ] fix README.md, see [docs](https://a.b)', @IsFile));
+  AssertEquals('an index', 'a[i] in [README.md](gittan-file:README.md)',
+    LinkFilePaths('a[i] in README.md', @IsFile));
+end;
+
+procedure TReviewsTest.TestLinkFilePathsLeftAlone;
+const
+  Fenced = '```' + LineEnding + 'src/ui/umain.pp' + LineEnding + '```';
+begin
+  AssertEquals('not a file', 'see src/ui/other.pp and 1.2.3',
+    LinkFilePaths('see src/ui/other.pp and 1.2.3', @IsFile));
+  AssertEquals('a link', '[x](src/ui/umain.pp) and [src/ui/umain.pp](https://a.b)',
+    LinkFilePaths('[x](src/ui/umain.pp) and [src/ui/umain.pp](https://a.b)', @IsFile));
+  AssertEquals('a link with brackets in it', '[a [README.md] b](https://a.b)',
+    LinkFilePaths('[a [README.md] b](https://a.b)', @IsFile));
+  AssertEquals('a URL', 'https://example.com/src/ui/umain.pp done',
+    LinkFilePaths('https://example.com/src/ui/umain.pp done', @IsFile));
+  AssertEquals('a tag', '<a href="README.md">', LinkFilePaths('<a href="README.md">', @IsFile));
+  AssertEquals('fenced code', Fenced, LinkFilePaths(Fenced, @IsFile));
+  AssertEquals('code with more in it', '`cat README.md`', LinkFilePaths('`cat README.md`', @IsFile));
+  AssertEquals('part of a word', 'x@README.md', LinkFilePaths('x@README.md', @IsFile));
+  AssertEquals('out of the repository', '../README.md /README.md',
+    LinkFilePaths('../README.md /README.md', @IsFile));
+end;
+
+procedure TReviewsTest.TestFileOfLink;
+var
+  Path: string;
+  Line: integer;
+begin
+  AssertTrue(FileOfLink('gittan-file:src/a.pp#L42', Path, Line));
+  AssertEquals('src/a.pp', Path);
+  AssertEquals(42, Line);
+  AssertTrue(FileOfLink('gittan-file:README.md', Path, Line));
+  AssertEquals('README.md', Path);
+  AssertEquals(0, Line);
+  AssertFalse(FileOfLink('https://github.com/o/r', Path, Line));
+  AssertFalse(FileOfLink('gittan-file:', Path, Line));
 end;
 
 initialization

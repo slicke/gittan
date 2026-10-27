@@ -120,6 +120,17 @@ type
     bug), bad (with it), or skipped (it cannot be tested). }
   TGittanBisectMark = (bmGood, bmBad, bmSkip);
 
+  {** Where a repository stands with Git LFS (TGittanRepo.LfsState):
+    whether it has files in Git LFS (Files, those with filter=lfs),
+    whether git-lfs is on the tool path (Installed) and set up in git's
+    config (SetUp: `git lfs install` gives filter.lfs.process or
+    .smudge), and how many of the files are pointers in the work tree,
+    not downloaded or never checked out (Pointers). }
+  TGittanLfsState = record
+    Files, Pointers: integer;
+    Installed, SetUp: boolean;
+  end;
+
   TGittanRepoSnapshot = record
     Ok: boolean;
     Error: string;
@@ -127,6 +138,8 @@ type
     Branch, DefaultBranch, MergeBase, Operation, RebaseBranch: string;
     {** HEAD is on no branch: Branch is then the short commit id. }
     Detached: boolean;
+    {** The id of the commit HEAD is on; empty before the first commit. }
+    Head: string;
     HasUpstream: boolean;
     Ahead, Behind: integer;
     {** How many commits of DefaultBranch the branch lacks, from
@@ -215,6 +228,12 @@ type
   end;
   TGittanCommitParts = array of TGittanCommitPart;
 
+  {** How a commit is made besides its message and files: with a
+    Signed-off-by line of the committer (`--signoff`), and without the
+    pre-commit and commit-msg hooks (`--no-verify`). }
+  TGittanCommitOption = (coSignOff, coNoVerify);
+  TGittanCommitOptions = set of TGittanCommitOption;
+
   {** One opened repository. Open finds the work tree root for a folder, and
     the other calls run inside that root. }
   TGittanRepo = class
@@ -222,6 +241,9 @@ type
     FRoot: string;
     { The git directory, found by Open with the root. }
     FGitDir: string;
+    { Git LFS's store folder (LfsObjectFile) and FETCH_HEAD's path
+      (LastFetch), '' until they are asked for. }
+    FLfsStore, FFetchHead: string;
     FError: string;
     FBase: string;
     FWholeTree: boolean;
@@ -235,6 +257,11 @@ type
     function RunGit(const ADir: string; const AArgs: array of string;
       out AOutput: string; const AIndexFile: string = ''): boolean;
     function RunRemote(const AArgs: array of string): boolean;
+    function StoredSize(const APath, ARef: string; out ASize: int64): boolean;
+    function LfsPointerAt(const APath, ARef: string; AStoredSize: int64; out AOid: string;
+      out ASize: int64): boolean;
+    function LfsStore: string;
+    function LfsInstalled: boolean;
     function IndexPath: string;
     function CopyIndex(const ATarget: string): boolean;
     function CommitTree(const ATree, AParent, AMessage: string; out AId: string): boolean;
@@ -376,9 +403,11 @@ type
       temporary index, HEAD's tree with APaths added and AParts written
       over them, and the real index takes the committed paths as the new
       HEAD has them, so what was left out shows as not staged; during a
-      merge, a cherry-pick or a revert AParts go into the real index. }
+      merge, a cherry-pick or a revert AParts go into the real index.
+      AOptions add a sign-off or skip the hooks. }
     function Commit(const AMessage: string; APaths: TStrings; AAmend: boolean;
-      out AId: string; const AParts: TGittanCommitParts = nil): boolean;
+      out AId: string; const AParts: TGittanCommitParts = nil;
+      AOptions: TGittanCommitOptions = []): boolean;
     {** The whole message of HEAD, without its trailing line ends; false
       before the first commit. }
     function HeadMessage(out AMessage: string): boolean;
@@ -396,6 +425,10 @@ type
     {** Fetches every remote, dropping the remote-tracking branches
       whose branch is gone from it (`git fetch --all --prune`). }
     function Fetch: boolean;
+    {** When the repository was last fetched, from anywhere: the time
+      FETCH_HEAD was written (`rev-parse --git-path`, so a linked
+      worktree's own, asked once per open). 0 when it never was. }
+    function LastFetch: TDateTime;
     {** Pulls the branch's upstream into it, the way AMode says. False,
       with git's reason in Error, when nothing was pulled; ADiverged is
       then set when the branch and its upstream both have commits the
@@ -692,17 +725,27 @@ type
     {** Whether the repository sets a name or an e-mail of its own
       (`git config --local`), which go before the global ones. }
     function HasLocalIdentity: boolean;
+    {** Whether commits in the repository are signed off, as Gittan keeps
+      it in the repository's own config (`gittan.signOff`), so it holds
+      for that repository and its worktrees alone. }
+    function SignOff: boolean;
+    {** Keeps ASignOff for SignOff, unsetting the key when off. }
+    function SetSignOff(ASignOff: boolean): boolean;
     {** The remote whose URL holds ARepoPath ("owner/repo", compared
       without regard to case), else origin, else the first remote, else
       empty. }
     function RemoteFor(const ARepoPath: string): string;
-    {** Fetches pull request ANumber of ARemote (a GitHub remote, which
-      serves it as refs/pull/N/head) into refs/gittan/pr/N, the name given
-      in AHeadRef, and ABaseRef along with it, so the remote-tracking
-      branch of the base is current too. Nothing in the work tree or the
-      branches changes. }
+    {** Whether a remote's URL holds ARepoPath ("owner/repo", compared
+      without regard to case) as its path: followed by nothing, ".git"
+      or a slash. }
+    function HasRemoteFor(const ARepoPath: string): boolean;
+    {** Fetches pull request ANumber of ARemote, which serves its head at
+      APullRef (the forge's PullRef: refs/pull/N/head on GitHub), into
+      refs/gittan/pr/N, the name given in AHeadRef, and ABaseRef along
+      with it, so the remote-tracking branch of the base is current too.
+      Nothing in the work tree or the branches changes. }
     function FetchPullRequest(const ARemote: string; ANumber: integer;
-      const ABaseRef: string; out AHeadRef: string): boolean;
+      const APullRef, ABaseRef: string; out AHeadRef: string): boolean;
     {** Records the work tree as it is now, untracked files included, in
       a commit of its own (parent HEAD when there is one, no branch points
       at it), and returns its id: a Base to compare against later, with
@@ -840,12 +883,47 @@ type
     procedure DiffSides(out ALeft, ARight: string);
     {** The bytes of APath as it is in the commit ARef (`git cat-file
       blob`, no filter applied), or in the work tree when ARef is empty.
-      Returns false when the version has no such file. }
+      A Git LFS pointer gives the file it stands for when the local
+      store has it (LfsObjectFile), else the pointer itself. Returns
+      false when the version has no such file. }
     function FileBlob(const APath, ARef: string; out AData: RawByteString): boolean;
     {** The size in bytes of APath in the commit ARef (`git cat-file -s`),
-      or in the work tree when ARef is empty, without reading it. Returns
-      false when the version has no such file. }
-    function FileSize(const APath, ARef: string; out ASize: int64): boolean;
+      or in the work tree when ARef is empty, without reading it; for a
+      Git LFS pointer the size it gives. Returns false when the version
+      has no such file. }
+    function FileSize(const APath, ARef: string; out ASize: int64): boolean; overload;
+    {** FileSize, and in ALfsMissing whether the version is a Git LFS
+      pointer whose object the local store lacks (LfsMissing), from one
+      read of the pointer. }
+    function FileSize(const APath, ARef: string; out ASize: int64;
+      out ALfsMissing: boolean): boolean; overload;
+    {** Where Git LFS keeps the object AOid (an oid of ParseLfsPointer):
+      lfs/objects/<2>/<2>/<oid> in the common git directory, which a
+      linked worktree names in its commondir file, or under lfs.storage
+      when that is set; the folder is found once per open. The file need
+      not exist. }
+    function LfsObjectFile(const AOid: string): string;
+    {** Whether APath in the commit ARef, or in the work tree when ARef is
+      empty, is a Git LFS pointer whose object the local store lacks. }
+    function LfsMissing(const APath, ARef: string): boolean;
+    {** Downloads the Git LFS object of APath as it is in each of ARefs
+      (commits; an empty one for the work tree, whose pointer is then
+      replaced by the file) from the remote a push goes to, through
+      `git lfs fetch` and `git lfs checkout`. False, with the reason in
+      Error, when git-lfs is not installed, there is no remote or it
+      failed. }
+    function LfsDownload(const APath: string; const ARefs: array of string): boolean;
+    {** Where the repository stands with Git LFS. False when git failed. }
+    function LfsState(out AState: TGittanLfsState): boolean;
+    {** Downloads every Git LFS file of HEAD and puts them in place of
+      their pointers in the work tree (`git lfs pull`), from the default
+      remote. False, with the reason in Error, as for LfsDownload. }
+    function LfsPull: boolean;
+    {** Sets Git LFS up for the user (`git lfs install`: the filter in
+      the global config, the hooks in this repository) and puts the
+      files of the work tree in place of their pointers from what the
+      store has. }
+    function LfsInstall: boolean;
     {** The output of `git blame --porcelain` for APath as it is in the
       commit ARef, or in the work tree when ARef is empty, with
       IgnoreWhitespace passed on as -w. Returns false when git failed: a
@@ -950,6 +1028,8 @@ function GitExe: string;
 const
   {** The oldest git Gittan supports: 2.30, the first with
     `push --force-if-includes`. }
+  LfsMissingMessage = 'Git LFS is not installed. Install it from https://git-lfs.com, ' +
+    'then run "git lfs install" once.';
   MinGitMajor = 2;
   MinGitMinor = 30;
 
@@ -1001,11 +1081,11 @@ function NvmNodeBin(const ANvmDir: string): string;
   version installed. Empty when none is. }
 function FnmNodeBin(const AFnmDir: string): string;
 
-{** Runs gh (AExe, from FindTool('gh')) in ADir and answers whether it
-  succeeded, with its standard output in AOutput and, on failure, its
-  message in AError. gh runs with its prompts and its update notice off,
-  since nobody could answer the one and the other would land in stderr. }
-function RunGitHubCli(const AExe, ADir: string; const AArgs: array of string;
+{** Runs a command line tool (AExe: a forge's, gh) in ADir with AArgs and
+  AEnv ("NAME=value") added to the environment, and answers whether it
+  exited with 0, with its standard output in AOutput and, on failure,
+  its message in AError (what it printed on both, as git's failures). }
+function RunCli(const AExe, ADir: string; const AArgs, AEnv: array of string;
   out AOutput, AError: string): boolean;
 
 {** Runs an AI agent's command line tool (AExe: claude, copilot) in ADir
@@ -1096,6 +1176,17 @@ function IsBinaryFile(const AFileName: string): boolean;
   it. }
 function StatExact(const AFileName: string; out AInfo: TSearchRec): boolean;
 
+const
+  {** A Git LFS pointer is shorter than this, in bytes (Git LFS's spec). }
+  LfsPointerMax = 1024;
+
+{** Whether AData is a Git LFS pointer, the text git holds in place of a
+  file kept in Git LFS's store: under LfsPointerMax bytes, lines ending in a line
+  feed, the version line first, an oid of sha256 and a size. AOid is the
+  oid's 64 hex digits, ASize the size of the file it stands for. }
+function ParseLfsPointer(const AData: RawByteString; out AOid: string;
+  out ASize: int64): boolean;
+
 {** Runs git in ADir as TGittanRepo does (see Running git) and answers
   whether it succeeded, with its standard output in AOutput and, on
   failure, its message in AError: what it wrote on stdout, then on
@@ -1153,6 +1244,16 @@ function ResolveReturns(const AText: string): string;
   remote that cannot be reached counts none of its branches as gone.
   For threads: it goes to the network. }
 procedure GoneUpstreamsIn(const ADir: string; AList: TStrings);
+
+{** The URLs of the remotes of the repository in ADir, a line each as
+  `git config --get-regexp ^remote\..*\.url$` prints them ("remote.<name>.url
+  <url>"); empty when it has none or ADir is no repository. For threads. }
+function RemoteUrlsIn(const ADir: string): string;
+
+{** Whether one of AUrls (as RemoteUrlsIn gives them) holds ARepoPath
+  ("owner/repo", compared without regard to case) as its path: followed
+  by nothing, ".git" or a slash. }
+function RemoteUrlsHold(const AUrls, ARepoPath: string): boolean;
 
 {** S quoted as the C runtime of Windows splits a command line: in double
   quotes, with a quote inside escaped and the backslashes before it or
@@ -1868,6 +1969,45 @@ begin
   end;
 end;
 
+function RemoteUrlsIn(const ADir: string): string;
+var
+  Err: string;
+begin
+  if not RunGitIn(ADir, ['config', '--get-regexp', '^remote\..*\.url$'], Result, Err) then
+    Result := '';
+end;
+
+function RemoteUrlsHold(const AUrls, ARepoPath: string): boolean;
+var
+  Line, Lower, Path, Rest: string;
+  p, Url: integer;
+begin
+  Result := False;
+  if ARepoPath = '' then
+    Exit;
+  Path := LowerCase(ARepoPath);
+  for Line in AUrls.Split([#10]) do
+  begin
+    Lower := LowerCase(TrimRight(Line));
+    Url := Pos(' ', Lower);
+    if Url = 0 then
+      Continue;
+    { The path starts after a slash, or the colon of user@host:owner/repo,
+      so another owner whose name ends with this one is not it. }
+    p := PosEx(Path, Lower, Url + 1);
+    while p > 0 do
+    begin
+      if Lower[p - 1] in ['/', ':'] then
+      begin
+        Rest := Copy(Lower, p + Length(Path), MaxInt);
+        if (Rest = '') or (Rest = '.git') or (Rest[1] = '/') then
+          Exit(True);
+      end;
+      p := PosEx(Path, Lower, p + 1);
+    end;
+  end;
+end;
+
 { Each line of for-each-ref is "branch<TAB>remote<TAB>refs/heads/x",
   the last two empty without an upstream; each of ls-remote's is
   "<id><TAB>refs/heads/x". }
@@ -1946,13 +2086,12 @@ begin
     ParseGitVersion(Output, AVersion, AMajor, AMinor);
 end;
 
-function RunGitHubCli(const AExe, ADir: string; const AArgs: array of string;
+function RunCli(const AExe, ADir: string; const AArgs, AEnv: array of string;
   out AOutput, AError: string): boolean;
 var
   Status: integer;
 begin
-  if not RunTool(AExe, ADir, AArgs, [], ['GH_PROMPT_DISABLED=1',
-    'GH_NO_UPDATE_NOTIFIER=1'], AOutput, AError, Status, nil) then
+  if not RunTool(AExe, ADir, AArgs, [], AEnv, AOutput, AError, Status, nil) then
   begin
     AError := 'Could not run ' + AExe;
     Exit(False);
@@ -2072,6 +2211,8 @@ begin
   DropTempIndex;
   FRoot := '';
   FGitDir := '';
+  FLfsStore := '';
+  FFetchHead := '';
   FError := '';
   FBase := '';
   FWholeTree := False;
@@ -2434,6 +2575,35 @@ begin
     RunGit(FRoot, ['config', '--local', 'user.email'], Output));
 end;
 
+function TGittanRepo.SignOff: boolean;
+var
+  Output: string;
+begin
+  Result := (FRoot <> '') and RunGit(FRoot, ['config', '--local', '--bool', 'gittan.signOff'],
+    Output) and (Trim(Output) = 'true');
+end;
+
+{ --unset fails (5) when the key is not there, which is what off is. }
+function TGittanRepo.SetSignOff(ASignOff: boolean): boolean;
+var
+  Output, Err: string;
+begin
+  if FRoot = '' then
+    Exit(False);
+  if ASignOff then
+    Exit(RunGit(FRoot, ['config', '--local', 'gittan.signOff', 'true'], Output));
+  { --unset-all fails when the key is not there, which is no failure. }
+  RunGitIn(FRoot, ['config', '--local', '--unset-all', 'gittan.signOff'], Output, Err);
+  Result := not SignOff;
+  if Result then
+    Exit;
+  Err := Trim(Err);
+  if Err <> '' then
+    FError := Err
+  else
+    FError := 'Sign-off is still on: another git config sets gittan.signOff.';
+end;
+
 function TGittanRepo.RemoteFor(const ARepoPath: string): string;
 var
   Output, Line, Name: string;
@@ -2462,7 +2632,7 @@ begin
       if Result = '' then
         Result := Name;
       HasOrigin := HasOrigin or (Name = 'origin');
-      if (ARepoPath <> '') and (Pos(LowerCase(ARepoPath), LowerCase(Line)) > p) then
+      if RemoteUrlsHold(Line, ARepoPath) then
         Exit(Name);
     end;
   finally
@@ -2472,14 +2642,23 @@ begin
     Result := 'origin';
 end;
 
+function TGittanRepo.HasRemoteFor(const ARepoPath: string): boolean;
+var
+  Output: string;
+begin
+  Result := (FRoot <> '') and (ARepoPath <> '') and RunGit(FRoot, ['config', '--get-regexp',
+    '^remote\..*\.url$'], Output) and RemoteUrlsHold(Output, ARepoPath);
+end;
+
 function TGittanRepo.FetchPullRequest(const ARemote: string; ANumber: integer;
-  const ABaseRef: string; out AHeadRef: string): boolean;
+  const APullRef, ABaseRef: string; out AHeadRef: string): boolean;
 var
   Output: string;
 begin
   AHeadRef := 'refs/gittan/pr/' + IntToStr(ANumber);
-  Result := (FRoot <> '') and (ARemote <> '') and RunGit(FRoot, ['fetch', '--no-tags',
-    '-q', ARemote, ABaseRef, '+refs/pull/' + IntToStr(ANumber) + '/head:' + AHeadRef],
+  Result := (FRoot <> '') and (ARemote <> '') and (APullRef <> '') and
+    RunGit(FRoot, ['fetch', '--no-tags', '-q', ARemote, ABaseRef, '+' + APullRef + ':' +
+    AHeadRef],
     Output);
 end;
 
@@ -2517,15 +2696,19 @@ var
   Sep, i: integer;
 
   { "diff", -w when whitespace is ignored, then AArgs with ABase put
-    before its "--" (or last, without one). }
+    before its "--" (or last, without one). A file in Git LFS (its
+    attribute diff=lfs) is binary, as what it holds is, not the pointer
+    text git would compare. }
   procedure Build(const ABase: string);
   var
     i, n: integer;
   begin
-    SetLength(Args, Length(AArgs) + 3);
+    SetLength(Args, Length(AArgs) + 5);
     n := 0;
-    Args[n] := 'diff';
-    Inc(n);
+    Args[n] := '-c';
+    Args[n + 1] := 'diff.lfs.binary=true';
+    Args[n + 2] := 'diff';
+    Inc(n, 3);
     if FIgnoreWhitespace then
     begin
       Args[n] := '-w';
@@ -3125,13 +3308,30 @@ end;
   added, such a path is left to the index, which already says it is
   gone. }
 function TGittanRepo.Commit(const AMessage: string; APaths: TStrings;
-  AAmend: boolean; out AId: string; const AParts: TGittanCommitParts): boolean;
+  AAmend: boolean; out AId: string; const AParts: TGittanCommitParts;
+  AOptions: TGittanCommitOptions): boolean;
 var
   Output, Entry, Path, XY, Op, Err, SpecFile, AddFile, MsgFile, PartFile, Index: string;
   Fields, Chosen, Spec, Added, Untrack: TStringList;
   Args: TStringArray;
   Whole: boolean;
   i: integer;
+
+  { -F with the message, then --amend, --signoff and --no-verify as
+    asked. }
+  procedure AddCommitArgs;
+  begin
+    AddArg(Args, 'commit');
+    AddArg(Args, '-q');
+    AddArg(Args, '-F');
+    AddArg(Args, MsgFile);
+    if AAmend then
+      AddArg(Args, '--amend');
+    if coSignOff in AOptions then
+      AddArg(Args, '--signoff');
+    if coNoVerify in AOptions then
+      AddArg(Args, '--no-verify');
+  end;
 
   { Writes AParts over their paths in the index AIndex ('' for the
     repository's): each text goes in as a blob, through the filters of
@@ -3193,12 +3393,7 @@ var
       Exit;
     WriteBytes(MsgFile, AMessage);
     Args := nil;
-    AddArg(Args, 'commit');
-    AddArg(Args, '-q');
-    AddArg(Args, '-F');
-    AddArg(Args, MsgFile);
-    if AAmend then
-      AddArg(Args, '--amend');
+    AddCommitArgs;
     Result := RunGit(FRoot, Args, Output, Index);
     if not Result then
       Exit;
@@ -3290,12 +3485,7 @@ begin
     WriteBytes(MsgFile, AMessage);
     Args := nil;
     AddArg(Args, '--literal-pathspecs');
-    AddArg(Args, 'commit');
-    AddArg(Args, '-q');
-    AddArg(Args, '-F');
-    AddArg(Args, MsgFile);
-    if AAmend then
-      AddArg(Args, '--amend');
+    AddCommitArgs;
     if not Whole then
     begin
       AddArg(Args, '--only');
@@ -3479,6 +3669,39 @@ end;
 function TGittanRepo.Fetch: boolean;
 begin
   Result := RunRemote(['fetch', '--all', '--prune', '--progress']);
+end;
+
+{ A path git or git-lfs takes as it is: from the root on Unix, from a
+  drive or a share on Windows. }
+function IsAbsolutePath(const APath: string): boolean;
+begin
+  {$ifdef windows}
+  Result := (Length(APath) >= 3) and (APath[2] = ':') and (APath[3] in ['\', '/']) or
+    (Length(APath) >= 2) and (APath[1] in ['\', '/']) and (APath[2] in ['\', '/']);
+  {$else}
+  Result := (APath <> '') and (APath[1] = '/');
+  {$endif}
+end;
+
+function TGittanRepo.LastFetch: TDateTime;
+var
+  Name: string;
+begin
+  Result := 0;
+  if FRoot = '' then
+    Exit;
+  if FFetchHead = '' then
+  begin
+    if not RunGit(FRoot, ['rev-parse', '--git-path', 'FETCH_HEAD'], Name) then
+      Exit;
+    Name := Trim(Name);
+    if (Name <> '') and not IsAbsolutePath(Name) then
+      Name := IncludeTrailingPathDelimiter(FRoot) + Name;
+    FFetchHead := Name;
+  end;
+  Name := FFetchHead;
+  if (Name = '') or not FileAge(Name, Result) then
+    Result := 0;
 end;
 
 { Whether the config says how to pull: then pmAuto leaves it to git. }
@@ -5428,6 +5651,7 @@ begin
   if not ASnap.Ok then
     ASnap.Error := FError;
   ASnap.Branch := Branch(ASnap.Detached);
+  ASnap.Head := CommitId('HEAD');
   ASnap.DefaultBranch := DefaultBranch;
   if not MergeBase(ASnap.DefaultBranch, ASnap.MergeBase) then
     ASnap.MergeBase := '';
@@ -5821,6 +6045,136 @@ begin
   Result := False;
 end;
 
+{ The pointer's form as Git LFS's spec gives it: "key value" lines, the
+  version first, keys it does not know (an ext-0-... of an extension)
+  passed over. The version of the first releases, hawser's, counts too. }
+function ParseLfsPointer(const AData: RawByteString; out AOid: string;
+  out ASize: int64): boolean;
+const
+  OidPrefix = 'sha256:';
+var
+  Lines: TStringArray;
+  Key, Value, Oid: string;
+  Size: int64;
+  i, j, Space: integer;
+begin
+  AOid := '';
+  ASize := 0;
+  Result := False;
+  if (Length(AData) >= LfsPointerMax) or (AData = '') or (AData[Length(AData)] <> #10) then
+    Exit;
+  Lines := string(Copy(AData, 1, Length(AData) - 1)).Split([#10]);
+  if (Lines[0] <> 'version https://git-lfs.github.com/spec/v1') and
+    (Lines[0] <> 'version https://hawser.github.com/spec/v1') then
+    Exit;
+  Oid := '';
+  Size := -1;
+  for i := 1 to High(Lines) do
+  begin
+    Space := Pos(' ', Lines[i]);
+    if Space < 2 then
+      Exit;
+    Key := Copy(Lines[i], 1, Space - 1);
+    Value := Copy(Lines[i], Space + 1, MaxInt);
+    if Key = 'oid' then
+    begin
+      if (Pos(OidPrefix, Value) <> 1) or (Length(Value) <> Length(OidPrefix) + 64) then
+        Exit;
+      Oid := Copy(Value, Length(OidPrefix) + 1, 64);
+      for j := 1 to Length(Oid) do
+        if not (Oid[j] in ['0'..'9', 'a'..'f']) then
+          Exit;
+    end
+    else if (Key = 'size') and not (TryStrToInt64(Value, Size) and (Size >= 0)) then
+      Exit;
+  end;
+  Result := (Oid <> '') and (Size >= 0);
+  if Result then
+  begin
+    AOid := Oid;
+    ASize := Size;
+  end;
+end;
+
+{ Git LFS's store folder, found once per open: a commondir file and
+  lfs.storage (a git config) are read the first time only. }
+function TGittanRepo.LfsStore: string;
+var
+  Common, Storage, Err: string;
+begin
+  Result := FLfsStore;
+  if (Result <> '') or (FGitDir = '') then
+    Exit;
+  Common := FGitDir;
+  if FileExists(IncludeTrailingPathDelimiter(FGitDir) + 'commondir') then
+    try
+      Common := Trim(ReadFileBytes(IncludeTrailingPathDelimiter(FGitDir) + 'commondir'));
+      if (Common <> '') and not IsAbsolutePath(Common) then
+        Common := ExpandFileName(IncludeTrailingPathDelimiter(FGitDir) + Common);
+      if Common = '' then
+        Common := FGitDir;
+    except
+      Common := FGitDir;
+    end;
+  { lfs.storage replaces the lfs folder, relative to the common folder. }
+  if RunGitIn(FRoot, ['config', '--get', 'lfs.storage'], Storage, Err) and (Trim(Storage) <> '') then
+  begin
+    Storage := Trim(Storage);
+    if not IsAbsolutePath(Storage) then
+      Storage := ExpandFileName(IncludeTrailingPathDelimiter(Common) + Storage);
+  end
+  else
+    Storage := IncludeTrailingPathDelimiter(Common) + 'lfs';
+  { In the system's separators whichever way it came: git names the git
+    directory with / on Windows too. }
+  FLfsStore := ExpandFileName(Storage);
+  Result := FLfsStore;
+end;
+
+function TGittanRepo.LfsObjectFile(const AOid: string): string;
+begin
+  Result := '';
+  if (Length(AOid) < 4) or (LfsStore = '') then
+    Exit;
+  Result := IncludeTrailingPathDelimiter(LfsStore) + 'objects' + PathDelim +
+    Copy(AOid, 1, 2) + PathDelim + Copy(AOid, 3, 2) + PathDelim + AOid;
+end;
+
+var
+  { Git LFS was found once: it stays (a removal while Gittan runs is
+    told by git lfs itself). A miss is asked again, after an install. }
+  LfsFound: boolean;
+
+{ Git LFS as git finds it: git-lfs on the PATH, or in git's own exec
+  path, where Git for Windows keeps it (mingw64\bin, not on the PATH). }
+function TGittanRepo.LfsInstalled: boolean;
+var
+  Output, Err: string;
+begin
+  { RunGitIn, so a miss leaves FError alone. }
+  if not LfsFound then
+    LfsFound := (FindTool('git-lfs') <> '') or RunGitIn(FRoot, ['lfs', 'version'], Output, Err);
+  Result := LfsFound;
+end;
+
+{ AData read in its place when it is a Git LFS pointer whose object the
+  local store has. }
+procedure ResolveLfsPointer(ARepo: TGittanRepo; var AData: RawByteString);
+var
+  Oid: string;
+  Size: int64;
+  Name: string;
+begin
+  if not ParseLfsPointer(AData, Oid, Size) then
+    Exit;
+  Name := ARepo.LfsObjectFile(Oid);
+  if (Name <> '') and FileExists(Name) then
+    try
+      AData := ReadFileBytes(Name);
+    except
+    end;
+end;
+
 function TGittanRepo.Fingerprint: string;
 var
   Paths: TStringList;
@@ -5949,7 +6303,9 @@ begin
   end;
 end;
 
-function TGittanRepo.FileSize(const APath, ARef: string; out ASize: int64): boolean;
+{ cat-file -s, or the work tree file's size: what is stored, a Git LFS
+  pointer's own size for a file in Git LFS. }
+function TGittanRepo.StoredSize(const APath, ARef: string; out ASize: int64): boolean;
 var
   Output: string;
   Info: TSearchRec;
@@ -5958,17 +6314,196 @@ begin
   if (FRoot = '') or (APath = '') then
     Exit(False);
   if ARef <> '' then
-  begin
-    Result := RunGit(FRoot, ['cat-file', '-s', ARef + ':' + APath], Output) and
-      TryStrToInt64(Trim(Output), ASize);
-    Exit;
-  end;
+    Exit(RunGit(FRoot, ['cat-file', '-s', ARef + ':' + APath], Output) and
+      TryStrToInt64(Trim(Output), ASize));
   Result := StatExact(FullPath(APath), Info);
   if Result then
   begin
     ASize := Info.Size;
     FindClose(Info);
   end;
+end;
+
+{ Only a file under 1024 bytes can be a Git LFS pointer, so the others,
+  of AStoredSize bytes, are not read. }
+function TGittanRepo.LfsPointerAt(const APath, ARef: string; AStoredSize: int64;
+  out AOid: string; out ASize: int64): boolean;
+var
+  Output: string;
+  Data: RawByteString;
+begin
+  AOid := '';
+  ASize := 0;
+  Result := False;
+  if AStoredSize >= LfsPointerMax then
+    Exit;
+  if ARef <> '' then
+    Result := RunGit(FRoot, ['cat-file', 'blob', ARef + ':' + APath], Output) and
+      ParseLfsPointer(Output, AOid, ASize)
+  else
+    try
+      Data := ReadFileBytes(FullPath(APath));
+      Result := ParseLfsPointer(Data, AOid, ASize);
+    except
+      Result := False;
+    end;
+end;
+
+function TGittanRepo.FileSize(const APath, ARef: string; out ASize: int64): boolean;
+var
+  Missing: boolean;
+begin
+  Result := FileSize(APath, ARef, ASize, Missing);
+end;
+
+function TGittanRepo.FileSize(const APath, ARef: string; out ASize: int64;
+  out ALfsMissing: boolean): boolean;
+var
+  Oid: string;
+  Size: int64;
+begin
+  ALfsMissing := False;
+  Result := StoredSize(APath, ARef, ASize);
+  if Result and LfsPointerAt(APath, ARef, ASize, Oid, Size) then
+  begin
+    ASize := Size;
+    ALfsMissing := not FileExists(LfsObjectFile(Oid));
+  end;
+end;
+
+function TGittanRepo.LfsMissing(const APath, ARef: string): boolean;
+var
+  Oid: string;
+  Stored, Size: int64;
+begin
+  Result := StoredSize(APath, ARef, Stored) and LfsPointerAt(APath, ARef, Stored, Oid, Size) and
+    not FileExists(LfsObjectFile(Oid));
+end;
+
+{ git lfs fetch takes refs only after a remote, the one a push goes to.
+  The work tree's pointer is HEAD's as a rule, and git lfs checkout then
+  puts the file in its place, which it does for a pointer alone. }
+{ The files with filter=lfs as git's attributes give them (the attr
+  pathspec), each read only when it is small enough to be a pointer. }
+function TGittanRepo.LfsState(out AState: TGittanLfsState): boolean;
+var
+  Output, Path, Oid: string;
+  Paths: TStringList;
+  Info: TSearchRec;
+  Size: int64;
+begin
+  AState := Default(TGittanLfsState);
+  if FRoot = '' then
+    Exit(False);
+  Result := RunGit(FRoot, ['ls-files', '-z', '--', ':(attr:filter=lfs)'], Output);
+  if not Result then
+    Exit;
+  Paths := TStringList.Create;
+  try
+    SplitNul(Output, Paths);
+    AState.Files := Paths.Count;
+    for Path in Paths do
+      if StatExact(FullPath(Path), Info) then
+      begin
+        Size := Info.Size;
+        FindClose(Info);
+        { A file that cannot be read now (locked on Windows) counts as
+          neither, rather than end the whole check. }
+        if Size < LfsPointerMax then
+          try
+            if ParseLfsPointer(ReadFileBytes(FullPath(Path)), Oid, Size) then
+              Inc(AState.Pointers);
+          except
+          end;
+      end;
+  finally
+    Paths.Free;
+  end;
+  if AState.Files = 0 then
+    Exit;
+  AState.Installed := LfsInstalled;
+  AState.SetUp := (RunGit(FRoot, ['config', 'filter.lfs.process'], Output) and
+    (Trim(Output) <> '')) or (RunGit(FRoot, ['config', 'filter.lfs.smudge'], Output) and
+    (Trim(Output) <> ''));
+end;
+
+function TGittanRepo.LfsPull: boolean;
+begin
+  if (FRoot = '') then
+    Exit(False);
+  if not LfsInstalled then
+  begin
+    FError := LfsMissingMessage;
+    Exit(False);
+  end;
+  Result := RunRemote(['lfs', 'pull']);
+end;
+
+function TGittanRepo.LfsInstall: boolean;
+begin
+  if (FRoot = '') then
+    Exit(False);
+  if not LfsInstalled then
+  begin
+    FError := LfsMissingMessage;
+    Exit(False);
+  end;
+  Result := RunRemote(['lfs', 'install']) and RunRemote(['lfs', 'checkout']);
+end;
+
+{ APath as a pattern of git-lfs, which takes --include as patterns
+  between commas and checkout's paths as patterns too: a comma or a
+  wildcard becomes ?, which matches it (and at most a file whose name
+  differs there, downloaded along with it). git-lfs has no escape for a
+  comma, and a backslash is a path separator to it on Windows. }
+function LfsPattern(const APath: string): string;
+var
+  i: integer;
+begin
+  Result := APath;
+  for i := 1 to Length(Result) do
+    if Result[i] in [',', '*', '?', '[', ']', '\', '!', '{', '}'] then
+      Result[i] := '?';
+end;
+
+function TGittanRepo.LfsDownload(const APath: string; const ARefs: array of string): boolean;
+var
+  Args, Wanted: array of string;
+  Ref, Name, Remote, Pattern: string;
+  WorkTree: boolean;
+begin
+  Result := False;
+  if (FRoot = '') or (APath = '') then
+    Exit;
+  if not LfsInstalled then
+  begin
+    FError := LfsMissingMessage;
+    Exit;
+  end;
+  Remote := PushRemote;
+  if Remote = '' then
+  begin
+    FError := 'The repository has no remote to download from.';
+    Exit;
+  end;
+  Wanted := nil;
+  WorkTree := False;
+  for Ref in ARefs do
+  begin
+    Name := Ref;
+    if Name = '' then
+    begin
+      WorkTree := True;
+      Name := 'HEAD';
+    end;
+    if AnsiIndexStr(Name, Wanted) < 0 then
+      Wanted := Concat(Wanted, [Name]);
+  end;
+  if Wanted = nil then
+    Wanted := ['HEAD'];
+  Pattern := LfsPattern(APath);
+  Args := Concat(['lfs', 'fetch', '--include=' + Pattern, Remote], Wanted);
+  Result := RunRemote(Args) and (not WorkTree or RunRemote(['lfs', 'checkout', '--', Pattern]));
 end;
 
 { ---------------------------------------------------------------------------
@@ -6003,7 +6538,10 @@ begin
   begin
     Result := RunGit(FRoot, ['cat-file', 'blob', ARef + ':' + APath], Output);
     if Result then
+    begin
       AData := Output;
+      ResolveLfsPointer(Self, AData);
+    end;
     Exit;
   end;
   Result := FileExists(FullPath(APath));
@@ -6011,6 +6549,7 @@ begin
     Exit;
   try
     AData := ReadFileBytes(FullPath(APath));
+    ResolveLfsPointer(Self, AData);
   except
     AData := '';
     Result := False;

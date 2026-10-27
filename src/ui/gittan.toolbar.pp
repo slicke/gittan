@@ -1,21 +1,28 @@
-{ The window's toolbar (macOS).
+{ The window's toolbar and its tabs (macOS).
 
   The title bar takes the mouse in the strip it covers, so the LCL's own
   controls cannot be put there (see gittan.titlebar.pp). An NSToolbar in
-  the unified style can: it makes the strip taller and holds native items
-  that take clicks, as Finder, Mail or Deezer do. From the left: the
-  application's name after the traffic lights, the file filter as a
-  native search field (rounded, with a magnifier and a clear button) in
-  the middle, and on the right the change navigator (the counter, then
-  the previous and next arrows) and the actions the view offers (Edit,
-  Revert, Save, Open), which the file header shows as pills elsewhere.
+  the unified style can: it makes the strip taller, so the traffic
+  lights sit in a row of a tab bar's height, and its items are native
+  and take clicks. Its one item is the tab strip, a view of its own
+  (TGittanTabStrip) that stretches from the traffic lights to the right
+  edge, as Firefox's tabs do: a tab per open repository, the one shown
+  filled, then a plus that opens a new tab.
 
-  The navigator and the actions come and go with the view: Update
-  removes the items after the fixed ones and inserts the ones wanted
-  when the set changed, and sets the counter, the captions and the
-  enabled states in place.
+  The strip draws the tabs itself in the system's colors, so it follows
+  the window's appearance; a tab with news (something happened in its
+  frame while another was shown) has a blue dot before its name. A
+  click on a tab selects it at once; the
+  cross on the shown or hovered tab, or a middle click, closes it; the
+  plus asks for a new tab. A press on the empty part moves the window
+  and a double click there zooms it, as on the title bar. The full path
+  of the tab under the mouse is its tooltip.
 
-  The unit uses CocoaAll alone; umain keeps it behind LCLCocoa, so the
+  The filter, the change navigator and the actions of the view belong to
+  a repository and are in its frame: the field over the tree and the
+  file header's pills.
+
+  The unit uses CocoaAll alone; uwindow keeps it behind LCLCocoa, so the
   other widgetsets never see it. }
 unit gittan.toolbar;
 
@@ -28,11 +35,8 @@ uses
   Classes, CocoaAll;
 
 type
-  {** A key the search field passes on: VK_ESCAPE when it is already
-    empty, VK_RETURN or VK_DOWN. }
-  TGittanToolbarKeyEvent = procedure(Sender: TObject; var Key: word) of object;
-  {** A click on the action at AIndex, in the order of SetActions. }
-  TGittanToolbarActionEvent = procedure(Sender: TObject; AIndex: integer) of object;
+  {** Something done to the tab at AIndex, in the order of SetTabs. }
+  TGittanTabEvent = procedure(Sender: TObject; AIndex: integer) of object;
 
   { TGittanToolbar }
 
@@ -41,328 +45,226 @@ type
     FWindow: NSWindow;
     FToolbar: NSToolbar;
     FDelegate: NSObject;
-    FSearch: NSSearchField;
-    FCounter, FConflictCounter: NSTextField;
-    FActions: array of string;
-    FEnabled: array of boolean;
-    FCurrent, FTotal: integer;
-    FConflictCurrent, FConflictTotal: integer;
-    FConflictSuffix: string;
-    FOnSearchChange: TNotifyEvent;
-    FOnSearchKey: TGittanToolbarKeyEvent;
-    FOnAction: TGittanToolbarActionEvent;
-    FOnPrev, FOnNext, FOnConflictPrev, FOnConflictNext: TNotifyEvent;
-    FOnName: TNotifyEvent;
-    function GetSearchText: string;
-    procedure Update;
+    FStrip: NSView;
+    FCaptions, FHints: array of string;
+    FMarks: array of boolean;
+    FActive: integer;
+    { The tab under the mouse (-1 for none), whether the mouse is on its
+      cross, on the plus; the cross or plus pressed (-1 for none,
+      PlusPart for the plus). }
+    FHot: integer;
+    FHotClose, FHotPlus: boolean;
+    FPressed: integer;
+    FOnSelect, FOnClose: TGittanTabEvent;
+    FOnNew: TNotifyEvent;
+    function TabWidth(AWidth: double): double;
+    function TabRect(AIndex: integer; const ABounds: NSRect): NSRect;
+    function CloseRect(const ATab: NSRect): NSRect;
+    function PlusRect(const ABounds: NSRect): NSRect;
+    procedure HitTest(const APoint: NSPoint; const ABounds: NSRect;
+      out AIndex: integer; out AClose, APlus: boolean);
+    procedure Draw(const ABounds: NSRect);
+    procedure MouseDown(AEvent: NSEvent);
+    procedure MouseUp(AEvent: NSEvent);
+    procedure OtherMouseUp(AEvent: NSEvent);
+    procedure MouseMoved(AEvent: NSEvent);
+    procedure MouseExited;
   public
-    {** Puts the toolbar on the window of the form whose handle is AHandle,
-      named AName on the left, with AHint in the empty search field, and
-      hides the window's title. Answers nil before macOS 11 or without a
-      window. }
-    class function Install(AHandle: PtrUInt; const AName, AHint: string): TGittanToolbar;
+    {** Puts the toolbar with the tab strip on the window of the form
+      whose handle is AHandle and hides the window's title. Answers nil
+      before macOS 11 or without a window. }
+    class function Install(AHandle: PtrUInt): TGittanToolbar;
     destructor Destroy; override;
-    {** The action buttons, left to right, each enabled as AEnabled says;
-      none for an empty array. }
-    procedure SetActions(const ACaptions: array of string;
-      const AEnabled: array of boolean);
-    {** Shows the navigator at ACurrent of ATotal changes, or hides it when
-      ATotal is 0. }
-    procedure SetChanges(ACurrent, ATotal: integer);
-    {** Shows the conflict navigator, left of the other one, at ACurrent
-      of ATotal conflicts with ASuffix after the counter, or hides it
-      when ATotal is 0. }
-    procedure SetConflicts(ACurrent, ATotal: integer; const ASuffix: string);
-    {** Focuses the search field with its text selected. }
-    procedure FocusSearch;
-    property SearchText: string read GetSearchText;
-    property OnSearchChange: TNotifyEvent read FOnSearchChange write FOnSearchChange;
-    property OnSearchKey: TGittanToolbarKeyEvent read FOnSearchKey write FOnSearchKey;
-    property OnAction: TGittanToolbarActionEvent read FOnAction write FOnAction;
-    property OnPrev: TNotifyEvent read FOnPrev write FOnPrev;
-    property OnNext: TNotifyEvent read FOnNext write FOnNext;
-    property OnConflictPrev: TNotifyEvent read FOnConflictPrev write FOnConflictPrev;
-    property OnConflictNext: TNotifyEvent read FOnConflictNext write FOnConflictNext;
-    {** A click on the name at the left. }
-    property OnName: TNotifyEvent read FOnName write FOnName;
+    {** The tabs, left to right: ACaptions are their names, AHints their
+      tooltips (the paths), AMarks those with news (a dot before the
+      name), AActive the one shown. }
+    procedure SetTabs(const ACaptions, AHints: array of string;
+      const AMarks: array of boolean; AActive: integer);
+    {** A click on a tab: show it. }
+    property OnSelect: TGittanTabEvent read FOnSelect write FOnSelect;
+    {** The cross or a middle click on a tab: close it. }
+    property OnClose: TGittanTabEvent read FOnClose write FOnClose;
+    {** The plus: a new tab. }
+    property OnNew: TNotifyEvent read FOnNew write FOnNew;
   end;
 
 implementation
 
 uses
-  SysUtils, LCLType, cocoa_extra;
+  SysUtils, Math, cocoa_extra;
 
 type
-  NSToolbarItemTitle = objccategory external (NSToolbarItem)
-    procedure setTitle(newValue: NSString); message 'setTitle:'; { 10.15 }
+  NSColorSystemBlue = objccategory external (NSColor)
+    class function systemBlueColor: NSColor; message 'systemBlueColor'; { 10.10 }
   end;
 
-  NSSegmentedControlTracking = objccategory external (NSSegmentedControl)
-    procedure setTrackingMode(newValue: NSSegmentSwitchTracking);
-      message 'setTrackingMode:';
+  NSWindowDrag = objccategory external (NSWindow)
+    procedure performWindowDragWithEvent(event: NSEvent);
+      message 'performWindowDragWithEvent:'; { 10.11 }
   end;
 
-  NSFontDigits = objccategory external (NSFont)
-    class function monospacedDigitSystemFontOfSize_weight(fontSize: Double;
-      weight: Double): NSFont; message 'monospacedDigitSystemFontOfSize:weight:'; { 10.11 }
-  end;
-
-  NSColorSystem = objccategory external (NSColor)
-    class function systemPurpleColor: NSColor; message 'systemPurpleColor'; { 10.10 }
-  end;
-
-  NSToolbarCentered = objccategory external (NSToolbar)
-    procedure setCenteredItemIdentifier(newValue: NSString);
-      message 'setCenteredItemIdentifier:'; { 10.14 }
-  end;
-
-  { The toolbar's delegate and the target of its items. }
-  TGittanToolbarDelegate = objcclass(NSObject, NSToolbarDelegateProtocol,
-    NSTextFieldDelegateProtocol)
+  { The toolbar's delegate. }
+  TGittanToolbarDelegate = objcclass(NSObject, NSToolbarDelegateProtocol)
   public
     Owner: TGittanToolbar;
     function toolbar_itemForItemIdentifier_willBeInsertedIntoToolbar(
       toolbar: NSToolbar; itemIdentifier: NSString; flag: ObjCBOOL): NSToolbarItem;
     function toolbarDefaultItemIdentifiers(toolbar: NSToolbar): NSArray;
     function toolbarAllowedItemIdentifiers(toolbar: NSToolbar): NSArray;
-    function control_textView_doCommandBySelector(control: NSControl;
-      textView: NSTextView; commandSelector: SEL): ObjCBOOL;
-    procedure searchChanged(sender: id); message 'gittanSearchChanged:';
-    procedure actionClicked(sender: id); message 'gittanActionClicked:';
-    procedure navClicked(sender: id); message 'gittanNavClicked:';
-    procedure nameClicked(sender: id); message 'gittanNameClicked:';
+  end;
+
+  { The tab strip: the toolbar draws it and takes its mouse. }
+  TGittanTabStrip = objcclass(NSView)
+  public
+    Owner: TGittanToolbar;
+    function isFlipped: ObjCBOOL; override;
+    function mouseDownCanMoveWindow: ObjCBOOL; override;
+    function acceptsFirstMouse(event: NSEvent): ObjCBOOL; override;
+    procedure drawRect(dirtyRect: NSRect); override;
+    procedure mouseDown(event: NSEvent); override;
+    procedure mouseUp(event: NSEvent); override;
+    procedure otherMouseUp(event: NSEvent); override;
+    procedure mouseMoved(event: NSEvent); override;
+    procedure mouseExited(event: NSEvent); override;
   end;
 
 const
-  IdName = 'gittan.name';
-  IdSearch = 'gittan.search';
-  IdCounter = 'gittan.counter';
-  IdNav = 'gittan.nav';
-  IdConflictCounter = 'gittan.conflictcounter';
-  IdConflictNav = 'gittan.conflictnav';
-  { The tag of the segmented control that steps the conflicts. }
-  ConflictNavTag = 1;
-  IdAction = 'gittan.action.';
-  { The items before the navigator and the actions: the name, a flexible
-    space, the search field and a flexible space. }
-  FixedItems = 4;
-  MaxActions = 4;
-  SearchWidth = 320;
+  IdTabs = 'gittan.tabs';
+  StripHeight = 30;
+  { A tab's width: shared out evenly, within these. }
+  MaxTabWidth = 220;
+  MinTabWidth = 64;
+  { The gap between tabs, the room the plus takes after the last. }
+  TabGap = 3;
+  PlusWidth = 30;
+  CrossSize = 16;
+  { FPressed for the plus. }
+  PlusPart = -2;
 
 function NSStr(const S: string): NSString;
 begin
   Result := NSString.stringWithUTF8String(PChar(S));
 end;
 
-function SymbolImage(const AName: string): NSImage;
+{ Whether the strip is drawn on a dark window: the label color the
+  appearance resolves is light then. }
+function DarkAppearance: boolean;
+var
+  C: NSColor;
 begin
-  Result := NSImage.imageWithSystemSymbolName_accessibilityDescription(
-    NSStr(AName), nil);
+  C := NSColor.labelColor.colorUsingColorSpace(NSColorSpace.sRGBColorSpace);
+  Result := (C <> nil) and (C.redComponent > 0.5);
 end;
 
-{ A label that cannot be edited or selected, without a border or a
-  background. }
-function MakeLabel(const AText: string; AFont: NSFont): NSTextField;
+procedure StrokeLine(X1, Y1, X2, Y2: double; AColor: NSColor; AWidth: double);
+var
+  P: NSBezierPath;
 begin
-  Result := NSTextField.alloc.initWithFrame(NSMakeRect(0, 0, 10, 10));
-  Result.setStringValue(NSStr(AText));
-  Result.setEditable(False);
-  Result.setSelectable(False);
-  Result.setBezeled(False);
-  Result.setBordered(False);
-  Result.setDrawsBackground(False);
-  Result.setFont(AFont);
-  Result.sizeToFit;
-  Result.autorelease;
+  P := NSBezierPath.bezierPath;
+  P.moveToPoint(NSMakePoint(X1, Y1));
+  P.lineToPoint(NSMakePoint(X2, Y2));
+  P.setLineWidth(AWidth);
+  P.setLineCapStyle(NSRoundLineCapStyle);
+  AColor.setStroke;
+  P.stroke;
 end;
 
-{ The name at the left as a button without a border, so a click on it
-  reaches ATarget as gittanNameClicked: and it still reads as a label. }
-function MakeNameButton(const AText: string; ATarget: id): NSButton;
+function PointIn(const P: NSPoint; const R: NSRect): boolean;
 begin
-  Result := NSButton.alloc.initWithFrame(NSMakeRect(0, 0, 10, 10));
-  Result.setTitle(NSStr(AText));
-  Result.setBordered(False);
-  Result.setFont(NSFont.boldSystemFontOfSize(15));
-  Result.setTarget(ATarget);
-  Result.setAction(objcselector('gittanNameClicked:'));
-  Result.sizeToFit;
-  Result.autorelease;
-end;
-
-{ The up and down arrows that step the changes (or the conflicts, with
-  ConflictNavTag), sending gittanNavClicked: to ATarget. }
-function MakeNav(ATarget: id; ATag: integer): NSSegmentedControl;
-begin
-  Result := NSSegmentedControl.alloc.initWithFrame(NSMakeRect(0, 0, 10, 10));
-  Result.setSegmentCount(2);
-  Result.setImage_forSegment(SymbolImage('chevron.up'), 0);
-  Result.setImage_forSegment(SymbolImage('chevron.down'), 1);
-  Result.setTrackingMode(NSSegmentSwitchTrackingMomentary);
-  Result.setTarget(ATarget);
-  Result.setAction(objcselector('gittanNavClicked:'));
-  Result.setTag(ATag);
-  Result.sizeToFit;
-  Result.autorelease;
+  Result := (P.x >= R.origin.x) and (P.x < R.origin.x + R.size.width) and
+    (P.y >= R.origin.y) and (P.y < R.origin.y + R.size.height);
 end;
 
 { TGittanToolbarDelegate }
 
 function TGittanToolbarDelegate.toolbar_itemForItemIdentifier_willBeInsertedIntoToolbar(
   toolbar: NSToolbar; itemIdentifier: NSString; flag: ObjCBOOL): NSToolbarItem;
-var
-  Search: NSSearchToolbarItem;
-  Index: integer;
 begin
   Result := nil;
-  if itemIdentifier.isEqualToString(NSStr(IdName)) then
+  if itemIdentifier.isEqualToString(NSStr(IdTabs)) then
   begin
     Result := NSToolbarItem.alloc.initWithItemIdentifier(itemIdentifier);
-    Result.setView(MakeNameButton('Gittan', Self));
-  end
-  else if itemIdentifier.isEqualToString(NSStr(IdSearch)) then
-  begin
-    Search := NSSearchToolbarItem.alloc.initWithItemIdentifier(itemIdentifier);
-    Search.setSearchField(Owner.FSearch);
-    { The item makes itself the field's delegate. }
-    Owner.FSearch.setDelegate(NSTextFieldDelegateProtocol(Self));
-    Search.setPreferredWidthForSearchField(SearchWidth);
-    Result := Search;
-  end
-  else if itemIdentifier.isEqualToString(NSStr(IdCounter)) then
-  begin
-    Result := NSToolbarItem.alloc.initWithItemIdentifier(itemIdentifier);
-    Result.setView(Owner.FCounter);
-  end
-  else if itemIdentifier.isEqualToString(NSStr(IdNav)) then
-  begin
-    Result := NSToolbarItem.alloc.initWithItemIdentifier(itemIdentifier);
-    Result.setView(MakeNav(Self, 0));
-  end
-  else if itemIdentifier.isEqualToString(NSStr(IdConflictCounter)) then
-  begin
-    Result := NSToolbarItem.alloc.initWithItemIdentifier(itemIdentifier);
-    Result.setView(Owner.FConflictCounter);
-  end
-  else if itemIdentifier.isEqualToString(NSStr(IdConflictNav)) then
-  begin
-    Result := NSToolbarItem.alloc.initWithItemIdentifier(itemIdentifier);
-    Result.setView(MakeNav(Self, ConflictNavTag));
-  end
-  else if itemIdentifier.hasPrefix(NSStr(IdAction)) then
-  begin
-    Index := StrToIntDef(System.Copy(itemIdentifier.UTF8String, Length(IdAction) + 1,
-      MaxInt), -1);
-    Result := NSToolbarItem.alloc.initWithItemIdentifier(itemIdentifier);
-    Result.setTag(Index);
-    Result.setTarget(Self);
-    Result.setAction(objcselector('gittanActionClicked:'));
-    Result.setAutovalidates(False);
-    Result.setBordered(True);
-    { The caption is set by Update. }
-    Result.setTitle(NSStr(' '));
-  end;
-  if Result <> nil then
+    Result.setView(Owner.FStrip);
+    { Between these it takes the width the toolbar has. }
+    Result.setMinSize(NSMakeSize(PlusWidth + MinTabWidth, StripHeight));
+    Result.setMaxSize(NSMakeSize(100000, StripHeight));
     Result.autorelease;
+  end;
 end;
 
 function TGittanToolbarDelegate.toolbarDefaultItemIdentifiers(toolbar: NSToolbar): NSArray;
 begin
-  Result := NSArray.arrayWithObjects(NSStr(IdName),
-    NSToolbarFlexibleSpaceItemIdentifier, NSStr(IdSearch),
-    NSToolbarFlexibleSpaceItemIdentifier, nil);
+  Result := NSArray.arrayWithObjects(NSStr(IdTabs), nil);
 end;
 
 function TGittanToolbarDelegate.toolbarAllowedItemIdentifiers(toolbar: NSToolbar): NSArray;
-var
-  A: NSMutableArray;
-  i: integer;
 begin
-  A := NSMutableArray.arrayWithArray(toolbarDefaultItemIdentifiers(toolbar));
-  A.addObject(NSStr(IdConflictCounter));
-  A.addObject(NSStr(IdConflictNav));
-  A.addObject(NSStr(IdCounter));
-  A.addObject(NSStr(IdNav));
-  for i := 0 to MaxActions - 1 do
-    A.addObject(NSStr(IdAction + IntToStr(i)));
-  Result := A;
+  Result := toolbarDefaultItemIdentifiers(toolbar);
 end;
 
-{ Escape in an empty field, Enter and Down are passed on; Escape with
-  text is the field's own and clears it. }
-function TGittanToolbarDelegate.control_textView_doCommandBySelector(
-  control: NSControl; textView: NSTextView; commandSelector: SEL): ObjCBOOL;
-var
-  Key: word;
+{ TGittanTabStrip }
+
+function TGittanTabStrip.isFlipped: ObjCBOOL;
+begin
+  Result := True;
+end;
+
+{ The strip moves the window itself from its empty part (MouseDown). }
+function TGittanTabStrip.mouseDownCanMoveWindow: ObjCBOOL;
 begin
   Result := False;
-  if commandSelector = objcselector('cancelOperation:') then
-  begin
-    if Owner.FSearch.stringValue.length > 0 then
-      Exit;
-    Key := VK_ESCAPE;
-  end
-  else if commandSelector = objcselector('insertNewline:') then
-    Key := VK_RETURN
-  else if commandSelector = objcselector('moveDown:') then
-    Key := VK_DOWN
-  else
-    Exit;
-  if Assigned(Owner.FOnSearchKey) then
-    Owner.FOnSearchKey(Owner, Key);
-  Result := Key = 0;
 end;
 
-procedure TGittanToolbarDelegate.searchChanged(sender: id);
+{ A click on a tab of a window in the background selects it too. }
+function TGittanTabStrip.acceptsFirstMouse(event: NSEvent): ObjCBOOL;
 begin
-  if Assigned(Owner.FOnSearchChange) then
-    Owner.FOnSearchChange(Owner);
+  Result := True;
 end;
 
-procedure TGittanToolbarDelegate.actionClicked(sender: id);
+procedure TGittanTabStrip.drawRect(dirtyRect: NSRect);
 begin
-  if Assigned(Owner.FOnAction) then
-    Owner.FOnAction(Owner, NSToolbarItem(sender).tag);
+  if Owner <> nil then
+    Owner.Draw(bounds);
 end;
 
-procedure TGittanToolbarDelegate.nameClicked(sender: id);
+procedure TGittanTabStrip.mouseDown(event: NSEvent);
 begin
-  if Assigned(Owner.FOnName) then
-    Owner.FOnName(Owner);
+  if Owner <> nil then
+    Owner.MouseDown(event);
 end;
 
-procedure TGittanToolbarDelegate.navClicked(sender: id);
-var
-  Prev, Conflicts: boolean;
+procedure TGittanTabStrip.mouseUp(event: NSEvent);
 begin
-  Prev := NSSegmentedControl(sender).selectedSegment = 0;
-  Conflicts := NSSegmentedControl(sender).tag = ConflictNavTag;
-  if Conflicts and Prev then
-  begin
-    if Assigned(Owner.FOnConflictPrev) then
-      Owner.FOnConflictPrev(Owner);
-  end
-  else if Conflicts then
-  begin
-    if Assigned(Owner.FOnConflictNext) then
-      Owner.FOnConflictNext(Owner);
-  end
-  else if Prev then
-  begin
-    if Assigned(Owner.FOnPrev) then
-      Owner.FOnPrev(Owner);
-  end
-  else if Assigned(Owner.FOnNext) then
-    Owner.FOnNext(Owner);
+  if Owner <> nil then
+    Owner.MouseUp(event);
+end;
+
+procedure TGittanTabStrip.otherMouseUp(event: NSEvent);
+begin
+  if Owner <> nil then
+    Owner.OtherMouseUp(event);
+end;
+
+procedure TGittanTabStrip.mouseMoved(event: NSEvent);
+begin
+  if Owner <> nil then
+    Owner.MouseMoved(event);
+end;
+
+procedure TGittanTabStrip.mouseExited(event: NSEvent);
+begin
+  if Owner <> nil then
+    Owner.MouseExited;
 end;
 
 { TGittanToolbar }
 
-class function TGittanToolbar.Install(AHandle: PtrUInt;
-  const AName, AHint: string): TGittanToolbar;
+class function TGittanToolbar.Install(AHandle: PtrUInt): TGittanToolbar;
 var
   Win: NSWindow;
   Delegate: TGittanToolbarDelegate;
+  Strip: TGittanTabStrip;
+  Area: NSTrackingArea;
 begin
   Result := nil;
   if (AHandle = 0) or (NSAppKitVersionNumber < NSAppKitVersionNumber11_0) then
@@ -372,34 +274,26 @@ begin
     Exit;
   Result := TGittanToolbar.Create;
   Result.FWindow := Win;
+  Result.FHot := -1;
+  Result.FPressed := -1;
+  Strip := TGittanTabStrip.alloc.initWithFrame(NSMakeRect(0, 0, 400, StripHeight));
+  Strip.Owner := Result;
+  Area := NSTrackingArea.alloc.initWithRect_options_owner_userInfo(NSZeroRect,
+    NSTrackingMouseMoved or NSTrackingMouseEnteredAndExited or
+    NSTrackingActiveAlways or NSTrackingInVisibleRect, Strip, nil);
+  Strip.addTrackingArea(Area);
+  Area.release;
+  Result.FStrip := Strip;
   Delegate := TGittanToolbarDelegate.alloc.init;
   Delegate.Owner := Result;
   Result.FDelegate := Delegate;
-
-  Result.FSearch := NSSearchField.alloc.initWithFrame(NSMakeRect(0, 0, SearchWidth, 22));
-  Result.FSearch.setPlaceholderString(NSStr(AHint));
-  Result.FSearch.setSendsSearchStringImmediately(True);
-  Result.FSearch.setSendsWholeSearchString(False);
-  Result.FSearch.setTarget(Delegate);
-  Result.FSearch.setAction(objcselector('gittanSearchChanged:'));
-  Result.FSearch.setDelegate(NSTextFieldDelegateProtocol(Delegate));
-  Result.FCounter := MakeLabel('– / 0',
-    NSFont.monospacedDigitSystemFontOfSize_weight(NSFont.systemFontSize, 0));
-  Result.FCounter.setTextColor(NSColor.secondaryLabelColor);
-  Result.FCounter.retain;
-  Result.FConflictCounter := MakeLabel('– / 0',
-    NSFont.monospacedDigitSystemFontOfSize_weight(NSFont.systemFontSize, 0));
-  Result.FConflictCounter.setTextColor(NSColor.systemPurpleColor);
-  Result.FConflictCounter.retain;
-
   Result.FToolbar := NSToolbar.alloc.initWithIdentifier(NSStr('gittan.toolbar'));
   Result.FToolbar.setDelegate(Delegate);
   Result.FToolbar.setDisplayMode(NSToolbarDisplayModeIconOnly);
   Result.FToolbar.setAllowsUserCustomization(False);
-  Result.FToolbar.setCenteredItemIdentifier(NSStr(IdSearch));
   Win.setToolbar(Result.FToolbar);
   Win.setToolbarStyle(NSWindowToolbarStyleUnified);
-  { The name is on the left and the repository in the status bar. }
+  { The tabs name the repositories, as does the status bar. }
   Win.setTitleVisibility(NSWindowTitleHidden);
 end;
 
@@ -412,139 +306,283 @@ begin
     FToolbar.setDelegate(nil);
     FToolbar.release;
   end;
-  if FSearch <> nil then
+  if FStrip <> nil then
   begin
-    FSearch.setDelegate(nil);
-    FSearch.setTarget(nil);
-    FSearch.release;
+    TGittanTabStrip(FStrip).Owner := nil;
+    FStrip.release;
   end;
-  if FCounter <> nil then
-    FCounter.release;
-  if FConflictCounter <> nil then
-    FConflictCounter.release;
   if FDelegate <> nil then
     FDelegate.release;
   inherited Destroy;
 end;
 
-function TGittanToolbar.GetSearchText: string;
-begin
-  Result := FSearch.stringValue.UTF8String;
-end;
-
-procedure TGittanToolbar.SetActions(const ACaptions: array of string;
-  const AEnabled: array of boolean);
+procedure TGittanToolbar.SetTabs(const ACaptions, AHints: array of string;
+  const AMarks: array of boolean; AActive: integer);
 var
-  i, N: integer;
-begin
-  N := Length(ACaptions);
-  if N > MaxActions then
-    N := MaxActions;
-  SetLength(FActions, N);
-  SetLength(FEnabled, N);
-  for i := 0 to N - 1 do
-  begin
-    FActions[i] := ACaptions[i];
-    FEnabled[i] := (i > High(AEnabled)) or AEnabled[i];
-  end;
-  Update;
-end;
-
-procedure TGittanToolbar.SetChanges(ACurrent, ATotal: integer);
-begin
-  FCurrent := ACurrent;
-  FTotal := ATotal;
-  Update;
-end;
-
-procedure TGittanToolbar.SetConflicts(ACurrent, ATotal: integer; const ASuffix: string);
-begin
-  FConflictCurrent := ACurrent;
-  FConflictTotal := ATotal;
-  FConflictSuffix := ASuffix;
-  Update;
-end;
-
-procedure TGittanToolbar.FocusSearch;
-begin
-  FWindow.makeFirstResponder(FSearch);
-  FSearch.selectText(nil);
-end;
-
-{ The items after the fixed ones are the conflict counter and arrows
-  while there are conflicts, the counter and the arrows while there are
-  changes, then one per action. They are inserted again when that set
-  changed; the counters, the captions and the enabled states are set on
-  the items in place. }
-procedure TGittanToolbar.Update;
-var
-  Wanted: TStringList;
-  Items: NSArray;
-  Item: NSToolbarItem;
-  Id: string;
-  Same: boolean;
   i: integer;
 begin
-  Wanted := TStringList.Create;
-  try
-    if FConflictTotal > 0 then
-    begin
-      Wanted.Add(IdConflictCounter);
-      Wanted.Add(IdConflictNav);
-    end;
-    if FTotal > 0 then
-    begin
-      Wanted.Add(IdCounter);
-      Wanted.Add(IdNav);
-    end;
-    for i := 0 to High(FActions) do
-      Wanted.Add(IdAction + IntToStr(i));
-    Items := FToolbar.items;
-    Same := Items.count = NSUInteger(FixedItems + Wanted.Count);
-    if Same then
-      for i := 0 to Wanted.Count - 1 do
-        if NSToolbarItem(Items.objectAtIndex(FixedItems + i)).itemIdentifier.UTF8String
-          <> Wanted[i] then
-        begin
-          Same := False;
-          Break;
-        end;
-    if not Same then
-    begin
-      for i := integer(Items.count) - 1 downto FixedItems do
-        FToolbar.removeItemAtIndex(i);
-      for i := 0 to Wanted.Count - 1 do
-        FToolbar.insertItemWithItemIdentifier_atIndex(NSStr(Wanted[i]),
-          FixedItems + i);
-    end;
-  finally
-    Wanted.Free;
-  end;
-
-  if FCurrent > 0 then
-    FCounter.setStringValue(NSStr(Format('%d / %d', [FCurrent, FTotal])))
-  else
-    FCounter.setStringValue(NSStr(Format('– / %d', [FTotal])));
-  FCounter.sizeToFit;
-  if FConflictCurrent > 0 then
-    FConflictCounter.setStringValue(NSStr(Format('%d / %d %s',
-      [FConflictCurrent, FConflictTotal, FConflictSuffix])))
-  else
-    FConflictCounter.setStringValue(NSStr(Format('– / %d %s', [FConflictTotal, FConflictSuffix])));
-  FConflictCounter.sizeToFit;
-  Items := FToolbar.items;
-  for i := FixedItems to integer(Items.count) - 1 do
+  SetLength(FCaptions, Length(ACaptions));
+  SetLength(FHints, Length(ACaptions));
+  SetLength(FMarks, Length(ACaptions));
+  for i := 0 to High(ACaptions) do
   begin
-    Item := NSToolbarItem(Items.objectAtIndex(i));
-    Id := Item.itemIdentifier.UTF8String;
-    if Copy(Id, 1, Length(IdAction)) = IdAction then
-      if (Item.tag >= 0) and (Item.tag <= High(FActions)) then
-      begin
-        Item.setTitle(NSStr(FActions[Item.tag]));
-        Item.setToolTip(NSStr(FActions[Item.tag]));
-        Item.setEnabled(FEnabled[Item.tag]);
-      end;
+    FCaptions[i] := ACaptions[i];
+    FMarks[i] := (i <= High(AMarks)) and AMarks[i];
+    if i <= High(AHints) then
+      FHints[i] := AHints[i]
+    else
+      FHints[i] := '';
   end;
+  FActive := AActive;
+  if FHot > High(FCaptions) then
+    FHot := -1;
+  if FStrip <> nil then
+    FStrip.setNeedsDisplay_(True);
+end;
+
+function TGittanToolbar.TabWidth(AWidth: double): double;
+begin
+  if Length(FCaptions) = 0 then
+    Exit(MaxTabWidth);
+  Result := (AWidth - PlusWidth) / Length(FCaptions);
+  Result := Max(MinTabWidth, Min(MaxTabWidth, Result));
+end;
+
+function TGittanToolbar.TabRect(AIndex: integer; const ABounds: NSRect): NSRect;
+var
+  W: double;
+begin
+  W := TabWidth(ABounds.size.width);
+  Result := NSMakeRect(AIndex * W, 3, W - TabGap, ABounds.size.height - 6);
+end;
+
+function TGittanToolbar.CloseRect(const ATab: NSRect): NSRect;
+begin
+  Result := NSMakeRect(ATab.origin.x + ATab.size.width - CrossSize - 6,
+    ATab.origin.y + (ATab.size.height - CrossSize) / 2, CrossSize, CrossSize);
+end;
+
+function TGittanToolbar.PlusRect(const ABounds: NSRect): NSRect;
+var
+  X: double;
+begin
+  X := Length(FCaptions) * TabWidth(ABounds.size.width);
+  Result := NSMakeRect(X + 2, (ABounds.size.height - 22) / 2, 22, 22);
+end;
+
+procedure TGittanToolbar.HitTest(const APoint: NSPoint; const ABounds: NSRect;
+  out AIndex: integer; out AClose, APlus: boolean);
+var
+  i: integer;
+  R: NSRect;
+begin
+  AIndex := -1;
+  AClose := False;
+  APlus := PointIn(APoint, PlusRect(ABounds));
+  if APlus then
+    Exit;
+  for i := 0 to High(FCaptions) do
+  begin
+    R := TabRect(i, ABounds);
+    if PointIn(APoint, R) then
+    begin
+      AIndex := i;
+      AClose := PointIn(APoint, CloseRect(R));
+      Exit;
+    end;
+  end;
+end;
+
+{ The shown tab is a filled, rounded box, as is a hovered one, fainter;
+  the others are their names alone, a faint line between two of them. The cross shows on the shown and
+  the hovered tab, on a round shade while the mouse is on it. }
+procedure TGittanToolbar.Draw(const ABounds: NSRect);
+var
+  i: integer;
+  R, C, T: NSRect;
+  Dark, Shown, Hover: boolean;
+  Fill, Text, Cross: NSColor;
+  Para: NSMutableParagraphStyle;
+  Font: NSFont;
+  Attrs: NSDictionary;
+  LineH: double;
+begin
+  Dark := DarkAppearance;
+  Font := NSFont.systemFontOfSize(12);
+  LineH := Font.ascender - Font.descender;
+  Para := NSMutableParagraphStyle.alloc.init;
+  Para.setLineBreakMode(NSLineBreakByTruncatingTail);
+  try
+    for i := 0 to High(FCaptions) do
+    begin
+      R := TabRect(i, ABounds);
+      Shown := i = FActive;
+      Hover := (i = FHot) and not Shown;
+      if Shown or Hover then
+      begin
+        if Shown and Dark then
+          Fill := NSColor.whiteColor.colorWithAlphaComponent(0.13)
+        else if Shown then
+          Fill := NSColor.whiteColor.colorWithAlphaComponent(0.85)
+        else
+          Fill := NSColor.labelColor.colorWithAlphaComponent(0.06);
+        Fill.setFill;
+        NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius(R, 6, 6).fill;
+        if Shown and not Dark then
+        begin
+          NSColor.blackColor.colorWithAlphaComponent(0.10).setStroke;
+          NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius(
+            NSInsetRect(R, 0.5, 0.5), 6, 6).stroke;
+        end;
+      end;
+      { A faint line parts two tabs that are neither shown nor hovered. }
+      if (i < High(FCaptions)) and not Shown and (i <> FHot) and (i + 1 <> FActive) and
+        (i + 1 <> FHot) then
+        StrokeLine(R.origin.x + R.size.width + TabGap / 2, R.origin.y + 6,
+          R.origin.x + R.size.width + TabGap / 2, R.origin.y + R.size.height - 6,
+          NSColor.labelColor.colorWithAlphaComponent(0.15), 1);
+      if Shown then
+        Text := NSColor.labelColor
+      else
+        Text := NSColor.secondaryLabelColor;
+      Attrs := NSDictionary.dictionaryWithObjectsAndKeys(Font, NSFontAttributeName,
+        Text, NSForegroundColorAttributeName, Para, NSParagraphStyleAttributeName, nil);
+      T := NSMakeRect(R.origin.x + 10, R.origin.y + (R.size.height - LineH) / 2,
+        R.size.width - 20 - CrossSize, LineH);
+      { News: a dot before the name, which moves over for it. }
+      if FMarks[i] then
+      begin
+        NSColor.systemBlueColor.setFill;
+        NSBezierPath.bezierPathWithOvalInRect(NSMakeRect(T.origin.x,
+          R.origin.y + R.size.height / 2 - 3, 6, 6)).fill;
+        T.origin.x := T.origin.x + 11;
+        T.size.width := T.size.width - 11;
+      end;
+      NSStr(FCaptions[i]).drawInRect_withAttributes(T, Attrs);
+      if Shown or (i = FHot) then
+      begin
+        C := CloseRect(R);
+        if (i = FHot) and FHotClose then
+        begin
+          NSColor.labelColor.colorWithAlphaComponent(0.15).setFill;
+          NSBezierPath.bezierPathWithOvalInRect(C).fill;
+        end;
+        Cross := NSColor.secondaryLabelColor;
+        StrokeLine(C.origin.x + 5, C.origin.y + 5, C.origin.x + C.size.width - 5,
+          C.origin.y + C.size.height - 5, Cross, 1.3);
+        StrokeLine(C.origin.x + C.size.width - 5, C.origin.y + 5, C.origin.x + 5,
+          C.origin.y + C.size.height - 5, Cross, 1.3);
+      end;
+    end;
+    C := PlusRect(ABounds);
+    if FHotPlus then
+    begin
+      NSColor.labelColor.colorWithAlphaComponent(0.10).setFill;
+      NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius(C, 5, 5).fill;
+    end;
+    Cross := NSColor.secondaryLabelColor;
+    StrokeLine(C.origin.x + C.size.width / 2, C.origin.y + 6,
+      C.origin.x + C.size.width / 2, C.origin.y + C.size.height - 6, Cross, 1.4);
+    StrokeLine(C.origin.x + 6, C.origin.y + C.size.height / 2,
+      C.origin.x + C.size.width - 6, C.origin.y + C.size.height / 2, Cross, 1.4);
+  finally
+    Para.release;
+  end;
+end;
+
+{ A tab is selected as it is pressed; the cross and the plus act on the
+  release, if the mouse is still on them. The empty part moves the
+  window, and a double click there zooms it. }
+procedure TGittanToolbar.MouseDown(AEvent: NSEvent);
+var
+  P: NSPoint;
+  Index: integer;
+  InCross, InPlus: boolean;
+begin
+  P := FStrip.convertPoint_fromView(AEvent.locationInWindow, nil);
+  HitTest(P, FStrip.bounds, Index, InCross, InPlus);
+  FPressed := -1;
+  if InPlus then
+    FPressed := PlusPart
+  else if (Index >= 0) and InCross then
+    FPressed := Index
+  else if Index >= 0 then
+  begin
+    if Assigned(FOnSelect) then
+      FOnSelect(Self, Index);
+  end
+  else if AEvent.clickCount = 2 then
+    FWindow.performZoom(nil)
+  else
+    FWindow.performWindowDragWithEvent(AEvent);
+end;
+
+procedure TGittanToolbar.MouseUp(AEvent: NSEvent);
+var
+  P: NSPoint;
+  Index, Pressed: integer;
+  InCross, InPlus: boolean;
+begin
+  Pressed := FPressed;
+  FPressed := -1;
+  if Pressed = -1 then
+    Exit;
+  P := FStrip.convertPoint_fromView(AEvent.locationInWindow, nil);
+  HitTest(P, FStrip.bounds, Index, InCross, InPlus);
+  if (Pressed = PlusPart) and InPlus then
+  begin
+    if Assigned(FOnNew) then
+      FOnNew(Self);
+  end
+  else if (Pressed >= 0) and InCross and (Index = Pressed) then
+  begin
+    if Assigned(FOnClose) then
+      FOnClose(Self, Index);
+  end;
+end;
+
+{ A middle click closes the tab under the mouse. }
+procedure TGittanToolbar.OtherMouseUp(AEvent: NSEvent);
+var
+  P: NSPoint;
+  Index: integer;
+  InCross, InPlus: boolean;
+begin
+  if AEvent.buttonNumber <> 2 then
+    Exit;
+  P := FStrip.convertPoint_fromView(AEvent.locationInWindow, nil);
+  HitTest(P, FStrip.bounds, Index, InCross, InPlus);
+  if (Index >= 0) and Assigned(FOnClose) then
+    FOnClose(Self, Index);
+end;
+
+procedure TGittanToolbar.MouseMoved(AEvent: NSEvent);
+var
+  P: NSPoint;
+  Index: integer;
+  InCross, InPlus: boolean;
+begin
+  P := FStrip.convertPoint_fromView(AEvent.locationInWindow, nil);
+  HitTest(P, FStrip.bounds, Index, InCross, InPlus);
+  if (Index = FHot) and (InCross = FHotClose) and (InPlus = FHotPlus) then
+    Exit;
+  if Index <> FHot then
+    if Index >= 0 then
+      FStrip.setToolTip(NSStr(FHints[Index]))
+    else
+      FStrip.setToolTip(nil);
+  FHot := Index;
+  FHotClose := InCross;
+  FHotPlus := InPlus;
+  FStrip.setNeedsDisplay_(True);
+end;
+
+procedure TGittanToolbar.MouseExited;
+begin
+  FHot := -1;
+  FHotClose := False;
+  FHotPlus := False;
+  FStrip.setNeedsDisplay_(True);
 end;
 
 end.

@@ -21,14 +21,14 @@
 
 { Whether blocks of the shown file can be left out of the commit: a
   tracked text file compared with HEAD while no commit runs. }
-function TForm1.CanLeaveOut: boolean;
+function TRepoFrame.CanLeaveOut: boolean;
 begin
   Result := CanDiscard and CommitChoosing and (FCommitJob = nil) and
     (FConflictRoles = nil) and (StatIndexOf(FCurrentPath) >= 0);
 end;
 
 { Whether the shown file goes into the commit at all. }
-function TForm1.ShownFileChosen: boolean;
+function TRepoFrame.ShownFileChosen: boolean;
 var
   i: integer;
 begin
@@ -39,7 +39,7 @@ end;
 { FLeftOutOf for the shown diff: for each line of FChangeLines the
   change left out it is, or -1; none while blocks cannot be left out or
   the file is not chosen. The changes the diff no longer holds go. }
-procedure TForm1.ApplyLeftOut;
+procedure TRepoFrame.ApplyLeftOut;
 var
   i: integer;
 begin
@@ -58,14 +58,14 @@ begin
 end;
 
 { Whether diff line ALine is a change left out. }
-function TForm1.LineLeftOut(ALine: integer): boolean;
+function TRepoFrame.LineLeftOut(ALine: integer): boolean;
 begin
   Result := (FView = gvChanges) and (ALine >= 0) and (ALine <= High(FLeftOutOf)) and
     (FLeftOutOf[ALine] >= 0);
 end;
 
 { Whether any line of block ABlock is left out. }
-function TForm1.BlockLeftOut(ABlock: integer): boolean;
+function TRepoFrame.BlockLeftOut(ABlock: integer): boolean;
 var
   i: integer;
 begin
@@ -83,7 +83,7 @@ end;
 
 { What the middle pill offers for the block: Include in Commit for one
   left out or of a file not ticked, Skip in Commit for the rest. }
-function TForm1.LeaveOutCaption(ABlock: integer): string;
+function TRepoFrame.LeaveOutCaption(ABlock: integer): string;
 begin
   if not ShownFileChosen or BlockLeftOut(ABlock) then
     Result := rsIncludePill
@@ -92,7 +92,7 @@ begin
 end;
 
 { The middle pill's hint, for the caption LeaveOutCaption gives. }
-function TForm1.LeaveOutHint(ABlock: integer): string;
+function TRepoFrame.LeaveOutHint(ABlock: integer): string;
 begin
   if LeaveOutCaption(ABlock) = rsIncludePill then
     Result := rsIncludePillHint
@@ -101,7 +101,7 @@ begin
 end;
 
 { The middle pill: the block goes out of the commit, or back in. }
-procedure TForm1.ToggleLeaveOutAt(ABlock: integer);
+procedure TRepoFrame.ToggleLeaveOutAt(ABlock: integer);
 begin
   if not CanLeaveOut or (ABlock < 0) or (ABlock > High(FBlockStarts)) then
     Exit;
@@ -113,7 +113,7 @@ end;
 
 { Every pair of the block goes out; a file left with nothing to commit
   is unticked instead. }
-procedure TForm1.LeaveOutBlockAt(ABlock: integer);
+procedure TRepoFrame.LeaveOutBlockAt(ABlock: integer);
 var
   Pairs: TGittanKeepArray;
   k, i: integer;
@@ -138,7 +138,7 @@ end;
 { The block's pairs go back into the commit. In a file not ticked the
   file is ticked with this block alone: every other block shown is left
   out. }
-procedure TForm1.IncludeBlockAt(ABlock: integer);
+procedure TRepoFrame.IncludeBlockAt(ABlock: integer);
 var
   Pairs: TGittanKeepArray;
   b, k, i, Line: integer;
@@ -180,7 +180,7 @@ begin
 end;
 
 { The header's Include All: every change of the file goes in. }
-procedure TForm1.IncludeFile;
+procedure TRepoFrame.IncludeFile;
 begin
   FLeftOut.Clear(FCurrentPath);
   StatusNote(Format(rsIncludedAll, [FCurrentPath]));
@@ -188,7 +188,7 @@ begin
 end;
 
 { A keep includes the pairs it keeps (see the comment at the top). }
-procedure TForm1.IncludeKept(const APairs: TGittanKeepArray);
+procedure TRepoFrame.IncludeKept(const APairs: TGittanKeepArray);
 var
   Items: TGittanKeepArray;
   k, j: integer;
@@ -204,7 +204,7 @@ begin
 end;
 
 { The tree's boxes, the section's count and the view follow. }
-procedure TForm1.LeftOutChanged;
+procedure TRepoFrame.LeftOutChanged;
 begin
   ApplyCommitChecks;
   UpdateCommitState;
@@ -213,7 +213,7 @@ end;
 
 { A click on a file's box takes the whole file in or out, so its
   changes left out go; when it is the shown file the view follows. }
-procedure TForm1.DropLeftOut(const APath: string);
+procedure TRepoFrame.DropLeftOut(const APath: string);
 begin
   if FLeftOut.Count(APath) = 0 then
     Exit;
@@ -226,7 +226,7 @@ end;
   work tree's with those changes as HEAD has them. A file whose changes
   left out are all gone goes in whole. False with the reason in AError
   when a file's diff cannot be taken or does not fit it. }
-function TForm1.CommitParts(APaths: TStrings; out AParts: TGittanCommitParts;
+function TRepoFrame.CommitParts(APaths: TStrings; out AParts: TGittanCommitParts;
   out AError: string): boolean;
 var
   Lines: TStringList;
@@ -279,7 +279,7 @@ begin
 end;
 
 { File > Leave Change Out of Commit acts on the block the caret is in. }
-procedure TForm1.MenuLeaveOutClick(Sender: TObject);
+procedure TRepoFrame.MenuLeaveOutClick(Sender: TObject);
 begin
   if Edit.Carets.Count > 0 then
     ToggleLeaveOutAt(BlockAtRow(Edit.Carets[0].PosY));
@@ -287,7 +287,7 @@ end;
 
 { The item follows the caret, as Discard Change does, and is named for
   what it does to the block there (from UpdateDiscardItems). }
-procedure TForm1.UpdateLeaveOutItem;
+procedure TRepoFrame.UpdateLeaveOutItem;
 var
   Block: integer;
 begin

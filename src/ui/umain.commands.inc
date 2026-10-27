@@ -14,7 +14,7 @@
   Commands on the page, and the settings keep the hash of the text
   trusted per root. See spec/repo-commands.md. }
 
-procedure TForm1.SetupCommandPage;
+procedure TRepoFrame.SetupCommandPage;
 begin
   FCommandPage := TGittanCommandPage.Create(Self);
   FCommandPage.Parent := FSummaryBox;
@@ -31,15 +31,15 @@ begin
   FCommandPage.OnCopyOutput := @CommandPageCopyOutput;
 end;
 
-function TForm1.CommandsTrusted: boolean;
+function TRepoFrame.CommandsTrusted: boolean;
 begin
-  Result := FSettings.CommandsTrusted(FRepo.Root, FCommandsHash);
+  Result := App.Settings.CommandsTrusted(FRepo.Root, FCommandsHash);
 end;
 
 { Reads the commands again (three small files) and hands them to the
   page; from ApplySnapshot, so an edit of the file or a pull that brings
   one is seen. A command of another repository is ended first. }
-procedure TForm1.LoadRepoCommands;
+procedure TRepoFrame.LoadRepoCommands;
 begin
   if (FCommandJob <> nil) and (FCommandJob.Root <> FRepo.Root) then
     AbandonCommandJob(False);
@@ -55,7 +55,7 @@ begin
   FCommandPage.SetCommands(FRepoCommands, FCommandsHash <> '', CommandsTrusted);
 end;
 
-procedure TForm1.MenuCommandsClick(Sender: TObject);
+procedure TRepoFrame.MenuCommandsClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
     ShowCommands;
@@ -63,7 +63,7 @@ end;
 
 { The page takes the summary's place in the box, as the Repository page
   does. }
-procedure TForm1.ShowCommands;
+procedure TRepoFrame.ShowCommands;
 begin
   if FRepo.Root = '' then
     Exit;
@@ -87,7 +87,7 @@ begin
   UpdateStatus;
 end;
 
-procedure TForm1.CommandPageRun(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.CommandPageRun(Sender: TObject; AIndex: integer);
 begin
   RunRepoCommand(AIndex, False);
 end;
@@ -96,7 +96,7 @@ end;
   in a job whose output the page shows. The file's commands, and the
   keys it gives (AByKey), wait for the file to be trusted: the page is
   shown with its card instead. }
-procedure TForm1.RunRepoCommand(AIndex: integer; AByKey: boolean);
+procedure TRepoFrame.RunRepoCommand(AIndex: integer; AByKey: boolean);
 var
   Cmd: TGittanRepoCommand;
 begin
@@ -143,7 +143,7 @@ end;
 
 { What the command wrote since the last piece goes to the console; the
   whole text again when the job cut its start. }
-procedure TForm1.CommandJobOutput(Sender: TObject);
+procedure TRepoFrame.CommandJobOutput(Sender: TObject);
 var
   Written: string;
 begin
@@ -157,7 +157,7 @@ begin
   FCommandRead := Length(Written);
 end;
 
-procedure TForm1.CommandJobDone(Sender: TObject);
+procedure TRepoFrame.CommandJobDone(Sender: TObject);
 var
   Job: TGittanCommandJob;
 begin
@@ -188,7 +188,7 @@ end;
 { Ends the command and drops the job: its end, if it comes, is thrown
   away. AWait, as on quitting, waits for it; else it goes to the zombie
   list as a blame job does. }
-procedure TForm1.AbandonCommandJob(AWait: boolean);
+procedure TRepoFrame.AbandonCommandJob(AWait: boolean);
 var
   Job: TGittanCommandJob;
 begin
@@ -210,25 +210,25 @@ begin
 end;
 
 { Stop on the page: the job ends it, and its end comes as Killed. }
-procedure TForm1.CommandPageStop(Sender: TObject);
+procedure TRepoFrame.CommandPageStop(Sender: TObject);
 begin
   if FCommandJob <> nil then
     FCommandJob.Kill;
 end;
 
-procedure TForm1.CommandPageTrust(Sender: TObject);
+procedure TRepoFrame.CommandPageTrust(Sender: TObject);
 begin
   if FRepo.Root = '' then
     Exit;
-  FSettings.TrustCommands(FRepo.Root, FCommandsHash);
-  FSettings.Save;
+  App.Settings.TrustCommands(FRepo.Root, FCommandsHash);
+  App.Settings.Save;
   FCommandPage.SetCommands(FRepoCommands, FCommandsHash <> '', CommandsTrusted);
 end;
 
 { Edit… or Create…: the file opens in the editor as a Config file does;
   a new one is written with its commented example first, and the
   Config section lists it. }
-procedure TForm1.CommandPageEditFile(Sender: TObject);
+procedure TRepoFrame.CommandPageEditFile(Sender: TObject);
 var
   FileName: string;
   F: TFileStream;
@@ -261,14 +261,14 @@ begin
   ShowRepoFile(CommandsPath);
 end;
 
-procedure TForm1.CommandPageCopyOutput(Sender: TObject);
+procedure TRepoFrame.CommandPageCopyOutput(Sender: TObject);
 begin
   Clipboard.AsText := FCommandPage.Console.PlainText;
 end;
 
 { A key of a command, with Ctrl+Cmd on macOS and Ctrl+Alt elsewhere;
   true when it ran one. }
-function TForm1.CommandKey(AKey: word; AShift: TShiftState): boolean;
+function TRepoFrame.CommandKey(AKey: word; AShift: TShiftState): boolean;
 var
   i: integer;
 begin

@@ -21,13 +21,13 @@
 
 { Whether the two editors stand side by side: the side-by-side change
   view and the translation view. }
-function TForm1.SidesShown: boolean;
+function TRepoFrame.SidesShown: boolean;
 begin
   Result := (FSideBySide and (FView = gvChanges)) or (FView = gvTranslation);
 end;
 
 { Whether the view is of a file in the tree, which F7 steps on from. }
-function TForm1.ShowsChangedFile: boolean;
+function TRepoFrame.ShowsChangedFile: boolean;
 begin
   Result := (FView in [gvChanges, gvImage]) or
     ((FView in [gvTranslation, gvBinary]) and (FCurrentPath <> ''));
@@ -40,7 +40,7 @@ const
   ACompare the entries that changed since AOld, the version compared
   against, get the diff's strip and are the blocks the navigator steps
   through; without, the fuzzy and untranslated entries are. }
-procedure TForm1.ShowTranslation(const AText, AOld: string; ACompare: boolean);
+procedure TRepoFrame.ShowTranslation(const AText, AOld: string; ACompare: boolean);
 var
   Rows: TGittanPoRows;
   Entries: TGittanPoEntries;
@@ -149,7 +149,7 @@ end;
 
 { A changed .po file in the translation view: the version the change
   view would show on its new side, the old one when the file is gone. }
-procedure TForm1.ShowTranslationChanges(const APath: string);
+procedure TRepoFrame.ShowTranslationChanges(const APath: string);
 var
   OldRef, NewRef: string;
   Data, OldData: RawByteString;
@@ -172,7 +172,7 @@ begin
 end;
 
 { A .po file from File > Open in the translation view. }
-procedure TForm1.ShowTranslationFile(const AFileName: string);
+procedure TRepoFrame.ShowTranslationFile(const AFileName: string);
 var
   Stream: TStringStream;
 begin
@@ -201,7 +201,7 @@ begin
 end;
 
 { View > Translations: the shown .po file is shown again the other way. }
-procedure TForm1.MenuTranslationsClick(Sender: TObject);
+procedure TRepoFrame.MenuTranslationsClick(Sender: TObject);
 begin
   FTranslations := not FTranslations;
   FTranslationsItem.Checked := FTranslations;

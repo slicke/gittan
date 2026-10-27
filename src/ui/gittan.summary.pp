@@ -6,7 +6,9 @@ unit gittan.summary;
   under a header with the repository name, branch and totals. Between the
   two, the conversation of the pull request when there is one: its
   comments and the text its reviews were submitted with, which are on no
-  line, so the change view has no place for them; or, while a commit is
+  line, so the change view has no place for them, and a row counting
+  the pull requests waiting for the user's review, which drops a list
+  of them; or, while a commit is
   compared with its parent, a card with its message, author and age and
   a link back to the working tree. A clean tree shows,
   instead of the totals, a large check with how far the branch is from
@@ -24,8 +26,8 @@ unit gittan.summary;
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Graphics, ImgList, gittan.git, gittan.icons,
-  gittan.reviews, gittan.statusbar, gittan.github;
+  Classes, SysUtils, Types, Controls, Graphics, ImgList, InkDraw, gittan.git, gittan.icons,
+  gittan.reviews, gittan.statusbar, gittan.forge;
 
 type
   TGittanSelectFileEvent = procedure(Sender: TObject; const APath: string) of object;
@@ -40,18 +42,30 @@ type
   TGittanSelectCommitEvent = procedure(Sender: TObject; const AHash: string) of object;
   {** A click on a link to AUrl. }
   TGittanOpenUrlEvent = procedure(Sender: TObject; const AUrl: string) of object;
-  {** A card of a pull request waiting for the user's review was clicked. }
-  TGittanPullSelectEvent = procedure(Sender: TObject; const APull: TGittanPullRequest) of object;
   {** A click on Rebase (ARebase) or Merge in the row of a branch behind
     the default branch. }
   TGittanBehindActionEvent = procedure(Sender: TObject; ARebase: boolean) of object;
 
-  {** A note of the conversation as laid out: its wrapped text, and its
-    top and height below the start of the section. }
+  {** A part of a note's text as laid out (CommentParts): LazInk's
+    markup, how deep in <details> blocks it is, the part it is when it
+    is the summary of one (-1 for text), and its top and height below
+    the top of the text. }
+  TGittanSummaryNoteRow = record
+    Markup: string;
+    Depth, Detail, Top, Height: integer;
+  end;
+
+  {** A note of the conversation as laid out: the parts of its text
+    shown, the height they are drawn in (Cut when they are taller and
+    an ellipsis follows), and its top and height below the start of the
+    section. Long when the text is taller than a card shows, so a line
+    under it shows more or less of it (MoreRect, where the last paint
+    drew its link). TextRect is where the last paint drew the text. }
   TGittanSummaryNoteBox = record
-    Top, Height: integer;
-    Lines: TStringArray;
-    LinkRect: TRect;
+    Top, Height, TextHeight: integer;
+    Rows: array of TGittanSummaryNoteRow;
+    Cut, Long: boolean;
+    LinkRect, TextRect, MoreRect: TRect;
   end;
 
   { TGittanSummary }
@@ -76,22 +90,28 @@ type
     FNotesTitle: string;
     FNotes: TGittanPullNotes;
     FNoteBoxes: array of TGittanSummaryNoteBox;
+    { Each note's parts (CommentParts) and their markup (MarkdownToInk,
+      the paths linked), made once per SetNotes: a new width lays them
+      out again without parsing them or asking for the files again. }
+    FNoteParts: array of TGittanCommentParts;
+    FNoteMarkup: array of TStringArray;
     { The width the notes were laid out at, -1 when they are to be laid
       out again; their height, title included, 0 without notes. }
     FNotesWidth, FNotesHeight: integer;
-    { The note whose link is under the mouse, -1 for none. }
-    FLinkHot: integer;
-    { The open pull requests waiting for the user's review, a card each
-      under the conversation; FReviewRects and FReviewLinks are the
-      cards and their GitHub links as last painted, FReviewHot and
-      FReviewLinkHot the ones under the mouse (-1 for none), and
-      FReviewHeight the section's height, heading included, 0 without
-      any. }
+    { The note whose link is under the mouse, -1 for none; FMoreHot the
+      note whose Show more or Show less is. }
+    FLinkHot, FMoreHot: integer;
+    { The open pull requests waiting for the user's review, counted in
+      a row under the conversation, a chip that drops a list of them
+      through OnReviewClick; FReviewRect is the chip as last painted,
+      FReviewHot whether the mouse is over it, FReviewHeight the row's
+      height, 0 without any. }
     FReviewPulls: TGittanPullRequests;
-    FReviewRects, FReviewLinks: array of TRect;
-    FReviewHot, FReviewLinkHot: integer;
+    FForgeName: string;
+    FReviewRect: TRect;
+    FReviewHot: boolean;
     FReviewHeight: integer;
-    FOnSelectPull: TGittanPullSelectEvent;
+    FOnReviewClick: TGittanBranchClickEvent;
     { The commit compared with its parent, shown in a card under the
       header; an empty Hash shows none. FCardSubject is its subject and
       FCardLines its body, wrapped at FCardWidth (-1 to lay them out
@@ -120,10 +140,18 @@ type
     FCommitsTop, FCommitHot: integer;
     FOnSelectCommit: TGittanSelectCommitEvent;
     FMeasure: TBitmap;
+    { The layouts of the notes' Markdown. }
+    FInk: THTMLLayoutCache;
+    { Whether the mouse is on a link in a note's text, or on the summary
+      of a <details> block in it. }
+    FTextLinkHot, FDetailsHot: boolean;
+    { The <details> blocks of the notes that are open (NoteDetailsKey). }
+    FNotesOpen: TStringList;
     FOnSelectFile: TGittanSelectFileEvent;
     FOnContextFile: TGittanContextFileEvent;
     FOnBranchClick: TGittanBranchClickEvent;
     FOnOpenUrl: TGittanOpenUrlEvent;
+    FOnFileExists: TGittanPathTest;
     FRowsTop: integer;
     { The height the content needs; the control is at least as high as
       the box it fills, see FitHeight. }
@@ -171,13 +199,15 @@ type
     procedure SetActionHot(AValue: integer);
     procedure SetLinkHot(AValue: integer);
     function LinkAt(X, Y: integer): integer;
+    function NoteInkOptions: THTMLOptions;
+    function TextLinkAt(X, Y: integer): string;
+    function NoteDetailsKey(ANote, ADetail: integer): string;
+    function NoteDetailsAt(X, Y: integer): string;
+    function NoteMoreAt(X, Y: integer): integer;
+    procedure SetMoreHot(AValue: integer);
     procedure LayoutNotes;
     procedure PaintNotes(var Y: integer);
-    function ReviewAt(X, Y: integer): integer;
-    function ReviewLinkAt(X, Y: integer): integer;
-    procedure SetReviewHot(AValue: integer);
-    procedure SetReviewLinkHot(AValue: integer);
-    function ReviewCardHeight(ACanvas: TCanvas): integer;
+    procedure SetReviewHot(AValue: boolean);
     procedure LayoutReview;
     procedure PaintReview(var Y: integer);
     procedure LayoutCard;
@@ -236,8 +266,8 @@ type
     {** Shows ANotes, the conversation of a pull request, under the
       heading ATitle; no notes shows none. }
     procedure SetNotes(const ATitle: string; const ANotes: TGittanPullNotes);
-    {** Shows APulls, the open pull requests waiting for the user's
-      review, as cards under the conversation; nil shows none. }
+    {** Counts APulls, the open pull requests waiting for the user's
+      review, in a row under the conversation; nil shows none. }
     procedure SetReviewPulls(const APulls: TGittanPullRequests);
     {** Shows ACommit, the commit the files are compared through (with
       its parent), in a card under the header with ABody, the rest of
@@ -291,19 +321,31 @@ type
     property OnBehindAction: TGittanBehindActionEvent read FOnBehindAction write FOnBehindAction;
     {** A click on a commit's row. }
     property OnSelectCommit: TGittanSelectCommitEvent read FOnSelectCommit write FOnSelectCommit;
-    {** A click on a note's link to GitHub. }
+    {** The forge the notes are on, by name, for their links. }
+    property ForgeName: string read FForgeName write FForgeName;
+    {** A click on a note's link to the forge. }
     property OnOpenUrl: TGittanOpenUrlEvent read FOnOpenUrl write FOnOpenUrl;
-    {** A card of a pull request waiting for the user's review was
-      clicked; without it the cards do not light up. }
-    property OnSelectPull: TGittanPullSelectEvent read FOnSelectPull write FOnSelectPull;
+    {** Whether a path is a file of the repository: a path in a note's
+      text that is one becomes a link to it (LinkFilePaths), which goes to
+      OnOpenUrl. }
+    property OnFileExists: TGittanPathTest read FOnFileExists write FOnFileExists;
+    {** A click on the row counting the pull requests waiting for the
+      user's review, with the chip's rectangle in screen coordinates
+      for a list to drop from; without it the row is not a chip. }
+    property OnReviewClick: TGittanBranchClickEvent read FOnReviewClick write FOnReviewClick;
     {** A click on the commit card's link back to the working tree. }
     property OnBackClick: TNotifyEvent read FOnBackClick write FOnBackClick;
   end;
 
+{** A line about a pull request for a list's detail: who opened it, how
+  long ago and whether it is a draft, with dots between; short, since
+  the detail takes its room from the title. }
+function ReviewPullLine(const APull: TGittanPullRequest): string;
+
 implementation
 
 uses
-  Math, DateUtils, LazUTF8, gittan.textfit, gittan.theme, Forms;
+  Math, DateUtils, LazUTF8, StrUtils, InkMarkdown, gittan.textfit, gittan.theme, Forms;
 
 resourcestring
   rsOneFile = '1 changed file';
@@ -328,9 +370,11 @@ resourcestring
   rsNoteApproved = 'approved';
   rsNoteChangesRequested = 'requested changes';
   rsNoteDismissed = 'review dismissed';
-  rsNoteLink = 'GitHub ↗';
-  rsNeedsReview = 'Needs your review';
-  rsReviewInto = '%s → %s';
+  rsNoteLink = '%s ↗';
+  rsNoteMore = 'Show more';
+  rsNoteLess = 'Show less';
+  rsReviewOne = '1 pull request needs your review';
+  rsReviewMany = '%d pull requests need your review';
   rsReviewOpened = 'opened %s';
   rsReviewDraft = 'draft';
   rsBackToTree = 'Back to Working Tree';
@@ -364,11 +408,13 @@ const
   IconGap = 5;
   { A note's card: room inside it, between cards, the colored stripe at
     its left, and the most lines of text it shows (the rest is on
-    GitHub). }
+    the forge). }
   NotePadX = 12;
   NotePadY = 8;
   NoteGap = 8;
   NoteStripe = 3;
+  { How far the text in a <details> block is indented, per level. }
+  NoteIndent = 14;
   NoteMaxLines = 12;
   { The most lines a commit's subject takes in its card. }
   SubjectMaxLines = 3;
@@ -382,8 +428,7 @@ begin
   FHot := -1;
   FActionHot := -1;
   FLinkHot := -1;
-  FReviewHot := -1;
-  FReviewLinkHot := -1;
+  FMoreHot := -1;
   FCommitHot := -1;
   FBehindHot := -1;
   FNotOnRemote := -1;
@@ -391,6 +436,8 @@ begin
   FCardWidth := -1;
   FLink := clHighlight;
   FMeasure := TBitmap.Create;
+  FInk := THTMLLayoutCache.Create;
+  FNotesOpen := TStringList.Create;
   SetColors(clWindow, clWindowText, clGrayText, clBtnFace, clBtnFace, clGreen,
     clRed, clBtnShadow);
   { The height follows the content; the scroll box it sits in scrolls. }
@@ -401,6 +448,8 @@ end;
 destructor TGittanSummary.Destroy;
 begin
   FMeasure.Free;
+  FInk.Free;
+  FNotesOpen.Free;
   inherited Destroy;
 end;
 
@@ -665,8 +714,11 @@ procedure TGittanSummary.SetNotes(const ATitle: string; const ANotes: TGittanPul
 begin
   FNotesTitle := ATitle;
   FNotes := Copy(ANotes);
+  FNoteParts := nil;
+  FNoteMarkup := nil;
   FNotesWidth := -1;
   FLinkHot := -1;
+  FMoreHot := -1;
   UpdateHeight;
   Invalidate;
 end;
@@ -728,27 +780,31 @@ begin
   end;
 end;
 
+{ Where the last paint drew part K of ABox's text, past its indent. }
+function NoteRowRect(const ABox: TGittanSummaryNoteBox; K: integer): TRect;
+begin
+  Result := ABox.TextRect;
+  Inc(Result.Left, ABox.Rows[K].Depth * Px(NoteIndent));
+  Inc(Result.Top, ABox.Rows[K].Top);
+  Result.Bottom := Result.Top + ABox.Rows[K].Height;
+end;
+
 { Lays the notes out at the control's width, when it changed: each
-  note's text wrapped at words (inside a word longer than a line too),
-  at most NoteMaxLines lines with an ellipsis after. }
+  note's parts (CommentParts) as LazInk lays their Markdown out at that
+  width, a <details> block as its summary after "▸", and after "▾" with
+  the parts in it indented when it is open (FNotesOpen). The text is at
+  most NoteMaxLines lines high with an ellipsis and Show more after,
+  unless a block in it is open, since that was asked for, or Show more
+  was clicked (NoteDetailsKey with -1 in FNotesOpen), when Show less
+  follows it. }
 procedure TGittanSummary.LayoutNotes;
 var
   C: TCanvas;
-  Inner, LineHeight, i, At: integer;
-  Paras: TStringList;
+  Inner, LineHeight, i, k, At, HideBelow: integer;
   Box: TGittanSummaryNoteBox;
-
-  procedure Add(const AText: string);
-  begin
-    SetLength(Box.Lines, Length(Box.Lines) + 1);
-    Box.Lines[High(Box.Lines)] := AText;
-  end;
-
-  procedure Wrap(const AText: string);
-  begin
-    WrapText(C, AText, Inner, Box.Lines);
-  end;
-
+  Parts: TGittanCommentParts;
+  Row: TGittanSummaryNoteRow;
+  AnyOpen: boolean;
 begin
   if FNotesWidth = Width then
     Exit;
@@ -763,35 +819,154 @@ begin
   Inner := Max(40, Width - 2 * Px(Pad) - 2 * Px(NotePadX) - Px(NoteStripe));
   { The section's heading. }
   At := LineHeight + Px(NoteGap);
-  SetLength(FNoteBoxes, Length(FNotes));
-  Paras := TStringList.Create;
-  try
+  if Length(FNoteParts) <> Length(FNotes) then
+  begin
+    SetLength(FNoteParts, Length(FNotes));
+    SetLength(FNoteMarkup, Length(FNotes));
     for i := 0 to High(FNotes) do
     begin
-      Box := Default(TGittanSummaryNoteBox);
-      Paras.Text := FNotes[i].Body;
-      while (Paras.Count > 0) and (Length(Box.Lines) <= NoteMaxLines) do
-      begin
-        Wrap(TrimRight(Paras[0]));
-        Paras.Delete(0);
-      end;
-      if (Length(Box.Lines) > NoteMaxLines) or (Paras.Count > 0) then
-      begin
-        SetLength(Box.Lines, Min(Length(Box.Lines), NoteMaxLines));
-        Add('…');
-      end;
-      Box.Top := At;
-      { The header line, then the text under a little room. }
-      Box.Height := 2 * Px(NotePadY) + LineHeight;
-      if Length(Box.Lines) > 0 then
-        Inc(Box.Height, 4 + Length(Box.Lines) * LineHeight);
-      FNoteBoxes[i] := Box;
-      Inc(At, Box.Height + Px(NoteGap));
+      Parts := CommentParts(FNotes[i].Body);
+      FNoteParts[i] := Parts;
+      SetLength(FNoteMarkup[i], Length(Parts));
+      for k := 0 to High(Parts) do
+        if (Parts[k].Kind = cpText) and Assigned(FOnFileExists) then
+          FNoteMarkup[i][k] := MarkdownToInk(LinkFilePaths(Parts[k].Text, FOnFileExists),
+            [imoInlineHTML])
+        else
+          FNoteMarkup[i][k] := MarkdownToInk(Parts[k].Text, [imoInlineHTML]);
     end;
-  finally
-    Paras.Free;
+  end;
+  SetLength(FNoteBoxes, Length(FNotes));
+  for i := 0 to High(FNotes) do
+  begin
+    Box := Default(TGittanSummaryNoteBox);
+    Parts := FNoteParts[i];
+    HideBelow := MaxInt;
+    AnyOpen := False;
+    for k := 0 to High(Parts) do
+    begin
+      if Parts[k].Depth > HideBelow then
+        Continue;
+      HideBelow := MaxInt;
+      Row := Default(TGittanSummaryNoteRow);
+      Row.Depth := Parts[k].Depth;
+      Row.Detail := -1;
+      Row.Markup := FNoteMarkup[i][k];
+      if Parts[k].Kind = cpDetails then
+      begin
+        Row.Detail := k;
+        if FNotesOpen.IndexOf(NoteDetailsKey(i, k)) >= 0 then
+        begin
+          Row.Markup := '▾ ' + Row.Markup;
+          AnyOpen := True;
+        end
+        else
+        begin
+          Row.Markup := '▸ ' + Row.Markup;
+          HideBelow := Parts[k].Depth;
+        end;
+      end;
+      if Length(Box.Rows) > 0 then
+        Inc(Box.TextHeight, Px(4));
+      Row.Top := Box.TextHeight;
+      Row.Height := HTMLTextExtentOpt(C, Rect(0, 0, Max(40, Inner - Row.Depth * Px(NoteIndent)),
+        100000), [], Row.Markup, NoteInkOptions, FInk).cy;
+      Inc(Box.TextHeight, Row.Height);
+      SetLength(Box.Rows, Length(Box.Rows) + 1);
+      Box.Rows[High(Box.Rows)] := Row;
+    end;
+    Box.Long := not AnyOpen and (Box.TextHeight > NoteMaxLines * LineHeight);
+    Box.Cut := Box.Long and (FNotesOpen.IndexOf(NoteDetailsKey(i, -1)) < 0);
+    if Box.Cut then
+      Box.TextHeight := NoteMaxLines * LineHeight;
+    Box.Top := At;
+    { The header line, then the text under a little room. }
+    Box.Height := 2 * Px(NotePadY) + LineHeight;
+    if Box.TextHeight > 0 then
+      Inc(Box.Height, 4 + Box.TextHeight);
+    if Box.Long then
+      Inc(Box.Height, LineHeight);
+    FNoteBoxes[i] := Box;
+    Inc(At, Box.Height + Px(NoteGap));
   end;
   FNotesHeight := At + Px(Pad) div 2;
+end;
+
+{ The key in FNotesOpen of <details> block ADetail (its part) of note
+  ANote: the note's address, else its place, and the part; ADetail -1
+  is the whole text, shown past NoteMaxLines. }
+function TGittanSummary.NoteDetailsKey(ANote, ADetail: integer): string;
+begin
+  if FNotes[ANote].Url <> '' then
+    Result := FNotes[ANote].Url
+  else
+    Result := IntToStr(ANote);
+  Result := Result + '#' + IntToStr(ADetail);
+end;
+
+{ The note whose Show more or Show less is at X, Y; -1 elsewhere. }
+function TGittanSummary.NoteMoreAt(X, Y: integer): integer;
+var
+  i: integer;
+begin
+  Result := -1;
+  for i := 0 to High(FNoteBoxes) do
+    if PtInRect(FNoteBoxes[i].MoreRect, Point(X, Y)) then
+      Exit(i);
+end;
+
+{ The key of the <details> block whose summary is at X, Y; '' elsewhere. }
+function TGittanSummary.NoteDetailsAt(X, Y: integer): string;
+var
+  i, k: integer;
+begin
+  Result := '';
+  for i := 0 to High(FNoteBoxes) do
+    if PtInRect(FNoteBoxes[i].TextRect, Point(X, Y)) then
+    begin
+      for k := 0 to High(FNoteBoxes[i].Rows) do
+        if (FNoteBoxes[i].Rows[k].Detail >= 0) and
+          PtInRect(NoteRowRect(FNoteBoxes[i], k), Point(X, Y)) then
+          Exit(NoteDetailsKey(i, FNoteBoxes[i].Rows[k].Detail));
+      Exit;
+    end;
+end;
+
+{ How LazInk draws a note's text: links in the link color. }
+function TGittanSummary.NoteInkOptions: THTMLOptions;
+begin
+  Result := DefaultHTMLOptions;
+  Result.LinkColor := FLink;
+end;
+
+{ The address of the link in a note's text at X, Y, when it goes to the
+  web or to a file of the repository; '' elsewhere. }
+function TGittanSummary.TextLinkAt(X, Y: integer): string;
+var
+  i, k: integer;
+  Hit: THTMLHitInfo;
+  R: TRect;
+begin
+  Result := '';
+  for i := 0 to High(FNoteBoxes) do
+    if PtInRect(FNoteBoxes[i].TextRect, Point(X, Y)) then
+    begin
+      FMeasure.Canvas.Font := Font;
+      for k := 0 to High(FNoteBoxes[i].Rows) do
+      begin
+        R := NoteRowRect(FNoteBoxes[i], k);
+        if not PtInRect(R, Point(X, Y)) then
+          Continue;
+        Hit := HTMLHitTest(FMeasure.Canvas, R, FNoteBoxes[i].Rows[k].Markup,
+          NoteInkOptions, X, Y, FInk);
+        if Hit.OnLink and (AnsiStartsText('https://', Hit.LinkName) or
+          AnsiStartsText('http://', Hit.LinkName) or AnsiStartsText('mailto:', Hit.LinkName) or
+          AnsiStartsText(FileLinkScheme, Hit.LinkName)) then
+          Result := Hit.LinkName;
+        Exit;
+      end;
+      Exit;
+    end;
 end;
 
 { The heading, then a card per note: a stripe in the color of the
@@ -800,9 +975,9 @@ end;
   the section. }
 procedure TGittanSummary.PaintNotes(var Y: integer);
 var
-  i, k, X, LineHeight, At: integer;
-  Card: TRect;
-  What, Age: string;
+  i, k, d, X, LineHeight, At: integer;
+  Card, R: TRect;
+  What, Age, Link: string;
   Tone: TColor;
 begin
   LayoutNotes;
@@ -875,22 +1050,66 @@ begin
     FNoteBoxes[i].LinkRect := Rect(0, 0, 0, 0);
     if FNotes[i].Url <> '' then
     begin
-      FNoteBoxes[i].LinkRect := Rect(Card.Right - Px(NotePadX) - Canvas.TextWidth(rsNoteLink),
+      Link := Format(rsNoteLink, [FForgeName]);
+      FNoteBoxes[i].LinkRect := Rect(Card.Right - Px(NotePadX) - Canvas.TextWidth(Link),
         At, Card.Right - Px(NotePadX), At + LineHeight);
       Canvas.Font.Color := FLink;
       if i = FLinkHot then
         Canvas.Font.Style := [fsUnderline];
-      Canvas.TextOut(FNoteBoxes[i].LinkRect.Left, At, rsNoteLink);
+      Canvas.TextOut(FNoteBoxes[i].LinkRect.Left, At, Link);
       Canvas.Font.Style := [];
     end;
 
     Inc(At, LineHeight + 4);
     Canvas.Font.Color := FText;
     X := Card.Left + Px(NoteStripe) + Px(NotePadX);
-    for k := 0 to High(FNoteBoxes[i].Lines) do
+    FNoteBoxes[i].TextRect := Rect(X, At, Card.Right - Px(NotePadX), At + FNoteBoxes[i].TextHeight);
+    if FNoteBoxes[i].TextHeight > 0 then
     begin
-      Canvas.TextOut(X, At, FNoteBoxes[i].Lines[k]);
-      Inc(At, LineHeight);
+      Canvas.Clipping := True;
+      Canvas.ClipRect := FNoteBoxes[i].TextRect;
+      try
+        for k := 0 to High(FNoteBoxes[i].Rows) do
+        begin
+          R := NoteRowRect(FNoteBoxes[i], k);
+          { A rule down the left of each level of <details> a part is in. }
+          Canvas.Pen.Color := FLine;
+          for d := 1 to FNoteBoxes[i].Rows[k].Depth do
+            Canvas.Line(X + (d - 1) * Px(NoteIndent) + Px(4), R.Top,
+              X + (d - 1) * Px(NoteIndent) + Px(4), R.Bottom);
+          Canvas.Font := Font;
+          if FNoteBoxes[i].Rows[k].Detail >= 0 then
+            Canvas.Font.Color := FDim
+          else
+            Canvas.Font.Color := FText;
+          Canvas.Brush.Style := bsClear;
+          HTMLDrawOpt(Canvas, R, [], FNoteBoxes[i].Rows[k].Markup, NoteInkOptions, FInk);
+        end;
+      finally
+        Canvas.Clipping := False;
+      end;
+      Canvas.Font := Font;
+      Canvas.Brush.Style := bsClear;
+    end;
+    FNoteBoxes[i].MoreRect := Rect(0, 0, 0, 0);
+    if FNoteBoxes[i].Long then
+    begin
+      At := FNoteBoxes[i].TextRect.Bottom;
+      if FNoteBoxes[i].Cut then
+      begin
+        Canvas.Font.Color := FDim;
+        Canvas.TextOut(X, At, '… ');
+        Inc(X, Canvas.TextWidth('… '));
+        Link := rsNoteMore;
+      end
+      else
+        Link := rsNoteLess;
+      FNoteBoxes[i].MoreRect := Rect(X, At, X + Canvas.TextWidth(Link), At + LineHeight);
+      Canvas.Font.Color := FLink;
+      if i = FMoreHot then
+        Canvas.Font.Style := [fsUnderline];
+      Canvas.TextOut(X, At, Link);
+      Canvas.Font.Style := [];
     end;
   end;
   Inc(Y, FNotesHeight);
@@ -916,74 +1135,32 @@ begin
   if SamePulls(APulls, FReviewPulls) then
     Exit;
   FReviewPulls := Copy(APulls);
-  FReviewRects := nil;
-  FReviewLinks := nil;
-  FReviewHot := -1;
-  FReviewLinkHot := -1;
+  FReviewRect := Rect(0, 0, 0, 0);
+  FReviewHot := False;
   UpdateHeight;
   Invalidate;
 end;
 
-function TGittanSummary.ReviewAt(X, Y: integer): integer;
-var
-  i: integer;
-begin
-  Result := -1;
-  if not Assigned(FOnSelectPull) then
-    Exit;
-  for i := 0 to High(FReviewRects) do
-    if PtInRect(FReviewRects[i], Point(X, Y)) then
-      Exit(i);
-end;
-
-function TGittanSummary.ReviewLinkAt(X, Y: integer): integer;
-var
-  i: integer;
-begin
-  Result := -1;
-  for i := 0 to High(FReviewLinks) do
-    if PtInRect(FReviewLinks[i], Point(X, Y)) then
-      Exit(i);
-end;
-
-procedure TGittanSummary.SetReviewHot(AValue: integer);
+procedure TGittanSummary.SetReviewHot(AValue: boolean);
 begin
   if FReviewHot = AValue then
     Exit;
   FReviewHot := AValue;
+  if AValue then
+    Cursor := crHandPoint
+  else
+    Cursor := crDefault;
   Invalidate;
-end;
-
-procedure TGittanSummary.SetReviewLinkHot(AValue: integer);
-begin
-  if FReviewLinkHot = AValue then
-    Exit;
-  FReviewLinkHot := AValue;
-  Invalidate;
-end;
-
-{ A card has two lines: the number and title, and who opened it. }
-function TGittanSummary.ReviewCardHeight(ACanvas: TCanvas): integer;
-begin
-  Result := 2 * Px(NotePadY) + 2 * ACanvas.TextHeight('Xg') + 4;
 end;
 
 procedure TGittanSummary.LayoutReview;
-var
-  C: TCanvas;
 begin
   FReviewHeight := 0;
-  if Length(FReviewPulls) = 0 then
-    Exit;
-  C := FMeasure.Canvas;
-  C.Font := Font;
-  FReviewHeight := C.TextHeight('Xg') + Px(NoteGap) +
-    Length(FReviewPulls) * (ReviewCardHeight(C) + Px(NoteGap)) + Px(Pad) div 2;
+  if Length(FReviewPulls) > 0 then
+    FReviewHeight := Px(RowHeight);
 end;
 
-{ The second line of a card: who opened it, "head → base", how long ago
-  and whether it is a draft, with dots between. }
-function ReviewLine(const APull: TGittanPullRequest): string;
+function ReviewPullLine(const APull: TGittanPullRequest): string;
 
   procedure Add(const APart: string);
   begin
@@ -997,84 +1174,55 @@ function ReviewLine(const APull: TGittanPullRequest): string;
 begin
   Result := '';
   Add(APull.Author);
-  if (APull.HeadRef <> '') and (APull.BaseRef <> '') then
-    Add(Format(rsReviewInto, [APull.HeadRef, APull.BaseRef]));
   if APull.Created > 0 then
     Add(Format(rsReviewOpened, [ReviewAge(APull.Created, LocalTimeToUniversal(Now))]));
   if APull.IsDraft then
     Add(rsReviewDraft);
 end;
 
-{ "Needs your review", then a card per pull request as the Pull Requests
-  page draws one: the number dimmed and the title in bold, under them
-  who opened it with the link to GitHub at the right; the card under
-  the mouse is filled with the hover color. Y is advanced past the
-  section. }
+{ The row counting the pull requests waiting for the user's review:
+  the pull request icon and "3 pull requests need your review", a chip
+  with a dimmed chevron while a click drops the list, filled under the
+  mouse as the branch chip is. Y is advanced past the row. }
 procedure TGittanSummary.PaintReview(var Y: integer);
 var
-  i, X, Right, LineHeight, CardH: integer;
-  Card, LinkR: TRect;
-  Number: string;
+  X, TextY, BodyHeight, IconW: integer;
+  Line: string;
 begin
+  FReviewRect := Rect(0, 0, 0, 0);
   if Length(FReviewPulls) = 0 then
     Exit;
   Canvas.Font := Font;
   Canvas.Brush.Style := bsClear;
-  LineHeight := Canvas.TextHeight('Xg');
-  CardH := ReviewCardHeight(Canvas);
-  Canvas.Font.Style := [fsBold];
-  Canvas.Font.Color := FDim;
-  Canvas.TextOut(Px(Pad), Y, rsNeedsReview);
-  Canvas.Font.Style := [];
-  Inc(Y, LineHeight + Px(NoteGap));
-  SetLength(FReviewRects, Length(FReviewPulls));
-  SetLength(FReviewLinks, Length(FReviewPulls));
-  for i := 0 to High(FReviewPulls) do
+  BodyHeight := Canvas.TextHeight('Xg');
+  TextY := Y + (Px(RowHeight) - BodyHeight) div 2;
+  X := Px(Pad);
+  IconW := BodyHeight - 4 + Px(IconGap);
+  if Length(FReviewPulls) = 1 then
+    Line := rsReviewOne
+  else
+    Line := Format(rsReviewMany, [Length(FReviewPulls)]);
+  if Assigned(FOnReviewClick) then
   begin
-    Card := Rect(Px(Pad), Y, Width - Px(Pad), Y + CardH);
-    FReviewRects[i] := Card;
-    FReviewLinks[i] := Rect(0, 0, 0, 0);
-    Canvas.Pen.Color := FLine;
-    Canvas.Brush.Style := bsSolid;
-    if i = FReviewHot then
-      Canvas.Brush.Color := FHover
-    else
-      Canvas.Brush.Color := FSelectedBack;
-    Canvas.RoundRect(Card, 8, 8);
-    Canvas.Brush.Style := bsClear;
-
-    X := Card.Left + Px(NotePadX);
-    Right := Card.Right - Px(NotePadX);
-    Number := '#' + IntToStr(FReviewPulls[i].Number);
-    Canvas.Font.Color := FDim;
-    Canvas.TextOut(X, Card.Top + Px(NotePadY), Number);
-    Inc(X, Canvas.TextWidth(Number) + Px(Gap) div 2);
-    Canvas.Font.Style := [fsBold];
-    Canvas.Font.Color := FText;
-    Canvas.TextOut(X, Card.Top + Px(NotePadY),
-      FitTextRight(Canvas, FReviewPulls[i].Title, Max(0, Right - X)));
-    Canvas.Font.Style := [];
-
-    X := Card.Left + Px(NotePadX);
-    if (FReviewPulls[i].Url <> '') and Assigned(FOnOpenUrl) then
-    begin
-      LinkR := Rect(Right - Canvas.TextWidth(rsNoteLink),
-        Card.Top + Px(NotePadY) + LineHeight + 4, Right,
-        Card.Top + Px(NotePadY) + 2 * LineHeight + 4);
-      FReviewLinks[i] := LinkR;
-      Canvas.Font.Color := FLink;
-      if i = FReviewLinkHot then
-        Canvas.Font.Style := [fsUnderline];
-      Canvas.TextOut(LinkR.Left, LinkR.Top, rsNoteLink);
-      Canvas.Font.Style := [];
-      Right := LinkR.Left - Px(Gap);
-    end;
-    Canvas.Font.Color := FDim;
-    Canvas.TextOut(X, Card.Top + Px(NotePadY) + LineHeight + 4,
-      FitTextRight(Canvas, ReviewLine(FReviewPulls[i]), Max(0, Right - X)));
-    Inc(Y, CardH + Px(NoteGap));
+    FReviewRect := Rect(X - Px(ChipPadX), TextY - Px(ChipPadY),
+      X + IconW + Canvas.TextWidth(Line) + Px(ChevronWidth) + Px(ChipPadX),
+      TextY + BodyHeight + Px(ChipPadY));
+    if FReviewHot then
+      FillHover(Canvas, FReviewRect, 8, FHover);
   end;
-  Inc(Y, Px(Pad) div 2);
+  DrawStatusIcon(Canvas, HintPull, X, TextY, BodyHeight, FDim);
+  Canvas.Pen.Width := 1;
+  Canvas.Brush.Style := bsClear;
+  Inc(X, IconW);
+  Canvas.Font.Color := FText;
+  Canvas.TextOut(X, TextY, Line);
+  Inc(X, Canvas.TextWidth(Line));
+  if Assigned(FOnReviewClick) then
+  begin
+    Inc(X, Px(ChevronWidth) div 2 + 1);
+    DrawChevron(Canvas, X, TextY + BodyHeight div 2, FDim);
+  end;
+  Inc(Y, Px(RowHeight));
 end;
 
 procedure TGittanSummary.SetCommit(const ACommit: TGittanCommitLine; const ABody: string);
@@ -1255,6 +1403,14 @@ begin
   if FLinkHot = AValue then
     Exit;
   FLinkHot := AValue;
+  Invalidate;
+end;
+
+procedure TGittanSummary.SetMoreHot(AValue: integer);
+begin
+  if FMoreHot = AValue then
+    Exit;
+  FMoreHot := AValue;
   Invalidate;
 end;
 
@@ -2017,18 +2173,20 @@ begin
   SetActionHot(ActionAt(X, Y));
   SetCommitHot(CommitAt(Y));
   SetLinkHot(LinkAt(X, Y));
-  SetReviewHot(ReviewAt(X, Y));
-  SetReviewLinkHot(ReviewLinkAt(X, Y));
+  FTextLinkHot := TextLinkAt(X, Y) <> '';
+  FDetailsHot := NoteDetailsAt(X, Y) <> '';
+  SetMoreHot(NoteMoreAt(X, Y));
+  SetReviewHot((FReviewRect.Right > FReviewRect.Left) and PtInRect(FReviewRect, Point(X, Y)));
   SetBranchHot(BranchClickable and PtInRect(FBranchRect, Point(X, Y)));
   SetBaseHot((FBaseRect.Right > FBaseRect.Left) and PtInRect(FBaseRect, Point(X, Y)));
   SetSyncHot((FSyncRect.Right > FSyncRect.Left) and PtInRect(FSyncRect, Point(X, Y)));
   SetBackHot(Assigned(FOnBackClick) and PtInRect(FBackRect, Point(X, Y)));
   if Assigned(FOnBehindAction) then
     SetBehindHot(BehindAt(X, Y));
-  if (FLinkHot >= 0) or (FActionHot >= 0) or FBackHot or (FBehindHot >= 0) or
-    (FReviewHot >= 0) or (FReviewLinkHot >= 0) then
+  if (FLinkHot >= 0) or (FActionHot >= 0) or FBackHot or (FBehindHot >= 0) or FTextLinkHot or
+    FDetailsHot or (FMoreHot >= 0) then
     Cursor := crHandPoint
-  else if not (FBranchHot or FBaseHot or FSyncHot) then
+  else if not (FBranchHot or FBaseHot or FSyncHot or FReviewHot) then
     Cursor := crDefault;
 end;
 
@@ -2039,8 +2197,10 @@ begin
   SetActionHot(-1);
   SetCommitHot(-1);
   SetLinkHot(-1);
-  SetReviewHot(-1);
-  SetReviewLinkHot(-1);
+  SetMoreHot(-1);
+  FTextLinkHot := False;
+  FDetailsHot := False;
+  SetReviewHot(False);
   SetBranchHot(False);
   SetBaseHot(False);
   SetSyncHot(False);
@@ -2052,6 +2212,7 @@ procedure TGittanSummary.MouseUp(Button: TMouseButton; Shift: TShiftState;
   X, Y: integer);
 var
   Row: integer;
+  Key: string;
 begin
   inherited MouseUp(Button, Shift, X, Y);
   if (Button = mbLeft) and BranchClickable and PtInRect(FBranchRect, Point(X, Y)) then
@@ -2092,14 +2253,34 @@ begin
     FOnOpenUrl(Self, FNotes[LinkAt(X, Y)].Url);
     Exit;
   end;
-  if (Button = mbLeft) and Assigned(FOnOpenUrl) and (ReviewLinkAt(X, Y) >= 0) then
+  if (Button = mbLeft) and Assigned(FOnOpenUrl) and (TextLinkAt(X, Y) <> '') then
   begin
-    FOnOpenUrl(Self, FReviewPulls[ReviewLinkAt(X, Y)].Url);
+    FOnOpenUrl(Self, TextLinkAt(X, Y));
     Exit;
   end;
-  if (Button = mbLeft) and (ReviewAt(X, Y) >= 0) then
+  { The summary of a <details> block opens or closes it, Show more and
+    Show less the whole text. }
+  if (Button = mbLeft) and ((NoteDetailsAt(X, Y) <> '') or (NoteMoreAt(X, Y) >= 0)) then
   begin
-    FOnSelectPull(Self, FReviewPulls[ReviewAt(X, Y)]);
+    if NoteMoreAt(X, Y) >= 0 then
+      Key := NoteDetailsKey(NoteMoreAt(X, Y), -1)
+    else
+      Key := NoteDetailsAt(X, Y);
+    if FNotesOpen.IndexOf(Key) >= 0 then
+      FNotesOpen.Delete(FNotesOpen.IndexOf(Key))
+    else
+      FNotesOpen.Add(Key);
+    FNotesWidth := -1;
+    UpdateHeight;
+    Invalidate;
+    Exit;
+  end;
+  if (Button = mbLeft) and (FReviewRect.Right > FReviewRect.Left) and
+    Assigned(FOnReviewClick) and PtInRect(FReviewRect, Point(X, Y)) then
+  begin
+    FOnReviewClick(Self, Rect(ClientToScreen(FReviewRect.TopLeft).X,
+      ClientToScreen(FReviewRect.TopLeft).Y, ClientToScreen(FReviewRect.BottomRight).X,
+      ClientToScreen(FReviewRect.BottomRight).Y));
     Exit;
   end;
   Row := CommitAt(Y);

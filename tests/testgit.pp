@@ -58,6 +58,10 @@ type
     procedure TestUserName;
     procedure TestFileBlob;
     procedure TestFileSize;
+    procedure TestLfsPointer;
+    procedure TestLfsFiles;
+    procedure TestLfsDownload;
+    procedure TestLastFetch;
     procedure TestFetchPullRequest;
     procedure TestDefaultBranchAndMergeBase;
     procedure TestAheadBehind;
@@ -872,8 +876,20 @@ begin
   { Unknown: origin when there is one, else the first remote git lists. }
   AssertEquals('origin', FRepo.RemoteFor('nobody/nothing'));
   AssertEquals('origin', FRepo.RemoteFor(''));
+  { HasRemoteFor never falls back, and wants the whole path. }
+  AssertTrue(FRepo.HasRemoteFor('foo/bar'));
+  AssertTrue(FRepo.HasRemoteFor('ME/BAR'));
+  AssertFalse(FRepo.HasRemoteFor('foo/ba'));
+  AssertFalse(FRepo.HasRemoteFor('nobody/nothing'));
+  AssertFalse(FRepo.HasRemoteFor(''));
   Git(['remote', 'remove', 'origin']);
   AssertEquals('upstream', FRepo.RemoteFor('nobody/nothing'));
+  AssertFalse(FRepo.HasRemoteFor('me/bar'));
+  { Another owner whose name ends with the one asked for is not it. }
+  Git(['remote', 'add', 'fork', 'https://github.com/notme/bar.git']);
+  AssertFalse(FRepo.HasRemoteFor('me/bar'));
+  AssertEquals('upstream', FRepo.RemoteFor('me/bar'));
+  AssertTrue(FRepo.HasRemoteFor('notme/bar'));
 end;
 
 procedure TGitRepoTest.TestUserName;
@@ -969,6 +985,239 @@ begin
   AssertFalse(IsBinaryFile(FDir + PathDelim + 'none.bin'));
 end;
 
+function LfsPointer(const AOid: string; ASize: int64): string;
+begin
+  Result := 'version https://git-lfs.github.com/spec/v1'#10'oid sha256:' + AOid + #10 +
+    'size ' + IntToStr(ASize) + #10;
+end;
+
+procedure TGitRepoTest.TestLfsPointer;
+var
+  Oid: string;
+  Size: int64;
+begin
+  AssertTrue(ParseLfsPointer(LfsPointer(StringOfChar('a', 64), 12345), Oid, Size));
+  AssertEquals(StringOfChar('a', 64), Oid);
+  AssertEquals(12345, Size);
+  AssertTrue('an extension', ParseLfsPointer('version https://git-lfs.github.com/spec/v1'#10 +
+    'ext-0-foo sha256:' + StringOfChar('c', 64) + #10'oid sha256:' + StringOfChar('b', 64) +
+    #10'size 0'#10, Oid, Size));
+  AssertEquals(StringOfChar('b', 64), Oid);
+  AssertEquals(0, Size);
+  AssertTrue('hawser', ParseLfsPointer('version https://hawser.github.com/spec/v1'#10 +
+    'oid sha256:' + StringOfChar('1', 64) + #10'size 3'#10, Oid, Size));
+  AssertFalse('no last line feed', ParseLfsPointer(Copy(LfsPointer(StringOfChar('a', 64), 1),
+    1, 108), Oid, Size));
+  AssertEquals('', Oid);
+  AssertFalse('another version', ParseLfsPointer(StringReplace(LfsPointer(StringOfChar('a', 64), 1),
+    'v1', 'v2', []), Oid, Size));
+  AssertFalse('upper case', ParseLfsPointer(LfsPointer(StringOfChar('A', 64), 1), Oid, Size));
+  AssertFalse('short oid', ParseLfsPointer(LfsPointer(StringOfChar('a', 63), 1), Oid, Size));
+  AssertFalse('negative size', ParseLfsPointer(LfsPointer(StringOfChar('a', 64), -1), Oid, Size));
+  AssertFalse('no size', ParseLfsPointer('version https://git-lfs.github.com/spec/v1'#10 +
+    'oid sha256:' + StringOfChar('a', 64) + #10, Oid, Size));
+  AssertFalse('too long', ParseLfsPointer(LfsPointer(StringOfChar('a', 64), 1) +
+    'x-pad ' + StringOfChar('x', 1000) + #10, Oid, Size));
+  AssertFalse('text', ParseLfsPointer('version 1'#10, Oid, Size));
+  AssertFalse('empty', ParseLfsPointer('', Oid, Size));
+end;
+
+{ git-lfs is not needed: without its filter git keeps the pointer as it
+  is, which is what git holds with it, and the object is put in the
+  store by hand. }
+procedure TGitRepoTest.TestLfsFiles;
+var
+  OldOid, NewOid: string;
+  Data: RawByteString;
+  Size: int64;
+  Missing: boolean;
+  Stats: TGittanFileStats;
+  Tree: TGittanRepo;
+  State: TGittanLfsState;
+
+  procedure Store(const AOid, AContent: string);
+  var
+    Stream: TFileStream;
+  begin
+    ForceDirectories(ExtractFileDir(FRepo.LfsObjectFile(AOid)));
+    Stream := TFileStream.Create(FRepo.LfsObjectFile(AOid), fmCreate);
+    try
+      Stream.WriteBuffer(AContent[1], Length(AContent));
+    finally
+      Stream.Free;
+    end;
+  end;
+
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.LfsState(State));
+  AssertEquals('no file in Git LFS', 0, State.Files);
+  AssertFalse('not looked for without one', State.Installed);
+  OldOid := StringOfChar('a', 64);
+  NewOid := StringOfChar('b', 64);
+  WriteFile('.gitattributes', '*.psd filter=lfs diff=lfs merge=lfs -text'#10);
+  WriteFile('art.psd', LfsPointer(OldOid, 9));
+  Commit('Add art');
+  WriteFile('art.psd', LfsPointer(NewOid, 7));
+  AssertTrue(FRepo.Open(FDir));
+  WriteFile('real.psd', 'real'#0'content');
+  Git(['add', 'real.psd']);
+  Git(['commit', '-q', '-m', 'Add art']);
+  AssertTrue(FRepo.LfsState(State));
+  AssertEquals(2, State.Files);
+  AssertEquals('the pointer in the work tree', 1, State.Pointers);
+  AssertEquals(FindTool('git-lfs') <> '', State.Installed);
+  AssertFalse('the tests'' config has no filter', State.SetUp);
+  Git(['config', 'filter.lfs.process', 'git-lfs filter-process']);
+  AssertTrue(FRepo.LfsState(State));
+  AssertTrue(State.SetUp);
+  Git(['config', '--unset', 'filter.lfs.process']);
+  Git(['rm', '-q', 'real.psd']);
+  Git(['commit', '-q', '-m', 'Drop the real one']);
+  AssertEquals(ExpandFileName(IncludeTrailingPathDelimiter(FRepo.GitDir) + 'lfs') + PathDelim +
+    'objects' + PathDelim + 'aa' + PathDelim + 'aa' + PathDelim + OldOid,
+    FRepo.LfsObjectFile(OldOid));
+  { Not downloaded: the pointer. }
+  AssertTrue(FRepo.FileBlob('art.psd', 'HEAD', Data));
+  AssertEquals(LfsPointer(OldOid, 9), Data);
+  AssertTrue(FRepo.FileBlob('art.psd', '', Data));
+  AssertEquals(LfsPointer(NewOid, 7), Data);
+  AssertTrue(FRepo.LfsMissing('art.psd', 'HEAD'));
+  AssertTrue(FRepo.LfsMissing('art.psd', ''));
+  AssertFalse(FRepo.LfsMissing('a.txt', 'HEAD'));
+  AssertFalse(FRepo.LfsMissing('a.txt', ''));
+  AssertFalse(FRepo.LfsMissing('none.psd', 'HEAD'));
+  { FileSize tells the same, from the one read of the pointer. }
+  AssertTrue(FRepo.FileSize('art.psd', 'HEAD', Size, Missing));
+  AssertEquals(9, Size);
+  AssertTrue(Missing);
+  AssertTrue(FRepo.FileSize('a.txt', '', Size, Missing));
+  AssertFalse(Missing);
+  Store(OldOid, 'old'#0'image');
+  Store(NewOid, 'new'#0'img');
+  AssertFalse(FRepo.LfsMissing('art.psd', 'HEAD'));
+  AssertFalse(FRepo.LfsMissing('art.psd', ''));
+  AssertTrue(FRepo.FileBlob('art.psd', 'HEAD', Data));
+  AssertEquals('old'#0'image', Data);
+  AssertTrue(FRepo.FileBlob('art.psd', '', Data));
+  AssertEquals('new'#0'img', Data);
+  AssertTrue(FRepo.FileSize('art.psd', 'HEAD', Size, Missing));
+  AssertFalse(Missing);
+  AssertTrue(FRepo.FileSize('art.psd', 'HEAD', Size));
+  AssertEquals(9, Size);
+  AssertTrue(FRepo.FileSize('art.psd', '', Size));
+  AssertEquals(7, Size);
+  AssertTrue(FRepo.FileSize('a.txt', 'HEAD', Size));
+  AssertEquals(14, Size);
+  { Binary, not the pointers' lines. }
+  AssertTrue(FRepo.ChangeStats(Stats));
+  AssertTrue(FindStat(Stats, 'art.psd').Binary);
+  AssertEquals(0, FindStat(Stats, 'art.psd').Added);
+  { A linked worktree reads the store of the common folder. }
+  Git(['worktree', 'add', '-q', 'wt']);
+  Tree := TGittanRepo.Create;
+  try
+    AssertTrue(Tree.Open(FDir + PathDelim + 'wt'));
+    AssertTrue(Tree.FileBlob('art.psd', 'HEAD', Data));
+    AssertEquals('old'#0'image', Data);
+  finally
+    Tree.Free;
+  end;
+  { The store folder is found once per open: lfs.storage set later
+    counts from the next. }
+  Git(['config', 'lfs.storage', 'elsewhere']);
+  AssertTrue(FRepo.Open(FDir));
+  AssertEquals(ExpandFileName(IncludeTrailingPathDelimiter(FRepo.GitDir) + 'elsewhere') + PathDelim +
+    'objects' + PathDelim + 'aa' + PathDelim + 'aa' + PathDelim + OldOid,
+    FRepo.LfsObjectFile(OldOid));
+  AssertTrue(FRepo.FileBlob('art.psd', 'HEAD', Data));
+  AssertEquals(LfsPointer(OldOid, 9), Data);
+end;
+
+{ With git-lfs (GitHub's runners have it) a real download from a remote
+  in a folder, which git-lfs serves itself; without it the message that
+  says so. The clone checks out with smudge skipped, as
+  GIT_LFS_SKIP_SMUDGE would, so only pointers come. }
+procedure TGitRepoTest.TestLfsDownload;
+var
+  Data: RawByteString;
+  State: TGittanLfsState;
+begin
+  Git(['init', '-q', 'up']);
+  if FindTool('git-lfs') = '' then
+  begin
+    AssertTrue(FRepo.Open(FDir + PathDelim + 'up'));
+    AssertFalse(FRepo.LfsDownload('art.psd', ['']));
+    AssertTrue(FRepo.Error, Pos('Git LFS is not installed', FRepo.Error) = 1);
+    Exit;
+  end;
+  Git(['-C', 'up', 'lfs', 'install', '--local']);
+  WriteFile('up/.gitattributes', '*.psd filter=lfs diff=lfs merge=lfs -text'#10);
+  WriteFile('up/art.psd', 'one'#0'image');
+  WriteFile('up/a,b [v2].psd', 'odd'#0'name');
+  Git(['-C', 'up', 'add', '-A']);
+  Git(['-C', 'up', 'commit', '-q', '-m', 'one']);
+  WriteFile('up/art.psd', 'two'#0'image!');
+  Git(['-C', 'up', 'commit', '-q', '-a', '-m', 'two']);
+  Git(['clone', '-q', '--no-checkout', 'up', 'down']);
+  Git(['-C', 'down', 'lfs', 'install', '--local', '--skip-smudge']);
+  Git(['-C', 'down', 'reset', '-q', '--hard']);
+  Git(['-C', 'down', 'lfs', 'install', '--local', '--force']);
+  AssertTrue(FRepo.Open(FDir + PathDelim + 'down'));
+  AssertTrue(FRepo.LfsMissing('art.psd', ''));
+  AssertTrue(FRepo.LfsMissing('art.psd', 'HEAD~1'));
+  AssertTrue(FRepo.Error, FRepo.LfsDownload('art.psd', ['HEAD~1', '']));
+  AssertFalse(FRepo.LfsMissing('art.psd', ''));
+  AssertFalse(FRepo.LfsMissing('art.psd', 'HEAD~1'));
+  AssertTrue(FRepo.FileBlob('art.psd', '', Data));
+  AssertEquals('two'#0'image!', Data);
+  AssertTrue(FRepo.FileBlob('art.psd', 'HEAD~1', Data));
+  AssertEquals('one'#0'image', Data);
+  { A name git-lfs would read as two patterns, one with a set in it. }
+  AssertTrue(FRepo.LfsMissing('a,b [v2].psd', ''));
+  AssertTrue(FRepo.Error, FRepo.LfsDownload('a,b [v2].psd', ['']));
+  AssertFalse(FRepo.LfsMissing('a,b [v2].psd', ''));
+  AssertTrue(FRepo.FileBlob('a,b [v2].psd', '', Data));
+  AssertEquals('odd'#0'name', Data);
+  { The whole work tree again: a pointer back in place of the file. }
+  Git(['-C', 'down', 'lfs', 'install', '--local', '--skip-smudge']);
+  DeleteFile(FDir + PathDelim + 'down' + PathDelim + 'art.psd');
+  Git(['-C', 'down', 'checkout', '-q', '--', 'art.psd']);
+  Git(['-C', 'down', 'lfs', 'install', '--local', '--force']);
+  AssertTrue(FRepo.LfsState(State));
+  AssertEquals(1, State.Pointers);
+  AssertTrue(State.SetUp);
+  AssertTrue(FRepo.Error, FRepo.LfsPull);
+  AssertTrue(FRepo.LfsState(State));
+  AssertEquals(0, State.Pointers);
+  Git(['-C', 'down', 'remote', 'remove', 'origin']);
+  AssertFalse(FRepo.LfsDownload('art.psd', ['HEAD']));
+  AssertEquals('The repository has no remote to download from.', FRepo.Error);
+end;
+
+{ The repository fetched from itself writes FETCH_HEAD, in the root's
+  .git and in a linked worktree's own folder. }
+procedure TGitRepoTest.TestLastFetch;
+var
+  Tree: TGittanRepo;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  AssertEquals('never fetched', 0, FRepo.LastFetch, 0);
+  Git(['remote', 'add', 'self', '.']);
+  Git(['fetch', '-q', 'self']);
+  AssertTrue('just now', Abs(Now - FRepo.LastFetch) < 1 / 24 / 60);
+  Git(['worktree', 'add', '-q', 'wt']);
+  Tree := TGittanRepo.Create;
+  try
+    AssertTrue(Tree.Open(FDir + PathDelim + 'wt'));
+    AssertEquals('the worktree never fetched', 0, Tree.LastFetch, 0);
+  finally
+    Tree.Free;
+  end;
+end;
+
 { A bare repository stands in for GitHub: it serves the pull request as
   refs/pull/7/head, as GitHub does. }
 procedure TGitRepoTest.TestFetchPullRequest;
@@ -990,11 +1239,11 @@ begin
     Git(['push', '-q', 'origin', 'HEAD:refs/pull/7/head']);
     Git(['reset', '-q', '--hard', 'HEAD^']);
     AssertTrue(FRepo.Open(FDir));
-    AssertTrue(FRepo.FetchPullRequest('origin', 7, Branch, HeadRef));
+    AssertTrue(FRepo.FetchPullRequest('origin', 7, 'refs/pull/7/head', Branch, HeadRef));
     AssertEquals('refs/gittan/pr/7', HeadRef);
     AssertEquals(Head, Trim(Git(['rev-parse', HeadRef])));
     AssertTrue(FRepo.HasCommit('origin/' + Branch));
-    AssertFalse(FRepo.FetchPullRequest('origin', 8, Branch, HeadRef));
+    AssertFalse(FRepo.FetchPullRequest('origin', 8, 'refs/pull/8/head', Branch, HeadRef));
     FRepo.Base := 'origin/' + Branch + '...' + HeadRef;
     AssertTrue(FRepo.IsRange);
   finally
@@ -1559,6 +1808,20 @@ begin
     AssertFalse(FRepo.Commit('blocked', Paths, False, Id));
     AssertEquals(FRepo.Error, 1, Pos(#27'[31mhook says no', FRepo.Error));
     AssertEquals('M  a.txt'#0'?? new.txt'#0, Git(['status', '--porcelain', '-z']));
+    { Past the hook, signed off. }
+    AssertTrue(FRepo.Error, FRepo.Commit('past the hook', Paths, False, Id, nil,
+      [coNoVerify, coSignOff]));
+    AssertTrue(FRepo.HeadMessage(Text));
+    AssertEquals(Text, 1, Pos('past the hook'#10#10'Signed-off-by: ', Text));
+    AssertEquals('new'#10, HeadFile(FDir, 'new.txt'));
+
+    AssertFalse(FRepo.SignOff);
+    AssertTrue(FRepo.SetSignOff(True));
+    AssertTrue(FRepo.SignOff);
+    AssertEquals('true', Trim(Git(['config', '--local', 'gittan.signOff'])));
+    AssertTrue(FRepo.SetSignOff(False));
+    AssertFalse(FRepo.SignOff);
+    AssertTrue('off when off', FRepo.SetSignOff(False));
   finally
     Paths.Free;
   end;
@@ -1641,14 +1904,15 @@ begin
     AssertFalse(FRepo.Commit('blocked', Paths, False, Id, Parts));
     AssertTrue(FRepo.Error, Pos('hook says no', FRepo.Error) > 0);
     AssertEquals(' M a.txt'#0'M  staged.txt'#0, Git(['status', '--porcelain', '-z']));
-    DeleteFile(Hook);
 
-    AssertTrue(FRepo.Error, FRepo.Commit('amended', Paths, True, Id, Parts));
+    { Through the temporary index too: past the hook, signed off. }
+    AssertTrue(FRepo.Error, FRepo.Commit('amended', Paths, True, Id, Parts,
+      [coNoVerify, coSignOff]));
     AssertEquals(Parent, Trim(Git(['rev-parse', 'HEAD~1'])));
     AssertEquals('ONE'#10'two'#10'THREE'#10, HeadFile(FDir, 'a.txt'));
     AssertEquals('the amended commit keeps its files', 'new'#10, HeadFile(FDir, 'new.txt'));
     AssertTrue(FRepo.HeadMessage(Text));
-    AssertEquals('amended', Text);
+    AssertEquals(Text, 1, Pos('amended'#10#10'Signed-off-by: ', Text));
     AssertEquals('M  staged.txt'#0, Git(['status', '--porcelain', '-z']));
   finally
     Paths.Free;
@@ -2486,6 +2750,7 @@ begin
   { Stopped: HEAD is detached, the snapshot names the rebased branch. }
   AssertTrue(FRepo.Snapshot(Snap));
   AssertTrue('detached', Snap.Detached);
+  AssertEquals(FRepo.CommitId('HEAD'), Snap.Head);
   AssertEquals('rebasing', Snap.Operation);
   AssertEquals('topic', Snap.RebaseBranch);
   AssertTrue(FRepo.ResolveConflict('a.txt', csMine));

@@ -3,8 +3,8 @@ unit gittan.repofiles;
 {** The repository's own files: the ones at the root that tell git and
   GitHub how to treat it (.gitignore and its kin) and everything under
   .github. The Config section under the tree lists them whether or
-  not they changed, and the "Add to .gitignore" command writes to one
-  of them. Nothing here runs git, so the unit has no LCL dependency and
+  not they changed, and the "Add to .gitignore" and "Track with Git
+  LFS" commands write to them. Nothing here runs git, so the unit has no LCL dependency and
   is tested in tests/testrepofiles.pp. }
 
 {$mode objfpc}{$H+}
@@ -51,6 +51,38 @@ function IgnorePatterns(const APath: string): TStringArray;
   already has the line is left as it is. False when the file could not
   be written. }
 function AddIgnorePattern(const AFileName, APattern: string): boolean;
+
+const
+  {** The attributes Git LFS gives a pattern it tracks, as `git lfs
+    track` writes them. }
+  LfsAttributes = 'filter=lfs diff=lfs merge=lfs -text';
+
+{** The .gitattributes patterns that would put APath, relative to the
+  root with "/" separators, in Git LFS: every file with its extension
+  ("*.psd", when it has one) and the file itself anchored at the root
+  ("/art/logo.psd"); a space is [[:space:]], as git lfs track writes
+  it, since a pattern ends at whitespace. }
+function LfsTrackPatterns(const APath: string): TStringArray;
+
+{** The patterns of the .gitattributes text AText that have filter=lfs,
+  in their order. }
+function LfsTrackedPatterns(const AText: string): TStringArray;
+
+{** Those of LfsTrackedPatterns(AText) that are among
+  LfsTrackPatterns(APath), the file's also without its leading slash:
+  what Stop Tracking offers for the file. }
+function LfsPatternsOf(const AText, APath: string): TStringArray;
+
+{** Appends APattern with LfsAttributes to the attributes file AFileName
+  as AddIgnorePattern appends a pattern; a file that tracks the pattern
+  in Git LFS already is left as it is. False when it could not be
+  written. }
+function AddLfsTrack(const AFileName, APattern: string): boolean;
+
+{** Takes the lines that track APattern in Git LFS out of the attributes
+  file AFileName, keeping the others and the file's line ends. False
+  when it could not be read or written. }
+function RemoveLfsTrack(const AFileName, APattern: string): boolean;
 
 implementation
 
@@ -177,6 +209,148 @@ begin
     F := TFileStream.Create(AFileName, fmCreate);
     try
       F.WriteBuffer(Text[1], Length(Text));
+    finally
+      F.Free;
+    end;
+    Result := True;
+  except
+    Result := False;
+  end;
+end;
+
+{ AText as a part of a pattern that matches it alone: each of git's
+  wildcards and a backslash after a backslash, a space as [[:space:]],
+  since .gitattributes parts a line at spaces. }
+function LiteralPattern(const AText: string): string;
+var
+  i: integer;
+begin
+  Result := '';
+  for i := 1 to Length(AText) do
+    case AText[i] of
+      '[', ']', '*', '?', '\':
+        Result := Result + '\' + AText[i];
+      ' ':
+        Result := Result + '[[:space:]]';
+    else
+      Result := Result + AText[i];
+    end;
+end;
+
+function LfsTrackPatterns(const APath: string): TStringArray;
+var
+  Ext: string;
+begin
+  Result := nil;
+  if APath = '' then
+    Exit;
+  Ext := ExtractFileExt(APath);
+  if (Ext <> '') and (Ext <> ExtractFileName(APath)) then
+    Result := ['*' + LiteralPattern(Ext)];
+  Result := Concat(Result, ['/' + LiteralPattern(APath)]);
+end;
+
+{ The pattern of a line of attributes and whether it has filter=lfs; a
+  comment or a blank line has none. }
+function LfsLine(const ALine: string; out APattern: string): boolean;
+var
+  Fields: TStringArray;
+  Field: string;
+begin
+  APattern := '';
+  Result := False;
+  Fields := Trim(ALine).Split([' ', #9], TStringSplitOptions.ExcludeEmpty);
+  if (Length(Fields) < 2) or (Fields[0][1] = '#') then
+    Exit;
+  APattern := Fields[0];
+  for Field in Fields do
+    if Field = 'filter=lfs' then
+      Exit(True);
+end;
+
+function LfsTrackedPatterns(const AText: string): TStringArray;
+var
+  Lines: TStringList;
+  Line, Pattern: string;
+begin
+  Result := nil;
+  Lines := TStringList.Create;
+  try
+    Lines.Text := AText;
+    for Line in Lines do
+      if LfsLine(Line, Pattern) then
+        Result := Concat(Result, [Pattern]);
+  finally
+    Lines.Free;
+  end;
+end;
+
+function LfsPatternsOf(const AText, APath: string): TStringArray;
+var
+  Tracked, Wanted: TStringArray;
+  Pattern, Want: string;
+begin
+  Result := nil;
+  Tracked := LfsTrackedPatterns(AText);
+  Wanted := LfsTrackPatterns(APath);
+  if Wanted <> nil then
+    Wanted := Concat(Wanted, [Copy(Wanted[High(Wanted)], 2, MaxInt)]);
+  for Pattern in Tracked do
+    for Want in Wanted do
+      if Pattern = Want then
+      begin
+        Result := Concat(Result, [Pattern]);
+        Break;
+      end;
+end;
+
+function AddLfsTrack(const AFileName, APattern: string): boolean;
+var
+  Pattern: string;
+begin
+  try
+    if FileExists(AFileName) then
+      for Pattern in LfsTrackedPatterns(ReadFileBytes(AFileName)) do
+        if Pattern = APattern then
+          Exit(True);
+  except
+    Exit(False);
+  end;
+  Result := AddIgnorePattern(AFileName, APattern + ' ' + LfsAttributes);
+end;
+
+function RemoveLfsTrack(const AFileName, APattern: string): boolean;
+var
+  Text, Line, Pattern, Kept, Ending: string;
+  Lines: TStringArray;
+  i: integer;
+  F: TFileStream;
+begin
+  Result := False;
+  try
+    Text := ReadFileBytes(AFileName);
+    if Pos(#13#10, Text) > 0 then
+      Ending := #13#10
+    else
+      Ending := #10;
+    Lines := StringReplace(Text, #13#10, #10, [rfReplaceAll]).Split([#10]);
+    Kept := '';
+    for i := 0 to High(Lines) do
+    begin
+      Line := Lines[i];
+      if LfsLine(Line, Pattern) and (Pattern = APattern) then
+        Continue;
+      { The last piece is what follows the last line end: nothing in a
+        file that ends with one. }
+      if i < High(Lines) then
+        Kept := Kept + Line + Ending
+      else
+        Kept := Kept + Line;
+    end;
+    F := TFileStream.Create(AFileName, fmCreate);
+    try
+      if Kept <> '' then
+        F.WriteBuffer(Kept[1], Length(Kept));
     finally
       F.Free;
     end;

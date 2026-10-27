@@ -29,7 +29,7 @@
   one conflict at a time (CanResolveBlocks, see umain.conflicts.inc). }
 
 { Whether the shown file's blocks can be discarded. }
-function TForm1.CanDiscard: boolean;
+function TRepoFrame.CanDiscard: boolean;
 var
   i: integer;
 begin
@@ -44,7 +44,7 @@ end;
 { The diff line on row ARow: the new side's, or the old side's where
   the new side has a filler; -1 for a gap or a filler with nothing on
   the other side. }
-function TForm1.LineAtRow(ARow: integer): integer;
+function TRepoFrame.LineAtRow(ARow: integer): integer;
 begin
   Result := -1;
   if (ARow < 0) or (ARow > High(FRows)) then
@@ -58,7 +58,7 @@ end;
 
 { The block the line on row ARow is in, or -1 for an unchanged line, a
   gap or a filler with nothing on the other side. }
-function TForm1.BlockAtRow(ARow: integer): integer;
+function TRepoFrame.BlockAtRow(ARow: integer): integer;
 var
   Line, b: integer;
 begin
@@ -77,7 +77,7 @@ end;
   its block. For a conflicted file the result is the conflict whose
   button is under the mouse: on the band, on the first screen row of
   the conflict's first row. }
-function TForm1.DiscardAt(AEd: TATSynEdit; X, Y: integer; out ARow: integer;
+function TRepoFrame.DiscardAt(AEd: TATSynEdit; X, Y: integer; out ARow: integer;
   out AKeep: integer): integer;
 var
   Band, b, RowTop, Line: integer;
@@ -135,7 +135,7 @@ end;
 { The band's width is a line's height plus a character's width, so the
   button is a circle with some room. A change of width moves the text,
   so the wrap info is rebuilt. }
-procedure TForm1.SetDiscardBand(AEd: TATSynEdit);
+procedure TRepoFrame.SetDiscardBand(AEd: TATSynEdit);
 var
   Band, W: integer;
   Shown: boolean;
@@ -163,7 +163,7 @@ end;
   the band's left edge from the conflict's first row to its last, so a
   conflict stands out from the changes around it when the file is
   long. }
-procedure TForm1.DrawDiscard(AEd: TATSynEdit; C: TCanvas);
+procedure TRepoFrame.DrawDiscard(AEd: TATSynEdit; C: TCanvas);
 var
   Band, W, b, CharH, Y, Cx, Cy, R, Y2: integer;
   Item: TATWrapItem;
@@ -244,7 +244,7 @@ end;
   once while they are up, after the pause when a new row is entered,
   so a mouse passing through the diff raises none; for a conflicted
   file the conflict whose button is under the mouse is lit. Edit only. }
-procedure TForm1.SetHotDiscard(AEd: TATSynEdit; ABlock, AKeep, ARow: integer);
+procedure TRepoFrame.SetHotDiscard(AEd: TATSynEdit; ABlock, AKeep, ARow: integer);
 begin
   if (ABlock = FHotDiscard) and (AKeep = FHotKeep) and (ARow = FHotRow) then
     Exit;
@@ -263,7 +263,7 @@ begin
 end;
 
 { The mouse has rested on the row. }
-procedure TForm1.PillTimerTimer(Sender: TObject);
+procedure TRepoFrame.PillTimerTimer(Sender: TObject);
 begin
   FPillTimer.Enabled := False;
   ShowDiscardPills;
@@ -272,7 +272,7 @@ end;
 { The pills at the right end of the hot row: Keep and Discard for the
   block the row is in; on a kept line, Unkeep. A conflict's button has
   none. }
-procedure TForm1.ShowDiscardPills;
+procedure TRepoFrame.ShowDiscardPills;
 var
   Y: integer;
   Anchor: TRect;
@@ -299,14 +299,14 @@ begin
 end;
 
 { Whether the mouse is over the pills, which are a child of the form. }
-function TForm1.MouseOnDiscardPills: boolean;
+function TRepoFrame.MouseOnDiscardPills: boolean;
 begin
   Result := FDiscardPills.Visible and
     PtInRect(FDiscardPills.BoundsRect, ScreenToClient(Mouse.CursorPos));
 end;
 
 { Whether the mouse is over Edit's text. }
-function TForm1.MouseOnDiscardRows: boolean;
+function TRepoFrame.MouseOnDiscardRows: boolean;
 var
   P: TPoint;
 begin
@@ -318,7 +318,7 @@ end;
 { A pill: Unkeep on a kept line, else Keep, Leave Out or Include (see
   umain.leaveout.inc) or Discard for the block. The pills go before the
   question. }
-procedure TForm1.DiscardPillsPick(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.DiscardPillsPick(Sender: TObject; AIndex: integer);
 var
   Block, Keep: integer;
 begin
@@ -337,7 +337,7 @@ end;
 
 { The mouse left the pills: back onto the rows, where EditMouseMove
   follows it, or away, which lets the block go. }
-procedure TForm1.DiscardPillsLeave(Sender: TObject);
+procedure TRepoFrame.DiscardPillsLeave(Sender: TObject);
 begin
   if not MouseOnDiscardRows then
     SetHotDiscard(Edit, -1, -1, -1);
@@ -345,7 +345,7 @@ end;
 
 { What discarding the block does, for the question: the lines put back
   (or removed, when nothing is put back) and what they go back to. }
-function TForm1.DiscardBackText(const ABlock: TGittanDiscard): string;
+function TRepoFrame.DiscardBackText(const ABlock: TGittanDiscard): string;
 var
   n: integer;
 begin
@@ -357,7 +357,7 @@ begin
 end;
 
 { What the lines go back to: HEAD, or the base as the summary names it. }
-function TForm1.DiscardBaseName: string;
+function TRepoFrame.DiscardBaseName: string;
 begin
   Result := BaseLabel;
   if Result = '' then
@@ -367,7 +367,7 @@ begin
 end;
 
 { Asks, writes the block's old lines over its new ones and refreshes. }
-procedure TForm1.DiscardThis(const ABlock: TGittanDiscard);
+procedure TRepoFrame.DiscardThis(const ABlock: TGittanDiscard);
 var
   Path, Err: string;
 begin
@@ -390,7 +390,7 @@ begin
 end;
 
 { The whole block. }
-procedure TForm1.DiscardBlockAt(ABlock: integer);
+procedure TRepoFrame.DiscardBlockAt(ABlock: integer);
 begin
   if not CanDiscard or (ABlock < 0) or (ABlock > High(FBlockStarts)) then
     Exit;
@@ -399,7 +399,7 @@ begin
 end;
 
 { Keeps every pair of the block. }
-procedure TForm1.KeepBlockAt(ABlock: integer);
+procedure TRepoFrame.KeepBlockAt(ABlock: integer);
 var
   Pairs: TGittanKeepArray;
   k: integer;
@@ -417,7 +417,7 @@ begin
 end;
 
 { Shows the kept change numbered AKeep (by FKeptOf) as a change again. }
-procedure TForm1.UnkeepAt(AKeep: integer);
+procedure TRepoFrame.UnkeepAt(AKeep: integer);
 var
   Line, i, n: integer;
 begin
@@ -441,7 +441,7 @@ begin
 end;
 
 { The header's Unkeep pill: every change of the file is shown again. }
-procedure TForm1.UnkeepFile;
+procedure TRepoFrame.UnkeepFile;
 begin
   if (FView <> gvChanges) or (FCurrentPath = '') then
     Exit;
@@ -453,7 +453,7 @@ end;
 { The keeps changed: the diff is taken from git's again, the keeps
   applied, and the view built again at the same place; the blocks are
   others now, so their headings are found again after the parse. }
-procedure TForm1.RebuildKeeps;
+procedure TRepoFrame.RebuildKeeps;
 begin
   FChangeLines.Assign(FRawChangeLines);
   FKeeps.Apply(FCurrentPath, FChangeLines, FKeptOf);
@@ -470,7 +470,7 @@ end;
   while the file has kept changes (FHeaderUnkeep is its index, for
   HeaderAction). A conflicted file has its own pills (see
   ShowChanges). }
-procedure TForm1.SetChangeActions;
+procedure TRepoFrame.SetChangeActions;
 var
   Captions: array of string;
   n: integer;
@@ -503,7 +503,7 @@ end;
   is dropped too: an older one is no better. The pick that took a
   file's last conflict marked it resolved; its markers back, the file is
   in conflict again, or a commit would take them. }
-procedure TForm1.MenuUndoDiscardClick(Sender: TObject);
+procedure TRepoFrame.MenuUndoDiscardClick(Sender: TObject);
 var
   B: TGittanDiscard;
   Path, Err: string;
@@ -533,7 +533,7 @@ begin
 end;
 
 { File > Discard Change acts on the block the caret is in. }
-procedure TForm1.MenuDiscardClick(Sender: TObject);
+procedure TRepoFrame.MenuDiscardClick(Sender: TObject);
 begin
   if Edit.Carets.Count > 0 then
     DiscardBlockAt(BlockAtRow(Edit.Carets[0].PosY));
@@ -541,7 +541,7 @@ end;
 
 { The two items follow the caret (from UpdateChangeNav) and the discards
   made; the menu asks once more as it opens. }
-procedure TForm1.UpdateDiscardItems;
+procedure TRepoFrame.UpdateDiscardItems;
 begin
   if FDiscardItem = nil then
     Exit;
@@ -560,7 +560,7 @@ begin
   end;
 end;
 
-procedure TForm1.FileMenuClick(Sender: TObject);
+procedure TRepoFrame.FileMenuClick(Sender: TObject);
 begin
   UpdateDiscardItems;
   UpdateRemoteItems;

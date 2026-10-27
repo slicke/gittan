@@ -1,25 +1,31 @@
 unit testgithub;
 
-{** Tests of gittan.github: the JSON gh prints, read on its own. The job
-  needs gh and a GitHub repository, so it is not run here. }
+{** Tests of gittan.github: the JSON gh prints, read on its own, GitHub's
+  words turned into gittan.forge's kinds, the gh browse arguments and
+  the forge's names. The jobs need gh and a GitHub repository, so they
+  are not run here. }
 
 {$mode objfpc}{$H+}
 
 interface
 
 uses
-  Classes, SysUtils, DateUtils, fpcunit, testregistry, gittan.github;
+  Classes, SysUtils, DateUtils, fpcunit, testregistry, gittan.forge, gittan.github;
 
 type
   TGitHubTest = class(TTestCase)
   published
     procedure TestParsePullRequest;
     procedure TestParsePullRequests;
+    procedure TestWithoutReviewed;
     procedure TestParseBad;
     procedure TestStatus;
     procedure TestRepoPathOfUrl;
     procedure TestChecks;
     procedure TestIssueNumber;
+    procedure TestWebArgs;
+    procedure TestFileOfUrl;
+    procedure TestForge;
   end;
 
 implementation
@@ -32,7 +38,11 @@ const
     '"createdAt":"2026-10-20T12:34:56Z","updatedAt":"2026-10-22T08:00:00Z",' +
     '"additions":120,"deletions":30,"changedFiles":4,' +
     '"labels":[{"name":"bug","color":"d73a4a"},{"name":"","color":"ffffff"},' +
-    '{"name":"ui","color":"0075ca"}]}';
+    '{"name":"ui","color":"0075ca"}],' +
+    '"latestReviews":[{"author":{"login":"bob"},"state":"APPROVED"},' +
+    '{"author":null,"state":"COMMENTED"},{"author":{"login":"eve"},"state":"COMMENTED"}],' +
+    '"reviewRequests":[{"__typename":"Team","name":"Core","slug":"core"},' +
+    '{"__typename":"User","login":"dan"}]}';
 
 procedure TGitHubTest.TestParsePullRequest;
 var
@@ -41,9 +51,10 @@ begin
   AssertTrue(ParsePullRequest(OnePull, Pull));
   AssertEquals(12, Pull.Number);
   AssertEquals('Fix the thing', Pull.Title);
-  AssertEquals('OPEN', Pull.State);
-  AssertEquals('APPROVED', Pull.ReviewDecision);
+  AssertTrue('open', Pull.State = prOpen);
+  AssertTrue('approved', Pull.ReviewDecision = rdApproved);
   AssertEquals('https://github.com/owner/repo/pull/12', Pull.Url);
+  AssertEquals('owner/repo', Pull.Repo);
   AssertEquals('fix/thing', Pull.HeadRef);
   AssertEquals('main', Pull.BaseRef);
   AssertEquals('ada', Pull.Author);
@@ -55,6 +66,41 @@ begin
   AssertEquals(30, Pull.Deletions);
   AssertEquals(4, Pull.ChangedFiles);
   AssertEquals('bug, ui', Pull.Labels);
+  AssertEquals(2, Length(Pull.Reviews));
+  AssertEquals('bob', Pull.Reviews[0].Login);
+  AssertTrue('bob approved', Pull.Reviews[0].Verdict = rvApproved);
+  AssertEquals('eve', Pull.Reviews[1].Login);
+  AssertTrue('eve commented', Pull.Reviews[1].Verdict = rvCommented);
+  AssertEquals(1, Length(Pull.Requested));
+  AssertEquals('dan', Pull.Requested[0]);
+end;
+
+{ A pull request whose latest review by the login approved it or asked
+  for changes is left out, unless the login is asked again in person;
+  one only commented on, or whose review was dismissed, stays, as does
+  every one without a login. }
+procedure TGitHubTest.TestWithoutReviewed;
+var
+  Pulls, Left: TGittanPullRequests;
+begin
+  AssertTrue(ParsePullRequests('[' + OnePull +
+    ',{"number":3,"title":"Changes","latestReviews":[{"author":{"login":"Bob"},"state":"CHANGES_REQUESTED"}]}' +
+    ',{"number":4,"title":"Dismissed","latestReviews":[{"author":{"login":"bob"},"state":"DISMISSED"}]}' +
+    ',{"number":5,"title":"Nobody","latestReviews":[]}' +
+    ',{"number":6,"title":"No field"}' +
+    ',{"number":7,"title":"Asked again","latestReviews":[{"author":{"login":"bob"},"state":"APPROVED"}],' +
+    '"reviewRequests":[{"__typename":"User","login":"bob"}]}]', Pulls));
+  AssertEquals(6, Length(Pulls));
+  Left := WithoutReviewed(Pulls, 'bob');
+  AssertEquals(4, Length(Left));
+  AssertEquals(4, Left[0].Number);
+  AssertEquals(5, Left[1].Number);
+  AssertEquals(6, Left[2].Number);
+  AssertEquals(7, Left[3].Number);
+  Left := WithoutReviewed(Pulls, 'eve');
+  AssertEquals(6, Length(Left));
+  AssertEquals(6, Length(WithoutReviewed(Pulls, '')));
+  AssertEquals(0, Length(WithoutReviewed(nil, 'bob')));
 end;
 
 procedure TGitHubTest.TestParsePullRequests;
@@ -70,7 +116,7 @@ begin
   AssertEquals(3, Pulls[1].Number);
   AssertTrue(Pulls[1].IsDraft);
   AssertEquals('', Pulls[1].Author);
-  AssertEquals('', Pulls[1].ReviewDecision);
+  AssertTrue('no decision', Pulls[1].ReviewDecision = rdNone);
   AssertEquals(0, Pulls[1].Created);
   AssertEquals(0, Pulls[1].Additions);
   AssertEquals('', Pulls[1].Labels);
@@ -95,17 +141,17 @@ var
 begin
   AssertTrue(ParsePullRequest(OnePull, Pull));
   AssertEquals('PR #12 · Approved', PullRequestStatus(Pull));
-  Pull.ReviewDecision := 'CHANGES_REQUESTED';
+  Pull.ReviewDecision := rdChangesRequested;
   AssertEquals('PR #12 · Changes requested', PullRequestStatus(Pull));
-  Pull.ReviewDecision := 'REVIEW_REQUIRED';
+  Pull.ReviewDecision := rdReviewRequired;
   AssertEquals('PR #12 · Review required', PullRequestStatus(Pull));
-  Pull.ReviewDecision := '';
+  Pull.ReviewDecision := rdNone;
   AssertEquals('PR #12', PullRequestStatus(Pull));
   Pull.IsDraft := True;
   AssertEquals('PR #12 · Draft', PullRequestStatus(Pull));
-  Pull.State := 'MERGED';
+  Pull.State := prMerged;
   AssertEquals('PR #12 · Merged', PullRequestStatus(Pull));
-  Pull.State := 'CLOSED';
+  Pull.State := prClosed;
   AssertEquals('PR #12 · Closed', PullRequestStatus(Pull));
 end;
 
@@ -157,7 +203,7 @@ begin
   AssertEquals('3 checks failing', PullRequestChecks(Pull));
   Pull := Parse(Format(CheckRun, ['COMPLETED', 'TIMED_OUT']));
   AssertEquals('1 check failing', PullRequestChecks(Pull));
-  Pull.ReviewDecision := 'APPROVED';
+  Pull.ReviewDecision := rdApproved;
   AssertEquals('PR #1 · Approved · 1 check failing', PullRequestStatus(Pull));
 end;
 
@@ -171,6 +217,60 @@ begin
   AssertEquals(0, IssueNumber('item#9 is not one'));
   AssertEquals(0, IssueNumber('#0 is nothing'));
   AssertEquals(0, IssueNumber(''));
+end;
+
+procedure TGitHubTest.TestWebArgs;
+
+  function Joined(const AArgs: TStringArray): string;
+  begin
+    Result := string.Join(' ', AArgs);
+  end;
+
+begin
+  AssertEquals('src/a.pp', Joined(GitHubWebArgs(FileTarget('src/a.pp', 0, '', ''))));
+  AssertEquals('src/a.pp:12 --branch main',
+    Joined(GitHubWebArgs(FileTarget('src/a.pp', 12, '', 'main'))));
+  { A commit wins over the branch. }
+  AssertEquals('src/a.pp:3 --commit=abc123',
+    Joined(GitHubWebArgs(FileTarget('src/a.pp', 3, 'abc123', 'main'))));
+  AssertEquals('abc123', Joined(GitHubWebArgs(CommitTarget('abc123'))));
+  AssertEquals('42', Joined(GitHubWebArgs(IssueTarget(42))));
+end;
+
+procedure TGitHubTest.TestForge;
+var
+  Forge: TGittanForge;
+  Version: string;
+begin
+  Forge := TGittanGitHubForge.Create('');
+  try
+    AssertEquals('GitHub', Forge.Name);
+    AssertEquals('gh', Forge.CliName);
+    AssertEquals('refs/pull/12/head', Forge.PullRef(12));
+    { No tool, no version. }
+    AssertFalse(Forge.Version(Version));
+  finally
+    Forge.Free;
+  end;
+end;
+
+procedure TGitHubTest.TestFileOfUrl;
+var
+  Repo, Path: string;
+  Line: integer;
+begin
+  AssertTrue(GitHubFileOfUrl('https://github.com/owner/repo/blob/abc123/src/a%20b.pp#L10-L20',
+    Repo, Path, Line));
+  AssertEquals('owner/repo', Repo);
+  AssertEquals('src/a b.pp', Path);
+  AssertEquals(10, Line);
+  AssertTrue(GitHubFileOfUrl('https://github.com/o/r/blob/main/README.md?plain=1', Repo, Path, Line));
+  AssertEquals('README.md', Path);
+  AssertEquals(0, Line);
+  AssertFalse('a folder', GitHubFileOfUrl('https://github.com/o/r/tree/main/src', Repo, Path, Line));
+  AssertFalse('a pull request', GitHubFileOfUrl('https://github.com/o/r/pull/3', Repo, Path, Line));
+  AssertFalse('another host', GitHubFileOfUrl('https://example.com/o/r/blob/main/a.pp',
+    Repo, Path, Line));
 end;
 
 initialization

@@ -17,7 +17,7 @@
 
 { The full path of the file the editor shows that the preview draws, ''
   when it shows none. }
-function TForm1.MarkdownPreviewPath: string;
+function TRepoFrame.MarkdownPreviewPath: string;
 begin
   Result := '';
   case FView of
@@ -32,7 +32,7 @@ begin
     Result := '';
 end;
 
-procedure TForm1.UpdateMarkdownPreview;
+procedure TRepoFrame.UpdateMarkdownPreview;
 var
   Path, Md, Old: string;
   i: integer;
@@ -77,7 +77,7 @@ begin
     FMdPreview.ShowFile(Path, Md);
 end;
 
-procedure TForm1.HideMarkdownPreview;
+procedure TRepoFrame.HideMarkdownPreview;
 begin
   FMdTimer.Enabled := False;
   if not FMdPreview.Visible then
@@ -89,7 +89,7 @@ begin
     ApplyLayout;
 end;
 
-procedure TForm1.MenuMarkdownPreviewClick(Sender: TObject);
+procedure TRepoFrame.MenuMarkdownPreviewClick(Sender: TObject);
 begin
   FMdPreviewOn := not FMdPreviewOn;
   FMdPreviewItem.Checked := FMdPreviewOn;
@@ -100,7 +100,7 @@ end;
 { The file the header's toggle is for: a .po file in the change view
   without conflicts or in the translation view, or a file the preview
   draws; '' for none. }
-function TForm1.PreviewTogglePath: string;
+function TRepoFrame.PreviewTogglePath: string;
 begin
   Result := '';
   case FView of
@@ -123,7 +123,7 @@ begin
     Result := '';
 end;
 
-procedure TForm1.UpdatePreviewToggle;
+procedure TRepoFrame.UpdatePreviewToggle;
 var
   Path: string;
 begin
@@ -139,7 +139,7 @@ begin
 end;
 
 { The header's toggle does what its menu item does. }
-procedure TForm1.HeaderToggle(Sender: TObject);
+procedure TRepoFrame.HeaderToggle(Sender: TObject);
 begin
   if IsPoPath(PreviewTogglePath) then
     MenuTranslationsClick(Sender)
@@ -147,7 +147,7 @@ begin
     MenuMarkdownPreviewClick(Sender);
 end;
 
-procedure TForm1.MdSplitterMoved(Sender: TObject);
+procedure TRepoFrame.MdSplitterMoved(Sender: TObject);
 begin
   if EditorPanel.ClientWidth > 0 then
     FMdRatio := FMdPreview.Width / EditorPanel.ClientWidth;
@@ -156,7 +156,7 @@ begin
 end;
 
 { An edit of the file shown is previewed once typing pauses. }
-procedure TForm1.EditChange(Sender: TObject);
+procedure TRepoFrame.EditChange(Sender: TObject);
 begin
   if FMdPreview.Visible and (FView = gvFile) then
   begin
@@ -165,7 +165,7 @@ begin
   end;
 end;
 
-procedure TForm1.MdTimerTimer(Sender: TObject);
+procedure TRepoFrame.MdTimerTimer(Sender: TObject);
 begin
   FMdTimer.Enabled := False;
   UpdateMarkdownPreview;
@@ -173,7 +173,7 @@ end;
 
 { A link in the preview to a file of the repository shows it as the tree
   would; any other local file is opened by itself. }
-procedure TForm1.MdPreviewOpenFile(Sender: TObject; const AFileName: string);
+procedure TRepoFrame.MdPreviewOpenFile(Sender: TObject; const AFileName: string);
 var
   Root: string;
 begin

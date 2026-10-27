@@ -1,104 +1,122 @@
 unit gittan.github;
 
-{** GitHub through gh, GitHub's command line tool: the pull request of a
-  branch and the open pull requests of a repository, read from the JSON
-  gh prints (with when each was opened and changed, what it changes
-  and its labels, for the Pull Requests page), and a job that fetches
-  both in a thread. Nothing here needs the LCL. }
+{** GitHub as a forge (gittan.forge), through gh, GitHub's command line
+  tool: TGittanGitHubForge, its jobs, and the JSON they read. gh pr view
+  and gh pr list --json give the open repository's pull requests
+  (ParsePullRequest, ParsePullRequests); gh api graphql with ForgeQuery
+  the user's across every repository (ParseForgeAnswer), and with
+  ReviewThreadsQuery a pull request's review threads and conversation
+  (ParseReviewThreads, ParsePullNotes); gh browse --no-browser the
+  address of a file, a commit or an issue (GitHubWebArgs). GitHub's words
+  (OPEN, APPROVED, SUCCESS) are turned into gittan.forge's kinds here
+  and go no further. Every gh runs through RunGh, with its prompts and
+  its update notice off. Nothing here needs the LCL. }
 
 {$mode objfpc}{$H+}
 
 interface
 
 uses
-  Classes, SysUtils, gittan.job;
-
-type
-  {** One pull request as gh pr view and gh pr list describe it. State is
-    OPEN, CLOSED or MERGED; ReviewDecision is APPROVED, CHANGES_REQUESTED,
-    REVIEW_REQUIRED or empty when no review is asked for. }
-  TGittanPullRequest = record
-    Number: integer;
-    Title, State, ReviewDecision, Url, HeadRef, BaseRef, Author: string;
-    IsDraft: boolean;
-    { The checks of the head commit (statusCheckRollup): how many passed
-      (or were skipped or neutral), failed (or were cancelled, timed out,
-      or need action) and are still running or queued. }
-    ChecksPassed, ChecksFailed, ChecksPending: integer;
-    { When it was opened and last changed, in UTC (0 when gh gave
-      none), what it changes, and the names of its labels joined with
-      ", ". }
-    Created, Updated: TDateTime;
-    Additions, Deletions, ChangedFiles: integer;
-    Labels: string;
-  end;
-  TGittanPullRequests = array of TGittanPullRequest;
+  Classes, SysUtils, gittan.forge, gittan.reviews;
 
 const
-  {** The fields asked of gh, the ones the record holds. }
+  {** The fields asked of gh pr view and gh pr list, the ones
+    TGittanPullRequest holds. }
   PullRequestFields = 'number,title,state,reviewDecision,url,headRefName,baseRefName,' +
     'author,isDraft,statusCheckRollup,createdAt,updatedAt,additions,deletions,changedFiles,' +
-    'labels';
+    'labels,latestReviews,reviewRequests';
+
+  {** The GraphQL query for the user's pull requests across every
+    repository: the login, the open pull requests the user wrote and the
+    open ones a review is asked of them for (in person or through a
+    team), fifty of each, newest first, with who wrote each one's last
+    thirty comments and reviews. }
+  ForgeQuery =
+    'query { viewer { login } ' +
+    'mine: search(query: "is:pr is:open author:@me archived:false sort:updated-desc", ' +
+    'type: ISSUE, first: 50) { issueCount nodes { ...pull } } ' +
+    'review: search(query: "is:pr is:open review-requested:@me archived:false ' +
+    'sort:updated-desc", type: ISSUE, first: 50) { issueCount nodes { ...pull } } } ' +
+    'fragment pull on PullRequest { number title url isDraft state reviewDecision ' +
+    'createdAt updatedAt author { login } repository { nameWithOwner } ' +
+    'headRefName baseRefName viewerLatestReview { state } ' +
+    'viewerLatestReviewRequest { id } ' +
+    'comments(last: 30) { nodes { author { __typename login } } } ' +
+    'reviews(last: 30) { nodes { author { __typename login } } } ' +
+    'commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } }';
+
+  {** The GraphQL query for one page of the threads of a pull request;
+    $after is the cursor of the page before, left out for the first. }
+  ReviewThreadsQuery =
+    'query($owner:String!,$name:String!,$number:Int!,$after:String){' +
+    'repository(owner:$owner,name:$name){pullRequest(number:$number){' +
+    'headRefOid reviews(last:100){nodes{state body author{login} submittedAt url}} ' +
+    'comments(last:100){nodes{author{login} body createdAt url}} ' +
+    'reviewThreads(first:100,after:$after){' +
+    'pageInfo{hasNextPage endCursor} nodes{' +
+    'isResolved isOutdated path line startLine originalLine diffSide subjectType ' +
+    'comments(first:100){nodes{author{login} body createdAt url}}}}}}}';
 
 {** Reads the object gh pr view --json prints. }
 function ParsePullRequest(const AJson: string; out APull: TGittanPullRequest): boolean;
 {** Reads the array gh pr list --json prints. }
 function ParsePullRequests(const AJson: string; out APulls: TGittanPullRequests): boolean;
-{** The short line of the status bar: "PR #12 · Approved", "PR #12 · Draft",
-  "PR #12 · Merged", with the review decision in words, and the checks
-  after it when there are any: "checks ✓", "2 checks failing" or
-  "3 checks pending". }
-function PullRequestStatus(const APull: TGittanPullRequest): string;
-{** The checks part of PullRequestStatus alone, empty without checks. }
-function PullRequestChecks(const APull: TGittanPullRequest): string;
-{** The state part of PullRequestStatus alone: Merged, Closed, Draft,
-  Approved, Changes requested or Review required, else empty. }
-function PullRequestNote(const APull: TGittanPullRequest): string;
+
+{** Reads the answer to ForgeQuery: the login, the pull requests the
+  user wrote (AMine) and those asked of them (AReview, as GitHub lists
+  them, see NeedsMyReview). False when AJson is not the answer, with the
+  query's first error message in AError when it carries one. }
+function ParseForgeAnswer(const AJson: string; out ALogin: string;
+  out AMine, AReview: TGittanForgePulls; out AError: string): boolean;
+
+{** Reads one page of the answer to ReviewThreadsQuery and adds its
+  threads to AThreads. AHeadOid is the commit at the head of the pull
+  request; ACursor the cursor of the next page when AHasNext. False when
+  the text is not such an answer. }
+function ParseReviewThreads(const AJson: string; var AThreads: TGittanReviewThreads;
+  out AHeadOid: string; out AHasNext: boolean; out ACursor: string): boolean;
+
+{** Reads the conversation of the pull request from an answer to
+  ReviewThreadsQuery into ANotes, oldest first: its comments, and its
+  reviews that were submitted with text or that approved, requested
+  changes or were dismissed; a review that only commented on lines has
+  nothing to show here, and a pending one is not submitted yet. False
+  when the text is not such an answer. }
+function ParsePullNotes(const AJson: string; out ANotes: TGittanPullNotes): boolean;
+
 {** "owner/repo" of a GitHub address such as https://github.com/owner/repo/pull/12,
   empty when the address is not one. }
 function RepoPathOfUrl(const AUrl: string): string;
-{** The first issue or pull request number a commit summary names, as
-  "#123" (a digit must follow the sign, and the sign must not follow a
-  word, so "C#5" is not one); 0 when it names none. }
-function IssueNumber(const ASummary: string): integer;
+
+{** The arguments of gh browse --no-browser for ATarget: "path:line"
+  with --commit=<id> or --branch <name> for a file, the id for a commit,
+  the number for an issue or pull request. }
+function GitHubWebArgs(const ATarget: TGittanWebTarget): TStringArray;
+
+{** The repository ("owner/name"), the file and the line (0 for none)
+  of a GitHub address of a file in a commit or on a branch:
+  "https://github.com/owner/name/blob/<ref>/src/a.pp#L10-L20" gives
+  owner/name, src/a.pp and 10. The ref is taken as one part of the
+  address, so a branch with a / in its name gives a wrong path. }
+function GitHubFileOfUrl(const AUrl: string; out ARepo, APath: string;
+  out ALine: integer): boolean;
 
 type
-  {** Runs gh pr view for the branch checked out in a repository (ABranch
-    only says which; empty skips it) and gh pr list, in a thread, since
-    both go to the network, and gh pr list again with
-    review-requested:@me for the open pull requests waiting for the
-    user's review (ReviewPulls). OnDone is called in the main thread
-    when all are done, as long as the job has not been stopped. A branch
-    with no pull request is not a failure: HasPull is false and Error
-    empty. The job also asks the remotes which local branches track a
-    branch that is gone from them (GoneBranches), as GitHub deletes a
-    merged one. }
-  TGittanPullRequestJob = class(TGittanJob)
-  private
-    FExe, FRoot, FBranch: string;
-    FPull: TGittanPullRequest;
-    FHasPull: boolean;
-    FGone: TStringList;
-    FPulls, FReviewPulls: TGittanPullRequests;
-    FError: string;
-  protected
-    procedure Execute; override;
+  {** GitHub through gh (Cli, a path to it). }
+  TGittanGitHubForge = class(TGittanForge)
   public
-    constructor Create(const AExe, ARoot, ABranch: string);
-    destructor Destroy; override;
-    property Branch: string read FBranch;
-    property Pull: TGittanPullRequest read FPull;
-    property HasPull: boolean read FHasPull;
-    {** The local branches whose upstream is deleted on its remote. }
-    property GoneBranches: TStringList read FGone;
-    property Pulls: TGittanPullRequests read FPulls;
-    {** The open pull requests whose review is asked of the user gh is
-      logged in as, or of a team they are on (GitHub's own
-      review-requested:@me search); empty when gh could not list them. }
-    property ReviewPulls: TGittanPullRequests read FReviewPulls;
-    {** gh's message when the list could not be read (no GitHub remote,
-      not logged in), else empty. }
-    property Error: string read FError;
+    function Name: string; override;
+    class function CliName: string; override;
+    function Version(out AVersion: string): boolean; override;
+    function PullJob(const ARoot, ABranch, ALogin: string): TGittanPullRequestJob; override;
+    function ReviewJob(const ARoot, ARepo: string; ANumber: integer): TGittanReviewJob;
+      override;
+    function AccountJob(const ARoot: string): TGittanForgeJob; override;
+    function WebUrl(const ARoot: string; const ATarget: TGittanWebTarget;
+      out AUrl, AError: string): boolean; override;
+    function FileOfWebUrl(const AUrl: string; out ARepo, APath: string;
+      out ALine: integer): boolean; override;
+    function PullRef(ANumber: integer): string; override;
   end;
 
 implementation
@@ -106,13 +124,134 @@ implementation
 uses
   DateUtils, fpjson, jsonparser, gittan.git;
 
-{ A time as gh prints it, "2026-10-20T12:34:56Z", in UTC; 0 when the
+{ ---------------------------------------------------------------------------
+  gh
+  --------------------------------------------------------------------------- }
+
+{ Runs gh (AExe) in ADir: true when it succeeded, with its standard
+  output in AOutput and, on failure, its message in AError. Its prompts
+  and its update notice are off, since nobody could answer the one and
+  the other would land in stderr. }
+function RunGh(const AExe, ADir: string; const AArgs: array of string;
+  out AOutput, AError: string): boolean;
+begin
+  Result := RunCli(AExe, ADir, AArgs, ['GH_PROMPT_DISABLED=1', 'GH_NO_UPDATE_NOTIFIER=1'],
+    AOutput, AError);
+end;
+
+{ ---------------------------------------------------------------------------
+  Reading JSON
+  --------------------------------------------------------------------------- }
+
+{ A path through nested objects, nil when a step is missing or not an
+  object. }
+function Dig(AData: TJSONData; const ANames: array of string): TJSONData;
+var
+  i: integer;
+begin
+  Result := AData;
+  for i := 0 to High(ANames) do
+  begin
+    if (Result = nil) or (Result.JSONType <> jtObject) then
+      Exit(nil);
+    Result := TJSONObject(Result).Find(ANames[i]);
+  end;
+end;
+
+{ An integer field that may be null. }
+function IntOf(AObject: TJSONObject; const AName: string): integer;
+var
+  Data: TJSONData;
+begin
+  Data := AObject.Find(AName);
+  if (Data <> nil) and (Data.JSONType = jtNumber) then
+    Result := Data.AsInteger
+  else
+    Result := 0;
+end;
+
+{ A string field, empty when it is missing, null or not a string. }
+function StrOf(AObject: TJSONObject; const AName: string): string;
+var
+  Data: TJSONData;
+begin
+  Data := AObject.Find(AName);
+  if (Data <> nil) and (Data.JSONType = jtString) then
+    Result := Data.AsString
+  else
+    Result := '';
+end;
+
+{ The string at AName of the object at AField, empty when either is
+  missing or null. }
+function NestedString(AObject: TJSONObject; const AField, AName: string): string;
+var
+  Inner: TJSONData;
+begin
+  Result := '';
+  Inner := AObject.Find(AField);
+  if (Inner <> nil) and (Inner.JSONType = jtObject) then
+    Result := StrOf(TJSONObject(Inner), AName);
+end;
+
+{ A time as GitHub gives it, "2026-10-20T12:34:56Z", in UTC; 0 when the
   field is missing or not a time. }
 function TimeOf(AObject: TJSONObject; const AName: string): TDateTime;
 begin
-  if not TryISO8601ToDate(AObject.Get(AName, ''), Result, True) then
+  if not TryISO8601ToDate(StrOf(AObject, AName), Result, True) then
     Result := 0;
 end;
+
+{ GitHub's words, as gittan.forge's kinds. }
+
+function StateOf(const S: string): TGittanPullState;
+begin
+  case S of
+    'MERGED': Result := prMerged;
+    'CLOSED': Result := prClosed;
+    else
+      Result := prOpen;
+  end;
+end;
+
+function DecisionOf(const S: string): TGittanReviewDecision;
+begin
+  case S of
+    'APPROVED': Result := rdApproved;
+    'CHANGES_REQUESTED': Result := rdChangesRequested;
+    'REVIEW_REQUIRED': Result := rdReviewRequired;
+    else
+      Result := rdNone;
+  end;
+end;
+
+function VerdictOf(const S: string): TGittanReviewVerdict;
+begin
+  case S of
+    'APPROVED': Result := rvApproved;
+    'CHANGES_REQUESTED': Result := rvChangesRequested;
+    'COMMENTED': Result := rvCommented;
+    'DISMISSED': Result := rvDismissed;
+    else
+      Result := rvNone;
+  end;
+end;
+
+{ The state of a commit's statusCheckRollup. }
+function RollupOf(const S: string): TGittanChecksState;
+begin
+  case S of
+    'SUCCESS': Result := chkPassed;
+    'FAILURE', 'ERROR': Result := chkFailed;
+    'PENDING', 'EXPECTED': Result := chkPending;
+    else
+      Result := chkNone;
+  end;
+end;
+
+{ ---------------------------------------------------------------------------
+  The open repository's pull requests
+  --------------------------------------------------------------------------- }
 
 { A CheckRun has a status (COMPLETED, IN_PROGRESS, QUEUED, ...) and, once
   completed, a conclusion; a StatusContext (the older commit status API)
@@ -121,10 +260,10 @@ procedure CountCheck(ACheck: TJSONObject; var APull: TGittanPullRequest);
 var
   Verdict: string;
 begin
-  if ACheck.Get('__typename', '') = 'StatusContext' then
-    Verdict := ACheck.Get('state', '')
-  else if ACheck.Get('status', '') = 'COMPLETED' then
-    Verdict := ACheck.Get('conclusion', '')
+  if StrOf(ACheck, '__typename') = 'StatusContext' then
+    Verdict := StrOf(ACheck, 'state')
+  else if StrOf(ACheck, 'status') = 'COMPLETED' then
+    Verdict := StrOf(ACheck, 'conclusion')
   else
     Verdict := 'PENDING';
   case Verdict of
@@ -139,46 +278,70 @@ end;
 
 function ReadPull(AObject: TJSONObject; out APull: TGittanPullRequest): boolean;
 var
-  Author, Checks, Labels: TJSONData;
-  i: integer;
+  Checks, Labels, Reviews, Reviewer, Requests: TJSONData;
+  i, n: integer;
   Name: string;
 begin
   APull := Default(TGittanPullRequest);
   Result := AObject.IndexOfName('number') >= 0;
   if not Result then
     Exit;
-  APull.Number := AObject.Get('number', 0);
-  APull.Title := AObject.Get('title', '');
-  APull.State := AObject.Get('state', '');
-  APull.ReviewDecision := AObject.Get('reviewDecision', '');
-  APull.Url := AObject.Get('url', '');
-  APull.HeadRef := AObject.Get('headRefName', '');
-  APull.BaseRef := AObject.Get('baseRefName', '');
+  APull.Number := IntOf(AObject, 'number');
+  APull.Title := StrOf(AObject, 'title');
+  APull.State := StateOf(StrOf(AObject, 'state'));
+  APull.ReviewDecision := DecisionOf(StrOf(AObject, 'reviewDecision'));
+  APull.Url := StrOf(AObject, 'url');
+  APull.Repo := RepoPathOfUrl(APull.Url);
+  APull.HeadRef := StrOf(AObject, 'headRefName');
+  APull.BaseRef := StrOf(AObject, 'baseRefName');
   APull.IsDraft := AObject.Get('isDraft', False);
-  Author := AObject.Find('author');
-  if (Author <> nil) and (Author.JSONType = jtObject) then
-    APull.Author := TJSONObject(Author).Get('login', '');
+  APull.Author := NestedString(AObject, 'author', 'login');
   Checks := AObject.Find('statusCheckRollup');
   if (Checks <> nil) and (Checks.JSONType = jtArray) then
-    for i := 0 to TJSONArray(Checks).Count - 1 do
-      if TJSONArray(Checks)[i].JSONType = jtObject then
-        CountCheck(TJSONObject(TJSONArray(Checks)[i]), APull);
+    for i := 0 to Checks.Count - 1 do
+      if Checks.Items[i].JSONType = jtObject then
+        CountCheck(TJSONObject(Checks.Items[i]), APull);
   APull.Created := TimeOf(AObject, 'createdAt');
   APull.Updated := TimeOf(AObject, 'updatedAt');
-  APull.Additions := AObject.Get('additions', 0);
-  APull.Deletions := AObject.Get('deletions', 0);
-  APull.ChangedFiles := AObject.Get('changedFiles', 0);
+  APull.Additions := IntOf(AObject, 'additions');
+  APull.Deletions := IntOf(AObject, 'deletions');
+  APull.ChangedFiles := IntOf(AObject, 'changedFiles');
   Labels := AObject.Find('labels');
   if (Labels <> nil) and (Labels.JSONType = jtArray) then
-    for i := 0 to TJSONArray(Labels).Count - 1 do
-      if TJSONArray(Labels)[i].JSONType = jtObject then
+    for i := 0 to Labels.Count - 1 do
+      if Labels.Items[i].JSONType = jtObject then
       begin
-        Name := TJSONObject(TJSONArray(Labels)[i]).Get('name', '');
+        Name := StrOf(TJSONObject(Labels.Items[i]), 'name');
         if Name = '' then
           Continue;
         if APull.Labels <> '' then
           APull.Labels := APull.Labels + ', ';
         APull.Labels := APull.Labels + Name;
+      end;
+  Reviews := AObject.Find('latestReviews');
+  if (Reviews <> nil) and (Reviews.JSONType = jtArray) then
+    for i := 0 to Reviews.Count - 1 do
+      if Reviews.Items[i].JSONType = jtObject then
+      begin
+        Reviewer := TJSONObject(Reviews.Items[i]).Find('author');
+        if (Reviewer = nil) or (Reviewer.JSONType <> jtObject) then
+          Continue;
+        n := Length(APull.Reviews);
+        SetLength(APull.Reviews, n + 1);
+        APull.Reviews[n].Login := StrOf(TJSONObject(Reviewer), 'login');
+        APull.Reviews[n].Verdict := VerdictOf(StrOf(TJSONObject(Reviews.Items[i]), 'state'));
+      end;
+  Requests := AObject.Find('reviewRequests');
+  if (Requests <> nil) and (Requests.JSONType = jtArray) then
+    for i := 0 to Requests.Count - 1 do
+      if Requests.Items[i].JSONType = jtObject then
+      begin
+        Name := StrOf(TJSONObject(Requests.Items[i]), 'login');
+        if Name = '' then
+          Continue;
+        n := Length(APull.Requested);
+        SetLength(APull.Requested, n + 1);
+        APull.Requested[n] := Name;
       end;
 end;
 
@@ -204,7 +367,6 @@ end;
 function ParsePullRequests(const AJson: string; out APulls: TGittanPullRequests): boolean;
 var
   Data: TJSONData;
-  Items: TJSONArray;
   i, n: integer;
 begin
   APulls := nil;
@@ -217,11 +379,11 @@ begin
   try
     if (Data = nil) or (Data.JSONType <> jtArray) then
       Exit;
-    Items := TJSONArray(Data);
-    SetLength(APulls, Items.Count);
+    SetLength(APulls, Data.Count);
     n := 0;
-    for i := 0 to Items.Count - 1 do
-      if (Items[i].JSONType = jtObject) and ReadPull(TJSONObject(Items[i]), APulls[n]) then
+    for i := 0 to Data.Count - 1 do
+      if (Data.Items[i].JSONType = jtObject) and ReadPull(TJSONObject(Data.Items[i]),
+        APulls[n]) then
         Inc(n);
     SetLength(APulls, n);
     Result := True;
@@ -230,50 +392,317 @@ begin
   end;
 end;
 
-function PullRequestNote(const APull: TGittanPullRequest): string;
-begin
-  if APull.State = 'MERGED' then
-    Result := 'Merged'
-  else if APull.State = 'CLOSED' then
-    Result := 'Closed'
-  else if APull.IsDraft then
-    Result := 'Draft'
-  else if APull.ReviewDecision = 'APPROVED' then
-    Result := 'Approved'
-  else if APull.ReviewDecision = 'CHANGES_REQUESTED' then
-    Result := 'Changes requested'
-  else if APull.ReviewDecision = 'REVIEW_REQUIRED' then
-    Result := 'Review required'
-  else
-    Result := '';
-end;
+{ ---------------------------------------------------------------------------
+  The user's pull requests across every repository
+  --------------------------------------------------------------------------- }
 
-function PullRequestStatus(const APull: TGittanPullRequest): string;
+{ Whether a node of AField's nodes has an author who is not AAuthor
+  and not a bot (a deleted user's author is null and counts too, as
+  someone else). }
+function OthersIn(AObject: TJSONObject; const AField, AAuthor: string): boolean;
 var
-  Note: string;
+  Nodes, Author: TJSONData;
+  i: integer;
 begin
-  Note := PullRequestNote(APull);
-  Result := 'PR #' + IntToStr(APull.Number);
-  if Note <> '' then
-    Result := Result + ' · ' + Note;
-  Note := PullRequestChecks(APull);
-  if Note <> '' then
-    Result := Result + ' · ' + Note;
+  Result := False;
+  Nodes := Dig(AObject, [AField, 'nodes']);
+  if (Nodes = nil) or (Nodes.JSONType <> jtArray) then
+    Exit;
+  for i := 0 to Nodes.Count - 1 do
+  begin
+    if Nodes.Items[i].JSONType <> jtObject then
+      Continue;
+    Author := TJSONObject(Nodes.Items[i]).Find('author');
+    if (Author = nil) or (Author.JSONType <> jtObject) then
+      Exit(True);
+    if (StrOf(TJSONObject(Author), '__typename') <> 'Bot') and
+      not SameText(StrOf(TJSONObject(Author), 'login'), AAuthor) then
+      Exit(True);
+  end;
 end;
 
-function PullRequestChecks(const APull: TGittanPullRequest): string;
+function ReadForgePull(AObject: TJSONObject; out APull: TGittanForgePull): boolean;
+var
+  Request, Nodes, Rollup: TJSONData;
 begin
-  if APull.ChecksFailed > 0 then
-    Result := IntToStr(APull.ChecksFailed) + ' checks failing'
-  else if APull.ChecksPending > 0 then
-    Result := IntToStr(APull.ChecksPending) + ' checks pending'
-  else if APull.ChecksPassed > 0 then
-    Result := 'checks ✓'
-  else
-    Result := '';
-  if (APull.ChecksFailed = 1) or ((APull.ChecksFailed = 0) and (APull.ChecksPending = 1)) then
-    Result := StringReplace(Result, 'checks', 'check', []);
+  APull := Default(TGittanForgePull);
+  Result := AObject.IndexOfName('number') >= 0;
+  if not Result then
+    Exit;
+  APull.Number := IntOf(AObject, 'number');
+  APull.Title := StrOf(AObject, 'title');
+  APull.Url := StrOf(AObject, 'url');
+  APull.IsDraft := AObject.Get('isDraft', False);
+  APull.State := StateOf(StrOf(AObject, 'state'));
+  APull.ReviewDecision := DecisionOf(StrOf(AObject, 'reviewDecision'));
+  APull.Created := TimeOf(AObject, 'createdAt');
+  APull.Updated := TimeOf(AObject, 'updatedAt');
+  APull.Author := NestedString(AObject, 'author', 'login');
+  APull.Repo := NestedString(AObject, 'repository', 'nameWithOwner');
+  APull.HeadRef := StrOf(AObject, 'headRefName');
+  APull.BaseRef := StrOf(AObject, 'baseRefName');
+  APull.MyReview := VerdictOf(NestedString(AObject, 'viewerLatestReview', 'state'));
+  Request := AObject.Find('viewerLatestReviewRequest');
+  APull.Requested := (Request <> nil) and (Request.JSONType = jtObject);
+  APull.Feedback := OthersIn(AObject, 'comments', APull.Author) or
+    OthersIn(AObject, 'reviews', APull.Author);
+  { commits.nodes[0].commit.statusCheckRollup.state }
+  Nodes := Dig(AObject, ['commits', 'nodes']);
+  if (Nodes <> nil) and (Nodes.JSONType = jtArray) and (Nodes.Count > 0) then
+  begin
+    Rollup := Dig(Nodes.Items[0], ['commit', 'statusCheckRollup']);
+    if (Rollup <> nil) and (Rollup.JSONType = jtObject) then
+      APull.Checks := RollupOf(StrOf(TJSONObject(Rollup), 'state'));
+  end;
 end;
+
+{ The pull requests of a search's nodes; nodes that are not pull
+  requests are skipped. }
+procedure ReadSearch(AData: TJSONObject; const AName: string; out APulls: TGittanForgePulls);
+var
+  Nodes: TJSONData;
+  i, n: integer;
+  Pull: TGittanForgePull;
+begin
+  APulls := nil;
+  Nodes := Dig(AData, [AName, 'nodes']);
+  if (Nodes = nil) or (Nodes.JSONType <> jtArray) then
+    Exit;
+  SetLength(APulls, Nodes.Count);
+  n := 0;
+  for i := 0 to Nodes.Count - 1 do
+    if (Nodes.Items[i].JSONType = jtObject) and
+      ReadForgePull(TJSONObject(Nodes.Items[i]), Pull) then
+    begin
+      APulls[n] := Pull;
+      Inc(n);
+    end;
+  SetLength(APulls, n);
+end;
+
+function ParseForgeAnswer(const AJson: string; out ALogin: string;
+  out AMine, AReview: TGittanForgePulls; out AError: string): boolean;
+var
+  Root, Data, Errors: TJSONData;
+begin
+  ALogin := '';
+  AMine := nil;
+  AReview := nil;
+  AError := '';
+  Result := False;
+  try
+    Root := GetJSON(AJson);
+  except
+    Exit;
+  end;
+  try
+    if (Root = nil) or (Root.JSONType <> jtObject) then
+      Exit;
+    Errors := TJSONObject(Root).Find('errors');
+    if (Errors <> nil) and (Errors.JSONType = jtArray) and (Errors.Count > 0) and
+      (Errors.Items[0].JSONType = jtObject) then
+      AError := StrOf(TJSONObject(Errors.Items[0]), 'message');
+    Data := TJSONObject(Root).Find('data');
+    if (Data = nil) or (Data.JSONType <> jtObject) then
+      Exit;
+    ALogin := NestedString(TJSONObject(Data), 'viewer', 'login');
+    ReadSearch(TJSONObject(Data), 'mine', AMine);
+    ReadSearch(TJSONObject(Data), 'review', AReview);
+    Result := True;
+  finally
+    Root.Free;
+  end;
+end;
+
+{ ---------------------------------------------------------------------------
+  Review threads and the conversation
+  --------------------------------------------------------------------------- }
+
+{ The login of a comment's author; a deleted account has none. }
+function AuthorOf(AObject: TJSONObject): string;
+begin
+  Result := NestedString(AObject, 'author', 'login');
+  if Result = '' then
+    Result := 'ghost';
+end;
+
+function BodyOf(AObject: TJSONObject): string;
+begin
+  Result := StringReplace(StrOf(AObject, 'body'), #13#10, #10, [rfReplaceAll]);
+end;
+
+function ReadComment(AObject: TJSONObject): TGittanReviewComment;
+begin
+  Result := Default(TGittanReviewComment);
+  Result.Author := AuthorOf(AObject);
+  Result.Body := BodyOf(AObject);
+  Result.Url := StrOf(AObject, 'url');
+  Result.Created := TimeOf(AObject, 'createdAt');
+end;
+
+function ReadThread(AObject: TJSONObject; out AThread: TGittanReviewThread): boolean;
+var
+  Nodes: TJSONData;
+  i, n: integer;
+begin
+  AThread := Default(TGittanReviewThread);
+  AThread.Path := StrOf(AObject, 'path');
+  Result := AThread.Path <> '';
+  if not Result then
+    Exit;
+  AThread.Line := IntOf(AObject, 'line');
+  AThread.StartLine := IntOf(AObject, 'startLine');
+  AThread.OriginalLine := IntOf(AObject, 'originalLine');
+  AThread.LeftSide := StrOf(AObject, 'diffSide') = 'LEFT';
+  AThread.Resolved := AObject.Get('isResolved', False);
+  AThread.Outdated := AObject.Get('isOutdated', False);
+  AThread.OnFile := StrOf(AObject, 'subjectType') = 'FILE';
+  if AThread.OnFile then
+    AThread.Line := 0;
+  Nodes := Dig(AObject, ['comments', 'nodes']);
+  if (Nodes = nil) or (Nodes.JSONType <> jtArray) then
+    Exit;
+  SetLength(AThread.Comments, Nodes.Count);
+  n := 0;
+  for i := 0 to Nodes.Count - 1 do
+    if Nodes.Items[i].JSONType = jtObject then
+    begin
+      AThread.Comments[n] := ReadComment(TJSONObject(Nodes.Items[i]));
+      Inc(n);
+    end;
+  SetLength(AThread.Comments, n);
+end;
+
+function ParseReviewThreads(const AJson: string; var AThreads: TGittanReviewThreads;
+  out AHeadOid: string; out AHasNext: boolean; out ACursor: string): boolean;
+var
+  Data, Pull, Threads, Info, Nodes: TJSONData;
+  Thread: TGittanReviewThread;
+  i: integer;
+begin
+  AHeadOid := '';
+  AHasNext := False;
+  ACursor := '';
+  Result := False;
+  try
+    Data := GetJSON(AJson);
+  except
+    Exit;
+  end;
+  try
+    Pull := Dig(Data, ['data', 'repository', 'pullRequest']);
+    if (Pull = nil) or (Pull.JSONType <> jtObject) then
+      Exit;
+    AHeadOid := StrOf(TJSONObject(Pull), 'headRefOid');
+    Threads := Dig(Pull, ['reviewThreads']);
+    if (Threads = nil) or (Threads.JSONType <> jtObject) then
+      Exit;
+    Info := Dig(Threads, ['pageInfo']);
+    if (Info <> nil) and (Info.JSONType = jtObject) then
+    begin
+      AHasNext := TJSONObject(Info).Get('hasNextPage', False);
+      ACursor := StrOf(TJSONObject(Info), 'endCursor');
+      AHasNext := AHasNext and (ACursor <> '');
+    end;
+    Nodes := Dig(Threads, ['nodes']);
+    if (Nodes <> nil) and (Nodes.JSONType = jtArray) then
+      for i := 0 to Nodes.Count - 1 do
+        if (Nodes.Items[i].JSONType = jtObject) and
+          ReadThread(TJSONObject(Nodes.Items[i]), Thread) and (Length(Thread.Comments) > 0) then
+        begin
+          SetLength(AThreads, Length(AThreads) + 1);
+          AThreads[High(AThreads)] := Thread;
+        end;
+    Result := True;
+  finally
+    Data.Free;
+  end;
+end;
+
+function ParsePullNotes(const AJson: string; out ANotes: TGittanPullNotes): boolean;
+var
+  Data, Pull, Nodes: TJSONData;
+  Node: TJSONObject;
+  Note: TGittanPullNote;
+  i, j: integer;
+
+  procedure Add;
+  begin
+    SetLength(ANotes, Length(ANotes) + 1);
+    ANotes[High(ANotes)] := Note;
+  end;
+
+begin
+  ANotes := nil;
+  Result := False;
+  try
+    Data := GetJSON(AJson);
+  except
+    Exit;
+  end;
+  try
+    Pull := Dig(Data, ['data', 'repository', 'pullRequest']);
+    if (Pull = nil) or (Pull.JSONType <> jtObject) then
+      Exit;
+    Nodes := Dig(Pull, ['comments', 'nodes']);
+    if (Nodes <> nil) and (Nodes.JSONType = jtArray) then
+      for i := 0 to Nodes.Count - 1 do
+        if Nodes.Items[i].JSONType = jtObject then
+        begin
+          Node := TJSONObject(Nodes.Items[i]);
+          Note := Default(TGittanPullNote);
+          Note.Kind := pnComment;
+          Note.Author := AuthorOf(Node);
+          Note.Body := Trim(BodyOf(Node));
+          Note.Url := StrOf(Node, 'url');
+          Note.Created := TimeOf(Node, 'createdAt');
+          if Note.Body <> '' then
+            Add;
+        end;
+    Nodes := Dig(Pull, ['reviews', 'nodes']);
+    if (Nodes <> nil) and (Nodes.JSONType = jtArray) then
+      for i := 0 to Nodes.Count - 1 do
+        if Nodes.Items[i].JSONType = jtObject then
+        begin
+          Node := TJSONObject(Nodes.Items[i]);
+          Note := Default(TGittanPullNote);
+          case VerdictOf(StrOf(Node, 'state')) of
+            rvApproved: Note.Kind := pnApproved;
+            rvChangesRequested: Note.Kind := pnChangesRequested;
+            rvDismissed: Note.Kind := pnDismissed;
+            rvCommented: Note.Kind := pnCommented;
+            else
+              Continue;
+          end;
+          Note.Author := AuthorOf(Node);
+          Note.Body := Trim(BodyOf(Node));
+          Note.Url := StrOf(Node, 'url');
+          Note.Created := TimeOf(Node, 'submittedAt');
+          if (Note.Body <> '') or (Note.Kind <> pnCommented) then
+            Add;
+        end;
+    { Comments and reviews each come in order; together they are sorted
+      by time, keeping that order among equal times. }
+    for i := 1 to High(ANotes) do
+    begin
+      Note := ANotes[i];
+      j := i - 1;
+      while (j >= 0) and (ANotes[j].Created > Note.Created) do
+      begin
+        ANotes[j + 1] := ANotes[j];
+        Dec(j);
+      end;
+      ANotes[j + 1] := Note;
+    end;
+    Result := True;
+  finally
+    Data.Free;
+  end;
+end;
+
+{ ---------------------------------------------------------------------------
+  Addresses
+  --------------------------------------------------------------------------- }
 
 function RepoPathOfUrl(const AUrl: string): string;
 var
@@ -307,81 +736,337 @@ begin
     Result := Rest;
 end;
 
-function IssueNumber(const ASummary: string): integer;
+function GitHubWebArgs(const ATarget: TGittanWebTarget): TStringArray;
 var
-  i, j: integer;
+  Target: string;
 begin
-  Result := 0;
-  i := 1;
-  while i < Length(ASummary) do
-  begin
-    if (ASummary[i] = '#') and (ASummary[i + 1] in ['0'..'9']) and
-      ((i = 1) or not (ASummary[i - 1] in ['0'..'9', 'a'..'z', 'A'..'Z', '_'])) then
+  case ATarget.Kind of
+    wtFile:
     begin
-      j := i + 1;
-      while (j <= Length(ASummary)) and (ASummary[j] in ['0'..'9']) do
-        Inc(j);
-      Result := StrToIntDef(Copy(ASummary, i + 1, j - i - 1), 0);
-      if Result > 0 then
-        Exit;
+      Target := ATarget.Path;
+      if ATarget.Line > 0 then
+        Target := Target + ':' + IntToStr(ATarget.Line);
+      if ATarget.Commit <> '' then
+        Result := [Target, '--commit=' + ATarget.Commit]
+      else if ATarget.Branch <> '' then
+        Result := [Target, '--branch', ATarget.Branch]
+      else
+        Result := [Target];
     end;
-    Inc(i);
+    wtCommit:
+      Result := [ATarget.Commit];
+    wtIssue:
+      Result := [IntToStr(ATarget.Number)];
+    else
+      Result := nil;
   end;
 end;
 
 { ---------------------------------------------------------------------------
-  The job
+  The jobs
   --------------------------------------------------------------------------- }
 
-constructor TGittanPullRequestJob.Create(const AExe, ARoot, ABranch: string);
+type
+  { gh pr view, gh pr list, gh pr list --search review-requested:@me and
+    gh api user. }
+  TGitHubPullJob = class(TGittanPullRequestJob)
+  private
+    FExe: string;
+  protected
+    function AskBranchPull(out APull: TGittanPullRequest): boolean; override;
+    function AskOpenPulls(out APulls: TGittanPullRequests; out AError: string): boolean;
+      override;
+    function AskReviewPulls(out APulls: TGittanPullRequests): boolean; override;
+    function AskLogin(out ALogin: string): boolean; override;
+  public
+    constructor Create(const AExe, ARoot, ABranch, ALogin: string);
+  end;
+
+  { gh api graphql with ReviewThreadsQuery, a page of 100 threads at a
+    time, at most twenty pages. }
+  TGitHubReviewJob = class(TGittanReviewJob)
+  private
+    FExe: string;
+  protected
+    function Ask(out AError: string): boolean; override;
+  public
+    constructor Create(const AExe, ARoot, ARepoPath: string; ANumber: integer);
+  end;
+
+  { gh api graphql with ForgeQuery. }
+  TGitHubAccountJob = class(TGittanForgeJob)
+  private
+    FExe: string;
+  protected
+    function Ask(out ALogin: string; out AMine, AReview: TGittanForgePulls;
+      out AError: string): boolean; override;
+  public
+    constructor Create(const AExe, AForgeName, ARoot: string);
+  end;
+
+constructor TGitHubPullJob.Create(const AExe, ARoot, ABranch, ALogin: string);
 begin
-  inherited Create(True);
+  inherited Create(ARoot, ABranch, ALogin);
   FExe := AExe;
-  FRoot := ARoot;
-  FBranch := ABranch;
-  FGone := TStringList.Create;
 end;
 
-destructor TGittanPullRequestJob.Destroy;
-begin
-  inherited Destroy;
-  FGone.Free;
-end;
-
-procedure TGittanPullRequestJob.Execute;
+function TGitHubPullJob.AskBranchPull(out APull: TGittanPullRequest): boolean;
 var
   Output, Err: string;
 begin
-  { No selector: gh takes the branch checked out in FRoot and knows
-    where it is pushed, which a name alone would not say for a fork. }
-  if (FBranch <> '') and RunGitHubCli(FExe, FRoot, ['pr', 'view', '--json',
-    PullRequestFields], Output, Err) then
-    FHasPull := ParsePullRequest(Output, FPull);
-  if Terminated then
+  APull := Default(TGittanPullRequest);
+  { No selector: gh takes the branch checked out in Root and knows where
+    it is pushed, which a name alone would not say for a fork. }
+  Result := RunGh(FExe, Root, ['pr', 'view', '--json', PullRequestFields], Output, Err) and
+    ParsePullRequest(Output, APull);
+end;
+
+function TGitHubPullJob.AskOpenPulls(out APulls: TGittanPullRequests;
+  out AError: string): boolean;
+var
+  Output: string;
+begin
+  APulls := nil;
+  Result := RunGh(FExe, Root, ['pr', 'list', '--state', 'open', '--limit', '50', '--json',
+    PullRequestFields], Output, AError);
+  if not Result then
     Exit;
-  if RunGitHubCli(FExe, FRoot, ['pr', 'list', '--state', 'open', '--limit', '50',
-    '--json', PullRequestFields], Output, Err) then
-  begin
-    if not ParsePullRequests(Output, FPulls) then
-      FError := 'Could not read the pull requests gh listed.';
-  end
-  else
-    FError := Err;
-  if Terminated then
+  AError := '';
+  Result := ParsePullRequests(Output, APulls);
+  if not Result then
+    AError := 'Could not read the pull requests gh listed.';
+end;
+
+{ GitHub's own search knows who gh is logged in as and the teams they
+  are on. }
+function TGitHubPullJob.AskReviewPulls(out APulls: TGittanPullRequests): boolean;
+var
+  Output, Err: string;
+begin
+  APulls := nil;
+  Result := RunGh(FExe, Root, ['pr', 'list', '--state', 'open', '--limit', '50', '--search',
+    'review-requested:@me', '--json', PullRequestFields], Output, Err) and
+    ParsePullRequests(Output, APulls);
+end;
+
+function TGitHubPullJob.AskLogin(out ALogin: string): boolean;
+var
+  Output, Err: string;
+begin
+  Result := RunGh(FExe, Root, ['api', 'user', '--jq', '.login'], Output, Err);
+  ALogin := '';
+  if Result then
+    ALogin := Trim(Output);
+  Result := ALogin <> '';
+end;
+
+constructor TGitHubReviewJob.Create(const AExe, ARoot, ARepoPath: string; ANumber: integer);
+begin
+  inherited Create(ARoot, ARepoPath, ANumber);
+  FExe := AExe;
+end;
+
+function TGitHubReviewJob.Ask(out AError: string): boolean;
+var
+  Owner, RepoName, Output, Cursor, Head: string;
+  HasNext: boolean;
+  Pages, p: integer;
+begin
+  AError := '';
+  Result := True;
+  p := Pos('/', RepoPath);
+  Owner := Copy(RepoPath, 1, p - 1);
+  RepoName := Copy(RepoPath, p + 1, MaxInt);
+  Cursor := '';
+  Pages := 0;
+  repeat
+    { -f passes the names as strings even when they look like numbers;
+      -F types the number. }
+    if Cursor = '' then
+      HasNext := RunGh(FExe, Root, ['api', 'graphql', '-f', 'owner=' + Owner,
+        '-f', 'name=' + RepoName, '-F', 'number=' + IntToStr(Number),
+        '-f', 'query=' + ReviewThreadsQuery], Output, AError)
+    else
+      HasNext := RunGh(FExe, Root, ['api', 'graphql', '-f', 'owner=' + Owner,
+        '-f', 'name=' + RepoName, '-F', 'number=' + IntToStr(Number),
+        '-f', 'after=' + Cursor, '-f', 'query=' + ReviewThreadsQuery], Output, AError);
+    if Terminated then
+      Exit;
+    if not HasNext then
+      Exit(False);
+    if not ParseReviewThreads(Output, FThreads, Head, HasNext, Cursor) then
+    begin
+      AError := 'Could not read the review comments gh fetched.';
+      Exit(False);
+    end;
+    if Pages = 0 then
+    begin
+      FHeadOid := Head;
+      ParsePullNotes(Output, FNotes);
+    end;
+    Inc(Pages);
+  until not HasNext or (Pages >= 20);
+end;
+
+constructor TGitHubAccountJob.Create(const AExe, AForgeName, ARoot: string);
+begin
+  inherited Create(AForgeName, ARoot);
+  FExe := AExe;
+end;
+
+function TGitHubAccountJob.Ask(out ALogin: string; out AMine, AReview: TGittanForgePulls;
+  out AError: string): boolean;
+var
+  Output: string;
+begin
+  ALogin := '';
+  AMine := nil;
+  AReview := nil;
+  { Any folder does; gh needs none in particular for it. }
+  Result := RunGh(FExe, Root, ['api', 'graphql', '-f', 'query=' + ForgeQuery], Output, AError)
+    and ParseForgeAnswer(Output, ALogin, AMine, AReview, AError);
+end;
+
+{ ---------------------------------------------------------------------------
+  The forge
+  --------------------------------------------------------------------------- }
+
+function TGittanGitHubForge.Name: string;
+begin
+  Result := 'GitHub';
+end;
+
+class function TGittanGitHubForge.CliName: string;
+begin
+  Result := 'gh';
+end;
+
+{ gh --version prints "gh version 2.62.0 (2024-11-14)" and a link. }
+function TGittanGitHubForge.Version(out AVersion: string): boolean;
+var
+  Output, Err: string;
+  i: integer;
+begin
+  AVersion := '';
+  Result := (Cli <> '') and RunGh(Cli, GetUserDir, ['--version'], Output, Err);
+  if not Result then
     Exit;
-  { Those waiting for the user's review, by GitHub's own search, which
-    knows who gh is logged in as and the teams they are on; a review
-    given clears the request, so these are the ones still to do. }
-  if (FError = '') and RunGitHubCli(FExe, FRoot, ['pr', 'list', '--state', 'open',
-    '--limit', '50', '--search', 'review-requested:@me', '--json', PullRequestFields],
-    Output, Err) then
+  AVersion := Trim(Output);
+  i := Pos(#10, AVersion);
+  if i > 0 then
+    AVersion := Trim(Copy(AVersion, 1, i - 1));
+  if Pos('gh version ', AVersion) = 1 then
+    Delete(AVersion, 1, Length('gh version '));
+  i := Pos(' ', AVersion);
+  if i > 0 then
+    AVersion := Copy(AVersion, 1, i - 1);
+end;
+
+function TGittanGitHubForge.PullJob(const ARoot, ABranch, ALogin: string): TGittanPullRequestJob;
+begin
+  Result := TGitHubPullJob.Create(Cli, ARoot, ABranch, ALogin);
+end;
+
+function TGittanGitHubForge.ReviewJob(const ARoot, ARepo: string;
+  ANumber: integer): TGittanReviewJob;
+begin
+  Result := TGitHubReviewJob.Create(Cli, ARoot, ARepo, ANumber);
+end;
+
+function TGittanGitHubForge.AccountJob(const ARoot: string): TGittanForgeJob;
+begin
+  Result := TGitHubAccountJob.Create(Cli, Name, ARoot);
+end;
+
+{ gh browse with --no-browser only prints the address. }
+function TGittanGitHubForge.WebUrl(const ARoot: string; const ATarget: TGittanWebTarget;
+  out AUrl, AError: string): boolean;
+var
+  Args, Target: TStringArray;
+  i: integer;
+begin
+  AUrl := '';
+  Target := GitHubWebArgs(ATarget);
+  Args := nil;
+  SetLength(Args, Length(Target) + 2);
+  Args[0] := 'browse';
+  Args[1] := '--no-browser';
+  for i := 0 to High(Target) do
+    Args[i + 2] := Target[i];
+  Result := RunGh(Cli, ARoot, Args, AUrl, AError);
+  AUrl := Trim(AUrl);
+  Result := Result and (AUrl <> '');
+end;
+
+function GitHubFileOfUrl(const AUrl: string; out ARepo, APath: string;
+  out ALine: integer): boolean;
+var
+  Rest, Fragment: string;
+  Parts: TStringArray;
+  p, i: integer;
+begin
+  Result := False;
+  ARepo := '';
+  APath := '';
+  ALine := 0;
+  p := Pos('://', AUrl);
+  if (p = 0) or not SameText(Copy(AUrl, 1, p - 1), 'https') and
+    not SameText(Copy(AUrl, 1, p - 1), 'http') then
+    Exit;
+  Rest := Copy(AUrl, p + 3, MaxInt);
+  Fragment := '';
+  p := Pos('#', Rest);
+  if p > 0 then
   begin
-    if not ParsePullRequests(Output, FReviewPulls) then
-      FReviewPulls := nil;
+    Fragment := Copy(Rest, p + 1, MaxInt);
+    SetLength(Rest, p - 1);
   end;
-  if not Terminated then
-    GoneUpstreamsIn(FRoot, FGone);
-  Done;
+  p := Pos('?', Rest);
+  if p > 0 then
+    SetLength(Rest, p - 1);
+  Parts := Rest.Split('/');
+  { github.com, owner, name, blob, the ref, then the path. }
+  if (Length(Parts) < 6) or not (SameText(Parts[0], 'github.com') or
+    SameText(Parts[0], 'www.github.com')) or (Parts[1] = '') or (Parts[2] = '') or
+    (Parts[3] <> 'blob') or (Parts[4] = '') then
+    Exit;
+  ARepo := Parts[1] + '/' + Parts[2];
+  for i := 5 to High(Parts) do
+  begin
+    if Parts[i] = '' then
+      Exit;
+    if APath <> '' then
+      APath := APath + '/';
+    APath := APath + Parts[i];
+  end;
+  { A space and the like come escaped. }
+  p := Pos('%', APath);
+  while (p > 0) and (p + 2 <= Length(APath)) do
+  begin
+    i := StrToIntDef('$' + Copy(APath, p + 1, 2), -1);
+    if i >= 0 then
+      APath := Copy(APath, 1, p - 1) + Chr(i) + Copy(APath, p + 3, MaxInt);
+    p := Pos('%', APath, p + 1);
+  end;
+  if (Fragment <> '') and (Fragment[1] = 'L') then
+  begin
+    p := 2;
+    while (p <= Length(Fragment)) and (Fragment[p] in ['0'..'9']) do
+      Inc(p);
+    ALine := StrToIntDef(Copy(Fragment, 2, p - 2), 0);
+  end;
+  Result := True;
+end;
+
+function TGittanGitHubForge.FileOfWebUrl(const AUrl: string; out ARepo, APath: string;
+  out ALine: integer): boolean;
+begin
+  Result := GitHubFileOfUrl(AUrl, ARepo, APath, ALine);
+end;
+
+function TGittanGitHubForge.PullRef(ANumber: integer): string;
+begin
+  Result := 'refs/pull/' + IntToStr(ANumber) + '/head';
 end;
 
 end.

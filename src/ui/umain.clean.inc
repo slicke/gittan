@@ -9,12 +9,12 @@
   are mostly what a build makes, often a lot of it; the dialog says so.
   The choice of kind is kept until another repository is opened. }
 
-function TForm1.CanClean: boolean;
+function TRepoFrame.CanClean: boolean;
 begin
   Result := (FRepo.Root <> '') and (FCommitJob = nil) and (FRemoteJob = nil);
 end;
 
-procedure TForm1.MenuCleanClick(Sender: TObject);
+procedure TRepoFrame.MenuCleanClick(Sender: TObject);
 var
   Paths: TStringList;
   Ok: boolean;

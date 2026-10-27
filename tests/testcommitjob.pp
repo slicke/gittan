@@ -10,7 +10,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.commitjob, gittan.remotejob,
-  gittan.github;
+  gittan.forge, gittan.github;
 
 type
   TCommitJobTest = class(TTestCase)
@@ -217,6 +217,7 @@ var
   Paths: TStringList;
   Job: TGittanCommitJob;
   Pulls: TGittanPullRequestJob;
+  Forge: TGittanForge;
   Started: string;
 begin
   Started := IncludeTrailingPathDelimiter(FDir) + 'started';
@@ -243,7 +244,10 @@ begin
 
   DeleteFile(Started);
   Git(['config', 'alias.pr', '!' + Slow + '; true']);
-  Pulls := TGittanPullRequestJob.Create(GitExe, FDir, 'main');
+  { The job takes what it needs from the forge, so it outlives it. }
+  Forge := TGittanGitHubForge.Create(GitExe);
+  Pulls := Forge.PullJob(FDir, 'main', '');
+  Forge.Free;
   Pulls.OnDone := @JobDone;
   Pulls.Start;
   WaitForFile(Started);

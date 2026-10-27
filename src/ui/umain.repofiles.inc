@@ -13,7 +13,7 @@
   is selected in the tree above with its diff, and only one of the trees
   keeps a selection. The files listed here are the ones the editor lets
   the user change; see "Editing the repository's files" below. }
-procedure TForm1.SetupRepoFiles;
+procedure TRepoFrame.SetupRepoFiles;
 begin
   FRepoPanel := TPanel.Create(Self);
   FRepoPanel.BevelOuter := bvNone;
@@ -40,7 +40,7 @@ begin
 end;
 
 { The header takes the file header's palette, the gutter's shade. }
-procedure TForm1.ColorRepoHeader;
+procedure TRepoFrame.ColorRepoHeader;
 var
   P: TGittanPalette;
 begin
@@ -54,7 +54,7 @@ end;
   fixed order, then .github as a folder, every folder open, then the
   exclude file as one row (Data 2, where the others have 1), since it
   is not under the root. }
-procedure TForm1.FillRepoFiles;
+procedure TRepoFrame.FillRepoFiles;
 var
   Files: TStringList;
   Path, Part: string;
@@ -121,7 +121,7 @@ end;
 { A section's panel is the header alone while folded, else the header
   and the rows in view, within half the tree panel, or a third of it
   each while both the Repository and the Submodules sections show. }
-procedure TForm1.LayoutRepoFiles;
+procedure TRepoFrame.LayoutRepoFiles;
 const
   { The least the tree of changed files keeps of the panel. }
   MinFileTree = 80;
@@ -191,22 +191,22 @@ begin
     SetHeight(FSubPanel, SectionHeight(FSubHeader, FSubTree));
 end;
 
-procedure TForm1.RepoHeaderToggle(Sender: TObject);
+procedure TRepoFrame.RepoHeaderToggle(Sender: TObject);
 begin
   LayoutRepoFiles;
 end;
 
-procedure TForm1.TreePanelResize(Sender: TObject);
+procedure TRepoFrame.TreePanelResize(Sender: TObject);
 begin
   LayoutRepoFiles;
   {$IFDEF OWNBAR}
   { The title bar's shade follows the sidebar's width. }
-  if FOwnBar <> nil then
-    FOwnBar.Invalidate;
+  if OwnBar <> nil then
+    OwnBar.Invalidate;
   {$ENDIF}
 end;
 
-procedure TForm1.RepoTreeSelectionChanged(Sender: TObject);
+procedure TRepoFrame.RepoTreeSelectionChanged(Sender: TObject);
 var
   Node: TTreeNode;
 begin
@@ -226,7 +226,7 @@ end;
 
 { Selects the row of APath in the section without showing the file, or
   clears the selection for '', as after a refresh rebuilt the rows. }
-procedure TForm1.SelectRepoNode(const APath: string);
+procedure TRepoFrame.SelectRepoNode(const APath: string);
 var
   Node: TTreeNode;
 begin
@@ -259,7 +259,7 @@ end;
   .git/info/exclude, which is not committed. A tracked file cannot be
   ignored, so the menus are disabled for anything else. The pattern is
   kept in the item's Hint, since the caption doubles ampersands. }
-procedure TForm1.FillIgnoreMenus(const APath: string);
+procedure TRepoFrame.FillIgnoreMenus(const APath: string);
 var
   Patterns: TStringArray;
   Untracked: boolean;
@@ -293,7 +293,7 @@ end;
 
 { Writes the pattern and reloads: the file leaves the tree, and a
   .gitignore joins it as changed. }
-procedure TForm1.MenuIgnoreClick(Sender: TObject);
+procedure TRepoFrame.MenuIgnoreClick(Sender: TObject);
 var
   Item: TMenuItem;
   FileName, Shown: string;
@@ -321,6 +321,93 @@ begin
 end;
 
 { ---------------------------------------------------------------------------
+  Git LFS in .gitattributes
+  ---------------------------------------------------------------------------
+  Track with Git LFS offers the file's patterns (LfsTrackPatterns: its
+  extension, the file itself) that the root .gitattributes does not
+  track yet, for a file in the work tree; Stop Tracking those of its
+  patterns it tracks (LfsPatternsOf). They write the file as git lfs
+  track and untrack do, without git-lfs; files already committed are
+  left as they are, and move when they are committed next. The pattern
+  is kept in the item's Hint, as for the ignore menus; the caption
+  shows a [[:space:]] as the space it stands for. }
+procedure TRepoFrame.FillLfsMenus(const APath: string);
+var
+  Attrs, Pattern: string;
+  Tracked: TStringArray;
+
+  procedure AddTo(AMenu: TMenuItem; const APattern: string; AClick: TNotifyEvent);
+  var
+    Item: TMenuItem;
+  begin
+    Item := TMenuItem.Create(AMenu);
+    Item.Caption := StringReplace(StringReplace(APattern, '[[:space:]]', ' ', [rfReplaceAll]),
+      '&', '&&', [rfReplaceAll]);
+    Item.Hint := APattern;
+    Item.OnClick := AClick;
+    AMenu.Add(Item);
+  end;
+
+begin
+  FLfsTrackMenu.Clear;
+  FLfsUntrackMenu.Clear;
+  Attrs := '';
+  if (FRepo.Root <> '') and (APath <> '') then
+    try
+      if FileExists(IncludeTrailingPathDelimiter(FRepo.Root) + RepoRootFiles[1]) then
+        Attrs := ReadFileBytes(IncludeTrailingPathDelimiter(FRepo.Root) + RepoRootFiles[1]);
+    except
+      Attrs := '';
+    end;
+  Tracked := LfsTrackedPatterns(Attrs);
+  if (APath <> '') and FileExists(ContextFullPath) then
+    for Pattern in LfsTrackPatterns(APath) do
+      if AnsiIndexStr(Pattern, Tracked) < 0 then
+        AddTo(FLfsTrackMenu, Pattern, @MenuLfsTrackClick);
+  if APath <> '' then
+    for Pattern in LfsPatternsOf(Attrs, APath) do
+      AddTo(FLfsUntrackMenu, Pattern, @MenuLfsUntrackClick);
+  FLfsTrackMenu.Enabled := FLfsTrackMenu.Count > 0;
+  FLfsUntrackMenu.Enabled := FLfsUntrackMenu.Count > 0;
+end;
+
+{ The banner reads the state again: the repository may have files in
+  Git LFS now, or none. }
+procedure TRepoFrame.MenuLfsTrackClick(Sender: TObject);
+var
+  Item: TMenuItem;
+begin
+  Item := Sender as TMenuItem;
+  if FRepo.Root = '' then
+    Exit;
+  if AddLfsTrack(IncludeTrailingPathDelimiter(FRepo.Root) + RepoRootFiles[1], Item.Hint) then
+  begin
+    StatusNote(Format(rsLfsTracked, [Item.Hint]));
+    FLfsChecked := '';
+    RefreshRepository;
+  end
+  else
+    StatusNote(Format(rsIgnoreFailed, [RepoRootFiles[1]]), True);
+end;
+
+procedure TRepoFrame.MenuLfsUntrackClick(Sender: TObject);
+var
+  Item: TMenuItem;
+begin
+  Item := Sender as TMenuItem;
+  if FRepo.Root = '' then
+    Exit;
+  if RemoveLfsTrack(IncludeTrailingPathDelimiter(FRepo.Root) + RepoRootFiles[1], Item.Hint) then
+  begin
+    StatusNote(Format(rsLfsUntracked, [Item.Hint]));
+    FLfsChecked := '';
+    RefreshRepository;
+  end
+  else
+    StatusNote(Format(rsIgnoreFailed, [RepoRootFiles[1]]), True);
+end;
+
+{ ---------------------------------------------------------------------------
   Editing the repository's files
   ---------------------------------------------------------------------------
   The editor is a viewer, except for the files the Config section
@@ -342,7 +429,7 @@ end;
 
 { Whether AFileName, a full name, is one of the repository's own files:
   the exclude file, or a file under the root that IsRepoFile accepts. }
-function TForm1.RepoFileName(const AFileName: string): boolean;
+function TRepoFrame.RepoFileName(const AFileName: string): boolean;
 var
   Root, Rel: string;
 begin
@@ -358,7 +445,7 @@ begin
 end;
 
 { Opens the loaded file AFileName to edits. }
-procedure TForm1.BeginEdit(const AFileName: string);
+procedure TRepoFrame.BeginEdit(const AFileName: string);
 begin
   FEditPath := AFileName;
   FEditStamp := FileAge(AFileName);
@@ -370,7 +457,7 @@ end;
 { Offers to save unsaved changes before the editor's text is replaced.
   Declining drops them; there is no way to stay, since the caller is
   already on its way elsewhere. }
-procedure TForm1.FlushEdit;
+procedure TRepoFrame.FlushEdit;
 begin
   if (FEditPath = '') or not Edit.Modified then
     Exit;
@@ -388,7 +475,7 @@ end;
 
 { Ends the edit: the editor is read-only again. The pills go with the
   next title the header gets. }
-procedure TForm1.LeaveEdit;
+procedure TRepoFrame.LeaveEdit;
 begin
   if FEditPath = '' then
     Exit;
@@ -401,7 +488,7 @@ end;
 { The dot, the pills and File > Save follow whether there is anything to
   save. The pills are left alone outside an edit: the diff view has one
   of its own. }
-procedure TForm1.UpdateEditState;
+procedure TRepoFrame.UpdateEditState;
 var
   Dirty: boolean;
 begin
@@ -419,7 +506,7 @@ end;
 { Writes the edited file; ARefresh reloads the repository so the tree
   shows the result at once. False when the write failed, which the
   status bar says. }
-function TForm1.SaveEdit(ARefresh: boolean): boolean;
+function TRepoFrame.SaveEdit(ARefresh: boolean): boolean;
 var
   Shown: string;
 begin
@@ -446,7 +533,7 @@ end;
 
 { Drops the changes and loads the file from disk again, at the same
   place, after asking: the undo history goes with them. }
-procedure TForm1.RevertEdit;
+procedure TRepoFrame.RevertEdit;
 var
   TopLine: integer;
 begin
@@ -465,7 +552,7 @@ end;
   diff view of a repository file, which opens its file view; the file
   stays selected in the section, not in the tree above, so a click there
   brings the diff back. }
-procedure TForm1.HeaderAction(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.HeaderAction(Sender: TObject; AIndex: integer);
 var
   Path: string;
 begin
@@ -488,6 +575,12 @@ begin
   end;
   if ConflictHeaderAction(AIndex) then
     Exit;
+  { Download, the one pill of an image or binary file in Git LFS. }
+  if (FView in [gvImage, gvBinary]) and (FLfsSides <> nil) then
+  begin
+    StartLfsDownload(FCurrentPath, FLfsSides);
+    Exit;
+  end;
   if FView = gvSubmodule then
   begin
     if AIndex = FSubUpdatePill then
@@ -517,19 +610,19 @@ begin
   SelectRepoNode(Path);
 end;
 
-procedure TForm1.EditChangeModified(Sender: TObject);
+procedure TRepoFrame.EditChangeModified(Sender: TObject);
 begin
   UpdateEditState;
 end;
 
-procedure TForm1.MenuSaveClick(Sender: TObject);
+procedure TRepoFrame.MenuSaveClick(Sender: TObject);
 begin
   if FEditPath <> '' then
     SaveEdit(True);
 end;
 
 { Unsaved changes hold the window open until they are saved or dropped. }
-procedure TForm1.FormCloseQuery(Sender: TObject; var CanClose: boolean);
+procedure TRepoFrame.FormCloseQuery(Sender: TObject; var CanClose: boolean);
 begin
   CanClose := True;
   if (FEditPath = '') or not Edit.Modified then

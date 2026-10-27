@@ -36,12 +36,18 @@ const
   rlCode = 4;
   rlRule = 5;
   rlFolded = 6;
+  { Markdown, as LazInk's inline markup, wrapped as it is drawn. }
+  rlMarkup = 7;
+  { The summary of a <details> block, as markup, after "▸" or "▾". }
+  rlDetails = 8;
   { Room around a card, inside it, and the most it widens to. }
   ReviewMargin = 6;
   ReviewPadX = 12;
   ReviewPadY = 7;
   ReviewMaxWidth = 860;
   ReviewRuleHeight = 11;
+  { How far the text in a <details> block is indented, per level. }
+  ReviewIndent = 14;
   { FThreadRows: a thread of another file, one at the top of this one. }
   threadElsewhere = -2;
   threadOnTop = -1;
@@ -66,12 +72,100 @@ begin
 end;
 
 { The link of a note in the summary's conversation. }
-procedure TForm1.SummaryOpenUrl(Sender: TObject; const AUrl: string);
+procedure TRepoFrame.SummaryOpenUrl(Sender: TObject; const AUrl: string);
 begin
-  OpenURL(AUrl);
+  OpenCommentLink(AUrl);
 end;
 
-procedure TForm1.MenuReviewCommentsClick(Sender: TObject);
+{ Whether APath (with /) is a file of the work tree, for LinkFilePaths
+  and the links of a comment, which anyone can write: a path that ..
+  takes out of the root is none (an absolute one is read under it). }
+function TRepoFrame.RepoFileExists(const APath: string): boolean;
+var
+  Root, Full: string;
+begin
+  if (FRepo.Root = '') or (APath = '') then
+    Exit(False);
+  Root := IncludeTrailingPathDelimiter(ExpandFileName(FRepo.Root));
+  Full := ExpandFileName(Root + SetDirSeparators(APath));
+  Result := (Copy(Full, 1, Length(Root)) = Root) and FileExists(Full) and
+    not DirectoryExists(Full);
+end;
+
+{ A link in a comment: a file of the repository (LinkFilePaths, or the
+  forge's address of one of a repository a remote holds) is shown at its
+  line, anything else goes to the browser. }
+procedure TRepoFrame.OpenCommentLink(const AUrl: string);
+var
+  Repo, Path: string;
+  Line: integer;
+begin
+  { Gittan's own link, which LinkFilePaths gives a file that is there,
+    or one a comment wrote in its place: a file of the work tree only,
+    and never the browser. }
+  if FileOfLink(AUrl, Path, Line) then
+  begin
+    if RepoFileExists(Path) then
+      ShowFileLine(Path, Line);
+  end
+  else if Assigned(FForge) and FForge.FileOfWebUrl(AUrl, Repo, Path, Line) and
+    FRepo.HasRemoteFor(Repo) and RepoFileExists(Path) then
+    ShowFileLine(Path, Line)
+  else
+    OpenURL(AUrl);
+end;
+
+{ Shows the file APath of the repository (ShowRepoFile) with the caret
+  on line ALine (0 for none) of it, in the middle of the view: in the
+  change view the row of the new
+  side that holds it, the gap that hides it opened. }
+procedure TRepoFrame.ShowFileLine(const APath: string; ALine: integer);
+
+  function RowOf(ALine: integer): integer;
+  var
+    i: integer;
+  begin
+    for i := 0 to Edit.Strings.Count - 1 do
+      if FileLineOfRow(i) = ALine then
+        Exit(i);
+    Result := -1;
+  end;
+
+var
+  Row, i: integer;
+begin
+  if APath <> ShownRelPath then
+    ShowRepoFile(APath);
+  if (ALine <= 0) or not Edit.Visible or (ShownRelPath <> APath) then
+    Exit;
+  Row := RowOf(ALine);
+  if Row < 0 then
+    Exit;
+  if (FView = gvChanges) and Edit.IsLineFolded(Row) and (Row <= High(FRows)) then
+    for i := 0 to High(FRows) do
+      if (FRows[i].Line = rowGap) and (FRows[i].GapFrom <= FRows[Row].Line) and
+        (FRows[Row].Line <= FRows[i].GapTo) then
+      begin
+        ExpandGap(FRows[i].GapFrom, FRows[i].GapTo);
+        Row := RowOf(ALine);
+        if Row < 0 then
+          Exit;
+        Break;
+      end;
+  { As a symbol picked in another file: the wrap info of the text just
+    loaded, and no line top kept from showing it. The editor centers a
+    row only when it is out of sight (an indent of 100 or more, negative
+    to count from the top either way), so the view starts at the top: a
+    row in the first screen stays where it is. }
+  Edit.UpdateWrapInfo(True);
+  Edit.LineTopTodo := 0;
+  Edit.LineTop := 0;
+  Edit.DoGotoPos(Point(0, Row), Point(-1, -1), 10, -100, True, FoldAction);
+  if Edit.CanFocus then
+    Edit.SetFocus;
+end;
+
+procedure TRepoFrame.MenuReviewCommentsClick(Sender: TObject);
 begin
   FShowComments := not FShowComments;
   FReviewItem.Checked := FShowComments;
@@ -89,40 +183,40 @@ end;
 { The pull request whose comments the change view shows: the one
   compared against, else the branch's own as long as the view's new side
   is the work tree. }
-function TForm1.ReviewTarget(out ANumber: integer; out ARepoPath: string): boolean;
+function TRepoFrame.ReviewTarget(out ANumber: integer; out ARepoPath: string): boolean;
 var
   i: integer;
 begin
   ANumber := 0;
   ARepoPath := '';
-  if not FShowComments or not FHasGitHubCli or (FRepo.Root = '') then
+  if not FShowComments or not Assigned(FForge) or (FRepo.Root = '') then
     Exit(False);
   if (FPullRange <> '') and (FRepo.Base = FPullRange) and FRepo.IsRange then
   begin
     ANumber := FPullNumber;
     for i := 0 to High(FPulls) do
       if FPulls[i].Number = FPullNumber then
-        ARepoPath := RepoPathOfUrl(FPulls[i].Url);
+        ARepoPath := FPulls[i].Repo;
     if (ARepoPath = '') and FHasPull and (FPull.Number = FPullNumber) then
-      ARepoPath := RepoPathOfUrl(FPull.Url);
+      ARepoPath := FPull.Repo;
   end
   else if FHasPull and not FRepo.IsRange then
   begin
     ANumber := FPull.Number;
-    ARepoPath := RepoPathOfUrl(FPull.Url);
+    ARepoPath := FPull.Repo;
   end;
   Result := (ANumber > 0) and (ARepoPath <> '');
 end;
 
 { Whether the view is the pull request's own diff, where its lines are
   the view's lines. }
-function TForm1.ReviewExact: boolean;
+function TRepoFrame.ReviewExact: boolean;
 begin
   Result := (FPullRange <> '') and (FRepo.Base = FPullRange) and FRepo.IsRange and
     (FThreadsNumber = FPullNumber);
 end;
 
-procedure TForm1.ClearReviews;
+procedure TRepoFrame.ClearReviews;
 begin
   FThreads := nil;
   FThreadRows := nil;
@@ -132,6 +226,7 @@ begin
   FThreadsKey := '';
   FReviewError := '';
   FMapDiffKey := '';
+  FReviewSegments.Clear;
   FSummary.SetNotes('', nil);
   CollectShownThreads;
   FileTree.Invalidate;
@@ -140,7 +235,7 @@ end;
 { Fetches the threads of the pull request ReviewTarget names when they
   are not the ones held, or again with AForce (a poll). Threads of
   another pull request are dropped at once. }
-procedure TForm1.StartReviewJob(AForce: boolean);
+procedure TRepoFrame.StartReviewJob(AForce: boolean);
 var
   Number: integer;
   RepoPath: string;
@@ -169,12 +264,12 @@ begin
     (FReviewJob.RepoPath = RepoPath) then
     Exit;
   AbandonReviewJob;
-  FReviewJob := TGittanReviewJob.Create(FGitHubCli, FRepo.Root, RepoPath, Number);
+  FReviewJob := FForge.ReviewJob(FRepo.Root, RepoPath, Number);
   FReviewJob.OnDone := @ReviewJobDone;
   FReviewJob.Start;
 end;
 
-procedure TForm1.AbandonReviewJob;
+procedure TRepoFrame.AbandonReviewJob;
 begin
   if FReviewJob = nil then
     Exit;
@@ -183,7 +278,7 @@ begin
   FReviewJob := nil;
 end;
 
-procedure TForm1.ReviewJobDone(Sender: TObject);
+procedure TRepoFrame.ReviewJobDone(Sender: TObject);
 var
   Job: TGittanReviewJob;
   Key: string;
@@ -212,6 +307,8 @@ begin
   if Key = FThreadsKey then
     Exit;
   FThreadsKey := Key;
+  { The bodies of the threads gone are dropped with the rest. }
+  FReviewSegments.Clear;
   CollectShownThreads;
   FileTree.Invalidate;
   RebuildIfChanges;
@@ -220,7 +317,7 @@ end;
 { Finds the diff line of every thread of the shown file in FThreadRows
   (threadOnTop for one that cannot be placed, threadElsewhere for one of
   another file). Called by BuildChangeView once the lines are numbered. }
-procedure TForm1.PlaceThreads;
+procedure TRepoFrame.PlaceThreads;
 var
   ByNew, ByOld: TIntegerDynArray;
   i, t, Line: integer;
@@ -293,7 +390,7 @@ end;
 { Whether the pull request's threads apply to what the view shows: the
   comments are on, and the new side is the work tree or the pull
   request's own head. }
-function TForm1.PullThreadsShown: boolean;
+function TRepoFrame.PullThreadsShown: boolean;
 begin
   Result := FShowComments and (FThreadsNumber <> 0) and (ReviewExact or
     not FRepo.IsRange);
@@ -301,7 +398,7 @@ end;
 
 { FShown: the pull request's threads while they apply, then the AI
   review's findings while the comparison is the one they were made for. }
-procedure TForm1.CollectShownThreads;
+procedure TRepoFrame.CollectShownThreads;
 begin
   FShown := nil;
   if PullThreadsShown then
@@ -312,7 +409,7 @@ end;
 
 { What keeps a thread's fold apart from its default: the address of its
   first comment. }
-function TForm1.ThreadId(AThread: integer): string;
+function TRepoFrame.ThreadId(AThread: integer): string;
 begin
   with FShown[AThread] do
     if Comments[0].Url <> '' then
@@ -321,7 +418,7 @@ begin
       Result := Path + #0 + IntToStr(OriginalLine) + #0 + Comments[0].Body;
 end;
 
-function TForm1.ThreadOpen(AThread: integer): boolean;
+function TRepoFrame.ThreadOpen(AThread: integer): boolean;
 begin
   Result := not FShown[AThread].Resolved and not FShown[AThread].Outdated;
   if FThreadFlips.IndexOf(ThreadId(AThread)) >= 0 then
@@ -345,7 +442,7 @@ end;
 
 { Who wrote comment AComment of AThread as its card names them: an AI
   agent with a sparkle before its name. }
-function TForm1.ThreadAuthor(AThread, AComment: integer): string;
+function TRepoFrame.ThreadAuthor(AThread, AComment: integer): string;
 begin
   Result := FShown[AThread].Comments[AComment].Author;
   if FShown[AThread].Agent <> '' then
@@ -354,7 +451,7 @@ end;
 
 { The stripe of an open finding's card, apart from GitHub's link color:
   a violet that reads on either background. }
-function TForm1.AgentColor: TColor;
+function TRepoFrame.AgentColor: TColor;
 begin
   if FDark then
     Result := RGBToColor(163, 113, 247)
@@ -364,7 +461,7 @@ end;
 
 { The fonts of a card: the interface font, scaled with the editor's
   zoom, for the text, and the editor's for code. }
-procedure TForm1.ReviewFont(C: TCanvas; AKind: integer);
+procedure TRepoFrame.ReviewFont(C: TCanvas; AKind: integer);
 begin
   if AKind = rlCode then
   begin
@@ -384,7 +481,7 @@ begin
   end;
 end;
 
-function TForm1.ReviewLineHeight(AKind: integer): integer;
+function TRepoFrame.ReviewLineHeight(AKind: integer): integer;
 begin
   if AKind = rlRule then
     Exit(ReviewRuleHeight);
@@ -412,20 +509,153 @@ begin
   Result := Max(120, Min(AWidth - 2 * ReviewMargin, ReviewMaxWidth));
 end;
 
+{ What a line of a card's layout has in its Objects: its kind, how
+  deep in <details> blocks it is, the block it is the summary of (its
+  part in CommentParts, -1 for none) and the comment it is in. }
+function ReviewRow(AKind, ADepth, ADetail, AComment: integer): TObject;
+begin
+  Result := TObject(PtrInt(AKind or (Min(ADepth, 15) shl 4) or ((ADetail + 1) shl 8) or
+    (AComment shl 20)));
+end;
+
+function RowKind(AObject: TObject): integer;
+begin
+  Result := PtrUInt(AObject) and $F;
+end;
+
+function RowDepth(AObject: TObject): integer;
+begin
+  Result := (PtrUInt(AObject) shr 4) and $F;
+end;
+
+function RowDetail(AObject: TObject): integer;
+begin
+  Result := ((PtrUInt(AObject) shr 8) and $FFF) - 1;
+end;
+
+function RowComment(AObject: TObject): integer;
+begin
+  Result := (PtrUInt(AObject) shr 20) and $FFF;
+end;
+
+{ The key in FThreadFlips of <details> block ADetail of comment AComment
+  of AThread: there when the block is open. }
+function TRepoFrame.DetailsKey(AThread, AComment, ADetail: integer): string;
+begin
+  Result := ThreadId(AThread) + '#' + IntToStr(AComment) + '#' + IntToStr(ADetail);
+end;
+
+{ The parts of a comment's body as its card shows them, kept by the body
+  (FReviewSegments, emptied when the threads or the work tree change,
+  since the paths it links are the files there), since a card is laid
+  out at every paint, with their
+  depth in <details> blocks in the Objects (ReviewRow, comment 0): the
+  summary of a block as rlDetails, the text between fences as one
+  rlMarkup each (CommentParts, then LazInk's inline markup, with only
+  the inline HTML it trusts), a fence's lines as rlCode, and the label
+  of a suggestion as rlNote before its code. }
+function TRepoFrame.ReviewSegments(const ABody: string): TStrings;
+var
+  Parts: TGittanCommentParts;
+  Lines: TStringList;
+  Prose: string;
+  k, i, Depth: integer;
+  InCode: boolean;
+
+  procedure FlushProse;
+  begin
+    if Trim(Prose) <> '' then
+      Result.AddObject(MarkdownToInk(LinkFilePaths(Prose, @RepoFileExists), [imoInlineHTML]),
+        ReviewRow(rlMarkup, Depth, -1, 0));
+    Prose := '';
+  end;
+
+begin
+  Result := TStrings(FReviewSegments.Items[ABody]);
+  if Result <> nil then
+    Exit;
+  Result := TStringList.Create;
+  FReviewSegments.Add(ABody, Result);
+  Parts := CommentParts(ABody);
+  Lines := TStringList.Create;
+  try
+    for k := 0 to High(Parts) do
+    begin
+      Depth := Parts[k].Depth;
+      if Parts[k].Kind = cpDetails then
+      begin
+        Result.AddObject(MarkdownToInk(Parts[k].Text, [imoInlineHTML]),
+          ReviewRow(rlDetails, Depth, k, 0));
+        Continue;
+      end;
+      Lines.Text := Parts[k].Text;
+      Prose := '';
+      InCode := False;
+      for i := 0 to Lines.Count - 1 do
+      begin
+        if Copy(TrimLeft(Lines[i]), 1, 3) = '```' then
+        begin
+          InCode := not InCode;
+          if InCode then
+          begin
+            FlushProse;
+            if Pos('suggestion', TrimLeft(Lines[i])) = 4 then
+              Result.AddObject(rsReviewSuggestion, ReviewRow(rlNote, Depth, -1, 0));
+          end;
+          Continue;
+        end;
+        if InCode then
+          Result.AddObject(StringReplace(Lines[i], #9, '    ', [rfReplaceAll]),
+            ReviewRow(rlCode, Depth, -1, 0))
+        else
+          Prose := Prose + Lines[i] + LineEnding;
+      end;
+      FlushProse;
+    end;
+  finally
+    Lines.Free;
+  end;
+end;
+
+{ How LazInk draws the text of a card: links in the link color. }
+function TRepoFrame.ReviewInkOptions: THTMLOptions;
+begin
+  Result := DefaultHTMLOptions;
+  Result.LinkColor := FLinkColor;
+end;
+
+{ The height of line I of a card laid out AInner wide: a kind's line
+  height, or the height Markdown takes wrapped at that width less its
+  indent. }
+function TRepoFrame.ReviewRowHeight(ALines: TStrings; I, AInner: integer): integer;
+var
+  C: TCanvas;
+begin
+  if not (RowKind(ALines.Objects[I]) in [rlMarkup, rlDetails]) then
+    Exit(ReviewLineHeight(RowKind(ALines.Objects[I])));
+  C := FReviewMeasure.Canvas;
+  ReviewFont(C, rlBody);
+  Result := HTMLTextExtentOpt(C, Rect(0, 0, Max(40, AInner - RowDepth(ALines.Objects[I]) * ReviewIndent),
+    100000), [], ALines[I], ReviewInkOptions, FReviewInk).cy + 4;
+end;
+
 { The lines of the card of AThread, AInner wide: the text in Strings,
-  the kind in Objects. Text is wrapped at words; code (between ```
-  fences) is not. }
-procedure TForm1.ReviewLayout(AThread, AInner: integer; ALines: TStrings);
+  the kind and the rest in Objects (ReviewRow). Headers and notes are
+  wrapped at words; the Markdown of a comment is one rlMarkup that
+  LazInk wraps; code (between ``` fences) is not wrapped. A <details>
+  block is its summary after "▸", and with "▾" the lines in it too
+  when it is open (DetailsKey in FThreadFlips). }
+procedure TRepoFrame.ReviewLayout(AThread, AInner: integer; ALines: TStrings);
 var
   C: TCanvas;
   Note, S, Head: string;
   Parts: TStringList;
-  i, k: integer;
-  InCode, Blank: boolean;
+  Segs: TStrings;
+  i, k, Depth, HideBelow: integer;
 
   procedure Add(const AText: string; AKind: integer);
   begin
-    ALines.AddObject(AText, TObject(PtrInt(AKind)));
+    ALines.AddObject(AText, ReviewRow(AKind, 0, -1, 0));
   end;
 
   { Breaks AText into lines no wider than AInner, at spaces, or inside a
@@ -492,15 +722,16 @@ begin
         Note := rsReviewOutdated
       else
         Note := '';
-      { The first line of text of the first comment. }
+      { The first line of text of the first comment, without its
+        markup. }
       S := '';
       Parts := TStringList.Create;
       try
-        Parts.Text := Comments[0].Body;
+        Parts.Text := CommentMarkdown(Comments[0].Body);
         for i := 0 to Parts.Count - 1 do
           if (Trim(Parts[i]) <> '') and (Copy(Trim(Parts[i]), 1, 3) <> '```') then
           begin
-            S := Trim(Parts[i]);
+            S := Trim(HTMLPlainText(MarkdownToInk(Parts[i], [imoInlineHTML])));
             Break;
           end;
       finally
@@ -548,47 +779,34 @@ begin
       if S <> '' then
         Head := Head + ' · ' + S;
       Add(Head, rlHeader);
-      Parts := TStringList.Create;
-      try
-        Parts.Text := Comments[k].Body;
-        while (Parts.Count > 0) and (Trim(Parts[Parts.Count - 1]) = '') do
-          Parts.Delete(Parts.Count - 1);
-        InCode := False;
-        Blank := False;
-        for i := 0 to Parts.Count - 1 do
+      Segs := ReviewSegments(Comments[k].Body);
+      { The lines deeper than a closed block are left out. }
+      HideBelow := MaxInt;
+      for i := 0 to Segs.Count - 1 do
+      begin
+        Depth := RowDepth(Segs.Objects[i]);
+        if Depth > HideBelow then
+          Continue;
+        HideBelow := MaxInt;
+        S := Segs[i];
+        if RowKind(Segs.Objects[i]) = rlDetails then
         begin
-          S := Parts[i];
-          if Copy(TrimLeft(S), 1, 3) = '```' then
+          if FThreadFlips.IndexOf(DetailsKey(AThread, k, RowDetail(Segs.Objects[i]))) >= 0 then
+            S := '▾ ' + S
+          else
           begin
-            InCode := not InCode;
-            if InCode and (Pos('suggestion', TrimLeft(S)) = 4) then
-              Add(rsReviewSuggestion, rlNote);
-            Continue;
+            S := '▸ ' + S;
+            HideBelow := Depth;
           end;
-          if InCode then
-          begin
-            Add(StringReplace(S, #9, '    ', [rfReplaceAll]), rlCode);
-            Continue;
-          end;
-          { One blank line between paragraphs, none at the start. }
-          if Trim(S) = '' then
-          begin
-            Blank := True;
-            Continue;
-          end;
-          if Blank and (ALines.Count > 0) and (PtrInt(ALines.Objects[ALines.Count - 1]) <> rlHeader) then
-            Add('', rlBody);
-          Blank := False;
-          Wrap(TrimRight(S), rlBody);
         end;
-      finally
-        Parts.Free;
+        ALines.AddObject(S, ReviewRow(RowKind(Segs.Objects[i]), Depth,
+          RowDetail(Segs.Objects[i]), k));
       end;
     end;
   end;
 end;
 
-function TForm1.ReviewCardHeight(AThread, AWidth: integer): integer;
+function TRepoFrame.ReviewCardHeight(AThread, AWidth: integer): integer;
 var
   Lines: TStringList;
   i: integer;
@@ -598,7 +816,7 @@ begin
     ReviewLayout(AThread, ReviewCardWidth(AWidth) - 2 * ReviewPadX, Lines);
     Result := 2 * ReviewMargin + 2 * ReviewPadY;
     for i := 0 to Lines.Count - 1 do
-      Inc(Result, ReviewLineHeight(PtrInt(Lines.Objects[i])));
+      Inc(Result, ReviewRowHeight(Lines, i, ReviewCardWidth(AWidth) - 2 * ReviewPadX));
   finally
     Lines.Free;
   end;
@@ -606,7 +824,7 @@ end;
 
 { The width a gap of AEd has: the one its last paint had, else the text
   area as the editor last laid it out. }
-function TForm1.ReviewGapWidth(AEd: TATSynEdit): integer;
+function TRepoFrame.ReviewGapWidth(AEd: TATSynEdit): integer;
 begin
   Result := FReviewWidths[Ord(AEd = FEditOld)];
   if Result <= 0 then
@@ -616,7 +834,7 @@ begin
 end;
 
 { Puts a card under the row of every thread of the shown file. }
-procedure TForm1.ApplyReviewGaps;
+procedure TRepoFrame.ApplyReviewGaps;
 var
   t, r, Row, H: integer;
   Ed, Other: TATSynEdit;
@@ -679,7 +897,7 @@ end;
   (the position -1); putting the top line at 0, as every build does,
   leaves it out. A view at its top is moved up onto it, once the build's
   own scrolling is done. }
-procedure TForm1.RevealTopGapAsync(Data: PtrInt);
+procedure TRepoFrame.RevealTopGapAsync(Data: PtrInt);
 var
   Info: TATEditorScrollInfo;
   Ed: TATSynEdit;
@@ -712,7 +930,7 @@ end;
   editor draws down a block of code after the text, run through the
   cards under its lines, so the cards are painted again over them.
   Called from OnDrawEditor, which comes after both. }
-procedure TForm1.DrawGapGutter(AEd: TATSynEdit; C: TCanvas);
+procedure TRepoFrame.DrawGapGutter(AEd: TATSynEdit; C: TCanvas);
 var
   Band, i, g, First, d, Line, Y, CharH, Below, GapTop: integer;
   Decor: PATGutterDecorItem;
@@ -790,7 +1008,7 @@ begin
   end;
 end;
 
-procedure TForm1.ReviewRelayoutAsync(Data: PtrInt);
+procedure TRepoFrame.ReviewRelayoutAsync(Data: PtrInt);
 begin
   if FView <> gvChanges then
     Exit;
@@ -798,14 +1016,14 @@ begin
   SyncOldSide;
 end;
 
-procedure TForm1.EditDrawGap(Sender: TObject; C: TCanvas; const ARect: TRect;
+procedure TRepoFrame.EditDrawGap(Sender: TObject; C: TCanvas; const ARect: TRect;
   AGap: TATGapItem);
 var
   Ed: TATSynEdit;
   Lines: TStringList;
   Card: TRect;
   Fill, Border, Dim, Accent, CodeFill: TColor;
-  i, y, H, Kind, W, Side, Right: integer;
+  i, y, H, Kind, W, Side, Right, Indent, k: integer;
   First, HasLink: boolean;
 begin
   Ed := TATSynEdit(Sender);
@@ -862,9 +1080,33 @@ begin
     First := True;
     for i := 0 to Lines.Count - 1 do
     begin
-      Kind := PtrInt(Lines.Objects[i]);
-      H := ReviewLineHeight(Kind);
+      Kind := RowKind(Lines.Objects[i]);
+      H := ReviewRowHeight(Lines, i, W - 2 * ReviewPadX);
+      { A line in a <details> block is indented, a rule down the left of
+        each level. }
+      Indent := RowDepth(Lines.Objects[i]) * ReviewIndent;
+      k := RowDepth(Lines.Objects[i]);
+      C.Pen.Color := Border;
+      while k > 0 do
+      begin
+        C.Line(Card.Left + ReviewPadX + (k - 1) * ReviewIndent + 4, y,
+          Card.Left + ReviewPadX + (k - 1) * ReviewIndent + 4, y + H);
+        Dec(k);
+      end;
       ReviewFont(C, Kind);
+      if Kind in [rlMarkup, rlDetails] then
+      begin
+        ReviewFont(C, rlBody);
+        if Kind = rlDetails then
+          C.Font.Color := Dim
+        else
+          C.Font.Color := Ed.Colors.TextFont;
+        C.Brush.Style := bsClear;
+        HTMLDrawOpt(C, Rect(Card.Left + ReviewPadX + Indent, y + 2, Card.Right - ReviewPadX, y + H), [],
+          Lines[i], ReviewInkOptions, FReviewInk);
+        Inc(y, H);
+        Continue;
+      end;
       case Kind of
         rlRule:
           begin
@@ -875,7 +1117,7 @@ begin
           begin
             C.Brush.Style := bsSolid;
             C.Brush.Color := CodeFill;
-            C.FillRect(Rect(Card.Left + ReviewPadX - 4, y, Card.Right - ReviewPadX + 4, y + H));
+            C.FillRect(Rect(Card.Left + ReviewPadX + Indent - 4, y, Card.Right - ReviewPadX + 4, y + H));
           end;
       end;
       C.Brush.Style := bsClear;
@@ -888,7 +1130,7 @@ begin
       begin
         { The link takes the right end of the first header. }
         ReviewFont(C, rlNote);
-        Right := Right - C.TextWidth(rsReviewLink) - ReviewPadX;
+        Right := Right - C.TextWidth(Format(rsReviewLink, [ForgeName])) - ReviewPadX;
         ReviewFont(C, Kind);
         if Kind = rlFolded then
           C.Font.Color := Dim
@@ -896,8 +1138,9 @@ begin
           C.Font.Color := Ed.Colors.TextFont;
       end;
       if Kind <> rlRule then
-        C.TextRect(Rect(Card.Left + ReviewPadX, y, Right, y + H),
-          Card.Left + ReviewPadX, y + 2, FitText(C, Lines[i], Right - Card.Left - ReviewPadX));
+        C.TextRect(Rect(Card.Left + ReviewPadX + Indent, y, Right, y + H),
+          Card.Left + ReviewPadX + Indent, y + 2,
+          FitText(C, Lines[i], Right - Card.Left - ReviewPadX - Indent));
       if First and HasLink and (Kind in [rlHeader, rlFolded]) then
       begin
         First := False;
@@ -905,7 +1148,8 @@ begin
         C.Font.Color := FLinkColor;
         C.Brush.Color := Fill;
         C.Brush.Style := bsSolid;
-        C.TextOut(Card.Right - ReviewPadX - C.TextWidth(rsReviewLink), y + 2, rsReviewLink);
+        C.TextOut(Card.Right - ReviewPadX - C.TextWidth(Format(rsReviewLink, [ForgeName])), y + 2,
+          Format(rsReviewLink, [ForgeName]));
         C.Brush.Style := bsClear;
       end;
       Inc(y, H);
@@ -917,13 +1161,17 @@ begin
   end;
 end;
 
-{ A click on "GitHub ↗" opens the thread on GitHub; anywhere else on the
-  card it folds or unfolds. APos is in the gap. }
-procedure TForm1.EditClickGap(Sender: TObject; AGapItem: TATGapItem; APos: TPoint);
+{ A click on "GitHub ↗" opens the thread on GitHub, one on a link in a
+  comment opens the link, one on the summary of a <details> block opens
+  or closes the block; anywhere else on the card it folds or unfolds.
+  APos is in the gap. }
+procedure TRepoFrame.EditClickGap(Sender: TObject; AGapItem: TATGapItem; APos: TPoint);
 var
   Ed: TATSynEdit;
   Lines: TStringList;
   W, y, i, Kind, H, LinkLeft: integer;
+  LinkDone: boolean;
+  Hit: THTMLHitInfo;
 begin
   if (AGapItem = nil) or (AGapItem.Tag < 0) or (AGapItem.Tag > High(FShown)) then
     Exit;
@@ -933,22 +1181,51 @@ begin
   try
     ReviewLayout(AGapItem.Tag, W - 2 * ReviewPadX, Lines);
     y := ReviewMargin + ReviewPadY;
+    LinkDone := False;
     for i := 0 to Lines.Count - 1 do
     begin
-      Kind := PtrInt(Lines.Objects[i]);
-      H := ReviewLineHeight(Kind);
-      if (Kind in [rlHeader, rlFolded]) and (FShown[AGapItem.Tag].Comments[0].Url <> '') then
+      Kind := RowKind(Lines.Objects[i]);
+      H := ReviewRowHeight(Lines, i, W - 2 * ReviewPadX);
+      { The summary of a <details> block opens or closes it, when the
+        button is up, as a card folds. }
+      if (Kind = rlDetails) and (APos.Y >= y) and (APos.Y < y + H) and
+        (APos.X <= ReviewMargin + W) then
       begin
-        ReviewFont(FReviewMeasure.Canvas, rlNote);
-        LinkLeft := ReviewMargin + W - ReviewPadX -
-          FReviewMeasure.Canvas.TextWidth(rsReviewLink);
-        if (APos.Y >= y) and (APos.Y < y + H) and (APos.X >= LinkLeft) and
-          (APos.X <= ReviewMargin + W - ReviewPadX) then
+        FGapToggle := DetailsKey(AGapItem.Tag, RowComment(Lines.Objects[i]),
+          RowDetail(Lines.Objects[i]));
+        Exit;
+      end;
+      if not LinkDone and (Kind in [rlHeader, rlFolded]) then
+      begin
+        LinkDone := True;
+        if FShown[AGapItem.Tag].Comments[0].Url <> '' then
         begin
-          OpenURL(FShown[AGapItem.Tag].Comments[0].Url);
+          ReviewFont(FReviewMeasure.Canvas, rlNote);
+          LinkLeft := ReviewMargin + W - ReviewPadX -
+            FReviewMeasure.Canvas.TextWidth(Format(rsReviewLink, [ForgeName]));
+          if (APos.Y >= y) and (APos.Y < y + H) and (APos.X >= LinkLeft) and
+            (APos.X <= ReviewMargin + W - ReviewPadX) then
+          begin
+            OpenURL(FShown[AGapItem.Tag].Comments[0].Url);
+            Exit;
+          end;
+        end;
+      end;
+      { A link in the text opens, when it goes to the web or to a file. }
+      if (Kind = rlMarkup) and (APos.Y >= y) and (APos.Y < y + H) then
+      begin
+        ReviewFont(FReviewMeasure.Canvas, rlBody);
+        Hit := HTMLHitTest(FReviewMeasure.Canvas, Rect(ReviewMargin + ReviewPadX +
+          RowDepth(Lines.Objects[i]) * ReviewIndent, y + 2,
+          ReviewMargin + W - ReviewPadX, y + H), Lines[i], ReviewInkOptions,
+          APos.X, APos.Y, FReviewInk);
+        if Hit.OnLink and (AnsiStartsText('https://', Hit.LinkName) or
+          AnsiStartsText('http://', Hit.LinkName) or AnsiStartsText('mailto:', Hit.LinkName) or
+          AnsiStartsText(FileLinkScheme, Hit.LinkName)) then
+        begin
+          FGapLink := Hit.LinkName;
           Exit;
         end;
-        Break;
       end;
       Inc(y, H);
     end;
@@ -963,8 +1240,22 @@ begin
   FGapToggle := ThreadId(AGapItem.Tag);
 end;
 
-{ The fold asked for by a click on a card, when the button came up. }
-procedure TForm1.ToggleThreadNow;
+{ The link a click on a card asked for (FGapLink), once the button is
+  up and the editor done with it: a file shown in its place would get
+  the caret where the button came up. }
+procedure TRepoFrame.OpenGapLinkAsync(Data: PtrInt);
+var
+  Link: string;
+begin
+  Link := FGapLink;
+  FGapLink := '';
+  if Link <> '' then
+    OpenCommentLink(Link);
+end;
+
+{ The fold asked for by a click on a card or on a <details> block in
+  it (DetailsKey), when the button came up. }
+procedure TRepoFrame.ToggleThreadNow;
 var
   i: integer;
 begin
@@ -980,7 +1271,7 @@ end;
 { The threads of APath the tree marks it with: AOpen neither resolved
   nor outdated, AAll every one, of those the change view shows
   (FShown). }
-procedure TForm1.FileThreads(const APath: string; out AOpen, AAll: integer);
+procedure TRepoFrame.FileThreads(const APath: string; out AOpen, AAll: integer);
 var
   t: integer;
 begin
@@ -996,7 +1287,7 @@ begin
 end;
 
 { What the tree's hint of APath adds about its threads. }
-function TForm1.FileThreadsHint(const APath: string): string;
+function TRepoFrame.FileThreadsHint(const APath: string): string;
 var
   Open, All: integer;
 begin
@@ -1016,7 +1307,7 @@ end;
   resolved or outdated; after the name when that reaches further. The
   theme (tvoThemedDraw) marks a selected row behind its name alone, so
   the bubble keeps its colors there and nothing is filled under it. }
-procedure TForm1.FileTreeAdvancedCustomDrawItem(Sender: TCustomTreeView;
+procedure TRepoFrame.FileTreeAdvancedCustomDrawItem(Sender: TCustomTreeView;
   Node: TTreeNode; State: TCustomDrawState; Stage: TCustomDrawStage;
   var PaintImages, DefaultDraw: boolean);
 var
@@ -1060,7 +1351,7 @@ end;
 
 { The line the status bar's pull request hint adds: how many threads of
   it are open. }
-function TForm1.ReviewHint(ANumber: integer): string;
+function TRepoFrame.ReviewHint(ANumber: integer): string;
 var
   Open: integer;
 begin

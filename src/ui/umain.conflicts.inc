@@ -44,7 +44,7 @@ end;
 
 { Whether git is in the middle of something the Commit section carries
   on with Continue rather than a commit of its own. }
-function TForm1.ContinueMode: boolean;
+function TRepoFrame.ContinueMode: boolean;
 begin
   Result := ((FOperation = 'rebasing') and not StrayRebase) or
     (FOperation = 'applying patches') or (FOperation = 'cherry-picking') or
@@ -57,14 +57,14 @@ end;
   rebased branch to HEAD, so Continue and Skip are off; Abort checks the
   rebased branch out again as it was, and Forget the Rebase (--quit)
   keeps HEAD where it is. }
-function TForm1.StrayRebase: boolean;
+function TRepoFrame.StrayRebase: boolean;
 begin
   Result := (FOperation = 'rebasing') and (FRebaseBranch <> '') and (FBranch <> FRebaseBranch);
 end;
 
 { The operation for the summary and the status bar: "rebasing", or
   "rebasing feature" while the rebase is of a branch HEAD is not on. }
-function TForm1.OperationLabel: string;
+function TRepoFrame.OperationLabel: string;
 begin
   if StrayRebase then
     Result := Format(rsOperationOf, [FOperation, FRebaseBranch])
@@ -72,7 +72,7 @@ begin
     Result := FOperation;
 end;
 
-function TForm1.IsConflictPath(const APath: string): boolean;
+function TRepoFrame.IsConflictPath(const APath: string): boolean;
 var
   i: integer;
 begin
@@ -81,7 +81,7 @@ begin
 end;
 
 { How many conflicts are left in the file APath on disk, by its markers. }
-function TForm1.MarkersLeft(const APath: string): integer;
+function TRepoFrame.MarkersLeft(const APath: string): integer;
 var
   Lines: TStringList;
   i: integer;
@@ -103,7 +103,7 @@ begin
 end;
 
 { AAction: 0 mine, 1 theirs, 2 resolved as it is. }
-procedure TForm1.ResolvePath(const APath: string; AAction: integer);
+procedure TRepoFrame.ResolvePath(const APath: string; AAction: integer);
 var
   Ok: boolean;
   Remaining: integer;
@@ -151,7 +151,7 @@ end;
 
 { Whether the shown file's conflicts can be resolved one by one: the
   change view of a conflicted file with markers, against the work tree. }
-function TForm1.CanResolveBlocks: boolean;
+function TRepoFrame.CanResolveBlocks: boolean;
 begin
   Result := (FRepo <> nil) and (FView = gvChanges) and (FCurrentPath <> '') and
     (FEditPath = '') and not FRepo.IsRange and (Length(FConflictStarts) > 0) and
@@ -162,7 +162,7 @@ end;
   FConflictStarts) and of its last line (FConflictEndRows from
   FConflictEnds), from the rows of the view just built: the lines are
   added ones, so they are on the new side. }
-procedure TForm1.FindConflictRows;
+procedure TRepoFrame.FindConflictRows;
 
   procedure Find(const ALines: TIntegerDynArray; var ARows: TIntegerDynArray);
   var
@@ -191,7 +191,7 @@ end;
 
 { The conflict the line on row ARow belongs to, or -1 for a line outside
   every conflict (a deleted line is never inside one). }
-function TForm1.ConflictAtRow(ARow: integer): integer;
+function TRepoFrame.ConflictAtRow(ARow: integer): integer;
 var
   Line, c: integer;
 begin
@@ -209,7 +209,7 @@ end;
 { Drops the choice down from the conflict's button: mine, theirs or
   both, with the names on the markers as details. Mine is the user's
   own work, git's theirs in a rebase (see TGittanConflictSide). }
-procedure TForm1.ResolveConflictAt(AIndex: integer);
+procedure TRepoFrame.ResolveConflictAt(AIndex: integer);
 var
   Ours, Theirs, Mine, Incoming: string;
   Rebase: boolean;
@@ -285,7 +285,7 @@ end;
 
 { Writes the pick over the conflict and refreshes. The last conflict of
   the file marks it resolved and moves on to the next file. }
-procedure TForm1.ApplyConflictPick(AIndex: integer; APick: TGittanConflictPick);
+procedure TRepoFrame.ApplyConflictPick(AIndex: integer; APick: TGittanConflictPick);
 var
   B: TGittanDiscard;
   Path, Err: string;
@@ -327,7 +327,7 @@ begin
     StatusNote(Format(rsResolvedBlock, [B.Line, Path, Remaining]));
 end;
 
-procedure TForm1.ConflictPopupPick(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.ConflictPopupPick(Sender: TObject; AIndex: integer);
 begin
   if FConflictPopupFiles then
   begin
@@ -343,7 +343,7 @@ end;
 { The conflicts left in APath for the list: by its markers, or that it
   is gone (one side deleted it) or holds no markers (ready to be marked
   resolved). }
-function TForm1.ConflictDetail(const APath: string): string;
+function TRepoFrame.ConflictDetail(const APath: string): string;
 var
   n: integer;
 begin
@@ -360,7 +360,7 @@ end;
 
 { The status bar's conflict badge drops down the conflicted files, the
   shown one checked; a pick shows the file. }
-procedure TForm1.ConflictBadgeClick(const AScreenRect: TRect);
+procedure TRepoFrame.ConflictBadgeClick(const AScreenRect: TRect);
 var
   i, Index: integer;
 begin
@@ -386,7 +386,7 @@ end;
 
 { The conflicted file after (or before, not ANext) AAfter in the tree,
   round the end, other than AAfter itself; '' for none. }
-function TForm1.NextConflictFile(const AAfter: string; ANext: boolean): string;
+function TRepoFrame.NextConflictFile(const AAfter: string; ANext: boolean): string;
 var
   Start, i, k, n: integer;
 begin
@@ -416,7 +416,7 @@ end;
   the one shown; with no conflict left the Commit section is the next
   step, so it gets the focus, the message field for a merge and the
   Continue button for the rest, and the status bar says so. }
-procedure TForm1.ShowNextConflict(const AAfter: string; AAdvance: boolean);
+procedure TRepoFrame.ShowNextConflict(const AAfter: string; AAdvance: boolean);
 var
   Following: string;
 begin
@@ -454,7 +454,7 @@ end;
   goes to the next change; past the last (or before the first) they go
   on to the next (or previous) conflicted file in the tree, and wrap
   around in the file when there is no other. }
-procedure TForm1.GoToConflict(ANext: boolean);
+procedure TRepoFrame.GoToConflict(ANext: boolean);
 var
   Rows: TIntegerDynArray;
   Cur, Target, i: integer;
@@ -507,26 +507,26 @@ end;
 { The Resolve pill of a conflicted file's row in the summary shows the
   file at its first conflict, where the band's buttons resolve it; a
   file without markers (deleted on one side) shows its header's pills. }
-procedure TForm1.SummaryRowAction(Sender: TObject; const APath: string);
+procedure TRepoFrame.SummaryRowAction(Sender: TObject; const APath: string);
 begin
   SummarySelectFile(Sender, APath);
   if (FView = gvChanges) and (FCurrentPath = APath) and (Length(FConflictRows) > 0) then
     ShowChangeAt(FConflictRows[0]);
 end;
 
-procedure TForm1.MenuNextConflictClick(Sender: TObject);
+procedure TRepoFrame.MenuNextConflictClick(Sender: TObject);
 begin
   GoToConflict(True);
 end;
 
-procedure TForm1.MenuPrevConflictClick(Sender: TObject);
+procedure TRepoFrame.MenuPrevConflictClick(Sender: TObject);
 begin
   GoToConflict(False);
 end;
 
 { File > Resolve Conflict acts on the conflict the caret is in; the
   item follows the caret (from UpdateDiscardItems). }
-procedure TForm1.UpdateResolveItems;
+procedure TRepoFrame.UpdateResolveItems;
 begin
   if FResolveItem = nil then
     Exit;
@@ -534,21 +534,21 @@ begin
     (ConflictAtRow(Edit.Carets[0].PosY) >= 0);
 end;
 
-procedure TForm1.MenuResolveHereClick(Sender: TObject);
+procedure TRepoFrame.MenuResolveHereClick(Sender: TObject);
 begin
   if CanResolveBlocks and (Edit.Carets.Count > 0) then
     ResolveConflictAt(ConflictAtRow(Edit.Carets[0].PosY));
 end;
 
 { The editor menu's item acts on the row it was opened on. }
-procedure TForm1.MenuResolveEditClick(Sender: TObject);
+procedure TRepoFrame.MenuResolveEditClick(Sender: TObject);
 begin
   if CanResolveBlocks and (FPopupEd = Edit) then
     ResolveConflictAt(ConflictAtRow(FPopupRow));
 end;
 
 { The header's pills on a conflicted file, from HeaderAction. }
-function TForm1.ConflictHeaderAction(AIndex: integer): boolean;
+function TRepoFrame.ConflictHeaderAction(AIndex: integer): boolean;
 begin
   Result := (FEditPath = '') and (FView in [gvChanges, gvImage, gvBinary]) and
     IsConflictPath(FCurrentPath);
@@ -556,17 +556,17 @@ begin
     ResolvePath(FCurrentPath, AIndex);
 end;
 
-procedure TForm1.MenuResolveMineClick(Sender: TObject);
+procedure TRepoFrame.MenuResolveMineClick(Sender: TObject);
 begin
   ResolvePath(FContextPath, 0);
 end;
 
-procedure TForm1.MenuResolveTheirsClick(Sender: TObject);
+procedure TRepoFrame.MenuResolveTheirsClick(Sender: TObject);
 begin
   ResolvePath(FContextPath, 1);
 end;
 
-procedure TForm1.MenuMarkResolvedClick(Sender: TObject);
+procedure TRepoFrame.MenuMarkResolvedClick(Sender: TObject);
 begin
   ResolvePath(FContextPath, 2);
 end;
@@ -575,7 +575,7 @@ end;
   (a rebase goes on with none left out); others than the conflicts' are
   asked about first, as they may be work of another kind. An edit stop
   has no conflicts, and its changes are what it stopped for. }
-procedure TForm1.ContinueOperationClick;
+procedure TRepoFrame.ContinueOperationClick;
 var
   Noun, StoppedAt, Shown: string;
   Extras: TStringArray;
@@ -631,7 +631,7 @@ begin
   end;
 end;
 
-procedure TForm1.SkipOperationClick(Sender: TObject);
+procedure TRepoFrame.SkipOperationClick(Sender: TObject);
 begin
   if (FRepo.Root = '') or not ContinueMode then
     Exit;
@@ -648,7 +648,7 @@ begin
   RefreshRepository;
 end;
 
-procedure TForm1.AbortOperationClick(Sender: TObject);
+procedure TRepoFrame.AbortOperationClick(Sender: TObject);
 var
   Noun: string;
 begin

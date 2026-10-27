@@ -14,7 +14,7 @@
   editor paints no band of a tag it does not know, so the texts are
   painted over the band from OnDrawEditor. }
 
-procedure TForm1.MenuBlameClick(Sender: TObject);
+procedure TRepoFrame.MenuBlameClick(Sender: TObject);
 begin
   FBlameOn := not FBlameOn;
   FBlameItem.Checked := FBlameOn;
@@ -34,7 +34,7 @@ end;
   side git could not blame is kept as nil, so it is not asked again),
   else in a new job. The band keeps its width while the job runs, so
   the text does not jump when the result comes. }
-procedure TForm1.StartBlame;
+procedure TRepoFrame.StartBlame;
 var
   OldRef, NewRef: string;
   i, j: integer;
@@ -67,7 +67,7 @@ end;
   done, and is freed with the next finished jobs: waiting for it here
   would stall the window. The history jobs (umain.history.inc) are kept
   in the same list. }
-procedure TForm1.AbandonBlameJob;
+procedure TRepoFrame.AbandonBlameJob;
 begin
   if FBlameJob = nil then
     Exit;
@@ -76,7 +76,7 @@ begin
   FBlameJob := nil;
 end;
 
-procedure TForm1.FreeFinishedBlameJobs(AWait: boolean);
+procedure TRepoFrame.FreeFinishedBlameJobs(AWait: boolean);
 var
   i: integer;
 begin
@@ -88,12 +88,12 @@ begin
     end;
 end;
 
-procedure TForm1.FreeBlameJobsAsync(Data: PtrInt);
+procedure TRepoFrame.FreeBlameJobsAsync(Data: PtrInt);
 begin
   FreeFinishedBlameJobs(False);
 end;
 
-procedure TForm1.CacheBlame(const ARef, APath: string; ABlame: TGittanBlame);
+procedure TRepoFrame.CacheBlame(const ARef, APath: string; ABlame: TGittanBlame);
 var
   i: integer;
 begin
@@ -111,7 +111,7 @@ end;
   it is still the job's, takes them from there. The job itself may not
   have finished yet (its notification is queued from inside Execute),
   so it is freed from the message loop. }
-procedure TForm1.BlameJobDone(Sender: TObject);
+procedure TRepoFrame.BlameJobDone(Sender: TObject);
 var
   Job: TGittanBlameJob;
 begin
@@ -130,7 +130,7 @@ end;
 { Forgets every blame: after a reload of the repository the work tree,
   and HEAD, may be something else. A running job would store its result
   after the clearing, so it is dropped too. }
-procedure TForm1.ClearBlameCache;
+procedure TRepoFrame.ClearBlameCache;
 var
   i: integer;
 begin
@@ -142,7 +142,7 @@ begin
   FBlameCache.Clear;
 end;
 
-procedure TForm1.StopBlame;
+procedure TRepoFrame.StopBlame;
 begin
   ClearBlameCache;
   AbandonHistoryJob;
@@ -165,7 +165,7 @@ end;
 { Shows or hides the band on both editors, sized to the longest author
   of the shown file's commits (up to BlameMaxAuthorCols characters) and
   the age. Without a blame yet the width is kept. }
-procedure TForm1.ApplyBlame;
+procedure TRepoFrame.ApplyBlame;
 
   procedure Measure(ABlame: TGittanBlame; var ACols: integer);
   var
@@ -207,7 +207,7 @@ end;
   the editor keeps it as set (its own bands are resized from their
   options at every paint). A change of width moves the text, so the
   wrap info is rebuilt. }
-procedure TForm1.SetBlameBand(AEd: TATSynEdit);
+procedure TRepoFrame.SetBlameBand(AEd: TATSynEdit);
 var
   Band, W: integer;
   Shown: boolean;
@@ -231,7 +231,7 @@ end;
   a side git could not blame, or a row beyond the rows. The old side,
   and a deleted line in the unified view, are blamed in the base, the
   rest in the new side. }
-function TForm1.BlameOfRow(AEd: TATSynEdit; ARow: integer; out ABlame: TGittanBlame): integer;
+function TRepoFrame.BlameOfRow(AEd: TATSynEdit; ARow: integer; out ABlame: TGittanBlame): integer;
 var
   Rows: TGittanRows;
   Line, FileLine: integer;
@@ -269,7 +269,7 @@ end;
   else the blamed commit (see BlameOfRow). AKey and ASource together
   tell one commit from another: the index in ASource, the history or
   the blame. }
-function TForm1.CommitOfRow(AEd: TATSynEdit; ARow: integer; out AInfo: TGittanBlameCommit;
+function TRepoFrame.CommitOfRow(AEd: TATSynEdit; ARow: integer; out AInfo: TGittanBlameCommit;
   out AKey: integer; out ASource: TObject): boolean;
 var
   Blame: TGittanBlame;
@@ -298,7 +298,7 @@ begin
   Result := True;
 end;
 
-function TForm1.BlameHintText(const ACommit: TGittanBlameCommit): string;
+function TRepoFrame.BlameHintText(const ACommit: TGittanBlameCommit): string;
 begin
   if ACommit.Uncommitted then
     Result := rsNotCommittedYet
@@ -310,7 +310,7 @@ end;
 { The hint for the mouse at X, Y of AEd: the commit of the row under it
   when X is on the band or the initials band, else empty. The row is
   found from Y alone, at the first column of the text. }
-function TForm1.BlameHintAt(AEd: TATSynEdit; X, Y: integer): string;
+function TRepoFrame.BlameHintAt(AEd: TATSynEdit; X, Y: integer): string;
 
   function OnBand(ATag: integer): boolean;
   var
@@ -342,7 +342,7 @@ end;
   the first visible row of each run of rows with the same commit, in the
   gutter's text color, the uncommitted lines in italics. Only the first
   row of a wrapped line counts, and a row without a commit ends a run. }
-procedure TForm1.DrawBlame(AEd: TATSynEdit; C: TCanvas);
+procedure TRepoFrame.DrawBlame(AEd: TATSynEdit; C: TCanvas);
 var
   Band, W, CharW, CharH, TextH, Key, PrevKey, Y: integer;
   Item: TATWrapItem;
@@ -414,7 +414,7 @@ end;
 { A click on a cell of the band shows the commit of its row: what it
   changed, in every file, as the diff from its parent; in the history
   view with the file open at the lines. }
-procedure TForm1.EditClickGutter(Sender: TObject; ABand, ALine: integer;
+procedure TRepoFrame.EditClickGutter(Sender: TObject; ABand, ALine: integer;
   var AHandled: boolean);
 var
   Ed: TATSynEdit;
@@ -449,7 +449,7 @@ end;
   the one the click was in, if the commit touched it under this path.
   The summary names the commit (see BaseLabel); Compare With > HEAD
   (Working Tree) goes back. }
-procedure TForm1.ShowBlameCommit(const AHash: string);
+procedure TRepoFrame.ShowBlameCommit(const AHash: string);
 var
   Range: string;
 begin
@@ -466,7 +466,7 @@ end;
 
 { The hand over a cell that can be clicked, set from the message loop so
   it lands after the editor's own cursor update (see EditMouseMove). }
-procedure TForm1.HandCursorAsync(Data: PtrInt);
+procedure TRepoFrame.HandCursorAsync(Data: PtrInt);
 begin
   if (FHoverBlame <> '') and (TATSynEdit(Data) = FHoverEd) then
     FHoverEd.Cursor := crHandPoint;

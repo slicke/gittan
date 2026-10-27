@@ -18,6 +18,10 @@ const
   {** The width of a tab in the editor when none was picked: git's own,
     what a diff shows in a terminal and on GitHub. }
   DefaultTabSize = 8;
+  {** How often the background fetch runs, in minutes. }
+  DefaultAutoFetchMinutes = 10;
+  MinAutoFetchMinutes = 1;
+  MaxAutoFetchMinutes = 240;
   {** The editor font when none was picked: the platform's own monospaced
     font (what Terminal and Xcode, Visual Studio or the desktop use). }
   DefaultFontName = {$IFDEF DARWIN}'Menlo'{$ELSE}{$IFDEF WINDOWS}'Consolas'
@@ -38,9 +42,12 @@ type
   TGittanSettings = class
   private
     FRecent: TStringList;
+    FTabs: TStringList;
     FTrust: TStringList;
     FFileName: string;
   public
+    {** The tab shown when the window closed, an index into Tabs. }
+    ActiveTab: integer;
     {** The window bounds, or a zero Width when none were saved. }
     Left, Top, Width, Height: integer;
     Maximized: boolean;
@@ -98,10 +105,25 @@ type
     {** The git to run, as a path to it; empty runs the git found on
       ToolSearchPath (see gittan.git). }
     GitPath: string;
+    {** Whether the open repository is fetched in the background once
+      AutoFetchMinutes have passed since it was last fetched; on unless
+      the user turns it off. }
+    AutoFetch: boolean;
+    AutoFetchMinutes: integer;
+    {** Whether the GitHub features are on (pull requests, the GitHub page,
+      review comments); on unless the user turns them off. }
+    GitHubEnabled: boolean;
     {** gh, GitHub's command line tool, as a path to it; empty runs the
       gh found on ToolSearchPath, and when there is none the features
       that need GitHub are off. }
     GhPath: string;
+    {** Whether the GitHub page leaves out the user's pull requests that
+      nobody but them has commented on or reviewed. }
+    HideWithoutFeedback: boolean;
+    {** Whether the GitHub page looks for a clone of a pull request's
+      repository beside the recent repositories too, in the folders they
+      are in, besides among them; off unless the user turns it on. }
+    CloneSiblings: boolean;
     {** Whether the AI features show (see gittan.ai): off until the user
       turns them on, since they send the changes to the agent's
       provider. }
@@ -138,6 +160,9 @@ type
     procedure TrustCommands(const ARoot, AHash: string);
     {** The recently opened repositories, newest first. }
     property Recent: TStringList read FRecent;
+    {** The repositories open in the window's tabs when it closed, left
+      to right, which open again at the next start; section Tabs. }
+    property Tabs: TStringList read FTabs;
     {** The ini file the settings are read from and written to. }
     property FileName: string read FFileName;
   end;
@@ -145,17 +170,20 @@ type
 implementation
 
 uses
-  IniFiles, md5, gittan.textfile;
+  Math, IniFiles, md5, gittan.textfile;
 
 const
   SecWindow = 'Window';
   SecView = 'View';
   SecRecent = 'Recent';
+  SecTabs = 'Tabs';
   SecUpdate = 'Update';
   SecCommit = 'Commit';
   SecTools = 'Tools';
   SecTrust = 'Trust';
   SecAI = 'AI';
+  { A section per forge, the service that hosts the repositories. }
+  SecGitHub = 'GitHub';
   ConfigFolder = 'Gittan';
 
 {** The folder the ini file lives in. GetAppConfigDir names it after
@@ -215,6 +243,7 @@ begin
   inherited Create;
   FRecent := TStringList.Create;
   FRecent.CaseSensitive := True;
+  FTabs := TStringList.Create;
   FTrust := TStringList.Create;
   if AFileName <> '' then
     FFileName := AFileName
@@ -222,14 +251,18 @@ begin
     FFileName := IncludeTrailingPathDelimiter(ConfigDir) + 'gittan.ini';
   ContextLines := 3;
   SubmodulesOpen := True;
+  AutoFetch := True;
+  AutoFetchMinutes := DefaultAutoFetchMinutes;
   CommitOpen := True;
   Translations := True;
+  GitHubEnabled := True;
 end;
 
 destructor TGittanSettings.Destroy;
 begin
   FTrust.Free;
   FRecent.Free;
+  FTabs.Free;
   inherited Destroy;
 end;
 
@@ -280,7 +313,14 @@ begin
       TerminalCommand := Ini.ReadString(SecView, 'TerminalCommand', '');
       TabSize := Ini.ReadInteger(SecView, 'TabSize', 0);
       GitPath := Ini.ReadString(SecTools, 'Git', '');
-      GhPath := Ini.ReadString(SecTools, 'Gh', '');
+      AutoFetch := Ini.ReadBool(SecTools, 'AutoFetch', True);
+      AutoFetchMinutes := EnsureRange(Ini.ReadInteger(SecTools, 'AutoFetchMinutes',
+        DefaultAutoFetchMinutes), MinAutoFetchMinutes, MaxAutoFetchMinutes);
+      GitHubEnabled := Ini.ReadBool(SecGitHub, 'Enabled', True);
+      { Earlier versions kept gh's path with git's. }
+      GhPath := Ini.ReadString(SecGitHub, 'Cli', Ini.ReadString(SecTools, 'Gh', ''));
+      HideWithoutFeedback := Ini.ReadBool(SecGitHub, 'HideWithoutFeedback', False);
+      CloneSiblings := Ini.ReadBool(SecGitHub, 'CloneSiblings', False);
       AIEnabled := Ini.ReadBool(SecAI, 'Enabled', False);
       AIAgent := Ini.ReadString(SecAI, 'Agent', '');
       ClaudePath := Ini.ReadString(SecAI, 'Claude', '');
@@ -296,6 +336,17 @@ begin
         if S <> '' then
           FRecent.Add(S);
       end;
+      FTabs.Clear;
+      i := 0;
+      repeat
+        S := Ini.ReadString(SecTabs, 'Repo' + IntToStr(i), '');
+        if S <> '' then
+          FTabs.Add(S);
+        Inc(i);
+      until S = '';
+      ActiveTab := Ini.ReadInteger(SecTabs, 'Active', 0);
+      if (ActiveTab < 0) or (ActiveTab >= FTabs.Count) then
+        ActiveTab := 0;
     finally
       Ini.Free;
     end;
@@ -347,7 +398,13 @@ begin
       Ini.WriteString(SecView, 'TerminalCommand', KeepEdges(TerminalCommand));
       Ini.WriteInteger(SecView, 'TabSize', TabSize);
       Ini.WriteString(SecTools, 'Git', KeepEdges(GitPath));
-      Ini.WriteString(SecTools, 'Gh', KeepEdges(GhPath));
+      Ini.WriteBool(SecTools, 'AutoFetch', AutoFetch);
+      Ini.WriteInteger(SecTools, 'AutoFetchMinutes', AutoFetchMinutes);
+      Ini.DeleteKey(SecTools, 'Gh');
+      Ini.WriteBool(SecGitHub, 'Enabled', GitHubEnabled);
+      Ini.WriteString(SecGitHub, 'Cli', KeepEdges(GhPath));
+      Ini.WriteBool(SecGitHub, 'HideWithoutFeedback', HideWithoutFeedback);
+      Ini.WriteBool(SecGitHub, 'CloneSiblings', CloneSiblings);
       Ini.WriteBool(SecAI, 'Enabled', AIEnabled);
       Ini.WriteString(SecAI, 'Agent', AIAgent);
       Ini.WriteString(SecAI, 'Claude', KeepEdges(ClaudePath));
@@ -362,6 +419,11 @@ begin
       Ini.EraseSection(SecRecent);
       for i := 0 to FRecent.Count - 1 do
         Ini.WriteString(SecRecent, 'Repo' + IntToStr(i), KeepEdges(FRecent[i]));
+      Ini.EraseSection(SecTabs);
+      for i := 0 to FTabs.Count - 1 do
+        Ini.WriteString(SecTabs, 'Repo' + IntToStr(i), KeepEdges(FTabs[i]));
+      if FTabs.Count > 0 then
+        Ini.WriteInteger(SecTabs, 'Active', ActiveTab);
       Ini.EraseSection(SecTrust);
       for i := 0 to FTrust.Count - 1 do
         Ini.WriteString(SecTrust, FTrust.Names[i], FTrust.ValueFromIndex[i]);

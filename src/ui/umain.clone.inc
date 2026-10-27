@@ -16,21 +16,21 @@
 
 { The folder the clone dialog and the init dialog start in: the last
   clone's, else the one the most recent repository is in, else home. }
-function TForm1.CloneParent: string;
+function TRepoFrame.CloneParent: string;
 begin
   Result := FCloneParent;
   if (Result <> '') and DirectoryExists(Result) then
     Exit;
-  if FSettings.Recent.Count > 0 then
+  if App.Settings.Recent.Count > 0 then
   begin
-    Result := ExtractFileDir(ExcludeTrailingPathDelimiter(FSettings.Recent[0]));
+    Result := ExtractFileDir(ExcludeTrailingPathDelimiter(App.Settings.Recent[0]));
     if DirectoryExists(Result) then
       Exit;
   end;
   Result := ExcludeTrailingPathDelimiter(GetUserDir);
 end;
 
-procedure TForm1.StartClone(const AUrl, ATarget: string; ASubmodules: boolean);
+procedure TRepoFrame.StartClone(const AUrl, ATarget: string; ASubmodules: boolean);
 begin
   if (FRemoteJob <> nil) or (FCommitJob <> nil) then
     Exit;
@@ -47,34 +47,39 @@ begin
 end;
 
 { From RemoteJobDone, the job no longer the running one. }
-procedure TForm1.CloneDone(AJob: TGittanRemoteJob);
+procedure TRepoFrame.CloneDone(AJob: TGittanRemoteJob);
 begin
   if not AJob.Ok then
   begin
     ShowRemoteFailure(AJob, False);
     Exit;
   end;
-  OpenRepository(AJob.Root, @ClonedOpened);
+  FWindow.OpenRepository(AJob.Root, @ClonedOpened);
 end;
 
 { The notes after a clone or an init wait for the repository, which
   opens in a thread. }
-procedure TForm1.ClonedOpened(Sender: TObject);
+{ Sender is the frame the repository opened in, which may be another
+  one (TRepoWindow.OpenRepository). }
+procedure TRepoFrame.ClonedOpened(Sender: TObject);
 begin
-  BannerSuccess(Format(rsCloned, [ExtractFileName(FRepo.Root)]));
+  with TRepoFrame(Sender) do
+    BannerSuccess(Format(rsCloned, [ExtractFileName(FRepo.Root)]));
 end;
 
-procedure TForm1.InitAlreadyOpened(Sender: TObject);
+procedure TRepoFrame.InitAlreadyOpened(Sender: TObject);
 begin
-  StatusNote(Format(rsInitAlready, [ExtractFileName(FRepo.Root)]));
+  with TRepoFrame(Sender) do
+    StatusNote(Format(rsInitAlready, [ExtractFileName(FRepo.Root)]));
 end;
 
-procedure TForm1.InitDoneOpened(Sender: TObject);
+procedure TRepoFrame.InitDoneOpened(Sender: TObject);
 begin
-  BannerSuccess(Format(rsInitDone, [ExtractFileName(FRepo.Root)]));
+  with TRepoFrame(Sender) do
+    BannerSuccess(Format(rsInitDone, [ExtractFileName(FRepo.Root)]));
 end;
 
-procedure TForm1.MenuCloneClick(Sender: TObject);
+procedure TRepoFrame.MenuCloneClick(Sender: TObject);
 var
   Url, Folder, Target: string;
   Submodules: boolean;
@@ -93,7 +98,7 @@ end;
 
 { A folder with a .git of its own is a repository already; git init
   there would only say it reinitialized it. }
-procedure TForm1.MenuInitClick(Sender: TObject);
+procedure TRepoFrame.MenuInitClick(Sender: TObject);
 var
   Dir, Err, Title: string;
   Probe: TGittanRepo;
@@ -113,7 +118,7 @@ begin
   end;
   if FileExists(Dir + PathDelim + '.git') or DirectoryExists(Dir + PathDelim + '.git') then
   begin
-    OpenRepository(Dir, @InitAlreadyOpened);
+    FWindow.OpenRepository(Dir, @InitAlreadyOpened);
     Exit;
   end;
   Probe := TGittanRepo.Create;
@@ -136,17 +141,17 @@ begin
       BannerError(Format(rsInitFailed, [Dir]), Err);
     Exit;
   end;
-  OpenRepository(Dir, @InitDoneOpened);
+  FWindow.OpenRepository(Dir, @InitDoneOpened);
 end;
 
-function TForm1.CanEditRemotes: boolean;
+function TRepoFrame.CanEditRemotes: boolean;
 begin
   Result := (FRepo.Root <> '') and (FRemoteJob = nil) and (FCommitJob = nil);
 end;
 
 { The status bar's upstream, the counts and the Repository page follow
   the change. }
-procedure TForm1.EditRemotesAsk;
+procedure TRepoFrame.EditRemotesAsk;
 var
   Fetch: boolean;
 begin
@@ -159,12 +164,12 @@ begin
     StartRemote(rkFetch);
 end;
 
-procedure TForm1.MenuRemotesClick(Sender: TObject);
+procedure TRepoFrame.MenuRemotesClick(Sender: TObject);
 begin
   EditRemotesAsk;
 end;
 
-procedure TForm1.RepoPageEditRemotes(Sender: TObject);
+procedure TRepoFrame.RepoPageEditRemotes(Sender: TObject);
 begin
   EditRemotesAsk;
 end;

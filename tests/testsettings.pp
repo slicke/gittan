@@ -22,10 +22,12 @@ type
     procedure TestRoundTrip;
     procedure TestQuotesAndSpaces;
     procedure TestRecentList;
+    procedure TestTabs;
     procedure TestDamagedFileGivesDefaults;
     procedure TestOldDefaultFont;
     procedure TestDefaultFontSize;
     procedure TestTrust;
+    procedure TestOldGhPath;
   end;
 
 implementation
@@ -60,6 +62,10 @@ begin
     AssertEquals('no tab width picked', 0, S.TabSize);
     AssertEquals('', S.GitPath);
     AssertEquals('', S.GhPath);
+    AssertTrue('the GitHub features start on', S.GitHubEnabled);
+    AssertTrue('the background fetch starts on', S.AutoFetch);
+    AssertEquals(DefaultAutoFetchMinutes, S.AutoFetchMinutes);
+    AssertFalse(S.HideWithoutFeedback);
     AssertFalse('the AI features start off', S.AIEnabled);
     AssertEquals('', S.ClaudePath);
     AssertEquals('', S.ClaudeModel);
@@ -100,6 +106,10 @@ begin
     S.TabSize := 4;
     S.GitPath := '/opt/homebrew/bin/git';
     S.GhPath := 'C:\Program Files\GitHub CLI\gh.exe';
+    S.GitHubEnabled := False;
+    S.AutoFetch := False;
+    S.AutoFetchMinutes := 30;
+    S.HideWithoutFeedback := True;
     S.SyntaxTheme := 'Delphi';
     S.AIEnabled := True;
     S.ClaudePath := '/Users/me/.local/bin/claude';
@@ -141,6 +151,10 @@ begin
     AssertEquals(4, S.TabSize);
     AssertEquals('/opt/homebrew/bin/git', S.GitPath);
     AssertEquals('C:\Program Files\GitHub CLI\gh.exe', S.GhPath);
+    AssertFalse(S.GitHubEnabled);
+    AssertFalse(S.AutoFetch);
+    AssertEquals(30, S.AutoFetchMinutes);
+    AssertTrue(S.HideWithoutFeedback);
     AssertEquals('Delphi', S.SyntaxTheme);
     AssertTrue(S.AIEnabled);
     AssertEquals('/Users/me/.local/bin/claude', S.ClaudePath);
@@ -207,6 +221,44 @@ begin
     AssertEquals('/repo/' + IntToStr(MaxRecent), S.Recent[0]);
     AssertEquals('/repo/' + IntToStr(MaxRecent + 3), S.Recent[1]);
     AssertEquals(-1, S.Recent.IndexOf('/repo/3'));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSettingsTest.TestTabs;
+var
+  S: TGittanSettings;
+begin
+  S := TGittanSettings.Create(FFileName);
+  try
+    AssertEquals('none by default', 0, S.Tabs.Count);
+    S.Tabs.Add('/repo/a');
+    S.Tabs.Add('/repo/b c');
+    S.Tabs.Add('/repo/d');
+    S.ActiveTab := 1;
+    S.Save;
+  finally
+    S.Free;
+  end;
+  S := TGittanSettings.Create(FFileName);
+  try
+    S.Load;
+    AssertEquals(3, S.Tabs.Count);
+    AssertEquals('/repo/b c', S.Tabs[1]);
+    AssertEquals(1, S.ActiveTab);
+    S.Tabs.Clear;
+    S.Tabs.Add('/repo/a');
+    S.ActiveTab := 5;
+    S.Save;
+  finally
+    S.Free;
+  end;
+  S := TGittanSettings.Create(FFileName);
+  try
+    S.Load;
+    AssertEquals('fewer tabs drop the rest', 1, S.Tabs.Count);
+    AssertEquals('an active tab past the end is the first', 0, S.ActiveTab);
   finally
     S.Free;
   end;
@@ -296,6 +348,35 @@ begin
     AssertFalse('an empty hash trusts nothing', S.CommandsTrusted('/tmp/b', 'x'));
   finally
     S.Free;
+  end;
+end;
+
+{ gh's path was kept in Tools with git's; it is read from there and
+  moved to the GitHub section. }
+procedure TSettingsTest.TestOldGhPath;
+var
+  S: TGittanSettings;
+  Ini: TStringList;
+begin
+  Ini := TStringList.Create;
+  try
+    Ini.Add('[Tools]');
+    Ini.Add('Gh=/opt/gh/bin/gh');
+    Ini.SaveToFile(FFileName);
+    S := TGittanSettings.Create(FFileName);
+    try
+      S.Load;
+      AssertEquals('/opt/gh/bin/gh', S.GhPath);
+      AssertTrue(S.GitHubEnabled);
+      S.Save;
+    finally
+      S.Free;
+    end;
+    Ini.LoadFromFile(FFileName);
+    AssertEquals('the old key is gone', -1, Ini.IndexOf('Gh=/opt/gh/bin/gh'));
+    AssertTrue('the path is under GitHub', Ini.IndexOf('Cli=/opt/gh/bin/gh') >= 0);
+  finally
+    Ini.Free;
   end;
 end;
 

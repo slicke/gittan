@@ -1,10 +1,10 @@
 unit gittan.reviews;
 
-{** The review comments of a pull request: its threads as GitHub's
-  GraphQL API gives them through gh, the notes of its conversation that
-  are on no line, a job that fetches them in a
-  thread, and the mapping of a line of the pull request's head to the
-  same line in the work tree. Nothing here needs the LCL. }
+{** The review comments of a pull request: its threads, the notes of its
+  conversation that are on no line, the base of the job that reads them
+  in a thread (a forge's, see gittan.forge; GitHub's reads them in
+  gittan.github), and the mapping of a line of the pull request's head
+  to the same line in the work tree. Nothing here needs the LCL. }
 
 {$mode objfpc}{$H+}
 
@@ -56,34 +56,6 @@ type
   end;
   TGittanPullNotes = array of TGittanPullNote;
 
-const
-  {** The GraphQL query for one page of the threads of a pull request;
-    $after is the cursor of the page before, left out for the first. }
-  ReviewThreadsQuery =
-    'query($owner:String!,$name:String!,$number:Int!,$after:String){' +
-    'repository(owner:$owner,name:$name){pullRequest(number:$number){' +
-    'headRefOid reviews(last:100){nodes{state body author{login} submittedAt url}} ' +
-    'comments(last:100){nodes{author{login} body createdAt url}} ' +
-    'reviewThreads(first:100,after:$after){' +
-    'pageInfo{hasNextPage endCursor} nodes{' +
-    'isResolved isOutdated path line startLine originalLine diffSide subjectType ' +
-    'comments(first:100){nodes{author{login} body createdAt url}}}}}}}';
-
-{** Reads one page of the answer to ReviewThreadsQuery and adds its
-  threads to AThreads. AHeadOid is the commit at the head of the pull
-  request; ACursor the cursor of the next page when AHasNext. False when
-  the text is not such an answer. }
-function ParseReviewThreads(const AJson: string; var AThreads: TGittanReviewThreads;
-  out AHeadOid: string; out AHasNext: boolean; out ACursor: string): boolean;
-
-{** Reads the conversation of the pull request from an answer to
-  ReviewThreadsQuery into ANotes, oldest first: its comments, and its
-  reviews that were submitted with text or that approved, requested
-  changes or were dismissed; a review that only commented on lines has
-  nothing to show here, and a pending one is not submitted yet. False
-  when the text is not such an answer. }
-function ParsePullNotes(const AJson: string; out ANotes: TGittanPullNotes): boolean;
-
 {** The line ALine of a file, counted in the old side of ADiff (what
   `git diff -U0` prints for the file), on the new side: shifted by the
   lines added and removed above it, or, for a line ADiff changes, the
@@ -100,26 +72,91 @@ function ReviewAge(AThen, ANow: TDateTime): string;
 function OpenThreads(const AThreads: TGittanReviewThreads): integer;
 
 type
-  {** Fetches the review threads of pull request ANumber of ARepoPath
-    ("owner/repo") with gh, every page of them, in a thread. OnDone is
-    called in the main thread when it is done, as long as the job has
-    not been stopped; Error is gh's message when it failed. }
+  {** What a part of a comment's body is: Markdown, or a <details> block
+    (its summary). }
+  TGittanCommentPartKind = (cpText, cpDetails);
+
+  {** A part of a comment's body. Text is Markdown, or for a cpDetails
+    its summary, on one line ("Details" when it has none). A cpDetails
+    at Depth d holds the parts after it deeper than d, up to the next
+    one at d or above. }
+  TGittanCommentPart = record
+    Kind: TGittanCommentPartKind;
+    Depth: integer;
+    Text: string;
+  end;
+  TGittanCommentParts = array of TGittanCommentPart;
+
+{** A comment's body as a card shows it, cut at its <details> blocks,
+  the HTML a bot writes in it (CodeRabbit's, say) made Markdown or taken
+  out: HTML comments go, an <img> becomes its alt text, an <a href> a
+  Markdown link, and the block tags (p, div, table, lists, headings and
+  the like) go with a line break or a blank line in their place; a
+  heading is bold, as a card has no room for a big one. Code (fenced or
+  between backticks) is left as it is, and inline tags and anything
+  else that looks like a tag (Vec<T>) are left for the Markdown
+  converter to pass or show. }
+function CommentParts(const ABody: string): TGittanCommentParts;
+
+{** The Markdown of a comment's body with its <details> blocks folded:
+  the parts of CommentParts at the top, a block as "▸ " and its summary
+  on a line of its own. }
+function CommentMarkdown(const ABody: string): string;
+
+const
+  {** The scheme of a link LinkFilePaths makes to a file of the
+    repository: "gittan-file:src/main.pp#L42". }
+  FileLinkScheme = 'gittan-file:';
+
+type
+  {** Whether APath, relative to the repository's root with / between
+    its folders, is a file there. }
+  TGittanPathTest = function(const APath: string): boolean of object;
+
+{** AMarkdown with each path in its text that AExists says is a file of
+  the repository made a link to it (FileLinkScheme), with the line when
+  ":42", ":42-50" or "#L42" follows it: "src/main.pp:42" becomes
+  "[src/main.pp:42](gittan-file:src/main.pp#L42)". A code span that
+  holds only such a path becomes a link around it. A path needs a / or a
+  . in it; one in a link already, a URL, a tag or code (fenced) is left
+  as it is. }
+function LinkFilePaths(const AMarkdown: string; AExists: TGittanPathTest): string;
+
+{** The path and the line (0 for none) of a link LinkFilePaths made;
+  false for any other address. }
+function FileOfLink(const ALink: string; out APath: string; out ALine: integer): boolean;
+
+type
+  {** Reads the review threads of pull request Number of RepoPath
+    ("owner/name") and the notes of its conversation, every page of
+    them, in a thread. OnDone is called in the main thread when it is
+    done, as long as the job has not been stopped; Error is the forge's
+    or its tool's message when it failed. A forge (gittan.forge) fills in
+    Ask, which sets Threads, Notes and HeadOid through the protected
+    fields. }
   TGittanReviewJob = class(TGittanJob)
   private
-    FExe, FRoot, FRepoPath: string;
+    FRoot, FRepoPath: string;
     FNumber: integer;
+    FError: string;
+  protected
     FThreads: TGittanReviewThreads;
     FNotes: TGittanPullNotes;
-    FHeadOid, FError: string;
-  protected
+    FHeadOid: string;
+    {** Reads the threads, the notes and the head commit; false with the
+      reason in AError when they could not be read. May return early
+      when Terminated. }
+    function Ask(out AError: string): boolean; virtual; abstract;
     procedure Execute; override;
+    property Root: string read FRoot;
   public
-    constructor Create(const AExe, ARoot, ARepoPath: string; ANumber: integer);
+    constructor Create(const ARoot, ARepoPath: string; ANumber: integer);
     property Number: integer read FNumber;
     property RepoPath: string read FRepoPath;
     property Threads: TGittanReviewThreads read FThreads;
     {** The conversation, from the first page. }
     property Notes: TGittanPullNotes read FNotes;
+    {** The commit at the head of the pull request. }
     property HeadOid: string read FHeadOid;
     property Error: string read FError;
   end;
@@ -127,242 +164,7 @@ type
 implementation
 
 uses
-  Math, fpjson, jsonparser, DateUtils, gittan.git;
-
-{ A path through nested objects, nil when a step is missing or not an
-  object. }
-function Dig(AData: TJSONData; const ANames: array of string): TJSONData;
-var
-  i: integer;
-begin
-  Result := AData;
-  for i := 0 to High(ANames) do
-  begin
-    if (Result = nil) or (Result.JSONType <> jtObject) then
-      Exit(nil);
-    Result := TJSONObject(Result).Find(ANames[i]);
-  end;
-end;
-
-{ An integer field that may be null. }
-function IntOf(AObject: TJSONObject; const AName: string): integer;
-var
-  Data: TJSONData;
-begin
-  Data := AObject.Find(AName);
-  if (Data <> nil) and (Data.JSONType = jtNumber) then
-    Result := Data.AsInteger
-  else
-    Result := 0;
-end;
-
-function StrOf(AObject: TJSONObject; const AName: string): string;
-var
-  Data: TJSONData;
-begin
-  Data := AObject.Find(AName);
-  if (Data <> nil) and (Data.JSONType = jtString) then
-    Result := Data.AsString
-  else
-    Result := '';
-end;
-
-{ The login of a comment's author; a deleted account has none. }
-function AuthorOf(AObject: TJSONObject): string;
-var
-  Author: TJSONData;
-begin
-  Result := '';
-  Author := AObject.Find('author');
-  if (Author <> nil) and (Author.JSONType = jtObject) then
-    Result := StrOf(TJSONObject(Author), 'login');
-  if Result = '' then
-    Result := 'ghost';
-end;
-
-function BodyOf(AObject: TJSONObject): string;
-begin
-  Result := StringReplace(StrOf(AObject, 'body'), #13#10, #10, [rfReplaceAll]);
-end;
-
-function TimeOf(AObject: TJSONObject; const AName: string): TDateTime;
-begin
-  if not TryISO8601ToDate(StrOf(AObject, AName), Result, True) then
-    Result := 0;
-end;
-
-function ReadComment(AObject: TJSONObject): TGittanReviewComment;
-begin
-  Result := Default(TGittanReviewComment);
-  Result.Author := AuthorOf(AObject);
-  Result.Body := BodyOf(AObject);
-  Result.Url := StrOf(AObject, 'url');
-  Result.Created := TimeOf(AObject, 'createdAt');
-end;
-
-function ReadThread(AObject: TJSONObject; out AThread: TGittanReviewThread): boolean;
-var
-  Nodes: TJSONData;
-  i, n: integer;
-begin
-  AThread := Default(TGittanReviewThread);
-  AThread.Path := StrOf(AObject, 'path');
-  Result := AThread.Path <> '';
-  if not Result then
-    Exit;
-  AThread.Line := IntOf(AObject, 'line');
-  AThread.StartLine := IntOf(AObject, 'startLine');
-  AThread.OriginalLine := IntOf(AObject, 'originalLine');
-  AThread.LeftSide := StrOf(AObject, 'diffSide') = 'LEFT';
-  AThread.Resolved := AObject.Get('isResolved', False);
-  AThread.Outdated := AObject.Get('isOutdated', False);
-  AThread.OnFile := StrOf(AObject, 'subjectType') = 'FILE';
-  if AThread.OnFile then
-    AThread.Line := 0;
-  Nodes := Dig(AObject, ['comments', 'nodes']);
-  if (Nodes = nil) or (Nodes.JSONType <> jtArray) then
-    Exit;
-  SetLength(AThread.Comments, Nodes.Count);
-  n := 0;
-  for i := 0 to Nodes.Count - 1 do
-    if Nodes.Items[i].JSONType = jtObject then
-    begin
-      AThread.Comments[n] := ReadComment(TJSONObject(Nodes.Items[i]));
-      Inc(n);
-    end;
-  SetLength(AThread.Comments, n);
-end;
-
-function ParseReviewThreads(const AJson: string; var AThreads: TGittanReviewThreads;
-  out AHeadOid: string; out AHasNext: boolean; out ACursor: string): boolean;
-var
-  Data, Pull, Threads, Info, Nodes: TJSONData;
-  Thread: TGittanReviewThread;
-  i: integer;
-begin
-  AHeadOid := '';
-  AHasNext := False;
-  ACursor := '';
-  Result := False;
-  try
-    Data := GetJSON(AJson);
-  except
-    Exit;
-  end;
-  try
-    Pull := Dig(Data, ['data', 'repository', 'pullRequest']);
-    if (Pull = nil) or (Pull.JSONType <> jtObject) then
-      Exit;
-    AHeadOid := StrOf(TJSONObject(Pull), 'headRefOid');
-    Threads := Dig(Pull, ['reviewThreads']);
-    if (Threads = nil) or (Threads.JSONType <> jtObject) then
-      Exit;
-    Info := Dig(Threads, ['pageInfo']);
-    if (Info <> nil) and (Info.JSONType = jtObject) then
-    begin
-      AHasNext := TJSONObject(Info).Get('hasNextPage', False);
-      ACursor := StrOf(TJSONObject(Info), 'endCursor');
-      AHasNext := AHasNext and (ACursor <> '');
-    end;
-    Nodes := Dig(Threads, ['nodes']);
-    if (Nodes <> nil) and (Nodes.JSONType = jtArray) then
-      for i := 0 to Nodes.Count - 1 do
-        if (Nodes.Items[i].JSONType = jtObject) and
-          ReadThread(TJSONObject(Nodes.Items[i]), Thread) and (Length(Thread.Comments) > 0) then
-        begin
-          SetLength(AThreads, Length(AThreads) + 1);
-          AThreads[High(AThreads)] := Thread;
-        end;
-    Result := True;
-  finally
-    Data.Free;
-  end;
-end;
-
-function ParsePullNotes(const AJson: string; out ANotes: TGittanPullNotes): boolean;
-var
-  Data, Pull, Nodes: TJSONData;
-  Node: TJSONObject;
-  Note: TGittanPullNote;
-  State: string;
-  i, j: integer;
-
-  procedure Add;
-  begin
-    SetLength(ANotes, Length(ANotes) + 1);
-    ANotes[High(ANotes)] := Note;
-  end;
-
-begin
-  ANotes := nil;
-  Result := False;
-  try
-    Data := GetJSON(AJson);
-  except
-    Exit;
-  end;
-  try
-    Pull := Dig(Data, ['data', 'repository', 'pullRequest']);
-    if (Pull = nil) or (Pull.JSONType <> jtObject) then
-      Exit;
-    Nodes := Dig(Pull, ['comments', 'nodes']);
-    if (Nodes <> nil) and (Nodes.JSONType = jtArray) then
-      for i := 0 to Nodes.Count - 1 do
-        if Nodes.Items[i].JSONType = jtObject then
-        begin
-          Node := TJSONObject(Nodes.Items[i]);
-          Note := Default(TGittanPullNote);
-          Note.Kind := pnComment;
-          Note.Author := AuthorOf(Node);
-          Note.Body := Trim(BodyOf(Node));
-          Note.Url := StrOf(Node, 'url');
-          Note.Created := TimeOf(Node, 'createdAt');
-          if Note.Body <> '' then
-            Add;
-        end;
-    Nodes := Dig(Pull, ['reviews', 'nodes']);
-    if (Nodes <> nil) and (Nodes.JSONType = jtArray) then
-      for i := 0 to Nodes.Count - 1 do
-        if Nodes.Items[i].JSONType = jtObject then
-        begin
-          Node := TJSONObject(Nodes.Items[i]);
-          Note := Default(TGittanPullNote);
-          State := StrOf(Node, 'state');
-          if State = 'APPROVED' then
-            Note.Kind := pnApproved
-          else if State = 'CHANGES_REQUESTED' then
-            Note.Kind := pnChangesRequested
-          else if State = 'DISMISSED' then
-            Note.Kind := pnDismissed
-          else if State = 'COMMENTED' then
-            Note.Kind := pnCommented
-          else
-            Continue;
-          Note.Author := AuthorOf(Node);
-          Note.Body := Trim(BodyOf(Node));
-          Note.Url := StrOf(Node, 'url');
-          Note.Created := TimeOf(Node, 'submittedAt');
-          if (Note.Body <> '') or (Note.Kind <> pnCommented) then
-            Add;
-        end;
-    { Comments and reviews each come in order; together they are sorted
-      by time, keeping that order among equal times. }
-    for i := 1 to High(ANotes) do
-    begin
-      Note := ANotes[i];
-      j := i - 1;
-      while (j >= 0) and (ANotes[j].Created > Note.Created) do
-      begin
-        ANotes[j + 1] := ANotes[j];
-        Dec(j);
-      end;
-      ANotes[j + 1] := Note;
-    end;
-    Result := True;
-  finally
-    Data.Free;
-  end;
-end;
+  Math, DateUtils;
 
 { "-12,3" or "+7" of a hunk header: the start and the count (1 when
   left out). }
@@ -469,60 +271,631 @@ begin
 end;
 
 { ---------------------------------------------------------------------------
+  The body as a card shows it
+  --------------------------------------------------------------------------- }
+
+{ The value of attribute AName in the tag ATag ("<img alt="x" ...>"),
+  quoted with " or ' or not at all; '' when it has none. }
+function TagAttr(const ATag, AName: string): string;
+var
+  L: string;
+  p, q: integer;
+  Quote: char;
+begin
+  Result := '';
+  L := LowerCase(ATag);
+  p := Pos(' ' + AName + '=', L);
+  if p = 0 then
+    Exit;
+  Inc(p, Length(AName) + 2);
+  if (p <= Length(ATag)) and (ATag[p] in ['"', '''']) then
+  begin
+    Quote := ATag[p];
+    Inc(p);
+    q := p;
+    while (q <= Length(ATag)) and (ATag[q] <> Quote) do
+      Inc(q);
+  end
+  else
+  begin
+    q := p;
+    while (q <= Length(ATag)) and not (ATag[q] in [' ', '>', '/']) do
+      Inc(q);
+  end;
+  Result := Copy(ATag, p, q - p);
+end;
+
+{ The fence a line opens or closes, ``` or ~~~ and longer; '' for a
+  line that is not one. }
+function FenceOf(const ALine: string): string;
+var
+  T: string;
+  n: integer;
+begin
+  Result := '';
+  T := TrimLeft(ALine);
+  if (Length(ALine) - Length(T) > 3) or (Length(T) < 3) or not (T[1] in ['`', '~']) then
+    Exit;
+  n := 1;
+  while (n < Length(T)) and (T[n + 1] = T[1]) do
+    Inc(n);
+  if n >= 3 then
+    Result := Copy(T, 1, n);
+end;
+
+function CommentParts(const ABody: string): TGittanCommentParts;
+const
+  { Tags that stand for a blank line, and for a line break. }
+  ParaTags: array[0..13] of string = ('p', 'div', 'table', 'blockquote', 'ul', 'ol',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'center', 'hr');
+  LineTags: array[0..2] of string = ('tr', 'li', 'dt');
+  { Tags that go without a trace. }
+  GoneTags: array[0..8] of string = ('td', 'th', 'thead', 'tbody', 'tfoot', 'picture',
+    'source', 'dd', 'dl');
+var
+  Lines: TStringList;
+  Out, Summary, Href, Tag, Name, S, Fence: string;
+  i, p, q, Depth: integer;
+  InComment, InSummary, Closing: boolean;
+  { The parts of the <details> blocks open, innermost last. }
+  Open: array of integer;
+
+  function IsIn(const AName: string; const AList: array of string): boolean;
+  var
+    k: integer;
+  begin
+    for k := 0 to High(AList) do
+      if AList[k] = AName then
+        Exit(True);
+    Result := False;
+  end;
+
+  { Text that goes to the part being read, or to the summary being
+    read. }
+  procedure Emit(const AText: string);
+  begin
+    if InSummary then
+      Summary := Summary + AText
+    else
+      Out := Out + AText;
+  end;
+
+  { AText with one blank line between paragraphs, none at the start or
+    the end, since what was taken out leaves blank lines, and its
+    headings bold. Code keeps its own. }
+  function Tidy(const AText: string): string;
+  var
+    L: TStringList;
+    T, Last, Code: string;
+    k, n: integer;
+  begin
+    Result := '';
+    L := TStringList.Create;
+    try
+      L.Text := AText;
+      Code := '';
+      Last := '';
+      for k := 0 to L.Count - 1 do
+      begin
+        if Code <> '' then
+        begin
+          if (FenceOf(L[k]) <> '') and (Copy(TrimLeft(L[k]), 1, Length(Code)) = Code) then
+            Code := '';
+        end
+        else
+        begin
+          if Trim(L[k]) = '' then
+          begin
+            if (Result <> '') and (Last <> '') then
+              Result := Result + LineEnding;
+            Last := '';
+            Continue;
+          end;
+          Code := FenceOf(L[k]);
+          { A heading is bold text: a card has no room for a big one. }
+          if Code = '' then
+          begin
+            T := TrimLeft(L[k]);
+            n := 1;
+            while (n <= Length(T)) and (n <= 6) and (T[n] = '#') do
+              Inc(n);
+            if (n > 1) and (n <= Length(T)) and (T[n] = ' ') and
+              (Length(L[k]) - Length(T) < 4) then
+            begin
+              T := Trim(Copy(T, n + 1, MaxInt));
+              while (T <> '') and (T[Length(T)] = '#') do
+                Delete(T, Length(T), 1);
+              L[k] := '**' + Trim(T) + '**';
+            end;
+          end;
+        end;
+        Last := L[k];
+        Result := Result + L[k] + LineEnding;
+      end;
+      Result := TrimRight(Result);
+    finally
+      L.Free;
+    end;
+  end;
+
+  { The text read so far as a part at the depth it is in. }
+  procedure Flush;
+  begin
+    Out := Tidy(Out);
+    if Out <> '' then
+    begin
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)].Kind := cpText;
+      Result[High(Result)].Depth := Depth;
+      Result[High(Result)].Text := Out;
+    end;
+    Out := '';
+  end;
+
+begin
+  Result := nil;
+  Open := nil;
+  Out := '';
+  Summary := '';
+  Href := '';
+  Fence := '';
+  Depth := 0;
+  InComment := False;
+  InSummary := False;
+  Lines := TStringList.Create;
+  try
+    Lines.Text := ABody;
+    for i := 0 to Lines.Count - 1 do
+    begin
+      S := Lines[i];
+      { A line of code, or the fence around it, as it is. }
+      if not InComment then
+      begin
+        if Fence <> '' then
+        begin
+          if (FenceOf(S) <> '') and (Copy(TrimLeft(S), 1, Length(Fence)) = Fence) and
+            (Trim(Copy(TrimLeft(S), Length(Fence) + 1, MaxInt)) = '') then
+            Fence := '';
+          Emit(S + LineEnding);
+          Continue;
+        end;
+        if FenceOf(S) <> '' then
+        begin
+          Fence := FenceOf(S);
+          Emit(S + LineEnding);
+          Continue;
+        end;
+      end;
+      p := 1;
+      while p <= Length(S) do
+      begin
+        if InComment then
+        begin
+          q := Pos('-->', Copy(S, p, MaxInt));
+          if q = 0 then
+            p := Length(S) + 1
+          else
+          begin
+            Inc(p, q + 2);
+            InComment := False;
+          end;
+          Continue;
+        end;
+        if Copy(S, p, 4) = '<!--' then
+        begin
+          InComment := True;
+          Inc(p, 4);
+          Continue;
+        end;
+        { A code span, as it is. }
+        if S[p] = '`' then
+        begin
+          q := p + 1;
+          while (q <= Length(S)) and (S[q] <> '`') do
+            Inc(q);
+          if q > Length(S) then
+          begin
+            Emit(Copy(S, p, MaxInt));
+            Break;
+          end;
+          Emit(Copy(S, p, q - p + 1));
+          p := q + 1;
+          Continue;
+        end;
+        if S[p] <> '<' then
+        begin
+          Emit(S[p]);
+          Inc(p);
+          Continue;
+        end;
+        { A tag: "<", maybe "/", a name, anything up to ">" on the line. }
+        q := p + 1;
+        Closing := (q <= Length(S)) and (S[q] = '/');
+        if Closing then
+          Inc(q);
+        Name := '';
+        while (q <= Length(S)) and (S[q] in ['a'..'z', 'A'..'Z', '0'..'9']) and
+          ((Name <> '') or (S[q] in ['a'..'z', 'A'..'Z'])) do
+        begin
+          Name := Name + LowerCase(S[q]);
+          Inc(q);
+        end;
+        while (q <= Length(S)) and (S[q] <> '>') and (S[q] <> '<') do
+          Inc(q);
+        if (Name = '') or (q > Length(S)) or (S[q] <> '>') or
+          not ((S[p + 1 + Ord(Closing) + Length(Name)] in [' ', '>', '/', #9])) then
+        begin
+          Emit('<');
+          Inc(p);
+          Continue;
+        end;
+        Tag := Copy(S, p, q - p + 1);
+        p := q + 1;
+        if Name = 'details' then
+        begin
+          InSummary := False;
+          if not Closing then
+          begin
+            Flush;
+            SetLength(Result, Length(Result) + 1);
+            Result[High(Result)].Kind := cpDetails;
+            Result[High(Result)].Depth := Depth;
+            Result[High(Result)].Text := '';
+            SetLength(Open, Length(Open) + 1);
+            Open[High(Open)] := High(Result);
+            Inc(Depth);
+          end
+          else if Depth > 0 then
+          begin
+            Flush;
+            SetLength(Open, Length(Open) - 1);
+            Dec(Depth);
+          end;
+        end
+        else if Name = 'summary' then
+        begin
+          if not Closing and (Length(Open) > 0) then
+          begin
+            InSummary := True;
+            Summary := '';
+          end
+          else if Closing and InSummary then
+          begin
+            InSummary := False;
+            Result[Open[High(Open)]].Text :=
+              Trim(StringReplace(Summary, LineEnding, ' ', [rfReplaceAll]));
+          end;
+        end
+        else if Name = 'img' then
+          Emit(TagAttr(Tag, 'alt'))
+        else if Name = 'a' then
+        begin
+          if not Closing then
+          begin
+            Href := TagAttr(Tag, 'href');
+            if Href <> '' then
+              Emit('[');
+          end
+          else if Href <> '' then
+          begin
+            Emit('](' + Href + ')');
+            Href := '';
+          end;
+        end
+        else if Name = 'br' then
+          Emit('<br>')
+        else if IsIn(Name, ParaTags) then
+          Emit(LineEnding + LineEnding)
+        else if IsIn(Name, LineTags) then
+        begin
+          Emit(LineEnding);
+          if (Name = 'li') and not Closing then
+            Emit('- ');
+        end
+        else if IsIn(Name, GoneTags) then
+          Emit(' ')
+        else
+          Emit(Tag);
+      end;
+      Emit(LineEnding);
+    end;
+  finally
+    Lines.Free;
+  end;
+  { A <details> left open holds the rest. }
+  Flush;
+  for i := 0 to High(Result) do
+    if (Result[i].Kind = cpDetails) and (Result[i].Text = '') then
+      Result[i].Text := 'Details';
+end;
+
+function CommentMarkdown(const ABody: string): string;
+var
+  Parts: TGittanCommentParts;
+  i: integer;
+begin
+  Result := '';
+  Parts := CommentParts(ABody);
+  for i := 0 to High(Parts) do
+    if Parts[i].Depth = 0 then
+    begin
+      if Result <> '' then
+        Result := Result + LineEnding + LineEnding;
+      if Parts[i].Kind = cpDetails then
+        Result := Result + '▸ ' + Parts[i].Text
+      else
+        Result := Result + Parts[i].Text;
+    end;
+end;
+
+{ ---------------------------------------------------------------------------
+  Paths in the text
+  --------------------------------------------------------------------------- }
+
+const
+  { What a path is made of. }
+  PathChars = ['A'..'Z', 'a'..'z', '0'..'9', '.', '_', '-', '/', '+', '~', #128..#255];
+
+{ The line after a path at AText[P]: ":42", ":42-50", "#L42" or
+  "#L42-L50"; ALen is how long it is, 0 (and the line 0) for none. }
+function LineSuffix(const AText: string; P: integer; out ALen: integer): integer;
+var
+  q: integer;
+begin
+  Result := 0;
+  ALen := 0;
+  q := P;
+  if Copy(AText, q, 1) = ':' then
+    Inc(q)
+  else if Copy(AText, q, 2) = '#L' then
+    Inc(q, 2)
+  else
+    Exit;
+  while (q <= Length(AText)) and (AText[q] in ['0'..'9']) do
+  begin
+    if Result < 10000000 then
+      Result := Result * 10 + Ord(AText[q]) - Ord('0');
+    Inc(q);
+  end;
+  if (Result = 0) or ((q <= Length(AText)) and (AText[q] in PathChars - ['-', '.'])) then
+    Exit(0);
+  ALen := q - P;
+  { The end of a range, which the link leaves out. }
+  if (Copy(AText, q, 1) = '-') then
+  begin
+    Inc(q);
+    if Copy(AText, q, 1) = 'L' then
+      Inc(q);
+    if (q <= Length(AText)) and (AText[q] in ['0'..'9']) then
+    begin
+      while (q <= Length(AText)) and (AText[q] in ['0'..'9']) do
+        Inc(q);
+      ALen := q - P;
+    end;
+  end;
+end;
+
+{ The file APath is about, as AExists is asked for it: without "./" in
+  front; '' when it cannot be a path of the repository. }
+function RepoPathOf(const APath: string): string;
+begin
+  Result := APath;
+  if Copy(Result, 1, 2) = './' then
+    Delete(Result, 1, 2);
+  if (Result = '') or (Result[1] = '/') or (Result[Length(Result)] = '/') or
+    ((Pos('/', Result) = 0) and (Pos('.', Result) = 0)) or (Pos('//', Result) > 0) or
+    (Result = '..') or (Copy(Result, 1, 3) = '../') or (Pos('/../', Result) > 0) or
+    (Copy(Result, Length(Result) - 2, 3) = '/..') then
+    Result := '';
+end;
+
+function FileLink(const APath: string; ALine: integer): string;
+begin
+  Result := FileLinkScheme + APath;
+  if ALine > 0 then
+    Result := Result + '#L' + IntToStr(ALine);
+end;
+
+function LinkFilePaths(const AMarkdown: string; AExists: TGittanPathTest): string;
+var
+  Lines: TStringList;
+  S, Fence, Path, Code: string;
+  i, p, q, n, k, m, Line, Len: integer;
+begin
+  Result := '';
+  Fence := '';
+  Lines := TStringList.Create;
+  try
+    Lines.Text := AMarkdown;
+    for i := 0 to Lines.Count - 1 do
+    begin
+      S := Lines[i];
+      if i > 0 then
+        Result := Result + LineEnding;
+      if Fence <> '' then
+      begin
+        if (FenceOf(S) <> '') and (Copy(TrimLeft(S), 1, Length(Fence)) = Fence) and
+          (Trim(Copy(TrimLeft(S), Length(Fence) + 1, MaxInt)) = '') then
+          Fence := '';
+        Result := Result + S;
+        Continue;
+      end;
+      if FenceOf(S) <> '' then
+      begin
+        Fence := FenceOf(S);
+        Result := Result + S;
+        Continue;
+      end;
+      p := 1;
+      while p <= Length(S) do
+      begin
+        case S[p] of
+          '\':
+          begin
+            Result := Result + Copy(S, p, 2);
+            Inc(p, 2);
+          end;
+          { A code span: a link around it when it holds only a path. }
+          '`':
+          begin
+            n := p;
+            while (n <= Length(S)) and (S[n] = '`') do
+              Inc(n);
+            q := Pos(Copy(S, p, n - p), S, n);
+            if q = 0 then
+            begin
+              Result := Result + Copy(S, p, n - p);
+              p := n;
+              Continue;
+            end;
+            Code := Trim(Copy(S, n, q - n));
+            Line := 0;
+            Len := Length(Code);
+            k := LastDelimiter(':#', Code);
+            if (k > 0) and (LineSuffix(Code, k, m) > 0) and (k + m - 1 = Length(Code)) then
+            begin
+              Line := LineSuffix(Code, k, m);
+              Len := k - 1;
+            end;
+            Path := RepoPathOf(Copy(Code, 1, Len));
+            q := q + (n - p);
+            if (Path <> '') and AExists(Path) then
+              Result := Result + '[' + Copy(S, p, q - p) + '](' + FileLink(Path, Line) + ')'
+            else
+              Result := Result + Copy(S, p, q - p);
+            p := q;
+          end;
+          { A link, with its address, as it is: this bracket's own ]
+            (nested ones counted) right before a (. Any other bracket,
+            a task's [ ] or an index, is text, its paths linked. }
+          '[':
+          begin
+            q := p + 1;
+            k := 1;
+            while q <= Length(S) do
+            begin
+              if S[q] = '\' then
+                Inc(q)
+              else if S[q] = '[' then
+                Inc(k)
+              else if S[q] = ']' then
+              begin
+                Dec(k);
+                if k = 0 then
+                  Break;
+              end;
+              Inc(q);
+            end;
+            n := 0;
+            if (q < Length(S)) and (S[q + 1] = '(') then
+              n := Pos(')', S, q);
+            if n > 0 then
+            begin
+              Result := Result + Copy(S, p, n - p + 1);
+              p := n + 1;
+            end
+            else
+            begin
+              Result := Result + '[';
+              Inc(p);
+            end;
+          end;
+          { A tag or an address between < and >. }
+          '<':
+          begin
+            q := Pos('>', S, p);
+            if q = 0 then
+              q := p;
+            Result := Result + Copy(S, p, q - p + 1);
+            p := q + 1;
+          end;
+          else
+            if not (S[p] in PathChars) then
+            begin
+              Result := Result + S[p];
+              Inc(p);
+            end
+            else
+            begin
+              q := p;
+              while (q <= Length(S)) and (S[q] in PathChars) do
+                Inc(q);
+              { A URL, up to the space after it. }
+              if (Copy(S, q, 3) = '://') or (Copy(S, q, 1) = '@') or
+                ((Copy(S, q, 1) = ':') and (LowerCase(Copy(S, p, q - p)) = 'mailto')) then
+              begin
+                while (q <= Length(S)) and not (S[q] in [' ', #9]) do
+                  Inc(q);
+                Result := Result + Copy(S, p, q - p);
+                p := q;
+                Continue;
+              end;
+              { A sentence goes on after it. }
+              while (q > p) and (S[q - 1] in ['.', '-']) do
+                Dec(q);
+              Path := RepoPathOf(Copy(S, p, q - p));
+              Line := LineSuffix(S, q, Len);
+              if (Path <> '') and ((p = 1) or not (S[p - 1] in ['@', '#', '$', '%', '&'])) and
+                AExists(Path) then
+              begin
+                Result := Result + '[' + Copy(S, p, q + Len - p) + '](' + FileLink(Path, Line) + ')';
+                p := q + Len;
+              end
+              else
+              begin
+                if q = p then
+                  q := p + 1;
+                Result := Result + Copy(S, p, q - p);
+                p := q;
+              end;
+            end;
+        end;
+      end;
+    end;
+    if (AMarkdown <> '') and (AMarkdown[Length(AMarkdown)] in [#10, #13]) then
+      Result := Result + LineEnding;
+  finally
+    Lines.Free;
+  end;
+end;
+
+function FileOfLink(const ALink: string; out APath: string; out ALine: integer): boolean;
+var
+  p: integer;
+begin
+  APath := '';
+  ALine := 0;
+  Result := Copy(ALink, 1, Length(FileLinkScheme)) = FileLinkScheme;
+  if not Result then
+    Exit;
+  APath := Copy(ALink, Length(FileLinkScheme) + 1, MaxInt);
+  p := Pos('#L', APath);
+  if p > 0 then
+  begin
+    ALine := StrToIntDef(Copy(APath, p + 2, MaxInt), 0);
+    SetLength(APath, p - 1);
+  end;
+  Result := APath <> '';
+end;
+
+{ ---------------------------------------------------------------------------
   The job
   --------------------------------------------------------------------------- }
 
-constructor TGittanReviewJob.Create(const AExe, ARoot, ARepoPath: string; ANumber: integer);
+constructor TGittanReviewJob.Create(const ARoot, ARepoPath: string; ANumber: integer);
 begin
   inherited Create(True);
-  FExe := AExe;
   FRoot := ARoot;
   FRepoPath := ARepoPath;
   FNumber := ANumber;
 end;
 
 procedure TGittanReviewJob.Execute;
-var
-  Owner, Name, Output, Err, Cursor, Head: string;
-  HasNext: boolean;
-  Pages, p: integer;
 begin
-  p := Pos('/', FRepoPath);
-  Owner := Copy(FRepoPath, 1, p - 1);
-  Name := Copy(FRepoPath, p + 1, MaxInt);
-  Cursor := '';
-  Pages := 0;
-  repeat
-    { -f passes the names as strings even when they look like numbers;
-      -F types the number. }
-    if Cursor = '' then
-      HasNext := RunGitHubCli(FExe, FRoot, ['api', 'graphql', '-f', 'owner=' + Owner,
-        '-f', 'name=' + Name, '-F', 'number=' + IntToStr(FNumber),
-        '-f', 'query=' + ReviewThreadsQuery], Output, Err)
-    else
-      HasNext := RunGitHubCli(FExe, FRoot, ['api', 'graphql', '-f', 'owner=' + Owner,
-        '-f', 'name=' + Name, '-F', 'number=' + IntToStr(FNumber),
-        '-f', 'after=' + Cursor, '-f', 'query=' + ReviewThreadsQuery], Output, Err);
-    if Terminated then
-      Exit;
-    if not HasNext then
-    begin
-      FError := Err;
-      Break;
-    end;
-    if not ParseReviewThreads(Output, FThreads, Head, HasNext, Cursor) then
-    begin
-      FError := 'Could not read the review comments gh fetched.';
-      Break;
-    end;
-    if Pages = 0 then
-    begin
-      FHeadOid := Head;
-      ParsePullNotes(Output, FNotes);
-    end;
-    Inc(Pages);
-  until not HasNext or (Pages >= 20);
-  Done;
+  if not Ask(FError) and (FError = '') then
+    FError := 'Could not read the review comments.';
+  if not Terminated then
+    Done;
 end;
 
 end.

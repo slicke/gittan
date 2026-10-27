@@ -22,7 +22,7 @@ type
 
   TGittanBinaryView = class(TCustomControl)
   private
-    FExt, FDetail: string;
+    FExt, FDetail, FNote: string;
     FBack, FText, FDim, FPage: TColor;
   protected
     procedure Paint; override;
@@ -35,6 +35,9 @@ type
       AOldSize, ANewSize: int64);
     {** A file opened by itself, of ASize bytes. }
     procedure SetFile(const APath: string; ASize: int64);
+    {** A line under the size, such as that the file is not downloaded
+      from Git LFS; SetChange and SetFile clear it. }
+    procedure SetNote(const ANote: string);
     {** The palette: the background, the title, the details and the
       page's outline, and the page's fill. }
     procedure SetColors(ABack, AText, ADim, APage: TColor);
@@ -92,6 +95,7 @@ begin
     FDetail := Format(rsDeletedFile, [ByteSize(AOldSize)])
   else
     FDetail := '';
+  FNote := '';
   Invalidate;
 end;
 
@@ -99,6 +103,13 @@ procedure TGittanBinaryView.SetFile(const APath: string; ASize: int64);
 begin
   FExt := PageLabel(APath);
   FDetail := ByteSize(ASize);
+  FNote := '';
+  Invalidate;
+end;
+
+procedure TGittanBinaryView.SetNote(const ANote: string);
+begin
+  FNote := ANote;
   Invalidate;
 end;
 
@@ -124,6 +135,8 @@ begin
   LineH := Canvas.TextHeight('Xg');
   { The page, the title and the detail, centered as a block. }
   Total := PageH + Gap + LineH + LineH div 2 + LineH;
+  if FNote <> '' then
+    Inc(Total, LineH + LineH div 4);
   X := (ClientWidth - PageW) div 2;
   Y := Max(0, (ClientHeight - Total) div 2);
   { A page with its top right corner folded down. }
@@ -156,6 +169,11 @@ begin
   Canvas.Font.Color := FDim;
   W := Canvas.TextWidth(FDetail);
   Canvas.TextOut((ClientWidth - W) div 2, Y + LineH + LineH div 2, FDetail);
+  if FNote <> '' then
+  begin
+    W := Canvas.TextWidth(FNote);
+    Canvas.TextOut((ClientWidth - W) div 2, Y + 2 * LineH + LineH div 2 + LineH div 4, FNote);
+  end;
 end;
 
 procedure TGittanBinaryView.Resize;

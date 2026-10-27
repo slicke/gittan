@@ -1,0 +1,612 @@
+unit gittan.forge;
+
+{** The service that hosts a repository, a forge (GitHub, GitLab,
+  Bitbucket), as Gittan sees it: what a pull request is (TGittanPullRequest
+  for the open repository's, TGittanForgePull for the user's across every
+  repository), the background jobs that read them (their forge-specific
+  part a virtual Ask), and TGittanForge, the class a forge inherits:
+  its name, the tool it runs, the jobs it makes, the address of a file,
+  a commit or an issue, and where a remote serves a pull request's head.
+  Nothing here names a forge; GitHub is TGittanGitHubForge in
+  gittan.github, and another forge is a unit of its own beside it.
+  Nothing here needs the LCL. }
+
+{$mode objfpc}{$H+}
+
+interface
+
+uses
+  Classes, SysUtils, gittan.job, gittan.reviews;
+
+type
+  {** Where a pull request stands. }
+  TGittanPullState = (prOpen, prClosed, prMerged);
+
+  {** What the reviews of a pull request add up to, as the forge decides
+    it from its rules: none asked for, a review still required, approved,
+    or changes requested. }
+  TGittanReviewDecision = (rdNone, rdReviewRequired, rdApproved, rdChangesRequested);
+
+  {** What one reviewer's review said. }
+  TGittanReviewVerdict = (rvNone, rvCommented, rvApproved, rvChangesRequested, rvDismissed);
+
+  {** The checks of a commit taken together: none, all passed, some still
+    running, or one failed. }
+  TGittanChecksState = (chkNone, chkPassed, chkPending, chkFailed);
+
+  {** The latest review a reviewer gave a pull request. }
+  TGittanLatestReview = record
+    Login: string;
+    Verdict: TGittanReviewVerdict;
+  end;
+
+  {** One pull request of the open repository. Repo is its repository as
+    "owner/name" (the path the forge serves it at). }
+  TGittanPullRequest = record
+    Number: integer;
+    Repo, Title, Url, HeadRef, BaseRef, Author: string;
+    State: TGittanPullState;
+    ReviewDecision: TGittanReviewDecision;
+    IsDraft: boolean;
+    { The checks of the head commit: how many passed (or were skipped or
+      neutral), failed (or were cancelled, timed out, or need action)
+      and are still running or queued. }
+    ChecksPassed, ChecksFailed, ChecksPending: integer;
+    { When it was opened and last changed, in UTC (0 when the forge gave
+      none), what it changes, and the names of its labels joined with
+      ", ". }
+    Created, Updated: TDateTime;
+    Additions, Deletions, ChangedFiles: integer;
+    Labels: string;
+    { The latest review of each reviewer, and the logins of the users a
+      review is asked of now (teams left out). }
+    Reviews: array of TGittanLatestReview;
+    Requested: array of string;
+  end;
+  TGittanPullRequests = array of TGittanPullRequest;
+
+  {** One pull request of the user's, as the forge lists them across
+    every repository. Repo is "owner/name"; Checks the head commit's
+    checks; MyReview what the user's latest review of it said;
+    Requested whether the user is asked for a review now, in person (a
+    request a review clears, and a new one brings back); Feedback
+    whether someone other than its author, and not a bot, has commented
+    on it or reviewed it (among its last thirty comments and last thirty
+    reviews); Clone the root of a local clone of its repository, from
+    the folders the job was given (FindClones), else empty. }
+  TGittanForgePull = record
+    Repo: string;
+    Number: integer;
+    Title, Url, Author, HeadRef, BaseRef: string;
+    State: TGittanPullState;
+    ReviewDecision: TGittanReviewDecision;
+    Checks: TGittanChecksState;
+    MyReview: TGittanReviewVerdict;
+    IsDraft, Requested, Feedback: boolean;
+    Created, Updated: TDateTime;
+    Clone: string;
+  end;
+  TGittanForgePulls = array of TGittanForgePull;
+
+  {** What a web address is asked for: a file (Path, at Line when above
+    0, in Commit, else on Branch, else the default branch), a commit
+    (Commit), or an issue or pull request (Number). }
+  TGittanWebKind = (wtFile, wtCommit, wtIssue);
+  TGittanWebTarget = record
+    Kind: TGittanWebKind;
+    Path, Commit, Branch: string;
+    Line, Number: integer;
+  end;
+
+{** A file's TGittanWebTarget. }
+function FileTarget(const APath: string; ALine: integer;
+  const ACommit, ABranch: string): TGittanWebTarget;
+{** A commit's TGittanWebTarget. }
+function CommitTarget(const ACommit: string): TGittanWebTarget;
+{** An issue's or a pull request's TGittanWebTarget. }
+function IssueTarget(ANumber: integer): TGittanWebTarget;
+
+{** APulls without the ones ALogin has already approved or requested
+  changes on (their latest review): a forge's search for the reviews
+  asked of the user keeps a pull request asked of a team they are on
+  after their review, which only a personal request loses. A review
+  that only commented, or was dismissed, leaves the pull request in,
+  and so does a request made of ALogin in person after their review
+  (Requested). An empty ALogin leaves all in. }
+function WithoutReviewed(const APulls: TGittanPullRequests;
+  const ALogin: string): TGittanPullRequests;
+{** The short line of the status bar: "PR #12 · Approved", "PR #12 · Draft",
+  "PR #12 · Merged", with the review decision in words, and the checks
+  after it when there are any: "checks ✓", "2 checks failing" or
+  "3 checks pending". }
+function PullRequestStatus(const APull: TGittanPullRequest): string;
+{** The checks part of PullRequestStatus alone, empty without checks. }
+function PullRequestChecks(const APull: TGittanPullRequest): string;
+{** The state part of PullRequestStatus alone: Merged, Closed, Draft,
+  Approved, Changes requested or Review required, else empty. }
+function PullRequestNote(const APull: TGittanPullRequest): string;
+{** The review decision in words: Approved, Changes requested, Review
+  required, empty for none. }
+function ReviewDecisionNote(ADecision: TGittanReviewDecision): string;
+{** The first issue or pull request number a commit summary names, as
+  "#123" (a digit must follow the sign, and the sign must not follow a
+  word, so "C#5" is not one); 0 when it names none. }
+function IssueNumber(const ASummary: string): integer;
+
+{** Fills in the Clone of each of APulls with the first of ARoots (the
+  roots of repositories, the likeliest first) one of whose remotes holds
+  its repository; a root that is gone or no repository is passed over.
+  Runs git once per root, in the caller's thread. }
+procedure FindClones(var APulls: TGittanForgePulls; ARoots: TStrings);
+{** Adds to ARoots, after them, the repositories beside them: the
+  folders in each of their parent folders that hold a .git (a folder,
+  or a file as a worktree or a submodule has), in name order, each once
+  and none already in ARoots. }
+procedure AddSiblingRepositories(ARoots: TStrings);
+
+{** Whether a pull request listed as waiting for the user's review
+  still is: one the user is asked for in person now, whatever they
+  said before (a request made again after their review), or one whose
+  latest review by the user neither approved it nor asked for changes.
+  A forge keeps a request made of a team the user is on after their
+  review, which only a personal request loses. }
+function NeedsMyReview(const APull: TGittanForgePull): boolean;
+{** AReview without the pull requests the user has reviewed, by
+  NeedsMyReview. }
+function StillToReview(const AReview: TGittanForgePulls): TGittanForgePulls;
+{** APulls without the ones nobody but their author has answered (no
+  Feedback). }
+function WithFeedback(const APulls: TGittanForgePulls): TGittanForgePulls;
+
+type
+  {** Reads, in a thread since it goes to the network, the pull request
+    of the branch checked out in a repository (ABranch only says which;
+    empty skips it), the open pull requests of the repository, and the
+    open ones waiting for the user's review (ReviewPulls), less the ones
+    the user has reviewed (WithoutReviewed, by the login ALogin, which
+    the job asks the forge for when none is given: Login after the job
+    for the next one). A branch with no pull request is not a failure:
+    HasPull is false and Error empty. The job also asks the remotes which
+    local branches track a branch that is gone from them (GoneBranches),
+    as a forge deletes a merged one. A forge fills in the Ask methods. }
+  TGittanPullRequestJob = class(TGittanJob)
+  private
+    FRoot, FBranch, FLogin: string;
+    FPull: TGittanPullRequest;
+    FHasPull: boolean;
+    FGone: TStringList;
+    FPulls, FReviewPulls: TGittanPullRequests;
+    FError: string;
+  protected
+    {** The pull request of the branch checked out in Root; false when it
+      has none or the forge could not say. }
+    function AskBranchPull(out APull: TGittanPullRequest): boolean; virtual; abstract;
+    {** The open pull requests of the repository at Root; false with the
+      reason in AError when they could not be read. }
+    function AskOpenPulls(out APulls: TGittanPullRequests; out AError: string): boolean;
+      virtual; abstract;
+    {** The open pull requests whose review is asked of the user, or of a
+      team they are on; false when they could not be read. }
+    function AskReviewPulls(out APulls: TGittanPullRequests): boolean; virtual; abstract;
+    {** The login the forge knows the user by; false when it could not
+      say. }
+    function AskLogin(out ALogin: string): boolean; virtual; abstract;
+    procedure Execute; override;
+    property Root: string read FRoot;
+  public
+    constructor Create(const ARoot, ABranch, ALogin: string);
+    destructor Destroy; override;
+    property Branch: string read FBranch;
+    {** The login the forge knows the user by, as given or as the forge
+      answered; empty when it could not say. }
+    property Login: string read FLogin;
+    property Pull: TGittanPullRequest read FPull;
+    property HasPull: boolean read FHasPull;
+    {** The local branches whose upstream is deleted on its remote. }
+    property GoneBranches: TStringList read FGone;
+    property Pulls: TGittanPullRequests read FPulls;
+    {** The open pull requests whose review is asked of the user, or of a
+      team they are on, without the ones they have reviewed; empty when
+      the forge could not list them. }
+    property ReviewPulls: TGittanPullRequests read FReviewPulls;
+    {** The forge's or its tool's message when the list could not be read
+      (no remote on the forge, not logged in), else empty. }
+    property Error: string read FError;
+  end;
+
+  {** Asks a forge, in a thread, for the user's pull requests across
+    every repository. Login, Mine and Review hold the answer, Review
+    already without the ones the user has reviewed (StillToReview); Error
+    the forge's or its tool's message when it failed. ForgeName names the
+    forge in a message. A forge fills in Ask. }
+  TGittanForgeJob = class(TGittanJob)
+  private
+    FForgeName, FRoot, FLogin, FError: string;
+    FMine, FReview: TGittanForgePulls;
+    FClones: TStringList;
+    FSiblings: boolean;
+  protected
+    {** The login and the two lists, the review list as the forge gives
+      it; false with the reason in AError when they could not be read. }
+    function Ask(out ALogin: string; out AMine, AReview: TGittanForgePulls;
+      out AError: string): boolean; virtual; abstract;
+    procedure Execute; override;
+    property Root: string read FRoot;
+  public
+    constructor Create(const AForgeName, ARoot: string);
+    destructor Destroy; override;
+    {** The roots of the repositories to look for clones in, the likeliest
+      first (FindClones), set before the job starts; empty looks for none. }
+    property Clones: TStringList read FClones;
+    {** Whether the repositories beside Clones are looked in too, after
+      them (AddSiblingRepositories). }
+    property Siblings: boolean read FSiblings write FSiblings;
+    property ForgeName: string read FForgeName;
+    property Login: string read FLogin;
+    property Mine: TGittanForgePulls read FMine;
+    property Review: TGittanForgePulls read FReview;
+    property Error: string read FError;
+  end;
+
+  {** A forge, reached through its command line tool (Cli, a path to it).
+    A forge inherits it and fills in the abstract methods; the jobs it
+    makes are its own kinds of the jobs above and of TGittanReviewJob,
+    which take what they need from it when they are made, so a job may
+    outlive the forge (the settings change while it runs). }
+  TGittanForge = class
+  private
+    FCli: string;
+  public
+    constructor Create(const ACli: string); virtual;
+    {** The forge's name, as the interface shows it: "GitHub". }
+    function Name: string; virtual; abstract;
+    {** The name of its tool, as found on the search path: "gh". }
+    class function CliName: string; virtual; abstract;
+    property Cli: string read FCli;
+    {** The tool's version, from its own --version, as "gh 2.62.0"; false
+      when it could not be run. }
+    function Version(out AVersion: string): boolean; virtual; abstract;
+    {** A job for the open repository at ARoot's pull requests, see
+      TGittanPullRequestJob. Not started. }
+    function PullJob(const ARoot, ABranch, ALogin: string): TGittanPullRequestJob;
+      virtual; abstract;
+    {** A job for the review threads and the conversation of pull request
+      ANumber of ARepo ("owner/name"), see TGittanReviewJob. Not started. }
+    function ReviewJob(const ARoot, ARepo: string; ANumber: integer): TGittanReviewJob;
+      virtual; abstract;
+    {** A job for the user's pull requests across every repository, see
+      TGittanForgeJob; ARoot is a folder to run in. Not started. }
+    function AccountJob(const ARoot: string): TGittanForgeJob; virtual; abstract;
+    {** The web address of ATarget for the repository at ARoot; false with
+      the reason in AError when there is none (no remote on the forge). }
+    function WebUrl(const ARoot: string; const ATarget: TGittanWebTarget;
+      out AUrl, AError: string): boolean; virtual; abstract;
+    {** The repository ("owner/name"), the file and the line (0 for none)
+      of the web address of a file on the forge in some commit or on some
+      branch, as a comment links to it; false for any other address. }
+    function FileOfWebUrl(const AUrl: string; out ARepo, APath: string;
+      out ALine: integer): boolean; virtual; abstract;
+    {** The ref a remote of the forge serves pull request ANumber's head
+      at, for git fetch: "refs/pull/12/head". }
+    function PullRef(ANumber: integer): string; virtual; abstract;
+  end;
+  TGittanForgeClass = class of TGittanForge;
+
+implementation
+
+uses
+  gittan.git;
+
+function FileTarget(const APath: string; ALine: integer;
+  const ACommit, ABranch: string): TGittanWebTarget;
+begin
+  Result := Default(TGittanWebTarget);
+  Result.Kind := wtFile;
+  Result.Path := APath;
+  Result.Line := ALine;
+  Result.Commit := ACommit;
+  Result.Branch := ABranch;
+end;
+
+function CommitTarget(const ACommit: string): TGittanWebTarget;
+begin
+  Result := Default(TGittanWebTarget);
+  Result.Kind := wtCommit;
+  Result.Commit := ACommit;
+end;
+
+function IssueTarget(ANumber: integer): TGittanWebTarget;
+begin
+  Result := Default(TGittanWebTarget);
+  Result.Kind := wtIssue;
+  Result.Number := ANumber;
+end;
+
+function WithoutReviewed(const APulls: TGittanPullRequests;
+  const ALogin: string): TGittanPullRequests;
+var
+  i, j, n: integer;
+  Reviewed: boolean;
+begin
+  Result := nil;
+  if ALogin = '' then
+    Exit(Copy(APulls));
+  n := 0;
+  SetLength(Result, Length(APulls));
+  for i := 0 to High(APulls) do
+  begin
+    Reviewed := False;
+    for j := 0 to High(APulls[i].Reviews) do
+      if SameText(APulls[i].Reviews[j].Login, ALogin) and
+        (APulls[i].Reviews[j].Verdict in [rvApproved, rvChangesRequested]) then
+        Reviewed := True;
+    { Asked again, in person, after the review. }
+    for j := 0 to High(APulls[i].Requested) do
+      if SameText(APulls[i].Requested[j], ALogin) then
+        Reviewed := False;
+    if Reviewed then
+      Continue;
+    Result[n] := APulls[i];
+    Inc(n);
+  end;
+  SetLength(Result, n);
+end;
+
+function ReviewDecisionNote(ADecision: TGittanReviewDecision): string;
+begin
+  case ADecision of
+    rdApproved: Result := 'Approved';
+    rdChangesRequested: Result := 'Changes requested';
+    rdReviewRequired: Result := 'Review required';
+    else
+      Result := '';
+  end;
+end;
+
+function PullRequestNote(const APull: TGittanPullRequest): string;
+begin
+  if APull.State = prMerged then
+    Result := 'Merged'
+  else if APull.State = prClosed then
+    Result := 'Closed'
+  else if APull.IsDraft then
+    Result := 'Draft'
+  else
+    Result := ReviewDecisionNote(APull.ReviewDecision);
+end;
+
+function PullRequestStatus(const APull: TGittanPullRequest): string;
+var
+  Note: string;
+begin
+  Note := PullRequestNote(APull);
+  Result := 'PR #' + IntToStr(APull.Number);
+  if Note <> '' then
+    Result := Result + ' · ' + Note;
+  Note := PullRequestChecks(APull);
+  if Note <> '' then
+    Result := Result + ' · ' + Note;
+end;
+
+function PullRequestChecks(const APull: TGittanPullRequest): string;
+begin
+  if APull.ChecksFailed > 0 then
+    Result := IntToStr(APull.ChecksFailed) + ' checks failing'
+  else if APull.ChecksPending > 0 then
+    Result := IntToStr(APull.ChecksPending) + ' checks pending'
+  else if APull.ChecksPassed > 0 then
+    Result := 'checks ✓'
+  else
+    Result := '';
+  if (APull.ChecksFailed = 1) or ((APull.ChecksFailed = 0) and (APull.ChecksPending = 1)) then
+    Result := StringReplace(Result, 'checks', 'check', []);
+end;
+
+function IssueNumber(const ASummary: string): integer;
+var
+  i, j: integer;
+begin
+  Result := 0;
+  i := 1;
+  while i < Length(ASummary) do
+  begin
+    if (ASummary[i] = '#') and (ASummary[i + 1] in ['0'..'9']) and
+      ((i = 1) or not (ASummary[i - 1] in ['0'..'9', 'a'..'z', 'A'..'Z', '_'])) then
+    begin
+      j := i + 1;
+      while (j <= Length(ASummary)) and (ASummary[j] in ['0'..'9']) do
+        Inc(j);
+      Result := StrToIntDef(Copy(ASummary, i + 1, j - i - 1), 0);
+      if Result > 0 then
+        Exit;
+    end;
+    Inc(i);
+  end;
+end;
+
+procedure AddSiblingRepositories(ARoots: TStrings);
+var
+  Parents, Found: TStringList;
+  Info: TSearchRec;
+  Parent, Dir: string;
+  i, j: integer;
+begin
+  Parents := TStringList.Create;
+  Found := TStringList.Create;
+  try
+    for i := 0 to ARoots.Count - 1 do
+    begin
+      Parent := ExtractFileDir(ExcludeTrailingPathDelimiter(ARoots[i]));
+      if (Parent = '') or (Parents.IndexOf(Parent) >= 0) then
+        Continue;
+      Parents.Add(Parent);
+      Found.Clear;
+      if FindFirst(IncludeTrailingPathDelimiter(Parent) + '*', faDirectory, Info) = 0 then
+      try
+        repeat
+          if (Info.Attr and faDirectory = 0) or (Info.Name = '.') or (Info.Name = '..') then
+            Continue;
+          Dir := IncludeTrailingPathDelimiter(Parent) + Info.Name;
+          if FileExists(Dir + PathDelim + '.git') or DirectoryExists(Dir + PathDelim + '.git') then
+            Found.Add(Dir);
+        until FindNext(Info) <> 0;
+      finally
+        FindClose(Info);
+      end;
+      Found.Sort;
+      for j := 0 to Found.Count - 1 do
+        if ARoots.IndexOf(Found[j]) < 0 then
+          ARoots.Add(Found[j]);
+    end;
+  finally
+    Parents.Free;
+    Found.Free;
+  end;
+end;
+
+procedure FindClones(var APulls: TGittanForgePulls; ARoots: TStrings);
+var
+  Urls: string;
+  i, j: integer;
+begin
+  for j := 0 to High(APulls) do
+    APulls[j].Clone := '';
+  for i := 0 to ARoots.Count - 1 do
+  begin
+    if not DirectoryExists(ARoots[i]) then
+      Continue;
+    Urls := RemoteUrlsIn(ARoots[i]);
+    if Urls = '' then
+      Continue;
+    for j := 0 to High(APulls) do
+      if (APulls[j].Clone = '') and RemoteUrlsHold(Urls, APulls[j].Repo) then
+        APulls[j].Clone := ARoots[i];
+  end;
+end;
+
+function NeedsMyReview(const APull: TGittanForgePull): boolean;
+begin
+  Result := APull.Requested or not (APull.MyReview in [rvApproved, rvChangesRequested]);
+end;
+
+function StillToReview(const AReview: TGittanForgePulls): TGittanForgePulls;
+var
+  i, n: integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(AReview));
+  n := 0;
+  for i := 0 to High(AReview) do
+    if NeedsMyReview(AReview[i]) then
+    begin
+      Result[n] := AReview[i];
+      Inc(n);
+    end;
+  SetLength(Result, n);
+end;
+
+function WithFeedback(const APulls: TGittanForgePulls): TGittanForgePulls;
+var
+  i, n: integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(APulls));
+  n := 0;
+  for i := 0 to High(APulls) do
+    if APulls[i].Feedback then
+    begin
+      Result[n] := APulls[i];
+      Inc(n);
+    end;
+  SetLength(Result, n);
+end;
+
+{ ---------------------------------------------------------------------------
+  The jobs
+  --------------------------------------------------------------------------- }
+
+constructor TGittanPullRequestJob.Create(const ARoot, ABranch, ALogin: string);
+begin
+  inherited Create(True);
+  FRoot := ARoot;
+  FBranch := ABranch;
+  FLogin := ALogin;
+  FGone := TStringList.Create;
+end;
+
+destructor TGittanPullRequestJob.Destroy;
+begin
+  inherited Destroy;
+  FGone.Free;
+end;
+
+procedure TGittanPullRequestJob.Execute;
+var
+  Asked: string;
+begin
+  if FBranch <> '' then
+    FHasPull := AskBranchPull(FPull);
+  if Terminated then
+    Exit;
+  if not AskOpenPulls(FPulls, FError) then
+    FPulls := nil;
+  if Terminated then
+    Exit;
+  { A review given clears a personal request but not a team's, so the
+    ones the user has reviewed are taken out by their login, asked of
+    the forge once. }
+  if (FError = '') and not AskReviewPulls(FReviewPulls) then
+    FReviewPulls := nil;
+  if Terminated then
+    Exit;
+  if (FLogin = '') and (Length(FReviewPulls) > 0) and AskLogin(Asked) then
+    FLogin := Asked;
+  FReviewPulls := WithoutReviewed(FReviewPulls, FLogin);
+  if not Terminated then
+    GoneUpstreamsIn(FRoot, FGone);
+  Done;
+end;
+
+constructor TGittanForgeJob.Create(const AForgeName, ARoot: string);
+begin
+  inherited Create(True);
+  FForgeName := AForgeName;
+  FRoot := ARoot;
+  FClones := TStringList.Create;
+end;
+
+destructor TGittanForgeJob.Destroy;
+begin
+  inherited Destroy;
+  FClones.Free;
+end;
+
+procedure TGittanForgeJob.Execute;
+begin
+  if not Ask(FLogin, FMine, FReview, FError) then
+  begin
+    if FError = '' then
+      FError := 'Could not read the answer of ' + FForgeName + '.';
+  end
+  else
+  begin
+    FReview := StillToReview(FReview);
+    if FSiblings then
+      AddSiblingRepositories(FClones);
+    FindClones(FMine, FClones);
+    FindClones(FReview, FClones);
+  end;
+  if Terminated then
+    Exit;
+  if (FError = '') and (Length(FMine) = 0) and (Length(FReview) = 0) and (FLogin = '') then
+    FError := 'The answer of ' + FForgeName + ' had no login in it.';
+  Done;
+end;
+
+constructor TGittanForge.Create(const ACli: string);
+begin
+  inherited Create;
+  FCli := ACli;
+end;
+
+end.

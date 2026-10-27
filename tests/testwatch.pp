@@ -34,9 +34,11 @@ type
     procedure TestChange;
     procedure TestIgnoreWhitespace;
     procedure TestStop;
+    procedure TestPoll;
     procedure TestOpenJob;
     procedure TestOpenJobIgnoreWhitespace;
     procedure TestOpenJobNoRepository;
+    procedure TestLfsCheckJob;
   end;
 
 implementation
@@ -201,6 +203,32 @@ begin
   AssertEquals(0, FChanges);
 end;
 
+{ Poll looks at once, in the middle of a long interval; the interval
+  set meanwhile is the wait after it. }
+procedure TWatchTest.TestPoll;
+var
+  Watcher: TGittanWatcher;
+begin
+  Watcher := TGittanWatcher.Create(FDir, '', False, 60000);
+  try
+    Watcher.OnChange := @WatcherChange;
+    Watcher.Start;
+    Pump(500);
+    WriteFile('b.txt', 'b');
+    Watcher.Interval := 50;
+    Pump(500);
+    AssertEquals('the interval waited out first', 0, FChanges);
+    Watcher.Poll;
+    Pump(5000, 1);
+    AssertEquals('the poll', 1, FChanges);
+    WriteFile('a.txt', 'changed');
+    Pump(5000, 2);
+    AssertEquals('the new interval', 2, FChanges);
+  finally
+    Watcher.Free;
+  end;
+end;
+
 procedure TWatchTest.OpenDone(Sender: TObject);
 begin
   Inc(FOpenDone);
@@ -271,6 +299,36 @@ begin
     Snap := Job.Snapshot;
     AssertEquals('added, counted', 1, Snap.Stats[0].Added);
     AssertEquals('deleted, counted', 1, Snap.Stats[0].Deleted);
+  finally
+    Job.Free;
+  end;
+end;
+
+{ A file in Git LFS whose work tree holds its pointer; git-lfs is not
+  needed for that. }
+procedure TWatchTest.TestLfsCheckJob;
+var
+  Job: TGittanLfsCheckJob;
+  Start: TDateTime;
+begin
+  WriteFile('.gitattributes', '*.psd filter=lfs diff=lfs merge=lfs -text'#10);
+  WriteFile('art.psd', 'version https://git-lfs.github.com/spec/v1'#10'oid sha256:' +
+    StringOfChar('a', 64) + #10'size 9'#10);
+  Git(['add', '-A']);
+  Git(['commit', '-q', '-m', 'art']);
+  FOpenDone := 0;
+  Job := TGittanLfsCheckJob.Create(FDir, 'abc');
+  try
+    Job.OnDone := @OpenDone;
+    Job.Start;
+    Start := Now;
+    while (FOpenDone = 0) and (MilliSecondsBetween(Now, Start) < 10000) do
+      CheckSynchronize(10);
+    AssertEquals('done once', 1, FOpenDone);
+    AssertTrue(Job.Ok);
+    AssertEquals('abc', Job.Head);
+    AssertEquals(1, Job.State.Files);
+    AssertEquals(1, Job.State.Pointers);
   finally
     Job.Free;
   end;

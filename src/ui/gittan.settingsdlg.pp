@@ -4,9 +4,12 @@ unit gittan.settingsdlg;
   elsewhere), in pages picked in a sidebar of the main window's kind,
   as the system's settings have: Editor, the editor font and its size,
   the width of a tab and the syntax theme, with a sample; Tools, the
-  commands Open in Editor and Open in Terminal run, and the git and gh to
-  run in place of those found on PATH; and AI, whether the AI features
-  show, the agent they run, and its command and model (see gittan.ai);
+  commands Open in Editor and Open in Terminal run, and the git to run in
+  place of the one found on PATH; Hosting, a block per service that hosts
+  repositories (GitHub alone so far) with whether its features are on,
+  the command line tool they run and, for GitHub, whether its page looks
+  for clones beside the recent repositories; AI, whether the AI features show, the
+  agent they run, and its command and model (see gittan.ai);
   and About (also Gittan > About Gittan on macOS, Tools > About Gittan
   elsewhere), the build, a check for a newer one, what Gittan runs on
   and with, for a bug report, and the licenses. The other view options
@@ -29,7 +32,7 @@ uses
 
 type
   {** The pages, in the sidebar's order. }
-  TSettingsPage = (pgEditor, pgTools, pgAI, pgAbout);
+  TSettingsPage = (pgEditor, pgTools, pgHosting, pgAI, pgAbout);
 
   {** Shows AFont, the theme ATheme (an index into SyntaxThemes) and a tab
     ATabSize characters wide in the editor while the dialog is open. }
@@ -43,6 +46,13 @@ type
     EditorCommand, TerminalCommand: string;
     {** Paths of git and gh; empty for the ones found on PATH. }
     GitPath, GhPath: string;
+    {** Whether the open repository is fetched in the background, and
+      how many minutes apart. }
+    AutoFetch: boolean;
+    AutoFetchMinutes: integer;
+    {** Whether the GitHub features are on, and whether the GitHub page
+      looks for clones beside the recent repositories. }
+    GitHubEnabled, CloneSiblings: boolean;
     {** Whether the AI features show, the agent they run, and each
       agent's command (empty for the one found) and model (empty for its
       own choice). }
@@ -68,12 +78,14 @@ implementation
 uses
   Math, StrUtils, Process, Clipbrd, LCLIntf, LCLType, LCLVersion, InterfaceBase, LCLPlatformDef,
   ec_SyntAnal, ATSynEdit_Adapter_EControl, ATSynEdit_Globals,
-  gittan.syntaxthemes, gittan.git, gittan.theme;
+  gittan.syntaxthemes, gittan.git, gittan.theme, gittan.forge, gittan.github,
+  gittan.settings, gittan.job;
 
 resourcestring
   rsSettingsTitle = 'Settings';
   rsEditorPage = 'Editor';
   rsToolsPage = 'Tools';
+  rsHostingPage = 'Hosting';
   rsAIPage = 'AI';
   rsAboutPage = 'About';
   rsAIEnabled = 'Turn on the AI features';
@@ -110,11 +122,25 @@ resourcestring
   rsTerminalNote = 'The repository''s folder is appended.';
   rsGitPath = 'git';
   rsGitDefault = 'The git on PATH';
+  rsAutoFetch = 'Fetch in the background every';
+  rsAutoFetchMinutes = 'minutes';
+  rsAutoFetchNote = 'Brings in what is new on the remotes of the open repository, so the ' +
+    'counts of what to pull stay current. It shows nothing, and waits for the time to pass ' +
+    'since the last fetch, from Gittan or anywhere else.';
   rsGhPath = 'gh, GitHub''s command line tool';
   rsGhDefault = 'The gh on PATH';
   rsToolFound = 'Found: %s';
   rsToolNotFound = 'Not found on PATH.';
   rsGhNotFound = 'Not found on PATH; the GitHub features are off.';
+  rsGitHub = 'GitHub';
+  rsGitHubEnabled = 'Turn on the GitHub features';
+  rsGitHubNote = 'Pull requests, their checks and review comments, and the ' +
+    'GitHub page. They run gh with its own login, for a repository with a ' +
+    'remote on GitHub.';
+  rsCloneSiblings = 'Look for clones beside the recent repositories';
+  rsCloneSiblingsNote = 'A pull request on the GitHub page links to a clone of its ' +
+    'repository among the recent ones. With this on, the repositories in the folders ' +
+    'they are in count too.';
   rsToolTyped = 'Run in place of the one on PATH.';
   rsToolMissing = 'There is no such file.';
   rsAboutName = 'Gittan';
@@ -133,6 +159,7 @@ resourcestring
   rsVersionGittanLocal = 'Gittan, a local build of %s';
   rsVersionNotFound = '%s not found';
   rsVersionAIOff = 'The AI features are off';
+  rsVersionGitHubOff = 'The GitHub features are off';
   rsVersionLibraries = 'Free Pascal %s, LCL %s';
   rsCopyVersions = 'Co&py';
   rsWebsite = 'gittan.app';
@@ -264,11 +291,11 @@ type
   private
     FFont: TFont;
     FFontLabel: TLabel;
-    FSizeEdit, FTabEdit: TSpinEdit;
+    FSizeEdit, FTabEdit, FAutoFetchEdit: TSpinEdit;
     FThemeBox: TComboBox;
     FEditorEdit, FTerminalEdit, FGitEdit, FGhEdit, FAgentEdit, FModelEdit: TEdit;
     FGitNote, FGhNote, FAgentLabel, FAgentNote, FModelNote: TLabel;
-    FAIBox: TCheckBox;
+    FAIBox, FGitHubBox, FSiblingsBox, FAutoFetchBox: TCheckBox;
     { The agent picked, and each agent's command and model as edited:
       the fields show the picked one's (ShowAgent). }
     FAgentBox: TComboBox;
@@ -279,7 +306,7 @@ type
       buttons under them. FBox is the one Place puts controls in. }
     FNavPanel, FContent: TPanel;
     FNav: TGittanSideNav;
-    FEditorBox, FToolsBox, FAIPage, FAboutPage: TPanel;
+    FEditorBox, FToolsBox, FHostingPage, FAIPage, FAboutPage: TPanel;
     { The About page's update check and what it found (FUpdateLink, a
       link when there is a page to go to), its links in the accent
       (FLinkColor), and what Gittan runs on and with, read the first
@@ -289,9 +316,11 @@ type
     FLinks: array of TLabel;
     FLinkColor: TColor;
     FVersionsLabel: TLabel;
-    { Whether the versions are in; a change of a tool, the AI switch or
-      the agent drops it, so the page shown again reads them anew. }
+    { Whether the versions are in; a change of a tool, a switch or the
+      agent drops it, so the page shown again reads them anew. }
     FVersionsRead: boolean;
+    { The versions being read (ReadVersions), nil when none is. }
+    FVersionsJob: TThread;
     FOK: TButton;
     { Gittan's icon as loaded, and as resampled for the screen's pixels. }
     FAppIcon, FAppIconShown: TBGRABitmap;
@@ -322,6 +351,7 @@ type
     procedure UpdateDone(Sender: TObject);
     procedure ShowUpdateLink(const ACaption, AUrl: string);
     procedure ReadVersions(Data: PtrInt);
+    procedure VersionsDone(Sender: TObject);
     procedure CopyVersionsClick(Sender: TObject);
     procedure AppIconPaint(Sender: TObject);
     procedure NavPick(Sender: TObject; AIndex: integer);
@@ -336,6 +366,8 @@ type
     procedure ThemeChange(Sender: TObject);
     procedure ToolChange(Sender: TObject);
     procedure AIChange(Sender: TObject);
+    procedure GitHubChange(Sender: TObject);
+    procedure AutoFetchChange(Sender: TObject);
     procedure AgentChange(Sender: TObject);
     procedure ShowAgent;
     procedure ShowTool(AEdit: TEdit; ANote: TLabel; const AName, ANotFound: string);
@@ -416,6 +448,7 @@ begin
   FContent.Parent := Self;
   FEditorBox := AddPage(rsEditorPage, niEditor);
   FToolsBox := AddPage(rsToolsPage, niTools);
+  FHostingPage := AddPage(rsHostingPage, niForge);
   FAIPage := AddPage(rsAIPage, niAI);
   FAboutPage := AddPage(rsAboutPage, niAbout);
 
@@ -509,7 +542,7 @@ begin
   FAdapter.AddEditor(FSampleEdit);
 
   { The Tools page: each command with a note on what an empty field does,
-    each tool with a note on what will run (ShowTool). }
+    git with a note on what will run (ShowTool). }
   FBox := FToolsBox;
   AddLabel(rsEditorCommand, 0);
   FEditorEdit := AddEdit(rsEditorDefault);
@@ -520,7 +553,53 @@ begin
   AddLabel(rsTerminalNote, 4).Font.Color := clGrayText;
 
   FGitEdit := AddTool(rsGitPath, rsGitDefault, FGitNote);
+
+  { The background fetch: the switch, the minutes and their unit on one
+    row (alLeft orders by Left), what it does under them. }
+  Row := AddRow(16);
+  FAutoFetchBox := TCheckBox.Create(Self);
+  FAutoFetchBox.Caption := rsAutoFetch;
+  FAutoFetchBox.Align := alLeft;
+  FAutoFetchBox.OnChange := @AutoFetchChange;
+  FAutoFetchBox.Parent := Row;
+  FAutoFetchEdit := TSpinEdit.Create(Self);
+  FAutoFetchEdit.MinValue := MinAutoFetchMinutes;
+  FAutoFetchEdit.MaxValue := MaxAutoFetchMinutes;
+  FAutoFetchEdit.Width := Scale96ToScreen(64);
+  FAutoFetchEdit.Align := alLeft;
+  FAutoFetchEdit.Left := 1000;
+  FAutoFetchEdit.BorderSpacing.Left := Scale96ToScreen(6);
+  FAutoFetchEdit.Parent := Row;
+  Lbl := TLabel.Create(Self);
+  Lbl.Caption := rsAutoFetchMinutes;
+  Lbl.Align := alLeft;
+  Lbl.Left := 2000;
+  Lbl.Layout := tlCenter;
+  Lbl.BorderSpacing.Left := Scale96ToScreen(6);
+  Lbl.Parent := Row;
+  Lbl := AddLabel(rsAutoFetchNote, 4);
+  Lbl.Font.Color := clGrayText;
+  Lbl.WordWrap := True;
+
+  { The Hosting page: a block per service under its name, the switch and
+    what it means, then the tool, which follows the switch. Another
+    service is another block. }
+  FBox := FHostingPage;
+  AddLabel(rsGitHub, 0).Font.Style := [fsBold];
+  FGitHubBox := TCheckBox.Create(Self);
+  FGitHubBox.Caption := rsGitHubEnabled;
+  FGitHubBox.OnChange := @GitHubChange;
+  Place(FGitHubBox, 8);
+  Lbl := AddLabel(rsGitHubNote, 4);
+  Lbl.Font.Color := clGrayText;
+  Lbl.WordWrap := True;
   FGhEdit := AddTool(rsGhPath, rsGhDefault, FGhNote);
+  FSiblingsBox := TCheckBox.Create(Self);
+  FSiblingsBox.Caption := rsCloneSiblings;
+  Place(FSiblingsBox, 16);
+  Lbl := AddLabel(rsCloneSiblingsNote, 4);
+  Lbl.Font.Color := clGrayText;
+  Lbl.WordWrap := True;
 
   { The AI page: the switch and what it means, then the agent, its
     command and its model, which follow the switch; the labels name the
@@ -661,6 +740,12 @@ begin
     GUpdateZombies.Add(FUpdateJob);
     FUpdateJob := nil;
   end;
+  if FVersionsJob <> nil then
+  begin
+    TGittanJob(FVersionsJob).Stop(False);
+    GUpdateZombies.Add(FVersionsJob);
+    FVersionsJob := nil;
+  end;
   FAppIconShown.Free;
   FAppIcon.Free;
   { The lexer belongs to the main form's list. }
@@ -686,12 +771,15 @@ begin
   Tallest := Max(FEditorBox.Height, H);
   FToolsBox.GetPreferredSize(W, H, False, True);
   Tallest := Max(Tallest, H);
+  FHostingPage.GetPreferredSize(W, H, False, True);
+  Tallest := Max(Tallest, H);
   FAIPage.GetPreferredSize(W, H, False, True);
   Tallest := Max(Tallest, H);
   FAboutPage.GetPreferredSize(W, H, False, True);
   Tallest := Max(Tallest, H);
   FEditorBox.Constraints.MinHeight := Tallest;
   FToolsBox.Constraints.MinHeight := Tallest;
+  FHostingPage.Constraints.MinHeight := Tallest;
   FAIPage.Constraints.MinHeight := Tallest;
   FAboutPage.Constraints.MinHeight := Tallest;
   if FCentered and (Owner is TCustomForm) then
@@ -749,11 +837,13 @@ begin
   try
     FEditorBox.Visible := False;
     FToolsBox.Visible := False;
+    FHostingPage.Visible := False;
     FAIPage.Visible := False;
     FAboutPage.Visible := False;
     case TSettingsPage(AIndex) of
       pgEditor: Box := FEditorBox;
       pgTools: Box := FToolsBox;
+      pgHosting: Box := FHostingPage;
       pgAI: Box := FAIPage;
       else
         Box := FAboutPage;
@@ -889,7 +979,7 @@ begin
   SetLexer(Lexer);
 end;
 
-{ As TForm1.SetEditorLexer: a change event from line 0 starts the parse. }
+{ As TRepoFrame.SetEditorLexer: a change event from line 0 starts the parse. }
 procedure TSettingsForm.SetLexer(ALexer: TecSyntAnalyzer);
 begin
   FAdapter.Lexer := ALexer;
@@ -899,7 +989,7 @@ begin
 end;
 
 { Shows the chosen sample, its button down and the others up. The text is
-  set as TForm1.ShowText sets it, with the wrap info rebuilt. }
+  set as TRepoFrame.ShowText sets it, with the wrap info rebuilt. }
 procedure TSettingsForm.ShowSample;
 var
   i: integer;
@@ -991,6 +1081,19 @@ begin
   FAgentBox.Enabled := FAIBox.Checked;
   FAgentEdit.Enabled := FAIBox.Checked;
   FModelEdit.Enabled := FAIBox.Checked;
+end;
+
+{ gh's field matters only with the GitHub features on. }
+procedure TSettingsForm.AutoFetchChange(Sender: TObject);
+begin
+  FAutoFetchEdit.Enabled := FAutoFetchBox.Checked;
+end;
+
+procedure TSettingsForm.GitHubChange(Sender: TObject);
+begin
+  FVersionsRead := False;
+  FGhEdit.Enabled := FGitHubBox.Checked;
+  FSiblingsBox.Enabled := FGitHubBox.Checked;
 end;
 
 { What was typed for the agent left is kept, and the fields show the
@@ -1178,59 +1281,105 @@ begin
   Result := Line;
 end;
 
-{ What Gittan runs on and with: the build, git, gh and the agent (as the
-  fields name them now), the system and the libraries; VersionLines in
-  all. }
-procedure TSettingsForm.ReadVersions(Data: PtrInt);
+type
+  { The versions About lists, read in a thread: git, gh and the agent
+    each start a process (the agent node, a second or more), which would
+    hold the dialog still. The tools are found in the main thread. }
+  TVersionsJob = class(TGittanJob)
+  protected
+    procedure Execute; override;
+  public
+    GitExe, GhExe, AgentExe, AgentName, Platform: string;
+    GitHubOn, AIOn: boolean;
+    Text: string;
+  end;
+
+procedure TVersionsJob.Execute;
 var
+  Forge: TGittanForge;
   Lines: TStringList;
-  Version, Output, Error, Exe: string;
+  Version, Output, Error: string;
   Major, Minor: integer;
-  OldCursor: TCursor;
 begin
-  OldCursor := Screen.Cursor;
-  Screen.Cursor := crHourGlass;
   Lines := TStringList.Create;
   try
     if CurrentBuild >= 0 then
       Lines.Add(Format(rsVersionGittan, [CurrentBuild]))
     else
       Lines.Add(Format(rsVersionGittanLocal, [{$I %DATE%}]));
-    { The git and gh the fields name, saved or not, as the notes under
-      them find them. }
-    Exe := Trim(FGitEdit.Text);
-    if Exe = '' then
-      Exe := FindTool('git');
-    if GitVersionOf(Exe, Version, Major, Minor) then
+    if GitVersionOf(GitExe, Version, Major, Minor) then
       Lines.Add('git ' + Version)
     else
       Lines.Add(Format(rsVersionNotFound, ['git']));
-    Exe := Trim(FGhEdit.Text);
-    if Exe = '' then
-      Exe := FindTool('gh');
-    if (Exe <> '') and RunGitHubCli(Exe, GetUserDir, ['--version'], Output, Error) then
-      Lines.Add('gh ' + VersionOf(Output, 'gh version '))
-    else
-      Lines.Add(Format(rsVersionNotFound, ['gh']));
-    if not FAIBox.Checked then
-      Lines.Add(rsVersionAIOff)
-    else
-    begin
-      Exe := FindAgent(FAgent, Trim(FAgentEdit.Text));
-      if (Exe <> '') and RunAgentCli(Exe, GetUserDir, ['--version'], '', nil,
-        Output, Error) then
-        Lines.Add(AgentNames[FAgent] + ' ' + VersionOf(Output, ''))
+    Forge := TGittanGitHubForge.Create(GhExe);
+    try
+      if not GitHubOn then
+        Lines.Add(rsVersionGitHubOff)
+      else if Forge.Version(Version) then
+        Lines.Add(Forge.CliName + ' ' + Version)
       else
-        Lines.Add(Format(rsVersionNotFound, [AgentNames[FAgent]]));
+        Lines.Add(Format(rsVersionNotFound, [Forge.CliName]));
+    finally
+      Forge.Free;
     end;
-    Lines.Add(Format('%s, %s, %s', [SystemName, {$I %FPCTARGETCPU%},
-      LCLPlatformDisplayNames[WidgetSet.LCLPlatform]]));
+    if not AIOn then
+      Lines.Add(rsVersionAIOff)
+    else if (AgentExe <> '') and RunAgentCli(AgentExe, GetUserDir, ['--version'], '', nil,
+      Output, Error) then
+      Lines.Add(AgentName + ' ' + VersionOf(Output, ''))
+    else
+      Lines.Add(Format(rsVersionNotFound, [AgentName]));
+    Lines.Add(Format('%s, %s, %s', [SystemName, {$I %FPCTARGETCPU%}, Platform]));
     Lines.Add(Format(rsVersionLibraries, [{$I %FPCVERSION%}, lcl_version]));
-    FVersionsLabel.Caption := TrimRight(Lines.Text);
+    Text := TrimRight(Lines.Text);
   finally
     Lines.Free;
-    Screen.Cursor := OldCursor;
   end;
+  Done;
+end;
+
+{ What Gittan runs on and with: the build, git, gh and the agent (as the
+  fields name them now), the system and the libraries; VersionLines in
+  all. The tools are found here, their versions asked in a TVersionsJob;
+  one still running for fields since changed is dropped. }
+procedure TSettingsForm.ReadVersions(Data: PtrInt);
+var
+  Job: TVersionsJob;
+begin
+  if FVersionsJob <> nil then
+  begin
+    TGittanJob(FVersionsJob).Stop(False);
+    GUpdateZombies.Add(FVersionsJob);
+    FVersionsJob := nil;
+  end;
+  FreeFinishedUpdateJobs(False);
+  Job := TVersionsJob.Create(False);
+  { The git and gh the fields name, saved or not, as the notes under
+    them find them. }
+  Job.GitExe := Trim(FGitEdit.Text);
+  if Job.GitExe = '' then
+    Job.GitExe := FindTool('git');
+  Job.GhExe := Trim(FGhEdit.Text);
+  if Job.GhExe = '' then
+    Job.GhExe := FindTool(TGittanGitHubForge.CliName);
+  Job.GitHubOn := FGitHubBox.Checked;
+  Job.AIOn := FAIBox.Checked;
+  if Job.AIOn then
+    Job.AgentExe := FindAgent(FAgent, Trim(FAgentEdit.Text));
+  Job.AgentName := AgentNames[FAgent];
+  Job.Platform := LCLPlatformDisplayNames[WidgetSet.LCLPlatform];
+  Job.OnDone := @VersionsDone;
+  FVersionsJob := Job;
+  Job.Start;
+end;
+
+procedure TSettingsForm.VersionsDone(Sender: TObject);
+begin
+  if Sender <> FVersionsJob then
+    Exit;
+  FVersionsLabel.Caption := TVersionsJob(Sender).Text;
+  FVersionsJob := nil;
+  GUpdateZombies.Add(Sender);
 end;
 
 { The icon as a square as wide as the box, in the middle of its height
@@ -1277,9 +1426,15 @@ begin
     F.FEditorEdit.Text := AValues.EditorCommand;
     F.FTerminalEdit.Text := AValues.TerminalCommand;
     F.FGitEdit.Text := AValues.GitPath;
+    F.FAutoFetchBox.Checked := AValues.AutoFetch;
+    F.FAutoFetchEdit.Value := AValues.AutoFetchMinutes;
+    F.AutoFetchChange(nil);
     F.FGhEdit.Text := AValues.GhPath;
     F.ToolChange(F.FGitEdit);
     F.ToolChange(F.FGhEdit);
+    F.FGitHubBox.Checked := AValues.GitHubEnabled;
+    F.FSiblingsBox.Checked := AValues.CloneSiblings;
+    F.GitHubChange(nil);
     F.FAIBox.Checked := AValues.AIEnabled;
     F.FAgent := AValues.Agent;
     F.FAgentPaths := AValues.AgentPaths;
@@ -1303,7 +1458,11 @@ begin
       AValues.EditorCommand := Trim(F.FEditorEdit.Text);
       AValues.TerminalCommand := Trim(F.FTerminalEdit.Text);
       AValues.GitPath := Trim(F.FGitEdit.Text);
+      AValues.AutoFetch := F.FAutoFetchBox.Checked;
+      AValues.AutoFetchMinutes := F.FAutoFetchEdit.Value;
       AValues.GhPath := Trim(F.FGhEdit.Text);
+      AValues.GitHubEnabled := F.FGitHubBox.Checked;
+      AValues.CloneSiblings := F.FSiblingsBox.Checked;
       AValues.AIEnabled := F.FAIBox.Checked;
       { The fields hold the picked agent's; the other's are as kept. }
       F.AgentChange(nil);

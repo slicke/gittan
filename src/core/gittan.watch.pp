@@ -43,8 +43,13 @@ type
     destructor Destroy; override;
     {** Drops the handler, ends the thread and waits for it. }
     procedure Stop;
+    {** Polls at once instead of when the current interval runs out. }
+    procedure Poll;
     {** Called in the main thread after the repository changed. }
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
+    {** Milliseconds between two polls; a change counts from the next
+      wait on, so call Poll as well to shorten the one under way. }
+    property Interval: integer read FInterval write FInterval;
     {** Passed on to the thread's TGittanRepo before the first poll, so
       the snapshot counts changed lines as the form does. Set it before
       Start. }
@@ -84,6 +89,27 @@ type
     property IgnoreWhitespace: boolean read FIgnoreWhitespace write FIgnoreWhitespace;
   end;
 
+  {** Reads where the repository at ARoot stands with Git LFS
+    (TGittanRepo.LfsState) on a thread, since it lists the files in Git
+    LFS and reads those small enough to be pointers; OnDone is raised
+    in the main thread with State, Ok false when git failed. Head is
+    the commit it was asked for, for the caller to tell whether it is
+    still the one checked out. }
+  TGittanLfsCheckJob = class(TGittanJob)
+  private
+    FRoot, FHead: string;
+    FOk: boolean;
+    FState: TGittanLfsState;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const ARoot, AHead: string);
+    property Root: string read FRoot;
+    property Head: string read FHead;
+    property Ok: boolean read FOk;
+    property State: TGittanLfsState read FState;
+  end;
+
 implementation
 
 { TGittanWatcher }
@@ -119,7 +145,8 @@ end;
   wakes it at once instead of after a whole interval. git runs in this
   thread, the snapshot too; only Notify reaches the main thread. It goes
   through Synchronize, not Queue, so the thread is held while the main
-  thread reads FSnapshot and does not overwrite it on the next tick. A poll
+  thread reads FSnapshot and does not overwrite it on the next tick. Poll
+  sets the same event, for a tick now. A poll
   that fails (a file gone between git's listing and the read, say) is
   tried again on the next tick instead of ending the thread. So is a
   snapshot that fails: its fingerprint is not kept, and the form hears
@@ -159,6 +186,11 @@ begin
 end;
 
 procedure TGittanWatcher.TerminatedSet;
+begin
+  RTLEventSetEvent(FWake);
+end;
+
+procedure TGittanWatcher.Poll;
 begin
   RTLEventSetEvent(FWake);
 end;
@@ -215,6 +247,32 @@ begin
         FOpened := False;
         FError := E.Message;
       end;
+    end;
+  finally
+    Repo.Free;
+  end;
+  Done;
+end;
+
+{ TGittanLfsCheckJob }
+
+constructor TGittanLfsCheckJob.Create(const ARoot, AHead: string);
+begin
+  inherited Create(True);
+  FRoot := ARoot;
+  FHead := AHead;
+end;
+
+procedure TGittanLfsCheckJob.Execute;
+var
+  Repo: TGittanRepo;
+begin
+  Repo := TGittanRepo.Create;
+  try
+    try
+      FOk := Repo.Open(FRoot) and not Terminated and Repo.LfsState(FState);
+    except
+      FOk := False;
     end;
   finally
     Repo.Free;

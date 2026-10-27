@@ -28,6 +28,9 @@ function FitTextRight(ACanvas: TCanvas; const AText: string; AWidth: integer): s
   character does, nothing when the ellipsis does not either. }
 function FitTextLeft(ACanvas: TCanvas; const AText: string; AWidth: integer): string;
 
+{** APath with the home folder shortened to "~", for menus and labels. }
+function ShortPath(const APath: string): string;
+
 {** The number of characters at the start of AText (ACount characters
   long) that fit AWidth on ACanvas, at least 1 when ACount is not 0, so
   a caller breaking a line always moves on. }
@@ -41,7 +44,7 @@ function MeasureCanvas(AFont: TFont): TCanvas;
 implementation
 
 uses
-  LazUTF8;
+  SysUtils, LazUTF8;
 
 function FitTextRight(ACanvas: TCanvas; const AText: string; AWidth: integer): string;
 var
@@ -123,6 +126,19 @@ begin
   Result := GMeasure.Canvas;
 end;
 
+function ShortPath(const APath: string): string;
+var
+  Home: string;
+begin
+  Result := APath;
+  Home := ExcludeTrailingPathDelimiter(GetUserDir);
+  { /home/al is no start of /home/alice. }
+  if (Home <> '') and (Copy(APath, 1, Length(Home)) = Home) and
+    ((Length(APath) = Length(Home)) or (APath[Length(Home) + 1] in AllowDirectorySeparators)) then
+    Result := '~' + Copy(APath, Length(Home) + 1, MaxInt);
+end;
+
 finalization
   GMeasure.Free;
+
 end.

@@ -3,8 +3,9 @@ unit gittan.sidenav;
 {** The rows at the top of the sidebar that open the pages of a
   repository, as a music app lists Home and Explore over the library:
   Home, the summary, Graph, the commit graph, Repository, the page
-  about the repository itself, Commands, Files and Pull Requests, the
-  last hidden (SetRowVisible) while gh is missing. Each row is an icon and a name; the row
+  about the repository itself, Commands, Files, Pull Requests and the
+  forge's own (GitHub, named by SetRowCaption), the last two hidden
+  (SetRowVisible) while the forge's tool is missing. Each row is an icon and a name; the row
   of the page shown is filled, and the one under the mouse tinted. Set
   Large, the rows are as tall as the music app's, with a larger icon and
   text, so they read as navigation over the list of files and not as
@@ -20,11 +21,11 @@ unit gittan.sidenav;
   page.
 
   With ShowToggle, the first row holds a button at its right end that
-  folds the other rows and the heading away, as a music app's sidebar
-  folds at the button beside its name: a window with its sidebar and an
-  arrow into it, which points out again while they are folded, when
-  the first row alone is left over the heading and whatever the sidebar
-  lists. Collapsed tells the state and OnCollapse reports a change of
+  folds the other rows up into it, as a music app's sidebar folds at
+  the button beside its name: a window with a band across its top and
+  an arrow up into it, which points down again while they are folded,
+  when the first row alone is left over the heading and whatever the
+  sidebar lists. Collapsed tells the state and OnCollapse reports a change of
   it.
 
   It paints itself in the sidebar's shade, as the section headers do,
@@ -43,12 +44,13 @@ type
     branch for the graph, a book for the repository, a terminal with
     its prompt for the commands, a page for the files, a pull request
     (a branch's commits meeting the trunk) for the pull requests, a
+    globe for a forge (GitHub) across every repository, a
     clock for the recent repositories, a window of text for the
     settings' Editor page or sliders for its Tools page and for the
     settings themselves, a sparkle for its AI page and an i in a circle
     for its About page. }
-  TGittanNavIcon = (niHome, niGraph, niRepository, niCommands, niFiles, niPull, niClock,
-    niEditor, niTools, niAI, niAbout);
+  TGittanNavIcon = (niHome, niGraph, niRepository, niCommands, niFiles, niPull, niForge,
+    niClock, niEditor, niTools, niAI, niAbout);
 
   {** A click on a row, with its index. }
   TGittanNavPickEvent = procedure(Sender: TObject; AIndex: integer) of object;
@@ -108,6 +110,8 @@ type
     {** Hides a row (its place closes up) or shows it again, for a row
       whose page needs a tool that may be missing. }
     procedure SetRowVisible(AIndex: integer; AVisible: boolean);
+    {** Names a row anew, for a row named after a forge. }
+    procedure SetRowCaption(AIndex: integer; const ACaption: string);
     {** The palette: the background, the text, the dim icons and
       heading, the tint under the mouse, the fill of the selected row
       and the line under the heading. }
@@ -354,6 +358,14 @@ begin
   Invalidate;
 end;
 
+procedure TGittanSideNav.SetRowCaption(AIndex: integer; const ACaption: string);
+begin
+  if (AIndex < 0) or (AIndex > High(FCaptions)) or (FCaptions[AIndex] = ACaption) then
+    Exit;
+  FCaptions[AIndex] := ACaption;
+  Invalidate;
+end;
+
 function TGittanSideNav.RowScreenRect(AIndex: integer): TRect;
 begin
   Result := RowRect(AIndex);
@@ -541,6 +553,15 @@ begin
         Y + ASize + 1);
       Canvas.Brush.Style := bsClear;
     end;
+    niForge:
+    begin
+      { A globe: the disc, a meridian and the equator. }
+      Canvas.Ellipse(X, Y, X + ASize + 1, Y + ASize + 1);
+      Mid := X + ASize div 2;
+      Eave := Max(2, ASize * 2 div 7);
+      Canvas.Ellipse(Mid - Eave, Y, Mid + Eave + 1, Y + ASize + 1);
+      Canvas.Line(X, Y + ASize div 2, X + ASize + 1, Y + ASize div 2);
+    end;
     niFiles:
     begin
       Mid := X + 1;  { the left edge; the page is two narrower than high }
@@ -609,12 +630,12 @@ begin
   end;
 end;
 
-{ The folding button: a window with its sidebar along the left and an
-  arrow in the rest, pointing into the sidebar while the rows show, out
-  of it while they are folded. }
+{ The folding button: a window with a band across its top and an arrow
+  in the rest, pointing up into the band while the rows show, since they
+  fold up into the first row, and down out of it while they are folded. }
 procedure TGittanSideNav.DrawToggle(const R: TRect; AColor: TColor);
 var
-  X, Y, Split, Mid, CX: integer;
+  X, Y, Split, Mid, CY: integer;
 begin
   if FHotToggle then
   begin
@@ -630,15 +651,15 @@ begin
   Canvas.Pen.Width := 1;
   Canvas.Brush.Style := bsClear;
   Canvas.RoundRect(X, Y, X + Px(ToggleIconWidth) + 1, Y + Px(ToggleIconHeight) + 1, 3, 3);
-  Split := X + Px(ToggleIconWidth) div 3;
-  Canvas.Line(Split, Y + 1, Split, Y + Px(ToggleIconHeight));
-  Mid := Y + Px(ToggleIconHeight) div 2;
-  CX := (Split + X + Px(ToggleIconWidth)) div 2;
-  Canvas.Line(CX - 2, Mid, CX + 3, Mid);
+  Split := Y + Px(ToggleIconHeight) div 3;
+  Canvas.Line(X + 1, Split, X + Px(ToggleIconWidth), Split);
+  Mid := X + Px(ToggleIconWidth) div 2;
+  CY := (Split + Y + Px(ToggleIconHeight)) div 2;
+  Canvas.Line(Mid, CY - 2, Mid, CY + 3);
   if FCollapsed then
-    Canvas.Polyline([Point(CX, Mid - 2), Point(CX + 2, Mid), Point(CX, Mid + 2)])
+    Canvas.Polyline([Point(Mid - 2, CY), Point(Mid, CY + 2), Point(Mid + 2, CY)])
   else
-    Canvas.Polyline([Point(CX, Mid - 2), Point(CX - 2, Mid), Point(CX, Mid + 2)]);
+    Canvas.Polyline([Point(Mid - 2, CY), Point(Mid, CY - 2), Point(Mid + 2, CY)]);
 end;
 
 procedure TGittanSideNav.Paint;

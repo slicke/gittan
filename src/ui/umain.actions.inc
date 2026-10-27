@@ -1,20 +1,10 @@
 { ---------------------------------------------------------------------------
   Settings
   ---------------------------------------------------------------------------
-  Included by umain.pp. The settings are read in FormCreate and applied
-  here before the menu is built, so its check marks match; they are
-  written when the window closes. }
-
-{ A path with the home folder shortened to "~", for menus. }
-function ShortPath(const APath: string): string;
-var
-  Home: string;
-begin
-  Result := APath;
-  Home := ExcludeTrailingPathDelimiter(GetUserDir);
-  if (Home <> '') and (Copy(APath, 1, Length(Home)) = Home) then
-    Result := '~' + Copy(APath, Length(Home) + 1, MaxInt);
-end;
+  Included by umain.pp. The settings are read as App is made (gittan.app)
+  and applied here before the menu is built, so its check marks match;
+  they are written when the window closes. The window's place and size
+  are the window's (uwindow). }
 
 { Starts AExe with AArgs, in ADir when given, and does not wait for it. }
 procedure RunDetached(const AExe: string; const AArgs: array of string;
@@ -40,183 +30,128 @@ begin
   end;
 end;
 
-procedure TForm1.ApplySettings;
-const
-  { The share of the screen's work area a window with no place of its
-    own takes. }
-  FirstShare = 0.7;
-  { At most this at 96 DPI, so it is not a band across a wide screen. }
-  FirstMaxWidth = 1600;
-  FirstMaxHeight = 1000;
+procedure TRepoFrame.ApplySettings;
 var
-  R, Area: TRect;
-  i, W, H: integer;
-  Placed: boolean;
+  i: integer;
 begin
-  FOnlyChanges := FSettings.OnlyChanges;
-  FSideBySide := FSettings.SideBySide;
-  FMdPreviewOn := FSettings.MarkdownPreview;
-  FWordWrap := FSettings.WordWrap;
-  FIgnoreWhitespace := FSettings.IgnoreWhitespace;
-  FBlameOn := FSettings.Blame;
-  FShowComments := FSettings.ReviewComments;
-  FTranslations := FSettings.Translations;
-  FSyntaxTheme := FindSyntaxTheme(FSettings.SyntaxTheme);
+  FOnlyChanges := App.Settings.OnlyChanges;
+  FSideBySide := App.Settings.SideBySide;
+  FMdPreviewOn := App.Settings.MarkdownPreview;
+  FWordWrap := App.Settings.WordWrap;
+  FIgnoreWhitespace := App.Settings.IgnoreWhitespace;
+  FBlameOn := App.Settings.Blame;
+  FShowComments := App.Settings.ReviewComments;
+  FTranslations := App.Settings.Translations;
+  FSyntaxTheme := FindSyntaxTheme(App.Settings.SyntaxTheme);
   if FSyntaxTheme < 0 then
     FSyntaxTheme := DefaultSyntaxTheme;
   if FSyntaxTheme <> DefaultSyntaxTheme then
-    FLexers.ApplyTheme(FDark, FSyntaxTheme);
+    App.Lexers.ApplyTheme(FDark, FSyntaxTheme);
   FRepo.IgnoreWhitespace := FIgnoreWhitespace;
   FContextLines := ContextChoices[1];
   for i := 0 to High(ContextChoices) do
-    if ContextChoices[i] = FSettings.ContextLines then
+    if ContextChoices[i] = App.Settings.ContextLines then
       FContextLines := ContextChoices[i];
-  { The window where it was, if that is still on a screen. The sizes are
-    kept at 96 DPI: this runs in FormCreate, and the form scales its size
-    and the tree's width to the screen's after it, its place not. }
-  Placed := False;
-  if (FSettings.Width > 0) and (FSettings.Height > 0) then
-  begin
-    R := Rect(FSettings.Left, FSettings.Top, FSettings.Left + FSettings.Width,
-      FSettings.Top + FSettings.Height);
-    Placed := IntersectRect(R, R, Screen.DesktopRect) and (R.Width > 100) and
-      (R.Height > 100);
-    if Placed then
-      SetBounds(FSettings.Left, FSettings.Top, FSettings.Width, FSettings.Height);
-  end;
-  { Else FirstShare of the main screen's work area, no smaller than the
-    designed size and no larger than FirstMaxWidth by FirstMaxHeight, in
-    its middle: the place in the screen's pixels, the
-    size at 96 DPI for the form to scale. }
-  if not Placed then
-  begin
-    Area := Screen.PrimaryMonitor.WorkareaRect;
-    W := Min(Area.Width, Max(Scale96ToScreen(Width), Min(Scale96ToScreen(FirstMaxWidth),
-      Round(Area.Width * FirstShare))));
-    H := Min(Area.Height, Max(Scale96ToScreen(Height), Min(Scale96ToScreen(FirstMaxHeight),
-      Round(Area.Height * FirstShare))));
-    SetBounds(Area.Left + (Area.Width - W) div 2, Area.Top + (Area.Height - H) div 2,
-      MulDiv(W, 96, Screen.PixelsPerInch), MulDiv(H, 96, Screen.PixelsPerInch));
-  end;
-  if FSettings.Maximized then
-    WindowState := wsMaximized;
   { The editor font as picked, else the platform's, its size from the
     height of the screen the window is on. }
-  FDefaultFontSize := DefaultFontSize(MulDiv(Screen.MonitorFromRect(BoundsRect)
+  FDefaultFontSize := DefaultFontSize(MulDiv(Screen.MonitorFromRect(FWindow.BoundsRect)
     .BoundsRect.Height, 96, Screen.PixelsPerInch));
-  if FSettings.FontName <> '' then
-    Edit.Font.Name := FSettings.FontName
+  if App.Settings.FontName <> '' then
+    Edit.Font.Name := App.Settings.FontName
   else
     Edit.Font.Name := DefaultFontName;
-  if FSettings.FontSize > 0 then
-    Edit.Font.Size := FSettings.FontSize
+  if App.Settings.FontSize > 0 then
+    Edit.Font.Size := App.Settings.FontSize
   else
     Edit.Font.Size := FDefaultFontSize;
   FEditOld.Font.Assign(Edit.Font);
-  if FSettings.Zoom > 0 then
+  if App.Settings.Zoom > 0 then
   begin
-    Edit.OptScaleFont := FSettings.Zoom;
-    FEditOld.OptScaleFont := FSettings.Zoom;
+    Edit.OptScaleFont := App.Settings.Zoom;
+    FEditOld.OptScaleFont := App.Settings.Zoom;
   end;
-  if FSettings.TreeWidth > 80 then
-    FTreePanel.Width := FSettings.TreeWidth;
-  FSideNav.Collapsed := not FSettings.NavOpen;
-  FRepoHeader.Expanded := FSettings.RepoFilesOpen;
-  FSubHeader.Expanded := FSettings.SubmodulesOpen;
-  FCommitHeader.Expanded := FSettings.CommitOpen;
+  if App.Settings.TreeWidth > 80 then
+    FTreePanel.Width := App.Settings.TreeWidth;
+  FSideNav.Collapsed := not App.Settings.NavOpen;
+  FRepoHeader.Expanded := App.Settings.RepoFilesOpen;
+  FSubHeader.Expanded := App.Settings.SubmodulesOpen;
+  FCommitHeader.Expanded := App.Settings.CommitOpen;
   FCommitBox.Visible := FCommitHeader.Expanded;
   LayoutRepoFiles;
 end;
 
-procedure TForm1.FormClose(Sender: TObject; var CloseAction: TCloseAction);
+procedure TRepoFrame.FormClose(Sender: TObject; var CloseAction: TCloseAction);
 begin
-  FSettings.Maximized := WindowState = wsMaximized;
-  if FSettings.Maximized then
-  begin
-    FSettings.Left := RestoredLeft;
-    FSettings.Top := RestoredTop;
-    FSettings.Width := RestoredWidth;
-    FSettings.Height := RestoredHeight;
-  end
-  else
-  begin
-    FSettings.Left := Left;
-    FSettings.Top := Top;
-    FSettings.Width := Width;
-    FSettings.Height := Height;
-  end;
-  FSettings.Width := MulDiv(FSettings.Width, 96, Screen.PixelsPerInch);
-  FSettings.Height := MulDiv(FSettings.Height, 96, Screen.PixelsPerInch);
-  FSettings.TreeWidth := MulDiv(FTreePanel.Width, 96, Screen.PixelsPerInch);
-  FSettings.NavOpen := not FSideNav.Collapsed;
-  FSettings.RepoFilesOpen := FRepoHeader.Expanded;
-  FSettings.SubmodulesOpen := FSubHeader.Expanded;
-  FSettings.CommitOpen := FCommitHeader.Expanded;
+  App.Settings.TreeWidth := MulDiv(FTreePanel.Width, 96, Screen.PixelsPerInch);
+  App.Settings.NavOpen := not FSideNav.Collapsed;
+  App.Settings.RepoFilesOpen := FRepoHeader.Expanded;
+  App.Settings.SubmodulesOpen := FSubHeader.Expanded;
+  App.Settings.CommitOpen := FCommitHeader.Expanded;
   StopCommitJob(True);
   StopRemoteJob(True);
   AbandonCommandJob(True);
   SaveCommitDraft;
   { The defaults are not written, so they follow the screen and a later
     Gittan's choice. }
-  FSettings.FontName := Edit.Font.Name;
-  if SameText(FSettings.FontName, DefaultFontName) then
-    FSettings.FontName := '';
-  FSettings.FontSize := Edit.Font.Size;
-  if FSettings.FontSize = FDefaultFontSize then
-    FSettings.FontSize := 0;
-  FSettings.Zoom := Edit.OptScaleFont;
-  FSettings.TabSize := FTabSize;
+  App.Settings.FontName := Edit.Font.Name;
+  if SameText(App.Settings.FontName, DefaultFontName) then
+    App.Settings.FontName := '';
+  App.Settings.FontSize := Edit.Font.Size;
+  if App.Settings.FontSize = FDefaultFontSize then
+    App.Settings.FontSize := 0;
+  App.Settings.Zoom := Edit.OptScaleFont;
+  App.Settings.TabSize := FTabSize;
   if FTabSize = DefaultTabSize then
-    FSettings.TabSize := 0;
-  FSettings.WordWrap := FWordWrap;
-  FSettings.OnlyChanges := FOnlyChanges;
-  FSettings.ContextLines := FContextLines;
-  FSettings.SideBySide := FSideBySide;
-  FSettings.MarkdownPreview := FMdPreviewOn;
-  FSettings.IgnoreWhitespace := FIgnoreWhitespace;
-  FSettings.Blame := FBlameOn;
-  FSettings.ReviewComments := FShowComments;
-  FSettings.Translations := FTranslations;
-  FSettings.SyntaxTheme := SyntaxThemes[FSyntaxTheme].Name;
-  FSettings.Save;
+    App.Settings.TabSize := 0;
+  App.Settings.WordWrap := FWordWrap;
+  App.Settings.OnlyChanges := FOnlyChanges;
+  App.Settings.ContextLines := FContextLines;
+  App.Settings.SideBySide := FSideBySide;
+  App.Settings.MarkdownPreview := FMdPreviewOn;
+  App.Settings.IgnoreWhitespace := FIgnoreWhitespace;
+  App.Settings.Blame := FBlameOn;
+  App.Settings.ReviewComments := FShowComments;
+  App.Settings.Translations := FTranslations;
+  App.Settings.SyntaxTheme := SyntaxThemes[FSyntaxTheme].Name;
+  App.Settings.Save;
   SaveIndex;
 end;
 
 { ---------------------------------------------------------------------------
   Recent repositories
   --------------------------------------------------------------------------- }
-procedure TForm1.RebuildRecentMenu;
+procedure TRepoFrame.RebuildRecentMenu;
 var
   Item: TMenuItem;
   i: integer;
 begin
   FRecentMenu.Clear;
-  for i := 0 to FSettings.Recent.Count - 1 do
+  for i := 0 to App.Settings.Recent.Count - 1 do
   begin
     Item := TMenuItem.Create(FRecentMenu);
-    Item.Caption := ShortPath(FSettings.Recent[i]);
-    Item.Hint := FSettings.Recent[i];
+    Item.Caption := ShortPath(App.Settings.Recent[i]);
+    Item.Hint := App.Settings.Recent[i];
     Item.OnClick := @MenuRecentClick;
     FRecentMenu.Add(Item);
   end;
-  if FSettings.Recent.Count > 0 then
+  if App.Settings.Recent.Count > 0 then
     FRecentMenu.Add(NewLine);
   Item := TMenuItem.Create(FRecentMenu);
   Item.Caption := rsClearMenu;
-  Item.Enabled := FSettings.Recent.Count > 0;
+  Item.Enabled := App.Settings.Recent.Count > 0;
   Item.OnClick := @MenuClearRecentClick;
   FRecentMenu.Add(Item);
-  FWelcome.SetRecent(FSettings.Recent);
+  FWelcome.SetRecent(App.Settings.Recent);
 end;
 
-procedure TForm1.MenuRecentClick(Sender: TObject);
+procedure TRepoFrame.MenuRecentClick(Sender: TObject);
 begin
-  OpenRepository(TMenuItem(Sender).Hint);
+  FWindow.OpenRepository(TMenuItem(Sender).Hint);
 end;
 
-procedure TForm1.MenuClearRecentClick(Sender: TObject);
+procedure TRepoFrame.MenuClearRecentClick(Sender: TObject);
 begin
-  FSettings.Recent.Clear;
+  App.Settings.Recent.Clear;
   RebuildRecentMenu;
 end;
 
@@ -228,14 +163,14 @@ end;
   quick enough for the files a diff shows; the one to show is the first
   after (or before) the caret, or the selection start while a match is
   selected, so retyping extends the current match in place. }
-procedure TForm1.MenuFindClick(Sender: TObject);
+procedure TRepoFrame.MenuFindClick(Sender: TObject);
 begin
   if not Edit.Visible then
     Exit;
   FFindBar.Activate;
 end;
 
-procedure TForm1.MenuFindNextClick(Sender: TObject);
+procedure TRepoFrame.MenuFindNextClick(Sender: TObject);
 begin
   if FFindBar.SearchText = '' then
     MenuFindClick(Sender)
@@ -243,7 +178,7 @@ begin
     FindText(FFindBar.SearchText, True, False);
 end;
 
-procedure TForm1.MenuFindPrevClick(Sender: TObject);
+procedure TRepoFrame.MenuFindPrevClick(Sender: TObject);
 begin
   if FFindBar.SearchText = '' then
     MenuFindClick(Sender)
@@ -251,20 +186,20 @@ begin
     FindText(FFindBar.SearchText, False, False);
 end;
 
-procedure TForm1.FindBarSearch(Sender: TObject; const AText: string;
+procedure TRepoFrame.FindBarSearch(Sender: TObject; const AText: string;
   ANext, AFromStart: boolean);
 begin
   FindText(AText, ANext, AFromStart);
 end;
 
-procedure TForm1.FindBarClose(Sender: TObject);
+procedure TRepoFrame.FindBarClose(Sender: TObject);
 begin
   FFindBar.Visible := False;
   if Edit.Visible and Edit.CanFocus then
     Edit.SetFocus;
 end;
 
-procedure TForm1.FindText(const AText: string; ANext, AFromStart: boolean);
+procedure TRepoFrame.FindText(const AText: string; ANext, AFromStart: boolean);
 type
   { A match: X and Y in the editor, Old when it is in the old side's
     text. The two sides of Side by Side have the same rows, so the
@@ -418,26 +353,26 @@ end;
   --------------------------------------------------------------------------- }
 { DoScaleFontDelta fires no OnChangeZoom (only the wheel and the
   editor's own keys do), so the menu's zoom calls the handler itself. }
-procedure TForm1.MenuZoomInClick(Sender: TObject);
+procedure TRepoFrame.MenuZoomInClick(Sender: TObject);
 begin
   Edit.DoScaleFontDelta(True, True);
   EditChangeZoom(Edit);
 end;
 
-procedure TForm1.MenuZoomOutClick(Sender: TObject);
+procedure TRepoFrame.MenuZoomOutClick(Sender: TObject);
 begin
   Edit.DoScaleFontDelta(False, True);
   EditChangeZoom(Edit);
 end;
 
-procedure TForm1.MenuZoomResetClick(Sender: TObject);
+procedure TRepoFrame.MenuZoomResetClick(Sender: TObject);
 begin
   Edit.OptScaleFont := 0;
   FEditOld.OptScaleFont := 0;
   EditorMetricsChanged;
 end;
 
-procedure TForm1.MenuFontClick(Sender: TObject);
+procedure TRepoFrame.MenuFontClick(Sender: TObject);
 var
   Dlg: TFontDialog;
 begin
@@ -451,7 +386,7 @@ begin
   end;
 end;
 
-procedure TForm1.ApplyEditorFont(AFont: TFont);
+procedure TRepoFrame.ApplyEditorFont(AFont: TFont);
 begin
   Edit.Font.Assign(AFont);
   FEditOld.Font.Assign(AFont);
@@ -465,7 +400,7 @@ end;
 { A git older than MinGitMajor.MinGitMinor is said in the banner, at
   start and when the settings name another git. One that cannot be run,
   or names no version, is left to the errors of the git calls. }
-procedure TForm1.CheckGitVersion;
+procedure TRepoFrame.CheckGitVersion;
 var
   Version: string;
   Major, Minor: integer;
@@ -481,7 +416,7 @@ end;
   from here on: the repository is read again with it, and the GitHub
   features follow whether gh is there now. APage is the page it opens
   on. }
-procedure TForm1.OpenSettings(APage: TSettingsPage);
+procedure TRepoFrame.OpenSettings(APage: TSettingsPage);
 const
   Margin = 24;
 var
@@ -489,6 +424,7 @@ var
   OldTheme, OldTabSize: integer;
   V: TSettingsValues;
   Corner: TPoint;
+  Tools: boolean;
 begin
   OldFont := TFont.Create;
   F := TFont.Create;
@@ -499,58 +435,47 @@ begin
     OldTabSize := FTabSize;
     V.Theme := FSyntaxTheme;
     V.TabSize := FTabSize;
-    V.EditorCommand := FSettings.EditorCommand;
-    V.TerminalCommand := FSettings.TerminalCommand;
-    V.GitPath := FSettings.GitPath;
-    V.GhPath := FSettings.GhPath;
-    V.AIEnabled := FSettings.AIEnabled;
-    V.Agent := AgentOfKey(FSettings.AIAgent);
-    V.AgentPaths[gaClaude] := FSettings.ClaudePath;
-    V.AgentModels[gaClaude] := FSettings.ClaudeModel;
-    V.AgentPaths[gaCopilot] := FSettings.CopilotPath;
-    V.AgentModels[gaCopilot] := FSettings.CopilotModel;
+    V.EditorCommand := App.Settings.EditorCommand;
+    V.TerminalCommand := App.Settings.TerminalCommand;
+    V.GitPath := App.Settings.GitPath;
+    V.AutoFetch := App.Settings.AutoFetch;
+    V.AutoFetchMinutes := App.Settings.AutoFetchMinutes;
+    V.GhPath := App.Settings.GhPath;
+    V.GitHubEnabled := App.Settings.GitHubEnabled;
+    V.CloneSiblings := App.Settings.CloneSiblings;
+    V.AIEnabled := App.Settings.AIEnabled;
+    V.Agent := AgentOfKey(App.Settings.AIAgent);
+    V.AgentPaths[gaClaude] := App.Settings.ClaudePath;
+    V.AgentModels[gaClaude] := App.Settings.ClaudeModel;
+    V.AgentPaths[gaCopilot] := App.Settings.CopilotPath;
+    V.AgentModels[gaCopilot] := App.Settings.CopilotModel;
     Corner := EditorPanel.ClientToScreen(Point(EditorPanel.ClientWidth -
       Scale96ToForm(Margin), EditorPanel.ClientHeight - Scale96ToForm(Margin)));
-    if EditSettings(F, V, @PreviewSettings, FLexers, Edit, Corner, APage) then
+    if EditSettings(F, V, @PreviewSettings, App.Lexers, Edit, Corner, APage) then
     begin
-      PreviewSettings(F, V.Theme, V.TabSize);
-      FSettings.EditorCommand := V.EditorCommand;
-      FSettings.TerminalCommand := V.TerminalCommand;
-      FSettings.AIEnabled := V.AIEnabled;
-      FSettings.AIAgent := AgentCommands[V.Agent];
-      FSettings.ClaudePath := V.AgentPaths[gaClaude];
-      FSettings.ClaudeModel := V.AgentModels[gaClaude];
-      FSettings.CopilotPath := V.AgentPaths[gaCopilot];
-      FSettings.CopilotModel := V.AgentModels[gaCopilot];
-      FindAgentCli;
-      if not AIAvailable then
+      { Once for all: what the settings keep. }
+      App.Settings.EditorCommand := V.EditorCommand;
+      App.Settings.TerminalCommand := V.TerminalCommand;
+      App.Settings.CloneSiblings := V.CloneSiblings;
+      App.Settings.AutoFetch := V.AutoFetch;
+      App.Settings.AutoFetchMinutes := V.AutoFetchMinutes;
+      App.Settings.AIEnabled := V.AIEnabled;
+      App.Settings.AIAgent := AgentCommands[V.Agent];
+      App.Settings.ClaudePath := V.AgentPaths[gaClaude];
+      App.Settings.ClaudeModel := V.AgentModels[gaClaude];
+      App.Settings.CopilotPath := V.AgentPaths[gaCopilot];
+      App.Settings.CopilotModel := V.AgentModels[gaCopilot];
+      Tools := (V.GitPath <> App.Settings.GitPath) or (V.GhPath <> App.Settings.GhPath) or
+        (V.GitHubEnabled <> App.Settings.GitHubEnabled);
+      if Tools then
       begin
-        AbandonMessageJob;
-        AbandonAIReview;
+        App.Settings.GitPath := V.GitPath;
+        App.Settings.GhPath := V.GhPath;
+        App.Settings.GitHubEnabled := V.GitHubEnabled;
+        SetGitExe(App.Settings.GitPath);
       end;
-      UpdateCommitState;
-      if (V.GitPath <> FSettings.GitPath) or (V.GhPath <> FSettings.GhPath) then
-      begin
-        FSettings.GitPath := V.GitPath;
-        FSettings.GhPath := V.GhPath;
-        SetGitExe(FSettings.GitPath);
-        FindGitHubCli;
-        UpdateGitHubItems;
-        if not FHasGitHubCli then
-        begin
-          { What the gh that is gone had found. }
-          AbandonPullJob;
-          FPullKey := '';
-          FHasPull := False;
-          FPulls := nil;
-          FPullError := '';
-          FReviewPulls := nil;
-          FSummary.SetReviewPulls(nil);
-          ClearReviews;
-        end;
-        MenuRefreshClick(nil);
-        CheckGitVersion;
-      end;
+      { Then every tab, this one with them. }
+      FWindow.SettingsChanged(F, V.Theme, V.TabSize, Tools);
     end
     else
       PreviewSettings(OldFont, OldTheme, OldTabSize);
@@ -560,18 +485,60 @@ begin
   end;
 end;
 
-procedure TForm1.MenuSettingsClick(Sender: TObject);
+{ A tab takes what the settings dialog changed, whichever tab opened it:
+  the editors' font, theme and tab size, the agent, and when git, gh or
+  the GitHub switch changed, the forge, with what a forge that is gone
+  had found, and the repository read again. }
+procedure TRepoFrame.SettingsChanged(AFont: TFont; ATheme, ATabSize: integer;
+  ATools: boolean);
+begin
+  PreviewSettings(AFont, ATheme, ATabSize);
+  FindAgentCli;
+  if not AIAvailable then
+  begin
+    AbandonMessageJob;
+    AbandonAIReview;
+  end;
+  UpdateCommitState;
+  if not ATools then
+    Exit;
+  FindForge;
+  UpdateForgeItems;
+  if not Assigned(FForge) then
+  begin
+    { What the forge that is gone had found. }
+    AbandonPullJob;
+    FPullKey := '';
+    FHasPull := False;
+    FPulls := nil;
+    FPullError := '';
+    FReviewPulls := nil;
+    FSummary.SetReviewPulls(nil);
+    FPullLogin := '';
+    AbandonForgeJob;
+    FForgeMine := nil;
+    FForgeReview := nil;
+    FForgeLogin := '';
+    FForgeError := '';
+    UpdateForgePage;
+    ClearReviews;
+  end;
+  MenuRefreshClick(nil);
+  CheckGitVersion;
+end;
+
+procedure TRepoFrame.MenuSettingsClick(Sender: TObject);
 begin
   OpenSettings(pgEditor);
 end;
 
 { About Gittan is the settings' last page. }
-procedure TForm1.MenuAboutClick(Sender: TObject);
+procedure TRepoFrame.MenuAboutClick(Sender: TObject);
 begin
   OpenSettings(pgAbout);
 end;
 
-procedure TForm1.PreviewSettings(AFont: TFont; ATheme, ATabSize: integer);
+procedure TRepoFrame.PreviewSettings(AFont: TFont; ATheme, ATabSize: integer);
 begin
   if not Edit.Font.IsEqual(AFont) then
     ApplyEditorFont(AFont);
@@ -582,7 +549,7 @@ end;
 
 { A tab ASize characters wide in both editors; the wrap follows, since
   the width of a line changes with it. }
-procedure TForm1.ApplyTabSize(ASize: integer);
+procedure TRepoFrame.ApplyTabSize(ASize: integer);
 begin
   if ASize = FTabSize then
     Exit;
@@ -593,38 +560,79 @@ begin
   FEditOld.Update(True);
 end;
 
-{ gh by the path the settings give, else as found on ToolSearchPath. }
-procedure TForm1.FindGitHubCli;
+{ The forge, GitHub through gh: gh by the path the settings give, else
+  as found on ToolSearchPath; none while the GitHub features are turned
+  off, which hides them as a missing gh does. A forge already made with
+  the same tool is kept. }
+procedure TRepoFrame.FindForge;
+var
+  Cli: string;
 begin
-  if FSettings.GhPath <> '' then
-    FGitHubCli := FSettings.GhPath
+  if not App.Settings.GitHubEnabled then
+    Cli := ''
+  else if App.Settings.GhPath <> '' then
+    Cli := App.Settings.GhPath
   else
-    FGitHubCli := FindTool('gh');
-  FHasGitHubCli := FGitHubCli <> '';
+    Cli := FindTool(TGittanGitHubForge.CliName);
+  if Assigned(FForge) and (FForge.Cli = Cli) then
+    Exit;
+  FreeAndNil(FForge);
+  if Cli <> '' then
+    FForge := TGittanGitHubForge.Create(Cli);
 end;
 
-{ Shows the menu items that need gh when there is one, hides them
-  otherwise. The Compare With menu and a commit's menu are built when
-  they open and look at the flag themselves. }
-procedure TForm1.UpdateGitHubItems;
-var
-  Item: TMenuItem;
+{ The forge's name, empty without one (when what is named after it is
+  hidden). }
+function TRepoFrame.ForgeName: string;
 begin
-  for Item in FGitHubItems do
-    Item.Visible := FHasGitHubCli;
+  if Assigned(FForge) then
+    Result := FForge.Name
+  else
+    Result := '';
+end;
+
+{ Shows the menu items that need the forge when there is one, named
+  after it, and hides them otherwise. The Compare With menu and a
+  commit's menu are built when they open and look themselves. }
+procedure TRepoFrame.UpdateForgeItems;
+var
+  i: integer;
+begin
+  for i := 0 to High(FForgeItems) do
+  begin
+    FForgeItems[i].Visible := Assigned(FForge);
+    if FForgeCaptions[i] <> '' then
+      FForgeItems[i].Caption := Format(FForgeCaptions[i], [ForgeName]);
+  end;
   if FReviewItem <> nil then
-    FReviewItem.Enabled := FHasGitHubCli;
-  { The Pull Requests page needs gh too: its row, its menu item, and
-    the page itself when gh goes while it shows. }
+    FReviewItem.Enabled := Assigned(FForge);
+  { The Pull Requests and forge pages need the forge too: their rows,
+    their menu items, the names they show, and the page itself when the
+    forge goes while it shows. }
   if FPullsItem <> nil then
-    FPullsItem.Visible := FHasGitHubCli;
+    FPullsItem.Visible := Assigned(FForge);
+  if FForgeItem <> nil then
+  begin
+    FForgeItem.Visible := Assigned(FForge);
+    FForgeItem.Caption := Format(rsForgeMenu, [ForgeName]);
+  end;
   if FSideNav <> nil then
-    FSideNav.SetRowVisible(navPulls, FHasGitHubCli);
-  if not FHasGitHubCli and (FView = gvPulls) then
+  begin
+    FSideNav.SetRowVisible(navPulls, Assigned(FForge));
+    FSideNav.SetRowVisible(navForge, Assigned(FForge));
+    FSideNav.SetRowCaption(navForge, ForgeName);
+  end;
+  if FPullPage <> nil then
+    FPullPage.SetForge(ForgeName);
+  if FForgePage <> nil then
+    FForgePage.SetForge(ForgeName);
+  if FSummary <> nil then
+    FSummary.ForgeName := ForgeName;
+  if not Assigned(FForge) and (FView in [gvPulls, gvForge]) then
     ShowSummary;
 end;
 
-procedure TForm1.MenuWrapClick(Sender: TObject);
+procedure TRepoFrame.MenuWrapClick(Sender: TObject);
 begin
   FWordWrap := not FWordWrap;
   FWrapItem.Checked := FWordWrap;
@@ -634,7 +642,7 @@ end;
 { View > Folding: the command in the item's Tag, on the ranges of the
   lexer where FoldingShown. The shortcuts reach here in the other views
   too. }
-procedure TForm1.MenuFoldClick(Sender: TObject);
+procedure TRepoFrame.MenuFoldClick(Sender: TObject);
 begin
   if not FoldingShown or not Edit.Visible then
     Exit;
@@ -674,7 +682,7 @@ end;
   View menu, and the file's histories from the Go menu, each with its
   shortcut, so the chip also teaches them; only the items the menus
   enable now. A pick clicks the menu item. }
-procedure TForm1.HeaderMenu(Sender: TObject; const AScreenRect: TRect);
+procedure TRepoFrame.HeaderMenu(Sender: TObject; const AScreenRect: TRect);
 var
   n: integer;
 
@@ -710,7 +718,7 @@ begin
   FViewPopup.Popup(AScreenRect);
 end;
 
-procedure TForm1.ViewPopupPick(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.ViewPopupPick(Sender: TObject; AIndex: integer);
 var
   i: integer;
 begin
@@ -722,12 +730,12 @@ begin
     end;
 end;
 
-procedure TForm1.ViewMenuClick(Sender: TObject);
+procedure TRepoFrame.ViewMenuClick(Sender: TObject);
 begin
   FFoldMenu.Enabled := FoldingShown and Edit.Visible;
 end;
 
-procedure TForm1.MenuOnlyChangesClick(Sender: TObject);
+procedure TRepoFrame.MenuOnlyChangesClick(Sender: TObject);
 begin
   FOnlyChanges := not FOnlyChanges;
   FOnlyChangesItem.Checked := FOnlyChanges;
@@ -735,7 +743,7 @@ begin
   RebuildIfChanges;
 end;
 
-procedure TForm1.MenuContextLinesClick(Sender: TObject);
+procedure TRepoFrame.MenuContextLinesClick(Sender: TObject);
 var
   i: integer;
 begin
@@ -748,12 +756,12 @@ end;
 
 { The lexer formats carry the colors, so the editors only need a repaint,
   which ApplyTheme does with the rest of the palette. }
-procedure TForm1.MenuSyntaxThemeClick(Sender: TObject);
+procedure TRepoFrame.MenuSyntaxThemeClick(Sender: TObject);
 begin
   SetSyntaxTheme(TMenuItem(Sender).Tag);
 end;
 
-procedure TForm1.SetSyntaxTheme(ATheme: integer);
+procedure TRepoFrame.SetSyntaxTheme(ATheme: integer);
 var
   i: integer;
 begin
@@ -763,7 +771,7 @@ begin
   ApplyTheme;
 end;
 
-procedure TForm1.MenuSideBySideClick(Sender: TObject);
+procedure TRepoFrame.MenuSideBySideClick(Sender: TObject);
 begin
   FSideBySide := not FSideBySide;
   FSideItem.Checked := FSideBySide;
@@ -774,7 +782,7 @@ end;
 { Whitespace changes are left out by git itself (-w on every diff), so
   the counts, the tree and the views all follow: the repository is
   loaded again and the view restored, as on a refresh. }
-procedure TForm1.MenuIgnoreSpaceClick(Sender: TObject);
+procedure TRepoFrame.MenuIgnoreSpaceClick(Sender: TObject);
 begin
   FIgnoreWhitespace := not FIgnoreWhitespace;
   FIgnoreSpaceItem.Checked := FIgnoreWhitespace;
@@ -789,12 +797,12 @@ end;
 { The caret goes to the file's first change, as selecting the file in
   the tree does, or going back, to its last; a file without any, such as
   an image or a binary file, is left as it is. }
-procedure TForm1.MenuNextFileClick(Sender: TObject);
+procedure TRepoFrame.MenuNextFileClick(Sender: TObject);
 begin
   StepFile(True);
 end;
 
-procedure TForm1.MenuPrevFileClick(Sender: TObject);
+procedure TRepoFrame.MenuPrevFileClick(Sender: TObject);
 var
   Blocks: TIntegerDynArray;
 begin
@@ -807,7 +815,7 @@ end;
 
 { Selects the next (or previous) file in the tree, wrapping around, which
   shows its changes. Returns false when there is no other file. }
-function TForm1.StepFile(ANext: boolean): boolean;
+function TRepoFrame.StepFile(ANext: boolean): boolean;
 var
   Node: TTreeNode;
 begin
@@ -821,7 +829,7 @@ end;
 
 { The file node after (or before) the selected one in the tree, wrapping
   around; nil when there is no other file. }
-function TForm1.NeighbourFile(ANext: boolean): TTreeNode;
+function TRepoFrame.NeighbourFile(ANext: boolean): TTreeNode;
 var
   Files: TList;
   Node: TTreeNode;
@@ -872,7 +880,7 @@ end;
   its bottom. The gesture's momentum runs on after the jump, so the pull
   is disarmed until the wheel has paused, and the editor's own scrolling
   is off meanwhile (SetWheelScroll). }
-procedure TForm1.EditMouseWheel(Sender: TObject; Shift: TShiftState;
+procedure TRepoFrame.EditMouseWheel(Sender: TObject; Shift: TShiftState;
   WheelDelta: integer; MousePos: TPoint; var Handled: boolean);
 var
   Now: QWord;
@@ -918,13 +926,13 @@ end;
   pulled in away from its edge, and so would the momentum after it, so
   the editors' wheel scrolling is off from the jump until the wheel has
   paused. }
-procedure TForm1.SetWheelScroll(AOn: boolean);
+procedure TRepoFrame.SetWheelScroll(AOn: boolean);
 begin
   Edit.OptMouseWheelScrollVert := AOn;
   FEditOld.OptMouseWheelScrollVert := AOn;
 end;
 
-procedure TForm1.SetOverscroll(AValue: integer);
+procedure TRepoFrame.SetOverscroll(AValue: integer);
 begin
   if AValue = FOverscroll then
     Exit;
@@ -943,7 +951,7 @@ end;
   build, and the line top the editor kept from the resize of showing the
   file would win at that paint. The editor keeps the line top within the
   last page, so the last line's puts that page in view. }
-procedure TForm1.ShowFileEnd;
+procedure TRepoFrame.ShowFileEnd;
 var
   Last: integer;
 begin
@@ -962,7 +970,7 @@ begin
   UpdateChangeNav;
 end;
 
-procedure TForm1.OverscrollTimerTimer(Sender: TObject);
+procedure TRepoFrame.OverscrollTimerTimer(Sender: TObject);
 begin
   SetOverscroll(0);
 end;
@@ -972,7 +980,7 @@ end;
   the top for the previous, as the pull grows, and fills from the left,
   until the file is pulled in. The canvas is clipped to the text
   rectangle so the pill comes in from under its edge. }
-procedure TForm1.EditDrawEditor(Sender: TObject; C: TCanvas; const ARect: TRect);
+procedure TRepoFrame.EditDrawEditor(Sender: TObject; C: TCanvas; const ARect: TRect);
 var
   Node: TTreeNode;
   Pill: string;
@@ -1038,7 +1046,7 @@ end;
   The file menu pops up over the tree (its right click selects the node),
   the summary's rows and the header; FContextPath names the file it is
   about. The status bar has a menu of its own. }
-procedure TForm1.BuildPopups;
+procedure TRepoFrame.BuildPopups;
 var
   Item: TMenuItem;
 
@@ -1051,16 +1059,19 @@ var
     APopup.Items.Add(Result);
   end;
 
-  { An item (a separator with no caption) shown only when gh is there. }
-  function AddGitHubItem(APopup: TPopupMenu; const ACaption: string;
+  { An item (a separator with no caption) shown only while there is a
+    forge, its caption AFormat with the forge's name in place of %s. }
+  function AddForgeItem(APopup: TPopupMenu; const AFormat: string;
     AClick: TNotifyEvent): TMenuItem;
   begin
-    if ACaption = '' then
+    if AFormat = '' then
       Result := AddItem(APopup, '-', nil)
     else
-      Result := AddItem(APopup, ACaption, AClick);
-    SetLength(FGitHubItems, Length(FGitHubItems) + 1);
-    FGitHubItems[High(FGitHubItems)] := Result;
+      Result := AddItem(APopup, Format(AFormat, [ForgeName]), AClick);
+    SetLength(FForgeItems, Length(FForgeItems) + 1);
+    FForgeItems[High(FForgeItems)] := Result;
+    SetLength(FForgeCaptions, Length(FForgeCaptions) + 1);
+    FForgeCaptions[High(FForgeCaptions)] := AFormat;
   end;
 
 begin
@@ -1074,8 +1085,8 @@ begin
   FRevealItem := AddItem(FFilePopup, rsReveal, @MenuRevealClick);
   FOpenItem := AddItem(FFilePopup, rsOpenInEditor, @MenuOpenInEditorClick);
   FFileHistoryItem := AddItem(FFilePopup, rsFileHistoryItem, @MenuFileHistoryClick);
-  AddGitHubItem(FFilePopup, rsOpenOnGitHub, @MenuOpenOnGitHubClick);
-  AddGitHubItem(FFilePopup, rsCopyGitHubUrl, @MenuCopyGitHubUrlClick);
+  AddForgeItem(FFilePopup, rsOpenOnForge, @MenuOpenOnForgeClick);
+  AddForgeItem(FFilePopup, rsCopyForgeUrl, @MenuCopyForgeUrlClick);
   Item := TMenuItem.Create(FFilePopup);
   Item.Caption := '-';
   FFilePopup.Items.Add(Item);
@@ -1091,6 +1102,8 @@ begin
   { Filled with the patterns for the file when the menu pops up. }
   FIgnoreMenu := AddItem(FFilePopup, rsAddToIgnore, nil);
   FExcludeMenu := AddItem(FFilePopup, rsAddToExclude, nil);
+  FLfsTrackMenu := AddItem(FFilePopup, rsLfsTrackMenu, nil);
+  FLfsUntrackMenu := AddItem(FFilePopup, rsLfsUntrackMenu, nil);
   { Over the tree while it chooses what to commit (FilePopupPopup). }
   FTickSepItem := TMenuItem.Create(FFilePopup);
   FTickSepItem.Caption := '-';
@@ -1114,14 +1127,14 @@ begin
   FResolveEditItem := AddItem(FEditPopup, rsResolveHere, @MenuResolveEditClick);
   FShowCommitItem := AddItem(FEditPopup, rsShowCommit, @MenuShowCommitClick);
   FCopyHashItem := AddItem(FEditPopup, rsCopyHash, @MenuCopyHashClick);
-  AddGitHubItem(FEditPopup, '', nil);
-  FGitHubEditItem := AddGitHubItem(FEditPopup, rsOpenOnGitHub, @MenuOpenLineOnGitHubClick);
-  AddGitHubItem(FEditPopup, rsCopyGitHubUrl, @MenuCopyLineGitHubUrlClick);
-  FGitHubCommitItem := AddGitHubItem(FEditPopup, rsOpenCommitOnGitHub,
-    @MenuOpenCommitOnGitHubClick);
+  AddForgeItem(FEditPopup, '', nil);
+  FForgeEditItem := AddForgeItem(FEditPopup, rsOpenOnForge, @MenuOpenLineOnForgeClick);
+  AddForgeItem(FEditPopup, rsCopyForgeUrl, @MenuCopyLineForgeUrlClick);
+  FForgeCommitItem := AddForgeItem(FEditPopup, rsOpenCommitOnForge,
+    @MenuOpenCommitOnForgeClick);
   { Shown for a commit whose summary names an issue (EditPopupPopup). }
-  FGitHubIssueItem := AddItem(FEditPopup, Format(rsOpenIssueOnGitHub, [0]),
-    @MenuOpenIssueOnGitHubClick);
+  FForgeIssueItem := AddItem(FEditPopup, Format(rsOpenIssueOnForge, [0, ForgeName]),
+    @MenuOpenIssueOnForgeClick);
   Edit.PopupText := FEditPopup;
   FEditOld.PopupText := FEditPopup;
 
@@ -1133,14 +1146,14 @@ begin
   Item.Caption := '-';
   FStatusPopup.Items.Add(Item);
   AddItem(FStatusPopup, rsOpenTerminal, @MenuOpenTerminalClick);
-  AddGitHubItem(FStatusPopup, '', nil);
-  FOpenPullItem := AddGitHubItem(FStatusPopup, rsOpenPull, @MenuOpenPullClick);
-  FCopyPullItem := AddGitHubItem(FStatusPopup, rsCopyPullUrl, @MenuCopyPullUrlClick);
+  AddForgeItem(FStatusPopup, '', nil);
+  FOpenPullItem := AddForgeItem(FStatusPopup, rsOpenPull, @MenuOpenPullClick);
+  FCopyPullItem := AddForgeItem(FStatusPopup, rsCopyPullUrl, @MenuCopyPullUrlClick);
   FStatus.PopupMenu := FStatusPopup;
-  UpdateGitHubItems;
+  UpdateForgeItems;
 end;
 
-procedure TForm1.FilePopupPopup(Sender: TObject);
+procedure TRepoFrame.FilePopupPopup(Sender: TObject);
 var
   i: integer;
   Exists: boolean;
@@ -1182,6 +1195,7 @@ begin
   FResolveTheirsItem.Enabled := FResolveMineItem.Enabled;
   FMarkResolvedItem.Enabled := FResolveMineItem.Enabled;
   FillIgnoreMenus(FContextPath);
+  FillLfsMenus(FContextPath);
   FTickSepItem.Visible := (FFilePopup.PopupComponent = FileTree) and CommitChoosing and
     (FChoosableCount > 0);
   FTickAllItem.Visible := FTickSepItem.Visible;
@@ -1190,7 +1204,7 @@ begin
   FUntickAllItem.Enabled := (FChosenCount > 0) and (FCommitJob = nil);
 end;
 
-procedure TForm1.SummaryContextFile(Sender: TObject; const APath: string;
+procedure TRepoFrame.SummaryContextFile(Sender: TObject; const APath: string;
   const AScreenPos: TPoint);
 begin
   FContextPath := APath;
@@ -1198,7 +1212,7 @@ begin
   FFilePopup.PopUp(AScreenPos.X, AScreenPos.Y);
 end;
 
-function TForm1.ContextFullPath: string;
+function TRepoFrame.ContextFullPath: string;
 begin
   Result := IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(FContextPath);
 end;
@@ -1219,12 +1233,12 @@ end;
   (AMode, kept in FBranchListMode for the pick): then the header says
   what the pick does, the current branch and the actions are left out,
   and nothing is checked. }
-procedure TForm1.SummaryBranchClick(Sender: TObject; const AScreenRect: TRect);
+procedure TRepoFrame.SummaryBranchClick(Sender: TObject; const AScreenRect: TRect);
 begin
   ShowBranchList(blSwitch, AScreenRect);
 end;
 
-procedure TForm1.ShowBranchList(AMode: TGittanBranchListMode; const AScreenRect: TRect);
+procedure TRepoFrame.ShowBranchList(AMode: TGittanBranchListMode; const AScreenRect: TRect);
 var
   Local, Remote, Gone: TStringList;
   i, Slash: integer;
@@ -1318,7 +1332,7 @@ end;
 
 { A remote row goes by its remote-tracking ref for anything but a
   switch, which makes the local branch from it. }
-procedure TForm1.BranchPopupPick(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.BranchPopupPick(Sender: TObject; AIndex: integer);
 var
   Ref: string;
 begin
@@ -1349,7 +1363,7 @@ end;
   conflicts); any other refusal is shown with git's whole message.
   With ADetach ABranch is a tag (or any commit) and HEAD is left on it
   without a branch. }
-procedure TForm1.SwitchBranch(const ABranch: string; ADetach: boolean);
+procedure TRepoFrame.SwitchBranch(const ABranch: string; ADetach: boolean);
 var
   Files: TStringList;
   Shown, Switch: string;
@@ -1414,19 +1428,19 @@ begin
   end;
 end;
 
-procedure TForm1.MenuCopyPathClick(Sender: TObject);
+procedure TRepoFrame.MenuCopyPathClick(Sender: TObject);
 begin
   if FContextPath <> '' then
     Clipboard.AsText := ContextFullPath;
 end;
 
-procedure TForm1.MenuCopyRelativePathClick(Sender: TObject);
+procedure TRepoFrame.MenuCopyRelativePathClick(Sender: TObject);
 begin
   if FContextPath <> '' then
     Clipboard.AsText := FContextPath;
 end;
 
-procedure TForm1.MenuRevealClick(Sender: TObject);
+procedure TRepoFrame.MenuRevealClick(Sender: TObject);
 begin
   if FContextPath = '' then
     Exit;
@@ -1446,7 +1460,7 @@ end;
   ---------------------------------------------------------------------------
   ATSynEdit pops the menu up itself, so the editor under the mouse and
   the row there are found here, before the items are enabled. }
-procedure TForm1.EditPopupPopup(Sender: TObject);
+procedure TRepoFrame.EditPopupPopup(Sender: TObject);
 var
   P: TPoint;
   Details: TATEditorPosDetails;
@@ -1476,17 +1490,17 @@ begin
   end;
   FShowCommitItem.Enabled := FPopupHash <> '';
   FCopyHashItem.Enabled := FPopupHash <> '';
-  FGitHubEditItem.Enabled := (FRepo.Root <> '') and (FCurrentPath <> '');
-  FGitHubCommitItem.Enabled := FPopupHash <> '';
-  FGitHubIssueItem.Visible := FHasGitHubCli and (FPopupIssue > 0);
-  FGitHubIssueItem.Caption := Format(rsOpenIssueOnGitHub, [FPopupIssue]);
+  FForgeEditItem.Enabled := (FRepo.Root <> '') and (FCurrentPath <> '');
+  FForgeCommitItem.Enabled := FPopupHash <> '';
+  FForgeIssueItem.Visible := Assigned(FForge) and (FPopupIssue > 0);
+  FForgeIssueItem.Caption := Format(rsOpenIssueOnForge, [FPopupIssue, ForgeName]);
   FResolveEditItem.Visible := CanResolveBlocks;
   FResolveEditItem.Enabled := (FPopupEd = Edit) and (ConflictAtRow(FPopupRow) >= 0);
 end;
 
 { The commit the row's blame or history gives, shown against its
   parent, as a click on the blame band does. }
-procedure TForm1.MenuShowCommitClick(Sender: TObject);
+procedure TRepoFrame.MenuShowCommitClick(Sender: TObject);
 begin
   if FPopupHash = '' then
     Exit;
@@ -1496,84 +1510,66 @@ begin
     ShowBlameCommit(FPopupHash);
 end;
 
-procedure TForm1.MenuCopyHashClick(Sender: TObject);
+procedure TRepoFrame.MenuCopyHashClick(Sender: TObject);
 begin
   if FPopupHash <> '' then
     Clipboard.AsText := FPopupHash;
 end;
 
-procedure TForm1.MenuEditCopyClick(Sender: TObject);
+procedure TRepoFrame.MenuEditCopyClick(Sender: TObject);
 begin
   FPopupEd.DoCommand(cCommand_ClipboardCopy, TATCommandInvoke.MenuContext);
 end;
 
-procedure TForm1.MenuEditSelectAllClick(Sender: TObject);
+procedure TRepoFrame.MenuEditSelectAllClick(Sender: TObject);
 begin
   FPopupEd.DoCommand(cCommand_SelectAll, TATCommandInvoke.MenuContext);
 end;
 
-{ The address of the page of the repository on GitHub that gh browse
-  finds for AArgs: gh only prints it (--no-browser). A failure (no
-  GitHub remote, say) is told in the status bar instead of going
-  unseen. }
-function TForm1.GitHubUrl(const AArgs: array of string; out AUrl: string): boolean;
+{ The address of ATarget's page on the forge: the forge's tool only
+  prints it. A failure (no remote on the forge, say) is told in the
+  status bar instead of going unseen. }
+function TRepoFrame.ForgeUrl(const ATarget: TGittanWebTarget; out AUrl: string): boolean;
 var
-  Args: array of string;
   Err: string;
-  i: integer;
 begin
   AUrl := '';
   Result := False;
-  if not FHasGitHubCli or (FRepo.Root = '') then
+  if not Assigned(FForge) or (FRepo.Root = '') then
     Exit;
-  SetLength(Args, Length(AArgs) + 2);
-  Args[0] := 'browse';
-  Args[1] := '--no-browser';
-  for i := 0 to High(AArgs) do
-    Args[i + 2] := AArgs[i];
-  Result := RunGitHubCli(FGitHubCli, FRepo.Root, Args, AUrl, Err) and (Trim(AUrl) <> '');
-  AUrl := Trim(AUrl);
+  Result := FForge.WebUrl(FRepo.Root, ATarget, AUrl, Err);
   if not Result then
   begin
     Err := Trim(Err);
     if Pos(LineEnding, Err) > 0 then
       Err := Copy(Err, 1, Pos(LineEnding, Err) - 1);
-    StatusNote(Format(rsGitHubFailed, [Err]), True);
+    StatusNote(Format(rsForgeFailed, [FForge.CliName, Err]), True);
   end;
 end;
 
-procedure TForm1.OpenOnGitHub(const AArgs: array of string);
+procedure TRepoFrame.OpenOnForge(const ATarget: TGittanWebTarget);
 var
   Url: string;
 begin
-  if GitHubUrl(AArgs, Url) then
+  if ForgeUrl(ATarget, Url) then
     OpenURL(Url);
 end;
 
-{ The gh browse arguments for a file, at ALine when it is above 0, in
-  the version the view shows: the right commit of a range (what a blame
-  click or Compare With > Other set), else the branch, since the work
-  tree has no page. }
-function TForm1.FileGitHubArgs(const APath: string; ALine: integer): TStringArray;
+{ A file at ALine when it is above 0, in the version the view shows:
+  the right commit of a range (what a blame click or Compare With >
+  Other set), else the branch, since the work tree has no page. }
+function TRepoFrame.FileWebTarget(const APath: string; ALine: integer): TGittanWebTarget;
 var
-  Target, OldRef, NewRef: string;
+  OldRef, NewRef: string;
 begin
-  Target := APath;
-  if ALine > 0 then
-    Target := Target + ':' + IntToStr(ALine);
   FRepo.DiffSides(OldRef, NewRef);
-  if NewRef <> '' then
-    Result := [Target, '--commit=' + NewRef]
-  else if FBranch <> '' then
-    Result := [Target, '--branch', FBranch]
-  else
-    Result := [Target];
+  Result := FileTarget(APath, ALine, NewRef, FBranch);
 end;
 
 { The line of the shown file that row ARow of AEd holds, 0 when the row
   is not one of the new side (a gap, a filler, a deleted line, the old
   side, or a history row, whose lines are of several versions). }
-function TForm1.FileLineOfRow(AEd: TATSynEdit; ARow: integer): integer;
+function TRepoFrame.FileLineOfRow(AEd: TATSynEdit; ARow: integer): integer;
 begin
   if AEd = Edit then
     Result := FileLineOfRow(ARow)
@@ -1581,46 +1577,46 @@ begin
     Result := 0;
 end;
 
-procedure TForm1.MenuOpenOnGitHubClick(Sender: TObject);
+procedure TRepoFrame.MenuOpenOnForgeClick(Sender: TObject);
 begin
   if FContextPath <> '' then
-    OpenOnGitHub(FileGitHubArgs(FContextPath, 0));
+    OpenOnForge(FileWebTarget(FContextPath, 0));
 end;
 
-procedure TForm1.MenuCopyGitHubUrlClick(Sender: TObject);
+procedure TRepoFrame.MenuCopyForgeUrlClick(Sender: TObject);
 var
   Url: string;
 begin
-  if (FContextPath <> '') and GitHubUrl(FileGitHubArgs(FContextPath, 0), Url) then
+  if (FContextPath <> '') and ForgeUrl(FileWebTarget(FContextPath, 0), Url) then
     Clipboard.AsText := Url;
 end;
 
-procedure TForm1.MenuOpenLineOnGitHubClick(Sender: TObject);
+procedure TRepoFrame.MenuOpenLineOnForgeClick(Sender: TObject);
 begin
   if FCurrentPath <> '' then
-    OpenOnGitHub(FileGitHubArgs(FCurrentPath, FileLineOfRow(FPopupEd, FPopupRow)));
+    OpenOnForge(FileWebTarget(FCurrentPath, FileLineOfRow(FPopupEd, FPopupRow)));
 end;
 
-procedure TForm1.MenuCopyLineGitHubUrlClick(Sender: TObject);
+procedure TRepoFrame.MenuCopyLineForgeUrlClick(Sender: TObject);
 var
   Url: string;
 begin
   if (FCurrentPath <> '') and
-    GitHubUrl(FileGitHubArgs(FCurrentPath, FileLineOfRow(FPopupEd, FPopupRow)), Url) then
+    ForgeUrl(FileWebTarget(FCurrentPath, FileLineOfRow(FPopupEd, FPopupRow)), Url) then
     Clipboard.AsText := Url;
 end;
 
-procedure TForm1.MenuOpenCommitOnGitHubClick(Sender: TObject);
+procedure TRepoFrame.MenuOpenCommitOnForgeClick(Sender: TObject);
 begin
   if FPopupHash <> '' then
-    OpenOnGitHub([FPopupHash]);
+    OpenOnForge(CommitTarget(FPopupHash));
 end;
 
-{ gh browse with a number opens the issue or the pull request. }
-procedure TForm1.MenuOpenIssueOnGitHubClick(Sender: TObject);
+{ A number opens the issue or the pull request. }
+procedure TRepoFrame.MenuOpenIssueOnForgeClick(Sender: TObject);
 begin
   if FPopupIssue > 0 then
-    OpenOnGitHub([IntToStr(FPopupIssue)]);
+    OpenOnForge(IssueTarget(FPopupIssue));
 end;
 
 { Runs ACommand, words separated by spaces, with AArgs appended. }
@@ -1650,14 +1646,14 @@ end;
 
 { The editor command from the settings, with the path appended; the
   desktop's default application when none is set. }
-procedure TForm1.MenuOpenInEditorClick(Sender: TObject);
+procedure TRepoFrame.MenuOpenInEditorClick(Sender: TObject);
 begin
   if FContextPath = '' then
     Exit;
-  if Trim(FSettings.EditorCommand) = '' then
+  if Trim(App.Settings.EditorCommand) = '' then
     OpenDocument(ContextFullPath)
   else
-    RunCommandWith(FSettings.EditorCommand, [ContextFullPath]);
+    RunCommandWith(App.Settings.EditorCommand, [ContextFullPath]);
 end;
 
 { The commit graph: the newest GraphLimit commits of every branch, in
@@ -1673,7 +1669,7 @@ const
   GraphLimit = 500;
   GraphSearchLimit = 50000;
 
-procedure TForm1.ShowCommitGraph(const AFilter: string);
+procedure TRepoFrame.ShowCommitGraph(const AFilter: string);
 var
   Commits: TGittanGraphCommits;
   Limit: integer;
@@ -1702,7 +1698,7 @@ begin
     FSideNav.Selected := navGraph;
 end;
 
-procedure TForm1.GraphMore(Sender: TObject);
+procedure TRepoFrame.GraphMore(Sender: TObject);
 var
   Commits: TGittanGraphCommits;
 begin
@@ -1717,7 +1713,7 @@ begin
   FGraph.Replace(Commits, Length(Commits) >= GraphSearchLimit);
 end;
 
-procedure TForm1.GraphPathCommits(Sender: TObject; const APath: string;
+procedure TRepoFrame.GraphPathCommits(Sender: TObject; const APath: string;
   AHashes: TStrings);
 begin
   if FRepo.Root <> '' then
@@ -1736,7 +1732,7 @@ end;
 
 { Show History in the file menu: the graph with the commits that touched
   the file, or the folder of the tree. }
-procedure TForm1.MenuFileHistoryClick(Sender: TObject);
+procedure TRepoFrame.MenuFileHistoryClick(Sender: TObject);
 begin
   if FContextPath <> '' then
     ShowCommitGraph(PathFilter(FContextPath))
@@ -1745,20 +1741,20 @@ begin
 end;
 
 { Go > File History: the same for the shown file. }
-procedure TForm1.MenuGoFileHistoryClick(Sender: TObject);
+procedure TRepoFrame.MenuGoFileHistoryClick(Sender: TObject);
 begin
   if FCurrentPath <> '' then
     ShowCommitGraph(PathFilter(FCurrentPath));
 end;
 
-procedure TForm1.MenuCommitGraphClick(Sender: TObject);
+procedure TRepoFrame.MenuCommitGraphClick(Sender: TObject);
 begin
   ShowCommitGraph;
 end;
 
 { The summary shows the commit, from any page: its card names it and
   leads back to the working tree. }
-procedure TForm1.GraphPick(Sender: TObject; const AHash: string);
+procedure TRepoFrame.GraphPick(Sender: TObject; const AHash: string);
 begin
   ShowBlameCommit(AHash);
   ShowSummary;
@@ -1766,7 +1762,7 @@ end;
 
 { A click on a commit in the summary of a clean tree shows it against its
   parent, as a pick from the commit graph does. }
-procedure TForm1.SummarySelectCommit(Sender: TObject; const AHash: string);
+procedure TRepoFrame.SummarySelectCommit(Sender: TObject; const AHash: string);
 begin
   ShowBlameCommit(AHash);
 end;
@@ -1776,7 +1772,7 @@ end;
   pull, push, fetch and the commit graph; the transport buttons take
   their step (UpdateStatusTransport); the pull request drops its list;
   the name and the file count go back to the summary. }
-procedure TForm1.StatusPartClick(Sender: TObject; APart: TGittanStatusPart;
+procedure TRepoFrame.StatusPartClick(Sender: TObject; APart: TGittanStatusPart;
   const AScreenRect: TRect);
 begin
   case APart of
@@ -1801,7 +1797,7 @@ end;
 
 { Resolve drops down the conflicted files, as the conflict badge did;
   the rest run the menu items and the Commit section's buttons. }
-procedure TForm1.StatusStepClick(AStep: TStatusStep; const AScreenRect: TRect);
+procedure TRepoFrame.StatusStepClick(AStep: TStatusStep; const AScreenRect: TRect);
 begin
   case AStep of
     stepFetch: MenuFetchClick(nil);
@@ -1816,19 +1812,19 @@ begin
   end;
 end;
 
-procedure TForm1.MenuCopyBranchClick(Sender: TObject);
+procedure TRepoFrame.MenuCopyBranchClick(Sender: TObject);
 begin
   if FBranch <> '' then
     Clipboard.AsText := FBranch;
 end;
 
-procedure TForm1.MenuCopyRepoPathClick(Sender: TObject);
+procedure TRepoFrame.MenuCopyRepoPathClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
     Clipboard.AsText := FRepo.Root;
 end;
 
-procedure TForm1.MenuOpenTerminalClick(Sender: TObject);
+procedure TRepoFrame.MenuOpenTerminalClick(Sender: TObject);
 begin
   OpenTerminal('');
 end;
@@ -1853,7 +1849,7 @@ end;
   after -- for gnome-terminal, whose -e takes one string, -x for
   xfce4-terminal, and -e for the rest (x-terminal-emulator takes -e as
   xterm does, whichever terminal it is). }
-procedure TForm1.OpenTerminal(const ACommand: string);
+procedure TRepoFrame.OpenTerminal(const ACommand: string);
 {$IF not defined(DARWIN) and not defined(WINDOWS)}
 const
   Terminals: array[0..4] of string = ('x-terminal-emulator', 'gnome-terminal',
@@ -1868,12 +1864,12 @@ var
 begin
   if FRepo.Root = '' then
     Exit;
-  if Trim(FSettings.TerminalCommand) <> '' then
+  if Trim(App.Settings.TerminalCommand) <> '' then
   begin
     if ACommand = '' then
-      RunCommandWith(FSettings.TerminalCommand, [FRepo.Root])
+      RunCommandWith(App.Settings.TerminalCommand, [FRepo.Root])
     else
-      RunCommandWith(FSettings.TerminalCommand, [FRepo.Root, ACommand]);
+      RunCommandWith(App.Settings.TerminalCommand, [FRepo.Root, ACommand]);
     Exit;
   end;
   {$IFDEF DARWIN}
@@ -1925,7 +1921,7 @@ end;
 
 { Tools > Install CLI Command: a gittan command for the terminal that
   starts this executable (see gittan.cli). }
-procedure TForm1.MenuInstallCliClick(Sender: TObject);
+procedure TRepoFrame.MenuInstallCliClick(Sender: TObject);
 var
   Msg: string;
 begin
@@ -1935,7 +1931,7 @@ begin
     MessageDlg(Msg, mtError, [mbOK], 0);
 end;
 
-procedure TForm1.MenuUninstallCliClick(Sender: TObject);
+procedure TRepoFrame.MenuUninstallCliClick(Sender: TObject);
 var
   Msg: string;
 begin
@@ -1947,7 +1943,7 @@ end;
 
 { Uninstall is offered only while Gittan's own script is installed; the
   menu's OnClick runs as it opens. }
-procedure TForm1.ToolsMenuClick(Sender: TObject);
+procedure TRepoFrame.ToolsMenuClick(Sender: TObject);
 begin
   FUninstallCliItem.Enabled := CliInstalled;
 end;
@@ -1961,7 +1957,7 @@ end;
   repository, from the refs its snapshot read off the main thread. A
   snapshot item carries Tag 1: the base is then compared with WholeTree,
   since the snapshot holds the untracked files. }
-procedure TForm1.RebuildCompareMenu;
+procedure TRepoFrame.RebuildCompareMenu;
 var
   Refs: TStringList;
   Item: TMenuItem;
@@ -2013,7 +2009,7 @@ begin
   Item.OnClick := @MenuTakeSnapshotClick;
   FCompareMenu.Add(Item);
   FPullMenu := nil;
-  if FHasGitHubCli then
+  if Assigned(FForge) then
   begin
     FPullMenu := TMenuItem.Create(FCompareMenu);
     FPullMenu.Caption := rsPullRequests;
@@ -2027,12 +2023,12 @@ begin
   FCompareMenu.Enabled := FRepo.Root <> '';
 end;
 
-procedure TForm1.MenuCompareClick(Sender: TObject);
+procedure TRepoFrame.MenuCompareClick(Sender: TObject);
 begin
   SetBase(TMenuItem(Sender).Hint, TMenuItem(Sender).Tag = 1);
 end;
 
-procedure TForm1.MenuCompareOtherClick(Sender: TObject);
+procedure TRepoFrame.MenuCompareOtherClick(Sender: TObject);
 var
   Ref: string;
 begin
@@ -2045,14 +2041,14 @@ end;
 { ---------------------------------------------------------------------------
   Pull requests
   ---------------------------------------------------------------------------
-  gh goes to the network, so the job runs in a thread: once per
+  The forge is on the network, so the job runs in a thread: once per
   repository and branch, and again on View > Refresh (AForce). A job
   still running for something else is abandoned like a blame job. }
-procedure TForm1.StartPullJob(AForce: boolean; AKeep: boolean);
+procedure TRepoFrame.StartPullJob(AForce: boolean; AKeep: boolean);
 var
   Key: string;
 begin
-  if not FHasGitHubCli then
+  if not Assigned(FForge) then
     Exit;
   Key := FRepo.Root + #0 + FBranch;
   if (FRepo.Root = '') or (not AForce and (Key = FPullKey)) then
@@ -2069,7 +2065,7 @@ begin
     FReviewPulls := nil;
     FSummary.SetReviewPulls(nil);
   end;
-  FPullJob := TGittanPullRequestJob.Create(FGitHubCli, FRepo.Root, FBranch);
+  FPullJob := FForge.PullJob(FRepo.Root, FBranch, FPullLogin);
   FPullJob.OnDone := @PullJobDone;
   FPullJob.Start;
   if not AKeep then
@@ -2079,7 +2075,7 @@ end;
 
 { A poll waits for a job still running; that job's end sets the timer
   again. }
-procedure TForm1.PullTimerTimer(Sender: TObject);
+procedure TRepoFrame.PullTimerTimer(Sender: TObject);
 begin
   FPullTimer.Enabled := False;
   if (FRepo.Root = '') or (FPullJob <> nil) then
@@ -2087,7 +2083,7 @@ begin
   StartPullJob(True, True);
 end;
 
-procedure TForm1.AbandonPullJob;
+procedure TRepoFrame.AbandonPullJob;
 begin
   { No job, no poll: the next finished job starts the timer again. }
   FPullTimer.Enabled := False;
@@ -2098,7 +2094,7 @@ begin
   FPullJob := nil;
 end;
 
-procedure TForm1.PullJobDone(Sender: TObject);
+procedure TRepoFrame.PullJobDone(Sender: TObject);
 var
   Job: TGittanPullRequestJob;
 begin
@@ -2115,6 +2111,7 @@ begin
   FGoneBranches.Assign(Job.GoneBranches);
   FSummary.SetUpstreamGone(FGoneBranches.IndexOf(FBranch) >= 0);
   FReviewPulls := Job.ReviewPulls;
+  FPullLogin := Job.Login;
   FSummary.SetReviewPulls(FReviewPulls);
   UpdateStatus;
   RebuildPullMenu;
@@ -2136,7 +2133,7 @@ end;
 { Compare With > Pull Requests: one radio item per open pull request,
   the one compared against checked; a note while the job runs, when
   there are none, or when gh failed. }
-procedure TForm1.RebuildPullMenu;
+procedure TRepoFrame.RebuildPullMenu;
 var
   Item: TMenuItem;
   i: integer;
@@ -2181,7 +2178,7 @@ end;
 { Fetches the pull request's head into a ref of Gittan's own, and its
   base branch, and compares the two with the three-dot range, as GitHub
   shows a pull request: what the branch adds since it left the base. }
-procedure TForm1.MenuComparePullClick(Sender: TObject);
+procedure TRepoFrame.MenuComparePullClick(Sender: TObject);
 var
   i: integer;
 begin
@@ -2196,23 +2193,41 @@ end;
   remote job (umain.remote.inc), so the window goes on while it runs;
   PullFetchDone compares. Not while another remote job or a commit
   runs. }
-procedure TForm1.ComparePull(const APull: TGittanPullRequest);
+procedure TRepoFrame.ComparePull(const APull: TGittanPullRequest);
 begin
   if FRepo.Root = '' then
     Exit;
-  StartPullFetch(APull.Number, FRepo.RemoteFor(RepoPathOfUrl(APull.Url)), APull.BaseRef);
+  StartPullFetch(APull.Number, FRepo.RemoteFor(APull.Repo), APull.BaseRef);
 end;
 
-procedure TForm1.StartPullFetch(ANumber: integer; const ARemote, ABaseRef: string);
+procedure TRepoFrame.StartPullFetch(ANumber: integer; const ARemote, ABaseRef: string);
 begin
-  if (FRepo.Root = '') or (FRemoteJob <> nil) or (FCommitJob <> nil) then
+  if (FRepo.Root = '') or not Assigned(FForge) or (FRemoteJob <> nil) or
+    (FCommitJob <> nil) then
     Exit;
+  { It would fight the background fetch over the remote's refs too. }
+  if FAutoFetchJob <> nil then
+  begin
+    if FPendingRemote then
+    begin
+      FStatus.ShowMessage(rsAlreadyWaiting, stNormal, 0);
+      Exit;
+    end;
+    FPendingRemote := True;
+    FPendingKind := rkFetchPull;
+    FPendingArg := IntToStr(ANumber);
+    FPendingRemoteName := ARemote;
+    FPendingBranch := ABaseRef;
+    FStatus.ShowMessage(rsWaitingForFetch, stNormal, 0);
+    Exit;
+  end;
   FNoticeHook := False;
   FRemoteHead := '';
   FRemoteAhead := FAhead;
   FRemoteJob := TGittanRemoteJob.Create(FRepo.Root, rkFetchPull, pmAuto, IntToStr(ANumber),
     ARemote);
   FRemoteJob.Branch := ABaseRef;
+  FRemoteJob.PullRef := FForge.PullRef(ANumber);
   FRemoteJob.OnDone := @RemoteJobDone;
   FRemoteJob.OnOutput := @RemoteJobOutput;
   FRemoteJob.Start;
@@ -2222,7 +2237,7 @@ begin
   UpdateCommitState;
 end;
 
-procedure TForm1.PullFetchDone(AJob: TGittanRemoteJob);
+procedure TRepoFrame.PullFetchDone(AJob: TGittanRemoteJob);
 begin
   if not AJob.Ok then
   begin
@@ -2247,7 +2262,7 @@ const
   shows its changes as GitHub does and its review comments where they
   were made (with how many are open), back to the working tree, or open
   it on GitHub. }
-procedure TForm1.PullChipClick(const AScreenRect: TRect);
+procedure TRepoFrame.PullChipClick(const AScreenRect: TRect);
 var
   Comparing: boolean;
   Detail: string;
@@ -2285,14 +2300,14 @@ begin
     not FRepo.WholeTree);
   if FPull.Url <> '' then
   begin
-    AddAction(paOpen, rsOpenPullOnGitHub, '');
+    AddAction(paOpen, Format(rsOpenPullOnForge, [ForgeName]), '');
     AddAction(paCopy, rsCopyPullLink, '');
   end;
   AddAction(paList, rsAllPulls, '');
   FPullPopup.Popup(AScreenRect);
 end;
 
-procedure TForm1.PullPopupPick(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.PullPopupPick(Sender: TObject; AIndex: integer);
 begin
   if (AIndex < 0) or (AIndex > High(FPullActions)) or not FHasPull then
     Exit;
@@ -2308,19 +2323,19 @@ begin
   end;
 end;
 
-procedure TForm1.StatusPopupPopup(Sender: TObject);
+procedure TRepoFrame.StatusPopupPopup(Sender: TObject);
 begin
   FOpenPullItem.Enabled := FHasPull and (FPull.Url <> '');
   FCopyPullItem.Enabled := FHasPull and (FPull.Url <> '');
 end;
 
-procedure TForm1.MenuOpenPullClick(Sender: TObject);
+procedure TRepoFrame.MenuOpenPullClick(Sender: TObject);
 begin
   if FHasPull and (FPull.Url <> '') then
     OpenURL(FPull.Url);
 end;
 
-function TForm1.PullChecks(const APull: TGittanPullRequest; out ACount: integer): TGittanStatusTone;
+function TRepoFrame.PullChecks(const APull: TGittanPullRequest; out ACount: integer): TGittanStatusTone;
 begin
   ACount := 0;
   if APull.ChecksFailed > 0 then
@@ -2341,7 +2356,7 @@ end;
 
 { One line per outcome of the checks, as gh counts them for the status
   line (a skipped one passed), worst first, each with its icon. }
-function TForm1.PullHint(const APull: TGittanPullRequest): string;
+function TRepoFrame.PullHint(const APull: TGittanPullRequest): string;
 
   procedure AddChecks(ACount: integer; const AIcon, AOne, AMany: string);
   begin
@@ -2357,10 +2372,10 @@ begin
   AddChecks(APull.ChecksPending, HintPending, rsPullHintPendingOne, rsPullHintPending);
   AddChecks(APull.ChecksPassed, HintPassed, rsPullHintPassedOne, rsPullHintPassed);
   Result := Result + ReviewHint(APull.Number);
-  Result := Result + LineEnding + HintLink + ' ' + rsPullHintOpen;
+  Result := Result + LineEnding + HintLink + ' ' + Format(rsPullHintOpen, [ForgeName]);
 end;
 
-procedure TForm1.MenuCopyPullUrlClick(Sender: TObject);
+procedure TRepoFrame.MenuCopyPullUrlClick(Sender: TObject);
 begin
   if FHasPull and (FPull.Url <> '') then
     Clipboard.AsText := FPull.Url;
@@ -2377,7 +2392,7 @@ end;
   kept in a file in the cache folder, named by a hash of the root like
   the symbol index, newest first; LoadSnapshots drops the ones git has
   pruned since. A failed snapshot is noted in the summary. }
-procedure TForm1.MenuTakeSnapshotClick(Sender: TObject);
+procedure TRepoFrame.MenuTakeSnapshotClick(Sender: TObject);
 var
   Id: string;
 begin
@@ -2394,12 +2409,12 @@ begin
   SetBase(Id, True);
 end;
 
-function TForm1.SnapshotsFileName: string;
+function TRepoFrame.SnapshotsFileName: string;
 begin
   Result := IndexCacheDir + MD5Print(MD5String(FRepo.Root)) + '.snapshots';
 end;
 
-procedure TForm1.LoadSnapshots;
+procedure TRepoFrame.LoadSnapshots;
 var
   i, Count: integer;
 begin
@@ -2412,7 +2427,7 @@ begin
     SaveSnapshots;
 end;
 
-procedure TForm1.SaveSnapshots;
+procedure TRepoFrame.SaveSnapshots;
 begin
   try
     FSnapshots.Save(SnapshotsFileName);
@@ -2424,7 +2439,7 @@ end;
 { What the work tree is compared against, for the summary, the status
   bar and the repository diff: "vs base", or the range itself, which
   says both sides; '' against HEAD. }
-function TForm1.BaseLabel: string;
+function TRepoFrame.BaseLabel: string;
 var
   i: integer;
 begin
@@ -2462,7 +2477,7 @@ end;
 
 { A base git cannot resolve is reported in the summary and the previous
   one is kept. ASnapshot compares the whole tree, see TakeSnapshot. }
-procedure TForm1.SetBase(const ARef: string; ASnapshot: boolean);
+procedure TRepoFrame.SetBase(const ARef: string; ASnapshot: boolean);
 var
   Prev: string;
   PrevSnapshot: boolean;

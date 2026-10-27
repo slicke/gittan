@@ -47,7 +47,7 @@ begin
     end;
 end;
 
-procedure TForm1.ShowReflogList(const AScreenRect: TRect);
+procedure TRepoFrame.ShowReflogList(const AScreenRect: TRect);
 var
   i: integer;
   Head, Detail, Subject: string;
@@ -80,7 +80,7 @@ begin
   FReflogPopup.Popup(AScreenRect);
 end;
 
-procedure TForm1.ReflogPopupPick(Sender: TObject; AIndex: integer);
+procedure TRepoFrame.ReflogPopupPick(Sender: TObject; AIndex: integer);
 var
   Row: PtrInt;
 begin
@@ -89,7 +89,7 @@ begin
     ShowBlameCommit(FReflog[Row].Commit);
 end;
 
-procedure TForm1.ReflogContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
+procedure TRepoFrame.ReflogContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
 var
   Busy: boolean;
   Sub: TMenuItem;
@@ -126,7 +126,7 @@ begin
   FReflogMenu.PopUp(AScreenPos.X, AScreenPos.Y);
 end;
 
-procedure TForm1.ReflogMenuClick(Sender: TObject);
+procedure TRepoFrame.ReflogMenuClick(Sender: TObject);
 var
   E: TGittanReflogEntry;
   Short: string;
@@ -148,7 +148,7 @@ begin
   end;
 end;
 
-procedure TForm1.MenuReflogClick(Sender: TObject);
+procedure TRepoFrame.MenuReflogClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
     ShowReflogList(FStatus.PartScreenRect(spBranch));
