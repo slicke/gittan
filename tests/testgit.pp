@@ -11,7 +11,7 @@ interface
 uses
   { gittan.repoinfo first: its ParseTags is not the one tested here. }
   Classes, SysUtils, fpcunit, testregistry, gittan.repoinfo, gittan.git, gittan.history,
-  gittan.graph, gittan.rebase, gittan.blame, gittan.conflicts, gittan.discard;
+  gittan.graph, gittan.rebase, gittan.blame, gittan.conflicts, gittan.discard, testhelpers;
 
 type
   TGitRepoTest = class(TTestCase)
@@ -146,26 +146,6 @@ const
     forms come through as they are. Windows forbids a quote in a file
     name, so there the test settles for an apostrophe. }
   QuoteName = {$ifdef MSWINDOWS}'q''uote.txt'{$else}'q"uote.txt'{$endif};
-
-procedure RemoveTree(const ADir: string);
-var
-  Info: TSearchRec;
-begin
-  if FindFirst(IncludeTrailingPathDelimiter(ADir) + '*', faAnyFile, Info) = 0 then
-  try
-    repeat
-      if (Info.Name = '.') or (Info.Name = '..') then
-        Continue;
-      if Info.Attr and faDirectory <> 0 then
-        RemoveTree(IncludeTrailingPathDelimiter(ADir) + Info.Name)
-      else
-        DeleteFile(IncludeTrailingPathDelimiter(ADir) + Info.Name);
-    until FindNext(Info) <> 0;
-  finally
-    FindClose(Info);
-  end;
-  RemoveDir(ADir);
-end;
 
 procedure TGitRepoTest.SetUp;
 begin

@@ -18,7 +18,7 @@ uses
   gittan.lexers, gittan.git, gittan.conflicts, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.welcome, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.sidenav, gittan.repoinfo, gittan.repopage, gittan.subpage,
-  gittan.repocommands, gittan.commandpage,
+  gittan.repocommands, gittan.commandpage, gittan.job,
   gittan.settingsdlg, gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   {$IFDEF LCLCocoa}gittan.memohint,{$ENDIF}
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
@@ -887,7 +887,7 @@ type
     FBlameOld, FBlameNew: TGittanBlame;
     FBlameJob: TGittanBlameJob;
     FBlameCache: TStringList;
-    FBlameZombies: TList;
+    FBlameZombies: TGittanJobReaper;
     FBlameCols: integer;
     FBlameNow: int64;
     { The Base a click on the band set, so the summary can name the
@@ -1187,7 +1187,6 @@ type
     procedure MenuBlameClick(Sender: TObject);
     procedure StartBlame;
     procedure AbandonBlameJob;
-    procedure FreeFinishedBlameJobs(AWait: boolean);
     procedure FreeBlameJobsAsync(Data: PtrInt);
     procedure CacheBlame(const ARef, APath: string; ABlame: TGittanBlame);
     procedure BlameJobDone(Sender: TObject);
@@ -3046,7 +3045,7 @@ begin
   FRawChangeLines := TStringList.Create;
   FBlameCache := TStringList.Create;
   FBlameCache.CaseSensitive := True;
-  FBlameZombies := TList.Create;
+  FBlameZombies := TGittanJobReaper.Create;
   FDroppedCommits := TList.Create;
   FThreadFlips := TStringList.Create;
   FReviewMeasure := TBitmap.Create;

@@ -1014,28 +1014,59 @@ end;
   The forge
   --------------------------------------------------------------------------- }
 
+var
+  { The hosts of gh's hosts.yml as last read, with the file's path and
+    age then, so it is read from disk again only when it has changed:
+    ForgeClassFor asks for every remote of every repository. Main
+    thread only. }
+  LoggedHosts: TStringArray;
+  LoggedHostsPath: string;
+  LoggedHostsAge: longint = -2;
+
+{ The hosts gh is logged in to, the file read again when it changed
+  (FileAge -1: none, and none logged in). }
+function GhLoggedHosts: TStringArray;
+var
+  Path: string;
+  Age: longint;
+  Lines: TStringList;
+begin
+  Path := IncludeTrailingPathDelimiter(GhConfigDir) + 'hosts.yml';
+  Age := FileAge(Path);
+  if (Age <> LoggedHostsAge) or (Path <> LoggedHostsPath) then
+  begin
+    LoggedHostsAge := Age;
+    LoggedHostsPath := Path;
+    LoggedHosts := nil;
+    if Age <> -1 then
+    begin
+      Lines := TStringList.Create;
+      try
+        try
+          Lines.LoadFromFile(Path);
+          LoggedHosts := GhHosts(Lines.Text);
+        except
+          LoggedHosts := nil;
+        end;
+      finally
+        Lines.Free;
+      end;
+    end;
+  end;
+  Result := LoggedHosts;
+end;
+
 class function TGittanGitHubForge.HostsRemote(const AHost: string): boolean;
 var
-  Lines: TStringList;
   Host: string;
 begin
   Result := (AHost = 'github.com') or (AHost = 'www.github.com') or
     (AHost = 'ssh.github.com');
   if Result then
     Exit;
-  Lines := TStringList.Create;
-  try
-    try
-      Lines.LoadFromFile(IncludeTrailingPathDelimiter(GhConfigDir) + 'hosts.yml');
-    except
-      Exit;
-    end;
-    for Host in GhHosts(Lines.Text) do
-      if Host = AHost then
-        Exit(True);
-  finally
-    Lines.Free;
-  end;
+  for Host in GhLoggedHosts do
+    if Host = AHost then
+      Exit(True);
 end;
 
 class function TGittanGitHubForge.Name: string;

@@ -12,7 +12,7 @@ interface
 
 uses
   Classes, SysUtils, DateUtils, fpcunit, testregistry, gittan.forge, gittan.github,
-  gittan.git;
+  gittan.git, testhelpers;
 
 type
   TForgeTest = class(TTestCase)
@@ -30,6 +30,7 @@ type
     procedure TestRemoteRepoPath;
     procedure TestForgeFor;
     procedure TestSshAlias;
+    procedure TestKeepForge;
   end;
 
 implementation
@@ -257,26 +258,6 @@ begin
   AssertEquals('', ReviewDecisionNote(rdNone));
 end;
 
-procedure RemoveTree(const ADir: string);
-var
-  Info: TSearchRec;
-begin
-  if FindFirst(IncludeTrailingPathDelimiter(ADir) + '*', faAnyFile, Info) = 0 then
-  try
-    repeat
-      if (Info.Name = '.') or (Info.Name = '..') then
-        Continue;
-      if Info.Attr and faDirectory <> 0 then
-        RemoveTree(IncludeTrailingPathDelimiter(ADir) + Info.Name)
-      else
-        DeleteFile(IncludeTrailingPathDelimiter(ADir) + Info.Name);
-    until FindNext(Info) <> 0;
-  finally
-    FindClose(Info);
-  end;
-  RemoveDir(ADir);
-end;
-
 { A fork's clone has the repository it was forked from as a remote of
   its own; the first root that holds a repository wins, and a folder
   that is gone or no repository is passed over. }
@@ -461,6 +442,34 @@ begin
     TGittanGitHubForge);
   AssertTrue(ForgeClassFor('remote.origin.url https://github-work/org/repo'#10, Config) = nil);
   AssertTrue(ForgeClassFor('remote.origin.url git@github-work:org/repo.git'#10, '') = nil);
+end;
+
+{ A forge is kept while its class and its tool stay, else made again,
+  and there is none without a class or a tool. }
+procedure TForgeTest.TestKeepForge;
+var
+  Forge, Same: TGittanForge;
+begin
+  Forge := nil;
+  AssertFalse(KeepForge(Forge, TExampleForge, ''));
+  AssertNull(Forge);
+  AssertFalse(KeepForge(Forge, nil, '/usr/bin/ex'));
+  AssertNull(Forge);
+  AssertTrue(KeepForge(Forge, TExampleForge, '/usr/bin/ex'));
+  AssertTrue(Forge is TExampleForge);
+  AssertEquals('/usr/bin/ex', Forge.Cli);
+  Same := Forge;
+  AssertFalse(KeepForge(Forge, TExampleForge, '/usr/bin/ex'));
+  AssertTrue(Forge = Same);
+  AssertTrue(KeepForge(Forge, TExampleForge, '/opt/ex'));
+  AssertEquals('/opt/ex', Forge.Cli);
+  AssertTrue(KeepForge(Forge, TGittanGitHubForge, '/opt/gh'));
+  AssertTrue(Forge is TGittanGitHubForge);
+  AssertTrue(KeepForge(Forge, TGittanGitHubForge, ''));
+  AssertNull(Forge);
+  AssertTrue(KeepForge(Forge, TGittanGitHubForge, '/opt/gh'));
+  AssertTrue(KeepForge(Forge, nil, ''));
+  AssertNull(Forge);
 end;
 
 initialization

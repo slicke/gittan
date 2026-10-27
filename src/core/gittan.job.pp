@@ -49,6 +49,22 @@ type
     property OnDone: TNotifyEvent read FOnDone write FOnDone;
   end;
 
+  {** The jobs done with whose thread may still run: one given up
+    without waiting, or one whose result was taken. Add puts one in;
+    FreeFinished frees those whose thread has ended, or every one,
+    waiting, with AWait (on the way out), as Destroy does. }
+  TGittanJobReaper = class
+  private
+    FJobs: TList;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure Add(AJob: TThread);
+    procedure FreeFinished(AWait: boolean);
+    {** The jobs not freed yet. }
+    function Count: integer;
+  end;
+
 implementation
 
 constructor TGittanJob.Create(AEndOnStop: boolean);
@@ -90,6 +106,45 @@ begin
     Terminate;
   if AWait and not Suspended then
     WaitFor;
+end;
+
+{ ---------------------------------------------------------------------------
+  TGittanJobReaper
+  --------------------------------------------------------------------------- }
+
+constructor TGittanJobReaper.Create;
+begin
+  inherited Create;
+  FJobs := TList.Create;
+end;
+
+destructor TGittanJobReaper.Destroy;
+begin
+  FreeFinished(True);
+  FJobs.Free;
+  inherited Destroy;
+end;
+
+procedure TGittanJobReaper.Add(AJob: TThread);
+begin
+  FJobs.Add(AJob);
+end;
+
+procedure TGittanJobReaper.FreeFinished(AWait: boolean);
+var
+  i: integer;
+begin
+  for i := FJobs.Count - 1 downto 0 do
+    if AWait or TThread(FJobs[i]).Finished then
+    begin
+      TThread(FJobs[i]).Free;
+      FJobs.Delete(i);
+    end;
+end;
+
+function TGittanJobReaper.Count: integer;
+begin
+  Result := FJobs.Count;
 end;
 
 end.

@@ -351,9 +351,16 @@ function RegisteredForges: TGittanForgeClasses;
   does (no remote, or none on a known forge). }
 function ForgeClassFor(const AUrls: string; const ASshConfig: string): TGittanForgeClass;
   overload;
-{** As above with the user's ~/.ssh/config, read only when a host needs
-  it. }
+{** As above with the user's ~/.ssh/config, read only when the hosts as
+  they are give no forge and one of them is an ssh remote's, and then
+  only the aliases looked up. }
 function ForgeClassFor(const AUrls: string): TGittanForgeClass; overload;
+{** Keeps AForge as the forge of AClass with the tool ACli: left as it
+  is when it already is, else freed and made again, or left nil without
+  a class or a tool. True when it changed, so what the old one found can
+  be dropped. }
+function KeepForge(var AForge: TGittanForge; AClass: TGittanForgeClass;
+  const ACli: string): boolean;
 {** The host name ssh connects to for AHost by AConfig (an ssh_config's
   text): the HostName of the first Host block whose patterns match it
   (* and ? wildcards, ! to exclude, case ignored; %h is AHost), the
@@ -422,9 +429,12 @@ begin
     Result := Pos('ssh', LowerCase(Copy(AUrl, 1, p - 1))) > 0;
 end;
 
-function ForgeClassFor(const AUrls: string; const ASshConfig: string): TGittanForgeClass;
+{ The remotes in order, each host asked of the forges as it is, unless
+  AAliasesOnly (a pass that did so already), then an ssh remote's host
+  as ASshConfig resolves it when that differs. }
+function ForgeClassIn(const AUrls, ASshConfig: string; AAliasesOnly: boolean): TGittanForgeClass;
 var
-  Line, Url, Host: string;
+  Line, Url, Host, Alias: string;
   p: integer;
 begin
   for Line in AUrls.Split([#10]) do
@@ -436,25 +446,67 @@ begin
     Host := RemoteHost(Url);
     if Host = '' then
       Continue;
-    Result := ForgeOfHost(Host);
-    if Result <> nil then
-      Exit;
-    if IsSshUrl(Url) and (ASshConfig <> '') then
+    if not AAliasesOnly then
     begin
-      Result := ForgeOfHost(LowerCase(SshHostName(Host, ASshConfig)));
+      Result := ForgeOfHost(Host);
       if Result <> nil then
         Exit;
+    end;
+    if IsSshUrl(Url) and (ASshConfig <> '') then
+    begin
+      Alias := LowerCase(SshHostName(Host, ASshConfig));
+      if Alias <> Host then
+      begin
+        Result := ForgeOfHost(Alias);
+        if Result <> nil then
+          Exit;
+      end;
     end;
   end;
   Result := nil;
 end;
 
+{ Whether one of AUrls is an ssh remote's, whose host may be an alias. }
+function HasSshUrl(const AUrls: string): boolean;
+var
+  Line: string;
+  p: integer;
+begin
+  for Line in AUrls.Split([#10]) do
+  begin
+    p := Pos(' ', Line);
+    if (p > 0) and IsSshUrl(Trim(Copy(Line, p + 1, MaxInt))) then
+      Exit(True);
+  end;
+  Result := False;
+end;
+
+function ForgeClassFor(const AUrls: string; const ASshConfig: string): TGittanForgeClass;
+begin
+  Result := ForgeClassIn(AUrls, ASshConfig, False);
+end;
+
 function ForgeClassFor(const AUrls: string): TGittanForgeClass;
 begin
-  { The config only when a host is not known as it is. }
-  Result := ForgeClassFor(AUrls, '');
-  if Result = nil then
-    Result := ForgeClassFor(AUrls, UserSshConfig);
+  { The config only when a host is not known as it is, and only the
+    aliases then: the hosts were asked already. }
+  Result := ForgeClassIn(AUrls, '', False);
+  if (Result = nil) and HasSshUrl(AUrls) then
+    Result := ForgeClassIn(AUrls, UserSshConfig, True);
+end;
+
+function KeepForge(var AForge: TGittanForge; AClass: TGittanForgeClass;
+  const ACli: string): boolean;
+begin
+  if Assigned(AForge) then
+    Result := (AForge.ClassType <> AClass) or (AForge.Cli <> ACli)
+  else
+    Result := (AClass <> nil) and (ACli <> '');
+  if not Result then
+    Exit;
+  FreeAndNil(AForge);
+  if (AClass <> nil) and (ACli <> '') then
+    AForge := AClass.Create(ACli);
 end;
 
 { Whether AText matches APattern, * any run and ? any one character,

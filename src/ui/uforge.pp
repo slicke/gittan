@@ -39,7 +39,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Controls, Forms, Menus, ExtCtrls, Graphics, LCLType,
-  gittan.forge, gittan.forgepage, umain;
+  gittan.job, gittan.forge, gittan.forgepage, umain;
 
 type
 
@@ -54,7 +54,7 @@ type
     { The job under way, and the jobs given up or done, freed once their
       thread has ended. }
     FJob: TGittanForgeJob;
-    FZombies: TList;
+    FZombies: TGittanJobReaper;
     FLogin, FError: string;
     FMine, FReview: TGittanForgePulls;
     FMainMenu: TMainMenu;
@@ -71,7 +71,6 @@ type
     procedure StartJob;
     procedure AbandonJob;
     procedure JobDone(Sender: TObject);
-    procedure FreeFinishedJobs(AWait: boolean);
     procedure FreeJobsAsync(Data: PtrInt);
     procedure BoxResize(Sender: TObject);
     procedure PagePick(Sender: TObject; const APull: TGittanForgePull);
@@ -162,7 +161,7 @@ constructor TForgeView.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
   ControlStyle := ControlStyle + [csOpaque];
-  FZombies := TList.Create;
+  FZombies := TGittanJobReaper.Create;
 end;
 
 destructor TForgeView.Destroy;
@@ -171,7 +170,7 @@ begin
   if FThemeTimer <> nil then
     FThemeTimer.Enabled := False;
   AbandonJob;
-  FreeFinishedJobs(True);
+  { Waits for the jobs given up. }
   FreeAndNil(FZombies);
   FreeAndNil(FForge);
   inherited Destroy;
@@ -224,11 +223,8 @@ begin
       Break;
     end;
   end;
-  if Assigned(FForge) and (FForge.ClassType = Found) and (FForge.Cli = Cli) then
+  if not KeepForge(FForge, Found, Cli) then
     Exit;
-  FreeAndNil(FForge);
-  if Found <> nil then
-    FForge := Found.Create(Cli);
   FPage.SetForge(ForgeName);
   if FCloseItem <> nil then
     FCloseItem.Caption := Format(rsCloseForge, [ForgeName]);
@@ -494,23 +490,9 @@ begin
   UpdatePage;
 end;
 
-{ Frees the jobs whose thread has ended; all of them, waiting, when
-  AWait (on the way out). }
-procedure TForgeView.FreeFinishedJobs(AWait: boolean);
-var
-  i: integer;
-begin
-  for i := FZombies.Count - 1 downto 0 do
-    if AWait or TThread(FZombies[i]).Finished then
-    begin
-      TThread(FZombies[i]).Free;
-      FZombies.Delete(i);
-    end;
-end;
-
 procedure TForgeView.FreeJobsAsync(Data: PtrInt);
 begin
-  FreeFinishedJobs(False);
+  FZombies.FreeFinished(False);
 end;
 
 { A card: the window compares with the pull request in a frame that has

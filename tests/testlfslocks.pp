@@ -9,7 +9,7 @@ unit testlfslocks;
 interface
 
 uses
-  Classes, SysUtils, DateUtils, fpcunit, testregistry, gittan.git, gittan.lfslocks;
+  Classes, SysUtils, DateUtils, fpcunit, testregistry, gittan.git, gittan.lfslocks, testhelpers;
 
 type
   TLfsLocksTest = class(TTestCase)
@@ -19,26 +19,6 @@ type
   end;
 
 implementation
-
-procedure RemoveTree(const ADir: string);
-var
-  Info: TSearchRec;
-begin
-  if FindFirst(IncludeTrailingPathDelimiter(ADir) + '*', faAnyFile, Info) = 0 then
-  try
-    repeat
-      if (Info.Name = '.') or (Info.Name = '..') then
-        Continue;
-      if Info.Attr and faDirectory <> 0 then
-        RemoveTree(IncludeTrailingPathDelimiter(ADir) + Info.Name)
-      else
-        DeleteFile(IncludeTrailingPathDelimiter(ADir) + Info.Name);
-    until FindNext(Info) <> 0;
-  finally
-    FindClose(Info);
-  end;
-  RemoveDir(ADir);
-end;
 
 procedure TLfsLocksTest.TestParse;
 var

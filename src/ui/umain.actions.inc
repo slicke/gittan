@@ -566,15 +566,7 @@ begin
   Cli := '';
   if Forge <> nil then
     Cli := App.ForgeCli(Forge);
-  if Assigned(FForge) then
-    Result := (FForge.ClassType <> Forge) or (FForge.Cli <> Cli)
-  else
-    Result := Cli <> '';
-  if not Result then
-    Exit;
-  FreeAndNil(FForge);
-  if Cli <> '' then
-    FForge := Forge.Create(Cli);
+  Result := KeepForge(FForge, Forge, Cli);
 end;
 
 { The forge found again, the remotes or the settings having changed:

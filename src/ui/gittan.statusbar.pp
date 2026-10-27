@@ -30,7 +30,7 @@ unit gittan.statusbar;
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Graphics, ExtCtrls, Forms;
+  Classes, SysUtils, Types, Controls, Graphics, ExtCtrls, Forms, LCLIntf;
 
 type
   {** The parts of the bar: the left zone (the tile and name, the
@@ -95,6 +95,7 @@ type
     FMessageIcon: string;
     FBusy: boolean;
     FBusyPhase: integer;
+    FBusyRect: TRect;
     FHints: array[TGittanStatusPart] of string;
     FRects: array[TGittanStatusPart] of TRect;
     FClickable: set of TGittanStatusPart;
@@ -845,15 +846,22 @@ begin
     Exit;
   FBusy := AValue;
   FBusyPhase := 0;
+  FBusyRect := Rect(0, 0, 0, 0);
   FBusyTimer.Enabled := AValue;
 end;
 
-{ Only the track moves, but it is centered by what the whole bar shows,
-  so the bar is painted again. }
+{ Only the stretch on the line moves, and whatever moves the line
+  paints the bar whole, so each tick paints the line's rectangle alone
+  (FBusyRect, from the last Paint): a job of minutes would otherwise
+  have the bar measure every part 25 times a second. }
 procedure TGittanStatusBar.BusyTimerTimer(Sender: TObject);
 begin
   FBusyPhase := (FBusyPhase + 1) mod BusySweep;
-  if IsVisible then
+  if not IsVisible then
+    Exit;
+  if HandleAllocated and not IsRectEmpty(FBusyRect) then
+    InvalidateRect(Handle, @FBusyRect, False)
+  else
     Invalidate;
 end;
 
@@ -1609,6 +1617,7 @@ begin
       TrackW := BusyW;
       BusyY := Y + TextH + Px(1);
     end;
+    FBusyRect := Rect(TrackLeft, BusyY, TrackLeft + TrackW, BusyY + Px(TrackHeight));
     Canvas.Pen.Style := psClear;
     Canvas.Brush.Style := bsSolid;
     Canvas.Brush.Color := FHover;

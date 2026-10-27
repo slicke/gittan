@@ -10,7 +10,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.commitjob, gittan.remotejob,
-  gittan.forge, gittan.github;
+  gittan.forge, gittan.github, testhelpers;
 
 type
   TCommitJobTest = class(TTestCase)
@@ -40,26 +40,6 @@ implementation
 
 uses
   {$ifdef unix}BaseUnix,{$endif} Process;
-
-procedure RemoveTree(const ADir: string);
-var
-  Info: TSearchRec;
-begin
-  if FindFirst(IncludeTrailingPathDelimiter(ADir) + '*', faAnyFile, Info) = 0 then
-  try
-    repeat
-      if (Info.Name = '.') or (Info.Name = '..') then
-        Continue;
-      if Info.Attr and faDirectory <> 0 then
-        RemoveTree(IncludeTrailingPathDelimiter(ADir) + Info.Name)
-      else
-        DeleteFile(IncludeTrailingPathDelimiter(ADir) + Info.Name);
-    until FindNext(Info) <> 0;
-  finally
-    FindClose(Info);
-  end;
-  RemoveDir(ADir);
-end;
 
 procedure TCommitJobTest.SetUp;
 begin

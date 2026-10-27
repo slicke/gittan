@@ -294,7 +294,7 @@ begin
   for i := 0 to FSubJobs.Count - 1 do
   begin
     TGittanSubmoduleJob(FSubJobs[i]).Stop(False);
-    FBlameZombies.Add(FSubJobs[i]);
+    FBlameZombies.Add(TGittanSubmoduleJob(FSubJobs[i]));
   end;
   FSubJobs.Clear;
 end;

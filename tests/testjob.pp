@@ -41,6 +41,7 @@ type
     procedure TestStopEnds;
     procedure TestStopKeepsRunning;
     procedure TestFreeRunning;
+    procedure TestReaper;
   end;
 
 implementation
@@ -186,6 +187,41 @@ begin
   Job.Free;
   CheckSynchronize(0);
   AssertEquals(0, FDone);
+end;
+
+{ The reaper frees a job once its thread has ended, and waits for the
+  rest on the way out. }
+procedure TJobTest.TestReaper;
+var
+  Reaper: TGittanJobReaper;
+  Job, Running: TWaitingJob;
+  i: integer;
+begin
+  Reaper := TGittanJobReaper.Create;
+  Job := TWaitingJob.Create(False);
+  Job.Start;
+  Job.WaitBusy;
+  Reaper.Add(Job);
+  Reaper.FreeFinished(False);
+  AssertEquals('still running', 1, Reaper.Count);
+  Job.Release;
+  for i := 1 to 500 do
+    if Job.Finished then
+      Break
+    else
+      Sleep(10);
+  AssertTrue(Job.Finished);
+  Reaper.FreeFinished(False);
+  AssertEquals(0, Reaper.Count);
+  Running := TWaitingJob.Create(False);
+  Running.Start;
+  Running.WaitBusy;
+  Reaper.Add(Running);
+  Reaper.FreeFinished(False);
+  AssertEquals(1, Reaper.Count);
+  { Destroy waits: the job is let go as it is freed. }
+  Reaper.Free;
+  CheckSynchronize(0);
 end;
 
 initialization
