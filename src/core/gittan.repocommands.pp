@@ -20,7 +20,8 @@ unit gittan.repocommands;
   TGittanCommandJob runs a command in a thread through the user's shell
   (a login shell, so the PATH is the terminal's) with its output read as
   it writes, told to the main thread, and its exit code at the end;
-  Kill ends it and what it started. }
+  Kill ends it and what it started, forced when it has not ended
+  KillGraceMs later. }
 
 {$mode objfpc}{$H+}
 
@@ -38,6 +39,9 @@ const
   CommandsPath = CommandsFolder + '/' + CommandsFile;
   {** How much of a command's output the job keeps: the newest bytes. }
   OutputKeep = 1024 * 1024;
+  {** How long a command may take to end after Kill before it is made
+    to: SIGKILL where Kill sent SIGTERM. }
+  KillGraceMs = 3000;
 
 type
   {** Where a command comes from: the commands file, package.json, a
@@ -118,7 +122,8 @@ type
     FOutputPending, FKill: boolean;
     FStarted, FKilled: boolean;
     FExitCode: integer;
-    FStartedAt, FEndedAt: QWord;
+    FStartedAt, FEndedAt, FKilledAt: QWord;
+    FForced: boolean;
     FOnOutput: TNotifyEvent;
     function GetOutput: string;
     function GetElapsedMs: int64;
@@ -134,7 +139,9 @@ type
     constructor Create(const ARoot, ACommand: string);
     destructor Destroy; override;
     {** Ends the command and what it started; OnDone follows as for an
-      end of its own, with Killed set. }
+      end of its own, with Killed set. One that is still running
+      KillGraceMs later, as one that ignores SIGTERM, is ended by
+      force. }
     procedure Kill;
     property Root: string read FRoot;
     property Command: string read FCommand;
@@ -573,16 +580,24 @@ begin
 end;
 {$endif}
 
-procedure EndProcess(P: TProcess);
-{$ifndef unix}
+{ AForce, on Unix, sends SIGKILL, which a command cannot ignore. }
+procedure EndProcess(P: TProcess; AForce: boolean);
+{$ifdef unix}
+var
+  Signal: cint;
+{$else}
 var
   Output: string;
 {$endif}
 begin
   {$ifdef unix}
   { The group is not there yet when the child has not reached setsid. }
-  if FpKill(-P.ProcessID, SIGTERM) <> 0 then
-    FpKill(P.ProcessID, SIGTERM);
+  if AForce then
+    Signal := SIGKILL
+  else
+    Signal := SIGTERM;
+  if FpKill(-P.ProcessID, Signal) <> 0 then
+    FpKill(P.ProcessID, Signal);
   {$else}
   { cmd.exe's children (node under npm) go with it. }
   RunCommand('taskkill', ['/PID', IntToStr(P.ProcessID), '/T', '/F'], Output,
@@ -662,7 +677,14 @@ begin
       if FKill and not FKilled and P.Running then
       begin
         FKilled := True;
-        EndProcess(P);
+        FKilledAt := GetTickCount64;
+        EndProcess(P, False);
+      end
+      else if FKilled and not FForced and P.Running and
+        (GetTickCount64 - FKilledAt >= KillGraceMs) then
+      begin
+        FForced := True;
+        EndProcess(P, True);
       end;
       N := P.Output.NumBytesAvailable;
       if N > 0 then

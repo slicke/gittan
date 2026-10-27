@@ -137,9 +137,10 @@ begin
   FCommandPage.SetRun(Cmd.Name, True, -1, 0, True, False);
   FCommandJob.Start;
   ShowCommands;
-  { The output's heading at the top of the box, the console under it. }
-  if FCommandPage.OutputTop >= 0 then
-    FSummaryBox.VertScrollBar.Position := Max(0, FCommandPage.OutputTop - Px(8));
+  { No further than the panel's end needs: the console fills the box
+    when the tiles leave room, and the tiles stay in sight above it. }
+  FSummaryBox.VertScrollBar.Position := Max(0, FCommandPage.Height -
+    FSummaryBox.ClientHeight);
 end;
 
 { What the command wrote since the last piece goes to the console; the

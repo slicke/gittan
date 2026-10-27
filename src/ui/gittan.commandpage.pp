@@ -11,12 +11,16 @@ unit gittan.commandpage;
   file is not trusted its commands are dimmed under a card that says
   why, with a Trust Commands button (OnTrust).
 
-  Under the groups, once a command has run, the Output section names it
-  and its state (running, the exit code and the time, stopped, could
-  not start) with Stop while it runs, else Copy, over a console
-  (TGittanConsole, Console, the owner's to fill and to give the
-  editor's font) that fills the rest of the box it sits in, at least
-  ConsoleMinHeight.
+  Under the groups, once a command has run, the output is a panel: a
+  bar with its state as a pill (Running with a dot that pulses, Done,
+  Failed with the exit code, Stopping…, Stopped, Could not start), the
+  command's name and its time, which counts while it runs, and the
+  buttons at the right (Stop while it runs, else Run Again and Copy),
+  over a console (TGittanConsole, Console, the owner's to fill and to
+  give the editor's font) that fills the rest of the box it sits in, at
+  least ConsoleMinHeight, so the output shows without scrolling when
+  the tiles leave room. The tile of the last run has its mark in the
+  state's color.
 
   The tiles of every group share one grid, so a group of one has a tile
   as wide as the others; a tile has a run mark at the left and what
@@ -34,11 +38,12 @@ unit gittan.commandpage;
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Graphics, gittan.repocommands, gittan.console;
+  Classes, SysUtils, Types, Controls, Graphics, ExtCtrls, gittan.repocommands,
+  gittan.console;
 
 const
   {** The least height of the console, in 96-DPI pixels. }
-  ConsoleMinHeight = 160;
+  ConsoleMinHeight = 220;
 
 type
   {** A click on a tile, with the command's index. }
@@ -52,9 +57,12 @@ type
     FCommands: TGittanRepoCommands;
     FHasFile, FTrusted: boolean;
     FRunName: string;
-    FHasRun, FRunning, FRunStarted, FRunKilled: boolean;
+    FHasRun, FRunning, FRunStarted, FRunKilled, FStopping, FPulse: boolean;
     FExitCode: integer;
     FElapsedMs: int64;
+    FRunStart: QWord;
+    { Ticks while a command runs: the time counts and the dot pulses. }
+    FTimer: TTimer;
     FConsole: TGittanConsole;
     FCodeFont: TFont;
     FShortcutPrefix: string;
@@ -77,6 +85,13 @@ type
     procedure PaintNote(var Y: integer; const AText: string);
     procedure PaintTrustCard(var Y: integer);
     procedure PaintTiles(var Y: integer; ASource: TGittanCommandSource);
+    procedure PaintButton(const R: TRect; const ACaption, ALink: string;
+      AFill, ATextColor: TColor);
+    procedure PaintStateMark(X, Y, ASize: integer; AColor: TColor);
+    procedure PaintOutput(var Y: integer);
+    function RunState(out AColor: TColor): string;
+    function RunIndex: integer;
+    procedure TimerTick(Sender: TObject);
     function GroupCount(ASource: TGittanCommandSource): integer;
     function ColumnCount: integer;
     procedure PaintContent;
@@ -157,20 +172,22 @@ resourcestring
   rsTrustText = 'A committed file could make a shortcut run anything. Its commands and ' +
     'their shortcuts are off until you trust it; a change of the file asks again.';
   rsTrustButton = 'Trust Commands';
-  rsOutput = 'Output';
-  rsRunning = 'running';
-  rsRunningTile = 'Running…';
-  rsExitOk = 'done';
-  rsExitCode = 'exit code %d';
-  rsStopped = 'stopped';
-  rsNoStart = 'could not start';
+  rsRunning = 'Running';
+  rsRunningTile = 'Running… %s';
+  rsExitOk = 'Done';
+  rsExitCode = 'Failed · exit code %d';
+  rsStopping = 'Stopping…';
+  rsStopped = 'Stopped';
+  rsNoStart = 'Could not start';
   rsStop = 'Stop';
   rsCopy = 'Copy';
+  rsRunAgain = 'Run Again';
   rsTerminalTile = 'in a terminal';
   rsNoSuchTarget = 'no script or target named %s';
 
 const
   RunLink = 'gittan:run:';
+  AgainLink = 'gittan:again';
   StopLink = 'gittan:stop';
   CopyLink = 'gittan:copy';
   TrustLink = 'gittan:trust';
@@ -196,6 +213,10 @@ const
   CardPad = 14;
   ButtonPadX = 12;
   ButtonPadY = 5;
+  { The output's bar: its padding, the gap between its buttons. }
+  BarPad = 10;
+  { The time the dot of a running command takes to pulse. }
+  PulseMs = 600;
 
 function FormatElapsed(AMs: int64): string;
 var
@@ -229,6 +250,10 @@ begin
   FConsole.Parent := Self;
   FConsole.Visible := False;
   FCodeFont := TFont.Create;
+  FTimer := TTimer.Create(Self);
+  FTimer.Enabled := False;
+  FTimer.Interval := PulseMs;
+  FTimer.OnTimer := @TimerTick;
 end;
 
 destructor TGittanCommandPage.Destroy;
@@ -246,6 +271,7 @@ begin
     FTrusted := True;
     FHasRun := False;
     FRunning := False;
+    FTimer.Enabled := False;
     FConsole.Text := '';
     FConsole.Visible := False;
   end;
@@ -273,9 +299,13 @@ end;
 procedure TGittanCommandPage.SetRun(const AName: string; ARunning: boolean;
   AExitCode: integer; AElapsedMs: int64; AStarted, AKilled: boolean);
 begin
+  if ARunning and not FRunning then
+    FRunStart := GetTickCount64;
   FRunName := AName;
   FHasRun := True;
   FRunning := ARunning;
+  FStopping := False;
+  FTimer.Enabled := ARunning;
   FExitCode := AExitCode;
   FElapsedMs := AElapsedMs;
   FRunStarted := AStarted;
@@ -526,6 +556,7 @@ var
   R, ChipR: TRect;
   Off, Leads, Hot, Busy: boolean;
   Cmd: TGittanRepoCommand;
+  StateColor: TColor;
 begin
   Indexes := nil;
   for i := 0 to High(FCommands) do
@@ -598,6 +629,11 @@ begin
     FC.Brush.Style := bsSolid;
     if Hot or Busy then
       FC.Brush.Color := FLink
+    else if FHasRun and (Cmd.Name = FRunName) and not FRunning then
+    begin
+      RunState(StateColor);
+      FC.Brush.Color := StateColor;
+    end
     else if Off then
       FC.Brush.Color := MixColor(FDim, FCard, 0.5)
     else
@@ -649,7 +685,7 @@ begin
     if Busy then
     begin
       FC.Font := Font;
-      Detail := rsRunningTile;
+      Detail := Format(rsRunningTile, [FormatElapsed(GetTickCount64 - FRunStart)]);
       FC.Font.Color := FLink;
     end
     else
@@ -675,6 +711,267 @@ begin
   Inc(Y, Rows * TileH + (Rows - 1) * Px(TileGap));
 end;
 
+procedure TGittanCommandPage.TimerTick(Sender: TObject);
+begin
+  FPulse := not FPulse;
+  Invalidate;
+end;
+
+{ What the panel's pill says of the last run, and its color. }
+function TGittanCommandPage.RunState(out AColor: TColor): string;
+begin
+  if FRunning and FStopping then
+  begin
+    Result := rsStopping;
+    AColor := FDim;
+  end
+  else if FRunning then
+  begin
+    Result := rsRunning;
+    AColor := FLink;
+  end
+  else if not FRunStarted then
+  begin
+    Result := rsNoStart;
+    AColor := FErrorColor;
+  end
+  else if FRunKilled then
+  begin
+    Result := rsStopped;
+    AColor := FDim;
+  end
+  else if FExitCode = 0 then
+  begin
+    Result := rsExitOk;
+    AColor := FOk;
+  end
+  else
+  begin
+    Result := Format(rsExitCode, [FExitCode]);
+    AColor := FErrorColor;
+  end;
+end;
+
+{ The index of the command that ran last, for Run Again; -1 when it is
+  gone or leads nowhere now. }
+function TGittanCommandPage.RunIndex: integer;
+var
+  i: integer;
+begin
+  for i := 0 to High(FCommands) do
+    if (FCommands[i].Name = FRunName) and (FCommands[i].Command <> '') then
+    begin
+      if (FCommands[i].Source = csFile) and not FTrusted then
+        Exit(-1);
+      Exit(i);
+    end;
+  Result := -1;
+end;
+
+{ A button: AFill, a shade lighter under the mouse, ACaption in
+  ATextColor; clNone as the fill draws an outline in the divider color. }
+procedure TGittanCommandPage.PaintButton(const R: TRect; const ACaption, ALink: string;
+  AFill, ATextColor: TColor);
+var
+  Hot: boolean;
+begin
+  AddLink(R, ALink);
+  Hot := FHot = High(FLinkRects);
+  if AFill = clNone then
+  begin
+    FC.Pen.Style := psSolid;
+    FC.Pen.Color := FLine;
+    if Hot then
+    begin
+      FC.Brush.Style := bsSolid;
+      FC.Brush.Color := FHover;
+    end
+    else
+      FC.Brush.Style := bsClear;
+  end
+  else
+  begin
+    FC.Pen.Style := psClear;
+    FC.Brush.Style := bsSolid;
+    if Hot then
+      FC.Brush.Color := MixColor(AFill, FText, 0.2)
+    else
+      FC.Brush.Color := AFill;
+  end;
+  FC.RoundRect(R, Px(ChipRadius) * 2, Px(ChipRadius) * 2);
+  FC.Pen.Style := psSolid;
+  FC.Brush.Style := bsClear;
+  FC.Font := Font;
+  FC.Font.Color := ATextColor;
+  FC.TextOut(R.Left + (R.Width - FC.TextWidth(ACaption)) div 2,
+    R.Top + (R.Height - FC.TextHeight(ACaption)) div 2, ACaption);
+end;
+
+{ The mark of the state in a square of ASize at X, Y: a dot while it
+  runs (faint every other tick, so it pulses), a tick when it is done, a
+  cross when it failed or could not start, a square when it was
+  stopped. }
+procedure TGittanCommandPage.PaintStateMark(X, Y, ASize: integer; AColor: TColor);
+var
+  W: integer;
+begin
+  W := Max(2, Px(2));
+  if FRunning and not FStopping then
+  begin
+    FC.Pen.Style := psClear;
+    FC.Brush.Style := bsSolid;
+    if FPulse then
+      FC.Brush.Color := MixColor(AColor, FCard, 0.6)
+    else
+      FC.Brush.Color := AColor;
+    FC.Ellipse(X + 1, Y + 1, X + ASize - 1, Y + ASize - 1);
+  end
+  else if FRunKilled or FStopping then
+  begin
+    FC.Pen.Style := psClear;
+    FC.Brush.Style := bsSolid;
+    FC.Brush.Color := AColor;
+    FC.Rectangle(X + 2, Y + 2, X + ASize - 2, Y + ASize - 2);
+  end
+  else
+  begin
+    FC.Pen.Style := psSolid;
+    FC.Pen.Width := W;
+    FC.Pen.Color := AColor;
+    if FRunStarted and (FExitCode = 0) then
+      FC.PolyLine([Point(X + 1, Y + ASize div 2), Point(X + ASize * 2 div 5, Y + ASize - 2),
+        Point(X + ASize - 1, Y + 2)])
+    else
+    begin
+      FC.Line(X + 2, Y + 2, X + ASize - 2, Y + ASize - 2);
+      FC.Line(X + ASize - 2, Y + 2, X + 2, Y + ASize - 2);
+    end;
+    FC.Pen.Width := 1;
+  end;
+  FC.Pen.Style := psSolid;
+  FC.Brush.Style := bsClear;
+end;
+
+{ The output's panel: the bar with the state, the name, the time and
+  the buttons, over the console, which fills the box down to its
+  bottom when there is room for ConsoleMinHeight. }
+procedure TGittanCommandPage.PaintOutput(var Y: integer);
+var
+  PL, PR, PT, BarH, BtnH, TextH, X, Right, MarkS, PillW, ConsoleH, Elapsed, BtnW: integer;
+  State, Time: string;
+  StateColor, Border: TColor;
+  R, Pill: TRect;
+begin
+  Inc(Y, Px(Pad));
+  FOutputTop := Y;
+  PL := Px(Pad);
+  PR := Width - Px(Pad);
+  PT := Y;
+  FC.Font := Font;
+  TextH := FC.TextHeight('Xg');
+  BtnH := TextH + 2 * Px(ButtonPadY);
+  BarH := BtnH + 2 * Px(BarPad);
+  State := RunState(StateColor);
+  if FRunning then
+    Elapsed := GetTickCount64 - FRunStart
+  else
+    Elapsed := FElapsedMs;
+  if FRunStarted then
+    Time := FormatElapsed(Elapsed)
+  else
+    Time := '';
+  ConsoleH := Max(Px(ConsoleMinHeight), FBoxHeight - (PT + BarH + 1) - Px(Pad) -
+    Px(TileRadius) div 2);
+
+  { The frame in the page's color, the console's, with the bar on top
+    in the card's. }
+  if FRunning and not FStopping then
+    Border := FLink
+  else
+    Border := MixColor(FCard, FLine, 0.5);
+  R := Rect(PL, PT, PR, PT + BarH + 1 + ConsoleH + Px(TileRadius) div 2);
+  FC.Pen.Style := psSolid;
+  FC.Pen.Color := Border;
+  FC.Brush.Style := bsSolid;
+  FC.Brush.Color := FBack;
+  FC.RoundRect(R, Px(TileRadius), Px(TileRadius));
+  FC.Pen.Style := psClear;
+  FC.Brush.Color := FCard;
+  FC.RoundRect(PL + 1, PT + 1, PR - 1, PT + BarH + Px(TileRadius), Px(TileRadius) - 1,
+    Px(TileRadius) - 1);
+  FC.Brush.Color := FBack;
+  FC.FillRect(Rect(PL + 1, PT + BarH, PR - 1, PT + BarH + Px(TileRadius) + 1));
+  FC.Pen.Style := psSolid;
+  FC.Pen.Color := Border;
+  FC.Line(PL, PT + BarH, PR, PT + BarH);
+  FC.Brush.Style := bsClear;
+
+  { The buttons, from the right. }
+  Right := PR - Px(BarPad);
+  if FRunning then
+  begin
+    if not FStopping and Assigned(FOnStop) then
+    begin
+      BtnW := FC.TextWidth(rsStop) + 2 * Px(ButtonPadX) + Px(8);
+      PaintButton(Rect(Right - BtnW, PT + Px(BarPad), Right, PT + Px(BarPad) + BtnH),
+        rsStop, StopLink, FErrorColor, clWhite);
+      Dec(Right, BtnW + Px(Gap) div 2);
+    end;
+  end
+  else
+  begin
+    if Assigned(FOnCopyOutput) then
+    begin
+      BtnW := FC.TextWidth(rsCopy) + 2 * Px(ButtonPadX);
+      PaintButton(Rect(Right - BtnW, PT + Px(BarPad), Right, PT + Px(BarPad) + BtnH),
+        rsCopy, CopyLink, clNone, FText);
+      Dec(Right, BtnW + Px(Gap) div 2);
+    end;
+    if Assigned(FOnRun) and (RunIndex >= 0) then
+    begin
+      BtnW := FC.TextWidth(rsRunAgain) + 2 * Px(ButtonPadX);
+      PaintButton(Rect(Right - BtnW, PT + Px(BarPad), Right, PT + Px(BarPad) + BtnH),
+        rsRunAgain, AgainLink, FLink, FBack);
+      Dec(Right, BtnW + Px(Gap) div 2);
+    end;
+  end;
+
+  { The pill: the mark and the state, in the state's color on a tint
+    of it. }
+  FC.Font := Font;
+  FC.Font.Style := [fsBold];
+  MarkS := Px(10);
+  X := PL + Px(BarPad) + Px(4);
+  PillW := Px(ButtonPadX) + MarkS + Px(6) + FC.TextWidth(State) + Px(ButtonPadX);
+  Pill := Rect(X, PT + Px(BarPad), X + PillW, PT + Px(BarPad) + BtnH);
+  FC.Pen.Style := psClear;
+  FC.Brush.Style := bsSolid;
+  FC.Brush.Color := MixColor(FCard, StateColor, 0.18);
+  FC.RoundRect(Pill, BtnH, BtnH);
+  FC.Brush.Style := bsClear;
+  PaintStateMark(Pill.Left + Px(ButtonPadX), Pill.Top + (BtnH - MarkS) div 2, MarkS, StateColor);
+  FC.Font.Color := StateColor;
+  FC.TextOut(Pill.Left + Px(ButtonPadX) + MarkS + Px(6), Pill.Top + (BtnH - TextH) div 2, State);
+
+  { The command's name, its time after it. }
+  X := Pill.Right + Px(Gap);
+  FC.Font.Color := FText;
+  FC.TextOut(X, Pill.Top + (BtnH - TextH) div 2, FitTextRight(FC, FRunName,
+    Max(0, Right - Px(Gap) - X)));
+  Inc(X, FC.TextWidth(FRunName));
+  FC.Font.Style := [];
+  if (Time <> '') and (X + FC.TextWidth(' · ' + Time) < Right - Px(Gap)) then
+  begin
+    FC.Font.Color := FDim;
+    FC.TextOut(X, Pill.Top + (BtnH - TextH) div 2, ' · ' + Time);
+  end;
+
+  R := Rect(PL + Px(BarPad), PT + BarH + Px(4), PR - Px(4), PT + BarH + 1 + ConsoleH);
+  if FConsole.BoundsRect <> R then
+    FConsole.BoundsRect := R;
+  Y := R.Bottom + Px(TileRadius) div 2;
+end;
+
 procedure TGittanCommandPage.Paint;
 begin
   FC := Canvas;
@@ -683,10 +980,7 @@ end;
 
 procedure TGittanCommandPage.PaintContent;
 var
-  Y, TextH, TitleH, HeadingTop, ConsoleH, X: integer;
-  State: string;
-  StateColor: TColor;
-  R: TRect;
+  Y, TextH, TitleH, HeadingTop, X: integer;
 begin
   FC.Brush.Style := bsSolid;
   FC.Brush.Color := FBack;
@@ -740,53 +1034,10 @@ begin
     PaintTiles(Y, csMake);
   end;
 
-  { The output of the last run, in the console under its heading. }
+  { The output of the last run, in its panel. }
   FOutputTop := -1;
   if FHasRun then
-  begin
-    if FRunning then
-    begin
-      State := rsRunning;
-      StateColor := FLink;
-    end
-    else if not FRunStarted then
-    begin
-      State := rsNoStart;
-      StateColor := FErrorColor;
-    end
-    else if FRunKilled then
-    begin
-      State := rsStopped + ' · ' + FormatElapsed(FElapsedMs);
-      StateColor := FDim;
-    end
-    else if FExitCode = 0 then
-    begin
-      State := rsExitOk + ' · ' + FormatElapsed(FElapsedMs);
-      StateColor := FOk;
-    end
-    else
-    begin
-      State := Format(rsExitCode, [FExitCode]) + ' · ' + FormatElapsed(FElapsedMs);
-      StateColor := FErrorColor;
-    end;
-    HeadingTop := Y;
-    FOutputTop := Y;
-    PaintHeading(Y, rsOutput, FRunName, State, StateColor);
-    if FRunning then
-    begin
-      if Assigned(FOnStop) then
-        PaintAction(HeadingTop + Px(Pad), rsStop, StopLink);
-    end
-    else if Assigned(FOnCopyOutput) then
-      PaintAction(HeadingTop + Px(Pad), rsCopy, CopyLink);
-    { As high as the box less the heading, so the console fills the
-      box once it is scrolled to the heading, as a terminal pane. }
-    ConsoleH := Max(Px(ConsoleMinHeight), FBoxHeight - (Y - FOutputTop) - Px(Pad));
-    R := Rect(Px(Pad), Y, Width - Px(Pad), Y + ConsoleH);
-    if FConsole.BoundsRect <> R then
-      FConsole.BoundsRect := R;
-    Inc(Y, ConsoleH);
-  end;
+    PaintOutput(Y);
 
   { Layout sets the height from this. }
   FContentHeight := Y + Px(Pad);
@@ -820,10 +1071,20 @@ begin
     if Assigned(FOnRun) and (n >= 0) and (n <= High(FCommands)) then
       FOnRun(Self, n);
   end
+  else if FLinkUrls[i] = AgainLink then
+  begin
+    n := RunIndex;
+    if Assigned(FOnRun) and (n >= 0) then
+      FOnRun(Self, n);
+  end
   else if FLinkUrls[i] = StopLink then
   begin
     if Assigned(FOnStop) then
+    begin
+      FStopping := True;
       FOnStop(Self);
+      Invalidate;
+    end;
   end
   else if FLinkUrls[i] = CopyLink then
   begin

@@ -39,6 +39,7 @@ type
     procedure TestJobRuns;
     procedure TestJobFails;
     procedure TestJobKill;
+    procedure TestJobKillForced;
   end;
 
 implementation
@@ -386,6 +387,30 @@ begin
   finally
     Job.Free;
   end;
+end;
+
+{ A command that ignores SIGTERM is ended by force after KillGraceMs. }
+procedure TRepoCommandsTest.TestJobKillForced;
+{$ifndef windows}
+var
+  Job: TGittanCommandJob;
+  Started: QWord;
+{$endif}
+begin
+  {$ifndef windows}
+  Job := TGittanCommandJob.Create(FDir, 'trap "" TERM; sleep 30; echo late');
+  try
+    Started := GetTickCount64;
+    RunJob(Job, 300);
+    AssertEquals(1, FDone);
+    AssertTrue('ended by Kill', Job.Killed);
+    AssertTrue('after the grace', GetTickCount64 - Started >= KillGraceMs);
+    AssertTrue('long before the sleep', GetTickCount64 - Started < 15000);
+    AssertEquals('the rest of the line did not run', 0, Pos('late', Job.Output));
+  finally
+    Job.Free;
+  end;
+  {$endif}
 end;
 
 initialization
