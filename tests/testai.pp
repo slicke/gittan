@@ -1,16 +1,18 @@
 unit testai;
 
-{** Tests of gittan.ai: the changes a commit message is written for,
-  made against a repository in a temporary folder with the real git, the
-  arguments and input of each agent, and the reading of their answers.
-  No agent is run; they need a login and the network. }
+{** Tests of gittan.ai: the changes a commit message is written for and
+  a review sees, made against a repository in a temporary folder with
+  the real git, the prompts, the reading of the answers, and the file
+  list a model that cannot search is given. The agents themselves are
+  tested in testagentcli and testopenai; none is run here. }
 
 {$mode objfpc}{$H+}
 
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.reviews, gittan.ai, testhelpers;
+  Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.reviews, gittan.ai,
+  testhelpers;
 
 type
   TAiTest = class(TTestCase)
@@ -28,24 +30,17 @@ type
     procedure TestChangesAmend;
     procedure TestNoChanges;
     procedure TestLongDiffIsCut;
-    procedure TestParseResult;
-    procedure TestParseError;
-    procedure TestParseNotAnAnswer;
     procedure TestCleanMessage;
-    procedure TestArgs;
-    procedure TestCopilotArgs;
-    procedure TestInput;
     procedure TestAgentOfKey;
-    procedure TestReadClaudeAnswer;
-    procedure TestReadCopilotAnswer;
     procedure TestNumberDiff;
     procedure TestParseFindings;
     procedure TestParseFindingsAround;
     procedure TestReviewChangesWorkTree;
     procedure TestReviewChangesRange;
-    procedure TestReviewArgs;
     procedure TestParseFoundFiles;
-    procedure TestFindArgs;
+    procedure TestTaskPrompt;
+    procedure TestRepoFileList;
+    procedure TestFindListInput;
   end;
 
 implementation
@@ -173,47 +168,6 @@ begin
   AssertTrue('the summary is whole', Pos('big.txt', Text) > 0);
 end;
 
-procedure TAiTest.TestParseResult;
-var
-  Text, Error: string;
-begin
-  AssertTrue(ParseClaudeResult('{"type":"result","subtype":"success","is_error":false,' +
-    '"result":"Fix the tree\n\nIt drew twice.","session_id":"x","total_cost_usd":0.01}',
-    Text, Error));
-  AssertEquals('', Error);
-  AssertEquals('Fix the tree'#10#10'It drew twice.', Text);
-  { A warning line before the answer. }
-  AssertTrue(ParseClaudeResult('Warning: something' + LineEnding +
-    '{"type":"result","subtype":"success","is_error":false,"result":"Ok"}', Text, Error));
-  AssertEquals('Ok', Text);
-end;
-
-procedure TAiTest.TestParseError;
-var
-  Text, Error: string;
-begin
-  AssertTrue(ParseClaudeResult('{"type":"result","subtype":"success","is_error":true,' +
-    '"result":"Invalid API key - Please run /login"}', Text, Error));
-  AssertEquals('', Text);
-  AssertEquals('Invalid API key - Please run /login', Error);
-  AssertTrue(ParseClaudeResult('{"type":"result","subtype":"error_max_turns",' +
-    '"is_error":true,"num_turns":11}', Text, Error));
-  AssertEquals(Format(rsClaudeTurns, [11]), Error);
-  AssertTrue(ParseClaudeResult('{"type":"result","subtype":"success","is_error":false,' +
-    '"result":"  "}', Text, Error));
-  AssertEquals(Format(rsAgentNoAnswer, ['Claude Code']), Error);
-end;
-
-procedure TAiTest.TestParseNotAnAnswer;
-var
-  Text, Error: string;
-begin
-  AssertFalse(ParseClaudeResult('', Text, Error));
-  AssertFalse(ParseClaudeResult('error: unknown option ''--tools''', Text, Error));
-  AssertFalse(ParseClaudeResult('{"type":"system"}', Text, Error));
-  AssertFalse(ParseClaudeResult('{not json', Text, Error));
-end;
-
 procedure TAiTest.TestCleanMessage;
 begin
   AssertEquals('Subject'#10#10'Body', CleanCommitMessage(#10'Subject'#10#10'Body'#10#10));
@@ -227,84 +181,13 @@ begin
     'Subject'#10#10'```'#10'code'#10'```'));
 end;
 
-procedure TAiTest.TestArgs;
-var
-  Args: TStringArray;
-  Line: string;
-begin
-  Args := CommitMessageArgs(gaClaude, '');
-  Line := string.Join(' ', Args);
-  AssertEquals('-p', Args[0]);
-  AssertTrue(Pos('--output-format json', Line) > 0);
-  AssertTrue('read-only tools', Pos('--tools Read,Grep,Glob', Line) > 0);
-  AssertEquals('no model without one', 0, Pos('--model', Line));
-  AssertTrue('the message is asked to be short', Pos('at most 72 characters', Args[1]) > 0);
-  Args := CommitMessageArgs(gaClaude, 'haiku');
-  AssertEquals('haiku', Args[High(Args)]);
-  AssertEquals('--model', Args[High(Args) - 1]);
-end;
-
-procedure TAiTest.TestCopilotArgs;
-var
-  Args: TStringArray;
-  Line: string;
-begin
-  Args := CommitMessageArgs(gaCopilot, '');
-  Line := string.Join(' ', Args);
-  AssertEquals('the prompt goes on the input, which -p would make it ignore', 0,
-    Pos('-p ', Line + ' '));
-  AssertTrue('only its answer', Pos('-s', Line) > 0);
-  AssertTrue('read-only tools', Pos('--available-tools=view,grep,glob', Line) > 0);
-  AssertTrue('asks for nothing', Pos('--allow-all-tools', Line) > 0);
-  AssertEquals(0, Pos('--model', Line));
-  Args := CommitMessageArgs(gaCopilot, 'auto');
-  AssertEquals('--model=auto', Args[High(Args)]);
-end;
-
-procedure TAiTest.TestInput;
-begin
-  AssertEquals('claude has the prompt as an argument', 'the changes',
-    CommitMessageInput(gaClaude, 'the changes'));
-  AssertTrue('copilot gets the prompt first', Pos('Write the git commit message',
-    CommitMessageInput(gaCopilot, 'the changes')) = 1);
-  AssertTrue(Pos('the changes', CommitMessageInput(gaCopilot, 'the changes')) > 0);
-end;
-
 procedure TAiTest.TestAgentOfKey;
 begin
   AssertTrue(AgentOfKey('copilot') = gaCopilot);
   AssertTrue(AgentOfKey('Copilot') = gaCopilot);
   AssertTrue(AgentOfKey('claude') = gaClaude);
+  AssertTrue(AgentOfKey('openai') = gaOpenAI);
   AssertTrue('an unknown key is Claude Code', AgentOfKey('') = gaClaude);
-end;
-
-procedure TAiTest.TestReadClaudeAnswer;
-var
-  Msg, Error: string;
-begin
-  AssertTrue(ReadAgentAnswer(gaClaude, True, '{"type":"result","subtype":"success",' +
-    '"is_error":false,"result":"```\nFix it\n```"}', '', Msg, Error));
-  AssertEquals('Fix it', Msg);
-  { An error in the JSON, with exit 1. }
-  AssertFalse(ReadAgentAnswer(gaClaude, False, '{"type":"result","subtype":"success",' +
-    '"is_error":true,"result":"Not logged in"}', '', Msg, Error));
-  AssertEquals('Not logged in', Error);
-  { No JSON: stderr says why. }
-  AssertFalse(ReadAgentAnswer(gaClaude, False, '', 'error: unknown option', Msg, Error));
-  AssertEquals('error: unknown option', Error);
-end;
-
-procedure TAiTest.TestReadCopilotAnswer;
-var
-  Msg, Error: string;
-begin
-  AssertTrue(ReadAgentAnswer(gaCopilot, True, #10'Fix it'#10#10'Body'#10, '', Msg, Error));
-  AssertEquals('Fix it'#10#10'Body', Msg);
-  AssertFalse('a failed run is no answer', ReadAgentAnswer(gaCopilot, False,
-    'partial', 'No authentication information found.', Msg, Error));
-  AssertEquals('No authentication information found.', Error);
-  AssertFalse(ReadAgentAnswer(gaCopilot, True, '  ', '', Msg, Error));
-  AssertEquals(Format(rsAgentNoAnswer, ['GitHub Copilot']), Error);
 end;
 
 procedure TAiTest.TestNumberDiff;
@@ -419,19 +302,6 @@ begin
   AssertEquals('the work tree is no part of a range', 0, Pos('not committed', Text));
 end;
 
-procedure TAiTest.TestReviewArgs;
-var
-  Line: string;
-begin
-  Line := string.Join(' ', ReviewArgs(gaClaude, ''));
-  AssertTrue('more turns, to check findings', Pos('--max-turns ' +
-    IntToStr(ReviewMaxTurns), Line) > 0);
-  AssertTrue('asks for a JSON array', Pos('JSON array', ReviewArgs(gaClaude, '')[1]) > 0);
-  AssertTrue('copilot gets the prompt on its input', Pos('Review the changes',
-    ReviewInput(gaCopilot, 'the diff')) = 1);
-  AssertEquals('the diff', ReviewInput(gaClaude, 'the diff'));
-end;
-
 procedure TAiTest.TestParseFoundFiles;
 var
   F: TGittanFoundFiles;
@@ -463,22 +333,56 @@ begin
   AssertEquals('at most the limit', FindMaxFiles, Length(F));
 end;
 
-procedure TAiTest.TestFindArgs;
+procedure TAiTest.TestTaskPrompt;
 var
-  Line: string;
+  Task: TGittanAITask;
 begin
-  Line := string.Join(' ', FindArgs(gaClaude, 'haiku'));
-  AssertTrue(Pos('--max-turns ' + IntToStr(FindMaxTurns), Line) > 0);
-  AssertTrue(Pos('--model haiku', Line) > 0);
-  AssertTrue('read-only tools', Pos('--tools Read,Grep,Glob', Line) > 0);
-  AssertTrue('asks for a JSON array', Pos('JSON array', FindArgs(gaClaude, '')[1]) > 0);
-  AssertEquals('the question alone for claude', 'the parser',
-    FindInput(gaClaude, 'the parser'));
-  AssertTrue('copilot gets the prompt, then the question', Pos('Find where',
-    FindInput(gaCopilot, 'the parser')) = 1);
-  AssertTrue(Pos('the parser', FindInput(gaCopilot, 'the parser')) > 0);
+  for Task in TGittanAITask do
+  begin
+    AssertTrue('an agent that reads files may', Pos('read the repository''s files',
+      LowerCase(TaskPrompt(Task, True))) > 0);
+    AssertEquals('one that sees what it is sent may not', 0,
+      Pos('read the repository''s files', LowerCase(TaskPrompt(Task, False))));
+    AssertEquals('both get the same task', Copy(TaskPrompt(Task, True), 1, 30),
+      Copy(TaskPrompt(Task, False), 1, 30));
+  end;
+  AssertTrue('the message is asked to be short', Pos('at most 72 characters',
+    TaskPrompt(atMessage, True)) > 0);
+  AssertTrue(Pos('JSON array', TaskPrompt(atReview, True)) > 0);
+  AssertTrue(Pos('cannot open the files', TaskPrompt(atReview, False)) > 0);
+  AssertTrue('the find prompt says the list follows', Pos('paths of the repository',
+    TaskPrompt(atFind, False)) > 0);
+  AssertTrue(Pos('JSON array', TaskPrompt(atFind, False)) > 0);
+end;
+
+
+procedure TAiTest.TestRepoFileList;
+var
+  List, Error: string;
+begin
+  WriteFile('a.txt', 'one');
+  WriteFile('.gitignore', '*.log');
+  Git(['add', '.']);
+  Git(['commit', '-q', '-m', 'Add a']);
+  WriteFile('new file.txt', 'brand new');
+  WriteFile('build.log', 'noise');
+  AssertTrue(RepoFileList(FDir, List, Error));
+  AssertTrue('a tracked file', Pos('a.txt'#10, List) > 0);
+  AssertTrue('an untracked file', Pos('new file.txt'#10, List) > 0);
+  AssertEquals('an ignored file is left out', 0, Pos('build.log', List));
+  AssertFalse('no repository', RepoFileList(FDir + '-none', List, Error));
+end;
+
+procedure TAiTest.TestFindListInput;
+var
+  Text: string;
+begin
+  Text := FindListInput('the parser', 'a.txt'#10'b.txt'#10);
+  AssertEquals(1, Pos('The question: the parser', Text));
+  AssertTrue(Pos('files:'#10'a.txt'#10'b.txt', Text) > 0);
 end;
 
 initialization
+
   RegisterTest(TAiTest);
 end.

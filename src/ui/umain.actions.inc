@@ -454,6 +454,9 @@ begin
     V.AgentModels[gaClaude] := App.Settings.ClaudeModel;
     V.AgentPaths[gaCopilot] := App.Settings.CopilotPath;
     V.AgentModels[gaCopilot] := App.Settings.CopilotModel;
+    V.AgentPaths[gaOpenAI] := App.Settings.OpenAIUrl;
+    V.AgentModels[gaOpenAI] := App.Settings.OpenAIModel;
+    V.ApiKey := App.Settings.OpenAIKey;
     Corner := EditorPanel.ClientToScreen(Point(EditorPanel.ClientWidth -
       Scale96ToForm(Margin), EditorPanel.ClientHeight - Scale96ToForm(Margin)));
     if EditSettings(F, V, @PreviewSettings, App.Lexers, Edit, Corner, APage) then
@@ -470,6 +473,10 @@ begin
       App.Settings.ClaudeModel := V.AgentModels[gaClaude];
       App.Settings.CopilotPath := V.AgentPaths[gaCopilot];
       App.Settings.CopilotModel := V.AgentModels[gaCopilot];
+      App.Settings.OpenAIUrl := V.AgentPaths[gaOpenAI];
+      App.Settings.OpenAIModel := V.AgentModels[gaOpenAI];
+      App.Settings.OpenAIKey := V.ApiKey;
+
       Tools := (V.GitPath <> App.Settings.GitPath) or
         (V.HostingEnabled <> App.Settings.HostingEnabled);
       for i := 0 to High(Forges) do
@@ -501,7 +508,8 @@ procedure TRepoFrame.SettingsChanged(AFont: TFont; ATheme, ATabSize: integer;
   ATools: boolean);
 begin
   PreviewSettings(AFont, ATheme, ATabSize);
-  FindAgentCli;
+  FindAI;
+
   if not AIAvailable then
   begin
     AbandonMessageJob;

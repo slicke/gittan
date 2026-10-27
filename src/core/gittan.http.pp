@@ -6,8 +6,9 @@ unit gittan.http;
   own; these take the system's certificates and proxy. The backends come
   from Trndi's (nsutils.web.urlrequest, winutils.httpclient, trndi.curl),
   cut down to one request that waits for its answer, which a job's thread
-  makes. Redirects are followed. Defining GITTAN_CURL builds the libcurl
-  one on macOS too, which is how it is tested there. No LCL. }
+  makes, and gives it up when the caller says to (TGittanHttpCancel).
+  Redirects are followed. Defining GITTAN_CURL builds the libcurl one on
+  macOS too, which is how it is tested there. No LCL. }
 
 {$mode objfpc}{$H+}
 {$IF DEFINED(DARWIN) AND NOT DEFINED(GITTAN_CURL)}
@@ -33,8 +34,16 @@ const
   {** What carries the requests in this build, for the About page. }
   HttpBackend = {$IF DEFINED(GITTAN_COCOA)}'NSURLSession'
     {$ELSEIF DEFINED(GITTAN_WINHTTP)}'WinHTTP'{$ELSE}'libcurl'{$ENDIF};
+  {** The error of a request given up (Status 0). }
+  HttpGivenUp = 'The request was given up.';
 
 type
+  {** Asked every quarter second while a request waits, when the caller
+    gives one: True gives the request up, which comes back with Status 0
+    and HttpGivenUp. }
+  TGittanHttpCancel = function: boolean of object;
+
+
   {** What a server answered: its status (200, 404) and its body, or
     Status 0 and why no answer came (no network, no libcurl, a timeout). }
   TGittanHttpResponse = record
@@ -45,13 +54,16 @@ type
 
 {** Sends a request and waits for the answer. AHeaders are lines of the
   form 'Name: value'; ABody, when not empty, is sent as it is (UTF-8 for
-  text). Any status counts as an answer: a 404 comes back with its body. }
+  text). Any status counts as an answer: a 404 comes back with its body.
+  ACancel, when given, is asked as the request waits and gives it up. }
 function HttpRequest(const AMethod, AUrl: string;
   const AHeaders: array of string; const ABody: string = '';
-  ATimeoutSeconds: integer = DefaultHttpTimeout): TGittanHttpResponse;
+  ATimeoutSeconds: integer = DefaultHttpTimeout;
+  ACancel: TGittanHttpCancel = nil): TGittanHttpResponse;
 
 function HttpGet(const AUrl: string; const AHeaders: array of string;
-  ATimeoutSeconds: integer = DefaultHttpTimeout): TGittanHttpResponse;
+  ATimeoutSeconds: integer = DefaultHttpTimeout;
+  ACancel: TGittanHttpCancel = nil): TGittanHttpResponse;
 
 {** Whether the server answered with a 2xx status. }
 function HttpOk(const AResponse: TGittanHttpResponse): boolean;
@@ -87,7 +99,9 @@ type
     Method, Url, Body: string;
     Headers: array of string;
     TimeoutSeconds: integer;
+    Cancel: TGittanHttpCancel;
   end;
+  PGittanHttpRequest = ^TGittanHttpRequest;
 
 function SplitHeader(const ALine: string; out AName, AValue: string): boolean;
 var
@@ -186,6 +200,12 @@ begin
         AOthers := Concat(AOthers, [Name + ': ' + Value]);
 end;
 
+{ Whether the caller gave the request up. }
+function GivenUp(const ARequest: TGittanHttpRequest): boolean;
+begin
+  Result := Assigned(ARequest.Cancel) and ARequest.Cancel();
+end;
+
 {$IF DEFINED(GITTAN_COCOA)}
 
 { Apple's frameworks expect the FPU's exceptions masked, as C code has
@@ -253,6 +273,7 @@ var
   Task: NSURLSessionDataTask;
   Others: TStringArray;
   Line, Name, Value: string;
+  Deadline: QWord;
 begin
   Mask := GetExceptionMask;
   SetExceptionMask(AppleFpuMask);
@@ -286,8 +307,12 @@ begin
     Task := Session.dataTaskWithRequest(Request);
     Task.resume;
     { The session's own timeout ends the task; the margin is for one that
-      hangs anyway. A cancelled task still reports, soon. }
-    RTLEventWaitFor(Delegate.Done, (ARequest.TimeoutSeconds + 5) * 1000);
+      hangs anyway. The wait is in steps, so a request given up is
+      cancelled at once. A cancelled task still reports, soon. }
+    Deadline := GetTickCount64 + QWord(ARequest.TimeoutSeconds + 5) * 1000;
+    while not Delegate.Completed and (GetTickCount64 < Deadline) and
+      not GivenUp(ARequest) do
+      RTLEventWaitFor(Delegate.Done, 250);
     if not Delegate.Completed then
     begin
       Task.cancel;
@@ -395,7 +420,7 @@ begin
   Result := Trim(UTF8Encode(Text));
 end;
 
-procedure Send(const ARequest: TGittanHttpRequest;
+procedure SendSync(const ARequest: TGittanHttpRequest;
   var AResponse: TGittanHttpResponse);
 var
   Secure: boolean;
@@ -519,6 +544,116 @@ begin
   end;
 end;
 
+type
+  { SendSync in a thread of its own, so a request can be given up while
+    a WinHTTP call still waits: WinHTTP's documentation rules out
+    closing the handle of a synchronous request from another thread. The
+    caller waits for Done in steps; one that gives up (Abandon) leaves
+    the thread to end on its own, by its timeouts at the latest, and to
+    free itself then. The lock keeps the two from doing both. }
+  TGittanWinHttpSender = class(TThread)
+  private
+    FRequest: TGittanHttpRequest;
+    FResponse: TGittanHttpResponse;
+    FLock: TRTLCriticalSection;
+    FEnded, FAbandoned: boolean;
+  protected
+    procedure Execute; override;
+  public
+    Done: PRTLEvent;
+    constructor Create(const ARequest: TGittanHttpRequest);
+    destructor Destroy; override;
+    { Whether the request has ended. }
+    function Ended: boolean;
+    { Leaves the thread to itself; True when the request had ended
+      already, so the caller takes its answer and frees the thread. }
+    function Abandon: boolean;
+    property Response: TGittanHttpResponse read FResponse;
+  end;
+
+constructor TGittanWinHttpSender.Create(const ARequest: TGittanHttpRequest);
+begin
+  inherited Create(True);
+  FRequest := ARequest;
+  FRequest.Cancel := nil;
+  FResponse := Default(TGittanHttpResponse);
+  InitCriticalSection(FLock);
+  Done := RTLEventCreate;
+end;
+
+destructor TGittanWinHttpSender.Destroy;
+begin
+  inherited Destroy;
+  RTLEventDestroy(Done);
+  DoneCriticalSection(FLock);
+end;
+
+procedure TGittanWinHttpSender.Execute;
+begin
+  try
+    SendSync(FRequest, FResponse);
+  except
+    on E: Exception do
+    begin
+      FResponse.Status := 0;
+      FResponse.Error := E.Message;
+    end;
+  end;
+  EnterCriticalSection(FLock);
+  try
+    FEnded := True;
+    FreeOnTerminate := FAbandoned;
+  finally
+    LeaveCriticalSection(FLock);
+  end;
+  RTLEventSetEvent(Done);
+end;
+
+function TGittanWinHttpSender.Ended: boolean;
+begin
+  EnterCriticalSection(FLock);
+  try
+    Result := FEnded;
+  finally
+    LeaveCriticalSection(FLock);
+  end;
+end;
+
+function TGittanWinHttpSender.Abandon: boolean;
+begin
+  EnterCriticalSection(FLock);
+  try
+    Result := FEnded;
+    FAbandoned := not FEnded;
+  finally
+    LeaveCriticalSection(FLock);
+  end;
+end;
+
+procedure Send(const ARequest: TGittanHttpRequest;
+  var AResponse: TGittanHttpResponse);
+var
+  Sender: TGittanWinHttpSender;
+begin
+  if not Assigned(ARequest.Cancel) then
+  begin
+    SendSync(ARequest, AResponse);
+    Exit;
+  end;
+  Sender := TGittanWinHttpSender.Create(ARequest);
+  Sender.Start;
+  while True do
+  begin
+    RTLEventWaitFor(Sender.Done, 250);
+    if Sender.Ended then
+      Break;
+    if GivenUp(ARequest) and not Sender.Abandon then
+      Exit;
+  end;
+  AResponse := Sender.Response;
+  Sender.Free;
+end;
+
 {$ELSE}
 
 { libcurl through dlopen: a Linux without it still starts and says so
@@ -538,12 +673,15 @@ const
   CURLOPT_USERAGENT = 10018;
   CURLOPT_HTTPHEADER = 10023;
   CURLOPT_CUSTOMREQUEST = 10036;
+  CURLOPT_NOPROGRESS = 43;
   CURLOPT_NOBODY = 44;
   CURLOPT_FOLLOWLOCATION = 52;
   CURLOPT_POSTFIELDSIZE = 60;
   CURLOPT_MAXREDIRS = 68;
   CURLOPT_NOSIGNAL = 99;
   CURLOPT_ACCEPT_ENCODING = 10102;
+  CURLOPT_XFERINFODATA = 10057;
+  CURLOPT_XFERINFOFUNCTION = 20219;
   CURLINFO_RESPONSE_CODE = $200002;
   CurlNames: array[0..2] of string = (
     {$IFDEF DARWIN}'libcurl.4.dylib', 'libcurl.dylib', ''
@@ -617,6 +755,14 @@ begin
   TMemoryStream(AData).WriteBuffer(ABuffer^, Result);
 end;
 
+{ Called at least once a second while the request runs, waiting for the
+  answer too; not 0 ends it (CURLE_ABORTED_BY_CALLBACK). }
+function CurlProgress(AData: Pointer; {%H-}ADownTotal, {%H-}ADown,
+  {%H-}AUpTotal, {%H-}AUp: cint64): cint; cdecl;
+begin
+  Result := Ord(GivenUp(PGittanHttpRequest(AData)^));
+end;
+
 procedure Send(const ARequest: TGittanHttpRequest;
   var AResponse: TGittanHttpResponse);
 var
@@ -664,6 +810,12 @@ begin
     curl_easy_setopt(Curl, CURLOPT_ACCEPT_ENCODING, PChar(''));
     curl_easy_setopt(Curl, CURLOPT_WRITEFUNCTION, @CurlWrite);
     curl_easy_setopt(Curl, CURLOPT_WRITEDATA, Pointer(Body));
+    if Assigned(ARequest.Cancel) then
+    begin
+      curl_easy_setopt(Curl, CURLOPT_XFERINFOFUNCTION, @CurlProgress);
+      curl_easy_setopt(Curl, CURLOPT_XFERINFODATA, Pointer(@ARequest));
+      curl_easy_setopt(Curl, CURLOPT_NOPROGRESS, clong(0));
+    end;
     if ARequest.Method = 'HEAD' then
       curl_easy_setopt(Curl, CURLOPT_NOBODY, clong(1))
     else if ARequest.Method <> 'GET' then
@@ -698,12 +850,14 @@ end;
 
 function HttpRequest(const AMethod, AUrl: string;
   const AHeaders: array of string; const ABody: string;
-  ATimeoutSeconds: integer): TGittanHttpResponse;
+  ATimeoutSeconds: integer; ACancel: TGittanHttpCancel): TGittanHttpResponse;
 var
   Request: TGittanHttpRequest;
   i: integer;
 begin
   Result := Default(TGittanHttpResponse);
+  Request := Default(TGittanHttpRequest);
+  Request.Cancel := ACancel;
   Request.Method := UpperCase(AMethod);
   Request.Url := AUrl;
   Request.Body := ABody;
@@ -725,15 +879,18 @@ begin
   if Result.Status = 0 then
   begin
     Result.Body := '';
-    if Result.Error = '' then
+    { Given up: whatever the backend said of the task it cancelled. }
+    if Assigned(ACancel) and ACancel() then
+      Result.Error := HttpGivenUp
+    else if Result.Error = '' then
       Result.Error := 'No answer from ' + AUrl;
   end;
 end;
 
 function HttpGet(const AUrl: string; const AHeaders: array of string;
-  ATimeoutSeconds: integer): TGittanHttpResponse;
+  ATimeoutSeconds: integer; ACancel: TGittanHttpCancel): TGittanHttpResponse;
 begin
-  Result := HttpRequest('GET', AUrl, AHeaders, '', ATimeoutSeconds);
+  Result := HttpRequest('GET', AUrl, AHeaders, '', ATimeoutSeconds, ACancel);
 end;
 
 function HttpOk(const AResponse: TGittanHttpResponse): boolean;

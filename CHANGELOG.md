@@ -25,6 +25,8 @@ What changes for you in each build of Gittan, newest first. Changes land under U
 ### Working with the agent
 
 - Ask the agent where something is: with the AI features on, the filter field over the tree has a sparkle. Click it or press Cmd+Enter (Ctrl+Enter) and Claude Code or Copilot answers with the files that hold what you typed, each with a line and why; pick one to open it there.
+- The AI features can use an OpenAI-compatible API instead of an agent's command line tool: pick OpenAI-compatible API on the settings' AI page and give the server (OpenAI's when empty; OpenRouter's or a local Ollama's otherwise), your API key and the model. The commit message, the review and asking where something is then go to that model, which sees the changes alone and cannot read your files; the hints and messages name the model. The key is kept in Gittan's settings file.
+
 
 ### Status bar
 

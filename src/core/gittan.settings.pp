@@ -10,7 +10,7 @@ unit gittan.settings;
 interface
 
 uses
-  Classes, SysUtils;
+  Classes, SysUtils, gittan.ai;
 
 const
   {** How many repositories File > Open Recent lists. }
@@ -129,12 +129,18 @@ type
       turns them on, since they send the changes to the agent's
       provider. }
     AIEnabled: boolean;
-    {** The agent they run, by its key (AgentOfKey): claude or copilot. }
+    {** The agent they run, by its key (AgentOfKey): claude, copilot
+      or openai. AgentSetup gives the fields below for one. }
     AIAgent: string;
     {** Each agent's command, as a path to it (empty runs the one
-      FindAgent finds), and the model it runs with (empty for its own
-      choice). }
+      TGittanAI.Find finds), and the model it runs with (empty for its
+      own choice). }
     ClaudePath, ClaudeModel, CopilotPath, CopilotModel: string;
+    {** The OpenAI-compatible API: its server's base URL (empty for
+      OpenAIDefaultUrl), the key sent as the bearer token (empty for
+      none, as a local server takes) and the model asked, which it
+      needs. The key is kept in the settings file as it is. }
+    OpenAIUrl, OpenAIKey, OpenAIModel: string;
     {** The day until which a newer Gittan is not pointed out, 0 for no
       such wait: Remind Me Later in the update dialog sets it. Kept as a
       date alone. }
@@ -148,7 +154,12 @@ type
       Name; gh for GitHub) as a path to it, kept in the forge's own
       section; empty runs the one found on ToolSearchPath, and when there
       is none the forge's features are off. }
+    {** AAgent's fields: its command's path or its server (APath), its
+      key (AKey, empty for a command) and its model (AModel), as the
+      settings hold them. }
+    procedure AgentSetup(AAgent: TGittanAgent; out APath, AKey, AModel: string);
     function ForgeCliPath(const AName: string): string;
+
     procedure SetForgeCliPath(const AName, AValue: string);
     {** AFileName names the ini file; empty picks gittan.ini in the
       user's configuration folder. }
@@ -282,7 +293,31 @@ begin
   inherited Destroy;
 end;
 
+procedure TGittanSettings.AgentSetup(AAgent: TGittanAgent; out APath, AKey, AModel: string);
+begin
+  AKey := '';
+  case AAgent of
+    gaCopilot:
+    begin
+      APath := CopilotPath;
+      AModel := CopilotModel;
+    end;
+    gaOpenAI:
+    begin
+      APath := OpenAIUrl;
+      AKey := OpenAIKey;
+      AModel := OpenAIModel;
+    end;
+    else
+    begin
+      APath := ClaudePath;
+      AModel := ClaudeModel;
+    end;
+  end;
+end;
+
 function TGittanSettings.ForgeCliPath(const AName: string): string;
+
 var
   i: integer;
 begin
@@ -381,6 +416,9 @@ begin
       ClaudeModel := Ini.ReadString(SecAI, 'ClaudeModel', '');
       CopilotPath := Ini.ReadString(SecAI, 'Copilot', '');
       CopilotModel := Ini.ReadString(SecAI, 'CopilotModel', '');
+      OpenAIUrl := Ini.ReadString(SecAI, 'OpenAIUrl', '');
+      OpenAIKey := Ini.ReadString(SecAI, 'OpenAIKey', '');
+      OpenAIModel := Ini.ReadString(SecAI, 'OpenAIModel', '');
       UpdateSnoozedUntil := ReadDay(Ini.ReadString(SecUpdate, 'SnoozedUntil', ''));
       Ini.ReadSectionValues(SecTrust, FTrust);
       FRecent.Clear;
@@ -475,6 +513,10 @@ begin
       Ini.WriteString(SecAI, 'ClaudeModel', KeepEdges(ClaudeModel));
       Ini.WriteString(SecAI, 'Copilot', KeepEdges(CopilotPath));
       Ini.WriteString(SecAI, 'CopilotModel', KeepEdges(CopilotModel));
+      Ini.WriteString(SecAI, 'OpenAIUrl', KeepEdges(OpenAIUrl));
+      Ini.WriteString(SecAI, 'OpenAIKey', KeepEdges(OpenAIKey));
+      Ini.WriteString(SecAI, 'OpenAIModel', KeepEdges(OpenAIModel));
+
       if UpdateSnoozedUntil > 0 then
         Ini.WriteString(SecUpdate, 'SnoozedUntil',
           FormatDateTime('yyyy"-"mm"-"dd', UpdateSnoozedUntil))

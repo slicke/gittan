@@ -6,7 +6,8 @@ unit testhttp;
   macOS too). The server answers one connection at a time: /echo with the
   method, the X-Test and User-Agent headers and the body, a line each;
   /missing with a 404; /moved with a redirect to /echo; /slow after
-  SlowMs, longer than the timeout the test gives. }
+  SlowMs, longer than the timeout the test gives, and before a request
+  given up comes back. }
 
 {$mode objfpc}{$H+}
 
@@ -34,6 +35,7 @@ type
   private
     FServer: TTestServer;
     function Url(const APath: string): string;
+    function GiveUp: boolean;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -47,6 +49,7 @@ type
     procedure TestRedirect;
     procedure TestRefused;
     procedure TestTimeout;
+    procedure TestGivenUp;
   end;
 
 implementation
@@ -353,6 +356,25 @@ begin
   AssertEquals(0, R.Status);
   AssertTrue('says why', R.Error <> '');
   AssertEquals('', R.Body);
+end;
+
+function THttpTest.GiveUp: boolean;
+begin
+  Result := True;
+end;
+
+procedure THttpTest.TestGivenUp;
+var
+  R: TGittanHttpResponse;
+  Started: QWord;
+begin
+  Started := GetTickCount64;
+  R := HttpGet(Url('/slow'), [], 10, @GiveUp);
+  AssertEquals(0, R.Status);
+  AssertEquals(HttpGivenUp, R.Error);
+  AssertEquals('', R.Body);
+  AssertTrue('at once, before the answer or the timeout',
+    GetTickCount64 - Started < SlowMs);
 end;
 
 initialization

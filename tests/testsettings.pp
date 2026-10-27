@@ -79,6 +79,9 @@ begin
     AssertEquals('', S.ClaudeModel);
     AssertEquals('', S.AIAgent);
     AssertEquals('', S.CopilotPath);
+    AssertEquals('', S.OpenAIUrl);
+    AssertEquals('', S.OpenAIKey);
+    AssertEquals('', S.OpenAIModel);
   finally
     S.Free;
   end;
@@ -128,6 +131,9 @@ begin
     S.AIAgent := 'copilot';
     S.CopilotPath := '/opt/homebrew/bin/copilot';
     S.CopilotModel := 'auto';
+    S.OpenAIUrl := 'https://openrouter.ai/api/v1';
+    S.OpenAIKey := 'sk-or-v1-abc';
+    S.OpenAIModel := 'openai/gpt-4o-mini';
     S.UpdateSnoozedUntil := EncodeDate(2026, 10, 29) + 0.5;
     S.AddRecent('/tmp/a');
     S.AddRecent('/tmp/b');
@@ -178,7 +184,11 @@ begin
     AssertEquals('copilot', S.AIAgent);
     AssertEquals('/opt/homebrew/bin/copilot', S.CopilotPath);
     AssertEquals('auto', S.CopilotModel);
+    AssertEquals('https://openrouter.ai/api/v1', S.OpenAIUrl);
+    AssertEquals('sk-or-v1-abc', S.OpenAIKey);
+    AssertEquals('openai/gpt-4o-mini', S.OpenAIModel);
     AssertEquals('the day, without the time', EncodeDate(2026, 10, 29),
+
       S.UpdateSnoozedUntil, 0);
     AssertEquals(2, S.Recent.Count);
     AssertEquals('newest first', '/tmp/b', S.Recent[0]);

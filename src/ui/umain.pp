@@ -239,12 +239,11 @@ type
     FForgeCaptions: array of string;
     { The AI features (umain.ai.inc, gittan.ai), shown only once the
       settings turn them on and the agent's command is found: the agent
-      the settings pick, its command and model, File > Write Commit
+      the settings pick as it is set up (FindAI), File > Write Commit
       Message (the Commit header's AI does the same), the job writing
       it, and the field's text when it started, which the message
       replaces only while it is unchanged. }
-    FAgent: TGittanAgent;
-    FAgentCli, FAgentModel: string;
+    FAI: TGittanAI;
     FMessageItem: TMenuItem;
     FMessageJob: TGittanMessageJob;
     FMessageFrom: string;
@@ -1340,9 +1339,13 @@ type
     procedure ReFindForge;
     function ForgeName: string;
     procedure UpdateForgeItems;
-    procedure FindAgentCli;
-    {** Whether the AI features are on and the agent's command is there. }
+    procedure FindAI;
+    {** Whether the AI features are on and the agent can be asked
+      (TGittanAI.Available). }
     function AIAvailable: boolean;
+    {** The agent's name for the hints and messages (TGittanAI.Title). }
+    function AgentName: string;
+
     {** Shows AI in the Commit header and File > Write Commit Message
       when AIAvailable, enabled as the commit section allows; from
       UpdateCommitState. }
@@ -3030,7 +3033,7 @@ procedure TRepoFrame.Init(AWindow: TRepoWindow);
 begin
   FWindow := AWindow;
   FTitleBarHeight := FWindow.TitleBarHeight;
-  FindAgentCli;
+  FindAI;
   FTabSize := App.Settings.TabSize;
   if FTabSize <= 0 then
     FTabSize := DefaultTabSize;
@@ -3552,8 +3555,10 @@ begin
   AbandonMessageJob;
   AbandonAIReview;
   AbandonFindJob;
+  FreeAndNil(FAI);
   StopCommitJob(True);
   FreeAndNil(FDroppedCommits);
+
   StopRemoteJob(True);
   Application.RemoveOnActivateHandler(@AppActivate);
   Application.RemoveOnDeactivateHandler(@AppDeactivate);
