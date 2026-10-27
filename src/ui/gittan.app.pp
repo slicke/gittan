@@ -69,8 +69,8 @@ type
     procedure SnoozeUpdate;
     {** The path of the tool of AForge (ForgeClass when nil; gh), as the
       settings give it: its ForgeCliPath when set, else the one on the
-      search path; '' while its features are off or its tool is not
-      found, and for no forge. Whoever needs the forge makes one of it and keeps it while
+      search path; '' while the hosting features are off or its tool is
+      not found, and for no forge. Whoever needs the forge makes one of it and keeps it while
       the path stays the same. }
     function ForgeCli(AForge: TGittanForgeClass = nil): string;
     property Settings: TGittanSettings read FSettings;
@@ -211,7 +211,7 @@ function TGittanApp.ForgeCli(AForge: TGittanForgeClass): string;
 begin
   if AForge = nil then
     AForge := ForgeClass;
-  if (AForge = nil) or not FSettings.ForgeEnabled(AForge.Name) then
+  if (AForge = nil) or not FSettings.HostingEnabled then
     Result := ''
   else if FSettings.ForgeCliPath(AForge.Name) <> '' then
     Result := FSettings.ForgeCliPath(AForge.Name)

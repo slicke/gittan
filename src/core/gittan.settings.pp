@@ -44,8 +44,8 @@ type
     FRecent: TStringList;
     FTabs: TStringList;
     FTrust: TStringList;
-    { Each forge's switch and tool, by its name. }
-    FForgeOff, FForgeClis: TStringList;
+    { Each forge's tool, by its name. }
+    FForgeClis: TStringList;
     FFileName: string;
   public
     {** The tab shown when the window closed, an index into Tabs. }
@@ -139,19 +139,19 @@ type
       such wait: Remind Me Later in the update dialog sets it. Kept as a
       date alone. }
     UpdateSnoozedUntil: TDateTime;
-    {** AFileName names the ini file; empty picks gittan.ini in the
-      user's configuration folder. }
-    {** Whether the features of the forge named AName (gittan.forge's
-      Name: pull requests, the forge view, review comments) are on; on
-      unless the user turns them off. Kept in the forge's own section,
-      for every registered forge. }
-    function ForgeEnabled(const AName: string): boolean;
-    procedure SetForgeEnabled(const AName: string; AValue: boolean);
-    {** The forge's command line tool (gh for GitHub) as a path to it;
-      empty runs the one found on ToolSearchPath, and when there is none
-      the forge's features are off. }
+    {** Whether the hosting features are on (pull requests, the forge
+      view, review comments), for every forge at once: a forge acts only
+      on a repository with a remote on it. On unless the user turns them
+      off. }
+    HostingEnabled: boolean;
+    {** The command line tool of the forge named AName (gittan.forge's
+      Name; gh for GitHub) as a path to it, kept in the forge's own
+      section; empty runs the one found on ToolSearchPath, and when there
+      is none the forge's features are off. }
     function ForgeCliPath(const AName: string): string;
     procedure SetForgeCliPath(const AName, AValue: string);
+    {** AFileName names the ini file; empty picks gittan.ini in the
+      user's configuration folder. }
     constructor Create(const AFileName: string = '');
     destructor Destroy; override;
     {** Reads the file; missing keys keep their defaults. }
@@ -196,6 +196,7 @@ const
   SecAI = 'AI';
   { A section per forge, the service that hosts the repositories. }
   SecGitHub = 'GitHub';
+  SecHosting = 'Hosting';
   ConfigFolder = 'Gittan';
 
 {** The folder the ini file lives in. GetAppConfigDir names it after
@@ -257,8 +258,6 @@ begin
   FRecent.CaseSensitive := True;
   FTabs := TStringList.Create;
   FTrust := TStringList.Create;
-  FForgeOff := TStringList.Create;
-  FForgeOff.CaseSensitive := False;
   FForgeClis := TStringList.Create;
   FForgeClis.CaseSensitive := False;
   if AFileName <> '' then
@@ -271,32 +270,16 @@ begin
   AutoFetchMinutes := DefaultAutoFetchMinutes;
   CommitOpen := True;
   Translations := True;
+  HostingEnabled := True;
 end;
 
 destructor TGittanSettings.Destroy;
 begin
   FForgeClis.Free;
-  FForgeOff.Free;
   FTrust.Free;
   FRecent.Free;
   FTabs.Free;
   inherited Destroy;
-end;
-
-function TGittanSettings.ForgeEnabled(const AName: string): boolean;
-begin
-  Result := FForgeOff.IndexOf(AName) < 0;
-end;
-
-procedure TGittanSettings.SetForgeEnabled(const AName: string; AValue: boolean);
-var
-  i: integer;
-begin
-  i := FForgeOff.IndexOf(AName);
-  if AValue and (i >= 0) then
-    FForgeOff.Delete(i)
-  else if not AValue and (i < 0) then
-    FForgeOff.Add(AName);
 end;
 
 function TGittanSettings.ForgeCliPath(const AName: string): string;
@@ -371,13 +354,17 @@ begin
       AutoFetch := Ini.ReadBool(SecTools, 'AutoFetch', True);
       AutoFetchMinutes := EnsureRange(Ini.ReadInteger(SecTools, 'AutoFetchMinutes',
         DefaultAutoFetchMinutes), MinAutoFetchMinutes, MaxAutoFetchMinutes);
-      { Every forge registered, in its own section; earlier versions
-        kept gh's path with git's, under its tool's name. }
-      FForgeOff.Clear;
+      { One switch for every forge; earlier versions had one per forge,
+        GitHub's, and any of them off turned it off. Each forge's tool in
+        its own section; earlier versions kept gh's path with git's,
+        under its tool's name. }
+      HostingEnabled := True;
+      for Forge in RegisteredForges do
+        HostingEnabled := HostingEnabled and Ini.ReadBool(Forge.Name, 'Enabled', True);
+      HostingEnabled := Ini.ReadBool(SecHosting, 'Enabled', HostingEnabled);
       FForgeClis.Clear;
       for Forge in RegisteredForges do
       begin
-        SetForgeEnabled(Forge.Name, Ini.ReadBool(Forge.Name, 'Enabled', True));
         SetForgeCliPath(Forge.Name, Ini.ReadString(Forge.Name, 'Cli',
           Ini.ReadString(SecTools, Forge.CliName, '')));
       end;
@@ -468,10 +455,11 @@ begin
       Ini.WriteString(SecTools, 'Git', KeepEdges(GitPath));
       Ini.WriteBool(SecTools, 'AutoFetch', AutoFetch);
       Ini.WriteInteger(SecTools, 'AutoFetchMinutes', AutoFetchMinutes);
+      Ini.WriteBool(SecHosting, 'Enabled', HostingEnabled);
       for Forge in RegisteredForges do
       begin
         Ini.DeleteKey(SecTools, Forge.CliName);
-        Ini.WriteBool(Forge.Name, 'Enabled', ForgeEnabled(Forge.Name));
+        Ini.DeleteKey(Forge.Name, 'Enabled');
         Ini.WriteString(Forge.Name, 'Cli', KeepEdges(ForgeCliPath(Forge.Name)));
       end;
       Ini.WriteBool(SecGitHub, 'HideWithoutFeedback', HideWithoutFeedback);

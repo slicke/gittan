@@ -13,7 +13,7 @@ Read this before adding a service that hosts repositories (GitLab, Bitbucket, Gi
     RegisterForge(TGittanGitLabForge);
   ```
 
-  From then on everything else follows: a repository whose remote is on the forge gets it (`ForgeClassFor` asks `HostsRemote`), the settings keep a section named after it, the settings dialog's Hosting page has a block for it, and About lists its tool's version. No unit in `src/ui` needs to change.
+  From then on everything else follows: a repository whose remote is on the forge gets it (`ForgeClassFor` asks `HostsRemote`), the settings keep its tool's path in a section named after it, the settings dialog's Hosting page has a block for it (its name and its tool's field, under the one switch for every forge), and About lists its tool's version. No unit in `src/ui` needs to change.
 
 ## The class
 

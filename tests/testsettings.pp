@@ -8,7 +8,7 @@ unit testsettings;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.settings,
+  Classes, SysUtils, IniFiles, fpcunit, testregistry, gittan.settings,
   { GitHub registers itself, so the settings keep its section. }
   gittan.github;
 
@@ -30,6 +30,7 @@ type
     procedure TestDefaultFontSize;
     procedure TestTrust;
     procedure TestOldGhPath;
+    procedure TestOldForgeSwitch;
   end;
 
 implementation
@@ -64,7 +65,7 @@ begin
     AssertEquals('no tab width picked', 0, S.TabSize);
     AssertEquals('', S.GitPath);
     AssertEquals('', S.ForgeCliPath('GitHub'));
-    AssertTrue('the GitHub features start on', S.ForgeEnabled('GitHub'));
+    AssertTrue('the hosting features start on', S.HostingEnabled);
     AssertTrue('the background fetch starts on', S.AutoFetch);
     AssertEquals(DefaultAutoFetchMinutes, S.AutoFetchMinutes);
     AssertFalse(S.HideWithoutFeedback);
@@ -113,7 +114,7 @@ begin
     S.TabSize := 4;
     S.GitPath := '/opt/homebrew/bin/git';
     S.SetForgeCliPath('GitHub', 'C:\Program Files\GitHub CLI\gh.exe');
-    S.SetForgeEnabled('GitHub', False);
+    S.HostingEnabled := False;
     S.AutoFetch := False;
     S.AutoFetchMinutes := 30;
     S.HideWithoutFeedback := True;
@@ -161,7 +162,7 @@ begin
     AssertEquals(4, S.TabSize);
     AssertEquals('/opt/homebrew/bin/git', S.GitPath);
     AssertEquals('C:\Program Files\GitHub CLI\gh.exe', S.ForgeCliPath('GitHub'));
-    AssertFalse(S.ForgeEnabled('GitHub'));
+    AssertFalse(S.HostingEnabled);
     AssertFalse(S.AutoFetch);
     AssertEquals(30, S.AutoFetchMinutes);
     AssertTrue(S.HideWithoutFeedback);
@@ -368,6 +369,41 @@ end;
 
 { gh's path was kept in Tools with git's; it is read from there and
   moved to the GitHub section. }
+{ The GitHub features had a switch of their own; off, it turns the
+  hosting features off, and moves to the Hosting section. }
+procedure TSettingsTest.TestOldForgeSwitch;
+var
+  S: TGittanSettings;
+  Ini: TStringList;
+  Cfg: TIniFile;
+begin
+  Ini := TStringList.Create;
+  try
+    Ini.Add('[GitHub]');
+    Ini.Add('Enabled=0');
+    Ini.Add('Cli=/opt/gh/bin/gh');
+    Ini.SaveToFile(FFileName);
+    S := TGittanSettings.Create(FFileName);
+    try
+      S.Load;
+      AssertFalse(S.HostingEnabled);
+      AssertEquals('/opt/gh/bin/gh', S.ForgeCliPath('GitHub'));
+      S.Save;
+    finally
+      S.Free;
+    end;
+    Cfg := TIniFile.Create(FFileName);
+    try
+      AssertFalse('the switch is under Hosting', Cfg.ReadBool('Hosting', 'Enabled', True));
+      AssertEquals('the old switch is gone', 'none', Cfg.ReadString('GitHub', 'Enabled', 'none'));
+    finally
+      Cfg.Free;
+    end;
+  finally
+    Ini.Free;
+  end;
+end;
+
 procedure TSettingsTest.TestOldGhPath;
 var
   S: TGittanSettings;
@@ -382,7 +418,7 @@ begin
     try
       S.Load;
       AssertEquals('/opt/gh/bin/gh', S.ForgeCliPath('GitHub'));
-      AssertTrue(S.ForgeEnabled('GitHub'));
+      AssertTrue(S.HostingEnabled);
       S.Save;
     finally
       S.Free;

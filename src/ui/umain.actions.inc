@@ -444,12 +444,9 @@ begin
     V.AutoFetchMinutes := App.Settings.AutoFetchMinutes;
     Forges := RegisteredForges;
     SetLength(V.ForgePaths, Length(Forges));
-    SetLength(V.ForgeOn, Length(Forges));
     for i := 0 to High(Forges) do
-    begin
       V.ForgePaths[i] := App.Settings.ForgeCliPath(Forges[i].Name);
-      V.ForgeOn[i] := App.Settings.ForgeEnabled(Forges[i].Name);
-    end;
+    V.HostingEnabled := App.Settings.HostingEnabled;
     V.CloneSiblings := App.Settings.CloneSiblings;
     V.AIEnabled := App.Settings.AIEnabled;
     V.Agent := AgentOfKey(App.Settings.AIAgent);
@@ -473,18 +470,16 @@ begin
       App.Settings.ClaudeModel := V.AgentModels[gaClaude];
       App.Settings.CopilotPath := V.AgentPaths[gaCopilot];
       App.Settings.CopilotModel := V.AgentModels[gaCopilot];
-      Tools := V.GitPath <> App.Settings.GitPath;
+      Tools := (V.GitPath <> App.Settings.GitPath) or
+        (V.HostingEnabled <> App.Settings.HostingEnabled);
       for i := 0 to High(Forges) do
-        Tools := Tools or (V.ForgePaths[i] <> App.Settings.ForgeCliPath(Forges[i].Name)) or
-          (V.ForgeOn[i] <> App.Settings.ForgeEnabled(Forges[i].Name));
+        Tools := Tools or (V.ForgePaths[i] <> App.Settings.ForgeCliPath(Forges[i].Name));
       if Tools then
       begin
         App.Settings.GitPath := V.GitPath;
+        App.Settings.HostingEnabled := V.HostingEnabled;
         for i := 0 to High(Forges) do
-        begin
           App.Settings.SetForgeCliPath(Forges[i].Name, V.ForgePaths[i]);
-          App.Settings.SetForgeEnabled(Forges[i].Name, V.ForgeOn[i]);
-        end;
         SetGitExe(App.Settings.GitPath);
       end;
       { Then every tab, this one with them. }

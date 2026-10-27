@@ -46,10 +46,10 @@ type
     EditorCommand, TerminalCommand: string;
     {** The path of git; empty for the one found on PATH. }
     GitPath: string;
+    {** Whether the hosting features are on, for every forge at once. }
+    HostingEnabled: boolean;
     {** Each registered forge's (gittan.forge's RegisteredForges, in
-      their order): whether its features are on, and the path of its
-      tool, empty for the one found on PATH. }
-    ForgeOn: array of boolean;
+      their order) tool's path, empty for the one found on PATH. }
     ForgePaths: TStringArray;
     {** Whether the open repository is fetched in the background, and
       how many minutes apart. }
@@ -137,12 +137,12 @@ resourcestring
   rsToolFound = 'Found: %s';
   rsToolNotFound = 'Not found on PATH.';
   rsForgeNotFound = 'Not found on PATH; the %s features are off.';
-  rsForgeEnabled = 'Turn on the %s features';
-  rsForgeNote = 'Pull requests, their checks and review comments, and the ' +
-    '%0:s page. They run %1:s with its own login, for a repository with a ' +
-    'remote on %0:s.';
+  rsHostingEnabled = 'Turn on the hosting features';
+  rsHostingNote = 'Pull requests, their checks and review comments, and the page ' +
+    'of your pull requests, for a repository with a remote on one of the services ' +
+    'below. They run the service''s command line tool with its own login.';
   rsCloneSiblings = 'Look for clones beside the recent repositories';
-  rsCloneSiblingsNote = 'A pull request on the %s page links to a clone of its ' +
+  rsCloneSiblingsNote = 'A pull request on the page of your pull requests links to a clone of its ' +
     'repository among the recent ones. With this on, the repositories in the folders ' +
     'they are in count too.';
   rsToolTyped = 'Run in place of the one on PATH.';
@@ -163,7 +163,7 @@ resourcestring
   rsVersionGittanLocal = 'Gittan, a local build of %s';
   rsVersionNotFound = '%s not found';
   rsVersionAIOff = 'The AI features are off';
-  rsVersionForgeOff = 'The %s features are off';
+  rsVersionHostingOff = 'The hosting features are off';
   rsVersionLibraries = 'Free Pascal %s, LCL %s';
   rsCopyVersions = 'Co&py';
   rsWebsite = 'gittan.app';
@@ -300,10 +300,10 @@ type
     FEditorEdit, FTerminalEdit, FGitEdit, FAgentEdit, FModelEdit: TEdit;
     FGitNote, FAgentLabel, FAgentNote, FModelNote: TLabel;
     FAIBox, FSiblingsBox, FAutoFetchBox: TCheckBox;
-    { The Hosting page's block of each registered forge (FForges, in
-      their order): its switch, its tool's field and the note under it. }
+    { The Hosting page's switch, and the block of each registered forge
+      (FForges, in their order): its tool's field and the note under it. }
+    FHostingBox: TCheckBox;
     FForges: TGittanForgeClasses;
-    FForgeBoxes: array of TCheckBox;
     FForgeEdits: array of TEdit;
     FForgeNotes: array of TLabel;
     { The agent picked, and each agent's command and model as edited:
@@ -376,7 +376,7 @@ type
     procedure ThemeChange(Sender: TObject);
     procedure ToolChange(Sender: TObject);
     procedure AIChange(Sender: TObject);
-    procedure ForgeChange(Sender: TObject);
+    procedure HostingChange(Sender: TObject);
     procedure AutoFetchChange(Sender: TObject);
     procedure AgentChange(Sender: TObject);
     procedure ShowAgent;
@@ -597,34 +597,27 @@ begin
     too. }
   FBox := FHostingPage;
   FForges := RegisteredForges;
-  SetLength(FForgeBoxes, Length(FForges));
+  FHostingBox := TCheckBox.Create(Self);
+  FHostingBox.Caption := rsHostingEnabled;
+  FHostingBox.OnChange := @HostingChange;
+  Place(FHostingBox, 0);
+  Lbl := AddLabel(rsHostingNote, 4);
+  Lbl.Font.Color := clGrayText;
+  Lbl.WordWrap := True;
   SetLength(FForgeEdits, Length(FForges));
   SetLength(FForgeNotes, Length(FForges));
   for i := 0 to High(FForges) do
   begin
-    if i = 0 then
-      AddLabel(FForges[i].Name, 0).Font.Style := [fsBold]
-    else
-      AddLabel(FForges[i].Name, 24).Font.Style := [fsBold];
-    FForgeBoxes[i] := TCheckBox.Create(Self);
-    FForgeBoxes[i].Caption := Format(rsForgeEnabled, [FForges[i].Name]);
-    FForgeBoxes[i].OnChange := @ForgeChange;
-    Place(FForgeBoxes[i], 8);
-    Lbl := AddLabel(Format(rsForgeNote, [FForges[i].Name, FForges[i].CliName]), 4);
-    Lbl.Font.Color := clGrayText;
-    Lbl.WordWrap := True;
+    AddLabel(FForges[i].Name, 20).Font.Style := [fsBold];
     FForgeEdits[i] := AddTool(Format(rsForgeTool, [FForges[i].CliName, FForges[i].Name]),
       Format(rsForgeToolDefault, [FForges[i].CliName]), FForgeNotes[i]);
-    if i = 0 then
-    begin
-      FSiblingsBox := TCheckBox.Create(Self);
-      FSiblingsBox.Caption := rsCloneSiblings;
-      Place(FSiblingsBox, 16);
-      Lbl := AddLabel(Format(rsCloneSiblingsNote, [FForges[i].Name]), 4);
-      Lbl.Font.Color := clGrayText;
-      Lbl.WordWrap := True;
-    end;
   end;
+  FSiblingsBox := TCheckBox.Create(Self);
+  FSiblingsBox.Caption := rsCloneSiblings;
+  Place(FSiblingsBox, 20);
+  Lbl := AddLabel(rsCloneSiblingsNote, 4);
+  Lbl.Font.Color := clGrayText;
+  Lbl.WordWrap := True;
 
   { The AI page: the switch and what it means, then the agent, its
     command and its model, which follow the switch; the labels name the
@@ -1122,17 +1115,16 @@ begin
   FAutoFetchEdit.Enabled := FAutoFetchBox.Checked;
 end;
 
-{ A forge's tool matters only with its features on; the clones' switch
-  with the first forge's, whose is the forge view. }
-procedure TSettingsForm.ForgeChange(Sender: TObject);
+{ The tools and the clones' switch matter only with the hosting
+  features on. }
+procedure TSettingsForm.HostingChange(Sender: TObject);
 var
   i: integer;
 begin
   FVersionsRead := False;
   for i := 0 to High(FForges) do
-    FForgeEdits[i].Enabled := FForgeBoxes[i].Checked;
-  if Length(FForges) > 0 then
-    FSiblingsBox.Enabled := FForgeBoxes[0].Checked;
+    FForgeEdits[i].Enabled := FHostingBox.Checked;
+  FSiblingsBox.Enabled := FHostingBox.Checked;
 end;
 
 { What was typed for the agent left is kept, and the fields show the
@@ -1332,8 +1324,7 @@ type
     { Each registered forge's tool and whether it is on. }
     Forges: TGittanForgeClasses;
     ForgeExes: TStringArray;
-    ForgeOn: array of boolean;
-    AIOn: boolean;
+    HostingOn, AIOn: boolean;
     Text: string;
   end;
 
@@ -1354,20 +1345,21 @@ begin
       Lines.Add('git ' + Version)
     else
       Lines.Add(Format(rsVersionNotFound, ['git']));
-    for i := 0 to High(Forges) do
-    begin
-      Forge := Forges[i].Create(ForgeExes[i]);
-      try
-        if not ForgeOn[i] then
-          Lines.Add(Format(rsVersionForgeOff, [Forge.Name]))
-        else if Forge.Version(Version) then
-          Lines.Add(Forge.CliName + ' ' + Version)
-        else
-          Lines.Add(Format(rsVersionNotFound, [Forge.CliName]));
-      finally
-        Forge.Free;
+    if not HostingOn then
+      Lines.Add(rsVersionHostingOff)
+    else
+      for i := 0 to High(Forges) do
+      begin
+        Forge := Forges[i].Create(ForgeExes[i]);
+        try
+          if Forge.Version(Version) then
+            Lines.Add(Forge.CliName + ' ' + Version)
+          else
+            Lines.Add(Format(rsVersionNotFound, [Forge.CliName]));
+        finally
+          Forge.Free;
+        end;
       end;
-    end;
     if not AIOn then
       Lines.Add(rsVersionAIOff)
     else if (AgentExe <> '') and RunAgentCli(AgentExe, GetUserDir, ['--version'], '', nil,
@@ -1408,14 +1400,13 @@ begin
     Job.GitExe := FindTool('git');
   Job.Forges := Copy(FForges);
   SetLength(Job.ForgeExes, Length(FForges));
-  SetLength(Job.ForgeOn, Length(FForges));
   for i := 0 to High(FForges) do
   begin
     Job.ForgeExes[i] := Trim(FForgeEdits[i].Text);
     if Job.ForgeExes[i] = '' then
       Job.ForgeExes[i] := FindTool(FForges[i].CliName);
-    Job.ForgeOn[i] := FForgeBoxes[i].Checked;
   end;
+  Job.HostingOn := FHostingBox.Checked;
   Job.AIOn := FAIBox.Checked;
   if Job.AIOn then
     Job.AgentExe := FindAgent(FAgent, Trim(FAgentEdit.Text));
@@ -1489,11 +1480,10 @@ begin
       if i <= High(AValues.ForgePaths) then
         F.FForgeEdits[i].Text := AValues.ForgePaths[i];
       F.ToolChange(F.FForgeEdits[i]);
-      F.FForgeBoxes[i].Checked := (i > High(AValues.ForgeOn)) or AValues.ForgeOn[i];
     end;
-    if F.FSiblingsBox <> nil then
-      F.FSiblingsBox.Checked := AValues.CloneSiblings;
-    F.ForgeChange(nil);
+    F.FHostingBox.Checked := AValues.HostingEnabled;
+    F.FSiblingsBox.Checked := AValues.CloneSiblings;
+    F.HostingChange(nil);
     F.FAIBox.Checked := AValues.AIEnabled;
     F.FAgent := AValues.Agent;
     F.FAgentPaths := AValues.AgentPaths;
@@ -1520,14 +1510,10 @@ begin
       AValues.AutoFetch := F.FAutoFetchBox.Checked;
       AValues.AutoFetchMinutes := F.FAutoFetchEdit.Value;
       SetLength(AValues.ForgePaths, Length(F.FForges));
-      SetLength(AValues.ForgeOn, Length(F.FForges));
       for i := 0 to High(F.FForges) do
-      begin
         AValues.ForgePaths[i] := Trim(F.FForgeEdits[i].Text);
-        AValues.ForgeOn[i] := F.FForgeBoxes[i].Checked;
-      end;
-      if F.FSiblingsBox <> nil then
-        AValues.CloneSiblings := F.FSiblingsBox.Checked;
+      AValues.HostingEnabled := F.FHostingBox.Checked;
+      AValues.CloneSiblings := F.FSiblingsBox.Checked;
       AValues.AIEnabled := F.FAIBox.Checked;
       { The fields hold the picked agent's; the other's are as kept. }
       F.AgentChange(nil);
