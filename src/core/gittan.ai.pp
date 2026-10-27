@@ -168,7 +168,8 @@ function AgentOfKey(const AKey: string): TGittanAgent;
 {** The prompt for ATask, for an agent that reads the repository's files
   itself (AReadsFiles: it is told it may, where that helps) or one that
   sees what it is sent alone (told it cannot, and for where something
-  is to judge by the file list it is given). }
+  is to judge by the file list it is given); atLocate is such a
+  model's alone, whatever AReadsFiles says. }
 function TaskPrompt(ATask: TGittanAITask; AReadsFiles: boolean): string;
 
 {** What a commit of APaths in the work tree of the repository at ARoot
@@ -223,9 +224,10 @@ function FindListInput(const AQuestion, AFiles: string): string;
 {** What such a model gets for the lines, once it named AFiles
   (ParseFoundFiles of its first answer): AQuestion, then each file of
   AFiles that is in the work tree at ARoot (none out of it) with its
-  lines numbered ("12: text"), cut at its share of MessageDiffKeep with
-  a line that says so, the share split among the files that are there
-  and only that much of a file read; a binary file (one with a NUL in
+  lines numbered ("12: text"), cut at its share of MessageDiffKeep (at
+  a line end, or mid-line when the share holds none) with a line that
+  says so, the share split among the files that are there and only
+  that much of a file read; a binary file (one with a NUL in
   what is read) is named without its text. Empty when none of them is
   there. }
 function FindLinesInput(const ARoot, AQuestion: string;
@@ -410,12 +412,10 @@ const
 
   { The lines, once a model that cannot search has named the files from
     their paths: their text, numbered, which it reads as a tool would
-    have. }
+    have. A tool never gets this round, so there is no read note. }
   LocatePromptStart = 'Find the lines where the thing asked about below is: the ' +
     'question is followed by the files that may hold it, each with its lines ' +
-    'numbered. ';
-  LocateReadNote = 'You may read the repository''s files for more. ';
-  LocateSentNote = 'Judge by the text given alone. ';
+    'numbered. Judge by the text given alone. ';
   LocatePromptEnd = 'Answer with a JSON array alone, no code fences, the best match ' +
     'first, one entry for a file at most and none for a file that does not hold ' +
     'it, each {"path": the file as given, "line": the number of the line where ' +
@@ -462,11 +462,8 @@ begin
         Result := FindPromptStart + FindReadNote + FindPromptEnd
       else
         Result := FindPromptStart + FindSentNote + FindPromptEnd;
-    else
-      if AReadsFiles then
-        Result := LocatePromptStart + LocateReadNote + LocatePromptEnd
-      else
-        Result := LocatePromptStart + LocateSentNote + LocatePromptEnd;
+    else { atLocate }
+      Result := LocatePromptStart + LocatePromptEnd;
   end;
 end;
 
@@ -607,6 +604,17 @@ begin
   end;
 end;
 
+{ Where AText, a file's share, is cut: at its last line end, or at its
+  end when it holds none (one long line), so something is kept. }
+function CutAt(const AText: string): integer;
+begin
+  Result := Length(AText);
+  while (Result > 0) and (AText[Result] <> #10) do
+    Dec(Result);
+  if Result = 0 then
+    Result := Length(AText);
+end;
+
 { Whether APath, as the model gave it, stays in the repository: not
   absolute, no .. in it. }
 function InsideRepo(const APath: string): boolean;
@@ -619,7 +627,7 @@ function FindLinesInput(const ARoot, AQuestion: string;
   const AFiles: TGittanFoundFiles): string;
 var
   Names: array of string;
-  Count, Share, Cut, i: integer;
+  Count, Share, i: integer;
   Whole: int64;
   Text: string;
   Stream: TFileStream;
@@ -666,14 +674,9 @@ begin
       Result := Result + '[A binary file; its text is not shown.]' + LineEnding
     else
     begin
-      { Cut at a line end before it is numbered. }
+      { Cut at a line end (CutAt) before it is numbered. }
       if Whole > Share then
-      begin
-        Cut := Length(Text);
-        while (Cut > 0) and (Text[Cut] <> #10) do
-          Dec(Cut);
-        SetLength(Text, Cut);
-      end;
+        SetLength(Text, CutAt(Text));
       Result := Result + NumberLines(Text);
       if Whole > Share then
         Result := Result + Format('[The file is cut here: %d of its %d bytes are ' +

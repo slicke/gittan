@@ -31,7 +31,8 @@ const
     search or a read. }
   FindMaxTurns = 20;
   {** The most turns claude may take for each task; the second round of
-    a find is never a tool's, and gets the find's. }
+    a find (atLocate) is never a tool's, and has the find's for the
+    array's sake. }
   TaskTurns: array[TGittanAITask] of integer = (MessageMaxTurns, ReviewMaxTurns,
     FindMaxTurns, FindMaxTurns);
 
