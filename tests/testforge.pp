@@ -27,6 +27,7 @@ type
     procedure TestSiblingRepositories;
     procedure TestPullRequestOf;
     procedure TestRemoteHost;
+    procedure TestRemoteRepoPath;
     procedure TestForgeFor;
     procedure TestSshAlias;
   end;
@@ -398,6 +399,17 @@ begin
   AssertEquals(EncodeDateTime(2026, 10, 20, 12, 34, 56, 0), Pull.Created);
   AssertEquals(0, Pull.ChecksPending);
   AssertEquals('', Pull.Labels);
+end;
+
+procedure TForgeTest.TestRemoteRepoPath;
+begin
+  AssertEquals('slicke/gittan', RemoteRepoPath('https://github.com/slicke/gittan.git'));
+  AssertEquals('slicke/gittan', RemoteRepoPath('https://user:token@github.com/slicke/gittan/'));
+  AssertEquals('slicke/gittan', RemoteRepoPath('git@github.com:slicke/gittan.git'));
+  AssertEquals('slicke/gittan', RemoteRepoPath('ssh://git@github.com:22/slicke/gittan.git'));
+  AssertEquals('group/sub/repo', RemoteRepoPath('gitlab.example.org:group/sub/repo.git'));
+  AssertEquals('', RemoteRepoPath('/Volumes/Projects/git/trailhead.git'));
+  AssertEquals('', RemoteRepoPath('file:///srv/git/trailhead.git'));
 end;
 
 procedure TForgeTest.TestRemoteHost;

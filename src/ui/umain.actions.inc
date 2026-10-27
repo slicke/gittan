@@ -627,6 +627,8 @@ begin
     shows. }
   if FPullsItem <> nil then
     FPullsItem.Visible := Assigned(FForge);
+  if FNewPullItem <> nil then
+    FNewPullItem.Visible := Assigned(FForge);
   if FSideNav <> nil then
     FSideNav.SetRowVisible(navPulls, Assigned(FForge));
   if FPullPage <> nil then
@@ -1154,6 +1156,7 @@ begin
   AddForgeItem(FStatusPopup, '', nil);
   FOpenPullItem := AddForgeItem(FStatusPopup, rsOpenPull, @MenuOpenPullClick);
   FCopyPullItem := AddForgeItem(FStatusPopup, rsCopyPullUrl, @MenuCopyPullUrlClick);
+  FNewPullPopItem := AddForgeItem(FStatusPopup, rsNewPullItem, @MenuNewPullClick);
   FStatus.PopupMenu := FStatusPopup;
   UpdateForgeItems;
 end;
@@ -2335,6 +2338,7 @@ procedure TRepoFrame.StatusPopupPopup(Sender: TObject);
 begin
   FOpenPullItem.Enabled := FHasPull and (FPull.Url <> '');
   FCopyPullItem.Enabled := FHasPull and (FPull.Url <> '');
+  FNewPullPopItem.Enabled := CanCreatePull(FBranch);
 end;
 
 procedure TRepoFrame.MenuOpenPullClick(Sender: TObject);

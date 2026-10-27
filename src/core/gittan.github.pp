@@ -92,8 +92,16 @@ function RepoPathOfUrl(const AUrl: string): string;
 
 {** The arguments of gh browse --no-browser for ATarget: "path:line"
   with --commit=<id> or --branch <name> for a file, the id for a commit,
-  the number for an issue or pull request. }
+  the number for an issue or pull request, none for a new pull request
+  (the repository's address, which GitHubNewPullUrl goes on from). }
 function GitHubWebArgs(const ATarget: TGittanWebTarget): TStringArray;
+
+{** The page that opens a new pull request from ABranch in the
+  repository at ARepoUrl (https://github.com/owner/repo): its compare
+  page with the form unfolded, the branch escaped. A branch pushed to
+  another repository (AHeadRepo, "owner/repo", a fork) goes in as
+  "owner:branch", as GitHub takes it. }
+function GitHubNewPullUrl(const ARepoUrl, ABranch, AHeadRepo: string): string;
 
 {** The repository ("owner/name"), the file and the line (0 for none)
   of a GitHub address of a file in a commit or on a branch:
@@ -817,6 +825,26 @@ begin
   end;
 end;
 
+function GitHubNewPullUrl(const ARepoUrl, ABranch, AHeadRepo: string): string;
+var
+  Url, Base, Head: string;
+  c: char;
+begin
+  Url := Trim(ARepoUrl);
+  while (Url <> '') and (Url[Length(Url)] = '/') do
+    SetLength(Url, Length(Url) - 1);
+  Head := '';
+  for c in ABranch do
+    if c in ['A'..'Z', 'a'..'z', '0'..'9', '-', '.', '_', '~', '/'] then
+      Head := Head + c
+    else
+      Head := Head + '%' + IntToHex(Ord(c), 2);
+  Base := RepoPathOfUrl(Url);
+  if (AHeadRepo <> '') and (Pos('/', AHeadRepo) > 1) and not SameText(AHeadRepo, Base) then
+    Head := Copy(AHeadRepo, 1, Pos('/', AHeadRepo) - 1) + ':' + Head;
+  Result := Url + '/compare/' + Head + '?expand=1';
+end;
+
 { ---------------------------------------------------------------------------
   The jobs
   --------------------------------------------------------------------------- }
@@ -1075,6 +1103,8 @@ begin
   Result := RunGh(Cli, ARoot, Args, AUrl, AError);
   AUrl := Trim(AUrl);
   Result := Result and (AUrl <> '');
+  if Result and (ATarget.Kind = wtNewPull) then
+    AUrl := GitHubNewPullUrl(AUrl, ATarget.Branch, ATarget.HeadRepo);
 end;
 
 function GitHubFileOfUrl(const AUrl: string; out ARepo, APath: string;

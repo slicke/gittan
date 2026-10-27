@@ -264,6 +264,9 @@ begin
   { A rebase or merge waits only for the fetch it started. }
   if not (Job.Ok and (Job.Kind = rkFetch)) then
     FAfterFetchRef := '';
+  { Create Pull Request waits only for the push it started. }
+  if not (Job.Ok and (Job.Kind in [rkPush, rkPushBranch])) then
+    FPullAfterPush := '';
   if Job.Ok then
   begin
     case Job.Kind of
@@ -297,7 +300,8 @@ begin
       rkForcePush:
         BannerSuccess(Format(rsForcePushed, [FBranch]));
       rkPushBranch:
-        BannerSuccess(Format(rsPushedBranchTo, [Job.Arg, Job.Remote + '/' + Job.Arg]));
+        PushedBanner(Format(rsPushedBranchTo, [Job.Arg, Job.Remote + '/' + Job.Arg]),
+          Job.Arg);
       rkPushTag:
         if Job.Arg = '' then
           BannerSuccess(Format(rsPushedTags, [Job.Remote]))
@@ -305,11 +309,11 @@ begin
           BannerSuccess(Format(rsPushedTag, [Job.Arg, Job.Remote]));
       rkPush:
         if FRemoteAhead = 1 then
-          BannerSuccess(Format(rsPushedOne, [FBranch]))
+          PushedBanner(Format(rsPushedOne, [FBranch]), FBranch)
         else if FRemoteAhead > 1 then
-          BannerSuccess(Format(rsPushed, [FRemoteAhead, FBranch]))
+          PushedBanner(Format(rsPushed, [FRemoteAhead, FBranch]), FBranch)
         else
-          BannerSuccess(Format(rsPushedBranch, [FBranch]));
+          PushedBanner(Format(rsPushedBranch, [FBranch]), FBranch);
     end;
     Exit;
   end;

@@ -355,6 +355,12 @@ type
     FPullLogin: string;
     FPullError, FPullKey: string;
     FPullMenu, FOpenPullItem, FCopyPullItem: TMenuItem;
+    { Branch > Create Pull Request... and the status bar's item for it
+      (umain.pulls.inc). FPullAfterPush names the branch whose push was
+      asked for first, which opens the forge's page when it worked;
+      FPushedBranch the branch the banner after a push offers it for. }
+    FNewPullItem, FNewPullPopItem: TMenuItem;
+    FPullAfterPush, FPushedBranch: string;
     FPullRange: string;
     FPullNumber: integer;
     { The tree sits in a panel under a filter field (Go > Filter Files):
@@ -1026,6 +1032,12 @@ type
     procedure SetupPullPage;
     procedure MenuPullsClick(Sender: TObject);
     procedure ShowPulls;
+    function CanCreatePull(const ABranch: string): boolean;
+    procedure CreatePull(const ABranch: string);
+    procedure OpenNewPull(const ABranch: string);
+    procedure PushedBanner(const ATitle, ABranch: string);
+    procedure MenuNewPullClick(Sender: TObject);
+    procedure NewPullBannerClick(Sender: TObject);
     procedure UpdatePullPage;
     procedure PullPageCompare(Sender: TObject; const APull: TGittanPullRequest);
     procedure SummaryReviewClick(Sender: TObject; const AScreenRect: TRect);
@@ -2804,6 +2816,17 @@ const
   rsVsPull = 'PR #%d';
   rsOpenPull = 'Open Pull Re&quest';
   rsCopyPullUrl = 'Copy Pull Request &URL';
+  rsNewPullItem = 'Create &Pull Request...';
+  rsNewPullAction = 'Create Pull Request';
+  rsNewPullTitle = 'Create Pull Request';
+  rsNewPullPush = '%s is not on %s yet. Push it there first, then open the pull request ' +
+    'on %s?';
+  rsNewPullAhead = '%d commit(s) of %s are not pushed yet. Push them first, so the pull ' +
+    'request holds them?';
+  rsPushAndOpen = 'Push and Open';
+  rsOpenAnyway = 'Open Anyway';
+  rsNewPullNoRemote = 'The repository has no remote to push %s to';
+  rsNewPullHasOne = '%s already has pull request #%d';
   rsFetchingPull = 'Fetching pull request #%d...';
   rsPullFailed = 'Could not fetch pull request #%d';
   { Bookmark kinds in the editor's second bookmark list, used only for the
@@ -4396,6 +4419,8 @@ begin
     @MenuBranchListClick);
   FSwitchItem.Tag := Ord(blSwitch);
   FNewBranchItem := AddItem(BranchMenu, rsBmNewItem, 0, @MenuNewBranchClick);
+  FNewPullItem := AddItem(BranchMenu, rsNewPullItem, 0, @MenuNewPullClick);
+  FNewPullItem.Visible := Assigned(FForge);
   BranchMenu.Add(NewLine);
   FMergeItem := AddItem(BranchMenu, '', 0, @MenuBranchListClick);
   FMergeItem.Tag := Ord(blMerge);

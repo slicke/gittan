@@ -26,7 +26,7 @@ Every method below is abstract in `TGittanForge`; each comment in `gittan.forge.
 5. `function PullJob(const ARoot, ABranch, ALogin: string): TGittanPullRequestJob` – the open repository's pull requests (merge requests, on GitLab), see below. Not started.
 6. `function ReviewJob(const ARoot, ARepo: string; ANumber: integer): TGittanReviewJob` – one pull request's review threads and conversation. Not started.
 7. `function AccountJob(const ARoot: string): TGittanForgeJob` – the user's pull requests across every repository, for the forge view. Not started.
-8. `function WebUrl(const ARoot: string; const ATarget: TGittanWebTarget; out AUrl, AError: string): boolean` – the web address of a file at a line in a commit or on a branch, a commit, or an issue, for the repository at `ARoot`; false with the reason when its remote is not on the forge.
+8. `function WebUrl(const ARoot: string; const ATarget: TGittanWebTarget; out AUrl, AError: string): boolean` – the web address of a file at a line in a commit or on a branch, a commit, an issue, or the page that opens a new pull request from a branch (`wtNewPull`: `Branch` as named on its remote, `HeadRepo` the path of the repository it is pushed to, a fork when it is not the forge's own), for the repository at `ARoot`; false with the reason when its remote is not on the forge.
 9. `function FileOfWebUrl(const AUrl: string; out ARepo, APath: string; out ALine: integer): boolean` – the reverse, for links in comments: the repository, file and line of an address of a file on the forge; false for any other address.
 10. `function PullRef(ANumber: integer): string` – the ref a remote serves the pull request's head at, which `git fetch` fetches to compare with it ("refs/merge-requests/12/head" on GitLab).
 

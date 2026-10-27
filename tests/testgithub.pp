@@ -26,6 +26,7 @@ type
     procedure TestChecks;
     procedure TestIssueNumber;
     procedure TestWebArgs;
+    procedure TestNewPullUrl;
     procedure TestFileOfUrl;
     procedure TestForge;
   end;
@@ -271,6 +272,23 @@ begin
     Joined(GitHubWebArgs(FileTarget('src/a.pp', 3, 'abc123', 'main'))));
   AssertEquals('abc123', Joined(GitHubWebArgs(CommitTarget('abc123'))));
   AssertEquals('42', Joined(GitHubWebArgs(IssueTarget(42))));
+  { A new pull request asks for the repository's address. }
+  AssertEquals('', Joined(GitHubWebArgs(NewPullTarget('feature', ''))));
+end;
+
+procedure TGitHubTest.TestNewPullUrl;
+begin
+  AssertEquals('https://github.com/o/r/compare/feature/x?expand=1',
+    GitHubNewPullUrl('https://github.com/o/r' + LineEnding, 'feature/x', ''));
+  { The same repository as the head, in another case, is no fork. }
+  AssertEquals('https://github.com/o/r/compare/fix?expand=1',
+    GitHubNewPullUrl('https://github.com/o/r/', 'fix', 'O/R'));
+  { A fork's branch goes in under its owner. }
+  AssertEquals('https://github.com/o/r/compare/me:fix?expand=1',
+    GitHubNewPullUrl('https://github.com/o/r', 'fix', 'me/r'));
+  { What an address cannot hold is escaped, UTF-8 by its bytes. }
+  AssertEquals('https://github.com/o/r/compare/a%23b%2Bc%C3%B6?expand=1',
+    GitHubNewPullUrl('https://github.com/o/r', 'a#b+c' + #$C3#$B6, ''));
 end;
 
 procedure TGitHubTest.TestForge;

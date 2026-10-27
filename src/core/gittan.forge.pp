@@ -103,11 +103,13 @@ type
 
   {** What a web address is asked for: a file (Path, at Line when above
     0, in Commit, else on Branch, else the default branch), a commit
-    (Commit), or an issue or pull request (Number). }
-  TGittanWebKind = (wtFile, wtCommit, wtIssue);
+    (Commit), an issue or pull request (Number), or the page that opens
+    a new pull request from Branch (in HeadRepo, "owner/repo", when it
+    is pushed to another repository than the forge's, a fork). }
+  TGittanWebKind = (wtFile, wtCommit, wtIssue, wtNewPull);
   TGittanWebTarget = record
     Kind: TGittanWebKind;
-    Path, Commit, Branch: string;
+    Path, Commit, Branch, HeadRepo: string;
     Line, Number: integer;
   end;
 
@@ -118,6 +120,9 @@ function FileTarget(const APath: string; ALine: integer;
 function CommitTarget(const ACommit: string): TGittanWebTarget;
 {** An issue's or a pull request's TGittanWebTarget. }
 function IssueTarget(ANumber: integer): TGittanWebTarget;
+{** The TGittanWebTarget of a new pull request from ABranch, pushed to
+  AHeadRepo ("owner/repo"; empty when not known). }
+function NewPullTarget(const ABranch, AHeadRepo: string): TGittanWebTarget;
 
 {** APulls without the ones ALogin has already approved or requested
   changes on (their latest review): a forge's search for the reviews
@@ -362,6 +367,11 @@ function UserSshConfig: string;
   and ssh://git@github.com:22/o/r; empty for a local path or a file://
   URL. }
 function RemoteHost(const AUrl: string): string;
+{** The repository's path on its host of a remote's URL, without ".git"
+  and the slashes around it: "o/r" of https://github.com/o/r.git,
+  git@github.com:o/r and ssh://git@github.com:22/o/r/; empty where
+  RemoteHost is. }
+function RemoteRepoPath(const AUrl: string): string;
 
 implementation
 
@@ -582,6 +592,35 @@ begin
   Result := LowerCase(S);
 end;
 
+function RemoteRepoPath(const AUrl: string): string;
+var
+  S: string;
+  p: integer;
+begin
+  Result := '';
+  if RemoteHost(AUrl) = '' then
+    Exit;
+  S := Trim(AUrl);
+  p := Pos('://', S);
+  if p > 0 then
+  begin
+    S := Copy(S, p + 3, MaxInt);
+    p := Pos('/', S);
+    if p = 0 then
+      Exit;
+    S := Copy(S, p + 1, MaxInt);
+  end
+  else
+    S := Copy(S, Pos(':', S) + 1, MaxInt);
+  while (S <> '') and (S[Length(S)] = '/') do
+    SetLength(S, Length(S) - 1);
+  while (S <> '') and (S[1] = '/') do
+    Delete(S, 1, 1);
+  if SameText(Copy(S, Length(S) - 3, 4), '.git') then
+    SetLength(S, Length(S) - 4);
+  Result := S;
+end;
+
 function FileTarget(const APath: string; ALine: integer;
   const ACommit, ABranch: string): TGittanWebTarget;
 begin
@@ -605,6 +644,14 @@ begin
   Result := Default(TGittanWebTarget);
   Result.Kind := wtIssue;
   Result.Number := ANumber;
+end;
+
+function NewPullTarget(const ABranch, AHeadRepo: string): TGittanWebTarget;
+begin
+  Result := Default(TGittanWebTarget);
+  Result.Kind := wtNewPull;
+  Result.Branch := ABranch;
+  Result.HeadRepo := AHeadRepo;
 end;
 
 function WithoutReviewed(const APulls: TGittanPullRequests;
