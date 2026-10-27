@@ -20,10 +20,11 @@ unit uwindow;
   repository of the forge (GitHub). The globe at the right end of the
   tab strip (the own title bar on Windows and GTK 3), there while
   there is a forge, shows it over the frame shown (ShowForgeView: its
-  menu and caption take the frame's, no tab is marked as shown, the
-  frame counts as in the background meanwhile); the globe again, a
-  tab, Escape or opening a repository hides it (HideForgeView,
-  ActivateFrame), and the frame gets the window back (Activated).
+  menu and caption take the frame's, the strip shows the view's own
+  tabs instead of the frames' (UpdateTabs), and the frame counts as in
+  the background meanwhile); the globe again, Escape or opening a
+  repository hides it (HideForgeView, ActivateFrame), and the frame
+  gets the window back (Activated).
   What the view needs a repository or the window for comes through
   TRepoWindow: the folder dialog, the settings, and a pull request to
   compare with, which goes to the frame with a remote for its
@@ -53,7 +54,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Math, LCLType, Forms, Controls, Graphics, gittan.app,
-  gittan.git, gittan.forge, umain, uforge
+  gittan.git, gittan.forge, gittan.forgepage, umain, uforge
   {$IFDEF LCLCocoa}, gittan.toolbar, gittan.titlebar, CocoaConfig{$ENDIF}
   {$IFDEF OWNBAR}, gittan.owntitlebar{$ENDIF}
   {$IFDEF LCLWin32}, gittan.wintitlebar{$ENDIF}
@@ -102,6 +103,7 @@ type
     procedure LexersLoaded(Sender: TObject);
     procedure UpdateChecked(Sender: TObject; AManual: boolean);
     procedure UpdateTabs;
+    procedure ForgeTabsChange(Sender: TObject);
     procedure SaveTabs;
     procedure CloseFrameAsync(Data: PtrInt);
     procedure TabSelect(Sender: TObject; AIndex: integer);
@@ -184,6 +186,7 @@ begin
   FForgeView.Align := alClient;
   FForgeView.Parent := Self;
   FForgeView.Init(Self);
+  FForgeView.OnTabsChange := @ForgeTabsChange;
   UpdateForgeChrome;
   if not Lexers then
     FActive.ShowNoLexers;
@@ -694,6 +697,16 @@ begin
   if (Key >= VK_1) and (Key <= VK_9) and (Shift * [ssShift, ssAlt, ssCtrl, ssMeta] =
     [{$IFDEF DARWIN}ssMeta{$ELSE}ssCtrl{$ENDIF}]) then
   begin
+    { The forge view's tabs while it is shown, which the strip has. }
+    if FForgeShown then
+    begin
+      if Key = VK_9 then
+        FForgeView.SelectTab(SectionCount - 1)
+      else
+        FForgeView.SelectTab(Key - VK_1);
+      Key := 0;
+      Exit;
+    end;
     if Key = VK_9 then
       Index := FFrames.Count - 1
     else
@@ -762,14 +775,29 @@ begin
   UpdateTabs;
 end;
 
+{ The strip shows the frames, or the forge view's own tabs while it is
+  shown, which cannot be closed or added to. }
 procedure TGittanWindow.UpdateTabs;
 var
-  Captions, Hints: array of string;
-  Marks: array of boolean;
+  Captions, Hints: TStringArray;
+  Marks: TBooleanDynArray;
   i: integer;
 begin
   if (csDestroying in ComponentState) or (FFrames = nil) then
     Exit;
+  if FForgeShown then
+  begin
+    i := FForgeView.Tabs(Captions, Marks);
+    Hints := nil;
+    {$IFDEF LCLCocoa}
+    if FToolbar <> nil then
+      FToolbar.SetTabs(Captions, Hints, Marks, i, True);
+    {$ENDIF}
+    {$IFDEF OWNBAR}
+    FOwnBar.SetTabs(Captions, Hints, Marks, i, True);
+    {$ENDIF}
+    Exit;
+  end;
   Captions := nil;
   Hints := nil;
   SetLength(Captions, FFrames.Count);
@@ -782,11 +810,7 @@ begin
     Hints[i] := Frames[i].TabHint;
     Marks[i] := Frames[i].HasNews;
   end;
-  { No tab is the shown one while the forge view is. }
-  if FForgeShown then
-    i := -1
-  else
-    i := FFrames.IndexOf(FActive);
+  i := FFrames.IndexOf(FActive);
   {$IFDEF LCLCocoa}
   if FToolbar <> nil then
     FToolbar.SetTabs(Captions, Hints, Marks, i);
@@ -888,6 +912,11 @@ procedure TGittanWindow.StepTab(ADelta: integer);
 var
   Index: integer;
 begin
+  if FForgeShown then
+  begin
+    FForgeView.StepTab(ADelta);
+    Exit;
+  end;
   if FFrames.Count < 2 then
     Exit;
   Index := FFrames.IndexOf(FActive) + ADelta;
@@ -922,14 +951,24 @@ begin
     ActivateFrame(AFrame);
 end;
 
+procedure TGittanWindow.ForgeTabsChange(Sender: TObject);
+begin
+  if FForgeShown then
+    UpdateTabs;
+end;
+
 procedure TGittanWindow.TabSelect(Sender: TObject; AIndex: integer);
 begin
-  if (AIndex >= 0) and (AIndex < FFrames.Count) then
+  if FForgeShown then
+    FForgeView.SelectTab(AIndex)
+  else if (AIndex >= 0) and (AIndex < FFrames.Count) then
     ActivateFrame(Frames[AIndex]);
 end;
 
 procedure TGittanWindow.TabClose(Sender: TObject; AIndex: integer);
 begin
+  if FForgeShown then
+    Exit;
   if (AIndex >= 0) and (AIndex < FFrames.Count) then
     CloseFrame(Frames[AIndex]);
 end;

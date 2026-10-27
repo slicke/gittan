@@ -4,15 +4,17 @@ unit uforge;
   the forge (GitHub), shown in the window over the repository frames
   (TRepoFrame in umain) from the globe at the right end of the window's
   top chrome, the tab strip on macOS and the own title bar on Windows
-  and GTK 3; the globe again, Escape, Close GitHub (Cmd+W) or a tab
-  goes back to the repository. It is one for the window, since what it
+  and GTK 3, whose tabs are the view's own meanwhile; the globe again,
+  Escape or Close GitHub (Cmd+W) goes back to the repository. It is one for the window, since what it
   shows is the user's and not a repository's, and it is there only
   while there is a forge (gh found and GitHub on in the settings:
   App.ForgeCli), which SettingsChanged finds again.
 
   The content is the forge page (gittan.forgepage) in a scroll box, as
   the Pull Requests page sits in a repository frame's: the open pull
-  requests the user wrote and the open ones waiting for their review,
+  requests the user wrote or the open ones waiting for their review, a
+  section at a time, which the window's tab strip picks while the view
+  is shown (Tabs, SelectTab, StepTab, OnTabsChange),
   read by the forge's AccountJob (gittan.forge; GitHub's runs one
   GraphQL query through gh) each time the view is shown and on Refresh,
   the page keeping what it had meanwhile. A card of a pull request goes
@@ -36,7 +38,7 @@ unit uforge;
 interface
 
 uses
-  Classes, SysUtils, Controls, Forms, Menus, ExtCtrls, Graphics, LCLType,
+  Classes, SysUtils, Types, Controls, Forms, Menus, ExtCtrls, Graphics, LCLType,
   gittan.forge, gittan.forgepage, umain;
 
 type
@@ -60,6 +62,7 @@ type
     FRecentMenu, FCloseItem: TMenuItem;
     FDark: boolean;
     FThemeTimer: TTimer;
+    FOnTabsChange: TNotifyEvent;
     procedure FindForge;
     procedure BuildMenu;
     procedure RebuildRecentMenu;
@@ -109,6 +112,17 @@ type
       changed: the forge is found again, and what one that is gone had
       found is dropped (the window hides the view then, HasForge). }
     procedure SettingsChanged;
+    {** The view's tabs, which the window's tab strip shows while the
+      view is shown: their names in ACaptions, in AMarks the ones with
+      something to do (pull requests waiting for review); gives the
+      shown one's index. }
+    function Tabs(out ACaptions: TStringArray; out AMarks: TBooleanDynArray): integer;
+    {** Shows the tab at AIndex. }
+    procedure SelectTab(AIndex: integer);
+    {** The tab ADelta tabs on, round the ends. }
+    procedure StepTab(ADelta: integer);
+    {** The tabs changed: another one is shown or their marks changed. }
+    property OnTabsChange: TNotifyEvent read FOnTabsChange write FOnTabsChange;
     {** The window's keys while the view is shown: Escape closes it. }
     procedure FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
     {** The view's menu, the window's while the view is shown. }
@@ -343,10 +357,12 @@ begin
     FDark := not FDark;
     ApplyTheme;
   end;
+  { The job first, so the page does not take the lists of before it as
+    the forge's answer. }
+  StartJob;
   UpdatePage;
   FBox.VertScrollBar.Position := 0;
   FThemeTimer.Enabled := True;
-  StartJob;
 end;
 
 procedure TForgeView.Hidden;
@@ -383,6 +399,38 @@ begin
   FPage.SetLogin(FLogin);
   FPage.SetPulls(FMine, FReview, FError, FJob <> nil);
   FPage.FitHeight(FBox.ClientHeight);
+  if Assigned(FOnTabsChange) then
+    FOnTabsChange(Self);
+end;
+
+function TForgeView.Tabs(out ACaptions: TStringArray; out AMarks: TBooleanDynArray): integer;
+var
+  i: integer;
+begin
+  ACaptions := nil;
+  AMarks := nil;
+  SetLength(ACaptions, SectionCount);
+  SetLength(AMarks, SectionCount);
+  for i := 0 to SectionCount - 1 do
+    ACaptions[i] := SectionCaption(i);
+  AMarks[fsReview] := Length(FReview) > 0;
+  Result := FPage.Section;
+end;
+
+procedure TForgeView.SelectTab(AIndex: integer);
+begin
+  if (AIndex < 0) or (AIndex >= SectionCount) or (AIndex = FPage.Section) then
+    Exit;
+  FPage.Section := AIndex;
+  FPage.FitHeight(FBox.ClientHeight);
+  FBox.VertScrollBar.Position := 0;
+  if Assigned(FOnTabsChange) then
+    FOnTabsChange(Self);
+end;
+
+procedure TForgeView.StepTab(ADelta: integer);
+begin
+  SelectTab(((FPage.Section + ADelta) mod SectionCount + SectionCount) mod SectionCount);
 end;
 
 procedure TForgeView.BoxResize(Sender: TObject);
@@ -510,12 +558,12 @@ end;
 
 procedure TForgeView.MenuNextTabClick(Sender: TObject);
 begin
-  FWindow.StepTab(1);
+  StepTab(1);
 end;
 
 procedure TForgeView.MenuPrevTabClick(Sender: TObject);
 begin
-  FWindow.StepTab(-1);
+  StepTab(-1);
 end;
 
 procedure TForgeView.MenuCheckUpdatesClick(Sender: TObject);

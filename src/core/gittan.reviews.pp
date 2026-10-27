@@ -68,6 +68,12 @@ function MapLine(const ADiff: string; ALine: integer): integer;
   then the date. }
 function ReviewAge(AThen, ANow: TDateTime): string;
 
+{** How long ago AThen was at ANow, both in UTC, as ReviewAge says it
+  up to a month and then in months and years (3 months ago, 1 year ago)
+  rather than as the date, for a list of pull requests that may be
+  years old. }
+function RelativeAge(AThen, ANow: TDateTime): string;
+
 {** The threads that are neither resolved nor outdated. }
 function OpenThreads(const AThreads: TGittanReviewThreads): integer;
 
@@ -258,6 +264,23 @@ begin
     Result := IntToStr(Minutes div (24 * 60)) + ' days ago'
   else
     Result := FormatDateTime('yyyy-mm-dd', AThen);
+end;
+
+function RelativeAge(AThen, ANow: TDateTime): string;
+var
+  Days: int64;
+begin
+  if (AThen <= 0) or (ANow < AThen) or (MinutesBetween(ANow, AThen) < 30 * 24 * 60) then
+    Exit(ReviewAge(AThen, ANow));
+  Days := DaysBetween(ANow, AThen);
+  if Days < 60 then
+    Result := '1 month ago'
+  else if Days < 365 then
+    Result := IntToStr(Days div 30) + ' months ago'
+  else if Days < 2 * 365 then
+    Result := '1 year ago'
+  else
+    Result := IntToStr(Days div 365) + ' years ago';
 end;
 
 function OpenThreads(const AThreads: TGittanReviewThreads): integer;

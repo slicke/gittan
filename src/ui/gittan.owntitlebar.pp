@@ -70,6 +70,8 @@ type
     FCaptions, FHints: array of string;
     FMarks: array of boolean;
     FTabActive: integer;
+    { The tabs are a view's own (the forge view's): no cross, no plus. }
+    FFixed: boolean;
     FMenuRect, FPlusRect, FForgeRect, FMinRect, FMaxRect, FCloseRect: TRect;
     { The globe: whether it is there, whether the forge view is shown,
       and its hint. }
@@ -136,9 +138,10 @@ type
     function OpenMenuByKey(AKey: char): boolean;
     {** The tabs, left to right: ACaptions are their names, AHints their
       tooltips (the paths), AMarks those with news (a dot before the
-      name), AActive the one shown. }
+      name), AActive the one shown; AFixed when they are a view's own,
+      which cannot be closed or added to: no cross and no plus. }
     procedure SetTabs(const ACaptions, AHints: array of string;
-      const AMarks: array of boolean; AActive: integer);
+      const AMarks: array of boolean; AActive: integer; AFixed: boolean = False);
     {** The banner before the caption buttons: shown while AVisible
       (there is a forge), in the accent while AShown (the forge view is
       shown), AHint its hint (the forge's name). }
@@ -244,10 +247,11 @@ begin
 end;
 
 procedure TGittanOwnTitleBar.SetTabs(const ACaptions, AHints: array of string;
-  const AMarks: array of boolean; AActive: integer);
+  const AMarks: array of boolean; AActive: integer; AFixed: boolean);
 var
   i: integer;
 begin
+  FFixed := AFixed;
   SetLength(FCaptions, Length(ACaptions));
   SetLength(FHints, Length(ACaptions));
   SetLength(FMarks, Length(ACaptions));
@@ -322,13 +326,15 @@ begin
 end;
 
 { The tabs share the room between the menu button and the plus, which
-  follows the last of them, evenly, within MinTabWidth and MaxTabWidth. }
+  follows the last of them (when they are not fixed), evenly, within
+  MinTabWidth and MaxTabWidth. }
 function TGittanOwnTitleBar.TabWidth: integer;
 var
   Room: integer;
 begin
-  Room := TabsLimit - Scale96ToForm(Gap) - Scale96ToForm(PlusSize + Gap) -
-    (FMenuRect.Right + Scale96ToForm(Gap));
+  Room := TabsLimit - Scale96ToForm(Gap) - (FMenuRect.Right + Scale96ToForm(Gap));
+  if not FFixed then
+    Dec(Room, Scale96ToForm(PlusSize + Gap));
   if Length(FCaptions) = 0 then
     Exit(Scale96ToForm(MaxTabWidth));
   Result := Max(Scale96ToForm(MinTabWidth), Min(Scale96ToForm(MaxTabWidth),
@@ -380,7 +386,10 @@ begin
   FMenuRect := Types.Rect(Scale96ToForm(Pad), (H - S) div 2,
     Scale96ToForm(Pad + MenuButtonWidth), (H + S) div 2);
   X := FMenuRect.Right + Scale96ToForm(Gap) + Length(FCaptions) * TabWidth;
-  FPlusRect := Types.Rect(X, (H - S) div 2 + 1, X + S, (H + S) div 2 + 1);
+  if FFixed then
+    FPlusRect := Types.Rect(0, 0, 0, 0)
+  else
+    FPlusRect := Types.Rect(X, (H - S) div 2 + 1, X + S, (H + S) div 2 + 1);
 end;
 
 procedure TGittanOwnTitleBar.Resize;
@@ -417,7 +426,7 @@ begin
     if R.Contains(P) then
     begin
       AIndex := i;
-      if CrossRect(R).Contains(P) then
+      if not FFixed and CrossRect(R).Contains(P) then
         Exit(tpTabClose);
       Exit(tpTab);
     end;
@@ -514,7 +523,7 @@ begin
   { A middle click on a tab closes it. }
   if Button = mbMiddle then
   begin
-    if (Part in [tpTab, tpTabClose]) and (Pressed in [tpTab, tpTabClose]) and
+    if not FFixed and (Part in [tpTab, tpTabClose]) and (Pressed in [tpTab, tpTabClose]) and
       (Index = FPressedIndex) and Assigned(FOnTabClose) then
       FOnTabClose(Self, Index);
     Exit;
@@ -768,6 +777,8 @@ begin
     else
       Canvas.Font.Color := FDim;
     C := CrossRect(R);
+    if FFixed then
+      C.Left := R.Right - Scale96ToForm(6);
     { News: a dot before the name, which moves over for it. }
     L := R.Left + Scale96ToForm(10);
     if FMarks[i] then
@@ -782,7 +793,7 @@ begin
     end;
     Canvas.TextRect(Types.Rect(L, R.Top, C.Left - Scale96ToForm(4), R.Bottom), L, TextY,
       FCaptions[i]);
-    if Shown or Hover then
+    if not FFixed and (Shown or Hover) then
     begin
       if Hover and (FHotPart = tpTabClose) then
       begin
@@ -798,13 +809,16 @@ begin
   end;
 
   { The plus. }
-  if FHotPart = tpPlus then
-    HotBox(FPlusRect, FButtonHot);
-  Mid := (FPlusRect.Left + FPlusRect.Right) div 2;
-  L := (FPlusRect.Top + FPlusRect.Bottom) div 2;
-  W := Scale96ToForm(6);
-  Line(Mid - W, L, Mid + W + 1, L, FDim);
-  Line(Mid, L - W, Mid, L + W + 1, FDim);
+  if not FFixed then
+  begin
+    if FHotPart = tpPlus then
+      HotBox(FPlusRect, FButtonHot);
+    Mid := (FPlusRect.Left + FPlusRect.Right) div 2;
+    L := (FPlusRect.Top + FPlusRect.Bottom) div 2;
+    W := Scale96ToForm(6);
+    Line(Mid - W, L, Mid + W + 1, L, FDim);
+    Line(Mid, L - W, Mid, L + W + 1, FDim);
+  end;
   Canvas.Pen.Width := 1;
 
   { The banner: a ribbon from the top edge with a notch at its foot, in
