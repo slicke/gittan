@@ -2212,7 +2212,7 @@ begin
   begin
     if FPendingRemote then
     begin
-      FStatus.ShowMessage(rsAlreadyWaiting, stNormal, 0);
+      FStatus.ShowBusy(rsAlreadyWaiting, HintFetch);
       Exit;
     end;
     FPendingRemote := True;
@@ -2220,7 +2220,7 @@ begin
     FPendingArg := IntToStr(ANumber);
     FPendingRemoteName := ARemote;
     FPendingBranch := ABaseRef;
-    FStatus.ShowMessage(rsWaitingForFetch, stNormal, 0);
+    FStatus.ShowBusy(rsWaitingForFetch, HintFetch);
     Exit;
   end;
   FNoticeHook := False;
@@ -2233,7 +2233,7 @@ begin
   FRemoteJob.OnDone := @RemoteJobDone;
   FRemoteJob.OnOutput := @RemoteJobOutput;
   FRemoteJob.Start;
-  FStatus.ShowMessage(Format(rsFetchingPull, [ANumber]), stNormal, 0);
+  FStatus.ShowBusy(Format(rsFetchingPull, [ANumber]), HintFetch);
   FNoticeTimer.Enabled := True;
   UpdateRemoteItems;
   UpdateCommitState;

@@ -110,7 +110,7 @@ begin
   FMessageFrom := FCommitMemo.Text;
   FMessageJob.OnDone := @MessageJobDone;
   FMessageJob.Start;
-  FStatus.ShowMessage(Format(rsWritingStatus, [AgentNames[FAgent]]), stNormal, 0);
+  FStatus.ShowBusy(Format(rsWritingStatus, [AgentNames[FAgent]]), HintSparkle);
   UpdateCommitState;
 end;
 
@@ -213,7 +213,7 @@ begin
   end;
   FAIReviewJob.OnDone := @AIReviewDone;
   FAIReviewJob.Start;
-  FStatus.ShowMessage(Format(rsAIReviewing, [AgentNames[FAgent]]), stNormal, 0);
+  FStatus.ShowBusy(Format(rsAIReviewing, [AgentNames[FAgent]]), HintSparkle);
   UpdateAIReviewItems;
 end;
 
@@ -308,8 +308,8 @@ begin
     AQuestion);
   FFindJob.OnDone := @FindJobDone;
   FFindJob.Start;
-  FStatus.ShowMessage(Format(rsFindLooking, [AgentNames[FAgent], AQuestion]),
-    stNormal, 0);
+  FStatus.ShowBusy(Format(rsFindLooking, [AgentNames[FAgent], AQuestion]),
+    HintSparkle);
   UpdateFindAction;
 end;
 

@@ -859,7 +859,7 @@ begin
   end;
   FCommitJob.OnDone := @CommitJobDone;
   FCommitJob.Start;
-  FStatus.ShowMessage(rsCommitting, stNormal, 0);
+  FStatus.ShowBusy(rsCommitting);
   UpdateCommitState;
   UpdateRemoteItems;
 end;

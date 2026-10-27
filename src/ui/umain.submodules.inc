@@ -593,7 +593,7 @@ begin
   FRemoteJob.OnDone := @RemoteJobDone;
   FRemoteJob.OnOutput := @RemoteJobOutput;
   FRemoteJob.Start;
-  FStatus.ShowMessage(Format(rsSubAdding, [Path]), stNormal, 0);
+  FStatus.ShowBusy(Format(rsSubAdding, [Path]));
   ShowRemoteNotice;
   UpdateRemoteItems;
   UpdateCommitState;

@@ -198,7 +198,7 @@ begin
     FHistoryFrom, FHistoryTo, FHistoryMax + 1, FRepo.IgnoreWhitespace);
   FHistoryJob.OnDone := @HistoryJobDone;
   FHistoryJob.Start;
-  FStatus.ShowMessage(rsHistoryLoading, stNormal, 0);
+  FStatus.ShowBusy(rsHistoryLoading);
 end;
 
 procedure TRepoFrame.AbandonHistoryJob;

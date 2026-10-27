@@ -315,7 +315,7 @@ begin
     JumpToDefinition(AEd, P, Word);
     Exit;
   end;
-  FStatus.ShowMessage(Format(rsLookingFor, [Word]), stNormal, 0);
+  FStatus.ShowBusy(Format(rsLookingFor, [Word]));
   if FindInRepo(Word, RelPath, Symbol) then
   begin
     FStatus.ClearMessage;

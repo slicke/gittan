@@ -30,6 +30,9 @@ var
 begin
   Can := (FRepo <> nil) and (FRepo.Root <> '') and (FRemoteJob = nil) and
     (FCommitJob = nil);
+  { The status bar's buttons are dimmed while a job runs, from its start,
+    which also moves what it says into their row. }
+  UpdateStatusTransport;
   if FFetchItem = nil then
     Exit;
   FFetchItem.Enabled := Can;
@@ -56,7 +59,7 @@ begin
     { One waits; a second is refused rather than put in its place. }
     if FPendingRemote then
     begin
-      FStatus.ShowMessage(rsAlreadyWaiting, stNormal, 0);
+      FStatus.ShowBusy(rsAlreadyWaiting, HintFetch);
       Exit;
     end;
     FPendingRemote := True;
@@ -64,7 +67,7 @@ begin
     FPendingMode := AMode;
     FPendingArg := AArg;
     FPendingRemoteName := ARemote;
-    FStatus.ShowMessage(rsWaitingForFetch, stNormal, 0);
+    FStatus.ShowBusy(rsWaitingForFetch, HintFetch);
     Exit;
   end;
   FRemoteAhead := FAhead;
@@ -83,30 +86,32 @@ begin
     FRemoteJob.Refs := FLfsRefs;
   FRemoteJob.Start;
   if FNoticeHook then
-    FStatus.ShowMessage(rsRunningHook, stNormal, 0)
+    FStatus.ShowBusy(rsRunningHook)
   else
     case AKind of
-      rkFetch: FStatus.ShowMessage(rsFetching, stNormal, 0);
-      rkPull: FStatus.ShowMessage(rsPulling, stNormal, 0);
-      rkPush: FStatus.ShowMessage(rsPushing, stNormal, 0);
-      rkForcePush: FStatus.ShowMessage(rsForcePushing, stNormal, 0);
-      rkPushBranch: FStatus.ShowMessage(Format(rsPushingTo, [AArg, ARemote]), stNormal, 0);
+      rkFetch: FStatus.ShowBusy(rsFetching, HintFetch);
+      rkPull: FStatus.ShowBusy(rsPulling, HintDown);
+      rkPush: FStatus.ShowBusy(rsPushing, HintUp);
+      rkForcePush: FStatus.ShowBusy(rsForcePushing, HintUp);
+      rkPushBranch:
+        FStatus.ShowBusy(Format(rsPushingTo, [AArg, ARemote]), HintUp);
       rkPushTag:
         if AArg = '' then
-          FStatus.ShowMessage(Format(rsPushingTags, [ARemote]), stNormal, 0)
+          FStatus.ShowBusy(Format(rsPushingTags, [ARemote]), HintUp)
         else
-          FStatus.ShowMessage(Format(rsPushingTo, [AArg, ARemote]), stNormal, 0);
+          FStatus.ShowBusy(Format(rsPushingTo, [AArg, ARemote]), HintUp);
       rkDeleteRemote, rkDeleteRemoteTag:
-        FStatus.ShowMessage(Format(rsDeletingRemote, [AArg]), stNormal, 0);
+        FStatus.ShowBusy(Format(rsDeletingRemote, [AArg]), HintUp);
       rkSubmoduleUpdate:
         if AArg = '' then
-          FStatus.ShowMessage(rsSubUpdatingAll, stNormal, 0)
+          FStatus.ShowBusy(rsSubUpdatingAll)
         else
-          FStatus.ShowMessage(Format(rsSubUpdating, [AArg]), stNormal, 0);
+          FStatus.ShowBusy(Format(rsSubUpdating, [AArg]));
       rkLfsFetch:
-        FStatus.ShowMessage(Format(rsLfsDownloading, [ExtractFileName(AArg)]), stNormal, 0);
-      rkLfsPull: FStatus.ShowMessage(rsLfsPulling, stNormal, 0);
-      rkLfsInstall: FStatus.ShowMessage(rsLfsInstalling, stNormal, 0);
+        FStatus.ShowBusy(Format(rsLfsDownloading, [ExtractFileName(AArg)]),
+          HintDown);
+      rkLfsPull: FStatus.ShowBusy(rsLfsPulling, HintDown);
+      rkLfsInstall: FStatus.ShowBusy(rsLfsInstalling);
     end;
   if FNoticeHook then
     ShowRemoteNotice
@@ -179,9 +184,9 @@ begin
   begin
     FNoticeHook := False;
     if Job.Kind in [rkDeleteRemote, rkDeleteRemoteTag] then
-      FStatus.ShowMessage(Format(rsDeletingRemote, [Job.Arg]), stNormal, 0)
+      FStatus.ShowBusy(Format(rsDeletingRemote, [Job.Arg]), HintUp)
     else
-      FStatus.ShowMessage(rsPushing, stNormal, 0);
+      FStatus.ShowBusy(rsPushing, HintUp);
     FNotice.Title := RemoteNoticeTitle;
   end;
   if FNotice.Visible then
