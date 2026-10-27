@@ -166,6 +166,9 @@ type
     Bisect: TGittanBisect;
     {** The branches and tags, from Refs: what Base can be set to. }
     Refs: TStringArray;
+    {** The remotes' URLs, from RemoteUrlsIn: which forge the repository
+      is on (gittan.forge's ForgeClassFor). }
+    RemoteUrls: string;
   end;
   PGittanRepoSnapshot = ^TGittanRepoSnapshot;
 
@@ -5681,6 +5684,7 @@ begin
   finally
     List.Free;
   end;
+  ASnap.RemoteUrls := RemoteUrlsIn(FRoot);
   Result := ASnap.Ok;
 end;
 

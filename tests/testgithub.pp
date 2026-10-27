@@ -16,6 +16,7 @@ type
   TGitHubTest = class(TTestCase)
   published
     procedure TestRegistered;
+    procedure TestHosts;
     procedure TestParsePullRequest;
     procedure TestParsePullRequests;
     procedure TestWithoutReviewed;
@@ -60,6 +61,23 @@ begin
   finally
     Forge.Free;
   end;
+end;
+
+procedure TGitHubTest.TestHosts;
+var
+  Hosts: TStringArray;
+begin
+  Hosts := GhHosts('github.com:'#10'    user: me'#10'    git_protocol: ssh'#10 +
+    '# a comment:'#10'GHE.Example.com:'#10'    users:'#10'        me:'#10 +
+    '"quoted.example.com":'#10);
+  AssertEquals(3, Length(Hosts));
+  AssertEquals('github.com', Hosts[0]);
+  AssertEquals('ghe.example.com', Hosts[1]);
+  AssertEquals('quoted.example.com', Hosts[2]);
+  AssertEquals(0, Length(GhHosts('')));
+  AssertTrue(TGittanGitHubForge.HostsRemote('github.com'));
+  AssertTrue(TGittanGitHubForge.HostsRemote('ssh.github.com'));
+  AssertFalse(TGittanGitHubForge.HostsRemote('gitlab.com'));
 end;
 
 procedure TGitHubTest.TestParsePullRequest;

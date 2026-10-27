@@ -26,9 +26,30 @@ type
     procedure TestFindClones;
     procedure TestSiblingRepositories;
     procedure TestPullRequestOf;
+    procedure TestRemoteHost;
+    procedure TestForgeFor;
   end;
 
 implementation
+
+type
+  { A forge on example.org, registered after GitHub, so the forge of a
+    repository is picked by its remotes; it is never made. }
+  TExampleForge = class(TGittanForge)
+  public
+    class function CliName: string; override;
+    class function HostsRemote(const AHost: string): boolean; override;
+  end;
+
+class function TExampleForge.CliName: string;
+begin
+  Result := 'ex';
+end;
+
+class function TExampleForge.HostsRemote(const AHost: string): boolean;
+begin
+  Result := AHost = 'example.org';
+end;
 
 const
   Mine = '{"number":41,"title":"Watcher pace","url":"https://github.com/slicke/gittan/pull/41",' +
@@ -372,7 +393,39 @@ begin
   AssertEquals('', Pull.Labels);
 end;
 
+procedure TForgeTest.TestRemoteHost;
+begin
+  AssertEquals('github.com', RemoteHost('https://github.com/slicke/gittan.git'));
+  AssertEquals('github.com', RemoteHost('https://user:token@GitHub.com/slicke/gittan'));
+  AssertEquals('github.com', RemoteHost('git@github.com:slicke/gittan.git'));
+  AssertEquals('github.com', RemoteHost('ssh://git@github.com:22/slicke/gittan.git'));
+  AssertEquals('gitlab.example.org', RemoteHost('gitlab.example.org:group/sub/repo.git'));
+  AssertEquals('', RemoteHost('/Volumes/Projects/git/trailhead.git'));
+  AssertEquals('', RemoteHost('../trailhead.git'));
+  AssertEquals('', RemoteHost('C:\git\trailhead.git'));
+  AssertEquals('', RemoteHost('C:/git/trailhead.git'));
+  AssertEquals('', RemoteHost('file:///srv/git/trailhead.git'));
+  AssertEquals('', RemoteHost('./a:b'));
+end;
+
+procedure TForgeTest.TestForgeFor;
+begin
+  AssertTrue(ForgeClassFor('remote.origin.url git@github.com:slicke/gittan.git'#10) =
+    TGittanGitHubForge);
+  AssertTrue(ForgeClassFor('remote.origin.url https://example.org/a/b.git'#10) =
+    TExampleForge);
+  { The remotes in order: the first on a known forge decides. }
+  AssertTrue(ForgeClassFor('remote.local.url /srv/git/b.git'#10 +
+    'remote.origin.url https://example.org/a/b.git'#10 +
+    'remote.up.url https://github.com/a/b'#10) = TExampleForge);
+  AssertTrue(ForgeClassFor('remote.origin.url https://bitbucket.org/a/b.git'#10) = nil);
+  AssertTrue(ForgeClassFor('') = nil);
+  { Where no repository decides, the first registered. }
+  AssertTrue(ForgeClass = TGittanGitHubForge);
+end;
+
 initialization
+  RegisterForge(TExampleForge);
   RegisterTest(TForgeTest);
 
 end.

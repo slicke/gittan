@@ -292,6 +292,10 @@ type
     function Name: string; virtual; abstract;
     {** The name of its tool, as found on the search path: "gh". }
     class function CliName: string; virtual; abstract;
+    {** Whether a remote on AHost (as RemoteHost gives it, "github.com")
+      is on this forge, so a repository with it gets this forge
+      (ForgeClassFor). }
+    class function HostsRemote(const AHost: string): boolean; virtual; abstract;
     property Cli: string read FCli;
     {** The tool's version, from its own --version, as "gh 2.62.0"; false
       when it could not be run. }
@@ -325,9 +329,20 @@ type
 {** Adds AClass to the forges Gittan knows; a forge's unit calls it in
   its initialization. }
 procedure RegisterForge(AClass: TGittanForgeClass);
-{** The forge Gittan uses, the first registered (GitHub, the one forge
-  so far); nil while none is. }
+{** The forge Gittan uses where no repository decides, as for the
+  user's pull requests across every repository: the first registered
+  (GitHub, the one forge so far); nil while none is. }
 function ForgeClass: TGittanForgeClass;
+{** The forge of a repository whose remotes are AUrls (as RemoteUrlsIn
+  gives them, a "remote.<name>.url <url>" line each): the first
+  registered that hosts one of them, the remotes taken in order; nil
+  when none does (no remote, or none on a known forge). }
+function ForgeClassFor(const AUrls: string): TGittanForgeClass;
+{** The host of a remote's URL in lower case, without the user and the
+  port: "github.com" of https://github.com/o/r.git, git@github.com:o/r.git
+  and ssh://git@github.com:22/o/r; empty for a local path or a file://
+  URL. }
+function RemoteHost(const AUrl: string): string;
 
 implementation
 
@@ -348,6 +363,60 @@ begin
   if Length(Forges) = 0 then
     Exit(nil);
   Result := Forges[0];
+end;
+
+function ForgeClassFor(const AUrls: string): TGittanForgeClass;
+var
+  Line, Host: string;
+  p, i: integer;
+begin
+  for Line in AUrls.Split([#10]) do
+  begin
+    p := Pos(' ', Line);
+    if p = 0 then
+      Continue;
+    Host := RemoteHost(Copy(Line, p + 1, MaxInt));
+    if Host = '' then
+      Continue;
+    for i := 0 to High(Forges) do
+      if Forges[i].HostsRemote(Host) then
+        Exit(Forges[i]);
+  end;
+  Result := nil;
+end;
+
+function RemoteHost(const AUrl: string): string;
+var
+  S: string;
+  p, Colon, Slash: integer;
+begin
+  S := Trim(AUrl);
+  p := Pos('://', S);
+  if p > 0 then
+  begin
+    if SameText(Copy(S, 1, p - 1), 'file') then
+      Exit('');
+    S := Copy(S, p + 3, MaxInt);
+    Slash := Pos('/', S);
+    if Slash > 0 then
+      S := Copy(S, 1, Slash - 1);
+  end
+  else
+  begin
+    { user@host:path; a colon after a slash, or a drive letter's, is a
+      local path's. }
+    Colon := Pos(':', S);
+    Slash := Pos('/', S);
+    if (Colon <= 2) or ((Slash > 0) and (Slash < Colon)) then
+      Exit('');
+  end;
+  p := LastDelimiter('@', S);
+  if p > 0 then
+    S := Copy(S, p + 1, MaxInt);
+  Colon := Pos(':', S);
+  if Colon > 0 then
+    S := Copy(S, 1, Colon - 1);
+  Result := LowerCase(S);
 end;
 
 function FileTarget(const APath: string; ALine: integer;

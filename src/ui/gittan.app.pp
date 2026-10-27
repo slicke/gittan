@@ -67,11 +67,12 @@ type
     function UpdateDue: boolean;
     {** Remind Me Later: no badge for UpdateSnoozeDays. }
     procedure SnoozeUpdate;
-    {** The path of the forge's tool (gh), as the settings give it: GhPath
-      when set, else the one on the search path; '' while GitHub is off
-      or gh is not found. Whoever needs the forge makes one of it
-      (ForgeClass) and keeps it while the path stays the same. }
-    function ForgeCli: string;
+    {** The path of the tool of AForge (ForgeClass when nil; gh), as the
+      settings give it: GhPath when set, else the one on the search
+      path; '' while it is off or its tool is not found, and for no
+      forge. Whoever needs the forge makes one of it and keeps it while
+      the path stays the same. }
+    function ForgeCli(AForge: TGittanForgeClass = nil): string;
     property Settings: TGittanSettings read FSettings;
     property Lexers: TGittanLexers read FLexers;
     {** The application icon at every size (MAINICON), nil when the
@@ -206,14 +207,16 @@ begin
   FSettings.UpdateSnoozedUntil := Date + UpdateSnoozeDays;
 end;
 
-function TGittanApp.ForgeCli: string;
+function TGittanApp.ForgeCli(AForge: TGittanForgeClass): string;
 begin
-  if not FSettings.GitHubEnabled or (ForgeClass = nil) then
+  if AForge = nil then
+    AForge := ForgeClass;
+  if not FSettings.GitHubEnabled or (AForge = nil) then
     Result := ''
   else if FSettings.GhPath <> '' then
     Result := FSettings.GhPath
   else
-    Result := FindTool(ForgeClass.CliName);
+    Result := FindTool(AForge.CliName);
 end;
 
 end.

@@ -109,6 +109,9 @@ type
   public
     function Name: string; override;
     class function CliName: string; override;
+    {** github.com, and the GitHub Enterprise hosts gh is logged in to
+      (GhHosts of the hosts.yml in GhConfigDir). }
+    class function HostsRemote(const AHost: string): boolean; override;
     function Version(out AVersion: string): boolean; override;
     function PullJob(const ARoot, ABranch, ALogin: string): TGittanPullRequestJob; override;
     function ReviewJob(const ARoot, ARepo: string; ANumber: integer): TGittanReviewJob;
@@ -121,10 +124,60 @@ type
     function PullRef(ANumber: integer): string; override;
   end;
 
+{** gh's configuration folder: GH_CONFIG_DIR, else "GitHub CLI" in
+  AppData on Windows, else gh in XDG_CONFIG_HOME or ~/.config. }
+function GhConfigDir: string;
+
+{** The hosts gh is logged in to, the top-level keys of its hosts.yml
+  (AText), in lower case. }
+function GhHosts(const AText: string): TStringArray;
+
 implementation
 
 uses
   DateUtils, fpjson, jsonparser, gittan.git;
+
+function GhConfigDir: string;
+begin
+  Result := EnvironmentVariable('GH_CONFIG_DIR');
+  if Result <> '' then
+    Exit;
+  {$ifdef windows}
+  Result := EnvironmentVariable('AppData');
+  if Result <> '' then
+    Result := IncludeTrailingPathDelimiter(Result) + 'GitHub CLI';
+  {$else}
+  Result := EnvironmentVariable('XDG_CONFIG_HOME');
+  if Result = '' then
+    Result := IncludeTrailingPathDelimiter(GetUserDir) + '.config';
+  Result := IncludeTrailingPathDelimiter(Result) + 'gh';
+  {$endif}
+end;
+
+function GhHosts(const AText: string): TStringArray;
+var
+  Line, Host: string;
+begin
+  Result := nil;
+  for Line in AText.Split([#10]) do
+  begin
+    { A key at the start of a line, "host:"; the settings under it are
+      indented. }
+    if (Line = '') or (Line[1] in [' ', #9, '#', '-']) then
+      Continue;
+    Host := Trim(Line);
+    if (Host = '') or (Host[Length(Host)] <> ':') then
+      Continue;
+    Host := LowerCase(Trim(Copy(Host, 1, Length(Host) - 1)));
+    if (Length(Host) >= 2) and (Host[1] in ['"', '''']) then
+      Host := Copy(Host, 2, Length(Host) - 2);
+    if Host <> '' then
+    begin
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := Host;
+    end;
+  end;
+end;
 
 { ---------------------------------------------------------------------------
   gh
@@ -932,6 +985,30 @@ end;
 { ---------------------------------------------------------------------------
   The forge
   --------------------------------------------------------------------------- }
+
+class function TGittanGitHubForge.HostsRemote(const AHost: string): boolean;
+var
+  Lines: TStringList;
+  Host: string;
+begin
+  Result := (AHost = 'github.com') or (AHost = 'www.github.com') or
+    (AHost = 'ssh.github.com');
+  if Result then
+    Exit;
+  Lines := TStringList.Create;
+  try
+    try
+      Lines.LoadFromFile(IncludeTrailingPathDelimiter(GhConfigDir) + 'hosts.yml');
+    except
+      Exit;
+    end;
+    for Host in GhHosts(Lines.Text) do
+      if Host = AHost then
+        Exit(True);
+  finally
+    Lines.Free;
+  end;
+end;
 
 function TGittanGitHubForge.Name: string;
 begin

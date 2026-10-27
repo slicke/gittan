@@ -504,21 +504,7 @@ begin
   UpdateCommitState;
   if not ATools then
     Exit;
-  FindForge;
-  UpdateForgeItems;
-  if not Assigned(FForge) then
-  begin
-    { What the forge that is gone had found. }
-    AbandonPullJob;
-    FPullKey := '';
-    FHasPull := False;
-    FPulls := nil;
-    FPullError := '';
-    FReviewPulls := nil;
-    FSummary.SetReviewPulls(nil);
-    FPullLogin := '';
-    ClearReviews;
-  end;
+  ReFindForge;
   MenuRefreshClick(nil);
   CheckGitVersion;
 end;
@@ -556,20 +542,51 @@ begin
   FEditOld.Update(True);
 end;
 
-{ The forge, GitHub through gh: gh by the path the settings give, else
-  as found on ToolSearchPath; none while the GitHub features are turned
-  off, which hides them as a missing gh does. A forge already made with
-  the same tool is kept. }
-procedure TRepoFrame.FindForge;
+{ The forge of the repository's remotes (ForgeClassFor), its tool by
+  the path the settings give, else as found on ToolSearchPath; none
+  without a remote on a known forge or while its features are turned
+  off, which hides them as a missing tool does. A forge already made of
+  the same class with the same tool is kept; true when it is not. }
+function TRepoFrame.FindForge: boolean;
 var
+  Forge: TGittanForgeClass;
   Cli: string;
 begin
-  Cli := App.ForgeCli;
-  if Assigned(FForge) and (FForge.Cli = Cli) then
+  Forge := nil;
+  if (FRepo <> nil) and (FRepo.Root <> '') then
+    Forge := ForgeClassFor(FRemoteUrls);
+  Cli := '';
+  if Forge <> nil then
+    Cli := App.ForgeCli(Forge);
+  if Assigned(FForge) then
+    Result := (FForge.ClassType <> Forge) or (FForge.Cli <> Cli)
+  else
+    Result := Cli <> '';
+  if not Result then
     Exit;
   FreeAndNil(FForge);
   if Cli <> '' then
-    FForge := ForgeClass.Create(Cli);
+    FForge := Forge.Create(Cli);
+end;
+
+{ The forge found again, the remotes or the settings having changed:
+  the items that need it follow, and what a forge that is gone or
+  replaced had found goes with it. }
+procedure TRepoFrame.ReFindForge;
+begin
+  if FindForge then
+  begin
+    AbandonPullJob;
+    FPullKey := '';
+    FHasPull := False;
+    FPulls := nil;
+    FPullError := '';
+    FReviewPulls := nil;
+    FSummary.SetReviewPulls(nil);
+    FPullLogin := '';
+    ClearReviews;
+  end;
+  UpdateForgeItems;
 end;
 
 { The forge's name, empty without one (when what is named after it is

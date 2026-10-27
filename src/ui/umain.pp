@@ -222,15 +222,19 @@ type
     { The editor's font size when none was picked (DefaultFontSize for
       the screen the window opened on). }
     FDefaultFontSize: integer;
-    { The forge the repositories are on (gittan.forge; GitHub through
-      gh, the only one so far), made by FindForge with the tool's path
-      the settings give, else the one FindTool gives (run it by that,
-      PATH may not reach it); nil while the tool is missing or the
-      features are turned off. The features that need the forge are
+    { The forge the repository is on (gittan.forge; GitHub through gh,
+      the only one so far), the first registered that hosts one of its
+      remotes (ForgeClassFor of FRemoteUrls, the snapshot's), made by
+      FindForge with the tool's path the settings give, else the one
+      FindTool gives (run it by that, PATH may not reach it); nil
+      without a repository, while none of its remotes is on a known
+      forge, while the tool is missing or the features are turned off.
+      ReFindForge looks again when the remotes or the settings change. The features that need the forge are
       offered only when it is there: the menu items in FForgeItems are
       shown then, hidden otherwise, and named after it from the formats
       in FForgeCaptions (UpdateForgeItems). }
     FForge: TGittanForge;
+    FRemoteUrls: string;
     FForgeItems: array of TMenuItem;
     FForgeCaptions: array of string;
     { The AI features (umain.ai.inc, gittan.ai), shown only once the
@@ -1284,7 +1288,8 @@ type
     procedure ApplyEditorFont(AFont: TFont);
     procedure EditorMetricsChanged;
     procedure ApplyTabSize(ASize: integer);
-    procedure FindForge;
+    function FindForge: boolean;
+    procedure ReFindForge;
     function ForgeName: string;
     procedure UpdateForgeItems;
     procedure FindAgentCli;
@@ -2934,7 +2939,6 @@ procedure TRepoFrame.Init(AWindow: TRepoWindow);
 begin
   FWindow := AWindow;
   FTitleBarHeight := FWindow.TitleBarHeight;
-  FindForge;
   FindAgentCli;
   FTabSize := App.Settings.TabSize;
   if FTabSize <= 0 then
@@ -5764,6 +5768,13 @@ begin
   FStats := ASnap.Stats;
   FBranch := ASnap.Branch;
   FSnapHead := ASnap.Head;
+  { The remotes decide the forge, before the pull request is looked up
+    on it. }
+  if ASnap.RemoteUrls <> FRemoteUrls then
+  begin
+    FRemoteUrls := ASnap.RemoteUrls;
+    ReFindForge;
+  end;
   { The pull request is looked up for the branch HEAD is on, the detached
     id during a rebase, so this runs before the rebase branch stands in. }
   StartPullJob(False);
