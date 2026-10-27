@@ -15,6 +15,20 @@ unit uwindow;
   all, the shown one last, since the settings keep its view options.
   App's news goes to every frame: the lexers loaded, a newer build.
 
+  Beside the frames the window holds the forge view (TForgeView in
+  uforge), one for the window: the user's pull requests across every
+  repository of the forge (GitHub). The globe at the right end of the
+  tab strip (the own title bar on Windows and GTK 3), there while
+  there is a forge, shows it over the frame shown (ShowForgeView: its
+  menu and caption take the frame's, no tab is marked as shown, the
+  frame counts as in the background meanwhile); the globe again, a
+  tab, Escape or opening a repository hides it (HideForgeView,
+  ActivateFrame), and the frame gets the window back (Activated).
+  What the view needs a repository or the window for comes through
+  TRepoWindow: the folder dialog, the settings, and a pull request to
+  compare with, which goes to the frame with a remote for its
+  repository, else to its clone opened in a tab (ComparePullRequest).
+
   OpenRepository is the one way a repository opens: it shows the frame
   that has it open already (or is opening it), else opens it in the
   shown frame while that one is empty, else in a new frame.
@@ -39,8 +53,8 @@ interface
 
 uses
   Classes, SysUtils, Types, Math, LCLType, Forms, Controls, Graphics, gittan.app,
-  gittan.git, umain
-  {$IFDEF LCLCocoa}, gittan.toolbar, gittan.titlebar{$ENDIF}
+  gittan.git, gittan.forge, umain, uforge
+  {$IFDEF LCLCocoa}, gittan.toolbar, gittan.titlebar, CocoaConfig{$ENDIF}
   {$IFDEF OWNBAR}, gittan.owntitlebar{$ENDIF}
   {$IFDEF LCLWin32}, gittan.wintitlebar{$ENDIF}
   {$IFDEF LCLGtk3}, gittan.gtktitlebar{$ENDIF};
@@ -60,6 +74,12 @@ type
     FClosing: TList;
     FActive: TRepoFrame;
     FTitleBarHeight: integer;
+    { The forge view, over the frame shown while FForgeShown; the pull
+      request a card of it compares with once its clone, which the view
+      asked to open, is open. }
+    FForgeView: TForgeView;
+    FForgeShown: boolean;
+    FForgeClonePull: TGittanPullRequest;
     {$IFDEF LCLCocoa}
     { The toolbar on macOS 11 and later, nil before. }
     FToolbar: TGittanToolbar;
@@ -87,6 +107,10 @@ type
     procedure TabSelect(Sender: TObject; AIndex: integer);
     procedure TabClose(Sender: TObject; AIndex: integer);
     procedure TabNew(Sender: TObject);
+    procedure ForgeClick(Sender: TObject);
+    procedure ShowForgeView;
+    procedure UpdateForgeChrome;
+    procedure ForgeCloneOpened(Sender: TObject);
   public
     procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil);
       override;
@@ -102,6 +126,12 @@ type
     procedure ShowFrame(AFrame: TRepoFrame); override;
     procedure SettingsChanged(AFont: TFont; ATheme, ATabSize: integer; ATools: boolean);
       override;
+    procedure AskOpenRepository; override;
+    procedure ShowSettings; override;
+    procedure ShowAbout; override;
+    function ComparePullRequest(const APull: TGittanPullRequest;
+      const AClone: string): boolean; override;
+    procedure HideForgeView; override;
     {** A new, empty frame, shown. }
     function NewFrame: TRepoFrame;
     {** Shows AFrame and hides the one shown before. }
@@ -148,6 +178,13 @@ begin
   { The first frame is made here, in FormCreate, so the form scales it
     to the screen with the rest afterwards (TCustomForm.AfterConstruction). }
   NewFrame;
+  { The forge view after the first frame, scaled with it. }
+  FForgeView := TForgeView.Create(Self);
+  FForgeView.Visible := False;
+  FForgeView.Align := alClient;
+  FForgeView.Parent := Self;
+  FForgeView.Init(Self);
+  UpdateForgeChrome;
   if not Lexers then
     FActive.ShowNoLexers;
   { The welcome view says what opens, rather than offer its buttons
@@ -169,6 +206,7 @@ begin
   FActive := nil;
   for i := FFrames.Count - 1 downto 0 do
     TRepoFrame(FFrames[i]).Free;
+  FreeAndNil(FForgeView);
   FreeAndNil(FFrames);
   FreeAndNil(FClosing);
   {$IFDEF LCLCocoa}
@@ -194,6 +232,7 @@ begin
     FToolbar.OnSelect := @TabSelect;
     FToolbar.OnClose := @TabClose;
     FToolbar.OnNew := @TabNew;
+    FToolbar.OnForge := @ForgeClick;
   end;
   FTitleBarHeight := ExtendUnderTitleBar(Handle);
   {$ENDIF}
@@ -210,6 +249,7 @@ begin
   FOwnBar.OnTabSelect := @TabSelect;
   FOwnBar.OnTabClose := @TabClose;
   FOwnBar.OnNewTab := @TabNew;
+  FOwnBar.OnForge := @ForgeClick;
   {$ENDIF}
   {$IFDEF LCLWin32}
   InstallTitleBar(Self, TGittanWinTitleBar(FOwnBar));
@@ -255,25 +295,143 @@ begin
   ActivateFrame(Result);
 end;
 
+{ Also what hides the forge view: the frame then takes the window back
+  (Activated), the one under the view too. }
 procedure TGittanWindow.ActivateFrame(AFrame: TRepoFrame);
 var
   Old: TRepoFrame;
 begin
-  if AFrame = FActive then
+  if (AFrame = FActive) and not FForgeShown then
     Exit;
   Old := FActive;
   FActive := AFrame;
+  if FForgeShown then
+  begin
+    FForgeShown := False;
+    FForgeView.Visible := False;
+    FForgeView.Hidden;
+  end;
   AFrame.Visible := True;
   AFrame.BringToFront;
-  if Old <> nil then
+  if (Old <> nil) and (Old <> AFrame) then
     Old.Visible := False;
   AFrame.Activated;
   UpdateTabs;
+  UpdateForgeChrome;
 end;
 
+{ The frame under the forge view counts as in the background: the view
+  has the menu, the caption and the title bar meanwhile. }
 function TGittanWindow.IsActive(AFrame: TRepoFrame): boolean;
 begin
-  Result := (AFrame <> nil) and (AFrame = FActive);
+  Result := (AFrame <> nil) and (AFrame = FActive) and not FForgeShown;
+end;
+
+{ The globe: the forge view, or the frame under it again. }
+procedure TGittanWindow.ForgeClick(Sender: TObject);
+begin
+  if FForgeShown then
+    HideForgeView
+  else
+    ShowForgeView;
+end;
+
+{ The view over the frame shown, with its menu (and the application
+  menu's items on macOS), the forge's name as the caption and the
+  title bar's shade whole, since no sidebar is under it. }
+procedure TGittanWindow.ShowForgeView;
+begin
+  if FForgeShown or (FForgeView = nil) or not FForgeView.HasForge then
+    Exit;
+  FForgeShown := True;
+  FForgeView.Visible := True;
+  FForgeView.BringToFront;
+  {$IFDEF LCLCocoa}
+  CocoaConfigMenu.appMenu.customMenus := FForgeView.AppMenuItem;
+  {$ENDIF}
+  Menu := FForgeView.MainMenu;
+  {$IFDEF OWNBAR}
+  FOwnBar.SplitControl := nil;
+  FOwnBar.Layout;
+  {$ENDIF}
+  {$IFDEF LCLGtk3}
+  TGittanGtkTitleBar(FOwnBar).HideNativeMenu;
+  {$ENDIF}
+  Caption := FForgeView.ForgeName;
+  FForgeView.Shown;
+  UpdateTabs;
+  UpdateForgeChrome;
+end;
+
+procedure TGittanWindow.HideForgeView;
+begin
+  if FForgeShown and (FActive <> nil) then
+    ActivateFrame(FActive);
+end;
+
+{ The globe in the chrome: there while there is a forge, filled while
+  the view is shown. }
+procedure TGittanWindow.UpdateForgeChrome;
+begin
+  if FForgeView = nil then
+    Exit;
+  {$IFDEF LCLCocoa}
+  if FToolbar <> nil then
+    FToolbar.SetForge(FForgeView.HasForge, FForgeShown, FForgeView.ForgeName);
+  {$ENDIF}
+  {$IFDEF OWNBAR}
+  FOwnBar.SetForge(FForgeView.HasForge, FForgeShown, FForgeView.ForgeName);
+  {$ENDIF}
+end;
+
+procedure TGittanWindow.AskOpenRepository;
+begin
+  FActive.MenuOpenRepoClick(nil);
+end;
+
+procedure TGittanWindow.ShowSettings;
+begin
+  FActive.MenuSettingsClick(nil);
+end;
+
+procedure TGittanWindow.ShowAbout;
+begin
+  FActive.MenuAboutClick(nil);
+end;
+
+{ The frame with a remote for the pull request's repository, shown,
+  compares with it; else its clone opens (in the frame that has it, the
+  shown one while empty, or a new one) and compares once open. }
+function TGittanWindow.ComparePullRequest(const APull: TGittanPullRequest;
+  const AClone: string): boolean;
+var
+  i: integer;
+begin
+  Result := True;
+  for i := 0 to FFrames.Count - 1 do
+    if Frames[i].HasRemoteFor(APull.Repo) then
+    begin
+      ActivateFrame(Frames[i]);
+      Frames[i].ComparePull(APull);
+      Exit;
+    end;
+  if AClone <> '' then
+  begin
+    FForgeClonePull := APull;
+    OpenRepository(AClone, @ForgeCloneOpened);
+    Exit;
+  end;
+  Result := False;
+end;
+
+{ Sender is the frame the clone opened in (OpenRepository). }
+procedure TGittanWindow.ForgeCloneOpened(Sender: TObject);
+var
+  Target: TRepoFrame;
+begin
+  Target := TRepoFrame(Sender);
+  if Target.HasRemoteFor(FForgeClonePull.Repo) then
+    Target.ComparePull(FForgeClonePull);
 end;
 
 function TGittanWindow.TitleBarHeight: integer;
@@ -554,7 +712,10 @@ begin
     Key := 0;
     Exit;
   end;
-  FActive.FormKeyDown(Sender, Key, Shift);
+  if FForgeShown then
+    FForgeView.FormKeyDown(Sender, Key, Shift)
+  else
+    FActive.FormKeyDown(Sender, Key, Shift);
   {$IFDEF LCLGtk3}
   if (Key <> 0) and (Shift * [ssAlt, ssCtrl, ssShift, ssMeta] = [ssAlt]) and
     (Key >= VK_A) and (Key <= VK_Z) and FOwnBar.OpenMenuByKey(Chr(Key)) then
@@ -621,12 +782,17 @@ begin
     Hints[i] := Frames[i].TabHint;
     Marks[i] := Frames[i].HasNews;
   end;
+  { No tab is the shown one while the forge view is. }
+  if FForgeShown then
+    i := -1
+  else
+    i := FFrames.IndexOf(FActive);
   {$IFDEF LCLCocoa}
   if FToolbar <> nil then
-    FToolbar.SetTabs(Captions, Hints, Marks, FFrames.IndexOf(FActive));
+    FToolbar.SetTabs(Captions, Hints, Marks, i);
   {$ENDIF}
   {$IFDEF OWNBAR}
-  FOwnBar.SetTabs(Captions, Hints, Marks, FFrames.IndexOf(FActive));
+  FOwnBar.SetTabs(Captions, Hints, Marks, i);
   {$ENDIF}
 end;
 
@@ -740,6 +906,14 @@ begin
       Frames[i].SettingsChanged(AFont, ATheme, ATabSize, ATools);
   if FActive <> nil then
     FActive.SettingsChanged(AFont, ATheme, ATabSize, ATools);
+  { The forge view's forge too; gone, the view goes with its globe. }
+  if ATools and (FForgeView <> nil) then
+  begin
+    FForgeView.SettingsChanged;
+    if not FForgeView.HasForge then
+      HideForgeView;
+    UpdateForgeChrome;
+  end;
 end;
 
 procedure TGittanWindow.ShowFrame(AFrame: TRepoFrame);

@@ -157,6 +157,10 @@ function StillToReview(const AReview: TGittanForgePulls): TGittanForgePulls;
 {** APulls without the ones nobody but their author has answered (no
   Feedback). }
 function WithFeedback(const APulls: TGittanForgePulls): TGittanForgePulls;
+{** APull as a TGittanPullRequest, for what works on the repository's
+  own pull requests (a comparison): the fields both have, the rest
+  empty. }
+function PullRequestOf(const APull: TGittanForgePull): TGittanPullRequest;
 
 type
   {** Reads, in a thread since it goes to the network, the pull request
@@ -519,6 +523,23 @@ begin
       Inc(n);
     end;
   SetLength(Result, n);
+end;
+
+function PullRequestOf(const APull: TGittanForgePull): TGittanPullRequest;
+begin
+  Result := Default(TGittanPullRequest);
+  Result.Number := APull.Number;
+  Result.Repo := APull.Repo;
+  Result.Title := APull.Title;
+  Result.Url := APull.Url;
+  Result.HeadRef := APull.HeadRef;
+  Result.BaseRef := APull.BaseRef;
+  Result.Author := APull.Author;
+  Result.State := APull.State;
+  Result.ReviewDecision := APull.ReviewDecision;
+  Result.IsDraft := APull.IsDraft;
+  Result.Created := APull.Created;
+  Result.Updated := APull.Updated;
 end;
 
 { ---------------------------------------------------------------------------

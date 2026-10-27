@@ -517,12 +517,6 @@ begin
     FReviewPulls := nil;
     FSummary.SetReviewPulls(nil);
     FPullLogin := '';
-    AbandonForgeJob;
-    FForgeMine := nil;
-    FForgeReview := nil;
-    FForgeLogin := '';
-    FForgeError := '';
-    UpdateForgePage;
     ClearReviews;
   end;
   MenuRefreshClick(nil);
@@ -570,12 +564,7 @@ procedure TRepoFrame.FindForge;
 var
   Cli: string;
 begin
-  if not App.Settings.GitHubEnabled then
-    Cli := ''
-  else if App.Settings.GhPath <> '' then
-    Cli := App.Settings.GhPath
-  else
-    Cli := FindTool(TGittanGitHubForge.CliName);
+  Cli := App.ForgeCli;
   if Assigned(FForge) and (FForge.Cli = Cli) then
     Exit;
   FreeAndNil(FForge);
@@ -608,29 +597,18 @@ begin
   end;
   if FReviewItem <> nil then
     FReviewItem.Enabled := Assigned(FForge);
-  { The Pull Requests and forge pages need the forge too: their rows,
-    their menu items, the names they show, and the page itself when the
-    forge goes while it shows. }
+  { The Pull Requests page needs the forge too: its row, its menu item,
+    the name it shows, and the page itself when the forge goes while it
+    shows. }
   if FPullsItem <> nil then
     FPullsItem.Visible := Assigned(FForge);
-  if FForgeItem <> nil then
-  begin
-    FForgeItem.Visible := Assigned(FForge);
-    FForgeItem.Caption := Format(rsForgeMenu, [ForgeName]);
-  end;
   if FSideNav <> nil then
-  begin
     FSideNav.SetRowVisible(navPulls, Assigned(FForge));
-    FSideNav.SetRowVisible(navForge, Assigned(FForge));
-    FSideNav.SetRowCaption(navForge, ForgeName);
-  end;
   if FPullPage <> nil then
     FPullPage.SetForge(ForgeName);
-  if FForgePage <> nil then
-    FForgePage.SetForge(ForgeName);
   if FSummary <> nil then
     FSummary.ForgeName := ForgeName;
-  if not Assigned(FForge) and (FView in [gvPulls, gvForge]) then
+  if not Assigned(FForge) and (FView = gvPulls) then
     ShowSummary;
 end;
 

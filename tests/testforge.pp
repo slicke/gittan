@@ -24,6 +24,7 @@ type
     procedure TestNotes;
     procedure TestFindClones;
     procedure TestSiblingRepositories;
+    procedure TestPullRequestOf;
   end;
 
 implementation
@@ -287,6 +288,30 @@ begin
     Roots.Free;
     RemoveTree(ExcludeTrailingPathDelimiter(Dir));
   end;
+end;
+
+{ The forge page's pull request as the repository's own are kept: what
+  both records have, the rest empty. }
+procedure TForgeTest.TestPullRequestOf;
+var
+  Login, Error: string;
+  MinePulls, ReviewPulls: TGittanForgePulls;
+  Pull: TGittanPullRequest;
+begin
+  AssertTrue(ParseForgeAnswer(Answer, Login, MinePulls, ReviewPulls, Error));
+  Pull := PullRequestOf(ReviewPulls[0]);
+  AssertEquals(12, Pull.Number);
+  AssertEquals('owner/repo', Pull.Repo);
+  AssertEquals('Fix the thing', Pull.Title);
+  AssertEquals('https://github.com/owner/repo/pull/12', Pull.Url);
+  AssertEquals('fix/thing', Pull.HeadRef);
+  AssertEquals('main', Pull.BaseRef);
+  AssertEquals('ada', Pull.Author);
+  AssertTrue(Pull.IsDraft);
+  AssertTrue(Pull.State = ReviewPulls[0].State);
+  AssertEquals(EncodeDateTime(2026, 10, 20, 12, 34, 56, 0), Pull.Created);
+  AssertEquals(0, Pull.ChecksPending);
+  AssertEquals('', Pull.Labels);
 end;
 
 initialization

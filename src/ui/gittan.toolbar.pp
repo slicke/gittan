@@ -14,9 +14,12 @@
   frame while another was shown) has a blue dot before its name. A
   click on a tab selects it at once; the
   cross on the shown or hovered tab, or a middle click, closes it; the
-  plus asks for a new tab. A press on the empty part moves the window
-  and a double click there zooms it, as on the title bar. The full path
-  of the tab under the mouse is its tooltip.
+  plus asks for a new tab. At the strip's right end a globe (SetForge;
+  there while there is a forge, filled while the forge view is shown)
+  asks for the forge view (OnForge). A press on the empty part moves
+  the window and a double click there zooms it, as on the title bar.
+  The full path of the tab under the mouse is its tooltip, the forge's
+  name the globe's.
 
   The filter, the change navigator and the actions of the view belong to
   a repository and are in its frame: the field over the tree and the
@@ -53,16 +56,22 @@ type
       cross, on the plus; the cross or plus pressed (-1 for none,
       PlusPart for the plus). }
     FHot: integer;
-    FHotClose, FHotPlus: boolean;
+    FHotClose, FHotPlus, FHotGlobe: boolean;
     FPressed: integer;
+    { The globe: whether it is there, whether the forge view is shown,
+      and its tooltip. }
+    FForgeVisible, FForgeShown: boolean;
+    FForgeHint: string;
     FOnSelect, FOnClose: TGittanTabEvent;
-    FOnNew: TNotifyEvent;
+    FOnNew, FOnForge: TNotifyEvent;
+    function GlobeRoom: double;
     function TabWidth(AWidth: double): double;
     function TabRect(AIndex: integer; const ABounds: NSRect): NSRect;
     function CloseRect(const ATab: NSRect): NSRect;
     function PlusRect(const ABounds: NSRect): NSRect;
+    function GlobeRect(const ABounds: NSRect): NSRect;
     procedure HitTest(const APoint: NSPoint; const ABounds: NSRect;
-      out AIndex: integer; out AClose, APlus: boolean);
+      out AIndex: integer; out AClose, APlus, AGlobe: boolean);
     procedure Draw(const ABounds: NSRect);
     procedure MouseDown(AEvent: NSEvent);
     procedure MouseUp(AEvent: NSEvent);
@@ -80,12 +89,18 @@ type
       name), AActive the one shown. }
     procedure SetTabs(const ACaptions, AHints: array of string;
       const AMarks: array of boolean; AActive: integer);
+    {** The globe at the right end: shown while AVisible (there is a
+      forge), filled while AShown (the forge view is shown), AHint its
+      tooltip (the forge's name). }
+    procedure SetForge(AVisible, AShown: boolean; const AHint: string);
     {** A click on a tab: show it. }
     property OnSelect: TGittanTabEvent read FOnSelect write FOnSelect;
     {** The cross or a middle click on a tab: close it. }
     property OnClose: TGittanTabEvent read FOnClose write FOnClose;
     {** The plus: a new tab. }
     property OnNew: TNotifyEvent read FOnNew write FOnNew;
+    {** The globe: the forge view, or back from it. }
+    property OnForge: TNotifyEvent read FOnForge write FOnForge;
   end;
 
 implementation
@@ -138,8 +153,12 @@ const
   TabGap = 3;
   PlusWidth = 30;
   CrossSize = 16;
-  { FPressed for the plus. }
+  { The room the globe takes at the right end, and its button. }
+  GlobeWidth = 34;
+  GlobeSize = 24;
+  { FPressed for the plus and for the globe. }
   PlusPart = -2;
+  GlobePart = -3;
 
 function NSStr(const S: string): NSString;
 begin
@@ -166,6 +185,16 @@ begin
   P.setLineWidth(AWidth);
   P.setLineCapStyle(NSRoundLineCapStyle);
   AColor.setStroke;
+  P.stroke;
+end;
+
+{ Strokes the oval in R in the stroke color set. }
+procedure StrokeOval(const R: NSRect; AWidth: double);
+var
+  P: NSBezierPath;
+begin
+  P := NSBezierPath.bezierPathWithOvalInRect(R);
+  P.setLineWidth(AWidth);
   P.stroke;
 end;
 
@@ -316,6 +345,17 @@ begin
   inherited Destroy;
 end;
 
+procedure TGittanToolbar.SetForge(AVisible, AShown: boolean; const AHint: string);
+begin
+  FForgeVisible := AVisible;
+  FForgeShown := AShown;
+  FForgeHint := AHint;
+  if not AVisible then
+    FHotGlobe := False;
+  if FStrip <> nil then
+    FStrip.setNeedsDisplay_(True);
+end;
+
 procedure TGittanToolbar.SetTabs(const ACaptions, AHints: array of string;
   const AMarks: array of boolean; AActive: integer);
 var
@@ -340,11 +380,20 @@ begin
     FStrip.setNeedsDisplay_(True);
 end;
 
+{ What the globe keeps the tabs out of. }
+function TGittanToolbar.GlobeRoom: double;
+begin
+  if FForgeVisible then
+    Result := GlobeWidth
+  else
+    Result := 0;
+end;
+
 function TGittanToolbar.TabWidth(AWidth: double): double;
 begin
   if Length(FCaptions) = 0 then
     Exit(MaxTabWidth);
-  Result := (AWidth - PlusWidth) / Length(FCaptions);
+  Result := (AWidth - PlusWidth - GlobeRoom) / Length(FCaptions);
   Result := Max(MinTabWidth, Min(MaxTabWidth, Result));
 end;
 
@@ -370,14 +419,25 @@ begin
   Result := NSMakeRect(X + 2, (ABounds.size.height - 22) / 2, 22, 22);
 end;
 
+{ The globe's button, at the right end. }
+function TGittanToolbar.GlobeRect(const ABounds: NSRect): NSRect;
+begin
+  Result := NSMakeRect(ABounds.size.width - GlobeWidth + (GlobeWidth - GlobeSize) / 2,
+    (ABounds.size.height - GlobeSize) / 2, GlobeSize, GlobeSize);
+end;
+
 procedure TGittanToolbar.HitTest(const APoint: NSPoint; const ABounds: NSRect;
-  out AIndex: integer; out AClose, APlus: boolean);
+  out AIndex: integer; out AClose, APlus, AGlobe: boolean);
 var
   i: integer;
   R: NSRect;
 begin
   AIndex := -1;
   AClose := False;
+  APlus := False;
+  AGlobe := FForgeVisible and PointIn(APoint, GlobeRect(ABounds));
+  if AGlobe then
+    Exit;
   APlus := PointIn(APoint, PlusRect(ABounds));
   if APlus then
     Exit;
@@ -485,6 +545,41 @@ begin
       C.origin.x + C.size.width / 2, C.origin.y + C.size.height - 6, Cross, 1.4);
     StrokeLine(C.origin.x + 6, C.origin.y + C.size.height / 2,
       C.origin.x + C.size.width - 6, C.origin.y + C.size.height / 2, Cross, 1.4);
+    { The globe: filled as the shown tab while the forge view is shown,
+      fainter under the mouse; a circle with a narrower one in it and
+      a line across, as the sidebar drew it. }
+    if FForgeVisible then
+    begin
+      C := GlobeRect(ABounds);
+      if FForgeShown or FHotGlobe then
+      begin
+        if FForgeShown and Dark then
+          Fill := NSColor.whiteColor.colorWithAlphaComponent(0.13)
+        else if FForgeShown then
+          Fill := NSColor.whiteColor.colorWithAlphaComponent(0.85)
+        else
+          Fill := NSColor.labelColor.colorWithAlphaComponent(0.10);
+        Fill.setFill;
+        NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius(C, 5, 5).fill;
+        if FForgeShown and not Dark then
+        begin
+          NSColor.blackColor.colorWithAlphaComponent(0.10).setStroke;
+          NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius(
+            NSInsetRect(C, 0.5, 0.5), 5, 5).stroke;
+        end;
+      end;
+      if FForgeShown then
+        Cross := NSColor.labelColor
+      else
+        Cross := NSColor.secondaryLabelColor;
+      Cross.setStroke;
+      R := NSInsetRect(C, 5, 5);
+      StrokeOval(R, 1.3);
+      StrokeOval(NSMakeRect(R.origin.x + R.size.width * 5 / 14, R.origin.y,
+        R.size.width * 4 / 14, R.size.height), 1.3);
+      StrokeLine(R.origin.x, R.origin.y + R.size.height / 2, R.origin.x + R.size.width,
+        R.origin.y + R.size.height / 2, Cross, 1.3);
+    end;
   finally
     Para.release;
   end;
@@ -497,12 +592,14 @@ procedure TGittanToolbar.MouseDown(AEvent: NSEvent);
 var
   P: NSPoint;
   Index: integer;
-  InCross, InPlus: boolean;
+  InCross, InPlus, InGlobe: boolean;
 begin
   P := FStrip.convertPoint_fromView(AEvent.locationInWindow, nil);
-  HitTest(P, FStrip.bounds, Index, InCross, InPlus);
+  HitTest(P, FStrip.bounds, Index, InCross, InPlus, InGlobe);
   FPressed := -1;
-  if InPlus then
+  if InGlobe then
+    FPressed := GlobePart
+  else if InPlus then
     FPressed := PlusPart
   else if (Index >= 0) and InCross then
     FPressed := Index
@@ -521,15 +618,20 @@ procedure TGittanToolbar.MouseUp(AEvent: NSEvent);
 var
   P: NSPoint;
   Index, Pressed: integer;
-  InCross, InPlus: boolean;
+  InCross, InPlus, InGlobe: boolean;
 begin
   Pressed := FPressed;
   FPressed := -1;
   if Pressed = -1 then
     Exit;
   P := FStrip.convertPoint_fromView(AEvent.locationInWindow, nil);
-  HitTest(P, FStrip.bounds, Index, InCross, InPlus);
-  if (Pressed = PlusPart) and InPlus then
+  HitTest(P, FStrip.bounds, Index, InCross, InPlus, InGlobe);
+  if (Pressed = GlobePart) and InGlobe then
+  begin
+    if Assigned(FOnForge) then
+      FOnForge(Self);
+  end
+  else if (Pressed = PlusPart) and InPlus then
   begin
     if Assigned(FOnNew) then
       FOnNew(Self);
@@ -546,12 +648,12 @@ procedure TGittanToolbar.OtherMouseUp(AEvent: NSEvent);
 var
   P: NSPoint;
   Index: integer;
-  InCross, InPlus: boolean;
+  InCross, InPlus, InGlobe: boolean;
 begin
   if AEvent.buttonNumber <> 2 then
     Exit;
   P := FStrip.convertPoint_fromView(AEvent.locationInWindow, nil);
-  HitTest(P, FStrip.bounds, Index, InCross, InPlus);
+  HitTest(P, FStrip.bounds, Index, InCross, InPlus, InGlobe);
   if (Index >= 0) and Assigned(FOnClose) then
     FOnClose(Self, Index);
 end;
@@ -560,20 +662,24 @@ procedure TGittanToolbar.MouseMoved(AEvent: NSEvent);
 var
   P: NSPoint;
   Index: integer;
-  InCross, InPlus: boolean;
+  InCross, InPlus, InGlobe: boolean;
 begin
   P := FStrip.convertPoint_fromView(AEvent.locationInWindow, nil);
-  HitTest(P, FStrip.bounds, Index, InCross, InPlus);
-  if (Index = FHot) and (InCross = FHotClose) and (InPlus = FHotPlus) then
+  HitTest(P, FStrip.bounds, Index, InCross, InPlus, InGlobe);
+  if (Index = FHot) and (InCross = FHotClose) and (InPlus = FHotPlus) and
+    (InGlobe = FHotGlobe) then
     Exit;
-  if Index <> FHot then
+  if (Index <> FHot) or (InGlobe <> FHotGlobe) then
     if Index >= 0 then
       FStrip.setToolTip(NSStr(FHints[Index]))
+    else if InGlobe then
+      FStrip.setToolTip(NSStr(FForgeHint))
     else
       FStrip.setToolTip(nil);
   FHot := Index;
   FHotClose := InCross;
   FHotPlus := InPlus;
+  FHotGlobe := InGlobe;
   FStrip.setNeedsDisplay_(True);
 end;
 
@@ -582,6 +688,7 @@ begin
   FHot := -1;
   FHotClose := False;
   FHotPlus := False;
+  FHotGlobe := False;
   FStrip.setNeedsDisplay_(True);
 end;
 

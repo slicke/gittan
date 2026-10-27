@@ -107,6 +107,11 @@ type
     procedure SetColors(ABack, AText, ADim, AHover, ALine, ALink, AOk, AWarn, AError: TColor);
     {** The fill of the cards. }
     procedure SetCardColor(ACard: TColor);
+    {** The palette of the dark or the light appearance: the editor's
+      background and text, the dim text, the hover, the dividers, the
+      link color and the ok, warning and error tones the Pull Requests
+      page has, and the cards' fill. }
+    procedure SetTheme(ADark: boolean);
     {** Makes the control at least AMin high (the height of the box it
       sits in, so its background covers the box), and no higher than its
       content needs beyond that. }
@@ -255,6 +260,24 @@ procedure TGittanForgePage.SetCardColor(ACard: TColor);
 begin
   FCard := ACard;
   Invalidate;
+end;
+
+procedure TGittanForgePage.SetTheme(ADark: boolean);
+begin
+  if ADark then
+  begin
+    SetColors(RGBToColor(30, 30, 30), RGBToColor(224, 224, 224), RGBToColor(150, 150, 150),
+      RGBToColor(50, 50, 51), RGBToColor(62, 62, 62), RGBToColor(78, 161, 255),
+      RGBToColor(63, 185, 80), RGBToColor(227, 179, 65), RGBToColor(248, 81, 73));
+    SetCardColor(RGBToColor(40, 40, 41));
+  end
+  else
+  begin
+    SetColors(clWhite, RGBToColor(30, 30, 30), RGBToColor(110, 110, 110),
+      RGBToColor(235, 235, 235), RGBToColor(222, 222, 222), RGBToColor(0, 102, 204),
+      RGBToColor(26, 127, 55), RGBToColor(154, 103, 0), RGBToColor(207, 34, 46));
+    SetCardColor(RGBToColor(245, 245, 246));
+  end;
 end;
 
 procedure TGittanForgePage.FitHeight(AMin: integer);
