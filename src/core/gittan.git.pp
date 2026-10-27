@@ -124,11 +124,14 @@ type
     whether it has files in Git LFS (Files, those with filter=lfs),
     whether git-lfs is on the tool path (Installed) and set up in git's
     config (SetUp: `git lfs install` gives filter.lfs.process or
-    .smudge), and how many of the files are pointers in the work tree,
-    not downloaded or never checked out (Pointers). }
+    .smudge), how many of the files are pointers in the work tree,
+    not downloaded or never checked out (Pointers), and the files that
+    may be locked (Lockable: those in Git LFS and those with the
+    attribute lockable, sorted). }
   TGittanLfsState = record
     Files, Pointers: integer;
     Installed, SetUp: boolean;
+    Lockable: TStringArray;
   end;
 
   TGittanRepoSnapshot = record
@@ -927,6 +930,15 @@ type
       files of the work tree in place of their pointers from what the
       store has. }
     function LfsInstall: boolean;
+    {** Locks APath on the LFS server for the user (`git lfs lock`), so
+      no one else pushes a change to it. False, with the reason in
+      Error, when git-lfs is not installed or the server said no (held
+      by someone else, say). }
+    function LfsLock(const APath: string): boolean;
+    {** Gives up the lock on APath (`git lfs unlock`); AForce also takes
+      another user's lock away, and one on a file with changes not
+      committed. False, with the reason in Error. }
+    function LfsUnlock(const APath: string; AForce: boolean): boolean;
     {** The output of `git blame --porcelain` for APath as it is in the
       commit ARef, or in the work tree when ARef is empty, with
       IgnoreWhitespace passed on as -w. Returns false when git failed: a
@@ -6465,7 +6477,7 @@ end;
 function TGittanRepo.LfsState(out AState: TGittanLfsState): boolean;
 var
   Output, Path, Oid: string;
-  Paths: TStringList;
+  Paths, Lockable: TStringList;
   Info: TSearchRec;
   Size: int64;
 begin
@@ -6493,10 +6505,27 @@ begin
           except
           end;
       end;
+    { The files with lockable besides, which git-lfs makes read-only
+      until they are locked. }
+    Lockable := TStringList.Create;
+    try
+      Lockable.Sorted := True;
+      Lockable.Duplicates := dupIgnore;
+      Lockable.AddStrings(Paths);
+      if RunGit(FRoot, ['ls-files', '-z', '--', ':(attr:lockable)'], Output) then
+      begin
+        SplitNul(Output, Paths);
+        Lockable.AddStrings(Paths);
+      end;
+      if Lockable.Count > 0 then
+        AState.Lockable := Lockable.ToStringArray(0, Lockable.Count - 1);
+    finally
+      Lockable.Free;
+    end;
   finally
     Paths.Free;
   end;
-  if AState.Files = 0 then
+  if (AState.Files = 0) and (AState.Lockable = nil) then
     Exit;
   AState.Installed := LfsInstalled;
   AState.SetUp := (RunGit(FRoot, ['config', 'filter.lfs.process'], Output) and
@@ -6526,6 +6555,33 @@ begin
     Exit(False);
   end;
   Result := RunRemote(['lfs', 'install']) and RunRemote(['lfs', 'checkout']);
+end;
+
+function TGittanRepo.LfsLock(const APath: string): boolean;
+begin
+  if (FRoot = '') or (APath = '') then
+    Exit(False);
+  if not LfsInstalled then
+  begin
+    FError := LfsMissingMessage;
+    Exit(False);
+  end;
+  Result := RunRemote(['lfs', 'lock', APath]);
+end;
+
+function TGittanRepo.LfsUnlock(const APath: string; AForce: boolean): boolean;
+begin
+  if (FRoot = '') or (APath = '') then
+    Exit(False);
+  if not LfsInstalled then
+  begin
+    FError := LfsMissingMessage;
+    Exit(False);
+  end;
+  if AForce then
+    Result := RunRemote(['lfs', 'unlock', '--force', APath])
+  else
+    Result := RunRemote(['lfs', 'unlock', APath]);
 end;
 
 { APath as a pattern of git-lfs, which takes --include as patterns

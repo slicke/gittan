@@ -27,7 +27,7 @@ uses
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.textfile, gittan.sectionheader, gittan.hintbox,
-  gittan.forge,
+  gittan.forge, gittan.lfslocks,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
   gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
@@ -774,6 +774,19 @@ type
       it (FLfsShown), not shown again once closed until it changes. }
     FLfsCheckJob: TGittanLfsCheckJob;
     FLfsChecked, FLfsShown: string;
+    { Git LFS locks (umain.lfslocks.inc): the files that may be locked,
+      as the check read them (sorted), the locks the job last read,
+      the job and whether to read again when it is done, the header's
+      note of a lock, the file menu's items, File > Git LFS Locks...,
+      its list, the locks it shows and the one its menu is for. }
+    FLfsLockable: TStringList;
+    FLfsLocks, FListedLocks: TGittanLfsLocks;
+    FLfsLocksJob: TGittanLfsLocksJob;
+    FLfsLocksAgain: boolean;
+    FLockNote, FMenuLock: string;
+    FLfsLockSepItem, FLfsLockItem, FLfsUnlockItem, FLfsLocksItem: TMenuItem;
+    FLfsLocksPopup: TGittanPopupList;
+    FLfsLocksMenu: TPopupMenu;
     { The commit HEAD was on in the last snapshot, the key's half that
       CheckLfs reads without running git on this thread. }
     FSnapHead: string;
@@ -1079,6 +1092,25 @@ type
     procedure StartLfsDownload(const APath: string; const ARefs: TStringArray);
     procedure CheckLfs;
     procedure LfsCheckDone(Sender: TObject);
+    procedure StartLfsLocks;
+    procedure LfsLocksDone(Sender: TObject);
+    procedure StopLfsLocks;
+    function LockOf(const APath: string): integer;
+    function ShownLockPath: string;
+    procedure LockNote;
+    procedure UpdateLockItems;
+    procedure MenuLfsLockClick(Sender: TObject);
+    procedure MenuLfsUnlockClick(Sender: TObject);
+    procedure UnlockAsk(const APath: string);
+    procedure LfsLockJobDone(AJob: TGittanRemoteJob);
+    procedure MenuLfsLocksClick(Sender: TObject);
+    procedure ShowLfsLocks(const AScreenRect: TRect);
+    procedure LfsLocksPopupPick(Sender: TObject; AIndex: integer);
+    procedure LfsLocksContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
+    procedure LfsLocksMenuClick(Sender: TObject);
+    procedure BlobActions;
+    function LockedCommitAsk(APaths: TStrings): boolean;
+    procedure BlobLockAction;
     procedure LfsGetClick(Sender: TObject);
     procedure LfsInstallClick(Sender: TObject);
     procedure LfsPullClick(Sender: TObject);
@@ -2827,6 +2859,38 @@ const
   rsOpenAnyway = 'Open Anyway';
   rsNewPullNoRemote = 'The repository has no remote to push %s to';
   rsNewPullHasOne = '%s already has pull request #%d';
+  rsLfsLockItem = '&Lock File (Git LFS)';
+  rsLfsUnlockItem = '&Unlock File';
+  rsLfsForceUnlockItem = 'Force &Unlock (Locked by %s)...';
+  rsLfsForceUnlockTitle = 'Force Unlock';
+  rsLfsForceUnlockAsk = '%s is locked by %s. Take the lock away? Their changes to it ' +
+    'can then not be pushed until they lock it again.';
+  rsLfsForceUnlockAction = 'Force Unlock';
+  rsLfsLockedBy = 'Locked by %s';
+  rsLfsLocked = 'Locked %s';
+  rsLfsUnlocked = 'Unlocked %s';
+  rsLfsLocking = 'Locking %s...';
+  rsLfsUnlocking = 'Unlocking %s...';
+  rsNoticeLfsLocking = 'Locking %s';
+  rsNoticeLfsUnlocking = 'Unlocking %s';
+  rsLfsLockFailed = 'Could not lock %s';
+  rsLfsUnlockFailed = 'Could not unlock %s';
+  rsLfsLocksItem = 'Git LFS Loc&ks...';
+  rsLfsLocksHeader = 'Git LFS locks';
+  rsLfsNoLocks = 'No file is locked';
+  rsLfsLockYou = 'you';
+  rsLfsShowFile = 'Show File';
+  rsLfsLockAction = 'Lock';
+  rsLfsLockedCommitTitle = 'Locked Files';
+  rsLfsLockedCommitOne = '%s is locked by %s. The commit can be made, but pushing it will ' +
+    'be refused until the lock is given up.';
+  rsLfsLockedCommitMany = '%d files are locked by others. The commit can be made, but ' +
+    'pushing it will be refused until the locks are given up.';
+  rsLfsLockedCommitLine = '%s (%s)';
+  rsLfsLockedCommitMore = 'and %d more';
+  rsCommitAnyway = 'Commit Anyway';
+  rsLfsUnlockAction = 'Unlock';
+  rsFilterLocks = 'Filter locks';
   rsFetchingPull = 'Fetching pull request #%d...';
   rsPullFailed = 'Could not fetch pull request #%d';
   { Bookmark kinds in the editor's second bookmark list, used only for the
@@ -3176,6 +3240,8 @@ begin
   FGoneToDelete := TStringList.Create;
   FBranchMenu := TPopupMenu.Create(Self);
   FGoneBranches := TStringList.Create;
+  FLfsLockable := TStringList.Create;
+  FLfsLockable.Sorted := True;
   FBranchPopup := TGittanPopupList.Create(Self);
   FBranchPopup.Parent := Self;
   FBranchPopup.FilterHint := rsFilterBranches;
@@ -3215,6 +3281,14 @@ begin
   FStashPopup.FilterHint := rsFilterStashes;
   FStashPopup.OnPick := @StashPopupPick;
   FStashPopup.OnContext := @StashContext;
+  { The Git LFS locks pop up under the status bar's branch, as the
+    reflog does. }
+  FLfsLocksMenu := TPopupMenu.Create(Self);
+  FLfsLocksPopup := TGittanPopupList.Create(Self);
+  FLfsLocksPopup.Parent := Self;
+  FLfsLocksPopup.FilterHint := rsFilterLocks;
+  FLfsLocksPopup.OnPick := @LfsLocksPopupPick;
+  FLfsLocksPopup.OnContext := @LfsLocksContext;
   { The commit graph pops up in the middle of the form. }
   FGraph := TGittanCommitGraph.Create(Self);
   FGraph.Parent := Self;
@@ -3495,6 +3569,7 @@ begin
   FGoneToDelete.Free;
   FUpstreamRows.Free;
   FGoneBranches.Free;
+  FLfsLockable.Free;
   StopBlame;
   StopIndexing;
   SaveIndex;
@@ -4401,6 +4476,8 @@ begin
   FUndoRevertItem := AddItem(FileMenu, rsUndoRevert, 0, @MenuUndoRevertClick);
   FCleanItem := AddItem(FileMenu, rsCleanItem, 0, @MenuCleanClick);
   FApplyPatchesItem := AddItem(FileMenu, rsApplyPatchesItem, 0, @MenuApplyPatchesClick);
+  FLfsLocksItem := AddItem(FileMenu, rsLfsLocksItem, 0, @MenuLfsLocksClick);
+  FLfsLocksItem.Visible := False;
   UpdateDiscardItems;
   FileMenu.OnClick := @FileMenuClick;
   FileMenu.Add(NewLine);
@@ -4817,6 +4894,7 @@ begin
     SetLexer(App.Lexers.ByName(rsGitignoreLexer))
   else
     SetLexer(App.Lexers.ForFile(AFileName));
+  LockNote;
   UpdateChangeNav;
   ShowEditor;
   UpdateCaption;
@@ -5632,6 +5710,9 @@ begin
   FBanner.Clear;
   FLfsChecked := '';
   FLfsShown := '';
+  FLfsLockable.Clear;
+  FLfsLocks := nil;
+  FLockNote := '';
   FAutoFetchTried := 0;
   FAutoFetchFails := 0;
   { The next snapshot is the first of this repository (MarkNews). }
@@ -6617,6 +6698,7 @@ begin
       FHeader.SetActions([rsUseMine, rsUseTheirs, rsMarkResolved]);
     end;
   end;
+  LockNote;
   if IsImagePath(APath) then
   begin
     ShowImageChanges(APath);
@@ -7120,6 +7202,7 @@ const
 {$I umain.commit.inc}
 {$I umain.ai.inc}
 {$I umain.remote.inc}
+{$I umain.lfslocks.inc}
 {$I umain.mdpreview.inc}
 
 end.

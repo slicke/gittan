@@ -1111,6 +1111,10 @@ begin
   FExcludeMenu := AddItem(FFilePopup, rsAddToExclude, nil);
   FLfsTrackMenu := AddItem(FFilePopup, rsLfsTrackMenu, nil);
   FLfsUntrackMenu := AddItem(FFilePopup, rsLfsUntrackMenu, nil);
+  { Shown for a file that may be locked or is (UpdateLockItems). }
+  FLfsLockSepItem := AddItem(FFilePopup, '-', nil);
+  FLfsLockItem := AddItem(FFilePopup, rsLfsLockItem, @MenuLfsLockClick);
+  FLfsUnlockItem := AddItem(FFilePopup, rsLfsUnlockItem, @MenuLfsUnlockClick);
   { Over the tree while it chooses what to commit (FilePopupPopup). }
   FTickSepItem := TMenuItem.Create(FFilePopup);
   FTickSepItem.Caption := '-';
@@ -1204,6 +1208,7 @@ begin
   FMarkResolvedItem.Enabled := FResolveMineItem.Enabled;
   FillIgnoreMenus(FContextPath);
   FillLfsMenus(FContextPath);
+  UpdateLockItems;
   FTickSepItem.Visible := (FFilePopup.PopupComponent = FileTree) and CommitChoosing and
     (FChoosableCount > 0);
   FTickAllItem.Visible := FTickSepItem.Visible;

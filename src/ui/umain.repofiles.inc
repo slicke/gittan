@@ -569,8 +569,10 @@ begin
   begin
     if AIndex = 0 then
       OpenBlobOutside
+    else if AIndex = 1 then
+      SaveBlobAs
     else
-      SaveBlobAs;
+      BlobLockAction;
     Exit;
   end;
   if ConflictHeaderAction(AIndex) then

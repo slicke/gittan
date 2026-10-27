@@ -1084,6 +1084,7 @@ begin
   AssertTrue(FRepo.LfsState(State));
   AssertEquals(2, State.Files);
   AssertEquals('the pointer in the work tree', 1, State.Pointers);
+  AssertEquals('art.psd real.psd', string.Join(' ', State.Lockable));
   AssertEquals(FindTool('git-lfs') <> '', State.Installed);
   AssertFalse('the tests'' config has no filter', State.SetUp);
   Git(['config', 'filter.lfs.process', 'git-lfs filter-process']);
@@ -1092,6 +1093,18 @@ begin
   Git(['config', '--unset', 'filter.lfs.process']);
   Git(['rm', '-q', 'real.psd']);
   Git(['commit', '-q', '-m', 'Drop the real one']);
+  { A lockable file outside Git LFS may be locked too, once. }
+  WriteFile('.gitattributes', '*.psd filter=lfs diff=lfs merge=lfs -text'#10 +
+    '*.psd lockable'#10'plan.txt lockable'#10);
+  WriteFile('plan.txt', 'plan'#10);
+  Git(['add', '.gitattributes', 'plan.txt']);
+  AssertTrue(FRepo.LfsState(State));
+  AssertEquals(1, State.Files);
+  AssertEquals('art.psd plan.txt', string.Join(' ', State.Lockable));
+  Git(['rm', '-q', '--cached', 'plan.txt']);
+  WriteFile('.gitattributes', '*.psd filter=lfs diff=lfs merge=lfs -text'#10);
+  Git(['add', '.gitattributes']);
+  DeleteFile(FDir + PathDelim + 'plan.txt');
   AssertEquals(ExpandFileName(IncludeTrailingPathDelimiter(FRepo.GitDir) + 'lfs') + PathDelim +
     'objects' + PathDelim + 'aa' + PathDelim + 'aa' + PathDelim + OldOid,
     FRepo.LfsObjectFile(OldOid));

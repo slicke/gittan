@@ -840,6 +840,8 @@ begin
   Paths := TStringList.Create;
   try
     ChosenCommitPaths(Paths);
+    if not LockedCommitAsk(Paths) then
+      Exit;
     { The files with changes left out go in as their text without them
       (see umain.leaveout.inc). }
     if not CommitParts(Paths, Parts, Err) then

@@ -112,6 +112,8 @@ begin
           HintDown);
       rkLfsPull: FStatus.ShowBusy(rsLfsPulling, HintDown);
       rkLfsInstall: FStatus.ShowBusy(rsLfsInstalling);
+      rkLfsLock: FStatus.ShowBusy(Format(rsLfsLocking, [AArg]));
+      rkLfsUnlock, rkLfsForceUnlock: FStatus.ShowBusy(Format(rsLfsUnlocking, [AArg]));
     end;
   if FNoticeHook then
     ShowRemoteNotice
@@ -153,6 +155,8 @@ begin
     rkLfsFetch: Result := Format(rsNoticeLfsDownloading, [ExtractFileName(FRemoteJob.Arg)]);
     rkLfsPull: Result := rsNoticeLfsPulling;
     rkLfsInstall: Result := rsNoticeLfsInstalling;
+    rkLfsLock: Result := Format(rsNoticeLfsLocking, [FRemoteJob.Arg]);
+    rkLfsUnlock, rkLfsForceUnlock: Result := Format(rsNoticeLfsUnlocking, [FRemoteJob.Arg]);
   end;
 end;
 
@@ -233,6 +237,11 @@ begin
     PullFetchDone(Job);
     Exit;
   end;
+  if Job.Kind in [rkLfsLock, rkLfsUnlock, rkLfsForceUnlock] then
+  begin
+    LfsLockJobDone(Job);
+    Exit;
+  end;
   { The file is shown again, as the version downloaded into the store
     left the work tree as it was when it was of a commit. }
   if Job.Kind in [rkLfsFetch, rkLfsPull, rkLfsInstall] then
@@ -269,6 +278,8 @@ begin
     FPullAfterPush := '';
   if Job.Ok then
   begin
+    if Job.Kind = rkFetch then
+      StartLfsLocks;
     case Job.Kind of
       rkFetch:
         if FAfterFetchRef <> '' then
@@ -432,6 +443,16 @@ begin
         Title := rsLfsInstallFailed;
         Again := rsTryAgain;
       end;
+    rkLfsLock:
+      begin
+        Title := Format(rsLfsLockFailed, [AJob.Arg]);
+        Again := rsTryAgain;
+      end;
+    rkLfsUnlock, rkLfsForceUnlock:
+      begin
+        Title := Format(rsLfsUnlockFailed, [AJob.Arg]);
+        Again := rsTryAgain;
+      end;
     else
       if AHookFailed then
         Title := rsHookFailed
@@ -498,6 +519,7 @@ end;
 procedure TRepoFrame.StopRemoteJob(AWait: boolean);
 begin
   FPendingRemote := False;
+  StopLfsLocks;
   { The Git LFS check reads only, and is dropped rather than waited for. }
   if FLfsCheckJob <> nil then
   begin
@@ -591,6 +613,12 @@ begin
     Exit;
   end;
   State := Job.State;
+  FLfsLockable.Clear;
+  FLfsLockable.AddStrings(State.Lockable);
+  if State.Installed then
+    StartLfsLocks
+  else
+    FLfsLocks := nil;
   Key := '';
   Kind := bkError;
   Handler := nil;
@@ -708,7 +736,10 @@ begin
     else
       Inc(FAutoFetchFails);
   if Job.Ok and (Job.Root = FRepo.Root) then
+  begin
     RefreshRepository;
+    StartLfsLocks;
+  end;
   if FPendingRemote then
   begin
     FPendingRemote := False;

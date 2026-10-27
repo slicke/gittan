@@ -176,7 +176,8 @@ begin
   FView := gvBlob;
   FHeader.SetFile(APath, iconFile);
   FHeader.SetDetail(Format(rsAtCommit, [FBlobName]));
-  FHeader.SetActions([rsBlobOpen, rsBlobSaveAs]);
+  BlobActions;
+  LockNote;
   FHeader.SetChanges(0, 0);
   FHeader.SetConflicts(0, 0);
   FSummaryBox.Visible := False;

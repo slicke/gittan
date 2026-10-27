@@ -134,6 +134,8 @@ type
       mouse. }
     procedure SetPillColors(AFill, ABorder, AHot: TColor);
     {** The image list the badge comes from. }
+    {** The note SetNote gave, '' for none. }
+    property Note: string read FNote;
     property Images: TCustomImageList read FImages write FImages;
     {** The navigator, for its colors and click handlers. }
     property Nav: TGittanChangeNav read FNav;
