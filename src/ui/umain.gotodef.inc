@@ -238,6 +238,8 @@ var
   S: UnicodeString;
   N1, N2, i: integer;
 begin
+  { Go > Back comes back here. }
+  NavMark;
   if (AEd = Edit) and (FView = gvChanges) and Edit.IsLineFolded(APos.Y) and
     (APos.Y <= High(FRows)) then
   begin

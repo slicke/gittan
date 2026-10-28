@@ -53,6 +53,7 @@ Details of each area live in `spec/`. Read the file that matches what you are ab
 - [spec/repo-commands.md](spec/repo-commands.md): The Commands page and `.gittan/commands.ini`. Read when touching `gittan.repocommands`, `gittan.commandpage`, `umain.commands.inc`, the Commands row, the shortcuts that run a command, or the `.gittan` folder.
 - [spec/submodules.md](spec/submodules.md): Submodules. Read when touching `gittan.submodules`, `gittan.subpage`, `umain.submodules.inc`, submodule actions.
 - [spec/worktrees.md](spec/worktrees.md): Worktrees. Read when touching `gittan.worktrees`, `umain.worktrees.inc`, Branch > Worktrees..., or adding, opening, locking, removing or pruning a worktree.
+- [spec/back-forward.md](spec/back-forward.md): Back and Forward. Read when touching `gittan.navhistory`, `umain.nav.inc`, Go > Back and Go > Forward, or a new view or page that should count as a place to go back to.
 - [spec/command-palette.md](spec/command-palette.md): The command palette. Read when touching `umain.palette.inc`, Go > Command Palette..., `PaletteRecent` in the settings, or a menu item the palette should leave out.
 - [spec/commit-graph.md](spec/commit-graph.md): Commit graph and commit menu. Read when touching `gittan.commitgraph`, `gittan.graph`, `gittan.pickaxe` (the graph's `change:` filter), `umain.commitactions.inc`.
 - [spec/files-page.md](spec/files-page.md): The Files page. Read when touching `gittan.filespage`, `umain.files.inc`, the Files row, Browse Files..., or a file of a commit shown in the editor.

@@ -24,7 +24,7 @@ uses
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
   {$IFDEF LCLWin32}gittan.wintitlebar,{$ENDIF}
   {$IFDEF LCLGtk3}gittan.gtktitlebar,{$ENDIF}
-  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.pickaxe,
+  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.pickaxe, gittan.navhistory,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.textfile, gittan.sectionheader, gittan.hintbox,
   gittan.forge, gittan.lfslocks,
@@ -739,6 +739,13 @@ type
     FPaletteItem: TMenuItem;
     FPalettePopup: TGittanPopupList;
     FPaletteNames: TStringList;
+    { Back and Forward (umain.nav.inc): the places left, the place shown
+      as last noted (FNavValid once there is one), set while a place is
+      being shown again, and the Go menu's items. }
+    FNavHistory: TGittanNavHistory;
+    FNavPlace: TGittanPlace;
+    FNavValid, FNavBusy: boolean;
+    FBackItem, FForwardItem: TMenuItem;
     FWorktreeMenu: TPopupMenu;
     FListedWorktrees: TGittanWorktrees;
     FMenuWorktree: TGittanWorktree;
@@ -1707,6 +1714,17 @@ type
     procedure MenuWorktreesClick(Sender: TObject);
     procedure ListPaletteActions(AList: TStringList);
     procedure MenuPaletteClick(Sender: TObject);
+    function NavCurrent(out APlace: TGittanPlace): boolean;
+    function NavSync: boolean;
+    procedure NavIdle(Sender: TObject; var Done: boolean);
+    procedure NavMark;
+    procedure NavClear;
+    procedure NavUpdateItems;
+    procedure NavRestoreRow(ARow, ACol, ATop: integer);
+    function NavRestore(const APlace: TGittanPlace): boolean;
+    procedure NavStep(AForward: boolean);
+    procedure MenuBackClick(Sender: TObject);
+    procedure MenuForwardClick(Sender: TObject);
     procedure PalettePopupPick(Sender: TObject; AIndex: integer);
     procedure ShowWorktreeList(const AScreenRect: TRect);
     procedure WorktreePopupPick(Sender: TObject; AIndex: integer);
@@ -2159,6 +2177,9 @@ resourcestring
   rsGoToDefinition = 'Go to &Definition';
   rsGoToSymbol = 'Go to S&ymbol...';
   rsCommandPalette = 'Command &Palette...';
+  rsBack = '&Back';
+  rsForward = 'For&ward';
+  rsNavGone = 'That place is no longer there.';
   rsFilterPalette = 'Type an action';
   rsPaletteRecent = 'Recently used';
   rsPaletteOther = 'Other actions';
@@ -3248,6 +3269,8 @@ begin
   FBlameCache := TStringList.Create;
   FBlameCache.CaseSensitive := True;
   FBlameZombies := TGittanJobReaper.Create;
+  FNavHistory := TGittanNavHistory.Create;
+  Application.AddOnIdleHandler(@NavIdle);
   FDroppedCommits := TList.Create;
   FThreadFlips := TStringList.Create;
   FReviewMeasure := TBitmap.Create;
@@ -3777,6 +3800,8 @@ begin
   StopRemoteJob(True);
   Application.RemoveOnActivateHandler(@AppActivate);
   Application.RemoveOnDeactivateHandler(@AppDeactivate);
+  Application.RemoveOnIdleHandler(@NavIdle);
+  FreeAndNil(FNavHistory);
   StopWatcher;
   AbandonPullJob;
   AbandonPullAction;
@@ -4906,6 +4931,18 @@ begin
   FPaletteItem := AddItem(GoMenu, rsCommandPalette, ShortCut(VK_P, [ssModifier]),
     @MenuPaletteClick);
   GoMenu.Add(NewLine);
+  { Cmd+[ and Cmd+] as in Xcode and Safari; Alt+Left and Alt+Right
+    elsewhere, as in a browser there. }
+  {$IFDEF LCLCocoa}
+  FBackItem := AddItem(GoMenu, rsBack, ShortCut(VK_OEM_4, [ssModifier]), @MenuBackClick);
+  FForwardItem := AddItem(GoMenu, rsForward, ShortCut(VK_OEM_6, [ssModifier]),
+    @MenuForwardClick);
+  {$ELSE}
+  FBackItem := AddItem(GoMenu, rsBack, ShortCut(VK_LEFT, [ssAlt]), @MenuBackClick);
+  FForwardItem := AddItem(GoMenu, rsForward, ShortCut(VK_RIGHT, [ssAlt]), @MenuForwardClick);
+  {$ENDIF}
+  NavUpdateItems;
+  GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextTab, ShortCut(VK_OEM_6, [ssModifier, ssShift]), @MenuNextTabClick);
   AddItem(GoMenu, rsPrevTab, ShortCut(VK_OEM_4, [ssModifier, ssShift]), @MenuPrevTabClick);
   GoMenu.Add(NewLine);
@@ -5970,6 +6007,7 @@ begin
   UpdateDiscardItems;
   FPullRange := '';
   FMarkHash := '';
+  NavClear;
   FCleanKind := cnUntracked;
   FPatchFolder := '';
   FApplyFolder := '';
@@ -7472,6 +7510,7 @@ const
 {$I umain.stash.inc}
 {$I umain.worktrees.inc}
 {$I umain.palette.inc}
+{$I umain.nav.inc}
 {$I umain.tags.inc}
 {$I umain.reflog.inc}
 {$I umain.bisect.inc}
