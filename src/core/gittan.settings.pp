@@ -15,6 +15,8 @@ uses
 const
   {** How many repositories File > Open Recent lists. }
   MaxRecent = 10;
+  {** How many actions the command palette lists as recently used. }
+  MaxPaletteRecent = 8;
   {** The width of a tab in the editor when none was picked: git's own,
     what a diff shows in a terminal and on GitHub. }
   DefaultTabSize = 8;
@@ -42,6 +44,7 @@ type
   TGittanSettings = class
   private
     FRecent: TStringList;
+    FPaletteRecent: TStringList;
     FTabs: TStringList;
     FTrust: TStringList;
     { Each forge's tool, by its name. }
@@ -168,6 +171,10 @@ type
     {** Puts ARoot first in the recent list, dropping a duplicate and the
       oldest beyond MaxRecent. }
     procedure AddRecent(const ARoot: string);
+    {** Puts the action AName (as the command palette names it) first in
+      PaletteRecent, dropping a duplicate and the oldest beyond
+      MaxPaletteRecent. }
+    procedure AddPaletteRecent(const AName: string);
     {** Whether the commands file of the repository at ARoot, whose
       text has the hash AHash (CommandsFileHash), has been trusted:
       the file's commands and keys run only then. A repository without
@@ -178,6 +185,9 @@ type
     procedure TrustCommands(const ARoot, AHash: string);
     {** The recently opened repositories, newest first. }
     property Recent: TStringList read FRecent;
+    {** The actions last run from the command palette, newest first;
+      section Palette. }
+    property PaletteRecent: TStringList read FPaletteRecent;
     {** The repositories open in the window's tabs when it closed, left
       to right, which open again at the next start; section Tabs. }
     property Tabs: TStringList read FTabs;
@@ -194,6 +204,7 @@ const
   SecWindow = 'Window';
   SecView = 'View';
   SecRecent = 'Recent';
+  SecPalette = 'Palette';
   SecTabs = 'Tabs';
   SecUpdate = 'Update';
   SecCommit = 'Commit';
@@ -262,6 +273,8 @@ begin
   inherited Create;
   FRecent := TStringList.Create;
   FRecent.CaseSensitive := True;
+  FPaletteRecent := TStringList.Create;
+  FPaletteRecent.CaseSensitive := True;
   FTabs := TStringList.Create;
   FTrust := TStringList.Create;
   FForgeClis := TStringList.Create;
@@ -284,6 +297,7 @@ begin
   FForgeClis.Free;
   FTrust.Free;
   FRecent.Free;
+  FPaletteRecent.Free;
   FTabs.Free;
   inherited Destroy;
 end;
@@ -399,6 +413,13 @@ begin
         if S <> '' then
           FRecent.Add(S);
       end;
+      FPaletteRecent.Clear;
+      for i := 0 to MaxPaletteRecent - 1 do
+      begin
+        S := Ini.ReadString(SecPalette, 'Recent' + IntToStr(i), '');
+        if S <> '' then
+          FPaletteRecent.Add(S);
+      end;
       FTabs.Clear;
       i := 0;
       repeat
@@ -495,6 +516,9 @@ begin
       Ini.EraseSection(SecRecent);
       for i := 0 to FRecent.Count - 1 do
         Ini.WriteString(SecRecent, 'Repo' + IntToStr(i), KeepEdges(FRecent[i]));
+      Ini.EraseSection(SecPalette);
+      for i := 0 to FPaletteRecent.Count - 1 do
+        Ini.WriteString(SecPalette, 'Recent' + IntToStr(i), KeepEdges(FPaletteRecent[i]));
       Ini.EraseSection(SecTabs);
       for i := 0 to FTabs.Count - 1 do
         Ini.WriteString(SecTabs, 'Repo' + IntToStr(i), KeepEdges(FTabs[i]));
@@ -546,6 +570,18 @@ begin
   FRecent.Insert(0, ARoot);
   while FRecent.Count > MaxRecent do
     FRecent.Delete(FRecent.Count - 1);
+end;
+
+procedure TGittanSettings.AddPaletteRecent(const AName: string);
+var
+  i: integer;
+begin
+  i := FPaletteRecent.IndexOf(AName);
+  if i >= 0 then
+    FPaletteRecent.Delete(i);
+  FPaletteRecent.Insert(0, AName);
+  while FPaletteRecent.Count > MaxPaletteRecent do
+    FPaletteRecent.Delete(FPaletteRecent.Count - 1);
 end;
 
 end.

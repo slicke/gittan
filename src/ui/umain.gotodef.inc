@@ -339,13 +339,27 @@ begin
 end;
 
 { Go > Go to Symbol: lists the symbols of the shown file in the symbol
-  bar. }
+  bar. Its key, Cmd+Enter (Ctrl+Enter elsewhere), commits in the commit
+  message and asks the agent in the tree's filter, which the menu may
+  get first; it does that there instead. }
 procedure TRepoFrame.MenuGoToSymbolClick(Sender: TObject);
 var
   Names: TStringList;
   Depths: TIntegerDynArray;
   i: integer;
 begin
+  if FCommitMemo.Focused then
+  begin
+    if FCommitButton.Enabled then
+      CommitButtonClick(FCommitMemo);
+    Exit;
+  end;
+  if FTreeFilter.Focused then
+  begin
+    if FSearchBox.ShowAction then
+      SearchBoxAction(nil);
+    Exit;
+  end;
   if not Edit.Visible then
     Exit;
   FreeAndNil(FSymbolFiles);

@@ -734,6 +734,11 @@ type
       the worktrees it shows, the menu of one and the one it is for. }
     FWorktreesItem: TMenuItem;
     FWorktreePopup: TGittanPopupList;
+    { The command palette (umain.palette.inc): its item in the Go menu,
+      the list and the action of each of its rows, by name. }
+    FPaletteItem: TMenuItem;
+    FPalettePopup: TGittanPopupList;
+    FPaletteNames: TStringList;
     FWorktreeMenu: TPopupMenu;
     FListedWorktrees: TGittanWorktrees;
     FMenuWorktree: TGittanWorktree;
@@ -1694,6 +1699,9 @@ type
     procedure StashMenuClick(Sender: TObject);
     function IsThisWorktree(const AWorktree: TGittanWorktree): boolean;
     procedure MenuWorktreesClick(Sender: TObject);
+    procedure ListPaletteActions(AList: TStringList);
+    procedure MenuPaletteClick(Sender: TObject);
+    procedure PalettePopupPick(Sender: TObject; AIndex: integer);
     procedure ShowWorktreeList(const AScreenRect: TRect);
     procedure WorktreePopupPick(Sender: TObject; AIndex: integer);
     procedure OpenWorktree(const AWorktree: TGittanWorktree);
@@ -2144,6 +2152,10 @@ resourcestring
   rsFindPrev = 'Find &Previous';
   rsGoToDefinition = 'Go to &Definition';
   rsGoToSymbol = 'Go to S&ymbol...';
+  rsCommandPalette = 'Command &Palette...';
+  rsFilterPalette = 'Type an action';
+  rsPaletteRecent = 'Recently used';
+  rsPaletteOther = 'Other actions';
   rsGoToRepoSymbol = 'Go to Symbol in Re&pository...';
   rsChangedSymbols = 'Changed S&ymbols...';
   rsChangedSymbolHint = 'Changed symbol';
@@ -3476,6 +3488,11 @@ begin
   FWorktreePopup.FilterHint := rsWtFilter;
   FWorktreePopup.OnPick := @WorktreePopupPick;
   FWorktreePopup.OnContext := @WorktreeContext;
+  FPaletteNames := TStringList.Create;
+  FPalettePopup := TGittanPopupList.Create(Self);
+  FPalettePopup.Parent := Self;
+  FPalettePopup.FilterHint := rsFilterPalette;
+  FPalettePopup.OnPick := @PalettePopupPick;
   { The Git LFS locks pop up under the status bar's branch, as the
     reflog does. }
   FLfsLocksMenu := TPopupMenu.Create(Self);
@@ -3769,6 +3786,7 @@ begin
   FBranchRefs.Free;
   FGoneToDelete.Free;
   FUpstreamRows.Free;
+  FPaletteNames.Free;
   FGoneBranches.Free;
   FLfsLockable.Free;
   StopBlame;
@@ -4087,7 +4105,8 @@ begin
   FSymbolBar.SetColors(P.Shade, P.Text, P.Dim, P.Line);
   for List in [FBranchPopup, FStashPopup, FUpstreamPopup, FTagPopup, FViewPopup,
     FSubListPopup, FReflogPopup, FPullPopup, FReviewPopup, FSyncPopup, FRecentPopup,
-    FBasePopup, FConflictPopup, FFindPopup, FCompositionPopup, FWorktreePopup] do
+    FBasePopup, FConflictPopup, FFindPopup, FCompositionPopup, FWorktreePopup,
+    FPalettePopup] do
     List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
   FGraph.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent, P.Warning);
   FBanner.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Line, P.Accent, P.Deleted, P.Added);
@@ -4877,6 +4896,9 @@ begin
   GoMenu := TMenuItem.Create(Main);
   GoMenu.Caption := rsGo;
   Main.Items.Add(GoMenu);
+  FPaletteItem := AddItem(GoMenu, rsCommandPalette, ShortCut(VK_P, [ssModifier]),
+    @MenuPaletteClick);
+  GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextTab, ShortCut(VK_OEM_6, [ssModifier, ssShift]), @MenuNextTabClick);
   AddItem(GoMenu, rsPrevTab, ShortCut(VK_OEM_4, [ssModifier, ssShift]), @MenuPrevTabClick);
   GoMenu.Add(NewLine);
@@ -4886,7 +4908,9 @@ begin
   AddItem(GoMenu, rsFilterFiles, ShortCut(VK_F, [ssModifier, ssShift]), @MenuFilterFilesClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsGoToDefinition, ShortCut(VK_F12, []), @MenuGoToDefinitionClick);
-  AddItem(GoMenu, rsGoToSymbol, ShortCut(VK_P, [ssModifier]), @MenuGoToSymbolClick);
+  { Cmd+Enter in the commit message commits and in the tree's filter
+    asks the agent; MenuGoToSymbolClick passes it on to them. }
+  AddItem(GoMenu, rsGoToSymbol, ShortCut(VK_RETURN, [ssModifier]), @MenuGoToSymbolClick);
   AddItem(GoMenu, rsGoToRepoSymbol, ShortCut(VK_T, [ssModifier, ssShift]),
     @MenuGoToRepoSymbolClick);
   { Cmd+Y alone is the editor's delete-line key, which gets the key first. }
@@ -7440,6 +7464,7 @@ const
 {$I umain.rebase.inc}
 {$I umain.stash.inc}
 {$I umain.worktrees.inc}
+{$I umain.palette.inc}
 {$I umain.tags.inc}
 {$I umain.reflog.inc}
 {$I umain.bisect.inc}
