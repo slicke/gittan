@@ -141,6 +141,9 @@ type
     {** AFrame's name or path changed (TabTitle, TabHint): its tab and,
       while it is shown, the window's caption follow. }
     procedure FrameChanged(AFrame: TRepoFrame); virtual; abstract;
+    {** Where AFrame can go back and forward to changed (CanGoBack,
+      CanGoForward): the title bar's chevrons follow while it is shown. }
+    procedure NavChanged(AFrame: TRepoFrame); virtual; abstract;
     {** File > New Tab: a new, empty frame, shown. }
     procedure NewTab; virtual; abstract;
     {** File > Close Tab: closes AFrame, from the message loop, after
@@ -1943,6 +1946,12 @@ type
     {** AEvent is called with this frame as Sender once the repository
       opening now has opened, after any asked for before. }
     procedure WhenOpened(AEvent: TNotifyEvent);
+    {** Go > Back and Go > Forward, for the title bar's chevrons, and
+      whether there is somewhere to go (umain.nav.inc). }
+    function CanGoBack: boolean;
+    function CanGoForward: boolean;
+    procedure GoBack;
+    procedure GoForward;
     {** Something happened while the frame was in the background: a
       banner or a notice, a job that ended, files or commits that came;
       cleared when it is shown. }

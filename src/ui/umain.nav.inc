@@ -137,12 +137,35 @@ begin
   NavUpdateItems;
 end;
 
+{ The menu's items, and the title bar's chevrons through the window. }
 procedure TRepoFrame.NavUpdateItems;
 begin
   if FBackItem <> nil then
-    FBackItem.Enabled := FNavHistory.CanBack;
+    FBackItem.Enabled := CanGoBack;
   if FForwardItem <> nil then
-    FForwardItem.Enabled := FNavHistory.CanForward;
+    FForwardItem.Enabled := CanGoForward;
+  if FWindow <> nil then
+    FWindow.NavChanged(Self);
+end;
+
+function TRepoFrame.CanGoBack: boolean;
+begin
+  Result := (FNavHistory <> nil) and FNavHistory.CanBack;
+end;
+
+function TRepoFrame.CanGoForward: boolean;
+begin
+  Result := (FNavHistory <> nil) and FNavHistory.CanForward;
+end;
+
+procedure TRepoFrame.GoBack;
+begin
+  NavStep(False);
+end;
+
+procedure TRepoFrame.GoForward;
+begin
+  NavStep(True);
 end;
 
 { Puts the caret on ARow at ACol with ATop the first row in view, as far

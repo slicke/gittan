@@ -118,6 +118,9 @@ type
     procedure TabSelect(Sender: TObject; AIndex: integer);
     procedure TabClose(Sender: TObject; AIndex: integer);
     procedure TabNew(Sender: TObject);
+    procedure TabBack(Sender: TObject);
+    procedure TabForward(Sender: TObject);
+    procedure UpdateNav;
     procedure ForgeClick(Sender: TObject);
     procedure ShowForgeView;
     procedure UpdateForgeChrome;
@@ -133,6 +136,7 @@ type
     function OwnBar: TGittanOwnTitleBar; override;
     {$ENDIF}
     procedure FrameChanged(AFrame: TRepoFrame); override;
+    procedure NavChanged(AFrame: TRepoFrame); override;
     procedure NewTab; override;
     procedure CloseFrame(AFrame: TRepoFrame); override;
     procedure StepTab(ADelta: integer); override;
@@ -170,6 +174,12 @@ const
 resourcestring
   { The name the own title bar shows. }
   rsAppShortName = 'Gittan';
+{$ENDIF}
+{$IFDEF LCLCocoa}
+resourcestring
+  { The tooltips of the title bar's chevrons. }
+  rsNavBackHint = 'Back (⌘[)';
+  rsNavForwardHint = 'Forward (⌘])';
 {$ENDIF}
 
 
@@ -279,6 +289,8 @@ begin
     FToolbar.OnClose := @TabClose;
     FToolbar.OnNew := @TabNew;
     FToolbar.OnForge := @ForgeClick;
+    FToolbar.OnBack := @TabBack;
+    FToolbar.OnForward := @TabForward;
   end;
   FTitleBarHeight := ExtendUnderTitleBar(Handle);
   {$ENDIF}
@@ -858,6 +870,36 @@ begin
   UpdateTabs;
 end;
 
+procedure TGittanWindow.NavChanged(AFrame: TRepoFrame);
+begin
+  if AFrame = FActive then
+    UpdateNav;
+end;
+
+{ The chevrons go back and forward in the frame shown; they are dim
+  while the forge view is shown, which has no places of its own. }
+procedure TGittanWindow.UpdateNav;
+begin
+  {$IFDEF LCLCocoa}
+  if FToolbar <> nil then
+    FToolbar.SetNav((FActive <> nil) and not FForgeShown and FActive.CanGoBack,
+      (FActive <> nil) and not FForgeShown and FActive.CanGoForward,
+      rsNavBackHint, rsNavForwardHint);
+  {$ENDIF}
+end;
+
+procedure TGittanWindow.TabBack(Sender: TObject);
+begin
+  if (FActive <> nil) and not FForgeShown then
+    FActive.GoBack;
+end;
+
+procedure TGittanWindow.TabForward(Sender: TObject);
+begin
+  if (FActive <> nil) and not FForgeShown then
+    FActive.GoForward;
+end;
+
 { The strip shows the frames, or the forge view's own tabs while it is
   shown, which cannot be closed or added to. }
 procedure TGittanWindow.UpdateTabs;
@@ -868,6 +910,7 @@ var
 begin
   if (csDestroying in ComponentState) or (FFrames = nil) then
     Exit;
+  UpdateNav;
   if FForgeShown then
   begin
     i := FForgeView.Tabs(Captions, Marks);
