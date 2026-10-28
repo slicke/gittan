@@ -17,6 +17,7 @@ type
   published
     procedure TestRegistered;
     procedure TestHosts;
+    procedure TestAccounts;
     procedure TestParsePullRequest;
     procedure TestParsePullRequests;
     procedure TestWithoutReviewed;
@@ -86,6 +87,39 @@ begin
   AssertEquals('', GhEnvHost('acme.ghe.com', '', 'secret'));
   AssertEquals('', GhEnvHost('github.com', 'secret', 'secret'));
   AssertEquals('', GhEnvHost('', 'secret', 'secret'));
+end;
+
+procedure TGitHubTest.TestAccounts;
+var
+  Accounts: TGittanForgeAccounts;
+begin
+  { gh 2.40 and later: the logins under users:, user: the active one,
+    each login's own settings further in. }
+  Accounts := GhAccounts('github.com:'#10'    git_protocol: https'#10 +
+    '    users:'#10'        ada:'#10'            oauth_token: x'#10 +
+    '        bob:'#10'    user: bob'#10 +
+    'GHE.Example.com:'#10'    user: "carl"'#10'    oauth_token: y'#10 +
+    'empty.example.com:'#10'    git_protocol: ssh'#10);
+  AssertEquals(3, Length(Accounts));
+  AssertEquals('github.com', Accounts[0].Host);
+  AssertEquals('ada', Accounts[0].Login);
+  AssertFalse(Accounts[0].Active);
+  AssertEquals('bob', Accounts[1].Login);
+  AssertTrue(Accounts[1].Active);
+  { An older gh, user: alone. }
+  AssertEquals('ghe.example.com', Accounts[2].Host);
+  AssertEquals('carl', Accounts[2].Login);
+  AssertTrue(Accounts[2].Active);
+  AssertEquals('github.com=bob'#10'ghe.example.com=carl'#10, ActiveAccountsKey(Accounts));
+  { The switch shows in the key. }
+  Accounts := GhAccounts('github.com:'#13#10'    users:'#13#10'        ada:'#13#10 +
+    '        bob:'#13#10'    user: ada'#13#10);
+  AssertEquals(2, Length(Accounts));
+  AssertTrue(Accounts[0].Active);
+  AssertFalse(Accounts[1].Active);
+  AssertEquals('github.com=ada'#10, ActiveAccountsKey(Accounts));
+  AssertEquals(0, Length(GhAccounts('')));
+  AssertEquals('', ActiveAccountsKey(nil));
 end;
 
 procedure TGitHubTest.TestParsePullRequest;

@@ -157,6 +157,11 @@ type
       when ATools, git, gh and the forge (TRepoFrame.SettingsChanged). }
     procedure SettingsChanged(AFont: TFont; ATheme, ATabSize: integer; ATools: boolean);
       virtual; abstract;
+    {** Looks whether the active account of a forge's tool changed since
+      the last look (a switch in the settings or in a terminal), and if
+      so has every frame and the forge view drop what the account of
+      before was shown (TRepoFrame.AccountChanged). }
+    procedure CheckAccounts; virtual; abstract;
     {** What the forge view (uforge) asks of the window, which runs it
       in the frame shown under the view: the folder dialog of File >
       Open Repository..., the settings dialog, and About (the settings'
@@ -1339,6 +1344,7 @@ type
     procedure ApplyTabSize(ASize: integer);
     function FindForge: boolean;
     procedure ReFindForge;
+    procedure ForgetForgeAnswers;
     function ForgeName: string;
     procedure UpdateForgeItems;
     procedure FindAI;
@@ -1868,6 +1874,10 @@ type
     {** The welcome view says ADir is opening, before it does; '' gives
       it its buttons back. }
     procedure ShowOpening(const ADir: string);
+    {** The active account of the forge's tool changed (CheckAccounts):
+      the pull requests, the login and the review comments of the
+      account of before go, and the pull requests are asked for again. }
+    procedure AccountChanged;
     {** The settings changed (TRepoWindow.SettingsChanged): AFont, ATheme
       and ATabSize in the editors, the agent found again, and with
       ATools the forge and the repository read again. }

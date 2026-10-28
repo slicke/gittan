@@ -283,6 +283,16 @@ type
     property Error: string read FError;
   end;
 
+  {** An account the forge's tool is logged in to: Login on Host
+    ("github.com"), Active for the one the tool uses on that host. }
+  TGittanForgeAccount = record
+    Host, Login: string;
+    Active: boolean;
+  end;
+  TGittanForgeAccounts = array of TGittanForgeAccount;
+  {** Accounts by forge, one entry per registered forge in their order. }
+  TGittanForgeAccountsList = array of TGittanForgeAccounts;
+
   {** A forge, reached through its command line tool (Cli, a path to it).
     A forge inherits it and fills in the abstract methods; the jobs it
     makes are its own kinds of the jobs above and of TGittanReviewJob,
@@ -302,7 +312,21 @@ type
       is on this forge, so a repository with it gets this forge
       (ForgeClassFor). }
     class function HostsRemote(const AHost: string): boolean; virtual; abstract;
+    {** The accounts the tool is logged in to, each host's in the tool's
+      order, read from the tool's own files without running it (cheap,
+      main thread only, as a poll asks). None for a forge that keeps no
+      such list, the base's answer. }
+    class function Accounts: TGittanForgeAccounts; virtual;
+    {** Why the account on a host is not the tool's active one, when
+      something outside the tool's login decides it (a token in the
+      environment); empty otherwise, the base's answer. }
+    class function AccountsNote: string; virtual;
     property Cli: string read FCli;
+    {** Makes ALogin the tool's active account on AHost, for the tool
+      everywhere (a terminal too); false with the reason in AError. The
+      base cannot. Runs the tool and waits for it. }
+    function SwitchAccount(const AHost, ALogin: string; out AError: string): boolean;
+      virtual;
     {** The tool's version, from its own --version, as "gh 2.62.0"; false
       when it could not be run. }
     function Version(out AVersion: string): boolean; virtual; abstract;
@@ -355,6 +379,10 @@ function ForgeClassFor(const AUrls: string; const ASshConfig: string): TGittanFo
   they are give no forge and one of them is an ssh remote's, and then
   only the aliases looked up. }
 function ForgeClassFor(const AUrls: string): TGittanForgeClass; overload;
+{** The active accounts of AAccounts as one string, "host=login" a line
+  each, for telling whether the user switched: equal keys, the same
+  accounts in use. }
+function ActiveAccountsKey(const AAccounts: TGittanForgeAccounts): string;
 {** Keeps AForge as the forge of AClass with the tool ACli: left as it
   is when it already is, else freed and made again, or left nil without
   a class or a tool. True when it changed, so what the old one found can
@@ -1067,6 +1095,33 @@ constructor TGittanForge.Create(const ACli: string);
 begin
   inherited Create;
   FCli := ACli;
+end;
+
+class function TGittanForge.Accounts: TGittanForgeAccounts;
+begin
+  Result := nil;
+end;
+
+class function TGittanForge.AccountsNote: string;
+begin
+  Result := '';
+end;
+
+function TGittanForge.SwitchAccount(const AHost, ALogin: string;
+  out AError: string): boolean;
+begin
+  AError := Name + ' cannot switch accounts.';
+  Result := False;
+end;
+
+function ActiveAccountsKey(const AAccounts: TGittanForgeAccounts): string;
+var
+  Account: TGittanForgeAccount;
+begin
+  Result := '';
+  for Account in AAccounts do
+    if Account.Active then
+      Result := Result + Account.Host + '=' + Account.Login + #10;
 end;
 
 end.

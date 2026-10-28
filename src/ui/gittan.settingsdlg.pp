@@ -29,7 +29,8 @@ interface
 
 uses
   Classes, SysUtils, Types, Forms, Controls, Graphics, Dialogs, StdCtrls,
-  ExtCtrls, Spin, BGRABitmap, BGRABitmapTypes, ATSynEdit, gittan.lexers, gittan.sidenav, gittan.ai, gittan.update;
+  ExtCtrls, Spin, BGRABitmap, BGRABitmapTypes, ATSynEdit, gittan.lexers, gittan.sidenav, gittan.ai, gittan.update,
+  gittan.forge;
 
 type
   {** The pages, in the sidebar's order. }
@@ -52,6 +53,11 @@ type
     {** Each registered forge's (gittan.forge's RegisteredForges, in
       their order) tool's path, empty for the one found on PATH. }
     ForgePaths: TStringArray;
+    {** On OK, each registered forge's accounts (TGittanForge.Accounts as
+      the dialog read them, in the forges' order) with the one picked
+      for each host marked active; the caller switches where that is
+      not the tool's. }
+    Accounts: TGittanForgeAccountsList;
     {** Whether the open repository is fetched in the background, and
       how many minutes apart. }
     AutoFetch: boolean;
@@ -86,7 +92,7 @@ implementation
 uses
   Math, StrUtils, Process, Clipbrd, LCLIntf, LCLType, LCLVersion, InterfaceBase, LCLPlatformDef,
   ec_SyntAnal, ATSynEdit_Adapter_EControl, ATSynEdit_Globals,
-  gittan.syntaxthemes, gittan.git, gittan.theme, gittan.forge,
+  gittan.syntaxthemes, gittan.git, gittan.theme,
   gittan.settings, gittan.job;
 
 resourcestring
@@ -155,6 +161,10 @@ resourcestring
   rsToolNotFound = 'Not found on PATH.';
   rsForgeNotFound = 'Not found on PATH; the %s features are off.';
   rsHostingEnabled = 'Turn on the hosting features';
+  rsForgeAccount = 'Account on %s';
+  rsForgeAccountNote = 'Picking another switches %s''s account everywhere, in a terminal ' +
+    'too, and the open repositories ask %s again with it.';
+  rsForgeNoAccount = '%s is not logged in to any account.';
   rsHostingNote = 'Pull requests, their checks and review comments, and the page ' +
     'of your pull requests, for a repository with a remote on one of the services ' +
     'below. They run the service''s command line tool with its own login.';
@@ -323,6 +333,13 @@ type
     FForges: TGittanForgeClasses;
     FForgeEdits: array of TEdit;
     FForgeNotes: array of TLabel;
+    { Each forge's accounts as read when the page was built, and a list
+      per host to pick one, with the forge (an index into FForges) and
+      the host it is for. }
+    FAccounts: TGittanForgeAccountsList;
+    FAccountBoxes: array of TComboBox;
+    FAccountForges: array of integer;
+    FAccountHosts: TStringArray;
     { The agent picked, and each agent's command and model as edited:
       the fields show the picked one's (ShowAgent). }
     FAgentBox: TComboBox;
@@ -394,6 +411,8 @@ type
     procedure ToolChange(Sender: TObject);
     procedure AIChange(Sender: TObject);
     procedure HostingChange(Sender: TObject);
+    procedure AddAccounts(AIndex: integer);
+    function PickedAccounts: TGittanForgeAccountsList;
     procedure AutoFetchChange(Sender: TObject);
     procedure AgentChange(Sender: TObject);
     procedure ShowAgent;
@@ -626,11 +645,13 @@ begin
   Lbl.WordWrap := True;
   SetLength(FForgeEdits, Length(FForges));
   SetLength(FForgeNotes, Length(FForges));
+  SetLength(FAccounts, Length(FForges));
   for i := 0 to High(FForges) do
   begin
     AddLabel(FForges[i].Name, 20).Font.Style := [fsBold];
     FForgeEdits[i] := AddTool(Format(rsForgeTool, [FForges[i].CliName, FForges[i].Name]),
       Format(rsForgeToolDefault, [FForges[i].CliName]), FForgeNotes[i]);
+    AddAccounts(i);
   end;
   FSiblingsBox := TCheckBox.Create(Self);
   FSiblingsBox.Caption := rsCloneSiblings;
@@ -1175,7 +1196,83 @@ begin
   FVersionsRead := False;
   for i := 0 to High(FForges) do
     FForgeEdits[i].Enabled := FHostingBox.Checked;
+  for i := 0 to High(FAccountBoxes) do
+    FAccountBoxes[i].Enabled := FHostingBox.Checked and (FAccountBoxes[i].Items.Count > 1);
   FSiblingsBox.Enabled := FHostingBox.Checked;
+end;
+
+{ Forge AIndex's accounts under its tool: a list per host, the active
+  one picked, and a note on what picking does; or why there is nothing
+  to pick. }
+procedure TSettingsForm.AddAccounts(AIndex: integer);
+var
+  Accounts: TGittanForgeAccounts;
+  Hosts: TStringArray;
+  Box: TComboBox;
+  Lbl: TLabel;
+  Note: string;
+  i, j: integer;
+  Several: boolean;
+begin
+  Accounts := FForges[AIndex].Accounts;
+  FAccounts[AIndex] := Accounts;
+  Hosts := nil;
+  for i := 0 to High(Accounts) do
+    if IndexText(Accounts[i].Host, Hosts) < 0 then
+    begin
+      SetLength(Hosts, Length(Hosts) + 1);
+      Hosts[High(Hosts)] := Accounts[i].Host;
+    end;
+  Several := False;
+  for i := 0 to High(Hosts) do
+  begin
+    AddLabel(Format(rsForgeAccount, [Hosts[i]]), 12);
+    Box := TComboBox.Create(Self);
+    Box.Style := csDropDownList;
+    for j := 0 to High(Accounts) do
+      if Accounts[j].Host = Hosts[i] then
+      begin
+        Box.Items.Add(Accounts[j].Login);
+        if Accounts[j].Active then
+          Box.ItemIndex := Box.Items.Count - 1;
+      end;
+    if Box.ItemIndex < 0 then
+      Box.ItemIndex := 0;
+    Several := Several or (Box.Items.Count > 1);
+    Place(Box, 4);
+    SetLength(FAccountBoxes, Length(FAccountBoxes) + 1);
+    FAccountBoxes[High(FAccountBoxes)] := Box;
+    SetLength(FAccountForges, Length(FAccountForges) + 1);
+    FAccountForges[High(FAccountForges)] := AIndex;
+    SetLength(FAccountHosts, Length(FAccountHosts) + 1);
+    FAccountHosts[High(FAccountHosts)] := Hosts[i];
+  end;
+  Note := FForges[AIndex].AccountsNote;
+  if Note = '' then
+    if Several then
+      Note := Format(rsForgeAccountNote, [FForges[AIndex].CliName, FForges[AIndex].Name])
+    else if Length(Accounts) = 0 then
+      Note := Format(rsForgeNoAccount, [FForges[AIndex].CliName]);
+  if Note = '' then
+    Exit;
+  Lbl := AddLabel(Note, 4);
+  Lbl.Font.Color := clGrayText;
+  Lbl.WordWrap := True;
+end;
+
+{ FAccounts with each list's pick as its host's active account. }
+function TSettingsForm.PickedAccounts: TGittanForgeAccountsList;
+var
+  i, j: integer;
+begin
+  SetLength(Result, Length(FAccounts));
+  for i := 0 to High(FAccounts) do
+    Result[i] := Copy(FAccounts[i]);
+  for i := 0 to High(FAccountBoxes) do
+    for j := 0 to High(Result[FAccountForges[i]]) do
+      if Result[FAccountForges[i]][j].Host = FAccountHosts[i] then
+        Result[FAccountForges[i]][j].Active :=
+          Result[FAccountForges[i]][j].Login = FAccountBoxes[i].Text;
 end;
 
 function TSettingsForm.AgentClass: TGittanAIClass;
@@ -1582,6 +1679,7 @@ begin
       for i := 0 to High(F.FForges) do
         AValues.ForgePaths[i] := Trim(F.FForgeEdits[i].Text);
       AValues.HostingEnabled := F.FHostingBox.Checked;
+      AValues.Accounts := F.PickedAccounts;
       AValues.CloneSiblings := F.FSiblingsBox.Checked;
       AValues.AIEnabled := F.FAIBox.Checked;
       { The fields hold the picked agent's; the other's are as kept. }

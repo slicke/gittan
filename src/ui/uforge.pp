@@ -64,6 +64,7 @@ type
     FThemeTimer: TTimer;
     FOnTabsChange: TNotifyEvent;
     function FindForge: boolean;
+    procedure ForgetAnswers;
     procedure BuildMenu;
     procedure RebuildRecentMenu;
     procedure ApplyTheme;
@@ -112,6 +113,9 @@ type
       changed: the forge is found again, and what one that is gone had
       found is dropped (the window hides the view then, HasForge). }
     procedure SettingsChanged;
+    {** The active account of the forge's tool changed: what the account
+      of before had found goes, and the view asks again while shown. }
+    procedure AccountChanged;
     {** The view's tabs, which the window's tab strip shows while the
       view is shown: their names in ACaptions, in AMarks the ones with
       something to do (pull requests waiting for review); gives the
@@ -382,10 +386,20 @@ end;
 
 procedure TForgeView.SettingsChanged;
 begin
-  if not FindForge then
-    Exit;
-  { What the forge of before had found or was asking; a new one is
-    asked at once while the view is shown. }
+  if FindForge then
+    ForgetAnswers;
+end;
+
+procedure TForgeView.AccountChanged;
+begin
+  if Assigned(FForge) then
+    ForgetAnswers;
+end;
+
+{ What the forge or the account of before had found or was asking; a
+  new one is asked at once while the view is shown. }
+procedure TForgeView.ForgetAnswers;
+begin
   AbandonJob;
   FMine := nil;
   FReview := nil;

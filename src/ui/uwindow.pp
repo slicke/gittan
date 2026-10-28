@@ -53,7 +53,7 @@ unit uwindow;
 interface
 
 uses
-  Classes, SysUtils, Types, Math, LCLType, Forms, Controls, Graphics, gittan.app,
+  Classes, SysUtils, Types, Math, LCLType, Forms, Controls, Graphics, ExtCtrls, gittan.app,
   gittan.git, gittan.forge, gittan.forgepage, umain, uforge
   {$IFDEF LCLCocoa}, gittan.toolbar, gittan.titlebar, CocoaConfig{$ENDIF}
   {$IFDEF OWNBAR}, gittan.owntitlebar{$ENDIF}
@@ -81,6 +81,11 @@ type
     FForgeView: TForgeView;
     FForgeShown: boolean;
     FForgeClonePull: TGittanPullRequest;
+    { The forges' active accounts at the last look (CheckAccounts), and
+      the timer that looks now and then besides the window's activation,
+      for a switch in a terminal while Gittan is in front. }
+    FAccountsKey: string;
+    FAccountTimer: TTimer;
     {$IFDEF LCLCocoa}
     { The toolbar on macOS 11 and later, nil before. }
     FToolbar: TGittanToolbar;
@@ -113,6 +118,8 @@ type
     procedure ShowForgeView;
     procedure UpdateForgeChrome;
     procedure ForgeCloneOpened(Sender: TObject);
+    function AccountsKey: string;
+    procedure AccountTimerTimer(Sender: TObject);
   public
     procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil);
       override;
@@ -128,6 +135,7 @@ type
     procedure ShowFrame(AFrame: TRepoFrame); override;
     procedure SettingsChanged(AFont: TFont; ATheme, ATabSize: integer; ATools: boolean);
       override;
+    procedure CheckAccounts; override;
     procedure AskOpenRepository; override;
     procedure ShowSettings; override;
     procedure ShowAbout; override;
@@ -149,6 +157,10 @@ var
 implementation
 
 {$R *.lfm}
+
+const
+  { How often CheckAccounts looks besides the window's activation, in ms. }
+  AccountPoll = 60000;
 
 {$IFDEF OWNBAR}
 resourcestring
@@ -188,6 +200,11 @@ begin
   FForgeView.Init(Self);
   FForgeView.OnTabsChange := @ForgeTabsChange;
   UpdateForgeChrome;
+  FAccountsKey := AccountsKey;
+  FAccountTimer := TTimer.Create(Self);
+  FAccountTimer.Interval := AccountPoll;
+  FAccountTimer.OnTimer := @AccountTimerTimer;
+  FAccountTimer.Enabled := True;
   if not Lexers then
     FActive.ShowNoLexers;
   { The welcome view says what opens, rather than offer its buttons
@@ -743,6 +760,42 @@ end;
 procedure TGittanWindow.FormActivate(Sender: TObject);
 begin
   FActive.FormActivate(Sender);
+  CheckAccounts;
+end;
+
+{ Every forge's active accounts, by its name. Reads the tools' files
+  only when they changed, so it is cheap enough for a timer. }
+function TGittanWindow.AccountsKey: string;
+var
+  Forge: TGittanForgeClass;
+begin
+  Result := '';
+  for Forge in RegisteredForges do
+    Result := Result + Forge.Name + ':'#10 + ActiveAccountsKey(Forge.Accounts);
+end;
+
+procedure TGittanWindow.AccountTimerTimer(Sender: TObject);
+begin
+  CheckAccounts;
+end;
+
+{ The shown tab last, as in SettingsChanged. }
+procedure TGittanWindow.CheckAccounts;
+var
+  Key: string;
+  i: integer;
+begin
+  Key := AccountsKey;
+  if Key = FAccountsKey then
+    Exit;
+  FAccountsKey := Key;
+  for i := 0 to FFrames.Count - 1 do
+    if Frames[i] <> FActive then
+      Frames[i].AccountChanged;
+  if FActive <> nil then
+    FActive.AccountChanged;
+  if FForgeView <> nil then
+    FForgeView.AccountChanged;
 end;
 
 { Also how Cocoa hands over a path Gittan is asked to open (the gittan

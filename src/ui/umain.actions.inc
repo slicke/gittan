@@ -410,6 +410,43 @@ begin
       Format(rsGitTooOldDetail, [MinGitMajor, MinGitMinor, GitExe]));
 end;
 
+{ Makes the accounts marked active in APicked the active ones of
+  AForge's tool, where they are not already; a switch that fails says
+  why. }
+procedure SwitchForgeAccounts(AForge: TGittanForgeClass; const APicked: TGittanForgeAccounts);
+var
+  Current: TGittanForgeAccounts;
+  Forge: TGittanForge;
+  Cli, Err: string;
+  i, j: integer;
+  Already: boolean;
+begin
+  Current := AForge.Accounts;
+  for i := 0 to High(APicked) do
+  begin
+    if not APicked[i].Active then
+      Continue;
+    Already := False;
+    for j := 0 to High(Current) do
+      Already := Already or (Current[j].Active and (Current[j].Host = APicked[i].Host) and
+        (Current[j].Login = APicked[i].Login));
+    if Already then
+      Continue;
+    { The tool as the settings name it, whether the hosting features
+      are on or not. }
+    Cli := App.Settings.ForgeCliPath(AForge.Name);
+    if Cli = '' then
+      Cli := FindTool(AForge.CliName);
+    Forge := AForge.Create(Cli);
+    try
+      if not Forge.SwitchAccount(APicked[i].Host, APicked[i].Login, Err) then
+        MessageDlg(Err, mtError, [mbOK], 0);
+    finally
+      Forge.Free;
+    end;
+  end;
+end;
+
 { The settings dialog previews the font, the theme and the tab width in
   the editor and puts back the old ones when it is cancelled; the commands
   are saved with the rest when the window closes. A new git or gh runs
@@ -490,6 +527,12 @@ begin
       end;
       { Then every tab, this one with them. }
       FWindow.SettingsChanged(F, V.Theme, V.TabSize, Tools);
+      { The accounts picked, switched where they are not the tools'; the
+        tabs follow through CheckAccounts. }
+      for i := 0 to High(Forges) do
+        if i <= High(V.Accounts) then
+          SwitchForgeAccounts(Forges[i], V.Accounts[i]);
+      FWindow.CheckAccounts;
     end
     else
       PreviewSettings(OldFont, OldTheme, OldTabSize);
@@ -581,18 +624,31 @@ end;
 procedure TRepoFrame.ReFindForge;
 begin
   if FindForge then
-  begin
-    AbandonPullJob;
-    FPullKey := '';
-    FHasPull := False;
-    FPulls := nil;
-    FPullError := '';
-    FReviewPulls := nil;
-    FSummary.SetReviewPulls(nil);
-    FPullLogin := '';
-    ClearReviews;
-  end;
+    ForgetForgeAnswers;
   UpdateForgeItems;
+end;
+
+{ What the forge answered, for a forge or an account of before. }
+procedure TRepoFrame.ForgetForgeAnswers;
+begin
+  AbandonPullJob;
+  FPullKey := '';
+  FHasPull := False;
+  FPulls := nil;
+  FPullError := '';
+  FReviewPulls := nil;
+  FSummary.SetReviewPulls(nil);
+  FPullLogin := '';
+  ClearReviews;
+end;
+
+procedure TRepoFrame.AccountChanged;
+begin
+  if not Assigned(FForge) then
+    Exit;
+  ForgetForgeAnswers;
+  UpdateForgeItems;
+  StartPullJob(True);
 end;
 
 { The forge's name, empty without one (when what is named after it is

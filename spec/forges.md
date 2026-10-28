@@ -30,6 +30,12 @@ Every method below is abstract in `TGittanForge`; each comment in `gittan.forge.
 9. `function FileOfWebUrl(const AUrl: string; out ARepo, APath: string; out ALine: integer): boolean` – the reverse, for links in comments: the repository, file and line of an address of a file on the forge; false for any other address.
 10. `function PullRef(ANumber: integer): string` – the ref a remote serves the pull request's head at, which `git fetch` fetches to compare with it ("refs/merge-requests/12/head" on GitLab).
 
+Three more have an answer in the base, for a forge whose tool keeps no list of accounts (none, no note, no switch), and a forge overrides them when its tool can be logged in to several:
+
+- `class function Accounts: TGittanForgeAccounts` – the accounts the tool is logged in to, a host and a login each, the active one per host marked, read from the tool's own files without running it, since the window asks on every activation and every minute (`CheckAccounts`). GitHub reads gh's `hosts.yml` (`GhAccounts`), again only when the file changed. Keep it cheap and main-thread.
+- `class function AccountsNote: string` – why the tool would not use the account picked, when something outside its login decides (gh with `GH_TOKEN` in the environment); empty otherwise. The Hosting page shows it in place of its own note.
+- `function SwitchAccount(const AHost, ALogin: string; out AError: string): boolean` – makes ALogin the tool's active account on AHost, for the tool everywhere (`gh auth switch --hostname --user`). It runs the tool and waits.
+
 A job takes what it needs from the forge (the tool's path, the name) when it is made, never the forge itself: the settings may change, and the forge be freed, while it runs.
 
 ## The jobs
