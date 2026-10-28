@@ -776,6 +776,7 @@ begin
   AddRow(FReviewItem);
   FViewPopup.AddHeader(rsHistoryHeader);
   AddRow(FCodeHistoryItem);
+  AddRow(FTimelapseItem);
   AddRow(FGoFileHistoryItem);
   FViewPopup.Popup(AScreenRect);
 end;

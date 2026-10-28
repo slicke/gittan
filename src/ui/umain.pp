@@ -24,7 +24,7 @@ uses
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
   {$IFDEF LCLWin32}gittan.wintitlebar,{$ENDIF}
   {$IFDEF LCLGtk3}gittan.gtktitlebar,{$ENDIF}
-  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.pickaxe, gittan.navhistory,
+  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.timelapse, gittan.timelapsebar, gittan.pickaxe, gittan.navhistory,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.textfile, gittan.sectionheader, gittan.hintbox,
   gittan.forge, gittan.lfslocks,
@@ -714,7 +714,7 @@ type
     FViewPopup: TGittanPopupList;
     FViewItems: array of TMenuItem;
     FViewRows: array of integer;
-    FCodeHistoryItem, FGoFileHistoryItem: TMenuItem;
+    FCodeHistoryItem, FGoFileHistoryItem, FTimelapseItem: TMenuItem;
     { The submodules, dropped from the Repository page's tile when there
       is more than one; a pick shows that one's page. }
     FSubListPopup: TGittanPopupList;
@@ -959,6 +959,17 @@ type
     { The name the changes not committed yet are made under, for their
       initial (see DrawInitials). }
     FHistoryUser: string;
+    { Go > Time-lapse (see umain.timelapse.inc): the versions of the file
+      (their commits are in FHistory), the job that reads them, the bar
+      under the editor, the timer that plays them, the commit whose
+      version is shown, whether the lines it takes away are shown
+      leaving first, and whether a version is being filled in. }
+    FTimelapse: TGittanTimelapse;
+    FTimelapseJob: TGittanTimelapseJob;
+    FTimelapseBar: TGittanTimelapseBar;
+    FTimelapseTimer: TTimer;
+    FTimelapseCommit: integer;
+    FTimelapseLeaving, FTimelapseFilling: boolean;
     { The change view of an image, in the editor's place (see
       ShowImageChanges). }
     FImageDiff: TGittanImageDiff;
@@ -1376,6 +1387,22 @@ type
     function HistoryHeaderText(AIndex: integer): string;
     procedure HistoryClick(ARow: integer);
     procedure ShowHistoryCommit(AIndex: integer);
+    { umain.timelapse.inc }
+    procedure MenuTimelapseClick(Sender: TObject);
+    procedure AbandonTimelapseJob;
+    procedure TimelapseJobDone(Sender: TObject);
+    procedure EndTimelapse;
+    procedure ShowTimelapseVersion(ACommit: integer; ALeaving: boolean);
+    procedure FillTimelapseVersion(ACommit: integer; ALeaving: boolean);
+    function TimelapseTakesAway(ACommit: integer): boolean;
+    function TimelapseStepTime: integer;
+    procedure SetTimelapsePlaying(APlaying: boolean);
+    procedure TimelapseTimerTimer(Sender: TObject);
+    procedure TimelapsePlay(Sender: TObject);
+    procedure TimelapseSeek(Sender: TObject);
+    procedure TimelapseStep(ADelta: integer);
+    function TimelapseDotColor(AIndex: integer): TColor;
+    function TimelapseKey(Key: word; Shift: TShiftState): boolean;
     { umain.actions.inc }
     procedure ApplySettings;
     procedure RebuildRecentMenu;
@@ -2144,6 +2171,13 @@ resourcestring
   rsCommit = 'commit %s';
   rsHistory = 'Code &History';
   rsGoFileHistory = 'Fi&le History';
+  rsTimelapse = '&Time-lapse';
+  rsTimelapseTitle = 'Time-lapse of %s';
+  rsTimelapseLoading = 'Loading the history of the file...';
+  rsTimelapseNeedsFile = 'Show a file first: the time-lapse plays its history.';
+  rsTimelapseBinary = 'A binary file has no lines to play.';
+  rsNoTimelapse = 'The file has no committed history.';
+  rsTimelapseCounter = '%d / %d';
   rsHistoryTitle = 'History of %s';
   rsHistoryIn = '%s in %s';
   rsHistoryLines = 'lines %d-%d';
@@ -3107,6 +3141,9 @@ const
     umain.leaveout.inc). }
   bmLeftOutAdded = 12;
   bmLeftOutDeleted = 13;
+  { A line the version shown in the time-lapse brought in, in the
+    stronger tone of its commit: kind bmHistoryNew + the commit's hue. }
+  bmHistoryNew = 50;
   bmHistoryBase = 100;
   { Tags of the editor's attribs that mark the words that differ inside
     an added or a deleted line. }
@@ -3421,6 +3458,17 @@ begin
   FSymbolBar.Visible := False;
   FSymbolBar.OnPick := @SymbolBarPick;
   FSymbolBar.OnClose := @SymbolBarClose;
+  { The time-lapse bar sits under the editor while a time-lapse plays. }
+  FTimelapseBar := TGittanTimelapseBar.Create(Self);
+  FTimelapseBar.Parent := EditorPanel;
+  FTimelapseBar.Align := alBottom;
+  FTimelapseBar.Visible := False;
+  FTimelapseBar.OnColor := @TimelapseDotColor;
+  FTimelapseBar.OnSeek := @TimelapseSeek;
+  FTimelapseBar.OnPlay := @TimelapsePlay;
+  FTimelapseTimer := TTimer.Create(Self);
+  FTimelapseTimer.Enabled := False;
+  FTimelapseTimer.OnTimer := @TimelapseTimerTimer;
   { The summary takes the editor's place until a file is picked. The
     scroll box gives it native scrolling; its resize keeps the summary at
     least as tall as the box, so the summary's background fills it. }
@@ -4144,6 +4192,7 @@ begin
   FFindBar.SetColors(P.Shade, P.Text, P.Dim, P.Line);
   FFindBar.Nav.SetColors(P.Shade, P.Pill, P.Border, P.PillText, P.Accent);
   FSymbolBar.SetColors(P.Shade, P.Text, P.Dim, P.Line);
+  FTimelapseBar.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Accent);
   for List in [FBranchPopup, FStashPopup, FUpstreamPopup, FTagPopup, FViewPopup,
     FSubListPopup, FReflogPopup, FPullPopup, FReviewPopup, FSyncPopup, FRecentPopup,
     FBasePopup, FConflictPopup, FFindPopup, FCompositionPopup, FWorktreePopup,
@@ -4972,6 +5021,8 @@ begin
   AddItem(GoMenu, rsCallers, ShortCut(VK_C, [ssModifier, ssShift]), @MenuCallersClick);
   FCodeHistoryItem := AddItem(GoMenu, rsHistory, ShortCut(VK_H, [ssModifier, ssShift]),
     @MenuHistoryClick);
+  FTimelapseItem := AddItem(GoMenu, rsTimelapse, ShortCut(VK_H, [ssModifier, ssAlt]),
+    @MenuTimelapseClick);
   FGoFileHistoryItem := AddItem(GoMenu, rsGoFileHistory, 0, @MenuGoFileHistoryClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextChange, ShortCut(VK_F7, []), @MenuNextChangeClick);
@@ -5249,6 +5300,11 @@ begin
   if ABookmarkKind >= bmHistoryBase then
   begin
     AColor := HistoryColor(ABookmarkKind - bmHistoryBase, htRow);
+    Exit;
+  end;
+  if ABookmarkKind >= bmHistoryNew then
+  begin
+    AColor := HistoryColor(ABookmarkKind - bmHistoryNew, htWord);
     Exit;
   end;
   if FDark then
@@ -5793,6 +5849,10 @@ begin
   for i := 0 to Marks.Count - 1 do
   begin
     if (Marks[i]^.Data.Kind = bmGap) or (Marks[i]^.Data.Kind = bmCommit) then
+      Continue;
+    { The time-lapse's blocks are what the version shown changed. }
+    if (FTimelapse <> nil) and (FView = gvHistory) and
+      (Marks[i]^.Data.Kind >= bmHistoryBase) then
       Continue;
     Line := Marks[i]^.Data.LineNum;
     if Prev <> Line - 1 then
@@ -6590,6 +6650,11 @@ begin
     gvSubmodule:
       RestoreSubmodule;
     gvHistory:
+      if FTimelapse <> nil then
+        { The history up to the commit does not change with the work
+          tree; the version is drawn again, for the lexer and colors. }
+        ShowTimelapseVersion(FTimelapseCommit, False)
+      else
       begin
         { The view is rebuilt when the job is done, at the same place. }
         FHistoryTopLine := TopLine;
@@ -6663,6 +6728,7 @@ begin
   FFindBar.Visible := False;
   FSymbolBar.Visible := False;
   AbandonHistoryJob;
+  EndTimelapse;
   if FBanner <> nil then
     PlaceUnderTitleBar;
 end;
@@ -6672,7 +6738,10 @@ procedure TRepoFrame.ShowEditor;
 begin
   { A history still being fetched is for a view that is no longer shown. }
   if FView <> gvHistory then
+  begin
     AbandonHistoryJob;
+    EndTimelapse;
+  end;
   { The symbol bar lists the file shown before. }
   FSymbolBar.Visible := False;
   FSummaryBox.Visible := False;
@@ -7382,7 +7451,7 @@ end;
 { A command's key runs it (CommandKey). }
 procedure TRepoFrame.FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
 begin
-  if CommandKey(Key, Shift) then
+  if TimelapseKey(Key, Shift) or CommandKey(Key, Shift) then
     Key := 0;
 end;
 
@@ -7505,6 +7574,7 @@ const
 {$I umain.leaveout.inc}
 {$I umain.index.inc}
 {$I umain.history.inc}
+{$I umain.timelapse.inc}
 {$I umain.repofiles.inc}
 {$I umain.repopage.inc}
 {$I umain.commands.inc}

@@ -963,6 +963,14 @@ type
       know, or a range past the end of the file in ARef. }
     function LineHistory(const APath, ARef: string; AFrom, ATo, AMax: integer;
       out AOutput: string): boolean;
+    {** The history of APath up to ARef (HEAD when empty) for the
+      time-lapse: in ALog every commit along the first parents that
+      changed it, newest first, followed through renames, each with its
+      diff without context lines and formatted as LineHistory's (see
+      TGittanHistory.Parse); a merge counts with its diff from the first
+      parent. AText is the file as ARef has it, as stored. Returns false
+      when git failed, as for a file ARef does not have. }
+    function FileTimeline(const APath, ARef: string; out ALog, AText: string): boolean;
     {** A Base that shows what the commit AHash changed: the range from
       its parent, or from the empty tree for a commit without one. }
     function CommitRange(const AHash: string): string;
@@ -6827,6 +6835,24 @@ begin
     AddArg(Args, APath);
   end;
   Result := RunGit(FRoot, Args, AOutput);
+end;
+
+function TGittanRepo.FileTimeline(const APath, ARef: string; out ALog, AText: string): boolean;
+var
+  Ref: string;
+begin
+  ALog := '';
+  AText := '';
+  if FRoot = '' then
+    Exit(False);
+  Ref := ARef;
+  if Ref = '' then
+    Ref := 'HEAD';
+  { The text as stored: a Git LFS pointer is what the diffs are of. }
+  Result := RunGit(FRoot, ['cat-file', 'blob', Ref + ':' + APath], AText) and
+    RunGit(FRoot, ['log', '--no-color', '--no-ext-diff', '--no-textconv',
+    '--first-parent', '-m', '--follow', '-p', '-U0',
+    '--format=%x01%H%x1f%an%x1f%at%x1f%s', Ref, '--', APath], ALog);
 end;
 
 initialization
