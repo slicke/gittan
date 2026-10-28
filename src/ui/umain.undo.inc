@@ -37,19 +37,21 @@ begin
 end;
 
 { The branches checked out in the repository's other worktrees, which
-  an undo leaves alone; none when git cannot list them. }
-function TRepoFrame.OtherWorktreeBranches: TStringArray;
+  an undo leaves alone; false with AError when git cannot list them,
+  since an undo could then move one of them. }
+function TRepoFrame.OtherWorktreeBranches(out ABranches: TStringArray;
+  out AError: string): boolean;
 var
   List: TGittanWorktrees;
-  Err: string;
   i: integer;
 begin
-  Result := nil;
-  if not ListWorktrees(FRepo.Root, List, Err) then
+  ABranches := nil;
+  Result := ListWorktrees(FRepo.Root, List, AError);
+  if not Result then
     Exit;
   for i := 0 to High(List) do
     if (List[i].Branch <> '') and not IsThisWorktree(List[i]) then
-      Result := Concat(Result, [List[i].Branch]);
+      ABranches := Concat(ABranches, [List[i].Branch]);
 end;
 
 procedure TRepoFrame.UndoRedo(ARedo: boolean);
@@ -58,7 +60,7 @@ var
   Current, Now, Target: TGittanRefState;
   Steps: TGittanGitSteps;
   Elsewhere: TStringArray;
-  Err: string;
+  Err, Base: string;
   Ok: boolean;
 begin
   if (FRepo.Root = '') or (FUndoHistory = nil) then
@@ -87,7 +89,11 @@ begin
     BannerError(rsUndoFailed, FRepo.Error);
     Exit;
   end;
-  Elsewhere := OtherWorktreeBranches;
+  if not OtherWorktreeBranches(Elsewhere, Err) then
+  begin
+    BannerError(rsUndoFailed, Err);
+    Exit;
+  end;
   if ARedo then
     Ok := PlanRefChange(Current, Step.Before, Step.After, Step.Kind, Elsewhere, Steps, Err)
   else
@@ -97,14 +103,23 @@ begin
     StatusNote(Err, True);
     Exit;
   end;
-  { HEAD's branch going back off commits its upstream has. }
+  { HEAD's branch going back off commits its upstream has: the newest
+    of them (where HEAD and the upstream meet) is not in the target. }
   if not ARedo and (Current.Branch <> '') and (Target.Branch = Current.Branch) and
-    (Target.Head <> Current.Head) and FRepo.IsAncestor(Current.Head, '@{upstream}') and
-    not FRepo.IsAncestor(Current.Head, Target.Head) then
+    (Target.Head <> Current.Head) and FRepo.MergeBase('@{upstream}', Base) and
+    not FRepo.IsAncestor(Base, Target.Head) then
+  begin
     if QuestionDlg(rsUndoPushedTitle, Format(rsUndoPushedAsk,
       [Step.Title, FRepo.Upstream(Current.Branch), Current.Branch]), mtWarning,
       [mrYes, rsUndoAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
       Exit;
+    { git elsewhere may have moved the branches while it asked. }
+    if not FRepo.ReadRefState(Now) or not SameRefState(Now, Current) then
+    begin
+      StatusNote(rsUndoChanged, True);
+      Exit;
+    end;
+  end;
   StopWatcher;
   try
     Screen.Cursor := crHourGlass;
@@ -112,8 +127,11 @@ begin
       Ok := FRepo.RunSteps(Steps);
       Err := FRepo.Error;
       { Noted as the step's own state, so the refresh finds no new
-        step; a run that stopped halfway is a step of its own. }
-      if Ok and FRepo.ReadRefState(Now) then
+        step; a run that stopped halfway is a step of its own. When
+        the branches cannot be read, the target stands for them. }
+      if Ok and not FRepo.ReadRefState(Now) then
+        Now := Target;
+      if Ok then
         if ARedo then
           FUndoHistory.Redone(Now)
         else

@@ -173,9 +173,10 @@ begin
   Add(nil, rsCaRevert, caRevert, not Busy and InHead and not IsMerge);
   Add(nil, rsCaRebase, caRebase, not Busy and InHead and not IsHead);
   { The ticked files as a fixup of this commit, for the rebase to fold
-    in; of a commit on the branch, while the tree chooses a commit. }
+    in; of a commit on the branch, while the tree chooses a commit
+    without Amend and no file is in conflict. }
   Add(nil, rsCaFixup, caFixup, not Busy and not Jobs and InHead and CommitChoosing and
-    (FChosenCount > 0));
+    (FChosenCount > 0) and not FCommitAmend.Checked and (FConflictFiles = 0));
   Sub := Add(nil, Format(rsCaReset, [Amp(ResetTarget)]), 0, not Busy);
   Sub.OnClick := nil;
   Add(Sub, rsCaResetSoft, caResetSoft);

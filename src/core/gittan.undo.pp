@@ -347,8 +347,8 @@ function PlanRefChange(const ACurrent, AFrom, ATo: TGittanRefState; AKind: TGitt
   const AElsewhere: array of string; out ASteps: TGittanGitSteps;
   out AError: string): boolean;
 var
-  i: integer;
-  FromId, ToId: string;
+  i, Made, Gone: integer;
+  FromId, ToId, Renamed, RenamedTo, FromBranch: string;
 
   { Whether ABranch is checked out in another worktree, said in AError. }
   function Elsewhere(const ABranch: string): boolean;
@@ -399,18 +399,46 @@ begin
   for i := 0 to High(AFrom.Tips) do
     if not TipOf(ATo, AFrom.Tips[i].Name, ToId) and Elsewhere(AFrom.Tips[i].Name) then
       Exit(False);
-  { The branches to make again first, since HEAD may go to one. }
+  { One branch gone and one made at the same commit is a rename, taken
+    back with branch -m so its upstream and reflog go with it (and HEAD,
+    when it is HEAD's own) rather than made again and deleted. }
+  Renamed := '';
+  RenamedTo := '';
+  Made := -1;
+  Gone := -1;
   for i := 0 to High(ATo.Tips) do
     if not TipOf(AFrom, ATo.Tips[i].Name, FromId) then
+      if Made = -1 then
+        Made := i
+      else
+        Made := -2;
+  for i := 0 to High(AFrom.Tips) do
+    if not TipOf(ATo, AFrom.Tips[i].Name, ToId) then
+      if Gone = -1 then
+        Gone := i
+      else
+        Gone := -2;
+  if (Made >= 0) and (Gone >= 0) and (ATo.Tips[Made].Id = AFrom.Tips[Gone].Id) then
+  begin
+    Renamed := AFrom.Tips[Gone].Name;
+    RenamedTo := ATo.Tips[Made].Name;
+    Add(['branch', '-m', Renamed, RenamedTo]);
+  end;
+  FromBranch := AFrom.Branch;
+  if (Renamed <> '') and (FromBranch = Renamed) then
+    FromBranch := RenamedTo;
+  { The branches to make again first, since HEAD may go to one. }
+  for i := 0 to High(ATo.Tips) do
+    if (ATo.Tips[i].Name <> RenamedTo) and not TipOf(AFrom, ATo.Tips[i].Name, FromId) then
       Add(['branch', '--no-track', ATo.Tips[i].Name, ATo.Tips[i].Id]);
   { The other branches, given the tip each has now so a branch moved by
     something else meanwhile is left alone; HEAD's own is moved by the
     reset or, when HEAD goes elsewhere, once it has left it. }
   for i := 0 to High(ATo.Tips) do
-    if (ATo.Tips[i].Name <> AFrom.Branch) and TipOf(AFrom, ATo.Tips[i].Name, FromId) and
+    if (ATo.Tips[i].Name <> FromBranch) and TipOf(AFrom, ATo.Tips[i].Name, FromId) and
       (FromId <> ATo.Tips[i].Id) then
       Add(['update-ref', HeadsPrefix + ATo.Tips[i].Name, ATo.Tips[i].Id, FromId]);
-  if ATo.Branch <> AFrom.Branch then
+  if ATo.Branch <> FromBranch then
   begin
     if ATo.Branch <> '' then
       Add(['switch', ATo.Branch])
@@ -428,7 +456,7 @@ begin
       Add(['reset', '--keep', ATo.Head]);
   end;
   for i := 0 to High(AFrom.Tips) do
-    if not TipOf(ATo, AFrom.Tips[i].Name, ToId) then
+    if (AFrom.Tips[i].Name <> Renamed) and not TipOf(ATo, AFrom.Tips[i].Name, ToId) then
       Add(['update-ref', '-d', HeadsPrefix + AFrom.Tips[i].Name, AFrom.Tips[i].Id]);
   Result := True;
 end;

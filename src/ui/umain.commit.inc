@@ -869,7 +869,9 @@ end;
 { The ticked files committed as a fixup of ACommit, as StartCommit
   commits them, with "fixup! <subject>" as the message, which git's
   autosquash and the interactive rebase's dialog read (AutosquashSteps
-  in gittan.rebase). The message being written stays in the memo. }
+  in gittan.rebase). The message being written stays in the memo. Not
+  while Amend is ticked, which the next commit would then amend the
+  fixup with, nor while a file is still in conflict. }
 procedure TRepoFrame.StartFixupCommit(const ACommit: TGittanGraphCommit);
 var
   Paths: TStringList;
@@ -878,7 +880,8 @@ var
   Err: string;
 begin
   if (FCommitJob <> nil) or (FRemoteJob <> nil) or RepoBusy or not CommitChoosing or
-    (FChosenCount = 0) or not EnsureIdentity then
+    (FChosenCount = 0) or FCommitAmend.Checked or (FConflictFiles > 0) or
+    not EnsureIdentity then
     Exit;
   Paths := TStringList.Create;
   try
@@ -916,10 +919,11 @@ end;
 
 { Fold It In in the banner of a fixup commit: the interactive rebase
   from the parent of the commit fixed up, which puts the fixup after
-  it. }
+  it; only while HEAD still has the fixup (a branch switched to since
+  may have the commit fixed up without it). }
 procedure TRepoFrame.FixupFoldClick(Sender: TObject);
 begin
-  if (FFixupParent <> '') and FRepo.IsAncestor(FFixupHash, 'HEAD') then
+  if (FFixupParent <> '') and (FFixupId <> '') and FRepo.IsAncestor(FFixupId, 'HEAD') then
     RebaseInteractiveAsk(FFixupParent, Copy(FFixupParent, 1, 7), False);
 end;
 
@@ -933,7 +937,8 @@ procedure TRepoFrame.CommitJobDone(Sender: TObject);
 var
   Job: TGittanCommitJob;
   Subject: string;
-  Amended, Fixup: boolean;
+  Amended, Fixup, Merges: boolean;
+  Steps: TGittanRebaseSteps;
 begin
   Job := TGittanCommitJob(Sender);
   if Job <> FCommitJob then
@@ -973,6 +978,11 @@ begin
   else if Fixup then
   begin
     FStatus.ShowMessage('', stNormal, 0);
+    FFixupId := Job.Id;
+    { Folded in by the interactive rebase, which takes no merges. }
+    if (FFixupParent <> '') and (not FRepo.RebaseSteps(FFixupParent, Steps, Merges) or
+      Merges) then
+      FFixupParent := '';
     if FFixupParent <> '' then
       FBanner.AddAction(Format(rsFixupCommitted, [FFixupShort]), Job.Message, bkSuccess,
         BannerActionSeconds, rsFixupFold, @FixupFoldClick)

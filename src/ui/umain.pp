@@ -128,6 +128,9 @@ type
       the frame that has it as Sender, also when it was open already. }
     procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil);
       virtual; abstract;
+    {** Whether a frame has the repository at ARoot open, or is opening
+      it. }
+    function HasOpen(const ARoot: string): boolean; virtual; abstract;
     {** Whether AFrame is the frame shown, the one whose menu, caption
       and title bar the window has. }
     function IsActive(AFrame: TRepoFrame): boolean; virtual; abstract;
@@ -444,9 +447,9 @@ type
     { A commit running as a fixup of a commit from the graph's menu
       (StartFixupCommit): the job, and the commit it fixes up, its
       short id and its first parent, the rebase to fold it in starts
-      from (FixupFoldClick). }
+      from (FixupFoldClick), and the fixup commit once it is made. }
     FFixupJob: TGittanCommitJob;
-    FFixupHash, FFixupShort, FFixupParent: string;
+    FFixupHash, FFixupShort, FFixupParent, FFixupId: string;
     { The commits still running in a repository no longer open, for
       their draft (DroppedCommitDone). }
     FDroppedCommits: TList;
@@ -1750,7 +1753,7 @@ type
     procedure StashContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
     procedure StashMenuClick(Sender: TObject);
     function IsThisWorktree(const AWorktree: TGittanWorktree): boolean;
-    function OtherWorktreeBranches: TStringArray;
+    function OtherWorktreeBranches(out ABranches: TStringArray; out AError: string): boolean;
     procedure MenuWorktreesClick(Sender: TObject);
     procedure ListPaletteActions(AList: TStringList);
     procedure MenuPaletteClick(Sender: TObject);
@@ -2440,6 +2443,7 @@ resourcestring
   rsUndoPushedAsk = 'Undo %s? %s has the commits it takes off %s, so the branch ' +
     'will be behind it and the next push replaces them.';
   rsUndoAction = 'Undo';
+  rsUndoChanged = 'The branches changed meanwhile; Refresh and try again';
   rsCaMerge = 'Merge %s into %s';
   rsCaDropInHead = '%s is already in %s';
   rsCaCherryPick = 'Cherry-pick into %s';
@@ -2624,6 +2628,7 @@ resourcestring
   rsWtRemoveForceAsk = 'The worktree %s cannot be removed as it is: %s' + LineEnding + LineEnding + 'Remove it anyway? Changes not committed there are lost.';
   rsWtRemoveAction = 'Remove';
   rsWtRemoveAnyway = 'Remove Anyway';
+  rsWtRemoveOpen = '%s is open in a tab; close it first';
   rsWtRemoved = 'Removed the worktree %s';
   rsReflog = 'Where HEAD has been';
   rsNoReflog = 'The reflog is empty';

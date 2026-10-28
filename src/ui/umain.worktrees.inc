@@ -237,6 +237,13 @@ begin
   if (FRepo.Root = '') or AWorktree.Main or IsThisWorktree(AWorktree) then
     Exit;
   Folder := ExtractFileName(ExcludeTrailingPathDelimiter(AWorktree.Path));
+  { Its tab would be left on a folder that is gone, with any edit not
+    saved there. }
+  if FWindow.HasOpen(AWorktree.Path) then
+  begin
+    StatusNote(Format(rsWtRemoveOpen, [Folder]), True);
+    Exit;
+  end;
   if QuestionDlg(rsWtRemoveTitle, Format(rsWtRemoveAsk, [Folder, AWorktree.Path]), mtWarning,
     [mrYes, rsWtRemoveAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
     Exit;

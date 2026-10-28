@@ -379,7 +379,7 @@ end;
 
 procedure TUndoTest.TestDeleteAndRename;
 var
-  Tip: string;
+  Tip, Output, Err: string;
 begin
   Git(['branch', 'old']);
   Git(['switch', '-q', 'old']);
@@ -392,12 +392,15 @@ begin
   AssertEquals('Delete Branch old', FHistory.UndoStep.Title);
   Undo;
   AssertEquals('made again at its tip', Tip, Rev('refs/heads/old'));
+  Git(['config', 'branch.old.merge', 'refs/heads/old']);
   Git(['branch', '-m', 'old', 'renamed']);
   Track;
   AssertEquals('Rename Branch old to renamed', FHistory.UndoStep.Title);
   Undo;
   AssertEquals(Tip, Rev('refs/heads/old'));
   AssertEquals('', Rev('refs/heads/renamed'));
+  AssertTrue(RunGitIn(FDir, ['config', 'branch.old.merge'], Output, Err));
+  AssertEquals('its config back with it', 'refs/heads/old', Trim(Output));
   { HEAD's own branch. }
   Git(['branch', '-m', 'main', 'trunk']);
   Track;

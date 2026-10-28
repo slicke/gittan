@@ -130,6 +130,7 @@ type
   public
     procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil);
       override;
+    function HasOpen(const ARoot: string): boolean; override;
     function IsActive(AFrame: TRepoFrame): boolean; override;
     function TitleBarHeight: integer; override;
     {$IFDEF OWNBAR}
@@ -524,6 +525,21 @@ begin
   finally
     Probe.Free;
   end;
+end;
+
+function TGittanWindow.HasOpen(const ARoot: string): boolean;
+var
+  Root: string;
+  i: integer;
+begin
+  Root := ExpandFileName(ExcludeTrailingPathDelimiter(ARoot));
+  for i := 0 to FFrames.Count - 1 do
+    if ((Frames[i].RepoRoot <> '') and
+      SameFileName(ExpandFileName(ExcludeTrailingPathDelimiter(Frames[i].RepoRoot)), Root)) or
+      ((Frames[i].OpeningRoot <> '') and
+      SameFileName(ExpandFileName(ExcludeTrailingPathDelimiter(Frames[i].OpeningRoot)), Root)) then
+      Exit(True);
+  Result := False;
 end;
 
 procedure TGittanWindow.OpenRepository(const ADir: string; AOnOpened: TNotifyEvent);
