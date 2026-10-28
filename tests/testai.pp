@@ -498,7 +498,8 @@ var
 begin
   Text := FindListInput('the parser', 'a.txt'#10'b.txt'#10);
   AssertEquals(1, Pos('The question: the parser', Text));
-  AssertTrue(Pos('files:'#10'a.txt'#10'b.txt', Text) > 0);
+  AssertTrue('the list after its heading, on the platform''s line end', Pos('files:' +
+    LineEnding + 'a.txt'#10'b.txt', Text) > 0);
 end;
 
 procedure TAiTest.TestFindLinesInput;
