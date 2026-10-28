@@ -707,8 +707,9 @@ begin
   Application.QueueAsyncCall(@ScrollAsync, 0);
 end;
 
-{ Reads the field and keeps the rows that match. Lower case on both
-  sides, so the case does not matter. The commits of a path come from
+{ Reads the field and keeps the rows that match. Lower case and composed
+  on both sides, so neither the case nor how an ö is written matters
+  (the Repository page gives an author's name as git has it). The commits of a path come from
   the owner, asked again only when the paths change. When the log shown
   was cut, the owner is asked for all of it first (once), and answers
   with Replace, which comes back here. The highlight stays on the same
@@ -722,9 +723,9 @@ begin
   FTimer.Enabled := False;
   FFilter := ParseGraphFilter(FEdit.Text);
   for i := 0 to High(FFilter.Words) do
-    FFilter.Words[i] := UTF8LowerCase(FFilter.Words[i]);
+    FFilter.Words[i] := UTF8LowerCase(Composed(FFilter.Words[i]));
   for i := 0 to High(FFilter.Authors) do
-    FFilter.Authors[i] := UTF8LowerCase(FFilter.Authors[i]);
+    FFilter.Authors[i] := UTF8LowerCase(Composed(FFilter.Authors[i]));
   FFiltered := not GraphFilterEmpty(FFilter);
   if FFiltered and FMore and not FAskedMore and Assigned(FOnMore) then
   begin
