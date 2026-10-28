@@ -7,9 +7,12 @@ unit gittan.commitgraph;
   or not pulled yet. The header names the branch and how far it is from
   its upstream, and holds the search field: what is typed there
   (ParseGraphFilter in gittan.graph: words, author:, since:, until:,
-  path:) keeps only the commits that match, as a flat list, since the
-  lanes of a part of the history mean nothing. The commits a path
-  filter asks for come from the owner (OnPathCommits), who asks git;
+  path:, change:) keeps only the commits that match, as a flat list,
+  since the lanes of a part of the history mean nothing. The commits a
+  path filter asks for come from the owner (OnPathCommits), who asks
+  git; those a change filter asks for take longer, so the owner is
+  asked (OnChangeCommits) and answers later with SetChangeCommits,
+  the list saying meanwhile that it searches;
   when the log shown was cut and a filter is typed, the owner is asked
   for the whole log once (OnMore), as it is by a click on the last row
   that says the log was cut.
@@ -52,6 +55,8 @@ type
     AHashes. }
   TGittanGraphPathEvent = procedure(Sender: TObject; const APath: string;
     AHashes: TStrings) of object;
+  TGittanGraphChangeEvent = procedure(Sender: TObject;
+    const AChanges: TStringArray) of object;
 
   TGittanCommitGraph = class;
 
@@ -111,6 +116,11 @@ type
       were asked for. }
     FPathHashes: TStringList;
     FPathKey: string;
+    { The commits making the changes of the filter: the changes they are
+      wanted for (FChangeKey, '' for none), those they were found for
+      (FChangeDone), and git's reason when the search failed. }
+    FChangeHashes: TStringList;
+    FChangeKey, FChangeDone, FChangeError: string;
     FLanes: integer;
     FMore, FAskedMore: boolean;
     FBranch: string;
@@ -138,6 +148,7 @@ type
     FOnContext: TGittanGraphContextEvent;
     FOnMore: TNotifyEvent;
     FOnPathCommits: TGittanGraphPathEvent;
+    FOnChangeCommits: TGittanGraphChangeEvent;
     FOnClose: TNotifyEvent;
     procedure Context(const AScreenPos: TPoint);
     function LaneColor(AIndex: integer): TColor;
@@ -155,6 +166,7 @@ type
     procedure ScrollAsync(Data: PtrInt);
     function FooterClickable: boolean;
     function FooterText: string;
+    function ChangePending: boolean;
     procedure Load(const ACommits: TGittanGraphCommits; AMore: boolean;
       const AKeep: string);
     function CurrentHash: string;
@@ -213,6 +225,12 @@ type
     {** Puts ACommits in the place of the ones shown, the answer to
       OnMore: the filter and the highlighted commit stay. }
     procedure Replace(const ACommits: TGittanGraphCommits; AMore: boolean);
+    {** The answer to OnChangeCommits: AHashes are the commits making
+      AChanges, or AError says why git could not look (AHashes then
+      empty). An answer for changes the filter no longer asks for is
+      dropped. }
+    procedure SetChangeCommits(const AChanges: TStringArray; AHashes: TStrings;
+      const AError: string);
     {** Hides the panel without a pick. }
     procedure Close;
     {** Keeps the panel in the middle of the parent after it resized. }
@@ -235,6 +253,11 @@ type
     property OnMore: TNotifyEvent read FOnMore write FOnMore;
     {** The commits that touched a path of the filter are wanted. }
     property OnPathCommits: TGittanGraphPathEvent read FOnPathCommits write FOnPathCommits;
+    {** The commits making the changes of the filter are wanted: the
+      handler starts the search (dropping one still running) and
+      answers with SetChangeCommits. }
+    property OnChangeCommits: TGittanGraphChangeEvent
+      read FOnChangeCommits write FOnChangeCommits;
     {** The panel went away, however it was closed. }
     property OnClose: TNotifyEvent read FOnClose write FOnClose;
     {** A control whose clicks leave the panel open, as its own do, so
@@ -260,7 +283,9 @@ resourcestring
   rsGraphMatchesCut = '%d of the newest %d commits match';
   rsGraphEmpty = 'No commits yet';
   rsGraphNoMatch = 'No commits match';
-  rsGraphFilterHint = 'Search (author: since: until: path:)';
+  rsGraphFilterHint = 'Search (author: since: until: path: change:)';
+  rsGraphSearchingChanges = 'Searching the history for the change...';
+  rsGraphChangeFailed = 'git could not search: %s';
   rsGraphStats = 'Statistics';
   rsStatsSummary = '%s commits by %s authors';
   rsStatsSummaryOne = '%s commits by one author';
@@ -398,6 +423,10 @@ begin
   FPathHashes.Sorted := True;
   FPathHashes.Duplicates := dupIgnore;
   FPathHashes.CaseSensitive := True;
+  FChangeHashes := TStringList.Create;
+  FChangeHashes.Sorted := True;
+  FChangeHashes.Duplicates := dupIgnore;
+  FChangeHashes.CaseSensitive := True;
   FBox := TGittanGraphBox.Create(Self);
   FBox.FGraph := Self;
   FBox.Parent := Self;
@@ -428,6 +457,7 @@ begin
   Application.RemoveAsyncCalls(Self);
   FHook.Hook(False);
   FPathHashes.Free;
+  FChangeHashes.Free;
   inherited Destroy;
 end;
 
@@ -683,6 +713,10 @@ begin
   FStatsHot := False;
   FPathKey := '';
   FPathHashes.Clear;
+  FChangeKey := '';
+  FChangeDone := '';
+  FChangeError := '';
+  FChangeHashes.Clear;
   Load(ACommits, AMore, '');
   FEdit.Text := AFilter;
   ApplyFilter;
@@ -707,10 +741,45 @@ begin
   Application.QueueAsyncCall(@ScrollAsync, 0);
 end;
 
+{ The changes of a filter as one string, '' for none. }
+function ChangeKeyOf(const AChanges: TStringArray): string;
+var
+  i: integer;
+begin
+  Result := '';
+  for i := 0 to High(AChanges) do
+    Result := Result + AChanges[i] + #1;
+end;
+
+procedure TGittanCommitGraph.SetChangeCommits(const AChanges: TStringArray;
+  AHashes: TStrings; const AError: string);
+var
+  Key: string;
+begin
+  Key := ChangeKeyOf(AChanges);
+  if (Key = '') or (Key <> FChangeKey) then
+    Exit;
+  FChangeHashes.Clear;
+  if AHashes <> nil then
+    FChangeHashes.AddStrings(AHashes);
+  FChangeDone := Key;
+  FChangeError := AError;
+  if Visible then
+    ApplyFilter;
+end;
+
+{ Whether the changes the filter asks for are still being looked for. }
+function TGittanCommitGraph.ChangePending: boolean;
+begin
+  Result := (FChangeKey <> '') and (FChangeKey <> FChangeDone);
+end;
+
 { Reads the field and keeps the rows that match. Lower case and composed
   on both sides, so neither the case nor how an ö is written matters
   (the Repository page gives an author's name as git has it). The commits of a path come from
-  the owner, asked again only when the paths change. When the log shown
+  the owner, asked again only when the paths change; those of a change
+  come later (SetChangeCommits), and until then no commit is shown.
+  When the log shown
   was cut, the owner is asked for all of it first (once), and answers
   with Replace, which comes back here. The highlight stays on the same
   commit when it is still shown. }
@@ -756,13 +825,24 @@ begin
     end;
     FPathKey := Key;
   end;
+  Key := '';
+  if Assigned(FOnChangeCommits) then
+    Key := ChangeKeyOf(FFilter.Changes);
+  if Key <> FChangeKey then
+  begin
+    FChangeKey := Key;
+    if ChangePending then
+      FOnChangeCommits(Self, FFilter.Changes);
+  end;
   Current := CurrentHash;
   SetLength(FShown, Length(FCommits));
   n := 0;
-  for i := 0 to High(FCommits) do
-    if not FFiltered or (MatchesGraphFilter(FFilter, FSearch[i], FAuthorKeys[i],
-      FCommits[i].Date) and ((Length(FFilter.Paths) = 0) or
-      (FPathHashes.IndexOf(FCommits[i].Hash) >= 0))) then
+  if not ChangePending then
+    for i := 0 to High(FCommits) do
+      if not FFiltered or (MatchesGraphFilter(FFilter, FSearch[i], FAuthorKeys[i],
+        FCommits[i].Date) and ((Length(FFilter.Paths) = 0) or
+        (FPathHashes.IndexOf(FCommits[i].Hash) >= 0)) and ((FChangeKey = '') or
+        (FChangeHashes.IndexOf(FCommits[i].Hash) >= 0))) then
     begin
       FShown[n] := i;
       Inc(n);
@@ -1204,7 +1284,13 @@ begin
   begin
     ACanvas.Brush.Style := bsClear;
     ACanvas.Font.Color := FDim;
-    if FFiltered then
+    if ChangePending then
+      ACanvas.TextOut(Px(Pad), (Px(RowHeight) - ACanvas.TextHeight('Xg')) div 2,
+        rsGraphSearchingChanges)
+    else if (FChangeKey <> '') and (FChangeError <> '') then
+      ACanvas.TextOut(Px(Pad), (Px(RowHeight) - ACanvas.TextHeight('Xg')) div 2,
+        Format(rsGraphChangeFailed, [FChangeError]))
+    else if FFiltered then
       ACanvas.TextOut(Px(Pad), (Px(RowHeight) - ACanvas.TextHeight('Xg')) div 2, rsGraphNoMatch)
     else
       ACanvas.TextOut(Px(Pad), (Px(RowHeight) - ACanvas.TextHeight('Xg')) div 2, rsGraphEmpty);
@@ -1485,6 +1571,8 @@ begin
   Search := '';
   for i := 0 to High(FFilter.Paths) do
     Search := Search + Quoted('path:', FFilter.Paths[i]) + ' ';
+  for i := 0 to High(FFilter.Changes) do
+    Search := Search + Quoted('change:', FFilter.Changes[i]) + ' ';
   FEdit.Text := Search + Quoted('author:', FStats.Authors[FStatsAuthor].Name);
   FEdit.SelStart := Length(FEdit.Text);
   SetStatsOn(False);

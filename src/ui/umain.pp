@@ -24,7 +24,7 @@ uses
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
   {$IFDEF LCLWin32}gittan.wintitlebar,{$ENDIF}
   {$IFDEF LCLGtk3}gittan.gtktitlebar,{$ENDIF}
-  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
+  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.pickaxe,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.textfile, gittan.sectionheader, gittan.hintbox,
   gittan.forge, gittan.lfslocks,
@@ -937,6 +937,9 @@ type
       done. }
     FHistory: TGittanHistory;
     FHistoryJob: TGittanHistoryJob;
+    { The search for the commits making the changes of the graph's
+      filter (change:), given up when the filter or the graph goes. }
+    FChangeJob: TGittanChangeJob;
     FHistoryPath, FHistoryRef, FHistoryName: string;
     FHistoryFrom, FHistoryTo, FHistoryMax: integer;
     FHistoryMore: boolean;
@@ -1517,6 +1520,9 @@ type
     procedure ShowCommitGraph(const AFilter: string = '');
     procedure GraphMore(Sender: TObject);
     procedure GraphPathCommits(Sender: TObject; const APath: string; AHashes: TStrings);
+    procedure GraphChangeCommits(Sender: TObject; const AChanges: TStringArray);
+    procedure ChangeJobDone(Sender: TObject);
+    procedure AbandonChangeJob;
     procedure MenuCommitGraphClick(Sender: TObject);
     procedure GraphPick(Sender: TObject; const AHash: string);
     procedure PullChipClick(const AScreenRect: TRect);
@@ -3508,6 +3514,7 @@ begin
   FGraph.OnContext := @GraphContext;
   FGraph.OnMore := @GraphMore;
   FGraph.OnPathCommits := @GraphPathCommits;
+  FGraph.OnChangeCommits := @GraphChangeCommits;
   FCommitPopup := TPopupMenu.Create(Self);
   FPullCardPopup := TPopupMenu.Create(Self);
   FPullPopup := TGittanPopupList.Create(Self);

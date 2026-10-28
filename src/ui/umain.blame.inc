@@ -134,6 +134,7 @@ procedure TRepoFrame.StopBlame;
 begin
   ClearBlameCache;
   AbandonHistoryJob;
+  AbandonChangeJob;
   AbandonRepoInfoJob;
   FreeAndNil(FHistory);
   { Waits for the jobs given up. }

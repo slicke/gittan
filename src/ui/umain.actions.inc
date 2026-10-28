@@ -1815,7 +1815,9 @@ end;
   to GraphSearchLimit commits at once, since a filter looks through the
   whole history; it asks for the same (GraphMore) when a filter is typed
   into a graph that was cut, or the last row is clicked. The commits
-  that touched a path come from TGittanRepo.PathCommits. }
+  that touched a path come from TGittanRepo.PathCommits, those making a
+  change (change:) from a TGittanChangeJob, since git log -S reads every
+  diff and takes seconds on a large repository. }
 const
   GraphLimit = 500;
   GraphSearchLimit = 50000;
@@ -1869,6 +1871,45 @@ procedure TRepoFrame.GraphPathCommits(Sender: TObject; const APath: string;
 begin
   if FRepo.Root <> '' then
     FRepo.PathCommits(APath, AHashes, GraphSearchLimit);
+end;
+
+{ A search still running for what was typed before is given up: its git
+  is ended. }
+procedure TRepoFrame.GraphChangeCommits(Sender: TObject; const AChanges: TStringArray);
+begin
+  AbandonChangeJob;
+  if FRepo.Root = '' then
+  begin
+    FGraph.SetChangeCommits(AChanges, nil, '');
+    Exit;
+  end;
+  FChangeJob := TGittanChangeJob.Create(FRepo.Root, AChanges, GraphSearchLimit);
+  FChangeJob.OnDone := @ChangeJobDone;
+  FChangeJob.Start;
+end;
+
+{ The job queues this from inside Execute, so it is freed from the
+  message loop with the blame jobs. }
+procedure TRepoFrame.ChangeJobDone(Sender: TObject);
+var
+  Job: TGittanChangeJob;
+begin
+  Job := TGittanChangeJob(Sender);
+  if Job <> FChangeJob then
+    Exit;
+  FChangeJob := nil;
+  FGraph.SetChangeCommits(Job.Changes, Job.Hashes, Job.Error);
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+end;
+
+procedure TRepoFrame.AbandonChangeJob;
+begin
+  if FChangeJob = nil then
+    Exit;
+  FChangeJob.Stop(False);
+  FBlameZombies.Add(FChangeJob);
+  FChangeJob := nil;
 end;
 
 { The filter that keeps the commits touching APath: quoted when the path
