@@ -76,21 +76,9 @@ begin
   FBlameJob := nil;
 end;
 
-procedure TRepoFrame.FreeFinishedBlameJobs(AWait: boolean);
-var
-  i: integer;
-begin
-  for i := FBlameZombies.Count - 1 downto 0 do
-    if AWait or TThread(FBlameZombies[i]).Finished then
-    begin
-      TThread(FBlameZombies[i]).Free;
-      FBlameZombies.Delete(i);
-    end;
-end;
-
 procedure TRepoFrame.FreeBlameJobsAsync(Data: PtrInt);
 begin
-  FreeFinishedBlameJobs(False);
+  FBlameZombies.FreeFinished(False);
 end;
 
 procedure TRepoFrame.CacheBlame(const ARef, APath: string; ABlame: TGittanBlame);
@@ -148,7 +136,7 @@ begin
   AbandonHistoryJob;
   AbandonRepoInfoJob;
   FreeAndNil(FHistory);
-  FreeFinishedBlameJobs(True);
+  { Waits for the jobs given up. }
   FreeAndNil(FBlameZombies);
   FreeAndNil(FBlameCache);
 end;

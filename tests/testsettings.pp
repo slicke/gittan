@@ -8,7 +8,9 @@ unit testsettings;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.settings;
+  Classes, SysUtils, IniFiles, fpcunit, testregistry, gittan.settings,
+  { GitHub registers itself, so the settings keep its section. }
+  gittan.github{$IFDEF UNIX}, BaseUnix{$ENDIF};
 
 type
   TSettingsTest = class(TTestCase)
@@ -28,9 +30,22 @@ type
     procedure TestDefaultFontSize;
     procedure TestTrust;
     procedure TestOldGhPath;
+    procedure TestOldForgeSwitch;
   end;
 
 implementation
+
+{$IFDEF UNIX}
+function FileModeOf(const AName: string): integer;
+var
+  Info: Stat;
+begin
+  if FpStat(AName, Info) = 0 then
+    Result := Info.st_mode
+  else
+    Result := -1;
+end;
+{$ENDIF}
 
 procedure TSettingsTest.SetUp;
 begin
@@ -61,16 +76,24 @@ begin
     AssertEquals('', S.CommitDraft);
     AssertEquals('no tab width picked', 0, S.TabSize);
     AssertEquals('', S.GitPath);
-    AssertEquals('', S.GhPath);
-    AssertTrue('the GitHub features start on', S.GitHubEnabled);
+    AssertEquals('', S.ForgeCliPath('GitHub'));
+    AssertTrue('the hosting features start on', S.HostingEnabled);
     AssertTrue('the background fetch starts on', S.AutoFetch);
     AssertEquals(DefaultAutoFetchMinutes, S.AutoFetchMinutes);
     AssertFalse(S.HideWithoutFeedback);
+    AssertFalse(S.OnlyNeedsAttention);
+    AssertFalse(S.HideDrafts);
+    AssertFalse(S.OnlyAskedOfMe);
+    AssertFalse(S.HideReviewDrafts);
+    AssertFalse(S.OnlyStale);
     AssertFalse('the AI features start off', S.AIEnabled);
     AssertEquals('', S.ClaudePath);
     AssertEquals('', S.ClaudeModel);
     AssertEquals('', S.AIAgent);
     AssertEquals('', S.CopilotPath);
+    AssertEquals('', S.OpenAIUrl);
+    AssertEquals('', S.OpenAIKey);
+    AssertEquals('', S.OpenAIModel);
   finally
     S.Free;
   end;
@@ -105,11 +128,16 @@ begin
     S.EditorCommand := 'code -g';
     S.TabSize := 4;
     S.GitPath := '/opt/homebrew/bin/git';
-    S.GhPath := 'C:\Program Files\GitHub CLI\gh.exe';
-    S.GitHubEnabled := False;
+    S.SetForgeCliPath('GitHub', 'C:\Program Files\GitHub CLI\gh.exe');
+    S.HostingEnabled := False;
     S.AutoFetch := False;
     S.AutoFetchMinutes := 30;
     S.HideWithoutFeedback := True;
+    S.OnlyNeedsAttention := True;
+    S.HideDrafts := True;
+    S.OnlyAskedOfMe := True;
+    S.HideReviewDrafts := True;
+    S.OnlyStale := True;
     S.SyntaxTheme := 'Delphi';
     S.AIEnabled := True;
     S.ClaudePath := '/Users/me/.local/bin/claude';
@@ -117,6 +145,9 @@ begin
     S.AIAgent := 'copilot';
     S.CopilotPath := '/opt/homebrew/bin/copilot';
     S.CopilotModel := 'auto';
+    S.OpenAIUrl := 'https://openrouter.ai/api/v1';
+    S.OpenAIKey := 'sk-or-v1-abc';
+    S.OpenAIModel := 'openai/gpt-4o-mini';
     S.UpdateSnoozedUntil := EncodeDate(2026, 10, 29) + 0.5;
     S.AddRecent('/tmp/a');
     S.AddRecent('/tmp/b');
@@ -150,11 +181,16 @@ begin
     AssertEquals('code -g', S.EditorCommand);
     AssertEquals(4, S.TabSize);
     AssertEquals('/opt/homebrew/bin/git', S.GitPath);
-    AssertEquals('C:\Program Files\GitHub CLI\gh.exe', S.GhPath);
-    AssertFalse(S.GitHubEnabled);
+    AssertEquals('C:\Program Files\GitHub CLI\gh.exe', S.ForgeCliPath('GitHub'));
+    AssertFalse(S.HostingEnabled);
     AssertFalse(S.AutoFetch);
     AssertEquals(30, S.AutoFetchMinutes);
     AssertTrue(S.HideWithoutFeedback);
+    AssertTrue(S.OnlyNeedsAttention);
+    AssertTrue(S.HideDrafts);
+    AssertTrue(S.OnlyAskedOfMe);
+    AssertTrue(S.HideReviewDrafts);
+    AssertTrue(S.OnlyStale);
     AssertEquals('Delphi', S.SyntaxTheme);
     AssertTrue(S.AIEnabled);
     AssertEquals('/Users/me/.local/bin/claude', S.ClaudePath);
@@ -162,6 +198,13 @@ begin
     AssertEquals('copilot', S.AIAgent);
     AssertEquals('/opt/homebrew/bin/copilot', S.CopilotPath);
     AssertEquals('auto', S.CopilotModel);
+    AssertEquals('https://openrouter.ai/api/v1', S.OpenAIUrl);
+    AssertEquals('sk-or-v1-abc', S.OpenAIKey);
+    AssertEquals('openai/gpt-4o-mini', S.OpenAIModel);
+    {$IFDEF UNIX}
+    AssertEquals('with a key the file is its owner''s alone', &600,
+      FileModeOf(FFileName) and &777);
+    {$ENDIF}
     AssertEquals('the day, without the time', EncodeDate(2026, 10, 29),
       S.UpdateSnoozedUntil, 0);
     AssertEquals(2, S.Recent.Count);
@@ -183,7 +226,7 @@ begin
     S.CommitDraft := '"Quoted subject"';
     S.CommitDraftRepo := '  /tmp/a ';
     S.GitPath := '"';
-    S.GhPath := '""';
+    S.SetForgeCliPath('GitHub', '""');
     S.FontName := 'Menlo';
     S.Save;
   finally
@@ -197,7 +240,7 @@ begin
     AssertEquals('"Quoted subject"', S.CommitDraft);
     AssertEquals('  /tmp/a ', S.CommitDraftRepo);
     AssertEquals('"', S.GitPath);
-    AssertEquals('""', S.GhPath);
+    AssertEquals('""', S.ForgeCliPath('GitHub'));
     AssertEquals('Menlo', S.FontName);
   finally
     S.Free;
@@ -353,6 +396,41 @@ end;
 
 { gh's path was kept in Tools with git's; it is read from there and
   moved to the GitHub section. }
+{ The GitHub features had a switch of their own; off, it turns the
+  hosting features off, and moves to the Hosting section. }
+procedure TSettingsTest.TestOldForgeSwitch;
+var
+  S: TGittanSettings;
+  Ini: TStringList;
+  Cfg: TIniFile;
+begin
+  Ini := TStringList.Create;
+  try
+    Ini.Add('[GitHub]');
+    Ini.Add('Enabled=0');
+    Ini.Add('Cli=/opt/gh/bin/gh');
+    Ini.SaveToFile(FFileName);
+    S := TGittanSettings.Create(FFileName);
+    try
+      S.Load;
+      AssertFalse(S.HostingEnabled);
+      AssertEquals('/opt/gh/bin/gh', S.ForgeCliPath('GitHub'));
+      S.Save;
+    finally
+      S.Free;
+    end;
+    Cfg := TIniFile.Create(FFileName);
+    try
+      AssertFalse('the switch is under Hosting', Cfg.ReadBool('Hosting', 'Enabled', True));
+      AssertEquals('the old switch is gone', 'none', Cfg.ReadString('GitHub', 'Enabled', 'none'));
+    finally
+      Cfg.Free;
+    end;
+  finally
+    Ini.Free;
+  end;
+end;
+
 procedure TSettingsTest.TestOldGhPath;
 var
   S: TGittanSettings;
@@ -366,8 +444,8 @@ begin
     S := TGittanSettings.Create(FFileName);
     try
       S.Load;
-      AssertEquals('/opt/gh/bin/gh', S.GhPath);
-      AssertTrue(S.GitHubEnabled);
+      AssertEquals('/opt/gh/bin/gh', S.ForgeCliPath('GitHub'));
+      AssertTrue(S.HostingEnabled);
       S.Save;
     finally
       S.Free;

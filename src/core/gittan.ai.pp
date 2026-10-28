@@ -1,104 +1,179 @@
 unit gittan.ai;
 
-{** The AI features, through an agent's own command line tool run
-  without a session in the repository: Claude Code's claude (claude -p)
-  or GitHub Copilot's copilot (the prompt on its input), whichever the
-  settings pick. Each runs with the user's own login and settings and
-  reads the repository's own instructions (CLAUDE.md, AGENTS.md, and for
-  Copilot .github/copilot-instructions.md). Gittan links no API of its
-  own.
+{** The AI features: a commit message, a review of the changes shown,
+  and where something is in the repository. Each is a job here that
+  collects what the AI is given, asks it and reads its answer. The AI
+  is one of the agents the settings pick (TGittanAgent), each a class
+  of TGittanAI that its own unit registers as it loads (RegisterAI,
+  AIClassOf), as the forges register with gittan.forge: the command
+  line tools, Claude Code's claude (claude -p) and GitHub Copilot's
+  copilot, in gittan.agentcli, and a model asked over HTTP at an
+  OpenAI-compatible API in gittan.openai, with what an API of any
+  shape shares (TGittanApi: a server, a key and a model) here. A tool
+  runs with the user's own login and settings, reads the repository's
+  own instructions (CLAUDE.md, AGENTS.md, and for Copilot
+  .github/copilot-instructions.md) and may read the repository's files,
+  but gets no tool that writes, runs a command or goes to the network;
+  the API's model sees what it is sent alone. The prompts (TaskPrompt)
+  say which (ReadsFiles).
 
-  The features: a commit message, and a review of the changes shown.
-  The commit message: the changes that would be
-  committed are collected as a diff (CommitChanges), given to the agent
-  on its standard input with the repository's recent subjects, and its
-  answer (ReadAgentAnswer) goes into the message field. The review: the
-  diff the change view shows, its lines numbered on both sides
-  (NumberDiff), so the agent names lines as the view counts them, and
-  its findings (ParseReviewFindings) are review threads the change view
-  shows as it shows a pull request's. The agent may
-  read the repository's files for context, but gets no tool that writes,
-  runs a command or goes to the network. The features are off until
-  they are turned on in the settings, since the changes go to the
-  agent's provider. }
+  The commit message: the changes that would be committed are
+  collected as a diff (CommitChanges), given to the AI with the
+  repository's recent subjects, and its answer goes into the message
+  field. The review: the diff the change view shows, its lines numbered
+  on both sides (NumberDiff), so the AI names lines as the view counts
+  them, and its findings (ParseReviewFindings) are review threads the
+  change view shows as it shows a pull request's. Where something is:
+  the user's words (with the repository's file list for a model that
+  cannot search, FindListInput, which then gets the files it named
+  with their lines numbered in a second round, FindLinesInput, for
+  their lines), and the files it names (ParseFoundFiles) a list to
+  pick from under the filter field. The
+  features are off until they are turned on in the settings, since the
+  changes go to the agent's provider. }
 
 {$mode objfpc}{$H+}
 
 interface
 
 uses
-  Classes, SysUtils, gittan.job, gittan.reviews;
+  Classes, SysUtils, gittan.job, gittan.reviews, gittan.git;
 
 type
-  {** The agents Gittan can run. }
-  TGittanAgent = (gaClaude, gaCopilot);
+  {** The agents Gittan can ask: two command line tools, and a model at
+    an OpenAI-compatible API. Each has a class (AIClassOf). }
+  TGittanAgent = (gaClaude, gaCopilot, gaOpenAI);
+
+  {** What an agent is asked to do; atLocate is the second round of a
+    find for a model that cannot read files, the lines in the files it
+    named. }
+  TGittanAITask = (atMessage, atReview, atFind, atLocate);
+
+  {** How many lines of each file a model was given (FindLinesInput). }
+  TGittanLineCounts = array of integer;
 
 const
-  {** What the agents are called in the interface. }
-  AgentNames: array[TGittanAgent] of string = ('Claude Code', 'GitHub Copilot');
-  {** The names of their command line tools, also their keys in the
-    settings (AgentOfKey). }
-  AgentCommands: array[TGittanAgent] of string = ('claude', 'copilot');
+  {** What the agents are called in the interface; an API's model is
+    named instead where one is set (TGittanAI.Title). }
+  AgentNames: array[TGittanAgent] of string = ('Claude Code', 'GitHub Copilot',
+    'OpenAI-compatible API');
+  {** The agents' keys in the settings (AgentOfKey), the names of the
+    tools' commands; the API has no command, only its key. }
+  AgentCommands: array[TGittanAgent] of string = ('claude', 'copilot', 'openai');
   {** The most of the diff given to the agent, in bytes; the rest is cut
     at a line end and said to be, the summary of every file still whole. }
   MessageDiffKeep = 80000;
   {** How many of the recent subjects show the agent the repository's
     style. }
   MessageSubjects = 10;
-  {** The most turns claude may take, each a read of a file or the
-    answer. Copilot has no such limit. }
-  MessageMaxTurns = 10;
-  {** The most turns claude may take for a review, which reads files to
-    check what it finds. }
-  ReviewMaxTurns = 20;
   {** The most findings of a review kept; the prompt asks for fewer. }
   ReviewMaxFindings = 10;
+  {** The most files of an answer to where something is kept. }
+  FindMaxFiles = 10;
+
+type
+  {** A file the agent named for where something is: its path in the
+    repository (with /), the line it is at (0 for the file as a whole)
+    and a few words on what is there. }
+  TGittanFoundFile = record
+    Path: string;
+    Line: integer;
+    Why: string;
+  end;
+  TGittanFoundFiles = array of TGittanFoundFile;
+
+  {** An agent as the settings set it up, made once from them (FindAI
+    in the frame) and copied into each job (Clone), since a job may
+    outlive the settings it was made from. What it is made of: APath,
+    the tool's command or the API's server (Find gives it from the
+    setting); AKey, the API's key, empty for a tool or a server that
+    takes none; AModel, the model, empty for a tool's own choice. It
+    changes nothing after it is made, so a copy may be asked from any
+    thread. }
+  TGittanAI = class
+  private
+    FPath, FKey, FModel: string;
+  public
+    constructor Create(const APath, AKey, AModel: string); virtual;
+    {** The same agent again, for a job of its own. }
+    function Clone: TGittanAI;
+    {** Which of the agents this is. }
+    class function Kind: TGittanAgent; virtual; abstract;
+    {** AgentNames of it. }
+    class function Name: string;
+    {** Whether it is a model at an API (a server, a key and a model in
+      the settings) rather than a command. }
+    class function IsApi: boolean; virtual;
+    {** Whether it reads the repository's files itself, as a tool does,
+      or sees only what it is sent, as a model at an API does; the
+      prompts say which, and the find gives such a model the file list. }
+    class function ReadsFiles: boolean; virtual; abstract;
+    {** The command, or the server, from ASetting, the setting's text:
+      the path as given, else the command found on ToolSearchPath (and
+      wherever the tool's own installer puts it), or the API's default
+      server. Empty when there is none. }
+    class function Find(const ASetting: string): string; virtual; abstract;
+    {** Whether it can be asked: the command found, or the server and
+      a model set. }
+    function Available: boolean; virtual;
+    {** Its name for a message: the agent's, or the model's for an API,
+      since that is who answers. }
+    function Title: string; virtual;
+    {** TaskPrompt as it reads files or not. }
+    function Prompt(ATask: TGittanAITask): string;
+    {** Puts ATask to it with AInput (the changes, the question) for the
+      repository at ARoot, asking ACancel as it waits (True ends the
+      command, or gives the request up): the answer as the agent gave
+      it in AText, else why none in AError
+      (the agent's own, what it wrote on standard error, or that it gave
+      no answer). }
+    function Ask(const ARoot: string; ATask: TGittanAITask; const AInput: string;
+      ACancel: TGittanCancelEvent; out AText, AError: string): boolean; virtual; abstract;
+    {** A line for the About page: the agent and its version, asked of
+      the command (a second or more, so from a thread), or the model and
+      its server; empty when the command answered no version. }
+    function About: string; virtual; abstract;
+    property Path: string read FPath;
+    property Key: string read FKey;
+    property Model: string read FModel;
+  end;
+  TGittanAIClass = class of TGittanAI;
+
+  {** A model at an API: Path is the server's base URL, Key goes with
+    every request, Model is asked and must be set. It sees what it is
+    sent alone. }
+  TGittanApi = class(TGittanAI)
+  public
+    {** The server when the settings name none. }
+    class function DefaultUrl: string; virtual; abstract;
+    class function IsApi: boolean; override;
+    class function ReadsFiles: boolean; override;
+    {** ASetting, else DefaultUrl. }
+    class function Find(const ASetting: string): string; override;
+    function Available: boolean; override;
+    {** The model, when one is set. }
+    function Title: string; override;
+    {** The model at the server. }
+    function About: string; override;
+  end;
+
+{** Registers AClass as the agent of its Kind, from its unit's
+  initialization; the last registered for a kind counts. }
+procedure RegisterAI(AClass: TGittanAIClass);
+
+{** The class registered for AAgent, nil when none is. }
+function AIClassOf(AAgent: TGittanAgent): TGittanAIClass;
 
 {** The agent whose key (AgentCommands) is AKey; Claude Code for any
   other, the first the settings offered. }
-  { Only what matters, as a list the change view can place: a model
-    asked to review without a limit lists style and praise, and counts
-    lines in a hunk wrongly unless they are numbered for it. }
-  ReviewPrompt = 'Review the changes given on standard input: a diff with each ' +
-    'line numbered, N for a line of the new side and O for a line of the old side. ' +
-    'Point out only real problems: bugs, wrong results, crashes, data loss, ' +
-    'security holes, races, edge cases the change misses. Leave out style, naming, ' +
-    'formatting, praise and summaries. At most 10 findings, fewer is better, and ' +
-    'none is a fine answer. You may read the repository''s files to check a ' +
-    'finding. Answer with a JSON array alone, no code fences, each finding ' +
-    '{"path": the file as the diff names it, "line": the number after N or O, ' +
-    '"side": "new" for N or "old" for O, "severity": "bug", "risk" or "question", ' +
-    '"body": a few sentences in Markdown}.';
-
 function AgentOfKey(const AKey: string): TGittanAgent;
 
-{** AAgent's command by the path the settings give (ASetting), else as
-  found on ToolSearchPath, and for claude else the local install
-  ~/.claude/local/claude that earlier versions made; empty when there is
-  none. }
-function FindAgent(AAgent: TGittanAgent; const ASetting: string): string;
-
-{** The arguments AAgent runs with for APrompt, with AModel when it is
-  not empty: claude in print mode with the prompt, JSON output,
-  read-only tools and at most AMaxTurns turns; copilot silent, with
-  read-only tools allowed (it asks for nothing then) and the prompt on
-  its input, which it ignores when -p is given. Neither keeps a
-  session. }
-function AgentArgs(AAgent: TGittanAgent; const APrompt, AModel: string;
-  AMaxTurns: integer): TStringArray;
-
-{** What AAgent is given on its input for APrompt and AChanges: the
-  changes for claude, which has the prompt as an argument; the prompt
-  and then the changes for copilot. }
-function AgentInput(AAgent: TGittanAgent; const APrompt, AChanges: string): string;
-
-{** AgentArgs and AgentInput for a commit message. }
-function CommitMessageArgs(AAgent: TGittanAgent; const AModel: string): TStringArray;
-function CommitMessageInput(AAgent: TGittanAgent; const AChanges: string): string;
-
-{** AgentArgs and AgentInput for a review. }
-function ReviewArgs(AAgent: TGittanAgent; const AModel: string): TStringArray;
-function ReviewInput(AAgent: TGittanAgent; const AChanges: string): string;
+{** The prompt for ATask, for an agent that reads the repository's files
+  itself (AReadsFiles: it is told it may, where that helps) or one that
+  sees what it is sent alone (told it cannot, and for where something
+  is to judge by the file list it is given); atLocate is such a
+  model's alone, whatever AReadsFiles says. }
+function TaskPrompt(ATask: TGittanAITask; AReadsFiles: boolean): string;
 
 {** What a commit of APaths in the work tree of the repository at ARoot
   would change, amending HEAD with AAmend, as the agent is given it: the
@@ -139,49 +214,90 @@ function NumberDiff(const ADiff: string): string;
 function ParseReviewFindings(const AText, AAgent: string;
   out AThreads: TGittanReviewThreads): boolean;
 
-{** Reads what claude -p --output-format json printed: the answer in
-  AText, or why there is none in AError (claude's own error, or the turn
-  limit). False when AOutput is no such answer. }
-function ParseClaudeResult(const AOutput: string; out AText, AError: string): boolean;
+{** The repository's files at ARoot, tracked and untracked but not
+  ignored, a path a line, cut at MessageDiffKeep with a line that says
+  so: what a model that cannot search is given to find where something
+  is. False, with git's reason in AError, when git failed. }
+function RepoFileList(const ARoot: string; out AList, AError: string): boolean;
+
+{** What such a model gets for where AQuestion is: the question, then
+  AFiles (RepoFileList). }
+function FindListInput(const AQuestion, AFiles: string): string;
+
+{** What such a model gets for the lines, once it named AFiles
+  (ParseFoundFiles of its first answer) from AList (RepoFileList):
+  AQuestion, then each file of AFiles that AList names and that is in
+  the work tree at ARoot (none out of it, none through a symbolic link,
+  which may lead out of it) with its lines numbered ("12: text"), cut at its share of MessageDiffKeep (at
+  a line end, or mid-line when the share holds none) with a line that
+  says so, the share split among the files that are there and only
+  that much of a file read; a binary file (one with a NUL in
+  what is read) is named without its text. ALast gets, for each of
+  AFiles, how many of its lines were given, 0 for one left out. Empty
+  when none of them is there. }
+function FindLinesInput(const ARoot, AQuestion, AList: string;
+  const AFiles: TGittanFoundFiles; out ALast: TGittanLineCounts): string;
+
+{** Puts the lines of ALines, the model's second answer, into AFiles by
+  path: a file's line, when it is one of the ALast[i] given
+  (FindLinesInput), and then its why when given; any other line is 0,
+  since a line from the first answer was guessed from the path. }
+procedure MergeFoundLines(var AFiles: TGittanFoundFiles; const ALines: TGittanFoundFiles;
+  const ALast: array of integer);
+
+{** The files of an answer to where something is in AText: a JSON array
+  of objects with path, line and why, which may come inside a code fence
+  or after a sentence. Each with a path is kept, "./" taken off it and
+  its backslashes made /, a missing or negative line 0, at most
+  FindMaxFiles. False when AText holds no such array; an empty array is
+  no file. }
+function ParseFoundFiles(const AText: string; out AFiles: TGittanFoundFiles): boolean;
 
 {** AText as a commit message: blank lines around it trimmed, and a code
   fence around the whole of it taken off, which a model adds at times. }
 function CleanCommitMessage(const AText: string): string;
 
-{** The commit message in AMessage from what AAgent printed (AOutput on
-  standard output, AErrors on standard error) and whether it exited with
-  0 (AExited); else False with the reason in AError: the agent's own,
-  what it wrote on standard error, or that it gave no answer. }
-function ReadAgentAnswer(AAgent: TGittanAgent; AExited: boolean;
-  const AOutput, AErrors: string; out AMessage, AError: string): boolean;
-
-{** ReadAgentAnswer's answer as the agent gave it, not made a commit
-  message. }
-function ReadAgentText(AAgent: TGittanAgent; AExited: boolean;
-  const AOutput, AErrors: string; out AText, AError: string): boolean;
-
 type
-  {** Writes a commit message for APaths of the repository at ARoot (see
-    CommitChanges) with AAgent's command at AExe, in a thread: the agent
-    takes some seconds. Stop ends the agent, so leaving the repository
-    or quitting does not wait for its answer. }
-  TGittanMessageJob = class(TGittanJob)
+  {** What the jobs below share: the repository at ARoot and the agent,
+    its own copy of AAI (Clone), and Ask. Each runs in a thread, since
+    the agent takes some seconds, and may be given up: Stop ends a
+    command and gives up a request to an API, so leaving the repository
+    or quitting does not wait for an answer. }
+  TGittanAgentJob = class(TGittanJob)
   private
-    FRoot, FExe, FModel: string;
-    FAgent: TGittanAgent;
+    function GetAgentName: string;
+  protected
+    FRoot: string;
+    FAI: TGittanAI;
+    function Cancelled: boolean;
+    {** Puts ATask to the agent with AInput (the changes, the question);
+      the answer as the agent gave it in AText, else why none in AError.
+      False too when the job was stopped meanwhile. }
+    function Ask(ATask: TGittanAITask; const AInput: string;
+      out AText, AError: string): boolean;
+  public
+    constructor Create(const ARoot: string; AAI: TGittanAI);
+    destructor Destroy; override;
+    property Root: string read FRoot;
+    property AI: TGittanAI read FAI;
+    {** The agent's name for a message (TGittanAI.Title). }
+    property AgentName: string read GetAgentName;
+  end;
+
+  {** Writes a commit message for APaths of the repository (see
+    CommitChanges), amending HEAD with AAmend. }
+  TGittanMessageJob = class(TGittanAgentJob)
+  private
     FPaths: TStringList;
     FAmend: boolean;
     FOk: boolean;
     FMessage, FError: string;
-    function Cancelled: boolean;
   protected
     procedure Execute; override;
   public
-    constructor Create(const ARoot: string; AAgent: TGittanAgent;
-      const AExe, AModel: string; APaths: TStrings; AAmend: boolean);
+    constructor Create(const ARoot: string; AAI: TGittanAI; APaths: TStrings;
+      AAmend: boolean);
     destructor Destroy; override;
-    property Root: string read FRoot;
-    property Agent: TGittanAgent read FAgent;
     {** Whether a message was written. }
     property Ok: boolean read FOk;
     {** The message, when Ok. }
@@ -191,29 +307,24 @@ type
     property Error: string read FError;
   end;
 
-  {** Reviews what the change view shows of the repository at ARoot
-    against ABase (see ReviewChanges) with AAgent's command at AExe, in
-    a thread. AKey is the caller's, to tell whether the findings are
-    still for what is shown when they come. Stop ends the agent. }
-  TGittanAIReviewJob = class(TGittanJob)
+  {** Reviews what the change view shows of the repository against
+    ABase (see ReviewChanges). AViewKey is the caller's, to tell whether
+    the findings are still for what is shown when they come. }
+  TGittanAIReviewJob = class(TGittanAgentJob)
   private
-    FRoot, FExe, FModel, FBase, FKey: string;
-    FAgent: TGittanAgent;
+    FBase, FViewKey: string;
     FRange: boolean;
     FPaths: TStringList;
     FOk: boolean;
     FThreads: TGittanReviewThreads;
     FError: string;
-    function Cancelled: boolean;
   protected
     procedure Execute; override;
   public
-    constructor Create(const ARoot: string; AAgent: TGittanAgent;
-      const AExe, AModel, ABase: string; ARange: boolean; APaths: TStrings;
-      const AKey: string);
+    constructor Create(const ARoot: string; AAI: TGittanAI; const ABase: string;
+      ARange: boolean; APaths: TStrings; const AViewKey: string);
     destructor Destroy; override;
-    property Agent: TGittanAgent read FAgent;
-    property Key: string read FKey;
+    property Key: string read FViewKey;
     {** Whether the agent answered with findings, none among them too. }
     property Ok: boolean read FOk;
     property Threads: TGittanReviewThreads read FThreads;
@@ -221,31 +332,114 @@ type
     property Error: string read FError;
   end;
 
+  {** Asks the agent where AQuestion is in the repository (a model that
+    cannot search gets the file list with it, RepoFileList, and then
+    the files it named with their text, for their lines). }
+  TGittanFindJob = class(TGittanAgentJob)
+  private
+    FQuestion: string;
+    FOk: boolean;
+    FFiles: TGittanFoundFiles;
+    FError: string;
+    procedure LocateLines(const AList: string);
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const ARoot: string; AAI: TGittanAI; const AQuestion: string);
+    property Question: string read FQuestion;
+    {** Whether the agent answered with files, none among them too. }
+    property Ok: boolean read FOk;
+    property Files: TGittanFoundFiles read FFiles;
+    {** Why there are none, when not Ok. }
+    property Error: string read FError;
+  end;
+
 resourcestring
   rsNothingToReview = 'There are no changes to review.';
   rsReviewNotRead = 'The answer was no list of findings: %s';
+  rsFoundNotRead = 'The answer was no list of files: %s';
   rsNothingToDescribe = 'There are no changes to describe.';
   rsAgentNoAnswer = '%s gave no answer.';
-  rsClaudeTurns = 'Claude Code stopped after %d turns without an answer.';
+  rsAboutApi = '%s at %s';
 
 implementation
 
 uses
-  Math, fpjson, jsonparser, DateUtils, gittan.git;
+  Math, fpjson, jsonparser, DateUtils;
 
 const
   { Short, whatever the repository's own messages are like: a model told
     only to follow the conventions wrote pages, describing every file it
-    read. }
-  CommitPrompt = 'Write the git commit message for the changes given on standard ' +
-    'input, which are what will be committed. Keep it short: a subject line of at ' +
-    'most 72 characters and, only when the change needs explaining, a blank line ' +
-    'and a body of a few lines wrapped at 72 columns. Say what changed and why, ' +
-    'not what each file or line does. Take the style (language, tense, prefixes) ' +
-    'from the recent commit subjects given. Read the repository''s files only when ' +
-    'the diff alone leaves the change unclear. Answer with the message alone, ' +
-    'ready for git commit: no preamble, no explanation, no code fences, no ' +
-    'trailers.';
+    read. A tool may read a file when the diff leaves the change
+    unclear; a model at an API sees the diff alone. }
+  CommitPromptStart = 'Write the git commit message for the changes given below, ' +
+    'which are what will be committed. Keep it short: a subject line of at most 72 ' +
+    'characters and, only when the change needs explaining, a blank line and a body ' +
+    'of a few lines wrapped at 72 columns. Say what changed and why, not what each ' +
+    'file or line does. Take the style (language, tense, prefixes) from the recent ' +
+    'commit subjects given. ';
+  CommitReadNote = 'Read the repository''s files only when the diff alone leaves the ' +
+    'change unclear. ';
+  CommitPromptEnd = 'Answer with the message alone, ready for git commit: no ' +
+    'preamble, no explanation, no code fences, no trailers.';
+
+  { Only what matters, as a list the change view can place: a model
+    asked to review without a limit lists style and praise, and counts
+    lines in a hunk wrongly unless they are numbered for it. }
+  ReviewPromptStart = 'Review the changes given below: a diff with each line ' +
+    'numbered, N for a line of the new side and O for a line of the old side. ' +
+    'Point out only real problems: bugs, wrong results, crashes, data loss, ' +
+    'security holes, races, edge cases the change misses. Leave out style, naming, ' +
+    'formatting, praise and summaries. At most 10 findings, fewer is better, and ' +
+    'none is a fine answer. ';
+  ReviewReadNote = 'You may read the repository''s files to check a finding. ';
+  ReviewSentNote = 'You see the diff alone and cannot open the files, so say so in a ' +
+    'finding that would need checking against the rest of its file. ';
+  ReviewPromptEnd = 'Answer with a JSON array alone, no code fences, each finding ' +
+    '{"path": the file as the diff names it, "line": the number after N or O, ' +
+    '"side": "new" for N or "old" for O, "severity": "bug", "risk" or "question", ' +
+    '"body": a few sentences in Markdown}.';
+
+  { The files that hold it, as a list to pick from: a model asked where
+    something is otherwise answers in prose, and names a folder or a
+    file it has not opened. A model that cannot search is given the
+    paths alone. }
+  FindPromptStart = 'Find where in this repository the thing asked about below is: ' +
+    'the files that define, implement or handle it. ';
+  FindReadNote = 'Search and read the repository''s files to be sure; name only files ' +
+    'that are there. ';
+  FindSentNote = 'The question is followed by the paths of the repository''s files; ' +
+    'you cannot open them, so judge by their paths and names alone, and name only ' +
+    'paths from the list. ';
+  FindPromptEnd = 'Answer with a JSON array alone, no code fences, the best match ' +
+    'first, at most 10 files, fewer is better, and an empty array when nothing ' +
+    'fits, each {"path": the file relative to the repository root with /, "line": ' +
+    'the line where it is, 0 for the file as a whole, "why": a few words on what ' +
+    'is there}.';
+
+  { The lines, once a model that cannot search has named the files from
+    their paths: their text, numbered, which it reads as a tool would
+    have. A tool never gets this round, so there is no read note. }
+  LocatePromptStart = 'Find the lines where the thing asked about below is: the ' +
+    'question is followed by the files that may hold it, each with its lines ' +
+    'numbered. Judge by the text given alone. ';
+  LocatePromptEnd = 'Answer with a JSON array alone, no code fences, the best match ' +
+    'first, one entry for a file at most and none for a file that does not hold ' +
+    'it, each {"path": the file as given, "line": the number of the line where ' +
+    'it is defined, implemented or handled, "why": a few words on what is there}.';
+
+var
+  AIClasses: array[TGittanAgent] of TGittanAIClass;
+
+procedure RegisterAI(AClass: TGittanAIClass);
+begin
+  AIClasses[AClass.Kind] := AClass;
+end;
+
+function AIClassOf(AAgent: TGittanAgent): TGittanAIClass;
+begin
+  Result := AIClasses[AAgent];
+end;
 
 function AgentOfKey(const AKey: string): TGittanAgent;
 var
@@ -257,87 +451,302 @@ begin
   Result := gaClaude;
 end;
 
-function FindAgent(AAgent: TGittanAgent; const ASetting: string): string;
-var
-  Local: string;
+function TaskPrompt(ATask: TGittanAITask; AReadsFiles: boolean): string;
 begin
-  if ASetting <> '' then
-    Exit(ASetting);
-  Result := FindTool(AgentCommands[AAgent]);
-  if (Result <> '') or (AAgent <> gaClaude) then
-    Exit;
-  Local := IncludeTrailingPathDelimiter(GetUserDir) + '.claude' + PathDelim + 'local' +
-    PathDelim + 'claude';
-  {$ifdef windows}
-  Local := Local + '.exe';
-  {$endif}
-  if FileExists(Local) then
-    Result := Local;
-end;
-
-function AgentArgs(AAgent: TGittanAgent; const APrompt, AModel: string;
-  AMaxTurns: integer): TStringArray;
-begin
-  case AAgent of
-    gaCopilot:
-    begin
-      Result := ['-s', '--no-color', '--stream=off', '--no-ask-user',
-        '--available-tools=view,grep,glob', '--allow-all-tools'];
-      if AModel <> '' then
-        Result := Concat(Result, ['--model=' + AModel]);
-    end;
-    else
-    begin
-      Result := ['-p', APrompt, '--output-format', 'json', '--tools', 'Read,Grep,Glob',
-        '--no-session-persistence', '--max-turns', IntToStr(AMaxTurns)];
-      if AModel <> '' then
-        Result := Concat(Result, ['--model', AModel]);
-    end;
+  case ATask of
+    atMessage:
+      if AReadsFiles then
+        Result := CommitPromptStart + CommitReadNote + CommitPromptEnd
+      else
+        Result := CommitPromptStart + CommitPromptEnd;
+    atReview:
+      if AReadsFiles then
+        Result := ReviewPromptStart + ReviewReadNote + ReviewPromptEnd
+      else
+        Result := ReviewPromptStart + ReviewSentNote + ReviewPromptEnd;
+    atFind:
+      if AReadsFiles then
+        Result := FindPromptStart + FindReadNote + FindPromptEnd
+      else
+        Result := FindPromptStart + FindSentNote + FindPromptEnd;
+    else { atLocate }
+      Result := LocatePromptStart + LocatePromptEnd;
   end;
 end;
 
-function AgentInput(AAgent: TGittanAgent; const APrompt, AChanges: string): string;
+{ TGittanAI }
+
+constructor TGittanAI.Create(const APath, AKey, AModel: string);
 begin
-  if AAgent = gaCopilot then
-    Result := APrompt + LineEnding + LineEnding + AChanges
+  inherited Create;
+  FPath := APath;
+  FKey := AKey;
+  FModel := AModel;
+end;
+
+function TGittanAI.Clone: TGittanAI;
+begin
+  Result := TGittanAIClass(ClassType).Create(FPath, FKey, FModel);
+end;
+
+class function TGittanAI.Name: string;
+begin
+  Result := AgentNames[Kind];
+end;
+
+class function TGittanAI.IsApi: boolean;
+begin
+  Result := False;
+end;
+
+function TGittanAI.Available: boolean;
+begin
+  Result := FPath <> '';
+end;
+
+function TGittanAI.Title: string;
+begin
+  Result := Name;
+end;
+
+function TGittanAI.Prompt(ATask: TGittanAITask): string;
+begin
+  Result := TaskPrompt(ATask, ReadsFiles);
+end;
+
+{ TGittanApi }
+
+class function TGittanApi.IsApi: boolean;
+begin
+  Result := True;
+end;
+
+class function TGittanApi.ReadsFiles: boolean;
+begin
+  Result := False;
+end;
+
+class function TGittanApi.Find(const ASetting: string): string;
+begin
+  Result := Trim(ASetting);
+  if Result = '' then
+    Result := DefaultUrl;
+end;
+
+function TGittanApi.Available: boolean;
+begin
+  Result := (FPath <> '') and (FModel <> '');
+end;
+
+function TGittanApi.Title: string;
+begin
+  if FModel <> '' then
+    Result := FModel
   else
-    Result := AChanges;
+    Result := Name;
 end;
 
-function CommitMessageArgs(AAgent: TGittanAgent; const AModel: string): TStringArray;
+function TGittanApi.About: string;
 begin
-  Result := AgentArgs(AAgent, CommitPrompt, AModel, MessageMaxTurns);
+  Result := Format(rsAboutApi, [Title, FPath]);
 end;
 
-function CommitMessageInput(AAgent: TGittanAgent; const AChanges: string): string;
-begin
-  Result := AgentInput(AAgent, CommitPrompt, AChanges);
-end;
-
-function ReviewArgs(AAgent: TGittanAgent; const AModel: string): TStringArray;
-begin
-  Result := AgentArgs(AAgent, ReviewPrompt, AModel, ReviewMaxTurns);
-end;
-
-function ReviewInput(AAgent: TGittanAgent; const AChanges: string): string;
-begin
-  Result := AgentInput(AAgent, ReviewPrompt, AChanges);
-end;
-
-{ ADiff up to MessageDiffKeep bytes, cut at a line end, with a line that
-  says it was. }
-function KeepDiff(const ADiff: string): string;
+{ AText up to MessageDiffKeep bytes, cut at a line end, with a line that
+  says it was: ANote, with the bytes left out and the whole. }
+function KeepText(const AText, ANote: string): string;
 var
   Cut: integer;
 begin
-  if Length(ADiff) <= MessageDiffKeep then
-    Exit(ADiff);
+  if Length(AText) <= MessageDiffKeep then
+    Exit(AText);
   Cut := MessageDiffKeep;
-  while (Cut > 0) and (ADiff[Cut] <> #10) do
+  while (Cut > 0) and (AText[Cut] <> #10) do
     Dec(Cut);
-  Result := Copy(ADiff, 1, Cut) + Format('[The diff is cut here: %d of its %d bytes ' +
-    'are left out. The summary above lists every file.]', [Length(ADiff) - Cut,
-    Length(ADiff)]) + LineEnding;
+  Result := Copy(AText, 1, Cut) + Format(ANote, [Length(AText) - Cut, Length(AText)]) +
+    LineEnding;
+end;
+
+function KeepDiff(const ADiff: string): string;
+begin
+  Result := KeepText(ADiff, '[The diff is cut here: %d of its %d bytes are left out. ' +
+    'The summary above lists every file.]');
+end;
+
+function RepoFileList(const ARoot: string; out AList, AError: string): boolean;
+begin
+  Result := RunGitIn(ARoot, ['ls-files', '--cached', '--others', '--exclude-standard'],
+    AList, AError);
+  if Result then
+    AList := KeepText(AList, '[The list is cut here: %d of its %d bytes are left out.]');
+end;
+
+function FindListInput(const AQuestion, AFiles: string): string;
+begin
+  Result := 'The question: ' + AQuestion + LineEnding + LineEnding +
+    'The repository''s files:' + LineEnding + AFiles;
+end;
+
+{ AText with its lines numbered from 1, "12: text", and in ACount how
+  many lines that is. }
+function NumberLines(const AText: string; out ACount: integer): string;
+var
+  Lines: TStringList;
+  Text: TStringBuilder;
+  i: integer;
+begin
+  Lines := TStringList.Create;
+  Text := TStringBuilder.Create;
+  try
+    Lines.Text := AText;
+    for i := 0 to Lines.Count - 1 do
+    begin
+      Text.Append(IntToStr(i + 1));
+      Text.Append(': ');
+      Text.Append(Lines[i]);
+      Text.Append(#10);
+    end;
+    ACount := Lines.Count;
+    Result := Text.ToString;
+  finally
+    Text.Free;
+    Lines.Free;
+  end;
+end;
+
+{ Where AText, a file's share, is cut: at its last line end, or at its
+  end when it holds none (one long line), so something is kept. }
+function CutAt(const AText: string): integer;
+begin
+  Result := Length(AText);
+  while (Result > 0) and (AText[Result] <> #10) do
+    Dec(Result);
+  if Result = 0 then
+    Result := Length(AText);
+end;
+
+{ Whether APath, as the model gave it, stays in the repository: not
+  absolute, no .. in it. }
+function InsideRepo(const APath: string): boolean;
+begin
+  Result := (APath <> '') and (APath[1] <> '/') and (Pos(':', APath) = 0) and
+    (Pos('/../', '/' + APath + '/') = 0);
+end;
+
+{ Whether APath under ARoot goes through a symbolic link, the file or a
+  folder on the way to it, which may lead out of the repository however
+  APath reads. }
+function ThroughLink(const ARoot, APath: string): boolean;
+var
+  Name, Rest: string;
+  Cut, Attr: integer;
+begin
+  Name := ExcludeTrailingPathDelimiter(ARoot);
+  Rest := APath;
+  repeat
+    Cut := Pos('/', Rest);
+    if Cut = 0 then
+      Cut := Length(Rest) + 1;
+    Name := Name + PathDelim + Copy(Rest, 1, Cut - 1);
+    Delete(Rest, 1, Cut);
+    Attr := FileGetAttr(Name);
+    {$WARN SYMBOL_PLATFORM OFF}
+    if (Attr <> -1) and (Attr and faSymLink <> 0) then
+      Exit(True);
+    {$WARN SYMBOL_PLATFORM ON}
+  until Rest = '';
+  Result := False;
+end;
+
+function FindLinesInput(const ARoot, AQuestion, AList: string;
+  const AFiles: TGittanFoundFiles; out ALast: TGittanLineCounts): string;
+var
+  Names: array of string;
+  Count, Share, i: integer;
+  Whole: int64;
+  Text: string;
+  Stream: TFileStream;
+begin
+  Result := '';
+  SetLength(ALast, Length(AFiles));
+  for i := 0 to High(ALast) do
+    ALast[i] := 0;
+  { The files that are there share the budget; one named but not in the
+    list (an ignored file), out of the repository or missing takes none
+    of it. }
+  Count := 0;
+  SetLength(Names, Length(AFiles));
+  for i := 0 to High(AFiles) do
+    if InsideRepo(AFiles[i].Path) and (Pos(#10 + AFiles[i].Path + #10,
+      #10 + AList + #10) > 0) and not ThroughLink(ARoot, AFiles[i].Path) then
+    begin
+      Names[i] := IncludeTrailingPathDelimiter(ARoot) +
+        StringReplace(AFiles[i].Path, '/', PathDelim, [rfReplaceAll]);
+      if FileExists(Names[i]) then
+        Inc(Count)
+      else
+        Names[i] := '';
+    end;
+  if Count = 0 then
+    Exit;
+  Share := MessageDiffKeep div Count;
+  for i := 0 to High(AFiles) do
+  begin
+    if Names[i] = '' then
+      Continue;
+    { Only the share is read: a big file is neither loaded nor numbered
+      whole. }
+    try
+      Stream := TFileStream.Create(Names[i], fmOpenRead or fmShareDenyNone);
+      try
+        Whole := Stream.Size;
+        SetLength(Text, Min(Whole, Share));
+        if Text <> '' then
+          Stream.ReadBuffer(Text[1], Length(Text));
+      finally
+        Stream.Free;
+      end;
+    except
+      Continue;
+    end;
+    Result := Result + 'File: ' + AFiles[i].Path + LineEnding;
+    if Pos(#0, Text) > 0 then
+      Result := Result + '[A binary file; its text is not shown.]' + LineEnding
+    else
+    begin
+      { Cut at a line end (CutAt) before it is numbered. }
+      if Whole > Share then
+        SetLength(Text, CutAt(Text));
+      Result := Result + NumberLines(Text, ALast[i]);
+      if Whole > Share then
+        Result := Result + Format('[The file is cut here: %d of its %d bytes are ' +
+          'left out.]', [Whole - Length(Text), Whole]) + LineEnding;
+    end;
+    Result := Result + LineEnding;
+  end;
+  if Result <> '' then
+    Result := 'The question: ' + AQuestion + LineEnding + LineEnding + Result;
+end;
+
+procedure MergeFoundLines(var AFiles: TGittanFoundFiles; const ALines: TGittanFoundFiles;
+  const ALast: array of integer);
+var
+  i, j: integer;
+begin
+  for i := 0 to High(AFiles) do
+  begin
+    AFiles[i].Line := 0;
+    if i > High(ALast) then
+      Continue;
+    for j := 0 to High(ALines) do
+      if (ALines[j].Path = AFiles[i].Path) and (ALines[j].Line > 0) and
+        (ALines[j].Line <= ALast[i]) then
+      begin
+        AFiles[i].Line := ALines[j].Line;
+        if ALines[j].Why <> '' then
+          AFiles[i].Why := ALines[j].Why;
+        Break;
+      end;
+  end;
 end;
 
 const
@@ -597,47 +1006,52 @@ begin
   end;
 end;
 
-function ParseClaudeResult(const AOutput: string; out AText, AError: string): boolean;
+function ParseFoundFiles(const AText: string; out AFiles: TGittanFoundFiles): boolean;
 var
   Data: TJSONData;
-  Obj: TJSONObject;
-  Start: integer;
+  Item: TJSONObject;
+  Found: TGittanFoundFile;
+  First, Last, i, n: integer;
 begin
-  AText := '';
-  AError := '';
-  { A warning may come before the answer; the answer is the last line
-    that starts an object. }
-  Start := Length(AOutput);
-  while (Start > 0) and not ((AOutput[Start] = '{') and ((Start = 1) or
-      (AOutput[Start - 1] in [#10, #13]))) do
-    Dec(Start);
-  if Start = 0 then
+  AFiles := nil;
+  { The array from its first bracket to its last, whatever is around it. }
+  First := Pos('[', AText);
+  Last := LastDelimiter(']', AText);
+  if (First = 0) or (Last < First) then
     Exit(False);
   try
-    Data := GetJSON(Copy(AOutput, Start, MaxInt));
+    Data := GetJSON(Copy(AText, First, Last - First + 1));
   except
     Exit(False);
   end;
   try
-    if not (Data is TJSONObject) then
-      Exit(False);
-    Obj := TJSONObject(Data);
-    if Obj.Get('type', '') <> 'result' then
-      Exit(False);
-    Result := True;
-    AText := Obj.Get('result', '');
-    if Obj.Get('is_error', False) or (Obj.Get('subtype', 'success') <> 'success') then
+    Result := Data is TJSONArray;
+    if not Result then
+      Exit;
+    n := 0;
+    SetLength(AFiles, Min(Data.Count, FindMaxFiles));
+    for i := 0 to Data.Count - 1 do
     begin
-      if Obj.Get('subtype', '') = 'error_max_turns' then
-        AError := Format(rsClaudeTurns, [Obj.Get('num_turns', MessageMaxTurns)])
-      else if Trim(AText) <> '' then
-        AError := Trim(AText)
+      if n >= Length(AFiles) then
+        Break;
+      if not (Data.Items[i] is TJSONObject) then
+        Continue;
+      Item := TJSONObject(Data.Items[i]);
+      Found := Default(TGittanFoundFile);
+      Found.Path := StringReplace(Trim(Item.Get('path', '')), '\', '/', [rfReplaceAll]);
+      if Copy(Found.Path, 1, 2) = './' then
+        Delete(Found.Path, 1, 2);
+      if Found.Path = '' then
+        Continue;
+      if Item.Find('line') is TJSONNumber then
+        Found.Line := Max(0, Item.Get('line', 0))
       else
-        AError := Obj.Get('subtype', Format(rsAgentNoAnswer, [AgentNames[gaClaude]]));
-      AText := '';
-    end
-    else if Trim(AText) = '' then
-      AError := Format(rsAgentNoAnswer, [AgentNames[gaClaude]]);
+        Found.Line := Max(0, StrToIntDef(Item.Get('line', ''), 0));
+      Found.Why := Trim(Item.Get('why', ''));
+      AFiles[n] := Found;
+      Inc(n);
+    end;
+    SetLength(AFiles, n);
   finally
     Data.Free;
   end;
@@ -663,63 +1077,50 @@ begin
   end;
 end;
 
-function ReadAgentText(AAgent: TGittanAgent; AExited: boolean;
-  const AOutput, AErrors: string; out AText, AError: string): boolean;
+{ TGittanAgentJob }
+
+constructor TGittanAgentJob.Create(const ARoot: string; AAI: TGittanAI);
 begin
-  AText := '';
-  AError := '';
-  { claude exits with 1 on an error it reports in its JSON, so its
-    answer is read whatever the exit; copilot's silent answer is its
-    whole output, and counts only when it exited with 0. }
-  if AAgent = gaClaude then
-  begin
-    if ParseClaudeResult(AOutput, AText, AError) then
-      Exit(AError = '');
-  end
-  else if AExited and (Trim(AOutput) <> '') then
-  begin
-    AText := AOutput;
-    Exit(True);
-  end;
-  { No answer: stderr says why (not logged in, an unknown option of an
-    old version), else whatever was printed. }
-  Result := False;
-  if Trim(AErrors) <> '' then
-    AError := Trim(AErrors)
-  else if Trim(AOutput) <> '' then
-    AError := Trim(AOutput)
-  else
-    AError := Format(rsAgentNoAnswer, [AgentNames[AAgent]]);
+  { Given up on Stop: Execute asks Cancelled while the command runs. }
+  inherited Create(True);
+  FRoot := ARoot;
+  FAI := AAI.Clone;
 end;
 
-function ReadAgentAnswer(AAgent: TGittanAgent; AExited: boolean;
-  const AOutput, AErrors: string; out AMessage, AError: string): boolean;
-var
-  Text: string;
+destructor TGittanAgentJob.Destroy;
 begin
-  AMessage := '';
-  Result := ReadAgentText(AAgent, AExited, AOutput, AErrors, Text, AError);
-  if not Result then
-    Exit;
-  AMessage := CleanCommitMessage(Text);
-  if AMessage = '' then
+  inherited Destroy;
+  FAI.Free;
+end;
+
+function TGittanAgentJob.GetAgentName: string;
+begin
+  Result := FAI.Title;
+end;
+
+function TGittanAgentJob.Cancelled: boolean;
+begin
+  Result := Terminated;
+end;
+
+function TGittanAgentJob.Ask(ATask: TGittanAITask; const AInput: string;
+  out AText, AError: string): boolean;
+begin
+  Result := FAI.Ask(FRoot, ATask, AInput, @Cancelled, AText, AError);
+  if Terminated then
   begin
-    AError := Format(rsAgentNoAnswer, [AgentNames[AAgent]]);
+    AText := '';
+    AError := '';
     Result := False;
   end;
 end;
 
 { TGittanMessageJob }
 
-constructor TGittanMessageJob.Create(const ARoot: string; AAgent: TGittanAgent;
-  const AExe, AModel: string; APaths: TStrings; AAmend: boolean);
+constructor TGittanMessageJob.Create(const ARoot: string; AAI: TGittanAI;
+  APaths: TStrings; AAmend: boolean);
 begin
-  { Given up on Stop: Execute asks Cancelled while the agent runs. }
-  inherited Create(True);
-  FRoot := ARoot;
-  FAgent := AAgent;
-  FExe := AExe;
-  FModel := AModel;
+  inherited Create(ARoot, AAI);
   FPaths := TStringList.Create;
   FPaths.AddStrings(APaths);
   FAmend := AAmend;
@@ -731,15 +1132,9 @@ begin
   FPaths.Free;
 end;
 
-function TGittanMessageJob.Cancelled: boolean;
-begin
-  Result := Terminated;
-end;
-
 procedure TGittanMessageJob.Execute;
 var
-  Changes, Output, Errors: string;
-  Exited: boolean;
+  Changes, Answer: string;
 begin
   if not CommitChanges(FRoot, FPaths, FAmend, Changes, FError) then
   begin
@@ -754,31 +1149,30 @@ begin
   end;
   if Terminated then
     Exit;
-  Exited := RunAgentCli(FExe, FRoot, CommitMessageArgs(FAgent, FModel),
-    CommitMessageInput(FAgent, Changes), @Cancelled, Output, Errors);
+  FOk := Ask(atMessage, Changes, Answer, FError);
   if Terminated then
     Exit;
-  FOk := ReadAgentAnswer(FAgent, Exited, Output, Errors, FMessage, FError);
+  if FOk then
+  begin
+    FMessage := CleanCommitMessage(Answer);
+    FOk := FMessage <> '';
+    if not FOk then
+      FError := Format(rsAgentNoAnswer, [AgentName]);
+  end;
   Done;
 end;
 
 { TGittanAIReviewJob }
 
-constructor TGittanAIReviewJob.Create(const ARoot: string; AAgent: TGittanAgent;
-  const AExe, AModel, ABase: string; ARange: boolean; APaths: TStrings;
-  const AKey: string);
+constructor TGittanAIReviewJob.Create(const ARoot: string; AAI: TGittanAI;
+  const ABase: string; ARange: boolean; APaths: TStrings; const AViewKey: string);
 begin
-  { Given up on Stop: Execute asks Cancelled while the agent runs. }
-  inherited Create(True);
-  FRoot := ARoot;
-  FAgent := AAgent;
-  FExe := AExe;
-  FModel := AModel;
+  inherited Create(ARoot, AAI);
   FBase := ABase;
   FRange := ARange;
   FPaths := TStringList.Create;
   FPaths.AddStrings(APaths);
-  FKey := AKey;
+  FViewKey := AViewKey;
 end;
 
 destructor TGittanAIReviewJob.Destroy;
@@ -787,15 +1181,9 @@ begin
   FPaths.Free;
 end;
 
-function TGittanAIReviewJob.Cancelled: boolean;
-begin
-  Result := Terminated;
-end;
-
 procedure TGittanAIReviewJob.Execute;
 var
-  Changes, Output, Errors, Answer: string;
-  Exited: boolean;
+  Changes, Answer: string;
 begin
   if not ReviewChanges(FRoot, FBase, FRange, FPaths, Changes, FError) then
   begin
@@ -810,17 +1198,79 @@ begin
   end;
   if Terminated then
     Exit;
-  Exited := RunAgentCli(FExe, FRoot, ReviewArgs(FAgent, FModel),
-    ReviewInput(FAgent, Changes), @Cancelled, Output, Errors);
+  FOk := Ask(atReview, Changes, Answer, FError);
   if Terminated then
     Exit;
-  if ReadAgentText(FAgent, Exited, Output, Errors, Answer, FError) then
+  if FOk then
   begin
-    FOk := ParseReviewFindings(Answer, AgentNames[FAgent], FThreads);
+    FOk := ParseReviewFindings(Answer, AgentName, FThreads);
     if not FOk then
       FError := Format(rsReviewNotRead, [Copy(Trim(Answer), 1, 300)]);
   end;
   Done;
+end;
+
+{ TGittanFindJob }
+
+constructor TGittanFindJob.Create(const ARoot: string; AAI: TGittanAI;
+  const AQuestion: string);
+begin
+  inherited Create(ARoot, AAI);
+  FQuestion := AQuestion;
+end;
+
+procedure TGittanFindJob.Execute;
+var
+  Input, List, Answer: string;
+begin
+  { A model that cannot search gets the file list to pick from. }
+  Input := FQuestion;
+  if not FAI.ReadsFiles then
+  begin
+    if not RepoFileList(FRoot, List, FError) then
+    begin
+      Done;
+      Exit;
+    end;
+    Input := FindListInput(FQuestion, List);
+  end;
+  if Terminated then
+    Exit;
+  FOk := Ask(atFind, Input, Answer, FError);
+  if Terminated then
+    Exit;
+  if FOk then
+  begin
+    FOk := ParseFoundFiles(Answer, FFiles);
+    if not FOk then
+      FError := Format(rsFoundNotRead, [Copy(Trim(Answer), 1, 300)])
+    else if not FAI.ReadsFiles and (Length(FFiles) > 0) then
+      LocateLines(List);
+  end;
+  if Terminated then
+    Exit;
+  Done;
+end;
+
+{ The second round for a model that cannot read files: the files it
+  named from AList with their text, for their lines. The first answer's
+  lines were guessed from the paths and are dropped; an answer that is
+  none leaves the files without lines, since they are still worth
+  showing. }
+procedure TGittanFindJob.LocateLines(const AList: string);
+var
+  Input, Answer, Why: string;
+  Lines: TGittanFoundFiles;
+  Last: TGittanLineCounts;
+  i: integer;
+begin
+  for i := 0 to High(FFiles) do
+    FFiles[i].Line := 0;
+  Input := FindLinesInput(FRoot, FQuestion, AList, FFiles, Last);
+  if (Input = '') or Terminated then
+    Exit;
+  if Ask(atLocate, Input, Answer, Why) and ParseFoundFiles(Answer, Lines) then
+    MergeFoundLines(FFiles, Lines, Last);
 end;
 
 end.

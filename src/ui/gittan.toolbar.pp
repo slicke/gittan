@@ -14,9 +14,16 @@
   frame while another was shown) has a blue dot before its name. A
   click on a tab selects it at once; the
   cross on the shown or hovered tab, or a middle click, closes it; the
-  plus asks for a new tab. A press on the empty part moves the window
-  and a double click there zooms it, as on the title bar. The full path
-  of the tab under the mouse is its tooltip.
+  plus asks for a new tab. At the window's right end a banner hangs
+  from the top edge over the title bar, a ribbon with a notch at its
+  foot and a globe in it (SetForge; there while there is a forge, in
+  the accent while the forge view is shown), which asks for the forge
+  view (OnForge); it is a view of its own in the window's frame view
+  (TGittanForgeBanner), since the strip, a toolbar item, does not reach
+  the top edge, and the strip keeps its tabs out of its room. A press
+  on the empty part moves the window and a double click there zooms
+  it, as on the title bar. The full path of the tab under the mouse is
+  its tooltip, the forge's name the banner's.
 
   The filter, the change navigator and the actions of the view belong to
   a repository and are in its frame: the field over the tree and the
@@ -49,20 +56,32 @@ type
     FCaptions, FHints: array of string;
     FMarks: array of boolean;
     FActive: integer;
+    { The tabs are a view's own (the forge view's): no cross, no plus. }
+    FFixed: boolean;
     { The tab under the mouse (-1 for none), whether the mouse is on its
       cross, on the plus; the cross or plus pressed (-1 for none,
       PlusPart for the plus). }
     FHot: integer;
     FHotClose, FHotPlus: boolean;
     FPressed: integer;
+    { The banner: its view (made when first shown), whether it is there,
+      whether the forge view is shown, the mouse on it and pressed. }
+    FBanner: NSView;
+    FForgeVisible, FForgeShown, FBannerHot, FBannerPressed: boolean;
     FOnSelect, FOnClose: TGittanTabEvent;
-    FOnNew: TNotifyEvent;
+    FOnNew, FOnForge: TNotifyEvent;
+    function GlobeRoom: double;
     function TabWidth(AWidth: double): double;
     function TabRect(AIndex: integer; const ABounds: NSRect): NSRect;
     function CloseRect(const ATab: NSRect): NSRect;
     function PlusRect(const ABounds: NSRect): NSRect;
     procedure HitTest(const APoint: NSPoint; const ABounds: NSRect;
       out AIndex: integer; out AClose, APlus: boolean);
+    procedure MakeBanner;
+    procedure DrawBanner(const ABounds: NSRect);
+    procedure BannerDown;
+    procedure BannerUp(AEvent: NSEvent);
+    procedure BannerHover(AHot: boolean);
     procedure Draw(const ABounds: NSRect);
     procedure MouseDown(AEvent: NSEvent);
     procedure MouseUp(AEvent: NSEvent);
@@ -77,15 +96,22 @@ type
     destructor Destroy; override;
     {** The tabs, left to right: ACaptions are their names, AHints their
       tooltips (the paths), AMarks those with news (a dot before the
-      name), AActive the one shown. }
+      name), AActive the one shown; AFixed when they are a view's own,
+      which cannot be closed or added to: no cross and no plus. }
     procedure SetTabs(const ACaptions, AHints: array of string;
-      const AMarks: array of boolean; AActive: integer);
+      const AMarks: array of boolean; AActive: integer; AFixed: boolean = False);
+    {** The banner at the right end: shown while AVisible (there is a
+      forge), in the accent while AShown (the forge view is shown),
+      AHint its tooltip (the forge's name). }
+    procedure SetForge(AVisible, AShown: boolean; const AHint: string);
     {** A click on a tab: show it. }
     property OnSelect: TGittanTabEvent read FOnSelect write FOnSelect;
     {** The cross or a middle click on a tab: close it. }
     property OnClose: TGittanTabEvent read FOnClose write FOnClose;
     {** The plus: a new tab. }
     property OnNew: TNotifyEvent read FOnNew write FOnNew;
+    {** The banner: the forge view, or back from it. }
+    property OnForge: TNotifyEvent read FOnForge write FOnForge;
   end;
 
 implementation
@@ -113,6 +139,20 @@ type
     function toolbarAllowedItemIdentifiers(toolbar: NSToolbar): NSArray;
   end;
 
+  { The banner: the toolbar draws it and takes its mouse. }
+  TGittanForgeBanner = objcclass(NSView)
+  public
+    Owner: TGittanToolbar;
+    function isFlipped: ObjCBOOL; override;
+    function mouseDownCanMoveWindow: ObjCBOOL; override;
+    function acceptsFirstMouse(event: NSEvent): ObjCBOOL; override;
+    procedure drawRect(dirtyRect: NSRect); override;
+    procedure mouseDown(event: NSEvent); override;
+    procedure mouseUp(event: NSEvent); override;
+    procedure mouseEntered(event: NSEvent); override;
+    procedure mouseExited(event: NSEvent); override;
+  end;
+
   { The tab strip: the toolbar draws it and takes its mouse. }
   TGittanTabStrip = objcclass(NSView)
   public
@@ -138,6 +178,14 @@ const
   TabGap = 3;
   PlusWidth = 30;
   CrossSize = 16;
+  { The banner: its width, how far it stays from the window's right
+    edge, how far it hangs (from the top edge), the depth of the notch
+    at its foot; the room the strip leaves it at its right end. }
+  BannerWidth = 30;
+  BannerRight = 14;
+  BannerHeight = 44;
+  BannerNotch = 8;
+  GlobeWidth = 40;
   { FPressed for the plus. }
   PlusPart = -2;
 
@@ -166,6 +214,16 @@ begin
   P.setLineWidth(AWidth);
   P.setLineCapStyle(NSRoundLineCapStyle);
   AColor.setStroke;
+  P.stroke;
+end;
+
+{ Strokes the oval in R in the stroke color set. }
+procedure StrokeOval(const R: NSRect; AWidth: double);
+var
+  P: NSBezierPath;
+begin
+  P := NSBezierPath.bezierPathWithOvalInRect(R);
+  P.setLineWidth(AWidth);
   P.stroke;
 end;
 
@@ -200,6 +258,53 @@ end;
 function TGittanToolbarDelegate.toolbarAllowedItemIdentifiers(toolbar: NSToolbar): NSArray;
 begin
   Result := toolbarDefaultItemIdentifiers(toolbar);
+end;
+
+{ TGittanForgeBanner }
+
+function TGittanForgeBanner.isFlipped: ObjCBOOL;
+begin
+  Result := True;
+end;
+
+function TGittanForgeBanner.mouseDownCanMoveWindow: ObjCBOOL;
+begin
+  Result := False;
+end;
+
+function TGittanForgeBanner.acceptsFirstMouse(event: NSEvent): ObjCBOOL;
+begin
+  Result := True;
+end;
+
+procedure TGittanForgeBanner.drawRect(dirtyRect: NSRect);
+begin
+  if Owner <> nil then
+    Owner.DrawBanner(bounds);
+end;
+
+procedure TGittanForgeBanner.mouseDown(event: NSEvent);
+begin
+  if Owner <> nil then
+    Owner.BannerDown;
+end;
+
+procedure TGittanForgeBanner.mouseUp(event: NSEvent);
+begin
+  if Owner <> nil then
+    Owner.BannerUp(event);
+end;
+
+procedure TGittanForgeBanner.mouseEntered(event: NSEvent);
+begin
+  if Owner <> nil then
+    Owner.BannerHover(True);
+end;
+
+procedure TGittanForgeBanner.mouseExited(event: NSEvent);
+begin
+  if Owner <> nil then
+    Owner.BannerHover(False);
 end;
 
 { TGittanTabStrip }
@@ -299,6 +404,12 @@ end;
 
 destructor TGittanToolbar.Destroy;
 begin
+  if FBanner <> nil then
+  begin
+    TGittanForgeBanner(FBanner).Owner := nil;
+    FBanner.removeFromSuperview;
+    FBanner.release;
+  end;
   if FWindow <> nil then
     FWindow.setToolbar(nil);
   if FToolbar <> nil then
@@ -316,11 +427,137 @@ begin
   inherited Destroy;
 end;
 
+procedure TGittanToolbar.SetForge(AVisible, AShown: boolean; const AHint: string);
+begin
+  if AVisible and (FBanner = nil) then
+    MakeBanner;
+  FForgeVisible := AVisible;
+  FForgeShown := AShown;
+  if FBanner <> nil then
+  begin
+    FBanner.setHidden(not AVisible);
+    FBanner.setToolTip(NSStr(AHint));
+    FBanner.setNeedsDisplay_(True);
+  end;
+  if not AVisible then
+  begin
+    FBannerHot := False;
+    FBannerPressed := False;
+  end;
+  if FStrip <> nil then
+    FStrip.setNeedsDisplay_(True);
+end;
+
+{ In the window's frame view, over the toolbar and the content alike,
+  at the top right and kept there as the window resizes (the frame
+  view's origin is at its bottom). }
+procedure TGittanToolbar.MakeBanner;
+var
+  Frame: NSView;
+  Area: NSTrackingArea;
+  B: NSRect;
+begin
+  Frame := FWindow.contentView.superview;
+  if Frame = nil then
+    Exit;
+  B := Frame.bounds;
+  FBanner := TGittanForgeBanner.alloc.initWithFrame(NSMakeRect(
+    B.size.width - BannerRight - BannerWidth, B.size.height - BannerHeight,
+    BannerWidth, BannerHeight));
+  TGittanForgeBanner(FBanner).Owner := Self;
+  FBanner.setAutoresizingMask(NSViewMinXMargin or NSViewMinYMargin);
+  Area := NSTrackingArea.alloc.initWithRect_options_owner_userInfo(NSZeroRect,
+    NSTrackingMouseEnteredAndExited or NSTrackingActiveAlways or NSTrackingInVisibleRect,
+    FBanner, nil);
+  FBanner.addTrackingArea(Area);
+  Area.release;
+  Frame.addSubview_positioned_relativeTo(FBanner, NSWindowAbove, nil);
+end;
+
+{ A ribbon hanging from the top edge with a notch at its foot and a
+  globe in it: faint, a little stronger under the mouse, in the accent
+  with a white globe while the forge view is shown. }
+procedure TGittanToolbar.DrawBanner(const ABounds: NSRect);
+var
+  P: NSBezierPath;
+  W, H, S, X, Y: double;
+  Fill, Ink: NSColor;
+  G: NSRect;
+begin
+  W := ABounds.size.width;
+  H := ABounds.size.height;
+  P := NSBezierPath.bezierPath;
+  P.moveToPoint(NSMakePoint(0, 0));
+  P.lineToPoint(NSMakePoint(W, 0));
+  P.lineToPoint(NSMakePoint(W, H));
+  P.lineToPoint(NSMakePoint(W / 2, H - BannerNotch));
+  P.lineToPoint(NSMakePoint(0, H));
+  P.closePath;
+  P.setLineJoinStyle(NSRoundLineJoinStyle);
+  if FForgeShown then
+  begin
+    Fill := NSColor.systemBlueColor;
+    if FBannerHot then
+      Fill := Fill.colorWithAlphaComponent(0.85);
+    Ink := NSColor.whiteColor;
+  end
+  else
+  begin
+    if FBannerHot or FBannerPressed then
+      Fill := NSColor.labelColor.colorWithAlphaComponent(0.16)
+    else
+      Fill := NSColor.labelColor.colorWithAlphaComponent(0.08);
+    if FBannerHot then
+      Ink := NSColor.labelColor
+    else
+      Ink := NSColor.secondaryLabelColor;
+  end;
+  Fill.setFill;
+  P.fill;
+  { The globe in the ribbon's body, above the notch: a circle, a
+    narrower one in it and a line across. }
+  S := 16;
+  X := (W - S) / 2;
+  Y := (H - BannerNotch - S) / 2 + 3;
+  G := NSMakeRect(X, Y, S, S);
+  Ink.setStroke;
+  StrokeOval(G, 1.3);
+  StrokeOval(NSMakeRect(X + S * 5 / 14, Y, S * 4 / 14, S), 1.3);
+  StrokeLine(X, Y + S / 2, X + S, Y + S / 2, Ink, 1.3);
+end;
+
+procedure TGittanToolbar.BannerDown;
+begin
+  FBannerPressed := True;
+  FBanner.setNeedsDisplay_(True);
+end;
+
+{ The release on the banner asks for the forge view. }
+procedure TGittanToolbar.BannerUp(AEvent: NSEvent);
+var
+  P: NSPoint;
+  Pressed: boolean;
+begin
+  Pressed := FBannerPressed;
+  FBannerPressed := False;
+  FBanner.setNeedsDisplay_(True);
+  P := FBanner.convertPoint_fromView(AEvent.locationInWindow, nil);
+  if Pressed and PointIn(P, FBanner.bounds) and Assigned(FOnForge) then
+    FOnForge(Self);
+end;
+
+procedure TGittanToolbar.BannerHover(AHot: boolean);
+begin
+  FBannerHot := AHot;
+  FBanner.setNeedsDisplay_(True);
+end;
+
 procedure TGittanToolbar.SetTabs(const ACaptions, AHints: array of string;
-  const AMarks: array of boolean; AActive: integer);
+  const AMarks: array of boolean; AActive: integer; AFixed: boolean);
 var
   i: integer;
 begin
+  FFixed := AFixed;
   SetLength(FCaptions, Length(ACaptions));
   SetLength(FHints, Length(ACaptions));
   SetLength(FMarks, Length(ACaptions));
@@ -340,11 +577,23 @@ begin
     FStrip.setNeedsDisplay_(True);
 end;
 
+{ What the banner keeps the tabs out of. }
+function TGittanToolbar.GlobeRoom: double;
+begin
+  if FForgeVisible then
+    Result := GlobeWidth
+  else
+    Result := 0;
+end;
+
 function TGittanToolbar.TabWidth(AWidth: double): double;
 begin
   if Length(FCaptions) = 0 then
     Exit(MaxTabWidth);
-  Result := (AWidth - PlusWidth) / Length(FCaptions);
+  if FFixed then
+    Result := (AWidth - GlobeRoom) / Length(FCaptions)
+  else
+    Result := (AWidth - PlusWidth - GlobeRoom) / Length(FCaptions);
   Result := Max(MinTabWidth, Min(MaxTabWidth, Result));
 end;
 
@@ -378,7 +627,7 @@ var
 begin
   AIndex := -1;
   AClose := False;
-  APlus := PointIn(APoint, PlusRect(ABounds));
+  APlus := not FFixed and PointIn(APoint, PlusRect(ABounds));
   if APlus then
     Exit;
   for i := 0 to High(FCaptions) do
@@ -387,7 +636,7 @@ begin
     if PointIn(APoint, R) then
     begin
       AIndex := i;
-      AClose := PointIn(APoint, CloseRect(R));
+      AClose := not FFixed and PointIn(APoint, CloseRect(R));
       Exit;
     end;
   end;
@@ -448,7 +697,7 @@ begin
       Attrs := NSDictionary.dictionaryWithObjectsAndKeys(Font, NSFontAttributeName,
         Text, NSForegroundColorAttributeName, Para, NSParagraphStyleAttributeName, nil);
       T := NSMakeRect(R.origin.x + 10, R.origin.y + (R.size.height - LineH) / 2,
-        R.size.width - 20 - CrossSize, LineH);
+        R.size.width - 20 - Ord(not FFixed) * CrossSize, LineH);
       { News: a dot before the name, which moves over for it. }
       if FMarks[i] then
       begin
@@ -459,7 +708,7 @@ begin
         T.size.width := T.size.width - 11;
       end;
       NSStr(FCaptions[i]).drawInRect_withAttributes(T, Attrs);
-      if Shown or (i = FHot) then
+      if not FFixed and (Shown or (i = FHot)) then
       begin
         C := CloseRect(R);
         if (i = FHot) and FHotClose then
@@ -474,6 +723,8 @@ begin
           C.origin.y + C.size.height - 5, Cross, 1.3);
       end;
     end;
+    if FFixed then
+      Exit;
     C := PlusRect(ABounds);
     if FHotPlus then
     begin
@@ -548,7 +799,7 @@ var
   Index: integer;
   InCross, InPlus: boolean;
 begin
-  if AEvent.buttonNumber <> 2 then
+  if (AEvent.buttonNumber <> 2) or FFixed then
     Exit;
   P := FStrip.convertPoint_fromView(AEvent.locationInWindow, nil);
   HitTest(P, FStrip.bounds, Index, InCross, InPlus);
@@ -567,7 +818,7 @@ begin
   if (Index = FHot) and (InCross = FHotClose) and (InPlus = FHotPlus) then
     Exit;
   if Index <> FHot then
-    if Index >= 0 then
+    if (Index >= 0) and (FHints[Index] <> '') then
       FStrip.setToolTip(NSStr(FHints[Index]))
     else
       FStrip.setToolTip(nil);

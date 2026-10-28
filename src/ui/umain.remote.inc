@@ -30,6 +30,9 @@ var
 begin
   Can := (FRepo <> nil) and (FRepo.Root <> '') and (FRemoteJob = nil) and
     (FCommitJob = nil);
+  { The status bar's buttons are dimmed while a job runs, from its start,
+    which also moves what it says into their row. }
+  UpdateStatusTransport;
   if FFetchItem = nil then
     Exit;
   FFetchItem.Enabled := Can;
@@ -56,7 +59,7 @@ begin
     { One waits; a second is refused rather than put in its place. }
     if FPendingRemote then
     begin
-      FStatus.ShowMessage(rsAlreadyWaiting, stNormal, 0);
+      FStatus.ShowBusy(rsAlreadyWaiting, HintFetch);
       Exit;
     end;
     FPendingRemote := True;
@@ -64,7 +67,7 @@ begin
     FPendingMode := AMode;
     FPendingArg := AArg;
     FPendingRemoteName := ARemote;
-    FStatus.ShowMessage(rsWaitingForFetch, stNormal, 0);
+    FStatus.ShowBusy(rsWaitingForFetch, HintFetch);
     Exit;
   end;
   FRemoteAhead := FAhead;
@@ -83,30 +86,34 @@ begin
     FRemoteJob.Refs := FLfsRefs;
   FRemoteJob.Start;
   if FNoticeHook then
-    FStatus.ShowMessage(rsRunningHook, stNormal, 0)
+    FStatus.ShowBusy(rsRunningHook)
   else
     case AKind of
-      rkFetch: FStatus.ShowMessage(rsFetching, stNormal, 0);
-      rkPull: FStatus.ShowMessage(rsPulling, stNormal, 0);
-      rkPush: FStatus.ShowMessage(rsPushing, stNormal, 0);
-      rkForcePush: FStatus.ShowMessage(rsForcePushing, stNormal, 0);
-      rkPushBranch: FStatus.ShowMessage(Format(rsPushingTo, [AArg, ARemote]), stNormal, 0);
+      rkFetch: FStatus.ShowBusy(rsFetching, HintFetch);
+      rkPull: FStatus.ShowBusy(rsPulling, HintDown);
+      rkPush: FStatus.ShowBusy(rsPushing, HintUp);
+      rkForcePush: FStatus.ShowBusy(rsForcePushing, HintUp);
+      rkPushBranch:
+        FStatus.ShowBusy(Format(rsPushingTo, [AArg, ARemote]), HintUp);
       rkPushTag:
         if AArg = '' then
-          FStatus.ShowMessage(Format(rsPushingTags, [ARemote]), stNormal, 0)
+          FStatus.ShowBusy(Format(rsPushingTags, [ARemote]), HintUp)
         else
-          FStatus.ShowMessage(Format(rsPushingTo, [AArg, ARemote]), stNormal, 0);
+          FStatus.ShowBusy(Format(rsPushingTo, [AArg, ARemote]), HintUp);
       rkDeleteRemote, rkDeleteRemoteTag:
-        FStatus.ShowMessage(Format(rsDeletingRemote, [AArg]), stNormal, 0);
+        FStatus.ShowBusy(Format(rsDeletingRemote, [AArg]), HintUp);
       rkSubmoduleUpdate:
         if AArg = '' then
-          FStatus.ShowMessage(rsSubUpdatingAll, stNormal, 0)
+          FStatus.ShowBusy(rsSubUpdatingAll)
         else
-          FStatus.ShowMessage(Format(rsSubUpdating, [AArg]), stNormal, 0);
+          FStatus.ShowBusy(Format(rsSubUpdating, [AArg]));
       rkLfsFetch:
-        FStatus.ShowMessage(Format(rsLfsDownloading, [ExtractFileName(AArg)]), stNormal, 0);
-      rkLfsPull: FStatus.ShowMessage(rsLfsPulling, stNormal, 0);
-      rkLfsInstall: FStatus.ShowMessage(rsLfsInstalling, stNormal, 0);
+        FStatus.ShowBusy(Format(rsLfsDownloading, [ExtractFileName(AArg)]),
+          HintDown);
+      rkLfsPull: FStatus.ShowBusy(rsLfsPulling, HintDown);
+      rkLfsInstall: FStatus.ShowBusy(rsLfsInstalling);
+      rkLfsLock: FStatus.ShowBusy(Format(rsLfsLocking, [AArg]));
+      rkLfsUnlock, rkLfsForceUnlock: FStatus.ShowBusy(Format(rsLfsUnlocking, [AArg]));
     end;
   if FNoticeHook then
     ShowRemoteNotice
@@ -148,6 +155,8 @@ begin
     rkLfsFetch: Result := Format(rsNoticeLfsDownloading, [ExtractFileName(FRemoteJob.Arg)]);
     rkLfsPull: Result := rsNoticeLfsPulling;
     rkLfsInstall: Result := rsNoticeLfsInstalling;
+    rkLfsLock: Result := Format(rsNoticeLfsLocking, [FRemoteJob.Arg]);
+    rkLfsUnlock, rkLfsForceUnlock: Result := Format(rsNoticeLfsUnlocking, [FRemoteJob.Arg]);
   end;
 end;
 
@@ -179,9 +188,9 @@ begin
   begin
     FNoticeHook := False;
     if Job.Kind in [rkDeleteRemote, rkDeleteRemoteTag] then
-      FStatus.ShowMessage(Format(rsDeletingRemote, [Job.Arg]), stNormal, 0)
+      FStatus.ShowBusy(Format(rsDeletingRemote, [Job.Arg]), HintUp)
     else
-      FStatus.ShowMessage(rsPushing, stNormal, 0);
+      FStatus.ShowBusy(rsPushing, HintUp);
     FNotice.Title := RemoteNoticeTitle;
   end;
   if FNotice.Visible then
@@ -212,6 +221,10 @@ begin
   FNoticeTimer.Enabled := False;
   FNotice.Close;
   FStatus.ShowMessage('', stNormal, 0);
+  { Create Pull Request waits only for the push it started, so any
+    other job, those that end below too, drops it. }
+  if not (Job.Ok and (Job.Kind in [rkPush, rkPushBranch])) then
+    FPullAfterPush := '';
   { A clone is of no open repository. }
   if Job.Kind = rkClone then
   begin
@@ -226,6 +239,11 @@ begin
   if Job.Kind = rkFetchPull then
   begin
     PullFetchDone(Job);
+    Exit;
+  end;
+  if Job.Kind in [rkLfsLock, rkLfsUnlock, rkLfsForceUnlock] then
+  begin
+    LfsLockJobDone(Job);
     Exit;
   end;
   { The file is shown again, as the version downloaded into the store
@@ -261,6 +279,8 @@ begin
     FAfterFetchRef := '';
   if Job.Ok then
   begin
+    if Job.Kind = rkFetch then
+      StartLfsLocks;
     case Job.Kind of
       rkFetch:
         if FAfterFetchRef <> '' then
@@ -292,7 +312,8 @@ begin
       rkForcePush:
         BannerSuccess(Format(rsForcePushed, [FBranch]));
       rkPushBranch:
-        BannerSuccess(Format(rsPushedBranchTo, [Job.Arg, Job.Remote + '/' + Job.Arg]));
+        PushedBanner(Format(rsPushedBranchTo, [Job.Arg, Job.Remote + '/' + Job.Arg]),
+          Job.Arg);
       rkPushTag:
         if Job.Arg = '' then
           BannerSuccess(Format(rsPushedTags, [Job.Remote]))
@@ -300,11 +321,11 @@ begin
           BannerSuccess(Format(rsPushedTag, [Job.Arg, Job.Remote]));
       rkPush:
         if FRemoteAhead = 1 then
-          BannerSuccess(Format(rsPushedOne, [FBranch]))
+          PushedBanner(Format(rsPushedOne, [FBranch]), FBranch)
         else if FRemoteAhead > 1 then
-          BannerSuccess(Format(rsPushed, [FRemoteAhead, FBranch]))
+          PushedBanner(Format(rsPushed, [FRemoteAhead, FBranch]), FBranch)
         else
-          BannerSuccess(Format(rsPushedBranch, [FBranch]));
+          PushedBanner(Format(rsPushedBranch, [FBranch]), FBranch);
     end;
     Exit;
   end;
@@ -423,6 +444,16 @@ begin
         Title := rsLfsInstallFailed;
         Again := rsTryAgain;
       end;
+    rkLfsLock:
+      begin
+        Title := Format(rsLfsLockFailed, [AJob.Arg]);
+        Again := rsTryAgain;
+      end;
+    rkLfsUnlock, rkLfsForceUnlock:
+      begin
+        Title := Format(rsLfsUnlockFailed, [AJob.Arg]);
+        Again := rsTryAgain;
+      end;
     else
       if AHookFailed then
         Title := rsHookFailed
@@ -489,6 +520,7 @@ end;
 procedure TRepoFrame.StopRemoteJob(AWait: boolean);
 begin
   FPendingRemote := False;
+  StopLfsLocks;
   { The Git LFS check reads only, and is dropped rather than waited for. }
   if FLfsCheckJob <> nil then
   begin
@@ -582,6 +614,18 @@ begin
     Exit;
   end;
   State := Job.State;
+  FLfsLockable.Clear;
+  FLfsLockable.AddStrings(State.Lockable);
+  FLfsInstalled := State.Installed;
+  if FLfsInstalled then
+    StartLfsLocks
+  else
+    FLfsLocks := nil;
+  { The note and the pills follow: locks gone with git-lfs, a file that
+    may be locked now or no longer. }
+  LockNote;
+  if FView = gvBlob then
+    BlobActions;
   Key := '';
   Kind := bkError;
   Handler := nil;
@@ -699,7 +743,10 @@ begin
     else
       Inc(FAutoFetchFails);
   if Job.Ok and (Job.Root = FRepo.Root) then
+  begin
     RefreshRepository;
+    StartLfsLocks;
+  end;
   if FPendingRemote then
   begin
     FPendingRemote := False;

@@ -12,7 +12,7 @@ interface
 
 uses
   Classes, SysUtils, DateUtils, fpcunit, testregistry, gittan.forge, gittan.github,
-  gittan.git;
+  gittan.git, testhelpers;
 
 type
   TForgeTest = class(TTestCase)
@@ -21,12 +21,44 @@ type
     procedure TestParseErrors;
     procedure TestNeedsMyReview;
     procedure TestFeedback;
+    procedure TestFilters;
     procedure TestNotes;
     procedure TestFindClones;
     procedure TestSiblingRepositories;
+    procedure TestPullRequestOf;
+    procedure TestRemoteHost;
+    procedure TestRemoteRepoPath;
+    procedure TestForgeFor;
+    procedure TestSshAlias;
+    procedure TestKeepForge;
   end;
 
 implementation
+
+type
+  { A forge on example.org, registered after GitHub, so the forge of a
+    repository is picked by its remotes; it is never made. }
+  TExampleForge = class(TGittanForge)
+  public
+    class function Name: string; override;
+    class function CliName: string; override;
+    class function HostsRemote(const AHost: string): boolean; override;
+  end;
+
+class function TExampleForge.Name: string;
+begin
+  Result := 'Example';
+end;
+
+class function TExampleForge.CliName: string;
+begin
+  Result := 'ex';
+end;
+
+class function TExampleForge.HostsRemote(const AHost: string): boolean;
+begin
+  Result := AHost = 'example.org';
+end;
 
 const
   Mine = '{"number":41,"title":"Watcher pace","url":"https://github.com/slicke/gittan/pull/41",' +
@@ -161,32 +193,69 @@ begin
   AssertEquals(0, Length(WithFeedback(nil)));
 end;
 
+procedure TForgeTest.TestFilters;
+var
+  Pulls, Left: TGittanForgePulls;
+  Now_: TDateTime;
+  i: integer;
+begin
+  Now_ := EncodeDateTime(2026, 10, 27, 12, 0, 0, 0);
+  Pulls := nil;
+  SetLength(Pulls, 4);
+  for i := 0 to 3 do
+  begin
+    Pulls[i] := Default(TGittanForgePull);
+    Pulls[i].Number := i + 1;
+  end;
+  Pulls[0].ReviewDecision := rdChangesRequested;
+  Pulls[0].Feedback := True;
+  Pulls[1].Checks := chkFailed;
+  Pulls[1].IsDraft := True;
+  Pulls[2].Requested := True;
+  Pulls[2].Checks := chkPending;
+  Pulls[3].ReviewDecision := rdApproved;
+  AssertTrue(NeedsAttention(Pulls[0]));
+  AssertTrue(NeedsAttention(Pulls[1]));
+  AssertFalse(NeedsAttention(Pulls[2]));
+  AssertFalse(NeedsAttention(Pulls[3]));
+  AssertEquals(4, Length(FilterPulls(Pulls, [], Now_)));
+  Left := FilterPulls(Pulls, [ffAttention], Now_);
+  AssertEquals(2, Length(Left));
+  AssertEquals(1, Left[0].Number);
+  AssertEquals(2, Left[1].Number);
+  { The filters together: every one must pass. }
+  Left := FilterPulls(Pulls, [ffAttention, ffNoDrafts], Now_);
+  AssertEquals(1, Length(Left));
+  AssertEquals(1, Left[0].Number);
+  Left := FilterPulls(Pulls, [ffAskedOfMe], Now_);
+  AssertEquals(1, Length(Left));
+  AssertEquals(3, Left[0].Number);
+  AssertEquals(3, Length(FilterPulls(Pulls, [ffNoDrafts], Now_)));
+  AssertEquals(1, Length(FilterPulls(Pulls, [ffFeedback], Now_)));
+  AssertEquals(0, Length(FilterPulls(nil, [ffFeedback], Now_)));
+  { Stale: unchanged for StaleDays, by the last change or else the
+    opening; no dates at all is not stale. }
+  Pulls[0].Created := IncDay(Now_, -100);
+  Pulls[0].Updated := IncDay(Now_, -2);
+  Pulls[1].Created := IncDay(Now_, -100);
+  Pulls[1].Updated := IncDay(Now_, -31);
+  Pulls[2].Created := IncDay(Now_, -40);
+  AssertFalse(IsStale(Pulls[0], Now_));
+  AssertTrue(IsStale(Pulls[1], Now_));
+  AssertTrue(IsStale(Pulls[2], Now_));
+  AssertFalse(IsStale(Pulls[3], Now_));
+  Left := FilterPulls(Pulls, [ffStale], Now_);
+  AssertEquals(2, Length(Left));
+  AssertEquals(2, Left[0].Number);
+  AssertEquals(3, Left[1].Number);
+end;
+
 procedure TForgeTest.TestNotes;
 begin
   AssertEquals('Approved', ReviewDecisionNote(rdApproved));
   AssertEquals('Changes requested', ReviewDecisionNote(rdChangesRequested));
   AssertEquals('Review required', ReviewDecisionNote(rdReviewRequired));
   AssertEquals('', ReviewDecisionNote(rdNone));
-end;
-
-procedure RemoveTree(const ADir: string);
-var
-  Info: TSearchRec;
-begin
-  if FindFirst(IncludeTrailingPathDelimiter(ADir) + '*', faAnyFile, Info) = 0 then
-  try
-    repeat
-      if (Info.Name = '.') or (Info.Name = '..') then
-        Continue;
-      if Info.Attr and faDirectory <> 0 then
-        RemoveTree(IncludeTrailingPathDelimiter(ADir) + Info.Name)
-      else
-        DeleteFile(IncludeTrailingPathDelimiter(ADir) + Info.Name);
-    until FindNext(Info) <> 0;
-  finally
-    FindClose(Info);
-  end;
-  RemoveDir(ADir);
 end;
 
 { A fork's clone has the repository it was forked from as a remote of
@@ -289,7 +358,125 @@ begin
   end;
 end;
 
+{ The forge page's pull request as the repository's own are kept: what
+  both records have, the rest empty. }
+procedure TForgeTest.TestPullRequestOf;
+var
+  Login, Error: string;
+  MinePulls, ReviewPulls: TGittanForgePulls;
+  Pull: TGittanPullRequest;
+begin
+  AssertTrue(ParseForgeAnswer(Answer, Login, MinePulls, ReviewPulls, Error));
+  Pull := PullRequestOf(ReviewPulls[0]);
+  AssertEquals(12, Pull.Number);
+  AssertEquals('owner/repo', Pull.Repo);
+  AssertEquals('Fix the thing', Pull.Title);
+  AssertEquals('https://github.com/owner/repo/pull/12', Pull.Url);
+  AssertEquals('fix/thing', Pull.HeadRef);
+  AssertEquals('main', Pull.BaseRef);
+  AssertEquals('ada', Pull.Author);
+  AssertTrue(Pull.IsDraft);
+  AssertTrue(Pull.State = ReviewPulls[0].State);
+  AssertEquals(EncodeDateTime(2026, 10, 20, 12, 34, 56, 0), Pull.Created);
+  AssertEquals(0, Pull.ChecksPending);
+  AssertEquals('', Pull.Labels);
+end;
+
+procedure TForgeTest.TestRemoteRepoPath;
+begin
+  AssertEquals('slicke/gittan', RemoteRepoPath('https://github.com/slicke/gittan.git'));
+  AssertEquals('slicke/gittan', RemoteRepoPath('https://user:token@github.com/slicke/gittan/'));
+  AssertEquals('slicke/gittan', RemoteRepoPath('git@github.com:slicke/gittan.git'));
+  AssertEquals('slicke/gittan', RemoteRepoPath('ssh://git@github.com:22/slicke/gittan.git'));
+  AssertEquals('group/sub/repo', RemoteRepoPath('gitlab.example.org:group/sub/repo.git'));
+  AssertEquals('', RemoteRepoPath('/Volumes/Projects/git/trailhead.git'));
+  AssertEquals('', RemoteRepoPath('file:///srv/git/trailhead.git'));
+end;
+
+procedure TForgeTest.TestRemoteHost;
+begin
+  AssertEquals('github.com', RemoteHost('https://github.com/slicke/gittan.git'));
+  AssertEquals('github.com', RemoteHost('https://user:token@GitHub.com/slicke/gittan'));
+  AssertEquals('github.com', RemoteHost('git@github.com:slicke/gittan.git'));
+  AssertEquals('github.com', RemoteHost('ssh://git@github.com:22/slicke/gittan.git'));
+  AssertEquals('gitlab.example.org', RemoteHost('gitlab.example.org:group/sub/repo.git'));
+  AssertEquals('', RemoteHost('/Volumes/Projects/git/trailhead.git'));
+  AssertEquals('', RemoteHost('../trailhead.git'));
+  AssertEquals('', RemoteHost('C:\git\trailhead.git'));
+  AssertEquals('', RemoteHost('C:/git/trailhead.git'));
+  AssertEquals('', RemoteHost('file:///srv/git/trailhead.git'));
+  AssertEquals('', RemoteHost('./a:b'));
+end;
+
+procedure TForgeTest.TestForgeFor;
+begin
+  AssertTrue(ForgeClassFor('remote.origin.url git@github.com:slicke/gittan.git'#10) =
+    TGittanGitHubForge);
+  AssertTrue(ForgeClassFor('remote.origin.url https://example.org/a/b.git'#10) =
+    TExampleForge);
+  { The remotes in order: the first on a known forge decides. }
+  AssertTrue(ForgeClassFor('remote.local.url /srv/git/b.git'#10 +
+    'remote.origin.url https://example.org/a/b.git'#10 +
+    'remote.up.url https://github.com/a/b'#10) = TExampleForge);
+  AssertTrue(ForgeClassFor('remote.origin.url https://bitbucket.org/a/b.git'#10) = nil);
+  AssertTrue(ForgeClassFor('') = nil);
+  { Where no repository decides, the first registered. }
+  AssertTrue(ForgeClass = TGittanGitHubForge);
+end;
+
+procedure TForgeTest.TestSshAlias;
+const
+  Config = '# work'#10'Host github-work gh-*'#10'  HostName github.com'#10 +
+    '  User git'#10#10'Host !nope *.lan'#10'    HostName=%h.example.org'#10 +
+    'Match host other'#10'  HostName example.org'#10;
+begin
+  AssertEquals('github.com', SshHostName('github-work', Config));
+  AssertEquals('github.com', SshHostName('GH-two', Config));
+  AssertEquals('box.lan.example.org', SshHostName('box.lan', Config));
+  AssertEquals('other', SshHostName('other', Config));
+  AssertEquals('plain', SshHostName('plain', ''));
+  { A value in double quotes, as ssh takes it. }
+  AssertEquals('github.com', SshHostName('quoted', 'Host quoted'#10'  HostName "github.com"'#10));
+  AssertEquals('github.com', SshHostName('quoted', 'Host quoted'#10'  HostName="github.com"'#10));
+  { The alias of an ssh remote is looked up; an https host is not. }
+  AssertTrue(ForgeClassFor('remote.origin.url git@github-work:org/repo.git'#10, Config) =
+    TGittanGitHubForge);
+  AssertTrue(ForgeClassFor('remote.origin.url ssh://git@github-work/org/repo'#10, Config) =
+    TGittanGitHubForge);
+  AssertTrue(ForgeClassFor('remote.origin.url https://github-work/org/repo'#10, Config) = nil);
+  AssertTrue(ForgeClassFor('remote.origin.url git@github-work:org/repo.git'#10, '') = nil);
+end;
+
+{ A forge is kept while its class and its tool stay, else made again,
+  and there is none without a class or a tool. }
+procedure TForgeTest.TestKeepForge;
+var
+  Forge, Same: TGittanForge;
+begin
+  Forge := nil;
+  AssertFalse(KeepForge(Forge, TExampleForge, ''));
+  AssertNull(Forge);
+  AssertFalse(KeepForge(Forge, nil, '/usr/bin/ex'));
+  AssertNull(Forge);
+  AssertTrue(KeepForge(Forge, TExampleForge, '/usr/bin/ex'));
+  AssertTrue(Forge is TExampleForge);
+  AssertEquals('/usr/bin/ex', Forge.Cli);
+  Same := Forge;
+  AssertFalse(KeepForge(Forge, TExampleForge, '/usr/bin/ex'));
+  AssertTrue(Forge = Same);
+  AssertTrue(KeepForge(Forge, TExampleForge, '/opt/ex'));
+  AssertEquals('/opt/ex', Forge.Cli);
+  AssertTrue(KeepForge(Forge, TGittanGitHubForge, '/opt/gh'));
+  AssertTrue(Forge is TGittanGitHubForge);
+  AssertTrue(KeepForge(Forge, TGittanGitHubForge, ''));
+  AssertNull(Forge);
+  AssertTrue(KeepForge(Forge, TGittanGitHubForge, '/opt/gh'));
+  AssertTrue(KeepForge(Forge, nil, ''));
+  AssertNull(Forge);
+end;
+
 initialization
+  RegisterForge(TExampleForge);
   RegisterTest(TForgeTest);
 
 end.

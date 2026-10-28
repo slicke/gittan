@@ -9,7 +9,8 @@ unit gittan.settingsdlg;
   repositories (GitHub alone so far) with whether its features are on,
   the command line tool they run and, for GitHub, whether its page looks
   for clones beside the recent repositories; AI, whether the AI features show, the
-  agent they run, and its command and model (see gittan.ai);
+  agent they run, and its command and model, or for the OpenAI-compatible API its
+  server, key and model (see gittan.ai);
   and About (also Gittan > About Gittan on macOS, Tools > About Gittan
   elsewhere), the build, a check for a newer one, what Gittan runs on
   and with, for a bug report, and the licenses. The other view options
@@ -44,21 +45,28 @@ type
     Theme: integer;
     TabSize: integer;
     EditorCommand, TerminalCommand: string;
-    {** Paths of git and gh; empty for the ones found on PATH. }
-    GitPath, GhPath: string;
+    {** The path of git; empty for the one found on PATH. }
+    GitPath: string;
+    {** Whether the hosting features are on, for every forge at once. }
+    HostingEnabled: boolean;
+    {** Each registered forge's (gittan.forge's RegisteredForges, in
+      their order) tool's path, empty for the one found on PATH. }
+    ForgePaths: TStringArray;
     {** Whether the open repository is fetched in the background, and
       how many minutes apart. }
     AutoFetch: boolean;
     AutoFetchMinutes: integer;
-    {** Whether the GitHub features are on, and whether the GitHub page
-      looks for clones beside the recent repositories. }
-    GitHubEnabled, CloneSiblings: boolean;
+    {** Whether the forge view looks for clones beside the recent
+      repositories. }
+    CloneSiblings: boolean;
     {** Whether the AI features show, the agent they run, and each
-      agent's command (empty for the one found) and model (empty for its
-      own choice). }
+      agent's command (empty for the one found; for the API its server,
+      empty for OpenAIDefaultUrl) and model (empty for its own choice;
+      the API needs one), and the API's key. }
     AIEnabled: boolean;
     Agent: TGittanAgent;
     AgentPaths, AgentModels: array[TGittanAgent] of string;
+    ApiKey: string;
   end;
 
 {** Shows the dialog with AFont and AValues in it, its bottom right corner
@@ -78,7 +86,7 @@ implementation
 uses
   Math, StrUtils, Process, Clipbrd, LCLIntf, LCLType, LCLVersion, InterfaceBase, LCLPlatformDef,
   ec_SyntAnal, ATSynEdit_Adapter_EControl, ATSynEdit_Globals,
-  gittan.syntaxthemes, gittan.git, gittan.theme, gittan.forge, gittan.github,
+  gittan.syntaxthemes, gittan.git, gittan.theme, gittan.forge,
   gittan.settings, gittan.job;
 
 resourcestring
@@ -90,9 +98,12 @@ resourcestring
   rsAboutPage = 'About';
   rsAIEnabled = 'Turn on the AI features';
   rsAINote = 'They run the agent picked here in the repository, with your own ' +
-    'login, to write a commit message from the ticked files. The changes are sent ' +
-    'to its provider: Anthropic for Claude Code, GitHub for Copilot. Off until ' +
-    'turned on here.';
+    'login, or ask a model at an OpenAI-compatible API with your key, to write a ' +
+    'commit message from the ticked files, review the changes and find where ' +
+    'something is. The changes are sent to its provider (Anthropic for Claude ' +
+    'Code, GitHub for Copilot, the server named for the API), and when you ask ' +
+    'where something is, so is the text of the files an API''s model picks. Off ' +
+    'until turned on here.';
   rsAgent = 'Agent';
   rsAgentPath = '%s, %s''s command line tool';
   rsAgentDefault = 'The %s on PATH';
@@ -101,6 +112,17 @@ resourcestring
   rsAgentModelDefault = '%s''s default';
   rsClaudeModelNote = 'An alias such as haiku or sonnet, or a model''s full name.';
   rsCopilotModelNote = 'A model''s name, or auto to let Copilot pick.';
+  rsApiUrl = 'Server';
+  rsApiUrlNote = 'The base URL of an OpenAI-compatible API: OpenAI''s when empty, ' +
+    'https://openrouter.ai/api/v1 for OpenRouter, http://localhost:11434/v1 for a ' +
+    'local Ollama.';
+  rsApiUrlScheme = 'The server is a URL, starting with http:// or https://.';
+  rsApiKey = 'API key';
+  rsApiKeyNote = 'Kept in Gittan''s settings file. Leave it empty for a local server ' +
+    'that needs none.';
+  rsApiModelNote = 'The model''s name as the server knows it, such as gpt-4o-mini, ' +
+    'or openai/gpt-4o-mini on OpenRouter. The API needs one.';
+  rsApiModelMissing = 'Name a model to use the AI features.';
   rsEditorFont = 'Editor font';
   rsChangeFont = '&Change...';
   rsTabWidth = 'Tab width';
@@ -127,18 +149,17 @@ resourcestring
   rsAutoFetchNote = 'Brings in what is new on the remotes of the open repository, so the ' +
     'counts of what to pull stay current. It shows nothing, and waits for the time to pass ' +
     'since the last fetch, from Gittan or anywhere else.';
-  rsGhPath = 'gh, GitHub''s command line tool';
-  rsGhDefault = 'The gh on PATH';
+  rsForgeTool = '%s, %s''s command line tool';
+  rsForgeToolDefault = 'The %s on PATH';
   rsToolFound = 'Found: %s';
   rsToolNotFound = 'Not found on PATH.';
-  rsGhNotFound = 'Not found on PATH; the GitHub features are off.';
-  rsGitHub = 'GitHub';
-  rsGitHubEnabled = 'Turn on the GitHub features';
-  rsGitHubNote = 'Pull requests, their checks and review comments, and the ' +
-    'GitHub page. They run gh with its own login, for a repository with a ' +
-    'remote on GitHub.';
+  rsForgeNotFound = 'Not found on PATH; the %s features are off.';
+  rsHostingEnabled = 'Turn on the hosting features';
+  rsHostingNote = 'Pull requests, their checks and review comments, and the page ' +
+    'of your pull requests, for a repository with a remote on one of the services ' +
+    'below. They run the service''s command line tool with its own login.';
   rsCloneSiblings = 'Look for clones beside the recent repositories';
-  rsCloneSiblingsNote = 'A pull request on the GitHub page links to a clone of its ' +
+  rsCloneSiblingsNote = 'A pull request on the page of your pull requests links to a clone of its ' +
     'repository among the recent ones. With this on, the repositories in the folders ' +
     'they are in count too.';
   rsToolTyped = 'Run in place of the one on PATH.';
@@ -159,7 +180,7 @@ resourcestring
   rsVersionGittanLocal = 'Gittan, a local build of %s';
   rsVersionNotFound = '%s not found';
   rsVersionAIOff = 'The AI features are off';
-  rsVersionGitHubOff = 'The GitHub features are off';
+  rsVersionHostingOff = 'The hosting features are off';
   rsVersionLibraries = 'Free Pascal %s, LCL %s';
   rsCopyVersions = 'Co&py';
   rsWebsite = 'gittan.app';
@@ -293,9 +314,15 @@ type
     FFontLabel: TLabel;
     FSizeEdit, FTabEdit, FAutoFetchEdit: TSpinEdit;
     FThemeBox: TComboBox;
-    FEditorEdit, FTerminalEdit, FGitEdit, FGhEdit, FAgentEdit, FModelEdit: TEdit;
-    FGitNote, FGhNote, FAgentLabel, FAgentNote, FModelNote: TLabel;
-    FAIBox, FGitHubBox, FSiblingsBox, FAutoFetchBox: TCheckBox;
+    FEditorEdit, FTerminalEdit, FGitEdit, FAgentEdit, FKeyEdit, FModelEdit: TEdit;
+    FGitNote, FAgentLabel, FAgentNote, FKeyLabel, FKeyNote, FModelNote: TLabel;
+    FAIBox, FSiblingsBox, FAutoFetchBox: TCheckBox;
+    { The Hosting page's switch, and the block of each registered forge
+      (FForges, in their order): its tool's field and the note under it. }
+    FHostingBox: TCheckBox;
+    FForges: TGittanForgeClasses;
+    FForgeEdits: array of TEdit;
+    FForgeNotes: array of TLabel;
     { The agent picked, and each agent's command and model as edited:
       the fields show the picked one's (ShowAgent). }
     FAgentBox: TComboBox;
@@ -366,10 +393,13 @@ type
     procedure ThemeChange(Sender: TObject);
     procedure ToolChange(Sender: TObject);
     procedure AIChange(Sender: TObject);
-    procedure GitHubChange(Sender: TObject);
+    procedure HostingChange(Sender: TObject);
     procedure AutoFetchChange(Sender: TObject);
     procedure AgentChange(Sender: TObject);
     procedure ShowAgent;
+    { The picked agent's class (AIClassOf), and whether it is an API. }
+    function AgentClass: TGittanAIClass;
+    function ApiAgent: boolean;
     procedure ShowTool(AEdit: TEdit; ANote: TLabel; const AName, ANotFound: string);
     procedure SampleClick(Sender: TObject);
     procedure ShowSample;
@@ -581,29 +611,38 @@ begin
   Lbl.Font.Color := clGrayText;
   Lbl.WordWrap := True;
 
-  { The Hosting page: a block per service under its name, the switch and
-    what it means, then the tool, which follows the switch. Another
-    service is another block. }
+  { The Hosting page: a block per registered forge under its name, the
+    switch and what it means, then the tool, which follows the switch;
+    the first forge's, whose is the forge view, has the clones' switch
+    too. }
   FBox := FHostingPage;
-  AddLabel(rsGitHub, 0).Font.Style := [fsBold];
-  FGitHubBox := TCheckBox.Create(Self);
-  FGitHubBox.Caption := rsGitHubEnabled;
-  FGitHubBox.OnChange := @GitHubChange;
-  Place(FGitHubBox, 8);
-  Lbl := AddLabel(rsGitHubNote, 4);
+  FForges := RegisteredForges;
+  FHostingBox := TCheckBox.Create(Self);
+  FHostingBox.Caption := rsHostingEnabled;
+  FHostingBox.OnChange := @HostingChange;
+  Place(FHostingBox, 0);
+  Lbl := AddLabel(rsHostingNote, 4);
   Lbl.Font.Color := clGrayText;
   Lbl.WordWrap := True;
-  FGhEdit := AddTool(rsGhPath, rsGhDefault, FGhNote);
+  SetLength(FForgeEdits, Length(FForges));
+  SetLength(FForgeNotes, Length(FForges));
+  for i := 0 to High(FForges) do
+  begin
+    AddLabel(FForges[i].Name, 20).Font.Style := [fsBold];
+    FForgeEdits[i] := AddTool(Format(rsForgeTool, [FForges[i].CliName, FForges[i].Name]),
+      Format(rsForgeToolDefault, [FForges[i].CliName]), FForgeNotes[i]);
+  end;
   FSiblingsBox := TCheckBox.Create(Self);
   FSiblingsBox.Caption := rsCloneSiblings;
-  Place(FSiblingsBox, 16);
+  Place(FSiblingsBox, 20);
   Lbl := AddLabel(rsCloneSiblingsNote, 4);
   Lbl.Font.Color := clGrayText;
   Lbl.WordWrap := True;
 
   { The AI page: the switch and what it means, then the agent, its
-    command and its model, which follow the switch; the labels name the
-    agent picked (ShowAgent). }
+    command (the API's server), the API's key, shown for it alone, and
+    the model, which follow the switch; the labels name the agent
+    picked (ShowAgent). }
   FBox := FAIPage;
   FAIBox := TCheckBox.Create(Self);
   FAIBox.Caption := rsAIEnabled;
@@ -625,10 +664,18 @@ begin
   FAgentNote := AddLabel('', 4);
   FAgentNote.Font.Color := clGrayText;
   FAgentNote.WordWrap := True;
+  FKeyLabel := AddLabel(rsApiKey, 16);
+  FKeyEdit := AddEdit('');
+  FKeyEdit.PasswordChar := '*';
+  FKeyNote := AddLabel(rsApiKeyNote, 4);
+  FKeyNote.Font.Color := clGrayText;
+  FKeyNote.WordWrap := True;
   AddLabel(rsAgentModel, 16);
   FModelEdit := AddEdit('');
+  FModelEdit.OnChange := @ToolChange;
   FModelNote := AddLabel('', 4);
   FModelNote.Font.Color := clGrayText;
+  FModelNote.WordWrap := True;
 
   { The About page: the icon, and beside it the name, the build and what
     Gittan is; the update check, its answer beside it; what Gittan runs
@@ -714,7 +761,7 @@ end;
 
 { Update jobs dropped by a dialog that closed while they ran, freed once
   they have finished, as the main form frees its jobs: freeing one at
-  once would wait for curl, up to FetchSeconds. }
+  once would wait for the request, up to FetchSeconds. }
 var
   GUpdateZombies: TList;
 
@@ -1063,15 +1110,45 @@ end;
 
 { The versions on About name the tools as the fields have them. }
 procedure TSettingsForm.ToolChange(Sender: TObject);
+var
+  i: integer;
+  Server: string;
 begin
   FVersionsRead := False;
   if Sender = FGitEdit then
-    ShowTool(FGitEdit, FGitNote, 'git', rsToolNotFound)
-  else if Sender = FGhEdit then
-    ShowTool(FGhEdit, FGhNote, 'gh', rsGhNotFound)
-  else
-    ShowTool(FAgentEdit, FAgentNote, AgentCommands[FAgent],
-      Format(rsAgentNotFound, [AgentNames[FAgent]]));
+  begin
+    ShowTool(FGitEdit, FGitNote, 'git', rsToolNotFound);
+    Exit;
+  end;
+  for i := 0 to High(FForges) do
+    if Sender = FForgeEdits[i] then
+    begin
+      ShowTool(FForgeEdits[i], FForgeNotes[i], FForges[i].CliName,
+        Format(rsForgeNotFound, [FForges[i].Name]));
+      Exit;
+    end;
+  { An API has no command to look for: its server's note says when the
+    server is no URL (a scheme with no host after it is none), its
+    model's when the model it needs is missing. }
+  if ApiAgent then
+  begin
+    Server := LowerCase(Trim(FAgentEdit.Text));
+    if (Server = '') or (Pos('http://', Server) = 1) and (Length(Server) > 7) or
+      (Pos('https://', Server) = 1) and (Length(Server) > 8) then
+      FAgentNote.Caption := rsApiUrlNote
+    else
+      FAgentNote.Caption := rsApiUrlScheme;
+    if Trim(FModelEdit.Text) = '' then
+      FModelNote.Caption := rsApiModelMissing
+    else
+      FModelNote.Caption := rsApiModelNote;
+    Exit;
+  end;
+  { A tool's model is not looked for. }
+  if Sender = FModelEdit then
+    Exit;
+  ShowTool(FAgentEdit, FAgentNote, AgentCommands[FAgent],
+    Format(rsAgentNotFound, [AgentNames[FAgent]]));
 end;
 
 { The agent and its fields matter only with the features on. }
@@ -1080,20 +1157,35 @@ begin
   FVersionsRead := False;
   FAgentBox.Enabled := FAIBox.Checked;
   FAgentEdit.Enabled := FAIBox.Checked;
+  FKeyEdit.Enabled := FAIBox.Checked;
   FModelEdit.Enabled := FAIBox.Checked;
 end;
 
-{ gh's field matters only with the GitHub features on. }
 procedure TSettingsForm.AutoFetchChange(Sender: TObject);
 begin
   FAutoFetchEdit.Enabled := FAutoFetchBox.Checked;
 end;
 
-procedure TSettingsForm.GitHubChange(Sender: TObject);
+{ The tools and the clones' switch matter only with the hosting
+  features on. }
+procedure TSettingsForm.HostingChange(Sender: TObject);
+var
+  i: integer;
 begin
   FVersionsRead := False;
-  FGhEdit.Enabled := FGitHubBox.Checked;
-  FSiblingsBox.Enabled := FGitHubBox.Checked;
+  for i := 0 to High(FForges) do
+    FForgeEdits[i].Enabled := FHostingBox.Checked;
+  FSiblingsBox.Enabled := FHostingBox.Checked;
+end;
+
+function TSettingsForm.AgentClass: TGittanAIClass;
+begin
+  Result := AIClassOf(FAgent);
+end;
+
+function TSettingsForm.ApiAgent: boolean;
+begin
+  Result := (AgentClass <> nil) and AgentClass.IsApi;
 end;
 
 { What was typed for the agent left is kept, and the fields show the
@@ -1107,19 +1199,33 @@ begin
 end;
 
 { The picked agent's command and model in the fields, and the labels,
-  hints and notes that name it. }
+  hints and notes that name it; for an API the command field is its
+  server, the key's field shows, and ToolChange gives the notes. }
 procedure TSettingsForm.ShowAgent;
 begin
   FAgentBox.ItemIndex := Ord(FAgent);
-  FAgentLabel.Caption := Format(rsAgentPath, [AgentCommands[FAgent], AgentNames[FAgent]]);
-  FAgentEdit.TextHint := Format(rsAgentDefault, [AgentCommands[FAgent]]);
-  FAgentEdit.Text := FAgentPaths[FAgent];
-  FModelEdit.TextHint := Format(rsAgentModelDefault, [AgentNames[FAgent]]);
-  FModelEdit.Text := FAgentModels[FAgent];
-  if FAgent = gaCopilot then
-    FModelNote.Caption := rsCopilotModelNote
+  if ApiAgent then
+  begin
+    FAgentLabel.Caption := rsApiUrl;
+    FAgentEdit.TextHint := AgentClass.Find('');
+    FModelEdit.TextHint := '';
+  end
   else
-    FModelNote.Caption := rsClaudeModelNote;
+  begin
+    FAgentLabel.Caption := Format(rsAgentPath, [AgentCommands[FAgent],
+      AgentNames[FAgent]]);
+    FAgentEdit.TextHint := Format(rsAgentDefault, [AgentCommands[FAgent]]);
+    FModelEdit.TextHint := Format(rsAgentModelDefault, [AgentNames[FAgent]]);
+    if FAgent = gaCopilot then
+      FModelNote.Caption := rsCopilotModelNote
+    else
+      FModelNote.Caption := rsClaudeModelNote;
+  end;
+  FAgentEdit.Text := FAgentPaths[FAgent];
+  FKeyLabel.Visible := ApiAgent;
+  FKeyEdit.Visible := ApiAgent;
+  FKeyNote.Visible := ApiAgent;
+  FModelEdit.Text := FAgentModels[FAgent];
   ToolChange(FAgentEdit);
 end;
 
@@ -1135,8 +1241,8 @@ begin
   if Path = '' then
   begin
     { claude may be where its own installer put it, off PATH. }
-    if AEdit = FAgentEdit then
-      Path := FindAgent(FAgent, '')
+    if (AEdit = FAgentEdit) and (AgentClass <> nil) then
+      Path := AgentClass.Find('')
     else
       Path := FindTool(AName);
     if Path <> '' then
@@ -1261,26 +1367,6 @@ begin
   {$ENDIF}
 end;
 
-{ The first word of a tool's first line after APrefix ("gh version 2.62.0
-  (2024-11-14)" gives 2.62.0, claude's "2.1.0 (Claude Code)" 2.1.0). }
-function VersionOf(const AOutput, APrefix: string): string;
-var
-  Line: string;
-  i: integer;
-begin
-  Line := Trim(AOutput);
-  i := Pos(LineEnding, Line);
-  if i > 0 then
-    Line := Copy(Line, 1, i - 1);
-  if Pos(APrefix, Line) = 1 then
-    Delete(Line, 1, Length(APrefix));
-  Line := Trim(Line);
-  i := Pos(' ', Line);
-  if i > 0 then
-    Line := Copy(Line, 1, i - 1);
-  Result := Line;
-end;
-
 type
   { The versions About lists, read in a thread: git, gh and the agent
     each start a process (the agent node, a second or more), which would
@@ -1289,17 +1375,30 @@ type
   protected
     procedure Execute; override;
   public
-    GitExe, GhExe, AgentExe, AgentName, Platform: string;
-    GitHubOn, AIOn: boolean;
+    GitExe, Platform: string;
+    { Each registered forge's tool and whether it is on. }
+    Forges: TGittanForgeClasses;
+    ForgeExes: TStringArray;
+    HostingOn, AIOn: boolean;
+    { The agent as the fields set it up, the job's own; nil when none
+      is registered. }
+    AI: TGittanAI;
     Text: string;
+    destructor Destroy; override;
   end;
+
+destructor TVersionsJob.Destroy;
+begin
+  inherited Destroy;
+  AI.Free;
+end;
 
 procedure TVersionsJob.Execute;
 var
   Forge: TGittanForge;
   Lines: TStringList;
-  Version, Output, Error: string;
-  Major, Minor: integer;
+  Version: string;
+  Major, Minor, i: integer;
 begin
   Lines := TStringList.Create;
   try
@@ -1311,24 +1410,31 @@ begin
       Lines.Add('git ' + Version)
     else
       Lines.Add(Format(rsVersionNotFound, ['git']));
-    Forge := TGittanGitHubForge.Create(GhExe);
-    try
-      if not GitHubOn then
-        Lines.Add(rsVersionGitHubOff)
-      else if Forge.Version(Version) then
-        Lines.Add(Forge.CliName + ' ' + Version)
-      else
-        Lines.Add(Format(rsVersionNotFound, [Forge.CliName]));
-    finally
-      Forge.Free;
-    end;
-    if not AIOn then
-      Lines.Add(rsVersionAIOff)
-    else if (AgentExe <> '') and RunAgentCli(AgentExe, GetUserDir, ['--version'], '', nil,
-      Output, Error) then
-      Lines.Add(AgentName + ' ' + VersionOf(Output, ''))
+    if not HostingOn then
+      Lines.Add(rsVersionHostingOff)
     else
-      Lines.Add(Format(rsVersionNotFound, [AgentName]));
+      for i := 0 to High(Forges) do
+      begin
+        Forge := Forges[i].Create(ForgeExes[i]);
+        try
+          if Forge.Version(Version) then
+            Lines.Add(Forge.CliName + ' ' + Version)
+          else
+            Lines.Add(Format(rsVersionNotFound, [Forge.CliName]));
+        finally
+          Forge.Free;
+        end;
+      end;
+    if not AIOn or (AI = nil) then
+      Lines.Add(rsVersionAIOff)
+    else
+    begin
+      Version := AI.About;
+      if Version <> '' then
+        Lines.Add(Version)
+      else
+        Lines.Add(Format(rsVersionNotFound, [AI.Title]));
+    end;
     Lines.Add(Format('%s, %s, %s', [SystemName, {$I %FPCTARGETCPU%}, Platform]));
     Lines.Add(Format(rsVersionLibraries, [{$I %FPCVERSION%}, lcl_version]));
     Text := TrimRight(Lines.Text);
@@ -1345,6 +1451,7 @@ end;
 procedure TSettingsForm.ReadVersions(Data: PtrInt);
 var
   Job: TVersionsJob;
+  i: integer;
 begin
   if FVersionsJob <> nil then
   begin
@@ -1359,14 +1466,19 @@ begin
   Job.GitExe := Trim(FGitEdit.Text);
   if Job.GitExe = '' then
     Job.GitExe := FindTool('git');
-  Job.GhExe := Trim(FGhEdit.Text);
-  if Job.GhExe = '' then
-    Job.GhExe := FindTool(TGittanGitHubForge.CliName);
-  Job.GitHubOn := FGitHubBox.Checked;
+  Job.Forges := Copy(FForges);
+  SetLength(Job.ForgeExes, Length(FForges));
+  for i := 0 to High(FForges) do
+  begin
+    Job.ForgeExes[i] := Trim(FForgeEdits[i].Text);
+    if Job.ForgeExes[i] = '' then
+      Job.ForgeExes[i] := FindTool(FForges[i].CliName);
+  end;
+  Job.HostingOn := FHostingBox.Checked;
   Job.AIOn := FAIBox.Checked;
-  if Job.AIOn then
-    Job.AgentExe := FindAgent(FAgent, Trim(FAgentEdit.Text));
-  Job.AgentName := AgentNames[FAgent];
+  if AgentClass <> nil then
+    Job.AI := AgentClass.Create(AgentClass.Find(Trim(FAgentEdit.Text)),
+      Trim(FKeyEdit.Text), Trim(FModelEdit.Text));
   Job.Platform := LCLPlatformDisplayNames[WidgetSet.LCLPlatform];
   Job.OnDone := @VersionsDone;
   FVersionsJob := Job;
@@ -1414,6 +1526,7 @@ function EditSettings(AFont: TFont; var AValues: TSettingsValues;
   ACorner: TPoint; APage: TSettingsPage): boolean;
 var
   F: TSettingsForm;
+  i: integer;
 begin
   F := TSettingsForm.Create(Screen.ActiveForm);
   try
@@ -1429,16 +1542,21 @@ begin
     F.FAutoFetchBox.Checked := AValues.AutoFetch;
     F.FAutoFetchEdit.Value := AValues.AutoFetchMinutes;
     F.AutoFetchChange(nil);
-    F.FGhEdit.Text := AValues.GhPath;
     F.ToolChange(F.FGitEdit);
-    F.ToolChange(F.FGhEdit);
-    F.FGitHubBox.Checked := AValues.GitHubEnabled;
+    for i := 0 to High(F.FForges) do
+    begin
+      if i <= High(AValues.ForgePaths) then
+        F.FForgeEdits[i].Text := AValues.ForgePaths[i];
+      F.ToolChange(F.FForgeEdits[i]);
+    end;
+    F.FHostingBox.Checked := AValues.HostingEnabled;
     F.FSiblingsBox.Checked := AValues.CloneSiblings;
-    F.GitHubChange(nil);
+    F.HostingChange(nil);
     F.FAIBox.Checked := AValues.AIEnabled;
     F.FAgent := AValues.Agent;
     F.FAgentPaths := AValues.AgentPaths;
     F.FAgentModels := AValues.AgentModels;
+    F.FKeyEdit.Text := AValues.ApiKey;
     F.ShowAgent;
     F.AIChange(nil);
     F.FPreview := APreview;
@@ -1460,8 +1578,10 @@ begin
       AValues.GitPath := Trim(F.FGitEdit.Text);
       AValues.AutoFetch := F.FAutoFetchBox.Checked;
       AValues.AutoFetchMinutes := F.FAutoFetchEdit.Value;
-      AValues.GhPath := Trim(F.FGhEdit.Text);
-      AValues.GitHubEnabled := F.FGitHubBox.Checked;
+      SetLength(AValues.ForgePaths, Length(F.FForges));
+      for i := 0 to High(F.FForges) do
+        AValues.ForgePaths[i] := Trim(F.FForgeEdits[i].Text);
+      AValues.HostingEnabled := F.FHostingBox.Checked;
       AValues.CloneSiblings := F.FSiblingsBox.Checked;
       AValues.AIEnabled := F.FAIBox.Checked;
       { The fields hold the picked agent's; the other's are as kept. }
@@ -1469,6 +1589,7 @@ begin
       AValues.Agent := F.FAgent;
       AValues.AgentPaths := F.FAgentPaths;
       AValues.AgentModels := F.FAgentModels;
+      AValues.ApiKey := Trim(F.FKeyEdit.Text);
     end;
   finally
     F.Free;

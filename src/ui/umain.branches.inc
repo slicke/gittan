@@ -286,6 +286,7 @@ begin
   FNewTagItem.Enabled := Has;
   FPushTagsItem.Enabled := Has and (FRemoteJob = nil) and (FCommitJob = nil);
   FReflogItem.Enabled := Has;
+  FNewPullItem.Enabled := CanCreatePull(FBranch);
 end;
 
 { ---------------------------------------------------------------------------

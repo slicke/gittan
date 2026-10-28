@@ -15,10 +15,10 @@ uses
   ATStringProc_WordJump,
   ATSynEdit_Markers, ATSynEdit_LineParts, ATSynEdit_Ranges, ATSynEdit_WrapInfo,
   ec_SyntAnal,
-  gittan.lexers, gittan.git, gittan.github, gittan.conflicts, gittan.icons, gittan.theme, gittan.changenav,
+  gittan.lexers, gittan.git, gittan.conflicts, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.welcome, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.sidenav, gittan.repoinfo, gittan.repopage, gittan.subpage,
-  gittan.repocommands, gittan.commandpage,
+  gittan.repocommands, gittan.commandpage, gittan.job,
   gittan.settingsdlg, gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   {$IFDEF LCLCocoa}gittan.memohint,{$ENDIF}
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
@@ -27,7 +27,7 @@ uses
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.textfile, gittan.sectionheader, gittan.hintbox,
-  gittan.forge, gittan.forgepage,
+  gittan.forge, gittan.lfslocks,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
   gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
@@ -45,7 +45,7 @@ type
     binary view), or the Pull Requests page (gittan.pullpage,
     umain.pulls.inc). }
   TGittanView = (gvSummary, gvRepoInfo, gvChanges, gvRepoDiff, gvFile, gvHistory, gvSubmodule,
-    gvImage, gvTranslation, gvBinary, gvCommands, gvFiles, gvBlob, gvPulls, gvForge);
+    gvImage, gvTranslation, gvBinary, gvCommands, gvFiles, gvBlob, gvPulls);
 
   {** The three strengths of a commit's color in the history view: the
     faint tint of its rows, the shade of the words it changed, and the
@@ -157,6 +157,21 @@ type
       when ATools, git, gh and the forge (TRepoFrame.SettingsChanged). }
     procedure SettingsChanged(AFont: TFont; ATheme, ATabSize: integer; ATools: boolean);
       virtual; abstract;
+    {** What the forge view (uforge) asks of the window, which runs it
+      in the frame shown under the view: the folder dialog of File >
+      Open Repository..., the settings dialog, and About (the settings'
+      last page). }
+    procedure AskOpenRepository; virtual; abstract;
+    procedure ShowSettings; virtual; abstract;
+    procedure ShowAbout; virtual; abstract;
+    {** A pull request picked in the forge view: compares with it in the
+      frame that has a remote for its repository, showing that frame,
+      else opens AClone (its local clone, '' for none) and compares
+      there once it is open; False when it can do neither. }
+    function ComparePullRequest(const APull: TGittanPullRequest;
+      const AClone: string): boolean; virtual; abstract;
+    {** Hides the forge view, giving the frame under it the window back. }
+    procedure HideForgeView; virtual; abstract;
   end;
 
   { TRepoFrame }
@@ -207,25 +222,28 @@ type
     { The editor's font size when none was picked (DefaultFontSize for
       the screen the window opened on). }
     FDefaultFontSize: integer;
-    { The forge the repositories are on (gittan.forge; GitHub through
-      gh, the only one so far), made by FindForge with the tool's path
-      the settings give, else the one FindTool gives (run it by that,
-      PATH may not reach it); nil while the tool is missing or the
-      features are turned off. The features that need the forge are
+    { The forge the repository is on (gittan.forge; GitHub through gh,
+      the only one so far), the first registered that hosts one of its
+      remotes (ForgeClassFor of FRemoteUrls, the snapshot's), made by
+      FindForge with the tool's path the settings give, else the one
+      FindTool gives (run it by that, PATH may not reach it); nil
+      without a repository, while none of its remotes is on a known
+      forge, while the tool is missing or the features are turned off.
+      ReFindForge looks again when the remotes or the settings change. The features that need the forge are
       offered only when it is there: the menu items in FForgeItems are
       shown then, hidden otherwise, and named after it from the formats
       in FForgeCaptions (UpdateForgeItems). }
     FForge: TGittanForge;
+    FRemoteUrls: string;
     FForgeItems: array of TMenuItem;
     FForgeCaptions: array of string;
     { The AI features (umain.ai.inc, gittan.ai), shown only once the
       settings turn them on and the agent's command is found: the agent
-      the settings pick, its command and model, File > Write Commit
+      the settings pick as it is set up (FindAI), File > Write Commit
       Message (the Commit header's AI does the same), the job writing
       it, and the field's text when it started, which the message
       replaces only while it is unchanged. }
-    FAgent: TGittanAgent;
-    FAgentCli, FAgentModel: string;
+    FAI: TGittanAI;
     FMessageItem: TMenuItem;
     FMessageJob: TGittanMessageJob;
     FMessageFrom: string;
@@ -237,6 +255,12 @@ type
     FAIReviewJob: TGittanAIReviewJob;
     FAIThreads: TGittanReviewThreads;
     FAIThreadsKey: string;
+    { Where something is (umain.ai.inc): the sparkle in the filter field
+      asks the agent, and the files it names drop from the field. }
+    FFindJob: TGittanFindJob;
+    FFindPopup: TGittanPopupList;
+    FFoundFiles: TGittanFoundFiles;
+    FFoundPick: TGittanFoundFile;
     { The width of a tab in the editors, in characters. }
     FTabSize: integer;
     FSyntaxMenu, FAutoLexerItem, FPlainTextItem: TMenuItem;
@@ -331,6 +355,12 @@ type
     FPullLogin: string;
     FPullError, FPullKey: string;
     FPullMenu, FOpenPullItem, FCopyPullItem: TMenuItem;
+    { Branch > Create Pull Request... and the status bar's item for it
+      (umain.pulls.inc). FPullAfterPush names the branch whose push was
+      asked for first, which opens the forge's page when it worked;
+      FPushedBranch the branch the banner after a push offers it for. }
+    FNewPullItem, FNewPullPopItem: TMenuItem;
+    FPullAfterPush, FPushedBranch: string;
     FPullRange: string;
     FPullNumber: integer;
     { The tree sits in a panel under a filter field (Go > Filter Files):
@@ -615,6 +645,7 @@ type
     FCommandsHash: string;
     FCommandJob: TGittanCommandJob;
     FCommandName: string;
+    FCommandSource: TGittanCommandSource;
     FCommandRead: integer;
     { The Files page, in the box too (umain.files.inc): whether it
       follows HEAD (else it shows the commit Browse Files... picked),
@@ -627,16 +658,6 @@ type
       both there only with gh (umain.pulls.inc). }
     FPullPage: TGittanPullPage;
     FPullsItem: TMenuItem;
-    { The forge page (umain.forge.inc): the user's pull requests across
-      every repository, as the forge job last read them. }
-    FForgePage: TGittanForgePage;
-    FForgeItem: TMenuItem;
-    FForgeJob: TGittanForgeJob;
-    FForgeMine, FForgeReview: TGittanForgePulls;
-    { The pull request a card of the forge page compares with once its
-      clone, which it opened, is open. }
-    FForgeClonePull: TGittanPullRequest;
-    FForgeLogin, FForgeError: string;
     { The page of a submodule, in the box too (umain.submodules.inc). }
     FSubPage: TGittanSubPage;
     FRepoInfoJob: TGittanRepoInfoJob;
@@ -754,6 +775,22 @@ type
       it (FLfsShown), not shown again once closed until it changes. }
     FLfsCheckJob: TGittanLfsCheckJob;
     FLfsChecked, FLfsShown: string;
+    { Git LFS locks (umain.lfslocks.inc): whether git-lfs is installed,
+      as the check found, the files that may be locked, as it read
+      them (sorted), the locks the job last read,
+      the job and whether to read again when it is done, the header's
+      note of a lock and the note it took the place of, the file menu's
+      items, File > Git LFS Locks...,
+      its list, the locks it shows and the one its menu is for. }
+    FLfsInstalled: boolean;
+    FLfsLockable: TStringList;
+    FLfsLocks, FListedLocks: TGittanLfsLocks;
+    FLfsLocksJob: TGittanLfsLocksJob;
+    FLfsLocksAgain: boolean;
+    FLockNote, FLockNoteWas, FMenuLock: string;
+    FLfsLockSepItem, FLfsLockItem, FLfsUnlockItem, FLfsLocksItem: TMenuItem;
+    FLfsLocksPopup: TGittanPopupList;
+    FLfsLocksMenu: TPopupMenu;
     { The commit HEAD was on in the last snapshot, the key's half that
       CheckLfs reads without running git on this thread. }
     FSnapHead: string;
@@ -851,7 +888,7 @@ type
     FBlameOld, FBlameNew: TGittanBlame;
     FBlameJob: TGittanBlameJob;
     FBlameCache: TStringList;
-    FBlameZombies: TList;
+    FBlameZombies: TGittanJobReaper;
     FBlameCols: integer;
     FBlameNow: int64;
     { The Base a click on the band set, so the summary can name the
@@ -986,7 +1023,6 @@ type
     procedure BuildSyntaxMenu;
     procedure AddLexerItems;
     procedure MenuOpenClick(Sender: TObject);
-    procedure MenuOpenRepoClick(Sender: TObject);
     procedure MenuSyntaxClick(Sender: TObject);
     procedure MenuAutoLexerClick(Sender: TObject);
     procedure MenuSummaryClick(Sender: TObject);
@@ -1010,20 +1046,15 @@ type
     procedure AbandonRepoInfoJob;
     procedure RepoInfoJobDone(Sender: TObject);
     procedure HideBoxPages;
-    procedure SetupForgePage;
-    procedure MenuForgeClick(Sender: TObject);
-    procedure ShowForge;
-    procedure UpdateForgePage;
-    procedure StartForgeJob;
-    procedure AbandonForgeJob;
-    procedure ForgeJobDone(Sender: TObject);
-    procedure ForgePagePick(Sender: TObject; const APull: TGittanForgePull);
-    procedure ForgeCloneOpened(Sender: TObject);
-    procedure ForgePageRefresh(Sender: TObject);
-    procedure ForgePageHideChange(Sender: TObject);
     procedure SetupPullPage;
     procedure MenuPullsClick(Sender: TObject);
     procedure ShowPulls;
+    function CanCreatePull(const ABranch: string): boolean;
+    procedure CreatePull(const ABranch: string);
+    procedure OpenNewPull(const ABranch: string);
+    procedure PushedBanner(const ATitle, ABranch: string);
+    procedure MenuNewPullClick(Sender: TObject);
+    procedure NewPullBannerClick(Sender: TObject);
     procedure UpdatePullPage;
     procedure PullPageCompare(Sender: TObject; const APull: TGittanPullRequest);
     procedure SummaryReviewClick(Sender: TObject; const AScreenRect: TRect);
@@ -1049,7 +1080,9 @@ type
     procedure MenuCommandsClick(Sender: TObject);
     procedure ShowCommands;
     procedure CommandPageRun(Sender: TObject; AIndex: integer);
-    procedure RunRepoCommand(AIndex: integer; AByKey: boolean);
+    procedure CommandPageRunInTerminal(Sender: TObject; AIndex: integer);
+    procedure RunRepoCommand(AIndex: integer; AByKey: boolean;
+      AInTerminal: boolean = False);
     procedure CommandJobOutput(Sender: TObject);
     procedure CommandJobDone(Sender: TObject);
     procedure AbandonCommandJob(AWait: boolean);
@@ -1065,6 +1098,25 @@ type
     procedure StartLfsDownload(const APath: string; const ARefs: TStringArray);
     procedure CheckLfs;
     procedure LfsCheckDone(Sender: TObject);
+    procedure StartLfsLocks;
+    procedure LfsLocksDone(Sender: TObject);
+    procedure StopLfsLocks;
+    function LockOf(const APath: string): integer;
+    function ShownLockPath: string;
+    procedure LockNote;
+    procedure UpdateLockItems;
+    procedure MenuLfsLockClick(Sender: TObject);
+    procedure MenuLfsUnlockClick(Sender: TObject);
+    procedure UnlockAsk(const APath: string);
+    procedure LfsLockJobDone(AJob: TGittanRemoteJob);
+    procedure MenuLfsLocksClick(Sender: TObject);
+    procedure ShowLfsLocks(const AScreenRect: TRect);
+    procedure LfsLocksPopupPick(Sender: TObject; AIndex: integer);
+    procedure LfsLocksContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
+    procedure LfsLocksMenuClick(Sender: TObject);
+    procedure BlobActions;
+    function LockedCommitAsk(APaths: TStrings; AAmend: boolean): boolean;
+    procedure BlobLockAction;
     procedure LfsGetClick(Sender: TObject);
     procedure LfsInstallClick(Sender: TObject);
     procedure LfsPullClick(Sender: TObject);
@@ -1136,7 +1188,6 @@ type
     procedure MenuBlameClick(Sender: TObject);
     procedure StartBlame;
     procedure AbandonBlameJob;
-    procedure FreeFinishedBlameJobs(AWait: boolean);
     procedure FreeBlameJobsAsync(Data: PtrInt);
     procedure CacheBlame(const ARef, APath: string; ABlame: TGittanBlame);
     procedure BlameJobDone(Sender: TObject);
@@ -1282,18 +1333,20 @@ type
     procedure MenuZoomResetClick(Sender: TObject);
     procedure MenuFontClick(Sender: TObject);
     procedure OpenSettings(APage: TSettingsPage);
-    procedure MenuSettingsClick(Sender: TObject);
-    procedure MenuAboutClick(Sender: TObject);
     procedure PreviewSettings(AFont: TFont; ATheme, ATabSize: integer);
     procedure ApplyEditorFont(AFont: TFont);
     procedure EditorMetricsChanged;
     procedure ApplyTabSize(ASize: integer);
-    procedure FindForge;
+    function FindForge: boolean;
+    procedure ReFindForge;
     function ForgeName: string;
     procedure UpdateForgeItems;
-    procedure FindAgentCli;
-    {** Whether the AI features are on and the agent's command is there. }
+    procedure FindAI;
+    {** Whether the AI features are on and the agent can be asked
+      (TGittanAI.Available). }
     function AIAvailable: boolean;
+    {** The agent's name for the hints and messages (TGittanAI.Title). }
+    function AgentName: string;
     {** Shows AI in the Commit header and File > Write Commit Message
       when AIAvailable, enabled as the commit section allows; from
       UpdateCommitState. }
@@ -1313,6 +1366,15 @@ type
     procedure StartAIReview;
     procedure AIReviewDone(Sender: TObject);
     procedure AbandonAIReview;
+    {** Shows the sparkle in the filter field while AIAvailable, lit
+      while the agent looks. }
+    procedure UpdateFindAction;
+    procedure SearchBoxAction(Sender: TObject);
+    procedure StartFindJob(const AQuestion: string);
+    procedure FindJobDone(Sender: TObject);
+    procedure FindPopupPick(Sender: TObject; AIndex: integer);
+    procedure ShowFoundAsync(Data: PtrInt);
+    procedure AbandonFindJob;
     procedure MenuWrapClick(Sender: TObject);
     procedure MenuFoldClick(Sender: TObject);
     procedure ViewMenuClick(Sender: TObject);
@@ -1410,7 +1472,6 @@ type
     procedure GraphPick(Sender: TObject; const AHash: string);
     procedure PullChipClick(const AScreenRect: TRect);
     procedure PullPopupPick(Sender: TObject; AIndex: integer);
-    procedure ComparePull(const APull: TGittanPullRequest);
     procedure StartPullFetch(ANumber: integer; const ARemote, ABaseRef: string);
     procedure PullFetchDone(AJob: TGittanRemoteJob);
     procedure SwitchBranch(const ABranch: string; ADetach: boolean = False);
@@ -1851,6 +1912,17 @@ type
       opened. }
     procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil;
       const ARoot: string = '');
+    {** Whether the open repository has a remote for the repository
+      ARepo ("owner/name" on the forge); False without one open. }
+    function HasRemoteFor(const ARepo: string): boolean;
+    {** Fetches APull and compares with it, as Compare With > Pull
+      Requests does; also for a pull request of the forge view. }
+    procedure ComparePull(const APull: TGittanPullRequest);
+    {** File > Open Repository..., Settings... and About Gittan, which the
+      forge view's menu runs here too, since they need no repository. }
+    procedure MenuOpenRepoClick(Sender: TObject);
+    procedure MenuSettingsClick(Sender: TObject);
+    procedure MenuAboutClick(Sender: TObject);
   end;
 
 implementation
@@ -2044,6 +2116,13 @@ resourcestring
   rsAIReviewNone = '%s found nothing to point out.';
   rsAIReviewOne = '%s found one thing to look at.';
   rsAIReviewMany = '%s found %d things to look at.';
+  rsFindHint = 'Ask %s which files hold what you type';
+  rsFindStopHint = 'Stop %s looking';
+  rsFindEmpty = 'Type what you are looking for, then ask %s with the sparkle.';
+  rsFindLooking = '%s is looking for "%s"...';
+  rsFindHeader = 'Files for "%s"';
+  rsFindNone = '%s found no file for "%s".';
+  rsFindFailed = '%s could not find it';
   rsSeverityBug = 'Bug';
   rsSeverityRisk = 'Risk';
   rsSeverityQuestion = 'Question';
@@ -2648,6 +2727,7 @@ resourcestring
   rsBaseActionsHint = 'Merge or rebase';
   rsBlameActionsHint = 'Back to the working tree, or copy the commit id';
   rsBackToTree = 'Back to Working Tree';
+  rsEndCompareHint = 'End the comparison: back to the working tree';
   rsCopyCommitId = 'Copy Commit ID';
   rsShowSummaryHint = 'Show the summary';
   rsShowConflictHint = 'Show the conflicted files';
@@ -2713,9 +2793,8 @@ const
   navCommands = 3;
   navFiles = 4;
   navPulls = 5;
-  navForge = 6;
   { The last row: a list, never selected. }
-  navRecent = 7;
+  navRecent = 6;
   { Scrolling on past the bottom of a file goes to the next one, and
     past the top to the previous: the wheel delta the pull needs (120 is
     one notch of a mouse wheel, 8 one pixel of a trackpad on macOS), the
@@ -2770,8 +2849,6 @@ const
   rsHintStaged = '%s · staged';
   rsHintPartlyStaged = '%s · partly staged';
   rsPullRequests = 'Pull Re&quests';
-  { The forge's name, with its first letter the accelerator. }
-  rsForgeMenu = '&%s';
   rsPullLoading = 'Loading...';
   rsNoPulls = 'No open pull requests';
   rsPullItem = '#%d %s';
@@ -2779,6 +2856,50 @@ const
   rsVsPull = 'PR #%d';
   rsOpenPull = 'Open Pull Re&quest';
   rsCopyPullUrl = 'Copy Pull Request &URL';
+  rsNewPullItem = 'Create &Pull Request...';
+  rsNewPullAction = 'Create Pull Request';
+  rsNewPullTitle = 'Create Pull Request';
+  rsNewPullPush = '%s is not on %s yet. Push it there first, then open the pull request ' +
+    'on %s?';
+  rsNewPullAhead = '%d commit(s) of %s are not pushed yet. Push them first, so the pull ' +
+    'request holds them?';
+  rsPushAndOpen = 'Push and Open';
+  rsOpenAnyway = 'Open Anyway';
+  rsNewPullNoRemote = 'The repository has no remote to push %s to';
+  rsNewPullHasOne = '%s already has pull request #%d';
+  rsNewPullOtherHost = 'The remote %s is not on %s';
+  rsLfsLockItem = '&Lock File (Git LFS)';
+  rsLfsUnlockItem = '&Unlock File';
+  rsLfsForceUnlockItem = 'Force &Unlock (Locked by %s)...';
+  rsLfsForceUnlockTitle = 'Force Unlock';
+  rsLfsForceUnlockAsk = '%s is locked by %s. Take the lock away? Their changes to it ' +
+    'can then not be pushed until they lock it again.';
+  rsLfsForceUnlockAction = 'Force Unlock';
+  rsLfsLockedBy = 'Locked by %s';
+  rsLfsLocked = 'Locked %s';
+  rsLfsUnlocked = 'Unlocked %s';
+  rsLfsLocking = 'Locking %s...';
+  rsLfsUnlocking = 'Unlocking %s...';
+  rsNoticeLfsLocking = 'Locking %s';
+  rsNoticeLfsUnlocking = 'Unlocking %s';
+  rsLfsLockFailed = 'Could not lock %s';
+  rsLfsUnlockFailed = 'Could not unlock %s';
+  rsLfsLocksItem = 'Git LFS Loc&ks...';
+  rsLfsLocksHeader = 'Git LFS locks';
+  rsLfsNoLocks = 'No file is locked';
+  rsLfsLockYou = 'you';
+  rsLfsShowFile = 'Show File';
+  rsLfsLockAction = 'Lock';
+  rsLfsLockedCommitTitle = 'Locked Files';
+  rsLfsLockedCommitOne = '%s is locked by %s. The commit can be made, but pushing it will ' +
+    'be refused until the lock is given up.';
+  rsLfsLockedCommitMany = '%d files are locked by others. The commit can be made, but ' +
+    'pushing it will be refused until the locks are given up.';
+  rsLfsLockedCommitLine = '%s (%s)';
+  rsLfsLockedCommitMore = 'and %d more';
+  rsCommitAnyway = 'Commit Anyway';
+  rsLfsUnlockAction = 'Unlock';
+  rsFilterLocks = 'Filter locks';
   rsFetchingPull = 'Fetching pull request #%d...';
   rsPullFailed = 'Could not fetch pull request #%d';
   { Bookmark kinds in the editor's second bookmark list, used only for the
@@ -2914,8 +3035,7 @@ procedure TRepoFrame.Init(AWindow: TRepoWindow);
 begin
   FWindow := AWindow;
   FTitleBarHeight := FWindow.TitleBarHeight;
-  FindForge;
-  FindAgentCli;
+  FindAI;
   FTabSize := App.Settings.TabSize;
   if FTabSize <= 0 then
     FTabSize := DefaultTabSize;
@@ -2930,7 +3050,7 @@ begin
   FRawChangeLines := TStringList.Create;
   FBlameCache := TStringList.Create;
   FBlameCache.CaseSensitive := True;
-  FBlameZombies := TList.Create;
+  FBlameZombies := TGittanJobReaper.Create;
   FDroppedCommits := TList.Create;
   FThreadFlips := TStringList.Create;
   FReviewMeasure := TBitmap.Create;
@@ -3129,6 +3249,8 @@ begin
   FGoneToDelete := TStringList.Create;
   FBranchMenu := TPopupMenu.Create(Self);
   FGoneBranches := TStringList.Create;
+  FLfsLockable := TStringList.Create;
+  FLfsLockable.Sorted := True;
   FBranchPopup := TGittanPopupList.Create(Self);
   FBranchPopup.Parent := Self;
   FBranchPopup.FilterHint := rsFilterBranches;
@@ -3168,6 +3290,14 @@ begin
   FStashPopup.FilterHint := rsFilterStashes;
   FStashPopup.OnPick := @StashPopupPick;
   FStashPopup.OnContext := @StashContext;
+  { The Git LFS locks pop up under the status bar's branch, as the
+    reflog does. }
+  FLfsLocksMenu := TPopupMenu.Create(Self);
+  FLfsLocksPopup := TGittanPopupList.Create(Self);
+  FLfsLocksPopup.Parent := Self;
+  FLfsLocksPopup.FilterHint := rsFilterLocks;
+  FLfsLocksPopup.OnPick := @LfsLocksPopupPick;
+  FLfsLocksPopup.OnContext := @LfsLocksContext;
   { The commit graph pops up in the middle of the form. }
   FGraph := TGittanCommitGraph.Create(Self);
   FGraph.Parent := Self;
@@ -3188,6 +3318,9 @@ begin
   FRecentPopup := TGittanPopupList.Create(Self);
   FRecentPopup.Parent := Self;
   FRecentPopup.OnPick := @RecentPopupPick;
+  FFindPopup := TGittanPopupList.Create(Self);
+  FFindPopup.Parent := Self;
+  FFindPopup.OnPick := @FindPopupPick;
   FBasePopup := TGittanPopupList.Create(Self);
   FBasePopup.Parent := Self;
   FBasePopup.OnPick := @BasePopupPick;
@@ -3228,7 +3361,6 @@ begin
   SetupCommandPage;
   SetupFilesPage;
   SetupPullPage;
-  SetupForgePage;
   { So does the page of a submodule. }
   FSubPage := TGittanSubPage.Create(Self);
   FSubPage.Parent := FSummaryBox;
@@ -3424,6 +3556,8 @@ begin
   AbandonOpenJob;
   AbandonMessageJob;
   AbandonAIReview;
+  AbandonFindJob;
+  FreeAndNil(FAI);
   StopCommitJob(True);
   FreeAndNil(FDroppedCommits);
   StopRemoteJob(True);
@@ -3431,7 +3565,6 @@ begin
   Application.RemoveOnDeactivateHandler(@AppDeactivate);
   StopWatcher;
   AbandonPullJob;
-  AbandonForgeJob;
   AbandonReviewJob;
   AbandonSubmoduleJobs;
   FreeAndNil(FSubJobs);
@@ -3446,6 +3579,7 @@ begin
   FGoneToDelete.Free;
   FUpstreamRows.Free;
   FGoneBranches.Free;
+  FLfsLockable.Free;
   StopBlame;
   StopIndexing;
   SaveIndex;
@@ -3716,7 +3850,7 @@ begin
   FSymbolBar.SetColors(P.Shade, P.Text, P.Dim, P.Line);
   for List in [FBranchPopup, FStashPopup, FUpstreamPopup, FTagPopup, FViewPopup,
     FSubListPopup, FReflogPopup, FPullPopup, FReviewPopup, FSyncPopup, FRecentPopup,
-    FBasePopup, FConflictPopup] do
+    FBasePopup, FConflictPopup, FFindPopup] do
     List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
   FGraph.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent, P.Warning);
   FBanner.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Line, P.Accent, P.Deleted, P.Added);
@@ -3787,10 +3921,6 @@ begin
       RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(62, 62, 62),
       FLinkColor, RGBToColor(63, 185, 80), RGBToColor(227, 179, 65), RGBToColor(248, 81, 73));
     FPullPage.SetCardColor(RGBToColor(40, 40, 41));
-    FForgePage.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
-      RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(62, 62, 62),
-      FLinkColor, RGBToColor(63, 185, 80), RGBToColor(227, 179, 65), RGBToColor(248, 81, 73));
-    FForgePage.SetCardColor(RGBToColor(40, 40, 41));
     FSubPage.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(45, 45, 46), RGBToColor(62, 62, 62),
       RGBToColor(40, 40, 41), FLinkColor, RGBToColor(63, 185, 80),
@@ -3821,10 +3951,6 @@ begin
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(222, 222, 222),
       FLinkColor, RGBToColor(26, 127, 55), RGBToColor(154, 103, 0), RGBToColor(207, 34, 46));
     FPullPage.SetCardColor(RGBToColor(245, 245, 246));
-    FForgePage.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
-      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(222, 222, 222),
-      FLinkColor, RGBToColor(26, 127, 55), RGBToColor(154, 103, 0), RGBToColor(207, 34, 46));
-    FForgePage.SetCardColor(RGBToColor(245, 245, 246));
     FSubPage.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(243, 243, 243), RGBToColor(222, 222, 222),
       RGBToColor(245, 245, 246), FLinkColor, RGBToColor(26, 127, 55),
@@ -3859,6 +3985,11 @@ begin
     DirDialog.InitialDir := FRepo.Root;
   if DirDialog.Execute then
     FWindow.OpenRepository(DirDialog.FileName);
+end;
+
+function TRepoFrame.HasRemoteFor(const ARepo: string): boolean;
+begin
+  Result := (FRepo.Root <> '') and (ARepo <> '') and FRepo.HasRemoteFor(ARepo);
 end;
 
 { The window is named after the repository, or the file when none is
@@ -3972,7 +4103,9 @@ begin
     FStatus.SetOperation(Op, OpPos, OpTotal);
   end;
   UpdateStatusTransport;
-  FStatus.SetBase(BaseLabel, (BaseActionRef <> '') or (StashOfBase >= 0) or BlameShown);
+  FStatus.SetBase(BaseLabel, (BaseActionRef <> '') or (StashOfBase >= 0) or BlameShown,
+    FRepo.Base <> '');
+  FStatus.PartHint[spBaseClose] := rsEndCompareHint;
   if BaseActionRef <> '' then
     FStatus.PartHint[spBase] := rsBaseActionsHint
   else if BlameShown then
@@ -4353,6 +4486,8 @@ begin
   FUndoRevertItem := AddItem(FileMenu, rsUndoRevert, 0, @MenuUndoRevertClick);
   FCleanItem := AddItem(FileMenu, rsCleanItem, 0, @MenuCleanClick);
   FApplyPatchesItem := AddItem(FileMenu, rsApplyPatchesItem, 0, @MenuApplyPatchesClick);
+  FLfsLocksItem := AddItem(FileMenu, rsLfsLocksItem, 0, @MenuLfsLocksClick);
+  FLfsLocksItem.Visible := False;
   UpdateDiscardItems;
   FileMenu.OnClick := @FileMenuClick;
   FileMenu.Add(NewLine);
@@ -4371,6 +4506,8 @@ begin
     @MenuBranchListClick);
   FSwitchItem.Tag := Ord(blSwitch);
   FNewBranchItem := AddItem(BranchMenu, rsBmNewItem, 0, @MenuNewBranchClick);
+  FNewPullItem := AddItem(BranchMenu, rsNewPullItem, 0, @MenuNewPullClick);
+  FNewPullItem.Visible := Assigned(FForge);
   BranchMenu.Add(NewLine);
   FMergeItem := AddItem(BranchMenu, '', 0, @MenuBranchListClick);
   FMergeItem.Tag := Ord(blMerge);
@@ -4423,9 +4560,6 @@ begin
   FPullsItem := AddItem(ViewMenu, rsPullRequests, ShortCut(VK_6, ViewKeys),
     @MenuPullsClick);
   FPullsItem.Visible := Assigned(FForge);
-  FForgeItem := AddItem(ViewMenu, rsForgeMenu, ShortCut(VK_7, ViewKeys),
-    @MenuForgeClick);
-  FForgeItem.Visible := Assigned(FForge);
   ViewMenu.Add(NewLine);
   FCompareMenu := AddItem(ViewMenu, rsCompareWith, 0, nil);
   RebuildCompareMenu;
@@ -4770,6 +4904,7 @@ begin
     SetLexer(App.Lexers.ByName(rsGitignoreLexer))
   else
     SetLexer(App.Lexers.ForFile(AFileName));
+  LockNote;
   UpdateChangeNav;
   ShowEditor;
   UpdateCaption;
@@ -5545,6 +5680,7 @@ begin
   SaveCommitDraft;
   AbandonMessageJob;
   AbandonAIReview;
+  AbandonFindJob;
   FAIThreads := nil;
   FAIThreadsKey := '';
   StopCommitJob(False);
@@ -5584,6 +5720,11 @@ begin
   FBanner.Clear;
   FLfsChecked := '';
   FLfsShown := '';
+  FLfsInstalled := False;
+  FLfsLockable.Clear;
+  FLfsLocks := nil;
+  FLockNote := '';
+  FLockNoteWas := '';
   FAutoFetchTried := 0;
   FAutoFetchFails := 0;
   { The next snapshot is the first of this repository (MarkNews). }
@@ -5745,6 +5886,13 @@ begin
   FStats := ASnap.Stats;
   FBranch := ASnap.Branch;
   FSnapHead := ASnap.Head;
+  { The remotes decide the forge, before the pull request is looked up
+    on it. }
+  if ASnap.RemoteUrls <> FRemoteUrls then
+  begin
+    FRemoteUrls := ASnap.RemoteUrls;
+    ReFindForge;
+  end;
   { The pull request is looked up for the branch HEAD is on, the detached
     id during a rebase, so this runs before the rebase branch stands in. }
   StartPullJob(False);
@@ -5838,12 +5986,6 @@ begin
     HideBoxPages;
     FPullPage.Visible := True;
     FPullPage.FitHeight(FSummaryBox.ClientHeight);
-  end;
-  if FView = gvForge then
-  begin
-    HideBoxPages;
-    FForgePage.Visible := True;
-    FForgePage.FitHeight(FSummaryBox.ClientHeight);
   end;
   RebuildCompareMenu;
   FTerminalItem.Enabled := FRepo.Root <> '';
@@ -6153,10 +6295,10 @@ begin
   LeaveEditorViews;
   FSummaryBox.Visible := True;
   FView := gvSummary;
-  { The Repository, Commands, Files, Pull Requests and forge pages and
-    the page of a submodule give the box back. }
+  { The Repository, Commands, Files and Pull Requests pages and the page
+    of a submodule give the box back. }
   if FRepoPage.Visible or FSubPage.Visible or FCommandPage.Visible or FFilesPage.Visible or
-    FPullPage.Visible or FForgePage.Visible then
+    FPullPage.Visible then
   begin
     HideBoxPages;
     FSummary.Visible := FRepo.Root <> '';
@@ -6188,8 +6330,6 @@ begin
     FFilesPage.Visible := False;
   if FPullPage <> nil then
     FPullPage.Visible := False;
-  if FForgePage <> nil then
-    FForgePage.Visible := False;
 end;
 
 { Hides the editor and what goes with it, for a page in the box. }
@@ -6353,7 +6493,6 @@ begin
   FCommandPage.FitHeight(FSummaryBox.ClientHeight);
   FFilesPage.FitHeight(FSummaryBox.ClientHeight);
   FPullPage.FitHeight(FSummaryBox.ClientHeight);
-  FForgePage.FitHeight(FSummaryBox.ClientHeight);
 end;
 
 { The welcome view takes the summary's place in the box, with AError
@@ -6571,6 +6710,7 @@ begin
       FHeader.SetActions([rsUseMine, rsUseTheirs, rsMarkResolved]);
     end;
   end;
+  LockNote;
   if IsImagePath(APath) then
   begin
     ShowImageChanges(APath);
@@ -6768,11 +6908,14 @@ begin
   FSearchBox.Align := alTop;
   FSearchBox.BorderSpacing.Around := 6;
   FSearchBox.OnChange := @TreeFilterChange;
+  FSearchBox.OnAction := @SearchBoxAction;
+  FSearchBox.ShowHint := True;
   FSearchBox.Parent := FTreePanel;
   FSearchBox.FitHeight;
   FTreeFilter := FSearchBox.Edit;
   FTreeFilter.TextHint := rsFilterHint;
   FTreeFilter.OnKeyDown := @TreeFilterKeyDown;
+  UpdateFindAction;
   SetupSideNav;
   FileTree.Parent := FTreePanel;
   FileTree.Align := alClient;
@@ -6888,8 +7031,11 @@ begin
 end;
 
 { Escape clears the filter, or leaves the field when it is empty; Enter
-  and Down go to the tree. }
+  and Down go to the tree, Cmd+Enter (Ctrl+Enter elsewhere) asks the
+  agent where it is, as the sparkle does. }
 procedure TRepoFrame.TreeFilterKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
+var
+  Asks: boolean;
 begin
   case Key of
     VK_ESCAPE:
@@ -6902,8 +7048,11 @@ begin
       end;
     VK_RETURN, VK_DOWN:
       begin
+        Asks := (Key = VK_RETURN) and (ssModifier in Shift) and FSearchBox.ShowAction;
         Key := 0;
-        if FileTree.CanFocus then
+        if Asks then
+          SearchBoxAction(nil)
+        else if FileTree.CanFocus then
         begin
           if (FileTree.Selected = nil) and (FileTree.Items.Count > 0) then
             FileTree.Selected := FileTree.Items.GetFirstNode;
@@ -7062,10 +7211,10 @@ const
 {$I umain.clone.inc}
 {$I umain.files.inc}
 {$I umain.pulls.inc}
-{$I umain.forge.inc}
 {$I umain.commit.inc}
 {$I umain.ai.inc}
 {$I umain.remote.inc}
+{$I umain.lfslocks.inc}
 {$I umain.mdpreview.inc}
 
 end.

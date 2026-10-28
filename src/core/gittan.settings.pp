@@ -44,6 +44,8 @@ type
     FRecent: TStringList;
     FTabs: TStringList;
     FTrust: TStringList;
+    { Each forge's tool, by its name. }
+    FForgeClis: TStringList;
     FFileName: string;
   public
     {** The tab shown when the window closed, an index into Tabs. }
@@ -110,16 +112,15 @@ type
       the user turns it off. }
     AutoFetch: boolean;
     AutoFetchMinutes: integer;
-    {** Whether the GitHub features are on (pull requests, the GitHub page,
-      review comments); on unless the user turns them off. }
-    GitHubEnabled: boolean;
-    {** gh, GitHub's command line tool, as a path to it; empty runs the
-      gh found on ToolSearchPath, and when there is none the features
-      that need GitHub are off. }
-    GhPath: string;
     {** Whether the GitHub page leaves out the user's pull requests that
       nobody but them has commented on or reviewed. }
     HideWithoutFeedback: boolean;
+    {** The GitHub page's other filters, all off by default: of the
+      user's pull requests only the ones that need attention (changes
+      asked for, checks failing), and no drafts; of the ones waiting for
+      their review only the ones asked of them in person, and no
+      drafts; of the user's only the stale ones. }
+    OnlyNeedsAttention, HideDrafts, OnlyAskedOfMe, HideReviewDrafts, OnlyStale: boolean;
     {** Whether the GitHub page looks for a clone of a pull request's
       repository beside the recent repositories too, in the folders they
       are in, besides among them; off unless the user turns it on. }
@@ -128,16 +129,33 @@ type
       turns them on, since they send the changes to the agent's
       provider. }
     AIEnabled: boolean;
-    {** The agent they run, by its key (AgentOfKey): claude or copilot. }
+    {** The agent they run, by its key (AgentOfKey): claude, copilot
+      or openai. }
     AIAgent: string;
     {** Each agent's command, as a path to it (empty runs the one
-      FindAgent finds), and the model it runs with (empty for its own
-      choice). }
+      TGittanAI.Find finds), and the model it runs with (empty for its
+      own choice). }
     ClaudePath, ClaudeModel, CopilotPath, CopilotModel: string;
+    {** The OpenAI-compatible API: its server's base URL (empty for
+      OpenAIDefaultUrl), the key sent as the bearer token (empty for
+      none, as a local server takes) and the model asked, which it
+      needs. The key is kept in the settings file as it is. }
+    OpenAIUrl, OpenAIKey, OpenAIModel: string;
     {** The day until which a newer Gittan is not pointed out, 0 for no
       such wait: Remind Me Later in the update dialog sets it. Kept as a
       date alone. }
     UpdateSnoozedUntil: TDateTime;
+    {** Whether the hosting features are on (pull requests, the forge
+      view, review comments), for every forge at once: a forge acts only
+      on a repository with a remote on it. On unless the user turns them
+      off. }
+    HostingEnabled: boolean;
+    {** The command line tool of the forge named AName (gittan.forge's
+      Name; gh for GitHub) as a path to it, kept in the forge's own
+      section; empty runs the one found on ToolSearchPath, and when there
+      is none the forge's features are off. }
+    function ForgeCliPath(const AName: string): string;
+    procedure SetForgeCliPath(const AName, AValue: string);
     {** AFileName names the ini file; empty picks gittan.ini in the
       user's configuration folder. }
     constructor Create(const AFileName: string = '');
@@ -170,7 +188,7 @@ type
 implementation
 
 uses
-  Math, IniFiles, md5, gittan.textfile;
+  {$IFDEF UNIX}BaseUnix,{$ENDIF} Math, IniFiles, md5, gittan.textfile, gittan.forge;
 
 const
   SecWindow = 'Window';
@@ -184,6 +202,7 @@ const
   SecAI = 'AI';
   { A section per forge, the service that hosts the repositories. }
   SecGitHub = 'GitHub';
+  SecHosting = 'Hosting';
   ConfigFolder = 'Gittan';
 
 {** The folder the ini file lives in. GetAppConfigDir names it after
@@ -245,6 +264,8 @@ begin
   FRecent.CaseSensitive := True;
   FTabs := TStringList.Create;
   FTrust := TStringList.Create;
+  FForgeClis := TStringList.Create;
+  FForgeClis.CaseSensitive := False;
   if AFileName <> '' then
     FFileName := AFileName
   else
@@ -255,21 +276,44 @@ begin
   AutoFetchMinutes := DefaultAutoFetchMinutes;
   CommitOpen := True;
   Translations := True;
-  GitHubEnabled := True;
+  HostingEnabled := True;
 end;
 
 destructor TGittanSettings.Destroy;
 begin
+  FForgeClis.Free;
   FTrust.Free;
   FRecent.Free;
   FTabs.Free;
   inherited Destroy;
 end;
 
+function TGittanSettings.ForgeCliPath(const AName: string): string;
+var
+  i: integer;
+begin
+  i := FForgeClis.IndexOfName(AName);
+  if i < 0 then
+    Exit('');
+  Result := FForgeClis.ValueFromIndex[i];
+end;
+
+procedure TGittanSettings.SetForgeCliPath(const AName, AValue: string);
+var
+  i: integer;
+begin
+  i := FForgeClis.IndexOfName(AName);
+  if i >= 0 then
+    FForgeClis.Delete(i);
+  if AValue <> '' then
+    FForgeClis.Add(AName + '=' + AValue);
+end;
+
 procedure TGittanSettings.Load;
 var
   Ini: TIniFile;
   i: integer;
+  Forge: TGittanForgeClass;
   S: string;
 begin
   if not FileExists(FFileName) then
@@ -316,10 +360,26 @@ begin
       AutoFetch := Ini.ReadBool(SecTools, 'AutoFetch', True);
       AutoFetchMinutes := EnsureRange(Ini.ReadInteger(SecTools, 'AutoFetchMinutes',
         DefaultAutoFetchMinutes), MinAutoFetchMinutes, MaxAutoFetchMinutes);
-      GitHubEnabled := Ini.ReadBool(SecGitHub, 'Enabled', True);
-      { Earlier versions kept gh's path with git's. }
-      GhPath := Ini.ReadString(SecGitHub, 'Cli', Ini.ReadString(SecTools, 'Gh', ''));
+      { One switch for every forge; earlier versions had one per forge,
+        GitHub's, and any of them off turned it off. Each forge's tool in
+        its own section; earlier versions kept gh's path with git's,
+        under its tool's name. }
+      HostingEnabled := True;
+      for Forge in RegisteredForges do
+        HostingEnabled := HostingEnabled and Ini.ReadBool(Forge.Name, 'Enabled', True);
+      HostingEnabled := Ini.ReadBool(SecHosting, 'Enabled', HostingEnabled);
+      FForgeClis.Clear;
+      for Forge in RegisteredForges do
+      begin
+        SetForgeCliPath(Forge.Name, Ini.ReadString(Forge.Name, 'Cli',
+          Ini.ReadString(SecTools, Forge.CliName, '')));
+      end;
       HideWithoutFeedback := Ini.ReadBool(SecGitHub, 'HideWithoutFeedback', False);
+      OnlyNeedsAttention := Ini.ReadBool(SecGitHub, 'OnlyNeedsAttention', False);
+      HideDrafts := Ini.ReadBool(SecGitHub, 'HideDrafts', False);
+      OnlyAskedOfMe := Ini.ReadBool(SecGitHub, 'OnlyAskedOfMe', False);
+      HideReviewDrafts := Ini.ReadBool(SecGitHub, 'HideReviewDrafts', False);
+      OnlyStale := Ini.ReadBool(SecGitHub, 'OnlyStale', False);
       CloneSiblings := Ini.ReadBool(SecGitHub, 'CloneSiblings', False);
       AIEnabled := Ini.ReadBool(SecAI, 'Enabled', False);
       AIAgent := Ini.ReadString(SecAI, 'Agent', '');
@@ -327,6 +387,9 @@ begin
       ClaudeModel := Ini.ReadString(SecAI, 'ClaudeModel', '');
       CopilotPath := Ini.ReadString(SecAI, 'Copilot', '');
       CopilotModel := Ini.ReadString(SecAI, 'CopilotModel', '');
+      OpenAIUrl := Ini.ReadString(SecAI, 'OpenAIUrl', '');
+      OpenAIKey := Ini.ReadString(SecAI, 'OpenAIKey', '');
+      OpenAIModel := Ini.ReadString(SecAI, 'OpenAIModel', '');
       UpdateSnoozedUntil := ReadDay(Ini.ReadString(SecUpdate, 'SnoozedUntil', ''));
       Ini.ReadSectionValues(SecTrust, FTrust);
       FRecent.Clear;
@@ -359,6 +422,7 @@ procedure TGittanSettings.Save;
 var
   Ini: TIniFile;
   i: integer;
+  Forge: TGittanForgeClass;
 begin
   try
     ForceDirectories(ExtractFileDir(FFileName));
@@ -400,10 +464,19 @@ begin
       Ini.WriteString(SecTools, 'Git', KeepEdges(GitPath));
       Ini.WriteBool(SecTools, 'AutoFetch', AutoFetch);
       Ini.WriteInteger(SecTools, 'AutoFetchMinutes', AutoFetchMinutes);
-      Ini.DeleteKey(SecTools, 'Gh');
-      Ini.WriteBool(SecGitHub, 'Enabled', GitHubEnabled);
-      Ini.WriteString(SecGitHub, 'Cli', KeepEdges(GhPath));
+      Ini.WriteBool(SecHosting, 'Enabled', HostingEnabled);
+      for Forge in RegisteredForges do
+      begin
+        Ini.DeleteKey(SecTools, Forge.CliName);
+        Ini.DeleteKey(Forge.Name, 'Enabled');
+        Ini.WriteString(Forge.Name, 'Cli', KeepEdges(ForgeCliPath(Forge.Name)));
+      end;
       Ini.WriteBool(SecGitHub, 'HideWithoutFeedback', HideWithoutFeedback);
+      Ini.WriteBool(SecGitHub, 'OnlyNeedsAttention', OnlyNeedsAttention);
+      Ini.WriteBool(SecGitHub, 'HideDrafts', HideDrafts);
+      Ini.WriteBool(SecGitHub, 'OnlyAskedOfMe', OnlyAskedOfMe);
+      Ini.WriteBool(SecGitHub, 'HideReviewDrafts', HideReviewDrafts);
+      Ini.WriteBool(SecGitHub, 'OnlyStale', OnlyStale);
       Ini.WriteBool(SecGitHub, 'CloneSiblings', CloneSiblings);
       Ini.WriteBool(SecAI, 'Enabled', AIEnabled);
       Ini.WriteString(SecAI, 'Agent', AIAgent);
@@ -411,6 +484,9 @@ begin
       Ini.WriteString(SecAI, 'ClaudeModel', KeepEdges(ClaudeModel));
       Ini.WriteString(SecAI, 'Copilot', KeepEdges(CopilotPath));
       Ini.WriteString(SecAI, 'CopilotModel', KeepEdges(CopilotModel));
+      Ini.WriteString(SecAI, 'OpenAIUrl', KeepEdges(OpenAIUrl));
+      Ini.WriteString(SecAI, 'OpenAIKey', KeepEdges(OpenAIKey));
+      Ini.WriteString(SecAI, 'OpenAIModel', KeepEdges(OpenAIModel));
       if UpdateSnoozedUntil > 0 then
         Ini.WriteString(SecUpdate, 'SnoozedUntil',
           FormatDateTime('yyyy"-"mm"-"dd', UpdateSnoozedUntil))
@@ -428,6 +504,11 @@ begin
       for i := 0 to FTrust.Count - 1 do
         Ini.WriteString(SecTrust, FTrust.Names[i], FTrust.ValueFromIndex[i]);
       Ini.UpdateFile;
+      {$IFDEF UNIX}
+      { The API key is in the file as it is, so no one else may read it. }
+      if OpenAIKey <> '' then
+        FpChmod(FFileName, &600);
+      {$ENDIF}
     finally
       Ini.Free;
     end;

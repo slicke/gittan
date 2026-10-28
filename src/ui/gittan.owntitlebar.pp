@@ -3,7 +3,11 @@
   TGittanOwnTitleBar, aligned at the top of the window, stands in for
   the window's caption, as Firefox's tab bar does: a menu button on the
   left, then a tab per open repository and a plus that opens a new tab,
-  and on the right the minimize, maximize and close buttons. It lays out
+  a banner before the caption buttons, a ribbon hanging from the top
+  edge with a notch at its foot and a globe in it (SetForge: there
+  while there is a forge, in the accent while the forge view is shown,
+  OnForge), and on the
+  right the minimize, maximize and close buttons. It lays out
   and paints all of that, tells which part a point is in and runs the
   menu button and the tabs. The empty part is the caption: it moves the
   window, and a double click maximizes it.
@@ -51,7 +55,7 @@ type
 
   {** What a point of the bar is: the menu button, a tab, a tab's cross,
     the plus, a caption button, or nothing (the caption, a drag area). }
-  TGittanTitlePart = (tpNone, tpMenu, tpTab, tpTabClose, tpPlus,
+  TGittanTitlePart = (tpNone, tpMenu, tpTab, tpTabClose, tpPlus, tpForge,
     tpMinimize, tpMaximize, tpClose);
 
   {** The glyphs a descendant draws: the caption buttons' (restore for
@@ -66,7 +70,13 @@ type
     FCaptions, FHints: array of string;
     FMarks: array of boolean;
     FTabActive: integer;
-    FMenuRect, FPlusRect, FMinRect, FMaxRect, FCloseRect: TRect;
+    { The tabs are a view's own (the forge view's): no cross, no plus. }
+    FFixed: boolean;
+    FMenuRect, FPlusRect, FForgeRect, FMinRect, FMaxRect, FCloseRect: TRect;
+    { The globe: whether it is there, whether the forge view is shown,
+      and its hint. }
+    FForgeVisible, FForgeShown: boolean;
+    FForgeHint: string;
     FHotPart, FPressedPart, FHotButton, FPressedButton: TGittanTitlePart;
     FHotIndex, FPressedIndex: integer;
     FMenuOpen: boolean;
@@ -77,10 +87,11 @@ type
     FBandTrack, FBandFill: TColor;
     FTitle: string;
     FOnTabSelect, FOnTabClose: TGittanTitleTabEvent;
-    FOnNewTab: TNotifyEvent;
+    FOnNewTab, FOnForge: TNotifyEvent;
     procedure SetActive(AValue: boolean);
     function BandFillWidth(APos, ATotal: integer): integer;
     function MenuOf(AForm: TCustomForm): TMainMenu;
+    function TabsLimit: integer;
     function TabWidth: integer;
     function TabRect(AIndex: integer): TRect;
     function CrossRect(const ATab: TRect): TRect;
@@ -127,9 +138,14 @@ type
     function OpenMenuByKey(AKey: char): boolean;
     {** The tabs, left to right: ACaptions are their names, AHints their
       tooltips (the paths), AMarks those with news (a dot before the
-      name), AActive the one shown. }
+      name), AActive the one shown; AFixed when they are a view's own,
+      which cannot be closed or added to: no cross and no plus. }
     procedure SetTabs(const ACaptions, AHints: array of string;
-      const AMarks: array of boolean; AActive: integer);
+      const AMarks: array of boolean; AActive: integer; AFixed: boolean = False);
+    {** The banner before the caption buttons: shown while AVisible
+      (there is a forge), in the accent while AShown (the forge view is
+      shown), AHint its hint (the forge's name). }
+    procedure SetForge(AVisible, AShown: boolean; const AHint: string);
     {** The bar's colors: the shade over the sidebar and the background
       over the rest, the text and the dim text, the shown tab's fill and
       border, a caption button (or a hovered tab) under the mouse, and
@@ -152,6 +168,8 @@ type
     property OnTabSelect: TGittanTitleTabEvent read FOnTabSelect write FOnTabSelect;
     property OnTabClose: TGittanTitleTabEvent read FOnTabClose write FOnTabClose;
     property OnNewTab: TNotifyEvent read FOnNewTab write FOnNewTab;
+    {** The banner: the forge view, or back from it. }
+    property OnForge: TNotifyEvent read FOnForge write FOnForge;
   end;
 
 const
@@ -161,7 +179,7 @@ const
 implementation
 
 uses
-  Math, LCLIntf, LCLType;
+  Math, LCLIntf, LCLType, gittan.statusbar, gittan.theme;
 
 const
   Pad = 8;
@@ -172,6 +190,12 @@ const
   MinTabWidth = 64;
   TabGap = 3;
   PlusSize = 26;
+  { The banner: its width, the room it leaves under it, the depth of
+    the notch at its foot, and the globe in it. }
+  ForgeWidth = 30;
+  ForgeFoot = 4;
+  ForgeNotch = 7;
+  ForgeIconSize = 20;
   CrossSize = 18;
   ButtonWidth = 46;
   BandHeight = 3;
@@ -223,10 +247,11 @@ begin
 end;
 
 procedure TGittanOwnTitleBar.SetTabs(const ACaptions, AHints: array of string;
-  const AMarks: array of boolean; AActive: integer);
+  const AMarks: array of boolean; AActive: integer; AFixed: boolean);
 var
   i: integer;
 begin
+  FFixed := AFixed;
   SetLength(FCaptions, Length(ACaptions));
   SetLength(FHints, Length(ACaptions));
   SetLength(FMarks, Length(ACaptions));
@@ -290,14 +315,26 @@ begin
     Result := AForm.Menu;
 end;
 
+{ Where the tabs and the plus end: the globe when it is there, else the
+  minimize button. }
+function TGittanOwnTitleBar.TabsLimit: integer;
+begin
+  if FForgeVisible then
+    Result := FForgeRect.Left
+  else
+    Result := FMinRect.Left;
+end;
+
 { The tabs share the room between the menu button and the plus, which
-  follows the last of them, evenly, within MinTabWidth and MaxTabWidth. }
+  follows the last of them (when they are not fixed), evenly, within
+  MinTabWidth and MaxTabWidth. }
 function TGittanOwnTitleBar.TabWidth: integer;
 var
   Room: integer;
 begin
-  Room := FMinRect.Left - Scale96ToForm(Gap) - Scale96ToForm(PlusSize + Gap) -
-    (FMenuRect.Right + Scale96ToForm(Gap));
+  Room := TabsLimit - Scale96ToForm(Gap) - (FMenuRect.Right + Scale96ToForm(Gap));
+  if not FFixed then
+    Dec(Room, Scale96ToForm(PlusSize + Gap));
   if Length(FCaptions) = 0 then
     Exit(Scale96ToForm(MaxTabWidth));
   Result := Max(Scale96ToForm(MinTabWidth), Min(Scale96ToForm(MaxTabWidth),
@@ -339,11 +376,20 @@ begin
   FCloseRect := Types.Rect(Width - W, 0, Width, H);
   FMaxRect := Types.Rect(FCloseRect.Left - W, 0, FCloseRect.Left, H);
   FMinRect := Types.Rect(FMaxRect.Left - W, 0, FMaxRect.Left, H);
+  S := Scale96ToForm(ForgeWidth);
+  X := FMinRect.Left - Scale96ToForm(Gap) - S;
+  if FForgeVisible then
+    FForgeRect := Types.Rect(X, 0, X + S, H - Scale96ToForm(ForgeFoot))
+  else
+    FForgeRect := Types.Rect(0, 0, 0, 0);
   S := Scale96ToForm(PlusSize);
   FMenuRect := Types.Rect(Scale96ToForm(Pad), (H - S) div 2,
     Scale96ToForm(Pad + MenuButtonWidth), (H + S) div 2);
   X := FMenuRect.Right + Scale96ToForm(Gap) + Length(FCaptions) * TabWidth;
-  FPlusRect := Types.Rect(X, (H - S) div 2 + 1, X + S, (H + S) div 2 + 1);
+  if FFixed then
+    FPlusRect := Types.Rect(0, 0, 0, 0)
+  else
+    FPlusRect := Types.Rect(X, (H - S) div 2 + 1, X + S, (H + S) div 2 + 1);
 end;
 
 procedure TGittanOwnTitleBar.Resize;
@@ -368,17 +414,19 @@ begin
     Exit(tpMinimize);
   if FMenuRect.Contains(P) then
     Exit(tpMenu);
+  if FForgeVisible and FForgeRect.Contains(P) then
+    Exit(tpForge);
   if FPlusRect.Contains(P) then
     Exit(tpPlus);
   for i := 0 to High(FCaptions) do
   begin
     R := TabRect(i);
-    if R.Right > FMinRect.Left then
+    if R.Right > TabsLimit then
       Break;
     if R.Contains(P) then
     begin
       AIndex := i;
-      if CrossRect(R).Contains(P) then
+      if not FFixed and CrossRect(R).Contains(P) then
         Exit(tpTabClose);
       Exit(tpTab);
     end;
@@ -397,6 +445,8 @@ begin
   end
   else if APart = tpMenu then
     Hint := FTitle
+  else if APart = tpForge then
+    Hint := FForgeHint
   else if AIndex < 0 then
     Hint := '';
   FHotPart := APart;
@@ -451,7 +501,7 @@ begin
     tpTab:
       if Assigned(FOnTabSelect) then
         FOnTabSelect(Self, Index);
-    tpTabClose, tpPlus, tpMinimize, tpMaximize, tpClose:
+    tpTabClose, tpPlus, tpForge, tpMinimize, tpMaximize, tpClose:
       begin
         FPressedPart := Part;
         FPressedIndex := Index;
@@ -473,7 +523,7 @@ begin
   { A middle click on a tab closes it. }
   if Button = mbMiddle then
   begin
-    if (Part in [tpTab, tpTabClose]) and (Pressed in [tpTab, tpTabClose]) and
+    if not FFixed and (Part in [tpTab, tpTabClose]) and (Pressed in [tpTab, tpTabClose]) and
       (Index = FPressedIndex) and Assigned(FOnTabClose) then
       FOnTabClose(Self, Index);
     Exit;
@@ -490,9 +540,21 @@ begin
     tpPlus:
       if Assigned(FOnNewTab) then
         FOnNewTab(Self);
+    tpForge:
+      if Assigned(FOnForge) then
+        FOnForge(Self);
     tpMinimize, tpMaximize, tpClose:
       CaptionButtonClick(Part);
   end;
+end;
+
+procedure TGittanOwnTitleBar.SetForge(AVisible, AShown: boolean; const AHint: string);
+begin
+  FForgeVisible := AVisible;
+  FForgeShown := AShown;
+  FForgeHint := AHint;
+  Layout;
+  Invalidate;
 end;
 
 procedure TGittanOwnTitleBar.CaptionButtonClick(APart: TGittanTitlePart);
@@ -616,7 +678,7 @@ procedure TGittanOwnTitleBar.Paint;
 var
   Split, i, TextY, Mid, W, L: integer;
   R, C: TRect;
-  Ink: TColor;
+  Ink, GlobeInk: TColor;
   Glyph: TGittanTitleGlyph;
   Shown, Hover: boolean;
 
@@ -689,7 +751,7 @@ begin
   for i := 0 to High(FCaptions) do
   begin
     R := TabRect(i);
-    if R.Right > FMinRect.Left then
+    if R.Right > TabsLimit then
       Break;
     Shown := i = FTabActive;
     Hover := (FHotIndex = i) and (FHotPart in [tpTab, tpTabClose]);
@@ -715,6 +777,8 @@ begin
     else
       Canvas.Font.Color := FDim;
     C := CrossRect(R);
+    if FFixed then
+      C.Left := R.Right - Scale96ToForm(6);
     { News: a dot before the name, which moves over for it. }
     L := R.Left + Scale96ToForm(10);
     if FMarks[i] then
@@ -729,7 +793,7 @@ begin
     end;
     Canvas.TextRect(Types.Rect(L, R.Top, C.Left - Scale96ToForm(4), R.Bottom), L, TextY,
       FCaptions[i]);
-    if Shown or Hover then
+    if not FFixed and (Shown or Hover) then
     begin
       if Hover and (FHotPart = tpTabClose) then
       begin
@@ -745,14 +809,51 @@ begin
   end;
 
   { The plus. }
-  if FHotPart = tpPlus then
-    HotBox(FPlusRect, FButtonHot);
-  Mid := (FPlusRect.Left + FPlusRect.Right) div 2;
-  L := (FPlusRect.Top + FPlusRect.Bottom) div 2;
-  W := Scale96ToForm(6);
-  Line(Mid - W, L, Mid + W + 1, L, FDim);
-  Line(Mid, L - W, Mid, L + W + 1, FDim);
+  if not FFixed then
+  begin
+    if FHotPart = tpPlus then
+      HotBox(FPlusRect, FButtonHot);
+    Mid := (FPlusRect.Left + FPlusRect.Right) div 2;
+    L := (FPlusRect.Top + FPlusRect.Bottom) div 2;
+    W := Scale96ToForm(6);
+    Line(Mid - W, L, Mid + W + 1, L, FDim);
+    Line(Mid, L - W, Mid, L + W + 1, FDim);
+  end;
   Canvas.Pen.Width := 1;
+
+  { The banner: a ribbon from the top edge with a notch at its foot, in
+    the accent with a white globe while the forge view is shown, else a
+    little of the text color in the background, a little more under the
+    mouse, as on macOS: the tab fill is the background itself in the
+    light theme. }
+  if FForgeVisible then
+  begin
+    R := FForgeRect;
+    Canvas.Brush.Style := bsSolid;
+    if FForgeShown then
+      Canvas.Brush.Color := FMark
+    else if FHotPart = tpForge then
+      Canvas.Brush.Color := MixColor(FMain, FText, 0.16)
+    else
+      Canvas.Brush.Color := MixColor(FMain, FText, 0.08);
+    Canvas.Pen.Color := Canvas.Brush.Color;
+    Canvas.Pen.Width := 1;
+    W := Scale96ToForm(ForgeNotch);
+    Canvas.Polygon([Types.Point(R.Left, R.Top), Types.Point(R.Right - 1, R.Top),
+      Types.Point(R.Right - 1, R.Bottom), Types.Point((R.Left + R.Right) div 2, R.Bottom - W),
+      Types.Point(R.Left, R.Bottom)]);
+    L := Scale96ToForm(ForgeIconSize);
+    if FForgeShown then
+      GlobeInk := clWhite
+    else if FHotPart = tpForge then
+      GlobeInk := Ink
+    else
+      GlobeInk := FDim;
+    { The icon is a square ASize - 4 wide at its left. }
+    DrawStatusIcon(Canvas, HintLink, R.Left + (R.Width - (L - 4)) div 2,
+      (R.Bottom - W - L) div 2 + 1, L, GlobeInk);
+    Canvas.Pen.Width := 1;
+  end;
 
   DrawButton(tpMinimize, FMinRect, tgMinimize);
   if Maximized then

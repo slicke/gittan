@@ -15,7 +15,7 @@ type
   {** What a TGittanRemoteJob does. }
   TGittanRemoteKind = (rkFetch, rkPull, rkPush, rkDeleteRemote, rkForcePush, rkPushBranch,
     rkPushTag, rkDeleteRemoteTag, rkClone, rkSubmoduleUpdate, rkSubmoduleAdd, rkFetchPull, rkLfsFetch, rkLfsPull,
-    rkLfsInstall);
+    rkLfsInstall, rkLfsLock, rkLfsUnlock, rkLfsForceUnlock);
 
   {** Runs a fetch, a pull (the way Mode says), a push, a push with
     --force-with-lease, or the deletion of the remote branch Arg stands
@@ -32,8 +32,10 @@ type
     base branch Branch, and gives the ref its head is fetched to in
     HeadRef. A Git LFS download fetches the object of the path Arg as
     it is in each of Refs (see TGittanRepo.LfsDownload); a pull of Git
-    LFS downloads every file of HEAD (LfsPull), and an install sets Git
-    LFS up (LfsInstall).
+    LFS downloads every file of HEAD (LfsPull), an install sets Git
+    LFS up (LfsInstall), and a lock or an unlock locks the file Arg on
+    the LFS server or gives its lock up (LfsLock, LfsUnlock), a forced
+    unlock also another user's.
     OnDone is called in the main thread when it is done, unless the job
     has been stopped. A job is never broken off, as a pull stopped
     halfway would leave a merge behind: Stop only drops the handler, and
@@ -269,6 +271,9 @@ begin
         rkLfsFetch: FOk := Repo.LfsDownload(FArg, FRefs);
         rkLfsPull: FOk := Repo.LfsPull;
         rkLfsInstall: FOk := Repo.LfsInstall;
+        rkLfsLock: FOk := Repo.LfsLock(FArg);
+        rkLfsUnlock: FOk := Repo.LfsUnlock(FArg, False);
+        rkLfsForceUnlock: FOk := Repo.LfsUnlock(FArg, True);
         rkClone: ;
       end;
     if not FOk then

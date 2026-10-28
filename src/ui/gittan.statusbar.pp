@@ -11,8 +11,12 @@ unit gittan.statusbar;
   which says what to do next (Pull, Push, Resolve, Continue, or that the
   branch is up to date), over a track line with the commits behind on
   its left and ahead on its right; the track also carries a passing
-  message, the progress of a long job, or how far a rebase has come. On
-  the right what is shown: a newer Gittan, the pull request, the caret's
+  message, the progress of a long job, or how far a rebase has come; a
+  message that says something is under way (ShowBusy) is in the accent
+  color, after an icon for what runs, over a line with a short stretch
+  sliding to and fro on it; when none of the buttons can be clicked
+  meanwhile it takes their row and the line has the track's. On the
+  right what is shown: a newer Gittan, the pull request, the caret's
   position and the changed files.
 
   The parts give way from the outside in when the window is narrow. It
@@ -26,15 +30,15 @@ unit gittan.statusbar;
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Graphics, ExtCtrls, Forms;
+  Classes, SysUtils, Types, Controls, Graphics, ExtCtrls, Forms, LCLIntf;
 
 type
   {** The parts of the bar: the left zone (the tile and name, the
-    branch, the base, the stashes), the transport (the left button, the
-    primary one, the right button) over the track (the sync counts, or a
-    message or a progress), and the right zone. }
-  TGittanStatusPart = (spNone, spRepo, spBranch, spBase, spStash, spLeft, spPrimary,
-    spRight, spSync, spMessage, spProgress, spUpdate, spPull, spPosition, spFiles);
+    branch, the base and its cross, the stashes), the transport (the left
+    button, the primary one, the right button) over the track (the sync
+    counts, or a message or a progress), and the right zone. }
+  TGittanStatusPart = (spNone, spRepo, spBranch, spBase, spBaseClose, spStash, spLeft,
+    spPrimary, spRight, spSync, spMessage, spProgress, spUpdate, spPull, spPosition, spFiles);
 
   {** How a message or the pull request reads: in the text color, or
     in green, amber or red. }
@@ -85,14 +89,18 @@ type
     FOperation, FMessage, FProgressText: string;
     FPullChecks, FPullOpen, FPullThreads, FStashes: integer;
     FAhead, FBehind, FProgressPos, FProgressTotal, FOperationPos, FOperationTotal: integer;
-    FSyncShown: boolean;
+    FSyncShown, FBaseClosable: boolean;
     FButtons: array[spLeft..spRight] of TGittanStatusButton;
     FPullTone, FMessageTone: TGittanStatusTone;
+    FMessageIcon: string;
+    FBusy: boolean;
+    FBusyPhase: integer;
+    FBusyRect: TRect;
     FHints: array[TGittanStatusPart] of string;
     FRects: array[TGittanStatusPart] of TRect;
     FClickable: set of TGittanStatusPart;
     FHot, FPressed: TGittanStatusPart;
-    FTimer, FHintTimer: TTimer;
+    FTimer, FHintTimer, FBusyTimer: TTimer;
     FHintWindow: TGittanStatusHint;
     FBack, FText, FDim, FLine, FHover, FAccent: TColor;
     FTones: array[TGittanStatusTone] of TColor;
@@ -103,6 +111,8 @@ type
     procedure SetPartHint(APart: TGittanStatusPart; const AValue: string);
     procedure SetHot(AValue: TGittanStatusPart);
     procedure TimerTimer(Sender: TObject);
+    procedure BusyTimerTimer(Sender: TObject);
+    procedure SetBusy(AValue: boolean);
     function HotHint: string;
     procedure HintTimerTimer(Sender: TObject);
     procedure HideHint;
@@ -125,8 +135,10 @@ type
     procedure SetRepository(const ATitle, ABranch: string);
     {** The base label ("vs origin/main") after the branch, '' for none;
       AClickable makes the part answer a click (and show a hand), for a
-      base that has actions. }
-    procedure SetBase(const ABase: string; AClickable: boolean = False);
+      base that has actions. AClosable puts a cross after it (spBaseClose),
+      for a comparison that a click ends. }
+    procedure SetBase(const ABase: string; AClickable: boolean = False;
+      AClosable: boolean = False);
     {** How many stashes the repository has, shown as a chip with a box
       and the count after the name and the branch; 0 hides it. }
     procedure SetStashes(ACount: integer);
@@ -162,9 +174,18 @@ type
     procedure SetUpdate(const AText: string);
     {** Shows AText on the track in ATone, in place of any message before.
       It clears itself after ASeconds; 0 keeps it until the next message
-      or ClearMessage, for a message that says something is under way. }
+      or ClearMessage. }
     procedure ShowMessage(const AText: string; ATone: TGittanStatusTone = stNormal;
       ASeconds: integer = 6);
+    {** Shows AText on the track as something under way, until the next
+      message or ClearMessage: in the accent color, after the icon of the
+      marker AIcon (HintSparkle for the agent, HintFetch, HintUp and the
+      others; '' for none), over a line with a stretch of the accent
+      sliding to and fro on it. While none of the transport buttons is
+      enabled the text takes their row and the line is the track's;
+      otherwise the text is on the track's row under the buttons and the
+      line, as wide as the text, right under it. }
+    procedure ShowBusy(const AText: string; const AIcon: string = '');
     procedure ClearMessage;
     {** Shows the track line filled APos of ATotal with AText before it,
       in place of the sync counts; ATotal 0 hides it. }
@@ -202,7 +223,8 @@ const
     push and pull, a box for the stashes, and for the transport two
     arrows round a circle (fetch), an arrow down (pull), an arrow up
     (push), a triangle (continue), a triangle at a bar (skip) and a
-    warning triangle (conflicts). Each is followed by a space. }
+    warning triangle (conflicts); a sparkle for the agent. Each is
+    followed by a space. }
   HintPassed = '✓';
   HintFailed = '✕';
   HintPending = '◷';
@@ -220,6 +242,7 @@ const
   HintPlay = '▶';
   HintSkip = '⏭';
   HintWarn = '⚠';
+  HintSparkle = '✦';
 
 {** Draws the icon of the marker AIcon (HintPassed and the others above)
   in AColor, in a square a little smaller than ASize centered on a line
@@ -268,6 +291,12 @@ const
   TrackWidth = 220;
   TrackNarrow = 140;
   TrackHeight = 3;
+  { The stretch that slides on the track while something is under way:
+    its width as a part of the track, the timer's step in ms and the
+    steps of one sweep there and back. }
+  BusyPart = 4;
+  BusyStep = 40;
+  BusySweep = 44;
   { The name and the branch are cut to these. }
   NameMax = 220;
   BranchMax = 200;
@@ -531,6 +560,19 @@ begin
     ACanvas.Pen.Width := 2;
     ACanvas.Line(CX, T + 4, CX, T + S - 6);
     ACanvas.Line(CX, T + S - 4, CX, T + S - 2);
+  end
+  else if AIcon = HintSparkle then
+  begin
+    { A star of four points, its sides drawn in to the middle, filled,
+      as the filter field's action has it. }
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Pen.Width := 1;
+    ACanvas.Brush.Style := bsSolid;
+    ACanvas.Brush.Color := AColor;
+    ACanvas.Polygon([Point(CX, T), Point(CX + S div 6, CY - S div 6), Point(L + S, CY),
+      Point(CX + S div 6, CY + S div 6), Point(CX, T + S), Point(CX - S div 6, CY + S div 6),
+      Point(L, CY), Point(CX - S div 6, CY - S div 6)]);
+    ACanvas.Brush.Style := bsClear;
   end;
   ACanvas.Pen.Width := 1;
 end;
@@ -634,6 +676,10 @@ begin
   FTimer := TTimer.Create(Self);
   FTimer.Enabled := False;
   FTimer.OnTimer := @TimerTimer;
+  FBusyTimer := TTimer.Create(Self);
+  FBusyTimer.Enabled := False;
+  FBusyTimer.Interval := BusyStep;
+  FBusyTimer.OnTimer := @BusyTimerTimer;
   { The bar shows its hints itself (see SetHot), so the LCL's own stays
     off. }
   ShowHint := False;
@@ -661,12 +707,22 @@ begin
   Change(FBranch, ABranch);
 end;
 
-procedure TGittanStatusBar.SetBase(const ABase: string; AClickable: boolean);
+procedure TGittanStatusBar.SetBase(const ABase: string; AClickable, AClosable: boolean);
 begin
   if AClickable then
     Include(FClickable, spBase)
   else
     Exclude(FClickable, spBase);
+  AClosable := AClosable and (ABase <> '');
+  if AClosable then
+    Include(FClickable, spBaseClose)
+  else
+    Exclude(FClickable, spBaseClose);
+  if AClosable <> FBaseClosable then
+  begin
+    FBaseClosable := AClosable;
+    Invalidate;
+  end;
   Change(FBase, ABase);
 end;
 
@@ -751,6 +807,8 @@ procedure TGittanStatusBar.ShowMessage(const AText: string; ATone: TGittanStatus
 begin
   FMessage := AText;
   FMessageTone := ATone;
+  FMessageIcon := '';
+  SetBusy(False);
   FTimer.Enabled := False;
   if (AText <> '') and (ASeconds > 0) then
   begin
@@ -762,10 +820,49 @@ begin
   Repaint;
 end;
 
+procedure TGittanStatusBar.ShowBusy(const AText: string; const AIcon: string);
+begin
+  FTimer.Enabled := False;
+  if (FMessage = AText) and FBusy and (FMessageIcon = AIcon) then
+    Exit;
+  FMessage := AText;
+  FMessageTone := stNormal;
+  FMessageIcon := AIcon;
+  SetBusy(AText <> '');
+  Repaint;
+end;
+
 procedure TGittanStatusBar.ClearMessage;
 begin
   FTimer.Enabled := False;
+  SetBusy(False);
+  FMessageIcon := '';
   Change(FMessage, '');
+end;
+
+procedure TGittanStatusBar.SetBusy(AValue: boolean);
+begin
+  if FBusy = AValue then
+    Exit;
+  FBusy := AValue;
+  FBusyPhase := 0;
+  FBusyRect := Rect(0, 0, 0, 0);
+  FBusyTimer.Enabled := AValue;
+end;
+
+{ Only the stretch on the line moves, and whatever moves the line
+  paints the bar whole, so each tick paints the line's rectangle alone
+  (FBusyRect, from the last Paint): a job of minutes would otherwise
+  have the bar measure every part 25 times a second. }
+procedure TGittanStatusBar.BusyTimerTimer(Sender: TObject);
+begin
+  FBusyPhase := (FBusyPhase + 1) mod BusySweep;
+  if not IsVisible then
+    Exit;
+  if HandleAllocated and not IsRectEmpty(FBusyRect) then
+    InvalidateRect(Handle, @FBusyRect, False)
+  else
+    Invalidate;
 end;
 
 procedure TGittanStatusBar.TimerTimer(Sender: TObject);
@@ -877,13 +974,23 @@ procedure TGittanStatusBar.Paint;
 var
   P: TGittanStatusPart;
   TextH, IconW, X, Y, W, Right, LeftW, MidW, RightW, MidX, MidTop, MidH: integer;
-  Row1Y, Row2Y, TrackW, NumW, Avail, Step, TrackLeft, Fill: integer;
+  Row1Y, Row2Y, TrackW, NumW, Avail, Step, TrackLeft, Fill, BusyW, BusyY: integer;
   ShowName, ShowBase, ShowStash, ShowPull, ShowPullNote, ShowFiles, ShowPosition,
-    ShowUpdate, ShowTrack, TransportShown, TrackNumbers, TrackLine: boolean;
-  Title, Branch, Base, TrackText, Behind, Ahead, Checks, Threads: string;
+    ShowUpdate, ShowTrack, TransportShown, TrackNumbers, TrackLine, TrackBusy,
+    BusyTop: boolean;
+  Title, Branch, Base, TrackText, TrackIcon, Behind, Ahead, Checks, Threads: string;
   TrackTone: TGittanStatusTone;
   TrackPart: TGittanStatusPart;
   TrackPos, TrackTotal: integer;
+
+  { The room the icon before a busy message takes. }
+  function TrackIconWidth: integer;
+  begin
+    if TrackIcon = '' then
+      Result := 0
+    else
+      Result := IconW;
+  end;
 
   function ChipRect(AX, AY, AWidth, AHeight: integer): TRect;
   begin
@@ -932,6 +1039,34 @@ var
     DrawHot(APart);
     Canvas.Font.Color := AColor;
     Canvas.TextOut(AX, AY, S);
+  end;
+
+  { The cross after the base, a square of the text's height on its row,
+    on a filled circle under the mouse. }
+  procedure DrawClose(AX, AY: integer);
+  var
+    R: TRect;
+    Inset: integer;
+  begin
+    R := ChipRect(AX, AY, TextH, TextH);
+    FRects[spBaseClose] := R;
+    if FHot = spBaseClose then
+    begin
+      Canvas.Pen.Style := psClear;
+      Canvas.Brush.Style := bsSolid;
+      Canvas.Brush.Color := FHover;
+      Canvas.Ellipse(R);
+      Canvas.Pen.Style := psSolid;
+      Canvas.Brush.Style := bsClear;
+      Canvas.Pen.Color := FText;
+    end
+    else
+      Canvas.Pen.Color := FDim;
+    Inset := TextH * 3 div 10;
+    Canvas.Pen.Width := Max(1, Px(3) div 2);
+    Canvas.Line(R.Left + Inset, R.Top + Inset, R.Right - Inset, R.Bottom - Inset);
+    Canvas.Line(R.Right - Inset, R.Top + Inset, R.Left + Inset, R.Bottom - Inset);
+    Canvas.Pen.Width := 1;
   end;
 
   { A side button without an icon keeps its place, so the primary one
@@ -1053,7 +1188,11 @@ var
     if Branch <> '' then
       Row2 := IconW + Canvas.TextWidth(Branch) + Px(ChevronWidth) + 2 * Px(ChipPadX);
     if ShowBase and (Base <> '') then
+    begin
       Inc(Row2, Px(Gap) div 2 + Canvas.TextWidth(Base) + 2 * Px(ChipPadX));
+      if FBaseClosable then
+        Inc(Row2, TextH);
+    end;
     Inc(Result, Max(Block, Row2));
     if ShowStash and (FStashes > 0) then
       Inc(Result, Px(Gap) + IconW + Canvas.TextWidth(IntToStr(FStashes)) + 2 * Px(ChipPadX));
@@ -1074,9 +1213,11 @@ var
       T := 2 * NumW + 2 * Px(Gap) + TrackW
     else
     begin
-      T := Canvas.TextWidth(TrackText);
+      T := TrackIconWidth + Canvas.TextWidth(TrackText);
       if TrackLine then
         Inc(T, Px(Gap) + TrackW);
+      if BusyTop then
+        T := Max(T, TrackW);
     end;
     Result := Max(Result, T);
   end;
@@ -1130,7 +1271,9 @@ begin
     Threads := IntToStr(FPullOpen);
   TrackNumbers := False;
   TrackLine := False;
+  TrackBusy := False;
   TrackText := '';
+  TrackIcon := '';
   TrackTone := stNormal;
   TrackPart := spNone;
   TrackPos := 0;
@@ -1140,6 +1283,8 @@ begin
     TrackText := FMessage;
     TrackTone := FMessageTone;
     TrackPart := spMessage;
+    TrackIcon := FMessageIcon;
+    TrackBusy := FBusy;
   end
   else if FProgressTotal > 0 then
   begin
@@ -1165,6 +1310,19 @@ begin
   end;
   ShowTrack := TrackNumbers or (TrackText <> '');
   TransportShown := FButtons[spPrimary].Icon <> '';
+  { Something under way that leaves none of the buttons to click takes
+    their row, with its line on its own under it; one that leaves them
+    (the agent's) goes under them, the line under its text. }
+  BusyTop := False;
+  if TrackBusy then
+  begin
+    BusyTop := True;
+    for P := spLeft to spRight do
+      if FButtons[P].Enabled and (FButtons[P].Icon <> '') then
+        BusyTop := False;
+    if BusyTop then
+      TransportShown := False;
+  end;
   Behind := '↓' + IntToStr(FBehind);
   Ahead := '↑' + IntToStr(FAhead);
   NumW := Max(Canvas.TextWidth(Behind), Canvas.TextWidth(Ahead));
@@ -1199,7 +1357,8 @@ begin
       5: ShowName := False;
       6: TrackW := Px(TrackNarrow);
       7: ShowPull := False;
-      8: if TrackNumbers or TrackLine then
+      { A busy message keeps its text and its line. }
+      8: if not TrackBusy and (TrackNumbers or TrackLine) then
           ShowTrack := False;
       9: ShowUpdate := False;
     end;
@@ -1209,7 +1368,8 @@ begin
     { A message is cut to what is left. }
     if (TrackText <> '') and not TrackLine then
     begin
-      TrackText := Ellipsize(Canvas, TrackText, Max(40, Avail - LeftW - RightW - 2 * Px(Gap)));
+      TrackText := Ellipsize(Canvas, TrackText, Max(40, Avail - LeftW - RightW -
+        2 * Px(Gap) - TrackIconWidth));
       Needed;
     end;
   end;
@@ -1226,6 +1386,8 @@ begin
       Inc(MidH, Px(TrackGap));
     Inc(MidH, TextH);
   end;
+  if BusyTop then
+    MidH := Px(PrimaryHeight) + Px(TrackGap) + TextH;
   MidTop := (Height - MidH) div 2;
 
   { Left: the tile, the name over the branch and the base, the stashes. }
@@ -1289,6 +1451,11 @@ begin
       begin
         DrawText(spBase, FRects[spBranch].Right + Px(Gap) div 2 + Px(ChipPadX), Y, Base, FDim);
         W := Max(W, FRects[spBase].Right);
+        if FBaseClosable then
+        begin
+          DrawClose(FRects[spBase].Right, Y);
+          W := Max(W, FRects[spBaseClose].Right);
+        end;
       end;
     end;
     X := W;
@@ -1424,9 +1591,51 @@ begin
     TrackLine := True;
     TrackTotal := 0;
   end
+  else if TrackBusy then
+  begin
+    { The icon and the text centered in the accent, in the buttons' row
+      or under the buttons; then the line, centered on its own row under
+      the text in the buttons' row, else as wide as the text right under
+      it. }
+    BusyW := TrackIconWidth + Canvas.TextWidth(TrackText);
+    X := MidX + (MidW - BusyW) div 2;
+    if BusyTop then
+      Inc(Y, (Px(PrimaryHeight) - TextH) div 2);
+    FRects[spMessage] := ChipRect(X, Y - Px(ChipPadY), BusyW, TextH + 2 * Px(ChipPadY));
+    Canvas.Font.Color := FAccent;
+    if TrackIcon <> '' then
+      DrawStatusIcon(Canvas, TrackIcon, X, Y, TextH, FAccent);
+    Canvas.TextOut(X + TrackIconWidth, Y, TrackText);
+    if BusyTop then
+    begin
+      TrackLeft := MidX + (MidW - TrackW) div 2;
+      BusyY := MidTop + Px(PrimaryHeight) + Px(TrackGap) + (TextH - Px(TrackHeight)) div 2;
+    end
+    else
+    begin
+      TrackLeft := X;
+      TrackW := BusyW;
+      BusyY := Y + TextH + Px(1);
+    end;
+    FBusyRect := Rect(TrackLeft, BusyY, TrackLeft + TrackW, BusyY + Px(TrackHeight));
+    Canvas.Pen.Style := psClear;
+    Canvas.Brush.Style := bsSolid;
+    Canvas.Brush.Color := FHover;
+    Canvas.RoundRect(TrackLeft, BusyY, TrackLeft + TrackW, BusyY + Px(TrackHeight),
+      Px(TrackHeight), Px(TrackHeight));
+    { A stretch of the accent eases from one end to the other and back,
+      slowest at the ends. }
+    Canvas.Brush.Color := FAccent;
+    Fill := Max(Px(TrackHeight), TrackW div BusyPart);
+    X := TrackLeft + Round((1 - Cos(2 * Pi * FBusyPhase / BusySweep)) / 2 * (TrackW - Fill));
+    Canvas.RoundRect(X, BusyY, X + Fill, BusyY + Px(TrackHeight), Px(TrackHeight),
+      Px(TrackHeight));
+    Canvas.Pen.Style := psSolid;
+    Canvas.Brush.Style := bsClear;
+  end
   else
   begin
-    W := Canvas.TextWidth(TrackText);
+    W := TrackIconWidth + Canvas.TextWidth(TrackText);
     if TrackLine then
       Inc(W, Px(Gap) + TrackW);
     X := MidX + (MidW - W) div 2;
@@ -1435,6 +1644,11 @@ begin
     Canvas.Font.Color := FTones[TrackTone];
     if (TrackTone = stNormal) and (TrackPart <> spMessage) then
       Canvas.Font.Color := FDim;
+    if TrackIcon <> '' then
+    begin
+      DrawStatusIcon(Canvas, TrackIcon, X, Y, TextH, FAccent);
+      Inc(X, IconW);
+    end;
     Canvas.TextOut(X, Y, TrackText);
     TrackLeft := X + Canvas.TextWidth(TrackText) + Px(Gap);
   end;
@@ -1463,12 +1677,12 @@ end;
 
 { The repository's rectangle grows over its name, which spans both rows
   beside the tile, so the branch chip and the base under the name are
-  tested first. }
+  tested first (the base's cross with them). }
 function TGittanStatusBar.PartAt(X, Y: integer): TGittanStatusPart;
 var
   P: TGittanStatusPart;
 begin
-  for P in [spBranch, spBase] do
+  for P in [spBranch, spBase, spBaseClose] do
     if Types.PtInRect(FRects[P], Point(X, Y)) then
       Exit(P);
   for P := Succ(spNone) to High(P) do

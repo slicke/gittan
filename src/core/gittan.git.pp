@@ -124,11 +124,14 @@ type
     whether it has files in Git LFS (Files, those with filter=lfs),
     whether git-lfs is on the tool path (Installed) and set up in git's
     config (SetUp: `git lfs install` gives filter.lfs.process or
-    .smudge), and how many of the files are pointers in the work tree,
-    not downloaded or never checked out (Pointers). }
+    .smudge), how many of the files are pointers in the work tree,
+    not downloaded or never checked out (Pointers), and the files that
+    may be locked (Lockable: those in Git LFS and those with the
+    attribute lockable, sorted). }
   TGittanLfsState = record
     Files, Pointers: integer;
     Installed, SetUp: boolean;
+    Lockable: TStringArray;
   end;
 
   TGittanRepoSnapshot = record
@@ -166,6 +169,9 @@ type
     Bisect: TGittanBisect;
     {** The branches and tags, from Refs: what Base can be set to. }
     Refs: TStringArray;
+    {** The remotes' URLs as git reaches them, from ResolvedRemoteUrlsIn:
+      which forge the repository is on (gittan.forge's ForgeClassFor). }
+    RemoteUrls: string;
   end;
   PGittanRepoSnapshot = ^TGittanRepoSnapshot;
 
@@ -254,6 +260,9 @@ type
     FIndexAdded: boolean;
     FIgnoreWhitespace: boolean;
     FOnOutput: TGittanOutputEvent;
+    {** The folder a linked worktree's git directory shares with the
+      main one (its commondir file), else the git directory itself. }
+    function CommonDir: string;
     function RunGit(const ADir: string; const AArgs: array of string;
       out AOutput: string; const AIndexFile: string = ''): boolean;
     function RunRemote(const AArgs: array of string): boolean;
@@ -411,6 +420,11 @@ type
     {** The whole message of HEAD, without its trailing line ends; false
       before the first commit. }
     function HeadMessage(out AMessage: string): boolean;
+    {** The paths HEAD changes against its first parent (every path of a
+      first commit), a rename as its two paths, in AList, which an amend
+      keeps in the commit beside those it adds; false before the first
+      commit. }
+    function HeadPaths(AList: TStrings): boolean;
     {** Whether ARef names a commit in the repository. }
     function HasCommit(const ARef: string): boolean;
     {** The full id of the commit ARef names, empty when it names none. }
@@ -924,6 +938,15 @@ type
       files of the work tree in place of their pointers from what the
       store has. }
     function LfsInstall: boolean;
+    {** Locks APath on the LFS server for the user (`git lfs lock`), so
+      no one else pushes a change to it. False, with the reason in
+      Error, when git-lfs is not installed or the server said no (held
+      by someone else, say). }
+    function LfsLock(const APath: string): boolean;
+    {** Gives up the lock on APath (`git lfs unlock`); AForce also takes
+      another user's lock away, and one on a file with changes not
+      committed. False, with the reason in Error. }
+    function LfsUnlock(const APath: string; AForce: boolean): boolean;
     {** The output of `git blame --porcelain` for APath as it is in the
       commit ARef, or in the work tree when ARef is empty, with
       IgnoreWhitespace passed on as -w. Returns false when git failed: a
@@ -951,7 +974,8 @@ type
       out ABody: string): boolean;
     {** A text that changes whenever the branch, the set of changed files
       or the content of a changed file changes: the branch, the commit ids
-      of HEAD and Base, the status of every changed file, and the size,
+      of HEAD and Base, the status of every changed file, the size and
+      modification time of the repository's config, and the size,
       modification time and content hash of every changed file on disk.
       Empty when nothing is open or git failed. Meant for polling: two
       equal fingerprints mean there is nothing new to show. }
@@ -1198,10 +1222,11 @@ function RunGitIn(const ADir: string; const AArgs: array of string;
 
 {** RunGitIn with the variables AEnv ("NAME=value") set besides those
   Gittan always sets, and AOnOutput told of each piece git writes as it
-  runs, on either stream. }
+  runs, on either stream. ACancel, when given, is asked as git runs, and
+  True ends it: false then, with no reason in AError. }
 function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
   out AOutput, AError: string; const AIndexFile: string = '';
-  AOnOutput: TGittanOutputEvent = nil): boolean;
+  AOnOutput: TGittanOutputEvent = nil; ACancel: TGittanCancelEvent = nil): boolean;
 
 {** The variables a command that goes to the network runs with in ADir
   besides Gittan's own: ssh in batch mode (see
@@ -1249,6 +1274,18 @@ procedure GoneUpstreamsIn(const ADir: string; AList: TStrings);
   `git config --get-regexp ^remote\..*\.url$` prints them ("remote.<name>.url
   <url>"); empty when it has none or ADir is no repository. For threads. }
 function RemoteUrlsIn(const ADir: string): string;
+
+{** The URLs of the remotes of the repository in ADir as git reaches
+  them: as RemoteUrlsIn gives them, each rewritten by the
+  url.<base>.insteadOf rules of the config (ApplyInsteadOf), read with
+  them in one git config. For threads. }
+function ResolvedRemoteUrlsIn(const ADir: string): string;
+
+{** AConfig's remote URLs (the lines `git config --get-regexp` prints for
+  ^remote\..*\.url$ and ^url\..*\.insteadof$ together) each rewritten as
+  git does: the longest insteadOf value the URL starts with is replaced
+  by its base. Gives the remote lines alone, "remote.<name>.url <url>". }
+function ApplyInsteadOf(const AConfig: string): string;
 
 {** Whether one of AUrls (as RemoteUrlsIn gives them) holds ARepoPath
   ("owner/repo", compared without regard to case) as its path: followed
@@ -1926,7 +1963,7 @@ end;
 
 function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
   out AOutput, AError: string; const AIndexFile: string;
-  AOnOutput: TGittanOutputEvent): boolean;
+  AOnOutput: TGittanOutputEvent; ACancel: TGittanCancelEvent): boolean;
 var
   Args, Env: array of string;
   Status, i: integer;
@@ -1955,9 +1992,12 @@ begin
     SetLength(Env, i + 3);
   { The user's own GIT_INDEX_FILE goes even when none is given. }
   if not RunTool(GGitExe, ADir, Args, ['GIT_INDEX_FILE='], Env, AOutput, AError,
-    Status, AOnOutput) then
+    Status, AOnOutput, '', ACancel) then
   begin
-    AError := GitNotRunMessage(GGitExe);
+    if Assigned(ACancel) and ACancel() then
+      AError := ''
+    else
+      AError := GitNotRunMessage(GGitExe);
     Exit(False);
   end;
   Result := Status = 0;
@@ -1975,6 +2015,67 @@ var
 begin
   if not RunGitIn(ADir, ['config', '--get-regexp', '^remote\..*\.url$'], Result, Err) then
     Result := '';
+end;
+
+function ResolvedRemoteUrlsIn(const ADir: string): string;
+var
+  Output, Err: string;
+begin
+  if not RunGitIn(ADir, ['config', '--get-regexp',
+    '^(remote\..*\.url|url\..*\.insteadof)$'], Output, Err) then
+    Exit('');
+  Result := ApplyInsteadOf(Output);
+end;
+
+function ApplyInsteadOf(const AConfig: string): string;
+const
+  UrlKey = 'url.';
+  InsteadKey = '.insteadof';
+var
+  Lines: TStringArray;
+  Bases, Prefixes: array of string;
+  Line, Key, Value, Best: string;
+  p, i, BestLen: integer;
+begin
+  Result := '';
+  Lines := AConfig.Split([#10]);
+  Bases := nil;
+  Prefixes := nil;
+  for Line in Lines do
+  begin
+    p := Pos(' ', Line);
+    if p = 0 then
+      Continue;
+    Key := Copy(Line, 1, p - 1);
+    if (Copy(LowerCase(Key), 1, Length(UrlKey)) = UrlKey) and
+      (LowerCase(Copy(Key, Length(Key) - Length(InsteadKey) + 1, MaxInt)) = InsteadKey) then
+    begin
+      SetLength(Bases, Length(Bases) + 1);
+      SetLength(Prefixes, Length(Prefixes) + 1);
+      Bases[High(Bases)] := Copy(Key, Length(UrlKey) + 1,
+        Length(Key) - Length(UrlKey) - Length(InsteadKey));
+      Prefixes[High(Prefixes)] := TrimRight(Copy(Line, p + 1, MaxInt));
+    end;
+  end;
+  for Line in Lines do
+  begin
+    p := Pos(' ', Line);
+    if (p = 0) or (Copy(LowerCase(Line), 1, Length('remote.')) <> 'remote.') then
+      Continue;
+    Key := Copy(Line, 1, p - 1);
+    Value := TrimRight(Copy(Line, p + 1, MaxInt));
+    Best := '';
+    BestLen := 0;
+    for i := 0 to High(Prefixes) do
+      if (Length(Prefixes[i]) > BestLen) and (Copy(Value, 1, Length(Prefixes[i])) = Prefixes[i]) then
+      begin
+        BestLen := Length(Prefixes[i]);
+        Best := Bases[i];
+      end;
+    if BestLen > 0 then
+      Value := Best + Copy(Value, BestLen + 1, MaxInt);
+    Result := Result + Key + ' ' + Value + #10;
+  end;
 end;
 
 function RemoteUrlsHold(const AUrls, ARepoPath: string): boolean;
@@ -5335,6 +5436,17 @@ begin
     AMessage := '';
 end;
 
+function TGittanRepo.HeadPaths(AList: TStrings): boolean;
+var
+  Output: string;
+begin
+  AList.Clear;
+  Result := (FRoot <> '') and RunGit(FRoot, ['diff-tree', '-r', '-z', '--name-only',
+    '--no-renames', '--no-commit-id', '--root', '--diff-merges=first-parent', 'HEAD'], Output);
+  if Result then
+    SplitNul(Output, AList);
+end;
+
 { Against HEAD the list is git status itself. Against another base it is
   `git diff --name-status` turned into the same "XY path" shape, with the
   letter in the work tree column, plus the untracked files from git
@@ -5681,6 +5793,7 @@ begin
   finally
     List.Free;
   end;
+  ASnap.RemoteUrls := ResolvedRemoteUrlsIn(FRoot);
   Result := ASnap.Ok;
 end;
 
@@ -6098,6 +6211,22 @@ end;
 
 { Git LFS's store folder, found once per open: a commondir file and
   lfs.storage (a git config) are read the first time only. }
+function TGittanRepo.CommonDir: string;
+begin
+  Result := FGitDir;
+  if (FGitDir = '') or not FileExists(IncludeTrailingPathDelimiter(FGitDir) + 'commondir') then
+    Exit;
+  try
+    Result := Trim(ReadFileBytes(IncludeTrailingPathDelimiter(FGitDir) + 'commondir'));
+    if (Result <> '') and not IsAbsolutePath(Result) then
+      Result := ExpandFileName(IncludeTrailingPathDelimiter(FGitDir) + Result);
+    if Result = '' then
+      Result := FGitDir;
+  except
+    Result := FGitDir;
+  end;
+end;
+
 function TGittanRepo.LfsStore: string;
 var
   Common, Storage, Err: string;
@@ -6105,17 +6234,7 @@ begin
   Result := FLfsStore;
   if (Result <> '') or (FGitDir = '') then
     Exit;
-  Common := FGitDir;
-  if FileExists(IncludeTrailingPathDelimiter(FGitDir) + 'commondir') then
-    try
-      Common := Trim(ReadFileBytes(IncludeTrailingPathDelimiter(FGitDir) + 'commondir'));
-      if (Common <> '') and not IsAbsolutePath(Common) then
-        Common := ExpandFileName(IncludeTrailingPathDelimiter(FGitDir) + Common);
-      if Common = '' then
-        Common := FGitDir;
-    except
-      Common := FGitDir;
-    end;
+  Common := CommonDir;
   { lfs.storage replaces the lfs folder, relative to the common folder. }
   if RunGitIn(FRoot, ['config', '--get', 'lfs.storage'], Storage, Err) and (Trim(Storage) <> '') then
   begin
@@ -6214,6 +6333,14 @@ begin
     { The stashes, which the status bar counts and lists. }
     if RunGit(FRoot, ['stash', 'list', '--format=%H'], Id) then
       Result := Result + 'stash ' + StringReplace(Trim(Id), #10, ' ', [rfReplaceAll]) + #10;
+    { The repository's config, where `git remote add` and `set-url` write
+      the remotes the forge is found by. }
+    if (FGitDir <> '') and StatExact(IncludeTrailingPathDelimiter(CommonDir) + 'config', Info) then
+    begin
+      Result := Result + 'config ' + FormatDateTime('yyyymmddhhnnsszzz', Info.TimeStamp) +
+        ' ' + IntToStr(Info.Size) + #10;
+      FindClose(Info);
+    end;
     for i := 0 to Paths.Count - 1 do
       Result := Result + IntToStr(PtrUInt(Paths.Objects[i])) + ' ' + Paths[i] + #10;
     { Between two commits the files on disk do not matter. }
@@ -6388,7 +6515,7 @@ end;
 function TGittanRepo.LfsState(out AState: TGittanLfsState): boolean;
 var
   Output, Path, Oid: string;
-  Paths: TStringList;
+  Paths, Lockable: TStringList;
   Info: TSearchRec;
   Size: int64;
 begin
@@ -6416,10 +6543,27 @@ begin
           except
           end;
       end;
+    { The files with lockable besides, which git-lfs makes read-only
+      until they are locked. }
+    Lockable := TStringList.Create;
+    try
+      Lockable.Sorted := True;
+      Lockable.Duplicates := dupIgnore;
+      Lockable.AddStrings(Paths);
+      if RunGit(FRoot, ['ls-files', '-z', '--', ':(attr:lockable)'], Output) then
+      begin
+        SplitNul(Output, Paths);
+        Lockable.AddStrings(Paths);
+      end;
+      if Lockable.Count > 0 then
+        AState.Lockable := Lockable.ToStringArray(0, Lockable.Count - 1);
+    finally
+      Lockable.Free;
+    end;
   finally
     Paths.Free;
   end;
-  if AState.Files = 0 then
+  if (AState.Files = 0) and (AState.Lockable = nil) then
     Exit;
   AState.Installed := LfsInstalled;
   AState.SetUp := (RunGit(FRoot, ['config', 'filter.lfs.process'], Output) and
@@ -6449,6 +6593,34 @@ begin
     Exit(False);
   end;
   Result := RunRemote(['lfs', 'install']) and RunRemote(['lfs', 'checkout']);
+end;
+
+function TGittanRepo.LfsLock(const APath: string): boolean;
+begin
+  if (FRoot = '') or (APath = '') then
+    Exit(False);
+  if not LfsInstalled then
+  begin
+    FError := LfsMissingMessage;
+    Exit(False);
+  end;
+  { -- so a path that starts with - is not taken for an option. }
+  Result := RunRemote(['lfs', 'lock', '--', APath]);
+end;
+
+function TGittanRepo.LfsUnlock(const APath: string; AForce: boolean): boolean;
+begin
+  if (FRoot = '') or (APath = '') then
+    Exit(False);
+  if not LfsInstalled then
+  begin
+    FError := LfsMissingMessage;
+    Exit(False);
+  end;
+  if AForce then
+    Result := RunRemote(['lfs', 'unlock', '--force', '--', APath])
+  else
+    Result := RunRemote(['lfs', 'unlock', '--', APath]);
 end;
 
 { APath as a pattern of git-lfs, which takes --include as patterns

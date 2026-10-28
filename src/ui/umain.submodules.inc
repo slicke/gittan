@@ -294,7 +294,7 @@ begin
   for i := 0 to FSubJobs.Count - 1 do
   begin
     TGittanSubmoduleJob(FSubJobs[i]).Stop(False);
-    FBlameZombies.Add(FSubJobs[i]);
+    FBlameZombies.Add(TGittanSubmoduleJob(FSubJobs[i]));
   end;
   FSubJobs.Clear;
 end;
@@ -593,7 +593,7 @@ begin
   FRemoteJob.OnDone := @RemoteJobDone;
   FRemoteJob.OnOutput := @RemoteJobOutput;
   FRemoteJob.Start;
-  FStatus.ShowMessage(Format(rsSubAdding, [Path]), stNormal, 0);
+  FStatus.ShowBusy(Format(rsSubAdding, [Path]));
   ShowRemoteNotice;
   UpdateRemoteItems;
   UpdateCommitState;

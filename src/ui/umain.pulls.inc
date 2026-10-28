@@ -125,3 +125,170 @@ begin
     Exit;
   StartPullJob(True, True);
 end;
+
+{ ---------------------------------------------------------------------------
+  A new pull request
+  ---------------------------------------------------------------------------
+  Branch > Create Pull Request... and the status bar's item open the
+  forge's page for a new pull request from the current branch (a
+  wtNewPull target): GitHub's compare page, the form unfolded. A branch
+  not on a remote yet is offered the push first (push -u to the remote
+  RemoteFor gives), and a branch with commits not pushed the same (Push
+  and Open, Open Anyway); the page opens when the push worked. A push
+  that worked otherwise offers the page in its banner, for a branch
+  other than the default one that has no pull request. }
+
+{ Not for the default branch, a branch with an open pull request (one
+  merged or closed may be followed by another; another branch's among
+  the open ones the forge listed, FPulls, by its name on its remote),
+  the current branch before its first commit, during a merge or rebase,
+  or while a push or a commit runs. }
+function TRepoFrame.CanCreatePull(const ABranch: string): boolean;
+var
+  Remote, Default, RemoteBranch: string;
+  i: integer;
+begin
+  Result := Assigned(FForge) and (FRepo.Root <> '') and (ABranch <> '') and
+    (FOperation = '') and (FRemoteJob = nil) and (FCommitJob = nil) and
+    not ((ABranch = FBranch) and FHasPull and (FPull.State = prOpen)) and
+    not ((ABranch = FBranch) and (FSnapHead = ''));
+  if Result and (FDefaultBranch <> '') and
+    FRepo.SplitRemoteRef(FDefaultBranch, Remote, Default) then
+    Result := ABranch <> Default;
+  if Result and (ABranch <> FBranch) then
+  begin
+    if not FRepo.SplitRemoteRef(FRepo.Upstream(ABranch), Remote, RemoteBranch) then
+      RemoteBranch := ABranch;
+    for i := 0 to High(FPulls) do
+      if (FPulls[i].State = prOpen) and (FPulls[i].HeadRef = RemoteBranch) then
+        Exit(False);
+  end;
+end;
+
+procedure TRepoFrame.CreatePull(const ABranch: string);
+var
+  Up, Remote, RemoteBranch: string;
+  Ahead: integer;
+begin
+  if not CanCreatePull(ABranch) then
+  begin
+    if Assigned(FForge) and (ABranch = FBranch) and FHasPull and (FPull.State = prOpen) then
+      StatusNote(Format(rsNewPullHasOne, [ABranch, FPull.Number]));
+    Exit;
+  end;
+  if not FRepo.HasCommit('refs/heads/' + ABranch) then
+  begin
+    StatusNote(rsUpstreamDetached, True);
+    Exit;
+  end;
+  Up := FRepo.Upstream(ABranch);
+  if (Up = '') or not FRepo.SplitRemoteRef(Up, Remote, RemoteBranch) then
+  begin
+    Remote := FRepo.RemoteFor('');
+    if Remote = '' then
+    begin
+      StatusNote(Format(rsNewPullNoRemote, [ABranch]), True);
+      Exit;
+    end;
+    if QuestionDlg(rsNewPullTitle, Format(rsNewPullPush, [ABranch, Remote, ForgeName]),
+      mtConfirmation, [mrYes, rsPushAndOpen, 'IsDefault', mrCancel, rsCancelButton,
+      'IsCancel'], 0) <> mrYes then
+      Exit;
+    FPullAfterPush := ABranch;
+    StartRemote(rkPushBranch, pmAuto, ABranch, Remote);
+    Exit;
+  end;
+  { Another branch (the one a push banner offered) is counted against
+    its upstream here, as the snapshot counts the current one, when it
+    is pushed to the branch of its own name, as rkPushBranch pushes. }
+  Ahead := 0;
+  if ABranch = FBranch then
+  begin
+    if FHasUpstream then
+      Ahead := FAhead;
+  end
+  else if RemoteBranch = ABranch then
+    Ahead := FRepo.CountCommits(Up, 'refs/heads/' + ABranch);
+  if Ahead > 0 then
+    case QuestionDlg(rsNewPullTitle, Format(rsNewPullAhead, [Ahead, ABranch]),
+        mtConfirmation, [mrYes, rsPushAndOpen, 'IsDefault', mrNo, rsOpenAnyway,
+        mrCancel, rsCancelButton, 'IsCancel'], 0) of
+      mrYes:
+      begin
+        FPullAfterPush := ABranch;
+        if ABranch = FBranch then
+          StartRemote(rkPush)
+        else
+          StartRemote(rkPushBranch, pmAuto, ABranch, Remote);
+        Exit;
+      end;
+      mrNo: ;
+      else
+        Exit;
+    end;
+  OpenNewPull(ABranch);
+end;
+
+{ The branch as its upstream names it on its remote, in the repository
+  the remote's push URL holds, which is a fork when it is not the
+  forge's own. A remote pushed to on no host of the forge's (the forge
+  found by another remote) gives no page, but a note. }
+procedure TRepoFrame.OpenNewPull(const ABranch: string);
+var
+  Remote, RemoteBranch, Url, Err: string;
+begin
+  if not FRepo.SplitRemoteRef(FRepo.Upstream(ABranch), Remote, RemoteBranch) then
+  begin
+    Remote := '';
+    RemoteBranch := ABranch;
+  end;
+  Url := '';
+  if (Remote <> '') and RunGitIn(FRepo.Root, ['remote', 'get-url', '--push', Remote],
+    Url, Err) then
+  begin
+    Url := Trim(Url);
+    if ForgeClassFor('remote.' + Remote + '.pushurl ' + Url) <> FForge.ClassType then
+    begin
+      StatusNote(Format(rsNewPullOtherHost, [Remote, ForgeName]), True);
+      Exit;
+    end;
+    Url := RemoteRepoPath(Url);
+  end
+  else
+    Url := '';
+  OpenOnForge(NewPullTarget(RemoteBranch, Url));
+end;
+
+{ A push's success, with Create Pull Request by it when ABranch could
+  have one; the page itself when the push was asked for to open it. }
+procedure TRepoFrame.PushedBanner(const ATitle, ABranch: string);
+begin
+  if (FPullAfterPush <> '') and (FPullAfterPush = ABranch) then
+  begin
+    FPullAfterPush := '';
+    BannerSuccess(ATitle);
+    OpenNewPull(ABranch);
+    Exit;
+  end;
+  FPullAfterPush := '';
+  if not CanCreatePull(ABranch) then
+  begin
+    BannerSuccess(ATitle);
+    Exit;
+  end;
+  MarkNews;
+  FPushedBranch := ABranch;
+  FBanner.AddAction(ATitle, '', bkSuccess, BannerActionSeconds, rsNewPullAction,
+    @NewPullBannerClick);
+end;
+
+procedure TRepoFrame.MenuNewPullClick(Sender: TObject);
+begin
+  CreatePull(FBranch);
+end;
+
+procedure TRepoFrame.NewPullBannerClick(Sender: TObject);
+begin
+  if FPushedBranch <> '' then
+    CreatePull(FPushedBranch);
+end;

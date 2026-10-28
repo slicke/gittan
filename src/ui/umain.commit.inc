@@ -840,6 +840,8 @@ begin
   Paths := TStringList.Create;
   try
     ChosenCommitPaths(Paths);
+    if not LockedCommitAsk(Paths, FCommitAmend.Checked) then
+      Exit;
     { The files with changes left out go in as their text without them
       (see umain.leaveout.inc). }
     if not CommitParts(Paths, Parts, Err) then
@@ -859,7 +861,7 @@ begin
   end;
   FCommitJob.OnDone := @CommitJobDone;
   FCommitJob.Start;
-  FStatus.ShowMessage(rsCommitting, stNormal, 0);
+  FStatus.ShowBusy(rsCommitting);
   UpdateCommitState;
   UpdateRemoteItems;
 end;

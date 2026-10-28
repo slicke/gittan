@@ -15,7 +15,7 @@
     </General>
     <VersionInfo>
       <UseVersionInfo Value="True"/>
-      <MinorVersionNr Value="6"/>
+      <MinorVersionNr Value="7"/>
       <StringTable FileDescription="Git Tree Analyzer &amp; Navigator" InternalName="Gittan" OriginalFilename="Gittan.exe" ProductName="Git Tree Analyzer &amp; Navigator"/>
     </VersionInfo>
     <BuildModes>
@@ -98,6 +98,10 @@
         <ComponentName Value="GittanWindow"/>
         <HasResources Value="True"/>
         <ResourceBaseClass Value="Form"/>
+      </Unit>
+      <Unit>
+        <Filename Value="src/ui/uforge.pp"/>
+        <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
         <Filename Value="src/ui/gittan.lexers.pp"/>
@@ -209,6 +213,14 @@
       </Unit>
       <Unit>
         <Filename Value="src/core/gittan.github.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
+        <Filename Value="src/core/gittan.agentcli.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
+        <Filename Value="src/core/gittan.openai.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>

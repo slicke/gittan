@@ -40,7 +40,7 @@ begin
   FRemoteJob.OnDone := @RemoteJobDone;
   FRemoteJob.OnOutput := @RemoteJobOutput;
   FRemoteJob.Start;
-  FStatus.ShowMessage(Format(rsCloning, [CloneFolderName(AUrl)]), stNormal, 0);
+  FStatus.ShowBusy(Format(rsCloning, [CloneFolderName(AUrl)]), HintDown);
   ShowRemoteNotice;
   UpdateRemoteItems;
   UpdateCommitState;

@@ -10,7 +10,9 @@ unit gittan.github;
   address of a file, a commit or an issue (GitHubWebArgs). GitHub's words
   (OPEN, APPROVED, SUCCESS) are turned into gittan.forge's kinds here
   and go no further. Every gh runs through RunGh, with its prompts and
-  its update notice off. Nothing here needs the LCL. }
+  its update notice off. The unit registers the forge as it loads
+  (RegisterForge), so nothing outside it names TGittanGitHubForge.
+  Nothing here needs the LCL. }
 
 {$mode objfpc}{$H+}
 
@@ -90,8 +92,16 @@ function RepoPathOfUrl(const AUrl: string): string;
 
 {** The arguments of gh browse --no-browser for ATarget: "path:line"
   with --commit=<id> or --branch <name> for a file, the id for a commit,
-  the number for an issue or pull request. }
+  the number for an issue or pull request, none for a new pull request
+  (the repository's address, which GitHubNewPullUrl goes on from). }
 function GitHubWebArgs(const ATarget: TGittanWebTarget): TStringArray;
+
+{** The page that opens a new pull request from ABranch in the
+  repository at ARepoUrl (https://github.com/owner/repo): its compare
+  page with the form unfolded, the branch escaped. A branch pushed to
+  another repository (AHeadRepo, "owner/repo", a fork) goes in as
+  "owner:branch", as GitHub takes it. }
+function GitHubNewPullUrl(const ARepoUrl, ABranch, AHeadRepo: string): string;
 
 {** The repository ("owner/name"), the file and the line (0 for none)
   of a GitHub address of a file in a commit or on a branch:
@@ -105,8 +115,12 @@ type
   {** GitHub through gh (Cli, a path to it). }
   TGittanGitHubForge = class(TGittanForge)
   public
-    function Name: string; override;
+    class function Name: string; override;
     class function CliName: string; override;
+    {** github.com, the GitHub Enterprise hosts gh is logged in to
+      (GhHosts of the hosts.yml in GhConfigDir), and the one GH_HOST
+      names when gh's environment gives a token for it (GhEnvHost). }
+    class function HostsRemote(const AHost: string): boolean; override;
     function Version(out AVersion: string): boolean; override;
     function PullJob(const ARoot, ABranch, ALogin: string): TGittanPullRequestJob; override;
     function ReviewJob(const ARoot, ARepo: string; ANumber: integer): TGittanReviewJob;
@@ -119,10 +133,81 @@ type
     function PullRef(ANumber: integer): string; override;
   end;
 
+{** gh's configuration folder: GH_CONFIG_DIR, else "GitHub CLI" in
+  AppData on Windows, else gh in XDG_CONFIG_HOME or ~/.config. }
+function GhConfigDir: string;
+
+{** The hosts gh is logged in to, the top-level keys of its hosts.yml
+  (AText), in lower case. }
+function GhHosts(const AText: string): TStringArray;
+
+{** The host gh reaches through the environment with no login in
+  hosts.yml: AHost (GH_HOST) in lower case when the token gh takes for
+  it is given, AEnterpriseToken (GH_ENTERPRISE_TOKEN or
+  GITHUB_ENTERPRISE_TOKEN) for a GitHub Enterprise Server, AToken
+  (GH_TOKEN or GITHUB_TOKEN) for one under ghe.com; empty otherwise. }
+function GhEnvHost(const AHost, AToken, AEnterpriseToken: string): string;
+
 implementation
 
 uses
   DateUtils, fpjson, jsonparser, gittan.git;
+
+function GhConfigDir: string;
+begin
+  Result := EnvironmentVariable('GH_CONFIG_DIR');
+  if Result <> '' then
+    Exit;
+  {$ifdef windows}
+  Result := EnvironmentVariable('AppData');
+  if Result <> '' then
+    Result := IncludeTrailingPathDelimiter(Result) + 'GitHub CLI';
+  {$else}
+  Result := EnvironmentVariable('XDG_CONFIG_HOME');
+  if Result = '' then
+    Result := IncludeTrailingPathDelimiter(GetUserDir) + '.config';
+  Result := IncludeTrailingPathDelimiter(Result) + 'gh';
+  {$endif}
+end;
+
+function GhHosts(const AText: string): TStringArray;
+var
+  Line, Host: string;
+begin
+  Result := nil;
+  for Line in AText.Split([#10]) do
+  begin
+    { A key at the start of a line, "host:"; the settings under it are
+      indented. }
+    if (Line = '') or (Line[1] in [' ', #9, '#', '-']) then
+      Continue;
+    Host := Trim(Line);
+    if (Host = '') or (Host[Length(Host)] <> ':') then
+      Continue;
+    Host := LowerCase(Trim(Copy(Host, 1, Length(Host) - 1)));
+    if (Length(Host) >= 2) and (Host[1] in ['"', '''']) then
+      Host := Copy(Host, 2, Length(Host) - 2);
+    if Host <> '' then
+    begin
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := Host;
+    end;
+  end;
+end;
+
+function GhEnvHost(const AHost, AToken, AEnterpriseToken: string): string;
+begin
+  Result := LowerCase(Trim(AHost));
+  if (Result = '') or (Result = 'github.com') then
+    Exit('');
+  if (Result = 'ghe.com') or Result.EndsWith('.ghe.com') then
+  begin
+    if AToken = '' then
+      Result := '';
+  end
+  else if AEnterpriseToken = '' then
+    Result := '';
+end;
 
 { ---------------------------------------------------------------------------
   gh
@@ -762,6 +847,26 @@ begin
   end;
 end;
 
+function GitHubNewPullUrl(const ARepoUrl, ABranch, AHeadRepo: string): string;
+var
+  Url, Base, Head: string;
+  c: char;
+begin
+  Url := Trim(ARepoUrl);
+  while (Url <> '') and (Url[Length(Url)] = '/') do
+    SetLength(Url, Length(Url) - 1);
+  Head := '';
+  for c in ABranch do
+    if c in ['A'..'Z', 'a'..'z', '0'..'9', '-', '.', '_', '~', '/'] then
+      Head := Head + c
+    else
+      Head := Head + '%' + IntToHex(Ord(c), 2);
+  Base := RepoPathOfUrl(Url);
+  if (AHeadRepo <> '') and (Pos('/', AHeadRepo) > 1) and not SameText(AHeadRepo, Base) then
+    Head := Copy(AHeadRepo, 1, Pos('/', AHeadRepo) - 1) + ':' + Head;
+  Result := Url + '/compare/' + Head + '?expand=1';
+end;
+
 { ---------------------------------------------------------------------------
   The jobs
   --------------------------------------------------------------------------- }
@@ -931,7 +1036,71 @@ end;
   The forge
   --------------------------------------------------------------------------- }
 
-function TGittanGitHubForge.Name: string;
+var
+  { The hosts of gh's hosts.yml as last read, with the file's path and
+    age then, so it is read from disk again only when it has changed:
+    ForgeClassFor asks for every remote of every repository. Main
+    thread only. }
+  LoggedHosts: TStringArray;
+  LoggedHostsPath: string;
+  LoggedHostsAge: longint = -2;
+
+{ The hosts gh is logged in to, the file read again when it changed
+  (FileAge -1: none, and none logged in). }
+function GhLoggedHosts: TStringArray;
+var
+  Path: string;
+  Age: longint;
+  Lines: TStringList;
+begin
+  Path := IncludeTrailingPathDelimiter(GhConfigDir) + 'hosts.yml';
+  Age := FileAge(Path);
+  if (Age <> LoggedHostsAge) or (Path <> LoggedHostsPath) then
+  begin
+    LoggedHostsAge := Age;
+    LoggedHostsPath := Path;
+    LoggedHosts := nil;
+    if Age <> -1 then
+    begin
+      Lines := TStringList.Create;
+      try
+        try
+          Lines.LoadFromFile(Path);
+          LoggedHosts := GhHosts(Lines.Text);
+        except
+          LoggedHosts := nil;
+        end;
+      finally
+        Lines.Free;
+      end;
+    end;
+  end;
+  Result := LoggedHosts;
+end;
+
+class function TGittanGitHubForge.HostsRemote(const AHost: string): boolean;
+var
+  Host, Token, Enterprise: string;
+begin
+  Result := (AHost = 'github.com') or (AHost = 'www.github.com') or
+    (AHost = 'ssh.github.com');
+  if Result then
+    Exit;
+  for Host in GhLoggedHosts do
+    if Host = AHost then
+      Exit(True);
+  { An Enterprise host gh is given a token for in its environment. }
+  Token := EnvironmentVariable('GH_TOKEN');
+  if Token = '' then
+    Token := EnvironmentVariable('GITHUB_TOKEN');
+  Enterprise := EnvironmentVariable('GH_ENTERPRISE_TOKEN');
+  if Enterprise = '' then
+    Enterprise := EnvironmentVariable('GITHUB_ENTERPRISE_TOKEN');
+  Host := GhEnvHost(EnvironmentVariable('GH_HOST'), Token, Enterprise);
+  Result := (Host <> '') and (Host = AHost);
+end;
+
+class function TGittanGitHubForge.Name: string;
 begin
   Result := 'GitHub';
 end;
@@ -996,6 +1165,8 @@ begin
   Result := RunGh(Cli, ARoot, Args, AUrl, AError);
   AUrl := Trim(AUrl);
   Result := Result and (AUrl <> '');
+  if Result and (ATarget.Kind = wtNewPull) then
+    AUrl := GitHubNewPullUrl(AUrl, ATarget.Branch, ATarget.HeadRepo);
 end;
 
 function GitHubFileOfUrl(const AUrl: string; out ARepo, APath: string;
@@ -1068,5 +1239,8 @@ function TGittanGitHubForge.PullRef(ANumber: integer): string;
 begin
   Result := 'refs/pull/' + IntToStr(ANumber) + '/head';
 end;
+
+initialization
+  RegisterForge(TGittanGitHubForge);
 
 end.

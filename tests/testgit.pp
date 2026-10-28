@@ -11,7 +11,7 @@ interface
 uses
   { gittan.repoinfo first: its ParseTags is not the one tested here. }
   Classes, SysUtils, fpcunit, testregistry, gittan.repoinfo, gittan.git, gittan.history,
-  gittan.graph, gittan.rebase, gittan.blame, gittan.conflicts, gittan.discard;
+  gittan.graph, gittan.rebase, gittan.blame, gittan.conflicts, gittan.discard, testhelpers;
 
 type
   TGitRepoTest = class(TTestCase)
@@ -31,6 +31,7 @@ type
     procedure TearDown; override;
   published
     procedure TestWindowsArg;
+    procedure TestInsteadOf;
     procedure TestChangeKind;
     procedure TestStageFlags;
     procedure TestOpenNonRepo;
@@ -76,6 +77,7 @@ type
     procedure TestGoneUpstreams;
     procedure TestCommit;
     procedure TestCommitAmendAndHook;
+    procedure TestHeadPaths;
     procedure TestCommitUnborn;
     procedure TestCommitParts;
     procedure TestCommitMerge;
@@ -145,26 +147,6 @@ const
     forms come through as they are. Windows forbids a quote in a file
     name, so there the test settles for an apostrophe. }
   QuoteName = {$ifdef MSWINDOWS}'q''uote.txt'{$else}'q"uote.txt'{$endif};
-
-procedure RemoveTree(const ADir: string);
-var
-  Info: TSearchRec;
-begin
-  if FindFirst(IncludeTrailingPathDelimiter(ADir) + '*', faAnyFile, Info) = 0 then
-  try
-    repeat
-      if (Info.Name = '.') or (Info.Name = '..') then
-        Continue;
-      if Info.Attr and faDirectory <> 0 then
-        RemoveTree(IncludeTrailingPathDelimiter(ADir) + Info.Name)
-      else
-        DeleteFile(IncludeTrailingPathDelimiter(ADir) + Info.Name);
-    until FindNext(Info) <> 0;
-  finally
-    FindClose(Info);
-  end;
-  RemoveDir(ADir);
-end;
 
 procedure TGitRepoTest.SetUp;
 begin
@@ -259,6 +241,22 @@ end;
 { As the C runtime of Windows reads it back: 2n backslashes and a quote
   are n backslashes and the end of the quotes, 2n+1 and a quote are n and
   a quote; other backslashes are themselves. }
+procedure TGitRepoTest.TestInsteadOf;
+begin
+  { The longest prefix wins; a URL no rule fits stays as it is; the
+    rules' lines are left out. }
+  AssertEquals('remote.origin.url git@github.com:slicke/gittan.git'#10 +
+    'remote.up.url https://example.org/a.git'#10 +
+    'remote.work.url https://ghe.example.com/team/x'#10,
+    ApplyInsteadOf('url.git@github.com:.insteadof gh:'#10 +
+    'remote.origin.url gh:slicke/gittan.git'#10 +
+    'url.https://ghe.example.com/.insteadof work:'#10 +
+    'url.https://ghe.example.com/team/.insteadof work:t/'#10 +
+    'remote.up.url https://example.org/a.git'#10 +
+    'remote.work.url work:t/x'#10));
+  AssertEquals('', ApplyInsteadOf(''));
+end;
+
 procedure TGitRepoTest.TestWindowsArg;
 begin
   AssertEquals('plain', WindowsArg('plain'));
@@ -643,6 +641,11 @@ begin
   A := FRepo.Fingerprint;
   AssertTrue('an operation begun seen', A <> B);
   Git(['bisect', 'reset']);
+  { A remote added outside, which the forge is found by. }
+  A := FRepo.Fingerprint;
+  Git(['remote', 'add', 'origin', 'https://github.com/o/r.git']);
+  B := FRepo.Fingerprint;
+  AssertTrue('a remote added seen', A <> B);
 end;
 
 { A snapshot holds the untracked files, and the whole tree comparison
@@ -1067,6 +1070,7 @@ begin
   AssertTrue(FRepo.LfsState(State));
   AssertEquals(2, State.Files);
   AssertEquals('the pointer in the work tree', 1, State.Pointers);
+  AssertEquals('art.psd real.psd', string.Join(' ', State.Lockable));
   AssertEquals(FindTool('git-lfs') <> '', State.Installed);
   AssertFalse('the tests'' config has no filter', State.SetUp);
   Git(['config', 'filter.lfs.process', 'git-lfs filter-process']);
@@ -1075,6 +1079,18 @@ begin
   Git(['config', '--unset', 'filter.lfs.process']);
   Git(['rm', '-q', 'real.psd']);
   Git(['commit', '-q', '-m', 'Drop the real one']);
+  { A lockable file outside Git LFS may be locked too, once. }
+  WriteFile('.gitattributes', '*.psd filter=lfs diff=lfs merge=lfs -text'#10 +
+    '*.psd lockable'#10'plan.txt lockable'#10);
+  WriteFile('plan.txt', 'plan'#10);
+  Git(['add', '.gitattributes', 'plan.txt']);
+  AssertTrue(FRepo.LfsState(State));
+  AssertEquals(1, State.Files);
+  AssertEquals('art.psd plan.txt', string.Join(' ', State.Lockable));
+  Git(['rm', '-q', '--cached', 'plan.txt']);
+  WriteFile('.gitattributes', '*.psd filter=lfs diff=lfs merge=lfs -text'#10);
+  Git(['add', '.gitattributes']);
+  DeleteFile(FDir + PathDelim + 'plan.txt');
   AssertEquals(ExpandFileName(IncludeTrailingPathDelimiter(FRepo.GitDir) + 'lfs') + PathDelim +
     'objects' + PathDelim + 'aa' + PathDelim + 'aa' + PathDelim + OldOid,
     FRepo.LfsObjectFile(OldOid));
@@ -1769,6 +1785,42 @@ begin
   AssertEquals('M  dir sp/fil å.txt'#0'?? bra.txt'#0, Text);
   AssertTrue(FRepo.HeadMessage(Text));
   AssertEquals(Message, Text);
+end;
+
+{ The paths an amend keeps: a first commit's every file, then what HEAD
+  changed, a rename as both paths, and a merge against its first parent
+  alone. }
+procedure TGitRepoTest.TestHeadPaths;
+var
+  Paths: TStringList;
+begin
+  Paths := TStringList.Create;
+  try
+    Git(['init', '-q', '-b', 'main']);
+    AssertTrue(FRepo.Open(FDir));
+    AssertFalse('before the first commit', FRepo.HeadPaths(Paths));
+    WriteFile('a.txt', 'a'#10);
+    WriteFile('dir sp/b.txt', 'b'#10);
+    Commit('first');
+    AssertTrue(FRepo.Error, FRepo.HeadPaths(Paths));
+    AssertEquals('a.txt|dir sp/b.txt|', Joined(Paths));
+    Git(['mv', '--', 'a.txt', '-a.txt']);
+    WriteFile('c.txt', 'c'#10);
+    Commit('second');
+    AssertTrue(FRepo.Error, FRepo.HeadPaths(Paths));
+    AssertEquals('-a.txt|a.txt|c.txt|', Joined(Paths));
+    Git(['checkout', '-q', '-b', 'side']);
+    WriteFile('side.txt', 's'#10);
+    Commit('side');
+    Git(['checkout', '-q', 'main']);
+    WriteFile('main.txt', 'm'#10);
+    Commit('main');
+    Git(['merge', '-q', '--no-edit', 'side']);
+    AssertTrue(FRepo.Error, FRepo.HeadPaths(Paths));
+    AssertEquals('side.txt|', Joined(Paths));
+  finally
+    Paths.Free;
+  end;
 end;
 
 { Amend without paths changes only the message; a hook that fails

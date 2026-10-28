@@ -8,8 +8,10 @@ unit gittan.forge;
   its name, the tool it runs, the jobs it makes, the address of a file,
   a commit or an issue, and where a remote serves a pull request's head.
   Nothing here names a forge; GitHub is TGittanGitHubForge in
-  gittan.github, and another forge is a unit of its own beside it.
-  Nothing here needs the LCL. }
+  gittan.github, and another forge is a unit of its own beside it,
+  which registers its class as it loads (RegisterForge), so the rest of
+  Gittan makes one through ForgeClass without naming it. Nothing here
+  needs the LCL. }
 
 {$mode objfpc}{$H+}
 
@@ -17,6 +19,10 @@ interface
 
 uses
   Classes, SysUtils, gittan.job, gittan.reviews;
+
+const
+  {** A pull request unchanged this many days is stale (IsStale). }
+  StaleDays = 30;
 
 type
   {** Where a pull request stands. }
@@ -88,13 +94,22 @@ type
   end;
   TGittanForgePulls = array of TGittanForgePull;
 
+  {** What a list of the user's pull requests can be narrowed to: the
+    ones with Feedback, the ones that need attention (NeedsAttention),
+    no drafts, the ones the user is asked to review in person
+    (Requested), the stale ones (IsStale). }
+  TGittanForgeFilter = (ffFeedback, ffAttention, ffNoDrafts, ffAskedOfMe, ffStale);
+  TGittanForgeFilters = set of TGittanForgeFilter;
+
   {** What a web address is asked for: a file (Path, at Line when above
     0, in Commit, else on Branch, else the default branch), a commit
-    (Commit), or an issue or pull request (Number). }
-  TGittanWebKind = (wtFile, wtCommit, wtIssue);
+    (Commit), an issue or pull request (Number), or the page that opens
+    a new pull request from Branch (in HeadRepo, "owner/repo", when it
+    is pushed to another repository than the forge's, a fork). }
+  TGittanWebKind = (wtFile, wtCommit, wtIssue, wtNewPull);
   TGittanWebTarget = record
     Kind: TGittanWebKind;
-    Path, Commit, Branch: string;
+    Path, Commit, Branch, HeadRepo: string;
     Line, Number: integer;
   end;
 
@@ -105,6 +120,9 @@ function FileTarget(const APath: string; ALine: integer;
 function CommitTarget(const ACommit: string): TGittanWebTarget;
 {** An issue's or a pull request's TGittanWebTarget. }
 function IssueTarget(ANumber: integer): TGittanWebTarget;
+{** The TGittanWebTarget of a new pull request from ABranch, pushed to
+  AHeadRepo ("owner/repo"; empty when not known). }
+function NewPullTarget(const ABranch, AHeadRepo: string): TGittanWebTarget;
 
 {** APulls without the ones ALogin has already approved or requested
   changes on (their latest review): a forge's search for the reviews
@@ -157,6 +175,23 @@ function StillToReview(const AReview: TGittanForgePulls): TGittanForgePulls;
 {** APulls without the ones nobody but their author has answered (no
   Feedback). }
 function WithFeedback(const APulls: TGittanForgePulls): TGittanForgePulls;
+{** Whether APull needs its author to act: changes were asked for or
+  its checks fail. }
+function NeedsAttention(const APull: TGittanForgePull): boolean;
+{** Whether APull has not changed for StaleDays at ANow (UTC): its
+  last change, or its opening when it has none, that long ago. }
+function IsStale(const APull: TGittanForgePull; ANow: TDateTime): boolean;
+{** Whether APull passes AFilter at ANow (UTC). }
+function PassesFilter(const APull: TGittanForgePull; AFilter: TGittanForgeFilter;
+  ANow: TDateTime): boolean;
+{** APulls without the ones that fail any of AFilters at ANow (UTC), in
+  their order. }
+function FilterPulls(const APulls: TGittanForgePulls; AFilters: TGittanForgeFilters;
+  ANow: TDateTime): TGittanForgePulls;
+{** APull as a TGittanPullRequest, for what works on the repository's
+  own pull requests (a comparison): the fields both have, the rest
+  empty. }
+function PullRequestOf(const APull: TGittanForgePull): TGittanPullRequest;
 
 type
   {** Reads, in a thread since it goes to the network, the pull request
@@ -258,10 +293,15 @@ type
     FCli: string;
   public
     constructor Create(const ACli: string); virtual;
-    {** The forge's name, as the interface shows it: "GitHub". }
-    function Name: string; virtual; abstract;
+    {** The forge's name, as the interface shows it and the settings
+      keep its section under: "GitHub". }
+    class function Name: string; virtual; abstract;
     {** The name of its tool, as found on the search path: "gh". }
     class function CliName: string; virtual; abstract;
+    {** Whether a remote on AHost (as RemoteHost gives it, "github.com")
+      is on this forge, so a repository with it gets this forge
+      (ForgeClassFor). }
+    class function HostsRemote(const AHost: string): boolean; virtual; abstract;
     property Cli: string read FCli;
     {** The tool's version, from its own --version, as "gh 2.62.0"; false
       when it could not be run. }
@@ -291,11 +331,353 @@ type
     function PullRef(ANumber: integer): string; virtual; abstract;
   end;
   TGittanForgeClass = class of TGittanForge;
+  TGittanForgeClasses = array of TGittanForgeClass;
+
+{** Adds AClass to the forges Gittan knows; a forge's unit calls it in
+  its initialization. }
+procedure RegisterForge(AClass: TGittanForgeClass);
+{** The forge Gittan uses where no repository decides, as for the
+  user's pull requests across every repository: the first registered
+  (GitHub, the one forge so far); nil while none is. }
+function ForgeClass: TGittanForgeClass;
+{** Every forge registered, in the order they were. }
+function RegisteredForges: TGittanForgeClasses;
+{** The forge of a repository whose remotes are AUrls (as
+  ResolvedRemoteUrlsIn gives them, a "remote.<name>.url <url>" line
+  each): the first registered that hosts one of them, the remotes taken
+  in order; a host of an ssh URL no forge takes is looked up in ASshConfig
+  (SshHostName; the text of ~/.ssh/config, UserSshConfig) and asked
+  again, so github-work aliasing github.com is GitHub. Nil when none
+  does (no remote, or none on a known forge). }
+function ForgeClassFor(const AUrls: string; const ASshConfig: string): TGittanForgeClass;
+  overload;
+{** As above with the user's ~/.ssh/config, read only when the hosts as
+  they are give no forge and one of them is an ssh remote's, and then
+  only the aliases looked up. }
+function ForgeClassFor(const AUrls: string): TGittanForgeClass; overload;
+{** Keeps AForge as the forge of AClass with the tool ACli: left as it
+  is when it already is, else freed and made again, or left nil without
+  a class or a tool. True when it changed, so what the old one found can
+  be dropped. }
+function KeepForge(var AForge: TGittanForge; AClass: TGittanForgeClass;
+  const ACli: string): boolean;
+{** The host name ssh connects to for AHost by AConfig (an ssh_config's
+  text): the HostName of the first Host block whose patterns match it
+  (* and ? wildcards, ! to exclude, case ignored; %h is AHost; the
+  value may be in double quotes), the lines before the first Host applying to all; AHost itself when none
+  sets one. Match blocks and Include are not followed. }
+function SshHostName(const AHost, AConfig: string): string;
+{** The text of the user's ~/.ssh/config, empty when there is none. }
+function UserSshConfig: string;
+{** The host of a remote's URL in lower case, without the user and the
+  port: "github.com" of https://github.com/o/r.git, git@github.com:o/r.git
+  and ssh://git@github.com:22/o/r; empty for a local path or a file://
+  URL. }
+function RemoteHost(const AUrl: string): string;
+{** The repository's path on its host of a remote's URL, without ".git"
+  and the slashes around it: "o/r" of https://github.com/o/r.git,
+  git@github.com:o/r and ssh://git@github.com:22/o/r/; empty where
+  RemoteHost is. }
+function RemoteRepoPath(const AUrl: string): string;
 
 implementation
 
 uses
   gittan.git;
+
+var
+  Forges: array of TGittanForgeClass;
+
+procedure RegisterForge(AClass: TGittanForgeClass);
+begin
+  SetLength(Forges, Length(Forges) + 1);
+  Forges[High(Forges)] := AClass;
+end;
+
+function ForgeClass: TGittanForgeClass;
+begin
+  if Length(Forges) = 0 then
+    Exit(nil);
+  Result := Forges[0];
+end;
+
+function RegisteredForges: TGittanForgeClasses;
+begin
+  Result := Copy(Forges);
+end;
+
+{ The registered forge that hosts AHost, nil for none. }
+function ForgeOfHost(const AHost: string): TGittanForgeClass;
+var
+  i: integer;
+begin
+  for i := 0 to High(Forges) do
+    if Forges[i].HostsRemote(AHost) then
+      Exit(Forges[i]);
+  Result := nil;
+end;
+
+{ Whether AUrl goes over ssh: user@host:path, or an ssh:// URL. }
+function IsSshUrl(const AUrl: string): boolean;
+var
+  p: integer;
+begin
+  p := Pos('://', AUrl);
+  if p = 0 then
+    Result := RemoteHost(AUrl) <> ''
+  else
+    Result := Pos('ssh', LowerCase(Copy(AUrl, 1, p - 1))) > 0;
+end;
+
+{ The remotes in order, each host asked of the forges as it is, unless
+  AAliasesOnly (a pass that did so already), then an ssh remote's host
+  as ASshConfig resolves it when that differs. }
+function ForgeClassIn(const AUrls, ASshConfig: string; AAliasesOnly: boolean): TGittanForgeClass;
+var
+  Line, Url, Host, Alias: string;
+  p: integer;
+begin
+  for Line in AUrls.Split([#10]) do
+  begin
+    p := Pos(' ', Line);
+    if p = 0 then
+      Continue;
+    Url := Trim(Copy(Line, p + 1, MaxInt));
+    Host := RemoteHost(Url);
+    if Host = '' then
+      Continue;
+    if not AAliasesOnly then
+    begin
+      Result := ForgeOfHost(Host);
+      if Result <> nil then
+        Exit;
+    end;
+    if IsSshUrl(Url) and (ASshConfig <> '') then
+    begin
+      Alias := LowerCase(SshHostName(Host, ASshConfig));
+      if Alias <> Host then
+      begin
+        Result := ForgeOfHost(Alias);
+        if Result <> nil then
+          Exit;
+      end;
+    end;
+  end;
+  Result := nil;
+end;
+
+{ Whether one of AUrls is an ssh remote's, whose host may be an alias. }
+function HasSshUrl(const AUrls: string): boolean;
+var
+  Line: string;
+  p: integer;
+begin
+  for Line in AUrls.Split([#10]) do
+  begin
+    p := Pos(' ', Line);
+    if (p > 0) and IsSshUrl(Trim(Copy(Line, p + 1, MaxInt))) then
+      Exit(True);
+  end;
+  Result := False;
+end;
+
+function ForgeClassFor(const AUrls: string; const ASshConfig: string): TGittanForgeClass;
+begin
+  Result := ForgeClassIn(AUrls, ASshConfig, False);
+end;
+
+function ForgeClassFor(const AUrls: string): TGittanForgeClass;
+begin
+  { The config only when a host is not known as it is, and only the
+    aliases then: the hosts were asked already. }
+  Result := ForgeClassIn(AUrls, '', False);
+  if (Result = nil) and HasSshUrl(AUrls) then
+    Result := ForgeClassIn(AUrls, UserSshConfig, True);
+end;
+
+function KeepForge(var AForge: TGittanForge; AClass: TGittanForgeClass;
+  const ACli: string): boolean;
+begin
+  if Assigned(AForge) then
+    Result := (AForge.ClassType <> AClass) or (AForge.Cli <> ACli)
+  else
+    Result := (AClass <> nil) and (ACli <> '');
+  if not Result then
+    Exit;
+  FreeAndNil(AForge);
+  if (AClass <> nil) and (ACli <> '') then
+    AForge := AClass.Create(ACli);
+end;
+
+{ Whether AText matches APattern, * any run and ? any one character,
+  case ignored. }
+function GlobMatch(const AText, APattern: string): boolean;
+
+  function Match(t, p: integer): boolean;
+  begin
+    while p <= Length(APattern) do
+    begin
+      case APattern[p] of
+        '*':
+          begin
+            while (p <= Length(APattern)) and (APattern[p] = '*') do
+              Inc(p);
+            if p > Length(APattern) then
+              Exit(True);
+            while t <= Length(AText) do
+            begin
+              if Match(t, p) then
+                Exit(True);
+              Inc(t);
+            end;
+            Exit(False);
+          end;
+        '?':
+          if t > Length(AText) then
+            Exit(False);
+      else
+        if (t > Length(AText)) or (LowerCase(AText[t]) <> LowerCase(APattern[p])) then
+          Exit(False);
+      end;
+      Inc(t);
+      Inc(p);
+    end;
+    Result := t > Length(AText);
+  end;
+
+begin
+  Result := Match(1, 1);
+end;
+
+function SshHostName(const AHost, AConfig: string): string;
+var
+  Line, Keyword, Args, Pattern: string;
+  Applies, Any, Excluded: boolean;
+  p: integer;
+begin
+  Applies := True;
+  for Line in AConfig.Split([#10]) do
+  begin
+    Args := Trim(Line);
+    p := Pos('#', Args);
+    if p > 0 then
+      Args := Trim(Copy(Args, 1, p - 1));
+    if Args = '' then
+      Continue;
+    { "Keyword value" or "Keyword=value". }
+    p := 1;
+    while (p <= Length(Args)) and not (Args[p] in [' ', #9, '=']) do
+      Inc(p);
+    Keyword := LowerCase(Copy(Args, 1, p - 1));
+    Args := Trim(Copy(Args, p, MaxInt));
+    if (Args <> '') and (Args[1] = '=') then
+      Args := Trim(Copy(Args, 2, MaxInt));
+    if Keyword = 'host' then
+    begin
+      Any := False;
+      Excluded := False;
+      for Pattern in Args.Split([' ', #9], TStringSplitOptions.ExcludeEmpty) do
+        if (Pattern[1] = '!') and GlobMatch(AHost, Copy(Pattern, 2, MaxInt)) then
+          Excluded := True
+        else if (Pattern[1] <> '!') and GlobMatch(AHost, Pattern) then
+          Any := True;
+      Applies := Any and not Excluded;
+    end
+    else if Keyword = 'match' then
+      Applies := False
+    else if Applies and (Keyword = 'hostname') and (Args <> '') then
+    begin
+      { ssh takes a value in double quotes as well. }
+      if (Length(Args) >= 2) and (Args[1] = '"') and (Args[Length(Args)] = '"') then
+        Args := Trim(Copy(Args, 2, Length(Args) - 2));
+      if Args <> '' then
+        Exit(StringReplace(Args, '%h', AHost, [rfReplaceAll]));
+    end;
+  end;
+  Result := AHost;
+end;
+
+function UserSshConfig: string;
+var
+  Lines: TStringList;
+begin
+  Result := '';
+  Lines := TStringList.Create;
+  try
+    try
+      Lines.LoadFromFile(IncludeTrailingPathDelimiter(GetUserDir) + '.ssh' +
+        PathDelim + 'config');
+      Result := Lines.Text;
+    except
+      Result := '';
+    end;
+  finally
+    Lines.Free;
+  end;
+end;
+
+function RemoteHost(const AUrl: string): string;
+var
+  S: string;
+  p, Colon, Slash: integer;
+begin
+  S := Trim(AUrl);
+  p := Pos('://', S);
+  if p > 0 then
+  begin
+    if SameText(Copy(S, 1, p - 1), 'file') then
+      Exit('');
+    S := Copy(S, p + 3, MaxInt);
+    Slash := Pos('/', S);
+    if Slash > 0 then
+      S := Copy(S, 1, Slash - 1);
+  end
+  else
+  begin
+    { user@host:path; a colon after a slash, or a drive letter's, is a
+      local path's. }
+    Colon := Pos(':', S);
+    Slash := Pos('/', S);
+    if (Colon <= 2) or ((Slash > 0) and (Slash < Colon)) then
+      Exit('');
+  end;
+  p := LastDelimiter('@', S);
+  if p > 0 then
+    S := Copy(S, p + 1, MaxInt);
+  Colon := Pos(':', S);
+  if Colon > 0 then
+    S := Copy(S, 1, Colon - 1);
+  Result := LowerCase(S);
+end;
+
+function RemoteRepoPath(const AUrl: string): string;
+var
+  S: string;
+  p: integer;
+begin
+  Result := '';
+  if RemoteHost(AUrl) = '' then
+    Exit;
+  S := Trim(AUrl);
+  p := Pos('://', S);
+  if p > 0 then
+  begin
+    S := Copy(S, p + 3, MaxInt);
+    p := Pos('/', S);
+    if p = 0 then
+      Exit;
+    S := Copy(S, p + 1, MaxInt);
+  end
+  else
+    S := Copy(S, Pos(':', S) + 1, MaxInt);
+  while (S <> '') and (S[Length(S)] = '/') do
+    SetLength(S, Length(S) - 1);
+  while (S <> '') and (S[1] = '/') do
+    Delete(S, 1, 1);
+  if SameText(Copy(S, Length(S) - 3, 4), '.git') then
+    SetLength(S, Length(S) - 4);
+  Result := S;
+end;
 
 function FileTarget(const APath: string; ALine: integer;
   const ACommit, ABranch: string): TGittanWebTarget;
@@ -320,6 +702,14 @@ begin
   Result := Default(TGittanWebTarget);
   Result.Kind := wtIssue;
   Result.Number := ANumber;
+end;
+
+function NewPullTarget(const ABranch, AHeadRepo: string): TGittanWebTarget;
+begin
+  Result := Default(TGittanWebTarget);
+  Result.Kind := wtNewPull;
+  Result.Branch := ABranch;
+  Result.HeadRepo := AHeadRepo;
 end;
 
 function WithoutReviewed(const APulls: TGittanPullRequests;
@@ -519,6 +909,76 @@ begin
       Inc(n);
     end;
   SetLength(Result, n);
+end;
+
+function NeedsAttention(const APull: TGittanForgePull): boolean;
+begin
+  Result := (APull.ReviewDecision = rdChangesRequested) or (APull.Checks = chkFailed);
+end;
+
+function IsStale(const APull: TGittanForgePull; ANow: TDateTime): boolean;
+var
+  Changed: TDateTime;
+begin
+  Changed := APull.Updated;
+  if Changed <= 0 then
+    Changed := APull.Created;
+  Result := (Changed > 0) and (ANow - Changed >= StaleDays);
+end;
+
+function PassesFilter(const APull: TGittanForgePull; AFilter: TGittanForgeFilter;
+  ANow: TDateTime): boolean;
+begin
+  case AFilter of
+    ffFeedback: Result := APull.Feedback;
+    ffAttention: Result := NeedsAttention(APull);
+    ffNoDrafts: Result := not APull.IsDraft;
+    ffAskedOfMe: Result := APull.Requested;
+    ffStale: Result := IsStale(APull, ANow);
+  else
+    Result := True;
+  end;
+end;
+
+function FilterPulls(const APulls: TGittanForgePulls; AFilters: TGittanForgeFilters;
+  ANow: TDateTime): TGittanForgePulls;
+var
+  i, n: integer;
+  F: TGittanForgeFilter;
+  Keep: boolean;
+begin
+  Result := nil;
+  SetLength(Result, Length(APulls));
+  n := 0;
+  for i := 0 to High(APulls) do
+  begin
+    Keep := True;
+    for F in AFilters do
+      Keep := Keep and PassesFilter(APulls[i], F, ANow);
+    if Keep then
+    begin
+      Result[n] := APulls[i];
+      Inc(n);
+    end;
+  end;
+  SetLength(Result, n);
+end;
+
+function PullRequestOf(const APull: TGittanForgePull): TGittanPullRequest;
+begin
+  Result := Default(TGittanPullRequest);
+  Result.Number := APull.Number;
+  Result.Repo := APull.Repo;
+  Result.Title := APull.Title;
+  Result.Url := APull.Url;
+  Result.HeadRef := APull.HeadRef;
+  Result.BaseRef := APull.BaseRef;
+  Result.Author := APull.Author;
+  Result.State := APull.State;
+  Result.ReviewDecision := APull.ReviewDecision;
+  Result.IsDraft := APull.IsDraft;
+  Result.Created := APull.Created;
+  Result.Updated := APull.Updated;
 end;
 
 { ---------------------------------------------------------------------------

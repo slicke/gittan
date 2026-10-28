@@ -25,6 +25,7 @@ begin
   FCommandPage.ShortcutPrefix := 'Ctrl+Alt+';
   {$ENDIF}
   FCommandPage.OnRun := @CommandPageRun;
+  FCommandPage.OnRunInTerminal := @CommandPageRunInTerminal;
   FCommandPage.OnStop := @CommandPageStop;
   FCommandPage.OnTrust := @CommandPageTrust;
   FCommandPage.OnEditFile := @CommandPageEditFile;
@@ -51,6 +52,7 @@ begin
   end;
   FRepoCommands := DiscoverRepoCommands(FRepo.Root);
   FCommandsHash := CommandsFileHash(FRepo.Root);
+  FCommandPage.CodeFont.Assign(Edit.Font);
   FCommandPage.SetRepository(ExtractFileName(FRepo.Root), FRepo.Root);
   FCommandPage.SetCommands(FRepoCommands, FCommandsHash <> '', CommandsTrusted);
 end;
@@ -92,11 +94,17 @@ begin
   RunRepoCommand(AIndex, False);
 end;
 
-{ Runs the command at AIndex: in a terminal when it asks for one, else
-  in a job whose output the page shows. The file's commands, and the
+procedure TRepoFrame.CommandPageRunInTerminal(Sender: TObject; AIndex: integer);
+begin
+  RunRepoCommand(AIndex, False, True);
+end;
+
+{ Runs the command at AIndex: in a terminal when it asks for one or
+  AInTerminal (the tile's terminal), else in a job whose output the
+  page shows. The file's commands, and the
   keys it gives (AByKey), wait for the file to be trusted: the page is
   shown with its card instead. }
-procedure TRepoFrame.RunRepoCommand(AIndex: integer; AByKey: boolean);
+procedure TRepoFrame.RunRepoCommand(AIndex: integer; AByKey, AInTerminal: boolean);
 var
   Cmd: TGittanRepoCommand;
 begin
@@ -111,7 +119,7 @@ begin
     ShowCommands;
     Exit;
   end;
-  if Cmd.Terminal then
+  if Cmd.Terminal or AInTerminal then
   begin
     OpenTerminal(Cmd.Command);
     Exit;
@@ -123,6 +131,7 @@ begin
     Exit;
   end;
   FCommandName := Cmd.Name;
+  FCommandSource := Cmd.Source;
   FCommandRead := 0;
   FCommandJob := TGittanCommandJob.Create(FRepo.Root, Cmd.Command);
   FCommandJob.OnOutput := @CommandJobOutput;
@@ -133,12 +142,13 @@ begin
   FCommandPage.Console.Font.Assign(Edit.Font);
   FCommandPage.Console.Text := '';
   FCommandPage.Console.FollowEnd := True;
-  FCommandPage.SetRun(Cmd.Name, True, -1, 0, True, False);
+  FCommandPage.SetRun(Cmd.Name, Cmd.Source, True, -1, 0, True, False);
   FCommandJob.Start;
   ShowCommands;
-  { The output's heading at the top of the box, the console under it. }
-  if FCommandPage.OutputTop >= 0 then
-    FSummaryBox.VertScrollBar.Position := Max(0, FCommandPage.OutputTop - Px(8));
+  { No further than the panel's end needs: the console fills the box
+    when the tiles leave room, and the tiles stay in sight above it. }
+  FSummaryBox.VertScrollBar.Position := Max(0, FCommandPage.Height -
+    FSummaryBox.ClientHeight);
 end;
 
 { What the command wrote since the last piece goes to the console; the
@@ -169,8 +179,8 @@ begin
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
   FCommandPage.Console.FollowEnd := False;
-  FCommandPage.SetRun(FCommandName, False, Job.ExitCode, Job.ElapsedMs, Job.Started,
-    Job.Killed);
+  FCommandPage.SetRun(FCommandName, FCommandSource, False, Job.ExitCode, Job.ElapsedMs,
+    Job.Started, Job.Killed);
   if FCommandPage.Visible then
     FCommandPage.FitHeight(FSummaryBox.ClientHeight);
   { The page says it in red too, so the status bar's note is enough. }
@@ -206,7 +216,7 @@ begin
     Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
   end;
   FCommandPage.Console.FollowEnd := False;
-  FCommandPage.SetRun(FCommandName, False, -1, Job.ElapsedMs, True, True);
+  FCommandPage.SetRun(FCommandName, FCommandSource, False, -1, Job.ElapsedMs, True, True);
 end;
 
 { Stop on the page: the job ends it, and its end comes as Killed. }

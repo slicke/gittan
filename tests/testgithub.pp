@@ -15,6 +15,8 @@ uses
 type
   TGitHubTest = class(TTestCase)
   published
+    procedure TestRegistered;
+    procedure TestHosts;
     procedure TestParsePullRequest;
     procedure TestParsePullRequests;
     procedure TestWithoutReviewed;
@@ -24,6 +26,7 @@ type
     procedure TestChecks;
     procedure TestIssueNumber;
     procedure TestWebArgs;
+    procedure TestNewPullUrl;
     procedure TestFileOfUrl;
     procedure TestForge;
   end;
@@ -43,6 +46,47 @@ const
     '{"author":null,"state":"COMMENTED"},{"author":{"login":"eve"},"state":"COMMENTED"}],' +
     '"reviewRequests":[{"__typename":"Team","name":"Core","slug":"core"},' +
     '{"__typename":"User","login":"dan"}]}';
+
+procedure TGitHubTest.TestRegistered;
+var
+  Forge: TGittanForge;
+begin
+  { The unit registers its forge as it loads, which the rest of Gittan
+    makes through ForgeClass without naming it. }
+  AssertTrue(ForgeClass = TGittanGitHubForge);
+  AssertEquals('gh', ForgeClass.CliName);
+  Forge := ForgeClass.Create('/usr/bin/gh');
+  try
+    AssertEquals('GitHub', Forge.Name);
+    AssertEquals('/usr/bin/gh', Forge.Cli);
+  finally
+    Forge.Free;
+  end;
+end;
+
+procedure TGitHubTest.TestHosts;
+var
+  Hosts: TStringArray;
+begin
+  Hosts := GhHosts('github.com:'#10'    user: me'#10'    git_protocol: ssh'#10 +
+    '# a comment:'#10'GHE.Example.com:'#10'    users:'#10'        me:'#10 +
+    '"quoted.example.com":'#10);
+  AssertEquals(3, Length(Hosts));
+  AssertEquals('github.com', Hosts[0]);
+  AssertEquals('ghe.example.com', Hosts[1]);
+  AssertEquals('quoted.example.com', Hosts[2]);
+  AssertEquals(0, Length(GhHosts('')));
+  AssertTrue(TGittanGitHubForge.HostsRemote('github.com'));
+  AssertTrue(TGittanGitHubForge.HostsRemote('ssh.github.com'));
+  AssertFalse(TGittanGitHubForge.HostsRemote('gitlab.com'));
+  { GH_HOST with the token gh takes for it in the environment. }
+  AssertEquals('ghe.example.com', GhEnvHost('GHE.Example.com', '', 'secret'));
+  AssertEquals('', GhEnvHost('ghe.example.com', 'secret', ''));
+  AssertEquals('acme.ghe.com', GhEnvHost('acme.ghe.com', 'secret', ''));
+  AssertEquals('', GhEnvHost('acme.ghe.com', '', 'secret'));
+  AssertEquals('', GhEnvHost('github.com', 'secret', 'secret'));
+  AssertEquals('', GhEnvHost('', 'secret', 'secret'));
+end;
 
 procedure TGitHubTest.TestParsePullRequest;
 var
@@ -235,6 +279,23 @@ begin
     Joined(GitHubWebArgs(FileTarget('src/a.pp', 3, 'abc123', 'main'))));
   AssertEquals('abc123', Joined(GitHubWebArgs(CommitTarget('abc123'))));
   AssertEquals('42', Joined(GitHubWebArgs(IssueTarget(42))));
+  { A new pull request asks for the repository's address. }
+  AssertEquals('', Joined(GitHubWebArgs(NewPullTarget('feature', ''))));
+end;
+
+procedure TGitHubTest.TestNewPullUrl;
+begin
+  AssertEquals('https://github.com/o/r/compare/feature/x?expand=1',
+    GitHubNewPullUrl('https://github.com/o/r' + LineEnding, 'feature/x', ''));
+  { The same repository as the head, in another case, is no fork. }
+  AssertEquals('https://github.com/o/r/compare/fix?expand=1',
+    GitHubNewPullUrl('https://github.com/o/r/', 'fix', 'O/R'));
+  { A fork's branch goes in under its owner. }
+  AssertEquals('https://github.com/o/r/compare/me:fix?expand=1',
+    GitHubNewPullUrl('https://github.com/o/r', 'fix', 'me/r'));
+  { What an address cannot hold is escaped, UTF-8 by its bytes. }
+  AssertEquals('https://github.com/o/r/compare/a%23b%2Bc%C3%B6?expand=1',
+    GitHubNewPullUrl('https://github.com/o/r', 'a#b+c' + #$C3#$B6, ''));
 end;
 
 procedure TGitHubTest.TestForge;

@@ -17,8 +17,9 @@ uses
   testsymbolindex, testsnapshots, testblame, testhistory, testsyntaxthemes,
   testgithub, testconflicts, testcli, testsymbolchanges,
   testcallers, testrepofiles, testdiscard, testkeep, testleaveout, testsubmodules, testupdate,
-  testreviews, testgraph, testpofile, testcommitjob, testrepoinfo, testrebase, testcommitstats, testwatch, testjob, testterminal,
-  testtextfile, testrepocommands, testsha256, testai, testforge;
+  testreviews, testgraph, testpofile, testcommitjob, testrepoinfo, testrebase, testcommitstats, testwatch, testjob, testterminal, testhttp,
+  testtextfile, testrepocommands, testsha256, testai, testagentcli, testopenai, testforge,
+  testlfslocks;
 
 { Every git the tests start reads this file as the user's config and no
   system config, so what the developer has set (signed commits, a hooks
@@ -59,13 +60,13 @@ var
   App: TTestRunner;
   GitConfig: string;
 begin
-  {$IFDEF WINDOWS}
   { Strings are UTF-8, as LazUTF8 makes them in the app; without it a
-    string reaches CreateProcessW and the file functions in the ANSI code
-    page, and "Björn" becomes "BjÃ¶rn". }
+    string reaches CreateProcessW and the file functions on Windows in
+    the ANSI code page, and "Björn" becomes "BjÃ¶rn", and on every
+    platform one given to fpjson (a UTF8String) is converted from the
+    system's page on the way, so "ändrad" comes back broken. }
   SetMultiByteConversionCodePage(CP_UTF8);
   SetMultiByteRTLFileSystemCodePage(CP_UTF8);
-  {$ENDIF}
   GitConfig := IsolateGitConfig;
   App := TTestRunner.Create(nil);
   try

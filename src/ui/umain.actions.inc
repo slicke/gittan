@@ -425,6 +425,8 @@ var
   V: TSettingsValues;
   Corner: TPoint;
   Tools: boolean;
+  Forges: TGittanForgeClasses;
+  i: integer;
 begin
   OldFont := TFont.Create;
   F := TFont.Create;
@@ -440,8 +442,11 @@ begin
     V.GitPath := App.Settings.GitPath;
     V.AutoFetch := App.Settings.AutoFetch;
     V.AutoFetchMinutes := App.Settings.AutoFetchMinutes;
-    V.GhPath := App.Settings.GhPath;
-    V.GitHubEnabled := App.Settings.GitHubEnabled;
+    Forges := RegisteredForges;
+    SetLength(V.ForgePaths, Length(Forges));
+    for i := 0 to High(Forges) do
+      V.ForgePaths[i] := App.Settings.ForgeCliPath(Forges[i].Name);
+    V.HostingEnabled := App.Settings.HostingEnabled;
     V.CloneSiblings := App.Settings.CloneSiblings;
     V.AIEnabled := App.Settings.AIEnabled;
     V.Agent := AgentOfKey(App.Settings.AIAgent);
@@ -449,6 +454,9 @@ begin
     V.AgentModels[gaClaude] := App.Settings.ClaudeModel;
     V.AgentPaths[gaCopilot] := App.Settings.CopilotPath;
     V.AgentModels[gaCopilot] := App.Settings.CopilotModel;
+    V.AgentPaths[gaOpenAI] := App.Settings.OpenAIUrl;
+    V.AgentModels[gaOpenAI] := App.Settings.OpenAIModel;
+    V.ApiKey := App.Settings.OpenAIKey;
     Corner := EditorPanel.ClientToScreen(Point(EditorPanel.ClientWidth -
       Scale96ToForm(Margin), EditorPanel.ClientHeight - Scale96ToForm(Margin)));
     if EditSettings(F, V, @PreviewSettings, App.Lexers, Edit, Corner, APage) then
@@ -465,13 +473,19 @@ begin
       App.Settings.ClaudeModel := V.AgentModels[gaClaude];
       App.Settings.CopilotPath := V.AgentPaths[gaCopilot];
       App.Settings.CopilotModel := V.AgentModels[gaCopilot];
-      Tools := (V.GitPath <> App.Settings.GitPath) or (V.GhPath <> App.Settings.GhPath) or
-        (V.GitHubEnabled <> App.Settings.GitHubEnabled);
+      App.Settings.OpenAIUrl := V.AgentPaths[gaOpenAI];
+      App.Settings.OpenAIModel := V.AgentModels[gaOpenAI];
+      App.Settings.OpenAIKey := V.ApiKey;
+      Tools := (V.GitPath <> App.Settings.GitPath) or
+        (V.HostingEnabled <> App.Settings.HostingEnabled);
+      for i := 0 to High(Forges) do
+        Tools := Tools or (V.ForgePaths[i] <> App.Settings.ForgeCliPath(Forges[i].Name));
       if Tools then
       begin
         App.Settings.GitPath := V.GitPath;
-        App.Settings.GhPath := V.GhPath;
-        App.Settings.GitHubEnabled := V.GitHubEnabled;
+        App.Settings.HostingEnabled := V.HostingEnabled;
+        for i := 0 to High(Forges) do
+          App.Settings.SetForgeCliPath(Forges[i].Name, V.ForgePaths[i]);
         SetGitExe(App.Settings.GitPath);
       end;
       { Then every tab, this one with them. }
@@ -493,36 +507,18 @@ procedure TRepoFrame.SettingsChanged(AFont: TFont; ATheme, ATabSize: integer;
   ATools: boolean);
 begin
   PreviewSettings(AFont, ATheme, ATabSize);
-  FindAgentCli;
+  FindAI;
   if not AIAvailable then
   begin
     AbandonMessageJob;
     AbandonAIReview;
+    AbandonFindJob;
   end;
+  UpdateFindAction;
   UpdateCommitState;
   if not ATools then
     Exit;
-  FindForge;
-  UpdateForgeItems;
-  if not Assigned(FForge) then
-  begin
-    { What the forge that is gone had found. }
-    AbandonPullJob;
-    FPullKey := '';
-    FHasPull := False;
-    FPulls := nil;
-    FPullError := '';
-    FReviewPulls := nil;
-    FSummary.SetReviewPulls(nil);
-    FPullLogin := '';
-    AbandonForgeJob;
-    FForgeMine := nil;
-    FForgeReview := nil;
-    FForgeLogin := '';
-    FForgeError := '';
-    UpdateForgePage;
-    ClearReviews;
-  end;
+  ReFindForge;
   MenuRefreshClick(nil);
   CheckGitVersion;
 end;
@@ -560,25 +556,43 @@ begin
   FEditOld.Update(True);
 end;
 
-{ The forge, GitHub through gh: gh by the path the settings give, else
-  as found on ToolSearchPath; none while the GitHub features are turned
-  off, which hides them as a missing gh does. A forge already made with
-  the same tool is kept. }
-procedure TRepoFrame.FindForge;
+{ The forge of the repository's remotes (ForgeClassFor), its tool by
+  the path the settings give, else as found on ToolSearchPath; none
+  without a remote on a known forge or while its features are turned
+  off, which hides them as a missing tool does. A forge already made of
+  the same class with the same tool is kept; true when it is not. }
+function TRepoFrame.FindForge: boolean;
 var
+  Forge: TGittanForgeClass;
   Cli: string;
 begin
-  if not App.Settings.GitHubEnabled then
-    Cli := ''
-  else if App.Settings.GhPath <> '' then
-    Cli := App.Settings.GhPath
-  else
-    Cli := FindTool(TGittanGitHubForge.CliName);
-  if Assigned(FForge) and (FForge.Cli = Cli) then
-    Exit;
-  FreeAndNil(FForge);
-  if Cli <> '' then
-    FForge := TGittanGitHubForge.Create(Cli);
+  Forge := nil;
+  if (FRepo <> nil) and (FRepo.Root <> '') then
+    Forge := ForgeClassFor(FRemoteUrls);
+  Cli := '';
+  if Forge <> nil then
+    Cli := App.ForgeCli(Forge);
+  Result := KeepForge(FForge, Forge, Cli);
+end;
+
+{ The forge found again, the remotes or the settings having changed:
+  the items that need it follow, and what a forge that is gone or
+  replaced had found goes with it. }
+procedure TRepoFrame.ReFindForge;
+begin
+  if FindForge then
+  begin
+    AbandonPullJob;
+    FPullKey := '';
+    FHasPull := False;
+    FPulls := nil;
+    FPullError := '';
+    FReviewPulls := nil;
+    FSummary.SetReviewPulls(nil);
+    FPullLogin := '';
+    ClearReviews;
+  end;
+  UpdateForgeItems;
 end;
 
 { The forge's name, empty without one (when what is named after it is
@@ -606,29 +620,20 @@ begin
   end;
   if FReviewItem <> nil then
     FReviewItem.Enabled := Assigned(FForge);
-  { The Pull Requests and forge pages need the forge too: their rows,
-    their menu items, the names they show, and the page itself when the
-    forge goes while it shows. }
+  { The Pull Requests page needs the forge too: its row, its menu item,
+    the name it shows, and the page itself when the forge goes while it
+    shows. }
   if FPullsItem <> nil then
     FPullsItem.Visible := Assigned(FForge);
-  if FForgeItem <> nil then
-  begin
-    FForgeItem.Visible := Assigned(FForge);
-    FForgeItem.Caption := Format(rsForgeMenu, [ForgeName]);
-  end;
+  if FNewPullItem <> nil then
+    FNewPullItem.Visible := Assigned(FForge);
   if FSideNav <> nil then
-  begin
     FSideNav.SetRowVisible(navPulls, Assigned(FForge));
-    FSideNav.SetRowVisible(navForge, Assigned(FForge));
-    FSideNav.SetRowCaption(navForge, ForgeName);
-  end;
   if FPullPage <> nil then
     FPullPage.SetForge(ForgeName);
-  if FForgePage <> nil then
-    FForgePage.SetForge(ForgeName);
   if FSummary <> nil then
     FSummary.ForgeName := ForgeName;
-  if not Assigned(FForge) and (FView in [gvPulls, gvForge]) then
+  if not Assigned(FForge) and (FView = gvPulls) then
     ShowSummary;
 end;
 
@@ -1104,6 +1109,10 @@ begin
   FExcludeMenu := AddItem(FFilePopup, rsAddToExclude, nil);
   FLfsTrackMenu := AddItem(FFilePopup, rsLfsTrackMenu, nil);
   FLfsUntrackMenu := AddItem(FFilePopup, rsLfsUntrackMenu, nil);
+  { Shown for a file that may be locked or is (UpdateLockItems). }
+  FLfsLockSepItem := AddItem(FFilePopup, '-', nil);
+  FLfsLockItem := AddItem(FFilePopup, rsLfsLockItem, @MenuLfsLockClick);
+  FLfsUnlockItem := AddItem(FFilePopup, rsLfsUnlockItem, @MenuLfsUnlockClick);
   { Over the tree while it chooses what to commit (FilePopupPopup). }
   FTickSepItem := TMenuItem.Create(FFilePopup);
   FTickSepItem.Caption := '-';
@@ -1149,6 +1158,7 @@ begin
   AddForgeItem(FStatusPopup, '', nil);
   FOpenPullItem := AddForgeItem(FStatusPopup, rsOpenPull, @MenuOpenPullClick);
   FCopyPullItem := AddForgeItem(FStatusPopup, rsCopyPullUrl, @MenuCopyPullUrlClick);
+  FNewPullPopItem := AddForgeItem(FStatusPopup, rsNewPullItem, @MenuNewPullClick);
   FStatus.PopupMenu := FStatusPopup;
   UpdateForgeItems;
 end;
@@ -1196,6 +1206,7 @@ begin
   FMarkResolvedItem.Enabled := FResolveMineItem.Enabled;
   FillIgnoreMenus(FContextPath);
   FillLfsMenus(FContextPath);
+  UpdateLockItems;
   FTickSepItem.Visible := (FFilePopup.PopupComponent = FileTree) and CommitChoosing and
     (FChoosableCount > 0);
   FTickAllItem.Visible := FTickSepItem.Visible;
@@ -1770,7 +1781,8 @@ end;
 { The status bar's parts: the branch drops the branch list up from it,
   as in the summary; the track with the ahead/behind counts drops up
   pull, push, fetch and the commit graph; the transport buttons take
-  their step (UpdateStatusTransport); the pull request drops its list;
+  their step (UpdateStatusTransport); the cross after the base ends the
+  comparison; the pull request drops its list;
   the name and the file count go back to the summary. }
 procedure TRepoFrame.StatusPartClick(Sender: TObject; APart: TGittanStatusPart;
   const AScreenRect: TRect);
@@ -1782,6 +1794,8 @@ begin
       SummaryBranchClick(Sender, AScreenRect);
     spBase:
       BaseClick(AScreenRect);
+    spBaseClose:
+      SetBase('');
     spSync:
       SyncClick(AScreenRect);
     spStash:
@@ -2210,7 +2224,7 @@ begin
   begin
     if FPendingRemote then
     begin
-      FStatus.ShowMessage(rsAlreadyWaiting, stNormal, 0);
+      FStatus.ShowBusy(rsAlreadyWaiting, HintFetch);
       Exit;
     end;
     FPendingRemote := True;
@@ -2218,7 +2232,7 @@ begin
     FPendingArg := IntToStr(ANumber);
     FPendingRemoteName := ARemote;
     FPendingBranch := ABaseRef;
-    FStatus.ShowMessage(rsWaitingForFetch, stNormal, 0);
+    FStatus.ShowBusy(rsWaitingForFetch, HintFetch);
     Exit;
   end;
   FNoticeHook := False;
@@ -2231,7 +2245,7 @@ begin
   FRemoteJob.OnDone := @RemoteJobDone;
   FRemoteJob.OnOutput := @RemoteJobOutput;
   FRemoteJob.Start;
-  FStatus.ShowMessage(Format(rsFetchingPull, [ANumber]), stNormal, 0);
+  FStatus.ShowBusy(Format(rsFetchingPull, [ANumber]), HintFetch);
   FNoticeTimer.Enabled := True;
   UpdateRemoteItems;
   UpdateCommitState;
@@ -2327,6 +2341,7 @@ procedure TRepoFrame.StatusPopupPopup(Sender: TObject);
 begin
   FOpenPullItem.Enabled := FHasPull and (FPull.Url <> '');
   FCopyPullItem.Enabled := FHasPull and (FPull.Url <> '');
+  FNewPullPopItem.Enabled := CanCreatePull(FBranch);
 end;
 
 procedure TRepoFrame.MenuOpenPullClick(Sender: TObject);

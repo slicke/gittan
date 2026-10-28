@@ -10,7 +10,7 @@ unit testsubmodules;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.submodules;
+  Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.submodules, testhelpers;
 
 type
   TSubmodulesTest = class(TTestCase)
@@ -57,26 +57,6 @@ begin
   SetTestVariable('GIT_CONFIG_KEY_' + IntToStr(Count), 'protocol.file.allow');
   SetTestVariable('GIT_CONFIG_VALUE_' + IntToStr(Count), 'always');
   SetTestVariable('GIT_CONFIG_COUNT', IntToStr(Count + 1));
-end;
-
-procedure RemoveTree(const ADir: string);
-var
-  Info: TSearchRec;
-begin
-  if FindFirst(IncludeTrailingPathDelimiter(ADir) + '*', faAnyFile, Info) = 0 then
-  try
-    repeat
-      if (Info.Name = '.') or (Info.Name = '..') then
-        Continue;
-      if Info.Attr and faDirectory <> 0 then
-        RemoveTree(IncludeTrailingPathDelimiter(ADir) + Info.Name)
-      else
-        DeleteFile(IncludeTrailingPathDelimiter(ADir) + Info.Name);
-    until FindNext(Info) <> 0;
-  finally
-    FindClose(Info);
-  end;
-  RemoveDir(ADir);
 end;
 
 procedure TSubmodulesTest.SetUp;

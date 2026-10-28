@@ -26,6 +26,7 @@ type
     procedure TestMapLineChanged;
     procedure TestMapLineRemoved;
     procedure TestReviewAge;
+    procedure TestRelativeAge;
     procedure TestCommentMarkdown;
     procedure TestCommentMarkdownCode;
     procedure TestCommentParts;
@@ -204,6 +205,20 @@ begin
   AssertEquals('yesterday', ReviewAge(IncHour(Now_, -30), Now_));
   AssertEquals('4 days ago', ReviewAge(IncDay(Now_, -4), Now_));
   AssertEquals('2026-08-01', ReviewAge(EncodeDateTime(2026, 8, 1, 0, 0, 0, 0), Now_));
+end;
+
+procedure TReviewsTest.TestRelativeAge;
+var
+  Now_: TDateTime;
+begin
+  Now_ := EncodeDateTime(2026, 10, 15, 12, 0, 0, 0);
+  AssertEquals('', RelativeAge(0, Now_));
+  AssertEquals('3 hours ago', RelativeAge(IncHour(Now_, -3), Now_));
+  AssertEquals('4 days ago', RelativeAge(IncDay(Now_, -4), Now_));
+  AssertEquals('1 month ago', RelativeAge(IncDay(Now_, -45), Now_));
+  AssertEquals('3 months ago', RelativeAge(IncDay(Now_, -100), Now_));
+  AssertEquals('1 year ago', RelativeAge(IncDay(Now_, -400), Now_));
+  AssertEquals('12 years ago', RelativeAge(EncodeDateTime(2014, 7, 10, 0, 0, 0, 0), Now_));
 end;
 
 procedure TReviewsTest.TestCommentMarkdown;
