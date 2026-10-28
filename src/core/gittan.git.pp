@@ -10,7 +10,7 @@ unit gittan.git;
 interface
 
 uses
-  Classes, SysUtils, gittan.graph, gittan.rebase;
+  Classes, SysUtils, gittan.graph, gittan.rebase, gittan.undo;
 
 const
   {** Bits added to the kind in the Objects of ChangedPaths: the index
@@ -172,6 +172,8 @@ type
     {** The remotes' URLs as git reaches them, from ResolvedRemoteUrlsIn:
       which forge the repository is on (gittan.forge's ForgeClassFor). }
     RemoteUrls: string;
+    {** Where the branches are, from ReadRefState, for Undo. }
+    RefState: TGittanRefState;
   end;
   PGittanRepoSnapshot = ^TGittanRepoSnapshot;
 
@@ -791,6 +793,13 @@ type
       files could not be read; the rest is filled in as far as git
       answered. Returns ASnap.Ok. }
     function Snapshot(out ASnap: TGittanRepoSnapshot): boolean;
+    {** Where the branches are, for Undo (gittan.undo): HEAD's branch and
+      commit, every local branch's tip and the newest entry of HEAD's
+      reflog. False when the branches could not be read. }
+    function ReadRefState(out AState: TGittanRefState): boolean;
+    {** Runs ASteps (from PlanRefChange) in turn, stopping at the first
+      that fails, whose message Error then holds. }
+    function RunSteps(const ASteps: TGittanGitSteps): boolean;
     {** The current branch, the short commit id when HEAD is detached, or
       empty when nothing is open. }
     function Branch: string;
@@ -5802,7 +5811,45 @@ begin
     List.Free;
   end;
   ASnap.RemoteUrls := ResolvedRemoteUrlsIn(FRoot);
+  ReadRefState(ASnap.RefState);
   Result := ASnap.Ok;
+end;
+
+{ symbolic-ref fails while HEAD is detached, and the reflog before the
+  first commit; neither makes the state unreadable. }
+function TGittanRepo.ReadRefState(out AState: TGittanRefState): boolean;
+var
+  Output: string;
+begin
+  AState := Default(TGittanRefState);
+  if FRoot = '' then
+    Exit(False);
+  if RunGit(FRoot, ['symbolic-ref', '-q', 'HEAD'], Output) then
+  begin
+    AState.Branch := Trim(Output);
+    if Pos('refs/heads/', AState.Branch) = 1 then
+      Delete(AState.Branch, 1, Length('refs/heads/'));
+  end;
+  AState.Head := CommitId('HEAD');
+  if not RunGit(FRoot, ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads'],
+    Output) then
+    Exit(False);
+  AState.Tips := ParseBranchTips(Output);
+  if RunGit(FRoot, ['reflog', '-1', '--format=%gs', 'HEAD'], Output) then
+    AState.Move := Trim(Output);
+  AState.Valid := True;
+  Result := True;
+end;
+
+function TGittanRepo.RunSteps(const ASteps: TGittanGitSteps): boolean;
+var
+  i: integer;
+  Output: string;
+begin
+  Result := FRoot <> '';
+  for i := 0 to High(ASteps) do
+    if not RunGit(FRoot, ASteps[i], Output) then
+      Exit(False);
 end;
 
 { symbolic-ref names the branch even before its first commit; it fails
@@ -6338,6 +6385,10 @@ begin
     if RunGit(FRoot, ['rev-parse', '--verify', '-q', '@{upstream}'], Id) then
       Result := Result + 'upstream ' + Trim(Id) + #10;
     Result := Result + 'operation ' + Operation + #10;
+    { The local branches, which a branch made, deleted or moved without
+      touching HEAD changes alone, and Undo follows. }
+    if RunGit(FRoot, ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads'], Id) then
+      Result := Result + Trim(Id) + #10;
     { The stashes, which the status bar counts and lists. }
     if RunGit(FRoot, ['stash', 'list', '--format=%H'], Id) then
       Result := Result + 'stash ' + StringReplace(Trim(Id), #10, ' ', [rfReplaceAll]) + #10;

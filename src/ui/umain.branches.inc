@@ -288,6 +288,7 @@ begin
   FReflogItem.Enabled := Has;
   FWorktreesItem.Enabled := Has;
   FNewPullItem.Enabled := CanCreatePull(FBranch);
+  UpdateUndoItems;
 end;
 
 { ---------------------------------------------------------------------------

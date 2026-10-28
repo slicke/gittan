@@ -24,7 +24,7 @@ uses
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
   {$IFDEF LCLWin32}gittan.wintitlebar,{$ENDIF}
   {$IFDEF LCLGtk3}gittan.gtktitlebar,{$ENDIF}
-  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.timelapse, gittan.timelapsebar, gittan.pickaxe, gittan.navhistory,
+  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.timelapse, gittan.timelapsebar, gittan.pickaxe, gittan.navhistory, gittan.undo,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.textfile, gittan.sectionheader, gittan.hintbox,
   gittan.forge, gittan.lfslocks,
@@ -733,6 +733,10 @@ type
     FReflogMenu: TPopupMenu;
     FMenuReflog: TGittanReflogEntry;
     FReflogItem: TMenuItem;
+    { Undo and Redo of what moved the branches (umain.undo.inc): the
+      steps, and the Branch menu's items. }
+    FUndoHistory: TGittanUndoHistory;
+    FUndoItem, FRedoItem: TMenuItem;
     { Worktrees (umain.worktrees.inc): Branch > Worktrees..., the list,
       the worktrees it shows, the menu of one and the one it is for. }
     FWorktreesItem: TMenuItem;
@@ -1749,6 +1753,10 @@ type
     procedure NavIdle(Sender: TObject; var Done: boolean);
     procedure NavMark;
     procedure NavClear;
+    procedure UpdateUndoItems;
+    procedure UndoRedo(ARedo: boolean);
+    procedure MenuUndoClick(Sender: TObject);
+    procedure MenuRedoClick(Sender: TObject);
     procedure NavUpdateItems;
     procedure NavRestoreRow(ARow, ACol, ATop: integer);
     function NavRestore(const APlace: TGittanPlace): boolean;
@@ -2404,6 +2412,19 @@ resourcestring
   rsCaSwitch = 'Switch to %s';
   rsCaBranch = 'Create Branch Here...';
   rsCaTag = 'Create Tag Here...';
+  rsUndoItem = 'Undo %s';
+  rsRedoItem = 'Redo %s';
+  rsUndoNone = 'Undo';
+  rsRedoNone = 'Redo';
+  rsUndid = 'Undid %s';
+  rsRedid = 'Redid %s';
+  rsUndoBusy = 'Finish what git is in the middle of first';
+  rsUndoFailed = 'Could not undo';
+  rsRedoFailed = 'Could not redo';
+  rsUndoPushedTitle = 'Undo';
+  rsUndoPushedAsk = 'Undo %s? %s has the commits it takes off %s, so the branch ' +
+    'will be behind it and the next push replaces them.';
+  rsUndoAction = 'Undo';
   rsCaMerge = 'Merge %s into %s';
   rsCaDropInHead = '%s is already in %s';
   rsCaCherryPick = 'Cherry-pick into %s';
@@ -3320,6 +3341,7 @@ begin
   FBlameCache.CaseSensitive := True;
   FBlameZombies := TGittanJobReaper.Create;
   FNavHistory := TGittanNavHistory.Create;
+  FUndoHistory := TGittanUndoHistory.Create;
   Application.AddOnIdleHandler(@NavIdle);
   FDroppedCommits := TList.Create;
   FThreadFlips := TStringList.Create;
@@ -3864,6 +3886,7 @@ begin
   Application.RemoveOnDeactivateHandler(@AppDeactivate);
   Application.RemoveOnIdleHandler(@NavIdle);
   FreeAndNil(FNavHistory);
+  FreeAndNil(FUndoHistory);
   StopWatcher;
   AbandonPullJob;
   AbandonPullAction;
@@ -4853,7 +4876,10 @@ begin
   BranchMenu.Caption := rsBranchMenu;
   BranchMenu.OnClick := @BranchMenuOpen;
   Main.Items.Add(BranchMenu);
-  FSwitchItem := AddItem(BranchMenu, rsBmSwitchItem, ShortCut(VK_B, [ssModifier]),
+  FUndoItem := AddItem(BranchMenu, rsUndoNone, 0, @MenuUndoClick);
+  FRedoItem := AddItem(BranchMenu, rsRedoNone, 0, @MenuRedoClick);
+  BranchMenu.Add(NewLine);
+  FSwitchItem :=AddItem(BranchMenu, rsBmSwitchItem, ShortCut(VK_B, [ssModifier]),
     @MenuBranchListClick);
   FSwitchItem.Tag := Ord(blSwitch);
   FNewBranchItem := AddItem(BranchMenu, rsBmNewItem, 0, @MenuNewBranchClick);
@@ -6082,6 +6108,8 @@ begin
   FPullRange := '';
   FMarkHash := '';
   NavClear;
+  FUndoHistory.Clear;
+  UpdateUndoItems;
   FCleanKind := cnUntracked;
   FPatchFolder := '';
   FApplyFolder := '';
@@ -6261,6 +6289,11 @@ begin
   if (FSnapHead <> '') and ((Length(ASnap.Stats) <> Length(FStats)) or
     (ASnap.Behind <> FBehind) or (ASnap.Head <> FSnapHead)) then
     MarkNews;
+  { What moved the branches since the last snapshot, for Undo; nothing
+    while git is in the middle of something, which is one step once it
+    ends. }
+  FUndoHistory.Track(ASnap.RefState, ASnap.Operation <> '');
+  UpdateUndoItems;
   ClearBlameCache;
   { The files a comment's paths link to may have come or gone. }
   FReviewSegments.Clear;
@@ -7595,6 +7628,7 @@ const
 {$I umain.worktrees.inc}
 {$I umain.palette.inc}
 {$I umain.nav.inc}
+{$I umain.undo.inc}
 {$I umain.tags.inc}
 {$I umain.reflog.inc}
 {$I umain.bisect.inc}
