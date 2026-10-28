@@ -175,12 +175,15 @@ resourcestring
   { The name the own title bar shows. }
   rsAppShortName = 'Gittan';
 {$ENDIF}
-{$IFDEF LCLCocoa}
 resourcestring
-  { The tooltips of the title bar's chevrons. }
+  { The tooltips of the title bar's chevrons, with the keys. }
+  {$IFDEF LCLCocoa}
   rsNavBackHint = 'Back (⌘[)';
   rsNavForwardHint = 'Forward (⌘])';
-{$ENDIF}
+  {$ELSE}
+  rsNavBackHint = 'Back (Alt+Left)';
+  rsNavForwardHint = 'Forward (Alt+Right)';
+  {$ENDIF}
 
 
 procedure TGittanWindow.FormCreate(Sender: TObject);
@@ -308,6 +311,8 @@ begin
   FOwnBar.OnTabClose := @TabClose;
   FOwnBar.OnNewTab := @TabNew;
   FOwnBar.OnForge := @ForgeClick;
+  FOwnBar.OnBack := @TabBack;
+  FOwnBar.OnForward := @TabForward;
   {$ENDIF}
   {$IFDEF LCLWin32}
   InstallTitleBar(Self, TGittanWinTitleBar(FOwnBar));
@@ -879,12 +884,17 @@ end;
 { The chevrons go back and forward in the frame shown; they are dim
   while the forge view is shown, which has no places of its own. }
 procedure TGittanWindow.UpdateNav;
+var
+  Back, Forward: boolean;
 begin
+  Back := (FActive <> nil) and not FForgeShown and FActive.CanGoBack;
+  Forward := (FActive <> nil) and not FForgeShown and FActive.CanGoForward;
   {$IFDEF LCLCocoa}
   if FToolbar <> nil then
-    FToolbar.SetNav((FActive <> nil) and not FForgeShown and FActive.CanGoBack,
-      (FActive <> nil) and not FForgeShown and FActive.CanGoForward,
-      rsNavBackHint, rsNavForwardHint);
+    FToolbar.SetNav(Back, Forward, rsNavBackHint, rsNavForwardHint);
+  {$ENDIF}
+  {$IFDEF OWNBAR}
+  FOwnBar.SetNav(Back, Forward, rsNavBackHint, rsNavForwardHint);
   {$ENDIF}
 end;
 
