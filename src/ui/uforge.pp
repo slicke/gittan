@@ -56,6 +56,9 @@ type
     FJob: TGittanForgeJob;
     FZombies: TGittanJobReaper;
     FLogin, FError: string;
+    { The address of the user's picture as last fetched, and its bytes,
+      kept across the jobs so a refresh does not fetch it again. }
+    FAvatarUrl, FAvatar: string;
     FMine, FReview: TGittanForgePulls;
     FMainMenu: TMainMenu;
     FAppMenuItem: TMenuItem;
@@ -404,6 +407,8 @@ begin
   FMine := nil;
   FReview := nil;
   FLogin := '';
+  FAvatarUrl := '';
+  FAvatar := '';
   FError := '';
   UpdatePage;
   if Visible then
@@ -423,6 +428,7 @@ end;
 procedure TForgeView.UpdatePage;
 begin
   FPage.SetLogin(FLogin);
+  FPage.SetAvatar(FAvatar);
   FPage.SetPulls(FMine, FReview, FError, FJob <> nil);
   FPage.FitHeight(FBox.ClientHeight);
   if Assigned(FOnTabsChange) then
@@ -471,6 +477,7 @@ begin
   if not Assigned(FForge) or (FJob <> nil) then
     Exit;
   FJob := FForge.AccountJob(GetUserDir);
+  FJob.KnownAvatarUrl := FAvatarUrl;
   FJob.Clones.Assign(App.Settings.Recent);
   FJob.Siblings := App.Settings.CloneSiblings;
   FJob.OnDone := @JobDone;
@@ -501,6 +508,16 @@ begin
   if FError = '' then
   begin
     FLogin := Job.Login;
+    { A new picture, or none any more; the same address keeps the one
+      held, which the job did not fetch again. }
+    if Job.PictureUrl <> FAvatarUrl then
+    begin
+      FAvatarUrl := Job.PictureUrl;
+      FAvatar := Job.Avatar;
+      { A fetch that failed tries again next time. }
+      if FAvatar = '' then
+        FAvatarUrl := '';
+    end;
     FMine := Job.Mine;
     FReview := Job.Review;
   end;

@@ -39,7 +39,8 @@ unit gittan.forgepage;
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Graphics, ExtCtrls, gittan.forge, gittan.summary;
+  Classes, SysUtils, Types, Controls, Graphics, ExtCtrls, BGRABitmap, gittan.forge,
+  gittan.summary;
 
 const
   {** The sections: the user's open pull requests and those waiting for
@@ -79,6 +80,11 @@ type
     { The canvas the content is painted on: the control's in Paint, a
       measuring one in Layout. }
     FC: TCanvas;
+    { The user's picture as the forge sent it (FAvatarData, its bytes;
+      FAvatar decoded, nil for none or one that could not be read) and
+      as painted: resampled to the disc's pixels and cut round. }
+    FAvatarData: string;
+    FAvatar, FAvatarShown: TBGRABitmap;
     FOnPick: TGittanForgePickEvent;
     FOnRefresh, FOnFilterChange: TNotifyEvent;
     FOnOpenUrl: TGittanOpenUrlEvent;
@@ -122,10 +128,15 @@ type
       override;
   public
     constructor Create(AOwner: TComponent); override;
+    destructor Destroy; override;
     {** The forge shown, by name: the page's title and its links. }
     procedure SetForge(const AName: string);
     {** The login the forge knows the user as; empty before it answered. }
     procedure SetLogin(const ALogin: string);
+    {** The user's picture as the forge sent it (PNG or JPEG bytes), in
+      the disc of the head in place of the initial; empty, or bytes that
+      are not a picture, for the initial. }
+    procedure SetAvatar(const AData: string);
     {** The root of the open repository, empty when none is open: a card
       whose clone it is has no link to it, since its click compares
       there. }
@@ -170,7 +181,7 @@ function SectionCaption(ASection: integer): string;
 implementation
 
 uses
-  Math, DateUtils, LCLIntf, LCLType, gittan.reviews, gittan.textfit, gittan.theme;
+  Math, DateUtils, LCLIntf, LCLType, BGRABitmapTypes, gittan.reviews, gittan.textfit, gittan.theme;
 
 resourcestring
   rsPageTitle = 'Pull requests';
@@ -265,6 +276,40 @@ begin
   FPulse.Enabled := False;
   FPulse.Interval := PulseStep;
   FPulse.OnTimer := @PulseTimer;
+end;
+
+destructor TGittanForgePage.Destroy;
+begin
+  FAvatarShown.Free;
+  FAvatar.Free;
+  inherited Destroy;
+end;
+
+procedure TGittanForgePage.SetAvatar(const AData: string);
+var
+  Stream: TStringStream;
+begin
+  if AData = FAvatarData then
+    Exit;
+  FAvatarData := AData;
+  FreeAndNil(FAvatarShown);
+  FreeAndNil(FAvatar);
+  if AData <> '' then
+  begin
+    Stream := TStringStream.Create(AData);
+    try
+      try
+        FAvatar := TBGRABitmap.Create(Stream);
+        if (FAvatar.Width = 0) or (FAvatar.Height = 0) then
+          FreeAndNil(FAvatar);
+      except
+        FreeAndNil(FAvatar);
+      end;
+    finally
+      Stream.Free;
+    end;
+  end;
+  Invalidate;
 end;
 
 procedure TGittanForgePage.SetForge(const AName: string);
@@ -457,12 +502,45 @@ begin
   FLinkUrls[High(FLinkUrls)] := AUrl;
 end;
 
-{ A disc ASize across with the login's initial in it, in the link
-  color; empty in the hover fill before the forge has said who. }
+{ A disc ASize across with the user's picture in it, resampled to the
+  screen's pixels (twice its points on a Retina screen) and cut round,
+  on the hover fill;
+  without one the login's initial, in the link color; empty in the hover
+  fill before the forge has said who. }
 procedure TGittanForgePage.PaintAvatar(ALeft, ATop, ASize: integer);
 var
   Initial: string;
+  Pixels: integer;
+  Mask: TBGRABitmap;
 begin
+  if (FLogin <> '') and (FAvatar <> nil) then
+  begin
+    Pixels := Max(1, Round(ASize * GetCanvasScaleFactor));
+    if (FAvatarShown = nil) or (FAvatarShown.Width <> Pixels) then
+    begin
+      FreeAndNil(FAvatarShown);
+      FAvatar.ResampleFilter := rfBestQuality;
+      FAvatarShown := FAvatar.Resample(Pixels, Pixels, rmFineResample) as TBGRABitmap;
+      Mask := TBGRABitmap.Create(Pixels, Pixels, BGRAPixelTransparent);
+      try
+        Mask.FillEllipseAntialias((Pixels - 1) / 2, (Pixels - 1) / 2, Pixels / 2, Pixels / 2,
+          BGRAWhite);
+        FAvatarShown.ApplyMask(Mask);
+      finally
+        Mask.Free;
+      end;
+    end;
+    { On the hover fill, so a picture with a clear background still
+      reads as a disc. }
+    FC.Pen.Style := psClear;
+    FC.Brush.Style := bsSolid;
+    FC.Brush.Color := FHover;
+    FC.Ellipse(ALeft, ATop, ALeft + ASize, ATop + ASize);
+    FC.Pen.Style := psSolid;
+    FC.Brush.Style := bsClear;
+    FAvatarShown.Draw(FC, Rect(ALeft, ATop, ALeft + ASize, ATop + ASize), False);
+    Exit;
+  end;
   FC.Pen.Style := psClear;
   FC.Brush.Style := bsSolid;
   if FLogin <> '' then

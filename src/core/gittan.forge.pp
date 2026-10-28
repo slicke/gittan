@@ -257,9 +257,12 @@ type
   TGittanForgeJob = class(TGittanJob)
   private
     FForgeName, FRoot, FLogin, FError: string;
+    FAvatarUrl, FKnownAvatarUrl, FAvatar: string;
     FMine, FReview: TGittanForgePulls;
     FClones: TStringList;
     FSiblings: boolean;
+    function Cancelled: boolean;
+    procedure FetchAvatar;
   protected
     {** The login and the two lists, the review list as the forge gives
       it; false with the reason in AError when they could not be read. }
@@ -267,6 +270,9 @@ type
       out AError: string): boolean; virtual; abstract;
     procedure Execute; override;
     property Root: string read FRoot;
+    {** The address of the user's picture, which Ask sets when the forge
+      gives one; Execute fetches it (Avatar). }
+    property AvatarUrl: string read FAvatarUrl write FAvatarUrl;
   public
     constructor Create(const AForgeName, ARoot: string);
     destructor Destroy; override;
@@ -278,6 +284,15 @@ type
     property Siblings: boolean read FSiblings write FSiblings;
     property ForgeName: string read FForgeName;
     property Login: string read FLogin;
+    {** The address of the picture already held, set before the job
+      starts: a picture at the same address is not fetched again, and
+      Avatar stays empty. }
+    property KnownAvatarUrl: string read FKnownAvatarUrl write FKnownAvatarUrl;
+    {** The address of the user's picture as the forge gave it, '' for
+      none, and the picture's bytes (PNG or JPEG) when it was fetched;
+      empty when it was not (known already, no answer, too large). }
+    property PictureUrl: string read FAvatarUrl;
+    property Avatar: string read FAvatar;
     property Mine: TGittanForgePulls read FMine;
     property Review: TGittanForgePulls read FReview;
     property Error: string read FError;
@@ -411,7 +426,11 @@ function RemoteRepoPath(const AUrl: string): string;
 implementation
 
 uses
-  gittan.git;
+  gittan.git, gittan.http;
+
+const
+  { The largest picture taken, in bytes; a forge's are a few KB. }
+  MaxAvatarBytes = 1024 * 1024;
 
 var
   Forges: array of TGittanForgeClass;
@@ -1084,11 +1103,30 @@ begin
     FindClones(FMine, FClones);
     FindClones(FReview, FClones);
   end;
+  FetchAvatar;
   if Terminated then
     Exit;
   if (FError = '') and (Length(FMine) = 0) and (Length(FReview) = 0) and (FLogin = '') then
     FError := 'The answer of ' + FForgeName + ' had no login in it.';
   Done;
+end;
+
+function TGittanForgeJob.Cancelled: boolean;
+begin
+  Result := Terminated;
+end;
+
+{ The user's picture, unless it is the one held; a failure leaves it
+  empty, and the page keeps the initial. }
+procedure TGittanForgeJob.FetchAvatar;
+var
+  Response: TGittanHttpResponse;
+begin
+  if (FAvatarUrl = '') or (FAvatarUrl = FKnownAvatarUrl) or Terminated then
+    Exit;
+  Response := HttpGet(FAvatarUrl, [], 15, @Cancelled);
+  if HttpOk(Response) and (Length(Response.Body) <= MaxAvatarBytes) then
+    FAvatar := Response.Body;
 end;
 
 constructor TGittanForge.Create(const ACli: string);

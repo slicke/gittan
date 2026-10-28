@@ -34,7 +34,7 @@ const
     team), fifty of each, newest first, with who wrote each one's last
     thirty comments and reviews. }
   ForgeQuery =
-    'query { viewer { login } ' +
+    'query { viewer { login avatarUrl(size: 128) } ' +
     'mine: search(query: "is:pr is:open author:@me archived:false sort:updated-desc", ' +
     'type: ISSUE, first: 50) { issueCount nodes { ...pull } } ' +
     'review: search(query: "is:pr is:open review-requested:@me archived:false ' +
@@ -69,7 +69,11 @@ function ParsePullRequests(const AJson: string; out APulls: TGittanPullRequests)
   them, see NeedsMyReview). False when AJson is not the answer, with the
   query's first error message in AError when it carries one. }
 function ParseForgeAnswer(const AJson: string; out ALogin: string;
-  out AMine, AReview: TGittanForgePulls; out AError: string): boolean;
+  out AMine, AReview: TGittanForgePulls; out AError: string): boolean; overload;
+{** As above, with the address of the user's picture (viewer's
+  avatarUrl) in AAvatarUrl, '' when the answer has none. }
+function ParseForgeAnswer(const AJson: string; out ALogin, AAvatarUrl: string;
+  out AMine, AReview: TGittanForgePulls; out AError: string): boolean; overload;
 
 {** Reads one page of the answer to ReviewThreadsQuery and adds its
   threads to AThreads. AHeadOid is the commit at the head of the pull
@@ -689,9 +693,18 @@ end;
 function ParseForgeAnswer(const AJson: string; out ALogin: string;
   out AMine, AReview: TGittanForgePulls; out AError: string): boolean;
 var
+  AvatarUrl: string;
+begin
+  Result := ParseForgeAnswer(AJson, ALogin, AvatarUrl, AMine, AReview, AError);
+end;
+
+function ParseForgeAnswer(const AJson: string; out ALogin, AAvatarUrl: string;
+  out AMine, AReview: TGittanForgePulls; out AError: string): boolean;
+var
   Root, Data, Errors: TJSONData;
 begin
   ALogin := '';
+  AAvatarUrl := '';
   AMine := nil;
   AReview := nil;
   AError := '';
@@ -712,6 +725,7 @@ begin
     if (Data = nil) or (Data.JSONType <> jtObject) then
       Exit;
     ALogin := NestedString(TJSONObject(Data), 'viewer', 'login');
+    AAvatarUrl := NestedString(TJSONObject(Data), 'viewer', 'avatarUrl');
     ReadSearch(TJSONObject(Data), 'mine', AMine);
     ReadSearch(TJSONObject(Data), 'review', AReview);
     Result := True;
@@ -1143,14 +1157,15 @@ end;
 function TGitHubAccountJob.Ask(out ALogin: string; out AMine, AReview: TGittanForgePulls;
   out AError: string): boolean;
 var
-  Output: string;
+  Output, Url: string;
 begin
   ALogin := '';
   AMine := nil;
   AReview := nil;
   { Any folder does; gh needs none in particular for it. }
   Result := RunGh(FExe, Root, ['api', 'graphql', '-f', 'query=' + ForgeQuery], Output, AError)
-    and ParseForgeAnswer(Output, ALogin, AMine, AReview, AError);
+    and ParseForgeAnswer(Output, ALogin, Url, AMine, AReview, AError);
+  AvatarUrl := Url;
 end;
 
 { ---------------------------------------------------------------------------
