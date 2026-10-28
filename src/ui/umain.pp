@@ -10,7 +10,7 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, Menus, ComCtrls,
   ExtCtrls, StdCtrls, LCLType, LazLoggerBase, Math, Types, contnrs, InkDraw,
-  ATSynEdit, ATSynEdit_Adapter_EControl, ATSynEdit_Bookmarks, ATSynEdit_Commands,
+  ATSynEdit, ATScrollBar, ATSynEdit_Adapter_EControl, ATSynEdit_Bookmarks, ATSynEdit_Commands,
   ATSynEdit_Carets, ATSynEdit_Gutter_Decor, ATSynEdit_Globals, ATStringProc,
   ATStringProc_WordJump,
   ATSynEdit_Markers, ATSynEdit_LineParts, ATSynEdit_Ranges, ATSynEdit_WrapInfo,
@@ -978,6 +978,7 @@ type
     function Palette: TGittanPalette;
     procedure ApplyTheme;
     procedure ApplyEditorColors(AEd: TATSynEdit);
+    procedure ApplyScrollbarTheme(const P: TGittanPalette);
     procedure SetupEditor(AEd: TATSynEdit);
     function AdapterOf(AEd: TATSynEdit): TATAdapterEControl;
     procedure MenuRefreshClick(Sender: TObject);
@@ -3638,15 +3639,14 @@ begin
     editors sit edge to edge with the header, the sidebar and the
     status bar, which it showed as a box around the text. }
   AEd.OptBorderVisible := False;
-  {$IFDEF LCLCocoa}
-  { ATSynEdit takes the system scroll bars' width off its client
-    whenever it shows them, also macOS's overlay scrollers that take no
-    room: the minimap and the last line stopped a bar's width short of
-    the bottom and the right edge. Without them the wheel, the trackpad
-    and the minimap still scroll. }
-  AEd.OptScrollStyleHorz := TATEditorScrollbarStyle.Hide;
-  AEd.OptScrollStyleVert := TATEditorScrollbarStyle.Hide;
-  {$ENDIF}
+  { The scroll bars are ATSynEdit's own, painted in the palette's colors
+    (see ApplyScrollbarTheme), on every widgetset: the vertical one always
+    there, the horizontal one while a line is wider than the view. The
+    system bars were hidden on macOS, since ATSynEdit takes their width
+    off its client whenever it shows them, also macOS's overlay
+    scrollers that take no room, so the minimap and the last line
+    stopped a bar's width short of the bottom and the right edge. }
+  AEd.OptScrollbarsNew := True;
   {$IFDEF LCLGtk3}
   { ATSynEdit paints into a bitmap of its own only where the widgetset
     can draw outside Paint (EditorDoubleBufferedNeeded), and straight
@@ -3848,6 +3848,52 @@ begin
   end;
 end;
 
+{ The editors' scroll bars (ATScrollBar, one theme for every bar): a
+  track on the text background, a rounded thumb in the border color
+  that darkens under the mouse and while dragged, a pixel of track
+  around it, no arrows and no grip lines, as macOS draws its own. The
+  theme is global, so a bar is told to take it again (Update sets its
+  size and repaints) after a change of appearance. }
+procedure TRepoFrame.ApplyScrollbarTheme(const P: TGittanPalette);
+var
+  Ed: TATSynEdit;
+begin
+  with ATScrollbarTheme do
+  begin
+    ColorBG := Edit.Colors.TextBG;
+    ColorBorder := ColorBG;
+    ColorScrolled := MixColor(ColorBG, P.Border, 0.4);
+    ColorThumbFill := P.Border;
+    ColorThumbFillOver := MixColor(P.Border, P.Dim, 0.5);
+    ColorThumbFillPressed := P.Dim;
+    ColorThumbBorder := ColorBG;
+    ColorThumbDecor := ColorThumbFill;
+    ColorThumbDecor2 := ColorThumbFill;
+    ColorArrowBorder := ColorBG;
+    ColorArrowFill := ColorBG;
+    ColorArrowFillOver := ColorBG;
+    ColorArrowFillPressed := ColorBG;
+    ColorArrowSign := ColorBG;
+    ColorArrowSignOver := ColorBG;
+    ColorArrowSignPressed := ColorBG;
+    ArrowStyleH := asaArrowsHidden;
+    ArrowStyleV := asaArrowsHidden;
+    InitialSize := 12;
+    ScalePercents := Px(100);
+    BorderSize := 0;
+    ThumbMinSize := 24;
+    { The grip lines are drawn on a thumb longer than this. }
+    ThumbMarkerMinimalSize := MaxInt;
+    ThumbRoundedRect := True;
+  end;
+  for Ed in [Edit, FEditOld] do
+    if Ed <> nil then
+    begin
+      Ed.ScrollbarVert.Update;
+      Ed.ScrollbarHorz.Update;
+    end;
+end;
+
 procedure TRepoFrame.ApplyTheme;
 var
   P: TGittanPalette;
@@ -3863,6 +3909,7 @@ begin
   { The header and the find bar take the gutter's shade; the navigator
     pills sit on it. }
   P := Palette;
+  ApplyScrollbarTheme(P);
   FHeader.SetColors(P.Shade, P.Text, P.Dim, P.Added, P.Deleted, P.Line);
   FHeader.SetPillColors(P.Pill, P.Border, P.Accent);
   FNav.SetColors(P.Shade, P.Pill, P.Border, P.PillText, P.Accent);
