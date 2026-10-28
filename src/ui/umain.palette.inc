@@ -140,8 +140,13 @@ begin
   Tile(FPaletteRight, rsPsBranch, HintBranch, FNewBranchItem);
   FPaletteLeft.Fit;
   FPaletteRight.Fit;
+  { Too narrow: the columns of an earlier show go too. }
   if FPalettePopup.Left - Px(Gap) - FPaletteLeft.Width < Px(Gap) then
+  begin
+    FPaletteLeft.Visible := False;
+    FPaletteRight.Visible := False;
     Exit;
+  end;
   FPaletteLeft.SetBounds(FPalettePopup.Left - Px(Gap) - FPaletteLeft.Width,
     FPalettePopup.Top, FPaletteLeft.Width, FPaletteLeft.Height);
   FPaletteRight.SetBounds(FPalettePopup.Left + FPalettePopup.Width + Px(Gap),

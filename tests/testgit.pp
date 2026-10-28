@@ -2891,8 +2891,9 @@ begin
   AssertEquals(4, Length(Steps));
 end;
 
-{ A fixup! commit, as Fixup with the Ticked Files makes it, folds
-  into the commit it names through AutosquashSteps and the rebase. }
+{ A fixup! commit, named as Fixup with the Ticked Files names it,
+  folds into the commit it names through AutosquashSteps and the
+  rebase. }
 procedure TGitRepoTest.TestRebaseInteractiveFixup;
 var
   First: string;

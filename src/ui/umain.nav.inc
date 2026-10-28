@@ -246,6 +246,10 @@ begin
         { A file picked in the tree later must fire the selection event. }
         FileTree.Selected := nil;
         OpenFile(APlace.Path);
+        { A file that could not be shown (a translation file that cannot
+          be read) leaves the view as it was. }
+        if (FView <> gvFile) or (Edit.FileName <> APlace.Path) then
+          Exit;
       end;
       if FView = gvFile then
         NavRestoreRow(APlace.Row, APlace.Col, APlace.Top);

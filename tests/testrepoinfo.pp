@@ -273,7 +273,11 @@ begin
   for i := 1 to Length(Big) do
     Big[i] := Chr(Ord('a') + Random(26));
   Put('b.txt', Big);
-  Git(['add', 'b.txt']);
+  ForceDirectories(IncludeTrailingPathDelimiter(FDir) + 'src');
+  ForceDirectories(IncludeTrailingPathDelimiter(FDir) + 'tests');
+  Put('src/x.pp', 'begin'#10'end.');
+  Put('tests/t.pp', 'test');
+  Git(['add', 'b.txt', 'src/x.pp', 'tests/t.pp']);
   Git(['-c', 'user.name=Other', 'commit', '-q', '-m', 'second']);
   Git(['tag', 'v1']);
   Git(['branch', 'topic']);
@@ -282,7 +286,7 @@ begin
   AssertTrue('ok: ' + Info.Error, Info.Ok);
   AssertEquals('branch', 'main', Info.Branch);
   AssertEquals('commits', 2, Info.Commits);
-  AssertEquals('files', 2, Info.Files);
+  AssertEquals('files', 4, Info.Files);
   AssertEquals('local branches', 2, Info.LocalBranches);
   AssertEquals('remote branches', 0, Info.RemoteBranches);
   AssertEquals('tags', 1, Info.Tags);
@@ -299,7 +303,10 @@ begin
   AssertTrue('size', Info.SizeKiB > 0);
   AssertEquals('text files', 2, Info.Composition[fcDocs].Files);
   AssertEquals('text lines', 2, Info.Composition[fcDocs].Lines);
-  AssertEquals('code files', 0, Info.Composition[fcCode].Files);
+  AssertEquals('code files', 1, Info.Composition[fcCode].Files);
+  AssertEquals('code lines', 2, Info.Composition[fcCode].Lines);
+  AssertEquals('test files', 1, Info.Composition[fcTest].Files);
+  AssertEquals('test lines', 1, Info.Composition[fcTest].Lines);
 end;
 
 procedure TRepoInfoRepoTest.TestGatherEmpty;

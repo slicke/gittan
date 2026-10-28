@@ -156,14 +156,20 @@ begin
   AssertFalse('folder gone', DirectoryExists(Other));
   AssertTrue(Err, ListWorktrees(Root, List, Err));
   AssertEquals(1, Length(List));
-  { The branch stays. }
+  { The branch stays, and is free to check out in a worktree again. }
   Git(['rev-parse', '--verify', 'refs/heads/feature']);
+  AssertTrue(Err, AddWorktree(Root, Other, 'feature', False, '', Err));
+  AssertTrue(Err, ListWorktrees(Root, List, Err));
+  AssertEquals('feature', List[1].Branch);
+  AssertTrue(Err, RemoveWorktree(Root, Other, False, Err, Dirty));
 
-  { A folder that goes away is prunable, and pruned. }
+  { A folder that goes away is prunable, and pruned; with no branch git
+    makes one named after the folder. }
   AssertTrue(Err, AddWorktree(Root, Other, '', False, '', Err));
   RemoveTree(Other);
   AssertTrue(Err, ListWorktrees(Root, List, Err));
   AssertEquals(2, Length(List));
+  AssertEquals('repo-feature', List[1].Branch);
   AssertTrue('prunable', List[1].Prunable);
   AssertTrue(Err, PruneWorktrees(Root, Err));
   AssertTrue(Err, ListWorktrees(Root, List, Err));

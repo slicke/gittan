@@ -71,7 +71,8 @@ type
     FBase: TGittanRefState;
     FMax: integer;
   public
-    {** A history of at most AMax steps, the oldest dropped first. }
+    {** A history of at most AMax steps, the oldest dropped first; 0
+      for no limit. }
     constructor Create(AMax: integer = 50);
     {** The branches are as AState says: when they differ from the state
       noted last, the change is a step to undo and the steps undone are

@@ -341,7 +341,7 @@ var
   Text, W: string;
 begin
   Text := LowerCase(ACaption);
-  Words := AFilter.Split([' '], TStringSplitOptions.ExcludeEmpty);
+  Words := AFilter.Split([' ', #9], TStringSplitOptions.ExcludeEmpty);
   for W in Words do
     if Pos(W, Text) = 0 then
       Exit(False);
