@@ -173,7 +173,7 @@ begin
   { The later since wins. }
   AssertEquals(EncodeDate(2024, 1, 1), F.Since);
   AssertEquals(EncodeDate(2024, 6, 16), F.Before);
-  F := ParseGraphFilter('Change:ParseList change:"a b" change: change:/x+/');
+  F := ParseGraphFilter('Change:ParseList change:"a b" change: change:// change:/x+/');
   AssertFalse(GraphFilterEmpty(F));
   AssertEquals(0, Length(F.Words));
   AssertEquals(3, Length(F.Changes));

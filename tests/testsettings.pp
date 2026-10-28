@@ -275,6 +275,8 @@ begin
     AssertEquals('capped', MaxPaletteRecent, S.PaletteRecent.Count);
     AssertEquals('Action 5', S.PaletteRecent[0]);
     AssertEquals('Action ' + IntToStr(MaxPaletteRecent + 2), S.PaletteRecent[1]);
+    AssertEquals('a repeat is not kept twice', 'Action 3',
+      S.PaletteRecent[MaxPaletteRecent - 1]);
   finally
     S.Free;
   end;

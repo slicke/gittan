@@ -21,6 +21,7 @@ type
     function Head(const ARev: string): string;
     procedure WriteFile(const AText: string);
     procedure Commit(const AMessage: string);
+    function Cancel: boolean;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -30,6 +31,11 @@ type
   end;
 
 implementation
+
+function TPickaxeTest.Cancel: boolean;
+begin
+  Result := True;
+end;
 
 procedure TPickaxeTest.SetUp;
 begin
@@ -148,6 +154,7 @@ begin
     AssertEquals('an empty change is left out', 2, Hashes.Count);
     AssertTrue(ChangeCommits(FDir, ['ParseList'], Hashes, 1, nil, Error));
     AssertEquals('at most AMax', 1, Hashes.Count);
+    AssertFalse('cancelled', ChangeCommits(FDir, ['ParseList'], Hashes, 100, @Cancel, Error));
 
     AssertFalse(ChangeCommits(FDir, ['/a(/'], Hashes, 100, nil, Error));
     AssertEquals(0, Hashes.Count);

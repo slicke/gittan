@@ -37,8 +37,8 @@ uses
 type
   {** A click on a card: the pull request. }
   TGittanPullEvent = procedure(Sender: TObject; const APull: TGittanPullRequest) of object;
-  {** A right click on a card, or the Menu key: the pull request and
-    where to show a menu, in screen coordinates. }
+  {** A right click on a card: the pull request and where to show a
+    menu, in screen coordinates. }
   TGittanPullContextEvent = procedure(Sender: TObject; const APull: TGittanPullRequest;
     const AScreenPos: TPoint) of object;
 
@@ -674,21 +674,27 @@ var
 begin
   Result := False;
   APull := Default(TGittanPullRequest);
-  i := LinkAt(X, Y);
-  if i < 0 then
-    Exit;
-  Url := FLinkUrls[i];
-  if Copy(Url, 1, Length(CompareLink)) = CompareLink then
+  { The card under the forge link that lies on it, too. }
+  for i := High(FLinkRects) downto 0 do
   begin
-    n := StrToIntDef(Copy(Url, Length(CompareLink) + 1, MaxInt), -1);
-    Result := (n >= 0) and (n <= High(FPulls));
-    if Result then
-      APull := FPulls[n];
-  end
-  else if (Url = BranchLink) and FHasBranchPull then
-  begin
-    APull := FBranchPull;
-    Result := True;
+    if not PtInRect(FLinkRects[i], Point(X, Y)) then
+      Continue;
+    Url := FLinkUrls[i];
+    if Copy(Url, 1, Length(CompareLink)) = CompareLink then
+    begin
+      n := StrToIntDef(Copy(Url, Length(CompareLink) + 1, MaxInt), -1);
+      Result := (n >= 0) and (n <= High(FPulls));
+      if Result then
+      begin
+        APull := FPulls[n];
+        Exit;
+      end;
+    end
+    else if (Url = BranchLink) and FHasBranchPull then
+    begin
+      APull := FBranchPull;
+      Exit(True);
+    end;
   end;
 end;
 

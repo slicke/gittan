@@ -238,8 +238,9 @@ begin
     BannerError(Format(rsPullActionFailed, [ForgeName]), Job.Error);
   { The pull request as it is now: the page, the chip and the summary
     follow the job; a merge may have deleted the branch on the remote,
-    which the job sees after the next fetch. }
-  if (FRepo.Root <> '') and (FPullJob = nil) then
+    which the job sees after the next fetch. A poll running may have
+    read it from before the action, so it gives way. }
+  if FRepo.Root <> '' then
     StartPullJob(True, True);
 end;
 

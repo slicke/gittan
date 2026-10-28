@@ -300,25 +300,26 @@ end;
 
 procedure TGitHubTest.TestPullActionArgs;
 
+  { Joined with a bar, so an argument with a space stays one. }
   function Joined(const AArgs: TStringArray): string;
   begin
-    Result := string.Join(' ', AArgs);
+    Result := string.Join('|', AArgs);
   end;
 
 begin
-  AssertEquals('pr review 12 --repo o/r --approve',
+  AssertEquals('pr|review|12|--repo|o/r|--approve',
     Joined(GitHubPullActionArgs('o/r', 12, plApprove, '')));
-  AssertEquals('pr review 12 --repo o/r --approve --body Nice',
+  AssertEquals('pr|review|12|--repo|o/r|--approve|--body|Nice',
     Joined(GitHubPullActionArgs('o/r', 12, plApprove, 'Nice')));
-  AssertEquals('pr review 12 --repo o/r --request-changes --body Not yet',
+  AssertEquals('pr|review|12|--repo|o/r|--request-changes|--body|Not yet',
     Joined(GitHubPullActionArgs('o/r', 12, plRequestChanges, 'Not yet')));
-  AssertEquals('pr review 12 --repo o/r --comment --body Hm',
+  AssertEquals('pr|review|12|--repo|o/r|--comment|--body|Hm',
     Joined(GitHubPullActionArgs('o/r', 12, plComment, 'Hm')));
-  AssertEquals('pr merge 12 --repo o/r --merge', Joined(GitHubPullActionArgs('o/r', 12, plMerge, 'x')));
-  AssertEquals('pr merge 12 --repo o/r --squash', Joined(GitHubPullActionArgs('o/r', 12, plSquash, '')));
-  AssertEquals('pr merge 12 --repo o/r --rebase',
+  AssertEquals('pr|merge|12|--repo|o/r|--merge', Joined(GitHubPullActionArgs('o/r', 12, plMerge, 'x')));
+  AssertEquals('pr|merge|12|--repo|o/r|--squash', Joined(GitHubPullActionArgs('o/r', 12, plSquash, '')));
+  AssertEquals('pr|merge|12|--repo|o/r|--rebase',
     Joined(GitHubPullActionArgs('o/r', 12, plRebaseMerge, '')));
-  AssertEquals('pr ready 12 --repo o/r', Joined(GitHubPullActionArgs('o/r', 12, plReady, '')));
+  AssertEquals('pr|ready|12|--repo|o/r', Joined(GitHubPullActionArgs('o/r', 12, plReady, '')));
   AssertTrue(TGittanGitHubForge.HasPullActions);
   AssertEquals('Approved', PullActionDone(plApprove));
   AssertTrue(PullActionMerges(plSquash));

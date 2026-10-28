@@ -1879,10 +1879,12 @@ begin
 end;
 
 { A search still running for what was typed before is given up: its git
-  is ended. }
+  is ended. No changes only ends it. }
 procedure TRepoFrame.GraphChangeCommits(Sender: TObject; const AChanges: TStringArray);
 begin
   AbandonChangeJob;
+  if Length(AChanges) = 0 then
+    Exit;
   if FRepo.Root = '' then
   begin
     FGraph.SetChangeCommits(AChanges, nil, '');

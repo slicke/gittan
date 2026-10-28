@@ -394,7 +394,8 @@ begin
     if (Key = 'author') or (Key = 'since') or (Key = 'after') or (Key = 'until') or
       (Key = 'before') or (Key = 'path') or (Key = 'change') then
     begin
-      if Value = '' then
+      { change:// is an empty pattern on the way to a regex. }
+      if (Value = '') or ((Key = 'change') and (Value = '//')) then
         Continue;
       if Key = 'author' then
         Append(Result.Authors, Value)

@@ -905,8 +905,12 @@ begin
   if Key <> FChangeKey then
   begin
     FChangeKey := Key;
+    { None to search for (the filter cleared, or back to the one done)
+      stops a search still running. }
     if ChangePending then
-      FOnChangeCommits(Self, FFilter.Changes);
+      FOnChangeCommits(Self, FFilter.Changes)
+    else if Assigned(FOnChangeCommits) then
+      FOnChangeCommits(Self, nil);
   end;
   Current := CurrentHash;
   SetLength(FShown, Length(FCommits));

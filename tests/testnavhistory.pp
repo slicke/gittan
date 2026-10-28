@@ -49,7 +49,13 @@ begin
   AssertFalse('another file', SamePlace(A, Place(pkChanges, 'b.pp', 3)));
   B := A;
   B.Ref := 'abc';
-  AssertFalse('another commit', SamePlace(A, B));
+  AssertFalse('another ref', SamePlace(A, B));
+  B := A;
+  B.Commit := 'abc';
+  AssertFalse('another commit compared with', SamePlace(A, B));
+  B := A;
+  B.WholeTree := True;
+  AssertFalse('the whole tree', SamePlace(A, B));
 end;
 
 procedure TNavHistoryTest.TestBackForward;

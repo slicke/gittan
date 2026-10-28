@@ -1174,23 +1174,32 @@ var
 begin
   Result := False;
   APull := Default(TGittanForgePull);
-  i := LinkAt(X, Y);
-  if i < 0 then
-    Exit;
-  Url := FLinkUrls[i];
-  if Copy(Url, 1, Length(MineLink)) = MineLink then
+  { The card under the forge link that lies on it, too. }
+  for i := High(FLinkRects) downto 0 do
   begin
-    n := StrToIntDef(Copy(Url, Length(MineLink) + 1, MaxInt), -1);
-    Result := (n >= 0) and (n <= High(FShownMine));
-    if Result then
-      APull := FShownMine[n];
-  end
-  else if Copy(Url, 1, Length(ReviewLink)) = ReviewLink then
-  begin
-    n := StrToIntDef(Copy(Url, Length(ReviewLink) + 1, MaxInt), -1);
-    Result := (n >= 0) and (n <= High(FShownReview));
-    if Result then
-      APull := FShownReview[n];
+    if not PtInRect(FLinkRects[i], Point(X, Y)) then
+      Continue;
+    Url := FLinkUrls[i];
+    if Copy(Url, 1, Length(MineLink)) = MineLink then
+    begin
+      n := StrToIntDef(Copy(Url, Length(MineLink) + 1, MaxInt), -1);
+      Result := (n >= 0) and (n <= High(FShownMine));
+      if Result then
+      begin
+        APull := FShownMine[n];
+        Exit;
+      end;
+    end
+    else if Copy(Url, 1, Length(ReviewLink)) = ReviewLink then
+    begin
+      n := StrToIntDef(Copy(Url, Length(ReviewLink) + 1, MaxInt), -1);
+      Result := (n >= 0) and (n <= High(FShownReview));
+      if Result then
+      begin
+        APull := FShownReview[n];
+        Exit;
+      end;
+    end;
   end;
 end;
 
