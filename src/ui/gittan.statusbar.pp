@@ -223,8 +223,9 @@ const
     push and pull, a box for the stashes, and for the transport two
     arrows round a circle (fetch), an arrow down (pull), an arrow up
     (push), a triangle (continue), a triangle at a bar (skip) and a
-    warning triangle (conflicts); a sparkle for the agent. Each is
-    followed by a space. }
+    warning triangle (conflicts); a sparkle for the agent; an arrow
+    bending back to the left (undo) and one bending on to the right
+    (redo). Each is followed by a space. }
   HintPassed = '✓';
   HintFailed = '✕';
   HintPending = '◷';
@@ -243,6 +244,8 @@ const
   HintSkip = '⏭';
   HintWarn = '⚠';
   HintSparkle = '✦';
+  HintUndo = '↶';
+  HintRedo = '↷';
 
 {** Draws the icon of the marker AIcon (HintPassed and the others above)
   in AColor, in a square a little smaller than ASize centered on a line
@@ -354,7 +357,7 @@ begin
   AText := ALine;
   for M in [HintPassed, HintFailed, HintPending, HintLink, HintSwitch, HintFolder, HintBranch, HintPull,
     HintComment, HintSync, HintStash, HintFetch, HintDown, HintUp, HintPlay, HintSkip,
-    HintWarn] do
+    HintWarn, HintUndo, HintRedo] do
     if Copy(ALine, 1, Length(M) + 1) = M + ' ' then
     begin
       AIcon := M;
@@ -573,6 +576,19 @@ begin
       Point(CX + S div 6, CY + S div 6), Point(CX, T + S), Point(CX - S div 6, CY + S div 6),
       Point(L, CY), Point(CX - S div 6, CY - S div 6)]);
     ACanvas.Brush.Style := bsClear;
+  end
+  else if (AIcon = HintUndo) or (AIcon = HintRedo) then
+  begin
+    { The upper half of a circle, with an arrowhead pointing down at its
+      left end (undo) or its right end (redo). }
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Pen.Width := 1;
+    ACanvas.Arc(L + 1, T + 2, L + S - 1, T + S + 2, 0, 180 * 16);
+    if AIcon = HintUndo then
+      ACanvas.Polyline([Point(L - 2, CY - 1), Point(L + 1, CY + 3), Point(L + 4, CY - 1)])
+    else
+      ACanvas.Polyline([Point(L + S - 4, CY - 1), Point(L + S - 1, CY + 3),
+        Point(L + S + 2, CY - 1)]);
   end;
   ACanvas.Pen.Width := 1;
 end;

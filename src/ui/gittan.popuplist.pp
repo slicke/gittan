@@ -131,6 +131,8 @@ type
     procedure PopupCentered(ATop: integer);
     {** Hides the list without a pick. }
     procedure Close;
+    {** A control beside the list whose presses leave it open. }
+    procedure AddKeeper(AControl: TControl);
     {** The colors: the background, the text, the dim text (headers,
       details), the highlighted row, the border and the divider, and the
       check mark of the current choice. }
@@ -457,6 +459,11 @@ begin
   if FAbove then
     Layout;
   Present;
+end;
+
+procedure TGittanPopupList.AddKeeper(AControl: TControl);
+begin
+  FHook.AddKeeper(AControl);
 end;
 
 procedure TGittanPopupList.PopupCentered(ATop: integer);

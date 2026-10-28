@@ -24,7 +24,7 @@ uses
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
   {$IFDEF LCLWin32}gittan.wintitlebar,{$ENDIF}
   {$IFDEF LCLGtk3}gittan.gtktitlebar,{$ENDIF}
-  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.timelapse, gittan.timelapsebar, gittan.pickaxe, gittan.navhistory, gittan.undo,
+  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.timelapse, gittan.timelapsebar, gittan.pickaxe, gittan.navhistory, gittan.undo, gittan.paletteside,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.textfile, gittan.sectionheader, gittan.hintbox,
   gittan.forge, gittan.lfslocks,
@@ -746,6 +746,8 @@ type
     FPaletteItem: TMenuItem;
     FPalettePopup: TGittanPopupList;
     FPaletteNames: TStringList;
+    { The buttons left and right of the palette while it is open. }
+    FPaletteLeft, FPaletteRight: TGittanPaletteSide;
     { Back and Forward (umain.nav.inc): the places left, the place shown
       as last noted (FNavValid once there is one), set while a place is
       being shown again, and the Go menu's items. }
@@ -1764,6 +1766,9 @@ type
     procedure MenuBackClick(Sender: TObject);
     procedure MenuForwardClick(Sender: TObject);
     procedure PalettePopupPick(Sender: TObject; AIndex: integer);
+    procedure ShowPaletteSides;
+    procedure PalettePopupClose(Sender: TObject);
+    procedure PaletteSideClick(Sender: TObject; AIndex: integer);
     procedure ShowWorktreeList(const AScreenRect: TRect);
     procedure WorktreePopupPick(Sender: TObject; AIndex: integer);
     procedure OpenWorktree(const AWorktree: TGittanWorktree);
@@ -2236,6 +2241,12 @@ resourcestring
   rsNavGone = 'That place is no longer there.';
   rsFilterPalette = 'Type an action';
   rsPaletteRecent = 'Recently used';
+  rsPsUndo = 'Undo';
+  rsPsRedo = 'Redo';
+  rsPsStash = 'Stash';
+  rsPsPull = 'Pull';
+  rsPsPush = 'Push';
+  rsPsBranch = 'New Branch';
   rsPaletteOther = 'Other actions';
   rsGoToRepoSymbol = 'Go to Symbol in Re&pository...';
   rsChangedSymbols = 'Changed S&ymbols...';
@@ -3605,6 +3616,15 @@ begin
   FPalettePopup.Parent := Self;
   FPalettePopup.FilterHint := rsFilterPalette;
   FPalettePopup.OnPick := @PalettePopupPick;
+  FPalettePopup.OnClose := @PalettePopupClose;
+  FPaletteLeft := TGittanPaletteSide.Create(Self);
+  FPaletteLeft.Parent := Self;
+  FPaletteLeft.OnClick := @PaletteSideClick;
+  FPalettePopup.AddKeeper(FPaletteLeft);
+  FPaletteRight := TGittanPaletteSide.Create(Self);
+  FPaletteRight.Parent := Self;
+  FPaletteRight.OnClick := @PaletteSideClick;
+  FPalettePopup.AddKeeper(FPaletteRight);
   { The Git LFS locks pop up under the status bar's branch, as the
     reflog does. }
   FLfsLocksMenu := TPopupMenu.Create(Self);
@@ -4226,6 +4246,8 @@ begin
     FBasePopup, FConflictPopup, FFindPopup, FCompositionPopup, FWorktreePopup,
     FPalettePopup] do
     List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
+  FPaletteLeft.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border);
+  FPaletteRight.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border);
   FGraph.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent, P.Warning);
   FBanner.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Line, P.Accent, P.Deleted, P.Added);
   FDiscardPills.SetColors(P.Popup, P.Text, P.Border, P.Accent, P.Added, P.Deleted);

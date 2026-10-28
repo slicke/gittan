@@ -26,6 +26,7 @@ type
     FOnOutside: TGittanPopupClose;
     FDeactivate: boolean;
     FKeeper: TControl;
+    FKeepers: array of TControl;
     FReturnFocus: TWinControl;
     FHooked: boolean;
     { Lazarus 4.99 passes the whole message, by reference. }
@@ -55,6 +56,12 @@ type
     {** Gives the focus back to the control SaveFocus remembered, when it
       can still take it. }
     procedure RestoreFocus;
+    {** Another control whose presses leave the panel open, beside
+      Keeper, for a panel with controls of its own around it. }
+    procedure AddKeeper(AControl: TControl);
+    {** Whether presses on AControl leave the panel open: the Keeper or
+      one added with AddKeeper. }
+    function Keeps(AControl: TControl): boolean;
     {** A control whose presses leave the panel open, as its own do. }
     property Keeper: TControl read FKeeper write FKeeper;
   end;
@@ -90,6 +97,22 @@ begin
   end;
 end;
 
+procedure TGittanPopupHook.AddKeeper(AControl: TControl);
+begin
+  SetLength(FKeepers, Length(FKeepers) + 1);
+  FKeepers[High(FKeepers)] := AControl;
+end;
+
+function TGittanPopupHook.Keeps(AControl: TControl): boolean;
+var
+  C: TControl;
+begin
+  Result := (FKeeper <> nil) and (AControl = FKeeper);
+  for C in FKeepers do
+    if AControl = C then
+      Exit(True);
+end;
+
 { Every mouse press and key goes through here before it is delivered.
   A press on a control outside the panel (and not on the Keeper) closes
   it. The message says which it was on most widgetsets; Cocoa passes the
@@ -106,8 +129,7 @@ begin
 {$ENDIF}
   if not FPanel.Visible then
     Exit;
-  if (Sender is TControl) and (Owns(TControl(Sender)) or
-    ((FKeeper <> nil) and (Sender = FKeeper))) then
+  if (Sender is TControl) and (Owns(TControl(Sender)) or Keeps(TControl(Sender))) then
     Exit;
   if (Msg = LM_LBUTTONDOWN) or (Msg = LM_RBUTTONDOWN) or (Msg = LM_MBUTTONDOWN) or
     (GetKeyState(VK_LBUTTON) < 0) or (GetKeyState(VK_RBUTTON) < 0) or
