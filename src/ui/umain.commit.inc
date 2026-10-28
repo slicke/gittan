@@ -866,20 +866,81 @@ begin
   UpdateRemoteItems;
 end;
 
+{ The ticked files committed as a fixup of ACommit, as StartCommit
+  commits them, with "fixup! <subject>" as the message, which git's
+  autosquash and the interactive rebase's dialog read (AutosquashSteps
+  in gittan.rebase). The message being written stays in the memo. }
+procedure TRepoFrame.StartFixupCommit(const ACommit: TGittanGraphCommit);
+var
+  Paths: TStringList;
+  Parts: TGittanCommitParts;
+  Options: TGittanCommitOptions;
+  Err: string;
+begin
+  if (FCommitJob <> nil) or (FRemoteJob <> nil) or RepoBusy or not CommitChoosing or
+    (FChosenCount = 0) or not EnsureIdentity then
+    Exit;
+  Paths := TStringList.Create;
+  try
+    ChosenCommitPaths(Paths);
+    if (Paths.Count = 0) or not LockedCommitAsk(Paths, False) then
+      Exit;
+    if not CommitParts(Paths, Parts, Err) then
+    begin
+      BannerError(rsCommitFailed, Err);
+      Exit;
+    end;
+    Options := [];
+    if FSignOff then
+      Include(Options, coSignOff);
+    if FSkipHooks then
+      Include(Options, coNoVerify);
+    FCommitJob := TGittanCommitJob.Create(FRepo.Root, 'fixup! ' + ACommit.Subject, Paths,
+      False, Parts, Options);
+  finally
+    Paths.Free;
+  end;
+  FFixupJob := FCommitJob;
+  FFixupHash := ACommit.Hash;
+  FFixupShort := ACommit.Short;
+  if Length(ACommit.Parents) > 0 then
+    FFixupParent := ACommit.Parents[0]
+  else
+    FFixupParent := '';
+  FCommitJob.OnDone := @CommitJobDone;
+  FCommitJob.Start;
+  FStatus.ShowBusy(rsCommitting);
+  UpdateCommitState;
+  UpdateRemoteItems;
+end;
+
+{ Fold It In in the banner of a fixup commit: the interactive rebase
+  from the parent of the commit fixed up, which puts the fixup after
+  it. }
+procedure TRepoFrame.FixupFoldClick(Sender: TObject);
+begin
+  if (FFixupParent <> '') and FRepo.IsAncestor(FFixupHash, 'HEAD') then
+    RebaseInteractiveAsk(FFixupParent, Copy(FFixupParent, 1, 7), False);
+end;
+
 { Done: on success the message, Amend and the flips go, and the tree
   shows what is left; on failure all stay, and git's reason (a hook's
   output, say) is shown in full. The job is freed from the message loop,
-  since its notification comes from inside Execute. }
+  since its notification comes from inside Execute. A fixup commit
+  leaves the message, Amend and the options alone, and offers the
+  rebase that folds it in. }
 procedure TRepoFrame.CommitJobDone(Sender: TObject);
 var
   Job: TGittanCommitJob;
   Subject: string;
-  Amended: boolean;
+  Amended, Fixup: boolean;
 begin
   Job := TGittanCommitJob(Sender);
   if Job <> FCommitJob then
     Exit;
   FCommitJob := nil;
+  Fixup := Job = FFixupJob;
+  FFixupJob := nil;
   MarkNews;
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
@@ -889,12 +950,15 @@ begin
     if FCommitMemo.Lines.Count > 0 then
       Subject := FCommitMemo.Lines[0];
     Amended := FCommitAmend.Checked;
-    FCommitMemo.Clear;
-    FCommitAmend.Checked := False;
-    FAmendMessage := '';
-    FMergeMessage := '';
-    FSkipHooks := False;
-    UpdateCommitOptions;
+    if not Fixup then
+    begin
+      FCommitMemo.Clear;
+      FCommitAmend.Checked := False;
+      FAmendMessage := '';
+      FMergeMessage := '';
+      FSkipHooks := False;
+      UpdateCommitOptions;
+    end;
     FCommitOn.Clear;
     FCommitOff.Clear;
     FLeftOut.ClearAll;
@@ -906,6 +970,15 @@ begin
   UpdateRemoteItems;
   if not Job.Ok then
     ShowCommitFailure(Job.Error)
+  else if Fixup then
+  begin
+    FStatus.ShowMessage('', stNormal, 0);
+    if FFixupParent <> '' then
+      FBanner.AddAction(Format(rsFixupCommitted, [FFixupShort]), Job.Message, bkSuccess,
+        BannerActionSeconds, rsFixupFold, @FixupFoldClick)
+    else
+      StatusNote(Format(rsCommitted, [Copy(Job.Id, 1, 7), Job.Message]));
+  end
   { A branch that can be pushed as it is (it has an upstream and is not
     behind it, so an amended pushed commit is left to Force Push) is
     offered the push in a banner; otherwise the status bar says it. }

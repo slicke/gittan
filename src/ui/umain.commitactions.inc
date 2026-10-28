@@ -51,6 +51,7 @@ const
   caBisectEnd = 23;
   caPatch = 24;
   caPatchSeries = 25;
+  caFixup = 26;
 
 procedure TRepoFrame.GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
   const AScreenPos: TPoint);
@@ -136,6 +137,10 @@ begin
     not Busy and not InHead and not IsMerge);
   Add(nil, rsCaRevert, caRevert, not Busy and InHead and not IsMerge);
   Add(nil, rsCaRebase, caRebase, not Busy and InHead and not IsHead);
+  { The ticked files as a fixup of this commit, for the rebase to fold
+    in; of a commit on the branch, while the tree chooses a commit. }
+  Add(nil, rsCaFixup, caFixup, not Busy and not Jobs and InHead and CommitChoosing and
+    (FChosenCount > 0));
   Sub := Add(nil, Format(rsCaReset, [Amp(ResetTarget)]), 0, not Busy);
   Sub.OnClick := nil;
   Add(Sub, rsCaResetSoft, caResetSoft);
@@ -231,6 +236,8 @@ begin
       OpenOnForge(CommitTarget(Hash));
     caRebase:
       RebaseInteractiveAsk(Hash, Short, True);
+    caFixup:
+      StartFixupCommit(FActionCommit);
     caBisectStartGood, caBisectStartBad, caBisectGood, caBisectBad, caBisectSkip:
     begin
       case (Sender as TMenuItem).Tag of

@@ -31,6 +31,9 @@ type
     procedure TestShellQuote;
     procedure TestJoinedMessage;
     procedure TestOriginalMessage;
+    procedure TestFixupTarget;
+    procedure TestAutosquash;
+    procedure TestAutosquashUnmatched;
   end;
 
 implementation
@@ -177,6 +180,75 @@ begin
   AssertEquals('first', OriginalMessage(FSteps[0]));
   AssertEquals('second'#10#10'body'#10'more', StringReplace(OriginalMessage(FSteps[1]),
     LineEnding, #10, [rfReplaceAll]));
+end;
+
+procedure TRebaseTest.TestFixupTarget;
+var
+  Action: TGittanRebaseAction;
+begin
+  AssertEquals('first', FixupTarget('fixup! first', Action));
+  AssertTrue(Action = raFixup);
+  AssertEquals('first', FixupTarget('squash! first', Action));
+  AssertTrue(Action = raSquash);
+  AssertEquals('first', FixupTarget('fixup! squash! first', Action));
+  AssertTrue('the first prefix counts', Action = raFixup);
+  AssertEquals('', FixupTarget('first', Action));
+  AssertTrue(Action = raPick);
+  AssertEquals('', FixupTarget('fixup!first', Action));
+end;
+
+{ The fixups and squashes go after the commits they name, in their
+  order, a fixup of a fixup along; a squash keeps its message without
+  the prefix; an id names a commit too. }
+procedure TRebaseTest.TestAutosquash;
+begin
+  Add('aaaaaaa1', 'first', '', raPick);
+  Add('bbbbbbb2', 'second', 'body', raPick);
+  Add('ccccccc3', 'fixup! first', '', raPick);
+  Add('ddddddd4', 'squash! second', 'more', raPick);
+  Add('eeeeeee5', 'third', '', raPick);
+  Add('fffffff6', 'fixup! fixup! first', '', raPick);
+  Add('0000007', 'fixup! aaaaaaa', '', raPick);
+  AutosquashSteps(FSteps);
+  AssertEquals(7, Length(FSteps));
+  AssertEquals('aaaaaaa1', FSteps[0].Hash);
+  AssertEquals('ccccccc3', FSteps[1].Hash);
+  AssertTrue(FSteps[1].Action = raFixup);
+  AssertEquals('fffffff6', FSteps[2].Hash);
+  AssertTrue(FSteps[2].Action = raFixup);
+  AssertEquals('0000007', FSteps[3].Hash);
+  AssertTrue(FSteps[3].Action = raFixup);
+  AssertEquals('bbbbbbb2', FSteps[4].Hash);
+  AssertTrue(FSteps[4].Action = raPick);
+  AssertEquals('ddddddd4', FSteps[5].Hash);
+  AssertTrue(FSteps[5].Action = raSquash);
+  AssertEquals('second'#10#10'more', StringReplace(FSteps[5].Message, LineEnding, #10,
+    [rfReplaceAll]));
+  AssertEquals('eeeeeee5', FSteps[6].Hash);
+  AssertEquals('pick aaaaaaa1 first'#10'fixup ccccccc3 fixup! first'#10 +
+    'fixup fffffff6 fixup! fixup! first'#10'fixup 0000007 fixup! aaaaaaa'#10 +
+    'pick bbbbbbb2 second'#10'fixup ddddddd4 squash! second'#10 +
+    'exec git commit --amend --allow-empty -F "/tmp/x/msg-1.txt"'#10 +
+    'pick eeeeeee5 third'#10, Todo);
+  AssertEquals('second'#10#10'body'#10#10'second'#10#10'more'#10, FFiles[0].Text);
+end;
+
+{ A fixup that names a commit not among the steps, or one after it,
+  stays a pick where it is; a subject matched by its start. }
+procedure TRebaseTest.TestAutosquashUnmatched;
+begin
+  Add('aaaaaaa1', 'fixup! first', '', raPick);
+  Add('bbbbbbb2', 'first', '', raPick);
+  Add('ccccccc3', 'fixup! fir', '', raPick);
+  Add('ddddddd4', 'fixup! elsewhere', '', raDrop);
+  AutosquashSteps(FSteps);
+  AssertEquals('aaaaaaa1', FSteps[0].Hash);
+  AssertTrue(FSteps[0].Action = raPick);
+  AssertEquals('bbbbbbb2', FSteps[1].Hash);
+  AssertEquals('ccccccc3', FSteps[2].Hash);
+  AssertTrue(FSteps[2].Action = raFixup);
+  AssertEquals('ddddddd4', FSteps[3].Hash);
+  AssertTrue('an action set stays', FSteps[3].Action = raDrop);
 end;
 
 initialization

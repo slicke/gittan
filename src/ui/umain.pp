@@ -438,6 +438,12 @@ type
     FCommitNote: TGittanHintBox;
     FCommitItem, FIdentityItem: TMenuItem;
     FCommitJob: TGittanCommitJob;
+    { A commit running as a fixup of a commit from the graph's menu
+      (StartFixupCommit): the job, and the commit it fixes up, its
+      short id and its first parent, the rebase to fold it in starts
+      from (FixupFoldClick). }
+    FFixupJob: TGittanCommitJob;
+    FFixupHash, FFixupShort, FFixupParent: string;
     { The commits still running in a repository no longer open, for
       their draft (DroppedCommitDone). }
     FDroppedCommits: TList;
@@ -1558,6 +1564,11 @@ type
     procedure IdentityClick(Sender: TObject);
     procedure CommitHeaderEnter(Sender: TObject);
     procedure StartCommit;
+    {** Commits the ticked files as a fixup of ACommit ("fixup! " and
+      its subject, what git commit --fixup writes), which the
+      interactive rebase folds into it (AutosquashSteps). }
+    procedure StartFixupCommit(const ACommit: TGittanGraphCommit);
+    procedure FixupFoldClick(Sender: TObject);
     {** The notice with a failed commit's reason (a hook's output, in
       its colors), Commit Again and Copy Output. }
     procedure ShowCommitFailure(const AError: string);
@@ -2294,6 +2305,9 @@ resourcestring
   rsCaWasReset = 'Reset %s to %s';
   rsCaConflicts = 'Stopped with conflicts: resolve them, then continue';
   rsCaRebase = 'Rebase Interactively from Here...';
+  rsCaFixup = 'Fixup with the Ticked Files';
+  rsFixupCommitted = 'Committed a fixup of %s';
+  rsFixupFold = 'Fold It In...';
   rsCaBisect = 'Bisect';
   rsCaBisectStartGood = 'Start Bisect: This Is Good, %s Is Bad';
   rsCaBisectStartBad = 'Start Bisect: This Is Bad';
