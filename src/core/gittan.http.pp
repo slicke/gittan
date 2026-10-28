@@ -361,6 +361,7 @@ const
     and later. }
   WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY = 4;
   WINHTTP_FLAG_SECURE = $00800000;
+  WINHTTP_OPTION_RECEIVE_RESPONSE_TIMEOUT = 7;
   WINHTTP_OPTION_SECURE_PROTOCOLS = 84;
   WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 = $00000800;
   WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3 = $00002000;
@@ -473,6 +474,11 @@ begin
     WinHttpSetTimeouts(Session, ARequest.TimeoutSeconds * 1000,
       ARequest.TimeoutSeconds * 1000, ARequest.TimeoutSeconds * 1000,
       ARequest.TimeoutSeconds * 1000);
+    { The wait for the answer's headers has a timeout of its own, 90 s
+      unless set, which WinHttpSetTimeouts leaves. }
+    Value := ARequest.TimeoutSeconds * 1000;
+    WinHttpSetOption(Session, WINHTTP_OPTION_RECEIVE_RESPONSE_TIMEOUT, @Value,
+      SizeOf(Value));
     { Windows 7 and 8 leave TLS 1.2 off unless asked; 1.3 is refused
       before Windows 11, so 1.2 alone then. }
     Value := WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 or WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
