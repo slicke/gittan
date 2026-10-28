@@ -153,6 +153,9 @@ type
       it is being asked now. }
     procedure SetPulls(const AMine, AReview: TGittanForgePulls; const AError: string;
       ALoading: boolean);
+    {** Forgets that the forge answered (another forge or account), so
+      an empty section says nothing until the new one has. }
+    procedure ForgetAnswer;
     {** The palette: the background, the text, the dim text, the fill
       under the mouse, the dividers, the links, the ok, the warning and
       the error colors. }
@@ -344,6 +347,11 @@ begin
   FOpenRoot := ARoot;
   Layout;
   Invalidate;
+end;
+
+procedure TGittanForgePage.ForgetAnswer;
+begin
+  FAnswered := False;
 end;
 
 procedure TGittanForgePage.SetPulls(const AMine, AReview: TGittanForgePulls;

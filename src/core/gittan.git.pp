@@ -5458,8 +5458,17 @@ var
   Output: string;
 begin
   AList.Clear;
-  Result := (FRoot <> '') and RunGit(FRoot, ['diff-tree', '-r', '-z', '--name-only',
-    '--no-renames', '--no-commit-id', '--root', '--diff-merges=first-parent', 'HEAD'], Output);
+  Result := FRoot <> '';
+  if not Result then
+    Exit;
+  { Against the first parent by name: --diff-merges=first-parent needs
+    git 2.31, and -m lists a merge against each parent. }
+  if RunGit(FRoot, ['rev-parse', '--verify', '--quiet', 'HEAD^'], Output) then
+    Result := RunGit(FRoot, ['diff-tree', '-r', '-z', '--name-only', '--no-renames',
+      'HEAD^', 'HEAD'], Output)
+  else
+    Result := RunGit(FRoot, ['diff-tree', '-r', '-z', '--name-only', '--no-renames',
+      '--no-commit-id', '--root', 'HEAD'], Output);
   if Result then
     SplitNul(Output, AList);
 end;

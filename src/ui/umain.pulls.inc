@@ -375,6 +375,9 @@ procedure TRepoFrame.OpenNewPull(const ABranch: string);
 var
   Remote, RemoteBranch, Url, Err: string;
 begin
+  { The forge may have gone while the push ran (hosting turned off). }
+  if not Assigned(FForge) then
+    Exit;
   if not FRepo.SplitRemoteRef(FRepo.Upstream(ABranch), Remote, RemoteBranch) then
   begin
     Remote := '';

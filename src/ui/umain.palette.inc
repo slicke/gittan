@@ -174,6 +174,9 @@ var
   Path: string;
   i: integer;
 begin
+  { The list raises OnClose, which hides the columns, only after this:
+    a dialog the item opens would have them over the frame meanwhile. }
+  PalettePopupClose(Sender);
   i := FPalettePopup.TagOf(AIndex);
   if (i < 0) or (i >= FPaletteNames.Count) then
     Exit;
@@ -185,7 +188,12 @@ begin
     if i < 0 then
       Exit;
     App.Settings.AddPaletteRecent(Path);
-    TMenuItem(Actions.Objects[i]).Click;
+    FPalettePicking := True;
+    try
+      TMenuItem(Actions.Objects[i]).Click;
+    finally
+      FPalettePicking := False;
+    end;
   finally
     Actions.Free;
   end;

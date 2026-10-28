@@ -145,10 +145,12 @@ type
     { A drag: the row the left button went down on (-1 for none) and
       where, whether the mouse has gone far enough from there for a
       drag, the row it would be dropped on (-1 for none), and the timer
-      that scrolls the box while the mouse is near its top or bottom. }
+      that scrolls the box while the mouse is near its top or bottom.
+      FDragGivenUp: a drag given up with the button still down, whose
+      release then does nothing. }
     FPressRow, FDropRow: integer;
     FPressPoint: TPoint;
-    FDragging: boolean;
+    FDragging, FDragGivenUp: boolean;
     FDragTimer: TTimer;
     FCloseRect: TRect;
     FCloseHot, FFooterHot: boolean;
@@ -224,6 +226,7 @@ type
     function DragMove(Shift: TShiftState; X, Y: integer): boolean;
     procedure Drop(X, Y: integer);
     procedure EndDrag;
+    procedure GiveUpDrag;
     procedure DragTimerTick(Sender: TObject);
     procedure KeyInput(var Key: word);
     procedure EditChange(Sender: TObject);
@@ -387,6 +390,8 @@ procedure TGittanGraphRows.MouseDown(Button: TMouseButton; Shift: TShiftState;
   X, Y: integer);
 begin
   inherited MouseDown(Button, Shift, X, Y);
+  if Button = mbLeft then
+    FGraph.FDragGivenUp := False;
   if (Button = mbLeft) and not FGraph.FStatsOn then
   begin
     FGraph.FPressRow := FGraph.RowAt(Y);
@@ -429,6 +434,11 @@ begin
   if (Button = mbLeft) and FGraph.FDragging then
   begin
     FGraph.Drop(X, Y);
+    Exit;
+  end;
+  if (Button = mbLeft) and FGraph.FDragGivenUp then
+  begin
+    FGraph.FDragGivenUp := False;
     Exit;
   end;
   if Button = mbLeft then
@@ -797,6 +807,8 @@ end;
 
 procedure TGittanCommitGraph.Replace(const ACommits: TGittanGraphCommits; AMore: boolean);
 begin
+  { The rows a press or a drag was on move. }
+  GiveUpDrag;
   Load(ACommits, AMore, CurrentHash);
   ApplyFilter;
   Place;
@@ -961,7 +973,7 @@ procedure TGittanCommitGraph.EditKeyDown(Sender: TObject; var Key: word;
 begin
   if (Key = VK_ESCAPE) and FDragging then
   begin
-    EndDrag;
+    GiveUpDrag;
     Key := 0;
     Exit;
   end;
@@ -1147,6 +1159,14 @@ begin
       FRows.ClientToScreen(Point(X, Y)));
 end;
 
+{ A drag ended with the button still down (Escape, the rows replaced):
+  its release picks nothing. A press not yet a drag is forgotten. }
+procedure TGittanCommitGraph.GiveUpDrag;
+begin
+  FDragGivenUp := FDragging;
+  EndDrag;
+end;
+
 procedure TGittanCommitGraph.EndDrag;
 begin
   FDragTimer.Enabled := False;
@@ -1267,7 +1287,7 @@ begin
   Page := Max(1, FBox.ClientHeight div Px(RowHeight) - 1);
   if (Key = VK_ESCAPE) and FDragging then
   begin
-    EndDrag;
+    GiveUpDrag;
     Key := 0;
     Exit;
   end;

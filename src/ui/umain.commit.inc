@@ -1042,6 +1042,9 @@ begin
     FCommitJob.OnDone := @DroppedCommitDone;
     FDroppedCommits.Add(FCommitJob);
   end;
+  { Freed now or later: a job made at its address is no fixup. }
+  if FFixupJob = FCommitJob then
+    FFixupJob := nil;
   FCommitJob := nil;
 end;
 

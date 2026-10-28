@@ -174,7 +174,9 @@ var
 begin
   ADirty := False;
   if AForce then
-    Result := RunGitIn(ARoot, ['worktree', 'remove', '--force', '--', APath], Output, AError)
+    { Twice: once for changes not committed, once more for a lock. }
+    Result := RunGitIn(ARoot, ['worktree', 'remove', '--force', '--force', '--', APath],
+      Output, AError)
   else
     Result := RunGitIn(ARoot, ['worktree', 'remove', '--', APath], Output, AError);
   { "contains modified or untracked files, use --force to delete it",

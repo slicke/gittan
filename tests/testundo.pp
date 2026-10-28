@@ -133,7 +133,7 @@ begin
   AssertTrue('can undo', FHistory.CanUndo);
   Step := FHistory.UndoStep;
   AssertTrue(FRepo.ReadRefState(Cur));
-  AssertTrue('plan: ' + Err, PlanRefChange(Cur, Step.After, Step.Before, Step.Kind, Steps, Err));
+  AssertTrue('plan: ' + Err, PlanRefChange(Cur, Step.After, Step.Before, Step.Kind, [], Steps, Err));
   AssertTrue('run: ' + FRepo.Error, FRepo.RunSteps(Steps));
   AssertTrue(FRepo.ReadRefState(S));
   AssertTrue('as before', SameRefState(S, Step.Before));
@@ -150,7 +150,7 @@ begin
   AssertTrue('can redo', FHistory.CanRedo);
   Step := FHistory.RedoStep;
   AssertTrue(FRepo.ReadRefState(Cur));
-  AssertTrue('plan: ' + Err, PlanRefChange(Cur, Step.Before, Step.After, Step.Kind, Steps, Err));
+  AssertTrue('plan: ' + Err, PlanRefChange(Cur, Step.Before, Step.After, Step.Kind, [], Steps, Err));
   AssertTrue('run: ' + FRepo.Error, FRepo.RunSteps(Steps));
   AssertTrue(FRepo.ReadRefState(S));
   AssertTrue('as after', SameRefState(S, Step.After));
@@ -213,6 +213,10 @@ begin
   B.Move := 'commit: ' + StringOfChar('x', 60);
   AssertEquals('a long subject is cut', 'Commit "' + StringOfChar('x', 39) + '…"',
     DescribeStep(A, B, Kind));
+  { A character across the cut is left out whole. }
+  B.Move := 'commit: ' + StringOfChar('x', 38) + 'ä' + StringOfChar('x', 20);
+  AssertEquals('cut at a character', 'Commit "' + StringOfChar('x', 38) + '…"',
+    DescribeStep(A, B, Kind));
 
   A := State('main', '1111111aaa', '', ['dev', '3333333ccc', 'main', '1111111aaa']);
   B := State('dev', '3333333ccc', 'checkout: moving from main to dev',
@@ -256,17 +260,42 @@ begin
   C := B;
   C.Head := '3333333';
   C.Tips := ParseBranchTips('3333333 refs/heads/main');
-  AssertFalse('moved since', PlanRefChange(C, B, A, ukCommit, Steps, Err));
+  AssertFalse('moved since', PlanRefChange(C, B, A, ukCommit, [], Steps, Err));
   AssertTrue(Err <> '');
-  AssertTrue(PlanRefChange(B, B, A, ukCommit, Steps, Err));
+  AssertTrue(PlanRefChange(B, B, A, ukCommit, [], Steps, Err));
   AssertEquals(1, Length(Steps));
   AssertEquals('reset', Steps[0][0]);
   AssertEquals('--soft', Steps[0][1]);
-  AssertTrue(PlanRefChange(B, B, A, ukOther, Steps, Err));
+  AssertTrue(PlanRefChange(B, B, A, ukOther, [], Steps, Err));
   AssertEquals('--keep', Steps[0][1]);
   A.Head := '';
   A.Tips := nil;
-  AssertFalse('before the first commit', PlanRefChange(B, B, A, ukCommit, Steps, Err));
+  AssertFalse('before the first commit', PlanRefChange(B, B, A, ukCommit, [], Steps, Err));
+
+  { A branch another worktree has checked out is not moved, deleted or
+    switched to; HEAD's own is reset as before. }
+  A := Default(TGittanRefState);
+  A.Valid := True;
+  A.Branch := 'main';
+  A.Head := '1111111';
+  A.Tips := ParseBranchTips('1111111 refs/heads/main'#10'4444444 refs/heads/wt');
+  B := A;
+  B.Tips := ParseBranchTips('1111111 refs/heads/main'#10'5555555 refs/heads/wt');
+  AssertFalse('moved elsewhere', PlanRefChange(B, B, A, ukOther, ['wt'], Steps, Err));
+  AssertEquals('wt is checked out in another worktree', Err);
+  AssertEquals(0, Length(Steps));
+  AssertTrue(PlanRefChange(B, B, A, ukOther, ['other'], Steps, Err));
+  B := A;
+  B.Tips := ParseBranchTips('1111111 refs/heads/main');
+  AssertFalse('deleted elsewhere', PlanRefChange(A, A, B, ukOther, ['wt'], Steps, Err));
+  B := A;
+  B.Branch := 'wt';
+  B.Head := '4444444';
+  AssertFalse('switched to elsewhere', PlanRefChange(A, A, B, ukOther, ['wt'], Steps, Err));
+  B := A;
+  B.Head := '2222222';
+  B.Tips := ParseBranchTips('2222222 refs/heads/main'#10'4444444 refs/heads/wt');
+  AssertTrue('HEAD''s own', PlanRefChange(B, B, A, ukCommit, ['wt'], Steps, Err));
 end;
 
 procedure TUndoTest.TestCommit;
@@ -396,7 +425,7 @@ begin
   WriteFile('b.txt', 'mine');
   Step := FHistory.UndoStep;
   AssertTrue(FRepo.ReadRefState(Cur));
-  AssertTrue(PlanRefChange(Cur, Step.After, Step.Before, Step.Kind, Steps, Err));
+  AssertTrue(PlanRefChange(Cur, Step.After, Step.Before, Step.Kind, [], Steps, Err));
   AssertFalse('git refuses', FRepo.RunSteps(Steps));
   AssertTrue(FRepo.Error <> '');
   AssertEquals('the change is kept', 'mine', ReadFile('b.txt'));

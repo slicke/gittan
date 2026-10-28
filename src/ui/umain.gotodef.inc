@@ -343,20 +343,21 @@ end;
 { Go > Go to Symbol: lists the symbols of the shown file in the symbol
   bar. Its key, Cmd+Enter (Ctrl+Enter elsewhere), commits in the commit
   message and asks the agent in the tree's filter, which the menu may
-  get first; it does that there instead. }
+  get first; it does that there instead, but not when the palette runs
+  it by name (FPalettePicking), which gives the focus back first. }
 procedure TRepoFrame.MenuGoToSymbolClick(Sender: TObject);
 var
   Names: TStringList;
   Depths: TIntegerDynArray;
   i: integer;
 begin
-  if FCommitMemo.Focused then
+  if FCommitMemo.Focused and not FPalettePicking then
   begin
     if FCommitButton.Enabled then
       CommitButtonClick(FCommitMemo);
     Exit;
   end;
-  if FTreeFilter.Focused then
+  if FTreeFilter.Focused and not FPalettePicking then
   begin
     if FSearchBox.ShowAction then
       SearchBoxAction(nil);

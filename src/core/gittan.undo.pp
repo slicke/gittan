@@ -109,9 +109,13 @@ function DescribeStep(const ABefore, AAfter: TGittanRefState;
   left them to ATo: the branches ATo has and AFrom lacks made again,
   the other branches moved, HEAD switched or reset, and the branches
   ATo lacks deleted. False with AError when ACurrent is not AFrom (the
-  branches moved since) or when ATo is before the first commit. }
+  branches moved since), when ATo is before the first commit, or when
+  it would move, delete or switch to a branch of AElsewhere (those
+  checked out in another worktree, which git would leave with a HEAD
+  that does not match its files, or refuse halfway). }
 function PlanRefChange(const ACurrent, AFrom, ATo: TGittanRefState; AKind: TGittanUndoKind;
-  out ASteps: TGittanGitSteps; out AError: string): boolean;
+  const AElsewhere: array of string; out ASteps: TGittanGitSteps;
+  out AError: string): boolean;
 
 implementation
 
@@ -134,6 +138,7 @@ resourcestring
   rsUndoChange = 'Branch Changes';
   rsUndoMoved = 'The branches changed since; Refresh and try again';
   rsUndoFirst = 'Nothing comes before the first commit';
+  rsUndoElsewhere = '%s is checked out in another worktree';
 
 const
   { The longest subject a title quotes. }
@@ -203,10 +208,18 @@ begin
 end;
 
 function Cut(const AText: string): string;
+var
+  n: integer;
 begin
   Result := Trim(AText);
   if Length(Result) > TitleChars then
-    Result := TrimRight(Copy(Result, 1, TitleChars - 1)) + '…';
+  begin
+    { At a character's start, not in the bytes of one. }
+    n := TitleChars - 1;
+    while (n > 0) and (Ord(Result[n + 1]) and $C0 = $80) do
+      Dec(n);
+    Result := TrimRight(Copy(Result, 1, n)) + '…';
+  end;
 end;
 
 function Short(const AId: string): string;
@@ -331,10 +344,25 @@ begin
 end;
 
 function PlanRefChange(const ACurrent, AFrom, ATo: TGittanRefState; AKind: TGittanUndoKind;
-  out ASteps: TGittanGitSteps; out AError: string): boolean;
+  const AElsewhere: array of string; out ASteps: TGittanGitSteps;
+  out AError: string): boolean;
 var
   i: integer;
   FromId, ToId: string;
+
+  { Whether ABranch is checked out in another worktree, said in AError. }
+  function Elsewhere(const ABranch: string): boolean;
+  var
+    j: integer;
+  begin
+    for j := 0 to High(AElsewhere) do
+      if AElsewhere[j] = ABranch then
+      begin
+        AError := Format(rsUndoElsewhere, [ABranch]);
+        Exit(True);
+      end;
+    Result := False;
+  end;
 
   procedure Add(const AArgs: array of string);
   var
@@ -361,6 +389,16 @@ begin
     AError := rsUndoFirst;
     Exit(False);
   end;
+  { Nothing is run when a branch to touch is another worktree's. }
+  for i := 0 to High(ATo.Tips) do
+    if (ATo.Tips[i].Name <> AFrom.Branch) and TipOf(AFrom, ATo.Tips[i].Name, FromId) and
+      (FromId <> ATo.Tips[i].Id) and Elsewhere(ATo.Tips[i].Name) then
+      Exit(False);
+  if (ATo.Branch <> AFrom.Branch) and (ATo.Branch <> '') and Elsewhere(ATo.Branch) then
+    Exit(False);
+  for i := 0 to High(AFrom.Tips) do
+    if not TipOf(ATo, AFrom.Tips[i].Name, ToId) and Elsewhere(AFrom.Tips[i].Name) then
+      Exit(False);
   { The branches to make again first, since HEAD may go to one. }
   for i := 0 to High(ATo.Tips) do
     if not TipOf(AFrom, ATo.Tips[i].Name, FromId) then

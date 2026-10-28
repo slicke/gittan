@@ -437,9 +437,11 @@ begin
   FAvatarUrl := '';
   FAvatar := '';
   FError := '';
-  UpdatePage;
+  FPage.ForgetAnswer;
+  { The job first, as in Shown. }
   if Visible then
     StartJob;
+  UpdatePage;
 end;
 
 procedure TForgeView.FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);

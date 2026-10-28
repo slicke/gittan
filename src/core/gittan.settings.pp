@@ -447,6 +447,17 @@ var
 begin
   try
     ForceDirectories(ExtractFileDir(FFileName));
+    {$IFDEF UNIX}
+    { The API key is in the file as it is, so no one else may read it,
+      from its first write on: TIniFile writes the file again in place,
+      keeping its mode. }
+    if OpenAIKey <> '' then
+    begin
+      if not FileExists(FFileName) then
+        FileClose(FileCreate(FFileName, &600));
+      FpChmod(FFileName, &600);
+    end;
+    {$ENDIF}
     Ini := TIniFile.Create(FFileName);
     try
       Ini.WriteInteger(SecWindow, 'Left', Left);
@@ -528,11 +539,6 @@ begin
       for i := 0 to FTrust.Count - 1 do
         Ini.WriteString(SecTrust, FTrust.Names[i], FTrust.ValueFromIndex[i]);
       Ini.UpdateFile;
-      {$IFDEF UNIX}
-      { The API key is in the file as it is, so no one else may read it. }
-      if OpenAIKey <> '' then
-        FpChmod(FFileName, &600);
-      {$ENDIF}
     finally
       Ini.Free;
     end;

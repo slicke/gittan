@@ -36,11 +36,28 @@ begin
   FRedoItem.Enabled := (FRepo.Root <> '') and FUndoHistory.CanRedo and not RepoBusy;
 end;
 
+{ The branches checked out in the repository's other worktrees, which
+  an undo leaves alone; none when git cannot list them. }
+function TRepoFrame.OtherWorktreeBranches: TStringArray;
+var
+  List: TGittanWorktrees;
+  Err: string;
+  i: integer;
+begin
+  Result := nil;
+  if not ListWorktrees(FRepo.Root, List, Err) then
+    Exit;
+  for i := 0 to High(List) do
+    if (List[i].Branch <> '') and not IsThisWorktree(List[i]) then
+      Result := Concat(Result, [List[i].Branch]);
+end;
+
 procedure TRepoFrame.UndoRedo(ARedo: boolean);
 var
   Step: TGittanUndoStep;
   Current, Now, Target: TGittanRefState;
   Steps: TGittanGitSteps;
+  Elsewhere: TStringArray;
   Err: string;
   Ok: boolean;
 begin
@@ -70,10 +87,11 @@ begin
     BannerError(rsUndoFailed, FRepo.Error);
     Exit;
   end;
+  Elsewhere := OtherWorktreeBranches;
   if ARedo then
-    Ok := PlanRefChange(Current, Step.Before, Step.After, Step.Kind, Steps, Err)
+    Ok := PlanRefChange(Current, Step.Before, Step.After, Step.Kind, Elsewhere, Steps, Err)
   else
-    Ok := PlanRefChange(Current, Step.After, Step.Before, Step.Kind, Steps, Err);
+    Ok := PlanRefChange(Current, Step.After, Step.Before, Step.Kind, Elsewhere, Steps, Err);
   if not Ok then
   begin
     StatusNote(Err, True);

@@ -282,6 +282,9 @@ begin
     if Action[i] = raPick then
       Continue;
     Text := FixupTarget(ASteps[i].Subject, Action[i]);
+    { "fixup! " alone names no step, as git takes it. }
+    if Text = '' then
+      Continue;
     j := Find(Text, i);
     if j < 0 then
       for k := 0 to i - 1 do

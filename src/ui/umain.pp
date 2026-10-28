@@ -746,6 +746,10 @@ type
     FPaletteItem: TMenuItem;
     FPalettePopup: TGittanPopupList;
     FPaletteNames: TStringList;
+    { While a row of the palette clicks its menu item: the focus is back
+      where it was, so an item that acts on the focused control by its
+      key (Go to Symbol) acts as the menu item instead. }
+    FPalettePicking: boolean;
     { The buttons left and right of the palette while it is open. }
     FPaletteLeft, FPaletteRight: TGittanPaletteSide;
     { Back and Forward (umain.nav.inc): the places left, the place shown
@@ -845,8 +849,8 @@ type
     FPendingKind: TGittanRemoteKind;
     FPendingMode: TGittanPullMode;
     FPendingArg, FPendingRemoteName, FPendingBranch: string;
-    { The list a click on the status bar's pull request drops down, and
-      what each of its rows does (the pa* constants). }
+    { The list a click on the status bar's pull request drops down; each
+      row's tag is what it does (the pa* constants). }
     FPullPopup: TGittanPopupList;
     { An action on a pull request on the forge (umain.pulls.inc): the
       job running it, the pull request the card's menu was opened for
@@ -854,7 +858,6 @@ type
     FPullActionJob: TGittanPullActionJob;
     FActionPull: TGittanPullRequest;
     FPullCardPopup: TPopupMenu;
-    FPullActions: TIntegerDynArray;
     FEditOld: TATSynEdit;
     { The hidden editor that parses another changed file for Go to
       Definition, with its adapter; made on the first lookup. }
@@ -1747,6 +1750,7 @@ type
     procedure StashContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
     procedure StashMenuClick(Sender: TObject);
     function IsThisWorktree(const AWorktree: TGittanWorktree): boolean;
+    function OtherWorktreeBranches: TStringArray;
     procedure MenuWorktreesClick(Sender: TObject);
     procedure ListPaletteActions(AList: TStringList);
     procedure MenuPaletteClick(Sender: TObject);

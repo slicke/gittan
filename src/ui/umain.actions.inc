@@ -624,7 +624,11 @@ end;
 procedure TRepoFrame.ReFindForge;
 begin
   if FindForge then
+  begin
+    { A push asked to open its page on a forge that is no longer it. }
+    FPullAfterPush := '';
     ForgetForgeAnswers;
+  end;
   UpdateForgeItems;
 end;
 
@@ -2469,9 +2473,7 @@ var
   procedure AddAction(AAction: integer; const ACaption, ADetail: string;
     AChecked: boolean = False);
   begin
-    FPullPopup.Add(ACaption, ADetail, AChecked);
-    SetLength(FPullActions, Length(FPullActions) + 1);
-    FPullActions[High(FPullActions)] := AAction;
+    FPullPopup.Add(ACaption, ADetail, AChecked, AAction);
   end;
 
 begin
@@ -2489,10 +2491,7 @@ begin
       Detail := Format(rsReviewOpen, [Open]);
   end;
   FPullPopup.Clear;
-  FPullActions := nil;
   FPullPopup.AddHeader(Format(rsPullHintTitle, [FPull.Number, FPull.Title]));
-  SetLength(FPullActions, 1);
-  FPullActions[0] := 0;
   AddAction(paCompare, rsComparePull, Detail, Comparing);
   AddAction(paWorkingTree, rsCompareWorkingTree, '', (FRepo.Base = '') and
     not FRepo.WholeTree);
@@ -2526,10 +2525,13 @@ begin
 end;
 
 procedure TRepoFrame.PullPopupPick(Sender: TObject; AIndex: integer);
+var
+  Picked: PtrInt;
 begin
-  if (AIndex < 0) or (AIndex > High(FPullActions)) or not FHasPull then
+  Picked := FPullPopup.TagOf(AIndex);
+  if (Picked < 0) or not FHasPull then
     Exit;
-  case FPullActions[AIndex] of
+  case Picked of
     paCompare:
       if not ((FPullRange <> '') and (FRepo.Base = FPullRange) and
         (FPullNumber = FPull.Number)) then
@@ -2539,9 +2541,8 @@ begin
     paCopy: MenuCopyPullUrlClick(Sender);
     paList: ShowPulls;
     else
-      if (FPullActions[AIndex] >= paAct) and
-        (FPullActions[AIndex] <= paAct + Ord(High(TGittanPullAction))) then
-        StartPullAction(FPull, TGittanPullAction(FPullActions[AIndex] - paAct));
+      if (Picked >= paAct) and (Picked <= paAct + Ord(High(TGittanPullAction))) then
+        StartPullAction(FPull, TGittanPullAction(Picked - paAct));
   end;
 end;
 

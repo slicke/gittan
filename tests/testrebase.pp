@@ -241,6 +241,7 @@ begin
   Add('bbbbbbb2', 'first', '', raPick);
   Add('ccccccc3', 'fixup! fir', '', raPick);
   Add('ddddddd4', 'fixup! elsewhere', '', raDrop);
+  Add('eeeeeee5', 'fixup!  ', '', raPick);
   AutosquashSteps(FSteps);
   AssertEquals('aaaaaaa1', FSteps[0].Hash);
   AssertTrue(FSteps[0].Action = raPick);
@@ -249,6 +250,8 @@ begin
   AssertTrue(FSteps[2].Action = raFixup);
   AssertEquals('ddddddd4', FSteps[3].Hash);
   AssertTrue('an action set stays', FSteps[3].Action = raDrop);
+  AssertEquals('one that names nothing stays', 'eeeeeee5', FSteps[4].Hash);
+  AssertTrue(FSteps[4].Action = raPick);
 end;
 
 initialization

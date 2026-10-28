@@ -150,6 +150,8 @@ begin
     end;
   AssertFalse(RemoveWorktree(Root, Other, False, Err, Dirty));
   AssertTrue('dirty', Dirty);
+  { Force removes it with the change and a lock both. }
+  AssertTrue(Err, LockWorktree(Root, Other, True, Err));
   AssertTrue(Err, RemoveWorktree(Root, Other, True, Err, Dirty));
   AssertFalse('folder gone', DirectoryExists(Other));
   AssertTrue(Err, ListWorktrees(Root, List, Err));
