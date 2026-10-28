@@ -676,7 +676,8 @@ var
     Canvas.TextOut(LinesRight - Canvas.TextWidth(LinesText(ALines)), TextY, LinesText(ALines));
     Canvas.Font.Style := [];
     Canvas.Font.Color := FDim;
-    Canvas.TextOut(NameX + NameCol, TextY, FilesText(AFiles));
+    if FilesCol > 0 then
+      Canvas.TextOut(NameX + NameCol, TextY, FilesText(AFiles));
   end;
 
 begin
@@ -708,6 +709,13 @@ begin
   if BarW < 40 then
     BarW := 0;
   LinesRight := BarX + BarW + Px(Gap) + LinesW;
+  { Still too narrow for the lines and the share: the files go too. }
+  if LinesRight + Px(Gap) + ShareW > Width - Px(Pad) then
+  begin
+    FilesCol := 0;
+    BarX := NameX + NameCol;
+    LinesRight := BarX + Px(Gap) + LinesW;
+  end;
 
   Row(rsAllFiles, AllFiles, AllLines, True);
   Inc(Y, Px(RemoteRow));

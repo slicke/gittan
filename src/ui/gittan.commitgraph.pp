@@ -223,6 +223,7 @@ type
     procedure Dismiss;
     function IsHeadRow(ARow: integer): boolean;
     procedure SetDropRow(AValue: integer);
+    function DropRowAt(X, Y: integer): integer;
     function DragMove(Shift: TShiftState; X, Y: integer): boolean;
     procedure Drop(X, Y: integer);
     procedure EndDrag;
@@ -1146,7 +1147,7 @@ begin
     SetCurrent(FPressRow);
     FDragTimer.Enabled := True;
   end;
-  SetDropRow(RowAt(Y));
+  SetDropRow(DropRowAt(X, Y));
   Result := True;
 end;
 
@@ -1155,7 +1156,7 @@ var
   Source, Target: integer;
 begin
   Source := FPressRow;
-  SetDropRow(RowAt(Y));
+  SetDropRow(DropRowAt(X, Y));
   Target := FDropRow;
   EndDrag;
   if (Target >= 0) and (Source >= 0) and (Source <= High(FShown)) and Assigned(FOnDrop) then
@@ -1205,7 +1206,18 @@ begin
   else
     Exit;
   P := FRows.ScreenToClient(Mouse.CursorPos);
-  SetDropRow(RowAt(P.Y));
+  SetDropRow(DropRowAt(P.X, P.Y));
+end;
+
+{ The row a drag at X, Y of the rows would drop on: none outside the box
+  that shows them, where the rows go on out of sight (the mouse is
+  captured, so a release anywhere comes here). }
+function TGittanCommitGraph.DropRowAt(X, Y: integer): integer;
+begin
+  if PtInRect(FBox.ClientRect, FBox.ScreenToClient(FRows.ClientToScreen(Point(X, Y)))) then
+    Result := RowAt(Y)
+  else
+    Result := -1;
 end;
 
 function TGittanCommitGraph.RowAt(Y: integer): integer;

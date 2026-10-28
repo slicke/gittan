@@ -322,6 +322,8 @@ begin
       left the frame elsewhere. }
     FNavValid := False;
     NavSync;
+    if FNavValid then
+      FNavHistory.Settled(FNavPlace);
     StatusNote(rsNavGone);
   end;
   NavUpdateItems;

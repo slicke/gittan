@@ -513,19 +513,27 @@ end;
 function ParseComposition(const AFiles, ALineCounts: string): TGittanComposition;
 var
   Path: string;
-  Nul: integer;
+  P, Nul, Lf: integer;
   Count: int64;
 begin
   Result := Default(TGittanComposition);
   for Path in AFiles.Split([#0]) do
     if Path <> '' then
       Inc(Result[FileCategory(Path)].Files);
-  { Split by hand: the lines hold NULs. }
-  for Path in ALineCounts.Split([#10]) do
+  { A record is the name up to its NUL and the count up to the line end
+    after it, read from the NUL since a name may hold a line feed. }
+  P := 1;
+  while P <= Length(ALineCounts) do
   begin
-    Nul := Pos(#0, Path);
-    if (Nul >= 2) and TryStrToInt64(Trim(Copy(Path, Nul + 1, MaxInt)), Count) then
-      Inc(Result[FileCategory(Copy(Path, 1, Nul - 1))].Lines, Count);
+    Nul := Pos(#0, ALineCounts, P);
+    if Nul = 0 then
+      Break;
+    Lf := Pos(#10, ALineCounts, Nul);
+    if Lf = 0 then
+      Lf := Length(ALineCounts) + 1;
+    if (Nul > P) and TryStrToInt64(Trim(Copy(ALineCounts, Nul + 1, Lf - Nul - 1)), Count) then
+      Inc(Result[FileCategory(Copy(ALineCounts, P, Nul - P))].Lines, Count);
+    P := Lf + 1;
   end;
 end;
 

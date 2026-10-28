@@ -786,6 +786,11 @@ begin
     IntToStr(GetProcessID) + '-' + IntToStr(InterLockedIncrement(IndexSerial));
   List := Index + '.paths';
   Index := Index + '.index';
+  { Left by a run of an earlier process with the same id that ended
+    before it cleaned up; no live one has this name, and git would
+    refuse the index while its lock is there. }
+  DeleteFile(Index + '.lock');
+  DeleteFile(Index);
   try
     if AHasHead then
       Result := RunGitIn(ARoot, ['read-tree', 'HEAD'], Output, AError, Index)

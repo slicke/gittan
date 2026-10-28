@@ -69,6 +69,10 @@ type
     function Forward(const ACurrent: TGittanPlace): TGittanPlace;
     function CanBack: boolean;
     function CanForward: boolean;
+    {** APlace is shown after steps that found nothing to show: the
+      place at the end of either list that is the same goes, since a
+      step there would show what is shown. }
+    procedure Settled(const APlace: TGittanPlace);
     {** Forgets every place, as when another repository is opened. }
     procedure Clear;
     property BackPlaces: TGittanPlaces read FBack;
@@ -147,6 +151,14 @@ end;
 function TGittanNavHistory.CanForward: boolean;
 begin
   Result := Length(FForward) > 0;
+end;
+
+procedure TGittanNavHistory.Settled(const APlace: TGittanPlace);
+begin
+  if (Length(FForward) > 0) and SamePlace(FForward[High(FForward)], APlace) then
+    Pop(FForward);
+  if (Length(FBack) > 0) and SamePlace(FBack[High(FBack)], APlace) then
+    Pop(FBack);
 end;
 
 procedure TGittanNavHistory.Clear;

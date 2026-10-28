@@ -19,7 +19,7 @@ unit gittan.github;
 interface
 
 uses
-  Classes, SysUtils, gittan.forge, gittan.reviews;
+  Classes, SysUtils, gittan.forge, gittan.reviews, gittan.textfile;
 
 const
   {** The fields asked of gh pr view and gh pr list, the ones
@@ -1197,46 +1197,39 @@ end;
 
 var
   { The hosts of gh's hosts.yml as last read, with the file's path and
-    age then, so it is read from disk again only when it has changed:
-    ForgeClassFor asks for every remote of every repository. Main
-    thread only. }
+    text then, so it is parsed again only when it has changed:
+    ForgeClassFor asks for every remote of every repository. The text
+    is compared rather than the file's age, which counts whole seconds,
+    so an account switched in the second it was read is not missed.
+    Main thread only. }
   LoggedHosts: TStringArray;
   LoggedAccounts: TGittanForgeAccounts;
   LoggedHostsPath: string;
-  LoggedHostsAge: longint = -2;
+  LoggedHostsText: RawByteString;
+  LoggedHostsRead: boolean;
 
-{ The hosts gh is logged in to, the file read again when it changed
-  (FileAge -1: none, and none logged in). }
+{ The hosts gh is logged in to, the file parsed again when it changed
+  (none when it is not there, and none logged in). }
 function GhLoggedHosts: TStringArray;
 var
   Path: string;
-  Age: longint;
-  Lines: TStringList;
+  Text: RawByteString;
 begin
   Path := IncludeTrailingPathDelimiter(GhConfigDir) + 'hosts.yml';
-  Age := FileAge(Path);
-  if (Age <> LoggedHostsAge) or (Path <> LoggedHostsPath) then
-  begin
-    LoggedHostsAge := Age;
-    LoggedHostsPath := Path;
-    LoggedHosts := nil;
-    LoggedAccounts := nil;
-    if Age <> -1 then
-    begin
-      Lines := TStringList.Create;
-      try
-        try
-          Lines.LoadFromFile(Path);
-          LoggedHosts := GhHosts(Lines.Text);
-          LoggedAccounts := GhAccounts(Lines.Text);
-        except
-          LoggedHosts := nil;
-          LoggedAccounts := nil;
-        end;
-      finally
-        Lines.Free;
-      end;
+  Text := '';
+  if FileExists(Path) then
+    try
+      Text := ReadFileBytes(Path);
+    except
+      Text := '';
     end;
+  if not LoggedHostsRead or (Text <> LoggedHostsText) or (Path <> LoggedHostsPath) then
+  begin
+    LoggedHostsRead := True;
+    LoggedHostsText := Text;
+    LoggedHostsPath := Path;
+    LoggedHosts := GhHosts(Text);
+    LoggedAccounts := GhAccounts(Text);
   end;
   Result := LoggedHosts;
 end;
@@ -1270,15 +1263,33 @@ begin
 end;
 
 class function TGittanGitHubForge.AccountsNote: string;
+
+  function FirstSet(const AA, AB: string): string;
+  begin
+    if EnvironmentVariable(AA) <> '' then
+      Result := AA
+    else if EnvironmentVariable(AB) <> '' then
+      Result := AB
+    else
+      Result := '';
+  end;
+
+var
+  Token, Enterprise: string;
 begin
-  if EnvironmentVariable('GH_TOKEN') <> '' then
-    Result := 'GH_TOKEN'
-  else if EnvironmentVariable('GITHUB_TOKEN') <> '' then
-    Result := 'GITHUB_TOKEN'
-  else
-    Exit('');
-  Result := Result + ' is set in Gittan''s environment, so gh uses that token ' +
-    'on github.com whichever account is picked here.';
+  Result := '';
+  Token := FirstSet('GH_TOKEN', 'GITHUB_TOKEN');
+  Enterprise := FirstSet('GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN');
+  if Token <> '' then
+    Result := Token + ' is set in Gittan''s environment, so gh uses that token ' +
+      'on github.com and ghe.com whichever account is picked here.';
+  if Enterprise <> '' then
+  begin
+    if Result <> '' then
+      Result := Result + ' ';
+    Result := Result + Enterprise + ' is set in Gittan''s environment, so gh uses ' +
+      'that token on Enterprise Server hosts whichever account is picked here.';
+  end;
 end;
 
 function TGittanGitHubForge.SwitchAccount(const AHost, ALogin: string;

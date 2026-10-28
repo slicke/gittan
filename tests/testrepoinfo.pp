@@ -202,6 +202,11 @@ begin
   AssertEquals('doc lines', 8, C[fcDocs].Lines);
   C := ParseComposition('', '');
   AssertEquals('none', 0, C[fcCode].Files);
+  { A line feed in a name: the lines stay with the whole name. }
+  C := ParseComposition('src/a'#10'tests/b.pp'#0'c'#10#0,
+    'src/a'#10'tests/b.pp'#0'5'#10'c'#10#0'7'#10);
+  AssertEquals('code lines', 12, C[fcCode].Lines);
+  AssertEquals('test lines', 0, C[fcTest].Lines);
 end;
 
 { TRepoInfoRepoTest }

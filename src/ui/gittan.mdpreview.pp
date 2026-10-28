@@ -210,8 +210,11 @@ begin
 end;
 
 { The picture in the file APath decoded by DecodeImage and written to
-  ADest as a PNG; False when it cannot be read. }
+  ADest as a PNG; False when it cannot be read, or is over
+  MaxRenderImage, since it is decoded on the main thread. }
 function RenderImage(const APath: string; ADest: TStream): boolean;
+const
+  MaxRenderImage = 64 shl 20;
 var
   Data: RawByteString;
   F: TFileStream;
@@ -221,6 +224,8 @@ begin
   try
     F := TFileStream.Create(APath, fmOpenRead or fmShareDenyWrite);
     try
+      if F.Size > MaxRenderImage then
+        Exit;
       SetLength(Data, F.Size);
       if Data <> '' then
         F.ReadBuffer(Data[1], Length(Data));

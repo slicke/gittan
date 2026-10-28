@@ -1035,6 +1035,9 @@ type
     FGapToggle: string;
     { The link in a card a click opens when the button comes up. }
     FGapLink: string;
+    { The editors' scroll bars' look, this frame's own since its colors
+      follow its syntax theme. }
+    FScrollbarTheme: TATScrollbarTheme;
     function Palette: TGittanPalette;
     procedure ApplyTheme;
     procedure ApplyEditorColors(AEd: TATSynEdit);
@@ -4185,8 +4188,9 @@ end;
   track on the text background, a rounded thumb in the border color
   that darkens under the mouse and while dragged, a pixel of track
   around it, no arrows and no grip lines, as macOS draws its own. The
-  theme is global, so a bar is told to take it again (Update sets its
-  size and repaints) after a change of appearance. }
+  global theme gives the sizes ATSynEdit reads; the colors follow this
+  frame's syntax theme, so its bars take a copy of their own, told to
+  take it again (Update sets its size and repaints) after a change. }
 procedure TRepoFrame.ApplyScrollbarTheme(const P: TGittanPalette);
 var
   Ed: TATSynEdit;
@@ -4219,9 +4223,12 @@ begin
     ThumbMarkerMinimalSize := MaxInt;
     ThumbRoundedRect := True;
   end;
+  FScrollbarTheme := ATScrollbarTheme;
   for Ed in [Edit, FEditOld] do
     if Ed <> nil then
     begin
+      Ed.ScrollbarVert.Theme := @FScrollbarTheme;
+      Ed.ScrollbarHorz.Theme := @FScrollbarTheme;
       Ed.ScrollbarVert.Update;
       Ed.ScrollbarHorz.Update;
     end;

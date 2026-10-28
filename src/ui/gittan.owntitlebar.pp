@@ -100,6 +100,7 @@ type
     function TabsStart: integer;
     function NavEnabled(APart: TGittanTitlePart): boolean;
     function TabWidth: integer;
+    function TabsShown: integer;
     function TabRect(AIndex: integer): TRect;
     function CrossRect(const ATab: TRect): TRect;
     procedure CopyItems(ASource, ATarget: TMenuItem);
@@ -369,6 +370,21 @@ begin
     Room div Length(FCaptions)));
 end;
 
+{ How many tabs fit before the limit, with room for the plus after them
+  (when they are not fixed); those after are not drawn, so the plus
+  stays clear of the caption buttons in a narrow window. }
+function TGittanOwnTitleBar.TabsShown: integer;
+var
+  Limit: integer;
+begin
+  Limit := TabsLimit;
+  if not FFixed then
+    Dec(Limit, Scale96ToForm(PlusSize + Gap));
+  Result := 0;
+  while (Result < Length(FCaptions)) and (TabRect(Result).Right <= Limit) do
+    Inc(Result);
+end;
+
 function TGittanOwnTitleBar.TabRect(AIndex: integer): TRect;
 var
   W, X, H: integer;
@@ -418,8 +434,8 @@ begin
   FBackRect := Types.Rect(X, (H - W) div 2 + 1, X + W, (H + W) div 2 + 1);
   X := FBackRect.Right + Scale96ToForm(NavGap);
   FForwardRect := Types.Rect(X, FBackRect.Top, X + W, FBackRect.Bottom);
-  X := TabsStart + Length(FCaptions) * TabWidth;
-  if FFixed then
+  X := TabsStart + TabsShown * TabWidth;
+  if FFixed or (X + S > TabsLimit) then
     FPlusRect := Types.Rect(0, 0, 0, 0)
   else
     FPlusRect := Types.Rect(X, (H - S) div 2 + 1, X + S, (H + S) div 2 + 1);
@@ -455,11 +471,9 @@ begin
     Exit(tpForge);
   if FPlusRect.Contains(P) then
     Exit(tpPlus);
-  for i := 0 to High(FCaptions) do
+  for i := 0 to TabsShown - 1 do
   begin
     R := TabRect(i);
-    if R.Right > TabsLimit then
-      Break;
     if R.Contains(P) then
     begin
       AIndex := i;
@@ -849,11 +863,9 @@ begin
   DrawChevron(tpBack, FBackRect);
   DrawChevron(tpForward, FForwardRect);
 
-  for i := 0 to High(FCaptions) do
+  for i := 0 to TabsShown - 1 do
   begin
     R := TabRect(i);
-    if R.Right > TabsLimit then
-      Break;
     Shown := i = FTabActive;
     Hover := (FHotIndex = i) and (FHotPart in [tpTab, tpTabClose]);
     if Shown then
@@ -909,8 +921,8 @@ begin
     end;
   end;
 
-  { The plus. }
-  if not FFixed then
+  { The plus, unless there is no room for it. }
+  if not FFixed and not FPlusRect.IsEmpty then
   begin
     if FHotPart = tpPlus then
       HotBox(FPlusRect, FButtonHot);

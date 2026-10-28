@@ -85,6 +85,12 @@ begin
     AssertEquals(7, P.Row);
     AssertFalse(H.CanForward);
     AssertEquals(3, Length(H.BackPlaces));
+    { A Back that found nothing to show, left at c.pp: Forward would
+      go to c.pp, which is shown. }
+    P := H.Back(Place(pkChanges, 'c.pp', 7));
+    H.Settled(Place(pkChanges, 'c.pp', 2));
+    AssertFalse('nothing to go forward to', H.CanForward);
+    AssertEquals(2, Length(H.BackPlaces));
     H.Clear;
     AssertFalse(H.CanBack);
   finally
