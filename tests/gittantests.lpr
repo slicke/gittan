@@ -19,7 +19,7 @@ uses
   testcallers, testrepofiles, testdiscard, testkeep, testleaveout, testsubmodules, testupdate,
   testreviews, testgraph, testpofile, testcommitjob, testrepoinfo, testrebase, testcommitstats, testwatch, testjob, testterminal, testhttp,
   testtextfile, testrepocommands, testsha256, testai, testagentcli, testopenai, testforge,
-  testlfslocks;
+  testlfslocks, testworktrees;
 
 { Every git the tests start reads this file as the user's config and no
   system config, so what the developer has set (signed commits, a hooks

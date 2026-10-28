@@ -52,6 +52,7 @@ Details of each area live in `spec/`. Read the file that matches what you are ab
 - [spec/repo-files.md](spec/repo-files.md): Config section and editing repository files. Read when touching `umain.repofiles.inc`, `gittan.repofiles`, the ignore menus or editing .gitignore and the like.
 - [spec/repo-commands.md](spec/repo-commands.md): The Commands page and `.gittan/commands.ini`. Read when touching `gittan.repocommands`, `gittan.commandpage`, `umain.commands.inc`, the Commands row, the shortcuts that run a command, or the `.gittan` folder.
 - [spec/submodules.md](spec/submodules.md): Submodules. Read when touching `gittan.submodules`, `gittan.subpage`, `umain.submodules.inc`, submodule actions.
+- [spec/worktrees.md](spec/worktrees.md): Worktrees. Read when touching `gittan.worktrees`, `umain.worktrees.inc`, Branch > Worktrees..., or adding, opening, locking, removing or pruning a worktree.
 - [spec/commit-graph.md](spec/commit-graph.md): Commit graph and commit menu. Read when touching `gittan.commitgraph`, `gittan.graph`, `umain.commitactions.inc`.
 - [spec/files-page.md](spec/files-page.md): The Files page. Read when touching `gittan.filespage`, `umain.files.inc`, the Files row, Browse Files..., or a file of a commit shown in the editor.
 - [spec/branches-stash-tags.md](spec/branches-stash-tags.md): Interactive rebase, branches, stashes, tags, reflog, bisect and patches. Read when touching `umain.rebase.inc`, `umain.branches.inc`, `umain.stash.inc`, `umain.tags.inc`, `umain.reflog.inc`, `umain.bisect.inc`, `umain.patches.inc`.

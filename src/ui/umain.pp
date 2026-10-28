@@ -30,7 +30,7 @@ uses
   gittan.forge, gittan.lfslocks,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
-  gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
+  gittan.rebase, gittan.worktrees, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
   gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, ATSynEdit_Gaps, md5;
 
 type
@@ -730,6 +730,13 @@ type
     FReflogMenu: TPopupMenu;
     FMenuReflog: TGittanReflogEntry;
     FReflogItem: TMenuItem;
+    { Worktrees (umain.worktrees.inc): Branch > Worktrees..., the list,
+      the worktrees it shows, the menu of one and the one it is for. }
+    FWorktreesItem: TMenuItem;
+    FWorktreePopup: TGittanPopupList;
+    FWorktreeMenu: TPopupMenu;
+    FListedWorktrees: TGittanWorktrees;
+    FMenuWorktree: TGittanWorktree;
     { Stashes (umain.stash.inc): what the last snapshot listed, the list
       that drops from the status bar's stash chip with the stashes it
       shows (FListedStashes, a copy, since a snapshot replaces FStashes
@@ -1685,6 +1692,15 @@ type
     procedure StashPopupPick(Sender: TObject; AIndex: integer);
     procedure StashContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
     procedure StashMenuClick(Sender: TObject);
+    function IsThisWorktree(const AWorktree: TGittanWorktree): boolean;
+    procedure MenuWorktreesClick(Sender: TObject);
+    procedure ShowWorktreeList(const AScreenRect: TRect);
+    procedure WorktreePopupPick(Sender: TObject; AIndex: integer);
+    procedure OpenWorktree(const AWorktree: TGittanWorktree);
+    procedure WorktreeContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
+    procedure WorktreeMenuClick(Sender: TObject);
+    procedure AddWorktreeAsk;
+    procedure RemoveWorktreeAsk(const AWorktree: TGittanWorktree);
     procedure StashChangesAsk(AChosenOnly: boolean);
     procedure ApplyStash(AStash: TGittanStash; APop: boolean);
     procedure DropStashAsk(AStash: TGittanStash);
@@ -2454,6 +2470,39 @@ resourcestring
   rsFilterSubmodules = 'Filter submodules';
   rsSubmodulesHeader = 'Submodules';
   rsReflogItem = 'Re&flog...';
+  rsWorktreesItem = '&Worktrees...';
+  rsWtHeader = 'Worktrees';
+  rsWtAddRow = 'Add Worktree...';
+  rsWtFilter = 'Filter worktrees';
+  rsWtThisOne = 'this one';
+  rsWtMain = 'the repository';
+  rsWtLocked = 'locked';
+  rsWtGone = 'folder is gone';
+  rsWtBare = 'bare';
+  rsWtDetached = 'at %s';
+  rsWtOpen = 'Open in New Tab';
+  rsWtLock = 'Lock';
+  rsWtUnlock = 'Unlock';
+  rsWtRemove = 'Remove...';
+  rsWtPrune = 'Prune Worktrees';
+  rsWtListFailed = 'Could not list the worktrees';
+  rsWtFailed = 'Git refused';
+  rsWtCannotOpen = '%s is not there to open';
+  rsWtLockedNote = 'Locked %s';
+  rsWtUnlockedNote = 'Unlocked %s';
+  rsWtPruned = 'Pruned the worktrees whose folders are gone';
+  rsWtAddTitle = 'Add Worktree';
+  rsWtFolderPrompt = 'Folder of the new worktree';
+  rsWtBranchPrompt = 'Branch (made if new, empty for one named after the folder)';
+  rsWtFolderExists = '%s exists already.';
+  rsWtAddFailed = 'Could not add the worktree';
+  rsWtAdded = 'Added the worktree %s';
+  rsWtRemoveTitle = 'Remove Worktree';
+  rsWtRemoveAsk = 'Remove the worktree %s? Its folder, %s, is deleted. The branch stays.';
+  rsWtRemoveForceAsk = 'The worktree %s cannot be removed as it is: %s' + LineEnding + LineEnding + 'Remove it anyway? Changes not committed there are lost.';
+  rsWtRemoveAction = 'Remove';
+  rsWtRemoveAnyway = 'Remove Anyway';
+  rsWtRemoved = 'Removed the worktree %s';
   rsReflog = 'Where HEAD has been';
   rsNoReflog = 'The reflog is empty';
   rsReflogLost = 'only in the reflog';
@@ -3421,6 +3470,12 @@ begin
   FStashPopup.FilterHint := rsFilterStashes;
   FStashPopup.OnPick := @StashPopupPick;
   FStashPopup.OnContext := @StashContext;
+  FWorktreeMenu := TPopupMenu.Create(Self);
+  FWorktreePopup := TGittanPopupList.Create(Self);
+  FWorktreePopup.Parent := Self;
+  FWorktreePopup.FilterHint := rsWtFilter;
+  FWorktreePopup.OnPick := @WorktreePopupPick;
+  FWorktreePopup.OnContext := @WorktreeContext;
   { The Git LFS locks pop up under the status bar's branch, as the
     reflog does. }
   FLfsLocksMenu := TPopupMenu.Create(Self);
@@ -4032,7 +4087,7 @@ begin
   FSymbolBar.SetColors(P.Shade, P.Text, P.Dim, P.Line);
   for List in [FBranchPopup, FStashPopup, FUpstreamPopup, FTagPopup, FViewPopup,
     FSubListPopup, FReflogPopup, FPullPopup, FReviewPopup, FSyncPopup, FRecentPopup,
-    FBasePopup, FConflictPopup, FFindPopup, FCompositionPopup] do
+    FBasePopup, FConflictPopup, FFindPopup, FCompositionPopup, FWorktreePopup] do
     List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
   FGraph.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent, P.Warning);
   FBanner.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Line, P.Accent, P.Deleted, P.Added);
@@ -4708,6 +4763,7 @@ begin
   FPushTagsItem := AddItem(BranchMenu, rsPushTagsItem, 0, @MenuPushTagsClick);
   BranchMenu.Add(NewLine);
   FReflogItem := AddItem(BranchMenu, rsReflogItem, 0, @MenuReflogClick);
+  FWorktreesItem := AddItem(BranchMenu, rsWorktreesItem, 0, @MenuWorktreesClick);
   UpdateBranchItems;
 
   { The Stash menu (umain.stash.inc). }
@@ -7383,6 +7439,7 @@ const
 {$I umain.branches.inc}
 {$I umain.rebase.inc}
 {$I umain.stash.inc}
+{$I umain.worktrees.inc}
 {$I umain.tags.inc}
 {$I umain.reflog.inc}
 {$I umain.bisect.inc}
