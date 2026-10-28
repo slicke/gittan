@@ -260,6 +260,9 @@ type
     FIndexAdded: boolean;
     FIgnoreWhitespace: boolean;
     FOnOutput: TGittanOutputEvent;
+    {** The folder a linked worktree's git directory shares with the
+      main one (its commondir file), else the git directory itself. }
+    function CommonDir: string;
     function RunGit(const ADir: string; const AArgs: array of string;
       out AOutput: string; const AIndexFile: string = ''): boolean;
     function RunRemote(const AArgs: array of string): boolean;
@@ -417,6 +420,11 @@ type
     {** The whole message of HEAD, without its trailing line ends; false
       before the first commit. }
     function HeadMessage(out AMessage: string): boolean;
+    {** The paths HEAD changes against its first parent (every path of a
+      first commit), a rename as its two paths, in AList, which an amend
+      keeps in the commit beside those it adds; false before the first
+      commit. }
+    function HeadPaths(AList: TStrings): boolean;
     {** Whether ARef names a commit in the repository. }
     function HasCommit(const ARef: string): boolean;
     {** The full id of the commit ARef names, empty when it names none. }
@@ -966,7 +974,8 @@ type
       out ABody: string): boolean;
     {** A text that changes whenever the branch, the set of changed files
       or the content of a changed file changes: the branch, the commit ids
-      of HEAD and Base, the status of every changed file, and the size,
+      of HEAD and Base, the status of every changed file, the size and
+      modification time of the repository's config, and the size,
       modification time and content hash of every changed file on disk.
       Empty when nothing is open or git failed. Meant for polling: two
       equal fingerprints mean there is nothing new to show. }
@@ -1213,10 +1222,11 @@ function RunGitIn(const ADir: string; const AArgs: array of string;
 
 {** RunGitIn with the variables AEnv ("NAME=value") set besides those
   Gittan always sets, and AOnOutput told of each piece git writes as it
-  runs, on either stream. }
+  runs, on either stream. ACancel, when given, is asked as git runs, and
+  True ends it: false then, with no reason in AError. }
 function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
   out AOutput, AError: string; const AIndexFile: string = '';
-  AOnOutput: TGittanOutputEvent = nil): boolean;
+  AOnOutput: TGittanOutputEvent = nil; ACancel: TGittanCancelEvent = nil): boolean;
 
 {** The variables a command that goes to the network runs with in ADir
   besides Gittan's own: ssh in batch mode (see
@@ -1953,7 +1963,7 @@ end;
 
 function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
   out AOutput, AError: string; const AIndexFile: string;
-  AOnOutput: TGittanOutputEvent): boolean;
+  AOnOutput: TGittanOutputEvent; ACancel: TGittanCancelEvent): boolean;
 var
   Args, Env: array of string;
   Status, i: integer;
@@ -1982,9 +1992,12 @@ begin
     SetLength(Env, i + 3);
   { The user's own GIT_INDEX_FILE goes even when none is given. }
   if not RunTool(GGitExe, ADir, Args, ['GIT_INDEX_FILE='], Env, AOutput, AError,
-    Status, AOnOutput) then
+    Status, AOnOutput, '', ACancel) then
   begin
-    AError := GitNotRunMessage(GGitExe);
+    if Assigned(ACancel) and ACancel() then
+      AError := ''
+    else
+      AError := GitNotRunMessage(GGitExe);
     Exit(False);
   end;
   Result := Status = 0;
@@ -5423,6 +5436,17 @@ begin
     AMessage := '';
 end;
 
+function TGittanRepo.HeadPaths(AList: TStrings): boolean;
+var
+  Output: string;
+begin
+  AList.Clear;
+  Result := (FRoot <> '') and RunGit(FRoot, ['diff-tree', '-r', '-z', '--name-only',
+    '--no-renames', '--no-commit-id', '--root', '--diff-merges=first-parent', 'HEAD'], Output);
+  if Result then
+    SplitNul(Output, AList);
+end;
+
 { Against HEAD the list is git status itself. Against another base it is
   `git diff --name-status` turned into the same "XY path" shape, with the
   letter in the work tree column, plus the untracked files from git
@@ -6187,6 +6211,22 @@ end;
 
 { Git LFS's store folder, found once per open: a commondir file and
   lfs.storage (a git config) are read the first time only. }
+function TGittanRepo.CommonDir: string;
+begin
+  Result := FGitDir;
+  if (FGitDir = '') or not FileExists(IncludeTrailingPathDelimiter(FGitDir) + 'commondir') then
+    Exit;
+  try
+    Result := Trim(ReadFileBytes(IncludeTrailingPathDelimiter(FGitDir) + 'commondir'));
+    if (Result <> '') and not IsAbsolutePath(Result) then
+      Result := ExpandFileName(IncludeTrailingPathDelimiter(FGitDir) + Result);
+    if Result = '' then
+      Result := FGitDir;
+  except
+    Result := FGitDir;
+  end;
+end;
+
 function TGittanRepo.LfsStore: string;
 var
   Common, Storage, Err: string;
@@ -6194,17 +6234,7 @@ begin
   Result := FLfsStore;
   if (Result <> '') or (FGitDir = '') then
     Exit;
-  Common := FGitDir;
-  if FileExists(IncludeTrailingPathDelimiter(FGitDir) + 'commondir') then
-    try
-      Common := Trim(ReadFileBytes(IncludeTrailingPathDelimiter(FGitDir) + 'commondir'));
-      if (Common <> '') and not IsAbsolutePath(Common) then
-        Common := ExpandFileName(IncludeTrailingPathDelimiter(FGitDir) + Common);
-      if Common = '' then
-        Common := FGitDir;
-    except
-      Common := FGitDir;
-    end;
+  Common := CommonDir;
   { lfs.storage replaces the lfs folder, relative to the common folder. }
   if RunGitIn(FRoot, ['config', '--get', 'lfs.storage'], Storage, Err) and (Trim(Storage) <> '') then
   begin
@@ -6303,6 +6333,14 @@ begin
     { The stashes, which the status bar counts and lists. }
     if RunGit(FRoot, ['stash', 'list', '--format=%H'], Id) then
       Result := Result + 'stash ' + StringReplace(Trim(Id), #10, ' ', [rfReplaceAll]) + #10;
+    { The repository's config, where `git remote add` and `set-url` write
+      the remotes the forge is found by. }
+    if (FGitDir <> '') and StatExact(IncludeTrailingPathDelimiter(CommonDir) + 'config', Info) then
+    begin
+      Result := Result + 'config ' + FormatDateTime('yyyymmddhhnnsszzz', Info.TimeStamp) +
+        ' ' + IntToStr(Info.Size) + #10;
+      FindClose(Info);
+    end;
     for i := 0 to Paths.Count - 1 do
       Result := Result + IntToStr(PtrUInt(Paths.Objects[i])) + ' ' + Paths[i] + #10;
     { Between two commits the files on disk do not matter. }
@@ -6566,7 +6604,8 @@ begin
     FError := LfsMissingMessage;
     Exit(False);
   end;
-  Result := RunRemote(['lfs', 'lock', APath]);
+  { -- so a path that starts with - is not taken for an option. }
+  Result := RunRemote(['lfs', 'lock', '--', APath]);
 end;
 
 function TGittanRepo.LfsUnlock(const APath: string; AForce: boolean): boolean;
@@ -6579,9 +6618,9 @@ begin
     Exit(False);
   end;
   if AForce then
-    Result := RunRemote(['lfs', 'unlock', '--force', APath])
+    Result := RunRemote(['lfs', 'unlock', '--force', '--', APath])
   else
-    Result := RunRemote(['lfs', 'unlock', APath]);
+    Result := RunRemote(['lfs', 'unlock', '--', APath]);
 end;
 
 { APath as a pattern of git-lfs, which takes --include as patterns

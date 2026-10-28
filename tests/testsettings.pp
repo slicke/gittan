@@ -10,7 +10,7 @@ interface
 uses
   Classes, SysUtils, IniFiles, fpcunit, testregistry, gittan.settings,
   { GitHub registers itself, so the settings keep its section. }
-  gittan.github;
+  gittan.github{$IFDEF UNIX}, BaseUnix{$ENDIF};
 
 type
   TSettingsTest = class(TTestCase)
@@ -34,6 +34,18 @@ type
   end;
 
 implementation
+
+{$IFDEF UNIX}
+function FileModeOf(const AName: string): integer;
+var
+  Info: Stat;
+begin
+  if FpStat(AName, Info) = 0 then
+    Result := Info.st_mode
+  else
+    Result := -1;
+end;
+{$ENDIF}
 
 procedure TSettingsTest.SetUp;
 begin
@@ -122,6 +134,8 @@ begin
     S.AutoFetchMinutes := 30;
     S.HideWithoutFeedback := True;
     S.OnlyNeedsAttention := True;
+    S.HideDrafts := True;
+    S.OnlyAskedOfMe := True;
     S.HideReviewDrafts := True;
     S.OnlyStale := True;
     S.SyntaxTheme := 'Delphi';
@@ -173,8 +187,8 @@ begin
     AssertEquals(30, S.AutoFetchMinutes);
     AssertTrue(S.HideWithoutFeedback);
     AssertTrue(S.OnlyNeedsAttention);
-    AssertFalse(S.HideDrafts);
-    AssertFalse(S.OnlyAskedOfMe);
+    AssertTrue(S.HideDrafts);
+    AssertTrue(S.OnlyAskedOfMe);
     AssertTrue(S.HideReviewDrafts);
     AssertTrue(S.OnlyStale);
     AssertEquals('Delphi', S.SyntaxTheme);
@@ -187,6 +201,10 @@ begin
     AssertEquals('https://openrouter.ai/api/v1', S.OpenAIUrl);
     AssertEquals('sk-or-v1-abc', S.OpenAIKey);
     AssertEquals('openai/gpt-4o-mini', S.OpenAIModel);
+    {$IFDEF UNIX}
+    AssertEquals('with a key the file is its owner''s alone', &600,
+      FileModeOf(FFileName) and &777);
+    {$ENDIF}
     AssertEquals('the day, without the time', EncodeDate(2026, 10, 29),
       S.UpdateSnoozedUntil, 0);
     AssertEquals(2, S.Recent.Count);

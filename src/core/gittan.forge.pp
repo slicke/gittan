@@ -363,8 +363,8 @@ function KeepForge(var AForge: TGittanForge; AClass: TGittanForgeClass;
   const ACli: string): boolean;
 {** The host name ssh connects to for AHost by AConfig (an ssh_config's
   text): the HostName of the first Host block whose patterns match it
-  (* and ? wildcards, ! to exclude, case ignored; %h is AHost), the
-  lines before the first Host applying to all; AHost itself when none
+  (* and ? wildcards, ! to exclude, case ignored; %h is AHost; the
+  value may be in double quotes), the lines before the first Host applying to all; AHost itself when none
   sets one. Match blocks and Include are not followed. }
 function SshHostName(const AHost, AConfig: string): string;
 {** The text of the user's ~/.ssh/config, empty when there is none. }
@@ -586,7 +586,13 @@ begin
     else if Keyword = 'match' then
       Applies := False
     else if Applies and (Keyword = 'hostname') and (Args <> '') then
-      Exit(StringReplace(Args, '%h', AHost, [rfReplaceAll]));
+    begin
+      { ssh takes a value in double quotes as well. }
+      if (Length(Args) >= 2) and (Args[1] = '"') and (Args[Length(Args)] = '"') then
+        Args := Trim(Copy(Args, 2, Length(Args) - 2));
+      if Args <> '' then
+        Exit(StringReplace(Args, '%h', AHost, [rfReplaceAll]));
+    end;
   end;
   Result := AHost;
 end;

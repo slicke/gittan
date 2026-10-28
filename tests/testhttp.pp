@@ -34,6 +34,7 @@ type
   THttpTest = class(TTestCase)
   private
     FServer: TTestServer;
+    FGiveUpAt: QWord;
     function Url(const APath: string): string;
     function GiveUp: boolean;
   protected
@@ -56,6 +57,9 @@ implementation
 
 const
   SlowMs = 2500;
+  { When TestGivenUp gives its request up: after it has started, while
+    /slow is still waiting. }
+  GiveUpMs = 500;
 
 function LoopbackAddr(APort: integer): TInetSockAddr;
 begin
@@ -335,7 +339,7 @@ var
 begin
   R := HttpGet(Url('/moved'), ['X-Test: two']);
   AssertEquals(R.Error, 200, R.Status);
-  AssertEquals('GET', Copy(R.Body, 1, 3));
+  AssertEquals('the headers go along', 'GET'#10'two'#10 + HttpUserAgent + #10, R.Body);
 end;
 
 procedure THttpTest.TestRefused;
@@ -358,9 +362,11 @@ begin
   AssertEquals('', R.Body);
 end;
 
+{ False until GiveUpMs after the request started, so the request must be
+  given up as it waits, not before. }
 function THttpTest.GiveUp: boolean;
 begin
-  Result := True;
+  Result := GetTickCount64 >= FGiveUpAt;
 end;
 
 procedure THttpTest.TestGivenUp;
@@ -369,11 +375,13 @@ var
   Started: QWord;
 begin
   Started := GetTickCount64;
+  FGiveUpAt := Started + GiveUpMs;
   R := HttpGet(Url('/slow'), [], 10, @GiveUp);
   AssertEquals(0, R.Status);
   AssertEquals(HttpGivenUp, R.Error);
   AssertEquals('', R.Body);
-  AssertTrue('at once, before the answer or the timeout',
+  AssertTrue('not before it was asked to', GetTickCount64 - Started >= GiveUpMs);
+  AssertTrue('soon after, before the answer or the timeout',
     GetTickCount64 - Started < SlowMs);
 end;
 

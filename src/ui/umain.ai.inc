@@ -406,15 +406,17 @@ begin
     Exit;
   { The question was the agent's, not a filter of the tree. }
   FTreeFilter.Text := '';
-  Application.QueueAsyncCall(@ShowFoundAsync, i);
+  { The file picked, kept now: another find may be done before the
+    call and put other files in FFoundFiles. }
+  FFoundPick := FFoundFiles[i];
+  Application.QueueAsyncCall(@ShowFoundAsync, 0);
 end;
 
 { After the list has closed and given the focus back to the field, so
   the editor keeps the focus ShowFileLine gives it. }
 procedure TRepoFrame.ShowFoundAsync(Data: PtrInt);
 begin
-  if Data <= High(FFoundFiles) then
-    ShowFileLine(FFoundFiles[Data].Path, FFoundFiles[Data].Line);
+  ShowFileLine(FFoundPick.Path, FFoundPick.Line);
 end;
 
 procedure TRepoFrame.AbandonFindJob;

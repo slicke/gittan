@@ -14,17 +14,17 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.reviews, gittan.ai,
-  testhelpers;
+  testhelpers{$IFDEF UNIX}, BaseUnix{$ENDIF};
 
 type
   {** An agent that answers Answers in turn (an empty one is a failure,
     "no answer"), keeps what it was asked in Tasks and Inputs, and reads
     files or not as Reads says. The job holds a clone, so all of it is
     the class's. HoldLocate makes the second round wait until the job
-    is stopped (for the cancel test). }
+    is stopped (for the cancel test), and Cancelled says it was told. }
   TFakeAI = class(TGittanAI)
   public
-    class var Reads, HoldLocate: boolean;
+    class var Reads, HoldLocate, Cancelled: boolean;
     class var Answers, Inputs: array of string;
     class var Tasks: array of TGittanAITask;
     class procedure Reset;
@@ -81,6 +81,7 @@ class procedure TFakeAI.Reset;
 begin
   Reads := False;
   HoldLocate := False;
+  Cancelled := False;
   Answers := nil;
   Inputs := nil;
   Tasks := nil;
@@ -119,6 +120,7 @@ begin
       Sleep(10);
       Inc(Waited);
     end;
+    Cancelled := ACancel();
   end;
   AText := '';
   if n < Length(Answers) then
@@ -503,9 +505,13 @@ begin
 end;
 
 procedure TAiTest.TestFindLinesInput;
+const
+  List = 'a.pas'#10'missing.txt'#10'sub/b.txt'#10'bin.dat'#10'big.txt'#10'long.txt'#10 +
+    'link.txt'#10'sub/link/c.txt'#10;
 var
   Files: TGittanFoundFiles;
-  Text, Big: string;
+  Last: TGittanLineCounts;
+  Text, Big, Outside: string;
   Stream: TFileStream;
   i: integer;
 begin
@@ -525,8 +531,13 @@ begin
   Files[2].Path := 'sub/b.txt';
   Files[3].Path := 'bin.dat';
   Files[4].Path := '../' + ExtractFileName(FDir) + '/a.pas';
-  Text := FindLinesInput(FDir, 'the parser', Files);
+  Text := FindLinesInput(FDir, 'the parser', List, Files, Last);
   AssertEquals(1, Pos('The question: the parser', Text));
+  AssertEquals('the lines given of each', 3, Last[0]);
+  AssertEquals(0, Last[1]);
+  AssertEquals(1, Last[2]);
+  AssertEquals('none of a binary file', 0, Last[3]);
+  AssertEquals(0, Last[4]);
   AssertTrue('each line numbered', Pos('File: a.pas' + LineEnding +
     '1: one'#10'2: two'#10'3: three'#10, Text) > 0);
   AssertTrue('a file in a folder, by its path with /', Pos('File: sub/b.txt' +
@@ -535,7 +546,29 @@ begin
   AssertTrue('a binary file is named without its text', Pos('File: bin.dat' +
     LineEnding + '[A binary file', Text) > 0);
   AssertEquals('no path out of the repository', 0, Pos('..', Text));
-  AssertEquals('none there', '', FindLinesInput(FDir, 'q', Copy(Files, 1, 1)));
+  AssertEquals('none there', '', FindLinesInput(FDir, 'q', List, Copy(Files, 1, 1), Last));
+  { A file the list does not name, an ignored one, is not read. }
+  WriteFile('secret.env', 'key');
+  SetLength(Files, 1);
+  Files[0].Path := 'secret.env';
+  AssertEquals('not in the list', '', FindLinesInput(FDir, 'q', List, Files, Last));
+  {$IFDEF UNIX}
+  { Nor one through a symbolic link, the file or a folder, which may
+    lead out of the repository. }
+  Outside := FDir + '-outside';
+  ForceDirectories(Outside);
+  try
+    WriteFile('..' + PathDelim + ExtractFileName(Outside) + PathDelim + 'c.txt', 'out');
+    FpSymlink(PChar(Outside + PathDelim + 'c.txt'), PChar(FDir + PathDelim + 'link.txt'));
+    FpSymlink(PChar(Outside), PChar(FDir + PathDelim + 'sub' + PathDelim + 'link'));
+    SetLength(Files, 2);
+    Files[0].Path := 'link.txt';
+    Files[1].Path := 'sub/link/c.txt';
+    AssertEquals('not through a link', '', FindLinesInput(FDir, 'q', List, Files, Last));
+  finally
+    RemoveTree(Outside);
+  end;
+  {$ENDIF}
   { A file past its share of the budget (the whole of it, for one file
     that is there) is cut at a line end before it is numbered: its first
     80000 bytes end in line 3119. }
@@ -551,7 +584,7 @@ begin
   SetLength(Files, 2);
   Files[0].Path := 'big.txt';
   Files[1].Path := 'missing.txt';
-  Text := FindLinesInput(FDir, 'q', Files);
+  Text := FindLinesInput(FDir, 'q', List, Files, Last);
   AssertTrue('the lines within the budget; a missing file takes no share of it',
     Pos(#10'3119: line 3119 of', Text) > 0);
   AssertEquals('none past it', 0, Pos(#10'3120: ', Text));
@@ -562,7 +595,7 @@ begin
     left out whole. }
   WriteFile('long.txt', StringOfChar('x', MessageDiffKeep + 100));
   Files[0].Path := 'long.txt';
-  Text := FindLinesInput(FDir, 'q', Files);
+  Text := FindLinesInput(FDir, 'q', List, Files, Last);
   AssertTrue('the share of the line', Pos('1: ' + StringOfChar('x', MessageDiffKeep) +
     #10'[The file is cut here: ', Text) > 0);
 end;
@@ -582,16 +615,20 @@ begin
   Lines[1].Path := 'a.pas';
   Lines[1].Line := 42;
   Lines[1].Why := 'ParseIt';
-  MergeFoundLines(Files, Lines);
+  MergeFoundLines(Files, Lines, [50, 7]);
   AssertEquals('the first answer''s order', 'a.pas', Files[0].Path);
   AssertEquals(42, Files[0].Line);
   AssertEquals('a why given replaces', 'ParseIt', Files[0].Why);
   AssertEquals(7, Files[1].Line);
   AssertEquals('a why not given stays', 'its tests', Files[1].Why);
+  Lines[0].Line := 8;
+  MergeFoundLines(Files, Lines, [50, 7]);
+  AssertEquals('a line past those given is none', 0, Files[1].Line);
+  MergeFoundLines(Files, Lines, [50]);
+  AssertEquals('nor one of a file not given', 0, Files[1].Line);
   SetLength(Lines, 0);
-  Files[0].Line := 0;
-  MergeFoundLines(Files, Lines);
-  AssertEquals('a file not named again keeps 0', 0, Files[0].Line);
+  MergeFoundLines(Files, Lines, [50, 7]);
+  AssertEquals('a file not named again gets 0', 0, Files[0].Line);
 end;
 
 { A model that cannot read files names the files from the list, then
@@ -603,7 +640,7 @@ begin
   WriteFile('a.pas', 'one'#10'two'#10'three');
   WriteFile('b.pas', 'four');
   TFakeAI.Reset;
-  TFakeAI.Answers := ['[{"path":"a.pas","why":"the parser"},{"path":"b.pas"}]',
+  TFakeAI.Answers := ['[{"path":"a.pas","why":"the parser"},{"path":"b.pas","line":9}]',
     '[{"path":"a.pas","line":2,"why":"two"}]'];
   Job := RunFind('the parser');
   try
@@ -620,7 +657,7 @@ begin
     AssertEquals('a.pas', Job.Files[0].Path);
     AssertEquals(2, Job.Files[0].Line);
     AssertEquals('two', Job.Files[0].Why);
-    AssertEquals('a file not named again keeps 0', 0, Job.Files[1].Line);
+    AssertEquals('a line guessed from the path is dropped', 0, Job.Files[1].Line);
   finally
     Job.Free;
   end;
@@ -699,6 +736,7 @@ begin
     AssertEquals('reached the second round', 2, Length(TFakeAI.Tasks));
     Job.Stop(True);
     CheckSynchronize(0);
+    AssertTrue('the agent was told', TFakeAI.Cancelled);
     AssertEquals('no word', 0, FDone);
   finally
     Job.Free;

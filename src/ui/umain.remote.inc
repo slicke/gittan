@@ -221,6 +221,10 @@ begin
   FNoticeTimer.Enabled := False;
   FNotice.Close;
   FStatus.ShowMessage('', stNormal, 0);
+  { Create Pull Request waits only for the push it started, so any
+    other job, those that end below too, drops it. }
+  if not (Job.Ok and (Job.Kind in [rkPush, rkPushBranch])) then
+    FPullAfterPush := '';
   { A clone is of no open repository. }
   if Job.Kind = rkClone then
   begin
@@ -273,9 +277,6 @@ begin
   { A rebase or merge waits only for the fetch it started. }
   if not (Job.Ok and (Job.Kind = rkFetch)) then
     FAfterFetchRef := '';
-  { Create Pull Request waits only for the push it started. }
-  if not (Job.Ok and (Job.Kind in [rkPush, rkPushBranch])) then
-    FPullAfterPush := '';
   if Job.Ok then
   begin
     if Job.Kind = rkFetch then
@@ -620,6 +621,11 @@ begin
     StartLfsLocks
   else
     FLfsLocks := nil;
+  { The note and the pills follow: locks gone with git-lfs, a file that
+    may be locked now or no longer. }
+  LockNote;
+  if FView = gvBlob then
+    BlobActions;
   Key := '';
   Kind := bkError;
   Handler := nil;

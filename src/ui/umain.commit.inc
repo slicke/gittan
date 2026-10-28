@@ -840,7 +840,7 @@ begin
   Paths := TStringList.Create;
   try
     ChosenCommitPaths(Paths);
-    if not LockedCommitAsk(Paths) then
+    if not LockedCommitAsk(Paths, FCommitAmend.Checked) then
       Exit;
     { The files with changes left out go in as their text without them
       (see umain.leaveout.inc). }

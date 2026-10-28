@@ -9,7 +9,8 @@ unit testrepocommands;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.repocommands, testhelpers;
+  Classes, SysUtils, {$ifndef windows}BaseUnix,{$endif} fpcunit, testregistry,
+  gittan.repocommands, testhelpers;
 
 type
   TRepoCommandsTest = class(TTestCase)
@@ -40,6 +41,7 @@ type
     procedure TestJobFails;
     procedure TestJobKill;
     procedure TestJobKillForced;
+    procedure TestJobKillChild;
   end;
 
 implementation
@@ -387,6 +389,45 @@ begin
     AssertTrue('after the grace', GetTickCount64 - Started >= KillGraceMs);
     AssertTrue('long before the sleep', GetTickCount64 - Started < 15000);
     AssertEquals('the rest of the line did not run', 0, Pos('late', Job.Output));
+  finally
+    Job.Free;
+  end;
+  {$endif}
+end;
+
+{ A child that ignores SIGTERM under a shell that does not is ended by
+  force too, after KillGraceMs, though the shell is gone by then. }
+procedure TRepoCommandsTest.TestJobKillChild;
+{$ifndef windows}
+var
+  Job: TGittanCommandJob;
+  Started: QWord;
+  Child, Waited: integer;
+  Text: string;
+{$endif}
+begin
+  {$ifndef windows}
+  Job := TGittanCommandJob.Create(FDir,
+    '/bin/sh -c ''trap "" TERM; echo child=$$; exec sleep 30'' & wait');
+  try
+    Started := GetTickCount64;
+    RunJob(Job, 300);
+    AssertEquals(1, FDone);
+    AssertTrue('ended by Kill', Job.Killed);
+    AssertTrue('after the grace', GetTickCount64 - Started >= KillGraceMs);
+    AssertTrue('long before the sleep', GetTickCount64 - Started < 15000);
+    Text := Job.Output;
+    Text := Copy(Text, Pos('child=', Text) + 6, MaxInt);
+    Child := StrToIntDef(Trim(Copy(Text, 1, Pos(#10, Text) - 1)), 0);
+    AssertTrue('the child said who it is', Child > 0);
+    { Reaped by init once killed, which may take a moment. }
+    Waited := 0;
+    while (FpKill(Child, 0) = 0) and (Waited < 2000) do
+    begin
+      Sleep(20);
+      Inc(Waited, 20);
+    end;
+    AssertTrue('the child is gone', FpKill(Child, 0) <> 0);
   finally
     Job.Free;
   end;

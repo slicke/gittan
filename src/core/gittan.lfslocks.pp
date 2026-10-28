@@ -5,7 +5,8 @@ unit gittan.lfslocks;
   `git lfs locks --verify --json` lists them split into the user's own
   and everyone else's; a server that cannot verify gets the plain list,
   the user's own then the locks this clone made (`--local`). The list
-  goes to the network, so TGittanLfsLocksJob reads it on a thread.
+  goes to the network, so TGittanLfsLocksJob reads it on a thread, and
+  gives it up when it is stopped.
   Locking and unlocking are TGittanRepo.LfsLock and LfsUnlock, run in
   the remote job. }
 
@@ -35,6 +36,7 @@ type
     FRoot, FError: string;
     FOk: boolean;
     FLocks: TGittanLfsLocks;
+    function Cancelled: boolean;
   protected
     procedure Execute; override;
   public
@@ -53,10 +55,17 @@ function ParseLfsLocks(const AJson: string; out ALocks: TGittanLfsLocks;
 function ParseLfsLocks(const AJson: string; out ALocks: TGittanLfsLocks): boolean;
 {** The index of the lock on APath in ALocks, -1 when none. }
 function LfsLockIndex(const ALocks: TGittanLfsLocks; const APath: string): integer;
+{** Sets Ours on each lock of ALocks that ALocal, the locks this clone
+  made (`--local`), holds with the same id on the same path: one that
+  only shares the path was taken by someone else after the clone's own
+  went (a force unlock it has not heard of). }
+procedure MarkLocalLocks(var ALocks: TGittanLfsLocks; const ALocal: TGittanLfsLocks);
 {** The locks of the repository at ARoot, from its LFS server (see the
-  unit). False with git-lfs's reason in AError. }
+  unit). False with git-lfs's reason in AError, and when it is not
+  known whose they are (`--local` failed). ACancel, when given, is asked
+  as git-lfs runs, and True ends it, with no reason. }
 function ReadLfsLocks(const ARoot: string; out ALocks: TGittanLfsLocks;
-  out AError: string): boolean;
+  out AError: string; ACancel: TGittanCancelEvent = nil): boolean;
 
 implementation
 
@@ -137,25 +146,55 @@ begin
   Result := -1;
 end;
 
+procedure MarkLocalLocks(var ALocks: TGittanLfsLocks; const ALocal: TGittanLfsLocks);
+var
+  i, j: integer;
+begin
+  for i := 0 to High(ALocks) do
+  begin
+    ALocks[i].Ours := False;
+    for j := 0 to High(ALocal) do
+      if (ALocal[j].Id = ALocks[i].Id) and (ALocal[j].Path = ALocks[i].Path) then
+      begin
+        ALocks[i].Ours := True;
+        Break;
+      end;
+  end;
+end;
+
 function ReadLfsLocks(const ARoot: string; out ALocks: TGittanLfsLocks;
-  out AError: string): boolean;
+  out AError: string; ACancel: TGittanCancelEvent): boolean;
 var
   Env: TStringArray;
   Output, Err, VerifyErr: string;
   Local: TGittanLfsLocks;
-  i: integer;
   Verified: boolean;
+
+  function Cancelled: boolean;
+  begin
+    Result := Assigned(ACancel) and ACancel();
+    if Result then
+    begin
+      ALocks := nil;
+      AError := '';
+    end;
+  end;
+
 begin
   ALocks := nil;
   AError := '';
   Env := RemoteEnvironmentIn(ARoot);
   { Only the split into ours and theirs says whose each lock is; a
     plain list from --verify is marked below as the one without. }
-  if RunGitEnv(ARoot, ['lfs', 'locks', '--verify', '--json'], Env, Output, VerifyErr) and
-    ParseLfsLocks(Output, ALocks, Verified) and Verified then
+  if RunGitEnv(ARoot, ['lfs', 'locks', '--verify', '--json'], Env, Output, VerifyErr,
+    '', nil, ACancel) and ParseLfsLocks(Output, ALocks, Verified) and Verified then
     Exit(True);
-  Result := RunGitEnv(ARoot, ['lfs', 'locks', '--json'], Env, Output, Err) and
+  if Cancelled then
+    Exit(False);
+  Result := RunGitEnv(ARoot, ['lfs', 'locks', '--json'], Env, Output, Err, '', nil, ACancel) and
     ParseLfsLocks(Output, ALocks);
+  if Cancelled then
+    Exit(False);
   if not Result then
   begin
     AError := Trim(Err);
@@ -163,10 +202,22 @@ begin
       AError := Trim(VerifyErr);
     Exit;
   end;
-  if RunGitEnv(ARoot, ['lfs', 'locks', '--local', '--json'], [], Output, Err) and
-    ParseLfsLocks(Output, Local) then
-    for i := 0 to High(ALocks) do
-      ALocks[i].Ours := LfsLockIndex(Local, ALocks[i].Path) >= 0;
+  { Without the clone's own list every lock would look like another
+    user's, and the user's own would get Force Unlock and the commit's
+    question: a failure, so what was known stays. }
+  Result := RunGitEnv(ARoot, ['lfs', 'locks', '--local', '--json'], [], Output, Err, '', nil,
+    ACancel) and ParseLfsLocks(Output, Local);
+  if Cancelled then
+    Exit(False);
+  if not Result then
+  begin
+    ALocks := nil;
+    AError := Trim(Err);
+    if AError = '' then
+      AError := Trim(Output);
+    Exit;
+  end;
+  MarkLocalLocks(ALocks, Local);
 end;
 
 { TGittanLfsLocksJob }
@@ -177,10 +228,17 @@ begin
   FRoot := ARoot;
 end;
 
+{ Given up on Stop: git-lfs is ended while it waits for a server that
+  does not answer, so the reaper does not wait for it. }
+function TGittanLfsLocksJob.Cancelled: boolean;
+begin
+  Result := Terminated;
+end;
+
 procedure TGittanLfsLocksJob.Execute;
 begin
   try
-    FOk := not Terminated and ReadLfsLocks(FRoot, FLocks, FError);
+    FOk := not Terminated and ReadLfsLocks(FRoot, FLocks, FError, @Cancelled);
   except
     on E: Exception do
     begin

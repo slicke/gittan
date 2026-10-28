@@ -117,8 +117,9 @@ type
   public
     class function Name: string; override;
     class function CliName: string; override;
-    {** github.com, and the GitHub Enterprise hosts gh is logged in to
-      (GhHosts of the hosts.yml in GhConfigDir). }
+    {** github.com, the GitHub Enterprise hosts gh is logged in to
+      (GhHosts of the hosts.yml in GhConfigDir), and the one GH_HOST
+      names when gh's environment gives a token for it (GhEnvHost). }
     class function HostsRemote(const AHost: string): boolean; override;
     function Version(out AVersion: string): boolean; override;
     function PullJob(const ARoot, ABranch, ALogin: string): TGittanPullRequestJob; override;
@@ -139,6 +140,13 @@ function GhConfigDir: string;
 {** The hosts gh is logged in to, the top-level keys of its hosts.yml
   (AText), in lower case. }
 function GhHosts(const AText: string): TStringArray;
+
+{** The host gh reaches through the environment with no login in
+  hosts.yml: AHost (GH_HOST) in lower case when the token gh takes for
+  it is given, AEnterpriseToken (GH_ENTERPRISE_TOKEN or
+  GITHUB_ENTERPRISE_TOKEN) for a GitHub Enterprise Server, AToken
+  (GH_TOKEN or GITHUB_TOKEN) for one under ghe.com; empty otherwise. }
+function GhEnvHost(const AHost, AToken, AEnterpriseToken: string): string;
 
 implementation
 
@@ -185,6 +193,20 @@ begin
       Result[High(Result)] := Host;
     end;
   end;
+end;
+
+function GhEnvHost(const AHost, AToken, AEnterpriseToken: string): string;
+begin
+  Result := LowerCase(Trim(AHost));
+  if (Result = '') or (Result = 'github.com') then
+    Exit('');
+  if (Result = 'ghe.com') or Result.EndsWith('.ghe.com') then
+  begin
+    if AToken = '' then
+      Result := '';
+  end
+  else if AEnterpriseToken = '' then
+    Result := '';
 end;
 
 { ---------------------------------------------------------------------------
@@ -1058,7 +1080,7 @@ end;
 
 class function TGittanGitHubForge.HostsRemote(const AHost: string): boolean;
 var
-  Host: string;
+  Host, Token, Enterprise: string;
 begin
   Result := (AHost = 'github.com') or (AHost = 'www.github.com') or
     (AHost = 'ssh.github.com');
@@ -1067,6 +1089,15 @@ begin
   for Host in GhLoggedHosts do
     if Host = AHost then
       Exit(True);
+  { An Enterprise host gh is given a token for in its environment. }
+  Token := EnvironmentVariable('GH_TOKEN');
+  if Token = '' then
+    Token := EnvironmentVariable('GITHUB_TOKEN');
+  Enterprise := EnvironmentVariable('GH_ENTERPRISE_TOKEN');
+  if Enterprise = '' then
+    Enterprise := EnvironmentVariable('GITHUB_ENTERPRISE_TOKEN');
+  Host := GhEnvHost(EnvironmentVariable('GH_HOST'), Token, Enterprise);
+  Result := (Host <> '') and (Host = AHost);
 end;
 
 class function TGittanGitHubForge.Name: string;

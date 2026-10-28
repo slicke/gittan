@@ -71,7 +71,10 @@ var
   i: integer;
 begin
   i := LockOf(FBlobPath);
-  if not FFilesHead or (i < 0) and (FLfsLockable.IndexOf(FBlobPath) < 0) then
+  { Lock is not offered without git-lfs, which it would only fail for;
+    the banner says it is missing. }
+  if not FFilesHead or (i < 0) and (not FLfsInstalled or
+    (FLfsLockable.IndexOf(FBlobPath) < 0)) then
     FHeader.SetActions([rsBlobOpen, rsBlobSaveAs])
   else if i < 0 then
     FHeader.SetActions([rsBlobOpen, rsBlobSaveAs, rsLfsLockAction])
@@ -125,7 +128,9 @@ begin
 end;
 
 { Another user's lock on the file shown, in the header; a note of its
-  own (FLockNote) is taken away when the lock goes, another is left. }
+  own (FLockNote) is taken away when the lock goes, another is left.
+  The note it took the place of (FLockNoteWas: the file changed on
+  disk) comes back then. }
 procedure TRepoFrame.LockNote;
 var
   i: integer;
@@ -136,9 +141,15 @@ begin
   if (i >= 0) and not FLfsLocks[i].Ours then
     Note := Format(rsLfsLockedBy, [FLfsLocks[i].Owner]);
   if Note <> '' then
-    FHeader.SetNote(Note)
+  begin
+    if (FLockNote = '') or (FHeader.Note <> FLockNote) then
+      FLockNoteWas := FHeader.Note;
+    FHeader.SetNote(Note);
+  end
   else if (FLockNote <> '') and (FHeader.Note = FLockNote) then
-    FHeader.SetNote('');
+    FHeader.SetNote(FLockNoteWas);
+  if Note = '' then
+    FLockNoteWas := '';
   FLockNote := Note;
 end;
 
@@ -149,7 +160,8 @@ var
   Lockable: boolean;
 begin
   i := LockOf(FContextPath);
-  Lockable := (FContextPath <> '') and (FLfsLockable.IndexOf(FContextPath) >= 0);
+  Lockable := FLfsInstalled and (FContextPath <> '') and
+    (FLfsLockable.IndexOf(FContextPath) >= 0);
   FLfsLockItem.Visible := Lockable and (i < 0);
   FLfsUnlockItem.Visible := i >= 0;
   if i >= 0 then
@@ -296,13 +308,15 @@ begin
 end;
 
 { A commit of files another user holds is asked first: git-lfs's
-  pre-push hook refuses to push it while they hold them. True to go on. }
-function TRepoFrame.LockedCommitAsk(APaths: TStrings): boolean;
+  pre-push hook refuses to push it while they hold them. An amend keeps
+  what HEAD changed in the commit, so those paths count too. True to go
+  on. }
+function TRepoFrame.LockedCommitAsk(APaths: TStrings; AAmend: boolean): boolean;
 const
   MaxListed = 8;
 var
   Path, Msg: string;
-  Held: TStringList;
+  Held, Paths: TStringList;
   i, First: integer;
 begin
   Result := True;
@@ -310,8 +324,15 @@ begin
     Exit;
   First := -1;
   Held := TStringList.Create;
+  Paths := TStringList.Create;
   try
-    for Path in APaths do
+    Paths.Sorted := True;
+    Paths.Duplicates := dupIgnore;
+    Paths.CaseSensitive := True;
+    if AAmend then
+      FRepo.HeadPaths(Paths);
+    Paths.AddStrings(APaths);
+    for Path in Paths do
     begin
       i := LockOf(Path);
       if (i >= 0) and not FLfsLocks[i].Ours then
@@ -334,6 +355,7 @@ begin
         Msg := Msg + LineEnding + Format(rsLfsLockedCommitMore, [Held.Count - MaxListed]);
     end;
   finally
+    Paths.Free;
     Held.Free;
   end;
   Result := QuestionDlg(rsLfsLockedCommitTitle, Msg, mtWarning, [mrYes, rsCommitAnyway,

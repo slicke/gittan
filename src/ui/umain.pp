@@ -260,6 +260,7 @@ type
     FFindJob: TGittanFindJob;
     FFindPopup: TGittanPopupList;
     FFoundFiles: TGittanFoundFiles;
+    FFoundPick: TGittanFoundFile;
     { The width of a tab in the editors, in characters. }
     FTabSize: integer;
     FSyntaxMenu, FAutoLexerItem, FPlainTextItem: TMenuItem;
@@ -778,14 +779,15 @@ type
       as the check found, the files that may be locked, as it read
       them (sorted), the locks the job last read,
       the job and whether to read again when it is done, the header's
-      note of a lock, the file menu's items, File > Git LFS Locks...,
+      note of a lock and the note it took the place of, the file menu's
+      items, File > Git LFS Locks...,
       its list, the locks it shows and the one its menu is for. }
     FLfsInstalled: boolean;
     FLfsLockable: TStringList;
     FLfsLocks, FListedLocks: TGittanLfsLocks;
     FLfsLocksJob: TGittanLfsLocksJob;
     FLfsLocksAgain: boolean;
-    FLockNote, FMenuLock: string;
+    FLockNote, FLockNoteWas, FMenuLock: string;
     FLfsLockSepItem, FLfsLockItem, FLfsUnlockItem, FLfsLocksItem: TMenuItem;
     FLfsLocksPopup: TGittanPopupList;
     FLfsLocksMenu: TPopupMenu;
@@ -1113,7 +1115,7 @@ type
     procedure LfsLocksContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
     procedure LfsLocksMenuClick(Sender: TObject);
     procedure BlobActions;
-    function LockedCommitAsk(APaths: TStrings): boolean;
+    function LockedCommitAsk(APaths: TStrings; AAmend: boolean): boolean;
     procedure BlobLockAction;
     procedure LfsGetClick(Sender: TObject);
     procedure LfsInstallClick(Sender: TObject);
@@ -2865,6 +2867,7 @@ const
   rsOpenAnyway = 'Open Anyway';
   rsNewPullNoRemote = 'The repository has no remote to push %s to';
   rsNewPullHasOne = '%s already has pull request #%d';
+  rsNewPullOtherHost = 'The remote %s is not on %s';
   rsLfsLockItem = '&Lock File (Git LFS)';
   rsLfsUnlockItem = '&Unlock File';
   rsLfsForceUnlockItem = 'Force &Unlock (Locked by %s)...';
@@ -5721,6 +5724,7 @@ begin
   FLfsLockable.Clear;
   FLfsLocks := nil;
   FLockNote := '';
+  FLockNoteWas := '';
   FAutoFetchTried := 0;
   FAutoFetchFails := 0;
   { The next snapshot is the first of this repository (MarkNews). }

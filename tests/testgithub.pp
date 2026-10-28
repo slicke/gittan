@@ -79,6 +79,13 @@ begin
   AssertTrue(TGittanGitHubForge.HostsRemote('github.com'));
   AssertTrue(TGittanGitHubForge.HostsRemote('ssh.github.com'));
   AssertFalse(TGittanGitHubForge.HostsRemote('gitlab.com'));
+  { GH_HOST with the token gh takes for it in the environment. }
+  AssertEquals('ghe.example.com', GhEnvHost('GHE.Example.com', '', 'secret'));
+  AssertEquals('', GhEnvHost('ghe.example.com', 'secret', ''));
+  AssertEquals('acme.ghe.com', GhEnvHost('acme.ghe.com', 'secret', ''));
+  AssertEquals('', GhEnvHost('acme.ghe.com', '', 'secret'));
+  AssertEquals('', GhEnvHost('github.com', 'secret', 'secret'));
+  AssertEquals('', GhEnvHost('', 'secret', 'secret'));
 end;
 
 procedure TGitHubTest.TestParsePullRequest;

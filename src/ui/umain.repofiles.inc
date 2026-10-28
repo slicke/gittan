@@ -525,6 +525,10 @@ begin
   end;
   FEditStamp := FileAge(FEditPath);
   FHeader.SetNote('');
+  { A .gitattributes may make files lockable or put them in Git LFS,
+    which the check reads again, as after Track with Git LFS. }
+  if SameText(Shown, RepoRootFiles[1]) then
+    FLfsChecked := '';
   StatusNote(Format(rsSaved, [Shown]));
   Result := True;
   if ARefresh then

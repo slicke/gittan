@@ -435,6 +435,9 @@ begin
   AssertEquals('box.lan.example.org', SshHostName('box.lan', Config));
   AssertEquals('other', SshHostName('other', Config));
   AssertEquals('plain', SshHostName('plain', ''));
+  { A value in double quotes, as ssh takes it. }
+  AssertEquals('github.com', SshHostName('quoted', 'Host quoted'#10'  HostName "github.com"'#10));
+  AssertEquals('github.com', SshHostName('quoted', 'Host quoted'#10'  HostName="github.com"'#10));
   { The alias of an ssh remote is looked up; an https host is not. }
   AssertTrue(ForgeClassFor('remote.origin.url git@github-work:org/repo.git'#10, Config) =
     TGittanGitHubForge);

@@ -63,7 +63,7 @@ type
     FDark: boolean;
     FThemeTimer: TTimer;
     FOnTabsChange: TNotifyEvent;
-    procedure FindForge;
+    function FindForge: boolean;
     procedure BuildMenu;
     procedure RebuildRecentMenu;
     procedure ApplyTheme;
@@ -206,8 +206,8 @@ end;
 
 { The first registered forge that is on and whose tool is found, kept
   while it and its tool's path stay the same, as a repository frame
-  finds its own. }
-procedure TForgeView.FindForge;
+  finds its own. True when it changed. }
+function TForgeView.FindForge: boolean;
 var
   Forge, Found: TGittanForgeClass;
   Cli: string;
@@ -223,7 +223,8 @@ begin
       Break;
     end;
   end;
-  if not KeepForge(FForge, Found, Cli) then
+  Result := KeepForge(FForge, Found, Cli);
+  if not Result then
     Exit;
   FPage.SetForge(ForgeName);
   if FCloseItem <> nil then
@@ -381,16 +382,18 @@ end;
 
 procedure TForgeView.SettingsChanged;
 begin
-  FindForge;
-  if Assigned(FForge) then
+  if not FindForge then
     Exit;
-  { What the forge that is gone had found. }
+  { What the forge of before had found or was asking; a new one is
+    asked at once while the view is shown. }
   AbandonJob;
   FMine := nil;
   FReview := nil;
   FLogin := '';
   FError := '';
   UpdatePage;
+  if Visible then
+    StartJob;
 end;
 
 procedure TForgeView.FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);

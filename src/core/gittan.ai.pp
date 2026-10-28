@@ -49,6 +49,9 @@ type
     named. }
   TGittanAITask = (atMessage, atReview, atFind, atLocate);
 
+  {** How many lines of each file a model was given (FindLinesInput). }
+  TGittanLineCounts = array of integer;
+
 const
   {** What the agents are called in the interface; an API's model is
     named instead where one is set (TGittanAI.Title). }
@@ -222,21 +225,25 @@ function RepoFileList(const ARoot: string; out AList, AError: string): boolean;
 function FindListInput(const AQuestion, AFiles: string): string;
 
 {** What such a model gets for the lines, once it named AFiles
-  (ParseFoundFiles of its first answer): AQuestion, then each file of
-  AFiles that is in the work tree at ARoot (none out of it) with its
-  lines numbered ("12: text"), cut at its share of MessageDiffKeep (at
+  (ParseFoundFiles of its first answer) from AList (RepoFileList):
+  AQuestion, then each file of AFiles that AList names and that is in
+  the work tree at ARoot (none out of it, none through a symbolic link,
+  which may lead out of it) with its lines numbered ("12: text"), cut at its share of MessageDiffKeep (at
   a line end, or mid-line when the share holds none) with a line that
   says so, the share split among the files that are there and only
   that much of a file read; a binary file (one with a NUL in
-  what is read) is named without its text. Empty when none of them is
-  there. }
-function FindLinesInput(const ARoot, AQuestion: string;
-  const AFiles: TGittanFoundFiles): string;
+  what is read) is named without its text. ALast gets, for each of
+  AFiles, how many of its lines were given, 0 for one left out. Empty
+  when none of them is there. }
+function FindLinesInput(const ARoot, AQuestion, AList: string;
+  const AFiles: TGittanFoundFiles; out ALast: TGittanLineCounts): string;
 
 {** Puts the lines of ALines, the model's second answer, into AFiles by
-  path: a file's line and, when given, its why; a file ALines does not
-  name keeps line 0. }
-procedure MergeFoundLines(var AFiles: TGittanFoundFiles; const ALines: TGittanFoundFiles);
+  path: a file's line, when it is one of the ALast[i] given
+  (FindLinesInput), and then its why when given; any other line is 0,
+  since a line from the first answer was guessed from the path. }
+procedure MergeFoundLines(var AFiles: TGittanFoundFiles; const ALines: TGittanFoundFiles;
+  const ALast: array of integer);
 
 {** The files of an answer to where something is in AText: a JSON array
   of objects with path, line and why, which may come inside a code fence
@@ -334,7 +341,7 @@ type
     FOk: boolean;
     FFiles: TGittanFoundFiles;
     FError: string;
-    procedure LocateLines;
+    procedure LocateLines(const AList: string);
   protected
     procedure Execute; override;
   public
@@ -579,8 +586,9 @@ begin
     'The repository''s files:' + LineEnding + AFiles;
 end;
 
-{ AText with its lines numbered from 1, "12: text". }
-function NumberLines(const AText: string): string;
+{ AText with its lines numbered from 1, "12: text", and in ACount how
+  many lines that is. }
+function NumberLines(const AText: string; out ACount: integer): string;
 var
   Lines: TStringList;
   Text: TStringBuilder;
@@ -597,6 +605,7 @@ begin
       Text.Append(Lines[i]);
       Text.Append(#10);
     end;
+    ACount := Lines.Count;
     Result := Text.ToString;
   finally
     Text.Free;
@@ -623,8 +632,33 @@ begin
     (Pos('/../', '/' + APath + '/') = 0);
 end;
 
-function FindLinesInput(const ARoot, AQuestion: string;
-  const AFiles: TGittanFoundFiles): string;
+{ Whether APath under ARoot goes through a symbolic link, the file or a
+  folder on the way to it, which may lead out of the repository however
+  APath reads. }
+function ThroughLink(const ARoot, APath: string): boolean;
+var
+  Name, Rest: string;
+  Cut, Attr: integer;
+begin
+  Name := ExcludeTrailingPathDelimiter(ARoot);
+  Rest := APath;
+  repeat
+    Cut := Pos('/', Rest);
+    if Cut = 0 then
+      Cut := Length(Rest) + 1;
+    Name := Name + PathDelim + Copy(Rest, 1, Cut - 1);
+    Delete(Rest, 1, Cut);
+    Attr := FileGetAttr(Name);
+    {$WARN SYMBOL_PLATFORM OFF}
+    if (Attr <> -1) and (Attr and faSymLink <> 0) then
+      Exit(True);
+    {$WARN SYMBOL_PLATFORM ON}
+  until Rest = '';
+  Result := False;
+end;
+
+function FindLinesInput(const ARoot, AQuestion, AList: string;
+  const AFiles: TGittanFoundFiles; out ALast: TGittanLineCounts): string;
 var
   Names: array of string;
   Count, Share, i: integer;
@@ -633,12 +667,17 @@ var
   Stream: TFileStream;
 begin
   Result := '';
-  { The files that are there share the budget; one named but out of the
-    repository or missing takes none of it. }
+  SetLength(ALast, Length(AFiles));
+  for i := 0 to High(ALast) do
+    ALast[i] := 0;
+  { The files that are there share the budget; one named but not in the
+    list (an ignored file), out of the repository or missing takes none
+    of it. }
   Count := 0;
   SetLength(Names, Length(AFiles));
   for i := 0 to High(AFiles) do
-    if InsideRepo(AFiles[i].Path) then
+    if InsideRepo(AFiles[i].Path) and (Pos(#10 + AFiles[i].Path + #10,
+      #10 + AList + #10) > 0) and not ThroughLink(ARoot, AFiles[i].Path) then
     begin
       Names[i] := IncludeTrailingPathDelimiter(ARoot) +
         StringReplace(AFiles[i].Path, '/', PathDelim, [rfReplaceAll]);
@@ -677,7 +716,7 @@ begin
       { Cut at a line end (CutAt) before it is numbered. }
       if Whole > Share then
         SetLength(Text, CutAt(Text));
-      Result := Result + NumberLines(Text);
+      Result := Result + NumberLines(Text, ALast[i]);
       if Whole > Share then
         Result := Result + Format('[The file is cut here: %d of its %d bytes are ' +
           'left out.]', [Whole - Length(Text), Whole]) + LineEnding;
@@ -688,19 +727,26 @@ begin
     Result := 'The question: ' + AQuestion + LineEnding + LineEnding + Result;
 end;
 
-procedure MergeFoundLines(var AFiles: TGittanFoundFiles; const ALines: TGittanFoundFiles);
+procedure MergeFoundLines(var AFiles: TGittanFoundFiles; const ALines: TGittanFoundFiles;
+  const ALast: array of integer);
 var
   i, j: integer;
 begin
   for i := 0 to High(AFiles) do
+  begin
+    AFiles[i].Line := 0;
+    if i > High(ALast) then
+      Continue;
     for j := 0 to High(ALines) do
-      if (ALines[j].Path = AFiles[i].Path) and (ALines[j].Line > 0) then
+      if (ALines[j].Path = AFiles[i].Path) and (ALines[j].Line > 0) and
+        (ALines[j].Line <= ALast[i]) then
       begin
         AFiles[i].Line := ALines[j].Line;
         if ALines[j].Why <> '' then
           AFiles[i].Why := ALines[j].Why;
         Break;
       end;
+  end;
 end;
 
 const
@@ -1199,7 +1245,7 @@ begin
     if not FOk then
       FError := Format(rsFoundNotRead, [Copy(Trim(Answer), 1, 300)])
     else if not FAI.ReadsFiles and (Length(FFiles) > 0) then
-      LocateLines;
+      LocateLines(List);
   end;
   if Terminated then
     Exit;
@@ -1207,19 +1253,24 @@ begin
 end;
 
 { The second round for a model that cannot read files: the files it
-  named with their text, for their lines. An answer that is none leaves
-  the files as they are, without lines, since they are still worth
+  named from AList with their text, for their lines. The first answer's
+  lines were guessed from the paths and are dropped; an answer that is
+  none leaves the files without lines, since they are still worth
   showing. }
-procedure TGittanFindJob.LocateLines;
+procedure TGittanFindJob.LocateLines(const AList: string);
 var
   Input, Answer, Why: string;
   Lines: TGittanFoundFiles;
+  Last: TGittanLineCounts;
+  i: integer;
 begin
-  Input := FindLinesInput(FRoot, FQuestion, FFiles);
+  for i := 0 to High(FFiles) do
+    FFiles[i].Line := 0;
+  Input := FindLinesInput(FRoot, FQuestion, AList, FFiles, Last);
   if (Input = '') or Terminated then
     Exit;
   if Ask(atLocate, Input, Answer, Why) and ParseFoundFiles(Answer, Lines) then
-    MergeFoundLines(FFiles, Lines);
+    MergeFoundLines(FFiles, Lines, Last);
 end;
 
 end.

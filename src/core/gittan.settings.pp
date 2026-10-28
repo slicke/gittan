@@ -188,7 +188,7 @@ type
 implementation
 
 uses
-  Math, IniFiles, md5, gittan.textfile, gittan.forge;
+  {$IFDEF UNIX}BaseUnix,{$ENDIF} Math, IniFiles, md5, gittan.textfile, gittan.forge;
 
 const
   SecWindow = 'Window';
@@ -504,6 +504,11 @@ begin
       for i := 0 to FTrust.Count - 1 do
         Ini.WriteString(SecTrust, FTrust.Names[i], FTrust.ValueFromIndex[i]);
       Ini.UpdateFile;
+      {$IFDEF UNIX}
+      { The API key is in the file as it is, so no one else may read it. }
+      if OpenAIKey <> '' then
+        FpChmod(FFileName, &600);
+      {$ENDIF}
     finally
       Ini.Free;
     end;

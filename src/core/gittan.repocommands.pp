@@ -605,6 +605,18 @@ begin
   {$endif}
 end;
 
+{ Whether the process group of a command that was killed still has
+  members once the shell has gone: a child that ignores SIGTERM outlives
+  a shell that does not. taskkill /F leaves none on Windows. }
+function GroupLives(P: TProcess): boolean;
+begin
+  {$ifdef unix}
+  Result := FpKill(-P.ProcessID, 0) = 0;
+  {$else}
+  Result := False;
+  {$endif}
+end;
+
 procedure TGittanCommandJob.Execute;
 var
   P: TProcess;
@@ -680,8 +692,9 @@ begin
         FKilledAt := GetTickCount64;
         EndProcess(P, False);
       end
-      else if FKilled and not FForced and P.Running and
-        (GetTickCount64 - FKilledAt >= KillGraceMs) then
+      else if FKilled and not FForced and
+        (GetTickCount64 - FKilledAt >= KillGraceMs) and
+        (P.Running or GroupLives(P)) then
       begin
         FForced := True;
         EndProcess(P, True);
@@ -697,7 +710,7 @@ begin
           AddOutput(Chunk);
         end;
       end
-      else if P.Running then
+      else if P.Running or (FKilled and not FForced and GroupLives(P)) then
         Sleep(30)
       else
         Break;

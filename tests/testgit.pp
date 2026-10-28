@@ -77,6 +77,7 @@ type
     procedure TestGoneUpstreams;
     procedure TestCommit;
     procedure TestCommitAmendAndHook;
+    procedure TestHeadPaths;
     procedure TestCommitUnborn;
     procedure TestCommitParts;
     procedure TestCommitMerge;
@@ -640,6 +641,11 @@ begin
   A := FRepo.Fingerprint;
   AssertTrue('an operation begun seen', A <> B);
   Git(['bisect', 'reset']);
+  { A remote added outside, which the forge is found by. }
+  A := FRepo.Fingerprint;
+  Git(['remote', 'add', 'origin', 'https://github.com/o/r.git']);
+  B := FRepo.Fingerprint;
+  AssertTrue('a remote added seen', A <> B);
 end;
 
 { A snapshot holds the untracked files, and the whole tree comparison
@@ -1779,6 +1785,42 @@ begin
   AssertEquals('M  dir sp/fil å.txt'#0'?? bra.txt'#0, Text);
   AssertTrue(FRepo.HeadMessage(Text));
   AssertEquals(Message, Text);
+end;
+
+{ The paths an amend keeps: a first commit's every file, then what HEAD
+  changed, a rename as both paths, and a merge against its first parent
+  alone. }
+procedure TGitRepoTest.TestHeadPaths;
+var
+  Paths: TStringList;
+begin
+  Paths := TStringList.Create;
+  try
+    Git(['init', '-q', '-b', 'main']);
+    AssertTrue(FRepo.Open(FDir));
+    AssertFalse('before the first commit', FRepo.HeadPaths(Paths));
+    WriteFile('a.txt', 'a'#10);
+    WriteFile('dir sp/b.txt', 'b'#10);
+    Commit('first');
+    AssertTrue(FRepo.Error, FRepo.HeadPaths(Paths));
+    AssertEquals('a.txt|dir sp/b.txt|', Joined(Paths));
+    Git(['mv', '--', 'a.txt', '-a.txt']);
+    WriteFile('c.txt', 'c'#10);
+    Commit('second');
+    AssertTrue(FRepo.Error, FRepo.HeadPaths(Paths));
+    AssertEquals('-a.txt|a.txt|c.txt|', Joined(Paths));
+    Git(['checkout', '-q', '-b', 'side']);
+    WriteFile('side.txt', 's'#10);
+    Commit('side');
+    Git(['checkout', '-q', 'main']);
+    WriteFile('main.txt', 'm'#10);
+    Commit('main');
+    Git(['merge', '-q', '--no-edit', 'side']);
+    AssertTrue(FRepo.Error, FRepo.HeadPaths(Paths));
+    AssertEquals('side.txt|', Joined(Paths));
+  finally
+    Paths.Free;
+  end;
 end;
 
 { Amend without paths changes only the message; a hook that fails

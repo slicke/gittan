@@ -1128,11 +1128,13 @@ begin
       Exit;
     end;
   { An API has no command to look for: its server's note says when the
-    server is no URL, its model's when the model it needs is missing. }
+    server is no URL (a scheme with no host after it is none), its
+    model's when the model it needs is missing. }
   if ApiAgent then
   begin
     Server := LowerCase(Trim(FAgentEdit.Text));
-    if (Server = '') or (Pos('http://', Server) = 1) or (Pos('https://', Server) = 1) then
+    if (Server = '') or (Pos('http://', Server) = 1) and (Length(Server) > 7) or
+      (Pos('https://', Server) = 1) and (Length(Server) > 8) then
       FAgentNote.Caption := rsApiUrlNote
     else
       FAgentNote.Caption := rsApiUrlScheme;

@@ -1,8 +1,9 @@
 unit testlfslocks;
 
 {** Tests of gittan.lfslocks: git-lfs's lists of locks read, with and
-  without --verify, and a lock asked of a repository with no LFS server
-  failing with git-lfs's reason, while its list is empty. }
+  without --verify, the clone's own marked by id and path, and a lock
+  asked of a repository with no LFS server failing with git-lfs's
+  reason, while its list is empty and a read given up fails with none. }
 
 {$mode objfpc}{$H+}
 
@@ -13,8 +14,11 @@ uses
 
 type
   TLfsLocksTest = class(TTestCase)
+  private
+    function Cancel: boolean;
   published
     procedure TestParse;
+    procedure TestMarkLocal;
     procedure TestNoServer;
   end;
 
@@ -55,6 +59,30 @@ begin
   AssertFalse(ParseLfsLocks('"text"', Locks));
 end;
 
+function TLfsLocksTest.Cancel: boolean;
+begin
+  Result := True;
+end;
+
+{ A lock is the clone's own when --local has it with its id on its
+  path; the same path under another id was taken by someone else after
+  the clone's own went. }
+procedure TLfsLocksTest.TestMarkLocal;
+var
+  Locks, Local: TGittanLfsLocks;
+begin
+  AssertTrue(ParseLfsLocks('[{"id":"1","path":"a.psd"},{"id":"9","path":"b.psd"},' +
+    '{"id":"5","path":"c.psd"}]', Locks));
+  AssertTrue(ParseLfsLocks('[{"id":"1","path":"a.psd"},{"id":"2","path":"b.psd"},' +
+    '{"id":"5","path":"d.psd"}]', Local));
+  MarkLocalLocks(Locks, Local);
+  AssertTrue(Locks[0].Ours);
+  AssertFalse('the path taken again', Locks[1].Ours);
+  AssertFalse('the id on another path', Locks[2].Ours);
+  MarkLocalLocks(Locks, nil);
+  AssertFalse(Locks[0].Ours);
+end;
+
 procedure TLfsLocksTest.TestNoServer;
 var
   Dir, Output, Err: string;
@@ -76,6 +104,8 @@ begin
     { git-lfs lists no locks then, rather than fail. }
     AssertTrue(ReadLfsLocks(Dir, Locks, Err));
     AssertEquals(0, Length(Locks));
+    AssertFalse(ReadLfsLocks(Dir, Locks, Err, @Cancel));
+    AssertEquals('', Err);
   finally
     Repo.Free;
     RemoveTree(Dir);

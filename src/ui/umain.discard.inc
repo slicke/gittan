@@ -564,5 +564,6 @@ procedure TRepoFrame.FileMenuClick(Sender: TObject);
 begin
   UpdateDiscardItems;
   UpdateRemoteItems;
-  FLfsLocksItem.Visible := (FRepo.Root <> '') and ((FLfsLockable.Count > 0) or (FLfsLocks <> nil));
+  FLfsLocksItem.Visible := (FRepo.Root <> '') and FLfsInstalled and
+    ((FLfsLockable.Count > 0) or (FLfsLocks <> nil));
 end;
