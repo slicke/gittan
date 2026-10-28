@@ -107,6 +107,15 @@ function GitHubWebArgs(const ATarget: TGittanWebTarget): TStringArray;
   "owner:branch", as GitHub takes it. }
 function GitHubNewPullUrl(const ARepoUrl, ABranch, AHeadRepo: string): string;
 
+{** The arguments of gh that do AAction to pull request ANumber of
+  ARepo with AText: gh pr review with --approve, --request-changes or
+  --comment and the text as --body (left out when empty; a request for
+  changes and a comment need one, which gh refuses otherwise), gh pr
+  merge with --merge, --squash or --rebase, or gh pr ready; --repo
+  names the repository, so the folder it runs in does not matter. }
+function GitHubPullActionArgs(const ARepo: string; ANumber: integer;
+  AAction: TGittanPullAction; const AText: string): TStringArray;
+
 {** The repository ("owner/name"), the file and the line (0 for none)
   of a GitHub address of a file in a commit or on a branch:
   "https://github.com/owner/name/blob/<ref>/src/a.pp#L10-L20" gives
@@ -144,6 +153,9 @@ type
     function FileOfWebUrl(const AUrl: string; out ARepo, APath: string;
       out ALine: integer): boolean; override;
     function PullRef(ANumber: integer): string; override;
+    class function HasPullActions: boolean; override;
+    function ActionJob(const ARoot, ARepo: string; ANumber: integer;
+      AAction: TGittanPullAction; const AText: string): TGittanPullActionJob; override;
   end;
 
 {** gh's configuration folder: GH_CONFIG_DIR, else "GitHub CLI" in
@@ -1022,6 +1034,17 @@ type
     constructor Create(const AExe, ARoot, ABranch, ALogin: string);
   end;
 
+  { gh pr review, gh pr merge or gh pr ready (GitHubPullActionArgs). }
+  TGitHubPullActionJob = class(TGittanPullActionJob)
+  private
+    FExe: string;
+  protected
+    function Ask(out AError: string): boolean; override;
+  public
+    constructor Create(const AExe, ARoot, ARepo: string; ANumber: integer;
+      AAction: TGittanPullAction; const AText: string);
+  end;
+
   { gh api graphql with ReviewThreadsQuery, a page of 100 threads at a
     time, at most twenty pages. }
   TGitHubReviewJob = class(TGittanReviewJob)
@@ -1303,6 +1326,55 @@ begin
   i := Pos(' ', AVersion);
   if i > 0 then
     AVersion := Copy(AVersion, 1, i - 1);
+end;
+
+function GitHubPullActionArgs(const ARepo: string; ANumber: integer;
+  AAction: TGittanPullAction; const AText: string): TStringArray;
+begin
+  case AAction of
+    plApprove: Result := ['pr', 'review', IntToStr(ANumber), '--repo', ARepo, '--approve'];
+    plRequestChanges: Result := ['pr', 'review', IntToStr(ANumber), '--repo', ARepo,
+      '--request-changes'];
+    plComment: Result := ['pr', 'review', IntToStr(ANumber), '--repo', ARepo, '--comment'];
+    plMerge: Result := ['pr', 'merge', IntToStr(ANumber), '--repo', ARepo, '--merge'];
+    plSquash: Result := ['pr', 'merge', IntToStr(ANumber), '--repo', ARepo, '--squash'];
+    plRebaseMerge: Result := ['pr', 'merge', IntToStr(ANumber), '--repo', ARepo, '--rebase'];
+    else
+      Result := ['pr', 'ready', IntToStr(ANumber), '--repo', ARepo];
+  end;
+  if PullActionIsReview(AAction) and (Trim(AText) <> '') then
+    Result := Concat(Result, ['--body', AText]);
+end;
+
+constructor TGitHubPullActionJob.Create(const AExe, ARoot, ARepo: string; ANumber: integer;
+  AAction: TGittanPullAction; const AText: string);
+begin
+  inherited Create(ARoot, ARepo, ANumber, AAction, AText);
+  FExe := AExe;
+end;
+
+function TGitHubPullActionJob.Ask(out AError: string): boolean;
+var
+  Output: string;
+begin
+  AError := '';
+  Result := RunGh(FExe, Root, GitHubPullActionArgs(Repo, Number, Action, Text), Output, AError);
+  AError := Trim(AError);
+  if AError.StartsWith('X ') then
+    AError := Trim(Copy(AError, 3, MaxInt));
+  if not Result and (AError = '') then
+    AError := 'gh could not do it.';
+end;
+
+class function TGittanGitHubForge.HasPullActions: boolean;
+begin
+  Result := True;
+end;
+
+function TGittanGitHubForge.ActionJob(const ARoot, ARepo: string; ANumber: integer;
+  AAction: TGittanPullAction; const AText: string): TGittanPullActionJob;
+begin
+  Result := TGitHubPullActionJob.Create(Cli, ARoot, ARepo, ANumber, AAction, AText);
 end;
 
 function TGittanGitHubForge.PullJob(const ARoot, ABranch, ALogin: string): TGittanPullRequestJob;

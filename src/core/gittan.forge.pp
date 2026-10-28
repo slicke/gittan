@@ -298,6 +298,41 @@ type
     property Error: string read FError;
   end;
 
+  {** What can be done to a pull request on the forge: a review that
+    approves it, asks for changes or only comments; merging it with a
+    merge commit, squashed or rebased; marking a draft ready for
+    review. }
+  TGittanPullAction = (plApprove, plRequestChanges, plComment, plMerge, plSquash,
+    plRebaseMerge, plReady);
+
+  {** Does one thing to a pull request on the forge, in a thread since
+    it goes to the network: Action on pull request Number of Repo
+    ("owner/name"), with Text as the review's words (what a request
+    for changes needs, what a comment is, what an approval may carry).
+    Ok says whether it went through, Error the forge's or its tool's
+    words when it did not. A forge fills in Ask. }
+  TGittanPullActionJob = class(TGittanJob)
+  private
+    FRoot, FRepo, FText, FError: string;
+    FNumber: integer;
+    FAction: TGittanPullAction;
+    FOk: boolean;
+  protected
+    {** Does the action; false with the reason in AError. }
+    function Ask(out AError: string): boolean; virtual; abstract;
+    procedure Execute; override;
+    property Root: string read FRoot;
+  public
+    constructor Create(const ARoot, ARepo: string; ANumber: integer;
+      AAction: TGittanPullAction; const AText: string);
+    property Repo: string read FRepo;
+    property Number: integer read FNumber;
+    property Action: TGittanPullAction read FAction;
+    property Text: string read FText;
+    property Ok: boolean read FOk;
+    property Error: string read FError;
+  end;
+
   {** An account the forge's tool is logged in to: Login on Host
     ("github.com"), Active for the one the tool uses on that host. }
   TGittanForgeAccount = record
@@ -368,9 +403,31 @@ type
     {** The ref a remote of the forge serves pull request ANumber's head
       at, for git fetch: "refs/pull/12/head". }
     function PullRef(ANumber: integer): string; virtual; abstract;
+    {** Whether the forge can act on a pull request (ActionJob gives a
+      job); the base cannot. }
+    class function HasPullActions: boolean; virtual;
+    {** A job that does AAction to pull request ANumber of ARepo
+      ("owner/name") with AText, see TGittanPullActionJob; ARoot is a
+      folder to run in. Not started; nil from a forge without actions
+      (the base). }
+    function ActionJob(const ARoot, ARepo: string; ANumber: integer;
+      AAction: TGittanPullAction; const AText: string): TGittanPullActionJob; virtual;
   end;
   TGittanForgeClass = class of TGittanForge;
   TGittanForgeClasses = array of TGittanForgeClass;
+
+{** What AAction did, in a message: "Approved", "Requested changes on",
+  "Commented on", "Merged", "Squashed and merged", "Rebased and merged",
+  "Marked ready for review", followed by the pull request's number by
+  the caller. }
+function PullActionDone(AAction: TGittanPullAction): string;
+
+{** Whether AAction is a review: it may carry words (Text), which a
+  request for changes and a comment must. }
+function PullActionIsReview(AAction: TGittanPullAction): boolean;
+
+{** Whether AAction merges the pull request. }
+function PullActionMerges(AAction: TGittanPullAction): boolean;
 
 {** Adds AClass to the forges Gittan knows; a forge's unit calls it in
   its initialization. }
@@ -1074,6 +1131,47 @@ begin
   Done;
 end;
 
+constructor TGittanPullActionJob.Create(const ARoot, ARepo: string; ANumber: integer;
+  AAction: TGittanPullAction; const AText: string);
+begin
+  inherited Create(True);
+  FRoot := ARoot;
+  FRepo := ARepo;
+  FNumber := ANumber;
+  FAction := AAction;
+  FText := AText;
+end;
+
+procedure TGittanPullActionJob.Execute;
+begin
+  FOk := Ask(FError);
+  Done;
+end;
+
+function PullActionDone(AAction: TGittanPullAction): string;
+begin
+  case AAction of
+    plApprove: Result := 'Approved';
+    plRequestChanges: Result := 'Requested changes on';
+    plComment: Result := 'Commented on';
+    plMerge: Result := 'Merged';
+    plSquash: Result := 'Squashed and merged';
+    plRebaseMerge: Result := 'Rebased and merged';
+    else
+      Result := 'Marked ready for review';
+  end;
+end;
+
+function PullActionIsReview(AAction: TGittanPullAction): boolean;
+begin
+  Result := AAction in [plApprove, plRequestChanges, plComment];
+end;
+
+function PullActionMerges(AAction: TGittanPullAction): boolean;
+begin
+  Result := AAction in [plMerge, plSquash, plRebaseMerge];
+end;
+
 constructor TGittanForgeJob.Create(const AForgeName, ARoot: string);
 begin
   inherited Create(True);
@@ -1150,6 +1248,17 @@ function TGittanForge.SwitchAccount(const AHost, ALogin: string;
 begin
   AError := Name + ' cannot switch accounts.';
   Result := False;
+end;
+
+class function TGittanForge.HasPullActions: boolean;
+begin
+  Result := False;
+end;
+
+function TGittanForge.ActionJob(const ARoot, ARepo: string; ANumber: integer;
+  AAction: TGittanPullAction; const AText: string): TGittanPullActionJob;
+begin
+  Result := nil;
 end;
 
 function ActiveAccountsKey(const AAccounts: TGittanForgeAccounts): string;

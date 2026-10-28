@@ -820,6 +820,12 @@ type
     { The list a click on the status bar's pull request drops down, and
       what each of its rows does (the pa* constants). }
     FPullPopup: TGittanPopupList;
+    { An action on a pull request on the forge (umain.pulls.inc): the
+      job running it, the pull request the card's menu was opened for
+      and that menu. }
+    FPullActionJob: TGittanPullActionJob;
+    FActionPull: TGittanPullRequest;
+    FPullCardPopup: TPopupMenu;
     FPullActions: TIntegerDynArray;
     FEditOld: TATSynEdit;
     { The hidden editor that parses another changed file for Go to
@@ -1071,6 +1077,20 @@ type
     procedure NewPullBannerClick(Sender: TObject);
     procedure UpdatePullPage;
     procedure PullPageCompare(Sender: TObject; const APull: TGittanPullRequest);
+    procedure PullPageContext(Sender: TObject; const APull: TGittanPullRequest;
+      const AScreenPos: TPoint);
+    procedure PullCardMenuClick(Sender: TObject);
+    {** Whether AAction can be done to APull now: the forge acts, the
+      pull request is open (a draft for plReady, not for a merge), and
+      no action runs. }
+    function CanPullAction(const APull: TGittanPullRequest; AAction: TGittanPullAction): boolean;
+    {** Does AAction to APull on the forge: asks the words of a review
+      (a request for changes and a comment need some) or whether to
+      merge, then runs the job; its end says so in a banner and asks
+      the forge for the pull requests again. }
+    procedure StartPullAction(const APull: TGittanPullRequest; AAction: TGittanPullAction);
+    procedure PullActionDone(Sender: TObject);
+    procedure AbandonPullAction;
     procedure SummaryReviewClick(Sender: TObject; const AScreenRect: TRect);
     procedure ReviewPopupPick(Sender: TObject; AIndex: integer);
     procedure PullPageWorkingTree(Sender: TObject);
@@ -1951,6 +1971,13 @@ type
     procedure MenuAboutClick(Sender: TObject);
   end;
 
+{** Asks what AAction on APull needs before it runs: the words of a
+  review (a request for changes and a comment must have some, an
+  approval may), or whether to merge it, naming the method and the
+  base branch. False when the user backed out. }
+function AskPullAction(const APull: TGittanPullRequest; AAction: TGittanPullAction;
+  out AWords: string): boolean;
+
 implementation
 
 {$R *.lfm}
@@ -2798,6 +2825,29 @@ resourcestring
   rsCompareWorkingTree = 'Compare With the Working Tree';
   rsOpenPullOnForge = 'Open on %s';
   rsCopyPullLink = 'Copy Link';
+  rsPullReviewHeader = 'Review';
+  rsPullMergeHeader = 'Merge';
+  rsPullApprove = 'Approve...';
+  rsPullRequestChanges = 'Request Changes...';
+  rsPullComment = 'Comment...';
+  rsPullMerge = 'Merge...';
+  rsPullSquash = 'Squash and Merge...';
+  rsPullRebaseMerge = 'Rebase and Merge...';
+  rsPullReady = 'Mark Ready for Review';
+  rsPullApproveTitle = 'Approve #%d';
+  rsPullApprovePrompt = 'A comment with the approval (optional)';
+  rsPullRequestChangesTitle = 'Request Changes on #%d';
+  rsPullRequestChangesPrompt = 'What should change';
+  rsPullCommentTitle = 'Comment on #%d';
+  rsPullCommentPrompt = 'Comment';
+  rsPullMergeTitle = 'Merge #%d';
+  rsPullMergeAsk = 'Merge #%d "%s" into %s with a merge commit?';
+  rsPullSquashAsk = 'Squash the commits of #%d "%s" into one on %s?';
+  rsPullRebaseMergeAsk = 'Rebase the commits of #%d "%s" onto %s?';
+  rsPullMergeAction = 'Merge';
+  rsPullActing = 'Asking %s...';
+  rsPullActionDone = '%s #%d';
+  rsPullActionFailed = 'Could not do it on %s';
   rsPositionOld = 'Ln %d (old), Col %d';
   rsReviewComments = 'Review &Comments';
   rsReviewResolved = 'Resolved';
@@ -3026,6 +3076,54 @@ const
   ContextChoices: array[0..3] of integer = (1, 3, 5, 10);
   { Matches beyond this are not counted; the find bar says "10000+". }
   MaxMatches = 10000;
+
+function AskPullAction(const APull: TGittanPullRequest; AAction: TGittanPullAction;
+  out AWords: string): boolean;
+var
+  Title, Prompt, Ask: string;
+begin
+  Result := False;
+  AWords := '';
+  if PullActionIsReview(AAction) then
+  begin
+    case AAction of
+      plApprove:
+      begin
+        Title := Format(rsPullApproveTitle, [APull.Number]);
+        Prompt := rsPullApprovePrompt;
+      end;
+      plRequestChanges:
+      begin
+        Title := Format(rsPullRequestChangesTitle, [APull.Number]);
+        Prompt := rsPullRequestChangesPrompt;
+      end;
+      else
+      begin
+        Title := Format(rsPullCommentTitle, [APull.Number]);
+        Prompt := rsPullCommentPrompt;
+      end;
+    end;
+    repeat
+      if not InputQuery(Title, Prompt, AWords) then
+        Exit;
+      AWords := Trim(AWords);
+    until (AWords <> '') or (AAction = plApprove);
+  end
+  else if PullActionMerges(AAction) then
+  begin
+    case AAction of
+      plMerge: Ask := rsPullMergeAsk;
+      plSquash: Ask := rsPullSquashAsk;
+      else
+        Ask := rsPullRebaseMergeAsk;
+    end;
+    if QuestionDlg(Format(rsPullMergeTitle, [APull.Number]),
+      Format(Ask, [APull.Number, APull.Title, APull.BaseRef]), mtConfirmation,
+      [mrYes, rsPullMergeAction, 'IsDefault', mrCancel, rsCancelButton, 'IsCancel'], 0) <> mrYes then
+      Exit;
+  end;
+  Result := True;
+end;
 
 { A menu item under AParent, owned by AParent's menu, for the context
   menus that are filled as they open. }
@@ -3339,6 +3437,7 @@ begin
   FGraph.OnMore := @GraphMore;
   FGraph.OnPathCommits := @GraphPathCommits;
   FCommitPopup := TPopupMenu.Create(Self);
+  FPullCardPopup := TPopupMenu.Create(Self);
   FPullPopup := TGittanPopupList.Create(Self);
   FPullPopup.Parent := Self;
   FPullPopup.OnPick := @PullPopupPick;
@@ -3601,6 +3700,7 @@ begin
   Application.RemoveOnDeactivateHandler(@AppDeactivate);
   StopWatcher;
   AbandonPullJob;
+  AbandonPullAction;
   AbandonReviewJob;
   AbandonSubmoduleJobs;
   FreeAndNil(FSubJobs);

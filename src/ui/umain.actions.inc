@@ -632,6 +632,7 @@ end;
 procedure TRepoFrame.ForgetForgeAnswers;
 begin
   AbandonPullJob;
+  AbandonPullAction;
   FPullKey := '';
   FHasPull := False;
   FPulls := nil;
@@ -2410,6 +2411,8 @@ const
   paOpen = 3;
   paCopy = 4;
   paList = 5;
+  { The actions on the forge, paAct + Ord(TGittanPullAction). }
+  paAct = 10;
 
 { A click on the status bar's pull request: compare with it, which
   shows its changes as GitHub does and its review comments where they
@@ -2457,6 +2460,26 @@ begin
     AddAction(paCopy, rsCopyPullLink, '');
   end;
   AddAction(paList, rsAllPulls, '');
+  { Review it, merge it, while it is open and the forge acts. }
+  if CanPullAction(FPull, plApprove) then
+  begin
+    FPullPopup.AddHeader(rsPullReviewHeader);
+    AddAction(paAct + Ord(plApprove), rsPullApprove, '');
+    AddAction(paAct + Ord(plRequestChanges), rsPullRequestChanges, '');
+    AddAction(paAct + Ord(plComment), rsPullComment, '');
+  end;
+  if CanPullAction(FPull, plMerge) then
+  begin
+    FPullPopup.AddHeader(rsPullMergeHeader);
+    AddAction(paAct + Ord(plMerge), rsPullMerge, '');
+    AddAction(paAct + Ord(plSquash), rsPullSquash, '');
+    AddAction(paAct + Ord(plRebaseMerge), rsPullRebaseMerge, '');
+  end
+  else if CanPullAction(FPull, plReady) then
+  begin
+    FPullPopup.AddHeader('');
+    AddAction(paAct + Ord(plReady), rsPullReady, '');
+  end;
   FPullPopup.Popup(AScreenRect);
 end;
 
@@ -2473,6 +2496,10 @@ begin
     paOpen: MenuOpenPullClick(Sender);
     paCopy: MenuCopyPullUrlClick(Sender);
     paList: ShowPulls;
+    else
+      if (FPullActions[AIndex] >= paAct) and
+        (FPullActions[AIndex] <= paAct + Ord(High(TGittanPullAction))) then
+        StartPullAction(FPull, TGittanPullAction(FPullActions[AIndex] - paAct));
   end;
 end;
 

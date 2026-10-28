@@ -36,6 +36,11 @@ Three more have an answer in the base, for a forge whose tool keeps no list of a
 - `class function AccountsNote: string` – why the tool would not use the account picked, when something outside its login decides (gh with `GH_TOKEN` in the environment); empty otherwise. The Hosting page shows it in place of its own note.
 - `function SwitchAccount(const AHost, ALogin: string; out AError: string): boolean` – makes ALogin the tool's active account on AHost, for the tool everywhere (`gh auth switch --hostname --user`). It runs the tool and waits.
 
+Two more are for acting on a pull request, which the base cannot (no menu items then), and a forge overrides them when its tool can:
+
+- `class function HasPullActions: boolean` – whether `ActionJob` gives a job; the menus offer the actions only then.
+- `function ActionJob(const ARoot, ARepo: string; ANumber: integer; AAction: TGittanPullAction; const AText: string): TGittanPullActionJob` – a job that does one `TGittanPullAction` (approve, request changes, comment, merge with a merge commit, squash, rebase, mark ready for review) to pull request ANumber of ARepo ("owner/name"), with AText as a review's words; fill in `Ask` (false with the tool's words in AError). GitHub's is `gh pr review` with `--approve`, `--request-changes` or `--comment` and `--body`, `gh pr merge` with `--merge`, `--squash` or `--rebase`, and `gh pr ready`, always with `--repo` (`GitHubPullActionArgs`, tested). `PullActionDone`, `PullActionIsReview` and `PullActionMerges` describe an action for the views.
+
 A job takes what it needs from the forge (the tool's path, the name) when it is made, never the forge itself: the settings may change, and the forge be freed, while it runs.
 
 ## The jobs

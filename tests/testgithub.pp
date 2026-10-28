@@ -27,6 +27,7 @@ type
     procedure TestChecks;
     procedure TestIssueNumber;
     procedure TestWebArgs;
+    procedure TestPullActionArgs;
     procedure TestNewPullUrl;
     procedure TestFileOfUrl;
     procedure TestForge;
@@ -295,6 +296,33 @@ begin
   AssertEquals(0, IssueNumber('item#9 is not one'));
   AssertEquals(0, IssueNumber('#0 is nothing'));
   AssertEquals(0, IssueNumber(''));
+end;
+
+procedure TGitHubTest.TestPullActionArgs;
+
+  function Joined(const AArgs: TStringArray): string;
+  begin
+    Result := string.Join(' ', AArgs);
+  end;
+
+begin
+  AssertEquals('pr review 12 --repo o/r --approve',
+    Joined(GitHubPullActionArgs('o/r', 12, plApprove, '')));
+  AssertEquals('pr review 12 --repo o/r --approve --body Nice',
+    Joined(GitHubPullActionArgs('o/r', 12, plApprove, 'Nice')));
+  AssertEquals('pr review 12 --repo o/r --request-changes --body Not yet',
+    Joined(GitHubPullActionArgs('o/r', 12, plRequestChanges, 'Not yet')));
+  AssertEquals('pr review 12 --repo o/r --comment --body Hm',
+    Joined(GitHubPullActionArgs('o/r', 12, plComment, 'Hm')));
+  AssertEquals('pr merge 12 --repo o/r --merge', Joined(GitHubPullActionArgs('o/r', 12, plMerge, 'x')));
+  AssertEquals('pr merge 12 --repo o/r --squash', Joined(GitHubPullActionArgs('o/r', 12, plSquash, '')));
+  AssertEquals('pr merge 12 --repo o/r --rebase',
+    Joined(GitHubPullActionArgs('o/r', 12, plRebaseMerge, '')));
+  AssertEquals('pr ready 12 --repo o/r', Joined(GitHubPullActionArgs('o/r', 12, plReady, '')));
+  AssertTrue(TGittanGitHubForge.HasPullActions);
+  AssertEquals('Approved', PullActionDone(plApprove));
+  AssertTrue(PullActionMerges(plSquash));
+  AssertFalse(PullActionIsReview(plReady));
 end;
 
 procedure TGitHubTest.TestWebArgs;

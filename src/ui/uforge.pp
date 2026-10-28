@@ -38,8 +38,8 @@ unit uforge;
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Forms, Menus, ExtCtrls, Graphics, LCLType,
-  gittan.job, gittan.forge, gittan.forgepage, umain;
+  Classes, SysUtils, Types, Controls, Forms, Menus, ExtCtrls, Graphics, LCLType, Dialogs,
+  Clipbrd, gittan.job, gittan.forge, gittan.forgepage, umain;
 
 type
 
@@ -55,6 +55,12 @@ type
       thread has ended. }
     FJob: TGittanForgeJob;
     FZombies: TGittanJobReaper;
+    { An action on a pull request from a card's menu (PageContext): the
+      job running it, the pull request the menu was opened for and the
+      menu. }
+    FActionJob: TGittanPullActionJob;
+    FActionPull: TGittanForgePull;
+    FCardPopup: TPopupMenu;
     FLogin, FError: string;
     { The address of the user's picture as last fetched, and its bytes,
       kept across the jobs so a refresh does not fetch it again. }
@@ -78,6 +84,13 @@ type
     procedure FreeJobsAsync(Data: PtrInt);
     procedure BoxResize(Sender: TObject);
     procedure PagePick(Sender: TObject; const APull: TGittanForgePull);
+    procedure PageContext(Sender: TObject; const APull: TGittanForgePull;
+      const AScreenPos: TPoint);
+    procedure CardMenuClick(Sender: TObject);
+    function CanAction(const APull: TGittanForgePull; AAction: TGittanPullAction): boolean;
+    procedure StartAction(const APull: TGittanForgePull; AAction: TGittanPullAction);
+    procedure ActionDone(Sender: TObject);
+    procedure AbandonAction;
     procedure PageRefresh(Sender: TObject);
     procedure LoadFilters;
     procedure PageFilterChange(Sender: TObject);
@@ -145,6 +158,17 @@ uses
   LCLIntf, gittan.app, gittan.theme, gittan.textfit;
 
 resourcestring
+  rsComparePull = 'Compare With This Pull Request';
+  rsOpenPullOnForge = 'Open on %s';
+  rsCopyPullLink = 'Copy Link';
+  rsPullApprove = 'Approve...';
+  rsPullRequestChanges = 'Request Changes...';
+  rsPullComment = 'Comment...';
+  rsPullMerge = 'Merge...';
+  rsPullSquash = 'Squash and Merge...';
+  rsPullRebaseMerge = 'Rebase and Merge...';
+  rsPullReady = 'Mark Ready for Review';
+  rsPullActionFailed = 'Could not do it on %s';
   rsFile = '&File';
   rsNewTab = 'New &Tab';
   rsOpenRepo = 'Open &Repository...';
@@ -177,6 +201,7 @@ begin
   if FThemeTimer <> nil then
     FThemeTimer.Enabled := False;
   AbandonJob;
+  AbandonAction;
   { Waits for the jobs given up. }
   FreeAndNil(FZombies);
   FreeAndNil(FForge);
@@ -197,6 +222,8 @@ begin
   FPage := TGittanForgePage.Create(Self);
   FPage.Parent := FBox;
   FPage.OnPick := @PagePick;
+  FPage.OnContext := @PageContext;
+  FCardPopup := TPopupMenu.Create(Self);
   FPage.OnRefresh := @PageRefresh;
   LoadFilters;
   FPage.OnFilterChange := @PageFilterChange;
@@ -541,6 +568,132 @@ begin
     Clone := '';
   if not FWindow.ComparePullRequest(PullRequestOf(APull), Clone) and (APull.Url <> '') then
     OpenURL(APull.Url);
+end;
+
+{ A right click on a card: compare with the pull request (what a click
+  does), open it on the forge, copy its link, and on the forge, while
+  it is open: approve it, request changes or comment, merge it (with a
+  merge commit, squashed or rebased), or mark a draft ready for review;
+  the same the Pull Requests page of a repository offers, with the
+  same questions (AskPullAction in umain). The forge does it in a
+  thread; when it is done the view asks for the pull requests again,
+  and a failure shows the tool's words. One action runs at a time. }
+const
+  pcCompare = 1;
+  pcOpen = 2;
+  pcCopy = 3;
+  pcAct = 10;
+
+procedure TForgeView.PageContext(Sender: TObject; const APull: TGittanForgePull;
+  const AScreenPos: TPoint);
+
+  function Add(const ACaption: string; ATag: integer): TMenuItem;
+  begin
+    Result := TMenuItem.Create(FCardPopup);
+    Result.Caption := ACaption;
+    Result.Tag := ATag;
+    Result.OnClick := @CardMenuClick;
+    FCardPopup.Items.Add(Result);
+  end;
+
+begin
+  FActionPull := APull;
+  FCardPopup.Items.Clear;
+  Add(rsComparePull, pcCompare);
+  if APull.Url <> '' then
+  begin
+    Add(Format(rsOpenPullOnForge, [ForgeName]), pcOpen);
+    Add(rsCopyPullLink, pcCopy);
+  end;
+  if CanAction(APull, plApprove) then
+  begin
+    FCardPopup.Items.Add(NewLine);
+    Add(rsPullApprove, pcAct + Ord(plApprove));
+    Add(rsPullRequestChanges, pcAct + Ord(plRequestChanges));
+    Add(rsPullComment, pcAct + Ord(plComment));
+  end;
+  if CanAction(APull, plMerge) then
+  begin
+    FCardPopup.Items.Add(NewLine);
+    Add(rsPullMerge, pcAct + Ord(plMerge));
+    Add(rsPullSquash, pcAct + Ord(plSquash));
+    Add(rsPullRebaseMerge, pcAct + Ord(plRebaseMerge));
+  end
+  else if CanAction(APull, plReady) then
+  begin
+    FCardPopup.Items.Add(NewLine);
+    Add(rsPullReady, pcAct + Ord(plReady));
+  end;
+  FCardPopup.PopUp(AScreenPos.X, AScreenPos.Y);
+end;
+
+procedure TForgeView.CardMenuClick(Sender: TObject);
+var
+  Which: integer;
+begin
+  Which := (Sender as TMenuItem).Tag;
+  case Which of
+    pcCompare: PagePick(Sender, FActionPull);
+    pcOpen: if FActionPull.Url <> '' then
+        OpenURL(FActionPull.Url);
+    pcCopy: Clipboard.AsText := FActionPull.Url;
+    else
+      if (Which >= pcAct) and (Which <= pcAct + Ord(High(TGittanPullAction))) then
+        StartAction(FActionPull, TGittanPullAction(Which - pcAct));
+  end;
+end;
+
+function TForgeView.CanAction(const APull: TGittanForgePull;
+  AAction: TGittanPullAction): boolean;
+begin
+  Result := Assigned(FForge) and FForge.HasPullActions and (FActionJob = nil) and
+    (APull.Number > 0) and (APull.Repo <> '') and (APull.State = prOpen);
+  if Result then
+    case AAction of
+      plReady: Result := APull.IsDraft;
+      plMerge, plSquash, plRebaseMerge: Result := not APull.IsDraft;
+    end;
+end;
+
+procedure TForgeView.StartAction(const APull: TGittanForgePull; AAction: TGittanPullAction);
+var
+  Words: string;
+begin
+  if not CanAction(APull, AAction) or not AskPullAction(PullRequestOf(APull), AAction, Words) then
+    Exit;
+  FActionJob := FForge.ActionJob(GetUserDir, APull.Repo, APull.Number, AAction, Words);
+  if FActionJob = nil then
+    Exit;
+  FActionJob.OnDone := @ActionDone;
+  FActionJob.Start;
+  Screen.Cursor := crAppStart;
+end;
+
+procedure TForgeView.ActionDone(Sender: TObject);
+var
+  Job: TGittanPullActionJob;
+begin
+  Job := TGittanPullActionJob(Sender);
+  if Job <> FActionJob then
+    Exit;
+  FActionJob := nil;
+  Screen.Cursor := crDefault;
+  FZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeJobsAsync, 0);
+  if not Job.Ok then
+    MessageDlg(Format(rsPullActionFailed, [ForgeName]), Job.Error, mtError, [mbOK], 0);
+  { The lists as they are now. }
+  AbandonJob;
+  StartJob;
+end;
+
+procedure TForgeView.AbandonAction;
+begin
+  if FActionJob = nil then
+    Exit;
+  FActionJob.Stop(False);
+  FZombies.Add(FActionJob);
+  FActionJob := nil;
 end;
 
 procedure TForgeView.PageRefresh(Sender: TObject);

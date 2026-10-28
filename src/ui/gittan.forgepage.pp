@@ -52,6 +52,10 @@ const
 type
   {** A click on a card: the pull request. }
   TGittanForgePickEvent = procedure(Sender: TObject; const APull: TGittanForgePull) of object;
+  {** A right click on a card: the pull request and where to show a
+    menu, in screen coordinates. }
+  TGittanForgeContextEvent = procedure(Sender: TObject; const APull: TGittanForgePull;
+    const AScreenPos: TPoint) of object;
 
   { TGittanForgePage }
 
@@ -88,6 +92,9 @@ type
     FOnPick: TGittanForgePickEvent;
     FOnRefresh, FOnFilterChange: TNotifyEvent;
     FOnOpenUrl: TGittanOpenUrlEvent;
+    FOnContext: TGittanForgeContextEvent;
+    {** The pull request whose card is at X, Y; false between them. }
+    function CardAt(X, Y: integer; out APull: TGittanForgePull): boolean;
     function LinkAt(X, Y: integer): integer;
     procedure SetHot(AValue: integer);
     procedure SetMineFilters(AValue: TGittanForgeFilters);
@@ -171,6 +178,8 @@ type
     property Section: integer read FSection write SetSection;
     property OnFilterChange: TNotifyEvent read FOnFilterChange write FOnFilterChange;
     property OnPick: TGittanForgePickEvent read FOnPick write FOnPick;
+    {** A right click on a card, for a menu. }
+    property OnContext: TGittanForgeContextEvent read FOnContext write FOnContext;
     property OnRefresh: TNotifyEvent read FOnRefresh write FOnRefresh;
     property OnOpenUrl: TGittanOpenUrlEvent read FOnOpenUrl write FOnOpenUrl;
   end;
@@ -1150,12 +1159,46 @@ begin
   SetHot(-1);
 end;
 
-procedure TGittanForgePage.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
+function TGittanForgePage.CardAt(X, Y: integer; out APull: TGittanForgePull): boolean;
 var
   i, n: integer;
   Url: string;
 begin
+  Result := False;
+  APull := Default(TGittanForgePull);
+  i := LinkAt(X, Y);
+  if i < 0 then
+    Exit;
+  Url := FLinkUrls[i];
+  if Copy(Url, 1, Length(MineLink)) = MineLink then
+  begin
+    n := StrToIntDef(Copy(Url, Length(MineLink) + 1, MaxInt), -1);
+    Result := (n >= 0) and (n <= High(FShownMine));
+    if Result then
+      APull := FShownMine[n];
+  end
+  else if Copy(Url, 1, Length(ReviewLink)) = ReviewLink then
+  begin
+    n := StrToIntDef(Copy(Url, Length(ReviewLink) + 1, MaxInt), -1);
+    Result := (n >= 0) and (n <= High(FShownReview));
+    if Result then
+      APull := FShownReview[n];
+  end;
+end;
+
+procedure TGittanForgePage.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
+var
+  i, n: integer;
+  Url: string;
+  Card: TGittanForgePull;
+begin
   inherited MouseUp(Button, Shift, X, Y);
+  if (Button = mbRight) and Assigned(FOnContext) then
+  begin
+    if CardAt(X, Y, Card) then
+      FOnContext(Self, Card, ClientToScreen(Point(X, Y)));
+    Exit;
+  end;
   if Button <> mbLeft then
     Exit;
   i := LinkAt(X, Y);
