@@ -67,6 +67,10 @@ type
   TGittanWindow = class(TRepoWindow)
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
+    { A dialog the LCL centers on the screen (InputQuery, QuestionDlg,
+      MessageDlg) is centered on the window instead, as Gittan's own
+      dialogs are. }
+    procedure ModalBegin(Sender: TObject);
     procedure FormDropFiles(Sender: TObject; const FileNames: array of string);
   private
     FFrames: TList;
@@ -178,6 +182,7 @@ begin
   FFrames := TList.Create;
   FClosing := TList.Create;
   PlaceWindow;
+  Application.AddOnModalBeginHandler(@ModalBegin);
   KeyPreview := True;
   OnKeyDown := @FormKeyDown;
   OnActivate := @FormActivate;
@@ -216,10 +221,31 @@ begin
   Application.QueueAsyncCall(@OpenAtStartAsync, 0);
 end;
 
+{ ShowModal tells the application before it shows the form, and the
+  form is placed as it shows, so a hidden form still to be centered on
+  the screen is the one about to show: centered on the window
+  instead. On a second screen the dialog then comes up beside the
+  window, not on the primary screen. }
+procedure TGittanWindow.ModalBegin(Sender: TObject);
+var
+  i: integer;
+  F: TCustomForm;
+begin
+  if not Visible or (WindowState = wsMinimized) then
+    Exit;
+  for i := 0 to Screen.CustomFormCount - 1 do
+  begin
+    F := Screen.CustomForms[i];
+    if (F <> Self) and not F.Visible and (F.Position = poScreenCenter) then
+      F.Position := poMainFormCenter;
+  end;
+end;
+
 procedure TGittanWindow.FormDestroy(Sender: TObject);
 var
   i: integer;
 begin
+  Application.RemoveOnModalBeginHandler(@ModalBegin);
   Application.RemoveAsyncCalls(Self);
   App.OnUpdateChecked := nil;
   App.Lexers.OnLoaded := nil;
