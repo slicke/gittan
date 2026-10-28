@@ -8,6 +8,8 @@ unit gittan.repopage;
   it and a detail under it (the commits with the dates of the first and
   the latest, the local and remote branches, the tags with the newest,
   the tracked files, the submodules and the size of the objects), the
+  composition of the tracked files (all of them and their lines, then
+  code, tests and documentation with a bar of their share), the
   remotes with a globe for a web address, which is a link, and Edit
   Remotes... at the right of the heading, and the authors with the most
   commits, each with a disc of their initials and a bar in a color of
@@ -66,6 +68,7 @@ type
     procedure PaintRemote(var Y: integer; const ARemote: TGittanRemote; ANameWidth: integer);
     procedure PaintTiles(var Y: integer);
     procedure PaintContributors(var Y: integer);
+    procedure PaintComposition(var Y: integer);
     function LaneColor(AIndex: integer): TColor;
   protected
     procedure Paint; override;
@@ -116,6 +119,12 @@ uses
 resourcestring
   rsRemotes = 'Remotes';
   rsContributors = 'Contributors';
+  rsComposition = 'Composition';
+  rsAllFiles = 'All files';
+  rsOneFileCount = '1 file';
+  rsFilesCount = '%s files';
+  rsOneLine = '1 line';
+  rsLinesCount = '%s lines';
   rsCommitsLabel = 'Commits';
   rsBranchesLabel = 'Branches';
   rsTagsLabel = 'Tags';
@@ -167,6 +176,7 @@ const
   AvatarSize = 24;
   ContributorRow = 34;
   RemoteRow = 30;
+  DotSize = 8;
 
 { TGittanRepoPage }
 
@@ -623,6 +633,121 @@ begin
   end;
 end;
 
+{ The tracked files and their lines: All files, a divider, then a row
+  per category with a dot in its color, the files dimmed, a bar of its
+  share of the lines in the same color, the lines and the share. }
+procedure TGittanRepoPage.PaintComposition(var Y: integer);
+var
+  Cat: TGittanFileCategory;
+  AllFiles: integer;
+  AllLines: int64;
+  TextH, NameX, NameCol, FilesCol, LinesW, LinesRight, ShareW, BarX, BarW, CenterY,
+    TextY: integer;
+  Share: string;
+  R: TRect;
+
+  function FilesText(ACount: integer): string;
+  begin
+    if ACount = 1 then
+      Result := rsOneFileCount
+    else
+      Result := Format(rsFilesCount, [GroupDigits(ACount)]);
+  end;
+
+  function LinesText(ACount: int64): string;
+  begin
+    if ACount = 1 then
+      Result := rsOneLine
+    else
+      Result := Format(rsLinesCount, [GroupDigits(ACount)]);
+  end;
+
+  { The name, the files and the lines of a row; Y is its top. }
+  procedure Row(const AName: string; AFiles: integer; ALines: int64; ABold: boolean);
+  begin
+    CenterY := Y + Px(RemoteRow) div 2;
+    TextY := CenterY - TextH div 2;
+    Canvas.Font := Font;
+    Canvas.Brush.Style := bsClear;
+    if ABold then
+      Canvas.Font.Style := [fsBold];
+    Canvas.Font.Color := FText;
+    Canvas.TextOut(NameX, TextY, AName);
+    Canvas.TextOut(LinesRight - Canvas.TextWidth(LinesText(ALines)), TextY, LinesText(ALines));
+    Canvas.Font.Style := [];
+    Canvas.Font.Color := FDim;
+    Canvas.TextOut(NameX + NameCol, TextY, FilesText(AFiles));
+  end;
+
+begin
+  AllFiles := 0;
+  AllLines := 0;
+  for Cat := Low(Cat) to High(Cat) do
+  begin
+    Inc(AllFiles, FInfo.Composition[Cat].Files);
+    Inc(AllLines, FInfo.Composition[Cat].Lines);
+  end;
+  Canvas.Font := Font;
+  TextH := Canvas.TextHeight('Xg');
+  NameX := Px(Pad) + Px(DotSize) + Px(Gap) div 2;
+  Canvas.Font.Style := [fsBold];
+  NameCol := Canvas.TextWidth(rsAllFiles);
+  Canvas.Font.Style := [];
+  for Cat := Low(Cat) to High(Cat) do
+    NameCol := Max(NameCol, Canvas.TextWidth(CategoryName(Cat)));
+  Inc(NameCol, 2 * Px(Gap));
+  FilesCol := Canvas.TextWidth(Format(rsFilesCount, [GroupDigits(Max(AllFiles, 10000))])) +
+    2 * Px(Gap);
+  { The bar, left out when there is no room for it, then the lines and
+  the share right after it, as the contributors have them. }
+  ShareW := Canvas.TextWidth('100%');
+  Canvas.Font.Style := [fsBold];
+  LinesW := Canvas.TextWidth(LinesText(Max(AllLines, 1000000)));
+  BarX := NameX + NameCol + FilesCol;
+  BarW := Min(Px(BarWidth), Width - Px(Pad) - ShareW - 2 * Px(Gap) - LinesW - BarX);
+  if BarW < 40 then
+    BarW := 0;
+  LinesRight := BarX + BarW + Px(Gap) + LinesW;
+
+  Row(rsAllFiles, AllFiles, AllLines, True);
+  Inc(Y, Px(RemoteRow));
+  Canvas.Pen.Style := psSolid;
+  Canvas.Pen.Color := FLine;
+  Canvas.Line(NameX, Y, LinesRight + Px(Gap) + ShareW, Y);
+  Inc(Y, Px(Gap) div 2);
+  for Cat := Low(Cat) to High(Cat) do
+  begin
+    Row(CategoryName(Cat), FInfo.Composition[Cat].Files, FInfo.Composition[Cat].Lines, False);
+    Canvas.Pen.Style := psClear;
+    Canvas.Brush.Style := bsSolid;
+    Canvas.Brush.Color := LaneColor(Ord(Cat));
+    Canvas.Ellipse(Px(Pad), CenterY - Px(DotSize) div 2, Px(Pad) + Px(DotSize),
+      CenterY + Px(DotSize) div 2);
+    if BarW > 0 then
+    begin
+      R := Rect(BarX, CenterY - Px(BarHeight) div 2, BarX + BarW, CenterY + Px(BarHeight) div 2);
+      Canvas.Brush.Color := FHover;
+      Canvas.RoundRect(R, Px(BarHeight), Px(BarHeight));
+      if (AllLines > 0) and (FInfo.Composition[Cat].Lines > 0) then
+      begin
+        R.Right := BarX + Max(Px(BarHeight), Round(BarW * FInfo.Composition[Cat].Lines / AllLines));
+        Canvas.Brush.Color := LaneColor(Ord(Cat));
+        Canvas.RoundRect(R, Px(BarHeight), Px(BarHeight));
+      end;
+    end;
+    Canvas.Pen.Style := psSolid;
+    Canvas.Brush.Style := bsClear;
+    if AllLines > 0 then
+      Share := IntToStr(Round(FInfo.Composition[Cat].Lines * 100 / AllLines)) + '%'
+    else
+      Share := '';
+    Canvas.Font := Font;
+    Canvas.Font.Color := FDim;
+    Canvas.TextOut(LinesRight + Px(Gap) + ShareW - Canvas.TextWidth(Share), TextY, Share);
+    Inc(Y, Px(RemoteRow));
+  end;
+end;
+
 procedure TGittanRepoPage.Paint;
 var
   Y, TextH, TitleH, NameW, i, X, TextY, HeadingTop: integer;
@@ -697,6 +822,9 @@ begin
   begin
     Inc(Y, Px(Pad));
     PaintTiles(Y);
+
+    PaintHeading(Y, rsComposition, '');
+    PaintComposition(Y);
 
     HeadingTop := Y;
     PaintHeading(Y, rsRemotes, '');

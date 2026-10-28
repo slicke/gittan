@@ -473,6 +473,8 @@ type
     FFetchItem, FPullItem, FPushItem, FForcePushItem: TMenuItem;
     FSyncPopup: TGittanPopupList;
     FRecentPopup: TGittanPopupList;
+    { What the change is made of, dropped from the summary's totals. }
+    FCompositionPopup: TGittanPopupList;
     { The actions of a base that is a branch compared through the merge
       base with the current one (umain.branches.inc): the list dropped
       from the base label in the summary and the status bar, and the
@@ -1465,6 +1467,8 @@ type
     procedure SummaryContextFile(Sender: TObject; const APath: string;
       const AScreenPos: TPoint);
     procedure SummaryBranchClick(Sender: TObject; const AScreenRect: TRect);
+    procedure SummaryTotalsClick(Sender: TObject; const AScreenRect: TRect);
+    procedure CompositionPopupPick(Sender: TObject; AIndex: integer);
     procedure SummaryOpenUrl(Sender: TObject; const AUrl: string);
     function RepoFileExists(const APath: string): boolean;
     procedure OpenCommentLink(const AUrl: string);
@@ -1988,6 +1992,9 @@ resourcestring
   rsNavHome = 'Home';
   rsNavGraph = 'Graph';
   rsNavRepository = 'Repository';
+  rsCompAllFiles = 'All files';
+  rsCompOneFile = '1 file';
+  rsCompFiles = '%d files';
   rsNavRecent = 'Recent';
   rsNavCommands = 'Commands';
   rsNavChanges = 'Changes';
@@ -3244,6 +3251,7 @@ begin
   FSummary.OnBranchClick := @SummaryBranchClick;
   FSummary.OnBaseClick := @SummaryBaseClick;
   FSummary.OnSyncClick := @SummarySyncClick;
+  FSummary.OnTotalsClick := @SummaryTotalsClick;
   FSummary.OnBehindAction := @SummaryBehindAction;
   FSummary.OnOpenUrl := @SummaryOpenUrl;
   FSummary.OnFileExists := @RepoFileExists;
@@ -3328,6 +3336,9 @@ begin
   FRecentPopup := TGittanPopupList.Create(Self);
   FRecentPopup.Parent := Self;
   FRecentPopup.OnPick := @RecentPopupPick;
+  FCompositionPopup := TGittanPopupList.Create(Self);
+  FCompositionPopup.Parent := Self;
+  FCompositionPopup.OnPick := @CompositionPopupPick;
   FFindPopup := TGittanPopupList.Create(Self);
   FFindPopup.Parent := Self;
   FFindPopup.OnPick := @FindPopupPick;
@@ -3860,7 +3871,7 @@ begin
   FSymbolBar.SetColors(P.Shade, P.Text, P.Dim, P.Line);
   for List in [FBranchPopup, FStashPopup, FUpstreamPopup, FTagPopup, FViewPopup,
     FSubListPopup, FReflogPopup, FPullPopup, FReviewPopup, FSyncPopup, FRecentPopup,
-    FBasePopup, FConflictPopup, FFindPopup] do
+    FBasePopup, FConflictPopup, FFindPopup, FCompositionPopup] do
     List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
   FGraph.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent, P.Warning);
   FBanner.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Line, P.Accent, P.Deleted, P.Added);

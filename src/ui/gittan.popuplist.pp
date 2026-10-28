@@ -114,7 +114,7 @@ type
       index out of range. }
     function TagOf(AIndex: integer): PtrInt;
     {** Adds a header, the dimmed name of the group of items that
-      follow. It cannot be picked. }
+      follow. It cannot be picked. An empty caption is a divider line. }
     procedure AddHeader(const ACaption: string);
     {** Shows the list under AAnchor, a rectangle in screen coordinates
       (the control or the text that was clicked), aligned with its left
@@ -618,6 +618,12 @@ begin
       ACanvas.Polyline([Point(X, CenterY), Point(X + 4, CenterY + 4),
         Point(X + 11, CenterY - 4)]);
       ACanvas.Pen.Width := 1;
+    end;
+    if Item.Header and (Item.Caption = '') then
+    begin
+      ACanvas.Pen.Color := FLine;
+      ACanvas.Line(Px(Pad), CenterY, FRows.Width - Px(Pad), CenterY);
+      Continue;
     end;
     DetailWidth := 0;
     if Item.Detail <> '' then

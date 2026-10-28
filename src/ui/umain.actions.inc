@@ -1285,6 +1285,89 @@ begin
 end;
 
 { ---------------------------------------------------------------------------
+  What the change is made of
+  ---------------------------------------------------------------------------
+  A click on the summary's totals drops the changed files and their
+  lines, all of them, then per category (code, tests, documentation,
+  FileCategory in gittan.repoinfo), a category without a changed file
+  left out. A pick shows the first file of its row. }
+
+const
+  { The tag of All files in FCompositionPopup; a category's is its
+    ordinal. }
+  CompositionAll = 100;
+
+procedure TRepoFrame.SummaryTotalsClick(Sender: TObject; const AScreenRect: TRect);
+var
+  Files: array[TGittanFileCategory] of integer;
+  Added, Deleted: array[TGittanFileCategory] of int64;
+  AllFiles: integer;
+  AllAdded, AllDeleted: int64;
+  Cat: TGittanFileCategory;
+  i: integer;
+
+  function Detail(AAdded, ADeleted: int64; AFiles: integer): string;
+  begin
+    Result := '+' + IntToStr(AAdded) + ' −' + IntToStr(ADeleted) + ' · ';
+    if AFiles = 1 then
+      Result := Result + rsCompOneFile
+    else
+      Result := Result + Format(rsCompFiles, [AFiles]);
+  end;
+
+begin
+  if Length(FStats) = 0 then
+    Exit;
+  for Cat := Low(Cat) to High(Cat) do
+  begin
+    Files[Cat] := 0;
+    Added[Cat] := 0;
+    Deleted[Cat] := 0;
+  end;
+  for i := 0 to High(FStats) do
+  begin
+    Cat := FileCategory(FStats[i].Path);
+    Inc(Files[Cat]);
+    Inc(Added[Cat], FStats[i].Added);
+    Inc(Deleted[Cat], FStats[i].Deleted);
+  end;
+  AllFiles := 0;
+  AllAdded := 0;
+  AllDeleted := 0;
+  for Cat := Low(Cat) to High(Cat) do
+  begin
+    Inc(AllFiles, Files[Cat]);
+    Inc(AllAdded, Added[Cat]);
+    Inc(AllDeleted, Deleted[Cat]);
+  end;
+  FCompositionPopup.Clear;
+  FCompositionPopup.Add(rsCompAllFiles, Detail(AllAdded, AllDeleted, AllFiles), False,
+    CompositionAll);
+  FCompositionPopup.AddHeader('');
+  for Cat := Low(Cat) to High(Cat) do
+    if Files[Cat] > 0 then
+      FCompositionPopup.Add(CategoryName(Cat), Detail(Added[Cat], Deleted[Cat], Files[Cat]),
+        False, Ord(Cat));
+  FCompositionPopup.Popup(AScreenRect);
+end;
+
+procedure TRepoFrame.CompositionPopupPick(Sender: TObject; AIndex: integer);
+var
+  Picked: PtrInt;
+  i: integer;
+begin
+  Picked := FCompositionPopup.TagOf(AIndex);
+  if Picked < 0 then
+    Exit;
+  for i := 0 to High(FStats) do
+    if (Picked = CompositionAll) or (Ord(FileCategory(FStats[i].Path)) = Picked) then
+    begin
+      SummarySelectFile(Self, FStats[i].Path);
+      Exit;
+    end;
+end;
+
+{ ---------------------------------------------------------------------------
   Switching branch
   ---------------------------------------------------------------------------
   A click on the branch in the summary drops the branch list down from

@@ -24,6 +24,8 @@ type
     procedure TestCountLines;
     procedure TestGroupDigits;
     procedure TestFormatKiB;
+    procedure TestFileCategory;
+    procedure TestParseComposition;
   end;
 
   TRepoInfoRepoTest = class(TTestCase)
@@ -172,6 +174,36 @@ begin
   AssertEquals('0 KiB', FormatKiB(0));
 end;
 
+procedure TRepoInfoTest.TestFileCategory;
+begin
+  AssertTrue('code', FileCategory('src/core/gittan.git.pp') = fcCode);
+  AssertTrue('tests folder', FileCategory('tests/testgit.pp') = fcTest);
+  AssertTrue('test folder deep', FileCategory('lib/Test/data.json') = fcTest);
+  AssertTrue('test name', FileCategory('web/app.test.ts') = fcTest);
+  AssertTrue('a doc under tests', FileCategory('tests/README.md') = fcTest);
+  AssertTrue('markdown', FileCategory('README.md') = fcDocs);
+  AssertTrue('text', FileCategory('docs/notes.TXT') = fcDocs);
+  AssertTrue('a file named test', FileCategory('test') = fcCode);
+  AssertTrue('testing folder', FileCategory('testing/a.pp') = fcCode);
+  AssertTrue('contest', FileCategory('contest.pp') = fcCode);
+end;
+
+procedure TRepoInfoTest.TestParseComposition;
+var
+  C: TGittanComposition;
+begin
+  C := ParseComposition('a.pp'#0'b.png'#0'tests/t.pp'#0'README.md'#0,
+    'a.pp'#0'120'#10'tests/t.pp'#0'30'#10'README.md'#0'8'#10);
+  AssertEquals('code files', 2, C[fcCode].Files);
+  AssertEquals('code lines', 120, C[fcCode].Lines);
+  AssertEquals('test files', 1, C[fcTest].Files);
+  AssertEquals('test lines', 30, C[fcTest].Lines);
+  AssertEquals('doc files', 1, C[fcDocs].Files);
+  AssertEquals('doc lines', 8, C[fcDocs].Lines);
+  C := ParseComposition('', '');
+  AssertEquals('none', 0, C[fcCode].Files);
+end;
+
 { TRepoInfoRepoTest }
 
 procedure TRepoInfoRepoTest.SetUp;
@@ -260,6 +292,9 @@ begin
   AssertTrue('first commit', Info.FirstCommit > 0);
   AssertTrue('last commit', Info.LastCommit >= Info.FirstCommit);
   AssertTrue('size', Info.SizeKiB > 0);
+  AssertEquals('text files', 2, Info.Composition[fcDocs].Files);
+  AssertEquals('text lines', 2, Info.Composition[fcDocs].Lines);
+  AssertEquals('code files', 0, Info.Composition[fcCode].Files);
 end;
 
 procedure TRepoInfoRepoTest.TestGatherEmpty;
