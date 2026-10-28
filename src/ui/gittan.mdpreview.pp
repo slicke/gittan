@@ -6,7 +6,8 @@ unit gittan.mdpreview;
   which lays HTML and Markdown out on the canvas with no browser engine.
   LazInk draws no SVG, so an SVG file, and an SVG image a page links to,
   is drawn by BGRABitmap's BGRASVG and handed to the page as a PNG
-  through OnResource. A changed SVG is drawn twice, before and after,
+  through OnResource, as is a picture in a format LazInk does not read
+  (a TGA, a PSD) that the image view does. A changed SVG is drawn twice, before and after,
   at one scale, each under a caption with its size, the new one telling
   how many of the pixels differ, as the image view does. A changed
   Markdown or HTML page is drawn with its changes marked (see
@@ -194,6 +195,49 @@ begin
     end;
   finally
     Svg.Free;
+  end;
+end;
+
+{ Whether LazInk reads the picture APath itself: the formats it shows as
+  a page of their own. }
+function PageReadsImage(const APath: string): boolean;
+var
+  Ext: string;
+begin
+  Ext := LowerCase(ExtractFileExt(APath));
+  Result := (Ext = '.png') or (Ext = '.gif') or (Ext = '.jpg') or (Ext = '.jpeg') or
+    (Ext = '.bmp') or (Ext = '.ico') or (Ext = '.webp');
+end;
+
+{ The picture in the file APath decoded by DecodeImage and written to
+  ADest as a PNG; False when it cannot be read. }
+function RenderImage(const APath: string; ADest: TStream): boolean;
+var
+  Data: RawByteString;
+  F: TFileStream;
+  Bmp: TBGRABitmap;
+begin
+  Result := False;
+  try
+    F := TFileStream.Create(APath, fmOpenRead or fmShareDenyWrite);
+    try
+      SetLength(Data, F.Size);
+      if Data <> '' then
+        F.ReadBuffer(Data[1], Length(Data));
+    finally
+      F.Free;
+    end;
+  except
+    Exit;
+  end;
+  Bmp := DecodeImage(Data);
+  if Bmp = nil then
+    Exit;
+  try
+    Bmp.SaveToStreamAsPng(ADest);
+    Result := True;
+  finally
+    Bmp.Free;
   end;
 end;
 
@@ -484,8 +528,14 @@ begin
       Handled := RenderSvg(FText, FSvgZoom * GetCanvasScaleFactor, Destination);
     Exit;
   end;
-  if not IsSvgPath(URL) or not URIToFilename(URL, Path) or not FileExists(Path) then
+  if not URIToFilename(URL, Path) or not FileExists(Path) then
     Exit;
+  if not IsSvgPath(Path) then
+  begin
+    if IsImagePath(Path) and not PageReadsImage(Path) then
+      Handled := RenderImage(Path, Destination);
+    Exit;
+  end;
   Lines := TStringList.Create;
   try
     Lines.LoadFromFile(Path);
