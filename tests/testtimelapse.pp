@@ -128,7 +128,7 @@ begin
   T := TGittanTimelapse.Create;
   try
     AssertTrue(Repo.Open(FDir));
-    AssertTrue(Repo.FileTimeline('b.txt', '', Log, Text));
+    AssertTrue(Repo.FileTimeline('b.txt', '', 1000, Log, Text));
     AssertTrue(History.Parse(Log));
     AssertTrue(T.Build(History, Text));
     AssertEquals('one version per commit that changed it', 6, T.Count);

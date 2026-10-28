@@ -270,8 +270,9 @@ begin
   begin
     Result := NSToolbarItem.alloc.initWithItemIdentifier(itemIdentifier);
     Result.setView(Owner.FStrip);
-    { Between these it takes the width the toolbar has. }
-    Result.setMinSize(NSMakeSize(PlusWidth + MinTabWidth, StripHeight));
+    { Between these it takes the width the toolbar has; at the least
+      Back and Forward, a tab, the plus and the globe. }
+    Result.setMinSize(NSMakeSize(NavRoom + MinTabWidth + PlusWidth + GlobeWidth, StripHeight));
     Result.setMaxSize(NSMakeSize(100000, StripHeight));
     Result.autorelease;
   end;

@@ -17,6 +17,11 @@ interface
 uses
   Classes, SysUtils, gittan.git, gittan.history, gittan.job;
 
+const
+  {** The most commits a time-lapse goes back over, newest first; each
+    keeps a version of the file. }
+  TimelapseMax = 1000;
+
 type
   TGittanEntryIds = array of integer;
 
@@ -274,8 +279,11 @@ begin
   Repo := TGittanRepo.Create;
   try
     if not Repo.Open(FRoot) then
+    begin
+      FError := Repo.Error;
       Exit;
-    if not Repo.FileTimeline(FPath, FRef, Log, Text) then
+    end;
+    if not Repo.FileTimeline(FPath, FRef, TimelapseMax, Log, Text) or Terminated then
     begin
       FError := Repo.Error;
       Exit;

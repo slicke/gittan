@@ -6838,6 +6838,7 @@ var
   Size: int64;
 begin
   AbandonHistoryJob;
+  EndTimelapse;
   FRepo.DiffSides(OldRef, NewRef);
   HasOld := FRepo.FileBlob(APath, OldRef, OldData);
   HasNew := FRepo.FileBlob(APath, NewRef, NewData);
@@ -6874,6 +6875,7 @@ var
   HasOld, HasNew, OldMissing, NewMissing: boolean;
 begin
   AbandonHistoryJob;
+  EndTimelapse;
   FRepo.DiffSides(OldRef, NewRef);
   HasOld := FRepo.FileSize(APath, OldRef, OldSize, OldMissing);
   HasNew := FRepo.FileSize(APath, NewRef, NewSize, NewMissing);
@@ -6910,6 +6912,7 @@ var
   Size: int64;
 begin
   AbandonHistoryJob;
+  EndTimelapse;
   Size := 0;
   if FindFirst(AFileName, faAnyFile, Info) = 0 then
   begin
