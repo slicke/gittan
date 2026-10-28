@@ -1778,6 +1778,9 @@ type
     procedure MenuPopStashClick(Sender: TObject);
     procedure MenuApplyStashClick(Sender: TObject);
     procedure MenuStashListClick(Sender: TObject);
+    function CommitKnownName(const ACommit: TGittanGraphCommit): string;
+    procedure GraphDrop(Sender: TObject; const ASource, ATarget: TGittanGraphCommit;
+      const AScreenPos: TPoint);
     procedure GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
       const AScreenPos: TPoint);
     procedure CommitMenuClick(Sender: TObject);
@@ -2402,6 +2405,7 @@ resourcestring
   rsCaBranch = 'Create Branch Here...';
   rsCaTag = 'Create Tag Here...';
   rsCaMerge = 'Merge %s into %s';
+  rsCaDropInHead = '%s is already in %s';
   rsCaCherryPick = 'Cherry-pick into %s';
   rsCaRevert = 'Revert Commit';
   rsCaReset = 'Reset %s to Here';
@@ -3592,6 +3596,7 @@ begin
   FGraph.Parent := Self;
   FGraph.OnPick := @GraphPick;
   FGraph.OnContext := @GraphContext;
+  FGraph.OnDrop := @GraphDrop;
   FGraph.OnMore := @GraphMore;
   FGraph.OnPathCommits := @GraphPathCommits;
   FGraph.OnChangeCommits := @GraphChangeCommits;

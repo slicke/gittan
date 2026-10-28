@@ -31,6 +31,13 @@ unit gittan.commitgraph;
   id), for the owner's "compare with the marked commit": its short id
   is shown in the accent.
 
+  A row can be dragged onto the row of the commit HEAD is on: that row
+  is outlined in the accent while the mouse is over it, the box scrolls
+  when the mouse nears its top or bottom, and the release there asks the
+  owner (OnDrop, with both commits and where to show a menu) what to do,
+  a merge of the dragged commit into the branch. Escape gives the drag
+  up.
+
   The Statistics toggle in the header shows, in the place of the rows,
   how many of the commits shown there are per week, as a bar for every
   week with each of the authors with the most commits in a lane color,
@@ -51,6 +58,10 @@ type
   TGittanGraphPickEvent = procedure(Sender: TObject; const AHash: string) of object;
   TGittanGraphContextEvent = procedure(Sender: TObject; const ACommit: TGittanGraphCommit;
     const AScreenPos: TPoint) of object;
+  {** ASource was dragged onto ATarget, the commit HEAD is on, and let
+    go at AScreenPos. }
+  TGittanGraphDropEvent = procedure(Sender: TObject;
+    const ASource, ATarget: TGittanGraphCommit; const AScreenPos: TPoint) of object;
   {** Asked for the ids of the commits that touched APath, added to
     AHashes. }
   TGittanGraphPathEvent = procedure(Sender: TObject; const APath: string;
@@ -80,6 +91,8 @@ type
     FGraph: TGittanCommitGraph;
   protected
     procedure Paint; override;
+    procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
+      override;
     procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
       override;
@@ -129,6 +142,14 @@ type
     { The highlighted row, the one Enter picks; -1 for none. }
     FCurrent: integer;
     FMarked: string;
+    { A drag: the row the left button went down on (-1 for none) and
+      where, whether the mouse has gone far enough from there for a
+      drag, the row it would be dropped on (-1 for none), and the timer
+      that scrolls the box while the mouse is near its top or bottom. }
+    FPressRow, FDropRow: integer;
+    FPressPoint: TPoint;
+    FDragging: boolean;
+    FDragTimer: TTimer;
     FCloseRect: TRect;
     FCloseHot, FFooterHot: boolean;
     { The statistics shown in the place of the rows while FStatsOn, the
@@ -146,6 +167,7 @@ type
     FLaneColors: array of TColor;
     FOnPick: TGittanGraphPickEvent;
     FOnContext: TGittanGraphContextEvent;
+    FOnDrop: TGittanGraphDropEvent;
     FOnMore: TNotifyEvent;
     FOnPathCommits: TGittanGraphPathEvent;
     FOnChangeCommits: TGittanGraphChangeEvent;
@@ -197,6 +219,12 @@ type
     function FitText(ACanvas: TCanvas; const AText: string; ARoom: integer): string;
     procedure Pick;
     procedure Dismiss;
+    function IsHeadRow(ARow: integer): boolean;
+    procedure SetDropRow(AValue: integer);
+    function DragMove(Shift: TShiftState; X, Y: integer): boolean;
+    procedure Drop(X, Y: integer);
+    procedure EndDrag;
+    procedure DragTimerTick(Sender: TObject);
     procedure KeyInput(var Key: word);
     procedure EditChange(Sender: TObject);
     procedure EditKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
@@ -248,6 +276,9 @@ type
       the panel stays open under the menu the handler shows at
       AScreenPos. }
     property OnContext: TGittanGraphContextEvent read FOnContext write FOnContext;
+    {** A commit was dragged onto the one HEAD is on: the panel stays
+      open under the menu the handler shows at AScreenPos. }
+    property OnDrop: TGittanGraphDropEvent read FOnDrop write FOnDrop;
     {** The whole log is wanted: the handler answers with Replace. Asked
       once per Popup. }
     property OnMore: TNotifyEvent read FOnMore write FOnMore;
@@ -323,6 +354,10 @@ const
   MaxRowsHeight = 32000;
   { How long typing may pause before the filter is applied. }
   FilterDelay = 200;
+  { How far the mouse goes with the button down before a drag starts,
+    and how often a drag near the top or bottom scrolls the box. }
+  DragThreshold = 5;
+  DragScrollInterval = 40;
   { The statistics: the height of the weeks' bars, the column of the
     names and counts left of the weeks, the narrowest a week is drawn,
     and how many authors of a week the line above the bars names. }
@@ -348,6 +383,17 @@ begin
   FGraph.PaintRows(Canvas);
 end;
 
+procedure TGittanGraphRows.MouseDown(Button: TMouseButton; Shift: TShiftState;
+  X, Y: integer);
+begin
+  inherited MouseDown(Button, Shift, X, Y);
+  if (Button = mbLeft) and not FGraph.FStatsOn then
+  begin
+    FGraph.FPressRow := FGraph.RowAt(Y);
+    FGraph.FPressPoint := Point(X, Y);
+  end;
+end;
+
 { The mouse over empty space under the rows keeps the row the keys
   chose, which Enter and the Menu key act on. }
 procedure TGittanGraphRows.MouseMove(Shift: TShiftState; X, Y: integer);
@@ -360,6 +406,8 @@ begin
     FGraph.StatsHover(X, Y);
     Exit;
   end;
+  if FGraph.DragMove(Shift, X, Y) then
+    Exit;
   Row := FGraph.RowAt(Y);
   if Row >= 0 then
     FGraph.SetCurrent(Row);
@@ -378,6 +426,13 @@ begin
       FGraph.StatsClick(X, Y);
     Exit;
   end;
+  if (Button = mbLeft) and FGraph.FDragging then
+  begin
+    FGraph.Drop(X, Y);
+    Exit;
+  end;
+  if Button = mbLeft then
+    FGraph.EndDrag;
   Row := FGraph.RowAt(Y);
   if (Button = mbLeft) and (Row >= 0) then
   begin
@@ -399,7 +454,8 @@ begin
   FGraph.SetFooterHot(False);
   if FGraph.FStatsOn then
     FGraph.StatsHover(-1, -1);
-  Cursor := crDefault;
+  if not FGraph.FDragging then
+    Cursor := crDefault;
 end;
 
 procedure TGittanGraphRows.KeyDown(var Key: word; Shift: TShiftState);
@@ -417,6 +473,8 @@ begin
   ControlStyle := ControlStyle + [csOpaque];
   Visible := False;
   FCurrent := -1;
+  FPressRow := -1;
+  FDropRow := -1;
   FStatsWeek := -1;
   FStatsAuthor := -1;
   FPathHashes := TStringList.Create;
@@ -447,6 +505,10 @@ begin
   FTimer.Enabled := False;
   FTimer.Interval := FilterDelay;
   FTimer.OnTimer := @TimerTick;
+  FDragTimer := TTimer.Create(Self);
+  FDragTimer.Enabled := False;
+  FDragTimer.Interval := DragScrollInterval;
+  FDragTimer.OnTimer := @DragTimerTick;
   SetColors(clWindow, clWindowText, clGrayText, clBtnFace, clBtnShadow,
     clHighlight, clMaroon);
   SetLaneColors([clHighlight]);
@@ -897,6 +959,12 @@ end;
 procedure TGittanCommitGraph.EditKeyDown(Sender: TObject; var Key: word;
   Shift: TShiftState);
 begin
+  if (Key = VK_ESCAPE) and FDragging then
+  begin
+    EndDrag;
+    Key := 0;
+    Exit;
+  end;
   case Key of
     VK_UP, VK_DOWN, VK_PRIOR, VK_NEXT, VK_RETURN, VK_APPS:
       KeyInput(Key);
@@ -974,6 +1042,7 @@ end;
 procedure TGittanCommitGraph.Dismiss;
 begin
   FTimer.Enabled := False;
+  EndDrag;
   if not Visible then
     Exit;
   FHook.Hook(False);
@@ -1004,6 +1073,115 @@ begin
   Dismiss;
   if Assigned(FOnPick) then
     FOnPick(Self, Hash);
+end;
+
+{ ---------------------------------------------------------------------------
+  Dragging a commit onto HEAD's
+  --------------------------------------------------------------------------- }
+
+function TGittanCommitGraph.IsHeadRow(ARow: integer): boolean;
+var
+  i: integer;
+begin
+  Result := False;
+  if (ARow < 0) or (ARow > High(FShown)) then
+    Exit;
+  for i := 0 to High(FCommits[FShown[ARow]].Refs) do
+    if FCommits[FShown[ARow]].Refs[i].Kind = grHead then
+      Exit(True);
+end;
+
+{ Only HEAD's row takes a drop, and not from itself. }
+procedure TGittanCommitGraph.SetDropRow(AValue: integer);
+begin
+  if (AValue = FPressRow) or not IsHeadRow(AValue) then
+    AValue := -1;
+  if FDragging then
+    if AValue >= 0 then
+      FRows.Cursor := crDrag
+    else
+      FRows.Cursor := crNoDrop;
+  if FDropRow = AValue then
+    Exit;
+  FDropRow := AValue;
+  FRows.Invalidate;
+end;
+
+{ The mouse moved over the rows with the button down on one: true while
+  that is a drag, which keeps the pressed row highlighted. The drag
+  starts once the mouse is DragThreshold away from the press, so a
+  click that shakes a little still picks. }
+function TGittanCommitGraph.DragMove(Shift: TShiftState; X, Y: integer): boolean;
+begin
+  Result := False;
+  if FPressRow < 0 then
+    Exit;
+  if not (ssLeft in Shift) then
+  begin
+    EndDrag;
+    Exit;
+  end;
+  if not FDragging then
+  begin
+    if (Abs(X - FPressPoint.X) < Px(DragThreshold)) and
+      (Abs(Y - FPressPoint.Y) < Px(DragThreshold)) then
+      Exit;
+    FDragging := True;
+    SetCurrent(FPressRow);
+    FDragTimer.Enabled := True;
+  end;
+  SetDropRow(RowAt(Y));
+  Result := True;
+end;
+
+procedure TGittanCommitGraph.Drop(X, Y: integer);
+var
+  Source, Target: integer;
+begin
+  Source := FPressRow;
+  SetDropRow(RowAt(Y));
+  Target := FDropRow;
+  EndDrag;
+  if (Target >= 0) and (Source >= 0) and (Source <= High(FShown)) and Assigned(FOnDrop) then
+    FOnDrop(Self, FCommits[FShown[Source]], FCommits[FShown[Target]],
+      FRows.ClientToScreen(Point(X, Y)));
+end;
+
+procedure TGittanCommitGraph.EndDrag;
+begin
+  FDragTimer.Enabled := False;
+  FPressRow := -1;
+  if FDragging then
+  begin
+    FDragging := False;
+    if FCurrent >= 0 then
+      FRows.Cursor := crHandPoint
+    else
+      FRows.Cursor := crDefault;
+  end;
+  SetDropRow(-1);
+end;
+
+{ The mouse within a row of the box's top or bottom scrolls it half a
+  row a tick, and the row under the mouse is looked for again, since
+  the rows moved under it. }
+procedure TGittanCommitGraph.DragTimerTick(Sender: TObject);
+var
+  P: TPoint;
+  InBox: integer;
+begin
+  if not FDragging then
+    Exit;
+  InBox :=FBox.ScreenToClient(Mouse.CursorPos).Y;
+  if InBox < Px(RowHeight) then
+    SetLogicalTop(LogicalTop - Px(RowHeight) div 2)
+  else if InBox > FBox.ClientHeight - Px(RowHeight) then
+    SetLogicalTop(Min(LogicalTop + Px(RowHeight) div 2,
+      Max(0, TotalHeight - FBox.ClientHeight)))
+  else
+    Exit;
+  P := FRows.ScreenToClient(Mouse.CursorPos);
+  SetDropRow(RowAt(P.Y));
 end;
 
 function TGittanCommitGraph.RowAt(Y: integer): integer;
@@ -1087,6 +1265,12 @@ var
   Page: integer;
 begin
   Page := Max(1, FBox.ClientHeight div Px(RowHeight) - 1);
+  if (Key = VK_ESCAPE) and FDragging then
+  begin
+    EndDrag;
+    Key := 0;
+    Exit;
+  end;
   { The statistics have no rows to move to: the keys scroll. }
   if FStatsOn then
   begin
@@ -1350,6 +1534,17 @@ begin
     ACanvas.Brush.Color := FHover;
     ACanvas.RoundRect(Px(Pad) div 2, ATop + 1, FRows.Width - Px(Pad) div 2, Bottom - 1, 8, 8);
     ACanvas.Pen.Style := psSolid;
+  end;
+  { The row a drag would be dropped on, outlined in the accent. }
+  if ARow = FDropRow then
+  begin
+    ACanvas.Pen.Style := psSolid;
+    ACanvas.Pen.Color := FAccent;
+    ACanvas.Pen.Width := 2;
+    ACanvas.Brush.Style := bsClear;
+    ACanvas.RoundRect(Px(Pad) div 2 + 1, ATop + 2, FRows.Width - Px(Pad) div 2 - 1,
+      Bottom - 2, 8, 8);
+    ACanvas.Pen.Width := 1;
   end;
 
   if not FFiltered then
