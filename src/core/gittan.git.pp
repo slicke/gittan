@@ -10,7 +10,7 @@ unit gittan.git;
 interface
 
 uses
-  Classes, SysUtils, gittan.graph, gittan.rebase;
+  Classes, SysUtils, gittan.graph, gittan.rebase, gittan.undo;
 
 const
   {** Bits added to the kind in the Objects of ChangedPaths: the index
@@ -172,6 +172,8 @@ type
     {** The remotes' URLs as git reaches them, from ResolvedRemoteUrlsIn:
       which forge the repository is on (gittan.forge's ForgeClassFor). }
     RemoteUrls: string;
+    {** Where the branches are, from ReadRefState, for Undo. }
+    RefState: TGittanRefState;
   end;
   PGittanRepoSnapshot = ^TGittanRepoSnapshot;
 
@@ -791,6 +793,13 @@ type
       files could not be read; the rest is filled in as far as git
       answered. Returns ASnap.Ok. }
     function Snapshot(out ASnap: TGittanRepoSnapshot): boolean;
+    {** Where the branches are, for Undo (gittan.undo): HEAD's branch and
+      commit, every local branch's tip and the newest entry of HEAD's
+      reflog. False when the branches could not be read. }
+    function ReadRefState(out AState: TGittanRefState): boolean;
+    {** Runs ASteps (from PlanRefChange) in turn, stopping at the first
+      that fails, whose message Error then holds. }
+    function RunSteps(const ASteps: TGittanGitSteps): boolean;
     {** The current branch, the short commit id when HEAD is detached, or
       empty when nothing is open. }
     function Branch: string;
@@ -963,6 +972,16 @@ type
       know, or a range past the end of the file in ARef. }
     function LineHistory(const APath, ARef: string; AFrom, ATo, AMax: integer;
       out AOutput: string): boolean;
+    {** The history of APath up to ARef (HEAD when empty) for the
+      time-lapse: in ALog every commit along the first parents that
+      changed it, newest first, followed through renames, each with its
+      diff without context lines and formatted as LineHistory's (see
+      TGittanHistory.Parse); a merge counts with its diff from the first
+      parent; the newest AMax of them. AText is the file as ARef has it,
+      as stored. Returns false when git failed, as for a file ARef does
+      not have. }
+    function FileTimeline(const APath, ARef: string; AMax: integer;
+      out ALog, AText: string): boolean;
     {** A Base that shows what the commit AHash changed: the range from
       its parent, or from the empty tree for a commit without one. }
     function CommitRange(const AHash: string): string;
@@ -5441,8 +5460,17 @@ var
   Output: string;
 begin
   AList.Clear;
-  Result := (FRoot <> '') and RunGit(FRoot, ['diff-tree', '-r', '-z', '--name-only',
-    '--no-renames', '--no-commit-id', '--root', '--diff-merges=first-parent', 'HEAD'], Output);
+  Result := FRoot <> '';
+  if not Result then
+    Exit;
+  { Against the first parent by name: --diff-merges=first-parent needs
+    git 2.31, and -m lists a merge against each parent. }
+  if RunGit(FRoot, ['rev-parse', '--verify', '--quiet', 'HEAD^'], Output) then
+    Result := RunGit(FRoot, ['diff-tree', '-r', '-z', '--name-only', '--no-renames',
+      'HEAD^', 'HEAD'], Output)
+  else
+    Result := RunGit(FRoot, ['diff-tree', '-r', '-z', '--name-only', '--no-renames',
+      '--no-commit-id', '--root', 'HEAD'], Output);
   if Result then
     SplitNul(Output, AList);
 end;
@@ -5794,7 +5822,45 @@ begin
     List.Free;
   end;
   ASnap.RemoteUrls := ResolvedRemoteUrlsIn(FRoot);
+  ReadRefState(ASnap.RefState);
   Result := ASnap.Ok;
+end;
+
+{ symbolic-ref fails while HEAD is detached, and the reflog before the
+  first commit; neither makes the state unreadable. }
+function TGittanRepo.ReadRefState(out AState: TGittanRefState): boolean;
+var
+  Output: string;
+begin
+  AState := Default(TGittanRefState);
+  if FRoot = '' then
+    Exit(False);
+  if RunGit(FRoot, ['symbolic-ref', '-q', 'HEAD'], Output) then
+  begin
+    AState.Branch := Trim(Output);
+    if Pos('refs/heads/', AState.Branch) = 1 then
+      Delete(AState.Branch, 1, Length('refs/heads/'));
+  end;
+  AState.Head := CommitId('HEAD');
+  if not RunGit(FRoot, ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads'],
+    Output) then
+    Exit(False);
+  AState.Tips := ParseBranchTips(Output);
+  if RunGit(FRoot, ['reflog', '-1', '--format=%gs', 'HEAD'], Output) then
+    AState.Move := Trim(Output);
+  AState.Valid := True;
+  Result := True;
+end;
+
+function TGittanRepo.RunSteps(const ASteps: TGittanGitSteps): boolean;
+var
+  i: integer;
+  Output: string;
+begin
+  Result := FRoot <> '';
+  for i := 0 to High(ASteps) do
+    if not RunGit(FRoot, ASteps[i], Output) then
+      Exit(False);
 end;
 
 { symbolic-ref names the branch even before its first commit; it fails
@@ -6330,6 +6396,10 @@ begin
     if RunGit(FRoot, ['rev-parse', '--verify', '-q', '@{upstream}'], Id) then
       Result := Result + 'upstream ' + Trim(Id) + #10;
     Result := Result + 'operation ' + Operation + #10;
+    { The local branches, which a branch made, deleted or moved without
+      touching HEAD changes alone, and Undo follows. }
+    if RunGit(FRoot, ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads'], Id) then
+      Result := Result + Trim(Id) + #10;
     { The stashes, which the status bar counts and lists. }
     if RunGit(FRoot, ['stash', 'list', '--format=%H'], Id) then
       Result := Result + 'stash ' + StringReplace(Trim(Id), #10, ' ', [rfReplaceAll]) + #10;
@@ -6801,6 +6871,7 @@ begin
   if FRoot = '' then
     Exit(False);
   Args := nil;
+  AddArg(Args, '--literal-pathspecs');
   AddArg(Args, 'log');
   AddArg(Args, '--no-color');
   AddArg(Args, '--no-ext-diff');
@@ -6827,6 +6898,25 @@ begin
     AddArg(Args, APath);
   end;
   Result := RunGit(FRoot, Args, AOutput);
+end;
+
+function TGittanRepo.FileTimeline(const APath, ARef: string; AMax: integer;
+  out ALog, AText: string): boolean;
+var
+  Ref: string;
+begin
+  ALog := '';
+  AText := '';
+  if FRoot = '' then
+    Exit(False);
+  Ref := ARef;
+  if Ref = '' then
+    Ref := 'HEAD';
+  { The text as stored: a Git LFS pointer is what the diffs are of. }
+  Result := RunGit(FRoot, ['cat-file', 'blob', Ref + ':' + APath], AText) and
+    RunGit(FRoot, ['--literal-pathspecs', 'log', '--no-color', '--no-ext-diff', '--no-textconv',
+    '--first-parent', '-m', '--follow', '-p', '-U0', '-n', IntToStr(AMax),
+    '--format=%x01%H%x1f%an%x1f%at%x1f%s', Ref, '--', APath], ALog);
 end;
 
 initialization

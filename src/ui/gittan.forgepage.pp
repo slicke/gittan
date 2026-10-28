@@ -39,7 +39,8 @@ unit gittan.forgepage;
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Graphics, ExtCtrls, gittan.forge, gittan.summary;
+  Classes, SysUtils, Types, Controls, Graphics, ExtCtrls, BGRABitmap, gittan.forge,
+  gittan.summary;
 
 const
   {** The sections: the user's open pull requests and those waiting for
@@ -51,6 +52,10 @@ const
 type
   {** A click on a card: the pull request. }
   TGittanForgePickEvent = procedure(Sender: TObject; const APull: TGittanForgePull) of object;
+  {** A right click on a card: the pull request and where to show a
+    menu, in screen coordinates. }
+  TGittanForgeContextEvent = procedure(Sender: TObject; const APull: TGittanForgePull;
+    const AScreenPos: TPoint) of object;
 
   { TGittanForgePage }
 
@@ -79,9 +84,17 @@ type
     { The canvas the content is painted on: the control's in Paint, a
       measuring one in Layout. }
     FC: TCanvas;
+    { The user's picture as the forge sent it (FAvatarData, its bytes;
+      FAvatar decoded, nil for none or one that could not be read) and
+      as painted: resampled to the disc's pixels and cut round. }
+    FAvatarData: string;
+    FAvatar, FAvatarShown: TBGRABitmap;
     FOnPick: TGittanForgePickEvent;
     FOnRefresh, FOnFilterChange: TNotifyEvent;
     FOnOpenUrl: TGittanOpenUrlEvent;
+    FOnContext: TGittanForgeContextEvent;
+    {** The pull request whose card is at X, Y; false between them. }
+    function CardAt(X, Y: integer; out APull: TGittanForgePull): boolean;
     function LinkAt(X, Y: integer): integer;
     procedure SetHot(AValue: integer);
     procedure SetMineFilters(AValue: TGittanForgeFilters);
@@ -122,10 +135,15 @@ type
       override;
   public
     constructor Create(AOwner: TComponent); override;
+    destructor Destroy; override;
     {** The forge shown, by name: the page's title and its links. }
     procedure SetForge(const AName: string);
     {** The login the forge knows the user as; empty before it answered. }
     procedure SetLogin(const ALogin: string);
+    {** The user's picture as the forge sent it (PNG or JPEG bytes), in
+      the disc of the head in place of the initial; empty, or bytes that
+      are not a picture, for the initial. }
+    procedure SetAvatar(const AData: string);
     {** The root of the open repository, empty when none is open: a card
       whose clone it is has no link to it, since its click compares
       there. }
@@ -135,6 +153,9 @@ type
       it is being asked now. }
     procedure SetPulls(const AMine, AReview: TGittanForgePulls; const AError: string;
       ALoading: boolean);
+    {** Forgets that the forge answered (another forge or account), so
+      an empty section says nothing until the new one has. }
+    procedure ForgetAnswer;
     {** The palette: the background, the text, the dim text, the fill
       under the mouse, the dividers, the links, the ok, the warning and
       the error colors. }
@@ -160,6 +181,8 @@ type
     property Section: integer read FSection write SetSection;
     property OnFilterChange: TNotifyEvent read FOnFilterChange write FOnFilterChange;
     property OnPick: TGittanForgePickEvent read FOnPick write FOnPick;
+    {** A right click on a card, for a menu. }
+    property OnContext: TGittanForgeContextEvent read FOnContext write FOnContext;
     property OnRefresh: TNotifyEvent read FOnRefresh write FOnRefresh;
     property OnOpenUrl: TGittanOpenUrlEvent read FOnOpenUrl write FOnOpenUrl;
   end;
@@ -170,7 +193,7 @@ function SectionCaption(ASection: integer): string;
 implementation
 
 uses
-  Math, DateUtils, LCLIntf, LCLType, gittan.reviews, gittan.textfit, gittan.theme;
+  Math, DateUtils, LCLIntf, LCLType, BGRABitmapTypes, gittan.reviews, gittan.textfit, gittan.theme;
 
 resourcestring
   rsPageTitle = 'Pull requests';
@@ -267,6 +290,40 @@ begin
   FPulse.OnTimer := @PulseTimer;
 end;
 
+destructor TGittanForgePage.Destroy;
+begin
+  FAvatarShown.Free;
+  FAvatar.Free;
+  inherited Destroy;
+end;
+
+procedure TGittanForgePage.SetAvatar(const AData: string);
+var
+  Stream: TStringStream;
+begin
+  if AData = FAvatarData then
+    Exit;
+  FAvatarData := AData;
+  FreeAndNil(FAvatarShown);
+  FreeAndNil(FAvatar);
+  if AData <> '' then
+  begin
+    Stream := TStringStream.Create(AData);
+    try
+      try
+        FAvatar := TBGRABitmap.Create(Stream);
+        if (FAvatar.Width = 0) or (FAvatar.Height = 0) then
+          FreeAndNil(FAvatar);
+      except
+        FreeAndNil(FAvatar);
+      end;
+    finally
+      Stream.Free;
+    end;
+  end;
+  Invalidate;
+end;
+
 procedure TGittanForgePage.SetForge(const AName: string);
 begin
   FForge := AName;
@@ -290,6 +347,11 @@ begin
   FOpenRoot := ARoot;
   Layout;
   Invalidate;
+end;
+
+procedure TGittanForgePage.ForgetAnswer;
+begin
+  FAnswered := False;
 end;
 
 procedure TGittanForgePage.SetPulls(const AMine, AReview: TGittanForgePulls;
@@ -457,12 +519,45 @@ begin
   FLinkUrls[High(FLinkUrls)] := AUrl;
 end;
 
-{ A disc ASize across with the login's initial in it, in the link
-  color; empty in the hover fill before the forge has said who. }
+{ A disc ASize across with the user's picture in it, resampled to the
+  screen's pixels (twice its points on a Retina screen) and cut round,
+  on the hover fill;
+  without one the login's initial, in the link color; empty in the hover
+  fill before the forge has said who. }
 procedure TGittanForgePage.PaintAvatar(ALeft, ATop, ASize: integer);
 var
   Initial: string;
+  Pixels: integer;
+  Mask: TBGRABitmap;
 begin
+  if (FLogin <> '') and (FAvatar <> nil) then
+  begin
+    Pixels := Max(1, Round(ASize * GetCanvasScaleFactor));
+    if (FAvatarShown = nil) or (FAvatarShown.Width <> Pixels) then
+    begin
+      FreeAndNil(FAvatarShown);
+      FAvatar.ResampleFilter := rfBestQuality;
+      FAvatarShown := FAvatar.Resample(Pixels, Pixels, rmFineResample) as TBGRABitmap;
+      Mask := TBGRABitmap.Create(Pixels, Pixels, BGRAPixelTransparent);
+      try
+        Mask.FillEllipseAntialias((Pixels - 1) / 2, (Pixels - 1) / 2, Pixels / 2, Pixels / 2,
+          BGRAWhite);
+        FAvatarShown.ApplyMask(Mask);
+      finally
+        Mask.Free;
+      end;
+    end;
+    { On the hover fill, so a picture with a clear background still
+      reads as a disc. }
+    FC.Pen.Style := psClear;
+    FC.Brush.Style := bsSolid;
+    FC.Brush.Color := FHover;
+    FC.Ellipse(ALeft, ATop, ALeft + ASize, ATop + ASize);
+    FC.Pen.Style := psSolid;
+    FC.Brush.Style := bsClear;
+    FAvatarShown.Draw(FC, Rect(ALeft, ATop, ALeft + ASize, ATop + ASize), False);
+    Exit;
+  end;
   FC.Pen.Style := psClear;
   FC.Brush.Style := bsSolid;
   if FLogin <> '' then
@@ -1072,12 +1167,55 @@ begin
   SetHot(-1);
 end;
 
-procedure TGittanForgePage.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
+function TGittanForgePage.CardAt(X, Y: integer; out APull: TGittanForgePull): boolean;
 var
   i, n: integer;
   Url: string;
 begin
+  Result := False;
+  APull := Default(TGittanForgePull);
+  { The card under the forge link that lies on it, too. }
+  for i := High(FLinkRects) downto 0 do
+  begin
+    if not PtInRect(FLinkRects[i], Point(X, Y)) then
+      Continue;
+    Url := FLinkUrls[i];
+    if Copy(Url, 1, Length(MineLink)) = MineLink then
+    begin
+      n := StrToIntDef(Copy(Url, Length(MineLink) + 1, MaxInt), -1);
+      Result := (n >= 0) and (n <= High(FShownMine));
+      if Result then
+      begin
+        APull := FShownMine[n];
+        Exit;
+      end;
+    end
+    else if Copy(Url, 1, Length(ReviewLink)) = ReviewLink then
+    begin
+      n := StrToIntDef(Copy(Url, Length(ReviewLink) + 1, MaxInt), -1);
+      Result := (n >= 0) and (n <= High(FShownReview));
+      if Result then
+      begin
+        APull := FShownReview[n];
+        Exit;
+      end;
+    end;
+  end;
+end;
+
+procedure TGittanForgePage.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
+var
+  i, n: integer;
+  Url: string;
+  Card: TGittanForgePull;
+begin
   inherited MouseUp(Button, Shift, X, Y);
+  if (Button = mbRight) and Assigned(FOnContext) then
+  begin
+    if CardAt(X, Y, Card) then
+      FOnContext(Self, Card, ClientToScreen(Point(X, Y)));
+    Exit;
+  end;
   if Button <> mbLeft then
     Exit;
   i := LinkAt(X, Y);

@@ -113,6 +113,7 @@ end;
 
 procedure TRepoFrame.GraphClosed(Sender: TObject);
 begin
+  AbandonChangeJob;
   if FSideNav <> nil then
     FSideNav.Selected := FNavViewRow;
 end;

@@ -87,6 +87,23 @@ function ShellQuote(const APath: string): string;
   between them. }
 function JoinedMessage(const AMessages: array of string): string;
 
+{** What a fixup commit's subject names: "fixup! <text>" or
+  "squash! <text>" (more than one prefix allowed, as git commit
+  --fixup of a fixup writes) gives the text and the action the first
+  prefix asks for; another subject gives '' and raPick. }
+function FixupTarget(const ASubject: string; out AAction: TGittanRebaseAction): string;
+
+{** Moves the fixup and squash commits (by their subjects, as git
+  rebase --autosquash does) after the commit each one names, after the
+  ones moved there before it, with raFixup or raSquash as its action
+  and, for a squash, the prefix taken off its message. The commit
+  named is an earlier step (in replay order) that is no fixup itself,
+  with that subject, else whose subject starts with the text, else
+  whose id starts with it (four hex digits or more); a fixup of a
+  fixup follows it to its commit. One that names no step stays where
+  it is, a pick. The actions of the steps not moved stay. }
+procedure AutosquashSteps(var ASteps: TGittanRebaseSteps);
+
 implementation
 
 function RebaseActionName(AAction: TGittanRebaseAction): string;
@@ -182,6 +199,123 @@ begin
       Result := Result + #10 + #10;
     Result := Result + Part;
   end;
+end;
+
+function FixupTarget(const ASubject: string; out AAction: TGittanRebaseAction): string;
+var
+  Found: boolean;
+begin
+  Result := ASubject;
+  AAction := raPick;
+  repeat
+    Found := False;
+    if Copy(Result, 1, 7) = 'fixup! ' then
+    begin
+      if AAction = raPick then
+        AAction := raFixup;
+      Delete(Result, 1, 7);
+      Found := True;
+    end
+    else if Copy(Result, 1, 8) = 'squash! ' then
+    begin
+      if AAction = raPick then
+        AAction := raSquash;
+      Delete(Result, 1, 8);
+      Found := True;
+    end;
+  until not Found;
+  Result := Trim(Result);
+  if AAction = raPick then
+    Result := '';
+end;
+
+{ Whether AText is a prefix of an id: hex digits, four or more. }
+function LooksLikeId(const AText: string): boolean;
+var
+  i: integer;
+begin
+  Result := Length(AText) >= 4;
+  for i := 1 to Length(AText) do
+    if not (AText[i] in ['0'..'9', 'a'..'f', 'A'..'F']) then
+      Exit(False);
+end;
+
+procedure AutosquashSteps(var ASteps: TGittanRebaseSteps);
+var
+  Target: array of integer;
+  Action: array of TGittanRebaseAction;
+  Text: string;
+  i, j, k: integer;
+  Done: TGittanRebaseSteps;
+
+  { The earlier step the text names, -1 for none. }
+  function Find(const AText: string; ABefore: integer): integer;
+  var
+    n: integer;
+  begin
+    for n := 0 to ABefore - 1 do
+      if (Target[n] < 0) and (Action[n] = raPick) and (ASteps[n].Subject = AText) then
+        Exit(n);
+    for n := 0 to ABefore - 1 do
+      if (Target[n] < 0) and (Action[n] = raPick) and
+        (Copy(ASteps[n].Subject, 1, Length(AText)) = AText) then
+        Exit(n);
+    if LooksLikeId(AText) then
+      for n := 0 to ABefore - 1 do
+        if (Target[n] < 0) and (Action[n] = raPick) and
+          SameText(Copy(ASteps[n].Hash, 1, Length(AText)), AText) then
+          Exit(n);
+    Result := -1;
+  end;
+
+begin
+  SetLength(Target, Length(ASteps));
+  SetLength(Action, Length(ASteps));
+  for i := 0 to High(ASteps) do
+  begin
+    Target[i] := -1;
+    FixupTarget(ASteps[i].Subject, Action[i]);
+  end;
+  { Each fixup names an earlier commit, through a fixup of a fixup. }
+  for i := 0 to High(ASteps) do
+  begin
+    if Action[i] = raPick then
+      Continue;
+    Text := FixupTarget(ASteps[i].Subject, Action[i]);
+    { "fixup! " alone names no step, as git takes it. }
+    if Text = '' then
+      Continue;
+    j := Find(Text, i);
+    if j < 0 then
+      for k := 0 to i - 1 do
+        if (Action[k] <> raPick) and (FixupTarget(ASteps[k].Subject, Action[k]) = Text) and
+          (Target[k] >= 0) then
+        begin
+          j := Target[k];
+          Break;
+        end;
+    if j < 0 then
+      Continue;
+    Target[i] := j;
+    ASteps[i].Action := Action[i];
+    if Action[i] = raSquash then
+      ASteps[i].Message := Text + Copy(ASteps[i].Message, Length(ASteps[i].Subject) + 1, MaxInt);
+  end;
+  Done := nil;
+  for i := 0 to High(ASteps) do
+  begin
+    if Target[i] >= 0 then
+      Continue;
+    SetLength(Done, Length(Done) + 1);
+    Done[High(Done)] := ASteps[i];
+    for j := i + 1 to High(ASteps) do
+      if Target[j] = i then
+      begin
+        SetLength(Done, Length(Done) + 1);
+        Done[High(Done)] := ASteps[j];
+      end;
+  end;
+  ASteps := Done;
 end;
 
 { A step's line: the command, the id and the subject, which git shows

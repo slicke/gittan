@@ -38,6 +38,20 @@ type
   end;
   TGittanTagInfos = array of TGittanTagInfo;
 
+  {** What a file is for, by its path: a test (under a folder named test
+    or tests, or named *.test.*), documentation (.md or .txt) or code,
+    which is everything else. }
+  TGittanFileCategory = (fcCode, fcTest, fcDocs);
+
+  {** How many files of a category, and how many lines they have. }
+  TGittanCategoryCount = record
+    Files: integer;
+    Lines: int64;
+  end;
+
+  {** The files and lines of a repository, or of a change, per category. }
+  TGittanComposition = array[TGittanFileCategory] of TGittanCategoryCount;
+
   {** The facts of a repository. Ok is false when git failed, with the
     message in Error; what was read before the failure is kept. The
     dates are universal time. }
@@ -54,6 +68,9 @@ type
     Contributors: TGittanContributors;
     {** The newest tags, at most the number asked for. }
     NewestTags: TGittanTagInfos;
+    {** The tracked files and their lines per category; a binary file
+      counts as a file with no lines. }
+    Composition: TGittanComposition;
   end;
 
 {** The remotes from `git remote -v`: one per name, with its fetch URL
@@ -92,6 +109,18 @@ function ParseTags(const AOutput: string): TGittanTagInfos;
 {** The number of non-empty lines. }
 function CountLines(const AOutput: string): integer;
 
+{** The category of the file at APath, relative to the root with
+  forward slashes. }
+function FileCategory(const APath: string): TGittanFileCategory;
+
+{** The name of ACategory as a list shows it: "Code files". }
+function CategoryName(ACategory: TGittanFileCategory): string;
+
+{** The composition of the files AFiles names (`git ls-files -z`) with
+  their lines from ALineCounts (`git grep -I -c -z -e ^`: a path, a
+  NUL and the count, a line each); a file without a count has no lines. }
+function ParseComposition(const AFiles, ALineCounts: string): TGittanComposition;
+
 {** A count with its thousands grouped by a thin space: 1 234 567. }
 function GroupDigits(AValue: int64): string;
 
@@ -127,6 +156,11 @@ implementation
 
 uses
   StrUtils, DateUtils, Math;
+
+resourcestring
+  rsCodeFiles = 'Code files';
+  rsTestFiles = 'Test files';
+  rsDocumentation = 'Documentation';
 
 function ParseRemotes(const AOutput: string): TGittanRemotes;
 var
@@ -445,6 +479,64 @@ begin
   end;
 end;
 
+function FileCategory(const APath: string): TGittanFileCategory;
+var
+  Parts: TStringArray;
+  Name, Ext: string;
+  i: integer;
+begin
+  Parts := LowerCase(APath).Split(['/']);
+  if Length(Parts) = 0 then
+    Exit(fcCode);
+  for i := 0 to High(Parts) - 1 do
+    if (Parts[i] = 'test') or (Parts[i] = 'tests') then
+      Exit(fcTest);
+  Name := Parts[High(Parts)];
+  if Pos('.test.', Name) > 0 then
+    Exit(fcTest);
+  Ext := ExtractFileExt(Name);
+  if (Ext = '.md') or (Ext = '.txt') then
+    Exit(fcDocs);
+  Result := fcCode;
+end;
+
+function CategoryName(ACategory: TGittanFileCategory): string;
+begin
+  case ACategory of
+    fcTest: Result := rsTestFiles;
+    fcDocs: Result := rsDocumentation;
+    else
+      Result := rsCodeFiles;
+  end;
+end;
+
+function ParseComposition(const AFiles, ALineCounts: string): TGittanComposition;
+var
+  Path: string;
+  P, Nul, Lf: integer;
+  Count: int64;
+begin
+  Result := Default(TGittanComposition);
+  for Path in AFiles.Split([#0]) do
+    if Path <> '' then
+      Inc(Result[FileCategory(Path)].Files);
+  { A record is the name up to its NUL and the count up to the line end
+    after it, read from the NUL since a name may hold a line feed. }
+  P := 1;
+  while P <= Length(ALineCounts) do
+  begin
+    Nul := Pos(#0, ALineCounts, P);
+    if Nul = 0 then
+      Break;
+    Lf := Pos(#10, ALineCounts, Nul);
+    if Lf = 0 then
+      Lf := Length(ALineCounts) + 1;
+    if (Nul > P) and TryStrToInt64(Trim(Copy(ALineCounts, Nul + 1, Lf - Nul - 1)), Count) then
+      Inc(Result[FileCategory(Copy(ALineCounts, P, Nul - P))].Lines, Count);
+    P := Lf + 1;
+  end;
+end;
+
 function GroupDigits(AValue: int64): string;
 var
   Digits: string;
@@ -489,7 +581,8 @@ function GatherRepoInfo(const ARoot: string; AMaxContributors, AMaxTags: integer
 var
   Info: TGittanRepoInfo;
   Repo: TGittanRepo;
-  Output, Err, Line: string;
+  Output, Err, Line, Counts: string;
+  Cat: TGittanFileCategory;
   Seconds: int64;
   Lines: TStringList;
 
@@ -569,8 +662,16 @@ begin
     '--format=%(refname:short)%09%(creatordate:unix)', '--count=' + IntToStr(AMaxTags),
     'refs/tags']) then
     Info.NewestTags := ParseTags(Output);
-  if Run(['ls-files']) then
-    Info.Files := CountLines(Output);
+  if Run(['ls-files', '-z']) then
+  begin
+    { Every line of every tracked text file as it is in the working
+      tree; git grep fails when there is none, which is no failure. }
+    if not RunGitIn(ARoot, ['grep', '-I', '-c', '-z', '--no-color', '-e', '^'], Counts, Err) then
+      Counts := '';
+    Info.Composition := ParseComposition(Output, Counts);
+    for Cat := Low(Cat) to High(Cat) do
+      Inc(Info.Files, Info.Composition[Cat].Files);
+  end;
   if FileExists(IncludeTrailingPathDelimiter(ARoot) + '.gitmodules') then
     if RunGitIn(ARoot, ['config', '--file', '.gitmodules', '--get-regexp',
       '^submodule\..*\.path$'], Output, Err) then

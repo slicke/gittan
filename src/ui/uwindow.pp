@@ -53,7 +53,7 @@ unit uwindow;
 interface
 
 uses
-  Classes, SysUtils, Types, Math, LCLType, Forms, Controls, Graphics, gittan.app,
+  Classes, SysUtils, Types, Math, LCLType, Forms, Controls, Graphics, ExtCtrls, gittan.app,
   gittan.git, gittan.forge, gittan.forgepage, umain, uforge
   {$IFDEF LCLCocoa}, gittan.toolbar, gittan.titlebar, CocoaConfig{$ENDIF}
   {$IFDEF OWNBAR}, gittan.owntitlebar{$ENDIF}
@@ -67,6 +67,10 @@ type
   TGittanWindow = class(TRepoWindow)
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
+    { A dialog the LCL centers on the screen (InputQuery, QuestionDlg,
+      MessageDlg) is centered on the window instead, as Gittan's own
+      dialogs are. }
+    procedure ModalBegin(Sender: TObject);
     procedure FormDropFiles(Sender: TObject; const FileNames: array of string);
   private
     FFrames: TList;
@@ -81,6 +85,11 @@ type
     FForgeView: TForgeView;
     FForgeShown: boolean;
     FForgeClonePull: TGittanPullRequest;
+    { The forges' active accounts at the last look (CheckAccounts), and
+      the timer that looks now and then besides the window's activation,
+      for a switch in a terminal while Gittan is in front. }
+    FAccountsKey: string;
+    FAccountTimer: TTimer;
     {$IFDEF LCLCocoa}
     { The toolbar on macOS 11 and later, nil before. }
     FToolbar: TGittanToolbar;
@@ -109,25 +118,33 @@ type
     procedure TabSelect(Sender: TObject; AIndex: integer);
     procedure TabClose(Sender: TObject; AIndex: integer);
     procedure TabNew(Sender: TObject);
+    procedure TabBack(Sender: TObject);
+    procedure TabForward(Sender: TObject);
+    procedure UpdateNav;
     procedure ForgeClick(Sender: TObject);
     procedure ShowForgeView;
     procedure UpdateForgeChrome;
     procedure ForgeCloneOpened(Sender: TObject);
+    function AccountsKey: string;
+    procedure AccountTimerTimer(Sender: TObject);
   public
     procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil);
       override;
+    function HasOpen(const ARoot: string): boolean; override;
     function IsActive(AFrame: TRepoFrame): boolean; override;
     function TitleBarHeight: integer; override;
     {$IFDEF OWNBAR}
     function OwnBar: TGittanOwnTitleBar; override;
     {$ENDIF}
     procedure FrameChanged(AFrame: TRepoFrame); override;
+    procedure NavChanged(AFrame: TRepoFrame); override;
     procedure NewTab; override;
     procedure CloseFrame(AFrame: TRepoFrame); override;
     procedure StepTab(ADelta: integer); override;
     procedure ShowFrame(AFrame: TRepoFrame); override;
     procedure SettingsChanged(AFont: TFont; ATheme, ATabSize: integer; ATools: boolean);
       override;
+    procedure CheckAccounts; override;
     procedure AskOpenRepository; override;
     procedure ShowSettings; override;
     procedure ShowAbout; override;
@@ -150,11 +167,24 @@ implementation
 
 {$R *.lfm}
 
+const
+  { How often CheckAccounts looks besides the window's activation, in ms. }
+  AccountPoll = 60000;
+
 {$IFDEF OWNBAR}
 resourcestring
   { The name the own title bar shows. }
   rsAppShortName = 'Gittan';
 {$ENDIF}
+resourcestring
+  { The tooltips of the title bar's chevrons, with the keys. }
+  {$IFDEF LCLCocoa}
+  rsNavBackHint = 'Back (⌘[)';
+  rsNavForwardHint = 'Forward (⌘])';
+  {$ELSE}
+  rsNavBackHint = 'Back (Alt+Left)';
+  rsNavForwardHint = 'Forward (Alt+Right)';
+  {$ENDIF}
 
 
 procedure TGittanWindow.FormCreate(Sender: TObject);
@@ -166,6 +196,7 @@ begin
   FFrames := TList.Create;
   FClosing := TList.Create;
   PlaceWindow;
+  Application.AddOnModalBeginHandler(@ModalBegin);
   KeyPreview := True;
   OnKeyDown := @FormKeyDown;
   OnActivate := @FormActivate;
@@ -188,6 +219,11 @@ begin
   FForgeView.Init(Self);
   FForgeView.OnTabsChange := @ForgeTabsChange;
   UpdateForgeChrome;
+  FAccountsKey := AccountsKey;
+  FAccountTimer := TTimer.Create(Self);
+  FAccountTimer.Interval := AccountPoll;
+  FAccountTimer.OnTimer := @AccountTimerTimer;
+  FAccountTimer.Enabled := True;
   if not Lexers then
     FActive.ShowNoLexers;
   { The welcome view says what opens, rather than offer its buttons
@@ -199,10 +235,31 @@ begin
   Application.QueueAsyncCall(@OpenAtStartAsync, 0);
 end;
 
+{ ShowModal tells the application before it shows the form, and the
+  form is placed as it shows, so a hidden form still to be centered on
+  the screen is the one about to show: centered on the window
+  instead. On a second screen the dialog then comes up beside the
+  window, not on the primary screen. }
+procedure TGittanWindow.ModalBegin(Sender: TObject);
+var
+  i: integer;
+  F: TCustomForm;
+begin
+  if not Visible or (WindowState = wsMinimized) then
+    Exit;
+  for i := 0 to Screen.CustomFormCount - 1 do
+  begin
+    F := Screen.CustomForms[i];
+    if (F <> Self) and not F.Visible and (F.Position = poScreenCenter) then
+      F.Position := poMainFormCenter;
+  end;
+end;
+
 procedure TGittanWindow.FormDestroy(Sender: TObject);
 var
   i: integer;
 begin
+  Application.RemoveOnModalBeginHandler(@ModalBegin);
   Application.RemoveAsyncCalls(Self);
   App.OnUpdateChecked := nil;
   App.Lexers.OnLoaded := nil;
@@ -236,6 +293,8 @@ begin
     FToolbar.OnClose := @TabClose;
     FToolbar.OnNew := @TabNew;
     FToolbar.OnForge := @ForgeClick;
+    FToolbar.OnBack := @TabBack;
+    FToolbar.OnForward := @TabForward;
   end;
   FTitleBarHeight := ExtendUnderTitleBar(Handle);
   {$ENDIF}
@@ -253,6 +312,8 @@ begin
   FOwnBar.OnTabClose := @TabClose;
   FOwnBar.OnNewTab := @TabNew;
   FOwnBar.OnForge := @ForgeClick;
+  FOwnBar.OnBack := @TabBack;
+  FOwnBar.OnForward := @TabForward;
   {$ENDIF}
   {$IFDEF LCLWin32}
   InstallTitleBar(Self, TGittanWinTitleBar(FOwnBar));
@@ -464,6 +525,21 @@ begin
   finally
     Probe.Free;
   end;
+end;
+
+function TGittanWindow.HasOpen(const ARoot: string): boolean;
+var
+  Root: string;
+  i: integer;
+begin
+  Root := ExpandFileName(ExcludeTrailingPathDelimiter(ARoot));
+  for i := 0 to FFrames.Count - 1 do
+    if ((Frames[i].RepoRoot <> '') and
+      SameFileName(ExpandFileName(ExcludeTrailingPathDelimiter(Frames[i].RepoRoot)), Root)) or
+      ((Frames[i].OpeningRoot <> '') and
+      SameFileName(ExpandFileName(ExcludeTrailingPathDelimiter(Frames[i].OpeningRoot)), Root)) then
+      Exit(True);
+  Result := False;
 end;
 
 procedure TGittanWindow.OpenRepository(const ADir: string; AOnOpened: TNotifyEvent);
@@ -743,6 +819,42 @@ end;
 procedure TGittanWindow.FormActivate(Sender: TObject);
 begin
   FActive.FormActivate(Sender);
+  CheckAccounts;
+end;
+
+{ Every forge's active accounts, by its name. Reads the tools' files
+  only when they changed, so it is cheap enough for a timer. }
+function TGittanWindow.AccountsKey: string;
+var
+  Forge: TGittanForgeClass;
+begin
+  Result := '';
+  for Forge in RegisteredForges do
+    Result := Result + Forge.Name + ':'#10 + ActiveAccountsKey(Forge.Accounts);
+end;
+
+procedure TGittanWindow.AccountTimerTimer(Sender: TObject);
+begin
+  CheckAccounts;
+end;
+
+{ The shown tab last, as in SettingsChanged. }
+procedure TGittanWindow.CheckAccounts;
+var
+  Key: string;
+  i: integer;
+begin
+  Key := AccountsKey;
+  if Key = FAccountsKey then
+    Exit;
+  FAccountsKey := Key;
+  for i := 0 to FFrames.Count - 1 do
+    if Frames[i] <> FActive then
+      Frames[i].AccountChanged;
+  if FActive <> nil then
+    FActive.AccountChanged;
+  if FForgeView <> nil then
+    FForgeView.AccountChanged;
 end;
 
 { Also how Cocoa hands over a path Gittan is asked to open (the gittan
@@ -779,6 +891,41 @@ begin
   UpdateTabs;
 end;
 
+procedure TGittanWindow.NavChanged(AFrame: TRepoFrame);
+begin
+  if AFrame = FActive then
+    UpdateNav;
+end;
+
+{ The chevrons go back and forward in the frame shown; they are dim
+  while the forge view is shown, which has no places of its own. }
+procedure TGittanWindow.UpdateNav;
+var
+  Back, Forward: boolean;
+begin
+  Back := (FActive <> nil) and not FForgeShown and FActive.CanGoBack;
+  Forward := (FActive <> nil) and not FForgeShown and FActive.CanGoForward;
+  {$IFDEF LCLCocoa}
+  if FToolbar <> nil then
+    FToolbar.SetNav(Back, Forward, rsNavBackHint, rsNavForwardHint);
+  {$ENDIF}
+  {$IFDEF OWNBAR}
+  FOwnBar.SetNav(Back, Forward, rsNavBackHint, rsNavForwardHint);
+  {$ENDIF}
+end;
+
+procedure TGittanWindow.TabBack(Sender: TObject);
+begin
+  if (FActive <> nil) and not FForgeShown then
+    FActive.GoBack;
+end;
+
+procedure TGittanWindow.TabForward(Sender: TObject);
+begin
+  if (FActive <> nil) and not FForgeShown then
+    FActive.GoForward;
+end;
+
 { The strip shows the frames, or the forge view's own tabs while it is
   shown, which cannot be closed or added to. }
 procedure TGittanWindow.UpdateTabs;
@@ -789,6 +936,7 @@ var
 begin
   if (csDestroying in ComponentState) or (FFrames = nil) then
     Exit;
+  UpdateNav;
   if FForgeShown then
   begin
     i := FForgeView.Tabs(Captions, Marks);

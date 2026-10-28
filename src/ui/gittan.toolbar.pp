@@ -6,15 +6,17 @@
   lights sit in a row of a tab bar's height, and its items are native
   and take clicks. Its one item is the tab strip, a view of its own
   (TGittanTabStrip) that stretches from the traffic lights to the right
-  edge, as Firefox's tabs do: a tab per open repository, the one shown
-  filled, then a plus that opens a new tab.
+  edge, as Firefox's tabs do: Back and Forward first, two chevrons
+  (SetNav; dim while there is nowhere to go), then a tab per open
+  repository, the one shown filled, then a plus that opens a new tab.
 
   The strip draws the tabs itself in the system's colors, so it follows
   the window's appearance; a tab with news (something happened in its
   frame while another was shown) has a blue dot before its name. A
   click on a tab selects it at once; the
   cross on the shown or hovered tab, or a middle click, closes it; the
-  plus asks for a new tab. At the window's right end a banner hangs
+  plus asks for a new tab; a chevron asks to go back or forward
+  (OnBack, OnForward) on its release. At the window's right end a banner hangs
   from the top edge over the title bar, a ribbon with a notch at its
   foot and a globe in it (SetForge; there while there is a forge, in
   the accent while the forge view is shown), which asks for the forge
@@ -64,19 +66,27 @@ type
     FHot: integer;
     FHotClose, FHotPlus: boolean;
     FPressed: integer;
+    { Back and Forward: whether each can be gone to, their tooltips, the
+      chevron under the mouse (NavNone, NavBack, NavForward). }
+    FCanBack, FCanForward: boolean;
+    FBackHint, FForwardHint: string;
+    FHotNav: integer;
     { The banner: its view (made when first shown), whether it is there,
       whether the forge view is shown, the mouse on it and pressed. }
     FBanner: NSView;
     FForgeVisible, FForgeShown, FBannerHot, FBannerPressed: boolean;
     FOnSelect, FOnClose: TGittanTabEvent;
-    FOnNew, FOnForge: TNotifyEvent;
+    FOnNew, FOnForge, FOnBack, FOnForward: TNotifyEvent;
     function GlobeRoom: double;
+    function NavRect(ANav: integer; const ABounds: NSRect): NSRect;
+    function NavEnabled(ANav: integer): boolean;
+    procedure DrawNav(ANav: integer; const ABounds: NSRect);
     function TabWidth(AWidth: double): double;
     function TabRect(AIndex: integer; const ABounds: NSRect): NSRect;
     function CloseRect(const ATab: NSRect): NSRect;
     function PlusRect(const ABounds: NSRect): NSRect;
     procedure HitTest(const APoint: NSPoint; const ABounds: NSRect;
-      out AIndex: integer; out AClose, APlus: boolean);
+      out AIndex: integer; out AClose, APlus: boolean; out ANav: integer);
     procedure MakeBanner;
     procedure DrawBanner(const ABounds: NSRect);
     procedure BannerDown;
@@ -104,7 +114,10 @@ type
       forge), in the accent while AShown (the forge view is shown),
       AHint its tooltip (the forge's name). }
     procedure SetForge(AVisible, AShown: boolean; const AHint: string);
-    {** A click on a tab: show it. }
+    {** The chevrons: whether there is somewhere to go back (ABack) and
+      forward (AForward) to, a dim chevron taking no click; ABackHint
+      and AForwardHint their tooltips. }
+    procedure SetNav(ABack, AForward: boolean; const ABackHint, AForwardHint: string);    {** A click on a tab: show it. }
     property OnSelect: TGittanTabEvent read FOnSelect write FOnSelect;
     {** The cross or a middle click on a tab: close it. }
     property OnClose: TGittanTabEvent read FOnClose write FOnClose;
@@ -112,6 +125,9 @@ type
     property OnNew: TNotifyEvent read FOnNew write FOnNew;
     {** The banner: the forge view, or back from it. }
     property OnForge: TNotifyEvent read FOnForge write FOnForge;
+    {** The chevrons: back, forward. }
+    property OnBack: TNotifyEvent read FOnBack write FOnBack;
+    property OnForward: TNotifyEvent read FOnForward write FOnForward;
   end;
 
 implementation
@@ -186,8 +202,19 @@ const
   BannerHeight = 44;
   BannerNotch = 8;
   GlobeWidth = 40;
-  { FPressed for the plus. }
+  { FPressed for the plus and the chevrons. }
   PlusPart = -2;
+  BackPart = -3;
+  ForwardPart = -4;
+  { The chevrons: none, back, forward; a chevron's button, the gap
+    between the two, the room they take before the first tab. }
+  NavNone = 0;
+  NavBack = 1;
+  NavForward = 2;
+  NavWidth = 26;
+  NavHeight = 24;
+  NavGap = 2;
+  NavRoom = 2 * NavWidth + NavGap + 10;
 
 function NSStr(const S: string): NSString;
 begin
@@ -243,8 +270,9 @@ begin
   begin
     Result := NSToolbarItem.alloc.initWithItemIdentifier(itemIdentifier);
     Result.setView(Owner.FStrip);
-    { Between these it takes the width the toolbar has. }
-    Result.setMinSize(NSMakeSize(PlusWidth + MinTabWidth, StripHeight));
+    { Between these it takes the width the toolbar has; at the least
+      Back and Forward, a tab, the plus and the globe. }
+    Result.setMinSize(NSMakeSize(NavRoom + MinTabWidth + PlusWidth + GlobeWidth, StripHeight));
     Result.setMaxSize(NSMakeSize(100000, StripHeight));
     Result.autorelease;
   end;
@@ -381,6 +409,7 @@ begin
   Result.FWindow := Win;
   Result.FHot := -1;
   Result.FPressed := -1;
+  Result.FHotNav := NavNone;
   Strip := TGittanTabStrip.alloc.initWithFrame(NSMakeRect(0, 0, 400, StripHeight));
   Strip.Owner := Result;
   Area := NSTrackingArea.alloc.initWithRect_options_owner_userInfo(NSZeroRect,
@@ -577,6 +606,64 @@ begin
     FStrip.setNeedsDisplay_(True);
 end;
 
+procedure TGittanToolbar.SetNav(ABack, AForward: boolean;
+  const ABackHint, AForwardHint: string);
+begin
+  if (ABack = FCanBack) and (AForward = FCanForward) and (ABackHint = FBackHint) and
+    (AForwardHint = FForwardHint) then
+    Exit;
+  FCanBack := ABack;
+  FCanForward := AForward;
+  FBackHint := ABackHint;
+  FForwardHint := AForwardHint;
+  if FStrip <> nil then
+    FStrip.setNeedsDisplay_(True);
+end;
+
+function TGittanToolbar.NavRect(ANav: integer; const ABounds: NSRect): NSRect;
+begin
+  Result := NSMakeRect(Ord(ANav = NavForward) * (NavWidth + NavGap),
+    (ABounds.size.height - NavHeight) / 2, NavWidth, NavHeight);
+end;
+
+function TGittanToolbar.NavEnabled(ANav: integer): boolean;
+begin
+  Result := ((ANav = NavBack) and FCanBack) or ((ANav = NavForward) and FCanForward);
+end;
+
+{ A chevron pointing left (back) or right (forward), on a rounded shade
+  under the mouse; dim while there is nowhere to go. }
+procedure TGittanToolbar.DrawNav(ANav: integer; const ABounds: NSRect);
+var
+  R: NSRect;
+  Ink: NSColor;
+  CX, CY, D: double;
+begin
+  R := NavRect(ANav, ABounds);
+  if NavEnabled(ANav) and (FHotNav = ANav) then
+  begin
+    NSColor.labelColor.colorWithAlphaComponent(0.10).setFill;
+    NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius(R, 5, 5).fill;
+  end;
+  if NavEnabled(ANav) then
+    Ink := NSColor.secondaryLabelColor
+  else
+    Ink := NSColor.labelColor.colorWithAlphaComponent(0.22);
+  CX := R.origin.x + R.size.width / 2;
+  CY := R.origin.y + R.size.height / 2;
+  D := 3.5;
+  if ANav = NavBack then
+  begin
+    StrokeLine(CX + D / 2, CY - 2 * D, CX - D, CY, Ink, 1.6);
+    StrokeLine(CX - D, CY, CX + D / 2, CY + 2 * D, Ink, 1.6);
+  end
+  else
+  begin
+    StrokeLine(CX - D / 2, CY - 2 * D, CX + D, CY, Ink, 1.6);
+    StrokeLine(CX + D, CY, CX - D / 2, CY + 2 * D, Ink, 1.6);
+  end;
+end;
+
 { What the banner keeps the tabs out of. }
 function TGittanToolbar.GlobeRoom: double;
 begin
@@ -591,9 +678,9 @@ begin
   if Length(FCaptions) = 0 then
     Exit(MaxTabWidth);
   if FFixed then
-    Result := (AWidth - GlobeRoom) / Length(FCaptions)
+    Result := (AWidth - NavRoom - GlobeRoom) / Length(FCaptions)
   else
-    Result := (AWidth - PlusWidth - GlobeRoom) / Length(FCaptions);
+    Result := (AWidth - NavRoom - PlusWidth - GlobeRoom) / Length(FCaptions);
   Result := Max(MinTabWidth, Min(MaxTabWidth, Result));
 end;
 
@@ -602,7 +689,7 @@ var
   W: double;
 begin
   W := TabWidth(ABounds.size.width);
-  Result := NSMakeRect(AIndex * W, 3, W - TabGap, ABounds.size.height - 6);
+  Result := NSMakeRect(NavRoom + AIndex * W, 3, W - TabGap, ABounds.size.height - 6);
 end;
 
 function TGittanToolbar.CloseRect(const ATab: NSRect): NSRect;
@@ -615,18 +702,26 @@ function TGittanToolbar.PlusRect(const ABounds: NSRect): NSRect;
 var
   X: double;
 begin
-  X := Length(FCaptions) * TabWidth(ABounds.size.width);
+  X := NavRoom + Length(FCaptions) * TabWidth(ABounds.size.width);
   Result := NSMakeRect(X + 2, (ABounds.size.height - 22) / 2, 22, 22);
 end;
 
 procedure TGittanToolbar.HitTest(const APoint: NSPoint; const ABounds: NSRect;
-  out AIndex: integer; out AClose, APlus: boolean);
+  out AIndex: integer; out AClose, APlus: boolean; out ANav: integer);
 var
   i: integer;
   R: NSRect;
 begin
   AIndex := -1;
   AClose := False;
+  APlus := False;
+  ANav := NavNone;
+  if PointIn(APoint, NavRect(NavBack, ABounds)) then
+    ANav := NavBack
+  else if PointIn(APoint, NavRect(NavForward, ABounds)) then
+    ANav := NavForward;
+  if ANav <> NavNone then
+    Exit;
   APlus := not FFixed and PointIn(APoint, PlusRect(ABounds));
   if APlus then
     Exit;
@@ -662,6 +757,8 @@ begin
   Para := NSMutableParagraphStyle.alloc.init;
   Para.setLineBreakMode(NSLineBreakByTruncatingTail);
   try
+    DrawNav(NavBack, ABounds);
+    DrawNav(NavForward, ABounds);
     for i := 0 to High(FCaptions) do
     begin
       R := TabRect(i, ABounds);
@@ -741,19 +838,27 @@ begin
   end;
 end;
 
-{ A tab is selected as it is pressed; the cross and the plus act on the
-  release, if the mouse is still on them. The empty part moves the
-  window, and a double click there zooms it. }
+{ A tab is selected as it is pressed; the cross, the plus and a chevron
+  act on the release, if the mouse is still on them. The empty part
+  moves the window, and a double click there zooms it; so does a dim
+  chevron. }
 procedure TGittanToolbar.MouseDown(AEvent: NSEvent);
 var
   P: NSPoint;
-  Index: integer;
+  Index, Nav: integer;
   InCross, InPlus: boolean;
 begin
   P := FStrip.convertPoint_fromView(AEvent.locationInWindow, nil);
-  HitTest(P, FStrip.bounds, Index, InCross, InPlus);
+  HitTest(P, FStrip.bounds, Index, InCross, InPlus, Nav);
   FPressed := -1;
-  if InPlus then
+  if NavEnabled(Nav) then
+  begin
+    if Nav = NavBack then
+      FPressed := BackPart
+    else
+      FPressed := ForwardPart;
+  end
+  else if InPlus then
     FPressed := PlusPart
   else if (Index >= 0) and InCross then
     FPressed := Index
@@ -771,7 +876,7 @@ end;
 procedure TGittanToolbar.MouseUp(AEvent: NSEvent);
 var
   P: NSPoint;
-  Index, Pressed: integer;
+  Index, Pressed, Nav: integer;
   InCross, InPlus: boolean;
 begin
   Pressed := FPressed;
@@ -779,8 +884,18 @@ begin
   if Pressed = -1 then
     Exit;
   P := FStrip.convertPoint_fromView(AEvent.locationInWindow, nil);
-  HitTest(P, FStrip.bounds, Index, InCross, InPlus);
-  if (Pressed = PlusPart) and InPlus then
+  HitTest(P, FStrip.bounds, Index, InCross, InPlus, Nav);
+  if (Pressed = BackPart) and (Nav = NavBack) then
+  begin
+    if FCanBack and Assigned(FOnBack) then
+      FOnBack(Self);
+  end
+  else if (Pressed = ForwardPart) and (Nav = NavForward) then
+  begin
+    if FCanForward and Assigned(FOnForward) then
+      FOnForward(Self);
+  end
+  else if (Pressed = PlusPart) and InPlus then
   begin
     if Assigned(FOnNew) then
       FOnNew(Self);
@@ -796,13 +911,13 @@ end;
 procedure TGittanToolbar.OtherMouseUp(AEvent: NSEvent);
 var
   P: NSPoint;
-  Index: integer;
+  Index, Nav: integer;
   InCross, InPlus: boolean;
 begin
   if (AEvent.buttonNumber <> 2) or FFixed then
     Exit;
   P := FStrip.convertPoint_fromView(AEvent.locationInWindow, nil);
-  HitTest(P, FStrip.bounds, Index, InCross, InPlus);
+  HitTest(P, FStrip.bounds, Index, InCross, InPlus, Nav);
   if (Index >= 0) and Assigned(FOnClose) then
     FOnClose(Self, Index);
 end;
@@ -810,21 +925,27 @@ end;
 procedure TGittanToolbar.MouseMoved(AEvent: NSEvent);
 var
   P: NSPoint;
-  Index: integer;
+  Index, Nav: integer;
   InCross, InPlus: boolean;
 begin
   P := FStrip.convertPoint_fromView(AEvent.locationInWindow, nil);
-  HitTest(P, FStrip.bounds, Index, InCross, InPlus);
-  if (Index = FHot) and (InCross = FHotClose) and (InPlus = FHotPlus) then
+  HitTest(P, FStrip.bounds, Index, InCross, InPlus, Nav);
+  if (Index = FHot) and (InCross = FHotClose) and (InPlus = FHotPlus) and
+    (Nav = FHotNav) then
     Exit;
-  if Index <> FHot then
-    if (Index >= 0) and (FHints[Index] <> '') then
+  if (Index <> FHot) or (Nav <> FHotNav) then
+    if Nav = NavBack then
+      FStrip.setToolTip(NSStr(FBackHint))
+    else if Nav = NavForward then
+      FStrip.setToolTip(NSStr(FForwardHint))
+    else if (Index >= 0) and (FHints[Index] <> '') then
       FStrip.setToolTip(NSStr(FHints[Index]))
     else
       FStrip.setToolTip(nil);
   FHot := Index;
   FHotClose := InCross;
   FHotPlus := InPlus;
+  FHotNav := Nav;
   FStrip.setNeedsDisplay_(True);
 end;
 
@@ -833,6 +954,7 @@ begin
   FHot := -1;
   FHotClose := False;
   FHotPlus := False;
+  FHotNav := NavNone;
   FStrip.setNeedsDisplay_(True);
 end;
 

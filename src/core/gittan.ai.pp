@@ -763,6 +763,11 @@ begin
     'HEAD~1^{commit}'], Output, Error);
 end;
 
+var
+  { Numbers IndexDiff's temporary index, unique in the process: the
+    message and the review job can make one at once. }
+  IndexSerial: longint = 0;
+
 { The summary and the diff of the work tree's APaths against ABase,
   made in a temporary index (HEAD's tree, or none without AHasHead,
   with the paths added as they are on disk), so untracked files are in
@@ -778,9 +783,14 @@ begin
   ADiff := '';
   AError := '';
   Index := IncludeTrailingPathDelimiter(GetTempDir) + 'gittan-ai-' +
-    IntToStr(GetProcessID) + '-' + IntToStr(Random(MaxInt));
+    IntToStr(GetProcessID) + '-' + IntToStr(InterLockedIncrement(IndexSerial));
   List := Index + '.paths';
   Index := Index + '.index';
+  { Left by a run of an earlier process with the same id that ended
+    before it cleaned up; no live one has this name, and git would
+    refuse the index while its lock is there. }
+  DeleteFile(Index + '.lock');
+  DeleteFile(Index);
   try
     if AHasHead then
       Result := RunGitIn(ARoot, ['read-tree', 'HEAD'], Output, AError, Index)

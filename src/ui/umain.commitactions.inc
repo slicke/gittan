@@ -51,6 +51,52 @@ const
   caBisectEnd = 23;
   caPatch = 24;
   caPatchSeries = 25;
+  caFixup = 26;
+
+{ The commit by the name a person knows it by: a local branch on it,
+  else a remote one, else a tag, else its short id. }
+function TRepoFrame.CommitKnownName(const ACommit: TGittanGraphCommit): string;
+var
+  i: integer;
+begin
+  Result := '';
+  for i := 0 to High(ACommit.Refs) do
+    if (Result = '') and (ACommit.Refs[i].Kind = grBranch) then
+      Result := ACommit.Refs[i].Name;
+  for i := 0 to High(ACommit.Refs) do
+    if (Result = '') and (ACommit.Refs[i].Kind in [grRemote, grTag]) then
+      Result := ACommit.Refs[i].Name;
+  if Result = '' then
+    Result := ACommit.Short;
+end;
+
+{ A commit dragged onto HEAD's row in the graph: a menu with the merge
+  of it into the branch, the commit menu's own item, so a drag let go
+  by mistake does nothing. A commit HEAD already has says so instead. }
+procedure TRepoFrame.GraphDrop(Sender: TObject; const ASource, ATarget: TGittanGraphCommit;
+  const AScreenPos: TPoint);
+var
+  Item: TMenuItem;
+begin
+  if FRepo.Root = '' then
+    Exit;
+  FActionCommit := ASource;
+  FActionName := CommitKnownName(ASource);
+  FCommitPopup.Items.Clear;
+  if FRepo.IsAncestor(ASource.Hash, 'HEAD') then
+    AddMenuItem(FCommitPopup.Items, Format(rsCaDropInHead,
+      [StringReplace(FActionName, '&', '&&', [rfReplaceAll]),
+      StringReplace(ResetTarget, '&', '&&', [rfReplaceAll])]), 0, False, nil)
+  else
+  begin
+    Item := AddMenuItem(FCommitPopup.Items, Format(rsCaMerge,
+      [StringReplace(FActionName, '&', '&&', [rfReplaceAll]),
+      StringReplace(FBranch, '&', '&&', [rfReplaceAll])]), caMerge, not RepoBusy,
+      @CommitMenuClick);
+    Item.Default := True;
+  end;
+  FCommitPopup.PopUp(AScreenPos.X, AScreenPos.Y);
+end;
 
 procedure TRepoFrame.GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
   const AScreenPos: TPoint);
@@ -92,17 +138,7 @@ begin
   for i := 0 to High(ACommit.Refs) do
     if ACommit.Refs[i].Kind = grHead then
       IsHead := True;
-  { The commit by the name a person knows it by: a local branch on it,
-    else a remote one, else a tag, else its short id. }
-  Known := '';
-  for i := 0 to High(ACommit.Refs) do
-    if (Known = '') and (ACommit.Refs[i].Kind = grBranch) then
-      Known := ACommit.Refs[i].Name;
-  for i := 0 to High(ACommit.Refs) do
-    if (Known = '') and (ACommit.Refs[i].Kind in [grRemote, grTag]) then
-      Known := ACommit.Refs[i].Name;
-  if Known = '' then
-    Known := ACommit.Short;
+  Known := CommitKnownName(ACommit);
   FActionName := Known;
 
   FCommitPopup.Items.Clear;
@@ -136,6 +172,11 @@ begin
     not Busy and not InHead and not IsMerge);
   Add(nil, rsCaRevert, caRevert, not Busy and InHead and not IsMerge);
   Add(nil, rsCaRebase, caRebase, not Busy and InHead and not IsHead);
+  { The ticked files as a fixup of this commit, for the rebase to fold
+    in; of a commit on the branch, while the tree chooses a commit
+    without Amend and no file is in conflict. }
+  Add(nil, rsCaFixup, caFixup, not Busy and not Jobs and InHead and CommitChoosing and
+    (FChosenCount > 0) and not FCommitAmend.Checked and (FConflictFiles = 0));
   Sub := Add(nil, Format(rsCaReset, [Amp(ResetTarget)]), 0, not Busy);
   Sub.OnClick := nil;
   Add(Sub, rsCaResetSoft, caResetSoft);
@@ -231,6 +272,8 @@ begin
       OpenOnForge(CommitTarget(Hash));
     caRebase:
       RebaseInteractiveAsk(Hash, Short, True);
+    caFixup:
+      StartFixupCommit(FActionCommit);
     caBisectStartGood, caBisectStartBad, caBisectGood, caBisectBad, caBisectSkip:
     begin
       case (Sender as TMenuItem).Tag of
@@ -274,7 +317,12 @@ begin
           case (Sender as TMenuItem).Tag of
             caMerge:
             begin
-              Ok := FRepo.MergeRef(Hash, Conflicts);
+              { By the name it goes by while that is still the commit,
+                so git's message says "Merge branch 'feature'". }
+              if FRepo.CommitId(FActionName) = Hash then
+                Ok := FRepo.MergeRef(FActionName, Conflicts)
+              else
+                Ok := FRepo.MergeRef(Hash, Conflicts);
               Note := Format(rsCaMerged, [FActionName]);
             end;
             caCherryPick:

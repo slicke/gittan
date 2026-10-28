@@ -64,11 +64,13 @@ type
     its author or its id), the authors it may be by (one must match
     when there are any), the first moment its time may be (Since) and
     the first it may not (Before), both in local time and 0 for no
-    bound, and the paths it must touch. The words and the authors are
-    kept as typed: a caller that wants no case folds them and the
-    texts it matches with MatchesGraphFilter the same way. }
+    bound, the paths it must touch, and the changes its diff must make
+    (git log -S, or -G for a /regex/; see gittan.pickaxe). The words
+    and the authors are kept as typed: a caller that wants no case
+    folds them and the texts it matches with MatchesGraphFilter the
+    same way. }
   TGittanGraphFilter = record
-    Words, Authors, Paths: TStringArray;
+    Words, Authors, Paths, Changes: TStringArray;
     Since, Before: TDateTime;
   end;
 
@@ -88,8 +90,8 @@ function ParseGraphRefs(const ADecoration: string): TGittanGraphRefs;
 
 {** Reads AText as words separated by spaces, double quotes keeping a
   phrase together ("path:my file.txt", or path:"my file.txt"), with
-  "author:", "since:" (or "after:"), "until:" (or "before:") and
-  "path:" naming a part; the names are read in any case. A date is a
+  "author:", "since:" (or "after:"), "until:" (or "before:"), "path:"
+  and "change:" naming a part; the names are read in any case. A date is a
   year, a year and month or a day (2024, 2024-06, 2024-06-15); since
   is from its start, until to its end. A part with nothing after the
   colon, or a date that does not read as one yet, is left out, so the
@@ -102,7 +104,8 @@ function GraphFilterEmpty(const AFilter: TGittanGraphFilter): boolean;
 {** Whether a commit matches the filter's words, authors and dates:
   AText is the text the words are looked for in (its subject, body,
   author and id), AAuthor its author, ADate its time in UTC. Whether
-  it touches the paths is the caller's to find out. }
+  it touches the paths or makes the changes is the caller's to find
+  out. }
 function MatchesGraphFilter(const AFilter: TGittanGraphFilter;
   const AText, AAuthor: string; ADate: TDateTime): boolean;
 
@@ -389,14 +392,17 @@ begin
       Key := LowerCase(Copy(Token, 1, Colon - 1));
     Value := Copy(Token, Colon + 1, MaxInt);
     if (Key = 'author') or (Key = 'since') or (Key = 'after') or (Key = 'until') or
-      (Key = 'before') or (Key = 'path') then
+      (Key = 'before') or (Key = 'path') or (Key = 'change') then
     begin
-      if Value = '' then
+      { change:// is an empty pattern on the way to a regex. }
+      if (Value = '') or ((Key = 'change') and (Value = '//')) then
         Continue;
       if Key = 'author' then
         Append(Result.Authors, Value)
       else if Key = 'path' then
         Append(Result.Paths, Value)
+      else if Key = 'change' then
+        Append(Result.Changes, Value)
       else if ParseFilterDate(Value, From, Next) then
       begin
         if (Key = 'since') or (Key = 'after') then
@@ -413,7 +419,8 @@ end;
 function GraphFilterEmpty(const AFilter: TGittanGraphFilter): boolean;
 begin
   Result := (Length(AFilter.Words) = 0) and (Length(AFilter.Authors) = 0) and
-    (Length(AFilter.Paths) = 0) and (AFilter.Since = 0) and (AFilter.Before = 0);
+    (Length(AFilter.Paths) = 0) and (Length(AFilter.Changes) = 0) and
+    (AFilter.Since = 0) and (AFilter.Before = 0);
 end;
 
 function MatchesGraphFilter(const AFilter: TGittanGraphFilter;

@@ -123,7 +123,7 @@ end;
 
 procedure TForgeTest.TestParseErrors;
 var
-  Login, Error: string;
+  Login, Error, Url: string;
   MinePulls, ReviewPulls: TGittanForgePulls;
 begin
   AssertFalse(ParseForgeAnswer('', Login, MinePulls, ReviewPulls, Error));
@@ -138,6 +138,13 @@ begin
   AssertEquals('x', Login);
   AssertEquals(0, Length(MinePulls));
   AssertEquals(0, Length(ReviewPulls));
+  { The picture's address, when the viewer has one. }
+  AssertTrue(ParseForgeAnswer('{"data":{"viewer":{"login":"x","avatarUrl":' +
+    '"https://avatars.example.com/u/1?s=128"}}}', Login, Url, MinePulls, ReviewPulls, Error));
+  AssertEquals('https://avatars.example.com/u/1?s=128', Url);
+  AssertTrue(ParseForgeAnswer('{"data":{"viewer":{"login":"x"}}}', Login, Url, MinePulls,
+    ReviewPulls, Error));
+  AssertEquals('', Url);
 end;
 
 procedure TForgeTest.TestNeedsMyReview;

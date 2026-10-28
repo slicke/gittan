@@ -8,7 +8,10 @@ unit gittan.popuplist;
   them may be Checked, the current choice, shown with a check mark.
   Popup shows the panel under a rectangle given in screen coordinates
   (above it when there is more room there), focused, with a filter
-  field on top when the list is long. Up and Down move in it, Enter or
+  field on top when the list is long; PopupCentered shows it wider,
+  across the middle of the parent near its top, always with the field,
+  as a command palette. The filter keeps the items whose caption has
+  every word of it, in any order. Up and Down move in it, Enter or
   a click picks: OnPick comes with the index Add gave the item. A right
   click or the Menu key on an item raises OnContext instead, with the
   item and where to show a menu for it; the list stays open. Escape,
@@ -74,7 +77,7 @@ type
       picks; -1 for none. }
     FCurrent: integer;
     FAnchor: TRect;
-    FAbove, FFilterVisible: boolean;
+    FAbove, FFilterVisible, FCentered: boolean;
     FHook: TGittanPopupHook;
     FBack, FText, FDim, FHover, FLine, FAccent: TColor;
     FFilterHint: string;
@@ -85,6 +88,7 @@ type
     function Pickable: integer;
     function ContentWidth: integer;
     procedure Fill;
+    procedure Present;
     procedure Layout;
     procedure Arrange;
     function RowAt(Y: integer): integer;
@@ -114,15 +118,21 @@ type
       index out of range. }
     function TagOf(AIndex: integer): PtrInt;
     {** Adds a header, the dimmed name of the group of items that
-      follow. It cannot be picked. }
+      follow. It cannot be picked. An empty caption is a divider line. }
     procedure AddHeader(const ACaption: string);
     {** Shows the list under AAnchor, a rectangle in screen coordinates
       (the control or the text that was clicked), aligned with its left
       edge, kept within the parent; above it when there is more room
       there. The focus goes to the filter field, or to the rows. }
     procedure Popup(const AAnchor: TRect);
+    {** Shows the list centered in the parent, ATop pixels from its
+      top, CenteredWidth wide (less in a narrow parent), with the
+      filter field focused however few items it has. }
+    procedure PopupCentered(ATop: integer);
     {** Hides the list without a pick. }
     procedure Close;
+    {** A control beside the list whose presses leave it open. }
+    procedure AddKeeper(AControl: TControl);
     {** The colors: the background, the text, the dim text (headers,
       details), the highlighted row, the border and the divider, and the
       check mark of the current choice. }
@@ -159,6 +169,8 @@ const
   CheckWidth = 20;
   MinWidth = 220;
   MaxWidth = 440;
+  { The width of a list PopupCentered shows. }
+  CenteredWidth = 600;
   { Room left of the text for the scroll bar, which overlays on macOS
     and takes space elsewhere. }
   ScrollRoom = 16;
@@ -313,15 +325,34 @@ begin
       Inc(W, Px(Gap) + C.TextWidth(FItems[i].Detail));
     Result := Max(Result, W);
   end;
-  Result := Min(Result, Px(MaxWidth));
+  if FCentered then
+    Result := Px(CenteredWidth)
+  else
+    Result := Min(Result, Px(MaxWidth));
   if Parent <> nil then
     Result := Min(Result, Parent.ClientWidth - 2 * Px(Pad));
 end;
 
-{ The rows that match the filter (any part of the caption, ignoring
-  case); the headers are left out while there is a filter, since their
+{ Whether ACaption has every word of AFilter (in lower case) somewhere
+  in it, ignoring case. }
+function MatchesWords(const ACaption, AFilter: string): boolean;
+var
+  Words: TStringArray;
+  Text, W: string;
+begin
+  Text := LowerCase(ACaption);
+  Words := AFilter.Split([' ', #9], TStringSplitOptions.ExcludeEmpty);
+  for W in Words do
+    if Pos(W, Text) = 0 then
+      Exit(False);
+  Result := True;
+end;
+
+{ The rows that match the filter (every word of it in the caption,
+  ignoring case); the headers are left out while there is a filter, since their
   groups are broken up. The current row is the checked item when it is
-  shown, else the first pickable one. }
+  shown, else the first pickable one; in a list PopupCentered shows,
+  where several may be checked, always the first. }
 procedure TGittanPopupList.Fill;
 var
   Filter: string;
@@ -338,12 +369,12 @@ begin
   begin
     if Filter <> '' then
     begin
-      if FItems[i].Header or (Pos(Filter, LowerCase(FItems[i].Caption)) = 0) then
+      if FItems[i].Header or not MatchesWords(FItems[i].Caption, Filter) then
         Continue;
     end;
     FShown[Count] := i;
     if not FItems[i].Header then
-      if (FCurrent < 0) or FItems[i].Checked then
+      if (FCurrent < 0) or (FItems[i].Checked and not FCentered) then
         FCurrent := Count;
     Inc(Count);
   end;
@@ -411,6 +442,7 @@ begin
   if Parent = nil then
     Exit;
   Dismiss;
+  FCentered := False;
   FAnchor.TopLeft := Parent.ScreenToClient(AAnchor.TopLeft);
   FAnchor.BottomRight := Parent.ScreenToClient(AAnchor.BottomRight);
   FFilterVisible := Pickable > FilterOver;
@@ -426,6 +458,38 @@ begin
   FAbove := (Height > RoomBelow) and (RoomAbove > RoomBelow);
   if FAbove then
     Layout;
+  Present;
+end;
+
+procedure TGittanPopupList.AddKeeper(AControl: TControl);
+begin
+  FHook.AddKeeper(AControl);
+end;
+
+procedure TGittanPopupList.PopupCentered(ATop: integer);
+var
+  W: integer;
+begin
+  if Parent = nil then
+    Exit;
+  Dismiss;
+  FCentered := True;
+  FFilterVisible := True;
+  FEdit.Text := '';
+  FEdit.TextHint := FFilterHint;
+  W := ContentWidth;
+  Width := W;
+  Left := Max(0, (Parent.ClientWidth - W) div 2);
+  FAnchor := Rect(Left, ATop - Px(Offset), Left + W, ATop - Px(Offset));
+  FAbove := False;
+  Fill;
+  Present;
+end;
+
+{ Shows the panel placed by Fill, focused, and starts watching for a
+  click outside it. }
+procedure TGittanPopupList.Present;
+begin
   FHook.SaveFocus;
   Visible := True;
   BringToFront;
@@ -618,6 +682,12 @@ begin
       ACanvas.Polyline([Point(X, CenterY), Point(X + 4, CenterY + 4),
         Point(X + 11, CenterY - 4)]);
       ACanvas.Pen.Width := 1;
+    end;
+    if Item.Header and (Item.Caption = '') then
+    begin
+      ACanvas.Pen.Color := FLine;
+      ACanvas.Line(Px(Pad), CenterY, FRows.Width - Px(Pad), CenterY);
+      Continue;
     end;
     DetailWidth := 0;
     if Item.Detail <> '' then

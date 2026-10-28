@@ -17,6 +17,7 @@ type
   published
     procedure TestRegistered;
     procedure TestHosts;
+    procedure TestAccounts;
     procedure TestParsePullRequest;
     procedure TestParsePullRequests;
     procedure TestWithoutReviewed;
@@ -26,6 +27,7 @@ type
     procedure TestChecks;
     procedure TestIssueNumber;
     procedure TestWebArgs;
+    procedure TestPullActionArgs;
     procedure TestNewPullUrl;
     procedure TestFileOfUrl;
     procedure TestForge;
@@ -86,6 +88,39 @@ begin
   AssertEquals('', GhEnvHost('acme.ghe.com', '', 'secret'));
   AssertEquals('', GhEnvHost('github.com', 'secret', 'secret'));
   AssertEquals('', GhEnvHost('', 'secret', 'secret'));
+end;
+
+procedure TGitHubTest.TestAccounts;
+var
+  Accounts: TGittanForgeAccounts;
+begin
+  { gh 2.40 and later: the logins under users:, user: the active one,
+    each login's own settings further in. }
+  Accounts := GhAccounts('github.com:'#10'    git_protocol: https'#10 +
+    '    users:'#10'        ada:'#10'            oauth_token: x'#10 +
+    '        bob:'#10'    user: bob'#10 +
+    'GHE.Example.com:'#10'    user: "carl"'#10'    oauth_token: y'#10 +
+    'empty.example.com:'#10'    git_protocol: ssh'#10);
+  AssertEquals(3, Length(Accounts));
+  AssertEquals('github.com', Accounts[0].Host);
+  AssertEquals('ada', Accounts[0].Login);
+  AssertFalse(Accounts[0].Active);
+  AssertEquals('bob', Accounts[1].Login);
+  AssertTrue(Accounts[1].Active);
+  { An older gh, user: alone. }
+  AssertEquals('ghe.example.com', Accounts[2].Host);
+  AssertEquals('carl', Accounts[2].Login);
+  AssertTrue(Accounts[2].Active);
+  AssertEquals('github.com=bob'#10'ghe.example.com=carl'#10, ActiveAccountsKey(Accounts));
+  { The switch shows in the key. }
+  Accounts := GhAccounts('github.com:'#13#10'    users:'#13#10'        ada:'#13#10 +
+    '        bob:'#13#10'    user: ada'#13#10);
+  AssertEquals(2, Length(Accounts));
+  AssertTrue(Accounts[0].Active);
+  AssertFalse(Accounts[1].Active);
+  AssertEquals('github.com=ada'#10, ActiveAccountsKey(Accounts));
+  AssertEquals(0, Length(GhAccounts('')));
+  AssertEquals('', ActiveAccountsKey(nil));
 end;
 
 procedure TGitHubTest.TestParsePullRequest;
@@ -261,6 +296,34 @@ begin
   AssertEquals(0, IssueNumber('item#9 is not one'));
   AssertEquals(0, IssueNumber('#0 is nothing'));
   AssertEquals(0, IssueNumber(''));
+end;
+
+procedure TGitHubTest.TestPullActionArgs;
+
+  { Joined with a bar, so an argument with a space stays one. }
+  function Joined(const AArgs: TStringArray): string;
+  begin
+    Result := string.Join('|', AArgs);
+  end;
+
+begin
+  AssertEquals('pr|review|12|--repo|o/r|--approve',
+    Joined(GitHubPullActionArgs('o/r', 12, plApprove, '')));
+  AssertEquals('pr|review|12|--repo|o/r|--approve|--body|Nice',
+    Joined(GitHubPullActionArgs('o/r', 12, plApprove, 'Nice')));
+  AssertEquals('pr|review|12|--repo|o/r|--request-changes|--body|Not yet',
+    Joined(GitHubPullActionArgs('o/r', 12, plRequestChanges, 'Not yet')));
+  AssertEquals('pr|review|12|--repo|o/r|--comment|--body|Hm',
+    Joined(GitHubPullActionArgs('o/r', 12, plComment, 'Hm')));
+  AssertEquals('pr|merge|12|--repo|o/r|--merge', Joined(GitHubPullActionArgs('o/r', 12, plMerge, 'x')));
+  AssertEquals('pr|merge|12|--repo|o/r|--squash', Joined(GitHubPullActionArgs('o/r', 12, plSquash, '')));
+  AssertEquals('pr|merge|12|--repo|o/r|--rebase',
+    Joined(GitHubPullActionArgs('o/r', 12, plRebaseMerge, '')));
+  AssertEquals('pr|ready|12|--repo|o/r', Joined(GitHubPullActionArgs('o/r', 12, plReady, '')));
+  AssertTrue(TGittanGitHubForge.HasPullActions);
+  AssertEquals('Approved', PullActionDone(plApprove));
+  AssertTrue(PullActionMerges(plSquash));
+  AssertFalse(PullActionIsReview(plReady));
 end;
 
 procedure TGitHubTest.TestWebArgs;

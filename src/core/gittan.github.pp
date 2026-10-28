@@ -19,7 +19,7 @@ unit gittan.github;
 interface
 
 uses
-  Classes, SysUtils, gittan.forge, gittan.reviews;
+  Classes, SysUtils, gittan.forge, gittan.reviews, gittan.textfile;
 
 const
   {** The fields asked of gh pr view and gh pr list, the ones
@@ -34,7 +34,7 @@ const
     team), fifty of each, newest first, with who wrote each one's last
     thirty comments and reviews. }
   ForgeQuery =
-    'query { viewer { login } ' +
+    'query { viewer { login avatarUrl(size: 128) } ' +
     'mine: search(query: "is:pr is:open author:@me archived:false sort:updated-desc", ' +
     'type: ISSUE, first: 50) { issueCount nodes { ...pull } } ' +
     'review: search(query: "is:pr is:open review-requested:@me archived:false ' +
@@ -69,7 +69,11 @@ function ParsePullRequests(const AJson: string; out APulls: TGittanPullRequests)
   them, see NeedsMyReview). False when AJson is not the answer, with the
   query's first error message in AError when it carries one. }
 function ParseForgeAnswer(const AJson: string; out ALogin: string;
-  out AMine, AReview: TGittanForgePulls; out AError: string): boolean;
+  out AMine, AReview: TGittanForgePulls; out AError: string): boolean; overload;
+{** As above, with the address of the user's picture (viewer's
+  avatarUrl) in AAvatarUrl, '' when the answer has none. }
+function ParseForgeAnswer(const AJson: string; out ALogin, AAvatarUrl: string;
+  out AMine, AReview: TGittanForgePulls; out AError: string): boolean; overload;
 
 {** Reads one page of the answer to ReviewThreadsQuery and adds its
   threads to AThreads. AHeadOid is the commit at the head of the pull
@@ -103,6 +107,15 @@ function GitHubWebArgs(const ATarget: TGittanWebTarget): TStringArray;
   "owner:branch", as GitHub takes it. }
 function GitHubNewPullUrl(const ARepoUrl, ABranch, AHeadRepo: string): string;
 
+{** The arguments of gh that do AAction to pull request ANumber of
+  ARepo with AText: gh pr review with --approve, --request-changes or
+  --comment and the text as --body (left out when empty; a request for
+  changes and a comment need one, which gh refuses otherwise), gh pr
+  merge with --merge, --squash or --rebase, or gh pr ready; --repo
+  names the repository, so the folder it runs in does not matter. }
+function GitHubPullActionArgs(const ARepo: string; ANumber: integer;
+  AAction: TGittanPullAction; const AText: string): TStringArray;
+
 {** The repository ("owner/name"), the file and the line (0 for none)
   of a GitHub address of a file in a commit or on a branch:
   "https://github.com/owner/name/blob/<ref>/src/a.pp#L10-L20" gives
@@ -121,6 +134,15 @@ type
       (GhHosts of the hosts.yml in GhConfigDir), and the one GH_HOST
       names when gh's environment gives a token for it (GhEnvHost). }
     class function HostsRemote(const AHost: string): boolean; override;
+    {** The accounts of hosts.yml (GhAccounts), read again only when the
+      file changed. }
+    class function Accounts: TGittanForgeAccounts; override;
+    {** A note when GH_TOKEN or GITHUB_TOKEN is set, which gh takes over
+      the active account on github.com and ghe.com. }
+    class function AccountsNote: string; override;
+    {** gh auth switch with the host and the user. }
+    function SwitchAccount(const AHost, ALogin: string; out AError: string): boolean;
+      override;
     function Version(out AVersion: string): boolean; override;
     function PullJob(const ARoot, ABranch, ALogin: string): TGittanPullRequestJob; override;
     function ReviewJob(const ARoot, ARepo: string; ANumber: integer): TGittanReviewJob;
@@ -131,6 +153,9 @@ type
     function FileOfWebUrl(const AUrl: string; out ARepo, APath: string;
       out ALine: integer): boolean; override;
     function PullRef(ANumber: integer): string; override;
+    class function HasPullActions: boolean; override;
+    function ActionJob(const ARoot, ARepo: string; ANumber: integer;
+      AAction: TGittanPullAction; const AText: string): TGittanPullActionJob; override;
   end;
 
 {** gh's configuration folder: GH_CONFIG_DIR, else "GitHub CLI" in
@@ -140,6 +165,12 @@ function GhConfigDir: string;
 {** The hosts gh is logged in to, the top-level keys of its hosts.yml
   (AText), in lower case. }
 function GhHosts(const AText: string): TStringArray;
+
+{** The accounts of gh's hosts.yml (AText): under each host's key the
+  logins under "users:" (gh 2.40 and later), the one "user:" names
+  active; a host with "user:" alone (an older gh) has that one. Hosts
+  and logins in the order of the file, hosts in lower case. }
+function GhAccounts(const AText: string): TGittanForgeAccounts;
 
 {** The host gh reaches through the environment with no login in
   hosts.yml: AHost (GH_HOST) in lower case when the token gh takes for
@@ -193,6 +224,112 @@ begin
       Result[High(Result)] := Host;
     end;
   end;
+end;
+
+{ AText without the quotes YAML may put around a key or a value. }
+function Unquoted(const AText: string): string;
+begin
+  Result := Trim(AText);
+  if (Length(Result) >= 2) and (Result[1] in ['"', '''']) and
+    (Result[Length(Result)] = Result[1]) then
+    Result := Copy(Result, 2, Length(Result) - 2);
+end;
+
+function GhAccounts(const AText: string): TGittanForgeAccounts;
+var
+  Line, Host, Key, Value, Active: string;
+  Indent, HostIndent, UserIndent, Colon, First, i: integer;
+  InUsers, Found: boolean;
+
+  { The host read so far, its active login marked or added. }
+  procedure EndHost;
+  var
+    j: integer;
+  begin
+    if (Host = '') or (Active = '') then
+      Exit;
+    Found := False;
+    for j := First to High(Result) do
+      if SameText(Result[j].Login, Active) then
+      begin
+        Result[j].Active := True;
+        Found := True;
+      end;
+    if not Found then
+    begin
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)].Host := Host;
+      Result[High(Result)].Login := Active;
+      Result[High(Result)].Active := True;
+    end;
+  end;
+
+begin
+  Result := nil;
+  Host := '';
+  Active := '';
+  First := 0;
+  HostIndent := -1;
+  UserIndent := -1;
+  InUsers := False;
+  for Line in AText.Split([#10]) do
+  begin
+    if (Trim(Line) = '') or (TrimLeft(Line)[1] in ['#', '-']) then
+      Continue;
+    Indent := 0;
+    while (Indent < Length(Line)) and (Line[Indent + 1] in [' ', #9]) do
+      Inc(Indent);
+    Colon := Pos(':', Line);
+    if Colon = 0 then
+      Continue;
+    Key := Unquoted(Copy(Line, Indent + 1, Colon - Indent - 1));
+    Value := Unquoted(Copy(Line, Colon + 1, MaxInt));
+    if Indent = 0 then
+    begin
+      { A new host, a key with nothing after the colon. }
+      EndHost;
+      Host := '';
+      Active := '';
+      if (Key <> '') and (Value = '') then
+        Host := LowerCase(Key);
+      First := Length(Result);
+      HostIndent := -1;
+      UserIndent := -1;
+      InUsers := False;
+      Continue;
+    end;
+    if Host = '' then
+      Continue;
+    if HostIndent < 0 then
+      HostIndent := Indent;
+    if Indent <= HostIndent then
+    begin
+      InUsers := Key = 'users';
+      UserIndent := -1;
+      if Key = 'user' then
+        Active := Value;
+    end
+    else if InUsers and (Key <> '') then
+    begin
+      { A login is a key one level in; its settings are further in. }
+      if UserIndent < 0 then
+        UserIndent := Indent;
+      if Indent = UserIndent then
+      begin
+        Found := False;
+        for i := First to High(Result) do
+          Found := Found or SameText(Result[i].Login, Key);
+        if not Found then
+        begin
+          SetLength(Result, Length(Result) + 1);
+          Result[High(Result)].Host := Host;
+          Result[High(Result)].Login := Key;
+          Result[High(Result)].Active := False;
+        end;
+      end;
+    end;
+  end;
+  EndHost;
 end;
 
 function GhEnvHost(const AHost, AToken, AEnterpriseToken: string): string;
@@ -568,9 +705,18 @@ end;
 function ParseForgeAnswer(const AJson: string; out ALogin: string;
   out AMine, AReview: TGittanForgePulls; out AError: string): boolean;
 var
+  AvatarUrl: string;
+begin
+  Result := ParseForgeAnswer(AJson, ALogin, AvatarUrl, AMine, AReview, AError);
+end;
+
+function ParseForgeAnswer(const AJson: string; out ALogin, AAvatarUrl: string;
+  out AMine, AReview: TGittanForgePulls; out AError: string): boolean;
+var
   Root, Data, Errors: TJSONData;
 begin
   ALogin := '';
+  AAvatarUrl := '';
   AMine := nil;
   AReview := nil;
   AError := '';
@@ -591,6 +737,7 @@ begin
     if (Data = nil) or (Data.JSONType <> jtObject) then
       Exit;
     ALogin := NestedString(TJSONObject(Data), 'viewer', 'login');
+    AAvatarUrl := NestedString(TJSONObject(Data), 'viewer', 'avatarUrl');
     ReadSearch(TJSONObject(Data), 'mine', AMine);
     ReadSearch(TJSONObject(Data), 'review', AReview);
     Result := True;
@@ -887,6 +1034,17 @@ type
     constructor Create(const AExe, ARoot, ABranch, ALogin: string);
   end;
 
+  { gh pr review, gh pr merge or gh pr ready (GitHubPullActionArgs). }
+  TGitHubPullActionJob = class(TGittanPullActionJob)
+  private
+    FExe: string;
+  protected
+    function Ask(out AError: string): boolean; override;
+  public
+    constructor Create(const AExe, ARoot, ARepo: string; ANumber: integer;
+      AAction: TGittanPullAction; const AText: string);
+  end;
+
   { gh api graphql with ReviewThreadsQuery, a page of 100 threads at a
     time, at most twenty pages. }
   TGitHubReviewJob = class(TGittanReviewJob)
@@ -1022,14 +1180,15 @@ end;
 function TGitHubAccountJob.Ask(out ALogin: string; out AMine, AReview: TGittanForgePulls;
   out AError: string): boolean;
 var
-  Output: string;
+  Output, Url: string;
 begin
   ALogin := '';
   AMine := nil;
   AReview := nil;
   { Any folder does; gh needs none in particular for it. }
   Result := RunGh(FExe, Root, ['api', 'graphql', '-f', 'query=' + ForgeQuery], Output, AError)
-    and ParseForgeAnswer(Output, ALogin, AMine, AReview, AError);
+    and ParseForgeAnswer(Output, ALogin, Url, AMine, AReview, AError);
+  AvatarUrl := Url;
 end;
 
 { ---------------------------------------------------------------------------
@@ -1038,42 +1197,39 @@ end;
 
 var
   { The hosts of gh's hosts.yml as last read, with the file's path and
-    age then, so it is read from disk again only when it has changed:
-    ForgeClassFor asks for every remote of every repository. Main
-    thread only. }
+    text then, so it is parsed again only when it has changed:
+    ForgeClassFor asks for every remote of every repository. The text
+    is compared rather than the file's age, which counts whole seconds,
+    so an account switched in the second it was read is not missed.
+    Main thread only. }
   LoggedHosts: TStringArray;
+  LoggedAccounts: TGittanForgeAccounts;
   LoggedHostsPath: string;
-  LoggedHostsAge: longint = -2;
+  LoggedHostsText: RawByteString;
+  LoggedHostsRead: boolean;
 
-{ The hosts gh is logged in to, the file read again when it changed
-  (FileAge -1: none, and none logged in). }
+{ The hosts gh is logged in to, the file parsed again when it changed
+  (none when it is not there, and none logged in). }
 function GhLoggedHosts: TStringArray;
 var
   Path: string;
-  Age: longint;
-  Lines: TStringList;
+  Text: RawByteString;
 begin
   Path := IncludeTrailingPathDelimiter(GhConfigDir) + 'hosts.yml';
-  Age := FileAge(Path);
-  if (Age <> LoggedHostsAge) or (Path <> LoggedHostsPath) then
-  begin
-    LoggedHostsAge := Age;
-    LoggedHostsPath := Path;
-    LoggedHosts := nil;
-    if Age <> -1 then
-    begin
-      Lines := TStringList.Create;
-      try
-        try
-          Lines.LoadFromFile(Path);
-          LoggedHosts := GhHosts(Lines.Text);
-        except
-          LoggedHosts := nil;
-        end;
-      finally
-        Lines.Free;
-      end;
+  Text := '';
+  if FileExists(Path) then
+    try
+      Text := ReadFileBytes(Path);
+    except
+      Text := '';
     end;
+  if not LoggedHostsRead or (Text <> LoggedHostsText) or (Path <> LoggedHostsPath) then
+  begin
+    LoggedHostsRead := True;
+    LoggedHostsText := Text;
+    LoggedHostsPath := Path;
+    LoggedHosts := GhHosts(Text);
+    LoggedAccounts := GhAccounts(Text);
   end;
   Result := LoggedHosts;
 end;
@@ -1098,6 +1254,58 @@ begin
     Enterprise := EnvironmentVariable('GITHUB_ENTERPRISE_TOKEN');
   Host := GhEnvHost(EnvironmentVariable('GH_HOST'), Token, Enterprise);
   Result := (Host <> '') and (Host = AHost);
+end;
+
+class function TGittanGitHubForge.Accounts: TGittanForgeAccounts;
+begin
+  GhLoggedHosts;
+  Result := Copy(LoggedAccounts);
+end;
+
+class function TGittanGitHubForge.AccountsNote: string;
+
+  function FirstSet(const AA, AB: string): string;
+  begin
+    if EnvironmentVariable(AA) <> '' then
+      Result := AA
+    else if EnvironmentVariable(AB) <> '' then
+      Result := AB
+    else
+      Result := '';
+  end;
+
+var
+  Token, Enterprise: string;
+begin
+  Result := '';
+  Token := FirstSet('GH_TOKEN', 'GITHUB_TOKEN');
+  Enterprise := FirstSet('GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN');
+  if Token <> '' then
+    Result := Token + ' is set in Gittan''s environment, so gh uses that token ' +
+      'on github.com and ghe.com whichever account is picked here.';
+  if Enterprise <> '' then
+  begin
+    if Result <> '' then
+      Result := Result + ' ';
+    Result := Result + Enterprise + ' is set in Gittan''s environment, so gh uses ' +
+      'that token on Enterprise Server hosts whichever account is picked here.';
+  end;
+end;
+
+function TGittanGitHubForge.SwitchAccount(const AHost, ALogin: string;
+  out AError: string): boolean;
+var
+  Output: string;
+begin
+  AError := '';
+  Result := (Cli <> '') and RunGh(Cli, GetUserDir,
+    ['auth', 'switch', '--hostname', AHost, '--user', ALogin], Output, AError);
+  { gh marks its failure with an X, a cross on a terminal. }
+  AError := Trim(AError);
+  if AError.StartsWith('X ') then
+    AError := Trim(Copy(AError, 3, MaxInt));
+  if not Result and (AError = '') then
+    AError := 'gh could not switch to ' + ALogin + ' on ' + AHost + '.';
 end;
 
 class function TGittanGitHubForge.Name: string;
@@ -1129,6 +1337,55 @@ begin
   i := Pos(' ', AVersion);
   if i > 0 then
     AVersion := Copy(AVersion, 1, i - 1);
+end;
+
+function GitHubPullActionArgs(const ARepo: string; ANumber: integer;
+  AAction: TGittanPullAction; const AText: string): TStringArray;
+begin
+  case AAction of
+    plApprove: Result := ['pr', 'review', IntToStr(ANumber), '--repo', ARepo, '--approve'];
+    plRequestChanges: Result := ['pr', 'review', IntToStr(ANumber), '--repo', ARepo,
+      '--request-changes'];
+    plComment: Result := ['pr', 'review', IntToStr(ANumber), '--repo', ARepo, '--comment'];
+    plMerge: Result := ['pr', 'merge', IntToStr(ANumber), '--repo', ARepo, '--merge'];
+    plSquash: Result := ['pr', 'merge', IntToStr(ANumber), '--repo', ARepo, '--squash'];
+    plRebaseMerge: Result := ['pr', 'merge', IntToStr(ANumber), '--repo', ARepo, '--rebase'];
+    else
+      Result := ['pr', 'ready', IntToStr(ANumber), '--repo', ARepo];
+  end;
+  if PullActionIsReview(AAction) and (Trim(AText) <> '') then
+    Result := Concat(Result, ['--body', AText]);
+end;
+
+constructor TGitHubPullActionJob.Create(const AExe, ARoot, ARepo: string; ANumber: integer;
+  AAction: TGittanPullAction; const AText: string);
+begin
+  inherited Create(ARoot, ARepo, ANumber, AAction, AText);
+  FExe := AExe;
+end;
+
+function TGitHubPullActionJob.Ask(out AError: string): boolean;
+var
+  Output: string;
+begin
+  AError := '';
+  Result := RunGh(FExe, Root, GitHubPullActionArgs(Repo, Number, Action, Text), Output, AError);
+  AError := Trim(AError);
+  if AError.StartsWith('X ') then
+    AError := Trim(Copy(AError, 3, MaxInt));
+  if not Result and (AError = '') then
+    AError := 'gh could not do it.';
+end;
+
+class function TGittanGitHubForge.HasPullActions: boolean;
+begin
+  Result := True;
+end;
+
+function TGittanGitHubForge.ActionJob(const ARoot, ARepo: string; ANumber: integer;
+  AAction: TGittanPullAction; const AText: string): TGittanPullActionJob;
+begin
+  Result := TGitHubPullActionJob.Create(Cli, ARoot, ARepo, ANumber, AAction, AText);
 end;
 
 function TGittanGitHubForge.PullJob(const ARoot, ABranch, ALogin: string): TGittanPullRequestJob;

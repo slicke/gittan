@@ -171,6 +171,11 @@ type
     FSyncRect: TRect;
     FSyncHot: boolean;
     FOnSyncClick: TGittanBranchClickEvent;
+    { The totals' chip ("3 changed files +12 −4"), drawn as one while
+      OnTotalsClick is set, with its hover state. }
+    FTotalsRect: TRect;
+    FTotalsHot: boolean;
+    FOnTotalsClick: TGittanBranchClickEvent;
     { How many commits of FBehindRef (the default branch) the branch
       lacks, 0 for no row; the row's Rebase and Merge pills as last
       painted, and the one under the mouse, -1 for none. }
@@ -180,6 +185,7 @@ type
     FBehindHot: integer;
     FOnBehindAction: TGittanBehindActionEvent;
     procedure SetSyncHot(AValue: boolean);
+    procedure SetTotalsHot(AValue: boolean);
     function BehindAt(X, Y: integer): integer;
     procedure SetBehindHot(AValue: integer);
     procedure PaintBehind(var Y: integer);
@@ -317,6 +323,10 @@ type
       which is drawn as a chip under the mouse while this is set and the
       branch has an upstream. }
     property OnSyncClick: TGittanBranchClickEvent read FOnSyncClick write FOnSyncClick;
+    {** A click on the totals under the header (the changed files and
+      their lines), which are drawn as a chip with a chevron while this
+      is set and there are changed files. }
+    property OnTotalsClick: TGittanBranchClickEvent read FOnTotalsClick write FOnTotalsClick;
     {** A click on Rebase or Merge in the row of SetBehind. }
     property OnBehindAction: TGittanBehindActionEvent read FOnBehindAction write FOnBehindAction;
     {** A click on a commit's row. }
@@ -1456,6 +1466,18 @@ begin
   Invalidate;
 end;
 
+procedure TGittanSummary.SetTotalsHot(AValue: boolean);
+begin
+  if FTotalsHot = AValue then
+    Exit;
+  FTotalsHot := AValue;
+  if AValue then
+    Cursor := crHandPoint
+  else
+    Cursor := crDefault;
+  Invalidate;
+end;
+
 procedure TGittanSummary.SetBaseHot(AValue: boolean);
 begin
   if FBaseHot = AValue then
@@ -1616,6 +1638,7 @@ begin
     Inc(Deleted, FStats[i].Deleted);
   end;
   X := Px(Pad);
+  FTotalsRect := Rect(0, 0, 0, 0);
   if (Length(FStats) = 0) and not CentersClean then
     PaintCleanHeader(Y);
   if Length(FStats) > 0 then
@@ -1624,6 +1647,18 @@ begin
       Heading := rsOneFile
     else
       Heading := Format(rsManyFiles, [Length(FStats)]);
+    { The totals are a chip while a click drops what the change is made
+      of, filled under the mouse as the branch chip is. }
+    if Assigned(FOnTotalsClick) then
+    begin
+      FTotalsRect := Rect(X - Px(ChipPadX), Y - Px(ChipPadY), X + Canvas.TextWidth(Heading) +
+        Px(Gap) + Canvas.TextWidth('+' + IntToStr(Added)) + Px(Gap) div 2 +
+        Canvas.TextWidth('−' + IntToStr(Deleted)) + Px(ChevronWidth) + Px(ChipPadX),
+        Y + BodyHeight + Px(ChipPadY));
+      if FTotalsHot then
+        FillHover(Canvas, FTotalsRect, 8, FHover);
+      Canvas.Brush.Style := bsClear;
+    end;
     Canvas.Font.Color := FDim;
     Canvas.TextOut(X, Y, Heading);
     Inc(X, Canvas.TextWidth(Heading) + Px(Gap));
@@ -1634,7 +1669,14 @@ begin
     Canvas.Font.Color := FDeleted;
     Heading := '−' + IntToStr(Deleted);
     Canvas.TextOut(X, Y, Heading);
-    Inc(X, Canvas.TextWidth(Heading) + Px(Gap));
+    Inc(X, Canvas.TextWidth(Heading));
+    if FTotalsRect.Right > FTotalsRect.Left then
+    begin
+      Inc(X, Px(ChevronWidth) div 2 + 1);
+      DrawChevron(Canvas, X, Y + BodyHeight div 2, FDim);
+      Inc(X, Px(ChevronWidth) div 2 + Px(ChipPadX));
+    end;
+    Inc(X, Px(Gap));
     { The whole change as one bar: the added share in green, the
       deleted in red. }
     if Added + Deleted > 0 then
@@ -2180,13 +2222,14 @@ begin
   SetBranchHot(BranchClickable and PtInRect(FBranchRect, Point(X, Y)));
   SetBaseHot((FBaseRect.Right > FBaseRect.Left) and PtInRect(FBaseRect, Point(X, Y)));
   SetSyncHot((FSyncRect.Right > FSyncRect.Left) and PtInRect(FSyncRect, Point(X, Y)));
+  SetTotalsHot((FTotalsRect.Right > FTotalsRect.Left) and PtInRect(FTotalsRect, Point(X, Y)));
   SetBackHot(Assigned(FOnBackClick) and PtInRect(FBackRect, Point(X, Y)));
   if Assigned(FOnBehindAction) then
     SetBehindHot(BehindAt(X, Y));
   if (FLinkHot >= 0) or (FActionHot >= 0) or FBackHot or (FBehindHot >= 0) or FTextLinkHot or
     FDetailsHot or (FMoreHot >= 0) then
     Cursor := crHandPoint
-  else if not (FBranchHot or FBaseHot or FSyncHot or FReviewHot) then
+  else if not (FBranchHot or FBaseHot or FSyncHot or FTotalsHot or FReviewHot) then
     Cursor := crDefault;
 end;
 
@@ -2204,6 +2247,7 @@ begin
   SetBranchHot(False);
   SetBaseHot(False);
   SetSyncHot(False);
+  SetTotalsHot(False);
   SetBackHot(False);
   SetBehindHot(-1);
 end;
@@ -2241,6 +2285,14 @@ begin
     FOnSyncClick(Self, Rect(ClientToScreen(FSyncRect.TopLeft).X,
       ClientToScreen(FSyncRect.TopLeft).Y, ClientToScreen(FSyncRect.BottomRight).X,
       ClientToScreen(FSyncRect.BottomRight).Y));
+    Exit;
+  end;
+  if (Button = mbLeft) and (FTotalsRect.Right > FTotalsRect.Left) and Assigned(FOnTotalsClick) and
+    PtInRect(FTotalsRect, Point(X, Y)) then
+  begin
+    FOnTotalsClick(Self, Rect(ClientToScreen(FTotalsRect.TopLeft).X,
+      ClientToScreen(FTotalsRect.TopLeft).Y, ClientToScreen(FTotalsRect.BottomRight).X,
+      ClientToScreen(FTotalsRect.BottomRight).Y));
     Exit;
   end;
   if (Button = mbLeft) and Assigned(FOnBehindAction) and (BehindAt(X, Y) >= 0) then

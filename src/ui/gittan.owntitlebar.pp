@@ -2,7 +2,8 @@
 
   TGittanOwnTitleBar, aligned at the top of the window, stands in for
   the window's caption, as Firefox's tab bar does: a menu button on the
-  left, then a tab per open repository and a plus that opens a new tab,
+  left, Back and Forward after it, two chevrons (SetNav; dim while there
+  is nowhere to go, OnBack, OnForward), then a tab per open repository and a plus that opens a new tab,
   a banner before the caption buttons, a ribbon hanging from the top
   edge with a notch at its foot and a globe in it (SetForge: there
   while there is a forge, in the accent while the forge view is shown,
@@ -55,8 +56,8 @@ type
 
   {** What a point of the bar is: the menu button, a tab, a tab's cross,
     the plus, a caption button, or nothing (the caption, a drag area). }
-  TGittanTitlePart = (tpNone, tpMenu, tpTab, tpTabClose, tpPlus, tpForge,
-    tpMinimize, tpMaximize, tpClose);
+  TGittanTitlePart = (tpNone, tpMenu, tpBack, tpForward, tpTab, tpTabClose, tpPlus,
+    tpForge, tpMinimize, tpMaximize, tpClose);
 
   {** The glyphs a descendant draws: the caption buttons' (restore for
     maximize while the window is maximized). }
@@ -72,7 +73,11 @@ type
     FTabActive: integer;
     { The tabs are a view's own (the forge view's): no cross, no plus. }
     FFixed: boolean;
-    FMenuRect, FPlusRect, FForgeRect, FMinRect, FMaxRect, FCloseRect: TRect;
+    FMenuRect, FBackRect, FForwardRect, FPlusRect, FForgeRect, FMinRect, FMaxRect,
+    FCloseRect: TRect;
+    { Back and Forward: whether each can be gone to, and their hints. }
+    FCanBack, FCanForward: boolean;
+    FBackHint, FForwardHint: string;
     { The globe: whether it is there, whether the forge view is shown,
       and its hint. }
     FForgeVisible, FForgeShown: boolean;
@@ -87,12 +92,15 @@ type
     FBandTrack, FBandFill: TColor;
     FTitle: string;
     FOnTabSelect, FOnTabClose: TGittanTitleTabEvent;
-    FOnNewTab, FOnForge: TNotifyEvent;
+    FOnNewTab, FOnForge, FOnBack, FOnForward: TNotifyEvent;
     procedure SetActive(AValue: boolean);
     function BandFillWidth(APos, ATotal: integer): integer;
     function MenuOf(AForm: TCustomForm): TMainMenu;
     function TabsLimit: integer;
+    function TabsStart: integer;
+    function NavEnabled(APart: TGittanTitlePart): boolean;
     function TabWidth: integer;
+    function TabsShown: integer;
     function TabRect(AIndex: integer): TRect;
     function CrossRect(const ATab: TRect): TRect;
     procedure CopyItems(ASource, ATarget: TMenuItem);
@@ -146,6 +154,10 @@ type
       (there is a forge), in the accent while AShown (the forge view is
       shown), AHint its hint (the forge's name). }
     procedure SetForge(AVisible, AShown: boolean; const AHint: string);
+    {** The chevrons: whether there is somewhere to go back (ABack) and
+      forward (AForward) to, a dim chevron taking no click; ABackHint
+      and AForwardHint their hints. }
+    procedure SetNav(ABack, AForward: boolean; const ABackHint, AForwardHint: string);
     {** The bar's colors: the shade over the sidebar and the background
       over the rest, the text and the dim text, the shown tab's fill and
       border, a caption button (or a hovered tab) under the mouse, and
@@ -170,6 +182,9 @@ type
     property OnNewTab: TNotifyEvent read FOnNewTab write FOnNewTab;
     {** The banner: the forge view, or back from it. }
     property OnForge: TNotifyEvent read FOnForge write FOnForge;
+    {** The chevrons: back, forward. }
+    property OnBack: TNotifyEvent read FOnBack write FOnBack;
+    property OnForward: TNotifyEvent read FOnForward write FOnForward;
   end;
 
 const
@@ -190,6 +205,9 @@ const
   MinTabWidth = 64;
   TabGap = 3;
   PlusSize = 26;
+  { A chevron's button, square, and the gap between the two. }
+  NavSize = 26;
+  NavGap = 2;
   { The banner: its width, the room it leaves under it, the depth of
     the notch at its foot, and the globe in it. }
   ForgeWidth = 30;
@@ -325,14 +343,25 @@ begin
     Result := FMinRect.Left;
 end;
 
-{ The tabs share the room between the menu button and the plus, which
+{ Where the first tab starts: after the chevrons. }
+function TGittanOwnTitleBar.TabsStart: integer;
+begin
+  Result := FForwardRect.Right + Scale96ToForm(Gap);
+end;
+
+function TGittanOwnTitleBar.NavEnabled(APart: TGittanTitlePart): boolean;
+begin
+  Result := ((APart = tpBack) and FCanBack) or ((APart = tpForward) and FCanForward);
+end;
+
+{ The tabs share the room between the chevrons and the plus, which
   follows the last of them (when they are not fixed), evenly, within
   MinTabWidth and MaxTabWidth. }
 function TGittanOwnTitleBar.TabWidth: integer;
 var
   Room: integer;
 begin
-  Room := TabsLimit - Scale96ToForm(Gap) - (FMenuRect.Right + Scale96ToForm(Gap));
+  Room := TabsLimit - Scale96ToForm(Gap) - TabsStart;
   if not FFixed then
     Dec(Room, Scale96ToForm(PlusSize + Gap));
   if Length(FCaptions) = 0 then
@@ -341,12 +370,27 @@ begin
     Room div Length(FCaptions)));
 end;
 
+{ How many tabs fit before the limit, with room for the plus after them
+  (when they are not fixed); those after are not drawn, so the plus
+  stays clear of the caption buttons in a narrow window. }
+function TGittanOwnTitleBar.TabsShown: integer;
+var
+  Limit: integer;
+begin
+  Limit := TabsLimit;
+  if not FFixed then
+    Dec(Limit, Scale96ToForm(PlusSize + Gap));
+  Result := 0;
+  while (Result < Length(FCaptions)) and (TabRect(Result).Right <= Limit) do
+    Inc(Result);
+end;
+
 function TGittanOwnTitleBar.TabRect(AIndex: integer): TRect;
 var
   W, X, H: integer;
 begin
   W := TabWidth;
-  X := FMenuRect.Right + Scale96ToForm(Gap) + AIndex * W;
+  X := TabsStart + AIndex * W;
   H := Scale96ToForm(TabHeight);
   Result := Types.Rect(X, (Height - H) div 2 + 1, X + W - Scale96ToForm(TabGap),
     (Height + H) div 2 + 1);
@@ -362,7 +406,7 @@ begin
 end;
 
 { From the right the caption buttons; from the left the menu button,
-  the tabs and the plus after them. }
+  the chevrons, the tabs and the plus after them. }
 procedure TGittanOwnTitleBar.Layout;
 var
   W, H, X, S: integer;
@@ -385,8 +429,13 @@ begin
   S := Scale96ToForm(PlusSize);
   FMenuRect := Types.Rect(Scale96ToForm(Pad), (H - S) div 2,
     Scale96ToForm(Pad + MenuButtonWidth), (H + S) div 2);
-  X := FMenuRect.Right + Scale96ToForm(Gap) + Length(FCaptions) * TabWidth;
-  if FFixed then
+  X := FMenuRect.Right + Scale96ToForm(Gap);
+  W := Scale96ToForm(NavSize);
+  FBackRect := Types.Rect(X, (H - W) div 2 + 1, X + W, (H + W) div 2 + 1);
+  X := FBackRect.Right + Scale96ToForm(NavGap);
+  FForwardRect := Types.Rect(X, FBackRect.Top, X + W, FBackRect.Bottom);
+  X := TabsStart + TabsShown * TabWidth;
+  if FFixed or (X + S > TabsLimit) then
     FPlusRect := Types.Rect(0, 0, 0, 0)
   else
     FPlusRect := Types.Rect(X, (H - S) div 2 + 1, X + S, (H + S) div 2 + 1);
@@ -414,15 +463,17 @@ begin
     Exit(tpMinimize);
   if FMenuRect.Contains(P) then
     Exit(tpMenu);
+  if FBackRect.Contains(P) then
+    Exit(tpBack);
+  if FForwardRect.Contains(P) then
+    Exit(tpForward);
   if FForgeVisible and FForgeRect.Contains(P) then
     Exit(tpForge);
   if FPlusRect.Contains(P) then
     Exit(tpPlus);
-  for i := 0 to High(FCaptions) do
+  for i := 0 to TabsShown - 1 do
   begin
     R := TabRect(i);
-    if R.Right > TabsLimit then
-      Break;
     if R.Contains(P) then
     begin
       AIndex := i;
@@ -445,6 +496,10 @@ begin
   end
   else if APart = tpMenu then
     Hint := FTitle
+  else if APart = tpBack then
+    Hint := FBackHint
+  else if APart = tpForward then
+    Hint := FForwardHint
   else if APart = tpForge then
     Hint := FForgeHint
   else if AIndex < 0 then
@@ -501,6 +556,13 @@ begin
     tpTab:
       if Assigned(FOnTabSelect) then
         FOnTabSelect(Self, Index);
+    tpBack, tpForward:
+      if NavEnabled(Part) then
+      begin
+        FPressedPart := Part;
+        FPressedIndex := Index;
+        Invalidate;
+      end;
     tpTabClose, tpPlus, tpForge, tpMinimize, tpMaximize, tpClose:
       begin
         FPressedPart := Part;
@@ -534,6 +596,12 @@ begin
   if (Part <> Pressed) or (Index <> FPressedIndex) then
     Exit;
   case Part of
+    tpBack:
+      if FCanBack and Assigned(FOnBack) then
+        FOnBack(Self);
+    tpForward:
+      if FCanForward and Assigned(FOnForward) then
+        FOnForward(Self);
     tpTabClose:
       if Assigned(FOnTabClose) then
         FOnTabClose(Self, Index);
@@ -554,6 +622,23 @@ begin
   FForgeShown := AShown;
   FForgeHint := AHint;
   Layout;
+  Invalidate;
+end;
+
+procedure TGittanOwnTitleBar.SetNav(ABack, AForward: boolean;
+  const ABackHint, AForwardHint: string);
+begin
+  if (ABack = FCanBack) and (AForward = FCanForward) and (ABackHint = FBackHint) and
+    (AForwardHint = FForwardHint) then
+    Exit;
+  FCanBack := ABack;
+  FCanForward := AForward;
+  FBackHint := ABackHint;
+  FForwardHint := AForwardHint;
+  if FHotPart = tpBack then
+    Hint := FBackHint
+  else if FHotPart = tpForward then
+    Hint := FForwardHint;
   Invalidate;
 end;
 
@@ -720,6 +805,31 @@ var
       Scale96ToForm(8));
   end;
 
+  procedure DrawChevron(APart: TGittanTitlePart; const AR: TRect);
+  var
+    CX, CY, D, Dir: integer;
+    Chevron: TColor;
+  begin
+    if NavEnabled(APart) and ((FHotPart = APart) or (FPressedPart = APart)) then
+      HotBox(AR, FButtonHot);
+    if NavEnabled(APart) then
+      Chevron := Ink
+    else
+      Chevron := MixColor(FMain, FDim, 0.45);
+    CX := (AR.Left + AR.Right) div 2;
+    CY := (AR.Top + AR.Bottom) div 2;
+    D := Scale96ToForm(4);
+    if APart = tpBack then
+      Dir := -1
+    else
+      Dir := 1;
+    Canvas.Pen.Color := Chevron;
+    Canvas.Pen.Width := Max(1, Scale96ToForm(2) * 3 div 4);
+    Canvas.Line(CX - Dir * D div 2, CY - 2 * D, CX + Dir * D, CY);
+    Canvas.Line(CX + Dir * D, CY, CX - Dir * D div 2, CY + 2 * D);
+    Canvas.Pen.Width := 1;
+  end;
+
 begin
   if FSplitControl <> nil then
     Split := FSplitControl.Left + FSplitControl.Width
@@ -748,11 +858,14 @@ begin
     Line(Mid - W, L, Mid + W, L, Ink);
   end;
 
-  for i := 0 to High(FCaptions) do
+  { The chevrons, on a box under the mouse; dim while there is nowhere
+    to go. }
+  DrawChevron(tpBack, FBackRect);
+  DrawChevron(tpForward, FForwardRect);
+
+  for i := 0 to TabsShown - 1 do
   begin
     R := TabRect(i);
-    if R.Right > TabsLimit then
-      Break;
     Shown := i = FTabActive;
     Hover := (FHotIndex = i) and (FHotPart in [tpTab, tpTabClose]);
     if Shown then
@@ -808,8 +921,8 @@ begin
     end;
   end;
 
-  { The plus. }
-  if not FFixed then
+  { The plus, unless there is no room for it. }
+  if not FFixed and not FPlusRect.IsEmpty then
   begin
     if FHotPart = tpPlus then
       HotBox(FPlusRect, FButtonHot);

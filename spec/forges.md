@@ -30,6 +30,17 @@ Every method below is abstract in `TGittanForge`; each comment in `gittan.forge.
 9. `function FileOfWebUrl(const AUrl: string; out ARepo, APath: string; out ALine: integer): boolean` – the reverse, for links in comments: the repository, file and line of an address of a file on the forge; false for any other address.
 10. `function PullRef(ANumber: integer): string` – the ref a remote serves the pull request's head at, which `git fetch` fetches to compare with it ("refs/merge-requests/12/head" on GitLab).
 
+Three more have an answer in the base, for a forge whose tool keeps no list of accounts (none, no note, no switch), and a forge overrides them when its tool can be logged in to several:
+
+- `class function Accounts: TGittanForgeAccounts` – the accounts the tool is logged in to, a host and a login each, the active one per host marked, read from the tool's own files without running it, since the window asks on every activation and every minute (`CheckAccounts`). GitHub reads gh's `hosts.yml` (`GhAccounts`), again only when the file changed. Keep it cheap and main-thread.
+- `class function AccountsNote: string` – why the tool would not use the account picked, when something outside its login decides (gh with `GH_TOKEN` in the environment); empty otherwise. The Hosting page shows it in place of its own note.
+- `function SwitchAccount(const AHost, ALogin: string; out AError: string): boolean` – makes ALogin the tool's active account on AHost, for the tool everywhere (`gh auth switch --hostname --user`). It runs the tool and waits.
+
+Two more are for acting on a pull request, which the base cannot (no menu items then), and a forge overrides them when its tool can:
+
+- `class function HasPullActions: boolean` – whether `ActionJob` gives a job; the menus offer the actions only then.
+- `function ActionJob(const ARoot, ARepo: string; ANumber: integer; AAction: TGittanPullAction; const AText: string): TGittanPullActionJob` – a job that does one `TGittanPullAction` (approve, request changes, comment, merge with a merge commit, squash, rebase, mark ready for review) to pull request ANumber of ARepo ("owner/name"), with AText as a review's words; fill in `Ask` (false with the tool's words in AError). GitHub's is `gh pr review` with `--approve`, `--request-changes` or `--comment` and `--body`, `gh pr merge` with `--merge`, `--squash` or `--rebase`, and `gh pr ready`, always with `--repo` (`GitHubPullActionArgs`, tested). `PullActionDone`, `PullActionIsReview` and `PullActionMerges` describe an action for the views.
+
 A job takes what it needs from the forge (the tool's path, the name) when it is made, never the forge itself: the settings may change, and the forge be freed, while it runs.
 
 ## The jobs
@@ -38,7 +49,7 @@ Each is a thread (`TGittanJob`); the base class runs the steps, filters and repo
 
 - `TGittanPullRequestJob` – fill in `AskBranchPull` (the pull request of the checked-out branch; false for none, which is no failure), `AskOpenPulls` (the repository's open ones; false with the message, such as not logged in), `AskReviewPulls` (the open ones whose review is asked of the user or a team of theirs) and `AskLogin`. The base filters out what the user has reviewed (`WithoutReviewed`) and finds the branches gone from the remote.
 - `TGittanReviewJob` (`gittan.reviews`) – fill in `Ask`: the threads (`TGittanReviewThreads`, with their file, line, side, resolved and outdated), the conversation (`TGittanPullNotes`) and the head commit. A forge without threads on lines gives the comments as notes.
-- `TGittanForgeJob` – fill in `Ask`: the login, the user's open pull requests and the ones asked of them, as `TGittanForgePull`s, each with its `Repo` (the forge's path of it, "group/sub/project" on GitLab; `RemoteUrlsHold` matches it against a clone's remotes), the review decision, the checks as one word, the user's latest review, whether they are asked in person (`Requested`) and whether someone else has answered (`Feedback`). The base filters what the user has reviewed (`StillToReview`) and finds local clones.
+- `TGittanForgeJob` – fill in `Ask`: the login (and `AvatarUrl`, the address of the user's picture when the forge gives one, which the base fetches over HTTP without the tool's token; a forge whose pictures need it leaves it empty and the view shows the initial), the user's open pull requests and the ones asked of them, as `TGittanForgePull`s, each with its `Repo` (the forge's path of it, "group/sub/project" on GitLab; `RemoteUrlsHold` matches it against a clone's remotes), the review decision, the checks as one word, the user's latest review, whether they are asked in person (`Requested`) and whether someone else has answered (`Feedback`). The base filters what the user has reviewed (`StillToReview`) and finds local clones.
 
 Fields a service does not have stay at their defaults (`rdNone`, `chkNone`, `False`); the views leave out what is not there.
 

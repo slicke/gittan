@@ -134,8 +134,11 @@ procedure TRepoFrame.StopBlame;
 begin
   ClearBlameCache;
   AbandonHistoryJob;
+  AbandonTimelapseJob;
+  AbandonChangeJob;
   AbandonRepoInfoJob;
   FreeAndNil(FHistory);
+  FreeAndNil(FTimelapse);
   { Waits for the jobs given up. }
   FreeAndNil(FBlameZombies);
   FreeAndNil(FBlameCache);

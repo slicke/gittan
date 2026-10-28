@@ -11,7 +11,7 @@ unit gittan.imagediff;
   checkerboard behind the image shows what is transparent, and a
   frame in the diff's red and green marks the old and the new side. A
   side without a version (an added or a deleted file) says so in a
-  dotted box; one BGRABitmap cannot decode says that instead. When both
+  dotted box; one that cannot be decoded says that instead. When both
   sides have the same size, the caption of the new side tells how many
   of the pixels differ.
 
@@ -62,9 +62,16 @@ type
       ACheckDark: TColor);
   end;
 
-{** Whether APath names an image the view can show, by its extension.
+{** Whether APath names an image the view can show, by its extension:
+  every format BGRABitmap reads, AVIF only when libavif can be loaded.
   SVG is text and keeps the text diff. }
 function IsImagePath(const APath: string): boolean;
+
+{** AData, the bytes of an image file, decoded; nil when it cannot be.
+  The format is told from the bytes. A WebP goes through LazInk's
+  decoder, which needs no library, the rest (and a WebP it cannot
+  decode) through BGRABitmap. }
+function DecodeImage(const AData: RawByteString): TBGRABitmap;
 
 {** The name of the image format of APath for the file header: the
   extension in upper case and "image" ("PNG image"). }
@@ -92,7 +99,7 @@ resourcestring
 implementation
 
 uses
-  Math, gittan.git;
+  Math, LibAvif, BGRAOpenRaster, BGRAPaintNet, BGRAPhoxo, InkWebP, gittan.git;
 
 resourcestring
   rsCannotRead = 'Cannot read this image';
@@ -106,8 +113,28 @@ const
   Gap = 6;
   MaxZoom = 8;
   CheckSize = 8;
-  ImageExtensions: array[0..9] of string = ('.png', '.jpg', '.jpeg', '.gif', '.bmp',
-    '.ico', '.tga', '.tif', '.tiff', '.pcx');
+  ImageExtensions: array[0..23] of string = ('.png', '.jpg', '.jpeg', '.gif', '.bmp',
+    '.ico', '.cur', '.tga', '.tif', '.tiff', '.pcx', '.webp', '.psd', '.pdd', '.xpm',
+    '.pnm', '.pbm', '.pgm', '.ppm', '.xwd', '.ora', '.pdn', '.lzp', '.oxo');
+
+var
+  AvifChecked, AvifLoaded: boolean;
+
+{ Whether libavif, which BGRABitmap reads AVIF with, can be loaded;
+  tried once. }
+function AvifReadable: boolean;
+begin
+  if not AvifChecked then
+  begin
+    AvifChecked := True;
+    try
+      AvifLoaded := LibAvifLoad;
+    except
+      AvifLoaded := False;
+    end;
+  end;
+  Result := AvifLoaded;
+end;
 
 function IsImagePath(const APath: string): boolean;
 var
@@ -117,7 +144,45 @@ begin
   for E in ImageExtensions do
     if Ext = E then
       Exit(True);
-  Result := False;
+  Result := (Ext = '.avif') and AvifReadable;
+end;
+
+function DecodeImage(const AData: RawByteString): TBGRABitmap;
+var
+  Stream: TStringStream;
+  WebP: TInkWebP;
+begin
+  Result := nil;
+  Stream := TStringStream.Create(AData);
+  try
+    try
+      if InkIsWebP(Copy(AData, 1, 12)) then
+      begin
+        WebP := TInkWebP.Create(Stream);
+        try
+          if WebP.Decoded then
+          begin
+            Result := TBGRABitmap.Create;
+            Result.Assign(WebP.Bitmap);
+          end;
+        finally
+          WebP.Free;
+        end;
+      end;
+      { what LazInk cannot decode BGRABitmap may, a WebP with libwebp }
+      if Result = nil then
+      begin
+        Stream.Position := 0;
+        Result := TBGRABitmap.Create(Stream);
+      end;
+    except
+      FreeAndNil(Result);
+    end;
+  finally
+    Stream.Free;
+  end;
+  if (Result <> nil) and ((Result.Width = 0) or (Result.Height = 0)) then
+    FreeAndNil(Result);
 end;
 
 function ImageFormatName(const APath: string): string;
@@ -205,7 +270,6 @@ procedure TGittanImageDiff.SetImages(const AOld, ANew: RawByteString;
   AHasOld, AHasNew: boolean);
 var
   Data: array[0..1] of RawByteString;
-  Stream: TStringStream;
   Oid: string;
   Size: int64;
   i: integer;
@@ -227,19 +291,8 @@ begin
       FBytes[i] := Size;
       Continue;
     end;
-    Stream := TStringStream.Create(Data[i]);
-    try
-      try
-        FImages[i] := TBGRABitmap.Create(Stream);
-      except
-        FreeAndNil(FImages[i]);
-      end;
-    finally
-      Stream.Free;
-    end;
-    FBroken[i] := (FImages[i] = nil) or (FImages[i].Width = 0) or (FImages[i].Height = 0);
-    if FBroken[i] then
-      FreeAndNil(FImages[i]);
+    FImages[i] := DecodeImage(Data[i]);
+    FBroken[i] := FImages[i] = nil;
   end;
   CountDiffering;
   Invalidate;
@@ -462,5 +515,11 @@ begin
   inherited Resize;
   Invalidate;
 end;
+
+initialization
+  { these register their readers only when asked }
+  RegisterOpenRasterFormat;
+  RegisterPaintNetFormat;
+  RegisterPhoxoFormat;
 
 end.

@@ -257,9 +257,12 @@ type
   TGittanForgeJob = class(TGittanJob)
   private
     FForgeName, FRoot, FLogin, FError: string;
+    FAvatarUrl, FKnownAvatarUrl, FAvatar: string;
     FMine, FReview: TGittanForgePulls;
     FClones: TStringList;
     FSiblings: boolean;
+    function Cancelled: boolean;
+    procedure FetchAvatar;
   protected
     {** The login and the two lists, the review list as the forge gives
       it; false with the reason in AError when they could not be read. }
@@ -267,6 +270,9 @@ type
       out AError: string): boolean; virtual; abstract;
     procedure Execute; override;
     property Root: string read FRoot;
+    {** The address of the user's picture, which Ask sets when the forge
+      gives one; Execute fetches it (Avatar). }
+    property AvatarUrl: string read FAvatarUrl write FAvatarUrl;
   public
     constructor Create(const AForgeName, ARoot: string);
     destructor Destroy; override;
@@ -278,10 +284,64 @@ type
     property Siblings: boolean read FSiblings write FSiblings;
     property ForgeName: string read FForgeName;
     property Login: string read FLogin;
+    {** The address of the picture already held, set before the job
+      starts: a picture at the same address is not fetched again, and
+      Avatar stays empty. }
+    property KnownAvatarUrl: string read FKnownAvatarUrl write FKnownAvatarUrl;
+    {** The address of the user's picture as the forge gave it, '' for
+      none, and the picture's bytes (PNG or JPEG) when it was fetched;
+      empty when it was not (known already, no answer, too large). }
+    property PictureUrl: string read FAvatarUrl;
+    property Avatar: string read FAvatar;
     property Mine: TGittanForgePulls read FMine;
     property Review: TGittanForgePulls read FReview;
     property Error: string read FError;
   end;
+
+  {** What can be done to a pull request on the forge: a review that
+    approves it, asks for changes or only comments; merging it with a
+    merge commit, squashed or rebased; marking a draft ready for
+    review. }
+  TGittanPullAction = (plApprove, plRequestChanges, plComment, plMerge, plSquash,
+    plRebaseMerge, plReady);
+
+  {** Does one thing to a pull request on the forge, in a thread since
+    it goes to the network: Action on pull request Number of Repo
+    ("owner/name"), with Text as the review's words (what a request
+    for changes needs, what a comment is, what an approval may carry).
+    Ok says whether it went through, Error the forge's or its tool's
+    words when it did not. A forge fills in Ask. }
+  TGittanPullActionJob = class(TGittanJob)
+  private
+    FRoot, FRepo, FText, FError: string;
+    FNumber: integer;
+    FAction: TGittanPullAction;
+    FOk: boolean;
+  protected
+    {** Does the action; false with the reason in AError. }
+    function Ask(out AError: string): boolean; virtual; abstract;
+    procedure Execute; override;
+    property Root: string read FRoot;
+  public
+    constructor Create(const ARoot, ARepo: string; ANumber: integer;
+      AAction: TGittanPullAction; const AText: string);
+    property Repo: string read FRepo;
+    property Number: integer read FNumber;
+    property Action: TGittanPullAction read FAction;
+    property Text: string read FText;
+    property Ok: boolean read FOk;
+    property Error: string read FError;
+  end;
+
+  {** An account the forge's tool is logged in to: Login on Host
+    ("github.com"), Active for the one the tool uses on that host. }
+  TGittanForgeAccount = record
+    Host, Login: string;
+    Active: boolean;
+  end;
+  TGittanForgeAccounts = array of TGittanForgeAccount;
+  {** Accounts by forge, one entry per registered forge in their order. }
+  TGittanForgeAccountsList = array of TGittanForgeAccounts;
 
   {** A forge, reached through its command line tool (Cli, a path to it).
     A forge inherits it and fills in the abstract methods; the jobs it
@@ -302,7 +362,21 @@ type
       is on this forge, so a repository with it gets this forge
       (ForgeClassFor). }
     class function HostsRemote(const AHost: string): boolean; virtual; abstract;
+    {** The accounts the tool is logged in to, each host's in the tool's
+      order, read from the tool's own files without running it (cheap,
+      main thread only, as a poll asks). None for a forge that keeps no
+      such list, the base's answer. }
+    class function Accounts: TGittanForgeAccounts; virtual;
+    {** Why the account on a host is not the tool's active one, when
+      something outside the tool's login decides it (a token in the
+      environment); empty otherwise, the base's answer. }
+    class function AccountsNote: string; virtual;
     property Cli: string read FCli;
+    {** Makes ALogin the tool's active account on AHost, for the tool
+      everywhere (a terminal too); false with the reason in AError. The
+      base cannot. Runs the tool and waits for it. }
+    function SwitchAccount(const AHost, ALogin: string; out AError: string): boolean;
+      virtual;
     {** The tool's version, from its own --version, as "gh 2.62.0"; false
       when it could not be run. }
     function Version(out AVersion: string): boolean; virtual; abstract;
@@ -329,9 +403,31 @@ type
     {** The ref a remote of the forge serves pull request ANumber's head
       at, for git fetch: "refs/pull/12/head". }
     function PullRef(ANumber: integer): string; virtual; abstract;
+    {** Whether the forge can act on a pull request (ActionJob gives a
+      job); the base cannot. }
+    class function HasPullActions: boolean; virtual;
+    {** A job that does AAction to pull request ANumber of ARepo
+      ("owner/name") with AText, see TGittanPullActionJob; ARoot is a
+      folder to run in. Not started; nil from a forge without actions
+      (the base). }
+    function ActionJob(const ARoot, ARepo: string; ANumber: integer;
+      AAction: TGittanPullAction; const AText: string): TGittanPullActionJob; virtual;
   end;
   TGittanForgeClass = class of TGittanForge;
   TGittanForgeClasses = array of TGittanForgeClass;
+
+{** What AAction did, in a message: "Approved", "Requested changes on",
+  "Commented on", "Merged", "Squashed and merged", "Rebased and merged",
+  "Marked ready for review", followed by the pull request's number by
+  the caller. }
+function PullActionDone(AAction: TGittanPullAction): string;
+
+{** Whether AAction is a review: it may carry words (Text), which a
+  request for changes and a comment must. }
+function PullActionIsReview(AAction: TGittanPullAction): boolean;
+
+{** Whether AAction merges the pull request. }
+function PullActionMerges(AAction: TGittanPullAction): boolean;
 
 {** Adds AClass to the forges Gittan knows; a forge's unit calls it in
   its initialization. }
@@ -355,6 +451,10 @@ function ForgeClassFor(const AUrls: string; const ASshConfig: string): TGittanFo
   they are give no forge and one of them is an ssh remote's, and then
   only the aliases looked up. }
 function ForgeClassFor(const AUrls: string): TGittanForgeClass; overload;
+{** The active accounts of AAccounts as one string, "host=login" a line
+  each, for telling whether the user switched: equal keys, the same
+  accounts in use. }
+function ActiveAccountsKey(const AAccounts: TGittanForgeAccounts): string;
 {** Keeps AForge as the forge of AClass with the tool ACli: left as it
   is when it already is, else freed and made again, or left nil without
   a class or a tool. True when it changed, so what the old one found can
@@ -383,7 +483,11 @@ function RemoteRepoPath(const AUrl: string): string;
 implementation
 
 uses
-  gittan.git;
+  gittan.git, gittan.http;
+
+const
+  { The largest picture taken, in bytes; a forge's are a few KB. }
+  MaxAvatarBytes = 1024 * 1024;
 
 var
   Forges: array of TGittanForgeClass;
@@ -1027,6 +1131,47 @@ begin
   Done;
 end;
 
+constructor TGittanPullActionJob.Create(const ARoot, ARepo: string; ANumber: integer;
+  AAction: TGittanPullAction; const AText: string);
+begin
+  inherited Create(True);
+  FRoot := ARoot;
+  FRepo := ARepo;
+  FNumber := ANumber;
+  FAction := AAction;
+  FText := AText;
+end;
+
+procedure TGittanPullActionJob.Execute;
+begin
+  FOk := Ask(FError);
+  Done;
+end;
+
+function PullActionDone(AAction: TGittanPullAction): string;
+begin
+  case AAction of
+    plApprove: Result := 'Approved';
+    plRequestChanges: Result := 'Requested changes on';
+    plComment: Result := 'Commented on';
+    plMerge: Result := 'Merged';
+    plSquash: Result := 'Squashed and merged';
+    plRebaseMerge: Result := 'Rebased and merged';
+    else
+      Result := 'Marked ready for review';
+  end;
+end;
+
+function PullActionIsReview(AAction: TGittanPullAction): boolean;
+begin
+  Result := AAction in [plApprove, plRequestChanges, plComment];
+end;
+
+function PullActionMerges(AAction: TGittanPullAction): boolean;
+begin
+  Result := AAction in [plMerge, plSquash, plRebaseMerge];
+end;
+
 constructor TGittanForgeJob.Create(const AForgeName, ARoot: string);
 begin
   inherited Create(True);
@@ -1056,6 +1201,7 @@ begin
     FindClones(FMine, FClones);
     FindClones(FReview, FClones);
   end;
+  FetchAvatar;
   if Terminated then
     Exit;
   if (FError = '') and (Length(FMine) = 0) and (Length(FReview) = 0) and (FLogin = '') then
@@ -1063,10 +1209,66 @@ begin
   Done;
 end;
 
+function TGittanForgeJob.Cancelled: boolean;
+begin
+  Result := Terminated;
+end;
+
+{ The user's picture, unless it is the one held; a failure leaves it
+  empty, and the page keeps the initial. }
+procedure TGittanForgeJob.FetchAvatar;
+var
+  Response: TGittanHttpResponse;
+begin
+  if (FAvatarUrl = '') or (FAvatarUrl = FKnownAvatarUrl) or Terminated then
+    Exit;
+  Response := HttpGet(FAvatarUrl, [], 15, @Cancelled);
+  if HttpOk(Response) and (Length(Response.Body) <= MaxAvatarBytes) then
+    FAvatar := Response.Body;
+end;
+
 constructor TGittanForge.Create(const ACli: string);
 begin
   inherited Create;
   FCli := ACli;
+end;
+
+class function TGittanForge.Accounts: TGittanForgeAccounts;
+begin
+  Result := nil;
+end;
+
+class function TGittanForge.AccountsNote: string;
+begin
+  Result := '';
+end;
+
+function TGittanForge.SwitchAccount(const AHost, ALogin: string;
+  out AError: string): boolean;
+begin
+  AError := Name + ' cannot switch accounts.';
+  Result := False;
+end;
+
+class function TGittanForge.HasPullActions: boolean;
+begin
+  Result := False;
+end;
+
+function TGittanForge.ActionJob(const ARoot, ARepo: string; ANumber: integer;
+  AAction: TGittanPullAction; const AText: string): TGittanPullActionJob;
+begin
+  Result := nil;
+end;
+
+function ActiveAccountsKey(const AAccounts: TGittanForgeAccounts): string;
+var
+  Account: TGittanForgeAccount;
+begin
+  Result := '';
+  for Account in AAccounts do
+    if Account.Active then
+      Result := Result + Account.Host + '=' + Account.Login + #10;
 end;
 
 end.

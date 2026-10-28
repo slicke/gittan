@@ -107,6 +107,7 @@ type
     procedure TestRebaseStray;
     procedure TestRebaseInteractive;
     procedure TestRebaseInteractiveEdit;
+    procedure TestRebaseInteractiveFixup;
     procedure TestRebaseInteractiveConflicts;
     procedure TestStashes;
     procedure TestStashConflicts;
@@ -2888,6 +2889,41 @@ begin
   AssertTrue(FRepo.Error, FRepo.RebaseSteps(First, Steps, Merges));
   AssertTrue('merges', Merges);
   AssertEquals(4, Length(Steps));
+end;
+
+{ A fixup! commit, named as Fixup with the Ticked Files names it,
+  folds into the commit it names through AutosquashSteps and the
+  rebase. }
+procedure TGitRepoTest.TestRebaseInteractiveFixup;
+var
+  First: string;
+  Steps: TGittanRebaseSteps;
+  Merges, Conflicts, Stopped: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  First := Trim(Git(['rev-parse', 'HEAD']));
+  WriteFile('b.txt', 'b'#10);
+  Commit('second');
+  WriteFile('c.txt', 'c'#10);
+  Commit('third');
+  WriteFile('b.txt', 'b2'#10);
+  Commit('fixup! second');
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.Error, FRepo.RebaseSteps(First, Steps, Merges));
+  AssertEquals(3, Length(Steps));
+  AutosquashSteps(Steps);
+  AssertEquals('second', Steps[0].Subject);
+  AssertEquals('fixup! second', Steps[1].Subject);
+  AssertTrue(Steps[1].Action = raFixup);
+  AssertEquals('third', Steps[2].Subject);
+  AssertTrue(FRepo.Error, FRepo.RebaseInteractive(First, Steps, Conflicts, Stopped));
+  AssertFalse(Conflicts);
+  AssertFalse(Stopped);
+  AssertEquals('third|second|files', Trim(Git(['log', '--format=%s', '-n', '3'])).Replace(#10, '|'));
+  AssertEquals('b2', Trim(Git(['show', 'HEAD~1:b.txt'])));
+  AssertEquals('b.txt', Trim(Git(['diff', '--name-only', 'HEAD~2', 'HEAD~1'])));
 end;
 
 { An edit stops the rebase after the commit, with nothing in conflict;

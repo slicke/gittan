@@ -38,6 +38,9 @@ begin
     BannerError(rsBmRebaseTitle, Format(rsRiMerges, [FBranch, AName]));
     Exit;
   end;
+  { The fixup! and squash! commits after the ones they name, as git's
+    --autosquash puts them; the dialog shows the result to change. }
+  AutosquashSteps(Steps);
   Pushed := 0;
   for i := 0 to High(Steps) do
     if Steps[i].Pushed then

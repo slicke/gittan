@@ -10,7 +10,7 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, Menus, ComCtrls,
   ExtCtrls, StdCtrls, LCLType, LazLoggerBase, Math, Types, contnrs, InkDraw,
-  ATSynEdit, ATSynEdit_Adapter_EControl, ATSynEdit_Bookmarks, ATSynEdit_Commands,
+  ATSynEdit, ATScrollBar, ATSynEdit_Adapter_EControl, ATSynEdit_Bookmarks, ATSynEdit_Commands,
   ATSynEdit_Carets, ATSynEdit_Gutter_Decor, ATSynEdit_Globals, ATStringProc,
   ATStringProc_WordJump,
   ATSynEdit_Markers, ATSynEdit_LineParts, ATSynEdit_Ranges, ATSynEdit_WrapInfo,
@@ -24,13 +24,13 @@ uses
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
   {$IFDEF LCLWin32}gittan.wintitlebar,{$ENDIF}
   {$IFDEF LCLGtk3}gittan.gtktitlebar,{$ENDIF}
-  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history,
+  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.timelapse, gittan.timelapsebar, gittan.pickaxe, gittan.navhistory, gittan.undo, gittan.paletteside,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.textfile, gittan.sectionheader, gittan.hintbox,
   gittan.forge, gittan.lfslocks,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
-  gittan.rebase, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
+  gittan.rebase, gittan.worktrees, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
   gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, ATSynEdit_Gaps, md5;
 
 type
@@ -128,6 +128,9 @@ type
       the frame that has it as Sender, also when it was open already. }
     procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil);
       virtual; abstract;
+    {** Whether a frame has the repository at ARoot open, or is opening
+      it. }
+    function HasOpen(const ARoot: string): boolean; virtual; abstract;
     {** Whether AFrame is the frame shown, the one whose menu, caption
       and title bar the window has. }
     function IsActive(AFrame: TRepoFrame): boolean; virtual; abstract;
@@ -141,6 +144,9 @@ type
     {** AFrame's name or path changed (TabTitle, TabHint): its tab and,
       while it is shown, the window's caption follow. }
     procedure FrameChanged(AFrame: TRepoFrame); virtual; abstract;
+    {** Where AFrame can go back and forward to changed (CanGoBack,
+      CanGoForward): the title bar's chevrons follow while it is shown. }
+    procedure NavChanged(AFrame: TRepoFrame); virtual; abstract;
     {** File > New Tab: a new, empty frame, shown. }
     procedure NewTab; virtual; abstract;
     {** File > Close Tab: closes AFrame, from the message loop, after
@@ -157,6 +163,11 @@ type
       when ATools, git, gh and the forge (TRepoFrame.SettingsChanged). }
     procedure SettingsChanged(AFont: TFont; ATheme, ATabSize: integer; ATools: boolean);
       virtual; abstract;
+    {** Looks whether the active account of a forge's tool changed since
+      the last look (a switch in the settings or in a terminal), and if
+      so has every frame and the forge view drop what the account of
+      before was shown (TRepoFrame.AccountChanged). }
+    procedure CheckAccounts; virtual; abstract;
     {** What the forge view (uforge) asks of the window, which runs it
       in the frame shown under the view: the folder dialog of File >
       Open Repository..., the settings dialog, and About (the settings'
@@ -433,6 +444,12 @@ type
     FCommitNote: TGittanHintBox;
     FCommitItem, FIdentityItem: TMenuItem;
     FCommitJob: TGittanCommitJob;
+    { A commit running as a fixup of a commit from the graph's menu
+      (StartFixupCommit): the job, and the commit it fixes up, its
+      short id and its first parent, the rebase to fold it in starts
+      from (FixupFoldClick), and the fixup commit once it is made. }
+    FFixupJob: TGittanCommitJob;
+    FFixupHash, FFixupShort, FFixupParent, FFixupId: string;
     { The commits still running in a repository no longer open, for
       their draft (DroppedCommitDone). }
     FDroppedCommits: TList;
@@ -468,6 +485,8 @@ type
     FFetchItem, FPullItem, FPushItem, FForcePushItem: TMenuItem;
     FSyncPopup: TGittanPopupList;
     FRecentPopup: TGittanPopupList;
+    { What the change is made of, dropped from the summary's totals. }
+    FCompositionPopup: TGittanPopupList;
     { The actions of a base that is a branch compared through the merge
       base with the current one (umain.branches.inc): the list dropped
       from the base label in the summary and the status bar, and the
@@ -698,7 +717,7 @@ type
     FViewPopup: TGittanPopupList;
     FViewItems: array of TMenuItem;
     FViewRows: array of integer;
-    FCodeHistoryItem, FGoFileHistoryItem: TMenuItem;
+    FCodeHistoryItem, FGoFileHistoryItem, FTimelapseItem: TMenuItem;
     { The submodules, dropped from the Repository page's tile when there
       is more than one; a pick shows that one's page. }
     FSubListPopup: TGittanPopupList;
@@ -717,6 +736,35 @@ type
     FReflogMenu: TPopupMenu;
     FMenuReflog: TGittanReflogEntry;
     FReflogItem: TMenuItem;
+    { Undo and Redo of what moved the branches (umain.undo.inc): the
+      steps, and the Branch menu's items. }
+    FUndoHistory: TGittanUndoHistory;
+    FUndoItem, FRedoItem: TMenuItem;
+    { Worktrees (umain.worktrees.inc): Branch > Worktrees..., the list,
+      the worktrees it shows, the menu of one and the one it is for. }
+    FWorktreesItem: TMenuItem;
+    FWorktreePopup: TGittanPopupList;
+    { The command palette (umain.palette.inc): its item in the Go menu,
+      the list and the action of each of its rows, by name. }
+    FPaletteItem: TMenuItem;
+    FPalettePopup: TGittanPopupList;
+    FPaletteNames: TStringList;
+    { While a row of the palette clicks its menu item: the focus is back
+      where it was, so an item that acts on the focused control by its
+      key (Go to Symbol) acts as the menu item instead. }
+    FPalettePicking: boolean;
+    { The buttons left and right of the palette while it is open. }
+    FPaletteLeft, FPaletteRight: TGittanPaletteSide;
+    { Back and Forward (umain.nav.inc): the places left, the place shown
+      as last noted (FNavValid once there is one), set while a place is
+      being shown again, and the Go menu's items. }
+    FNavHistory: TGittanNavHistory;
+    FNavPlace: TGittanPlace;
+    FNavValid, FNavBusy: boolean;
+    FBackItem, FForwardItem: TMenuItem;
+    FWorktreeMenu: TPopupMenu;
+    FListedWorktrees: TGittanWorktrees;
+    FMenuWorktree: TGittanWorktree;
     { Stashes (umain.stash.inc): what the last snapshot listed, the list
       that drops from the status bar's stash chip with the stashes it
       shows (FListedStashes, a copy, since a snapshot replaces FStashes
@@ -804,10 +852,15 @@ type
     FPendingKind: TGittanRemoteKind;
     FPendingMode: TGittanPullMode;
     FPendingArg, FPendingRemoteName, FPendingBranch: string;
-    { The list a click on the status bar's pull request drops down, and
-      what each of its rows does (the pa* constants). }
+    { The list a click on the status bar's pull request drops down; each
+      row's tag is what it does (the pa* constants). }
     FPullPopup: TGittanPopupList;
-    FPullActions: TIntegerDynArray;
+    { An action on a pull request on the forge (umain.pulls.inc): the
+      job running it, the pull request the card's menu was opened for
+      and that menu. }
+    FPullActionJob: TGittanPullActionJob;
+    FActionPull: TGittanPullRequest;
+    FPullCardPopup: TPopupMenu;
     FEditOld: TATSynEdit;
     { The hidden editor that parses another changed file for Go to
       Definition, with its adapter; made on the first lookup. }
@@ -906,6 +959,9 @@ type
       done. }
     FHistory: TGittanHistory;
     FHistoryJob: TGittanHistoryJob;
+    { The search for the commits making the changes of the graph's
+      filter (change:), given up when the filter or the graph goes. }
+    FChangeJob: TGittanChangeJob;
     FHistoryPath, FHistoryRef, FHistoryName: string;
     FHistoryFrom, FHistoryTo, FHistoryMax: integer;
     FHistoryMore: boolean;
@@ -915,6 +971,17 @@ type
     { The name the changes not committed yet are made under, for their
       initial (see DrawInitials). }
     FHistoryUser: string;
+    { Go > Time-lapse (see umain.timelapse.inc): the versions of the file
+      (their commits are in FHistory), the job that reads them, the bar
+      under the editor, the timer that plays them, the commit whose
+      version is shown, whether the lines it takes away are shown
+      leaving first, and whether a version is being filled in. }
+    FTimelapse: TGittanTimelapse;
+    FTimelapseJob: TGittanTimelapseJob;
+    FTimelapseBar: TGittanTimelapseBar;
+    FTimelapseTimer: TTimer;
+    FTimelapseCommit: integer;
+    FTimelapseLeaving, FTimelapseFilling: boolean;
     { The change view of an image, in the editor's place (see
       ShowImageChanges). }
     FImageDiff: TGittanImageDiff;
@@ -968,9 +1035,13 @@ type
     FGapToggle: string;
     { The link in a card a click opens when the button comes up. }
     FGapLink: string;
+    { The editors' scroll bars' look, this frame's own since its colors
+      follow its syntax theme. }
+    FScrollbarTheme: TATScrollbarTheme;
     function Palette: TGittanPalette;
     procedure ApplyTheme;
     procedure ApplyEditorColors(AEd: TATSynEdit);
+    procedure ApplyScrollbarTheme(const P: TGittanPalette);
     procedure SetupEditor(AEd: TATSynEdit);
     function AdapterOf(AEd: TATSynEdit): TATAdapterEControl;
     procedure MenuRefreshClick(Sender: TObject);
@@ -1057,6 +1128,20 @@ type
     procedure NewPullBannerClick(Sender: TObject);
     procedure UpdatePullPage;
     procedure PullPageCompare(Sender: TObject; const APull: TGittanPullRequest);
+    procedure PullPageContext(Sender: TObject; const APull: TGittanPullRequest;
+      const AScreenPos: TPoint);
+    procedure PullCardMenuClick(Sender: TObject);
+    {** Whether AAction can be done to APull now: the forge acts, the
+      pull request is open (a draft for plReady, not for a merge), and
+      no action runs. }
+    function CanPullAction(const APull: TGittanPullRequest; AAction: TGittanPullAction): boolean;
+    {** Does AAction to APull on the forge: asks the words of a review
+      (a request for changes and a comment need some) or whether to
+      merge, then runs the job; its end says so in a banner and asks
+      the forge for the pull requests again. }
+    procedure StartPullAction(const APull: TGittanPullRequest; AAction: TGittanPullAction);
+    procedure PullActionDone(Sender: TObject);
+    procedure AbandonPullAction;
     procedure SummaryReviewClick(Sender: TObject; const AScreenRect: TRect);
     procedure ReviewPopupPick(Sender: TObject; AIndex: integer);
     procedure PullPageWorkingTree(Sender: TObject);
@@ -1317,6 +1402,22 @@ type
     function HistoryHeaderText(AIndex: integer): string;
     procedure HistoryClick(ARow: integer);
     procedure ShowHistoryCommit(AIndex: integer);
+    { umain.timelapse.inc }
+    procedure MenuTimelapseClick(Sender: TObject);
+    procedure AbandonTimelapseJob;
+    procedure TimelapseJobDone(Sender: TObject);
+    procedure EndTimelapse;
+    procedure ShowTimelapseVersion(ACommit: integer; ALeaving: boolean);
+    procedure FillTimelapseVersion(ACommit: integer; ALeaving: boolean);
+    function TimelapseTakesAway(ACommit: integer): boolean;
+    function TimelapseStepTime: integer;
+    procedure SetTimelapsePlaying(APlaying: boolean);
+    procedure TimelapseTimerTimer(Sender: TObject);
+    procedure TimelapsePlay(Sender: TObject);
+    procedure TimelapseSeek(Sender: TObject);
+    procedure TimelapseStep(ADelta: integer);
+    function TimelapseDotColor(AIndex: integer): TColor;
+    function TimelapseKey(Key: word; Shift: TShiftState): boolean;
     { umain.actions.inc }
     procedure ApplySettings;
     procedure RebuildRecentMenu;
@@ -1339,6 +1440,7 @@ type
     procedure ApplyTabSize(ASize: integer);
     function FindForge: boolean;
     procedure ReFindForge;
+    procedure ForgetForgeAnswers;
     function ForgeName: string;
     procedure UpdateForgeItems;
     procedure FindAI;
@@ -1459,6 +1561,8 @@ type
     procedure SummaryContextFile(Sender: TObject; const APath: string;
       const AScreenPos: TPoint);
     procedure SummaryBranchClick(Sender: TObject; const AScreenRect: TRect);
+    procedure SummaryTotalsClick(Sender: TObject; const AScreenRect: TRect);
+    procedure CompositionPopupPick(Sender: TObject; AIndex: integer);
     procedure SummaryOpenUrl(Sender: TObject; const AUrl: string);
     function RepoFileExists(const APath: string): boolean;
     procedure OpenCommentLink(const AUrl: string);
@@ -1468,6 +1572,9 @@ type
     procedure ShowCommitGraph(const AFilter: string = '');
     procedure GraphMore(Sender: TObject);
     procedure GraphPathCommits(Sender: TObject; const APath: string; AHashes: TStrings);
+    procedure GraphChangeCommits(Sender: TObject; const AChanges: TStringArray);
+    procedure ChangeJobDone(Sender: TObject);
+    procedure AbandonChangeJob;
     procedure MenuCommitGraphClick(Sender: TObject);
     procedure GraphPick(Sender: TObject; const AHash: string);
     procedure PullChipClick(const AScreenRect: TRect);
@@ -1547,6 +1654,11 @@ type
     procedure IdentityClick(Sender: TObject);
     procedure CommitHeaderEnter(Sender: TObject);
     procedure StartCommit;
+    {** Commits the ticked files as a fixup of ACommit ("fixup! " and
+      its subject, what git commit --fixup writes), which the
+      interactive rebase folds into it (AutosquashSteps). }
+    procedure StartFixupCommit(const ACommit: TGittanGraphCommit);
+    procedure FixupFoldClick(Sender: TObject);
     {** The notice with a failed commit's reason (a hook's output, in
       its colors), Commit Again and Copy Output. }
     procedure ShowCommitFailure(const AError: string);
@@ -1643,6 +1755,37 @@ type
     procedure StashPopupPick(Sender: TObject; AIndex: integer);
     procedure StashContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
     procedure StashMenuClick(Sender: TObject);
+    function IsThisWorktree(const AWorktree: TGittanWorktree): boolean;
+    function OtherWorktreeBranches(out ABranches: TStringArray; out AError: string): boolean;
+    procedure MenuWorktreesClick(Sender: TObject);
+    procedure ListPaletteActions(AList: TStringList);
+    procedure MenuPaletteClick(Sender: TObject);
+    function NavCurrent(out APlace: TGittanPlace): boolean;
+    function NavSync: boolean;
+    procedure NavIdle(Sender: TObject; var Done: boolean);
+    procedure NavMark;
+    procedure NavClear;
+    procedure UpdateUndoItems;
+    procedure UndoRedo(ARedo: boolean);
+    procedure MenuUndoClick(Sender: TObject);
+    procedure MenuRedoClick(Sender: TObject);
+    procedure NavUpdateItems;
+    procedure NavRestoreRow(ARow, ACol, ATop: integer);
+    function NavRestore(const APlace: TGittanPlace): boolean;
+    procedure NavStep(AForward: boolean);
+    procedure MenuBackClick(Sender: TObject);
+    procedure MenuForwardClick(Sender: TObject);
+    procedure PalettePopupPick(Sender: TObject; AIndex: integer);
+    procedure ShowPaletteSides;
+    procedure PalettePopupClose(Sender: TObject);
+    procedure PaletteSideClick(Sender: TObject; AIndex: integer);
+    procedure ShowWorktreeList(const AScreenRect: TRect);
+    procedure WorktreePopupPick(Sender: TObject; AIndex: integer);
+    procedure OpenWorktree(const AWorktree: TGittanWorktree);
+    procedure WorktreeContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
+    procedure WorktreeMenuClick(Sender: TObject);
+    procedure AddWorktreeAsk;
+    procedure RemoveWorktreeAsk(const AWorktree: TGittanWorktree);
     procedure StashChangesAsk(AChosenOnly: boolean);
     procedure ApplyStash(AStash: TGittanStash; APop: boolean);
     procedure DropStashAsk(AStash: TGittanStash);
@@ -1658,6 +1801,9 @@ type
     procedure MenuPopStashClick(Sender: TObject);
     procedure MenuApplyStashClick(Sender: TObject);
     procedure MenuStashListClick(Sender: TObject);
+    function CommitKnownName(const ACommit: TGittanGraphCommit): string;
+    procedure GraphDrop(Sender: TObject; const ASource, ATarget: TGittanGraphCommit;
+      const AScreenPos: TPoint);
     procedure GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
       const AScreenPos: TPoint);
     procedure CommitMenuClick(Sender: TObject);
@@ -1853,6 +1999,12 @@ type
     {** AEvent is called with this frame as Sender once the repository
       opening now has opened, after any asked for before. }
     procedure WhenOpened(AEvent: TNotifyEvent);
+    {** Go > Back and Go > Forward, for the title bar's chevrons, and
+      whether there is somewhere to go (umain.nav.inc). }
+    function CanGoBack: boolean;
+    function CanGoForward: boolean;
+    procedure GoBack;
+    procedure GoForward;
     {** Something happened while the frame was in the background: a
       banner or a notice, a job that ended, files or commits that came;
       cleared when it is shown. }
@@ -1868,6 +2020,10 @@ type
     {** The welcome view says ADir is opening, before it does; '' gives
       it its buttons back. }
     procedure ShowOpening(const ADir: string);
+    {** The active account of the forge's tool changed (CheckAccounts):
+      the pull requests, the login and the review comments of the
+      account of before go, and the pull requests are asked for again. }
+    procedure AccountChanged;
     {** The settings changed (TRepoWindow.SettingsChanged): AFont, ATheme
       and ATabSize in the editors, the agent found again, and with
       ATools the forge and the repository read again. }
@@ -1925,6 +2081,13 @@ type
     procedure MenuAboutClick(Sender: TObject);
   end;
 
+{** Asks what AAction on APull needs before it runs: the words of a
+  review (a request for changes and a comment must have some, an
+  approval may), or whether to merge it, naming the method and the
+  base branch. False when the user backed out. }
+function AskPullAction(const APull: TGittanPullRequest; AAction: TGittanPullAction;
+  out AWords: string): boolean;
+
 implementation
 
 {$R *.lfm}
@@ -1978,6 +2141,9 @@ resourcestring
   rsNavHome = 'Home';
   rsNavGraph = 'Graph';
   rsNavRepository = 'Repository';
+  rsCompAllFiles = 'All files';
+  rsCompOneFile = '1 file';
+  rsCompFiles = '%d files';
   rsNavRecent = 'Recent';
   rsNavCommands = 'Commands';
   rsNavChanges = 'Changes';
@@ -2031,6 +2197,13 @@ resourcestring
   rsCommit = 'commit %s';
   rsHistory = 'Code &History';
   rsGoFileHistory = 'Fi&le History';
+  rsTimelapse = '&Time-lapse';
+  rsTimelapseTitle = 'Time-lapse of %s';
+  rsTimelapseLoading = 'Loading the history of the file...';
+  rsTimelapseNeedsFile = 'Show a file first: the time-lapse plays its history.';
+  rsTimelapseBinary = 'A binary file has no lines to play.';
+  rsNoTimelapse = 'The file has no committed history.';
+  rsTimelapseCounter = '%d / %d';
   rsHistoryTitle = 'History of %s';
   rsHistoryIn = '%s in %s';
   rsHistoryLines = 'lines %d-%d';
@@ -2072,6 +2245,19 @@ resourcestring
   rsFindPrev = 'Find &Previous';
   rsGoToDefinition = 'Go to &Definition';
   rsGoToSymbol = 'Go to S&ymbol...';
+  rsCommandPalette = 'Command &Palette...';
+  rsBack = '&Back';
+  rsForward = 'For&ward';
+  rsNavGone = 'That place is no longer there.';
+  rsFilterPalette = 'Type an action';
+  rsPaletteRecent = 'Recently used';
+  rsPsUndo = 'Undo';
+  rsPsRedo = 'Redo';
+  rsPsStash = 'Stash';
+  rsPsPull = 'Pull';
+  rsPsPush = 'Push';
+  rsPsBranch = 'New Branch';
+  rsPaletteOther = 'Other actions';
   rsGoToRepoSymbol = 'Go to Symbol in Re&pository...';
   rsChangedSymbols = 'Changed S&ymbols...';
   rsChangedSymbolHint = 'Changed symbol';
@@ -2247,7 +2433,22 @@ resourcestring
   rsCaSwitch = 'Switch to %s';
   rsCaBranch = 'Create Branch Here...';
   rsCaTag = 'Create Tag Here...';
+  rsUndoItem = 'Undo %s';
+  rsRedoItem = 'Redo %s';
+  rsUndoNone = 'Undo';
+  rsRedoNone = 'Redo';
+  rsUndid = 'Undid %s';
+  rsRedid = 'Redid %s';
+  rsUndoBusy = 'Finish what git is in the middle of first';
+  rsUndoFailed = 'Could not undo';
+  rsRedoFailed = 'Could not redo';
+  rsUndoPushedTitle = 'Undo';
+  rsUndoPushedAsk = 'Undo %s? %s has the commits it takes off %s, so the branch ' +
+    'will be behind it and the next push replaces them.';
+  rsUndoAction = 'Undo';
+  rsUndoChanged = 'The branches changed meanwhile; Refresh and try again';
   rsCaMerge = 'Merge %s into %s';
+  rsCaDropInHead = '%s is already in %s';
   rsCaCherryPick = 'Cherry-pick into %s';
   rsCaRevert = 'Revert Commit';
   rsCaReset = 'Reset %s to Here';
@@ -2276,6 +2477,9 @@ resourcestring
   rsCaWasReset = 'Reset %s to %s';
   rsCaConflicts = 'Stopped with conflicts: resolve them, then continue';
   rsCaRebase = 'Rebase Interactively from Here...';
+  rsCaFixup = 'Fixup with the Ticked Files';
+  rsFixupCommitted = 'Committed a fixup of %s';
+  rsFixupFold = 'Fold It In...';
   rsCaBisect = 'Bisect';
   rsCaBisectStartGood = 'Start Bisect: This Is Good, %s Is Bad';
   rsCaBisectStartBad = 'Start Bisect: This Is Bad';
@@ -2395,6 +2599,40 @@ resourcestring
   rsFilterSubmodules = 'Filter submodules';
   rsSubmodulesHeader = 'Submodules';
   rsReflogItem = 'Re&flog...';
+  rsWorktreesItem = '&Worktrees...';
+  rsWtHeader = 'Worktrees';
+  rsWtAddRow = 'Add Worktree...';
+  rsWtFilter = 'Filter worktrees';
+  rsWtThisOne = 'this one';
+  rsWtMain = 'the repository';
+  rsWtLocked = 'locked';
+  rsWtGone = 'folder is gone';
+  rsWtBare = 'bare';
+  rsWtDetached = 'at %s';
+  rsWtOpen = 'Open in New Tab';
+  rsWtLock = 'Lock';
+  rsWtUnlock = 'Unlock';
+  rsWtRemove = 'Remove...';
+  rsWtPrune = 'Prune Worktrees';
+  rsWtListFailed = 'Could not list the worktrees';
+  rsWtFailed = 'Git refused';
+  rsWtCannotOpen = '%s is not there to open';
+  rsWtLockedNote = 'Locked %s';
+  rsWtUnlockedNote = 'Unlocked %s';
+  rsWtPruned = 'Pruned the worktrees whose folders are gone';
+  rsWtAddTitle = 'Add Worktree';
+  rsWtFolderPrompt = 'Folder of the new worktree';
+  rsWtBranchPrompt = 'Branch (made if new, empty for one named after the folder)';
+  rsWtFolderExists = '%s exists already.';
+  rsWtAddFailed = 'Could not add the worktree';
+  rsWtAdded = 'Added the worktree %s';
+  rsWtRemoveTitle = 'Remove Worktree';
+  rsWtRemoveAsk = 'Remove the worktree %s? Its folder, %s, is deleted. The branch stays.';
+  rsWtRemoveForceAsk = 'The worktree %s cannot be removed as it is: %s' + LineEnding + LineEnding + 'Remove it anyway? Changes not committed there are lost.';
+  rsWtRemoveAction = 'Remove';
+  rsWtRemoveAnyway = 'Remove Anyway';
+  rsWtRemoveOpen = '%s is open in a tab; close it first';
+  rsWtRemoved = 'Removed the worktree %s';
   rsReflog = 'Where HEAD has been';
   rsNoReflog = 'The reflog is empty';
   rsReflogLost = 'only in the reflog';
@@ -2766,6 +3004,29 @@ resourcestring
   rsCompareWorkingTree = 'Compare With the Working Tree';
   rsOpenPullOnForge = 'Open on %s';
   rsCopyPullLink = 'Copy Link';
+  rsPullReviewHeader = 'Review';
+  rsPullMergeHeader = 'Merge';
+  rsPullApprove = 'Approve...';
+  rsPullRequestChanges = 'Request Changes...';
+  rsPullComment = 'Comment...';
+  rsPullMerge = 'Merge...';
+  rsPullSquash = 'Squash and Merge...';
+  rsPullRebaseMerge = 'Rebase and Merge...';
+  rsPullReady = 'Mark Ready for Review';
+  rsPullApproveTitle = 'Approve #%d';
+  rsPullApprovePrompt = 'A comment with the approval (optional)';
+  rsPullRequestChangesTitle = 'Request Changes on #%d';
+  rsPullRequestChangesPrompt = 'What should change';
+  rsPullCommentTitle = 'Comment on #%d';
+  rsPullCommentPrompt = 'Comment';
+  rsPullMergeTitle = 'Merge #%d';
+  rsPullMergeAsk = 'Merge #%d "%s" into %s with a merge commit?';
+  rsPullSquashAsk = 'Squash the commits of #%d "%s" into one on %s?';
+  rsPullRebaseMergeAsk = 'Rebase the commits of #%d "%s" onto %s?';
+  rsPullMergeAction = 'Merge';
+  rsPullActing = 'Asking %s...';
+  rsPullActionDone = '%s #%d';
+  rsPullActionFailed = 'Could not do it on %s';
   rsPositionOld = 'Ln %d (old), Col %d';
   rsReviewComments = 'Review &Comments';
   rsReviewResolved = 'Resolved';
@@ -2928,6 +3189,9 @@ const
     umain.leaveout.inc). }
   bmLeftOutAdded = 12;
   bmLeftOutDeleted = 13;
+  { A line the version shown in the time-lapse brought in, in the
+    stronger tone of its commit: kind bmHistoryNew + the commit's hue. }
+  bmHistoryNew = 50;
   bmHistoryBase = 100;
   { Tags of the editor's attribs that mark the words that differ inside
     an added or a deleted line. }
@@ -2995,6 +3259,54 @@ const
   { Matches beyond this are not counted; the find bar says "10000+". }
   MaxMatches = 10000;
 
+function AskPullAction(const APull: TGittanPullRequest; AAction: TGittanPullAction;
+  out AWords: string): boolean;
+var
+  Title, Prompt, Ask: string;
+begin
+  Result := False;
+  AWords := '';
+  if PullActionIsReview(AAction) then
+  begin
+    case AAction of
+      plApprove:
+      begin
+        Title := Format(rsPullApproveTitle, [APull.Number]);
+        Prompt := rsPullApprovePrompt;
+      end;
+      plRequestChanges:
+      begin
+        Title := Format(rsPullRequestChangesTitle, [APull.Number]);
+        Prompt := rsPullRequestChangesPrompt;
+      end;
+      else
+      begin
+        Title := Format(rsPullCommentTitle, [APull.Number]);
+        Prompt := rsPullCommentPrompt;
+      end;
+    end;
+    repeat
+      if not InputQuery(Title, Prompt, AWords) then
+        Exit;
+      AWords := Trim(AWords);
+    until (AWords <> '') or (AAction = plApprove);
+  end
+  else if PullActionMerges(AAction) then
+  begin
+    case AAction of
+      plMerge: Ask := rsPullMergeAsk;
+      plSquash: Ask := rsPullSquashAsk;
+      else
+        Ask := rsPullRebaseMergeAsk;
+    end;
+    if QuestionDlg(Format(rsPullMergeTitle, [APull.Number]),
+      Format(Ask, [APull.Number, APull.Title, APull.BaseRef]), mtConfirmation,
+      [mrYes, rsPullMergeAction, 'IsDefault', mrCancel, rsCancelButton, 'IsCancel'], 0) <> mrYes then
+      Exit;
+  end;
+  Result := True;
+end;
+
 { A menu item under AParent, owned by AParent's menu, for the context
   menus that are filled as they open. }
 function AddMenuItem(AParent: TMenuItem; const ACaption: string; ATag: integer;
@@ -3051,6 +3363,9 @@ begin
   FBlameCache := TStringList.Create;
   FBlameCache.CaseSensitive := True;
   FBlameZombies := TGittanJobReaper.Create;
+  FNavHistory := TGittanNavHistory.Create;
+  FUndoHistory := TGittanUndoHistory.Create;
+  Application.AddOnIdleHandler(@NavIdle);
   FDroppedCommits := TList.Create;
   FThreadFlips := TStringList.Create;
   FReviewMeasure := TBitmap.Create;
@@ -3192,6 +3507,17 @@ begin
   FSymbolBar.Visible := False;
   FSymbolBar.OnPick := @SymbolBarPick;
   FSymbolBar.OnClose := @SymbolBarClose;
+  { The time-lapse bar sits under the editor while a time-lapse plays. }
+  FTimelapseBar := TGittanTimelapseBar.Create(Self);
+  FTimelapseBar.Parent := EditorPanel;
+  FTimelapseBar.Align := alBottom;
+  FTimelapseBar.Visible := False;
+  FTimelapseBar.OnColor := @TimelapseDotColor;
+  FTimelapseBar.OnSeek := @TimelapseSeek;
+  FTimelapseBar.OnPlay := @TimelapsePlay;
+  FTimelapseTimer := TTimer.Create(Self);
+  FTimelapseTimer.Enabled := False;
+  FTimelapseTimer.OnTimer := @TimelapseTimerTimer;
   { The summary takes the editor's place until a file is picked. The
     scroll box gives it native scrolling; its resize keeps the summary at
     least as tall as the box, so the summary's background fills it. }
@@ -3234,6 +3560,7 @@ begin
   FSummary.OnBranchClick := @SummaryBranchClick;
   FSummary.OnBaseClick := @SummaryBaseClick;
   FSummary.OnSyncClick := @SummarySyncClick;
+  FSummary.OnTotalsClick := @SummaryTotalsClick;
   FSummary.OnBehindAction := @SummaryBehindAction;
   FSummary.OnOpenUrl := @SummaryOpenUrl;
   FSummary.OnFileExists := @RepoFileExists;
@@ -3290,6 +3617,26 @@ begin
   FStashPopup.FilterHint := rsFilterStashes;
   FStashPopup.OnPick := @StashPopupPick;
   FStashPopup.OnContext := @StashContext;
+  FWorktreeMenu := TPopupMenu.Create(Self);
+  FWorktreePopup := TGittanPopupList.Create(Self);
+  FWorktreePopup.Parent := Self;
+  FWorktreePopup.FilterHint := rsWtFilter;
+  FWorktreePopup.OnPick := @WorktreePopupPick;
+  FWorktreePopup.OnContext := @WorktreeContext;
+  FPaletteNames := TStringList.Create;
+  FPalettePopup := TGittanPopupList.Create(Self);
+  FPalettePopup.Parent := Self;
+  FPalettePopup.FilterHint := rsFilterPalette;
+  FPalettePopup.OnPick := @PalettePopupPick;
+  FPalettePopup.OnClose := @PalettePopupClose;
+  FPaletteLeft := TGittanPaletteSide.Create(Self);
+  FPaletteLeft.Parent := Self;
+  FPaletteLeft.OnClick := @PaletteSideClick;
+  FPalettePopup.AddKeeper(FPaletteLeft);
+  FPaletteRight := TGittanPaletteSide.Create(Self);
+  FPaletteRight.Parent := Self;
+  FPaletteRight.OnClick := @PaletteSideClick;
+  FPalettePopup.AddKeeper(FPaletteRight);
   { The Git LFS locks pop up under the status bar's branch, as the
     reflog does. }
   FLfsLocksMenu := TPopupMenu.Create(Self);
@@ -3303,9 +3650,12 @@ begin
   FGraph.Parent := Self;
   FGraph.OnPick := @GraphPick;
   FGraph.OnContext := @GraphContext;
+  FGraph.OnDrop := @GraphDrop;
   FGraph.OnMore := @GraphMore;
   FGraph.OnPathCommits := @GraphPathCommits;
+  FGraph.OnChangeCommits := @GraphChangeCommits;
   FCommitPopup := TPopupMenu.Create(Self);
+  FPullCardPopup := TPopupMenu.Create(Self);
   FPullPopup := TGittanPopupList.Create(Self);
   FPullPopup.Parent := Self;
   FPullPopup.OnPick := @PullPopupPick;
@@ -3318,6 +3668,9 @@ begin
   FRecentPopup := TGittanPopupList.Create(Self);
   FRecentPopup.Parent := Self;
   FRecentPopup.OnPick := @RecentPopupPick;
+  FCompositionPopup := TGittanPopupList.Create(Self);
+  FCompositionPopup.Parent := Self;
+  FCompositionPopup.OnPick := @CompositionPopupPick;
   FFindPopup := TGittanPopupList.Create(Self);
   FFindPopup.Parent := Self;
   FFindPopup.OnPick := @FindPopupPick;
@@ -3563,8 +3916,12 @@ begin
   StopRemoteJob(True);
   Application.RemoveOnActivateHandler(@AppActivate);
   Application.RemoveOnDeactivateHandler(@AppDeactivate);
+  Application.RemoveOnIdleHandler(@NavIdle);
+  FreeAndNil(FNavHistory);
+  FreeAndNil(FUndoHistory);
   StopWatcher;
   AbandonPullJob;
+  AbandonPullAction;
   AbandonReviewJob;
   AbandonSubmoduleJobs;
   FreeAndNil(FSubJobs);
@@ -3578,6 +3935,7 @@ begin
   FBranchRefs.Free;
   FGoneToDelete.Free;
   FUpstreamRows.Free;
+  FPaletteNames.Free;
   FGoneBranches.Free;
   FLfsLockable.Free;
   StopBlame;
@@ -3617,15 +3975,14 @@ begin
     editors sit edge to edge with the header, the sidebar and the
     status bar, which it showed as a box around the text. }
   AEd.OptBorderVisible := False;
-  {$IFDEF LCLCocoa}
-  { ATSynEdit takes the system scroll bars' width off its client
-    whenever it shows them, also macOS's overlay scrollers that take no
-    room: the minimap and the last line stopped a bar's width short of
-    the bottom and the right edge. Without them the wheel, the trackpad
-    and the minimap still scroll. }
-  AEd.OptScrollStyleHorz := TATEditorScrollbarStyle.Hide;
-  AEd.OptScrollStyleVert := TATEditorScrollbarStyle.Hide;
-  {$ENDIF}
+  { The scroll bars are ATSynEdit's own, painted in the palette's colors
+    (see ApplyScrollbarTheme), on every widgetset: the vertical one always
+    there, the horizontal one while a line is wider than the view. The
+    system bars were hidden on macOS, since ATSynEdit takes their width
+    off its client whenever it shows them, also macOS's overlay
+    scrollers that take no room, so the minimap and the last line
+    stopped a bar's width short of the bottom and the right edge. }
+  AEd.OptScrollbarsNew := True;
   {$IFDEF LCLGtk3}
   { ATSynEdit paints into a bitmap of its own only where the widgetset
     can draw outside Paint (EditorDoubleBufferedNeeded), and straight
@@ -3827,6 +4184,56 @@ begin
   end;
 end;
 
+{ The editors' scroll bars (ATScrollBar, one theme for every bar): a
+  track on the text background, a rounded thumb in the border color
+  that darkens under the mouse and while dragged, a pixel of track
+  around it, no arrows and no grip lines, as macOS draws its own. The
+  global theme gives the sizes ATSynEdit reads; the colors follow this
+  frame's syntax theme, so its bars take a copy of their own, told to
+  take it again (Update sets its size and repaints) after a change. }
+procedure TRepoFrame.ApplyScrollbarTheme(const P: TGittanPalette);
+var
+  Ed: TATSynEdit;
+begin
+  with ATScrollbarTheme do
+  begin
+    ColorBG := Edit.Colors.TextBG;
+    ColorBorder := ColorBG;
+    ColorScrolled := MixColor(ColorBG, P.Border, 0.4);
+    ColorThumbFill := P.Border;
+    ColorThumbFillOver := MixColor(P.Border, P.Dim, 0.5);
+    ColorThumbFillPressed := P.Dim;
+    ColorThumbBorder := ColorBG;
+    ColorThumbDecor := ColorThumbFill;
+    ColorThumbDecor2 := ColorThumbFill;
+    ColorArrowBorder := ColorBG;
+    ColorArrowFill := ColorBG;
+    ColorArrowFillOver := ColorBG;
+    ColorArrowFillPressed := ColorBG;
+    ColorArrowSign := ColorBG;
+    ColorArrowSignOver := ColorBG;
+    ColorArrowSignPressed := ColorBG;
+    ArrowStyleH := asaArrowsHidden;
+    ArrowStyleV := asaArrowsHidden;
+    InitialSize := 12;
+    ScalePercents := Px(100);
+    BorderSize := 0;
+    ThumbMinSize := 24;
+    { The grip lines are drawn on a thumb longer than this. }
+    ThumbMarkerMinimalSize := MaxInt;
+    ThumbRoundedRect := True;
+  end;
+  FScrollbarTheme := ATScrollbarTheme;
+  for Ed in [Edit, FEditOld] do
+    if Ed <> nil then
+    begin
+      Ed.ScrollbarVert.Theme := @FScrollbarTheme;
+      Ed.ScrollbarHorz.Theme := @FScrollbarTheme;
+      Ed.ScrollbarVert.Update;
+      Ed.ScrollbarHorz.Update;
+    end;
+end;
+
 procedure TRepoFrame.ApplyTheme;
 var
   P: TGittanPalette;
@@ -3842,16 +4249,21 @@ begin
   { The header and the find bar take the gutter's shade; the navigator
     pills sit on it. }
   P := Palette;
+  ApplyScrollbarTheme(P);
   FHeader.SetColors(P.Shade, P.Text, P.Dim, P.Added, P.Deleted, P.Line);
   FHeader.SetPillColors(P.Pill, P.Border, P.Accent);
   FNav.SetColors(P.Shade, P.Pill, P.Border, P.PillText, P.Accent);
   FFindBar.SetColors(P.Shade, P.Text, P.Dim, P.Line);
   FFindBar.Nav.SetColors(P.Shade, P.Pill, P.Border, P.PillText, P.Accent);
   FSymbolBar.SetColors(P.Shade, P.Text, P.Dim, P.Line);
+  FTimelapseBar.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Accent);
   for List in [FBranchPopup, FStashPopup, FUpstreamPopup, FTagPopup, FViewPopup,
     FSubListPopup, FReflogPopup, FPullPopup, FReviewPopup, FSyncPopup, FRecentPopup,
-    FBasePopup, FConflictPopup, FFindPopup] do
+    FBasePopup, FConflictPopup, FFindPopup, FCompositionPopup, FWorktreePopup,
+    FPalettePopup] do
     List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
+  FPaletteLeft.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border);
+  FPaletteRight.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border);
   FGraph.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent, P.Warning);
   FBanner.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Line, P.Accent, P.Deleted, P.Added);
   FDiscardPills.SetColors(P.Popup, P.Text, P.Border, P.Accent, P.Added, P.Deleted);
@@ -4502,7 +4914,10 @@ begin
   BranchMenu.Caption := rsBranchMenu;
   BranchMenu.OnClick := @BranchMenuOpen;
   Main.Items.Add(BranchMenu);
-  FSwitchItem := AddItem(BranchMenu, rsBmSwitchItem, ShortCut(VK_B, [ssModifier]),
+  FUndoItem := AddItem(BranchMenu, rsUndoNone, 0, @MenuUndoClick);
+  FRedoItem := AddItem(BranchMenu, rsRedoNone, 0, @MenuRedoClick);
+  BranchMenu.Add(NewLine);
+  FSwitchItem :=AddItem(BranchMenu, rsBmSwitchItem, ShortCut(VK_B, [ssModifier]),
     @MenuBranchListClick);
   FSwitchItem.Tag := Ord(blSwitch);
   FNewBranchItem := AddItem(BranchMenu, rsBmNewItem, 0, @MenuNewBranchClick);
@@ -4526,6 +4941,7 @@ begin
   FPushTagsItem := AddItem(BranchMenu, rsPushTagsItem, 0, @MenuPushTagsClick);
   BranchMenu.Add(NewLine);
   FReflogItem := AddItem(BranchMenu, rsReflogItem, 0, @MenuReflogClick);
+  FWorktreesItem := AddItem(BranchMenu, rsWorktreesItem, 0, @MenuWorktreesClick);
   UpdateBranchItems;
 
   { The Stash menu (umain.stash.inc). }
@@ -4639,6 +5055,21 @@ begin
   GoMenu := TMenuItem.Create(Main);
   GoMenu.Caption := rsGo;
   Main.Items.Add(GoMenu);
+  FPaletteItem := AddItem(GoMenu, rsCommandPalette, ShortCut(VK_P, [ssModifier]),
+    @MenuPaletteClick);
+  GoMenu.Add(NewLine);
+  { Cmd+[ and Cmd+] as in Xcode and Safari; Alt+Left and Alt+Right
+    elsewhere, as in a browser there. }
+  {$IFDEF LCLCocoa}
+  FBackItem := AddItem(GoMenu, rsBack, ShortCut(VK_OEM_4, [ssModifier]), @MenuBackClick);
+  FForwardItem := AddItem(GoMenu, rsForward, ShortCut(VK_OEM_6, [ssModifier]),
+    @MenuForwardClick);
+  {$ELSE}
+  FBackItem := AddItem(GoMenu, rsBack, ShortCut(VK_LEFT, [ssAlt]), @MenuBackClick);
+  FForwardItem := AddItem(GoMenu, rsForward, ShortCut(VK_RIGHT, [ssAlt]), @MenuForwardClick);
+  {$ENDIF}
+  NavUpdateItems;
+  GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextTab, ShortCut(VK_OEM_6, [ssModifier, ssShift]), @MenuNextTabClick);
   AddItem(GoMenu, rsPrevTab, ShortCut(VK_OEM_4, [ssModifier, ssShift]), @MenuPrevTabClick);
   GoMenu.Add(NewLine);
@@ -4648,7 +5079,9 @@ begin
   AddItem(GoMenu, rsFilterFiles, ShortCut(VK_F, [ssModifier, ssShift]), @MenuFilterFilesClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsGoToDefinition, ShortCut(VK_F12, []), @MenuGoToDefinitionClick);
-  AddItem(GoMenu, rsGoToSymbol, ShortCut(VK_P, [ssModifier]), @MenuGoToSymbolClick);
+  { Cmd+Enter in the commit message commits and in the tree's filter
+    asks the agent; MenuGoToSymbolClick passes it on to them. }
+  AddItem(GoMenu, rsGoToSymbol, ShortCut(VK_RETURN, [ssModifier]), @MenuGoToSymbolClick);
   AddItem(GoMenu, rsGoToRepoSymbol, ShortCut(VK_T, [ssModifier, ssShift]),
     @MenuGoToRepoSymbolClick);
   { Cmd+Y alone is the editor's delete-line key, which gets the key first. }
@@ -4657,6 +5090,8 @@ begin
   AddItem(GoMenu, rsCallers, ShortCut(VK_C, [ssModifier, ssShift]), @MenuCallersClick);
   FCodeHistoryItem := AddItem(GoMenu, rsHistory, ShortCut(VK_H, [ssModifier, ssShift]),
     @MenuHistoryClick);
+  FTimelapseItem := AddItem(GoMenu, rsTimelapse, ShortCut(VK_H, [ssModifier, ssAlt]),
+    @MenuTimelapseClick);
   FGoFileHistoryItem := AddItem(GoMenu, rsGoFileHistory, 0, @MenuGoFileHistoryClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextChange, ShortCut(VK_F7, []), @MenuNextChangeClick);
@@ -4934,6 +5369,11 @@ begin
   if ABookmarkKind >= bmHistoryBase then
   begin
     AColor := HistoryColor(ABookmarkKind - bmHistoryBase, htRow);
+    Exit;
+  end;
+  if ABookmarkKind >= bmHistoryNew then
+  begin
+    AColor := HistoryColor(ABookmarkKind - bmHistoryNew, htWord);
     Exit;
   end;
   if FDark then
@@ -5479,6 +5919,10 @@ begin
   begin
     if (Marks[i]^.Data.Kind = bmGap) or (Marks[i]^.Data.Kind = bmCommit) then
       Continue;
+    { The time-lapse's blocks are what the version shown changed. }
+    if (FTimelapse <> nil) and (FView = gvHistory) and
+      (Marks[i]^.Data.Kind >= bmHistoryBase) then
+      Continue;
     Line := Marks[i]^.Data.LineNum;
     if Prev <> Line - 1 then
     begin
@@ -5701,6 +6145,9 @@ begin
   UpdateDiscardItems;
   FPullRange := '';
   FMarkHash := '';
+  NavClear;
+  FUndoHistory.Clear;
+  UpdateUndoItems;
   FCleanKind := cnUntracked;
   FPatchFolder := '';
   FApplyFolder := '';
@@ -5880,6 +6327,11 @@ begin
   if (FSnapHead <> '') and ((Length(ASnap.Stats) <> Length(FStats)) or
     (ASnap.Behind <> FBehind) or (ASnap.Head <> FSnapHead)) then
     MarkNews;
+  { What moved the branches since the last snapshot, for Undo; nothing
+    while git is in the middle of something, which is one step once it
+    ends. }
+  FUndoHistory.Track(ASnap.RefState, ASnap.Operation <> '');
+  UpdateUndoItems;
   ClearBlameCache;
   { The files a comment's paths link to may have come or gone. }
   FReviewSegments.Clear;
@@ -6274,6 +6726,11 @@ begin
     gvSubmodule:
       RestoreSubmodule;
     gvHistory:
+      if FTimelapse <> nil then
+        { The history up to the commit does not change with the work
+          tree; the version is drawn again, for the lexer and colors. }
+        ShowTimelapseVersion(FTimelapseCommit, False)
+      else
       begin
         { The view is rebuilt when the job is done, at the same place. }
         FHistoryTopLine := TopLine;
@@ -6347,6 +6804,7 @@ begin
   FFindBar.Visible := False;
   FSymbolBar.Visible := False;
   AbandonHistoryJob;
+  EndTimelapse;
   if FBanner <> nil then
     PlaceUnderTitleBar;
 end;
@@ -6356,7 +6814,10 @@ procedure TRepoFrame.ShowEditor;
 begin
   { A history still being fetched is for a view that is no longer shown. }
   if FView <> gvHistory then
+  begin
     AbandonHistoryJob;
+    EndTimelapse;
+  end;
   { The symbol bar lists the file shown before. }
   FSymbolBar.Visible := False;
   FSummaryBox.Visible := False;
@@ -6384,6 +6845,7 @@ var
   Size: int64;
 begin
   AbandonHistoryJob;
+  EndTimelapse;
   FRepo.DiffSides(OldRef, NewRef);
   HasOld := FRepo.FileBlob(APath, OldRef, OldData);
   HasNew := FRepo.FileBlob(APath, NewRef, NewData);
@@ -6420,6 +6882,7 @@ var
   HasOld, HasNew, OldMissing, NewMissing: boolean;
 begin
   AbandonHistoryJob;
+  EndTimelapse;
   FRepo.DiffSides(OldRef, NewRef);
   HasOld := FRepo.FileSize(APath, OldRef, OldSize, OldMissing);
   HasNew := FRepo.FileSize(APath, NewRef, NewSize, NewMissing);
@@ -6456,6 +6919,7 @@ var
   Size: int64;
 begin
   AbandonHistoryJob;
+  EndTimelapse;
   Size := 0;
   if FindFirst(AFileName, faAnyFile, Info) = 0 then
   begin
@@ -7066,7 +7530,7 @@ end;
 { A command's key runs it (CommandKey). }
 procedure TRepoFrame.FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
 begin
-  if CommandKey(Key, Shift) then
+  if TimelapseKey(Key, Shift) or CommandKey(Key, Shift) then
     Key := 0;
 end;
 
@@ -7189,6 +7653,7 @@ const
 {$I umain.leaveout.inc}
 {$I umain.index.inc}
 {$I umain.history.inc}
+{$I umain.timelapse.inc}
 {$I umain.repofiles.inc}
 {$I umain.repopage.inc}
 {$I umain.commands.inc}
@@ -7201,6 +7666,10 @@ const
 {$I umain.branches.inc}
 {$I umain.rebase.inc}
 {$I umain.stash.inc}
+{$I umain.worktrees.inc}
+{$I umain.palette.inc}
+{$I umain.nav.inc}
+{$I umain.undo.inc}
 {$I umain.tags.inc}
 {$I umain.reflog.inc}
 {$I umain.bisect.inc}

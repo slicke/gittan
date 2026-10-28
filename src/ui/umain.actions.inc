@@ -410,6 +410,43 @@ begin
       Format(rsGitTooOldDetail, [MinGitMajor, MinGitMinor, GitExe]));
 end;
 
+{ Makes the accounts marked active in APicked the active ones of
+  AForge's tool, where they are not already; a switch that fails says
+  why. }
+procedure SwitchForgeAccounts(AForge: TGittanForgeClass; const APicked: TGittanForgeAccounts);
+var
+  Current: TGittanForgeAccounts;
+  Forge: TGittanForge;
+  Cli, Err: string;
+  i, j: integer;
+  Already: boolean;
+begin
+  Current := AForge.Accounts;
+  for i := 0 to High(APicked) do
+  begin
+    if not APicked[i].Active then
+      Continue;
+    Already := False;
+    for j := 0 to High(Current) do
+      Already := Already or (Current[j].Active and (Current[j].Host = APicked[i].Host) and
+        (Current[j].Login = APicked[i].Login));
+    if Already then
+      Continue;
+    { The tool as the settings name it, whether the hosting features
+      are on or not. }
+    Cli := App.Settings.ForgeCliPath(AForge.Name);
+    if Cli = '' then
+      Cli := FindTool(AForge.CliName);
+    Forge := AForge.Create(Cli);
+    try
+      if not Forge.SwitchAccount(APicked[i].Host, APicked[i].Login, Err) then
+        MessageDlg(Err, mtError, [mbOK], 0);
+    finally
+      Forge.Free;
+    end;
+  end;
+end;
+
 { The settings dialog previews the font, the theme and the tab width in
   the editor and puts back the old ones when it is cancelled; the commands
   are saved with the rest when the window closes. A new git or gh runs
@@ -490,6 +527,12 @@ begin
       end;
       { Then every tab, this one with them. }
       FWindow.SettingsChanged(F, V.Theme, V.TabSize, Tools);
+      { The accounts picked, switched where they are not the tools'; the
+        tabs follow through CheckAccounts. }
+      for i := 0 to High(Forges) do
+        if i <= High(V.Accounts) then
+          SwitchForgeAccounts(Forges[i], V.Accounts[i]);
+      FWindow.CheckAccounts;
     end
     else
       PreviewSettings(OldFont, OldTheme, OldTabSize);
@@ -582,17 +625,35 @@ procedure TRepoFrame.ReFindForge;
 begin
   if FindForge then
   begin
-    AbandonPullJob;
-    FPullKey := '';
-    FHasPull := False;
-    FPulls := nil;
-    FPullError := '';
-    FReviewPulls := nil;
-    FSummary.SetReviewPulls(nil);
-    FPullLogin := '';
-    ClearReviews;
+    { A push asked to open its page on a forge that is no longer it. }
+    FPullAfterPush := '';
+    ForgetForgeAnswers;
   end;
   UpdateForgeItems;
+end;
+
+{ What the forge answered, for a forge or an account of before. }
+procedure TRepoFrame.ForgetForgeAnswers;
+begin
+  AbandonPullJob;
+  AbandonPullAction;
+  FPullKey := '';
+  FHasPull := False;
+  FPulls := nil;
+  FPullError := '';
+  FReviewPulls := nil;
+  FSummary.SetReviewPulls(nil);
+  FPullLogin := '';
+  ClearReviews;
+end;
+
+procedure TRepoFrame.AccountChanged;
+begin
+  if not Assigned(FForge) then
+    Exit;
+  ForgetForgeAnswers;
+  UpdateForgeItems;
+  StartPullJob(True);
 end;
 
 { The forge's name, empty without one (when what is named after it is
@@ -719,6 +780,7 @@ begin
   AddRow(FReviewItem);
   FViewPopup.AddHeader(rsHistoryHeader);
   AddRow(FCodeHistoryItem);
+  AddRow(FTimelapseItem);
   AddRow(FGoFileHistoryItem);
   FViewPopup.Popup(AScreenRect);
 end;
@@ -1229,6 +1291,89 @@ begin
 end;
 
 { ---------------------------------------------------------------------------
+  What the change is made of
+  ---------------------------------------------------------------------------
+  A click on the summary's totals drops the changed files and their
+  lines, all of them, then per category (code, tests, documentation,
+  FileCategory in gittan.repoinfo), a category without a changed file
+  left out. A pick shows the first file of its row. }
+
+const
+  { The tag of All files in FCompositionPopup; a category's is its
+    ordinal. }
+  CompositionAll = 100;
+
+procedure TRepoFrame.SummaryTotalsClick(Sender: TObject; const AScreenRect: TRect);
+var
+  Files: array[TGittanFileCategory] of integer;
+  Added, Deleted: array[TGittanFileCategory] of int64;
+  AllFiles: integer;
+  AllAdded, AllDeleted: int64;
+  Cat: TGittanFileCategory;
+  i: integer;
+
+  function Detail(AAdded, ADeleted: int64; AFiles: integer): string;
+  begin
+    Result := '+' + IntToStr(AAdded) + ' −' + IntToStr(ADeleted) + ' · ';
+    if AFiles = 1 then
+      Result := Result + rsCompOneFile
+    else
+      Result := Result + Format(rsCompFiles, [AFiles]);
+  end;
+
+begin
+  if Length(FStats) = 0 then
+    Exit;
+  for Cat := Low(Cat) to High(Cat) do
+  begin
+    Files[Cat] := 0;
+    Added[Cat] := 0;
+    Deleted[Cat] := 0;
+  end;
+  for i := 0 to High(FStats) do
+  begin
+    Cat := FileCategory(FStats[i].Path);
+    Inc(Files[Cat]);
+    Inc(Added[Cat], FStats[i].Added);
+    Inc(Deleted[Cat], FStats[i].Deleted);
+  end;
+  AllFiles := 0;
+  AllAdded := 0;
+  AllDeleted := 0;
+  for Cat := Low(Cat) to High(Cat) do
+  begin
+    Inc(AllFiles, Files[Cat]);
+    Inc(AllAdded, Added[Cat]);
+    Inc(AllDeleted, Deleted[Cat]);
+  end;
+  FCompositionPopup.Clear;
+  FCompositionPopup.Add(rsCompAllFiles, Detail(AllAdded, AllDeleted, AllFiles), False,
+    CompositionAll);
+  FCompositionPopup.AddHeader('');
+  for Cat := Low(Cat) to High(Cat) do
+    if Files[Cat] > 0 then
+      FCompositionPopup.Add(CategoryName(Cat), Detail(Added[Cat], Deleted[Cat], Files[Cat]),
+        False, Ord(Cat));
+  FCompositionPopup.Popup(AScreenRect);
+end;
+
+procedure TRepoFrame.CompositionPopupPick(Sender: TObject; AIndex: integer);
+var
+  Picked: PtrInt;
+  i: integer;
+begin
+  Picked := FCompositionPopup.TagOf(AIndex);
+  if Picked < 0 then
+    Exit;
+  for i := 0 to High(FStats) do
+    if (Picked = CompositionAll) or (Ord(FileCategory(FStats[i].Path)) = Picked) then
+    begin
+      SummarySelectFile(Self, FStats[i].Path);
+      Exit;
+    end;
+end;
+
+{ ---------------------------------------------------------------------------
   Switching branch
   ---------------------------------------------------------------------------
   A click on the branch in the summary drops the branch list down from
@@ -1675,7 +1820,9 @@ end;
   to GraphSearchLimit commits at once, since a filter looks through the
   whole history; it asks for the same (GraphMore) when a filter is typed
   into a graph that was cut, or the last row is clicked. The commits
-  that touched a path come from TGittanRepo.PathCommits. }
+  that touched a path come from TGittanRepo.PathCommits, those making a
+  change (change:) from a TGittanChangeJob, since git log -S reads every
+  diff and takes seconds on a large repository. }
 const
   GraphLimit = 500;
   GraphSearchLimit = 50000;
@@ -1729,6 +1876,47 @@ procedure TRepoFrame.GraphPathCommits(Sender: TObject; const APath: string;
 begin
   if FRepo.Root <> '' then
     FRepo.PathCommits(APath, AHashes, GraphSearchLimit);
+end;
+
+{ A search still running for what was typed before is given up: its git
+  is ended. No changes only ends it. }
+procedure TRepoFrame.GraphChangeCommits(Sender: TObject; const AChanges: TStringArray);
+begin
+  AbandonChangeJob;
+  if Length(AChanges) = 0 then
+    Exit;
+  if FRepo.Root = '' then
+  begin
+    FGraph.SetChangeCommits(AChanges, nil, '');
+    Exit;
+  end;
+  FChangeJob := TGittanChangeJob.Create(FRepo.Root, AChanges, GraphSearchLimit);
+  FChangeJob.OnDone := @ChangeJobDone;
+  FChangeJob.Start;
+end;
+
+{ The job queues this from inside Execute, so it is freed from the
+  message loop with the blame jobs. }
+procedure TRepoFrame.ChangeJobDone(Sender: TObject);
+var
+  Job: TGittanChangeJob;
+begin
+  Job := TGittanChangeJob(Sender);
+  if Job <> FChangeJob then
+    Exit;
+  FChangeJob := nil;
+  FGraph.SetChangeCommits(Job.Changes, Job.Hashes, Job.Error);
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+end;
+
+procedure TRepoFrame.AbandonChangeJob;
+begin
+  if FChangeJob = nil then
+    Exit;
+  FChangeJob.Stop(False);
+  FBlameZombies.Add(FChangeJob);
+  FChangeJob := nil;
 end;
 
 { The filter that keeps the commits touching APath: quoted when the path
@@ -2271,6 +2459,8 @@ const
   paOpen = 3;
   paCopy = 4;
   paList = 5;
+  { The actions on the forge, paAct + Ord(TGittanPullAction). }
+  paAct = 10;
 
 { A click on the status bar's pull request: compare with it, which
   shows its changes as GitHub does and its review comments where they
@@ -2285,9 +2475,7 @@ var
   procedure AddAction(AAction: integer; const ACaption, ADetail: string;
     AChecked: boolean = False);
   begin
-    FPullPopup.Add(ACaption, ADetail, AChecked);
-    SetLength(FPullActions, Length(FPullActions) + 1);
-    FPullActions[High(FPullActions)] := AAction;
+    FPullPopup.Add(ACaption, ADetail, AChecked, AAction);
   end;
 
 begin
@@ -2305,10 +2493,7 @@ begin
       Detail := Format(rsReviewOpen, [Open]);
   end;
   FPullPopup.Clear;
-  FPullActions := nil;
   FPullPopup.AddHeader(Format(rsPullHintTitle, [FPull.Number, FPull.Title]));
-  SetLength(FPullActions, 1);
-  FPullActions[0] := 0;
   AddAction(paCompare, rsComparePull, Detail, Comparing);
   AddAction(paWorkingTree, rsCompareWorkingTree, '', (FRepo.Base = '') and
     not FRepo.WholeTree);
@@ -2318,14 +2503,37 @@ begin
     AddAction(paCopy, rsCopyPullLink, '');
   end;
   AddAction(paList, rsAllPulls, '');
+  { Review it, merge it, while it is open and the forge acts. }
+  if CanPullAction(FPull, plApprove) then
+  begin
+    FPullPopup.AddHeader(rsPullReviewHeader);
+    AddAction(paAct + Ord(plApprove), rsPullApprove, '');
+    AddAction(paAct + Ord(plRequestChanges), rsPullRequestChanges, '');
+    AddAction(paAct + Ord(plComment), rsPullComment, '');
+  end;
+  if CanPullAction(FPull, plMerge) then
+  begin
+    FPullPopup.AddHeader(rsPullMergeHeader);
+    AddAction(paAct + Ord(plMerge), rsPullMerge, '');
+    AddAction(paAct + Ord(plSquash), rsPullSquash, '');
+    AddAction(paAct + Ord(plRebaseMerge), rsPullRebaseMerge, '');
+  end
+  else if CanPullAction(FPull, plReady) then
+  begin
+    FPullPopup.AddHeader('');
+    AddAction(paAct + Ord(plReady), rsPullReady, '');
+  end;
   FPullPopup.Popup(AScreenRect);
 end;
 
 procedure TRepoFrame.PullPopupPick(Sender: TObject; AIndex: integer);
+var
+  Picked: PtrInt;
 begin
-  if (AIndex < 0) or (AIndex > High(FPullActions)) or not FHasPull then
+  Picked := FPullPopup.TagOf(AIndex);
+  if (Picked < 0) or not FHasPull then
     Exit;
-  case FPullActions[AIndex] of
+  case Picked of
     paCompare:
       if not ((FPullRange <> '') and (FRepo.Base = FPullRange) and
         (FPullNumber = FPull.Number)) then
@@ -2334,6 +2542,9 @@ begin
     paOpen: MenuOpenPullClick(Sender);
     paCopy: MenuCopyPullUrlClick(Sender);
     paList: ShowPulls;
+    else
+      if (Picked >= paAct) and (Picked <= paAct + Ord(High(TGittanPullAction))) then
+        StartPullAction(FPull, TGittanPullAction(Picked - paAct));
   end;
 end;
 

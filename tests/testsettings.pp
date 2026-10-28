@@ -151,6 +151,8 @@ begin
     S.UpdateSnoozedUntil := EncodeDate(2026, 10, 29) + 0.5;
     S.AddRecent('/tmp/a');
     S.AddRecent('/tmp/b');
+    S.AddPaletteRecent('File: Push');
+    S.AddPaletteRecent('View: Blame');
     S.Save;
   finally
     S.Free;
@@ -210,6 +212,9 @@ begin
     AssertEquals(2, S.Recent.Count);
     AssertEquals('newest first', '/tmp/b', S.Recent[0]);
     AssertEquals('/tmp/a', S.Recent[1]);
+    AssertEquals(2, S.PaletteRecent.Count);
+    AssertEquals('View: Blame', S.PaletteRecent[0]);
+    AssertEquals('File: Push', S.PaletteRecent[1]);
   finally
     S.Free;
   end;
@@ -264,6 +269,14 @@ begin
     AssertEquals('/repo/' + IntToStr(MaxRecent), S.Recent[0]);
     AssertEquals('/repo/' + IntToStr(MaxRecent + 3), S.Recent[1]);
     AssertEquals(-1, S.Recent.IndexOf('/repo/3'));
+    for i := 1 to MaxPaletteRecent + 2 do
+      S.AddPaletteRecent('Action ' + IntToStr(i));
+    S.AddPaletteRecent('Action 5');
+    AssertEquals('capped', MaxPaletteRecent, S.PaletteRecent.Count);
+    AssertEquals('Action 5', S.PaletteRecent[0]);
+    AssertEquals('Action ' + IntToStr(MaxPaletteRecent + 2), S.PaletteRecent[1]);
+    AssertEquals('a repeat is not kept twice', 'Action 3',
+      S.PaletteRecent[MaxPaletteRecent - 1]);
   finally
     S.Free;
   end;

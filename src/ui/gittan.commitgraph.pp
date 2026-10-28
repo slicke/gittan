@@ -7,9 +7,12 @@ unit gittan.commitgraph;
   or not pulled yet. The header names the branch and how far it is from
   its upstream, and holds the search field: what is typed there
   (ParseGraphFilter in gittan.graph: words, author:, since:, until:,
-  path:) keeps only the commits that match, as a flat list, since the
-  lanes of a part of the history mean nothing. The commits a path
-  filter asks for come from the owner (OnPathCommits), who asks git;
+  path:, change:) keeps only the commits that match, as a flat list,
+  since the lanes of a part of the history mean nothing. The commits a
+  path filter asks for come from the owner (OnPathCommits), who asks
+  git; those a change filter asks for take longer, so the owner is
+  asked (OnChangeCommits) and answers later with SetChangeCommits,
+  the list saying meanwhile that it searches;
   when the log shown was cut and a filter is typed, the owner is asked
   for the whole log once (OnMore), as it is by a click on the last row
   that says the log was cut.
@@ -27,6 +30,13 @@ unit gittan.commitgraph;
   nothing but a coarser scroll. One commit may be marked (Marked, its
   id), for the owner's "compare with the marked commit": its short id
   is shown in the accent.
+
+  A row can be dragged onto the row of the commit HEAD is on: that row
+  is outlined in the accent while the mouse is over it, the box scrolls
+  when the mouse nears its top or bottom, and the release there asks the
+  owner (OnDrop, with both commits and where to show a menu) what to do,
+  a merge of the dragged commit into the branch. Escape gives the drag
+  up.
 
   The Statistics toggle in the header shows, in the place of the rows,
   how many of the commits shown there are per week, as a bar for every
@@ -48,10 +58,16 @@ type
   TGittanGraphPickEvent = procedure(Sender: TObject; const AHash: string) of object;
   TGittanGraphContextEvent = procedure(Sender: TObject; const ACommit: TGittanGraphCommit;
     const AScreenPos: TPoint) of object;
+  {** ASource was dragged onto ATarget, the commit HEAD is on, and let
+    go at AScreenPos. }
+  TGittanGraphDropEvent = procedure(Sender: TObject;
+    const ASource, ATarget: TGittanGraphCommit; const AScreenPos: TPoint) of object;
   {** Asked for the ids of the commits that touched APath, added to
     AHashes. }
   TGittanGraphPathEvent = procedure(Sender: TObject; const APath: string;
     AHashes: TStrings) of object;
+  TGittanGraphChangeEvent = procedure(Sender: TObject;
+    const AChanges: TStringArray) of object;
 
   TGittanCommitGraph = class;
 
@@ -75,6 +91,8 @@ type
     FGraph: TGittanCommitGraph;
   protected
     procedure Paint; override;
+    procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
+      override;
     procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
       override;
@@ -111,6 +129,11 @@ type
       were asked for. }
     FPathHashes: TStringList;
     FPathKey: string;
+    { The commits making the changes of the filter: the changes they are
+      wanted for (FChangeKey, '' for none), those they were found for
+      (FChangeDone), and git's reason when the search failed. }
+    FChangeHashes: TStringList;
+    FChangeKey, FChangeDone, FChangeError: string;
     FLanes: integer;
     FMore, FAskedMore: boolean;
     FBranch: string;
@@ -119,6 +142,16 @@ type
     { The highlighted row, the one Enter picks; -1 for none. }
     FCurrent: integer;
     FMarked: string;
+    { A drag: the row the left button went down on (-1 for none) and
+      where, whether the mouse has gone far enough from there for a
+      drag, the row it would be dropped on (-1 for none), and the timer
+      that scrolls the box while the mouse is near its top or bottom.
+      FDragGivenUp: a drag given up with the button still down, whose
+      release then does nothing. }
+    FPressRow, FDropRow: integer;
+    FPressPoint: TPoint;
+    FDragging, FDragGivenUp: boolean;
+    FDragTimer: TTimer;
     FCloseRect: TRect;
     FCloseHot, FFooterHot: boolean;
     { The statistics shown in the place of the rows while FStatsOn, the
@@ -136,8 +169,10 @@ type
     FLaneColors: array of TColor;
     FOnPick: TGittanGraphPickEvent;
     FOnContext: TGittanGraphContextEvent;
+    FOnDrop: TGittanGraphDropEvent;
     FOnMore: TNotifyEvent;
     FOnPathCommits: TGittanGraphPathEvent;
+    FOnChangeCommits: TGittanGraphChangeEvent;
     FOnClose: TNotifyEvent;
     procedure Context(const AScreenPos: TPoint);
     function LaneColor(AIndex: integer): TColor;
@@ -155,6 +190,7 @@ type
     procedure ScrollAsync(Data: PtrInt);
     function FooterClickable: boolean;
     function FooterText: string;
+    function ChangePending: boolean;
     procedure Load(const ACommits: TGittanGraphCommits; AMore: boolean;
       const AKeep: string);
     function CurrentHash: string;
@@ -185,6 +221,14 @@ type
     function FitText(ACanvas: TCanvas; const AText: string; ARoom: integer): string;
     procedure Pick;
     procedure Dismiss;
+    function IsHeadRow(ARow: integer): boolean;
+    procedure SetDropRow(AValue: integer);
+    function DropRowAt(X, Y: integer): integer;
+    function DragMove(Shift: TShiftState; X, Y: integer): boolean;
+    procedure Drop(X, Y: integer);
+    procedure EndDrag;
+    procedure GiveUpDrag;
+    procedure DragTimerTick(Sender: TObject);
     procedure KeyInput(var Key: word);
     procedure EditChange(Sender: TObject);
     procedure EditKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
@@ -213,6 +257,12 @@ type
     {** Puts ACommits in the place of the ones shown, the answer to
       OnMore: the filter and the highlighted commit stay. }
     procedure Replace(const ACommits: TGittanGraphCommits; AMore: boolean);
+    {** The answer to OnChangeCommits: AHashes are the commits making
+      AChanges, or AError says why git could not look (AHashes then
+      empty). An answer for changes the filter no longer asks for is
+      dropped. }
+    procedure SetChangeCommits(const AChanges: TStringArray; AHashes: TStrings;
+      const AError: string);
     {** Hides the panel without a pick. }
     procedure Close;
     {** Keeps the panel in the middle of the parent after it resized. }
@@ -230,11 +280,19 @@ type
       the panel stays open under the menu the handler shows at
       AScreenPos. }
     property OnContext: TGittanGraphContextEvent read FOnContext write FOnContext;
+    {** A commit was dragged onto the one HEAD is on: the panel stays
+      open under the menu the handler shows at AScreenPos. }
+    property OnDrop: TGittanGraphDropEvent read FOnDrop write FOnDrop;
     {** The whole log is wanted: the handler answers with Replace. Asked
       once per Popup. }
     property OnMore: TNotifyEvent read FOnMore write FOnMore;
     {** The commits that touched a path of the filter are wanted. }
     property OnPathCommits: TGittanGraphPathEvent read FOnPathCommits write FOnPathCommits;
+    {** The commits making the changes of the filter are wanted: the
+      handler starts the search (dropping one still running) and
+      answers with SetChangeCommits. }
+    property OnChangeCommits: TGittanGraphChangeEvent
+      read FOnChangeCommits write FOnChangeCommits;
     {** The panel went away, however it was closed. }
     property OnClose: TNotifyEvent read FOnClose write FOnClose;
     {** A control whose clicks leave the panel open, as its own do, so
@@ -260,7 +318,9 @@ resourcestring
   rsGraphMatchesCut = '%d of the newest %d commits match';
   rsGraphEmpty = 'No commits yet';
   rsGraphNoMatch = 'No commits match';
-  rsGraphFilterHint = 'Search (author: since: until: path:)';
+  rsGraphFilterHint = 'Search (author: since: until: path: change:)';
+  rsGraphSearchingChanges = 'Searching the history for the change...';
+  rsGraphChangeFailed = 'git could not search: %s';
   rsGraphStats = 'Statistics';
   rsStatsSummary = '%s commits by %s authors';
   rsStatsSummaryOne = '%s commits by one author';
@@ -298,6 +358,10 @@ const
   MaxRowsHeight = 32000;
   { How long typing may pause before the filter is applied. }
   FilterDelay = 200;
+  { How far the mouse goes with the button down before a drag starts,
+    and how often a drag near the top or bottom scrolls the box. }
+  DragThreshold = 5;
+  DragScrollInterval = 40;
   { The statistics: the height of the weeks' bars, the column of the
     names and counts left of the weeks, the narrowest a week is drawn,
     and how many authors of a week the line above the bars names. }
@@ -323,6 +387,19 @@ begin
   FGraph.PaintRows(Canvas);
 end;
 
+procedure TGittanGraphRows.MouseDown(Button: TMouseButton; Shift: TShiftState;
+  X, Y: integer);
+begin
+  inherited MouseDown(Button, Shift, X, Y);
+  if Button = mbLeft then
+    FGraph.FDragGivenUp := False;
+  if (Button = mbLeft) and not FGraph.FStatsOn then
+  begin
+    FGraph.FPressRow := FGraph.RowAt(Y);
+    FGraph.FPressPoint := Point(X, Y);
+  end;
+end;
+
 { The mouse over empty space under the rows keeps the row the keys
   chose, which Enter and the Menu key act on. }
 procedure TGittanGraphRows.MouseMove(Shift: TShiftState; X, Y: integer);
@@ -335,6 +412,8 @@ begin
     FGraph.StatsHover(X, Y);
     Exit;
   end;
+  if FGraph.DragMove(Shift, X, Y) then
+    Exit;
   Row := FGraph.RowAt(Y);
   if Row >= 0 then
     FGraph.SetCurrent(Row);
@@ -353,6 +432,18 @@ begin
       FGraph.StatsClick(X, Y);
     Exit;
   end;
+  if (Button = mbLeft) and FGraph.FDragging then
+  begin
+    FGraph.Drop(X, Y);
+    Exit;
+  end;
+  if (Button = mbLeft) and FGraph.FDragGivenUp then
+  begin
+    FGraph.FDragGivenUp := False;
+    Exit;
+  end;
+  if Button = mbLeft then
+    FGraph.EndDrag;
   Row := FGraph.RowAt(Y);
   if (Button = mbLeft) and (Row >= 0) then
   begin
@@ -374,7 +465,8 @@ begin
   FGraph.SetFooterHot(False);
   if FGraph.FStatsOn then
     FGraph.StatsHover(-1, -1);
-  Cursor := crDefault;
+  if not FGraph.FDragging then
+    Cursor := crDefault;
 end;
 
 procedure TGittanGraphRows.KeyDown(var Key: word; Shift: TShiftState);
@@ -392,12 +484,18 @@ begin
   ControlStyle := ControlStyle + [csOpaque];
   Visible := False;
   FCurrent := -1;
+  FPressRow := -1;
+  FDropRow := -1;
   FStatsWeek := -1;
   FStatsAuthor := -1;
   FPathHashes := TStringList.Create;
   FPathHashes.Sorted := True;
   FPathHashes.Duplicates := dupIgnore;
   FPathHashes.CaseSensitive := True;
+  FChangeHashes := TStringList.Create;
+  FChangeHashes.Sorted := True;
+  FChangeHashes.Duplicates := dupIgnore;
+  FChangeHashes.CaseSensitive := True;
   FBox := TGittanGraphBox.Create(Self);
   FBox.FGraph := Self;
   FBox.Parent := Self;
@@ -418,6 +516,10 @@ begin
   FTimer.Enabled := False;
   FTimer.Interval := FilterDelay;
   FTimer.OnTimer := @TimerTick;
+  FDragTimer := TTimer.Create(Self);
+  FDragTimer.Enabled := False;
+  FDragTimer.Interval := DragScrollInterval;
+  FDragTimer.OnTimer := @DragTimerTick;
   SetColors(clWindow, clWindowText, clGrayText, clBtnFace, clBtnShadow,
     clHighlight, clMaroon);
   SetLaneColors([clHighlight]);
@@ -428,6 +530,7 @@ begin
   Application.RemoveAsyncCalls(Self);
   FHook.Hook(False);
   FPathHashes.Free;
+  FChangeHashes.Free;
   inherited Destroy;
 end;
 
@@ -683,6 +786,10 @@ begin
   FStatsHot := False;
   FPathKey := '';
   FPathHashes.Clear;
+  FChangeKey := '';
+  FChangeDone := '';
+  FChangeError := '';
+  FChangeHashes.Clear;
   Load(ACommits, AMore, '');
   FEdit.Text := AFilter;
   ApplyFilter;
@@ -701,15 +808,53 @@ end;
 
 procedure TGittanCommitGraph.Replace(const ACommits: TGittanGraphCommits; AMore: boolean);
 begin
+  { The rows a press or a drag was on move. }
+  GiveUpDrag;
   Load(ACommits, AMore, CurrentHash);
   ApplyFilter;
   Place;
   Application.QueueAsyncCall(@ScrollAsync, 0);
 end;
 
-{ Reads the field and keeps the rows that match. Lower case on both
-  sides, so the case does not matter. The commits of a path come from
-  the owner, asked again only when the paths change. When the log shown
+{ The changes of a filter as one string, '' for none. }
+function ChangeKeyOf(const AChanges: TStringArray): string;
+var
+  i: integer;
+begin
+  Result := '';
+  for i := 0 to High(AChanges) do
+    Result := Result + AChanges[i] + #1;
+end;
+
+procedure TGittanCommitGraph.SetChangeCommits(const AChanges: TStringArray;
+  AHashes: TStrings; const AError: string);
+var
+  Key: string;
+begin
+  Key := ChangeKeyOf(AChanges);
+  if (Key = '') or (Key <> FChangeKey) then
+    Exit;
+  FChangeHashes.Clear;
+  if AHashes <> nil then
+    FChangeHashes.AddStrings(AHashes);
+  FChangeDone := Key;
+  FChangeError := AError;
+  if Visible then
+    ApplyFilter;
+end;
+
+{ Whether the changes the filter asks for are still being looked for. }
+function TGittanCommitGraph.ChangePending: boolean;
+begin
+  Result := (FChangeKey <> '') and (FChangeKey <> FChangeDone);
+end;
+
+{ Reads the field and keeps the rows that match. Lower case and composed
+  on both sides, so neither the case nor how an ö is written matters
+  (the Repository page gives an author's name as git has it). The commits of a path come from
+  the owner, asked again only when the paths change; those of a change
+  come later (SetChangeCommits), and until then no commit is shown.
+  When the log shown
   was cut, the owner is asked for all of it first (once), and answers
   with Replace, which comes back here. The highlight stays on the same
   commit when it is still shown. }
@@ -722,9 +867,9 @@ begin
   FTimer.Enabled := False;
   FFilter := ParseGraphFilter(FEdit.Text);
   for i := 0 to High(FFilter.Words) do
-    FFilter.Words[i] := UTF8LowerCase(FFilter.Words[i]);
+    FFilter.Words[i] := UTF8LowerCase(Composed(FFilter.Words[i]));
   for i := 0 to High(FFilter.Authors) do
-    FFilter.Authors[i] := UTF8LowerCase(FFilter.Authors[i]);
+    FFilter.Authors[i] := UTF8LowerCase(Composed(FFilter.Authors[i]));
   FFiltered := not GraphFilterEmpty(FFilter);
   if FFiltered and FMore and not FAskedMore and Assigned(FOnMore) then
   begin
@@ -755,13 +900,28 @@ begin
     end;
     FPathKey := Key;
   end;
+  Key := '';
+  if Assigned(FOnChangeCommits) then
+    Key := ChangeKeyOf(FFilter.Changes);
+  if Key <> FChangeKey then
+  begin
+    FChangeKey := Key;
+    { None to search for (the filter cleared, or back to the one done)
+      stops a search still running. }
+    if ChangePending then
+      FOnChangeCommits(Self, FFilter.Changes)
+    else if Assigned(FOnChangeCommits) then
+      FOnChangeCommits(Self, nil);
+  end;
   Current := CurrentHash;
   SetLength(FShown, Length(FCommits));
   n := 0;
-  for i := 0 to High(FCommits) do
-    if not FFiltered or (MatchesGraphFilter(FFilter, FSearch[i], FAuthorKeys[i],
-      FCommits[i].Date) and ((Length(FFilter.Paths) = 0) or
-      (FPathHashes.IndexOf(FCommits[i].Hash) >= 0))) then
+  if not ChangePending then
+    for i := 0 to High(FCommits) do
+      if not FFiltered or (MatchesGraphFilter(FFilter, FSearch[i], FAuthorKeys[i],
+        FCommits[i].Date) and ((Length(FFilter.Paths) = 0) or
+        (FPathHashes.IndexOf(FCommits[i].Hash) >= 0)) and ((FChangeKey = '') or
+        (FChangeHashes.IndexOf(FCommits[i].Hash) >= 0))) then
     begin
       FShown[n] := i;
       Inc(n);
@@ -816,6 +976,12 @@ end;
 procedure TGittanCommitGraph.EditKeyDown(Sender: TObject; var Key: word;
   Shift: TShiftState);
 begin
+  if (Key = VK_ESCAPE) and FDragging then
+  begin
+    GiveUpDrag;
+    Key := 0;
+    Exit;
+  end;
   case Key of
     VK_UP, VK_DOWN, VK_PRIOR, VK_NEXT, VK_RETURN, VK_APPS:
       KeyInput(Key);
@@ -893,6 +1059,7 @@ end;
 procedure TGittanCommitGraph.Dismiss;
 begin
   FTimer.Enabled := False;
+  EndDrag;
   if not Visible then
     Exit;
   FHook.Hook(False);
@@ -923,6 +1090,134 @@ begin
   Dismiss;
   if Assigned(FOnPick) then
     FOnPick(Self, Hash);
+end;
+
+{ ---------------------------------------------------------------------------
+  Dragging a commit onto HEAD's
+  --------------------------------------------------------------------------- }
+
+function TGittanCommitGraph.IsHeadRow(ARow: integer): boolean;
+var
+  i: integer;
+begin
+  Result := False;
+  if (ARow < 0) or (ARow > High(FShown)) then
+    Exit;
+  for i := 0 to High(FCommits[FShown[ARow]].Refs) do
+    if FCommits[FShown[ARow]].Refs[i].Kind = grHead then
+      Exit(True);
+end;
+
+{ Only HEAD's row takes a drop, and not from itself. }
+procedure TGittanCommitGraph.SetDropRow(AValue: integer);
+begin
+  if (AValue = FPressRow) or not IsHeadRow(AValue) then
+    AValue := -1;
+  if FDragging then
+    if AValue >= 0 then
+      FRows.Cursor := crDrag
+    else
+      FRows.Cursor := crNoDrop;
+  if FDropRow = AValue then
+    Exit;
+  FDropRow := AValue;
+  FRows.Invalidate;
+end;
+
+{ The mouse moved over the rows with the button down on one: true while
+  that is a drag, which keeps the pressed row highlighted. The drag
+  starts once the mouse is DragThreshold away from the press, so a
+  click that shakes a little still picks. }
+function TGittanCommitGraph.DragMove(Shift: TShiftState; X, Y: integer): boolean;
+begin
+  Result := False;
+  if FPressRow < 0 then
+    Exit;
+  if not (ssLeft in Shift) then
+  begin
+    EndDrag;
+    Exit;
+  end;
+  if not FDragging then
+  begin
+    if (Abs(X - FPressPoint.X) < Px(DragThreshold)) and
+      (Abs(Y - FPressPoint.Y) < Px(DragThreshold)) then
+      Exit;
+    FDragging := True;
+    SetCurrent(FPressRow);
+    FDragTimer.Enabled := True;
+  end;
+  SetDropRow(DropRowAt(X, Y));
+  Result := True;
+end;
+
+procedure TGittanCommitGraph.Drop(X, Y: integer);
+var
+  Source, Target: integer;
+begin
+  Source := FPressRow;
+  SetDropRow(DropRowAt(X, Y));
+  Target := FDropRow;
+  EndDrag;
+  if (Target >= 0) and (Source >= 0) and (Source <= High(FShown)) and Assigned(FOnDrop) then
+    FOnDrop(Self, FCommits[FShown[Source]], FCommits[FShown[Target]],
+      FRows.ClientToScreen(Point(X, Y)));
+end;
+
+{ A drag ended with the button still down (Escape, the rows replaced):
+  its release picks nothing. A press not yet a drag is forgotten. }
+procedure TGittanCommitGraph.GiveUpDrag;
+begin
+  FDragGivenUp := FDragging;
+  EndDrag;
+end;
+
+procedure TGittanCommitGraph.EndDrag;
+begin
+  FDragTimer.Enabled := False;
+  FPressRow := -1;
+  if FDragging then
+  begin
+    FDragging := False;
+    if FCurrent >= 0 then
+      FRows.Cursor := crHandPoint
+    else
+      FRows.Cursor := crDefault;
+  end;
+  SetDropRow(-1);
+end;
+
+{ The mouse within a row of the box's top or bottom scrolls it half a
+  row a tick, and the row under the mouse is looked for again, since
+  the rows moved under it. }
+procedure TGittanCommitGraph.DragTimerTick(Sender: TObject);
+var
+  P: TPoint;
+  InBox: integer;
+begin
+  if not FDragging then
+    Exit;
+  InBox :=FBox.ScreenToClient(Mouse.CursorPos).Y;
+  if InBox < Px(RowHeight) then
+    SetLogicalTop(LogicalTop - Px(RowHeight) div 2)
+  else if InBox > FBox.ClientHeight - Px(RowHeight) then
+    SetLogicalTop(Min(LogicalTop + Px(RowHeight) div 2,
+      Max(0, TotalHeight - FBox.ClientHeight)))
+  else
+    Exit;
+  P := FRows.ScreenToClient(Mouse.CursorPos);
+  SetDropRow(DropRowAt(P.X, P.Y));
+end;
+
+{ The row a drag at X, Y of the rows would drop on: none outside the box
+  that shows them, where the rows go on out of sight (the mouse is
+  captured, so a release anywhere comes here). }
+function TGittanCommitGraph.DropRowAt(X, Y: integer): integer;
+begin
+  if PtInRect(FBox.ClientRect, FBox.ScreenToClient(FRows.ClientToScreen(Point(X, Y)))) then
+    Result := RowAt(Y)
+  else
+    Result := -1;
 end;
 
 function TGittanCommitGraph.RowAt(Y: integer): integer;
@@ -1006,6 +1301,12 @@ var
   Page: integer;
 begin
   Page := Max(1, FBox.ClientHeight div Px(RowHeight) - 1);
+  if (Key = VK_ESCAPE) and FDragging then
+  begin
+    GiveUpDrag;
+    Key := 0;
+    Exit;
+  end;
   { The statistics have no rows to move to: the keys scroll. }
   if FStatsOn then
   begin
@@ -1203,7 +1504,13 @@ begin
   begin
     ACanvas.Brush.Style := bsClear;
     ACanvas.Font.Color := FDim;
-    if FFiltered then
+    if ChangePending then
+      ACanvas.TextOut(Px(Pad), (Px(RowHeight) - ACanvas.TextHeight('Xg')) div 2,
+        rsGraphSearchingChanges)
+    else if (FChangeKey <> '') and (FChangeError <> '') then
+      ACanvas.TextOut(Px(Pad), (Px(RowHeight) - ACanvas.TextHeight('Xg')) div 2,
+        Format(rsGraphChangeFailed, [FChangeError]))
+    else if FFiltered then
       ACanvas.TextOut(Px(Pad), (Px(RowHeight) - ACanvas.TextHeight('Xg')) div 2, rsGraphNoMatch)
     else
       ACanvas.TextOut(Px(Pad), (Px(RowHeight) - ACanvas.TextHeight('Xg')) div 2, rsGraphEmpty);
@@ -1263,6 +1570,17 @@ begin
     ACanvas.Brush.Color := FHover;
     ACanvas.RoundRect(Px(Pad) div 2, ATop + 1, FRows.Width - Px(Pad) div 2, Bottom - 1, 8, 8);
     ACanvas.Pen.Style := psSolid;
+  end;
+  { The row a drag would be dropped on, outlined in the accent. }
+  if ARow = FDropRow then
+  begin
+    ACanvas.Pen.Style := psSolid;
+    ACanvas.Pen.Color := FAccent;
+    ACanvas.Pen.Width := 2;
+    ACanvas.Brush.Style := bsClear;
+    ACanvas.RoundRect(Px(Pad) div 2 + 1, ATop + 2, FRows.Width - Px(Pad) div 2 - 1,
+      Bottom - 2, 8, 8);
+    ACanvas.Pen.Width := 1;
   end;
 
   if not FFiltered then
@@ -1484,6 +1802,8 @@ begin
   Search := '';
   for i := 0 to High(FFilter.Paths) do
     Search := Search + Quoted('path:', FFilter.Paths[i]) + ' ';
+  for i := 0 to High(FFilter.Changes) do
+    Search := Search + Quoted('change:', FFilter.Changes[i]) + ' ';
   FEdit.Text := Search + Quoted('author:', FStats.Authors[FStatsAuthor].Name);
   FEdit.SelStart := Length(FEdit.Text);
   SetStatsOn(False);

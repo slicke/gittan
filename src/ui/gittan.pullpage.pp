@@ -37,6 +37,10 @@ uses
 type
   {** A click on a card: the pull request. }
   TGittanPullEvent = procedure(Sender: TObject; const APull: TGittanPullRequest) of object;
+  {** A right click on a card: the pull request and where to show a
+    menu, in screen coordinates. }
+  TGittanPullContextEvent = procedure(Sender: TObject; const APull: TGittanPullRequest;
+    const AScreenPos: TPoint) of object;
 
   { TGittanPullPage }
 
@@ -59,9 +63,12 @@ type
       measuring one in Layout. }
     FC: TCanvas;
     FOnCompare: TGittanPullEvent;
+    FOnContext: TGittanPullContextEvent;
     FOnWorkingTree, FOnRefresh: TNotifyEvent;
     FOnOpenUrl: TGittanOpenUrlEvent;
     function LinkAt(X, Y: integer): integer;
+    {** The pull request whose card is at X, Y; false between them. }
+    function CardAt(X, Y: integer; out APull: TGittanPullRequest): boolean;
     function NeedsReview(ANumber: integer): boolean;
     procedure SetHot(AValue: integer);
     procedure AddLink(const ARect: TRect; const AUrl: string);
@@ -112,6 +119,8 @@ type
     {** The root the pull requests are for. }
     property Root: string read FRoot;
     property OnCompare: TGittanPullEvent read FOnCompare write FOnCompare;
+    {** A right click on a card, for a menu. }
+    property OnContext: TGittanPullContextEvent read FOnContext write FOnContext;
     {** A click on the card compared against. }
     property OnWorkingTree: TNotifyEvent read FOnWorkingTree write FOnWorkingTree;
     property OnRefresh: TNotifyEvent read FOnRefresh write FOnRefresh;
@@ -658,10 +667,42 @@ begin
   SetHot(-1);
 end;
 
+function TGittanPullPage.CardAt(X, Y: integer; out APull: TGittanPullRequest): boolean;
+var
+  i, n: integer;
+  Url: string;
+begin
+  Result := False;
+  APull := Default(TGittanPullRequest);
+  { The card under the forge link that lies on it, too. }
+  for i := High(FLinkRects) downto 0 do
+  begin
+    if not PtInRect(FLinkRects[i], Point(X, Y)) then
+      Continue;
+    Url := FLinkUrls[i];
+    if Copy(Url, 1, Length(CompareLink)) = CompareLink then
+    begin
+      n := StrToIntDef(Copy(Url, Length(CompareLink) + 1, MaxInt), -1);
+      Result := (n >= 0) and (n <= High(FPulls));
+      if Result then
+      begin
+        APull := FPulls[n];
+        Exit;
+      end;
+    end
+    else if (Url = BranchLink) and FHasBranchPull then
+    begin
+      APull := FBranchPull;
+      Exit(True);
+    end;
+  end;
+end;
+
 procedure TGittanPullPage.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
 var
   i, n: integer;
   Url: string;
+  Card: TGittanPullRequest;
 
   procedure Pick(const APull: TGittanPullRequest);
   begin
@@ -676,6 +717,12 @@ var
 
 begin
   inherited MouseUp(Button, Shift, X, Y);
+  if (Button = mbRight) and Assigned(FOnContext) then
+  begin
+    if CardAt(X, Y, Card) then
+      FOnContext(Self, Card, ClientToScreen(Point(X, Y)));
+    Exit;
+  end;
   if Button <> mbLeft then
     Exit;
   i := LinkAt(X, Y);
