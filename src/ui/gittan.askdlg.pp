@@ -101,6 +101,14 @@ const
   AlertHeading = False;
   {$ENDIF}
   HeadingGap = 4;
+  { The right and bottom edges. On macOS the hidden title bar's strip
+    leaves some 30 points over the title, so the other edges get as
+    much as the icon has at the left, which evens them out. }
+  {$IFDEF LCLCocoa}
+  EdgeGap = IconLeft;
+  {$ELSE}
+  EdgeGap = Margin;
+  {$ENDIF}
 
 type
   TAskButton = record
@@ -227,7 +235,7 @@ begin
   Lbl.Align := alTop;
   Lbl.Top := NextTop;
   Lbl.BorderSpacing.Left := Scale96ToScreen(IconLeft + IconSize + IconGap);
-  Lbl.BorderSpacing.Right := Scale96ToScreen(Margin);
+  Lbl.BorderSpacing.Right := Scale96ToScreen(EdgeGap);
   if FNextTop = 1000 then
     Lbl.BorderSpacing.Top := Scale96ToScreen(TopGap)
   else
@@ -261,7 +269,10 @@ begin
   Row.AutoSize := True;
   Row.Align := alTop;
   Row.Top := NextTop;
-  Row.BorderSpacing.Around := Scale96ToScreen(Margin);
+  { Around would add to each side's own spacing: each is set alone. }
+  Row.BorderSpacing.Left := Scale96ToScreen(Margin);
+  Row.BorderSpacing.Right := Scale96ToScreen(EdgeGap);
+  Row.BorderSpacing.Bottom := Scale96ToScreen(EdgeGap);
   Row.BorderSpacing.Top := Scale96ToScreen(Margin + 4);
   Row.Constraints.MinHeight := 1;
   Row.Parent := Self;
@@ -548,7 +559,7 @@ begin
       Edit.Align := alTop;
       Edit.Top := F.NextTop;
       Edit.BorderSpacing.Left := F.Scale96ToScreen(IconLeft + IconSize + IconGap);
-      Edit.BorderSpacing.Right := F.Scale96ToScreen(Margin);
+      Edit.BorderSpacing.Right := F.Scale96ToScreen(EdgeGap);
       Edit.BorderSpacing.Top := F.Scale96ToScreen(4);
       if i <= High(AValues) then
         Edit.Text := AValues[i];
@@ -561,7 +572,7 @@ begin
     F.FError.Align := alTop;
     F.FError.Top := F.NextTop;
     F.FError.BorderSpacing.Left := F.Scale96ToScreen(IconLeft + IconSize + IconGap);
-    F.FError.BorderSpacing.Right := F.Scale96ToScreen(Margin);
+    F.FError.BorderSpacing.Right := F.Scale96ToScreen(EdgeGap);
     F.FError.BorderSpacing.Top := F.Scale96ToScreen(6);
     F.FError.Font.Color := RGBToColor(229, 72, 77);
     F.FError.Visible := False;
