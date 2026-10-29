@@ -89,8 +89,13 @@ VENDOR_PACKAGES := \
 # into Gittan.app and names it in Info.plist. A fresh bundle's Info.plist has
 # the project title as CFBundleName with its "&" unescaped, which no plist
 # reader accepts; escape it and name the bundle Gittan before adding the icon.
+# macOS 26 and later take the icon from icons/Assets.car instead (named by
+# CFBundleIconName), which `make icons` compiles from the Icon Composer document
+# icons/Gittan.icon with Xcode's actool; without it they put the .icns on a
+# grey tile of their own.
 ICON_MAC_SRC ?= icons/gittan-mac.png
 ICON_PNG_DIR ?= icons/png
+ACTOOL ?= $(firstword $(wildcard /Applications/Xcode.app/Contents/Developer/usr/bin/actool) xcrun actool)
 BUNDLE := Gittan.app
 ifeq ($(shell uname -s),Darwin)
 define bundle_icon
@@ -98,10 +103,13 @@ define bundle_icon
 	if [ -d "$(BUNDLE)/Contents" ]; then \
 	  mkdir -p "$(BUNDLE)/Contents/Resources"; \
 	  cp icons/Gittan.icns "$(BUNDLE)/Contents/Resources/Gittan.icns"; \
+	  cp icons/Assets.car "$(BUNDLE)/Contents/Resources/Assets.car"; \
 	  sed -i '' -E 's/&([^a-zA-Z#]|$$)/\&amp;\1/g' "$$plist"; \
 	  /usr/libexec/PlistBuddy -c 'Set :CFBundleName Gittan' "$$plist"; \
 	  /usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$$plist" >/dev/null 2>&1 || \
 	    /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string Gittan.icns' "$$plist"; \
+	  /usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$$plist" >/dev/null 2>&1 || \
+	    /usr/libexec/PlistBuddy -c 'Add :CFBundleIconName string Gittan' "$$plist"; \
 	  plutil -lint "$$plist" >/dev/null; \
 	  touch "$(BUNDLE)"; \
 	fi
@@ -155,6 +163,12 @@ ide:
 
 icons:
 	swift tools/makeicons.swift "$(ICON_MAC_SRC)" "$(ICON_PNG_DIR)" icons Gittan.ico
+	@set -e; out=$$(mktemp -d); \
+	"$(ACTOOL)" "$(CURDIR)/icons/Gittan.icon" --compile "$$out" --platform macosx \
+	  --minimum-deployment-target 11.0 --app-icon Gittan \
+	  --output-partial-info-plist "$$out/partial.plist" >/dev/null; \
+	cp "$$out/Assets.car" icons/Assets.car; rm -rf "$$out"; \
+	echo "wrote icons/Assets.car"
 
 # The welcome view's wordmark, icons/gittan-wordmark.svg, as a Pascal string
 # constant (src/ui/gittan.wordmark.inc, kept in git, so a build needs neither
