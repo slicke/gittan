@@ -80,17 +80,17 @@ VENDOR_PACKAGES := \
   vendor/metadarkstyle/metadarkstyle.lpk \
   vendor/lazink/lazink.lpk
 
-# Application icon. icons/gittan-source.png is the artwork, the motif cut out
-# of its background, and icons/gittan-source-mac.png the motif on its macOS
-# tile; `make icons` sizes them with tools/makeicons.swift (macOS only) into
-# icons/gittan.png, icons/png/, icons/Gittan.icns and Gittan.ico. Lazarus
+# Application icon. The artwork comes finished: icons/gittan-mac.png is the
+# macOS icon at 1024 pixels and icons/png/gittan-<n>.png the Windows and Linux
+# one at each size; `make icons` packs them with tools/makeicons.swift (macOS
+# only) into icons/Gittan.icns and Gittan.ico. Lazarus
 # compiles Gittan.ico into the executable for Windows and Linux, but writes no
 # icon into the macOS bundle it creates, so every Darwin build copies the .icns
 # into Gittan.app and names it in Info.plist. A fresh bundle's Info.plist has
 # the project title as CFBundleName with its "&" unescaped, which no plist
 # reader accepts; escape it and name the bundle Gittan before adding the icon.
-ICON_SRC ?= icons/gittan-source.png
-ICON_MAC_SRC ?= icons/gittan-source-mac.png
+ICON_MAC_SRC ?= icons/gittan-mac.png
+ICON_PNG_DIR ?= icons/png
 BUNDLE := Gittan.app
 ifeq ($(shell uname -s),Darwin)
 define bundle_icon
@@ -125,7 +125,7 @@ help:
 	@echo "  lexlib    Copy the lexers from $(LEXERS_SRC) and $(LEXERS_OWN) into $(LEXLIB)/ (part of every build)"
 	@echo "  deps      Register the vendored packages with lazbuild and compile them"
 	@echo "  ide       Rebuild the Lazarus IDE (after ATSynEdit, ATFlatControls, EncConv or BGRABitmap moves)"
-	@echo "  icons     Regenerate the icons from ICON_SRC=$(ICON_SRC) and ICON_MAC_SRC=$(ICON_MAC_SRC) (macOS only)"
+	@echo "  icons     Pack Gittan.icns and Gittan.ico from ICON_MAC_SRC=$(ICON_MAC_SRC) and ICON_PNG_DIR=$(ICON_PNG_DIR) (macOS only)"
 	@echo "  clean     Remove lib/, $(LEXLIB)/, the test build and the binary"
 	@echo "Current: WIDGETSET=$(WIDGETSET) LAZBUILD=$(LAZBUILD)"
 
@@ -153,7 +153,7 @@ ide:
 	"$(LAZBUILD)" --build-ide=
 
 icons:
-	swift tools/makeicons.swift "$(ICON_SRC)" "$(ICON_MAC_SRC)" icons Gittan.ico
+	swift tools/makeicons.swift "$(ICON_MAC_SRC)" "$(ICON_PNG_DIR)" icons Gittan.ico
 
 lexlib:
 	@if [ ! -d "$(LEXERS_SRC)/Pascal" ]; then \
