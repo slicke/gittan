@@ -452,6 +452,12 @@ function PullActionIsReview(AAction: TGittanPullAction): boolean;
 {** Whether AAction merges the pull request. }
 function PullActionMerges(AAction: TGittanPullAction): boolean;
 
+{** Whether AAction fits APull as it is: an open pull request the
+  forge knows (a number and its repository); a draft can be marked
+  ready but not merged, and only a draft marked ready. Whether the
+  forge acts at all is the caller's to know. }
+function PullActionFits(const APull: TGittanPullRequest; AAction: TGittanPullAction): boolean;
+
 {** Adds AClass to the forges Gittan knows; a forge's unit calls it in
   its initialization. }
 procedure RegisterForge(AClass: TGittanForgeClass);
@@ -1242,6 +1248,16 @@ end;
 function PullActionMerges(AAction: TGittanPullAction): boolean;
 begin
   Result := AAction in [plMerge, plSquash, plRebaseMerge];
+end;
+
+function PullActionFits(const APull: TGittanPullRequest; AAction: TGittanPullAction): boolean;
+begin
+  Result := (APull.Number > 0) and (APull.Repo <> '') and (APull.State = prOpen);
+  if Result then
+    if AAction = plReady then
+      Result := APull.IsDraft
+    else if PullActionMerges(AAction) then
+      Result := not APull.IsDraft;
 end;
 
 constructor TGittanForgeJob.Create(const AForgeName, ARoot: string);

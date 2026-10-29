@@ -128,81 +128,94 @@ end;
   does it in a thread (TGittanPullActionJob, from the forge's
   ActionJob); when it is done a banner says so, or shows the tool's
   words, and the forge is asked for the pull requests again, so the
-  page and the chip follow. One action runs at a time. }
-const
-  pcCompare = 1;
-  pcOpen = 2;
-  pcCopy = 3;
-  pcAct = 10;
+  page and the chip follow. One action runs at a time. The forge view's
+  cards have the same menu (FillPullCardMenu, PullCardAction). }
+procedure FillPullCardMenu(AMenu: TPopupMenu; const APull: TGittanPullRequest;
+  const AForgeName: string; AActs: boolean; AOnClick: TNotifyEvent);
 
-procedure TRepoFrame.PullPageContext(Sender: TObject; const APull: TGittanPullRequest;
-  const AScreenPos: TPoint);
-
-  function Add(const ACaption: string; ATag: integer; AEnabled: boolean = True): TMenuItem;
+  procedure Add(const ACaption: string; ATag: integer);
   begin
-    Result := AddMenuItem(FPullCardPopup.Items, ACaption, ATag, AEnabled, @PullCardMenuClick);
+    AddMenuItem(AMenu.Items, ACaption, ATag, True, AOnClick);
+  end;
+
+  function Fits(AAction: TGittanPullAction): boolean;
+  begin
+    Result := AActs and PullActionFits(APull, AAction);
   end;
 
 begin
-  if FRepo.Root = '' then
-    Exit;
-  FActionPull := APull;
-  FPullCardPopup.Items.Clear;
+  AMenu.Items.Clear;
   Add(rsComparePull, pcCompare);
   if APull.Url <> '' then
   begin
-    Add(Format(rsOpenPullOnForge, [ForgeName]), pcOpen);
+    Add(Format(rsOpenPullOnForge, [AForgeName]), pcOpen);
     Add(rsCopyPullLink, pcCopy);
   end;
-  if CanPullAction(APull, plApprove) then
+  if Fits(plApprove) then
   begin
-    FPullCardPopup.Items.Add(NewLine);
+    AMenu.Items.Add(NewLine);
     Add(rsPullApprove, pcAct + Ord(plApprove));
     Add(rsPullRequestChanges, pcAct + Ord(plRequestChanges));
     Add(rsPullComment, pcAct + Ord(plComment));
   end;
-  if CanPullAction(APull, plMerge) then
+  if Fits(plMerge) then
   begin
-    FPullCardPopup.Items.Add(NewLine);
+    AMenu.Items.Add(NewLine);
     Add(rsPullMerge, pcAct + Ord(plMerge));
     Add(rsPullSquash, pcAct + Ord(plSquash));
     Add(rsPullRebaseMerge, pcAct + Ord(plRebaseMerge));
   end
-  else if CanPullAction(APull, plReady) then
+  else if Fits(plReady) then
   begin
-    FPullCardPopup.Items.Add(NewLine);
+    AMenu.Items.Add(NewLine);
     Add(rsPullReady, pcAct + Ord(plReady));
   end;
+end;
+
+function PullCardAction(ATag: integer; out AAction: TGittanPullAction): boolean;
+begin
+  Result := (ATag >= pcAct) and (ATag <= pcAct + Ord(High(TGittanPullAction)));
+  if Result then
+    AAction := TGittanPullAction(ATag - pcAct)
+  else
+    AAction := Low(TGittanPullAction);
+end;
+
+procedure TRepoFrame.PullPageContext(Sender: TObject; const APull: TGittanPullRequest;
+  const AScreenPos: TPoint);
+begin
+  if FRepo.Root = '' then
+    Exit;
+  FActionPull := APull;
+  FillPullCardMenu(FPullCardPopup, APull, ForgeName, PullActsNow, @PullCardMenuClick);
   FPullCardPopup.PopUp(AScreenPos.X, AScreenPos.Y);
 end;
 
 procedure TRepoFrame.PullCardMenuClick(Sender: TObject);
 var
-  Which: integer;
+  Picked: TGittanPullAction;
 begin
-  Which := (Sender as TMenuItem).Tag;
-  case Which of
+  case (Sender as TMenuItem).Tag of
     pcCompare: ComparePull(FActionPull);
     pcOpen: if FActionPull.Url <> '' then
         OpenURL(FActionPull.Url);
     pcCopy: Clipboard.AsText := FActionPull.Url;
     else
-      if (Which >= pcAct) and (Which <= pcAct + Ord(High(TGittanPullAction))) then
-        StartPullAction(FActionPull, TGittanPullAction(Which - pcAct));
+      if PullCardAction((Sender as TMenuItem).Tag, Picked) then
+        StartPullAction(FActionPull, Picked);
   end;
+end;
+
+function TRepoFrame.PullActsNow: boolean;
+begin
+  Result := Assigned(FForge) and FForge.HasPullActions and (FRepo.Root <> '') and
+    (FPullActionJob = nil);
 end;
 
 function TRepoFrame.CanPullAction(const APull: TGittanPullRequest;
   AAction: TGittanPullAction): boolean;
 begin
-  Result := Assigned(FForge) and FForge.HasPullActions and (FRepo.Root <> '') and
-    (FPullActionJob = nil) and (APull.Number > 0) and (APull.Repo <> '') and
-    (APull.State = prOpen);
-  if Result then
-    case AAction of
-      plReady: Result := APull.IsDraft;
-      plMerge, plSquash, plRebaseMerge: Result := not APull.IsDraft;
-    end;
+  Result := PullActsNow and PullActionFits(APull, AAction);
 end;
 
 procedure TRepoFrame.StartPullAction(const APull: TGittanPullRequest;

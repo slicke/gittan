@@ -87,7 +87,8 @@ type
     procedure PageContext(Sender: TObject; const APull: TGittanForgePull;
       const AScreenPos: TPoint);
     procedure CardMenuClick(Sender: TObject);
-    function CanAction(const APull: TGittanForgePull; AAction: TGittanPullAction): boolean;
+    { Whether an action can be done now: the forge acts and none runs. }
+    function ActsNow: boolean;
     procedure StartAction(const APull: TGittanForgePull; AAction: TGittanPullAction);
     procedure ActionDone(Sender: TObject);
     procedure AbandonAction;
@@ -158,17 +159,6 @@ uses
   LCLIntf, gittan.app, gittan.theme, gittan.textfit;
 
 resourcestring
-  rsComparePull = 'Compare With This Pull Request';
-  rsOpenPullOnForge = 'Open on %s';
-  rsCopyPullLink = 'Copy Link';
-  rsPullApprove = 'Approve...';
-  rsPullRequestChanges = 'Request Changes...';
-  rsPullComment = 'Comment...';
-  rsPullMerge = 'Merge...';
-  rsPullSquash = 'Squash and Merge...';
-  rsPullRebaseMerge = 'Rebase and Merge...';
-  rsPullReady = 'Mark Ready for Review';
-  rsPullActionFailed = 'Could not do it on %s';
   rsFile = '&File';
   rsNewTab = 'New &Tab';
   rsOpenRepo = 'Open &Repository...';
@@ -580,88 +570,40 @@ end;
   same questions (AskPullAction in umain). The forge does it in a
   thread; when it is done the view asks for the pull requests again,
   and a failure shows the tool's words. One action runs at a time. }
-const
-  pcCompare = 1;
-  pcOpen = 2;
-  pcCopy = 3;
-  pcAct = 10;
-
 procedure TForgeView.PageContext(Sender: TObject; const APull: TGittanForgePull;
   const AScreenPos: TPoint);
-
-  function Add(const ACaption: string; ATag: integer): TMenuItem;
-  begin
-    Result := TMenuItem.Create(FCardPopup);
-    Result.Caption := ACaption;
-    Result.Tag := ATag;
-    Result.OnClick := @CardMenuClick;
-    FCardPopup.Items.Add(Result);
-  end;
-
 begin
   FActionPull := APull;
-  FCardPopup.Items.Clear;
-  Add(rsComparePull, pcCompare);
-  if APull.Url <> '' then
-  begin
-    Add(Format(rsOpenPullOnForge, [ForgeName]), pcOpen);
-    Add(rsCopyPullLink, pcCopy);
-  end;
-  if CanAction(APull, plApprove) then
-  begin
-    FCardPopup.Items.Add(NewLine);
-    Add(rsPullApprove, pcAct + Ord(plApprove));
-    Add(rsPullRequestChanges, pcAct + Ord(plRequestChanges));
-    Add(rsPullComment, pcAct + Ord(plComment));
-  end;
-  if CanAction(APull, plMerge) then
-  begin
-    FCardPopup.Items.Add(NewLine);
-    Add(rsPullMerge, pcAct + Ord(plMerge));
-    Add(rsPullSquash, pcAct + Ord(plSquash));
-    Add(rsPullRebaseMerge, pcAct + Ord(plRebaseMerge));
-  end
-  else if CanAction(APull, plReady) then
-  begin
-    FCardPopup.Items.Add(NewLine);
-    Add(rsPullReady, pcAct + Ord(plReady));
-  end;
+  FillPullCardMenu(FCardPopup, PullRequestOf(APull), ForgeName, ActsNow, @CardMenuClick);
   FCardPopup.PopUp(AScreenPos.X, AScreenPos.Y);
 end;
 
 procedure TForgeView.CardMenuClick(Sender: TObject);
 var
-  Which: integer;
+  Picked: TGittanPullAction;
 begin
-  Which := (Sender as TMenuItem).Tag;
-  case Which of
+  case (Sender as TMenuItem).Tag of
     pcCompare: PagePick(Sender, FActionPull);
     pcOpen: if FActionPull.Url <> '' then
         OpenURL(FActionPull.Url);
     pcCopy: Clipboard.AsText := FActionPull.Url;
     else
-      if (Which >= pcAct) and (Which <= pcAct + Ord(High(TGittanPullAction))) then
-        StartAction(FActionPull, TGittanPullAction(Which - pcAct));
+      if PullCardAction((Sender as TMenuItem).Tag, Picked) then
+        StartAction(FActionPull, Picked);
   end;
 end;
 
-function TForgeView.CanAction(const APull: TGittanForgePull;
-  AAction: TGittanPullAction): boolean;
+function TForgeView.ActsNow: boolean;
 begin
-  Result := Assigned(FForge) and FForge.HasPullActions and (FActionJob = nil) and
-    (APull.Number > 0) and (APull.Repo <> '') and (APull.State = prOpen);
-  if Result then
-    case AAction of
-      plReady: Result := APull.IsDraft;
-      plMerge, plSquash, plRebaseMerge: Result := not APull.IsDraft;
-    end;
+  Result := Assigned(FForge) and FForge.HasPullActions and (FActionJob = nil);
 end;
 
 procedure TForgeView.StartAction(const APull: TGittanForgePull; AAction: TGittanPullAction);
 var
   Words: string;
 begin
-  if not CanAction(APull, AAction) or not AskPullAction(PullRequestOf(APull), AAction, Words) then
+  if not ActsNow or not PullActionFits(PullRequestOf(APull), AAction) or
+    not AskPullAction(PullRequestOf(APull), AAction, Words) then
     Exit;
   FActionJob := FForge.ActionJob(GetUserDir, APull.Repo, APull.Number, AAction, Words);
   if FActionJob = nil then

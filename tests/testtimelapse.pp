@@ -28,6 +28,7 @@ type
     procedure TearDown; override;
   published
     procedure TestRepository;
+    procedure TestLongHistory;
     procedure TestMisfitStops;
     procedure TestNotCommitted;
   end;
@@ -162,6 +163,83 @@ begin
     AssertEquals('three', T.Text(Ids[2]));
     AssertEquals(2, T.Died(Ids[2]));
     AssertEquals('a line kept is one entry', T.Lines(0)[1], Ids[0]);
+  finally
+    T.Free;
+    History.Free;
+    Repo.Free;
+  end;
+end;
+
+{ More commits than one stretch between versions kept whole: every
+  version, asked for in any order, is git's copy of the file. Each commit
+  drops lines at the top, adds one at the end and changes the last. }
+procedure TTimelapseTest.TestLongHistory;
+const
+  Commits = TimelapseMarkEvery + 8;
+  Order: array[0..5] of integer = (0, Commits - 1, TimelapseMarkEvery,
+    TimelapseMarkEvery - 1, TimelapseMarkEvery + 3, TimelapseMarkEvery + 1);
+var
+  Repo: TGittanRepo;
+  History: TGittanHistory;
+  T: TGittanTimelapse;
+  Log, Text, Body, Err, Blob: string;
+  Blobs: array of string;
+  c, j: integer;
+
+  function BlobOf(ACommit: integer): string;
+  begin
+    if not RunGitIn(FDir, ['cat-file', 'blob', History.Commits[ACommit].Info.Hash + ':a.txt'],
+      Result, Err) then
+      Fail(Err);
+  end;
+
+  { The entry of version ACommit with the text AText, -1 for none. }
+  function EntryOf(ACommit: integer; const AText: string): integer;
+  var
+    Ids: TGittanEntryIds;
+    i: integer;
+  begin
+    Result := -1;
+    Ids := T.Lines(ACommit);
+    for i := 0 to High(Ids) do
+      if T.Text(Ids[i]) = AText then
+        Exit(Ids[i]);
+  end;
+
+begin
+  Git(['init', '-q', '-b', 'main']);
+  for c := 0 to Commits - 1 do
+  begin
+    Body := '';
+    for j := c mod 7 to c + 2 do
+      Body := Body + 'line ' + IntToStr(j) + #10;
+    WriteFile('a.txt', Body + 'version ' + IntToStr(c div 5) + #10);
+    Commit('c' + IntToStr(c));
+  end;
+  Repo := TGittanRepo.Create;
+  History := TGittanHistory.Create;
+  T := TGittanTimelapse.Create;
+  try
+    AssertTrue(Repo.Open(FDir));
+    AssertTrue(Repo.FileTimeline('a.txt', '', 1000, Log, Text));
+    AssertTrue(History.Parse(Log));
+    AssertTrue(T.Build(History, Text));
+    AssertEquals(Commits, T.Count);
+    SetLength(Blobs, Commits);
+    for c := 0 to Commits - 1 do
+      Blobs[c] := BlobOf(c);
+    { Back through the history, as the time-lapse steps. }
+    for c := 0 to Commits - 1 do
+      AssertEquals('version ' + IntToStr(c), Blobs[c], VersionText(T, c));
+    { Forward, as it plays, and across the stretches. }
+    for c := Commits - 1 downto 0 do
+      AssertEquals('version ' + IntToStr(c), Blobs[c], VersionText(T, c));
+    for j := 0 to High(Order) do
+      AssertEquals('version ' + IntToStr(Order[j]), Blobs[Order[j]], VersionText(T, Order[j]));
+    { "line 9" is in both versions around the first mark, kept between. }
+    AssertTrue(EntryOf(TimelapseMarkEvery - 1, 'line 9') >= 0);
+    AssertEquals('a line kept is one entry across a mark',
+      EntryOf(TimelapseMarkEvery - 1, 'line 9'), EntryOf(TimelapseMarkEvery, 'line 9'));
   finally
     T.Free;
     History.Free;

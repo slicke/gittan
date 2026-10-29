@@ -1185,9 +1185,12 @@ type
     procedure PullPageContext(Sender: TObject; const APull: TGittanPullRequest;
       const AScreenPos: TPoint);
     procedure PullCardMenuClick(Sender: TObject);
-    {** Whether AAction can be done to APull now: the forge acts, the
-      pull request is open (a draft for plReady, not for a merge), and
-      no action runs. }
+    {** Whether an action can be done to a pull request now, as far as
+      the frame goes: the forge acts, a repository is open and no action
+      runs. }
+    function PullActsNow: boolean;
+    {** Whether AAction can be done to APull now: PullActsNow, and the
+      pull request fits it (PullActionFits). }
     function CanPullAction(const APull: TGittanPullRequest; AAction: TGittanPullAction): boolean;
     {** Does AAction to APull on the forge: asks the words of a review
       (a request for changes and a comment need some) or whether to
@@ -2199,6 +2202,30 @@ type
 function AskPullAction(const APull: TGittanPullRequest; AAction: TGittanPullAction;
   out AWords: string): boolean;
 
+const
+  {** The tags of a pull request card's menu (FillPullCardMenu): compare
+    with it, open it on the forge, copy its link, and pcAct plus an
+    action's Ord. }
+  pcCompare = 1;
+  pcOpen = 2;
+  pcCopy = 3;
+  pcAct = 10;
+
+resourcestring
+  rsPullActionFailed = 'Could not do it on %s';
+
+{** Fills AMenu with what can be done to the pull request APull of a
+  card, the Pull Requests page's or the forge view's: compare with it,
+  open it on AForgeName and copy its link when it has one, and while
+  AActs (the forge acts and no action runs) the reviews, the merges or,
+  for a draft, Mark Ready, as PullActionFits allows; each item's
+  OnClick is AOnClick, its Tag one of the pc tags. }
+procedure FillPullCardMenu(AMenu: TPopupMenu; const APull: TGittanPullRequest;
+  const AForgeName: string; AActs: boolean; AOnClick: TNotifyEvent);
+{** The action a card menu item's tag ATag stands for; false for the
+  other items. }
+function PullCardAction(ATag: integer; out AAction: TGittanPullAction): boolean;
+
 implementation
 
 {$R *.lfm}
@@ -3199,7 +3226,6 @@ resourcestring
   rsPullMergeAction = 'Merge';
   rsPullActing = 'Asking %s...';
   rsPullActionDone = '%s #%d';
-  rsPullActionFailed = 'Could not do it on %s';
   rsPositionOld = 'Ln %d (old), Col %d';
   rsReviewComments = 'Review &Comments';
   rsReviewResolved = 'Resolved';
