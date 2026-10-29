@@ -255,7 +255,10 @@ begin
   FHotRow := ARow;
   FPillTimer.Enabled := False;
   if (ABlock < 0) and (AKeep < 0) then
-    FDiscardPills.Dismiss
+  begin
+    FDiscardPills.Dismiss;
+    SetFramedBlock(-1);
+  end
   else if FDiscardPills.Visible then
     ShowDiscardPills
   else
@@ -292,8 +295,13 @@ begin
     (FHotDiscard > High(FBlockStarts)) or CanResolveBlocks or not CanDiscard then
   begin
     FDiscardPills.Dismiss;
+    SetFramedBlock(-1);
     Exit;
   end;
+  if FHotKeep >= 0 then
+    SetFramedBlock(-1)
+  else
+    SetFramedBlock(FHotDiscard);
   Y := Max(Edit.CaretPosToClientPos(Point(0, PillRow)).Y, Edit.RectMain.Top);
   Anchor := Rect(Edit.RectMain.Left, Y, Edit.RectMain.Right, Y + Edit.TextCharSize.Y);
   Anchor.TopLeft := Edit.ClientToScreen(Anchor.TopLeft);
@@ -307,6 +315,52 @@ begin
   else
     FDiscardPills.Show(Anchor, [rsKeepPill, rsDiscardAction], 'kd',
       [rsKeepPillHint, rsDiscardPillHint]);
+end;
+
+{ The block whose pills are up gets a frame, so it shows which rows
+  they are for when the mouse is far below them. }
+procedure TRepoFrame.SetFramedBlock(ABlock: integer);
+begin
+  if ABlock = FFramedBlock then
+    Exit;
+  FFramedBlock := ABlock;
+  Edit.Invalidate;
+end;
+
+{ The frame round the framed block's rows, across the text, the gaps
+  after its last row left out. }
+procedure TRepoFrame.DrawBlockFrame(AEd: TATSynEdit; C: TCanvas);
+var
+  First, Last, Y1, Y2, WrapFrom, WrapTo, Rad: integer;
+begin
+  if (AEd <> Edit) or (FFramedBlock < 0) or not FDiscardPills.Visible or
+    (FHotRow < 0) or (FHotRow >= AEd.Strings.Count) then
+    Exit;
+  First := FHotRow;
+  while (First > 0) and (BlockAtRow(First - 1) = FFramedBlock) do
+    Dec(First);
+  Last := FHotRow;
+  while (Last < AEd.Strings.Count - 1) and (BlockAtRow(Last + 1) = FFramedBlock) do
+    Inc(Last);
+  AEd.WrapInfo.FindIndexesOfLineNumber(Last, WrapFrom, WrapTo);
+  if WrapFrom < 0 then
+    Exit;
+  Y1 := AEd.CaretPosToClientPos(Point(0, First)).Y;
+  Y2 := AEd.CaretPosToClientPos(Point(0, Last)).Y;
+  Y2 := Y2 + Max(1, WrapTo - WrapFrom + 1) * AEd.TextCharSize.Y;
+  Rad := Px(6);
+  C.Clipping := True;
+  C.ClipRect := AEd.RectMain;
+  try
+    C.Pen.Style := psSolid;
+    C.Pen.Width := 1;
+    C.Pen.Color := FBlockFrame;
+    C.Brush.Style := bsClear;
+    C.RoundRect(AEd.RectMain.Left + 1, Y1, AEd.RectMain.Right - 1, Y2, Rad, Rad);
+  finally
+    C.Clipping := False;
+    C.Brush.Style := bsSolid;
+  end;
 end;
 
 { Edit has scrolled: the pills move with their block while the mouse

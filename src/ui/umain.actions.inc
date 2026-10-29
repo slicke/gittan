@@ -1060,6 +1060,7 @@ begin
   DrawBlame(TATSynEdit(Sender), C);
   DrawInitials(TATSynEdit(Sender), C);
   DrawDiscard(TATSynEdit(Sender), C);
+  DrawBlockFrame(TATSynEdit(Sender), C);
   if (Sender <> Edit) or (FOverscroll = 0) or (FView <> gvChanges) then
     Exit;
   Down := FOverscroll > 0;

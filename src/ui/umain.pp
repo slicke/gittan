@@ -930,6 +930,10 @@ type
     FOverscrollArmed: boolean;
     FOverscrollTimer: TTimer;
     FPullFill, FPullBorder, FPullText, FPullBar: TColor;
+    { The block framed while its pills are up (see umain.discard.inc),
+      or -1, and the frame's color. }
+    FFramedBlock: integer;
+    FBlockFrame: TColor;
     { View > Blame (see umain.blame.inc): whether it is on, its menu item,
       the blames of the two sides of the shown file, the job that blames
       a file, the cache of the results (TGittanBlame per side and path,
@@ -1306,6 +1310,8 @@ type
     procedure PillTimerTimer(Sender: TObject);
     function PillRow: integer;
     procedure ShowDiscardPills;
+    procedure SetFramedBlock(ABlock: integer);
+    procedure DrawBlockFrame(AEd: TATSynEdit; C: TCanvas);
     procedure PillsScrolled;
     function MouseOnDiscardPills: boolean;
     function MouseOnDiscardRows: boolean;
@@ -3357,6 +3363,7 @@ begin
   FHotDiscard := -1;
   FHotRow := -1;
   FHotKeep := -1;
+  FFramedBlock := -1;
   FHeaderUnkeep := -1;
   FKeeps := TGittanKeeps.Create;
   FLeftOut := TGittanKeeps.Create;
@@ -4273,6 +4280,7 @@ begin
     P.Warning, P.Deleted);
   FPullFill := P.Pill;
   FPullBorder := P.Border;
+  FBlockFrame := P.Accent;
   FPullText := P.PillText;
   FBandTrack := P.Line;
   FBandFill := P.Accent;
