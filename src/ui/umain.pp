@@ -277,6 +277,15 @@ type
       (-1 while the list has none). }
     FConflictJob: TGittanConflictJob;
     FConflictAIItem: integer;
+    { Splitting the changes into commits (umain.ai.inc): File > Split
+      Changes into Commits, the job while it runs, the plan it gave
+      (pruned of what has been committed since, PrunePlan) and the list
+      it is picked from. }
+    FSplitItem: TMenuItem;
+    FSplitJob: TGittanSplitJob;
+    FCommitPlan: TGittanCommitPlan;
+    FPlanAgent: string;
+    FPlanPopup: TGittanPopupList;
     { The width of a tab in the editors, in characters. }
     FTabSize: integer;
     FSyntaxMenu, FAutoLexerItem, FPlainTextItem: TMenuItem;
@@ -1496,6 +1505,22 @@ type
     procedure StartConflictJob(AIndex: integer);
     procedure ConflictJobDone(Sender: TObject);
     procedure AbandonConflictJob;
+    {** File > Split Changes into Commits while AIAvailable: enabled with
+      two files or more to choose from, or a plan held; from
+      UpdateMessageAction. }
+    procedure UpdateSplitItem;
+    procedure MenuSplitClick(Sender: TObject);
+    procedure StartSplitJob;
+    procedure SplitJobDone(Sender: TObject);
+    procedure AbandonSplitJob;
+    {** Drops from FCommitPlan the files no longer changed, and the
+      commits left with none. }
+    procedure PrunePlan;
+    procedure ShowPlan;
+    procedure PlanPopupPick(Sender: TObject; AIndex: integer);
+    {** Ticks the files of the plan's commit AIndex alone and puts its
+      message in the field. }
+    procedure ApplyPlannedCommit(AIndex: integer);
     procedure MenuWrapClick(Sender: TObject);
     procedure MenuFoldClick(Sender: TObject);
     procedure ViewMenuClick(Sender: TObject);
@@ -2338,6 +2363,18 @@ resourcestring
   rsResolvedAI = '%s resolved the conflict at line %d of %s: %s';
   rsResolvedAILast = '%s resolved the last conflict in %s, now marked resolved: %s';
   rsResolvedAIUndo = 'File > Undo Discard puts it back';
+  rsSplitMenu = 'Split Changes into Commits...';
+  rsSplitStopMenu = 'Stop Splitting into Commits';
+  rsSplitting = '%s is splitting the changes into commits...';
+  rsSplitFailed = '%s could not split the changes';
+  rsPlanHeader = 'Commits planned by %s';
+  rsPlanNoMessage = '(the files left over)';
+  rsPlanFile = '1 file';
+  rsPlanFiles = '%d files';
+  rsPlanAgain = 'Plan Again';
+  rsPlanTicked = 'Ticked the files of commit %d of %d: commit them, then File > Split ' +
+    'Changes into Commits for the next';
+  rsPlanOne = '%s sees the changes as one commit: its message is in the field';
   rsSeverityBug = 'Bug';
   rsSeverityRisk = 'Risk';
   rsSeverityQuestion = 'Question';
@@ -3704,6 +3741,9 @@ begin
   FFindPopup := TGittanPopupList.Create(Self);
   FFindPopup.Parent := Self;
   FFindPopup.OnPick := @FindPopupPick;
+  FPlanPopup := TGittanPopupList.Create(Self);
+  FPlanPopup.Parent := Self;
+  FPlanPopup.OnPick := @PlanPopupPick;
   FBasePopup := TGittanPopupList.Create(Self);
   FBasePopup.Parent := Self;
   FBasePopup.OnPick := @BasePopupPick;
@@ -3942,6 +3982,7 @@ begin
   AbandonAIReview;
   AbandonFindJob;
   AbandonConflictJob;
+  AbandonSplitJob;
   FreeAndNil(FAI);
   StopCommitJob(True);
   FreeAndNil(FDroppedCommits);
@@ -4292,7 +4333,7 @@ begin
   for List in [FBranchPopup, FStashPopup, FUpstreamPopup, FTagPopup, FViewPopup,
     FSubListPopup, FReflogPopup, FPullPopup, FReviewPopup, FSyncPopup, FRecentPopup,
     FBasePopup, FConflictPopup, FFindPopup, FCompositionPopup, FWorktreePopup,
-    FPalettePopup] do
+    FPalettePopup, FPlanPopup] do
     List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
   FPaletteLeft.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border);
   FPaletteRight.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border);
@@ -4899,6 +4940,8 @@ begin
   FMessageItem := AddItem(FileMenu, rsWriteMessageMenu, ShortCut(VK_K, [ssModifier,
     ssShift]), @MessageActionClick);
   FMessageItem.Visible := False;
+  FSplitItem := AddItem(FileMenu, rsSplitMenu, 0, @MenuSplitClick);
+  FSplitItem.Visible := False;
   { The person in the Commit header, for the keyboard. }
   FIdentityItem := AddItem(FileMenu, rsIdentityMenu, 0, @IdentityClick);
   FIdentityItem.Enabled := False;
@@ -6159,8 +6202,10 @@ begin
   AbandonAIReview;
   AbandonFindJob;
   AbandonConflictJob;
+  AbandonSplitJob;
   FAIThreads := nil;
   FAIThreadsKey := '';
+  FCommitPlan := nil;
   StopCommitJob(False);
   StopRemoteJob(False);
   { A failure's notice, which Try Again would run on this one. }

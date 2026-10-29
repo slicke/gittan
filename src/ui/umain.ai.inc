@@ -21,7 +21,10 @@
   The third is the sparkle in the filter field (where something is), the
   fourth Resolve with the agent in a conflict's list (umain.conflicts.inc):
   the agent writes the lines that take the conflict's place, which are
-  written as a pick of the list is, so Undo Discard puts it back. }
+  written as a pick of the list is, so Undo Discard puts it back. The
+  fifth is File > Split Changes into Commits: the agent groups the
+  changed files into commits with their messages, and a pick from the
+  plan ticks one commit's files and fills in its message. }
 
 { The agent the settings pick, made from its fields there: its command
   by the path they give, else where it is found (or the API's server),
@@ -104,6 +107,7 @@ begin
   FCommitHeader.ActionEnabled := Can;
   FMessageItem.Visible := AIAvailable;
   FMessageItem.Enabled := Shown and Can;
+  UpdateSplitItem;
   UpdateAIReviewItems;
 end;
 
@@ -482,4 +486,225 @@ begin
   FConflictJob.Stop(False);
   FBlameZombies.Add(FConflictJob);
   FConflictJob := nil;
+end;
+
+{ ---------------------------------------------------------------------------
+  Splitting the changes into commits
+  --------------------------------------------------------------------------- }
+
+{ The files a commit could take: the changed ones but the conflicts. }
+function ChoosablePaths(const AStats: TGittanFileStats; AList: TStrings): integer;
+var
+  i: integer;
+begin
+  AList.Clear;
+  for i := 0 to High(AStats) do
+    if AStats[i].Kind <> ckConflict then
+      AList.Add(AStats[i].Path);
+  Result := AList.Count;
+end;
+
+procedure TRepoFrame.UpdateSplitItem;
+var
+  Paths: TStringList;
+  Can: boolean;
+begin
+  if FSplitItem = nil then
+    Exit;
+  FSplitItem.Visible := AIAvailable;
+  if FSplitJob <> nil then
+  begin
+    FSplitItem.Caption := rsSplitStopMenu;
+    FSplitItem.Enabled := True;
+    Exit;
+  end;
+  FSplitItem.Caption := rsSplitMenu;
+  Can := AIAvailable and (FOperation = '') and CommitChoosing and (FCommitJob = nil);
+  if Can and (FCommitPlan = nil) then
+  begin
+    Paths := TStringList.Create;
+    try
+      Can := ChoosablePaths(FStats, Paths) >= 2;
+    finally
+      Paths.Free;
+    end;
+  end;
+  FSplitItem.Enabled := Can;
+end;
+
+{ Stops the agent while it plans; shows the plan held, with what has
+  been committed since gone from it; else asks for one. }
+procedure TRepoFrame.MenuSplitClick(Sender: TObject);
+begin
+  if FSplitJob <> nil then
+  begin
+    AbandonSplitJob;
+    FStatus.ShowMessage('', stNormal, 0);
+    UpdateSplitItem;
+    Exit;
+  end;
+  PrunePlan;
+  if FCommitPlan <> nil then
+    ShowPlan
+  else
+    StartSplitJob;
+end;
+
+procedure TRepoFrame.StartSplitJob;
+var
+  Paths: TStringList;
+begin
+  if (FSplitJob <> nil) or not AIAvailable or not CommitChoosing or (FOperation <> '') then
+    Exit;
+  FCommitPlan := nil;
+  Paths := TStringList.Create;
+  try
+    if ChoosablePaths(FStats, Paths) = 0 then
+      Exit;
+    FSplitJob := TGittanSplitJob.Create(FRepo.Root, FAI, Paths);
+  finally
+    Paths.Free;
+  end;
+  FSplitJob.OnDone := @SplitJobDone;
+  FSplitJob.Start;
+  FStatus.ShowBusy(Format(rsSplitting, [AgentName]), HintSparkle);
+  UpdateSplitItem;
+end;
+
+{ One commit is ticked and described at once; more are a list to pick
+  the first from. }
+procedure TRepoFrame.SplitJobDone(Sender: TObject);
+var
+  Job: TGittanSplitJob;
+begin
+  Job := TGittanSplitJob(Sender);
+  if Job <> FSplitJob then
+    Exit;
+  FSplitJob := nil;
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+  FStatus.ShowMessage('', stNormal, 0);
+  if not Job.Ok then
+    BannerError(Format(rsSplitFailed, [Job.AgentName]), Job.Error)
+  else
+  begin
+    FCommitPlan := Job.Plan;
+    FPlanAgent := Job.AgentName;
+    PrunePlan;
+    if Length(FCommitPlan) = 1 then
+    begin
+      ApplyPlannedCommit(0);
+      StatusNote(Format(rsPlanOne, [Job.AgentName]));
+      FCommitPlan := nil;
+    end
+    else if FCommitPlan <> nil then
+      ShowPlan;
+  end;
+  UpdateSplitItem;
+end;
+
+procedure TRepoFrame.AbandonSplitJob;
+begin
+  if FSplitJob = nil then
+    Exit;
+  FSplitJob.Stop(False);
+  FBlameZombies.Add(FSplitJob);
+  FSplitJob := nil;
+end;
+
+procedure TRepoFrame.PrunePlan;
+var
+  Paths: TStringList;
+  i, j: integer;
+begin
+  Paths := TStringList.Create;
+  try
+    ChoosablePaths(FStats, Paths);
+    Paths.Sorted := True;
+    for i := High(FCommitPlan) downto 0 do
+    begin
+      for j := High(FCommitPlan[i].Files) downto 0 do
+        if Paths.IndexOf(FCommitPlan[i].Files[j]) < 0 then
+          Delete(FCommitPlan[i].Files, j, 1);
+      if FCommitPlan[i].Files = nil then
+        Delete(FCommitPlan, i, 1);
+    end;
+  finally
+    Paths.Free;
+  end;
+end;
+
+{ Under the Commit header: each commit's subject and how many files it
+  takes, then Plan Again. }
+procedure TRepoFrame.ShowPlan;
+var
+  i: integer;
+  Subject, Count: string;
+  P: TPoint;
+begin
+  if FCommitPlan = nil then
+    Exit;
+  FPlanPopup.Clear;
+  FPlanPopup.AddHeader(Format(rsPlanHeader, [FPlanAgent]));
+  for i := 0 to High(FCommitPlan) do
+  begin
+    Subject := FCommitPlan[i].Message;
+    if Pos(#10, Subject) > 0 then
+      Subject := Copy(Subject, 1, Pos(#10, Subject) - 1);
+    if Subject = '' then
+      Subject := rsPlanNoMessage;
+    if Length(FCommitPlan[i].Files) = 1 then
+      Count := rsPlanFile
+    else
+      Count := Format(rsPlanFiles, [Length(FCommitPlan[i].Files)]);
+    FPlanPopup.Add(Format('%d. %s', [i + 1, Subject]), Count, False, i);
+  end;
+  FPlanPopup.AddHeader('');
+  FPlanPopup.Add(rsPlanAgain, HintSparkle, False, -2);
+  P := FCommitHeader.ClientToScreen(Point(0, 0));
+  FPlanPopup.Popup(Rect(P.X, P.Y, P.X + FCommitHeader.Width, P.Y + FCommitHeader.Height));
+end;
+
+procedure TRepoFrame.PlanPopupPick(Sender: TObject; AIndex: integer);
+var
+  i: PtrInt;
+begin
+  i := FPlanPopup.TagOf(AIndex);
+  if i = -2 then
+    StartSplitJob
+  else if (i >= 0) and (i <= High(FCommitPlan)) then
+  begin
+    ApplyPlannedCommit(i);
+    StatusNote(Format(rsPlanTicked, [i + 1, Length(FCommitPlan)]));
+  end;
+end;
+
+procedure TRepoFrame.ApplyPlannedCommit(AIndex: integer);
+var
+  Files: TStringList;
+  i: integer;
+begin
+  if not CommitChoosing or (FCommitJob <> nil) or (AIndex < 0) or
+    (AIndex > High(FCommitPlan)) then
+    Exit;
+  Files := TStringList.Create;
+  try
+    Files.AddStrings(FCommitPlan[AIndex].Files);
+    Files.Sorted := True;
+    { The changes left out of a file go too: the plan took files whole. }
+    for i := 0 to High(FStats) do
+      if FStats[i].Kind <> ckConflict then
+      begin
+        SetCommitChosen(i, Files.IndexOf(FStats[i].Path) >= 0);
+        DropLeftOut(FStats[i].Path);
+      end;
+  finally
+    Files.Free;
+  end;
+  ApplyCommitChecks;
+  if FCommitPlan[AIndex].Message <> '' then
+    FCommitMemo.Text := FCommitPlan[AIndex].Message;
+  MenuCommitClick(nil);
+  FCommitMemo.SelStart := 0;
+  UpdateCommitState;
 end;

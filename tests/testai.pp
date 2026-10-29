@@ -75,6 +75,8 @@ type
     procedure TestParseResolution;
     procedure TestConflictInput;
     procedure TestConflictJob;
+    procedure TestParseCommitPlan;
+    procedure TestSplitJob;
   end;
 
 implementation
@@ -869,6 +871,86 @@ begin
     AssertEquals('two mine and theirs', Job.Block.OldLines[0]);
     AssertEquals('the conflict is kept', 5, Length(Job.Block.NewLines));
     AssertEquals('Both changes kept.', Job.Why);
+  finally
+    Job.Free;
+  end;
+end;
+
+procedure TAiTest.TestParseCommitPlan;
+var
+  Paths: TStringList;
+  Plan: TGittanCommitPlan;
+begin
+  Paths := TStringList.Create;
+  try
+    Paths.Add('src/a.pas');
+    Paths.Add('src/b.pas');
+    Paths.Add('tests/ta.pas');
+    Paths.Add('README.md');
+    AssertTrue(ParseCommitPlan('The plan:'#10'```json'#10'[{"files": ["src/a.pas", ' +
+      '"./tests/ta.pas"], "message": "Fix a\n\nBecause."}, {"files": ["b/src/b.pas", ' +
+      '"src/a.pas", "nowhere.pas"], "message": "```\nTidy b\n```"}, {"files": ' +
+      '["gone.pas"], "message": "Nothing"}]'#10'```', Paths, Plan));
+    AssertEquals('the empty one dropped, the left out added', 3, Length(Plan));
+    AssertEquals(2, Length(Plan[0].Files));
+    AssertEquals('src/a.pas', Plan[0].Files[0]);
+    AssertEquals('./ taken off', 'tests/ta.pas', Plan[0].Files[1]);
+    AssertEquals('Fix a'#10#10'Because.', Plan[0].Message);
+    AssertEquals('a file once, b/ taken off', 1, Length(Plan[1].Files));
+    AssertEquals('src/b.pas', Plan[1].Files[0]);
+    AssertEquals('the fence cleaned', 'Tidy b', Plan[1].Message);
+    AssertEquals('README.md', Plan[2].Files[0]);
+    AssertEquals('no message for the left out', '', Plan[2].Message);
+    AssertTrue('nothing planned', ParseCommitPlan('[]', Paths, Plan));
+    AssertEquals('every file still in it', 1, Length(Plan));
+    AssertEquals(4, Length(Plan[0].Files));
+    AssertFalse(ParseCommitPlan('Commit it all at once.', Paths, Plan));
+    AssertFalse(ParseCommitPlan('[not json]', Paths, Plan));
+  finally
+    Paths.Free;
+  end;
+end;
+
+procedure TAiTest.TestSplitJob;
+var
+  AI: TGittanAI;
+  Job: TGittanSplitJob;
+  Paths: TStringList;
+begin
+  WriteFile('a.txt', 'one');
+  Git(['add', '.']);
+  Git(['commit', '-q', '-m', 'Add a']);
+  WriteFile('a.txt', 'one changed');
+  WriteFile('b.txt', 'new');
+  TFakeAI.Reset;
+  TFakeAI.Answers := ['[{"files": ["b.txt"], "message": "Add b"}, {"files": ["a.txt"], ' +
+    '"message": "Change a"}]'];
+  AI := TFakeAI.Create('', '', 'fake');
+  Paths := TStringList.Create;
+  try
+    Paths.Add('a.txt');
+    Paths.Add('b.txt');
+    Job := TGittanSplitJob.Create(FDir, AI, Paths);
+  finally
+    Paths.Free;
+    AI.Free;
+  end;
+  try
+    Job.OnDone := @JobDone;
+    FDone := 0;
+    Job.Start;
+    Job.WaitFor;
+    CheckSynchronize(0);
+    AssertEquals(1, FDone);
+    AssertTrue(Job.Error, Job.Ok);
+    AssertTrue(TFakeAI.Tasks[0] = atSplit);
+    AssertTrue('the diff', Pos('+one changed', TFakeAI.Inputs[0]) > 0);
+    AssertTrue('the untracked file', Pos('+new', TFakeAI.Inputs[0]) > 0);
+    AssertTrue('the paths', Pos('The changed files:' + LineEnding + 'a.txt' + LineEnding +
+      'b.txt', TFakeAI.Inputs[0]) > 0);
+    AssertEquals(2, Length(Job.Plan));
+    AssertEquals('b.txt', Job.Plan[0].Files[0]);
+    AssertEquals('Change a', Job.Plan[1].Message);
   finally
     Job.Free;
   end;

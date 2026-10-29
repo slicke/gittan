@@ -48,8 +48,9 @@ type
 
   {** What an agent is asked to do; atLocate is the second round of a
     find for a model that cannot read files, the lines in the files it
-    named; atResolve resolves one conflict. }
-  TGittanAITask = (atMessage, atReview, atFind, atLocate, atResolve);
+    named; atResolve resolves one conflict; atSplit groups the changed
+    files into commits. }
+  TGittanAITask = (atMessage, atReview, atFind, atLocate, atResolve, atSplit);
 
   {** How many lines of each file a model was given (FindLinesInput). }
   TGittanLineCounts = array of integer;
@@ -75,6 +76,8 @@ const
   {** How many of the file's lines before and after a conflict the agent
     is given with it. }
   ConflictAround = 20;
+  {** The most commits of a plan kept; the prompt asks for fewer. }
+  SplitMaxCommits = 10;
 
 type
   {** A file the agent named for where something is: its path in the
@@ -86,6 +89,14 @@ type
     Why: string;
   end;
   TGittanFoundFiles = array of TGittanFoundFile;
+
+  {** One commit of a plan to split the changes: the changed files it
+    takes and its message ('' for the files the agent left out). }
+  TGittanPlannedCommit = record
+    Files: TStringArray;
+    Message: string;
+  end;
+  TGittanCommitPlan = array of TGittanPlannedCommit;
 
   {** An agent as the settings set it up, made once from them (FindAI
     in the frame) and copied into each job (Clone), since a job may
@@ -274,6 +285,23 @@ function CleanCommitMessage(const AText: string): string;
 function ConflictInput(const ARoot, APath, AOperation: string; ARebase: boolean;
   const ABlock: TGittanDiscard): string;
 
+{** What the agent gets to split APaths, the changed files of the
+  repository at ARoot, into commits: CommitChanges of them all, then
+  the paths as they are to be named. False, with git's reason in AError,
+  when git failed; an empty AText when nothing would change. }
+function SplitInput(const ARoot: string; APaths: TStrings; out AText, AError: string): boolean;
+
+{** The commits of a plan in AText, the agent's answer: a JSON array of
+  objects with files and message, which may come inside a code fence or
+  after a sentence. Only the paths of APaths are kept, each in the first
+  commit that names it ("./", "a/" or "b/" taken off), a message cleaned
+  as CleanCommitMessage cleans it, a commit left with no file dropped,
+  at most SplitMaxCommits; the paths no commit took go in one more with
+  no message, so every file is in the plan. False when AText holds no
+  such array. }
+function ParseCommitPlan(const AText: string; APaths: TStrings;
+  out APlan: TGittanCommitPlan): boolean;
+
 {** The commits git's conflict in the repository at ARoot comes from, for
   APath: the commit being applied (the first of MERGE_HEAD,
   CHERRY_PICK_HEAD, REVERT_HEAD and REBASE_HEAD there is) with its
@@ -414,11 +442,32 @@ type
     property Error: string read FError;
   end;
 
+  {** Asks the agent how to split APaths, the changed files, into
+    commits (see SplitInput, ParseCommitPlan). }
+  TGittanSplitJob = class(TGittanAgentJob)
+  private
+    FPaths: TStringList;
+    FOk: boolean;
+    FPlan: TGittanCommitPlan;
+    FError: string;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const ARoot: string; AAI: TGittanAI; APaths: TStrings);
+    destructor Destroy; override;
+    {** Whether the agent answered with a plan. }
+    property Ok: boolean read FOk;
+    property Plan: TGittanCommitPlan read FPlan;
+    {** Why there is none, when not Ok. }
+    property Error: string read FError;
+  end;
+
 resourcestring
   rsNothingToReview = 'There are no changes to review.';
   rsReviewNotRead = 'The answer was no list of findings: %s';
   rsFoundNotRead = 'The answer was no list of files: %s';
   rsResolutionNotRead = 'The answer held no resolved lines: %s';
+  rsPlanNotRead = 'The answer was no list of commits: %s';
   rsNothingToDescribe = 'There are no changes to describe.';
   rsAgentNoAnswer = '%s gave no answer.';
   rsAboutApi = '%s at %s';
@@ -508,6 +557,24 @@ const
     'no code fences in them, then one short sentence on what you kept between ' +
     '<why> and </why>, and nothing else.';
 
+  { Commits a reviewer can follow, in an order that builds: a model asked
+    to split changes otherwise makes a commit per file, or per folder. }
+  SplitPromptStart = 'The changes given below are to be committed as a few commits, ' +
+    'each one thing a reviewer can follow, such as a refactoring, a fix, a feature or ' +
+    'a dependency bump, with the tests of that change in the same commit. Group the ' +
+    'changed files into such commits, in the ' +
+    'order they should be made, each building on those before; every file listed at ' +
+    'the end goes in exactly one commit, a file that serves two things in the one it ' +
+    'is most for. One commit for the whole is a fine answer when the change is one ' +
+    'thing. Give each commit a message: a subject line of at most 72 characters and, ' +
+    'only when it needs explaining, a blank line and a body of a few lines, the style ' +
+    '(language, tense, prefixes) taken from the recent commit subjects given. ';
+  SplitReadNote = 'Read the repository''s files only when the diff alone leaves a ' +
+    'change unclear. ';
+  SplitPromptEnd = 'Answer with a JSON array alone, no code fences, at most 8 commits, ' +
+    'the first to be made first, each {"files": [the paths as listed], "message": the ' +
+    'commit message}.';
+
 var
   AIClasses: array[TGittanAgent] of TGittanAIClass;
 
@@ -554,6 +621,11 @@ begin
         Result := ResolvePromptStart + ResolveReadNote + ResolvePromptEnd
       else
         Result := ResolvePromptStart + ResolveSentNote + ResolvePromptEnd;
+    atSplit:
+      if AReadsFiles then
+        Result := SplitPromptStart + SplitReadNote + SplitPromptEnd
+      else
+        Result := SplitPromptStart + SplitPromptEnd;
     else { atLocate }
       Result := LocatePromptStart + LocatePromptEnd;
   end;
@@ -1172,6 +1244,91 @@ begin
   end;
 end;
 
+function SplitInput(const ARoot: string; APaths: TStrings; out AText, AError: string): boolean;
+var
+  i: integer;
+begin
+  Result := CommitChanges(ARoot, APaths, False, AText, AError);
+  if not Result or (AText = '') then
+    Exit;
+  { The summary cuts long paths; these are what the plan names. }
+  AText := AText + LineEnding + 'The changed files:' + LineEnding;
+  for i := 0 to APaths.Count - 1 do
+    AText := AText + APaths[i] + LineEnding;
+end;
+
+function ParseCommitPlan(const AText: string; APaths: TStrings;
+  out APlan: TGittanCommitPlan): boolean;
+var
+  Data, Files: TJSONData;
+  Item: TJSONObject;
+  Taken: TStringList;
+  Commit: TGittanPlannedCommit;
+  First, Last, i, j, n: integer;
+  Path: string;
+begin
+  APlan := nil;
+  First := Pos('[', AText);
+  Last := LastDelimiter(']', AText);
+  if (First = 0) or (Last < First) then
+    Exit(False);
+  try
+    Data := GetJSON(Copy(AText, First, Last - First + 1));
+  except
+    Exit(False);
+  end;
+  Taken := TStringList.Create;
+  try
+    Result := Data is TJSONArray;
+    if not Result then
+      Exit;
+    Taken.Sorted := True;
+    Taken.CaseSensitive := True;
+    n := 0;
+    for i := 0 to Data.Count - 1 do
+    begin
+      if n >= SplitMaxCommits then
+        Break;
+      if not (Data.Items[i] is TJSONObject) then
+        Continue;
+      Item := TJSONObject(Data.Items[i]);
+      Files := Item.Find('files');
+      if not (Files is TJSONArray) then
+        Continue;
+      Commit := Default(TGittanPlannedCommit);
+      for j := 0 to Files.Count - 1 do
+      begin
+        if not (Files.Items[j] is TJSONString) then
+          Continue;
+        Path := StringReplace(Trim(Files.Items[j].AsString), '\', '/', [rfReplaceAll]);
+        if (Copy(Path, 1, 2) = './') or (((Copy(Path, 1, 2) = 'a/') or
+          (Copy(Path, 1, 2) = 'b/')) and (APaths.IndexOf(Path) < 0)) then
+          Delete(Path, 1, 2);
+        if (APaths.IndexOf(Path) < 0) or (Taken.IndexOf(Path) >= 0) then
+          Continue;
+        Taken.Add(Path);
+        Insert(Path, Commit.Files, Length(Commit.Files));
+      end;
+      if Commit.Files = nil then
+        Continue;
+      Commit.Message := CleanCommitMessage(Item.Get('message', ''));
+      Insert(Commit, APlan, n);
+      Inc(n);
+    end;
+    { What the agent left out, or what came after the most it may plan,
+      is one more commit for the user to describe. }
+    Commit := Default(TGittanPlannedCommit);
+    for i := 0 to APaths.Count - 1 do
+      if Taken.IndexOf(APaths[i]) < 0 then
+        Insert(APaths[i], Commit.Files, Length(Commit.Files));
+    if Commit.Files <> nil then
+      Insert(Commit, APlan, Length(APlan));
+  finally
+    Taken.Free;
+    Data.Free;
+  end;
+end;
+
 function ConflictCommits(const ARoot, APath: string): string;
 const
   Heads: array[0..3] of string = ('MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD',
@@ -1545,6 +1702,50 @@ begin
       FBlock.OldLines := Lines
     else
       FError := Format(rsResolutionNotRead, [Copy(Trim(Answer), 1, 300)]);
+  end;
+  Done;
+end;
+
+{ TGittanSplitJob }
+
+constructor TGittanSplitJob.Create(const ARoot: string; AAI: TGittanAI; APaths: TStrings);
+begin
+  inherited Create(ARoot, AAI);
+  FPaths := TStringList.Create;
+  FPaths.AddStrings(APaths);
+end;
+
+destructor TGittanSplitJob.Destroy;
+begin
+  inherited Destroy;
+  FPaths.Free;
+end;
+
+procedure TGittanSplitJob.Execute;
+var
+  Changes, Answer: string;
+begin
+  if not SplitInput(FRoot, FPaths, Changes, FError) then
+  begin
+    Done;
+    Exit;
+  end;
+  if Changes = '' then
+  begin
+    FError := rsNothingToDescribe;
+    Done;
+    Exit;
+  end;
+  if Terminated then
+    Exit;
+  FOk := Ask(atSplit, Changes, Answer, FError);
+  if Terminated then
+    Exit;
+  if FOk then
+  begin
+    FOk := ParseCommitPlan(Answer, FPaths, FPlan);
+    if not FOk then
+      FError := Format(rsPlanNotRead, [Copy(Trim(Answer), 1, 300)]);
   end;
   Done;
 end;

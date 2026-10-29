@@ -557,6 +557,8 @@ begin
     AbandonAIReview;
     AbandonFindJob;
     AbandonConflictJob;
+    AbandonSplitJob;
+    FCommitPlan := nil;
   end;
   UpdateFindAction;
   UpdateCommitState;
