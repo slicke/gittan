@@ -703,11 +703,12 @@ begin
   StartJob;
 end;
 
-{ The checkbox: the settings keep it, and the page's new height. }
-{ The page's filters from the settings, a flag each. }
+{ The page's filters, what needs attention and the orders from the
+  settings. }
 procedure TForgeView.LoadFilters;
 var
   Mine, Review: TGittanForgeFilters;
+  Reasons: TGittanAttentionReasons;
 begin
   Mine := [];
   if App.Settings.HideWithoutFeedback then
@@ -725,8 +726,18 @@ begin
     Include(Review, ffNoDrafts);
   FPage.MineFilters := Mine;
   FPage.ReviewFilters := Review;
+  Reasons := [];
+  if App.Settings.ChangesNeedAttention then
+    Include(Reasons, arChangesRequested);
+  if App.Settings.ChecksNeedAttention then
+    Include(Reasons, arChecksFailing);
+  FPage.AttentionReasons := Reasons;
+  FPage.MineOrder := TGittanPullOrder(App.Settings.MineOrder);
+  FPage.ReviewOrder := TGittanPullOrder(App.Settings.ReviewOrder);
 end;
 
+{ A chip or the page's menu: the settings keep it, and the page's new
+  height. }
 procedure TForgeView.PageFilterChange(Sender: TObject);
 begin
   App.Settings.HideWithoutFeedback := ffFeedback in FPage.MineFilters;
@@ -735,6 +746,10 @@ begin
   App.Settings.OnlyStale := ffStale in FPage.MineFilters;
   App.Settings.OnlyAskedOfMe := ffAskedOfMe in FPage.ReviewFilters;
   App.Settings.HideReviewDrafts := ffNoDrafts in FPage.ReviewFilters;
+  App.Settings.ChangesNeedAttention := arChangesRequested in FPage.AttentionReasons;
+  App.Settings.ChecksNeedAttention := arChecksFailing in FPage.AttentionReasons;
+  App.Settings.MineOrder := Ord(FPage.MineOrder);
+  App.Settings.ReviewOrder := Ord(FPage.ReviewOrder);
   FPage.FitHeight(FBox.ClientHeight);
 end;
 

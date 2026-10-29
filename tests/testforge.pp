@@ -22,6 +22,7 @@ type
     procedure TestNeedsMyReview;
     procedure TestFeedback;
     procedure TestFilters;
+    procedure TestOrder;
     procedure TestNotes;
     procedure TestFindClones;
     procedure TestSiblingRepositories;
@@ -255,6 +256,69 @@ begin
   AssertEquals(2, Length(Left));
   AssertEquals(2, Left[0].Number);
   AssertEquals(3, Left[1].Number);
+  { Attention for only some reasons: failing checks left out, or
+    changes asked for; neither leaves none. }
+  AssertTrue(NeedsAttention(Pulls[0], [arChangesRequested]));
+  AssertFalse(NeedsAttention(Pulls[1], [arChangesRequested]));
+  AssertFalse(NeedsAttention(Pulls[0], [arChecksFailing]));
+  AssertTrue(NeedsAttention(Pulls[1], [arChecksFailing]));
+  Left := FilterPulls(Pulls, [ffAttention], Now_, [arChangesRequested]);
+  AssertEquals(1, Length(Left));
+  AssertEquals(1, Left[0].Number);
+  AssertEquals(0, Length(FilterPulls(Pulls, [ffAttention], Now_, [])));
+end;
+
+procedure TForgeTest.TestOrder;
+var
+  Pulls, Sorted: TGittanForgePulls;
+  Now_: TDateTime;
+  i: integer;
+begin
+  Now_ := EncodeDateTime(2026, 10, 27, 12, 0, 0, 0);
+  Pulls := nil;
+  SetLength(Pulls, 4);
+  for i := 0 to 3 do
+  begin
+    Pulls[i] := Default(TGittanForgePull);
+    Pulls[i].Number := i + 1;
+  end;
+  { 1 changed last, opened second; 2 failing, the newest; 3 changes
+    asked for, opened first and changed never; 4 failing, changed
+    second. }
+  Pulls[0].Created := IncDay(Now_, -20);
+  Pulls[0].Updated := IncDay(Now_, -1);
+  Pulls[1].Created := IncDay(Now_, -3);
+  Pulls[1].Updated := IncDay(Now_, -3);
+  Pulls[1].Checks := chkFailed;
+  Pulls[2].Created := IncDay(Now_, -30);
+  Pulls[2].ReviewDecision := rdChangesRequested;
+  Pulls[3].Created := IncDay(Now_, -10);
+  Pulls[3].Updated := IncDay(Now_, -2);
+  Pulls[3].Checks := chkFailed;
+  Sorted := SortPulls(Pulls, poUpdated);
+  AssertEquals(1, Sorted[0].Number);
+  AssertEquals(4, Sorted[1].Number);
+  AssertEquals(2, Sorted[2].Number);
+  AssertEquals('no change counts the opening', 3, Sorted[3].Number);
+  Sorted := SortPulls(Pulls, poNewest);
+  AssertEquals(2, Sorted[0].Number);
+  AssertEquals(4, Sorted[1].Number);
+  AssertEquals(1, Sorted[2].Number);
+  AssertEquals(3, Sorted[3].Number);
+  { Attention first keeps the order among those that need it and among
+    the rest. }
+  Sorted := SortPulls(Pulls, poAttentionFirst);
+  AssertEquals(2, Sorted[0].Number);
+  AssertEquals(3, Sorted[1].Number);
+  AssertEquals(4, Sorted[2].Number);
+  AssertEquals(1, Sorted[3].Number);
+  Sorted := SortPulls(Pulls, poAttentionFirst, [arChangesRequested]);
+  AssertEquals(3, Sorted[0].Number);
+  AssertEquals(1, Sorted[1].Number);
+  AssertEquals(2, Sorted[2].Number);
+  AssertEquals(4, Sorted[3].Number);
+  AssertEquals('the list given is left as it was', 1, Pulls[0].Number);
+  AssertEquals(0, Length(SortPulls(nil, poNewest)));
 end;
 
 procedure TForgeTest.TestNotes;

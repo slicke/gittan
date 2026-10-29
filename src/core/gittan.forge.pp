@@ -101,6 +101,22 @@ type
   TGittanForgeFilter = (ffFeedback, ffAttention, ffNoDrafts, ffAskedOfMe, ffStale);
   TGittanForgeFilters = set of TGittanForgeFilter;
 
+  {** What makes a pull request need its author (NeedsAttention): changes
+    asked for, its checks failing. }
+  TGittanAttentionReason = (arChangesRequested, arChecksFailing);
+  TGittanAttentionReasons = set of TGittanAttentionReason;
+
+  {** The order of a list of pull requests (SortPulls): the last changed
+    first, the newest first, the ones that need attention first. }
+  TGittanPullOrder = (poUpdated, poNewest, poAttentionFirst);
+
+const
+  {** Every reason a pull request can need attention for, what counts
+    unless the user leaves one out. }
+  AllAttentionReasons = [arChangesRequested, arChecksFailing];
+
+type
+
   {** What a web address is asked for: a file (Path, at Line when above
     0, in Commit, else on Branch, else the default branch), a commit
     (Commit), an issue or pull request (Number), or the page that opens
@@ -175,19 +191,26 @@ function StillToReview(const AReview: TGittanForgePulls): TGittanForgePulls;
 {** APulls without the ones nobody but their author has answered (no
   Feedback). }
 function WithFeedback(const APulls: TGittanForgePulls): TGittanForgePulls;
-{** Whether APull needs its author to act: changes were asked for or
-  its checks fail. }
-function NeedsAttention(const APull: TGittanForgePull): boolean;
+{** Whether APull needs its author to act for one of AReasons: changes
+  were asked for, its checks fail. }
+function NeedsAttention(const APull: TGittanForgePull;
+  AReasons: TGittanAttentionReasons = AllAttentionReasons): boolean;
 {** Whether APull has not changed for StaleDays at ANow (UTC): its
   last change, or its opening when it has none, that long ago. }
 function IsStale(const APull: TGittanForgePull; ANow: TDateTime): boolean;
-{** Whether APull passes AFilter at ANow (UTC). }
+{** Whether APull passes AFilter at ANow (UTC), ffAttention counting
+  AReasons. }
 function PassesFilter(const APull: TGittanForgePull; AFilter: TGittanForgeFilter;
-  ANow: TDateTime): boolean;
+  ANow: TDateTime; AReasons: TGittanAttentionReasons = AllAttentionReasons): boolean;
 {** APulls without the ones that fail any of AFilters at ANow (UTC), in
-  their order. }
+  their order, ffAttention counting AReasons. }
 function FilterPulls(const APulls: TGittanForgePulls; AFilters: TGittanForgeFilters;
-  ANow: TDateTime): TGittanForgePulls;
+  ANow: TDateTime; AReasons: TGittanAttentionReasons = AllAttentionReasons): TGittanForgePulls;
+{** APulls in AOrder, poAttentionFirst counting AReasons; those the
+  order does not tell apart keep the order they had (last changed first
+  among the ones that need attention and among the rest). }
+function SortPulls(const APulls: TGittanForgePulls; AOrder: TGittanPullOrder;
+  AReasons: TGittanAttentionReasons = AllAttentionReasons): TGittanForgePulls;
 {** APull as a TGittanPullRequest, for what works on the repository's
   own pull requests (a comparison): the fields both have, the rest
   empty. }
@@ -1015,9 +1038,12 @@ begin
   SetLength(Result, n);
 end;
 
-function NeedsAttention(const APull: TGittanForgePull): boolean;
+function NeedsAttention(const APull: TGittanForgePull;
+  AReasons: TGittanAttentionReasons): boolean;
 begin
-  Result := (APull.ReviewDecision = rdChangesRequested) or (APull.Checks = chkFailed);
+  Result := ((arChangesRequested in AReasons) and
+    (APull.ReviewDecision = rdChangesRequested)) or
+    ((arChecksFailing in AReasons) and (APull.Checks = chkFailed));
 end;
 
 function IsStale(const APull: TGittanForgePull; ANow: TDateTime): boolean;
@@ -1031,11 +1057,11 @@ begin
 end;
 
 function PassesFilter(const APull: TGittanForgePull; AFilter: TGittanForgeFilter;
-  ANow: TDateTime): boolean;
+  ANow: TDateTime; AReasons: TGittanAttentionReasons): boolean;
 begin
   case AFilter of
     ffFeedback: Result := APull.Feedback;
-    ffAttention: Result := NeedsAttention(APull);
+    ffAttention: Result := NeedsAttention(APull, AReasons);
     ffNoDrafts: Result := not APull.IsDraft;
     ffAskedOfMe: Result := APull.Requested;
     ffStale: Result := IsStale(APull, ANow);
@@ -1045,7 +1071,7 @@ begin
 end;
 
 function FilterPulls(const APulls: TGittanForgePulls; AFilters: TGittanForgeFilters;
-  ANow: TDateTime): TGittanForgePulls;
+  ANow: TDateTime; AReasons: TGittanAttentionReasons): TGittanForgePulls;
 var
   i, n: integer;
   F: TGittanForgeFilter;
@@ -1058,7 +1084,7 @@ begin
   begin
     Keep := True;
     for F in AFilters do
-      Keep := Keep and PassesFilter(APulls[i], F, ANow);
+      Keep := Keep and PassesFilter(APulls[i], F, ANow, AReasons);
     if Keep then
     begin
       Result[n] := APulls[i];
@@ -1066,6 +1092,52 @@ begin
     end;
   end;
   SetLength(Result, n);
+end;
+
+{ Whether A goes before B in AOrder: the later change, else opening,
+  for poUpdated; the later opening for poNewest; one that needs
+  attention before one that does not for poAttentionFirst. }
+function PullBefore(const A, B: TGittanForgePull; AOrder: TGittanPullOrder;
+  AReasons: TGittanAttentionReasons): boolean;
+
+  function Changed(const APull: TGittanForgePull): TDateTime;
+  begin
+    Result := APull.Updated;
+    if Result <= 0 then
+      Result := APull.Created;
+  end;
+
+begin
+  case AOrder of
+    poUpdated: Result := Changed(A) > Changed(B);
+    poNewest: Result := A.Created > B.Created;
+    poAttentionFirst: Result := NeedsAttention(A, AReasons) and
+        not NeedsAttention(B, AReasons);
+  else
+    Result := False;
+  end;
+end;
+
+function SortPulls(const APulls: TGittanForgePulls; AOrder: TGittanPullOrder;
+  AReasons: TGittanAttentionReasons): TGittanForgePulls;
+var
+  i, j: integer;
+  Pull: TGittanForgePull;
+begin
+  { An insertion sort, which keeps the order of those it does not tell
+    apart; the lists are at most the forge's fifty. }
+  Result := Copy(APulls);
+  for i := 1 to High(Result) do
+  begin
+    Pull := Result[i];
+    j := i - 1;
+    while (j >= 0) and PullBefore(Pull, Result[j], AOrder, AReasons) do
+    begin
+      Result[j + 1] := Result[j];
+      Dec(j);
+    end;
+    Result[j + 1] := Pull;
+  end;
 end;
 
 function PullRequestOf(const APull: TGittanForgePull): TGittanPullRequest;
