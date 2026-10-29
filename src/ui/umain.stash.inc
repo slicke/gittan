@@ -400,5 +400,5 @@ end;
 procedure TRepoFrame.MenuStashListClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
-    ShowStashList(FStatus.PartScreenRect(spStash));
+    ShowStashList(MenuListAnchor);
 end;

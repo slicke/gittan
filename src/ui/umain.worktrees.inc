@@ -40,7 +40,7 @@ end;
 procedure TRepoFrame.MenuWorktreesClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
-    ShowWorktreeList(FStatus.PartScreenRect(spBranch));
+    ShowWorktreeList(MenuListAnchor);
 end;
 
 procedure TRepoFrame.ShowWorktreeList(const AScreenRect: TRect);

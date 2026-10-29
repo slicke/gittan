@@ -221,7 +221,7 @@ end;
 procedure TRepoFrame.MenuLfsLocksClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
-    ShowLfsLocks(FStatus.PartScreenRect(spBranch));
+    ShowLfsLocks(MenuListAnchor);
 end;
 
 { The user's locks first, then everyone else's, each by path. }

@@ -123,7 +123,9 @@ type
     {** Shows the list under AAnchor, a rectangle in screen coordinates
       (the control or the text that was clicked), aligned with its left
       edge, kept within the parent; above it when there is more room
-      there. The focus goes to the filter field, or to the rows. }
+      there. An anchor of no width is a point the list is centered
+      under (a list a menu item drops, from the top of the parent). The
+      focus goes to the filter field, or to the rows. }
     procedure Popup(const AAnchor: TRect);
     {** Shows the list centered in the parent, ATop pixels from its
       top, CenteredWidth wide (less in a narrow parent), with the
@@ -453,7 +455,10 @@ begin
   FEdit.TextHint := FFilterHint;
   W := ContentWidth;
   Width := W;
-  Left := Max(0, Min(FAnchor.Left, Parent.ClientWidth - W));
+  if FAnchor.Right = FAnchor.Left then
+    Left := Max(0, Min(FAnchor.Left - W div 2, Parent.ClientWidth - W))
+  else
+    Left := Max(0, Min(FAnchor.Left, Parent.ClientWidth - W));
   RoomBelow := Parent.ClientHeight - FAnchor.Bottom - Px(Offset);
   RoomAbove := FAnchor.Top - Px(Offset);
   FAbove := False;

@@ -112,7 +112,7 @@ begin
     bmRebase: RebaseOntoAsk(Ref);
     bmRename: RenameBranchAsk(BranchName);
     bmDelete: DeleteBranchAsk(BranchName);
-    bmUpstream: ShowUpstreamList(BranchName, FStatus.PartScreenRect(spBranch));
+    bmUpstream: ShowUpstreamList(BranchName, MenuListAnchor);
     bmDeleteRemote:
       if QuestionDlg(rsBmDeleteRemoteTitle, Format(rsBmDeleteRemoteAsk, [FMenuBranchUpstream]),
         mtWarning, [mrYes, rsBmDeleteAction, mrCancel, rsCancelButton, 'IsCancel',
@@ -403,7 +403,7 @@ end;
 procedure TRepoFrame.MenuUpstreamClick(Sender: TObject);
 begin
   if (FRepo.Root <> '') and (FBranch <> '') then
-    ShowUpstreamList(FBranch, FStatus.PartScreenRect(spBranch));
+    ShowUpstreamList(FBranch, MenuListAnchor);
 end;
 
 procedure TRepoFrame.BranchMenuOpen(Sender: TObject);
@@ -411,7 +411,8 @@ begin
   UpdateBranchItems;
 end;
 
-{ The list drops from the status bar's branch, where a click drops it. }
+{ From the menu the list opens at the top of the frame (MenuListAnchor);
+  a click on the status bar's branch drops it from there. }
 procedure TRepoFrame.MenuBranchListClick(Sender: TObject);
 var
   Mode: TGittanBranchListMode;
@@ -422,7 +423,7 @@ begin
   if (Mode in [blMerge, blRebase]) and
     (RepoBusy or (FBranch = '')) then
     Exit;
-  ShowBranchList(Mode, FStatus.PartScreenRect(spBranch));
+  ShowBranchList(Mode, MenuListAnchor);
 end;
 
 procedure TRepoFrame.MenuNewBranchClick(Sender: TObject);

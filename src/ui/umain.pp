@@ -1665,6 +1665,7 @@ type
     procedure AbandonChangeJob;
     procedure MenuCommitGraphClick(Sender: TObject);
     procedure GraphPick(Sender: TObject; const AHash: string);
+    function MenuListAnchor: TRect;
     function CommitStepHash(AOlder: boolean): string;
     procedure GoToCommitStep(AOlder: boolean);
     procedure UpdateCommitSteps;

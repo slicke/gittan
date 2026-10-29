@@ -151,5 +151,5 @@ end;
 procedure TRepoFrame.MenuReflogClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
-    ShowReflogList(FStatus.PartScreenRect(spBranch));
+    ShowReflogList(MenuListAnchor);
 end;

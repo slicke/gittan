@@ -243,7 +243,7 @@ end;
 procedure TRepoFrame.MenuTagsClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
-    ShowTagList(FStatus.PartScreenRect(spBranch));
+    ShowTagList(MenuListAnchor);
 end;
 
 procedure TRepoFrame.MenuNewTagClick(Sender: TObject);

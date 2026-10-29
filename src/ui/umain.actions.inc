@@ -1985,6 +1985,18 @@ begin
   ShowSummary;
 end;
 
+{ Where a list a menu item (or the palette, or its shortcut) drops opens:
+  centered at the top of the frame under the title bar, as the command
+  palette does, rather than from a part of the status bar far from the
+  menu. A point, which TGittanPopupList.Popup centers the list under. }
+function TRepoFrame.MenuListAnchor: TRect;
+var
+  P: TPoint;
+begin
+  P := ClientToScreen(Point(ClientWidth div 2, FTitleBarHeight + Px(4)));
+  Result := Rect(P.X, P.Y, P.X, P.Y);
+end;
+
 { Where Older or Newer leads from the commit shown against its parent:
   the next row of the graph's last pick, older or newer, while the
   commit is one of them; off them (a commit picked from the blame band,
