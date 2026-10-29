@@ -1411,7 +1411,7 @@ var
   Item: TJSONObject;
   Taken: TStringList;
   Commit: TGittanPlannedCommit;
-  First, Last, i, j, n: integer;
+  First, Last, i, j, k, n: integer;
   Path: string;
 begin
   APlan := nil;
@@ -1451,7 +1451,13 @@ begin
         if (Copy(Path, 1, 2) = './') or (((Copy(Path, 1, 2) = 'a/') or
           (Copy(Path, 1, 2) = 'b/')) and (APaths.IndexOf(Path) < 0)) then
           Delete(Path, 1, 2);
-        if (APaths.IndexOf(Path) < 0) or (Taken.IndexOf(Path) >= 0) then
+        { The list's own spelling: APaths finds a path in any case, Taken
+          only in the one it holds. }
+        k := APaths.IndexOf(Path);
+        if k < 0 then
+          Continue;
+        Path := APaths[k];
+        if Taken.IndexOf(Path) >= 0 then
           Continue;
         Taken.Add(Path);
         Insert(Path, Commit.Files, Length(Commit.Files));

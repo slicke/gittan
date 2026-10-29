@@ -910,6 +910,12 @@ begin
     AssertTrue('nothing planned', ParseCommitPlan('[]', Paths, Plan));
     AssertEquals('every file still in it', 1, Length(Plan));
     AssertEquals(4, Length(Plan[0].Files));
+    AssertTrue(ParseCommitPlan('[{"files": ["SRC/A.pas", "src/b.pas", "src/a.pas", ' +
+      '"tests/ta.pas", "readme.md"], "message": "All"}]', Paths, Plan));
+    AssertEquals('a re-cased path once, nothing left out', 1, Length(Plan));
+    AssertEquals(4, Length(Plan[0].Files));
+    AssertEquals('the list''s spelling', 'src/a.pas', Plan[0].Files[0]);
+    AssertEquals('the list''s spelling', 'README.md', Plan[0].Files[3]);
     AssertFalse(ParseCommitPlan('Commit it all at once.', Paths, Plan));
     AssertFalse(ParseCommitPlan('[not json]', Paths, Plan));
   finally

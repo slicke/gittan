@@ -1253,6 +1253,10 @@ begin
       end;
     if Box.ItemIndex < 0 then
       Box.ItemIndex := 0;
+    { The login shown when none is active is no pick of the user's:
+      PickedAccounts switches only from a box whose Tag, the item it
+      started on, is no longer the one picked. }
+    Box.Tag := Box.ItemIndex;
     Several := Several or (Box.Items.Count > 1);
     Place(Box, 4);
     SetLength(FAccountBoxes, Length(FAccountBoxes) + 1);
@@ -1284,10 +1288,11 @@ begin
   for i := 0 to High(FAccounts) do
     Result[i] := Copy(FAccounts[i]);
   for i := 0 to High(FAccountBoxes) do
-    for j := 0 to High(Result[FAccountForges[i]]) do
-      if Result[FAccountForges[i]][j].Host = FAccountHosts[i] then
-        Result[FAccountForges[i]][j].Active :=
-          Result[FAccountForges[i]][j].Login = FAccountBoxes[i].Text;
+    if FAccountBoxes[i].ItemIndex <> FAccountBoxes[i].Tag then
+      for j := 0 to High(Result[FAccountForges[i]]) do
+        if Result[FAccountForges[i]][j].Host = FAccountHosts[i] then
+          Result[FAccountForges[i]][j].Active :=
+            Result[FAccountForges[i]][j].Login = FAccountBoxes[i].Text;
 end;
 
 function TSettingsForm.AgentClass: TGittanAIClass;
