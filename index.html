@@ -216,11 +216,7 @@
     mask-image: radial-gradient(ellipse 55% 60% at 50% 25%, #000 10%, transparent 72%);
     opacity: .5;
   }
-  .hero .icon { width: 88px; height: 88px; border-radius: 20px; filter: drop-shadow(0 14px 26px rgba(30, 24, 12, .3)); }
-  .hero .name {
-    margin: 22px 0 0; font-size: 12.5px; font-weight: 650; letter-spacing: .14em; text-transform: uppercase; color: var(--fg-muted);
-  }
-  .hero .name em { font-style: normal; color: var(--fg); }
+  .hero .logo { display: block; margin: 0 auto 8px; width: 437px; max-width: 100%; height: auto; }
   .pill {
     display: inline-flex; align-items: center; gap: 8px; margin: 18px 0 0;
     padding: 5px 12px 5px 6px; border-radius: 999px; font-size: 13.5px; font-weight: 550;
@@ -575,10 +571,9 @@
 <header class="hero">
   <div class="wrap">
     <picture>
-      <source srcset="assets/icon-256.avif" type="image/avif">
-      <img class="icon" src="assets/icon-256.png" alt="Gittan icon" width="88" height="88">
+      <source srcset="assets/logo-dark.svg" media="(prefers-color-scheme: dark)" data-dark>
+      <img class="logo" src="assets/logo-light.svg" alt="Gittan, Git Tree Analyzer &amp; Navigator" width="437" height="128">
     </picture>
-    <p class="name"><em>Git</em> <em>T</em>ree <em>A</em>nalyzer &amp; <em>N</em>avigator</p>
     <div><a class="pill" href="#ai"><b>New</b> AI review and commit messages, off until you turn them on <span aria-hidden="true">→</span></a></div>
     <h1>Understand every change.<br><em>Then commit it.</em></h1>
     <span class="strandline" aria-hidden="true"><svg class="strand"><use href="#strand"/></svg></span>
