@@ -1388,7 +1388,10 @@ end;
   under it. }
 procedure TGittanCommitGraph.Paint;
 var
-  X, Y, BodyHeight, CenterY: integer;
+  X, Y, BodyHeight, CenterY, Room, TailWidth, NParts, i: integer;
+  Parts: array[0..2] of string;
+  PartColors: array[0..2] of TColor;
+  BranchText: string;
 
   procedure Part(const AText: string; AColor: TColor);
   begin
@@ -1419,24 +1422,52 @@ begin
   X := Px(Pad) + Canvas.TextWidth(rsGraphTitle) + 2 * Px(Gap);
   Canvas.Font := Font;
   Y := CenterY - BodyHeight div 2;
-  if FBranch <> '' then
+  { The branch and how far it is from its upstream end before the
+    Statistics toggle: a long name is cut, and the upstream goes when
+    it leaves the name too little room. }
+  Room := FStatsRect.Left - Px(Gap) - (X + BodyHeight - 4 + 5);
+  if (FBranch <> '') and (Room > Canvas.TextWidth('…')) then
   begin
+    NParts := 0;
+    if FHasUpstream then
+    begin
+      if FAhead > 0 then
+      begin
+        Parts[NParts] := '↑ ' + Format(rsGraphNotPushed, [FAhead]);
+        PartColors[NParts] := FAccent;
+        Inc(NParts);
+      end;
+      if FBehind > 0 then
+      begin
+        Parts[NParts] := '↓ ' + Format(rsGraphNotPulled, [FBehind]);
+        PartColors[NParts] := FText;
+        Inc(NParts);
+      end;
+      if (FAhead = 0) and (FBehind = 0) then
+      begin
+        Parts[NParts] := rsGraphInSync;
+        PartColors[NParts] := FDim;
+        Inc(NParts);
+      end;
+    end;
+    TailWidth := 0;
+    for i := 0 to NParts - 1 do
+      Inc(TailWidth, Canvas.TextWidth(' · ') + Canvas.TextWidth(Parts[i]));
+    if Room - TailWidth < Min(Canvas.TextWidth(FBranch), Canvas.TextWidth('mmmmmm')) then
+    begin
+      NParts := 0;
+      TailWidth := 0;
+    end;
     DrawStatusIcon(Canvas, HintBranch, X, Y, BodyHeight, FDim);
     Canvas.Pen.Width := 1;
     Canvas.Brush.Style := bsClear;
     Inc(X, BodyHeight - 4 + 5);
     Canvas.Font.Color := FText;
-    Canvas.TextOut(X, Y, FBranch);
-    Inc(X, Canvas.TextWidth(FBranch));
-    if FHasUpstream then
-    begin
-      if FAhead > 0 then
-        Part('↑ ' + Format(rsGraphNotPushed, [FAhead]), FAccent);
-      if FBehind > 0 then
-        Part('↓ ' + Format(rsGraphNotPulled, [FBehind]), FText);
-      if (FAhead = 0) and (FBehind = 0) then
-        Part(rsGraphInSync, FDim);
-    end;
+    BranchText := FitText(Canvas, FBranch, Room - TailWidth);
+    Canvas.TextOut(X, Y, BranchText);
+    Inc(X, Canvas.TextWidth(BranchText));
+    for i := 0 to NParts - 1 do
+      Part(Parts[i], PartColors[i]);
   end;
 
   if FCloseHot then
