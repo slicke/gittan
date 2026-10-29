@@ -43,7 +43,7 @@ var
 begin
   if not CanRevert or (APaths.Count = 0) then
     Exit;
-  if QuestionDlg(rsRevertTitle, Format(rsRevertFilesAsk, [ALabel]), mtWarning,
+  if AskDlg(rsRevertTitle, Format(rsRevertFilesAsk, [ALabel]), mtWarning,
     [mrYes, rsRevertFilesAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
     Exit;
   Saved := TStringList.Create;

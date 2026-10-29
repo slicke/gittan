@@ -114,7 +114,7 @@ begin
     bmDelete: DeleteBranchAsk(BranchName);
     bmUpstream: ShowUpstreamList(BranchName, MenuListAnchor);
     bmDeleteRemote:
-      if QuestionDlg(rsBmDeleteRemoteTitle, Format(rsBmDeleteRemoteAsk, [FMenuBranchUpstream]),
+      if AskDlg(rsBmDeleteRemoteTitle, Format(rsBmDeleteRemoteAsk, [FMenuBranchUpstream]),
         mtWarning, [mrYes, rsBmDeleteAction, mrCancel, rsCancelButton, 'IsCancel',
         'IsDefault'], 0) = mrYes then
         StartRemote(rkDeleteRemote, pmAuto, FMenuBranchUpstream);
@@ -137,14 +137,38 @@ begin
   NewBranchAsk(rsBmNewPrompt, 'HEAD');
 end;
 
+{ Why AName cannot name a new branch, '' when it can. }
+function TRepoFrame.BranchNameProblem(const AName: string): string;
+begin
+  Result := '';
+  if not FRepo.IsBranchName(AName) then
+    Result := rsAskBadBranch
+  else if FRepo.HasCommit('refs/heads/' + AName) then
+    Result := Format(rsAskBranchTaken, [AName]);
+end;
+
+function TRepoFrame.CheckNewBranch(const AValues: array of string): string;
+begin
+  Result := BranchNameProblem(Trim(AValues[0]));
+end;
+
+function TRepoFrame.CheckRenameBranch(const AValues: array of string): string;
+begin
+  if Trim(AValues[0]) = FRenamingBranch then
+    Exit('');
+  Result := BranchNameProblem(Trim(AValues[0]));
+end;
+
 procedure TRepoFrame.RenameBranchAsk(const AName: string);
 var
   Values: array of string;
 begin
   SetLength(Values, 1);
   Values[0] := AName;
-  if not InputQuery(rsBmRenameTitle, [Format(rsBmRenamePrompt, [AName])], Values) or
-    (Trim(Values[0]) = '') or (Trim(Values[0]) = AName) then
+  FRenamingBranch := AName;
+  if not AskInput(rsBmRenameTitle, '', [Format(rsBmRenamePrompt, [AName])], Values,
+    @CheckRenameBranch, rsBmRenameAction) or (Trim(Values[0]) = '') or
+    (Trim(Values[0]) = AName) then
     Exit;
   StopWatcher;
   try
@@ -166,11 +190,11 @@ procedure TRepoFrame.DeleteBranchAsk(const AName: string);
 var
   NotMerged, Ok: boolean;
 begin
-  if QuestionDlg(rsBmDeleteTitle, Format(rsBmDeleteAsk, [AName]), mtConfirmation,
+  if AskDlg(rsBmDeleteTitle, Format(rsBmDeleteAsk, [AName]), mtConfirmation,
     [mrYes, rsBmDeleteAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
     Exit;
   Ok := FRepo.DeleteBranch(AName, False, NotMerged);
-  if not Ok and NotMerged and (QuestionDlg(rsBmDeleteTitle, Format(rsBmNotMerged, [AName]),
+  if not Ok and NotMerged and (AskDlg(rsBmDeleteTitle, Format(rsBmNotMerged, [AName]),
     mtWarning, [mrYes, rsBmDeleteAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'],
     0) = mrYes) then
     Ok := FRepo.DeleteBranch(AName, True, NotMerged)
@@ -202,7 +226,7 @@ begin
     Names.Assign(FGoneToDelete);
     if Names.Count = 0 then
       Exit;
-    if QuestionDlg(rsBmGoneTitle, Format(rsBmGoneAsk, [Names.Count]) + LineEnding +
+    if AskDlg(rsBmGoneTitle, Format(rsBmGoneAsk, [Names.Count]) + LineEnding +
       LineEnding + Names.Text, mtConfirmation, [mrYes, rsBmDeleteAction, mrCancel,
       rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
       Exit;
@@ -212,7 +236,7 @@ begin
         Inc(Deleted)
       else if NotMerged then
         Unmerged.Add(Names[i]);
-    if (Unmerged.Count > 0) and (QuestionDlg(rsBmGoneTitle, Format(rsBmGoneUnmerged,
+    if (Unmerged.Count > 0) and (AskDlg(rsBmGoneTitle, Format(rsBmGoneUnmerged,
       [Unmerged.Count]) + LineEnding + LineEnding + Unmerged.Text, mtWarning,
       [mrYes, rsBmDeleteAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) = mrYes) then
       for i := 0 to Unmerged.Count - 1 do
@@ -465,7 +489,7 @@ begin
     Msg := Msg + ' ' + rsBmRebasePushedOne
   else if Pushed > 1 then
     Msg := Msg + ' ' + Format(rsBmRebasePushed, [Pushed]);
-  case QuestionDlg(rsBmRebaseTitle, Msg, mtConfirmation, [mrYes, rsRebaseAction, 'IsDefault',
+  case AskDlg(rsBmRebaseTitle, Msg, mtConfirmation, [mrYes, rsRebaseAction, 'IsDefault',
     mrNo, rsRebaseChoose, mrCancel, rsCancelButton, 'IsCancel'], 0) of
     mrNo:
     begin

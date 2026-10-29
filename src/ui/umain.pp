@@ -27,7 +27,7 @@ uses
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.timelapse, gittan.timelapsebar, gittan.pickaxe, gittan.navhistory, gittan.undo, gittan.paletteside,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.textfile, gittan.sectionheader, gittan.hintbox,
-  gittan.forge, gittan.lfslocks,
+  gittan.forge, gittan.lfslocks, gittan.askdlg,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
   gittan.rebase, gittan.worktrees, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
@@ -494,6 +494,9 @@ type
     { FocusTreeAsync ran before the window was shown; FormActivate tries
       again. }
     FFocusTreePending: boolean;
+    { The branch Rename Branch asks a new name for, which its check
+      takes as no change rather than as a name taken. }
+    FRenamingBranch: string;
     { Abort and Skip for what git is in the middle of, and the merge
       message filled into the field (umain.conflicts.inc). }
     FAbortButton, FSkipButton: TButton;
@@ -1804,6 +1807,13 @@ type
     procedure BranchMenuClick(Sender: TObject);
     function BranchAction(const AName: string): boolean;
     procedure RenameBranchAsk(const AName: string);
+    function CheckNewBranch(const AValues: array of string): string;
+    function CheckRenameBranch(const AValues: array of string): string;
+    function CheckTagName(const AValues: array of string): string;
+    function CheckMovePath(const AValues: array of string): string;
+    function CheckWorktree(const AValues: array of string): string;
+    function CheckCompareRef(const AValues: array of string): string;
+    function BranchNameProblem(const AName: string): string;
     procedure DeleteBranchAsk(const AName: string);
     procedure DeleteGoneBranches;
     procedure MergeIntoCurrent(const ARef: string);
@@ -2596,6 +2606,18 @@ resourcestring
   rsCaResetMixed = 'Mixed: keep the changes in the files...';
   rsCaResetHard = 'Hard: discard all changes...';
   rsCaBranchTitle = 'Create Branch';
+  rsAskBadBranch = 'Not a branch name git takes: no spaces, "..", "~", "^", ":" or "?".';
+  rsAskBranchTaken = 'A branch named %s exists.';
+  rsAskBadTag = 'Not a tag name git takes: no spaces, "..", "~", "^", ":" or "?".';
+  rsAskTagTaken = 'A tag named %s exists.';
+  rsAskPathTaken = 'Something is at %s already.';
+  rsAskNoSuchRef = 'git knows no commit named %s.';
+  rsCaTagAction = 'Create Tag';
+  rsCaBranchAction = 'Create Branch';
+  rsStashAction = 'Stash';
+  rsWtAddAction = 'Add Worktree';
+  rsCompareAction = 'Compare';
+  rsMoveAction = 'Move';
   rsCaBranchPrompt = 'Name of the new branch at %s';
   rsCaTagTitle = 'Create Tag';
   rsCaTagPrompt = 'Name of the tag on %s';
@@ -2700,6 +2722,7 @@ resourcestring
   rsBmDelete = 'Delete...';
   rsBmDeleteRemote = 'Delete %s on the Remote...';
   rsBmRenameTitle = 'Rename Branch';
+  rsBmRenameAction = 'Rename';
   rsBmRenamePrompt = 'New name for %s';
   rsBmRenamed = 'Renamed %s to %s';
   rsBmDeleteTitle = 'Delete Branch';
@@ -3436,7 +3459,7 @@ begin
       end;
     end;
     repeat
-      if not InputQuery(Title, Prompt, AWords) then
+      if not AskText(Title, Prompt, AWords, nil, '', '', AAction = plApprove) then
         Exit;
       AWords := Trim(AWords);
     until (AWords <> '') or (AAction = plApprove);
@@ -3449,7 +3472,7 @@ begin
       else
         Ask := rsPullRebaseMergeAsk;
     end;
-    if QuestionDlg(Format(rsPullMergeTitle, [APull.Number]),
+    if AskDlg(Format(rsPullMergeTitle, [APull.Number]),
       Format(Ask, [APull.Number, APull.Title, APull.BaseRef]), mtConfirmation,
       [mrYes, rsPullMergeAction, 'IsDefault', mrCancel, rsCancelButton, 'IsCancel'], 0) <> mrYes then
       Exit;

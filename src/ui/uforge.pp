@@ -39,7 +39,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Controls, Forms, Menus, ExtCtrls, Graphics, LCLType, Dialogs,
-  Clipbrd, gittan.job, gittan.forge, gittan.forgepage, umain;
+  Clipbrd, gittan.job, gittan.forge, gittan.forgepage, gittan.askdlg, umain;
 
 type
 
@@ -683,7 +683,7 @@ begin
   FZombies.Add(Job);
   Application.QueueAsyncCall(@FreeJobsAsync, 0);
   if not Job.Ok then
-    MessageDlg(Format(rsPullActionFailed, [ForgeName]), Job.Error, mtError, [mbOK], 0);
+    TellDlg(Format(rsPullActionFailed, [ForgeName]), Job.Error, mtError);
   { The lists as they are now. }
   AbandonJob;
   StartJob;

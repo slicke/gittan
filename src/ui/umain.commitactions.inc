@@ -405,7 +405,7 @@ begin
   Ask := Format(Ask, [ResetTarget, AShort]);
   if Note <> '' then
     Ask := Ask + LineEnding + LineEnding + Note;
-  Result := QuestionDlg(rsCaResetTitle, Ask, mtWarning, [mrYes, rsCaResetAction, mrCancel,
+  Result := AskDlg(rsCaResetTitle, Ask, mtWarning, [mrYes, rsCaResetAction, mrCancel,
     rsCancelButton, 'IsCancel', 'IsDefault'], 0) = mrYes;
 end;
 

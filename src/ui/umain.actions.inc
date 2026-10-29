@@ -440,7 +440,7 @@ begin
     Forge := AForge.Create(Cli);
     try
       if not Forge.SwitchAccount(APicked[i].Host, APicked[i].Login, Err) then
-        MessageDlg(Err, mtError, [mbOK], 0);
+        TellDlg('', Err, mtError);
     finally
       Forge.Free;
     end;
@@ -1560,7 +1560,7 @@ begin
           Shown := Shown + LineEnding + '  ' + Files[i];
         if Files.Count > 10 then
           Shown := Shown + LineEnding + '  ' + Format(rsSwitchMore, [Files.Count - 10]);
-        case QuestionDlg(rsSwitchBlockedTitle, Format(rsSwitchBlocked, [ABranch]) + LineEnding +
+        case AskDlg(rsSwitchBlockedTitle, Format(rsSwitchBlocked, [ABranch]) + LineEnding +
             Shown, mtWarning, [mrYes, rsStashAndSwitch, 'IsDefault', mrNo, rsBringChanges,
             mrCancel, rsCancelButton, 'IsCancel'], 0) of
           mrYes:
@@ -2227,9 +2227,9 @@ var
   Msg: string;
 begin
   if InstallCli(Application.ExeName, Msg) then
-    MessageDlg(Msg, mtInformation, [mbOK], 0)
+    TellDlg('', Msg, mtInformation)
   else
-    MessageDlg(Msg, mtError, [mbOK], 0);
+    TellDlg('', Msg, mtError);
 end;
 
 procedure TRepoFrame.MenuUninstallCliClick(Sender: TObject);
@@ -2237,9 +2237,9 @@ var
   Msg: string;
 begin
   if UninstallCli(Msg) then
-    MessageDlg(Msg, mtInformation, [mbOK], 0)
+    TellDlg('', Msg, mtInformation)
   else
-    MessageDlg(Msg, mtError, [mbOK], 0);
+    TellDlg('', Msg, mtError);
 end;
 
 { Uninstall is offered only while Gittan's own script is installed; the
@@ -2329,14 +2329,28 @@ begin
   SetBase(TMenuItem(Sender).Hint, TMenuItem(Sender).Tag = 1);
 end;
 
+{ A commit git can find; a range (a..b, a...b) is left to SetBase. }
+function TRepoFrame.CheckCompareRef(const AValues: array of string): string;
+var
+  Ref: string;
+begin
+  Result := '';
+  Ref := Trim(AValues[0]);
+  if (Pos('..', Ref) = 0) and not FRepo.HasCommit(Ref) then
+    Result := Format(rsAskNoSuchRef, [Ref]);
+end;
+
 procedure TRepoFrame.MenuCompareOtherClick(Sender: TObject);
 var
   Ref: string;
 begin
   if FRepo.Root = '' then
     Exit;
-  Ref := Trim(InputBox(StringReplace(rsCompareWith, '&', '', []), rsRefPrompt, FRepo.Base));
-  SetBase(Ref);
+  Ref := FRepo.Base;
+  if not AskText(StringReplace(rsCompareWith, '&', '', []), rsRefPrompt, Ref, @CheckCompareRef,
+    rsCompareAction) then
+    Exit;
+  SetBase(Trim(Ref));
 end;
 
 { ---------------------------------------------------------------------------

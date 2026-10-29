@@ -187,6 +187,31 @@ begin
   end;
 end;
 
+{ The folder as AddWorktreeAsk takes it: relative to the folder the
+  repository is in. }
+function WorktreeFolder(const ARoot, AFolder: string): string;
+begin
+  Result := Trim(AFolder);
+  if (Result <> '') and not FilenameIsAbsolute(Result) then
+    Result := ExpandFileName(IncludeTrailingPathDelimiter(ExtractFileDir(
+      ExcludeTrailingPathDelimiter(ARoot))) + Result);
+end;
+
+{ The folder must not be there yet; a branch, when named, must be one
+  git takes (an existing one is checked out, another made). }
+function TRepoFrame.CheckWorktree(const AValues: array of string): string;
+var
+  Folder, Branch: string;
+begin
+  Result := '';
+  Folder := WorktreeFolder(FRepo.Root, AValues[0]);
+  if DirectoryExists(Folder) or FileExists(Folder) then
+    Exit(Format(rsWtFolderExists, [Folder]));
+  Branch := Trim(AValues[1]);
+  if (Branch <> '') and not FRepo.IsBranchName(Branch) then
+    Result := rsAskBadBranch;
+end;
+
 procedure TRepoFrame.AddWorktreeAsk;
 var
   Values: array of string;
@@ -198,15 +223,14 @@ begin
   SetLength(Values, 2);
   Values[0] := SuggestWorktreePath(FRepo.Root, '');
   Values[1] := '';
-  if not InputQuery(rsWtAddTitle, [rsWtFolderPrompt, rsWtBranchPrompt], Values) then
+  if not AskInput(rsWtAddTitle, '', [rsWtFolderPrompt, rsWtBranchPrompt], Values,
+    @CheckWorktree, rsWtAddAction) then
     Exit;
   Folder := Trim(Values[0]);
   Branch := Trim(Values[1]);
   if Folder = '' then
     Exit;
-  if not FilenameIsAbsolute(Folder) then
-    Folder := ExpandFileName(IncludeTrailingPathDelimiter(ExtractFileDir(
-      ExcludeTrailingPathDelimiter(FRepo.Root))) + Folder);
+  Folder := WorktreeFolder(FRepo.Root, Folder);
   if DirectoryExists(Folder) or FileExists(Folder) then
   begin
     BannerError(rsWtAddFailed, Format(rsWtFolderExists, [Folder]));
@@ -244,7 +268,7 @@ begin
     StatusNote(Format(rsWtRemoveOpen, [Folder]), True);
     Exit;
   end;
-  if QuestionDlg(rsWtRemoveTitle, Format(rsWtRemoveAsk, [Folder, AWorktree.Path]), mtWarning,
+  if AskDlg(rsWtRemoveTitle, Format(rsWtRemoveAsk, [Folder, AWorktree.Path]), mtWarning,
     [mrYes, rsWtRemoveAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
     Exit;
   if not RemoveWorktree(FRepo.Root, AWorktree.Path, False, Err, Dirty) then
@@ -256,7 +280,7 @@ begin
     end;
     { Changes not committed, or a lock: git wants --force, which loses
       them. }
-    if QuestionDlg(rsWtRemoveTitle, Format(rsWtRemoveForceAsk, [Folder, Trim(Err)]), mtWarning,
+    if AskDlg(rsWtRemoveTitle, Format(rsWtRemoveForceAsk, [Folder, Trim(Err)]), mtWarning,
       [mrYes, rsWtRemoveAnyway, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
       Exit;
     if not RemoveWorktree(FRepo.Root, AWorktree.Path, True, Err, Dirty) then

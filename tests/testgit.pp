@@ -3009,6 +3009,11 @@ begin
   AssertTrue(FRepo.IsBranchName('feature/x'));
   AssertFalse(FRepo.IsBranchName('bad..name'));
   AssertFalse(FRepo.IsBranchName(''));
+  AssertTrue(FRepo.IsTagName('v1.2'));
+  AssertTrue(FRepo.IsTagName('release/1'));
+  AssertFalse(FRepo.IsTagName('bad..name'));
+  AssertFalse(FRepo.IsTagName('ends.lock'));
+  AssertFalse(FRepo.IsTagName(''));
 
   AssertTrue(FRepo.Error, FRepo.CreateBranch('side', First, False));
   AssertEquals('not switched', Main, FRepo.Branch);

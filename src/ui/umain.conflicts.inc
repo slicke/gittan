@@ -114,7 +114,7 @@ begin
   if AAction = 2 then
   begin
     Remaining := MarkersLeft(APath);
-    if (Remaining > 0) and (QuestionDlg(rsMarkResolvedTitle, Format(rsMarkersLeft, [APath, Remaining]),
+    if (Remaining > 0) and (AskDlg(rsMarkResolvedTitle, Format(rsMarkersLeft, [APath, Remaining]),
       mtConfirmation, [mrYes, rsMarkResolved, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'],
       0) <> mrYes) then
       Exit;
@@ -128,7 +128,7 @@ begin
       Side := rsSideTheirs;
     { Taking one side drops the other's changes, with no undo: Cancel is
       the default, as for Revert, Remove and Clean. }
-    if QuestionDlg(rsResolveTitle, Format(rsResolveAsk, [APath, Side]), mtConfirmation,
+    if AskDlg(rsResolveTitle, Format(rsResolveAsk, [APath, Side]), mtConfirmation,
       [mrYes, rsResolveAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
       Exit;
     if AAction = 0 then
@@ -631,7 +631,7 @@ begin
       Shown := Shown + LineEnding + '  ' + Extras[i];
     if Length(Extras) > 10 then
       Shown := Shown + LineEnding + '  ' + Format(rsSwitchMore, [Length(Extras) - 10]);
-    if QuestionDlg(rsContinueExtrasTitle, Format(rsContinueExtrasAsk, [Shown]), mtConfirmation,
+    if AskDlg(rsContinueExtrasTitle, Format(rsContinueExtrasAsk, [Shown]), mtConfirmation,
       [mrYes, rsContinueExtrasButton, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'],
       0) <> mrYes then
       Exit;
@@ -642,7 +642,7 @@ begin
     begin
       Screen.Cursor := crDefault;
       RefreshRepository;
-      MessageDlg(Format(rsContinueFailed, [Noun]), FRepo.Error, mtError, [mbOK], 0);
+      TellDlg(Format(rsContinueFailed, [Noun]), FRepo.Error, mtError);
       Exit;
     end;
   finally
@@ -674,7 +674,7 @@ procedure TRepoFrame.SkipOperationClick(Sender: TObject);
 begin
   if (FRepo.Root = '') or not ContinueMode then
     Exit;
-  if QuestionDlg(rsSkipTitle, rsSkipAsk, mtConfirmation,
+  if AskDlg(rsSkipTitle, rsSkipAsk, mtConfirmation,
     [mrYes, rsSkipButton, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
     Exit;
   if FRepo.SkipOperation then
@@ -683,7 +683,7 @@ begin
     StatusNote(rsSkipped);
   end
   else
-    MessageDlg(rsSkipFailed, FRepo.Error, mtError, [mbOK], 0);
+    TellDlg(rsSkipFailed, FRepo.Error, mtError);
   RefreshRepository;
 end;
 
@@ -698,7 +698,7 @@ begin
   begin
     { HEAD is on another branch: offer to forget the rebase too, which
       keeps the branch and the files as they are. }
-    case QuestionDlg(rsAbortTitle, Format(rsStrayAbortAsk, [FRebaseBranch, FBranch]),
+    case AskDlg(rsAbortTitle, Format(rsStrayAbortAsk, [FRebaseBranch, FBranch]),
         mtConfirmation, [mrYes, rsAbortButton, mrNo, rsQuitButton, mrCancel, rsCancelButton,
         'IsCancel', 'IsDefault'], 0) of
       mrYes: ;
@@ -710,7 +710,7 @@ begin
           StatusNote(Format(rsQuit, [Noun]));
         end
         else
-          MessageDlg(Format(rsQuitFailed, [Noun]), FRepo.Error, mtError, [mbOK], 0);
+          TellDlg(Format(rsQuitFailed, [Noun]), FRepo.Error, mtError);
         RefreshRepository;
         Exit;
       end;
@@ -718,7 +718,7 @@ begin
         Exit;
     end;
   end
-  else if QuestionDlg(rsAbortTitle, Format(rsAbortAsk, [Noun]), mtConfirmation,
+  else if AskDlg(rsAbortTitle, Format(rsAbortAsk, [Noun]), mtConfirmation,
     [mrYes, rsAbortButton, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
     Exit;
   if FRepo.AbortOperation then
@@ -731,6 +731,6 @@ begin
     StatusNote(Format(rsAborted, [Noun]));
   end
   else
-    MessageDlg(Format(rsAbortFailed, [Noun]), FRepo.Error, mtError, [mbOK], 0);
+    TellDlg(Format(rsAbortFailed, [Noun]), FRepo.Error, mtError);
   RefreshRepository;
 end;

@@ -596,7 +596,7 @@ begin
         if Index >= 0 then
           List := List + ' → ' + Copy(FSubmodules[Index].Recorded, 1, 7);
       end;
-      if QuestionDlg(rsSubUpdateTitle, rsSubUpdateMoved + LineEnding + List + LineEnding +
+      if AskDlg(rsSubUpdateTitle, rsSubUpdateMoved + LineEnding + List + LineEnding +
         LineEnding + rsSubUpdateMovedKeep, mtWarning, [mrYes, rsSubUpdateAction, mrCancel,
         rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
         Exit;

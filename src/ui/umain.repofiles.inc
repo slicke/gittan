@@ -463,7 +463,7 @@ begin
     Exit;
   HoldRefresh;
   try
-    if QuestionDlg(rsAppName, Format(rsSaveAsk, [ExtractFileName(FEditPath)]),
+    if AskDlg(rsAppName, Format(rsSaveAsk, [ExtractFileName(FEditPath)]),
       mtConfirmation, [mrYes, rsSaveAction, 'IsDefault', mrNo, rsDontSave], 0) = mrYes then
       SaveEdit(False)
     else
@@ -543,7 +543,7 @@ var
 begin
   if (FEditPath = '') or not Edit.Modified then
     Exit;
-  if QuestionDlg(rsAppName, Format(rsRevertAsk, [ExtractFileName(FEditPath)]),
+  if AskDlg(rsAppName, Format(rsRevertAsk, [ExtractFileName(FEditPath)]),
     mtConfirmation, [mrYes, rsRevertAction, mrCancel, rsCancelButton, 'IsCancel'], 0) <> mrYes then
     Exit;
   TopLine := Edit.LineTop;
@@ -633,7 +633,7 @@ begin
   CanClose := True;
   if (FEditPath = '') or not Edit.Modified then
     Exit;
-  case QuestionDlg(rsAppName, Format(rsSaveAsk, [ExtractFileName(FEditPath)]),
+  case AskDlg(rsAppName, Format(rsSaveAsk, [ExtractFileName(FEditPath)]),
       mtConfirmation, [mrYes, rsSaveAction, 'IsDefault', mrNo, rsDontSave,
       mrCancel, rsCancelButton, 'IsCancel'], 0) of
     mrYes: CanClose := SaveEdit(False);

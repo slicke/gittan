@@ -458,7 +458,7 @@ var
   Path, Err: string;
 begin
   Path := FCurrentPath;
-  if QuestionDlg(rsAppName, Format(rsDiscardAsk, [ExtractFileName(Path),
+  if AskDlg(rsAppName, Format(rsDiscardAsk, [ExtractFileName(Path),
     DiscardBackText(ABlock)]), mtConfirmation,
     [mrYes, rsDiscardAction, 'IsDefault', mrCancel, rsCancelButton, 'IsCancel'], 0) <> mrYes then
     Exit;

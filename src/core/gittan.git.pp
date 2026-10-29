@@ -515,6 +515,8 @@ type
     function RemoteEnvironment: TStringArray;
     {** Whether AName may name a branch (`git check-ref-format --branch`). }
     function IsBranchName(const AName: string): boolean;
+    {** Whether AName may name a tag (`git check-ref-format refs/tags/<name>`). }
+    function IsTagName(const AName: string): boolean;
     {** Makes the branch AName at the commit AAt, and switches to it with
       ASwitch (`git switch -c`). False, with git's reason, when the name
       is taken or wrong, or the switch would overwrite local changes;
@@ -4039,6 +4041,14 @@ var
 begin
   Result := (FRoot <> '') and (AName <> '') and
     RunGit(FRoot, ['check-ref-format', '--branch', AName], Output);
+end;
+
+function TGittanRepo.IsTagName(const AName: string): boolean;
+var
+  Output: string;
+begin
+  Result := (FRoot <> '') and (AName <> '') and (AName[1] <> '-') and
+    RunGit(FRoot, ['check-ref-format', 'refs/tags/' + AName], Output);
 end;
 
 function TGittanRepo.CreateBranch(const AName, AAt: string; ASwitch: boolean): boolean;

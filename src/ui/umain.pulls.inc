@@ -329,7 +329,7 @@ begin
       StatusNote(Format(rsNewPullNoRemote, [ABranch]), True);
       Exit;
     end;
-    if QuestionDlg(rsNewPullTitle, Format(rsNewPullPush, [ABranch, Remote, ForgeName]),
+    if AskDlg(rsNewPullTitle, Format(rsNewPullPush, [ABranch, Remote, ForgeName]),
       mtConfirmation, [mrYes, rsPushAndOpen, 'IsDefault', mrCancel, rsCancelButton,
       'IsCancel'], 0) <> mrYes then
       Exit;
@@ -349,7 +349,7 @@ begin
   else if RemoteBranch = ABranch then
     Ahead := FRepo.CountCommits(Up, 'refs/heads/' + ABranch);
   if Ahead > 0 then
-    case QuestionDlg(rsNewPullTitle, Format(rsNewPullAhead, [Ahead, ABranch]),
+    case AskDlg(rsNewPullTitle, Format(rsNewPullAhead, [Ahead, ABranch]),
         mtConfirmation, [mrYes, rsPushAndOpen, 'IsDefault', mrNo, rsOpenAnyway,
         mrCancel, rsCancelButton, 'IsCancel'], 0) of
       mrYes:

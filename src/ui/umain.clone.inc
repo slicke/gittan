@@ -124,7 +124,7 @@ begin
   Probe := TGittanRepo.Create;
   try
     Inside := Probe.Open(Dir);
-    if Inside and (QuestionDlg(rsInitTitle, Format(rsInitInside, [Dir,
+    if Inside and (AskDlg(rsInitTitle, Format(rsInitInside, [Dir,
       ExcludeTrailingPathDelimiter(Probe.Root)]), mtWarning, [mrYes, rsInitAction, mrCancel,
       rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes) then
       Exit;

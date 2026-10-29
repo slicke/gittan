@@ -14,10 +14,46 @@ begin
     (FContextFolder = '') and FRepo.IsTracked(FContextPath);
 end;
 
+{ AValue as a path from the top of the repository, slashes for
+  backslashes and no leading ./, in ANew; '' when it may be moved to,
+  else why not: it stays inside the work tree and out of the git
+  directory, and nothing is there yet. }
+function MoveTarget(const ARoot, AValue: string; out ANew: string): string;
+var
+  Part: string;
+  Ok: boolean;
+begin
+  Result := '';
+  ANew := StringReplace(Trim(AValue), '\', '/', [rfReplaceAll]);
+  while Copy(ANew, 1, 2) = './' do
+    Delete(ANew, 1, 2);
+  if ANew = '' then
+    Exit;
+  Ok := (ANew[1] <> '/') and (ANew[Length(ANew)] <> '/') and (Pos(':', ANew) = 0);
+  for Part in ANew.Split(['/']) do
+    if (Part = '') or (Part = '.') or (Part = '..') or SameText(Part, '.git') then
+      Ok := False;
+  if not Ok then
+    Exit(rsMoveBadPath);
+  if FileExists(IncludeTrailingPathDelimiter(ARoot) + ANew) or
+    DirectoryExists(IncludeTrailingPathDelimiter(ARoot) + ANew) then
+    Result := Format(rsAskPathTaken, [ANew]);
+end;
+
+{ The path itself is no move: OK does nothing then, and says nothing. }
+function TRepoFrame.CheckMovePath(const AValues: array of string): string;
+var
+  New: string;
+begin
+  Result := MoveTarget(FRepo.Root, AValues[0], New);
+  if New = FContextPath then
+    Result := '';
+end;
+
 procedure TRepoFrame.MenuMoveFileClick(Sender: TObject);
 var
   Values: array of string;
-  Old, New, Part: string;
+  Old, New: string;
   Ok: boolean;
 begin
   if not CanMoveFiles then
@@ -25,23 +61,18 @@ begin
   Old := FContextPath;
   SetLength(Values, 1);
   Values[0] := Old;
-  if not InputQuery(rsMoveTitle, [Format(rsMovePrompt, [Old])], Values) then
+  if not AskInput(rsMoveTitle, '', [Format(rsMovePrompt, [Old])], Values, @CheckMovePath,
+    rsMoveAction) then
     Exit;
-  New := StringReplace(Trim(Values[0]), '\', '/', [rfReplaceAll]);
-  while Copy(New, 1, 2) = './' do
-    Delete(New, 1, 2);
-  if (New = Old) or (New = '') then
-    Exit;
-  { The path stays inside the work tree and out of the git directory. }
-  Ok := (New[1] <> '/') and (New[Length(New)] <> '/') and (Pos(':', New) = 0);
-  for Part in New.Split(['/']) do
-    if (Part = '') or (Part = '.') or (Part = '..') or SameText(Part, '.git') then
-      Ok := False;
-  if not Ok then
+  { The check ran on what was typed; a file made meanwhile is git's to
+    refuse. }
+  if MoveTarget(FRepo.Root, Values[0], New) = rsMoveBadPath then
   begin
     StatusNote(rsMoveBadPath, True);
     Exit;
   end;
+  if (New = Old) or (New = '') then
+    Exit;
   StopWatcher;
   try
     Ok := FRepo.MovePath(Old, New);
@@ -66,7 +97,7 @@ begin
   if not CanMoveFiles then
     Exit;
   Path := FContextPath;
-  Answer := QuestionDlg(rsRemoveTitle, Format(rsRemoveAsk, [Path]), mtWarning,
+  Answer := AskDlg(rsRemoveTitle, Format(rsRemoveAsk, [Path]), mtWarning,
     [mrYes, rsRemoveKeepAction, mrNo, rsRemoveDeleteAction, mrCancel, rsCancelButton,
     'IsCancel', 'IsDefault'], 0);
   if not (Answer in [mrYes, mrNo]) then
