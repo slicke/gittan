@@ -67,9 +67,9 @@ type
   TGittanWindow = class(TRepoWindow)
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
-    { A dialog the LCL centers on the screen (InputQuery, QuestionDlg,
-      MessageDlg) is centered on the window instead, as Gittan's own
-      dialogs are. }
+    { A dialog the LCL centers on the screen (an exception's, and the
+      message boxes of ATSynEdit and EControl) is centered on the window
+      instead, as Gittan's own dialogs are. }
     procedure ModalBegin(Sender: TObject);
     procedure FormDropFiles(Sender: TObject; const FileNames: array of string);
   private

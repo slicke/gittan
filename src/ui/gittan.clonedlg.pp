@@ -316,8 +316,10 @@ begin
     if DirectoryExists(Trim(FParent.Text)) then
       D.InitialDir := Trim(FParent.Text);
     if D.Execute then
+    begin
       FParent.Text := D.FileName;
       ShowPathEnd(FParent);
+    end;
   finally
     D.Free;
   end;

@@ -119,7 +119,8 @@ type
     {** The chevrons: whether there is somewhere to go back (ABack) and
       forward (AForward) to, a dim chevron taking no click; ABackHint
       and AForwardHint their tooltips. }
-    procedure SetNav(ABack, AForward: boolean; const ABackHint, AForwardHint: string);    {** A click on a tab: show it. }
+    procedure SetNav(ABack, AForward: boolean; const ABackHint, AForwardHint: string);
+    {** A click on a tab: show it. }
     property OnSelect: TGittanTabEvent read FOnSelect write FOnSelect;
     {** The cross or a middle click on a tab: close it. }
     property OnClose: TGittanTabEvent read FOnClose write FOnClose;
