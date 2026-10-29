@@ -132,20 +132,20 @@ type
     FOptional: boolean;
     FPathField: integer;
     FCancelResult: TModalResult;
-    FNoCancel: boolean;
+    FNoCancel, FPressed: boolean;
     function NextTop: integer;
     function IconRect: TRect;
     procedure FieldChange(Sender: TObject);
     procedure AddText(const AText: string; ABold: boolean; AGap: integer = FieldGap);
     procedure AddButtons(const AButtons: array of TAskButton; ADefault, ACancel: integer);
+    procedure ButtonClick(Sender: TObject);
   protected
     procedure KeyDown(var Key: word; Shift: TShiftState); override;
     procedure Paint; override;
-  public
-    function CloseQuery: boolean; override;
     procedure CreateWnd; override;
     procedure DoShow; override;
   public
+    function CloseQuery: boolean; override;
     constructor CreateAsk(const ATitle: string; AKind: TMsgDlgType);
   end;
 
@@ -299,6 +299,7 @@ begin
     B := TButton.Create(Self);
     B.Caption := AButtons[Order[i]].Caption;
     B.ModalResult := AButtons[Order[i]].Result;
+    B.OnClick := @ButtonClick;
     B.AutoSize := True;
     B.Constraints.MinWidth := Scale96ToScreen(ButtonMinWidth);
     B.Align := alRight;
@@ -328,12 +329,22 @@ begin
   inherited KeyDown(Key, Shift);
 end;
 
-{ Under 'NoCancel' the close box does not close the dialog; a button
-  sets ModalResult before it closes. }
+{ A button was pressed: the answer is its ModalResult, which the LCL
+  sets after OnClick. }
+procedure TAskForm.ButtonClick(Sender: TObject);
+begin
+  FPressed := True;
+end;
+
+{ Under 'NoCancel' the close box does not close the dialog. The LCL's
+  Close sets a modal form's ModalResult to mrCancel without asking, and
+  the modal loop asks here afterwards (CloseModal), so the test is
+  whether a button was pressed, not ModalResult; a refusal clears
+  ModalResult and the dialog stays. }
 function TAskForm.CloseQuery: boolean;
 begin
   Result := inherited CloseQuery;
-  if FNoCancel and (ModalResult = mrNone) then
+  if FNoCancel and not FPressed then
     Result := False;
 end;
 

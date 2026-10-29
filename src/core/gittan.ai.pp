@@ -1709,6 +1709,7 @@ var
   Diff, Error, Side: string;
   Numbered: TStringArray;
   i, Size, Room, First, Last: integer;
+  Grew: boolean;
 begin
   Text := TStringBuilder.Create;
   try
@@ -1753,24 +1754,24 @@ begin
       First := Max(0, Min(AFinding.Line - 1, High(ALines)));
       Last := First - 1;
       Size := 0;
-      { Down and up from the finding's line in turn while lines fit. }
-      while (First > 0) or (Last < High(ALines)) do
-      begin
+      { Down and up from the finding's line in turn while lines fit,
+        each way on its own: a line too long below does not stop the
+        lines above. }
+      repeat
+        Grew := False;
         if (Last < High(ALines)) and (Size + Length(Numbered[Last + 1]) <= Room) then
         begin
           Inc(Last);
           Inc(Size, Length(Numbered[Last]));
-        end
-        else if Last < High(ALines) then
-          Break;
+          Grew := True;
+        end;
         if (First > 0) and (Size + Length(Numbered[First - 1]) <= Room) then
         begin
           Dec(First);
           Inc(Size, Length(Numbered[First]));
-        end
-        else if (First > 0) and (Last >= High(ALines)) then
-          Break;
-      end;
+          Grew := True;
+        end;
+      until not Grew;
     end;
     if First > 0 then
       Text.Append(Format('[Lines 1 to %d are left out.]', [First]) + LineEnding);

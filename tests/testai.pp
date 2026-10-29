@@ -1064,6 +1064,12 @@ begin
   AssertTrue('the finding''s line', Pos(#10'15000: line number 15000'#10, Text) > 0);
   AssertTrue('the start left out', Pos('[Lines 1 to ', Text) > 0);
   AssertTrue('the end left out', Pos(' to 20000 are left out.]', Text) > 0);
+  { A line below too long for the budget does not stop the lines above. }
+  Lines[15000] := StringOfChar('x', MessageDiffKeep);
+  Text := FixInput(FDir, '', Finding, Lines);
+  AssertTrue('the lines above still come', Pos(#10'14990: line number 14990'#10, Text) > 0);
+  AssertEquals('the long line left out', 0, Pos('xxxx', Text));
+  Lines[15000] := 'line number 15001';
   SetLength(Lines, 3);
   Finding.Line := 2;
   Text := FixInput(FDir, '', Finding, Lines);
