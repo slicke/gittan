@@ -224,7 +224,7 @@ begin
   Values[0] := SuggestWorktreePath(FRepo.Root, '');
   Values[1] := '';
   if not AskInput(rsWtAddTitle, '', [rsWtFolderPrompt, rsWtBranchPrompt], Values,
-    @CheckWorktree, rsWtAddAction) then
+    @CheckWorktree, rsWtAddAction, False, 0) then
     Exit;
   Folder := Trim(Values[0]);
   Branch := Trim(Values[1]);

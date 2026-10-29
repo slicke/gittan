@@ -92,7 +92,7 @@ implementation
 uses
   Math, StrUtils, Process, Clipbrd, LCLIntf, LCLType, LCLVersion, InterfaceBase, LCLPlatformDef,
   ec_SyntAnal, ATSynEdit_Adapter_EControl, ATSynEdit_Globals,
-  gittan.syntaxthemes, gittan.git, gittan.theme,
+  gittan.syntaxthemes, gittan.git, gittan.theme, gittan.pathfield,
   gittan.settings, gittan.job;
 
 resourcestring
@@ -420,6 +420,7 @@ type
     function AgentClass: TGittanAIClass;
     function ApiAgent: boolean;
     procedure ShowTool(AEdit: TEdit; ANote: TLabel; const AName, ANotFound: string);
+    procedure ShowToolPaths;
     procedure SampleClick(Sender: TObject);
     procedure ShowSample;
     procedure StyleSample;
@@ -833,6 +834,7 @@ var
   Main: TCustomForm;
 begin
   inherited DoShow;
+  ShowToolPaths;
   { The Editor page is laid out when it is the one shown, else (opened on
     About) it has its preferred height too. }
   FEditorBox.GetPreferredSize(W, H, False, True);
@@ -897,6 +899,18 @@ end;
 { Shows the page's box over the buttons: a box that was hidden kept the
   Top it was placed with, past the buttons' laid out one, so it goes to
   0 first (alTop orders by Top). The form is laid out once, at the end. }
+{ The tools' paths show their ends; a field on a page not shown yet has
+  no handle, so this runs again as each page shows. }
+procedure TSettingsForm.ShowToolPaths;
+var
+  i: integer;
+begin
+  ShowPathEnd(FGitEdit);
+  ShowPathEnd(FAgentEdit);
+  for i := 0 to High(FForgeEdits) do
+    ShowPathEnd(FForgeEdits[i]);
+end;
+
 procedure TSettingsForm.ShowPage(AIndex: integer);
 var
   Box: TPanel;
@@ -922,6 +936,7 @@ begin
     EnableAutoSizing;
   end;
   FNav.Selected := AIndex;
+  ShowToolPaths;
   { The About page's first control is Check for Updates, which the
     focus would make the default button. }
   if (Box = FAboutPage) and not Box.ContainsControl(ActiveControl) then

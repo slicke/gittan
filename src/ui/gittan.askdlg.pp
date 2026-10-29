@@ -48,10 +48,12 @@ procedure TellDlg(const ATitle, AMsg: string; AKind: TMsgDlgType);
   fields start and go out trimmed of nothing, as typed. OK, named
   AOkCaption when given, is off while the first field is blank or ACheck
   says why the fields cannot be taken; with AOptional a blank first
-  field is taken too. True when OK was pressed. }
+  field is taken too. The field APathField holds a path and shows its
+  end (ShowPathEnd). True when OK was pressed. }
 function AskInput(const ATitle, ANote: string; const APrompts: array of string;
   var AValues: array of string; ACheck: TGittanAskCheck = nil;
-  const AOkCaption: string = ''; AOptional: boolean = False): boolean;
+  const AOkCaption: string = ''; AOptional: boolean = False;
+  APathField: integer = -1): boolean;
 
 {** AskInput with one field; AValue goes out as typed. }
 function AskText(const ATitle, APrompt: string; var AValue: string;
@@ -61,7 +63,7 @@ function AskText(const ATitle, APrompt: string; var AValue: string;
 implementation
 
 uses
-  Math, Types, LCLType, gittan.app;
+  Math, Types, LCLType, gittan.app, gittan.pathfield;
 
 resourcestring
   rsAskOK = 'OK';
@@ -105,6 +107,7 @@ type
     FButtonRow: TPanel;
     FCheck: TGittanAskCheck;
     FOptional: boolean;
+    FPathField: integer;
     FCancelResult: TModalResult;
     function NextTop: integer;
     procedure IconPaint(Sender: TObject);
@@ -163,6 +166,7 @@ begin
   Caption := ATitle;
   FKind := AKind;
   FCancelResult := mrCancel;
+  FPathField := -1;
   BorderStyle := bsDialog;
   Position := poMainFormCenter;
   KeyPreview := True;
@@ -299,6 +303,8 @@ begin
   begin
     ActiveControl := FEdits[0];
     FEdits[0].SelectAll;
+    if (FPathField >= 0) and (FPathField <= High(FEdits)) then
+      ShowPathEnd(FEdits[FPathField]);
   end
   else if FOk <> nil then
     ActiveControl := FOk;
@@ -478,7 +484,7 @@ end;
 
 function AskInput(const ATitle, ANote: string; const APrompts: array of string;
   var AValues: array of string; ACheck: TGittanAskCheck; const AOkCaption: string;
-  AOptional: boolean): boolean;
+  AOptional: boolean; APathField: integer): boolean;
 var
   F: TAskForm;
   Buttons: array[0..1] of TAskButton;
@@ -517,6 +523,7 @@ begin
     F.FError.Parent := F;
     F.FCheck := ACheck;
     F.FOptional := AOptional;
+    F.FPathField := APathField;
     if AOkCaption <> '' then
       Buttons[0].Caption := AOkCaption
     else
