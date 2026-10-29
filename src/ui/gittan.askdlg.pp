@@ -28,7 +28,9 @@ type
   its caption (the usual one for mrOK, mrCancel, mrYes, mrNo and the like
   when left out), then 'IsDefault' or 'IsCancel'. Without a default the
   first button is; without a cancel the mrCancel one is, and Escape
-  answers mrCancel when there is none. }
+  answers mrCancel when there is none. 'NoCancel' after any button
+  leaves Escape and the close box nothing to do: a button must be
+  pressed. }
 function AskDlg(const ATitle, AMsg: string; AKind: TMsgDlgType;
   const AButtons: array of const): TModalResult;
 
@@ -130,6 +132,7 @@ type
     FOptional: boolean;
     FPathField: integer;
     FCancelResult: TModalResult;
+    FNoCancel: boolean;
     function NextTop: integer;
     function IconRect: TRect;
     procedure FieldChange(Sender: TObject);
@@ -138,6 +141,8 @@ type
   protected
     procedure KeyDown(var Key: word; Shift: TShiftState); override;
     procedure Paint; override;
+  public
+    function CloseQuery: boolean; override;
     procedure CreateWnd; override;
     procedure DoShow; override;
   public
@@ -222,6 +227,7 @@ var
   Lbl: TLabel;
 begin
   Lbl := TLabel.Create(Self);
+  Lbl.ShowAccelChar := False;
   Lbl.Caption := AText;
   Lbl.WordWrap := True;
   Lbl.Align := alTop;
@@ -309,16 +315,26 @@ begin
 end;
 
 { Escape answers the cancel button's result, mrCancel without one; a
-  cancel button takes the key itself. }
+  cancel button takes the key itself. Under 'NoCancel' it does nothing. }
 procedure TAskForm.KeyDown(var Key: word; Shift: TShiftState);
 begin
   if (Key = VK_ESCAPE) and (Shift = []) then
   begin
     Key := 0;
-    ModalResult := FCancelResult;
+    if not FNoCancel then
+      ModalResult := FCancelResult;
     Exit;
   end;
   inherited KeyDown(Key, Shift);
+end;
+
+{ Under 'NoCancel' the close box does not close the dialog; a button
+  sets ModalResult before it closes. }
+function TAskForm.CloseQuery: boolean;
+begin
+  Result := inherited CloseQuery;
+  if FNoCancel and (ModalResult = mrNone) then
+    Result := False;
 end;
 
 { The icon in the middle of the text's height over the buttons, never
@@ -441,9 +457,10 @@ var
   Buttons: array of TAskButton;
   i, n, Default, Cancel: integer;
   S: string;
-  Named: boolean;
+  Named, NoCancel: boolean;
 begin
   Buttons := nil;
+  NoCancel := False;
   Default := -1;
   Cancel := -1;
   i := Low(AButtons);
@@ -463,6 +480,8 @@ begin
         Default := n
       else if SameText(S, 'IsCancel') then
         Cancel := n
+      else if SameText(S, 'NoCancel') then
+        NoCancel := True
       else if not Named then
       begin
         Buttons[n].Caption := S;
@@ -489,6 +508,7 @@ begin
   try
     F.AddText(AMsg, False, HeadingGap);
     F.AddButtons(Buttons, Default, Cancel);
+    F.FNoCancel := NoCancel;
     Result := F.ShowModal;
     if Result = mrNone then
       Result := F.FCancelResult;

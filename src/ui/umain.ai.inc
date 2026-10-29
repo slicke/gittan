@@ -470,6 +470,14 @@ begin
   FStatus.ShowBusy(Format(rsResolvingAI, [AgentName, B.Line, FCurrentPath]), HintSparkle);
 end;
 
+{ Whether ARelPath, a path in the repository, is the file open to
+  edits; FEditPath is a full name. }
+function TRepoFrame.EditingRepoPath(const ARelPath: string): boolean;
+begin
+  Result := (FEditPath <> '') and SameFileName(FEditPath,
+    IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(ARelPath));
+end;
+
 { The lines go over the conflict unless the file is being edited; the
   view moves on to the next conflicted file only when this one is shown. }
 procedure TRepoFrame.ConflictJobDone(Sender: TObject);
@@ -485,7 +493,7 @@ begin
   FStatus.ShowMessage('', stNormal, 0);
   if not Job.Ok then
     BannerError(Format(rsResolveAIFailed, [Job.AgentName]), Job.Error)
-  else if FEditPath = Job.Path then
+  else if EditingRepoPath(Job.Path) then
     StatusNote(Format(rsResolveAIEditing, [Job.AgentName, Job.Path]), True)
   else
     WriteConflictBlock(Job.Block, Job.Path, (Job.Path = FCurrentPath) and
@@ -788,7 +796,7 @@ begin
     BannerError(Format(rsFixFailed, [Agent]), Job.Error)
   else if not Job.Changed then
     StatusNote(Format(rsFixNone, [Agent, Why]))
-  else if FEditPath = Job.Finding.Path then
+  else if EditingRepoPath(Job.Finding.Path) then
     StatusNote(Format(rsFixEditing, [Agent, Job.Finding.Path]), True)
   else if not DiscardBlock(Job.Block, Err) then
     StatusNote(Format(rsFixWriteFailed, [Err]), True)
@@ -934,7 +942,9 @@ end;
 
 { The explanation is a card among the review's findings for the
   comparison it was asked in, in place of one for the same line; it
-  goes with them on Clear AI Review. }
+  goes with them on Clear AI Review. One asked in another comparison
+  than the findings held, while theirs is the one shown, is dropped
+  rather than drop them. }
 procedure TRepoFrame.WhyJobDone(Sender: TObject);
 var
   Job: TGittanWhyJob;
@@ -951,6 +961,12 @@ begin
   if not Job.Ok then
   begin
     BannerError(Format(rsWhyFailed, [Job.AgentName]), Job.Error);
+    UpdateAIReviewItems;
+    Exit;
+  end;
+  if (FAIThreadsKey <> FWhyKey) and (Length(FAIThreads) > 0) and
+    (FAIThreadsKey = AIReviewKey) then
+  begin
     UpdateAIReviewItems;
     Exit;
   end;

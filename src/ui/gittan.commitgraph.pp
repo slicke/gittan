@@ -134,6 +134,9 @@ type
       (FChangeDone), and git's reason when the search failed. }
     FChangeHashes: TStringList;
     FChangeKey, FChangeDone, FChangeError: string;
+    { The commit highlighted when a search for changes began, highlighted
+      again when it ends, since the rows are empty meanwhile. }
+    FChangeKeep: string;
     FLanes: integer;
     FMore, FAskedMore: boolean;
     FBranch: string;
@@ -810,6 +813,7 @@ begin
   FChangeKey := '';
   FChangeDone := '';
   FChangeError := '';
+  FChangeKeep := '';
   FChangeHashes.Clear;
   Load(ACommits, AMore, AKeep);
   FEdit.Text := AFilter;
@@ -935,6 +939,12 @@ begin
       FOnChangeCommits(Self, nil);
   end;
   Current := CurrentHash;
+  if Current = '' then
+    Current := FChangeKeep;
+  if ChangePending then
+    FChangeKeep := Current
+  else
+    FChangeKeep := '';
   SetLength(FShown, Length(FCommits));
   n := 0;
   if not ChangePending then

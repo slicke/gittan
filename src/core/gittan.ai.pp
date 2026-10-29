@@ -577,6 +577,7 @@ resourcestring
   rsFixNotRead = 'The answer held no edits: %s';
   rsFixNotFound = 'edit %d is not in the file as it is';
   rsFixAmbiguous = 'edit %d is in the file %d times';
+  rsFixLink = '%s goes through a symbolic link, which a fix does not write through';
   rsNoLineHistory = 'git has no history of these lines.';
   rsNothingToDescribe = 'There are no changes to describe.';
   rsAgentNoAnswer = '%s gave no answer.';
@@ -1855,6 +1856,13 @@ begin
   while (Tail < Length(ABefore) - Head) and (Tail < Length(AAfter) - Head) and
     (ABefore[High(ABefore) - Tail] = AAfter[High(AAfter) - Tail]) do
     Inc(Tail);
+  { An insert keeps a line beside it in the block, so that DiscardBlock
+    has a line to find where it was and refuses a file changed there. }
+  if (Head + Tail = Length(ABefore)) and (Head + Tail < Length(AAfter)) then
+    if Head > 0 then
+      Dec(Head)
+    else if Tail > 0 then
+      Dec(Tail);
   Result := Default(TGittanDiscard);
   Result.FileName := AFileName;
   Result.Line := Head + 1;
@@ -2156,6 +2164,13 @@ var
 begin
   FileName := IncludeTrailingPathDelimiter(FRoot) + StringReplace(FFinding.Path, '/',
     PathDelim, [rfReplaceAll]);
+  { The write would follow the link, maybe out of the repository. }
+  if ThroughLink(FRoot, FFinding.Path) then
+  begin
+    FError := Format(rsFixLink, [FFinding.Path]);
+    Done;
+    Exit;
+  end;
   Lines := TStringList.Create;
   try
     try

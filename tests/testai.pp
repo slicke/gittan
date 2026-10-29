@@ -1040,10 +1040,20 @@ begin
   AssertEquals(2, Length(B.NewLines));
   AssertEquals('b', B.NewLines[0]);
   AssertEquals('x', B.OldLines[0]);
+  { An insert keeps the line before it, or after it at the top. }
   B := FixBlock('f', ['a', 'b'], ['a', 'n', 'b']);
-  AssertEquals('an insert', 2, B.Line);
-  AssertEquals(0, Length(B.NewLines));
+  AssertEquals('an insert', 1, B.Line);
+  AssertEquals(1, Length(B.NewLines));
+  AssertEquals('a', B.NewLines[0]);
+  AssertEquals(2, Length(B.OldLines));
+  AssertEquals('n', B.OldLines[1]);
+  B := FixBlock('f', ['a'], ['n', 'a']);
+  AssertEquals('an insert at the top', 1, B.Line);
+  AssertEquals('a', B.NewLines[0]);
   AssertEquals('n', B.OldLines[0]);
+  AssertEquals('a', B.OldLines[1]);
+  B := FixBlock('f', [], ['n']);
+  AssertEquals('into an empty file', 0, Length(B.NewLines));
   B := FixBlock('f', ['a', 'b'], ['a', 'b']);
   AssertEquals('no change', 0, Length(B.NewLines) + Length(B.OldLines));
   { Written and undone as a discard. }
@@ -1057,6 +1067,10 @@ begin
     AssertTrue(Error, DiscardBlock(Swapped(B), Error));
     L.LoadFromFile(B.FileName);
     AssertEquals('b', L[1]);
+    { An insert into a file changed where it goes is refused. }
+    B := FixBlock(B.FileName, ['a', 'b', 'c'], ['a', 'n', 'b', 'c']);
+    WriteFile('f.txt', 'z'#10'b'#10'c');
+    AssertFalse('stale insert', DiscardBlock(B, Error));
   finally
     L.Free;
   end;

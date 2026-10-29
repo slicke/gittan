@@ -2015,7 +2015,7 @@ begin
   if (i > 0) and not AOlder then
     Exit(FGraphTrail[i - 1]);
   { CommitRange names the parent unless it is the first commit. }
-  if AOlder and (i < 0) and (Pos('^..', FBlameRange) > 0) then
+  if AOlder and ((i < 0) or (i = High(FGraphTrail))) and (Pos('^..', FBlameRange) > 0) then
     Result := FBlameCommit.Hash + '^';
 end;
 

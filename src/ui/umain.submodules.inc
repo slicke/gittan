@@ -228,6 +228,9 @@ begin
   if (AIndex < 0) or (AIndex > High(FSubmodules)) then
     Exit;
   Branch := FSubmodules[AIndex].Branch;
+  { branch = . follows the superproject's branch. }
+  if Branch = '.' then
+    Branch := FBranch;
   if Branch = '' then
     Branch := rsSubHintDefaultBranch;
   if AIndex <= High(FSubInfos) then

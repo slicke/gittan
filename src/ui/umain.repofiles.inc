@@ -456,7 +456,8 @@ end;
 
 { Offers to save unsaved changes before the editor's text is replaced.
   Declining drops them; there is no way to stay, since the caller is
-  already on its way elsewhere. }
+  already on its way elsewhere, so Escape and the close box do nothing
+  rather than drop them unasked. }
 procedure TRepoFrame.FlushEdit;
 begin
   if (FEditPath = '') or not Edit.Modified then
@@ -464,7 +465,8 @@ begin
   HoldRefresh;
   try
     if AskDlg(rsAppName, Format(rsSaveAsk, [ExtractFileName(FEditPath)]),
-      mtConfirmation, [mrYes, rsSaveAction, 'IsDefault', mrNo, rsDontSave], 0) = mrYes then
+      mtConfirmation, [mrYes, rsSaveAction, 'IsDefault', mrNo, rsDontSave,
+      'NoCancel'], 0) = mrYes then
       SaveEdit(False)
     else
       Edit.Modified := False;

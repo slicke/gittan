@@ -1539,6 +1539,7 @@ type
       (WriteConflictBlock). }
     procedure StartConflictJob(AIndex: integer);
     procedure ConflictJobDone(Sender: TObject);
+    function EditingRepoPath(const ARelPath: string): boolean;
     procedure AbandonConflictJob;
     {** File > Split Changes into Commits while AIAvailable: enabled with
       two files or more to choose from, or a plan held; from
