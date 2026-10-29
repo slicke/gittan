@@ -344,6 +344,10 @@ begin
   AssertFalse('a draft is not merged', PullActionFits(Pull, plMerge));
   Pull.State := prMerged;
   AssertFalse('not open', PullActionFits(Pull, plComment));
+  Pull.IsDraft := False;
+  AssertFalse('a closed pull is not merged', PullActionFits(Pull, plMerge));
+  AssertFalse(PullActionFits(Pull, plSquash));
+  AssertFalse(PullActionFits(Pull, plRebaseMerge));
   Pull.State := prOpen;
   Pull.Repo := '';
   AssertFalse('no repository', PullActionFits(Pull, plComment));

@@ -230,7 +230,7 @@ type
     procedure PaintCard(var Y: integer);
     procedure SetBackHot(AValue: boolean);
     procedure SetStepHot(AValue: integer);
-    procedure PaintSteps(ARight, Y: integer);
+    function PaintSteps(ARight, Y: integer): integer;
     function StepAt(X, Y: integer): integer;
     procedure SetSelected(const AValue: string);
     procedure SetNotice(const AValue: string);
@@ -1356,7 +1356,7 @@ end;
 procedure TGittanSummary.PaintCard(var Y: integer);
 var
   Card: TRect;
-  X, At, LineHeight, k: integer;
+  X, At, LineHeight, k, Room: integer;
   Meta: string;
 begin
   LayoutCard;
@@ -1410,9 +1410,10 @@ begin
   if Meta <> '' then
     Meta := Meta + ' · ';
   Meta := Meta + FCommit.Short;
+  { The steps first, so the line is cut short of them. }
+  Room := PaintSteps(Card.Right - Px(NotePadX), At) - X;
   Canvas.Font.Color := FDim;
-  Canvas.TextOut(X, At, Meta);
-  PaintSteps(Card.Right - Px(NotePadX), At);
+  Canvas.TextOut(X, At, FitTextRight(Canvas, Meta, Room));
 
   Inc(At, LineHeight + 6);
   Canvas.Font.Color := FText;
@@ -1426,8 +1427,10 @@ end;
 
 { Newer and Older, right-aligned at ARight on the line at Y: in the link
   color while they lead somewhere, underlined under the mouse, dimmed
-  and without a target when not; neither when both are off. }
-procedure TGittanSummary.PaintSteps(ARight, Y: integer);
+  and without a target when not; neither when both are off. Answers
+  where the line's other text must end: a gap left of them, ARight
+  without them. }
+function TGittanSummary.PaintSteps(ARight, Y: integer): integer;
 const
   Captions: array[0..1] of string = (rsNewerCommit, rsOlderCommit);
 var
@@ -1435,6 +1438,7 @@ var
 begin
   FStepRects[0] := Rect(0, 0, 0, 0);
   FStepRects[1] := Rect(0, 0, 0, 0);
+  Result := ARight;
   if not Assigned(FOnCommitStep) or not (FStepOn[0] or FStepOn[1]) then
     Exit;
   X := ARight;
@@ -1457,6 +1461,7 @@ begin
     Dec(X, Px(Gap) * 2);
   end;
   Canvas.Font.Style := [];
+  Result := X;
 end;
 
 function TGittanSummary.StepAt(X, Y: integer): integer;

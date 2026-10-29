@@ -1,7 +1,7 @@
 unit gittan.notice;
 
 {** A notice: a panel in the middle of the form that says what is going
-  on, with the application icon above a title and the last lines of a
+  on, with Gittan's dialog icon (DialogIcon) above a title and the last lines of a
   detail text under it, such as what a pre-push hook writes while it
   runs, or why a push or a commit failed, drawn by a TGittanConsole
   with the colors the hook asks for. Like the popup list and the commit graph
@@ -74,8 +74,9 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
-    {** The application icon, drawn above the title; nil draws none. The
-      icon stays the caller's. }
+    {** Whether the dialog icon (DialogIcon, the braid graph) is drawn
+      above the title: any icon does, nil draws none. The icon itself is
+      not drawn and stays the caller's. }
     procedure SetIcon(AIcon: TIcon);
     {** The palette: AAccent fills the default button, ABad colors the
       title of an nkBad notice. }

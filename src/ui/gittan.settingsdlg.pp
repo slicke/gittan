@@ -421,6 +421,7 @@ type
     function ApiAgent: boolean;
     procedure ShowTool(AEdit: TEdit; ANote: TLabel; const AName, ANotFound: string);
     procedure ShowToolPaths;
+    procedure ShowAgentEnd;
     procedure SampleClick(Sender: TObject);
     procedure ShowSample;
     procedure StyleSample;
@@ -906,9 +907,19 @@ var
   i: integer;
 begin
   ShowPathEnd(FGitEdit);
-  ShowPathEnd(FAgentEdit);
+  ShowAgentEnd;
   for i := 0 to High(FForgeEdits) do
     ShowPathEnd(FForgeEdits[i]);
+end;
+
+{ The agent's field shows a path's end, but an API's server from its
+  start, where the host is. }
+procedure TSettingsForm.ShowAgentEnd;
+begin
+  if ApiAgent then
+    ShowTextStart(FAgentEdit)
+  else
+    ShowPathEnd(FAgentEdit);
 end;
 
 procedure TSettingsForm.ShowPage(AIndex: integer);
@@ -1339,6 +1350,7 @@ begin
       FModelNote.Caption := rsClaudeModelNote;
   end;
   FAgentEdit.Text := FAgentPaths[FAgent];
+  ShowAgentEnd;
   FKeyLabel.Visible := ApiAgent;
   FKeyEdit.Visible := ApiAgent;
   FKeyNote.Visible := ApiAgent;

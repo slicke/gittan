@@ -129,8 +129,9 @@ type
       AOrder: TGittanPullOrder; ALeft, ARight: integer);
     function FilterChipsWidth(const AChips: array of TGittanForgeFilter;
       AOrder: TGittanPullOrder): integer;
-    procedure PaintFilterChips(ALeft, ATop: integer; const AChips: array of TGittanForgeFilter;
-      AOn: TGittanForgeFilters; AOrder: TGittanPullOrder);
+    procedure PaintFilterChips(ALeft, ARight: integer; var ATop: integer;
+      const AChips: array of TGittanForgeFilter; AOn: TGittanForgeFilters;
+      AOrder: TGittanPullOrder);
     procedure PaintNote(var Y: integer; const AText: string; AColor: TColor;
       ALeft, ARight: integer);
     procedure PaintEmpty(var Y: integer; const ATitle, AText: string; ACheck: boolean;
@@ -839,13 +840,13 @@ end;
 { A dim bold title with a dim detail after it, over a divider, between
   ALeft and ARight; with AChips the filters as chips (those in AOn on)
   and AOrder's after them,
-  at the right of the title's line when they fit there, else on a line
+  at the right of the title's line when they fit there, else on lines
   of their own under the divider. }
 procedure TGittanForgePage.PaintHeading(var Y: integer; const ATitle, ADetail: string;
   const AChips: array of TGittanForgeFilter; AOn: TGittanForgeFilters;
   AOrder: TGittanPullOrder; ALeft, ARight: integer);
 var
-  TextH, X, ChipsW: integer;
+  TextH, X, ChipsW, At: integer;
   OnLine: boolean;
 begin
   Inc(Y, Px(Pad));
@@ -865,7 +866,10 @@ begin
   ChipsW := FilterChipsWidth(AChips, AOrder);
   OnLine := (Length(AChips) > 0) and (X + Px(Gap) + ChipsW <= ARight);
   if OnLine then
-    PaintFilterChips(ARight - ChipsW, Y, AChips, AOn, AOrder);
+  begin
+    At := Y;
+    PaintFilterChips(ARight - ChipsW, ARight, At, AChips, AOn, AOrder);
+  end;
   Inc(Y, TextH + Px(Gap) div 2);
   FC.Pen.Style := psSolid;
   FC.Pen.Color := FLine;
@@ -874,7 +878,7 @@ begin
   if (Length(AChips) > 0) and not OnLine then
   begin
     Inc(Y, Px(FilterPadY));
-    PaintFilterChips(ALeft, Y, AChips, AOn, AOrder);
+    PaintFilterChips(ALeft, ARight, Y, AChips, AOn, AOrder);
     Inc(Y, TextH + Px(FilterPadY) + Px(Gap) div 2);
   end;
 end;
@@ -895,18 +899,21 @@ end;
 { The chips of AChips from ALeft, their text on the line at ATop: a
   rounded outline with the caption dim, filled under the mouse; one in
   AOn in a tint of the link color with its caption and outline in it.
-  After them AOrder's, as one that is off, with a glyph for its menu. }
-procedure TGittanForgePage.PaintFilterChips(ALeft, ATop: integer;
+  After them AOrder's, as one that is off, with a glyph for its menu.
+  A chip that would cross ARight starts a line under them at ALeft;
+  ATop comes back as the last line's. }
+procedure TGittanForgePage.PaintFilterChips(ALeft, ARight: integer; var ATop: integer;
   const AChips: array of TGittanForgeFilter; AOn: TGittanForgeFilters;
   AOrder: TGittanPullOrder);
 var
-  i, TextH, W: integer;
+  i, TextH, W, LineLeft: integer;
   R: TRect;
   ChipText: string;
   IsOn: boolean;
 begin
   FC.Font := Font;
   TextH := FC.TextHeight('Xg');
+  LineLeft := ALeft;
   for i := 0 to High(AChips) + 1 do
   begin
     if i > High(AChips) then
@@ -920,6 +927,11 @@ begin
       IsOn := AChips[i] in AOn;
     end;
     W := FC.TextWidth(ChipText) + 2 * Px(FilterPadX);
+    if (ALeft > LineLeft) and (ALeft + W > ARight) then
+    begin
+      ALeft := LineLeft;
+      Inc(ATop, TextH + 2 * Px(FilterPadY) + Px(FilterGap));
+    end;
     R := Rect(ALeft, ATop - Px(FilterPadY), ALeft + W, ATop + TextH + Px(FilterPadY));
     if i > High(AChips) then
       AddLink(R, OrderLink)

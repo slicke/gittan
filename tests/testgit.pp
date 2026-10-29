@@ -3014,6 +3014,7 @@ begin
   AssertFalse(FRepo.IsTagName('bad..name'));
   AssertFalse(FRepo.IsTagName('ends.lock'));
   AssertFalse(FRepo.IsTagName(''));
+  AssertFalse('a leading dash', FRepo.IsTagName('-release'));
 
   AssertTrue(FRepo.Error, FRepo.CreateBranch('side', First, False));
   AssertEquals('not switched', Main, FRepo.Branch);

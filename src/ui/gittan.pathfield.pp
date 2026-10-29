@@ -26,6 +26,10 @@ uses
   after the text is set. It takes AEdit's OnEnter when that is free. }
 procedure ShowPathEnd(AEdit: TEdit);
 
+{** Undoes ShowPathEnd: AEdit shows the start of its text again, as a
+  field that holds a path at one time and a URL at another needs. }
+procedure ShowTextStart(AEdit: TEdit);
+
 implementation
 
 uses
@@ -45,6 +49,7 @@ type
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
     procedure Watch(AEdit: TEdit);
+    procedure Unwatch(AEdit: TEdit);
   end;
 
 var
@@ -70,6 +75,16 @@ begin
   AEdit.FreeNotification(Self);
   if not Assigned(AEdit.OnEnter) then
     AEdit.OnEnter := @EditEnter;
+end;
+
+procedure TPathEndHook.Unwatch(AEdit: TEdit);
+begin
+  if FEdits.IndexOf(AEdit) < 0 then
+    Exit;
+  FEdits.Remove(AEdit);
+  AEdit.RemoveFreeNotification(Self);
+  if AEdit.OnEnter = @EditEnter then
+    AEdit.OnEnter := nil;
 end;
 
 procedure TPathEndHook.Notification(AComponent: TComponent; Operation: TOperation);
@@ -131,6 +146,25 @@ begin
   AEdit.SelStart := UTF8Length(AEdit.Text);
   AEdit.SelLength := 0;
   {$ENDIF}
+end;
+
+procedure ShowTextStart(AEdit: TEdit);
+{$IFDEF LCLCocoa}
+var
+  Field: NSObject;
+{$ENDIF}
+begin
+  if (AEdit = nil) or not AEdit.HandleAllocated then
+    Exit;
+  if GHook <> nil then
+    GHook.Unwatch(AEdit);
+  {$IFDEF LCLCocoa}
+  Field := NSObject(AEdit.Handle);
+  if Field.isKindOfClass(NSTextField) then
+    NSTextField(Field).cell.setLineBreakMode(NSLineBreakByTruncatingTail);
+  {$ENDIF}
+  AEdit.SelStart := 0;
+  AEdit.SelLength := 0;
 end;
 
 end.

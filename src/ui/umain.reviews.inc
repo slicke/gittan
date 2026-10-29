@@ -1309,7 +1309,7 @@ end;
 
 { The threads of APath the tree marks it with: AOpen neither resolved
   nor outdated, AAll every one, of those the change view shows
-  (FShown). }
+  (FShown). An explanation of lines is no thread to review. }
 procedure TRepoFrame.FileThreads(const APath: string; out AOpen, AAll: integer);
 var
   t: integer;
@@ -1317,7 +1317,7 @@ begin
   AOpen := 0;
   AAll := 0;
   for t := 0 to High(FShown) do
-    if FShown[t].Path = APath then
+    if (FShown[t].Path = APath) and (FShown[t].Severity <> WhySeverity) then
     begin
       Inc(AAll);
       if not FShown[t].Resolved and not FShown[t].Outdated then

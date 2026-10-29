@@ -95,7 +95,7 @@ VENDOR_PACKAGES := \
 # grey tile of their own.
 ICON_MAC_SRC ?= icons/gittan-mac.png
 ICON_PNG_DIR ?= icons/png
-ACTOOL ?= $(firstword $(wildcard /Applications/Xcode.app/Contents/Developer/usr/bin/actool) xcrun actool)
+ACTOOL ?= $(or $(wildcard /Applications/Xcode.app/Contents/Developer/usr/bin/actool),$(shell xcrun --find actool 2>/dev/null),actool)
 BUNDLE := Gittan.app
 ifeq ($(shell uname -s),Darwin)
 define bundle_icon

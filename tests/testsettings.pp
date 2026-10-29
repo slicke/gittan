@@ -143,6 +143,7 @@ begin
     S.OnlyAskedOfMe := True;
     S.HideReviewDrafts := True;
     S.OnlyStale := True;
+    S.ChangesNeedAttention := False;
     S.ChecksNeedAttention := False;
     S.MineOrder := 2;
     S.ReviewOrder := 1;
@@ -201,7 +202,7 @@ begin
     AssertTrue(S.OnlyAskedOfMe);
     AssertTrue(S.HideReviewDrafts);
     AssertTrue(S.OnlyStale);
-    AssertTrue(S.ChangesNeedAttention);
+    AssertFalse(S.ChangesNeedAttention);
     AssertFalse(S.ChecksNeedAttention);
     AssertEquals(2, S.MineOrder);
     AssertEquals(1, S.ReviewOrder);

@@ -641,6 +641,7 @@ begin
   Paths := TStringList.Create;
   try
     ChoosablePaths(FStats, Paths);
+    Paths.CaseSensitive := True;
     Paths.Sorted := True;
     for i := High(FCommitPlan) downto 0 do
     begin
@@ -711,6 +712,7 @@ begin
   Files := TStringList.Create;
   try
     Files.AddStrings(FCommitPlan[AIndex].Files);
+    Files.CaseSensitive := True;
     Files.Sorted := True;
     { The changes left out of a file go too: the plan took files whole. }
     for i := 0 to High(FStats) do

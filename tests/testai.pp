@@ -784,6 +784,12 @@ begin
   AssertFalse('markers left', ParseResolution('<resolved>'#10'<<<<<<< HEAD'#10'x'#10 +
     '=======' + #10'y'#10'>>>>>>> other'#10'</resolved>', Lines, Why));
   AssertEquals(0, Length(Lines));
+  AssertFalse('a separator left', ParseResolution('<resolved>'#10'x'#10'=======' + #10 +
+    'y'#10'</resolved>', Lines, Why));
+  AssertFalse('a base marker left', ParseResolution('<resolved>'#10'||||||| base'#10 +
+    'x'#10'</resolved>', Lines, Why));
+  AssertTrue('a longer underline is text', ParseResolution('<resolved>'#10'Title'#10 +
+    '========'#10'</resolved>', Lines, Why));
 end;
 
 { A merge that conflicts in a.txt, and its conflict as the frame takes
@@ -916,6 +922,14 @@ begin
     AssertEquals(4, Length(Plan[0].Files));
     AssertEquals('the list''s spelling', 'src/a.pas', Plan[0].Files[0]);
     AssertEquals('the list''s spelling', 'README.md', Plan[0].Files[3]);
+    { Two paths that differ in case alone: each as spelled, a third
+      spelling neither. }
+    Paths.Add('src/A.pas');
+    AssertTrue(ParseCommitPlan('[{"files": ["src/A.pas"], "message": "Big"}, ' +
+      '{"files": ["SRC/a.PAS", "src/a.pas"], "message": "Small"}]', Paths, Plan));
+    AssertEquals('src/A.pas', Plan[0].Files[0]);
+    AssertEquals('the ambiguous one skipped', 1, Length(Plan[1].Files));
+    AssertEquals('src/a.pas', Plan[1].Files[0]);
     AssertFalse(ParseCommitPlan('Commit it all at once.', Paths, Plan));
     AssertFalse(ParseCommitPlan('[not json]', Paths, Plan));
   finally

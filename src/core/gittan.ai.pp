@@ -1405,6 +1405,26 @@ begin
     AText := AText + APaths[i] + LineEnding;
 end;
 
+{ The index of APath in APaths: as it is spelled, else in another case
+  when that names one path alone; -1 for none, or for two paths that
+  differ in case alone. }
+function PlanPathIndex(APaths: TStrings; const APath: string): integer;
+var
+  i: integer;
+begin
+  for i := 0 to APaths.Count - 1 do
+    if APaths[i] = APath then
+      Exit(i);
+  Result := -1;
+  for i := 0 to APaths.Count - 1 do
+    if SameText(APaths[i], APath) then
+    begin
+      if Result >= 0 then
+        Exit(-1);
+      Result := i;
+    end;
+end;
+
 function ParseCommitPlan(const AText: string; APaths: TStrings;
   out APlan: TGittanCommitPlan): boolean;
 var
@@ -1450,11 +1470,11 @@ begin
           Continue;
         Path := StringReplace(Trim(Files.Items[j].AsString), '\', '/', [rfReplaceAll]);
         if (Copy(Path, 1, 2) = './') or (((Copy(Path, 1, 2) = 'a/') or
-          (Copy(Path, 1, 2) = 'b/')) and (APaths.IndexOf(Path) < 0)) then
+          (Copy(Path, 1, 2) = 'b/')) and (PlanPathIndex(APaths, Path) < 0)) then
           Delete(Path, 1, 2);
-        { The list's own spelling: APaths finds a path in any case, Taken
-          only in the one it holds. }
-        k := APaths.IndexOf(Path);
+        { The list's own spelling: PlanPathIndex finds a path in another
+          case when no other path has it, Taken only in the one it holds. }
+        k := PlanPathIndex(APaths, Path);
         if k < 0 then
           Continue;
         Path := APaths[k];
@@ -1671,7 +1691,9 @@ begin
     Exit(False);
   ALines := TagLines(Part);
   for i := 0 to High(ALines) do
-    if (Copy(ALines[i], 1, 7) = '<<<<<<<') or (Copy(ALines[i], 1, 7) = '>>>>>>>') then
+    if (Copy(ALines[i], 1, 7) = '<<<<<<<') or (Copy(ALines[i], 1, 7) = '>>>>>>>') or
+      (ALines[i] = '=======') or (ALines[i] = '|||||||') or
+      (Copy(ALines[i], 1, 8) = '||||||| ') then
     begin
       ALines := nil;
       Exit(False);
