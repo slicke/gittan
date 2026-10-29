@@ -559,6 +559,7 @@ begin
     AbandonConflictJob;
     AbandonSplitJob;
     AbandonFixJob;
+    AbandonWhyJob;
     FCommitPlan := nil;
   end;
   UpdateFindAction;
@@ -1203,6 +1204,7 @@ begin
   FResolveEditItem := AddItem(FEditPopup, rsResolveHere, @MenuResolveEditClick);
   FShowCommitItem := AddItem(FEditPopup, rsShowCommit, @MenuShowCommitClick);
   FCopyHashItem := AddItem(FEditPopup, rsCopyHash, @MenuCopyHashClick);
+  FWhyEditItem := AddItem(FEditPopup, rsWhyMenu, @MenuWhyEditClick);
   AddForgeItem(FEditPopup, '', nil);
   FForgeEditItem := AddForgeItem(FEditPopup, rsOpenOnForge, @MenuOpenLineOnForgeClick);
   AddForgeItem(FEditPopup, rsCopyForgeUrl, @MenuCopyLineForgeUrlClick);
@@ -1657,6 +1659,13 @@ begin
   FForgeIssueItem.Caption := Format(rsOpenIssueOnForge, [FPopupIssue, ForgeName]);
   FResolveEditItem.Visible := CanResolveBlocks;
   FResolveEditItem.Enabled := (FPopupEd = Edit) and (ConflictAtRow(FPopupRow) >= 0);
+  FWhyEditItem.Visible := AIAvailable and (FView = gvChanges);
+  if FWhyJob <> nil then
+    FWhyEditItem.Caption := rsWhyStopMenu
+  else
+    FWhyEditItem.Caption := rsWhyMenu;
+  FWhyEditItem.Enabled := (FWhyJob <> nil) or ((FPopupEd = Edit) and (FPopupRow >= 0) and
+    (FEditPath = ''));
 end;
 
 { The commit the row's blame or history gives, shown against its

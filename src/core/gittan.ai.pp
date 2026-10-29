@@ -49,8 +49,10 @@ type
   {** What an agent is asked to do; atLocate is the second round of a
     find for a model that cannot read files, the lines in the files it
     named; atResolve resolves one conflict; atSplit groups the changed
-    files into commits; atFix fixes what a review's finding points out. }
-  TGittanAITask = (atMessage, atReview, atFind, atLocate, atResolve, atSplit, atFix);
+    files into commits; atFix fixes what a review's finding points out;
+    atWhy explains how lines came to be as they are. }
+  TGittanAITask = (atMessage, atReview, atFind, atLocate, atResolve, atSplit, atFix,
+    atWhy);
 
   {** How many lines of each file a model was given (FindLinesInput). }
   TGittanLineCounts = array of integer;
@@ -78,6 +80,12 @@ const
   ConflictAround = 20;
   {** The most commits of a plan kept; the prompt asks for fewer. }
   SplitMaxCommits = 10;
+  {** How many of the commits that changed the lines the agent is given
+    to explain them. }
+  WhyCommits = 10;
+  {** The severity of a thread that explains lines rather than points
+    out a problem (TGittanReviewThread.Severity). }
+  WhySeverity = 'history';
 
 type
   {** A file the agent named for where something is: its path in the
@@ -339,6 +347,15 @@ function ApplyFixEdits(const ALines: TStringArray; const AEdits: TGittanFixEdits
   whose undo (Swapped) puts them back. }
 function FixBlock(const AFileName: string; const ABefore, AAfter: TStringArray): TGittanDiscard;
 
+{** What the agent gets to explain lines AFrom to ATo of APath in ARef
+  of the repository at ARoot: the lines, then the history of their
+  changes (git log -L, newest first, WhyCommits of them, each with its
+  author, date, whole message and the diff of the lines), cut at
+  MessageDiffKeep. False, with git's reason in AError, when git failed
+  or found no history. }
+function WhyInput(const ARoot, APath, ARef: string; AFrom, ATo: integer;
+  out AText, AError: string): boolean;
+
 {** The commits git's conflict in the repository at ARoot comes from, for
   APath: the commit being applied (the first of MERGE_HEAD,
   CHERRY_PICK_HEAD, REVERT_HEAD and REBASE_HEAD there is) with its
@@ -528,6 +545,29 @@ type
     property Error: string read FError;
   end;
 
+  {** Has the agent explain lines AFrom to ATo of APath in ARef (see
+    WhyInput); the answer is Markdown. }
+  TGittanWhyJob = class(TGittanAgentJob)
+  private
+    FPath, FRef: string;
+    FFrom, FTo: integer;
+    FOk: boolean;
+    FText, FError: string;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const ARoot: string; AAI: TGittanAI; const APath, ARef: string;
+      AFrom, ATo: integer);
+    property Path: string read FPath;
+    property FromLine: integer read FFrom;
+    property ToLine: integer read FTo;
+    property Ok: boolean read FOk;
+    {** The explanation, when Ok. }
+    property Text: string read FText;
+    {** Why there is none, when not Ok. }
+    property Error: string read FError;
+  end;
+
 resourcestring
   rsNothingToReview = 'There are no changes to review.';
   rsReviewNotRead = 'The answer was no list of findings: %s';
@@ -537,6 +577,7 @@ resourcestring
   rsFixNotRead = 'The answer held no edits: %s';
   rsFixNotFound = 'edit %d is not in the file as it is';
   rsFixAmbiguous = 'edit %d is in the file %d times';
+  rsNoLineHistory = 'git has no history of these lines.';
   rsNothingToDescribe = 'There are no changes to describe.';
   rsAgentNoAnswer = '%s gave no answer.';
   rsAboutApi = '%s at %s';
@@ -659,6 +700,18 @@ const
     'you changed between <why> and </why>. When the finding is wrong or needs no ' +
     'change, answer with the <why> alone, saying so.';
 
+  { The history git gives, read as a story: a model asked why lines are
+    so otherwise retells the diff, or guesses at reasons no commit gave. }
+  WhyPromptStart = 'Explain why the lines given below are as they are, from the ' +
+    'history of their changes that follows them (git log -L, newest first, each ' +
+    'commit with its message and the diff of the lines). Say what they do, how and ' +
+    'why they came to be this way, and what the changes that shaped them were for, ' +
+    'naming each commit by its short hash; where the history does not say why, say ' +
+    'so rather than guess. ';
+  WhyReadNote = 'You may read the repository''s files to see how the lines are used. ';
+  WhyPromptEnd = 'Answer with at most three short paragraphs of Markdown alone, the ' +
+    'history first, no headings, no preamble.';
+
 var
   AIClasses: array[TGittanAgent] of TGittanAIClass;
 
@@ -715,6 +768,11 @@ begin
         Result := FixPromptStart + FixReadNote + FixPromptEnd
       else
         Result := FixPromptStart + FixPromptEnd;
+    atWhy:
+      if AReadsFiles then
+        Result := WhyPromptStart + WhyReadNote + WhyPromptEnd
+      else
+        Result := WhyPromptStart + WhyPromptEnd;
     else { atLocate }
       Result := LocatePromptStart + LocatePromptEnd;
   end;
@@ -1418,6 +1476,39 @@ begin
   end;
 end;
 
+function WhyInput(const ARoot, APath, ARef: string; AFrom, ATo: integer;
+  out AText, AError: string): boolean;
+var
+  Blob, Log: string;
+  Lines: TStringList;
+  i: integer;
+begin
+  AText := '';
+  Result := RunGitIn(ARoot, ['show', ARef + ':' + APath], Blob, AError) and
+    RunGitIn(ARoot, ['log', '--no-color', '-n', IntToStr(WhyCommits), '-L',
+    IntToStr(AFrom) + ',' + IntToStr(ATo) + ':' + APath,
+    '--format=commit %h%nAuthor: %an%nDate: %as%n%n%B', ARef], Log, AError);
+  if not Result then
+    Exit;
+  if Trim(Log) = '' then
+  begin
+    AError := rsNoLineHistory;
+    Exit(False);
+  end;
+  Lines := TStringList.Create;
+  try
+    SplitLf(Blob, Lines);
+    AText := 'The lines ' + IntToStr(AFrom) + ' to ' + IntToStr(ATo) + ' of ' + APath +
+      ':' + LineEnding;
+    for i := AFrom - 1 to Min(ATo, Lines.Count) - 1 do
+      AText := AText + BareLine(Lines[i]) + LineEnding;
+  finally
+    Lines.Free;
+  end;
+  AText := AText + LineEnding + 'Their history (git log -L):' + LineEnding +
+    KeepText(Log, '[The history is cut here: %d of its %d bytes are left out.]');
+end;
+
 function ConflictCommits(const ARoot, APath: string): string;
 const
   Heads: array[0..3] of string = ('MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD',
@@ -2096,6 +2187,42 @@ begin
         FChanged := (FBlock.NewLines <> nil) or (FBlock.OldLines <> nil);
       end;
     end;
+  end;
+  Done;
+end;
+
+{ TGittanWhyJob }
+
+constructor TGittanWhyJob.Create(const ARoot: string; AAI: TGittanAI;
+  const APath, ARef: string; AFrom, ATo: integer);
+begin
+  inherited Create(ARoot, AAI);
+  FPath := APath;
+  FRef := ARef;
+  FFrom := AFrom;
+  FTo := ATo;
+end;
+
+procedure TGittanWhyJob.Execute;
+var
+  Input, Answer: string;
+begin
+  if not WhyInput(FRoot, FPath, FRef, FFrom, FTo, Input, FError) then
+  begin
+    Done;
+    Exit;
+  end;
+  if Terminated then
+    Exit;
+  FOk := Ask(atWhy, Input, Answer, FError);
+  if Terminated then
+    Exit;
+  if FOk then
+  begin
+    FText := Trim(StringReplace(Answer, #13#10, #10, [rfReplaceAll]));
+    FOk := FText <> '';
+    if not FOk then
+      FError := Format(rsAgentNoAnswer, [AgentName]);
   end;
   Done;
 end;

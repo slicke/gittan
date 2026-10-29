@@ -290,6 +290,13 @@ type
       finding it fixes (FindingKey). }
     FFixJob: TGittanFixJob;
     FFixKey: string;
+    { Explaining lines (umain.ai.inc): Go > Explain Line History with AI
+      and the editor menu's, the job while it runs, the comparison it
+      was asked in (AIReviewKey) and the card it is to be, placed. }
+    FWhyItem, FWhyEditItem: TMenuItem;
+    FWhyJob: TGittanWhyJob;
+    FWhyKey: string;
+    FWhyThread: TGittanReviewThread;
     { The width of a tab in the editors, in characters. }
     FTabSize: integer;
     FSyntaxMenu, FAutoLexerItem, FPlainTextItem: TMenuItem;
@@ -1533,6 +1540,14 @@ type
     {** The link at the right end of the first row of FShown[AThread]'s
       card, '' for none (see umain.reviews.inc). }
     function CardLink(AThread: integer): string;
+    {** Has the agent explain how the lines of rows AFromRow to AToRow
+      of the change view came to be, as a card under the last; stops it
+      while it explains. }
+    procedure StartWhyJob(AFromRow, AToRow: integer);
+    procedure WhyJobDone(Sender: TObject);
+    procedure AbandonWhyJob;
+    procedure MenuWhyClick(Sender: TObject);
+    procedure MenuWhyEditClick(Sender: TObject);
     procedure MenuWrapClick(Sender: TObject);
     procedure MenuFoldClick(Sender: TObject);
     procedure ViewMenuClick(Sender: TObject);
@@ -2396,6 +2411,14 @@ resourcestring
   rsFixed = '%s fixed %s: %s';
   rsFixEditing = '%s''s fix was not used: %s is being edited.';
   rsFixWriteFailed = 'Could not write the fix: %s';
+  rsWhyMenu = 'Explain Line History with AI';
+  rsWhyStopMenu = 'Stop Explaining Line History';
+  rsWhyNeedsChanges = 'Show a file''s changes first: the history is of the selected lines, ' +
+    'or of the line at the caret.';
+  rsWhyLooking = '%s is reading the history of lines %d to %d of %s...';
+  rsWhyFailed = '%s could not explain the lines';
+  rsWhyDone = '%s explained lines %d to %d of %s';
+  rsSeverityHistory = 'Line history';
   rsSeverityBug = 'Bug';
   rsSeverityRisk = 'Risk';
   rsSeverityQuestion = 'Question';
@@ -4005,6 +4028,7 @@ begin
   AbandonConflictJob;
   AbandonSplitJob;
   AbandonFixJob;
+  AbandonWhyJob;
   FreeAndNil(FAI);
   StopCommitJob(True);
   FreeAndNil(FDroppedCommits);
@@ -5191,6 +5215,8 @@ begin
     @MenuHistoryClick);
   FTimelapseItem := AddItem(GoMenu, rsTimelapse, ShortCut(VK_H, [ssModifier, ssAlt]),
     @MenuTimelapseClick);
+  FWhyItem := AddItem(GoMenu, rsWhyMenu, 0, @MenuWhyClick);
+  FWhyItem.Visible := False;
   FGoFileHistoryItem := AddItem(GoMenu, rsGoFileHistory, 0, @MenuGoFileHistoryClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextChange, ShortCut(VK_F7, []), @MenuNextChangeClick);
@@ -6227,6 +6253,7 @@ begin
   AbandonConflictJob;
   AbandonSplitJob;
   AbandonFixJob;
+  AbandonWhyJob;
   FAIThreads := nil;
   FAIThreadsKey := '';
   FCommitPlan := nil;

@@ -81,6 +81,8 @@ type
     procedure TestApplyFixEdits;
     procedure TestFixBlock;
     procedure TestFixJob;
+    procedure TestWhyInput;
+    procedure TestWhyJob;
   end;
 
 implementation
@@ -1097,6 +1099,59 @@ begin
     AssertEquals('two changed', Job.Block.NewLines[0]);
     AssertEquals('two fixed', Job.Block.OldLines[0]);
     AssertEquals('Fixed two.', Job.Why);
+  finally
+    Job.Free;
+  end;
+end;
+
+procedure TAiTest.TestWhyInput;
+var
+  Text, Error: string;
+begin
+  WriteFile('a.pas', 'one'#10'two'#10'three');
+  Git(['add', '.']);
+  Git(['commit', '-q', '-m', 'Add a']);
+  WriteFile('a.pas', 'one'#10'two, because of the bug'#10'three');
+  Git(['commit', '-q', '-am', 'Fix two'#10#10'Two was wrong.']);
+  WriteFile('a.pas', 'one changed'#10'two, because of the bug'#10'three');
+  Git(['commit', '-q', '-am', 'Change one']);
+  AssertTrue(Error, WhyInput(FDir, 'a.pas', 'HEAD', 2, 2, Text, Error));
+  AssertTrue('the line', Pos('The lines 2 to 2 of a.pas:' + LineEnding +
+    'two, because of the bug' + LineEnding, Text) > 0);
+  AssertTrue('the commit that changed it, its body too', Pos('Two was wrong.', Text) > 0);
+  AssertTrue('its diff', Pos('+two, because of the bug', Text) > 0);
+  AssertTrue('the first', Pos('Add a', Text) > 0);
+  AssertEquals('a commit that did not touch it', 0, Pos('Change one', Text));
+  AssertFalse('a file git does not have', WhyInput(FDir, 'b.pas', 'HEAD', 1, 1, Text, Error));
+end;
+
+procedure TAiTest.TestWhyJob;
+var
+  AI: TGittanAI;
+  Job: TGittanWhyJob;
+begin
+  WriteFile('a.pas', 'one'#10'two');
+  Git(['add', '.']);
+  Git(['commit', '-q', '-m', 'Add a']);
+  TFakeAI.Reset;
+  TFakeAI.Answers := [#10'It came in with **abc1234**.'#13#10#10];
+  AI := TFakeAI.Create('', '', 'fake');
+  try
+    Job := TGittanWhyJob.Create(FDir, AI, 'a.pas', 'HEAD', 1, 2);
+  finally
+    AI.Free;
+  end;
+  try
+    Job.OnDone := @JobDone;
+    FDone := 0;
+    Job.Start;
+    Job.WaitFor;
+    CheckSynchronize(0);
+    AssertEquals(1, FDone);
+    AssertTrue(Job.Error, Job.Ok);
+    AssertTrue(TFakeAI.Tasks[0] = atWhy);
+    AssertTrue(Pos('Add a', TFakeAI.Inputs[0]) > 0);
+    AssertEquals('It came in with **abc1234**.', Job.Text);
   finally
     Job.Free;
   end;

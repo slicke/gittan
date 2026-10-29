@@ -26,7 +26,10 @@
   changed files into commits with their messages, and a pick from the
   plan ticks one commit's files and fills in its message. The sixth is
   Fix on a finding's card: the agent changes the file as the finding
-  asks, written as a discard is, so Undo Discard takes it back. }
+  asks, written as a discard is, so Undo Discard takes it back. The
+  seventh is Go > Explain Line History with AI (and the editor menu's):
+  the agent reads the history of the lines (git log -L) and explains
+  how they came to be, a card under them among the review's. }
 
 { The agent the settings pick, made from its fields there: its command
   by the path they give, else where it is found (or the API's server),
@@ -203,6 +206,14 @@ begin
     Exit;
   FAIReviewItem.Visible := AIAvailable;
   FAIClearItem.Visible := AIAvailable;
+  if FWhyItem <> nil then
+  begin
+    FWhyItem.Visible := AIAvailable;
+    if FWhyJob <> nil then
+      FWhyItem.Caption := rsWhyStopMenu
+    else
+      FWhyItem.Caption := rsWhyMenu;
+  end;
   if FAIReviewJob <> nil then
     FAIReviewItem.Caption := rsAIReviewStopMenu
   else
@@ -810,4 +821,168 @@ begin
   FBlameZombies.Add(FFixJob);
   FFixJob := nil;
   FFixKey := '';
+end;
+
+{ ---------------------------------------------------------------------------
+  Explaining lines
+  --------------------------------------------------------------------------- }
+
+{ The rows the selection spans when it spans more than one and holds
+  ARow (ARow -1 for the caret's), else ARow's alone. A selection that
+  ends at the start of a row does not take that row. }
+procedure WhyRows(AEd: TATSynEdit; ARow: integer; out AFrom, ATo: integer);
+var
+  X1, Y1, X2, Y2: integer;
+  Sel: boolean;
+begin
+  if ARow < 0 then
+    ARow := AEd.Carets[0].PosY;
+  AFrom := ARow;
+  ATo := ARow;
+  AEd.Carets[0].GetRange(X1, Y1, X2, Y2, Sel);
+  if Sel and (X2 = 0) and (Y2 > Y1) then
+    Dec(Y2);
+  if Sel and (Y2 > Y1) and (ARow >= Y1) and (ARow <= Y2) then
+  begin
+    AFrom := Y1;
+    ATo := Y2;
+  end;
+end;
+
+procedure TRepoFrame.MenuWhyClick(Sender: TObject);
+var
+  FromRow, ToRow: integer;
+begin
+  if FWhyJob <> nil then
+  begin
+    StartWhyJob(-1, -1);
+    Exit;
+  end;
+  WhyRows(Edit, -1, FromRow, ToRow);
+  StartWhyJob(FromRow, ToRow);
+end;
+
+procedure TRepoFrame.MenuWhyEditClick(Sender: TObject);
+var
+  FromRow, ToRow: integer;
+begin
+  if FWhyJob <> nil then
+  begin
+    StartWhyJob(-1, -1);
+    Exit;
+  end;
+  if (FPopupEd <> Edit) or (FPopupRow < 0) then
+    Exit;
+  WhyRows(Edit, FPopupRow, FromRow, ToRow);
+  StartWhyJob(FromRow, ToRow);
+end;
+
+{ The lines in the commit the history starts from (ChunkLines,
+  HistoryRef), as Code History takes them; the card goes under the last
+  row that has a line, on the new side, or the old for a removed one. }
+procedure TRepoFrame.StartWhyJob(AFromRow, AToRow: integer);
+var
+  FromLine, ToLine, r, Line: integer;
+begin
+  if FWhyJob <> nil then
+  begin
+    AbandonWhyJob;
+    FStatus.ShowMessage('', stNormal, 0);
+    UpdateAIReviewItems;
+    Exit;
+  end;
+  if not AIAvailable or (FRepo.Root = '') then
+    Exit;
+  if (FView <> gvChanges) or (FCurrentPath = '') or (FEditPath <> '') then
+  begin
+    StatusNote(rsWhyNeedsChanges);
+    Exit;
+  end;
+  if not ChunkLines(AFromRow, AToRow, FromLine, ToLine) then
+  begin
+    StatusNote(rsNoHistoryYet);
+    Exit;
+  end;
+  FWhyThread := Default(TGittanReviewThread);
+  FWhyThread.Path := FCurrentPath;
+  for r := Min(AToRow, High(FRows)) downto AFromRow do
+  begin
+    Line := FRows[r].Line;
+    if (Line < 0) then
+      Continue;
+    if (Line <= High(FNewNum)) and (FNewNum[Line] > 0) then
+      FWhyThread.Line := FNewNum[Line]
+    else if (Line <= High(FOldNum)) and (FOldNum[Line] > 0) then
+    begin
+      FWhyThread.Line := FOldNum[Line];
+      FWhyThread.LeftSide := True;
+    end
+    else
+      Continue;
+    Break;
+  end;
+  FWhyThread.OriginalLine := FWhyThread.Line;
+  FWhyKey := AIReviewKey;
+  FWhyJob := TGittanWhyJob.Create(FRepo.Root, FAI, FCurrentPath, HistoryRef, FromLine,
+    ToLine);
+  FWhyJob.OnDone := @WhyJobDone;
+  FWhyJob.Start;
+  FStatus.ShowBusy(Format(rsWhyLooking, [AgentName, FromLine, ToLine, FCurrentPath]),
+    HintSparkle);
+  UpdateAIReviewItems;
+end;
+
+{ The explanation is a card among the review's findings for the
+  comparison it was asked in, in place of one for the same line; it
+  goes with them on Clear AI Review. }
+procedure TRepoFrame.WhyJobDone(Sender: TObject);
+var
+  Job: TGittanWhyJob;
+  T: TGittanReviewThread;
+  i: integer;
+begin
+  Job := TGittanWhyJob(Sender);
+  if Job <> FWhyJob then
+    Exit;
+  FWhyJob := nil;
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+  FStatus.ShowMessage('', stNormal, 0);
+  if not Job.Ok then
+  begin
+    BannerError(Format(rsWhyFailed, [Job.AgentName]), Job.Error);
+    UpdateAIReviewItems;
+    Exit;
+  end;
+  T := FWhyThread;
+  T.Agent := Job.AgentName;
+  T.Severity := WhySeverity;
+  SetLength(T.Comments, 1);
+  T.Comments[0].Author := Job.AgentName;
+  T.Comments[0].Body := Job.Text;
+  T.Comments[0].Created := LocalTimeToUniversal(Now);
+  if FAIThreadsKey <> FWhyKey then
+  begin
+    FAIThreads := nil;
+    FAIThreadsKey := FWhyKey;
+  end;
+  for i := High(FAIThreads) downto 0 do
+    if (FAIThreads[i].Severity = WhySeverity) and (FAIThreads[i].Path = T.Path) and
+      (FAIThreads[i].Line = T.Line) and (FAIThreads[i].LeftSide = T.LeftSide) then
+      Delete(FAIThreads, i, 1);
+  Insert(T, FAIThreads, Length(FAIThreads));
+  StatusNote(Format(rsWhyDone, [Job.AgentName, Job.FromLine, Job.ToLine, Job.Path]));
+  CollectShownThreads;
+  FileTree.Invalidate;
+  RebuildIfChanges;
+  UpdateAIReviewItems;
+end;
+
+procedure TRepoFrame.AbandonWhyJob;
+begin
+  if FWhyJob = nil then
+    Exit;
+  FWhyJob.Stop(False);
+  FBlameZombies.Add(FWhyJob);
+  FWhyJob := nil;
 end;

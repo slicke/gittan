@@ -426,7 +426,8 @@ begin
   with FShown[AThread] do
     if Comments[0].Url <> '' then
       Result := Format(rsReviewLink, [ForgeName])
-    else if (Agent <> '') and not Resolved and AIAvailable and not FRepo.IsRange then
+    else if (Agent <> '') and (Severity <> WhySeverity) and not Resolved and AIAvailable and
+      not FRepo.IsRange then
       if (FFixJob <> nil) and (FFixKey = FindingKey(FShown[AThread])) then
         Result := rsFixStopLink
       else
@@ -462,6 +463,8 @@ begin
     Result := rsSeverityRisk
   else if ASeverity = 'question' then
     Result := rsSeverityQuestion
+  else if ASeverity = WhySeverity then
+    Result := rsSeverityHistory
   else
     Result := ASeverity;
 end;
