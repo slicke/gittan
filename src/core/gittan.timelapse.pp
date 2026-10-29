@@ -378,12 +378,17 @@ begin
     end;
     { A file the commit lacks (untracked, or added since) has no history
       to play: no time-lapse and no error, rather than git's "exists on
-      disk, but not in 'HEAD'". }
+      disk, but not in 'HEAD'". A ref that names no commit is git's
+      error; HEAD may name none yet in a new repository. }
     Ref := FRef;
     if Ref = '' then
       Ref := 'HEAD';
     if not Repo.FileSize(FPath, Ref, Size) then
+    begin
+      if (FRef <> '') and not Repo.HasCommit(FRef) then
+        FError := Format(rsNoSuchCommit, [FRef]);
       Exit;
+    end;
     if not Repo.FileTimeline(FPath, FRef, TimelapseMax, Log, Text) or Terminated then
     begin
       FError := Repo.Error;

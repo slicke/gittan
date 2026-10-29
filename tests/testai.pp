@@ -80,6 +80,7 @@ type
     procedure TestParseFixEdits;
     procedure TestApplyFixEdits;
     procedure TestFixBlock;
+    procedure TestFixInputWindow;
     procedure TestFixJob;
     procedure TestWhyInput;
     procedure TestWhyJob;
@@ -1041,6 +1042,33 @@ begin
   Edits[1].Replace := ['  z := 9;'];
   AssertTrue(Error, ApplyFixEdits(Lines, Edits, New, Error));
   AssertEquals('  z := 9;', New[1]);
+end;
+
+{ A file too long for the budget gives the lines round the finding's,
+  with notes for those left out; a short one comes whole. }
+procedure TAiTest.TestFixInputWindow;
+var
+  Finding: TGittanReviewThread;
+  Lines: TStringArray;
+  Text: string;
+  i: integer;
+begin
+  Finding := Default(TGittanReviewThread);
+  Finding.Path := 'big.txt';
+  Finding.Line := 15000;
+  SetLength(Lines, 20000);
+  for i := 0 to High(Lines) do
+    Lines[i] := 'line number ' + IntToStr(i + 1);
+  Text := FixInput(FDir, '', Finding, Lines);
+  AssertTrue('within the budget', Length(Text) <= MessageDiffKeep);
+  AssertTrue('the finding''s line', Pos(#10'15000: line number 15000'#10, Text) > 0);
+  AssertTrue('the start left out', Pos('[Lines 1 to ', Text) > 0);
+  AssertTrue('the end left out', Pos(' to 20000 are left out.]', Text) > 0);
+  SetLength(Lines, 3);
+  Finding.Line := 2;
+  Text := FixInput(FDir, '', Finding, Lines);
+  AssertTrue(Pos(#10'1: line number 1'#10, Text) > 0);
+  AssertEquals('nothing left out', 0, Pos('left out', Text));
 end;
 
 procedure TAiTest.TestFixBlock;

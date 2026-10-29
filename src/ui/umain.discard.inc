@@ -273,14 +273,15 @@ begin
 end;
 
 { The row the pills go on: the hot block's first row, or its first row
-  in view when it begins above the view, so they stay put while the
-  mouse moves in the block; a kept line's own row. }
+  in view when it begins above the view or under a fold, so they stay
+  put while the mouse moves in the block; a kept line's own row. }
 function TRepoFrame.PillRow: integer;
 begin
   Result := FHotRow;
   if FHotKeep >= 0 then
     Exit;
-  while (Result > Edit.LineTop) and (BlockAtRow(Result - 1) = FHotDiscard) do
+  while (Result > Edit.LineTop) and (BlockAtRow(Result - 1) = FHotDiscard) and
+    not Edit.IsLineFolded(Result - 1) do
     Dec(Result);
 end;
 
@@ -328,7 +329,8 @@ begin
 end;
 
 { The frame round the framed block's rows, across the text, the gaps
-  after its last row left out. }
+  after its last row left out; rows under a fold end it, as they have no
+  place on the screen. }
 procedure TRepoFrame.DrawBlockFrame(AEd: TATSynEdit; C: TCanvas);
 var
   First, Last, Y1, Y2, WrapFrom, WrapTo, Rad: integer;
@@ -337,10 +339,12 @@ begin
     (FHotRow < 0) or (FHotRow >= AEd.Strings.Count) then
     Exit;
   First := FHotRow;
-  while (First > 0) and (BlockAtRow(First - 1) = FFramedBlock) do
+  while (First > 0) and (BlockAtRow(First - 1) = FFramedBlock) and
+    not AEd.IsLineFolded(First - 1) do
     Dec(First);
   Last := FHotRow;
-  while (Last < AEd.Strings.Count - 1) and (BlockAtRow(Last + 1) = FFramedBlock) do
+  while (Last < AEd.Strings.Count - 1) and (BlockAtRow(Last + 1) = FFramedBlock) and
+    not AEd.IsLineFolded(Last + 1) do
     Inc(Last);
   AEd.WrapInfo.FindIndexesOfLineNumber(Last, WrapFrom, WrapTo);
   if WrapFrom < 0 then

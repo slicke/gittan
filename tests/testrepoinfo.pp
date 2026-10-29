@@ -192,6 +192,8 @@ begin
   AssertTrue('yarn lock', FileCategory('yarn.lock') = fcConfig);
   AssertTrue('yaml', FileCategory('.github/workflows/ci.YML') = fcConfig);
   AssertTrue('gemfile', FileCategory('Gemfile') = fcConfig);
+  AssertTrue('makefile', FileCategory('Makefile') = fcConfig);
+  AssertTrue('cmake', FileCategory('src/CMakeLists.txt') = fcConfig);
   AssertTrue('requirements over text', FileCategory('requirements.txt') = fcConfig);
   AssertTrue('dotfile', FileCategory('.gitignore') = fcConfig);
   AssertTrue('dot script', FileCategory('.eslintrc.js') = fcCode);

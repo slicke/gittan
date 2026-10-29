@@ -321,6 +321,27 @@ begin
   finally
     HJob.Free;
   end;
+  { A ref that names no commit is an error, not a file not committed. }
+  Job := TGittanTimelapseJob.Create(FDir, 'b.txt', 'gone');
+  try
+    Job.Start;
+    Job.WaitFor;
+    CheckSynchronize(0);
+    AssertNull(Job.Timelapse);
+    AssertTrue('an error', Job.Error <> '');
+  finally
+    Job.Free;
+  end;
+  HJob := TGittanHistoryJob.Create(FDir, 'b.txt', 'gone', 1, 1, 10, False);
+  try
+    HJob.Start;
+    HJob.WaitFor;
+    CheckSynchronize(0);
+    AssertFalse(HJob.NotCommitted);
+    AssertTrue('an error', HJob.Error <> '');
+  finally
+    HJob.Free;
+  end;
   { A tracked file still plays. }
   Job := TGittanTimelapseJob.Create(FDir, 'b.txt', '');
   try

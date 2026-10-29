@@ -701,10 +701,15 @@ begin
   end;
 end;
 
+{ Ticks the plan's commit AIndex, files whole: the changes left out of
+  its files go, those of the others stay. Its message goes in the field;
+  one without (the files the agent left out) empties the field when it
+  holds another commit's of the plan, and leaves what the user typed. }
 procedure TRepoFrame.ApplyPlannedCommit(AIndex: integer);
 var
   Files: TStringList;
   i: integer;
+  Chosen: boolean;
 begin
   if not CommitChoosing or (FCommitJob <> nil) or (AIndex < 0) or
     (AIndex > High(FCommitPlan)) then
@@ -714,19 +719,28 @@ begin
     Files.AddStrings(FCommitPlan[AIndex].Files);
     Files.CaseSensitive := True;
     Files.Sorted := True;
-    { The changes left out of a file go too: the plan took files whole. }
     for i := 0 to High(FStats) do
       if FStats[i].Kind <> ckConflict then
       begin
-        SetCommitChosen(i, Files.IndexOf(FStats[i].Path) >= 0);
-        DropLeftOut(FStats[i].Path);
+        Chosen := Files.IndexOf(FStats[i].Path) >= 0;
+        SetCommitChosen(i, Chosen);
+        if Chosen then
+          DropLeftOut(FStats[i].Path);
       end;
   finally
     Files.Free;
   end;
   ApplyCommitChecks;
   if FCommitPlan[AIndex].Message <> '' then
-    FCommitMemo.Text := FCommitPlan[AIndex].Message;
+    FCommitMemo.Text := FCommitPlan[AIndex].Message
+  else
+    for i := 0 to High(FCommitPlan) do
+      if (FCommitPlan[i].Message <> '') and
+        (Trim(FCommitMemo.Text) = Trim(FCommitPlan[i].Message)) then
+      begin
+        FCommitMemo.Text := '';
+        Break;
+      end;
   MenuCommitClick(nil);
   FCommitMemo.SelStart := 0;
   UpdateCommitState;

@@ -429,6 +429,9 @@ type
     function HeadPaths(AList: TStrings): boolean;
     {** Whether ARef names a commit in the repository. }
     function HasCommit(const ARef: string): boolean;
+    {** Whether ARef, a full name such as refs/tags/v1, is a ref of the
+      repository, whatever it points at. }
+    function HasRef(const ARef: string): boolean;
     {** The full id of the commit ARef names, empty when it names none. }
     function CommitId(const ARef: string): string;
     {** How many commits AFrom..ATo holds (those ATo reaches and AFrom
@@ -2625,6 +2628,14 @@ var
 begin
   Result := (FRoot <> '') and (ARef <> '') and
     RunGit(FRoot, ['rev-parse', '--verify', '-q', ARef + '^{commit}'], Id);
+end;
+
+function TGittanRepo.HasRef(const ARef: string): boolean;
+var
+  Id: string;
+begin
+  Result := (FRoot <> '') and (ARef <> '') and
+    RunGit(FRoot, ['rev-parse', '--verify', '-q', ARef], Id);
 end;
 
 function TGittanRepo.CommitId(const ARef: string): string;

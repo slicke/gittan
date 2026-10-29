@@ -137,6 +137,9 @@ type
     { The commit highlighted when a search for changes began, highlighted
       again when it ends, since the rows are empty meanwhile. }
     FChangeKeep: string;
+    { The search text the rows were last filtered with, which a pick
+      keeps with them: the field may hold more not yet applied. }
+    FAppliedText: string;
     FLanes: integer;
     FMore, FAskedMore: boolean;
     FBranch: string;
@@ -261,7 +264,8 @@ type
     {** The hashes of the rows the filter shows, newest first: the order
       the owner steps through after a pick. }
     function ShownHashes: TStringArray;
-    {** What the search field holds. }
+    {** The search text the rows ShownHashes gives were filtered with,
+      which may lag what the field holds while a filter waits. }
     function FilterText: string;
     {** Puts ACommits in the place of the ones shown, the answer to
       OnMore: the filter and the highlighted commit stay. }
@@ -789,7 +793,7 @@ end;
 
 function TGittanCommitGraph.FilterText: string;
 begin
-  Result := FEdit.Text;
+  Result := FAppliedText;
 end;
 
 procedure TGittanCommitGraph.Popup(const ACommits: TGittanGraphCommits;
@@ -901,6 +905,7 @@ begin
     More;
     Exit;
   end;
+  FAppliedText := FEdit.Text;
   Key := '';
   for i := 0 to High(FFilter.Paths) do
     Key := Key + FFilter.Paths[i] + #1;

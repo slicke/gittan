@@ -486,10 +486,10 @@ end;
 const
   { The manifests and lock files of package managers and build tools
     that no extension in ConfigExts gives away, lower case. }
-  ConfigNames: array[0..14] of string = ('gemfile', 'go.mod', 'go.sum', 'go.work',
+  ConfigNames: array[0..17] of string = ('gemfile', 'go.mod', 'go.sum', 'go.work',
     'pipfile', 'requirements.txt', 'podfile', 'cartfile', 'brewfile', 'procfile',
     'package.swift', 'build.gradle', 'settings.gradle', 'build.gradle.kts',
-    'settings.gradle.kts');
+    'settings.gradle.kts', 'makefile', 'gnumakefile', 'cmakelists.txt');
   { The folders at the top of a repository that a forge or a CI service
     reads, whose files are all configuration: workflows, templates and
     the scripts they run. }

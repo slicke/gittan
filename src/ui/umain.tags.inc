@@ -155,7 +155,7 @@ begin
   TagName := Trim(AValues[0]);
   if not FRepo.IsTagName(TagName) then
     Result := rsAskBadTag
-  else if FRepo.HasCommit('refs/tags/' + TagName) then
+  else if FRepo.HasRef('refs/tags/' + TagName) then
     Result := Format(rsAskTagTaken, [TagName]);
 end;
 

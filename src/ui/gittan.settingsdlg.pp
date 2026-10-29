@@ -412,6 +412,7 @@ type
     procedure AIChange(Sender: TObject);
     procedure HostingChange(Sender: TObject);
     procedure AddAccounts(AIndex: integer);
+    procedure AccountBoxSelect(Sender: TObject);
     function PickedAccounts: TGittanForgeAccountsList;
     procedure AutoFetchChange(Sender: TObject);
     procedure AgentChange(Sender: TObject);
@@ -1266,8 +1267,10 @@ begin
       Box.ItemIndex := 0;
     { The login shown when none is active is no pick of the user's:
       PickedAccounts switches only from a box whose Tag, the item it
-      started on, is no longer the one picked. }
+      started on, is no longer the one picked, or -1 once the user
+      picked in it (AccountBoxSelect), the first login again included. }
     Box.Tag := Box.ItemIndex;
+    Box.OnSelect := @AccountBoxSelect;
     Several := Several or (Box.Items.Count > 1);
     Place(Box, 4);
     SetLength(FAccountBoxes, Length(FAccountBoxes) + 1);
@@ -1288,6 +1291,11 @@ begin
   Lbl := AddLabel(Note, 4);
   Lbl.Font.Color := clGrayText;
   Lbl.WordWrap := True;
+end;
+
+procedure TSettingsForm.AccountBoxSelect(Sender: TObject);
+begin
+  TComboBox(Sender).Tag := -1;
 end;
 
 { FAccounts with each list's pick as its host's active account. }

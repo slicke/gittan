@@ -15,6 +15,10 @@ interface
 uses
   Classes, SysUtils, Math, gittan.git, gittan.blame, gittan.job;
 
+resourcestring
+  {** A history or time-lapse asked from a ref that names no commit. }
+  rsNoSuchCommit = '%s names no commit here.';
+
 type
   {** One hunk of a commit's diff: the lines with their ' ', '+' or '-'
     marker, and the number of the first line in the old and in the new
@@ -498,7 +502,13 @@ begin
       if Ref = '' then
         Ref := 'HEAD';
       FNotCommitted := not Repo.FileSize(FPath, Ref, Size);
-      if not FNotCommitted then
+      { A ref that names no commit is no file not committed. }
+      if FNotCommitted and (FRef <> '') and not Repo.HasCommit(FRef) then
+      begin
+        FNotCommitted := False;
+        FError := Format(rsNoSuchCommit, [FRef]);
+      end
+      else if not FNotCommitted then
       begin
         Repo.IgnoreWhitespace := FIgnoreWhitespace;
         if Repo.LineHistory(FPath, FRef, FFrom, FTo, FMax, Output) then

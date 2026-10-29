@@ -354,7 +354,8 @@ end;
 procedure TGittanWelcome.Paint;
 var
   ColLeft, ColWidth, Y, BlockTop, Total, LineHeight, TitleHeight, ErrHeight: integer;
-  KeyWidth, X, TextY, i, RowWidth, ButtonHeight, ButtonRows, Spare: integer;
+  KeyWidth, X, TextY, i, RowWidth, ButtonHeight, ButtonRows, Spare, LogoW: integer;
+  OpenNeed: integer;
   ButtonWidths: array[0..2] of integer;
   Captions: array[0..2] of string;
   Stacked: boolean;
@@ -375,11 +376,13 @@ begin
   ColWidth := Min(Px(ColumnWidth), Width - 2 * Px(Pad));
   ColLeft := (Width - ColWidth) div 2;
   { The wordmark in the screen's pixels (twice its points on a Retina
-    screen), which Cocoa then draws pixel for pixel. }
-  Logo := LogoBitmap(Round(Px(LogoWidth) * GetCanvasScaleFactor));
+    screen), which Cocoa then draws pixel for pixel; no wider than the
+    column. }
+  LogoW := Max(1, Min(Px(LogoWidth), ColWidth));
+  Logo := LogoBitmap(Round(LogoW * GetCanvasScaleFactor));
   LogoHeight := 0;
   if Logo <> nil then
-    LogoHeight := Px(LogoWidth) * Logo.Height div Logo.Width;
+    LogoHeight := LogoW * Logo.Height div Logo.Width;
 
   { The block's height first, to place it: a little above the middle
     of the room, which looks centered, and never off the top. }
@@ -407,12 +410,17 @@ begin
     Inc(RowWidth, ButtonWidths[i]);
   end;
   Canvas.Font.Style := [];
+  OpenNeed := ButtonWidths[0];
   Stacked := RowWidth > ColWidth;
   if Stacked then
     for i := 0 to High(Captions) do
       ButtonWidths[i] := ColWidth
   else
     Inc(ButtonWidths[0], ColWidth - RowWidth);
+  { A column too narrow for the open button's caption and its key cap
+    drops the key cap rather than draw the caption over it. }
+  if ButtonWidths[0] < OpenNeed then
+    KeyWidth := 0;
   ButtonHeight := LineHeight + 2 * Px(ButtonPadY);
   if Stacked then
     ButtonRows := Length(Captions)
@@ -458,8 +466,8 @@ begin
 
     if Logo <> nil then
     begin
-      Logo.Draw(Canvas, Rect((Width - Px(LogoWidth)) div 2, Y,
-        (Width + Px(LogoWidth)) div 2, Y + LogoHeight), False);
+      Logo.Draw(Canvas, Rect((Width - LogoW) div 2, Y,
+        (Width + LogoW) div 2, Y + LogoHeight), False);
       Inc(Y, LogoHeight + Px(Gap));
     end
     else
@@ -537,7 +545,7 @@ begin
       Canvas.Brush.Style := bsClear;
       Spare := R.Right;
       TextY := Y + Px(ButtonPadY);
-      if (i = 0) and (FShortcut <> '') then
+      if (i = 0) and (KeyWidth > 0) then
       begin
         { The shortcut as a key cap: a small rounded frame in a paler
           shade of the fill. }

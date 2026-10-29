@@ -319,8 +319,9 @@ function ParseCommitPlan(const AText: string; APaths: TStrings;
 
 {** What the agent gets to fix AFinding (a review's, on the view's lines
   of its Path) in the repository at ARoot compared with ABase (empty for
-  HEAD): the finding, the file's diff against the base, and ALines, the
-  file as it is, numbered and cut at MessageDiffKeep. }
+  HEAD): the finding, the file's diff against the base, cut at half of
+  MessageDiffKeep, and ALines, the file as it is, numbered: whole when
+  it fits in what is left, else the lines round the finding's that do. }
 function FixInput(const ARoot, ABase: string; const AFinding: TGittanReviewThread;
   const ALines: TStringArray): string;
 
@@ -856,15 +857,15 @@ begin
   Result := Format(rsAboutApi, [Title, FPath]);
 end;
 
-{ AText up to MessageDiffKeep bytes, cut at a line end, with a line that
-  says it was: ANote, with the bytes left out and the whole. }
-function KeepText(const AText, ANote: string): string;
+{ AText up to AKeep bytes, cut at a line end, with a line that says it
+  was: ANote, with the bytes left out and the whole. }
+function KeepText(const AText, ANote: string; AKeep: integer = MessageDiffKeep): string;
 var
   Cut: integer;
 begin
-  if Length(AText) <= MessageDiffKeep then
+  if Length(AText) <= AKeep then
     Exit(AText);
-  Cut := MessageDiffKeep;
+  Cut := AKeep;
   while (Cut > 0) and (AText[Cut] <> #10) do
     Dec(Cut);
   Result := Copy(AText, 1, Cut) + Format(ANote, [Length(AText) - Cut, Length(AText)]) +
@@ -1706,7 +1707,8 @@ function FixInput(const ARoot, ABase: string; const AFinding: TGittanReviewThrea
 var
   Text: TStringBuilder;
   Diff, Error, Side: string;
-  i: integer;
+  Numbered: TStringArray;
+  i, Size, Room, First, Last: integer;
 begin
   Text := TStringBuilder.Create;
   try
@@ -1727,17 +1729,56 @@ begin
     else if not RunGitIn(ARoot, ['diff', '--no-ext-diff', 'HEAD', '--', AFinding.Path],
       Diff, Error) then
       Diff := '';
+    { The diff takes half the budget at most, so the file's lines at the
+      finding always come: a model that cannot read files has only them
+      to find the lines to change. }
     if Trim(Diff) <> '' then
       Text.Append('The change under review in the file:' + LineEnding +
-        KeepDiff(Diff) + LineEnding);
+        KeepText(Diff, '[The diff is cut here: %d of its %d bytes are left out.]',
+        MessageDiffKeep div 2) + LineEnding);
     Text.Append('The file as it is now:' + LineEnding);
+    SetLength(Numbered, Length(ALines));
+    Size := 0;
     for i := 0 to High(ALines) do
     begin
-      Text.Append(IntToStr(i + 1));
-      Text.Append(': ');
-      Text.Append(ALines[i]);
-      Text.Append(#10);
+      Numbered[i] := IntToStr(i + 1) + ': ' + ALines[i] + #10;
+      Inc(Size, Length(Numbered[i]));
     end;
+    { Room for the notes of the lines left out. }
+    Room := MessageDiffKeep - Text.Length - 200;
+    First := 0;
+    Last := High(ALines);
+    if Size > Room then
+    begin
+      First := Max(0, Min(AFinding.Line - 1, High(ALines)));
+      Last := First - 1;
+      Size := 0;
+      { Down and up from the finding's line in turn while lines fit. }
+      while (First > 0) or (Last < High(ALines)) do
+      begin
+        if (Last < High(ALines)) and (Size + Length(Numbered[Last + 1]) <= Room) then
+        begin
+          Inc(Last);
+          Inc(Size, Length(Numbered[Last]));
+        end
+        else if Last < High(ALines) then
+          Break;
+        if (First > 0) and (Size + Length(Numbered[First - 1]) <= Room) then
+        begin
+          Dec(First);
+          Inc(Size, Length(Numbered[First]));
+        end
+        else if (First > 0) and (Last >= High(ALines)) then
+          Break;
+      end;
+    end;
+    if First > 0 then
+      Text.Append(Format('[Lines 1 to %d are left out.]', [First]) + LineEnding);
+    for i := First to Last do
+      Text.Append(Numbered[i]);
+    if Last < High(ALines) then
+      Text.Append(Format('[Lines %d to %d are left out.]', [Last + 2, Length(ALines)]) +
+        LineEnding);
     Result := KeepText(Text.ToString, '[The file is cut here: %d of the %d bytes are ' +
       'left out.]');
   finally
