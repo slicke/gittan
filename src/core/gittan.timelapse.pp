@@ -274,7 +274,8 @@ end;
 procedure TGittanTimelapseJob.Execute;
 var
   Repo: TGittanRepo;
-  Log, Text: string;
+  Log, Text, Ref: string;
+  Size: int64;
 begin
   Repo := TGittanRepo.Create;
   try
@@ -283,6 +284,14 @@ begin
       FError := Repo.Error;
       Exit;
     end;
+    { A file the commit lacks (untracked, or added since) has no history
+      to play: no time-lapse and no error, rather than git's "exists on
+      disk, but not in 'HEAD'". }
+    Ref := FRef;
+    if Ref = '' then
+      Ref := 'HEAD';
+    if not Repo.FileSize(FPath, Ref, Size) then
+      Exit;
     if not Repo.FileTimeline(FPath, FRef, TimelapseMax, Log, Text) or Terminated then
     begin
       FError := Repo.Error;

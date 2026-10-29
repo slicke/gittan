@@ -96,6 +96,15 @@ type
     property OnStateClick: TTVExpandedEvent read FOnStateClick write FOnStateClick;
   end;
 
+  {** The commit message field. Cocoa draws no TextHint in a memo, so the
+    placeholder of gittan.memohint goes in whenever the field gets its
+    text view (InitializeWnd): the frame is made hidden and its window
+    shown later, so Init is too early. }
+  TCommitMemo = class(TMemo)
+  protected
+    procedure InitializeWnd; override;
+  end;
+
   {** The colors the self-painted controls share in one appearance
     (TRepoFrame.Palette): the gutter's shade the bars and headers sit on,
     the text and its dim kind, the divider lines, the popup lists'
@@ -1691,7 +1700,6 @@ type
     procedure SetupSubmodules;
     procedure SetupCommit;
     procedure FocusTreeAsync(Data: PtrInt);
-    procedure CommitHintAsync(Data: PtrInt);
     procedure CommitHeaderCheck(Sender: TObject);
     procedure SetAllChosen(AValue: boolean);
     procedure MenuTickAllClick(Sender: TObject);
@@ -3432,6 +3440,16 @@ begin
 end;
 
 { TRepoFrame }
+
+{ TCommitMemo }
+
+procedure TCommitMemo.InitializeWnd;
+begin
+  inherited InitializeWnd;
+  {$IFDEF LCLCocoa}
+  SetMemoPlaceholder(Handle, TextHint);
+  {$ENDIF}
+end;
 
 { TTreeView }
 

@@ -73,6 +73,7 @@ begin
     AssertEquals(0, S.Recent.Count);
     AssertEquals(0, S.UpdateSnoozedUntil, 0);
     AssertTrue(S.CommitOpen);
+    AssertTrue('the sidebar''s rows start shown', S.NavOpen);
     AssertEquals('', S.CommitDraft);
     AssertEquals('no tab width picked', 0, S.TabSize);
     AssertEquals('', S.GitPath);

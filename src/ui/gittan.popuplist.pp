@@ -167,6 +167,9 @@ const
   Offset = 4;
   Border = 1;
   CheckWidth = 20;
+  { The share of a row, in percent, a caption keeps when it and its
+    detail do not both fit: the detail is cut first, down to the rest. }
+  CaptionShare = 55;
   MinWidth = 220;
   MaxWidth = 440;
   { The width of a list PopupCentered shows. }
@@ -640,12 +643,14 @@ end;
 { Each row: the highlight behind the current one, the check mark of
   the checked item, the caption (dim for a header, which sits at the
   left margin where the check marks go) and the detail dimmed on the
-  right. A caption too long for the room loses its end. }
+  right. When the two do not fit, the detail is cut first, until the
+  caption has CaptionShare of the row (a tag's name before its commit's
+  subject); then both lose their end. }
 procedure TGittanPopupList.PaintRows(ACanvas: TCanvas);
 var
-  i, X, Y, TextY, LineHeight, Room, DetailWidth, CenterY: integer;
+  i, X, Y, TextY, LineHeight, Room, Avail, CaptionWidth, DetailWidth, CenterY: integer;
   Item: TGittanPopupItem;
-  Shown: string;
+  Shown, Detail: string;
 begin
   ACanvas.Brush.Style := bsSolid;
   ACanvas.Brush.Color := FBack;
@@ -689,9 +694,6 @@ begin
       ACanvas.Line(Px(Pad), CenterY, FRows.Width - Px(Pad), CenterY);
       Continue;
     end;
-    DetailWidth := 0;
-    if Item.Detail <> '' then
-      DetailWidth := ACanvas.TextWidth(Item.Detail) + Px(Gap);
     if Item.Header then
     begin
       X := Px(Pad);
@@ -702,14 +704,25 @@ begin
       X := Px(Pad) + Px(CheckWidth);
       ACanvas.Font.Color := FText;
     end;
-    Room := FRows.Width - Px(Pad) - X - DetailWidth;
-    Shown := FitTextRight(ACanvas, Item.Caption, Room);
-    ACanvas.TextOut(X, TextY, Shown);
+    Avail := FRows.Width - Px(Pad) - X;
+    Room := Avail;
+    Detail := '';
     if Item.Detail <> '' then
     begin
+      CaptionWidth := ACanvas.TextWidth(Item.Caption);
+      DetailWidth := ACanvas.TextWidth(Item.Detail) + Px(Gap);
+      if CaptionWidth + DetailWidth <= Avail then
+        Room := Avail - DetailWidth
+      else
+        Room := Max(Avail - DetailWidth, Min(CaptionWidth, Avail * CaptionShare div 100));
+      Detail := FitTextRight(ACanvas, Item.Detail, Max(0, Avail - Room - Px(Gap)));
+    end;
+    Shown := FitTextRight(ACanvas, Item.Caption, Room);
+    ACanvas.TextOut(X, TextY, Shown);
+    if Detail <> '' then
+    begin
       ACanvas.Font.Color := FDim;
-      ACanvas.TextOut(FRows.Width - Px(Pad) - ACanvas.TextWidth(Item.Detail), TextY,
-        Item.Detail);
+      ACanvas.TextOut(FRows.Width - Px(Pad) - ACanvas.TextWidth(Detail), TextY, Detail);
     end;
   end;
 end;

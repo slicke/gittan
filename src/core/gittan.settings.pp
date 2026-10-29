@@ -292,6 +292,7 @@ begin
   else
     FFileName := IncludeTrailingPathDelimiter(ConfigDir) + 'gittan.ini';
   ContextLines := 3;
+  NavOpen := True;
   SubmodulesOpen := True;
   AutoFetch := True;
   AutoFetchMinutes := DefaultAutoFetchMinutes;

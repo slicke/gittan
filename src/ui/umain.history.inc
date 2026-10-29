@@ -227,8 +227,17 @@ begin
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
   if Job.History = nil then
   begin
-    if Job.Error <> '' then
-      StatusNote(Job.Error, True)
+    if Job.NotCommitted then
+    begin
+      FStatus.ClearMessage;
+      StatusNote(rsNoHistoryYet);
+    end
+    else if Job.Error <> '' then
+    begin
+      { The error goes to the banner: the busy message must go too. }
+      FStatus.ClearMessage;
+      StatusNote(Job.Error, True);
+    end
     else
       StatusNote(rsNoHistory);
     Exit;

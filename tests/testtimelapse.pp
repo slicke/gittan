@@ -29,6 +29,7 @@ type
   published
     procedure TestRepository;
     procedure TestMisfitStops;
+    procedure TestNotCommitted;
   end;
 
 implementation
@@ -194,6 +195,64 @@ begin
   finally
     T.Free;
     History.Free;
+  end;
+end;
+
+{ A file HEAD lacks gives no time-lapse and no error, and its code
+  history says it is not committed, so the frame says that instead of
+  showing git's refusal. }
+procedure TTimelapseTest.TestNotCommitted;
+var
+  Job: TGittanTimelapseJob;
+  HJob: TGittanHistoryJob;
+begin
+  Git(['init', '-q', '-b', 'main']);
+  WriteFile('b.txt', 'one'#10);
+  Commit('start');
+  WriteFile('new.txt', 'fresh'#10);
+  Job := TGittanTimelapseJob.Create(FDir, 'new.txt', '');
+  try
+    Job.Start;
+    Job.WaitFor;
+    CheckSynchronize(0);
+    AssertNull('no time-lapse', Job.Timelapse);
+    AssertEquals('no error', '', Job.Error);
+    AssertFalse(Job.Binary);
+  finally
+    Job.Free;
+  end;
+  { Code History says the same through NotCommitted. }
+  HJob := TGittanHistoryJob.Create(FDir, 'new.txt', '', 1, 1, 10, False);
+  try
+    HJob.Start;
+    HJob.WaitFor;
+    CheckSynchronize(0);
+    AssertTrue('not committed', HJob.NotCommitted);
+    AssertNull(HJob.History);
+    AssertEquals('', HJob.Error);
+  finally
+    HJob.Free;
+  end;
+  HJob := TGittanHistoryJob.Create(FDir, 'b.txt', '', 1, 1, 10, False);
+  try
+    HJob.Start;
+    HJob.WaitFor;
+    CheckSynchronize(0);
+    AssertFalse(HJob.NotCommitted);
+    AssertNotNull(HJob.Error, HJob.History);
+  finally
+    HJob.Free;
+  end;
+  { A tracked file still plays. }
+  Job := TGittanTimelapseJob.Create(FDir, 'b.txt', '');
+  try
+    Job.Start;
+    Job.WaitFor;
+    CheckSynchronize(0);
+    AssertEquals(Job.Error, '', Job.Error);
+    AssertNotNull('a time-lapse', Job.Timelapse);
+  finally
+    Job.Free;
   end;
 end;
 

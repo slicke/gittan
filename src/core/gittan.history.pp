@@ -91,7 +91,7 @@ type
   private
     FRoot, FPath, FRef: string;
     FFrom, FTo, FMax: integer;
-    FIgnoreWhitespace: boolean;
+    FIgnoreWhitespace, FNotCommitted: boolean;
     FHistory: TGittanHistory;
     FError: string;
   protected
@@ -103,6 +103,9 @@ type
     function Take: TGittanHistory;
     property History: TGittanHistory read FHistory;
     property Error: string read FError;
+    {** The commit the history starts from lacks the file (untracked, or
+      added since): no history and no error. }
+    property NotCommitted: boolean read FNotCommitted;
   end;
 
 implementation
@@ -481,21 +484,33 @@ end;
 procedure TGittanHistoryJob.Execute;
 var
   Repo: TGittanRepo;
-  Output: string;
+  Output, Ref: string;
+  Size: int64;
 begin
   Repo := TGittanRepo.Create;
   try
+    { Done comes after the finally: no Exit here, which would skip it. }
     if not Repo.Open(FRoot) then
-      Exit;
-    Repo.IgnoreWhitespace := FIgnoreWhitespace;
-    if Repo.LineHistory(FPath, FRef, FFrom, FTo, FMax, Output) then
-    begin
-      FHistory := TGittanHistory.Create;
-      if not FHistory.Parse(Output) then
-        FreeAndNil(FHistory);
-    end
+      FError := Repo.Error
     else
-      FError := Repo.Error;
+    begin
+      Ref := FRef;
+      if Ref = '' then
+        Ref := 'HEAD';
+      FNotCommitted := not Repo.FileSize(FPath, Ref, Size);
+      if not FNotCommitted then
+      begin
+        Repo.IgnoreWhitespace := FIgnoreWhitespace;
+        if Repo.LineHistory(FPath, FRef, FFrom, FTo, FMax, Output) then
+        begin
+          FHistory := TGittanHistory.Create;
+          if not FHistory.Parse(Output) then
+            FreeAndNil(FHistory);
+        end
+        else
+          FError := Repo.Error;
+      end;
+    end;
   finally
     Repo.Free;
   end;

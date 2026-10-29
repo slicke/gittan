@@ -70,7 +70,11 @@ begin
     if Job.Binary then
       StatusNote(rsTimelapseBinary)
     else if Job.Error <> '' then
-      StatusNote(Job.Error, True)
+    begin
+      { The error goes to the banner: the busy message must go too. }
+      FStatus.ClearMessage;
+      StatusNote(Job.Error, True);
+    end
     else
       StatusNote(rsNoTimelapse);
     Exit;
