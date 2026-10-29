@@ -24,7 +24,9 @@
   written as a pick of the list is, so Undo Discard puts it back. The
   fifth is File > Split Changes into Commits: the agent groups the
   changed files into commits with their messages, and a pick from the
-  plan ticks one commit's files and fills in its message. }
+  plan ticks one commit's files and fills in its message. The sixth is
+  Fix on a finding's card: the agent changes the file as the finding
+  asks, written as a discard is, so Undo Discard takes it back. }
 
 { The agent the settings pick, made from its fields there: its command
   by the path they give, else where it is found (or the API's server),
@@ -707,4 +709,105 @@ begin
   MenuCommitClick(nil);
   FCommitMemo.SelStart := 0;
   UpdateCommitState;
+end;
+
+{ ---------------------------------------------------------------------------
+  Fixing a finding
+  --------------------------------------------------------------------------- }
+
+{ What tells a finding apart, among the review's and the shown: its
+  path, its line as the agent gave it and its text. }
+function FindingKey(const AThread: TGittanReviewThread): string;
+begin
+  Result := AThread.Path + #0 + IntToStr(AThread.OriginalLine) + #0 +
+    AThread.Comments[0].Body;
+end;
+
+procedure TRepoFrame.FixFindingClick(AThread: integer);
+var
+  Finding: TGittanReviewThread;
+begin
+  if (AThread < 0) or (AThread > High(FShown)) then
+    Exit;
+  Finding := FShown[AThread];
+  if FFixJob <> nil then
+  begin
+    if FFixKey = FindingKey(Finding) then
+    begin
+      AbandonFixJob;
+      FStatus.ShowMessage('', stNormal, 0);
+      Edit.Invalidate;
+      FEditOld.Invalidate;
+    end
+    else
+      StatusNote(Format(rsFixBusy, [AgentName]));
+    Exit;
+  end;
+  if not AIAvailable or FRepo.IsRange or (Finding.Agent = '') then
+    Exit;
+  FFixKey := FindingKey(Finding);
+  FFixJob := TGittanFixJob.Create(FRepo.Root, FAI, FRepo.Base, Finding);
+  FFixJob.OnDone := @FixJobDone;
+  FFixJob.Start;
+  FStatus.ShowBusy(Format(rsFixing, [AgentName, Finding.Line, Finding.Path]), HintSparkle);
+  Edit.Invalidate;
+  FEditOld.Invalidate;
+end;
+
+{ The fix is written as a discard (refused when the file changed since
+  it was read, or while it is being edited), so Undo Discard takes it
+  back; its finding is marked resolved, which folds its card. }
+procedure TRepoFrame.FixJobDone(Sender: TObject);
+var
+  Job: TGittanFixJob;
+  Agent, Err, Why, Key: string;
+  i: integer;
+begin
+  Job := TGittanFixJob(Sender);
+  if Job <> FFixJob then
+    Exit;
+  FFixJob := nil;
+  FFixKey := '';
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+  FStatus.ShowMessage('', stNormal, 0);
+  Agent := Job.AgentName;
+  Why := Job.Why;
+  if not Job.Ok then
+    BannerError(Format(rsFixFailed, [Agent]), Job.Error)
+  else if not Job.Changed then
+    StatusNote(Format(rsFixNone, [Agent, Why]))
+  else if FEditPath = Job.Finding.Path then
+    StatusNote(Format(rsFixEditing, [Agent, Job.Finding.Path]), True)
+  else if not DiscardBlock(Job.Block, Err) then
+    StatusNote(Format(rsFixWriteFailed, [Err]), True)
+  else
+  begin
+    SetLength(FDiscards, Length(FDiscards) + 1);
+    FDiscards[High(FDiscards)] := Job.Block;
+    Key := FindingKey(Job.Finding);
+    for i := 0 to High(FAIThreads) do
+      if FindingKey(FAIThreads[i]) = Key then
+        FAIThreads[i].Resolved := True;
+    if Why = '' then
+      Why := rsResolvedAIUndo;
+    CollectShownThreads;
+    RefreshRepository;
+    UpdateDiscardItems;
+    RebuildIfChanges;
+    StatusNote(Format(rsFixed, [Agent, Job.Finding.Path, Why]));
+    Exit;
+  end;
+  Edit.Invalidate;
+  FEditOld.Invalidate;
+end;
+
+procedure TRepoFrame.AbandonFixJob;
+begin
+  if FFixJob = nil then
+    Exit;
+  FFixJob.Stop(False);
+  FBlameZombies.Add(FFixJob);
+  FFixJob := nil;
+  FFixKey := '';
 end;

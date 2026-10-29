@@ -49,8 +49,8 @@ type
   {** What an agent is asked to do; atLocate is the second round of a
     find for a model that cannot read files, the lines in the files it
     named; atResolve resolves one conflict; atSplit groups the changed
-    files into commits. }
-  TGittanAITask = (atMessage, atReview, atFind, atLocate, atResolve, atSplit);
+    files into commits; atFix fixes what a review's finding points out. }
+  TGittanAITask = (atMessage, atReview, atFind, atLocate, atResolve, atSplit, atFix);
 
   {** How many lines of each file a model was given (FindLinesInput). }
   TGittanLineCounts = array of integer;
@@ -97,6 +97,13 @@ type
     Message: string;
   end;
   TGittanCommitPlan = array of TGittanPlannedCommit;
+
+  {** One edit of a fix: lines of the file to find (once) and the lines
+    to put in their place. }
+  TGittanFixEdit = record
+    Find, Replace: TStringArray;
+  end;
+  TGittanFixEdits = array of TGittanFixEdit;
 
   {** An agent as the settings set it up, made once from them (FindAI
     in the frame) and copied into each job (Clone), since a job may
@@ -302,6 +309,36 @@ function SplitInput(const ARoot: string; APaths: TStrings; out AText, AError: st
 function ParseCommitPlan(const AText: string; APaths: TStrings;
   out APlan: TGittanCommitPlan): boolean;
 
+{** What the agent gets to fix AFinding (a review's, on the view's lines
+  of its Path) in the repository at ARoot compared with ABase (empty for
+  HEAD): the finding, the file's diff against the base, and ALines, the
+  file as it is, numbered and cut at MessageDiffKeep. }
+function FixInput(const ARoot, ABase: string; const AFinding: TGittanReviewThread;
+  const ALines: TStringArray): string;
+
+{** The edits of a fix in AText, the agent's answer: each the lines
+  between a line "<find>" and a line "</find>", then those between
+  "<replace>" and "</replace>" (none is an answer too, the lines
+  dropped), and in AWhy what is between "<why>" and "</why>", on one
+  line. False when there is neither an edit nor a why, or an edit finds
+  no line. }
+function ParseFixEdits(const AText: string; out AEdits: TGittanFixEdits;
+  out AWhy: string): boolean;
+
+{** ALines with AEdits made in turn, in ANew: each edit's Find must be
+  in the lines once, as they are, else with the spaces at the ends of
+  the lines ignored, else without line numbers ("12: ") the agent copied
+  from its input before each. False with the reason in AError when an
+  edit is found nowhere or in more places than one. }
+function ApplyFixEdits(const ALines: TStringArray; const AEdits: TGittanFixEdits;
+  out ANew: TStringArray; out AError: string): boolean;
+
+{** The block that turns ABefore, the lines of AFileName, into AAfter:
+  the lines between those both begin and end with, as a TGittanDiscard
+  whose write (DiscardBlock) puts AAfter's in place of ABefore's, and
+  whose undo (Swapped) puts them back. }
+function FixBlock(const AFileName: string; const ABefore, AAfter: TStringArray): TGittanDiscard;
+
 {** The commits git's conflict in the repository at ARoot comes from, for
   APath: the commit being applied (the first of MERGE_HEAD,
   CHERRY_PICK_HEAD, REVERT_HEAD and REBASE_HEAD there is) with its
@@ -462,12 +499,44 @@ type
     property Error: string read FError;
   end;
 
+  {** Has the agent fix AFinding, a review's finding of the repository
+    compared with ABase (see FixInput); the file is read as it is, and
+    the fix (ApplyFixEdits) is Block, for the frame to write as it
+    writes a discard. }
+  TGittanFixJob = class(TGittanAgentJob)
+  private
+    FBase: string;
+    FFinding: TGittanReviewThread;
+    FOk, FChanged: boolean;
+    FBlock: TGittanDiscard;
+    FWhy, FError: string;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const ARoot: string; AAI: TGittanAI; const ABase: string;
+      const AFinding: TGittanReviewThread);
+    property Finding: TGittanReviewThread read FFinding;
+    {** Whether the agent answered with a fix that fits the file, or
+      that none is needed. }
+    property Ok: boolean read FOk;
+    {** Whether it changes the file: Block holds the change. }
+    property Changed: boolean read FChanged;
+    property Block: TGittanDiscard read FBlock;
+    {** The agent's few words on the fix, or on why there is none. }
+    property Why: string read FWhy;
+    {** Why there is no fix, when not Ok. }
+    property Error: string read FError;
+  end;
+
 resourcestring
   rsNothingToReview = 'There are no changes to review.';
   rsReviewNotRead = 'The answer was no list of findings: %s';
   rsFoundNotRead = 'The answer was no list of files: %s';
   rsResolutionNotRead = 'The answer held no resolved lines: %s';
   rsPlanNotRead = 'The answer was no list of commits: %s';
+  rsFixNotRead = 'The answer held no edits: %s';
+  rsFixNotFound = 'edit %d is not in the file as it is';
+  rsFixAmbiguous = 'edit %d is in the file %d times';
   rsNothingToDescribe = 'There are no changes to describe.';
   rsAgentNoAnswer = '%s gave no answer.';
   rsAboutApi = '%s at %s';
@@ -475,7 +544,7 @@ resourcestring
 implementation
 
 uses
-  Math, fpjson, jsonparser, DateUtils;
+  Math, fpjson, jsonparser, DateUtils, gittan.textfile;
 
 const
   { Short, whatever the repository's own messages are like: a model told
@@ -575,6 +644,21 @@ const
     'the first to be made first, each {"files": [the paths as listed], "message": the ' +
     'commit message}.';
 
+  { Edits by the lines they replace, which a model copies reliably,
+    rather than a patch, whose hunk headers and counts it gets wrong. }
+  FixPromptStart = 'Fix the problem the review finding below points out, in the file ' +
+    'it is on, which is given as it is now with its lines numbered, after the change ' +
+    'under review. Change as little as needed, keep the file''s style, and change no ' +
+    'other file. ';
+  FixReadNote = 'You may read the repository''s files to check the finding and how ' +
+    'the code is used. ';
+  FixPromptEnd = 'Answer with the edits alone, each a line <find>, the lines of the ' +
+    'file to replace exactly as they are (whole lines, without their numbers, enough ' +
+    'of them to be found once in the file), a line </find>, a line <replace>, the ' +
+    'lines to put in their place, a line </replace>; then one short sentence on what ' +
+    'you changed between <why> and </why>. When the finding is wrong or needs no ' +
+    'change, answer with the <why> alone, saying so.';
+
 var
   AIClasses: array[TGittanAgent] of TGittanAIClass;
 
@@ -626,6 +710,11 @@ begin
         Result := SplitPromptStart + SplitReadNote + SplitPromptEnd
       else
         Result := SplitPromptStart + SplitPromptEnd;
+    atFix:
+      if AReadsFiles then
+        Result := FixPromptStart + FixReadNote + FixPromptEnd
+      else
+        Result := FixPromptStart + FixPromptEnd;
     else { atLocate }
       Result := LocatePromptStart + LocatePromptEnd;
   end;
@@ -1441,6 +1530,37 @@ begin
     APart := Copy(AText, First, Last - First);
 end;
 
+{ The lines of APart, the text between two tags on lines of their own:
+  the line ends next to the tags are theirs, a blank line at the end is
+  one of the lines, and a code fence around them is taken off. }
+function TagLines(const APart: string): TStringArray;
+var
+  Part: string;
+begin
+  Result := nil;
+  Part := StringReplace(APart, #13#10, #10, [rfReplaceAll]);
+  if Copy(Part, 1, 1) = #10 then
+    Delete(Part, 1, 1);
+  if Copy(Part, Length(Part), 1) = #10 then
+    SetLength(Part, Length(Part) - 1);
+  if Part <> '' then
+    Result := Part.Split([#10]);
+  if (Length(Result) >= 2) and (Copy(Trim(Result[0]), 1, 3) = '```') and
+    (Trim(Result[High(Result)]) = '```') then
+    Result := Copy(Result, 1, Length(Result) - 2);
+end;
+
+{ What is between "<why>" and "</why>" in AText, on one line. }
+function WhyOf(const AText: string): string;
+var
+  Part: string;
+begin
+  Result := '';
+  if Between(AText, '<why>', '</why>', Part) then
+    Result := Trim(StringReplace(StringReplace(Part, #13, '', [rfReplaceAll]), #10, ' ',
+      [rfReplaceAll]));
+end;
+
 function ParseResolution(const AText: string; out ALines: TStringArray;
   out AWhy: string): boolean;
 var
@@ -1448,25 +1568,10 @@ var
   i: integer;
 begin
   ALines := nil;
-  AWhy := '';
-  if Between(AText, '<why>', '</why>', Part) then
-    AWhy := Trim(StringReplace(StringReplace(Part, #13, '', [rfReplaceAll]), #10, ' ',
-      [rfReplaceAll]));
+  AWhy := WhyOf(AText);
   if not Between(AText, '<resolved>', '</resolved>', Part) then
     Exit(False);
-  Part := StringReplace(Part, #13#10, #10, [rfReplaceAll]);
-  { The tags are on lines of their own: the line end after the opening
-    one and before the closing one are theirs. }
-  if Copy(Part, 1, 1) = #10 then
-    Delete(Part, 1, 1);
-  if Copy(Part, Length(Part), 1) = #10 then
-    SetLength(Part, Length(Part) - 1);
-  { Split by hand: a blank line at the end is one of the lines. }
-  if Part <> '' then
-    ALines := Part.Split([#10]);
-  if (Length(ALines) >= 2) and (Copy(Trim(ALines[0]), 1, 3) = '```') and
-    (Trim(ALines[High(ALines)]) = '```') then
-    ALines := Copy(ALines, 1, Length(ALines) - 2);
+  ALines := TagLines(Part);
   for i := 0 to High(ALines) do
     if (Copy(ALines[i], 1, 7) = '<<<<<<<') or (Copy(ALines[i], 1, 7) = '>>>>>>>') then
     begin
@@ -1474,6 +1579,190 @@ begin
       Exit(False);
     end;
   Result := True;
+end;
+
+function FixInput(const ARoot, ABase: string; const AFinding: TGittanReviewThread;
+  const ALines: TStringArray): string;
+var
+  Text: TStringBuilder;
+  Diff, Error, Side: string;
+  i: integer;
+begin
+  Text := TStringBuilder.Create;
+  try
+    if AFinding.LeftSide then
+      Side := 'line %d of the old side (a line the change removed)'
+    else
+      Side := 'line %d';
+    Text.Append('The finding, on ' + Format(Side, [AFinding.Line]) + ' of ' +
+      AFinding.Path);
+    if AFinding.Severity <> '' then
+      Text.Append(', a ' + AFinding.Severity);
+    Text.Append(':' + LineEnding);
+    if AFinding.Comments <> nil then
+      Text.Append(AFinding.Comments[0].Body + LineEnding);
+    Text.Append(LineEnding);
+    if ABase <> '' then
+      RunGitIn(ARoot, ['diff', '--no-ext-diff', ABase, '--', AFinding.Path], Diff, Error)
+    else if not RunGitIn(ARoot, ['diff', '--no-ext-diff', 'HEAD', '--', AFinding.Path],
+      Diff, Error) then
+      Diff := '';
+    if Trim(Diff) <> '' then
+      Text.Append('The change under review in the file:' + LineEnding +
+        KeepDiff(Diff) + LineEnding);
+    Text.Append('The file as it is now:' + LineEnding);
+    for i := 0 to High(ALines) do
+    begin
+      Text.Append(IntToStr(i + 1));
+      Text.Append(': ');
+      Text.Append(ALines[i]);
+      Text.Append(#10);
+    end;
+    Result := KeepText(Text.ToString, '[The file is cut here: %d of the %d bytes are ' +
+      'left out.]');
+  finally
+    Text.Free;
+  end;
+end;
+
+function ParseFixEdits(const AText: string; out AEdits: TGittanFixEdits;
+  out AWhy: string): boolean;
+var
+  Low, Part: string;
+  At, Open, Close, n: integer;
+  Edit: TGittanFixEdit;
+
+  { The part between AOpen and AClose from At on, At moved past it. }
+  function Next(const AOpen, AClose: string; out APart: string): boolean;
+  begin
+    Result := False;
+    APart := '';
+    Open := Pos(AOpen, Low, At);
+    if Open = 0 then
+      Exit;
+    Close := Pos(AClose, Low, Open + Length(AOpen));
+    if Close = 0 then
+      Exit;
+    APart := Copy(AText, Open + Length(AOpen), Close - Open - Length(AOpen));
+    At := Close + Length(AClose);
+    Result := True;
+  end;
+
+begin
+  AEdits := nil;
+  AWhy := WhyOf(AText);
+  Low := LowerCase(AText);
+  At := 1;
+  n := 0;
+  while Next('<find>', '</find>', Part) do
+  begin
+    Edit := Default(TGittanFixEdit);
+    Edit.Find := TagLines(Part);
+    if (Edit.Find = nil) or not Next('<replace>', '</replace>', Part) then
+    begin
+      AEdits := nil;
+      Exit(False);
+    end;
+    Edit.Replace := TagLines(Part);
+    Insert(Edit, AEdits, n);
+    Inc(n);
+  end;
+  Result := (AEdits <> nil) or (AWhy <> '');
+end;
+
+{ Where AFind is in ALines, compared as AMode says: 0 as they are, 1
+  with the spaces at the ends ignored, 2 without a line number before
+  each of AFind's; -1 for nowhere, and ACount how many places. }
+function FindLines(const ALines, AFind: TStringArray; AMode: integer;
+  out ACount: integer): integer;
+var
+  i, j, k: integer;
+  Want: TStringArray;
+  Same: boolean;
+begin
+  Result := -1;
+  ACount := 0;
+  Want := Copy(AFind);
+  if AMode = 2 then
+    for j := 0 to High(Want) do
+    begin
+      k := 1;
+      while (k <= Length(Want[j])) and (Want[j][k] in ['0'..'9']) do
+        Inc(k);
+      if (k = 1) or (Copy(Want[j], k, 2) <> ': ') then
+        Exit;
+      Want[j] := Copy(Want[j], k + 2, MaxInt);
+    end;
+  for i := 0 to Length(ALines) - Length(Want) do
+  begin
+    Same := True;
+    for j := 0 to High(Want) do
+    begin
+      if AMode = 0 then
+        Same := ALines[i + j] = Want[j]
+      else
+        Same := TrimRight(ALines[i + j]) = TrimRight(Want[j]);
+      if not Same then
+        Break;
+    end;
+    if Same then
+    begin
+      if Result < 0 then
+        Result := i;
+      Inc(ACount);
+    end;
+  end;
+end;
+
+function ApplyFixEdits(const ALines: TStringArray; const AEdits: TGittanFixEdits;
+  out ANew: TStringArray; out AError: string): boolean;
+var
+  e, Mode, At, Count: integer;
+begin
+  AError := '';
+  ANew := Copy(ALines);
+  for e := 0 to High(AEdits) do
+  begin
+    At := -1;
+    Count := 0;
+    for Mode := 0 to 2 do
+    begin
+      At := FindLines(ANew, AEdits[e].Find, Mode, Count);
+      if Count > 0 then
+        Break;
+    end;
+    if Count = 0 then
+      AError := Format(rsFixNotFound, [e + 1])
+    else if Count > 1 then
+      AError := Format(rsFixAmbiguous, [e + 1, Count]);
+    if AError <> '' then
+    begin
+      ANew := nil;
+      Exit(False);
+    end;
+    ANew := Concat(Copy(ANew, 0, At), AEdits[e].Replace,
+      Copy(ANew, At + Length(AEdits[e].Find), MaxInt));
+  end;
+  Result := True;
+end;
+
+function FixBlock(const AFileName: string; const ABefore, AAfter: TStringArray): TGittanDiscard;
+var
+  Head, Tail: integer;
+begin
+  Head := 0;
+  while (Head < Length(ABefore)) and (Head < Length(AAfter)) and
+    (ABefore[Head] = AAfter[Head]) do
+    Inc(Head);
+  Tail := 0;
+  while (Tail < Length(ABefore) - Head) and (Tail < Length(AAfter) - Head) and
+    (ABefore[High(ABefore) - Tail] = AAfter[High(AAfter) - Tail]) do
+    Inc(Tail);
+  Result := Default(TGittanDiscard);
+  Result.FileName := AFileName;
+  Result.Line := Head + 1;
+  Result.NewLines := Copy(ABefore, Head, Length(ABefore) - Head - Tail);
+  Result.OldLines := Copy(AAfter, Head, Length(AAfter) - Head - Tail);
 end;
 
 { TGittanAgentJob }
@@ -1746,6 +2035,67 @@ begin
     FOk := ParseCommitPlan(Answer, FPaths, FPlan);
     if not FOk then
       FError := Format(rsPlanNotRead, [Copy(Trim(Answer), 1, 300)]);
+  end;
+  Done;
+end;
+
+{ TGittanFixJob }
+
+constructor TGittanFixJob.Create(const ARoot: string; AAI: TGittanAI; const ABase: string;
+  const AFinding: TGittanReviewThread);
+begin
+  inherited Create(ARoot, AAI);
+  FBase := ABase;
+  FFinding := AFinding;
+end;
+
+procedure TGittanFixJob.Execute;
+var
+  FileName, Answer: string;
+  Lines: TStringList;
+  Before, After: TStringArray;
+  Edits: TGittanFixEdits;
+  i: integer;
+begin
+  FileName := IncludeTrailingPathDelimiter(FRoot) + StringReplace(FFinding.Path, '/',
+    PathDelim, [rfReplaceAll]);
+  Lines := TStringList.Create;
+  try
+    try
+      SplitLf(ReadFileBytes(FileName), Lines);
+    except
+      on E: Exception do
+      begin
+        FError := E.Message;
+        Done;
+        Exit;
+      end;
+    end;
+    SetLength(Before, Lines.Count);
+    for i := 0 to Lines.Count - 1 do
+      Before[i] := BareLine(Lines[i]);
+  finally
+    Lines.Free;
+  end;
+  if Terminated then
+    Exit;
+  FOk := Ask(atFix, FixInput(FRoot, FBase, FFinding, Before), Answer, FError);
+  if Terminated then
+    Exit;
+  if FOk then
+  begin
+    FOk := ParseFixEdits(Answer, Edits, FWhy);
+    if not FOk then
+      FError := Format(rsFixNotRead, [Copy(Trim(Answer), 1, 300)])
+    else if Edits <> nil then
+    begin
+      FOk := ApplyFixEdits(Before, Edits, After, FError);
+      if FOk then
+      begin
+        FBlock := FixBlock(FileName, Before, After);
+        FChanged := (FBlock.NewLines <> nil) or (FBlock.OldLines <> nil);
+      end;
+    end;
   end;
   Done;
 end;

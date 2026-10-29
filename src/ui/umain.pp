@@ -286,6 +286,10 @@ type
     FCommitPlan: TGittanCommitPlan;
     FPlanAgent: string;
     FPlanPopup: TGittanPopupList;
+    { Fixing an AI finding (umain.ai.inc): the job while it runs and the
+      finding it fixes (FindingKey). }
+    FFixJob: TGittanFixJob;
+    FFixKey: string;
     { The width of a tab in the editors, in characters. }
     FTabSize: integer;
     FSyntaxMenu, FAutoLexerItem, FPlainTextItem: TMenuItem;
@@ -1521,6 +1525,14 @@ type
     {** Ticks the files of the plan's commit AIndex alone and puts its
       message in the field. }
     procedure ApplyPlannedCommit(AIndex: integer);
+    {** A click on a finding's Fix (FShown[AThread]): has the agent fix
+      it, or stops it while it does. }
+    procedure FixFindingClick(AThread: integer);
+    procedure FixJobDone(Sender: TObject);
+    procedure AbandonFixJob;
+    {** The link at the right end of the first row of FShown[AThread]'s
+      card, '' for none (see umain.reviews.inc). }
+    function CardLink(AThread: integer): string;
     procedure MenuWrapClick(Sender: TObject);
     procedure MenuFoldClick(Sender: TObject);
     procedure ViewMenuClick(Sender: TObject);
@@ -2375,6 +2387,15 @@ resourcestring
   rsPlanTicked = 'Ticked the files of commit %d of %d: commit them, then File > Split ' +
     'Changes into Commits for the next';
   rsPlanOne = '%s sees the changes as one commit: its message is in the field';
+  rsFixLink = '✦ Fix';
+  rsFixStopLink = 'Stop Fixing';
+  rsFixing = '%s is fixing the finding at line %d of %s...';
+  rsFixBusy = '%s is fixing another finding; stop it first.';
+  rsFixFailed = '%s could not fix it';
+  rsFixNone = '%s changed nothing: %s';
+  rsFixed = '%s fixed %s: %s';
+  rsFixEditing = '%s''s fix was not used: %s is being edited.';
+  rsFixWriteFailed = 'Could not write the fix: %s';
   rsSeverityBug = 'Bug';
   rsSeverityRisk = 'Risk';
   rsSeverityQuestion = 'Question';
@@ -3983,6 +4004,7 @@ begin
   AbandonFindJob;
   AbandonConflictJob;
   AbandonSplitJob;
+  AbandonFixJob;
   FreeAndNil(FAI);
   StopCommitJob(True);
   FreeAndNil(FDroppedCommits);
@@ -4636,6 +4658,7 @@ begin
 end;
 
 function OperationNoun(const AOperation: string): string; forward;
+function FindingKey(const AThread: TGittanReviewThread): string; forward;
 
 { The transport in the middle of the status bar: the primary button is
   the next step, with what else can be done on its sides. While git is
@@ -6203,6 +6226,7 @@ begin
   AbandonFindJob;
   AbandonConflictJob;
   AbandonSplitJob;
+  AbandonFixJob;
   FAIThreads := nil;
   FAIThreadsKey := '';
   FCommitPlan := nil;
