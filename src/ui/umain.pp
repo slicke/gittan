@@ -1304,7 +1304,9 @@ type
     procedure RebuildKeeps;
     procedure SetChangeActions;
     procedure PillTimerTimer(Sender: TObject);
+    function PillRow: integer;
     procedure ShowDiscardPills;
+    procedure PillsScrolled;
     function MouseOnDiscardPills: boolean;
     function MouseOnDiscardRows: boolean;
     procedure DiscardPillsPick(Sender: TObject; AIndex: integer);

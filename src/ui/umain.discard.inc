@@ -240,9 +240,9 @@ begin
   end;
 end;
 
-{ The block under the mouse is kept and the pills follow the row: at
-  once while they are up, after the pause when a new row is entered,
-  so a mouse passing through the diff raises none; for a conflicted
+{ The block under the mouse is kept and the pills go to it: at once
+  while they are up, after the pause when a new row is entered, so a
+  mouse passing through the diff raises none; for a conflicted
   file the conflict whose button is under the mouse is lit. Edit only. }
 procedure TRepoFrame.SetHotDiscard(AEd: TATSynEdit; ABlock, AKeep, ARow: integer);
 begin
@@ -269,9 +269,20 @@ begin
   ShowDiscardPills;
 end;
 
-{ The pills at the right end of the hot row: Keep and Discard for the
-  block the row is in; on a kept line, Unkeep. A conflict's button has
-  none. }
+{ The row the pills go on: the hot block's first row, or its first row
+  in view when it begins above the view, so they stay put while the
+  mouse moves in the block; a kept line's own row. }
+function TRepoFrame.PillRow: integer;
+begin
+  Result := FHotRow;
+  if FHotKeep >= 0 then
+    Exit;
+  while (Result > Edit.LineTop) and (BlockAtRow(Result - 1) = FHotDiscard) do
+    Dec(Result);
+end;
+
+{ The pills at the right end of the block's pill row: Keep and Discard
+  for the block; on a kept line, Unkeep. A conflict's button has none. }
 procedure TRepoFrame.ShowDiscardPills;
 var
   Y: integer;
@@ -283,7 +294,7 @@ begin
     FDiscardPills.Dismiss;
     Exit;
   end;
-  Y := Edit.CaretPosToClientPos(Point(0, FHotRow)).Y;
+  Y := Max(Edit.CaretPosToClientPos(Point(0, PillRow)).Y, Edit.RectMain.Top);
   Anchor := Rect(Edit.RectMain.Left, Y, Edit.RectMain.Right, Y + Edit.TextCharSize.Y);
   Anchor.TopLeft := Edit.ClientToScreen(Anchor.TopLeft);
   Anchor.BottomRight := Edit.ClientToScreen(Anchor.BottomRight);
@@ -296,6 +307,27 @@ begin
   else
     FDiscardPills.Show(Anchor, [rsKeepPill, rsDiscardAction], 'kd',
       [rsKeepPillHint, rsDiscardPillHint]);
+end;
+
+{ Edit has scrolled: the pills move with their block while the mouse
+  is still on it, else they would stay where its row was. }
+procedure TRepoFrame.PillsScrolled;
+var
+  P: TPoint;
+  Block, Row, Keep: integer;
+begin
+  if FDiscardPills.Visible and MouseOnDiscardRows then
+  begin
+    P := Edit.ScreenToClient(Mouse.CursorPos);
+    Block := DiscardAt(Edit, P.X, P.Y, Row, Keep);
+    if (Block >= 0) and (Block = FHotDiscard) and (Keep < 0) then
+    begin
+      FHotRow := Row;
+      ShowDiscardPills;
+      Exit;
+    end;
+  end;
+  SetHotDiscard(Edit, -1, -1, -1);
 end;
 
 { Whether the mouse is over the pills, which are a child of the form. }

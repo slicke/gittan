@@ -834,7 +834,7 @@ var
   Row, Block, Keep: integer;
 begin
   Ed := TATSynEdit(Sender);
-  { On a changed row the pills at the row's end follow the mouse (see
+  { On a changed row the pills go to the block under the mouse (see
     umain.discard.inc) and the word hover goes on as usual. A
     conflict's button has a hint that goes the way of the blame's; on
     the blame band the cell under the mouse is the hover, see
