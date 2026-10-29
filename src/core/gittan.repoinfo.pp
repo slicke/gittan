@@ -39,9 +39,12 @@ type
   TGittanTagInfos = array of TGittanTagInfo;
 
   {** What a file is for, by its path: a test (under a folder named test
-    or tests, or named *.test.*), documentation (.md or .txt) or code,
-    which is everything else. }
-  TGittanFileCategory = (fcCode, fcTest, fcDocs);
+    or tests, or named *.test.*), configuration (a package manager's
+    manifest or lock file such as package.json or composer.lock, a
+    .json, .yaml, .toml, .ini or similar file, a dotfile such as
+    .gitignore, or anything under a forge's folder such as .github), documentation (.md or .txt) or code, which is
+    everything else. }
+  TGittanFileCategory = (fcCode, fcTest, fcDocs, fcConfig);
 
   {** How many files of a category, and how many lines they have. }
   TGittanCategoryCount = record
@@ -161,6 +164,7 @@ resourcestring
   rsCodeFiles = 'Code files';
   rsTestFiles = 'Test files';
   rsDocumentation = 'Documentation';
+  rsConfiguration = 'Configuration';
 
 function ParseRemotes(const AOutput: string): TGittanRemotes;
 var
@@ -479,6 +483,21 @@ begin
   end;
 end;
 
+const
+  { The manifests and lock files of package managers and build tools
+    that no extension in ConfigExts gives away, lower case. }
+  ConfigNames: array[0..14] of string = ('gemfile', 'go.mod', 'go.sum', 'go.work',
+    'pipfile', 'requirements.txt', 'podfile', 'cartfile', 'brewfile', 'procfile',
+    'package.swift', 'build.gradle', 'settings.gradle', 'build.gradle.kts',
+    'settings.gradle.kts');
+  { The folders at the top of a repository that a forge or a CI service
+    reads, whose files are all configuration: workflows, templates and
+    the scripts they run. }
+  ConfigFolders: array[0..4] of string = ('.github', '.gitlab', '.gitea', '.forgejo',
+    '.circleci');
+  ConfigExts: array[0..12] of string = ('.json', '.jsonc', '.json5', '.yaml', '.yml',
+    '.toml', '.ini', '.cfg', '.conf', '.lock', '.properties', '.plist', '.editorconfig');
+
 function FileCategory(const APath: string): TGittanFileCategory;
 var
   Parts: TStringArray;
@@ -488,13 +507,22 @@ begin
   Parts := LowerCase(APath).Split(['/']);
   if Length(Parts) = 0 then
     Exit(fcCode);
+  if (Length(Parts) > 1) and MatchStr(Parts[0], ConfigFolders) then
+    Exit(fcConfig);
   for i := 0 to High(Parts) - 1 do
     if (Parts[i] = 'test') or (Parts[i] = 'tests') then
       Exit(fcTest);
   Name := Parts[High(Parts)];
   if Pos('.test.', Name) > 0 then
     Exit(fcTest);
+  { By name first, so requirements.txt is not documentation; a dotfile
+    is one with no dot after its first. }
+  if MatchStr(Name, ConfigNames) or ((Name <> '') and (Name[1] = '.') and
+    (Pos('.', Name, 2) = 0)) then
+    Exit(fcConfig);
   Ext := ExtractFileExt(Name);
+  if MatchStr(Ext, ConfigExts) then
+    Exit(fcConfig);
   if (Ext = '.md') or (Ext = '.txt') then
     Exit(fcDocs);
   Result := fcCode;
@@ -505,6 +533,7 @@ begin
   case ACategory of
     fcTest: Result := rsTestFiles;
     fcDocs: Result := rsDocumentation;
+    fcConfig: Result := rsConfiguration;
     else
       Result := rsCodeFiles;
   end;
