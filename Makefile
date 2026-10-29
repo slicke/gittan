@@ -119,7 +119,7 @@ define bundle_icon
 endef
 endif
 
-.PHONY: all build debug rebuild run clean help lexlib icons wordmark test deps ide
+.PHONY: all build debug rebuild run clean help lexlib icons wordmark dialogicon test deps ide
 
 all: build
 
@@ -134,6 +134,7 @@ help:
 	@echo "  deps      Register the vendored packages with lazbuild and compile them"
 	@echo "  ide       Rebuild the Lazarus IDE (after ATSynEdit, ATFlatControls, EncConv or BGRABitmap moves)"
 	@echo "  wordmark  Write src/ui/gittan.wordmark.inc from icons/gittan-wordmark.svg"
+	@echo "  dialogicon Write src/ui/gittan.dialogicon.inc from icons/dialog/gittan-dialog-<n>.png"
 	@echo "  icons     Pack Gittan.icns and Gittan.ico from ICON_MAC_SRC=$(ICON_MAC_SRC) and ICON_PNG_DIR=$(ICON_PNG_DIR) (macOS only)"
 	@echo "  clean     Remove lib/, $(LEXLIB)/, the test build and the binary"
 	@echo "Current: WIDGETSET=$(WIDGETSET) LAZBUILD=$(LAZBUILD)"
@@ -178,6 +179,25 @@ wordmark:
 	  { gsub(/></, ">\n<"); n = split($$0, L, "\n"); \
 	    for (i = 1; i <= n; i++) { gsub(/\x27/, "\x27\x27", L[i]); print "  \x27" L[i] "\x27 +" } } \
 	  END { print "  \x27\x27" }' icons/gittan-wordmark.svg > src/ui/gittan.wordmark.inc
+
+# The dialogs' icon, icons/dialog/gittan-dialog-<n>.png (48, 96 and 144
+# pixels, rendered from icons/gittan-dialog.svg with Chrome headless; see
+# spec/icon.md), as Pascal byte arrays (src/ui/gittan.dialogicon.inc, kept
+# in git, so a build needs neither this rule nor od and awk).
+DIALOG_ICON_SIZES = 48 96 144
+dialogicon:
+	@set -e; out=src/ui/gittan.dialogicon.inc; \
+	echo "{ Made from icons/dialog/gittan-dialog-<n>.png by make dialogicon. }" > $$out; \
+	echo "const" >> $$out; \
+	for n in $(DIALOG_ICON_SIZES); do \
+	  f=icons/dialog/gittan-dialog-$$n.png; len=$$(wc -c < $$f | tr -d ' '); \
+	  echo "  DialogIcon$$n: array[0..$$((len - 1))] of byte = (" >> $$out; \
+	  od -An -v -tu1 $$f | awk -v total=$$len '{ for (i = 1; i <= NF; i++) { k++; \
+	    printf "%s%s", (c == 0 ? "    " : ""), $$i (k < total ? "," : ""); \
+	    if (++c == 20) { print ""; c = 0 } } } END { if (c) print "" }' >> $$out; \
+	  echo "  );" >> $$out; \
+	done; \
+	echo "wrote $$out"
 
 lexlib:
 	@if [ ! -d "$(LEXERS_SRC)/Pascal" ]; then \

@@ -41,7 +41,6 @@ type
     FBusy, FCloseHot: boolean;
     FDots: integer;
     FIcon: TIcon;
-    FIconBitmap: TBitmap;
     FConsole: TGittanConsole;
     FBack, FText, FDim, FHover, FLine, FAccent, FBad: TColor;
     FCloseRect: TRect;
@@ -107,7 +106,7 @@ type
 implementation
 
 uses
-  Math, LCLIntf, gittan.theme;
+  Math, LCLIntf, gittan.theme, gittan.dialogicon;
 
 const
   Pad = 24;
@@ -150,14 +149,12 @@ end;
 destructor TGittanNotice.Destroy;
 begin
   FHook.Hook(False);
-  FIconBitmap.Free;
   inherited Destroy;
 end;
 
 procedure TGittanNotice.SetIcon(AIcon: TIcon);
 begin
   FIcon := AIcon;
-  FreeAndNil(FIconBitmap);
   Invalidate;
 end;
 
@@ -413,18 +410,10 @@ begin
 
   if (FIcon <> nil) and not FIcon.Empty then
   begin
-    { As in the welcome view: the image for the size in device pixels,
-      copied into a bitmap, since the icon's handle is made from its
-      smallest image. }
-    if FIconBitmap = nil then
-    begin
-      FIcon.Current := FIcon.GetBestIndexForSize(
-        Size(Round(Px(IconSize) * GetCanvasScaleFactor), Round(Px(IconSize) * GetCanvasScaleFactor)));
-      FIconBitmap := TBitmap.Create;
-      FIconBitmap.LoadFromRawImage(FIcon.RawImage, False);
-    end;
+    { The dialogs' braid graph, not the application icon's tile: for
+      the size in device pixels. }
     Canvas.StretchDraw(Rect((Width - Px(IconSize)) div 2, Y, (Width + Px(IconSize)) div 2,
-      Y + Px(IconSize)), FIconBitmap);
+      Y + Px(IconSize)), DialogIcon(Round(Px(IconSize) * GetCanvasScaleFactor)));
     Inc(Y, Px(IconSize) + Px(Gap));
   end;
 

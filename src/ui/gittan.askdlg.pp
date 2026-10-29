@@ -5,7 +5,7 @@ unit gittan.askdlg;
   as wide as the screen allowed, put a glyph on every button and set the
   buttons in the middle. These are built in code like the Who Commits
   dialog: a fixed width the text wraps in, an icon for the kind at the
-  left (a warning triangle, an error disc, else the application's icon),
+  left (a warning triangle, an error disc, else the braid graph of gittan.dialogicon),
   plain buttons at the right in the platform's order, and for input a
   label over each field and a line in red under them saying why OK is
   off. }
@@ -63,7 +63,7 @@ function AskText(const ATitle, APrompt: string; var AValue: string;
 implementation
 
 uses
-  Math, Types, LCLType, gittan.app, gittan.pathfield
+  Math, Types, LCLType, gittan.dialogicon, gittan.pathfield
   {$IFDEF LCLCocoa}, gittan.titlebar{$ENDIF};
 
 resourcestring
@@ -121,7 +121,6 @@ type
   TAskForm = class(TForm)
   private
     FKind: TMsgDlgType;
-    FIconBitmap: TBitmap;
     FNextTop: integer;
     FEdits: array of TEdit;
     FError: TLabel;
@@ -143,7 +142,6 @@ type
     procedure DoShow; override;
   public
     constructor CreateAsk(const ATitle: string; AKind: TMsgDlgType);
-    destructor Destroy; override;
   end;
 
 function StdCaption(AResult: TModalResult): string;
@@ -208,12 +206,6 @@ begin
   {$IFDEF LCLCocoa}
   MakeAlertWindow(Handle);
   {$ENDIF}
-end;
-
-destructor TAskForm.Destroy;
-begin
-  FIconBitmap.Free;
-  inherited Destroy;
 end;
 
 { The alTop controls keep the order of their tops. }
@@ -362,14 +354,13 @@ begin
 end;
 
 { A warning is an amber triangle, an error a red disc, both with an
-  exclamation mark; a question or a note has the application's icon, in
-  the screen's pixels. }
+  exclamation mark; a question or a note has Gittan's braid graph
+  (DialogIcon), in the screen's pixels. }
 procedure TAskForm.Paint;
 var
   C: TCanvas;
   R: TRect;
   S, Mid, W, X, Y: integer;
-  AppIcon: TIcon;
   Fill: TColor;
 begin
   inherited Paint;
@@ -408,17 +399,7 @@ begin
     C.Pen.Style := psSolid;
     Exit;
   end;
-  AppIcon := App.Icon;
-  if (AppIcon = nil) or AppIcon.Empty then
-    Exit;
-  if FIconBitmap = nil then
-  begin
-    AppIcon.Current := AppIcon.GetBestIndexForSize(Size(Round(S * GetCanvasScaleFactor),
-      Round(S * GetCanvasScaleFactor)));
-    FIconBitmap := TBitmap.Create;
-    FIconBitmap.LoadFromRawImage(AppIcon.RawImage, False);
-  end;
-  C.StretchDraw(R, FIconBitmap);
+  C.StretchDraw(R, DialogIcon(Round(S * GetCanvasScaleFactor)));
 end;
 
 procedure TAskForm.FieldChange(Sender: TObject);
