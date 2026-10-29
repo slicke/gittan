@@ -193,12 +193,7 @@ begin
     if i < 0 then
       Exit;
     App.Settings.AddPaletteRecent(Path);
-    FPalettePicking := True;
-    try
-      TMenuItem(Actions.Objects[i]).Click;
-    finally
-      FPalettePicking := False;
-    end;
+    TMenuItem(Actions.Objects[i]).Click;
   finally
     Actions.Free;
   end;

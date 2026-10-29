@@ -792,10 +792,6 @@ type
     FPaletteItem: TMenuItem;
     FPalettePopup: TGittanPopupList;
     FPaletteNames: TStringList;
-    { While a row of the palette clicks its menu item: the focus is back
-      where it was, so an item that acts on the focused control by its
-      key (Go to Symbol) acts as the menu item instead. }
-    FPalettePicking: boolean;
     { The buttons left and right of the palette while it is open. }
     FPaletteLeft, FPaletteRight: TGittanPaletteSide;
     { Back and Forward (umain.nav.inc): the places left, the place shown
@@ -5326,9 +5322,9 @@ begin
   AddItem(GoMenu, rsFilterFiles, ShortCut(VK_F, [ssModifier, ssShift]), @MenuFilterFilesClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsGoToDefinition, ShortCut(VK_F12, []), @MenuGoToDefinitionClick);
-  { Cmd+Enter in the commit message commits and in the tree's filter
-    asks the agent; MenuGoToSymbolClick passes it on to them. }
-  AddItem(GoMenu, rsGoToSymbol, ShortCut(VK_RETURN, [ssModifier]), @MenuGoToSymbolClick);
+  { As VS Code's Cmd+Shift+O, which is Open Repository here; Cmd+Enter
+    is the commit message's and the tree filter's own. }
+  AddItem(GoMenu, rsGoToSymbol, ShortCut(VK_O, [ssModifier, ssAlt]), @MenuGoToSymbolClick);
   AddItem(GoMenu, rsGoToRepoSymbol, ShortCut(VK_T, [ssModifier, ssShift]),
     @MenuGoToRepoSymbolClick);
   { Cmd+Y alone is the editor's delete-line key, which gets the key first. }
