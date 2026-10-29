@@ -3813,7 +3813,6 @@ begin
   FWelcome.Title := 'Gittan';
   FWelcome.Tagline := rsTagline;
   FWelcome.Shortcut := {$IFDEF DARWIN}'⇧⌘O'{$ELSE}'Ctrl+Shift+O'{$ENDIF};
-  FWelcome.SetIcon(App.Icon);
   FWelcome.OnOpen := @WelcomeOpen;
   FWelcome.OnOpenRecent := @WelcomeOpenRecent;
   FWelcome.OnClone := @WelcomeClone;

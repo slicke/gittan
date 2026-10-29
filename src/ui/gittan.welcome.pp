@@ -1,8 +1,10 @@
 unit gittan.welcome;
 
 {** The welcome view: what Gittan shows while no repository is open, and
-  where a failure to open one is reported. Under the application icon and
-  the name it offers a button that opens the folder dialog, filled in the
+  where a failure to open one is reported. Under the wordmark (the mark
+  and the name, as gittan.app has them, drawn from
+  icons/gittan-wordmark.svg in the view's colors; the title and the
+  tagline as text when it cannot be drawn) it offers a button that opens the folder dialog, filled in the
   accent with the shortcut drawn as key caps inside it, one that clones a
   repository and one that makes a new one (the three in a row as wide as
   the column, or under each other when the row does not fit), says under
@@ -23,7 +25,7 @@ unit gittan.welcome;
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Graphics;
+  Classes, SysUtils, Types, Controls, Graphics, BGRABitmap;
 
 type
   {** A click on a recent repository, with its root. }
@@ -35,8 +37,10 @@ type
   private
     FTitle, FTagline, FError, FShortcut, FBusy: string;
     FRecent: TStringList;
-    FIcon: TIcon;
-    FIconBitmap: TBitmap;
+    { The wordmark drawn for the colors and the screen's pixels, made in
+      the first paint after a change; FLogoFailed when it could not be. }
+    FLogo: TBGRABitmap;
+    FLogoFailed: boolean;
     FBack, FText, FDim, FHover, FLine, FErrorColor, FAccent: TColor;
     { What the mouse is over: hotNone, a button (hotButton less its
       index) or a row's index. }
@@ -50,6 +54,7 @@ type
     procedure SetHot(AValue: integer);
     function RecentMissing(AIndex: integer): boolean;
     function FitLeft(const AText: string; AMaxWidth: integer): string;
+    function LogoBitmap(APixels: integer): TBGRABitmap;
     procedure WrapError(AWidth: integer; ALines: TStrings);
   protected
     procedure Paint; override;
@@ -60,9 +65,6 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
-    {** The application icon, drawn above the title; nil draws none. The
-      icon stays the caller's. }
-    procedure SetIcon(AIcon: TIcon);
     {** The recent repositories, most recent first; a copy is kept. }
     procedure SetRecent(ARoots: TStrings);
     {** The error shown under the title; empty shows none. }
@@ -81,9 +83,10 @@ type
       sits in, so its background covers the box), and no higher than its
       content needs beyond that. }
     procedure FitHeight(AMin: integer);
-    {** The application name over the tagline. }
+    {** The application name over the tagline, drawn when the wordmark
+      cannot be. }
     property Title: string read FTitle write FTitle;
-    {** The dim line under the title. }
+    {** The dim line under the title, with it. }
     property Tagline: string read FTagline write FTagline;
     {** The shortcut of the open button, drawn as key caps beside it. }
     property Shortcut: string read FShortcut write FShortcut;
@@ -100,7 +103,19 @@ type
 implementation
 
 uses
-  Math, LazUTF8, gittan.statusbar, gittan.textfit, gittan.theme;
+  Math, LazUTF8, BGRABitmapTypes, BGRASVG, BGRACanvas2D, gittan.statusbar,
+  gittan.textfit, gittan.theme;
+
+const
+  { icons/gittan-wordmark.svg, in its light colors. }
+  WordmarkSvg = {$I gittan.wordmark.inc};
+  WordmarkRed = '#E5484D';
+  WordmarkGreen = '#2FA84F';
+  WordmarkText = '#1F2937';
+  { What a dark background takes in their place, as gittan.app has it;
+    the name takes the view's text color in both. }
+  WordmarkDarkRed = '#FF6B70';
+  WordmarkDarkGreen = '#4ADE80';
 
 resourcestring
   rsOpenButton = 'Open Repository…';
@@ -116,7 +131,7 @@ const
   Pad = 24;
   Gap = 12;
   ColumnWidth = 480;
-  IconSize = 64;
+  LogoWidth = 340;
   TitleFontSize = 20;
   ButtonPadX = 16;
   ButtonPadY = 8;
@@ -144,16 +159,9 @@ end;
 
 destructor TGittanWelcome.Destroy;
 begin
-  FIconBitmap.Free;
+  FLogo.Free;
   FRecent.Free;
   inherited Destroy;
-end;
-
-procedure TGittanWelcome.SetIcon(AIcon: TIcon);
-begin
-  FIcon := AIcon;
-  FreeAndNil(FIconBitmap);
-  Invalidate;
 end;
 
 procedure TGittanWelcome.SetRecent(ARoots: TStrings);
@@ -192,6 +200,8 @@ begin
   FHover := AHover;
   FLine := ALine;
   FErrorColor := AError;
+  FreeAndNil(FLogo);
+  FLogoFailed := False;
   Color := ABack;
   Invalidate;
 end;
@@ -249,6 +259,58 @@ begin
   Result := FitTextLeft(Canvas, AText, AMaxWidth);
 end;
 
+function HexColor(AColor: TColor): string;
+var
+  C: TColor;
+begin
+  C := ColorToRGB(AColor);
+  Result := Format('#%.2x%.2x%.2x', [Red(C), Green(C), Blue(C)]);
+end;
+
+{ The wordmark APixels wide in the view's colors, kept until the colors
+  or the width change; nil when BGRASVG could not draw it. }
+function TGittanWelcome.LogoBitmap(APixels: integer): TBGRABitmap;
+var
+  Source: string;
+  Svg: TBGRASVG;
+  C2d: TBGRACanvas2D;
+  Size: TPointF;
+  C: TColor;
+begin
+  if (FLogo <> nil) and (FLogo.Width = APixels) then
+    Exit(FLogo);
+  FreeAndNil(FLogo);
+  if FLogoFailed then
+    Exit(nil);
+  Source := StringReplace(WordmarkSvg, WordmarkText, HexColor(FText), [rfReplaceAll]);
+  C := ColorToRGB(FBack);
+  if Red(C) * 299 + Green(C) * 587 + Blue(C) * 114 < 128000 then
+  begin
+    Source := StringReplace(Source, WordmarkRed, WordmarkDarkRed, [rfReplaceAll]);
+    Source := StringReplace(Source, WordmarkGreen, WordmarkDarkGreen, [rfReplaceAll]);
+  end;
+  Svg := nil;
+  try
+    try
+      Svg := TBGRASVG.CreateFromString(Source);
+      Size := Svg.ViewSizeInUnit[cuPixel];
+      FLogo := TBGRABitmap.Create(APixels, Max(1, Round(APixels * Size.Y / Size.X)));
+      C2d := TBGRACanvas2D.Create(FLogo);
+      try
+        Svg.StretchDraw(C2d, 0, 0, FLogo.Width, FLogo.Height, True);
+      finally
+        C2d.Free;
+      end;
+    except
+      FreeAndNil(FLogo);
+      FLogoFailed := True;
+    end;
+  finally
+    Svg.Free;
+  end;
+  Result := FLogo;
+end;
+
 { The error broken into lines no wider than AWidth with the canvas font:
   at spaces, and inside a word too wide for a line (a path, mostly)
   after a slash, or anywhere when there is no slash either. }
@@ -298,9 +360,11 @@ var
   Stacked: boolean;
   R: TRect;
   RepoName, Path: string;
-  Missing, HasIcon: boolean;
+  Missing: boolean;
   ErrLines: TStringList;
   Fill, Ink: TColor;
+  Logo: TBGRABitmap;
+  LogoHeight: integer;
 begin
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := FBack;
@@ -310,7 +374,12 @@ begin
   LineHeight := Canvas.TextHeight('Xg');
   ColWidth := Min(Px(ColumnWidth), Width - 2 * Px(Pad));
   ColLeft := (Width - ColWidth) div 2;
-  HasIcon := (FIcon <> nil) and not FIcon.Empty;
+  { The wordmark in the screen's pixels (twice its points on a Retina
+    screen), which Cocoa then draws pixel for pixel. }
+  Logo := LogoBitmap(Round(Px(LogoWidth) * GetCanvasScaleFactor));
+  LogoHeight := 0;
+  if Logo <> nil then
+    LogoHeight := Px(LogoWidth) * Logo.Height div Logo.Width;
 
   { The block's height first, to place it: a little above the middle
     of the room, which looks centered, and never off the top. }
@@ -349,12 +418,16 @@ begin
     ButtonRows := Length(Captions)
   else
     ButtonRows := 1;
-  Total := 0;
-  if HasIcon then
-    Inc(Total, Px(IconSize) + Px(Gap));
-  Inc(Total, TitleHeight + 2);
-  if FTagline <> '' then
-    Inc(Total, LineHeight);
+  { The wordmark's small caps line needs more room under it than the
+    tagline does. }
+  if Logo <> nil then
+    Total := LogoHeight + Px(Gap)
+  else
+  begin
+    Total := TitleHeight + 2;
+    if FTagline <> '' then
+      Inc(Total, LineHeight);
+  end;
   ErrHeight := 0;
   ErrLines := TStringList.Create;
   try
@@ -383,36 +456,27 @@ begin
     BlockTop := Max(Px(Pad), (Height - Total) * 2 div 5);
     Y := BlockTop;
 
-    if HasIcon then
+    if Logo <> nil then
     begin
-      { The icon's image for the size in device pixels (so a HiDPI screen
-        gets the sharp one) is copied into a bitmap: drawing the icon
-        itself goes through its handle, which Cocoa makes from the first,
-        smallest image. }
-      if FIconBitmap = nil then
+      Logo.Draw(Canvas, Rect((Width - Px(LogoWidth)) div 2, Y,
+        (Width + Px(LogoWidth)) div 2, Y + LogoHeight), False);
+      Inc(Y, LogoHeight + Px(Gap));
+    end
+    else
+    begin
+      Canvas.Font.Size := TitleFontSize;
+      Canvas.Font.Style := [fsBold];
+      Canvas.Font.Color := FText;
+      Canvas.TextOut((Width - Canvas.TextWidth(FTitle)) div 2, Y, FTitle);
+      Inc(Y, TitleHeight + 2);
+      Canvas.Font.Size := Font.Size;
+      Canvas.Font.Style := [];
+      if FTagline <> '' then
       begin
-        FIcon.Current := FIcon.GetBestIndexForSize(
-          Size(Round(Px(IconSize) * GetCanvasScaleFactor), Round(Px(IconSize) * GetCanvasScaleFactor)));
-        FIconBitmap := TBitmap.Create;
-        FIconBitmap.LoadFromRawImage(FIcon.RawImage, False);
+        Canvas.Font.Color := FDim;
+        Canvas.TextOut((Width - Canvas.TextWidth(FTagline)) div 2, Y, FTagline);
+        Inc(Y, LineHeight);
       end;
-      Canvas.StretchDraw(Rect((Width - Px(IconSize)) div 2, Y, (Width + Px(IconSize)) div 2,
-        Y + Px(IconSize)), FIconBitmap);
-      Inc(Y, Px(IconSize) + Px(Gap));
-    end;
-
-    Canvas.Font.Size := TitleFontSize;
-    Canvas.Font.Style := [fsBold];
-    Canvas.Font.Color := FText;
-    Canvas.TextOut((Width - Canvas.TextWidth(FTitle)) div 2, Y, FTitle);
-    Inc(Y, TitleHeight + 2);
-    Canvas.Font.Size := Font.Size;
-    Canvas.Font.Style := [];
-    if FTagline <> '' then
-    begin
-      Canvas.Font.Color := FDim;
-      Canvas.TextOut((Width - Canvas.TextWidth(FTagline)) div 2, Y, FTagline);
-      Inc(Y, LineHeight);
     end;
 
     if FBusy <> '' then

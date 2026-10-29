@@ -111,7 +111,7 @@ define bundle_icon
 endef
 endif
 
-.PHONY: all build debug rebuild run clean help lexlib icons test deps ide
+.PHONY: all build debug rebuild run clean help lexlib icons wordmark test deps ide
 
 all: build
 
@@ -125,6 +125,7 @@ help:
 	@echo "  lexlib    Copy the lexers from $(LEXERS_SRC) and $(LEXERS_OWN) into $(LEXLIB)/ (part of every build)"
 	@echo "  deps      Register the vendored packages with lazbuild and compile them"
 	@echo "  ide       Rebuild the Lazarus IDE (after ATSynEdit, ATFlatControls, EncConv or BGRABitmap moves)"
+	@echo "  wordmark  Write src/ui/gittan.wordmark.inc from icons/gittan-wordmark.svg"
 	@echo "  icons     Pack Gittan.icns and Gittan.ico from ICON_MAC_SRC=$(ICON_MAC_SRC) and ICON_PNG_DIR=$(ICON_PNG_DIR) (macOS only)"
 	@echo "  clean     Remove lib/, $(LEXLIB)/, the test build and the binary"
 	@echo "Current: WIDGETSET=$(WIDGETSET) LAZBUILD=$(LAZBUILD)"
@@ -154,6 +155,15 @@ ide:
 
 icons:
 	swift tools/makeicons.swift "$(ICON_MAC_SRC)" "$(ICON_PNG_DIR)" icons Gittan.ico
+
+# The welcome view's wordmark, icons/gittan-wordmark.svg, as a Pascal string
+# constant (src/ui/gittan.wordmark.inc, kept in git, so a build needs neither
+# this rule nor awk): one line of the constant per element.
+wordmark:
+	awk 'BEGIN { print "{ Made from icons/gittan-wordmark.svg by make wordmark. }" } \
+	  { gsub(/></, ">\n<"); n = split($$0, L, "\n"); \
+	    for (i = 1; i <= n; i++) { gsub(/\x27/, "\x27\x27", L[i]); print "  \x27" L[i] "\x27 +" } } \
+	  END { print "  \x27\x27" }' icons/gittan-wordmark.svg > src/ui/gittan.wordmark.inc
 
 lexlib:
 	@if [ ! -d "$(LEXERS_SRC)/Pascal" ]; then \
