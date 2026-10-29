@@ -2,12 +2,13 @@ unit gittan.welcome;
 
 {** The welcome view: what Gittan shows while no repository is open, and
   where a failure to open one is reported. Under the application icon and
-  the name it offers a button that opens the folder dialog, with the
-  shortcut drawn as key caps beside it, one that clones a repository and
-  one that makes a new one (the three in a row, or under each other when
-  the row does not fit), and lists the recent repositories
+  the name it offers a button that opens the folder dialog, filled in the
+  accent with the shortcut drawn as key caps inside it, one that clones a
+  repository and one that makes a new one (the three in a row as wide as
+  the column, or under each other when the row does not fit), says under
+  them that a folder can be dropped, and lists the recent repositories
   as rows to click, each with its name and path; a repository whose folder
-  is gone is listed dimmed and does not react. An error is shown in red
+  is gone is listed dimmed, says so, and does not react. An error is shown in red
   under the name, wrapped to the column, so the next attempt is one click
   or one drop away. While a repository opens it shows only that, in place
   of the error, the buttons and the list.
@@ -36,7 +37,7 @@ type
     FRecent: TStringList;
     FIcon: TIcon;
     FIconBitmap: TBitmap;
-    FBack, FText, FDim, FHover, FLine, FErrorColor: TColor;
+    FBack, FText, FDim, FHover, FLine, FErrorColor, FAccent: TColor;
     { What the mouse is over: hotNone, a button (hotButton less its
       index) or a row's index. }
     FHot: integer;
@@ -74,6 +75,8 @@ type
       button or row, the line of the borders and the divider, and the
       error text. }
     procedure SetColors(ABack, AText, ADim, AHover, ALine, AError: TColor);
+    {** The fill of the open button, the status bar's primary button's. }
+    procedure SetAccent(AAccent: TColor);
     {** Makes the control at least AMin high (the height of the box it
       sits in, so its background covers the box), and no higher than its
       content needs beyond that. }
@@ -115,13 +118,16 @@ const
   ColumnWidth = 480;
   IconSize = 64;
   TitleFontSize = 20;
-  ButtonPadX = 14;
-  ButtonPadY = 6;
+  ButtonPadX = 16;
+  ButtonPadY = 8;
+  ButtonGap = 8;
+  ButtonRound = 10;
+  RecentGap = 36;
   KeyPadX = 5;
   KeyPadY = 2;
   RowHeight = 44;
   RowPadX = 10;
-  FolderSize = 20;
+  FolderSize = 16;
 
 { TGittanWelcome }
 
@@ -133,6 +139,7 @@ begin
   FHot := hotNone;
   Align := alTop;
   SetColors(clWindow, clWindowText, clGrayText, clBtnFace, clBtnShadow, clRed);
+  FAccent := clHighlight;
 end;
 
 destructor TGittanWelcome.Destroy;
@@ -186,6 +193,12 @@ begin
   FLine := ALine;
   FErrorColor := AError;
   Color := ABack;
+  Invalidate;
+end;
+
+procedure TGittanWelcome.SetAccent(AAccent: TColor);
+begin
+  FAccent := AAccent;
   Invalidate;
 end;
 
@@ -279,7 +292,7 @@ end;
 procedure TGittanWelcome.Paint;
 var
   ColLeft, ColWidth, Y, BlockTop, Total, LineHeight, TitleHeight, ErrHeight: integer;
-  KeyWidth, X, TextY, i, NameWidth, RowWidth, ButtonHeight, ButtonRows: integer;
+  KeyWidth, X, TextY, i, RowWidth, ButtonHeight, ButtonRows, Spare: integer;
   ButtonWidths: array[0..2] of integer;
   Captions: array[0..2] of string;
   Stacked: boolean;
@@ -287,6 +300,7 @@ var
   RepoName, Path: string;
   Missing, HasIcon: boolean;
   ErrLines: TStringList;
+  Fill, Ink: TColor;
 begin
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := FBack;
@@ -304,25 +318,32 @@ begin
   Canvas.Font.Style := [fsBold];
   TitleHeight := Canvas.TextHeight('Xg');
   Canvas.Font.Size := Font.Size;
-  Canvas.Font.Style := [];
-  { The buttons in a row, the open button's key caps after it, or under
-    each other when the row is wider than the room. }
+  { The buttons as wide as the column, the open button taking what the
+    others leave, its shortcut drawn as a key cap inside it at the right;
+    under each other, each as wide as the column, when their row does
+    not fit. The captions are bold, as the status bar's primary
+    button's is, and measured so. }
   Captions[0] := rsOpenButton;
   Captions[1] := rsCloneButton;
   Captions[2] := rsInitButton;
   KeyWidth := 0;
   if FShortcut <> '' then
-    KeyWidth := Px(Gap) + Canvas.TextWidth(FShortcut) + 2 * Px(KeyPadX);
-  RowWidth := KeyWidth + 2 * Px(Gap);
-  { The key caps stand a little apart from the next button. }
-  if KeyWidth > 0 then
-    Inc(RowWidth, Px(Gap));
+    KeyWidth := Canvas.TextWidth(FShortcut) + 2 * Px(KeyPadX);
+  RowWidth := 2 * Px(ButtonGap);
   for i := 0 to High(Captions) do
   begin
     ButtonWidths[i] := Canvas.TextWidth(Captions[i]) + 2 * Px(ButtonPadX);
+    if (i = 0) and (KeyWidth > 0) then
+      Inc(ButtonWidths[i], Px(Gap) + KeyWidth);
     Inc(RowWidth, ButtonWidths[i]);
   end;
-  Stacked := RowWidth > Width - 2 * Px(Pad);
+  Canvas.Font.Style := [];
+  Stacked := RowWidth > ColWidth;
+  if Stacked then
+    for i := 0 to High(Captions) do
+      ButtonWidths[i] := ColWidth
+  else
+    Inc(ButtonWidths[0], ColWidth - RowWidth);
   ButtonHeight := LineHeight + 2 * Px(ButtonPadY);
   if Stacked then
     ButtonRows := Length(Captions)
@@ -347,10 +368,11 @@ begin
         ErrHeight := ErrLines.Count * LineHeight;
         Inc(Total, Px(Gap) + ErrHeight);
       end;
-      Inc(Total, Px(Pad) + ButtonRows * ButtonHeight + (ButtonRows - 1) * Px(Gap) div 2);
+      Inc(Total, Px(Pad) + ButtonRows * ButtonHeight + (ButtonRows - 1) * Px(ButtonGap));
+      Inc(Total, Px(Gap) + LineHeight);
       if FRecent.Count > 0 then
-        Inc(Total, Px(Pad) + LineHeight + Px(Gap) div 2 + 1 + Px(Gap) div 2 + FRecent.Count * Px(RowHeight));
-      Inc(Total, Px(Pad) + LineHeight);
+        Inc(Total, Px(RecentGap) + LineHeight + Px(Gap) div 2 + 1 + Px(Gap) div 2 +
+          FRecent.Count * Px(RowHeight));
     end;
     FContentHeight := Total + 2 * Px(Pad);
     if Height < FContentHeight then
@@ -414,58 +436,83 @@ begin
       Inc(Y, ErrHeight);
     end;
 
-    { The buttons, as one centered group, or each centered under the one
-      before; the open button's shortcut beside it. }
+    { The buttons: the open button filled in the accent, the others
+      outlined; each caption centered in its button, the open one's in
+      what the key cap leaves. }
     Inc(Y, Px(Pad));
-    if Stacked then
-      X := 0
-    else
-      X := (Width - RowWidth) div 2;
-    Canvas.Pen.Style := psSolid;
+    X := ColLeft;
     for i := 0 to High(Captions) do
     begin
-      if Stacked then
-      begin
-        X := (Width - ButtonWidths[i]) div 2;
-        if i = 0 then
-          X := (Width - ButtonWidths[i] - KeyWidth) div 2;
-      end;
       FButtonRects[i] := Rect(X, Y, X + ButtonWidths[i], Y + ButtonHeight);
-      Canvas.Pen.Color := FLine;
-      if FHot = hotButton - i then
+      R := FButtonRects[i];
+      if i = 0 then
       begin
+        Fill := FAccent;
+        if FHot = hotButton then
+          Fill := MixColor(Fill, FText, 0.12);
+        Canvas.Pen.Style := psClear;
         Canvas.Brush.Style := bsSolid;
-        Canvas.Brush.Color := FHover;
+        Canvas.Brush.Color := Fill;
+        Canvas.RoundRect(R, Px(ButtonRound), Px(ButtonRound));
+        Canvas.Pen.Style := psSolid;
+        Ink := clWhite;
       end
       else
-        Canvas.Brush.Style := bsClear;
-      Canvas.RoundRect(FButtonRects[i], 10, 10);
+      begin
+        Canvas.Pen.Color := FLine;
+        if FHot = hotButton - i then
+        begin
+          Canvas.Brush.Style := bsSolid;
+          Canvas.Brush.Color := FHover;
+        end
+        else
+          Canvas.Brush.Style := bsClear;
+        Canvas.RoundRect(R, Px(ButtonRound), Px(ButtonRound));
+        Ink := FText;
+      end;
       Canvas.Brush.Style := bsClear;
-      Canvas.Font.Color := FText;
-      Canvas.TextOut(X + Px(ButtonPadX), Y + Px(ButtonPadY), Captions[i]);
-      X := FButtonRects[i].Right + Px(Gap);
+      Spare := R.Right;
+      TextY := Y + Px(ButtonPadY);
       if (i = 0) and (FShortcut <> '') then
       begin
-        { The shortcut as a key cap: a small rounded frame in dim. }
-        TextY := Y + Px(ButtonPadY);
-        R := Rect(X, TextY - Px(KeyPadY), X + KeyWidth - Px(Gap), TextY + LineHeight + Px(KeyPadY));
-        Canvas.Pen.Color := FLine;
-        Canvas.RoundRect(R, 6, 6);
-        Canvas.Font.Color := FDim;
-        Canvas.TextOut(X + Px(KeyPadX), TextY, FShortcut);
-        X := R.Right + 2 * Px(Gap);
+        { The shortcut as a key cap: a small rounded frame in a paler
+          shade of the fill. }
+        Spare := R.Right - Px(ButtonPadX) - KeyWidth;
+        Canvas.Pen.Color := MixColor(FAccent, clWhite, 0.45);
+        Canvas.RoundRect(Spare, TextY - Px(KeyPadY), R.Right - Px(ButtonPadX),
+          TextY + LineHeight + Px(KeyPadY), Px(6), Px(6));
+        Canvas.Font.Color := MixColor(FAccent, clWhite, 0.8);
+        Canvas.TextOut(Spare + Px(KeyPadX), TextY, FShortcut);
+        Dec(Spare, Px(Gap));
       end;
-      if Stacked and (i < High(Captions)) then
-        Inc(Y, ButtonHeight + Px(Gap) div 2);
+      Canvas.Font.Style := [fsBold];
+      Canvas.Font.Color := Ink;
+      Canvas.TextOut(R.Left + (Spare - R.Left - Canvas.TextWidth(Captions[i])) div 2,
+        TextY, Captions[i]);
+      Canvas.Font.Style := [];
+      if Stacked then
+      begin
+        if i < High(Captions) then
+          Inc(Y, ButtonHeight + Px(ButtonGap));
+      end
+      else
+        X := R.Right + Px(ButtonGap);
     end;
     Inc(Y, ButtonHeight);
 
+    { What else opens a repository, dim under the buttons. }
+    Inc(Y, Px(Gap));
+    Canvas.Font.Color := FDim;
+    Canvas.TextOut((Width - Canvas.TextWidth(rsDrop)) div 2, Y, rsDrop);
+    Inc(Y, LineHeight);
+
     { The recent repositories: a dim heading over a divider, then a row
-      per repository with the folder, the name and the path. }
+      per repository with the folder, the name and the path, and "not
+      found" at the right of the name's line when the folder is gone. }
     SetLength(FRowRects, FRecent.Count);
     if FRecent.Count > 0 then
     begin
-      Inc(Y, Px(Pad));
+      Inc(Y, Px(RecentGap));
       Canvas.Font.Color := FDim;
       Canvas.TextOut(ColLeft, Y, rsRecent);
       Inc(Y, LineHeight + Px(Gap) div 2);
@@ -481,34 +528,33 @@ begin
           Canvas.Pen.Style := psClear;
           Canvas.Brush.Style := bsSolid;
           Canvas.Brush.Color := FHover;
-          Canvas.RoundRect(FRowRects[i], 10, 10);
+          Canvas.RoundRect(FRowRects[i], Px(ButtonRound), Px(ButtonRound));
           Canvas.Pen.Style := psSolid;
           Canvas.Brush.Style := bsClear;
         end;
-        DrawStatusIcon(Canvas, HintFolder, ColLeft + 2, Y + (Px(RowHeight) - Px(FolderSize)) div 2,
+        DrawStatusIcon(Canvas, HintFolder, ColLeft, Y + (Px(RowHeight) - Px(FolderSize)) div 2,
           Px(FolderSize), FDim);
         Canvas.Brush.Style := bsClear;
         X := ColLeft + Px(FolderSize) + Px(Gap);
         RepoName := ExtractFileName(ExcludeTrailingPathDelimiter(FRecent[i]));
         Path := FRecent[i];
         TextY := Y + (Px(RowHeight) - 2 * LineHeight) div 2;
-        if Missing then
-          Canvas.Font.Color := FDim
-        else
-          Canvas.Font.Color := FText;
-        Canvas.TextOut(X, TextY, RepoName);
-        NameWidth := Canvas.TextWidth(RepoName);
+        Spare := ColLeft + ColWidth;
         Canvas.Font.Color := FDim;
         if Missing then
-          Canvas.TextOut(X + NameWidth + Px(Gap) div 2, TextY, '· ' + rsNotFound);
+        begin
+          Dec(Spare, Canvas.TextWidth(rsNotFound));
+          Canvas.TextOut(Spare, TextY, rsNotFound);
+          Dec(Spare, Px(Gap));
+        end
+        else
+          Canvas.Font.Color := FText;
+        Canvas.TextOut(X, TextY, FitTextRight(Canvas, RepoName, Spare - X));
+        Canvas.Font.Color := FDim;
         Canvas.TextOut(X, TextY + LineHeight, FitLeft(Path, ColLeft + ColWidth - X));
         Inc(Y, Px(RowHeight));
       end;
     end;
-
-    Inc(Y, Px(Pad));
-    Canvas.Font.Color := FDim;
-    Canvas.TextOut((Width - Canvas.TextWidth(rsDrop)) div 2, Y, rsDrop);
   finally
     ErrLines.Free;
   end;

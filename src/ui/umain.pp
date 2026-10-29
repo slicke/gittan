@@ -1082,6 +1082,7 @@ type
     procedure OpenJobDone(Sender: TObject);
     procedure AbandonOpenJob;
     procedure ClearRepositoryViews(const AError: string);
+    procedure ShowSidebar(AShown: boolean);
     procedure StartWatcher;
     procedure StopWatcher;
     function WatchPace: integer;
@@ -3859,6 +3860,8 @@ begin
   SetupSubmodules;
   SetupCommit;
   SetupTitleBar;
+  { Until a repository opens. }
+  ShowSidebar(False);
   ApplySettings;
   BuildMenu;
   BuildPopups;
@@ -3878,7 +3881,10 @@ begin
   {$IFDEF OWNBAR}
   { The title bar lists the menus and runs its shade to this frame's
     splitter. }
-  OwnBar.SplitControl := TreeSplitter;
+  if TreeSplitter.Visible then
+    OwnBar.SplitControl := TreeSplitter
+  else
+    OwnBar.SplitControl := nil;
   OwnBar.Layout;
   {$ENDIF}
   {$IFDEF LCLGtk3}
@@ -4394,6 +4400,7 @@ begin
   FPullText := P.PillText;
   FBandTrack := P.Line;
   FBandFill := P.Accent;
+  FWelcome.SetAccent(P.Accent);
   if FDark then
   begin
     FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim, P.Line, P.Deleted,
@@ -4704,6 +4711,12 @@ begin
   FStatusSteps[spLeft] := stepNone;
   FStatusSteps[spPrimary] := stepNone;
   FStatusSteps[spRight] := stepNone;
+  { No repository, nothing to fetch, pull or push. }
+  if (FRepo = nil) or (FRepo.Root = '') then
+  begin
+    FStatus.SetTransport(StatusButton('', ''), StatusButton('', ''), StatusButton('', ''));
+    Exit;
+  end;
   R := StatusButton('', '');
   if (FOperation <> '') and (FOperation <> 'bisecting') then
   begin
@@ -6368,6 +6381,7 @@ begin
     Exit;
   end;
   FRepo.OpenAt(Job.Root, Job.GitDir);
+  ShowSidebar(True);
   LoadCommitDraft;
   { The exclude file lives in the git directory, which git names (a
     work tree's is elsewhere), once per open: the section lists it and
@@ -6420,9 +6434,35 @@ begin
   FSubPanel.Visible := False;
   FStats := nil;
   FFileCount := 0;
+  ShowSidebar(False);
   ShowWelcome(AError);
   ShowSummary;
   UpdateStatus;
+end;
+
+{ The sidebar (the filter, the pages and the trees) and its splitter,
+  which have nothing to offer while no repository is open: the welcome
+  view takes the whole width then. }
+procedure TRepoFrame.ShowSidebar(AShown: boolean);
+begin
+  if FTreePanel.Visible = AShown then
+    Exit;
+  FTreePanel.Visible := AShown;
+  { Shown again, the splitter goes right of the panel, not where alLeft
+    would put it first. }
+  if AShown then
+    TreeSplitter.Left := FTreePanel.Left + FTreePanel.Width;
+  TreeSplitter.Visible := AShown;
+  {$IFDEF OWNBAR}
+  if FWindow.IsActive(Self) then
+  begin
+    if AShown then
+      OwnBar.SplitControl := TreeSplitter
+    else
+      OwnBar.SplitControl := nil;
+    OwnBar.Invalidate;
+  end;
+  {$ENDIF}
 end;
 
 { Reads the branch and the changed files of the open repository into the
@@ -6535,6 +6575,7 @@ begin
   FSummary.SetRepository(ExtractFileName(FRepo.Root), Branch, BaseLabel, FStats, Icons,
     Texts, Actions);
   FWelcome.Visible := False;
+  ShowSidebar(True);
   { The page of a submodule keeps the box; RefreshRepository shows it
     again. }
   FSummary.Visible := FView <> gvSubmodule;
