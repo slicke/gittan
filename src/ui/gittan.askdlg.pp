@@ -63,7 +63,8 @@ function AskText(const ATitle, APrompt: string; var AValue: string;
 implementation
 
 uses
-  Math, Types, LCLType, gittan.app, gittan.pathfield;
+  Math, Types, LCLType, gittan.app, gittan.pathfield
+  {$IFDEF LCLCocoa}, gittan.titlebar{$ENDIF};
 
 resourcestring
   rsAskOK = 'OK';
@@ -89,6 +90,17 @@ const
   ButtonMinWidth = 84;
   ButtonGap = 8;
   FieldGap = 10;
+  { The space over the first line of text and the icon. On macOS the
+    hidden title bar's strip is over it already, and the title is the
+    first line, in bold (AlertHeading), as a system alert has it. }
+  {$IFDEF LCLCocoa}
+  TopGap = 2;
+  AlertHeading = True;
+  {$ELSE}
+  TopGap = Margin;
+  AlertHeading = False;
+  {$ENDIF}
+  HeadingGap = 4;
 
 type
   TAskButton = record
@@ -114,11 +126,12 @@ type
     function NextTop: integer;
     function IconRect: TRect;
     procedure FieldChange(Sender: TObject);
-    procedure AddText(const AText: string; ABold: boolean);
+    procedure AddText(const AText: string; ABold: boolean; AGap: integer = FieldGap);
     procedure AddButtons(const AButtons: array of TAskButton; ADefault, ACancel: integer);
   protected
     procedure KeyDown(var Key: word; Shift: TShiftState); override;
     procedure Paint; override;
+    procedure CreateWnd; override;
     procedure DoShow; override;
   public
     constructor CreateAsk(const ATitle: string; AKind: TMsgDlgType);
@@ -176,6 +189,17 @@ begin
   Constraints.MinWidth := Scale96ToScreen(DialogWidth);
   Constraints.MaxWidth := Scale96ToScreen(DialogWidth);
   AutoSize := True;
+  if AlertHeading and (ATitle <> '') then
+    AddText(ATitle, True);
+end;
+
+{ The window, once made, looks as a system alert on macOS. }
+procedure TAskForm.CreateWnd;
+begin
+  inherited CreateWnd;
+  {$IFDEF LCLCocoa}
+  MakeAlertWindow(Handle);
+  {$ENDIF}
 end;
 
 destructor TAskForm.Destroy;
@@ -193,7 +217,7 @@ end;
 
 { A label right of the icon, wrapped at the dialog's width; the first
   keeps at least the icon's height under it, so the buttons clear it. }
-procedure TAskForm.AddText(const AText: string; ABold: boolean);
+procedure TAskForm.AddText(const AText: string; ABold: boolean; AGap: integer);
 var
   Lbl: TLabel;
 begin
@@ -205,9 +229,9 @@ begin
   Lbl.BorderSpacing.Left := Scale96ToScreen(IconLeft + IconSize + IconGap);
   Lbl.BorderSpacing.Right := Scale96ToScreen(Margin);
   if FNextTop = 1000 then
-    Lbl.BorderSpacing.Top := Scale96ToScreen(Margin)
+    Lbl.BorderSpacing.Top := Scale96ToScreen(TopGap)
   else
-    Lbl.BorderSpacing.Top := Scale96ToScreen(FieldGap);
+    Lbl.BorderSpacing.Top := Scale96ToScreen(AGap);
   if ABold then
     Lbl.Font.Style := [fsBold];
   Lbl.Parent := Self;
@@ -303,7 +327,7 @@ var
   S, IconTop, Room: integer;
 begin
   S := Scale96ToScreen(IconSize);
-  IconTop := Scale96ToScreen(Margin);
+  IconTop := Scale96ToScreen(TopGap);
   if FButtonRow <> nil then
   begin
     Room := FButtonRow.Top - FButtonRow.BorderSpacing.Top - IconTop;
@@ -471,7 +495,7 @@ begin
     Default := 0;
   F := TAskForm.CreateAsk(ATitle, AKind);
   try
-    F.AddText(AMsg, False);
+    F.AddText(AMsg, False, HeadingGap);
     F.AddButtons(Buttons, Default, Cancel);
     Result := F.ShowModal;
     if Result = mrNone then
@@ -515,7 +539,7 @@ begin
   F := TAskForm.CreateAsk(ATitle, mtConfirmation);
   try
     if ANote <> '' then
-      F.AddText(ANote, False);
+      F.AddText(ANote, False, HeadingGap);
     SetLength(F.FEdits, Length(APrompts));
     for i := 0 to High(APrompts) do
     begin
