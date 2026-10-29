@@ -28,6 +28,7 @@ type
     procedure TestIssueNumber;
     procedure TestWebArgs;
     procedure TestPullActionArgs;
+    procedure TestPullActionFits;
     procedure TestNewPullUrl;
     procedure TestFileOfUrl;
     procedure TestForge;
@@ -324,6 +325,35 @@ begin
   AssertEquals('Approved', PullActionDone(plApprove));
   AssertTrue(PullActionMerges(plSquash));
   AssertFalse(PullActionIsReview(plReady));
+end;
+
+procedure TGitHubTest.TestPullActionFits;
+var
+  Pull: TGittanPullRequest;
+begin
+  Pull := Default(TGittanPullRequest);
+  Pull.Number := 12;
+  Pull.Repo := 'o/r';
+  Pull.State := prOpen;
+  AssertTrue(PullActionFits(Pull, plApprove));
+  AssertTrue(PullActionFits(Pull, plSquash));
+  AssertFalse('only a draft is marked ready', PullActionFits(Pull, plReady));
+  Pull.IsDraft := True;
+  AssertTrue(PullActionFits(Pull, plReady));
+  AssertTrue('a draft is reviewed', PullActionFits(Pull, plComment));
+  AssertFalse('a draft is not merged', PullActionFits(Pull, plMerge));
+  Pull.State := prMerged;
+  AssertFalse('not open', PullActionFits(Pull, plComment));
+  Pull.IsDraft := False;
+  AssertFalse('a closed pull is not merged', PullActionFits(Pull, plMerge));
+  AssertFalse(PullActionFits(Pull, plSquash));
+  AssertFalse(PullActionFits(Pull, plRebaseMerge));
+  Pull.State := prOpen;
+  Pull.Repo := '';
+  AssertFalse('no repository', PullActionFits(Pull, plComment));
+  Pull.Repo := 'o/r';
+  Pull.Number := 0;
+  AssertFalse('no number', PullActionFits(Pull, plComment));
 end;
 
 procedure TGitHubTest.TestWebArgs;

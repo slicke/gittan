@@ -334,7 +334,7 @@ begin
   if Job.Diverged or Job.Rejected or Job.Unseen or Job.Stale then
     FWindow.ShowFrame(Self);
   if Job.Diverged then
-    case QuestionDlg(rsPullDivergedTitle, rsPullDiverged, mtConfirmation,
+    case AskDlg(rsPullDivergedTitle, rsPullDiverged, mtConfirmation,
         [mrYes, rsMergeAction, 'IsDefault', mrNo, rsRebaseAction, mrCancel,
         rsCancelButton, 'IsCancel'], 0) of
       mrYes: StartRemote(rkPull, pmMerge);
@@ -351,11 +351,11 @@ begin
     { Force Push first for a branch rewritten here, whose upstream holds
       only what it replaced. }
     if FRewritten then
-      Choice := QuestionDlg(rsPushRejectedTitle, Msg + LineEnding + LineEnding +
+      Choice := AskDlg(rsPushRejectedTitle, Msg + LineEnding + LineEnding +
         rsPushRejectedForce, mtConfirmation, [mrNo, rsForcePushAction, 'IsDefault', mrYes,
         rsPullAction, mrCancel, rsCancelButton, 'IsCancel'], 0)
     else
-      Choice := QuestionDlg(rsPushRejectedTitle, Msg + LineEnding + LineEnding +
+      Choice := AskDlg(rsPushRejectedTitle, Msg + LineEnding + LineEnding +
         rsPushRejectedForce, mtConfirmation, [mrYes, rsPullAction, 'IsDefault', mrNo,
         rsForcePushAction, mrCancel, rsCancelButton, 'IsCancel'], 0);
     case Choice of
@@ -365,20 +365,20 @@ begin
   end
   else if Job.Rejected then
   begin
-    if QuestionDlg(rsPushRejectedTitle, rsPushRejected, mtConfirmation,
+    if AskDlg(rsPushRejectedTitle, rsPushRejected, mtConfirmation,
       [mrYes, rsPullAction, 'IsDefault', mrCancel, rsCancelButton, 'IsCancel'], 0) = mrYes then
       StartRemote(rkPull, pmAuto);
   end
   else if Job.Unseen then
   begin
-    if QuestionDlg(rsForceUnseenTitle, Format(rsForceUnseen, [FRepo.Upstream(FBranch)]),
+    if AskDlg(rsForceUnseenTitle, Format(rsForceUnseen, [FRepo.Upstream(FBranch)]),
       mtWarning, [mrYes, rsPullAction, 'IsDefault', mrCancel, rsCancelButton, 'IsCancel'],
       0) = mrYes then
       StartRemote(rkPull, pmAuto);
   end
   else if Job.Stale then
   begin
-    if QuestionDlg(rsForceStaleTitle, Format(rsForceStale, [FRepo.Upstream(FBranch)]),
+    if AskDlg(rsForceStaleTitle, Format(rsForceStale, [FRepo.Upstream(FBranch)]),
       mtWarning, [mrYes, rsFetchItem, 'IsDefault', mrCancel, rsCancelButton, 'IsCancel'],
       0) = mrYes then
       StartRemote(rkFetch);
@@ -804,7 +804,7 @@ begin
     Msg := Format(rsForceAskOne, [FBranch, Up, Up])
   else
     Msg := Format(rsForceAsk, [FBranch, Up, FBehind, Up]);
-  if QuestionDlg(rsForcePushTitle, Msg, mtWarning, [mrYes, rsForcePushAction, mrCancel,
+  if AskDlg(rsForcePushTitle, Msg, mtWarning, [mrYes, rsForcePushAction, mrCancel,
     rsCancelButton, 'IsCancel', 'IsDefault'], 0) = mrYes then
     StartRemote(rkForcePush);
 end;

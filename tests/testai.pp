@@ -14,7 +14,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.reviews, gittan.ai,
-  testhelpers{$IFDEF UNIX}, BaseUnix{$ENDIF};
+  gittan.discard, testhelpers{$IFDEF UNIX}, BaseUnix{$ENDIF};
 
 type
   {** An agent that answers Answers in turn (an empty one is a failure,
@@ -45,6 +45,7 @@ type
     function Changes(const APaths: array of string; AAmend: boolean = False): string;
     procedure JobDone(Sender: TObject);
     function RunFind(const AQuestion: string): TGittanFindJob;
+    function MakeConflict: TGittanDiscard;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -71,6 +72,18 @@ type
     procedure TestFindJobSecondFails;
     procedure TestFindJobTool;
     procedure TestFindJobStopped;
+    procedure TestParseResolution;
+    procedure TestConflictInput;
+    procedure TestConflictJob;
+    procedure TestParseCommitPlan;
+    procedure TestSplitJob;
+    procedure TestParseFixEdits;
+    procedure TestApplyFixEdits;
+    procedure TestFixBlock;
+    procedure TestFixInputWindow;
+    procedure TestFixJob;
+    procedure TestWhyInput;
+    procedure TestWhyJob;
   end;
 
 implementation
@@ -738,6 +751,475 @@ begin
     CheckSynchronize(0);
     AssertTrue('the agent was told', TFakeAI.Cancelled);
     AssertEquals('no word', 0, FDone);
+  finally
+    Job.Free;
+  end;
+end;
+
+procedure TAiTest.TestParseResolution;
+var
+  Lines: TStringArray;
+  Why: string;
+begin
+  AssertTrue(ParseResolution('Here it is:'#10'<resolved>'#10'  a := 1;'#10'  b := 2;'#10 +
+    '</resolved>'#10'<why>Kept both</why>', Lines, Why));
+  AssertEquals(2, Length(Lines));
+  AssertEquals('  a := 1;', Lines[0]);
+  AssertEquals('  b := 2;', Lines[1]);
+  AssertEquals('Kept both', Why);
+  AssertTrue('CRLF and a fence', ParseResolution('<RESOLVED>'#13#10'```pascal'#13#10'x'#13#10 +
+    '```'#13#10'</Resolved>', Lines, Why));
+  AssertEquals(1, Length(Lines));
+  AssertEquals('x', Lines[0]);
+  AssertEquals('no why', '', Why);
+  AssertTrue('nothing is an answer', ParseResolution('<resolved>'#10'</resolved>', Lines, Why));
+  AssertEquals(0, Length(Lines));
+  AssertTrue('a blank line at the end is kept', ParseResolution('<resolved>'#10'x'#10#10 +
+    '</resolved>', Lines, Why));
+  AssertEquals(2, Length(Lines));
+  AssertEquals('', Lines[1]);
+  AssertTrue('the why on one line', ParseResolution('<resolved>'#10'x'#10'</resolved>' +
+    '<why>one'#10'two</why>', Lines, Why));
+  AssertEquals('one two', Why);
+  AssertFalse('no tags', ParseResolution('x := 1;', Lines, Why));
+  AssertFalse('markers left', ParseResolution('<resolved>'#10'<<<<<<< HEAD'#10'x'#10 +
+    '=======' + #10'y'#10'>>>>>>> other'#10'</resolved>', Lines, Why));
+  AssertEquals(0, Length(Lines));
+  AssertFalse('a separator left', ParseResolution('<resolved>'#10'x'#10'=======' + #10 +
+    'y'#10'</resolved>', Lines, Why));
+  AssertFalse('a base marker left', ParseResolution('<resolved>'#10'||||||| base'#10 +
+    'x'#10'</resolved>', Lines, Why));
+  AssertTrue('a longer underline is text', ParseResolution('<resolved>'#10'Title'#10 +
+    '========'#10'</resolved>', Lines, Why));
+end;
+
+{ A merge that conflicts in a.txt, and its conflict as the frame takes
+  it: the lines from the "<<<<<<<" to the ">>>>>>>". }
+function TAiTest.MakeConflict: TGittanDiscard;
+var
+  Lines: TStringList;
+  Output, Error: string;
+  i: integer;
+begin
+  WriteFile('a.txt', 'one'#10'two'#10'three'#10'four');
+  Git(['add', '.']);
+  Git(['commit', '-q', '-m', 'Add a']);
+  Git(['checkout', '-q', '-b', 'other']);
+  WriteFile('a.txt', 'one'#10'two theirs'#10'three'#10'four');
+  Git(['commit', '-q', '-am', 'Theirs changes two']);
+  Git(['checkout', '-q', '-']);
+  WriteFile('a.txt', 'one'#10'two mine'#10'three'#10'four');
+  Git(['commit', '-q', '-am', 'Mine changes two']);
+  AssertFalse('the merge conflicts', RunGitIn(FDir, ['merge', '-q', 'other'], Output, Error));
+  Result := Default(TGittanDiscard);
+  Result.FileName := IncludeTrailingPathDelimiter(FDir) + 'a.txt';
+  Lines := TStringList.Create;
+  try
+    Lines.LoadFromFile(Result.FileName);
+    for i := 0 to Lines.Count - 1 do
+    begin
+      if Copy(Lines[i], 1, 7) = '<<<<<<<' then
+        Result.Line := i + 1;
+      if Result.Line > 0 then
+      begin
+        SetLength(Result.NewLines, Length(Result.NewLines) + 1);
+        Result.NewLines[High(Result.NewLines)] := Lines[i];
+        if Copy(Lines[i], 1, 7) = '>>>>>>>' then
+          Break;
+      end;
+    end;
+  finally
+    Lines.Free;
+  end;
+  AssertEquals('the conflict is at line 2', 2, Result.Line);
+end;
+
+procedure TAiTest.TestConflictInput;
+var
+  Block: TGittanDiscard;
+  Text: string;
+begin
+  Block := MakeConflict;
+  Text := ConflictInput(FDir, 'a.txt', 'merging', False, Block);
+  AssertTrue('the file', Pos('The file: a.txt', Text) > 0);
+  AssertTrue('what git does', Pos('Git is merging', Text) > 0);
+  AssertTrue('mine is <<<<<<<', Pos('"<<<<<<<" side is the user''s own', Text) > 0);
+  AssertTrue('our commits', Pos('Mine changes two', Text) > 0);
+  AssertTrue('their commits', Pos('Theirs changes two', Text) > 0);
+  AssertEquals('a merge head is not the change', 0, Pos('The commit being applied', Text));
+  AssertTrue('the line before', Pos('before the conflict:' + LineEnding + 'one' +
+    LineEnding, Text) > 0);
+  AssertTrue('the conflict', Pos('two mine' + LineEnding + '=======' + LineEnding +
+    'two theirs', Text) > 0);
+  AssertTrue('the lines after', Pos('after the conflict:' + LineEnding + 'three' +
+    LineEnding + 'four' + LineEnding, Text) > 0);
+  Text := ConflictInput(FDir, 'a.txt', 'rebasing', True, Block);
+  AssertTrue('mine is >>>>>>> in a rebase', Pos('">>>>>>>" side is the user''s own', Text) > 0);
+end;
+
+procedure TAiTest.TestConflictJob;
+var
+  AI: TGittanAI;
+  Job: TGittanConflictJob;
+begin
+  TFakeAI.Reset;
+  TFakeAI.Answers := ['<resolved>'#10'two mine and theirs'#10'</resolved>'#10 +
+    '<why>Both changes kept.</why>'];
+  AI := TFakeAI.Create('', '', 'fake');
+  try
+    Job := TGittanConflictJob.Create(FDir, AI, 'a.txt', 'merging', False, MakeConflict);
+  finally
+    AI.Free;
+  end;
+  try
+    Job.OnDone := @JobDone;
+    FDone := 0;
+    Job.Start;
+    Job.WaitFor;
+    CheckSynchronize(0);
+    AssertEquals(1, FDone);
+    AssertTrue(Job.Error, Job.Ok);
+    AssertTrue(TFakeAI.Tasks[0] = atResolve);
+    AssertEquals(1, Length(Job.Block.OldLines));
+    AssertEquals('two mine and theirs', Job.Block.OldLines[0]);
+    AssertEquals('the conflict is kept', 5, Length(Job.Block.NewLines));
+    AssertEquals('Both changes kept.', Job.Why);
+  finally
+    Job.Free;
+  end;
+end;
+
+procedure TAiTest.TestParseCommitPlan;
+var
+  Paths: TStringList;
+  Plan: TGittanCommitPlan;
+begin
+  Paths := TStringList.Create;
+  try
+    Paths.Add('src/a.pas');
+    Paths.Add('src/b.pas');
+    Paths.Add('tests/ta.pas');
+    Paths.Add('README.md');
+    AssertTrue(ParseCommitPlan('The plan:'#10'```json'#10'[{"files": ["src/a.pas", ' +
+      '"./tests/ta.pas"], "message": "Fix a\n\nBecause."}, {"files": ["b/src/b.pas", ' +
+      '"src/a.pas", "nowhere.pas"], "message": "```\nTidy b\n```"}, {"files": ' +
+      '["gone.pas"], "message": "Nothing"}]'#10'```', Paths, Plan));
+    AssertEquals('the empty one dropped, the left out added', 3, Length(Plan));
+    AssertEquals(2, Length(Plan[0].Files));
+    AssertEquals('src/a.pas', Plan[0].Files[0]);
+    AssertEquals('./ taken off', 'tests/ta.pas', Plan[0].Files[1]);
+    AssertEquals('Fix a'#10#10'Because.', Plan[0].Message);
+    AssertEquals('a file once, b/ taken off', 1, Length(Plan[1].Files));
+    AssertEquals('src/b.pas', Plan[1].Files[0]);
+    AssertEquals('the fence cleaned', 'Tidy b', Plan[1].Message);
+    AssertEquals('README.md', Plan[2].Files[0]);
+    AssertEquals('no message for the left out', '', Plan[2].Message);
+    AssertTrue('nothing planned', ParseCommitPlan('[]', Paths, Plan));
+    AssertEquals('every file still in it', 1, Length(Plan));
+    AssertEquals(4, Length(Plan[0].Files));
+    AssertTrue(ParseCommitPlan('[{"files": ["SRC/A.pas", "src/b.pas", "src/a.pas", ' +
+      '"tests/ta.pas", "readme.md"], "message": "All"}]', Paths, Plan));
+    AssertEquals('a re-cased path once, nothing left out', 1, Length(Plan));
+    AssertEquals(4, Length(Plan[0].Files));
+    AssertEquals('the list''s spelling', 'src/a.pas', Plan[0].Files[0]);
+    AssertEquals('the list''s spelling', 'README.md', Plan[0].Files[3]);
+    { Two paths that differ in case alone: each as spelled, a third
+      spelling neither. }
+    Paths.Add('src/A.pas');
+    AssertTrue(ParseCommitPlan('[{"files": ["src/A.pas"], "message": "Big"}, ' +
+      '{"files": ["SRC/a.PAS", "src/a.pas"], "message": "Small"}]', Paths, Plan));
+    AssertEquals('src/A.pas', Plan[0].Files[0]);
+    AssertEquals('the ambiguous one skipped', 1, Length(Plan[1].Files));
+    AssertEquals('src/a.pas', Plan[1].Files[0]);
+    AssertFalse(ParseCommitPlan('Commit it all at once.', Paths, Plan));
+    AssertFalse(ParseCommitPlan('[not json]', Paths, Plan));
+  finally
+    Paths.Free;
+  end;
+end;
+
+procedure TAiTest.TestSplitJob;
+var
+  AI: TGittanAI;
+  Job: TGittanSplitJob;
+  Paths: TStringList;
+begin
+  WriteFile('a.txt', 'one');
+  Git(['add', '.']);
+  Git(['commit', '-q', '-m', 'Add a']);
+  WriteFile('a.txt', 'one changed');
+  WriteFile('b.txt', 'new');
+  TFakeAI.Reset;
+  TFakeAI.Answers := ['[{"files": ["b.txt"], "message": "Add b"}, {"files": ["a.txt"], ' +
+    '"message": "Change a"}]'];
+  AI := TFakeAI.Create('', '', 'fake');
+  Paths := TStringList.Create;
+  try
+    Paths.Add('a.txt');
+    Paths.Add('b.txt');
+    Job := TGittanSplitJob.Create(FDir, AI, Paths);
+  finally
+    Paths.Free;
+    AI.Free;
+  end;
+  try
+    Job.OnDone := @JobDone;
+    FDone := 0;
+    Job.Start;
+    Job.WaitFor;
+    CheckSynchronize(0);
+    AssertEquals(1, FDone);
+    AssertTrue(Job.Error, Job.Ok);
+    AssertTrue(TFakeAI.Tasks[0] = atSplit);
+    AssertTrue('the diff', Pos('+one changed', TFakeAI.Inputs[0]) > 0);
+    AssertTrue('the untracked file', Pos('+new', TFakeAI.Inputs[0]) > 0);
+    AssertTrue('the paths', Pos('The changed files:' + LineEnding + 'a.txt' + LineEnding +
+      'b.txt', TFakeAI.Inputs[0]) > 0);
+    AssertEquals(2, Length(Job.Plan));
+    AssertEquals('b.txt', Job.Plan[0].Files[0]);
+    AssertEquals('Change a', Job.Plan[1].Message);
+  finally
+    Job.Free;
+  end;
+end;
+
+procedure TAiTest.TestParseFixEdits;
+var
+  Edits: TGittanFixEdits;
+  Why: string;
+begin
+  AssertTrue(ParseFixEdits('<find>'#10'  if a then'#10'</find>'#10'<replace>'#10 +
+    '  if a and b then'#10'</replace>'#10'<FIND>'#13#10'x;'#13#10'</FIND>'#13#10 +
+    '<replace>'#13#10'</replace>'#10'<why>Checks b too.</why>', Edits, Why));
+  AssertEquals(2, Length(Edits));
+  AssertEquals('  if a then', Edits[0].Find[0]);
+  AssertEquals('  if a and b then', Edits[0].Replace[0]);
+  AssertEquals('x;', Edits[1].Find[0]);
+  AssertEquals('a line dropped', 0, Length(Edits[1].Replace));
+  AssertEquals('Checks b too.', Why);
+  AssertTrue('no change needed', ParseFixEdits('<why>The finding is wrong.</why>', Edits, Why));
+  AssertEquals(0, Length(Edits));
+  AssertEquals('The finding is wrong.', Why);
+  AssertFalse('neither', ParseFixEdits('I would change line 3.', Edits, Why));
+  AssertFalse('a find without a replace', ParseFixEdits('<find>'#10'x'#10'</find>', Edits, Why));
+  AssertFalse('an empty find', ParseFixEdits('<find>'#10'</find><replace>'#10'y'#10 +
+    '</replace>', Edits, Why));
+end;
+
+procedure TAiTest.TestApplyFixEdits;
+var
+  Lines, New: TStringArray;
+  Edits: TGittanFixEdits;
+  Error: string;
+begin
+  Lines := ['begin', '  a := 1;', '  b := 2;  ', '  a := 1;', 'end'];
+  SetLength(Edits, 1);
+  Edits[0].Find := ['  b := 2;  '];
+  Edits[0].Replace := ['  b := 3;', '  c := 4;'];
+  AssertTrue(Error, ApplyFixEdits(Lines, Edits, New, Error));
+  AssertEquals(6, Length(New));
+  AssertEquals('  b := 3;', New[2]);
+  AssertEquals('  c := 4;', New[3]);
+  AssertEquals('the lines given are left', '  b := 2;  ', Lines[2]);
+  Edits[0].Find := ['  b := 2;'];
+  AssertTrue('spaces at the end ignored', ApplyFixEdits(Lines, Edits, New, Error));
+  Edits[0].Find := ['3:   b := 2;', '4:   a := 1;'];
+  Edits[0].Replace := [];
+  AssertTrue('numbers copied', ApplyFixEdits(Lines, Edits, New, Error));
+  AssertEquals(3, Length(New));
+  AssertEquals('end', New[2]);
+  Edits[0].Find := ['  a := 1;'];
+  AssertFalse('twice', ApplyFixEdits(Lines, Edits, New, Error));
+  AssertTrue(Error, Pos('2 times', Error) > 0);
+  Edits[0].Find := ['  z := 1;'];
+  AssertFalse('nowhere', ApplyFixEdits(Lines, Edits, New, Error));
+  AssertEquals(0, Length(New));
+  { An edit sees the lines the one before it left. }
+  SetLength(Edits, 2);
+  Edits[0].Find := ['begin'];
+  Edits[0].Replace := ['begin', '  z := 0;'];
+  Edits[1].Find := ['  z := 0;'];
+  Edits[1].Replace := ['  z := 9;'];
+  AssertTrue(Error, ApplyFixEdits(Lines, Edits, New, Error));
+  AssertEquals('  z := 9;', New[1]);
+end;
+
+{ A file too long for the budget gives the lines round the finding's,
+  with notes for those left out; a short one comes whole. }
+procedure TAiTest.TestFixInputWindow;
+var
+  Finding: TGittanReviewThread;
+  Lines: TStringArray;
+  Text: string;
+  i: integer;
+begin
+  Finding := Default(TGittanReviewThread);
+  Finding.Path := 'big.txt';
+  Finding.Line := 15000;
+  SetLength(Lines, 20000);
+  for i := 0 to High(Lines) do
+    Lines[i] := 'line number ' + IntToStr(i + 1);
+  Text := FixInput(FDir, '', Finding, Lines);
+  AssertTrue('within the budget', Length(Text) <= MessageDiffKeep);
+  AssertTrue('the finding''s line', Pos(#10'15000: line number 15000'#10, Text) > 0);
+  AssertTrue('the start left out', Pos('[Lines 1 to ', Text) > 0);
+  AssertTrue('the end left out', Pos(' to 20000 are left out.]', Text) > 0);
+  { A line below too long for the budget does not stop the lines above. }
+  Lines[15000] := StringOfChar('x', MessageDiffKeep);
+  Text := FixInput(FDir, '', Finding, Lines);
+  AssertTrue('the lines above still come', Pos(#10'14990: line number 14990'#10, Text) > 0);
+  AssertEquals('the long line left out', 0, Pos('xxxx', Text));
+  Lines[15000] := 'line number 15001';
+  SetLength(Lines, 3);
+  Finding.Line := 2;
+  Text := FixInput(FDir, '', Finding, Lines);
+  AssertTrue(Pos(#10'1: line number 1'#10, Text) > 0);
+  AssertEquals('nothing left out', 0, Pos('left out', Text));
+end;
+
+procedure TAiTest.TestFixBlock;
+var
+  B: TGittanDiscard;
+  Error: string;
+  L: TStringList;
+begin
+  B := FixBlock('f', ['a', 'b', 'c', 'd'], ['a', 'x', 'y', 'd']);
+  AssertEquals(2, B.Line);
+  AssertEquals(2, Length(B.NewLines));
+  AssertEquals('b', B.NewLines[0]);
+  AssertEquals('x', B.OldLines[0]);
+  { An insert keeps the line before it, or after it at the top. }
+  B := FixBlock('f', ['a', 'b'], ['a', 'n', 'b']);
+  AssertEquals('an insert', 1, B.Line);
+  AssertEquals(1, Length(B.NewLines));
+  AssertEquals('a', B.NewLines[0]);
+  AssertEquals(2, Length(B.OldLines));
+  AssertEquals('n', B.OldLines[1]);
+  B := FixBlock('f', ['a'], ['n', 'a']);
+  AssertEquals('an insert at the top', 1, B.Line);
+  AssertEquals('a', B.NewLines[0]);
+  AssertEquals('n', B.OldLines[0]);
+  AssertEquals('a', B.OldLines[1]);
+  B := FixBlock('f', [], ['n']);
+  AssertEquals('into an empty file', 0, Length(B.NewLines));
+  B := FixBlock('f', ['a', 'b'], ['a', 'b']);
+  AssertEquals('no change', 0, Length(B.NewLines) + Length(B.OldLines));
+  { Written and undone as a discard. }
+  WriteFile('f.txt', 'a'#10'b'#10'c');
+  B := FixBlock(IncludeTrailingPathDelimiter(FDir) + 'f.txt', ['a', 'b', 'c'], ['a', 'B', 'c']);
+  AssertTrue(Error, DiscardBlock(B, Error));
+  L := TStringList.Create;
+  try
+    L.LoadFromFile(B.FileName);
+    AssertEquals('B', L[1]);
+    AssertTrue(Error, DiscardBlock(Swapped(B), Error));
+    L.LoadFromFile(B.FileName);
+    AssertEquals('b', L[1]);
+    { An insert into a file changed where it goes is refused. }
+    B := FixBlock(B.FileName, ['a', 'b', 'c'], ['a', 'n', 'b', 'c']);
+    WriteFile('f.txt', 'z'#10'b'#10'c');
+    AssertFalse('stale insert', DiscardBlock(B, Error));
+  finally
+    L.Free;
+  end;
+end;
+
+procedure TAiTest.TestFixJob;
+var
+  AI: TGittanAI;
+  Job: TGittanFixJob;
+  Finding: TGittanReviewThread;
+begin
+  WriteFile('a.pas', 'one'#10'two'#10'three');
+  Git(['add', '.']);
+  Git(['commit', '-q', '-m', 'Add a']);
+  WriteFile('a.pas', 'one'#10'two changed'#10'three');
+  Finding := Default(TGittanReviewThread);
+  Finding.Path := 'a.pas';
+  Finding.Line := 2;
+  Finding.Severity := 'bug';
+  SetLength(Finding.Comments, 1);
+  Finding.Comments[0].Body := 'Two is wrong.';
+  TFakeAI.Reset;
+  TFakeAI.Answers := ['<find>'#10'two changed'#10'</find>'#10'<replace>'#10'two fixed'#10 +
+    '</replace>'#10'<why>Fixed two.</why>'];
+  AI := TFakeAI.Create('', '', 'fake');
+  try
+    Job := TGittanFixJob.Create(FDir, AI, '', Finding);
+  finally
+    AI.Free;
+  end;
+  try
+    Job.OnDone := @JobDone;
+    FDone := 0;
+    Job.Start;
+    Job.WaitFor;
+    CheckSynchronize(0);
+    AssertEquals(1, FDone);
+    AssertTrue(Job.Error, Job.Ok);
+    AssertTrue(TFakeAI.Tasks[0] = atFix);
+    AssertTrue('the finding', Pos('on line 2 of a.pas, a bug:', TFakeAI.Inputs[0]) > 0);
+    AssertTrue('the body', Pos('Two is wrong.', TFakeAI.Inputs[0]) > 0);
+    AssertTrue('the diff', Pos('+two changed', TFakeAI.Inputs[0]) > 0);
+    AssertTrue('the file numbered', Pos('2: two changed', TFakeAI.Inputs[0]) > 0);
+    AssertTrue(Job.Changed);
+    AssertEquals(2, Job.Block.Line);
+    AssertEquals('two changed', Job.Block.NewLines[0]);
+    AssertEquals('two fixed', Job.Block.OldLines[0]);
+    AssertEquals('Fixed two.', Job.Why);
+  finally
+    Job.Free;
+  end;
+end;
+
+procedure TAiTest.TestWhyInput;
+var
+  Text, Error: string;
+begin
+  WriteFile('a.pas', 'one'#10'two'#10'three');
+  Git(['add', '.']);
+  Git(['commit', '-q', '-m', 'Add a']);
+  WriteFile('a.pas', 'one'#10'two, because of the bug'#10'three');
+  Git(['commit', '-q', '-am', 'Fix two'#10#10'Two was wrong.']);
+  WriteFile('a.pas', 'one changed'#10'two, because of the bug'#10'three');
+  Git(['commit', '-q', '-am', 'Change one']);
+  AssertTrue(Error, WhyInput(FDir, 'a.pas', 'HEAD', 2, 2, Text, Error));
+  AssertTrue('the line', Pos('The lines 2 to 2 of a.pas:' + LineEnding +
+    'two, because of the bug' + LineEnding, Text) > 0);
+  AssertTrue('the commit that changed it, its body too', Pos('Two was wrong.', Text) > 0);
+  AssertTrue('its diff', Pos('+two, because of the bug', Text) > 0);
+  AssertTrue('the first', Pos('Add a', Text) > 0);
+  AssertEquals('a commit that did not touch it', 0, Pos('Change one', Text));
+  AssertFalse('a file git does not have', WhyInput(FDir, 'b.pas', 'HEAD', 1, 1, Text, Error));
+end;
+
+procedure TAiTest.TestWhyJob;
+var
+  AI: TGittanAI;
+  Job: TGittanWhyJob;
+begin
+  WriteFile('a.pas', 'one'#10'two');
+  Git(['add', '.']);
+  Git(['commit', '-q', '-m', 'Add a']);
+  TFakeAI.Reset;
+  TFakeAI.Answers := [#10'It came in with **abc1234**.'#13#10#10];
+  AI := TFakeAI.Create('', '', 'fake');
+  try
+    Job := TGittanWhyJob.Create(FDir, AI, 'a.pas', 'HEAD', 1, 2);
+  finally
+    AI.Free;
+  end;
+  try
+    Job.OnDone := @JobDone;
+    FDone := 0;
+    Job.Start;
+    Job.WaitFor;
+    CheckSynchronize(0);
+    AssertEquals(1, FDone);
+    AssertTrue(Job.Error, Job.Ok);
+    AssertTrue(TFakeAI.Tasks[0] = atWhy);
+    AssertTrue(Pos('Add a', TFakeAI.Inputs[0]) > 0);
+    AssertEquals('It came in with **abc1234**.', Job.Text);
   finally
     Job.Free;
   end;

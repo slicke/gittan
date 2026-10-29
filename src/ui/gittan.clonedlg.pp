@@ -28,7 +28,7 @@ function FolderHasEntries(const ADir: string): boolean;
 implementation
 
 uses
-  Graphics, Clipbrd, gittan.git;
+  Graphics, Clipbrd, gittan.git, gittan.pathfield;
 
 resourcestring
   rsCloneTitle = 'Clone Repository';
@@ -235,6 +235,7 @@ end;
 procedure TCloneForm.DoShow;
 begin
   inherited DoShow;
+  ShowPathEnd(FParent);
   if FUrl.Text = '' then
     ActiveControl := FUrl
   else
@@ -315,7 +316,10 @@ begin
     if DirectoryExists(Trim(FParent.Text)) then
       D.InitialDir := Trim(FParent.Text);
     if D.Execute then
+    begin
       FParent.Text := D.FileName;
+      ShowPathEnd(FParent);
+    end;
   finally
     D.Free;
   end;

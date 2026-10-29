@@ -59,6 +59,9 @@ begin
   FSubTree.ReadOnly := True;
   FSubTree.Options := FileTree.Options;
   FSubTree.OnSelectionChanged := @SubTreeSelectionChanged;
+  FSubTree.ShowHint := True;
+  FSubTree.OnMouseMove := @SubTreeMouseMove;
+  FSubTree.OnMouseLeave := @FileTreeMouseLeave;
   FSubTree.Align := alClient;
   FSubTree.Parent := FSubPanel;
   { A right click selects the row, so the menu acts on the one shown. }
@@ -200,9 +203,75 @@ begin
     smBehind: Result := Result + '  ↓' + IntToStr(Info.Behind);
     smAhead: Result := Result + '  ↑' + IntToStr(Info.Ahead);
     smDiverged: Result := Result + '  ↓' + IntToStr(Info.Behind) + ' ↑' + IntToStr(Info.Ahead);
-    smNotFetched: Result := Result + '  ↓';
+    smNotFetched: Result := Result + '  ↓?';
     smFailed: Result := Result + '  ⚠';
   end;
+end;
+
+function CommitCount(ACount: integer): string;
+begin
+  if ACount = 1 then
+    Result := rsOneCommit
+  else
+    Result := Format(rsCommitsCount, [ACount]);
+end;
+
+{ What the arrow after a submodule's row says, in words, and how it
+  moved in the work tree when it did. }
+function TRepoFrame.SubmoduleHint(AIndex: integer): string;
+var
+  Info: TGittanSubmoduleInfo;
+  Branch, Err: string;
+  i: integer;
+begin
+  Result := '';
+  if (AIndex < 0) or (AIndex > High(FSubmodules)) then
+    Exit;
+  Branch := FSubmodules[AIndex].Branch;
+  { branch = . follows the superproject's branch. }
+  if Branch = '.' then
+    Branch := FBranch;
+  if Branch = '' then
+    Branch := rsSubHintDefaultBranch;
+  if AIndex <= High(FSubInfos) then
+  begin
+    Info := FSubInfos[AIndex];
+    case Info.State of
+      smUpToDate: Result := Format(rsSubHintUpToDate, [Branch]);
+      smBehind: Result := Format(rsSubHintBehind, [Branch, CommitCount(Info.Behind)]) +
+          ' ' + rsSubHintUpdate;
+      smAhead: Result := Format(rsSubHintAhead, [CommitCount(Info.Ahead), Branch]);
+      smDiverged: Result := Format(rsSubHintDiverged,
+          [Branch, CommitCount(Info.Behind), CommitCount(Info.Ahead)]);
+      smNotFetched: Result := Format(rsSubHintNotFetched, [Branch]) + ' ' + rsSubHintUpdate;
+      smFailed:
+      begin
+        Err := Trim(Info.Error);
+        i := Pos(#10, Err);
+        if i > 0 then
+          Err := TrimRight(Copy(Err, 1, i - 1));
+        Result := Format(rsSubHintFailed, [Err]);
+      end;
+    end;
+  end;
+  if SubmoduleMoveText(AIndex) <> '' then
+  begin
+    if Result <> '' then
+      Result := Result + LineEnding;
+    Result := Result + Format(rsHintSubmodule, [SubmoduleMoveText(AIndex)]);
+  end;
+end;
+
+procedure TRepoFrame.SubTreeMouseMove(Sender: TObject; Shift: TShiftState; X, Y: integer);
+var
+  Node: TTreeNode;
+  Tip: string;
+begin
+  Tip := '';
+  Node := FSubTree.GetNodeAt(X, Y);
+  if (Node <> nil) and (Node.Data <> nil) then
+    Tip := SubmoduleHint(integer(PtrUInt(Node.Data)) - 1);
+  SetTreeHint(FSubTree, Node, Tip);
 end;
 
 { One row per submodule, Data its index + 1; the shown one stays
@@ -530,7 +599,7 @@ begin
         if Index >= 0 then
           List := List + ' → ' + Copy(FSubmodules[Index].Recorded, 1, 7);
       end;
-      if QuestionDlg(rsSubUpdateTitle, rsSubUpdateMoved + LineEnding + List + LineEnding +
+      if AskDlg(rsSubUpdateTitle, rsSubUpdateMoved + LineEnding + List + LineEnding +
         LineEnding + rsSubUpdateMovedKeep, mtWarning, [mrYes, rsSubUpdateAction, mrCancel,
         rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
         Exit;

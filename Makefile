@@ -80,17 +80,22 @@ VENDOR_PACKAGES := \
   vendor/metadarkstyle/metadarkstyle.lpk \
   vendor/lazink/lazink.lpk
 
-# Application icon. icons/gittan-source.png is the artwork, the motif cut out
-# of its background, and icons/gittan-source-mac.png the motif on its macOS
-# tile; `make icons` sizes them with tools/makeicons.swift (macOS only) into
-# icons/gittan.png, icons/png/, icons/Gittan.icns and Gittan.ico. Lazarus
+# Application icon. The artwork comes finished: icons/gittan-mac.png is the
+# macOS icon at 1024 pixels and icons/png/gittan-<n>.png the Windows and Linux
+# one at each size; `make icons` packs them with tools/makeicons.swift (macOS
+# only) into icons/Gittan.icns and Gittan.ico. Lazarus
 # compiles Gittan.ico into the executable for Windows and Linux, but writes no
 # icon into the macOS bundle it creates, so every Darwin build copies the .icns
 # into Gittan.app and names it in Info.plist. A fresh bundle's Info.plist has
 # the project title as CFBundleName with its "&" unescaped, which no plist
 # reader accepts; escape it and name the bundle Gittan before adding the icon.
-ICON_SRC ?= icons/gittan-source.png
-ICON_MAC_SRC ?= icons/gittan-source-mac.png
+# macOS 26 and later take the icon from icons/Assets.car instead (named by
+# CFBundleIconName), which `make icons` compiles from the Icon Composer document
+# icons/Gittan.icon with Xcode's actool; without it they put the .icns on a
+# grey tile of their own.
+ICON_MAC_SRC ?= icons/gittan-mac.png
+ICON_PNG_DIR ?= icons/png
+ACTOOL ?= $(or $(wildcard /Applications/Xcode.app/Contents/Developer/usr/bin/actool),$(shell xcrun --find actool 2>/dev/null),actool)
 BUNDLE := Gittan.app
 ifeq ($(shell uname -s),Darwin)
 define bundle_icon
@@ -98,10 +103,13 @@ define bundle_icon
 	if [ -d "$(BUNDLE)/Contents" ]; then \
 	  mkdir -p "$(BUNDLE)/Contents/Resources"; \
 	  cp icons/Gittan.icns "$(BUNDLE)/Contents/Resources/Gittan.icns"; \
+	  cp icons/Assets.car "$(BUNDLE)/Contents/Resources/Assets.car"; \
 	  sed -i '' -E 's/&([^a-zA-Z#]|$$)/\&amp;\1/g' "$$plist"; \
 	  /usr/libexec/PlistBuddy -c 'Set :CFBundleName Gittan' "$$plist"; \
 	  /usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$$plist" >/dev/null 2>&1 || \
 	    /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string Gittan.icns' "$$plist"; \
+	  /usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$$plist" >/dev/null 2>&1 || \
+	    /usr/libexec/PlistBuddy -c 'Add :CFBundleIconName string Gittan' "$$plist"; \
 	  plutil -lint "$$plist" >/dev/null; \
 	  touch "$(BUNDLE)"; \
 	fi
@@ -111,7 +119,7 @@ define bundle_icon
 endef
 endif
 
-.PHONY: all build debug rebuild run clean help lexlib icons test deps ide
+.PHONY: all build debug rebuild run clean help lexlib icons wordmark dialogicon test deps ide
 
 all: build
 
@@ -125,7 +133,9 @@ help:
 	@echo "  lexlib    Copy the lexers from $(LEXERS_SRC) and $(LEXERS_OWN) into $(LEXLIB)/ (part of every build)"
 	@echo "  deps      Register the vendored packages with lazbuild and compile them"
 	@echo "  ide       Rebuild the Lazarus IDE (after ATSynEdit, ATFlatControls, EncConv or BGRABitmap moves)"
-	@echo "  icons     Regenerate the icons from ICON_SRC=$(ICON_SRC) and ICON_MAC_SRC=$(ICON_MAC_SRC) (macOS only)"
+	@echo "  wordmark  Write src/ui/gittan.wordmark.inc from icons/gittan-wordmark.svg"
+	@echo "  dialogicon Write src/ui/gittan.dialogicon.inc from icons/dialog/gittan-dialog-<n>.png"
+	@echo "  icons     Pack Gittan.icns and Gittan.ico from ICON_MAC_SRC=$(ICON_MAC_SRC) and ICON_PNG_DIR=$(ICON_PNG_DIR) (macOS only)"
 	@echo "  clean     Remove lib/, $(LEXLIB)/, the test build and the binary"
 	@echo "Current: WIDGETSET=$(WIDGETSET) LAZBUILD=$(LAZBUILD)"
 
@@ -153,7 +163,41 @@ ide:
 	"$(LAZBUILD)" --build-ide=
 
 icons:
-	swift tools/makeicons.swift "$(ICON_SRC)" "$(ICON_MAC_SRC)" icons Gittan.ico
+	swift tools/makeicons.swift "$(ICON_MAC_SRC)" "$(ICON_PNG_DIR)" icons Gittan.ico
+	@set -e; out=$$(mktemp -d); \
+	"$(ACTOOL)" "$(CURDIR)/icons/Gittan.icon" --compile "$$out" --platform macosx \
+	  --minimum-deployment-target 11.0 --app-icon Gittan \
+	  --output-partial-info-plist "$$out/partial.plist" >/dev/null; \
+	cp "$$out/Assets.car" icons/Assets.car; rm -rf "$$out"; \
+	echo "wrote icons/Assets.car"
+
+# The welcome view's wordmark, icons/gittan-wordmark.svg, as a Pascal string
+# constant (src/ui/gittan.wordmark.inc, kept in git, so a build needs neither
+# this rule nor awk): one line of the constant per element.
+wordmark:
+	awk 'BEGIN { print "{ Made from icons/gittan-wordmark.svg by make wordmark. }" } \
+	  { gsub(/></, ">\n<"); n = split($$0, L, "\n"); \
+	    for (i = 1; i <= n; i++) { gsub(/\x27/, "\x27\x27", L[i]); print "  \x27" L[i] "\x27 +" } } \
+	  END { print "  \x27\x27" }' icons/gittan-wordmark.svg > src/ui/gittan.wordmark.inc
+
+# The dialogs' icon, icons/dialog/gittan-dialog-<n>.png (48, 96 and 144
+# pixels, rendered from icons/gittan-dialog.svg with Chrome headless; see
+# spec/icon.md), as Pascal byte arrays (src/ui/gittan.dialogicon.inc, kept
+# in git, so a build needs neither this rule nor od and awk).
+DIALOG_ICON_SIZES = 48 96 144
+dialogicon:
+	@set -e; out=src/ui/gittan.dialogicon.inc; \
+	echo "{ Made from icons/dialog/gittan-dialog-<n>.png by make dialogicon. }" > $$out; \
+	echo "const" >> $$out; \
+	for n in $(DIALOG_ICON_SIZES); do \
+	  f=icons/dialog/gittan-dialog-$$n.png; len=$$(wc -c < $$f | tr -d ' '); \
+	  echo "  DialogIcon$$n: array[0..$$((len - 1))] of byte = (" >> $$out; \
+	  od -An -v -tu1 $$f | awk -v total=$$len '{ for (i = 1; i <= NF; i++) { k++; \
+	    printf "%s%s", (c == 0 ? "    " : ""), $$i (k < total ? "," : ""); \
+	    if (++c == 20) { print ""; c = 0 } } } END { if (c) print "" }' >> $$out; \
+	  echo "  );" >> $$out; \
+	done; \
+	echo "wrote $$out"
 
 lexlib:
 	@if [ ! -d "$(LEXERS_SRC)/Pascal" ]; then \

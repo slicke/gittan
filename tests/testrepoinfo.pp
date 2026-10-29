@@ -186,20 +186,37 @@ begin
   AssertTrue('a file named test', FileCategory('test') = fcCode);
   AssertTrue('testing folder', FileCategory('testing/a.pp') = fcCode);
   AssertTrue('contest', FileCategory('contest.pp') = fcCode);
+  AssertTrue('npm manifest', FileCategory('package.json') = fcConfig);
+  AssertTrue('npm lock', FileCategory('web/package-lock.json') = fcConfig);
+  AssertTrue('composer lock', FileCategory('composer.lock') = fcConfig);
+  AssertTrue('yarn lock', FileCategory('yarn.lock') = fcConfig);
+  AssertTrue('yaml', FileCategory('.github/workflows/ci.YML') = fcConfig);
+  AssertTrue('gemfile', FileCategory('Gemfile') = fcConfig);
+  AssertTrue('makefile', FileCategory('Makefile') = fcConfig);
+  AssertTrue('cmake', FileCategory('src/CMakeLists.txt') = fcConfig);
+  AssertTrue('requirements over text', FileCategory('requirements.txt') = fcConfig);
+  AssertTrue('dotfile', FileCategory('.gitignore') = fcConfig);
+  AssertTrue('dot script', FileCategory('.eslintrc.js') = fcCode);
+  AssertTrue('a manifest under tests', FileCategory('tests/fixture/package.json') = fcTest);
+  AssertTrue('forge template', FileCategory('.github/ISSUE_TEMPLATE/bug.md') = fcConfig);
+  AssertTrue('forge script', FileCategory('.gitlab/ci/build.sh') = fcConfig);
+  AssertTrue('forge folder deeper', FileCategory('src/.github/a.md') = fcDocs);
 end;
 
 procedure TRepoInfoTest.TestParseComposition;
 var
   C: TGittanComposition;
 begin
-  C := ParseComposition('a.pp'#0'b.png'#0'tests/t.pp'#0'README.md'#0,
-    'a.pp'#0'120'#10'tests/t.pp'#0'30'#10'README.md'#0'8'#10);
+  C := ParseComposition('a.pp'#0'b.png'#0'tests/t.pp'#0'README.md'#0'package.json'#0,
+    'a.pp'#0'120'#10'tests/t.pp'#0'30'#10'README.md'#0'8'#10'package.json'#0'12'#10);
   AssertEquals('code files', 2, C[fcCode].Files);
   AssertEquals('code lines', 120, C[fcCode].Lines);
   AssertEquals('test files', 1, C[fcTest].Files);
   AssertEquals('test lines', 30, C[fcTest].Lines);
   AssertEquals('doc files', 1, C[fcDocs].Files);
   AssertEquals('doc lines', 8, C[fcDocs].Lines);
+  AssertEquals('config files', 1, C[fcConfig].Files);
+  AssertEquals('config lines', 12, C[fcConfig].Lines);
   C := ParseComposition('', '');
   AssertEquals('none', 0, C[fcCode].Files);
   { A line feed in a name: the lines stay with the whole name. }

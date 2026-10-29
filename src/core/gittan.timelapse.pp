@@ -21,9 +21,23 @@ const
   {** The most commits a time-lapse goes back over, newest first; each
     keeps a version of the file. }
   TimelapseMax = 1000;
+  {** Every how many versions one is kept whole; the ones between are
+    made again from it when asked for (TGittanTimelapse.Lines). }
+  TimelapseMarkEvery = 32;
 
 type
   TGittanEntryIds = array of integer;
+
+  {** One hunk's change from a version to the one before it: Drop
+    entries of the newer version taken out from At on, Put put in their
+    place. }
+  TGittanLapseEdit = record
+    At, Drop: integer;
+    Put: TGittanEntryIds;
+  end;
+  {** A commit's edits, in order, as the version it left becomes the one
+    before it. }
+  TGittanLapseStep = array of TGittanLapseEdit;
 
   { TGittanTimelapse }
 
@@ -32,12 +46,21 @@ type
     shared by the versions that have it; Born is the commit it came in
     with (the oldest one for a line that was there before the history
     begins), Died the one that took it away, -1 for a line still there.
-    Commits are counted as in the history, newest first. }
+    Commits are counted as in the history, newest first. Only every
+    TimelapseMarkEvery-th version is kept whole (FMarks), with each
+    commit's edits (FSteps), so a long history of a long file holds about
+    as much as its changes rather than a copy of the file per commit. }
   TGittanTimelapse = class
   private
     FTexts: TStringArray;
     FBorn, FDied: TGittanEntryIds;
-    FVersions: array of TGittanEntryIds;
+    FCount: integer;
+    FMarks: array of TGittanEntryIds;
+    FSteps: array of TGittanLapseStep;
+    { The version Lines made last, which the next one older than it in
+      the same stretch is made from. }
+    FCacheAt: integer;
+    FCache: TGittanEntryIds;
     function NewEntry(const AText: string): integer;
   public
     {** Makes the versions from AText, the file as the newest commit of
@@ -48,7 +71,8 @@ type
     function Build(AHistory: TGittanHistory; const AText: string): boolean;
     {** How many versions there are, one per commit. }
     function Count: integer;
-    {** The entries of the version of commit ACommit, in order. }
+    {** The entries of the version of commit ACommit, in order, made
+      from the version kept whole at or after it. }
     function Lines(ACommit: integer): TGittanEntryIds;
     function Text(AEntry: integer): string;
     function Born(AEntry: integer): integer;
@@ -111,12 +135,46 @@ begin
   FDied[Result] := -1;
 end;
 
+{ ANewer with AStep's edits: the version before it. }
+function ApplyStep(const ANewer: TGittanEntryIds; const AStep: TGittanLapseStep): TGittanEntryIds;
+var
+  e, i, n, From: integer;
+begin
+  n := Length(ANewer);
+  for e := 0 to High(AStep) do
+    n := n + Length(AStep[e].Put) - AStep[e].Drop;
+  SetLength(Result, n);
+  n := 0;
+  From := 0;
+  for e := 0 to High(AStep) do
+  begin
+    for i := From to AStep[e].At - 1 do
+    begin
+      Result[n] := ANewer[i];
+      Inc(n);
+    end;
+    for i := 0 to High(AStep[e].Put) do
+    begin
+      Result[n] := AStep[e].Put[i];
+      Inc(n);
+    end;
+    From := AStep[e].At + AStep[e].Drop;
+  end;
+  for i := From to High(ANewer) do
+  begin
+    Result[n] := ANewer[i];
+    Inc(n);
+  end;
+end;
+
 function TGittanTimelapse.Build(AHistory: TGittanHistory; const AText: string): boolean;
 var
-  Newer, Older: TGittanEntryIds;
+  Newer: TGittanEntryIds;
+  Step: TGittanLapseStep;
+  Edit: TGittanLapseEdit;
   Hunk: TGittanHistoryHunk;
   Line: string;
-  c, h, i, n, At, Adds, Start, Kept: integer;
+  c, h, i, n, Puts, At, Adds, Start: integer;
   Fits: boolean;
 
   procedure Add(var AList: TGittanEntryIds; var ACount: integer; AEntry: integer);
@@ -127,11 +185,29 @@ var
     Inc(ACount);
   end;
 
+  { The edit under way, when it changes anything, as the step's next;
+    the next edit starts at At. }
+  procedure Flush;
+  begin
+    if (Edit.Drop > 0) or (Puts > 0) then
+    begin
+      SetLength(Edit.Put, Puts);
+      Insert(Edit, Step, Length(Step));
+    end;
+    Edit := Default(TGittanLapseEdit);
+    Edit.At := At;
+    Puts := 0;
+  end;
+
 begin
   FTexts := nil;
   FBorn := nil;
   FDied := nil;
-  FVersions := nil;
+  FMarks := nil;
+  FSteps := nil;
+  FCount := 0;
+  FCacheAt := -1;
+  FCache := nil;
   Result := AHistory.Count > 0;
   if not Result then
     Exit;
@@ -141,19 +217,21 @@ begin
   while NextLine(AText, i, Line) do
     Add(Newer, n, NewEntry(Line));
   SetLength(Newer, n);
-  Kept := AHistory.Count;
-  SetLength(FVersions, Kept);
+  FCount := AHistory.Count;
+  SetLength(FSteps, FCount);
   for c := 0 to AHistory.Count - 1 do
   begin
-    FVersions[c] := Newer;
+    if c mod TimelapseMarkEvery = 0 then
+      Insert(Newer, FMarks, Length(FMarks));
     for i := 0 to High(Newer) do
       FBorn[Newer[i]] := c;
     if c = AHistory.Count - 1 then
       Break;
     { The version before commit c, which the next older commit left. }
-    Older := nil;
-    n := 0;
+    Step := nil;
     At := 0;
+    Edit := Default(TGittanLapseEdit);
+    Puts := 0;
     Fits := True;
     for h := 0 to High(AHistory.Commits[c].Hunks) do
     begin
@@ -171,11 +249,8 @@ begin
         Fits := False;
         Break;
       end;
-      while At < Start do
-      begin
-        Add(Older, n, Newer[At]);
-        Inc(At);
-      end;
+      At := Start;
+      Flush;
       for i := 0 to High(Hunk.Lines) do
       begin
         Line := Copy(Hunk.Lines[i], 2, MaxInt);
@@ -187,11 +262,12 @@ begin
                 Fits := False;
                 Break;
               end;
+              Inc(Edit.Drop);
               Inc(At);
             end;
           '-':
             begin
-              Add(Older, n, NewEntry(Line));
+              Add(Edit.Put, Puts, NewEntry(Line));
               FDied[High(FTexts)] := c;
             end;
           ' ':
@@ -201,41 +277,57 @@ begin
                 Fits := False;
                 Break;
               end;
-              Add(Older, n, Newer[At]);
+              Flush;
               Inc(At);
+              Edit.At := At;
             end;
         end;
       end;
       if not Fits then
         Break;
+      Flush;
     end;
     if not Fits then
     begin
-      Kept := c + 1;
+      FCount := c + 1;
       Break;
     end;
-    while At <= High(Newer) do
-    begin
-      Add(Older, n, Newer[At]);
-      Inc(At);
-    end;
-    SetLength(Older, n);
-    Newer := Older;
+    FSteps[c] := Step;
+    Newer := ApplyStep(Newer, Step);
   end;
-  SetLength(FVersions, Kept);
-  AHistory.Truncate(Kept);
+  SetLength(FSteps, FCount);
+  AHistory.Truncate(FCount);
 end;
 
 function TGittanTimelapse.Count: integer;
 begin
-  Result := Length(FVersions);
+  Result := FCount;
 end;
 
+{ A version is made from the last one asked for when that is newer in
+  the same stretch, which stepping back through the history is, else
+  from the stretch's mark. }
 function TGittanTimelapse.Lines(ACommit: integer): TGittanEntryIds;
+var
+  From, s: integer;
 begin
-  if (ACommit < 0) or (ACommit > High(FVersions)) then
+  if (ACommit < 0) or (ACommit >= FCount) then
     Exit(nil);
-  Result := FVersions[ACommit];
+  if (FCacheAt >= 0) and (FCacheAt <= ACommit) and
+    (FCacheAt div TimelapseMarkEvery = ACommit div TimelapseMarkEvery) then
+  begin
+    From := FCacheAt;
+    Result := FCache;
+  end
+  else
+  begin
+    From := ACommit div TimelapseMarkEvery * TimelapseMarkEvery;
+    Result := FMarks[ACommit div TimelapseMarkEvery];
+  end;
+  for s := From to ACommit - 1 do
+    Result := ApplyStep(Result, FSteps[s]);
+  FCacheAt := ACommit;
+  FCache := Result;
 end;
 
 function TGittanTimelapse.Text(AEntry: integer): string;
@@ -274,13 +366,27 @@ end;
 procedure TGittanTimelapseJob.Execute;
 var
   Repo: TGittanRepo;
-  Log, Text: string;
+  Log, Text, Ref: string;
+  Size: int64;
 begin
   Repo := TGittanRepo.Create;
   try
     if not Repo.Open(FRoot) then
     begin
       FError := Repo.Error;
+      Exit;
+    end;
+    { A file the commit lacks (untracked, or added since) has no history
+      to play: no time-lapse and no error, rather than git's "exists on
+      disk, but not in 'HEAD'". A ref that names no commit is git's
+      error; HEAD may name none yet in a new repository. }
+    Ref := FRef;
+    if Ref = '' then
+      Ref := 'HEAD';
+    if not Repo.FileSize(FPath, Ref, Size) then
+    begin
+      if (FRef <> '') and not Repo.HasCommit(FRef) then
+        FError := Format(rsNoSuchCommit, [FRef]);
       Exit;
     end;
     if not Repo.FileTimeline(FPath, FRef, TimelapseMax, Log, Text) or Terminated then

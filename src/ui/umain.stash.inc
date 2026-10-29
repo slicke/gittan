@@ -165,7 +165,7 @@ begin
     end;
     SetLength(Values, 1);
     Values[0] := '';
-    if not InputQuery(rsStashTitle, [Prompt], Values) then
+    if not AskInput(rsStashTitle, '', [Prompt], Values, nil, rsStashAction, True) then
       Exit;
     Before := Length(FStashes);
     StopWatcher;
@@ -238,7 +238,7 @@ procedure TRepoFrame.DropStashAsk(AStash: TGittanStash);
 begin
   if (FCommitJob <> nil) or (FRemoteJob <> nil) then
     Exit;
-  if QuestionDlg(rsDropStashTitle, Format(rsDropStashAsk, [StashLabel(AStash)]), mtWarning,
+  if AskDlg(rsDropStashTitle, Format(rsDropStashAsk, [StashLabel(AStash)]), mtWarning,
     [mrYes, rsDropAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
     Exit;
   StopWatcher;
@@ -266,7 +266,8 @@ begin
     Exit;
   SetLength(Values, 1);
   Values[0] := '';
-  if not InputQuery(rsStashBranchTitle, [rsStashBranchPrompt], Values) or
+  if not AskInput(rsStashBranchTitle, '', [rsStashBranchPrompt], Values, @CheckNewBranch,
+    rsCaBranchAction) or
     (Trim(Values[0]) = '') then
     Exit;
   StopWatcher;
@@ -400,5 +401,5 @@ end;
 procedure TRepoFrame.MenuStashListClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
-    ShowStashList(FStatus.PartScreenRect(spStash));
+    ShowStashList(MenuListAnchor);
 end;

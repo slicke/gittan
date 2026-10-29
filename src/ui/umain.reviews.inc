@@ -417,6 +417,23 @@ begin
     FShown := Concat(FShown, FAIThreads);
 end;
 
+{ The link at the right end of a card's first row: the thread on the
+  forge, or for an AI finding that is open, while the work tree is what
+  is compared, Fix (Stop Fixing while the agent fixes it); '' for none. }
+function TRepoFrame.CardLink(AThread: integer): string;
+begin
+  Result := '';
+  with FShown[AThread] do
+    if Comments[0].Url <> '' then
+      Result := Format(rsReviewLink, [ForgeName])
+    else if (Agent <> '') and (Severity <> WhySeverity) and not Resolved and AIAvailable and
+      not FRepo.IsRange then
+      if (FFixJob <> nil) and (FFixKey = FindingKey(FShown[AThread])) then
+        Result := rsFixStopLink
+      else
+        Result := rsFixLink;
+end;
+
 { What keeps a thread's fold apart from its default: the address of its
   first comment. }
 function TRepoFrame.ThreadId(AThread: integer): string;
@@ -446,6 +463,8 @@ begin
     Result := rsSeverityRisk
   else if ASeverity = 'question' then
     Result := rsSeverityQuestion
+  else if ASeverity = WhySeverity then
+    Result := rsSeverityHistory
   else
     Result := ASeverity;
 end;
@@ -1035,6 +1054,7 @@ var
   Fill, Border, Dim, Accent, CodeFill: TColor;
   i, y, H, Kind, W, Side, Right, Indent, k: integer;
   First, HasLink: boolean;
+  Link: string;
 begin
   Ed := TATSynEdit(Sender);
   C.Brush.Style := bsSolid;
@@ -1064,7 +1084,8 @@ begin
     Dim := RGBToColor(110, 110, 110);
     CodeFill := RGBToColor(234, 238, 242);
   end;
-  HasLink := FShown[AGap.Tag].Comments[0].Url <> '';
+  Link := CardLink(AGap.Tag);
+  HasLink := Link <> '';
   if not ThreadOpen(AGap.Tag) or FShown[AGap.Tag].Resolved or
     FShown[AGap.Tag].Outdated then
     Accent := Border
@@ -1140,7 +1161,7 @@ begin
       begin
         { The link takes the right end of the first header. }
         ReviewFont(C, rlNote);
-        Right := Right - C.TextWidth(Format(rsReviewLink, [ForgeName])) - ReviewPadX;
+        Right := Right - C.TextWidth(Link) - ReviewPadX;
         ReviewFont(C, Kind);
         if Kind = rlFolded then
           C.Font.Color := Dim
@@ -1155,11 +1176,13 @@ begin
       begin
         First := False;
         ReviewFont(C, rlNote);
-        C.Font.Color := FLinkColor;
+        if FShown[AGap.Tag].Agent <> '' then
+          C.Font.Color := AgentColor
+        else
+          C.Font.Color := FLinkColor;
         C.Brush.Color := Fill;
         C.Brush.Style := bsSolid;
-        C.TextOut(Card.Right - ReviewPadX - C.TextWidth(Format(rsReviewLink, [ForgeName])), y + 2,
-          Format(rsReviewLink, [ForgeName]));
+        C.TextOut(Card.Right - ReviewPadX - C.TextWidth(Link), y + 2, Link);
         C.Brush.Style := bsClear;
       end;
       Inc(y, H);
@@ -1171,7 +1194,8 @@ begin
   end;
 end;
 
-{ A click on "GitHub ↗" opens the thread on GitHub, one on a link in a
+{ A click on "GitHub ↗" opens the thread on GitHub, one on a finding's
+  "✦ Fix" has the agent fix it (FixFindingClick), one on a link in a
   comment opens the link, one on the summary of a <details> block opens
   or closes the block; anywhere else on the card it folds or unfolds.
   APos is in the gap. }
@@ -1182,6 +1206,7 @@ var
   W, y, i, Kind, H, LinkLeft: integer;
   LinkDone: boolean;
   Hit: THTMLHitInfo;
+  Link: string;
 begin
   if (AGapItem = nil) or (AGapItem.Tag < 0) or (AGapItem.Tag > High(FShown)) then
     Exit;
@@ -1208,15 +1233,19 @@ begin
       if not LinkDone and (Kind in [rlHeader, rlFolded]) then
       begin
         LinkDone := True;
-        if FShown[AGapItem.Tag].Comments[0].Url <> '' then
+        Link := CardLink(AGapItem.Tag);
+        if Link <> '' then
         begin
           ReviewFont(FReviewMeasure.Canvas, rlNote);
           LinkLeft := ReviewMargin + W - ReviewPadX -
-            FReviewMeasure.Canvas.TextWidth(Format(rsReviewLink, [ForgeName]));
+            FReviewMeasure.Canvas.TextWidth(Link);
           if (APos.Y >= y) and (APos.Y < y + H) and (APos.X >= LinkLeft) and
             (APos.X <= ReviewMargin + W - ReviewPadX) then
           begin
-            OpenURL(FShown[AGapItem.Tag].Comments[0].Url);
+            if FShown[AGapItem.Tag].Comments[0].Url <> '' then
+              OpenURL(FShown[AGapItem.Tag].Comments[0].Url)
+            else
+              FixFindingClick(AGapItem.Tag);
             Exit;
           end;
         end;
@@ -1280,7 +1309,7 @@ end;
 
 { The threads of APath the tree marks it with: AOpen neither resolved
   nor outdated, AAll every one, of those the change view shows
-  (FShown). }
+  (FShown). An explanation of lines is no thread to review. }
 procedure TRepoFrame.FileThreads(const APath: string; out AOpen, AAll: integer);
 var
   t: integer;
@@ -1288,7 +1317,7 @@ begin
   AOpen := 0;
   AAll := 0;
   for t := 0 to High(FShown) do
-    if FShown[t].Path = APath then
+    if (FShown[t].Path = APath) and (FShown[t].Severity <> WhySeverity) then
     begin
       Inc(AAll);
       if not FShown[t].Resolved and not FShown[t].Outdated then

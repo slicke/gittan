@@ -27,7 +27,7 @@ uses
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.timelapse, gittan.timelapsebar, gittan.pickaxe, gittan.navhistory, gittan.undo, gittan.paletteside,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.textfile, gittan.sectionheader, gittan.hintbox,
-  gittan.forge, gittan.lfslocks,
+  gittan.forge, gittan.lfslocks, gittan.askdlg,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
   gittan.rebase, gittan.worktrees, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
@@ -94,6 +94,15 @@ type
       override;
   public
     property OnStateClick: TTVExpandedEvent read FOnStateClick write FOnStateClick;
+  end;
+
+  {** The commit message field. Cocoa draws no TextHint in a memo, so the
+    placeholder of gittan.memohint goes in whenever the field gets its
+    text view (InitializeWnd): the frame is made hidden and its window
+    shown later, so Init is too early. }
+  TCommitMemo = class(TMemo)
+  protected
+    procedure InitializeWnd; override;
   end;
 
   {** The colors the self-painted controls share in one appearance
@@ -214,6 +223,9 @@ type
     procedure FileTreeSelectionChanged(Sender: TObject);
     procedure FileTreeMouseMove(Sender: TObject; Shift: TShiftState; X, Y: integer);
     procedure FileTreeMouseLeave(Sender: TObject);
+    procedure SetTreeHint(ATree: TTreeView; ANode: TTreeNode; const ATip: string);
+    procedure SubTreeMouseMove(Sender: TObject; Shift: TShiftState; X, Y: integer);
+    function SubmoduleHint(AIndex: integer): string;
     procedure TreeHintTimerTimer(Sender: TObject);
   private
     { The window the frame is in, from Init. }
@@ -272,6 +284,31 @@ type
     FFindPopup: TGittanPopupList;
     FFoundFiles: TGittanFoundFiles;
     FFoundPick: TGittanFoundFile;
+    { A conflict resolved by the agent (umain.ai.inc): the job while it
+      runs, and the item of the conflict list that starts or stops it
+      (-1 while the list has none). }
+    FConflictJob: TGittanConflictJob;
+    FConflictAIItem: integer;
+    { Splitting the changes into commits (umain.ai.inc): File > Split
+      Changes into Commits, the job while it runs, the plan it gave
+      (pruned of what has been committed since, PrunePlan) and the list
+      it is picked from. }
+    FSplitItem: TMenuItem;
+    FSplitJob: TGittanSplitJob;
+    FCommitPlan: TGittanCommitPlan;
+    FPlanAgent: string;
+    FPlanPopup: TGittanPopupList;
+    { Fixing an AI finding (umain.ai.inc): the job while it runs and the
+      finding it fixes (FindingKey). }
+    FFixJob: TGittanFixJob;
+    FFixKey: string;
+    { Explaining lines (umain.ai.inc): Go > Explain Line History with AI
+      and the editor menu's, the job while it runs, the comparison it
+      was asked in (AIReviewKey) and the card it is to be, placed. }
+    FWhyItem, FWhyEditItem: TMenuItem;
+    FWhyJob: TGittanWhyJob;
+    FWhyKey: string;
+    FWhyThread: TGittanReviewThread;
     { The width of a tab in the editors, in characters. }
     FTabSize: integer;
     FSyntaxMenu, FAutoLexerItem, FPlainTextItem: TMenuItem;
@@ -457,6 +494,9 @@ type
     { FocusTreeAsync ran before the window was shown; FormActivate tries
       again. }
     FFocusTreePending: boolean;
+    { The branch Rename Branch asks a new name for, which its check
+      takes as no change rather than as a name taken. }
+    FRenamingBranch: string;
     { Abort and Skip for what git is in the middle of, and the merge
       message filled into the field (umain.conflicts.inc). }
     FAbortButton, FSkipButton: TButton;
@@ -634,10 +674,12 @@ type
       large one (IndexNext). }
     FIndexLoading: boolean;
     FHoverTimer: TTimer;
-    { The hint of the file under the mouse in the tree and the timer
-      that shows it, see FileTreeMouseMove. }
+    { The hint of the row under the mouse in the tree of changed files
+      or of submodules (FTreeHintTree) and the timer that shows it, see
+      FileTreeMouseMove and SubTreeMouseMove. }
     FTreeHint: string;
     FTreeHintNode: TTreeNode;
+    FTreeHintTree: TTreeView;
     FTreeHintTimer: TTimer;
     FHoverEd: TATSynEdit;
     FHoverWord: string;
@@ -718,6 +760,7 @@ type
     FViewItems: array of TMenuItem;
     FViewRows: array of integer;
     FCodeHistoryItem, FGoFileHistoryItem, FTimelapseItem: TMenuItem;
+    FOlderCommitItem, FNewerCommitItem: TMenuItem;
     { The submodules, dropped from the Repository page's tile when there
       is more than one; a pick shows that one's page. }
     FSubListPopup: TGittanPopupList;
@@ -749,10 +792,6 @@ type
     FPaletteItem: TMenuItem;
     FPalettePopup: TGittanPopupList;
     FPaletteNames: TStringList;
-    { While a row of the palette clicks its menu item: the focus is back
-      where it was, so an item that acts on the focused control by its
-      key (Go to Symbol) acts as the menu item instead. }
-    FPalettePicking: boolean;
     { The buttons left and right of the palette while it is open. }
     FPaletteLeft, FPaletteRight: TGittanPaletteSide;
     { Back and Forward (umain.nav.inc): the places left, the place shown
@@ -930,6 +969,10 @@ type
     FOverscrollArmed: boolean;
     FOverscrollTimer: TTimer;
     FPullFill, FPullBorder, FPullText, FPullBar: TColor;
+    { The block framed while its pills are up (see umain.discard.inc),
+      or -1, and the frame's color. }
+    FFramedBlock: integer;
+    FBlockFrame: TColor;
     { View > Blame (see umain.blame.inc): whether it is on, its menu item,
       the blames of the two sides of the shown file, the job that blames
       a file, the cache of the results (TGittanBlame per side and path,
@@ -951,6 +994,12 @@ type
       summary's card (see ShowBlameCommit). }
     FBlameCommit: TGittanCommitLine;
     FBlameBody: string;
+    { The rows the commit graph showed at its last pick, newest first,
+      and what its search field held: Older and Newer step through them
+      (CommitStepHash), and the graph opens on them again while one of
+      them is shown (ShowCommitGraph). }
+    FGraphTrail: TStringArray;
+    FGraphTrailFilter: string;
     { Go > Code History (see umain.history.inc): the commits shown, the
       job that fetches them, the file, the commit the lines are counted
       in (empty for HEAD), the lines (From 0 for the whole file), what
@@ -1053,6 +1102,7 @@ type
     procedure OpenJobDone(Sender: TObject);
     procedure AbandonOpenJob;
     procedure ClearRepositoryViews(const AError: string);
+    procedure ShowSidebar(AShown: boolean);
     procedure StartWatcher;
     procedure StopWatcher;
     function WatchPace: integer;
@@ -1131,9 +1181,12 @@ type
     procedure PullPageContext(Sender: TObject; const APull: TGittanPullRequest;
       const AScreenPos: TPoint);
     procedure PullCardMenuClick(Sender: TObject);
-    {** Whether AAction can be done to APull now: the forge acts, the
-      pull request is open (a draft for plReady, not for a merge), and
-      no action runs. }
+    {** Whether an action can be done to a pull request now, as far as
+      the frame goes: the forge acts, a repository is open and no action
+      runs. }
+    function PullActsNow: boolean;
+    {** Whether AAction can be done to APull now: PullActsNow, and the
+      pull request fits it (PullActionFits). }
     function CanPullAction(const APull: TGittanPullRequest; AAction: TGittanPullAction): boolean;
     {** Does AAction to APull on the forge: asks the words of a review
       (a request for changes and a comment need some) or whether to
@@ -1304,7 +1357,11 @@ type
     procedure RebuildKeeps;
     procedure SetChangeActions;
     procedure PillTimerTimer(Sender: TObject);
+    function PillRow: integer;
     procedure ShowDiscardPills;
+    procedure SetFramedBlock(ABlock: integer);
+    procedure DrawBlockFrame(AEd: TATSynEdit; C: TCanvas);
+    procedure PillsScrolled;
     function MouseOnDiscardPills: boolean;
     function MouseOnDiscardRows: boolean;
     procedure DiscardPillsPick(Sender: TObject; AIndex: integer);
@@ -1477,6 +1534,45 @@ type
     procedure FindPopupPick(Sender: TObject; AIndex: integer);
     procedure ShowFoundAsync(Data: PtrInt);
     procedure AbandonFindJob;
+    {** Asks the agent to resolve conflict AIndex of the shown file; its
+      lines are written over the conflict when they come
+      (WriteConflictBlock). }
+    procedure StartConflictJob(AIndex: integer);
+    procedure ConflictJobDone(Sender: TObject);
+    function EditingRepoPath(const ARelPath: string): boolean;
+    procedure AbandonConflictJob;
+    {** File > Split Changes into Commits while AIAvailable: enabled with
+      two files or more to choose from, or a plan held; from
+      UpdateMessageAction. }
+    procedure UpdateSplitItem;
+    procedure MenuSplitClick(Sender: TObject);
+    procedure StartSplitJob;
+    procedure SplitJobDone(Sender: TObject);
+    procedure AbandonSplitJob;
+    {** Drops from FCommitPlan the files no longer changed, and the
+      commits left with none. }
+    procedure PrunePlan;
+    procedure ShowPlan;
+    procedure PlanPopupPick(Sender: TObject; AIndex: integer);
+    {** Ticks the files of the plan's commit AIndex alone and puts its
+      message in the field. }
+    procedure ApplyPlannedCommit(AIndex: integer);
+    {** A click on a finding's Fix (FShown[AThread]): has the agent fix
+      it, or stops it while it does. }
+    procedure FixFindingClick(AThread: integer);
+    procedure FixJobDone(Sender: TObject);
+    procedure AbandonFixJob;
+    {** The link at the right end of the first row of FShown[AThread]'s
+      card, '' for none (see umain.reviews.inc). }
+    function CardLink(AThread: integer): string;
+    {** Has the agent explain how the lines of rows AFromRow to AToRow
+      of the change view came to be, as a card under the last; stops it
+      while it explains. }
+    procedure StartWhyJob(AFromRow, AToRow: integer);
+    procedure WhyJobDone(Sender: TObject);
+    procedure AbandonWhyJob;
+    procedure MenuWhyClick(Sender: TObject);
+    procedure MenuWhyEditClick(Sender: TObject);
     procedure MenuWrapClick(Sender: TObject);
     procedure MenuFoldClick(Sender: TObject);
     procedure ViewMenuClick(Sender: TObject);
@@ -1577,6 +1673,13 @@ type
     procedure AbandonChangeJob;
     procedure MenuCommitGraphClick(Sender: TObject);
     procedure GraphPick(Sender: TObject; const AHash: string);
+    function MenuListAnchor: TRect;
+    function CommitStepHash(AOlder: boolean): string;
+    procedure GoToCommitStep(AOlder: boolean);
+    procedure UpdateCommitSteps;
+    procedure SummaryCommitStep(Sender: TObject; AOlder: boolean);
+    procedure MenuOlderCommitClick(Sender: TObject);
+    procedure MenuNewerCommitClick(Sender: TObject);
     procedure PullChipClick(const AScreenRect: TRect);
     procedure PullPopupPick(Sender: TObject; AIndex: integer);
     procedure StartPullFetch(ANumber: integer; const ARemote, ABaseRef: string);
@@ -1619,7 +1722,6 @@ type
     procedure SetupSubmodules;
     procedure SetupCommit;
     procedure FocusTreeAsync(Data: PtrInt);
-    procedure CommitHintAsync(Data: PtrInt);
     procedure CommitHeaderCheck(Sender: TObject);
     procedure SetAllChosen(AValue: boolean);
     procedure MenuTickAllClick(Sender: TObject);
@@ -1705,6 +1807,13 @@ type
     procedure BranchMenuClick(Sender: TObject);
     function BranchAction(const AName: string): boolean;
     procedure RenameBranchAsk(const AName: string);
+    function CheckNewBranch(const AValues: array of string): string;
+    function CheckRenameBranch(const AValues: array of string): string;
+    function CheckTagName(const AValues: array of string): string;
+    function CheckMovePath(const AValues: array of string): string;
+    function CheckWorktree(const AValues: array of string): string;
+    function CheckCompareRef(const AValues: array of string): string;
+    function BranchNameProblem(const AName: string): string;
     procedure DeleteBranchAsk(const AName: string);
     procedure DeleteGoneBranches;
     procedure MergeIntoCurrent(const ARef: string);
@@ -1819,6 +1928,8 @@ type
     function ConflictAtRow(ARow: integer): integer;
     procedure ResolveConflictAt(AIndex: integer);
     procedure ApplyConflictPick(AIndex: integer; APick: TGittanConflictPick);
+    procedure WriteConflictBlock(const ABlock: TGittanDiscard; const APath: string;
+      AAdvance: boolean; const AAgent: string = ''; const AWhy: string = '');
     procedure ConflictPopupPick(Sender: TObject; AIndex: integer);
     procedure ConflictBadgeClick(const AScreenRect: TRect);
     function ConflictDetail(const APath: string): string;
@@ -2088,6 +2199,30 @@ type
 function AskPullAction(const APull: TGittanPullRequest; AAction: TGittanPullAction;
   out AWords: string): boolean;
 
+const
+  {** The tags of a pull request card's menu (FillPullCardMenu): compare
+    with it, open it on the forge, copy its link, and pcAct plus an
+    action's Ord. }
+  pcCompare = 1;
+  pcOpen = 2;
+  pcCopy = 3;
+  pcAct = 10;
+
+resourcestring
+  rsPullActionFailed = 'Could not do it on %s';
+
+{** Fills AMenu with what can be done to the pull request APull of a
+  card, the Pull Requests page's or the forge view's: compare with it,
+  open it on AForgeName and copy its link when it has one, and while
+  AActs (the forge acts and no action runs) the reviews, the merges or,
+  for a draft, Mark Ready, as PullActionFits allows; each item's
+  OnClick is AOnClick, its Tag one of the pc tags. }
+procedure FillPullCardMenu(AMenu: TPopupMenu; const APull: TGittanPullRequest;
+  const AForgeName: string; AActs: boolean; AOnClick: TNotifyEvent);
+{** The action a card menu item's tag ATag stands for; false for the
+  other items. }
+function PullCardAction(ATag: integer; out AAction: TGittanPullAction): boolean;
+
 implementation
 
 {$R *.lfm}
@@ -2278,6 +2413,8 @@ resourcestring
   rsConflictsSuffix = 'conflicts';
   rsNextFile = 'Next F&ile';
   rsPrevFile = 'Previous Fi&le';
+  rsOlderCommit = 'Older Commit';
+  rsNewerCommit = 'Newer Commit';
   rsRepoFiles = 'Config';
   rsCommitSection = 'Commit';
   rsCommitMenu = 'Co&mmit...';
@@ -2309,6 +2446,43 @@ resourcestring
   rsFindHeader = 'Files for "%s"';
   rsFindNone = '%s found no file for "%s".';
   rsFindFailed = '%s could not find it';
+  rsResolveAI = 'Resolve with %s';
+  rsResolveAIStop = 'Stop %s Resolving';
+  rsResolvingAI = '%s is resolving the conflict at line %d of %s...';
+  rsResolveAIFailed = '%s could not resolve the conflict';
+  rsResolveAIEditing = '%s''s resolution was not used: %s is being edited.';
+  rsResolvedAI = '%s resolved the conflict at line %d of %s: %s';
+  rsResolvedAILast = '%s resolved the last conflict in %s, now marked resolved: %s';
+  rsResolvedAIUndo = 'File > Undo Discard puts it back';
+  rsSplitMenu = 'Split Changes into Commits...';
+  rsSplitStopMenu = 'Stop Splitting into Commits';
+  rsSplitting = '%s is splitting the changes into commits...';
+  rsSplitFailed = '%s could not split the changes';
+  rsPlanHeader = 'Commits planned by %s';
+  rsPlanNoMessage = '(the files left over)';
+  rsPlanFile = '1 file';
+  rsPlanFiles = '%d files';
+  rsPlanAgain = 'Plan Again';
+  rsPlanTicked = 'Ticked the files of commit %d of %d: commit them, then File > Split ' +
+    'Changes into Commits for the next';
+  rsPlanOne = '%s sees the changes as one commit: its message is in the field';
+  rsFixLink = '✦ Fix';
+  rsFixStopLink = 'Stop Fixing';
+  rsFixing = '%s is fixing the finding at line %d of %s...';
+  rsFixBusy = '%s is fixing another finding; stop it first.';
+  rsFixFailed = '%s could not fix it';
+  rsFixNone = '%s changed nothing: %s';
+  rsFixed = '%s fixed %s: %s';
+  rsFixEditing = '%s''s fix was not used: %s is being edited.';
+  rsFixWriteFailed = 'Could not write the fix: %s';
+  rsWhyMenu = 'Explain Line History with AI';
+  rsWhyStopMenu = 'Stop Explaining Line History';
+  rsWhyNeedsChanges = 'Show a file''s changes first: the history is of the selected lines, ' +
+    'or of the line at the caret.';
+  rsWhyLooking = '%s is reading the history of lines %d to %d of %s...';
+  rsWhyFailed = '%s could not explain the lines';
+  rsWhyDone = '%s explained lines %d to %d of %s';
+  rsSeverityHistory = 'Line history';
   rsSeverityBug = 'Bug';
   rsSeverityRisk = 'Risk';
   rsSeverityQuestion = 'Question';
@@ -2456,6 +2630,18 @@ resourcestring
   rsCaResetMixed = 'Mixed: keep the changes in the files...';
   rsCaResetHard = 'Hard: discard all changes...';
   rsCaBranchTitle = 'Create Branch';
+  rsAskBadBranch = 'Not a branch name git takes: no spaces, "..", "~", "^", ":" or "?".';
+  rsAskBranchTaken = 'A branch named %s exists.';
+  rsAskBadTag = 'Not a tag name git takes: no spaces, "..", "~", "^", ":" or "?".';
+  rsAskTagTaken = 'A tag named %s exists.';
+  rsAskPathTaken = 'Something is at %s already.';
+  rsAskNoSuchRef = 'git knows no commit named %s.';
+  rsCaTagAction = 'Create Tag';
+  rsCaBranchAction = 'Create Branch';
+  rsStashAction = 'Stash';
+  rsWtAddAction = 'Add Worktree';
+  rsCompareAction = 'Compare';
+  rsMoveAction = 'Move';
   rsCaBranchPrompt = 'Name of the new branch at %s';
   rsCaTagTitle = 'Create Tag';
   rsCaTagPrompt = 'Name of the tag on %s';
@@ -2560,6 +2746,7 @@ resourcestring
   rsBmDelete = 'Delete...';
   rsBmDeleteRemote = 'Delete %s on the Remote...';
   rsBmRenameTitle = 'Rename Branch';
+  rsBmRenameAction = 'Rename';
   rsBmRenamePrompt = 'New name for %s';
   rsBmRenamed = 'Renamed %s to %s';
   rsBmDeleteTitle = 'Delete Branch';
@@ -2766,7 +2953,17 @@ resourcestring
   rsIdentityHintLocal = ' (this repository only)';
   rsIdentityNone = 'Git has no name or e-mail to commit under. Click to set them.';
   rsSubmodules = 'Submodules';
-  rsSubmodulesNewer = '%d · ↓%d';
+  rsSubmodulesNewer = '%d · %d behind';
+  rsSubHintBehind = 'The remote''s %s has %s the recorded commit lacks.';
+  rsSubHintAhead = 'The recorded commit is %s past the remote''s %s.';
+  rsSubHintDiverged = 'The remote''s %s has %s the recorded commit lacks, and the recorded commit %s it lacks.';
+  rsSubHintNotFetched = 'The remote''s %s has moved on to a commit not fetched here, so its new commits cannot be counted.';
+  rsSubHintFailed = 'Could not ask the remote: %s';
+  rsSubHintUpToDate = 'The recorded commit is where the remote''s %s is.';
+  rsSubHintDefaultBranch = 'default branch';
+  rsSubHintUpdate = 'Update brings the submodule to it.';
+  rsOneCommit = '1 commit';
+  rsCommitsCount = '%d commits';
   rsSubOpen = 'Open';
   rsSubUpdateAction = 'Update';
   rsSubmodulesMenu = 'Su&bmodules';
@@ -3026,7 +3223,6 @@ resourcestring
   rsPullMergeAction = 'Merge';
   rsPullActing = 'Asking %s...';
   rsPullActionDone = '%s #%d';
-  rsPullActionFailed = 'Could not do it on %s';
   rsPositionOld = 'Ln %d (old), Col %d';
   rsReviewComments = 'Review &Comments';
   rsReviewResolved = 'Resolved';
@@ -3286,7 +3482,7 @@ begin
       end;
     end;
     repeat
-      if not InputQuery(Title, Prompt, AWords) then
+      if not AskText(Title, Prompt, AWords, nil, '', '', AAction = plApprove) then
         Exit;
       AWords := Trim(AWords);
     until (AWords <> '') or (AAction = plApprove);
@@ -3299,7 +3495,7 @@ begin
       else
         Ask := rsPullRebaseMergeAsk;
     end;
-    if QuestionDlg(Format(rsPullMergeTitle, [APull.Number]),
+    if AskDlg(Format(rsPullMergeTitle, [APull.Number]),
       Format(Ask, [APull.Number, APull.Title, APull.BaseRef]), mtConfirmation,
       [mrYes, rsPullMergeAction, 'IsDefault', mrCancel, rsCancelButton, 'IsCancel'], 0) <> mrYes then
       Exit;
@@ -3321,6 +3517,29 @@ begin
 end;
 
 { TRepoFrame }
+
+{ The place of AHash in ATrail, -1 when it is not there. }
+function TrailIndex(const ATrail: TStringArray; const AHash: string): integer;
+var
+  i: integer;
+begin
+  Result := -1;
+  if AHash = '' then
+    Exit;
+  for i := 0 to High(ATrail) do
+    if ATrail[i] = AHash then
+      Exit(i);
+end;
+
+{ TCommitMemo }
+
+procedure TCommitMemo.InitializeWnd;
+begin
+  inherited InitializeWnd;
+  {$IFDEF LCLCocoa}
+  SetMemoPlaceholder(Handle, TextHint);
+  {$ENDIF}
+end;
 
 { TTreeView }
 
@@ -3355,6 +3574,7 @@ begin
   FHotDiscard := -1;
   FHotRow := -1;
   FHotKeep := -1;
+  FFramedBlock := -1;
   FHeaderUnkeep := -1;
   FKeeps := TGittanKeeps.Create;
   FLeftOut := TGittanKeeps.Create;
@@ -3568,6 +3788,7 @@ begin
   FSummary.OnReviewClick := @SummaryReviewClick;
   FSummary.OnSelectCommit := @SummarySelectCommit;
   FSummary.OnBackClick := @SummaryBackClick;
+  FSummary.OnCommitStep := @SummaryCommitStep;
   FSummary.OnRowAction := @SummaryRowAction;
   { The branch list pops up over the form, under the branch. }
   FRevertUndo := TStringList.Create;
@@ -3674,6 +3895,9 @@ begin
   FFindPopup := TGittanPopupList.Create(Self);
   FFindPopup.Parent := Self;
   FFindPopup.OnPick := @FindPopupPick;
+  FPlanPopup := TGittanPopupList.Create(Self);
+  FPlanPopup.Parent := Self;
+  FPlanPopup.OnPick := @PlanPopupPick;
   FBasePopup := TGittanPopupList.Create(Self);
   FBasePopup.Parent := Self;
   FBasePopup.OnPick := @BasePopupPick;
@@ -3690,6 +3914,7 @@ begin
   FPillTimer.Interval := PillPause;
   FPillTimer.OnTimer := @PillTimerTimer;
   FResolveIndex := -1;
+  FConflictAIItem := -1;
   { The welcome view shares the summary's box. }
   FCloneSubmodules := True;
   FWelcome := TGittanWelcome.Create(Self);
@@ -3697,7 +3922,6 @@ begin
   FWelcome.Title := 'Gittan';
   FWelcome.Tagline := rsTagline;
   FWelcome.Shortcut := {$IFDEF DARWIN}'⇧⌘O'{$ELSE}'Ctrl+Shift+O'{$ENDIF};
-  FWelcome.SetIcon(App.Icon);
   FWelcome.OnOpen := @WelcomeOpen;
   FWelcome.OnOpenRecent := @WelcomeOpenRecent;
   FWelcome.OnClone := @WelcomeClone;
@@ -3744,6 +3968,8 @@ begin
   SetupSubmodules;
   SetupCommit;
   SetupTitleBar;
+  { Until a repository opens. }
+  ShowSidebar(False);
   ApplySettings;
   BuildMenu;
   BuildPopups;
@@ -3763,7 +3989,10 @@ begin
   {$IFDEF OWNBAR}
   { The title bar lists the menus and runs its shade to this frame's
     splitter. }
-  OwnBar.SplitControl := TreeSplitter;
+  if TreeSplitter.Visible then
+    OwnBar.SplitControl := TreeSplitter
+  else
+    OwnBar.SplitControl := nil;
   OwnBar.Layout;
   {$ENDIF}
   {$IFDEF LCLGtk3}
@@ -3910,6 +4139,10 @@ begin
   AbandonMessageJob;
   AbandonAIReview;
   AbandonFindJob;
+  AbandonConflictJob;
+  AbandonSplitJob;
+  AbandonFixJob;
+  AbandonWhyJob;
   FreeAndNil(FAI);
   StopCommitJob(True);
   FreeAndNil(FDroppedCommits);
@@ -4260,7 +4493,7 @@ begin
   for List in [FBranchPopup, FStashPopup, FUpstreamPopup, FTagPopup, FViewPopup,
     FSubListPopup, FReflogPopup, FPullPopup, FReviewPopup, FSyncPopup, FRecentPopup,
     FBasePopup, FConflictPopup, FFindPopup, FCompositionPopup, FWorktreePopup,
-    FPalettePopup] do
+    FPalettePopup, FPlanPopup] do
     List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
   FPaletteLeft.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border);
   FPaletteRight.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border);
@@ -4271,9 +4504,11 @@ begin
     P.Warning, P.Deleted);
   FPullFill := P.Pill;
   FPullBorder := P.Border;
+  FBlockFrame := P.Accent;
   FPullText := P.PillText;
   FBandTrack := P.Line;
   FBandFill := P.Accent;
+  FWelcome.SetAccent(P.Accent);
   if FDark then
   begin
     FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim, P.Line, P.Deleted,
@@ -4562,6 +4797,7 @@ begin
 end;
 
 function OperationNoun(const AOperation: string): string; forward;
+function FindingKey(const AThread: TGittanReviewThread): string; forward;
 
 { The transport in the middle of the status bar: the primary button is
   the next step, with what else can be done on its sides. While git is
@@ -4583,6 +4819,12 @@ begin
   FStatusSteps[spLeft] := stepNone;
   FStatusSteps[spPrimary] := stepNone;
   FStatusSteps[spRight] := stepNone;
+  { No repository, nothing to fetch, pull or push. }
+  if (FRepo = nil) or (FRepo.Root = '') then
+  begin
+    FStatus.SetTransport(StatusButton('', ''), StatusButton('', ''), StatusButton('', ''));
+    Exit;
+  end;
   R := StatusButton('', '');
   if (FOperation <> '') and (FOperation <> 'bisecting') then
   begin
@@ -4866,6 +5108,8 @@ begin
   FMessageItem := AddItem(FileMenu, rsWriteMessageMenu, ShortCut(VK_K, [ssModifier,
     ssShift]), @MessageActionClick);
   FMessageItem.Visible := False;
+  FSplitItem := AddItem(FileMenu, rsSplitMenu, 0, @MenuSplitClick);
+  FSplitItem.Visible := False;
   { The person in the Commit header, for the keyboard. }
   FIdentityItem := AddItem(FileMenu, rsIdentityMenu, 0, @IdentityClick);
   FIdentityItem.Enabled := False;
@@ -5079,9 +5323,9 @@ begin
   AddItem(GoMenu, rsFilterFiles, ShortCut(VK_F, [ssModifier, ssShift]), @MenuFilterFilesClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsGoToDefinition, ShortCut(VK_F12, []), @MenuGoToDefinitionClick);
-  { Cmd+Enter in the commit message commits and in the tree's filter
-    asks the agent; MenuGoToSymbolClick passes it on to them. }
-  AddItem(GoMenu, rsGoToSymbol, ShortCut(VK_RETURN, [ssModifier]), @MenuGoToSymbolClick);
+  { As VS Code's Cmd+Shift+O, which is Open Repository here; Cmd+Enter
+    is the commit message's and the tree filter's own. }
+  AddItem(GoMenu, rsGoToSymbol, ShortCut(VK_O, [ssModifier, ssAlt]), @MenuGoToSymbolClick);
   AddItem(GoMenu, rsGoToRepoSymbol, ShortCut(VK_T, [ssModifier, ssShift]),
     @MenuGoToRepoSymbolClick);
   { Cmd+Y alone is the editor's delete-line key, which gets the key first. }
@@ -5092,6 +5336,8 @@ begin
     @MenuHistoryClick);
   FTimelapseItem := AddItem(GoMenu, rsTimelapse, ShortCut(VK_H, [ssModifier, ssAlt]),
     @MenuTimelapseClick);
+  FWhyItem := AddItem(GoMenu, rsWhyMenu, 0, @MenuWhyClick);
+  FWhyItem.Visible := False;
   FGoFileHistoryItem := AddItem(GoMenu, rsGoFileHistory, 0, @MenuGoFileHistoryClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextChange, ShortCut(VK_F7, []), @MenuNextChangeClick);
@@ -5101,6 +5347,10 @@ begin
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextFile, ShortCut(VK_F8, []), @MenuNextFileClick);
   AddItem(GoMenu, rsPrevFile, ShortCut(VK_F8, [ssShift]), @MenuPrevFileClick);
+  GoMenu.Add(NewLine);
+  FOlderCommitItem := AddItem(GoMenu, rsOlderCommit, ShortCut(VK_F9, []), @MenuOlderCommitClick);
+  FNewerCommitItem := AddItem(GoMenu, rsNewerCommit, ShortCut(VK_F9, [ssShift]),
+    @MenuNewerCommitClick);
 
   ToolsMenu := TMenuItem.Create(Main);
   ToolsMenu.Caption := rsTools;
@@ -6125,8 +6375,13 @@ begin
   AbandonMessageJob;
   AbandonAIReview;
   AbandonFindJob;
+  AbandonConflictJob;
+  AbandonSplitJob;
+  AbandonFixJob;
+  AbandonWhyJob;
   FAIThreads := nil;
   FAIThreadsKey := '';
+  FCommitPlan := nil;
   StopCommitJob(False);
   StopRemoteJob(False);
   { A failure's notice, which Try Again would run on this one. }
@@ -6238,6 +6493,7 @@ begin
     Exit;
   end;
   FRepo.OpenAt(Job.Root, Job.GitDir);
+  ShowSidebar(True);
   LoadCommitDraft;
   { The exclude file lives in the git directory, which git names (a
     work tree's is elsewhere), once per open: the section lists it and
@@ -6290,9 +6546,35 @@ begin
   FSubPanel.Visible := False;
   FStats := nil;
   FFileCount := 0;
+  ShowSidebar(False);
   ShowWelcome(AError);
   ShowSummary;
   UpdateStatus;
+end;
+
+{ The sidebar (the filter, the pages and the trees) and its splitter,
+  which have nothing to offer while no repository is open: the welcome
+  view takes the whole width then. }
+procedure TRepoFrame.ShowSidebar(AShown: boolean);
+begin
+  if FTreePanel.Visible = AShown then
+    Exit;
+  FTreePanel.Visible := AShown;
+  { Shown again, the splitter goes right of the panel, not where alLeft
+    would put it first. }
+  if AShown then
+    TreeSplitter.Left := FTreePanel.Left + FTreePanel.Width;
+  TreeSplitter.Visible := AShown;
+  {$IFDEF OWNBAR}
+  if FWindow.IsActive(Self) then
+  begin
+    if AShown then
+      OwnBar.SplitControl := TreeSplitter
+    else
+      OwnBar.SplitControl := nil;
+    OwnBar.Invalidate;
+  end;
+  {$ENDIF}
 end;
 
 { Reads the branch and the changed files of the open repository into the
@@ -6402,9 +6684,11 @@ begin
     FSummary.SetCommit(FBlameCommit, FBlameBody)
   else
     FSummary.SetCommit(Default(TGittanCommitLine), '');
+  UpdateCommitSteps;
   FSummary.SetRepository(ExtractFileName(FRepo.Root), Branch, BaseLabel, FStats, Icons,
     Texts, Actions);
   FWelcome.Visible := False;
+  ShowSidebar(True);
   { The page of a submodule keeps the box; RefreshRepository shows it
     again. }
   FSummary.Visible := FView <> gvSubmodule;
@@ -7608,34 +7892,45 @@ begin
     if (i >= 0) and (SubmoduleMoveText(i) <> '') then
       Tip := Format(rsHintSubmodule, [SubmoduleMoveText(i)]);
   end;
-  if Tip = '' then
-    Node := nil;
-  if (Node = FTreeHintNode) and (Tip = FTreeHint) then
-    Exit;
-  FileTreeMouseLeave(Sender);
-  FTreeHintNode := Node;
-  FTreeHint := Tip;
-  FTreeHintTimer.Enabled := Tip <> '';
+  SetTreeHint(FileTree, Node, Tip);
 end;
 
+{ The hint ATip for ANode of ATree, shown after the hint pause; the same
+  row with the same hint changes nothing, so the hint is not restarted
+  as the mouse moves within it. }
+procedure TRepoFrame.SetTreeHint(ATree: TTreeView; ANode: TTreeNode; const ATip: string);
+begin
+  if ATip = '' then
+    ANode := nil;
+  if (ATree = FTreeHintTree) and (ANode = FTreeHintNode) and (ATip = FTreeHint) then
+    Exit;
+  FileTreeMouseLeave(ATree);
+  FTreeHintTree := ATree;
+  FTreeHintNode := ANode;
+  FTreeHint := ATip;
+  FTreeHintTimer.Enabled := ATip <> '';
+end;
+
+{ Also the submodule tree's OnMouseLeave. }
 procedure TRepoFrame.FileTreeMouseLeave(Sender: TObject);
 begin
   FTreeHintTimer.Enabled := False;
-  if FileTree.Hint <> '' then
+  if (FTreeHintTree <> nil) and (FTreeHintTree.Hint <> '') then
   begin
     Application.CancelHint;
-    FileTree.Hint := '';
+    FTreeHintTree.Hint := '';
   end;
   FTreeHint := '';
   FTreeHintNode := nil;
+  FTreeHintTree := nil;
 end;
 
 procedure TRepoFrame.TreeHintTimerTimer(Sender: TObject);
 begin
   FTreeHintTimer.Enabled := False;
-  if FTreeHint = '' then
+  if (FTreeHint = '') or (FTreeHintTree = nil) then
     Exit;
-  FileTree.Hint := FTreeHint;
+  FTreeHintTree.Hint := FTreeHint;
   Application.ActivateHint(Mouse.CursorPos);
 end;
 

@@ -56,6 +56,15 @@ procedure ShowTitleBand(AHandle: PtrUInt; APos, ATotal: integer;
 {** Hides the band. }
 procedure HideTitleBand(AHandle: PtrUInt);
 
+{** Makes the window of the form whose handle AHandle is look as a
+  system alert does: the title bar transparent in the window's
+  background, the title hidden (the window keeps it for Mission Control
+  and the Window menu) and no close, minimize or zoom button, since the
+  dialog's own buttons answer it. The content stays under the bar, not
+  under it: the LCL sizes a full size content view's window as if the
+  bar were not there. }
+procedure MakeAlertWindow(AHandle: PtrUInt);
+
 implementation
 
 uses
@@ -180,6 +189,27 @@ begin
     Exit;
   Track.setHidden(True);
   Fill.setHidden(True);
+end;
+
+procedure MakeAlertWindow(AHandle: PtrUInt);
+var
+  Win: NSWindow;
+  Button: NSButton;
+  Kind: NSWindowButton;
+begin
+  Win := WindowOf(AHandle);
+  if Win = nil then
+    Exit;
+  Win.setTitlebarAppearsTransparent(True);
+  Win.setTitleVisibility(NSWindowTitleHidden);
+  if NSAppKitVersionNumber >= NSAppKitVersionNumber11_0 then
+    Win.setTitlebarSeparatorStyle(NSTitlebarSeparatorStyleNone);
+  for Kind in [NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton] do
+  begin
+    Button := Win.standardWindowButton(Kind);
+    if Button <> nil then
+      Button.setHidden(True);
+  end;
 end;
 
 end.

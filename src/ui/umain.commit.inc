@@ -70,7 +70,7 @@ begin
   FCommitBox.ChildSizing.TopBottomSpacing := 6;
   FCommitBox.Parent := FCommitPanel;
   SetupBisect;
-  FCommitMemo := TMemo.Create(Self);
+  FCommitMemo := TCommitMemo.Create(Self);
   FCommitMemo.Align := alTop;
   FCommitMemo.Top := 500;
   FCommitMemo.Height := 84;
@@ -157,7 +157,6 @@ begin
     responder, which would be the message field: the tree takes the
     keys once the window is up. }
   Application.QueueAsyncCall(@FocusTreeAsync, 0);
-  Application.QueueAsyncCall(@CommitHintAsync, 0);
 end;
 
 procedure TRepoFrame.FocusTreeAsync(Data: PtrInt);
@@ -179,16 +178,6 @@ begin
     Exit;
   FFocusTreePending := False;
   Application.QueueAsyncCall(@FocusTreeAsync, 0);
-end;
-
-{ Cocoa shows no TextHint in a memo (see gittan.memohint); the hint is
-  set on the text view once the window has made it. }
-procedure TRepoFrame.CommitHintAsync(Data: PtrInt);
-begin
-  {$IFDEF LCLCocoa}
-  if FCommitMemo.HandleAllocated then
-    SetMemoPlaceholder(FCommitMemo.Handle, FCommitMemo.TextHint);
-  {$ENDIF}
 end;
 
 { The first line's length shows once it is past SubjectSoftLimit, in

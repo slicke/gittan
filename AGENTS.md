@@ -35,7 +35,7 @@ This file applies to the Gittan repository root and its subdirectories.
 
 ## Specs
 Details of each area live in `spec/`. Read the file that matches what you are about to change; the lists name the units and files it covers.
-- [spec/icon.md](spec/icon.md): Application icon. Read when touching the artwork, `make icons`, the .ico/.icns/PNGs or how the macOS bundle gets its icon.
+- [spec/icon.md](spec/icon.md): Application icon. Read when touching the artwork, `make icons`, the .ico/.icns/PNGs, how the macOS bundle gets its icon, or the dialogs' icon (`make dialogicon`, `gittan.dialogicon`).
 - [spec/syntax-highlighting.md](spec/syntax-highlighting.md): Syntax highlighting. Read when touching lexers, `lexlib`, syntax themes, `gittan.lexers`, `gittan.syntaxthemes`, or an editor that shows uncolored text.
 - [spec/preview.md](spec/preview.md): Markdown, HTML and SVG preview. Read when touching `gittan.mdpreview`, `gittan.richdiff`, the Preview toggle, or how an SVG is drawn in the change view.
 - [spec/dark-mode.md](spec/dark-mode.md): Dark mode and themes. Read when touching `gittan.theme`, `ApplyTheme`, `IsDarkMode`, MetaDarkStyle, or colors that look wrong in one appearance.

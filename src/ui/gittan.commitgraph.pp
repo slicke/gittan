@@ -134,6 +134,12 @@ type
       (FChangeDone), and git's reason when the search failed. }
     FChangeHashes: TStringList;
     FChangeKey, FChangeDone, FChangeError: string;
+    { The commit highlighted when a search for changes began, highlighted
+      again when it ends, since the rows are empty meanwhile. }
+    FChangeKeep: string;
+    { The search text the rows were last filtered with, which a pick
+      keeps with them: the field may hold more not yet applied. }
+    FAppliedText: string;
     FLanes: integer;
     FMore, FAskedMore: boolean;
     FBranch: string;
@@ -250,10 +256,17 @@ type
       ahead of (AAhead) and behind (ABehind) its upstream when it has
       one; AMore says the log was cut, which the last row says. AFilter
       goes into the search field. The focus goes to the field, the
-      highlight to the commit HEAD is on. }
+      highlight to AKeep when it is among the commits, else to the
+      commit HEAD is on. }
     procedure Popup(const ACommits: TGittanGraphCommits; AMore: boolean;
       const ABranch: string; AAhead, ABehind: integer; AHasUpstream: boolean;
-      const AFilter: string = '');
+      const AFilter: string = ''; const AKeep: string = '');
+    {** The hashes of the rows the filter shows, newest first: the order
+      the owner steps through after a pick. }
+    function ShownHashes: TStringArray;
+    {** The search text the rows ShownHashes gives were filtered with,
+      which may lag what the field holds while a filter waits. }
+    function FilterText: string;
     {** Puts ACommits in the place of the ones shown, the answer to
       OnMore: the filter and the highlighted commit stay. }
     procedure Replace(const ACommits: TGittanGraphCommits; AMore: boolean);
@@ -768,9 +781,24 @@ begin
     Result := FCommits[FShown[FCurrent]].Hash;
 end;
 
+function TGittanCommitGraph.ShownHashes: TStringArray;
+var
+  i: integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(FShown));
+  for i := 0 to High(FShown) do
+    Result[i] := FCommits[FShown[i]].Hash;
+end;
+
+function TGittanCommitGraph.FilterText: string;
+begin
+  Result := FAppliedText;
+end;
+
 procedure TGittanCommitGraph.Popup(const ACommits: TGittanGraphCommits;
   AMore: boolean; const ABranch: string; AAhead, ABehind: integer;
-  AHasUpstream: boolean; const AFilter: string);
+  AHasUpstream: boolean; const AFilter: string; const AKeep: string);
 begin
   if Parent = nil then
     Exit;
@@ -789,8 +817,9 @@ begin
   FChangeKey := '';
   FChangeDone := '';
   FChangeError := '';
+  FChangeKeep := '';
   FChangeHashes.Clear;
-  Load(ACommits, AMore, '');
+  Load(ACommits, AMore, AKeep);
   FEdit.Text := AFilter;
   ApplyFilter;
   Place;
@@ -876,6 +905,7 @@ begin
     More;
     Exit;
   end;
+  FAppliedText := FEdit.Text;
   Key := '';
   for i := 0 to High(FFilter.Paths) do
     Key := Key + FFilter.Paths[i] + #1;
@@ -914,6 +944,12 @@ begin
       FOnChangeCommits(Self, nil);
   end;
   Current := CurrentHash;
+  if Current = '' then
+    Current := FChangeKeep;
+  if ChangePending then
+    FChangeKeep := Current
+  else
+    FChangeKeep := '';
   SetLength(FShown, Length(FCommits));
   n := 0;
   if not ChangePending then
@@ -1388,7 +1424,10 @@ end;
   under it. }
 procedure TGittanCommitGraph.Paint;
 var
-  X, Y, BodyHeight, CenterY: integer;
+  X, Y, BodyHeight, CenterY, Room, TailWidth, NParts, i: integer;
+  Parts: array[0..2] of string;
+  PartColors: array[0..2] of TColor;
+  BranchText: string;
 
   procedure Part(const AText: string; AColor: TColor);
   begin
@@ -1419,24 +1458,52 @@ begin
   X := Px(Pad) + Canvas.TextWidth(rsGraphTitle) + 2 * Px(Gap);
   Canvas.Font := Font;
   Y := CenterY - BodyHeight div 2;
-  if FBranch <> '' then
+  { The branch and how far it is from its upstream end before the
+    Statistics toggle: a long name is cut, and the upstream goes when
+    it leaves the name too little room. }
+  Room := FStatsRect.Left - Px(Gap) - (X + BodyHeight - 4 + 5);
+  if (FBranch <> '') and (Room > Canvas.TextWidth('…')) then
   begin
+    NParts := 0;
+    if FHasUpstream then
+    begin
+      if FAhead > 0 then
+      begin
+        Parts[NParts] := '↑ ' + Format(rsGraphNotPushed, [FAhead]);
+        PartColors[NParts] := FAccent;
+        Inc(NParts);
+      end;
+      if FBehind > 0 then
+      begin
+        Parts[NParts] := '↓ ' + Format(rsGraphNotPulled, [FBehind]);
+        PartColors[NParts] := FText;
+        Inc(NParts);
+      end;
+      if (FAhead = 0) and (FBehind = 0) then
+      begin
+        Parts[NParts] := rsGraphInSync;
+        PartColors[NParts] := FDim;
+        Inc(NParts);
+      end;
+    end;
+    TailWidth := 0;
+    for i := 0 to NParts - 1 do
+      Inc(TailWidth, Canvas.TextWidth(' · ') + Canvas.TextWidth(Parts[i]));
+    if Room - TailWidth < Min(Canvas.TextWidth(FBranch), Canvas.TextWidth('mmmmmm')) then
+    begin
+      NParts := 0;
+      TailWidth := 0;
+    end;
     DrawStatusIcon(Canvas, HintBranch, X, Y, BodyHeight, FDim);
     Canvas.Pen.Width := 1;
     Canvas.Brush.Style := bsClear;
     Inc(X, BodyHeight - 4 + 5);
     Canvas.Font.Color := FText;
-    Canvas.TextOut(X, Y, FBranch);
-    Inc(X, Canvas.TextWidth(FBranch));
-    if FHasUpstream then
-    begin
-      if FAhead > 0 then
-        Part('↑ ' + Format(rsGraphNotPushed, [FAhead]), FAccent);
-      if FBehind > 0 then
-        Part('↓ ' + Format(rsGraphNotPulled, [FBehind]), FText);
-      if (FAhead = 0) and (FBehind = 0) then
-        Part(rsGraphInSync, FDim);
-    end;
+    BranchText := FitText(Canvas, FBranch, Room - TailWidth);
+    Canvas.TextOut(X, Y, BranchText);
+    Inc(X, Canvas.TextWidth(BranchText));
+    for i := 0 to NParts - 1 do
+      Part(Parts[i], PartColors[i]);
   end;
 
   if FCloseHot then

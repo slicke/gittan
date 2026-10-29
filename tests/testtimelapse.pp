@@ -28,7 +28,9 @@ type
     procedure TearDown; override;
   published
     procedure TestRepository;
+    procedure TestLongHistory;
     procedure TestMisfitStops;
+    procedure TestNotCommitted;
   end;
 
 implementation
@@ -168,6 +170,83 @@ begin
   end;
 end;
 
+{ More commits than one stretch between versions kept whole: every
+  version, asked for in any order, is git's copy of the file. Each commit
+  drops lines at the top, adds one at the end and changes the last. }
+procedure TTimelapseTest.TestLongHistory;
+const
+  Commits = TimelapseMarkEvery + 8;
+  Order: array[0..5] of integer = (0, Commits - 1, TimelapseMarkEvery,
+    TimelapseMarkEvery - 1, TimelapseMarkEvery + 3, TimelapseMarkEvery + 1);
+var
+  Repo: TGittanRepo;
+  History: TGittanHistory;
+  T: TGittanTimelapse;
+  Log, Text, Body, Err, Blob: string;
+  Blobs: array of string;
+  c, j: integer;
+
+  function BlobOf(ACommit: integer): string;
+  begin
+    if not RunGitIn(FDir, ['cat-file', 'blob', History.Commits[ACommit].Info.Hash + ':a.txt'],
+      Result, Err) then
+      Fail(Err);
+  end;
+
+  { The entry of version ACommit with the text AText, -1 for none. }
+  function EntryOf(ACommit: integer; const AText: string): integer;
+  var
+    Ids: TGittanEntryIds;
+    i: integer;
+  begin
+    Result := -1;
+    Ids := T.Lines(ACommit);
+    for i := 0 to High(Ids) do
+      if T.Text(Ids[i]) = AText then
+        Exit(Ids[i]);
+  end;
+
+begin
+  Git(['init', '-q', '-b', 'main']);
+  for c := 0 to Commits - 1 do
+  begin
+    Body := '';
+    for j := c mod 7 to c + 2 do
+      Body := Body + 'line ' + IntToStr(j) + #10;
+    WriteFile('a.txt', Body + 'version ' + IntToStr(c div 5) + #10);
+    Commit('c' + IntToStr(c));
+  end;
+  Repo := TGittanRepo.Create;
+  History := TGittanHistory.Create;
+  T := TGittanTimelapse.Create;
+  try
+    AssertTrue(Repo.Open(FDir));
+    AssertTrue(Repo.FileTimeline('a.txt', '', 1000, Log, Text));
+    AssertTrue(History.Parse(Log));
+    AssertTrue(T.Build(History, Text));
+    AssertEquals(Commits, T.Count);
+    SetLength(Blobs, Commits);
+    for c := 0 to Commits - 1 do
+      Blobs[c] := BlobOf(c);
+    { Back through the history, as the time-lapse steps. }
+    for c := 0 to Commits - 1 do
+      AssertEquals('version ' + IntToStr(c), Blobs[c], VersionText(T, c));
+    { Forward, as it plays, and across the stretches. }
+    for c := Commits - 1 downto 0 do
+      AssertEquals('version ' + IntToStr(c), Blobs[c], VersionText(T, c));
+    for j := 0 to High(Order) do
+      AssertEquals('version ' + IntToStr(Order[j]), Blobs[Order[j]], VersionText(T, Order[j]));
+    { "line 9" is in both versions around the first mark, kept between. }
+    AssertTrue(EntryOf(TimelapseMarkEvery - 1, 'line 9') >= 0);
+    AssertEquals('a line kept is one entry across a mark',
+      EntryOf(TimelapseMarkEvery - 1, 'line 9'), EntryOf(TimelapseMarkEvery, 'line 9'));
+  finally
+    T.Free;
+    History.Free;
+    Repo.Free;
+  end;
+end;
+
 { The newest commit says it added a line the text does not have there:
   only its own version is kept. }
 procedure TTimelapseTest.TestMisfitStops;
@@ -194,6 +273,85 @@ begin
   finally
     T.Free;
     History.Free;
+  end;
+end;
+
+{ A file HEAD lacks gives no time-lapse and no error, and its code
+  history says it is not committed, so the frame says that instead of
+  showing git's refusal. }
+procedure TTimelapseTest.TestNotCommitted;
+var
+  Job: TGittanTimelapseJob;
+  HJob: TGittanHistoryJob;
+begin
+  Git(['init', '-q', '-b', 'main']);
+  WriteFile('b.txt', 'one'#10);
+  Commit('start');
+  WriteFile('new.txt', 'fresh'#10);
+  Job := TGittanTimelapseJob.Create(FDir, 'new.txt', '');
+  try
+    Job.Start;
+    Job.WaitFor;
+    CheckSynchronize(0);
+    AssertNull('no time-lapse', Job.Timelapse);
+    AssertEquals('no error', '', Job.Error);
+    AssertFalse(Job.Binary);
+  finally
+    Job.Free;
+  end;
+  { Code History says the same through NotCommitted. }
+  HJob := TGittanHistoryJob.Create(FDir, 'new.txt', '', 1, 1, 10, False);
+  try
+    HJob.Start;
+    HJob.WaitFor;
+    CheckSynchronize(0);
+    AssertTrue('not committed', HJob.NotCommitted);
+    AssertNull(HJob.History);
+    AssertEquals('', HJob.Error);
+  finally
+    HJob.Free;
+  end;
+  HJob := TGittanHistoryJob.Create(FDir, 'b.txt', '', 1, 1, 10, False);
+  try
+    HJob.Start;
+    HJob.WaitFor;
+    CheckSynchronize(0);
+    AssertFalse(HJob.NotCommitted);
+    AssertNotNull(HJob.Error, HJob.History);
+  finally
+    HJob.Free;
+  end;
+  { A ref that names no commit is an error, not a file not committed. }
+  Job := TGittanTimelapseJob.Create(FDir, 'b.txt', 'gone');
+  try
+    Job.Start;
+    Job.WaitFor;
+    CheckSynchronize(0);
+    AssertNull(Job.Timelapse);
+    AssertTrue('an error', Job.Error <> '');
+  finally
+    Job.Free;
+  end;
+  HJob := TGittanHistoryJob.Create(FDir, 'b.txt', 'gone', 1, 1, 10, False);
+  try
+    HJob.Start;
+    HJob.WaitFor;
+    CheckSynchronize(0);
+    AssertFalse(HJob.NotCommitted);
+    AssertTrue('an error', HJob.Error <> '');
+  finally
+    HJob.Free;
+  end;
+  { A tracked file still plays. }
+  Job := TGittanTimelapseJob.Create(FDir, 'b.txt', '');
+  try
+    Job.Start;
+    Job.WaitFor;
+    CheckSynchronize(0);
+    AssertEquals(Job.Error, '', Job.Error);
+    AssertNotNull('a time-lapse', Job.Timelapse);
+  finally
+    Job.Free;
   end;
 end;
 

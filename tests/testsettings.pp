@@ -73,6 +73,7 @@ begin
     AssertEquals(0, S.Recent.Count);
     AssertEquals(0, S.UpdateSnoozedUntil, 0);
     AssertTrue(S.CommitOpen);
+    AssertTrue('the sidebar''s rows start shown', S.NavOpen);
     AssertEquals('', S.CommitDraft);
     AssertEquals('no tab width picked', 0, S.TabSize);
     AssertEquals('', S.GitPath);
@@ -86,6 +87,10 @@ begin
     AssertFalse(S.OnlyAskedOfMe);
     AssertFalse(S.HideReviewDrafts);
     AssertFalse(S.OnlyStale);
+    AssertTrue('changes asked for start as needing attention', S.ChangesNeedAttention);
+    AssertTrue('failing checks start as needing attention', S.ChecksNeedAttention);
+    AssertEquals('the last changed first', 0, S.MineOrder);
+    AssertEquals(0, S.ReviewOrder);
     AssertFalse('the AI features start off', S.AIEnabled);
     AssertEquals('', S.ClaudePath);
     AssertEquals('', S.ClaudeModel);
@@ -138,6 +143,10 @@ begin
     S.OnlyAskedOfMe := True;
     S.HideReviewDrafts := True;
     S.OnlyStale := True;
+    S.ChangesNeedAttention := False;
+    S.ChecksNeedAttention := False;
+    S.MineOrder := 2;
+    S.ReviewOrder := 1;
     S.SyntaxTheme := 'Delphi';
     S.AIEnabled := True;
     S.ClaudePath := '/Users/me/.local/bin/claude';
@@ -193,6 +202,10 @@ begin
     AssertTrue(S.OnlyAskedOfMe);
     AssertTrue(S.HideReviewDrafts);
     AssertTrue(S.OnlyStale);
+    AssertFalse(S.ChangesNeedAttention);
+    AssertFalse(S.ChecksNeedAttention);
+    AssertEquals(2, S.MineOrder);
+    AssertEquals(1, S.ReviewOrder);
     AssertEquals('Delphi', S.SyntaxTheme);
     AssertTrue(S.AIEnabled);
     AssertEquals('/Users/me/.local/bin/claude', S.ClaudePath);

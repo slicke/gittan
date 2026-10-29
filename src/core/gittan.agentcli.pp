@@ -30,11 +30,24 @@ const
   {** The most turns claude may take to find where something is, each a
     search or a read. }
   FindMaxTurns = 20;
+  {** The most turns claude may take to resolve a conflict, reading the
+    code around it. }
+  ResolveMaxTurns = 10;
+  {** The most turns claude may take to split the changes into commits,
+    as for a message. }
+  SplitMaxTurns = 10;
+  {** The most turns claude may take to fix a review's finding, reading
+    the code around it. }
+  FixMaxTurns = 15;
+  {** The most turns claude may take to explain lines, reading the code
+    around them. }
+  WhyMaxTurns = 10;
   {** The most turns claude may take for each task; the second round of
     a find (atLocate) is never a tool's, and has the find's for the
     array's sake. }
   TaskTurns: array[TGittanAITask] of integer = (MessageMaxTurns, ReviewMaxTurns,
-    FindMaxTurns, FindMaxTurns);
+    FindMaxTurns, FindMaxTurns, ResolveMaxTurns, SplitMaxTurns,
+    FixMaxTurns, WhyMaxTurns);
 
 type
   {** A tool: Path is its command, Model the model it runs with (empty

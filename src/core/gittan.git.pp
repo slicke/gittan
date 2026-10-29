@@ -429,6 +429,9 @@ type
     function HeadPaths(AList: TStrings): boolean;
     {** Whether ARef names a commit in the repository. }
     function HasCommit(const ARef: string): boolean;
+    {** Whether ARef, a full name such as refs/tags/v1, is a ref of the
+      repository, whatever it points at. }
+    function HasRef(const ARef: string): boolean;
     {** The full id of the commit ARef names, empty when it names none. }
     function CommitId(const ARef: string): string;
     {** How many commits AFrom..ATo holds (those ATo reaches and AFrom
@@ -515,6 +518,8 @@ type
     function RemoteEnvironment: TStringArray;
     {** Whether AName may name a branch (`git check-ref-format --branch`). }
     function IsBranchName(const AName: string): boolean;
+    {** Whether AName may name a tag (`git check-ref-format refs/tags/<name>`). }
+    function IsTagName(const AName: string): boolean;
     {** Makes the branch AName at the commit AAt, and switches to it with
       ASwitch (`git switch -c`). False, with git's reason, when the name
       is taken or wrong, or the switch would overwrite local changes;
@@ -2625,6 +2630,14 @@ begin
     RunGit(FRoot, ['rev-parse', '--verify', '-q', ARef + '^{commit}'], Id);
 end;
 
+function TGittanRepo.HasRef(const ARef: string): boolean;
+var
+  Id: string;
+begin
+  Result := (FRoot <> '') and (ARef <> '') and
+    RunGit(FRoot, ['rev-parse', '--verify', '-q', ARef], Id);
+end;
+
 function TGittanRepo.CommitId(const ARef: string): string;
 begin
   if (FRoot = '') or (ARef = '') or
@@ -4039,6 +4052,14 @@ var
 begin
   Result := (FRoot <> '') and (AName <> '') and
     RunGit(FRoot, ['check-ref-format', '--branch', AName], Output);
+end;
+
+function TGittanRepo.IsTagName(const AName: string): boolean;
+var
+  Output: string;
+begin
+  Result := (FRoot <> '') and (AName <> '') and (AName[1] <> '-') and
+    RunGit(FRoot, ['check-ref-format', 'refs/tags/' + AName], Output);
 end;
 
 function TGittanRepo.CreateBranch(const AName, AAt: string; ASwitch: boolean): boolean;

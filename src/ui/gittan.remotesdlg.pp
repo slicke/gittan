@@ -24,7 +24,7 @@ function EditRemotes(ARepo: TGittanRepo; out AFetch: boolean): boolean;
 implementation
 
 uses
-  Math, Graphics, LCLType, Clipbrd, gittan.repoinfo;
+  Math, Graphics, LCLType, Clipbrd, gittan.repoinfo, gittan.askdlg;
 
 resourcestring
   rsRemotesTitle = 'Remotes';
@@ -600,7 +600,7 @@ begin
     else
       Msg := Format(rsRemoveBranches, [Count]);
   end;
-  if QuestionDlg(rsRemoveTitle, Format(rsRemoveAsk, [RemoteName]) + LineEnding + LineEnding +
+  if AskDlg(rsRemoveTitle, Format(rsRemoveAsk, [RemoteName]) + LineEnding + LineEnding +
     Msg, mtWarning, [mrYes, rsRemoveButton, mrCancel, rsCancel, 'IsCancel', 'IsDefault'],
     0) <> mrYes then
     Exit;

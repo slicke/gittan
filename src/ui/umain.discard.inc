@@ -240,9 +240,9 @@ begin
   end;
 end;
 
-{ The block under the mouse is kept and the pills follow the row: at
-  once while they are up, after the pause when a new row is entered,
-  so a mouse passing through the diff raises none; for a conflicted
+{ The block under the mouse is kept and the pills go to it: at once
+  while they are up, after the pause when a new row is entered, so a
+  mouse passing through the diff raises none; for a conflicted
   file the conflict whose button is under the mouse is lit. Edit only. }
 procedure TRepoFrame.SetHotDiscard(AEd: TATSynEdit; ABlock, AKeep, ARow: integer);
 begin
@@ -255,7 +255,10 @@ begin
   FHotRow := ARow;
   FPillTimer.Enabled := False;
   if (ABlock < 0) and (AKeep < 0) then
-    FDiscardPills.Dismiss
+  begin
+    FDiscardPills.Dismiss;
+    SetFramedBlock(-1);
+  end
   else if FDiscardPills.Visible then
     ShowDiscardPills
   else
@@ -269,9 +272,21 @@ begin
   ShowDiscardPills;
 end;
 
-{ The pills at the right end of the hot row: Keep and Discard for the
-  block the row is in; on a kept line, Unkeep. A conflict's button has
-  none. }
+{ The row the pills go on: the hot block's first row, or its first row
+  in view when it begins above the view or under a fold, so they stay
+  put while the mouse moves in the block; a kept line's own row. }
+function TRepoFrame.PillRow: integer;
+begin
+  Result := FHotRow;
+  if FHotKeep >= 0 then
+    Exit;
+  while (Result > Edit.LineTop) and (BlockAtRow(Result - 1) = FHotDiscard) and
+    not Edit.IsLineFolded(Result - 1) do
+    Dec(Result);
+end;
+
+{ The pills at the right end of the block's pill row: Keep and Discard
+  for the block; on a kept line, Unkeep. A conflict's button has none. }
 procedure TRepoFrame.ShowDiscardPills;
 var
   Y: integer;
@@ -281,9 +296,14 @@ begin
     (FHotDiscard > High(FBlockStarts)) or CanResolveBlocks or not CanDiscard then
   begin
     FDiscardPills.Dismiss;
+    SetFramedBlock(-1);
     Exit;
   end;
-  Y := Edit.CaretPosToClientPos(Point(0, FHotRow)).Y;
+  if FHotKeep >= 0 then
+    SetFramedBlock(-1)
+  else
+    SetFramedBlock(FHotDiscard);
+  Y := Max(Edit.CaretPosToClientPos(Point(0, PillRow)).Y, Edit.RectMain.Top);
   Anchor := Rect(Edit.RectMain.Left, Y, Edit.RectMain.Right, Y + Edit.TextCharSize.Y);
   Anchor.TopLeft := Edit.ClientToScreen(Anchor.TopLeft);
   Anchor.BottomRight := Edit.ClientToScreen(Anchor.BottomRight);
@@ -296,6 +316,76 @@ begin
   else
     FDiscardPills.Show(Anchor, [rsKeepPill, rsDiscardAction], 'kd',
       [rsKeepPillHint, rsDiscardPillHint]);
+end;
+
+{ The block whose pills are up gets a frame, so it shows which rows
+  they are for when the mouse is far below them. }
+procedure TRepoFrame.SetFramedBlock(ABlock: integer);
+begin
+  if ABlock = FFramedBlock then
+    Exit;
+  FFramedBlock := ABlock;
+  Edit.Invalidate;
+end;
+
+{ The frame round the framed block's rows, across the text, the gaps
+  after its last row left out; rows under a fold end it, as they have no
+  place on the screen. }
+procedure TRepoFrame.DrawBlockFrame(AEd: TATSynEdit; C: TCanvas);
+var
+  First, Last, Y1, Y2, WrapFrom, WrapTo, Rad: integer;
+begin
+  if (AEd <> Edit) or (FFramedBlock < 0) or not FDiscardPills.Visible or
+    (FHotRow < 0) or (FHotRow >= AEd.Strings.Count) then
+    Exit;
+  First := FHotRow;
+  while (First > 0) and (BlockAtRow(First - 1) = FFramedBlock) and
+    not AEd.IsLineFolded(First - 1) do
+    Dec(First);
+  Last := FHotRow;
+  while (Last < AEd.Strings.Count - 1) and (BlockAtRow(Last + 1) = FFramedBlock) and
+    not AEd.IsLineFolded(Last + 1) do
+    Inc(Last);
+  AEd.WrapInfo.FindIndexesOfLineNumber(Last, WrapFrom, WrapTo);
+  if WrapFrom < 0 then
+    Exit;
+  Y1 := AEd.CaretPosToClientPos(Point(0, First)).Y;
+  Y2 := AEd.CaretPosToClientPos(Point(0, Last)).Y;
+  Y2 := Y2 + Max(1, WrapTo - WrapFrom + 1) * AEd.TextCharSize.Y;
+  Rad := Px(6);
+  C.Clipping := True;
+  C.ClipRect := AEd.RectMain;
+  try
+    C.Pen.Style := psSolid;
+    C.Pen.Width := 1;
+    C.Pen.Color := FBlockFrame;
+    C.Brush.Style := bsClear;
+    C.RoundRect(AEd.RectMain.Left + 1, Y1, AEd.RectMain.Right - 1, Y2, Rad, Rad);
+  finally
+    C.Clipping := False;
+    C.Brush.Style := bsSolid;
+  end;
+end;
+
+{ Edit has scrolled: the pills move with their block while the mouse
+  is still on it, else they would stay where its row was. }
+procedure TRepoFrame.PillsScrolled;
+var
+  P: TPoint;
+  Block, Row, Keep: integer;
+begin
+  if FDiscardPills.Visible and MouseOnDiscardRows then
+  begin
+    P := Edit.ScreenToClient(Mouse.CursorPos);
+    Block := DiscardAt(Edit, P.X, P.Y, Row, Keep);
+    if (Block >= 0) and (Block = FHotDiscard) and (Keep < 0) then
+    begin
+      FHotRow := Row;
+      ShowDiscardPills;
+      Exit;
+    end;
+  end;
+  SetHotDiscard(Edit, -1, -1, -1);
 end;
 
 { Whether the mouse is over the pills, which are a child of the form. }
@@ -372,7 +462,7 @@ var
   Path, Err: string;
 begin
   Path := FCurrentPath;
-  if QuestionDlg(rsAppName, Format(rsDiscardAsk, [ExtractFileName(Path),
+  if AskDlg(rsAppName, Format(rsDiscardAsk, [ExtractFileName(Path),
     DiscardBackText(ABlock)]), mtConfirmation,
     [mrYes, rsDiscardAction, 'IsDefault', mrCancel, rsCancelButton, 'IsCancel'], 0) <> mrYes then
     Exit;

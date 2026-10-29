@@ -92,7 +92,7 @@ implementation
 uses
   Math, StrUtils, Process, Clipbrd, LCLIntf, LCLType, LCLVersion, InterfaceBase, LCLPlatformDef,
   ec_SyntAnal, ATSynEdit_Adapter_EControl, ATSynEdit_Globals,
-  gittan.syntaxthemes, gittan.git, gittan.theme,
+  gittan.syntaxthemes, gittan.git, gittan.theme, gittan.pathfield,
   gittan.settings, gittan.job;
 
 resourcestring
@@ -412,6 +412,7 @@ type
     procedure AIChange(Sender: TObject);
     procedure HostingChange(Sender: TObject);
     procedure AddAccounts(AIndex: integer);
+    procedure AccountBoxSelect(Sender: TObject);
     function PickedAccounts: TGittanForgeAccountsList;
     procedure AutoFetchChange(Sender: TObject);
     procedure AgentChange(Sender: TObject);
@@ -420,6 +421,8 @@ type
     function AgentClass: TGittanAIClass;
     function ApiAgent: boolean;
     procedure ShowTool(AEdit: TEdit; ANote: TLabel; const AName, ANotFound: string);
+    procedure ShowToolPaths;
+    procedure ShowAgentEnd;
     procedure SampleClick(Sender: TObject);
     procedure ShowSample;
     procedure StyleSample;
@@ -833,6 +836,7 @@ var
   Main: TCustomForm;
 begin
   inherited DoShow;
+  ShowToolPaths;
   { The Editor page is laid out when it is the one shown, else (opened on
     About) it has its preferred height too. }
   FEditorBox.GetPreferredSize(W, H, False, True);
@@ -897,6 +901,28 @@ end;
 { Shows the page's box over the buttons: a box that was hidden kept the
   Top it was placed with, past the buttons' laid out one, so it goes to
   0 first (alTop orders by Top). The form is laid out once, at the end. }
+{ The tools' paths show their ends; a field on a page not shown yet has
+  no handle, so this runs again as each page shows. }
+procedure TSettingsForm.ShowToolPaths;
+var
+  i: integer;
+begin
+  ShowPathEnd(FGitEdit);
+  ShowAgentEnd;
+  for i := 0 to High(FForgeEdits) do
+    ShowPathEnd(FForgeEdits[i]);
+end;
+
+{ The agent's field shows a path's end, but an API's server from its
+  start, where the host is. }
+procedure TSettingsForm.ShowAgentEnd;
+begin
+  if ApiAgent then
+    ShowTextStart(FAgentEdit)
+  else
+    ShowPathEnd(FAgentEdit);
+end;
+
 procedure TSettingsForm.ShowPage(AIndex: integer);
 var
   Box: TPanel;
@@ -922,6 +948,7 @@ begin
     EnableAutoSizing;
   end;
   FNav.Selected := AIndex;
+  ShowToolPaths;
   { The About page's first control is Check for Updates, which the
     focus would make the default button. }
   if (Box = FAboutPage) and not Box.ContainsControl(ActiveControl) then
@@ -1238,6 +1265,12 @@ begin
       end;
     if Box.ItemIndex < 0 then
       Box.ItemIndex := 0;
+    { The login shown when none is active is no pick of the user's:
+      PickedAccounts switches only from a box whose Tag, the item it
+      started on, is no longer the one picked, or -1 once the user
+      picked in it (AccountBoxSelect), the first login again included. }
+    Box.Tag := Box.ItemIndex;
+    Box.OnSelect := @AccountBoxSelect;
     Several := Several or (Box.Items.Count > 1);
     Place(Box, 4);
     SetLength(FAccountBoxes, Length(FAccountBoxes) + 1);
@@ -1260,6 +1293,11 @@ begin
   Lbl.WordWrap := True;
 end;
 
+procedure TSettingsForm.AccountBoxSelect(Sender: TObject);
+begin
+  TComboBox(Sender).Tag := -1;
+end;
+
 { FAccounts with each list's pick as its host's active account. }
 function TSettingsForm.PickedAccounts: TGittanForgeAccountsList;
 var
@@ -1269,10 +1307,11 @@ begin
   for i := 0 to High(FAccounts) do
     Result[i] := Copy(FAccounts[i]);
   for i := 0 to High(FAccountBoxes) do
-    for j := 0 to High(Result[FAccountForges[i]]) do
-      if Result[FAccountForges[i]][j].Host = FAccountHosts[i] then
-        Result[FAccountForges[i]][j].Active :=
-          Result[FAccountForges[i]][j].Login = FAccountBoxes[i].Text;
+    if FAccountBoxes[i].ItemIndex <> FAccountBoxes[i].Tag then
+      for j := 0 to High(Result[FAccountForges[i]]) do
+        if Result[FAccountForges[i]][j].Host = FAccountHosts[i] then
+          Result[FAccountForges[i]][j].Active :=
+            Result[FAccountForges[i]][j].Login = FAccountBoxes[i].Text;
 end;
 
 function TSettingsForm.AgentClass: TGittanAIClass;
@@ -1319,6 +1358,7 @@ begin
       FModelNote.Caption := rsClaudeModelNote;
   end;
   FAgentEdit.Text := FAgentPaths[FAgent];
+  ShowAgentEnd;
   FKeyLabel.Visible := ApiAgent;
   FKeyEdit.Visible := ApiAgent;
   FKeyNote.Visible := ApiAgent;

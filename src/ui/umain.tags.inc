@@ -127,7 +127,7 @@ begin
     tmCopy: Clipboard.AsText := T.Name;
     tmDelete: DeleteTagAsk(T);
     tmDeleteRemote:
-      if QuestionDlg(rsBmDeleteRemoteTitle, Format(rsTagDeleteRemoteAsk,
+      if AskDlg(rsBmDeleteRemoteTitle, Format(rsTagDeleteRemoteAsk,
         [T.Name, FTagRemote]), mtWarning, [mrYes, rsBmDeleteAction, mrCancel,
         rsCancelButton, 'IsCancel', 'IsDefault'], 0) = mrYes then
         StartRemote(rkDeleteRemoteTag, pmAuto, T.Name, FTagRemote);
@@ -147,6 +147,18 @@ begin
     TagAtAsk(Short, 'HEAD');
 end;
 
+function TRepoFrame.CheckTagName(const AValues: array of string): string;
+var
+  TagName: string;
+begin
+  Result := '';
+  TagName := Trim(AValues[0]);
+  if not FRepo.IsTagName(TagName) then
+    Result := rsAskBadTag
+  else if FRepo.HasRef('refs/tags/' + TagName) then
+    Result := Format(rsAskTagTaken, [TagName]);
+end;
+
 { A tag at ACommit (AShort in the question) after a name and an optional
   message, which makes it annotated. True when it was made. }
 function TRepoFrame.TagAtAsk(const AShort, ACommit: string): boolean;
@@ -157,8 +169,8 @@ begin
   SetLength(Values, 2);
   Values[0] := '';
   Values[1] := '';
-  if not InputQuery(rsCaTagTitle, [Format(rsCaTagPrompt, [AShort]), rsCaTagMessage], Values) or
-    (Trim(Values[0]) = '') then
+  if not AskInput(rsCaTagTitle, '', [Format(rsCaTagPrompt, [AShort]), rsCaTagMessage], Values,
+    @CheckTagName, rsCaTagAction) or (Trim(Values[0]) = '') then
     Exit;
   StopWatcher;
   try
@@ -183,7 +195,7 @@ procedure TRepoFrame.CheckoutTagAsk(const ATag: TGittanTag);
 begin
   if not RepoReady then
     Exit;
-  case QuestionDlg(rsTagCheckoutTitle, Format(rsTagCheckoutAsk, [ATag.Name]), mtConfirmation,
+  case AskDlg(rsTagCheckoutTitle, Format(rsTagCheckoutAsk, [ATag.Name]), mtConfirmation,
       [mrYes, rsTagCheckoutAction, 'IsDefault', mrNo, rsCaBranch, mrCancel, rsCancelButton,
       'IsCancel'], 0) of
     mrYes: SwitchBranch(ATag.Name, True);
@@ -208,7 +220,8 @@ begin
   Result := False;
   SetLength(Values, 1);
   Values[0] := '';
-  if not InputQuery(rsCaBranchTitle, [APrompt], Values) or (Trim(Values[0]) = '') then
+  if not AskInput(rsCaBranchTitle, '', [APrompt], Values, @CheckNewBranch, rsCaBranchAction) or
+    (Trim(Values[0]) = '') then
     Exit;
   StopWatcher;
   try
@@ -228,7 +241,7 @@ end;
 
 procedure TRepoFrame.DeleteTagAsk(const ATag: TGittanTag);
 begin
-  if QuestionDlg(rsTagDeleteTitle, Format(rsTagDeleteAsk, [ATag.Name]), mtConfirmation,
+  if AskDlg(rsTagDeleteTitle, Format(rsTagDeleteAsk, [ATag.Name]), mtConfirmation,
     [mrYes, rsBmDeleteAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
     Exit;
   if FRepo.DeleteTag(ATag.Name) then
@@ -243,7 +256,7 @@ end;
 procedure TRepoFrame.MenuTagsClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
-    ShowTagList(FStatus.PartScreenRect(spBranch));
+    ShowTagList(MenuListAnchor);
 end;
 
 procedure TRepoFrame.MenuNewTagClick(Sender: TObject);

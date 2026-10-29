@@ -114,7 +114,7 @@ begin
   if AAction = 2 then
   begin
     Remaining := MarkersLeft(APath);
-    if (Remaining > 0) and (QuestionDlg(rsMarkResolvedTitle, Format(rsMarkersLeft, [APath, Remaining]),
+    if (Remaining > 0) and (AskDlg(rsMarkResolvedTitle, Format(rsMarkersLeft, [APath, Remaining]),
       mtConfirmation, [mrYes, rsMarkResolved, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'],
       0) <> mrYes) then
       Exit;
@@ -128,7 +128,7 @@ begin
       Side := rsSideTheirs;
     { Taking one side drops the other's changes, with no undo: Cancel is
       the default, as for Revert, Remove and Clean. }
-    if QuestionDlg(rsResolveTitle, Format(rsResolveAsk, [APath, Side]), mtConfirmation,
+    if AskDlg(rsResolveTitle, Format(rsResolveAsk, [APath, Side]), mtConfirmation,
       [mrYes, rsResolveAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
       Exit;
     if AAction = 0 then
@@ -260,6 +260,13 @@ begin
     AddPick(rsUseBothMineFirst, '', cpOursThenTheirs);
     AddPick(rsUseBothTheirsFirst, '', cpTheirsThenOurs);
   end;
+  { The agent's, or its stop while it resolves one (umain.ai.inc). }
+  FConflictAIItem := -1;
+  if AIAvailable then
+    if FConflictJob <> nil then
+      FConflictAIItem := FConflictPopup.Add(Format(rsResolveAIStop, [AgentName]), HintSparkle)
+    else
+      FConflictAIItem := FConflictPopup.Add(Format(rsResolveAI, [AgentName]), HintSparkle);
   { Under the button, or under the row's start when the band is not
     there to anchor to. }
   Band := Edit.Gutter.FindIndexByTag(gutterTagDiscard);
@@ -283,20 +290,30 @@ begin
   FConflictPopup.Popup(Anchor);
 end;
 
-{ Writes the pick over the conflict and refreshes. The last conflict of
-  the file marks it resolved and moves on to the next file. }
+{ Writes the pick over the conflict and refreshes. }
 procedure TRepoFrame.ApplyConflictPick(AIndex: integer; APick: TGittanConflictPick);
-var
-  B: TGittanDiscard;
-  Path, Err: string;
-  Remaining: integer;
-  Marked: boolean;
 begin
   if not CanResolveBlocks or (AIndex < 0) or (AIndex > High(FConflictStarts)) then
     Exit;
-  Path := FCurrentPath;
-  B := ResolveBlock(FChangeLines, FConflictRoles, FConflictStarts[AIndex], APick,
-    IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(Path));
+  WriteConflictBlock(ResolveBlock(FChangeLines, FConflictRoles, FConflictStarts[AIndex],
+    APick, IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(FCurrentPath)),
+    FCurrentPath, True);
+end;
+
+{ Writes ABlock over its conflict in APath (refused when the file no
+  longer holds it) and keeps it for Undo Discard. The last conflict of
+  the file marks it resolved and, with AAdvance, moves on to the next
+  file. AAgent's resolution says what it kept (AWhy) in the status bar. }
+procedure TRepoFrame.WriteConflictBlock(const ABlock: TGittanDiscard; const APath: string;
+  AAdvance: boolean; const AAgent: string; const AWhy: string);
+var
+  B: TGittanDiscard;
+  Path, Err, Why: string;
+  Remaining: integer;
+  Marked: boolean;
+begin
+  B := ABlock;
+  Path := APath;
   if not DiscardBlock(B, Err) then
   begin
     StatusNote(Format(rsResolveBlockFailed, [Err]), True);
@@ -316,10 +333,22 @@ begin
   end;
   RefreshRepository;
   UpdateDiscardItems;
-  if Marked then
+  if AAgent <> '' then
+  begin
+    Why := AWhy;
+    if Why = '' then
+      Why := rsResolvedAIUndo;
+    if Marked then
+      StatusNote(Format(rsResolvedAILast, [AAgent, Path, Why]))
+    else
+      StatusNote(Format(rsResolvedAI, [AAgent, B.Line, Path, Why]));
+    if Marked then
+      ShowNextConflict(Path, AAdvance);
+  end
+  else if Marked then
   begin
     StatusNote(Format(rsResolvedLast, [Path]));
-    ShowNextConflict(Path, True);
+    ShowNextConflict(Path, AAdvance);
   end
   else if Remaining = 1 then
     StatusNote(Format(rsResolvedBlockOne, [B.Line, Path]))
@@ -335,7 +364,17 @@ begin
       SummarySelectFile(Sender, FConflictPaths[AIndex]);
     Exit;
   end;
-  if (AIndex >= 0) and (AIndex <= High(FConflictPicks)) then
+  if (FConflictAIItem >= 0) and (AIndex = FConflictAIItem) then
+  begin
+    if FConflictJob <> nil then
+    begin
+      AbandonConflictJob;
+      FStatus.ShowMessage('', stNormal, 0);
+    end
+    else
+      StartConflictJob(FResolveIndex);
+  end
+  else if (AIndex >= 0) and (AIndex <= High(FConflictPicks)) then
     ApplyConflictPick(FResolveIndex, FConflictPicks[AIndex]);
   FResolveIndex := -1;
 end;
@@ -592,7 +631,7 @@ begin
       Shown := Shown + LineEnding + '  ' + Extras[i];
     if Length(Extras) > 10 then
       Shown := Shown + LineEnding + '  ' + Format(rsSwitchMore, [Length(Extras) - 10]);
-    if QuestionDlg(rsContinueExtrasTitle, Format(rsContinueExtrasAsk, [Shown]), mtConfirmation,
+    if AskDlg(rsContinueExtrasTitle, Format(rsContinueExtrasAsk, [Shown]), mtConfirmation,
       [mrYes, rsContinueExtrasButton, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'],
       0) <> mrYes then
       Exit;
@@ -603,7 +642,7 @@ begin
     begin
       Screen.Cursor := crDefault;
       RefreshRepository;
-      MessageDlg(Format(rsContinueFailed, [Noun]), FRepo.Error, mtError, [mbOK], 0);
+      TellDlg(Format(rsContinueFailed, [Noun]), FRepo.Error, mtError);
       Exit;
     end;
   finally
@@ -635,7 +674,7 @@ procedure TRepoFrame.SkipOperationClick(Sender: TObject);
 begin
   if (FRepo.Root = '') or not ContinueMode then
     Exit;
-  if QuestionDlg(rsSkipTitle, rsSkipAsk, mtConfirmation,
+  if AskDlg(rsSkipTitle, rsSkipAsk, mtConfirmation,
     [mrYes, rsSkipButton, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
     Exit;
   if FRepo.SkipOperation then
@@ -644,7 +683,7 @@ begin
     StatusNote(rsSkipped);
   end
   else
-    MessageDlg(rsSkipFailed, FRepo.Error, mtError, [mbOK], 0);
+    TellDlg(rsSkipFailed, FRepo.Error, mtError);
   RefreshRepository;
 end;
 
@@ -659,7 +698,7 @@ begin
   begin
     { HEAD is on another branch: offer to forget the rebase too, which
       keeps the branch and the files as they are. }
-    case QuestionDlg(rsAbortTitle, Format(rsStrayAbortAsk, [FRebaseBranch, FBranch]),
+    case AskDlg(rsAbortTitle, Format(rsStrayAbortAsk, [FRebaseBranch, FBranch]),
         mtConfirmation, [mrYes, rsAbortButton, mrNo, rsQuitButton, mrCancel, rsCancelButton,
         'IsCancel', 'IsDefault'], 0) of
       mrYes: ;
@@ -671,7 +710,7 @@ begin
           StatusNote(Format(rsQuit, [Noun]));
         end
         else
-          MessageDlg(Format(rsQuitFailed, [Noun]), FRepo.Error, mtError, [mbOK], 0);
+          TellDlg(Format(rsQuitFailed, [Noun]), FRepo.Error, mtError);
         RefreshRepository;
         Exit;
       end;
@@ -679,7 +718,7 @@ begin
         Exit;
     end;
   end
-  else if QuestionDlg(rsAbortTitle, Format(rsAbortAsk, [Noun]), mtConfirmation,
+  else if AskDlg(rsAbortTitle, Format(rsAbortAsk, [Noun]), mtConfirmation,
     [mrYes, rsAbortButton, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
     Exit;
   if FRepo.AbortOperation then
@@ -692,6 +731,6 @@ begin
     StatusNote(Format(rsAborted, [Noun]));
   end
   else
-    MessageDlg(Format(rsAbortFailed, [Noun]), FRepo.Error, mtError, [mbOK], 0);
+    TellDlg(Format(rsAbortFailed, [Noun]), FRepo.Error, mtError);
   RefreshRepository;
 end;

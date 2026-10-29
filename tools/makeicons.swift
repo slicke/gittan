@@ -1,18 +1,15 @@
-// makeicons.swift - builds Gittan's application icons from the artwork.
+// makeicons.swift - packs Gittan's finished application icons.
 //
-//   swift tools/makeicons.swift <artwork.png> <mac-artwork.png> <outdir> <Gittan.ico>
+//   swift tools/makeicons.swift <mac.png> <pngdir> <outdir> <Gittan.ico>
 //
-// Both artworks are finished, square PNGs. <artwork.png> is the motif alone,
-// transparent around it, for Windows and Linux, which get it filling its
-// canvas. <mac-artwork.png> is the motif on a rounded tile with its own rim,
-// transparent outside the tile, which macOS gets inset to Apple's grid over a
-// soft drop shadow.
+// The artwork comes finished. <mac.png> is the macOS icon at 1024 pixels, the
+// tile already on Apple's 824/1024 grid with its own shadow. <pngdir> holds
+// gittan-<n>.png for Windows and Linux, each drawn for its size (16 to 512),
+// the small ones from a simpler drawing.
 //
 // Writes:
-//   <outdir>/gittan.png          1024x1024 master, the motif filling the canvas
-//   <outdir>/png/gittan-<n>.png  16..512 for Linux desktop files
-//   <outdir>/Gittan.icns         macOS, the tile inset to Apple's 824/1024 grid
-//   <Gittan.ico>                 Windows/Linux LCL icon, 16..256, the motif filling the canvas
+//   <outdir>/Gittan.icns         macOS, <mac.png> scaled to each size
+//   <Gittan.ico>                 Windows/Linux LCL icon, 16..256 from <pngdir>
 //
 // macOS only (CoreGraphics, ImageIO, iconutil).
 
@@ -23,10 +20,10 @@ import UniformTypeIdentifiers
 
 let args = CommandLine.arguments
 guard args.count == 5 else {
-  FileHandle.standardError.write("usage: makeicons.swift <artwork.png> <mac-artwork.png> <outdir> <Gittan.ico>\n".data(using: .utf8)!)
+  FileHandle.standardError.write("usage: makeicons.swift <mac.png> <pngdir> <outdir> <Gittan.ico>\n".data(using: .utf8)!)
   exit(2)
 }
-let srcPath = args[1], macSrcPath = args[2], outDir = args[3], icoPath = args[4]
+let macPath = args[1], pngDir = args[2], outDir = args[3], icoPath = args[4]
 
 func fail(_ msg: String) -> Never {
   FileHandle.standardError.write("makeicons: \(msg)\n".data(using: .utf8)!)
@@ -95,46 +92,19 @@ func resized(_ img: CGImage, to size: Int) -> Bitmap {
   return bm
 }
 
-func loadSquare(_ path: String) -> CGImage {
+func loadSquare(_ path: String, size: Int? = nil) -> Bitmap {
   let art = load(path)
   if art.width != art.height { fail("\(path) must be square, it is \(art.width)x\(art.height)") }
-  return art.image
+  if let n = size, art.width != n { fail("\(path) must be \(n) pixels, it is \(art.width)") }
+  return art
 }
-let artImage = loadSquare(srcPath)
-let macArtImage = loadSquare(macSrcPath)
+let macImage = loadSquare(macPath).image
 
 let fm = FileManager.default
-try? fm.createDirectory(atPath: outDir + "/png", withIntermediateDirectories: true)
 
 func write(_ data: Data, _ path: String) {
   do { try data.write(to: URL(fileURLWithPath: path)) } catch { fail("cannot write \(path): \(error)") }
 }
-
-// ---------------------------------------------------------------------------
-// Windows and Linux: the motif filling its canvas
-// ---------------------------------------------------------------------------
-
-let master = resized(artImage, to: 1024)
-write(master.pngData(), outDir + "/gittan.png")
-let masterImage = master.image
-
-for n in [16, 22, 24, 32, 48, 64, 128, 256, 512] {
-  write(resized(masterImage, to: n).pngData(), outDir + "/png/gittan-\(n).png")
-}
-
-// ---------------------------------------------------------------------------
-// macOS: the tile inset to Apple's 824/1024 grid over a soft drop shadow
-// ---------------------------------------------------------------------------
-
-let side = 1024
-let mac = Bitmap(width: side, height: side)
-let macInset = CGFloat(side) * 100 / 1024
-// Context coordinates count from the bottom: a negative offset drops the
-// shadow below the tile.
-mac.ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 28,
-                  color: CGColor(gray: 0, alpha: 0.4))
-mac.draw(macArtImage, in: CGRect(x: 0, y: 0, width: side, height: side).insetBy(dx: macInset, dy: macInset))
-let macImage = mac.image
 
 // ---------------------------------------------------------------------------
 // Windows .ico: BMP entries up to 128, PNG at 256
@@ -172,7 +142,7 @@ func bmpEntry(_ bm: Bitmap) -> Data {
 
 let icoSizes = [16, 24, 32, 48, 64, 128, 256]
 var entries: [(size: Int, data: Data)] = icoSizes.map { n in
-  let bm = resized(masterImage, to: n)
+  let bm = loadSquare(pngDir + "/gittan-\(n).png", size: n)
   return (n, n >= 256 ? bm.pngData() : bmpEntry(bm))
 }
 var ico = Data()
@@ -211,4 +181,4 @@ do { try p.run() } catch { fail("cannot run iconutil") }
 p.waitUntilExit()
 try? fm.removeItem(atPath: tmp)
 if p.terminationStatus != 0 { fail("iconutil failed") }
-print("wrote \(outDir)/gittan.png, \(outDir)/png/, \(outDir)/Gittan.icns, \(icoPath)")
+print("wrote \(outDir)/Gittan.icns, \(icoPath)")

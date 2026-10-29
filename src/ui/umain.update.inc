@@ -23,7 +23,7 @@ begin
     UpdateDialog
   else if CurrentBuild < 0 then
   begin
-    if QuestionDlg(rsUpdateTitle, Format(rsUpdateLocalBuild, [App.UpdateRelease.Name]),
+    if AskDlg(rsUpdateTitle, Format(rsUpdateLocalBuild, [App.UpdateRelease.Name]),
       mtInformation, [mrYes, rsUpdateOpenPage, mrCancel, rsUpdateClose, 'IsDefault'],
       0) = mrYes then
       OpenURL(App.UpdateRelease.Url);
@@ -50,7 +50,7 @@ end;
 
 procedure TRepoFrame.UpdateDialog;
 begin
-  case QuestionDlg(rsUpdateTitle, Format(rsUpdateAvailable, [App.UpdateRelease.Name,
+  case AskDlg(rsUpdateTitle, Format(rsUpdateAvailable, [App.UpdateRelease.Name,
       CurrentBuild]), mtInformation, [mrYes, rsUpdateDownload, 'IsDefault',
       mrIgnore, Format(rsUpdateLater, [UpdateSnoozeDays]), mrCancel, rsUpdateNotNow,
       'IsCancel'], 0) of

@@ -1,13 +1,16 @@
 unit gittan.welcome;
 
 {** The welcome view: what Gittan shows while no repository is open, and
-  where a failure to open one is reported. Under the application icon and
-  the name it offers a button that opens the folder dialog, with the
-  shortcut drawn as key caps beside it, one that clones a repository and
-  one that makes a new one (the three in a row, or under each other when
-  the row does not fit), and lists the recent repositories
+  where a failure to open one is reported. Under the wordmark (the mark
+  and the name, as gittan.app has them, drawn from
+  icons/gittan-wordmark.svg in the view's colors; the title and the
+  tagline as text when it cannot be drawn) it offers a button that opens the folder dialog, filled in the
+  accent with the shortcut drawn as key caps inside it, one that clones a
+  repository and one that makes a new one (the three in a row as wide as
+  the column, or under each other when the row does not fit), says under
+  them that a folder can be dropped, and lists the recent repositories
   as rows to click, each with its name and path; a repository whose folder
-  is gone is listed dimmed and does not react. An error is shown in red
+  is gone is listed dimmed, says so, and does not react. An error is shown in red
   under the name, wrapped to the column, so the next attempt is one click
   or one drop away. While a repository opens it shows only that, in place
   of the error, the buttons and the list.
@@ -22,7 +25,7 @@ unit gittan.welcome;
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Graphics;
+  Classes, SysUtils, Types, Controls, Graphics, BGRABitmap;
 
 type
   {** A click on a recent repository, with its root. }
@@ -34,9 +37,11 @@ type
   private
     FTitle, FTagline, FError, FShortcut, FBusy: string;
     FRecent: TStringList;
-    FIcon: TIcon;
-    FIconBitmap: TBitmap;
-    FBack, FText, FDim, FHover, FLine, FErrorColor: TColor;
+    { The wordmark drawn for the colors and the screen's pixels, made in
+      the first paint after a change; FLogoFailed when it could not be. }
+    FLogo: TBGRABitmap;
+    FLogoFailed: boolean;
+    FBack, FText, FDim, FHover, FLine, FErrorColor, FAccent: TColor;
     { What the mouse is over: hotNone, a button (hotButton less its
       index) or a row's index. }
     FHot: integer;
@@ -49,6 +54,7 @@ type
     procedure SetHot(AValue: integer);
     function RecentMissing(AIndex: integer): boolean;
     function FitLeft(const AText: string; AMaxWidth: integer): string;
+    function LogoBitmap(APixels: integer): TBGRABitmap;
     procedure WrapError(AWidth: integer; ALines: TStrings);
   protected
     procedure Paint; override;
@@ -59,9 +65,6 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
-    {** The application icon, drawn above the title; nil draws none. The
-      icon stays the caller's. }
-    procedure SetIcon(AIcon: TIcon);
     {** The recent repositories, most recent first; a copy is kept. }
     procedure SetRecent(ARoots: TStrings);
     {** The error shown under the title; empty shows none. }
@@ -74,13 +77,16 @@ type
       button or row, the line of the borders and the divider, and the
       error text. }
     procedure SetColors(ABack, AText, ADim, AHover, ALine, AError: TColor);
+    {** The fill of the open button, the status bar's primary button's. }
+    procedure SetAccent(AAccent: TColor);
     {** Makes the control at least AMin high (the height of the box it
       sits in, so its background covers the box), and no higher than its
       content needs beyond that. }
     procedure FitHeight(AMin: integer);
-    {** The application name over the tagline. }
+    {** The application name over the tagline, drawn when the wordmark
+      cannot be. }
     property Title: string read FTitle write FTitle;
-    {** The dim line under the title. }
+    {** The dim line under the title, with it. }
     property Tagline: string read FTagline write FTagline;
     {** The shortcut of the open button, drawn as key caps beside it. }
     property Shortcut: string read FShortcut write FShortcut;
@@ -97,7 +103,19 @@ type
 implementation
 
 uses
-  Math, LazUTF8, gittan.statusbar, gittan.textfit, gittan.theme;
+  Math, LazUTF8, BGRABitmapTypes, BGRASVG, BGRACanvas2D, gittan.statusbar,
+  gittan.textfit, gittan.theme;
+
+const
+  { icons/gittan-wordmark.svg, in its light colors. }
+  WordmarkSvg = {$I gittan.wordmark.inc};
+  WordmarkRed = '#E5484D';
+  WordmarkGreen = '#2FA84F';
+  WordmarkText = '#1F2937';
+  { What a dark background takes in their place, as gittan.app has it;
+    the name takes the view's text color in both. }
+  WordmarkDarkRed = '#FF6B70';
+  WordmarkDarkGreen = '#4ADE80';
 
 resourcestring
   rsOpenButton = 'Open Repository…';
@@ -113,15 +131,18 @@ const
   Pad = 24;
   Gap = 12;
   ColumnWidth = 480;
-  IconSize = 64;
+  LogoWidth = 340;
   TitleFontSize = 20;
-  ButtonPadX = 14;
-  ButtonPadY = 6;
+  ButtonPadX = 16;
+  ButtonPadY = 8;
+  ButtonGap = 8;
+  ButtonRound = 10;
+  RecentGap = 36;
   KeyPadX = 5;
   KeyPadY = 2;
   RowHeight = 44;
   RowPadX = 10;
-  FolderSize = 20;
+  FolderSize = 16;
 
 { TGittanWelcome }
 
@@ -133,20 +154,14 @@ begin
   FHot := hotNone;
   Align := alTop;
   SetColors(clWindow, clWindowText, clGrayText, clBtnFace, clBtnShadow, clRed);
+  FAccent := clHighlight;
 end;
 
 destructor TGittanWelcome.Destroy;
 begin
-  FIconBitmap.Free;
+  FLogo.Free;
   FRecent.Free;
   inherited Destroy;
-end;
-
-procedure TGittanWelcome.SetIcon(AIcon: TIcon);
-begin
-  FIcon := AIcon;
-  FreeAndNil(FIconBitmap);
-  Invalidate;
 end;
 
 procedure TGittanWelcome.SetRecent(ARoots: TStrings);
@@ -185,7 +200,15 @@ begin
   FHover := AHover;
   FLine := ALine;
   FErrorColor := AError;
+  FreeAndNil(FLogo);
+  FLogoFailed := False;
   Color := ABack;
+  Invalidate;
+end;
+
+procedure TGittanWelcome.SetAccent(AAccent: TColor);
+begin
+  FAccent := AAccent;
   Invalidate;
 end;
 
@@ -236,6 +259,58 @@ begin
   Result := FitTextLeft(Canvas, AText, AMaxWidth);
 end;
 
+function HexColor(AColor: TColor): string;
+var
+  C: TColor;
+begin
+  C := ColorToRGB(AColor);
+  Result := Format('#%.2x%.2x%.2x', [Red(C), Green(C), Blue(C)]);
+end;
+
+{ The wordmark APixels wide in the view's colors, kept until the colors
+  or the width change; nil when BGRASVG could not draw it. }
+function TGittanWelcome.LogoBitmap(APixels: integer): TBGRABitmap;
+var
+  Source: string;
+  Svg: TBGRASVG;
+  C2d: TBGRACanvas2D;
+  Size: TPointF;
+  C: TColor;
+begin
+  if (FLogo <> nil) and (FLogo.Width = APixels) then
+    Exit(FLogo);
+  FreeAndNil(FLogo);
+  if FLogoFailed then
+    Exit(nil);
+  Source := StringReplace(WordmarkSvg, WordmarkText, HexColor(FText), [rfReplaceAll]);
+  C := ColorToRGB(FBack);
+  if Red(C) * 299 + Green(C) * 587 + Blue(C) * 114 < 128000 then
+  begin
+    Source := StringReplace(Source, WordmarkRed, WordmarkDarkRed, [rfReplaceAll]);
+    Source := StringReplace(Source, WordmarkGreen, WordmarkDarkGreen, [rfReplaceAll]);
+  end;
+  Svg := nil;
+  try
+    try
+      Svg := TBGRASVG.CreateFromString(Source);
+      Size := Svg.ViewSizeInUnit[cuPixel];
+      FLogo := TBGRABitmap.Create(APixels, Max(1, Round(APixels * Size.Y / Size.X)));
+      C2d := TBGRACanvas2D.Create(FLogo);
+      try
+        Svg.StretchDraw(C2d, 0, 0, FLogo.Width, FLogo.Height, True);
+      finally
+        C2d.Free;
+      end;
+    except
+      FreeAndNil(FLogo);
+      FLogoFailed := True;
+    end;
+  finally
+    Svg.Free;
+  end;
+  Result := FLogo;
+end;
+
 { The error broken into lines no wider than AWidth with the canvas font:
   at spaces, and inside a word too wide for a line (a path, mostly)
   after a slash, or anywhere when there is no slash either. }
@@ -279,14 +354,18 @@ end;
 procedure TGittanWelcome.Paint;
 var
   ColLeft, ColWidth, Y, BlockTop, Total, LineHeight, TitleHeight, ErrHeight: integer;
-  KeyWidth, X, TextY, i, NameWidth, RowWidth, ButtonHeight, ButtonRows: integer;
+  KeyWidth, X, TextY, i, RowWidth, ButtonHeight, ButtonRows, Spare, LogoW: integer;
+  OpenNeed: integer;
   ButtonWidths: array[0..2] of integer;
   Captions: array[0..2] of string;
   Stacked: boolean;
   R: TRect;
   RepoName, Path: string;
-  Missing, HasIcon: boolean;
+  Missing: boolean;
   ErrLines: TStringList;
+  Fill, Ink: TColor;
+  Logo: TBGRABitmap;
+  LogoHeight: integer;
 begin
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := FBack;
@@ -296,7 +375,14 @@ begin
   LineHeight := Canvas.TextHeight('Xg');
   ColWidth := Min(Px(ColumnWidth), Width - 2 * Px(Pad));
   ColLeft := (Width - ColWidth) div 2;
-  HasIcon := (FIcon <> nil) and not FIcon.Empty;
+  { The wordmark in the screen's pixels (twice its points on a Retina
+    screen), which Cocoa then draws pixel for pixel; no wider than the
+    column. }
+  LogoW := Max(1, Min(Px(LogoWidth), ColWidth));
+  Logo := LogoBitmap(Round(LogoW * GetCanvasScaleFactor));
+  LogoHeight := 0;
+  if Logo <> nil then
+    LogoHeight := LogoW * Logo.Height div Logo.Width;
 
   { The block's height first, to place it: a little above the middle
     of the room, which looks centered, and never off the top. }
@@ -304,36 +390,52 @@ begin
   Canvas.Font.Style := [fsBold];
   TitleHeight := Canvas.TextHeight('Xg');
   Canvas.Font.Size := Font.Size;
-  Canvas.Font.Style := [];
-  { The buttons in a row, the open button's key caps after it, or under
-    each other when the row is wider than the room. }
+  { The buttons as wide as the column, the open button taking what the
+    others leave, its shortcut drawn as a key cap inside it at the right;
+    under each other, each as wide as the column, when their row does
+    not fit. The captions are bold, as the status bar's primary
+    button's is, and measured so. }
   Captions[0] := rsOpenButton;
   Captions[1] := rsCloneButton;
   Captions[2] := rsInitButton;
   KeyWidth := 0;
   if FShortcut <> '' then
-    KeyWidth := Px(Gap) + Canvas.TextWidth(FShortcut) + 2 * Px(KeyPadX);
-  RowWidth := KeyWidth + 2 * Px(Gap);
-  { The key caps stand a little apart from the next button. }
-  if KeyWidth > 0 then
-    Inc(RowWidth, Px(Gap));
+    KeyWidth := Canvas.TextWidth(FShortcut) + 2 * Px(KeyPadX);
+  RowWidth := 2 * Px(ButtonGap);
   for i := 0 to High(Captions) do
   begin
     ButtonWidths[i] := Canvas.TextWidth(Captions[i]) + 2 * Px(ButtonPadX);
+    if (i = 0) and (KeyWidth > 0) then
+      Inc(ButtonWidths[i], Px(Gap) + KeyWidth);
     Inc(RowWidth, ButtonWidths[i]);
   end;
-  Stacked := RowWidth > Width - 2 * Px(Pad);
+  Canvas.Font.Style := [];
+  OpenNeed := ButtonWidths[0];
+  Stacked := RowWidth > ColWidth;
+  if Stacked then
+    for i := 0 to High(Captions) do
+      ButtonWidths[i] := ColWidth
+  else
+    Inc(ButtonWidths[0], ColWidth - RowWidth);
+  { A column too narrow for the open button's caption and its key cap
+    drops the key cap rather than draw the caption over it. }
+  if ButtonWidths[0] < OpenNeed then
+    KeyWidth := 0;
   ButtonHeight := LineHeight + 2 * Px(ButtonPadY);
   if Stacked then
     ButtonRows := Length(Captions)
   else
     ButtonRows := 1;
-  Total := 0;
-  if HasIcon then
-    Inc(Total, Px(IconSize) + Px(Gap));
-  Inc(Total, TitleHeight + 2);
-  if FTagline <> '' then
-    Inc(Total, LineHeight);
+  { The wordmark's small caps line needs more room under it than the
+    tagline does. }
+  if Logo <> nil then
+    Total := LogoHeight + Px(Gap)
+  else
+  begin
+    Total := TitleHeight + 2;
+    if FTagline <> '' then
+      Inc(Total, LineHeight);
+  end;
   ErrHeight := 0;
   ErrLines := TStringList.Create;
   try
@@ -347,10 +449,11 @@ begin
         ErrHeight := ErrLines.Count * LineHeight;
         Inc(Total, Px(Gap) + ErrHeight);
       end;
-      Inc(Total, Px(Pad) + ButtonRows * ButtonHeight + (ButtonRows - 1) * Px(Gap) div 2);
+      Inc(Total, Px(Pad) + ButtonRows * ButtonHeight + (ButtonRows - 1) * Px(ButtonGap));
+      Inc(Total, Px(Gap) + LineHeight);
       if FRecent.Count > 0 then
-        Inc(Total, Px(Pad) + LineHeight + Px(Gap) div 2 + 1 + Px(Gap) div 2 + FRecent.Count * Px(RowHeight));
-      Inc(Total, Px(Pad) + LineHeight);
+        Inc(Total, Px(RecentGap) + LineHeight + Px(Gap) div 2 + 1 + Px(Gap) div 2 +
+          FRecent.Count * Px(RowHeight));
     end;
     FContentHeight := Total + 2 * Px(Pad);
     if Height < FContentHeight then
@@ -361,36 +464,27 @@ begin
     BlockTop := Max(Px(Pad), (Height - Total) * 2 div 5);
     Y := BlockTop;
 
-    if HasIcon then
+    if Logo <> nil then
     begin
-      { The icon's image for the size in device pixels (so a HiDPI screen
-        gets the sharp one) is copied into a bitmap: drawing the icon
-        itself goes through its handle, which Cocoa makes from the first,
-        smallest image. }
-      if FIconBitmap = nil then
+      Logo.Draw(Canvas, Rect((Width - LogoW) div 2, Y,
+        (Width + LogoW) div 2, Y + LogoHeight), False);
+      Inc(Y, LogoHeight + Px(Gap));
+    end
+    else
+    begin
+      Canvas.Font.Size := TitleFontSize;
+      Canvas.Font.Style := [fsBold];
+      Canvas.Font.Color := FText;
+      Canvas.TextOut((Width - Canvas.TextWidth(FTitle)) div 2, Y, FTitle);
+      Inc(Y, TitleHeight + 2);
+      Canvas.Font.Size := Font.Size;
+      Canvas.Font.Style := [];
+      if FTagline <> '' then
       begin
-        FIcon.Current := FIcon.GetBestIndexForSize(
-          Size(Round(Px(IconSize) * GetCanvasScaleFactor), Round(Px(IconSize) * GetCanvasScaleFactor)));
-        FIconBitmap := TBitmap.Create;
-        FIconBitmap.LoadFromRawImage(FIcon.RawImage, False);
+        Canvas.Font.Color := FDim;
+        Canvas.TextOut((Width - Canvas.TextWidth(FTagline)) div 2, Y, FTagline);
+        Inc(Y, LineHeight);
       end;
-      Canvas.StretchDraw(Rect((Width - Px(IconSize)) div 2, Y, (Width + Px(IconSize)) div 2,
-        Y + Px(IconSize)), FIconBitmap);
-      Inc(Y, Px(IconSize) + Px(Gap));
-    end;
-
-    Canvas.Font.Size := TitleFontSize;
-    Canvas.Font.Style := [fsBold];
-    Canvas.Font.Color := FText;
-    Canvas.TextOut((Width - Canvas.TextWidth(FTitle)) div 2, Y, FTitle);
-    Inc(Y, TitleHeight + 2);
-    Canvas.Font.Size := Font.Size;
-    Canvas.Font.Style := [];
-    if FTagline <> '' then
-    begin
-      Canvas.Font.Color := FDim;
-      Canvas.TextOut((Width - Canvas.TextWidth(FTagline)) div 2, Y, FTagline);
-      Inc(Y, LineHeight);
     end;
 
     if FBusy <> '' then
@@ -414,58 +508,83 @@ begin
       Inc(Y, ErrHeight);
     end;
 
-    { The buttons, as one centered group, or each centered under the one
-      before; the open button's shortcut beside it. }
+    { The buttons: the open button filled in the accent, the others
+      outlined; each caption centered in its button, the open one's in
+      what the key cap leaves. }
     Inc(Y, Px(Pad));
-    if Stacked then
-      X := 0
-    else
-      X := (Width - RowWidth) div 2;
-    Canvas.Pen.Style := psSolid;
+    X := ColLeft;
     for i := 0 to High(Captions) do
     begin
-      if Stacked then
-      begin
-        X := (Width - ButtonWidths[i]) div 2;
-        if i = 0 then
-          X := (Width - ButtonWidths[i] - KeyWidth) div 2;
-      end;
       FButtonRects[i] := Rect(X, Y, X + ButtonWidths[i], Y + ButtonHeight);
-      Canvas.Pen.Color := FLine;
-      if FHot = hotButton - i then
+      R := FButtonRects[i];
+      if i = 0 then
       begin
+        Fill := FAccent;
+        if FHot = hotButton then
+          Fill := MixColor(Fill, FText, 0.12);
+        Canvas.Pen.Style := psClear;
         Canvas.Brush.Style := bsSolid;
-        Canvas.Brush.Color := FHover;
+        Canvas.Brush.Color := Fill;
+        Canvas.RoundRect(R, Px(ButtonRound), Px(ButtonRound));
+        Canvas.Pen.Style := psSolid;
+        Ink := clWhite;
       end
       else
-        Canvas.Brush.Style := bsClear;
-      Canvas.RoundRect(FButtonRects[i], 10, 10);
-      Canvas.Brush.Style := bsClear;
-      Canvas.Font.Color := FText;
-      Canvas.TextOut(X + Px(ButtonPadX), Y + Px(ButtonPadY), Captions[i]);
-      X := FButtonRects[i].Right + Px(Gap);
-      if (i = 0) and (FShortcut <> '') then
       begin
-        { The shortcut as a key cap: a small rounded frame in dim. }
-        TextY := Y + Px(ButtonPadY);
-        R := Rect(X, TextY - Px(KeyPadY), X + KeyWidth - Px(Gap), TextY + LineHeight + Px(KeyPadY));
         Canvas.Pen.Color := FLine;
-        Canvas.RoundRect(R, 6, 6);
-        Canvas.Font.Color := FDim;
-        Canvas.TextOut(X + Px(KeyPadX), TextY, FShortcut);
-        X := R.Right + 2 * Px(Gap);
+        if FHot = hotButton - i then
+        begin
+          Canvas.Brush.Style := bsSolid;
+          Canvas.Brush.Color := FHover;
+        end
+        else
+          Canvas.Brush.Style := bsClear;
+        Canvas.RoundRect(R, Px(ButtonRound), Px(ButtonRound));
+        Ink := FText;
       end;
-      if Stacked and (i < High(Captions)) then
-        Inc(Y, ButtonHeight + Px(Gap) div 2);
+      Canvas.Brush.Style := bsClear;
+      Spare := R.Right;
+      TextY := Y + Px(ButtonPadY);
+      if (i = 0) and (KeyWidth > 0) then
+      begin
+        { The shortcut as a key cap: a small rounded frame in a paler
+          shade of the fill. }
+        Spare := R.Right - Px(ButtonPadX) - KeyWidth;
+        Canvas.Pen.Color := MixColor(FAccent, clWhite, 0.45);
+        Canvas.RoundRect(Spare, TextY - Px(KeyPadY), R.Right - Px(ButtonPadX),
+          TextY + LineHeight + Px(KeyPadY), Px(6), Px(6));
+        Canvas.Font.Color := MixColor(FAccent, clWhite, 0.8);
+        Canvas.TextOut(Spare + Px(KeyPadX), TextY, FShortcut);
+        Dec(Spare, Px(Gap));
+      end;
+      Canvas.Font.Style := [fsBold];
+      Canvas.Font.Color := Ink;
+      Canvas.TextOut(R.Left + (Spare - R.Left - Canvas.TextWidth(Captions[i])) div 2,
+        TextY, Captions[i]);
+      Canvas.Font.Style := [];
+      if Stacked then
+      begin
+        if i < High(Captions) then
+          Inc(Y, ButtonHeight + Px(ButtonGap));
+      end
+      else
+        X := R.Right + Px(ButtonGap);
     end;
     Inc(Y, ButtonHeight);
 
+    { What else opens a repository, dim under the buttons. }
+    Inc(Y, Px(Gap));
+    Canvas.Font.Color := FDim;
+    Canvas.TextOut((Width - Canvas.TextWidth(rsDrop)) div 2, Y, rsDrop);
+    Inc(Y, LineHeight);
+
     { The recent repositories: a dim heading over a divider, then a row
-      per repository with the folder, the name and the path. }
+      per repository with the folder, the name and the path, and "not
+      found" at the right of the name's line when the folder is gone. }
     SetLength(FRowRects, FRecent.Count);
     if FRecent.Count > 0 then
     begin
-      Inc(Y, Px(Pad));
+      Inc(Y, Px(RecentGap));
       Canvas.Font.Color := FDim;
       Canvas.TextOut(ColLeft, Y, rsRecent);
       Inc(Y, LineHeight + Px(Gap) div 2);
@@ -481,34 +600,33 @@ begin
           Canvas.Pen.Style := psClear;
           Canvas.Brush.Style := bsSolid;
           Canvas.Brush.Color := FHover;
-          Canvas.RoundRect(FRowRects[i], 10, 10);
+          Canvas.RoundRect(FRowRects[i], Px(ButtonRound), Px(ButtonRound));
           Canvas.Pen.Style := psSolid;
           Canvas.Brush.Style := bsClear;
         end;
-        DrawStatusIcon(Canvas, HintFolder, ColLeft + 2, Y + (Px(RowHeight) - Px(FolderSize)) div 2,
+        DrawStatusIcon(Canvas, HintFolder, ColLeft, Y + (Px(RowHeight) - Px(FolderSize)) div 2,
           Px(FolderSize), FDim);
         Canvas.Brush.Style := bsClear;
         X := ColLeft + Px(FolderSize) + Px(Gap);
         RepoName := ExtractFileName(ExcludeTrailingPathDelimiter(FRecent[i]));
         Path := FRecent[i];
         TextY := Y + (Px(RowHeight) - 2 * LineHeight) div 2;
-        if Missing then
-          Canvas.Font.Color := FDim
-        else
-          Canvas.Font.Color := FText;
-        Canvas.TextOut(X, TextY, RepoName);
-        NameWidth := Canvas.TextWidth(RepoName);
+        Spare := ColLeft + ColWidth;
         Canvas.Font.Color := FDim;
         if Missing then
-          Canvas.TextOut(X + NameWidth + Px(Gap) div 2, TextY, '· ' + rsNotFound);
+        begin
+          Dec(Spare, Canvas.TextWidth(rsNotFound));
+          Canvas.TextOut(Spare, TextY, rsNotFound);
+          Dec(Spare, Px(Gap));
+        end
+        else
+          Canvas.Font.Color := FText;
+        Canvas.TextOut(X, TextY, FitTextRight(Canvas, RepoName, Spare - X));
+        Canvas.Font.Color := FDim;
         Canvas.TextOut(X, TextY + LineHeight, FitLeft(Path, ColLeft + ColWidth - X));
         Inc(Y, Px(RowHeight));
       end;
     end;
-
-    Inc(Y, Px(Pad));
-    Canvas.Font.Color := FDim;
-    Canvas.TextOut((Width - Canvas.TextWidth(rsDrop)) div 2, Y, rsDrop);
   finally
     ErrLines.Free;
   end;

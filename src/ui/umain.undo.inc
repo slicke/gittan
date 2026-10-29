@@ -109,7 +109,7 @@ begin
     (Target.Head <> Current.Head) and FRepo.MergeBase('@{upstream}', Base) and
     not FRepo.IsAncestor(Base, Target.Head) then
   begin
-    if QuestionDlg(rsUndoPushedTitle, Format(rsUndoPushedAsk,
+    if AskDlg(rsUndoPushedTitle, Format(rsUndoPushedAsk,
       [Step.Title, FRepo.Upstream(Current.Branch), Current.Branch]), mtWarning,
       [mrYes, rsUndoAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
       Exit;

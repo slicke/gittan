@@ -456,15 +456,17 @@ end;
 
 { Offers to save unsaved changes before the editor's text is replaced.
   Declining drops them; there is no way to stay, since the caller is
-  already on its way elsewhere. }
+  already on its way elsewhere, so Escape and the close box do nothing
+  rather than drop them unasked. }
 procedure TRepoFrame.FlushEdit;
 begin
   if (FEditPath = '') or not Edit.Modified then
     Exit;
   HoldRefresh;
   try
-    if QuestionDlg(rsAppName, Format(rsSaveAsk, [ExtractFileName(FEditPath)]),
-      mtConfirmation, [mrYes, rsSaveAction, 'IsDefault', mrNo, rsDontSave], 0) = mrYes then
+    if AskDlg(rsAppName, Format(rsSaveAsk, [ExtractFileName(FEditPath)]),
+      mtConfirmation, [mrYes, rsSaveAction, 'IsDefault', mrNo, rsDontSave,
+      'NoCancel'], 0) = mrYes then
       SaveEdit(False)
     else
       Edit.Modified := False;
@@ -543,7 +545,7 @@ var
 begin
   if (FEditPath = '') or not Edit.Modified then
     Exit;
-  if QuestionDlg(rsAppName, Format(rsRevertAsk, [ExtractFileName(FEditPath)]),
+  if AskDlg(rsAppName, Format(rsRevertAsk, [ExtractFileName(FEditPath)]),
     mtConfirmation, [mrYes, rsRevertAction, mrCancel, rsCancelButton, 'IsCancel'], 0) <> mrYes then
     Exit;
   TopLine := Edit.LineTop;
@@ -633,7 +635,7 @@ begin
   CanClose := True;
   if (FEditPath = '') or not Edit.Modified then
     Exit;
-  case QuestionDlg(rsAppName, Format(rsSaveAsk, [ExtractFileName(FEditPath)]),
+  case AskDlg(rsAppName, Format(rsSaveAsk, [ExtractFileName(FEditPath)]),
       mtConfirmation, [mrYes, rsSaveAction, 'IsDefault', mrNo, rsDontSave,
       mrCancel, rsCancelButton, 'IsCancel'], 0) of
     mrYes: CanClose := SaveEdit(False);

@@ -1,7 +1,7 @@
 unit gittan.notice;
 
 {** A notice: a panel in the middle of the form that says what is going
-  on, with the application icon above a title and the last lines of a
+  on, with Gittan's dialog icon (DialogIcon) above a title and the last lines of a
   detail text under it, such as what a pre-push hook writes while it
   runs, or why a push or a commit failed, drawn by a TGittanConsole
   with the colors the hook asks for. Like the popup list and the commit graph
@@ -41,7 +41,6 @@ type
     FBusy, FCloseHot: boolean;
     FDots: integer;
     FIcon: TIcon;
-    FIconBitmap: TBitmap;
     FConsole: TGittanConsole;
     FBack, FText, FDim, FHover, FLine, FAccent, FBad: TColor;
     FCloseRect: TRect;
@@ -75,8 +74,9 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
-    {** The application icon, drawn above the title; nil draws none. The
-      icon stays the caller's. }
+    {** Whether the dialog icon (DialogIcon, the braid graph) is drawn
+      above the title: any icon does, nil draws none. The icon itself is
+      not drawn and stays the caller's. }
     procedure SetIcon(AIcon: TIcon);
     {** The palette: AAccent fills the default button, ABad colors the
       title of an nkBad notice. }
@@ -107,7 +107,7 @@ type
 implementation
 
 uses
-  Math, LCLIntf, gittan.theme;
+  Math, LCLIntf, gittan.theme, gittan.dialogicon;
 
 const
   Pad = 24;
@@ -150,14 +150,12 @@ end;
 destructor TGittanNotice.Destroy;
 begin
   FHook.Hook(False);
-  FIconBitmap.Free;
   inherited Destroy;
 end;
 
 procedure TGittanNotice.SetIcon(AIcon: TIcon);
 begin
   FIcon := AIcon;
-  FreeAndNil(FIconBitmap);
   Invalidate;
 end;
 
@@ -413,18 +411,10 @@ begin
 
   if (FIcon <> nil) and not FIcon.Empty then
   begin
-    { As in the welcome view: the image for the size in device pixels,
-      copied into a bitmap, since the icon's handle is made from its
-      smallest image. }
-    if FIconBitmap = nil then
-    begin
-      FIcon.Current := FIcon.GetBestIndexForSize(
-        Size(Round(Px(IconSize) * GetCanvasScaleFactor), Round(Px(IconSize) * GetCanvasScaleFactor)));
-      FIconBitmap := TBitmap.Create;
-      FIconBitmap.LoadFromRawImage(FIcon.RawImage, False);
-    end;
+    { The dialogs' braid graph, not the application icon's tile: for
+      the size in device pixels. }
     Canvas.StretchDraw(Rect((Width - Px(IconSize)) div 2, Y, (Width + Px(IconSize)) div 2,
-      Y + Px(IconSize)), FIconBitmap);
+      Y + Px(IconSize)), DialogIcon(Round(Px(IconSize) * GetCanvasScaleFactor)));
     Inc(Y, Px(IconSize) + Px(Gap));
   end;
 

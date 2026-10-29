@@ -124,6 +124,14 @@ type
       their review only the ones asked of them in person, and no
       drafts; of the user's only the stale ones. }
     OnlyNeedsAttention, HideDrafts, OnlyAskedOfMe, HideReviewDrafts, OnlyStale: boolean;
+    {** What makes one of the user's pull requests need attention on the
+      GitHub page (its filter and its order): changes asked for, checks
+      failing; both on by default. }
+    ChangesNeedAttention, ChecksNeedAttention: boolean;
+    {** The order of the GitHub page's sections, as Ord of a
+      TGittanPullOrder (gittan.forge): 0, the last changed first, by
+      default; the ones waiting for review never 2 (attention first). }
+    MineOrder, ReviewOrder: integer;
     {** Whether the GitHub page looks for a clone of a pull request's
       repository beside the recent repositories too, in the folders they
       are in, besides among them; off unless the user turns it on. }
@@ -284,9 +292,12 @@ begin
   else
     FFileName := IncludeTrailingPathDelimiter(ConfigDir) + 'gittan.ini';
   ContextLines := 3;
+  NavOpen := True;
   SubmodulesOpen := True;
   AutoFetch := True;
   AutoFetchMinutes := DefaultAutoFetchMinutes;
+  ChangesNeedAttention := True;
+  ChecksNeedAttention := True;
   CommitOpen := True;
   Translations := True;
   HostingEnabled := True;
@@ -394,6 +405,10 @@ begin
       OnlyAskedOfMe := Ini.ReadBool(SecGitHub, 'OnlyAskedOfMe', False);
       HideReviewDrafts := Ini.ReadBool(SecGitHub, 'HideReviewDrafts', False);
       OnlyStale := Ini.ReadBool(SecGitHub, 'OnlyStale', False);
+      ChangesNeedAttention := Ini.ReadBool(SecGitHub, 'ChangesNeedAttention', True);
+      ChecksNeedAttention := Ini.ReadBool(SecGitHub, 'ChecksNeedAttention', True);
+      MineOrder := EnsureRange(Ini.ReadInteger(SecGitHub, 'MineOrder', 0), 0, 2);
+      ReviewOrder := EnsureRange(Ini.ReadInteger(SecGitHub, 'ReviewOrder', 0), 0, 1);
       CloneSiblings := Ini.ReadBool(SecGitHub, 'CloneSiblings', False);
       AIEnabled := Ini.ReadBool(SecAI, 'Enabled', False);
       AIAgent := Ini.ReadString(SecAI, 'Agent', '');
@@ -509,6 +524,10 @@ begin
       Ini.WriteBool(SecGitHub, 'OnlyAskedOfMe', OnlyAskedOfMe);
       Ini.WriteBool(SecGitHub, 'HideReviewDrafts', HideReviewDrafts);
       Ini.WriteBool(SecGitHub, 'OnlyStale', OnlyStale);
+      Ini.WriteBool(SecGitHub, 'ChangesNeedAttention', ChangesNeedAttention);
+      Ini.WriteBool(SecGitHub, 'ChecksNeedAttention', ChecksNeedAttention);
+      Ini.WriteInteger(SecGitHub, 'MineOrder', MineOrder);
+      Ini.WriteInteger(SecGitHub, 'ReviewOrder', ReviewOrder);
       Ini.WriteBool(SecGitHub, 'CloneSiblings', CloneSiblings);
       Ini.WriteBool(SecAI, 'Enabled', AIEnabled);
       Ini.WriteString(SecAI, 'Agent', AIAgent);

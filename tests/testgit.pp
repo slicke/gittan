@@ -3009,6 +3009,12 @@ begin
   AssertTrue(FRepo.IsBranchName('feature/x'));
   AssertFalse(FRepo.IsBranchName('bad..name'));
   AssertFalse(FRepo.IsBranchName(''));
+  AssertTrue(FRepo.IsTagName('v1.2'));
+  AssertTrue(FRepo.IsTagName('release/1'));
+  AssertFalse(FRepo.IsTagName('bad..name'));
+  AssertFalse(FRepo.IsTagName('ends.lock'));
+  AssertFalse(FRepo.IsTagName(''));
+  AssertFalse('a leading dash', FRepo.IsTagName('-release'));
 
   AssertTrue(FRepo.Error, FRepo.CreateBranch('side', First, False));
   AssertEquals('not switched', Main, FRepo.Branch);
@@ -3018,6 +3024,11 @@ begin
   AssertEquals('commit', Trim(Git(['cat-file', '-t', 'v1'])));
   AssertTrue(FRepo.Error, FRepo.CreateTag('v2', First, 'Release two'));
   AssertEquals('annotated', 'tag', Trim(Git(['cat-file', '-t', 'v2'])));
+  { A tag of a tree names no commit but is a ref all the same. }
+  Git(['tag', 'tree-tag', First + '^{tree}']);
+  AssertFalse(FRepo.HasCommit('refs/tags/tree-tag'));
+  AssertTrue(FRepo.HasRef('refs/tags/tree-tag'));
+  AssertFalse(FRepo.HasRef('refs/tags/none'));
 
   Git(['checkout', '-q', 'side']);
   WriteFile('b.txt', 'b'#10);

@@ -198,7 +198,7 @@ begin
     Exit;
   if FLfsLocks[i].Ours then
     StartRemote(rkLfsUnlock, pmAuto, APath)
-  else if QuestionDlg(rsLfsForceUnlockTitle, Format(rsLfsForceUnlockAsk,
+  else if AskDlg(rsLfsForceUnlockTitle, Format(rsLfsForceUnlockAsk,
     [APath, FLfsLocks[i].Owner]), mtWarning, [mrYes, rsLfsForceUnlockAction,
     mrCancel, rsCancelButton, 'IsDefault', 'IsCancel'], 0) = mrYes then
     StartRemote(rkLfsForceUnlock, pmAuto, APath);
@@ -221,7 +221,7 @@ end;
 procedure TRepoFrame.MenuLfsLocksClick(Sender: TObject);
 begin
   if FRepo.Root <> '' then
-    ShowLfsLocks(FStatus.PartScreenRect(spBranch));
+    ShowLfsLocks(MenuListAnchor);
 end;
 
 { The user's locks first, then everyone else's, each by path. }
@@ -358,6 +358,6 @@ begin
     Paths.Free;
     Held.Free;
   end;
-  Result := QuestionDlg(rsLfsLockedCommitTitle, Msg, mtWarning, [mrYes, rsCommitAnyway,
+  Result := AskDlg(rsLfsLockedCommitTitle, Msg, mtWarning, [mrYes, rsCommitAnyway,
     mrCancel, rsCancelButton, 'IsDefault', 'IsCancel'], 0) = mrYes;
 end;

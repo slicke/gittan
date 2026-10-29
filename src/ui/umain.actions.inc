@@ -440,7 +440,7 @@ begin
     Forge := AForge.Create(Cli);
     try
       if not Forge.SwitchAccount(APicked[i].Host, APicked[i].Login, Err) then
-        MessageDlg(Err, mtError, [mbOK], 0);
+        TellDlg('', Err, mtError);
     finally
       Forge.Free;
     end;
@@ -556,6 +556,11 @@ begin
     AbandonMessageJob;
     AbandonAIReview;
     AbandonFindJob;
+    AbandonConflictJob;
+    AbandonSplitJob;
+    AbandonFixJob;
+    AbandonWhyJob;
+    FCommitPlan := nil;
   end;
   UpdateFindAction;
   UpdateCommitState;
@@ -1060,6 +1065,7 @@ begin
   DrawBlame(TATSynEdit(Sender), C);
   DrawInitials(TATSynEdit(Sender), C);
   DrawDiscard(TATSynEdit(Sender), C);
+  DrawBlockFrame(TATSynEdit(Sender), C);
   if (Sender <> Edit) or (FOverscroll = 0) or (FView <> gvChanges) then
     Exit;
   Down := FOverscroll > 0;
@@ -1198,6 +1204,7 @@ begin
   FResolveEditItem := AddItem(FEditPopup, rsResolveHere, @MenuResolveEditClick);
   FShowCommitItem := AddItem(FEditPopup, rsShowCommit, @MenuShowCommitClick);
   FCopyHashItem := AddItem(FEditPopup, rsCopyHash, @MenuCopyHashClick);
+  FWhyEditItem := AddItem(FEditPopup, rsWhyMenu, @MenuWhyEditClick);
   AddForgeItem(FEditPopup, '', nil);
   FForgeEditItem := AddForgeItem(FEditPopup, rsOpenOnForge, @MenuOpenLineOnForgeClick);
   AddForgeItem(FEditPopup, rsCopyForgeUrl, @MenuCopyLineForgeUrlClick);
@@ -1553,7 +1560,7 @@ begin
           Shown := Shown + LineEnding + '  ' + Files[i];
         if Files.Count > 10 then
           Shown := Shown + LineEnding + '  ' + Format(rsSwitchMore, [Files.Count - 10]);
-        case QuestionDlg(rsSwitchBlockedTitle, Format(rsSwitchBlocked, [ABranch]) + LineEnding +
+        case AskDlg(rsSwitchBlockedTitle, Format(rsSwitchBlocked, [ABranch]) + LineEnding +
             Shown, mtWarning, [mrYes, rsStashAndSwitch, 'IsDefault', mrNo, rsBringChanges,
             mrCancel, rsCancelButton, 'IsCancel'], 0) of
           mrYes:
@@ -1652,6 +1659,13 @@ begin
   FForgeIssueItem.Caption := Format(rsOpenIssueOnForge, [FPopupIssue, ForgeName]);
   FResolveEditItem.Visible := CanResolveBlocks;
   FResolveEditItem.Enabled := (FPopupEd = Edit) and (ConflictAtRow(FPopupRow) >= 0);
+  FWhyEditItem.Visible := AIAvailable and (FView = gvChanges);
+  if FWhyJob <> nil then
+    FWhyEditItem.Caption := rsWhyStopMenu
+  else
+    FWhyEditItem.Caption := rsWhyMenu;
+  FWhyEditItem.Enabled := (FWhyJob <> nil) or ((FPopupEd = Edit) and (FPopupRow >= 0) and
+    (FEditPath = ''));
 end;
 
 { The commit the row's blame or history gives, shown against its
@@ -1831,6 +1845,7 @@ procedure TRepoFrame.ShowCommitGraph(const AFilter: string);
 var
   Commits: TGittanGraphCommits;
   Limit: integer;
+  Filter, Keep: string;
 begin
   if FRepo.Root = '' then
     Exit;
@@ -1839,7 +1854,16 @@ begin
     FGraph.Close;
     Exit;
   end;
-  if AFilter = '' then
+  { Opened again while a commit picked from it is shown: with the search
+    it was picked under, on that commit. }
+  Filter := AFilter;
+  Keep := '';
+  if (AFilter = '') and BlameShown and (TrailIndex(FGraphTrail, FBlameCommit.Hash) >= 0) then
+  begin
+    Filter := FGraphTrailFilter;
+    Keep := FBlameCommit.Hash;
+  end;
+  if Filter = '' then
     Limit := GraphLimit
   else
     Limit := GraphSearchLimit;
@@ -1851,7 +1875,7 @@ begin
   end;
   FGraph.Marked := FMarkHash;
   FGraph.Popup(Commits, Length(Commits) >= Limit, FBranch, FAhead, FBehind,
-    FHasUpstream, AFilter);
+    FHasUpstream, Filter, Keep);
   if FGraph.Visible then
     FSideNav.Selected := navGraph;
 end;
@@ -1955,8 +1979,83 @@ end;
   leads back to the working tree. }
 procedure TRepoFrame.GraphPick(Sender: TObject; const AHash: string);
 begin
+  FGraphTrail := FGraph.ShownHashes;
+  FGraphTrailFilter := FGraph.FilterText;
   ShowBlameCommit(AHash);
   ShowSummary;
+end;
+
+{ Where a list a menu item (or the palette, or its shortcut) drops opens:
+  centered at the top of the frame under the title bar, as the command
+  palette does, rather than from a part of the status bar far from the
+  menu. A point, which TGittanPopupList.Popup centers the list under. }
+function TRepoFrame.MenuListAnchor: TRect;
+var
+  P: TPoint;
+begin
+  P := ClientToScreen(Point(ClientWidth div 2, FTitleBarHeight + Px(4)));
+  Result := Rect(P.X, P.Y, P.X, P.Y);
+end;
+
+{ Where Older or Newer leads from the commit shown against its parent:
+  the next row of the graph's last pick, older or newer, while the
+  commit is one of them; off them (a commit picked from the blame band,
+  or the end of the rows) Older goes to the first parent, while there
+  is one, and Newer nowhere. Empty for nowhere. }
+function TRepoFrame.CommitStepHash(AOlder: boolean): string;
+var
+  i: integer;
+begin
+  Result := '';
+  if not BlameShown then
+    Exit;
+  i := TrailIndex(FGraphTrail, FBlameCommit.Hash);
+  if (i >= 0) and AOlder and (i < High(FGraphTrail)) then
+    Exit(FGraphTrail[i + 1]);
+  if (i > 0) and not AOlder then
+    Exit(FGraphTrail[i - 1]);
+  { CommitRange names the parent unless it is the first commit. }
+  if AOlder and ((i < 0) or (i = High(FGraphTrail))) and (Pos('^..', FBlameRange) > 0) then
+    Result := FBlameCommit.Hash + '^';
+end;
+
+procedure TRepoFrame.GoToCommitStep(AOlder: boolean);
+var
+  Hash: string;
+begin
+  Hash := CommitStepHash(AOlder);
+  if Hash = '' then
+    Exit;
+  ShowBlameCommit(Hash);
+  ShowSummary;
+end;
+
+{ The card's links and the Go menu's items, after every snapshot (the
+  base changes through one). }
+procedure TRepoFrame.UpdateCommitSteps;
+var
+  Newer, Older: boolean;
+begin
+  Newer := CommitStepHash(False) <> '';
+  Older := CommitStepHash(True) <> '';
+  FSummary.SetCommitSteps(Newer, Older);
+  FNewerCommitItem.Enabled := Newer;
+  FOlderCommitItem.Enabled := Older;
+end;
+
+procedure TRepoFrame.SummaryCommitStep(Sender: TObject; AOlder: boolean);
+begin
+  GoToCommitStep(AOlder);
+end;
+
+procedure TRepoFrame.MenuOlderCommitClick(Sender: TObject);
+begin
+  GoToCommitStep(True);
+end;
+
+procedure TRepoFrame.MenuNewerCommitClick(Sender: TObject);
+begin
+  GoToCommitStep(False);
 end;
 
 { A click on a commit in the summary of a clean tree shows it against its
@@ -2128,9 +2227,9 @@ var
   Msg: string;
 begin
   if InstallCli(Application.ExeName, Msg) then
-    MessageDlg(Msg, mtInformation, [mbOK], 0)
+    TellDlg('', Msg, mtInformation)
   else
-    MessageDlg(Msg, mtError, [mbOK], 0);
+    TellDlg('', Msg, mtError);
 end;
 
 procedure TRepoFrame.MenuUninstallCliClick(Sender: TObject);
@@ -2138,9 +2237,9 @@ var
   Msg: string;
 begin
   if UninstallCli(Msg) then
-    MessageDlg(Msg, mtInformation, [mbOK], 0)
+    TellDlg('', Msg, mtInformation)
   else
-    MessageDlg(Msg, mtError, [mbOK], 0);
+    TellDlg('', Msg, mtError);
 end;
 
 { Uninstall is offered only while Gittan's own script is installed; the
@@ -2230,14 +2329,28 @@ begin
   SetBase(TMenuItem(Sender).Hint, TMenuItem(Sender).Tag = 1);
 end;
 
+{ A commit git can find; a range (a..b, a...b) is left to SetBase. }
+function TRepoFrame.CheckCompareRef(const AValues: array of string): string;
+var
+  Ref: string;
+begin
+  Result := '';
+  Ref := Trim(AValues[0]);
+  if (Pos('..', Ref) = 0) and not FRepo.HasCommit(Ref) then
+    Result := Format(rsAskNoSuchRef, [Ref]);
+end;
+
 procedure TRepoFrame.MenuCompareOtherClick(Sender: TObject);
 var
   Ref: string;
 begin
   if FRepo.Root = '' then
     Exit;
-  Ref := Trim(InputBox(StringReplace(rsCompareWith, '&', '', []), rsRefPrompt, FRepo.Base));
-  SetBase(Ref);
+  Ref := FRepo.Base;
+  if not AskText(StringReplace(rsCompareWith, '&', '', []), rsRefPrompt, Ref, @CheckCompareRef,
+    rsCompareAction) then
+    Exit;
+  SetBase(Trim(Ref));
 end;
 
 { ---------------------------------------------------------------------------

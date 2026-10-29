@@ -55,6 +55,7 @@ type
     FToolbar: NSToolbar;
     FDelegate: NSObject;
     FStrip: NSView;
+    FDragArea: NSView;
     FCaptions, FHints: array of string;
     FMarks: array of boolean;
     FActive: integer;
@@ -98,6 +99,7 @@ type
     procedure OtherMouseUp(AEvent: NSEvent);
     procedure MouseMoved(AEvent: NSEvent);
     procedure MouseExited;
+    function DragAt(const APoint: NSPoint; AView: NSView): boolean;
   public
     {** Puts the toolbar with the tab strip on the window of the form
       whose handle is AHandle and hides the window's title. Answers nil
@@ -117,7 +119,8 @@ type
     {** The chevrons: whether there is somewhere to go back (ABack) and
       forward (AForward) to, a dim chevron taking no click; ABackHint
       and AForwardHint their tooltips. }
-    procedure SetNav(ABack, AForward: boolean; const ABackHint, AForwardHint: string);    {** A click on a tab: show it. }
+    procedure SetNav(ABack, AForward: boolean; const ABackHint, AForwardHint: string);
+    {** A click on a tab: show it. }
     property OnSelect: TGittanTabEvent read FOnSelect write FOnSelect;
     {** The cross or a middle click on a tab: close it. }
     property OnClose: TGittanTabEvent read FOnClose write FOnClose;
@@ -167,6 +170,17 @@ type
     procedure mouseUp(event: NSEvent); override;
     procedure mouseEntered(event: NSEvent); override;
     procedure mouseExited(event: NSEvent); override;
+  end;
+
+  { The title bar's row outside the strip: the toolbar holds its item
+    to its own height, and the row above and below it took no drag. }
+  TGittanDragArea = objcclass(NSView)
+  public
+    Owner: TGittanToolbar;
+    function hitTest(aPoint: NSPoint): NSView; override;
+    function mouseDownCanMoveWindow: ObjCBOOL; override;
+    function acceptsFirstMouse(event: NSEvent): ObjCBOOL; override;
+    procedure mouseDown(event: NSEvent); override;
   end;
 
   { The tab strip: the toolbar draws it and takes its mouse. }
@@ -335,6 +349,38 @@ begin
     Owner.BannerHover(False);
 end;
 
+{ TGittanDragArea }
+
+{ It covers the window's frame view and answers only the points where a
+  press moves the window (DragAt), so the rest falls through. }
+function TGittanDragArea.hitTest(aPoint: NSPoint): NSView;
+begin
+  if (Owner <> nil) and (superview <> nil) and Owner.DragAt(aPoint, superview) then
+    Result := Self
+  else
+    Result := nil;
+end;
+
+function TGittanDragArea.mouseDownCanMoveWindow: ObjCBOOL;
+begin
+  Result := False;
+end;
+
+function TGittanDragArea.acceptsFirstMouse(event: NSEvent): ObjCBOOL;
+begin
+  Result := True;
+end;
+
+procedure TGittanDragArea.mouseDown(event: NSEvent);
+begin
+  if window = nil then
+    Exit;
+  if event.clickCount = 2 then
+    window.performZoom(nil)
+  else
+    window.performWindowDragWithEvent(event);
+end;
+
 { TGittanTabStrip }
 
 function TGittanTabStrip.isFlipped: ObjCBOOL;
@@ -398,6 +444,7 @@ var
   Delegate: TGittanToolbarDelegate;
   Strip: TGittanTabStrip;
   Area: NSTrackingArea;
+  Frame: NSView;
 begin
   Result := nil;
   if (AHandle = 0) or (NSAppKitVersionNumber < NSAppKitVersionNumber11_0) then
@@ -429,10 +476,24 @@ begin
   Win.setToolbarStyle(NSWindowToolbarStyleUnified);
   { The tabs name the repositories, as does the status bar. }
   Win.setTitleVisibility(NSWindowTitleHidden);
+  Frame := Win.contentView.superview;
+  if Frame <> nil then
+  begin
+    Result.FDragArea := TGittanDragArea.alloc.initWithFrame(Frame.bounds);
+    TGittanDragArea(Result.FDragArea).Owner := Result;
+    Result.FDragArea.setAutoresizingMask(NSViewWidthSizable or NSViewHeightSizable);
+    Frame.addSubview_positioned_relativeTo(Result.FDragArea, NSWindowAbove, nil);
+  end;
 end;
 
 destructor TGittanToolbar.Destroy;
 begin
+  if FDragArea <> nil then
+  begin
+    TGittanDragArea(FDragArea).Owner := nil;
+    FDragArea.removeFromSuperview;
+    FDragArea.release;
+  end;
   if FBanner <> nil then
   begin
     TGittanForgeBanner(FBanner).Owner := nil;
@@ -947,6 +1008,35 @@ begin
   FHotPlus := InPlus;
   FHotNav := Nav;
   FStrip.setNeedsDisplay_(True);
+end;
+
+{ Whether a press at APoint, in AView's coordinates, moves the window:
+  in the title bar's row (above the content's layout rect, which leaves
+  it out), outside the strip and the traffic lights; not in full screen,
+  where the row is not the window's. The banner is above the area. }
+function TGittanToolbar.DragAt(const APoint: NSPoint; AView: NSView): boolean;
+var
+  P: NSPoint;
+  Button: NSButton;
+  B: NSWindowButton;
+begin
+  Result := False;
+  if (FWindow.styleMask and NSFullScreenWindowMask) <> 0 then
+    Exit;
+  P := AView.convertPoint_toView(APoint, nil);
+  if P.y < FWindow.contentLayoutRect.origin.y + FWindow.contentLayoutRect.size.height then
+    Exit;
+  if (FStrip.window = FWindow) and
+    PointIn(FStrip.convertPoint_fromView(P, nil), FStrip.bounds) then
+    Exit;
+  for B := NSWindowCloseButton to NSWindowZoomButton do
+  begin
+    Button := FWindow.standardWindowButton(B);
+    if (Button <> nil) and
+      PointIn(Button.convertPoint_fromView(P, nil), Button.bounds) then
+      Exit;
+  end;
+  Result := True;
 end;
 
 procedure TGittanToolbar.MouseExited;

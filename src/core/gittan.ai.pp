@@ -28,7 +28,9 @@ unit gittan.ai;
   cannot search, FindListInput, which then gets the files it named
   with their lines numbered in a second round, FindLinesInput, for
   their lines), and the files it names (ParseFoundFiles) a list to
-  pick from under the filter field. The
+  pick from under the filter field. A conflict: its lines, the file's
+  lines around it and the commits on either side (ConflictInput), and
+  the lines the agent puts in its place (ParseResolution). The
   features are off until they are turned on in the settings, since the
   changes go to the agent's provider. }
 
@@ -37,7 +39,7 @@ unit gittan.ai;
 interface
 
 uses
-  Classes, SysUtils, gittan.job, gittan.reviews, gittan.git;
+  Classes, SysUtils, gittan.job, gittan.reviews, gittan.git, gittan.discard;
 
 type
   {** The agents Gittan can ask: two command line tools, and a model at
@@ -46,8 +48,11 @@ type
 
   {** What an agent is asked to do; atLocate is the second round of a
     find for a model that cannot read files, the lines in the files it
-    named. }
-  TGittanAITask = (atMessage, atReview, atFind, atLocate);
+    named; atResolve resolves one conflict; atSplit groups the changed
+    files into commits; atFix fixes what a review's finding points out;
+    atWhy explains how lines came to be as they are. }
+  TGittanAITask = (atMessage, atReview, atFind, atLocate, atResolve, atSplit, atFix,
+    atWhy);
 
   {** How many lines of each file a model was given (FindLinesInput). }
   TGittanLineCounts = array of integer;
@@ -70,6 +75,17 @@ const
   ReviewMaxFindings = 10;
   {** The most files of an answer to where something is kept. }
   FindMaxFiles = 10;
+  {** How many of the file's lines before and after a conflict the agent
+    is given with it. }
+  ConflictAround = 20;
+  {** The most commits of a plan kept; the prompt asks for fewer. }
+  SplitMaxCommits = 10;
+  {** How many of the commits that changed the lines the agent is given
+    to explain them. }
+  WhyCommits = 10;
+  {** The severity of a thread that explains lines rather than points
+    out a problem (TGittanReviewThread.Severity). }
+  WhySeverity = 'history';
 
 type
   {** A file the agent named for where something is: its path in the
@@ -81,6 +97,21 @@ type
     Why: string;
   end;
   TGittanFoundFiles = array of TGittanFoundFile;
+
+  {** One commit of a plan to split the changes: the changed files it
+    takes and its message ('' for the files the agent left out). }
+  TGittanPlannedCommit = record
+    Files: TStringArray;
+    Message: string;
+  end;
+  TGittanCommitPlan = array of TGittanPlannedCommit;
+
+  {** One edit of a fix: lines of the file to find (once) and the lines
+    to put in their place. }
+  TGittanFixEdit = record
+    Find, Replace: TStringArray;
+  end;
+  TGittanFixEdits = array of TGittanFixEdit;
 
   {** An agent as the settings set it up, made once from them (FindAI
     in the frame) and copied into each job (Clone), since a job may
@@ -257,6 +288,91 @@ function ParseFoundFiles(const AText: string; out AFiles: TGittanFoundFiles): bo
   fence around the whole of it taken off, which a model adds at times. }
 function CleanCommitMessage(const AText: string): string;
 
+{** What the agent is given to resolve the conflict ABlock (NewLines its
+  lines as the file holds them, markers included, at Line) in APath of
+  the repository at ARoot: what git is in the middle of (AOperation, as
+  the frame names it, "merging" or "rebasing"), which side of the
+  markers is the user's own (the ">>>>>>>" one while ARebase, since a
+  rebase replays the user's commits onto the upstream), the commit being
+  applied and the commits on either side that changed the file
+  (ConflictCommits), ConflictAround lines of the file before and after,
+  and the conflict. }
+function ConflictInput(const ARoot, APath, AOperation: string; ARebase: boolean;
+  const ABlock: TGittanDiscard): string;
+
+{** What the agent gets to split APaths, the changed files of the
+  repository at ARoot, into commits: CommitChanges of them all, then
+  the paths as they are to be named. False, with git's reason in AError,
+  when git failed; an empty AText when nothing would change. }
+function SplitInput(const ARoot: string; APaths: TStrings; out AText, AError: string): boolean;
+
+{** The commits of a plan in AText, the agent's answer: a JSON array of
+  objects with files and message, which may come inside a code fence or
+  after a sentence. Only the paths of APaths are kept, each in the first
+  commit that names it ("./", "a/" or "b/" taken off), a message cleaned
+  as CleanCommitMessage cleans it, a commit left with no file dropped,
+  at most SplitMaxCommits; the paths no commit took go in one more with
+  no message, so every file is in the plan. False when AText holds no
+  such array. }
+function ParseCommitPlan(const AText: string; APaths: TStrings;
+  out APlan: TGittanCommitPlan): boolean;
+
+{** What the agent gets to fix AFinding (a review's, on the view's lines
+  of its Path) in the repository at ARoot compared with ABase (empty for
+  HEAD): the finding, the file's diff against the base, cut at half of
+  MessageDiffKeep, and ALines, the file as it is, numbered: whole when
+  it fits in what is left, else the lines round the finding's that do. }
+function FixInput(const ARoot, ABase: string; const AFinding: TGittanReviewThread;
+  const ALines: TStringArray): string;
+
+{** The edits of a fix in AText, the agent's answer: each the lines
+  between a line "<find>" and a line "</find>", then those between
+  "<replace>" and "</replace>" (none is an answer too, the lines
+  dropped), and in AWhy what is between "<why>" and "</why>", on one
+  line. False when there is neither an edit nor a why, or an edit finds
+  no line. }
+function ParseFixEdits(const AText: string; out AEdits: TGittanFixEdits;
+  out AWhy: string): boolean;
+
+{** ALines with AEdits made in turn, in ANew: each edit's Find must be
+  in the lines once, as they are, else with the spaces at the ends of
+  the lines ignored, else without line numbers ("12: ") the agent copied
+  from its input before each. False with the reason in AError when an
+  edit is found nowhere or in more places than one. }
+function ApplyFixEdits(const ALines: TStringArray; const AEdits: TGittanFixEdits;
+  out ANew: TStringArray; out AError: string): boolean;
+
+{** The block that turns ABefore, the lines of AFileName, into AAfter:
+  the lines between those both begin and end with, as a TGittanDiscard
+  whose write (DiscardBlock) puts AAfter's in place of ABefore's, and
+  whose undo (Swapped) puts them back. }
+function FixBlock(const AFileName: string; const ABefore, AAfter: TStringArray): TGittanDiscard;
+
+{** What the agent gets to explain lines AFrom to ATo of APath in ARef
+  of the repository at ARoot: the lines, then the history of their
+  changes (git log -L, newest first, WhyCommits of them, each with its
+  author, date, whole message and the diff of the lines), cut at
+  MessageDiffKeep. False, with git's reason in AError, when git failed
+  or found no history. }
+function WhyInput(const ARoot, APath, ARef: string; AFrom, ATo: integer;
+  out AText, AError: string): boolean;
+
+{** The commits git's conflict in the repository at ARoot comes from, for
+  APath: the commit being applied (the first of MERGE_HEAD,
+  CHERRY_PICK_HEAD, REVERT_HEAD and REBASE_HEAD there is) with its
+  message unless it is a merge's, and the commits since the merge base
+  that changed APath on HEAD's side and on its side, MessageSubjects of
+  each. Empty when git is applying none. }
+function ConflictCommits(const ARoot, APath: string): string;
+
+{** The lines that take a conflict's place in AText, the agent's answer:
+  those between a line "<resolved>" and a line "</resolved>" (none is an
+  answer too, both sides dropped), a code fence around them taken off,
+  and in AWhy what is between "<why>" and "</why>", on one line. False
+  when there is no such part, or a line of it is a conflict marker. }
+function ParseResolution(const AText: string; out ALines: TStringArray;
+  out AWhy: string): boolean;
+
 type
   {** What the jobs below share: the repository at ARoot and the agent,
     its own copy of AAI (Clone), and Ask. Each runs in a thread, since
@@ -354,10 +470,116 @@ type
     property Error: string read FError;
   end;
 
+  {** Resolves the conflict ABlock of APath (see ConflictInput); its
+    lines to write go into Block's OldLines, so the frame writes it as
+    it writes the conflict's other picks. }
+  TGittanConflictJob = class(TGittanAgentJob)
+  private
+    FPath, FOperation: string;
+    FRebase: boolean;
+    FBlock: TGittanDiscard;
+    FOk: boolean;
+    FWhy, FError: string;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const ARoot: string; AAI: TGittanAI; const APath, AOperation: string;
+      ARebase: boolean; const ABlock: TGittanDiscard);
+    property Path: string read FPath;
+    {** The conflict as it was given, with the agent's lines as OldLines
+      when Ok. }
+    property Block: TGittanDiscard read FBlock;
+    {** Whether the agent answered with the lines. }
+    property Ok: boolean read FOk;
+    {** The agent's few words on what it kept. }
+    property Why: string read FWhy;
+    {** Why there are none, when not Ok. }
+    property Error: string read FError;
+  end;
+
+  {** Asks the agent how to split APaths, the changed files, into
+    commits (see SplitInput, ParseCommitPlan). }
+  TGittanSplitJob = class(TGittanAgentJob)
+  private
+    FPaths: TStringList;
+    FOk: boolean;
+    FPlan: TGittanCommitPlan;
+    FError: string;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const ARoot: string; AAI: TGittanAI; APaths: TStrings);
+    destructor Destroy; override;
+    {** Whether the agent answered with a plan. }
+    property Ok: boolean read FOk;
+    property Plan: TGittanCommitPlan read FPlan;
+    {** Why there is none, when not Ok. }
+    property Error: string read FError;
+  end;
+
+  {** Has the agent fix AFinding, a review's finding of the repository
+    compared with ABase (see FixInput); the file is read as it is, and
+    the fix (ApplyFixEdits) is Block, for the frame to write as it
+    writes a discard. }
+  TGittanFixJob = class(TGittanAgentJob)
+  private
+    FBase: string;
+    FFinding: TGittanReviewThread;
+    FOk, FChanged: boolean;
+    FBlock: TGittanDiscard;
+    FWhy, FError: string;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const ARoot: string; AAI: TGittanAI; const ABase: string;
+      const AFinding: TGittanReviewThread);
+    property Finding: TGittanReviewThread read FFinding;
+    {** Whether the agent answered with a fix that fits the file, or
+      that none is needed. }
+    property Ok: boolean read FOk;
+    {** Whether it changes the file: Block holds the change. }
+    property Changed: boolean read FChanged;
+    property Block: TGittanDiscard read FBlock;
+    {** The agent's few words on the fix, or on why there is none. }
+    property Why: string read FWhy;
+    {** Why there is no fix, when not Ok. }
+    property Error: string read FError;
+  end;
+
+  {** Has the agent explain lines AFrom to ATo of APath in ARef (see
+    WhyInput); the answer is Markdown. }
+  TGittanWhyJob = class(TGittanAgentJob)
+  private
+    FPath, FRef: string;
+    FFrom, FTo: integer;
+    FOk: boolean;
+    FText, FError: string;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const ARoot: string; AAI: TGittanAI; const APath, ARef: string;
+      AFrom, ATo: integer);
+    property Path: string read FPath;
+    property FromLine: integer read FFrom;
+    property ToLine: integer read FTo;
+    property Ok: boolean read FOk;
+    {** The explanation, when Ok. }
+    property Text: string read FText;
+    {** Why there is none, when not Ok. }
+    property Error: string read FError;
+  end;
+
 resourcestring
   rsNothingToReview = 'There are no changes to review.';
   rsReviewNotRead = 'The answer was no list of findings: %s';
   rsFoundNotRead = 'The answer was no list of files: %s';
+  rsResolutionNotRead = 'The answer held no resolved lines: %s';
+  rsPlanNotRead = 'The answer was no list of commits: %s';
+  rsFixNotRead = 'The answer held no edits: %s';
+  rsFixNotFound = 'edit %d is not in the file as it is';
+  rsFixAmbiguous = 'edit %d is in the file %d times';
+  rsFixLink = '%s goes through a symbolic link, which a fix does not write through';
+  rsNoLineHistory = 'git has no history of these lines.';
   rsNothingToDescribe = 'There are no changes to describe.';
   rsAgentNoAnswer = '%s gave no answer.';
   rsAboutApi = '%s at %s';
@@ -365,7 +587,7 @@ resourcestring
 implementation
 
 uses
-  Math, fpjson, jsonparser, DateUtils;
+  Math, fpjson, jsonparser, DateUtils, gittan.textfile;
 
 const
   { Short, whatever the repository's own messages are like: a model told
@@ -428,6 +650,70 @@ const
     'it, each {"path": the file as given, "line": the number of the line where ' +
     'it is defined, implemented or handled, "why": a few words on what is there}.';
 
+  { The conflict's lines and how each side came to be: a model told only
+    to resolve it takes one side whole, and answers with prose or a fence
+    around the code unless the lines are asked for between tags. }
+  ResolvePromptStart = 'Resolve the git conflict given below: the lines from ' +
+    '"<<<<<<<" to ">>>>>>>" in the file named, the side after "<<<<<<<" (up to ' +
+    '"|||||||" or "=======") against the side after "=======", with what both ' +
+    'started from between "|||||||" and "=======" when it is there. Keep what each ' +
+    'side meant to change: combine them where they change different things, and ' +
+    'where they contradict, follow the commits given and keep the other side''s ' +
+    'change where it still applies. Keep the file''s indentation and style, and ' +
+    'change nothing outside the conflict. ';
+  ResolveReadNote = 'You may read the repository''s files to see how the code in the ' +
+    'conflict is used. ';
+  ResolveSentNote = 'You see the lines given alone and cannot open the files. ';
+  ResolvePromptEnd = 'Answer with the lines that take the whole conflict''s place, ' +
+    'between a line <resolved> and a line </resolved>, with no conflict markers and ' +
+    'no code fences in them, then one short sentence on what you kept between ' +
+    '<why> and </why>, and nothing else.';
+
+  { Commits a reviewer can follow, in an order that builds: a model asked
+    to split changes otherwise makes a commit per file, or per folder. }
+  SplitPromptStart = 'The changes given below are to be committed as a few commits, ' +
+    'each one thing a reviewer can follow, such as a refactoring, a fix, a feature or ' +
+    'a dependency bump, with the tests of that change in the same commit. Group the ' +
+    'changed files into such commits, in the ' +
+    'order they should be made, each building on those before; every file listed at ' +
+    'the end goes in exactly one commit, a file that serves two things in the one it ' +
+    'is most for. One commit for the whole is a fine answer when the change is one ' +
+    'thing. Give each commit a message: a subject line of at most 72 characters and, ' +
+    'only when it needs explaining, a blank line and a body of a few lines, the style ' +
+    '(language, tense, prefixes) taken from the recent commit subjects given. ';
+  SplitReadNote = 'Read the repository''s files only when the diff alone leaves a ' +
+    'change unclear. ';
+  SplitPromptEnd = 'Answer with a JSON array alone, no code fences, at most 8 commits, ' +
+    'the first to be made first, each {"files": [the paths as listed], "message": the ' +
+    'commit message}.';
+
+  { Edits by the lines they replace, which a model copies reliably,
+    rather than a patch, whose hunk headers and counts it gets wrong. }
+  FixPromptStart = 'Fix the problem the review finding below points out, in the file ' +
+    'it is on, which is given as it is now with its lines numbered, after the change ' +
+    'under review. Change as little as needed, keep the file''s style, and change no ' +
+    'other file. ';
+  FixReadNote = 'You may read the repository''s files to check the finding and how ' +
+    'the code is used. ';
+  FixPromptEnd = 'Answer with the edits alone, each a line <find>, the lines of the ' +
+    'file to replace exactly as they are (whole lines, without their numbers, enough ' +
+    'of them to be found once in the file), a line </find>, a line <replace>, the ' +
+    'lines to put in their place, a line </replace>; then one short sentence on what ' +
+    'you changed between <why> and </why>. When the finding is wrong or needs no ' +
+    'change, answer with the <why> alone, saying so.';
+
+  { The history git gives, read as a story: a model asked why lines are
+    so otherwise retells the diff, or guesses at reasons no commit gave. }
+  WhyPromptStart = 'Explain why the lines given below are as they are, from the ' +
+    'history of their changes that follows them (git log -L, newest first, each ' +
+    'commit with its message and the diff of the lines). Say what they do, how and ' +
+    'why they came to be this way, and what the changes that shaped them were for, ' +
+    'naming each commit by its short hash; where the history does not say why, say ' +
+    'so rather than guess. ';
+  WhyReadNote = 'You may read the repository''s files to see how the lines are used. ';
+  WhyPromptEnd = 'Answer with at most three short paragraphs of Markdown alone, the ' +
+    'history first, no headings, no preamble.';
+
 var
   AIClasses: array[TGittanAgent] of TGittanAIClass;
 
@@ -469,6 +755,26 @@ begin
         Result := FindPromptStart + FindReadNote + FindPromptEnd
       else
         Result := FindPromptStart + FindSentNote + FindPromptEnd;
+    atResolve:
+      if AReadsFiles then
+        Result := ResolvePromptStart + ResolveReadNote + ResolvePromptEnd
+      else
+        Result := ResolvePromptStart + ResolveSentNote + ResolvePromptEnd;
+    atSplit:
+      if AReadsFiles then
+        Result := SplitPromptStart + SplitReadNote + SplitPromptEnd
+      else
+        Result := SplitPromptStart + SplitPromptEnd;
+    atFix:
+      if AReadsFiles then
+        Result := FixPromptStart + FixReadNote + FixPromptEnd
+      else
+        Result := FixPromptStart + FixPromptEnd;
+    atWhy:
+      if AReadsFiles then
+        Result := WhyPromptStart + WhyReadNote + WhyPromptEnd
+      else
+        Result := WhyPromptStart + WhyPromptEnd;
     else { atLocate }
       Result := LocatePromptStart + LocatePromptEnd;
   end;
@@ -551,15 +857,15 @@ begin
   Result := Format(rsAboutApi, [Title, FPath]);
 end;
 
-{ AText up to MessageDiffKeep bytes, cut at a line end, with a line that
-  says it was: ANote, with the bytes left out and the whole. }
-function KeepText(const AText, ANote: string): string;
+{ AText up to AKeep bytes, cut at a line end, with a line that says it
+  was: ANote, with the bytes left out and the whole. }
+function KeepText(const AText, ANote: string; AKeep: integer = MessageDiffKeep): string;
 var
   Cut: integer;
 begin
-  if Length(AText) <= MessageDiffKeep then
+  if Length(AText) <= AKeep then
     Exit(AText);
-  Cut := MessageDiffKeep;
+  Cut := AKeep;
   while (Cut > 0) and (AText[Cut] <> #10) do
     Dec(Cut);
   Result := Copy(AText, 1, Cut) + Format(ANote, [Length(AText) - Cut, Length(AText)]) +
@@ -1087,6 +1393,547 @@ begin
   end;
 end;
 
+function SplitInput(const ARoot: string; APaths: TStrings; out AText, AError: string): boolean;
+var
+  i: integer;
+begin
+  Result := CommitChanges(ARoot, APaths, False, AText, AError);
+  if not Result or (AText = '') then
+    Exit;
+  { The summary cuts long paths; these are what the plan names. }
+  AText := AText + LineEnding + 'The changed files:' + LineEnding;
+  for i := 0 to APaths.Count - 1 do
+    AText := AText + APaths[i] + LineEnding;
+end;
+
+{ The index of APath in APaths: as it is spelled, else in another case
+  when that names one path alone; -1 for none, or for two paths that
+  differ in case alone. }
+function PlanPathIndex(APaths: TStrings; const APath: string): integer;
+var
+  i: integer;
+begin
+  for i := 0 to APaths.Count - 1 do
+    if APaths[i] = APath then
+      Exit(i);
+  Result := -1;
+  for i := 0 to APaths.Count - 1 do
+    if SameText(APaths[i], APath) then
+    begin
+      if Result >= 0 then
+        Exit(-1);
+      Result := i;
+    end;
+end;
+
+function ParseCommitPlan(const AText: string; APaths: TStrings;
+  out APlan: TGittanCommitPlan): boolean;
+var
+  Data, Files: TJSONData;
+  Item: TJSONObject;
+  Taken: TStringList;
+  Commit: TGittanPlannedCommit;
+  First, Last, i, j, k, n: integer;
+  Path: string;
+begin
+  APlan := nil;
+  First := Pos('[', AText);
+  Last := LastDelimiter(']', AText);
+  if (First = 0) or (Last < First) then
+    Exit(False);
+  try
+    Data := GetJSON(Copy(AText, First, Last - First + 1));
+  except
+    Exit(False);
+  end;
+  Taken := TStringList.Create;
+  try
+    Result := Data is TJSONArray;
+    if not Result then
+      Exit;
+    Taken.Sorted := True;
+    Taken.CaseSensitive := True;
+    n := 0;
+    for i := 0 to Data.Count - 1 do
+    begin
+      if n >= SplitMaxCommits then
+        Break;
+      if not (Data.Items[i] is TJSONObject) then
+        Continue;
+      Item := TJSONObject(Data.Items[i]);
+      Files := Item.Find('files');
+      if not (Files is TJSONArray) then
+        Continue;
+      Commit := Default(TGittanPlannedCommit);
+      for j := 0 to Files.Count - 1 do
+      begin
+        if not (Files.Items[j] is TJSONString) then
+          Continue;
+        Path := StringReplace(Trim(Files.Items[j].AsString), '\', '/', [rfReplaceAll]);
+        if (Copy(Path, 1, 2) = './') or (((Copy(Path, 1, 2) = 'a/') or
+          (Copy(Path, 1, 2) = 'b/')) and (PlanPathIndex(APaths, Path) < 0)) then
+          Delete(Path, 1, 2);
+        { The list's own spelling: PlanPathIndex finds a path in another
+          case when no other path has it, Taken only in the one it holds. }
+        k := PlanPathIndex(APaths, Path);
+        if k < 0 then
+          Continue;
+        Path := APaths[k];
+        if Taken.IndexOf(Path) >= 0 then
+          Continue;
+        Taken.Add(Path);
+        Insert(Path, Commit.Files, Length(Commit.Files));
+      end;
+      if Commit.Files = nil then
+        Continue;
+      Commit.Message := CleanCommitMessage(Item.Get('message', ''));
+      Insert(Commit, APlan, n);
+      Inc(n);
+    end;
+    { What the agent left out, or what came after the most it may plan,
+      is one more commit for the user to describe. }
+    Commit := Default(TGittanPlannedCommit);
+    for i := 0 to APaths.Count - 1 do
+      if Taken.IndexOf(APaths[i]) < 0 then
+        Insert(APaths[i], Commit.Files, Length(Commit.Files));
+    if Commit.Files <> nil then
+      Insert(Commit, APlan, Length(APlan));
+  finally
+    Taken.Free;
+    Data.Free;
+  end;
+end;
+
+function WhyInput(const ARoot, APath, ARef: string; AFrom, ATo: integer;
+  out AText, AError: string): boolean;
+var
+  Blob, Log: string;
+  Lines: TStringList;
+  i: integer;
+begin
+  AText := '';
+  Result := RunGitIn(ARoot, ['show', ARef + ':' + APath], Blob, AError) and
+    RunGitIn(ARoot, ['log', '--no-color', '-n', IntToStr(WhyCommits), '-L',
+    IntToStr(AFrom) + ',' + IntToStr(ATo) + ':' + APath,
+    '--format=commit %h%nAuthor: %an%nDate: %as%n%n%B', ARef], Log, AError);
+  if not Result then
+    Exit;
+  if Trim(Log) = '' then
+  begin
+    AError := rsNoLineHistory;
+    Exit(False);
+  end;
+  Lines := TStringList.Create;
+  try
+    SplitLf(Blob, Lines);
+    AText := 'The lines ' + IntToStr(AFrom) + ' to ' + IntToStr(ATo) + ' of ' + APath +
+      ':' + LineEnding;
+    for i := AFrom - 1 to Min(ATo, Lines.Count) - 1 do
+      AText := AText + BareLine(Lines[i]) + LineEnding;
+  finally
+    Lines.Free;
+  end;
+  AText := AText + LineEnding + 'Their history (git log -L):' + LineEnding +
+    KeepText(Log, '[The history is cut here: %d of its %d bytes are left out.]');
+end;
+
+function ConflictCommits(const ARoot, APath: string): string;
+const
+  Heads: array[0..3] of string = ('MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD',
+    'REBASE_HEAD');
+var
+  Head, Base, Output, Error: string;
+  i: integer;
+begin
+  Result := '';
+  Head := '';
+  for i := 0 to High(Heads) do
+    if RunGitIn(ARoot, ['rev-parse', '--verify', '-q', Heads[i] + '^{commit}'], Output,
+      Error) then
+    begin
+      Head := Heads[i];
+      Break;
+    end;
+  if Head = '' then
+    Exit;
+  { A merge's head is only the tip of the branch merged; the commit a
+    cherry-pick, revert or rebase applies is the change itself. }
+  if (Head <> 'MERGE_HEAD') and RunGitIn(ARoot, ['log', '-1', '--format=%B', Head], Output,
+    Error) and (Trim(Output) <> '') then
+    Result := 'The commit being applied (' + Head + '):' + LineEnding + Trim(Output) +
+      LineEnding + LineEnding;
+  if not RunGitIn(ARoot, ['merge-base', 'HEAD', Head], Base, Error) then
+    Exit;
+  Base := Trim(Base);
+  if RunGitIn(ARoot, ['log', '-n', IntToStr(MessageSubjects), '--format=%h %s',
+    Base + '..HEAD', '--', APath], Output, Error) and (Trim(Output) <> '') then
+    Result := Result + 'Commits on the "<<<<<<<" side (HEAD) that changed the file, ' +
+      'newest first:' + LineEnding + Output + LineEnding;
+  if RunGitIn(ARoot, ['log', '-n', IntToStr(MessageSubjects), '--format=%h %s',
+    Base + '..' + Head, '--', APath], Output, Error) and (Trim(Output) <> '') then
+    Result := Result + 'Commits on the ">>>>>>>" side (' + Head + ') that changed the ' +
+      'file, newest first:' + LineEnding + Output + LineEnding;
+end;
+
+function ConflictInput(const ARoot, APath, AOperation: string; ARebase: boolean;
+  const ABlock: TGittanDiscard): string;
+var
+  Lines: TStringList;
+  Text: TStringBuilder;
+  i, First, Last: integer;
+begin
+  Text := TStringBuilder.Create;
+  Lines := TStringList.Create;
+  try
+    Text.Append('The file: ' + APath + LineEnding);
+    if AOperation <> '' then
+      Text.Append('Git is ' + AOperation + '. ');
+    if ARebase then
+      Text.Append('The "<<<<<<<" side is the upstream the user''s commits are replayed ' +
+        'onto; the ">>>>>>>" side is the user''s own commit being replayed.')
+    else
+      Text.Append('The "<<<<<<<" side is the user''s own work; the ">>>>>>>" side is ' +
+        'what comes in.');
+    Text.Append(LineEnding + LineEnding);
+    Text.Append(ConflictCommits(ARoot, APath));
+    try
+      Lines.LoadFromFile(ABlock.FileName);
+    except
+      Lines.Clear;
+    end;
+    { The lines around it, as the file has them now. }
+    First := Max(0, ABlock.Line - 1 - ConflictAround);
+    if First < ABlock.Line - 1 then
+    begin
+      Text.Append('The lines before the conflict:' + LineEnding);
+      for i := First to Min(ABlock.Line - 2, Lines.Count - 1) do
+        Text.Append(Lines[i] + LineEnding);
+      Text.Append(LineEnding);
+    end;
+    Text.Append('The conflict:' + LineEnding);
+    for i := 0 to High(ABlock.NewLines) do
+      Text.Append(ABlock.NewLines[i] + LineEnding);
+    First := ABlock.Line - 1 + Length(ABlock.NewLines);
+    Last := Min(First + ConflictAround, Lines.Count) - 1;
+    if First <= Last then
+    begin
+      Text.Append(LineEnding + 'The lines after the conflict:' + LineEnding);
+      for i := First to Last do
+        Text.Append(Lines[i] + LineEnding);
+    end;
+    Result := Text.ToString;
+  finally
+    Lines.Free;
+    Text.Free;
+  end;
+end;
+
+{ The text between the first AOpen and the last AClose in AText (case
+  ignored), '' with False when there is none. }
+function Between(const AText, AOpen, AClose: string; out APart: string): boolean;
+var
+  Low: string;
+  First, Last: integer;
+begin
+  APart := '';
+  Low := LowerCase(AText);
+  First := Pos(AOpen, Low);
+  if First = 0 then
+    Exit(False);
+  First := First + Length(AOpen);
+  Last := Length(Low) - Length(AClose) + 1;
+  while (Last >= First) and (Copy(Low, Last, Length(AClose)) <> AClose) do
+    Dec(Last);
+  Result := Last >= First;
+  if Result then
+    APart := Copy(AText, First, Last - First);
+end;
+
+{ The lines of APart, the text between two tags on lines of their own:
+  the line ends next to the tags are theirs, a blank line at the end is
+  one of the lines, and a code fence around them is taken off. }
+function TagLines(const APart: string): TStringArray;
+var
+  Part: string;
+begin
+  Result := nil;
+  Part := StringReplace(APart, #13#10, #10, [rfReplaceAll]);
+  if Copy(Part, 1, 1) = #10 then
+    Delete(Part, 1, 1);
+  if Copy(Part, Length(Part), 1) = #10 then
+    SetLength(Part, Length(Part) - 1);
+  if Part <> '' then
+    Result := Part.Split([#10]);
+  if (Length(Result) >= 2) and (Copy(Trim(Result[0]), 1, 3) = '```') and
+    (Trim(Result[High(Result)]) = '```') then
+    Result := Copy(Result, 1, Length(Result) - 2);
+end;
+
+{ What is between "<why>" and "</why>" in AText, on one line. }
+function WhyOf(const AText: string): string;
+var
+  Part: string;
+begin
+  Result := '';
+  if Between(AText, '<why>', '</why>', Part) then
+    Result := Trim(StringReplace(StringReplace(Part, #13, '', [rfReplaceAll]), #10, ' ',
+      [rfReplaceAll]));
+end;
+
+function ParseResolution(const AText: string; out ALines: TStringArray;
+  out AWhy: string): boolean;
+var
+  Part: string;
+  i: integer;
+begin
+  ALines := nil;
+  AWhy := WhyOf(AText);
+  if not Between(AText, '<resolved>', '</resolved>', Part) then
+    Exit(False);
+  ALines := TagLines(Part);
+  for i := 0 to High(ALines) do
+    if (Copy(ALines[i], 1, 7) = '<<<<<<<') or (Copy(ALines[i], 1, 7) = '>>>>>>>') or
+      (ALines[i] = '=======') or (ALines[i] = '|||||||') or
+      (Copy(ALines[i], 1, 8) = '||||||| ') then
+    begin
+      ALines := nil;
+      Exit(False);
+    end;
+  Result := True;
+end;
+
+function FixInput(const ARoot, ABase: string; const AFinding: TGittanReviewThread;
+  const ALines: TStringArray): string;
+var
+  Text: TStringBuilder;
+  Diff, Error, Side: string;
+  Numbered: TStringArray;
+  i, Size, Room, First, Last: integer;
+  Grew: boolean;
+begin
+  Text := TStringBuilder.Create;
+  try
+    if AFinding.LeftSide then
+      Side := 'line %d of the old side (a line the change removed)'
+    else
+      Side := 'line %d';
+    Text.Append('The finding, on ' + Format(Side, [AFinding.Line]) + ' of ' +
+      AFinding.Path);
+    if AFinding.Severity <> '' then
+      Text.Append(', a ' + AFinding.Severity);
+    Text.Append(':' + LineEnding);
+    if AFinding.Comments <> nil then
+      Text.Append(AFinding.Comments[0].Body + LineEnding);
+    Text.Append(LineEnding);
+    if ABase <> '' then
+      RunGitIn(ARoot, ['diff', '--no-ext-diff', ABase, '--', AFinding.Path], Diff, Error)
+    else if not RunGitIn(ARoot, ['diff', '--no-ext-diff', 'HEAD', '--', AFinding.Path],
+      Diff, Error) then
+      Diff := '';
+    { The diff takes half the budget at most, so the file's lines at the
+      finding always come: a model that cannot read files has only them
+      to find the lines to change. }
+    if Trim(Diff) <> '' then
+      Text.Append('The change under review in the file:' + LineEnding +
+        KeepText(Diff, '[The diff is cut here: %d of its %d bytes are left out.]',
+        MessageDiffKeep div 2) + LineEnding);
+    Text.Append('The file as it is now:' + LineEnding);
+    SetLength(Numbered, Length(ALines));
+    Size := 0;
+    for i := 0 to High(ALines) do
+    begin
+      Numbered[i] := IntToStr(i + 1) + ': ' + ALines[i] + #10;
+      Inc(Size, Length(Numbered[i]));
+    end;
+    { Room for the notes of the lines left out. }
+    Room := MessageDiffKeep - Text.Length - 200;
+    First := 0;
+    Last := High(ALines);
+    if Size > Room then
+    begin
+      First := Max(0, Min(AFinding.Line - 1, High(ALines)));
+      Last := First - 1;
+      Size := 0;
+      { Down and up from the finding's line in turn while lines fit,
+        each way on its own: a line too long below does not stop the
+        lines above. }
+      repeat
+        Grew := False;
+        if (Last < High(ALines)) and (Size + Length(Numbered[Last + 1]) <= Room) then
+        begin
+          Inc(Last);
+          Inc(Size, Length(Numbered[Last]));
+          Grew := True;
+        end;
+        if (First > 0) and (Size + Length(Numbered[First - 1]) <= Room) then
+        begin
+          Dec(First);
+          Inc(Size, Length(Numbered[First]));
+          Grew := True;
+        end;
+      until not Grew;
+    end;
+    if First > 0 then
+      Text.Append(Format('[Lines 1 to %d are left out.]', [First]) + LineEnding);
+    for i := First to Last do
+      Text.Append(Numbered[i]);
+    if Last < High(ALines) then
+      Text.Append(Format('[Lines %d to %d are left out.]', [Last + 2, Length(ALines)]) +
+        LineEnding);
+    Result := KeepText(Text.ToString, '[The file is cut here: %d of the %d bytes are ' +
+      'left out.]');
+  finally
+    Text.Free;
+  end;
+end;
+
+function ParseFixEdits(const AText: string; out AEdits: TGittanFixEdits;
+  out AWhy: string): boolean;
+var
+  Low, Part: string;
+  At, Open, Close, n: integer;
+  Edit: TGittanFixEdit;
+
+  { The part between AOpen and AClose from At on, At moved past it. }
+  function Next(const AOpen, AClose: string; out APart: string): boolean;
+  begin
+    Result := False;
+    APart := '';
+    Open := Pos(AOpen, Low, At);
+    if Open = 0 then
+      Exit;
+    Close := Pos(AClose, Low, Open + Length(AOpen));
+    if Close = 0 then
+      Exit;
+    APart := Copy(AText, Open + Length(AOpen), Close - Open - Length(AOpen));
+    At := Close + Length(AClose);
+    Result := True;
+  end;
+
+begin
+  AEdits := nil;
+  AWhy := WhyOf(AText);
+  Low := LowerCase(AText);
+  At := 1;
+  n := 0;
+  while Next('<find>', '</find>', Part) do
+  begin
+    Edit := Default(TGittanFixEdit);
+    Edit.Find := TagLines(Part);
+    if (Edit.Find = nil) or not Next('<replace>', '</replace>', Part) then
+    begin
+      AEdits := nil;
+      Exit(False);
+    end;
+    Edit.Replace := TagLines(Part);
+    Insert(Edit, AEdits, n);
+    Inc(n);
+  end;
+  Result := (AEdits <> nil) or (AWhy <> '');
+end;
+
+{ Where AFind is in ALines, compared as AMode says: 0 as they are, 1
+  with the spaces at the ends ignored, 2 without a line number before
+  each of AFind's; -1 for nowhere, and ACount how many places. }
+function FindLines(const ALines, AFind: TStringArray; AMode: integer;
+  out ACount: integer): integer;
+var
+  i, j, k: integer;
+  Want: TStringArray;
+  Same: boolean;
+begin
+  Result := -1;
+  ACount := 0;
+  Want := Copy(AFind);
+  if AMode = 2 then
+    for j := 0 to High(Want) do
+    begin
+      k := 1;
+      while (k <= Length(Want[j])) and (Want[j][k] in ['0'..'9']) do
+        Inc(k);
+      if (k = 1) or (Copy(Want[j], k, 2) <> ': ') then
+        Exit;
+      Want[j] := Copy(Want[j], k + 2, MaxInt);
+    end;
+  for i := 0 to Length(ALines) - Length(Want) do
+  begin
+    Same := True;
+    for j := 0 to High(Want) do
+    begin
+      if AMode = 0 then
+        Same := ALines[i + j] = Want[j]
+      else
+        Same := TrimRight(ALines[i + j]) = TrimRight(Want[j]);
+      if not Same then
+        Break;
+    end;
+    if Same then
+    begin
+      if Result < 0 then
+        Result := i;
+      Inc(ACount);
+    end;
+  end;
+end;
+
+function ApplyFixEdits(const ALines: TStringArray; const AEdits: TGittanFixEdits;
+  out ANew: TStringArray; out AError: string): boolean;
+var
+  e, Mode, At, Count: integer;
+begin
+  AError := '';
+  ANew := Copy(ALines);
+  for e := 0 to High(AEdits) do
+  begin
+    At := -1;
+    Count := 0;
+    for Mode := 0 to 2 do
+    begin
+      At := FindLines(ANew, AEdits[e].Find, Mode, Count);
+      if Count > 0 then
+        Break;
+    end;
+    if Count = 0 then
+      AError := Format(rsFixNotFound, [e + 1])
+    else if Count > 1 then
+      AError := Format(rsFixAmbiguous, [e + 1, Count]);
+    if AError <> '' then
+    begin
+      ANew := nil;
+      Exit(False);
+    end;
+    ANew := Concat(Copy(ANew, 0, At), AEdits[e].Replace,
+      Copy(ANew, At + Length(AEdits[e].Find), MaxInt));
+  end;
+  Result := True;
+end;
+
+function FixBlock(const AFileName: string; const ABefore, AAfter: TStringArray): TGittanDiscard;
+var
+  Head, Tail: integer;
+begin
+  Head := 0;
+  while (Head < Length(ABefore)) and (Head < Length(AAfter)) and
+    (ABefore[Head] = AAfter[Head]) do
+    Inc(Head);
+  Tail := 0;
+  while (Tail < Length(ABefore) - Head) and (Tail < Length(AAfter) - Head) and
+    (ABefore[High(ABefore) - Tail] = AAfter[High(AAfter) - Tail]) do
+    Inc(Tail);
+  { An insert keeps a line beside it in the block, so that DiscardBlock
+    has a line to find where it was and refuses a file changed there. }
+  if (Head + Tail = Length(ABefore)) and (Head + Tail < Length(AAfter)) then
+    if Head > 0 then
+      Dec(Head)
+    else if Tail > 0 then
+      Dec(Tail);
+  Result := Default(TGittanDiscard);
+  Result.FileName := AFileName;
+  Result.Line := Head + 1;
+  Result.NewLines := Copy(ABefore, Head, Length(ABefore) - Head - Tail);
+  Result.OldLines := Copy(AAfter, Head, Length(AAfter) - Head - Tail);
+end;
+
 { TGittanAgentJob }
 
 constructor TGittanAgentJob.Create(const ARoot: string; AAI: TGittanAI);
@@ -1281,6 +2128,188 @@ begin
     Exit;
   if Ask(atLocate, Input, Answer, Why) and ParseFoundFiles(Answer, Lines) then
     MergeFoundLines(FFiles, Lines, Last);
+end;
+
+{ TGittanConflictJob }
+
+constructor TGittanConflictJob.Create(const ARoot: string; AAI: TGittanAI;
+  const APath, AOperation: string; ARebase: boolean; const ABlock: TGittanDiscard);
+begin
+  inherited Create(ARoot, AAI);
+  FPath := APath;
+  FOperation := AOperation;
+  FRebase := ARebase;
+  FBlock := ABlock;
+end;
+
+procedure TGittanConflictJob.Execute;
+var
+  Input, Answer: string;
+  Lines: TStringArray;
+begin
+  Input := ConflictInput(FRoot, FPath, FOperation, FRebase, FBlock);
+  if Terminated then
+    Exit;
+  FOk := Ask(atResolve, Input, Answer, FError);
+  if Terminated then
+    Exit;
+  if FOk then
+  begin
+    FOk := ParseResolution(Answer, Lines, FWhy);
+    if FOk then
+      FBlock.OldLines := Lines
+    else
+      FError := Format(rsResolutionNotRead, [Copy(Trim(Answer), 1, 300)]);
+  end;
+  Done;
+end;
+
+{ TGittanSplitJob }
+
+constructor TGittanSplitJob.Create(const ARoot: string; AAI: TGittanAI; APaths: TStrings);
+begin
+  inherited Create(ARoot, AAI);
+  FPaths := TStringList.Create;
+  FPaths.AddStrings(APaths);
+end;
+
+destructor TGittanSplitJob.Destroy;
+begin
+  inherited Destroy;
+  FPaths.Free;
+end;
+
+procedure TGittanSplitJob.Execute;
+var
+  Changes, Answer: string;
+begin
+  if not SplitInput(FRoot, FPaths, Changes, FError) then
+  begin
+    Done;
+    Exit;
+  end;
+  if Changes = '' then
+  begin
+    FError := rsNothingToDescribe;
+    Done;
+    Exit;
+  end;
+  if Terminated then
+    Exit;
+  FOk := Ask(atSplit, Changes, Answer, FError);
+  if Terminated then
+    Exit;
+  if FOk then
+  begin
+    FOk := ParseCommitPlan(Answer, FPaths, FPlan);
+    if not FOk then
+      FError := Format(rsPlanNotRead, [Copy(Trim(Answer), 1, 300)]);
+  end;
+  Done;
+end;
+
+{ TGittanFixJob }
+
+constructor TGittanFixJob.Create(const ARoot: string; AAI: TGittanAI; const ABase: string;
+  const AFinding: TGittanReviewThread);
+begin
+  inherited Create(ARoot, AAI);
+  FBase := ABase;
+  FFinding := AFinding;
+end;
+
+procedure TGittanFixJob.Execute;
+var
+  FileName, Answer: string;
+  Lines: TStringList;
+  Before, After: TStringArray;
+  Edits: TGittanFixEdits;
+  i: integer;
+begin
+  FileName := IncludeTrailingPathDelimiter(FRoot) + StringReplace(FFinding.Path, '/',
+    PathDelim, [rfReplaceAll]);
+  { The write would follow the link, maybe out of the repository. }
+  if ThroughLink(FRoot, FFinding.Path) then
+  begin
+    FError := Format(rsFixLink, [FFinding.Path]);
+    Done;
+    Exit;
+  end;
+  Lines := TStringList.Create;
+  try
+    try
+      SplitLf(ReadFileBytes(FileName), Lines);
+    except
+      on E: Exception do
+      begin
+        FError := E.Message;
+        Done;
+        Exit;
+      end;
+    end;
+    SetLength(Before, Lines.Count);
+    for i := 0 to Lines.Count - 1 do
+      Before[i] := BareLine(Lines[i]);
+  finally
+    Lines.Free;
+  end;
+  if Terminated then
+    Exit;
+  FOk := Ask(atFix, FixInput(FRoot, FBase, FFinding, Before), Answer, FError);
+  if Terminated then
+    Exit;
+  if FOk then
+  begin
+    FOk := ParseFixEdits(Answer, Edits, FWhy);
+    if not FOk then
+      FError := Format(rsFixNotRead, [Copy(Trim(Answer), 1, 300)])
+    else if Edits <> nil then
+    begin
+      FOk := ApplyFixEdits(Before, Edits, After, FError);
+      if FOk then
+      begin
+        FBlock := FixBlock(FileName, Before, After);
+        FChanged := (FBlock.NewLines <> nil) or (FBlock.OldLines <> nil);
+      end;
+    end;
+  end;
+  Done;
+end;
+
+{ TGittanWhyJob }
+
+constructor TGittanWhyJob.Create(const ARoot: string; AAI: TGittanAI;
+  const APath, ARef: string; AFrom, ATo: integer);
+begin
+  inherited Create(ARoot, AAI);
+  FPath := APath;
+  FRef := ARef;
+  FFrom := AFrom;
+  FTo := ATo;
+end;
+
+procedure TGittanWhyJob.Execute;
+var
+  Input, Answer: string;
+begin
+  if not WhyInput(FRoot, FPath, FRef, FFrom, FTo, Input, FError) then
+  begin
+    Done;
+    Exit;
+  end;
+  if Terminated then
+    Exit;
+  FOk := Ask(atWhy, Input, Answer, FError);
+  if Terminated then
+    Exit;
+  if FOk then
+  begin
+    FText := Trim(StringReplace(Answer, #13#10, #10, [rfReplaceAll]));
+    FOk := FText <> '';
+    if not FOk then
+      FError := Format(rsAgentNoAnswer, [AgentName]);
+  end;
+  Done;
 end;
 
 end.
