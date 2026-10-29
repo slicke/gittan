@@ -361,6 +361,13 @@ jobs:
           # No make on the Windows runner: make.ps1 has the same targets.
           # build copies the lexers into lexlib\ first; test finds the fpc
           # the Lazarus installer put under C:\Lazarus\fpc\<version>.
+          # The git tests make their repositories in GetTempDir, which reads
+          # TMP; the default is on C:, the runner's slow disk, RUNNER_TEMP
+          # on D:. Defender's real-time scan of the thousands of small files
+          # they make is left out there.
+          Add-MpPreference -ExclusionPath $env:RUNNER_TEMP -ErrorAction SilentlyContinue
+          $env:TMP = $env:RUNNER_TEMP
+          $env:TEMP = $env:RUNNER_TEMP
           ./make.ps1 build --lazarusdir=C:\Lazarus
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           ./make.ps1 test
