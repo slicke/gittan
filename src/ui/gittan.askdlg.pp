@@ -82,7 +82,10 @@ const
   DialogWidth = 460;
   Margin = 16;
   IconSize = 48;
-  IconGap = 14;
+  { The icon's room at the left, as a system dialog has it: its own
+    margin, and the gap to the text. }
+  IconLeft = 22;
+  IconGap = 18;
   ButtonMinWidth = 84;
   ButtonGap = 8;
   FieldGap = 10;
@@ -98,7 +101,6 @@ type
   TAskForm = class(TForm)
   private
     FKind: TMsgDlgType;
-    FIconBox: TPaintBox;
     FIconBitmap: TBitmap;
     FNextTop: integer;
     FEdits: array of TEdit;
@@ -110,12 +112,13 @@ type
     FPathField: integer;
     FCancelResult: TModalResult;
     function NextTop: integer;
-    procedure IconPaint(Sender: TObject);
+    function IconRect: TRect;
     procedure FieldChange(Sender: TObject);
     procedure AddText(const AText: string; ABold: boolean);
     procedure AddButtons(const AButtons: array of TAskButton; ADefault, ACancel: integer);
   protected
     procedure KeyDown(var Key: word; Shift: TShiftState); override;
+    procedure Paint; override;
     procedure DoShow; override;
   public
     constructor CreateAsk(const ATitle: string; AKind: TMsgDlgType);
@@ -173,11 +176,6 @@ begin
   Constraints.MinWidth := Scale96ToScreen(DialogWidth);
   Constraints.MaxWidth := Scale96ToScreen(DialogWidth);
   AutoSize := True;
-  FIconBox := TPaintBox.Create(Self);
-  FIconBox.SetBounds(Scale96ToScreen(Margin), Scale96ToScreen(Margin),
-    Scale96ToScreen(IconSize), Scale96ToScreen(IconSize));
-  FIconBox.OnPaint := @IconPaint;
-  FIconBox.Parent := Self;
 end;
 
 destructor TAskForm.Destroy;
@@ -204,7 +202,7 @@ begin
   Lbl.WordWrap := True;
   Lbl.Align := alTop;
   Lbl.Top := NextTop;
-  Lbl.BorderSpacing.Left := Scale96ToScreen(Margin + IconSize + IconGap);
+  Lbl.BorderSpacing.Left := Scale96ToScreen(IconLeft + IconSize + IconGap);
   Lbl.BorderSpacing.Right := Scale96ToScreen(Margin);
   if FNextTop = 1000 then
     Lbl.BorderSpacing.Top := Scale96ToScreen(Margin)
@@ -296,6 +294,24 @@ begin
   inherited KeyDown(Key, Shift);
 end;
 
+{ The icon in the middle of the text's height over the buttons, never
+  above the top margin. It is painted on the form, not a control of its
+  own: a control would count in the form's AutoSize, and moving it down
+  made the form taller, which moved the buttons and the icon again. }
+function TAskForm.IconRect: TRect;
+var
+  S, IconTop, Room: integer;
+begin
+  S := Scale96ToScreen(IconSize);
+  IconTop := Scale96ToScreen(Margin);
+  if FButtonRow <> nil then
+  begin
+    Room := FButtonRow.Top - FButtonRow.BorderSpacing.Top - IconTop;
+    Inc(IconTop, Max(0, (Room - S) div 2));
+  end;
+  Result := Rect(Scale96ToScreen(IconLeft), IconTop, Scale96ToScreen(IconLeft) + S, IconTop + S);
+end;
+
 procedure TAskForm.DoShow;
 begin
   inherited DoShow;
@@ -313,16 +329,21 @@ end;
 { A warning is an amber triangle, an error a red disc, both with an
   exclamation mark; a question or a note has the application's icon, in
   the screen's pixels. }
-procedure TAskForm.IconPaint(Sender: TObject);
+procedure TAskForm.Paint;
 var
   C: TCanvas;
-  S, Mid, W: integer;
+  R: TRect;
+  S, Mid, W, X, Y: integer;
   AppIcon: TIcon;
   Fill: TColor;
 begin
-  C := FIconBox.Canvas;
-  S := FIconBox.Width;
-  Mid := S div 2;
+  inherited Paint;
+  C := Canvas;
+  R := IconRect;
+  S := R.Width;
+  X := R.Left;
+  Y := R.Top;
+  Mid := X + S div 2;
   if FKind in [mtWarning, mtError] then
   begin
     if FKind = mtWarning then
@@ -333,21 +354,21 @@ begin
     C.Brush.Style := bsSolid;
     C.Brush.Color := Fill;
     if FKind = mtWarning then
-      C.Polygon([Point(Mid, S div 12), Point(S - S div 24, S - S div 8),
-        Point(S div 24, S - S div 8)])
+      C.Polygon([Point(Mid, Y + S div 12), Point(X + S - S div 24, Y + S - S div 8),
+        Point(X + S div 24, Y + S - S div 8)])
     else
-      C.Ellipse(S div 12, S div 12, S - S div 12, S - S div 12);
+      C.Ellipse(X + S div 12, Y + S div 12, X + S - S div 12, Y + S - S div 12);
     C.Brush.Color := clWhite;
     W := Max(3, S div 12);
     if FKind = mtWarning then
     begin
-      C.RoundRect(Mid - W div 2, S * 9 div 24, Mid + W div 2 + 1, S * 16 div 24, W, W);
-      C.Ellipse(Mid - W div 2, S * 18 div 24, Mid + W div 2 + 1, S * 18 div 24 + W + 1);
+      C.RoundRect(Mid - W div 2, Y + S * 9 div 24, Mid + W div 2 + 1, Y + S * 16 div 24, W, W);
+      C.Ellipse(Mid - W div 2, Y + S * 18 div 24, Mid + W div 2 + 1, Y + S * 18 div 24 + W + 1);
     end
     else
     begin
-      C.RoundRect(Mid - W div 2, S * 6 div 24, Mid + W div 2 + 1, S * 14 div 24, W, W);
-      C.Ellipse(Mid - W div 2, S * 16 div 24, Mid + W div 2 + 1, S * 16 div 24 + W + 1);
+      C.RoundRect(Mid - W div 2, Y + S * 6 div 24, Mid + W div 2 + 1, Y + S * 14 div 24, W, W);
+      C.Ellipse(Mid - W div 2, Y + S * 16 div 24, Mid + W div 2 + 1, Y + S * 16 div 24 + W + 1);
     end;
     C.Pen.Style := psSolid;
     Exit;
@@ -362,7 +383,7 @@ begin
     FIconBitmap := TBitmap.Create;
     FIconBitmap.LoadFromRawImage(AppIcon.RawImage, False);
   end;
-  C.StretchDraw(Rect(0, 0, S, S), FIconBitmap);
+  C.StretchDraw(R, FIconBitmap);
 end;
 
 procedure TAskForm.FieldChange(Sender: TObject);
@@ -502,7 +523,7 @@ begin
       Edit := TEdit.Create(F);
       Edit.Align := alTop;
       Edit.Top := F.NextTop;
-      Edit.BorderSpacing.Left := F.Scale96ToScreen(Margin + IconSize + IconGap);
+      Edit.BorderSpacing.Left := F.Scale96ToScreen(IconLeft + IconSize + IconGap);
       Edit.BorderSpacing.Right := F.Scale96ToScreen(Margin);
       Edit.BorderSpacing.Top := F.Scale96ToScreen(4);
       if i <= High(AValues) then
@@ -515,7 +536,7 @@ begin
     F.FError.WordWrap := True;
     F.FError.Align := alTop;
     F.FError.Top := F.NextTop;
-    F.FError.BorderSpacing.Left := F.Scale96ToScreen(Margin + IconSize + IconGap);
+    F.FError.BorderSpacing.Left := F.Scale96ToScreen(IconLeft + IconSize + IconGap);
     F.FError.BorderSpacing.Right := F.Scale96ToScreen(Margin);
     F.FError.BorderSpacing.Top := F.Scale96ToScreen(6);
     F.FError.Font.Color := RGBToColor(229, 72, 77);
