@@ -223,6 +223,9 @@ type
     procedure FileTreeSelectionChanged(Sender: TObject);
     procedure FileTreeMouseMove(Sender: TObject; Shift: TShiftState; X, Y: integer);
     procedure FileTreeMouseLeave(Sender: TObject);
+    procedure SetTreeHint(ATree: TTreeView; ANode: TTreeNode; const ATip: string);
+    procedure SubTreeMouseMove(Sender: TObject; Shift: TShiftState; X, Y: integer);
+    function SubmoduleHint(AIndex: integer): string;
     procedure TreeHintTimerTimer(Sender: TObject);
   private
     { The window the frame is in, from Init. }
@@ -668,10 +671,12 @@ type
       large one (IndexNext). }
     FIndexLoading: boolean;
     FHoverTimer: TTimer;
-    { The hint of the file under the mouse in the tree and the timer
-      that shows it, see FileTreeMouseMove. }
+    { The hint of the row under the mouse in the tree of changed files
+      or of submodules (FTreeHintTree) and the timer that shows it, see
+      FileTreeMouseMove and SubTreeMouseMove. }
     FTreeHint: string;
     FTreeHintNode: TTreeNode;
+    FTreeHintTree: TTreeView;
     FTreeHintTimer: TTimer;
     FHoverEd: TATSynEdit;
     FHoverWord: string;
@@ -2901,7 +2906,17 @@ resourcestring
   rsIdentityHintLocal = ' (this repository only)';
   rsIdentityNone = 'Git has no name or e-mail to commit under. Click to set them.';
   rsSubmodules = 'Submodules';
-  rsSubmodulesNewer = '%d · ↓%d';
+  rsSubmodulesNewer = '%d · %d behind';
+  rsSubHintBehind = 'The remote''s %s has %s the recorded commit lacks.';
+  rsSubHintAhead = 'The recorded commit is %s past the remote''s %s.';
+  rsSubHintDiverged = 'The remote''s %s has %s the recorded commit lacks, and the recorded commit %s it lacks.';
+  rsSubHintNotFetched = 'The remote''s %s has moved on to a commit not fetched here, so its new commits cannot be counted.';
+  rsSubHintFailed = 'Could not ask the remote: %s';
+  rsSubHintUpToDate = 'The recorded commit is where the remote''s %s is.';
+  rsSubHintDefaultBranch = 'default branch';
+  rsSubHintUpdate = 'Update brings the submodule to it.';
+  rsOneCommit = '1 commit';
+  rsCommitsCount = '%d commits';
   rsSubOpen = 'Open';
   rsSubUpdateAction = 'Update';
   rsSubmodulesMenu = 'Su&bmodules';
@@ -7831,34 +7846,45 @@ begin
     if (i >= 0) and (SubmoduleMoveText(i) <> '') then
       Tip := Format(rsHintSubmodule, [SubmoduleMoveText(i)]);
   end;
-  if Tip = '' then
-    Node := nil;
-  if (Node = FTreeHintNode) and (Tip = FTreeHint) then
-    Exit;
-  FileTreeMouseLeave(Sender);
-  FTreeHintNode := Node;
-  FTreeHint := Tip;
-  FTreeHintTimer.Enabled := Tip <> '';
+  SetTreeHint(FileTree, Node, Tip);
 end;
 
+{ The hint ATip for ANode of ATree, shown after the hint pause; the same
+  row with the same hint changes nothing, so the hint is not restarted
+  as the mouse moves within it. }
+procedure TRepoFrame.SetTreeHint(ATree: TTreeView; ANode: TTreeNode; const ATip: string);
+begin
+  if ATip = '' then
+    ANode := nil;
+  if (ATree = FTreeHintTree) and (ANode = FTreeHintNode) and (ATip = FTreeHint) then
+    Exit;
+  FileTreeMouseLeave(ATree);
+  FTreeHintTree := ATree;
+  FTreeHintNode := ANode;
+  FTreeHint := ATip;
+  FTreeHintTimer.Enabled := ATip <> '';
+end;
+
+{ Also the submodule tree's OnMouseLeave. }
 procedure TRepoFrame.FileTreeMouseLeave(Sender: TObject);
 begin
   FTreeHintTimer.Enabled := False;
-  if FileTree.Hint <> '' then
+  if (FTreeHintTree <> nil) and (FTreeHintTree.Hint <> '') then
   begin
     Application.CancelHint;
-    FileTree.Hint := '';
+    FTreeHintTree.Hint := '';
   end;
   FTreeHint := '';
   FTreeHintNode := nil;
+  FTreeHintTree := nil;
 end;
 
 procedure TRepoFrame.TreeHintTimerTimer(Sender: TObject);
 begin
   FTreeHintTimer.Enabled := False;
-  if FTreeHint = '' then
+  if (FTreeHint = '') or (FTreeHintTree = nil) then
     Exit;
-  FileTree.Hint := FTreeHint;
+  FTreeHintTree.Hint := FTreeHint;
   Application.ActivateHint(Mouse.CursorPos);
 end;
 
