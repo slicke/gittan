@@ -12,8 +12,12 @@ unit gittan.hoverpills;
   keys. The strip is a child of the form it shows in, placed over
   whatever the form shows, as the popup lists are (see
   gittan.popuplist), and paints itself in the colors SetColors gives:
-  the box, its border, the text, the text of the pill under the mouse,
-  and the check mark and the arrow. Its font is a size under the
+  the pills, their border, the text, the text of the pill under the
+  mouse, and the check mark and the arrow. On Cocoa the strip has no
+  box: what lies around the pills shows through, so they float over
+  the row; elsewhere a child control cannot be see-through and the
+  pills sit on a box of their own color. The pill under the mouse is
+  tinted toward its color, the discard pill's toward the arrow's red. Its font is a size under the
   form's, so the strip stays near the height of a row. A pill can have
   a hint, which the strip shows itself under the pill after the usual
   pause, as the status bar does; a pill with the discard arrow stands a
@@ -89,9 +93,9 @@ const
     text; and between the anchor's right edge and the box. }
   Pad = 2;
   PillGap = 4;
-  PillPad = 8;
-  PillRise = 2;
-  ArrowGap = 5;
+  PillPad = 10;
+  PillRise = 3;
+  ArrowGap = 6;
   { Before the pill with the discard arrow, added to PillGap. }
   DiscardGap = 8;
   Offset = 4;
@@ -102,7 +106,12 @@ const
 constructor TGittanHoverPills.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  {$IFDEF LCLCocoa}
+  { Cocoa fills a control's background only for a real color. }
+  Color := clNone;
+  {$ELSE}
   ControlStyle := ControlStyle + [csOpaque];
+  {$ENDIF}
   Visible := False;
   Cursor := crHandPoint;
   FHot := -1;
@@ -291,29 +300,49 @@ procedure TGittanHoverPills.Paint;
 var
   i, X, TextY: integer;
   R: TRect;
-  Ink: TColor;
+  Ink, Tint: TColor;
+  Weight: double;
+  Discard: boolean;
 begin
+  Canvas.AntialiasingMode := amOn;
+  {$IFNDEF LCLCocoa}
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := FBack;
   Canvas.FillRect(ClientRect);
-  Canvas.Pen.Color := FLine;
-  Canvas.Pen.Width := 1;
-  Canvas.Brush.Style := bsClear;
-  Canvas.Rectangle(0, 0, Width, Height);
+  {$ENDIF}
   Canvas.Font := Font;
   for i := 0 to High(FRects) do
   begin
     R := FRects[i];
-    Canvas.Pen.Color := FLine;
+    Discard := (i < Length(FIcons)) and (FIcons[i + 1] = 'd');
+    if Discard then
+      Tint := FDiscardColor
+    else
+      Tint := FHotColor;
+    if FPressed = i then
+      Weight := 0.3
+    else if (FPressed < 0) and (FHot = i) then
+      Weight := 0.16
+    else
+      Weight := 0;
     Canvas.Pen.Width := 1;
     Canvas.Brush.Style := bsSolid;
-    Canvas.Brush.Color := FBack;
-    Canvas.RoundRect(R.Left, R.Top, R.Right, R.Bottom, R.Height, R.Height);
-    Canvas.Brush.Style := bsClear;
-    if (FPressed = i) or ((FPressed < 0) and (FHot = i)) then
-      Ink := FHotColor
+    if Weight > 0 then
+    begin
+      Canvas.Pen.Color := MixColor(FLine, Tint, 0.6);
+      Canvas.Brush.Color := MixColor(FBack, Tint, Weight);
+      Ink := Tint;
+    end
     else
+    begin
+      Canvas.Pen.Color := FLine;
+      Canvas.Brush.Color := FBack;
       Ink := FText;
+    end;
+    { Corners a tenth of the height round. }
+    Canvas.RoundRect(R.Left, R.Top, R.Right, R.Bottom, Max(2, R.Height div 5),
+      Max(2, R.Height div 5));
+    Canvas.Brush.Style := bsClear;
     X := R.Left + Px(PillPad);
     if (i < Length(FIcons)) and (FIcons[i + 1] in ['k', 'd']) then
     begin
