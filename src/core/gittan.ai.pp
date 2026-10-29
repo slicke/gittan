@@ -28,7 +28,9 @@ unit gittan.ai;
   cannot search, FindListInput, which then gets the files it named
   with their lines numbered in a second round, FindLinesInput, for
   their lines), and the files it names (ParseFoundFiles) a list to
-  pick from under the filter field. The
+  pick from under the filter field. A conflict: its lines, the file's
+  lines around it and the commits on either side (ConflictInput), and
+  the lines the agent puts in its place (ParseResolution). The
   features are off until they are turned on in the settings, since the
   changes go to the agent's provider. }
 
@@ -37,7 +39,7 @@ unit gittan.ai;
 interface
 
 uses
-  Classes, SysUtils, gittan.job, gittan.reviews, gittan.git;
+  Classes, SysUtils, gittan.job, gittan.reviews, gittan.git, gittan.discard;
 
 type
   {** The agents Gittan can ask: two command line tools, and a model at
@@ -46,8 +48,8 @@ type
 
   {** What an agent is asked to do; atLocate is the second round of a
     find for a model that cannot read files, the lines in the files it
-    named. }
-  TGittanAITask = (atMessage, atReview, atFind, atLocate);
+    named; atResolve resolves one conflict. }
+  TGittanAITask = (atMessage, atReview, atFind, atLocate, atResolve);
 
   {** How many lines of each file a model was given (FindLinesInput). }
   TGittanLineCounts = array of integer;
@@ -70,6 +72,9 @@ const
   ReviewMaxFindings = 10;
   {** The most files of an answer to where something is kept. }
   FindMaxFiles = 10;
+  {** How many of the file's lines before and after a conflict the agent
+    is given with it. }
+  ConflictAround = 20;
 
 type
   {** A file the agent named for where something is: its path in the
@@ -257,6 +262,34 @@ function ParseFoundFiles(const AText: string; out AFiles: TGittanFoundFiles): bo
   fence around the whole of it taken off, which a model adds at times. }
 function CleanCommitMessage(const AText: string): string;
 
+{** What the agent is given to resolve the conflict ABlock (NewLines its
+  lines as the file holds them, markers included, at Line) in APath of
+  the repository at ARoot: what git is in the middle of (AOperation, as
+  the frame names it, "merging" or "rebasing"), which side of the
+  markers is the user's own (the ">>>>>>>" one while ARebase, since a
+  rebase replays the user's commits onto the upstream), the commit being
+  applied and the commits on either side that changed the file
+  (ConflictCommits), ConflictAround lines of the file before and after,
+  and the conflict. }
+function ConflictInput(const ARoot, APath, AOperation: string; ARebase: boolean;
+  const ABlock: TGittanDiscard): string;
+
+{** The commits git's conflict in the repository at ARoot comes from, for
+  APath: the commit being applied (the first of MERGE_HEAD,
+  CHERRY_PICK_HEAD, REVERT_HEAD and REBASE_HEAD there is) with its
+  message unless it is a merge's, and the commits since the merge base
+  that changed APath on HEAD's side and on its side, MessageSubjects of
+  each. Empty when git is applying none. }
+function ConflictCommits(const ARoot, APath: string): string;
+
+{** The lines that take a conflict's place in AText, the agent's answer:
+  those between a line "<resolved>" and a line "</resolved>" (none is an
+  answer too, both sides dropped), a code fence around them taken off,
+  and in AWhy what is between "<why>" and "</why>", on one line. False
+  when there is no such part, or a line of it is a conflict marker. }
+function ParseResolution(const AText: string; out ALines: TStringArray;
+  out AWhy: string): boolean;
+
 type
   {** What the jobs below share: the repository at ARoot and the agent,
     its own copy of AAI (Clone), and Ask. Each runs in a thread, since
@@ -354,10 +387,38 @@ type
     property Error: string read FError;
   end;
 
+  {** Resolves the conflict ABlock of APath (see ConflictInput); its
+    lines to write go into Block's OldLines, so the frame writes it as
+    it writes the conflict's other picks. }
+  TGittanConflictJob = class(TGittanAgentJob)
+  private
+    FPath, FOperation: string;
+    FRebase: boolean;
+    FBlock: TGittanDiscard;
+    FOk: boolean;
+    FWhy, FError: string;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const ARoot: string; AAI: TGittanAI; const APath, AOperation: string;
+      ARebase: boolean; const ABlock: TGittanDiscard);
+    property Path: string read FPath;
+    {** The conflict as it was given, with the agent's lines as OldLines
+      when Ok. }
+    property Block: TGittanDiscard read FBlock;
+    {** Whether the agent answered with the lines. }
+    property Ok: boolean read FOk;
+    {** The agent's few words on what it kept. }
+    property Why: string read FWhy;
+    {** Why there are none, when not Ok. }
+    property Error: string read FError;
+  end;
+
 resourcestring
   rsNothingToReview = 'There are no changes to review.';
   rsReviewNotRead = 'The answer was no list of findings: %s';
   rsFoundNotRead = 'The answer was no list of files: %s';
+  rsResolutionNotRead = 'The answer held no resolved lines: %s';
   rsNothingToDescribe = 'There are no changes to describe.';
   rsAgentNoAnswer = '%s gave no answer.';
   rsAboutApi = '%s at %s';
@@ -428,6 +489,25 @@ const
     'it, each {"path": the file as given, "line": the number of the line where ' +
     'it is defined, implemented or handled, "why": a few words on what is there}.';
 
+  { The conflict's lines and how each side came to be: a model told only
+    to resolve it takes one side whole, and answers with prose or a fence
+    around the code unless the lines are asked for between tags. }
+  ResolvePromptStart = 'Resolve the git conflict given below: the lines from ' +
+    '"<<<<<<<" to ">>>>>>>" in the file named, the side after "<<<<<<<" (up to ' +
+    '"|||||||" or "=======") against the side after "=======", with what both ' +
+    'started from between "|||||||" and "=======" when it is there. Keep what each ' +
+    'side meant to change: combine them where they change different things, and ' +
+    'where they contradict, follow the commits given and keep the other side''s ' +
+    'change where it still applies. Keep the file''s indentation and style, and ' +
+    'change nothing outside the conflict. ';
+  ResolveReadNote = 'You may read the repository''s files to see how the code in the ' +
+    'conflict is used. ';
+  ResolveSentNote = 'You see the lines given alone and cannot open the files. ';
+  ResolvePromptEnd = 'Answer with the lines that take the whole conflict''s place, ' +
+    'between a line <resolved> and a line </resolved>, with no conflict markers and ' +
+    'no code fences in them, then one short sentence on what you kept between ' +
+    '<why> and </why>, and nothing else.';
+
 var
   AIClasses: array[TGittanAgent] of TGittanAIClass;
 
@@ -469,6 +549,11 @@ begin
         Result := FindPromptStart + FindReadNote + FindPromptEnd
       else
         Result := FindPromptStart + FindSentNote + FindPromptEnd;
+    atResolve:
+      if AReadsFiles then
+        Result := ResolvePromptStart + ResolveReadNote + ResolvePromptEnd
+      else
+        Result := ResolvePromptStart + ResolveSentNote + ResolvePromptEnd;
     else { atLocate }
       Result := LocatePromptStart + LocatePromptEnd;
   end;
@@ -1087,6 +1172,153 @@ begin
   end;
 end;
 
+function ConflictCommits(const ARoot, APath: string): string;
+const
+  Heads: array[0..3] of string = ('MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD',
+    'REBASE_HEAD');
+var
+  Head, Base, Output, Error: string;
+  i: integer;
+begin
+  Result := '';
+  Head := '';
+  for i := 0 to High(Heads) do
+    if RunGitIn(ARoot, ['rev-parse', '--verify', '-q', Heads[i] + '^{commit}'], Output,
+      Error) then
+    begin
+      Head := Heads[i];
+      Break;
+    end;
+  if Head = '' then
+    Exit;
+  { A merge's head is only the tip of the branch merged; the commit a
+    cherry-pick, revert or rebase applies is the change itself. }
+  if (Head <> 'MERGE_HEAD') and RunGitIn(ARoot, ['log', '-1', '--format=%B', Head], Output,
+    Error) and (Trim(Output) <> '') then
+    Result := 'The commit being applied (' + Head + '):' + LineEnding + Trim(Output) +
+      LineEnding + LineEnding;
+  if not RunGitIn(ARoot, ['merge-base', 'HEAD', Head], Base, Error) then
+    Exit;
+  Base := Trim(Base);
+  if RunGitIn(ARoot, ['log', '-n', IntToStr(MessageSubjects), '--format=%h %s',
+    Base + '..HEAD', '--', APath], Output, Error) and (Trim(Output) <> '') then
+    Result := Result + 'Commits on the "<<<<<<<" side (HEAD) that changed the file, ' +
+      'newest first:' + LineEnding + Output + LineEnding;
+  if RunGitIn(ARoot, ['log', '-n', IntToStr(MessageSubjects), '--format=%h %s',
+    Base + '..' + Head, '--', APath], Output, Error) and (Trim(Output) <> '') then
+    Result := Result + 'Commits on the ">>>>>>>" side (' + Head + ') that changed the ' +
+      'file, newest first:' + LineEnding + Output + LineEnding;
+end;
+
+function ConflictInput(const ARoot, APath, AOperation: string; ARebase: boolean;
+  const ABlock: TGittanDiscard): string;
+var
+  Lines: TStringList;
+  Text: TStringBuilder;
+  i, First, Last: integer;
+begin
+  Text := TStringBuilder.Create;
+  Lines := TStringList.Create;
+  try
+    Text.Append('The file: ' + APath + LineEnding);
+    if AOperation <> '' then
+      Text.Append('Git is ' + AOperation + '. ');
+    if ARebase then
+      Text.Append('The "<<<<<<<" side is the upstream the user''s commits are replayed ' +
+        'onto; the ">>>>>>>" side is the user''s own commit being replayed.')
+    else
+      Text.Append('The "<<<<<<<" side is the user''s own work; the ">>>>>>>" side is ' +
+        'what comes in.');
+    Text.Append(LineEnding + LineEnding);
+    Text.Append(ConflictCommits(ARoot, APath));
+    try
+      Lines.LoadFromFile(ABlock.FileName);
+    except
+      Lines.Clear;
+    end;
+    { The lines around it, as the file has them now. }
+    First := Max(0, ABlock.Line - 1 - ConflictAround);
+    if First < ABlock.Line - 1 then
+    begin
+      Text.Append('The lines before the conflict:' + LineEnding);
+      for i := First to Min(ABlock.Line - 2, Lines.Count - 1) do
+        Text.Append(Lines[i] + LineEnding);
+      Text.Append(LineEnding);
+    end;
+    Text.Append('The conflict:' + LineEnding);
+    for i := 0 to High(ABlock.NewLines) do
+      Text.Append(ABlock.NewLines[i] + LineEnding);
+    First := ABlock.Line - 1 + Length(ABlock.NewLines);
+    Last := Min(First + ConflictAround, Lines.Count) - 1;
+    if First <= Last then
+    begin
+      Text.Append(LineEnding + 'The lines after the conflict:' + LineEnding);
+      for i := First to Last do
+        Text.Append(Lines[i] + LineEnding);
+    end;
+    Result := Text.ToString;
+  finally
+    Lines.Free;
+    Text.Free;
+  end;
+end;
+
+{ The text between the first AOpen and the last AClose in AText (case
+  ignored), '' with False when there is none. }
+function Between(const AText, AOpen, AClose: string; out APart: string): boolean;
+var
+  Low: string;
+  First, Last: integer;
+begin
+  APart := '';
+  Low := LowerCase(AText);
+  First := Pos(AOpen, Low);
+  if First = 0 then
+    Exit(False);
+  First := First + Length(AOpen);
+  Last := Length(Low) - Length(AClose) + 1;
+  while (Last >= First) and (Copy(Low, Last, Length(AClose)) <> AClose) do
+    Dec(Last);
+  Result := Last >= First;
+  if Result then
+    APart := Copy(AText, First, Last - First);
+end;
+
+function ParseResolution(const AText: string; out ALines: TStringArray;
+  out AWhy: string): boolean;
+var
+  Part: string;
+  i: integer;
+begin
+  ALines := nil;
+  AWhy := '';
+  if Between(AText, '<why>', '</why>', Part) then
+    AWhy := Trim(StringReplace(StringReplace(Part, #13, '', [rfReplaceAll]), #10, ' ',
+      [rfReplaceAll]));
+  if not Between(AText, '<resolved>', '</resolved>', Part) then
+    Exit(False);
+  Part := StringReplace(Part, #13#10, #10, [rfReplaceAll]);
+  { The tags are on lines of their own: the line end after the opening
+    one and before the closing one are theirs. }
+  if Copy(Part, 1, 1) = #10 then
+    Delete(Part, 1, 1);
+  if Copy(Part, Length(Part), 1) = #10 then
+    SetLength(Part, Length(Part) - 1);
+  { Split by hand: a blank line at the end is one of the lines. }
+  if Part <> '' then
+    ALines := Part.Split([#10]);
+  if (Length(ALines) >= 2) and (Copy(Trim(ALines[0]), 1, 3) = '```') and
+    (Trim(ALines[High(ALines)]) = '```') then
+    ALines := Copy(ALines, 1, Length(ALines) - 2);
+  for i := 0 to High(ALines) do
+    if (Copy(ALines[i], 1, 7) = '<<<<<<<') or (Copy(ALines[i], 1, 7) = '>>>>>>>') then
+    begin
+      ALines := nil;
+      Exit(False);
+    end;
+  Result := True;
+end;
+
 { TGittanAgentJob }
 
 constructor TGittanAgentJob.Create(const ARoot: string; AAI: TGittanAI);
@@ -1281,6 +1513,40 @@ begin
     Exit;
   if Ask(atLocate, Input, Answer, Why) and ParseFoundFiles(Answer, Lines) then
     MergeFoundLines(FFiles, Lines, Last);
+end;
+
+{ TGittanConflictJob }
+
+constructor TGittanConflictJob.Create(const ARoot: string; AAI: TGittanAI;
+  const APath, AOperation: string; ARebase: boolean; const ABlock: TGittanDiscard);
+begin
+  inherited Create(ARoot, AAI);
+  FPath := APath;
+  FOperation := AOperation;
+  FRebase := ARebase;
+  FBlock := ABlock;
+end;
+
+procedure TGittanConflictJob.Execute;
+var
+  Input, Answer: string;
+  Lines: TStringArray;
+begin
+  Input := ConflictInput(FRoot, FPath, FOperation, FRebase, FBlock);
+  if Terminated then
+    Exit;
+  FOk := Ask(atResolve, Input, Answer, FError);
+  if Terminated then
+    Exit;
+  if FOk then
+  begin
+    FOk := ParseResolution(Answer, Lines, FWhy);
+    if FOk then
+      FBlock.OldLines := Lines
+    else
+      FError := Format(rsResolutionNotRead, [Copy(Trim(Answer), 1, 300)]);
+  end;
+  Done;
 end;
 
 end.

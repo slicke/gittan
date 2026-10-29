@@ -14,7 +14,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.reviews, gittan.ai,
-  testhelpers{$IFDEF UNIX}, BaseUnix{$ENDIF};
+  gittan.discard, testhelpers{$IFDEF UNIX}, BaseUnix{$ENDIF};
 
 type
   {** An agent that answers Answers in turn (an empty one is a failure,
@@ -45,6 +45,7 @@ type
     function Changes(const APaths: array of string; AAmend: boolean = False): string;
     procedure JobDone(Sender: TObject);
     function RunFind(const AQuestion: string): TGittanFindJob;
+    function MakeConflict: TGittanDiscard;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -71,6 +72,9 @@ type
     procedure TestFindJobSecondFails;
     procedure TestFindJobTool;
     procedure TestFindJobStopped;
+    procedure TestParseResolution;
+    procedure TestConflictInput;
+    procedure TestConflictJob;
   end;
 
 implementation
@@ -738,6 +742,133 @@ begin
     CheckSynchronize(0);
     AssertTrue('the agent was told', TFakeAI.Cancelled);
     AssertEquals('no word', 0, FDone);
+  finally
+    Job.Free;
+  end;
+end;
+
+procedure TAiTest.TestParseResolution;
+var
+  Lines: TStringArray;
+  Why: string;
+begin
+  AssertTrue(ParseResolution('Here it is:'#10'<resolved>'#10'  a := 1;'#10'  b := 2;'#10 +
+    '</resolved>'#10'<why>Kept both</why>', Lines, Why));
+  AssertEquals(2, Length(Lines));
+  AssertEquals('  a := 1;', Lines[0]);
+  AssertEquals('  b := 2;', Lines[1]);
+  AssertEquals('Kept both', Why);
+  AssertTrue('CRLF and a fence', ParseResolution('<RESOLVED>'#13#10'```pascal'#13#10'x'#13#10 +
+    '```'#13#10'</Resolved>', Lines, Why));
+  AssertEquals(1, Length(Lines));
+  AssertEquals('x', Lines[0]);
+  AssertEquals('no why', '', Why);
+  AssertTrue('nothing is an answer', ParseResolution('<resolved>'#10'</resolved>', Lines, Why));
+  AssertEquals(0, Length(Lines));
+  AssertTrue('a blank line at the end is kept', ParseResolution('<resolved>'#10'x'#10#10 +
+    '</resolved>', Lines, Why));
+  AssertEquals(2, Length(Lines));
+  AssertEquals('', Lines[1]);
+  AssertTrue('the why on one line', ParseResolution('<resolved>'#10'x'#10'</resolved>' +
+    '<why>one'#10'two</why>', Lines, Why));
+  AssertEquals('one two', Why);
+  AssertFalse('no tags', ParseResolution('x := 1;', Lines, Why));
+  AssertFalse('markers left', ParseResolution('<resolved>'#10'<<<<<<< HEAD'#10'x'#10 +
+    '=======' + #10'y'#10'>>>>>>> other'#10'</resolved>', Lines, Why));
+  AssertEquals(0, Length(Lines));
+end;
+
+{ A merge that conflicts in a.txt, and its conflict as the frame takes
+  it: the lines from the "<<<<<<<" to the ">>>>>>>". }
+function TAiTest.MakeConflict: TGittanDiscard;
+var
+  Lines: TStringList;
+  Output, Error: string;
+  i: integer;
+begin
+  WriteFile('a.txt', 'one'#10'two'#10'three'#10'four');
+  Git(['add', '.']);
+  Git(['commit', '-q', '-m', 'Add a']);
+  Git(['checkout', '-q', '-b', 'other']);
+  WriteFile('a.txt', 'one'#10'two theirs'#10'three'#10'four');
+  Git(['commit', '-q', '-am', 'Theirs changes two']);
+  Git(['checkout', '-q', '-']);
+  WriteFile('a.txt', 'one'#10'two mine'#10'three'#10'four');
+  Git(['commit', '-q', '-am', 'Mine changes two']);
+  AssertFalse('the merge conflicts', RunGitIn(FDir, ['merge', '-q', 'other'], Output, Error));
+  Result := Default(TGittanDiscard);
+  Result.FileName := IncludeTrailingPathDelimiter(FDir) + 'a.txt';
+  Lines := TStringList.Create;
+  try
+    Lines.LoadFromFile(Result.FileName);
+    for i := 0 to Lines.Count - 1 do
+    begin
+      if Copy(Lines[i], 1, 7) = '<<<<<<<' then
+        Result.Line := i + 1;
+      if Result.Line > 0 then
+      begin
+        SetLength(Result.NewLines, Length(Result.NewLines) + 1);
+        Result.NewLines[High(Result.NewLines)] := Lines[i];
+        if Copy(Lines[i], 1, 7) = '>>>>>>>' then
+          Break;
+      end;
+    end;
+  finally
+    Lines.Free;
+  end;
+  AssertEquals('the conflict is at line 2', 2, Result.Line);
+end;
+
+procedure TAiTest.TestConflictInput;
+var
+  Block: TGittanDiscard;
+  Text: string;
+begin
+  Block := MakeConflict;
+  Text := ConflictInput(FDir, 'a.txt', 'merging', False, Block);
+  AssertTrue('the file', Pos('The file: a.txt', Text) > 0);
+  AssertTrue('what git does', Pos('Git is merging', Text) > 0);
+  AssertTrue('mine is <<<<<<<', Pos('"<<<<<<<" side is the user''s own', Text) > 0);
+  AssertTrue('our commits', Pos('Mine changes two', Text) > 0);
+  AssertTrue('their commits', Pos('Theirs changes two', Text) > 0);
+  AssertEquals('a merge head is not the change', 0, Pos('The commit being applied', Text));
+  AssertTrue('the line before', Pos('before the conflict:' + LineEnding + 'one' +
+    LineEnding, Text) > 0);
+  AssertTrue('the conflict', Pos('two mine' + LineEnding + '=======' + LineEnding +
+    'two theirs', Text) > 0);
+  AssertTrue('the lines after', Pos('after the conflict:' + LineEnding + 'three' +
+    LineEnding + 'four' + LineEnding, Text) > 0);
+  Text := ConflictInput(FDir, 'a.txt', 'rebasing', True, Block);
+  AssertTrue('mine is >>>>>>> in a rebase', Pos('">>>>>>>" side is the user''s own', Text) > 0);
+end;
+
+procedure TAiTest.TestConflictJob;
+var
+  AI: TGittanAI;
+  Job: TGittanConflictJob;
+begin
+  TFakeAI.Reset;
+  TFakeAI.Answers := ['<resolved>'#10'two mine and theirs'#10'</resolved>'#10 +
+    '<why>Both changes kept.</why>'];
+  AI := TFakeAI.Create('', '', 'fake');
+  try
+    Job := TGittanConflictJob.Create(FDir, AI, 'a.txt', 'merging', False, MakeConflict);
+  finally
+    AI.Free;
+  end;
+  try
+    Job.OnDone := @JobDone;
+    FDone := 0;
+    Job.Start;
+    Job.WaitFor;
+    CheckSynchronize(0);
+    AssertEquals(1, FDone);
+    AssertTrue(Job.Error, Job.Ok);
+    AssertTrue(TFakeAI.Tasks[0] = atResolve);
+    AssertEquals(1, Length(Job.Block.OldLines));
+    AssertEquals('two mine and theirs', Job.Block.OldLines[0]);
+    AssertEquals('the conflict is kept', 5, Length(Job.Block.NewLines));
+    AssertEquals('Both changes kept.', Job.Why);
   finally
     Job.Free;
   end;

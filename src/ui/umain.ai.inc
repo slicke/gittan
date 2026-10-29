@@ -16,7 +16,12 @@
   The second is View > Review Changes with AI (Alt+Cmd+R): the agent
   reviews what the change view compares, and its findings are cards in
   the change view among a pull request's threads (see umain.reviews.inc),
-  kept for that comparison until the next review or Clear AI Review. }
+  kept for that comparison until the next review or Clear AI Review.
+
+  The third is the sparkle in the filter field (where something is), the
+  fourth Resolve with the agent in a conflict's list (umain.conflicts.inc):
+  the agent writes the lines that take the conflict's place, which are
+  written as a pick of the list is, so Undo Discard puts it back. }
 
 { The agent the settings pick, made from its fields there: its command
   by the path they give, else where it is found (or the API's server),
@@ -426,4 +431,55 @@ begin
   FFindJob.Stop(False);
   FBlameZombies.Add(FFindJob);
   FFindJob := nil;
+end;
+
+{ The conflict as the view has it now, markers and all, goes to the
+  agent; its lines are written over it when they come, as long as the
+  file still holds it then (DiscardBlock checks). }
+procedure TRepoFrame.StartConflictJob(AIndex: integer);
+var
+  B: TGittanDiscard;
+begin
+  if (FConflictJob <> nil) or not AIAvailable or not CanResolveBlocks or (AIndex < 0) or
+    (AIndex > High(FConflictStarts)) then
+    Exit;
+  B := ResolveBlock(FChangeLines, FConflictRoles, FConflictStarts[AIndex], cpOurs,
+    IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(FCurrentPath));
+  B.OldLines := nil;
+  FConflictJob := TGittanConflictJob.Create(FRepo.Root, FAI, FCurrentPath, FOperation,
+    FOperation = 'rebasing', B);
+  FConflictJob.OnDone := @ConflictJobDone;
+  FConflictJob.Start;
+  FStatus.ShowBusy(Format(rsResolvingAI, [AgentName, B.Line, FCurrentPath]), HintSparkle);
+end;
+
+{ The lines go over the conflict unless the file is being edited; the
+  view moves on to the next conflicted file only when this one is shown. }
+procedure TRepoFrame.ConflictJobDone(Sender: TObject);
+var
+  Job: TGittanConflictJob;
+begin
+  Job := TGittanConflictJob(Sender);
+  if Job <> FConflictJob then
+    Exit;
+  FConflictJob := nil;
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+  FStatus.ShowMessage('', stNormal, 0);
+  if not Job.Ok then
+    BannerError(Format(rsResolveAIFailed, [Job.AgentName]), Job.Error)
+  else if FEditPath = Job.Path then
+    StatusNote(Format(rsResolveAIEditing, [Job.AgentName, Job.Path]), True)
+  else
+    WriteConflictBlock(Job.Block, Job.Path, (Job.Path = FCurrentPath) and
+      (FView = gvChanges), Job.AgentName, Job.Why);
+end;
+
+procedure TRepoFrame.AbandonConflictJob;
+begin
+  if FConflictJob = nil then
+    Exit;
+  FConflictJob.Stop(False);
+  FBlameZombies.Add(FConflictJob);
+  FConflictJob := nil;
 end;

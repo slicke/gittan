@@ -272,6 +272,11 @@ type
     FFindPopup: TGittanPopupList;
     FFoundFiles: TGittanFoundFiles;
     FFoundPick: TGittanFoundFile;
+    { A conflict resolved by the agent (umain.ai.inc): the job while it
+      runs, and the item of the conflict list that starts or stops it
+      (-1 while the list has none). }
+    FConflictJob: TGittanConflictJob;
+    FConflictAIItem: integer;
     { The width of a tab in the editors, in characters. }
     FTabSize: integer;
     FSyntaxMenu, FAutoLexerItem, FPlainTextItem: TMenuItem;
@@ -1485,6 +1490,12 @@ type
     procedure FindPopupPick(Sender: TObject; AIndex: integer);
     procedure ShowFoundAsync(Data: PtrInt);
     procedure AbandonFindJob;
+    {** Asks the agent to resolve conflict AIndex of the shown file; its
+      lines are written over the conflict when they come
+      (WriteConflictBlock). }
+    procedure StartConflictJob(AIndex: integer);
+    procedure ConflictJobDone(Sender: TObject);
+    procedure AbandonConflictJob;
     procedure MenuWrapClick(Sender: TObject);
     procedure MenuFoldClick(Sender: TObject);
     procedure ViewMenuClick(Sender: TObject);
@@ -1827,6 +1838,8 @@ type
     function ConflictAtRow(ARow: integer): integer;
     procedure ResolveConflictAt(AIndex: integer);
     procedure ApplyConflictPick(AIndex: integer; APick: TGittanConflictPick);
+    procedure WriteConflictBlock(const ABlock: TGittanDiscard; const APath: string;
+      AAdvance: boolean; const AAgent: string = ''; const AWhy: string = '');
     procedure ConflictPopupPick(Sender: TObject; AIndex: integer);
     procedure ConflictBadgeClick(const AScreenRect: TRect);
     function ConflictDetail(const APath: string): string;
@@ -2317,6 +2330,14 @@ resourcestring
   rsFindHeader = 'Files for "%s"';
   rsFindNone = '%s found no file for "%s".';
   rsFindFailed = '%s could not find it';
+  rsResolveAI = 'Resolve with %s';
+  rsResolveAIStop = 'Stop %s Resolving';
+  rsResolvingAI = '%s is resolving the conflict at line %d of %s...';
+  rsResolveAIFailed = '%s could not resolve the conflict';
+  rsResolveAIEditing = '%s''s resolution was not used: %s is being edited.';
+  rsResolvedAI = '%s resolved the conflict at line %d of %s: %s';
+  rsResolvedAILast = '%s resolved the last conflict in %s, now marked resolved: %s';
+  rsResolvedAIUndo = 'File > Undo Discard puts it back';
   rsSeverityBug = 'Bug';
   rsSeverityRisk = 'Risk';
   rsSeverityQuestion = 'Question';
@@ -3699,6 +3720,7 @@ begin
   FPillTimer.Interval := PillPause;
   FPillTimer.OnTimer := @PillTimerTimer;
   FResolveIndex := -1;
+  FConflictAIItem := -1;
   { The welcome view shares the summary's box. }
   FCloneSubmodules := True;
   FWelcome := TGittanWelcome.Create(Self);
@@ -3919,6 +3941,7 @@ begin
   AbandonMessageJob;
   AbandonAIReview;
   AbandonFindJob;
+  AbandonConflictJob;
   FreeAndNil(FAI);
   StopCommitJob(True);
   FreeAndNil(FDroppedCommits);
@@ -6135,6 +6158,7 @@ begin
   AbandonMessageJob;
   AbandonAIReview;
   AbandonFindJob;
+  AbandonConflictJob;
   FAIThreads := nil;
   FAIThreadsKey := '';
   StopCommitJob(False);

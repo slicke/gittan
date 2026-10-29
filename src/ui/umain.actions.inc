@@ -556,6 +556,7 @@ begin
     AbandonMessageJob;
     AbandonAIReview;
     AbandonFindJob;
+    AbandonConflictJob;
   end;
   UpdateFindAction;
   UpdateCommitState;

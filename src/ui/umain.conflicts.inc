@@ -260,6 +260,13 @@ begin
     AddPick(rsUseBothMineFirst, '', cpOursThenTheirs);
     AddPick(rsUseBothTheirsFirst, '', cpTheirsThenOurs);
   end;
+  { The agent's, or its stop while it resolves one (umain.ai.inc). }
+  FConflictAIItem := -1;
+  if AIAvailable then
+    if FConflictJob <> nil then
+      FConflictAIItem := FConflictPopup.Add(Format(rsResolveAIStop, [AgentName]), HintSparkle)
+    else
+      FConflictAIItem := FConflictPopup.Add(Format(rsResolveAI, [AgentName]), HintSparkle);
   { Under the button, or under the row's start when the band is not
     there to anchor to. }
   Band := Edit.Gutter.FindIndexByTag(gutterTagDiscard);
@@ -283,20 +290,30 @@ begin
   FConflictPopup.Popup(Anchor);
 end;
 
-{ Writes the pick over the conflict and refreshes. The last conflict of
-  the file marks it resolved and moves on to the next file. }
+{ Writes the pick over the conflict and refreshes. }
 procedure TRepoFrame.ApplyConflictPick(AIndex: integer; APick: TGittanConflictPick);
-var
-  B: TGittanDiscard;
-  Path, Err: string;
-  Remaining: integer;
-  Marked: boolean;
 begin
   if not CanResolveBlocks or (AIndex < 0) or (AIndex > High(FConflictStarts)) then
     Exit;
-  Path := FCurrentPath;
-  B := ResolveBlock(FChangeLines, FConflictRoles, FConflictStarts[AIndex], APick,
-    IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(Path));
+  WriteConflictBlock(ResolveBlock(FChangeLines, FConflictRoles, FConflictStarts[AIndex],
+    APick, IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(FCurrentPath)),
+    FCurrentPath, True);
+end;
+
+{ Writes ABlock over its conflict in APath (refused when the file no
+  longer holds it) and keeps it for Undo Discard. The last conflict of
+  the file marks it resolved and, with AAdvance, moves on to the next
+  file. AAgent's resolution says what it kept (AWhy) in the status bar. }
+procedure TRepoFrame.WriteConflictBlock(const ABlock: TGittanDiscard; const APath: string;
+  AAdvance: boolean; const AAgent: string; const AWhy: string);
+var
+  B: TGittanDiscard;
+  Path, Err, Why: string;
+  Remaining: integer;
+  Marked: boolean;
+begin
+  B := ABlock;
+  Path := APath;
   if not DiscardBlock(B, Err) then
   begin
     StatusNote(Format(rsResolveBlockFailed, [Err]), True);
@@ -316,10 +333,22 @@ begin
   end;
   RefreshRepository;
   UpdateDiscardItems;
-  if Marked then
+  if AAgent <> '' then
+  begin
+    Why := AWhy;
+    if Why = '' then
+      Why := rsResolvedAIUndo;
+    if Marked then
+      StatusNote(Format(rsResolvedAILast, [AAgent, Path, Why]))
+    else
+      StatusNote(Format(rsResolvedAI, [AAgent, B.Line, Path, Why]));
+    if Marked then
+      ShowNextConflict(Path, AAdvance);
+  end
+  else if Marked then
   begin
     StatusNote(Format(rsResolvedLast, [Path]));
-    ShowNextConflict(Path, True);
+    ShowNextConflict(Path, AAdvance);
   end
   else if Remaining = 1 then
     StatusNote(Format(rsResolvedBlockOne, [B.Line, Path]))
@@ -335,7 +364,17 @@ begin
       SummarySelectFile(Sender, FConflictPaths[AIndex]);
     Exit;
   end;
-  if (AIndex >= 0) and (AIndex <= High(FConflictPicks)) then
+  if (FConflictAIItem >= 0) and (AIndex = FConflictAIItem) then
+  begin
+    if FConflictJob <> nil then
+    begin
+      AbandonConflictJob;
+      FStatus.ShowMessage('', stNormal, 0);
+    end
+    else
+      StartConflictJob(FResolveIndex);
+  end
+  else if (AIndex >= 0) and (AIndex <= High(FConflictPicks)) then
     ApplyConflictPick(FResolveIndex, FConflictPicks[AIndex]);
   FResolveIndex := -1;
 end;
