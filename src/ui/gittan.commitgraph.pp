@@ -250,10 +250,16 @@ type
       ahead of (AAhead) and behind (ABehind) its upstream when it has
       one; AMore says the log was cut, which the last row says. AFilter
       goes into the search field. The focus goes to the field, the
-      highlight to the commit HEAD is on. }
+      highlight to AKeep when it is among the commits, else to the
+      commit HEAD is on. }
     procedure Popup(const ACommits: TGittanGraphCommits; AMore: boolean;
       const ABranch: string; AAhead, ABehind: integer; AHasUpstream: boolean;
-      const AFilter: string = '');
+      const AFilter: string = ''; const AKeep: string = '');
+    {** The hashes of the rows the filter shows, newest first: the order
+      the owner steps through after a pick. }
+    function ShownHashes: TStringArray;
+    {** What the search field holds. }
+    function FilterText: string;
     {** Puts ACommits in the place of the ones shown, the answer to
       OnMore: the filter and the highlighted commit stay. }
     procedure Replace(const ACommits: TGittanGraphCommits; AMore: boolean);
@@ -768,9 +774,24 @@ begin
     Result := FCommits[FShown[FCurrent]].Hash;
 end;
 
+function TGittanCommitGraph.ShownHashes: TStringArray;
+var
+  i: integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(FShown));
+  for i := 0 to High(FShown) do
+    Result[i] := FCommits[FShown[i]].Hash;
+end;
+
+function TGittanCommitGraph.FilterText: string;
+begin
+  Result := FEdit.Text;
+end;
+
 procedure TGittanCommitGraph.Popup(const ACommits: TGittanGraphCommits;
   AMore: boolean; const ABranch: string; AAhead, ABehind: integer;
-  AHasUpstream: boolean; const AFilter: string);
+  AHasUpstream: boolean; const AFilter: string; const AKeep: string);
 begin
   if Parent = nil then
     Exit;
@@ -790,7 +811,7 @@ begin
   FChangeDone := '';
   FChangeError := '';
   FChangeHashes.Clear;
-  Load(ACommits, AMore, '');
+  Load(ACommits, AMore, AKeep);
   FEdit.Text := AFilter;
   ApplyFilter;
   Place;

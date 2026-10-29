@@ -1845,6 +1845,7 @@ procedure TRepoFrame.ShowCommitGraph(const AFilter: string);
 var
   Commits: TGittanGraphCommits;
   Limit: integer;
+  Filter, Keep: string;
 begin
   if FRepo.Root = '' then
     Exit;
@@ -1853,7 +1854,16 @@ begin
     FGraph.Close;
     Exit;
   end;
-  if AFilter = '' then
+  { Opened again while a commit picked from it is shown: with the search
+    it was picked under, on that commit. }
+  Filter := AFilter;
+  Keep := '';
+  if (AFilter = '') and BlameShown and (TrailIndex(FGraphTrail, FBlameCommit.Hash) >= 0) then
+  begin
+    Filter := FGraphTrailFilter;
+    Keep := FBlameCommit.Hash;
+  end;
+  if Filter = '' then
     Limit := GraphLimit
   else
     Limit := GraphSearchLimit;
@@ -1865,7 +1875,7 @@ begin
   end;
   FGraph.Marked := FMarkHash;
   FGraph.Popup(Commits, Length(Commits) >= Limit, FBranch, FAhead, FBehind,
-    FHasUpstream, AFilter);
+    FHasUpstream, Filter, Keep);
   if FGraph.Visible then
     FSideNav.Selected := navGraph;
 end;
@@ -1969,8 +1979,71 @@ end;
   leads back to the working tree. }
 procedure TRepoFrame.GraphPick(Sender: TObject; const AHash: string);
 begin
+  FGraphTrail := FGraph.ShownHashes;
+  FGraphTrailFilter := FGraph.FilterText;
   ShowBlameCommit(AHash);
   ShowSummary;
+end;
+
+{ Where Older or Newer leads from the commit shown against its parent:
+  the next row of the graph's last pick, older or newer, while the
+  commit is one of them; off them (a commit picked from the blame band,
+  or the end of the rows) Older goes to the first parent, while there
+  is one, and Newer nowhere. Empty for nowhere. }
+function TRepoFrame.CommitStepHash(AOlder: boolean): string;
+var
+  i: integer;
+begin
+  Result := '';
+  if not BlameShown then
+    Exit;
+  i := TrailIndex(FGraphTrail, FBlameCommit.Hash);
+  if (i >= 0) and AOlder and (i < High(FGraphTrail)) then
+    Exit(FGraphTrail[i + 1]);
+  if (i > 0) and not AOlder then
+    Exit(FGraphTrail[i - 1]);
+  { CommitRange names the parent unless it is the first commit. }
+  if AOlder and (i < 0) and (Pos('^..', FBlameRange) > 0) then
+    Result := FBlameCommit.Hash + '^';
+end;
+
+procedure TRepoFrame.GoToCommitStep(AOlder: boolean);
+var
+  Hash: string;
+begin
+  Hash := CommitStepHash(AOlder);
+  if Hash = '' then
+    Exit;
+  ShowBlameCommit(Hash);
+  ShowSummary;
+end;
+
+{ The card's links and the Go menu's items, after every snapshot (the
+  base changes through one). }
+procedure TRepoFrame.UpdateCommitSteps;
+var
+  Newer, Older: boolean;
+begin
+  Newer := CommitStepHash(False) <> '';
+  Older := CommitStepHash(True) <> '';
+  FSummary.SetCommitSteps(Newer, Older);
+  FNewerCommitItem.Enabled := Newer;
+  FOlderCommitItem.Enabled := Older;
+end;
+
+procedure TRepoFrame.SummaryCommitStep(Sender: TObject; AOlder: boolean);
+begin
+  GoToCommitStep(AOlder);
+end;
+
+procedure TRepoFrame.MenuOlderCommitClick(Sender: TObject);
+begin
+  GoToCommitStep(True);
+end;
+
+procedure TRepoFrame.MenuNewerCommitClick(Sender: TObject);
+begin
+  GoToCommitStep(False);
 end;
 
 { A click on a commit in the summary of a clean tree shows it against its

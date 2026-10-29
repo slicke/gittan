@@ -45,6 +45,9 @@ type
   {** A click on Rebase (ARebase) or Merge in the row of a branch behind
     the default branch. }
   TGittanBehindActionEvent = procedure(Sender: TObject; ARebase: boolean) of object;
+  {** A step from the commit in the card to the next older (AOlder) or
+    newer one. }
+  TGittanCommitStepEvent = procedure(Sender: TObject; AOlder: boolean) of object;
 
   {** A part of a note's text as laid out (CommentParts): LazInk's
     markup, how deep in <details> blocks it is, the part it is when it
@@ -125,6 +128,13 @@ type
     FBackRect: TRect;
     FBackHot: boolean;
     FOnBackClick: TNotifyEvent;
+    { Newer (0) and Older (1) at the right of the card's author line:
+      whether each can be gone to, where it is (empty when not), and
+      the one under the mouse, -1 for none. }
+    FStepOn: array[0..1] of boolean;
+    FStepRects: array[0..1] of TRect;
+    FStepHot: integer;
+    FOnCommitStep: TGittanCommitStepEvent;
     { The newest commits, shown under a clean tree, with how far the
       branch is from its upstream; FCommitHot is the row under the
       mouse, -1 for none. }
@@ -219,6 +229,9 @@ type
     procedure LayoutCard;
     procedure PaintCard(var Y: integer);
     procedure SetBackHot(AValue: boolean);
+    procedure SetStepHot(AValue: integer);
+    procedure PaintSteps(ARight, Y: integer);
+    function StepAt(X, Y: integer): integer;
     procedure SetSelected(const AValue: string);
     procedure SetNotice(const AValue: string);
     procedure UpdateHeight;
@@ -279,6 +292,9 @@ type
       its parent), in a card under the header with ABody, the rest of
       its message; an empty Hash shows none. }
     procedure SetCommit(const ACommit: TGittanCommitLine; const ABody: string);
+    {** Whether the card offers Newer and Older (OnCommitStep); neither
+      shows when both are off. }
+    procedure SetCommitSteps(ANewer, AOlder: boolean);
     {** Shows ACommits, the newest commits of HEAD, under "Working tree
       clean", and after it how many commits the branch is ahead of
       (AAhead) and behind (ABehind) its upstream when it has one
@@ -345,6 +361,7 @@ type
     property OnReviewClick: TGittanBranchClickEvent read FOnReviewClick write FOnReviewClick;
     {** A click on the commit card's link back to the working tree. }
     property OnBackClick: TNotifyEvent read FOnBackClick write FOnBackClick;
+    property OnCommitStep: TGittanCommitStepEvent read FOnCommitStep write FOnCommitStep;
   end;
 
 {** A line about a pull request for a list's detail: who opened it, how
@@ -388,6 +405,8 @@ resourcestring
   rsReviewOpened = 'opened %s';
   rsReviewDraft = 'draft';
   rsBackToTree = 'Back to Working Tree';
+  rsNewerCommit = '‹ Newer';
+  rsOlderCommit = 'Older ›';
 
 const
   { The count of each kind in the header, after a dot in its color. }
@@ -438,6 +457,7 @@ begin
   FHot := -1;
   FActionHot := -1;
   FLinkHot := -1;
+  FStepHot := -1;
   FMoreHot := -1;
   FCommitHot := -1;
   FBehindHot := -1;
@@ -1243,7 +1263,18 @@ begin
   FCommitBody := ABody;
   FCardWidth := -1;
   FBackHot := False;
+  FStepHot := -1;
   UpdateHeight;
+  Invalidate;
+end;
+
+procedure TGittanSummary.SetCommitSteps(ANewer, AOlder: boolean);
+begin
+  if (FStepOn[0] = ANewer) and (FStepOn[1] = AOlder) then
+    Exit;
+  FStepOn[0] := ANewer;
+  FStepOn[1] := AOlder;
+  FStepHot := -1;
   Invalidate;
 end;
 
@@ -1330,6 +1361,8 @@ var
 begin
   LayoutCard;
   FBackRect := Rect(0, 0, 0, 0);
+  FStepRects[0] := Rect(0, 0, 0, 0);
+  FStepRects[1] := Rect(0, 0, 0, 0);
   if FCardHeight = 0 then
     Exit;
   Canvas.Font := Font;
@@ -1379,6 +1412,7 @@ begin
   Meta := Meta + FCommit.Short;
   Canvas.Font.Color := FDim;
   Canvas.TextOut(X, At, Meta);
+  PaintSteps(Card.Right - Px(NotePadX), At);
 
   Inc(At, LineHeight + 6);
   Canvas.Font.Color := FText;
@@ -1388,6 +1422,61 @@ begin
     Inc(At, LineHeight);
   end;
   Inc(Y, FCardHeight);
+end;
+
+{ Newer and Older, right-aligned at ARight on the line at Y: in the link
+  color while they lead somewhere, underlined under the mouse, dimmed
+  and without a target when not; neither when both are off. }
+procedure TGittanSummary.PaintSteps(ARight, Y: integer);
+const
+  Captions: array[0..1] of string = (rsNewerCommit, rsOlderCommit);
+var
+  k, X, W: integer;
+begin
+  FStepRects[0] := Rect(0, 0, 0, 0);
+  FStepRects[1] := Rect(0, 0, 0, 0);
+  if not Assigned(FOnCommitStep) or not (FStepOn[0] or FStepOn[1]) then
+    Exit;
+  X := ARight;
+  for k := 1 downto 0 do
+  begin
+    W := Canvas.TextWidth(Captions[k]);
+    Dec(X, W);
+    if FStepOn[k] then
+    begin
+      FStepRects[k] := Rect(X, Y, X + W, Y + Canvas.TextHeight('Xg'));
+      Canvas.Font.Color := FLink;
+    end
+    else
+      Canvas.Font.Color := FDim;
+    if FStepHot = k then
+      Canvas.Font.Style := [fsUnderline]
+    else
+      Canvas.Font.Style := [];
+    Canvas.TextOut(X, Y, Captions[k]);
+    Dec(X, Px(Gap) * 2);
+  end;
+  Canvas.Font.Style := [];
+end;
+
+function TGittanSummary.StepAt(X, Y: integer): integer;
+var
+  k: integer;
+begin
+  Result := -1;
+  if not Assigned(FOnCommitStep) then
+    Exit;
+  for k := 0 to 1 do
+    if FStepOn[k] and PtInRect(FStepRects[k], Point(X, Y)) then
+      Exit(k);
+end;
+
+procedure TGittanSummary.SetStepHot(AValue: integer);
+begin
+  if FStepHot = AValue then
+    Exit;
+  FStepHot := AValue;
+  Invalidate;
 end;
 
 procedure TGittanSummary.SetBackHot(AValue: boolean);
@@ -2224,9 +2313,10 @@ begin
   SetSyncHot((FSyncRect.Right > FSyncRect.Left) and PtInRect(FSyncRect, Point(X, Y)));
   SetTotalsHot((FTotalsRect.Right > FTotalsRect.Left) and PtInRect(FTotalsRect, Point(X, Y)));
   SetBackHot(Assigned(FOnBackClick) and PtInRect(FBackRect, Point(X, Y)));
+  SetStepHot(StepAt(X, Y));
   if Assigned(FOnBehindAction) then
     SetBehindHot(BehindAt(X, Y));
-  if (FLinkHot >= 0) or (FActionHot >= 0) or FBackHot or (FBehindHot >= 0) or FTextLinkHot or
+  if (FLinkHot >= 0) or (FActionHot >= 0) or FBackHot or (FStepHot >= 0) or (FBehindHot >= 0) or FTextLinkHot or
     FDetailsHot or (FMoreHot >= 0) then
     Cursor := crHandPoint
   else if not (FBranchHot or FBaseHot or FSyncHot or FTotalsHot or FReviewHot) then
@@ -2249,6 +2339,7 @@ begin
   SetSyncHot(False);
   SetTotalsHot(False);
   SetBackHot(False);
+  SetStepHot(-1);
   SetBehindHot(-1);
 end;
 
@@ -2277,6 +2368,11 @@ begin
   if (Button = mbLeft) and Assigned(FOnBackClick) and PtInRect(FBackRect, Point(X, Y)) then
   begin
     FOnBackClick(Self);
+    Exit;
+  end;
+  if (Button = mbLeft) and (StepAt(X, Y) >= 0) then
+  begin
+    FOnCommitStep(Self, StepAt(X, Y) = 1);
     Exit;
   end;
   if (Button = mbLeft) and (FSyncRect.Right > FSyncRect.Left) and Assigned(FOnSyncClick) and

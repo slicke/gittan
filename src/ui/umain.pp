@@ -752,6 +752,7 @@ type
     FViewItems: array of TMenuItem;
     FViewRows: array of integer;
     FCodeHistoryItem, FGoFileHistoryItem, FTimelapseItem: TMenuItem;
+    FOlderCommitItem, FNewerCommitItem: TMenuItem;
     { The submodules, dropped from the Repository page's tile when there
       is more than one; a pick shows that one's page. }
     FSubListPopup: TGittanPopupList;
@@ -989,6 +990,12 @@ type
       summary's card (see ShowBlameCommit). }
     FBlameCommit: TGittanCommitLine;
     FBlameBody: string;
+    { The rows the commit graph showed at its last pick, newest first,
+      and what its search field held: Older and Newer step through them
+      (CommitStepHash), and the graph opens on them again while one of
+      them is shown (ShowCommitGraph). }
+    FGraphTrail: TStringArray;
+    FGraphTrailFilter: string;
     { Go > Code History (see umain.history.inc): the commits shown, the
       job that fetches them, the file, the commit the lines are counted
       in (empty for HEAD), the lines (From 0 for the whole file), what
@@ -1658,6 +1665,12 @@ type
     procedure AbandonChangeJob;
     procedure MenuCommitGraphClick(Sender: TObject);
     procedure GraphPick(Sender: TObject; const AHash: string);
+    function CommitStepHash(AOlder: boolean): string;
+    procedure GoToCommitStep(AOlder: boolean);
+    procedure UpdateCommitSteps;
+    procedure SummaryCommitStep(Sender: TObject; AOlder: boolean);
+    procedure MenuOlderCommitClick(Sender: TObject);
+    procedure MenuNewerCommitClick(Sender: TObject);
     procedure PullChipClick(const AScreenRect: TRect);
     procedure PullPopupPick(Sender: TObject; AIndex: integer);
     procedure StartPullFetch(ANumber: integer; const ARemote, ABaseRef: string);
@@ -2360,6 +2373,8 @@ resourcestring
   rsConflictsSuffix = 'conflicts';
   rsNextFile = 'Next F&ile';
   rsPrevFile = 'Previous Fi&le';
+  rsOlderCommit = 'Older Commit';
+  rsNewerCommit = 'Newer Commit';
   rsRepoFiles = 'Config';
   rsCommitSection = 'Commit';
   rsCommitMenu = 'Co&mmit...';
@@ -3441,6 +3456,19 @@ end;
 
 { TRepoFrame }
 
+{ The place of AHash in ATrail, -1 when it is not there. }
+function TrailIndex(const ATrail: TStringArray; const AHash: string): integer;
+var
+  i: integer;
+begin
+  Result := -1;
+  if AHash = '' then
+    Exit;
+  for i := 0 to High(ATrail) do
+    if ATrail[i] = AHash then
+      Exit(i);
+end;
+
 { TCommitMemo }
 
 procedure TCommitMemo.InitializeWnd;
@@ -3698,6 +3726,7 @@ begin
   FSummary.OnReviewClick := @SummaryReviewClick;
   FSummary.OnSelectCommit := @SummarySelectCommit;
   FSummary.OnBackClick := @SummaryBackClick;
+  FSummary.OnCommitStep := @SummaryCommitStep;
   FSummary.OnRowAction := @SummaryRowAction;
   { The branch list pops up over the form, under the branch. }
   FRevertUndo := TStringList.Create;
@@ -5256,6 +5285,10 @@ begin
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextFile, ShortCut(VK_F8, []), @MenuNextFileClick);
   AddItem(GoMenu, rsPrevFile, ShortCut(VK_F8, [ssShift]), @MenuPrevFileClick);
+  GoMenu.Add(NewLine);
+  FOlderCommitItem := AddItem(GoMenu, rsOlderCommit, ShortCut(VK_F9, []), @MenuOlderCommitClick);
+  FNewerCommitItem := AddItem(GoMenu, rsNewerCommit, ShortCut(VK_F9, [ssShift]),
+    @MenuNewerCommitClick);
 
   ToolsMenu := TMenuItem.Create(Main);
   ToolsMenu.Caption := rsTools;
@@ -6589,6 +6622,7 @@ begin
     FSummary.SetCommit(FBlameCommit, FBlameBody)
   else
     FSummary.SetCommit(Default(TGittanCommitLine), '');
+  UpdateCommitSteps;
   FSummary.SetRepository(ExtractFileName(FRepo.Root), Branch, BaseLabel, FStats, Icons,
     Texts, Actions);
   FWelcome.Visible := False;
