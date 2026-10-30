@@ -26,6 +26,12 @@ uses
 
 begin
   Application.Title:='Git Tree Analyzer & Navigator';
+  {$IFDEF LCLCocoa}
+  { The application menu's Hide, Quit and About items name the title,
+    and Cocoa reads its ampersand as an accelerator and drops it; they
+    name the application as the menu bar does. }
+  Application.Title:='Gittan';
+  {$ENDIF}
   RequireDerivedFormResource:=True;
   Application.Scaled:=True;
   {$PUSH}{$WARN 5044 OFF}
