@@ -10,7 +10,10 @@
   (FNavPlace), that one goes on the back list; while it is the same, its
   caret row is kept up to date, so going back lands where the caret was
   left. A jump within a file (JumpToDefinition: a definition, a symbol, a
-  caller) notes the place before it (NavMark). The code history, a
+  caller) notes the place before it (NavMark). A commit picked in the
+  graph notes the graph too, with its search and the commit (NavGraphPick),
+  so Back opens it again; while the graph is open nothing is noted. The
+  code history, a
   submodule, the welcome view and the like are no places: while they are
   shown nothing is noted, and what was shown before them stays the place
   to go back to. }
@@ -20,7 +23,7 @@ function TRepoFrame.NavCurrent(out APlace: TGittanPlace): boolean;
 begin
   Result := False;
   APlace := Default(TGittanPlace);
-  if FRepo.Root = '' then
+  if (FRepo.Root = '') or FGraph.Visible then
     Exit;
   case FView of
     gvSummary:
@@ -126,6 +129,24 @@ begin
   if FNavBusy or NavSync or not FNavValid then
     Exit;
   FNavHistory.Visit(FNavPlace);
+  NavUpdateItems;
+end;
+
+{ A commit, AHash, is picked in the graph searched with AFilter: the
+  place under the graph goes on the back list, then the graph, which the
+  commit shown next puts there in turn. A pick in a graph opened by Back
+  replaces that graph's place. }
+procedure TRepoFrame.NavGraphPick(const AFilter, AHash: string);
+begin
+  if FNavBusy then
+    Exit;
+  if FNavValid and (FNavPlace.Kind <> pkGraph) then
+    FNavHistory.Visit(FNavPlace);
+  FNavPlace := Default(TGittanPlace);
+  FNavPlace.Kind := pkGraph;
+  FNavPlace.Path := AFilter;
+  FNavPlace.Ref := AHash;
+  FNavValid := True;
   NavUpdateItems;
 end;
 
@@ -283,6 +304,12 @@ begin
       ShowCommands;
     pkPulls:
       ShowPulls;
+    pkGraph:
+    begin
+      ShowCommitGraph(APlace.Path, APlace.Ref);
+      if not FGraph.Visible then
+        Exit;
+    end;
   end;
   Result := True;
 end;

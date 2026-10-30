@@ -1841,7 +1841,7 @@ const
   GraphLimit = 500;
   GraphSearchLimit = 50000;
 
-procedure TRepoFrame.ShowCommitGraph(const AFilter: string);
+procedure TRepoFrame.ShowCommitGraph(const AFilter, AKeep: string);
 var
   Commits: TGittanGraphCommits;
   Limit: integer;
@@ -1849,7 +1849,7 @@ var
 begin
   if FRepo.Root = '' then
     Exit;
-  if FGraph.Visible and (AFilter = '') then
+  if FGraph.Visible and (AFilter = '') and (AKeep = '') then
   begin
     FGraph.Close;
     Exit;
@@ -1857,8 +1857,8 @@ begin
   { Opened again while a commit picked from it is shown: with the search
     it was picked under, on that commit. }
   Filter := AFilter;
-  Keep := '';
-  if (AFilter = '') and BlameShown and (TrailIndex(FGraphTrail, FBlameCommit.Hash) >= 0) then
+  Keep := AKeep;
+  if (AFilter = '') and (AKeep = '') and BlameShown and (TrailIndex(FGraphTrail, FBlameCommit.Hash) >= 0) then
   begin
     Filter := FGraphTrailFilter;
     Keep := FBlameCommit.Hash;
@@ -1981,6 +1981,7 @@ procedure TRepoFrame.GraphPick(Sender: TObject; const AHash: string);
 begin
   FGraphTrail := FGraph.ShownHashes;
   FGraphTrailFilter := FGraph.FilterText;
+  NavGraphPick(FGraphTrailFilter, AHash);
   ShowBlameCommit(AHash);
   ShowSummary;
 end;

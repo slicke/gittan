@@ -1673,7 +1673,7 @@ type
     procedure ShowFileLine(const APath: string; ALine: integer);
     procedure SummarySelectCommit(Sender: TObject; const AHash: string);
     procedure BranchPopupPick(Sender: TObject; AIndex: integer);
-    procedure ShowCommitGraph(const AFilter: string = '');
+    procedure ShowCommitGraph(const AFilter: string = ''; const AKeep: string = '');
     procedure GraphMore(Sender: TObject);
     procedure GraphPathCommits(Sender: TObject; const APath: string; AHashes: TStrings);
     procedure GraphChangeCommits(Sender: TObject; const AChanges: TStringArray);
@@ -1882,6 +1882,7 @@ type
     function NavSync: boolean;
     procedure NavIdle(Sender: TObject; var Done: boolean);
     procedure NavMark;
+    procedure NavGraphPick(const AFilter, AHash: string);
     procedure NavClear;
     procedure UpdateUndoItems;
     procedure UndoRedo(ARedo: boolean);
