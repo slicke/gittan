@@ -30,6 +30,7 @@ Packaged builds for every platform are on the [Releases page](https://github.com
 | Platform | File |
 | --- | --- |
 | macOS (Apple Silicon) | `Gittan-macos-silicon.dmg` |
+| macOS (Intel) | `Gittan-macos-intel.dmg` |
 | Windows (x64) | `Gittan-windows-x64-setup.exe`, or `Gittan-windows-x64.zip` without installing |
 | Linux (amd64, GTK 3) | `Gittan-linux-amd64.deb`, `Gittan-linux-x86_64.rpm`, or `Gittan-linux-amd64.tar.gz` without installing |
 

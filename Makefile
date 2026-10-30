@@ -40,7 +40,15 @@ else
   DEBUG_FLAGS := --opt=-g --opt=-gl
 endif
 
-LAZFLAGS = --widgetset=$(WIDGETSET)
+# The target CPU, for a cross build: `make CPU=x86_64` on Apple Silicon
+# builds the Intel macOS Gittan (FPC's macOS installer has ppcx64 and its
+# units). Empty builds for the machine's own. The units go in
+# lib/<cpu>-<os>-release, apart from the native build's, and the tests in
+# tests/lib/<cpu>, but the executable is the same Gittan, so a cross build
+# replaces the native one.
+CPU ?=
+
+LAZFLAGS = --widgetset=$(WIDGETSET) $(if $(CPU),--cpu=$(CPU))
 
 # The version, Major.Minor from Gittan.lpi's version info and the build
 # number CI passes as GITTAN_BUILD (0 in a local build): 0.9.123. Lazarus
@@ -61,6 +69,7 @@ DEBUG_MODE := --bm=Default
 # LCL, no lazbuild.
 FPC ?= fpc
 TESTBIN := tests/gittantests
+TESTLIB := tests/lib$(if $(CPU),/$(CPU))
 
 # Syntax highlighting. vendor/CudaText-lexers keeps each EControl lexer in a
 # subfolder of its own, but TecLexerList loads *.lcf from one flat folder, so
@@ -150,7 +159,7 @@ help:
 	@echo "  packages  Build the Linux .deb and .rpm into pkg/ (needs fpm and rpmbuild)"
 	@echo "  icons     Pack Gittan.icns and Gittan.ico from ICON_MAC_SRC=$(ICON_MAC_SRC) and ICON_PNG_DIR=$(ICON_PNG_DIR) (macOS only)"
 	@echo "  clean     Remove lib/, $(LEXLIB)/, the test build and the binary"
-	@echo "Current: WIDGETSET=$(WIDGETSET) LAZBUILD=$(LAZBUILD)"
+	@echo "Current: WIDGETSET=$(WIDGETSET) CPU=$(or $(CPU),native) LAZBUILD=$(LAZBUILD)"
 
 build: lexlib
 	"$(LAZBUILD)" $(LAZFLAGS) $(RELEASE_MODE) $(LPI)
@@ -302,8 +311,8 @@ run: build
 	"$(RUN_EXE)" $(RUN_ARGS)
 
 test:
-	@mkdir -p tests/lib
-	$(FPC) -Mobjfpc -Sh -O1 -Fusrc/core -FUtests/lib -FEtests tests/gittantests.lpr
+	@mkdir -p $(TESTLIB)
+	$(FPC) $(if $(CPU),-P$(CPU)) -Mobjfpc -Sh -O1 -Fusrc/core -FU$(TESTLIB) -FEtests tests/gittantests.lpr
 	$(TESTBIN) --all --format=plain $(TEST_ARGS)
 
 clean:

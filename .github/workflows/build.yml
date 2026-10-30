@@ -12,6 +12,8 @@ on:
 # ---------------------------------------------------------------------------------
 # One matrix job builds Gittan natively on each platform and uploads a package:
 #   - macOS (arm64):   Gittan-macos-silicon.dmg  (Gittan.app with lexlib inside)
+#   - macOS (x86_64):  Gittan-macos-intel.dmg    (the same, cross built on the
+#                      arm64 runner with FPC's ppcx64)
 #   - Windows (x64):   Gittan-windows-x64.zip    (Gittan.exe + lexlib/) and
 #                      Gittan-windows-x64-setup.exe (Inno Setup)
 #   - Linux (amd64):   Gittan-linux-amd64.tar.gz (Gittan + lexlib/, GTK 3),
@@ -19,7 +21,7 @@ on:
 #
 # As in Trndi, a push to main publishes a release: the version job takes the
 # next build number from the "build-<n>" tags (100 when there is none), and
-# the publish job creates the release "build-<n>" with the three packages and
+# the publish job creates the release "build-<n>" with the packages and
 # the commits since the previous build as its notes. PRs, to main or develop,
 # only upload artifacts.
 # Every leg also builds and runs the unit tests in tests/ (`make test`).
@@ -109,6 +111,15 @@ jobs:
           - name: macos-arm64
             os_target: macos
             runner: macos-14
+            dmg: Gittan-macos-silicon.dmg
+          # GitHub's Intel macOS runners are going away, so the Intel build is
+          # made on Apple Silicon: the FPC installer has ppcx64 and its units,
+          # and `make CPU=x86_64` passes --cpu to lazbuild.
+          - name: macos-x64
+            os_target: macos
+            runner: macos-14
+            cpu: x86_64
+            dmg: Gittan-macos-intel.dmg
           - name: windows-x64
             os_target: windows
             runner: windows-latest
@@ -359,12 +370,18 @@ jobs:
 
       - name: Build and package (macOS)
         if: matrix.os_target == 'macos'
+        env:
+          CPU: ${{ matrix.cpu }}
+          DMG: ${{ matrix.dmg }}
         run: |
           set -euo pipefail
           # The Makefile builds with cocoa, refreshes lexlib/ and puts the icon
-          # into Gittan.app.
-          gmake
-          gmake test
+          # into Gittan.app; CPU (empty on the arm64 leg) picks the target.
+          gmake CPU="$CPU"
+          # The x86_64 tests run under Rosetta. /usr/bin/git, Apple's shim,
+          # cannot start there (its libxcrun has no x86_64), so the tests
+          # get the git it stands for, an arm64 binary that runs as it is.
+          PATH="$(dirname "$(xcrun --find git)"):$PATH" gmake test CPU="$CPU"
           # Lazarus's bundle links Contents/MacOS/Gittan to ../../../Gittan;
           # replace the link with the binary and carry lexlib in Resources,
           # where gittan.lexers.pp looks for it.
@@ -380,7 +397,7 @@ jobs:
           codesign --force --deep --sign - dist/Gittan.app
           codesign --verify --deep --strict dist/Gittan.app
           ln -s /Applications dist/Applications
-          hdiutil create -volname Gittan -srcfolder dist -ov -format UDZO Gittan-macos-silicon.dmg
+          hdiutil create -volname Gittan -srcfolder dist -ov -format UDZO "$DMG"
 
       - name: Build and test (Windows)
         if: matrix.os_target == 'windows'
@@ -436,6 +453,7 @@ jobs:
             Gittan-linux-amd64.deb
             Gittan-linux-x86_64.rpm
             Gittan-macos-silicon.dmg
+            Gittan-macos-intel.dmg
             Gittan-windows-x64.zip
             Gittan-windows-x64-setup.exe
           if-no-files-found: error
@@ -491,6 +509,7 @@ jobs:
             echo "## Downloads"
             echo
             echo '- **Gittan-macos-silicon.dmg** — macOS on Apple Silicon. The app is signed ad hoc, so macOS blocks it at first: drag it to Applications, then run `xattr -cr /Applications/Gittan.app` in Terminal.'
+            echo '- **Gittan-macos-intel.dmg** — macOS on Intel Macs, installed the same way. On Apple Silicon take the one above.'
             echo "- **Gittan-windows-x64-setup.exe** — Windows x64 installer, for the current user without an administrator or for everyone; adds Open in Gittan to folders' context menu and the gittan command to the PATH. It is not signed, so SmartScreen warns: More info, then Run anyway."
             echo "- **Gittan-windows-x64.zip** — Windows x64 without installing. Unzip anywhere and run Gittan.exe."
             echo "- **Gittan-linux-amd64.deb** — Debian and Ubuntu: \`sudo apt install ./Gittan-linux-amd64.deb\`."
@@ -520,6 +539,7 @@ jobs:
           fi
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
             packages/Gittan-macos-silicon.dmg \
+            packages/Gittan-macos-intel.dmg \
             packages/Gittan-windows-x64-setup.exe \
             packages/Gittan-windows-x64.zip \
             packages/Gittan-linux-amd64.deb \
