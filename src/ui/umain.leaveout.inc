@@ -278,21 +278,191 @@ begin
   end;
 end;
 
-{ File > Leave Change Out of Commit acts on the block the caret is in. }
-procedure TRepoFrame.MenuLeaveOutClick(Sender: TObject);
+{ The pairs of changed lines the editor's selection touches, in
+  APairs, and in AIncluding whether they would go into the commit (all
+  of them are left out, or the file is not ticked) rather than out of
+  it. A selection ending at the start of a row leaves that row out.
+  False when it touches no changed line. }
+function TRepoFrame.SelectedPairs(out APairs: TGittanKeepArray;
+  out AIncluding: boolean): boolean;
+var
+  Sel: array of boolean;
+  Pairs: TGittanKeepArray;
+  i, r, X1, Y1, X2, Y2, b, k, s, Old, OldIdx, NewIdx: integer;
+  HasSel, Hit, AllOut: boolean;
+
+  procedure Mark(ALine: integer);
+  begin
+    if (ALine >= 0) and (ALine < FChangeLines.Count) and (FChangeLines[ALine][1] <> ' ') then
+      Sel[ALine] := True;
+  end;
+
 begin
-  if Edit.Carets.Count > 0 then
+  APairs := nil;
+  AIncluding := False;
+  Result := False;
+  if (FView <> gvChanges) or (FChangeLines = nil) then
+    Exit;
+  Sel := nil;
+  SetLength(Sel, FChangeLines.Count);
+  Hit := False;
+  for i := 0 to Edit.Carets.Count - 1 do
+  begin
+    Edit.Carets[i].GetRange(X1, Y1, X2, Y2, HasSel);
+    if not HasSel then
+      Continue;
+    if (X2 = 0) and (Y2 > Y1) then
+      Dec(Y2);
+    for r := Y1 to Y2 do
+      if (r <= High(FRows)) and not FRows[r].Hidden then
+      begin
+        Mark(FRows[r].Line);
+        if r <= High(FRowsOld) then
+          Mark(FRowsOld[r].Line);
+        Hit := True;
+      end;
+  end;
+  if not Hit then
+    Exit;
+  AllOut := True;
+  for b := 0 to High(FBlockStarts) do
+  begin
+    s := FBlockStarts[b];
+    Pairs := BlockPairs(FChangeLines, s);
+    Old := 0;
+    while (s + Old < FChangeLines.Count) and (FChangeLines[s + Old][1] = '-') do
+      Inc(Old);
+    for k := 0 to High(Pairs) do
+    begin
+      OldIdx := -1;
+      NewIdx := -1;
+      if Pairs[k].HasOld then
+        OldIdx := s + k;
+      if Pairs[k].HasNew then
+        NewIdx := s + Old + k;
+      if ((OldIdx >= 0) and Sel[OldIdx]) or ((NewIdx >= 0) and Sel[NewIdx]) then
+      begin
+        SetLength(APairs, Length(APairs) + 1);
+        APairs[High(APairs)] := Pairs[k];
+        if not (LineLeftOut(OldIdx) or LineLeftOut(NewIdx)) then
+          AllOut := False;
+      end;
+    end;
+  end;
+  Result := Length(APairs) > 0;
+  AIncluding := Result and (AllOut or not ShownFileChosen);
+end;
+
+{ The selected lines out of the commit, or into it: in a file not ticked
+  the file is ticked with those lines alone, as Include does for a
+  block; one left with nothing to commit is unticked. }
+procedure TRepoFrame.ToggleLeaveOutSelection;
+var
+  Pairs, All, Items: TGittanKeepArray;
+  Including, Picked: boolean;
+  b, k, j, i: integer;
+
+  procedure LinesNote(const AOne, AMany: string);
+  begin
+    if Length(Pairs) = 1 then
+      StatusNote(Format(AOne, [FCurrentPath]))
+    else
+      StatusNote(Format(AMany, [Length(Pairs), FCurrentPath]));
+  end;
+
+begin
+  if not CanLeaveOut or not SelectedPairs(Pairs, Including) then
+    Exit;
+  i := StatIndexOf(FCurrentPath);
+  if Including and not CommitChosen(i) then
+  begin
+    FLeftOut.Clear(FCurrentPath);
+    for b := 0 to High(FBlockStarts) do
+    begin
+      All := BlockPairs(FChangeLines, FBlockStarts[b]);
+      for k := 0 to High(All) do
+      begin
+        Picked := False;
+        for j := 0 to High(Pairs) do
+          if SameKeep(All[k], Pairs[j]) and (All[k].Line = Pairs[j].Line) then
+            Picked := True;
+        if not Picked then
+          FLeftOut.Add(FCurrentPath, All[k]);
+      end;
+    end;
+    SetCommitChosen(i, True);
+    LinesNote(rsIncludedLine, rsIncludedLines);
+  end
+  else if Including then
+  begin
+    Items := FLeftOut.Items(FCurrentPath);
+    for j := High(Items) downto 0 do
+      for k := 0 to High(Pairs) do
+        if SameKeep(Items[j], Pairs[k]) and (Items[j].Line = Pairs[k].Line) then
+        begin
+          FLeftOut.Remove(FCurrentPath, j);
+          Break;
+        end;
+    LinesNote(rsIncludedLine, rsIncludedLines);
+  end
+  else
+  begin
+    Items := FLeftOut.Items(FCurrentPath);
+    for k := 0 to High(Pairs) do
+    begin
+      Picked := False;
+      for j := 0 to High(Items) do
+        if SameKeep(Items[j], Pairs[k]) and (Items[j].Line = Pairs[k].Line) then
+          Picked := True;
+      if not Picked then
+        FLeftOut.Add(FCurrentPath, Pairs[k]);
+    end;
+    if AllLeftOut(FRawChangeLines, FLeftOut.Items(FCurrentPath)) then
+    begin
+      FLeftOut.Clear(FCurrentPath);
+      SetCommitChosen(i, False);
+      StatusNote(Format(rsLeftOutFile, [FCurrentPath]));
+    end
+    else
+      LinesNote(rsLeftOutLine, rsLeftOutLines);
+  end;
+  LeftOutChanged;
+end;
+
+{ File > Leave Change Out of Commit acts on the selected lines, else on
+  the block the caret is in. }
+procedure TRepoFrame.MenuLeaveOutClick(Sender: TObject);
+var
+  Pairs: TGittanKeepArray;
+  Including: boolean;
+begin
+  if SelectedPairs(Pairs, Including) then
+    ToggleLeaveOutSelection
+  else if Edit.Carets.Count > 0 then
     ToggleLeaveOutAt(BlockAtRow(Edit.Carets[0].PosY));
 end;
 
 { The item follows the caret, as Discard Change does, and is named for
-  what it does to the block there (from UpdateDiscardItems). }
+  what it does to the selected lines or the block there (from
+  UpdateDiscardItems). }
 procedure TRepoFrame.UpdateLeaveOutItem;
 var
   Block: integer;
+  Pairs: TGittanKeepArray;
+  Including: boolean;
 begin
   if FLeaveOutItem = nil then
     Exit;
+  { A selection over changed lines: the item is for those lines. }
+  if CanLeaveOut and SelectedPairs(Pairs, Including) then
+  begin
+    FLeaveOutItem.Enabled := True;
+    if Including then
+      FLeaveOutItem.Caption := rsIncludeLinesItem
+    else
+      FLeaveOutItem.Caption := rsLeaveOutLinesItem;
+    Exit;
+  end;
   Block := -1;
   if CanLeaveOut and (Edit.Carets.Count > 0) then
     Block := BlockAtRow(Edit.Carets[0].PosY);

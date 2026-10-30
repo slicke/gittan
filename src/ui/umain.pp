@@ -384,7 +384,7 @@ type
       pills offer it: its block, or the reviewed change the row shows as
       code; -1 for none. The items for it come first. }
     FPopupBlock, FPopupKeep: integer;
-    FBlockKeepItem, FBlockLeaveOutItem, FBlockSepItem, FBlockDiscardItem,
+    FBlockKeepItem, FBlockLeaveOutItem, FBlockLinesItem, FBlockSepItem, FBlockDiscardItem,
       FBlockEndItem: TMenuItem;
     { GitHub's view of the repository, read by a TGittanPullRequestJob
       when the repository or its branch changes (FPullKey names the pair
@@ -1414,6 +1414,9 @@ type
     function LeaveOutCaption(ABlock: integer): string;
     function LeaveOutHint(ABlock: integer): string;
     procedure ToggleLeaveOutAt(ABlock: integer);
+    function SelectedPairs(out APairs: TGittanKeepArray; out AIncluding: boolean): boolean;
+    procedure ToggleLeaveOutSelection;
+    procedure MenuBlockLinesClick(Sender: TObject);
     procedure LeaveOutBlockAt(ABlock: integer);
     procedure IncludeBlockAt(ABlock: integer);
     procedure IncludeFile;
@@ -3164,6 +3167,12 @@ resourcestring
   rsUndoDiscard = '&Undo Discard';
   rsLeaveOutItem = '&Leave Change Out of Commit';
   rsIncludeItem = '&Include Change in Commit';
+  rsLeaveOutLinesItem = 'Skip Selected Lines in Commit';
+  rsIncludeLinesItem = 'Include Selected Lines in Commit';
+  rsLeftOutLines = 'Left %d changed lines of %s out of the commit';
+  rsLeftOutLine = 'Left a changed line of %s out of the commit';
+  rsIncludedLines = '%d changed lines of %s go into the commit';
+  rsIncludedLine = 'A changed line of %s goes into the commit';
   rsRevertFile = 'Re&vert File...';
   rsUndoRevert = 'Undo Re&vert';
   rsCleanItem = 'C&lean...';

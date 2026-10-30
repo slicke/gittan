@@ -1208,6 +1208,7 @@ begin
     shows them and sets the captions). }
   FBlockKeepItem := AddItem(FEditPopup, rsKeepPill, @MenuBlockKeepClick);
   FBlockLeaveOutItem := AddItem(FEditPopup, rsLeaveOutPill, @MenuBlockLeaveOutClick);
+  FBlockLinesItem := AddItem(FEditPopup, rsLeaveOutLinesItem, @MenuBlockLinesClick);
   FBlockSepItem := AddItem(FEditPopup, '-', nil);
   FBlockDiscardItem := AddItem(FEditPopup, rsBlockDiscardItem, @MenuBlockDiscardClick);
   FBlockEndItem := AddItem(FEditPopup, '-', nil);
@@ -1649,6 +1650,8 @@ var
   Info: TGittanBlameCommit;
   Key: integer;
   Src: TObject;
+  LinePairs: TGittanKeepArray;
+  Including: boolean;
 begin
   FPopupEd := Edit;
   if (FEditOld <> nil) and FEditOld.Visible and
@@ -1699,6 +1702,13 @@ begin
         FPopupKeep := FKeptOf[Key];
     end;
   end;
+  { A selection over changed lines: those lines out of the commit, or in. }
+  FBlockLinesItem.Visible := (FPopupEd = Edit) and (FView = gvChanges) and CanLeaveOut and
+    SelectedPairs(LinePairs, Including);
+  if Including then
+    FBlockLinesItem.Caption := rsIncludeLinesItem
+  else
+    FBlockLinesItem.Caption := rsLeaveOutLinesItem;
   FBlockKeepItem.Visible := (FPopupBlock >= 0) or (FPopupKeep >= 0);
   if FPopupKeep >= 0 then
     FBlockKeepItem.Caption := rsUnkeepPill
@@ -1709,7 +1719,13 @@ begin
     FBlockLeaveOutItem.Caption := LeaveOutCaption(FPopupBlock);
   FBlockSepItem.Visible := FPopupBlock >= 0;
   FBlockDiscardItem.Visible := FPopupBlock >= 0;
-  FBlockEndItem.Visible := FBlockKeepItem.Visible;
+  FBlockEndItem.Visible := FBlockKeepItem.Visible or FBlockLinesItem.Visible;
+end;
+
+procedure TRepoFrame.MenuBlockLinesClick(Sender: TObject);
+begin
+  SetHotDiscard(Edit, -1, -1, -1);
+  ToggleLeaveOutSelection;
 end;
 
 procedure TRepoFrame.MenuBlockKeepClick(Sender: TObject);
