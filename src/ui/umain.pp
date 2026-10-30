@@ -445,6 +445,8 @@ type
     { Track with Git LFS and Stop Tracking with Git LFS, filled with the
       file's patterns as the menu pops up (FillLfsMenus). }
     FLfsTrackMenu, FLfsUntrackMenu: TMenuItem;
+    { The file menu's More: .git/info/exclude and Git LFS. }
+    FFileMoreMenu: TMenuItem;
     { The Submodules section under it (umain.submodules.inc): the
       submodules from gittan.submodules, what their jobs found out
       (FSubInfos, one per submodule, smUnknown while its job runs), the
@@ -3089,6 +3091,7 @@ resourcestring
   rsHintSubmodule = 'Submodule moved %s; click to see the commits';
   rsAddToIgnore = 'Add to .&gitignore';
   rsAddToExclude = 'Add to .git/info/e&xclude';
+  rsFileMoreMenu = 'More';
   rsIgnoreAdded = 'Added %s to %s';
   rsIgnoreFailed = 'Could not write %s';
   rsLfsTrackMenu = 'Track with Git &LFS';
