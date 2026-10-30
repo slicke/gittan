@@ -69,6 +69,7 @@ begin
     AssertEquals(FFileName, S.FileName);
     S.Load;
     AssertEquals(3, S.ContextLines);
+    AssertTrue('the unchanged lines start hidden', S.OnlyChanges);
     AssertEquals(0, S.Width);
     AssertFalse(S.SideBySide);
     AssertFalse(S.MarkdownPreview);
@@ -126,7 +127,7 @@ begin
     S.FontSize := 13;
     S.Zoom := 120;
     S.WordWrap := True;
-    S.OnlyChanges := True;
+    S.OnlyChanges := False;
     S.ContextLines := 5;
     S.SideBySide := True;
     S.MarkdownPreview := True;
@@ -184,7 +185,7 @@ begin
     AssertEquals(13, S.FontSize);
     AssertEquals(120, S.Zoom);
     AssertTrue(S.WordWrap);
-    AssertTrue(S.OnlyChanges);
+    AssertFalse('off is kept', S.OnlyChanges);
     AssertEquals(5, S.ContextLines);
     AssertTrue(S.SideBySide);
     AssertTrue(S.MarkdownPreview);

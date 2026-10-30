@@ -86,7 +86,7 @@ type
     Zoom: integer;
     WordWrap: boolean;
     {** Hide the unchanged lines of a file, keeping ContextLines around
-      each change. }
+      each change; on at first, so a large file shows its changes. }
     OnlyChanges: boolean;
     ContextLines: integer;
     SideBySide: boolean;
@@ -308,6 +308,7 @@ begin
   else
     FFileName := IncludeTrailingPathDelimiter(ConfigDir) + 'gittan.ini';
   ContextLines := 3;
+  OnlyChanges := True;
   NavOpen := True;
   SubmodulesOpen := True;
   AutoFetch := True;
@@ -416,7 +417,7 @@ begin
       end;
       Zoom := Ini.ReadInteger(SecView, 'Zoom', 0);
       WordWrap := Ini.ReadBool(SecView, 'WordWrap', False);
-      OnlyChanges := Ini.ReadBool(SecView, 'OnlyChanges', False);
+      OnlyChanges := Ini.ReadBool(SecView, 'OnlyChanges', True);
       ContextLines := Ini.ReadInteger(SecView, 'ContextLines', 3);
       SideBySide := Ini.ReadBool(SecView, 'SideBySide', False);
       MarkdownPreview := Ini.ReadBool(SecView, 'MarkdownPreview', False);
