@@ -1160,6 +1160,12 @@ type
     procedure MenuNewTabClick(Sender: TObject);
     procedure MenuCloseTabClick(Sender: TObject);
     procedure MenuNextTabClick(Sender: TObject);
+    procedure MenuMinimizeClick(Sender: TObject);
+    procedure MenuZoomWindowClick(Sender: TObject);
+    procedure MenuBringAllToFrontClick(Sender: TObject);
+    procedure MenuHelpWebsiteClick(Sender: TObject);
+    procedure MenuHelpReleasesClick(Sender: TObject);
+    procedure MenuHelpIssueClick(Sender: TObject);
     procedure MenuPrevTabClick(Sender: TObject);
     {$IFDEF OWNBAR}
     function OwnBar: TGittanOwnTitleBar;
@@ -2404,6 +2410,14 @@ resourcestring
   rsTagline = 'See what changed in a git repository';
   rsGo = '&Go';
   rsTools = '&Tools';
+  rsWindowMenu = '&Window';
+  rsMinimize = 'Minimize';
+  rsZoom = 'Zoom';
+  rsBringAllToFront = 'Bring All to Front';
+  rsHelpMenu = '&Help';
+  rsHelpWebsite = 'Gittan Website';
+  rsHelpReleases = 'Release Notes';
+  rsHelpIssue = 'Report an Issue';
   rsInstallCli = 'Install &CLI Command';
   rsUninstallCli = '&Uninstall CLI Command';
   rsCheckUpdates = 'Check for &Updates...';
@@ -5157,7 +5171,8 @@ end;
 procedure TRepoFrame.BuildMenu;
 var
   Main: TMainMenu;
-  FileMenu, BranchMenu, StashMenu, ViewMenu, GoMenu, ToolsMenu, Item, Sub: TMenuItem;
+  FileMenu, BranchMenu, StashMenu, ViewMenu, GoMenu, ToolsMenu, WindowMenu, HelpMenu, Item,
+    Sub: TMenuItem;
   i: integer;
 
   function AddItem(AParent: TMenuItem; const ACaption: string; AShortCut: TShortCut;
@@ -5410,9 +5425,12 @@ begin
   FForwardItem := AddItem(GoMenu, rsForward, ShortCut(VK_RIGHT, [ssAlt]), @MenuForwardClick);
   {$ENDIF}
   NavUpdateItems;
+  { On macOS the tabs are stepped through from the Window menu. }
+  {$IFNDEF LCLCocoa}
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextTab, ShortCut(VK_OEM_6, [ssModifier, ssShift]), @MenuNextTabClick);
   AddItem(GoMenu, rsPrevTab, ShortCut(VK_OEM_4, [ssModifier, ssShift]), @MenuPrevTabClick);
+  {$ENDIF}
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsFind, ShortCut(VK_F, [ssModifier]), @MenuFindClick);
   AddItem(GoMenu, rsFindNext, ShortCut(VK_G, [ssModifier]), @MenuFindNextClick);
@@ -5462,6 +5480,59 @@ begin
   AddItem(ToolsMenu, rsSettings, ShortCut(VK_OEM_COMMA, [ssModifier]), @MenuSettingsClick);
   AddItem(ToolsMenu, rsAbout, 0, @MenuAboutClick);
   {$ENDIF}
+
+  { The menus a Mac application has: Window, with the tabs, and Help,
+    whose search field macOS adds itself, searching the menus too. }
+  {$IFDEF LCLCocoa}
+  WindowMenu := TMenuItem.Create(Main);
+  WindowMenu.Caption := rsWindowMenu;
+  Main.Items.Add(WindowMenu);
+  AddItem(WindowMenu, rsMinimize, ShortCut(VK_M, [ssModifier]), @MenuMinimizeClick);
+  AddItem(WindowMenu, rsZoom, 0, @MenuZoomWindowClick);
+  WindowMenu.Add(NewLine);
+  AddItem(WindowMenu, rsNextTab, ShortCut(VK_OEM_6, [ssModifier, ssShift]), @MenuNextTabClick);
+  AddItem(WindowMenu, rsPrevTab, ShortCut(VK_OEM_4, [ssModifier, ssShift]), @MenuPrevTabClick);
+  WindowMenu.Add(NewLine);
+  AddItem(WindowMenu, rsBringAllToFront, 0, @MenuBringAllToFrontClick);
+  {$ENDIF}
+  HelpMenu := TMenuItem.Create(Main);
+  HelpMenu.Caption := rsHelpMenu;
+  Main.Items.Add(HelpMenu);
+  AddItem(HelpMenu, rsHelpWebsite, 0, @MenuHelpWebsiteClick);
+  AddItem(HelpMenu, rsHelpReleases, 0, @MenuHelpReleasesClick);
+  AddItem(HelpMenu, rsHelpIssue, 0, @MenuHelpIssueClick);
+end;
+
+procedure TRepoFrame.MenuMinimizeClick(Sender: TObject);
+begin
+  FWindow.WindowState := wsMinimized;
+end;
+
+procedure TRepoFrame.MenuZoomWindowClick(Sender: TObject);
+begin
+  {$IFDEF LCLCocoa}
+  ZoomWindow(FWindow.Handle);
+  {$ENDIF}
+end;
+
+procedure TRepoFrame.MenuBringAllToFrontClick(Sender: TObject);
+begin
+  Application.BringToFront;
+end;
+
+procedure TRepoFrame.MenuHelpWebsiteClick(Sender: TObject);
+begin
+  OpenURL(GittanSite);
+end;
+
+procedure TRepoFrame.MenuHelpReleasesClick(Sender: TObject);
+begin
+  OpenURL(GittanSource + '/releases');
+end;
+
+procedure TRepoFrame.MenuHelpIssueClick(Sender: TObject);
+begin
+  OpenURL(GittanSource + '/issues/new');
 end;
 
 { Automatic and Plain text first, then the lexer list, which is long

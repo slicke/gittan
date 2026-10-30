@@ -32,6 +32,11 @@ uses
   ExtCtrls, Spin, BGRABitmap, BGRABitmapTypes, ATSynEdit, gittan.lexers, gittan.sidenav, gittan.ai, gittan.update,
   gittan.forge;
 
+const
+  {** The website and the source, for the About page and the Help menu. }
+  GittanSite = 'https://gittan.app';
+  GittanSource = 'https://github.com/slicke/gittan';
+
 type
   {** The pages, in the sidebar's order. }
   TSettingsPage = (pgEditor, pgTools, pgHosting, pgAI, pgAbout);
@@ -221,8 +226,6 @@ const
   AboutIconSize = 64;
   {** The lines ShowVersions writes, held while they are read. }
   VersionLines = 6;
-  GittanSite = 'https://gittan.app';
-  GittanSource = 'https://github.com/slicke/gittan';
 
 type
   TSample = record

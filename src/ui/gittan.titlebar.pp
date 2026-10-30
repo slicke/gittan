@@ -65,6 +65,11 @@ procedure HideTitleBand(AHandle: PtrUInt);
   bar were not there. }
 procedure MakeAlertWindow(AHandle: PtrUInt);
 
+{** Window > Zoom: what the green button does, which fills the screen's
+  free area or goes back to the size before; the LCL's WindowState does
+  not tell a zoomed window apart. }
+procedure ZoomWindow(AHandle: PtrUInt);
+
 implementation
 
 uses
@@ -210,6 +215,15 @@ begin
     if Button <> nil then
       Button.setHidden(True);
   end;
+end;
+
+procedure ZoomWindow(AHandle: PtrUInt);
+var
+  Win: NSWindow;
+begin
+  Win := WindowOf(AHandle);
+  if Win <> nil then
+    Win.zoom(nil);
 end;
 
 end.
