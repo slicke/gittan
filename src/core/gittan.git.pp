@@ -858,6 +858,10 @@ type
       with LayoutGraph; false before the first commit. }
     function GraphCommits(out ACommits: TGittanGraphCommits;
       AMax: integer = 500): boolean;
+    {** The commit ARef names as GraphCommits gives it (no lanes): for the
+      commit menu of a commit shown outside the graph. False when git
+      knows no such commit. }
+    function GraphCommit(const ARef: string; out ACommit: TGittanGraphCommit): boolean;
     {** The ids of the commits of every local and remote branch, every
       tag and HEAD that touched APath, a file or a folder relative to
       Root, newest first, at most AMax; a file is followed through its
@@ -6090,36 +6094,30 @@ end;
   since the body, last, may hold anything, line breaks too. The commits
   not pushed (or not pulled) are read with the same cut, so every one in
   the log is marked. }
-function TGittanRepo.GraphCommits(out ACommits: TGittanGraphCommits;
-  AMax: integer): boolean;
+const
+  { git leaves a bisect's refs out of the decorations unless asked. }
+  GraphLogArgs: array[0..9] of string = ('log', '--no-color', '--decorate=full',
+    '--decorate-refs=HEAD', '--decorate-refs=refs/heads/', '--decorate-refs=refs/remotes/',
+    '--decorate-refs=refs/tags/', '--decorate-refs=refs/bisect/', '-z',
+    '--format=%H%x1f%P%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%s%x1f%b');
+
+{ The commits of a log in GraphLogArgs' format, those whose ids are in
+  AAhead or ABehind (rev-list output) marked not pushed or not pulled. }
+function ParseGraphLog(const AOutput, AAhead, ABehind: string): TGittanGraphCommits;
 var
-  Output, Ahead, Behind: string;
   Records, Fields: TStringArray;
   i: integer;
   Seconds: int64;
 begin
-  ACommits := nil;
-  { git leaves a bisect's refs out of the decorations unless asked. }
-  Result := (FRoot <> '') and RunGit(FRoot, ['log', '--no-color', '--topo-order',
-    '--decorate=full', '--decorate-refs=HEAD', '--decorate-refs=refs/heads/',
-    '--decorate-refs=refs/remotes/', '--decorate-refs=refs/tags/',
-    '--decorate-refs=refs/bisect/', '-z', '-n', IntToStr(AMax),
-    '--format=%H%x1f%P%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%s%x1f%b',
-    '--branches', '--remotes', '--tags', 'HEAD'], Output);
-  if not Result then
-    Exit;
-  if not RunGit(FRoot, ['rev-list', '-n', IntToStr(AMax), '@{upstream}..HEAD'], Ahead) then
-    Ahead := '';
-  if not RunGit(FRoot, ['rev-list', '-n', IntToStr(AMax), 'HEAD..@{upstream}'], Behind) then
-    Behind := '';
-  Records := Output.Split([#0]);
+  Result := nil;
+  Records := AOutput.Split([#0]);
   for i := 0 to High(Records) do
   begin
     Fields := Records[i].Split([#31]);
     if Length(Fields) < 8 then
       Continue;
-    SetLength(ACommits, Length(ACommits) + 1);
-    with ACommits[High(ACommits)] do
+    SetLength(Result, Length(Result) + 1);
+    with Result[High(Result)] do
     begin
       Hash := Fields[0];
       if Fields[1] = '' then
@@ -6135,11 +6133,56 @@ begin
       Refs := ParseGraphRefs(Fields[5]);
       Subject := Fields[6];
       Body := TrimRight(Fields[7]);
-      Unpushed := Pos(Hash, Ahead) > 0;
-      Unpulled := Pos(Hash, Behind) > 0;
+      Unpushed := Pos(Hash, AAhead) > 0;
+      Unpulled := Pos(Hash, ABehind) > 0;
     end;
   end;
+end;
+
+function TGittanRepo.GraphCommits(out ACommits: TGittanGraphCommits;
+  AMax: integer): boolean;
+var
+  Output, Ahead, Behind: string;
+  Args: array of string;
+  i: integer;
+begin
+  ACommits := nil;
+  SetLength(Args, Length(GraphLogArgs));
+  for i := 0 to High(GraphLogArgs) do
+    Args[i] := GraphLogArgs[i];
+  Args := Concat(Args, ['--topo-order', '-n', IntToStr(AMax), '--branches', '--remotes',
+    '--tags', 'HEAD']);
+  Result := (FRoot <> '') and RunGit(FRoot, Args, Output);
+  if not Result then
+    Exit;
+  if not RunGit(FRoot, ['rev-list', '-n', IntToStr(AMax), '@{upstream}..HEAD'], Ahead) then
+    Ahead := '';
+  if not RunGit(FRoot, ['rev-list', '-n', IntToStr(AMax), 'HEAD..@{upstream}'], Behind) then
+    Behind := '';
+  ACommits := ParseGraphLog(Output, Ahead, Behind);
   LayoutGraph(ACommits);
+end;
+
+{ --end-of-options, so a ref that starts with a dash is no option. }
+function TGittanRepo.GraphCommit(const ARef: string; out ACommit: TGittanGraphCommit): boolean;
+var
+  Output: string;
+  Args: array of string;
+  Commits: TGittanGraphCommits;
+  i: integer;
+begin
+  ACommit := Default(TGittanGraphCommit);
+  SetLength(Args, Length(GraphLogArgs));
+  for i := 0 to High(GraphLogArgs) do
+    Args[i] := GraphLogArgs[i];
+  Args := Concat(Args, ['-n', '1', '--end-of-options', ARef]);
+  Result := (FRoot <> '') and (ARef <> '') and RunGit(FRoot, Args, Output);
+  if not Result then
+    Exit;
+  Commits := ParseGraphLog(Output, '', '');
+  Result := Length(Commits) = 1;
+  if Result then
+    ACommit := Commits[0];
 end;
 
 { --literal-pathspecs, so a path with a glob character is the path. A

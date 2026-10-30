@@ -433,6 +433,7 @@ end;
 procedure TRepoFrame.BranchMenuOpen(Sender: TObject);
 begin
   UpdateBranchItems;
+  FillBranchCommitMenu;
 end;
 
 { From the menu the list opens at the top of the frame (MenuListAnchor);

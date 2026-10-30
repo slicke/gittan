@@ -1479,6 +1479,7 @@ var
   Remote, Branch, Output: string;
   Code, i: integer;
   Commits: TGittanGraphCommits;
+  One: TGittanGraphCommit;
 begin
   Git(['init', '-q']);
   AssertTrue(FRepo.Open(FDir));
@@ -1512,6 +1513,14 @@ begin
   AssertEquals('v1', Commits[0].Refs[1].Name);
   AssertEquals(2, GraphWidth(Commits));
   AssertFalse(Commits[0].Unpushed);
+  { One commit, as the graph has it. }
+  AssertTrue(FRepo.GraphCommit(Commits[0].Hash, One));
+  AssertEquals(Commits[0].Hash, One.Hash);
+  AssertEquals('merge side', One.Subject);
+  AssertEquals(2, Length(One.Parents));
+  AssertEquals(2, Length(One.Refs));
+  AssertEquals('v1', One.Refs[1].Name);
+  AssertFalse('no such commit', FRepo.GraphCommit('0123456789abcdef0123456789abcdef01234567', One));
   Remote := FDir + '-remote';
   if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Code,
     [poStderrToOutPut]) <> 0 then

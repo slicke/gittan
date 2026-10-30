@@ -100,6 +100,16 @@ end;
 
 procedure TRepoFrame.GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
   const AScreenPos: TPoint);
+begin
+  if FRepo.Root = '' then
+    Exit;
+  FillCommitMenu(FCommitPopup.Items, ACommit);
+  FCommitPopup.PopUp(AScreenPos.X, AScreenPos.Y);
+end;
+
+{ The commit menu's items for ACommit, under ARoot: the graph's popup,
+  or Branch > Commit for the commit shown (FillBranchCommitMenu). }
+procedure TRepoFrame.FillCommitMenu(ARoot: TMenuItem; const ACommit: TGittanGraphCommit);
 var
   Busy, Jobs, InHead, IsHead, IsMerge: boolean;
   Known: string;
@@ -117,18 +127,16 @@ var
     AEnabled: boolean = True): TMenuItem;
   begin
     if AParent = nil then
-      AParent := FCommitPopup.Items;
+      AParent := ARoot;
     Result := AddMenuItem(AParent, ACaption, ATag, AEnabled, @CommitMenuClick);
   end;
 
   procedure Line;
   begin
-    FCommitPopup.Items.Add(NewLine);
+    ARoot.Add(NewLine);
   end;
 
 begin
-  if FRepo.Root = '' then
-    Exit;
   FActionCommit := ACommit;
   Jobs := (FCommitJob <> nil) or (FRemoteJob <> nil);
   Busy := RepoBusy;
@@ -141,7 +149,7 @@ begin
   Known := CommitKnownName(ACommit);
   FActionName := Known;
 
-  FCommitPopup.Items.Clear;
+  ARoot.Clear;
   Add(nil, rsCaShow, caShow);
   Add(nil, rsCaCompare, caCompare);
   Add(nil, rsCaBrowse, caBrowse);
@@ -203,7 +211,35 @@ begin
   Add(nil, rsCopyHash, caCopy);
   if Assigned(FForge) then
     Add(nil, Format(rsOpenCommitOnForge, [ForgeName]), caForge);
-  FCommitPopup.PopUp(AScreenPos.X, AScreenPos.Y);
+end;
+
+{ Branch > Commit, filled as the Branch menu opens (and for the command
+  palette): the commit menu of the commit shown against its parent
+  (picked in the graph, the blame band or Older and Newer), named by
+  its short id; without one, an item that opens the graph to pick one
+  in. }
+procedure TRepoFrame.FillBranchCommitMenu;
+var
+  Commit: TGittanGraphCommit;
+begin
+  if FBranchCommitMenu = nil then
+    Exit;
+  { The menu is built before the repository object is. }
+  if (FRepo <> nil) and (FRepo.Root <> '') and BlameShown and FRepo.GraphCommit(FBlameCommit.Hash, Commit) then
+  begin
+    FBranchCommitMenu.Caption := Format(rsBmCommitMenu, [Commit.Short]);
+    FillCommitMenu(FBranchCommitMenu, Commit);
+    Exit;
+  end;
+  FBranchCommitMenu.Caption := rsBmCommitNone;
+  FBranchCommitMenu.Clear;
+  AddMenuItem(FBranchCommitMenu, rsBmCommitPick, 0, (FRepo <> nil) and (FRepo.Root <> ''),
+    @MenuPickCommitClick);
+end;
+
+procedure TRepoFrame.MenuPickCommitClick(Sender: TObject);
+begin
+  ShowCommitGraph;
 end;
 
 { A new branch is asked a name for and switched to; a tag a name and a

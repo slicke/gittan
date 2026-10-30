@@ -541,6 +541,8 @@ type
     FRemoteAhead: integer;
     FRemoteHead: string;
     FFetchItem, FPullItem, FPushItem, FForcePushItem: TMenuItem;
+    { Branch > Commit: the commit menu of the commit shown. }
+    FBranchCommitMenu: TMenuItem;
     FSyncPopup: TGittanPopupList;
     FRecentPopup: TGittanPopupList;
     { The header's lexer name drops the lexers, Automatic and Plain
@@ -1961,6 +1963,9 @@ type
     function CommitKnownName(const ACommit: TGittanGraphCommit): string;
     procedure GraphDrop(Sender: TObject; const ASource, ATarget: TGittanGraphCommit;
       const AScreenPos: TPoint);
+    procedure FillCommitMenu(ARoot: TMenuItem; const ACommit: TGittanGraphCommit);
+    procedure FillBranchCommitMenu;
+    procedure MenuPickCommitClick(Sender: TObject);
     procedure GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
       const AScreenPos: TPoint);
     procedure CommitMenuClick(Sender: TObject);
@@ -2818,6 +2823,9 @@ resourcestring
   rsBmRebase = 'Rebase %s onto %s';
   rsBranchMenu = '&Branch';
   rsBmSwitchItem = '&Switch to Branch...';
+  rsBmCommitMenu = 'Commit %s';
+  rsBmCommitNone = 'Commit';
+  rsBmCommitPick = 'Pick a Commit in the Graph...';
   rsBmNewItem = '&New Branch...';
   rsBmMergeItem = '&Merge into %s...';
   rsBmRebaseItem = '&Rebase %s onto...';
@@ -5335,6 +5343,10 @@ begin
   FMergeItem.Tag := Ord(blMerge);
   FRebaseItem := AddItem(BranchMenu, '', 0, @MenuBranchListClick);
   FRebaseItem.Tag := Ord(blRebase);
+  { The commit menu of the commit shown, so cherry-pick, revert, reset
+    and the rest are in the menu bar and the palette too. }
+  FBranchCommitMenu := AddItem(BranchMenu, rsBmCommitNone, 0, nil);
+  FillBranchCommitMenu;
   BranchMenu.Add(NewLine);
   FCompareBranchItem := AddItem(BranchMenu, '', 0, @MenuBranchListClick);
   FCompareBranchItem.Tag := Ord(blBranchSince);
