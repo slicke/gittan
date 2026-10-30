@@ -106,7 +106,7 @@ make test       # build and run the unit tests with plain fpc
 make help       # every target
 ```
 
-On macOS, make finds lazbuild in `/Applications/lazarus` when it is not on `PATH`. On Linux you need GTK 3's headers (`libgtk-3-dev` on Debian and Ubuntu, `gtk3-devel` on Fedora). On Windows there is no make: `.\make.ps1` has the same targets and finds lazbuild on `PATH`, in `C:\lazarus` or in `C:\fpcupdeluxe\lazarus`.
+On macOS, make finds lazbuild in `/Applications/lazarus` when it is not on `PATH`. On Linux you need GTK 3's headers (`libgtk-3-dev` on Debian and Ubuntu, `gtk3-devel` on Fedora); `make desktop` then installs a launcher and the icons in `~/.local/share`, without which a Wayland desktop shows a generic icon for Gittan. On Windows there is no make: `.\make.ps1` has the same targets and finds lazbuild on `PATH`, in `C:\lazarus` or in `C:\fpcupdeluxe\lazarus`.
 
 Every build copies the lexers into `lexlib/`, which must sit beside the executable (inside `Contents/Resources` in the macOS bundle). A build from the IDE does not do that, so run `make lexlib` (or `.\make.ps1 lexlib`) once.
 

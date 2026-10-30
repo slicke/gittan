@@ -13,6 +13,9 @@ uses
   {$IFDEF LCLWin32}
   uDarkStyleParams, uMetaDarkStyle, uDarkStyleSchemes,
   {$ENDIF}
+  {$IFDEF LCLGtk3}
+  LazGLib2,
+  {$ENDIF}
   Forms, uwindow,
   { The forges and the AI agents, which register themselves as they
     load. }
@@ -34,6 +37,14 @@ begin
     follow a change while Gittan runs (see IsDarkMode). }
   PreferredAppMode := pamAllowDark;
   ApplyMetaDarkStyle(DefaultDark);
+  {$ENDIF}
+  {$IFDEF LCLGtk3}
+  { GTK names the window's Wayland app_id after the program, ./Gittan
+    giving Gittan. A Wayland compositor (KDE's, GNOME's) takes the window's
+    icon from the .desktop file of that name, not from the executable, and
+    shows a generic one without it: make desktop installs
+    app.gittan.Gittan.desktop and the icons. Set before a window is shown. }
+  g_set_prgname('app.gittan.Gittan');
   {$ENDIF}
   Application.Initialize;
   {$IFDEF DARWIN}

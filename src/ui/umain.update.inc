@@ -31,9 +31,9 @@ begin
   { A release tagged other than build-<n> cannot be compared, and says
     nothing of whether this build is current. }
   else if App.UpdateRelease.Build < 0 then
-    BannerInfo(Format(rsUpdateNoBuild, [App.UpdateRelease.Name, CurrentBuild]))
+    BannerInfo(Format(rsUpdateNoBuild, [App.UpdateRelease.Name, CurrentBuildName]))
   else
-    BannerInfo(Format(rsUpdateCurrent, [CurrentBuild]));
+    BannerInfo(Format(rsUpdateCurrent, [CurrentBuildName]));
 end;
 
 procedure TRepoFrame.ShowUpdateBadge;
@@ -42,7 +42,7 @@ begin
   begin
     FStatus.SetUpdate(Format(rsUpdateBadge, [App.UpdateRelease.Build]));
     FStatus.PartHint[spUpdate] := Format(rsUpdateHint, [App.UpdateRelease.Name,
-      CurrentBuild]) + LineEnding + HintLink + ' ' + rsUpdateHintClick;
+      CurrentBuildName]) + LineEnding + HintLink + ' ' + rsUpdateHintClick;
   end
   else
     FStatus.SetUpdate('');
@@ -51,7 +51,7 @@ end;
 procedure TRepoFrame.UpdateDialog;
 begin
   case AskDlg(rsUpdateTitle, Format(rsUpdateAvailable, [App.UpdateRelease.Name,
-      CurrentBuild]), mtInformation, [mrYes, rsUpdateDownload, 'IsDefault',
+      CurrentBuildName]), mtInformation, [mrYes, rsUpdateDownload, 'IsDefault',
       mrIgnore, Format(rsUpdateLater, [UpdateSnoozeDays]), mrCancel, rsUpdateNotNow,
       'IsCancel'], 0) of
     mrYes:

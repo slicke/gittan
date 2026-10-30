@@ -13,7 +13,8 @@ on:
 # One matrix job builds Gittan natively on each platform and uploads a package:
 #   - macOS (arm64):   Gittan-macos-silicon.dmg  (Gittan.app with lexlib inside)
 #   - Windows (x64):   Gittan-windows-x64.zip    (Gittan.exe + lexlib/)
-#   - Linux (amd64):   Gittan-linux-amd64.tar.gz (Gittan + lexlib/, GTK 3)
+#   - Linux (amd64):   Gittan-linux-amd64.tar.gz (Gittan + lexlib/, GTK 3),
+#                      Gittan-linux-amd64.deb and Gittan-linux-x86_64.rpm
 #
 # As in Trndi, a push to main publishes a release: the version job takes the
 # next build number from the "build-<n>" tags (100 when there is none), and
@@ -62,6 +63,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     outputs:
       build_number: ${{ steps.setver.outputs.build_number }}
+      version: ${{ steps.setver.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -76,6 +78,10 @@ jobs:
           if [ -z "$LATEST" ]; then NEXT=100; else NEXT=$((LATEST + 1)); fi
           echo "build_number=${NEXT}" >> "$GITHUB_OUTPUT"
           echo "Next build number: ${NEXT}"
+          # Major.Minor from Gittan.lpi's version info and the build number.
+          VERSION=$(make -s version GITTAN_BUILD="$NEXT")
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Version: ${VERSION}"
 
   # ===================== BUILD MATRIX =====================
   build:
@@ -90,6 +96,8 @@ jobs:
       # Compiled into gittan.update, which compares it with the latest
       # release; empty on a PR, where the version job is skipped.
       GITTAN_BUILD: ${{ needs.version.outputs.build_number }}
+      # The version (make version) for the About page; empty with it.
+      GITTAN_VERSION: ${{ needs.version.outputs.version }}
     strategy:
       fail-fast: false
       matrix:
@@ -315,6 +323,18 @@ jobs:
             lazbuild ${LAZARGS[@]+"${LAZARGS[@]}"} --add-package-link "$LPK"
           done
 
+      # The build number into Gittan.lpi's version info, beside its Major and
+      # Minor, so the Windows executable's version resource is the
+      # release's version (0.9.123.0) as the packages', the bundle's and the
+      # About page's are. Only in the runner's checkout; on a PR there is none.
+      - name: Stamp the build number
+        if: env.GITTAN_BUILD != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          perl -pi -e 's|(<UseVersionInfo Value="True"/>)|$1<RevisionNr Value="$ENV{GITTAN_BUILD}"/>|' Gittan.lpi
+          grep -q "<RevisionNr Value=\"$GITTAN_BUILD\"/>" Gittan.lpi
+
       # ===================== BUILD + PACKAGE =====================
       - name: Build and package (Linux)
         if: matrix.os_target == 'linux'
@@ -328,6 +348,13 @@ jobs:
           cp -r lexlib dist/Gittan/
           cp icons/png/gittan-256.png dist/Gittan/gittan.png
           tar -C dist -czf Gittan-linux-amd64.tar.gz Gittan
+          # The .deb and the .rpm, which install the desktop file and the
+          # icons a Wayland desktop needs to show Gittan's (make packages).
+          sudo apt-get install -y ruby ruby-dev rpm
+          sudo gem install --no-document fpm
+          make packages
+          cp pkg/gittan_*.deb Gittan-linux-amd64.deb
+          cp pkg/gittan-*.rpm Gittan-linux-x86_64.rpm
 
       - name: Build and package (macOS)
         if: matrix.os_target == 'macos'
@@ -389,6 +416,8 @@ jobs:
           name: gittan-${{ matrix.name }}
           path: |
             Gittan-linux-amd64.tar.gz
+            Gittan-linux-amd64.deb
+            Gittan-linux-x86_64.rpm
             Gittan-macos-silicon.dmg
             Gittan-windows-x64.zip
           if-no-files-found: error
@@ -419,6 +448,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BUILD: ${{ needs.version.outputs.build_number }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
           TAG="build-${BUILD}"
@@ -434,7 +464,7 @@ jobs:
           fi
 
           {
-            echo "Automated build of Gittan from the latest source."
+            echo "Gittan ${VERSION}, an automated build of the latest source (build ${BUILD})."
             echo
             echo "## Changes"
             echo
@@ -444,7 +474,9 @@ jobs:
             echo
             echo '- **Gittan-macos-silicon.dmg** — macOS on Apple Silicon. The app is signed ad hoc, so macOS blocks it at first: drag it to Applications, then run `xattr -cr /Applications/Gittan.app` in Terminal.'
             echo "- **Gittan-windows-x64.zip** — Windows x64. Unzip anywhere and run Gittan.exe."
-            echo "- **Gittan-linux-amd64.tar.gz** — Linux amd64, needs GTK 3."
+            echo "- **Gittan-linux-amd64.deb** — Debian and Ubuntu: \`sudo apt install ./Gittan-linux-amd64.deb\`."
+            echo "- **Gittan-linux-x86_64.rpm** — Fedora and other RPM distributions: \`sudo dnf install ./Gittan-linux-x86_64.rpm\` (\`zypper install\` on openSUSE)."
+            echo "- **Gittan-linux-amd64.tar.gz** — Linux amd64 without installing, needs GTK 3. Unpacked, it has no launcher or icon in the desktop's menu."
             echo
             echo "Gittan runs the git command line tool, so git must be on your PATH."
           } > notes.md
@@ -460,7 +492,7 @@ jobs:
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
-              --title "Gittan build ${BUILD}" \
+              --title "Gittan ${VERSION}" \
               --notes-file notes.md \
               --draft
           elif [ "$DRAFT" != "true" ]; then
@@ -470,6 +502,8 @@ jobs:
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
             packages/Gittan-macos-silicon.dmg \
             packages/Gittan-windows-x64.zip \
+            packages/Gittan-linux-amd64.deb \
+            packages/Gittan-linux-x86_64.rpm \
             packages/Gittan-linux-amd64.tar.gz
           # --latest: releases/latest, which the app's update check reads,
           # must move to it, not be left to how GitHub treats a published

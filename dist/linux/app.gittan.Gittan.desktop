@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Gittan
+GenericName=Git Client
+Comment=Browse, review and commit changes in a Git repository
+Exec=/usr/bin/gittan %f
+Icon=app.gittan.Gittan
+Terminal=false
+Categories=Development;RevisionControl;
+Keywords=git;diff;blame;commit;merge;repository;
+StartupNotify=true
+StartupWMClass=app.gittan.Gittan

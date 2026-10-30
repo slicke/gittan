@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>app.gittan.Gittan</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>Gittan</name>
+  <summary>Git Tree Analyzer &amp; Navigator</summary>
+  <description>
+    <p>
+      A free, native git client built around the diff. See what you changed
+      as you change it, who wrote each line and the history behind it, then
+      commit, sync and merge without leaving it. The AI features are off
+      until you turn them on.
+    </p>
+  </description>
+  <launchable type="desktop-id">app.gittan.Gittan.desktop</launchable>
+  <url type="homepage">https://gittan.app</url>
+  <url type="bugtracker">https://github.com/slicke/gittan/issues</url>
+  <developer id="app.gittan">
+    <name>Björn Lindh</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <categories>
+    <category>Development</category>
+    <category>RevisionControl</category>
+  </categories>
+</component>

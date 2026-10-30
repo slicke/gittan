@@ -177,6 +177,7 @@ resourcestring
   rsAboutName = 'Gittan';
   rsAboutTagline = 'Git Tree Analyzer & Navigator';
   rsAboutBuild = 'Build %d';
+  rsAboutVersion = 'Version %s';
   rsAboutLocalBuild = 'A local build of %s';
   rsAboutText = 'A free, native git client built around the diff.';
   rsCheckUpdates = 'Check for &Updates';
@@ -186,7 +187,7 @@ resourcestring
   rsUpdateLatest = 'The latest release is %s';
   rsUpdateFailed = 'Could not ask GitHub: %s';
   rsRunsOn = 'What it runs on and with';
-  rsVersionGittan = 'Gittan build %d';
+  rsVersionGittan = 'Gittan %s';
   rsVersionGittanLocal = 'Gittan, a local build of %s';
   rsVersionNotFound = '%s not found';
   rsVersionAIOff = 'The AI features are off';
@@ -726,7 +727,9 @@ begin
   Lbl.Font.Style := [fsBold];
   Lbl := AddLabel(rsAboutTagline, 0);
   Lbl.ShowAccelChar := False;
-  if CurrentBuild >= 0 then
+  if GittanVersion <> '' then
+    Lbl := AddLabel(Format(rsAboutVersion, [GittanVersion]), 6)
+  else if CurrentBuild >= 0 then
     Lbl := AddLabel(Format(rsAboutBuild, [CurrentBuild]), 6)
   else
     Lbl := AddLabel(Format(rsAboutLocalBuild, [{$I %DATE%}]), 6);
@@ -1540,7 +1543,7 @@ begin
   Lines := TStringList.Create;
   try
     if CurrentBuild >= 0 then
-      Lines.Add(Format(rsVersionGittan, [CurrentBuild]))
+      Lines.Add(Format(rsVersionGittan, [CurrentBuildName]))
     else
       Lines.Add(Format(rsVersionGittanLocal, [{$I %DATE%}]));
     if GitVersionOf(GitExe, Version, Major, Minor) then

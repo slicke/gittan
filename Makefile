@@ -42,6 +42,13 @@ endif
 
 LAZFLAGS = --widgetset=$(WIDGETSET)
 
+# The version, Major.Minor from Gittan.lpi's version info and the build
+# number CI passes as GITTAN_BUILD (0 in a local build): 0.9.123. Lazarus
+# leaves a number that is 0 out of the .lpi, so a missing one is 0.
+# `make version` prints it, for CI.
+lpi_version_nr = $(or $(shell sed -n -E 's/.*<$(1)VersionNr Value="([0-9]+)".*/\1/p' $(LPI)),0)
+GITTAN_VERSION := $(call lpi_version_nr,Major).$(call lpi_version_nr,Minor).$(or $(GITTAN_BUILD),0)
+
 # Gittan.lpi has two build modes: Release (-O2, no debug info, smart linked
 # and stripped, its units in lib/<cpu>-<os>-release) for build, rebuild and
 # run, which CI ships, and Default (debug info, line info) for debug.
@@ -89,6 +96,7 @@ VENDOR_PACKAGES := \
 # into Gittan.app and names it in Info.plist. A fresh bundle's Info.plist has
 # the project title as CFBundleName with its "&" unescaped, which no plist
 # reader accepts; escape it and name the bundle Gittan before adding the icon.
+# Its versions (0.1 and 1 from lazbuild) become GITTAN_VERSION.
 # macOS 26 and later take the icon from icons/Assets.car instead (named by
 # CFBundleIconName), which `make icons` compiles from the Icon Composer document
 # icons/Gittan.icon with Xcode's actool; without it they put the .icns on a
@@ -106,6 +114,8 @@ define bundle_icon
 	  cp icons/Assets.car "$(BUNDLE)/Contents/Resources/Assets.car"; \
 	  sed -i '' -E 's/&([^a-zA-Z#]|$$)/\&amp;\1/g' "$$plist"; \
 	  /usr/libexec/PlistBuddy -c 'Set :CFBundleName Gittan' "$$plist"; \
+	  /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString $(GITTAN_VERSION)' "$$plist"; \
+	  /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion $(GITTAN_VERSION)' "$$plist"; \
 	  /usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$$plist" >/dev/null 2>&1 || \
 	    /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string Gittan.icns' "$$plist"; \
 	  /usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$$plist" >/dev/null 2>&1 || \
@@ -119,7 +129,7 @@ define bundle_icon
 endef
 endif
 
-.PHONY: all build debug rebuild run clean help lexlib icons wordmark dialogicon test deps ide
+.PHONY: all build debug rebuild run clean help lexlib icons wordmark dialogicon test deps ide desktop packages version
 
 all: build
 
@@ -135,6 +145,9 @@ help:
 	@echo "  ide       Rebuild the Lazarus IDE (after ATSynEdit, ATFlatControls, EncConv or BGRABitmap moves)"
 	@echo "  wordmark  Write src/ui/gittan.wordmark.inc from icons/wordmark/gittan-wordmark-<theme>.png"
 	@echo "  dialogicon Write src/ui/gittan.dialogicon.inc from icons/dialog/gittan-dialog-<n>.png"
+	@echo "  desktop   Install app.gittan.Gittan.desktop and the icons for ./Gittan in ~/.local/share (Linux)"
+	@echo "  version   Print the version, $(GITTAN_VERSION) (Major.Minor from $(LPI), GITTAN_BUILD)"
+	@echo "  packages  Build the Linux .deb and .rpm into pkg/ (needs fpm and rpmbuild)"
 	@echo "  icons     Pack Gittan.icns and Gittan.ico from ICON_MAC_SRC=$(ICON_MAC_SRC) and ICON_PNG_DIR=$(ICON_PNG_DIR) (macOS only)"
 	@echo "  clean     Remove lib/, $(LEXLIB)/, the test build and the binary"
 	@echo "Current: WIDGETSET=$(WIDGETSET) LAZBUILD=$(LAZBUILD)"
@@ -226,6 +239,65 @@ else
   RUN_EXE := ./Gittan
 endif
 
+# Linux: under Wayland the compositor takes a window's icon from the
+# .desktop file named after its app_id (app.gittan.Gittan, which Gittan.lpr
+# sets with g_set_prgname), never from the executable, and shows a generic
+# one without it. The packages install dist/linux's desktop file and the
+# icons system wide; `make desktop` installs them for this checkout's Gittan
+# in the user's ~/.local/share, its Exec pointing here.
+DESKTOP_ID := app.gittan.Gittan
+XDG_DATA_HOME ?= $(HOME)/.local/share
+
+# Copies icons/png/gittan-<n>.png into the hicolor theme under $(1).
+define install_icons
+	for f in $(ICON_PNG_DIR)/gittan-*.png; do \
+	  n=$$(basename "$$f" .png); n=$${n#gittan-}; \
+	  d="$(1)/icons/hicolor/$${n}x$${n}/apps"; mkdir -p "$$d"; \
+	  cp "$$f" "$$d/$(DESKTOP_ID).png"; \
+	done
+endef
+
+desktop:
+	@set -e; $(call install_icons,$(XDG_DATA_HOME)); \
+	d="$(XDG_DATA_HOME)/applications"; mkdir -p "$$d"; \
+	sed 's|^Exec=.*|Exec="$(CURDIR)/Gittan" %f|' dist/linux/$(DESKTOP_ID).desktop \
+	  > "$$d/$(DESKTOP_ID).desktop"; \
+	touch "$(XDG_DATA_HOME)/icons/hicolor"; \
+	command -v update-desktop-database >/dev/null && update-desktop-database "$$d" || true; \
+	echo "wrote $$d/$(DESKTOP_ID).desktop"
+
+# Linux packages: a .deb and an .rpm made by fpm (gem install fpm; rpmbuild
+# for the .rpm) from the release build, staged under $(PKG_ROOT) as they
+# install: /usr/bin/gittan, the lexers in /usr/share/gittan/lexlib (which
+# gittan.lexers finds from the executable), the desktop file, the AppStream
+# metainfo and the icons. The .rpm owns /usr/share/gittan, so removing it
+# takes the folder too (dpkg removes an emptied folder itself). The packages
+# carry GITTAN_VERSION.
+PKG_ROOT := pkg/root
+PKG_ARCH ?= native
+FPM ?= fpm
+FPM_FLAGS = -s dir -n gittan -v $(GITTAN_VERSION) --license GPL-3.0-only \
+  --url https://gittan.app --maintainer "Björn Lindh" \
+  --description "Git Tree Analyzer & Navigator: a native git client built around the diff" \
+  -C $(PKG_ROOT) -p pkg/ -f
+
+packages: build
+	@set -e; rm -rf $(PKG_ROOT); \
+	mkdir -p $(PKG_ROOT)/usr/bin $(PKG_ROOT)/usr/share/gittan \
+	  $(PKG_ROOT)/usr/share/applications $(PKG_ROOT)/usr/share/metainfo; \
+	install -m 755 Gittan $(PKG_ROOT)/usr/bin/gittan; \
+	cp -r $(LEXLIB) $(PKG_ROOT)/usr/share/gittan/lexlib; \
+	install -m 644 dist/linux/$(DESKTOP_ID).desktop $(PKG_ROOT)/usr/share/applications/; \
+	install -m 644 dist/linux/$(DESKTOP_ID).metainfo.xml $(PKG_ROOT)/usr/share/metainfo/; \
+	$(call install_icons,$(PKG_ROOT)/usr/share)
+	$(FPM) $(FPM_FLAGS) -t deb -a $(PKG_ARCH) \
+	  --depends git --depends 'libgtk-3-0t64 | libgtk-3-0' .
+	$(FPM) $(FPM_FLAGS) -t rpm -a $(PKG_ARCH) --directories /usr/share/gittan \
+	  --depends git --depends 'libgtk-3.so.0()(64bit)' .
+
+version:
+	@echo $(GITTAN_VERSION)
+
 run: build
 	"$(RUN_EXE)" $(RUN_ARGS)
 
@@ -235,4 +307,4 @@ test:
 	$(TESTBIN) --all --format=plain $(TEST_ARGS)
 
 clean:
-	rm -rf lib $(LEXLIB) Gittan Gittan.app Gittan.exe tests/lib $(TESTBIN) $(TESTBIN).exe
+	rm -rf lib $(LEXLIB) pkg Gittan Gittan.app Gittan.exe tests/lib $(TESTBIN) $(TESTBIN).exe
