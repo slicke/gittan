@@ -8,7 +8,8 @@
   middle of the form (gittan.notice) shows what git and the hooks write
   as they run: at once for a push with a pre-push hook, which may run
   the tests, else after NoticeDelay, so a quick fetch shows none. A pull
-  that finds the branch diverged asks whether to merge or rebase, a
+  that finds the branch diverged asks whether to merge or rebase (a
+  branch rewritten here is asked about before, MenuPullClick), a
   push the remote rejects offers to pull first, or, when the upstream
   has commits the branch lacks (as after a rebase of pushed commits), to
   force the push with --force-with-lease; a forced push that finds the
@@ -771,8 +772,28 @@ begin
   StartRemote(rkFetch);
 end;
 
+{ A branch rewritten here since it was pushed has its old commits in the
+  upstream: a pull, merged or rebased, brings them back, so the question
+  comes before git runs, with Force Push first. }
 procedure TRepoFrame.MenuPullClick(Sender: TObject);
+var
+  Up, Msg: string;
 begin
+  if FRewritten and FHasUpstream and (FAhead > 0) and (FBehind > 0) and
+    (FRepo.Root <> '') and (FRemoteJob = nil) and (FCommitJob = nil) then
+  begin
+    Up := FRepo.Upstream(FBranch);
+    if FBehind = 1 then
+      Msg := Format(rsPullRewrittenOne, [FBranch, Up])
+    else
+      Msg := Format(rsPullRewritten, [FBranch, FBehind, Up]);
+    case AskDlg(rsPullRewrittenTitle, Msg, mtConfirmation, [mrNo, rsForcePushAction,
+        'IsDefault', mrYes, rsPullAnywayAction, mrCancel, rsCancelButton, 'IsCancel'], 0) of
+      mrNo: StartRemote(rkForcePush);
+      mrYes: StartRemote(rkPull);
+    end;
+    Exit;
+  end;
   StartRemote(rkPull);
 end;
 
@@ -859,7 +880,7 @@ end;
 procedure TRepoFrame.SyncPopupPick(Sender: TObject; AIndex: integer);
 begin
   case FSyncPopup.TagOf(AIndex) of
-    saPull: StartRemote(rkPull);
+    saPull: MenuPullClick(nil);
     saPush: StartRemote(rkPush);
     saForcePush: ForcePushAsk;
     saFetch: StartRemote(rkFetch);

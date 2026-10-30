@@ -2577,6 +2577,16 @@ resourcestring
   rsPullDivergedTitle = 'The Branch Has Diverged';
   rsPullDiverged = 'The branch and its upstream both have commits the other lacks. ' +
     'Merge them with a merge commit, or rebase your commits onto the upstream''s?';
+  rsPullRewrittenTitle = 'The Branch Was Rewritten';
+  rsPullRewrittenOne = '%s was rewritten here (rebased or amended) since it was pushed, ' +
+    'and %s still has the commit it replaced. A pull brings that commit back. A force ' +
+    'push puts the branch''s commits in its place instead; if someone pushed since the ' +
+    'last fetch, it is refused (--force-with-lease).';
+  rsPullRewritten = '%s was rewritten here (rebased or amended) since it was pushed, ' +
+    'and the %d commits it replaced are still on %s. A pull brings them back. A force ' +
+    'push puts the branch''s commits in their place instead; if someone pushed since the ' +
+    'last fetch, it is refused (--force-with-lease).';
+  rsPullAnywayAction = 'Pull Anyway';
   rsMergeAction = 'Merge';
   rsRebaseAction = 'Rebase';
   rsPushRejectedTitle = 'The Push Was Rejected';
@@ -6728,7 +6738,8 @@ begin
   if FOperation <> '' then
     Branch := Branch + ' · ' + OperationLabel;
   FNotOnRemote := ASnap.NotOnRemote;
-  FSummary.SetCommits(ASnap.Recent, FAhead, FBehind, FHasUpstream, FNotOnRemote);
+  FSummary.SetCommits(ASnap.Recent, FAhead, FBehind, FHasUpstream, FNotOnRemote,
+    FRewritten);
   { Not in the middle of a merge or rebase, which the Commit section
     finishes first. }
   if FOperation = '' then
