@@ -3,8 +3,8 @@ unit gittan.fileheader;
 {** The file header: a bar above the editor that names what it shows. On
   the left the badge and path of the file (the directory dimmed, the file
   name in full color, a dot after it while the editor holds unsaved
-  changes), on the right its added and deleted line counts, the lexer,
-  the menu chip (View, with a chevron: the view's modes, dropped by
+  changes), on the right its added and deleted line counts, the lexer
+  (a click on it fires OnLexer, for a list of the others), the menu chip (View, with a chevron: the view's modes, dropped by
   whoever owns the header), the toggle of the file's preview, the
   actions the view offers as pills (Edit, Save, Revert) and the change
   navigator for jumping between the changed blocks.
@@ -57,6 +57,8 @@ type
     FMenu, FMenuHint: string;
     FMenuRect: TRect;
     FOnMenu: TGittanHeaderMenuEvent;
+    FLexerRect: TRect;
+    FOnLexer: TGittanHeaderMenuEvent;
     FOnAction: TGittanHeaderActionEvent;
     FShowControls: boolean;
     FChangeCurrent, FChangeTotal: integer;
@@ -145,6 +147,9 @@ type
     property OnAction: TGittanHeaderActionEvent read FOnAction write FOnAction;
     property OnToggle: TNotifyEvent read FOnToggle write FOnToggle;
     property OnMenu: TGittanHeaderMenuEvent read FOnMenu write FOnMenu;
+    {** A click on the lexer's name, with its rectangle in screen
+      coordinates. }
+    property OnLexer: TGittanHeaderMenuEvent read FOnLexer write FOnLexer;
     {** Whether the pills and the navigator are shown here; True by default. }
     property ShowControls: boolean read FShowControls write SetShowControls;
     property ActionCount: integer read GetActionCount;
@@ -170,6 +175,7 @@ resourcestring
   rsBinary = 'binary';
   rsStaged = 'staged';
   rsPartlyStaged = 'partly staged';
+  rsLexerHint = 'Choose the syntax highlighting';
 
 const
   HeaderHeight = 36;
@@ -185,6 +191,7 @@ const
   { What ActionAt gives for the toggle and the menu chip; -1 is nothing. }
   HitToggle = -2;
   HitMenu = -3;
+  HitLexer = -4;
   ChevronWidth = 12;
 
 { TGittanFileHeader }
@@ -459,6 +466,8 @@ begin
     Exit(HitToggle);
   if (FMenu <> '') and Assigned(FOnMenu) and FMenuRect.Contains(Point(X, Y)) then
     Exit(HitMenu);
+  if (FLexer <> '') and Assigned(FOnLexer) and FLexerRect.Contains(Point(X, Y)) then
+    Exit(HitLexer);
   if not FShowControls then
     Exit(-1);
   for i := 0 to High(FActionRects) do
@@ -480,6 +489,8 @@ begin
     Hint := FToggleHint
   else if AValue = HitMenu then
     Hint := FMenuHint
+  else if AValue = HitLexer then
+    Hint := rsLexerHint
   else
     Hint := '';
   Invalidate;
@@ -534,6 +545,14 @@ begin
       FOnMenu(Self, Rect(ClientToScreen(FMenuRect.TopLeft).X,
         ClientToScreen(FMenuRect.TopLeft).Y, ClientToScreen(FMenuRect.BottomRight).X,
         ClientToScreen(FMenuRect.BottomRight).Y));
+    Exit;
+  end;
+  if Index = HitLexer then
+  begin
+    if Assigned(FOnLexer) then
+      FOnLexer(Self, Rect(ClientToScreen(FLexerRect.TopLeft).X,
+        ClientToScreen(FLexerRect.TopLeft).Y, ClientToScreen(FLexerRect.BottomRight).X,
+        ClientToScreen(FLexerRect.BottomRight).Y));
     Exit;
   end;
   if Assigned(FOnAction) then
@@ -656,7 +675,19 @@ begin
     Right := R.Left - Px(Gap);
   end;
   DrawRight(FNote, FDeletedColor);
-  DrawRight(FLexer, FDim);
+  { The lexer, in the hot color under the mouse while a click on it
+    offers the others. }
+  FLexerRect := Rect(0, 0, 0, 0);
+  if FLexer <> '' then
+  begin
+    W := Canvas.TextWidth(FLexer);
+    FLexerRect := Rect(Right - W, PillTop, Right, PillTop + Px(PillHeight));
+    if Assigned(FOnLexer) and ((FPressed = HitLexer) or ((FPressed = -1) and
+      (FHot = HitLexer))) then
+      DrawRight(FLexer, FHotColor)
+    else
+      DrawRight(FLexer, FDim);
+  end;
   if FHasCounts then
     if FBinary then
       DrawRight(rsBinary, FDim)

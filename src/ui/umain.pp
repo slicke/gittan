@@ -537,6 +537,10 @@ type
     FFetchItem, FPullItem, FPushItem, FForcePushItem: TMenuItem;
     FSyncPopup: TGittanPopupList;
     FRecentPopup: TGittanPopupList;
+    { The header's lexer name drops the lexers, Automatic and Plain
+      text first (FSyntaxPopupNames: the lexer of each item after them). }
+    FSyntaxPopup: TGittanPopupList;
+    FSyntaxPopupNames: TStringList;
     { What the change is made of, dropped from the summary's totals. }
     FCompositionPopup: TGittanPopupList;
     { The actions of a base that is a branch compared through the merge
@@ -1616,6 +1620,8 @@ type
     procedure UpdatePreviewToggle;
     procedure HeaderToggle(Sender: TObject);
     procedure HeaderMenu(Sender: TObject; const AScreenRect: TRect);
+    procedure HeaderLexer(Sender: TObject; const AScreenRect: TRect);
+    procedure SyntaxPopupPick(Sender: TObject; AIndex: integer);
     procedure ViewPopupPick(Sender: TObject; AIndex: integer);
     procedure MdSplitterMoved(Sender: TObject);
     procedure MdTimerTimer(Sender: TObject);
@@ -3753,6 +3759,7 @@ begin
   FHeader.OnAction := @HeaderAction;
   FHeader.OnToggle := @HeaderToggle;
   FHeader.OnMenu := @HeaderMenu;
+  FHeader.OnLexer := @HeaderLexer;
   FHeader.SetMenu(rsViewChip, rsViewChipHint);
   UpdateChangeNav;
   { The banner sits over the header, hidden until something fails. }
@@ -3967,6 +3974,10 @@ begin
   FSyncPopup := TGittanPopupList.Create(Self);
   FSyncPopup.Parent := Self;
   FSyncPopup.OnPick := @SyncPopupPick;
+  FSyntaxPopup := TGittanPopupList.Create(Self);
+  FSyntaxPopup.Parent := Self;
+  FSyntaxPopup.OnPick := @SyntaxPopupPick;
+  FSyntaxPopupNames := TStringList.Create;
   FRecentPopup := TGittanPopupList.Create(Self);
   FRecentPopup.Parent := Self;
   FRecentPopup.OnPick := @RecentPopupPick;
@@ -4250,6 +4261,7 @@ begin
   FGoneToDelete.Free;
   FUpstreamRows.Free;
   FPaletteNames.Free;
+  FSyntaxPopupNames.Free;
   FGoneBranches.Free;
   FLfsLockable.Free;
   StopBlame;
@@ -4573,7 +4585,7 @@ begin
   FTimelapseBar.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Accent);
   for List in [FBranchPopup, FStashPopup, FUpstreamPopup, FTagPopup, FViewPopup,
     FSubListPopup, FReflogPopup, FPullPopup, FReviewPopup, FSyncPopup, FRecentPopup,
-    FBasePopup, FConflictPopup, FFindPopup, FCompositionPopup, FWorktreePopup,
+    FSyntaxPopup, FBasePopup, FConflictPopup, FFindPopup, FCompositionPopup, FWorktreePopup,
     FPalettePopup, FPlanPopup] do
     List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
   FPaletteLeft.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border);
@@ -5359,6 +5371,10 @@ begin
   AddItem(ViewMenu, rsZoomOut, ShortCut(VK_OEM_MINUS, [ssModifier]), @MenuZoomOutClick);
   AddItem(ViewMenu, rsZoomReset, ShortCut(VK_0, [ssModifier]), @MenuZoomResetClick);
   AddItem(ViewMenu, rsFont, 0, @MenuFontClick);
+  { The lexer of the text shown, seldom changed, so not a menu of its
+    own; the header's lexer name offers the same list with a filter. }
+  FSyntaxMenu := AddItem(ViewMenu, rsSyntax, 0, nil);
+  BuildSyntaxMenu;
   Sub := AddItem(ViewMenu, rsSyntaxTheme, 0, nil);
   SetLength(FThemeItems, Length(SyntaxThemes));
   for i := 0 to High(SyntaxThemes) do
@@ -5369,11 +5385,6 @@ begin
     Item.Checked := i = FSyntaxTheme;
     FThemeItems[i] := Item;
   end;
-
-  FSyntaxMenu := TMenuItem.Create(Main);
-  FSyntaxMenu.Caption := rsSyntax;
-  Main.Items.Add(FSyntaxMenu);
-  BuildSyntaxMenu;
 
   GoMenu := TMenuItem.Create(Main);
   GoMenu.Caption := rsGo;
@@ -5541,6 +5552,46 @@ procedure TRepoFrame.MenuAutoLexerClick(Sender: TObject);
 begin
   FManualLexer := False;
   SetLexer(AutoLexer);
+end;
+
+{ The header's lexer name: the View > Syntax choices in one list with a
+  filter, the current one checked. }
+procedure TRepoFrame.HeaderLexer(Sender: TObject; const AScreenRect: TRect);
+var
+  Current: string;
+  i: integer;
+begin
+  if FAdapter.Lexer = nil then
+    Current := ''
+  else
+    Current := FAdapter.Lexer.LexerName;
+  FSyntaxPopup.Clear;
+  FSyntaxPopup.Add(StripHotkey(rsAutomatic), '', not FManualLexer, 0);
+  FSyntaxPopup.Add(StripHotkey(rsPlainText), '', FManualLexer and (Current = ''), 1);
+  FSyntaxPopup.AddHeader('');
+  FSyntaxPopupNames.Clear;
+  if App.Lexers.Loaded then
+    App.Lexers.GetNames(FSyntaxPopupNames);
+  for i := 0 to FSyntaxPopupNames.Count - 1 do
+    FSyntaxPopup.Add(FSyntaxPopupNames[i], '', FManualLexer and
+      (FSyntaxPopupNames[i] = Current), i + 2);
+  FSyntaxPopup.Popup(AScreenRect);
+end;
+
+procedure TRepoFrame.SyntaxPopupPick(Sender: TObject; AIndex: integer);
+var
+  Pick: PtrInt;
+begin
+  Pick := FSyntaxPopup.TagOf(AIndex);
+  if Pick = 0 then
+    MenuAutoLexerClick(nil)
+  else if Pick = 1 then
+    MenuSyntaxClick(FPlainTextItem)
+  else if (Pick >= 2) and (Pick - 2 < FSyntaxPopupNames.Count) then
+  begin
+    FManualLexer := True;
+    SetLexer(App.Lexers.ByName(FSyntaxPopupNames[Pick - 2]));
+  end;
 end;
 
 { ---------------------------------------------------------------------------
