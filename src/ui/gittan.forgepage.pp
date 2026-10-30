@@ -6,30 +6,49 @@ unit gittan.forgepage;
   wrote, or the open ones waiting for their review, no wider than
   MaxContentWidth, centered in a wider page.
   A card has a pull request glyph (in the ok color, dim for a draft),
-  the number and the title, at the right its state (Draft, Approved,
-  Changes requested, Review required) and its checks as chips, "Asked
-  again" on one the user is asked to review once more after reviewing
-  it, and under them the repository, who opened it and how long ago it
-  was opened and last changed, with a link to the forge at the right
-  end while the card is under the mouse, and under that link one to
-  the pull request's local clone (its Clone) when it is not the open
-  repository (SetOpenRoot). Filters as chips at the right of a
-  section's heading, or under it when they do not fit there, narrow it
-  (MineFilters, ReviewFilters, OnFilterChange; FilterPulls): the
-  user's own to those with feedback, those that need attention, no
-  drafts, the stale ones; the ones waiting for review to those asked of the user in
-  person, no drafts. What needs attention is changes asked for or
-  checks failing, either of which the user can leave out
-  (AttentionReasons) from the menu of a right click on its chip or from
-  the order's; a reason left out shows its card chip dim. After the
-  filters a chip with the section's order (MineOrder, ReviewOrder;
-  SortPulls) opens a menu of the orders: the last changed first, the
-  newest first and, of the user's own, the ones that need attention
-  first. A card fills under the mouse
-  and a click raises OnPick with the pull request, as one on its
-  clone's link does, for the owner to compare with it when it is the
-  open repository's, else in its clone, else to open it on the forge.
-  An empty section says so in a card of its own with a large dim glyph.
+  the number and the title, at the right where its review stands
+  (Draft, Approved, Changes requested, "Waiting for anna", "Waiting
+  for 2 reviewers", Review required; PullReviewNote) and its checks
+  ("✓ 5 checks", "2 of 5 checks failing", "checks pending";
+  PullChecksNote, the checks the user ignores left out) as chips,
+  "Asked again" on one the user is asked to review once more after
+  reviewing it, under them the repository, who opened it and how long
+  ago it was opened and last changed, with a link to the forge at the
+  right end while the card is under the mouse, then a dim line with
+  the reviewers ("anna approved · coderabbitai commented · waiting
+  for chef"; PullReviewers) and the checks by name ("Failing: npm
+  audit · Ignored: approval"; PullChecksDetail) when there is
+  something to say, and under that one a link to the pull request's
+  local clone (its Clone) when it is not the open repository
+  (SetOpenRoot). A click on the checks chip, with either button, opens
+  a menu of the checks by name, each a check item that ignores it or
+  counts it again (IgnoredChecks, kept by the owner on
+  OnFilterChange): an ignored check counts in neither the chip, the
+  filters nor the order, for a check that fails for reasons of its
+  own, say one that needs an approval the pull request still waits
+  for.
+  The filters are the forge's (SetFilters; TGittanForge.Filters, the
+  base's StandardFilters), as chips in rows under a section's
+  heading: the ones for the section, each on or off (MineFilters,
+  ReviewFilters, their keys joined with commas; OnFilterChange;
+  FilterPulls, every one on must pass), and after them a chip with the
+  section's order (MineOrder, ReviewOrder; SortPulls) that opens a
+  menu of the orders: the last changed first, the newest first and, of
+  the user's own, the ones that need attention first. What needs
+  attention is changes asked for or checks failing, either of which
+  the user can leave out (AttentionReasons) from the menu of a right
+  click on its chip or from the order's; a reason left out shows its
+  card chip dim. Over the filters a row of presets: All (no filter),
+  the forge's (TGittanForge.Presets) and the user's own (SetFilters'
+  APresets holds both, the own ones after; Presets), the one whose
+  filters are on highlighted, and, while the filters on match none,
+  "Save as preset…", which raises OnSavePreset for the owner to ask a
+  name and call AddPreset; a right click on an own preset offers to
+  delete it. A card fills under the mouse and a click raises OnPick
+  with the pull request, as one on its clone's link does, for the
+  owner to compare with it when it is the open repository's, else in
+  its clone, else to open it on the forge. An empty section says so in
+  a card of its own with a large dim glyph.
   The head has the login's initial in a disc, the forge's name and the
   page's title with Refresh (OnRefresh) after them, a dot pulsing in
   its place while the forge is asked, and under them the login with the
@@ -50,10 +69,8 @@ uses
   gittan.summary;
 
 const
-  {** The sections: the user's open pull requests and those waiting for
-    their review. }
-  fsMine = 0;
-  fsReview = 1;
+  {** The sections, as the owner's tabs count them: Ord of
+    TGittanForgeSection (gittan.forge). }
   SectionCount = 2;
 
 type
@@ -64,21 +81,39 @@ type
   TGittanForgeContextEvent = procedure(Sender: TObject; const APull: TGittanForgePull;
     const AScreenPos: TPoint) of object;
 
+  { A chip of a row: its text, the link a click follows, whether it is
+    on (in the link color), and whether it is dim (an offer, not a
+    state). }
+  TGittanChipSpec = record
+    Text, Link: string;
+    IsOn, Dim: boolean;
+  end;
+  TGittanChipSpecs = array of TGittanChipSpec;
+
+
   { TGittanForgePage }
 
   TGittanForgePage = class(TCustomControl)
   private
     FForge, FLogin, FError, FOpenRoot: string;
     FMine, FReview: TGittanForgePulls;
-    { The filters of each section, and the lists as they leave them. }
-    FMineFilters, FReviewFilters: TGittanForgeFilters;
+    { The forge's filters and the presets, the forge's then the user's
+      own; the filters on of each section as their keys; the checks
+      ignored by name; and the lists as the filters leave them. }
+    FDefs: TGittanForgeFilterDefs;
+    FPresets: TGittanForgePresets;
+    FMineKeys, FReviewKeys: string;
+    FIgnored: TStringList;
     FShownMine, FShownReview: TGittanForgePulls;
     { What needs attention, each section's order, and the menu of the
-      order and the reasons. }
+      order and the reasons, of a card's checks (FMenuPull) or of a
+      preset (FMenuPreset). }
     FAttention: TGittanAttentionReasons;
     FMineOrder, FReviewOrder: TGittanPullOrder;
     FMenu: TPopupMenu;
-    { The section shown: fsMine or fsReview. }
+    FMenuPull: TGittanForgePull;
+    FMenuPreset: integer;
+    { The section shown: Ord(fsMine) or Ord(fsReview). }
     FSection: integer;
     { FLoading while the forge is asked; FAnswered once it has answered,
       so an empty section says so only then. }
@@ -102,22 +137,30 @@ type
     FAvatarData: string;
     FAvatar, FAvatarShown: TBGRABitmap;
     FOnPick: TGittanForgePickEvent;
-    FOnRefresh, FOnFilterChange: TNotifyEvent;
+    FOnRefresh, FOnFilterChange, FOnSavePreset: TNotifyEvent;
     FOnOpenUrl: TGittanOpenUrlEvent;
     FOnContext: TGittanForgeContextEvent;
     {** The pull request whose card is at X, Y; false between them. }
     function CardAt(X, Y: integer; out APull: TGittanForgePull): boolean;
     function LinkAt(X, Y: integer): integer;
+    function CurSection: TGittanForgeSection;
+    function SectionKeysOf(ASection: TGittanForgeSection): string;
     procedure SetHot(AValue: integer);
-    procedure SetMineFilters(AValue: TGittanForgeFilters);
-    procedure SetReviewFilters(AValue: TGittanForgeFilters);
+    procedure SetMineFilters(const AValue: string);
+    procedure SetReviewFilters(const AValue: string);
+    procedure SetIgnoredChecks(AValue: TStringList);
     procedure SetSection(AValue: integer);
     procedure SetAttention(AValue: TGittanAttentionReasons);
     procedure SetMineOrder(AValue: TGittanPullOrder);
     procedure SetReviewOrder(AValue: TGittanPullOrder);
     procedure ShowMenu(AOrders: boolean; const AScreenPos: TPoint);
+    procedure ShowChecksMenu(const APull: TGittanForgePull; const AScreenPos: TPoint);
+    procedure ShowPresetMenu(AIndex: integer; const AScreenPos: TPoint);
     procedure MenuOrderClick(Sender: TObject);
     procedure MenuAttentionClick(Sender: TObject);
+    procedure MenuCheckClick(Sender: TObject);
+    procedure MenuDeletePresetClick(Sender: TObject);
+    procedure FilterChanged;
     procedure PulseTimer(Sender: TObject);
     procedure AddLink(const ARect: TRect; const AUrl: string);
     procedure PaintAvatar(ALeft, ATop, ASize: integer);
@@ -125,25 +168,22 @@ type
     procedure PaintPullGlyph(ALeft, ATop, ASize: integer; AColor: TColor);
     procedure PaintCheckGlyph(ALeft, ATop, ASize: integer; AColor: TColor);
     procedure PaintHeading(var Y: integer; const ATitle, ADetail: string;
-      const AChips: array of TGittanForgeFilter; AOn: TGittanForgeFilters;
-      AOrder: TGittanPullOrder; ALeft, ARight: integer);
-    function FilterChipsWidth(const AChips: array of TGittanForgeFilter;
-      AOrder: TGittanPullOrder): integer;
-    procedure PaintFilterChips(ALeft, ARight: integer; var ATop: integer;
-      const AChips: array of TGittanForgeFilter; AOn: TGittanForgeFilters;
-      AOrder: TGittanPullOrder);
+      AChips: boolean; ALeft, ARight: integer);
+    function PresetChips: TGittanChipSpecs;
+    function FilterChips: TGittanChipSpecs;
+    procedure PaintChipRow(ALeft, ARight: integer; var ATop: integer;
+      const AChips: array of TGittanChipSpec);
     procedure PaintNote(var Y: integer; const AText: string; AColor: TColor;
       ALeft, ARight: integer);
     procedure PaintEmpty(var Y: integer; const ATitle, AText: string; ACheck: boolean;
       ALeft, ARight: integer);
-    function PaintChip(ARight, ATop: integer; const AText: string; AColor: TColor): integer;
+    function PaintChip(ARight, ATop: integer; const AText: string; AColor: TColor): TRect;
     procedure PaintCard(var Y: integer; const APull: TGittanForgePull; ALeft, ARight: integer;
-      const ALink: string);
+      const ALink: string; AIndex: integer);
     function PullLine(const APull: TGittanForgePull): string;
     procedure PaintSection(var Y: integer; const ATitle: string; const APulls: TGittanForgePulls;
       ATotal: integer; const AEmptyTitle, AEmpty, ALinkPrefix: string; AEmptyCheck: boolean;
-      const AChips: array of TGittanForgeFilter; AOn: TGittanForgeFilters;
-      AOrder: TGittanPullOrder; ALeft, ARight: integer);
+      ALeft, ARight: integer);
     procedure PaintContent;
     procedure Layout;
   protected
@@ -176,6 +216,15 @@ type
     {** Forgets that the forge answered (another forge or account), so
       an empty section says nothing until the new one has. }
     procedure ForgetAnswer;
+    {** The forge's filters (its Filters) and the presets to offer: the
+      forge's (its Presets) and the user's own after them (ParsePresets
+      of the settings' value). }
+    procedure SetFilters(const ADefs: TGittanForgeFilterDefs;
+      const APresets: TGittanForgePresets);
+    {** Adds a preset of the user's own, of the section shown with the
+      filters on now, named AName (PresetName); one of the section with
+      that name is replaced. Raises OnFilterChange. }
+    procedure AddPreset(const AName: string);
     {** The palette: the background, the text, the dim text, the fill
       under the mouse, the dividers, the links, the ok, the warning and
       the error colors. }
@@ -191,12 +240,18 @@ type
       sits in, so its background covers the box), and no higher than its
       content needs beyond that. }
     procedure FitHeight(AMin: integer);
-    {** The filters of the user's pull requests (ffFeedback,
-      ffAttention, ffNoDrafts, ffStale) and of those waiting for their review
-      (ffAskedOfMe, ffNoDrafts); a click on a chip changes them and
-      raises OnFilterChange. }
-    property MineFilters: TGittanForgeFilters read FMineFilters write SetMineFilters;
-    property ReviewFilters: TGittanForgeFilters read FReviewFilters write SetReviewFilters;
+    {** The filters on in each section, their keys joined with commas
+      (a key the forge lacks is kept but does nothing); a click on a
+      chip changes them and raises OnFilterChange. }
+    property MineFilters: string read FMineKeys write SetMineFilters;
+    property ReviewFilters: string read FReviewKeys write SetReviewFilters;
+    {** The checks that do not count, by name; the checks menu changes
+      them and raises OnFilterChange. }
+    property IgnoredChecks: TStringList read FIgnored write SetIgnoredChecks;
+    {** The presets as given to SetFilters, with the ones the user added
+      or without the ones they deleted since (the own ones are the
+      settings', JoinPresets). }
+    property Presets: TGittanForgePresets read FPresets;
     {** What makes one of the user's pull requests need attention, for
       its filter and its order; all of them by default. The menus
       change it and raise OnFilterChange. }
@@ -206,9 +261,12 @@ type
       chip changes it and raises OnFilterChange. }
     property MineOrder: TGittanPullOrder read FMineOrder write SetMineOrder;
     property ReviewOrder: TGittanPullOrder read FReviewOrder write SetReviewOrder;
-    {** The section shown, fsMine (the default) or fsReview. }
+    {** The section shown, Ord(fsMine) (the default) or Ord(fsReview). }
     property Section: integer read FSection write SetSection;
     property OnFilterChange: TNotifyEvent read FOnFilterChange write FOnFilterChange;
+    {** A click on "Save as preset…": the owner asks a name and calls
+      AddPreset. }
+    property OnSavePreset: TNotifyEvent read FOnSavePreset write FOnSavePreset;
     property OnPick: TGittanForgePickEvent read FOnPick write FOnPick;
     {** A right click on a card, for a menu. }
     property OnContext: TGittanForgeContextEvent read FOnContext write FOnContext;
@@ -234,11 +292,10 @@ resourcestring
   rsManyOpen = '%d open';
   rsSomeOpen = '%d of %d open';
   rsToReview = '%d to review';
-  rsFeedbackChip = 'With feedback';
-  rsAttentionChip = 'Needs attention';
-  rsNoDraftsChip = 'No drafts';
-  rsAskedOfMeChip = 'Asked of me';
-  rsStaleChip = 'Stale';
+  rsAllChip = 'All';
+  rsSavePresetChip = 'Save as preset…';
+  rsDeletePreset = 'Delete Preset “%s”';
+  rsIgnoreCheck = 'Ignore Check “%s”';
   rsNoMatch = 'None of them match the filters.';
   rsOrderUpdated = 'Last updated';
   rsOrderNewest = 'Newest';
@@ -255,13 +312,7 @@ resourcestring
   rsForgeLink = '%s ↗';
   rsCloneLink = 'Open %s';
   rsDraft = 'Draft';
-  rsApproved = 'Approved';
-  rsChangesRequested = 'Changes requested';
-  rsReviewRequired = 'Review required';
   rsAskedAgain = 'Asked again';
-  rsChecksOk = '✓ checks';
-  rsChecksFailing = 'checks failing';
-  rsChecksPending = 'checks pending';
   rsOpened = 'opened %s';
   rsUpdated = 'updated %s';
 
@@ -270,6 +321,10 @@ const
   ReviewLink = 'gittan:review:';
   RefreshLink = 'gittan:refresh';
   FilterLink = 'gittan:filter:';
+  PresetLink = 'gittan:preset:';
+  AllPresetLink = 'gittan:preset:all';
+  SavePresetLink = 'gittan:savepreset';
+  ChecksLink = 'gittan:checks:';
   OrderLink = 'gittan:order';
   OrderGlyph = ' ▾';
   RefreshGlyph = '↻';
@@ -279,7 +334,8 @@ const
   { The content no wider than this, centered in a wider page. }
   MaxContentWidth = 960;
   { The cards: their padding and corner radius; the chips at their
-    right; the room between the glyph and the text. }
+    right; the room between the glyph and the text; the room between
+    two of their lines. }
   CardPadX = 14;
   CardPadY = 10;
   CardRadius = 12;
@@ -288,6 +344,7 @@ const
   ChipPadX = 6;
   ChipPadY = 2;
   ChipRadius = 6;
+  LineGap = 4;
   { An empty section's card: its glyph and the room above and below. }
   EmptyGlyph = 30;
   EmptyPadY = 22;
@@ -295,9 +352,6 @@ const
   FilterPadX = 10;
   FilterPadY = 2;
   FilterGap = 6;
-  { The filters each section has, as chips. }
-  MineChips: array[0..3] of TGittanForgeFilter = (ffFeedback, ffAttention, ffNoDrafts, ffStale);
-  ReviewChips: array[0..1] of TGittanForgeFilter = (ffAskedOfMe, ffNoDrafts);
   { The dot pulsing while the forge is asked: its size, its timer's
     step and the steps of one pulse. }
   DotSize = 8;
@@ -306,13 +360,20 @@ const
 
 function SectionCaption(ASection: integer): string;
 begin
-  if ASection = fsReview then
+  if ASection = Ord(fsReview) then
     Result := rsReviewTab
   else
     Result := rsMineTab;
 end;
 
-{ TGittanForgePage }
+{ A chip of a row. }
+function Chip(const AText, ALink: string; AOn: boolean; ADim: boolean = False): TGittanChipSpec;
+begin
+  Result.Text := AText;
+  Result.Link := ALink;
+  Result.IsOn := AOn;
+  Result.Dim := ADim;
+end;
 
 constructor TGittanForgePage.Create(AOwner: TComponent);
 begin
@@ -324,7 +385,11 @@ begin
     clGreen, clOlive, clRed);
   FCard := clBtnFace;
   FAttention := AllAttentionReasons;
+  FDefs := StandardFilters;
+  FPresets := StandardPresets;
+  FIgnored := TStringList.Create;
   FMenu := TPopupMenu.Create(Self);
+  FMenuPreset := -1;
   FPulse := TTimer.Create(Self);
   FPulse.Enabled := False;
   FPulse.Interval := PulseStep;
@@ -335,6 +400,7 @@ destructor TGittanForgePage.Destroy;
 begin
   FAvatarShown.Free;
   FAvatar.Free;
+  FIgnored.Free;
   inherited Destroy;
 end;
 
@@ -410,21 +476,21 @@ begin
   Invalidate;
 end;
 
-procedure TGittanForgePage.SetMineFilters(AValue: TGittanForgeFilters);
+procedure TGittanForgePage.SetMineFilters(const AValue: string);
 begin
-  if FMineFilters = AValue then
+  if FMineKeys = AValue then
     Exit;
-  FMineFilters := AValue;
+  FMineKeys := AValue;
   FHot := -1;
   Layout;
   Invalidate;
 end;
 
-procedure TGittanForgePage.SetReviewFilters(AValue: TGittanForgeFilters);
+procedure TGittanForgePage.SetReviewFilters(const AValue: string);
 begin
-  if FReviewFilters = AValue then
+  if FReviewKeys = AValue then
     Exit;
-  FReviewFilters := AValue;
+  FReviewKeys := AValue;
   FHot := -1;
   Layout;
   Invalidate;
@@ -487,6 +553,7 @@ end;
 { The menu at AScreenPos: with AOrders the section's orders, the one it
   has checked; for the user's own the reasons that need attention,
   those counted checked. }
+
 procedure TGittanForgePage.ShowMenu(AOrders: boolean; const AScreenPos: TPoint);
 var
   Shown, Last: TGittanPullOrder;
@@ -505,7 +572,7 @@ var
 
 begin
   FMenu.Items.Clear;
-  if FSection = fsReview then
+  if CurSection = fsReview then
   begin
     Shown := FReviewOrder;
     Last := poNewest;
@@ -526,7 +593,7 @@ begin
       Item.OnClick := @MenuOrderClick;
       FMenu.Items.Add(Item);
     end;
-  if FSection <> fsReview then
+  if CurSection <> fsReview then
   begin
     if AOrders then
       FMenu.Items.Add(NewLine);
@@ -537,12 +604,15 @@ begin
     FMenu.PopUp(AScreenPos.X, AScreenPos.Y);
 end;
 
+{ The menu of APull's checks at AScreenPos: each by name as a check
+  item, checked while ignored. }
+
 procedure TGittanForgePage.MenuOrderClick(Sender: TObject);
 var
   O: TGittanPullOrder;
 begin
   O := TGittanPullOrder((Sender as TMenuItem).Tag);
-  if FSection = fsReview then
+  if CurSection = fsReview then
     SetReviewOrder(O)
   else
     SetMineOrder(O);
@@ -557,20 +627,6 @@ begin
     FOnFilterChange(Self);
 end;
 
-{ A filter's chip caption. }
-function FilterCaption(AFilter: TGittanForgeFilter): string;
-begin
-  case AFilter of
-    ffFeedback: Result := rsFeedbackChip;
-    ffAttention: Result := rsAttentionChip;
-    ffNoDrafts: Result := rsNoDraftsChip;
-    ffAskedOfMe: Result := rsAskedOfMeChip;
-    ffStale: Result := rsStaleChip;
-  else
-    Result := '';
-  end;
-end;
-
 procedure TGittanForgePage.SetSection(AValue: integer);
 begin
   if FSection = AValue then
@@ -580,6 +636,268 @@ begin
   Layout;
   Invalidate;
 end;
+
+function TGittanForgePage.CurSection: TGittanForgeSection;
+begin
+  if FSection = Ord(fsReview) then
+    Result := fsReview
+  else
+    Result := fsMine;
+end;
+
+{ The keys on in ASection, only the ones the forge has for it. }
+function TGittanForgePage.SectionKeysOf(ASection: TGittanForgeSection): string;
+begin
+  if ASection = fsReview then
+    Result := KnownKeys(FReviewKeys, FDefs, fsReview)
+  else
+    Result := KnownKeys(FMineKeys, FDefs, fsMine);
+end;
+
+procedure TGittanForgePage.SetIgnoredChecks(AValue: TStringList);
+begin
+  if AValue = nil then
+    FIgnored.Clear
+  else
+    FIgnored.Assign(AValue);
+  FHot := -1;
+  Layout;
+  Invalidate;
+end;
+
+procedure TGittanForgePage.SetFilters(const ADefs: TGittanForgeFilterDefs;
+  const APresets: TGittanForgePresets);
+begin
+  FDefs := Copy(ADefs);
+  FPresets := Copy(APresets);
+  FHot := -1;
+  Layout;
+  Invalidate;
+end;
+
+procedure TGittanForgePage.AddPreset(const AName: string);
+var
+  PName: string;
+  i, n: integer;
+begin
+  PName := PresetName(AName);
+  if PName = '' then
+    Exit;
+  n := -1;
+  for i := 0 to High(FPresets) do
+    if FPresets[i].Own and (FPresets[i].Section = CurSection) and
+      SameText(FPresets[i].Name, PName) then
+      n := i;
+  if n < 0 then
+  begin
+    n := Length(FPresets);
+    SetLength(FPresets, n + 1);
+  end;
+  FPresets[n].Name := PName;
+  FPresets[n].Section := CurSection;
+  FPresets[n].Keys := SectionKeysOf(CurSection);
+  FPresets[n].Own := True;
+  FilterChanged;
+end;
+
+{ After a change of the filters, the ignored checks or the presets:
+  the layout, and the owner told. }
+
+procedure TGittanForgePage.FilterChanged;
+begin
+  FHot := -1;
+  Layout;
+  Invalidate;
+  if Assigned(FOnFilterChange) then
+    FOnFilterChange(Self);
+end;
+
+procedure TGittanForgePage.ShowChecksMenu(const APull: TGittanForgePull;
+  const AScreenPos: TPoint);
+var
+  i: integer;
+  Item: TMenuItem;
+begin
+  if Length(APull.CheckList) = 0 then
+    Exit;
+  FMenuPull := APull;
+  FMenu.Items.Clear;
+  for i := 0 to High(APull.CheckList) do
+  begin
+    Item := TMenuItem.Create(FMenu);
+    Item.Caption := Format(rsIgnoreCheck, [APull.CheckList[i].Name]);
+    Item.Tag := i;
+    Item.Checked := IsIgnoredCheck(APull.CheckList[i].Name, FIgnored);
+    Item.OnClick := @MenuCheckClick;
+    FMenu.Items.Add(Item);
+  end;
+  FMenu.PopUp(AScreenPos.X, AScreenPos.Y);
+end;
+
+{ The menu of the user's own preset AIndex at AScreenPos: deleting it. }
+procedure TGittanForgePage.ShowPresetMenu(AIndex: integer; const AScreenPos: TPoint);
+var
+  Item: TMenuItem;
+begin
+  if (AIndex < 0) or (AIndex > High(FPresets)) or not FPresets[AIndex].Own then
+    Exit;
+  FMenuPreset := AIndex;
+  FMenu.Items.Clear;
+  Item := TMenuItem.Create(FMenu);
+  Item.Caption := Format(rsDeletePreset, [FPresets[AIndex].Name]);
+  Item.OnClick := @MenuDeletePresetClick;
+  FMenu.Items.Add(Item);
+  FMenu.PopUp(AScreenPos.X, AScreenPos.Y);
+end;
+
+procedure TGittanForgePage.MenuCheckClick(Sender: TObject);
+var
+  i, n: integer;
+  CheckName: string;
+begin
+  n := (Sender as TMenuItem).Tag;
+  if (n < 0) or (n > High(FMenuPull.CheckList)) then
+    Exit;
+  CheckName := FMenuPull.CheckList[n].Name;
+  if IsIgnoredCheck(CheckName, FIgnored) then
+    for i := FIgnored.Count - 1 downto 0 do
+    begin
+      if SameText(FIgnored[i], CheckName) then
+        FIgnored.Delete(i);
+    end
+  else
+    FIgnored.Add(CheckName);
+  FilterChanged;
+end;
+
+
+procedure TGittanForgePage.MenuDeletePresetClick(Sender: TObject);
+var
+  i: integer;
+begin
+  if (FMenuPreset < 0) or (FMenuPreset > High(FPresets)) or not FPresets[FMenuPreset].Own then
+    Exit;
+  for i := FMenuPreset to High(FPresets) - 1 do
+    FPresets[i] := FPresets[i + 1];
+  SetLength(FPresets, Length(FPresets) - 1);
+  FMenuPreset := -1;
+  FilterChanged;
+end;
+
+{ A section's heading: ATitle in bold with ADetail dim after it, a
+  divider, and with AChips the rows of the presets and the filters
+  under it, the order's chip at the end of the filters. }
+
+function TGittanForgePage.PresetChips: TGittanChipSpecs;
+var
+  Keys: string;
+  i, n: integer;
+begin
+  Keys := SectionKeysOf(CurSection);
+  Result := nil;
+  SetLength(Result, Length(FPresets) + 2);
+  Result[0] := Chip(rsAllChip, AllPresetLink, Keys = '');
+  n := 1;
+  for i := 0 to High(FPresets) do
+    if FPresets[i].Section = CurSection then
+    begin
+      Result[n] := Chip(FPresets[i].Name, PresetLink + IntToStr(i), SameKeys(FPresets[i].Keys,
+        Keys));
+      Inc(n);
+    end;
+  if (Keys <> '') and (FindPreset(FPresets, CurSection, Keys) < 0) then
+  begin
+    Result[n] := Chip(rsSavePresetChip, SavePresetLink, False, True);
+    Inc(n);
+  end;
+  SetLength(Result, n);
+end;
+
+{ The filters row of the section shown: the forge's filters for it,
+  the ones on marked, and the order's chip with a glyph for its menu. }
+
+function TGittanForgePage.FilterChips: TGittanChipSpecs;
+var
+  Defs: TGittanForgeFilterDefs;
+  Keys: string;
+  i: integer;
+  Order: TGittanPullOrder;
+begin
+  Defs := SectionFilters(FDefs, CurSection);
+  Keys := SectionKeysOf(CurSection);
+  if CurSection = fsReview then
+    Order := FReviewOrder
+  else
+    Order := FMineOrder;
+  Result := nil;
+  SetLength(Result, Length(Defs) + 1);
+  for i := 0 to High(Defs) do
+    Result[i] := Chip(Defs[i].Caption, FilterLink + Defs[i].Key, HasKey(Keys, Defs[i].Key));
+  Result[High(Result)] := Chip(OrderCaption(Order) + OrderGlyph, OrderLink, False);
+end;
+
+{ The chips of AChips from ALeft, their text on the line at ATop: a
+  rounded outline with the caption dim, filled under the mouse; one
+  that is on in a tint of the link color with its caption and outline
+  in it; a dim one with its caption dimmer still, an offer. A chip
+  that would cross ARight starts a line under them at ALeft; ATop
+  comes back as the last line's. }
+
+procedure TGittanForgePage.PaintChipRow(ALeft, ARight: integer; var ATop: integer;
+  const AChips: array of TGittanChipSpec);
+var
+  i, TextH, W, LineLeft: integer;
+  R: TRect;
+begin
+  FC.Font := Font;
+  TextH := FC.TextHeight('Xg');
+  LineLeft := ALeft;
+  for i := 0 to High(AChips) do
+  begin
+    W := FC.TextWidth(AChips[i].Text) + 2 * Px(FilterPadX);
+    if (ALeft > LineLeft) and (ALeft + W > ARight) then
+    begin
+      ALeft := LineLeft;
+      Inc(ATop, TextH + 2 * Px(FilterPadY) + Px(FilterGap));
+    end;
+    R := Rect(ALeft, ATop - Px(FilterPadY), ALeft + W, ATop + TextH + Px(FilterPadY));
+    AddLink(R, AChips[i].Link);
+    FC.Pen.Style := psSolid;
+    FC.Brush.Style := bsSolid;
+    if AChips[i].IsOn then
+    begin
+      FC.Pen.Color := FLink;
+      FC.Brush.Color := MixColor(FBack, FLink, 0.18);
+    end
+    else
+    begin
+      if AChips[i].Dim then
+        FC.Pen.Color := MixColor(FBack, FLine, 0.6)
+      else
+        FC.Pen.Color := FLine;
+      if FHot = High(FLinkRects) then
+        FC.Brush.Color := FHover
+      else
+        FC.Brush.Color := FBack;
+    end;
+    FC.RoundRect(R, R.Height, R.Height);
+    FC.Brush.Style := bsClear;
+    if AChips[i].IsOn then
+      FC.Font.Color := FLink
+    else if FHot = High(FLinkRects) then
+      FC.Font.Color := FText
+    else if AChips[i].Dim then
+      FC.Font.Color := MixColor(FBack, FDim, 0.7)
+    else
+      FC.Font.Color := FDim;
+    FC.TextOut(R.Left + Px(FilterPadX), ATop, AChips[i].Text);
+    ALeft := R.Right + Px(FilterGap);
+  end;
+  FC.Font := Font;
+end;
+
+{ A chip ending at ARight with its text in AColor on the hover fill;
+  gives its rectangle. }
 
 procedure TGittanForgePage.PulseTimer(Sender: TObject);
 begin
@@ -636,6 +954,7 @@ end;
 
 { The content painted on the measuring canvas, for its height; the
   height is set here, never in Paint. }
+
 procedure TGittanForgePage.Layout;
 var
   H: integer;
@@ -692,6 +1011,7 @@ end;
   on the hover fill;
   without one the login's initial, in the link color; empty in the hover
   fill before the forge has said who. }
+
 procedure TGittanForgePage.PaintAvatar(ALeft, ATop, ASize: integer);
 var
   Initial: string;
@@ -749,6 +1069,7 @@ end;
 
 { Refresh as a round button ASize across, filled under the mouse; while
   the forge is asked, a dot pulsing in its place instead. }
+
 procedure TGittanForgePage.PaintRefresh(ALeft, ATop, ASize: integer);
 var
   R: TRect;
@@ -792,6 +1113,7 @@ end;
 { A pull request glyph in a square ASize across: at the left a branch
   between two rings, at the right a ring with a line up from it that
   turns left into an arrow. }
+
 procedure TGittanForgePage.PaintPullGlyph(ALeft, ATop, ASize: integer; AColor: TColor);
 var
   W, Rad, X1, X2, YT, YB, XA, A: integer;
@@ -842,12 +1164,12 @@ end;
   and AOrder's after them,
   at the right of the title's line when they fit there, else on lines
   of their own under the divider. }
+
 procedure TGittanForgePage.PaintHeading(var Y: integer; const ATitle, ADetail: string;
-  const AChips: array of TGittanForgeFilter; AOn: TGittanForgeFilters;
-  AOrder: TGittanPullOrder; ALeft, ARight: integer);
+  AChips: boolean; ALeft, ARight: integer);
 var
-  TextH, X, ChipsW, At: integer;
-  OnLine: boolean;
+  TextH, X: integer;
+  Chips: TGittanChipSpecs;
 begin
   Inc(Y, Px(Pad));
   FC.Font := Font;
@@ -859,112 +1181,30 @@ begin
   X := ALeft + FC.TextWidth(ATitle) + Px(Gap) div 2;
   FC.Font.Style := [];
   if ADetail <> '' then
-  begin
     FC.TextOut(X, Y, ADetail);
-    Inc(X, FC.TextWidth(ADetail));
-  end;
-  ChipsW := FilterChipsWidth(AChips, AOrder);
-  OnLine := (Length(AChips) > 0) and (X + Px(Gap) + ChipsW <= ARight);
-  if OnLine then
-  begin
-    At := Y;
-    PaintFilterChips(ARight - ChipsW, ARight, At, AChips, AOn, AOrder);
-  end;
   Inc(Y, TextH + Px(Gap) div 2);
   FC.Pen.Style := psSolid;
   FC.Pen.Color := FLine;
   FC.Line(ALeft, Y, ARight, Y);
   Inc(Y, Px(Gap) div 2);
-  if (Length(AChips) > 0) and not OnLine then
+  if not AChips then
+    Exit;
+  Chips := PresetChips;
+  if Length(Chips) > 1 then
   begin
     Inc(Y, Px(FilterPadY));
-    PaintFilterChips(ALeft, ARight, Y, AChips, AOn, AOrder);
+    PaintChipRow(ALeft, ARight, Y, Chips);
     Inc(Y, TextH + Px(FilterPadY) + Px(Gap) div 2);
   end;
+  Inc(Y, Px(FilterPadY));
+  PaintChipRow(ALeft, ARight, Y, FilterChips);
+  Inc(Y, TextH + Px(FilterPadY) + Px(Gap) div 2);
 end;
 
-{ The width of the chips of AChips side by side, AOrder's after them. }
-function TGittanForgePage.FilterChipsWidth(const AChips: array of TGittanForgeFilter;
-  AOrder: TGittanPullOrder): integer;
-var
-  i: integer;
-begin
-  FC.Font := Font;
-  Result := 0;
-  for i := 0 to High(AChips) do
-    Inc(Result, FC.TextWidth(FilterCaption(AChips[i])) + 2 * Px(FilterPadX) + Px(FilterGap));
-  Inc(Result, FC.TextWidth(OrderCaption(AOrder) + OrderGlyph) + 2 * Px(FilterPadX));
-end;
-
-{ The chips of AChips from ALeft, their text on the line at ATop: a
-  rounded outline with the caption dim, filled under the mouse; one in
-  AOn in a tint of the link color with its caption and outline in it.
-  After them AOrder's, as one that is off, with a glyph for its menu.
-  A chip that would cross ARight starts a line under them at ALeft;
-  ATop comes back as the last line's. }
-procedure TGittanForgePage.PaintFilterChips(ALeft, ARight: integer; var ATop: integer;
-  const AChips: array of TGittanForgeFilter; AOn: TGittanForgeFilters;
-  AOrder: TGittanPullOrder);
-var
-  i, TextH, W, LineLeft: integer;
-  R: TRect;
-  ChipText: string;
-  IsOn: boolean;
-begin
-  FC.Font := Font;
-  TextH := FC.TextHeight('Xg');
-  LineLeft := ALeft;
-  for i := 0 to High(AChips) + 1 do
-  begin
-    if i > High(AChips) then
-    begin
-      ChipText := OrderCaption(AOrder) + OrderGlyph;
-      IsOn := False;
-    end
-    else
-    begin
-      ChipText := FilterCaption(AChips[i]);
-      IsOn := AChips[i] in AOn;
-    end;
-    W := FC.TextWidth(ChipText) + 2 * Px(FilterPadX);
-    if (ALeft > LineLeft) and (ALeft + W > ARight) then
-    begin
-      ALeft := LineLeft;
-      Inc(ATop, TextH + 2 * Px(FilterPadY) + Px(FilterGap));
-    end;
-    R := Rect(ALeft, ATop - Px(FilterPadY), ALeft + W, ATop + TextH + Px(FilterPadY));
-    if i > High(AChips) then
-      AddLink(R, OrderLink)
-    else
-      AddLink(R, FilterLink + IntToStr(Ord(AChips[i])));
-    FC.Pen.Style := psSolid;
-    FC.Brush.Style := bsSolid;
-    if IsOn then
-    begin
-      FC.Pen.Color := FLink;
-      FC.Brush.Color := MixColor(FBack, FLink, 0.18);
-    end
-    else
-    begin
-      FC.Pen.Color := FLine;
-      if FHot = High(FLinkRects) then
-        FC.Brush.Color := FHover
-      else
-        FC.Brush.Color := FBack;
-    end;
-    FC.RoundRect(R, R.Height, R.Height);
-    FC.Brush.Style := bsClear;
-    if IsOn then
-      FC.Font.Color := FLink
-    else if FHot = High(FLinkRects) then
-      FC.Font.Color := FText
-    else
-      FC.Font.Color := FDim;
-    FC.TextOut(R.Left + Px(FilterPadX), ATop, ChipText);
-    ALeft := R.Right + Px(FilterGap);
-  end;
-  FC.Font := Font;
-end;
+{ The presets row of the section shown: All, on while no filter is;
+  the presets of the section, the one whose filters are on; and, while
+  the filters on match none, Save as preset. Only All when the section
+  has no presets. }
 
 { A paragraph in AColor, wrapped between ALeft and ARight. }
 procedure TGittanForgePage.PaintNote(var Y: integer; const AText: string; AColor: TColor;
@@ -993,6 +1233,7 @@ end;
   glyph (a check in a ring with ACheck, else a pull request's), ATitle
   in bold under it when there is one, and AText dim, wrapped, all
   centered. }
+
 procedure TGittanForgePage.PaintEmpty(var Y: integer; const ATitle, AText: string;
   ACheck: boolean; ALeft, ARight: integer);
 var
@@ -1042,10 +1283,10 @@ end;
 
 { A chip ending at ARight with its text in AColor on the hover fill;
   gives its left edge. }
+
 function TGittanForgePage.PaintChip(ARight, ATop: integer; const AText: string;
-  AColor: TColor): integer;
+  AColor: TColor): TRect;
 var
-  R: TRect;
   W, H: integer;
 begin
   FC.Font := Font;
@@ -1054,22 +1295,29 @@ begin
     FC.Font.Size := 9;
   W := FC.TextWidth(AText) + 2 * Px(ChipPadX);
   H := FC.TextHeight(AText) + 2 * Px(ChipPadY);
-  R := Rect(ARight - W, ATop, ARight, ATop + H);
+  Result := Rect(ARight - W, ATop, ARight, ATop + H);
   FC.Pen.Style := psClear;
   FC.Brush.Style := bsSolid;
   FC.Brush.Color := FHover;
-  FC.RoundRect(R, Px(ChipRadius), Px(ChipRadius));
+  FC.RoundRect(Result, Px(ChipRadius), Px(ChipRadius));
   FC.Pen.Style := psSolid;
   FC.Brush.Style := bsClear;
   FC.Font.Color := AColor;
-  FC.TextOut(R.Left + Px(ChipPadX), R.Top + Px(ChipPadY), AText);
+  FC.TextOut(Result.Left + Px(ChipPadX), Result.Top + Px(ChipPadY), AText);
   FC.Font := Font;
   FC.Brush.Style := bsClear;
-  Result := R.Left;
 end;
 
-{ The second line of a card after the repository: who opened it, how
-  long ago it was opened and last changed. }
+{ A card between ALeft and ARight: the pull request glyph, the number
+  dimmed and the title in bold, the chips of the review and the checks
+  at the right (the checks' a link to their menu, ChecksLink with
+  AIndex, when the forge named them), the second line under them with
+  the repository first and the forge link at its right end while the
+  card is under the mouse, the reviewers and the checks by name dim
+  under that when there is something to say, and the link to its
+  clone under those, which ALink, the card's own, picks too. The card
+  and its links are under the mouse together. }
+
 function TGittanForgePage.PullLine(const APull: TGittanForgePull): string;
 var
   UtcNow: TDateTime;
@@ -1101,15 +1349,17 @@ end;
   mouse, and the link to its clone under that, which ALink, the card's
   own, picks too. The card and its links are under the mouse
   together. }
+
 procedure TGittanForgePage.PaintCard(var Y: integer; const APull: TGittanForgePull;
-  ALeft, ARight: integer; const ALink: string);
+  ALeft, ARight: integer; const ALink: string; AIndex: integer);
 var
-  R, LinkR: TRect;
+  R, LinkR, ChipR: TRect;
   TextH, CardH, Right, X, TextX, LineY, ChipTop, First, Links: integer;
-  Number, Repo, Rest, ForgeLink, CloneLink: string;
+  Number, Repo, Rest, ForgeLink, CloneLink, Note, Detail, Part: string;
   Lines: integer;
-  HasClone, HasForge, Hot: boolean;
+  HasClone, HasForge, HasChecksMenu, Hot: boolean;
   GlyphColor, Tone: TColor;
+  Checks: TGittanChecksState;
 begin
   FC.Font := Font;
   FC.Brush.Style := bsClear;
@@ -1117,13 +1367,24 @@ begin
   HasClone := (APull.Clone <> '') and Assigned(FOnPick) and
     not SameFileName(APull.Clone, FOpenRoot);
   HasForge := (APull.Url <> '') and Assigned(FOnOpenUrl);
+  HasChecksMenu := Length(APull.CheckList) > 0;
+  Detail := PullReviewers(APull, FLogin);
+  Part := PullChecksDetail(APull, FIgnored);
+  if Part <> '' then
+  begin
+    if Detail <> '' then
+      Detail := Detail + ' · ';
+    Detail := Detail + Part;
+  end;
   Lines := 2;
+  if Detail <> '' then
+    Inc(Lines);
   if HasClone then
-    Lines := 3;
-  CardH := 2 * Px(CardPadY) + Lines * TextH + 4 * (Lines - 1);
+    Inc(Lines);
+  CardH := 2 * Px(CardPadY) + Lines * TextH + Px(LineGap) * (Lines - 1);
   R := Rect(ALeft, Y, ARight, Y + CardH);
   First := Length(FLinkRects);
-  Links := Ord(Assigned(FOnPick)) + Ord(HasForge) + Ord(HasClone);
+  Links := Ord(Assigned(FOnPick)) + Ord(HasChecksMenu) + Ord(HasForge) + Ord(HasClone);
   Hot := (FHot >= First) and (FHot < First + Links);
   FC.Pen.Style := psClear;
   FC.Brush.Style := bsSolid;
@@ -1145,36 +1406,53 @@ begin
   PaintPullGlyph(R.Left + Px(CardPadX), R.Top + Px(CardPadY), TextH, GlyphColor);
   TextX := R.Left + Px(CardPadX) + TextH + Px(GlyphGap);
 
-  { The chips, right to left: the checks, the state, asked again. }
+  { The chips, right to left: the checks, the review, asked again. }
   Right := R.Right - Px(CardPadX);
   ChipTop := R.Top + Px(CardPadY);
   { Of the user's own a reason left out of what needs attention is dim. }
-  if (FSection = fsReview) or (arChecksFailing in FAttention) then
+  if (CurSection = fsReview) or (arChecksFailing in FAttention) then
     Tone := FErrorColor
   else
     Tone := FDim;
-  case APull.Checks of
-    chkFailed: Right := PaintChip(Right, ChipTop, rsChecksFailing, Tone) - Px(Gap) div 2;
-    chkPending: Right := PaintChip(Right, ChipTop, rsChecksPending, FWarn) - Px(Gap) div 2;
-    chkPassed: Right := PaintChip(Right, ChipTop, rsChecksOk, FOk) - Px(Gap) div 2;
-  end;
-  if APull.IsDraft then
-    Right := PaintChip(Right, ChipTop, rsDraft, FDim) - Px(Gap) div 2
-  else
-    case APull.ReviewDecision of
-      rdApproved: Right := PaintChip(Right, ChipTop, rsApproved, FOk) - Px(Gap) div 2;
-      rdChangesRequested:
-      begin
-        if (FSection = fsReview) or (arChangesRequested in FAttention) then
-          Tone := FErrorColor
-        else
-          Tone := FDim;
-        Right := PaintChip(Right, ChipTop, rsChangesRequested, Tone) - Px(Gap) div 2;
-      end;
-      rdReviewRequired: Right := PaintChip(Right, ChipTop, rsReviewRequired, FDim) - Px(Gap) div 2;
+  Checks := ChecksState(APull, FIgnored);
+  Note := PullChecksNote(APull, FIgnored);
+  if Note <> '' then
+  begin
+    case Checks of
+      chkFailed: ChipR := PaintChip(Right, ChipTop, Note, Tone);
+      chkPending: ChipR := PaintChip(Right, ChipTop, Note, FWarn);
+    else
+      ChipR := PaintChip(Right, ChipTop, Note, FOk);
     end;
+    if HasChecksMenu then
+      AddLink(ChipR, ChecksLink + IntToStr(AIndex));
+    Right := ChipR.Left - Px(Gap) div 2;
+  end
+  else if HasChecksMenu then
+    AddLink(Rect(Right, ChipTop, Right, ChipTop), ChecksLink + IntToStr(AIndex));
+  if APull.IsDraft then
+    Right := PaintChip(Right, ChipTop, rsDraft, FDim).Left - Px(Gap) div 2
+  else
+  begin
+    Note := PullReviewNote(APull, FLogin);
+
+    if Note <> '' then
+    begin
+      case APull.ReviewDecision of
+        rdApproved: Tone := FOk;
+        rdChangesRequested:
+          if (CurSection = fsReview) or (arChangesRequested in FAttention) then
+            Tone := FErrorColor
+          else
+            Tone := FDim;
+      else
+        Tone := FDim;
+      end;
+      Right := PaintChip(Right, ChipTop, Note, Tone).Left - Px(Gap) div 2;
+    end;
+  end;
   if APull.Requested and (APull.MyReview <> rvNone) then
-    Right := PaintChip(Right, ChipTop, rsAskedAgain, FWarn) - Px(Gap) div 2;
+    Right := PaintChip(Right, ChipTop, rsAskedAgain, FWarn).Left - Px(Gap) div 2;
 
   { The number and the title. }
   X := TextX;
@@ -1190,7 +1468,7 @@ begin
   { The second line: the repository, the rest dim, and the forge link
     at its right end, there to click whether shown or not, since the
     mouse on it shows it. }
-  LineY := R.Top + Px(CardPadY) + TextH + 4;
+  LineY := R.Top + Px(CardPadY) + TextH + Px(LineGap);
   Right := R.Right - Px(CardPadX);
   if HasForge then
   begin
@@ -1218,15 +1496,24 @@ begin
     FC.TextOut(X, LineY, FitTextRight(FC, ' · ' + Rest, Max(0, Right - X)));
   end;
 
+  { The reviewers and the checks by name. }
+  if Detail <> '' then
+  begin
+    Inc(LineY, TextH + Px(LineGap));
+    Right := R.Right - Px(CardPadX);
+    FC.Font.Color := FDim;
+    FC.TextOut(TextX, LineY, FitTextRight(FC, Detail, Max(0, Right - TextX)));
+  end;
+
   { The clone's link, under the forge's, its path cut at its start to
     the card. }
   if HasClone then
   begin
+    Inc(LineY, TextH + Px(LineGap));
     Right := R.Right - Px(CardPadX);
     CloneLink := Format(rsCloneLink, [FitTextLeft(FC, ShortPath(APull.Clone),
       Max(0, Right - TextX - FC.TextWidth(Format(rsCloneLink, ['']))))]);
-    LinkR := Rect(Right - FC.TextWidth(CloneLink), LineY + TextH + 4,
-      Right, LineY + 2 * TextH + 4);
+    LinkR := Rect(Right - FC.TextWidth(CloneLink), LineY, Right, LineY + TextH);
     AddLink(LinkR, ALink);
     FC.Font.Color := FLink;
     if FHot = High(FLinkRects) then
@@ -1238,15 +1525,14 @@ begin
 end;
 
 { A section: its heading with the count (of ATotal, when some are left
-  out) and the filters AChips and the order AOrder while there is
-  something to filter, then
-  a card per pull request, or, once the forge has answered, an empty
-  card with AEmptyTitle and AEmpty, its glyph a check with AEmptyCheck;
-  one that the filters left empty says so. }
+  out) and the presets and the filters while there is something to
+  filter, then a card per pull request, or, once the forge has
+  answered, an empty card with AEmptyTitle and AEmpty, its glyph a
+  check with AEmptyCheck; one that the filters left empty says so. }
+
 procedure TGittanForgePage.PaintSection(var Y: integer; const ATitle: string;
   const APulls: TGittanForgePulls; ATotal: integer; const AEmptyTitle, AEmpty,
-  ALinkPrefix: string; AEmptyCheck: boolean; const AChips: array of TGittanForgeFilter;
-  AOn: TGittanForgeFilters; AOrder: TGittanPullOrder; ALeft, ARight: integer);
+  ALinkPrefix: string; AEmptyCheck: boolean; ALeft, ARight: integer);
 var
   Detail: string;
   i: integer;
@@ -1259,10 +1545,7 @@ begin
     Detail := Format(rsManyOpen, [Length(APulls)])
   else
     Detail := '';
-  if ATotal > 0 then
-    PaintHeading(Y, ATitle, Detail, AChips, AOn, AOrder, ALeft, ARight)
-  else
-    PaintHeading(Y, ATitle, Detail, [], [], AOrder, ALeft, ARight);
+  PaintHeading(Y, ATitle, Detail, ATotal > 0, ALeft, ARight);
   if Length(APulls) = 0 then
   begin
     if ATotal > 0 then
@@ -1272,7 +1555,7 @@ begin
   end
   else
     for i := 0 to High(APulls) do
-      PaintCard(Y, APulls[i], ALeft, ARight, ALinkPrefix + IntToStr(i));
+      PaintCard(Y, APulls[i], ALeft, ARight, ALinkPrefix + IntToStr(i), i);
 end;
 
 procedure TGittanForgePage.Paint;
@@ -1285,6 +1568,7 @@ procedure TGittanForgePage.PaintContent;
 var
   Y, TextH, TitleH, X, L, R, AvatarD, ButtonD: integer;
   Who: string;
+  Ctx: TGittanFilterContext;
 
   procedure AddWho(const APart: string);
   begin
@@ -1345,16 +1629,17 @@ begin
     PaintNote(Y, FError, FErrorColor, L, R);
 
   { The section, as its filters leave it. }
-  FShownMine := SortPulls(FilterPulls(FMine, FMineFilters, LocalTimeToUniversal(Now),
-    FAttention), FMineOrder, FAttention);
-  FShownReview := SortPulls(FilterPulls(FReview, FReviewFilters, LocalTimeToUniversal(Now)),
-    FReviewOrder);
-  if FSection = fsReview then
+  Ctx := FilterContext(LocalTimeToUniversal(Now), FAttention, FIgnored);
+  FShownMine := SortPulls(FilterPulls(FMine, FDefs, SectionKeysOf(fsMine), Ctx), FMineOrder,
+    FAttention, FIgnored);
+  FShownReview := SortPulls(FilterPulls(FReview, FDefs, SectionKeysOf(fsReview), Ctx),
+    FReviewOrder, FAttention, FIgnored);
+  if CurSection = fsReview then
     PaintSection(Y, rsReviewGroup, FShownReview, Length(FReview), rsCaughtUp, rsNoReview,
-      ReviewLink, True, ReviewChips, FReviewFilters, FReviewOrder, L, R)
+      ReviewLink, True, L, R)
   else
     PaintSection(Y, rsMineGroup, FShownMine, Length(FMine), '', rsNoMine, MineLink, False,
-      MineChips, FMineFilters, FMineOrder, L, R);
+      L, R);
 
   { Layout sets the height from this. }
   FContentHeight := Y + Px(Pad);
@@ -1411,28 +1696,42 @@ end;
 procedure TGittanForgePage.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
 var
   i, n: integer;
-  Url: string;
+  Url, Key: string;
   Card: TGittanForgePull;
+  Shown: TGittanForgePulls;
+  Screen: TPoint;
 begin
   inherited MouseUp(Button, Shift, X, Y);
   i := LinkAt(X, Y);
-  if (Button = mbRight) and (i >= 0) and (FSection <> fsReview) and
-    (FLinkUrls[i] = FilterLink + IntToStr(Ord(ffAttention))) then
+  Screen := ClientToScreen(Point(X, Y));
+  if CurSection = fsReview then
+    Shown := FShownReview
+  else
+    Shown := FShownMine;
+  if i >= 0 then
+    Url := FLinkUrls[i]
+  else
+    Url := '';
+  { Either button: the menu of a card's checks. }
+  if Copy(Url, 1, Length(ChecksLink)) = ChecksLink then
   begin
-    ShowMenu(False, ClientToScreen(Point(X, Y)));
+    n := StrToIntDef(Copy(Url, Length(ChecksLink) + 1, MaxInt), -1);
+    if (n >= 0) and (n <= High(Shown)) then
+      ShowChecksMenu(Shown[n], ClientToScreen(Point(FLinkRects[i].Left, FLinkRects[i].Bottom)));
     Exit;
   end;
-  if (Button = mbRight) and Assigned(FOnContext) then
+  if Button = mbRight then
   begin
-    if CardAt(X, Y, Card) then
-      FOnContext(Self, Card, ClientToScreen(Point(X, Y)));
+    if (CurSection <> fsReview) and (Url = FilterLink + fkAttention) then
+      ShowMenu(False, Screen)
+    else if (Copy(Url, 1, Length(PresetLink)) = PresetLink) and (Url <> AllPresetLink) then
+      ShowPresetMenu(StrToIntDef(Copy(Url, Length(PresetLink) + 1, MaxInt), -1), Screen)
+    else if Assigned(FOnContext) and CardAt(X, Y, Card) then
+      FOnContext(Self, Card, Screen);
     Exit;
   end;
-  if Button <> mbLeft then
+  if (Button <> mbLeft) or (i < 0) then
     Exit;
-  if i < 0 then
-    Exit;
-  Url := FLinkUrls[i];
   if Copy(Url, 1, Length(MineLink)) = MineLink then
   begin
     n := StrToIntDef(Copy(Url, Length(MineLink) + 1, MaxInt), -1);
@@ -1447,15 +1746,41 @@ begin
   end
   else if Copy(Url, 1, Length(FilterLink)) = FilterLink then
   begin
-    n := StrToIntDef(Copy(Url, Length(FilterLink) + 1, MaxInt), -1);
-    if (n < Ord(Low(TGittanForgeFilter))) or (n > Ord(High(TGittanForgeFilter))) then
+    Key := Copy(Url, Length(FilterLink) + 1, MaxInt);
+    if FindFilter(FDefs, Key) < 0 then
       Exit;
-    if FSection = fsReview then
-      SetReviewFilters(FReviewFilters >< [TGittanForgeFilter(n)])
+    if CurSection = fsReview then
+      SetReviewFilters(ToggleKey(SectionKeysOf(fsReview), Key))
     else
-      SetMineFilters(FMineFilters >< [TGittanForgeFilter(n)]);
+      SetMineFilters(ToggleKey(SectionKeysOf(fsMine), Key));
     if Assigned(FOnFilterChange) then
       FOnFilterChange(Self);
+  end
+  else if Url = AllPresetLink then
+  begin
+    if CurSection = fsReview then
+      SetReviewFilters('')
+    else
+      SetMineFilters('');
+    if Assigned(FOnFilterChange) then
+      FOnFilterChange(Self);
+  end
+  else if Copy(Url, 1, Length(PresetLink)) = PresetLink then
+  begin
+    n := StrToIntDef(Copy(Url, Length(PresetLink) + 1, MaxInt), -1);
+    if (n < 0) or (n > High(FPresets)) or (FPresets[n].Section <> CurSection) then
+      Exit;
+    if CurSection = fsReview then
+      SetReviewFilters(FPresets[n].Keys)
+    else
+      SetMineFilters(FPresets[n].Keys);
+    if Assigned(FOnFilterChange) then
+      FOnFilterChange(Self);
+  end
+  else if Url = SavePresetLink then
+  begin
+    if Assigned(FOnSavePreset) then
+      FOnSavePreset(Self);
   end
   else if Url = OrderLink then
     ShowMenu(True, ClientToScreen(Point(FLinkRects[i].Left, FLinkRects[i].Bottom)))

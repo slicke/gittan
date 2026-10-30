@@ -95,6 +95,7 @@ type
     procedure PageRefresh(Sender: TObject);
     procedure LoadFilters;
     procedure PageFilterChange(Sender: TObject);
+    procedure PageSavePreset(Sender: TObject);
     procedure PageOpenUrl(Sender: TObject; const AUrl: string);
     procedure ThemeTimerTimer(Sender: TObject);
     procedure FileMenuClick(Sender: TObject);
@@ -159,7 +160,10 @@ uses
   LCLIntf, gittan.app, gittan.theme, gittan.textfit;
 
 resourcestring
+  rsSavePresetTitle = 'Save as Preset';
+  rsSavePresetPrompt = 'Name for the filters that are on:';
   rsFile = '&File';
+
   rsNewTab = 'New &Tab';
   rsOpenRepo = 'Open &Repository...';
   rsOpenRecent = 'Open Re&cent';
@@ -217,6 +221,7 @@ begin
   FPage.OnRefresh := @PageRefresh;
   LoadFilters;
   FPage.OnFilterChange := @PageFilterChange;
+  FPage.OnSavePreset := @PageSavePreset;
   FPage.OnOpenUrl := @PageOpenUrl;
   FThemeTimer := TTimer.Create(Self);
   FThemeTimer.Interval := 2000;
@@ -251,6 +256,8 @@ begin
   if not Result then
     Exit;
   FPage.SetForge(ForgeName);
+  { The filters are the forge's, and what the user kept of them. }
+  LoadFilters;
   if FCloseItem <> nil then
     FCloseItem.Caption := Format(rsCloseForge, [ForgeName]);
 end;
@@ -464,7 +471,7 @@ begin
   SetLength(AMarks, SectionCount);
   for i := 0 to SectionCount - 1 do
     ACaptions[i] := SectionCaption(i);
-  AMarks[fsReview] := Length(FReview) > 0;
+  AMarks[Ord(fsReview)] := Length(FReview) > 0;
   Result := FPage.Section;
 end;
 
@@ -645,29 +652,40 @@ begin
   StartJob;
 end;
 
-{ The page's filters, what needs attention and the orders from the
-  settings. }
+{ The forge's filters and presets with the user's own presets after
+  them, the filters on, the checks ignored, what needs attention and
+  the orders from the settings; the forge's values are kept under its
+  name (ForgeValue), the standard ones shown while there is no forge. }
 procedure TForgeView.LoadFilters;
 var
-  Mine, Review: TGittanForgeFilters;
   Reasons: TGittanAttentionReasons;
+  Presets, Own: TGittanForgePresets;
+  Ignored: TStringList;
+  FName: string;
+  i, n: integer;
 begin
-  Mine := [];
-  if App.Settings.HideWithoutFeedback then
-    Include(Mine, ffFeedback);
-  if App.Settings.OnlyNeedsAttention then
-    Include(Mine, ffAttention);
-  if App.Settings.HideDrafts then
-    Include(Mine, ffNoDrafts);
-  if App.Settings.OnlyStale then
-    Include(Mine, ffStale);
-  Review := [];
-  if App.Settings.OnlyAskedOfMe then
-    Include(Review, ffAskedOfMe);
-  if App.Settings.HideReviewDrafts then
-    Include(Review, ffNoDrafts);
-  FPage.MineFilters := Mine;
-  FPage.ReviewFilters := Review;
+  FName := ForgeName;
+  if Assigned(FForge) then
+  begin
+    Presets := TGittanForgeClass(FForge.ClassType).Presets;
+    Own := ParsePresets(App.Settings.ForgeValue(FName, 'Presets'));
+    n := Length(Presets);
+    SetLength(Presets, n + Length(Own));
+    for i := 0 to High(Own) do
+      Presets[n + i] := Own[i];
+    FPage.SetFilters(TGittanForgeClass(FForge.ClassType).Filters, Presets);
+  end
+  else
+    FPage.SetFilters(StandardFilters, StandardPresets);
+  FPage.MineFilters := App.Settings.ForgeValue(FName, 'MineFilters');
+  FPage.ReviewFilters := App.Settings.ForgeValue(FName, 'ReviewFilters');
+  Ignored := TStringList.Create;
+  try
+    SplitCheckNames(App.Settings.ForgeValue(FName, 'IgnoredChecks'), Ignored);
+    FPage.IgnoredChecks := Ignored;
+  finally
+    Ignored.Free;
+  end;
   Reasons := [];
   if App.Settings.ChangesNeedAttention then
     Include(Reasons, arChangesRequested);
@@ -681,13 +699,17 @@ end;
 { A chip or the page's menu: the settings keep it, and the page's new
   height. }
 procedure TForgeView.PageFilterChange(Sender: TObject);
+var
+  FName: string;
 begin
-  App.Settings.HideWithoutFeedback := ffFeedback in FPage.MineFilters;
-  App.Settings.OnlyNeedsAttention := ffAttention in FPage.MineFilters;
-  App.Settings.HideDrafts := ffNoDrafts in FPage.MineFilters;
-  App.Settings.OnlyStale := ffStale in FPage.MineFilters;
-  App.Settings.OnlyAskedOfMe := ffAskedOfMe in FPage.ReviewFilters;
-  App.Settings.HideReviewDrafts := ffNoDrafts in FPage.ReviewFilters;
+  FName := ForgeName;
+  if FName <> '' then
+  begin
+    App.Settings.SetForgeValue(FName, 'MineFilters', FPage.MineFilters);
+    App.Settings.SetForgeValue(FName, 'ReviewFilters', FPage.ReviewFilters);
+    App.Settings.SetForgeValue(FName, 'IgnoredChecks', JoinCheckNames(FPage.IgnoredChecks));
+    App.Settings.SetForgeValue(FName, 'Presets', JoinPresets(FPage.Presets));
+  end;
   App.Settings.ChangesNeedAttention := arChangesRequested in FPage.AttentionReasons;
   App.Settings.ChecksNeedAttention := arChecksFailing in FPage.AttentionReasons;
   App.Settings.MineOrder := Ord(FPage.MineOrder);
@@ -695,7 +717,18 @@ begin
   FPage.FitHeight(FBox.ClientHeight);
 end;
 
+{ Save as preset: the name asked, the preset made of the filters on. }
+procedure TForgeView.PageSavePreset(Sender: TObject);
+var
+  Given: string;
+begin
+  Given := '';
+  if AskText(rsSavePresetTitle, rsSavePresetPrompt, Given) and (PresetName(Given) <> '') then
+    FPage.AddPreset(Given);
+end;
+
 procedure TForgeView.PageOpenUrl(Sender: TObject; const AUrl: string);
+
 begin
   OpenURL(AUrl);
 end;

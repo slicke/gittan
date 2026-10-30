@@ -49,6 +49,9 @@ type
     FTrust: TStringList;
     { Each forge's tool, by its name. }
     FForgeClis: TStringList;
+    { What the forge view keeps per forge (ForgeValue), as
+      "Forge" + ForgeValueSep + "Key" = value. }
+    FForgeValues: TStringList;
     FFileName: string;
   public
     {** The tab shown when the window closed, an index into Tabs. }
@@ -115,15 +118,6 @@ type
       the user turns it off. }
     AutoFetch: boolean;
     AutoFetchMinutes: integer;
-    {** Whether the GitHub page leaves out the user's pull requests that
-      nobody but them has commented on or reviewed. }
-    HideWithoutFeedback: boolean;
-    {** The GitHub page's other filters, all off by default: of the
-      user's pull requests only the ones that need attention (changes
-      asked for, checks failing), and no drafts; of the ones waiting for
-      their review only the ones asked of them in person, and no
-      drafts; of the user's only the stale ones. }
-    OnlyNeedsAttention, HideDrafts, OnlyAskedOfMe, HideReviewDrafts, OnlyStale: boolean;
     {** What makes one of the user's pull requests need attention on the
       GitHub page (its filter and its order): changes asked for, checks
       failing; both on by default. }
@@ -167,6 +161,18 @@ type
       is none the forge's features are off. }
     function ForgeCliPath(const AName: string): string;
     procedure SetForgeCliPath(const AName, AValue: string);
+    {** What the forge view keeps for the forge AForge (by its Name),
+      in the forge's own section under AKey, one of ForgeValueKeys:
+      MineFilters and ReviewFilters (the keys of the filters on, joined
+      with commas, see gittan.forge), IgnoredChecks (the names of the
+      checks that do not count, joined with bars) and Presets (the
+      user's own presets, see ParsePresets); empty for none. Earlier
+      versions kept GitHub's filters as flags (HideWithoutFeedback,
+      OnlyNeedsAttention, HideDrafts, OnlyStale, OnlyAskedOfMe,
+      HideReviewDrafts), which Load turns into the keys when the new
+      value is not there. }
+    function ForgeValue(const AForge, AKey: string): string;
+    procedure SetForgeValue(const AForge, AKey, AValue: string);
     {** AFileName names the ini file; empty picks gittan.ini in the
       user's configuration folder. }
     constructor Create(const AFileName: string = '');
@@ -221,6 +227,11 @@ const
   SecAI = 'AI';
   { A section per forge, the service that hosts the repositories. }
   SecGitHub = 'GitHub';
+  { Between the forge and the key of a forge value's name. }
+  ForgeValueSep = #9;
+  ForgeValueKeys: array[0..3] of string = ('MineFilters', 'ReviewFilters', 'IgnoredChecks',
+    'Presets');
+
   SecHosting = 'Hosting';
   ConfigFolder = 'Gittan';
 
@@ -287,6 +298,8 @@ begin
   FTrust := TStringList.Create;
   FForgeClis := TStringList.Create;
   FForgeClis.CaseSensitive := False;
+  FForgeValues := TStringList.Create;
+  FForgeValues.CaseSensitive := False;
   if AFileName <> '' then
     FFileName := AFileName
   else
@@ -305,12 +318,32 @@ end;
 
 destructor TGittanSettings.Destroy;
 begin
+  FForgeValues.Free;
   FForgeClis.Free;
   FTrust.Free;
   FRecent.Free;
   FPaletteRecent.Free;
   FTabs.Free;
   inherited Destroy;
+end;
+
+function TGittanSettings.ForgeValue(const AForge, AKey: string): string;
+begin
+  Result := FForgeValues.Values[AForge + ForgeValueSep + AKey];
+end;
+
+procedure TGittanSettings.SetForgeValue(const AForge, AKey, AValue: string);
+var
+  i: integer;
+begin
+  if AValue = '' then
+  begin
+    i := FForgeValues.IndexOfName(AForge + ForgeValueSep + AKey);
+    if i >= 0 then
+      FForgeValues.Delete(i);
+  end
+  else
+    FForgeValues.Values[AForge + ForgeValueSep + AKey] := AValue;
 end;
 
 function TGittanSettings.ForgeCliPath(const AName: string): string;
@@ -339,7 +372,17 @@ var
   Ini: TIniFile;
   i: integer;
   Forge: TGittanForgeClass;
-  S: string;
+  S, Key, Keys: string;
+
+  procedure AddFlag(AOn: boolean; const AKey: string);
+  begin
+    if not AOn then
+      Exit;
+    if Keys <> '' then
+      Keys := Keys + ',';
+    Keys := Keys + AKey;
+  end;
+
 begin
   if not FileExists(FFileName) then
     Exit;
@@ -399,12 +442,25 @@ begin
         SetForgeCliPath(Forge.Name, Ini.ReadString(Forge.Name, 'Cli',
           Ini.ReadString(SecTools, Forge.CliName, '')));
       end;
-      HideWithoutFeedback := Ini.ReadBool(SecGitHub, 'HideWithoutFeedback', False);
-      OnlyNeedsAttention := Ini.ReadBool(SecGitHub, 'OnlyNeedsAttention', False);
-      HideDrafts := Ini.ReadBool(SecGitHub, 'HideDrafts', False);
-      OnlyAskedOfMe := Ini.ReadBool(SecGitHub, 'OnlyAskedOfMe', False);
-      HideReviewDrafts := Ini.ReadBool(SecGitHub, 'HideReviewDrafts', False);
-      OnlyStale := Ini.ReadBool(SecGitHub, 'OnlyStale', False);
+      FForgeValues.Clear;
+      for Forge in RegisteredForges do
+        for Key in ForgeValueKeys do
+          if Ini.ValueExists(Forge.Name, Key) then
+            SetForgeValue(Forge.Name, Key, Ini.ReadString(Forge.Name, Key, ''));
+      { Earlier versions kept GitHub's filters as flags. }
+      if not Ini.ValueExists(SecGitHub, 'MineFilters') then
+      begin
+        Keys := '';
+        AddFlag(Ini.ReadBool(SecGitHub, 'HideWithoutFeedback', False), 'feedback');
+        AddFlag(Ini.ReadBool(SecGitHub, 'OnlyNeedsAttention', False), 'attention');
+        AddFlag(Ini.ReadBool(SecGitHub, 'HideDrafts', False), 'nodrafts');
+        AddFlag(Ini.ReadBool(SecGitHub, 'OnlyStale', False), 'stale');
+        SetForgeValue(SecGitHub, 'MineFilters', Keys);
+        Keys := '';
+        AddFlag(Ini.ReadBool(SecGitHub, 'OnlyAskedOfMe', False), 'askedofme');
+        AddFlag(Ini.ReadBool(SecGitHub, 'HideReviewDrafts', False), 'nodrafts');
+        SetForgeValue(SecGitHub, 'ReviewFilters', Keys);
+      end;
       ChangesNeedAttention := Ini.ReadBool(SecGitHub, 'ChangesNeedAttention', True);
       ChecksNeedAttention := Ini.ReadBool(SecGitHub, 'ChecksNeedAttention', True);
       MineOrder := EnsureRange(Ini.ReadInteger(SecGitHub, 'MineOrder', 0), 0, 2);
@@ -459,7 +515,9 @@ var
   Ini: TIniFile;
   i: integer;
   Forge: TGittanForgeClass;
+  Key, Keys: string;
 begin
+
   try
     ForceDirectories(ExtractFileDir(FFileName));
     {$IFDEF UNIX}
@@ -518,12 +576,15 @@ begin
         Ini.DeleteKey(Forge.Name, 'Enabled');
         Ini.WriteString(Forge.Name, 'Cli', KeepEdges(ForgeCliPath(Forge.Name)));
       end;
-      Ini.WriteBool(SecGitHub, 'HideWithoutFeedback', HideWithoutFeedback);
-      Ini.WriteBool(SecGitHub, 'OnlyNeedsAttention', OnlyNeedsAttention);
-      Ini.WriteBool(SecGitHub, 'HideDrafts', HideDrafts);
-      Ini.WriteBool(SecGitHub, 'OnlyAskedOfMe', OnlyAskedOfMe);
-      Ini.WriteBool(SecGitHub, 'HideReviewDrafts', HideReviewDrafts);
-      Ini.WriteBool(SecGitHub, 'OnlyStale', OnlyStale);
+      for Key in ['HideWithoutFeedback', 'OnlyNeedsAttention', 'HideDrafts', 'OnlyAskedOfMe',
+          'HideReviewDrafts', 'OnlyStale'] do
+        Ini.DeleteKey(SecGitHub, Key);
+      for i := 0 to FForgeValues.Count - 1 do
+      begin
+        Keys := FForgeValues.Names[i];
+        Ini.WriteString(Copy(Keys, 1, Pos(ForgeValueSep, Keys) - 1),
+          Copy(Keys, Pos(ForgeValueSep, Keys) + 1, MaxInt), FForgeValues.ValueFromIndex[i]);
+      end;
       Ini.WriteBool(SecGitHub, 'ChangesNeedAttention', ChangesNeedAttention);
       Ini.WriteBool(SecGitHub, 'ChecksNeedAttention', ChecksNeedAttention);
       Ini.WriteInteger(SecGitHub, 'MineOrder', MineOrder);

@@ -31,8 +31,10 @@ const
   {** The GraphQL query for the user's pull requests across every
     repository: the login, the open pull requests the user wrote and the
     open ones a review is asked of them for (in person or through a
-    team), fifty of each, newest first, with who wrote each one's last
-    thirty comments and reviews. }
+    team), fifty of each, newest first, each with who is asked for a
+    review now (users, teams), the latest review of each reviewer, who
+    wrote its last thirty comments and what its last thirty reviews
+    said, and the head commit's checks by name. }
   ForgeQuery =
     'query { viewer { login avatarUrl(size: 128) } ' +
     'mine: search(query: "is:pr is:open author:@me archived:false sort:updated-desc", ' +
@@ -42,10 +44,16 @@ const
     'fragment pull on PullRequest { number title url isDraft state reviewDecision ' +
     'createdAt updatedAt author { login } repository { nameWithOwner } ' +
     'headRefName baseRefName viewerLatestReview { state } ' +
-    'viewerLatestReviewRequest { id } ' +
+    'reviewRequests(first: 20) { nodes { requestedReviewer { __typename ' +
+    '... on User { login } ... on Team { name } ... on Bot { login } ' +
+    '... on Mannequin { login } } } } ' +
+    'latestReviews(first: 20) { nodes { state author { __typename login } } } ' +
     'comments(last: 30) { nodes { author { __typename login } } } ' +
-    'reviews(last: 30) { nodes { author { __typename login } } } ' +
-    'commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } }';
+    'reviews(last: 30) { nodes { state author { __typename login } } } ' +
+    'commits(last: 1) { nodes { commit { statusCheckRollup { state ' +
+    'contexts(first: 60) { nodes { __typename ' +
+    '... on CheckRun { name status conclusion } ' +
+    '... on StatusContext { context state } } } } } } } }';
 
   {** The GraphQL query for one page of the threads of a pull request;
     $after is the cursor of the page before, left out for the first. }
@@ -478,7 +486,7 @@ end;
 { A CheckRun has a status (COMPLETED, IN_PROGRESS, QUEUED, ...) and, once
   completed, a conclusion; a StatusContext (the older commit status API)
   has a state. }
-procedure CountCheck(ACheck: TJSONObject; var APull: TGittanPullRequest);
+function CheckStateOf(ACheck: TJSONObject): TGittanChecksState;
 var
   Verdict: string;
 begin
@@ -490,9 +498,27 @@ begin
     Verdict := 'PENDING';
   case Verdict of
     'SUCCESS', 'SKIPPED', 'NEUTRAL':
-      Inc(APull.ChecksPassed);
+      Result := chkPassed;
     'FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE':
-      Inc(APull.ChecksFailed);
+      Result := chkFailed;
+    else
+      Result := chkPending;
+  end;
+end;
+
+{ A check's name: a CheckRun's name, a StatusContext's context. }
+function CheckNameOf(ACheck: TJSONObject): string;
+begin
+  Result := StrOf(ACheck, 'name');
+  if Result = '' then
+    Result := StrOf(ACheck, 'context');
+end;
+
+procedure CountCheck(ACheck: TJSONObject; var APull: TGittanPullRequest);
+begin
+  case CheckStateOf(ACheck) of
+    chkPassed: Inc(APull.ChecksPassed);
+    chkFailed: Inc(APull.ChecksFailed);
     else
       Inc(APull.ChecksPending);
   end;
@@ -643,9 +669,126 @@ begin
   end;
 end;
 
-function ReadForgePull(AObject: TJSONObject; out APull: TGittanForgePull): boolean;
+{ The viewer's verdict from their reviews (the last thirty, oldest
+  first): the latest that approved or asked for changes, a dismissal
+  after it undoing it, a comment or a pending review leaving it be;
+  rvNone when none of theirs said anything. }
+function ViewerVerdictIn(AObject: TJSONObject; const ALogin: string): TGittanReviewVerdict;
 var
-  Request, Nodes, Rollup: TJSONData;
+  Nodes, Author: TJSONData;
+  i: integer;
+  Verdict: TGittanReviewVerdict;
+begin
+  Result := rvNone;
+  if ALogin = '' then
+    Exit;
+  Nodes := Dig(AObject, ['reviews', 'nodes']);
+  if (Nodes = nil) or (Nodes.JSONType <> jtArray) then
+    Exit;
+  for i := 0 to Nodes.Count - 1 do
+  begin
+    if Nodes.Items[i].JSONType <> jtObject then
+      Continue;
+    Author := TJSONObject(Nodes.Items[i]).Find('author');
+    if (Author = nil) or (Author.JSONType <> jtObject) or
+      not SameText(StrOf(TJSONObject(Author), 'login'), ALogin) then
+      Continue;
+    Verdict := VerdictOf(StrOf(TJSONObject(Nodes.Items[i]), 'state'));
+    if Verdict in [rvApproved, rvChangesRequested, rvDismissed] then
+      Result := Verdict;
+  end;
+end;
+
+{ The reviewers asked now: the names in RequestedOf, and whether ALogin
+  is among them in person. }
+procedure ReadRequests(AObject: TJSONObject; const ALogin: string; var APull: TGittanForgePull);
+var
+  Nodes, Who: TJSONData;
+  i, n: integer;
+  Name: string;
+begin
+  Nodes := Dig(AObject, ['reviewRequests', 'nodes']);
+  if (Nodes = nil) or (Nodes.JSONType <> jtArray) then
+    Exit;
+  for i := 0 to Nodes.Count - 1 do
+  begin
+    if Nodes.Items[i].JSONType <> jtObject then
+      Continue;
+    Who := TJSONObject(Nodes.Items[i]).Find('requestedReviewer');
+    if (Who = nil) or (Who.JSONType <> jtObject) then
+      Continue;
+    Name := StrOf(TJSONObject(Who), 'login');
+    if Name = '' then
+      Name := StrOf(TJSONObject(Who), 'name');
+    if Name = '' then
+      Continue;
+    if (StrOf(TJSONObject(Who), '__typename') <> 'Team') and (ALogin <> '') and
+      SameText(Name, ALogin) then
+      APull.Requested := True;
+    n := Length(APull.RequestedOf);
+    SetLength(APull.RequestedOf, n + 1);
+    APull.RequestedOf[n] := Name;
+  end;
+end;
+
+{ The latest review of each reviewer, from latestReviews. }
+procedure ReadLatestReviews(AObject: TJSONObject; var APull: TGittanForgePull);
+var
+  Nodes, Author: TJSONData;
+  i, n: integer;
+begin
+  Nodes := Dig(AObject, ['latestReviews', 'nodes']);
+  if (Nodes = nil) or (Nodes.JSONType <> jtArray) then
+    Exit;
+  for i := 0 to Nodes.Count - 1 do
+  begin
+    if Nodes.Items[i].JSONType <> jtObject then
+      Continue;
+    Author := TJSONObject(Nodes.Items[i]).Find('author');
+    if (Author = nil) or (Author.JSONType <> jtObject) then
+      Continue;
+    n := Length(APull.Reviews);
+    SetLength(APull.Reviews, n + 1);
+    APull.Reviews[n].Login := StrOf(TJSONObject(Author), 'login');
+    APull.Reviews[n].Verdict := VerdictOf(StrOf(TJSONObject(Nodes.Items[i]), 'state'));
+  end;
+end;
+
+{ The head commit's checks: the rollup's state as the forge's sum, and
+  each of its contexts by name. }
+procedure ReadChecks(AObject: TJSONObject; var APull: TGittanForgePull);
+var
+  Nodes, Rollup, Contexts: TJSONData;
+  i, n: integer;
+begin
+  { commits.nodes[0].commit.statusCheckRollup }
+  Nodes := Dig(AObject, ['commits', 'nodes']);
+  if (Nodes = nil) or (Nodes.JSONType <> jtArray) or (Nodes.Count = 0) then
+    Exit;
+  Rollup := Dig(Nodes.Items[0], ['commit', 'statusCheckRollup']);
+  if (Rollup = nil) or (Rollup.JSONType <> jtObject) then
+    Exit;
+  APull.Checks := RollupOf(StrOf(TJSONObject(Rollup), 'state'));
+  Contexts := Dig(Rollup, ['contexts', 'nodes']);
+  if (Contexts = nil) or (Contexts.JSONType <> jtArray) then
+    Exit;
+  for i := 0 to Contexts.Count - 1 do
+  begin
+    if Contexts.Items[i].JSONType <> jtObject then
+      Continue;
+    if CheckNameOf(TJSONObject(Contexts.Items[i])) = '' then
+      Continue;
+    n := Length(APull.CheckList);
+    SetLength(APull.CheckList, n + 1);
+    APull.CheckList[n].Name := CheckNameOf(TJSONObject(Contexts.Items[i]));
+    APull.CheckList[n].State := CheckStateOf(TJSONObject(Contexts.Items[i]));
+  end;
+end;
+
+function ReadForgePull(AObject: TJSONObject; const ALogin: string;
+  out APull: TGittanForgePull): boolean;
+var
+  Verdict: TGittanReviewVerdict;
 begin
   APull := Default(TGittanForgePull);
   Result := AObject.IndexOfName('number') >= 0;
@@ -663,24 +806,24 @@ begin
   APull.Repo := NestedString(AObject, 'repository', 'nameWithOwner');
   APull.HeadRef := StrOf(AObject, 'headRefName');
   APull.BaseRef := StrOf(AObject, 'baseRefName');
+  { The viewer's latest review as GitHub names it, unless their reviews
+    say an earlier approval or request for changes still stands, which
+    a comment after it does not undo. }
   APull.MyReview := VerdictOf(NestedString(AObject, 'viewerLatestReview', 'state'));
-  Request := AObject.Find('viewerLatestReviewRequest');
-  APull.Requested := (Request <> nil) and (Request.JSONType = jtObject);
+  Verdict := ViewerVerdictIn(AObject, ALogin);
+  if Verdict <> rvNone then
+    APull.MyReview := Verdict;
+  ReadRequests(AObject, ALogin, APull);
+  ReadLatestReviews(AObject, APull);
   APull.Feedback := OthersIn(AObject, 'comments', APull.Author) or
     OthersIn(AObject, 'reviews', APull.Author);
-  { commits.nodes[0].commit.statusCheckRollup.state }
-  Nodes := Dig(AObject, ['commits', 'nodes']);
-  if (Nodes <> nil) and (Nodes.JSONType = jtArray) and (Nodes.Count > 0) then
-  begin
-    Rollup := Dig(Nodes.Items[0], ['commit', 'statusCheckRollup']);
-    if (Rollup <> nil) and (Rollup.JSONType = jtObject) then
-      APull.Checks := RollupOf(StrOf(TJSONObject(Rollup), 'state'));
-  end;
+  ReadChecks(AObject, APull);
 end;
 
 { The pull requests of a search's nodes; nodes that are not pull
-  requests are skipped. }
-procedure ReadSearch(AData: TJSONObject; const AName: string; out APulls: TGittanForgePulls);
+  requests are skipped. ALogin is the viewer's. }
+procedure ReadSearch(AData: TJSONObject; const AName, ALogin: string;
+  out APulls: TGittanForgePulls);
 var
   Nodes: TJSONData;
   i, n: integer;
@@ -694,7 +837,7 @@ begin
   n := 0;
   for i := 0 to Nodes.Count - 1 do
     if (Nodes.Items[i].JSONType = jtObject) and
-      ReadForgePull(TJSONObject(Nodes.Items[i]), Pull) then
+      ReadForgePull(TJSONObject(Nodes.Items[i]), ALogin, Pull) then
     begin
       APulls[n] := Pull;
       Inc(n);
@@ -738,8 +881,9 @@ begin
       Exit;
     ALogin := NestedString(TJSONObject(Data), 'viewer', 'login');
     AAvatarUrl := NestedString(TJSONObject(Data), 'viewer', 'avatarUrl');
-    ReadSearch(TJSONObject(Data), 'mine', AMine);
-    ReadSearch(TJSONObject(Data), 'review', AReview);
+    ReadSearch(TJSONObject(Data), 'mine', ALogin, AMine);
+    ReadSearch(TJSONObject(Data), 'review', ALogin, AReview);
+
     Result := True;
   finally
     Root.Free;
