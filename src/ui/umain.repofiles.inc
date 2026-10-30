@@ -120,13 +120,19 @@ end;
 
 { A section's panel is the header alone while folded, else the header
   and the rows in view, within half the tree panel, or a third of it
-  each while both the Repository and the Submodules sections show. }
+  each while both the Repository and the Submodules sections show. The
+  tree of changed files gives way last: it keeps room for its rows as
+  long as the open sections keep MinSectionRows each. }
 procedure TRepoFrame.LayoutRepoFiles;
 const
   { The least the tree of changed files keeps of the panel. }
   MinFileTree = 80;
+  { The rows an open section keeps before the tree of changed files
+    gives up any of its own. }
+  MinSectionRows = 2;
 var
-  Limit, Room, Open: integer;
+  Limit, Room, Open, TreeKeep, TreeRows: integer;
+  Node: TTreeNode;
 
   { A panel at the bottom grows or shrinks at its top edge: alBottom
     orders the panels by their bottom edges, and one that kept its top
@@ -174,7 +180,7 @@ begin
     section leave, less the tree of changed files' share, which got
     nothing when the window was low (nine submodules and the Commit
     section took it all, and the tree never drew again). }
-  Room := FTreePanel.ClientHeight - Px(MinFileTree);
+  Room := FTreePanel.ClientHeight;
   if FSideNav <> nil then
     Dec(Room, FSideNav.Top + FSideNav.Height);
   if (FCommitPanel <> nil) and FCommitPanel.Visible then
@@ -184,6 +190,20 @@ begin
   if (FSubPanel <> nil) and FSubPanel.Visible then
     Dec(Room, FSubHeader.Height);
   Open := Ord(Opened(FRepoPanel, FRepoHeader)) + Ord(Opened(FSubPanel, FSubHeader));
+  { What the tree of changed files keeps: its rows (the changes' header
+    row and the placeholder fit in MinFileTree), less what the open
+    sections need to keep their least. }
+  TreeRows := 0;
+  Node := FileTree.Items.GetFirstVisibleNode;
+  while Node <> nil do
+  begin
+    Inc(TreeRows);
+    Node := Node.GetNextVisible;
+  end;
+  TreeKeep := Max(Px(MinFileTree), TreeRows * Max(FileTree.DefaultItemHeight, 8) + 4);
+  TreeKeep := Max(Px(MinFileTree), Min(TreeKeep,
+    Room - Open * (MinSectionRows * Max(FRepoTree.DefaultItemHeight, 8) + 4)));
+  Dec(Room, TreeKeep);
   if Open > 0 then
     Limit := Min(Limit, Max(0, Room) div Open);
   SetHeight(FRepoPanel, SectionHeight(FRepoHeader, FRepoTree));
@@ -192,6 +212,11 @@ begin
 end;
 
 procedure TRepoFrame.RepoHeaderToggle(Sender: TObject);
+begin
+  LayoutRepoFiles;
+end;
+
+procedure TRepoFrame.FileTreeFolded(Sender: TObject; Node: TTreeNode);
 begin
   LayoutRepoFiles;
 end;

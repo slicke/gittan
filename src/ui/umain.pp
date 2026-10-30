@@ -1748,6 +1748,7 @@ type
     procedure FillRepoFiles;
     procedure LayoutRepoFiles;
     procedure RepoHeaderToggle(Sender: TObject);
+    procedure FileTreeFolded(Sender: TObject; Node: TTreeNode);
     procedure TreePanelResize(Sender: TObject);
     procedure RepoTreeSelectionChanged(Sender: TObject);
     procedure SetupSubmodules;
@@ -3802,6 +3803,9 @@ begin
   { Files with review comments get a speech bubble (umain.reviews.inc). }
   FileTree.OnAdvancedCustomDrawItem := @FileTreeAdvancedCustomDrawItem;
   FileTree.OnAdvancedCustomDraw := @FileTreeAdvancedCustomDraw;
+  { The sections under the tree give it room for its rows. }
+  FileTree.OnExpanded := @FileTreeFolded;
+  FileTree.OnCollapsed := @FileTreeFolded;
   FSymbolBar := TGittanSymbolBar.Create(Self);
   FSymbolBar.Parent := EditorPanel;
   FSymbolBar.Top := FHeader.Height + FFindBar.Height;
@@ -7737,6 +7741,7 @@ begin
   finally
     FileTree.EndUpdate;
   end;
+  LayoutRepoFiles;
   if FTreeClean <> (Length(AStats) = 0) then
   begin
     FTreeClean := Length(AStats) = 0;
