@@ -2628,8 +2628,11 @@ resourcestring
   rsGitPullFailed = 'The pull failed';
   rsPushFailed = 'The push failed';
   rsPullDivergedTitle = 'The Branch Has Diverged';
-  rsPullDiverged = 'The branch and its upstream both have commits the other lacks. ' +
-    'Merge them with a merge commit, or rebase your commits onto the upstream''s?';
+  rsPullDiverged = 'The branch and its upstream both have commits the other lacks.' +
+    LineEnding + LineEnding + 'Merge keeps both histories as they are and joins them with a ' +
+    'merge commit. Rebase puts your commits on top of the upstream''s, one line of history ' +
+    'without a merge commit, your commits rewritten.';
+  rsPullAlways = 'Always do this in this repository';
   rsPullRewrittenTitle = 'The Branch Was Rewritten';
   rsPullRewrittenOne = '%s was rewritten here (rebased or amended) since it was pushed, ' +
     'and %s still has the commit it replaced. A pull brings that commit back. A force ' +

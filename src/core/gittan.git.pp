@@ -752,6 +752,11 @@ type
     function SignOff: boolean;
     {** Keeps ASignOff for SignOff, unsetting the key when off. }
     function SetSignOff(ASignOff: boolean): boolean;
+    {** Tells git how the repository pulls a branch that has diverged, in
+      its own config, so Pull(pmAuto) asks no more: ARebase sets
+      pull.rebase true, else pull.rebase false with pull.ff true (a
+      global pull.ff=only would refuse the merge). }
+    function SetPullMode(ARebase: boolean): boolean;
     {** The remote whose URL holds ARepoPath ("owner/repo", compared
       without regard to case), else origin, else the first remote, else
       empty. }
@@ -2714,6 +2719,18 @@ var
 begin
   Result := (FRoot <> '') and RunGit(FRoot, ['config', '--local', '--bool', 'gittan.signOff'],
     Output) and (Trim(Output) = 'true');
+end;
+
+function TGittanRepo.SetPullMode(ARebase: boolean): boolean;
+var
+  Output: string;
+begin
+  if FRoot = '' then
+    Exit(False);
+  if ARebase then
+    Exit(RunGit(FRoot, ['config', '--local', 'pull.rebase', 'true'], Output));
+  Result := RunGit(FRoot, ['config', '--local', 'pull.rebase', 'false'], Output) and
+    RunGit(FRoot, ['config', '--local', 'pull.ff', 'true'], Output);
 end;
 
 { --unset fails (5) when the key is not there, which is what off is. }

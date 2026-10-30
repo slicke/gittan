@@ -203,7 +203,7 @@ end;
 procedure TRepoFrame.RemoteJobDone(Sender: TObject);
 var
   Job: TGittanRemoteJob;
-  HookFailed: boolean;
+  HookFailed, Always: boolean;
   Count: integer;
   Msg: string;
   Choice: TModalResult;
@@ -335,12 +335,20 @@ begin
   if Job.Diverged or Job.Rejected or Job.Unseen or Job.Stale then
     FWindow.ShowFrame(Self);
   if Job.Diverged then
-    case AskDlg(rsPullDivergedTitle, rsPullDiverged, mtConfirmation,
-        [mrYes, rsMergeAction, 'IsDefault', mrNo, rsRebaseAction, mrCancel,
-        rsCancelButton, 'IsCancel'], 0) of
+  begin
+    { Always is kept in the repository's config (pull.rebase), which a
+      pull reads, so the question does not come again. }
+    Always := False;
+    Choice := AskDlgCheck(rsPullDivergedTitle, rsPullDiverged, mtConfirmation,
+      [mrYes, rsMergeAction, 'IsDefault', mrNo, rsRebaseAction, mrCancel,
+      rsCancelButton, 'IsCancel'], rsPullAlways, Always);
+    if Always and (Choice in [mrYes, mrNo]) and not FRepo.SetPullMode(Choice = mrNo) then
+      StatusNote(FRepo.Error, True);
+    case Choice of
       mrYes: StartRemote(rkPull, pmMerge);
       mrNo: StartRemote(rkPull, pmRebase);
-    end
+    end;
+  end
   else if Job.Rejected and FHasUpstream and (FBehind > 0) then
   begin
     { The upstream's commits the branch lacks are known here: they are

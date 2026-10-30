@@ -2321,6 +2321,25 @@ begin
     AssertTrue('no merge commit', Code <> 0);
     AssertTrue(FileExists(IncludeTrailingPathDelimiter(FDir) + 'two.txt'));
     AssertEquals(' M del.txt'#0, Git(['status', '--porcelain', '-z']));
+    Git(['checkout', '--', 'del.txt']);
+
+    { Always merge, kept in the repository's config: past pull.ff=only. }
+    PushFromOther(Remote, Other, 'three.txt');
+    WriteFile('a.txt', 'mine once more'#10);
+    Commit('mine once more');
+    AssertTrue(FRepo.Error, FRepo.SetPullMode(False));
+    AssertTrue(FRepo.Error, FRepo.Pull(pmAuto, Diverged));
+    Git(['rev-parse', '-q', '--verify', 'HEAD^2']);
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+    { Always rebase. }
+    PushFromOther(Remote, Other, 'four.txt');
+    WriteFile('a.txt', 'mine at last'#10);
+    Commit('mine at last');
+    AssertTrue(FRepo.Error, FRepo.SetPullMode(True));
+    AssertEquals('true'#10, Git(['config', '--local', 'pull.rebase']));
+    AssertTrue(FRepo.Error, FRepo.Pull(pmAuto, Diverged));
+    RunCommandIndir(FDir, 'git', ['rev-parse', '-q', '--verify', 'HEAD^2'], Output, Code, []);
+    AssertTrue('rebased, no merge commit', Code <> 0);
   finally
     RemoveTree(Remote);
     RemoveTree(Other);

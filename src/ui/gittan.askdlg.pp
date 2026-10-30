@@ -34,6 +34,12 @@ type
 function AskDlg(const ATitle, AMsg: string; AKind: TMsgDlgType;
   const AButtons: array of const): TModalResult;
 
+{** AskDlg with a check box under the text, ACheckCaption, ticked as
+  AChecked says, which holds its state when the dialog closes. }
+function AskDlgCheck(const ATitle, AMsg: string; AKind: TMsgDlgType;
+  const AButtons: array of const; const ACheckCaption: string;
+  var AChecked: boolean): TModalResult;
+
 {** AskDlg with QuestionDlg's help context or keyword, which it does not
   use, so a call to QuestionDlg changes in its name alone. }
 function AskDlg(const ATitle, AMsg: string; AKind: TMsgDlgType;
@@ -461,10 +467,13 @@ end;
   The calls
   --------------------------------------------------------------------------- }
 
-function AskDlg(const ATitle, AMsg: string; AKind: TMsgDlgType;
-  const AButtons: array of const): TModalResult;
+{ AskDlg, with a check box under the text when ACheckCaption is given. }
+function AskWith(const ATitle, AMsg: string; AKind: TMsgDlgType;
+  const AButtons: array of const; const ACheckCaption: string;
+  var AChecked: boolean): TModalResult;
 var
   F: TAskForm;
+  Box: TCheckBox;
   Buttons: array of TAskButton;
   i, n, Default, Cancel: integer;
   S: string;
@@ -518,14 +527,44 @@ begin
   F := TAskForm.CreateAsk(ATitle, AKind);
   try
     F.AddText(AMsg, False, HeadingGap);
+    Box := nil;
+    if ACheckCaption <> '' then
+    begin
+      Box := TCheckBox.Create(F);
+      Box.Caption := ACheckCaption;
+      Box.Checked := AChecked;
+      Box.Align := alTop;
+      Box.Top := F.NextTop;
+      Box.BorderSpacing.Left := F.Scale96ToScreen(IconLeft + IconSize + IconGap);
+      Box.BorderSpacing.Top := F.Scale96ToScreen(FieldGap);
+      Box.Parent := F;
+    end;
     F.AddButtons(Buttons, Default, Cancel);
     F.FNoCancel := NoCancel;
     Result := F.ShowModal;
     if Result = mrNone then
       Result := F.FCancelResult;
+    if Box <> nil then
+      AChecked := Box.Checked;
   finally
     F.Free;
   end;
+end;
+
+function AskDlg(const ATitle, AMsg: string; AKind: TMsgDlgType;
+  const AButtons: array of const): TModalResult;
+var
+  Unused: boolean;
+begin
+  Unused := False;
+  Result := AskWith(ATitle, AMsg, AKind, AButtons, '', Unused);
+end;
+
+function AskDlgCheck(const ATitle, AMsg: string; AKind: TMsgDlgType;
+  const AButtons: array of const; const ACheckCaption: string;
+  var AChecked: boolean): TModalResult;
+begin
+  Result := AskWith(ATitle, AMsg, AKind, AButtons, ACheckCaption, AChecked);
 end;
 
 function AskDlg(const ATitle, AMsg: string; AKind: TMsgDlgType;
