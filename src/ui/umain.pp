@@ -2493,7 +2493,7 @@ resourcestring
   rsRepoFiles = 'Config';
   rsCommitSection = 'Commit';
   rsCommitMenu = 'Co&mmit...';
-  rsIdentityMenu = 'Who Commits...';
+  rsIdentityMenu = 'Name and Email...';
   rsCommitButton = 'Commit';
   rsCommitAmendButton = 'Amend Commit';
   rsCommitAmend = 'Amend';
@@ -3410,8 +3410,8 @@ const
   rsKindRenamed = 'Renamed';
   rsKindUntracked = 'Untracked';
   rsKindConflict = 'Conflict';
-  rsHintStaged = '%s · staged';
-  rsHintPartlyStaged = '%s · partly staged';
+  rsHintPartlyAdded = '%s · partly added with git add; Commit takes the whole file as ' +
+    'shown, not only what git add took';
   rsPullRequests = 'Pull Re&quests';
   rsPullLoading = 'Loading...';
   rsNoPulls = 'No open pull requests';
@@ -7014,18 +7014,19 @@ begin
   CheckLfs;
 end;
 
-{ The badge of a file: solid when the index holds all of its change,
-  ringed when it holds part of it. }
+{ The badge of a file, ringed when the index holds part of its change
+  (git add in a terminal took some of it), since the commit takes the
+  whole file; an index that holds all of it changes nothing here. }
 function TRepoFrame.StatIcon(const AStat: TGittanFileStat): integer;
 begin
-  if AStat.Staged then
-    Result := StagedIcon(AStat.Kind, AStat.Unstaged)
+  if AStat.Staged and AStat.Unstaged then
+    Result := StagedIcon(AStat.Kind, True)
   else
     Result := ChangeIcon(AStat.Kind);
 end;
 
-{ What a file's badge means: the kind of change, and how much of it is
-  staged. }
+{ What a file's badge means: the kind of change, and that git add took
+  only part of it. }
 function TRepoFrame.StatHint(const AStat: TGittanFileStat): string;
 const
   KindNames: array[TGittanChangeKind] of string = (rsKindModified,
@@ -7033,9 +7034,7 @@ const
 begin
   Result := KindNames[AStat.Kind];
   if AStat.Staged and AStat.Unstaged then
-    Result := Format(rsHintPartlyStaged, [Result])
-  else if AStat.Staged then
-    Result := Format(rsHintStaged, [Result]);
+    Result := Format(rsHintPartlyAdded, [Result]);
 end;
 
 { ---------------------------------------------------------------------------

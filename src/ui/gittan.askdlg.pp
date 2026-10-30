@@ -3,7 +3,7 @@ unit gittan.askdlg;
 {** Gittan's own dialogs, in place of the LCL's QuestionDlg, MessageDlg,
   InputQuery and InputBox, which on Cocoa laid a message out on one line
   as wide as the screen allowed, put a glyph on every button and set the
-  buttons in the middle. These are built in code like the Who Commits
+  buttons in the middle. These are built in code like the Name and Email
   dialog: a fixed width the text wraps in, an icon for the kind at the
   left (a warning triangle, an error disc, else the mark of gittan.dialogicon),
   plain buttons at the right in the platform's order, and for input a

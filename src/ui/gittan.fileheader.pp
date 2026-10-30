@@ -173,8 +173,7 @@ uses
 
 resourcestring
   rsBinary = 'binary';
-  rsStaged = 'staged';
-  rsPartlyStaged = 'partly staged';
+  rsPartlyAdded = 'partly added with git add';
   rsLexerHint = 'Choose the syntax highlighting';
 
 const
@@ -262,12 +261,12 @@ end;
 
 procedure TGittanFileHeader.SetStage(AStaged, AUnstaged: boolean);
 begin
-  if not AStaged then
-    FStage := ''
-  else if AUnstaged then
-    FStage := rsPartlyStaged
+  { The whole file is committed as shown, so only an index that holds
+    part of its change says anything: what git add took is not all. }
+  if AStaged and AUnstaged then
+    FStage := rsPartlyAdded
   else
-    FStage := rsStaged;
+    FStage := '';
   Invalidate;
 end;
 

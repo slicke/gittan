@@ -397,8 +397,7 @@ resourcestring
   rsBehindMerge = 'Merge';
   rsUpstreamGone = '✕ upstream deleted on remote';
   rsBinary = 'binary';
-  rsStaged = 'staged';
-  rsPartlyStaged = 'partly staged';
+  rsPartlyAdded = 'partly added with git add';
   rsNoteCommented = 'commented';
   rsNoteApproved = 'approved';
   rsNoteChangesRequested = 'requested changes';
@@ -1992,13 +1991,11 @@ begin
     Canvas.TextOut(X + Px(ChipPadX), TextY, RowAction);
     Inc(X, W + Px(Gap));
   end;
-  { What the index holds, when the path left room for it. }
-  if Stat.Staged then
+  { An index that holds part of the change, when the path left room for
+    it: the commit takes the whole file, not only what git add took. }
+  if Stat.Staged and Stat.Unstaged then
   begin
-    if Stat.Unstaged then
-      Count := rsPartlyStaged
-    else
-      Count := rsStaged;
+    Count := rsPartlyAdded;
     if X + Canvas.TextWidth(Count) <= CountsX - Px(Gap) then
     begin
       Canvas.Font.Color := FDim;
