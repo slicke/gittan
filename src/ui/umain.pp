@@ -65,6 +65,10 @@ type
 
   {** What a transport button of the status bar does: UpdateStatusTransport
     puts the steps there, StatusStepClick runs them. }
+  {** What Edit > Undo, Redo, Cut, Copy, Paste and Select All ask of the
+    focused control (EditAction). }
+  TEditAction = (eaUndo, eaRedo, eaCut, eaCopy, eaPaste, eaSelectAll);
+
   TStatusStep = (stepNone, stepFetch, stepPull, stepPush, stepForcePush, stepContinue,
     stepCommit, stepAbort, stepSkip, stepResolve);
 
@@ -1160,6 +1164,8 @@ type
     procedure MenuNewTabClick(Sender: TObject);
     procedure MenuCloseTabClick(Sender: TObject);
     procedure MenuNextTabClick(Sender: TObject);
+    procedure EditAction(AAction: TEditAction);
+    procedure MenuEditActionClick(Sender: TObject);
     procedure MenuMinimizeClick(Sender: TObject);
     procedure MenuZoomWindowClick(Sender: TObject);
     procedure MenuBringAllToFrontClick(Sender: TObject);
@@ -2411,6 +2417,11 @@ resourcestring
   rsGo = '&Go';
   rsTools = '&Tools';
   rsWindowMenu = '&Window';
+  rsEditMenu = '&Edit';
+  rsEditUndo = '&Undo';
+  rsEditRedo = '&Redo';
+  rsEditCut = 'Cu&t';
+  rsEditPaste = '&Paste';
   rsMinimize = 'Minimize';
   rsZoom = 'Zoom';
   rsBringAllToFront = 'Bring All to Front';
@@ -5171,8 +5182,8 @@ end;
 procedure TRepoFrame.BuildMenu;
 var
   Main: TMainMenu;
-  FileMenu, BranchMenu, StashMenu, ViewMenu, GoMenu, ToolsMenu, WindowMenu, HelpMenu, Item,
-    Sub: TMenuItem;
+  FileMenu, EditMenu, BranchMenu, StashMenu, ViewMenu, GoMenu, ToolsMenu, WindowMenu, HelpMenu,
+    Item, Sub: TMenuItem;
   i: integer;
 
   function AddItem(AParent: TMenuItem; const ACaption: string; AShortCut: TShortCut;
@@ -5267,6 +5278,29 @@ begin
 
   { The Branch menu: the verb first, then the branch from the list
     (umain.branches.inc). }
+  { What the focused control does with text, as every application's Edit
+    menu (EditAction), then Find, which acts on the editor. }
+  EditMenu := TMenuItem.Create(Main);
+  EditMenu.Caption := rsEditMenu;
+  Main.Items.Add(EditMenu);
+  AddItem(EditMenu, rsEditUndo, ShortCut(VK_Z, [ssModifier]), @MenuEditActionClick).Tag :=
+    Ord(eaUndo);
+  AddItem(EditMenu, rsEditRedo, ShortCut(VK_Z, [ssModifier, ssShift]),
+    @MenuEditActionClick).Tag := Ord(eaRedo);
+  EditMenu.Add(NewLine);
+  AddItem(EditMenu, rsEditCut, ShortCut(VK_X, [ssModifier]), @MenuEditActionClick).Tag :=
+    Ord(eaCut);
+  AddItem(EditMenu, rsEditCopy, ShortCut(VK_C, [ssModifier]), @MenuEditActionClick).Tag :=
+    Ord(eaCopy);
+  AddItem(EditMenu, rsEditPaste, ShortCut(VK_V, [ssModifier]), @MenuEditActionClick).Tag :=
+    Ord(eaPaste);
+  AddItem(EditMenu, rsEditSelectAll, ShortCut(VK_A, [ssModifier]),
+    @MenuEditActionClick).Tag := Ord(eaSelectAll);
+  EditMenu.Add(NewLine);
+  AddItem(EditMenu, rsFind, ShortCut(VK_F, [ssModifier]), @MenuFindClick);
+  AddItem(EditMenu, rsFindNext, ShortCut(VK_G, [ssModifier]), @MenuFindNextClick);
+  AddItem(EditMenu, rsFindPrev, ShortCut(VK_G, [ssModifier, ssShift]), @MenuFindPrevClick);
+
   BranchMenu := TMenuItem.Create(Main);
   BranchMenu.Caption := rsBranchMenu;
   BranchMenu.OnClick := @BranchMenuOpen;
@@ -5432,9 +5466,6 @@ begin
   AddItem(GoMenu, rsPrevTab, ShortCut(VK_OEM_4, [ssModifier, ssShift]), @MenuPrevTabClick);
   {$ENDIF}
   GoMenu.Add(NewLine);
-  AddItem(GoMenu, rsFind, ShortCut(VK_F, [ssModifier]), @MenuFindClick);
-  AddItem(GoMenu, rsFindNext, ShortCut(VK_G, [ssModifier]), @MenuFindNextClick);
-  AddItem(GoMenu, rsFindPrev, ShortCut(VK_G, [ssModifier, ssShift]), @MenuFindPrevClick);
   AddItem(GoMenu, rsFilterFiles, ShortCut(VK_F, [ssModifier, ssShift]), @MenuFilterFilesClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsGoToDefinition, ShortCut(VK_F12, []), @MenuGoToDefinitionClick);
@@ -5501,6 +5532,46 @@ begin
   AddItem(HelpMenu, rsHelpWebsite, 0, @MenuHelpWebsiteClick);
   AddItem(HelpMenu, rsHelpReleases, 0, @MenuHelpReleasesClick);
   AddItem(HelpMenu, rsHelpIssue, 0, @MenuHelpIssueClick);
+end;
+
+{ Edit > Undo, Cut, Copy and the rest act on the focused control: the
+  editor through its commands; on macOS anything else through the first
+  responder, as Cocoa's own Edit menu does, so a native field keeps its
+  undo; elsewhere a field or memo through its own methods. }
+procedure TRepoFrame.EditAction(AAction: TEditAction);
+const
+  EdCommands: array[TEditAction] of integer = (cCommand_Undo, cCommand_Redo,
+    cCommand_ClipboardCut, cCommand_ClipboardCopy, cCommand_ClipboardPaste, cCommand_SelectAll);
+  {$IFDEF LCLCocoa}
+  Selectors: array[TEditAction] of string = ('undo:', 'redo:', 'cut:', 'copy:', 'paste:',
+    'selectAll:');
+  {$ENDIF}
+var
+  C: TWinControl;
+begin
+  C := Screen.ActiveControl;
+  if C is TATSynEdit then
+  begin
+    TATSynEdit(C).DoCommand(EdCommands[AAction], TATCommandInvoke.AppInternal);
+    Exit;
+  end;
+  {$IFDEF LCLCocoa}
+  SendEditAction(Selectors[AAction]);
+  {$ELSE}
+  if C is TCustomEdit then
+    case AAction of
+      eaUndo: TCustomEdit(C).Undo;
+      eaCut: TCustomEdit(C).CutToClipboard;
+      eaCopy: TCustomEdit(C).CopyToClipboard;
+      eaPaste: TCustomEdit(C).PasteFromClipboard;
+      eaSelectAll: TCustomEdit(C).SelectAll;
+    end;
+  {$ENDIF}
+end;
+
+procedure TRepoFrame.MenuEditActionClick(Sender: TObject);
+begin
+  EditAction(TEditAction(TMenuItem(Sender).Tag));
 end;
 
 procedure TRepoFrame.MenuMinimizeClick(Sender: TObject);

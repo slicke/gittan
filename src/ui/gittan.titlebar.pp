@@ -70,6 +70,12 @@ procedure MakeAlertWindow(AHandle: PtrUInt);
   not tell a zoomed window apart. }
 procedure ZoomWindow(AHandle: PtrUInt);
 
+{** Sends the standard action ASelector ('copy:', 'undo:' ...) to the
+  first responder, as the Edit menu of a Cocoa application does, so a
+  native text field or memo cuts, pastes and undoes as it always does.
+  False when no responder took it. }
+function SendEditAction(const ASelector: string): boolean;
+
 implementation
 
 uses
@@ -224,6 +230,11 @@ begin
   Win := WindowOf(AHandle);
   if Win <> nil then
     Win.zoom(nil);
+end;
+
+function SendEditAction(const ASelector: string): boolean;
+begin
+  Result := NSApp.sendAction_to_from(NSSelectorFromString(NSSTR(ASelector)), nil, nil);
 end;
 
 end.
