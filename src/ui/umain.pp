@@ -376,6 +376,12 @@ type
     { The row's commit as the history view keys it, -1 elsewhere, and
       the first "#123" of the commit's summary, 0 when it has none. }
     FPopupKey, FPopupIssue: integer;
+    { The change under the mouse when the editor menu popped up, as the
+      pills offer it: its block, or the reviewed change the row shows as
+      code; -1 for none. The items for it come first. }
+    FPopupBlock, FPopupKeep: integer;
+    FBlockKeepItem, FBlockLeaveOutItem, FBlockSepItem, FBlockDiscardItem,
+      FBlockEndItem: TMenuItem;
     { GitHub's view of the repository, read by a TGittanPullRequestJob
       when the repository or its branch changes (FPullKey names the pair
       the data is for) and on View > Refresh: the pull request of the
@@ -1712,6 +1718,9 @@ type
     procedure MenuOpenCommitOnForgeClick(Sender: TObject);
     procedure MenuOpenIssueOnForgeClick(Sender: TObject);
     procedure MenuShowCommitClick(Sender: TObject);
+    procedure MenuBlockKeepClick(Sender: TObject);
+    procedure MenuBlockLeaveOutClick(Sender: TObject);
+    procedure MenuBlockDiscardClick(Sender: TObject);
     procedure MenuCopyHashClick(Sender: TObject);
     function ForgeUrl(const ATarget: TGittanWebTarget; out AUrl: string): boolean;
     procedure OpenOnForge(const ATarget: TGittanWebTarget);
@@ -3179,6 +3188,7 @@ resourcestring
   rsDiscardPillHint = 'Put the lines back as they were, after asking; ' +
     'File > Undo Discard brings them back';
   rsIncludeAllAction = 'Include All';
+  rsBlockDiscardItem = 'Discard Change...';
   rsLeftOutBlock = 'Left the change at line %d of %s out of the commit';
   rsLeftOutFile = 'Left every change of %s out of the commit';
   rsIncludedBlock = 'The change at line %d of %s goes into the commit';

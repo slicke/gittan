@@ -1204,6 +1204,13 @@ begin
     undo and redo a read-only viewer never enables. }
   FEditPopup := TPopupMenu.Create(Self);
   FEditPopup.OnPopup := @EditPopupPopup;
+  { Over a change: what its pills offer, Discard apart (EditPopupPopup
+    shows them and sets the captions). }
+  FBlockKeepItem := AddItem(FEditPopup, rsKeepPill, @MenuBlockKeepClick);
+  FBlockLeaveOutItem := AddItem(FEditPopup, rsLeaveOutPill, @MenuBlockLeaveOutClick);
+  FBlockSepItem := AddItem(FEditPopup, '-', nil);
+  FBlockDiscardItem := AddItem(FEditPopup, rsBlockDiscardItem, @MenuBlockDiscardClick);
+  FBlockEndItem := AddItem(FEditPopup, '-', nil);
   AddItem(FEditPopup, rsEditCopy, @MenuEditCopyClick);
   AddItem(FEditPopup, rsEditSelectAll, @MenuEditSelectAllClick);
   Item := TMenuItem.Create(FEditPopup);
@@ -1678,6 +1685,54 @@ begin
     FWhyEditItem.Caption := rsWhyMenu;
   FWhyEditItem.Enabled := (FWhyJob <> nil) or ((FPopupEd = Edit) and (FPopupRow >= 0) and
     (FEditPath = ''));
+  { The change under the mouse, as DiscardAt finds it for the pills. }
+  FPopupBlock := -1;
+  FPopupKeep := -1;
+  if (FPopupEd = Edit) and (FPopupRow >= 0) and (FView = gvChanges) and CanDiscard and
+    not CanResolveBlocks then
+  begin
+    FPopupBlock := BlockAtRow(FPopupRow);
+    if FPopupBlock < 0 then
+    begin
+      Key := LineAtRow(FPopupRow);
+      if (Key >= 0) and (Key <= High(FKeptOf)) then
+        FPopupKeep := FKeptOf[Key];
+    end;
+  end;
+  FBlockKeepItem.Visible := (FPopupBlock >= 0) or (FPopupKeep >= 0);
+  if FPopupKeep >= 0 then
+    FBlockKeepItem.Caption := rsUnkeepPill
+  else
+    FBlockKeepItem.Caption := rsKeepPill;
+  FBlockLeaveOutItem.Visible := (FPopupBlock >= 0) and CanLeaveOut;
+  if FBlockLeaveOutItem.Visible then
+    FBlockLeaveOutItem.Caption := LeaveOutCaption(FPopupBlock);
+  FBlockSepItem.Visible := FPopupBlock >= 0;
+  FBlockDiscardItem.Visible := FPopupBlock >= 0;
+  FBlockEndItem.Visible := FBlockKeepItem.Visible;
+end;
+
+procedure TRepoFrame.MenuBlockKeepClick(Sender: TObject);
+begin
+  SetHotDiscard(Edit, -1, -1, -1);
+  if FPopupKeep >= 0 then
+    UnkeepAt(FPopupKeep)
+  else if FPopupBlock >= 0 then
+    KeepBlockAt(FPopupBlock);
+end;
+
+procedure TRepoFrame.MenuBlockLeaveOutClick(Sender: TObject);
+begin
+  SetHotDiscard(Edit, -1, -1, -1);
+  if FPopupBlock >= 0 then
+    ToggleLeaveOutAt(FPopupBlock);
+end;
+
+procedure TRepoFrame.MenuBlockDiscardClick(Sender: TObject);
+begin
+  SetHotDiscard(Edit, -1, -1, -1);
+  if FPopupBlock >= 0 then
+    DiscardBlockAt(FPopupBlock);
 end;
 
 { The commit the row's blame or history gives, shown against its
