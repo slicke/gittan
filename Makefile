@@ -133,7 +133,7 @@ help:
 	@echo "  lexlib    Copy the lexers from $(LEXERS_SRC) and $(LEXERS_OWN) into $(LEXLIB)/ (part of every build)"
 	@echo "  deps      Register the vendored packages with lazbuild and compile them"
 	@echo "  ide       Rebuild the Lazarus IDE (after ATSynEdit, ATFlatControls, EncConv or BGRABitmap moves)"
-	@echo "  wordmark  Write src/ui/gittan.wordmark.inc from icons/gittan-wordmark.svg"
+	@echo "  wordmark  Write src/ui/gittan.wordmark.inc from icons/wordmark/gittan-wordmark-<theme>.png"
 	@echo "  dialogicon Write src/ui/gittan.dialogicon.inc from icons/dialog/gittan-dialog-<n>.png"
 	@echo "  icons     Pack Gittan.icns and Gittan.ico from ICON_MAC_SRC=$(ICON_MAC_SRC) and ICON_PNG_DIR=$(ICON_PNG_DIR) (macOS only)"
 	@echo "  clean     Remove lib/, $(LEXLIB)/, the test build and the binary"
@@ -171,14 +171,30 @@ icons:
 	cp "$$out/Assets.car" icons/Assets.car; rm -rf "$$out"; \
 	echo "wrote icons/Assets.car"
 
-# The welcome view's wordmark, icons/gittan-wordmark.svg, as a Pascal string
-# constant (src/ui/gittan.wordmark.inc, kept in git, so a build needs neither
-# this rule nor awk): one line of the constant per element.
+# A PNG as a Pascal byte array, for the rules below: $$f the file, $$len its
+# size, $$name the constant; appended to $$out.
+define png_bytes
+echo "  $$name: array[0..$$((len - 1))] of byte = (" >> $$out; \
+od -An -v -tu1 $$f | awk -v total=$$len '{ for (i = 1; i <= NF; i++) { k++; \
+  printf "%s%s", (c == 0 ? "    " : ""), $$i (k < total ? "," : ""); \
+  if (++c == 20) { print ""; c = 0 } } } END { if (c) print "" }' >> $$out; \
+echo "  );" >> $$out
+endef
+
+# The welcome view's wordmark, icons/wordmark/gittan-wordmark-<theme>.png
+# (dark and light, rendered from icons/gittan-wordmark-<theme>.svg with
+# Chrome headless; see spec/icon.md), as Pascal byte arrays
+# (src/ui/gittan.wordmark.inc, kept in git, so a build needs neither this
+# rule nor od and awk).
 wordmark:
-	awk 'BEGIN { print "{ Made from icons/gittan-wordmark.svg by make wordmark. }" } \
-	  { gsub(/></, ">\n<"); n = split($$0, L, "\n"); \
-	    for (i = 1; i <= n; i++) { gsub(/\x27/, "\x27\x27", L[i]); print "  \x27" L[i] "\x27 +" } } \
-	  END { print "  \x27\x27" }' icons/gittan-wordmark.svg > src/ui/gittan.wordmark.inc
+	@set -e; out=src/ui/gittan.wordmark.inc; \
+	echo "{ Made from icons/wordmark/gittan-wordmark-<theme>.png by make wordmark. }" > $$out; \
+	echo "const" >> $$out; \
+	for t in Dark Light; do \
+	  f=icons/wordmark/gittan-wordmark-$$(echo $$t | tr A-Z a-z).png; len=$$(wc -c < $$f | tr -d ' '); \
+	  name=Wordmark$$t; $(png_bytes); \
+	done; \
+	echo "wrote $$out"
 
 # The dialogs' icon, icons/dialog/gittan-dialog-<n>.png (48, 96 and 144
 # pixels, rendered from icons/gittan-dialog.svg with Chrome headless; see
@@ -191,11 +207,7 @@ dialogicon:
 	echo "const" >> $$out; \
 	for n in $(DIALOG_ICON_SIZES); do \
 	  f=icons/dialog/gittan-dialog-$$n.png; len=$$(wc -c < $$f | tr -d ' '); \
-	  echo "  DialogIcon$$n: array[0..$$((len - 1))] of byte = (" >> $$out; \
-	  od -An -v -tu1 $$f | awk -v total=$$len '{ for (i = 1; i <= NF; i++) { k++; \
-	    printf "%s%s", (c == 0 ? "    " : ""), $$i (k < total ? "," : ""); \
-	    if (++c == 20) { print ""; c = 0 } } } END { if (c) print "" }' >> $$out; \
-	  echo "  );" >> $$out; \
+	  name=DialogIcon$$n; $(png_bytes); \
 	done; \
 	echo "wrote $$out"
 

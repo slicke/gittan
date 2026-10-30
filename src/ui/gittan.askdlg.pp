@@ -5,7 +5,7 @@ unit gittan.askdlg;
   as wide as the screen allowed, put a glyph on every button and set the
   buttons in the middle. These are built in code like the Who Commits
   dialog: a fixed width the text wraps in, an icon for the kind at the
-  left (a warning triangle, an error disc, else the braid graph of gittan.dialogicon),
+  left (a warning triangle, an error disc, else the mark of gittan.dialogicon),
   plain buttons at the right in the platform's order, and for input a
   label over each field and a line in red under them saying why OK is
   off. }
@@ -381,7 +381,7 @@ begin
 end;
 
 { A warning is an amber triangle, an error a red disc, both with an
-  exclamation mark; a question or a note has Gittan's braid graph
+  exclamation mark; a question or a note has Gittan's mark
   (DialogIcon), in the screen's pixels. }
 procedure TAskForm.Paint;
 var
