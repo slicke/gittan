@@ -581,6 +581,11 @@ begin
       BlobLockAction;
     Exit;
   end;
+  if FView = gvMerge then
+  begin
+    MergeHeaderAction(AIndex);
+    Exit;
+  end;
   if ConflictHeaderAction(AIndex) then
     Exit;
   { Download, the one pill of an image or binary file in Git LFS. }

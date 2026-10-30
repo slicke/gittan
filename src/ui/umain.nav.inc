@@ -25,7 +25,7 @@ begin
   case FView of
     gvSummary:
       APlace.Kind := pkSummary;
-    gvChanges, gvImage, gvTranslation, gvBinary:
+    gvChanges, gvImage, gvTranslation, gvBinary, gvMerge:
     begin
       { A translation or a binary file opened from disk is not in the
         tree. }
@@ -221,7 +221,7 @@ begin
       if not IsChangedPath(APlace.Path) then
         Exit;
       if (FCurrentPath <> APlace.Path) or not (FView in [gvChanges, gvImage,
-        gvTranslation, gvBinary]) then
+        gvTranslation, gvBinary, gvMerge]) then
       begin
         SummarySelectFile(nil, APlace.Path);
         { The tree filter may hide the file. }

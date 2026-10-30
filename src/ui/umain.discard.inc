@@ -643,7 +643,7 @@ begin
   if FRevertFileItem <> nil then
   begin
     FRevertFileItem.Enabled := CanRevert and IsChangedPath(FCurrentPath) and
-      (FView in [gvChanges, gvImage, gvBinary, gvTranslation]);
+      (FView in [gvChanges, gvImage, gvBinary, gvTranslation, gvMerge]);
     FUndoRevertItem.Enabled := FRevertUndo.Count > 0;
     FCleanItem.Enabled := CanClean;
     FApplyPatchesItem.Enabled := CanApplyPatches;

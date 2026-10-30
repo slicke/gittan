@@ -31,7 +31,8 @@ uses
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
   gittan.rebase, gittan.worktrees, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
-  gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, ATSynEdit_Gaps, md5;
+  gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, gittan.merge, gittan.mergeview,
+  ATSynEdit_Gaps, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -45,7 +46,7 @@ type
     binary view), or the Pull Requests page (gittan.pullpage,
     umain.pulls.inc). }
   TGittanView = (gvSummary, gvRepoInfo, gvChanges, gvRepoDiff, gvFile, gvHistory, gvSubmodule,
-    gvImage, gvTranslation, gvBinary, gvCommands, gvFiles, gvBlob, gvPulls);
+    gvImage, gvTranslation, gvBinary, gvCommands, gvFiles, gvBlob, gvPulls, gvMerge);
 
   {** The three strengths of a commit's color in the history view: the
     faint tint of its rows, the shade of the words it changed, and the
@@ -288,7 +289,7 @@ type
       runs, and the item of the conflict list that starts or stops it
       (-1 while the list has none). }
     FConflictJob: TGittanConflictJob;
-    FConflictAIItem: integer;
+    FConflictAIItem, FConflictMergeItem: integer;
     { Splitting the changes into commits (umain.ai.inc): File > Split
       Changes into Commits, the job while it runs, the plan it gave
       (pruned of what has been committed since, PrunePlan) and the list
@@ -1036,6 +1037,13 @@ type
     FImageDiff: TGittanImageDiff;
     { A binary file, in the editor's place (see ShowBinaryChanges). }
     FBinaryView: TGittanBinaryView;
+    { The merge editor (umain.merge.inc): a conflicted file in three
+      panes, in the editor's place; whether conflicted files open in it,
+      the file it shows and the item of the File menu. }
+    FMergeView: TGittanMergeView;
+    FMergeMode: boolean;
+    FMergePath: string;
+    FMergeEditorItem: TMenuItem;
     { View > Markdown Preview (see umain.mdpreview.inc): whether it is on,
       the page right of the editor, its splitter, its share of the width
       and the pause after an edit before the page follows. }
@@ -1936,6 +1944,19 @@ type
     function NextConflictFile(const AAfter: string; ANext: boolean): string;
     procedure ShowNextConflict(const AAfter: string; AAdvance: boolean);
     procedure GoToConflict(ANext: boolean);
+    function CanOpenMerge: boolean;
+    procedure OpenMergeEditor;
+    procedure CloseMergeEditor;
+    procedure ShowMergeView(const APath: string);
+    procedure HideMergeView;
+    procedure RestyleMergeView;
+    procedure SetMergeActions;
+    procedure MergeHeaderAction(AIndex: integer);
+    procedure MergeChanged(Sender: TObject);
+    function MergeDirty: boolean;
+    function SaveMerge(ARefresh: boolean): boolean;
+    procedure FlushMerge;
+    procedure MenuMergeEditorClick(Sender: TObject);
     procedure SummaryRowAction(Sender: TObject; const APath: string);
     procedure CommitNoteLink(Sender: TObject);
     procedure MenuNextConflictClick(Sender: TObject);
@@ -2905,6 +2926,26 @@ resourcestring
   rsResolvedBlockOne = 'Resolved the conflict at line %d of %s; 1 left in the file';
   rsResolvedLast = 'Resolved the last conflict in %s and marked it resolved';
   rsResolveBlockFailed = 'Could not resolve the conflict: %s';
+  rsOpenMerge = 'Merge Editor';
+  rsMergeEditorItem = 'Open in &Merge Editor';
+  rsMergeEditorPick = 'Open in Merge Editor';
+  rsMergeMine = 'Mine';
+  rsMergeTheirs = 'Theirs';
+  rsMergeResult = 'Result';
+  rsMergeHeader = 'Conflict %d of %d · %s';
+  rsMergeNoLines = 'no lines';
+  rsMergeEdited = 'edited by hand: the boxes are off until Reset';
+  rsMergeResolvedCount = '%d of %d conflicts resolved';
+  rsMergeAllMine = 'All Mine';
+  rsMergeAllTheirs = 'All Theirs';
+  rsMergeReset = 'Reset';
+  rsMergeSave = 'Save';
+  rsMergeClose = 'Close';
+  rsMergeNothing = 'Nothing to save: the result is the file as it is';
+  rsMergeSaveFailed = 'Could not save the result: %s';
+  rsMergeSaved = 'Saved the result to %s; %d conflicts left in the file';
+  rsMergeSavedOne = 'Saved the result to %s; 1 conflict left in the file';
+  rsMergeSaveAsk = 'Save the merge result of %s?';
   rsConflictsInFile = '%d conflicts';
   rsConflictInFile = '1 conflict';
   rsConflictNoMarkers = 'no markers left';
@@ -3749,6 +3790,15 @@ begin
   FBinaryView.Parent := EditorPanel;
   FBinaryView.Align := alClient;
   FBinaryView.Visible := False;
+  FMergeView := TGittanMergeView.Create(Self);
+  FMergeView.Parent := EditorPanel;
+  FMergeView.Align := alClient;
+  FMergeView.Visible := False;
+  FMergeView.SetKinds(bmConflictOurs, bmConflictTheirs, bmConflictMarker, bmFiller, bmGap);
+  FMergeView.SetTexts(rsMergeMine, rsMergeTheirs, rsMergeResult, rsMergeHeader, rsMergeEdited,
+    rsMergeResolvedCount, rsMergeNoLines);
+  FMergeView.OnPicked := @MergeChanged;
+  FMergeView.OnEdited := @MergeChanged;
   { The Markdown preview sits right of the editor, its splitter between
     them; both are created before the editor's alClient takes the rest. }
   FMdPreview := TGittanMarkdownPreview.Create(Self);
@@ -4509,6 +4559,8 @@ begin
   FBandTrack := P.Line;
   FBandFill := P.Accent;
   FWelcome.SetAccent(P.Accent);
+  FMergeView.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Accent);
+  RestyleMergeView;
   if FDark then
   begin
     FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim, P.Line, P.Deleted,
@@ -5137,6 +5189,8 @@ begin
     @MenuLeaveOutClick);
   FResolveItem := AddItem(FileMenu, rsResolveHere, ShortCut(VK_R, [ssModifier, ssShift]),
     @MenuResolveHereClick);
+  FMergeEditorItem := AddItem(FileMenu, rsMergeEditorItem, ShortCut(VK_E, [ssModifier, ssShift]),
+    @MenuMergeEditorClick);
   FRevertFileItem := AddItem(FileMenu, rsRevertFile, ShortCut(VK_BACK, [ssModifier, ssAlt]),
     @MenuRevertFileClick);
   FUndoRevertItem := AddItem(FileMenu, rsUndoRevert, 0, @MenuUndoRevertClick);
@@ -6371,6 +6425,10 @@ begin
   { Open closes the previous repository even when it fails. }
   FlushEdit;
   LeaveEdit;
+  FlushMerge;
+  HideMergeView;
+  FMergeView.Clear;
+  FMergePath := '';
   SaveCommitDraft;
   AbandonMessageJob;
   AbandonAIReview;
@@ -6925,7 +6983,7 @@ begin
   Path := SelectedPath;
   { The tree filter may hide the file shown; the tree then selects
     nothing. }
-  if (Path = '') and (View in [gvChanges, gvImage, gvTranslation, gvBinary]) then
+  if (Path = '') and (View in [gvChanges, gvImage, gvTranslation, gvBinary, gvMerge]) then
     Path := FCurrentPath;
   RepoPath := '';
   if (FRepoTree.Selected <> nil) and (FRepoTree.Selected.Data <> nil) then
@@ -6979,7 +7037,7 @@ begin
           OpenFile(FEditPath);
           RestoreScroll;
         end;
-    gvChanges, gvImage, gvTranslation, gvBinary:
+    gvChanges, gvImage, gvTranslation, gvBinary, gvMerge:
       { A translation or a binary file opened from disk is not in the
         tree. }
       if not (View in [gvTranslation, gvBinary]) or (FCurrentPath <> '') then
@@ -7078,6 +7136,8 @@ procedure TRepoFrame.LeaveEditorViews;
 begin
   FlushEdit;
   LeaveEdit;
+  FlushMerge;
+  HideMergeView;
   Edit.Visible := False;
   FEditOld.Visible := False;
   FSideSplitter.Visible := False;
@@ -7108,6 +7168,7 @@ begin
   SetNavRow(-1);
   FImageDiff.Visible := False;
   FBinaryView.Visible := False;
+  HideMergeView;
   FHeader.Visible := True;
   SetFoldBand(Edit, FoldingShown);
   ApplyLayout;
@@ -7143,6 +7204,7 @@ begin
   if FLfsSides <> nil then
     FHeader.SetActions([rsLfsDownloadAction]);
   FView := gvImage;
+  HideMergeView;
   FSymbolBar.Visible := False;
   FFindBar.Visible := False;
   FSummaryBox.Visible := False;
@@ -7182,6 +7244,7 @@ begin
     FHeader.SetActions([rsLfsDownloadAction]);
   end;
   FView := gvBinary;
+  HideMergeView;
   FSymbolBar.Visible := False;
   FFindBar.Visible := False;
   FSummaryBox.Visible := False;
@@ -7215,6 +7278,7 @@ begin
   FSummary.Selected := '';
   FCurrentPath := '';
   FView := gvBinary;
+  HideMergeView;
   Edit.FileName := AFileName;
   FSymbolBar.Visible := False;
   FFindBar.Visible := False;
@@ -7405,6 +7469,8 @@ begin
   { Asked before the header names the next file, not when the text is
     replaced further down. }
   FlushEdit;
+  if APath <> FMergePath then
+    FlushMerge;
   i := StatIndexOf(APath);
   Result := False;
   { A binary file has no lines to diff; a new one would be read as
@@ -7455,7 +7521,10 @@ begin
       SetLength(FConflictEnds, Length(FConflictStarts));
       for c := 0 to High(FConflictStarts) do
         FConflictEnds[c] := ConflictEnd(FChangeLines, FConflictRoles, FConflictStarts[c]);
-      FHeader.SetActions([rsUseMine, rsUseTheirs, rsMarkResolved]);
+      if Length(FConflictStarts) > 0 then
+        FHeader.SetActions([rsUseMine, rsUseTheirs, rsMarkResolved, rsOpenMerge])
+      else
+        FHeader.SetActions([rsUseMine, rsUseTheirs, rsMarkResolved]);
     end;
   end;
   LockNote;
@@ -7476,6 +7545,11 @@ begin
   if FTranslations and IsPoPath(APath) and (FConflictRoles = nil) then
   begin
     ShowTranslationChanges(APath);
+    Exit;
+  end;
+  if FMergeMode and CanOpenMerge then
+  begin
+    ShowMergeView(APath);
     Exit;
   end;
   FManualLexer := False;
@@ -7980,6 +8054,7 @@ const
 {$I umain.remote.inc}
 {$I umain.lfslocks.inc}
 {$I umain.mdpreview.inc}
+{$I umain.merge.inc}
 
 end.
 

@@ -142,7 +142,8 @@ begin
     StatusNote(Format(rsResolveFailed, [APath, FRepo.Error]), True);
   RefreshRepository;
   if Ok then
-    ShowNextConflict(APath, (APath = FCurrentPath) and (FView in [gvChanges, gvImage, gvBinary]));
+    ShowNextConflict(APath, (APath = FCurrentPath) and
+      (FView in [gvChanges, gvImage, gvBinary, gvMerge]));
 end;
 
 { ---------------------------------------------------------------------------
@@ -267,6 +268,8 @@ begin
       FConflictAIItem := FConflictPopup.Add(Format(rsResolveAIStop, [AgentName]), HintSparkle)
     else
       FConflictAIItem := FConflictPopup.Add(Format(rsResolveAI, [AgentName]), HintSparkle);
+  { Line by line, in three panes (umain.merge.inc). }
+  FConflictMergeItem := FConflictPopup.Add(rsMergeEditorPick, '');
   { Under the button, or under the row's start when the band is not
     there to anchor to. }
   Band := Edit.Gutter.FindIndexByTag(gutterTagDiscard);
@@ -364,7 +367,9 @@ begin
       SummarySelectFile(Sender, FConflictPaths[AIndex]);
     Exit;
   end;
-  if (FConflictAIItem >= 0) and (AIndex = FConflictAIItem) then
+  if AIndex = FConflictMergeItem then
+    OpenMergeEditor
+  else if (FConflictAIItem >= 0) and (AIndex = FConflictAIItem) then
   begin
     if FConflictJob <> nil then
     begin
@@ -416,7 +421,7 @@ begin
     if FStats[i].Kind = ckConflict then
     begin
       Index := FConflictPopup.Add(FStats[i].Path, ConflictDetail(FStats[i].Path),
-        (FStats[i].Path = FCurrentPath) and (FView in [gvChanges, gvImage, gvBinary]));
+        (FStats[i].Path = FCurrentPath) and (FView in [gvChanges, gvImage, gvBinary, gvMerge]));
       SetLength(FConflictPaths, Index + 1);
       FConflictPaths[Index] := FStats[i].Path;
     end;
@@ -499,6 +504,10 @@ var
   Cur, Target, i: integer;
   Other: string;
 begin
+  { The merge editor steps through its own conflicts, on to the next
+    file past its last. }
+  if (FView = gvMerge) and FMergeView.GoToConflict(ANext) then
+    Exit;
   Rows := nil;
   if (FView = gvChanges) and IsConflictPath(FCurrentPath) then
     Rows := FConflictRows;
@@ -567,6 +576,8 @@ end;
   item follows the caret (from UpdateDiscardItems). }
 procedure TRepoFrame.UpdateResolveItems;
 begin
+  if FMergeEditorItem <> nil then
+    FMergeEditorItem.Enabled := (FView = gvMerge) or CanOpenMerge;
   if FResolveItem = nil then
     Exit;
   FResolveItem.Enabled := CanResolveBlocks and (Edit.Carets.Count > 0) and
@@ -591,7 +602,12 @@ function TRepoFrame.ConflictHeaderAction(AIndex: integer): boolean;
 begin
   Result := (FEditPath = '') and (FView in [gvChanges, gvImage, gvBinary]) and
     IsConflictPath(FCurrentPath);
-  if Result then
+  if not Result then
+    Exit;
+  { The fourth pill, shown while the file has markers. }
+  if AIndex = 3 then
+    OpenMergeEditor
+  else
     ResolvePath(FCurrentPath, AIndex);
 end;
 

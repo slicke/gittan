@@ -174,6 +174,7 @@ begin
   FCurrentPath := '';
   FManualLexer := False;
   FView := gvBlob;
+  HideMergeView;
   FHeader.SetFile(APath, iconFile);
   FHeader.SetDetail(Format(rsAtCommit, [FBlobName]));
   BlobActions;

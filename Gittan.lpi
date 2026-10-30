@@ -232,6 +232,14 @@
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
+        <Filename Value="src/core/gittan.merge.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
+        <Filename Value="src/ui/gittan.mergeview.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
         <Filename Value="src/ui/gittan.richdiff.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
