@@ -1720,6 +1720,7 @@ type
     procedure SetupTitleBar;
     procedure ColorSidebar;
     procedure UpdateIndexBand;
+    procedure UpdateIndexProgress;
     procedure SetupRepoFiles;
     procedure ColorRepoHeader;
     procedure FillRepoFiles;
@@ -2426,7 +2427,9 @@ resourcestring
   rsCallersStatus = 'The changed symbols are used in %s outside this file.';
   rsLookingFor = 'Looking for a definition of "%s"...';
   rsNoDefinition = 'No definition of "%s" in the repository.';
-  rsIndexing = 'Indexing %d/%d';
+  rsIndexing = 'Indexing code %d/%d';
+  rsIndexingHint = 'Indexing the code of the repository'#10'%d of %d files (%d%%)'#10 +
+    'Go to Definition and the hover reach the files indexed so far.';
   rsNextChange = 'Next &Change';
   rsPrevChange = 'Previous C&hange';
   rsNextConflict = 'Next Conflic&t';
@@ -4834,12 +4837,7 @@ begin
     FStatus.SetPull('', '', stNormal, 0);
     FStatus.SetPullThreads(0, 0);
   end;
-  if FIndexing then
-    FStatus.SetProgress(Format(rsIndexing, [FIndexPos, FIndexTotal]),
-      FIndexPos, FIndexTotal)
-  else
-    FStatus.SetProgress('', 0, 0);
-  UpdateIndexBand;
+  UpdateIndexProgress;
   case FFileCount of
     0: FStatus.SetFiles(rsNoChanges);
     1: FStatus.SetFiles(rsOneChangedFile);
