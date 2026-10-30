@@ -556,6 +556,10 @@ begin
     the note says what the Abort button does instead. }
   if (Note = '') and StrayRebase then
     Note := Format(rsStrayRebaseNote, [FRebaseBranch, FBranch]);
+  { What a tick means, while files are ticked, until Don't Show Again. }
+  if (Note = '') and not Whole and CommitChoosing and (Chosen > 0) and
+    not App.Settings.TickHintHidden then
+    Note := rsCommitTickHint;
   if not Continuing and (Trim(FCommitMemo.Text) = '') then
     Can := False;
   if CommitChoosing and (Total > 0) then
@@ -607,6 +611,8 @@ begin
   { The conflicts lead on to the first of them. }
   if (FRepo.Base = '') and (FConflictFiles > 0) then
     FCommitNote.Link := Format(rsNextConflictLink, [ShortCutToText(ShortCut(VK_F6, []))])
+  else if Note = rsCommitTickHint then
+    FCommitNote.Link := rsDontShowAgain
   else
     FCommitNote.Link := '';
   { "Tick the files" beside a ticked box and the conflicts beside their
@@ -616,7 +622,7 @@ begin
     FCommitNote.Glyph := HintBranch
   else
     FCommitNote.Glyph := '';
-  if Note = rsCommitNothing then
+  if (Note = rsCommitNothing) or (Note = rsCommitTickHint) then
   begin
     FCommitNote.Images := FCheckImages;
     FCommitNote.Icon := checkOn;
@@ -638,7 +644,14 @@ end;
 
 procedure TRepoFrame.CommitNoteLink(Sender: TObject);
 begin
-  GoToConflict(True);
+  if FCommitNote.Text = rsCommitTickHint then
+  begin
+    App.Settings.TickHintHidden := True;
+    App.Settings.Save;
+    UpdateCommitState;
+  end
+  else
+    GoToConflict(True);
 end;
 
 procedure TRepoFrame.CommitMemoChange(Sender: TObject);

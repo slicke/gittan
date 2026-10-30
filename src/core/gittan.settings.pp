@@ -69,6 +69,9 @@ type
     RepoFilesOpen: boolean;
     {** Whether the Submodules section under it is unfolded. }
     SubmodulesOpen: boolean;
+    {** Whether the Commit section's note that ticked files go into the
+      commit was put away with Don't Show Again. }
+    TickHintHidden: boolean;
     {** Whether the Commit section under the tree is unfolded. }
     CommitOpen: boolean;
     {** The commit message being written, kept until it is committed,
@@ -398,6 +401,7 @@ begin
       NavOpen := Ini.ReadBool(SecWindow, 'Nav', True);
       RepoFilesOpen := Ini.ReadBool(SecWindow, 'RepoFiles', False);
       SubmodulesOpen := Ini.ReadBool(SecWindow, 'Submodules', True);
+      TickHintHidden := Ini.ReadBool(SecWindow, 'TickHintHidden', False);
       CommitOpen := Ini.ReadBool(SecWindow, 'Commit', True);
       CommitDraft := UnescapeC(Ini.ReadString(SecCommit, 'Draft', ''));
       CommitDraftRepo := Ini.ReadString(SecCommit, 'Repo', '');
@@ -542,6 +546,7 @@ begin
       Ini.WriteBool(SecWindow, 'Nav', NavOpen);
       Ini.WriteBool(SecWindow, 'RepoFiles', RepoFilesOpen);
       Ini.WriteBool(SecWindow, 'Submodules', SubmodulesOpen);
+      Ini.WriteBool(SecWindow, 'TickHintHidden', TickHintHidden);
       Ini.WriteBool(SecWindow, 'Commit', CommitOpen);
       if CommitDraft <> '' then
       begin
