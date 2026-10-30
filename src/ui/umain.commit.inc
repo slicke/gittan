@@ -930,7 +930,7 @@ procedure TRepoFrame.CommitJobDone(Sender: TObject);
 var
   Job: TGittanCommitJob;
   Subject: string;
-  Amended, Fixup, Merges: boolean;
+  Amended, Fixup, Merges, HistoryChanged: boolean;
   Steps: TGittanRebaseSteps;
 begin
   Job := TGittanCommitJob(Sender);
@@ -963,7 +963,13 @@ begin
   end
   else
     FStatus.ShowMessage('', stNormal, 0);
+  { The history or time-lapse of a file the commit took is done with:
+    the summary comes instead, as for the change view of one. }
+  HistoryChanged := (FView = gvHistory) and (FHistoryPath <> '') and
+    IsChangedPath(FHistoryPath);
   RefreshRepository;
+  if Job.Ok and HistoryChanged and (FView = gvHistory) and not IsChangedPath(FHistoryPath) then
+    ShowSummary;
   UpdateCommitState;
   UpdateRemoteItems;
   if not Job.Ok then
