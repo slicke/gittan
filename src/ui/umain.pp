@@ -147,6 +147,9 @@ type
     {** The height of the strip the title bar covers on macOS, where the
       content reaches under it; 0 elsewhere. }
     function TitleBarHeight: integer; virtual; abstract;
+    {** AFrame's name in its tab and the caption: TabTitle, with the
+      parent folders in front while another tab has the same name. }
+    function FrameName(AFrame: TRepoFrame): string; virtual; abstract;
     {$IFDEF OWNBAR}
     {** The window's own title bar on Windows and GTK 3. }
     function OwnBar: TGittanOwnTitleBar; virtual; abstract;
@@ -1139,7 +1142,6 @@ type
       the checks by outcome, and what a click does. }
     function PullHint(const APull: TGittanPullRequest): string;
     procedure UpdateSyntaxChecks;
-    procedure UpdateCaption;
     procedure MarkNews;
     procedure MenuNewTabClick(Sender: TObject);
     procedure MenuCloseTabClick(Sender: TObject);
@@ -2148,6 +2150,8 @@ type
     function TabTitle: string;
     {** The tab's tooltip: the repository's or the file's path. }
     function TabHint: string;
+    {** Names the window after the frame, while it is shown. }
+    procedure UpdateCaption;
     {** The file being edited has changes not saved, which
       FormCloseQuery asks about. }
     function NeedsSave: boolean;
@@ -4706,7 +4710,8 @@ begin
 end;
 
 { The window is named after the repository, or the file when none is
-  open; the header names the file, so the title does not change with it.
+  open, as its tab is (FrameName, which tells folders of the same name
+  apart); the header names the file, so the title does not change with it.
   Cocoa reads an ampersand in a window title as an accelerator and drops
   it, so there every ampersand is doubled. }
 procedure TRepoFrame.UpdateCaption;
@@ -4716,10 +4721,8 @@ begin
   { Nothing to tell a window the frame is leaving. }
   if csDestroying in ComponentState then
     Exit;
-  if FRepo.Root <> '' then
-    Title := ExtractFileName(FRepo.Root) + ' - ' + rsAppName
-  else if Edit.FileName <> '' then
-    Title := ExtractFileName(Edit.FileName) + ' - ' + rsAppName
+  if (FRepo.Root <> '') or (Edit.FileName <> '') then
+    Title := FWindow.FrameName(Self) + ' - ' + rsAppName
   else
     Title := rsAppName;
   {$IFDEF LCLCocoa}

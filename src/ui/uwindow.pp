@@ -54,7 +54,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Math, LCLType, Forms, Controls, Graphics, ExtCtrls, gittan.app,
-  gittan.git, gittan.forge, gittan.forgepage, umain, uforge
+  gittan.git, gittan.forge, gittan.forgepage, gittan.tabnames, umain, uforge
   {$IFDEF LCLCocoa}, gittan.toolbar, gittan.titlebar, CocoaConfig{$ENDIF}
   {$IFDEF OWNBAR}, gittan.owntitlebar{$ENDIF}
   {$IFDEF LCLWin32}, gittan.wintitlebar{$ENDIF}
@@ -84,6 +84,9 @@ type
       asked to open, is open. }
     FForgeView: TForgeView;
     FForgeShown: boolean;
+    { The shown frame's name when the strip was last updated: the
+      caption follows when another tab makes it change. }
+    FActiveName: string;
     FForgeClonePull: TGittanPullRequest;
     { The forges' active accounts at the last look (CheckAccounts), and
       the timer that looks now and then besides the window's activation,
@@ -111,6 +114,7 @@ type
     procedure FormActivate(Sender: TObject);
     procedure LexersLoaded(Sender: TObject);
     procedure UpdateChecked(Sender: TObject; AManual: boolean);
+    function FrameNames: TStringArray;
     procedure UpdateTabs;
     procedure ForgeTabsChange(Sender: TObject);
     procedure SaveTabs;
@@ -133,6 +137,7 @@ type
     function HasOpen(const ARoot: string): boolean; override;
     function IsActive(AFrame: TRepoFrame): boolean; override;
     function TitleBarHeight: integer; override;
+    function FrameName(AFrame: TRepoFrame): string; override;
     {$IFDEF OWNBAR}
     function OwnBar: TGittanOwnTitleBar; override;
     {$ENDIF}
@@ -926,6 +931,34 @@ begin
     FActive.GoForward;
 end;
 
+{ The frames' names, left to right: the folder of each repository (or
+  the file open without one), with its parents in front while another
+  tab's has the same name (DistinctNames); New Tab for an empty one. }
+function TGittanWindow.FrameNames: TStringArray;
+var
+  Paths: TStringArray;
+  i: integer;
+begin
+  Paths := nil;
+  SetLength(Paths, FFrames.Count);
+  for i := 0 to FFrames.Count - 1 do
+    Paths[i] := Frames[i].TabHint;
+  Result := DistinctNames(Paths);
+  for i := 0 to FFrames.Count - 1 do
+    if Result[i] = '' then
+      Result[i] := Frames[i].TabTitle;
+end;
+
+function TGittanWindow.FrameName(AFrame: TRepoFrame): string;
+var
+  i: integer;
+begin
+  i := FFrames.IndexOf(AFrame);
+  if i < 0 then
+    Exit(AFrame.TabTitle);
+  Result := FrameNames[i];
+end;
+
 { The strip shows the frames, or the forge view's own tabs while it is
   shown, which cannot be closed or added to. }
 procedure TGittanWindow.UpdateTabs;
@@ -950,19 +983,24 @@ begin
     {$ENDIF}
     Exit;
   end;
-  Captions := nil;
+  Captions := FrameNames;
   Hints := nil;
-  SetLength(Captions, FFrames.Count);
   SetLength(Hints, FFrames.Count);
   Marks := nil;
   SetLength(Marks, FFrames.Count);
   for i := 0 to FFrames.Count - 1 do
   begin
-    Captions[i] := Frames[i].TabTitle;
     Hints[i] := Frames[i].TabHint;
     Marks[i] := Frames[i].HasNews;
   end;
   i := FFrames.IndexOf(FActive);
+  { A tab opened or closed may change the shown one's name; its
+    UpdateCaption comes back here, with the name as kept. }
+  if (i >= 0) and (Captions[i] <> FActiveName) then
+  begin
+    FActiveName := Captions[i];
+    FActive.UpdateCaption;
+  end;
   {$IFDEF LCLCocoa}
   if FToolbar <> nil then
     FToolbar.SetTabs(Captions, Hints, Marks, i);
