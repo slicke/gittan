@@ -50,14 +50,14 @@ type
     const AScreenRect: TRect) of object;
 
   {** A transport button. The primary one reads Caption after its icon;
-    the side ones show the icon alone, and their caption is for the
-    hint. The primary's tone is its fill: the accent for stNormal, a
+    the side ones show the icon alone, or with Text after it, and their
+    caption is for the hint. The primary's tone is its fill: the accent for stNormal, a
     step to take; the hover fill with a green icon for stGood, when
     there is nothing to do; amber or red for stWarn and stBad. An empty
     icon hides the button; a disabled one is dimmed and answers no
     click. }
   TGittanStatusButton = record
-    Caption, Icon: string;
+    Caption, Icon, Text: string;
     Tone: TGittanStatusTone;
     Enabled: boolean;
   end;
@@ -211,7 +211,7 @@ type
 
 {** A transport button, for SetTransport. }
 function StatusButton(const ACaption, AIcon: string; ATone: TGittanStatusTone = stNormal;
-  AEnabled: boolean = True): TGittanStatusButton;
+  AEnabled: boolean = True; const AText: string = ''): TGittanStatusButton;
 
 {** The parts that answer a click. A transport button answers one while
   it is enabled, the base while it has actions. }
@@ -310,17 +310,19 @@ const
   BranchMax = 200;
 
 function StatusButton(const ACaption, AIcon: string; ATone: TGittanStatusTone;
-  AEnabled: boolean): TGittanStatusButton;
+  AEnabled: boolean; const AText: string): TGittanStatusButton;
 begin
   Result.Caption := ACaption;
   Result.Icon := AIcon;
+  Result.Text := AText;
   Result.Tone := ATone;
   Result.Enabled := AEnabled;
 end;
 
 function SameButton(const A, B: TGittanStatusButton): boolean;
 begin
-  Result := (A.Caption = B.Caption) and (A.Icon = B.Icon) and (A.Tone = B.Tone) and
+  Result := (A.Caption = B.Caption) and (A.Icon = B.Icon) and (A.Text = B.Text) and
+    (A.Tone = B.Tone) and
     (A.Enabled = B.Enabled);
 end;
 
@@ -1121,13 +1123,15 @@ var
       Result := 2 * Px(PrimaryPad) + IconW + Canvas.TextWidth(FButtons[APart].Caption);
       Canvas.Font.Style := [];
     end
+    else if FButtons[APart].Text <> '' then
+      Result := 2 * Px(PrimaryPad) + IconW + Canvas.TextWidth(FButtons[APart].Text)
     else
       Result := Px(PrimaryHeight);
   end;
 
-  { A side button is a circle with the icon in it, filled under the
-    mouse; the primary a pill filled in its tone with the icon and the
-    caption. }
+  { A side button is a circle with the icon in it, or a pill with its
+    text after the icon, filled under the mouse; the primary a pill
+    filled in its tone with the icon and the caption. }
   procedure DrawButton(APart: TGittanStatusPart; AX, AY: integer);
   var
     B: TGittanStatusButton;
@@ -1184,7 +1188,10 @@ var
         Canvas.Pen.Style := psClear;
         Canvas.Brush.Style := bsSolid;
         Canvas.Brush.Color := FHover;
-        Canvas.Ellipse(R);
+        if B.Text <> '' then
+          Canvas.RoundRect(R, Px(PrimaryHeight), Px(PrimaryHeight))
+        else
+          Canvas.Ellipse(R);
         Canvas.Pen.Style := psSolid;
         Canvas.Brush.Style := bsClear;
         Ink := FText;
@@ -1193,8 +1200,16 @@ var
         Ink := FDim;
       if not B.Enabled then
         Ink := MixColor(FBack, FDim, 0.45);
-      DrawStatusIcon(Canvas, B.Icon, AX + (Px(PrimaryHeight) - (TextH - 4)) div 2,
-        AY + (Px(PrimaryHeight) - TextH) div 2, TextH, Ink);
+      if B.Text <> '' then
+      begin
+        X := AX + Px(PrimaryPad);
+        DrawStatusIcon(Canvas, B.Icon, X, AY + (Px(PrimaryHeight) - TextH) div 2, TextH, Ink);
+        Canvas.Font.Color := Ink;
+        Canvas.TextOut(X + IconW, AY + (Px(PrimaryHeight) - TextH) div 2, B.Text);
+      end
+      else
+        DrawStatusIcon(Canvas, B.Icon, AX + (Px(PrimaryHeight) - (TextH - 4)) div 2,
+          AY + (Px(PrimaryHeight) - TextH) div 2, TextH, Ink);
     end;
   end;
 

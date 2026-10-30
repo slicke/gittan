@@ -4955,7 +4955,9 @@ begin
   if (FOperation <> '') and (FOperation <> 'bisecting') then
   begin
     Noun := OperationNoun(FOperation);
-    L := StatusButton(Format(rsAbortStepHint, [Noun]), HintFailed, stNormal, not Busy);
+    { Abort says so: a bare cross beside Resolve read as a close box. }
+    L := StatusButton(Format(rsAbortStepHint, [Noun]), HintFailed, stNormal, not Busy,
+      rsAbortButton);
     FStatusSteps[spLeft] := stepAbort;
     if FConflictFiles > 0 then
     begin
