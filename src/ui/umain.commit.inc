@@ -505,7 +505,7 @@ begin
     once; it goes when the merge does. }
   if FOperation = 'merging' then
   begin
-    if (FMergeMessage = '') and (Trim(FCommitMemo.Text) = '') then
+    if (FMergeMessage = '') and MessageBlank then
     begin
       FMergeMessage := FRepo.MergeMessage;
       if FMergeMessage <> '' then
@@ -515,7 +515,7 @@ begin
   else if FMergeMessage <> '' then
   begin
     if FCommitMemo.Text = FMergeMessage then
-      FCommitMemo.Clear;
+      FCommitMemo.Text := FCommitTemplate;
     FMergeMessage := '';
   end;
   Note := '';
@@ -560,7 +560,7 @@ begin
   if (Note = '') and not Whole and CommitChoosing and (Chosen > 0) and
     not App.Settings.TickHintHidden then
     Note := rsCommitTickHint;
-  if not Continuing and (Trim(FCommitMemo.Text) = '') then
+  if not Continuing and MessageBlank then
     Can := False;
   if CommitChoosing and (Total > 0) then
   begin
@@ -703,6 +703,7 @@ begin
     FCommitOptions.Font.Color := Palette.Dim
   else
     FCommitOptions.Font.Color := Palette.Accent;
+  UpdateOptionItems;
 end;
 
 { The menu under the label, its items ticked as they are; Sign Off is
@@ -719,6 +720,26 @@ begin
   UpdateCommitOptions;
   At := FCommitOptions.ClientToScreen(Point(0, FCommitOptions.Height));
   FCommitOptionsMenu.PopUp(At.X, At.Y);
+end;
+
+{ Whether the message field holds nothing of the user's: it is empty,
+  or holds commit.template as it was put there, which git too refuses
+  to commit unchanged. }
+function TRepoFrame.MessageBlank: boolean;
+begin
+  Result := (Trim(FCommitMemo.Text) = '') or ((FCommitTemplate <> '') and
+    (Trim(AdjustLineBreaks(FCommitMemo.Text)) = Trim(AdjustLineBreaks(FCommitTemplate))));
+end;
+
+{ File > Sign Off and Skip Hooks, ticked as the options are. }
+procedure TRepoFrame.UpdateOptionItems;
+begin
+  if FSignOffMenuItem = nil then
+    Exit;
+  FSignOffMenuItem.Checked := FSignOff;
+  FSkipHooksMenuItem.Checked := FSkipHooks;
+  FSignOffMenuItem.Enabled := (FRepo <> nil) and (FRepo.Root <> '');
+  FSkipHooksMenuItem.Enabled := FSignOffMenuItem.Enabled;
 end;
 
 procedure TRepoFrame.SignOffItemClick(Sender: TObject);
@@ -743,14 +764,14 @@ var
 begin
   if FCommitAmend.Checked then
   begin
-    if (Trim(FCommitMemo.Text) = '') and FRepo.HeadMessage(Message) then
+    if MessageBlank and FRepo.HeadMessage(Message) then
     begin
       FCommitMemo.Text := Message;
       FAmendMessage := FCommitMemo.Text;
     end;
   end
   else if (FAmendMessage <> '') and (FCommitMemo.Text = FAmendMessage) then
-    FCommitMemo.Clear;
+    FCommitMemo.Text := FCommitTemplate;
   if not FCommitAmend.Checked then
     FAmendMessage := '';
   UpdateCommitState;
@@ -963,7 +984,7 @@ begin
     Amended := FCommitAmend.Checked;
     if not Fixup then
     begin
-      FCommitMemo.Clear;
+      FCommitMemo.Text := FCommitTemplate;
       FCommitAmend.Checked := False;
       FAmendMessage := '';
       FMergeMessage := '';
@@ -1114,7 +1135,7 @@ procedure TRepoFrame.SaveCommitDraft;
 begin
   if (FCommitMemo = nil) or (FCommitDraftFor = '') then
     Exit;
-  if Trim(FCommitMemo.Text) <> '' then
+  if not MessageBlank then
   begin
     App.Settings.CommitDraft := FCommitMemo.Text;
     App.Settings.CommitDraftRepo := FCommitDraftFor;
@@ -1139,9 +1160,11 @@ begin
   FSignOff := FRepo.SignOff;
   FSkipHooks := False;
   UpdateCommitOptions;
+  { commit.template fills a field with no draft, as git's editor would. }
+  FCommitTemplate := FRepo.CommitTemplate;
   if (FRepo.Root <> '') and (App.Settings.CommitDraftRepo = FRepo.Root) then
     FCommitMemo.Text := App.Settings.CommitDraft
   else
-    FCommitMemo.Clear;
+    FCommitMemo.Text := FCommitTemplate;
   UpdateCommitState;
 end;

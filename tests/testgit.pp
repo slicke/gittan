@@ -86,6 +86,7 @@ type
     procedure TestPushFetchPull;
     procedure TestPushHook;
     procedure TestPullDiverged;
+    procedure TestCommitTemplate;
     procedure TestRemoteEnvironment;
     procedure TestEnvironmentUtf8;
     procedure TestResolveMerge;
@@ -2353,6 +2354,19 @@ begin
     RemoveTree(Remote);
     RemoveTree(Other);
   end;
+end;
+
+procedure TGitRepoTest.TestCommitTemplate;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  AssertEquals('none set', '', FRepo.CommitTemplate);
+  WriteFile('tmpl.txt', 'Subject'#10#10'# say why'#10'Body'#10#10'# the end'#10#10);
+  Git(['config', 'commit.template', 'tmpl.txt']);
+  AssertEquals('relative to the root, the comments out',
+    'Subject' + LineEnding + LineEnding + 'Body', FRepo.CommitTemplate);
+  Git(['config', 'commit.template', 'missing.txt']);
+  AssertEquals('', FRepo.CommitTemplate);
 end;
 
 procedure TGitRepoTest.TestRemoteEnvironment;

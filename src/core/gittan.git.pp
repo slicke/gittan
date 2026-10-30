@@ -752,6 +752,11 @@ type
     function SignOff: boolean;
     {** Keeps ASignOff for SignOff, unsetting the key when off. }
     function SetSignOff(ASignOff: boolean): boolean;
+    {** The message commit.template names (a path from the root when
+      relative, ~ expanded), without its comment lines, which git takes
+      out only when it opens an editor, and without the blank lines at
+      its end; '' without one or when it cannot be read. }
+    function CommitTemplate: string;
     {** Tells git how the repository pulls a branch that has diverged, in
       its own config, so Pull(pmAuto) asks no more: ARebase sets
       pull.rebase true, else pull.rebase false with pull.ff true (a
@@ -2723,6 +2728,45 @@ var
 begin
   Result := (FRoot <> '') and RunGit(FRoot, ['config', '--local', '--bool', 'gittan.signOff'],
     Output) and (Trim(Output) = 'true');
+end;
+
+function TGittanRepo.CommitTemplate: string;
+var
+  Output, FileName: string;
+  Lines: TStringList;
+  i: integer;
+begin
+  Result := '';
+  if (FRoot = '') or not RunGit(FRoot, ['config', '--path', 'commit.template'], Output) then
+    Exit;
+  FileName := Trim(Output);
+  if FileName = '' then
+    Exit;
+  FileName := ExpandFileName(IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(FileName));
+  if not FileExists(FileName) then
+    FileName := ExpandFileName(SetDirSeparators(Trim(Output)));
+  if not FileExists(FileName) then
+    Exit;
+  Lines := TStringList.Create;
+  try
+    try
+      Lines.LoadFromFile(FileName);
+    except
+      Exit;
+    end;
+    for i := Lines.Count - 1 downto 0 do
+      if Copy(Lines[i], 1, 1) = '#' then
+        Lines.Delete(i);
+    while (Lines.Count > 0) and (Trim(Lines[Lines.Count - 1]) = '') do
+      Lines.Delete(Lines.Count - 1);
+    for i := 0 to Lines.Count - 1 do
+      if i = 0 then
+        Result := Lines[i]
+      else
+        Result := Result + LineEnding + Lines[i];
+  finally
+    Lines.Free;
+  end;
 end;
 
 function TGittanRepo.SetPullMode(ARebase: boolean): boolean;

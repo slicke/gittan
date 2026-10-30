@@ -741,7 +741,7 @@ begin
   begin
     { The merge message filled in is not for anything now. }
     if (FMergeMessage <> '') and (FCommitMemo.Text = FMergeMessage) then
-      FCommitMemo.Clear;
+      FCommitMemo.Text := FCommitTemplate;
     FMergeMessage := '';
     FBanner.Clear;
     StatusNote(Format(rsAborted, [Noun]));

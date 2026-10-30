@@ -482,6 +482,9 @@ type
     FCommitOptions: TLabel;
     FCommitOptionsMenu: TPopupMenu;
     FSignOffItem, FSkipHooksItem: TMenuItem;
+    FSignOffMenuItem, FSkipHooksMenuItem: TMenuItem;
+    { What commit.template holds, put in an empty message field. }
+    FCommitTemplate: string;
     FSignOff, FSkipHooks: boolean;
     { Sign Off or Skip Hooks is on, as UpdateCommitOptions shows it. }
     FHasCommitOption: boolean;
@@ -1796,6 +1799,8 @@ type
     procedure SignOffItemClick(Sender: TObject);
     procedure SkipHooksItemClick(Sender: TObject);
     procedure UpdateCommitOptions;
+    function MessageBlank: boolean;
+    procedure UpdateOptionItems;
     procedure CommitButtonClick(Sender: TObject);
     procedure MenuCommitClick(Sender: TObject);
     {** Asks for the name and e-mail to commit under, the global ones
@@ -5259,6 +5264,11 @@ begin
   { The person in the Commit header, for the keyboard. }
   FIdentityItem := AddItem(FileMenu, rsIdentityMenu, 0, @IdentityClick);
   FIdentityItem.Enabled := False;
+  { The Commit section's options, where they are found and in the
+    palette; the chevron beside Amend has them too. }
+  FSignOffMenuItem := AddItem(FileMenu, rsSignOffItem, 0, @SignOffItemClick);
+  FSkipHooksMenuItem := AddItem(FileMenu, rsSkipHooksItem, 0, @SkipHooksItemClick);
+  UpdateOptionItems;
   FPullItem := AddItem(FileMenu, rsPullMenu, ShortCut(VK_L, [ssModifier, ssShift]),
     @MenuPullClick);
   FPushItem := AddItem(FileMenu, rsPushMenu, ShortCut(VK_P, [ssModifier, ssShift]),
