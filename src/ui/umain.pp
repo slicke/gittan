@@ -2592,7 +2592,8 @@ resourcestring
   rsResolvePill = 'Resolve';
   rsCommitWhole = 'While %s, everything staged goes into the commit too.';
   rsCommitNothing = 'Tick the files to commit.';
-  rsCommitTickHint = 'Ticked files go into the commit; untick one to leave it out.';
+  rsCommitTickHint = 'Ticked files go into the commit. Click a box or press Space to ' +
+    'leave one out.';
   rsDontShowAgain = 'Don''t Show Again';
   rsCommitted = 'Committed %s: %s';
   rsCommittedTitle = 'Committed %s';
