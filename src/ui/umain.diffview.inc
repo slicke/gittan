@@ -351,6 +351,24 @@ begin
     Inc(Result);
 end;
 
+{ The row that shows the diff line ALine, on either side, or the gap
+  row that hides it; VisibleRow(AFallback) when no row does (ALine -1). }
+function TRepoFrame.RowOfLine(ALine, AFallback: integer): integer;
+var
+  r: integer;
+begin
+  if ALine >= 0 then
+    for r := 0 to High(FRows) do
+    begin
+      if FRows[r].Hidden or Edit.IsLineFolded(r) then
+        Continue;
+      if (FRows[r].Line = ALine) or ((r <= High(FRowsOld)) and (FRowsOld[r].Line = ALine)) or
+        ((FRows[r].Line = rowGap) and (FRows[r].GapFrom <= ALine) and (ALine <= FRows[r].GapTo)) then
+        Exit(Min(r, Edit.Strings.Count - 1));
+    end;
+  Result := VisibleRow(AFallback);
+end;
+
 { The text of a gap row standing for ACount hidden lines: how many, and
   for a run longer than GapStep the three ways to open it, each a few
   lines on: ADown opens the first GapStep lines (the text above goes on
@@ -772,19 +790,23 @@ end;
   same place, other views are left alone. }
 procedure TRepoFrame.RebuildIfChanges;
 var
-  TopLine, CaretY: integer;
+  TopLine, CaretY, CaretLine, Row: integer;
 begin
   if (FView <> gvChanges) or (FCurrentPath = '') then
     Exit;
   TopLine := Edit.LineTop;
   CaretY := Edit.Carets[0].PosY;
+  { The rows change with the layout (Hide Unchanged Lines, side by side):
+    the caret stays on its diff line, as far from the top as it was. }
+  CaretLine := LineAtRow(CaretY);
   KeepFolds;
   ApplyLayout;
   BuildChangeView;
   if Edit.Strings.Count > 0 then
   begin
-    Edit.DoCaretSingle(0, VisibleRow(CaretY));
-    Edit.LineTop := Min(TopLine, Edit.Strings.Count - 1);
+    Row := RowOfLine(CaretLine, CaretY);
+    Edit.DoCaretSingle(0, Row);
+    Edit.LineTop := Max(0, Min(Row - (CaretY - TopLine), Edit.Strings.Count - 1));
   end;
   Edit.Update;
   SyncOldSide;

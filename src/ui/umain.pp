@@ -1325,6 +1325,7 @@ type
       AOldSide: boolean; const AOldNum, ANewNum: TIntegerDynArray;
       ALexer: TecSyntAnalyzer);
     function VisibleRow(ARow: integer): integer;
+    function RowOfLine(ALine, AFallback: integer): integer;
     function GapRowText(ACount: integer; const AHeading: string;
       out ADown, AUp, AAll, AHeadingCol: integer): string;
     function GapHeading(AGapTo: integer): string;
