@@ -479,6 +479,8 @@ type
     FCommitOptionsMenu: TPopupMenu;
     FSignOffItem, FSkipHooksItem: TMenuItem;
     FSignOff, FSkipHooks: boolean;
+    { Sign Off or Skip Hooks is on, as UpdateCommitOptions shows it. }
+    FHasCommitOption: boolean;
     FCommitButton: TButton;
     { The length of the message's first line, by the Commit button, once
       it is past SubjectSoftLimit; in the warning color past

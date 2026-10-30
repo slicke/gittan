@@ -593,9 +593,10 @@ begin
   FCommitMemo.Enabled := not Continuing;
   FCommitAmend.Visible := FOperation = '';
   FCommitAmend.Enabled := not Busy;
-  { A merge's commit takes them too; carrying on with a rebase or a
-    cherry-pick does not commit through Commit. }
-  FCommitOptions.Visible := not Continuing;
+  { A merge's commit takes them too, but there the chevron shows only
+    with an option on; carrying on with a rebase or a cherry-pick does
+    not commit through Commit. }
+  FCommitOptions.Visible := not Continuing and ((FOperation = '') or FHasCommitOption);
   FCommitOptions.Enabled := not Busy;
   FAbortButton.Visible := (FOperation <> '') and (FOperation <> 'bisecting');
   FAbortButton.Enabled := not Busy;
@@ -662,7 +663,9 @@ end;
 
 { "⌄" alone, or the option that is on ("2 options" for both) before it
   in the accent, so a commit that would be signed off or skip the hooks
-  says so beside Amend. }
+  says so beside Amend. Without Amend beside it (a merge) a bare chevron
+  would say nothing, and a caption would not fit beside Abort and Commit
+  Merge: it shows only while an option is on (UpdateCommitState). }
 procedure TRepoFrame.UpdateCommitOptions;
 var
   Shown: string;
@@ -678,6 +681,7 @@ begin
       Shown := rsSkipHooksShort
     else
       Shown := Format(rsCommitOptionsCount, [2]);
+  FHasCommitOption := Shown <> '';
   if Shown = '' then
     FCommitOptions.Caption := '⌄'
   else
