@@ -2596,6 +2596,10 @@ resourcestring
   rsDontShowAgain = 'Don''t Show Again';
   rsCommitted = 'Committed %s: %s';
   rsCommittedTitle = 'Committed %s';
+  rsCommittedBehind = '%s · pull the %d new commits on %s, then push';
+  rsCommittedBehindOne = '%s · pull the new commit on %s, then push';
+  rsPulledPush = '%d commits to push';
+  rsPulledPushOne = '1 commit to push';
   rsTickAllItem = 'Tick All Files';
   rsUntickAllItem = 'Untick All Files';
   rsPushAction = 'Push';

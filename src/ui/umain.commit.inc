@@ -1024,13 +1024,27 @@ begin
   end
   { A branch that can be pushed as it is (it has an upstream and is not
     behind it, so an amended pushed commit is left to Force Push) is
-    offered the push in a banner; otherwise the status bar says it. }
+    offered the push in a banner, one behind it the pull; otherwise the
+    status bar says it. }
   else if not Amended and FHasUpstream and (FAhead > 0) and (FBehind = 0) and
     FPushItem.Enabled then
   begin
     FStatus.ShowMessage('', stNormal, 0);
     FBanner.AddAction(Format(rsCommittedTitle, [Copy(Job.Id, 1, 7)]), Subject,
       bkSuccess, BannerActionSeconds, rsPushAction, @CommitPushClick);
+  end
+  { Behind the upstream a push would be refused: the banner offers the
+    pull first, through File > Pull, which asks how to bring the
+    commits in (and about a rewritten branch). }
+  else if not Amended and FHasUpstream and (FBehind > 0) and FPullItem.Enabled then
+  begin
+    FStatus.ShowMessage('', stNormal, 0);
+    if FBehind = 1 then
+      Subject := Format(rsCommittedBehindOne, [Subject, FRepo.Upstream(FBranch)])
+    else
+      Subject := Format(rsCommittedBehind, [Subject, FBehind, FRepo.Upstream(FBranch)]);
+    FBanner.AddAction(Format(rsCommittedTitle, [Copy(Job.Id, 1, 7)]), Subject,
+      bkSuccess, BannerActionSeconds, rsPullAction, @MenuPullClick);
   end
   else
     StatusNote(Format(rsCommitted, [Copy(Job.Id, 1, 7), Subject]));

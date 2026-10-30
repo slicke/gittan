@@ -298,13 +298,28 @@ begin
             also when a rebase gave the local commits new ids. }
           Count := FRepo.CountCommits(FRemoteHead, '@{upstream}');
           if Count = 0 then
-            BannerSuccess(Format(rsPulledNothing, [FBranch]))
+            Msg := Format(rsPulledNothing, [FBranch])
           else if Count = 1 then
-            BannerSuccess(Format(rsPulledOne, [FBranch]))
+            Msg := Format(rsPulledOne, [FBranch])
           else if Count > 1 then
-            BannerSuccess(Format(rsPulledCount, [Count, FBranch]))
+            Msg := Format(rsPulledCount, [Count, FBranch])
           else
-            BannerSuccess(rsPulled);
+            Msg := rsPulled;
+          { With commits of its own to push and none to pull now, as after
+            a commit made behind the upstream, the push is next. }
+          if FHasUpstream and (FAhead > 0) and (FBehind = 0) then
+          begin
+            MarkNews;
+            FBanner.DetailFont.Assign(Edit.Font);
+            if FAhead = 1 then
+              FBanner.AddAction(Msg, rsPulledPushOne, bkSuccess, BannerActionSeconds,
+                rsPushAction, @CommitPushClick)
+            else
+              FBanner.AddAction(Msg, Format(rsPulledPush, [FAhead]), bkSuccess,
+                BannerActionSeconds, rsPushAction, @CommitPushClick);
+          end
+          else
+            BannerSuccess(Msg);
         end;
       rkDeleteRemote:
         StatusNote(Format(rsDeletedRemote, [Job.Arg]));
