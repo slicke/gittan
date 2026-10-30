@@ -12,7 +12,8 @@ on:
 # ---------------------------------------------------------------------------------
 # One matrix job builds Gittan natively on each platform and uploads a package:
 #   - macOS (arm64):   Gittan-macos-silicon.dmg  (Gittan.app with lexlib inside)
-#   - Windows (x64):   Gittan-windows-x64.zip    (Gittan.exe + lexlib/)
+#   - Windows (x64):   Gittan-windows-x64.zip    (Gittan.exe + lexlib/) and
+#                      Gittan-windows-x64-setup.exe (Inno Setup)
 #   - Linux (amd64):   Gittan-linux-amd64.tar.gz (Gittan + lexlib/, GTK 3),
 #                      Gittan-linux-amd64.deb and Gittan-linux-x86_64.rpm
 #
@@ -410,6 +411,22 @@ jobs:
           cp -r lexlib dist/Gittan/
           (cd dist && 7z a -tzip ../Gittan-windows-x64.zip Gittan >/dev/null)
 
+      # The installer, on every Windows build (PRs too, so a broken .iss
+      # shows before main): dist\windows\gittan.iss packs Gittan.exe and
+      # lexlib\ and takes its version from the executable's version resource.
+      - name: Installer (Windows)
+        if: matrix.os_target == 'windows'
+        shell: pwsh
+        run: |
+          # Inno Setup ships on the runner image; install it if an image drops
+          # it. Found by pattern, so a new major version's folder is found too.
+          $find = { Get-ChildItem 'C:\Program Files*\Inno Setup *\ISCC.exe' -ErrorAction SilentlyContinue | Select-Object -First 1 }
+          $iscc = & $find
+          if (-not $iscc) { choco install innosetup -y --no-progress; $iscc = & $find }
+          if (-not $iscc) { throw 'ISCC.exe not found' }
+          & $iscc.FullName 'dist\windows\gittan.iss'
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
@@ -420,6 +437,7 @@ jobs:
             Gittan-linux-x86_64.rpm
             Gittan-macos-silicon.dmg
             Gittan-windows-x64.zip
+            Gittan-windows-x64-setup.exe
           if-no-files-found: error
           retention-days: 14
 
@@ -473,7 +491,8 @@ jobs:
             echo "## Downloads"
             echo
             echo '- **Gittan-macos-silicon.dmg** — macOS on Apple Silicon. The app is signed ad hoc, so macOS blocks it at first: drag it to Applications, then run `xattr -cr /Applications/Gittan.app` in Terminal.'
-            echo "- **Gittan-windows-x64.zip** — Windows x64. Unzip anywhere and run Gittan.exe."
+            echo "- **Gittan-windows-x64-setup.exe** — Windows x64 installer, for the current user without an administrator or for everyone; adds Open in Gittan to folders' context menu and the gittan command to the PATH. It is not signed, so SmartScreen warns: More info, then Run anyway."
+            echo "- **Gittan-windows-x64.zip** — Windows x64 without installing. Unzip anywhere and run Gittan.exe."
             echo "- **Gittan-linux-amd64.deb** — Debian and Ubuntu: \`sudo apt install ./Gittan-linux-amd64.deb\`."
             echo "- **Gittan-linux-x86_64.rpm** — Fedora and other RPM distributions: \`sudo dnf install ./Gittan-linux-x86_64.rpm\` (\`zypper install\` on openSUSE)."
             echo "- **Gittan-linux-amd64.tar.gz** — Linux amd64 without installing, needs GTK 3. Unpacked, it has no launcher or icon in the desktop's menu."
@@ -501,6 +520,7 @@ jobs:
           fi
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
             packages/Gittan-macos-silicon.dmg \
+            packages/Gittan-windows-x64-setup.exe \
             packages/Gittan-windows-x64.zip \
             packages/Gittan-linux-amd64.deb \
             packages/Gittan-linux-x86_64.rpm \

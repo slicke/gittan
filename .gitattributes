@@ -12,3 +12,6 @@
 
 # Enforce LF line endings for all shell scripts.
 *.sh text eol=lf
+
+# cmd.exe misreads labels and goto in a batch file with LF line endings.
+*.cmd text eol=crlf
