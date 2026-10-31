@@ -80,13 +80,14 @@ begin
   Result := (i >= 0) and (FStats[i].Kind = ckConflict);
 end;
 
-{ How many conflicts are left in the file APath on disk, by its markers. }
+{ How many conflicts are left in the file APath on disk, by its
+  markers; -1 when it cannot be read, which is not none. }
 function TRepoFrame.MarkersLeft(const APath: string): integer;
 var
   Lines: TStringList;
   i: integer;
 begin
-  Result := 0;
+  Result := -1;
   Lines := TStringList.Create;
   try
     try
@@ -106,12 +107,12 @@ end;
   with no markers left (ARemaining) the file is marked resolved, a
   failure said in the status bar, and the discard notes it, so Undo
   Discard puts the conflict back in the index too. Whether it was
-  marked. }
+  marked. A file that cannot be read is left in conflict. }
 function TRepoFrame.ResolveIfDone(const APath: string; out ARemaining: integer): boolean;
 begin
   Result := False;
   ARemaining := MarkersLeft(APath);
-  if ARemaining > 0 then
+  if ARemaining <> 0 then
     Exit;
   Result := FRepo.MarkResolved(APath);
   if not Result then
@@ -402,7 +403,9 @@ begin
   if not FileExists(IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(APath)) then
     Exit(rsConflictGone);
   n := MarkersLeft(APath);
-  if n = 0 then
+  if n < 0 then
+    Result := ''
+  else if n = 0 then
     Result := rsConflictNoMarkers
   else if n = 1 then
     Result := rsConflictInFile
@@ -549,6 +552,13 @@ begin
       Rows := nil;
       if (FView = gvChanges) and (FCurrentPath = Other) then
         Rows := FConflictRows;
+    end;
+    { The merge editor, of the next file or round this one when there
+      is none: its first (or last) conflict. }
+    if FView = gvMerge then
+    begin
+      FMergeView.GoToEdgeConflict(ANext);
+      Exit;
     end;
     if Length(Rows) = 0 then
       Exit;

@@ -64,6 +64,11 @@ type
     FHeaderText, FEditedText, FResolvedText, FNoLinesText: string;
     FOnPicked, FOnEdited: TNotifyEvent;
     FTopRatio, FSideRatio: double;
+    { The header row GoToConflict went to last and the top row that left
+      in view, so the next step goes on from that conflict while the
+      panes are not scrolled since. }
+    FGoneRow, FGoneTop: integer;
+    procedure ShowConflictRow(ARow: integer);
     procedure SetupEditor(AEd: TATSynEdit);
     procedure FillSide(AEd: TATSynEdit; ASide: TGittanMergeSide);
     procedure FillResult(AKeepTop: boolean);
@@ -97,8 +102,12 @@ type
     {** Ticks one side whole in every conflict, the other dropped. }
     procedure PickEverywhere(ASide: TGittanMergeSide);
     {** Goes to the next (or previous) conflict from the top of the
-      panes; False when there is none that way. }
+      panes, or from the one it went to last while they stay put; False
+      when there is none that way. }
     function GoToConflict(ANext: boolean): boolean;
+    {** Goes to the first (or the last, not AFirst) conflict; False when
+      there is none. }
+    function GoToEdgeConflict(AFirst: boolean): boolean;
     {** Which conflict the panes show at their top, 0-based, or -1
       above the first. }
     function CurrentConflict: integer;
@@ -195,6 +204,7 @@ begin
   inherited Create(AOwner);
   FTopRatio := 0.55;
   FSideRatio := 0.5;
+  FGoneRow := -1;
   FBack := clWindow;
   FText := clWindowText;
   FDim := clGrayText;
@@ -818,6 +828,9 @@ begin
   if FMerge = nil then
     Exit;
   TopRow := FEditMine.LineTop;
+  if (FGoneRow >= 0) and (FGoneRow <= High(FRows)) and FRows[FGoneRow].Header and
+    (TopRow = FGoneTop) then
+    TopRow := FGoneRow;
   i := -1;
   if ANext then
   begin
@@ -835,11 +848,43 @@ begin
     if (i < 0) or not FRows[i].Header then
       Exit;
   end;
-  { A line of the chunk before stays in view above the header. }
-  FEditMine.LineTop := Max(0, i - 2);
+  ShowConflictRow(i);
+  Result := True;
+end;
+
+function TGittanMergeView.GoToEdgeConflict(AFirst: boolean): boolean;
+var
+  i: integer;
+begin
+  Result := False;
+  if FMerge = nil then
+    Exit;
+  if AFirst then
+  begin
+    for i := 0 to High(FRows) do
+      if FRows[i].Header then
+      begin
+        ShowConflictRow(i);
+        Exit(True);
+      end;
+  end
+  else
+    for i := High(FRows) downto 0 do
+      if FRows[i].Header then
+      begin
+        ShowConflictRow(i);
+        Exit(True);
+      end;
+end;
+
+{ A line of the chunk before stays in view above the header. }
+procedure TGittanMergeView.ShowConflictRow(ARow: integer);
+begin
+  FEditMine.LineTop := Max(0, ARow - 2);
   FEditMine.Update;
   EditScroll(FEditMine);
-  Result := True;
+  FGoneRow := ARow;
+  FGoneTop := FEditMine.LineTop;
 end;
 
 { The band's boxes: on a header row one for the side as a whole (a dash

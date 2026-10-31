@@ -78,8 +78,11 @@ begin
   HideMergeView;
   ClearMerge;
   FMergePath := '';
-  if (Path <> '') and IsChangedPath(Path) then
-    ShowChanges(Path)
+  { A save on the way out wrote the file: the repository is read again
+    and shows it in the change view, or the summary when it is no
+    longer changed. }
+  if Path <> '' then
+    RefreshRepository
   else
     ShowSummary;
 end;
@@ -109,6 +112,9 @@ begin
     AbandonHistoryJob;
     EndTimelapse;
     FView := gvMerge;
+    { A lexer picked by hand stays for the file, as in the change view. }
+    if APath <> FMergePath then
+      FManualLexer := False;
     FMergePath := APath;
     FSymbolBar.Visible := False;
     FFindBar.Visible := False;
@@ -125,7 +131,8 @@ begin
     if not Same then
     begin
       FMergeKeep := nil;
-      FMergeView.Lexer := App.Lexers.ForFile(APath, FRepo.Root);
+      if not FManualLexer then
+        FMergeView.Lexer := App.Lexers.ForFile(APath, FRepo.Root);
       FMergeView.Load(TGittanMerge.Create(Lines, FOperation = 'rebasing'));
     end;
   finally

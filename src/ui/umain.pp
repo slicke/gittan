@@ -1320,6 +1320,7 @@ type
     procedure MenuPrevChangeClick(Sender: TObject);
     procedure MenuNextChangeClick(Sender: TObject);
     function AutoLexer: TecSyntAnalyzer;
+    function ShownLexer: TecSyntAnalyzer;
     procedure SetLexer(ALexer: TecSyntAnalyzer);
     procedure SetEditorLexer(AEd: TATSynEdit; ALexer: TecSyntAnalyzer);
     procedure ShowText(AEd: TATSynEdit; const AText: string; ALexer: TecSyntAnalyzer);
@@ -4865,10 +4866,10 @@ begin
     Lexer := FPoStats
   else if (FView in [gvBinary, gvSubmodule]) or ((FView = gvBlob) and FBinaryView.Visible) then
     Lexer := ''
-  else if FAdapter.Lexer = nil then
+  else if ShownLexer = nil then
     Lexer := rsPlainText
   else
-    Lexer := FAdapter.Lexer.LexerName;
+    Lexer := ShownLexer.LexerName;
   FHeader.SetLexer(Lexer);
   UpdatePreviewToggle;
   UpdateSyntaxChecks;
@@ -5217,10 +5218,10 @@ begin
   if FAutoLexerItem = nil then
     Exit;
   FAutoLexerItem.Checked := not FManualLexer;
-  if FAdapter.Lexer = nil then
+  if ShownLexer = nil then
     Current := ''
   else
-    Current := FAdapter.Lexer.LexerName;
+    Current := ShownLexer.LexerName;
   FPlainTextItem.Checked := Current = '';
   for i := 0 to FSyntaxMenu.Count - 1 do
   begin
@@ -5776,10 +5777,10 @@ var
   Current: string;
   i: integer;
 begin
-  if FAdapter.Lexer = nil then
+  if ShownLexer = nil then
     Current := ''
   else
-    Current := FAdapter.Lexer.LexerName;
+    Current := ShownLexer.LexerName;
   FSyntaxPopup.Clear;
   FSyntaxPopup.Add(StripHotkey(rsAutomatic), '', not FManualLexer, 0);
   FSyntaxPopup.Add(StripHotkey(rsPlainText), '', FManualLexer and (Current = ''), 1);
@@ -5823,9 +5824,19 @@ begin
     gvFile: Result := App.Lexers.ForFile(Edit.FileName);
     gvBlob: Result := App.Lexers.ForFile(FBlobPath, FRepo.Root);
     gvHistory: Result := App.Lexers.ForFile(FHistoryPath, FRepo.Root);
+    gvMerge: Result := App.Lexers.ForFile(FMergePath, FRepo.Root);
     else
       Result := nil;
   end;
+end;
+
+{ The lexer of the text shown: the merge editor's in its view. }
+function TRepoFrame.ShownLexer: TecSyntAnalyzer;
+begin
+  if FView = gvMerge then
+    Result := FMergeView.Lexer
+  else
+    Result := FAdapter.Lexer;
 end;
 
 procedure TRepoFrame.SetEditorLexer(AEd: TATSynEdit; ALexer: TecSyntAnalyzer);
@@ -5839,9 +5850,16 @@ begin
 end;
 
 { Both editors show the same file, so they get the same lexer; the old
-  side only while it is shown. }
+  side only while it is shown. The merge editor's panes take it in its
+  view. }
 procedure TRepoFrame.SetLexer(ALexer: TecSyntAnalyzer);
 begin
+  if FView = gvMerge then
+  begin
+    FMergeView.Lexer := ALexer;
+    UpdateStatus;
+    Exit;
+  end;
   SetEditorLexer(Edit, ALexer);
   if FEditOld.Visible then
     SetEditorLexer(FEditOld, ALexer);
@@ -6500,7 +6518,7 @@ begin
   Result := nil;
   { The editor keeps the text of the file before an image or a binary
     file. }
-  if (FView in [gvImage, gvBinary]) or ((FView = gvBlob) and not Edit.Visible) then
+  if (FView in [gvImage, gvBinary, gvMerge]) or ((FView = gvBlob) and not Edit.Visible) then
     Exit;
   { The translation view keeps its own blocks: the changed entries, or
     the ones that need work. }
@@ -6600,6 +6618,12 @@ var
   Blocks: TIntegerDynArray;
   Cur, Target, i: integer;
 begin
+  { The merge editor's changes are its conflicts, in its panes. }
+  if FView = gvMerge then
+  begin
+    GoToConflict(ANext);
+    Exit;
+  end;
   Blocks := ChangeBlocks;
   if Length(Blocks) = 0 then
   begin
