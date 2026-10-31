@@ -38,6 +38,7 @@ type
     procedure TestCommit;
     procedure TestAmend;
     procedure TestCommitThenStash;
+    procedure TestCommitThenManyResets;
     procedure TestMerge;
     procedure TestSwitchAndCreate;
     procedure TestDeleteAndRename;
@@ -357,6 +358,24 @@ begin
   Undo;
   AssertEquals(First, Rev('HEAD'));
   AssertEquals('the commit''s change stays in the file', 'two', ReadFile('a.txt'));
+end;
+
+procedure TUndoTest.TestCommitThenManyResets;
+var
+  First: string;
+  i: integer;
+begin
+  { More resets that move nothing than the first read of the reflog
+    holds: the commit before them is still found. }
+  First := Rev('HEAD');
+  Commit('a.txt', 'two', 'Second');
+  for i := 1 to 25 do
+    Git(['reset', '-q']);
+  Track;
+  AssertEquals('Commit "Second"', FHistory.UndoStep.Title);
+  Undo;
+  AssertEquals(First, Rev('HEAD'));
+  AssertEquals('two', ReadFile('a.txt'));
 end;
 
 procedure TUndoTest.TestAmend;

@@ -984,6 +984,8 @@ begin
     Amended := FCommitAmend.Checked;
     if not Fixup then
     begin
+      { commit.template may have changed since the repository opened. }
+      FCommitTemplate := FRepo.CommitTemplate;
       FCommitMemo.Text := FCommitTemplate;
       FCommitAmend.Checked := False;
       FAmendMessage := '';
@@ -1121,7 +1123,7 @@ begin
 end;
 
 { Clears the draft slot and the field where they still hold the message
-  AJob committed. }
+  AJob committed, the field back to the template. }
 procedure TRepoFrame.ForgetCommitted(AJob: TGittanCommitJob);
 
   function Same(const AText: string): boolean;
@@ -1139,7 +1141,7 @@ begin
   end;
   if (FCommitMemo <> nil) and (FCommitDraftFor = AJob.Root) and
     Same(FCommitMemo.Text) then
-    FCommitMemo.Clear;
+    FCommitMemo.Text := FCommitTemplate;
 end;
 
 { The message goes to the settings' one slot for the repository it was

@@ -2345,11 +2345,24 @@ begin
     PushFromOther(Remote, Other, 'four.txt');
     WriteFile('a.txt', 'mine at last'#10);
     Commit('mine at last');
+    WriteFile('del.txt', 'local change once more'#10);
     AssertTrue(FRepo.Error, FRepo.SetPullMode(True));
     AssertEquals('true'#10, Git(['config', '--local', 'pull.rebase']));
     AssertTrue(FRepo.Error, FRepo.Pull(pmAuto, Diverged));
     RunCommandIndir(FDir, 'git', ['rev-parse', '-q', '--verify', 'HEAD^2'], Output, Code, []);
     AssertTrue('rebased, no merge commit', Code <> 0);
+    { The local change was stashed and put back. }
+    AssertEquals(' M del.txt'#0, Git(['status', '--porcelain', '-z']));
+    Git(['checkout', '--', 'del.txt']);
+    { The branch's own setting comes first: Always merge sets it too. }
+    PushFromOther(Remote, Other, 'five.txt');
+    WriteFile('a.txt', 'mine past the branch'#10);
+    Commit('mine past the branch');
+    Git(['config', 'branch.' + FRepo.Branch + '.rebase', 'true']);
+    AssertTrue(FRepo.Error, FRepo.SetPullMode(False));
+    AssertEquals('false'#10, Git(['config', '--local', 'branch.' + FRepo.Branch + '.rebase']));
+    AssertTrue(FRepo.Error, FRepo.Pull(pmAuto, Diverged));
+    Git(['rev-parse', '-q', '--verify', 'HEAD^2']);
   finally
     RemoveTree(Remote);
     RemoveTree(Other);
@@ -2365,6 +2378,13 @@ begin
   Git(['config', 'commit.template', 'tmpl.txt']);
   AssertEquals('relative to the root, the comments out',
     'Subject' + LineEnding + LineEnding + 'Body', FRepo.CommitTemplate);
+  Git(['config', 'core.commentChar', ';']);
+  WriteFile('tmpl.txt', 'Subject'#10'# kept'#10'; dropped'#10);
+  Git(['config', 'commit.template', 'tmpl.txt']);
+  AssertEquals('git''s comment character', 'Subject' + LineEnding + '# kept',
+    FRepo.CommitTemplate);
+  Git(['config', 'core.commentChar', 'auto']);
+  AssertEquals('auto is #', 'Subject' + LineEnding + '; dropped', FRepo.CommitTemplate);
   Git(['config', 'commit.template', 'missing.txt']);
   AssertEquals('', FRepo.CommitTemplate);
 end;

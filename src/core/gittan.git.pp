@@ -2732,7 +2732,7 @@ end;
 
 function TGittanRepo.CommitTemplate: string;
 var
-  Output, FileName: string;
+  Output, FileName, Comment: string;
   Lines: TStringList;
   i: integer;
 begin
@@ -2747,6 +2747,14 @@ begin
     FileName := ExpandFileName(SetDirSeparators(Trim(Output)));
   if not FileExists(FileName) then
     Exit;
+  { The comment lines start as git's own do: core.commentString (or
+    core.commentChar), '#' when none is set or git picks one (auto). }
+  Comment := '';
+  if RunGit(FRoot, ['config', 'core.commentString'], Output) or
+    RunGit(FRoot, ['config', 'core.commentChar'], Output) then
+    Comment := Trim(Output);
+  if (Comment = '') or (Comment = 'auto') then
+    Comment := '#';
   Lines := TStringList.Create;
   try
     try
@@ -2755,7 +2763,7 @@ begin
       Exit;
     end;
     for i := Lines.Count - 1 downto 0 do
-      if Copy(Lines[i], 1, 1) = '#' then
+      if Copy(Lines[i], 1, Length(Comment)) = Comment then
         Lines.Delete(i);
     while (Lines.Count > 0) and (Trim(Lines[Lines.Count - 1]) = '') do
       Lines.Delete(Lines.Count - 1);
@@ -2769,11 +2777,20 @@ begin
   end;
 end;
 
+{ The branch's own branch.<name>.rebase comes before pull.rebase, so
+  one that is set is set to the choice too. }
 function TGittanRepo.SetPullMode(ARebase: boolean): boolean;
+const
+  Value: array[boolean] of string = ('false', 'true');
 var
-  Output: string;
+  Output, Name: string;
 begin
   if FRoot = '' then
+    Exit(False);
+  Name := Branch;
+  if (Name <> '') and RunGit(FRoot, ['config', 'branch.' + Name + '.rebase'], Output) and
+    not RunGit(FRoot, ['config', '--local', 'branch.' + Name + '.rebase', Value[ARebase]],
+    Output) then
     Exit(False);
   if ARebase then
     Exit(RunGit(FRoot, ['config', '--local', 'pull.rebase', 'true'], Output));
@@ -3913,8 +3930,23 @@ begin
     Output, Err));
 end;
 
+{ Whether the config makes a pull rebase: branch.<name>.rebase, else
+  pull.rebase, anything but false (merges, interactive). }
+function PullRebases(const ARoot, ABranch: string): boolean;
+var
+  Output, Err: string;
+begin
+  if not (((ABranch <> '') and RunGitIn(ARoot, ['config', 'branch.' + ABranch + '.rebase'],
+    Output, Err)) or RunGitIn(ARoot, ['config', 'pull.rebase'], Output, Err)) then
+    Exit(False);
+  Output := LowerCase(Trim(Output));
+  Result := (Output <> '') and (Output <> 'false') and (Output <> 'no') and
+    (Output <> 'off') and (Output <> '0');
+end;
+
 { git says "Not possible to fast-forward" for --ff-only and pull.ff=only,
-  and "divergent branches" when it is told nothing. }
+  and "divergent branches" when it is told nothing. A rebase the config
+  asks for stashes local changes as Pull Rebase does. }
 function TGittanRepo.Pull(AMode: TGittanPullMode; out ADiverged: boolean): boolean;
 begin
   ADiverged := False;
@@ -3924,7 +3956,9 @@ begin
     pmRebase:
       Result := RunRemote(['pull', '--progress', '--rebase', '--autostash']);
     else
-      if PullConfigured(FRoot, Branch) then
+      if PullRebases(FRoot, Branch) then
+        Result := RunRemote(['pull', '--progress', '--autostash', '--no-edit'])
+      else if PullConfigured(FRoot, Branch) then
         Result := RunRemote(['pull', '--progress', '--no-edit'])
       else
         Result := RunRemote(['pull', '--progress', '--ff-only']);
@@ -5921,7 +5955,7 @@ function TGittanRepo.ReadRefState(out AState: TGittanRefState): boolean;
 var
   Output: string;
   Lines: TStringList;
-  i: integer;
+  i, Count, n: integer;
   Line: string;
 begin
   AState := Default(TGittanRefState);
@@ -5962,9 +5996,21 @@ begin
     end;
     AState.Head := CommitId('HEAD');
   end;
-  { Enough entries to look past the resets of a few stashes. }
-  if RunGit(FRoot, ['reflog', '-n', '20', '--format=%H %gs', 'HEAD'], Output) then
+  { Enough entries to look past the resets of a few stashes; when every
+    one read is such a reset, the move is further back and more are
+    read. }
+  Count := 20;
+  while RunGit(FRoot, ['reflog', '-n', IntToStr(Count), '--format=%H %gs', 'HEAD'], Output) do
+  begin
     AState.Move := ParseHeadMove(Output, AState.Head);
+    n := 0;
+    for i := 1 to Length(Output) do
+      if Output[i] = #10 then
+        Inc(n);
+    if not AnsiStartsStr('reset:', AState.Move) or (Count >= 2000) or (n < Count) then
+      Break;
+    Count := Count * 10;
+  end;
   AState.Valid := True;
   Result := True;
 end;
