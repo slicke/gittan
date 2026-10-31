@@ -84,6 +84,11 @@ type
       asked to open, is open. }
     FForgeView: TForgeView;
     FForgeShown: boolean;
+    {$IFDEF LCLGtk3}
+    { Alt is down with no other key pressed since: its release opens the
+      menu, as on Windows. }
+    FAltAlone: boolean;
+    {$ENDIF}
     { The shown frame's name when the strip was last updated: the
       caption follows when another tab makes it change. }
     FActiveName: string;
@@ -111,6 +116,9 @@ type
     procedure FormClose(Sender: TObject; var CloseAction: TCloseAction);
     procedure FormCloseQuery(Sender: TObject; var CanClose: boolean);
     procedure FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
+    {$IFDEF LCLGtk3}
+    procedure FormKeyUp(Sender: TObject; var Key: word; Shift: TShiftState);
+    {$ENDIF}
     procedure FormActivate(Sender: TObject);
     procedure LexersLoaded(Sender: TObject);
     procedure UpdateChecked(Sender: TObject; AManual: boolean);
@@ -204,6 +212,9 @@ begin
   Application.AddOnModalBeginHandler(@ModalBegin);
   KeyPreview := True;
   OnKeyDown := @FormKeyDown;
+  {$IFDEF LCLGtk3}
+  OnKeyUp := @FormKeyUp;
+  {$ENDIF}
   OnActivate := @FormActivate;
   OnClose := @FormClose;
   OnCloseQuery := @FormCloseQuery;
@@ -815,11 +826,31 @@ begin
   else
     FActive.FormKeyDown(Sender, Key, Shift);
   {$IFDEF LCLGtk3}
+  FAltAlone := (Key in [VK_MENU, VK_LMENU, VK_RMENU]) and (Shift * [ssCtrl, ssShift, ssMeta] = []);
+  { F10 opens the menu, as GNOME's primary menu and Windows' menu bar. }
+  if (Key = VK_F10) and (Shift = []) then
+  begin
+    FOwnBar.OpenMenu;
+    Key := 0;
+  end;
   if (Key <> 0) and (Shift * [ssAlt, ssCtrl, ssShift, ssMeta] = [ssAlt]) and
     (Key >= VK_A) and (Key <= VK_Z) and FOwnBar.OpenMenuByKey(Chr(Key)) then
     Key := 0;
   {$ENDIF}
 end;
+
+{$IFDEF LCLGtk3}
+{ Alt let go with no key pressed with it opens the whole menu. }
+procedure TGittanWindow.FormKeyUp(Sender: TObject; var Key: word; Shift: TShiftState);
+begin
+  if (Key in [VK_MENU, VK_LMENU, VK_RMENU]) and FAltAlone then
+  begin
+    FAltAlone := False;
+    FOwnBar.OpenMenu;
+    Key := 0;
+  end;
+end;
+{$ENDIF}
 
 procedure TGittanWindow.FormActivate(Sender: TObject);
 begin
