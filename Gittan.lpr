@@ -16,7 +16,11 @@ uses
   {$IFDEF LCLGtk3}
   LazGLib2,
   {$ENDIF}
-  Forms, uwindow,
+  Forms,
+  { Before any window: the brush cache that survives a change of the
+    system's appearance. }
+  gittan.brushcache,
+  uwindow,
   { The forges and the AI agents, which register themselves as they
     load. }
   gittan.github, gittan.agentcli, gittan.openai
