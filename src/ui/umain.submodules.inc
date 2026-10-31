@@ -494,9 +494,11 @@ begin
   end;
   if Length(Actions) > 0 then
     FHeader.SetActions(Actions);
+  { The header first: Cocoa does not hide the navigator of a file shown
+    before when it is hidden while the header is. }
+  FHeader.Visible := True;
   FHeader.SetChanges(0, 0);
   FHeader.SetConflicts(0, 0);
-  FHeader.Visible := True;
   PlaceUnderTitleBar;
   SelectShownSubmodule;
   FSummary.Selected := Sub.Path;

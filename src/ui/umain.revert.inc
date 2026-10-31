@@ -46,6 +46,9 @@ begin
   if AskDlg(rsRevertTitle, Format(rsRevertFilesAsk, [ALabel]), mtWarning,
     [mrYes, rsRevertFilesAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
     Exit;
+  { The merge editor's ticks for the file go with the changes. }
+  if (FMergePath <> '') and (APaths.IndexOf(FMergePath) >= 0) then
+    ClearMerge;
   Saved := TStringList.Create;
   StopWatcher;
   try

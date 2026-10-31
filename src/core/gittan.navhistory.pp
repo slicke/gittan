@@ -25,9 +25,10 @@ type
   {** What a place shows: the summary; a changed file in the change view
     (or the image, translation or binary view); the repository diff; a
     file open in the editor; a file as it is in a commit (Files page);
-    the Files page; the Repository, Commands or Pull Requests page. }
+    the Files page; the Repository, Commands or Pull Requests page; the
+    commit graph a commit was picked from. }
   TGittanPlaceKind = (pkSummary, pkChanges, pkRepoDiff, pkFile, pkBlob, pkFiles,
-    pkRepoInfo, pkCommands, pkPulls);
+    pkRepoInfo, pkCommands, pkPulls, pkGraph);
 
   {** A place. Path is the file (a path from the root, or the full name
     of a file open in the editor); Base and WholeTree the comparison it
@@ -35,8 +36,9 @@ type
     its parent, when that is the comparison (for the kinds the base
     matters to: summary, changes, repository diff); Ref and Name the
     commit of a file of a commit or of the Files page ('' for HEAD's
-    files) and what it is called; Row, Col and Top the caret's row and
-    column and the first row in view, 0 outside an editor. }
+    files) and what it is called; for the graph, Path is its search and
+    Ref the commit picked; Row, Col and Top the caret's row and column
+    and the first row in view, 0 outside an editor. }
   TGittanPlace = record
     Kind: TGittanPlaceKind;
     Path, Base, Commit, Ref, Name: string;

@@ -505,7 +505,7 @@ begin
     once; it goes when the merge does. }
   if FOperation = 'merging' then
   begin
-    if (FMergeMessage = '') and (Trim(FCommitMemo.Text) = '') then
+    if (FMergeMessage = '') and MessageBlank then
     begin
       FMergeMessage := FRepo.MergeMessage;
       if FMergeMessage <> '' then
@@ -515,7 +515,7 @@ begin
   else if FMergeMessage <> '' then
   begin
     if FCommitMemo.Text = FMergeMessage then
-      FCommitMemo.Clear;
+      FCommitMemo.Text := FCommitTemplate;
     FMergeMessage := '';
   end;
   Note := '';
@@ -556,7 +556,11 @@ begin
     the note says what the Abort button does instead. }
   if (Note = '') and StrayRebase then
     Note := Format(rsStrayRebaseNote, [FRebaseBranch, FBranch]);
-  if not Continuing and (Trim(FCommitMemo.Text) = '') then
+  { What a tick means, while files are ticked, until Don't Show Again. }
+  if (Note = '') and not Whole and CommitChoosing and (Chosen > 0) and
+    not App.Settings.TickHintHidden then
+    Note := rsCommitTickHint;
+  if not Continuing and MessageBlank then
     Can := False;
   if CommitChoosing and (Total > 0) then
   begin
@@ -593,9 +597,10 @@ begin
   FCommitMemo.Enabled := not Continuing;
   FCommitAmend.Visible := FOperation = '';
   FCommitAmend.Enabled := not Busy;
-  { A merge's commit takes them too; carrying on with a rebase or a
-    cherry-pick does not commit through Commit. }
-  FCommitOptions.Visible := not Continuing;
+  { A merge's commit takes them too, but there the chevron shows only
+    with an option on; carrying on with a rebase or a cherry-pick does
+    not commit through Commit. }
+  FCommitOptions.Visible := not Continuing and ((FOperation = '') or FHasCommitOption);
   FCommitOptions.Enabled := not Busy;
   FAbortButton.Visible := (FOperation <> '') and (FOperation <> 'bisecting');
   FAbortButton.Enabled := not Busy;
@@ -606,6 +611,8 @@ begin
   { The conflicts lead on to the first of them. }
   if (FRepo.Base = '') and (FConflictFiles > 0) then
     FCommitNote.Link := Format(rsNextConflictLink, [ShortCutToText(ShortCut(VK_F6, []))])
+  else if Note = rsCommitTickHint then
+    FCommitNote.Link := rsDontShowAgain
   else
     FCommitNote.Link := '';
   { "Tick the files" beside a ticked box and the conflicts beside their
@@ -615,7 +622,7 @@ begin
     FCommitNote.Glyph := HintBranch
   else
     FCommitNote.Glyph := '';
-  if Note = rsCommitNothing then
+  if (Note = rsCommitNothing) or (Note = rsCommitTickHint) then
   begin
     FCommitNote.Images := FCheckImages;
     FCommitNote.Icon := checkOn;
@@ -637,7 +644,14 @@ end;
 
 procedure TRepoFrame.CommitNoteLink(Sender: TObject);
 begin
-  GoToConflict(True);
+  if FCommitNote.Text = rsCommitTickHint then
+  begin
+    App.Settings.TickHintHidden := True;
+    App.Settings.Save;
+    UpdateCommitState;
+  end
+  else
+    GoToConflict(True);
 end;
 
 procedure TRepoFrame.CommitMemoChange(Sender: TObject);
@@ -662,7 +676,9 @@ end;
 
 { "⌄" alone, or the option that is on ("2 options" for both) before it
   in the accent, so a commit that would be signed off or skip the hooks
-  says so beside Amend. }
+  says so beside Amend. Without Amend beside it (a merge) a bare chevron
+  would say nothing, and a caption would not fit beside Abort and Commit
+  Merge: it shows only while an option is on (UpdateCommitState). }
 procedure TRepoFrame.UpdateCommitOptions;
 var
   Shown: string;
@@ -678,6 +694,7 @@ begin
       Shown := rsSkipHooksShort
     else
       Shown := Format(rsCommitOptionsCount, [2]);
+  FHasCommitOption := Shown <> '';
   if Shown = '' then
     FCommitOptions.Caption := '⌄'
   else
@@ -686,6 +703,7 @@ begin
     FCommitOptions.Font.Color := Palette.Dim
   else
     FCommitOptions.Font.Color := Palette.Accent;
+  UpdateOptionItems;
 end;
 
 { The menu under the label, its items ticked as they are; Sign Off is
@@ -702,6 +720,26 @@ begin
   UpdateCommitOptions;
   At := FCommitOptions.ClientToScreen(Point(0, FCommitOptions.Height));
   FCommitOptionsMenu.PopUp(At.X, At.Y);
+end;
+
+{ Whether the message field holds nothing of the user's: it is empty,
+  or holds commit.template as it was put there, which git too refuses
+  to commit unchanged. }
+function TRepoFrame.MessageBlank: boolean;
+begin
+  Result := (Trim(FCommitMemo.Text) = '') or ((FCommitTemplate <> '') and
+    (Trim(AdjustLineBreaks(FCommitMemo.Text)) = Trim(AdjustLineBreaks(FCommitTemplate))));
+end;
+
+{ File > Sign Off and Skip Hooks, ticked as the options are. }
+procedure TRepoFrame.UpdateOptionItems;
+begin
+  if FSignOffMenuItem = nil then
+    Exit;
+  FSignOffMenuItem.Checked := FSignOff;
+  FSkipHooksMenuItem.Checked := FSkipHooks;
+  FSignOffMenuItem.Enabled := (FRepo <> nil) and (FRepo.Root <> '');
+  FSkipHooksMenuItem.Enabled := FSignOffMenuItem.Enabled;
 end;
 
 procedure TRepoFrame.SignOffItemClick(Sender: TObject);
@@ -726,14 +764,14 @@ var
 begin
   if FCommitAmend.Checked then
   begin
-    if (Trim(FCommitMemo.Text) = '') and FRepo.HeadMessage(Message) then
+    if MessageBlank and FRepo.HeadMessage(Message) then
     begin
       FCommitMemo.Text := Message;
       FAmendMessage := FCommitMemo.Text;
     end;
   end
   else if (FAmendMessage <> '') and (FCommitMemo.Text = FAmendMessage) then
-    FCommitMemo.Clear;
+    FCommitMemo.Text := FCommitTemplate;
   if not FCommitAmend.Checked then
     FAmendMessage := '';
   UpdateCommitState;
@@ -926,7 +964,7 @@ procedure TRepoFrame.CommitJobDone(Sender: TObject);
 var
   Job: TGittanCommitJob;
   Subject: string;
-  Amended, Fixup, Merges: boolean;
+  Amended, Fixup, Merges, HistoryChanged: boolean;
   Steps: TGittanRebaseSteps;
 begin
   Job := TGittanCommitJob(Sender);
@@ -946,7 +984,9 @@ begin
     Amended := FCommitAmend.Checked;
     if not Fixup then
     begin
-      FCommitMemo.Clear;
+      { commit.template may have changed since the repository opened. }
+      FCommitTemplate := FRepo.CommitTemplate;
+      FCommitMemo.Text := FCommitTemplate;
       FCommitAmend.Checked := False;
       FAmendMessage := '';
       FMergeMessage := '';
@@ -959,7 +999,13 @@ begin
   end
   else
     FStatus.ShowMessage('', stNormal, 0);
+  { The history or time-lapse of a file the commit took is done with:
+    the summary comes instead, as for the change view of one. }
+  HistoryChanged := (FView = gvHistory) and (FHistoryPath <> '') and
+    IsChangedPath(FHistoryPath);
   RefreshRepository;
+  if Job.Ok and HistoryChanged and (FView = gvHistory) and not IsChangedPath(FHistoryPath) then
+    ShowSummary;
   UpdateCommitState;
   UpdateRemoteItems;
   if not Job.Ok then
@@ -980,13 +1026,27 @@ begin
   end
   { A branch that can be pushed as it is (it has an upstream and is not
     behind it, so an amended pushed commit is left to Force Push) is
-    offered the push in a banner; otherwise the status bar says it. }
+    offered the push in a banner, one behind it the pull; otherwise the
+    status bar says it. }
   else if not Amended and FHasUpstream and (FAhead > 0) and (FBehind = 0) and
     FPushItem.Enabled then
   begin
     FStatus.ShowMessage('', stNormal, 0);
     FBanner.AddAction(Format(rsCommittedTitle, [Copy(Job.Id, 1, 7)]), Subject,
       bkSuccess, BannerActionSeconds, rsPushAction, @CommitPushClick);
+  end
+  { Behind the upstream a push would be refused: the banner offers the
+    pull first, through File > Pull, which asks how to bring the
+    commits in (and about a rewritten branch). }
+  else if not Amended and FHasUpstream and (FBehind > 0) and FPullItem.Enabled then
+  begin
+    FStatus.ShowMessage('', stNormal, 0);
+    if FBehind = 1 then
+      Subject := Format(rsCommittedBehindOne, [Subject, FRepo.Upstream(FBranch)])
+    else
+      Subject := Format(rsCommittedBehind, [Subject, FBehind, FRepo.Upstream(FBranch)]);
+    FBanner.AddAction(Format(rsCommittedTitle, [Copy(Job.Id, 1, 7)]), Subject,
+      bkSuccess, BannerActionSeconds, rsPullAction, @MenuPullClick);
   end
   else
     StatusNote(Format(rsCommitted, [Copy(Job.Id, 1, 7), Subject]));
@@ -1063,7 +1123,7 @@ begin
 end;
 
 { Clears the draft slot and the field where they still hold the message
-  AJob committed. }
+  AJob committed, the field back to the template. }
 procedure TRepoFrame.ForgetCommitted(AJob: TGittanCommitJob);
 
   function Same(const AText: string): boolean;
@@ -1081,7 +1141,7 @@ begin
   end;
   if (FCommitMemo <> nil) and (FCommitDraftFor = AJob.Root) and
     Same(FCommitMemo.Text) then
-    FCommitMemo.Clear;
+    FCommitMemo.Text := FCommitTemplate;
 end;
 
 { The message goes to the settings' one slot for the repository it was
@@ -1091,7 +1151,7 @@ procedure TRepoFrame.SaveCommitDraft;
 begin
   if (FCommitMemo = nil) or (FCommitDraftFor = '') then
     Exit;
-  if Trim(FCommitMemo.Text) <> '' then
+  if not MessageBlank then
   begin
     App.Settings.CommitDraft := FCommitMemo.Text;
     App.Settings.CommitDraftRepo := FCommitDraftFor;
@@ -1116,9 +1176,11 @@ begin
   FSignOff := FRepo.SignOff;
   FSkipHooks := False;
   UpdateCommitOptions;
+  { commit.template fills a field with no draft, as git's editor would. }
+  FCommitTemplate := FRepo.CommitTemplate;
   if (FRepo.Root <> '') and (App.Settings.CommitDraftRepo = FRepo.Root) then
     FCommitMemo.Text := App.Settings.CommitDraft
   else
-    FCommitMemo.Clear;
+    FCommitMemo.Text := FCommitTemplate;
   UpdateCommitState;
 end;

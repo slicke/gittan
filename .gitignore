@@ -55,3 +55,6 @@ symbol_order*.fpc
 # Test build output from make test
 /tests/lib/
 /tests/gittantests
+
+# Linux packages (make packages)
+pkg/

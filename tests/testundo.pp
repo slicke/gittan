@@ -33,9 +33,12 @@ type
   published
     procedure TestParseBranchTips;
     procedure TestDescribe;
+    procedure TestParseHeadMove;
     procedure TestPlanStale;
     procedure TestCommit;
     procedure TestAmend;
+    procedure TestCommitThenStash;
+    procedure TestCommitThenManyResets;
     procedure TestMerge;
     procedure TestSwitchAndCreate;
     procedure TestDeleteAndRename;
@@ -316,6 +319,63 @@ begin
   Track;
   AssertFalse('the redo is no new step', FHistory.CanRedo);
   AssertTrue(FHistory.CanUndo);
+end;
+
+procedure TUndoTest.TestParseHeadMove;
+begin
+  AssertEquals('the newest', 'commit: Two',
+    ParseHeadMove('bbb commit: Two'#10'aaa commit (initial): One', 'bbb'));
+  AssertEquals('past the resets that moved nothing', 'commit: Two',
+    ParseHeadMove('bbb reset: moving to HEAD'#10'bbb reset: moving to HEAD'#10 +
+    'bbb commit: Two'#10'aaa commit (initial): One', 'bbb'));
+  AssertEquals('a reset that moved HEAD', 'reset: moving to HEAD~1',
+    ParseHeadMove('aaa reset: moving to HEAD'#10'aaa reset: moving to HEAD~1'#10 +
+    'bbb commit: Two', 'aaa'));
+  AssertEquals('a switch at the same commit stays', 'checkout: moving from main to dev',
+    ParseHeadMove('bbb checkout: moving from main to dev'#10'bbb commit: Two', 'bbb'));
+  AssertEquals('the oldest read stands', 'reset: moving to HEAD',
+    ParseHeadMove('bbb reset: moving to HEAD', 'bbb'));
+  AssertEquals('not where HEAD is', '', ParseHeadMove('bbb commit: Two', 'ccc'));
+  AssertEquals('none', '', ParseHeadMove('', 'bbb'));
+end;
+
+procedure TUndoTest.TestCommitThenStash;
+var
+  First: string;
+begin
+  { A commit and then a stash and an unstaging reset elsewhere, all
+    before a snapshot: the step is still the commit, undone softly. }
+  First := Rev('HEAD');
+  Commit('a.txt', 'two', 'Second');
+  WriteFile('a.txt', 'three');
+  Git(['stash', '-q']);
+  WriteFile('b.txt', 'new');
+  Git(['add', 'b.txt']);
+  Git(['reset', '-q']);
+  Track;
+  AssertEquals('Commit "Second"', FHistory.UndoStep.Title);
+  AssertTrue('soft', FHistory.UndoStep.Kind = ukCommit);
+  Undo;
+  AssertEquals(First, Rev('HEAD'));
+  AssertEquals('the commit''s change stays in the file', 'two', ReadFile('a.txt'));
+end;
+
+procedure TUndoTest.TestCommitThenManyResets;
+var
+  First: string;
+  i: integer;
+begin
+  { More resets that move nothing than the first read of the reflog
+    holds: the commit before them is still found. }
+  First := Rev('HEAD');
+  Commit('a.txt', 'two', 'Second');
+  for i := 1 to 25 do
+    Git(['reset', '-q']);
+  Track;
+  AssertEquals('Commit "Second"', FHistory.UndoStep.Title);
+  Undo;
+  AssertEquals(First, Rev('HEAD'));
+  AssertEquals('two', ReadFile('a.txt'));
 end;
 
 procedure TUndoTest.TestAmend;

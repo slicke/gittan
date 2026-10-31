@@ -31,6 +31,8 @@ type
     procedure TestTrust;
     procedure TestOldGhPath;
     procedure TestOldForgeSwitch;
+    procedure TestOldFilterFlags;
+
   end;
 
 implementation
@@ -67,6 +69,7 @@ begin
     AssertEquals(FFileName, S.FileName);
     S.Load;
     AssertEquals(3, S.ContextLines);
+    AssertTrue('the unchanged lines start hidden', S.OnlyChanges);
     AssertEquals(0, S.Width);
     AssertFalse(S.SideBySide);
     AssertFalse(S.MarkdownPreview);
@@ -81,12 +84,10 @@ begin
     AssertTrue('the hosting features start on', S.HostingEnabled);
     AssertTrue('the background fetch starts on', S.AutoFetch);
     AssertEquals(DefaultAutoFetchMinutes, S.AutoFetchMinutes);
-    AssertFalse(S.HideWithoutFeedback);
-    AssertFalse(S.OnlyNeedsAttention);
-    AssertFalse(S.HideDrafts);
-    AssertFalse(S.OnlyAskedOfMe);
-    AssertFalse(S.HideReviewDrafts);
-    AssertFalse(S.OnlyStale);
+    AssertEquals('no filters on', '', S.ForgeValue('GitHub', 'MineFilters'));
+    AssertEquals('', S.ForgeValue('GitHub', 'ReviewFilters'));
+    AssertEquals('', S.ForgeValue('GitHub', 'IgnoredChecks'));
+    AssertEquals('', S.ForgeValue('GitHub', 'Presets'));
     AssertTrue('changes asked for start as needing attention', S.ChangesNeedAttention);
     AssertTrue('failing checks start as needing attention', S.ChecksNeedAttention);
     AssertEquals('the last changed first', 0, S.MineOrder);
@@ -118,6 +119,8 @@ begin
     S.TreeWidth := 240;
     S.RepoFilesOpen := True;
     S.SubmodulesOpen := False;
+    S.TickHintHidden := True;
+    S.GraphTipHidden := True;
     S.CommitOpen := False;
     S.CommitDraft := 'Subject = x'#10#10'C:\new\nope\\'#10;
     S.CommitDraftRepo := '/tmp/a';
@@ -125,7 +128,7 @@ begin
     S.FontSize := 13;
     S.Zoom := 120;
     S.WordWrap := True;
-    S.OnlyChanges := True;
+    S.OnlyChanges := False;
     S.ContextLines := 5;
     S.SideBySide := True;
     S.MarkdownPreview := True;
@@ -137,12 +140,10 @@ begin
     S.HostingEnabled := False;
     S.AutoFetch := False;
     S.AutoFetchMinutes := 30;
-    S.HideWithoutFeedback := True;
-    S.OnlyNeedsAttention := True;
-    S.HideDrafts := True;
-    S.OnlyAskedOfMe := True;
-    S.HideReviewDrafts := True;
-    S.OnlyStale := True;
+    S.SetForgeValue('GitHub', 'MineFilters', 'feedback,attention,nodrafts,stale');
+    S.SetForgeValue('GitHub', 'ReviewFilters', 'askedofme,nodrafts');
+    S.SetForgeValue('GitHub', 'IgnoredChecks', 'npm audit|CodeQL');
+    S.SetForgeValue('GitHub', 'Presets', 'mine|Bot done|feedback,nodrafts');
     S.ChangesNeedAttention := False;
     S.ChecksNeedAttention := False;
     S.MineOrder := 2;
@@ -177,6 +178,8 @@ begin
     AssertEquals(240, S.TreeWidth);
     AssertTrue(S.RepoFilesOpen);
     AssertFalse(S.SubmodulesOpen);
+    AssertTrue(S.TickHintHidden);
+    AssertTrue(S.GraphTipHidden);
     AssertFalse(S.CommitOpen);
     AssertEquals('Subject = x'#10#10'C:\new\nope\\'#10, S.CommitDraft);
     AssertEquals('/tmp/a', S.CommitDraftRepo);
@@ -184,7 +187,7 @@ begin
     AssertEquals(13, S.FontSize);
     AssertEquals(120, S.Zoom);
     AssertTrue(S.WordWrap);
-    AssertTrue(S.OnlyChanges);
+    AssertFalse('off is kept', S.OnlyChanges);
     AssertEquals(5, S.ContextLines);
     AssertTrue(S.SideBySide);
     AssertTrue(S.MarkdownPreview);
@@ -196,12 +199,10 @@ begin
     AssertFalse(S.HostingEnabled);
     AssertFalse(S.AutoFetch);
     AssertEquals(30, S.AutoFetchMinutes);
-    AssertTrue(S.HideWithoutFeedback);
-    AssertTrue(S.OnlyNeedsAttention);
-    AssertTrue(S.HideDrafts);
-    AssertTrue(S.OnlyAskedOfMe);
-    AssertTrue(S.HideReviewDrafts);
-    AssertTrue(S.OnlyStale);
+    AssertEquals('feedback,attention,nodrafts,stale', S.ForgeValue('GitHub', 'MineFilters'));
+    AssertEquals('askedofme,nodrafts', S.ForgeValue('GitHub', 'ReviewFilters'));
+    AssertEquals('npm audit|CodeQL', S.ForgeValue('GitHub', 'IgnoredChecks'));
+    AssertEquals('mine|Bot done|feedback,nodrafts', S.ForgeValue('GitHub', 'Presets'));
     AssertFalse(S.ChangesNeedAttention);
     AssertFalse(S.ChecksNeedAttention);
     AssertEquals(2, S.MineOrder);
@@ -454,6 +455,69 @@ begin
     end;
   finally
     Ini.Free;
+  end;
+end;
+
+procedure TSettingsTest.TestOldFilterFlags;
+var
+  S: TGittanSettings;
+  F: TStringList;
+begin
+  { An earlier version's flags become the filters' keys, once; the new
+    value, once there, is what counts. }
+  F := TStringList.Create;
+  try
+    F.Text := '[GitHub]'#10'HideWithoutFeedback=1'#10'OnlyStale=1'#10'HideReviewDrafts=1'#10;
+    F.SaveToFile(FFileName);
+  finally
+    F.Free;
+  end;
+  S := TGittanSettings.Create(FFileName);
+  try
+    S.Load;
+    AssertEquals('feedback,stale', S.ForgeValue('GitHub', 'MineFilters'));
+    AssertEquals('nodrafts', S.ForgeValue('GitHub', 'ReviewFilters'));
+    { Written, then cleared: the key goes from the file. }
+    S.Save;
+    S.SetForgeValue('GitHub', 'MineFilters', 'attention');
+    S.SetForgeValue('GitHub', 'ReviewFilters', '');
+    S.Save;
+  finally
+    S.Free;
+  end;
+  F := TStringList.Create;
+  try
+    F.LoadFromFile(FFileName);
+    AssertTrue('the flags are gone', Pos('HideWithoutFeedback', F.Text) = 0);
+    AssertTrue('an empty value is not written', Pos('ReviewFilters', F.Text) = 0);
+  finally
+    F.Free;
+  end;
+  S := TGittanSettings.Create(FFileName);
+  try
+    S.Load;
+    AssertEquals('attention', S.ForgeValue('GitHub', 'MineFilters'));
+    AssertEquals('an empty value with the new one there stays empty', '',
+      S.ForgeValue('GitHub', 'ReviewFilters'));
+  finally
+    S.Free;
+  end;
+  { One section's keys there already: only the other is migrated. }
+  F := TStringList.Create;
+  try
+    F.Text := '[GitHub]'#10'ReviewFilters=new'#10'HideWithoutFeedback=1'#10 +
+      'HideReviewDrafts=1'#10;
+    F.SaveToFile(FFileName);
+  finally
+    F.Free;
+  end;
+  S := TGittanSettings.Create(FFileName);
+  try
+    S.Load;
+    AssertEquals('feedback', S.ForgeValue('GitHub', 'MineFilters'));
+    AssertEquals('the saved one kept', 'new', S.ForgeValue('GitHub', 'ReviewFilters'));
+  finally
+    S.Free;
   end;
 end;
 

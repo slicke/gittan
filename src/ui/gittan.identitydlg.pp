@@ -23,7 +23,7 @@ uses
   Graphics;
 
 resourcestring
-  rsIdentityDlgTitle = 'Who Commits?';
+  rsIdentityDlgTitle = 'Name and Email';
   rsIdentityDlgHint = 'Commits are made under this name and e-mail. Git keeps them in your ' +
     'global config, for every repository, unless this one has its own.';
   rsIdentityDlgName = 'Name';

@@ -752,6 +752,16 @@ type
     function SignOff: boolean;
     {** Keeps ASignOff for SignOff, unsetting the key when off. }
     function SetSignOff(ASignOff: boolean): boolean;
+    {** The message commit.template names (a path from the root when
+      relative, ~ expanded), without its comment lines, which git takes
+      out only when it opens an editor, and without the blank lines at
+      its end; '' without one or when it cannot be read. }
+    function CommitTemplate: string;
+    {** Tells git how the repository pulls a branch that has diverged, in
+      its own config, so Pull(pmAuto) asks no more: ARebase sets
+      pull.rebase true, else pull.rebase false with pull.ff true (a
+      global pull.ff=only would refuse the merge). }
+    function SetPullMode(ARebase: boolean): boolean;
     {** The remote whose URL holds ARepoPath ("owner/repo", compared
       without regard to case), else origin, else the first remote, else
       empty. }
@@ -853,6 +863,10 @@ type
       with LayoutGraph; false before the first commit. }
     function GraphCommits(out ACommits: TGittanGraphCommits;
       AMax: integer = 500): boolean;
+    {** The commit ARef names as GraphCommits gives it (no lanes): for the
+      commit menu of a commit shown outside the graph. False when git
+      knows no such commit. }
+    function GraphCommit(const ARef: string; out ACommit: TGittanGraphCommit): boolean;
     {** The ids of the commits of every local and remote branch, every
       tag and HEAD that touched APath, a file or a folder relative to
       Root, newest first, at most AMax; a file is followed through its
@@ -2716,6 +2730,74 @@ begin
     Output) and (Trim(Output) = 'true');
 end;
 
+function TGittanRepo.CommitTemplate: string;
+var
+  Output, FileName, Comment: string;
+  Lines: TStringList;
+  i: integer;
+begin
+  Result := '';
+  if (FRoot = '') or not RunGit(FRoot, ['config', '--path', 'commit.template'], Output) then
+    Exit;
+  FileName := Trim(Output);
+  if FileName = '' then
+    Exit;
+  FileName := ExpandFileName(IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(FileName));
+  if not FileExists(FileName) then
+    FileName := ExpandFileName(SetDirSeparators(Trim(Output)));
+  if not FileExists(FileName) then
+    Exit;
+  { The comment lines start as git's own do: core.commentString (or
+    core.commentChar), '#' when none is set or git picks one (auto). }
+  Comment := '';
+  if RunGit(FRoot, ['config', 'core.commentString'], Output) or
+    RunGit(FRoot, ['config', 'core.commentChar'], Output) then
+    Comment := Trim(Output);
+  if (Comment = '') or (Comment = 'auto') then
+    Comment := '#';
+  Lines := TStringList.Create;
+  try
+    try
+      Lines.LoadFromFile(FileName);
+    except
+      Exit;
+    end;
+    for i := Lines.Count - 1 downto 0 do
+      if Copy(Lines[i], 1, Length(Comment)) = Comment then
+        Lines.Delete(i);
+    while (Lines.Count > 0) and (Trim(Lines[Lines.Count - 1]) = '') do
+      Lines.Delete(Lines.Count - 1);
+    for i := 0 to Lines.Count - 1 do
+      if i = 0 then
+        Result := Lines[i]
+      else
+        Result := Result + LineEnding + Lines[i];
+  finally
+    Lines.Free;
+  end;
+end;
+
+{ The branch's own branch.<name>.rebase comes before pull.rebase, so
+  one that is set is set to the choice too. }
+function TGittanRepo.SetPullMode(ARebase: boolean): boolean;
+const
+  Value: array[boolean] of string = ('false', 'true');
+var
+  Output, Name: string;
+begin
+  if FRoot = '' then
+    Exit(False);
+  Name := Branch;
+  if (Name <> '') and RunGit(FRoot, ['config', 'branch.' + Name + '.rebase'], Output) and
+    not RunGit(FRoot, ['config', '--local', 'branch.' + Name + '.rebase', Value[ARebase]],
+    Output) then
+    Exit(False);
+  if ARebase then
+    Exit(RunGit(FRoot, ['config', '--local', 'pull.rebase', 'true'], Output));
+  Result := RunGit(FRoot, ['config', '--local', 'pull.rebase', 'false'], Output) and
+    RunGit(FRoot, ['config', '--local', 'pull.ff', 'true'], Output);
+end;
+
 { --unset fails (5) when the key is not there, which is what off is. }
 function TGittanRepo.SetSignOff(ASignOff: boolean): boolean;
 var
@@ -3848,8 +3930,23 @@ begin
     Output, Err));
 end;
 
+{ Whether the config makes a pull rebase: branch.<name>.rebase, else
+  pull.rebase, anything but false (merges, interactive). }
+function PullRebases(const ARoot, ABranch: string): boolean;
+var
+  Output, Err: string;
+begin
+  if not (((ABranch <> '') and RunGitIn(ARoot, ['config', 'branch.' + ABranch + '.rebase'],
+    Output, Err)) or RunGitIn(ARoot, ['config', 'pull.rebase'], Output, Err)) then
+    Exit(False);
+  Output := LowerCase(Trim(Output));
+  Result := (Output <> '') and (Output <> 'false') and (Output <> 'no') and
+    (Output <> 'off') and (Output <> '0');
+end;
+
 { git says "Not possible to fast-forward" for --ff-only and pull.ff=only,
-  and "divergent branches" when it is told nothing. }
+  and "divergent branches" when it is told nothing. A rebase the config
+  asks for stashes local changes as Pull Rebase does. }
 function TGittanRepo.Pull(AMode: TGittanPullMode; out ADiverged: boolean): boolean;
 begin
   ADiverged := False;
@@ -3859,7 +3956,9 @@ begin
     pmRebase:
       Result := RunRemote(['pull', '--progress', '--rebase', '--autostash']);
     else
-      if PullConfigured(FRoot, Branch) then
+      if PullRebases(FRoot, Branch) then
+        Result := RunRemote(['pull', '--progress', '--autostash', '--no-edit'])
+      else if PullConfigured(FRoot, Branch) then
         Result := RunRemote(['pull', '--progress', '--no-edit'])
       else
         Result := RunRemote(['pull', '--progress', '--ff-only']);
@@ -5280,12 +5379,27 @@ end;
 
 function TGittanRepo.Unresolve(const APath: string): boolean;
 var
-  Output: string;
+  Output, Path, Version: string;
+  Major, Minor: integer;
 begin
   if FRoot = '' then
     Exit(False);
-  if not RunGit(FRoot, ['update-index', '--unresolve', '--', APath], Output) then
+  { --unresolve takes every argument after it as a path, "--" too in
+    older git (Apple's on macOS 14: "--: not in our branch"), so a path
+    that looks like an option goes after "./" instead. }
+  Path := APath;
+  if Copy(Path, 1, 1) = '-' then
+    Path := './' + Path;
+  if not RunGit(FRoot, ['update-index', '--unresolve', Path], Output) then
+  begin
+    { Before 2.42 git brought back only a path the index still has, not
+      one resolved as deleted. }
+    if not FileExists(IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(APath)) and
+      GitVersion(Version, Major, Minor) and ((Major < 2) or ((Major = 2) and (Minor < 42))) then
+      FError := Format('git %s cannot bring back the conflict of a file resolved as deleted; ' +
+        'git 2.42 and later can', [Version]);
     Exit(False);
+  end;
   { git says nothing when it has no stages kept for the path. }
   Result := ConflictStages(FRoot, APath) <> '';
   if not Result then
@@ -5847,28 +5961,71 @@ begin
   Result := ASnap.Ok;
 end;
 
-{ symbolic-ref fails while HEAD is detached, and the reflog before the
-  first commit; neither makes the state unreadable. }
+{ for-each-ref marks the branch HEAD is on (%(HEAD)), whose tip is
+  HEAD's commit; symbolic-ref and rev-parse are asked only when none is
+  marked, HEAD detached or before the first commit. symbolic-ref fails
+  while HEAD is detached, and the reflog before the first commit;
+  neither makes the state unreadable. }
 function TGittanRepo.ReadRefState(out AState: TGittanRefState): boolean;
 var
   Output: string;
+  Lines: TStringList;
+  i, Count, n: integer;
+  Line: string;
 begin
   AState := Default(TGittanRefState);
   if FRoot = '' then
     Exit(False);
-  if RunGit(FRoot, ['symbolic-ref', '-q', 'HEAD'], Output) then
-  begin
-    AState.Branch := Trim(Output);
-    if Pos('refs/heads/', AState.Branch) = 1 then
-      Delete(AState.Branch, 1, Length('refs/heads/'));
-  end;
-  AState.Head := CommitId('HEAD');
-  if not RunGit(FRoot, ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads'],
-    Output) then
+  if not RunGit(FRoot, ['for-each-ref', '--format=%(objectname) %(refname) %(HEAD)',
+    'refs/heads'], Output) then
     Exit(False);
-  AState.Tips := ParseBranchTips(Output);
-  if RunGit(FRoot, ['reflog', '-1', '--format=%gs', 'HEAD'], Output) then
-    AState.Move := Trim(Output);
+  Lines := TStringList.Create;
+  try
+    Lines.Text := Output;
+    for i := 0 to Lines.Count - 1 do
+    begin
+      Line := TrimRight(Lines[i]);
+      if (Length(Line) > 2) and (Copy(Line, Length(Line) - 1, 2) = ' *') then
+      begin
+        SetLength(Line, Length(Line) - 2);
+        AState.Head := Copy(Line, 1, Pos(' ', Line) - 1);
+        AState.Branch := Copy(Line, Pos(' ', Line) + 1, MaxInt);
+      end;
+      Lines[i] := Line;
+    end;
+    AState.Tips := ParseBranchTips(Lines.Text);
+  finally
+    Lines.Free;
+  end;
+  if Pos('refs/heads/', AState.Branch) = 1 then
+    Delete(AState.Branch, 1, Length('refs/heads/'))
+  else
+  begin
+    AState.Branch := '';
+    AState.Head := '';
+    if RunGit(FRoot, ['symbolic-ref', '-q', 'HEAD'], Output) then
+    begin
+      AState.Branch := Trim(Output);
+      if Pos('refs/heads/', AState.Branch) = 1 then
+        Delete(AState.Branch, 1, Length('refs/heads/'));
+    end;
+    AState.Head := CommitId('HEAD');
+  end;
+  { Enough entries to look past the resets of a few stashes; when every
+    one read is such a reset, the move is further back and more are
+    read. }
+  Count := 20;
+  while RunGit(FRoot, ['reflog', '-n', IntToStr(Count), '--format=%H %gs', 'HEAD'], Output) do
+  begin
+    AState.Move := ParseHeadMove(Output, AState.Head);
+    n := 0;
+    for i := 1 to Length(Output) do
+      if Output[i] = #10 then
+        Inc(n);
+    if not AnsiStartsStr('reset:', AState.Move) or (Count >= 2000) or (n < Count) then
+      Break;
+    Count := Count * 10;
+  end;
   AState.Valid := True;
   Result := True;
 end;
@@ -6073,36 +6230,30 @@ end;
   since the body, last, may hold anything, line breaks too. The commits
   not pushed (or not pulled) are read with the same cut, so every one in
   the log is marked. }
-function TGittanRepo.GraphCommits(out ACommits: TGittanGraphCommits;
-  AMax: integer): boolean;
+const
+  { git leaves a bisect's refs out of the decorations unless asked. }
+  GraphLogArgs: array[0..9] of string = ('log', '--no-color', '--decorate=full',
+    '--decorate-refs=HEAD', '--decorate-refs=refs/heads/', '--decorate-refs=refs/remotes/',
+    '--decorate-refs=refs/tags/', '--decorate-refs=refs/bisect/', '-z',
+    '--format=%H%x1f%P%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%s%x1f%b');
+
+{ The commits of a log in GraphLogArgs' format, those whose ids are in
+  AAhead or ABehind (rev-list output) marked not pushed or not pulled. }
+function ParseGraphLog(const AOutput, AAhead, ABehind: string): TGittanGraphCommits;
 var
-  Output, Ahead, Behind: string;
   Records, Fields: TStringArray;
   i: integer;
   Seconds: int64;
 begin
-  ACommits := nil;
-  { git leaves a bisect's refs out of the decorations unless asked. }
-  Result := (FRoot <> '') and RunGit(FRoot, ['log', '--no-color', '--topo-order',
-    '--decorate=full', '--decorate-refs=HEAD', '--decorate-refs=refs/heads/',
-    '--decorate-refs=refs/remotes/', '--decorate-refs=refs/tags/',
-    '--decorate-refs=refs/bisect/', '-z', '-n', IntToStr(AMax),
-    '--format=%H%x1f%P%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%s%x1f%b',
-    '--branches', '--remotes', '--tags', 'HEAD'], Output);
-  if not Result then
-    Exit;
-  if not RunGit(FRoot, ['rev-list', '-n', IntToStr(AMax), '@{upstream}..HEAD'], Ahead) then
-    Ahead := '';
-  if not RunGit(FRoot, ['rev-list', '-n', IntToStr(AMax), 'HEAD..@{upstream}'], Behind) then
-    Behind := '';
-  Records := Output.Split([#0]);
+  Result := nil;
+  Records := AOutput.Split([#0]);
   for i := 0 to High(Records) do
   begin
     Fields := Records[i].Split([#31]);
     if Length(Fields) < 8 then
       Continue;
-    SetLength(ACommits, Length(ACommits) + 1);
-    with ACommits[High(ACommits)] do
+    SetLength(Result, Length(Result) + 1);
+    with Result[High(Result)] do
     begin
       Hash := Fields[0];
       if Fields[1] = '' then
@@ -6118,11 +6269,56 @@ begin
       Refs := ParseGraphRefs(Fields[5]);
       Subject := Fields[6];
       Body := TrimRight(Fields[7]);
-      Unpushed := Pos(Hash, Ahead) > 0;
-      Unpulled := Pos(Hash, Behind) > 0;
+      Unpushed := Pos(Hash, AAhead) > 0;
+      Unpulled := Pos(Hash, ABehind) > 0;
     end;
   end;
+end;
+
+function TGittanRepo.GraphCommits(out ACommits: TGittanGraphCommits;
+  AMax: integer): boolean;
+var
+  Output, Ahead, Behind: string;
+  Args: array of string;
+  i: integer;
+begin
+  ACommits := nil;
+  SetLength(Args, Length(GraphLogArgs));
+  for i := 0 to High(GraphLogArgs) do
+    Args[i] := GraphLogArgs[i];
+  Args := Concat(Args, ['--topo-order', '-n', IntToStr(AMax), '--branches', '--remotes',
+    '--tags', 'HEAD']);
+  Result := (FRoot <> '') and RunGit(FRoot, Args, Output);
+  if not Result then
+    Exit;
+  if not RunGit(FRoot, ['rev-list', '-n', IntToStr(AMax), '@{upstream}..HEAD'], Ahead) then
+    Ahead := '';
+  if not RunGit(FRoot, ['rev-list', '-n', IntToStr(AMax), 'HEAD..@{upstream}'], Behind) then
+    Behind := '';
+  ACommits := ParseGraphLog(Output, Ahead, Behind);
   LayoutGraph(ACommits);
+end;
+
+{ --end-of-options, so a ref that starts with a dash is no option. }
+function TGittanRepo.GraphCommit(const ARef: string; out ACommit: TGittanGraphCommit): boolean;
+var
+  Output: string;
+  Args: array of string;
+  Commits: TGittanGraphCommits;
+  i: integer;
+begin
+  ACommit := Default(TGittanGraphCommit);
+  SetLength(Args, Length(GraphLogArgs));
+  for i := 0 to High(GraphLogArgs) do
+    Args[i] := GraphLogArgs[i];
+  Args := Concat(Args, ['-n', '1', '--end-of-options', ARef]);
+  Result := (FRoot <> '') and (ARef <> '') and RunGit(FRoot, Args, Output);
+  if not Result then
+    Exit;
+  Commits := ParseGraphLog(Output, '', '');
+  Result := Length(Commits) = 1;
+  if Result then
+    ACommit := Commits[0];
 end;
 
 { --literal-pathspecs, so a path with a glob character is the path. A

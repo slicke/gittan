@@ -106,8 +106,9 @@ end;
   Lexer folder lookup
   ---------------------------------------------------------------------------
   GITTAN_LEXLIB overrides everything. Otherwise look beside the executable,
-  in a macOS bundle's Resources, and in the project root when the executable
-  runs from the Gittan.app wrapper the IDE makes there. }
+  in a macOS bundle's Resources, in share/gittan for the Linux packages
+  (/usr/bin/gittan and /usr/share/gittan/lexlib), and in the project root
+  when the executable runs from the Gittan.app wrapper the IDE makes there. }
 function LexerFolderCandidates: TStringArray;
 var
   ExeDir, Env: string;
@@ -120,6 +121,7 @@ begin
   Result := Concat(Result, [
     ExeDir + 'lexlib',
     ExeDir + '../Resources/lexlib',
+    ExeDir + '../share/gittan/lexlib',
     ExeDir + '../../../lexlib']);
 end;
 

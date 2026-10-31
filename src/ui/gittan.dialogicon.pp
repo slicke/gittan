@@ -1,10 +1,9 @@
 unit gittan.dialogicon;
 
-{** The icon Gittan's dialogs and notices show for themselves: the braid
-  graph alone, a red and a green strand crossing with a ring at each
-  end, without the application icon's tile, so it sits on the dialog's
-  own background in either appearance (the crossing's gap is a mask in
-  the red strand, not a white stroke). PNGs of 48, 96 and 144 pixels
+{** The icon Gittan's dialogs and notices show for themselves: the
+  application icon's mark alone (the diff window with its red and green
+  lines), without the tile, so it sits on the dialog's own background in
+  either appearance. PNGs of 48, 96 and 144 pixels
   from icons/gittan-dialog.svg, compiled in from gittan.dialogicon.inc
   (make dialogicon); the one for the size in device pixels is read once
   and kept. }

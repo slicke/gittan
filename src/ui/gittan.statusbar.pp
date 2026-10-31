@@ -50,14 +50,14 @@ type
     const AScreenRect: TRect) of object;
 
   {** A transport button. The primary one reads Caption after its icon;
-    the side ones show the icon alone, and their caption is for the
-    hint. The primary's tone is its fill: the accent for stNormal, a
+    the side ones show the icon alone, or with Text after it, and their
+    caption is for the hint. The primary's tone is its fill: the accent for stNormal, a
     step to take; the hover fill with a green icon for stGood, when
     there is nothing to do; amber or red for stWarn and stBad. An empty
     icon hides the button; a disabled one is dimmed and answers no
     click. }
   TGittanStatusButton = record
-    Caption, Icon: string;
+    Caption, Icon, Text: string;
     Tone: TGittanStatusTone;
     Enabled: boolean;
   end;
@@ -86,7 +86,7 @@ type
   TGittanStatusBar = class(TCustomControl)
   private
     FTitle, FBranch, FBase, FPull, FPullNote, FFiles, FPosition, FUpdate: string;
-    FOperation, FMessage, FProgressText: string;
+    FOperation, FMessage, FProgressText, FProgressIcon: string;
     FPullChecks, FPullOpen, FPullThreads, FStashes: integer;
     FAhead, FBehind, FProgressPos, FProgressTotal, FOperationPos, FOperationTotal: integer;
     FSyncShown, FBaseClosable: boolean;
@@ -116,6 +116,7 @@ type
     function HotHint: string;
     procedure HintTimerTimer(Sender: TObject);
     procedure HideHint;
+    procedure HintChanged(APart: TGittanStatusPart);
     procedure Change(var AField: string; const AValue: string);
   protected
     procedure DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
@@ -188,8 +189,11 @@ type
     procedure ShowBusy(const AText: string; const AIcon: string = '');
     procedure ClearMessage;
     {** Shows the track line filled APos of ATotal with AText before it,
-      in place of the sync counts; ATotal 0 hides it. }
-    procedure SetProgress(const AText: string; APos, ATotal: integer);
+      in place of the sync counts, in the accent color after the icon of
+      the marker AIcon ('' for none); ATotal 0 hides it. The part's hint
+      is PartHint[spProgress], or AText while that is empty. }
+    procedure SetProgress(const AText: string; APos, ATotal: integer;
+      const AIcon: string = '');
     {** Sets the palette: the background, the text, the dim text, the top
       border, the fill of a part under the mouse, the accent (the primary
       button, the progress), and the green, amber and red of the tones. }
@@ -208,7 +212,7 @@ type
 
 {** A transport button, for SetTransport. }
 function StatusButton(const ACaption, AIcon: string; ATone: TGittanStatusTone = stNormal;
-  AEnabled: boolean = True): TGittanStatusButton;
+  AEnabled: boolean = True; const AText: string = ''): TGittanStatusButton;
 
 {** The parts that answer a click. A transport button answers one while
   it is enabled, the base while it has actions. }
@@ -223,7 +227,8 @@ const
     push and pull, a box for the stashes, and for the transport two
     arrows round a circle (fetch), an arrow down (pull), an arrow up
     (push), a triangle (continue), a triangle at a bar (skip) and a
-    warning triangle (conflicts); a sparkle for the agent; an arrow
+    warning triangle (conflicts); a sparkle for the agent; a magnifying
+    glass for the indexing; an arrow
     bending back to the left (undo) and one bending on to the right
     (redo). Each is followed by a space. }
   HintPassed = '✓';
@@ -244,6 +249,7 @@ const
   HintSkip = '⏭';
   HintWarn = '⚠';
   HintSparkle = '✦';
+  HintSearch = '🔍';
   HintUndo = '↶';
   HintRedo = '↷';
 
@@ -305,17 +311,19 @@ const
   BranchMax = 200;
 
 function StatusButton(const ACaption, AIcon: string; ATone: TGittanStatusTone;
-  AEnabled: boolean): TGittanStatusButton;
+  AEnabled: boolean; const AText: string): TGittanStatusButton;
 begin
   Result.Caption := ACaption;
   Result.Icon := AIcon;
+  Result.Text := AText;
   Result.Tone := ATone;
   Result.Enabled := AEnabled;
 end;
 
 function SameButton(const A, B: TGittanStatusButton): boolean;
 begin
-  Result := (A.Caption = B.Caption) and (A.Icon = B.Icon) and (A.Tone = B.Tone) and
+  Result := (A.Caption = B.Caption) and (A.Icon = B.Icon) and (A.Text = B.Text) and
+    (A.Tone = B.Tone) and
     (A.Enabled = B.Enabled);
 end;
 
@@ -357,7 +365,7 @@ begin
   AText := ALine;
   for M in [HintPassed, HintFailed, HintPending, HintLink, HintSwitch, HintFolder, HintBranch, HintPull,
     HintComment, HintSync, HintStash, HintFetch, HintDown, HintUp, HintPlay, HintSkip,
-    HintWarn, HintUndo, HintRedo] do
+    HintWarn, HintSearch, HintUndo, HintRedo] do
     if Copy(ALine, 1, Length(M) + 1) = M + ' ' then
     begin
       AIcon := M;
@@ -576,6 +584,16 @@ begin
       Point(CX + S div 6, CY + S div 6), Point(CX, T + S), Point(CX - S div 6, CY + S div 6),
       Point(L, CY), Point(CX - S div 6, CY - S div 6)]);
     ACanvas.Brush.Style := bsClear;
+  end
+  else if AIcon = HintSearch then
+  begin
+    { A magnifying glass: the lens on the upper left, the handle down to
+      the lower right. }
+    ACanvas.Pen.Color := AColor;
+    ACanvas.Pen.Width := 1;
+    ACanvas.Ellipse(L, T, L + S * 2 div 3 + 1, T + S * 2 div 3 + 1);
+    ACanvas.Pen.Width := 2;
+    ACanvas.Line(L + S * 2 div 3 - 1, T + S * 2 div 3 - 1, L + S - 1, T + S - 1);
   end
   else if (AIcon = HintUndo) or (AIcon = HintRedo) then
   begin
@@ -886,14 +904,18 @@ begin
   ClearMessage;
 end;
 
-procedure TGittanStatusBar.SetProgress(const AText: string; APos, ATotal: integer);
+procedure TGittanStatusBar.SetProgress(const AText: string; APos, ATotal: integer;
+  const AIcon: string);
 begin
-  if (FProgressText = AText) and (FProgressPos = APos) and (FProgressTotal = ATotal) then
+  if (FProgressText = AText) and (FProgressPos = APos) and (FProgressTotal = ATotal) and
+    (FProgressIcon = AIcon) then
     Exit;
   FProgressText := AText;
+  FProgressIcon := AIcon;
   FProgressPos := APos;
   FProgressTotal := ATotal;
   Invalidate;
+  HintChanged(spProgress);
 end;
 
 procedure TGittanStatusBar.SetColors(ABack, AText, ADim, ALine, AHover, AAccent,
@@ -920,7 +942,22 @@ end;
 
 procedure TGittanStatusBar.SetPartHint(APart: TGittanStatusPart; const AValue: string);
 begin
+  if FHints[APart] = AValue then
+    Exit;
   FHints[APart] := AValue;
+  HintChanged(APart);
+end;
+
+{ The hint shown over APart follows its text, as the progress's count
+  does while the mouse rests on it. }
+procedure TGittanStatusBar.HintChanged(APart: TGittanStatusPart);
+begin
+  if (FHot <> APart) or (FHintWindow = nil) or not FHintWindow.Visible then
+    Exit;
+  if HotHint = '' then
+    HideHint
+  else
+    HintTimerTimer(nil);
 end;
 
 function TGittanStatusBar.Clickable(APart: TGittanStatusPart): boolean;
@@ -934,7 +971,12 @@ function TGittanStatusBar.HotHint: string;
 begin
   case FHot of
     spMessage: Result := FMessage;
-    spProgress: Result := FProgressText;
+    spProgress:
+    begin
+      Result := FHints[spProgress];
+      if Result = '' then
+        Result := FProgressText;
+    end;
     else
       Result := FHints[FHot];
   end;
@@ -1098,13 +1140,15 @@ var
       Result := 2 * Px(PrimaryPad) + IconW + Canvas.TextWidth(FButtons[APart].Caption);
       Canvas.Font.Style := [];
     end
+    else if FButtons[APart].Text <> '' then
+      Result := 2 * Px(PrimaryPad) + IconW + Canvas.TextWidth(FButtons[APart].Text)
     else
       Result := Px(PrimaryHeight);
   end;
 
-  { A side button is a circle with the icon in it, filled under the
-    mouse; the primary a pill filled in its tone with the icon and the
-    caption. }
+  { A side button is a circle with the icon in it, or a pill with its
+    text after the icon, filled under the mouse; the primary a pill
+    filled in its tone with the icon and the caption. }
   procedure DrawButton(APart: TGittanStatusPart; AX, AY: integer);
   var
     B: TGittanStatusButton;
@@ -1161,7 +1205,10 @@ var
         Canvas.Pen.Style := psClear;
         Canvas.Brush.Style := bsSolid;
         Canvas.Brush.Color := FHover;
-        Canvas.Ellipse(R);
+        if B.Text <> '' then
+          Canvas.RoundRect(R, Px(PrimaryHeight), Px(PrimaryHeight))
+        else
+          Canvas.Ellipse(R);
         Canvas.Pen.Style := psSolid;
         Canvas.Brush.Style := bsClear;
         Ink := FText;
@@ -1170,8 +1217,16 @@ var
         Ink := FDim;
       if not B.Enabled then
         Ink := MixColor(FBack, FDim, 0.45);
-      DrawStatusIcon(Canvas, B.Icon, AX + (Px(PrimaryHeight) - (TextH - 4)) div 2,
-        AY + (Px(PrimaryHeight) - TextH) div 2, TextH, Ink);
+      if B.Text <> '' then
+      begin
+        X := AX + Px(PrimaryPad);
+        DrawStatusIcon(Canvas, B.Icon, X, AY + (Px(PrimaryHeight) - TextH) div 2, TextH, Ink);
+        Canvas.Font.Color := Ink;
+        Canvas.TextOut(X + IconW, AY + (Px(PrimaryHeight) - TextH) div 2, B.Text);
+      end
+      else
+        DrawStatusIcon(Canvas, B.Icon, AX + (Px(PrimaryHeight) - (TextH - 4)) div 2,
+          AY + (Px(PrimaryHeight) - TextH) div 2, TextH, Ink);
     end;
   end;
 
@@ -1310,6 +1365,7 @@ begin
     TrackPos := FProgressPos;
     TrackTotal := FProgressTotal;
     TrackTone := stNormal;
+    TrackIcon := FProgressIcon;
   end
   else if FOperation <> '' then
   begin
@@ -1658,7 +1714,9 @@ begin
     if TrackPart <> spNone then
       FRects[TrackPart] := ChipRect(X, Y - Px(ChipPadY), W, TextH + 2 * Px(ChipPadY));
     Canvas.Font.Color := FTones[TrackTone];
-    if (TrackTone = stNormal) and (TrackPart <> spMessage) then
+    if TrackPart = spProgress then
+      Canvas.Font.Color := FAccent
+    else if (TrackTone = stNormal) and (TrackPart <> spMessage) then
       Canvas.Font.Color := FDim;
     if TrackIcon <> '' then
     begin

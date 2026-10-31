@@ -8,7 +8,8 @@
   middle of the form (gittan.notice) shows what git and the hooks write
   as they run: at once for a push with a pre-push hook, which may run
   the tests, else after NoticeDelay, so a quick fetch shows none. A pull
-  that finds the branch diverged asks whether to merge or rebase, a
+  that finds the branch diverged asks whether to merge or rebase (a
+  branch rewritten here is asked about before, MenuPullClick), a
   push the remote rejects offers to pull first, or, when the upstream
   has commits the branch lacks (as after a rebase of pushed commits), to
   force the push with --force-with-lease; a forced push that finds the
@@ -202,7 +203,7 @@ end;
 procedure TRepoFrame.RemoteJobDone(Sender: TObject);
 var
   Job: TGittanRemoteJob;
-  HookFailed: boolean;
+  HookFailed, Always: boolean;
   Count: integer;
   Msg: string;
   Choice: TModalResult;
@@ -297,13 +298,28 @@ begin
             also when a rebase gave the local commits new ids. }
           Count := FRepo.CountCommits(FRemoteHead, '@{upstream}');
           if Count = 0 then
-            BannerSuccess(Format(rsPulledNothing, [FBranch]))
+            Msg := Format(rsPulledNothing, [FBranch])
           else if Count = 1 then
-            BannerSuccess(Format(rsPulledOne, [FBranch]))
+            Msg := Format(rsPulledOne, [FBranch])
           else if Count > 1 then
-            BannerSuccess(Format(rsPulledCount, [Count, FBranch]))
+            Msg := Format(rsPulledCount, [Count, FBranch])
           else
-            BannerSuccess(rsPulled);
+            Msg := rsPulled;
+          { With commits of its own to push and none to pull now, as after
+            a commit made behind the upstream, the push is next. }
+          if FHasUpstream and (FAhead > 0) and (FBehind = 0) then
+          begin
+            MarkNews;
+            FBanner.DetailFont.Assign(Edit.Font);
+            if FAhead = 1 then
+              FBanner.AddAction(Msg, rsPulledPushOne, bkSuccess, BannerActionSeconds,
+                rsPushAction, @CommitPushClick)
+            else
+              FBanner.AddAction(Msg, Format(rsPulledPush, [FAhead]), bkSuccess,
+                BannerActionSeconds, rsPushAction, @CommitPushClick);
+          end
+          else
+            BannerSuccess(Msg);
         end;
       rkDeleteRemote:
         StatusNote(Format(rsDeletedRemote, [Job.Arg]));
@@ -334,12 +350,20 @@ begin
   if Job.Diverged or Job.Rejected or Job.Unseen or Job.Stale then
     FWindow.ShowFrame(Self);
   if Job.Diverged then
-    case AskDlg(rsPullDivergedTitle, rsPullDiverged, mtConfirmation,
-        [mrYes, rsMergeAction, 'IsDefault', mrNo, rsRebaseAction, mrCancel,
-        rsCancelButton, 'IsCancel'], 0) of
+  begin
+    { Always is kept in the repository's config (pull.rebase), which a
+      pull reads, so the question does not come again. }
+    Always := False;
+    Choice := AskDlgCheck(rsPullDivergedTitle, rsPullDiverged, mtConfirmation,
+      [mrYes, rsMergeAction, 'IsDefault', mrNo, rsRebaseAction, mrCancel,
+      rsCancelButton, 'IsCancel'], rsPullAlways, Always);
+    if Always and (Choice in [mrYes, mrNo]) and not FRepo.SetPullMode(Choice = mrNo) then
+      StatusNote(FRepo.Error, True);
+    case Choice of
       mrYes: StartRemote(rkPull, pmMerge);
       mrNo: StartRemote(rkPull, pmRebase);
-    end
+    end;
+  end
   else if Job.Rejected and FHasUpstream and (FBehind > 0) then
   begin
     { The upstream's commits the branch lacks are known here: they are
@@ -771,8 +795,28 @@ begin
   StartRemote(rkFetch);
 end;
 
+{ A branch rewritten here since it was pushed has its old commits in the
+  upstream: a pull, merged or rebased, brings them back, so the question
+  comes before git runs, with Force Push first. }
 procedure TRepoFrame.MenuPullClick(Sender: TObject);
+var
+  Up, Msg: string;
 begin
+  if FRewritten and FHasUpstream and (FAhead > 0) and (FBehind > 0) and
+    (FRepo.Root <> '') and (FRemoteJob = nil) and (FCommitJob = nil) then
+  begin
+    Up := FRepo.Upstream(FBranch);
+    if FBehind = 1 then
+      Msg := Format(rsPullRewrittenOne, [FBranch, Up])
+    else
+      Msg := Format(rsPullRewritten, [FBranch, FBehind, Up]);
+    case AskDlg(rsPullRewrittenTitle, Msg, mtConfirmation, [mrNo, rsForcePushAction,
+        'IsDefault', mrYes, rsPullAnywayAction, mrCancel, rsCancelButton, 'IsCancel'], 0) of
+      mrNo: StartRemote(rkForcePush);
+      mrYes: StartRemote(rkPull);
+    end;
+    Exit;
+  end;
   StartRemote(rkPull);
 end;
 
@@ -859,7 +903,7 @@ end;
 procedure TRepoFrame.SyncPopupPick(Sender: TObject; AIndex: integer);
 begin
   case FSyncPopup.TagOf(AIndex) of
-    saPull: StartRemote(rkPull);
+    saPull: MenuPullClick(nil);
     saPush: StartRemote(rkPush);
     saForcePush: ForcePushAsk;
     saFetch: StartRemote(rkFetch);

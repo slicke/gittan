@@ -80,13 +80,14 @@ begin
   Result := (i >= 0) and (FStats[i].Kind = ckConflict);
 end;
 
-{ How many conflicts are left in the file APath on disk, by its markers. }
+{ How many conflicts are left in the file APath on disk, by its
+  markers; -1 when it cannot be read, which is not none. }
 function TRepoFrame.MarkersLeft(const APath: string): integer;
 var
   Lines: TStringList;
   i: integer;
 begin
-  Result := 0;
+  Result := -1;
   Lines := TStringList.Create;
   try
     try
@@ -100,6 +101,24 @@ begin
   finally
     Lines.Free;
   end;
+end;
+
+{ After a block of the conflicted file APath was written (NoteDiscard):
+  with no markers left (ARemaining) the file is marked resolved, a
+  failure said in the status bar, and the discard notes it, so Undo
+  Discard puts the conflict back in the index too. Whether it was
+  marked. A file that cannot be read is left in conflict. }
+function TRepoFrame.ResolveIfDone(const APath: string; out ARemaining: integer): boolean;
+begin
+  Result := False;
+  ARemaining := MarkersLeft(APath);
+  if ARemaining <> 0 then
+    Exit;
+  Result := FRepo.MarkResolved(APath);
+  if not Result then
+    StatusNote(Format(rsResolveFailed, [APath, FRepo.Error]), True);
+  if Length(FDiscards) > 0 then
+    FDiscards[High(FDiscards)].Resolved := Result;
 end;
 
 { AAction: 0 mine, 1 theirs, 2 resolved as it is. }
@@ -142,7 +161,8 @@ begin
     StatusNote(Format(rsResolveFailed, [APath, FRepo.Error]), True);
   RefreshRepository;
   if Ok then
-    ShowNextConflict(APath, (APath = FCurrentPath) and (FView in [gvChanges, gvImage, gvBinary]));
+    ShowNextConflict(APath, (APath = FCurrentPath) and
+      (FView in [gvChanges, gvImage, gvBinary, gvMerge]));
 end;
 
 { ---------------------------------------------------------------------------
@@ -267,6 +287,8 @@ begin
       FConflictAIItem := FConflictPopup.Add(Format(rsResolveAIStop, [AgentName]), HintSparkle)
     else
       FConflictAIItem := FConflictPopup.Add(Format(rsResolveAI, [AgentName]), HintSparkle);
+  { Line by line, in three panes (umain.merge.inc). }
+  FConflictMergeItem := FConflictPopup.Add(rsMergeEditorPick, '');
   { Under the button, or under the row's start when the band is not
     there to anchor to. }
   Band := Edit.Gutter.FindIndexByTag(gutterTagDiscard);
@@ -319,18 +341,8 @@ begin
     StatusNote(Format(rsResolveBlockFailed, [Err]), True);
     Exit;
   end;
-  SetLength(FDiscards, Length(FDiscards) + 1);
-  FDiscards[High(FDiscards)] := B;
-  Remaining := MarkersLeft(Path);
-  Marked := False;
-  if Remaining = 0 then
-  begin
-    Marked := FRepo.MarkResolved(Path);
-    if not Marked then
-      StatusNote(Format(rsResolveFailed, [Path, FRepo.Error]), True);
-    { Undo Discard puts the conflict back in the index too. }
-    FDiscards[High(FDiscards)].Resolved := Marked;
-  end;
+  NoteDiscard(B);
+  Marked := ResolveIfDone(Path, Remaining);
   RefreshRepository;
   UpdateDiscardItems;
   if AAgent <> '' then
@@ -364,7 +376,9 @@ begin
       SummarySelectFile(Sender, FConflictPaths[AIndex]);
     Exit;
   end;
-  if (FConflictAIItem >= 0) and (AIndex = FConflictAIItem) then
+  if AIndex = FConflictMergeItem then
+    OpenMergeEditor
+  else if (FConflictAIItem >= 0) and (AIndex = FConflictAIItem) then
   begin
     if FConflictJob <> nil then
     begin
@@ -389,7 +403,9 @@ begin
   if not FileExists(IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(APath)) then
     Exit(rsConflictGone);
   n := MarkersLeft(APath);
-  if n = 0 then
+  if n < 0 then
+    Result := ''
+  else if n = 0 then
     Result := rsConflictNoMarkers
   else if n = 1 then
     Result := rsConflictInFile
@@ -416,7 +432,7 @@ begin
     if FStats[i].Kind = ckConflict then
     begin
       Index := FConflictPopup.Add(FStats[i].Path, ConflictDetail(FStats[i].Path),
-        (FStats[i].Path = FCurrentPath) and (FView in [gvChanges, gvImage, gvBinary]));
+        (FStats[i].Path = FCurrentPath) and (FView in [gvChanges, gvImage, gvBinary, gvMerge]));
       SetLength(FConflictPaths, Index + 1);
       FConflictPaths[Index] := FStats[i].Path;
     end;
@@ -499,6 +515,10 @@ var
   Cur, Target, i: integer;
   Other: string;
 begin
+  { The merge editor steps through its own conflicts, on to the next
+    file past its last. }
+  if (FView = gvMerge) and FMergeView.GoToConflict(ANext) then
+    Exit;
   Rows := nil;
   if (FView = gvChanges) and IsConflictPath(FCurrentPath) then
     Rows := FConflictRows;
@@ -532,6 +552,13 @@ begin
       Rows := nil;
       if (FView = gvChanges) and (FCurrentPath = Other) then
         Rows := FConflictRows;
+    end;
+    { The merge editor, of the next file or round this one when there
+      is none: its first (or last) conflict. }
+    if FView = gvMerge then
+    begin
+      FMergeView.GoToEdgeConflict(ANext);
+      Exit;
     end;
     if Length(Rows) = 0 then
       Exit;
@@ -567,6 +594,8 @@ end;
   item follows the caret (from UpdateDiscardItems). }
 procedure TRepoFrame.UpdateResolveItems;
 begin
+  if FMergeEditorItem <> nil then
+    FMergeEditorItem.Enabled := (FView = gvMerge) or CanOpenMerge;
   if FResolveItem = nil then
     Exit;
   FResolveItem.Enabled := CanResolveBlocks and (Edit.Carets.Count > 0) and
@@ -591,7 +620,12 @@ function TRepoFrame.ConflictHeaderAction(AIndex: integer): boolean;
 begin
   Result := (FEditPath = '') and (FView in [gvChanges, gvImage, gvBinary]) and
     IsConflictPath(FCurrentPath);
-  if Result then
+  if not Result then
+    Exit;
+  { The fourth pill, shown while the file has markers. }
+  if AIndex = 3 then
+    OpenMergeEditor
+  else
     ResolvePath(FCurrentPath, AIndex);
 end;
 
@@ -725,7 +759,7 @@ begin
   begin
     { The merge message filled in is not for anything now. }
     if (FMergeMessage <> '') and (FCommitMemo.Text = FMergeMessage) then
-      FCommitMemo.Clear;
+      FCommitMemo.Text := FCommitTemplate;
     FMergeMessage := '';
     FBanner.Clear;
     StatusNote(Format(rsAborted, [Noun]));

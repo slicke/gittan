@@ -45,6 +45,16 @@ type
     Login: string;
     Verdict: TGittanReviewVerdict;
   end;
+  TGittanLatestReviews = array of TGittanLatestReview;
+
+  {** One check of a pull request's head commit, by name: passed
+    (skipped and neutral count), failed (cancelled, timed out and
+    needing action count) or still pending. }
+  TGittanForgeCheck = record
+    Name: string;
+    State: TGittanChecksState;
+  end;
+  TGittanForgeChecks = array of TGittanForgeCheck;
 
   {** One pull request of the open repository. Repo is its repository as
     "owner/name" (the path the forge serves it at). }
@@ -73,13 +83,21 @@ type
 
   {** One pull request of the user's, as the forge lists them across
     every repository. Repo is "owner/name"; Checks the head commit's
-    checks; MyReview what the user's latest review of it said;
-    Requested whether the user is asked for a review now, in person (a
-    request a review clears, and a new one brings back); Feedback
-    whether someone other than its author, and not a bot, has commented
-    on it or reviewed it (among its last thirty comments and last thirty
-    reviews); Clone the root of a local clone of its repository, from
-    the folders the job was given (FindClones), else empty. }
+    checks as the forge sums them up, and CheckList each of them by
+    name when the forge gives them (ChecksState sums them up again
+    without the ones the user ignores; empty leaves Checks to stand),
+    ChecksMore when the forge has more than the list holds;
+    Reviews the latest review of each reviewer (bots included) and
+    RequestedOf the names of those a review is asked of now (users'
+    logins and teams' names); MyReview what the user's latest review
+    of it said, a comment after an approval or a request for changes
+    leaving that in force; Requested whether the user is asked for a
+    review now, in person (a request a review clears, and a new one
+    brings back); Feedback whether someone other than its author, and
+    not a bot, has commented on it or reviewed it (among its last thirty
+    comments and last thirty reviews); Clone the root of a local clone
+    of its repository, from the folders the job was given (FindClones),
+    else empty. }
   TGittanForgePull = record
     Repo: string;
     Number: integer;
@@ -87,6 +105,10 @@ type
     State: TGittanPullState;
     ReviewDecision: TGittanReviewDecision;
     Checks: TGittanChecksState;
+    CheckList: TGittanForgeChecks;
+    ChecksMore: boolean;
+    Reviews: TGittanLatestReviews;
+    RequestedOf: array of string;
     MyReview: TGittanReviewVerdict;
     IsDraft, Requested, Feedback: boolean;
     Created, Updated: TDateTime;
@@ -94,12 +116,10 @@ type
   end;
   TGittanForgePulls = array of TGittanForgePull;
 
-  {** What a list of the user's pull requests can be narrowed to: the
-    ones with Feedback, the ones that need attention (NeedsAttention),
-    no drafts, the ones the user is asked to review in person
-    (Requested), the stale ones (IsStale). }
-  TGittanForgeFilter = (ffFeedback, ffAttention, ffNoDrafts, ffAskedOfMe, ffStale);
-  TGittanForgeFilters = set of TGittanForgeFilter;
+  {** The two lists of the forge view: the user's own open pull
+    requests, and the ones waiting for their review. }
+  TGittanForgeSection = (fsMine, fsReview);
+  TGittanForgeSections = set of TGittanForgeSection;
 
   {** What makes a pull request need its author (NeedsAttention): changes
     asked for, its checks failing. }
@@ -110,10 +130,59 @@ type
     first, the newest first, the ones that need attention first. }
   TGittanPullOrder = (poUpdated, poNewest, poAttentionFirst);
 
+  {** What a filter judges a pull request against besides itself: the
+    time (UTC), the reasons that count as needing attention, and the
+    checks the user ignores by name (nil for none). }
+  TGittanFilterContext = record
+    Now: TDateTime;
+    Reasons: TGittanAttentionReasons;
+    Ignored: TStrings;
+  end;
+
+  {** A filter's test: whether APull passes it. }
+  TGittanPullTest = function(const APull: TGittanForgePull;
+    const ACtx: TGittanFilterContext): boolean;
+
+  {** A filter a forge offers on its lists (TGittanForge.Filters): Key
+    names it in the settings (lower case letters, no comma), Caption is
+    its chip, Sections says which lists it is for, and Passes judges a
+    pull request. The base's are StandardFilters; a forge adds its own
+    or leaves some out. }
+  TGittanForgeFilterDef = record
+    Key, Caption: string;
+    Sections: TGittanForgeSections;
+    Passes: TGittanPullTest;
+  end;
+  TGittanForgeFilterDefs = array of TGittanForgeFilterDef;
+
+  {** A named set of filters of one section: Keys the filters' keys
+    joined with commas (FilterKeys), Own whether the user made it (one
+    the forge offers, StandardPresets, is not). }
+  TGittanForgePreset = record
+    Name: string;
+    Section: TGittanForgeSection;
+    Keys: string;
+    Own: boolean;
+  end;
+  TGittanForgePresets = array of TGittanForgePreset;
+
 const
   {** Every reason a pull request can need attention for, what counts
     unless the user leaves one out. }
   AllAttentionReasons = [arChangesRequested, arChecksFailing];
+
+  {** The keys of the standard filters (StandardFilters). }
+  fkFeedback = 'feedback';
+  fkAttention = 'attention';
+  fkWaiting = 'waiting';
+  fkApproved = 'approved';
+  fkChanges = 'changes';
+  fkChecksFailing = 'checksfailing';
+  fkChecksOk = 'checksok';
+  fkNoDrafts = 'nodrafts';
+  fkStale = 'stale';
+  fkAskedOfMe = 'askedofme';
+  fkNew = 'new';
 
 type
 
@@ -179,42 +248,134 @@ procedure FindClones(var APulls: TGittanForgePulls; ARoots: TStrings);
 procedure AddSiblingRepositories(ARoots: TStrings);
 
 {** Whether a pull request listed as waiting for the user's review
-  still is: one the user is asked for in person now, whatever they
-  said before (a request made again after their review), or one whose
-  latest review by the user neither approved it nor asked for changes.
-  A forge keeps a request made of a team the user is on after their
-  review, which only a personal request loses. }
+  still is: an open one the user is asked for in person now, whatever
+  they said before (a request made again after their review), or one
+  whose latest review by the user neither approved it nor asked for
+  changes. A forge keeps a request made of a team the user is on after
+  their review, which only a personal request loses, and its search
+  may still list one merged or closed a moment ago. }
 function NeedsMyReview(const APull: TGittanForgePull): boolean;
-{** AReview without the pull requests the user has reviewed, by
-  NeedsMyReview. }
+{** AReview without the pull requests the user has reviewed, and the
+  ones no longer open, by NeedsMyReview. }
 function StillToReview(const AReview: TGittanForgePulls): TGittanForgePulls;
+{** APulls without the ones that are no longer open: a forge's search
+  for open pull requests may still list one merged or closed a moment
+  ago, while the pull request itself says what it is. }
+function OpenPulls(const APulls: TGittanForgePulls): TGittanForgePulls;
 {** APulls without the ones nobody but their author has answered (no
   Feedback). }
 function WithFeedback(const APulls: TGittanForgePulls): TGittanForgePulls;
+
+{** The names of the checks ignored by the user, as one settings value
+  (joined with bars, a bar or a backslash in a name after a backslash)
+  and back; a name is trimmed, an empty one dropped. }
+procedure SplitCheckNames(const AText: string; AInto: TStrings);
+function JoinCheckNames(AList: TStrings): string;
+{** Whether AName is one of AIgnored (nil for none; the case does not
+  matter). }
+function IsIgnoredCheck(const AName: string; AIgnored: TStrings): boolean;
+{** The checks of APull summed up without the ones in AIgnored: failed
+  when one fails, else pending when one is, else passed when any is
+  left, else none; the forge's own sum (Checks) when it gave no
+  list, or when it is worse and the list is not all of them
+  (ChecksMore), since one not in the list may fail. }
+function ChecksState(const APull: TGittanForgePull; AIgnored: TStrings = nil): TGittanChecksState;
+{** The names of APull's checks in AState, the ignored ones left out,
+  joined with ", ". }
+function CheckNames(const APull: TGittanForgePull; AState: TGittanChecksState;
+  AIgnored: TStrings = nil): string;
+{** The names of APull's checks that are ignored, joined with ", ". }
+function IgnoredCheckNames(const APull: TGittanForgePull; AIgnored: TStrings): string;
+{** The checks chip of a card: "✓ checks" or "✓ 5 checks", "checks
+  failing", "2 of 5 checks failing" or "1 check failing", the same
+  for pending; empty without checks (AIgnored left out). }
+function PullChecksNote(const APull: TGittanForgePull; AIgnored: TStrings = nil): string;
+{** The checks line of a card: "Failing: npm audit, build" (or
+  "Pending: …" when none fails) and "Ignored: codeql" for the checks
+  ignored, joined with " · "; empty when there is nothing to say. }
+function PullChecksDetail(const APull: TGittanForgePull; AIgnored: TStrings = nil): string;
+{** The review chip of a card: Approved, Changes requested, "Waiting
+  for anna" (one asked; "Waiting for you" when it is ALogin, the
+  user), "Waiting for 2 reviewers", Review required (the forge asks
+  for one and nobody is asked), else empty. }
+function PullReviewNote(const APull: TGittanForgePull; const ALogin: string = ''): string;
+{** The reviewers line of a card: each latest review as "anna
+  approved", "bob requested changes" or "coderabbit commented", then
+  "waiting for chef, team" (ALogin, the user, as "you", first), joined
+  with " · "; a dismissed review is left out. Empty when nobody has
+  reviewed and nobody is asked. }
+function PullReviewers(const APull: TGittanForgePull; const ALogin: string = ''): string;
+{** Whether APull waits for someone else's review: a review is asked
+  of someone and no changes are requested. }
+function WaitsForReview(const APull: TGittanForgePull): boolean;
 {** Whether APull needs its author to act for one of AReasons: changes
-  were asked for, its checks fail. }
+  were asked for, its checks fail (ChecksState without AIgnored). }
 function NeedsAttention(const APull: TGittanForgePull;
-  AReasons: TGittanAttentionReasons = AllAttentionReasons): boolean;
+  AReasons: TGittanAttentionReasons = AllAttentionReasons;
+  AIgnored: TStrings = nil): boolean;
 {** Whether APull has not changed for StaleDays at ANow (UTC): its
   last change, or its opening when it has none, that long ago. }
 function IsStale(const APull: TGittanForgePull; ANow: TDateTime): boolean;
-{** Whether APull passes AFilter at ANow (UTC), ffAttention counting
-  AReasons. }
-function PassesFilter(const APull: TGittanForgePull; AFilter: TGittanForgeFilter;
-  ANow: TDateTime; AReasons: TGittanAttentionReasons = AllAttentionReasons): boolean;
-{** APulls without the ones that fail any of AFilters at ANow (UTC), in
-  their order, ffAttention counting AReasons. }
-function FilterPulls(const APulls: TGittanForgePulls; AFilters: TGittanForgeFilters;
-  ANow: TDateTime; AReasons: TGittanAttentionReasons = AllAttentionReasons): TGittanForgePulls;
-{** APulls in AOrder, poAttentionFirst counting AReasons; those the
-  order does not tell apart keep the order they had (last changed first
-  among the ones that need attention and among the rest). }
+
+{** A filter context of ANow (UTC), AReasons and AIgnored. }
+function FilterContext(ANow: TDateTime;
+  AReasons: TGittanAttentionReasons = AllAttentionReasons;
+  AIgnored: TStrings = nil): TGittanFilterContext;
+{** The filters every forge has: of the user's own, with feedback,
+  needing attention, waiting for a reviewer, approved, changes
+  requested, checks failing, checks passing, no drafts and stale; of
+  the ones waiting for review, asked of me, new to me (no review of
+  mine), approved, checks failing, checks passing, no drafts and
+  stale. }
+function StandardFilters: TGittanForgeFilterDefs;
+{** The presets every forge has: of the user's own, Needs me
+  (attention), Waiting on others (waiting, no drafts) and Ready to
+  merge (approved, checks passing, no drafts); of the ones waiting
+  for review, Asked of me (asked of me, no drafts), Ready for me
+  (checks passing, no drafts) and New to me (new). }
+function StandardPresets: TGittanForgePresets;
+{** The index of the filter with AKey in ADefs, -1 for none. }
+function FindFilter(const ADefs: TGittanForgeFilterDefs; const AKey: string): integer;
+{** The filters of ADefs that are for ASection, in their order. }
+function SectionFilters(const ADefs: TGittanForgeFilterDefs;
+  ASection: TGittanForgeSection): TGittanForgeFilterDefs;
+{** Keys joined with commas: whether AKeys holds AKey; AKeys with AKey
+  taken out when it is in, else added; whether A and B hold the same
+  keys in any order; AKeys with only the keys ADefs has for ASection,
+  in ADefs' order (what a settings value is taken through). }
+function HasKey(const AKeys, AKey: string): boolean;
+function ToggleKey(const AKeys, AKey: string): string;
+function SameKeys(const A, B: string): boolean;
+function KnownKeys(const AKeys: string; const ADefs: TGittanForgeFilterDefs;
+  ASection: TGittanForgeSection): string;
+{** APulls without the ones that fail any of the filters of ADefs
+  named in AKeys (a key ADefs lacks is passed over), in their order. }
+function FilterPulls(const APulls: TGittanForgePulls; const ADefs: TGittanForgeFilterDefs;
+  const AKeys: string; const ACtx: TGittanFilterContext): TGittanForgePulls;
+{** APulls in AOrder, poAttentionFirst counting AReasons without
+  AIgnored; those the order does not tell apart keep the order they
+  had (last changed first among the ones that need attention and
+  among the rest). }
 function SortPulls(const APulls: TGittanForgePulls; AOrder: TGittanPullOrder;
-  AReasons: TGittanAttentionReasons = AllAttentionReasons): TGittanForgePulls;
+  AReasons: TGittanAttentionReasons = AllAttentionReasons;
+  AIgnored: TStrings = nil): TGittanForgePulls;
+{** The user's presets as one settings value and back: each as
+  "mine|Name|key,key" or "review|…", joined with semicolons; a name
+  loses those two signs (PresetName), and one without a name is
+  dropped. ParsePresets marks them Own. }
+function ParsePresets(const AText: string): TGittanForgePresets;
+function JoinPresets(const APresets: TGittanForgePresets): string;
+{** AName fit for a preset: trimmed, without bars and semicolons. }
+function PresetName(const AName: string): string;
+{** The index of the preset of ASection in APresets whose keys are
+  AKeys (SameKeys), -1 for none. }
+function FindPreset(const APresets: TGittanForgePresets; ASection: TGittanForgeSection;
+  const AKeys: string): integer;
 {** APull as a TGittanPullRequest, for what works on the repository's
   own pull requests (a comparison): the fields both have, the rest
   empty. }
 function PullRequestOf(const APull: TGittanForgePull): TGittanPullRequest;
+
 
 type
   {** Reads, in a thread since it goes to the network, the pull request
@@ -394,6 +555,13 @@ type
       something outside the tool's login decides it (a token in the
       environment); empty otherwise, the base's answer. }
     class function AccountsNote: string; virtual;
+    {** The filters the forge view offers on this forge's lists, and
+      the presets of them it names: the base's are StandardFilters and
+      StandardPresets; a forge with its own notions (a pipeline, an
+      approval rule) adds to them or leaves some out. The user's own
+      presets are kept in the settings beside them. }
+    class function Filters: TGittanForgeFilterDefs; virtual;
+    class function Presets: TGittanForgePresets; virtual;
     property Cli: string read FCli;
     {** Makes ALogin the tool's active account on AHost, for the tool
       everywhere (a terminal too); false with the reason in AError. The
@@ -1009,7 +1177,8 @@ end;
 
 function NeedsMyReview(const APull: TGittanForgePull): boolean;
 begin
-  Result := APull.Requested or not (APull.MyReview in [rvApproved, rvChangesRequested]);
+  Result := (APull.State = prOpen) and
+    (APull.Requested or not (APull.MyReview in [rvApproved, rvChangesRequested]));
 end;
 
 function StillToReview(const AReview: TGittanForgePulls): TGittanForgePulls;
@@ -1023,6 +1192,22 @@ begin
     if NeedsMyReview(AReview[i]) then
     begin
       Result[n] := AReview[i];
+      Inc(n);
+    end;
+  SetLength(Result, n);
+end;
+
+function OpenPulls(const APulls: TGittanForgePulls): TGittanForgePulls;
+var
+  i, n: integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(APulls));
+  n := 0;
+  for i := 0 to High(APulls) do
+    if APulls[i].State = prOpen then
+    begin
+      Result[n] := APulls[i];
       Inc(n);
     end;
   SetLength(Result, n);
@@ -1044,12 +1229,289 @@ begin
   SetLength(Result, n);
 end;
 
+{ ---------------------------------------------------------------------------
+  The checks and the reviewers of a pull request
+  --------------------------------------------------------------------------- }
+
+procedure SplitCheckNames(const AText: string; AInto: TStrings);
+var
+  Part: string;
+  i: integer;
+begin
+  AInto.Clear;
+  Part := '';
+  i := 1;
+  while i <= Length(AText) do
+  begin
+    if (AText[i] = '\') and (i < Length(AText)) and (AText[i + 1] in ['|', '\']) then
+    begin
+      Part := Part + AText[i + 1];
+      Inc(i);
+    end
+    else if AText[i] = '|' then
+    begin
+      if Trim(Part) <> '' then
+        AInto.Add(Trim(Part));
+      Part := '';
+    end
+    else
+      Part := Part + AText[i];
+    Inc(i);
+  end;
+  if Trim(Part) <> '' then
+    AInto.Add(Trim(Part));
+end;
+
+function JoinCheckNames(AList: TStrings): string;
+var
+  i: integer;
+begin
+  Result := '';
+  if AList = nil then
+    Exit;
+  for i := 0 to AList.Count - 1 do
+  begin
+    if Trim(AList[i]) = '' then
+      Continue;
+    if Result <> '' then
+      Result := Result + '|';
+    Result := Result + StringReplace(StringReplace(Trim(AList[i]), '\', '\\',
+      [rfReplaceAll]), '|', '\|', [rfReplaceAll]);
+  end;
+end;
+
+function IsIgnoredCheck(const AName: string; AIgnored: TStrings): boolean;
+var
+  i: integer;
+begin
+  Result := False;
+  if (AIgnored = nil) or (AName = '') then
+    Exit;
+  for i := 0 to AIgnored.Count - 1 do
+    if SameText(AIgnored[i], AName) then
+      Exit(True);
+end;
+
+function ChecksState(const APull: TGittanForgePull; AIgnored: TStrings): TGittanChecksState;
+var
+  i: integer;
+begin
+  if Length(APull.CheckList) = 0 then
+    Exit(APull.Checks);
+  Result := chkNone;
+  for i := 0 to High(APull.CheckList) do
+  begin
+    if IsIgnoredCheck(APull.CheckList[i].Name, AIgnored) then
+      Continue;
+    case APull.CheckList[i].State of
+      chkFailed: Exit(chkFailed);
+      chkPending: Result := chkPending;
+      chkPassed: if Result = chkNone then
+          Result := chkPassed;
+    end;
+  end;
+  { The states go from none to failed. }
+  if APull.ChecksMore and (APull.Checks > Result) then
+    Result := APull.Checks;
+end;
+
+function CheckNames(const APull: TGittanForgePull; AState: TGittanChecksState;
+  AIgnored: TStrings): string;
+var
+  i: integer;
+begin
+  Result := '';
+  for i := 0 to High(APull.CheckList) do
+    if (APull.CheckList[i].State = AState) and
+      not IsIgnoredCheck(APull.CheckList[i].Name, AIgnored) then
+    begin
+      if Result <> '' then
+        Result := Result + ', ';
+      Result := Result + APull.CheckList[i].Name;
+    end;
+end;
+
+function IgnoredCheckNames(const APull: TGittanForgePull; AIgnored: TStrings): string;
+var
+  i: integer;
+begin
+  Result := '';
+  for i := 0 to High(APull.CheckList) do
+    if IsIgnoredCheck(APull.CheckList[i].Name, AIgnored) then
+    begin
+      if Result <> '' then
+        Result := Result + ', ';
+      Result := Result + APull.CheckList[i].Name;
+    end;
+end;
+
+{ How many of APull's checks are not ignored, and how many of those
+  are in AState. }
+procedure CountChecks(const APull: TGittanForgePull; AState: TGittanChecksState;
+  AIgnored: TStrings; out ATotal, AInState: integer);
+var
+  i: integer;
+begin
+  ATotal := 0;
+  AInState := 0;
+  for i := 0 to High(APull.CheckList) do
+  begin
+    if IsIgnoredCheck(APull.CheckList[i].Name, AIgnored) then
+      Continue;
+    Inc(ATotal);
+    if APull.CheckList[i].State = AState then
+      Inc(AInState);
+  end;
+end;
+
+function PullChecksNote(const APull: TGittanForgePull; AIgnored: TStrings): string;
+var
+  State: TGittanChecksState;
+  Total, n: integer;
+  Word: string;
+begin
+  State := ChecksState(APull, AIgnored);
+  case State of
+    chkPassed: Word := 'passing';
+    chkFailed: Word := 'failing';
+    chkPending: Word := 'pending';
+  else
+    Exit('');
+  end;
+  CountChecks(APull, State, AIgnored, Total, n);
+  { Past the list the count is not known: the forge's sum, or a
+    count with a "+". }
+  if APull.ChecksMore then
+  begin
+    if n = 0 then
+      Exit('checks ' + Word);
+    if State = chkPassed then
+      Exit(Format('✓ %d+ checks', [Total]));
+    Exit(Format('%d of %d+ checks %s', [n, Total, Word]));
+  end;
+  if Total = 0 then
+  begin
+    if State = chkPassed then
+      Exit('✓ checks');
+    Exit('checks ' + Word);
+  end;
+  if State = chkPassed then
+  begin
+    if Total = 1 then
+      Exit('✓ 1 check');
+    Exit(Format('✓ %d checks', [Total]));
+  end;
+  if n = Total then
+  begin
+    if n = 1 then
+      Exit('1 check ' + Word);
+    Exit(Format('%d checks %s', [n, Word]));
+  end;
+  Result := Format('%d of %d checks %s', [n, Total, Word]);
+end;
+
+function PullChecksDetail(const APull: TGittanForgePull; AIgnored: TStrings): string;
+var
+  Names: string;
+
+  procedure Add(const ALabel, ANames: string);
+  begin
+    if ANames = '' then
+      Exit;
+    if Result <> '' then
+      Result := Result + ' · ';
+    Result := Result + ALabel + ': ' + ANames;
+  end;
+
+begin
+  Result := '';
+  Names := CheckNames(APull, chkFailed, AIgnored);
+  Add('Failing', Names);
+  if Names = '' then
+    Add('Pending', CheckNames(APull, chkPending, AIgnored));
+  Add('Ignored', IgnoredCheckNames(APull, AIgnored));
+end;
+
+{ The names a review is asked of, joined with ", ", ALogin as "you"
+  and first. }
+function RequestedNames(const APull: TGittanForgePull; const ALogin: string): string;
+var
+  i: integer;
+  IsMe: boolean;
+begin
+  Result := '';
+  for i := 0 to High(APull.RequestedOf) do
+  begin
+    IsMe := (ALogin <> '') and SameText(APull.RequestedOf[i], ALogin);
+    if IsMe then
+    begin
+      if Result = '' then
+        Result := 'you'
+      else
+        Result := 'you, ' + Result;
+    end
+    else
+    begin
+      if Result <> '' then
+        Result := Result + ', ';
+      Result := Result + APull.RequestedOf[i];
+    end;
+  end;
+end;
+
+function PullReviewNote(const APull: TGittanForgePull; const ALogin: string): string;
+begin
+  case APull.ReviewDecision of
+    rdApproved: Exit('Approved');
+    rdChangesRequested: Exit('Changes requested');
+  end;
+  case Length(APull.RequestedOf) of
+    0: Result := ReviewDecisionNote(APull.ReviewDecision);
+    1: Result := 'Waiting for ' + RequestedNames(APull, ALogin);
+  else
+    Result := Format('Waiting for %d reviewers', [Length(APull.RequestedOf)]);
+  end;
+end;
+
+function PullReviewers(const APull: TGittanForgePull; const ALogin: string): string;
+var
+  i: integer;
+  Names: string;
+
+  procedure Add(const APart: string);
+  begin
+    if Result <> '' then
+      Result := Result + ' · ';
+    Result := Result + APart;
+  end;
+
+begin
+  Result := '';
+  for i := 0 to High(APull.Reviews) do
+    if APull.Reviews[i].Login <> '' then
+      case APull.Reviews[i].Verdict of
+        rvApproved: Add(APull.Reviews[i].Login + ' approved');
+        rvChangesRequested: Add(APull.Reviews[i].Login + ' requested changes');
+        rvCommented: Add(APull.Reviews[i].Login + ' commented');
+      end;
+  Names := RequestedNames(APull, ALogin);
+  if Names <> '' then
+    Add('waiting for ' + Names);
+end;
+
+
+function WaitsForReview(const APull: TGittanForgePull): boolean;
+begin
+  Result := (Length(APull.RequestedOf) > 0) and
+    (APull.ReviewDecision <> rdChangesRequested);
+end;
+
 function NeedsAttention(const APull: TGittanForgePull;
-  AReasons: TGittanAttentionReasons): boolean;
+  AReasons: TGittanAttentionReasons; AIgnored: TStrings): boolean;
 begin
   Result := ((arChangesRequested in AReasons) and
     (APull.ReviewDecision = rdChangesRequested)) or
-    ((arChecksFailing in AReasons) and (APull.Checks = chkFailed));
+    ((arChecksFailing in AReasons) and (ChecksState(APull, AIgnored) = chkFailed));
 end;
 
 function IsStale(const APull: TGittanForgePull; ANow: TDateTime): boolean;
@@ -1062,35 +1524,280 @@ begin
   Result := (Changed > 0) and (ANow - Changed >= StaleDays);
 end;
 
-function PassesFilter(const APull: TGittanForgePull; AFilter: TGittanForgeFilter;
-  ANow: TDateTime; AReasons: TGittanAttentionReasons): boolean;
+{ ---------------------------------------------------------------------------
+  The filters, the presets and the order
+  --------------------------------------------------------------------------- }
+
+function FilterContext(ANow: TDateTime; AReasons: TGittanAttentionReasons;
+  AIgnored: TStrings): TGittanFilterContext;
 begin
-  case AFilter of
-    ffFeedback: Result := APull.Feedback;
-    ffAttention: Result := NeedsAttention(APull, AReasons);
-    ffNoDrafts: Result := not APull.IsDraft;
-    ffAskedOfMe: Result := APull.Requested;
-    ffStale: Result := IsStale(APull, ANow);
-  else
-    Result := True;
+  Result.Now := ANow;
+  Result.Reasons := AReasons;
+  Result.Ignored := AIgnored;
+end;
+
+{ The standard filters' tests. }
+function TestFeedback(const APull: TGittanForgePull; const ACtx: TGittanFilterContext): boolean;
+begin
+  Result := APull.Feedback;
+end;
+
+function TestAttention(const APull: TGittanForgePull; const ACtx: TGittanFilterContext): boolean;
+begin
+  Result := NeedsAttention(APull, ACtx.Reasons, ACtx.Ignored);
+end;
+
+function TestWaiting(const APull: TGittanForgePull; const ACtx: TGittanFilterContext): boolean;
+begin
+  Result := WaitsForReview(APull);
+end;
+
+function TestApproved(const APull: TGittanForgePull; const ACtx: TGittanFilterContext): boolean;
+begin
+  Result := APull.ReviewDecision = rdApproved;
+end;
+
+function TestChanges(const APull: TGittanForgePull; const ACtx: TGittanFilterContext): boolean;
+begin
+  Result := APull.ReviewDecision = rdChangesRequested;
+end;
+
+function TestChecksFailing(const APull: TGittanForgePull;
+  const ACtx: TGittanFilterContext): boolean;
+begin
+  Result := ChecksState(APull, ACtx.Ignored) = chkFailed;
+end;
+
+function TestChecksOk(const APull: TGittanForgePull; const ACtx: TGittanFilterContext): boolean;
+begin
+  Result := ChecksState(APull, ACtx.Ignored) in [chkPassed, chkNone];
+end;
+
+function TestNoDrafts(const APull: TGittanForgePull; const ACtx: TGittanFilterContext): boolean;
+begin
+  Result := not APull.IsDraft;
+end;
+
+function TestStale(const APull: TGittanForgePull; const ACtx: TGittanFilterContext): boolean;
+begin
+  Result := IsStale(APull, ACtx.Now);
+end;
+
+function TestAskedOfMe(const APull: TGittanForgePull; const ACtx: TGittanFilterContext): boolean;
+begin
+  Result := APull.Requested;
+end;
+
+function TestNew(const APull: TGittanForgePull; const ACtx: TGittanFilterContext): boolean;
+begin
+  Result := APull.MyReview = rvNone;
+end;
+
+function FilterDef(const AKey, ACaption: string; ASections: TGittanForgeSections;
+  APasses: TGittanPullTest): TGittanForgeFilterDef;
+begin
+  Result.Key := AKey;
+  Result.Caption := ACaption;
+  Result.Sections := ASections;
+  Result.Passes := APasses;
+end;
+
+function StandardFilters: TGittanForgeFilterDefs;
+begin
+  Result := nil;
+  SetLength(Result, 11);
+  Result[0] := FilterDef(fkFeedback, 'With feedback', [fsMine], @TestFeedback);
+  Result[1] := FilterDef(fkAttention, 'Needs attention', [fsMine], @TestAttention);
+  Result[2] := FilterDef(fkWaiting, 'Waiting for reviewer', [fsMine], @TestWaiting);
+  Result[3] := FilterDef(fkAskedOfMe, 'Asked of me', [fsReview], @TestAskedOfMe);
+  Result[4] := FilterDef(fkNew, 'New to me', [fsReview], @TestNew);
+  Result[5] := FilterDef(fkApproved, 'Approved', [fsMine, fsReview], @TestApproved);
+  Result[6] := FilterDef(fkChanges, 'Changes requested', [fsMine], @TestChanges);
+  Result[7] := FilterDef(fkChecksFailing, 'Checks failing', [fsMine, fsReview],
+    @TestChecksFailing);
+  Result[8] := FilterDef(fkChecksOk, 'Checks passing', [fsMine, fsReview], @TestChecksOk);
+  Result[9] := FilterDef(fkNoDrafts, 'No drafts', [fsMine, fsReview], @TestNoDrafts);
+  Result[10] := FilterDef(fkStale, 'Stale', [fsMine, fsReview], @TestStale);
+end;
+
+function Preset(const AName: string; ASection: TGittanForgeSection;
+  const AKeys: string; AOwn: boolean): TGittanForgePreset;
+begin
+  Result.Name := AName;
+  Result.Section := ASection;
+  Result.Keys := AKeys;
+  Result.Own := AOwn;
+end;
+
+function StandardPresets: TGittanForgePresets;
+begin
+  Result := nil;
+  SetLength(Result, 6);
+  Result[0] := Preset('Needs me', fsMine, fkAttention, False);
+  Result[1] := Preset('Waiting on others', fsMine, fkWaiting + ',' + fkNoDrafts, False);
+  Result[2] := Preset('Ready to merge', fsMine, fkApproved + ',' + fkChecksOk + ',' +
+    fkNoDrafts, False);
+  Result[3] := Preset('Asked of me', fsReview, fkAskedOfMe + ',' + fkNoDrafts, False);
+  Result[4] := Preset('Ready for me', fsReview, fkChecksOk + ',' + fkNoDrafts, False);
+  Result[5] := Preset('New to me', fsReview, fkNew, False);
+end;
+
+function FindFilter(const ADefs: TGittanForgeFilterDefs; const AKey: string): integer;
+var
+  i: integer;
+begin
+  Result := -1;
+  for i := 0 to High(ADefs) do
+    if ADefs[i].Key = AKey then
+      Exit(i);
+end;
+
+function SectionFilters(const ADefs: TGittanForgeFilterDefs;
+  ASection: TGittanForgeSection): TGittanForgeFilterDefs;
+var
+  i, n: integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(ADefs));
+  n := 0;
+  for i := 0 to High(ADefs) do
+    if ASection in ADefs[i].Sections then
+    begin
+      Result[n] := ADefs[i];
+      Inc(n);
+    end;
+  SetLength(Result, n);
+end;
+
+{ The keys of AKeys, trimmed, the empty ones dropped. }
+function SplitKeys(const AKeys: string): TStringArray;
+var
+  Parts: TStringArray;
+  i, n: integer;
+begin
+  Result := nil;
+  Parts := AKeys.Split([',']);
+  SetLength(Result, Length(Parts));
+  n := 0;
+  for i := 0 to High(Parts) do
+    if Trim(Parts[i]) <> '' then
+    begin
+      Result[n] := Trim(Parts[i]);
+      Inc(n);
+    end;
+  SetLength(Result, n);
+end;
+
+function JoinKeys(const AKeys: TStringArray): string;
+var
+  i: integer;
+begin
+  Result := '';
+  for i := 0 to High(AKeys) do
+  begin
+    if Result <> '' then
+      Result := Result + ',';
+    Result := Result + AKeys[i];
   end;
 end;
 
-function FilterPulls(const APulls: TGittanForgePulls; AFilters: TGittanForgeFilters;
-  ANow: TDateTime; AReasons: TGittanAttentionReasons): TGittanForgePulls;
+function HasKey(const AKeys, AKey: string): boolean;
 var
+  Key: string;
+begin
+  Result := False;
+  if AKey = '' then
+    Exit;
+  for Key in SplitKeys(AKeys) do
+    if Key = AKey then
+      Exit(True);
+end;
+
+function ToggleKey(const AKeys, AKey: string): string;
+var
+  Keys: TStringArray;
   i, n: integer;
-  F: TGittanForgeFilter;
+begin
+  Keys := SplitKeys(AKeys);
+  if HasKey(AKeys, AKey) then
+  begin
+    n := 0;
+    for i := 0 to High(Keys) do
+      if Keys[i] <> AKey then
+      begin
+        Keys[n] := Keys[i];
+        Inc(n);
+      end;
+    SetLength(Keys, n);
+  end
+  else if AKey <> '' then
+  begin
+    SetLength(Keys, Length(Keys) + 1);
+    Keys[High(Keys)] := AKey;
+  end;
+  Result := JoinKeys(Keys);
+end;
+
+function SameKeys(const A, B: string): boolean;
+var
+  Key: string;
+  KeysA, KeysB: TStringArray;
+begin
+  KeysA := SplitKeys(A);
+  KeysB := SplitKeys(B);
+  Result := False;
+  for Key in KeysA do
+    if not HasKey(B, Key) then
+      Exit;
+  for Key in KeysB do
+    if not HasKey(A, Key) then
+      Exit;
+  Result := True;
+end;
+
+function KnownKeys(const AKeys: string; const ADefs: TGittanForgeFilterDefs;
+  ASection: TGittanForgeSection): string;
+var
+  i: integer;
+  Keys: TStringArray;
+begin
+  Keys := nil;
+  for i := 0 to High(ADefs) do
+    if (ASection in ADefs[i].Sections) and HasKey(AKeys, ADefs[i].Key) then
+    begin
+      SetLength(Keys, Length(Keys) + 1);
+      Keys[High(Keys)] := ADefs[i].Key;
+    end;
+  Result := JoinKeys(Keys);
+end;
+
+function FilterPulls(const APulls: TGittanForgePulls; const ADefs: TGittanForgeFilterDefs;
+  const AKeys: string; const ACtx: TGittanFilterContext): TGittanForgePulls;
+var
+  i, j, n: integer;
+  Keys: TStringArray;
+  Tests: array of TGittanPullTest;
   Keep: boolean;
 begin
+  Keys := SplitKeys(AKeys);
+  Tests := nil;
+  for i := 0 to High(Keys) do
+  begin
+    j := FindFilter(ADefs, Keys[i]);
+    if (j >= 0) and Assigned(ADefs[j].Passes) then
+    begin
+      SetLength(Tests, Length(Tests) + 1);
+      Tests[High(Tests)] := ADefs[j].Passes;
+    end;
+  end;
   Result := nil;
   SetLength(Result, Length(APulls));
   n := 0;
   for i := 0 to High(APulls) do
   begin
     Keep := True;
-    for F in AFilters do
-      Keep := Keep and PassesFilter(APulls[i], F, ANow, AReasons);
+    for j := 0 to High(Tests) do
+      Keep := Keep and Tests[j](APulls[i], ACtx);
     if Keep then
     begin
       Result[n] := APulls[i];
@@ -1104,7 +1811,7 @@ end;
   for poUpdated; the later opening for poNewest; one that needs
   attention before one that does not for poAttentionFirst. }
 function PullBefore(const A, B: TGittanForgePull; AOrder: TGittanPullOrder;
-  AReasons: TGittanAttentionReasons): boolean;
+  AReasons: TGittanAttentionReasons; AIgnored: TStrings): boolean;
 
   function Changed(const APull: TGittanForgePull): TDateTime;
   begin
@@ -1117,15 +1824,15 @@ begin
   case AOrder of
     poUpdated: Result := Changed(A) > Changed(B);
     poNewest: Result := A.Created > B.Created;
-    poAttentionFirst: Result := NeedsAttention(A, AReasons) and
-        not NeedsAttention(B, AReasons);
+    poAttentionFirst: Result := NeedsAttention(A, AReasons, AIgnored) and
+        not NeedsAttention(B, AReasons, AIgnored);
   else
     Result := False;
   end;
 end;
 
 function SortPulls(const APulls: TGittanForgePulls; AOrder: TGittanPullOrder;
-  AReasons: TGittanAttentionReasons): TGittanForgePulls;
+  AReasons: TGittanAttentionReasons; AIgnored: TStrings): TGittanForgePulls;
 var
   i, j: integer;
   Pull: TGittanForgePull;
@@ -1137,7 +1844,7 @@ begin
   begin
     Pull := Result[i];
     j := i - 1;
-    while (j >= 0) and PullBefore(Pull, Result[j], AOrder, AReasons) do
+    while (j >= 0) and PullBefore(Pull, Result[j], AOrder, AReasons, AIgnored) do
     begin
       Result[j + 1] := Result[j];
       Dec(j);
@@ -1146,7 +1853,78 @@ begin
   end;
 end;
 
+function PresetName(const AName: string): string;
+begin
+  Result := Trim(StringReplace(StringReplace(AName, '|', '', [rfReplaceAll]), ';', '',
+    [rfReplaceAll]));
+end;
+
+function ParsePresets(const AText: string): TGittanForgePresets;
+var
+  Items, Fields: TStringArray;
+  Item: string;
+  P: TGittanForgePreset;
+begin
+  Result := nil;
+  Items := AText.Split([';']);
+  for Item in Items do
+  begin
+    Fields := Item.Split(['|']);
+    if Length(Fields) < 2 then
+      Continue;
+    if Fields[0] = 'review' then
+      P.Section := fsReview
+    else if Fields[0] = 'mine' then
+      P.Section := fsMine
+    else
+      Continue;
+    P.Name := PresetName(Fields[1]);
+    if P.Name = '' then
+      Continue;
+    P.Keys := '';
+    if Length(Fields) > 2 then
+      P.Keys := JoinKeys(SplitKeys(Fields[2]));
+    P.Own := True;
+    SetLength(Result, Length(Result) + 1);
+    Result[High(Result)] := P;
+  end;
+end;
+
+function JoinPresets(const APresets: TGittanForgePresets): string;
+var
+  i: integer;
+  Section: string;
+begin
+  Result := '';
+  for i := 0 to High(APresets) do
+  begin
+    if not APresets[i].Own or (PresetName(APresets[i].Name) = '') then
+      Continue;
+    if APresets[i].Section = fsReview then
+      Section := 'review'
+    else
+      Section := 'mine';
+    if Result <> '' then
+      Result := Result + ';';
+    Result := Result + Section + '|' + PresetName(APresets[i].Name) + '|' +
+      JoinKeys(SplitKeys(APresets[i].Keys));
+  end;
+end;
+
+function FindPreset(const APresets: TGittanForgePresets; ASection: TGittanForgeSection;
+  const AKeys: string): integer;
+var
+  i: integer;
+begin
+  Result := -1;
+  for i := 0 to High(APresets) do
+    if (APresets[i].Section = ASection) and SameKeys(APresets[i].Keys, AKeys) then
+      Exit(i);
+end;
+
 function PullRequestOf(const APull: TGittanForgePull): TGittanPullRequest;
+var
+  i: integer;
 begin
   Result := Default(TGittanPullRequest);
   Result.Number := APull.Number;
@@ -1161,6 +1939,14 @@ begin
   Result.IsDraft := APull.IsDraft;
   Result.Created := APull.Created;
   Result.Updated := APull.Updated;
+  Result.Reviews := Copy(APull.Reviews);
+  Result.Requested := Copy(APull.RequestedOf);
+  for i := 0 to High(APull.CheckList) do
+    case APull.CheckList[i].State of
+      chkPassed: Inc(Result.ChecksPassed);
+      chkFailed: Inc(Result.ChecksFailed);
+      chkPending: Inc(Result.ChecksPending);
+    end;
 end;
 
 { ---------------------------------------------------------------------------
@@ -1283,7 +2069,9 @@ begin
   end
   else
   begin
+    FMine := OpenPulls(FMine);
     FReview := StillToReview(FReview);
+
     if FSiblings then
       AddSiblingRepositories(FClones);
     FindClones(FMine, FClones);
@@ -1326,7 +2114,18 @@ begin
   Result := nil;
 end;
 
+class function TGittanForge.Filters: TGittanForgeFilterDefs;
+begin
+  Result := StandardFilters;
+end;
+
+class function TGittanForge.Presets: TGittanForgePresets;
+begin
+  Result := StandardPresets;
+end;
+
 class function TGittanForge.AccountsNote: string;
+
 begin
   Result := '';
 end;

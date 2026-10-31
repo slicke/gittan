@@ -270,10 +270,13 @@ begin
       end;
     WM_SYSCOMMAND:
       { Alt and a letter would open the hidden menu bar; the bar opens
-        the menu instead. Alt alone and F10 do nothing. }
+        the menu instead, and Alt alone or F10 (no letter) the whole
+        menu from its menu button, as a menu bar would take the focus. }
       if (WParam and $FFF0 = SC_KEYMENU) and (Bar <> nil) then
       begin
-        if (LParam <> 0) and (LParam <> Ord(' ')) then
+        if LParam = 0 then
+          Bar.OpenMenu
+        else if LParam <> Ord(' ') then
           Bar.OpenMenuByKey(Chr(LParam and $FF));
         if LParam <> Ord(' ') then
           Exit(0);

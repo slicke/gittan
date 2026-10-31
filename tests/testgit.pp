@@ -86,6 +86,7 @@ type
     procedure TestPushFetchPull;
     procedure TestPushHook;
     procedure TestPullDiverged;
+    procedure TestCommitTemplate;
     procedure TestRemoteEnvironment;
     procedure TestEnvironmentUtf8;
     procedure TestResolveMerge;
@@ -1479,6 +1480,7 @@ var
   Remote, Branch, Output: string;
   Code, i: integer;
   Commits: TGittanGraphCommits;
+  One: TGittanGraphCommit;
 begin
   Git(['init', '-q']);
   AssertTrue(FRepo.Open(FDir));
@@ -1512,6 +1514,14 @@ begin
   AssertEquals('v1', Commits[0].Refs[1].Name);
   AssertEquals(2, GraphWidth(Commits));
   AssertFalse(Commits[0].Unpushed);
+  { One commit, as the graph has it. }
+  AssertTrue(FRepo.GraphCommit(Commits[0].Hash, One));
+  AssertEquals(Commits[0].Hash, One.Hash);
+  AssertEquals('merge side', One.Subject);
+  AssertEquals(2, Length(One.Parents));
+  AssertEquals(2, Length(One.Refs));
+  AssertEquals('v1', One.Refs[1].Name);
+  AssertFalse('no such commit', FRepo.GraphCommit('0123456789abcdef0123456789abcdef01234567', One));
   Remote := FDir + '-remote';
   if RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Code,
     [poStderrToOutPut]) <> 0 then
@@ -2321,10 +2331,62 @@ begin
     AssertTrue('no merge commit', Code <> 0);
     AssertTrue(FileExists(IncludeTrailingPathDelimiter(FDir) + 'two.txt'));
     AssertEquals(' M del.txt'#0, Git(['status', '--porcelain', '-z']));
+    Git(['checkout', '--', 'del.txt']);
+
+    { Always merge, kept in the repository's config: past pull.ff=only. }
+    PushFromOther(Remote, Other, 'three.txt');
+    WriteFile('a.txt', 'mine once more'#10);
+    Commit('mine once more');
+    AssertTrue(FRepo.Error, FRepo.SetPullMode(False));
+    AssertTrue(FRepo.Error, FRepo.Pull(pmAuto, Diverged));
+    Git(['rev-parse', '-q', '--verify', 'HEAD^2']);
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+    { Always rebase. }
+    PushFromOther(Remote, Other, 'four.txt');
+    WriteFile('a.txt', 'mine at last'#10);
+    Commit('mine at last');
+    WriteFile('del.txt', 'local change once more'#10);
+    AssertTrue(FRepo.Error, FRepo.SetPullMode(True));
+    AssertEquals('true'#10, Git(['config', '--local', 'pull.rebase']));
+    AssertTrue(FRepo.Error, FRepo.Pull(pmAuto, Diverged));
+    RunCommandIndir(FDir, 'git', ['rev-parse', '-q', '--verify', 'HEAD^2'], Output, Code, []);
+    AssertTrue('rebased, no merge commit', Code <> 0);
+    { The local change was stashed and put back. }
+    AssertEquals(' M del.txt'#0, Git(['status', '--porcelain', '-z']));
+    Git(['checkout', '--', 'del.txt']);
+    { The branch's own setting comes first: Always merge sets it too. }
+    PushFromOther(Remote, Other, 'five.txt');
+    WriteFile('a.txt', 'mine past the branch'#10);
+    Commit('mine past the branch');
+    Git(['config', 'branch.' + FRepo.Branch + '.rebase', 'true']);
+    AssertTrue(FRepo.Error, FRepo.SetPullMode(False));
+    AssertEquals('false'#10, Git(['config', '--local', 'branch.' + FRepo.Branch + '.rebase']));
+    AssertTrue(FRepo.Error, FRepo.Pull(pmAuto, Diverged));
+    Git(['rev-parse', '-q', '--verify', 'HEAD^2']);
   finally
     RemoveTree(Remote);
     RemoveTree(Other);
   end;
+end;
+
+procedure TGitRepoTest.TestCommitTemplate;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  AssertEquals('none set', '', FRepo.CommitTemplate);
+  WriteFile('tmpl.txt', 'Subject'#10#10'# say why'#10'Body'#10#10'# the end'#10#10);
+  Git(['config', 'commit.template', 'tmpl.txt']);
+  AssertEquals('relative to the root, the comments out',
+    'Subject' + LineEnding + LineEnding + 'Body', FRepo.CommitTemplate);
+  Git(['config', 'core.commentChar', ';']);
+  WriteFile('tmpl.txt', 'Subject'#10'# kept'#10'; dropped'#10);
+  Git(['config', 'commit.template', 'tmpl.txt']);
+  AssertEquals('git''s comment character', 'Subject' + LineEnding + '# kept',
+    FRepo.CommitTemplate);
+  Git(['config', 'core.commentChar', 'auto']);
+  AssertEquals('auto is #', 'Subject' + LineEnding + '; dropped', FRepo.CommitTemplate);
+  Git(['config', 'commit.template', 'missing.txt']);
+  AssertEquals('', FRepo.CommitTemplate);
 end;
 
 procedure TGitRepoTest.TestRemoteEnvironment;
@@ -2568,6 +2630,9 @@ end;
 { Undo Discard of the pick that took a file's last conflict: the markers
   are written back and the file is in conflict again, edited or deleted. }
 procedure TGitRepoTest.TestUnresolve;
+var
+  Version: string;
+  Major, Minor: integer;
 begin
   MakeDiverged(Self);
   AssertTrue(FRepo.Open(FDir));
@@ -2581,8 +2646,20 @@ begin
   AssertTrue(FRepo.Error, FRepo.Unresolve('a.txt'));
   AssertEquals('<<<<<<< HEAD'#10'main'#10'======='#10'topic'#10'>>>>>>> topic'#10,
     FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
-  AssertTrue(FRepo.Error, FRepo.Unresolve('del.txt'));
-  AssertEquals(5, Length(Trim(Git(['ls-files', '-u'])).Split([#10])));
+  { A file resolved as deleted comes back from git 2.42 on (Apple's git
+    on macOS 14 is older), and says why before. }
+  AssertTrue(GitVersion(Version, Major, Minor));
+  if (Major > 2) or ((Major = 2) and (Minor >= 42)) then
+  begin
+    AssertTrue(FRepo.Error, FRepo.Unresolve('del.txt'));
+    AssertEquals(5, Length(Trim(Git(['ls-files', '-u'])).Split([#10])));
+  end
+  else
+  begin
+    AssertFalse(FRepo.Unresolve('del.txt'));
+    AssertTrue(FRepo.Error, Pos('2.42', FRepo.Error) > 0);
+    AssertEquals(3, Length(Trim(Git(['ls-files', '-u'])).Split([#10])));
+  end;
   AssertFalse('conflicts again', FRepo.ContinueOperation);
   { Nothing kept for a file that never was in conflict. }
   WriteFile('new.txt', 'new'#10);

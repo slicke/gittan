@@ -36,7 +36,8 @@ unit gittan.commitgraph;
   when the mouse nears its top or bottom, and the release there asks the
   owner (OnDrop, with both commits and where to show a menu) what to do,
   a merge of the dragged commit into the branch. Escape gives the drag
-  up.
+  up. A tip (Tip, from the owner) may say so in a strip at the bottom
+  of the panel, with a Don't Show Again link that raises OnTipDismiss.
 
   The Statistics toggle in the header shows, in the place of the rows,
   how many of the commits shown there are per week, as a bar for every
@@ -166,6 +167,10 @@ type
     FStatsOn, FStatsHot: boolean;
     FStats: TGittanCommitStats;
     FStatsRect: TRect;
+    FTip: string;
+    FTipRect, FTipLinkRect: TRect;
+    FTipHot: boolean;
+    FOnTipDismiss: TNotifyEvent;
     FStatsWeek, FStatsAuthor: integer;
     { The most commits one author made in one week, which the authors'
       bars are drawn against. }
@@ -212,6 +217,8 @@ type
     procedure SetMarked(const AValue: string);
     procedure SetStatsOn(AValue: boolean);
     procedure SetStatsHot(AValue: boolean);
+    procedure SetTip(const AValue: string);
+    function TipHeight: integer;
     procedure CountStats;
     function StatsPlot(out ALeft, ARight: integer): boolean;
     function StatsAuthorsTop: integer;
@@ -296,6 +303,12 @@ type
     {** A commit was dragged onto the one HEAD is on: the panel stays
       open under the menu the handler shows at AScreenPos. }
     property OnDrop: TGittanGraphDropEvent read FOnDrop write FOnDrop;
+    {** A line at the bottom of the panel, as how to drag a commit onto
+      the branch; '' for none. }
+    property Tip: string read FTip write SetTip;
+    {** The tip's Don't Show Again link was clicked; the owner sets Tip
+      to '' (and keeps it so). }
+    property OnTipDismiss: TNotifyEvent read FOnTipDismiss write FOnTipDismiss;
     {** The whole log is wanted: the handler answers with Replace. Asked
       once per Popup. }
     property OnMore: TNotifyEvent read FOnMore write FOnMore;
@@ -335,6 +348,7 @@ resourcestring
   rsGraphSearchingChanges = 'Searching the history for the change...';
   rsGraphChangeFailed = 'git could not search: %s';
   rsGraphStats = 'Statistics';
+  rsGraphTipDismiss = 'Don''t Show Again';
   rsStatsSummary = '%s commits by %s authors';
   rsStatsSummaryOne = '%s commits by one author';
   rsStatsCut = 'the newest %d';
@@ -1047,7 +1061,7 @@ begin
   if Parent = nil then
     Exit;
   W := Max(200, Min(Px(MaxPanelWidth), Parent.ClientWidth - 2 * Px(Margin)));
-  H := Px(HeaderHeight) + ContentHeight + Px(Pad) div 2 + Border;
+  H := Px(HeaderHeight) + ContentHeight + Px(Pad) div 2 + Border + TipHeight;
   H := Max(Px(HeaderHeight) + Px(RowHeight), Min(H, Parent.ClientHeight - 2 * Px(Margin)));
   SetBounds((Parent.ClientWidth - W) div 2, (Parent.ClientHeight - H) div 2, W, H);
   Arrange;
@@ -1066,7 +1080,8 @@ begin
   if (FBox = nil) or (FRows = nil) or (FEdit = nil) then
     Exit;
   FBox.SetBounds(Border, Px(HeaderHeight), Width - 2 * Border,
-    Max(Px(RowHeight), Height - Px(HeaderHeight) - Border));
+    Max(Px(RowHeight), Height - Px(HeaderHeight) - Border - TipHeight));
+  FTipRect := Rect(Border, Height - Border - TipHeight, Width - Border, Height - Border);
   FRows.Height := PhysHeight;
   FCloseRect := Rect(Width - Px(Pad) - Px(CloseSize) + 4, (Px(HeaderHeight) - Px(CloseSize)) div 2,
     Width - Px(Pad) + 4, (Px(HeaderHeight) + Px(CloseSize)) div 2);
@@ -1081,6 +1096,25 @@ begin
   else
     W := 90;
   FStatsRect := Rect(FEdit.Left - Px(Gap) - W, FEdit.Top, FEdit.Left - Px(Gap), FEdit.Top + FEdit.Height);
+end;
+
+function TGittanCommitGraph.TipHeight: integer;
+begin
+  if FTip = '' then
+    Result := 0
+  else
+    Result := Px(RowHeight);
+end;
+
+procedure TGittanCommitGraph.SetTip(const AValue: string);
+begin
+  if FTip = AValue then
+    Exit;
+  FTip := AValue;
+  FTipHot := False;
+  if Visible then
+    Place;
+  Invalidate;
 end;
 
 procedure TGittanCommitGraph.Resize;
@@ -1386,7 +1420,12 @@ begin
   inherited MouseMove(Shift, X, Y);
   SetCloseHot(PtInRect(FCloseRect, Point(X, Y)));
   SetStatsHot(PtInRect(FStatsRect, Point(X, Y)));
-  if FCloseHot or FStatsHot then
+  if FTipHot <> ((FTip <> '') and PtInRect(FTipLinkRect, Point(X, Y))) then
+  begin
+    FTipHot := not FTipHot;
+    Invalidate;
+  end;
+  if FCloseHot or FStatsHot or FTipHot then
     Cursor := crHandPoint
   else
     Cursor := crDefault;
@@ -1397,6 +1436,11 @@ begin
   inherited MouseLeave;
   SetCloseHot(False);
   SetStatsHot(False);
+  if FTipHot then
+  begin
+    FTipHot := False;
+    Invalidate;
+  end;
 end;
 
 procedure TGittanCommitGraph.MouseUp(Button: TMouseButton; Shift: TShiftState;
@@ -1406,7 +1450,10 @@ begin
   if (Button = mbLeft) and PtInRect(FCloseRect, Point(X, Y)) then
     Close
   else if (Button = mbLeft) and PtInRect(FStatsRect, Point(X, Y)) then
-    SetStatsOn(not FStatsOn);
+    SetStatsOn(not FStatsOn)
+  else if (Button = mbLeft) and (FTip <> '') and PtInRect(FTipLinkRect, Point(X, Y)) and
+    Assigned(FOnTipDismiss) then
+    FOnTipDismiss(Self);
 end;
 
 function TGittanCommitGraph.GetKeeper: TControl;
@@ -1548,6 +1595,25 @@ begin
     Canvas.Line(Right - 8, Top + 8, Left + 8, Bottom - 8);
   end;
   Canvas.Pen.Width := 1;
+
+  { The tip, dim, over a divider, with its link at the right. }
+  FTipLinkRect := Rect(0, 0, 0, 0);
+  if FTip <> '' then
+  begin
+    Canvas.Pen.Color := FLine;
+    Canvas.Line(FTipRect.Left, FTipRect.Top, FTipRect.Right, FTipRect.Top);
+    Y := (FTipRect.Top + FTipRect.Bottom - BodyHeight) div 2;
+    X := FTipRect.Right - Px(Pad) - Canvas.TextWidth(rsGraphTipDismiss);
+    FTipLinkRect := Rect(X, FTipRect.Top, FTipRect.Right - Px(Pad), FTipRect.Bottom);
+    if FTipHot then
+      Canvas.Font.Style := [fsUnderline];
+    Canvas.Font.Color := FAccent;
+    Canvas.TextOut(X, Y, rsGraphTipDismiss);
+    Canvas.Font.Style := [];
+    Canvas.Font.Color := FDim;
+    { Cut short before the link in a narrow graph. }
+    Canvas.TextOut(Px(Pad), Y, FitText(Canvas, FTip, X - 2 * Px(Pad)));
+  end;
 end;
 
 { Only the rows the box shows are painted: the log may have thousands.

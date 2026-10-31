@@ -31,7 +31,8 @@ uses
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
   gittan.rebase, gittan.worktrees, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
-  gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, ATSynEdit_Gaps, md5;
+  gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, gittan.merge, gittan.mergeview,
+  ATSynEdit_Gaps, md5;
 
 type
   {** What the space right of the tree shows: the summary, one changed
@@ -45,7 +46,7 @@ type
     binary view), or the Pull Requests page (gittan.pullpage,
     umain.pulls.inc). }
   TGittanView = (gvSummary, gvRepoInfo, gvChanges, gvRepoDiff, gvFile, gvHistory, gvSubmodule,
-    gvImage, gvTranslation, gvBinary, gvCommands, gvFiles, gvBlob, gvPulls);
+    gvImage, gvTranslation, gvBinary, gvCommands, gvFiles, gvBlob, gvPulls, gvMerge);
 
   {** The three strengths of a commit's color in the history view: the
     faint tint of its rows, the shade of the words it changed, and the
@@ -64,6 +65,10 @@ type
 
   {** What a transport button of the status bar does: UpdateStatusTransport
     puts the steps there, StatusStepClick runs them. }
+  {** What Edit > Undo, Redo, Cut, Copy, Paste and Select All ask of the
+    focused control (EditAction). }
+  TEditAction = (eaUndo, eaRedo, eaCut, eaCopy, eaPaste, eaSelectAll);
+
   TStatusStep = (stepNone, stepFetch, stepPull, stepPush, stepForcePush, stepContinue,
     stepCommit, stepAbort, stepSkip, stepResolve);
 
@@ -146,6 +151,9 @@ type
     {** The height of the strip the title bar covers on macOS, where the
       content reaches under it; 0 elsewhere. }
     function TitleBarHeight: integer; virtual; abstract;
+    {** AFrame's name in its tab and the caption: TabTitle, with the
+      parent folders in front while another tab has the same name. }
+    function FrameName(AFrame: TRepoFrame): string; virtual; abstract;
     {$IFDEF OWNBAR}
     {** The window's own title bar on Windows and GTK 3. }
     function OwnBar: TGittanOwnTitleBar; virtual; abstract;
@@ -288,7 +296,7 @@ type
       runs, and the item of the conflict list that starts or stops it
       (-1 while the list has none). }
     FConflictJob: TGittanConflictJob;
-    FConflictAIItem: integer;
+    FConflictAIItem, FConflictMergeItem: integer;
     { Splitting the changes into commits (umain.ai.inc): File > Split
       Changes into Commits, the job while it runs, the plan it gave
       (pruned of what has been committed since, PrunePlan) and the list
@@ -372,6 +380,12 @@ type
     { The row's commit as the history view keys it, -1 elsewhere, and
       the first "#123" of the commit's summary, 0 when it has none. }
     FPopupKey, FPopupIssue: integer;
+    { The change under the mouse when the editor menu popped up, as the
+      pills offer it: its block, or the reviewed change the row shows as
+      code; -1 for none. The items for it come first. }
+    FPopupBlock, FPopupKeep: integer;
+    FBlockKeepItem, FBlockLeaveOutItem, FBlockLinesItem, FBlockSepItem, FBlockDiscardItem,
+      FBlockEndItem: TMenuItem;
     { GitHub's view of the repository, read by a TGittanPullRequestJob
       when the repository or its branch changes (FPullKey names the pair
       the data is for) and on View > Refresh: the pull request of the
@@ -423,6 +437,9 @@ type
       paints in the empty tree; a filter that hides every file does not
       count. }
     FTreeClean: boolean;
+    { Set while the tree of changed files is filled or its folders folded
+      in bulk: FileTreeFolded leaves the layout to the one after it. }
+    FTreeFolding: boolean;
     { The height of the strip the title bar covers on macOS, where the
       content reaches under it (TRepoWindow.TitleBarHeight); 0 elsewhere. }
     FTitleBarHeight: integer;
@@ -441,6 +458,8 @@ type
     { Track with Git LFS and Stop Tracking with Git LFS, filled with the
       file's patterns as the menu pops up (FillLfsMenus). }
     FLfsTrackMenu, FLfsUntrackMenu: TMenuItem;
+    { The file menu's More: .git/info/exclude and Git LFS. }
+    FFileMoreMenu: TMenuItem;
     { The Submodules section under it (umain.submodules.inc): the
       submodules from gittan.submodules, what their jobs found out
       (FSubInfos, one per submodule, smUnknown while its job runs), the
@@ -466,7 +485,12 @@ type
     FCommitOptions: TLabel;
     FCommitOptionsMenu: TPopupMenu;
     FSignOffItem, FSkipHooksItem: TMenuItem;
+    FSignOffMenuItem, FSkipHooksMenuItem: TMenuItem;
+    { What commit.template holds, put in an empty message field. }
+    FCommitTemplate: string;
     FSignOff, FSkipHooks: boolean;
+    { Sign Off or Skip Hooks is on, as UpdateCommitOptions shows it. }
+    FHasCommitOption: boolean;
     FCommitButton: TButton;
     { The length of the message's first line, by the Commit button, once
       it is past SubjectSoftLimit; in the warning color past
@@ -523,8 +547,18 @@ type
     FRemoteAhead: integer;
     FRemoteHead: string;
     FFetchItem, FPullItem, FPushItem, FForcePushItem: TMenuItem;
+    { Branch > Commit: the commit menu of the commit shown. }
+    FBranchCommitMenu: TMenuItem;
+    { The commit FillBranchCommitMenu read last, so the command palette,
+      which opens the Branch menu as it lists the actions, runs no git
+      log for it again; forgotten with every snapshot. }
+    FBranchCommit: TGittanGraphCommit;
     FSyncPopup: TGittanPopupList;
     FRecentPopup: TGittanPopupList;
+    { The header's lexer name drops the lexers, Automatic and Plain
+      text first (FSyntaxPopupNames: the lexer of each item after them). }
+    FSyntaxPopup: TGittanPopupList;
+    FSyntaxPopupNames: TStringList;
     { What the change is made of, dropped from the summary's totals. }
     FCompositionPopup: TGittanPopupList;
     { The actions of a base that is a branch compared through the merge
@@ -1036,6 +1070,18 @@ type
     FImageDiff: TGittanImageDiff;
     { A binary file, in the editor's place (see ShowBinaryChanges). }
     FBinaryView: TGittanBinaryView;
+    { The merge editor (umain.merge.inc): a conflicted file in three
+      panes, in the editor's place; whether conflicted files open in it,
+      the file it shows and the item of the File menu. FMergeKeep is the
+      file as it is on disk when it changed outside Gittan and the user
+      kept the ticks, which Save writes over; FMergeAsked that leaving
+      the view asked already. }
+    FMergeView: TGittanMergeView;
+    FMergeMode: boolean;
+    FMergePath: string;
+    FMergeKeep: TStringArray;
+    FMergeAsked: boolean;
+    FMergeEditorItem: TMenuItem;
     { View > Markdown Preview (see umain.mdpreview.inc): whether it is on,
       the page right of the editor, its splitter, its share of the width
       and the pause after an edit before the page follows. }
@@ -1131,11 +1177,18 @@ type
       the checks by outcome, and what a click does. }
     function PullHint(const APull: TGittanPullRequest): string;
     procedure UpdateSyntaxChecks;
-    procedure UpdateCaption;
     procedure MarkNews;
     procedure MenuNewTabClick(Sender: TObject);
     procedure MenuCloseTabClick(Sender: TObject);
     procedure MenuNextTabClick(Sender: TObject);
+    procedure EditAction(AAction: TEditAction);
+    procedure MenuEditActionClick(Sender: TObject);
+    procedure MenuMinimizeClick(Sender: TObject);
+    procedure MenuZoomWindowClick(Sender: TObject);
+    procedure MenuBringAllToFrontClick(Sender: TObject);
+    procedure MenuHelpWebsiteClick(Sender: TObject);
+    procedure MenuHelpReleasesClick(Sender: TObject);
+    procedure MenuHelpIssueClick(Sender: TObject);
     procedure MenuPrevTabClick(Sender: TObject);
     {$IFDEF OWNBAR}
     function OwnBar: TGittanOwnTitleBar;
@@ -1271,6 +1324,7 @@ type
     procedure MenuPrevChangeClick(Sender: TObject);
     procedure MenuNextChangeClick(Sender: TObject);
     function AutoLexer: TecSyntAnalyzer;
+    function ShownLexer: TecSyntAnalyzer;
     procedure SetLexer(ALexer: TecSyntAnalyzer);
     procedure SetEditorLexer(AEd: TATSynEdit; ALexer: TecSyntAnalyzer);
     procedure ShowText(AEd: TATSynEdit; const AText: string; ALexer: TecSyntAnalyzer);
@@ -1301,6 +1355,7 @@ type
       AOldSide: boolean; const AOldNum, ANewNum: TIntegerDynArray;
       ALexer: TecSyntAnalyzer);
     function VisibleRow(ARow: integer): integer;
+    function RowOfLine(ALine, AFallback: integer): integer;
     function GapRowText(ACount: integer; const AHeading: string;
       out ADown, AUp, AAll, AHeadingCol: integer): string;
     function GapHeading(AGapTo: integer): string;
@@ -1377,6 +1432,9 @@ type
     function LeaveOutCaption(ABlock: integer): string;
     function LeaveOutHint(ABlock: integer): string;
     procedure ToggleLeaveOutAt(ABlock: integer);
+    function SelectedPairs(out APairs: TGittanKeepArray; out AIncluding: boolean): boolean;
+    procedure ToggleLeaveOutSelection;
+    procedure MenuBlockLinesClick(Sender: TObject);
     procedure LeaveOutBlockAt(ABlock: integer);
     procedure IncludeBlockAt(ABlock: integer);
     procedure IncludeFile;
@@ -1389,6 +1447,7 @@ type
     procedure UpdateLeaveOutItem;
     procedure DiscardBlockAt(ABlock: integer);
     procedure UpdateDiscardItems;
+    procedure NoteDiscard(const ABlock: TGittanDiscard);
     procedure FileMenuClick(Sender: TObject);
     procedure MenuDiscardClick(Sender: TObject);
     procedure MenuUndoDiscardClick(Sender: TObject);
@@ -1598,6 +1657,8 @@ type
     procedure UpdatePreviewToggle;
     procedure HeaderToggle(Sender: TObject);
     procedure HeaderMenu(Sender: TObject; const AScreenRect: TRect);
+    procedure HeaderLexer(Sender: TObject; const AScreenRect: TRect);
+    procedure SyntaxPopupPick(Sender: TObject; AIndex: integer);
     procedure ViewPopupPick(Sender: TObject; AIndex: integer);
     procedure MdSplitterMoved(Sender: TObject);
     procedure MdTimerTimer(Sender: TObject);
@@ -1665,7 +1726,7 @@ type
     procedure ShowFileLine(const APath: string; ALine: integer);
     procedure SummarySelectCommit(Sender: TObject; const AHash: string);
     procedure BranchPopupPick(Sender: TObject; AIndex: integer);
-    procedure ShowCommitGraph(const AFilter: string = '');
+    procedure ShowCommitGraph(const AFilter: string = ''; const AKeep: string = '');
     procedure GraphMore(Sender: TObject);
     procedure GraphPathCommits(Sender: TObject; const APath: string; AHashes: TStrings);
     procedure GraphChangeCommits(Sender: TObject; const AChanges: TStringArray);
@@ -1700,6 +1761,9 @@ type
     procedure MenuOpenCommitOnForgeClick(Sender: TObject);
     procedure MenuOpenIssueOnForgeClick(Sender: TObject);
     procedure MenuShowCommitClick(Sender: TObject);
+    procedure MenuBlockKeepClick(Sender: TObject);
+    procedure MenuBlockLeaveOutClick(Sender: TObject);
+    procedure MenuBlockDiscardClick(Sender: TObject);
     procedure MenuCopyHashClick(Sender: TObject);
     function ForgeUrl(const ATarget: TGittanWebTarget; out AUrl: string): boolean;
     procedure OpenOnForge(const ATarget: TGittanWebTarget);
@@ -1712,11 +1776,13 @@ type
     procedure SetupTitleBar;
     procedure ColorSidebar;
     procedure UpdateIndexBand;
+    procedure UpdateIndexProgress;
     procedure SetupRepoFiles;
     procedure ColorRepoHeader;
     procedure FillRepoFiles;
     procedure LayoutRepoFiles;
     procedure RepoHeaderToggle(Sender: TObject);
+    procedure FileTreeFolded(Sender: TObject; Node: TTreeNode);
     procedure TreePanelResize(Sender: TObject);
     procedure RepoTreeSelectionChanged(Sender: TObject);
     procedure SetupSubmodules;
@@ -1747,6 +1813,8 @@ type
     procedure SignOffItemClick(Sender: TObject);
     procedure SkipHooksItemClick(Sender: TObject);
     procedure UpdateCommitOptions;
+    function MessageBlank: boolean;
+    procedure UpdateOptionItems;
     procedure CommitButtonClick(Sender: TObject);
     procedure MenuCommitClick(Sender: TObject);
     {** Asks for the name and e-mail to commit under, the global ones
@@ -1868,11 +1936,13 @@ type
     function OtherWorktreeBranches(out ABranches: TStringArray; out AError: string): boolean;
     procedure MenuWorktreesClick(Sender: TObject);
     procedure ListPaletteActions(AList: TStringList);
+    function FindPaletteAction(const APath: string): TMenuItem;
     procedure MenuPaletteClick(Sender: TObject);
     function NavCurrent(out APlace: TGittanPlace): boolean;
     function NavSync: boolean;
     procedure NavIdle(Sender: TObject; var Done: boolean);
     procedure NavMark;
+    procedure NavGraphPick(const AFilter, AHash: string);
     procedure NavClear;
     procedure UpdateUndoItems;
     procedure UndoRedo(ARedo: boolean);
@@ -1913,6 +1983,10 @@ type
     function CommitKnownName(const ACommit: TGittanGraphCommit): string;
     procedure GraphDrop(Sender: TObject; const ASource, ATarget: TGittanGraphCommit;
       const AScreenPos: TPoint);
+    procedure GraphTipDismiss(Sender: TObject);
+    procedure FillCommitMenu(ARoot: TMenuItem; const ACommit: TGittanGraphCommit);
+    procedure FillBranchCommitMenu;
+    procedure MenuPickCommitClick(Sender: TObject);
     procedure GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
       const AScreenPos: TPoint);
     procedure CommitMenuClick(Sender: TObject);
@@ -1921,6 +1995,7 @@ type
     function OperationLabel: string;
     function IsConflictPath(const APath: string): boolean;
     function MarkersLeft(const APath: string): integer;
+    function ResolveIfDone(const APath: string; out ARemaining: integer): boolean;
     procedure ResolvePath(const APath: string; AAction: integer);
     function ConflictHeaderAction(AIndex: integer): boolean;
     function CanResolveBlocks: boolean;
@@ -1936,6 +2011,22 @@ type
     function NextConflictFile(const AAfter: string; ANext: boolean): string;
     procedure ShowNextConflict(const AAfter: string; AAdvance: boolean);
     procedure GoToConflict(ANext: boolean);
+    function CanOpenMerge: boolean;
+    procedure OpenMergeEditor;
+    procedure CloseMergeEditor;
+    procedure ShowMergeView(const APath: string);
+    procedure HideMergeView;
+    procedure ClearMerge;
+    function ReadMergeLines(out ALines: TStringArray): boolean;
+    function KeepMergeChoices(const ADisk: TStringArray): boolean;
+    procedure RestyleMergeView;
+    procedure SetMergeActions;
+    procedure MergeHeaderAction(AIndex: integer);
+    procedure MergeChanged(Sender: TObject);
+    function MergeDirty: boolean;
+    function SaveMerge(ARefresh: boolean): boolean;
+    function FlushMerge(ACancel: boolean = False): boolean;
+    procedure MenuMergeEditorClick(Sender: TObject);
     procedure SummaryRowAction(Sender: TObject; const APath: string);
     procedure CommitNoteLink(Sender: TObject);
     procedure MenuNextConflictClick(Sender: TObject);
@@ -2125,6 +2216,8 @@ type
     function TabTitle: string;
     {** The tab's tooltip: the repository's or the file's path. }
     function TabHint: string;
+    {** Names the window after the frame, while it is shown. }
+    procedure UpdateCaption;
     {** The file being edited has changes not saved, which
       FormCloseQuery asks about. }
     function NeedsSave: boolean;
@@ -2356,6 +2449,19 @@ resourcestring
   rsTagline = 'See what changed in a git repository';
   rsGo = '&Go';
   rsTools = '&Tools';
+  rsWindowMenu = '&Window';
+  rsEditMenu = '&Edit';
+  rsEditUndo = '&Undo';
+  rsEditRedo = '&Redo';
+  rsEditCut = 'Cu&t';
+  rsEditPaste = '&Paste';
+  rsMinimize = 'Minimize';
+  rsZoom = 'Zoom';
+  rsBringAllToFront = 'Bring All to Front';
+  rsHelpMenu = '&Help';
+  rsHelpWebsite = 'Gittan Website';
+  rsHelpReleases = 'Release Notes';
+  rsHelpIssue = 'Report an Issue';
   rsInstallCli = 'Install &CLI Command';
   rsUninstallCli = '&Uninstall CLI Command';
   rsCheckUpdates = 'Check for &Updates...';
@@ -2363,14 +2469,14 @@ resourcestring
   rsAbout = '&About Gittan';
   rsUpdateTitle = 'Gittan Updates';
   rsUpdateBadge = 'Build %d available';
-  rsUpdateHint = '%s is out; this is build %d.';
+  rsUpdateHint = '%s is out; this is %s.';
   rsUpdateHintClick = 'Click to download it';
-  rsUpdateAvailable = '%s is out; this is build %d. Download it from GitHub?';
+  rsUpdateAvailable = '%s is out; this is %s. Download it from GitHub?';
   rsUpdateDownload = 'Download';
   rsUpdateLater = 'Remind Me in %d Days';
   rsUpdateNotNow = 'Not Now';
-  rsUpdateCurrent = 'Gittan is up to date: build %d is the latest.';
-  rsUpdateNoBuild = 'The latest release, %s, has no build number to compare build %d with.';
+  rsUpdateCurrent = 'Gittan is up to date: %s is the latest.';
+  rsUpdateNoBuild = 'The latest release, %s, has no build number to compare %s with.';
   rsUpdateLocalBuild = 'This is a local build, so it is not compared with the releases. The latest release is %s.';
   rsUpdateOpenPage = 'Open Release Page';
   rsUpdateClose = 'Close';
@@ -2405,7 +2511,9 @@ resourcestring
   rsCallersStatus = 'The changed symbols are used in %s outside this file.';
   rsLookingFor = 'Looking for a definition of "%s"...';
   rsNoDefinition = 'No definition of "%s" in the repository.';
-  rsIndexing = 'Indexing %d/%d';
+  rsIndexing = 'Indexing code %d/%d';
+  rsIndexingHint = 'Indexing the code of the repository'#10'%d of %d files (%d%%)'#10 +
+    'Go to Definition and the hover reach the files indexed so far.';
   rsNextChange = 'Next &Change';
   rsPrevChange = 'Previous C&hange';
   rsNextConflict = 'Next Conflic&t';
@@ -2418,7 +2526,7 @@ resourcestring
   rsRepoFiles = 'Config';
   rsCommitSection = 'Commit';
   rsCommitMenu = 'Co&mmit...';
-  rsIdentityMenu = 'Who Commits...';
+  rsIdentityMenu = 'Name and Email...';
   rsCommitButton = 'Commit';
   rsCommitAmendButton = 'Amend Commit';
   rsCommitAmend = 'Amend';
@@ -2504,8 +2612,15 @@ resourcestring
   rsResolvePill = 'Resolve';
   rsCommitWhole = 'While %s, everything staged goes into the commit too.';
   rsCommitNothing = 'Tick the files to commit.';
+  rsCommitTickHint = 'Ticked files go into the commit. Click a box or press Space to ' +
+    'leave one out.';
+  rsDontShowAgain = 'Don''t Show Again';
   rsCommitted = 'Committed %s: %s';
   rsCommittedTitle = 'Committed %s';
+  rsCommittedBehind = '%s · pull the %d new commits on %s, then push';
+  rsCommittedBehindOne = '%s · pull the new commit on %s, then push';
+  rsPulledPush = '%d commits to push';
+  rsPulledPushOne = '1 commit to push';
   rsTickAllItem = 'Tick All Files';
   rsUntickAllItem = 'Untick All Files';
   rsPushAction = 'Push';
@@ -2551,8 +2666,21 @@ resourcestring
   rsGitPullFailed = 'The pull failed';
   rsPushFailed = 'The push failed';
   rsPullDivergedTitle = 'The Branch Has Diverged';
-  rsPullDiverged = 'The branch and its upstream both have commits the other lacks. ' +
-    'Merge them with a merge commit, or rebase your commits onto the upstream''s?';
+  rsPullDiverged = 'The branch and its upstream both have commits the other lacks.' +
+    LineEnding + LineEnding + 'Merge keeps both histories as they are and joins them with a ' +
+    'merge commit. Rebase puts your commits on top of the upstream''s, one line of history ' +
+    'without a merge commit, your commits rewritten.';
+  rsPullAlways = 'Always do this in this repository';
+  rsPullRewrittenTitle = 'The Branch Was Rewritten';
+  rsPullRewrittenOne = '%s was rewritten here (rebased or amended) since it was pushed, ' +
+    'and %s still has the commit it replaced. A pull brings that commit back. A force ' +
+    'push puts the branch''s commits in its place instead; if someone pushed since the ' +
+    'last fetch, it is refused (--force-with-lease).';
+  rsPullRewritten = '%s was rewritten here (rebased or amended) since it was pushed, ' +
+    'and the %d commits it replaced are still on %s. A pull brings them back. A force ' +
+    'push puts the branch''s commits in their place instead; if someone pushed since the ' +
+    'last fetch, it is refused (--force-with-lease).';
+  rsPullAnywayAction = 'Pull Anyway';
   rsMergeAction = 'Merge';
   rsRebaseAction = 'Rebase';
   rsPushRejectedTitle = 'The Push Was Rejected';
@@ -2725,6 +2853,10 @@ resourcestring
   rsBmRebase = 'Rebase %s onto %s';
   rsBranchMenu = '&Branch';
   rsBmSwitchItem = '&Switch to Branch...';
+  rsBmCommitMenu = 'Commit %s';
+  rsGraphDragTip = 'Drag a commit onto %s to merge it.';
+  rsBmCommitNone = 'Commit';
+  rsBmCommitPick = 'Pick a Commit in the Graph...';
   rsBmNewItem = '&New Branch...';
   rsBmMergeItem = '&Merge into %s...';
   rsBmRebaseItem = '&Rebase %s onto...';
@@ -2905,6 +3037,32 @@ resourcestring
   rsResolvedBlockOne = 'Resolved the conflict at line %d of %s; 1 left in the file';
   rsResolvedLast = 'Resolved the last conflict in %s and marked it resolved';
   rsResolveBlockFailed = 'Could not resolve the conflict: %s';
+  rsOpenMerge = 'Merge Editor';
+  rsMergeEditorItem = 'Open in &Merge Editor';
+  rsMergeEditorPick = 'Open in Merge Editor';
+  rsMergeMine = 'Mine';
+  rsMergeTheirs = 'Theirs';
+  rsMergeResult = 'Result';
+  rsMergeHeader = 'Conflict %d of %d · %s';
+  rsMergeNoLines = 'no lines';
+  rsMergeEdited = 'edited by hand: the boxes are off until Reset';
+  rsMergeResolvedCount = '%d of %d conflicts resolved';
+  rsMergeAllMine = 'All Mine';
+  rsMergeAllTheirs = 'All Theirs';
+  rsMergeReset = 'Reset';
+  rsMergeSave = 'Save';
+  rsMergeClose = 'Close';
+  rsMergeNothing = 'Nothing to save: the result is the file as it is';
+  rsMergeSaveFailed = 'Could not save the result: %s';
+  rsMergeSaved = 'Saved the result to %s; %d conflicts left in the file';
+  rsMergeSavedOne = 'Saved the result to %s; 1 conflict left in the file';
+  rsMergeSaveAsk = 'Save the merge result of %s?';
+  rsMergeChangedSaveAsk = '%s changed outside Gittan since the merge editor read it. ' +
+    'Save the merge result over it?';
+  rsMergeChangedAsk = '%s changed outside Gittan. Keep your choices in the merge editor, ' +
+    'which Save then writes over the change, or read the file again?';
+  rsMergeKeepChoices = 'Keep My Choices';
+  rsMergeReadAgain = 'Read Again';
   rsConflictsInFile = '%d conflicts';
   rsConflictInFile = '1 conflict';
   rsConflictNoMarkers = 'no markers left';
@@ -3030,6 +3188,7 @@ resourcestring
   rsHintSubmodule = 'Submodule moved %s; click to see the commits';
   rsAddToIgnore = 'Add to .&gitignore';
   rsAddToExclude = 'Add to .git/info/e&xclude';
+  rsFileMoreMenu = 'More';
   rsIgnoreAdded = 'Added %s to %s';
   rsIgnoreFailed = 'Could not write %s';
   rsLfsTrackMenu = 'Track with Git &LFS';
@@ -3053,6 +3212,12 @@ resourcestring
   rsUndoDiscard = '&Undo Discard';
   rsLeaveOutItem = '&Leave Change Out of Commit';
   rsIncludeItem = '&Include Change in Commit';
+  rsLeaveOutLinesItem = 'Skip Selected Lines in Commit';
+  rsIncludeLinesItem = 'Include Selected Lines in Commit';
+  rsLeftOutLines = 'Left %d changed lines of %s out of the commit';
+  rsLeftOutLine = 'Left a changed line of %s out of the commit';
+  rsIncludedLines = '%d changed lines of %s go into the commit';
+  rsIncludedLine = 'A changed line of %s goes into the commit';
   rsRevertFile = 'Re&vert File...';
   rsUndoRevert = 'Undo Re&vert';
   rsCleanItem = 'C&lean...';
@@ -3117,6 +3282,7 @@ resourcestring
   rsDiscardPillHint = 'Put the lines back as they were, after asking; ' +
     'File > Undo Discard brings them back';
   rsIncludeAllAction = 'Include All';
+  rsBlockDiscardItem = 'Discard Change...';
   rsLeftOutBlock = 'Left the change at line %d of %s out of the commit';
   rsLeftOutFile = 'Left every change of %s out of the commit';
   rsIncludedBlock = 'The change at line %d of %s goes into the commit';
@@ -3303,8 +3469,8 @@ const
   rsKindRenamed = 'Renamed';
   rsKindUntracked = 'Untracked';
   rsKindConflict = 'Conflict';
-  rsHintStaged = '%s · staged';
-  rsHintPartlyStaged = '%s · partly staged';
+  rsHintPartlyAdded = '%s · partly added with git add; Commit takes the whole file as ' +
+    'shown, not only what git add took';
   rsPullRequests = 'Pull Re&quests';
   rsPullLoading = 'Loading...';
   rsNoPulls = 'No open pull requests';
@@ -3681,6 +3847,7 @@ begin
   FHeader.OnAction := @HeaderAction;
   FHeader.OnToggle := @HeaderToggle;
   FHeader.OnMenu := @HeaderMenu;
+  FHeader.OnLexer := @HeaderLexer;
   FHeader.SetMenu(rsViewChip, rsViewChipHint);
   UpdateChangeNav;
   { The banner sits over the header, hidden until something fails. }
@@ -3720,6 +3887,9 @@ begin
   { Files with review comments get a speech bubble (umain.reviews.inc). }
   FileTree.OnAdvancedCustomDrawItem := @FileTreeAdvancedCustomDrawItem;
   FileTree.OnAdvancedCustomDraw := @FileTreeAdvancedCustomDraw;
+  { The sections under the tree give it room for its rows. }
+  FileTree.OnExpanded := @FileTreeFolded;
+  FileTree.OnCollapsed := @FileTreeFolded;
   FSymbolBar := TGittanSymbolBar.Create(Self);
   FSymbolBar.Parent := EditorPanel;
   FSymbolBar.Top := FHeader.Height + FFindBar.Height;
@@ -3749,6 +3919,15 @@ begin
   FBinaryView.Parent := EditorPanel;
   FBinaryView.Align := alClient;
   FBinaryView.Visible := False;
+  FMergeView := TGittanMergeView.Create(Self);
+  FMergeView.Parent := EditorPanel;
+  FMergeView.Align := alClient;
+  FMergeView.Visible := False;
+  FMergeView.SetKinds(bmConflictOurs, bmConflictTheirs, bmConflictMarker, bmFiller, bmGap);
+  FMergeView.SetTexts(rsMergeMine, rsMergeTheirs, rsMergeResult, rsMergeHeader, rsMergeEdited,
+    rsMergeResolvedCount, rsMergeNoLines);
+  FMergeView.OnPicked := @MergeChanged;
+  FMergeView.OnEdited := @MergeChanged;
   { The Markdown preview sits right of the editor, its splitter between
     them; both are created before the editor's alClient takes the rest. }
   FMdPreview := TGittanMarkdownPreview.Create(Self);
@@ -3871,6 +4050,7 @@ begin
   FGraph.Parent := Self;
   FGraph.OnPick := @GraphPick;
   FGraph.OnContext := @GraphContext;
+  FGraph.OnTipDismiss := @GraphTipDismiss;
   FGraph.OnDrop := @GraphDrop;
   FGraph.OnMore := @GraphMore;
   FGraph.OnPathCommits := @GraphPathCommits;
@@ -3886,6 +4066,10 @@ begin
   FSyncPopup := TGittanPopupList.Create(Self);
   FSyncPopup.Parent := Self;
   FSyncPopup.OnPick := @SyncPopupPick;
+  FSyntaxPopup := TGittanPopupList.Create(Self);
+  FSyntaxPopup.Parent := Self;
+  FSyntaxPopup.OnPick := @SyntaxPopupPick;
+  FSyntaxPopupNames := TStringList.Create;
   FRecentPopup := TGittanPopupList.Create(Self);
   FRecentPopup.Parent := Self;
   FRecentPopup.OnPick := @RecentPopupPick;
@@ -4040,7 +4224,7 @@ end;
 
 function TRepoFrame.NeedsSave: boolean;
 begin
-  Result := (FEditPath <> '') and Edit.Modified;
+  Result := ((FEditPath <> '') and Edit.Modified) or MergeDirty;
 end;
 
 { Something the user would want to see happened; a frame in the
@@ -4169,6 +4353,7 @@ begin
   FGoneToDelete.Free;
   FUpstreamRows.Free;
   FPaletteNames.Free;
+  FSyntaxPopupNames.Free;
   FGoneBranches.Free;
   FLfsLockable.Free;
   StopBlame;
@@ -4492,7 +4677,7 @@ begin
   FTimelapseBar.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Accent);
   for List in [FBranchPopup, FStashPopup, FUpstreamPopup, FTagPopup, FViewPopup,
     FSubListPopup, FReflogPopup, FPullPopup, FReviewPopup, FSyncPopup, FRecentPopup,
-    FBasePopup, FConflictPopup, FFindPopup, FCompositionPopup, FWorktreePopup,
+    FSyntaxPopup, FBasePopup, FConflictPopup, FFindPopup, FCompositionPopup, FWorktreePopup,
     FPalettePopup, FPlanPopup] do
     List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
   FPaletteLeft.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border);
@@ -4509,6 +4694,8 @@ begin
   FBandTrack := P.Line;
   FBandFill := P.Accent;
   FWelcome.SetAccent(P.Accent);
+  FMergeView.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Accent);
+  RestyleMergeView;
   if FDark then
   begin
     FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim, P.Line, P.Deleted,
@@ -4640,7 +4827,8 @@ begin
 end;
 
 { The window is named after the repository, or the file when none is
-  open; the header names the file, so the title does not change with it.
+  open, as its tab is (FrameName, which tells folders of the same name
+  apart); the header names the file, so the title does not change with it.
   Cocoa reads an ampersand in a window title as an accelerator and drops
   it, so there every ampersand is doubled. }
 procedure TRepoFrame.UpdateCaption;
@@ -4650,10 +4838,8 @@ begin
   { Nothing to tell a window the frame is leaving. }
   if csDestroying in ComponentState then
     Exit;
-  if FRepo.Root <> '' then
-    Title := ExtractFileName(FRepo.Root) + ' - ' + rsAppName
-  else if Edit.FileName <> '' then
-    Title := ExtractFileName(Edit.FileName) + ' - ' + rsAppName
+  if (FRepo.Root <> '') or (Edit.FileName <> '') then
+    Title := FWindow.FrameName(Self) + ' - ' + rsAppName
   else
     Title := rsAppName;
   {$IFDEF LCLCocoa}
@@ -4684,10 +4870,10 @@ begin
     Lexer := FPoStats
   else if (FView in [gvBinary, gvSubmodule]) or ((FView = gvBlob) and FBinaryView.Visible) then
     Lexer := ''
-  else if FAdapter.Lexer = nil then
+  else if ShownLexer = nil then
     Lexer := rsPlainText
   else
-    Lexer := FAdapter.Lexer.LexerName;
+    Lexer := ShownLexer.LexerName;
   FHeader.SetLexer(Lexer);
   UpdatePreviewToggle;
   UpdateSyntaxChecks;
@@ -4782,12 +4968,7 @@ begin
     FStatus.SetPull('', '', stNormal, 0);
     FStatus.SetPullThreads(0, 0);
   end;
-  if FIndexing then
-    FStatus.SetProgress(Format(rsIndexing, [FIndexPos, FIndexTotal]),
-      FIndexPos, FIndexTotal)
-  else
-    FStatus.SetProgress('', 0, 0);
-  UpdateIndexBand;
+  UpdateIndexProgress;
   case FFileCount of
     0: FStatus.SetFiles(rsNoChanges);
     1: FStatus.SetFiles(rsOneChangedFile);
@@ -4829,7 +5010,9 @@ begin
   if (FOperation <> '') and (FOperation <> 'bisecting') then
   begin
     Noun := OperationNoun(FOperation);
-    L := StatusButton(Format(rsAbortStepHint, [Noun]), HintFailed, stNormal, not Busy);
+    { Abort says so: a bare cross beside Resolve read as a close box. }
+    L := StatusButton(Format(rsAbortStepHint, [Noun]), HintFailed, stNormal, not Busy,
+      rsAbortButton);
     FStatusSteps[spLeft] := stepAbort;
     if FConflictFiles > 0 then
     begin
@@ -5039,10 +5222,10 @@ begin
   if FAutoLexerItem = nil then
     Exit;
   FAutoLexerItem.Checked := not FManualLexer;
-  if FAdapter.Lexer = nil then
+  if ShownLexer = nil then
     Current := ''
   else
-    Current := FAdapter.Lexer.LexerName;
+    Current := ShownLexer.LexerName;
   FPlainTextItem.Checked := Current = '';
   for i := 0 to FSyntaxMenu.Count - 1 do
   begin
@@ -5061,7 +5244,8 @@ end;
 procedure TRepoFrame.BuildMenu;
 var
   Main: TMainMenu;
-  FileMenu, BranchMenu, StashMenu, ViewMenu, GoMenu, ToolsMenu, Item, Sub: TMenuItem;
+  FileMenu, EditMenu, BranchMenu, StashMenu, ViewMenu, GoMenu, ToolsMenu, WindowMenu, HelpMenu,
+    Item, Sub: TMenuItem;
   i: integer;
 
   function AddItem(AParent: TMenuItem; const ACaption: string; AShortCut: TShortCut;
@@ -5113,6 +5297,11 @@ begin
   { The person in the Commit header, for the keyboard. }
   FIdentityItem := AddItem(FileMenu, rsIdentityMenu, 0, @IdentityClick);
   FIdentityItem.Enabled := False;
+  { The Commit section's options, where they are found and in the
+    palette; the chevron beside Amend has them too. }
+  FSignOffMenuItem := AddItem(FileMenu, rsSignOffItem, 0, @SignOffItemClick);
+  FSkipHooksMenuItem := AddItem(FileMenu, rsSkipHooksItem, 0, @SkipHooksItemClick);
+  UpdateOptionItems;
   FPullItem := AddItem(FileMenu, rsPullMenu, ShortCut(VK_L, [ssModifier, ssShift]),
     @MenuPullClick);
   FPushItem := AddItem(FileMenu, rsPushMenu, ShortCut(VK_P, [ssModifier, ssShift]),
@@ -5137,6 +5326,8 @@ begin
     @MenuLeaveOutClick);
   FResolveItem := AddItem(FileMenu, rsResolveHere, ShortCut(VK_R, [ssModifier, ssShift]),
     @MenuResolveHereClick);
+  FMergeEditorItem := AddItem(FileMenu, rsMergeEditorItem, ShortCut(VK_E, [ssModifier, ssShift]),
+    @MenuMergeEditorClick);
   FRevertFileItem := AddItem(FileMenu, rsRevertFile, ShortCut(VK_BACK, [ssModifier, ssAlt]),
     @MenuRevertFileClick);
   FUndoRevertItem := AddItem(FileMenu, rsUndoRevert, 0, @MenuUndoRevertClick);
@@ -5154,6 +5345,29 @@ begin
 
   { The Branch menu: the verb first, then the branch from the list
     (umain.branches.inc). }
+  { What the focused control does with text, as every application's Edit
+    menu (EditAction), then Find, which acts on the editor. }
+  EditMenu := TMenuItem.Create(Main);
+  EditMenu.Caption := rsEditMenu;
+  Main.Items.Add(EditMenu);
+  AddItem(EditMenu, rsEditUndo, ShortCut(VK_Z, [ssModifier]), @MenuEditActionClick).Tag :=
+    Ord(eaUndo);
+  AddItem(EditMenu, rsEditRedo, ShortCut(VK_Z, [ssModifier, ssShift]),
+    @MenuEditActionClick).Tag := Ord(eaRedo);
+  EditMenu.Add(NewLine);
+  AddItem(EditMenu, rsEditCut, ShortCut(VK_X, [ssModifier]), @MenuEditActionClick).Tag :=
+    Ord(eaCut);
+  AddItem(EditMenu, rsEditCopy, ShortCut(VK_C, [ssModifier]), @MenuEditActionClick).Tag :=
+    Ord(eaCopy);
+  AddItem(EditMenu, rsEditPaste, ShortCut(VK_V, [ssModifier]), @MenuEditActionClick).Tag :=
+    Ord(eaPaste);
+  AddItem(EditMenu, rsEditSelectAll, ShortCut(VK_A, [ssModifier]),
+    @MenuEditActionClick).Tag := Ord(eaSelectAll);
+  EditMenu.Add(NewLine);
+  AddItem(EditMenu, rsFind, ShortCut(VK_F, [ssModifier]), @MenuFindClick);
+  AddItem(EditMenu, rsFindNext, ShortCut(VK_G, [ssModifier]), @MenuFindNextClick);
+  AddItem(EditMenu, rsFindPrev, ShortCut(VK_G, [ssModifier, ssShift]), @MenuFindPrevClick);
+
   BranchMenu := TMenuItem.Create(Main);
   BranchMenu.Caption := rsBranchMenu;
   BranchMenu.OnClick := @BranchMenuOpen;
@@ -5172,6 +5386,10 @@ begin
   FMergeItem.Tag := Ord(blMerge);
   FRebaseItem := AddItem(BranchMenu, '', 0, @MenuBranchListClick);
   FRebaseItem.Tag := Ord(blRebase);
+  { The commit menu of the commit shown, so cherry-pick, revert, reset
+    and the rest are in the menu bar and the palette too. }
+  FBranchCommitMenu := AddItem(BranchMenu, rsBmCommitNone, 0, nil);
+  FillBranchCommitMenu;
   BranchMenu.Add(NewLine);
   FCompareBranchItem := AddItem(BranchMenu, '', 0, @MenuBranchListClick);
   FCompareBranchItem.Tag := Ord(blBranchSince);
@@ -5280,6 +5498,10 @@ begin
   AddItem(ViewMenu, rsZoomOut, ShortCut(VK_OEM_MINUS, [ssModifier]), @MenuZoomOutClick);
   AddItem(ViewMenu, rsZoomReset, ShortCut(VK_0, [ssModifier]), @MenuZoomResetClick);
   AddItem(ViewMenu, rsFont, 0, @MenuFontClick);
+  { The lexer of the text shown, seldom changed, so not a menu of its
+    own; the header's lexer name offers the same list with a filter. }
+  FSyntaxMenu := AddItem(ViewMenu, rsSyntax, 0, nil);
+  BuildSyntaxMenu;
   Sub := AddItem(ViewMenu, rsSyntaxTheme, 0, nil);
   SetLength(FThemeItems, Length(SyntaxThemes));
   for i := 0 to High(SyntaxThemes) do
@@ -5290,11 +5512,6 @@ begin
     Item.Checked := i = FSyntaxTheme;
     FThemeItems[i] := Item;
   end;
-
-  FSyntaxMenu := TMenuItem.Create(Main);
-  FSyntaxMenu.Caption := rsSyntax;
-  Main.Items.Add(FSyntaxMenu);
-  BuildSyntaxMenu;
 
   GoMenu := TMenuItem.Create(Main);
   GoMenu.Caption := rsGo;
@@ -5313,13 +5530,13 @@ begin
   FForwardItem := AddItem(GoMenu, rsForward, ShortCut(VK_RIGHT, [ssAlt]), @MenuForwardClick);
   {$ENDIF}
   NavUpdateItems;
+  { On macOS the tabs are stepped through from the Window menu. }
+  {$IFNDEF LCLCocoa}
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextTab, ShortCut(VK_OEM_6, [ssModifier, ssShift]), @MenuNextTabClick);
   AddItem(GoMenu, rsPrevTab, ShortCut(VK_OEM_4, [ssModifier, ssShift]), @MenuPrevTabClick);
+  {$ENDIF}
   GoMenu.Add(NewLine);
-  AddItem(GoMenu, rsFind, ShortCut(VK_F, [ssModifier]), @MenuFindClick);
-  AddItem(GoMenu, rsFindNext, ShortCut(VK_G, [ssModifier]), @MenuFindNextClick);
-  AddItem(GoMenu, rsFindPrev, ShortCut(VK_G, [ssModifier, ssShift]), @MenuFindPrevClick);
   AddItem(GoMenu, rsFilterFiles, ShortCut(VK_F, [ssModifier, ssShift]), @MenuFilterFilesClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsGoToDefinition, ShortCut(VK_F12, []), @MenuGoToDefinitionClick);
@@ -5365,6 +5582,102 @@ begin
   AddItem(ToolsMenu, rsSettings, ShortCut(VK_OEM_COMMA, [ssModifier]), @MenuSettingsClick);
   AddItem(ToolsMenu, rsAbout, 0, @MenuAboutClick);
   {$ENDIF}
+
+  { The menus a Mac application has: Window, with the tabs, and Help,
+    whose search field macOS adds itself, searching the menus too. }
+  {$IFDEF LCLCocoa}
+  WindowMenu := TMenuItem.Create(Main);
+  WindowMenu.Caption := rsWindowMenu;
+  Main.Items.Add(WindowMenu);
+  AddItem(WindowMenu, rsMinimize, ShortCut(VK_M, [ssModifier]), @MenuMinimizeClick);
+  AddItem(WindowMenu, rsZoom, 0, @MenuZoomWindowClick);
+  WindowMenu.Add(NewLine);
+  AddItem(WindowMenu, rsNextTab, ShortCut(VK_OEM_6, [ssModifier, ssShift]), @MenuNextTabClick);
+  AddItem(WindowMenu, rsPrevTab, ShortCut(VK_OEM_4, [ssModifier, ssShift]), @MenuPrevTabClick);
+  WindowMenu.Add(NewLine);
+  AddItem(WindowMenu, rsBringAllToFront, 0, @MenuBringAllToFrontClick);
+  {$ENDIF}
+  HelpMenu := TMenuItem.Create(Main);
+  HelpMenu.Caption := rsHelpMenu;
+  Main.Items.Add(HelpMenu);
+  AddItem(HelpMenu, rsHelpWebsite, 0, @MenuHelpWebsiteClick);
+  AddItem(HelpMenu, rsHelpReleases, 0, @MenuHelpReleasesClick);
+  AddItem(HelpMenu, rsHelpIssue, 0, @MenuHelpIssueClick);
+end;
+
+{ Edit > Undo, Cut, Copy and the rest act on the focused control: the
+  editor through its commands; on macOS anything else through the first
+  responder, as Cocoa's own Edit menu does, so a native field keeps its
+  undo; elsewhere a field or memo through its own methods. }
+procedure TRepoFrame.EditAction(AAction: TEditAction);
+const
+  EdCommands: array[TEditAction] of integer = (cCommand_Undo, cCommand_Redo,
+    cCommand_ClipboardCut, cCommand_ClipboardCopy, cCommand_ClipboardPaste, cCommand_SelectAll);
+  {$IFDEF LCLCocoa}
+  Selectors: array[TEditAction] of string = ('undo:', 'redo:', 'cut:', 'copy:', 'paste:',
+    'selectAll:');
+  {$ENDIF}
+var
+  C: TWinControl;
+begin
+  C := Screen.ActiveControl;
+  if C is TATSynEdit then
+  begin
+    TATSynEdit(C).DoCommand(EdCommands[AAction], TATCommandInvoke.AppInternal);
+    Exit;
+  end;
+  {$IFDEF LCLCocoa}
+  SendEditAction(Selectors[AAction]);
+  {$ELSE}
+  if C is TCustomEdit then
+    case AAction of
+      eaUndo: TCustomEdit(C).Undo;
+      { Windows' edit keeps one step, which an undo again takes back
+        (EM_UNDO); GTK 3's has no undo in the LCL. }
+      eaRedo: TCustomEdit(C).Undo;
+      eaCut: TCustomEdit(C).CutToClipboard;
+      eaCopy: TCustomEdit(C).CopyToClipboard;
+      eaPaste: TCustomEdit(C).PasteFromClipboard;
+      eaSelectAll: TCustomEdit(C).SelectAll;
+    end;
+  {$ENDIF}
+end;
+
+procedure TRepoFrame.MenuEditActionClick(Sender: TObject);
+begin
+  EditAction(TEditAction(TMenuItem(Sender).Tag));
+end;
+
+procedure TRepoFrame.MenuMinimizeClick(Sender: TObject);
+begin
+  FWindow.WindowState := wsMinimized;
+end;
+
+procedure TRepoFrame.MenuZoomWindowClick(Sender: TObject);
+begin
+  {$IFDEF LCLCocoa}
+  ZoomWindow(FWindow.Handle);
+  {$ENDIF}
+end;
+
+procedure TRepoFrame.MenuBringAllToFrontClick(Sender: TObject);
+begin
+  Application.BringToFront;
+end;
+
+procedure TRepoFrame.MenuHelpWebsiteClick(Sender: TObject);
+begin
+  OpenURL(GittanSite);
+end;
+
+procedure TRepoFrame.MenuHelpReleasesClick(Sender: TObject);
+begin
+  OpenURL(GittanSource + '/releases');
+end;
+
+procedure TRepoFrame.MenuHelpIssueClick(Sender: TObject);
+begin
+  OpenURL(GittanSource + '/issues/new');
 end;
 
 { Automatic and Plain text first, then the lexer list, which is long
@@ -5464,6 +5777,46 @@ begin
   SetLexer(AutoLexer);
 end;
 
+{ The header's lexer name: the View > Syntax choices in one list with a
+  filter, the current one checked. }
+procedure TRepoFrame.HeaderLexer(Sender: TObject; const AScreenRect: TRect);
+var
+  Current: string;
+  i: integer;
+begin
+  if ShownLexer = nil then
+    Current := ''
+  else
+    Current := ShownLexer.LexerName;
+  FSyntaxPopup.Clear;
+  FSyntaxPopup.Add(StripHotkey(rsAutomatic), '', not FManualLexer, 0);
+  FSyntaxPopup.Add(StripHotkey(rsPlainText), '', FManualLexer and (Current = ''), 1);
+  FSyntaxPopup.AddHeader('');
+  FSyntaxPopupNames.Clear;
+  if App.Lexers.Loaded then
+    App.Lexers.GetNames(FSyntaxPopupNames);
+  for i := 0 to FSyntaxPopupNames.Count - 1 do
+    FSyntaxPopup.Add(FSyntaxPopupNames[i], '', FManualLexer and
+      (FSyntaxPopupNames[i] = Current), i + 2);
+  FSyntaxPopup.Popup(AScreenRect);
+end;
+
+procedure TRepoFrame.SyntaxPopupPick(Sender: TObject; AIndex: integer);
+var
+  Pick: PtrInt;
+begin
+  Pick := FSyntaxPopup.TagOf(AIndex);
+  if Pick = 0 then
+    MenuAutoLexerClick(nil)
+  else if Pick = 1 then
+    MenuSyntaxClick(FPlainTextItem)
+  else if (Pick >= 2) and (Pick - 2 < FSyntaxPopupNames.Count) then
+  begin
+    FManualLexer := True;
+    SetLexer(App.Lexers.ByName(FSyntaxPopupNames[Pick - 2]));
+  end;
+end;
+
 { ---------------------------------------------------------------------------
   Files and lexers
   --------------------------------------------------------------------------- }
@@ -5478,9 +5831,19 @@ begin
     gvFile: Result := App.Lexers.ForFile(Edit.FileName);
     gvBlob: Result := App.Lexers.ForFile(FBlobPath, FRepo.Root);
     gvHistory: Result := App.Lexers.ForFile(FHistoryPath, FRepo.Root);
+    gvMerge: Result := App.Lexers.ForFile(FMergePath, FRepo.Root);
     else
       Result := nil;
   end;
+end;
+
+{ The lexer of the text shown: the merge editor's in its view. }
+function TRepoFrame.ShownLexer: TecSyntAnalyzer;
+begin
+  if FView = gvMerge then
+    Result := FMergeView.Lexer
+  else
+    Result := FAdapter.Lexer;
 end;
 
 procedure TRepoFrame.SetEditorLexer(AEd: TATSynEdit; ALexer: TecSyntAnalyzer);
@@ -5494,9 +5857,16 @@ begin
 end;
 
 { Both editors show the same file, so they get the same lexer; the old
-  side only while it is shown. }
+  side only while it is shown. The merge editor's panes take it in its
+  view. }
 procedure TRepoFrame.SetLexer(ALexer: TecSyntAnalyzer);
 begin
+  if FView = gvMerge then
+  begin
+    FMergeView.Lexer := ALexer;
+    UpdateStatus;
+    Exit;
+  end;
   SetEditorLexer(Edit, ALexer);
   if FEditOld.Visible then
     SetEditorLexer(FEditOld, ALexer);
@@ -6155,7 +6525,7 @@ begin
   Result := nil;
   { The editor keeps the text of the file before an image or a binary
     file. }
-  if (FView in [gvImage, gvBinary]) or ((FView = gvBlob) and not Edit.Visible) then
+  if (FView in [gvImage, gvBinary, gvMerge]) or ((FView = gvBlob) and not Edit.Visible) then
     Exit;
   { The translation view keeps its own blocks: the changed entries, or
     the ones that need work. }
@@ -6255,6 +6625,12 @@ var
   Blocks: TIntegerDynArray;
   Cur, Target, i: integer;
 begin
+  { The merge editor's changes are its conflicts, in its panes. }
+  if FView = gvMerge then
+  begin
+    GoToConflict(ANext);
+    Exit;
+  end;
   Blocks := ChangeBlocks;
   if Length(Blocks) = 0 then
   begin
@@ -6371,6 +6747,10 @@ begin
   { Open closes the previous repository even when it fails. }
   FlushEdit;
   LeaveEdit;
+  FlushMerge;
+  HideMergeView;
+  ClearMerge;
+  FMergePath := '';
   SaveCommitDraft;
   AbandonMessageJob;
   AbandonAIReview;
@@ -6603,6 +6983,7 @@ var
 begin
   if not ASnap.Ok then
     FLoadError := ASnap.Error;
+  FBranchCommit := Default(TGittanGraphCommit);
   { Files that changed in number, or commits that came, are news for a
     frame in the background; the first snapshot after an open is not,
     so the tabs opened at start come up without. }
@@ -6672,7 +7053,8 @@ begin
   if FOperation <> '' then
     Branch := Branch + ' · ' + OperationLabel;
   FNotOnRemote := ASnap.NotOnRemote;
-  FSummary.SetCommits(ASnap.Recent, FAhead, FBehind, FHasUpstream, FNotOnRemote);
+  FSummary.SetCommits(ASnap.Recent, FAhead, FBehind, FHasUpstream, FNotOnRemote,
+    FRewritten);
   { Not in the middle of a merge or rebase, which the Commit section
     finishes first. }
   if FOperation = '' then
@@ -6730,18 +7112,19 @@ begin
   CheckLfs;
 end;
 
-{ The badge of a file: solid when the index holds all of its change,
-  ringed when it holds part of it. }
+{ The badge of a file, ringed when the index holds part of its change
+  (git add in a terminal took some of it), since the commit takes the
+  whole file; an index that holds all of it changes nothing here. }
 function TRepoFrame.StatIcon(const AStat: TGittanFileStat): integer;
 begin
-  if AStat.Staged then
-    Result := StagedIcon(AStat.Kind, AStat.Unstaged)
+  if AStat.Staged and AStat.Unstaged then
+    Result := StagedIcon(AStat.Kind, True)
   else
     Result := ChangeIcon(AStat.Kind);
 end;
 
-{ What a file's badge means: the kind of change, and how much of it is
-  staged. }
+{ What a file's badge means: the kind of change, and that git add took
+  only part of it. }
 function TRepoFrame.StatHint(const AStat: TGittanFileStat): string;
 const
   KindNames: array[TGittanChangeKind] of string = (rsKindModified,
@@ -6749,9 +7132,7 @@ const
 begin
   Result := KindNames[AStat.Kind];
   if AStat.Staged and AStat.Unstaged then
-    Result := Format(rsHintPartlyStaged, [Result])
-  else if AStat.Staged then
-    Result := Format(rsHintStaged, [Result]);
+    Result := Format(rsHintPartlyAdded, [Result]);
 end;
 
 { ---------------------------------------------------------------------------
@@ -6925,7 +7306,7 @@ begin
   Path := SelectedPath;
   { The tree filter may hide the file shown; the tree then selects
     nothing. }
-  if (Path = '') and (View in [gvChanges, gvImage, gvTranslation, gvBinary]) then
+  if (Path = '') and (View in [gvChanges, gvImage, gvTranslation, gvBinary, gvMerge]) then
     Path := FCurrentPath;
   RepoPath := '';
   if (FRepoTree.Selected <> nil) and (FRepoTree.Selected.Data <> nil) then
@@ -6953,12 +7334,21 @@ begin
       if not ASnap^.Ok then
         FStatus.ShowMessage(FLoadError, stBad, 0);
     end;
-    Node := FileTree.Items.GetFirstNode;
-    while Node <> nil do
+    if Collapsed.Count > 0 then
     begin
-      if (Node.Data = nil) and (Collapsed.IndexOf(Node.GetTextPath) >= 0) then
-        Node.Collapse(False);
-      Node := Node.GetNext;
+      FTreeFolding := True;
+      try
+        Node := FileTree.Items.GetFirstNode;
+        while Node <> nil do
+        begin
+          if (Node.Data = nil) and (Collapsed.IndexOf(Node.GetTextPath) >= 0) then
+            Node.Collapse(False);
+          Node := Node.GetNext;
+        end;
+      finally
+        FTreeFolding := False;
+      end;
+      LayoutRepoFiles;
     end;
   finally
     Collapsed.Free;
@@ -6979,7 +7369,7 @@ begin
           OpenFile(FEditPath);
           RestoreScroll;
         end;
-    gvChanges, gvImage, gvTranslation, gvBinary:
+    gvChanges, gvImage, gvTranslation, gvBinary, gvMerge:
       { A translation or a binary file opened from disk is not in the
         tree. }
       if not (View in [gvTranslation, gvBinary]) or (FCurrentPath <> '') then
@@ -7078,6 +7468,8 @@ procedure TRepoFrame.LeaveEditorViews;
 begin
   FlushEdit;
   LeaveEdit;
+  FlushMerge;
+  HideMergeView;
   Edit.Visible := False;
   FEditOld.Visible := False;
   FSideSplitter.Visible := False;
@@ -7108,6 +7500,7 @@ begin
   SetNavRow(-1);
   FImageDiff.Visible := False;
   FBinaryView.Visible := False;
+  HideMergeView;
   FHeader.Visible := True;
   SetFoldBand(Edit, FoldingShown);
   ApplyLayout;
@@ -7143,6 +7536,7 @@ begin
   if FLfsSides <> nil then
     FHeader.SetActions([rsLfsDownloadAction]);
   FView := gvImage;
+  HideMergeView;
   FSymbolBar.Visible := False;
   FFindBar.Visible := False;
   FSummaryBox.Visible := False;
@@ -7182,6 +7576,7 @@ begin
     FHeader.SetActions([rsLfsDownloadAction]);
   end;
   FView := gvBinary;
+  HideMergeView;
   FSymbolBar.Visible := False;
   FFindBar.Visible := False;
   FSummaryBox.Visible := False;
@@ -7215,6 +7610,7 @@ begin
   FSummary.Selected := '';
   FCurrentPath := '';
   FView := gvBinary;
+  HideMergeView;
   Edit.FileName := AFileName;
   FSymbolBar.Visible := False;
   FFindBar.Visible := False;
@@ -7405,6 +7801,8 @@ begin
   { Asked before the header names the next file, not when the text is
     replaced further down. }
   FlushEdit;
+  if APath <> FMergePath then
+    FlushMerge;
   i := StatIndexOf(APath);
   Result := False;
   { A binary file has no lines to diff; a new one would be read as
@@ -7455,7 +7853,10 @@ begin
       SetLength(FConflictEnds, Length(FConflictStarts));
       for c := 0 to High(FConflictStarts) do
         FConflictEnds[c] := ConflictEnd(FChangeLines, FConflictRoles, FConflictStarts[c]);
-      FHeader.SetActions([rsUseMine, rsUseTheirs, rsMarkResolved]);
+      if Length(FConflictStarts) > 0 then
+        FHeader.SetActions([rsUseMine, rsUseTheirs, rsMarkResolved, rsOpenMerge])
+      else
+        FHeader.SetActions([rsUseMine, rsUseTheirs, rsMarkResolved]);
     end;
   end;
   LockNote;
@@ -7476,6 +7877,11 @@ begin
   if FTranslations and IsPoPath(APath) and (FConflictRoles = nil) then
   begin
     ShowTranslationChanges(APath);
+    Exit;
+  end;
+  if FMergeMode and CanOpenMerge then
+  begin
+    ShowMergeView(APath);
     Exit;
   end;
   FManualLexer := False;
@@ -7579,10 +7985,13 @@ begin
     end;
     FileTree.CustomSort(@CompareTreeNodes);
     { Every changed file is in view from the start. }
+    FTreeFolding := True;
     FileTree.FullExpand;
   finally
+    FTreeFolding := False;
     FileTree.EndUpdate;
   end;
+  LayoutRepoFiles;
   if FTreeClean <> (Length(AStats) = 0) then
   begin
     FTreeClean := Length(AStats) = 0;
@@ -7980,6 +8389,7 @@ const
 {$I umain.remote.inc}
 {$I umain.lfslocks.inc}
 {$I umain.mdpreview.inc}
+{$I umain.merge.inc}
 
 end.
 

@@ -74,7 +74,7 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
-    {** Whether the dialog icon (DialogIcon, the braid graph) is drawn
+    {** Whether the dialog icon (DialogIcon, the mark) is drawn
       above the title: any icon does, nil draws none. The icon itself is
       not drawn and stays the caller's. }
     procedure SetIcon(AIcon: TIcon);
@@ -411,7 +411,7 @@ begin
 
   if (FIcon <> nil) and not FIcon.Empty then
   begin
-    { The dialogs' braid graph, not the application icon's tile: for
+    { The dialogs' mark, not the application icon's tile: for
       the size in device pixels. }
     Canvas.StretchDraw(Rect((Width - Px(IconSize)) div 2, Y, (Width + Px(IconSize)) div 2,
       Y + Px(IconSize)), DialogIcon(Round(Px(IconSize) * GetCanvasScaleFactor)));

@@ -1132,6 +1132,13 @@ var
     APopup.Items.Add(Result);
   end;
 
+  function AddSubItem(AParent: TMenuItem; const ACaption: string): TMenuItem;
+  begin
+    Result := TMenuItem.Create(AParent);
+    Result.Caption := ACaption;
+    AParent.Add(Result);
+  end;
+
   { An item (a separator with no caption) shown only while there is a
     forge, its caption AFormat with the forge's name in place of %s. }
   function AddForgeItem(APopup: TPopupMenu; const AFormat: string;
@@ -1172,11 +1179,13 @@ begin
   Item := TMenuItem.Create(FFilePopup);
   Item.Caption := '-';
   FFilePopup.Items.Add(Item);
-  { Filled with the patterns for the file when the menu pops up. }
+  { Filled with the patterns for the file when the menu pops up; what is
+    seldom wanted waits under More. }
   FIgnoreMenu := AddItem(FFilePopup, rsAddToIgnore, nil);
-  FExcludeMenu := AddItem(FFilePopup, rsAddToExclude, nil);
-  FLfsTrackMenu := AddItem(FFilePopup, rsLfsTrackMenu, nil);
-  FLfsUntrackMenu := AddItem(FFilePopup, rsLfsUntrackMenu, nil);
+  FFileMoreMenu := AddItem(FFilePopup, rsFileMoreMenu, nil);
+  FExcludeMenu := AddSubItem(FFileMoreMenu, rsAddToExclude);
+  FLfsTrackMenu := AddSubItem(FFileMoreMenu, rsLfsTrackMenu);
+  FLfsUntrackMenu := AddSubItem(FFileMoreMenu, rsLfsUntrackMenu);
   { Shown for a file that may be locked or is (UpdateLockItems). }
   FLfsLockSepItem := AddItem(FFilePopup, '-', nil);
   FLfsLockItem := AddItem(FFilePopup, rsLfsLockItem, @MenuLfsLockClick);
@@ -1195,6 +1204,14 @@ begin
     undo and redo a read-only viewer never enables. }
   FEditPopup := TPopupMenu.Create(Self);
   FEditPopup.OnPopup := @EditPopupPopup;
+  { Over a change: what its pills offer, Discard apart (EditPopupPopup
+    shows them and sets the captions). }
+  FBlockKeepItem := AddItem(FEditPopup, rsKeepPill, @MenuBlockKeepClick);
+  FBlockLeaveOutItem := AddItem(FEditPopup, rsLeaveOutPill, @MenuBlockLeaveOutClick);
+  FBlockLinesItem := AddItem(FEditPopup, rsLeaveOutLinesItem, @MenuBlockLinesClick);
+  FBlockSepItem := AddItem(FEditPopup, '-', nil);
+  FBlockDiscardItem := AddItem(FEditPopup, rsBlockDiscardItem, @MenuBlockDiscardClick);
+  FBlockEndItem := AddItem(FEditPopup, '-', nil);
   AddItem(FEditPopup, rsEditCopy, @MenuEditCopyClick);
   AddItem(FEditPopup, rsEditSelectAll, @MenuEditSelectAllClick);
   Item := TMenuItem.Create(FEditPopup);
@@ -1270,11 +1287,14 @@ begin
   end;
   FRemoveItem.Enabled := CanMoveFiles;
   FMoveItem.Enabled := FRemoveItem.Enabled and Exists;
-  FResolveMineItem.Enabled := IsConflictPath(FContextPath);
-  FResolveTheirsItem.Enabled := FResolveMineItem.Enabled;
-  FMarkResolvedItem.Enabled := FResolveMineItem.Enabled;
+  { Shown only for a file in conflict. }
+  FResolveMineItem.Visible := IsConflictPath(FContextPath);
+  FResolveTheirsItem.Visible := FResolveMineItem.Visible;
+  FMarkResolvedItem.Visible := FResolveMineItem.Visible;
   FillIgnoreMenus(FContextPath);
   FillLfsMenus(FContextPath);
+  FFileMoreMenu.Enabled := FExcludeMenu.Enabled or FLfsTrackMenu.Enabled or
+    FLfsUntrackMenu.Enabled;
   UpdateLockItems;
   FTickSepItem.Visible := (FFilePopup.PopupComponent = FileTree) and CommitChoosing and
     (FChoosableCount > 0);
@@ -1630,12 +1650,16 @@ var
   Info: TGittanBlameCommit;
   Key: integer;
   Src: TObject;
+  LinePairs: TGittanKeepArray;
+  Including: boolean;
 begin
+  { Where the menu opens: at the mouse, or at the caret for the
+    keyboard's menu key, which ATSynEdit opens there. }
   FPopupEd := Edit;
   if (FEditOld <> nil) and FEditOld.Visible and
-    PtInRect(FEditOld.ClientRect, FEditOld.ScreenToClient(Mouse.CursorPos)) then
+    PtInRect(FEditOld.ClientRect, FEditOld.ScreenToClient(FEditPopup.PopupPoint)) then
     FPopupEd := FEditOld;
-  P := FPopupEd.ScreenToClient(Mouse.CursorPos);
+  P := FPopupEd.ScreenToClient(FEditPopup.PopupPoint);
   P := FPopupEd.ClientPosToCaretPos(ATPoint(P.X, P.Y), Details);
   FPopupRow := P.Y;
   if (P.Y < 0) or Details.BelowAllText then
@@ -1666,6 +1690,67 @@ begin
     FWhyEditItem.Caption := rsWhyMenu;
   FWhyEditItem.Enabled := (FWhyJob <> nil) or ((FPopupEd = Edit) and (FPopupRow >= 0) and
     (FEditPath = ''));
+  { The change under the mouse, as DiscardAt finds it for the pills. }
+  FPopupBlock := -1;
+  FPopupKeep := -1;
+  if (FPopupEd = Edit) and (FPopupRow >= 0) and (FView = gvChanges) and CanDiscard and
+    not CanResolveBlocks then
+  begin
+    FPopupBlock := BlockAtRow(FPopupRow);
+    if FPopupBlock < 0 then
+    begin
+      Key := LineAtRow(FPopupRow);
+      if (Key >= 0) and (Key <= High(FKeptOf)) then
+        FPopupKeep := FKeptOf[Key];
+    end;
+  end;
+  { A selection over changed lines: those lines out of the commit, or in. }
+  FBlockLinesItem.Visible := (FView = gvChanges) and CanLeaveOut and
+    SelectedPairs(LinePairs, Including);
+  if Including then
+    FBlockLinesItem.Caption := rsIncludeLinesItem
+  else
+    FBlockLinesItem.Caption := rsLeaveOutLinesItem;
+  FBlockKeepItem.Visible := (FPopupBlock >= 0) or (FPopupKeep >= 0);
+  if FPopupKeep >= 0 then
+    FBlockKeepItem.Caption := rsUnkeepPill
+  else
+    FBlockKeepItem.Caption := rsKeepPill;
+  FBlockLeaveOutItem.Visible := (FPopupBlock >= 0) and CanLeaveOut;
+  if FBlockLeaveOutItem.Visible then
+    FBlockLeaveOutItem.Caption := LeaveOutCaption(FPopupBlock);
+  FBlockSepItem.Visible := FPopupBlock >= 0;
+  FBlockDiscardItem.Visible := FPopupBlock >= 0;
+  FBlockEndItem.Visible := FBlockKeepItem.Visible or FBlockLinesItem.Visible;
+end;
+
+procedure TRepoFrame.MenuBlockLinesClick(Sender: TObject);
+begin
+  SetHotDiscard(Edit, -1, -1, -1);
+  ToggleLeaveOutSelection;
+end;
+
+procedure TRepoFrame.MenuBlockKeepClick(Sender: TObject);
+begin
+  SetHotDiscard(Edit, -1, -1, -1);
+  if FPopupKeep >= 0 then
+    UnkeepAt(FPopupKeep)
+  else if FPopupBlock >= 0 then
+    KeepBlockAt(FPopupBlock);
+end;
+
+procedure TRepoFrame.MenuBlockLeaveOutClick(Sender: TObject);
+begin
+  SetHotDiscard(Edit, -1, -1, -1);
+  if FPopupBlock >= 0 then
+    ToggleLeaveOutAt(FPopupBlock);
+end;
+
+procedure TRepoFrame.MenuBlockDiscardClick(Sender: TObject);
+begin
+  SetHotDiscard(Edit, -1, -1, -1);
+  if FPopupBlock >= 0 then
+    DiscardBlockAt(FPopupBlock);
 end;
 
 { The commit the row's blame or history gives, shown against its
@@ -1841,15 +1926,16 @@ const
   GraphLimit = 500;
   GraphSearchLimit = 50000;
 
-procedure TRepoFrame.ShowCommitGraph(const AFilter: string);
+procedure TRepoFrame.ShowCommitGraph(const AFilter, AKeep: string);
 var
   Commits: TGittanGraphCommits;
-  Limit: integer;
+  Limit, i: integer;
   Filter, Keep: string;
+  Found: boolean;
 begin
   if FRepo.Root = '' then
     Exit;
-  if FGraph.Visible and (AFilter = '') then
+  if FGraph.Visible and (AFilter = '') and (AKeep = '') then
   begin
     FGraph.Close;
     Exit;
@@ -1857,8 +1943,8 @@ begin
   { Opened again while a commit picked from it is shown: with the search
     it was picked under, on that commit. }
   Filter := AFilter;
-  Keep := '';
-  if (AFilter = '') and BlameShown and (TrailIndex(FGraphTrail, FBlameCommit.Hash) >= 0) then
+  Keep := AKeep;
+  if (AFilter = '') and (AKeep = '') and BlameShown and (TrailIndex(FGraphTrail, FBlameCommit.Hash) >= 0) then
   begin
     Filter := FGraphTrailFilter;
     Keep := FBlameCommit.Hash;
@@ -1870,14 +1956,44 @@ begin
   Screen.Cursor := crHourGlass;
   try
     FRepo.GraphCommits(Commits, Limit);
+    { A commit to stay on past the newest ones (picked after More, then
+      Back): the history up to the search's limit. }
+    if (Keep <> '') and (Limit < GraphSearchLimit) and (Length(Commits) >= Limit) then
+    begin
+      Found := False;
+      for i := 0 to High(Commits) do
+        if Commits[i].Hash = Keep then
+        begin
+          Found := True;
+          Break;
+        end;
+      if not Found then
+      begin
+        Limit := GraphSearchLimit;
+        FRepo.GraphCommits(Commits, Limit);
+      end;
+    end;
   finally
     Screen.Cursor := crDefault;
   end;
   FGraph.Marked := FMarkHash;
+  { How to merge from here, until Don't Show Again; a detached HEAD has
+    no branch to merge into. }
+  if App.Settings.GraphTipHidden or (FBranch = '') then
+    FGraph.Tip := ''
+  else
+    FGraph.Tip := Format(rsGraphDragTip, [FBranch]);
   FGraph.Popup(Commits, Length(Commits) >= Limit, FBranch, FAhead, FBehind,
     FHasUpstream, Filter, Keep);
   if FGraph.Visible then
     FSideNav.Selected := navGraph;
+end;
+
+procedure TRepoFrame.GraphTipDismiss(Sender: TObject);
+begin
+  App.Settings.GraphTipHidden := True;
+  App.Settings.Save;
+  FGraph.Tip := '';
 end;
 
 procedure TRepoFrame.GraphMore(Sender: TObject);
@@ -1981,6 +2097,7 @@ procedure TRepoFrame.GraphPick(Sender: TObject; const AHash: string);
 begin
   FGraphTrail := FGraph.ShownHashes;
   FGraphTrailFilter := FGraph.FilterText;
+  NavGraphPick(FGraphTrailFilter, AHash);
   ShowBlameCommit(AHash);
   ShowSummary;
 end;

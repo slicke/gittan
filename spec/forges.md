@@ -36,6 +36,11 @@ Three more have an answer in the base, for a forge whose tool keeps no list of a
 - `class function AccountsNote: string` – why the tool would not use the account picked, when something outside its login decides (gh with `GH_TOKEN` in the environment); empty otherwise. The Hosting page shows it in place of its own note.
 - `function SwitchAccount(const AHost, ALogin: string; out AError: string): boolean` – makes ALogin the tool's active account on AHost, for the tool everywhere (`gh auth switch --hostname --user`). It runs the tool and waits.
 
+Two more have the base's answer and a forge overrides them to shape the forge view's filters:
+
+- `class function Filters: TGittanForgeFilterDefs` – the filters the view offers on its two lists, each a key (kept in the settings, lower case, no comma), a caption, the sections it is for and a `Passes` test over a `TGittanForgePull` and a `TGittanFilterContext` (the time, the attention reasons, the ignored checks). The base's `StandardFilters` fit every forge; a forge with a notion of its own (a pipeline, an approval rule) adds a def with a test of its own, or leaves out one that means nothing on it. The view keeps the filters on by key under the forge's section, so a key must stay stable.
+- `class function Presets: TGittanForgePresets` – named sets of those filters, a section each (`StandardPresets` in the base); the user's own are kept beside them in the settings.
+
 Two more are for acting on a pull request, which the base cannot (no menu items then), and a forge overrides them when its tool can:
 
 - `class function HasPullActions: boolean` – whether `ActionJob` gives a job; the menus offer the actions only then.
@@ -49,7 +54,7 @@ Each is a thread (`TGittanJob`); the base class runs the steps, filters and repo
 
 - `TGittanPullRequestJob` – fill in `AskBranchPull` (the pull request of the checked-out branch; false for none, which is no failure), `AskOpenPulls` (the repository's open ones; false with the message, such as not logged in), `AskReviewPulls` (the open ones whose review is asked of the user or a team of theirs) and `AskLogin`. The base filters out what the user has reviewed (`WithoutReviewed`) and finds the branches gone from the remote.
 - `TGittanReviewJob` (`gittan.reviews`) – fill in `Ask`: the threads (`TGittanReviewThreads`, with their file, line, side, resolved and outdated), the conversation (`TGittanPullNotes`) and the head commit. A forge without threads on lines gives the comments as notes.
-- `TGittanForgeJob` – fill in `Ask`: the login (and `AvatarUrl`, the address of the user's picture when the forge gives one, which the base fetches over HTTP without the tool's token; a forge whose pictures need it leaves it empty and the view shows the initial), the user's open pull requests and the ones asked of them, as `TGittanForgePull`s, each with its `Repo` (the forge's path of it, "group/sub/project" on GitLab; `RemoteUrlsHold` matches it against a clone's remotes), the review decision, the checks as one word, the user's latest review, whether they are asked in person (`Requested`) and whether someone else has answered (`Feedback`). The base filters what the user has reviewed (`StillToReview`) and finds local clones.
+- `TGittanForgeJob` – fill in `Ask`: the login (and `AvatarUrl`, the address of the user's picture when the forge gives one, which the base fetches over HTTP without the tool's token; a forge whose pictures need it leaves it empty and the view shows the initial), the user's open pull requests and the ones asked of them, as `TGittanForgePull`s, each with its `Repo` (the forge's path of it, "group/sub/project" on GitLab; `RemoteUrlsHold` matches it against a clone's remotes), the review decision, the checks as one word (`Checks`) and, when the service names them, by name (`CheckList`, so the user can ignore one), the latest review of each reviewer (`Reviews`), the names a review is asked of now (`RequestedOf`), the user's own verdict (`MyReview`: an approval or a request for changes that still stands, not a comment after it), whether they are asked in person (`Requested`) and whether someone else has answered (`Feedback`). The base drops what is no longer open (`OpenPulls`) and what the user has reviewed (`StillToReview`), and finds local clones.
 
 Fields a service does not have stay at their defaults (`rdNone`, `chkNone`, `False`); the views leave out what is not there.
 
@@ -59,6 +64,7 @@ Write the parsing as plain functions of the tool's output (JSON, mostly) and tes
 
 ## Still to do when a second forge arrives
 
-- The forge view shows one forge, the first registered that is on and whose tool is found, with its filters' settings in `[GitHub]`. With two forges on, it needs a way to show the other's pull requests, a switch in its head or tabs of its own, and the filters a section per forge.
+- The forge view shows one forge, the first registered that is on and whose tool is found; its filters, presets and ignored checks are already kept under each forge's own section (`ForgeValue`), the attention reasons and the orders under `[GitHub]`. With two forges on, it needs a way to show the other's pull requests, a switch in its head or tabs of its own.
+
 - `ForgeClassFor` takes the first forge that hosts one of the remotes, the remotes in git's order. A repository with remotes on two forges gets the first; a setting per repository may be wanted then.
 - The texts of the pull request features name the forge through `Name`; check that none of them says something only true of GitHub ("gh", "GitHub Actions") for the new one.

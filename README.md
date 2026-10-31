@@ -30,8 +30,9 @@ Packaged builds for every platform are on the [Releases page](https://github.com
 | Platform | File |
 | --- | --- |
 | macOS (Apple Silicon) | `Gittan-macos-silicon.dmg` |
-| Windows (x64) | `Gittan-windows-x64.zip` |
-| Linux (amd64, GTK 3) | `Gittan-linux-amd64.tar.gz` |
+| macOS (Intel) | `Gittan-macos-intel.dmg` |
+| Windows (x64) | `Gittan-windows-x64-setup.exe`, or `Gittan-windows-x64.zip` without installing |
+| Linux (amd64, GTK 3) | `Gittan-linux-amd64.deb`, `Gittan-linux-x86_64.rpm`, or `Gittan-linux-amd64.tar.gz` without installing |
 
 Gittan needs git 2.30 or later on your `PATH`. The macOS build is signed ad hoc, so macOS blocks it at first: drag it to Applications, then run `xattr -cr /Applications/Gittan.app` in Terminal. The GitHub features (pull requests and review comments) use the `gh` CLI when it is installed and signed in. The AI features use [Claude Code](https://code.claude.com/docs) or [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli) with your own sign-in.
 
@@ -41,7 +42,7 @@ Gittan needs git 2.30 or later on your `PATH`. The macOS build is signed ad hoc,
 
 **History beside the code.** Blame puts who last changed each line, and when, in a column beside the diff. Code History lays the earlier versions of the selected lines, or the function the caret is in, under the lines themselves, one color per commit. Time-lapse plays a file through every version it has had, the lines each commit brought in lit up and the ones it took away struck through on their way out. The commit graph draws every branch and tag, marks what is not pushed or not pulled, and filters as you type (`author:`, `since:`, `until:`, `path:`, and `change:` for the commits that added or removed a text, or lines matching a `/regex/`). Browse the files of any commit as they were then, or turn the graph into commits per week and author.
 
-**Commit, sync and merge.** Tick the files that belong together, skip a block of a file for a later commit, write the message and commit. Pull, push and fetch sit in the status bar with the ahead and behind counts; a failed command tells in a banner with git's reason instead of a dialog. Branches, stashes, tags, reflog, remotes, clone and init, patches, cherry-pick, revert, reset, interactive rebase, bisect, and a conflict view with Use Mine, Use Theirs and one conflict at a time. Branch > Undo takes back a commit, a merge, a reset, a switch or a deleted branch, and Redo does it again. Anything that would throw work away asks first.
+**Commit, sync and merge.** Tick the files that belong together, skip a block of a file for a later commit, write the message and commit. Pull, push and fetch sit in the status bar with the ahead and behind counts; a failed command tells in a banner with git's reason instead of a dialog. Branches, stashes, tags, reflog, remotes, clone and init, patches, cherry-pick, revert, reset, interactive rebase, bisect, a conflict view with Use Mine, Use Theirs and one conflict at a time, and a merge editor that takes the lines you want from both sides. Branch > Undo takes back a commit, a merge, a reset, a switch or a deleted branch, and Redo does it again. Anything that would throw work away asks first.
 
 **AI when you want it.** Turn it on in the settings and pick Claude Code or GitHub Copilot, whichever you already use; Gittan runs its command line tool in the repository with your own sign-in and has no account or API key of its own. ✦ AI in the Commit section writes the message for the ticked files, short and in the style of the repository's recent commits. Review Changes with AI goes through what the diff compares and puts what it finds, bugs, risks and questions, as cards under the lines they are about, beside a pull request's review comments. The agent may read the repository to check a finding but gets no tool that writes, runs a command or goes to the network, and nothing is sent until you ask.
 
@@ -106,7 +107,7 @@ make test       # build and run the unit tests with plain fpc
 make help       # every target
 ```
 
-On macOS, make finds lazbuild in `/Applications/lazarus` when it is not on `PATH`. On Linux you need GTK 3's headers (`libgtk-3-dev` on Debian and Ubuntu, `gtk3-devel` on Fedora). On Windows there is no make: `.\make.ps1` has the same targets and finds lazbuild on `PATH`, in `C:\lazarus` or in `C:\fpcupdeluxe\lazarus`.
+On macOS, make finds lazbuild in `/Applications/lazarus` when it is not on `PATH`. On Linux you need GTK 3's headers (`libgtk-3-dev` on Debian and Ubuntu, `gtk3-devel` on Fedora); `make desktop` then installs a launcher and the icons in `~/.local/share`, without which a Wayland desktop shows a generic icon for Gittan. On Windows there is no make: `.\make.ps1` has the same targets and finds lazbuild on `PATH`, in `C:\lazarus` or in `C:\fpcupdeluxe\lazarus`.
 
 Every build copies the lexers into `lexlib/`, which must sit beside the executable (inside `Contents/Resources` in the macOS bundle). A build from the IDE does not do that, so run `make lexlib` (or `.\make.ps1 lexlib`) once.
 

@@ -3,9 +3,9 @@ unit gittan.askdlg;
 {** Gittan's own dialogs, in place of the LCL's QuestionDlg, MessageDlg,
   InputQuery and InputBox, which on Cocoa laid a message out on one line
   as wide as the screen allowed, put a glyph on every button and set the
-  buttons in the middle. These are built in code like the Who Commits
+  buttons in the middle. These are built in code like the Name and Email
   dialog: a fixed width the text wraps in, an icon for the kind at the
-  left (a warning triangle, an error disc, else the braid graph of gittan.dialogicon),
+  left (a warning triangle, an error disc, else the mark of gittan.dialogicon),
   plain buttons at the right in the platform's order, and for input a
   label over each field and a line in red under them saying why OK is
   off. }
@@ -33,6 +33,12 @@ type
   pressed. }
 function AskDlg(const ATitle, AMsg: string; AKind: TMsgDlgType;
   const AButtons: array of const): TModalResult;
+
+{** AskDlg with a check box under the text, ACheckCaption, ticked as
+  AChecked says, which holds its state when the dialog closes. }
+function AskDlgCheck(const ATitle, AMsg: string; AKind: TMsgDlgType;
+  const AButtons: array of const; const ACheckCaption: string;
+  var AChecked: boolean): TModalResult;
 
 {** AskDlg with QuestionDlg's help context or keyword, which it does not
   use, so a call to QuestionDlg changes in its name alone. }
@@ -381,7 +387,7 @@ begin
 end;
 
 { A warning is an amber triangle, an error a red disc, both with an
-  exclamation mark; a question or a note has Gittan's braid graph
+  exclamation mark; a question or a note has Gittan's mark
   (DialogIcon), in the screen's pixels. }
 procedure TAskForm.Paint;
 var
@@ -461,10 +467,13 @@ end;
   The calls
   --------------------------------------------------------------------------- }
 
-function AskDlg(const ATitle, AMsg: string; AKind: TMsgDlgType;
-  const AButtons: array of const): TModalResult;
+{ AskDlg, with a check box under the text when ACheckCaption is given. }
+function AskWith(const ATitle, AMsg: string; AKind: TMsgDlgType;
+  const AButtons: array of const; const ACheckCaption: string;
+  var AChecked: boolean): TModalResult;
 var
   F: TAskForm;
+  Box: TCheckBox;
   Buttons: array of TAskButton;
   i, n, Default, Cancel: integer;
   S: string;
@@ -518,14 +527,44 @@ begin
   F := TAskForm.CreateAsk(ATitle, AKind);
   try
     F.AddText(AMsg, False, HeadingGap);
+    Box := nil;
+    if ACheckCaption <> '' then
+    begin
+      Box := TCheckBox.Create(F);
+      Box.Caption := ACheckCaption;
+      Box.Checked := AChecked;
+      Box.Align := alTop;
+      Box.Top := F.NextTop;
+      Box.BorderSpacing.Left := F.Scale96ToScreen(IconLeft + IconSize + IconGap);
+      Box.BorderSpacing.Top := F.Scale96ToScreen(FieldGap);
+      Box.Parent := F;
+    end;
     F.AddButtons(Buttons, Default, Cancel);
     F.FNoCancel := NoCancel;
     Result := F.ShowModal;
     if Result = mrNone then
       Result := F.FCancelResult;
+    if Box <> nil then
+      AChecked := Box.Checked;
   finally
     F.Free;
   end;
+end;
+
+function AskDlg(const ATitle, AMsg: string; AKind: TMsgDlgType;
+  const AButtons: array of const): TModalResult;
+var
+  Unused: boolean;
+begin
+  Unused := False;
+  Result := AskWith(ATitle, AMsg, AKind, AButtons, '', Unused);
+end;
+
+function AskDlgCheck(const ATitle, AMsg: string; AKind: TMsgDlgType;
+  const AButtons: array of const; const ACheckCaption: string;
+  var AChecked: boolean): TModalResult;
+begin
+  Result := AskWith(ATitle, AMsg, AKind, AButtons, ACheckCaption, AChecked);
 end;
 
 function AskDlg(const ATitle, AMsg: string; AKind: TMsgDlgType;

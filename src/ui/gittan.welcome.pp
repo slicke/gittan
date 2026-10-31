@@ -1,10 +1,11 @@
 unit gittan.welcome;
 
 {** The welcome view: what Gittan shows while no repository is open, and
-  where a failure to open one is reported. Under the wordmark (the mark
-  and the name, as gittan.app has them, drawn from
-  icons/gittan-wordmark.svg in the view's colors; the title and the
-  tagline as text when it cannot be drawn) it offers a button that opens the folder dialog, filled in the
+  where a failure to open one is reported. Under the wordmark (the icon
+  beside the name and the tagline, gittan.app's lockup, from
+  icons/wordmark/gittan-wordmark-<theme>.png, the dark one on a dark
+  background; the title and the tagline as text when it cannot be
+  read) it offers a button that opens the folder dialog, filled in the
   accent with the shortcut drawn as key caps inside it, one that clones a
   repository and one that makes a new one (the three in a row as wide as
   the column, or under each other when the row does not fit), says under
@@ -37,7 +38,7 @@ type
   private
     FTitle, FTagline, FError, FShortcut, FBusy: string;
     FRecent: TStringList;
-    { The wordmark drawn for the colors and the screen's pixels, made in
+    { The wordmark for the background and the screen's pixels, made in
       the first paint after a change; FLogoFailed when it could not be. }
     FLogo: TBGRABitmap;
     FLogoFailed: boolean;
@@ -103,19 +104,12 @@ type
 implementation
 
 uses
-  Math, LazUTF8, BGRABitmapTypes, BGRASVG, BGRACanvas2D, gittan.statusbar,
+  Math, LazUTF8, BGRABitmapTypes, gittan.statusbar,
   gittan.textfit, gittan.theme;
 
-const
-  { icons/gittan-wordmark.svg, in its light colors. }
-  WordmarkSvg = {$I gittan.wordmark.inc};
-  WordmarkRed = '#E5484D';
-  WordmarkGreen = '#2FA84F';
-  WordmarkText = '#1F2937';
-  { What a dark background takes in their place, as gittan.app has it;
-    the name takes the view's text color in both. }
-  WordmarkDarkRed = '#FF6B70';
-  WordmarkDarkGreen = '#4ADE80';
+{ WordmarkDark and WordmarkLight, icons/wordmark/gittan-wordmark-<theme>.png
+  as byte arrays (make wordmark). }
+{$I gittan.wordmark.inc}
 
 resourcestring
   rsOpenButton = 'Open Repository…';
@@ -259,22 +253,13 @@ begin
   Result := FitTextLeft(Canvas, AText, AMaxWidth);
 end;
 
-function HexColor(AColor: TColor): string;
-var
-  C: TColor;
-begin
-  C := ColorToRGB(AColor);
-  Result := Format('#%.2x%.2x%.2x', [Red(C), Green(C), Blue(C)]);
-end;
-
-{ The wordmark APixels wide in the view's colors, kept until the colors
-  or the width change; nil when BGRASVG could not draw it. }
+{ The wordmark APixels wide for the background, the dark one on a dark
+  background, kept until the colors or the width change; nil when its
+  PNG could not be read. }
 function TGittanWelcome.LogoBitmap(APixels: integer): TBGRABitmap;
 var
-  Source: string;
-  Svg: TBGRASVG;
-  C2d: TBGRACanvas2D;
-  Size: TPointF;
+  Stream: TMemoryStream;
+  Png: TBGRABitmap;
   C: TColor;
 begin
   if (FLogo <> nil) and (FLogo.Width = APixels) then
@@ -282,31 +267,27 @@ begin
   FreeAndNil(FLogo);
   if FLogoFailed then
     Exit(nil);
-  Source := StringReplace(WordmarkSvg, WordmarkText, HexColor(FText), [rfReplaceAll]);
-  C := ColorToRGB(FBack);
-  if Red(C) * 299 + Green(C) * 587 + Blue(C) * 114 < 128000 then
-  begin
-    Source := StringReplace(Source, WordmarkRed, WordmarkDarkRed, [rfReplaceAll]);
-    Source := StringReplace(Source, WordmarkGreen, WordmarkDarkGreen, [rfReplaceAll]);
-  end;
-  Svg := nil;
+  Png := nil;
+  Stream := TMemoryStream.Create;
   try
     try
-      Svg := TBGRASVG.CreateFromString(Source);
-      Size := Svg.ViewSizeInUnit[cuPixel];
-      FLogo := TBGRABitmap.Create(APixels, Max(1, Round(APixels * Size.Y / Size.X)));
-      C2d := TBGRACanvas2D.Create(FLogo);
-      try
-        Svg.StretchDraw(C2d, 0, 0, FLogo.Width, FLogo.Height, True);
-      finally
-        C2d.Free;
-      end;
+      C := ColorToRGB(FBack);
+      if Red(C) * 299 + Green(C) * 587 + Blue(C) * 114 < 128000 then
+        Stream.WriteBuffer(WordmarkDark[0], Length(WordmarkDark))
+      else
+        Stream.WriteBuffer(WordmarkLight[0], Length(WordmarkLight));
+      Stream.Position := 0;
+      Png := TBGRABitmap.Create(Stream);
+      Png.ResampleFilter := rfBestQuality;
+      FLogo := Png.Resample(APixels, Max(1, Round(APixels * Png.Height / Png.Width)),
+        rmFineResample) as TBGRABitmap;
     except
       FreeAndNil(FLogo);
       FLogoFailed := True;
     end;
   finally
-    Svg.Free;
+    Png.Free;
+    Stream.Free;
   end;
   Result := FLogo;
 end;
@@ -426,7 +407,7 @@ begin
     ButtonRows := Length(Captions)
   else
     ButtonRows := 1;
-  { The wordmark's small caps line needs more room under it than the
+  { The wordmark's tagline needs more room under it than the
     tagline does. }
   if Logo <> nil then
     Total := LogoHeight + Px(Gap)

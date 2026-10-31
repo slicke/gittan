@@ -9,8 +9,9 @@
   its menu. The Syntax menu,
   hundreds of lexers, is left out. The actions last run from it come
   first (Settings.PaletteRecent, kept across runs); typing keeps the rows
-  that have every word typed. A pick lists the menus again and clicks the
-  item with that name, so a menu rebuilt meanwhile is no dangling item. }
+  that have every word typed. A pick finds the item with that name in the
+  menus again (FindPaletteAction, which opens only the menus on its
+  path) and clicks it, so a menu rebuilt meanwhile is no dangling item. }
 const
   PaletteSep = ': ';
 
@@ -54,6 +55,54 @@ begin
   {$IFDEF LCLCocoa}
   if FAppMenuItem <> nil then
     Walk(FAppMenuItem, 'Gittan');
+  {$ENDIF}
+end;
+
+{ The action named APath as ListPaletteActions names it, or nil: only
+  the menus on its path are walked, and only their open handlers run,
+  so a pick does not bring every menu up to date again. }
+function TRepoFrame.FindPaletteAction(const APath: string): TMenuItem;
+
+  function Find(AItem: TMenuItem; const APrefix: string): TMenuItem;
+  var
+    i: integer;
+    Child: TMenuItem;
+    Path: string;
+  begin
+    Result := nil;
+    for i := 0 to AItem.Count - 1 do
+    begin
+      Child := AItem.Items[i];
+      if Child.IsLine or not Child.Visible or not Child.Enabled or
+        (Child = FSyntaxMenu) or (Child = FPaletteItem) then
+        Continue;
+      Path := StripHotkey(Child.Caption);
+      if Path = '' then
+        Continue;
+      if APrefix <> '' then
+        Path := APrefix + PaletteSep + Path;
+      if Child.Count > 0 then
+      begin
+        if Copy(APath, 1, Length(Path) + Length(PaletteSep)) <> Path + PaletteSep then
+          Continue;
+        if Assigned(Child.OnClick) then
+          Child.OnClick(Child);
+        Result := Find(Child, Path);
+      end
+      else if (Path = APath) and Assigned(Child.OnClick) then
+        Result := Child;
+      if Result <> nil then
+        Exit;
+    end;
+  end;
+
+begin
+  Result := nil;
+  if FMainMenu <> nil then
+    Result := Find(FMainMenu.Items, '');
+  {$IFDEF LCLCocoa}
+  if (Result = nil) and (FAppMenuItem <> nil) then
+    Result := Find(FAppMenuItem, 'Gittan');
   {$ENDIF}
 end;
 
@@ -175,7 +224,7 @@ end;
 
 procedure TRepoFrame.PalettePopupPick(Sender: TObject; AIndex: integer);
 var
-  Actions: TStringList;
+  Item: TMenuItem;
   Path: string;
   i: integer;
 begin
@@ -186,15 +235,9 @@ begin
   if (i < 0) or (i >= FPaletteNames.Count) then
     Exit;
   Path := FPaletteNames[i];
-  Actions := TStringList.Create;
-  try
-    ListPaletteActions(Actions);
-    i := Actions.IndexOf(Path);
-    if i < 0 then
-      Exit;
-    App.Settings.AddPaletteRecent(Path);
-    TMenuItem(Actions.Objects[i]).Click;
-  finally
-    Actions.Free;
-  end;
+  Item := FindPaletteAction(Path);
+  if Item = nil then
+    Exit;
+  App.Settings.AddPaletteRecent(Path);
+  Item.Click;
 end;

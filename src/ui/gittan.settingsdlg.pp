@@ -32,6 +32,11 @@ uses
   ExtCtrls, Spin, BGRABitmap, BGRABitmapTypes, ATSynEdit, gittan.lexers, gittan.sidenav, gittan.ai, gittan.update,
   gittan.forge;
 
+const
+  {** The website and the source, for the About page and the Help menu. }
+  GittanSite = 'https://gittan.app';
+  GittanSource = 'https://github.com/slicke/gittan';
+
 type
   {** The pages, in the sidebar's order. }
   TSettingsPage = (pgEditor, pgTools, pgHosting, pgAI, pgAbout);
@@ -177,6 +182,7 @@ resourcestring
   rsAboutName = 'Gittan';
   rsAboutTagline = 'Git Tree Analyzer & Navigator';
   rsAboutBuild = 'Build %d';
+  rsAboutVersion = 'Version %s';
   rsAboutLocalBuild = 'A local build of %s';
   rsAboutText = 'A free, native git client built around the diff.';
   rsCheckUpdates = 'Check for &Updates';
@@ -186,7 +192,7 @@ resourcestring
   rsUpdateLatest = 'The latest release is %s';
   rsUpdateFailed = 'Could not ask GitHub: %s';
   rsRunsOn = 'What it runs on and with';
-  rsVersionGittan = 'Gittan build %d';
+  rsVersionGittan = 'Gittan %s';
   rsVersionGittanLocal = 'Gittan, a local build of %s';
   rsVersionNotFound = '%s not found';
   rsVersionAIOff = 'The AI features are off';
@@ -220,8 +226,6 @@ const
   AboutIconSize = 64;
   {** The lines ShowVersions writes, held while they are read. }
   VersionLines = 6;
-  GittanSite = 'https://gittan.app';
-  GittanSource = 'https://github.com/slicke/gittan';
 
 type
   TSample = record
@@ -726,7 +730,9 @@ begin
   Lbl.Font.Style := [fsBold];
   Lbl := AddLabel(rsAboutTagline, 0);
   Lbl.ShowAccelChar := False;
-  if CurrentBuild >= 0 then
+  if GittanVersion <> '' then
+    Lbl := AddLabel(Format(rsAboutVersion, [GittanVersion]), 6)
+  else if CurrentBuild >= 0 then
     Lbl := AddLabel(Format(rsAboutBuild, [CurrentBuild]), 6)
   else
     Lbl := AddLabel(Format(rsAboutLocalBuild, [{$I %DATE%}]), 6);
@@ -1540,7 +1546,7 @@ begin
   Lines := TStringList.Create;
   try
     if CurrentBuild >= 0 then
-      Lines.Add(Format(rsVersionGittan, [CurrentBuild]))
+      Lines.Add(Format(rsVersionGittan, [CurrentBuildName]))
     else
       Lines.Add(Format(rsVersionGittanLocal, [{$I %DATE%}]));
     if GitVersionOf(GitExe, Version, Major, Minor) then

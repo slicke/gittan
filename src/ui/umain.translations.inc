@@ -29,7 +29,7 @@ end;
 { Whether the view is of a file in the tree, which F7 steps on from. }
 function TRepoFrame.ShowsChangedFile: boolean;
 begin
-  Result := (FView in [gvChanges, gvImage]) or
+  Result := (FView in [gvChanges, gvImage, gvMerge]) or
     ((FView in [gvTranslation, gvBinary]) and (FCurrentPath <> ''));
 end;
 

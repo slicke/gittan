@@ -13,7 +13,14 @@ uses
   {$IFDEF LCLWin32}
   uDarkStyleParams, uMetaDarkStyle, uDarkStyleSchemes,
   {$ENDIF}
-  Forms, uwindow,
+  {$IFDEF LCLGtk3}
+  LazGLib2,
+  {$ENDIF}
+  Forms,
+  { Before any window: the brush cache that survives a change of the
+    system's appearance. }
+  gittan.brushcache,
+  uwindow,
   { The forges and the AI agents, which register themselves as they
     load. }
   gittan.github, gittan.agentcli, gittan.openai
@@ -23,6 +30,12 @@ uses
 
 begin
   Application.Title:='Git Tree Analyzer & Navigator';
+  {$IFDEF LCLCocoa}
+  { The application menu's Hide, Quit and About items name the title,
+    and Cocoa reads its ampersand as an accelerator and drops it; they
+    name the application as the menu bar does. }
+  Application.Title:='Gittan';
+  {$ENDIF}
   RequireDerivedFormResource:=True;
   Application.Scaled:=True;
   {$PUSH}{$WARN 5044 OFF}
@@ -34,6 +47,14 @@ begin
     follow a change while Gittan runs (see IsDarkMode). }
   PreferredAppMode := pamAllowDark;
   ApplyMetaDarkStyle(DefaultDark);
+  {$ENDIF}
+  {$IFDEF LCLGtk3}
+  { GTK names the window's Wayland app_id after the program, ./Gittan
+    giving Gittan. A Wayland compositor (KDE's, GNOME's) takes the window's
+    icon from the .desktop file of that name, not from the executable, and
+    shows a generic one without it: make desktop installs
+    app.gittan.Gittan.desktop and the icons. Set before a window is shown. }
+  g_set_prgname('app.gittan.Gittan');
   {$ENDIF}
   Application.Initialize;
   {$IFDEF DARWIN}

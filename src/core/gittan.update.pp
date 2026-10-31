@@ -21,6 +21,10 @@ const
     build, which is what the warning that it is not set means. }
   {$PUSH}{$WARN 2054 OFF}
   GittanBuild = {$I %GITTAN_BUILD%};
+  {** The version CI compiled in, Major.Minor from Gittan.lpi and the
+    build number (0.9.123, `make version`), from GITTAN_VERSION; empty
+    where GittanBuild is. }
+  GittanVersion = {$I %GITTAN_VERSION%};
   {$POP}
 
   {** The latest release, as GitHub's API answers it. }
@@ -63,6 +67,11 @@ function BuildOfTag(const ATag: string): integer;
 {** This build's number, -1 for a local build. }
 function CurrentBuild: integer;
 
+{** This build as the messages name it: its version (0.9.123), or build
+  and its number where CI compiled in no version. Only for a build with a
+  number. }
+function CurrentBuildName: string;
+
 {** Reads GitHub's answer for one release; False when it is not one (an
   error message, say). }
 function ParseRelease(const AJson: string; out ARelease: TGittanRelease): boolean;
@@ -100,6 +109,14 @@ begin
   Result := StrToIntDef(GittanBuild, -1);
   if Result < 0 then
     Result := -1;
+end;
+
+function CurrentBuildName: string;
+begin
+  if GittanVersion <> '' then
+    Result := GittanVersion
+  else
+    Result := Format('build %d', [CurrentBuild]);
 end;
 
 function ParseRelease(const AJson: string; out ARelease: TGittanRelease): boolean;

@@ -10,7 +10,8 @@ unit testgithub;
 interface
 
 uses
-  Classes, SysUtils, DateUtils, fpcunit, testregistry, gittan.forge, gittan.github;
+  Classes, SysUtils, DateUtils, fpcunit, testregistry, gittan.forge, gittan.github,
+  testgit, testhelpers;
 
 type
   TGitHubTest = class(TTestCase)
@@ -18,6 +19,7 @@ type
     procedure TestRegistered;
     procedure TestHosts;
     procedure TestAccounts;
+    procedure TestAccountsSwitchedAtOnce;
     procedure TestParsePullRequest;
     procedure TestParsePullRequests;
     procedure TestWithoutReviewed;
@@ -122,6 +124,47 @@ begin
   AssertEquals('github.com=ada'#10, ActiveAccountsKey(Accounts));
   AssertEquals(0, Length(GhAccounts('')));
   AssertEquals('', ActiveAccountsKey(nil));
+end;
+
+procedure TGitHubTest.TestAccountsSwitchedAtOnce;
+var
+  Dir, Before: string;
+  Accounts: TGittanForgeAccounts;
+  Stamp: longint;
+
+  procedure Put(const AActive: string);
+  begin
+    with TStringList.Create do
+    try
+      Text := 'github.com:'#10'    users:'#10'        ada:'#10'        bob:'#10 +
+        '    user: ' + AActive;
+      SaveToFile(IncludeTrailingPathDelimiter(Dir) + 'hosts.yml');
+    finally
+      Free;
+    end;
+    { Both writes in the same second, whatever the clock does between. }
+    FileSetDate(IncludeTrailingPathDelimiter(Dir) + 'hosts.yml', Stamp);
+  end;
+
+begin
+  { A switch written in the second the file was read, at the same size,
+    is seen: the file's time counts whole seconds. }
+  Dir := IncludeTrailingPathDelimiter(GetTempDir) + 'gittan-gh-' + IntToStr(GetProcessID);
+  ForceDirectories(Dir);
+  Stamp := DateTimeToFileDate(Now);
+  Before := GetEnvironmentVariable('GH_CONFIG_DIR');
+  SetTestVariable('GH_CONFIG_DIR', Dir);
+  try
+    Put('ada');
+    Accounts := TGittanGitHubForge.Accounts;
+    AssertEquals('github.com=ada'#10, ActiveAccountsKey(Accounts));
+    Put('bob');
+    Accounts := TGittanGitHubForge.Accounts;
+    AssertEquals('github.com=bob'#10, ActiveAccountsKey(Accounts));
+  finally
+    SetTestVariable('GH_CONFIG_DIR', Before);
+    RemoveTree(Dir);
+  end;
 end;
 
 procedure TGitHubTest.TestParsePullRequest;

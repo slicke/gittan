@@ -26,6 +26,7 @@ type
     procedure TestFormatKiB;
     procedure TestFileCategory;
     procedure TestParseComposition;
+    procedure TestAdjustLineCounts;
   end;
 
   TRepoInfoRepoTest = class(TTestCase)
@@ -38,6 +39,7 @@ type
     procedure TearDown; override;
   published
     procedure TestGather;
+    procedure TestGatherWorkTree;
     procedure TestGatherEmpty;
     procedure TestGatherNotARepo;
   end;
@@ -226,6 +228,32 @@ begin
   AssertEquals('test lines', 0, C[fcTest].Lines);
 end;
 
+procedure TRepoInfoTest.TestAdjustLineCounts;
+var
+  C: string;
+  Flagged: TStringList;
+begin
+  C := AdjustLineCounts('abc', 'abc:a.pp'#0'10'#10'abc:gone.pp'#0'4'#10'abc:bin.pp'#0'6'#10 +
+    'abc:same.pp'#0'3'#10, '5'#9'2'#9'a.pp'#0'0'#9'4'#9'gone.pp'#0'7'#9'0'#9'new.pp'#0 +
+    '-'#9'-'#9'bin.pp'#0);
+  AssertEquals('changed, removed, made, binary, untouched',
+    'a.pp'#0'13'#10'new.pp'#0'7'#10'same.pp'#0'3'#10, C);
+  AssertEquals('no change', 'x'#0'1'#10, AdjustLineCounts('h', 'h:x'#0'1'#10, ''));
+  AssertEquals('none', '', AdjustLineCounts('h', '', ''));
+  Flagged := TStringList.Create;
+  try
+    AdjustLineCounts('h', 'h:bin'#0'2'#10, '-'#9'-'#9'bin'#0'1'#9'0'#9'x'#0, Flagged);
+    AssertEquals('a binary file to read again', 'bin', Flagged.Text.Trim);
+    Flagged.Clear;
+    ParseFlaggedFiles('H a.pp'#0'h b.pp'#0'S c d.pp'#0'M e'#0, Flagged);
+    AssertEquals('assume-unchanged and skip-worktree', 2, Flagged.Count);
+    AssertEquals('b.pp', Flagged[0]);
+    AssertEquals('c d.pp', Flagged[1]);
+  finally
+    Flagged.Free;
+  end;
+end;
+
 { TRepoInfoRepoTest }
 
 procedure TRepoInfoRepoTest.SetUp;
@@ -324,6 +352,48 @@ begin
   AssertEquals('code lines', 2, Info.Composition[fcCode].Lines);
   AssertEquals('test files', 1, Info.Composition[fcTest].Files);
   AssertEquals('test lines', 1, Info.Composition[fcTest].Lines);
+end;
+
+procedure TRepoInfoRepoTest.TestGatherWorkTree;
+var
+  Info: TGittanRepoInfo;
+begin
+  Git(['init', '-q', '-b', 'main']);
+  ForceDirectories(IncludeTrailingPathDelimiter(FDir) + 'src');
+  Put('src/x.pp', 'begin'#10'end.');
+  Put('a.txt', 'one');
+  Git(['add', '-A']);
+  Git(['commit', '-q', '-m', 'first']);
+  Info := GatherRepoInfo(FDir, 5, 5);
+  AssertEquals('code lines', 2, Info.Composition[fcCode].Lines);
+  { The working tree's lines, read again with the commit's kept. }
+  Put('src/x.pp', 'begin'#10'  a;'#10'  b;'#10'end.');
+  Put('b.md', 'x'#10'y'#10'z');
+  Git(['add', 'b.md']);
+  DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'a.txt');
+  Info := GatherRepoInfo(FDir, 5, 5);
+  AssertEquals('code lines', 4, Info.Composition[fcCode].Lines);
+  AssertEquals('doc lines', 3, Info.Composition[fcDocs].Lines);
+  { A new commit is counted anew. }
+  Git(['commit', '-q', '-a', '-m', 'second']);
+  Put('src/x.pp', 'end.');
+  Info := GatherRepoInfo(FDir, 5, 5);
+  AssertEquals('code lines after the commit', 1, Info.Composition[fcCode].Lines);
+  AssertEquals('doc lines after the commit', 3, Info.Composition[fcDocs].Lines);
+  { A file git is told to take as unchanged is read from the disk. }
+  Git(['commit', '-q', '-a', '-m', 'third']);
+  Git(['update-index', '--assume-unchanged', 'src/x.pp']);
+  Put('src/x.pp', 'a'#10'b'#10'c'#10'd'#10'e'#10);
+  Info := GatherRepoInfo(FDir, 5, 5);
+  AssertEquals('assume-unchanged lines', 5, Info.Composition[fcCode].Lines);
+  Git(['update-index', '--no-assume-unchanged', 'src/x.pp']);
+  { A file binary in the commit and text now. }
+  Put('src/y.pp', 'a'#0'b');
+  Git(['add', 'src/y.pp']);
+  Git(['commit', '-q', '-m', 'binary']);
+  Put('src/y.pp', 'one'#10'two'#10);
+  Info := GatherRepoInfo(FDir, 5, 5);
+  AssertEquals('binary to text lines', 7, Info.Composition[fcCode].Lines);
 end;
 
 procedure TRepoInfoRepoTest.TestGatherEmpty;

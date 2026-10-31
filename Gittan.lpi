@@ -15,7 +15,7 @@
     </General>
     <VersionInfo>
       <UseVersionInfo Value="True"/>
-      <MinorVersionNr Value="9"/>
+      <MinorVersionNr Value="10"/>
       <StringTable FileDescription="Git Tree Analyzer &amp; Navigator" InternalName="Gittan" OriginalFilename="Gittan.exe" ProductName="Git Tree Analyzer &amp; Navigator"/>
     </VersionInfo>
     <BuildModes>
@@ -229,6 +229,14 @@
       </Unit>
       <Unit>
         <Filename Value="src/ui/gittan.imagediff.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
+        <Filename Value="src/core/gittan.merge.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
+        <Filename Value="src/ui/gittan.mergeview.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>

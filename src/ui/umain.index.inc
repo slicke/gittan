@@ -28,8 +28,6 @@
 const
   { Files larger than this are not parsed for the index. }
   MaxIndexedSize = 2 * 1024 * 1024;
-  { How often the status bar shows the indexing progress. }
-  IndexReportEvery = 25;
 
 { Orders the queue by extension, then by path, so the files of one
   lexer come together and the adapter seldom changes lexer. }
@@ -58,6 +56,27 @@ begin
     { The configuration folder cannot be written; the index is rebuilt
       next time. }
   end;
+end;
+
+{ The indexing's progress on the status bar's track, in the accent after
+  a magnifying glass, and on the band over the title bar, for every
+  file: the status bar paints once for the files taken from the index
+  in one go, and the big files of a large repository take seconds. }
+procedure TRepoFrame.UpdateIndexProgress;
+begin
+  if FIndexing and (FIndexTotal > 0) then
+  begin
+    FStatus.SetProgress(Format(rsIndexing, [FIndexPos, FIndexTotal]),
+      FIndexPos, FIndexTotal, HintSearch);
+    FStatus.PartHint[spProgress] := Format(rsIndexingHint,
+      [FIndexPos, FIndexTotal, FIndexPos * 100 div FIndexTotal]);
+  end
+  else
+  begin
+    FStatus.SetProgress('', 0, 0);
+    FStatus.PartHint[spProgress] := '';
+  end;
+  UpdateIndexBand;
 end;
 
 procedure TRepoFrame.StopIndexing;
@@ -114,12 +133,11 @@ begin
     Exit;
   while FIndexPos < FIndexQueue.Count do
   begin
+    { The count is of the files done, so the last one parsed does not
+      show 100% yet. }
+    UpdateIndexProgress;
     Path := FIndexQueue[FIndexPos];
     Inc(FIndexPos);
-    if FIndexPos mod IndexReportEvery = 0 then
-      UpdateStatus
-    else
-      UpdateIndexBand;
     Full := IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(Path);
     if not FileStamp(Full, Size, Time) then
     begin

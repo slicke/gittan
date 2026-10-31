@@ -141,6 +141,9 @@ type
     FCommits: TGittanCommitLines;
     FAhead, FBehind: integer;
     FHasUpstream: boolean;
+    { The branch was rewritten here since it was pushed: the upstream's
+      commits it lacks are the ones it replaced, not ones to pull. }
+    FRewritten: boolean;
     { A branch without an upstream: how many of its commits are on no
       remote, -1 without a remote (or with an upstream). }
     FNotOnRemote: integer;
@@ -299,11 +302,13 @@ type
       clean", and after it how many commits the branch is ahead of
       (AAhead) and behind (ABehind) its upstream when it has one
       (AHasUpstream), or, without one, how many are on no remote yet
-      (ANotOnRemote; -1 says nothing, as without a remote). The commits
-      show only while there are no changed files and some are not
-      pushed. }
+      (ANotOnRemote; -1 says nothing, as without a remote). ARewritten
+      says the commits behind were replaced here (a rebase or an amend
+      of pushed commits). The commits show only while there are no
+      changed files and some are not pushed. }
     procedure SetCommits(const ACommits: TGittanCommitLines;
-      AAhead, ABehind: integer; AHasUpstream: boolean; ANotOnRemote: integer = -1);
+      AAhead, ABehind: integer; AHasUpstream: boolean; ANotOnRemote: integer = -1;
+      ARewritten: boolean = False);
     {** Whether the upstream is deleted on the remote, which the sync
       line then says in place of the counts. }
     procedure SetUpstreamGone(AGone: boolean);
@@ -382,6 +387,7 @@ resourcestring
   rsRecentCommits = 'Recent commits';
   rsNotPushed = '%d not pushed';
   rsNotPulled = '%d not pulled';
+  rsReplacedHere = '%d replaced here';
   rsInSync = 'up to date with upstream';
   rsNotOnRemote = '%d not on the remote yet';
   rsBranchNotOnRemote = 'branch not on the remote yet';
@@ -391,8 +397,7 @@ resourcestring
   rsBehindMerge = 'Merge';
   rsUpstreamGone = '✕ upstream deleted on remote';
   rsBinary = 'binary';
-  rsStaged = 'staged';
-  rsPartlyStaged = 'partly staged';
+  rsPartlyAdded = 'partly added with git add';
   rsNoteCommented = 'commented';
   rsNoteApproved = 'approved';
   rsNoteChangesRequested = 'requested changes';
@@ -511,12 +516,14 @@ begin
 end;
 
 procedure TGittanSummary.SetCommits(const ACommits: TGittanCommitLines;
-  AAhead, ABehind: integer; AHasUpstream: boolean; ANotOnRemote: integer);
+  AAhead, ABehind: integer; AHasUpstream: boolean; ANotOnRemote: integer;
+  ARewritten: boolean);
 begin
   FCommits := Copy(ACommits);
   FAhead := AAhead;
   FBehind := ABehind;
   FHasUpstream := AHasUpstream;
+  FRewritten := AHasUpstream and ARewritten;
   if AHasUpstream then
     FNotOnRemote := -1
   else
@@ -1984,13 +1991,11 @@ begin
     Canvas.TextOut(X + Px(ChipPadX), TextY, RowAction);
     Inc(X, W + Px(Gap));
   end;
-  { What the index holds, when the path left room for it. }
-  if Stat.Staged then
+  { An index that holds part of the change, when the path left room for
+    it: the commit takes the whole file, not only what git add took. }
+  if Stat.Staged and Stat.Unstaged then
   begin
-    if Stat.Unstaged then
-      Count := rsPartlyStaged
-    else
-      Count := rsStaged;
+    Count := rsPartlyAdded;
     if X + Canvas.TextWidth(Count) <= CountsX - Px(Gap) then
     begin
       Canvas.Font.Color := FDim;
@@ -2148,7 +2153,9 @@ begin
   begin
     if FAhead > 0 then
       Part('↑ ' + Format(rsNotPushed, [FAhead]), FLink);
-    if FBehind > 0 then
+    if (FBehind > 0) and FRewritten then
+      Part('↓ ' + Format(rsReplacedHere, [FBehind]), FText)
+    else if FBehind > 0 then
       Part('↓ ' + Format(rsNotPulled, [FBehind]), FText);
     if (FAhead = 0) and (FBehind = 0) then
       Part(rsInSync, FDim);

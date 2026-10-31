@@ -98,6 +98,14 @@ type
   %(refname)' refs/heads`, sorted by name. }
 function ParseBranchTips(const AOutput: string): TGittanBranchTips;
 
+{** The entry of `git reflog --format='%H %gs' HEAD` (newest first) that
+  moved HEAD to AHead, for TGittanRefState.Move: the newest one, leaving
+  out the resets that moved it nowhere (`git stash`, a `git reset` that
+  only unstages, both "reset: moving to HEAD"), which would hide the
+  commit before them. '' when that entry is not at AHead or none is
+  read, as the branches then name the step. }
+function ParseHeadMove(const AOutput, AHead: string): string;
+
 {** Whether the branches and HEAD are the same in A and B (Move aside). }
 function SameRefState(const A, B: TGittanRefState): boolean;
 
@@ -177,6 +185,43 @@ begin
         Dec(j);
       end;
       Result[j] := Tip;
+    end;
+  finally
+    Lines.Free;
+  end;
+end;
+
+function ParseHeadMove(const AOutput, AHead: string): string;
+var
+  Lines: TStringList;
+  i, Space, Older: integer;
+  Id, Subject, OlderId: string;
+begin
+  Result := '';
+  Lines := TStringList.Create;
+  try
+    Lines.Text := AOutput;
+    for i := 0 to Lines.Count - 1 do
+    begin
+      Space := Pos(' ', Lines[i]);
+      if Space = 0 then
+        Continue;
+      Id := Copy(Lines[i], 1, Space - 1);
+      Subject := Trim(Copy(Lines[i], Space + 1, MaxInt));
+      { A reset to where HEAD was already moved nothing; the entry before
+        it says what did. The oldest entry read stands as it is. }
+      Older := i + 1;
+      while (Older < Lines.Count) and (Pos(' ', Lines[Older]) = 0) do
+        Inc(Older);
+      if (Older < Lines.Count) and AnsiStartsStr('reset:', Subject) then
+      begin
+        OlderId := Copy(Lines[Older], 1, Pos(' ', Lines[Older]) - 1);
+        if OlderId = Id then
+          Continue;
+      end;
+      if Id = AHead then
+        Result := Subject;
+      Exit;
     end;
   finally
     Lines.Free;
