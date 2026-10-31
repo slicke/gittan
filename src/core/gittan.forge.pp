@@ -267,8 +267,8 @@ function OpenPulls(const APulls: TGittanForgePulls): TGittanForgePulls;
 function WithFeedback(const APulls: TGittanForgePulls): TGittanForgePulls;
 
 {** The names of the checks ignored by the user, as one settings value
-  (joined with bars, which a name cannot hold) and back; a name is
-  trimmed, an empty one dropped. }
+  (joined with bars, a bar or a backslash in a name after a backslash)
+  and back; a name is trimmed, an empty one dropped. }
 procedure SplitCheckNames(const AText: string; AInto: TStrings);
 function JoinCheckNames(AList: TStrings): string;
 {** Whether AName is one of AIgnored (nil for none; the case does not
@@ -1235,14 +1235,31 @@ end;
 
 procedure SplitCheckNames(const AText: string; AInto: TStrings);
 var
-  Parts: TStringArray;
   Part: string;
+  i: integer;
 begin
   AInto.Clear;
-  Parts := AText.Split(['|']);
-  for Part in Parts do
-    if Trim(Part) <> '' then
-      AInto.Add(Trim(Part));
+  Part := '';
+  i := 1;
+  while i <= Length(AText) do
+  begin
+    if (AText[i] = '\') and (i < Length(AText)) and (AText[i + 1] in ['|', '\']) then
+    begin
+      Part := Part + AText[i + 1];
+      Inc(i);
+    end
+    else if AText[i] = '|' then
+    begin
+      if Trim(Part) <> '' then
+        AInto.Add(Trim(Part));
+      Part := '';
+    end
+    else
+      Part := Part + AText[i];
+    Inc(i);
+  end;
+  if Trim(Part) <> '' then
+    AInto.Add(Trim(Part));
 end;
 
 function JoinCheckNames(AList: TStrings): string;
@@ -1258,7 +1275,8 @@ begin
       Continue;
     if Result <> '' then
       Result := Result + '|';
-    Result := Result + Trim(AList[i]);
+    Result := Result + StringReplace(StringReplace(Trim(AList[i]), '\', '\\',
+      [rfReplaceAll]), '|', '\|', [rfReplaceAll]);
   end;
 end;
 

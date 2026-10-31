@@ -312,6 +312,7 @@ resourcestring
   rsForgeLink = '%s ↗';
   rsCloneLink = 'Open %s';
   rsDraft = 'Draft';
+  rsChecksIgnored = 'checks ignored';
   rsAskedAgain = 'Asked again';
   rsOpened = 'opened %s';
   rsUpdated = 'updated %s';
@@ -1429,7 +1430,13 @@ begin
     Right := ChipR.Left - Px(Gap) div 2;
   end
   else if HasChecksMenu then
-    AddLink(Rect(Right, ChipTop, Right, ChipTop), ChecksLink + IntToStr(AIndex));
+  begin
+    { Every check ignored: a dim chip still opens the menu, to count one
+      again. }
+    ChipR := PaintChip(Right, ChipTop, rsChecksIgnored, FDim);
+    AddLink(ChipR, ChecksLink + IntToStr(AIndex));
+    Right := ChipR.Left - Px(Gap) div 2;
+  end;
   if APull.IsDraft then
     Right := PaintChip(Right, ChipTop, rsDraft, FDim).Left - Px(Gap) div 2
   else

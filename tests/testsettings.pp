@@ -477,6 +477,8 @@ begin
     S.Load;
     AssertEquals('feedback,stale', S.ForgeValue('GitHub', 'MineFilters'));
     AssertEquals('nodrafts', S.ForgeValue('GitHub', 'ReviewFilters'));
+    { Written, then cleared: the key goes from the file. }
+    S.Save;
     S.SetForgeValue('GitHub', 'MineFilters', 'attention');
     S.SetForgeValue('GitHub', 'ReviewFilters', '');
     S.Save;
@@ -497,6 +499,23 @@ begin
     AssertEquals('attention', S.ForgeValue('GitHub', 'MineFilters'));
     AssertEquals('an empty value with the new one there stays empty', '',
       S.ForgeValue('GitHub', 'ReviewFilters'));
+  finally
+    S.Free;
+  end;
+  { One section's keys there already: only the other is migrated. }
+  F := TStringList.Create;
+  try
+    F.Text := '[GitHub]'#10'ReviewFilters=new'#10'HideWithoutFeedback=1'#10 +
+      'HideReviewDrafts=1'#10;
+    F.SaveToFile(FFileName);
+  finally
+    F.Free;
+  end;
+  S := TGittanSettings.Create(FFileName);
+  try
+    S.Load;
+    AssertEquals('feedback', S.ForgeValue('GitHub', 'MineFilters'));
+    AssertEquals('the saved one kept', 'new', S.ForgeValue('GitHub', 'ReviewFilters'));
   finally
     S.Free;
   end;

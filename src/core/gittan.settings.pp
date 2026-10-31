@@ -456,7 +456,8 @@ begin
         for Key in ForgeValueKeys do
           if Ini.ValueExists(Forge.Name, Key) then
             SetForgeValue(Forge.Name, Key, Ini.ReadString(Forge.Name, Key, ''));
-      { Earlier versions kept GitHub's filters as flags. }
+      { Earlier versions kept GitHub's filters as flags; each section
+        that has no keys yet takes its own. }
       if not Ini.ValueExists(SecGitHub, 'MineFilters') then
       begin
         Keys := '';
@@ -465,6 +466,9 @@ begin
         AddFlag(Ini.ReadBool(SecGitHub, 'HideDrafts', False), 'nodrafts');
         AddFlag(Ini.ReadBool(SecGitHub, 'OnlyStale', False), 'stale');
         SetForgeValue(SecGitHub, 'MineFilters', Keys);
+      end;
+      if not Ini.ValueExists(SecGitHub, 'ReviewFilters') then
+      begin
         Keys := '';
         AddFlag(Ini.ReadBool(SecGitHub, 'OnlyAskedOfMe', False), 'askedofme');
         AddFlag(Ini.ReadBool(SecGitHub, 'HideReviewDrafts', False), 'nodrafts');
@@ -590,6 +594,12 @@ begin
       for Key in ['HideWithoutFeedback', 'OnlyNeedsAttention', 'HideDrafts', 'OnlyAskedOfMe',
           'HideReviewDrafts', 'OnlyStale'] do
         Ini.DeleteKey(SecGitHub, Key);
+      { A value cleared goes from the file too, or the next load would
+        bring it back. }
+      for Forge in RegisteredForges do
+        for Key in ForgeValueKeys do
+          if ForgeValue(Forge.Name, Key) = '' then
+            Ini.DeleteKey(Forge.Name, Key);
       for i := 0 to FForgeValues.Count - 1 do
       begin
         Keys := FForgeValues.Names[i];

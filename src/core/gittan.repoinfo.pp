@@ -129,8 +129,18 @@ function ParseComposition(const AFiles, ALineCounts: string): TGittanComposition
   (`git grep -I -c -z -e ^ <AHead>`, each path after "<AHead>:") and
   what changed since (`git diff <AHead> --numstat --no-renames -z`): a
   file's lines with those added and less those removed. A file binary
-  on either side counts as one with no lines. }
-function AdjustLineCounts(const AHead, AHeadCounts, ANumstat: string): string;
+  on either side counts as one with no lines, and goes in ARecount
+  when given, for RecountLines: it may be text now. }
+function AdjustLineCounts(const AHead, AHeadCounts, ANumstat: string;
+  ARecount: TStrings = nil): string;
+{** Adds to AInto the files `git ls-files -v -z` marks assume-unchanged
+  (a lowercase tag) or skip-worktree (S), which git diff passes over. }
+procedure ParseFlaggedFiles(const AOutput: string; AInto: TStrings);
+{** ACounts (as AdjustLineCounts gives them) with the lines of APaths
+  counted in the working tree under ARoot, as git grep -I counts them:
+  none for a binary file (a NUL in its first 8000 bytes) or one that is
+  gone. }
+function RecountLines(const ACounts, ARoot: string; APaths: TStrings): string;
 
 {** A count with its thousands grouped by a thin space: 1 234 567. }
 function GroupDigits(AValue: int64): string;
@@ -166,7 +176,7 @@ type
 implementation
 
 uses
-  StrUtils, DateUtils, Math;
+  StrUtils, DateUtils, Math, gittan.textfile;
 
 resourcestring
   rsCodeFiles = 'Code files';
@@ -600,20 +610,46 @@ begin
   end;
 end;
 
-function AdjustLineCounts(const AHead, AHeadCounts, ANumstat: string): string;
+{ The counts in the form ParseComposition reads. }
+function WriteLineCounts(ACounts: TStringList): string;
+var
+  Sb: TStringBuilder;
+  i: integer;
+begin
+  Sb := TStringBuilder.Create;
+  try
+    for i := 0 to ACounts.Count - 1 do
+    begin
+      Sb.Append(ACounts[i]);
+      Sb.Append(#0);
+      Sb.Append(IntToStr(PtrInt(ACounts.Objects[i])));
+      Sb.Append(#10);
+    end;
+    Result := Sb.ToString;
+  finally
+    Sb.Free;
+  end;
+end;
+
+function NewCountList: TStringList;
+begin
+  Result := TStringList.Create;
+  Result.CaseSensitive := True;
+  Result.Sorted := True;
+  Result.Duplicates := dupIgnore;
+end;
+
+function AdjustLineCounts(const AHead, AHeadCounts, ANumstat: string;
+  ARecount: TStrings): string;
 var
   Counts: TStringList;
   P, Nul, Tab1, Tab2, i: integer;
   Path: string;
   Added, Removed, Count: int64;
   Binary: boolean;
-  Sb: TStringBuilder;
 begin
-  Counts := TStringList.Create;
+  Counts := NewCountList;
   try
-    Counts.CaseSensitive := True;
-    Counts.Sorted := True;
-    Counts.Duplicates := dupIgnore;
     ReadLineCounts(AHeadCounts, AHead + ':', Counts);
     { A record is "<added>\t<removed>\t<path>" up to its NUL. }
     P := 1;
@@ -644,24 +680,71 @@ begin
             Count := Count + Added - Removed;
             if Count > 0 then
               Counts.AddObject(Path, TObject(PtrInt(Count)));
-          end;
+          end
+          else if ARecount <> nil then
+            ARecount.Add(Path);
         end;
       end;
       P := Nul + 1;
     end;
-    Sb := TStringBuilder.Create;
-    try
-      for i := 0 to Counts.Count - 1 do
-      begin
-        Sb.Append(Counts[i]);
-        Sb.Append(#0);
-        Sb.Append(IntToStr(PtrInt(Counts.Objects[i])));
-        Sb.Append(#10);
+    Result := WriteLineCounts(Counts);
+  finally
+    Counts.Free;
+  end;
+end;
+
+procedure ParseFlaggedFiles(const AOutput: string; AInto: TStrings);
+var
+  P, Nul: integer;
+begin
+  P := 1;
+  while P <= Length(AOutput) do
+  begin
+    Nul := Pos(#0, AOutput, P);
+    if Nul = 0 then
+      Nul := Length(AOutput) + 1;
+    if (Nul - P > 2) and (AOutput[P + 1] = ' ') and
+      ((AOutput[P] in ['a'..'z']) or (AOutput[P] = 'S')) then
+      AInto.Add(Copy(AOutput, P + 2, Nul - P - 2));
+    P := Nul + 1;
+  end;
+end;
+
+function RecountLines(const ACounts, ARoot: string; APaths: TStrings): string;
+var
+  Counts: TStringList;
+  Data: RawByteString;
+  FileName: string;
+  i, j: integer;
+  Count: int64;
+begin
+  Counts := NewCountList;
+  try
+    ReadLineCounts(ACounts, '', Counts);
+    for i := 0 to APaths.Count - 1 do
+    begin
+      if Counts.Find(APaths[i], j) then
+        Counts.Delete(j);
+      FileName := IncludeTrailingPathDelimiter(ARoot) + SetDirSeparators(APaths[i]);
+      if not FileExists(FileName) then
+        Continue;
+      try
+        Data := ReadFileBytes(FileName);
+      except
+        Continue;
       end;
-      Result := Sb.ToString;
-    finally
-      Sb.Free;
+      if Pos(#0, Copy(Data, 1, 8000)) > 0 then
+        Continue;
+      Count := 0;
+      for j := 1 to Length(Data) do
+        if Data[j] = #10 then
+          Inc(Count);
+      if (Data <> '') and (Data[Length(Data)] <> #10) then
+        Inc(Count);
+      if Count > 0 then
+        Counts.AddObject(APaths[i], TObject(PtrInt(Count)));
     end;
+    Result := WriteLineCounts(Counts);
   finally
     Counts.Free;
   end;
@@ -771,10 +854,10 @@ function GatherRepoInfo(const ARoot: string; AMaxContributors, AMaxTags: integer
 var
   Info: TGittanRepoInfo;
   Repo: TGittanRepo;
-  Output, Err, Line, Counts, Head, HeadCounts, Numstat: string;
+  Output, Err, Line, Counts, Head, HeadCounts, Numstat, Flags: string;
   Cat: TGittanFileCategory;
   Seconds: int64;
-  Lines: TStringList;
+  Lines, Recount: TStringList;
 
   { Runs git at the root; a failure is kept as the error, the first one. }
   function Run(const AArgs: array of string): boolean;
@@ -866,7 +949,21 @@ begin
     if (Head <> '') and HeadLineCounts(ARoot, Head, HeadCounts) and
       RunGitIn(ARoot, ['diff', Head, '--numstat', '--no-renames', '--no-ext-diff', '-z'],
       Numstat, Err) then
-      Counts := AdjustLineCounts(Head, HeadCounts, Numstat)
+    begin
+      { A file binary in the commit may be text now, and git diff says
+        nothing of a file it is told to take as unchanged: both are
+        read from the disk. }
+      Recount := TStringList.Create;
+      try
+        Counts := AdjustLineCounts(Head, HeadCounts, Numstat, Recount);
+        if RunGitIn(ARoot, ['ls-files', '-v', '-z'], Flags, Err) then
+          ParseFlaggedFiles(Flags, Recount);
+        if Recount.Count > 0 then
+          Counts := RecountLines(Counts, ARoot, Recount);
+      finally
+        Recount.Free;
+      end;
+    end
     else if not RunGitIn(ARoot, ['grep', '-I', '-c', '-z', '--no-color', '-e', '^'], Counts, Err) then
       Counts := '';
     Info.Composition := ParseComposition(Output, Counts);

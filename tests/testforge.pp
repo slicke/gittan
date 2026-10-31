@@ -371,6 +371,17 @@ begin
     AssertEquals('b', Ignored[1]);
     AssertEquals('a|b', JoinCheckNames(Ignored));
     AssertEquals('', JoinCheckNames(nil));
+    { A bar or a backslash in a name comes back. }
+    Ignored.Clear;
+    Ignored.Add('lint | strict');
+    Ignored.Add('C:\path');
+    AssertEquals('lint \| strict|C:\\path', JoinCheckNames(Ignored));
+    SplitCheckNames(JoinCheckNames(Ignored), Ignored);
+    AssertEquals(2, Ignored.Count);
+    AssertEquals('lint | strict', Ignored[0]);
+    AssertEquals('C:\path', Ignored[1]);
+    SplitCheckNames('old\name|x', Ignored);
+    AssertEquals('a backslash before anything else stays', 'old\name', Ignored[0]);
   finally
     Ignored.Free;
   end;

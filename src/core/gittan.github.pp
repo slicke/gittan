@@ -44,7 +44,7 @@ const
     'fragment pull on PullRequest { number title url isDraft state reviewDecision ' +
     'createdAt updatedAt author { login } repository { nameWithOwner } ' +
     'headRefName baseRefName viewerLatestReview { state } ' +
-    'reviewRequests(first: 20) { nodes { requestedReviewer { __typename ' +
+    'reviewRequests(first: 100) { nodes { requestedReviewer { __typename ' +
     '... on User { login } ... on Team { name } ... on Bot { login } ' +
     '... on Mannequin { login } } } } ' +
     'latestReviews(first: 20) { nodes { state author { __typename login } } } ' +
@@ -1383,16 +1383,17 @@ begin
   if LoggedHostsRead and (Path = LoggedHostsPath) and (Stamp = LoggedHostsStamp) and
     (Size = LoggedHostsSize) and (LoggedHostsAt >= Stamp + 2 / SecsPerDay) then
     Exit(LoggedHosts);
-  LoggedHostsStamp := Stamp;
-  LoggedHostsSize := Size;
-  LoggedHostsAt := Now;
   Text := '';
   if Size >= 0 then
     try
       Text := ReadFileBytes(Path);
     except
-      Text := '';
+      { Read again on the next call; what was read last stands. }
+      Exit(LoggedHosts);
     end;
+  LoggedHostsStamp := Stamp;
+  LoggedHostsSize := Size;
+  LoggedHostsAt := Now;
   if not LoggedHostsRead or (Text <> LoggedHostsText) or (Path <> LoggedHostsPath) then
   begin
     LoggedHostsRead := True;
