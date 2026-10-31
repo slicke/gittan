@@ -133,9 +133,11 @@ begin
     Exit;
   while FIndexPos < FIndexQueue.Count do
   begin
+    { The count is of the files done, so the last one parsed does not
+      show 100% yet. }
+    UpdateIndexProgress;
     Path := FIndexQueue[FIndexPos];
     Inc(FIndexPos);
-    UpdateIndexProgress;
     Full := IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(Path);
     if not FileStamp(Full, Size, Time) then
     begin

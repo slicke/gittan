@@ -225,8 +225,14 @@ begin
   if FBranchCommitMenu = nil then
     Exit;
   { The menu is built before the repository object is. }
-  if (FRepo <> nil) and (FRepo.Root <> '') and BlameShown and FRepo.GraphCommit(FBlameCommit.Hash, Commit) then
+  if (FRepo <> nil) and (FRepo.Root <> '') and BlameShown and
+    (FBranchCommit.Hash <> FBlameCommit.Hash) then
+    if not FRepo.GraphCommit(FBlameCommit.Hash, FBranchCommit) then
+      FBranchCommit := Default(TGittanGraphCommit);
+  if (FRepo <> nil) and (FRepo.Root <> '') and BlameShown and
+    (FBranchCommit.Hash = FBlameCommit.Hash) and (FBranchCommit.Hash <> '') then
   begin
+    Commit := FBranchCommit;
     FBranchCommitMenu.Caption := Format(rsBmCommitMenu, [Commit.Short]);
     FillCommitMenu(FBranchCommitMenu, Commit);
     Exit;

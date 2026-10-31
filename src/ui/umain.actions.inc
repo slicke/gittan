@@ -1705,7 +1705,7 @@ begin
     end;
   end;
   { A selection over changed lines: those lines out of the commit, or in. }
-  FBlockLinesItem.Visible := (FPopupEd = Edit) and (FView = gvChanges) and CanLeaveOut and
+  FBlockLinesItem.Visible := (FView = gvChanges) and CanLeaveOut and
     SelectedPairs(LinePairs, Including);
   if Including then
     FBlockLinesItem.Caption := rsIncludeLinesItem
@@ -1929,8 +1929,9 @@ const
 procedure TRepoFrame.ShowCommitGraph(const AFilter, AKeep: string);
 var
   Commits: TGittanGraphCommits;
-  Limit: integer;
+  Limit, i: integer;
   Filter, Keep: string;
+  Found: boolean;
 begin
   if FRepo.Root = '' then
     Exit;
@@ -1955,6 +1956,23 @@ begin
   Screen.Cursor := crHourGlass;
   try
     FRepo.GraphCommits(Commits, Limit);
+    { A commit to stay on past the newest ones (picked after More, then
+      Back): the history up to the search's limit. }
+    if (Keep <> '') and (Limit < GraphSearchLimit) and (Length(Commits) >= Limit) then
+    begin
+      Found := False;
+      for i := 0 to High(Commits) do
+        if Commits[i].Hash = Keep then
+        begin
+          Found := True;
+          Break;
+        end;
+      if not Found then
+      begin
+        Limit := GraphSearchLimit;
+        FRepo.GraphCommits(Commits, Limit);
+      end;
+    end;
   finally
     Screen.Cursor := crDefault;
   end;

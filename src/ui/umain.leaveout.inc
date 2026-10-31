@@ -297,6 +297,30 @@ var
       Sel[ALine] := True;
   end;
 
+  { The rows selected in AEd; the two sides of Side by Side have the
+    same rows. }
+  procedure MarkSelected(AEd: TATSynEdit);
+  var
+    c, Row: integer;
+  begin
+    for c := 0 to AEd.Carets.Count - 1 do
+    begin
+      AEd.Carets[c].GetRange(X1, Y1, X2, Y2, HasSel);
+      if not HasSel then
+        Continue;
+      if (X2 = 0) and (Y2 > Y1) then
+        Dec(Y2);
+      for Row := Y1 to Y2 do
+        if (Row <= High(FRows)) and not FRows[Row].Hidden then
+        begin
+          Mark(FRows[Row].Line);
+          if Row <= High(FRowsOld) then
+            Mark(FRowsOld[Row].Line);
+          Hit := True;
+        end;
+    end;
+  end;
+
 begin
   APairs := nil;
   AIncluding := False;
@@ -306,22 +330,9 @@ begin
   Sel := nil;
   SetLength(Sel, FChangeLines.Count);
   Hit := False;
-  for i := 0 to Edit.Carets.Count - 1 do
-  begin
-    Edit.Carets[i].GetRange(X1, Y1, X2, Y2, HasSel);
-    if not HasSel then
-      Continue;
-    if (X2 = 0) and (Y2 > Y1) then
-      Dec(Y2);
-    for r := Y1 to Y2 do
-      if (r <= High(FRows)) and not FRows[r].Hidden then
-      begin
-        Mark(FRows[r].Line);
-        if r <= High(FRowsOld) then
-          Mark(FRowsOld[r].Line);
-        Hit := True;
-      end;
-  end;
+  MarkSelected(Edit);
+  if FEditOld.Visible then
+    MarkSelected(FEditOld);
   if not Hit then
     Exit;
   AllOut := True;

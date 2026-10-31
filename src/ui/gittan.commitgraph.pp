@@ -1611,7 +1611,8 @@ begin
     Canvas.TextOut(X, Y, rsGraphTipDismiss);
     Canvas.Font.Style := [];
     Canvas.Font.Color := FDim;
-    Canvas.TextOut(Px(Pad), Y, FTip);
+    { Cut short before the link in a narrow graph. }
+    Canvas.TextOut(Px(Pad), Y, FitText(Canvas, FTip, X - 2 * Px(Pad)));
   end;
 end;
 

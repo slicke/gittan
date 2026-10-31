@@ -549,6 +549,10 @@ type
     FFetchItem, FPullItem, FPushItem, FForcePushItem: TMenuItem;
     { Branch > Commit: the commit menu of the commit shown. }
     FBranchCommitMenu: TMenuItem;
+    { The commit FillBranchCommitMenu read last, so the command palette,
+      which opens the Branch menu as it lists the actions, runs no git
+      log for it again; forgotten with every snapshot. }
+    FBranchCommit: TGittanGraphCommit;
     FSyncPopup: TGittanPopupList;
     FRecentPopup: TGittanPopupList;
     { The header's lexer name drops the lexers, Automatic and Plain
@@ -5628,6 +5632,9 @@ begin
   if C is TCustomEdit then
     case AAction of
       eaUndo: TCustomEdit(C).Undo;
+      { Windows' edit keeps one step, which an undo again takes back
+        (EM_UNDO); GTK 3's has no undo in the LCL. }
+      eaRedo: TCustomEdit(C).Undo;
       eaCut: TCustomEdit(C).CutToClipboard;
       eaCopy: TCustomEdit(C).CopyToClipboard;
       eaPaste: TCustomEdit(C).PasteFromClipboard;
@@ -6976,6 +6983,7 @@ var
 begin
   if not ASnap.Ok then
     FLoadError := ASnap.Error;
+  FBranchCommit := Default(TGittanGraphCommit);
   { Files that changed in number, or commits that came, are news for a
     frame in the background; the first snapshot after an open is not,
     so the tabs opened at start come up without. }

@@ -22,7 +22,11 @@ implementation
 type
   TParts = array of string;
 
+{ The parts between the delimiters: a slash, and on Windows a backslash
+  too; elsewhere a backslash is a character of a name. }
 function SplitPath(const APath: string): TParts;
+const
+  Delims = {$IFDEF WINDOWS}['/', '\']{$ELSE}['/']{$ENDIF};
 var
   i, Start: integer;
   S: string;
@@ -31,7 +35,7 @@ begin
   S := APath + '/';
   Start := 1;
   for i := 1 to Length(S) do
-    if S[i] in ['/', '\'] then
+    if S[i] in Delims then
     begin
       if i > Start then
       begin

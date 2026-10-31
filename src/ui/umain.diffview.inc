@@ -799,6 +799,10 @@ begin
   { The rows change with the layout (Hide Unchanged Lines, side by side):
     the caret stays on its diff line, as far from the top as it was. }
   CaretLine := LineAtRow(CaretY);
+  { On a gap: its first hidden line, shown or in a gap again after. }
+  if (CaretLine < 0) and (CaretY >= 0) and (CaretY <= High(FRows)) and
+    (FRows[CaretY].Line = rowGap) then
+    CaretLine := FRows[CaretY].GapFrom;
   KeepFolds;
   ApplyLayout;
   BuildChangeView;

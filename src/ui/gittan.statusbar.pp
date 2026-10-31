@@ -116,6 +116,7 @@ type
     function HotHint: string;
     procedure HintTimerTimer(Sender: TObject);
     procedure HideHint;
+    procedure HintChanged(APart: TGittanStatusPart);
     procedure Change(var AField: string; const AValue: string);
   protected
     procedure DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
@@ -914,6 +915,7 @@ begin
   FProgressPos := APos;
   FProgressTotal := ATotal;
   Invalidate;
+  HintChanged(spProgress);
 end;
 
 procedure TGittanStatusBar.SetColors(ABack, AText, ADim, ALine, AHover, AAccent,
@@ -940,7 +942,22 @@ end;
 
 procedure TGittanStatusBar.SetPartHint(APart: TGittanStatusPart; const AValue: string);
 begin
+  if FHints[APart] = AValue then
+    Exit;
   FHints[APart] := AValue;
+  HintChanged(APart);
+end;
+
+{ The hint shown over APart follows its text, as the progress's count
+  does while the mouse rests on it. }
+procedure TGittanStatusBar.HintChanged(APart: TGittanStatusPart);
+begin
+  if (FHot <> APart) or (FHintWindow = nil) or not FHintWindow.Visible then
+    Exit;
+  if HotHint = '' then
+    HideHint
+  else
+    HintTimerTimer(nil);
 end;
 
 function TGittanStatusBar.Clickable(APart: TGittanStatusPart): boolean;

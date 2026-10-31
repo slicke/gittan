@@ -854,6 +854,10 @@ end;
 
 procedure TGittanWindow.FormActivate(Sender: TObject);
 begin
+  {$IFDEF LCLGtk3}
+  { An Alt held while the window was left (Alt+Tab) is not one alone. }
+  FAltAlone := False;
+  {$ENDIF}
   FActive.FormActivate(Sender);
   CheckAccounts;
 end;

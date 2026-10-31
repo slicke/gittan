@@ -17,6 +17,7 @@ type
     procedure TestParent;
     procedure TestDeeper;
     procedure TestSamePathAndEmpty;
+    procedure TestBackslash;
   end;
 
 implementation
@@ -70,6 +71,18 @@ begin
   AssertEquals('p' + PathDelim + 'app', N[1]);
   AssertEquals('an empty path', '', N[2]);
   AssertEquals('as far as it goes', 'app', N[3]);
+end;
+
+procedure TTabNamesTest.TestBackslash;
+var
+  N: TStringArray;
+begin
+  N := DistinctNames(['/home/u/back\slash']);
+  {$IFDEF WINDOWS}
+  AssertEquals('a delimiter on Windows', 'slash', N[0]);
+  {$ELSE}
+  AssertEquals('a character of the name elsewhere', 'back\slash', N[0]);
+  {$ENDIF}
 end;
 
 initialization

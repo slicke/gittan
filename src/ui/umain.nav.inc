@@ -140,8 +140,13 @@ procedure TRepoFrame.NavGraphPick(const AFilter, AHash: string);
 begin
   if FNavBusy then
     Exit;
+  { What is shown now, which the idle sync may not have noted yet; a
+    graph opened by Back keeps its place, to be replaced. }
   if FNavValid and (FNavPlace.Kind <> pkGraph) then
+  begin
+    NavSync;
     FNavHistory.Visit(FNavPlace);
+  end;
   FNavPlace := Default(TGittanPlace);
   FNavPlace.Kind := pkGraph;
   FNavPlace.Path := AFilter;
