@@ -415,6 +415,9 @@ begin
     FShown := Copy(FThreads);
   if (Length(FAIThreads) > 0) and (FAIThreadsKey = AIReviewKey) then
     FShown := Concat(FShown, FAIThreads);
+  { The extensions' cards are on the work tree's lines. }
+  if (Length(FExtThreads) > 0) and not FRepo.IsRange then
+    FShown := Concat(FShown, FExtThreads);
 end;
 
 { The link at the right end of a card's first row: the thread on the
@@ -424,7 +427,9 @@ function TRepoFrame.CardLink(AThread: integer): string;
 begin
   Result := '';
   with FShown[AThread] do
-    if Comments[0].Url <> '' then
+    if Extension <> '' then
+      Exit
+    else if Comments[0].Url <> '' then
       Result := Format(rsReviewLink, [ForgeName])
     else if (Agent <> '') and (Severity <> WhySeverity) and not Resolved and AIAvailable and
       not FRepo.IsRange then
@@ -474,7 +479,9 @@ end;
 function TRepoFrame.ThreadAuthor(AThread, AComment: integer): string;
 begin
   Result := FShown[AThread].Comments[AComment].Author;
-  if FShown[AThread].Agent <> '' then
+  if FShown[AThread].Extension <> '' then
+    Result := '⚙ ' + Result
+  else if FShown[AThread].Agent <> '' then
     Result := '✦ ' + Result;
 end;
 

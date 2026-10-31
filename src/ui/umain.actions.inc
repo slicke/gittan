@@ -461,9 +461,13 @@ var
   OldTheme, OldTabSize: integer;
   V: TSettingsValues;
   Corner: TPoint;
-  Tools: boolean;
+  Tools, ExtChanged: boolean;
   Forges: TGittanForgeClasses;
-  i: integer;
+  i, j: integer;
+  Info: TGittanExtInfo;
+  Keys: TStringList;
+  Eng: TGittanExtEngine;
+  Id, Key: string;
 begin
   OldFont := TFont.Create;
   F := TFont.Create;
@@ -494,6 +498,30 @@ begin
     V.AgentPaths[gaOpenAI] := App.Settings.OpenAIUrl;
     V.AgentModels[gaOpenAI] := App.Settings.OpenAIModel;
     V.ApiKey := App.Settings.OpenAIKey;
+    { The extensions as found, their declared settings and values. }
+    V.ExtDir := App.Extensions.Dir;
+    SetLength(V.ExtInfos, App.Extensions.Count);
+    V.ExtDefs := nil;
+    V.ExtValues := TStringList.Create;
+    V.ExtDisabled := TStringList.Create;
+    V.ExtResetPerms := TStringList.Create;
+    Eng := TGittanExtEngine.Existing;
+    Keys := TStringList.Create;
+    try
+      for i := 0 to App.Extensions.Count - 1 do
+      begin
+        Info := App.Extensions.Info(i);
+        V.ExtInfos[i] := Info;
+        if Eng <> nil then
+          V.ExtDefs := Concat(V.ExtDefs, Eng.Registry.SettingsOf(Info.Id));
+        Keys.Clear;
+        App.Settings.ExtValueKeys(Info.Id, Keys);
+        for Key in Keys do
+          V.ExtValues.Values[Info.Id + #9 + Key] := App.Settings.ExtValue(Info.Id, Key);
+      end;
+    finally
+      Keys.Free;
+    end;
     Corner := EditorPanel.ClientToScreen(Point(EditorPanel.ClientWidth -
       Scale96ToForm(Margin), EditorPanel.ClientHeight - Scale96ToForm(Margin)));
     if EditSettings(F, V, @PreviewSettings, App.Lexers, Edit, Corner, APage) then
@@ -533,10 +561,39 @@ begin
         if i <= High(V.Accounts) then
           SwitchForgeAccounts(Forges[i], V.Accounts[i]);
       FWindow.CheckAccounts;
+      { The extensions: their values are kept as they are; one turned on
+        or off, or one whose permissions were reset, needs a reload. }
+      ExtChanged := False;
+      for i := 0 to V.ExtValues.Count - 1 do
+      begin
+        Id := V.ExtValues.Names[i];
+        Key := Copy(Id, Pos(#9, Id) + 1, MaxInt);
+        Id := Copy(Id, 1, Pos(#9, Id) - 1);
+        App.Settings.SetExtValue(Id, Key, V.ExtValues.ValueFromIndex[i]);
+      end;
+      for i := 0 to High(V.ExtInfos) do
+      begin
+        j := V.ExtDisabled.IndexOf(V.ExtInfos[i].Id);
+        if (j >= 0) = V.ExtInfos[i].Enabled then
+        begin
+          App.Settings.SetExtEnabled(V.ExtInfos[i].Id, j < 0);
+          ExtChanged := True;
+        end;
+      end;
+      for i := 0 to V.ExtResetPerms.Count - 1 do
+      begin
+        App.Settings.ClearExtPerm(V.ExtResetPerms[i]);
+        ExtChanged := True;
+      end;
+      if ExtChanged then
+        App.Extensions.Reload;
     end
     else
       PreviewSettings(OldFont, OldTheme, OldTabSize);
   finally
+    V.ExtValues.Free;
+    V.ExtDisabled.Free;
+    V.ExtResetPerms.Free;
     F.Free;
     OldFont.Free;
   end;

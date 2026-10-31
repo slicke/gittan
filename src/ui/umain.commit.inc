@@ -876,6 +876,10 @@ begin
       BannerError(rsCommitFailed, Err);
       Exit;
     end;
+    { An extension may stop the commit (commit.before). }
+    if not ExtFire('commit.before', TJSONObject.Create(['message', FCommitMemo.Text,
+      'paths', ListJson(Paths), 'amend', FCommitAmend.Checked])) then
+      Exit;
     Options := [];
     if FSignOff then
       Include(Options, coSignOff);
@@ -999,6 +1003,11 @@ begin
   end
   else
     FStatus.ShowMessage('', stNormal, 0);
+  if Job.Ok then
+    ExtEmit('commit.after', TJSONObject.Create(['ok', True, 'error', '',
+      'id', FRepo.CommitId('HEAD'), 'amend', Amended]))
+  else
+    ExtEmit('commit.after', TJSONObject.Create(['ok', False, 'error', Job.Error, 'id', '']));
   { The history or time-lapse of a file the commit took is done with:
     the summary comes instead, as for the change view of one. }
   HistoryChanged := (FView = gvHistory) and (FHistoryPath <> '') and

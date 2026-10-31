@@ -29,6 +29,7 @@ uses
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.textfile, gittan.sectionheader, gittan.hintbox,
   gittan.forge, gittan.lfslocks, gittan.askdlg,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
+  fpjson, gittan.ext.engine, gittan.ext.registry, gittan.ext.api, gittan.ext.loader,
   gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
   gittan.rebase, gittan.worktrees, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
   gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, gittan.merge, gittan.mergeview,
@@ -200,6 +201,17 @@ type
       const AClone: string): boolean; virtual; abstract;
     {** Hides the forge view, giving the frame under it the window back. }
     procedure HideForgeView; virtual; abstract;
+    {** The frame that has the repository at ARoot open, nil for none
+      (the extensions act on a repository by its root). }
+    function FrameForRoot(const ARoot: string): TRepoFrame; virtual; abstract;
+    {** The frame shown. }
+    function ShownFrame: TRepoFrame; virtual; abstract;
+    {** Every frame, for what reaches them all. }
+    function FrameCount: integer; virtual; abstract;
+    function FrameAt(AIndex: integer): TRepoFrame; virtual; abstract;
+    {** The commands the extensions registered changed: every frame
+      builds its Extensions menu and popups again (RebuildExtMenu). }
+    procedure ExtensionsChanged; virtual; abstract;
   end;
 
   { TRepoFrame }
@@ -286,6 +298,9 @@ type
     FAIReviewJob: TGittanAIReviewJob;
     FAIThreads: TGittanReviewThreads;
     FAIThreadsKey: string;
+    { The cards the extensions put in the change view (Gittan.ui.addCard),
+      shown while the work tree is compared. }
+    FExtThreads: TGittanReviewThreads;
     { Where something is (umain.ai.inc): the sparkle in the filter field
       asks the agent, and the files it names drop from the field. }
     FFindJob: TGittanFindJob;
@@ -335,6 +350,11 @@ type
     {** The chosen syntax theme, an index into SyntaxThemes. }
     FSyntaxTheme: integer;
     FFilePopup, FStatusPopup, FEditPopup: TPopupMenu;
+    { The Extensions menu, built from the registry (umain.ext.inc), and
+      whether the snapshot applied is the one an open gives, whose
+      events OpenJobDone raises itself. }
+    FExtMenu: TMenuItem;
+    FExtOpening: boolean;
     FStatus: TGittanStatusBar;
     {** What the status bar's transport buttons do now. }
     FStatusSteps: array[spLeft..spRight] of TStatusStep;
@@ -1714,6 +1734,14 @@ type
     procedure OverscrollTimerTimer(Sender: TObject);
     procedure EditDrawEditor(Sender: TObject; C: TCanvas; const ARect: TRect);
     procedure BuildPopups;
+    { The extensions (umain.ext.inc). }
+    function ExtContextJson(AItem: TMenuItem): string;
+    procedure ExtCommandClick(Sender: TObject);
+    function ExtFire(const AEvent: string; AJson: TJSONObject): boolean;
+    procedure ExtEmit(const AEvent: string; AJson: TJSONObject);
+    procedure MenuExtReloadClick(Sender: TObject);
+    procedure MenuExtFolderClick(Sender: TObject);
+    procedure MenuExtSettingsClick(Sender: TObject);
     procedure FilePopupPopup(Sender: TObject);
     procedure SummaryContextFile(Sender: TObject; const APath: string;
       const AScreenPos: TPoint);
@@ -2193,6 +2221,23 @@ type
     function IsBlank: boolean;
     {** The root of the open repository, '' for none. }
     function RepoRoot: string;
+    {** The open repository and its changed files, for the extensions
+      (gittan.exthost); main thread only. }
+    property Repository: TGittanRepo read FRepo;
+    property Stats: TGittanFileStats read FStats;
+    {** What an extension puts in the status bar (ASeconds 0 keeps it
+      until cleared, an empty text clears it) and shows in the editor. }
+    procedure ExtSetStatus(const AText: string; ASeconds: integer);
+    procedure ExtOpenFile(const APath: string; ALine: integer);
+    {** A banner from an extension: an error's, which stays, or a note. }
+    procedure ExtNotify(const ATitle, ADetail: string; AError: boolean);
+    {** A card of an extension under a line of the change view, and the
+      cards of the extension AExtId (every extension's for '') dropped. }
+    procedure ExtAddCard(const ACard: TGittanReviewThread);
+    procedure ExtClearCards(const AExtId: string);
+    {** Builds the Extensions menu and the popups' items again from the
+      commands registered (TRepoWindow.ExtensionsChanged). }
+    procedure RebuildExtMenu;
     {** The folder an open job is opening, '' when none runs. }
     property OpeningDir: string read FOpeningDir;
     {** The root of the repository opening, as the window found it
@@ -2449,6 +2494,12 @@ resourcestring
   rsTagline = 'See what changed in a git repository';
   rsGo = '&Go';
   rsTools = '&Tools';
+  rsExtensionsMenu = 'E&xtensions';
+  rsReloadExtensions = 'Reload Extensions';
+  rsOpenExtensionsFolder = 'Open Extensions Folder';
+  rsExtCancelled = 'An extension stopped it';
+  rsExtCancelledDetail = 'The extension gave no reason.';
+  rsExtensionsSettings = 'Extensions Settings...';
   rsWindowMenu = '&Window';
   rsEditMenu = '&Edit';
   rsEditUndo = '&Undo';
@@ -4157,6 +4208,7 @@ begin
   ApplySettings;
   BuildMenu;
   BuildPopups;
+  RebuildExtMenu;
   ApplyWrap;
   ShowSummary;
   if App.UpdateOk then
@@ -4979,6 +5031,8 @@ end;
 
 function OperationNoun(const AOperation: string): string; forward;
 function FindingKey(const AThread: TGittanReviewThread): string; forward;
+function ExtRemoteKind(AKind: TGittanRemoteKind): string; forward;
+function ExtPullMode(AMode: TGittanPullMode): string; forward;
 
 { The transport in the middle of the status bar: the primary button is
   the next step, with what else can be done on its sides. While git is
@@ -5582,6 +5636,11 @@ begin
   AddItem(ToolsMenu, rsSettings, ShortCut(VK_OEM_COMMA, [ssModifier]), @MenuSettingsClick);
   AddItem(ToolsMenu, rsAbout, 0, @MenuAboutClick);
   {$ENDIF}
+
+  { The extensions' commands, filled from the registry (RebuildExtMenu). }
+  FExtMenu := TMenuItem.Create(Main);
+  FExtMenu.Caption := rsExtensionsMenu;
+  Main.Items.Add(FExtMenu);
 
   { The menus a Mac application has: Window, with the tabs, and Help,
     whose search field macOS adds itself, searching the menus too. }
@@ -6761,6 +6820,7 @@ begin
   AbandonWhyJob;
   FAIThreads := nil;
   FAIThreadsKey := '';
+  FExtThreads := nil;
   FCommitPlan := nil;
   StopCommitJob(False);
   StopRemoteJob(False);
@@ -6885,7 +6945,14 @@ begin
   FSummary.Selected := '';
   LoadSnapshots;
   Snap := Job.Snapshot;
+  FExtOpening := True;
   ApplySnapshot(Snap);
+  FExtOpening := False;
+  if Snap.Ok then
+  begin
+    ExtEmit('repo.opened', TJSONObject.Create(['branch', Snap.Branch, 'head', Snap.Head]));
+    ExtEmit('repo.changed', SnapshotJson(Snap));
+  end;
   if not Snap.Ok then
     ShowError(FLoadError)
   else
@@ -7110,6 +7177,8 @@ begin
   UpdateBranchItems;
   UpdateStashItems;
   CheckLfs;
+  if ASnap.Ok and not FExtOpening then
+    ExtEmit('repo.changed', SnapshotJson(ASnap));
 end;
 
 { The badge of a file, ringed when the index holds part of its change
@@ -8390,6 +8459,7 @@ const
 {$I umain.lfslocks.inc}
 {$I umain.mdpreview.inc}
 {$I umain.merge.inc}
+{$I umain.ext.inc}
 
 end.
 

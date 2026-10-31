@@ -54,7 +54,8 @@ interface
 
 uses
   Classes, SysUtils, Types, Math, LCLType, Forms, Controls, Graphics, ExtCtrls, gittan.app,
-  gittan.git, gittan.forge, gittan.forgepage, gittan.tabnames, umain, uforge
+  gittan.git, gittan.forge, gittan.forgepage, gittan.tabnames, umain, uforge,
+  gittan.ext.host, gittan.exthost
   {$IFDEF LCLCocoa}, gittan.toolbar, gittan.titlebar, CocoaConfig{$ENDIF}
   {$IFDEF OWNBAR}, gittan.owntitlebar{$ENDIF}
   {$IFDEF LCLWin32}, gittan.wintitlebar{$ENDIF}
@@ -113,6 +114,9 @@ type
     function StartRepository: string;
     function FirstSavedTab: string;
     procedure OpenAtStartAsync(Data: PtrInt);
+    { Loads the extensions once the window is up, so their permission
+      prompts come over it. }
+    procedure LoadExtensionsAsync(Data: PtrInt);
     procedure FormClose(Sender: TObject; var CloseAction: TCloseAction);
     procedure FormCloseQuery(Sender: TObject; var CanClose: boolean);
     procedure FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
@@ -157,6 +161,10 @@ type
     procedure ShowFrame(AFrame: TRepoFrame); override;
     procedure SettingsChanged(AFont: TFont; ATheme, ATabSize: integer; ATools: boolean);
       override;
+    function FrameForRoot(const ARoot: string): TRepoFrame; override;
+    function ShownFrame: TRepoFrame; override;
+    function FrameAt(AIndex: integer): TRepoFrame; override;
+    procedure ExtensionsChanged; override;
     procedure CheckAccounts; override;
     procedure AskOpenRepository; override;
     procedure ShowSettings; override;
@@ -168,7 +176,7 @@ type
     function NewFrame: TRepoFrame;
     {** Shows AFrame and hides the one shown before. }
     procedure ActivateFrame(AFrame: TRepoFrame);
-    function FrameCount: integer;
+    function FrameCount: integer; override;
     property Frames[AIndex: integer]: TRepoFrame read GetFrame;
     property ActiveFrame: TRepoFrame read FActive;
   end;
@@ -206,6 +214,8 @@ var
 begin
   { First: everything below reads the settings. }
   CreateApp;
+  { The extensions' host, before any of them loads. }
+  SetExtHost(TGittanExtUIHost.Create(Self));
   FFrames := TList.Create;
   FClosing := TList.Create;
   PlaceWindow;
@@ -248,6 +258,8 @@ begin
     FActive.ShowOpening(FirstSavedTab)
   else if StartRepository <> '' then
     FActive.ShowOpening(StartRepository);
+  { The extensions before the repositories, so they see them open. }
+  Application.QueueAsyncCall(@LoadExtensionsAsync, 0);
   Application.QueueAsyncCall(@OpenAtStartAsync, 0);
 end;
 
@@ -277,6 +289,8 @@ var
 begin
   Application.RemoveOnModalBeginHandler(@ModalBegin);
   Application.RemoveAsyncCalls(Self);
+  { The host is gone before the frames it reaches. }
+  SetExtHost(nil);
   App.OnUpdateChecked := nil;
   App.Lexers.OnLoaded := nil;
   FActive := nil;
@@ -1174,6 +1188,44 @@ procedure TGittanWindow.ShowFrame(AFrame: TRepoFrame);
 begin
   if FFrames.IndexOf(AFrame) >= 0 then
     ActivateFrame(AFrame);
+end;
+
+function TGittanWindow.FrameForRoot(const ARoot: string): TRepoFrame;
+var
+  Root: string;
+  i: integer;
+begin
+  Result := nil;
+  if ARoot = '' then
+    Exit;
+  Root := ExpandFileName(ExcludeTrailingPathDelimiter(ARoot));
+  for i := 0 to FFrames.Count - 1 do
+    if (Frames[i].RepoRoot <> '') and
+      SameFileName(ExpandFileName(ExcludeTrailingPathDelimiter(Frames[i].RepoRoot)), Root) then
+      Exit(Frames[i]);
+end;
+
+function TGittanWindow.ShownFrame: TRepoFrame;
+begin
+  Result := FActive;
+end;
+
+function TGittanWindow.FrameAt(AIndex: integer): TRepoFrame;
+begin
+  Result := Frames[AIndex];
+end;
+
+procedure TGittanWindow.ExtensionsChanged;
+var
+  i: integer;
+begin
+  for i := 0 to FFrames.Count - 1 do
+    Frames[i].RebuildExtMenu;
+end;
+
+procedure TGittanWindow.LoadExtensionsAsync(Data: PtrInt);
+begin
+  App.Extensions.Load;
 end;
 
 procedure TGittanWindow.ForgeTabsChange(Sender: TObject);

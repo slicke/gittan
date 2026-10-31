@@ -1,0 +1,1233 @@
+(*
+ * Trndi
+ * Medical and Non-Medical Usage Alert
+ *
+ * Copyright (c) Björn Lindh
+ * GitHub: https://github.com/slicke/trndi
+ *
+ * This program is distributed under the terms of the GNU General Public License,
+ * Version 3, as published by the Free Software Foundation. You may redistribute
+ * and/or modify the software under the terms of this license.
+ *
+ * A copy of the GNU General Public License should have been provided with this
+ * program. If not, see <http://www.gnu.org/licenses/gpl.html>.
+ *
+ * ================================== IMPORTANT ==================================
+ * MEDICAL DISCLAIMER:
+ * - This software is NOT a medical device and must NOT replace official continuous
+ *   glucose monitoring (CGM) systems or any healthcare decision-making process.
+ * - The data provided may be delayed, inaccurate, or unavailable.
+ * - DO NOT make medical decisions based on this software.
+ * - VERIFY all data using official devices and consult a healthcare professional for
+ *   medical concerns or emergencies.
+ *
+ * LIABILITY LIMITATION:
+ * - The software is provided "AS IS" and without any warranty—expressed or implied.
+ * - Users assume all risks associated with its use. The developers disclaim all
+ *   liability for any damage, injury, or harm, direct or incidental, arising
+ *   from its use.
+ *
+ * INSTRUCTIONS TO DEVELOPERS & USERS:
+ * - Any modifications to this file must include a prominent notice outlining what was
+ *   changed and the date of modification (as per GNU GPL Section 5).
+ * - Distribution of a modified version must include this header and comply with the
+ *   license terms.
+ *
+ * BY USING THIS SOFTWARE, YOU AGREE TO THE TERMS AND DISCLAIMERS STATED HERE.
+ *
+ * MODIFICATION NOTICE (GPLv3 Section 5):
+ * - 2026-09-20: Added the module normalizer test and the end-to-end tests of
+ *   the ES module bootstrap from gittan.ext.modules.
+ *)
+
+unit testextquickjs;
+
+{ Runtime tests for the QuickJS binding (gittan.ext.quickjs).
+
+  These exercise the FFI boundary itself, which is where the binding can fail in
+  ways the compiler cannot catch: a JSValue is a 16-byte struct, and how it
+  crosses cdecl differs per platform, so every value moves by pointer through
+  the C shim. A mismatch there does not produce a type error, it produces a
+  crash or silent garbage - hence tests that actually run JavaScript.
+
+  Only gittan.ext.quickjs is under test. The engine layer above it
+  (gittan.ext.engine) pulls in the LCL and the permission system, which the
+  console runner has no room for. }
+
+{$mode objfpc}{$H+}
+
+interface
+
+uses
+  fpcunit, testregistry, SysUtils, Classes, Variants, gittan.ext.quickjs,
+  gittan.ext.modules;
+
+type
+  TExtQuickJSTest = class(TTestCase)
+  private
+    FRuntime: JSRuntime;
+    FContext: JSContext;
+    { Evaluate src and return it as a string, failing the test on a JS exception. }
+    function EvalToString(const src: RawUtf8): string;
+  protected
+    procedure SetUp; override;
+    procedure TearDown; override;
+  published
+    procedure TestAbiVersionMatches;
+    procedure TestJSValueSizeMatches;
+    procedure TestEvalReturnsInteger;
+    procedure TestEvalReturnsString;
+    procedure TestEvalReturnsFloat;
+    procedure TestEvalReturnsBool;
+    procedure TestValuePredicates;
+    procedure TestExceptionIsReported;
+    procedure TestEvalConsumesExceptionOnce;
+    procedure TestThrowFromCallIsExceptionNotError;
+    procedure TestNativeFunctionIsCalled;
+    procedure TestNativeFunctionReceivesArguments;
+    procedure TestPascalExceptionBecomesJSThrow;
+    procedure TestPropertyRoundTrip;
+    procedure TestUtf8RoundTrip;
+    procedure TestBigIntToInt64;
+    procedure TestBigIntToVariant;
+    procedure TestGetValueReferenceIsOwned;
+    procedure TestModuleLoaderReturnsModuleDef;
+    procedure TestModuleNormalizerRenamesImport;
+    procedure TestModuleBootstrapPublishesExports;
+    procedure TestModuleBootstrapReportsLoadError;
+    procedure TestPromiseJobsRun;
+    procedure TestJobPumpDrainsQueueFully;
+    procedure TestJobPumpBudgetStopsRunawayChain;
+    procedure TestTopLevelAwaitPlainEvalIsSyntaxError;
+    procedure TestTopLevelAwaitRunsWithAsyncFlag;
+    procedure TestInterruptHandlerAbortsScript;
+    procedure TestMemoryLimitFailsAllocations;
+  end;
+
+implementation
+
+var
+  { Set by the native callbacks below so the tests can observe that the
+    trampoline actually reached Pascal. }
+  LastNativeCallCount: integer;
+  LastNativeArgSum: integer;
+  LastNativeArgText: string;
+
+{ ---------------------------------------------------------------------------
+  Native callbacks. These are what QuickJS reaches through the C trampoline:
+  the result is written through res, so no Pascal function ever returns a
+  struct to C.
+  --------------------------------------------------------------------------- }
+
+procedure NativePing(res: PJSValue; ctx: JSContext; this_val: PJSValue;
+  argc: integer; argv: PJSValues; magic: integer);
+begin
+  Inc(LastNativeCallCount);
+  res^ := JS_NewInt32(ctx, 42);
+end;
+
+{ Raises the way a real native can: the engine's natives reach LCL dialogs, the
+  network layer and the extension registry, any of which can throw. }
+procedure NativeRaises(res: PJSValue; ctx: JSContext; this_val: PJSValue;
+  argc: integer; argv: PJSValues; magic: integer);
+begin
+  // Write an owned value first, so the dispatcher's cleanup path is exercised
+  // too - a native that raises halfway through must not leak what it produced.
+  res^ := JS_NewString(ctx, 'partial result');
+  raise Exception.Create('pascal side blew up');
+end;
+
+procedure NativeSum(res: PJSValue; ctx: JSContext; this_val: PJSValue;
+  argc: integer; argv: PJSValues; magic: integer);
+var
+  i, v: longint;
+begin
+  LastNativeArgSum := 0;
+  LastNativeArgText := '';
+  for i := 0 to argc - 1 do
+  begin
+    if JS_IsString(argv^[i]) then
+      LastNativeArgText := LastNativeArgText + string(JS_ToUtf8(ctx, argv^[i]))
+    else
+    begin
+      JS_ToInt32(ctx, v, argv^[i]);
+      Inc(LastNativeArgSum, v);
+    end;
+  end;
+  res^ := JS_NewInt32(ctx, LastNativeArgSum);
+end;
+
+var
+  { Number of times the interrupt hook was polled during a script run. }
+  InterruptPolls: integer;
+
+{ Interrupt hook that aborts at the very first poll. }
+function InterruptAlways(rt: JSRuntime; opaque: pointer): integer; cdecl;
+begin
+  Inc(InterruptPolls);
+  Result := 1;
+end;
+
+{ ---------------------------------------------------------------------------
+  Fixture
+  --------------------------------------------------------------------------- }
+
+procedure TExtQuickJSTest.SetUp;
+begin
+  LastNativeCallCount := 0;
+  LastNativeArgSum := 0;
+  LastNativeArgText := '';
+  FRuntime := JS_NewRuntime;
+  AssertTrue('JS_NewRuntime returned nil', FRuntime <> nil);
+  FContext := JS_NewContext(FRuntime);
+  AssertTrue('JS_NewContext returned nil', FContext <> nil);
+end;
+
+procedure TExtQuickJSTest.TearDown;
+begin
+  ClearNatives;
+  if FContext <> nil then
+    JS_FreeContext(FContext);
+  if FRuntime <> nil then
+    JS_FreeRuntime(FRuntime);
+  FContext := nil;
+  FRuntime := nil;
+end;
+
+function TExtQuickJSTest.EvalToString(const src: RawUtf8): string;
+var
+  v: JSValue;
+begin
+  v := JS_Eval(FContext, src, 'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertFalse('JS threw evaluating: ' + string(src), JS_IsException(v));
+    Result := string(JS_ToUtf8(FContext, v));
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+end;
+
+{ ---------------------------------------------------------------------------
+  ABI
+  --------------------------------------------------------------------------- }
+
+procedure TExtQuickJSTest.TestAbiVersionMatches;
+begin
+  // The shim and this unit are versioned together; a mismatch means the
+  // prebuilt library is older or newer than the binding expects.
+  AssertEquals('tq_abi_version', TQ_EXPECTED_ABI, tq_abi_version);
+end;
+
+procedure TExtQuickJSTest.TestJSValueSizeMatches;
+begin
+  // If these ever disagree, every value crossing the boundary is misread.
+  AssertEquals('sizeof(JSValue)', tq_sizeof_jsvalue, SizeOf(JSValue));
+end;
+
+{ ---------------------------------------------------------------------------
+  Values out of JavaScript
+  --------------------------------------------------------------------------- }
+
+procedure TExtQuickJSTest.TestEvalReturnsInteger;
+var
+  v: JSValue;
+  i: longint;
+begin
+  v := JS_Eval(FContext, '20 + 22', 'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertFalse('unexpected exception', JS_IsException(v));
+    AssertTrue('expected a number', JS_IsNumber(v));
+    JS_ToInt32(FContext, i, v);
+    AssertEquals(42, i);
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+end;
+
+procedure TExtQuickJSTest.TestEvalReturnsString;
+begin
+  AssertEquals('trndi', EvalToString('"trn" + "di"'));
+end;
+
+procedure TExtQuickJSTest.TestEvalReturnsFloat;
+var
+  v: JSValue;
+  d: double;
+begin
+  v := JS_Eval(FContext, '5.5 / 2', 'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertFalse('unexpected exception', JS_IsException(v));
+    JS_ToFloat64(FContext, d, v);
+    AssertEquals(2.75, d, 0.0001);
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+end;
+
+procedure TExtQuickJSTest.TestEvalReturnsBool;
+var
+  v: JSValue;
+begin
+  v := JS_Eval(FContext, '1 < 2', 'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertEquals('JS_ToBool', 1, JS_ToBool(FContext, v));
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+end;
+
+procedure TExtQuickJSTest.TestValuePredicates;
+var
+  v: JSValue;
+begin
+  // The predicates return C99 bool (one byte); a wrong binding width here
+  // reads adjacent stack and passes or fails at random.
+  v := JS_Eval(FContext, '({a: 1})', 'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertTrue('object', JS_IsObject(v));
+    AssertFalse('not a string', JS_IsString(v));
+    AssertFalse('not an array', JS_IsArray(v));
+    AssertFalse('not an error', JS_IsError(v));
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+
+  v := JS_Eval(FContext, '[1, 2, 3]', 'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertTrue('array', JS_IsArray(v));
+    AssertTrue('array is an object', JS_IsObject(v));
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+
+  AssertTrue('undefined', JS_IsUndefined(JS_UNDEFINED));
+  AssertTrue('null', JS_IsNull(JS_NULL));
+end;
+
+procedure TExtQuickJSTest.TestExceptionIsReported;
+var
+  v, err: JSValue;
+  msg: string;
+begin
+  v := JS_Eval(FContext, 'throw new Error("boom")', 'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertTrue('expected an exception', JS_IsException(v));
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+
+  err := JS_GetException(FContext);
+  try
+    AssertTrue('exception should be an Error', JS_IsError(err));
+    msg := string(JS_ToUtf8(FContext, err));
+    AssertTrue('message should mention boom (got: ' + msg + ')', Pos('boom', msg) > 0);
+  finally
+    JS_FreeValue(FContext, err);
+  end;
+end;
+
+procedure TExtQuickJSTest.TestEvalConsumesExceptionOnce;
+var
+  v, second: JSValue;
+  err: RawUtf8;
+  again: string;
+begin
+  // JSContextHelper.Eval clears the exception and hands back the text, so err is
+  // the only surviving copy. The engine used to ask the context a second time
+  // and paste the answer into the message the user sees - which is how
+  // "Error: [uninitialized]" ended up in front of real error text.
+  v := FContext^.Eval('throw new Error("boom")', 'test.js', JS_EVAL_TYPE_GLOBAL, err);
+  try
+    AssertTrue('expected an exception', v.IsException);
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+
+  AssertTrue('Eval must report the message (got: ' + string(err) + ')',
+    Pos('boom', string(err)) > 0);
+  AssertTrue('Eval must report the stack too (got: ' + string(err) + ')',
+    Pos('test.js', string(err)) > 0);
+
+  // The context is clean afterwards: nothing is left to fetch.
+  second := JS_GetException(FContext);
+  try
+    again := string(JS_ToUtf8(FContext, second));
+    AssertFalse('a second fetch must not still be holding the error (got: '
+      + again + ')', Pos('boom', again) > 0);
+  finally
+    JS_FreeValue(FContext, second);
+  end;
+end;
+
+procedure TExtQuickJSTest.TestThrowFromCallIsExceptionNotError;
+var
+  global, fn, ret, err: JSValue;
+  msg: string;
+begin
+  // The distinction every JS_Call site in the engine depends on: a callback
+  // that throws hands back the exception marker, NOT an Error object. The
+  // broadcast paths used to test this with JS_IsError, which is false here, so
+  // the error was dropped silently.
+  JS_FreeValue(FContext, JS_Eval(FContext,
+    'function boom(){ throw new Error("from JS"); }', 'test.js',
+    JS_EVAL_TYPE_GLOBAL));
+
+  global := JS_GetGlobalObject(FContext);
+  try
+    fn := JS_GetPropertyStr(FContext, global, 'boom');
+    try
+      AssertTrue('boom should be callable', JS_IsFunction(FContext, fn));
+      ret := JS_Call(FContext, fn, global, 0, nil);
+      try
+        AssertTrue('a throw yields the exception marker', JS_IsException(ret));
+        AssertFalse('the marker is not an Error object', JS_IsError(ret));
+      finally
+        JS_FreeValue(FContext, ret);
+      end;
+    finally
+      JS_FreeValue(FContext, fn);
+    end;
+  finally
+    JS_FreeValue(FContext, global);
+  end;
+
+  // And the throw is still pending afterwards: the caller has to take it off
+  // the context (DumpJSError does, in the engine) or the next call made there
+  // fails with an error it never raised.
+  err := JS_GetException(FContext);
+  try
+    msg := string(JS_ToUtf8(FContext, err));
+    AssertTrue('the throw must still be pending (got: ' + msg + ')',
+      Pos('from JS', msg) > 0);
+  finally
+    JS_FreeValue(FContext, err);
+  end;
+end;
+
+{ ---------------------------------------------------------------------------
+  Pascal called from JavaScript
+  --------------------------------------------------------------------------- }
+
+procedure TExtQuickJSTest.TestNativeFunctionIsCalled;
+var
+  global, fn, v: JSValue;
+  i: longint;
+begin
+  global := JS_GetGlobalObject(FContext);
+  try
+    fn := JS_NewFunction(FContext, 'ping', 0, RegisterNative('ping', @NativePing));
+    // JS_SetPropertyStr consumes fn.
+    JS_SetPropertyStr(FContext, global, 'ping', fn);
+  finally
+    JS_FreeValue(FContext, global);
+  end;
+
+  v := JS_Eval(FContext, 'ping()', 'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertFalse('unexpected exception', JS_IsException(v));
+    JS_ToInt32(FContext, i, v);
+    AssertEquals('return value from Pascal', 42, i);
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+  AssertEquals('native should have been entered once', 1, LastNativeCallCount);
+end;
+
+procedure TExtQuickJSTest.TestNativeFunctionReceivesArguments;
+var
+  global, fn, v: JSValue;
+  i: longint;
+begin
+  global := JS_GetGlobalObject(FContext);
+  try
+    fn := JS_NewFunction(FContext, 'sum', 3, RegisterNative('sum', @NativeSum));
+    JS_SetPropertyStr(FContext, global, 'sum', fn);
+  finally
+    JS_FreeValue(FContext, global);
+  end;
+
+  v := JS_Eval(FContext, 'sum(1, 2, 3, "x")', 'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertFalse('unexpected exception', JS_IsException(v));
+    JS_ToInt32(FContext, i, v);
+    AssertEquals('sum of numeric arguments', 6, i);
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+  AssertEquals('string argument reached Pascal', 'x', LastNativeArgText);
+end;
+
+procedure TExtQuickJSTest.TestPascalExceptionBecomesJSThrow;
+var
+  global, fn, v: JSValue;
+  msg: string;
+begin
+  // A Pascal exception must never unwind through the interpreter's C frame: it
+  // would skip quickjs's own cleanup and leave the runtime undefined. The
+  // dispatcher converts it to a JS throw instead, which JavaScript can catch.
+  global := JS_GetGlobalObject(FContext);
+  try
+    fn := JS_NewFunction(FContext, 'blowup', 0,
+      RegisterNative('blowup', @NativeRaises));
+    JS_SetPropertyStr(FContext, global, 'blowup', fn);
+  finally
+    JS_FreeValue(FContext, global);
+  end;
+
+  // Caught on the JS side: the interpreter has to still be in a usable state
+  // for the catch block to run at all.
+  v := JS_Eval(FContext,
+    'var caught = ""; try { blowup(); } catch (e) { caught = String(e); } caught',
+    'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertFalse('the throw should have been catchable in JS',
+      JS_IsException(v));
+    msg := string(JS_ToUtf8(FContext, v));
+    AssertTrue('the Pascal message should reach JS (got: ' + msg + ')',
+      Pos('pascal side blew up', msg) > 0);
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+
+  // Uncaught, it propagates as a normal pending exception.
+  v := JS_Eval(FContext, 'blowup()', 'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertTrue('an uncaught native throw yields the exception marker',
+      JS_IsException(v));
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+  JS_FreeValue(FContext, JS_GetException(FContext));
+
+  // And the context still works afterwards.
+  AssertEquals('the context survives a native throw', '3',
+    EvalToString('1 + 2'));
+end;
+
+{ ---------------------------------------------------------------------------
+  Objects and strings
+  --------------------------------------------------------------------------- }
+
+procedure TExtQuickJSTest.TestPropertyRoundTrip;
+var
+  obj, prop: JSValue;
+  i: longint;
+begin
+  obj := JS_NewObject(FContext);
+  try
+    JS_SetPropertyStr(FContext, obj, 'answer', JS_NewInt32(FContext, 42));
+    JS_SetPropertyStr(FContext, obj, 'name', JS_NewString(FContext, 'trndi'));
+
+    prop := JS_GetPropertyStr(FContext, obj, 'answer');
+    try
+      JS_ToInt32(FContext, i, prop);
+      AssertEquals('numeric property', 42, i);
+    finally
+      JS_FreeValue(FContext, prop);
+    end;
+
+    prop := JS_GetPropertyStr(FContext, obj, 'name');
+    try
+      AssertEquals('string property', 'trndi', string(JS_ToUtf8(FContext, prop)));
+    finally
+      JS_FreeValue(FContext, prop);
+    end;
+
+    prop := JS_GetPropertyStr(FContext, obj, 'missing');
+    try
+      AssertTrue('absent property is undefined', JS_IsUndefined(prop));
+    finally
+      JS_FreeValue(FContext, prop);
+    end;
+  finally
+    JS_FreeValue(FContext, obj);
+  end;
+end;
+
+procedure TExtQuickJSTest.TestUtf8RoundTrip;
+const
+  { Non-ASCII on both sides: strings cross the boundary as byte counts, not
+    character counts. Spelled out as bytes so the assertion tests what QuickJS
+    emits rather than how FPC decoded this source file.
+    'Blodsocker: 5,6 mmol/L - hoegt', with 'oe' as U+00F6 = C3 B6. }
+  Text: RawUtf8 = 'Blodsocker: 5,6 mmol/L - h' + #$C3#$B6 + 'gt';
+  { 'hoegt <warning sign>': U+00F6 = C3 B6, U+26A0 = E2 9A A0. }
+  FromJS: RawUtf8 = 'h' + #$C3#$B6 + 'gt ' + #$E2#$9A#$A0;
+var
+  v, back: JSValue;
+  got: RawUtf8;
+begin
+  v := JS_NewString(FContext, Text);
+  try
+    AssertTrue('should be a string', JS_IsString(v));
+    got := JS_ToUtf8(FContext, v);
+    // Compared as UTF-8, not as `string`: on Windows the latter is CP1252 and
+    // the conversion would lose the very bytes under test.
+    AssertTrue('round trip (got ' + IntToStr(Length(got)) + ' bytes)', got = Text);
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+
+  // ...and the same text produced by JavaScript itself.
+  back := JS_Eval(FContext, '"' + FromJS + '"', 'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    got := JS_ToUtf8(FContext, back);
+    AssertTrue('from JS (got ' + IntToStr(Length(got)) + ' bytes)', got = FromJS);
+  finally
+    JS_FreeValue(FContext, back);
+  end;
+end;
+
+{ A BigInt outside the inline payload range is heap-allocated, and the payload
+  of a heap value says nothing about its magnitude - JSValue.int64 reads 0 for
+  it. QuickJS's own JS_ToInt64 is no help either: it applies ToNumber, which
+  throws a TypeError for every BigInt. Hence ctx^.ToInt64. }
+procedure TExtQuickJSTest.TestBigIntToInt64;
+
+  procedure Expect(const src: RawUtf8; wanted: int64);
+  var
+    v: JSValue;
+    got: int64;
+  begin
+    v := JS_Eval(FContext, src, 'test.js', JS_EVAL_TYPE_GLOBAL);
+    try
+      AssertTrue(string(src) + ' converts', FContext^.ToInt64(v, got));
+      AssertEquals(string(src), wanted, got);
+    finally
+      JS_FreeValue(FContext, v);
+    end;
+  end;
+
+  procedure ExpectRejected(const src: RawUtf8);
+  var
+    v: JSValue;
+    got: int64;
+  begin
+    v := JS_Eval(FContext, src, 'test.js', JS_EVAL_TYPE_GLOBAL);
+    try
+      AssertFalse(string(src) + ' is rejected', FContext^.ToInt64(v, got));
+      AssertEquals(string(src) + ' leaves 0', 0, got);
+    finally
+      JS_FreeValue(FContext, v);
+    end;
+  end;
+
+begin
+  // Small enough to live inline...
+  Expect('42n', 42);
+  Expect('-1n', -1);
+  // ...and past that, where the value is heap-allocated.
+  Expect('2n ** 40n', 1099511627776);
+  Expect('-1234567890123n', -1234567890123);
+  Expect('9223372036854775807n', High(int64));
+  Expect('-9223372036854775808n', Low(int64));
+
+  // Ordinary values still work through the same entry point.
+  Expect('123', 123);
+  Expect('true', 1);
+  Expect('2.75', 2);
+  Expect('"77"', 77);
+
+  // Too wide, or not a number at all.
+  ExpectRejected('2n ** 100n');
+  ExpectRejected('1e300');
+  ExpectRejected('({})');
+  ExpectRejected('undefined');
+  // NaN must not raise: FPC leaves the invalid-operation trap unmasked, so an
+  // ordered compare against it would throw EInvalidOp rather than return False.
+  ExpectRejected('NaN');
+
+  // None of the above may leave an exception pending on the context.
+  AssertEquals('context still usable', '2', EvalToString('1 + 1'));
+end;
+
+procedure TExtQuickJSTest.TestBigIntToVariant;
+var
+  v: JSValue;
+  got: variant;
+begin
+  // A BigInt has to arrive as a number, not as its string form - natives test
+  // VarType before using the value.
+  v := JS_Eval(FContext, '2n ** 40n', 'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    FContext^.ToVariant(v, got);
+    AssertEquals('heap BigInt is an Int64 variant', varInt64, VarType(got));
+    AssertEquals('heap BigInt value', 1099511627776, int64(got));
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+
+  // Beyond Int64 the exact digits are the only thing a Variant can carry.
+  v := JS_Eval(FContext, '2n ** 100n', 'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    FContext^.ToVariant(v, got);
+    AssertEquals('too-wide BigInt keeps its digits',
+      '1267650600228229401496703205376', string(got));
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+end;
+
+procedure TExtQuickJSTest.TestGetValueReferenceIsOwned;
+
+  { Plant a global function and a WeakRef to it, run probe, then drop the
+    global and collect. The WeakRef can still see the function only if some
+    reference is outstanding - which is exactly what forgetting to free a
+    GetValue result looks like from the JS side. }
+  function OutlivesGC(freeIt: boolean): boolean;
+  var
+    f: JSValue;
+    i: integer;
+  begin
+    EvalToString('globalThis.probeFn = function probeFn() {};' +
+      'globalThis.probeRef = new WeakRef(globalThis.probeFn); "ok"');
+
+    for i := 1 to 20 do
+      if FContext^.GetValue('probeFn', f) and freeIt then
+        JS_FreeValue(FContext, f);
+
+    EvalToString('delete globalThis.probeFn; "ok"');
+    // Twice: the first pass can leave cycle members for the second.
+    JS_RunGC(FRuntime);
+    JS_RunGC(FRuntime);
+    Result := EvalToString('String(globalThis.probeRef.deref() !== undefined)') = 'true';
+  end;
+
+begin
+  // GetValue hands back an owned reference. Nothing in the type system says so,
+  // and the leak it causes is invisible until an extension has been broadcast
+  // to a few thousand times - so pin the contract here.
+  if EvalToString('typeof WeakRef') <> 'function' then
+    Ignore('this QuickJS build has no WeakRef; ownership is untestable from JS');
+
+  AssertTrue('dropping the GetValue result should keep the function alive ' +
+    '(if this fails the test can no longer detect a leak)', OutlivesGC(false));
+  AssertFalse('a freed GetValue result should not keep the function alive',
+    OutlivesGC(true));
+end;
+
+var
+  { Source the test module loader below hands to the compiler, and the name it
+    answers to. Set by TestModuleLoaderReturnsModuleDef before the import runs. }
+  TestModuleName: string;
+  TestModuleSource: RawUtf8;
+  TestModuleTag: system.int64;
+  TestNormalizerBase: string;
+
+{ A module loader shaped the way QuickJS expects: it compiles the source and
+  returns the JSModuleDef, never the source text. }
+function TestModuleLoader(ctx: JSContext; module_name: pansichar;
+opaque: pointer): pointer; cdecl;
+var
+  compiled: JSValue;
+begin
+  Result := nil;
+  if string(module_name) <> TestModuleName then
+    Exit;
+  compiled := JS_Eval(ctx, TestModuleSource, RawUtf8(TestModuleName),
+    JS_EVAL_TYPE_MODULE or JS_EVAL_FLAG_COMPILE_ONLY);
+  TestModuleTag := compiled.tag;
+  if JS_IsException(compiled) then
+    Exit;
+  Result := JS_VALUE_GET_PTR(compiled);
+  JS_FreeValue(ctx, compiled);
+end;
+
+procedure TExtQuickJSTest.TestModuleLoaderReturnsModuleDef;
+var
+  v: JSValue;
+  jobCtx: JSContext;
+  pumped: integer;
+begin
+  // QuickJS uses the loader's return value as a JSModuleDef*. Returning the
+  // module source text instead type-checks (both are pointers) and then
+  // segfaults on the first import, so pin the compile-to-JSModuleDef contract.
+  TestModuleName := 'gittan-test-module.js';
+  TestModuleSource := 'export const answer = 42;';
+  TestModuleTag := 0;
+  JS_SetModuleLoaderFunc(FRuntime, nil, @TestModuleLoader, nil);
+
+  v := JS_Eval(FContext,
+    'import { answer } from "gittan-test-module.js"; globalThis.imported = answer;',
+    'test.js', JS_EVAL_TYPE_MODULE);
+  try
+    AssertFalse('importing should not raise', JS_IsException(v));
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+
+  AssertEquals('a compiled module must carry JS_TAG_MODULE - anything else means '
+    + 'the loader is handing back the wrong kind of pointer',
+    JS_TAG_MODULE, TestModuleTag);
+
+  // Module evaluation completes through the job queue.
+  jobCtx := FContext;
+  pumped := 0;
+  while JS_IsJobPending(FRuntime) and (pumped < 100) do
+  begin
+    if JS_ExecutePendingJob(FRuntime, @jobCtx) <= 0 then
+      Break;
+    Inc(pumped);
+  end;
+
+  AssertEquals('the imported binding should be visible', '42',
+    EvalToString('String(globalThis.imported)'));
+end;
+
+{ Normalizer that redirects any relative specifier to TestModuleName. The
+  returned string must come from the runtime's allocator (js_strdup), since
+  QuickJS releases it with js_free. }
+function TestModuleNormalizer(ctx: JSContext; base_name, name: pansichar;
+opaque: pointer): pansichar; cdecl;
+begin
+  TestNormalizerBase := string(base_name);
+  if (Length(name) > 1) and (name[0] = '.') then
+    Result := js_strdup(ctx, pansichar(RawUtf8(TestModuleName)))
+  else
+    Result := js_strdup(ctx, name);
+end;
+
+procedure TExtQuickJSTest.TestModuleNormalizerRenamesImport;
+var
+  v: JSValue;
+  jobCtx: JSContext;
+  pumped: integer;
+begin
+  // The engine's normalizer maps "./x.js" to an absolute path before the
+  // loader sees it. Pin the two contracts it depends on: the normalizer gets
+  // the importing file as base_name, and a js_strdup'd result is accepted
+  // (and freed) by QuickJS without a crash.
+  TestModuleName := 'renamed-by-normalizer.js';
+  TestModuleSource := 'export const answer = 7;';
+  TestNormalizerBase := '';
+  JS_SetModuleLoaderFunc(FRuntime, @TestModuleNormalizer, @TestModuleLoader, nil);
+
+  v := JS_Eval(FContext,
+    'import { answer } from "./whatever.js"; globalThis.renamed = answer;',
+    'entry.js', JS_EVAL_TYPE_MODULE);
+  try
+    AssertFalse('importing through the normalizer should not raise', JS_IsException(v));
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+
+  jobCtx := FContext;
+  pumped := 0;
+  while JS_IsJobPending(FRuntime) and (pumped < 100) do
+  begin
+    if JS_ExecutePendingJob(FRuntime, @jobCtx) <= 0 then
+      Break;
+    Inc(pumped);
+  end;
+
+  AssertEquals('the importer is passed as base_name', 'entry.js', TestNormalizerBase);
+  AssertEquals('the redirected module was evaluated', '7',
+    EvalToString('String(globalThis.renamed)'));
+end;
+
+{ The engine's module pipeline without the engine: the normalizer resolves
+  against a folder through ResolveModuleSpecifier and the loader compiles the
+  resolved file (or the synthetic "gittan" module), exactly as
+  gittan.ext.engine's GittanModuleNormalizer/GittanModuleLoader do. }
+var
+  FileModuleRoot: string;
+
+function FileModuleNormalizer(ctx: JSContext; base_name, name: pansichar;
+opaque: pointer): pansichar; cdecl;
+var
+  resolved, err: string;
+begin
+  err := ResolveModuleSpecifier(string(base_name), string(name), FileModuleRoot, resolved);
+  if err <> '' then
+    resolved := ModuleErrorPrefix + err;
+  Result := js_strdup(ctx, pansichar(RawUtf8(resolved)));
+end;
+
+function FileModuleLoader(ctx: JSContext; module_name: pansichar;
+opaque: pointer): pointer; cdecl;
+var
+  name: string;
+  src: RawUtf8;
+  compiled, thrown: JSValue;
+  f: TFileStream;
+  ss: TStringStream;
+
+  { Leave the reason pending on ctx, as the engine's loader does. }
+  procedure Fail(const reason: string);
+  begin
+    thrown := JS_Eval(ctx, RawUtf8('throw new ReferenceError(' +
+      JSStringLiteral(reason) + ')'), '<module-loader>', JS_EVAL_TYPE_GLOBAL);
+    JS_FreeValue(ctx, thrown);
+  end;
+
+begin
+  Result := nil;
+  name := string(module_name);
+  if Pos(ModuleErrorPrefix, name) = 1 then
+  begin
+    Fail(Copy(name, Length(ModuleErrorPrefix) + 1, MaxInt));
+    Exit;
+  end;
+  if name = GittanModuleSpecifier then
+    src := GittanModuleSource
+  else if not FileExists(name) then
+  begin
+    Fail('module not found: ' + name);
+    Exit;
+  end
+  else
+  // Runs inside a C frame: no Pascal exception may unwind out of here.
+  try
+    f := TFileStream.Create(name, fmOpenRead or fmShareDenyWrite);
+    ss := TStringStream.Create;
+    try
+      ss.CopyFrom(f, f.Size);
+      src := ss.DataString;
+    finally
+      ss.Free;
+      f.Free;
+    end;
+  except
+    on E: Exception do
+    begin
+      Fail('cannot read module ' + name + ': ' + E.Message);
+      Exit;
+    end;
+  end;
+  compiled := JS_Eval(ctx, src, RawUtf8(name), JS_EVAL_TYPE_MODULE or JS_EVAL_FLAG_COMPILE_ONLY);
+  if JS_IsException(compiled) then
+    Exit;
+  Result := JS_VALUE_GET_PTR(compiled);
+  JS_FreeValue(ctx, compiled);
+end;
+
+procedure WriteTextFile(const path, text: string);
+var
+  f: TFileStream;
+begin
+  f := TFileStream.Create(path, fmCreate);
+  try
+    if text <> '' then
+      f.WriteBuffer(text[1], Length(text));
+  finally
+    f.Free;
+  end;
+end;
+
+procedure TExtQuickJSTest.TestModuleBootstrapPublishesExports;
+var
+  v: JSValue;
+  jobCtx: JSContext;
+  pumped: integer;
+  entry: string;
+begin
+  // A module entry that imports a helper and the built-in "gittan" module,
+  // loaded through the same bootstrap script the engine evaluates. The
+  // exported function must land on globalThis (that is how name-based
+  // callbacks like clockView are found), the private one must not, and the
+  // error slot must be empty.
+  FileModuleRoot := IncludeTrailingPathDelimiter(GetTempDir(false)) +
+    'gittan-bootstrap-' + IntToStr(GetProcessID);
+  ForceDirectories(FileModuleRoot + DirectorySeparator + 'lib');
+  entry := FileModuleRoot + DirectorySeparator + 'main.js';
+  WriteTextFile(FileModuleRoot + DirectorySeparator + 'lib' + DirectorySeparator + 'util.js',
+    'export const twice = (n) => n * 2;');
+  WriteTextFile(entry,
+    'import T, { data } from "gittan";' + LineEnding +
+    'import { twice } from "./lib/util";' + LineEnding +   // extension-less on purpose
+    'function hidden() { return 1; }' + LineEnding +
+    'export function clockView() { return "v" + twice(21) + T.tag + data.tag; }' + LineEnding +
+    'export const notAFunction = 5;');
+  try
+    JS_SetModuleLoaderFunc(FRuntime, @FileModuleNormalizer, @FileModuleLoader, nil);
+    // Stand-in for the engine's Trndi object.
+    JS_FreeValue(FContext, JS_Eval(FContext,
+      'globalThis.Gittan = { tag: "!", data: { tag: "?" } };', 'setup.js', JS_EVAL_TYPE_GLOBAL));
+
+    v := JS_Eval(FContext, ModuleBootstrapScript(entry), 'main.js', JS_EVAL_TYPE_GLOBAL);
+    try
+      AssertFalse('bootstrap must not raise', JS_IsException(v));
+    finally
+      JS_FreeValue(FContext, v);
+    end;
+
+    jobCtx := FContext;
+    pumped := 0;
+    while JS_IsJobPending(FRuntime) and (pumped < 100) do
+    begin
+      if JS_ExecutePendingJob(FRuntime, @jobCtx) <= 0 then
+        Break;
+      Inc(pumped);
+    end;
+
+    AssertEquals('no load error', '',
+      EvalToString('String(globalThis.' + ModuleBootstrapGlobal + '.error)'));
+    AssertEquals('exported function is a global callback', 'v42!?',
+      EvalToString('typeof clockView === "function" ? clockView() : "missing"'));
+    AssertEquals('private function stays private', 'undefined',
+      EvalToString('typeof globalThis.hidden'));
+    AssertEquals('non-function exports are not published', 'undefined',
+      EvalToString('typeof globalThis.notAFunction'));
+  finally
+    DeleteFile(FileModuleRoot + DirectorySeparator + 'lib' + DirectorySeparator + 'util.js');
+    DeleteFile(entry);
+    RemoveDir(FileModuleRoot + DirectorySeparator + 'lib');
+    RemoveDir(FileModuleRoot);
+  end;
+end;
+
+procedure TExtQuickJSTest.TestModuleBootstrapReportsLoadError;
+var
+  v: JSValue;
+  jobCtx: JSContext;
+  pumped: integer;
+  entry, err: string;
+begin
+  // A bare specifier is rejected by the normalizer; the loader throws the
+  // message and the bootstrap has to surface it through the error slot, with
+  // the offending file named, while the slot still exists.
+  FileModuleRoot := IncludeTrailingPathDelimiter(GetTempDir(false)) +
+    'gittan-bootstrap-err-' + IntToStr(GetProcessID);
+  ForceDirectories(FileModuleRoot);
+  entry := FileModuleRoot + DirectorySeparator + 'main.js';
+  WriteTextFile(entry, 'import x from "lodash";' + LineEnding + 'export function clockView() {}');
+  try
+    JS_SetModuleLoaderFunc(FRuntime, @FileModuleNormalizer, @FileModuleLoader, nil);
+    v := JS_Eval(FContext, ModuleBootstrapScript(entry), 'main.js', JS_EVAL_TYPE_GLOBAL);
+    JS_FreeValue(FContext, v);
+
+    jobCtx := FContext;
+    pumped := 0;
+    while JS_IsJobPending(FRuntime) and (pumped < 100) do
+    begin
+      if JS_ExecutePendingJob(FRuntime, @jobCtx) <= 0 then
+        Break;
+      Inc(pumped);
+    end;
+
+    err := EvalToString('String(globalThis.' + ModuleBootstrapGlobal + '.error)');
+    AssertTrue('error slot names the problem: ' + err, Pos('bare module', err) > 0);
+    AssertTrue('error slot names the specifier: ' + err, Pos('lodash', err) > 0);
+    AssertEquals('nothing was published', 'undefined', EvalToString('typeof globalThis.clockView'));
+  finally
+    DeleteFile(entry);
+    RemoveDir(FileModuleRoot);
+  end;
+end;
+
+procedure TExtQuickJSTest.TestPromiseJobsRun;
+var
+  v: JSValue;
+  pumped: integer;
+  { QuickJS writes the context that ran the job here; it must be a real
+    variable, not nil. }
+  jobCtx: JSContext;
+begin
+  // Promise callbacks only run when the host drains the job queue, which is
+  // what the engine's timer loop does; verify the plumbing works here.
+  v := JS_Eval(FContext,
+    'globalThis.done = 0; Promise.resolve(7).then(function (n) { globalThis.done = n; });',
+    'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertFalse('unexpected exception', JS_IsException(v));
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+
+  AssertTrue('a job should be pending', JS_IsJobPending(FRuntime));
+  pumped := 0;
+  while JS_IsJobPending(FRuntime) and (pumped < 100) do
+  begin
+    AssertTrue('job raised', JS_ExecutePendingJob(FRuntime, @jobCtx) >= 0);
+    Inc(pumped);
+  end;
+
+  AssertEquals('then() should have run', '7', EvalToString('String(globalThis.done)'));
+end;
+
+procedure TExtQuickJSTest.TestJobPumpDrainsQueueFully;
+var
+  v: JSValue;
+begin
+  // The common case: an ordinary chain is nowhere near the drain budget, so one
+  // pump must empty the queue and report a full drain. The engine's OnJSTimer
+  // only reports unhandled rejections when this says True, so a budget that
+  // truncated normal work would also silence rejection reporting.
+  v := JS_Eval(FContext,
+    'globalThis.steps = 0;' +
+    'Promise.resolve().then(function () { globalThis.steps++; })' +
+    '  .then(function () { globalThis.steps++; })' +
+    '  .then(function () { globalThis.steps++; });',
+    'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertFalse('unexpected exception', JS_IsException(v));
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+
+  AssertTrue('the drain should report the queue emptied',
+    JS_DrainPendingJobs(FRuntime, FContext));
+  AssertFalse('no job should remain queued', JS_IsJobPending(FRuntime));
+  AssertEquals('every reaction should have run', '3',
+    EvalToString('String(globalThis.steps)'));
+end;
+
+procedure TExtQuickJSTest.TestJobPumpBudgetStopsRunawayChain;
+var
+  v: JSValue;
+  startedAt: QWord;
+  drained: boolean;
+  ranJobs: integer;
+begin
+  // A reaction that re-queues itself keeps JS_IsJobPending true forever, so an
+  // unbounded drain never returns and the main thread sits in it until the
+  // engine's watchdog aborts the script - ten seconds of frozen UI. The budget
+  // is what makes this terminate. Note that a regression here hangs the test
+  // rather than failing it, because that is precisely the defect.
+  v := JS_Eval(FContext,
+    'globalThis.jobRuns = 0;' +
+    'globalThis.stopChain = false;' +
+    'function chain() {' +
+    '  Promise.resolve().then(function () {' +
+    '    globalThis.jobRuns++;' +
+    '    if (!globalThis.stopChain) chain();' +
+    '  });' +
+    '}' +
+    'chain();',
+    'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertFalse('unexpected exception', JS_IsException(v));
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+
+  startedAt := GetTickCount64;
+  drained := JS_DrainPendingJobs(FRuntime, FContext);
+
+  AssertFalse('the drain should report it stopped short', drained);
+  AssertTrue('the runaway chain should still have jobs queued',
+    JS_IsJobPending(FRuntime));
+  // Generous: the point is that it returned at all, not how fast.
+  AssertTrue('the drain should return promptly, not run to the watchdog',
+    GetTickCount64 - startedAt < 5000);
+
+  ranJobs := StrToInt(EvalToString('String(globalThis.jobRuns)'));
+  AssertTrue('some jobs should have run, got ' + IntToStr(ranJobs), ranJobs > 0);
+  AssertTrue('the job bound should cap the pass, got ' + IntToStr(ranJobs),
+    ranJobs <= JS_PUMP_MAX_JOBS);
+
+  // Let the chain end, then drain for real: TearDown frees the runtime, and
+  // leaving a self-feeding queue behind would be a poor thing to hand it.
+  v := JS_Eval(FContext, 'globalThis.stopChain = true;', 'test.js',
+    JS_EVAL_TYPE_GLOBAL);
+  JS_FreeValue(FContext, v);
+  AssertTrue('the queue should empty once the chain stops',
+    JS_DrainPendingJobs(FRuntime, FContext));
+  AssertFalse('no job should remain queued', JS_IsJobPending(FRuntime));
+end;
+
+procedure TExtQuickJSTest.TestTopLevelAwaitPlainEvalIsSyntaxError;
+var
+  v: JSValue;
+  msg: RawUtf8;
+begin
+  // The engine only retries a script in async mode when the failed eval's
+  // error text contains 'SyntaxError' (IsTopLevelAwaitError in
+  // gittan.ext.engine); pin down that quickjs-ng still reports top-level
+  // await that way when JS_EVAL_FLAG_ASYNC is absent.
+  v := JS_Eval(FContext, 'const n = await Promise.resolve(5);', 'test.js',
+    JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertTrue('plain eval should reject top-level await', JS_IsException(v));
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+  FContext^.DumpError(msg);
+  AssertTrue('error should stringify as a SyntaxError, got: ' + string(msg),
+    Pos('SyntaxError', string(msg)) > 0);
+end;
+
+procedure TExtQuickJSTest.TestTopLevelAwaitRunsWithAsyncFlag;
+var
+  v: JSValue;
+  pumped: integer;
+  jobCtx: JSContext;
+begin
+  // The engine retries extension scripts with JS_EVAL_FLAG_ASYNC when the
+  // plain parse rejects top-level await. Verify the flag parses such a script,
+  // that the continuation after the await runs once jobs are pumped, and that
+  // top-level function declarations still land on the global object - the
+  // engine resolves callbacks (clockView, ...) by global name, which is what
+  // the retired async-IIFE source rewriter existed to preserve.
+  v := JS_Eval(FContext,
+    'globalThis.tla = 0;' +
+    'function namedCallback() { return 7; }' +
+    'const n = await Promise.resolve(5);' +
+    'globalThis.tla = n + namedCallback();',
+    'test.js', JS_EVAL_TYPE_GLOBAL or JS_EVAL_FLAG_ASYNC);
+  try
+    AssertFalse('async-mode eval threw', JS_IsException(v));
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+
+  pumped := 0;
+  jobCtx := FContext;
+  while JS_IsJobPending(FRuntime) and (pumped < 100) do
+  begin
+    AssertTrue('job raised', JS_ExecutePendingJob(FRuntime, @jobCtx) >= 0);
+    Inc(pumped);
+  end;
+
+  AssertEquals('await continuation should have run', '12',
+    EvalToString('String(globalThis.tla)'));
+  AssertEquals('function declaration should be global', 'function',
+    EvalToString('typeof namedCallback'));
+end;
+
+procedure TExtQuickJSTest.TestInterruptHandlerAbortsScript;
+var
+  v: JSValue;
+begin
+  InterruptPolls := 0;
+  JS_SetInterruptHandler(FRuntime, @InterruptAlways, nil);
+  try
+    // Finite but long: a few hundred million iterations end on their own if
+    // the interrupt hook were broken, instead of hanging the runner forever.
+    v := JS_Eval(FContext, 'for (let i = 0; i < 2e8; i++);', 'test.js',
+      JS_EVAL_TYPE_GLOBAL);
+    try
+      AssertTrue('interrupt handler should have been polled', InterruptPolls > 0);
+      AssertTrue('script should abort with an exception', JS_IsException(v));
+    finally
+      JS_FreeValue(FContext, v);
+    end;
+  finally
+    JS_SetInterruptHandler(FRuntime, nil, nil);
+  end;
+  // Take the InterruptError off the context so TearDown frees a clean one.
+  JS_FreeValue(FContext, JS_GetException(FContext));
+end;
+
+procedure TExtQuickJSTest.TestMemoryLimitFailsAllocations;
+var
+  v: JSValue;
+begin
+  JS_SetMemoryLimit(FRuntime, 1 shl 20); // 1 MB
+  // Bounded loop: if the cap were ignored this ends after ~160MB of work
+  // rather than hanging; with it in force allocation fails within a few
+  // dozen iterations. The runtime is per-test, so no need to lift the cap.
+  v := JS_Eval(FContext,
+    'var a = []; for (var i = 0; i < 20000; i++) a.push(new Array(1024).fill(i));',
+    'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertTrue('allocation should fail under the 1MB cap', JS_IsException(v));
+  finally
+    JS_FreeValue(FContext, v);
+  end;
+  JS_FreeValue(FContext, JS_GetException(FContext));
+end;
+
+initialization
+  RegisterTest(TExtQuickJSTest);
+end.

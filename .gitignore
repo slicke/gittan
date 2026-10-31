@@ -4,6 +4,9 @@
 *.so
 *.so.[0-9]*
 *.dylib
+# The prebuilt QuickJS engine and shim the extensions link are kept
+# (externals/quickjs/README.md).
+!/externals/quickjs/prebuilt/**
 *.lrs
 *.res
 *.compiled

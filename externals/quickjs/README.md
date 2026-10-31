@@ -1,0 +1,387 @@
+# QuickJS binding for Trndi
+
+Trndi's JavaScript extension engine binds [quickjs-ng](https://github.com/quickjs-ng/quickjs)
+directly, replacing the QuickJS binding previously used from mORMot2.
+
+Two libraries are involved:
+
+| library | contents |
+|---|---|
+| `libqjs` | quickjs-ng, completely unmodified |
+| `tqshim` | the ABI shim in `tq_shim.c` |
+
+Keeping the engine unpatched means upgrading quickjs-ng is a rebuild, not a re-patch.
+
+quickjs-ng is MIT-licensed. Because `prebuilt/` ships compiled copies of it, its
+notice travels with them in [`LICENSE.quickjs-ng`](LICENSE.quickjs-ng); Trndi
+also reproduces it in the app's License dialog in extension builds. Refresh the
+file whenever `QJS_TAG` in `build.sh` moves. The shim `tq_shim.c` is Trndi's own
+code and is GPLv3 like the rest of the app.
+
+## Why a shim is needed
+
+quickjs-ng's `JSValue` is a 16-byte struct on 64-bit targets. Passing or returning
+it by value across an FPC/C `cdecl` boundary depends on per-platform struct
+classification rules that FPC and GCC are not guaranteed to agree on — SysV splits
+it across two registers, Win64 returns it through a hidden pointer.
+
+`tq_shim.c` moves every `JSValue` across the boundary **by pointer**:
+
+- a `JSValue` argument becomes `const JSValue *`
+- a `JSValue` result becomes a leading `JSValue *out` parameter
+
+Callbacks run the same hazard in reverse — QuickJS calls a function that must
+*return* a `JSValue` struct. No Pascal function does that here. A single C
+trampoline receives every JS call and forwards it to one Pascal dispatch routine,
+using QuickJS's `magic` integer as the index into Trndi's native registry.
+
+The Pascal side is `units/trndi/ext/trndi.ext.quickjs.pp`. Note the binding rule
+documented there: every `JSValue` parameter must be an explicit pointer type.
+Writing `const v: JSValue` reintroduces exactly the by-value hazard the shim
+removes, and fails at runtime rather than at compile time.
+
+Do **not** build quickjs-ng with `JS_NAN_BOXING` on a 64-bit target. Its NaN
+boxing packs the pointer into the low 32 bits and is 32-bit-only.
+
+## Rebuilding
+
+`build.sh` builds both libraries. It needs `cmake`, a C compiler, and — for the
+Windows cross-build — mingw-w64. `ninja` is used when present.
+
+```sh
+# Fedora
+sudo dnf install -y cmake ninja-build gcc mingw64-gcc mingw64-winpthreads-static
+# Debian/Ubuntu
+sudo apt install -y cmake ninja-build gcc gcc-mingw-w64-x86-64
+# macOS (the compiler comes from the Xcode command line tools)
+brew install cmake ninja
+# Haiku
+pkgman install cmake gcc make
+# FreeBSD (clang and make come with the base system)
+pkg install cmake
+
+./build.sh            # everything this host can produce
+./build.sh linux      # host .so
+./build.sh mac        # host .dylib
+./build.sh win        # x86_64 win64 .dll (mingw cross)
+./build.sh winarm     # aarch64 win64 .dll (llvm-mingw cross; see below)
+./build.sh winhost    # .dll natively, in an MSYS2 shell on Windows
+./build.sh haiku      # host .so
+./build.sh freebsd    # host .so
+./build.sh shim       # the shim only (see below)
+```
+
+`winarm` is not part of `./build.sh` with no argument: it needs a toolchain no
+distro packages, so folding it into "everything this host can produce" would
+make the default fail on every machine that has only the x86_64 cross-compiler.
+
+`./build.sh shim` builds *only* `tq_shim.c`, against an engine that is already
+there — the copy in `prebuilt/<target>/` when one exists, otherwise the system's.
+`make shim` is the same thing. That is the useful mode wherever the platform
+packages quickjs-ng itself, and on any target `prebuilt/` has no engine for: the
+shim is Trndi's own code and always has to be compiled, the engine does not.
+
+Either way the engine is checked against `QJS_TAG` before the shim is compiled.
+quickjs-ng is pre-1.0 and makes no ABI promise between minor versions, and
+nothing detects a mismatched engine at runtime — `tq_abi_version` covers the
+shim, not the engine — so a build against the wrong version is refused rather
+than left to fail later (`TRNDI_QJS_ALLOW_VERSION_SKEW=1` overrides).
+
+### Haiku
+
+Haiku packages quickjs-ng at `dev-lang/quickjs-ng`, currently the same tag this
+binding targets, built shared and with a devel package:
+
+```sh
+pkgman install quickjs_ng quickjs_ng_devel
+./build.sh shim       # or: make shim
+```
+
+That is a supported way to get an Extensions build, and the right one if Trndi
+is packaged as an `.hpkg` (`REQUIRES: lib:libqjs`). `./build.sh haiku` builds the
+engine as well and puts it in `prebuilt/`, which is what every other platform
+ships and keeps the engine version under Trndi's control rather than the package
+repository's — the recipe declares `lib:libqjs = 0.15.1 compat >= 0`, so a future
+package bump to 0.16 would satisfy the dependency without satisfying the ABI.
+
+Output lands in `prebuilt/<cpu>-<os>/`, named the way FPC names targets — so
+Apple Silicon is `aarch64-darwin`, not `arm64-darwin`.
+
+Two macOS knobs, both optional:
+
+```sh
+TRNDI_QJS_MACOS_MIN=11.0 ./build.sh mac                 # raise the minimum OS
+TRNDI_QJS_MAC_ARCHS='arm64;x86_64' ./build.sh mac       # universal libraries
+```
+
+A universal build still lands in the host's directory; copy it to the other
+target's directory as well if you want both to link against it.
+
+## Platform coverage
+
+| target | how |
+|---|---|
+| `x86_64-linux` | `build.sh linux`, or cross from any host |
+| `x86_64-win64` | `build.sh win` (mingw cross), or `build.sh winhost` in MSYS2 |
+| `aarch64-win64` | `build.sh winarm` (llvm-mingw cross), or `build.sh winhost` in MSYS2 |
+| `aarch64-darwin`, `x86_64-darwin` | `build.sh mac`, on a Mac |
+| `aarch64-linux` | build natively on the target (e.g. a Raspberry Pi) |
+| `x86_64-haiku` | `build.sh haiku` on Haiku, or `build.sh shim` against the `quickjs_ng` package |
+| `x86_64-freebsd` | `build.sh freebsd` on FreeBSD (ports has Bellard's quickjs, not ng — build it) |
+
+`x86_64-linux`, `aarch64-linux`, `x86_64-win64`, `aarch64-win64`,
+`aarch64-darwin`, `x86_64-haiku` and `x86_64-freebsd` are committed. The only
+missing one is `x86_64-darwin` (Intel Mac), which has to be built on the target
+itself; until it is, that host can only build Trndi's "No Ext" modes. Anything
+`build.sh` produces is safe to commit — that is the point of `prebuilt/`.
+
+Nothing is shared between platforms here, and a near miss is worth naming: a
+native FreeBSD build links `libc.so.7` and cannot load the Linux `libqjs`.
+FreeBSD's Linuxulator runs a whole Linux *process* against Linux libraries
+under `/compat/linux`; it does not let a native executable load a Linux `.so`.
+
+There is no cross-glibc in Fedora's repos, so arm64 Linux is built natively
+rather than cross-compiled.
+
+### Windows on ARM
+
+The directory is `aarch64-win64` — FPC's name for the target, which is what
+`Trndi.lpi` resolves through `$(TargetCPU)-$(TargetOS)`. Both routes below
+produce the same two files, `libqjs.dll` and `tqshim.dll`, and both go through
+mingw rather than MSVC on purpose: the Pascal binding declares `external
+'libqjs.dll'` and FPC writes the import under exactly that name, so a
+toolchain that spells the engine `qjs.dll` links cleanly and then leaves the
+executable asking the loader for a DLL nobody shipped.
+
+**Cross-build in a container**, which installs nothing on the host. No distro
+packages an ARM64 mingw, so the toolchain comes from
+[llvm-mingw](https://github.com/mstorsjo/llvm-mingw); its image already carries
+cmake, ninja and git, so unlike the Rocky recipe below there is no package
+install step:
+
+```sh
+cd <repo root>/externals/quickjs
+podman run --rm \
+  -v "$PWD:/qjs:Z" -w /qjs \
+  -e TRNDI_QJS_WORK=/tmp/qjsbuild \
+  docker.io/mstorsjo/llvm-mingw:latest \
+  ./build.sh winarm
+```
+
+Only `externals/quickjs` is mounted, so `:Z` relabels that directory rather
+than the whole source tree; drop it on a host without SELinux (WSL, Debian).
+`TRNDI_QJS_WORK` keeps the quickjs-ng clone and the CMake tree inside the
+container, so only the finished DLLs are written back. The same image builds
+`./build.sh win` too, if you would rather not install mingw at all.
+
+**Natively on Windows on ARM**, which is the route if you already run an ARM64
+Windows — in a VM on an Apple Silicon Mac, say. Install
+[MSYS2](https://www.msys2.org/), open the **CLANGARM64** shell (not MSYS, not
+UCRT64 — CLANGARM64 is the environment that targets ARM64; there is no ARM64
+mingw *gcc*, which is why it is a clang environment), and:
+
+```sh
+pacman -S --needed git mingw-w64-clang-aarch64-clang mingw-w64-clang-aarch64-cmake mingw-w64-clang-aarch64-ninja
+cd /c/path/to/trndi/externals/quickjs
+./build.sh winhost      # or just ./build.sh — 'all' means this under MSYS2
+```
+
+`winhost` is arch-agnostic: run it from the MINGW64 shell on an x64 machine and
+it fills `x86_64-win64` instead. It is a host build, so the compilers have no
+triple prefix — that is the whole difference from `winarm`.
+
+Which directory it fills is decided by `$CC -dumpmachine`, not by `uname -m`,
+and the difference is not academic: MSYS2 ships **no native ARM64 runtime**, so
+on Windows on ARM the shell itself is the emulated x86_64 one and its `uname`
+says `x86_64` even in CLANGARM64, where every compiler on `PATH` emits ARM64
+code. Trusting `uname` there would file an ARM64 build under `x86_64-win64` and
+hand the loader an ARM64 DLL for an x64 executable. The plain **MSYS** shell is
+refused outright — it builds against `msys-2.0.dll`, a Cygwin fork, which is
+not a Windows-native library at all.
+
+Two things to know before building *Trndi itself* for ARM64 Windows:
+
+- **FPC 3.2.2 cannot target `aarch64-win64`**; that came later. Check with
+  `fpc -i` on the build machine, or install InstallAware's prebuilt
+  [lazarus-arm64.msi](https://www.installaware.com/lazarus-arm64.msi). The
+  `aarch64-win64` DLLs are committed either way: rebuilding them needs no FPC at
+  all — clang and CMake do that — so an FPC that cannot target ARM64 does not
+  stop you refreshing them for everyone else.
+- **Windows 11 on ARM runs x64 binaries under emulation**, so an existing
+  `x86_64-win64` Trndi build already works on an ARM machine. A native ARM64
+  build is an optimisation, not a prerequisite — and if the toolchain you run
+  is the emulated x64 one, x64 is also the *correct* target: `Makefile` and
+  `make.ps1` both key off `PROCESSOR_ARCHITECTURE`, which describes the
+  process, not the machine, and so stage the libraries that match whatever
+  `Trndi.exe` was just built as.
+- **An explicit target CPU wins over that host detection.** The staged
+  directory is always `<TargetCPU>-<TargetOS>`, the same one `Trndi.lpi`
+  links against, so a cross build passes the CPU through and both sides
+  agree: `make CPU_FLAG=--cpu=aarch64` on any host, or
+  `.\make.ps1 --cpu=aarch64` on Windows (the argument is forwarded to
+  lazbuild and read back for the library copy). Only when no `--cpu` is
+  given does the host (`PROCESSOR_ARCHITECTURE`, `uname -m`) decide.
+
+Packaging is a separate, unsolved problem: `dist/windows_setup.iss` is x64
+throughout — `ArchitecturesAllowed=x64compatible`, and `iscc` produces an x64
+setup binary — so pointing it at `aarch64-win64` would swap the DLLs without
+making the installer native. A native ARM64 installer needs solving as a whole,
+not one path at a time. Until then an ARM64 build is something you run from the
+build directory, not something you ship.
+
+### FreeBSD version floor
+
+FreeBSD stamps an ABI note with the `__FreeBSD_version` of the build host, and
+the platform's compatibility guarantee runs one way: old binaries keep working
+on newer systems, not the reverse. The committed `x86_64-freebsd` libraries
+report `for FreeBSD 15.1` — check with
+
+```sh
+file libqjs.so.0.15.1
+```
+
+so a 14.x system may refuse to load them and needs its own `build.sh freebsd`
+run. Building on the oldest release you intend to support is the way to keep
+that floor low, exactly as with the glibc floor below.
+
+### glibc floor
+
+A Linux library only runs on glibc at least as new as the one it was linked
+against, so the build host — not the code — decides which distros can load it.
+Check any of them with:
+
+```sh
+readelf -V libqjs.so.0.15.1 | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1
+```
+
+| target | built on | floor |
+|---|---|---|
+| `aarch64-linux` | Rocky 9 container (podman, on a Pi) | `GLIBC_2.34` |
+| `x86_64-linux` | Rocky 9 container (podman, on Fedora/WSL) | `GLIBC_2.34` |
+
+`GLIBC_2.34` is the number to hold: it matches the floor the `Trndi` binary
+itself records, so the engine is not what limits distro support. An earlier
+Fedora-built set floored at 2.38, which excluded Debian 12, Raspberry Pi OS
+bookworm, Ubuntu 22.04 and RHEL/Rocky 9 — all otherwise fine — and because the
+binding is link-time on Linux (`external QJSLIB`), `libqjs.so.0` is a `DT_NEEDED`
+entry the loader resolves before `main` runs. So the floor is not a limit on
+extensions, it is a limit on the whole program: an Extensions build below it
+fails to *launch* — no window, just a loader error — rather than starting up
+without extensions. "No Ext" builds link no engine and are unaffected by any of
+this, which is the fallback for a system that cannot meet the floor and cannot
+rebuild.
+
+Nothing in quickjs-ng needs 2.38; that floor was an artifact of Fedora's libc.
+Building the same source in a Rocky 9 container gives 2.34 on any host, without
+a VM — the sysroot supplies glibc, the host kernel is irrelevant, and
+old-userspace-on-new-kernel is the safe direction:
+
+```sh
+cd <repo root>
+podman run --rm \
+  -v "$PWD:/src" -w /src/externals/quickjs \
+  -e TRNDI_QJS_WORK=/tmp/qjsbuild \
+  quay.io/rockylinux/rockylinux:9 \
+  sh -c 'dnf install -y gcc cmake git && ./build.sh linux'
+```
+
+`TRNDI_QJS_WORK` keeps the quickjs-ng clone and the CMake tree inside the
+container, so only the finished libraries are written back through the bind
+mount — worth it on any slow mount, and a large difference under WSL. The image
+is named in full because Fedora's podman defaults to
+`short-name-mode = "enforcing"`, where a bare `rockylinux:9` prompts or fails.
+On an SELinux host (native Fedora/RHEL) add `:Z` to the volume; do *not* on
+WSL, where `/mnt/c` is drvfs and has no xattrs to relabel.
+
+Run it once per architecture, on a machine of that architecture (`build.sh
+linux` only ever builds for its host). Use it whenever these binaries are
+refreshed — rebuilding on a bleeding-edge host silently raises the floor for
+everyone, and nothing in CI catches it.
+
+Rootless podman under WSL usually needs one fix first: the distro's rootfs
+import strips file capabilities from `newuidmap`/`newgidmap`, and without them
+UID mapping fails with `should have setuid or have filecaps setuid`. Restore
+them with `sudo setcap cap_setuid+ep /usr/bin/newuidmap` and
+`sudo setcap cap_setgid+ep /usr/bin/newgidmap`, then `podman system migrate`.
+
+## How the libraries are found at runtime
+
+They ship *beside* the executable rather than being installed system-wide, so
+each platform needs the loader pointed at the executable's own directory:
+
+| platform | mechanism |
+|---|---|
+| Windows | automatic — the executable's directory is searched first |
+| Linux | `-k-rpath=$ORIGIN`, set per build mode in `Trndi.lpi` |
+| Haiku | `-k-rpath=\$ORIGIN`, plus a `lib/` subdirectory beside the executable as a belt |
+| FreeBSD | `-k-rpath=\$ORIGIN`, same place |
+| macOS | `-k-rpath -k@loader_path`, same place |
+
+### The dollar must be escaped
+
+Note the backslash. FPC's link step passes `-k` options through a shell on
+FreeBSD and Haiku, so an unescaped `$ORIGIN` is expanded by that shell to
+nothing: `ld` receives `-rpath=` and stamps an rpath entry that exists and
+points nowhere. The libraries then sit beside the executable, correctly named,
+and the loader still reports them missing. Measured, both with bare `fpc` and
+through the whole lazbuild → `<Conditionals>` → `fpc` → `ld` chain:
+
+| spelling | Linux | FreeBSD | Haiku |
+|---|---|---|---|
+| `-k-rpath=$ORIGIN` | `[$ORIGIN]` | `[]` | `[]` |
+| `-k-rpath=\$ORIGIN` | `[$ORIGIN]` | `[$ORIGIN]` | `[$ORIGIN]` |
+| `-k-rpath -k$ORIGIN` | `[$ORIGIN]` | `[-dynamic-linker=…]` | — |
+
+So all three use the escaped spelling, and the two-argument form is avoided
+entirely — on FreeBSD it swallowed an unrelated linker argument into the rpath.
+Linux tolerates every spelling, which is why this went unnoticed: it worked
+where it was tested and was silently empty everywhere else.
+
+With the escaped form the loaders do resolve a library sitting beside the
+executable, checked on FreeBSD 15.1 and Haiku hrev57937 by running a binary
+from `/` and calling into a library placed next to it — `ldd` on FreeBSD
+reports the copy beside the binary rather than the one in `/lib`.
+
+macOS keeps the two-argument form on purpose: `@loader_path` has no dollar for
+a shell to eat, and ld64 wants the path as a separate argument. An installed
+`Trndi.app` records it correctly — worth re-checking with
+
+```sh
+otool -l Trndi.app/Contents/MacOS/Trndi | grep -A2 LC_RPATH   # path @loader_path
+```
+
+if that line is ever rewritten to match the others.
+
+### Haiku also searches `%A/lib`
+
+With a working rpath the libraries load from beside the executable, verified on
+hrev57937 by running a program from `/` that called into `libqjs` sitting next
+to it. Independently, Haiku's default `LIBRARY_PATH` is `%A/lib` (a `lib/`
+subdirectory beside the app), then `~/config/lib`, then `/boot/system/lib` — so
+the Makefile also stages into `build/lib`, `tests/lib` and `./lib` there. That
+is now redundancy rather than the mechanism, and it is worth keeping: it is what
+made Haiku work at all while the rpath was silently empty.
+`~/config/non-packaged/lib/` is the other place that always works, if the
+libraries are installed rather than shipped beside the binary.
+
+In a macOS `.app`, that directory is `Contents/MacOS`, which is where
+`dist/macos.sh` puts them.
+
+## A note on `libqjs.so` symlinks
+
+The Linux build produces `libqjs.so.0.15.1` with `SONAME libqjs.so.0`, plus
+`libqjs.so` and `libqjs.so.0` symlinks. Only the real file is stored here —
+symlinks do not survive a copy onto a Windows filesystem. `build.sh` recreates
+them, and so does the Makefile's install step.
+
+The symlinks are a *build-tree* convenience only: `libqjs.so` exists so `-lqjs`
+resolves at link time, and `libqjs.so.0` is the `SONAME` the loader asks for.
+Linux packages never carry them — `dist/linux/stage-qjs.sh` installs the real
+file under its `SONAME` instead, because 7-Zip 21.07+, fpm and mksquashfs all
+dereference symlinks by default and would otherwise put three identical copies
+of the library into the ZIP, DEB, RPM and AppImage.
+
+macOS sidesteps this: `build.sh mac` flattens the versioned dylib into a single
+unversioned `libqjs.dylib` and rewrites its install name to match, so nothing
+here depends on a symlink. Versioning would buy nothing — FPC links the library
+by name and the copy beside the executable is the only one it ever loads.

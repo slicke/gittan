@@ -1,0 +1,52 @@
+# Changelog
+
+## Unreleased
+
+### Added
+- Extensions: JavaScript files in Gittan's extensions folder (Extensions > Open Extensions Folder) add commands to the Extensions menu, the command palette and the file and editor menus, watch what happens (a repository opened or changed, a commit, a push or a pull, which they can stop with a reason), read the repository, run git and other programs, make requests, and put cards under the lines of the change view, with a settings page of their own. Each file says what it needs, and Gittan asks before it loads one that wants the network, programs or the settings. The engine is quickjs-ng, brought over from Trndi.
+
+## 0.10 (build-135, 2026-10-31)
+
+### Added
+- A merge editor: a conflicted file in three panes, mine and theirs side by side above and the result under them, each conflict's lines picked one by one or typed by hand. It opens from the file header's Merge Editor, File > Open in Merge Editor (Cmd+Shift+E, Ctrl+Shift+E elsewhere) or a conflict's list, and stays on for the conflicted files shown after it until Close.
+- Lines can be left out of a commit one by one: select them and choose Skip Selected Lines in Commit from the editor's menu, or File > Leave Change Out of Commit.
+- The editor's menu over a change offers what the buttons over it do: Reviewed, Skip in Commit or Include in Commit, and Discard Change...
+- Branch > Commit holds the commit menu of the commit shown (cherry-pick, revert, reset, interactive rebase, fixup, bisect), so those are in the menu bar and the command palette, not only behind a right click in the commit graph.
+- An Edit menu with Undo, Redo, Cut, Copy, Paste and Select All, and Find, Find Next and Find Previous, moved there from Go.
+- A Window menu on macOS (Minimize, Zoom, Next and Previous Tab, Bring All to Front) and a Help menu with the website, the release notes and a link to report an issue.
+- Alt alone and F10 open the menu on Windows and Linux, as a menu bar does there.
+- commit.template fills the message field, and Sign Off and Skip Hooks are in the File menu.
+- When a pull finds the branch diverged, the question says what Merge and Rebase do to the history, and Always do this in this repository keeps the choice.
+- A commit made behind the upstream gets a banner that offers Pull, and a pull that leaves commits to push offers Push.
+- Go > Back from a commit picked in the commit graph opens the graph again, with its search and on that commit.
+- The GitHub view has filters (with feedback, needs attention, waiting for a reviewer, approved, changes requested, checks failing or passing, no drafts, stale, asked of me, new to me) and presets of them, built in and saved by you. Each card shows where the review stands and how the checks do, and a check that fails for reasons of its own can be ignored by name.
+- The Commit section says that ticked files go into the commit and that a click or Space leaves one out, and the commit graph says that a commit can be dragged onto the branch to merge it; both can be put away for good.
+- Linux packages: a .deb and an .rpm, which install Gittan with its icon and desktop file, and make desktop for a checkout.
+- A Windows installer, beside the zip.
+- An Intel macOS build, Gittan-macos-intel.dmg.
+
+### Changed
+- A new application icon and logo: a diff window with red lines joined to green ones, a minus and a plus under them.
+- Hide Unchanged Lines is on at first, so a large file opens on its changes. If you turned it off, it stays off.
+- Gittan no longer says "staged": a commit takes each ticked file whole, as shown. A file that git add took only part of says "partly added with git add". File > Who Commits... is now Name and Email...
+- A pull of a branch rewritten here since it was pushed asks first, with Force Push as the default, and the summary says the upstream's commits were replaced.
+- Tabs of folders with the same name show their parent folders, such as Projects/trailhead and conflict/trailhead, and so does the window's title.
+- Syntax is a submenu of View, beside Syntax Theme, and the language's name in the file header opens the same choices as a list with a filter.
+- The file menu is shorter: the conflict items show only for a file in conflict, and the .git/info/exclude and Git LFS items are under More.
+- The status bar's Abort button says Abort, rather than showing a bare cross.
+- The list of changed files keeps its rows in the sidebar while Config and Submodules give way.
+- The indexing shows its progress for every file, with a hint that says how far it has come.
+- Refreshes and the Repository page do less work, which shows in large repositories.
+
+### Fixed
+- Switching between light and dark could crash Gittan.
+- The GitHub view's Waiting for your review showed pull requests you had approved, or that were merged a moment before.
+- Undo took a commit's changes out of the files when git stash or a plain git reset ran after it outside Gittan, also after many such resets.
+- Undo Discard of a conflict's pick did not bring the conflict back with the git of macOS 14. With git older than 2.42 it still cannot bring back a conflict resolved as a deletion, and now says so.
+- The Repository page counted no lines for a file that was binary in the last commit and is text now, and kept the last commit's count for a file marked assume-unchanged or skip-worktree.
+- Hide Unchanged Lines, the context lines and Side by Side moved the caret off the line it was on, so the change navigator lost its count.
+- After a commit from the time-lapse or history of a file the commit took, the old time-lapse stayed.
+- A submodule's page showed the change navigator of the file shown before it.
+- On macOS the application menu said "Hide Git Tree Analyzer  Navigator" rather than Hide Gittan.
+- During a merge the Commit section showed a lone options chevron beside Abort.
+- Under Wayland on KDE Gittan's window had a generic icon.

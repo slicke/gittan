@@ -71,6 +71,14 @@ begin
     FStatus.ShowBusy(rsWaitingForFetch, HintFetch);
     Exit;
   end;
+  { An extension may stop a push or a pull (push.before, pull.before). }
+  if (AKind in [rkPush, rkForcePush, rkPushBranch, rkPushTag]) and
+    not ExtFire('push.before', TJSONObject.Create(['branch', FBranch, 'remote', ARemote,
+      'ref', AArg, 'kind', ExtRemoteKind(AKind)])) then
+    Exit;
+  if (AKind = rkPull) and not ExtFire('pull.before', TJSONObject.Create(['branch', FBranch,
+      'mode', ExtPullMode(AMode)])) then
+    Exit;
   FRemoteAhead := FAhead;
   { What a pull brings in is counted from here when it is done. }
   if AKind = rkPull then
@@ -237,6 +245,11 @@ begin
   RefreshRepository;
   UpdateRemoteItems;
   UpdateCommitState;
+  if Job.Kind in [rkPush, rkForcePush, rkPushBranch, rkPushTag] then
+    ExtEmit('push.after', TJSONObject.Create(['ok', Job.Ok, 'error', Job.Error,
+      'kind', ExtRemoteKind(Job.Kind)]))
+  else if Job.Kind = rkPull then
+    ExtEmit('pull.after', TJSONObject.Create(['ok', Job.Ok, 'error', Job.Error]));
   if Job.Kind = rkFetchPull then
   begin
     PullFetchDone(Job);

@@ -46,6 +46,8 @@ Gittan needs git 2.30 or later on your `PATH`. The macOS build is signed ad hoc,
 
 **AI when you want it.** Turn it on in the settings and pick Claude Code or GitHub Copilot, whichever you already use; Gittan runs its command line tool in the repository with your own sign-in and has no account or API key of its own. ✦ AI in the Commit section writes the message for the ticked files, short and in the style of the repository's recent commits. Review Changes with AI goes through what the diff compares and puts what it finds, bugs, risks and questions, as cards under the lines they are about, beside a pull request's review comments. The agent may read the repository to check a finding but gets no tool that writes, runs a command or goes to the network, and nothing is sent until you ask.
 
+**Extensions.** A JavaScript file in Gittan's extensions folder can add a command to the Extensions menu and the command palette, watch commits, pushes and pulls and stop one with a reason, read the repository, run git, call a webhook and put a card under a line, with a settings page of its own. Each file declares what it needs and Gittan asks before loading one that wants the network or programs. See [docs/extensions](docs/extensions/README.md).
+
 **At home on each desktop.** The actions sit in the title bar on every platform, the window follows the system's dark mode (on Windows the native controls too), and Tools > Install CLI Command gives you a `gittan` command that opens a folder in it.
 
 <table>
@@ -109,7 +111,7 @@ make help       # every target
 
 On macOS, make finds lazbuild in `/Applications/lazarus` when it is not on `PATH`. On Linux you need GTK 3's headers (`libgtk-3-dev` on Debian and Ubuntu, `gtk3-devel` on Fedora); `make desktop` then installs a launcher and the icons in `~/.local/share`, without which a Wayland desktop shows a generic icon for Gittan. On Windows there is no make: `.\make.ps1` has the same targets and finds lazbuild on `PATH`, in `C:\lazarus` or in `C:\fpcupdeluxe\lazarus`.
 
-Every build copies the lexers into `lexlib/`, which must sit beside the executable (inside `Contents/Resources` in the macOS bundle). A build from the IDE does not do that, so run `make lexlib` (or `.\make.ps1 lexlib`) once.
+Every build copies the lexers into `lexlib/`, which must sit beside the executable (inside `Contents/Resources` in the macOS bundle), and the extensions' engine (`libqjs` and `tqshim` from `externals/quickjs/prebuilt/`) beside the executable (inside `Contents/MacOS`). A build from the IDE does neither, so run `make lexlib` (or `.\make.ps1 lexlib`) and `make` once.
 
 ## Repository layout
 
@@ -118,6 +120,8 @@ Every build copies the lexers into `lexlib/`, which must sit beside the executab
 - `tests/`: fpcunit tests, run with `make test` on every CI leg.
 - `spec/`: one file per area, describing how it works and which units it covers. [AGENTS.md](AGENTS.md) has the rules that apply everywhere.
 - `vendor/`: the submodules. Nothing in there is edited here; a package is updated by moving its submodule.
+- `externals/quickjs/`: the extensions' JavaScript engine, quickjs-ng with the C shim Trndi wrote for it, prebuilt per platform and copied beside the executable by every build.
+- `docs/extensions/`: the guide for extension writers, the type declarations and sample extensions.
 - `lexers/`: Gittan's own lexers, copied into `lexlib/` together with the CudaText collection.
 - `icons/` and `tools/`: the application icon and the script that regenerates it (`make icons`).
 

@@ -30,13 +30,15 @@ type
     wrote (gittan.ai) has the agent's name in Agent and how much the
     finding weighs in Severity (bug, risk, question); its Line is the
     shown diff's own, in the old side with LeftSide, and it has one
-    comment, with no address. }
+    comment, with no address. A card an extension put there
+    (gittan.ext.api) has the extension's id in Extension and its name
+    in Agent. }
   TGittanReviewThread = record
     Path: string;
     Line, StartLine, OriginalLine: integer;
     LeftSide, Resolved, Outdated, OnFile: boolean;
     Comments: TGittanReviewComments;
-    Agent, Severity: string;
+    Agent, Severity, Extension: string;
   end;
   TGittanReviewThreads = array of TGittanReviewThread;
 
