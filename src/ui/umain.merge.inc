@@ -217,20 +217,10 @@ begin
     Exit;
   end;
   Result := True;
-  SetLength(FDiscards, Length(FDiscards) + 1);
-  FDiscards[High(FDiscards)] := B;
+  NoteDiscard(B);
   { What is on disk now is read again. }
   FMergeView.Clear;
-  Remaining := MarkersLeft(Path);
-  Marked := False;
-  if Remaining = 0 then
-  begin
-    Marked := FRepo.MarkResolved(Path);
-    if not Marked then
-      StatusNote(Format(rsResolveFailed, [Path, FRepo.Error]), True);
-    { Undo Discard puts the conflict back in the index too. }
-    FDiscards[High(FDiscards)].Resolved := Marked;
-  end;
+  Marked := ResolveIfDone(Path, Remaining);
   if Marked then
     StatusNote(Format(rsResolvedLast, [Path]))
   else if Remaining = 1 then

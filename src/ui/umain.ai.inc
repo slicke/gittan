@@ -818,8 +818,7 @@ begin
     StatusNote(Format(rsFixWriteFailed, [Err]), True)
   else
   begin
-    SetLength(FDiscards, Length(FDiscards) + 1);
-    FDiscards[High(FDiscards)] := Job.Block;
+    NoteDiscard(Job.Block);
     Key := FindingKey(Job.Finding);
     for i := 0 to High(FAIThreads) do
       if FindingKey(FAIThreads[i]) = Key then

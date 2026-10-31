@@ -102,6 +102,24 @@ begin
   end;
 end;
 
+{ After a block of the conflicted file APath was written (NoteDiscard):
+  with no markers left (ARemaining) the file is marked resolved, a
+  failure said in the status bar, and the discard notes it, so Undo
+  Discard puts the conflict back in the index too. Whether it was
+  marked. }
+function TRepoFrame.ResolveIfDone(const APath: string; out ARemaining: integer): boolean;
+begin
+  Result := False;
+  ARemaining := MarkersLeft(APath);
+  if ARemaining > 0 then
+    Exit;
+  Result := FRepo.MarkResolved(APath);
+  if not Result then
+    StatusNote(Format(rsResolveFailed, [APath, FRepo.Error]), True);
+  if Length(FDiscards) > 0 then
+    FDiscards[High(FDiscards)].Resolved := Result;
+end;
+
 { AAction: 0 mine, 1 theirs, 2 resolved as it is. }
 procedure TRepoFrame.ResolvePath(const APath: string; AAction: integer);
 var
@@ -322,18 +340,8 @@ begin
     StatusNote(Format(rsResolveBlockFailed, [Err]), True);
     Exit;
   end;
-  SetLength(FDiscards, Length(FDiscards) + 1);
-  FDiscards[High(FDiscards)] := B;
-  Remaining := MarkersLeft(Path);
-  Marked := False;
-  if Remaining = 0 then
-  begin
-    Marked := FRepo.MarkResolved(Path);
-    if not Marked then
-      StatusNote(Format(rsResolveFailed, [Path, FRepo.Error]), True);
-    { Undo Discard puts the conflict back in the index too. }
-    FDiscards[High(FDiscards)].Resolved := Marked;
-  end;
+  NoteDiscard(B);
+  Marked := ResolveIfDone(Path, Remaining);
   RefreshRepository;
   UpdateDiscardItems;
   if AAgent <> '' then

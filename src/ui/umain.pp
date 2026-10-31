@@ -1437,6 +1437,7 @@ type
     procedure UpdateLeaveOutItem;
     procedure DiscardBlockAt(ABlock: integer);
     procedure UpdateDiscardItems;
+    procedure NoteDiscard(const ABlock: TGittanDiscard);
     procedure FileMenuClick(Sender: TObject);
     procedure MenuDiscardClick(Sender: TObject);
     procedure MenuUndoDiscardClick(Sender: TObject);
@@ -1984,6 +1985,7 @@ type
     function OperationLabel: string;
     function IsConflictPath(const APath: string): boolean;
     function MarkersLeft(const APath: string): integer;
+    function ResolveIfDone(const APath: string; out ARemaining: integer): boolean;
     procedure ResolvePath(const APath: string; AAction: integer);
     function ConflictHeaderAction(AIndex: integer): boolean;
     function CanResolveBlocks: boolean;

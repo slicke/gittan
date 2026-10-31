@@ -456,6 +456,13 @@ begin
     Delete(Result, 1, Length(Format(rsVsBase, [''])));
 end;
 
+{ ABlock was written to disk: Undo Discard can take it back. }
+procedure TRepoFrame.NoteDiscard(const ABlock: TGittanDiscard);
+begin
+  SetLength(FDiscards, Length(FDiscards) + 1);
+  FDiscards[High(FDiscards)] := ABlock;
+end;
+
 { Asks, writes the block's old lines over its new ones and refreshes. }
 procedure TRepoFrame.DiscardThis(const ABlock: TGittanDiscard);
 var
@@ -472,8 +479,7 @@ begin
     StatusNote(Format(rsDiscardFailed, [Err]), True);
     Exit;
   end;
-  SetLength(FDiscards, Length(FDiscards) + 1);
-  FDiscards[High(FDiscards)] := ABlock;
+  NoteDiscard(ABlock);
   RefreshRepository;
   StatusNote(Format(rsDiscarded, [ABlock.Line, Path]));
   UpdateDiscardItems;
