@@ -120,6 +120,7 @@ begin
     S.RepoFilesOpen := True;
     S.SubmodulesOpen := False;
     S.TickHintHidden := True;
+    S.GraphTipHidden := True;
     S.CommitOpen := False;
     S.CommitDraft := 'Subject = x'#10#10'C:\new\nope\\'#10;
     S.CommitDraftRepo := '/tmp/a';
@@ -178,6 +179,7 @@ begin
     AssertTrue(S.RepoFilesOpen);
     AssertFalse(S.SubmodulesOpen);
     AssertTrue(S.TickHintHidden);
+    AssertTrue(S.GraphTipHidden);
     AssertFalse(S.CommitOpen);
     AssertEquals('Subject = x'#10#10'C:\new\nope\\'#10, S.CommitDraft);
     AssertEquals('/tmp/a', S.CommitDraftRepo);

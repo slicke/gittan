@@ -1968,6 +1968,7 @@ type
     function CommitKnownName(const ACommit: TGittanGraphCommit): string;
     procedure GraphDrop(Sender: TObject; const ASource, ATarget: TGittanGraphCommit;
       const AScreenPos: TPoint);
+    procedure GraphTipDismiss(Sender: TObject);
     procedure FillCommitMenu(ARoot: TMenuItem; const ACommit: TGittanGraphCommit);
     procedure FillBranchCommitMenu;
     procedure MenuPickCommitClick(Sender: TObject);
@@ -2834,6 +2835,7 @@ resourcestring
   rsBranchMenu = '&Branch';
   rsBmSwitchItem = '&Switch to Branch...';
   rsBmCommitMenu = 'Commit %s';
+  rsGraphDragTip = 'Drag a commit onto %s to merge it.';
   rsBmCommitNone = 'Commit';
   rsBmCommitPick = 'Pick a Commit in the Graph...';
   rsBmNewItem = '&New Branch...';
@@ -4023,6 +4025,7 @@ begin
   FGraph.Parent := Self;
   FGraph.OnPick := @GraphPick;
   FGraph.OnContext := @GraphContext;
+  FGraph.OnTipDismiss := @GraphTipDismiss;
   FGraph.OnDrop := @GraphDrop;
   FGraph.OnMore := @GraphMore;
   FGraph.OnPathCommits := @GraphPathCommits;

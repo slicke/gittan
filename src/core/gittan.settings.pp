@@ -72,6 +72,9 @@ type
     {** Whether the Commit section's note that ticked files go into the
       commit was put away with Don't Show Again. }
     TickHintHidden: boolean;
+    {** Whether the commit graph's tip on dragging a commit onto the
+      branch was put away with Don't Show Again. }
+    GraphTipHidden: boolean;
     {** Whether the Commit section under the tree is unfolded. }
     CommitOpen: boolean;
     {** The commit message being written, kept until it is committed,
@@ -403,6 +406,7 @@ begin
       RepoFilesOpen := Ini.ReadBool(SecWindow, 'RepoFiles', False);
       SubmodulesOpen := Ini.ReadBool(SecWindow, 'Submodules', True);
       TickHintHidden := Ini.ReadBool(SecWindow, 'TickHintHidden', False);
+      GraphTipHidden := Ini.ReadBool(SecWindow, 'GraphTipHidden', False);
       CommitOpen := Ini.ReadBool(SecWindow, 'Commit', True);
       CommitDraft := UnescapeC(Ini.ReadString(SecCommit, 'Draft', ''));
       CommitDraftRepo := Ini.ReadString(SecCommit, 'Repo', '');
@@ -548,6 +552,7 @@ begin
       Ini.WriteBool(SecWindow, 'RepoFiles', RepoFilesOpen);
       Ini.WriteBool(SecWindow, 'Submodules', SubmodulesOpen);
       Ini.WriteBool(SecWindow, 'TickHintHidden', TickHintHidden);
+      Ini.WriteBool(SecWindow, 'GraphTipHidden', GraphTipHidden);
       Ini.WriteBool(SecWindow, 'Commit', CommitOpen);
       if CommitDraft <> '' then
       begin

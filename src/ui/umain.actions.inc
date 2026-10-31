@@ -1957,10 +1957,23 @@ begin
     Screen.Cursor := crDefault;
   end;
   FGraph.Marked := FMarkHash;
+  { How to merge from here, until Don't Show Again; a detached HEAD has
+    no branch to merge into. }
+  if App.Settings.GraphTipHidden or (FBranch = '') then
+    FGraph.Tip := ''
+  else
+    FGraph.Tip := Format(rsGraphDragTip, [FBranch]);
   FGraph.Popup(Commits, Length(Commits) >= Limit, FBranch, FAhead, FBehind,
     FHasUpstream, Filter, Keep);
   if FGraph.Visible then
     FSideNav.Selected := navGraph;
+end;
+
+procedure TRepoFrame.GraphTipDismiss(Sender: TObject);
+begin
+  App.Settings.GraphTipHidden := True;
+  App.Settings.Save;
+  FGraph.Tip := '';
 end;
 
 procedure TRepoFrame.GraphMore(Sender: TObject);
