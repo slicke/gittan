@@ -1068,10 +1068,15 @@ type
     FBinaryView: TGittanBinaryView;
     { The merge editor (umain.merge.inc): a conflicted file in three
       panes, in the editor's place; whether conflicted files open in it,
-      the file it shows and the item of the File menu. }
+      the file it shows and the item of the File menu. FMergeKeep is the
+      file as it is on disk when it changed outside Gittan and the user
+      kept the ticks, which Save writes over; FMergeAsked that leaving
+      the view asked already. }
     FMergeView: TGittanMergeView;
     FMergeMode: boolean;
     FMergePath: string;
+    FMergeKeep: TStringArray;
+    FMergeAsked: boolean;
     FMergeEditorItem: TMenuItem;
     { View > Markdown Preview (see umain.mdpreview.inc): whether it is on,
       the page right of the editor, its splitter, its share of the width
@@ -2006,13 +2011,16 @@ type
     procedure CloseMergeEditor;
     procedure ShowMergeView(const APath: string);
     procedure HideMergeView;
+    procedure ClearMerge;
+    function ReadMergeLines(out ALines: TStringArray): boolean;
+    function KeepMergeChoices(const ADisk: TStringArray): boolean;
     procedure RestyleMergeView;
     procedure SetMergeActions;
     procedure MergeHeaderAction(AIndex: integer);
     procedure MergeChanged(Sender: TObject);
     function MergeDirty: boolean;
     function SaveMerge(ARefresh: boolean): boolean;
-    procedure FlushMerge;
+    function FlushMerge(ACancel: boolean = False): boolean;
     procedure MenuMergeEditorClick(Sender: TObject);
     procedure SummaryRowAction(Sender: TObject; const APath: string);
     procedure CommitNoteLink(Sender: TObject);
@@ -3044,6 +3052,12 @@ resourcestring
   rsMergeSaved = 'Saved the result to %s; %d conflicts left in the file';
   rsMergeSavedOne = 'Saved the result to %s; 1 conflict left in the file';
   rsMergeSaveAsk = 'Save the merge result of %s?';
+  rsMergeChangedSaveAsk = '%s changed outside Gittan since the merge editor read it. ' +
+    'Save the merge result over it?';
+  rsMergeChangedAsk = '%s changed outside Gittan. Keep your choices in the merge editor, ' +
+    'which Save then writes over the change, or read the file again?';
+  rsMergeKeepChoices = 'Keep My Choices';
+  rsMergeReadAgain = 'Read Again';
   rsConflictsInFile = '%d conflicts';
   rsConflictInFile = '1 conflict';
   rsConflictNoMarkers = 'no markers left';
@@ -4205,7 +4219,7 @@ end;
 
 function TRepoFrame.NeedsSave: boolean;
 begin
-  Result := (FEditPath <> '') and Edit.Modified;
+  Result := ((FEditPath <> '') and Edit.Modified) or MergeDirty;
 end;
 
 { Something the user would want to see happened; a frame in the
@@ -6704,7 +6718,7 @@ begin
   LeaveEdit;
   FlushMerge;
   HideMergeView;
-  FMergeView.Clear;
+  ClearMerge;
   FMergePath := '';
   SaveCommitDraft;
   AbandonMessageJob;

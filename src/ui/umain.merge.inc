@@ -19,7 +19,31 @@
   file is marked resolved and the next conflicted file is shown, as a
   pick in the change view does. A refresh while the file is unchanged
   on disk keeps the ticks; leaving the file with ticks or edits not
-  saved asks first. }
+  saved asks first, and so does a file changed outside Gittan
+  meanwhile, which Save then writes over. }
+
+{ Whether two lists of lines are the same. }
+function SameLines(const A, B: TStringArray): boolean;
+var
+  i: integer;
+begin
+  Result := Length(A) = Length(B);
+  i := 0;
+  while Result and (i < Length(A)) do
+  begin
+    Result := A[i] = B[i];
+    Inc(i);
+  end;
+end;
+
+function LinesOf(AList: TStrings): TStringArray;
+var
+  i: integer;
+begin
+  SetLength(Result, AList.Count);
+  for i := 0 to AList.Count - 1 do
+    Result[i] := AList[i];
+end;
 
 { Whether the shown file can be opened in the merge editor: a conflicted
   text file with markers, against the work tree. }
@@ -44,10 +68,15 @@ var
   Path: string;
 begin
   Path := FMergePath;
-  FlushMerge;
+  { A save that failed keeps the editor open, and leaving it asks again. }
+  if not FlushMerge then
+  begin
+    FMergeAsked := False;
+    Exit;
+  end;
   FMergeMode := False;
   HideMergeView;
-  FMergeView.Clear;
+  ClearMerge;
   FMergePath := '';
   if (Path <> '') and IsChangedPath(Path) then
     ShowChanges(Path)
@@ -59,8 +88,6 @@ procedure TRepoFrame.ShowMergeView(const APath: string);
 var
   Lines: TStringList;
   Same: boolean;
-  i: integer;
-  Old: TStringArray;
 begin
   Lines := TStringList.Create;
   try
@@ -72,19 +99,12 @@ begin
       ShowChanges(APath);
       Exit;
     end;
-    { A refresh of the same file, unchanged on disk, keeps the ticks. }
+    { A refresh of the same file, unchanged on disk, keeps the ticks;
+      changed, they stay when the user keeps them. }
     Same := (FMergeView.Merge <> nil) and (FMergePath = APath);
-    if Same then
-    begin
-      Old := FMergeView.Merge.FileLines;
-      Same := Length(Old) = Lines.Count;
-      i := 0;
-      while Same and (i < Lines.Count) do
-      begin
-        Same := Old[i] = Lines[i];
-        Inc(i);
-      end;
-    end;
+    if Same and not SameLines(FMergeView.Merge.FileLines, LinesOf(Lines)) then
+      Same := KeepMergeChoices(LinesOf(Lines));
+    FMergeAsked := False;
     LeaveEdit;
     AbandonHistoryJob;
     EndTimelapse;
@@ -104,6 +124,7 @@ begin
     RestyleMergeView;
     if not Same then
     begin
+      FMergeKeep := nil;
       FMergeView.Lexer := App.Lexers.ForFile(APath, FRepo.Root);
       FMergeView.Load(TGittanMerge.Create(Lines, FOperation = 'rebasing'));
     end;
@@ -121,10 +142,60 @@ begin
   UpdateStatus;
 end;
 
+{ Leaving the view asks about ticks not saved, unless FlushMerge asked
+  on the way here. }
 procedure TRepoFrame.HideMergeView;
 begin
   if (FMergeView <> nil) and FMergeView.Visible then
+  begin
+    if not FMergeAsked then
+      FlushMerge;
     FMergeView.Visible := False;
+  end;
+end;
+
+procedure TRepoFrame.ClearMerge;
+begin
+  FMergeView.Clear;
+  FMergeKeep := nil;
+end;
+
+{ The file shown in the merge editor as it is on disk now. }
+function TRepoFrame.ReadMergeLines(out ALines: TStringArray): boolean;
+var
+  Lines: TStringList;
+begin
+  ALines := nil;
+  Lines := TStringList.Create;
+  try
+    Result := ReadMergeFile(IncludeTrailingPathDelimiter(FRepo.Root) +
+      SetDirSeparators(FMergePath), Lines);
+    if Result then
+      ALines := LinesOf(Lines);
+  finally
+    Lines.Free;
+  end;
+end;
+
+{ The file in the merge editor changed on disk, to ADisk: the ticks and
+  edits stay when they were kept against this text before, or when the
+  user keeps them; Save then writes over the change. }
+function TRepoFrame.KeepMergeChoices(const ADisk: TStringArray): boolean;
+begin
+  if (FMergeKeep <> nil) and SameLines(ADisk, FMergeKeep) then
+    Exit(True);
+  Result := False;
+  if not MergeDirty then
+    Exit;
+  HoldRefresh;
+  try
+    Result := AskDlg(rsAppName, Format(rsMergeChangedAsk, [FMergePath]), mtConfirmation,
+      [mrYes, rsMergeKeepChoices, 'IsDefault', mrNo, rsMergeReadAgain, 'NoCancel'], 0) = mrYes;
+  finally
+    ReleaseRefresh;
+  end;
+  if Result then
+    FMergeKeep := Copy(ADisk);
 end;
 
 { The panes take the editor's font, zoom, colors and scroll bars. }
@@ -199,6 +270,9 @@ begin
   Path := FMergePath;
   B := FMergeView.Merge.ResultBlock(FMergeView.ResultLines,
     IncludeTrailingPathDelimiter(FRepo.Root) + SetDirSeparators(Path));
+  { Kept over a change on disk: written over that. }
+  if FMergeKeep <> nil then
+    B.NewLines := Copy(FMergeKeep);
   Same := Length(B.OldLines) = Length(B.NewLines);
   i := 0;
   while Same and (i <= High(B.OldLines)) do
@@ -219,7 +293,7 @@ begin
   Result := True;
   NoteDiscard(B);
   { What is on disk now is read again. }
-  FMergeView.Clear;
+  ClearMerge;
   Marked := ResolveIfDone(Path, Remaining);
   if Marked then
     StatusNote(Format(rsResolvedLast, [Path]))
@@ -239,17 +313,52 @@ begin
 end;
 
 { Leaving the file shown in the merge editor with ticks or edits not
-  saved asks whether to save them. }
-procedure TRepoFrame.FlushMerge;
+  saved asks whether to save them; a file changed on disk since it was
+  read is named so, and Save writes over it. With ACancel (a close) the
+  question has Cancel, and Don't Save leaves the ticks for a close that
+  is called off. False when the result stays: Cancel, or a save that
+  failed (the status bar says why), so the next leave asks again. }
+function TRepoFrame.FlushMerge(ACancel: boolean): boolean;
+var
+  Disk: TStringArray;
+  Outside: boolean;
+  Ask: string;
+  Answer: TModalResult;
 begin
+  Result := True;
+  if not ACancel then
+    FMergeAsked := True;
   if not MergeDirty or (FMergePath = '') then
     Exit;
+  Outside := ReadMergeLines(Disk) and not SameLines(Disk, FMergeView.Merge.FileLines) and
+    not SameLines(Disk, FMergeKeep);
+  if Outside then
+    Ask := Format(rsMergeChangedSaveAsk, [FMergePath])
+  else
+    Ask := Format(rsMergeSaveAsk, [FMergePath]);
   HoldRefresh;
   try
-    if AskDlg(rsAppName, Format(rsMergeSaveAsk, [FMergePath]), mtConfirmation,
-      [mrYes, rsSaveAction, 'IsDefault', mrNo, rsDontSave, 'NoCancel'], 0) = mrYes then
-      SaveMerge(False);
-    FMergeView.Clear;
+    if ACancel then
+      Answer := AskDlg(rsAppName, Ask, mtConfirmation, [mrYes, rsSaveAction, 'IsDefault',
+        mrNo, rsDontSave, mrCancel, rsCancelButton, 'IsCancel'], 0)
+    else
+      Answer := AskDlg(rsAppName, Ask, mtConfirmation, [mrYes, rsSaveAction, 'IsDefault',
+        mrNo, rsDontSave, 'NoCancel'], 0);
+    case Answer of
+      mrYes:
+      begin
+        if Outside then
+          FMergeKeep := Disk;
+        Result := SaveMerge(False);
+        if Result then
+          ClearMerge;
+      end;
+      mrNo:
+        if not ACancel then
+          ClearMerge;
+      else
+        Result := False;
+    end;
   finally
     ReleaseRefresh;
   end;

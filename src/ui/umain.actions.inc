@@ -1653,11 +1653,13 @@ var
   LinePairs: TGittanKeepArray;
   Including: boolean;
 begin
+  { Where the menu opens: at the mouse, or at the caret for the
+    keyboard's menu key, which ATSynEdit opens there. }
   FPopupEd := Edit;
   if (FEditOld <> nil) and FEditOld.Visible and
-    PtInRect(FEditOld.ClientRect, FEditOld.ScreenToClient(Mouse.CursorPos)) then
+    PtInRect(FEditOld.ClientRect, FEditOld.ScreenToClient(FEditPopup.PopupPoint)) then
     FPopupEd := FEditOld;
-  P := FPopupEd.ScreenToClient(Mouse.CursorPos);
+  P := FPopupEd.ScreenToClient(FEditPopup.PopupPoint);
   P := FPopupEd.ClientPosToCaretPos(ATPoint(P.X, P.Y), Details);
   FPopupRow := P.Y;
   if (P.Y < 0) or Details.BelowAllText then

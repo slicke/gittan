@@ -660,18 +660,20 @@ begin
     SaveEdit(True);
 end;
 
-{ Unsaved changes hold the window open until they are saved or dropped. }
+{ Unsaved changes hold the window open until they are saved or dropped,
+  the merge editor's ticks and edits too. }
 procedure TRepoFrame.FormCloseQuery(Sender: TObject; var CanClose: boolean);
 begin
   CanClose := True;
-  if (FEditPath = '') or not Edit.Modified then
-    Exit;
-  case AskDlg(rsAppName, Format(rsSaveAsk, [ExtractFileName(FEditPath)]),
-      mtConfirmation, [mrYes, rsSaveAction, 'IsDefault', mrNo, rsDontSave,
-      mrCancel, rsCancelButton, 'IsCancel'], 0) of
-    mrYes: CanClose := SaveEdit(False);
-    mrNo: Edit.Modified := False;
-    else
-      CanClose := False;
-  end;
+  if (FEditPath <> '') and Edit.Modified then
+    case AskDlg(rsAppName, Format(rsSaveAsk, [ExtractFileName(FEditPath)]),
+        mtConfirmation, [mrYes, rsSaveAction, 'IsDefault', mrNo, rsDontSave,
+        mrCancel, rsCancelButton, 'IsCancel'], 0) of
+      mrYes: CanClose := SaveEdit(False);
+      mrNo: Edit.Modified := False;
+      else
+        CanClose := False;
+    end;
+  if CanClose then
+    CanClose := FlushMerge(True);
 end;
