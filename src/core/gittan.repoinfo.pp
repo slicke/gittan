@@ -124,6 +124,14 @@ function CategoryName(ACategory: TGittanFileCategory): string;
   NUL and the count, a line each); a file without a count has no lines. }
 function ParseComposition(const AFiles, ALineCounts: string): TGittanComposition;
 
+{** The lines of the tracked files as they are in the working tree, in
+  the form ParseComposition reads, from those of the commit AHead
+  (`git grep -I -c -z -e ^ <AHead>`, each path after "<AHead>:") and
+  what changed since (`git diff <AHead> --numstat --no-renames -z`): a
+  file's lines with those added and less those removed. A file binary
+  on either side counts as one with no lines. }
+function AdjustLineCounts(const AHead, AHeadCounts, ANumstat: string): string;
+
 {** A count with its thousands grouped by a thin space: 1 234 567. }
 function GroupDigits(AValue: int64): string;
 
@@ -566,6 +574,159 @@ begin
   end;
 end;
 
+{ The paths of `git grep -c -z` output with their counts, sorted, each
+  count in the item's object. APrefix comes off every path. }
+procedure ReadLineCounts(const AOutput, APrefix: string; ACounts: TStringList);
+var
+  P, Nul, Lf: integer;
+  Path: string;
+  Count: int64;
+begin
+  P := 1;
+  while P <= Length(AOutput) do
+  begin
+    Nul := Pos(#0, AOutput, P);
+    if Nul = 0 then
+      Break;
+    Lf := Pos(#10, AOutput, Nul);
+    if Lf = 0 then
+      Lf := Length(AOutput) + 1;
+    Path := Copy(AOutput, P, Nul - P);
+    if AnsiStartsStr(APrefix, Path) then
+      Delete(Path, 1, Length(APrefix));
+    if (Path <> '') and TryStrToInt64(Trim(Copy(AOutput, Nul + 1, Lf - Nul - 1)), Count) then
+      ACounts.AddObject(Path, TObject(PtrInt(Count)));
+    P := Lf + 1;
+  end;
+end;
+
+function AdjustLineCounts(const AHead, AHeadCounts, ANumstat: string): string;
+var
+  Counts: TStringList;
+  P, Nul, Tab1, Tab2, i: integer;
+  Path: string;
+  Added, Removed, Count: int64;
+  Binary: boolean;
+  Sb: TStringBuilder;
+begin
+  Counts := TStringList.Create;
+  try
+    Counts.CaseSensitive := True;
+    Counts.Sorted := True;
+    Counts.Duplicates := dupIgnore;
+    ReadLineCounts(AHeadCounts, AHead + ':', Counts);
+    { A record is "<added>\t<removed>\t<path>" up to its NUL. }
+    P := 1;
+    while P <= Length(ANumstat) do
+    begin
+      Nul := Pos(#0, ANumstat, P);
+      if Nul = 0 then
+        Nul := Length(ANumstat) + 1;
+      Tab1 := Pos(#9, ANumstat, P);
+      Tab2 := 0;
+      if (Tab1 > 0) and (Tab1 < Nul) then
+        Tab2 := Pos(#9, ANumstat, Tab1 + 1);
+      if (Tab2 > 0) and (Tab2 < Nul) then
+      begin
+        Path := Copy(ANumstat, Tab2 + 1, Nul - Tab2 - 1);
+        Binary := not TryStrToInt64(Trim(Copy(ANumstat, P, Tab1 - P)), Added) or
+          not TryStrToInt64(Copy(ANumstat, Tab1 + 1, Tab2 - Tab1 - 1), Removed);
+        if Path <> '' then
+        begin
+          Count := 0;
+          if Counts.Find(Path, i) then
+          begin
+            Count := PtrInt(Counts.Objects[i]);
+            Counts.Delete(i);
+          end;
+          if not Binary then
+          begin
+            Count := Count + Added - Removed;
+            if Count > 0 then
+              Counts.AddObject(Path, TObject(PtrInt(Count)));
+          end;
+        end;
+      end;
+      P := Nul + 1;
+    end;
+    Sb := TStringBuilder.Create;
+    try
+      for i := 0 to Counts.Count - 1 do
+      begin
+        Sb.Append(Counts[i]);
+        Sb.Append(#0);
+        Sb.Append(IntToStr(PtrInt(Counts.Objects[i])));
+        Sb.Append(#10);
+      end;
+      Result := Sb.ToString;
+    finally
+      Sb.Free;
+    end;
+  finally
+    Counts.Free;
+  end;
+end;
+
+type
+  { The lines of a commit's text files, per root, so that only a new
+    commit has every file read again. }
+  THeadLines = record
+    Root, Head, Counts: string;
+  end;
+
+const
+  { The repositories whose counts are kept. }
+  HeadLinesKept = 8;
+
+var
+  HeadLinesCache: array of THeadLines;
+  HeadLinesLock: TRTLCriticalSection;
+
+{ The `git grep -c` output of the commit AHead at ARoot, from the cache
+  or read and kept. False when git could not read it. }
+function HeadLineCounts(const ARoot, AHead: string; out ACounts: string): boolean;
+var
+  i: integer;
+  Err: string;
+  Entry: THeadLines;
+begin
+  EnterCriticalSection(HeadLinesLock);
+  try
+    for i := 0 to High(HeadLinesCache) do
+      if (HeadLinesCache[i].Root = ARoot) and (HeadLinesCache[i].Head = AHead) then
+      begin
+        ACounts := HeadLinesCache[i].Counts;
+        Exit(True);
+      end;
+  finally
+    LeaveCriticalSection(HeadLinesLock);
+  end;
+  { git grep fails when no file matches, a commit of no text file;
+    that is not kept, as it is no failure to tell from one. }
+  if not RunGitIn(ARoot, ['grep', '-I', '-c', '-z', '--no-color', '-e', '^', AHead],
+    ACounts, Err) then
+  begin
+    ACounts := '';
+    Exit(Err = '');
+  end;
+  Entry.Root := ARoot;
+  Entry.Head := AHead;
+  Entry.Counts := ACounts;
+  EnterCriticalSection(HeadLinesLock);
+  try
+    { The root's older commit goes; the oldest root when full. }
+    for i := High(HeadLinesCache) downto 0 do
+      if HeadLinesCache[i].Root = ARoot then
+        Delete(HeadLinesCache, i, 1);
+    if Length(HeadLinesCache) >= HeadLinesKept then
+      Delete(HeadLinesCache, 0, 1);
+    Insert(Entry, HeadLinesCache, Length(HeadLinesCache));
+  finally
+    LeaveCriticalSection(HeadLinesLock);
+  end;
+  Result := True;
+end;
+
 function GroupDigits(AValue: int64): string;
 var
   Digits: string;
@@ -610,7 +771,7 @@ function GatherRepoInfo(const ARoot: string; AMaxContributors, AMaxTags: integer
 var
   Info: TGittanRepoInfo;
   Repo: TGittanRepo;
-  Output, Err, Line, Counts: string;
+  Output, Err, Line, Counts, Head, HeadCounts, Numstat: string;
   Cat: TGittanFileCategory;
   Seconds: int64;
   Lines: TStringList;
@@ -694,8 +855,19 @@ begin
   if Run(['ls-files', '-z']) then
   begin
     { Every line of every tracked text file as it is in the working
-      tree; git grep fails when there is none, which is no failure. }
-    if not RunGitIn(ARoot, ['grep', '-I', '-c', '-z', '--no-color', '-e', '^'], Counts, Err) then
+      tree: the commit's, read once per commit, and the changes since,
+      so that only the changed files are read each time. Without a
+      commit every file is read; git grep fails when there is none,
+      which is no failure. }
+    Head := '';
+    if (Info.Commits > 0) and RunGitIn(ARoot, ['rev-parse', '-q', '--verify', 'HEAD^{commit}'],
+      Head, Err) then
+      Head := Trim(Head);
+    if (Head <> '') and HeadLineCounts(ARoot, Head, HeadCounts) and
+      RunGitIn(ARoot, ['diff', Head, '--numstat', '--no-renames', '--no-ext-diff', '-z'],
+      Numstat, Err) then
+      Counts := AdjustLineCounts(Head, HeadCounts, Numstat)
+    else if not RunGitIn(ARoot, ['grep', '-I', '-c', '-z', '--no-color', '-e', '^'], Counts, Err) then
       Counts := '';
     Info.Composition := ParseComposition(Output, Counts);
     for Cat := Low(Cat) to High(Cat) do
@@ -731,5 +903,11 @@ begin
   FInfo := GatherRepoInfo(FRoot, FMaxContributors, FMaxTags);
   Done;
 end;
+
+initialization
+  InitCriticalSection(HeadLinesLock);
+
+finalization
+  DoneCriticalSection(HeadLinesLock);
 
 end.

@@ -1342,15 +1342,20 @@ end;
 var
   { The hosts of gh's hosts.yml as last read, with the file's path and
     text then, so it is parsed again only when it has changed:
-    ForgeClassFor asks for every remote of every repository. The text
-    is compared rather than the file's age, which counts whole seconds,
-    so an account switched in the second it was read is not missed.
-    Main thread only. }
+    ForgeClassFor asks for every remote of every repository. The file
+    is read only when its size or time changed, or when it was written
+    in the second it was last read, as its time counts whole seconds
+    and an account switched then would be missed; the text read is
+    compared, so an unchanged file is not parsed again. Main thread
+    only. }
   LoggedHosts: TStringArray;
   LoggedAccounts: TGittanForgeAccounts;
   LoggedHostsPath: string;
   LoggedHostsText: RawByteString;
   LoggedHostsRead: boolean;
+  LoggedHostsStamp: TDateTime;
+  LoggedHostsSize: int64;
+  LoggedHostsAt: TDateTime;
 
 { The hosts gh is logged in to, the file parsed again when it changed
   (none when it is not there, and none logged in). }
@@ -1358,10 +1363,28 @@ function GhLoggedHosts: TStringArray;
 var
   Path: string;
   Text: RawByteString;
+  Info: TSearchRec;
+  Stamp: TDateTime;
+  Size: int64;
 begin
   Path := IncludeTrailingPathDelimiter(GhConfigDir) + 'hosts.yml';
+  Stamp := 0;
+  Size := -1;
+  if StatExact(Path, Info) then
+  begin
+    Stamp := Info.TimeStamp;
+    Size := Info.Size;
+    FindClose(Info);
+  end;
+  { Unchanged, and read in a later second than it was written. }
+  if LoggedHostsRead and (Path = LoggedHostsPath) and (Stamp = LoggedHostsStamp) and
+    (Size = LoggedHostsSize) and (LoggedHostsAt >= Stamp + 2 / SecsPerDay) then
+    Exit(LoggedHosts);
+  LoggedHostsStamp := Stamp;
+  LoggedHostsSize := Size;
+  LoggedHostsAt := Now;
   Text := '';
-  if FileExists(Path) then
+  if Size >= 0 then
     try
       Text := ReadFileBytes(Path);
     except

@@ -218,7 +218,8 @@ end;
 
 procedure TRepoFrame.FileTreeFolded(Sender: TObject; Node: TTreeNode);
 begin
-  LayoutRepoFiles;
+  if not FTreeFolding then
+    LayoutRepoFiles;
 end;
 
 procedure TRepoFrame.TreePanelResize(Sender: TObject);

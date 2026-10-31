@@ -437,6 +437,9 @@ type
       paints in the empty tree; a filter that hides every file does not
       count. }
     FTreeClean: boolean;
+    { Set while the tree of changed files is filled or its folders folded
+      in bulk: FileTreeFolded leaves the layout to the one after it. }
+    FTreeFolding: boolean;
     { The height of the strip the title bar covers on macOS, where the
       content reaches under it (TRepoWindow.TitleBarHeight); 0 elsewhere. }
     FTitleBarHeight: integer;
@@ -1922,6 +1925,7 @@ type
     function OtherWorktreeBranches(out ABranches: TStringArray; out AError: string): boolean;
     procedure MenuWorktreesClick(Sender: TObject);
     procedure ListPaletteActions(AList: TStringList);
+    function FindPaletteAction(const APath: string): TMenuItem;
     procedure MenuPaletteClick(Sender: TObject);
     function NavCurrent(out APlace: TGittanPlace): boolean;
     function NavSync: boolean;
@@ -7282,12 +7286,21 @@ begin
       if not ASnap^.Ok then
         FStatus.ShowMessage(FLoadError, stBad, 0);
     end;
-    Node := FileTree.Items.GetFirstNode;
-    while Node <> nil do
+    if Collapsed.Count > 0 then
     begin
-      if (Node.Data = nil) and (Collapsed.IndexOf(Node.GetTextPath) >= 0) then
-        Node.Collapse(False);
-      Node := Node.GetNext;
+      FTreeFolding := True;
+      try
+        Node := FileTree.Items.GetFirstNode;
+        while Node <> nil do
+        begin
+          if (Node.Data = nil) and (Collapsed.IndexOf(Node.GetTextPath) >= 0) then
+            Node.Collapse(False);
+          Node := Node.GetNext;
+        end;
+      finally
+        FTreeFolding := False;
+      end;
+      LayoutRepoFiles;
     end;
   finally
     Collapsed.Free;
@@ -7924,8 +7937,10 @@ begin
     end;
     FileTree.CustomSort(@CompareTreeNodes);
     { Every changed file is in view from the start. }
+    FTreeFolding := True;
     FileTree.FullExpand;
   finally
+    FTreeFolding := False;
     FileTree.EndUpdate;
   end;
   LayoutRepoFiles;

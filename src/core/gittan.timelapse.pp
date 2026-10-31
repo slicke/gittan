@@ -223,8 +223,6 @@ begin
   begin
     if c mod TimelapseMarkEvery = 0 then
       Insert(Newer, FMarks, Length(FMarks));
-    for i := 0 to High(Newer) do
-      FBorn[Newer[i]] := c;
     if c = AHistory.Count - 1 then
       Break;
     { The version before commit c, which the next older commit left. }
@@ -262,6 +260,9 @@ begin
                 Fits := False;
                 Break;
               end;
+              { The oldest version with the entry is c's: the one
+                before has the line not yet. }
+              FBorn[Newer[At]] := c;
               Inc(Edit.Drop);
               Inc(At);
             end;
@@ -295,6 +296,9 @@ begin
     FSteps[c] := Step;
     Newer := ApplyStep(Newer, Step);
   end;
+  { What the oldest version shown has was there from it on. }
+  for i := 0 to High(Newer) do
+    FBorn[Newer[i]] := FCount - 1;
   SetLength(FSteps, FCount);
   AHistory.Truncate(FCount);
 end;
