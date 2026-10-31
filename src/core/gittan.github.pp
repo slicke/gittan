@@ -51,7 +51,7 @@ const
     'comments(last: 30) { nodes { author { __typename login } } } ' +
     'reviews(last: 30) { nodes { state author { __typename login } } } ' +
     'commits(last: 1) { nodes { commit { statusCheckRollup { state ' +
-    'contexts(first: 60) { nodes { __typename ' +
+    'contexts(first: 60) { pageInfo { hasNextPage } nodes { __typename ' +
     '... on CheckRun { name status conclusion } ' +
     '... on StatusContext { context state } } } } } } } }';
 
@@ -755,7 +755,7 @@ begin
 end;
 
 { The head commit's checks: the rollup's state as the forge's sum, and
-  each of its contexts by name. }
+  each of its contexts by name, with whether there are more. }
 procedure ReadChecks(AObject: TJSONObject; var APull: TGittanForgePull);
 var
   Nodes, Rollup, Contexts: TJSONData;
@@ -769,6 +769,9 @@ begin
   if (Rollup = nil) or (Rollup.JSONType <> jtObject) then
     Exit;
   APull.Checks := RollupOf(StrOf(TJSONObject(Rollup), 'state'));
+  Contexts := Dig(Rollup, ['contexts', 'pageInfo']);
+  if (Contexts <> nil) and (Contexts.JSONType = jtObject) then
+    APull.ChecksMore := TJSONObject(Contexts).Get('hasNextPage', False);
   Contexts := Dig(Rollup, ['contexts', 'nodes']);
   if (Contexts = nil) or (Contexts.JSONType <> jtArray) then
     Exit;

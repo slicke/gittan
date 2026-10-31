@@ -85,7 +85,8 @@ type
     every repository. Repo is "owner/name"; Checks the head commit's
     checks as the forge sums them up, and CheckList each of them by
     name when the forge gives them (ChecksState sums them up again
-    without the ones the user ignores; empty leaves Checks to stand);
+    without the ones the user ignores; empty leaves Checks to stand),
+    ChecksMore when the forge has more than the list holds;
     Reviews the latest review of each reviewer (bots included) and
     RequestedOf the names of those a review is asked of now (users'
     logins and teams' names); MyReview what the user's latest review
@@ -105,6 +106,7 @@ type
     ReviewDecision: TGittanReviewDecision;
     Checks: TGittanChecksState;
     CheckList: TGittanForgeChecks;
+    ChecksMore: boolean;
     Reviews: TGittanLatestReviews;
     RequestedOf: array of string;
     MyReview: TGittanReviewVerdict;
@@ -275,7 +277,8 @@ function IsIgnoredCheck(const AName: string; AIgnored: TStrings): boolean;
 {** The checks of APull summed up without the ones in AIgnored: failed
   when one fails, else pending when one is, else passed when any is
   left, else none; the forge's own sum (Checks) when it gave no
-  list. }
+  list, or when it is worse and the list is not all of them
+  (ChecksMore), since one not in the list may fail. }
 function ChecksState(const APull: TGittanForgePull; AIgnored: TStrings = nil): TGittanChecksState;
 {** The names of APull's checks in AState, the ignored ones left out,
   joined with ", ". }
@@ -1289,6 +1292,9 @@ begin
           Result := chkPassed;
     end;
   end;
+  { The states go from none to failed. }
+  if APull.ChecksMore and (APull.Checks > Result) then
+    Result := APull.Checks;
 end;
 
 function CheckNames(const APull: TGittanForgePull; AState: TGittanChecksState;
@@ -1355,6 +1361,16 @@ begin
     Exit('');
   end;
   CountChecks(APull, State, AIgnored, Total, n);
+  { Past the list the count is not known: the forge's sum, or a
+    count with a "+". }
+  if APull.ChecksMore then
+  begin
+    if n = 0 then
+      Exit('checks ' + Word);
+    if State = chkPassed then
+      Exit(Format('✓ %d+ checks', [Total]));
+    Exit(Format('%d of %d+ checks %s', [n, Total, Word]));
+  end;
   if Total = 0 then
   begin
     if State = chkPassed then

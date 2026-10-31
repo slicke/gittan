@@ -80,7 +80,8 @@ const
     '"comments":{"nodes":[{"author":{"__typename":"Bot","login":"codecov"}},' +
     '{"author":{"__typename":"User","login":"slicke"}}]},' +
     '"reviews":{"nodes":[{"state":"COMMENTED","author":{"__typename":"User","login":"Slicke"}}]},' +
-    '"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE","contexts":{"nodes":[' +
+    '"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE","contexts":{' +
+    '"pageInfo":{"hasNextPage":true},"nodes":[' +
     '{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS"},' +
     '{"__typename":"CheckRun","name":"npm audit","status":"COMPLETED","conclusion":"FAILURE"},' +
     '{"__typename":"CheckRun","name":"lint","status":"IN_PROGRESS","conclusion":null},' +
@@ -134,6 +135,8 @@ begin
   { The checks by name: a check run by its conclusion, one still
     running pending, a status context by its state. }
   AssertEquals(4, Length(MinePulls[0].CheckList));
+  AssertTrue('more checks than listed', MinePulls[0].ChecksMore);
+  AssertFalse(ReviewPulls[0].ChecksMore);
   AssertEquals('build', MinePulls[0].CheckList[0].Name);
   AssertTrue(MinePulls[0].CheckList[0].State = chkPassed);
   AssertEquals('npm audit', MinePulls[0].CheckList[1].Name);
@@ -346,6 +349,20 @@ begin
     AssertEquals('4 checks failing', PullChecksNote(Pull));
     SetLength(Pull.CheckList, 1);
     AssertEquals('1 check failing', PullChecksNote(Pull));
+    { More checks than the list: one past it may fail, which the
+      forge's sum tells. }
+    Pull.CheckList[0].State := chkPassed;
+    Pull.Checks := chkFailed;
+    AssertTrue(ChecksState(Pull) = chkPassed);
+    Pull.ChecksMore := True;
+    AssertTrue('the sum is worse', ChecksState(Pull) = chkFailed);
+    AssertEquals('checks failing', PullChecksNote(Pull));
+    AssertTrue(NeedsAttention(Pull, [arChecksFailing]));
+    Pull.Checks := chkPassed;
+    AssertEquals('✓ 1+ checks', PullChecksNote(Pull));
+    Pull.CheckList[0].State := chkFailed;
+    AssertEquals('1 of 1+ checks failing', PullChecksNote(Pull));
+    Pull.ChecksMore := False;
     { The names as one settings value and back. }
     AssertEquals('NPM Audit|approval|lint|build', JoinCheckNames(Ignored));
     SplitCheckNames(' a | |b|', Ignored);
