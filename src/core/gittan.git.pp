@@ -5912,28 +5912,59 @@ begin
   Result := ASnap.Ok;
 end;
 
-{ symbolic-ref fails while HEAD is detached, and the reflog before the
-  first commit; neither makes the state unreadable. }
+{ for-each-ref marks the branch HEAD is on (%(HEAD)), whose tip is
+  HEAD's commit; symbolic-ref and rev-parse are asked only when none is
+  marked, HEAD detached or before the first commit. symbolic-ref fails
+  while HEAD is detached, and the reflog before the first commit;
+  neither makes the state unreadable. }
 function TGittanRepo.ReadRefState(out AState: TGittanRefState): boolean;
 var
   Output: string;
+  Lines: TStringList;
+  i: integer;
+  Line: string;
 begin
   AState := Default(TGittanRefState);
   if FRoot = '' then
     Exit(False);
-  if RunGit(FRoot, ['symbolic-ref', '-q', 'HEAD'], Output) then
-  begin
-    AState.Branch := Trim(Output);
-    if Pos('refs/heads/', AState.Branch) = 1 then
-      Delete(AState.Branch, 1, Length('refs/heads/'));
-  end;
-  AState.Head := CommitId('HEAD');
-  if not RunGit(FRoot, ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads'],
-    Output) then
+  if not RunGit(FRoot, ['for-each-ref', '--format=%(objectname) %(refname) %(HEAD)',
+    'refs/heads'], Output) then
     Exit(False);
-  AState.Tips := ParseBranchTips(Output);
-  if RunGit(FRoot, ['reflog', '-1', '--format=%gs', 'HEAD'], Output) then
-    AState.Move := Trim(Output);
+  Lines := TStringList.Create;
+  try
+    Lines.Text := Output;
+    for i := 0 to Lines.Count - 1 do
+    begin
+      Line := TrimRight(Lines[i]);
+      if (Length(Line) > 2) and (Copy(Line, Length(Line) - 1, 2) = ' *') then
+      begin
+        SetLength(Line, Length(Line) - 2);
+        AState.Head := Copy(Line, 1, Pos(' ', Line) - 1);
+        AState.Branch := Copy(Line, Pos(' ', Line) + 1, MaxInt);
+      end;
+      Lines[i] := Line;
+    end;
+    AState.Tips := ParseBranchTips(Lines.Text);
+  finally
+    Lines.Free;
+  end;
+  if Pos('refs/heads/', AState.Branch) = 1 then
+    Delete(AState.Branch, 1, Length('refs/heads/'))
+  else
+  begin
+    AState.Branch := '';
+    AState.Head := '';
+    if RunGit(FRoot, ['symbolic-ref', '-q', 'HEAD'], Output) then
+    begin
+      AState.Branch := Trim(Output);
+      if Pos('refs/heads/', AState.Branch) = 1 then
+        Delete(AState.Branch, 1, Length('refs/heads/'));
+    end;
+    AState.Head := CommitId('HEAD');
+  end;
+  { Enough entries to look past the resets of a few stashes. }
+  if RunGit(FRoot, ['reflog', '-n', '20', '--format=%H %gs', 'HEAD'], Output) then
+    AState.Move := ParseHeadMove(Output, AState.Head);
   AState.Valid := True;
   Result := True;
 end;
