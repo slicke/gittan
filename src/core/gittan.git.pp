@@ -5379,11 +5379,17 @@ end;
 
 function TGittanRepo.Unresolve(const APath: string): boolean;
 var
-  Output: string;
+  Output, Path: string;
 begin
   if FRoot = '' then
     Exit(False);
-  if not RunGit(FRoot, ['update-index', '--unresolve', '--', APath], Output) then
+  { --unresolve takes every argument after it as a path, "--" too in
+    older git (Apple's on macOS 14: "--: not in our branch"), so a path
+    that looks like an option goes after "./" instead. }
+  Path := APath;
+  if Copy(Path, 1, 1) = '-' then
+    Path := './' + Path;
+  if not RunGit(FRoot, ['update-index', '--unresolve', Path], Output) then
     Exit(False);
   { git says nothing when it has no stages kept for the path. }
   Result := ConflictStages(FRoot, APath) <> '';
