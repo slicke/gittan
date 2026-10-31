@@ -14,7 +14,7 @@
 <meta property="og:image" content="https://gittan.app/assets/shots/unified-dark.png">
 <meta property="og:image:width" content="1280">
 <meta property="og:image:height" content="800">
-<meta property="og:image:alt" content="Gittan in dark mode showing the changes to a Vue component, with Reviewed, Skip in Commit and Discard pills on the block under the mouse">
+<meta property="og:image:alt" content="Gittan in dark mode showing the changes to a Vue component, with Reviewed, Skip in Commit and Discard pills on the framed block under the mouse">
 <meta property="og:url" content="https://gittan.app/">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
@@ -490,6 +490,7 @@
   .dl .os svg { width: 22px; height: 22px; fill: var(--fg); }
   .dl .file { color: var(--fg-muted); font-size: 13.5px; margin: 6px 0 22px; }
   .dl .btn { margin-top: auto; }
+  .dl .alt { margin-top: 10px; font-size: 13.5px; text-align: center; }
   .dl .card.mine { border-color: color-mix(in srgb, var(--green) 55%, var(--line)); box-shadow: 0 0 0 3px var(--tint-green), var(--shadow-sm); }
   .dl .card.mine .btn { background: var(--ink); border-color: var(--ink); color: var(--ink-fg); }
   .dl .yours { display: none; margin-left: auto; font-size: 11.5px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--green); }
@@ -552,6 +553,7 @@
     <nav>
       <a class="brand" href="#"><img src="assets/icon-64.png" alt="" width="28" height="28"> Gittan</a>
       <div class="links">
+        <a href="#new" class="opt">New</a>
         <a href="#tour" class="opt">Tour</a>
         <a href="#workflow" class="opt">Workflow</a>
         <a href="#features" class="opt">Features</a>
@@ -574,7 +576,7 @@
       <source srcset="assets/logo-dark.svg" media="(prefers-color-scheme: dark)" data-dark>
       <img class="logo" src="assets/logo-light.svg" alt="Gittan, Git Tree Analyzer &amp; Navigator" width="437" height="133">
     </picture>
-    <div><a class="pill" href="#ai"><b>New</b> AI review and commit messages, off until you turn them on <span aria-hidden="true">→</span></a></div>
+    <div><a class="pill" href="#new"><b>New</b> Tabs, a merge editor, a command palette and Undo <span aria-hidden="true">→</span></a></div>
     <h1>Understand every change.<br><em>Then commit it.</em></h1>
     <span class="strandline" aria-hidden="true"><svg class="strand"><use href="#strand"/></svg></span>
     <p class="tag">Gittan is a free, native git client built around the diff. See what you changed as you change it, who wrote each line and the history behind it, then commit, sync and merge without leaving it.</p>
@@ -596,13 +598,82 @@
           <source srcset="assets/shots/unified-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
           <source srcset="assets/shots/unified-dark.png" media="(prefers-color-scheme: dark)" data-dark>
           <source srcset="assets/shots/unified-light.avif" type="image/avif">
-          <img src="assets/shots/unified-light.png" width="1280" height="800" fetchpriority="high" alt="Gittan showing the changes to a Vue component: Home over Graph, Repository, Commands, Files, Pull Requests and Recent in the sidebar, the changed files with check boxes under them, the diff with the added lines in green on the right, Reviewed, Skip in Commit and Discard pills at the end of the block under the mouse, the Commit section under the tree, and the status bar with the repository, its branch and a Pull button over one commit behind and two ahead">
+          <img src="assets/shots/unified-light.png" width="1280" height="800" fetchpriority="high" alt="Gittan showing the changes to a Vue component: Home over Graph, Repository, Commands, Files and Recent in the sidebar, the changed files with check boxes under them, the diff with only the changed lines and a few around them, the block under the mouse framed with Reviewed, Skip in Commit and Discard pills at its first row, the Commit section under the tree, and the status bar with the repository, its branch and a Pull button over one commit behind and two ahead">
         </picture>
       </div>
     </div>
   </div>
 </header>
 
+<section id="new">
+  <div class="wrap">
+    <p class="eyebrow"><svg class="strand" aria-hidden="true"><use href="#strand"/></svg>New</p>
+    <h2>What's <em>new</em></h2>
+    <p class="lead">Gittan has grown a lot this autumn. These are the larger additions; the tour and the workflow below show most of them in place.</p>
+    <div class="facts c4">
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M3 11h18"/><path d="M8 7V4h6v3"/></svg></div>
+        <h3>Tabs</h3>
+        <p>One window holds several repositories, each in a tab: <kbd>⌘T</kbd> opens one, <kbd>⌘1</kbd> to <kbd>⌘9</kbd> pick one, and tabs of folders with the same name are told apart by their parents. Back and Forward (<kbd>⌘[</kbd> and <kbd>⌘]</kbd>, chevrons in the title bar) step through what a tab has shown, as a browser does.</p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3"/><path d="M12 15h5"/></svg></div>
+        <h3>Command palette</h3>
+        <p><kbd>⌘P</kbd> lists every action the menus offer right now. Type a few words in any order, and the ones you used last come first. Undo, Redo, Stash, Pull, Push and New Branch stand beside it as buttons.</p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></div>
+        <h3>Undo and Redo</h3>
+        <p>The Branch menu takes back what last moved a branch, and does it again: a commit, an amend, a merge, a cherry-pick, a reset, a pull, a rebase, a switch, a branch made, deleted or renamed, whether Gittan or git elsewhere did it.</p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/></svg></div>
+        <h3>Merge editor</h3>
+        <p>A conflicted file in three panes, <kbd>⌘⇧E</kbd>: yours and theirs side by side, the result under them. Tick the lines to keep from either side, one conflict at a time, and Save writes the result.</p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/></svg></div>
+        <h3>Time-lapse</h3>
+        <p><kbd>⌘⌥H</kbd> plays a file through its history, oldest first, each version with the lines its commit changed marked. Pause, step, or drag the track.</p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13h6"/><path d="M12 10v6"/></svg></div>
+        <h3>Worktrees</h3>
+        <p>Branch &gt; Worktrees… lists the repository's worktrees and opens one in a tab, and adds, locks, removes and prunes them.</p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7"/><path d="M18 15.5V10a3 3 0 0 0-3-3h-4"/><path d="m13 4-3 3 3 3"/></svg></div>
+        <h3>Pull requests everywhere</h3>
+        <p>The globe at the top right shows your pull requests on GitHub across every repository, the ones you wrote and the ones waiting for your review, with filters. Approve, ask for changes, comment and merge from Gittan, open a new one with Branch &gt; Create Pull Request…, and switch between your gh accounts.</p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
+        <h3>Git LFS</h3>
+        <p>A file in Git LFS shows as the file it stands for, not the pointer, with a Download button for a version not fetched. Who holds which lock is read from the server, and Lock File and Unlock File are on the file menu.</p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h9"/><path d="M4 18h16"/><path d="m16 10 4 4"/><path d="m20 10-4 4"/></svg></div>
+        <h3>Commit line by line</h3>
+        <p>Skip in Commit now works on the lines you select as well as on whole blocks. <code>commit.template</code> fills the message, and Sign Off and Skip Hooks sit after Amend.</p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10"/><path d="M16 12H9a3 3 0 0 0-3 3"/></svg></div>
+        <h3>Fixup, and drag to merge</h3>
+        <p>Fixup with the Ticked Files on a commit makes a fixup! commit for it, and Fold It In… rebases it in. Drag a commit onto your branch's row in the graph to merge it.</p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3v9h9"/><path d="M20.5 15A9 9 0 1 1 9 3.5"/></svg></div>
+        <h3>Composition and change:</h3>
+        <p>The Repository page counts the code, test, documentation and configuration files and their lines. The graph's search takes <code>change:</code> for the commits that add or remove a text.</p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2z"/></svg></div>
+        <h3>Bring your own agent</h3>
+        <p>Still off until you turn it on, and nothing is sent until you ask. Besides Claude Code and GitHub Copilot, it can now be any OpenAI-compatible API with your own key, or a local Ollama, so your code never leaves your computer. Turned on, the agent can also resolve a conflict, split the changes into commits, fix a review finding, explain how a few lines came to be and find where something is.</p>
+      </div>
+    </div>
+  </div>
+</section>
 <section id="tour">
   <div class="wrap">
     <p class="eyebrow"><svg class="strand" aria-hidden="true"><use href="#strand"/></svg>Tour</p>
@@ -613,6 +684,7 @@
     <div class="tour">
       <div class="tabs" role="tablist" aria-label="Screenshots" aria-orientation="vertical">
         <button role="tab" id="b-history" aria-selected="true" aria-controls="t-history"><b>Code History</b></button>
+        <button role="tab" id="b-timelapse" aria-selected="false" aria-controls="t-timelapse" tabindex="-1"><b>Time-lapse</b></button>
         <button role="tab" id="b-blame" aria-selected="false" aria-controls="t-blame" tabindex="-1"><b>Blame</b></button>
         <button role="tab" id="b-side" aria-selected="false" aria-controls="t-side" tabindex="-1"><b>Side by side</b></button>
         <button role="tab" id="b-preview" aria-selected="false" aria-controls="t-preview" tabindex="-1"><b>Preview</b></button>
@@ -622,18 +694,28 @@
         <button role="tab" id="b-stats" aria-selected="false" aria-controls="t-stats" tabindex="-1"><b>Statistics</b></button>
         <button role="tab" id="b-files" aria-selected="false" aria-controls="t-files" tabindex="-1"><b>Files</b></button>
         <button role="tab" id="b-commands" aria-selected="false" aria-controls="t-commands" tabindex="-1"><b>Commands</b></button>
-        <button role="tab" id="b-ai" aria-selected="false" aria-controls="t-ai" tabindex="-1"><b>AI review</b></button>
+        <button role="tab" id="b-palette" aria-selected="false" aria-controls="t-palette" tabindex="-1"><b>Command palette</b></button>
         <button role="tab" id="b-submodule" aria-selected="false" aria-controls="t-submodule" tabindex="-1"><b>Submodules</b></button>
         <button role="tab" id="b-clean" aria-selected="false" aria-controls="t-clean" tabindex="-1"><b>Clean tree</b></button>
+        <button role="tab" id="b-ai" aria-selected="false" aria-controls="t-ai" tabindex="-1"><b>AI review</b></button>
       </div>
       <div class="stage">
         <figure id="t-history" class="on" role="tabpanel" aria-labelledby="b-history">
-          <figcaption><b>Code History</b> lays the earlier versions of each line under the line itself, one color per commit, for the lines you select or the function the caret is in. The stats line of this component has four: the length, the walking time, the hours and minutes, and the unit of the climb.</figcaption>
+          <figcaption><b>Code History</b> lays the earlier versions of each line under the line itself, one color per commit, for the lines you select or the function the caret is in. In this component's script the import of the distance helpers has had three versions, and the duration two.</figcaption>
           <div class="frame"><picture>
             <source srcset="assets/shots/history-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/history-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/history-light.avif" type="image/avif">
-            <img src="assets/shots/history-light.png" width="1280" height="800" loading="lazy" alt="History of lines 1 to 19 in TrailCard.vue: four commits and the change not committed yet listed at the top, each with its own color and the author's initial, and the earlier versions of each line shown under it in that color">
+            <img src="assets/shots/history-light.png" width="1280" height="800" loading="lazy" alt="History of the script in TrailCard.vue: three commits and the change not committed yet listed at the top, each with its own color and the author's initial, and the earlier versions of each line shown under it in that color">
+          </picture></div>
+        </figure>
+        <figure id="t-timelapse" role="tabpanel" aria-labelledby="b-timelapse">
+          <figcaption><b>Time-lapse</b> (<kbd>⌘⌥H</kbd>) plays a file through its history, oldest first: each version as it was, with the lines that commit changed marked in its author's color. Pause it, step it, or drag the track to a version.</figcaption>
+          <div class="frame"><picture>
+            <source srcset="assets/shots/timelapse-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/timelapse-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/timelapse-light.avif" type="image/avif">
+            <img src="assets/shots/timelapse-light.png" width="1280" height="800" loading="lazy" alt="Time-lapse of TrailCard.vue paused at version 3 of 4, Show the walking time in hours and minutes by Inés Moreau: the import, the duration and the stats lines that commit changed marked in orange, and a play button and a track with four marks under the file">
           </picture></div>
         </figure>
         <figure id="t-blame" role="tabpanel" aria-labelledby="b-blame">
@@ -664,25 +746,25 @@
           </picture></div>
         </figure>
         <figure id="t-summary" role="tabpanel" aria-labelledby="b-summary">
-          <figcaption><b>The summary</b> is the Home of the sidebar: every changed file with its counts, a badge that fills as a change gets staged, and for a submodule the commits it moved between. The status bar under it names the repository and its branch, and its middle button is always the next step: Pull here, or Push, Resolve, Continue or Commit Merge.</figcaption>
+          <figcaption><b>The summary</b> is the Home of the sidebar: every changed file with its counts and a bar, and for a submodule the commits it moved between. The status bar under it names the repository and its branch, and its middle button is always the next step: Pull here, or Push, Resolve, Continue or Commit Merge.</figcaption>
           <div class="frame"><picture>
             <source srcset="assets/shots/summary-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/summary-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/summary-light.avif" type="image/avif">
-            <img src="assets/shots/summary-light.png" width="1280" height="800" loading="lazy" alt="The repository summary: six changed files with added and deleted line counts and bars, one marked staged, and a submodule moved from 64a3db3 to af86be3; Home heads the sidebar over Graph, Repository, Commands, Files, Pull Requests and Recent, and the status bar offers Pull with one commit behind and two ahead">
+            <img src="assets/shots/summary-light.png" width="1280" height="800" loading="lazy" alt="The repository summary: six changed files with added and deleted line counts and bars, and a submodule moved from 64a3db3 to af86be3; Home heads the sidebar over Graph, Repository, Commands, Files and Recent, and the status bar offers Pull with one commit behind and two ahead">
           </picture></div>
         </figure>
         <figure id="t-repo" role="tabpanel" aria-labelledby="b-repo">
-          <figcaption><b>The Repository page</b> (<kbd>⌘⇧I</kbd>) sums up the repository itself in tiles that lead on: Commits opens the graph, Branches and Tags drop their lists, Files opens the Files page at HEAD. The remotes can be edited from here, and a click on an author shows their commits.</figcaption>
+          <figcaption><b>The Repository page</b> (<kbd>⌘⇧I</kbd>) sums up the repository itself in tiles that lead on: Commits opens the graph, Branches and Tags drop their lists, Files opens the Files page at HEAD. Under them the composition counts the code, test, documentation and configuration files and their lines. The remotes can be edited from here, and a click on an author shows their commits.</figcaption>
           <div class="frame"><picture>
             <source srcset="assets/shots/repo-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/repo-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/repo-light.avif" type="image/avif">
-            <img src="assets/shots/repo-light.png" width="1280" height="800" loading="lazy" alt="The Repository page of trailhead: main tracking origin/main with the last commit 3 days ago, then tiles for 15 commits since 4 Aug 2026, 3 branches, the tag v0.1.0, 17 tracked files, one submodule and 496 KiB, the origin remote with Edit Remotes, and three contributors with their initials, a bar and their share of the commits">
+            <img src="assets/shots/repo-light.png" width="1280" height="800" loading="lazy" alt="The Repository page of trailhead: main tracking origin/main with the last commit 10 days ago, tiles for 15 commits since 4 Aug 2026, 3 branches, the tag v0.1.0, 17 tracked files, one submodule and 496 KiB, then the composition: 299 lines in all, 11 code files with 222 lines, no test files, one documentation file and 5 configuration files with 68 lines, each with a bar, then the origin remote with Edit Remotes and three contributors with their share of the commits">
           </picture></div>
         </figure>
         <figure id="t-graph" role="tabpanel" aria-labelledby="b-graph">
-          <figcaption><b>The commit graph</b> (Graph in the sidebar, or <kbd>⌘3</kbd>) draws every branch and tag, marks the commits not pushed and the ones waiting on the remote, shows any commit against its parent with a click, and filters as you type in its search field.</figcaption>
+          <figcaption><b>The commit graph</b> (Graph in the sidebar, or <kbd>⌘⌥3</kbd>) draws every branch and tag, marks the commits not pushed and the ones waiting on the remote, shows any commit against its parent with a click, and filters as you type in its search field. Drag a commit onto your branch's row to merge it.</figcaption>
           <div class="frame"><picture>
             <source srcset="assets/shots/graph-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/graph-dark.png" media="(prefers-color-scheme: dark)" data-dark>
@@ -700,7 +782,7 @@
           </picture></div>
         </figure>
         <figure id="t-files" role="tabpanel" aria-labelledby="b-files">
-          <figcaption><b>Files</b> in the sidebar, or <kbd>⌘5</kbd>, shows the tree of HEAD one folder at a time, with crumbs leading back up. Browse Files… on a commit, a tag or a reflog entry opens it as it was then. A file opens read-only in the editor under its lexer, an image scaled to fit, and Open or Save As takes it out.</figcaption>
+          <figcaption><b>Files</b> in the sidebar, or <kbd>⌘⌥5</kbd>, shows the tree of HEAD one folder at a time, with crumbs leading back up. Browse Files… on a commit, a tag or a reflog entry opens it as it was then. A file opens read-only in the editor under its lexer, an image scaled to fit, and Open or Save As takes it out.</figcaption>
           <div class="frame"><picture>
             <source srcset="assets/shots/files-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/files-dark.png" media="(prefers-color-scheme: dark)" data-dark>
@@ -709,21 +791,21 @@
           </picture></div>
         </figure>
         <figure id="t-commands" role="tabpanel" aria-labelledby="b-commands">
-          <figcaption><b>Commands</b> in the sidebar, or <kbd>⌘4</kbd>, turns a repository's own commands into buttons: the scripts of <code>package.json</code>, the targets of a Makefile and what <code>.gittan/commands.ini</code> adds. A click runs one in the root with its output live under the buttons, and a key from the file runs it from any view with <kbd>⌃⌘</kbd>, once you have trusted the file.</figcaption>
+          <figcaption><b>Commands</b> in the sidebar, or <kbd>⌘⌥4</kbd>, turns a repository's own commands into tiles: the scripts of <code>package.json</code>, the targets of a Makefile and what <code>.gittan/commands.ini</code> adds. A click runs one in the root, with its output in a panel under the tiles that tells its state and time and offers Stop, Run Again and Copy; the terminal mark runs it in your own terminal instead. A key from the file runs it from any view with <kbd>⌃⌘</kbd>, once you have trusted the file.</figcaption>
           <div class="frame"><picture>
             <source srcset="assets/shots/commands-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/commands-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/commands-light.avif" type="image/avif">
-            <img src="assets/shots/commands-light.png" width="1280" height="800" loading="lazy" alt="The Commands page of trailhead: graph, authors and icons from .gittan/commands.ini with their shortcuts, and the scripts dev, build and preview from package.json, dev and build with shortcuts too, and Commands marked in the sidebar">
+            <img src="assets/shots/commands-light.png" width="1280" height="800" loading="lazy" alt="The Commands page of trailhead: authors, graph and icons from .gittan/commands.ini and build, dev and preview from package.json, each with its shortcut, and under them the output of graph, Done in 72 ms, a colored git log graph, with Run Again and Copy">
           </picture></div>
         </figure>
-        <figure id="t-ai" role="tabpanel" aria-labelledby="b-ai">
-          <figcaption><b>AI review</b>, once you turn it on, runs Claude Code or GitHub Copilot, whichever you already use, on what the diff compares, with your own sign-in. View &gt; Review Changes with AI, or <kbd>⌘⌥R</kbd>, puts what it finds under the lines it is about, as bugs, risks or questions, beside a pull request's comments. <b>✦ AI</b> in the Commit section writes the message for the ticked files. The agent may read the repository but gets no tool that writes, runs a command or goes to the network.</figcaption>
+        <figure id="t-palette" role="tabpanel" aria-labelledby="b-palette">
+          <figcaption><b>The command palette</b> (<kbd>⌘P</kbd>) lists every action the menus offer right now, filtered by the words you type in any order, with the ones you used last first. Undo, Redo and Stash stand to its left, Pull, Push and New Branch to its right.</figcaption>
           <div class="frame"><picture>
-            <source srcset="assets/shots/ai-review-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
-            <source srcset="assets/shots/ai-review-dark.png" media="(prefers-color-scheme: dark)" data-dark>
-            <source srcset="assets/shots/ai-review-light.avif" type="image/avif">
-            <img src="assets/shots/ai-review-light.png" width="1280" height="800" loading="lazy" alt="The new file useForecast.ts with two cards from Claude Code under its lines, each marked Bug: one under watchEffect saying two fetches race and the older answer can win, one under the fetch saying res.ok is never checked; the tree counts 2 findings on useForecast.ts and 1 on TrailCard.vue, and ✦ AI sits in the Commit header">
+            <source srcset="assets/shots/palette-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/palette-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/palette-light.avif" type="image/avif">
+            <img src="assets/shots/palette-light.png" width="1280" height="800" loading="lazy" alt="The command palette over TrailCard.vue filtered by branch: Switch to Branch with ⌘B, New Branch, Merge into main, Rebase main onto and the rest of the Branch menu, with Undo, Redo and Stash in a column on the left and Pull, Push and New Branch on the right">
           </picture></div>
         </figure>
         <figure id="t-submodule" role="tabpanel" aria-labelledby="b-submodule">
@@ -744,6 +826,15 @@
             <img src="assets/shots/clean-light.png" width="1280" height="800" loading="lazy" alt="The summary of a clean working tree: a green check, two commits not pushed and one not pulled, the ten newest commits with the two unpushed ones marked, and a gray check with No changes in the empty file list">
           </picture></div>
         </figure>
+        <figure id="t-ai" role="tabpanel" aria-labelledby="b-ai">
+          <figcaption><b>AI review</b> is optional and off until you turn it on in the settings. Then it runs Claude Code or GitHub Copilot with your own sign-in, or a model behind an OpenAI-compatible API with your own key, on what the diff compares. View &gt; Review Changes with AI, or <kbd>⌘⌥R</kbd>, puts what it finds under the lines it is about, as bugs, risks or questions, beside a pull request's comments, and ✦ Fix on a finding has the agent fix it. <b>✦ AI</b> in the Commit section writes the message for the ticked files.</figcaption>
+          <div class="frame"><picture>
+            <source srcset="assets/shots/ai-review-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/ai-review-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/ai-review-light.avif" type="image/avif">
+            <img src="assets/shots/ai-review-light.png" width="1280" height="800" loading="lazy" alt="The new file useForecast.ts with three cards from Claude Code under its lines, each with ✦ Fix: a Bug saying two fetches race and the older answer can win, a Bug saying res.ok is never checked, and a Risk saying the old forecast stays on screen while a new one loads; the tree counts 3 findings on useForecast.ts and 1 each on TrailCard.vue and trails.ts">
+          </picture></div>
+        </figure>
       </div>
     </div>
   </div>
@@ -762,7 +853,9 @@
         <button role="tab" id="b-sync" aria-selected="false" aria-controls="t-sync" tabindex="-1"><b>Pull &amp; push</b></button>
         <button role="tab" id="b-branches" aria-selected="false" aria-controls="t-branches" tabindex="-1"><b>Branches</b></button>
         <button role="tab" id="b-stashes" aria-selected="false" aria-controls="t-stashes" tabindex="-1"><b>Stashes</b></button>
+        <button role="tab" id="b-worktrees" aria-selected="false" aria-controls="t-worktrees" tabindex="-1"><b>Worktrees</b></button>
         <button role="tab" id="b-conflicts" aria-selected="false" aria-controls="t-conflicts" tabindex="-1"><b>Conflicts</b></button>
+        <button role="tab" id="b-merge" aria-selected="false" aria-controls="t-merge" tabindex="-1"><b>Merge editor</b></button>
         <button role="tab" id="b-graphmenu" aria-selected="false" aria-controls="t-graphmenu" tabindex="-1"><b>Commit menu</b></button>
         <button role="tab" id="b-rebase" aria-selected="false" aria-controls="t-rebase" tabindex="-1"><b>Rebase</b></button>
         <button role="tab" id="b-bisect" aria-selected="false" aria-controls="t-bisect" tabindex="-1"><b>Bisect</b></button>
@@ -771,12 +864,12 @@
       </div>
       <div class="stage">
         <figure id="t-commit" class="on" role="tabpanel" aria-labelledby="b-commit">
-          <figcaption><b>Commit</b> from the tree: tick the files that belong together, write the message under them, and commit with <kbd>⌘↩</kbd>. Skip in Commit leaves one block of a file out, so here the favourite button waits for the next commit along with README.md.</figcaption>
+          <figcaption><b>Commit</b> from the tree: tick the files that belong together, write the message under them, and commit with <kbd>⌘↩</kbd>. Skip in Commit leaves a block of a file out, or only the lines you select, so here the favourite button waits for the next commit along with README.md.</figcaption>
           <div class="frame"><picture>
             <source srcset="assets/shots/commit-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/commit-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/commit-light.avif" type="image/avif">
-            <img src="assets/shots/commit-light.png" width="1280" height="800" loading="lazy" alt="TrailCard.vue changed in the diff view with the button block left out of the commit in a muted tint and Include in Commit among the pills over it, the file's box in the tree half ticked, README.md unticked, Include All in the toolbar, and the Commit section with a message and the Commit button">
+            <img src="assets/shots/commit-light.png" width="1280" height="800" loading="lazy" alt="TrailCard.vue changed in the diff view with the button block left out of the commit in a muted tint and Include in Commit among the pills over it, the file's box in the tree half ticked, README.md unticked, Include All in the file header, and the Commit section with a message and the Commit button">
           </picture></div>
         </figure>
         <figure id="t-sync" role="tabpanel" aria-labelledby="b-sync">
@@ -798,12 +891,21 @@
           </picture></div>
         </figure>
         <figure id="t-stashes" role="tabpanel" aria-labelledby="b-stashes">
-          <figcaption><b>Stashes</b> sit in a chip in the status bar, each with its branch, its age and whether it took untracked files along. Pick one to see what it holds, compared with the commit it was made on; a right click applies, pops or drops it, or makes a branch from it.</figcaption>
+          <figcaption><b>Stashes</b> sit in a chip in the status bar, each with its branch, its age and whether it took untracked files along. Pick one to see what it holds, compared with the commit it was made on, and the cross by its name in the status bar goes back to the work tree; a right click applies, pops or drops it, or makes a branch from it.</figcaption>
           <div class="frame"><picture>
             <source srcset="assets/shots/stashes-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/stashes-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/stashes-light.avif" type="image/avif">
-            <img src="assets/shots/stashes-light.png" width="1280" height="800" loading="lazy" alt="The stash list over the status bar: Stash Changes, then Chart legend on elevation-chart four days old with untracked files and Try a dark map style on main seven days old, the latter checked; the summary shows that stash's one changed file against its base, labeled vs stash: Try a dark map style">
+            <img src="assets/shots/stashes-light.png" width="1280" height="800" loading="lazy" alt="The stash list over the status bar: Stash Changes, then Chart legend on elevation-chart eleven days old with untracked files and Try a dark map style on main two weeks old, the latter checked; the summary shows that stash's one changed file against its base, and the status bar reads vs stash: Try a dark map style with a cross">
+          </picture></div>
+        </figure>
+        <figure id="t-worktrees" role="tabpanel" aria-labelledby="b-worktrees">
+          <figcaption><b>Worktrees</b>: Branch &gt; Worktrees… lists the repository's worktrees with their branches and opens one in a tab of its own, so another branch can be worked on without stashing. It adds, locks, removes and prunes them too.</figcaption>
+          <div class="frame"><picture>
+            <source srcset="assets/shots/worktrees-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/worktrees-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/worktrees-light.avif" type="image/avif">
+            <img src="assets/shots/worktrees-light.png" width="1280" height="800" loading="lazy" alt="The worktree trailhead-maps on offline-maps open in a second tab beside trailhead, with the worktree list showing Add Worktree, trailhead on main as the repository and trailhead-maps on offline-maps as this one, and the summary saying three commits behind origin/main with a Rebase button">
           </picture></div>
         </figure>
         <figure id="t-rebase" role="tabpanel" aria-labelledby="b-rebase">
@@ -821,7 +923,7 @@
             <source srcset="assets/shots/bisect-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/bisect-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/bisect-light.avif" type="image/avif">
-            <img src="assets/shots/bisect-light.png" width="1280" height="800" loading="lazy" alt="The commit graph during a bisect: main marked bad, two older commits marked good, and HEAD on Show the walking time in hours and minutes, the commit to test; beside the graph the Commit section's note with Good, Bad and Skip buttons, and Bisecting in the status bar">
+            <img src="assets/shots/bisect-light.png" width="1280" height="800" loading="lazy" alt="The commit graph during a bisect: main marked bad, two older commits marked good, and HEAD on Sort the trails by climb, the commit to test; beside the graph the Commit section's note with Good, Bad and Skip buttons, and Bisecting in the status bar">
           </picture></div>
         </figure>
         <figure id="t-cleanup" role="tabpanel" aria-labelledby="b-cleanup">
@@ -834,25 +936,34 @@
           </picture></div>
         </figure>
         <figure id="t-conflicts" role="tabpanel" aria-labelledby="b-conflicts">
-          <figcaption><b>A merge that stopped</b> turns the status bar's button into Resolve 2 conflicts, and each conflicted file in the summary gets a Resolve pill. Your side, the base and theirs each get a color, a fork button on each conflict resolves that one alone, Use Mine, Use Theirs and Mark Resolved sit in the toolbar, and the Commit section waits with Commit Merge, Abort and Next Conflict.</figcaption>
+          <figcaption><b>A merge that stopped</b> turns the status bar's button into Resolve 2 conflicts, and each conflicted file in the summary gets a Resolve pill. Your side, the base and theirs each get a color, a fork button on each conflict resolves that one alone, and Use Mine, Use Theirs, Mark Resolved and Merge Editor sit in the file header, while the Commit section waits with Commit Merge, Abort and Next Conflict.</figcaption>
           <div class="frame"><picture>
             <source srcset="assets/shots/conflicts-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/conflicts-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/conflicts-light.avif" type="image/avif">
-            <img src="assets/shots/conflicts-light.png" width="1280" height="800" loading="lazy" alt="TrailCard.vue in conflict while merging offline-maps: three conflicts with the HEAD side tinted blue, the base gray, the offline-maps side amber and the markers violet, a fork button on each, Use Mine, Use Theirs and Mark Resolved in the toolbar, 1 of 3 conflicts in the navigator, a red note with Next Conflict under the Commit section, and a red Resolve 2 conflicts button over Merging in the status bar">
+            <img src="assets/shots/conflicts-light.png" width="1280" height="800" loading="lazy" alt="TrailCard.vue in conflict while merging offline-maps: three conflicts with the HEAD side tinted blue, the base gray, the offline-maps side amber and the markers violet, a fork button on each, Use Mine, Use Theirs, Mark Resolved and Merge Editor in the file header, 1 of 3 conflicts in the navigator, a red note with Next Conflict under the Commit section, and a red Resolve 2 conflicts button beside Abort over Merging in the status bar">
+          </picture></div>
+        </figure>
+        <figure id="t-merge" role="tabpanel" aria-labelledby="b-merge">
+          <figcaption><b>The merge editor</b> (<kbd>⌘⇧E</kbd>, or Merge Editor in the file header) lays a conflicted file out in three panes: yours and theirs side by side, the result across the width under them. Tick the lines to keep from either side, conflict by conflict, and the result follows; Save writes it and marks the file resolved once no conflict is left.</figcaption>
+          <div class="frame"><picture>
+            <source srcset="assets/shots/merge-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/merge-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/merge-light.avif" type="image/avif">
+            <img src="assets/shots/merge-light.png" width="1280" height="800" loading="lazy" alt="The merge editor on TrailCard.vue: Mine at HEAD and Theirs on offline-maps side by side with check boxes on each conflict's lines, the first conflict's two imports from mine and one from theirs ticked, and the Result pane under them with those three imports in place and 1 of 3 conflicts resolved">
           </picture></div>
         </figure>
         <figure id="t-graphmenu" role="tabpanel" aria-labelledby="b-graphmenu">
-          <figcaption><b>A right click in the commit graph</b> branches or tags from a commit, merges it, cherry-picks or reverts it, resets the branch to it, rebases from it, browses its files, writes it as a patch or starts a bisect there. Mark one commit, and Compare with Marked on another shows what changed between the two.</figcaption>
+          <figcaption><b>A right click in the commit graph</b> branches or tags from a commit, merges it, cherry-picks or reverts it, resets the branch to it, rebases from it, makes a fixup commit for it from the ticked files, browses its files, writes it as a patch or starts a bisect there. Mark one commit, and Compare with Marked on another shows what changed between the two.</figcaption>
           <div class="frame"><picture>
             <source srcset="assets/shots/graphmenu-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/graphmenu-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/graphmenu-light.avif" type="image/avif">
-            <img src="assets/shots/graphmenu-light.png" width="1280" height="800" loading="lazy" alt="The commit graph with the menu of an older commit on main: Show Commit, Compare with Working Tree, Browse Files, Mark for Comparison, Create Patch, Create Branch Here, Create Tag Here, Revert Commit, Rebase Interactively from Here, Reset main to Here, and Bisect open on Start Bisect: This Is Good, main Is Bad and Start Bisect: This Is Bad">
+            <img src="assets/shots/graphmenu-light.png" width="1280" height="800" loading="lazy" alt="The commit graph with the menu of an older commit on main: Show Commit, Compare with Working Tree, Browse Files, Mark for Comparison, Create Patch, Create Branch Here, Create Tag Here, Revert Commit, Rebase Interactively from Here, Fixup with the Ticked Files highlighted, Reset main to Here, Bisect and Copy Commit Hash">
           </picture></div>
         </figure>
         <figure id="t-search" role="tabpanel" aria-labelledby="b-search">
-          <figcaption><b>Search the history</b> as you type: every word must be in the subject, body, author or id, <code>author:</code>, <code>since:</code>, <code>until:</code> and <code>path:</code> narrow it down, and a file's history is a <code>path:</code> search of its own. Here, what Sam changed under <code>src/components</code>.</figcaption>
+          <figcaption><b>Search the history</b> as you type: every word must be in the subject, body, author or id, <code>author:</code>, <code>since:</code>, <code>until:</code> and <code>path:</code> narrow it down, <code>change:</code> finds the commits that added or removed a text, and a file's history is a <code>path:</code> search of its own. Here, what Sam changed under <code>src/components</code>.</figcaption>
           <div class="frame"><picture>
             <source srcset="assets/shots/search-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/search-dark.png" media="(prefers-color-scheme: dark)" data-dark>
@@ -870,7 +981,7 @@
         <div>
           <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M3 12h5.5"/><path d="M15.5 12H21"/></svg></div>
           <h3>Commit what you see</h3>
-          <p>Every changed file in the tree has a check box. Untick what should wait, or leave one block of a file out with Skip in Commit, write the message at the bottom of the panel and commit with <kbd>⌘↩</kbd>. Files go in as the diff shows them, and your hooks and signing run as git is set up to. Amend picks up the last message, ✦ AI writes one if you have turned the AI features on, and a branch that can be pushed offers Push right after.</p>
+          <p>Every changed file in the tree has a check box. Untick what should wait, or leave a block of a file out with Skip in Commit, or only the lines you select, write the message at the bottom of the panel and commit with <kbd>⌘↩</kbd>. Files go in as the diff shows them, and your hooks, signing and commit template work as git is set up to. Amend picks up the last message, ✦ AI writes one if you have turned the AI features on, and a branch that can be pushed offers Push right after.</p>
         </div>
         <div class="art" aria-hidden="true">
           <div class="mini tree">
@@ -902,7 +1013,7 @@
         <div>
           <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="18" r="2.5"/><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M6 8.5c0 4 6 4 6 7"/><path d="M18 8.5c0 4-6 4-6 7"/></svg></div>
           <h3>Resolve conflicts</h3>
-          <p>Your side, the base and theirs each get a color. Take one side for a whole file, or one conflict at a time with <kbd>⌘⇧R</kbd>: mine, theirs or both. "Mine" is always your own work, in a rebase too. The last one resolved takes you to the next file, then to Commit or Continue.</p>
+          <p>Your side, the base and theirs each get a color. Take one side for a whole file, or one conflict at a time with <kbd>⌘⇧R</kbd>: mine, theirs or both, or pick lines from each in the merge editor with <kbd>⌘⇧E</kbd>. "Mine" is always your own work, in a rebase too. The last one resolved takes you to the next file, then to Commit or Continue.</p>
         </div>
         <div class="art" aria-hidden="true">
           <div class="uipills"><span class="hot">Use Mine</span><span>Use Theirs</span><span>Mark Resolved</span><span class="nav">1 / 3</span></div>
@@ -949,16 +1060,17 @@
       <div class="story wide reveal" id="ai">
         <div>
           <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2z"/><path d="M19 17l.8 2.2L22 20l-2.2.8L19 23l-.8-2.2L16 20l2.2-.8z"/></svg></div>
-          <h3>AI when you want it</h3>
-          <p>Off until you turn it on in the settings. Then pick Claude Code or GitHub Copilot, whichever you already use: Gittan runs its command line tool in the repository with your own sign-in, and has no account or API key of its own. <b>✦ AI</b> in the Commit section writes the message for the ticked files, short and in the style of the recent commits, and Review Changes with AI (<kbd>⌘⌥R</kbd>) puts what it finds under the lines it is about. The agent may read the repository to check a finding, but gets no tool that writes, runs a command or goes to the network, and nothing is sent until you ask.</p>
+          <h3>Bring your own agent</h3>
+          <p>Gittan has no AI of its own, no account and no key. The AI features are off until you turn them on in the settings, and then they use what you bring: Claude Code or GitHub Copilot with your own sign-in, or any OpenAI-compatible API with your own key, OpenAI, OpenRouter or a local Ollama, where nothing leaves your computer. <b>✦ AI</b> in the Commit section writes the message for the ticked files, Review Changes with AI (<kbd>⌘⌥R</kbd>) puts what it finds under the lines it is about, and the agent can resolve a conflict, split the changes into commits, fix a finding, explain how a few lines came to be, or find where something is. It may read the repository but gets no tool that writes, runs a command or goes to the network: a fix or a resolution comes back as text that Gittan writes in, and Undo Discard takes it out again. Nothing is sent until you ask.</p>
         </div>
         <div class="art" aria-hidden="true">
           <div class="mini settings">
             <div><span class="cbx on"></span>Turn on the AI features</div>
-            <div style="padding-left:32px"><span class="rdo on"></span>Claude Code<span class="n">claude</span></div>
-            <div style="padding-left:32px"><span class="rdo"></span>GitHub Copilot<span class="n">copilot</span></div>
+            <div style="padding-left:32px"><span class="rdo"></span>Claude Code<span class="n">your sign-in</span></div>
+            <div style="padding-left:32px"><span class="rdo"></span>GitHub Copilot<span class="n">your sign-in</span></div>
+            <div style="padding-left:32px"><span class="rdo on"></span>OpenAI-compatible API<span class="n">localhost:11434</span></div>
           </div>
-          <div class="aicard"><span class="who">✦ Claude Code</span><b>Bug</b> · Two fetches race, and the older answer can win.</div>
+          <div class="aicard"><span class="who">✦ llama3.1</span><b>Bug</b> · Two fetches race, and the older answer can win.</div>
         </div>
       </div>
     </div>
@@ -967,7 +1079,7 @@
       <div class="reveal">
         <div class="sync lede" aria-hidden="true"><b>↑ 2</b>not pushed · <b>↓ 1</b>not pulled</div>
         <h3>Pull, push and fetch</h3>
-        <p><kbd>⌘⇧L</kbd> pulls, <kbd>⌘⇧P</kbd> pushes, <kbd>⌘⌥F</kbd> fetches, or use the buttons in the status bar. A pull only fast-forwards unless your git config says otherwise; a branch that went its own way asks Merge or Rebase. After a rebase, <kbd>⌘⌥⇧P</kbd> force-pushes with a lease, so nobody else's commits are lost.</p>
+        <p><kbd>⌘⇧L</kbd> pulls, <kbd>⌘⇧P</kbd> pushes, <kbd>⌘⌥F</kbd> fetches, or use the buttons in the status bar; the open repository is also fetched every ten minutes. A pull only fast-forwards unless your git config says otherwise; a branch that went its own way asks Merge or Rebase, and can remember the answer for the repository. After a rebase, <kbd>⌘⌥⇧P</kbd> force-pushes with a lease, so nobody else's commits are lost.</p>
       </div>
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10"/><path d="M18 9a7 7 0 0 1-7 7H8"/></svg></div>
@@ -1018,7 +1130,7 @@
         <div>
           <div class="ic"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></div>
           <h3>Live view</h3>
-          <p>A background thread polls the repository every two seconds. Save a file in your editor and the tree, the counts and the diff update on their own.</p>
+          <p>A background thread polls the repository every two seconds while Gittan is in front, and every ten behind other windows. Save a file in your editor and the tree, the counts and the diff update on their own.</p>
         </div>
         <div class="art" aria-hidden="true">
           <div class="chip">Watching · every 2 s</div>
@@ -1035,11 +1147,11 @@
       <div class="story reveal">
         <div>
           <div class="ic"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div>
-          <h3>Knows what is staged</h3>
-          <p>A badge fills as a change gets staged: a tint for none of it, a ring for part, solid for all. The header says "staged" or "partly staged" too.</p>
+          <h3>No index to manage</h3>
+          <p>A commit takes each ticked file as the diff shows it, whatever <code>git add</code> did. Only when git add took part of a file does it say so, with a ringed badge and "partly added with git add" in the header.</p>
         </div>
         <div class="art" aria-hidden="true">
-          <div class="badges"><span><i class="none"></i>Not staged</span><span><i class="part"></i>Partly</span><span><i class="all"></i>Staged</span></div>
+          <div class="badges"><span><i class="part"></i>Partly added with git add</span></div>
           <div class="mini">
             <div class="a">+ src/components/TrailCard.vue</div>
             <div>&nbsp; src/stores/trails.ts&nbsp;&nbsp;&nbsp;+12 −3</div>
@@ -1096,7 +1208,7 @@
         <div>
           <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18"/><path d="M8 21h8"/></svg></div>
           <h3>At home on each desktop</h3>
-          <p>The file filter, the change navigator and the actions sit up in the title bar on every platform, and the window keeps the system's shadow and rounded corners.</p>
+          <p>Tabs sit in the title bar on every platform: beside the traffic lights on macOS, and in Gittan's own title bar with a menu button on Windows and Linux. The window keeps the system's shadow and rounded corners.</p>
         </div>
         <div class="art oswins">
           <figure class="os-linux"><picture>
@@ -1125,7 +1237,7 @@
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h16"/></svg></div>
         <h3>Hide unchanged lines</h3>
-        <p>Keep only the changed lines with 1, 3, 5 or 10 lines of context. Click a gap to open it. Highlighting still covers the whole file, so nothing colors wrong.</p>
+        <p>On from the start: only the changed lines show, with 1, 3, 5 or 10 lines of context. Click a gap to open it. Highlighting still covers the whole file, so nothing colors wrong.</p>
       </div>
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/></svg></div>
@@ -1207,7 +1319,7 @@
         <div>
           <div class="ic"><svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10"/><path d="M6 7c0 4 12 1 12 3"/></svg></div>
           <h3>Commit graph</h3>
-          <p>Graph in the sidebar, or <kbd>⌘3</kbd>, draws the branches with what is not pushed or not pulled yet. Type to search it: words, <code>author:</code>, <code>since:</code>, <code>until:</code> and <code>path:</code>. A file's Show History is the graph of the commits that touched it.</p>
+          <p>Graph in the sidebar, or <kbd>⌘⌥3</kbd>, draws the branches with what is not pushed or not pulled yet. Type to search it: words, <code>author:</code>, <code>since:</code>, <code>until:</code>, <code>path:</code> and <code>change:</code>. A file's Show History is the graph of the commits that touched it, and a commit dragged onto your branch merges it.</p>
         </div>
         <div class="art graph" aria-hidden="true">
           <svg viewBox="0 0 260 120" fill="none" stroke-width="2.5" stroke-linecap="round">
@@ -1230,7 +1342,7 @@
         <div>
           <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10"/><path d="M7 13h6"/><path d="M7 17h8"/></svg></div>
           <h3>The repository at a glance</h3>
-          <p>Repository in the sidebar, or <kbd>⌘⇧I</kbd>, opens a page about the repository itself: the branch and its upstream, then tiles for the commits, branches, tags, files, submodules and size, each a click away from its list. Under them the remotes, and the authors with their share of the commits.</p>
+          <p>Repository in the sidebar, or <kbd>⌘⇧I</kbd>, opens a page about the repository itself: the branch and its upstream, then tiles for the commits, branches, tags, files, submodules and size, each a click away from its list. Under them what the files are, code, tests, documentation or configuration, then the remotes, and the authors with their share of the commits.</p>
         </div>
         <div class="art stats" aria-hidden="true">
           <div><b>15</b><span>commits since Aug 4</span></div>
@@ -1259,12 +1371,12 @@
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/></svg></div>
         <h3>Find a symbol</h3>
-        <p>List the symbols of the shown file with <kbd>⌘T</kbd>, or of the whole repository with <kbd>⌘⇧T</kbd>, and type a few letters to get there.</p>
+        <p>List the symbols of the shown file with <kbd>⌘⌥O</kbd>, or of the whole repository with <kbd>⌘⇧T</kbd>, and type a few letters to get there.</p>
       </div>
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
         <h3>Pull request reviews</h3>
-        <p>With the <code>gh</code> CLI signed in, the status bar shows the branch's pull request and its checks, Pull Requests in the sidebar lists the open ones, Home names those waiting for your review, and the review comments appear under the lines they are about, as an AI review's findings do.</p>
+        <p>With the <code>gh</code> CLI signed in, the status bar shows the branch's pull request and its checks, and the review comments appear under the lines they are about, as an AI review's findings do. The globe at the top right lists your pull requests across every repository; approve, ask for changes, comment or merge one from its menu.</p>
       </div>
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/></svg></div>
@@ -1300,6 +1412,7 @@
         <div class="os"><svg viewBox="0 0 24 24"><path d="M16.4 12.6c0-2.6 2.1-3.8 2.2-3.9-1.2-1.8-3.1-2-3.7-2-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9-1.7 0-3.3 1-4.2 2.6-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8 1.6 0 2 .8 3.4.8 1.4 0 2.3-1.3 3.1-2.5 1-1.4 1.4-2.8 1.4-2.9-.1 0-2.7-1-2.7-4.1zM13.9 5c.7-.9 1.2-2 1.1-3.2-1 0-2.3.7-3 1.6-.7.8-1.2 2-1.1 3.1 1.1.1 2.3-.6 3-1.5z"/></svg>macOS<span class="yours">Your system</span></div>
         <div class="file">Apple Silicon · Gittan-macos-silicon.dmg</div>
         <a class="btn" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-macos-silicon.dmg">Download .dmg</a>
+        <a class="alt" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-macos-intel.dmg">Intel Mac? Gittan-macos-intel.dmg</a>
       </div>
       <div class="card" data-os="win">
         <div class="os"><svg viewBox="0 0 24 24"><path d="M3 5.1 10.4 4v7.1H3zm8.3-1.2L21 2.5v8.6h-9.7zM3 12.9h7.4V20L3 18.9zm8.3 0H21v8.6l-9.7-1.4z"/></svg>Windows<span class="yours">Your system</span></div>
@@ -1440,7 +1553,9 @@ make run
     get.href = card.querySelector('a').href;
     get.querySelector('span').textContent = 'Download for ' + names[os];
     document.getElementById('get-sub').innerHTML =
-      card.querySelector('.file').textContent.split(' · ')[0] + ' · free and open source · <a href="#download">Other platforms</a>';
+      card.querySelector('.file').textContent.split(' · ')[0] +
+      (os === 'mac' ? ' · <a href="' + card.querySelector('.alt').href + '">Intel</a>' : '') +
+      ' · free and open source · <a href="#download">Other platforms</a>';
   }
 
   // ---- Screenshot tabs: a list beside the picture, each tab carrying its figure's caption, with arrow keys.
