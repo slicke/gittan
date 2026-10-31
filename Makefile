@@ -194,8 +194,11 @@ icons:
 	echo "wrote icons/Assets.car"
 
 # A PNG as a Pascal byte array, for the rules below: $$f the file, $$len its
-# size, $$name the constant; appended to $$out.
+# size, $$name the constant; appended to $$out. A file missing or empty
+# stops the rule, which writes to $$out.new and moves it in place at the
+# end, so the include is never left with an empty array.
 define png_bytes
+test -s $$f || { echo "$$f is missing or empty" >&2; rm -f $$out; exit 1; }; \
 echo "  $$name: array[0..$$((len - 1))] of byte = (" >> $$out; \
 od -An -v -tu1 $$f | awk -v total=$$len '{ for (i = 1; i <= NF; i++) { k++; \
   printf "%s%s", (c == 0 ? "    " : ""), $$i (k < total ? "," : ""); \
@@ -209,14 +212,14 @@ endef
 # (src/ui/gittan.wordmark.inc, kept in git, so a build needs neither this
 # rule nor od and awk).
 wordmark:
-	@set -e; out=src/ui/gittan.wordmark.inc; \
+	@set -e; dest=src/ui/gittan.wordmark.inc; out=$$dest.new; \
 	echo "{ Made from icons/wordmark/gittan-wordmark-<theme>.png by make wordmark. }" > $$out; \
 	echo "const" >> $$out; \
 	for t in Dark Light; do \
 	  f=icons/wordmark/gittan-wordmark-$$(echo $$t | tr A-Z a-z).png; len=$$(wc -c < $$f | tr -d ' '); \
 	  name=Wordmark$$t; $(png_bytes); \
 	done; \
-	echo "wrote $$out"
+	mv $$out $$dest; echo "wrote $$dest"
 
 # The dialogs' icon, icons/dialog/gittan-dialog-<n>.png (48, 96 and 144
 # pixels, rendered from icons/gittan-dialog.svg with Chrome headless; see
@@ -224,14 +227,14 @@ wordmark:
 # in git, so a build needs neither this rule nor od and awk).
 DIALOG_ICON_SIZES = 48 96 144
 dialogicon:
-	@set -e; out=src/ui/gittan.dialogicon.inc; \
+	@set -e; dest=src/ui/gittan.dialogicon.inc; out=$$dest.new; \
 	echo "{ Made from icons/dialog/gittan-dialog-<n>.png by make dialogicon. }" > $$out; \
 	echo "const" >> $$out; \
 	for n in $(DIALOG_ICON_SIZES); do \
 	  f=icons/dialog/gittan-dialog-$$n.png; len=$$(wc -c < $$f | tr -d ' '); \
 	  name=DialogIcon$$n; $(png_bytes); \
 	done; \
-	echo "wrote $$out"
+	mv $$out $$dest; echo "wrote $$dest"
 
 lexlib:
 	@if [ ! -d "$(LEXERS_SRC)/Pascal" ]; then \
@@ -266,10 +269,16 @@ define install_icons
 	done
 endef
 
+# The Exec line takes the folder from the shell, not from $(CURDIR) in the
+# script, so a quote in its path cannot end the script: escaped as a quoted
+# argument of the desktop file ("`$\ after a backslash), then its backslashes
+# and percent signs doubled, then for sed's replacement.
 desktop:
 	@set -e; $(call install_icons,$(XDG_DATA_HOME)); \
 	d="$(XDG_DATA_HOME)/applications"; mkdir -p "$$d"; \
-	sed 's|^Exec=.*|Exec="$(CURDIR)/Gittan" %f|' dist/linux/$(DESKTOP_ID).desktop \
+	exe=$$(printf '%s' "$$(pwd)/Gittan" | sed -e 's/[\\"`$$]/\\&/g' -e 's/\\/\\\\/g' \
+	  -e 's/%/%%/g' -e 's/[\\|&]/\\&/g'); \
+	sed "s|^Exec=.*|Exec=\"$$exe\" %f|" dist/linux/$(DESKTOP_ID).desktop \
 	  > "$$d/$(DESKTOP_ID).desktop"; \
 	touch "$(XDG_DATA_HOME)/icons/hicolor"; \
 	command -v update-desktop-database >/dev/null && update-desktop-database "$$d" || true; \
@@ -300,9 +309,9 @@ packages: build
 	install -m 644 dist/linux/$(DESKTOP_ID).metainfo.xml $(PKG_ROOT)/usr/share/metainfo/; \
 	$(call install_icons,$(PKG_ROOT)/usr/share)
 	$(FPM) $(FPM_FLAGS) -t deb -a $(PKG_ARCH) \
-	  --depends git --depends 'libgtk-3-0t64 | libgtk-3-0' .
+	  --depends 'git >= 1:2.30' --depends 'libgtk-3-0t64 | libgtk-3-0' .
 	$(FPM) $(FPM_FLAGS) -t rpm -a $(PKG_ARCH) --directories /usr/share/gittan \
-	  --depends git --depends 'libgtk-3.so.0()(64bit)' .
+	  --depends 'git >= 2.30' --depends 'libgtk-3.so.0()(64bit)' .
 
 version:
 	@echo $(GITTAN_VERSION)

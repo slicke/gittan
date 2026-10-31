@@ -93,8 +93,9 @@ type
     procedure SetTitle(const ATitle: string);
     {** Shows the added and deleted line counts, or "binary" when ABinary. }
     procedure SetCounts(AAdded, ADeleted: integer; ABinary: boolean);
-    {** Shows "staged" or "partly staged" before the counts, or nothing
-      when AStaged is false. }
+    {** Shows "partly added with git add" before the counts when the
+      file has both staged and unstaged changes (AStaged and AUnstaged),
+      else nothing, since the whole file is committed as shown. }
     procedure SetStage(AStaged, AUnstaged: boolean);
     {** A dim detail in the stage's place, where a file of a commit
       names its commit; '' for none. SetFile and SetTitle clear it. }

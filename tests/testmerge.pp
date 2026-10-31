@@ -305,6 +305,12 @@ begin
     AssertEquals(4, M.ChunkCount);
     AssertEquals('x', Joined(M.Chunks[3].Sides[msMine]));
     AssertEquals('', M.Chunks[3].Names[msTheirs]);
+    AssertEquals('as written, untouched',
+      'a|<<<<<<< HEAD|m1|m2|=======|t1|>>>>>>> feature|b|<<<<<<< HEAD|x|=======',
+      Joined(M.Output));
+    M.PickAll(3, msMine, True);
+    AssertEquals('mine taken, its markers gone',
+      'a|<<<<<<< HEAD|m1|m2|=======|t1|>>>>>>> feature|b|x', Joined(M.Output));
   finally
     M.Free;
   end;

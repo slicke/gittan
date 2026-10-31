@@ -130,6 +130,7 @@ procedure TGitHubTest.TestAccountsSwitchedAtOnce;
 var
   Dir, Before: string;
   Accounts: TGittanForgeAccounts;
+  Stamp: longint;
 
   procedure Put(const AActive: string);
   begin
@@ -141,6 +142,8 @@ var
     finally
       Free;
     end;
+    { Both writes in the same second, whatever the clock does between. }
+    FileSetDate(IncludeTrailingPathDelimiter(Dir) + 'hosts.yml', Stamp);
   end;
 
 begin
@@ -148,6 +151,7 @@ begin
     is seen: the file's time counts whole seconds. }
   Dir := IncludeTrailingPathDelimiter(GetTempDir) + 'gittan-gh-' + IntToStr(GetProcessID);
   ForceDirectories(Dir);
+  Stamp := DateTimeToFileDate(Now);
   Before := GetEnvironmentVariable('GH_CONFIG_DIR');
   SetTestVariable('GH_CONFIG_DIR', Dir);
   try
