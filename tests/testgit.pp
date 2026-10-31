@@ -2630,6 +2630,9 @@ end;
 { Undo Discard of the pick that took a file's last conflict: the markers
   are written back and the file is in conflict again, edited or deleted. }
 procedure TGitRepoTest.TestUnresolve;
+var
+  Version: string;
+  Major, Minor: integer;
 begin
   MakeDiverged(Self);
   AssertTrue(FRepo.Open(FDir));
@@ -2643,8 +2646,20 @@ begin
   AssertTrue(FRepo.Error, FRepo.Unresolve('a.txt'));
   AssertEquals('<<<<<<< HEAD'#10'main'#10'======='#10'topic'#10'>>>>>>> topic'#10,
     FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
-  AssertTrue(FRepo.Error, FRepo.Unresolve('del.txt'));
-  AssertEquals(5, Length(Trim(Git(['ls-files', '-u'])).Split([#10])));
+  { A file resolved as deleted comes back from git 2.42 on (Apple's git
+    on macOS 14 is older), and says why before. }
+  AssertTrue(GitVersion(Version, Major, Minor));
+  if (Major > 2) or ((Major = 2) and (Minor >= 42)) then
+  begin
+    AssertTrue(FRepo.Error, FRepo.Unresolve('del.txt'));
+    AssertEquals(5, Length(Trim(Git(['ls-files', '-u'])).Split([#10])));
+  end
+  else
+  begin
+    AssertFalse(FRepo.Unresolve('del.txt'));
+    AssertTrue(FRepo.Error, Pos('2.42', FRepo.Error) > 0);
+    AssertEquals(3, Length(Trim(Git(['ls-files', '-u'])).Split([#10])));
+  end;
   AssertFalse('conflicts again', FRepo.ContinueOperation);
   { Nothing kept for a file that never was in conflict. }
   WriteFile('new.txt', 'new'#10);

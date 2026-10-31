@@ -5379,7 +5379,8 @@ end;
 
 function TGittanRepo.Unresolve(const APath: string): boolean;
 var
-  Output, Path: string;
+  Output, Path, Version: string;
+  Major, Minor: integer;
 begin
   if FRoot = '' then
     Exit(False);
@@ -5390,7 +5391,15 @@ begin
   if Copy(Path, 1, 1) = '-' then
     Path := './' + Path;
   if not RunGit(FRoot, ['update-index', '--unresolve', Path], Output) then
+  begin
+    { Before 2.42 git brought back only a path the index still has, not
+      one resolved as deleted. }
+    if not FileExists(IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(APath)) and
+      GitVersion(Version, Major, Minor) and ((Major < 2) or ((Major = 2) and (Minor < 42))) then
+      FError := Format('git %s cannot bring back the conflict of a file resolved as deleted; ' +
+        'git 2.42 and later can', [Version]);
     Exit(False);
+  end;
   { git says nothing when it has no stages kept for the path. }
   Result := ConflictStages(FRoot, APath) <> '';
   if not Result then
