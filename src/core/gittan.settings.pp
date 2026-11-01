@@ -210,7 +210,9 @@ type
     function HasExtPerm(const AId: string): boolean;
     {** An extension's own value (Gittan.storage, its settings page),
       section ExtValues:<id>; empty for none, and an empty value set
-      drops the key. ExtValueKeys lists the keys set. }
+      drops the key. A value may hold line ends: the file gets them
+      escaped. The key must pass ValidExtKey, or SetExtValue raises
+      EArgumentException. ExtValueKeys lists the keys set. }
     function ExtValue(const AId, AKey: string): string;
     procedure SetExtValue(const AId, AKey, AValue: string);
     procedure ExtValueKeys(const AId: string; AKeys: TStrings);
@@ -249,6 +251,18 @@ type
     {** The ini file the settings are read from and written to. }
     property FileName: string read FFileName;
   end;
+
+{** Whether AKey can be the key of an extension's value in the ini
+  file and in the lists that hold them: not empty, one line with no
+  control character, no "=" (the pair's separator), not starting with
+  ";" (a comment) or "[" (a section), and no space at an edge, which
+  TIniFile trims. Gittan.storage, Gittan.settings.define and the loader
+  refuse the rest, so a key cannot write a line of its own in
+  gittan.ini. }
+function ValidExtKey(const AKey: string): boolean;
+
+resourcestring
+  rsBadExtKey = 'The key "%s" cannot be stored: a key is one line without "=", not starting with ";" or "[", and no space at its edges.';
 
 implementation
 
@@ -322,13 +336,27 @@ begin
     Result := '"' + Result + '"';
 end;
 
-{ An ini value is one line: a line end is written as \n, and so a
-  backslash as \\; UnescapeC reads it. }
+{ An ini value is one line: a line feed is written as \n, a carriage
+  return (TStringList splits a line at a bare one too) as \r, and so a
+  backslash as \\; UnescapeC reads it, and the text comes back as it
+  was, CRLF included. }
 function EscapeLines(const AText: string): string;
 begin
   Result := StringReplace(AText, '\', '\\', [rfReplaceAll]);
-  Result := StringReplace(Result, #13#10, #10, [rfReplaceAll]);
   Result := StringReplace(Result, #10, '\n', [rfReplaceAll]);
+  Result := StringReplace(Result, #13, '\r', [rfReplaceAll]);
+end;
+
+function ValidExtKey(const AKey: string): boolean;
+var
+  c: char;
+begin
+  Result := (AKey <> '') and (AKey[1] > ' ') and (AKey[Length(AKey)] > ' ') and
+    (AKey[1] <> ';') and (AKey[1] <> '[');
+  if Result then
+    for c in AKey do
+      if (c < ' ') or (c = '=') then
+        Exit(False);
 end;
 
 { TGittanSettings }
@@ -761,6 +789,8 @@ procedure TGittanSettings.SetExtValue(const AId, AKey, AValue: string);
 var
   i: integer;
 begin
+  if not ValidExtKey(AKey) then
+    raise EArgumentException.CreateFmt(rsBadExtKey, [AKey]);
   if AValue = '' then
   begin
     i := FExtValues.IndexOfName(ExtValuesPrefix + AId + ForgeValueSep + AKey);
@@ -787,7 +817,10 @@ end;
 
 { The extensions' sections: Extensions, and ExtPerm:<id> and
   ExtValues:<id> for each extension that has one. The values go through
-  ReadString, which takes KeepEdges' quotes off again. }
+  ReadString, which takes KeepEdges' quotes off again, and UnescapeC for
+  the line ends SaveExt escaped: an extension's value is whatever it
+  stored, and written as it is a line end in it would start a line, a
+  key or a section, of the file's own. }
 function IsExtSection(const ASection: string): boolean;
 begin
   Result := SameText(ASection, SecExtensions) or
@@ -811,8 +844,9 @@ begin
         Keys.Clear;
         AIni.ReadSection(Section, Keys);
         for Key in Keys do
-          FExtValues.Values[Section + ForgeValueSep + Key] :=
-            AIni.ReadString(Section, Key, '');
+          if ValidExtKey(Key) then
+            FExtValues.Values[Section + ForgeValueSep + Key] :=
+              UnescapeC(AIni.ReadString(Section, Key, ''));
       end;
   finally
     Keys.Free;
@@ -843,7 +877,7 @@ begin
     if FExtValues.ValueFromIndex[i] <> '' then
       AIni.WriteString(Copy(Name, 1, Pos(ForgeValueSep, Name) - 1),
         Copy(Name, Pos(ForgeValueSep, Name) + 1, MaxInt),
-        KeepEdges(FExtValues.ValueFromIndex[i]));
+        KeepEdges(EscapeLines(FExtValues.ValueFromIndex[i])));
   end;
 end;
 

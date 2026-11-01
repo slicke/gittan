@@ -297,13 +297,27 @@ begin
     'Gittan.storage.set("url", "https://x"); Gittan.storage.setJSON("n", {a: 1});' +
     'globalThis.after = Gittan.storage.get("url"); globalThis.n = Gittan.storage.getJSON("n").a;' +
     'Gittan.storage.remove("url"); globalThis.gone = Gittan.storage.get("url");' +
-    'globalThis.dflt = Gittan.storage.getJSON("missing", 7);', AllPerms);
+    'globalThis.dflt = Gittan.storage.getJSON("missing", 7);' +
+    'Gittan.storage.set("text", "a\n[Trust]\nx=1");' +
+    'try { Gittan.storage.set("a=b", "v"); globalThis.bad = "stored"; } catch (e) { globalThis.bad = String(e); }' +
+    'try { Gittan.storage.get(";c"); globalThis.badGet = "read"; } catch (e) { globalThis.badGet = String(e); }' +
+    'try { Gittan.settings.define([{key: "[s]", type: "string"}]); globalThis.badDef = "defined"; } catch (e) { globalThis.badDef = String(e); }' +
+    'globalThis.done = true;', AllPerms);
   AssertEquals('nothing before', 'null', EvalIn(Info^.Ctx, 'String(before)'));
   AssertEquals('set', 'https://x', EvalIn(Info^.Ctx, 'after'));
   AssertEquals('json', '1', EvalIn(Info^.Ctx, 'String(n)'));
   AssertEquals('removed', 'null', EvalIn(Info^.Ctx, 'String(gone)'));
   AssertEquals('default', '7', EvalIn(Info^.Ctx, 'String(dflt)'));
   AssertEquals('in the settings', '{"a":1}', FSettings.ExtValue('store', 'n'));
+  AssertEquals('line ends kept', 'a' + #10 + '[Trust]' + #10 + 'x=1', FSettings.ExtValue('store', 'text'));
+  AssertTrue('a key with = refused: ' + EvalIn(Info^.Ctx, 'bad'),
+    Pos('Gittan.storage.set: The key "a=b"', EvalIn(Info^.Ctx, 'bad')) > 0);
+  AssertEquals('nothing under it', '', FSettings.ExtValue('store', 'a'));
+  AssertTrue('a comment key refused on read: ' + EvalIn(Info^.Ctx, 'badGet'),
+    Pos('Gittan.storage.get: The key ";c"', EvalIn(Info^.Ctx, 'badGet')) > 0);
+  AssertTrue('a section key refused in define: ' + EvalIn(Info^.Ctx, 'badDef'),
+    Pos('Gittan.settings.define: The key "[s]"', EvalIn(Info^.Ctx, 'badDef')) > 0);
+  AssertEquals('nothing declared', 0, Length(FEngine.Registry.SettingsOf('store')));
 end;
 
 procedure TExtApiTest.TestSettings;

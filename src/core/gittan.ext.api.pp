@@ -461,26 +461,44 @@ end;
   _settingsGet, _appSetting
   --------------------------------------------------------------------------- }
 
+{ A key goes into gittan.ini as it is, so one that would start a line,
+  a section or a pair of its own (ValidExtKey) is refused with an error
+  the extension can read, in the getters too, so a typo shows at once. }
+function CheckExtKey(res: PJSValue; ctx: JSContext; const AWho, AKey: string): boolean;
+begin
+  Result := ValidExtKey(AKey);
+  if not Result then
+    res^ := JS_ThrowError(ctx, RawUtf8(AWho + ': ' + Format(rsBadExtKey, [AKey])));
+end;
+
 procedure JSStorageGet(res: PJSValue; ctx: JSContext; this_val: PJSValue;
   argc: integer; argv: PJSValues; magic: integer);
 var
-  Value: string;
+  Key, Value: string;
 begin
   res^ := JS_NULL;
   if (ApiSettings = nil) or (argc < 1) then
     Exit;
-  Value := ApiSettings.ExtValue(ExtIdOf(ctx), Arg(ctx, argc, argv, 0));
+  Key := Arg(ctx, argc, argv, 0);
+  if not CheckExtKey(res, ctx, 'Gittan.storage.get', Key) then
+    Exit;
+  Value := ApiSettings.ExtValue(ExtIdOf(ctx), Key);
   if Value <> '' then
     ReturnString(res, ctx, Value);
 end;
 
 procedure JSStorageSet(res: PJSValue; ctx: JSContext; this_val: PJSValue;
   argc: integer; argv: PJSValues; magic: integer);
+var
+  Key: string;
 begin
   res^ := JS_UNDEFINED;
   if (ApiSettings = nil) or (argc < 1) then
     Exit;
-  ApiSettings.SetExtValue(ExtIdOf(ctx), Arg(ctx, argc, argv, 0), Arg(ctx, argc, argv, 1));
+  Key := Arg(ctx, argc, argv, 0);
+  if not CheckExtKey(res, ctx, 'Gittan.storage.set', Key) then
+    Exit;
+  ApiSettings.SetExtValue(ExtIdOf(ctx), Key, Arg(ctx, argc, argv, 1));
 end;
 
 function SettingKindOf(const AName: string): TGittanExtSettingKind;
@@ -532,6 +550,8 @@ begin
       Def.Key := Item.Get('key', '');
       if Def.Key = '' then
         Continue;
+      if not CheckExtKey(res, ctx, 'Gittan.settings.define', Def.Key) then
+        Exit;
       Def.Kind := SettingKindOf(Item.Get('type', 'string'));
       Def.Caption := Item.Get('label', Def.Key);
       Def.Note := Item.Get('note', '');
@@ -564,6 +584,8 @@ begin
   if (Eng = nil) or (argc < 1) then
     Exit;
   Key := Arg(ctx, argc, argv, 0);
+  if not CheckExtKey(res, ctx, 'Gittan.settings.get', Key) then
+    Exit;
   Value := '';
   if ApiSettings <> nil then
     Value := ApiSettings.ExtValue(ExtIdOf(ctx), Key);

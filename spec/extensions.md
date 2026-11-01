@@ -31,7 +31,7 @@ Read this when touching `gittan.ext.*`, `gittan.exthost`, `umain.ext.inc`, the E
 | `Gittan.ui.addCard({path, line, side, title, text, severity})`, `.clearCards()` | ui | a card under a line of the change view, as the AI review's (`TGittanReviewThread` with `Extension` set, shown while the work tree is compared, no Fix link, the extension's name after ⚙); the extension's cards dropped |
 | `Gittan.commands.register({id, title, where, run})`, `.unregister(id)` | ui | a command in the Extensions menu (`where` has `"menu"`, the default) and so in the command palette, in the file tree's popup (`"file"`) or the editor's (`"editor"`); `run(ctx)` gets `{repo, path, line, selection}` |
 | `Gittan.on(event, fn)`, `Gittan.off(event, fn)` | | the events below |
-| `Gittan.storage.get(k)`, `.set(k, v)`, `.remove(k)`, `.getJSON(k, default)`, `.setJSON(k, v)` | ui | the extension's own values, section `ExtValues:<id>` of `gittan.ini` |
+| `Gittan.storage.get(k)`, `.set(k, v)`, `.remove(k)`, `.getJSON(k, default)`, `.setJSON(k, v)` | ui | the extension's own values, section `ExtValues:<id>` of `gittan.ini`; a value may hold line ends (`SaveExt` escapes them, `LoadExt` reads them back), a key is one line without `=`, not starting with `;` or `[` (`ValidExtKey`; the getters, `set` and `settings.define` throw on another, so a key cannot write a line of the file's own) |
 | `Gittan.settings.define([{key, type, label, default, options, note}])`, `.get(key)` | ui | the fields of its settings page (`type` bool, string, number or choice); `get` is the value set there, else the default |
 | `Gittan.app.setting(name)` | settings | `GitPath`, `EditorCommand`, `TerminalCommand`, `AIEnabled`, `HostingEnabled`, `ExtensionsDir`, `<Forge>Cli` |
 

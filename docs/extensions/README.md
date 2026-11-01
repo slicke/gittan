@@ -83,6 +83,8 @@ var url = Gittan.settings.get("url");             // what the settings page hold
 Gittan.storage.setJSON("seen", {hash: s.head});   // the extension's own values in gittan.ini
 ```
 
+A value may hold anything, line ends included. A key is one line without `=`, not starting with `;` or `[`; `get`, `set` and `define` throw on another.
+
 ## Programs and the network
 
 ```js
