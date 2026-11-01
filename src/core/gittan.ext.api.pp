@@ -1056,7 +1056,10 @@ begin
     Api := TGittanExtApi.Create;
   with AEngine do
   begin
-    addClassFunctionIf(epData, '_root', @JSRoot, 0);
+    { The shown repository's root is where git.run and exec.run run when
+      no repo is named, so exec has it too: git there tells it anyway. }
+    if CanRegister(epData) or CanRegister(epExec) then
+      addClassFunction('_root', @JSRoot, 0);
     addClassFunctionIf(epData, '_snapshot', @JSSnapshot, 1);
     addClassFunctionIf(epData, '_files', @JSFiles, 1);
     addClassFunctionIf(epData, '_diff', @JSDiff, 2);

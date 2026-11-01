@@ -48,6 +48,7 @@ type
     procedure TestFileTextAndDiff;
     procedure TestGitRun;
     procedure TestExecRun;
+    procedure TestExecWithoutData;
     procedure TestStorage;
     procedure TestSettings;
     procedure TestPermissionsShape;
@@ -274,6 +275,24 @@ begin
   WaitFor(Info^.Ctx, 'globalThis.out && globalThis.bad');
   AssertEquals('the subject', 'true:first', EvalIn(Info^.Ctx, 'globalThis.out'));
   AssertEquals('a failure', 'false:true', EvalIn(Info^.Ctx, 'globalThis.bad'));
+end;
+
+{ exec without data: git.run, exec.run and gh.run run in the shown
+  repository when no repo is named, so they need its root, which data
+  alone gave. Gittan.repo stays out. }
+procedure TExtApiTest.TestExecWithoutData;
+var
+  Info: PExtContextInfo;
+begin
+  Info := Load('execonly', 'Gittan.git.run(["log", "--format=%s", "-n", "1"]).then(function (r) {' +
+    'globalThis.out = r.ok + ":" + r.stdout.trim(); }, function (e) { globalThis.out = "rejected:" + String(e); });' +
+    'Gittan.exec.run("git", ["rev-parse", "--is-inside-work-tree"]).then(function (r) {' +
+    'globalThis.inside = r.stdout.trim(); }, function (e) { globalThis.inside = "rejected:" + String(e); });',
+    PermBaseline + [epExec]);
+  WaitFor(Info^.Ctx, 'globalThis.out && globalThis.inside');
+  AssertEquals('git in the shown repository', 'true:first', EvalIn(Info^.Ctx, 'globalThis.out'));
+  AssertEquals('a program there too', 'true', EvalIn(Info^.Ctx, 'globalThis.inside'));
+  AssertEquals('no repo without data', 'undefined', EvalIn(Info^.Ctx, 'typeof Gittan.repo'));
 end;
 
 procedure TExtApiTest.TestExecRun;
