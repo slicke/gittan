@@ -1980,6 +1980,28 @@ end;
   tool's input as it runs (TToolInputWriter), of any length, and the
   input closed after it. ACancel, when given, is asked on every pass of
   the reading loop, and True ends the tool. }
+{$ifdef unix}
+var
+  { Held by RunTool from its fork until its own pipe ends are closed on
+    exec (KeepPipesFromChildren). }
+  GSpawnLock: TRTLCriticalSection;
+
+{ A fork copies every descriptor the process has, and TProcess neither
+  closes them in the child nor marks its pipes close-on-exec, so a tool
+  started on another thread kept the end of this tool's input it
+  inherited: with git hash-object --stdin and git cat-file
+  --batch-check started at once, each held the other's input open and
+  both waited for an end that never came. Gittan's own ends are closed
+  on exec from here on, and set under GSpawnLock, so no other RunTool
+  forks before it. }
+procedure KeepPipesFromChildren(P: TProcess);
+begin
+  FpFcntl(P.Input.Handle, F_SETFD, FD_CLOEXEC);
+  FpFcntl(P.Output.Handle, F_SETFD, FD_CLOEXEC);
+  FpFcntl(P.Stderr.Handle, F_SETFD, FD_CLOEXEC);
+end;
+{$endif}
+
 function RunTool(const AExe, ADir: string; const AArgs, ASkip, AEnv: array of string;
   out AOutput, AError: string; out AStatus: integer;
   AOnOutput: TGittanOutputEvent; const AInput: string = '';
@@ -2015,10 +2037,22 @@ begin
       a megabyte (git cat-file --batch-check) went a kilobyte for every
       wait, ten seconds in all; Unix leaves its own. }
     P.PipeBufferSize := 64 * 1024;
+    {$ifdef unix}
+    EnterCriticalSection(GSpawnLock);
+    {$endif}
     try
-      P.Execute;
-    except
-      Exit(False);
+      try
+        P.Execute;
+      except
+        Exit(False);
+      end;
+      {$ifdef unix}
+      KeepPipesFromChildren(P);
+      {$endif}
+    finally
+      {$ifdef unix}
+      LeaveCriticalSection(GSpawnLock);
+      {$endif}
     end;
     { The input ends once AInput is written (at once without one): a
       hook or an alias that reads it would otherwise wait for ever, and
@@ -7224,10 +7258,16 @@ initialization
   {$ifdef windows}
   OnGetTempDir := @UnicodeTempDir;
   {$endif}
+  {$ifdef unix}
+  InitCriticalSection(GSpawnLock);
+  {$endif}
   GToolPath := MakeToolPath;
   GOldGitExes := TStringList.Create;
   SetGitExe('');
 
 finalization
   GOldGitExes.Free;
+  {$ifdef unix}
+  DoneCriticalSection(GSpawnLock);
+  {$endif}
 end.
