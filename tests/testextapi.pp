@@ -37,7 +37,7 @@ type
     function EvalIn(ctx: JSContext; const ASrc: string): string;
     { Runs the engine's queue and the thread's Synchronize until AExpr
       is true in ctx, or a few seconds pass. }
-    procedure WaitFor(ctx: JSContext; const AExpr: string);
+    procedure WaitFor(ctx: JSContext; const AExpr: string; const AShow: string = '');
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -176,7 +176,8 @@ begin
   ctx^.Free(v);
 end;
 
-procedure TExtApiTest.WaitFor(ctx: JSContext; const AExpr: string);
+{ AShow, when given, is evaluated into the message of a timeout. }
+procedure TExtApiTest.WaitFor(ctx: JSContext; const AExpr: string; const AShow: string);
 var
   i: integer;
 begin
@@ -187,7 +188,10 @@ begin
     if EvalIn(ctx, 'String(!!(' + AExpr + '))') = 'true' then
       Exit;
   end;
-  Fail('timed out waiting for ' + AExpr);
+  if AShow <> '' then
+    Fail('timed out waiting for ' + AExpr + ': ' + EvalIn(ctx, AShow))
+  else
+    Fail('timed out waiting for ' + AExpr);
 end;
 
 procedure TExtApiTest.TestSnapshotAndFiles;
@@ -330,12 +334,18 @@ begin
   Info := Load('gitrun', 'Gittan.git.run(["log", "--format=%s", "-n", "1"]).then(function (r) {' +
     'globalThis.out = r.ok + ":" + r.stdout.trim(); });' +
     'Gittan.git.run(["nonsense-command"]).then(function (r) { globalThis.bad = r.ok + ":" + (r.stderr.length > 0); });' +
-    'Gittan.git.run(["rev-parse", "--verify", "no-such-ref"]).then(function (r) { globalThis.code = r.status; });',
+    'Gittan.git.run(["rev-parse", "--verify", "no-such-ref"]).then(function (r) {' +
+    'globalThis.code = r.status; globalThis.codeErr = r.stderr; }, function (e) { globalThis.code = "rejected: " + e; });',
     AllPerms);
-  WaitFor(Info^.Ctx, 'globalThis.out && globalThis.bad && globalThis.code');
+  { Each set at all, not truthy: a status of 0 is a wrong answer to show,
+    not a wait that never ends. }
+  WaitFor(Info^.Ctx, 'globalThis.out !== undefined && globalThis.bad !== undefined && ' +
+    'globalThis.code !== undefined',
+    'JSON.stringify({out: globalThis.out, bad: globalThis.bad, code: globalThis.code})');
   AssertEquals('the subject', 'true:first', EvalIn(Info^.Ctx, 'globalThis.out'));
   AssertEquals('a failure', 'false:true', EvalIn(Info^.Ctx, 'globalThis.bad'));
-  AssertEquals('git''s own exit status', '128', EvalIn(Info^.Ctx, 'String(globalThis.code)'));
+  AssertEquals('git''s own exit status (' + EvalIn(Info^.Ctx, 'String(globalThis.codeErr)') + ')',
+    '128', EvalIn(Info^.Ctx, 'String(globalThis.code)'));
 end;
 
 { exec without data: git.run, exec.run and gh.run run in the shown
