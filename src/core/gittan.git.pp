@@ -1998,10 +1998,13 @@ var
   on exec from here on, and set under GSpawnLock, so no other RunTool
   forks before it. }
 procedure KeepPipesFromChildren(P: TProcess);
+const
+  { POSIX's value everywhere; BaseUnix names it on Darwin, not on Linux. }
+  CloseOnExec = 1;
 begin
-  FpFcntl(P.Input.Handle, F_SETFD, FD_CLOEXEC);
-  FpFcntl(P.Output.Handle, F_SETFD, FD_CLOEXEC);
-  FpFcntl(P.Stderr.Handle, F_SETFD, FD_CLOEXEC);
+  FpFcntl(P.Input.Handle, F_SETFD, CloseOnExec);
+  FpFcntl(P.Output.Handle, F_SETFD, CloseOnExec);
+  FpFcntl(P.Stderr.Handle, F_SETFD, CloseOnExec);
 end;
 {$endif}
 
