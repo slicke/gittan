@@ -104,18 +104,36 @@ function Copy-Lexers {
 }
 
 # The extension engine (gittan.ext.quickjs) links quickjs-ng and its ABI
-# shim, prebuilt in externals\quickjs\prebuilt\x86_64-win64. Windows finds a
+# shim, prebuilt in externals\quickjs\prebuilt\<cpu>-win64. Windows finds a
 # DLL beside the executable, so they are copied next to Gittan.exe after a
-# build and next to the test binary before the tests run.
-$QjsDir = Join-Path $PSScriptRoot 'externals\quickjs\prebuilt\x86_64-win64'
+# build and next to the test binary before the tests run. The CPU is the
+# executable's own, read from its PE header: lazbuild's compiler may not be
+# the native CPU's, and a DLL of another CPU stops the program before it
+# starts (0xC000007B).
+function Get-QjsDir([string]$Cpu) {
+    Join-Path $PSScriptRoot "externals\quickjs\prebuilt\$Cpu-win64"
+}
+
+function Get-ExeCpu([string]$Exe) {
+    $bytes = [System.IO.File]::ReadAllBytes($Exe)
+    $pe = [BitConverter]::ToInt32($bytes, 0x3c)
+    switch ([BitConverter]::ToUInt16($bytes, $pe + 4)) {
+        0xAA64 { 'aarch64' }
+        0x8664 { 'x86_64' }
+        default { $null }
+    }
+}
+
 function Copy-QuickJSLibs {
-    param([string]$Destination = $PSScriptRoot)
-    if (-not (Test-Path $QjsDir)) {
-        Write-Warning "QuickJS libraries not found at $QjsDir; the extensions will not start."
+    param([string]$Exe = (Join-Path $PSScriptRoot 'Gittan.exe'))
+    $cpu = Get-ExeCpu $Exe
+    $dir = Get-QjsDir $cpu
+    if (-not $cpu -or -not (Test-Path $dir)) {
+        Write-Warning "No QuickJS libraries for $Exe ($cpu); the extensions will not start."
         return
     }
     foreach ($name in @('libqjs.dll', 'tqshim.dll')) {
-        Copy-Item (Join-Path $QjsDir $name) $Destination -Force
+        Copy-Item (Join-Path $dir $name) (Split-Path -Parent $Exe) -Force
     }
 }
 
@@ -175,9 +193,10 @@ switch ($target) {
             Write-Error 'fpc not found on PATH or beside lazbuild.'; exit 1
         }
         New-Item -ItemType Directory -Path 'tests\lib' -Force | Out-Null
-        & fpc -Mobjfpc -Sh -O1 '-Fusrc\core' '-FUtests\lib' '-FEtests' "-Fl$QjsDir" 'tests\gittantests.lpr'
+        $qjsDir = Get-QjsDir ((& fpc -iTP) | Out-String).Trim()
+        & fpc -Mobjfpc -Sh -O1 '-Fusrc\core' '-FUtests\lib' '-FEtests' "-Fl$qjsDir" 'tests\gittantests.lpr'
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        Copy-QuickJSLibs (Join-Path $PSScriptRoot 'tests')
+        Copy-QuickJSLibs (Join-Path $PSScriptRoot 'tests\gittantests.exe')
         & 'tests\gittantests.exe' --all --format=plain @rest
         exit $LASTEXITCODE
     }
