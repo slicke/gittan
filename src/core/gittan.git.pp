@@ -1887,7 +1887,10 @@ var
 begin
   if not AOutOpen and not AErrOpen then
   begin
-    P.WaitOnExit;
+    { With a timeout: WaitOnExit() keeps the exit code where Running and
+      this keep the raw wait status, so ExitStatus would be one or the
+      other as the tool ended (and RunTool's callers decode the raw). }
+    P.WaitOnExit(High(DWord));
     Exit;
   end;
   fpFD_ZERO(Fds);
