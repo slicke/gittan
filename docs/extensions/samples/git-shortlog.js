@@ -15,13 +15,19 @@ Gittan.commands.register({
   }
 });
 
+// The newest request per repository: the runs are threads, and an older one may answer last.
+var latest = {};
+
 Gittan.commands.register({
   id: "last",
   title: "Mark Last Commit of File",
   where: ["file", "editor"],
   run: function (ctx) {
     if (!ctx.path) return;
+    var repo = ctx.repo, request = (latest[repo] || 0) + 1;
+    latest[repo] = request;
     Gittan.git.run(["log", "-n", "1", "--format=%h %an, %as: %s", "--", ctx.path], {repo: ctx.repo}).then(function (r) {
+      if (request !== latest[repo]) return;
       if (!r.ok) {
         Gittan.ui.error("git log failed", r.stderr);
         return;

@@ -56,7 +56,7 @@ unit testextmodules;
 interface
 
 uses
-  fpcunit, testregistry, SysUtils, Classes, gittan.ext.modules
+  fpcunit, testregistry, SysUtils, Classes, gittan.ext.modules, testhelpers
   {$IFDEF UNIX}, BaseUnix{$ENDIF};
 
 type
@@ -101,10 +101,7 @@ end;
 
 procedure TExtModulesTest.TearDown;
 begin
-  DeleteFile(FRoot + DirectorySeparator + 'lib' + DirectorySeparator + 'util.js');
-  DeleteFile(FRoot + DirectorySeparator + 'main.js');
-  RemoveDir(FRoot + DirectorySeparator + 'lib');
-  RemoveDir(FRoot);
+  RemoveTree(FRoot);
 end;
 
 procedure TExtModulesTest.Touch(const RelPath: string);
@@ -235,6 +232,9 @@ begin
     './other.js', FRoot, resolved);
   AssertTrue('another extension rejected: ' + err, Pos('extension of its own', err) > 0);
   AssertEquals('nothing resolved', '', resolved);
+  err := ResolveModuleSpecifier(FRoot + DirectorySeparator + 'main.js',
+    './other.js', FRoot, resolved, FRoot + DirectorySeparator + 'main.js');
+  AssertTrue('rejected beside an entry: ' + err, Pos('extension of its own', err) > 0);
   AssertEquals('its own file allowed', '', ResolveModuleSpecifier('<bootstrap>',
     FRoot + DirectorySeparator + 'other.js', FRoot, resolved,
     FRoot + DirectorySeparator + 'other.js'));

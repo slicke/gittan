@@ -2996,11 +2996,15 @@ procedure TRepoFrame.SetBase(const ARef: string; ASnapshot: boolean);
 var
   Prev: string;
   PrevSnapshot: boolean;
+  OldCards: TGittanReviewThreads;
 begin
   if (FRepo.Root = '') or ((ARef = FRepo.Base) and (ASnapshot = FRepo.WholeTree)) then
     Exit;
   Prev := FRepo.Base;
   PrevSnapshot := FRepo.WholeTree;
+  { Before the refresh, so a card a repo.changed listener adds in it for
+    the new Base stays. }
+  OldCards := ExtDropOldSideCards;
   StopWatcher;
   try
     if ARef <> FBlameRange then
@@ -3015,14 +3019,13 @@ begin
       FRepo.WholeTree := PrevSnapshot;
       FBlameRange := '';
       RefreshRepository;
+      ExtRestoreCards(OldCards);
       FSummary.Notice := FLoadError;
       ShowSummary;
     end;
   finally
     StartWatcher;
   end;
-  if (FRepo.Base <> Prev) or (FRepo.WholeTree <> PrevSnapshot) then
-    ExtDropOldSideCards;
   { Comparing with a pull request shows its comments. }
   StartReviewJob(False);
 end;

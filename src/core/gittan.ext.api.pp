@@ -46,7 +46,8 @@ implementation
 uses
   {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}BaseUnix,{$ENDIF}
   gittan.ext.functions, gittan.ext.perm, gittan.ext.host, gittan.ext.registry,
-  gittan.ext.promise, gittan.http, gittan.textfile, gittan.reviews, gittan.forge;
+  gittan.ext.promise, gittan.ext.modules, gittan.http, gittan.textfile, gittan.reviews,
+  gittan.forge;
 
 const
   ApiVersion = '1.0';
@@ -326,8 +327,10 @@ begin
 end;
 
 { Does APath, relative to the repository, name a file inside it? The data
-  grant covers the repository, not the files around it. }
-function InsideRepo(ARepo: TGittanRepo; const APath: string): boolean;
+  grant covers the repository, not the files around it. In the work tree
+  (no ARef) a link on the way could lead out of it, so none may be there;
+  at a commit git gives a link's own text. }
+function InsideRepo(ARepo: TGittanRepo; const APath, ARef: string): boolean;
 var
   Root, Full: string;
 begin
@@ -337,7 +340,8 @@ begin
     Result := Copy(Full, 1, Length(Root)) = Root
   else
     Result := SameText(Copy(Full, 1, Length(Root)), Root);
-  Result := Result and (APath <> '');
+  Result := Result and (APath <> '') and
+    ((ARef <> '') or not PathHasLinkBelowRoot(Root, Full));
 end;
 
 procedure JSFileText(res: PJSValue; ctx: JSContext; this_val: PJSValue;
@@ -351,7 +355,7 @@ begin
   if Repo = nil then
     Exit;
   Path := Arg(ctx, argc, argv, 1);
-  if not InsideRepo(Repo, Path) then
+  if not InsideRepo(Repo, Path, Arg(ctx, argc, argv, 2)) then
     Exit;
   if Repo.FileBlob(Path, Arg(ctx, argc, argv, 2), Data) then
     ReturnString(res, ctx, string(Data));
@@ -862,11 +866,13 @@ begin
   end;
   { RunTool, not RunGitEnv, for git's own exit status and streams; the
     options and variables are RunGitEnv's. }
-  SetLength(GitArgs, 2 + Length(Args));
+  SetLength(GitArgs, 4 + Length(Args));
   GitArgs[0] := '-c';
   GitArgs[1] := 'core.quotepath=false';
+  GitArgs[2] := '-c';
+  GitArgs[3] := 'diff.suppressBlankEmpty=false';
   for i := 0 to High(Args) do
-    GitArgs[2 + i] := Args[i];
+    GitArgs[4 + i] := Args[i];
   res := StringToValueVal(ToolJson(GitExe, Root, GitArgs, ['GIT_INDEX_FILE='],
     ['LC_ALL=C', 'GIT_TERMINAL_PROMPT=0', 'GIT_OPTIONAL_LOCKS=0'], ParamStr(params, 2)));
   Result := True;
@@ -969,7 +975,7 @@ begin
       Got := Repo.Blame(Path, Ref, Text)
     else if Kind = 'fileText' then
     begin
-      Got := InsideRepo(Repo, Path) and Repo.FileBlob(Path, Ref, Data);
+      Got := InsideRepo(Repo, Path, Ref) and Repo.FileBlob(Path, Ref, Data);
       Text := string(Data);
     end;
     Envelope := TJSONObject.Create;
@@ -1150,10 +1156,10 @@ const
     '    recent: function (limit, o) { return J(t._recent(R(o), limit === undefined ? 10 : Number(limit))); }' + LineEnding +
     '  };' + LineEnding +
     '  if (typeof repoRead === "function") {' + LineEnding +
-    '    var repoReadF = globalThis.repoRead;' + LineEnding +
-    '    delete globalThis.repoRead;' + LineEnding +
+    '    var repoReadF = globalThis.repoRead, repoStateF = t._repoState;' + LineEnding +
+    '    delete globalThis.repoRead; delete t._repoState;' + LineEnding +
     '    var RR = function (kind, path, ref, o) {' + LineEnding +
-    '      var s = t._repoState(R(o));' + LineEnding +
+    '      var s = repoStateF.call(t, R(o));' + LineEnding +
     '      if (s === undefined) return Promise.resolve(undefined);' + LineEnding +
     '      return repoReadF(s, kind, path === undefined ? "" : String(path), ref === undefined ? "" : String(ref))' + LineEnding +
     '        .then(function (r) { var v = JSON.parse(r).value; return v === null ? undefined : v; });' + LineEnding +
@@ -1224,6 +1230,9 @@ begin
     addClassFunctionIf(epData, '_diff', @JSDiff, 2);
     addClassFunctionIf(epData, '_fileText', @JSFileText, 3);
     addClassFunctionIf(epData, '_blame', @JSBlame, 3);
+    { Taken into the facade's closure and deleted from Gittan before the
+      script runs: the state names the folder repoRead's thread opens, so
+      a script may not put its own in its place. }
     addClassFunctionIf(epData, '_repoState', @JSRepoState, 1);
     addClassFunctionIf(epData, '_commit', @JSCommit, 2);
     addClassFunctionIf(epData, '_branches', @JSBranches, 1);

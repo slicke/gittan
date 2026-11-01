@@ -106,6 +106,10 @@ function ResolveModuleSpecifier(const BaseName, Name, Root: string;
 {** Is Path a symbolic link, or on Windows any reparse point (junctions too)? }
 function IsLinkPath(const Path: string): boolean;
 
+{** Does any component of Candidate below RootDir (which ends in a
+    delimiter) go through a link? }
+function PathHasLinkBelowRoot(const RootDir, Candidate: string): boolean;
+
 {** Quote @code(S) as a JavaScript string literal (double quoted, escaped). }
 function JSStringLiteral(const S: string): UTF8String;
 

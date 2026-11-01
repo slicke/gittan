@@ -60,7 +60,7 @@ type
 implementation
 
 uses
-  testhelpers;
+  {$IFDEF UNIX}BaseUnix,{$ENDIF} testhelpers;
 
 const
   AllPerms: TExtPermSet = [epData, epUI, epTimers, epNet, epExec, epSettings];
@@ -273,6 +273,18 @@ begin
   end;
   AssertEquals('outside the repository', 'undefined',
     EvalIn(Info^.Ctx, 'String(Gittan.repo.fileText("../outside.txt"))'));
+  {$IFDEF UNIX}
+  { A link in the work tree to the folder around it. }
+  AssertEquals('link made', 0, fpSymlink(PChar(FDir),
+    PChar(IncludeTrailingPathDelimiter(FRepoDir) + 'out')));
+  try
+    AssertEquals('through a link', 'undefined',
+      EvalIn(Info^.Ctx, 'String(Gittan.repo.fileText("out/outside.txt"))'));
+  finally
+    { Before TearDown's RemoveTree, which would follow it. }
+    fpUnlink(PChar(IncludeTrailingPathDelimiter(FRepoDir) + 'out'));
+  end;
+  {$ENDIF}
 end;
 
 { The same reads on the promise thread, for a long file's blame or diff
@@ -289,6 +301,13 @@ begin
   finally
     Lines.Free;
   end;
+  with TStringList.Create do
+  try
+    Text := 'secret';
+    SaveToFile(IncludeTrailingPathDelimiter(FDir) + 'outside.txt');
+  finally
+    Free;
+  end;
   Info := Load('async', 'Promise.all([Gittan.repo.diffAsync("a.txt"), Gittan.repo.diffAsync(),' +
     'Gittan.repo.blameAsync("a.txt", "HEAD"), Gittan.repo.fileTextAsync("a.txt", "HEAD"),' +
     'Gittan.repo.fileTextAsync("../outside.txt"), Gittan.repo.blameAsync("nope.txt")])' +
@@ -300,6 +319,8 @@ begin
   AssertEquals('the text in HEAD', 'one,two', EvalIn(Info^.Ctx, 'r[3].trim().split(/\r?\n/).join(",")'));
   AssertEquals('outside the repository', 'undefined', EvalIn(Info^.Ctx, 'String(r[4])'));
   AssertEquals('a failed blame', 'undefined', EvalIn(Info^.Ctx, 'String(r[5])'));
+  AssertEquals('the state is the facade''s alone', 'undefined',
+    EvalIn(Info^.Ctx, 'typeof Gittan._repoState'));
 end;
 
 procedure TExtApiTest.TestGitRun;

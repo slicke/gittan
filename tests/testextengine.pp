@@ -29,6 +29,8 @@ type
     ConfirmAnswer, PermissionAnswer: boolean;
     PromptAnswer: string;
     SelectAnswer, Changed: integer;
+    { Run as a permission is asked, while the real host's dialog is up. }
+    OnAsk: procedure of object;
     constructor Create;
     destructor Destroy; override;
     procedure Alert(const AText: string); override;
@@ -145,6 +147,8 @@ function TFakeExtHost.AskPermission(const AName, AFile, AAuthor: string;
   const ARequested: TExtPermSet): boolean;
 begin
   Asked.Add(AName + '|' + AAuthor + '|' + PermSetToCSV(ARequested));
+  if Assigned(OnAsk) then
+    OnAsk();
   Result := PermissionAnswer;
 end;
 

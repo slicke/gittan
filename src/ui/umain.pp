@@ -2249,7 +2249,8 @@ type
       cards of the extension AExtId (every extension's for '') dropped. }
     procedure ExtAddCard(const ACard: TGittanReviewThread);
     procedure ExtClearCards(const AExtId: string);
-    procedure ExtDropOldSideCards;
+    function ExtDropOldSideCards: TGittanReviewThreads;
+    procedure ExtRestoreCards(const ACards: TGittanReviewThreads);
     {** Builds the Extensions menu and the popups' items again from the
       commands registered. }
     procedure RebuildExtMenu;

@@ -14,7 +14,7 @@ The file starts with a manifest in a comment:
 */
 ```
 
-`@perms` names what the extension needs beyond what every extension may do: `data` to read the repositories (`Gittan.repo`, the files and their content, and the full payload of an event), `net` for `Gittan.net.fetch`, `exec` for `Gittan.git.run` and `Gittan.exec.run`, `settings` for `Gittan.app.setting`. Gittan asks you once per file, and again when the file changes or a module in a subfolder does (a module runs with the permissions of the file that imports it). Dialogs, cards, commands, timers and the extension's own storage and settings page need no permission.
+`@perms` names what the extension needs beyond what every extension may do: `data` to read the repositories (`Gittan.repo`, the files and their content, and the full payload of an event), `net` for `Gittan.net.fetch`, `exec` for `Gittan.git.run` and `Gittan.exec.run`, `settings` for `Gittan.app.setting`. Gittan asks you once per file, and again when the file changes or a module in a subfolder does (a module runs with the permissions of the file that imports it). A no is not kept: the file is skipped and asked about again at the next load. Dialogs, cards, commands, timers and the extension's own storage and settings page need no permission.
 
 The scripts run in quickjs-ng (ES2023, with `fetch`-like networking, timers, `console`, `import` of modules from subfolders of the extensions folder, and top-level `await`). `gittan.d.ts` beside this file describes the `Gittan` object for an editor's completion.
 

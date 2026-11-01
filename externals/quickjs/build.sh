@@ -397,17 +397,18 @@ if [ "$what" = mac ] || [ "$what" = mac-x86_64 ]; then
     for a in ${TRNDI_QJS_MAC_ARCHS//;/ }; do shim_args+=(-arch "$a"); done
   fi
 
-  # A build folder per architecture: cmake keeps CMAKE_OSX_ARCHITECTURES in its
-  # cache, so a shared one would build the other slice again.
-  build_engine "mac-$arch" "${mac_args[@]}"
+  # A build folder per architecture list: cmake keeps CMAKE_OSX_ARCHITECTURES
+  # in its cache, so a shared one would build the other slices again.
+  macdir="mac-$(printf '%s' "${TRNDI_QJS_MAC_ARCHS:-$arch}" | tr ';' '-')"
+  build_engine "$macdir" "${mac_args[@]}"
 
   # Unlike the Linux build, flatten the versioned dylib into a single unversioned
   # file. FPC links these by name (-lqjs) and there is nothing here to version
   # against, so this avoids storing symlinks in git — they do not survive a
   # checkout onto a Windows filesystem.
-  engine="$WORK/b-mac-$arch/libqjs.dylib"
+  engine="$WORK/b-$macdir/libqjs.dylib"
   if [ ! -e "$engine" ]; then
-    engine="$(ls "$WORK"/b-mac-$arch/libqjs.*.dylib 2>/dev/null | head -1)"
+    engine="$(ls "$WORK"/b-$macdir/libqjs.*.dylib 2>/dev/null | head -1)"
   fi
   cp -L "$engine" "$out/libqjs.dylib"
   # cmake stamps the install name as @rpath/libqjs.<soversion>.dylib; retarget it

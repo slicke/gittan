@@ -275,24 +275,37 @@ begin
 end;
 
 { The cards on the old side are on the lines of the Base they were made
-  against; another Base has other lines there, so they go. }
-procedure TRepoFrame.ExtDropOldSideCards;
+  against; another Base has other lines there, so they go, and come back
+  with ExtRestoreCards when the Base does. }
+function TRepoFrame.ExtDropOldSideCards: TGittanReviewThreads;
 var
   Kept: TGittanReviewThreads;
-  i, n: integer;
+  i: integer;
 begin
+  Result := nil;
   Kept := nil;
-  n := 0;
   for i := 0 to High(FExtThreads) do
-    if not FExtThreads[i].LeftSide then
+    if FExtThreads[i].LeftSide then
     begin
-      SetLength(Kept, n + 1);
-      Kept[n] := FExtThreads[i];
-      Inc(n);
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := FExtThreads[i];
+    end
+    else
+    begin
+      SetLength(Kept, Length(Kept) + 1);
+      Kept[High(Kept)] := FExtThreads[i];
     end;
-  if Length(Kept) = Length(FExtThreads) then
+  if Length(Result) = 0 then
     Exit;
   FExtThreads := Kept;
+  QueueExtCards;
+end;
+
+procedure TRepoFrame.ExtRestoreCards(const ACards: TGittanReviewThreads);
+begin
+  if Length(ACards) = 0 then
+    Exit;
+  FExtThreads := Concat(FExtThreads, ACards);
   QueueExtCards;
 end;
 

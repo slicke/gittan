@@ -86,6 +86,7 @@ resourcestring
   rsExtInvalidManifest = 'The manifest of %s is not valid';
   rsExtDupId = 'The extension file "%s" was not loaded: apart from letter case, its name matches "%s", so both would share the same settings and permissions. Rename one of the files.';
   rsExtDenied = 'The permissions it asks for were not granted';
+  rsExtChangedWhileAsked = 'The file or a module beside it changed while Gittan asked; reload the extensions to be asked about what is there now';
   rsExtOff = 'Turned off';
   rsExtNoEngine = 'The extension engine could not be started';
 
@@ -125,6 +126,84 @@ begin
   Result := False;
 end;
 
+{ Adds the files under ADir (ending in a delimiter), not through a link,
+  to AFiles as paths after the extensions folder's AFolderLen characters. }
+procedure ListModules(const ADir: string; AFolderLen: integer; AFiles: TStrings);
+var
+  Sr: TSearchRec;
+begin
+  if FindFirst(ADir + AllFilesMask, faAnyFile, Sr) <> 0 then
+    Exit;
+  try
+    repeat
+      if (Sr.Name = '.') or (Sr.Name = '..') or IsLinkPath(ADir + Sr.Name) then
+        Continue;
+      if (Sr.Attr and faDirectory) <> 0 then
+        ListModules(ADir + Sr.Name + PathDelim, AFolderLen, AFiles)
+      else
+        AFiles.Add(Copy(ADir + Sr.Name, AFolderLen + 1, MaxInt));
+    until FindNext(Sr) <> 0;
+  finally
+    FindClose(Sr);
+  end;
+end;
+
+{ A digest of every file in the subfolders of AFolder, its path and its
+  content; '' when there is none, so a single-file extension's grant keeps
+  the hash of its file alone. }
+function ModulesDigest(const AFolder: string): string;
+var
+  Sr: TSearchRec;
+  Files: TStringList;
+  Buf: TStringStream;
+  Path: string;
+begin
+  Result := '';
+  Files := TStringList.Create;
+  try
+    if FindFirst(AFolder + AllFilesMask, faDirectory, Sr) = 0 then
+    try
+      repeat
+        if ((Sr.Attr and faDirectory) <> 0) and (Sr.Name <> '.') and (Sr.Name <> '..') and
+          not IsLinkPath(AFolder + Sr.Name) then
+          ListModules(AFolder + Sr.Name + PathDelim, Length(AFolder), Files);
+      until FindNext(Sr) <> 0;
+    finally
+      FindClose(Sr);
+    end;
+    if Files.Count = 0 then
+      Exit;
+    Files.CaseSensitive := True;
+    Files.Sort;
+    { One buffer, not a string grown file by file. }
+    Buf := TStringStream.Create('');
+    try
+      for Path in Files do
+      try
+        Buf.WriteString(Path + #0 + string(ReadFileBytes(AFolder + Path)) + #0);
+      except
+        Buf.WriteString(Path + #0#1#0);
+      end;
+      Result := HashScript(Buf.DataString);
+    finally
+      Buf.Free;
+    end;
+  finally
+    Files.Free;
+  end;
+end;
+
+{ The hash a grant is kept with: the file's, with the modules' digest when
+  there are any. }
+function GrantHash(const ASource, ADigest: string): string;
+begin
+  if ADigest = '' then
+    Result := HashScript(ASource)
+  else
+    Result := HashScript(ASource + #0 + ADigest);
+end;
+
+
 procedure TGittanExtLoader.LoadOne(const AFileName: string; ASeen: TStrings);
 var
   Inf: TGittanExtInfo;
@@ -134,6 +213,7 @@ var
   Ext: PExtContextInfo;
   Res: string;
   i: integer;
+  Asked: boolean;
 begin
   Inf := Default(TGittanExtInfo);
   Inf.FileName := AFileName;
@@ -166,10 +246,7 @@ begin
     Inf.Requested := Manifest.Requested;
     { The modules in the subfolders run under this file's grant, so an
       edit of one asks again as an edit of the file does. }
-    if FModulesDigest = '' then
-      Inf.Hash := HashScript(string(Source))
-    else
-      Inf.Hash := HashScript(string(Source) + #0 + FModulesDigest);
+    Inf.Hash := GrantHash(string(Source), FModulesDigest);
     if not Manifest.IsValid then
     begin
       Inf.Error := Manifest.ErrorMessage;
@@ -195,10 +272,30 @@ begin
       Inf.Error := rsExtOff;
       Exit;
     end;
+    Asked := (Manifest.Requested * PermPromptable <> []) and
+      (FSettings.ExtPerm(Inf.Id, 'Hash') <> Inf.Hash);
     Inf.Granted := GrantPermissionsFor(Inf.Id, AFileName, Inf.Hash, Manifest, FSettings);
     if Inf.Granted = [] then
     begin
       Inf.Error := rsExtDenied;
+      Exit;
+    end;
+    { What was approved is what was read before the question; what runs is
+      read after it, so it has to be the same. }
+    if Asked then
+    try
+      if GrantHash(string(ReadFileBytes(AFileName)),
+        ModulesDigest(ExtractFilePath(AFileName))) <> Inf.Hash then
+      begin
+        FSettings.ClearExtPerm(Inf.Id);
+        Inf.Granted := [];
+        Inf.Error := rsExtChangedWhileAsked;
+        ExtHost.ReportError(ExtractFileName(AFileName), Inf.Error);
+        Exit;
+      end;
+    except
+      Inf.Granted := [];
+      Inf.Error := rsExtReadFailed;
       Exit;
     end;
     { The prompt ran the message loop; the program may be closing. }
@@ -235,67 +332,6 @@ begin
   finally
     SetLength(FInfos, Length(FInfos) + 1);
     FInfos[High(FInfos)] := Inf;
-  end;
-end;
-
-{ Adds the files under ADir (ending in a delimiter), not through a link,
-  to AFiles as paths after the extensions folder's AFolderLen characters. }
-procedure ListModules(const ADir: string; AFolderLen: integer; AFiles: TStrings);
-var
-  Sr: TSearchRec;
-begin
-  if FindFirst(ADir + AllFilesMask, faAnyFile, Sr) <> 0 then
-    Exit;
-  try
-    repeat
-      if (Sr.Name = '.') or (Sr.Name = '..') or IsLinkPath(ADir + Sr.Name) then
-        Continue;
-      if (Sr.Attr and faDirectory) <> 0 then
-        ListModules(ADir + Sr.Name + PathDelim, AFolderLen, AFiles)
-      else
-        AFiles.Add(Copy(ADir + Sr.Name, AFolderLen + 1, MaxInt));
-    until FindNext(Sr) <> 0;
-  finally
-    FindClose(Sr);
-  end;
-end;
-
-{ A digest of every file in the subfolders of AFolder, its path and its
-  content; '' when there is none, so a single-file extension's grant keeps
-  the hash of its file alone. }
-function ModulesDigest(const AFolder: string): string;
-var
-  Sr: TSearchRec;
-  Files: TStringList;
-  All, Path: string;
-begin
-  Result := '';
-  Files := TStringList.Create;
-  try
-    if FindFirst(AFolder + AllFilesMask, faDirectory, Sr) = 0 then
-    try
-      repeat
-        if ((Sr.Attr and faDirectory) <> 0) and (Sr.Name <> '.') and (Sr.Name <> '..') and
-          not IsLinkPath(AFolder + Sr.Name) then
-          ListModules(AFolder + Sr.Name + PathDelim, Length(AFolder), Files);
-      until FindNext(Sr) <> 0;
-    finally
-      FindClose(Sr);
-    end;
-    if Files.Count = 0 then
-      Exit;
-    Files.CaseSensitive := True;
-    Files.Sort;
-    All := '';
-    for Path in Files do
-    try
-      All := All + Path + #0 + string(ReadFileBytes(AFolder + Path)) + #0;
-    except
-      All := All + Path + #0#1#0;
-    end;
-    Result := HashScript(All);
-  finally
-    Files.Free;
   end;
 end;
 

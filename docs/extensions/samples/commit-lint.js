@@ -13,7 +13,8 @@ Gittan.settings.define([
 
 Gittan.on("commit.before", function (p) {
   var subject = p.message.split("\n")[0].trim();
-  var max = Number(Gittan.settings.get("max")) || 72;
+  var max = Number(Gittan.settings.get("max"));
+  if (!(max > 0)) max = 72;
   if (subject.length > max)
     return "The subject is " + subject.length + " characters; keep it under " + max + ".";
   var pattern = Gittan.settings.get("ticket");

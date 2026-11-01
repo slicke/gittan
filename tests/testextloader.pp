@@ -20,6 +20,7 @@ type
     FSettings: TGittanSettings;
     FLoader: TGittanExtLoader;
     procedure Put(const AName, AScript: string);
+    procedure EditModule;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -29,6 +30,7 @@ type
     procedure TestInvalidManifest;
     procedure TestPermissionAskedAndKept;
     procedure TestPermissionDenied;
+    procedure TestChangedWhileAsked;
     procedure TestReloadPicksUpEdits;
     procedure TestScriptErrorListed;
     procedure TestCaseTwinRefused;
@@ -151,6 +153,31 @@ begin
   Put('lib' + PathDelim + 'util.js', 'export const x = 2;');
   FLoader.Reload;
   AssertEquals('asked after a module''s edit', 5, FHost.Asked.Count);
+end;
+
+procedure TExtLoaderTest.EditModule;
+begin
+  Put('lib' + PathDelim + 'util.js', 'export const x = 2;');
+end;
+
+{ A module edited while the question is up runs with what was not shown:
+  the grant goes and the file is not loaded. }
+procedure TExtLoaderTest.TestChangedWhileAsked;
+var
+  Inf: TGittanExtInfo;
+begin
+  Put('net.js', '/* @name Net' + LineEnding + '@perms net */ Gittan.alert("net");');
+  Put('lib' + PathDelim + 'util.js', 'export const x = 1;');
+  FHost.PermissionAnswer := True;
+  FHost.OnAsk := @EditModule;
+  FLoader.Load;
+  FHost.OnAsk := nil;
+  AssertTrue('found', FLoader.FindInfo('net', Inf));
+  AssertFalse('not loaded', Inf.Loaded);
+  AssertFalse('no grant kept', FSettings.HasExtPerm('net'));
+  FLoader.Reload;
+  AssertEquals('asked again', 2, FHost.Asked.Count);
+  AssertTrue('loaded then', FLoader.FindInfo('net', Inf) and Inf.Loaded);
 end;
 
 procedure TExtLoaderTest.TestPermissionDenied;
