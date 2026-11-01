@@ -1,19 +1,4 @@
-(*
- * Trndi
- *
- * Copyright (c) Björn Lindh
- * GitHub: https://github.com/slicke/trndi
- *
- * This program is distributed under the terms of the GNU General Public License,
- * Version 3, as published by the Free Software Foundation. You may redistribute
- * and/or modify the software under the terms of this license.
- *
- * MODIFICATION NOTICE (GPLv3 Section 5):
- * - 2026-10-31: Brought into Gittan as gittan.ext.grant. The prompt goes
- *   through the extension host (gittan.ext.host) and the stored grants
- *   through Gittan's settings (gittan.settings) instead of Trndi's dialogs
- *   and TrndiNative.
- *)
+{ Ported from Trndi (https://github.com/slicke/trndi), GPL-3.0. }
 
 unit gittan.ext.grant;
 
