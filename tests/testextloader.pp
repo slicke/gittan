@@ -32,6 +32,7 @@ type
     procedure TestReloadPicksUpEdits;
     procedure TestScriptErrorListed;
     procedure TestCaseTwinRefused;
+    procedure TestNameRefused;
   end;
 
 implementation
@@ -216,6 +217,35 @@ begin
   AssertEquals('one context', 1, TGittanExtEngine.Instance.ExtensionCount);
   AssertEquals('one run', 1, FHost.Alerts.Count);
   AssertEquals('the twin reported', Files - 1, FHost.Errors.Count);
+end;
+
+{ A name that cannot be a key of gittan.ini: a = splits it, a ; makes
+  it a comment. One with ] is fine, since TIniFile takes a section's
+  name to the last ]. }
+procedure TExtLoaderTest.TestNameRefused;
+var
+  Inf: TGittanExtInfo;
+begin
+  Put('a=b.js', '/* @name Eq */ Gittan.alert("eq");');
+  Put(';c.js', '/* @name Semi */ Gittan.alert("semi");');
+  Put('d]e.js', '/* @name Bracket */ Gittan.alert("bracket");');
+  FLoader.Load;
+  AssertTrue('= listed', FLoader.FindInfo('a=b', Inf));
+  AssertFalse('= not loaded', Inf.Loaded);
+  AssertTrue('says why: ' + Inf.Error, Pos('Rename the file', Inf.Error) > 0);
+  AssertTrue('; listed', FLoader.FindInfo(';c', Inf));
+  AssertFalse('; not loaded', Inf.Loaded);
+  AssertTrue('] listed', FLoader.FindInfo('d]e', Inf));
+  AssertTrue('] loaded', Inf.Loaded);
+  AssertEquals('only that one ran', 'bracket', FHost.Alerts.CommaText);
+  AssertEquals('two reported', 2, FHost.Errors.Count);
+  FSettings.SetExtValue('d]e', 'k', 'v');
+  FSettings.SetExtEnabled('d]e', False);
+  FSettings.Save;
+  FSettings.SetExtValue('d]e', 'k', '');
+  FSettings.Load;
+  AssertEquals('its value through the file', 'v', FSettings.ExtValue('d]e', 'k'));
+  AssertFalse('turned off through the file', FSettings.ExtEnabled('d]e'));
 end;
 
 initialization

@@ -356,6 +356,9 @@ type
     FExtMenu: TMenuItem;
     { A rebuild of the Extensions menu is queued (QueueRebuildExtMenu). }
     FExtMenuQueued: boolean;
+    { The extensions' cards changed and the view is to show it
+      (QueueExtCards). }
+    FExtCardsQueued: boolean;
     FExtOpening: boolean;
     FStatus: TGittanStatusBar;
     {** What the status bar's transport buttons do now. }
@@ -1740,11 +1743,17 @@ type
     function ExtContextJson(AItem: TMenuItem): string;
     procedure ExtCommandClick(Sender: TObject);
     function ExtFire(const AEvent: string; AJson: TJSONObject): boolean;
+    { Whether an extension listens to AEvent: asked before a payload that
+      costs is built (a snapshot's JSON, a git run), since the arguments
+      of ExtFire are built before it can tell. }
+    function ExtListens(const AEvent: string): boolean;
     procedure ExtEmit(const AEvent: string; AJson: TJSONObject);
     procedure MenuExtReloadClick(Sender: TObject);
     procedure MenuExtFolderClick(Sender: TObject);
     procedure MenuExtSettingsClick(Sender: TObject);
     procedure RebuildExtMenuAsync(Data: PtrInt);
+    procedure QueueExtCards;
+    procedure ExtCardsAsync(Data: PtrInt);
     procedure ExtReloadForSettings(out AInfos: TGittanExtInfos;
       out ADefs: TGittanExtSettingDefs);
     procedure FilePopupPopup(Sender: TObject);
@@ -6968,7 +6977,8 @@ begin
   if Snap.Ok then
   begin
     ExtEmit('repo.opened', TJSONObject.Create(['branch', Snap.Branch, 'head', Snap.Head]));
-    ExtEmit('repo.changed', SnapshotJson(Snap));
+    if ExtListens('repo.changed') then
+      ExtEmit('repo.changed', SnapshotJson(Snap));
   end;
   if not Snap.Ok then
     ShowError(FLoadError)
@@ -7194,7 +7204,7 @@ begin
   UpdateBranchItems;
   UpdateStashItems;
   CheckLfs;
-  if ASnap.Ok and not FExtOpening then
+  if ASnap.Ok and not FExtOpening and ExtListens('repo.changed') then
     ExtEmit('repo.changed', SnapshotJson(ASnap));
 end;
 

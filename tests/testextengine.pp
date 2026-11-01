@@ -284,6 +284,8 @@ begin
     'Gittan.on("commit.before", function (p) { ' +
     'if (p.message.length > 10) return "Subject too long: " + p.message.length; });'));
   AssertEquals('one listener', 1, FEngine.Registry.ListenerCount);
+  AssertTrue('listened to', FEngine.Registry.HasListener('commit.before'));
+  AssertFalse('another not', FEngine.Registry.HasListener('commit.after'));
   AssertTrue('short goes', FEngine.Fire('commit.before', '{"message": "short"}', Msg));
   AssertEquals('no message', '', Msg);
   AssertFalse('long is stopped', FEngine.Fire('commit.before',

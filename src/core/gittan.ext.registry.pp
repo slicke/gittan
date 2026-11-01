@@ -79,6 +79,9 @@ type
     function Listener(AIndex: integer): TGittanExtListener;
     {** The listeners of AEvent, in the order added. }
     function ListenersOf(const AEvent: string): TGittanExtListeners;
+    {** Whether AEvent has a listener: a caller asks before it builds a
+      payload that costs (a snapshot, a git run). }
+    function HasListener(const AEvent: string): boolean;
     {** Keeps a declared setting, replacing one of the same key. }
     procedure AddSetting(const ADef: TGittanExtSettingDef);
     function SettingsOf(const AExtId: string): TGittanExtSettingDefs;
@@ -290,6 +293,16 @@ begin
       Result[n] := FListeners[i];
       Inc(n);
     end;
+end;
+
+function TGittanExtRegistry.HasListener(const AEvent: string): boolean;
+var
+  i: integer;
+begin
+  for i := 0 to High(FListeners) do
+    if FListeners[i].Event = AEvent then
+      Exit(True);
+  Result := False;
 end;
 
 procedure TGittanExtRegistry.AddSetting(const ADef: TGittanExtSettingDef);

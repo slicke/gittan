@@ -146,9 +146,9 @@ var
 begin
   Result := True;
   try
-    Eng := TGittanExtEngine.Existing;
-    if (Eng = nil) or (Eng.Registry.ListenerCount = 0) then
+    if not ExtListens(AEvent) then
       Exit;
+    Eng := TGittanExtEngine.Existing;
     AJson.Add('repo', FRepo.Root);
     Result := Eng.Fire(AEvent, AJson.AsJSON, Msg);
     if not Result then
@@ -160,6 +160,14 @@ begin
   finally
     AJson.Free;
   end;
+end;
+
+function TRepoFrame.ExtListens(const AEvent: string): boolean;
+var
+  Eng: TGittanExtEngine;
+begin
+  Eng := TGittanExtEngine.Existing;
+  Result := (Eng <> nil) and Eng.Registry.HasListener(AEvent);
 end;
 
 procedure TRepoFrame.ExtEmit(const AEvent: string; AJson: TJSONObject);
@@ -226,13 +234,30 @@ begin
   OpenSettings(pgExtensions);
 end;
 
+{ The change view shows the cards once the script that added or
+  cleared them has run: a linter's loop of addCard would otherwise lay
+  the view out again for each. }
+procedure TRepoFrame.QueueExtCards;
+begin
+  if FExtCardsQueued then
+    Exit;
+  FExtCardsQueued := True;
+  Application.QueueAsyncCall(@ExtCardsAsync, 0);
+end;
+
+procedure TRepoFrame.ExtCardsAsync(Data: PtrInt);
+begin
+  FExtCardsQueued := False;
+  CollectShownThreads;
+  FileTree.Invalidate;
+  RebuildIfChanges;
+end;
+
 procedure TRepoFrame.ExtAddCard(const ACard: TGittanReviewThread);
 begin
   SetLength(FExtThreads, Length(FExtThreads) + 1);
   FExtThreads[High(FExtThreads)] := ACard;
-  CollectShownThreads;
-  FileTree.Invalidate;
-  RebuildIfChanges;
+  QueueExtCards;
 end;
 
 procedure TRepoFrame.ExtClearCards(const AExtId: string);
@@ -255,9 +280,7 @@ begin
   if Length(Kept) = Length(FExtThreads) then
     Exit;
   FExtThreads := Kept;
-  CollectShownThreads;
-  FileTree.Invalidate;
-  RebuildIfChanges;
+  QueueExtCards;
 end;
 
 procedure TRepoFrame.ExtSetStatus(const AText: string; ASeconds: integer);
