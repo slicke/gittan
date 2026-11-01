@@ -1988,6 +1988,11 @@ begin
     for i := 0 to High(AEnv) do
       P.Environment.Add(AEnv[i]);
     P.Options := [poNoConsole, poUsePipes];
+    { Windows makes the pipes this size (TProcess's 1 KB otherwise), and
+      as WaitForGit waits on the process, not the pipe, a tool writing
+      a megabyte (git cat-file --batch-check) went a kilobyte for every
+      wait, ten seconds in all; Unix leaves its own. }
+    P.PipeBufferSize := 64 * 1024;
     try
       P.Execute;
     except
