@@ -46,6 +46,7 @@ type
     procedure TestRecentAndCommit;
     procedure TestBranchesTagsRemotes;
     procedure TestFileTextAndDiff;
+    procedure TestAsyncReads;
     procedure TestGitRun;
     procedure TestExecRun;
     procedure TestExecWithoutData;
@@ -272,6 +273,33 @@ begin
   end;
   AssertEquals('outside the repository', 'undefined',
     EvalIn(Info^.Ctx, 'String(Gittan.repo.fileText("../outside.txt"))'));
+end;
+
+{ The same reads on the promise thread, for a long file's blame or diff
+  that would hold the window. }
+procedure TExtApiTest.TestAsyncReads;
+var
+  Info: PExtContextInfo;
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  try
+    Lines.Text := 'one' + LineEnding + 'two' + LineEnding + 'three' + LineEnding;
+    Lines.SaveToFile(IncludeTrailingPathDelimiter(FRepoDir) + 'a.txt');
+  finally
+    Lines.Free;
+  end;
+  Info := Load('async', 'Promise.all([Gittan.repo.diffAsync("a.txt"), Gittan.repo.diffAsync(),' +
+    'Gittan.repo.blameAsync("a.txt", "HEAD"), Gittan.repo.fileTextAsync("a.txt", "HEAD"),' +
+    'Gittan.repo.fileTextAsync("../outside.txt"), Gittan.repo.blameAsync("nope.txt")])' +
+    '.then(function (r) { globalThis.r = r; globalThis.done = true; });', AllPerms);
+  WaitFor(Info^.Ctx, 'globalThis.done');
+  AssertEquals('the file diff', 'true', EvalIn(Info^.Ctx, 'String(r[0].indexOf("+three") >= 0)'));
+  AssertEquals('the whole diff', 'true', EvalIn(Info^.Ctx, 'String(r[1].indexOf("+three") >= 0)'));
+  AssertEquals('the blame', 'true', EvalIn(Info^.Ctx, 'String(r[2].indexOf("summary first") >= 0)'));
+  AssertEquals('the text in HEAD', 'one,two', EvalIn(Info^.Ctx, 'r[3].trim().split(/\r?\n/).join(",")'));
+  AssertEquals('outside the repository', 'undefined', EvalIn(Info^.Ctx, 'String(r[4])'));
+  AssertEquals('a failed blame', 'undefined', EvalIn(Info^.Ctx, 'String(r[5])'));
 end;
 
 procedure TExtApiTest.TestGitRun;

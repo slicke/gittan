@@ -63,6 +63,8 @@ type
       const params: JSParameters; out res: JSValueVal): boolean;
     function HttpRequestCb(const ctx: PJSContext; const func: string;
       const params: JSParameters; out res: JSValueVal): boolean;
+    function RepoRead(const ctx: PJSContext; const func: string;
+      const params: JSParameters; out res: JSValueVal): boolean;
   end;
 
 var
@@ -366,6 +368,21 @@ begin
     Exit;
   if Repo.Blame(Arg(ctx, argc, argv, 1), Arg(ctx, argc, argv, 2), Output) then
     ReturnString(res, ctx, Output);
+end;
+
+{ What the comparison of the repository at a root is, for repoRead's
+  thread, which reads it in a repository of its own: root, git folder,
+  Base, whole tree, whitespace. }
+procedure JSRepoState(res: PJSValue; ctx: JSContext; this_val: PJSValue;
+  argc: integer; argv: PJSValues; magic: integer);
+var
+  Repo: TGittanRepo;
+begin
+  Repo := RepoArg(res, ctx, argc, argv);
+  if Repo = nil then
+    Exit;
+  ReturnJson(res, ctx, TJSONObject.Create(['root', Repo.Root, 'gitDir', Repo.GitDir,
+    'base', Repo.Base, 'whole', Repo.WholeTree, 'ws', Repo.IgnoreWhitespace]));
 end;
 
 procedure JSCommit(res: PJSValue; ctx: JSContext; this_val: PJSValue;
@@ -891,6 +908,87 @@ begin
   Result := True;
 end;
 
+{ Gittan.repo.diffAsync, blameAsync and fileTextAsync on the promise
+  thread: params are the state JSRepoState gave, the kind, the path and the
+  ref. A repository of its own with that comparison, so nothing of the
+  window's is touched; {"value": text} or {"value": null} for nothing. }
+function TGittanExtApi.RepoRead(const ctx: PJSContext; const func: string;
+  const params: JSParameters; out res: JSValueVal): boolean;
+var
+  State: TJSONData;
+  O, Envelope: TJSONObject;
+  Repo: TGittanRepo;
+  Kind, Path, Ref, Text: string;
+  Data: RawByteString;
+  Lines: TStringList;
+  Got: boolean;
+begin
+  Result := False;
+  try
+    State := GetJSON(ParamStr(params, 0));
+  except
+    State := nil;
+  end;
+  if not (State is TJSONObject) then
+  begin
+    State.Free;
+    res := StringToValueVal('Gittan.repo: no repository');
+    Exit;
+  end;
+  Kind := ParamStr(params, 1);
+  Path := ParamStr(params, 2);
+  Ref := ParamStr(params, 3);
+  O := TJSONObject(State);
+  Repo := TGittanRepo.Create;
+  try
+    Repo.OpenAt(O.Get('root', ''), O.Get('gitDir', ''));
+    Repo.Base := O.Get('base', '');
+    Repo.WholeTree := O.Get('whole', False);
+    Repo.IgnoreWhitespace := O.Get('ws', False);
+    Got := False;
+    Text := '';
+    if Kind = 'diff' then
+    begin
+      if Path = '' then
+      begin
+        Text := Repo.Diff;
+        Got := True;
+      end
+      else
+      begin
+        Lines := TStringList.Create;
+        try
+          Got := Repo.FileChanges(Path, Lines);
+          Text := Lines.Text;
+        finally
+          Lines.Free;
+        end;
+      end;
+    end
+    else if Kind = 'blame' then
+      Got := Repo.Blame(Path, Ref, Text)
+    else if Kind = 'fileText' then
+    begin
+      Got := InsideRepo(Repo, Path) and Repo.FileBlob(Path, Ref, Data);
+      Text := string(Data);
+    end;
+    Envelope := TJSONObject.Create;
+    try
+      if Got then
+        Envelope.Add('value', Text)
+      else
+        Envelope.Add('value', TJSONNull.Create);
+      res := StringToValueVal(Envelope.AsJSON);
+    finally
+      Envelope.Free;
+    end;
+    Result := True;
+  finally
+    Repo.Free;
+    State.Free;
+  end;
+end;
+
 function TGittanExtApi.HttpRequestCb(const ctx: PJSContext; const func: string;
   const params: JSParameters; out res: JSValueVal): boolean;
 var
@@ -1051,6 +1149,19 @@ const
     '    remotes: function (o) { return J(t._remotes(R(o))); },' + LineEnding +
     '    recent: function (limit, o) { return J(t._recent(R(o), limit === undefined ? 10 : Number(limit))); }' + LineEnding +
     '  };' + LineEnding +
+    '  if (typeof repoRead === "function") {' + LineEnding +
+    '    var repoReadF = globalThis.repoRead;' + LineEnding +
+    '    delete globalThis.repoRead;' + LineEnding +
+    '    var RR = function (kind, path, ref, o) {' + LineEnding +
+    '      var s = t._repoState(R(o));' + LineEnding +
+    '      if (s === undefined) return Promise.resolve(undefined);' + LineEnding +
+    '      return repoReadF(s, kind, path === undefined ? "" : String(path), ref === undefined ? "" : String(ref))' + LineEnding +
+    '        .then(function (r) { var v = JSON.parse(r).value; return v === null ? undefined : v; });' + LineEnding +
+    '    };' + LineEnding +
+    '    t.repo.diffAsync = function (path, o) { return RR("diff", path, "", o); };' + LineEnding +
+    '    t.repo.blameAsync = function (path, ref, o) { return RR("blame", path, ref, o); };' + LineEnding +
+    '    t.repo.fileTextAsync = function (path, ref, o) { return RR("fileText", path, ref, o); };' + LineEnding +
+    '  }' + LineEnding +
     '  if (typeof gitRun === "function") {' + LineEnding +
     '    var gitRunF = globalThis.gitRun, execRunF = globalThis.execRun;' + LineEnding +
     '    delete globalThis.gitRun; delete globalThis.execRun;' + LineEnding +
@@ -1113,6 +1224,7 @@ begin
     addClassFunctionIf(epData, '_diff', @JSDiff, 2);
     addClassFunctionIf(epData, '_fileText', @JSFileText, 3);
     addClassFunctionIf(epData, '_blame', @JSBlame, 3);
+    addClassFunctionIf(epData, '_repoState', @JSRepoState, 1);
     addClassFunctionIf(epData, '_commit', @JSCommit, 2);
     addClassFunctionIf(epData, '_branches', @JSBranches, 1);
     addClassFunctionIf(epData, '_tags', @JSTags, 1);
@@ -1130,12 +1242,13 @@ begin
     addClassFunctionIf(epUI, '_status', @JSStatus, 2);
     addClassFunctionIf(epUI, '_openFile', @JSOpenFile, 2);
     addClassFunctionIf(epUI, '_addCard', @JSAddCard, 1);
-    addClassFunctionIf(epUI, '_clearCards', @JSClearCards, 0);
+    addClassFunctionIf(epUI, '_clearCards', @JSClearCards, 1);
     { On the promise thread: strings in, JSON out, nothing of the
       window touched. }
     AddPromiseIf(epExec, 'gitRun', @Api.GitRun, 2, 3, True);
     AddPromiseIf(epExec, 'execRun', @Api.ExecRun, 2, 4, True);
     AddPromiseIf(epNet, 'httpRequest', @Api.HttpRequestCb, 4, 5, True);
+    AddPromiseIf(epData, 'repoRead', @Api.RepoRead, 4, 4, True);
     if CanRegister(epNet) then
       ExecuteInCurrent(FETCH_SHIM, '<fetch shim>');
     { The id and the permissions go into string literals: the id is a

@@ -462,7 +462,9 @@ const
       pass and only a runaway is ever cut short.
       The time is looked at between jobs only: a job is not cut short by it,
       and a slow synchronous native in one (a blame of a long file) runs to its
-      end; the watchdog's interrupt is what stops a job that loops. }
+      end, which is why the repository's slow reads have promise twins
+      (Gittan.repo.blameAsync and the others); the watchdog's interrupt is
+      what stops a job that loops. }
 JS_PUMP_MAX_JOBS = 4096;
 JS_PUMP_MAX_MS = 50;
 

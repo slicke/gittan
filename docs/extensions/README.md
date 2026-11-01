@@ -57,6 +57,12 @@ Gittan.repo.recent(5).forEach(function (c) { console.log(c.short, c.subject); })
 
 These need `data`. Every call takes the repository shown; pass `{repo: "/path/to/other"}` as the last argument for another tab's.
 
+The calls wait for git, and Gittan's window waits with them. For a file that may be long, `diffAsync`, `blameAsync` and `fileTextAsync` take the same arguments and give a promise, with git run in a thread of its own:
+
+```js
+Gittan.repo.blameAsync("src/big.pp").then(function (text) { if (text !== undefined) { /* porcelain blame */ } });
+```
+
 ## The window
 
 ```js

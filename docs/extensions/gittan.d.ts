@@ -26,6 +26,10 @@ declare namespace Gittan {
     diff(path?: string, o?: RepoOptions): string | undefined;
     fileText(path: string, ref?: string, o?: RepoOptions): string | undefined;
     blame(path: string, ref?: string, o?: RepoOptions): string | undefined;
+    /** diff, blame and fileText run by git in a thread of their own, for a long file that would hold the window. */
+    diffAsync(path?: string, o?: RepoOptions): Promise<string | undefined>;
+    blameAsync(path: string, ref?: string, o?: RepoOptions): Promise<string | undefined>;
+    fileTextAsync(path: string, ref?: string, o?: RepoOptions): Promise<string | undefined>;
     commit(hash: string, o?: RepoOptions): (Commit & { body: string }) | undefined;
     branches(o?: RepoOptions): { local: string[]; remote: string[] } | undefined;
     tags(o?: RepoOptions): Tag[] | undefined;
