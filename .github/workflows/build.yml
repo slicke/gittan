@@ -110,14 +110,14 @@ jobs:
             runner: ubuntu-latest
           - name: macos-arm64
             os_target: macos
-            runner: macos-14
+            runner: macos-26
             dmg: Gittan-macos-silicon.dmg
           # GitHub's Intel macOS runners are going away, so the Intel build is
           # made on Apple Silicon: the FPC installer has ppcx64 and its units,
           # and `make CPU=x86_64` passes --cpu to lazbuild.
           - name: macos-x64
             os_target: macos
-            runner: macos-14
+            runner: macos-26
             cpu: x86_64
             dmg: Gittan-macos-intel.dmg
           - name: windows-x64
