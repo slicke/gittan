@@ -300,7 +300,11 @@ end;
   git cat-file --batch-check writes as it reads (a megabyte of answers
   to a hundred kilobytes of names, which filled both pipes when the
   input was written first), and git --version never reads it, which
-  breaks the pipe without ending the tests. }
+  breaks the pipe without ending the tests. Built with FPC 3.3.1 (trunk,
+  as fpcupdeluxe makes it) it times out: there TProcess.CloseInput
+  closes nothing once Input has been used, so the tools that read to
+  the end never get it (https://gitlab.com/freepascal.org/fpc/source/-/issues/41845,
+  open as of 2026-11-01); 3.2.x, which CI and the releases use, closes it. }
 procedure TExtApiTest.TestRunInput;
 var
   Info: PExtContextInfo;
