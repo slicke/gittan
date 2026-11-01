@@ -50,6 +50,8 @@ end;
 
 procedure TRepoFrame.StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode;
   const AArg, ARemote: string);
+var
+  Remote, Ref: string;
 begin
   if (FRepo.Root = '') or (FRemoteJob <> nil) or (FCommitJob <> nil) then
     Exit;
@@ -71,6 +73,26 @@ begin
     FStatus.ShowBusy(rsWaitingForFetch, HintFetch);
     Exit;
   end;
+  { An extension may stop a push or a pull (push.before, pull.before). }
+  if (AKind in [rkPush, rkForcePush, rkPushBranch, rkPushTag]) and
+    ExtListens('push.before') then
+  begin
+    Remote := ARemote;
+    Ref := AArg;
+    { A plain push goes to the upstream, else to the remote it is set to. }
+    if (AKind in [rkPush, rkForcePush]) and (Remote = '') then
+      if not FRepo.SplitRemoteRef(FRepo.Upstream(FBranch), Remote, Ref) then
+      begin
+        Remote := FRepo.RemoteFor('');
+        Ref := FBranch;
+      end;
+    if not ExtFire('push.before', TJSONObject.Create(['branch', FBranch, 'remote', Remote,
+      'ref', Ref, 'kind', ExtRemoteKind(AKind)])) then
+      Exit;
+  end;
+  if (AKind = rkPull) and not ExtFire('pull.before', TJSONObject.Create(['branch', FBranch,
+      'mode', ExtPullMode(AMode)])) then
+    Exit;
   FRemoteAhead := FAhead;
   { What a pull brings in is counted from here when it is done. }
   if AKind = rkPull then
@@ -237,6 +259,11 @@ begin
   RefreshRepository;
   UpdateRemoteItems;
   UpdateCommitState;
+  if Job.Kind in [rkPush, rkForcePush, rkPushBranch, rkPushTag] then
+    ExtEmit('push.after', TJSONObject.Create(['ok', Job.Ok, 'error', Job.Error,
+      'kind', ExtRemoteKind(Job.Kind)]))
+  else if Job.Kind = rkPull then
+    ExtEmit('pull.after', TJSONObject.Create(['ok', Job.Ok, 'error', Job.Error]));
   if Job.Kind = rkFetchPull then
   begin
     PullFetchDone(Job);

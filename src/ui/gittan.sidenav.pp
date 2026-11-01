@@ -50,7 +50,7 @@ type
     settings themselves, a sparkle for its AI page and an i in a circle
     for its About page. }
   TGittanNavIcon = (niHome, niGraph, niRepository, niCommands, niFiles, niPull, niForge,
-    niClock, niEditor, niTools, niAI, niAbout);
+    niClock, niEditor, niTools, niAI, niAbout, niExtensions);
 
   {** A click on a row, with its index. }
   TGittanNavPickEvent = procedure(Sender: TObject; AIndex: integer) of object;
@@ -599,6 +599,17 @@ begin
       Canvas.Ellipse(X + ASize - 5, Mid - 2, X + ASize, Mid + 3);
       Canvas.Ellipse(X + 2, Eave - 2, X + 7, Eave + 3);
       Canvas.Brush.Style := bsClear;
+    end;
+    niExtensions:
+    begin
+      { A plug: its body with two prongs out of the top, and the cord
+        from the bottom. }
+      Mid := X + ASize div 2;
+      Eave := Y + ASize * 2 div 5;
+      Canvas.Rectangle(X + 1, Eave, X + ASize, Y + ASize * 3 div 4 + 1);
+      Canvas.Line(X + ASize div 3, Y, X + ASize div 3, Eave);
+      Canvas.Line(X + ASize * 2 div 3, Y, X + ASize * 2 div 3, Eave);
+      Canvas.Line(Mid, Y + ASize * 3 div 4, Mid, Y + ASize + 1);
     end;
     niAI:
     begin

@@ -10,7 +10,7 @@ unit gittan.settings;
 interface
 
 uses
-  Classes, SysUtils;
+  Classes, SysUtils, IniFiles;
 
 const
   {** How many repositories File > Open Recent lists. }
@@ -37,6 +37,10 @@ const
   than a native point, so 9 there is what Xcode and Terminal call 12. }
 function DefaultFontSize(AHeight: integer): integer;
 
+{** The folder the ini file lives in: the user's configuration folder,
+  named Gittan whatever the application's title says. }
+function ConfigDir: string;
+
 type
 
   { TGittanSettings }
@@ -52,7 +56,14 @@ type
     { What the forge view keeps per forge (ForgeValue), as
       "Forge" + ForgeValueSep + "Key" = value. }
     FForgeValues: TStringList;
+    { What the extensions keep (ExtEnabled, ExtPerm, ExtValue), as
+      "Section" + ForgeValueSep + "Key" = value: the section Extensions
+      for the ids turned off, ExtPerm:<id> for a granted permission set
+      and ExtValues:<id> for an extension's own values. }
+    FExtValues: TStringList;
     FFileName: string;
+    procedure LoadExt(AIni: TIniFile);
+    procedure SaveExt(AIni: TIniFile);
   public
     {** The tab shown when the window closed, an index into Tabs. }
     ActiveTab: integer;
@@ -179,6 +190,32 @@ type
       value is not there. }
     function ForgeValue(const AForge, AKey: string): string;
     procedure SetForgeValue(const AForge, AKey, AValue: string);
+    {** The folder the extensions (gittan.ext.loader) are read from:
+      extensions beside the ini file. }
+    function ExtensionsDir: string;
+    {** Whether the extension AId (ExtIdFromPath, its file's name in
+      lower case) loads; on unless turned off in the settings dialog.
+      Section Extensions, the id as the key, 0 for off. }
+    function ExtEnabled(const AId: string): boolean;
+    procedure SetExtEnabled(const AId: string; AValue: boolean);
+    {** What was granted to the extension AId (gittan.ext.grant): under
+      AKey Hash (the SHA-256 of the file approved), Granted (the
+      permissions, as PermSetToCSV) and Author; empty for none. Section
+      ExtPerm:<id>. ClearExtPerm forgets it, so the next load asks
+      again. }
+    function ExtPerm(const AId, AKey: string): string;
+    procedure SetExtPerm(const AId, AKey, AValue: string);
+    procedure ClearExtPerm(const AId: string);
+    {** Whether a grant is stored for AId. }
+    function HasExtPerm(const AId: string): boolean;
+    {** An extension's own value (Gittan.storage, its settings page),
+      section ExtValues:<id>; empty for none, and an empty value set
+      drops the key. A value may hold line ends: the file gets them
+      escaped. The key must pass ValidExtKey, or SetExtValue raises
+      EArgumentException. ExtValueKeys lists the keys set. }
+    function ExtValue(const AId, AKey: string): string;
+    procedure SetExtValue(const AId, AKey, AValue: string);
+    procedure ExtValueKeys(const AId: string; AKeys: TStrings);
     {** AFileName names the ini file; empty picks gittan.ini in the
       user's configuration folder. }
     constructor Create(const AFileName: string = '');
@@ -215,10 +252,22 @@ type
     property FileName: string read FFileName;
   end;
 
+{** Whether AKey can be the key of an extension's value in the ini
+  file and in the lists that hold them: not empty, one line with no
+  control character, no "=" (the pair's separator), not starting with
+  ";" (a comment) or "[" (a section), and no space at an edge, which
+  TIniFile trims. Gittan.storage, Gittan.settings.define and the loader
+  refuse the rest, so a key cannot write a line of its own in
+  gittan.ini. }
+function ValidExtKey(const AKey: string): boolean;
+
+resourcestring
+  rsBadExtKey = 'The key "%s" cannot be stored: a key is one line without "=", not starting with ";" or "[", and no space at its edges.';
+
 implementation
 
 uses
-  {$IFDEF UNIX}BaseUnix,{$ENDIF} Math, IniFiles, md5, gittan.textfile, gittan.forge;
+  {$IFDEF UNIX}BaseUnix,{$ENDIF} Math, md5, gittan.textfile, gittan.forge;
 
 const
   SecWindow = 'Window';
@@ -240,6 +289,11 @@ const
 
   SecHosting = 'Hosting';
   ConfigFolder = 'Gittan';
+  { The extensions: the ids turned off, and a section each for what an
+    extension was granted and what it keeps. }
+  SecExtensions = 'Extensions';
+  ExtPermPrefix = 'ExtPerm:';
+  ExtValuesPrefix = 'ExtValues:';
 
 {** The folder the ini file lives in. GetAppConfigDir names it after
   ApplicationName, which the LCL takes from Application.Title, a long name
@@ -282,13 +336,27 @@ begin
     Result := '"' + Result + '"';
 end;
 
-{ An ini value is one line: a line end is written as \n, and so a
-  backslash as \\; UnescapeC reads it. }
+{ An ini value is one line: a line feed is written as \n, a carriage
+  return (TStringList splits a line at a bare one too) as \r, and so a
+  backslash as \\; UnescapeC reads it, and the text comes back as it
+  was, CRLF included. }
 function EscapeLines(const AText: string): string;
 begin
   Result := StringReplace(AText, '\', '\\', [rfReplaceAll]);
-  Result := StringReplace(Result, #13#10, #10, [rfReplaceAll]);
   Result := StringReplace(Result, #10, '\n', [rfReplaceAll]);
+  Result := StringReplace(Result, #13, '\r', [rfReplaceAll]);
+end;
+
+function ValidExtKey(const AKey: string): boolean;
+var
+  c: char;
+begin
+  Result := (AKey <> '') and (AKey[1] > ' ') and (AKey[Length(AKey)] > ' ') and
+    (AKey[1] <> ';') and (AKey[1] <> '[');
+  if Result then
+    for c in AKey do
+      if (c < ' ') or (c = '=') then
+        Exit(False);
 end;
 
 { TGittanSettings }
@@ -306,6 +374,8 @@ begin
   FForgeClis.CaseSensitive := False;
   FForgeValues := TStringList.Create;
   FForgeValues.CaseSensitive := False;
+  FExtValues := TStringList.Create;
+  FExtValues.CaseSensitive := False;
   if AFileName <> '' then
     FFileName := AFileName
   else
@@ -325,6 +395,7 @@ end;
 
 destructor TGittanSettings.Destroy;
 begin
+  FExtValues.Free;
   FForgeValues.Free;
   FForgeClis.Free;
   FTrust.Free;
@@ -456,6 +527,7 @@ begin
         for Key in ForgeValueKeys do
           if Ini.ValueExists(Forge.Name, Key) then
             SetForgeValue(Forge.Name, Key, Ini.ReadString(Forge.Name, Key, ''));
+      LoadExt(Ini);
       { Earlier versions kept GitHub's filters as flags; each section
         that has no keys yet takes its own. }
       if not Ini.ValueExists(SecGitHub, 'MineFilters') then
@@ -639,12 +711,173 @@ begin
       Ini.EraseSection(SecTrust);
       for i := 0 to FTrust.Count - 1 do
         Ini.WriteString(SecTrust, FTrust.Names[i], FTrust.ValueFromIndex[i]);
+      SaveExt(Ini);
       Ini.UpdateFile;
     finally
       Ini.Free;
     end;
   except
     { Nothing to do; the next run starts with what was saved before. }
+  end;
+end;
+
+function TGittanSettings.ExtensionsDir: string;
+begin
+  Result := IncludeTrailingPathDelimiter(ExtractFilePath(FFileName)) + 'extensions';
+end;
+
+function TGittanSettings.ExtEnabled(const AId: string): boolean;
+begin
+  Result := FExtValues.Values[SecExtensions + ForgeValueSep + AId] <> '0';
+end;
+
+procedure TGittanSettings.SetExtEnabled(const AId: string; AValue: boolean);
+var
+  i: integer;
+begin
+  if AValue then
+  begin
+    i := FExtValues.IndexOfName(SecExtensions + ForgeValueSep + AId);
+    if i >= 0 then
+      FExtValues.Delete(i);
+  end
+  else
+    FExtValues.Values[SecExtensions + ForgeValueSep + AId] := '0';
+end;
+
+function TGittanSettings.ExtPerm(const AId, AKey: string): string;
+begin
+  Result := FExtValues.Values[ExtPermPrefix + AId + ForgeValueSep + AKey];
+end;
+
+procedure TGittanSettings.SetExtPerm(const AId, AKey, AValue: string);
+var
+  i: integer;
+begin
+  if AValue = '' then
+  begin
+    i := FExtValues.IndexOfName(ExtPermPrefix + AId + ForgeValueSep + AKey);
+    if i >= 0 then
+      FExtValues.Delete(i);
+  end
+  else
+    FExtValues.Values[ExtPermPrefix + AId + ForgeValueSep + AKey] := AValue;
+end;
+
+procedure TGittanSettings.ClearExtPerm(const AId: string);
+var
+  i: integer;
+  Prefix: string;
+begin
+  Prefix := LowerCase(ExtPermPrefix + AId + ForgeValueSep);
+  for i := FExtValues.Count - 1 downto 0 do
+    if Pos(Prefix, LowerCase(FExtValues.Names[i])) = 1 then
+      FExtValues.Delete(i);
+end;
+
+function TGittanSettings.HasExtPerm(const AId: string): boolean;
+begin
+  Result := ExtPerm(AId, 'Hash') <> '';
+end;
+
+function TGittanSettings.ExtValue(const AId, AKey: string): string;
+begin
+  Result := FExtValues.Values[ExtValuesPrefix + AId + ForgeValueSep + AKey];
+end;
+
+procedure TGittanSettings.SetExtValue(const AId, AKey, AValue: string);
+var
+  i: integer;
+begin
+  if not ValidExtKey(AKey) then
+    raise EArgumentException.CreateFmt(rsBadExtKey, [AKey]);
+  if AValue = '' then
+  begin
+    i := FExtValues.IndexOfName(ExtValuesPrefix + AId + ForgeValueSep + AKey);
+    if i >= 0 then
+      FExtValues.Delete(i);
+  end
+  else
+    FExtValues.Values[ExtValuesPrefix + AId + ForgeValueSep + AKey] := AValue;
+end;
+
+procedure TGittanSettings.ExtValueKeys(const AId: string; AKeys: TStrings);
+var
+  i: integer;
+  Prefix, Name: string;
+begin
+  Prefix := LowerCase(ExtValuesPrefix + AId + ForgeValueSep);
+  for i := 0 to FExtValues.Count - 1 do
+  begin
+    Name := FExtValues.Names[i];
+    if Pos(Prefix, LowerCase(Name)) = 1 then
+      AKeys.Add(Copy(Name, Length(Prefix) + 1, MaxInt));
+  end;
+end;
+
+{ The extensions' sections: Extensions, and ExtPerm:<id> and
+  ExtValues:<id> for each extension that has one. The values go through
+  ReadString, which takes KeepEdges' quotes off again, and UnescapeC for
+  the line ends SaveExt escaped: an extension's value is whatever it
+  stored, and written as it is a line end in it would start a line, a
+  key or a section, of the file's own. }
+function IsExtSection(const ASection: string): boolean;
+begin
+  Result := SameText(ASection, SecExtensions) or
+    (Pos(LowerCase(ExtPermPrefix), LowerCase(ASection)) = 1) or
+    (Pos(LowerCase(ExtValuesPrefix), LowerCase(ASection)) = 1);
+end;
+
+procedure TGittanSettings.LoadExt(AIni: TIniFile);
+var
+  Sections, Keys: TStringList;
+  Section, Key: string;
+begin
+  FExtValues.Clear;
+  Sections := TStringList.Create;
+  Keys := TStringList.Create;
+  try
+    AIni.ReadSections(Sections);
+    for Section in Sections do
+      if IsExtSection(Section) then
+      begin
+        Keys.Clear;
+        AIni.ReadSection(Section, Keys);
+        for Key in Keys do
+          if ValidExtKey(Key) then
+            FExtValues.Values[Section + ForgeValueSep + Key] :=
+              UnescapeC(AIni.ReadString(Section, Key, ''));
+      end;
+  finally
+    Keys.Free;
+    Sections.Free;
+  end;
+end;
+
+procedure TGittanSettings.SaveExt(AIni: TIniFile);
+var
+  Sections: TStringList;
+  Section, Name: string;
+  i: integer;
+begin
+  { Every section of theirs is written anew, so a key dropped goes from
+    the file too. }
+  Sections := TStringList.Create;
+  try
+    AIni.ReadSections(Sections);
+    for Section in Sections do
+      if IsExtSection(Section) then
+        AIni.EraseSection(Section);
+  finally
+    Sections.Free;
+  end;
+  for i := 0 to FExtValues.Count - 1 do
+  begin
+    Name := FExtValues.Names[i];
+    if FExtValues.ValueFromIndex[i] <> '' then
+      AIni.WriteString(Copy(Name, 1, Pos(ForgeValueSep, Name) - 1),
+        Copy(Name, Pos(ForgeValueSep, Name) + 1, MaxInt),
+        KeepEdges(EscapeLines(FExtValues.ValueFromIndex[i])));
   end;
 end;
 

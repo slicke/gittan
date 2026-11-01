@@ -876,6 +876,11 @@ begin
       BannerError(rsCommitFailed, Err);
       Exit;
     end;
+    { An extension may stop the commit (commit.before). }
+    if ExtListens('commit.before') and not ExtFire('commit.before',
+      TJSONObject.Create(['message', FCommitMemo.Text, 'paths', ListJson(Paths),
+      'amend', FCommitAmend.Checked])) then
+      Exit;
     Options := [];
     if FSignOff then
       Include(Options, coSignOff);
@@ -920,6 +925,11 @@ begin
       BannerError(rsCommitFailed, Err);
       Exit;
     end;
+    { An extension may stop a fixup commit as it may any other. }
+    if ExtListens('commit.before') and not ExtFire('commit.before',
+      TJSONObject.Create(['message', 'fixup! ' + ACommit.Subject, 'paths', ListJson(Paths),
+      'amend', False])) then
+      Exit;
     Options := [];
     if FSignOff then
       Include(Options, coSignOff);
@@ -976,12 +986,12 @@ begin
   MarkNews;
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+  Amended := FCommitAmend.Checked;
   if Job.Ok then
   begin
     Subject := FCommitMemo.Lines.Text;
     if FCommitMemo.Lines.Count > 0 then
       Subject := FCommitMemo.Lines[0];
-    Amended := FCommitAmend.Checked;
     if not Fixup then
     begin
       { commit.template may have changed since the repository opened. }
@@ -999,6 +1009,15 @@ begin
   end
   else
     FStatus.ShowMessage('', stNormal, 0);
+  if ExtListens('commit.after') then
+  begin
+    if Job.Ok then
+      ExtEmit('commit.after', TJSONObject.Create(['ok', True, 'error', '',
+        'id', Job.Id, 'amend', Amended]))
+    else
+      ExtEmit('commit.after', TJSONObject.Create(['ok', False, 'error', Job.Error, 'id', '',
+        'amend', Amended]));
+  end;
   { The history or time-lapse of a file the commit took is done with:
     the summary comes instead, as for the change view of one. }
   HistoryChanged := (FView = gvHistory) and (FHistoryPath <> '') and

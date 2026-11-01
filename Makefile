@@ -71,6 +71,73 @@ FPC ?= fpc
 TESTBIN := tests/gittantests
 TESTLIB := tests/lib$(if $(CPU),/$(CPU))
 
+# The extension engine (gittan.ext.quickjs) links quickjs-ng and its ABI
+# shim, prebuilt per target in externals/quickjs/prebuilt/<cpu>-<os>, the
+# folder Gittan.lpi's library path names ($(TargetCPU)-$(TargetOS); FPC says
+# aarch64 where uname says arm64). An executable finds them beside itself
+# (an rpath of @loader_path on macOS, $ORIGIN on Linux; Windows looks there
+# anyway), so the build copies them there: into the bundle's Contents/MacOS,
+# beside Gittan on Linux and Windows, and beside the test binary. The Linux
+# engine ships as libqjs.so.<version> alone; the SONAME links -lqjs resolves
+# through are not in git (a checkout onto NTFS flattens them), so qjs-links
+# makes them before a link and stage_qjs after a copy.
+ifeq ($(OS),Windows_NT)
+  QJS_OS := win64
+  QJS_HOST_CPU := x86_64
+  QJS_LIBS := libqjs.dll tqshim.dll
+  QJS_RPATH :=
+else ifeq ($(shell uname -s),Darwin)
+  QJS_OS := darwin
+  QJS_HOST_CPU := $(shell uname -m | sed s/arm64/aarch64/)
+  QJS_LIBS := libqjs.dylib libtqshim.dylib
+  QJS_RPATH := -k-rpath -k@loader_path
+else ifeq ($(shell uname -s),FreeBSD)
+  # FPC names the target x86_64-freebsd where uname -m says amd64.
+  QJS_OS := freebsd
+  QJS_HOST_CPU := $(shell uname -m | sed -e s/amd64/x86_64/ -e s/arm64/aarch64/)
+  QJS_LIBS := libqjs.so.[0-9]*.[0-9]*.[0-9]* libtqshim.so
+  QJS_RPATH := -k-rpath=\$$ORIGIN
+else ifeq ($(shell uname -s),Haiku)
+  # Haiku says BePC for 32-bit x86 and arm64 where FPC says i386 and aarch64.
+  QJS_OS := haiku
+  QJS_HOST_CPU := $(shell uname -m | sed -e s/BePC/i386/ -e s/arm64/aarch64/)
+  QJS_LIBS := libqjs.so.[0-9]*.[0-9]*.[0-9]* libtqshim.so
+  QJS_RPATH := -k-rpath=\$$ORIGIN
+else
+  QJS_OS := linux
+  QJS_HOST_CPU := $(shell uname -m)
+  QJS_LIBS := libqjs.so.[0-9]*.[0-9]*.[0-9]* libtqshim.so
+  QJS_RPATH := -k-rpath=\$$ORIGIN
+endif
+QJS_CPU := $(or $(CPU),$(QJS_HOST_CPU))
+QJS_DIR := externals/quickjs/prebuilt/$(QJS_CPU)-$(QJS_OS)
+
+# Where the executable finds the libraries: beside it in the project root,
+# and in the bundle's Contents/MacOS on macOS, whose Gittan is a link to
+# the root's but is loaded by its own path. The root's copies go in before
+# the link too: ld takes a library from the current folder before the
+# library path, so a stale copy there is what the executable would be
+# linked against.
+define stage_qjs_app
+	$(call stage_qjs,.)
+	@if [ -d "$(BUNDLE)/Contents/MacOS" ]; then :; else exit 0; fi
+	$(if $(filter darwin,$(QJS_OS)),$(call stage_qjs,$(BUNDLE)/Contents/MacOS))
+endef
+
+# Copies the two libraries into the folder $(1), making the Linux links.
+define stage_qjs
+	@if [ -d "$(QJS_DIR)" ]; then \
+	  mkdir -p "$(1)"; \
+	  cp -L $(addprefix $(QJS_DIR)/,$(QJS_LIBS)) "$(1)/" || exit 1; \
+	  real=$$(cd "$(1)" && ls libqjs.so.[0-9]*.[0-9]*.[0-9]* 2>/dev/null | head -1); \
+	  if [ -n "$$real" ]; then \
+	    (cd "$(1)" && ln -sf "$$real" libqjs.so.0 && ln -sf libqjs.so.0 libqjs.so); \
+	  fi; \
+	else \
+	  echo "warning: $(QJS_DIR) is missing; the extensions will not start" >&2; \
+	fi
+endef
+
 # Syntax highlighting. vendor/CudaText-lexers keeps each EControl lexer in a
 # subfolder of its own, but TecLexerList loads *.lcf from one flat folder, so
 # copy them all into $(LEXLIB) beside the executable. Rebuilt on every build;
@@ -161,17 +228,23 @@ help:
 	@echo "  clean     Remove lib/, $(LEXLIB)/, the test build and the binary"
 	@echo "Current: WIDGETSET=$(WIDGETSET) CPU=$(or $(CPU),native) LAZBUILD=$(LAZBUILD)"
 
-build: lexlib
+build: lexlib qjs-links
+	$(call stage_qjs,.)
 	"$(LAZBUILD)" $(LAZFLAGS) $(RELEASE_MODE) $(LPI)
 	$(bundle_icon)
+	$(stage_qjs_app)
 
-debug: lexlib
+debug: lexlib qjs-links
+	$(call stage_qjs,.)
 	"$(LAZBUILD)" $(LAZFLAGS) $(DEBUG_MODE) $(DEBUG_FLAGS) $(LPI)
 	$(bundle_icon)
+	$(stage_qjs_app)
 
-rebuild: lexlib
+rebuild: lexlib qjs-links
+	$(call stage_qjs,.)
 	"$(LAZBUILD)" -B $(LAZFLAGS) $(RELEASE_MODE) $(LPI)
 	$(bundle_icon)
+	$(stage_qjs_app)
 
 deps:
 	@set -e; for lpk in $(VENDOR_PACKAGES); do \
@@ -305,6 +378,10 @@ packages: build
 	  $(PKG_ROOT)/usr/share/applications $(PKG_ROOT)/usr/share/metainfo; \
 	install -m 755 Gittan $(PKG_ROOT)/usr/bin/gittan; \
 	cp -r $(LEXLIB) $(PKG_ROOT)/usr/share/gittan/lexlib; \
+	mkdir -p $(PKG_ROOT)/usr/lib/gittan $(PKG_ROOT)/usr/share/doc/gittan; \
+	install -m 644 $(QJS_DIR)/libqjs.so.[0-9]*.[0-9]*.[0-9]* $(PKG_ROOT)/usr/lib/gittan/libqjs.so.0; \
+	install -m 644 $(QJS_DIR)/libtqshim.so $(PKG_ROOT)/usr/lib/gittan/; \
+	install -m 644 externals/quickjs/LICENSE.quickjs-ng $(PKG_ROOT)/usr/share/doc/gittan/; \
 	install -m 644 dist/linux/$(DESKTOP_ID).desktop $(PKG_ROOT)/usr/share/applications/; \
 	install -m 644 dist/linux/$(DESKTOP_ID).metainfo.xml $(PKG_ROOT)/usr/share/metainfo/; \
 	$(call install_icons,$(PKG_ROOT)/usr/share)
@@ -319,10 +396,20 @@ version:
 run: build
 	"$(RUN_EXE)" $(RUN_ARGS)
 
-test:
+test: qjs-links
 	@mkdir -p $(TESTLIB)
-	$(FPC) $(if $(CPU),-P$(CPU)) -Mobjfpc -Sh -O1 -Fusrc/core -FU$(TESTLIB) -FEtests tests/gittantests.lpr
+	$(FPC) $(if $(CPU),-P$(CPU)) -Mobjfpc -Sh -O1 -Fusrc/core -FU$(TESTLIB) -FEtests -Fl$(QJS_DIR) $(QJS_RPATH) tests/gittantests.lpr
+	$(call stage_qjs,tests)
 	$(TESTBIN) --all --format=plain $(TEST_ARGS)
 
+.PHONY: qjs-links
+qjs-links:
+	@real=$$(cd "$(QJS_DIR)" 2>/dev/null && ls libqjs.so.[0-9]*.[0-9]*.[0-9]* 2>/dev/null | head -1); \
+	if [ -n "$$real" ]; then \
+	  (cd "$(QJS_DIR)" && ln -sf "$$real" libqjs.so.0 && ln -sf libqjs.so.0 libqjs.so); \
+	fi
+
 clean:
-	rm -rf lib $(LEXLIB) pkg Gittan Gittan.app Gittan.exe tests/lib $(TESTBIN) $(TESTBIN).exe
+	rm -rf lib $(LEXLIB) pkg Gittan Gittan.app Gittan.exe tests/lib $(TESTBIN) $(TESTBIN).exe \
+	  libqjs.* libtqshim.* tqshim.dll tests/libqjs.* tests/libtqshim.* tests/tqshim.dll \
+	  $(wildcard externals/quickjs/prebuilt/*/libqjs.so externals/quickjs/prebuilt/*/libqjs.so.0)

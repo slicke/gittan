@@ -1143,12 +1143,21 @@ function NvmNodeBin(const ANvmDir: string): string;
   version installed. Empty when none is. }
 function FnmNodeBin(const AFnmDir: string): string;
 
+{** Runs AExe in ADir with AArgs, the environment without ASkip's prefixes
+  ("NAME=") and with AEnv, and answers whether it started, with its
+  output, its error and its exit code in AStatus (see the implementation). }
+function RunTool(const AExe, ADir: string; const AArgs, ASkip, AEnv: array of string;
+  out AOutput, AError: string; out AStatus: integer;
+  AOnOutput: TGittanOutputEvent; const AInput: string = '';
+  ACancel: TGittanCancelEvent = nil): boolean;
+
 {** Runs a command line tool (AExe: a forge's, gh) in ADir with AArgs and
   AEnv ("NAME=value") added to the environment, and answers whether it
   exited with 0, with its standard output in AOutput and, on failure,
-  its message in AError (what it printed on both, as git's failures). }
+  its message in AError (what it printed on both, as git's failures).
+  AInput goes to its standard input. }
 function RunCli(const AExe, ADir: string; const AArgs, AEnv: array of string;
-  out AOutput, AError: string): boolean;
+  out AOutput, AError: string; const AInput: string = ''): boolean;
 
 {** Runs an AI agent's command line tool (AExe: claude, copilot) in ADir
   with AArgs and AInput on its standard input, and answers whether it
@@ -1261,10 +1270,12 @@ function RunGitIn(const ADir: string; const AArgs: array of string;
 {** RunGitIn with the variables AEnv ("NAME=value") set besides those
   Gittan always sets, and AOnOutput told of each piece git writes as it
   runs, on either stream. ACancel, when given, is asked as git runs, and
-  True ends it: false then, with no reason in AError. }
+  True ends it: false then, with no reason in AError. AInput goes to
+  git's standard input (git commit -F -, git apply). }
 function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
   out AOutput, AError: string; const AIndexFile: string = '';
-  AOnOutput: TGittanOutputEvent = nil; ACancel: TGittanCancelEvent = nil): boolean;
+  AOnOutput: TGittanOutputEvent = nil; ACancel: TGittanCancelEvent = nil;
+  const AInput: string = ''): boolean;
 
 {** The variables a command that goes to the network runs with in ADir
   besides Gittan's own: ssh in batch mode (see
@@ -1408,6 +1419,20 @@ begin
     Result[i] := envp[i];
     Inc(i);
   end;
+end;
+{$endif}
+
+{$ifdef windows}
+{ SysUtils.GetTempDir on Windows, through OnGetTempDir: FPC's own reads
+  TEMP with the GetEnvironmentVariable EnvironmentVariable describes, so
+  for a user named Björn it named a folder that is not there and every
+  temporary file (the commit's index, a stash's paths) failed. TEMP,
+  then TMP, as FPC's. }
+function UnicodeTempDir(AGlobal: boolean): string;
+begin
+  Result := EnvironmentVariable('TEMP');
+  if Result = '' then
+    Result := EnvironmentVariable('TMP');
 end;
 {$endif}
 
@@ -1862,7 +1887,10 @@ var
 begin
   if not AOutOpen and not AErrOpen then
   begin
-    P.WaitOnExit;
+    { With a timeout: WaitOnExit() keeps the exit code where Running and
+      this keep the raw wait status, so ExitStatus would be one or the
+      other as the tool ended (and RunTool's callers decode the raw). }
+    P.WaitOnExit(High(DWord));
     Exit;
   end;
   fpFD_ZERO(Fds);
@@ -1898,22 +1926,95 @@ begin
 end;
 {$endif}
 
+type
+  { Writes a tool's input on a thread of its own while RunTool reads its
+    output, then closes the input: written first, a tool that writes as
+    it reads (cat, git apply) filled its output pipe while Gittan was
+    still writing, and both waited for ever. A tool that ends before
+    reading it all breaks the pipe, which is no failure of the run; the
+    signal that would end Gittan then (SIGPIPE) is blocked on this
+    thread alone, so the tools Gittan starts keep theirs. }
+  TToolInputWriter = class(TThread)
+  private
+    FProcess: TProcess;
+    FInput: string;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(AProcess: TProcess; const AInput: string);
+  end;
+
+constructor TToolInputWriter.Create(AProcess: TProcess; const AInput: string);
+begin
+  FProcess := AProcess;
+  FInput := AInput;
+  inherited Create(False);
+end;
+
+procedure TToolInputWriter.Execute;
+{$ifdef unix}
+const
+  F_SETNOSIGPIPE = 73;
+var
+  Mask: TSigSet;
+{$endif}
+begin
+  {$ifdef unix}
+  FpSigEmptySet(Mask);
+  FpSigAddSet(Mask, SIGPIPE);
+  FpSigProcMask(SIG_BLOCK, @Mask, nil);
+  {$ifdef darwin}
+  FpFcntl(FProcess.Input.Handle, F_SETNOSIGPIPE, 1);
+  {$endif}
+  {$endif}
+  try
+    FProcess.Input.WriteBuffer(FInput[1], Length(FInput));
+  except
+  end;
+  FProcess.CloseInput;
+end;
+
 { Runs AExe in ADir with AArgs, in the environment with ASkip (prefixes
   like "NAME=") and the names of AEnv left out and AEnv added; false,
   with nothing read, when AExe cannot be started. Both pipes are read
   as the tool writes, so a long command's progress can be shown and
   neither pipe fills up and blocks it; what is left once it has ended
   is read after it. AStatus is its exit code. AInput is written to the
-  tool's input before its input is closed: a tool that reads all of it
-  before it writes (claude -p) takes any length, one that writes first
-  could block on a full pipe while it is written. ACancel, when given,
-  is asked on every pass of the reading loop, and True ends the tool. }
+  tool's input as it runs (TToolInputWriter), of any length, and the
+  input closed after it. ACancel, when given, is asked on every pass of
+  the reading loop, and True ends the tool. }
+{$ifdef unix}
+var
+  { Held by RunTool from its fork until its own pipe ends are closed on
+    exec (KeepPipesFromChildren). }
+  GSpawnLock: TRTLCriticalSection;
+
+{ A fork copies every descriptor the process has, and TProcess neither
+  closes them in the child nor marks its pipes close-on-exec, so a tool
+  started on another thread kept the end of this tool's input it
+  inherited: with git hash-object --stdin and git cat-file
+  --batch-check started at once, each held the other's input open and
+  both waited for an end that never came. Gittan's own ends are closed
+  on exec from here on, and set under GSpawnLock, so no other RunTool
+  forks before it. }
+procedure KeepPipesFromChildren(P: TProcess);
+const
+  { POSIX's value everywhere; BaseUnix names it on Darwin, not on Linux. }
+  CloseOnExec = 1;
+begin
+  FpFcntl(P.Input.Handle, F_SETFD, CloseOnExec);
+  FpFcntl(P.Output.Handle, F_SETFD, CloseOnExec);
+  FpFcntl(P.Stderr.Handle, F_SETFD, CloseOnExec);
+end;
+{$endif}
+
 function RunTool(const AExe, ADir: string; const AArgs, ASkip, AEnv: array of string;
   out AOutput, AError: string; out AStatus: integer;
   AOnOutput: TGittanOutputEvent; const AInput: string = '';
   ACancel: TGittanCancelEvent = nil): boolean;
 var
   P: TProcess;
+  Writer: TToolInputWriter;
   Skip: array of string;
   i: integer;
   Got, OutOpen, ErrOpen: boolean;
@@ -1921,6 +2022,7 @@ begin
   AOutput := '';
   AError := '';
   AStatus := -1;
+  Writer := nil;
   P := TProcess.Create(nil);
   try
     P.Executable := AExe;
@@ -1936,21 +2038,35 @@ begin
     for i := 0 to High(AEnv) do
       P.Environment.Add(AEnv[i]);
     P.Options := [poNoConsole, poUsePipes];
+    { Windows makes the pipes this size (TProcess's 1 KB otherwise), and
+      as WaitForGit waits on the process, not the pipe, a tool writing
+      a megabyte (git cat-file --batch-check) went a kilobyte for every
+      wait, ten seconds in all; Unix leaves its own. }
+    P.PipeBufferSize := 64 * 1024;
+    {$ifdef unix}
+    EnterCriticalSection(GSpawnLock);
+    {$endif}
     try
-      P.Execute;
-    except
-      Exit(False);
+      try
+        P.Execute;
+      except
+        Exit(False);
+      end;
+      {$ifdef unix}
+      KeepPipesFromChildren(P);
+      {$endif}
+    finally
+      {$ifdef unix}
+      LeaveCriticalSection(GSpawnLock);
+      {$endif}
     end;
     { The input ends once AInput is written (at once without one): a
       hook or an alias that reads it would otherwise wait for ever, and
-      the app with it. A tool that ended before reading it all breaks the
-      pipe, which is no failure of the run. }
+      the app with it. }
     if AInput <> '' then
-      try
-        P.Input.WriteBuffer(AInput[1], Length(AInput));
-      except
-      end;
-    P.CloseInput;
+      Writer := TToolInputWriter.Create(P, AInput)
+    else
+      P.CloseInput;
     OutOpen := True;
     ErrOpen := True;
     repeat
@@ -1974,6 +2090,13 @@ begin
     AStatus := P.ExitStatus;
     Result := True;
   finally
+    { The tool has ended (or was ended), so the writer's pipe is read or
+      broken and it returns. }
+    if Writer <> nil then
+    begin
+      Writer.WaitFor;
+      Writer.Free;
+    end;
     P.Free;
   end;
 end;
@@ -2001,7 +2124,8 @@ end;
 
 function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
   out AOutput, AError: string; const AIndexFile: string;
-  AOnOutput: TGittanOutputEvent; ACancel: TGittanCancelEvent): boolean;
+  AOnOutput: TGittanOutputEvent; ACancel: TGittanCancelEvent;
+  const AInput: string): boolean;
 var
   Args, Env: array of string;
   Status, i: integer;
@@ -2030,7 +2154,7 @@ begin
     SetLength(Env, i + 3);
   { The user's own GIT_INDEX_FILE goes even when none is given. }
   if not RunTool(GGitExe, ADir, Args, ['GIT_INDEX_FILE='], Env, AOutput, AError,
-    Status, AOnOutput, '', ACancel) then
+    Status, AOnOutput, AInput, ACancel) then
   begin
     if Assigned(ACancel) and ACancel() then
       AError := ''
@@ -2226,11 +2350,11 @@ begin
 end;
 
 function RunCli(const AExe, ADir: string; const AArgs, AEnv: array of string;
-  out AOutput, AError: string): boolean;
+  out AOutput, AError: string; const AInput: string): boolean;
 var
   Status: integer;
 begin
-  if not RunTool(AExe, ADir, AArgs, [], AEnv, AOutput, AError, Status, nil) then
+  if not RunTool(AExe, ADir, AArgs, [], AEnv, AOutput, AError, Status, nil, AInput) then
   begin
     AError := 'Could not run ' + AExe;
     Exit(False);
@@ -7137,10 +7261,19 @@ begin
 end;
 
 initialization
+  {$ifdef windows}
+  OnGetTempDir := @UnicodeTempDir;
+  {$endif}
+  {$ifdef unix}
+  InitCriticalSection(GSpawnLock);
+  {$endif}
   GToolPath := MakeToolPath;
   GOldGitExes := TStringList.Create;
   SetGitExe('');
 
 finalization
   GOldGitExes.Free;
+  {$ifdef unix}
+  DoneCriticalSection(GSpawnLock);
+  {$endif}
 end.

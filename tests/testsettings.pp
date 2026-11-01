@@ -32,7 +32,7 @@ type
     procedure TestOldGhPath;
     procedure TestOldForgeSwitch;
     procedure TestOldFilterFlags;
-
+    procedure TestExtensions;
   end;
 
 implementation
@@ -545,6 +545,88 @@ begin
     AssertTrue('the path is under GitHub', Ini.IndexOf('Cli=/opt/gh/bin/gh') >= 0);
   finally
     Ini.Free;
+  end;
+end;
+
+procedure TSettingsTest.TestExtensions;
+var
+  S: TGittanSettings;
+  Keys: TStringList;
+begin
+  S := TGittanSettings.Create(FFileName);
+  try
+    AssertTrue('on by default', S.ExtEnabled('hello'));
+    AssertFalse('no grant', S.HasExtPerm('hello'));
+    AssertEquals('no value', '', S.ExtValue('hello', 'url'));
+    AssertEquals('its folder', IncludeTrailingPathDelimiter(ExtractFilePath(FFileName)) +
+      'extensions', S.ExtensionsDir);
+    S.SetExtEnabled('hello', False);
+    S.SetExtEnabled('other', False);
+    S.SetExtEnabled('other', True);
+    S.SetExtPerm('hello', 'Hash', 'abc');
+    S.SetExtPerm('hello', 'Granted', 'net,exec');
+    S.SetExtPerm('hello', 'Author', '(c) Someone');
+    S.SetExtValue('hello', 'url', ' https://example.com/hook ');
+    S.SetExtValue('hello', 'json', '{"a": "b c"}');
+    S.SetExtValue('hello', 'gone', 'x');
+    S.SetExtValue('hello', 'gone', '');
+    { Line ends in a value: written as they are they would start lines
+      of the file's own, a section of Gittan's among them. }
+    S.SetExtValue('hello', 'lines', 'a' + #10 + '[Trust]' + #13#10 + 'x=1' + #13 + 'c:\d\n');
+    try
+      S.SetExtValue('hello', 'a=b', 'v');
+      Fail('a key with = is refused');
+    except
+      on EArgumentException do;
+    end;
+    try
+      S.SetExtValue('hello', 'k' + #10 + '[Tools]', 'v');
+      Fail('a key with a line end is refused');
+    except
+      on EArgumentException do;
+    end;
+    S.Save;
+  finally
+    S.Free;
+  end;
+  Keys := TStringList.Create;
+  Keys.LoadFromFile(FFileName);
+  AssertEquals('no section from the value', -1, Keys.IndexOf('[Trust]'));
+  AssertEquals('no pair from the value', -1, Keys.IndexOf('x=1'));
+  Keys.Free;
+  S := TGittanSettings.Create(FFileName);
+  Keys := TStringList.Create;
+  try
+    S.Load;
+    AssertEquals('line ends and backslashes as they were',
+      'a' + #10 + '[Trust]' + #13#10 + 'x=1' + #13 + 'c:\d\n', S.ExtValue('hello', 'lines'));
+    AssertFalse('no key from the value', S.ExtValue('hello', 'x') = '1');
+    AssertFalse('off kept', S.ExtEnabled('hello'));
+    AssertTrue('on again', S.ExtEnabled('other'));
+    AssertTrue('grant kept', S.HasExtPerm('hello'));
+    AssertEquals('hash', 'abc', S.ExtPerm('hello', 'Hash'));
+    AssertEquals('granted', 'net,exec', S.ExtPerm('hello', 'Granted'));
+    AssertEquals('author', '(c) Someone', S.ExtPerm('hello', 'Author'));
+    AssertEquals('value with its edges', ' https://example.com/hook ', S.ExtValue('hello', 'url'));
+    AssertEquals('json as it was', '{"a": "b c"}', S.ExtValue('hello', 'json'));
+    AssertEquals('empty dropped', '', S.ExtValue('hello', 'gone'));
+    S.ExtValueKeys('hello', Keys);
+    AssertEquals('the keys', 'url,json,lines', Keys.CommaText);
+    S.ClearExtPerm('hello');
+    AssertFalse('grant cleared', S.HasExtPerm('hello'));
+    AssertEquals('values stay', '{"a": "b c"}', S.ExtValue('hello', 'json'));
+    S.Save;
+  finally
+    Keys.Free;
+    S.Free;
+  end;
+  S := TGittanSettings.Create(FFileName);
+  try
+    S.Load;
+    AssertFalse('cleared grant gone from the file', S.HasExtPerm('hello'));
+    AssertEquals('value still there', '{"a": "b c"}', S.ExtValue('hello', 'json'));
+  finally
+    S.Free;
   end;
 end;
 

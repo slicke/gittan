@@ -103,6 +103,40 @@ function Copy-Lexers {
     Write-Host "Copied $count lexers to $LexLib\"
 }
 
+# The extension engine (gittan.ext.quickjs) links quickjs-ng and its ABI
+# shim, prebuilt in externals\quickjs\prebuilt\<cpu>-win64. Windows finds a
+# DLL beside the executable, so they are copied next to Gittan.exe after a
+# build and next to the test binary before the tests run. The CPU is the
+# executable's own, read from its PE header: lazbuild's compiler may not be
+# the native CPU's, and a DLL of another CPU stops the program before it
+# starts (0xC000007B).
+function Get-QjsDir([string]$Cpu) {
+    Join-Path $PSScriptRoot "externals\quickjs\prebuilt\$Cpu-win64"
+}
+
+function Get-ExeCpu([string]$Exe) {
+    $bytes = [System.IO.File]::ReadAllBytes($Exe)
+    $pe = [BitConverter]::ToInt32($bytes, 0x3c)
+    switch ([BitConverter]::ToUInt16($bytes, $pe + 4)) {
+        0xAA64 { 'aarch64' }
+        0x8664 { 'x86_64' }
+        default { $null }
+    }
+}
+
+function Copy-QuickJSLibs {
+    param([string]$Exe = (Join-Path $PSScriptRoot 'Gittan.exe'))
+    $cpu = Get-ExeCpu $Exe
+    $dir = Get-QjsDir $cpu
+    if (-not $cpu -or -not (Test-Path $dir)) {
+        Write-Warning "No QuickJS libraries for $Exe ($cpu); the extensions will not start."
+        return
+    }
+    foreach ($name in @('libqjs.dll', 'tqshim.dll')) {
+        Copy-Item (Join-Path $dir $name) (Split-Path -Parent $Exe) -Force
+    }
+}
+
 function Invoke-Lazbuild([string[]]$Flags) {
     Need-Lazbuild
     Copy-Lexers
@@ -115,12 +149,13 @@ $target = if ($MakeArgs.Count -ge 1) { $MakeArgs[0].ToLower() } else { 'build' }
 $rest = if ($MakeArgs.Count -gt 1) { @($MakeArgs[1..($MakeArgs.Count - 1)]) } else { @() }
 
 switch ($target) {
-    'build' { Invoke-Lazbuild (@($LazFlags) + $ReleaseFlags + $rest); exit 0 }
-    'debug' { Invoke-Lazbuild (@($LazFlags) + $DebugFlags + $rest); exit 0 }
-    'rebuild' { Invoke-Lazbuild (@('--build-all') + $LazFlags + $ReleaseFlags + $rest); exit 0 }
+    'build' { Invoke-Lazbuild (@($LazFlags) + $ReleaseFlags + $rest); Copy-QuickJSLibs; exit 0 }
+    'debug' { Invoke-Lazbuild (@($LazFlags) + $DebugFlags + $rest); Copy-QuickJSLibs; exit 0 }
+    'rebuild' { Invoke-Lazbuild (@('--build-all') + $LazFlags + $ReleaseFlags + $rest); Copy-QuickJSLibs; exit 0 }
     'run' {
         # Arguments after 'run' go to Gittan, not lazbuild.
         Invoke-Lazbuild (@($LazFlags) + $ReleaseFlags)
+        Copy-QuickJSLibs
         $startArgs = @{ FilePath = (Join-Path $PSScriptRoot 'Gittan.exe'); WorkingDirectory = $PSScriptRoot }
         if ($rest.Count -gt 0) {
             $startArgs.ArgumentList = @($rest | ForEach-Object {
@@ -158,13 +193,16 @@ switch ($target) {
             Write-Error 'fpc not found on PATH or beside lazbuild.'; exit 1
         }
         New-Item -ItemType Directory -Path 'tests\lib' -Force | Out-Null
-        & fpc -Mobjfpc -Sh -O1 '-Fusrc\core' '-FUtests\lib' '-FEtests' 'tests\gittantests.lpr'
+        $qjsDir = Get-QjsDir ((& fpc -iTP) | Out-String).Trim()
+        & fpc -Mobjfpc -Sh -O1 '-Fusrc\core' '-FUtests\lib' '-FEtests' "-Fl$qjsDir" 'tests\gittantests.lpr'
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Copy-QuickJSLibs (Join-Path $PSScriptRoot 'tests\gittantests.exe')
         & 'tests\gittantests.exe' --all --format=plain @rest
         exit $LASTEXITCODE
     }
     'clean' {
-        foreach ($p in @('lib', $LexLib, 'tests\lib', 'Gittan.exe', 'tests\gittantests.exe')) {
+        foreach ($p in @('lib', $LexLib, 'tests\lib', 'Gittan.exe', 'tests\gittantests.exe',
+                'libqjs.dll', 'tqshim.dll', 'tests\libqjs.dll', 'tests\tqshim.dll')) {
             if (Test-Path $p) { Remove-Item $p -Recurse -Force }
         }
         exit 0

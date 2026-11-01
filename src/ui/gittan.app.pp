@@ -24,7 +24,8 @@ interface
 
 uses
   Classes, SysUtils, Graphics, ExtCtrls, gittan.settings, gittan.lexers,
-  gittan.update, gittan.git, gittan.forge;
+  gittan.update, gittan.git, gittan.forge, gittan.ext.loader, gittan.ext.engine,
+  gittan.ext.api;
 
 const
   {** A check for a newer build a little after start, then this far
@@ -44,6 +45,7 @@ type
     FSettings: TGittanSettings;
     FLexers: TGittanLexers;
     FIcon: TIcon;
+    FExtensions: TGittanExtLoader;
     { The check under way, the last one done (freed by the next or on
       the way out, since it is still in its thread as it reports), the
       timer that starts the next, whether the menu asked for the one
@@ -56,6 +58,7 @@ type
     FOnUpdateChecked: TGittanUpdateCheckedEvent;
     procedure UpdateTimerTimer(Sender: TObject);
     procedure UpdateJobDone(Sender: TObject);
+    procedure ProvisionExtension(AEngine: TGittanExtEngine; AExt: PExtContextInfo);
   public
     constructor Create;
     destructor Destroy; override;
@@ -75,6 +78,9 @@ type
     function ForgeCli(AForge: TGittanForgeClass = nil): string;
     property Settings: TGittanSettings read FSettings;
     property Lexers: TGittanLexers read FLexers;
+    {** The extensions (gittan.ext.loader): the window loads them once it
+      is up, and Reload Extensions loads them again. }
+    property Extensions: TGittanExtLoader read FExtensions;
     {** The application icon at every size (MAINICON), nil when the
       resource cannot be read. Application.Icon keeps to its small
       image. }
@@ -122,6 +128,8 @@ begin
   FSettings := TGittanSettings.Create;
   FSettings.Load;
   SetGitExe(FSettings.GitPath);
+  FExtensions := TGittanExtLoader.Create(FSettings);
+  FExtensions.OnProvision := @ProvisionExtension;
   FLexers := TGittanLexers.Create;
   FIcon := TIcon.Create;
   try
@@ -147,6 +155,12 @@ begin
   FreeAndNil(FDoneUpdateJob);
   FreeAndNil(FIcon);
   FreeAndNil(FLexers);
+  { The extensions and their engine before the settings, which keep
+    what they granted. }
+  if FExtensions <> nil then
+    FExtensions.Unload;
+  FreeAndNil(FExtensions);
+  TGittanExtEngine.ReleaseInstance;
   FreeAndNil(FSettings);
   inherited Destroy;
 end;
@@ -161,6 +175,11 @@ begin
   FUpdateJob := TGittanUpdateJob.Create;
   FUpdateJob.OnDone := @UpdateJobDone;
   FUpdateJob.Start;
+end;
+
+procedure TGittanApp.ProvisionExtension(AEngine: TGittanExtEngine; AExt: PExtContextInfo);
+begin
+  RegisterGittanApi(AEngine, AExt, FSettings);
 end;
 
 procedure TGittanApp.UpdateTimerTimer(Sender: TObject);

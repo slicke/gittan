@@ -29,7 +29,8 @@ interface
 
 uses
   Classes, SysUtils, Types, Forms, Controls, Graphics, Dialogs, StdCtrls,
-  ExtCtrls, Spin, BGRABitmap, BGRABitmapTypes, ATSynEdit, gittan.lexers, gittan.sidenav, gittan.ai, gittan.update,
+  ExtCtrls, Spin, CheckLst, BGRABitmap, BGRABitmapTypes, ATSynEdit, gittan.lexers, gittan.sidenav, gittan.ai, gittan.update,
+  gittan.ext.loader, gittan.ext.registry, gittan.ext.perm,
   gittan.forge;
 
 const
@@ -39,11 +40,17 @@ const
 
 type
   {** The pages, in the sidebar's order. }
-  TSettingsPage = (pgEditor, pgTools, pgHosting, pgAI, pgAbout);
+  TSettingsPage = (pgEditor, pgTools, pgHosting, pgExtensions, pgAI, pgAbout);
 
   {** Shows AFont, the theme ATheme (an index into SyntaxThemes) and a tab
     ATabSize characters wide in the editor while the dialog is open. }
   TSettingsPreview = procedure(AFont: TFont; ATheme, ATabSize: integer) of object;
+
+  {** Loads the extensions again and gives what was found and the
+    settings they declared (the Extensions page's Reload), adding to
+    AValues the saved values of an extension it did not have. }
+  TSettingsExtReload = procedure(out AInfos: TGittanExtInfos;
+    out ADefs: TGittanExtSettingDefs; AValues: TStrings) of object;
 
   {** What the dialog edits besides the font. }
   TSettingsValues = record
@@ -78,6 +85,18 @@ type
     Agent: TGittanAgent;
     AgentPaths, AgentModels: array[TGittanAgent] of string;
     ApiKey: string;
+    {** The extensions as found (gittan.ext.loader's Infos), the settings
+      they declared (gittan.ext.registry), their folder, and three lists
+      the caller owns: their values as "id" + #9 + "key" = value, which
+      the page edits in place; the ids turned off, which the page writes
+      on OK; and the ids whose permissions the page reset, to be asked
+      again at the next load. }
+    ExtInfos: TGittanExtInfos;
+    ExtDefs: TGittanExtSettingDefs;
+    ExtDir: string;
+    ExtValues, ExtDisabled, ExtResetPerms: TStringList;
+    {** Reload on the Extensions page; nil hides the button. }
+    ExtReload: TSettingsExtReload;
   end;
 
 {** Shows the dialog with AFont and AValues in it, its bottom right corner
@@ -101,6 +120,14 @@ uses
   gittan.settings, gittan.job;
 
 resourcestring
+  rsExtensionsPage = 'Extensions';
+  rsExtensionsNote = 'Scripts in the extensions folder, loaded at start and with Reload (or Extensions > Reload Extensions); untick one to leave it out.';
+  rsExtNone = 'No extensions. Put a .js file in the folder (Open Folder) and click Reload.';
+  rsExtReload = 'Reload';
+  rsExtOpenFolder = 'Open Folder';
+  rsExtResetPerms = 'Reset Permissions';
+  rsExtPermsLine = 'Permissions: %s';
+  rsExtNotLoaded = 'Not loaded: %s';
   rsSettingsTitle = 'Settings';
   rsEditorPage = 'Editor';
   rsToolsPage = 'Tools';
@@ -204,7 +231,8 @@ resourcestring
   rsLicenses = 'Gittan is free software under the GNU General Public License 3. ' +
     'It is built with Free Pascal and Lazarus; ATSynEdit, ATSynEdit_Ex and ' +
     'ATFlatControls (MPL 2.0 or LGPL); EControl (for open source); EncConv, ' +
-    'BGRABitmap and MetaDarkStyle (LGPL); LazInk (0BSD) and the lexers of CudaText.';
+    'BGRABitmap and MetaDarkStyle (LGPL); LazInk (0BSD) and the lexers of CudaText; ' +
+    'quickjs-ng (MIT), the extensions'' JavaScript engine.';
   rsOK = 'OK';
   rsCancel = 'Cancel';
 
@@ -354,7 +382,20 @@ type
       buttons under them. FBox is the one Place puts controls in. }
     FNavPanel, FContent: TPanel;
     FNav: TGittanSideNav;
-    FEditorBox, FToolsBox, FHostingPage, FAIPage, FAboutPage: TPanel;
+    FEditorBox, FToolsBox, FHostingPage, FAIPage, FAboutPage, FExtPage: TPanel;
+    { The Extensions page: the list with a box per extension, what the
+      one picked is (FExtInfo), its buttons, and the box its declared
+      settings are generated into (ShowExtInfo), each control's Tag an
+      index into FExtDefs; the lists are the caller's (TSettingsValues). }
+    FExtList: TCheckListBox;
+    FExtInfo: TLabel;
+    FExtResetBtn, FExtFolderBtn, FExtReloadBtn: TButton;
+    FExtReload: TSettingsExtReload;
+    FExtSettingsBox: TPanel;
+    FExtInfos: TGittanExtInfos;
+    FExtDefs: TGittanExtSettingDefs;
+    FExtValues, FExtResets: TStringList;
+    FExtDir: string;
     { The About page's update check and what it found (FUpdateLink, a
       link when there is a page to go to), its links in the accent
       (FLinkColor), and what Gittan runs on and with, read the first
@@ -419,6 +460,14 @@ type
     procedure AccountBoxSelect(Sender: TObject);
     function PickedAccounts: TGittanForgeAccountsList;
     procedure AutoFetchChange(Sender: TObject);
+    procedure ExtListSelect(Sender: TObject; User: boolean);
+    procedure ExtResetClick(Sender: TObject);
+    procedure ExtFolderClick(Sender: TObject);
+    procedure ExtReloadClick(Sender: TObject);
+    procedure ExtSettingChange(Sender: TObject);
+    procedure ShowExtList;
+    procedure ShowExtInfo;
+    function ExtValueOf(const ADef: TGittanExtSettingDef): string;
     procedure AgentChange(Sender: TObject);
     procedure ShowAgent;
     { The picked agent's class (AIClassOf), and whether it is an API. }
@@ -505,6 +554,7 @@ begin
   FEditorBox := AddPage(rsEditorPage, niEditor);
   FToolsBox := AddPage(rsToolsPage, niTools);
   FHostingPage := AddPage(rsHostingPage, niForge);
+  FExtPage := AddPage(rsExtensionsPage, niExtensions);
   FAIPage := AddPage(rsAIPage, niAI);
   FAboutPage := AddPage(rsAboutPage, niAbout);
 
@@ -666,6 +716,48 @@ begin
   Lbl := AddLabel(rsCloneSiblingsNote, 4);
   Lbl.Font.Color := clGrayText;
   Lbl.WordWrap := True;
+
+  { The Extensions page: the list, with a box per extension that loads
+    it, what the one picked is, Reset Permissions and Open Folder, and
+    the settings the picked one declared. }
+  FBox := FExtPage;
+  Lbl := AddLabel(rsExtensionsNote, 0);
+  Lbl.Font.Color := clGrayText;
+  Lbl.WordWrap := True;
+  FExtList := TCheckListBox.Create(Self);
+  FExtList.Height := Scale96ToScreen(110);
+  FExtList.OnSelectionChange := @ExtListSelect;
+  Place(FExtList, 8);
+  FExtInfo := AddLabel('', 8);
+  FExtInfo.WordWrap := True;
+  Row := AddRow(8);
+  FExtFolderBtn := TButton.Create(Self);
+  FExtFolderBtn.Caption := rsExtOpenFolder;
+  FExtFolderBtn.AutoSize := True;
+  FExtFolderBtn.Align := alLeft;
+  FExtFolderBtn.Left := 0;
+  FExtFolderBtn.OnClick := @ExtFolderClick;
+  FExtFolderBtn.Parent := Row;
+  FExtReloadBtn := TButton.Create(Self);
+  FExtReloadBtn.Caption := rsExtReload;
+  FExtReloadBtn.AutoSize := True;
+  FExtReloadBtn.Align := alLeft;
+  FExtReloadBtn.Left := 500;
+  FExtReloadBtn.BorderSpacing.Left := Scale96ToScreen(8);
+  FExtReloadBtn.OnClick := @ExtReloadClick;
+  FExtReloadBtn.Parent := Row;
+  FExtResetBtn := TButton.Create(Self);
+  FExtResetBtn.Caption := rsExtResetPerms;
+  FExtResetBtn.AutoSize := True;
+  FExtResetBtn.Align := alLeft;
+  FExtResetBtn.Left := 1000;
+  FExtResetBtn.BorderSpacing.Left := Scale96ToScreen(8);
+  FExtResetBtn.OnClick := @ExtResetClick;
+  FExtResetBtn.Parent := Row;
+  FExtSettingsBox := TPanel.Create(Self);
+  FExtSettingsBox.BevelOuter := bvNone;
+  FExtSettingsBox.AutoSize := True;
+  Place(FExtSettingsBox, 0);
 
   { The AI page: the switch and what it means, then the agent, its
     command (the API's server), the API's key, shown for it alone, and
@@ -853,11 +945,14 @@ begin
   Tallest := Max(Tallest, H);
   FAIPage.GetPreferredSize(W, H, False, True);
   Tallest := Max(Tallest, H);
+  FExtPage.GetPreferredSize(W, H, False, True);
+  Tallest := Max(Tallest, H);
   FAboutPage.GetPreferredSize(W, H, False, True);
   Tallest := Max(Tallest, H);
   FEditorBox.Constraints.MinHeight := Tallest;
   FToolsBox.Constraints.MinHeight := Tallest;
   FHostingPage.Constraints.MinHeight := Tallest;
+  FExtPage.Constraints.MinHeight := Tallest;
   FAIPage.Constraints.MinHeight := Tallest;
   FAboutPage.Constraints.MinHeight := Tallest;
   if FCentered and (Owner is TCustomForm) then
@@ -938,12 +1033,14 @@ begin
     FEditorBox.Visible := False;
     FToolsBox.Visible := False;
     FHostingPage.Visible := False;
+    FExtPage.Visible := False;
     FAIPage.Visible := False;
     FAboutPage.Visible := False;
     case TSettingsPage(AIndex) of
       pgEditor: Box := FEditorBox;
       pgTools: Box := FToolsBox;
       pgHosting: Box := FHostingPage;
+      pgExtensions: Box := FExtPage;
       pgAI: Box := FAIPage;
       else
         Box := FAboutPage;
@@ -990,6 +1087,206 @@ begin
   else
     TextColor := clWindowText;
   ThemeSideNav(FNav, Dark, TextColor);
+end;
+
+{ The Extensions page's list: each extension's name and version, ticked
+  while it loads, the first picked. }
+procedure TSettingsForm.ShowExtList;
+var
+  i: integer;
+  Line: string;
+begin
+  FExtList.Items.BeginUpdate;
+  try
+    FExtList.Clear;
+    for i := 0 to High(FExtInfos) do
+    begin
+      Line := FExtInfos[i].DisplayName;
+      if FExtInfos[i].Version <> '' then
+        Line := Line + ' ' + FExtInfos[i].Version;
+      FExtList.Items.Add(Line);
+      FExtList.Checked[i] := FExtInfos[i].Enabled;
+    end;
+  finally
+    FExtList.Items.EndUpdate;
+  end;
+  if FExtList.Count > 0 then
+    FExtList.ItemIndex := 0;
+  ShowExtInfo;
+end;
+
+{ The value a declared setting shows: the one kept, else its default. }
+function TSettingsForm.ExtValueOf(const ADef: TGittanExtSettingDef): string;
+begin
+  Result := '';
+  if FExtValues <> nil then
+    Result := FExtValues.Values[ADef.ExtId + #9 + ADef.Key];
+  if Result = '' then
+    Result := ADef.Default;
+end;
+
+{ What the picked extension is, and its declared settings as controls
+  in FExtSettingsBox: a check box for a switch, a field for a text, a
+  spinner for a number, a list for a choice, each with its label and
+  note. }
+procedure TSettingsForm.ShowExtInfo;
+var
+  i, Index: integer;
+  Info: TGittanExtInfo;
+  About: string;
+  Lbl: TLabel;
+  Chk: TCheckBox;
+  Ed: TEdit;
+  Spin: TSpinEdit;
+  Combo: TComboBox;
+  Def: TGittanExtSettingDef;
+  Option: string;
+begin
+  for i := FExtSettingsBox.ControlCount - 1 downto 0 do
+    FExtSettingsBox.Controls[i].Free;
+  Index := FExtList.ItemIndex;
+  if (Index < 0) or (Index > High(FExtInfos)) then
+  begin
+    if Length(FExtInfos) = 0 then
+      FExtInfo.Caption := rsExtNone
+    else
+      FExtInfo.Caption := '';
+    FExtResetBtn.Enabled := False;
+    Exit;
+  end;
+  Info := FExtInfos[Index];
+  About := ExtractFileName(Info.FileName);
+  if Info.Author <> '' then
+    About := About + ' · ' + Info.Author;
+  if Info.Description <> '' then
+    About := About + LineEnding + Info.Description;
+  About := About + LineEnding + Format(rsExtPermsLine, [PermSetToCSV(Info.Granted + PermBaseline)]);
+  if not Info.Loaded and (Info.Error <> '') then
+    About := About + LineEnding + Format(rsExtNotLoaded, [Info.Error]);
+  FExtInfo.Caption := About;
+  FExtResetBtn.Enabled := Info.Requested * PermPromptable <> [];
+  if (FExtResets <> nil) and (FExtResets.IndexOf(Info.Id) >= 0) then
+    FExtResetBtn.Enabled := False;
+  FBox := FExtSettingsBox;
+  for i := 0 to High(FExtDefs) do
+  begin
+    Def := FExtDefs[i];
+    if Def.ExtId <> Info.Id then
+      Continue;
+    case Def.Kind of
+      skBool:
+      begin
+        Chk := TCheckBox.Create(Self);
+        Chk.Caption := Def.Caption;
+        Chk.Checked := (ExtValueOf(Def) = '1') or (LowerCase(ExtValueOf(Def)) = 'true');
+        Chk.Tag := i;
+        Chk.OnChange := @ExtSettingChange;
+        Place(Chk, 12);
+      end;
+      skNumber:
+      begin
+        AddLabel(Def.Caption, 12);
+        Spin := TSpinEdit.Create(Self);
+        Spin.MinValue := -MaxInt;
+        Spin.MaxValue := MaxInt;
+        Spin.Value := StrToIntDef(ExtValueOf(Def), 0);
+        Spin.Width := Scale96ToScreen(100);
+        Spin.Tag := i;
+        Spin.OnChange := @ExtSettingChange;
+        Place(Spin, 4);
+      end;
+      skChoice:
+      begin
+        AddLabel(Def.Caption, 12);
+        Combo := TComboBox.Create(Self);
+        Combo.Style := csDropDownList;
+        for Option in Def.Options do
+          Combo.Items.Add(Option);
+        Combo.ItemIndex := Combo.Items.IndexOf(ExtValueOf(Def));
+        Combo.Tag := i;
+        Combo.OnChange := @ExtSettingChange;
+        Place(Combo, 4);
+      end;
+      else
+      begin
+        AddLabel(Def.Caption, 12);
+        Ed := TEdit.Create(Self);
+        Ed.Text := ExtValueOf(Def);
+        Ed.Tag := i;
+        Ed.OnChange := @ExtSettingChange;
+        Place(Ed, 4);
+      end;
+    end;
+    if Def.Note <> '' then
+    begin
+      Lbl := AddLabel(Def.Note, 2);
+      Lbl.Font.Color := clGrayText;
+      Lbl.WordWrap := True;
+    end;
+  end;
+end;
+
+procedure TSettingsForm.ExtListSelect(Sender: TObject; User: boolean);
+begin
+  ShowExtInfo;
+end;
+
+{ Forgets what the picked extension was granted: the next load asks
+  again. }
+procedure TSettingsForm.ExtResetClick(Sender: TObject);
+begin
+  if (FExtList.ItemIndex < 0) or (FExtResets = nil) then
+    Exit;
+  FExtResets.Add(FExtInfos[FExtList.ItemIndex].Id);
+  FExtResetBtn.Enabled := False;
+end;
+
+{ Loads the extensions again, as Extensions > Reload Extensions does, and
+  lists what is found now: a file put in the folder, or edited, shows
+  without closing the dialog. A box unticked and not yet saved is
+  ticked again as the settings have it. }
+procedure TSettingsForm.ExtReloadClick(Sender: TObject);
+begin
+  if not Assigned(FExtReload) then
+    Exit;
+  FExtReload(FExtInfos, FExtDefs, FExtValues);
+  ShowExtList;
+end;
+
+procedure TSettingsForm.ExtFolderClick(Sender: TObject);
+begin
+  if FExtDir <> '' then
+    OpenDocument(FExtDir);
+end;
+
+{ A declared setting's control changed: its value goes to the caller's
+  list. An emptied field stays in it as "name=", since Values[] := ''
+  would drop the pair, and the caller would then keep the old value. }
+procedure TSettingsForm.ExtSettingChange(Sender: TObject);
+var
+  Def: TGittanExtSettingDef;
+  Value, Pair: string;
+  i: integer;
+begin
+  if (FExtValues = nil) or not (Sender is TControl) then
+    Exit;
+  Def := FExtDefs[TControl(Sender).Tag];
+  if Sender is TCheckBox then
+    Value := IntToStr(Ord(TCheckBox(Sender).Checked))
+  else if Sender is TSpinEdit then
+    Value := IntToStr(TSpinEdit(Sender).Value)
+  else if Sender is TComboBox then
+    Value := TComboBox(Sender).Text
+  else if Sender is TEdit then
+    Value := TEdit(Sender).Text
+  else
+    Exit;
+  Pair := Def.ExtId + #9 + Def.Key;
+  i := FExtValues.IndexOfName(Pair);
+  if i >= 0 then
+    FExtValues[i] := Pair + FExtValues.NameValueSeparator + Value
+  else
+    FExtValues.Add(Pair + FExtValues.NameValueSeparator + Value);
 end;
 
 function TSettingsForm.AddRow(ASpaceAbove: integer): TPanel;
@@ -1702,6 +1999,14 @@ begin
     F.FKeyEdit.Text := AValues.ApiKey;
     F.ShowAgent;
     F.AIChange(nil);
+    F.FExtInfos := AValues.ExtInfos;
+    F.FExtDefs := AValues.ExtDefs;
+    F.FExtValues := AValues.ExtValues;
+    F.FExtResets := AValues.ExtResetPerms;
+    F.FExtDir := AValues.ExtDir;
+    F.FExtReload := AValues.ExtReload;
+    F.FExtReloadBtn.Visible := Assigned(AValues.ExtReload);
+    F.ShowExtList;
     F.FPreview := APreview;
     F.FLexers := ALexers;
     F.FTemplate := ATemplate;
@@ -1734,6 +2039,15 @@ begin
       AValues.AgentPaths := F.FAgentPaths;
       AValues.AgentModels := F.FAgentModels;
       AValues.ApiKey := Trim(F.FKeyEdit.Text);
+      { What Reload found, so the caller compares with it. }
+      AValues.ExtInfos := F.FExtInfos;
+      if AValues.ExtDisabled <> nil then
+      begin
+        AValues.ExtDisabled.Clear;
+        for i := 0 to F.FExtList.Count - 1 do
+          if not F.FExtList.Checked[i] then
+            AValues.ExtDisabled.Add(F.FExtInfos[i].Id);
+      end;
     end;
   finally
     F.Free;

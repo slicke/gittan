@@ -110,14 +110,14 @@ jobs:
             runner: ubuntu-latest
           - name: macos-arm64
             os_target: macos
-            runner: macos-14
+            runner: macos-26
             dmg: Gittan-macos-silicon.dmg
           # GitHub's Intel macOS runners are going away, so the Intel build is
           # made on Apple Silicon: the FPC installer has ppcx64 and its units,
           # and `make CPU=x86_64` passes --cpu to lazbuild.
           - name: macos-x64
             os_target: macos
-            runner: macos-14
+            runner: macos-26
             cpu: x86_64
             dmg: Gittan-macos-intel.dmg
           - name: windows-x64
@@ -359,6 +359,11 @@ jobs:
           cp Gittan dist/Gittan/
           cp -r lexlib dist/Gittan/
           cp icons/png/gittan-256.png dist/Gittan/gittan.png
+          # The extensions' JavaScript engine and its shim, beside the
+          # executable, whose rpath is $ORIGIN (spec/extensions.md).
+          cp externals/quickjs/prebuilt/x86_64-linux/libqjs.so.0.*.* dist/Gittan/libqjs.so.0
+          cp externals/quickjs/prebuilt/x86_64-linux/libtqshim.so dist/Gittan/
+          cp externals/quickjs/LICENSE.quickjs-ng dist/Gittan/
           tar -C dist -czf Gittan-linux-amd64.tar.gz Gittan
           # The .deb and the .rpm, which install the desktop file and the
           # icons a Wayland desktop needs to show Gittan's (make packages).
@@ -393,6 +398,12 @@ jobs:
           # 12 MB with the smart linking of the Release mode).
           strip dist/Gittan.app/Contents/MacOS/Gittan
           cp -R lexlib dist/Gittan.app/Contents/Resources/
+          # The extensions' JavaScript engine and its shim beside the binary,
+          # whose rpath is @loader_path; signed ad hoc each, since --deep
+          # below leaves loose dylibs in Contents/MacOS alone.
+          cp externals/quickjs/prebuilt/"${CPU:-aarch64}"-darwin/*.dylib dist/Gittan.app/Contents/MacOS/
+          cp externals/quickjs/LICENSE.quickjs-ng dist/Gittan.app/Contents/Resources/
+          codesign --force --sign - dist/Gittan.app/Contents/MacOS/*.dylib
           # Apple Silicon refuses unsigned code; sign ad hoc.
           codesign --force --deep --sign - dist/Gittan.app
           codesign --verify --deep --strict dist/Gittan.app
@@ -426,6 +437,10 @@ jobs:
           mkdir -p dist/Gittan
           cp Gittan.exe dist/Gittan/
           cp -r lexlib dist/Gittan/
+          # The extensions' JavaScript engine and its shim, found beside
+          # the executable.
+          cp externals/quickjs/prebuilt/x86_64-win64/libqjs.dll externals/quickjs/prebuilt/x86_64-win64/tqshim.dll dist/Gittan/
+          cp externals/quickjs/LICENSE.quickjs-ng dist/Gittan/
           (cd dist && 7z a -tzip ../Gittan-windows-x64.zip Gittan >/dev/null)
 
       # The installer, on every Windows build (PRs too, so a broken .iss
