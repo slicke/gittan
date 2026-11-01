@@ -258,9 +258,10 @@ begin
     FActive.ShowOpening(FirstSavedTab)
   else if StartRepository <> '' then
     FActive.ShowOpening(StartRepository);
-  { The extensions before the repositories, so they see them open. }
+  { The extensions before the repositories, so they see them open:
+    LoadExtensionsAsync queues the opening once they are loaded, since a
+    permission's question runs the message loop that would run it. }
   Application.QueueAsyncCall(@LoadExtensionsAsync, 0);
-  Application.QueueAsyncCall(@OpenAtStartAsync, 0);
 end;
 
 { ShowModal tells the application before it shows the form, and the
@@ -1225,7 +1226,11 @@ end;
 
 procedure TGittanWindow.LoadExtensionsAsync(Data: PtrInt);
 begin
-  App.Extensions.Load;
+  try
+    App.Extensions.Load;
+  finally
+    Application.QueueAsyncCall(@OpenAtStartAsync, 0);
+  end;
 end;
 
 procedure TGittanWindow.ForgeTabsChange(Sender: TObject);

@@ -301,6 +301,9 @@ var
   xres: JSValue;
   callRes: JSValueRaw;
 begin
+  // The parsed parameters go on every path, the early exits too.
+  FreeJSParameters(FPromise.params.values.Data);
+
   // Final check before making JS calls
   if ExtHost.Terminated or IsExtShuttingDown then
     Exit;
@@ -330,10 +333,6 @@ begin
     // Silently ignore JS calls that fail during shutdown
     // This prevents crashes when the runtime is being destroyed
   end;
-
-  // Free parsed parameters captured earlier
-  if Assigned(FPromise.params.values.Data) then
-    FPromise.params.values.Data.Free;
 end;
 
 end.

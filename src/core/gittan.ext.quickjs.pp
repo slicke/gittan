@@ -459,7 +459,10 @@ const
       such a queue to exhaustion never returns and holds the calling thread
       until the interrupt handler aborts the script. Both bounds sit orders of
       magnitude above what a real chain needs, so ordinary work drains in one
-      pass and only a runaway is ever cut short. }
+      pass and only a runaway is ever cut short.
+      The time is looked at between jobs only: a job is not cut short by it,
+      and a slow synchronous native in one (a blame of a long file) runs to its
+      end; the watchdog's interrupt is what stops a job that loops. }
 JS_PUMP_MAX_JOBS = 4096;
 JS_PUMP_MAX_MS = 50;
 
@@ -1493,7 +1496,8 @@ begin
 
   exc := JS_GetException(ctx);
   try
-    Result := not exc.IsNull and not exc.IsUndefined;
+    { No exception pending is uninitialized; a script may throw null. }
+    Result := not exc.IsUninitialized;
     if not Result then
       Exit;
     aMessage := JS_ToUtf8(ctx, exc);

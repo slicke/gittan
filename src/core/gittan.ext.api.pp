@@ -44,6 +44,7 @@ function CommitJson(const ACommit: TGittanCommitLine): TJSONObject;
 implementation
 
 uses
+  {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}BaseUnix,{$ENDIF}
   gittan.ext.functions, gittan.ext.perm, gittan.ext.host, gittan.ext.registry,
   gittan.ext.promise, gittan.http, gittan.textfile, gittan.reviews, gittan.forge;
 
@@ -322,16 +323,35 @@ begin
   end;
 end;
 
+{ Does APath, relative to the repository, name a file inside it? The data
+  grant covers the repository, not the files around it. }
+function InsideRepo(ARepo: TGittanRepo; const APath: string): boolean;
+var
+  Root, Full: string;
+begin
+  Root := IncludeTrailingPathDelimiter(ExpandFileName(ARepo.Root));
+  Full := ExpandFileName(Root + SetDirSeparators(APath));
+  if FileNameCaseSensitive then
+    Result := Copy(Full, 1, Length(Root)) = Root
+  else
+    Result := SameText(Copy(Full, 1, Length(Root)), Root);
+  Result := Result and (APath <> '');
+end;
+
 procedure JSFileText(res: PJSValue; ctx: JSContext; this_val: PJSValue;
   argc: integer; argv: PJSValues; magic: integer);
 var
   Repo: TGittanRepo;
+  Path: string;
   Data: RawByteString;
 begin
   Repo := RepoArg(res, ctx, argc, argv);
   if Repo = nil then
     Exit;
-  if Repo.FileBlob(Arg(ctx, argc, argv, 1), Arg(ctx, argc, argv, 2), Data) then
+  Path := Arg(ctx, argc, argv, 1);
+  if not InsideRepo(Repo, Path) then
+    Exit;
+  if Repo.FileBlob(Path, Arg(ctx, argc, argv, 2), Data) then
     ReturnString(res, ctx, string(Data));
 end;
 
@@ -705,7 +725,12 @@ begin
       res^ := JS_ThrowError(ctx, 'Gittan.ui.addCard: a path and a text are needed');
       Exit;
     end;
-    ExtHost.AddCard(ExtHost.ActiveRoot, Card);
+    { The repository the card was made for, a command's ctx.repo, so it
+      does not land in another one shown since; else the shown one. }
+    if O.Get('repo', '') <> '' then
+      ExtHost.AddCard(O.Get('repo', ''), Card)
+    else
+      ExtHost.AddCard(ExtHost.ActiveRoot, Card);
   finally
     Data.Free;
   end;
@@ -715,7 +740,7 @@ procedure JSClearCards(res: PJSValue; ctx: JSContext; this_val: PJSValue;
   argc: integer; argv: PJSValues; magic: integer);
 begin
   res^ := JS_UNDEFINED;
-  ExtHost.ClearCards('', ExtIdOf(ctx));
+  ExtHost.ClearCards(Arg(ctx, argc, argv, 0), ExtIdOf(ctx));
 end;
 
 { ---------------------------------------------------------------------------
@@ -775,12 +800,36 @@ begin
   end;
 end;
 
+{ Runs a tool and gives git.run's and exec.run's result: its exit code,
+  128 and the signal when one ended it (as a shell says), -1 when it did
+  not start. RunTool gives the raw wait status on Unix. }
+function ToolJson(const AExe, ADir: string; const AArgs, ASkip, AEnv: array of string;
+  const AInput: string): string;
+var
+  Output, Error: string;
+  Status: integer;
+begin
+  if not RunTool(AExe, ADir, AArgs, ASkip, AEnv, Output, Error, Status, nil, AInput) then
+  begin
+    Status := -1;
+    if Error = '' then
+      Error := 'Could not run ' + AExe;
+  end
+  {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
+  else if wifexited(Status) then
+    Status := wexitstatus(Status)
+  else if wifsignaled(Status) then
+    Status := 128 + wtermsig(Status)
+  {$ENDIF};
+  Result := RunJson(Status = 0, Status, Output, Error);
+end;
+
 function TGittanExtApi.GitRun(const ctx: PJSContext; const func: string;
   const params: JSParameters; out res: JSValueVal): boolean;
 var
-  Root, Output, Error: string;
-  Args: TStringArray;
-  Ok: boolean;
+  Root: string;
+  Args, GitArgs: TStringArray;
+  i: integer;
 begin
   Result := False;
   Root := ParamStr(params, 0);
@@ -794,20 +843,23 @@ begin
     res := StringToValueVal('Gittan.git.run: the arguments are a list of strings');
     Exit;
   end;
-  Ok := RunGitEnv(Root, Args, [], Output, Error, '', nil, nil, ParamStr(params, 2));
-  if Ok then
-    res := StringToValueVal(RunJson(True, 0, Output, Error))
-  else
-    res := StringToValueVal(RunJson(False, 1, Output, Error));
+  { RunTool, not RunGitEnv, for git's own exit status and streams; the
+    options and variables are RunGitEnv's. }
+  SetLength(GitArgs, 2 + Length(Args));
+  GitArgs[0] := '-c';
+  GitArgs[1] := 'core.quotepath=false';
+  for i := 0 to High(Args) do
+    GitArgs[2 + i] := Args[i];
+  res := StringToValueVal(ToolJson(GitExe, Root, GitArgs, ['GIT_INDEX_FILE='],
+    ['LC_ALL=C', 'GIT_TERMINAL_PROMPT=0', 'GIT_OPTIONAL_LOCKS=0'], ParamStr(params, 2)));
   Result := True;
 end;
 
 function TGittanExtApi.ExecRun(const ctx: PJSContext; const func: string;
   const params: JSParameters; out res: JSValueVal): boolean;
 var
-  Cmd, Exe, Dir, Output, Error: string;
+  Cmd, Exe, Dir: string;
   Args: TStringArray;
-  Ok: boolean;
 begin
   Result := False;
   Cmd := ParamStr(params, 0);
@@ -835,11 +887,7 @@ begin
   Dir := ParamStr(params, 2);
   if Dir = '' then
     Dir := GetCurrentDir;
-  Ok := RunCli(Exe, Dir, Args, [], Output, Error, ParamStr(params, 3));
-  if Ok then
-    res := StringToValueVal(RunJson(True, 0, Output, Error))
-  else
-    res := StringToValueVal(RunJson(False, 1, Output, Error));
+  res := StringToValueVal(ToolJson(Exe, Dir, Args, [], [], ParamStr(params, 3)));
   Result := True;
 end;
 
@@ -1027,7 +1075,7 @@ const
     '    clearStatus: function () { t._status("", 0); },' + LineEnding +
     '    openFile: function (path, line) { t._openFile(String(path), line === undefined ? 0 : Number(line)); },' + LineEnding +
     '    addCard: function (card) { t._addCard(JSON.stringify(card || {})); },' + LineEnding +
-    '    clearCards: function () { t._clearCards(); }' + LineEnding +
+    '    clearCards: function (o) { t._clearCards(o && o.repo ? String(o.repo) : ""); }' + LineEnding +
     '  };' + LineEnding +
     '  if (has("_storageGet")) t.storage = {' + LineEnding +
     '    get: function (k) { return t._storageGet(String(k)); },' + LineEnding +

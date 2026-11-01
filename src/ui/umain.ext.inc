@@ -212,20 +212,34 @@ end;
 { The settings page's Reload: the extensions loaded again, and what is
   found now with the settings they declared. }
 procedure TRepoFrame.ExtReloadForSettings(out AInfos: TGittanExtInfos;
-  out ADefs: TGittanExtSettingDefs);
+  out ADefs: TGittanExtSettingDefs; AValues: TStrings);
 var
   Eng: TGittanExtEngine;
+  Keys: TStringList;
+  Key: string;
   i: integer;
 begin
   App.Extensions.Reload;
   SetLength(AInfos, App.Extensions.Count);
   ADefs := nil;
   Eng := TGittanExtEngine.Existing;
-  for i := 0 to App.Extensions.Count - 1 do
-  begin
-    AInfos[i] := App.Extensions.Info(i);
-    if Eng <> nil then
-      ADefs := Concat(ADefs, Eng.Registry.SettingsOf(AInfos[i].Id));
+  Keys := TStringList.Create;
+  try
+    for i := 0 to App.Extensions.Count - 1 do
+    begin
+      AInfos[i] := App.Extensions.Info(i);
+      if Eng <> nil then
+        ADefs := Concat(ADefs, Eng.Registry.SettingsOf(AInfos[i].Id));
+      { A file found now has saved values too; a value already in the
+        dialog's list, edited there or not, stays. }
+      Keys.Clear;
+      App.Settings.ExtValueKeys(AInfos[i].Id, Keys);
+      for Key in Keys do
+        if (AValues <> nil) and (AValues.IndexOfName(AInfos[i].Id + #9 + Key) < 0) then
+          AValues.Values[AInfos[i].Id + #9 + Key] := App.Settings.ExtValue(AInfos[i].Id, Key);
+    end;
+  finally
+    Keys.Free;
   end;
 end;
 
@@ -257,6 +271,28 @@ procedure TRepoFrame.ExtAddCard(const ACard: TGittanReviewThread);
 begin
   SetLength(FExtThreads, Length(FExtThreads) + 1);
   FExtThreads[High(FExtThreads)] := ACard;
+  QueueExtCards;
+end;
+
+{ The cards on the old side are on the lines of the Base they were made
+  against; another Base has other lines there, so they go. }
+procedure TRepoFrame.ExtDropOldSideCards;
+var
+  Kept: TGittanReviewThreads;
+  i, n: integer;
+begin
+  Kept := nil;
+  n := 0;
+  for i := 0 to High(FExtThreads) do
+    if not FExtThreads[i].LeftSide then
+    begin
+      SetLength(Kept, n + 1);
+      Kept[n] := FExtThreads[i];
+      Inc(n);
+    end;
+  if Length(Kept) = Length(FExtThreads) then
+    Exit;
+  FExtThreads := Kept;
   QueueExtCards;
 end;
 

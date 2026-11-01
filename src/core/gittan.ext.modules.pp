@@ -97,9 +97,14 @@ function ScriptLooksLikeModule(const Src: UTF8String): boolean;
     @param(Root The extension folder. Every resolved file must stay inside it,
       and no path component below it may be a symbolic link or junction.)
     @param(Resolved Receives the absolute path (or @link(GittanModuleSpecifier)).)
+    @param(Entry The importing extension's own file: the one file at the top
+      of Root that may be imported, by the bootstrap of a module extension.)
     @returns(An empty string on success, otherwise the error message.) }
 function ResolveModuleSpecifier(const BaseName, Name, Root: string;
-  out Resolved: string): string;
+  out Resolved: string; const Entry: string = ''): string;
+
+{** Is Path a symbolic link, or on Windows any reparse point (junctions too)? }
+function IsLinkPath(const Path: string): boolean;
 
 {** Quote @code(S) as a JavaScript string literal (double quoted, escaped). }
 function JSStringLiteral(const S: string): UTF8String;
@@ -267,7 +272,7 @@ begin
 end;
 
 function ResolveModuleSpecifier(const BaseName, Name, Root: string;
-out Resolved: string): string;
+out Resolved: string; const Entry: string): string;
 var
   baseDir, rootDir, candidate: string;
 begin
@@ -310,6 +315,14 @@ begin
   if not SamePathText(Copy(candidate, 1, Length(rootDir)), rootDir) then
     Exit(Format('cannot import "%s": modules must live inside the extension ' +
       'folder %s', [Name, Root]));
+
+  // A file at the top of the folder is an extension of its own, with its own
+  // grant; a module is in a subfolder, which the importer's grant covers
+  // (the loader hashes every file there into it).
+  if SamePathText(ExtractFilePath(candidate), rootDir) and
+    not ((Entry <> '') and SamePathText(candidate, ExpandFileName(Entry))) then
+    Exit(Format('cannot import "%s": a file at the top of the extensions ' +
+      'folder is an extension of its own; put modules in a subfolder', [Name]));
 
   // The check above is textual; a symlink or junction inside the folder could
   // still lead out of it, so refuse module paths that pass through one.

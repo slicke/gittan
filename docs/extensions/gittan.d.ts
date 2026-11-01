@@ -34,17 +34,19 @@ declare namespace Gittan {
     recent(limit?: number, o?: RepoOptions): Commit[] | undefined;
   };
 
+  /** status is the program's exit code, 128 + the signal when one ended it, -1 when it did not start. */
   interface RunResult { ok: boolean; status: number; stdout: string; stderr: string }
-  /** Needs exec. */
-  const git: { run(args: string[], o?: RepoOptions): Promise<RunResult> };
-  const exec: { run(cmd: string, args: string[], o?: RepoOptions & { cwd?: string }): Promise<RunResult> };
-  const gh: { run(args: string[], o?: RepoOptions): Promise<RunResult> };
+  /** Needs exec. input goes to the program's standard input. */
+  const git: { run(args: string[], o?: RepoOptions & { input?: string }): Promise<RunResult> };
+  const exec: { run(cmd: string, args: string[], o?: RepoOptions & { cwd?: string; input?: string }): Promise<RunResult> };
+  const gh: { run(args: string[], o?: RepoOptions & { input?: string }): Promise<RunResult> };
 
   interface FetchResponse { status: number; ok: boolean; url: string; redirected: boolean; headers: { get(n: string): string | null; has(n: string): boolean; keys(): string[] }; text(): Promise<string>; json(): Promise<any> }
   /** Needs net. */
   const net: { fetch(url: string, init?: { method?: string; headers?: Record<string, string>; body?: string; timeout?: number }): Promise<FetchResponse> };
 
-  interface Card { path: string; line: number; side?: "new" | "old"; title?: string; text: string; severity?: string }
+  /** repo: the repository it is for (a command's ctx.repo), else the shown one. */
+  interface Card { repo?: string; path: string; line: number; side?: "new" | "old"; title?: string; text: string; severity?: string }
   const ui: {
     alert(...text: any[]): void;
     confirm(...text: any[]): boolean;
@@ -56,7 +58,7 @@ declare namespace Gittan {
     clearStatus(): void;
     openFile(path: string, line?: number): void;
     addCard(card: Card): void;
-    clearCards(): void;
+    clearCards(o?: RepoOptions): void;
   };
 
   interface CommandContext { repo: string; path: string; line: number; selection: string }

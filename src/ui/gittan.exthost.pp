@@ -203,7 +203,11 @@ procedure TGittanExtUIHost.AddCard(const ARoot: string; const ACard: TGittanRevi
 var
   Frame: TRepoFrame;
 begin
-  Frame := FrameOf(ARoot);
+  { A repository no longer open takes no card, not the shown one's. }
+  if (ARoot <> '') and (FWindow <> nil) then
+    Frame := FWindow.FrameForRoot(ARoot)
+  else
+    Frame := FrameOf(ARoot);
   if Frame <> nil then
     Frame.ExtAddCard(ACard);
 end;
@@ -220,7 +224,7 @@ begin
       FWindow.FrameAt(i).ExtClearCards(AExtId)
   else
   begin
-    Frame := FrameOf(ARoot);
+    Frame := FWindow.FrameForRoot(ARoot);
     if Frame <> nil then
       Frame.ExtClearCards(AExtId);
   end;

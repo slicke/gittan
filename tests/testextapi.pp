@@ -263,6 +263,15 @@ begin
   AssertEquals('the file diff has the line', 'true', EvalIn(Info^.Ctx, 'String(d.indexOf("+three") >= 0)'));
   AssertEquals('the whole diff too', 'true', EvalIn(Info^.Ctx, 'String(all.indexOf("+three") >= 0)'));
   AssertEquals('missing', 'undefined', EvalIn(Info^.Ctx, 'String(Gittan.repo.fileText("nope.txt"))'));
+  with TStringList.Create do
+  try
+    Text := 'secret';
+    SaveToFile(IncludeTrailingPathDelimiter(FDir) + 'outside.txt');
+  finally
+    Free;
+  end;
+  AssertEquals('outside the repository', 'undefined',
+    EvalIn(Info^.Ctx, 'String(Gittan.repo.fileText("../outside.txt"))'));
 end;
 
 procedure TExtApiTest.TestGitRun;
@@ -271,11 +280,13 @@ var
 begin
   Info := Load('gitrun', 'Gittan.git.run(["log", "--format=%s", "-n", "1"]).then(function (r) {' +
     'globalThis.out = r.ok + ":" + r.stdout.trim(); });' +
-    'Gittan.git.run(["nonsense-command"]).then(function (r) { globalThis.bad = r.ok + ":" + (r.stderr.length > 0); });',
+    'Gittan.git.run(["nonsense-command"]).then(function (r) { globalThis.bad = r.ok + ":" + (r.stderr.length > 0); });' +
+    'Gittan.git.run(["rev-parse", "--verify", "no-such-ref"]).then(function (r) { globalThis.code = r.status; });',
     AllPerms);
-  WaitFor(Info^.Ctx, 'globalThis.out && globalThis.bad');
+  WaitFor(Info^.Ctx, 'globalThis.out && globalThis.bad && globalThis.code');
   AssertEquals('the subject', 'true:first', EvalIn(Info^.Ctx, 'globalThis.out'));
   AssertEquals('a failure', 'false:true', EvalIn(Info^.Ctx, 'globalThis.bad'));
+  AssertEquals('git''s own exit status', '128', EvalIn(Info^.Ctx, 'String(globalThis.code)'));
 end;
 
 { exec without data: git.run, exec.run and gh.run run in the shown

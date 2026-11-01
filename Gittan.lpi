@@ -33,6 +33,8 @@
             <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)-release"/>
           </SearchPaths>
           <Conditionals Value="if TargetOS='linux' then CustomOptions += ' -k-rpath=\$ORIGIN -k-rpath=\$ORIGIN/../lib/gittan';
+if TargetOS='freebsd' then CustomOptions += ' -k-rpath=\$ORIGIN';
+if TargetOS='haiku' then CustomOptions += ' -k-rpath=\$ORIGIN';
 if TargetOS='darwin' then CustomOptions += ' -k-rpath -k@loader_path';"/>
           <CodeGeneration>
             <SmartLinkUnit Value="True"/>
@@ -288,6 +290,8 @@ if TargetOS='darwin' then CustomOptions += ' -k-rpath -k@loader_path';"/>
       <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Conditionals Value="if TargetOS='linux' then CustomOptions += ' -k-rpath=\$ORIGIN -k-rpath=\$ORIGIN/../lib/gittan';
+if TargetOS='freebsd' then CustomOptions += ' -k-rpath=\$ORIGIN';
+if TargetOS='haiku' then CustomOptions += ' -k-rpath=\$ORIGIN';
 if TargetOS='darwin' then CustomOptions += ' -k-rpath -k@loader_path';"/>
     <Linking>
       <Debugging>

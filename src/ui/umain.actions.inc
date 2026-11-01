@@ -3021,6 +3021,8 @@ begin
   finally
     StartWatcher;
   end;
+  if (FRepo.Base <> Prev) or (FRepo.WholeTree <> PrevSnapshot) then
+    ExtDropOldSideCards;
   { Comparing with a pull request shows its comments. }
   StartReviewJob(False);
 end;

@@ -21,10 +21,15 @@ Gittan.commands.register({
   where: ["file", "editor"],
   run: function (ctx) {
     if (!ctx.path) return;
-    Gittan.git.run(["log", "-n", "1", "--format=%h %an, %as: %s", "--", ctx.path]).then(function (r) {
+    Gittan.git.run(["log", "-n", "1", "--format=%h %an, %as: %s", "--", ctx.path], {repo: ctx.repo}).then(function (r) {
+      if (!r.ok) {
+        Gittan.ui.error("git log failed", r.stderr);
+        return;
+      }
       var line = ctx.line > 0 ? ctx.line : 1;
-      Gittan.ui.clearCards();
-      Gittan.ui.addCard({path: ctx.path, line: line, title: "Last changed", text: r.stdout.trim() || "No commit has this file.", severity: "note"});
+      // ctx.repo: the repository the command was run in, though another may be shown by now.
+      Gittan.ui.clearCards({repo: ctx.repo});
+      Gittan.ui.addCard({repo: ctx.repo, path: ctx.path, line: line, title: "Last changed", text: r.stdout.trim() || "No commit has this file.", severity: "note"});
     });
   }
 });

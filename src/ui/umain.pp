@@ -1755,7 +1755,7 @@ type
     procedure QueueExtCards;
     procedure ExtCardsAsync(Data: PtrInt);
     procedure ExtReloadForSettings(out AInfos: TGittanExtInfos;
-      out ADefs: TGittanExtSettingDefs);
+      out ADefs: TGittanExtSettingDefs; AValues: TStrings);
     procedure FilePopupPopup(Sender: TObject);
     procedure SummaryContextFile(Sender: TObject; const APath: string;
       const AScreenPos: TPoint);
@@ -2249,6 +2249,7 @@ type
       cards of the extension AExtId (every extension's for '') dropped. }
     procedure ExtAddCard(const ACard: TGittanReviewThread);
     procedure ExtClearCards(const AExtId: string);
+    procedure ExtDropOldSideCards;
     {** Builds the Extensions menu and the popups' items again from the
       commands registered. }
     procedure RebuildExtMenu;

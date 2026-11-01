@@ -10,11 +10,11 @@ The file starts with a manifest in a comment:
 @copyright (c) Your Name
 @version 1.0
 @description Keeps commit subjects short.
-@perms data, net, exec
+@perms data
 */
 ```
 
-`@perms` names what the extension needs beyond what every extension may do: `data` to read the repositories (`Gittan.repo`, the files and their content, and the full payload of an event), `net` for `Gittan.net.fetch`, `exec` for `Gittan.git.run` and `Gittan.exec.run`, `settings` for `Gittan.app.setting`. Gittan asks you once per file, and again when the file changes. Dialogs, cards, commands, timers and the extension's own storage and settings page need no permission.
+`@perms` names what the extension needs beyond what every extension may do: `data` to read the repositories (`Gittan.repo`, the files and their content, and the full payload of an event), `net` for `Gittan.net.fetch`, `exec` for `Gittan.git.run` and `Gittan.exec.run`, `settings` for `Gittan.app.setting`. Gittan asks you once per file, and again when the file changes or a module in a subfolder does (a module runs with the permissions of the file that imports it). Dialogs, cards, commands, timers and the extension's own storage and settings page need no permission.
 
 The scripts run in quickjs-ng (ES2023, with `fetch`-like networking, timers, `console`, `import` of modules from subfolders of the extensions folder, and top-level `await`). `gittan.d.ts` beside this file describes the `Gittan` object for an editor's completion.
 
@@ -43,7 +43,7 @@ Gittan.on("push.after", function (p) {          // {repo, ok, error, kind}
 });
 ```
 
-Without `data` a listener gets only `ok`, `kind`, `mode` and `amend`, so a lint that reads the message needs it. The events are `repo.opened`, `repo.changed`, `commit.before`, `commit.after`, `push.before`, `push.after`, `pull.before`, `pull.after` and `unload`. A `before` listener stops the action by returning `false`, a string with the reason, or `{cancel: true, message: "..."}`; Gittan shows the reason in a banner. A listener that throws stops nothing, and a returned promise is not waited for.
+Without `data` a listener gets only `ok`, `kind`, `mode` and `amend`, so a lint that reads the message needs it. The events are `repo.opened`, `repo.changed`, `commit.before`, `commit.after`, `push.before`, `push.after`, `pull.before`, `pull.after` and `unload`. A `before` listener stops the action by returning `false`, a string with the reason, or `{cancel: true, message: "..."}`; Gittan shows the reason in a banner. A listener that throws stops nothing, and a returned promise is not waited for. `unload` comes before a reload and as Gittan quits, when the window is already gone: it may save to `Gittan.storage`, but a dialog or a notice shows nothing then.
 
 ## The repository
 
@@ -68,7 +68,7 @@ Gittan.ui.addCard({path: "src/main.pp", line: 120, title: "Note", text: "Markdow
 Gittan.ui.clearCards();
 ```
 
-A card sits under the line in the change view, like the AI review's, while the work tree is what is compared.
+A card sits under the line in the change view, like the AI review's, while the work tree is what is compared. It goes to the shown repository; a command that answers later gives `repo: ctx.repo` to `addCard` and `clearCards`, so the card lands in the repository it ran in even after another tab was picked. `clearCards()` without one clears every repository's.
 
 ## Storage and settings
 
@@ -80,15 +80,15 @@ Gittan.settings.define([
   {key: "max", type: "number", label: "Max lines", default: "20"}
 ]);
 var url = Gittan.settings.get("url");             // what the settings page holds, else the default
-Gittan.storage.setJSON("seen", {hash: s.head});   // the extension's own values in gittan.ini
+Gittan.storage.setJSON("seen", {at: Date.now()}); // the extension's own values in gittan.ini
 ```
 
-A value may hold anything, line ends included. A key is one line without `=`, not starting with `;` or `[`; `get`, `set` and `define` throw on another.
+A value may hold anything, line ends included. A key ignores case, as in any ini file (`Token` and `token` are one key), and is one line without `=`, not starting with `;` or `[`; `get`, `set` and `define` throw on another.
 
 ## Programs and the network
 
 ```js
-Gittan.git.run(["log", "--oneline", "-n", "5"]).then(function (r) { /* r.ok, r.status, r.stdout, r.stderr */ });
+Gittan.git.run(["log", "--oneline", "-n", "5"]).then(function (r) { /* r.ok, r.status (the exit code), r.stdout, r.stderr */ });
 Gittan.exec.run("gh", ["pr", "list"]).then(function (r) { ... });
 Gittan.net.fetch("https://example.com/hook", {method: "POST", body: JSON.stringify(p), headers: {"Content-Type": "application/json"}})
   .then(function (res) { return res.text(); });

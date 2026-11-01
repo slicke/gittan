@@ -66,6 +66,9 @@ case "$what" in
       MINGW*|MSYS*|CLANGARM64*) ;;
       *) echo "winhost builds on Windows itself; use 'win' or 'winarm' to cross from $host"; exit 1 ;;
     esac ;;
+  win|winarm|shim) ;;
+  *)
+    echo "unknown target '$what'; see the list at the top of $0"; exit 1 ;;
 esac
 
 # FreeBSD's base compiler is clang and there may be no 'gcc' at all, so do not
@@ -81,7 +84,12 @@ fi
 
 # Only the branches that compile the engine need the source tree; a shim-only
 # build takes its header from whichever engine is already installed.
+# A clone of another tag (QJS_TAG was bumped) is cloned again.
 fetch_src() {
+  if [ -d "$SRC" ] && \
+     [ "$(git -C "$SRC" describe --tags --exact-match 2>/dev/null)" != "$QJS_TAG" ]; then
+    rm -rf "$SRC"
+  fi
   if [ ! -d "$SRC" ]; then
     echo "--> fetching quickjs-ng $QJS_TAG"
     git clone --depth 1 --branch "$QJS_TAG" \
@@ -157,7 +165,7 @@ soname_links() {
 }
 
 # Refuse to compile the shim against an engine that is not the tag it — and the
-# Pascal binding in units/trndi/ext/trndi.ext.quickjs.pp — was written for.
+# Pascal binding in src/core/gittan.ext.quickjs.pp — was written for.
 # quickjs-ng is pre-1.0 and promises no ABI stability between minor versions,
 # and nothing catches a mismatch at runtime: tq_abi_version covers the shim,
 # not the engine. Any extra arguments are passed to the compiler (the -I of a
@@ -389,15 +397,17 @@ if [ "$what" = mac ] || [ "$what" = mac-x86_64 ]; then
     for a in ${TRNDI_QJS_MAC_ARCHS//;/ }; do shim_args+=(-arch "$a"); done
   fi
 
-  build_engine mac "${mac_args[@]}"
+  # A build folder per architecture: cmake keeps CMAKE_OSX_ARCHITECTURES in its
+  # cache, so a shared one would build the other slice again.
+  build_engine "mac-$arch" "${mac_args[@]}"
 
   # Unlike the Linux build, flatten the versioned dylib into a single unversioned
   # file. FPC links these by name (-lqjs) and there is nothing here to version
   # against, so this avoids storing symlinks in git — they do not survive a
   # checkout onto a Windows filesystem.
-  engine="$WORK/b-mac/libqjs.dylib"
+  engine="$WORK/b-mac-$arch/libqjs.dylib"
   if [ ! -e "$engine" ]; then
-    engine="$(ls "$WORK"/b-mac/libqjs.*.dylib 2>/dev/null | head -1)"
+    engine="$(ls "$WORK"/b-mac-$arch/libqjs.*.dylib 2>/dev/null | head -1)"
   fi
   cp -L "$engine" "$out/libqjs.dylib"
   # cmake stamps the install name as @rpath/libqjs.<soversion>.dylib; retarget it

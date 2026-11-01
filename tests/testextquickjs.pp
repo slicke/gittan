@@ -837,7 +837,9 @@ opaque: pointer): pansichar; cdecl;
 var
   resolved, err: string;
 begin
-  err := ResolveModuleSpecifier(string(base_name), string(name), FileModuleRoot, resolved);
+  // Both module tests' entry is main.js at the top of the folder.
+  err := ResolveModuleSpecifier(string(base_name), string(name), FileModuleRoot, resolved,
+    FileModuleRoot + DirectorySeparator + 'main.js');
   if err <> '' then
     resolved := ModuleErrorPrefix + err;
   Result := js_strdup(ctx, pansichar(RawUtf8(resolved)));

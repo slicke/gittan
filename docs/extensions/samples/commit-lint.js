@@ -17,6 +17,15 @@ Gittan.on("commit.before", function (p) {
   if (subject.length > max)
     return "The subject is " + subject.length + " characters; keep it under " + max + ".";
   var pattern = Gittan.settings.get("ticket");
-  if (pattern && !new RegExp(pattern).test(subject))
+  if (!pattern)
+    return;
+  var re;
+  try {
+    re = new RegExp(pattern);
+  } catch (e) {
+    // A listener that throws stops nothing, so a broken pattern stops the commit here.
+    return "The ticket pattern " + pattern + " is not a regular expression.";
+  }
+  if (!re.test(subject))
     return "The subject does not match " + pattern + ".";
 });

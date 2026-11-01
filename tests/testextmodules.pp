@@ -79,6 +79,7 @@ type
     procedure TestRelativeResolvesAgainstImporter;
     procedure TestEntryWithoutDirectoryUsesRoot;
     procedure TestParentInsideRootIsAllowed;
+    procedure TestTopLevelFileIsRejected;
     procedure TestEscapingRootIsRejected;
     procedure TestSymlinkEscapeIsRejected;
     procedure TestBareSpecifierIsRejected;
@@ -217,11 +218,26 @@ procedure TExtModulesTest.TestParentInsideRootIsAllowed;
 var
   resolved: string;
 begin
-  Touch('main.js');
+  Touch('lib/fmt.js');
   AssertEquals('no error', '', ResolveModuleSpecifier(
-    FRoot + DirectorySeparator + 'lib' + DirectorySeparator + 'util.js',
-    '../main.js', FRoot, resolved));
-  AssertEquals('collapsed ..', FRoot + DirectorySeparator + 'main.js', resolved);
+    FRoot + DirectorySeparator + 'lib' + DirectorySeparator + 'sub' + DirectorySeparator +
+    'util.js', '../fmt.js', FRoot, resolved));
+  AssertEquals('collapsed ..', FRoot + DirectorySeparator + 'lib' +
+    DirectorySeparator + 'fmt.js', resolved);
+end;
+
+procedure TExtModulesTest.TestTopLevelFileIsRejected;
+var
+  resolved, err: string;
+begin
+  Touch('other.js');
+  err := ResolveModuleSpecifier(FRoot + DirectorySeparator + 'main.js',
+    './other.js', FRoot, resolved);
+  AssertTrue('another extension rejected: ' + err, Pos('extension of its own', err) > 0);
+  AssertEquals('nothing resolved', '', resolved);
+  AssertEquals('its own file allowed', '', ResolveModuleSpecifier('<bootstrap>',
+    FRoot + DirectorySeparator + 'other.js', FRoot, resolved,
+    FRoot + DirectorySeparator + 'other.js'));
 end;
 
 procedure TExtModulesTest.TestEscapingRootIsRejected;

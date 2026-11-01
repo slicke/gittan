@@ -35,7 +35,7 @@ Callbacks run the same hazard in reverse — QuickJS calls a function that must
 trampoline receives every JS call and forwards it to one Pascal dispatch routine,
 using QuickJS's `magic` integer as the index into Trndi's native registry.
 
-The Pascal side is `units/trndi/ext/trndi.ext.quickjs.pp`. Note the binding rule
+The Pascal side is `src/core/gittan.ext.quickjs.pp`. Note the binding rule
 documented there: every `JSValue` parameter must be an explicit pointer type.
 Writing `const v: JSValue` reintroduces exactly the by-value hazard the shim
 removes, and fails at runtime rather than at compile time.
@@ -77,7 +77,7 @@ make the default fail on every machine that has only the x86_64 cross-compiler.
 
 `./build.sh shim` builds *only* `tq_shim.c`, against an engine that is already
 there — the copy in `prebuilt/<target>/` when one exists, otherwise the system's.
-`make shim` is the same thing. That is the useful mode wherever the platform
+That is the useful mode wherever the platform
 packages quickjs-ng itself, and on any target `prebuilt/` has no engine for: the
 shim is Trndi's own code and always has to be compiled, the engine does not.
 
@@ -94,7 +94,7 @@ binding targets, built shared and with a devel package:
 
 ```sh
 pkgman install quickjs_ng quickjs_ng_devel
-./build.sh shim       # or: make shim
+./build.sh shim
 ```
 
 That is a supported way to get an Extensions build, and the right one if Trndi
@@ -217,10 +217,8 @@ Two things to know before building *Trndi itself* for ARM64 Windows:
 - **An explicit target CPU wins over that host detection.** The staged
   directory is always `<TargetCPU>-<TargetOS>`, the same one `Trndi.lpi`
   links against, so a cross build passes the CPU through and both sides
-  agree: `make CPU_FLAG=--cpu=aarch64` on any host, or
-  `.\make.ps1 --cpu=aarch64` on Windows (the argument is forwarded to
-  lazbuild and read back for the library copy). Only when no `--cpu` is
-  given does the host (`PROCESSOR_ARCHITECTURE`, `uname -m`) decide.
+  agree: `make CPU=aarch64` on any host. On Windows `make.ps1` copies the
+  libraries of the CPU it reads from the built executable's header.
 
 Packaging is a separate, unsolved problem: `dist/windows_setup.iss` is x64
 throughout — `ArchitecturesAllowed=x64compatible`, and `iscc` produces an x64

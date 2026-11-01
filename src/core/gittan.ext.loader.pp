@@ -50,6 +50,7 @@ type
     FInfos: TGittanExtInfos;
     FOnProvision: TGittanExtProvision;
     FLoading: boolean;
+    FModulesDigest: string;
     procedure LoadOne(const AFileName: string; ASeen: TStrings);
   public
     constructor Create(ASettings: TGittanSettings);
@@ -77,7 +78,7 @@ type
 implementation
 
 uses
-  gittan.ext.host, gittan.ext.grant, gittan.textfile;
+  gittan.ext.host, gittan.ext.grant, gittan.ext.modules, gittan.textfile;
 
 resourcestring
   rsExtReadFailed = 'The extension file could not be read';
@@ -163,7 +164,12 @@ begin
     Inf.Homepage := Manifest.Homepage;
     Inf.License := Manifest.License;
     Inf.Requested := Manifest.Requested;
-    Inf.Hash := HashScript(string(Source));
+    { The modules in the subfolders run under this file's grant, so an
+      edit of one asks again as an edit of the file does. }
+    if FModulesDigest = '' then
+      Inf.Hash := HashScript(string(Source))
+    else
+      Inf.Hash := HashScript(string(Source) + #0 + FModulesDigest);
     if not Manifest.IsValid then
     begin
       Inf.Error := Manifest.ErrorMessage;
@@ -232,6 +238,67 @@ begin
   end;
 end;
 
+{ Adds the files under ADir (ending in a delimiter), not through a link,
+  to AFiles as paths after the extensions folder's AFolderLen characters. }
+procedure ListModules(const ADir: string; AFolderLen: integer; AFiles: TStrings);
+var
+  Sr: TSearchRec;
+begin
+  if FindFirst(ADir + AllFilesMask, faAnyFile, Sr) <> 0 then
+    Exit;
+  try
+    repeat
+      if (Sr.Name = '.') or (Sr.Name = '..') or IsLinkPath(ADir + Sr.Name) then
+        Continue;
+      if (Sr.Attr and faDirectory) <> 0 then
+        ListModules(ADir + Sr.Name + PathDelim, AFolderLen, AFiles)
+      else
+        AFiles.Add(Copy(ADir + Sr.Name, AFolderLen + 1, MaxInt));
+    until FindNext(Sr) <> 0;
+  finally
+    FindClose(Sr);
+  end;
+end;
+
+{ A digest of every file in the subfolders of AFolder, its path and its
+  content; '' when there is none, so a single-file extension's grant keeps
+  the hash of its file alone. }
+function ModulesDigest(const AFolder: string): string;
+var
+  Sr: TSearchRec;
+  Files: TStringList;
+  All, Path: string;
+begin
+  Result := '';
+  Files := TStringList.Create;
+  try
+    if FindFirst(AFolder + AllFilesMask, faDirectory, Sr) = 0 then
+    try
+      repeat
+        if ((Sr.Attr and faDirectory) <> 0) and (Sr.Name <> '.') and (Sr.Name <> '..') and
+          not IsLinkPath(AFolder + Sr.Name) then
+          ListModules(AFolder + Sr.Name + PathDelim, Length(AFolder), Files);
+      until FindNext(Sr) <> 0;
+    finally
+      FindClose(Sr);
+    end;
+    if Files.Count = 0 then
+      Exit;
+    Files.CaseSensitive := True;
+    Files.Sort;
+    All := '';
+    for Path in Files do
+    try
+      All := All + Path + #0 + string(ReadFileBytes(AFolder + Path)) + #0;
+    except
+      All := All + Path + #0#1#0;
+    end;
+    Result := HashScript(All);
+  finally
+    Files.Free;
+  end;
+end;
+
 procedure TGittanExtLoader.Load;
 var
   Folder: string;
@@ -259,6 +326,7 @@ begin
     Files.Sort;
     if (Files.Count > 0) and (TGittanExtEngine.Instance = nil) then
       Exit;
+    FModulesDigest := ModulesDigest(Folder);
     for FileName in Files do
     begin
       if ExtHost.Terminated then

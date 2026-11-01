@@ -51,8 +51,8 @@ end;
 {$ELSE}
 type
   TTimespec = record
-    tv_sec: int64;
-    tv_nsec: int64;
+    tv_sec: clong;
+    tv_nsec: clong;
   end;
 
 function sys_clock_gettime(clk_id: cint; tp: pointer): cint;
@@ -60,14 +60,14 @@ function sys_clock_gettime(clk_id: cint; tp: pointer): cint;
 
 function MonotonicMicroseconds: int64;
 const
-  { CLOCK_MONOTONIC: 6 on Darwin, 1 on Linux and the BSDs. }
-  ClockMonotonic = {$IFDEF DARWIN}6{$ELSE}1{$ENDIF};
+  { CLOCK_MONOTONIC: 6 on Darwin, 4 on FreeBSD, 0 on Haiku, 1 on Linux. }
+  ClockMonotonic = {$IF DEFINED(DARWIN)}6{$ELSEIF DEFINED(FREEBSD)}4{$ELSEIF DEFINED(HAIKU)}0{$ELSE}1{$ENDIF};
 var
   ts: TTimespec;
 begin
   ts := Default(TTimespec);
   if sys_clock_gettime(ClockMonotonic, @ts) = 0 then
-    Result := ts.tv_sec * 1000000 + ts.tv_nsec div 1000
+    Result := int64(ts.tv_sec) * 1000000 + int64(ts.tv_nsec) div 1000
   else
     Result := int64(GetTickCount64) * 1000;
 end;
@@ -88,6 +88,8 @@ begin
     while Got < ACount do
     begin
       n := FpRead(fd, ABuf[Got], ACount - Got);
+      if (n < 0) and (fpgeterrno = ESysEINTR) then
+        Continue;
       if n <= 0 then
         Exit;
       Inc(Got, n);

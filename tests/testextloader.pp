@@ -68,6 +68,7 @@ begin
   Lines := TStringList.Create;
   try
     Lines.Text := AScript;
+    ForceDirectories(ExtractFileDir(IncludeTrailingPathDelimiter(FLoader.Dir) + AName));
     Lines.SaveToFile(IncludeTrailingPathDelimiter(FLoader.Dir) + AName);
   finally
     Lines.Free;
@@ -137,6 +138,19 @@ begin
   FSettings.ClearExtPerm('net');
   FLoader.Reload;
   AssertEquals('asked after a reset', 2, FHost.Asked.Count);
+  Put('net.js', '/* @name Net' + LineEnding + '@copyright (c) Someone' + LineEnding +
+    '@perms net */ Gittan.alert("net, edited");');
+  FLoader.Reload;
+  AssertEquals('asked after an edit', 3, FHost.Asked.Count);
+  { A module in a subfolder runs under the grant too. }
+  Put('lib' + PathDelim + 'util.js', 'export const x = 1;');
+  FLoader.Reload;
+  AssertEquals('asked after a module came', 4, FHost.Asked.Count);
+  FLoader.Reload;
+  AssertEquals('not asked for the same module', 4, FHost.Asked.Count);
+  Put('lib' + PathDelim + 'util.js', 'export const x = 2;');
+  FLoader.Reload;
+  AssertEquals('asked after a module''s edit', 5, FHost.Asked.Count);
 end;
 
 procedure TExtLoaderTest.TestPermissionDenied;

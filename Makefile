@@ -91,6 +91,18 @@ else ifeq ($(shell uname -s),Darwin)
   QJS_HOST_CPU := $(shell uname -m | sed s/arm64/aarch64/)
   QJS_LIBS := libqjs.dylib libtqshim.dylib
   QJS_RPATH := -k-rpath -k@loader_path
+else ifeq ($(shell uname -s),FreeBSD)
+  # FPC names the target x86_64-freebsd where uname -m says amd64.
+  QJS_OS := freebsd
+  QJS_HOST_CPU := $(shell uname -m | sed -e s/amd64/x86_64/ -e s/arm64/aarch64/)
+  QJS_LIBS := libqjs.so.[0-9]*.[0-9]*.[0-9]* libtqshim.so
+  QJS_RPATH := -k-rpath=\$$ORIGIN
+else ifeq ($(shell uname -s),Haiku)
+  # Haiku says BePC for 32-bit x86 and arm64 where FPC says i386 and aarch64.
+  QJS_OS := haiku
+  QJS_HOST_CPU := $(shell uname -m | sed -e s/BePC/i386/ -e s/arm64/aarch64/)
+  QJS_LIBS := libqjs.so.[0-9]*.[0-9]*.[0-9]* libtqshim.so
+  QJS_RPATH := -k-rpath=\$$ORIGIN
 else
   QJS_OS := linux
   QJS_HOST_CPU := $(shell uname -m)

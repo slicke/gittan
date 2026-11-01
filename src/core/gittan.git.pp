@@ -1143,6 +1143,14 @@ function NvmNodeBin(const ANvmDir: string): string;
   version installed. Empty when none is. }
 function FnmNodeBin(const AFnmDir: string): string;
 
+{** Runs AExe in ADir with AArgs, the environment without ASkip's prefixes
+  ("NAME=") and with AEnv, and answers whether it started, with its
+  output, its error and its exit code in AStatus (see the implementation). }
+function RunTool(const AExe, ADir: string; const AArgs, ASkip, AEnv: array of string;
+  out AOutput, AError: string; out AStatus: integer;
+  AOnOutput: TGittanOutputEvent; const AInput: string = '';
+  ACancel: TGittanCancelEvent = nil): boolean;
+
 {** Runs a command line tool (AExe: a forge's, gh) in ADir with AArgs and
   AEnv ("NAME=value") added to the environment, and answers whether it
   exited with 0, with its standard output in AOutput and, on failure,

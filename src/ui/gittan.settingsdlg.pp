@@ -47,9 +47,10 @@ type
   TSettingsPreview = procedure(AFont: TFont; ATheme, ATabSize: integer) of object;
 
   {** Loads the extensions again and gives what was found and the
-    settings they declared (the Extensions page's Reload). }
+    settings they declared (the Extensions page's Reload), adding to
+    AValues the saved values of an extension it did not have. }
   TSettingsExtReload = procedure(out AInfos: TGittanExtInfos;
-    out ADefs: TGittanExtSettingDefs) of object;
+    out ADefs: TGittanExtSettingDefs; AValues: TStrings) of object;
 
   {** What the dialog edits besides the font. }
   TSettingsValues = record
@@ -1163,8 +1164,7 @@ begin
   if not Info.Loaded and (Info.Error <> '') then
     About := About + LineEnding + Format(rsExtNotLoaded, [Info.Error]);
   FExtInfo.Caption := About;
-  FExtResetBtn.Enabled := (epNet in Info.Requested) or (epExec in Info.Requested) or
-    (epSettings in Info.Requested);
+  FExtResetBtn.Enabled := Info.Requested * PermPromptable <> [];
   if (FExtResets <> nil) and (FExtResets.IndexOf(Info.Id) >= 0) then
     FExtResetBtn.Enabled := False;
   FBox := FExtSettingsBox;
@@ -1249,7 +1249,7 @@ procedure TSettingsForm.ExtReloadClick(Sender: TObject);
 begin
   if not Assigned(FExtReload) then
     Exit;
-  FExtReload(FExtInfos, FExtDefs);
+  FExtReload(FExtInfos, FExtDefs, FExtValues);
   ShowExtList;
 end;
 
