@@ -10,11 +10,11 @@ The file starts with a manifest in a comment:
 @copyright (c) Your Name
 @version 1.0
 @description Keeps commit subjects short.
-@perms net, exec
+@perms data, net, exec
 */
 ```
 
-`@perms` names what the extension needs beyond what every extension may do: `net` for `Gittan.net.fetch`, `exec` for `Gittan.git.run` and `Gittan.exec.run`, `settings` for `Gittan.app.setting`. Gittan asks you once per file, and again when the file changes. Reading the repository, dialogs, cards, commands, timers and the extension's own storage need no permission.
+`@perms` names what the extension needs beyond what every extension may do: `data` to read the repositories (`Gittan.repo`, the files and their content, and the full payload of an event), `net` for `Gittan.net.fetch`, `exec` for `Gittan.git.run` and `Gittan.exec.run`, `settings` for `Gittan.app.setting`. Gittan asks you once per file, and again when the file changes. Dialogs, cards, commands, timers and the extension's own storage and settings page need no permission.
 
 The scripts run in quickjs-ng (ES2023, with `fetch`-like networking, timers, `console`, `import` of modules from subfolders of the extensions folder, and top-level `await`). `gittan.d.ts` beside this file describes the `Gittan` object for an editor's completion.
 
@@ -43,7 +43,7 @@ Gittan.on("push.after", function (p) {          // {repo, ok, error, kind}
 });
 ```
 
-The events are `repo.opened`, `repo.changed`, `commit.before`, `commit.after`, `push.before`, `push.after`, `pull.before`, `pull.after` and `unload`. A `before` listener stops the action by returning `false`, a string with the reason, or `{cancel: true, message: "..."}`; Gittan shows the reason in a banner. A listener that throws stops nothing, and a returned promise is not waited for.
+Without `data` a listener gets only `ok`, `kind`, `mode` and `amend`, so a lint that reads the message needs it. The events are `repo.opened`, `repo.changed`, `commit.before`, `commit.after`, `push.before`, `push.after`, `pull.before`, `pull.after` and `unload`. A `before` listener stops the action by returning `false`, a string with the reason, or `{cancel: true, message: "..."}`; Gittan shows the reason in a banner. A listener that throws stops nothing, and a returned promise is not waited for.
 
 ## The repository
 
@@ -55,7 +55,7 @@ var diff = Gittan.repo.diff("src/main.pp");
 Gittan.repo.recent(5).forEach(function (c) { console.log(c.short, c.subject); });
 ```
 
-Every call takes the repository shown; pass `{repo: "/path/to/other"}` as the last argument for another tab's.
+These need `data`. Every call takes the repository shown; pass `{repo: "/path/to/other"}` as the last argument for another tab's.
 
 ## The window
 

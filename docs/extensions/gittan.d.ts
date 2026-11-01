@@ -18,6 +18,7 @@ declare namespace Gittan {
     files: FileStat[]; stashes: Stash[]; recent: Commit[]; refs: string[];
   }
 
+  /** Needs data. */
   const repo: {
     root(o?: RepoOptions): string;
     snapshot(o?: RepoOptions): Snapshot | undefined;

@@ -148,8 +148,8 @@ begin
   for g := Low(TExtPermGroup) to High(TExtPermGroup) do
     if g in ARequested then
       Text := Text + '  • ' + PermGroupName[g] + ': ' + PermGroupDesc[g] + LineEnding;
-  Text := Text + Format(rsExtPermBaseline, [LowerCase(PermGroupDesc[epData]) + ', ' +
-    LowerCase(PermGroupDesc[epUI]) + ' and ' + LowerCase(PermGroupDesc[epTimers])]);
+  Text := Text + Format(rsExtPermBaseline, [LowerCase(PermGroupDesc[epUI]) + ' and ' +
+    LowerCase(PermGroupDesc[epTimers])]);
   Result := AskDlg(rsExtPermTitle, Text, mtConfirmation,
     [mrYes, rsExtPermAllow, mrNo, rsExtPermDeny, 'IsDefault']) = mrYes;
 end;

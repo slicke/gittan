@@ -3,7 +3,7 @@
 @copyright (c) Gittan samples
 @version 1.0
 @description Posts every push to a webhook, with the branch and the newest commit.
-@perms net
+@perms net, data
 */
 Gittan.settings.define([
   {key: "url", type: "string", label: "Webhook URL", default: "", note: "Left empty, nothing is posted."},

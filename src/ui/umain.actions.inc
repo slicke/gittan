@@ -505,6 +505,7 @@ begin
     V.ExtValues := TStringList.Create;
     V.ExtDisabled := TStringList.Create;
     V.ExtResetPerms := TStringList.Create;
+    V.ExtReload := @ExtReloadForSettings;
     Eng := TGittanExtEngine.Existing;
     Keys := TStringList.Create;
     try

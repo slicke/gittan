@@ -46,6 +46,11 @@ type
     ATabSize characters wide in the editor while the dialog is open. }
   TSettingsPreview = procedure(AFont: TFont; ATheme, ATabSize: integer) of object;
 
+  {** Loads the extensions again and gives what was found and the
+    settings they declared (the Extensions page's Reload). }
+  TSettingsExtReload = procedure(out AInfos: TGittanExtInfos;
+    out ADefs: TGittanExtSettingDefs) of object;
+
   {** What the dialog edits besides the font. }
   TSettingsValues = record
     {** An index into SyntaxThemes. }
@@ -89,6 +94,8 @@ type
     ExtDefs: TGittanExtSettingDefs;
     ExtDir: string;
     ExtValues, ExtDisabled, ExtResetPerms: TStringList;
+    {** Reload on the Extensions page; nil hides the button. }
+    ExtReload: TSettingsExtReload;
   end;
 
 {** Shows the dialog with AFont and AValues in it, its bottom right corner
@@ -113,8 +120,9 @@ uses
 
 resourcestring
   rsExtensionsPage = 'Extensions';
-  rsExtensionsNote = 'Scripts in the extensions folder, loaded at start and on Extensions > Reload Extensions; untick one to leave it out.';
-  rsExtNone = 'No extensions. Put a .js file in the folder (Open Folder) and choose Reload Extensions.';
+  rsExtensionsNote = 'Scripts in the extensions folder, loaded at start and with Reload (or Extensions > Reload Extensions); untick one to leave it out.';
+  rsExtNone = 'No extensions. Put a .js file in the folder (Open Folder) and click Reload.';
+  rsExtReload = 'Reload';
   rsExtOpenFolder = 'Open Folder';
   rsExtResetPerms = 'Reset Permissions';
   rsExtPermsLine = 'Permissions: %s';
@@ -380,7 +388,8 @@ type
       index into FExtDefs; the lists are the caller's (TSettingsValues). }
     FExtList: TCheckListBox;
     FExtInfo: TLabel;
-    FExtResetBtn, FExtFolderBtn: TButton;
+    FExtResetBtn, FExtFolderBtn, FExtReloadBtn: TButton;
+    FExtReload: TSettingsExtReload;
     FExtSettingsBox: TPanel;
     FExtInfos: TGittanExtInfos;
     FExtDefs: TGittanExtSettingDefs;
@@ -453,6 +462,7 @@ type
     procedure ExtListSelect(Sender: TObject; User: boolean);
     procedure ExtResetClick(Sender: TObject);
     procedure ExtFolderClick(Sender: TObject);
+    procedure ExtReloadClick(Sender: TObject);
     procedure ExtSettingChange(Sender: TObject);
     procedure ShowExtList;
     procedure ShowExtInfo;
@@ -727,6 +737,14 @@ begin
   FExtFolderBtn.Left := 0;
   FExtFolderBtn.OnClick := @ExtFolderClick;
   FExtFolderBtn.Parent := Row;
+  FExtReloadBtn := TButton.Create(Self);
+  FExtReloadBtn.Caption := rsExtReload;
+  FExtReloadBtn.AutoSize := True;
+  FExtReloadBtn.Align := alLeft;
+  FExtReloadBtn.Left := 500;
+  FExtReloadBtn.BorderSpacing.Left := Scale96ToScreen(8);
+  FExtReloadBtn.OnClick := @ExtReloadClick;
+  FExtReloadBtn.Parent := Row;
   FExtResetBtn := TButton.Create(Self);
   FExtResetBtn.Caption := rsExtResetPerms;
   FExtResetBtn.AutoSize := True;
@@ -1221,6 +1239,18 @@ begin
     Exit;
   FExtResets.Add(FExtInfos[FExtList.ItemIndex].Id);
   FExtResetBtn.Enabled := False;
+end;
+
+{ Loads the extensions again, as Extensions > Reload Extensions does, and
+  lists what is found now: a file put in the folder, or edited, shows
+  without closing the dialog. A box unticked and not yet saved is
+  ticked again as the settings have it. }
+procedure TSettingsForm.ExtReloadClick(Sender: TObject);
+begin
+  if not Assigned(FExtReload) then
+    Exit;
+  FExtReload(FExtInfos, FExtDefs);
+  ShowExtList;
 end;
 
 procedure TSettingsForm.ExtFolderClick(Sender: TObject);
@@ -1967,6 +1997,8 @@ begin
     F.FExtValues := AValues.ExtValues;
     F.FExtResets := AValues.ExtResetPerms;
     F.FExtDir := AValues.ExtDir;
+    F.FExtReload := AValues.ExtReload;
+    F.FExtReloadBtn.Visible := Assigned(AValues.ExtReload);
     F.ShowExtList;
     F.FPreview := APreview;
     F.FLexers := ALexers;
@@ -2000,6 +2032,8 @@ begin
       AValues.AgentPaths := F.FAgentPaths;
       AValues.AgentModels := F.FAgentModels;
       AValues.ApiKey := Trim(F.FKeyEdit.Text);
+      { What Reload found, so the caller compares with it. }
+      AValues.ExtInfos := F.FExtInfos;
       if AValues.ExtDisabled <> nil then
       begin
         AValues.ExtDisabled.Clear;

@@ -187,6 +187,26 @@ begin
   OpenDocument(App.Extensions.Dir);
 end;
 
+{ The settings page's Reload: the extensions loaded again, and what is
+  found now with the settings they declared. }
+procedure TRepoFrame.ExtReloadForSettings(out AInfos: TGittanExtInfos;
+  out ADefs: TGittanExtSettingDefs);
+var
+  Eng: TGittanExtEngine;
+  i: integer;
+begin
+  App.Extensions.Reload;
+  SetLength(AInfos, App.Extensions.Count);
+  ADefs := nil;
+  Eng := TGittanExtEngine.Existing;
+  for i := 0 to App.Extensions.Count - 1 do
+  begin
+    AInfos[i] := App.Extensions.Info(i);
+    if Eng <> nil then
+      ADefs := Concat(ADefs, Eng.Registry.SettingsOf(AInfos[i].Id));
+  end;
+end;
+
 procedure TRepoFrame.MenuExtSettingsClick(Sender: TObject);
 begin
   OpenSettings(pgExtensions);

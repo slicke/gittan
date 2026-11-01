@@ -65,6 +65,7 @@ gittan.ext.perm,
 gittan.ext.host,
 gittan.ext.sys,
 gittan.ext.registry,
+fpjson,
 fgl,
 fpTimer,
 Math;
@@ -612,6 +613,8 @@ public
         for the admin/template context. Unlike the display name this is
         unique per loaded extension, so it is safe to key registries on. }
   function ExtensionIdForContext(ctx: JSContext): string;
+    {** What the extension owning @code(ctx) was granted; [] for none. }
+  function GrantedForContext(ctx: JSContext): TExtPermSet;
 
     {** Folder of the extension owning @code(ctx) (its script's directory),
         or '' for the admin/template context. Module imports are confined
@@ -648,7 +651,9 @@ public
         a string (the reason) or an object with cancel set (and a message);
         the first reason is ACancelMessage and the result is False. A
         listener that throws is reported and does not cancel. Every
-        listener is called even after a cancel. Main thread only. }
+        listener is called even after a cancel. A listener without the
+        data permission gets ok, kind, mode and amend alone, none of the
+        repository's content. Main thread only. }
   function Fire(const AEvent, APayloadJson: string; out ACancelMessage: string): boolean;
     {** Fire for an event that cannot be cancelled. }
   procedure Emit(const AEvent, APayloadJson: string);
@@ -3499,16 +3504,62 @@ begin
   end;
 end;
 
+{ What a listener without the data permission gets of a payload: the
+  fields that say what happened, none of the repository's content (the
+  files, the message, the commits, the root). }
+function ContentFreePayload(const AJson: string): string;
+const
+  Kept: array[0..3] of string = ('ok', 'kind', 'mode', 'amend');
+var
+  Data: TJSONData;
+  Reduced: TJSONObject;
+  Key: string;
+begin
+  Result := '{}';
+  try
+    Data := GetJSON(AJson);
+  except
+    Exit;
+  end;
+  try
+    if not (Data is TJSONObject) then
+      Exit;
+    Reduced := TJSONObject.Create;
+    try
+      for Key in Kept do
+        if TJSONObject(Data).Find(Key) <> nil then
+          Reduced.Add(Key, TJSONObject(Data).Find(Key).Clone);
+      Result := Reduced.AsJSON;
+    finally
+      Reduced.Free;
+    end;
+  finally
+    Data.Free;
+  end;
+end;
+
+function TGittanExtEngine.GrantedForContext(ctx: JSContext): TExtPermSet;
+var
+  i: integer;
+begin
+  Result := [];
+  if Assigned(FExtContexts) then
+    for i := 0 to FExtContexts.Count - 1 do
+      if (FExtContexts[i] <> nil) and (FExtContexts[i]^.Ctx = ctx) then
+        Exit(FExtContexts[i]^.Granted);
+end;
+
 function TGittanExtEngine.Fire(const AEvent, APayloadJson: string;
   out ACancelMessage: string): boolean;
 var
   Listeners: TGittanExtListeners;
   i: integer;
   arg, ret: JSValue;
-  Msg: string;
+  Msg, Reduced: string;
 begin
   Result := True;
   ACancelMessage := '';
+  Reduced := '';
   if IsExtShuttingDown or (FRuntime = nil) or (FRegistry = nil) then
     Exit;
   // A listener may add or remove listeners as it runs, so the list is
@@ -3521,7 +3572,14 @@ begin
     begin
       if IsExtShuttingDown then
         Break;
-      arg := ParseJsonIn(Listeners[i].Ctx, APayloadJson);
+      if epData in GrantedForContext(Listeners[i].Ctx) then
+        arg := ParseJsonIn(Listeners[i].Ctx, APayloadJson)
+      else
+      begin
+        if Reduced = '' then
+          Reduced := ContentFreePayload(APayloadJson);
+        arg := ParseJsonIn(Listeners[i].Ctx, Reduced);
+      end;
       ret := JS_Call(Listeners[i].Ctx, Listeners[i].Func, JS_UNDEFINED, 1, @arg);
       if JS_IsException(ret) then
         DumpJSError(Listeners[i].Ctx)

@@ -74,6 +74,7 @@ type
     procedure TestPermissionGate;
     procedure TestUnloadClearsRegistry;
     procedure TestEveryListenerIsCalled;
+    procedure TestPayloadWithoutData;
   end;
 
 implementation
@@ -215,7 +216,7 @@ end;
 
 function TExtEngineTest.LoadResult(const AName, AScript: string): string;
 begin
-  Result := string(FEngine.ExtExecuteFile(Load(AName, AScript, PermBaseline)));
+  Result := string(FEngine.ExtExecuteFile(Load(AName, AScript, PermBaseline + [epData])));
 end;
 
 function TExtEngineTest.EvalIn(ctx: JSContext; const ASrc: string): string;
@@ -368,7 +369,7 @@ procedure TExtEngineTest.TestPermissionGate;
 var
   NoUI, WithUI: PExtContextInfo;
 begin
-  NoUI := Load('noui', '', [epData, epTimers]);
+  NoUI := Load('noui', '', [epTimers]);
   WithUI := Load('withui', '', PermBaseline);
   AssertEquals('no commands without ui', 'undefined',
     EvalIn(NoUI^.Ctx, 'typeof Gittan.commands'));
@@ -406,6 +407,24 @@ begin
   AssertFalse('cancelled', FEngine.Fire('commit.before', '{}', Msg));
   AssertEquals('the first reason', 'stop', Msg);
   AssertEquals('both called', 'first,second', FHost.Alerts.CommaText);
+end;
+
+{ A listener without data gets what happened, not the content. }
+procedure TExtEngineTest.TestPayloadWithoutData;
+var
+  NoData, WithData: PExtContextInfo;
+  Msg: string;
+begin
+  NoData := Load('nodata', 'Gittan.on("commit.after", function (p) { globalThis.got = JSON.stringify(p); });',
+    PermBaseline);
+  AssertLoaded('nodata loads', string(FEngine.ExtExecuteFile(NoData)));
+  WithData := Load('withdata', 'Gittan.on("commit.after", function (p) { globalThis.got = JSON.stringify(p); });',
+    PermBaseline + [epData]);
+  AssertLoaded('withdata loads', string(FEngine.ExtExecuteFile(WithData)));
+  FEngine.Fire('commit.after', '{"repo": "/r", "ok": true, "id": "abc", "amend": false, "message": "secret"}', Msg);
+  AssertEquals('only what happened', '{"ok":true,"amend":false}', EvalIn(NoData^.Ctx, 'globalThis.got'));
+  AssertEquals('everything', '{"repo":"/r","ok":true,"id":"abc","amend":false,"message":"secret"}',
+    EvalIn(WithData^.Ctx, 'globalThis.got'));
 end;
 
 initialization

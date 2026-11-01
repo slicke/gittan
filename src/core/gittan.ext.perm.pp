@@ -47,8 +47,9 @@ uses
   gittan.sha256;
 
 type
-  {** Coarse permission groups. data/ui/timers are baseline (granted without prompt);
-      net/exec/settings must be declared in the extension manifest and approved. }
+  {** Coarse permission groups. ui/timers are baseline (granted without prompt);
+      data (the repository's content), net, exec and settings must be declared
+      in the extension manifest and approved. }
   TExtPermGroup = (epData, epUI, epTimers, epNet, epExec, epSettings);
   TExtPermSet = set of TExtPermGroup;
 
@@ -69,15 +70,15 @@ type
 
 const
   {** Always granted, no prompt. }
-  PermBaseline: TExtPermSet = [epData, epUI, epTimers];
+  PermBaseline: TExtPermSet = [epUI, epTimers];
   {** Must appear in @perms and be approved by the user. }
-  PermPromptable: TExtPermSet = [epNet, epExec, epSettings];
+  PermPromptable: TExtPermSet = [epData, epNet, epExec, epSettings];
   {** Human-readable names. Order matches TExtPermGroup. }
   PermGroupName: array[TExtPermGroup] of string =
     ('data', 'ui', 'timers', 'net', 'exec', 'settings');
   PermGroupDesc: array[TExtPermGroup] of string =
-    ('Read the repository: its state, files, changes and history',
-     'Show dialogs, cards and messages, add commands to the menus',
+    ('Read the repositories: the files and their content, changes and history',
+     'Show dialogs, cards and messages, add commands to the menus, keep its own settings',
      'Schedule timers',
      'Make network requests (fetch)',
      'Run git and other programs',

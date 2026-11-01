@@ -340,12 +340,14 @@ begin
   AssertEquals('git there', 'object', EvalIn(Full^.Ctx, 'typeof Gittan.git'));
   AssertEquals('net there', 'object', EvalIn(Full^.Ctx, 'typeof Gittan.net'));
   AssertEquals('app there', 'object', EvalIn(Full^.Ctx, 'typeof Gittan.app'));
-  AssertEquals('baseline listed', 'data,ui,timers', EvalIn(Bare^.Ctx, 'Gittan.api.permissions.join(",")'));
+  AssertEquals('baseline listed', 'ui,timers', EvalIn(Bare^.Ctx, 'Gittan.api.permissions.join(",")'));
   AssertEquals('no git', 'undefined', EvalIn(Bare^.Ctx, 'typeof Gittan.git'));
   AssertEquals('no net', 'undefined', EvalIn(Bare^.Ctx, 'typeof Gittan.net'));
   AssertEquals('no fetch global', 'undefined', EvalIn(Bare^.Ctx, 'typeof fetch'));
   AssertEquals('no app', 'undefined', EvalIn(Bare^.Ctx, 'typeof Gittan.app'));
-  AssertEquals('repo there', 'object', EvalIn(Bare^.Ctx, 'typeof Gittan.repo'));
+  AssertEquals('no repo without data', 'undefined', EvalIn(Bare^.Ctx, 'typeof Gittan.repo'));
+  AssertEquals('storage without data', 'object', EvalIn(Bare^.Ctx, 'typeof Gittan.storage'));
+  AssertEquals('settings without data', 'object', EvalIn(Bare^.Ctx, 'typeof Gittan.settings'));
   AssertEquals('require throws', 'true', EvalIn(Bare^.Ctx,
     'var threw = false; try { Gittan.permissions.require("net"); } catch (e) { threw = true; } String(threw)'));
   AssertEquals('git path', 'true', EvalIn(Full^.Ctx, 'String(Gittan.app.setting("GitPath").length > 0)'));

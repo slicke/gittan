@@ -11,7 +11,8 @@ unit gittan.ext.api;
   needs (gittan.ext.perm): data for the repository, exec for git and
   programs, net for HTTP, ui for the window, settings for Gittan's own.
   The reads run on the main thread against the window's repository
-  (ExtHost.RepoFor); git, programs and HTTP run on the promise thread
+  (ExtHost.RepoFor); the extension's own values and its settings page
+  are every extension's (ui); git, programs and HTTP run on the promise thread
   with nothing but strings, so the window is never touched off its
   thread. Every answer crosses as JSON text, which the facade parses in
   the extension's own context. No LCL. }
@@ -1045,10 +1046,12 @@ begin
     addClassFunctionIf(epData, '_stashes', @JSStashes, 1);
     addClassFunctionIf(epData, '_remotes', @JSRemotes, 1);
     addClassFunctionIf(epData, '_recent', @JSRecent, 2);
-    addClassFunctionIf(epData, '_storageGet', @JSStorageGet, 1);
-    addClassFunctionIf(epData, '_storageSet', @JSStorageSet, 2);
-    addClassFunctionIf(epData, '_settingsDefine', @JSSettingsDefine, 1);
-    addClassFunctionIf(epData, '_settingsGet', @JSSettingsGet, 1);
+    { The extension's own values and settings page touch nothing of the
+      repository: every extension has them. }
+    addClassFunctionIf(epUI, '_storageGet', @JSStorageGet, 1);
+    addClassFunctionIf(epUI, '_storageSet', @JSStorageSet, 2);
+    addClassFunctionIf(epUI, '_settingsDefine', @JSSettingsDefine, 1);
+    addClassFunctionIf(epUI, '_settingsGet', @JSSettingsGet, 1);
     addClassFunctionIf(epSettings, '_appSetting', @JSAppSetting, 1);
     addClassFunctionIf(epUI, '_notify', @JSNotify, 3);
     addClassFunctionIf(epUI, '_status', @JSStatus, 2);

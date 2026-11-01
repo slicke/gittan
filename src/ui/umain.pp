@@ -1742,6 +1742,8 @@ type
     procedure MenuExtReloadClick(Sender: TObject);
     procedure MenuExtFolderClick(Sender: TObject);
     procedure MenuExtSettingsClick(Sender: TObject);
+    procedure ExtReloadForSettings(out AInfos: TGittanExtInfos;
+      out ADefs: TGittanExtSettingDefs);
     procedure FilePopupPopup(Sender: TObject);
     procedure SummaryContextFile(Sender: TObject; const APath: string;
       const AScreenPos: TPoint);

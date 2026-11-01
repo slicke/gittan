@@ -3,6 +3,7 @@
 @copyright (c) Gittan samples
 @version 1.0
 @description Stops a commit whose subject is too long or lacks a ticket id.
+@perms data
 */
 Gittan.settings.define([
   {key: "max", type: "number", label: "Longest subject", default: "72"},
