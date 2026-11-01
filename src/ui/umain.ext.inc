@@ -3,7 +3,7 @@
   and the items of their own in the file and editor popups, a command's
   context, and what the host (gittan.exthost) puts in the status bar and
   the change view. The menus are built again whenever the registry
-  changes (RebuildExtMenu, from TRepoWindow.ExtensionsChanged). }
+  changes (QueueRebuildExtMenu, from TRepoWindow.ExtensionsChanged). }
 
 const
   { Marks the items of the extensions in the popups, so a rebuild takes
@@ -75,6 +75,20 @@ begin
   AddMenuItem(FExtMenu, rsExtensionsSettings, 0, True, @MenuExtSettingsClick);
 end;
 
+procedure TRepoFrame.QueueRebuildExtMenu;
+begin
+  if FExtMenuQueued then
+    Exit;
+  FExtMenuQueued := True;
+  Application.QueueAsyncCall(@RebuildExtMenuAsync, 0);
+end;
+
+procedure TRepoFrame.RebuildExtMenuAsync(Data: PtrInt);
+begin
+  FExtMenuQueued := False;
+  RebuildExtMenu;
+end;
+
 { What a command gets: the repository, the file it was opened on (the
   popup's, else the one shown), the line under the editor's popup or
   the caret, counted in the file, and the selected text. }
@@ -119,7 +133,7 @@ begin
     Exit;
   Item := TMenuItem(Sender);
   if not Eng.RunCommand(Item.Hint, ExtContextJson(Item)) then
-    RebuildExtMenu;
+    QueueRebuildExtMenu;
 end;
 
 { Raises AEvent in the extensions with AJson (freed here) as its

@@ -562,8 +562,9 @@ begin
         if i <= High(V.Accounts) then
           SwitchForgeAccounts(Forges[i], V.Accounts[i]);
       FWindow.CheckAccounts;
-      { The extensions: their values are kept as they are; one turned on
-        or off, or one whose permissions were reset, needs a reload. }
+      { The extensions: their values are kept as they are, an emptied one
+        ("name=" in the list) dropped; one turned on or off, or one whose
+        permissions were reset, needs a reload. }
       ExtChanged := False;
       for i := 0 to V.ExtValues.Count - 1 do
       begin

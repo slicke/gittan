@@ -1220,7 +1220,7 @@ var
   i: integer;
 begin
   for i := 0 to FFrames.Count - 1 do
-    Frames[i].RebuildExtMenu;
+    Frames[i].QueueRebuildExtMenu;
 end;
 
 procedure TGittanWindow.LoadExtensionsAsync(Data: PtrInt);

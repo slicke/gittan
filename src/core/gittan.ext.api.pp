@@ -794,7 +794,7 @@ begin
     res := StringToValueVal('Gittan.git.run: the arguments are a list of strings');
     Exit;
   end;
-  Ok := RunGitEnv(Root, Args, [], Output, Error);
+  Ok := RunGitEnv(Root, Args, [], Output, Error, '', nil, nil, ParamStr(params, 2));
   if Ok then
     res := StringToValueVal(RunJson(True, 0, Output, Error))
   else
@@ -835,7 +835,7 @@ begin
   Dir := ParamStr(params, 2);
   if Dir = '' then
     Dir := GetCurrentDir;
-  Ok := RunCli(Exe, Dir, Args, [], Output, Error);
+  Ok := RunCli(Exe, Dir, Args, [], Output, Error, ParamStr(params, 3));
   if Ok then
     res := StringToValueVal(RunJson(True, 0, Output, Error))
   else

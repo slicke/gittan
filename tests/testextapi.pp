@@ -49,6 +49,7 @@ type
     procedure TestGitRun;
     procedure TestExecRun;
     procedure TestExecWithoutData;
+    procedure TestRunInput;
     procedure TestStorage;
     procedure TestSettings;
     procedure TestPermissionsShape;
@@ -293,6 +294,30 @@ begin
   AssertEquals('git in the shown repository', 'true:first', EvalIn(Info^.Ctx, 'globalThis.out'));
   AssertEquals('a program there too', 'true', EvalIn(Info^.Ctx, 'globalThis.inside'));
   AssertEquals('no repo without data', 'undefined', EvalIn(Info^.Ctx, 'typeof Gittan.repo'));
+end;
+
+{ {input} goes to the standard input: git hash-object reads it all,
+  git cat-file --batch-check writes as it reads (a megabyte of answers
+  to a hundred kilobytes of names, which filled both pipes when the
+  input was written first), and git --version never reads it, which
+  breaks the pipe without ending the tests. }
+procedure TExtApiTest.TestRunInput;
+var
+  Info: PExtContextInfo;
+begin
+  Info := Load('input', 'Gittan.git.run(["hash-object", "--stdin"], {input: "hello\n"}).then(function (r) {' +
+    'globalThis.hash = r.stdout.trim(); });' +
+    'Gittan.exec.run("git", ["hash-object", "--stdin"], {input: "hello\n"}).then(function (r) {' +
+    'globalThis.ehash = r.stdout.trim(); });' +
+    'Gittan.git.run(["cat-file", "--batch-check"], {input: "HEAD\n".repeat(20000)}).then(function (r) {' +
+    'globalThis.lines = r.ok + ":" + r.stdout.trim().split("\n").length; });' +
+    'Gittan.git.run(["--version"], {input: "x".repeat(4 * 1024 * 1024)}).then(function (r) {' +
+    'globalThis.unread = r.ok + ":" + r.stdout.substring(0, 11); });', AllPerms);
+  WaitFor(Info^.Ctx, 'globalThis.hash && globalThis.ehash && globalThis.lines && globalThis.unread');
+  AssertEquals('git read it', 'ce013625030ba8dba906f756967f9e9ca394464a', EvalIn(Info^.Ctx, 'globalThis.hash'));
+  AssertEquals('a program too', 'ce013625030ba8dba906f756967f9e9ca394464a', EvalIn(Info^.Ctx, 'globalThis.ehash'));
+  AssertEquals('written as it was read', 'true:20000', EvalIn(Info^.Ctx, 'globalThis.lines'));
+  AssertEquals('an input not read', 'true:git version', EvalIn(Info^.Ctx, 'globalThis.unread'));
 end;
 
 procedure TExtApiTest.TestExecRun;

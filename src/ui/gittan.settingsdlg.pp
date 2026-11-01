@@ -1260,11 +1260,13 @@ begin
 end;
 
 { A declared setting's control changed: its value goes to the caller's
-  list. }
+  list. An emptied field stays in it as "name=", since Values[] := ''
+  would drop the pair, and the caller would then keep the old value. }
 procedure TSettingsForm.ExtSettingChange(Sender: TObject);
 var
   Def: TGittanExtSettingDef;
-  Value: string;
+  Value, Pair: string;
+  i: integer;
 begin
   if (FExtValues = nil) or not (Sender is TControl) then
     Exit;
@@ -1279,7 +1281,12 @@ begin
     Value := TEdit(Sender).Text
   else
     Exit;
-  FExtValues.Values[Def.ExtId + #9 + Def.Key] := Value;
+  Pair := Def.ExtId + #9 + Def.Key;
+  i := FExtValues.IndexOfName(Pair);
+  if i >= 0 then
+    FExtValues[i] := Pair + FExtValues.NameValueSeparator + Value
+  else
+    FExtValues.Add(Pair + FExtValues.NameValueSeparator + Value);
 end;
 
 function TSettingsForm.AddRow(ASpaceAbove: integer): TPanel;

@@ -399,4 +399,5 @@ qjs-links:
 
 clean:
 	rm -rf lib $(LEXLIB) pkg Gittan Gittan.app Gittan.exe tests/lib $(TESTBIN) $(TESTBIN).exe \
-	  libqjs.* libtqshim.* tqshim.dll tests/libqjs.* tests/libtqshim.* tests/tqshim.dll
+	  libqjs.* libtqshim.* tqshim.dll tests/libqjs.* tests/libtqshim.* tests/tqshim.dll \
+	  $(wildcard externals/quickjs/prebuilt/*/libqjs.so externals/quickjs/prebuilt/*/libqjs.so.0)

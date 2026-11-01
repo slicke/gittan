@@ -210,7 +210,7 @@ type
     function FrameCount: integer; virtual; abstract;
     function FrameAt(AIndex: integer): TRepoFrame; virtual; abstract;
     {** The commands the extensions registered changed: every frame
-      builds its Extensions menu and popups again (RebuildExtMenu). }
+      builds its Extensions menu and popups again (QueueRebuildExtMenu). }
     procedure ExtensionsChanged; virtual; abstract;
   end;
 
@@ -354,6 +354,8 @@ type
       whether the snapshot applied is the one an open gives, whose
       events OpenJobDone raises itself. }
     FExtMenu: TMenuItem;
+    { A rebuild of the Extensions menu is queued (QueueRebuildExtMenu). }
+    FExtMenuQueued: boolean;
     FExtOpening: boolean;
     FStatus: TGittanStatusBar;
     {** What the status bar's transport buttons do now. }
@@ -1742,6 +1744,7 @@ type
     procedure MenuExtReloadClick(Sender: TObject);
     procedure MenuExtFolderClick(Sender: TObject);
     procedure MenuExtSettingsClick(Sender: TObject);
+    procedure RebuildExtMenuAsync(Data: PtrInt);
     procedure ExtReloadForSettings(out AInfos: TGittanExtInfos;
       out ADefs: TGittanExtSettingDefs);
     procedure FilePopupPopup(Sender: TObject);
@@ -2238,8 +2241,15 @@ type
     procedure ExtAddCard(const ACard: TGittanReviewThread);
     procedure ExtClearCards(const AExtId: string);
     {** Builds the Extensions menu and the popups' items again from the
-      commands registered (TRepoWindow.ExtensionsChanged). }
+      commands registered. }
     procedure RebuildExtMenu;
+    {** RebuildExtMenu once the event that asked for it is handled
+      (TRepoWindow.ExtensionsChanged, a command gone): the registry
+      changes from a click on an item of those menus, Reload Extensions
+      or a command's, and the rebuild frees the items, the one clicked
+      among them, while the widgetset is still in its click. Several
+      asks before it runs give one rebuild. }
+    procedure QueueRebuildExtMenu;
     {** The folder an open job is opening, '' when none runs. }
     property OpeningDir: string read FOpeningDir;
     {** The root of the repository opening, as the window found it
@@ -6947,9 +6957,14 @@ begin
   FSummary.Selected := '';
   LoadSnapshots;
   Snap := Job.Snapshot;
+  { repo.opened tells the extensions, not ApplySnapshot's repo.changed;
+    an error in it must not leave that silenced for the tab. }
   FExtOpening := True;
-  ApplySnapshot(Snap);
-  FExtOpening := False;
+  try
+    ApplySnapshot(Snap);
+  finally
+    FExtOpening := False;
+  end;
   if Snap.Ok then
   begin
     ExtEmit('repo.opened', TJSONObject.Create(['branch', Snap.Branch, 'head', Snap.Head]));

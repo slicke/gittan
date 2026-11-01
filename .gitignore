@@ -7,6 +7,9 @@
 # The prebuilt QuickJS engine and shim the extensions link are kept
 # (externals/quickjs/README.md).
 !/externals/quickjs/prebuilt/**
+# but not the links make (qjs-links) puts beside the Linux engine
+/externals/quickjs/prebuilt/*/libqjs.so
+/externals/quickjs/prebuilt/*/libqjs.so.0
 *.lrs
 *.res
 *.compiled

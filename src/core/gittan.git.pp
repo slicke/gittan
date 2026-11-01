@@ -1146,9 +1146,10 @@ function FnmNodeBin(const AFnmDir: string): string;
 {** Runs a command line tool (AExe: a forge's, gh) in ADir with AArgs and
   AEnv ("NAME=value") added to the environment, and answers whether it
   exited with 0, with its standard output in AOutput and, on failure,
-  its message in AError (what it printed on both, as git's failures). }
+  its message in AError (what it printed on both, as git's failures).
+  AInput goes to its standard input. }
 function RunCli(const AExe, ADir: string; const AArgs, AEnv: array of string;
-  out AOutput, AError: string): boolean;
+  out AOutput, AError: string; const AInput: string = ''): boolean;
 
 {** Runs an AI agent's command line tool (AExe: claude, copilot) in ADir
   with AArgs and AInput on its standard input, and answers whether it
@@ -1261,10 +1262,12 @@ function RunGitIn(const ADir: string; const AArgs: array of string;
 {** RunGitIn with the variables AEnv ("NAME=value") set besides those
   Gittan always sets, and AOnOutput told of each piece git writes as it
   runs, on either stream. ACancel, when given, is asked as git runs, and
-  True ends it: false then, with no reason in AError. }
+  True ends it: false then, with no reason in AError. AInput goes to
+  git's standard input (git commit -F -, git apply). }
 function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
   out AOutput, AError: string; const AIndexFile: string = '';
-  AOnOutput: TGittanOutputEvent = nil; ACancel: TGittanCancelEvent = nil): boolean;
+  AOnOutput: TGittanOutputEvent = nil; ACancel: TGittanCancelEvent = nil;
+  const AInput: string = ''): boolean;
 
 {** The variables a command that goes to the network runs with in ADir
   besides Gittan's own: ssh in batch mode (see
@@ -1898,22 +1901,70 @@ begin
 end;
 {$endif}
 
+type
+  { Writes a tool's input on a thread of its own while RunTool reads its
+    output, then closes the input: written first, a tool that writes as
+    it reads (cat, git apply) filled its output pipe while Gittan was
+    still writing, and both waited for ever. A tool that ends before
+    reading it all breaks the pipe, which is no failure of the run; the
+    signal that would end Gittan then (SIGPIPE) is blocked on this
+    thread alone, so the tools Gittan starts keep theirs. }
+  TToolInputWriter = class(TThread)
+  private
+    FProcess: TProcess;
+    FInput: string;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(AProcess: TProcess; const AInput: string);
+  end;
+
+constructor TToolInputWriter.Create(AProcess: TProcess; const AInput: string);
+begin
+  FProcess := AProcess;
+  FInput := AInput;
+  inherited Create(False);
+end;
+
+procedure TToolInputWriter.Execute;
+{$ifdef unix}
+const
+  F_SETNOSIGPIPE = 73;
+var
+  Mask: TSigSet;
+{$endif}
+begin
+  {$ifdef unix}
+  FpSigEmptySet(Mask);
+  FpSigAddSet(Mask, SIGPIPE);
+  FpSigProcMask(SIG_BLOCK, @Mask, nil);
+  {$ifdef darwin}
+  FpFcntl(FProcess.Input.Handle, F_SETNOSIGPIPE, 1);
+  {$endif}
+  {$endif}
+  try
+    FProcess.Input.WriteBuffer(FInput[1], Length(FInput));
+  except
+  end;
+  FProcess.CloseInput;
+end;
+
 { Runs AExe in ADir with AArgs, in the environment with ASkip (prefixes
   like "NAME=") and the names of AEnv left out and AEnv added; false,
   with nothing read, when AExe cannot be started. Both pipes are read
   as the tool writes, so a long command's progress can be shown and
   neither pipe fills up and blocks it; what is left once it has ended
   is read after it. AStatus is its exit code. AInput is written to the
-  tool's input before its input is closed: a tool that reads all of it
-  before it writes (claude -p) takes any length, one that writes first
-  could block on a full pipe while it is written. ACancel, when given,
-  is asked on every pass of the reading loop, and True ends the tool. }
+  tool's input as it runs (TToolInputWriter), of any length, and the
+  input closed after it. ACancel, when given, is asked on every pass of
+  the reading loop, and True ends the tool. }
 function RunTool(const AExe, ADir: string; const AArgs, ASkip, AEnv: array of string;
   out AOutput, AError: string; out AStatus: integer;
   AOnOutput: TGittanOutputEvent; const AInput: string = '';
   ACancel: TGittanCancelEvent = nil): boolean;
 var
   P: TProcess;
+  Writer: TToolInputWriter;
   Skip: array of string;
   i: integer;
   Got, OutOpen, ErrOpen: boolean;
@@ -1921,6 +1972,7 @@ begin
   AOutput := '';
   AError := '';
   AStatus := -1;
+  Writer := nil;
   P := TProcess.Create(nil);
   try
     P.Executable := AExe;
@@ -1943,14 +1995,11 @@ begin
     end;
     { The input ends once AInput is written (at once without one): a
       hook or an alias that reads it would otherwise wait for ever, and
-      the app with it. A tool that ended before reading it all breaks the
-      pipe, which is no failure of the run. }
+      the app with it. }
     if AInput <> '' then
-      try
-        P.Input.WriteBuffer(AInput[1], Length(AInput));
-      except
-      end;
-    P.CloseInput;
+      Writer := TToolInputWriter.Create(P, AInput)
+    else
+      P.CloseInput;
     OutOpen := True;
     ErrOpen := True;
     repeat
@@ -1974,6 +2023,13 @@ begin
     AStatus := P.ExitStatus;
     Result := True;
   finally
+    { The tool has ended (or was ended), so the writer's pipe is read or
+      broken and it returns. }
+    if Writer <> nil then
+    begin
+      Writer.WaitFor;
+      Writer.Free;
+    end;
     P.Free;
   end;
 end;
@@ -2001,7 +2057,8 @@ end;
 
 function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
   out AOutput, AError: string; const AIndexFile: string;
-  AOnOutput: TGittanOutputEvent; ACancel: TGittanCancelEvent): boolean;
+  AOnOutput: TGittanOutputEvent; ACancel: TGittanCancelEvent;
+  const AInput: string): boolean;
 var
   Args, Env: array of string;
   Status, i: integer;
@@ -2030,7 +2087,7 @@ begin
     SetLength(Env, i + 3);
   { The user's own GIT_INDEX_FILE goes even when none is given. }
   if not RunTool(GGitExe, ADir, Args, ['GIT_INDEX_FILE='], Env, AOutput, AError,
-    Status, AOnOutput, '', ACancel) then
+    Status, AOnOutput, AInput, ACancel) then
   begin
     if Assigned(ACancel) and ACancel() then
       AError := ''
@@ -2226,11 +2283,11 @@ begin
 end;
 
 function RunCli(const AExe, ADir: string; const AArgs, AEnv: array of string;
-  out AOutput, AError: string): boolean;
+  out AOutput, AError: string; const AInput: string): boolean;
 var
   Status: integer;
 begin
-  if not RunTool(AExe, ADir, AArgs, [], AEnv, AOutput, AError, Status, nil) then
+  if not RunTool(AExe, ADir, AArgs, [], AEnv, AOutput, AError, Status, nil, AInput) then
   begin
     AError := 'Could not run ' + AExe;
     Exit(False);
