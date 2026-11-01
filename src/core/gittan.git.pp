@@ -1414,6 +1414,20 @@ begin
 end;
 {$endif}
 
+{$ifdef windows}
+{ SysUtils.GetTempDir on Windows, through OnGetTempDir: FPC's own reads
+  TEMP with the GetEnvironmentVariable EnvironmentVariable describes, so
+  for a user named Björn it named a folder that is not there and every
+  temporary file (the commit's index, a stash's paths) failed. TEMP,
+  then TMP, as FPC's. }
+function UnicodeTempDir(AGlobal: boolean): string;
+begin
+  Result := EnvironmentVariable('TEMP');
+  if Result = '' then
+    Result := EnvironmentVariable('TMP');
+end;
+{$endif}
+
 var
   GToolPath: string;
   GGitExe: string;
@@ -7199,6 +7213,9 @@ begin
 end;
 
 initialization
+  {$ifdef windows}
+  OnGetTempDir := @UnicodeTempDir;
+  {$endif}
   GToolPath := MakeToolPath;
   GOldGitExes := TStringList.Create;
   SetGitExe('');

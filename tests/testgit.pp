@@ -89,6 +89,7 @@ type
     procedure TestCommitTemplate;
     procedure TestRemoteEnvironment;
     procedure TestEnvironmentUtf8;
+    procedure TestTempDirUtf8;
     procedure TestResolveMerge;
     procedure TestResolveRebase;
     procedure TestMarkResolvedAndAbort;
@@ -2039,7 +2040,7 @@ var
   Own, Id, Text: string;
   Code: integer;
 begin
-  Own := GetEnvironmentVariable('PATH');
+  Own := EnvironmentVariable('PATH');
   AssertTrue(ToolSearchPath, Pos(Own, ToolSearchPath) = 1);
   Dirs := TStringList.Create;
   try
@@ -2472,6 +2473,31 @@ begin
   AssertTrue(Err, RunGitIn(FDir, ['-c', 'alias.gittan-env=!echo "$GITTAN_TEST_NAME"',
     'gittan-env'], Output, Err));
   AssertEquals('Björn', Trim(Output));
+end;
+
+{ GetTempDir names the temporary folder of a user named Björn, and a
+  file is made there: FPC's own read TEMP as EnvironmentVariable says
+  it must not, and every temporary file of a commit or a stash failed. }
+procedure TGitRepoTest.TestTempDirUtf8;
+const
+  Name = {$ifdef windows}'TEMP'{$else}'TMPDIR'{$endif};
+var
+  Old, Dir, Temp: string;
+begin
+  Old := EnvironmentVariable(Name);
+  Dir := FDir + PathDelim + 'Björn';
+  AssertTrue(Dir, CreateDir(Dir));
+  SetTestVariable(Name, Dir);
+  try
+    AssertEquals(IncludeTrailingPathDelimiter(Dir), GetTempDir);
+    AssertTrue(GetTempDir, DirectoryExists(GetTempDir));
+    Temp := GetTempFileName(GetTempDir, 'gittan-test-');
+    FileClose(FileCreate(Temp));
+    AssertTrue(Temp, FileExists(Temp));
+    DeleteFile(Temp);
+  finally
+    SetTestVariable(Name, Old);
+  end;
 end;
 
 { Two branches that change a.txt each their own way, topic also

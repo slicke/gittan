@@ -7,6 +7,7 @@
 
 ### Fixed
 - Gittan no longer quits at once when Claude Code or Copilot ends before it has read the whole prompt Gittan gives it.
+- On Windows, a user whose name has a letter outside ASCII (Björn) can commit, stash and revert again: Gittan's temporary files went to a folder that does not exist.
 
 ## 0.10 (build-135, 2026-10-31)
 
