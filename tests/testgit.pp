@@ -31,6 +31,7 @@ type
     procedure TearDown; override;
   published
     procedure TestWindowsArg;
+    procedure TestEmptyArgument;
     procedure TestInsteadOf;
     procedure TestChangeKind;
     procedure TestStageFlags;
@@ -3709,6 +3710,28 @@ begin
     RemoveTree(Remote);
     RemoveTree(Other);
   end;
+end;
+
+{ An empty argument is refused on Unix, where TProcess would end the
+  argument list there and git config would read the key instead of
+  setting it; on Windows it goes through as "". }
+procedure TGitRepoTest.TestEmptyArgument;
+var
+  Output, Err: string;
+begin
+  Git(['init', '-q']);
+  Git(['config', 'gittan.test', 'before']);
+  {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
+  AssertFalse('refused', RunGitIn(FDir, ['config', '--local', 'gittan.test', ''], Output, Err));
+  AssertTrue(Err, Pos('empty argument', Err) > 0);
+  AssertTrue(Err, Pos('after "gittan.test"', Err) > 0);
+  AssertEquals('nothing run', 'before', Trim(Git(['config', 'gittan.test'])));
+  AssertFalse('a tool too', RunCli('git', FDir, ['config', 'gittan.test', ''], [], Output, Err));
+  AssertTrue(Err, Pos('empty argument', Err) > 0);
+  {$ELSE}
+  AssertTrue(Err, RunGitIn(FDir, ['config', '--local', 'gittan.test', ''], Output, Err));
+  AssertEquals('set, empty', '', Trim(Git(['config', 'gittan.test'])));
+  {$ENDIF}
 end;
 
 procedure TGitRepoTest.TestParseGitVersion;

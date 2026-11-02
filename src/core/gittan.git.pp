@@ -1163,7 +1163,9 @@ function FnmNodeBin(const AFnmDir: string): string;
 
 {** Runs AExe in ADir with AArgs, the environment without ASkip's prefixes
   ("NAME=") and with AEnv, and answers whether it started, with its
-  output, its error and its exit code in AStatus (see the implementation). }
+  output, its error and its exit code in AStatus (see the implementation).
+  On Unix an empty argument is refused: nothing runs and AError says
+  why (see the implementation). }
 function RunTool(const AExe, ADir: string; const AArgs, ASkip, AEnv: array of string;
   out AOutput, AError: string; out AStatus: integer;
   AOnOutput: TGittanOutputEvent; const AInput: string = '';
@@ -2058,6 +2060,25 @@ begin
   AOutput := '';
   AError := '';
   AStatus := -1;
+  {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
+  { TProcess makes each argument a C string with StrNew, which gives nil
+    for an empty one, and nil ends the argument list: the empty argument
+    and every one after it would be lost and the tool run with what is
+    left (git config <key> "" reads the key instead of setting it). The
+    call fails instead, so the mistake shows. Windows quotes an empty
+    argument as "" (WindowsArg) and passes it. }
+  for i := 0 to High(AArgs) do
+    if AArgs[i] = '' then
+    begin
+      if i = 0 then
+        AError := Format('An empty argument cannot be passed to %s here, as the first; ' +
+          'nothing was run.', [ExtractFileName(AExe)])
+      else
+        AError := Format('An empty argument cannot be passed to %s here, after "%s"; ' +
+          'nothing was run.', [ExtractFileName(AExe), AArgs[i - 1]]);
+      Exit(False);
+    end;
+  {$ENDIF}
   Writer := nil;
   P := TProcess.Create(nil);
   try
@@ -2194,7 +2215,7 @@ begin
   begin
     if Assigned(ACancel) and ACancel() then
       AError := ''
-    else
+    else if AError = '' then
       AError := GitNotRunMessage(GGitExe);
     Exit(False);
   end;
@@ -2392,7 +2413,8 @@ var
 begin
   if not RunTool(AExe, ADir, AArgs, [], AEnv, AOutput, AError, Status, nil, AInput) then
   begin
-    AError := 'Could not run ' + AExe;
+    if AError = '' then
+      AError := 'Could not run ' + AExe;
     Exit(False);
   end;
   Result := Status = 0;
