@@ -11,7 +11,8 @@ interface
 uses
   { gittan.repoinfo first: its ParseTags is not the one tested here. }
   Classes, SysUtils, fpcunit, testregistry, gittan.repoinfo, gittan.git, gittan.history,
-  gittan.graph, gittan.rebase, gittan.blame, gittan.conflicts, gittan.discard, testhelpers;
+  gittan.graph, gittan.rebase, gittan.blame, gittan.conflicts, gittan.discard, gittan.issuelinks,
+  testhelpers;
 
 type
   TGitRepoTest = class(TTestCase)
@@ -31,6 +32,7 @@ type
     procedure TearDown; override;
   published
     procedure TestWindowsArg;
+    procedure TestEmptyArgument;
     procedure TestInsteadOf;
     procedure TestChangeKind;
     procedure TestStageFlags;
@@ -70,6 +72,10 @@ type
     procedure TestSyncCommits;
     procedure TestRecentCommits;
     procedure TestGraphCommits;
+    procedure TestGraphOptions;
+    procedure TestNotes;
+    procedure TestArchive;
+    procedure TestIssueTracker;
     procedure TestPathCommits;
     procedure TestOperation;
     procedure TestBranchesAndSwitch;
@@ -104,6 +110,7 @@ type
     procedure TestMoveAndRemove;
     procedure TestRebaseOnto;
     procedure TestBehindDefault;
+    procedure TestMergeConflicts;
     procedure TestUpstreamInReflog;
     procedure TestRebaseOntoConflicts;
     procedure TestRebaseStray;
@@ -1544,6 +1551,197 @@ begin
   end;
 end;
 
+{ First parent leaves the merged branch's commits out and cuts the
+  merge's other parents, so the lanes stay in one line; no merges
+  leaves the merge out. }
+procedure TGitRepoTest.TestGraphOptions;
+var
+  Branch: string;
+  Commits: TGittanGraphCommits;
+  i: integer;
+  Found: boolean;
+begin
+  MakeHistory;
+  Branch := Trim(Git(['rev-parse', '--abbrev-ref', 'HEAD']));
+  Git(['checkout', '-q', '-b', 'side']);
+  WriteFile('b.txt', 'side'#10);
+  Commit('on side');
+  Git(['checkout', '-q', Branch]);
+  WriteFile('a.txt', 'main'#10);
+  Commit('on main');
+  Git(['merge', '-q', '--no-ff', '-m', 'merge side', 'side']);
+  { The side branch is deleted, so only the merge leads to its commit. }
+  Git(['branch', '-D', 'side']);
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.GraphCommits(Commits, 500));
+  AssertEquals(4, Length(Commits));
+  AssertTrue(FRepo.GraphCommits(Commits, 500, True, False));
+  AssertEquals(3, Length(Commits));
+  AssertEquals('merge side', Commits[0].Subject);
+  AssertEquals(1, Length(Commits[0].Parents));
+  AssertEquals(1, GraphWidth(Commits));
+  for i := 0 to High(Commits) do
+    AssertFalse('on side left out', Commits[i].Subject = 'on side');
+  AssertTrue(FRepo.GraphCommits(Commits, 500, False, True));
+  AssertEquals(3, Length(Commits));
+  Found := False;
+  for i := 0 to High(Commits) do
+  begin
+    AssertFalse('merge left out', Commits[i].Subject = 'merge side');
+    Found := Found or (Commits[i].Subject = 'on side');
+  end;
+  AssertTrue('on side kept', Found);
+  AssertTrue(FRepo.GraphCommits(Commits, 500, True, True));
+  AssertEquals(2, Length(Commits));
+  AssertEquals('on main', Commits[0].Subject);
+end;
+
+{ A note is set, read by the graph and the details, replaced and
+  removed. }
+procedure TGitRepoTest.TestNotes;
+var
+  Head: string;
+  Commits: TGittanGraphCommits;
+  One: TGittanGraphCommit;
+  Line: TGittanCommitLine;
+  Body: string;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  Head := Trim(Git(['rev-parse', 'HEAD']));
+  AssertTrue(FRepo.GraphCommits(Commits));
+  AssertEquals('', Commits[0].Note);
+  AssertTrue(FRepo.CommitDetails(Head, Line, Body));
+  AssertEquals('', Line.Note);
+  AssertTrue('set: ' + FRepo.Error, FRepo.SetNote(Head, 'Reviewed by QA'#10'Twice'));
+  AssertTrue(FRepo.GraphCommits(Commits));
+  AssertEquals('Reviewed by QA'#10'Twice', Commits[0].Note);
+  AssertEquals('files', Commits[0].Subject);
+  AssertEquals('', Commits[0].Body);
+  AssertTrue('graph commit', FRepo.GraphCommit(Head, One));
+  AssertEquals('Reviewed by QA'#10'Twice', One.Note);
+  AssertTrue(FRepo.CommitDetails(Head, Line, Body));
+  AssertEquals('Reviewed by QA'#10'Twice', Line.Note);
+  AssertEquals('', Body);
+  { Replaced, not added to. }
+  AssertTrue('replace: ' + FRepo.Error, FRepo.SetNote(Head, 'Other'));
+  AssertTrue(FRepo.CommitDetails(Head, Line, Body));
+  AssertEquals('Other', Line.Note);
+  AssertTrue('remove: ' + FRepo.Error, FRepo.SetNote(Head, ''));
+  AssertTrue(FRepo.CommitDetails(Head, Line, Body));
+  AssertEquals('', Line.Note);
+  { Removing a note that is not there is fine. }
+  AssertTrue('remove again: ' + FRepo.Error, FRepo.SetNote(Head, '  '));
+  { A unit separator in the body stays in it, the note apart. }
+  Git(['commit', '--allow-empty', '-q', '-m', 'odd'#10#10'a'#31'b']);
+  Head := Trim(Git(['rev-parse', 'HEAD']));
+  AssertTrue(FRepo.SetNote(Head, 'n'));
+  AssertTrue(FRepo.CommitDetails(Head, Line, Body));
+  AssertEquals('a'#31'b', Body);
+  AssertEquals('n', Line.Note);
+  AssertTrue(FRepo.GraphCommits(Commits));
+  AssertEquals('a'#31'b', Commits[0].Body);
+  AssertEquals('n', Commits[0].Note);
+  { A full id git cannot resolve is still taken as an object name, so
+    the refusal is tested with a name that is none. }
+  AssertFalse('bad object', FRepo.SetNote('no-such-ref', 'x'));
+end;
+
+{ An archive of HEAD as a zip and as a tar.gz, with a folder prefix; a
+  ref git does not know fails. }
+procedure TGitRepoTest.TestArchive;
+var
+  Target: string;
+  Listing: string;
+  Code: integer;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  Target := IncludeTrailingPathDelimiter(FDir) + 'out.zip';
+  AssertTrue(FRepo.Archive('HEAD', Target, 'proj/'));
+  AssertTrue(FileExists(Target));
+  with TFileStream.Create(Target, fmOpenRead) do
+    try
+      AssertTrue(Size > 0);
+    finally
+      Free;
+    end;
+  Target := IncludeTrailingPathDelimiter(FDir) + 'out.tar.gz';
+  AssertTrue(FRepo.Archive('HEAD', Target, ''));
+  AssertTrue(FileExists(Target));
+  { git itself lists the archive's format for the extension. }
+  if RunCommandIndir(FDir, 'git', ['archive', '--list'], Listing, Code, [poStderrToOutPut]) = 0 then
+    AssertTrue(Pos('tar.gz', Listing) > 0);
+  AssertFalse(FRepo.Archive('no-such-ref', IncludeTrailingPathDelimiter(FDir) + 'x.zip', ''));
+  AssertFalse(FRepo.Archive('', Target, ''));
+  AssertFalse(FRepo.Archive('HEAD', '', ''));
+end;
+
+{ The tracker written into the config is read by the snapshot's
+  IssueTrackerIn, a two-line regular expression included, and taken
+  out again. }
+procedure TGitRepoTest.TestIssueTracker;
+var
+  T, Read: TGittanIssueTracker;
+  Snap: TGittanRepoSnapshot;
+  Included: string;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  Read := IssueTrackerIn(FDir);
+  AssertEquals('', Read.Url);
+  AssertEquals('', Read.LogRegex);
+  T.Url := 'https://example.test/issues/%BUGID%';
+  T.LogRegex := '[Ii]ssues?:?(\s*#\d+)+'#10'(\d+)';
+  AssertTrue(FRepo.SetIssueTracker(T));
+  Read := IssueTrackerIn(FDir);
+  AssertEquals(T.Url, Read.Url);
+  AssertEquals(T.LogRegex, Read.LogRegex);
+  AssertEquals(T.Url, Trim(Git(['config', 'bugtraq.url'])));
+  FRepo.Snapshot(Snap);
+  AssertEquals('the snapshot''s', T.Url, Snap.IssueTracker.Url);
+  AssertEquals(T.LogRegex, Snap.IssueTracker.LogRegex);
+  T.LogRegex := '#(\d+)';
+  AssertTrue(FRepo.SetIssueTracker(T));
+  Read := IssueTrackerIn(FDir);
+  AssertEquals('#(\d+)', Read.LogRegex);
+  { An expression that starts with a dash is no option to git config. }
+  T.LogRegex := '-(\d+)-';
+  AssertTrue(FRepo.SetIssueTracker(T));
+  AssertEquals('-(\d+)-', IssueTrackerIn(FDir).LogRegex);
+  T.Url := '';
+  T.LogRegex := '';
+  AssertTrue(FRepo.SetIssueTracker(T));
+  Read := IssueTrackerIn(FDir);
+  AssertEquals('', Read.Url);
+  AssertEquals('', Read.LogRegex);
+  { Taking out what is not there is fine. }
+  AssertTrue(FRepo.SetIssueTracker(T));
+  { A tracker from a config file the local one does not hold (an
+    include here, the global config mostly) is hidden by empty keys. }
+  Included := IncludeTrailingPathDelimiter(FDir) + 'tracker.inc';
+  with TStringList.Create do
+    try
+      Add('[bugtraq]');
+      Add(#9'url = https://example.test/%BUGID%');
+      Add(#9'logregex = ABC-([0-9]+)');
+      SaveToFile(Included);
+    finally
+      Free;
+    end;
+  Git(['config', 'include.path', Included]);
+  AssertEquals('ABC-([0-9]+)', IssueTrackerIn(FDir).LogRegex);
+  AssertTrue(FRepo.SetIssueTracker(T));
+  Read := IssueTrackerIn(FDir);
+  AssertEquals('', Read.Url);
+  AssertEquals('', Read.LogRegex);
+  AssertTrue('again', FRepo.SetIssueTracker(T));
+  AssertEquals('', IssueTrackerIn(FDir).LogRegex);
+  T.LogRegex := '#(\d+)';
+  AssertTrue(FRepo.SetIssueTracker(T));
+  AssertEquals('#(\d+)', IssueTrackerIn(FDir).LogRegex);
+end;
+
 { A file is followed through its rename; a folder lists what changed
   under it. }
 procedure TGitRepoTest.TestPathCommits;
@@ -2816,6 +3014,10 @@ begin
   AssertEquals(2, FRepo.BehindDefault('side', 'origin/main'));
   AssertTrue(FRepo.Snapshot(Snap));
   AssertEquals(2, Snap.BehindDefault);
+  if GitHasMergeTree then
+    AssertEquals('merges cleanly', 0, Snap.DefaultConflicts)
+  else
+    AssertEquals('git older than 2.38', -1, Snap.DefaultConflicts);
   AssertEquals('side is on no remote', 1, Snap.NotOnRemote);
   AssertEquals(1, FRepo.NotOnRemotes);
   AssertTrue('its commit is not pushed', Snap.Recent[0].Unpushed);
@@ -2831,6 +3033,61 @@ begin
   AssertTrue(FRepo.Snapshot(Snap));
   AssertEquals('detached', 0, Snap.BehindDefault);
   AssertEquals('detached', -1, Snap.NotOnRemote);
+end;
+
+{ A merge in memory finds the files both sides changed, and touches
+  neither the work tree nor the index. }
+procedure TGitRepoTest.TestMergeConflicts;
+var
+  Main: string;
+  Paths: TStringArray;
+  Snap: TGittanRepoSnapshot;
+begin
+  if not GitHasMergeTree then
+    Exit;
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Main := FRepo.Branch;
+  Git(['remote', 'add', 'origin', 'https://example.invalid/repo.git']);
+  Git(['checkout', '-q', '-b', 'side']);
+  WriteFile('b.txt', 'side'#10);
+  WriteFile(QuoteName, 'side'#10);
+  Commit('side');
+  Git(['checkout', '-q', Main]);
+  WriteFile('b.txt', 'main'#10);
+  WriteFile(QuoteName, 'main'#10);
+  WriteFile('c.txt', 'c'#10);
+  Commit('main');
+  Git(['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+  Git(['checkout', '-q', 'side']);
+  WriteFile('b.txt', 'changed'#10);
+
+  AssertEquals(2, FRepo.MergeConflicts('origin/main', Paths));
+  AssertEquals(2, Length(Paths));
+  AssertEquals('b.txt', Paths[0]);
+  AssertEquals(QuoteName, Paths[1]);
+  AssertTrue(FRepo.Snapshot(Snap));
+  AssertEquals('the work tree and the index are left alone', 1, Length(Snap.Stats));
+  AssertEquals('b.txt', Snap.Stats[0].Path);
+  AssertEquals(1, Snap.BehindDefault);
+  AssertEquals(2, Snap.DefaultConflicts);
+  { The next snapshot takes the merge it kept, and makes it again once
+    the default branch moved: to a commit with nothing new in it, which
+    merges cleanly. }
+  AssertTrue(FRepo.Snapshot(Snap));
+  AssertEquals(2, Snap.DefaultConflicts);
+  AssertEquals(2, Length(Snap.DefaultConflictPaths));
+  Git(['update-ref', 'refs/remotes/origin/main',
+    Trim(Git(['commit-tree', 'side~1^{tree}', '-p', 'side~1', '-m', 'empty']))]);
+  AssertTrue(FRepo.Snapshot(Snap));
+  AssertEquals(1, Snap.BehindDefault);
+  AssertEquals('merges cleanly now', 0, Snap.DefaultConflicts);
+  AssertEquals(0, Length(Snap.DefaultConflictPaths));
+  AssertEquals(-1, FRepo.MergeConflicts('no-such-ref', Paths));
+  AssertEquals(0, Length(Paths));
+  AssertEquals('nothing to merge', 0, FRepo.MergeConflicts('side~1', Paths));
 end;
 
 { An amend of a pushed commit leaves the upstream's tip in the branch's
@@ -3661,6 +3918,28 @@ begin
     RemoveTree(Remote);
     RemoveTree(Other);
   end;
+end;
+
+{ An empty argument is refused on Unix, where TProcess would end the
+  argument list there and git config would read the key instead of
+  setting it; on Windows it goes through as "". }
+procedure TGitRepoTest.TestEmptyArgument;
+var
+  Output, Err: string;
+begin
+  Git(['init', '-q']);
+  Git(['config', 'gittan.test', 'before']);
+  {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
+  AssertFalse('refused', RunGitIn(FDir, ['config', '--local', 'gittan.test', ''], Output, Err));
+  AssertTrue(Err, Pos('empty argument', Err) > 0);
+  AssertTrue(Err, Pos('after "gittan.test"', Err) > 0);
+  AssertEquals('nothing run', 'before', Trim(Git(['config', 'gittan.test'])));
+  AssertFalse('a tool too', RunCli('git', FDir, ['config', 'gittan.test', ''], [], Output, Err));
+  AssertTrue(Err, Pos('empty argument', Err) > 0);
+  {$ELSE}
+  AssertTrue(Err, RunGitIn(FDir, ['config', '--local', 'gittan.test', ''], Output, Err));
+  AssertEquals('set, empty', '', Trim(Git(['config', 'gittan.test'])));
+  {$ENDIF}
 end;
 
 procedure TGitRepoTest.TestParseGitVersion;

@@ -1,7 +1,7 @@
 unit gittan.app;
 
 {** What every repository Gittan shows shares, one of each per process:
-  the settings, the lexers, the application icon and the check for a
+  the settings, the repository list, the lexers, the application icon and the check for a
   newer build. The window creates it first thing (CreateApp) and frees it
   last (FreeApp); everything else reaches it through App.
 
@@ -25,7 +25,7 @@ interface
 uses
   Classes, SysUtils, Graphics, ExtCtrls, gittan.settings, gittan.lexers,
   gittan.update, gittan.git, gittan.forge, gittan.ext.loader, gittan.ext.engine,
-  gittan.ext.api;
+  gittan.ext.api, gittan.repolist;
 
 const
   {** A check for a newer build a little after start, then this far
@@ -43,6 +43,7 @@ type
   TGittanApp = class
   private
     FSettings: TGittanSettings;
+    FRepoList: TGittanRepoList;
     FLexers: TGittanLexers;
     FIcon: TIcon;
     FExtensions: TGittanExtLoader;
@@ -77,6 +78,10 @@ type
       the path stays the same. }
     function ForgeCli(AForge: TGittanForgeClass = nil): string;
     property Settings: TGittanSettings read FSettings;
+    {** The repository list the welcome view shows, read as App is
+      created; whoever changes it saves it and tells the window
+      (TRepoWindow.RepoListChanged). }
+    property RepoList: TGittanRepoList read FRepoList;
     property Lexers: TGittanLexers read FLexers;
     {** The extensions (gittan.ext.loader): the window loads them once it
       is up, and Reload Extensions loads them again. }
@@ -128,6 +133,9 @@ begin
   FSettings := TGittanSettings.Create;
   FSettings.Load;
   SetGitExe(FSettings.GitPath);
+  FRepoList := TGittanRepoList.Create(IncludeTrailingPathDelimiter(ConfigDir) +
+    RepoListFileName);
+  FRepoList.Load;
   FExtensions := TGittanExtLoader.Create(FSettings);
   FExtensions.OnProvision := @ProvisionExtension;
   FLexers := TGittanLexers.Create;
@@ -161,6 +169,7 @@ begin
     FExtensions.Unload;
   FreeAndNil(FExtensions);
   TGittanExtEngine.ReleaseInstance;
+  FreeAndNil(FRepoList);
   FreeAndNil(FSettings);
   inherited Destroy;
 end;

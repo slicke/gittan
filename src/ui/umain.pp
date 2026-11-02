@@ -31,8 +31,9 @@ uses
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   fpjson, gittan.ext.engine, gittan.ext.registry, gittan.ext.api, gittan.ext.loader,
   gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
-  gittan.rebase, gittan.worktrees, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
+  gittan.rebase, gittan.worktrees, gittan.gitflow, gittan.repolist, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
   gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, gittan.merge, gittan.mergeview,
+  gittan.notedlg, gittan.issuelinks,
   ATSynEdit_Gaps, md5;
 
 type
@@ -212,6 +213,13 @@ type
     {** The commands the extensions registered changed: every frame
       builds its Extensions menu and popups again (QueueRebuildExtMenu). }
     procedure ExtensionsChanged; virtual; abstract;
+    {** The repository list (App.RepoList) changed and was saved: every
+      frame's welcome view shows it again (TRepoFrame.RepoListChanged). }
+    procedure RepoListChanged; virtual; abstract;
+    {** File > Repository List: shows the welcome view, which has the
+      list: the frame shown when it has no repository, else another
+      that has none, else a new one. }
+    procedure ShowRepoList; virtual; abstract;
   end;
 
   { TRepoFrame }
@@ -278,6 +286,11 @@ type
       in FForgeCaptions (UpdateForgeItems). }
     FForge: TGittanForge;
     FRemoteUrls: string;
+    { The issue tracker the repository's config names (the snapshot's),
+      whose references in commit messages the summary's card links
+      (umain.issues.inc); File > Issue Tracker... sets it. }
+    FIssueTracker: TGittanIssueTracker;
+    FIssueTrackerItem: TMenuItem;
     FForgeItems: array of TMenuItem;
     FForgeCaptions: array of string;
     { The AI features (umain.ai.inc, gittan.ai), shown only once the
@@ -846,6 +859,27 @@ type
       the worktrees it shows, the menu of one and the one it is for. }
     FWorktreesItem: TMenuItem;
     FWorktreePopup: TGittanPopupList;
+    { Git flow (umain.gitflow.inc): Branch > Git Flow, the setup and the
+      branches it was last filled with (a Finish item's tag indexes
+      them), the kind a start asks a name for, and the branch of git
+      flow the branch list's menu is for. }
+    FFlowMenu: TMenuItem;
+    FFlow: TGittanFlow;
+    FFlowBranches: TGittanFlowBranches;
+    { The git flow and its branches as of the last snapshot, which the
+      Branch menu and the branch list's menu read, so opening them runs
+      no git. }
+    FSnapFlow: TGittanFlow;
+    FSnapFlowBranches: TGittanFlowBranches;
+    FFlowAskKind: TGittanFlowKind;
+    FMenuFlowBranch: TGittanFlowBranch;
+    { The repository list (umain.repolist.inc): File > Add to Repository
+      List, the menu of a right-click in the welcome view and the entry
+      or recent repository it is for. }
+    FAddListItem: TMenuItem;
+    FListPopup: TPopupMenu;
+    FListEntry: TGittanRepoEntry;
+    FListRoot: string;
     { The command palette (umain.palette.inc): its item in the Go menu,
       the list and the action of each of its rows, by name. }
     FPaletteItem: TMenuItem;
@@ -883,6 +917,9 @@ type
     { The commit graph, in the middle of the form, from the status bar's
       ahead/behind counts or View > Commit Graph. }
     FGraph: TGittanCommitGraph;
+    { How many commits the graph was last read with, for a reload with
+      other toggles (GraphReload). }
+    FGraphLoadLimit: integer;
     { The notice over the form while a fetch, pull or push runs: at once
       when a pre-push hook has to run first, else after NoticeDelay; and
       what a failed one or a failed commit said. }
@@ -1189,6 +1226,9 @@ type
     procedure WelcomeOpenRecent(Sender: TObject; const ARoot: string);
     procedure WelcomeClone(Sender: TObject);
     procedure WelcomeInit(Sender: TObject);
+    procedure WelcomeListMenu(Sender: TObject; AEntry: TGittanRepoEntry;
+      const ARoot: string; const APos: TPoint);
+    procedure WelcomeListChanged(Sender: TObject);
     function SelectedPath: string;
     function StatIcon(const AStat: TGittanFileStat): integer;
     function StatHint(const AStat: TGittanFileStat): string;
@@ -1562,6 +1602,7 @@ type
     { umain.actions.inc }
     procedure ApplySettings;
     procedure RebuildRecentMenu;
+    procedure RecentChanged;
     procedure MenuRecentClick(Sender: TObject);
     procedure MenuClearRecentClick(Sender: TObject);
     procedure MenuFindClick(Sender: TObject);
@@ -1769,7 +1810,9 @@ type
     procedure SummarySelectCommit(Sender: TObject; const AHash: string);
     procedure BranchPopupPick(Sender: TObject; AIndex: integer);
     procedure ShowCommitGraph(const AFilter: string = ''; const AKeep: string = '');
+    function LoadGraphCommits(ALimit: integer; out ACommits: TGittanGraphCommits): boolean;
     procedure GraphMore(Sender: TObject);
+    procedure GraphReload(Sender: TObject);
     procedure GraphPathCommits(Sender: TObject; const APath: string; AHashes: TStrings);
     procedure GraphChangeCommits(Sender: TObject; const AChanges: TStringArray);
     procedure ChangeJobDone(Sender: TObject);
@@ -2007,6 +2050,23 @@ type
     procedure WorktreeMenuClick(Sender: TObject);
     procedure AddWorktreeAsk;
     procedure RemoveWorktreeAsk(const AWorktree: TGittanWorktree);
+    procedure FillFlowMenu;
+    procedure ApplyFlowSnapshot(const ASnap: TGittanRepoSnapshot);
+    procedure FlowMenuClick(Sender: TObject);
+    function CheckFlowSetup(const AValues: array of string): string;
+    procedure FlowSetupAsk;
+    function CheckFlowStart(const AValues: array of string): string;
+    procedure FlowStartAsk(AKind: TGittanFlowKind);
+    procedure FlowFinishAsk(const ABranch: TGittanFlowBranch);
+    function FlowBranchOf(const ABranch: string; out AFlowBranch: TGittanFlowBranch): boolean;
+    function FlowFinishCaption(const ABranch: TGittanFlowBranch): string;
+    procedure UpdateRepoListItem;
+    function SaveRepoList: boolean;
+    procedure MenuRepoListClick(Sender: TObject);
+    procedure MenuAddListClick(Sender: TObject);
+    function ListMenuFolder: TGittanRepoEntry;
+    function CheckListName(const AValues: array of string): string;
+    procedure ListMenuClick(Sender: TObject);
     procedure StashChangesAsk(AChosenOnly: boolean);
     procedure ApplyStash(AStash: TGittanStash; APop: boolean);
     procedure DropStashAsk(AStash: TGittanStash);
@@ -2032,6 +2092,13 @@ type
     procedure GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
       const AScreenPos: TPoint);
     procedure CommitMenuClick(Sender: TObject);
+    procedure ExportArchive(const AHash, AName: string);
+    procedure EditNoteAsk(const ACommit: TGittanGraphCommit);
+    procedure RevealFile(const AFile: string);
+    function CheckIssueTracker(const AValues: array of string): string;
+    procedure MenuIssueTrackerClick(Sender: TObject);
+    procedure SummaryIssueClick(Sender: TObject; const AId: string);
+    procedure UpdateIssueTracker;
     function ContinueMode: boolean;
     function StrayRebase: boolean;
     function OperationLabel: string;
@@ -2261,6 +2328,9 @@ type
       among them, while the widgetset is still in its click. Several
       asks before it runs give one rebuild. }
     procedure QueueRebuildExtMenu;
+    {** The repository list changed (TRepoWindow.RepoListChanged): the
+      welcome view and File > Add to Repository List follow. }
+    procedure RepoListChanged;
     {** The folder an open job is opening, '' when none runs. }
     property OpeningDir: string read FOpeningDir;
     {** The root of the repository opening, as the window found it
@@ -2405,6 +2475,35 @@ resourcestring
   rsNextTab = 'Next Tab';
   rsPrevTab = 'Previous Tab';
   rsOpenRecent = 'Open Re&cent';
+  rsRepoListItem = 'Repository &List';
+  rsAddListItem = 'Add to Repository List';
+  rsListOpen = 'Open';
+  rsListRename = 'Rename...';
+  rsListRemove = 'Remove from List';
+  rsListRemoveFolder = 'Remove Folder...';
+  rsListAddRecent = 'Add to Repository List';
+  rsListRemoveRecent = 'Remove from Recent';
+  rsListClearRecent = 'Clear Recent';
+  rsListNewFolder = 'New Folder...';
+  rsListAddRepo = 'Add Repository...';
+  rsListAddFolder = 'Add Repositories in Folder...';
+  rsListRenameTitle = 'Rename';
+  rsListFolderPrompt = 'Name of the folder';
+  rsListRepoPrompt = 'Name in the list, empty for the folder''s';
+  rsListNoName = 'The folder needs a name.';
+  rsListNewFolderTitle = 'New Folder';
+  rsListCreate = 'Create';
+  rsListRemoveTitle = 'Remove Folder';
+  rsListRemoveAsk = 'Remove the folder %s and the %d repositories in it from the list? ' +
+    'The repositories themselves stay where they are.';
+  rsListRemoveAction = 'Remove';
+  rsListNotRepo = 'Not a git repository: %s';
+  rsListHasIt = 'The repository list has it already';
+  rsListAllListed = 'The repository list has every repository there already';
+  rsListNoneFound = 'No repositories found in %s';
+  rsListAdded = 'Added %s to the repository list';
+  rsListFolderAdded = 'Added %d repositories to the repository list, in %s';
+  rsListSaveFailed = 'Could not save the repository list';
   rsCloneItem = 'Clo&ne Repository...';
   rsInitItem = '&Init Repository...';
   rsInitTitle = 'Init Repository';
@@ -2801,6 +2900,35 @@ resourcestring
   rsCaCompare = 'Compare with Working Tree';
   rsCaBrowse = 'Browse Files...';
   rsCaPatch = 'Create Patch...';
+  rsCaArchive = 'Export Files as Archive...';
+  rsArchiveTitle = 'Export Files as Archive';
+  rsArchiveFilter = 'Zip archive (*.zip)|*.zip|Compressed tar archive (*.tar.gz)|*.tar.gz';
+  rsArchiveWritten = 'Wrote %s';
+  rsArchiveFailed = 'Could not write the archive';
+  rsArchiveReplace = '%s exists already. Replace it?';
+  rsArchiveReplaceAction = 'Replace';
+  rsCaNoteAdd = 'Add Note...';
+  rsCaNoteEdit = 'Edit Note...';
+  rsNoteSaved = 'Saved the note on %s';
+  rsNoteRemoved = 'Removed the note from %s';
+  rsNoteFailed = 'Could not write the note';
+  rsIssueTrackerItem = 'Issue Trac&ker...';
+  rsIssueTrackerTitle = 'Issue Tracker';
+  rsIssueTrackerNote = 'References to issues in commit messages become links in the ' +
+    'commit''s card. The address has %BUGID% where the issue''s id goes. The regular ' +
+    'expression finds the references; its first group is the id. With a second ' +
+    'expression the first finds each reference ("Fixes #12 and #13") and the second the ' +
+    'ids within it. Kept in the repository''s config as bugtraq.url and bugtraq.logregex, ' +
+    'which other git clients read too; leave everything empty to take it out.';
+  rsIssueTrackerUrl = 'Address of an issue';
+  rsIssueTrackerRegex = 'Regular expression';
+  rsIssueTrackerIdRegex = 'Expression for the ids within a reference (optional)';
+  rsIssueTrackerSaved = 'Issue tracker saved';
+  rsIssueTrackerFailed = 'Could not save the issue tracker';
+  rsIssueNoAddress = 'No address is set for issue %s: File > Issue Tracker...';
+  rsIssueNeedsRegex = 'An expression for the ids needs the regular expression that finds ' +
+    'the references.';
+  rsIssueBadRegex = 'That is no regular expression: %s';
   rsCaPatchSeries = 'Create Patch Series with Marked %s...';
   rsBrowseTitle = 'Files at %s';
   rsCaMark = 'Mark for Comparison';
@@ -2929,6 +3057,7 @@ resourcestring
   rsBmSwitchItem = '&Switch to Branch...';
   rsBmCommitMenu = 'Commit %s';
   rsGraphDragTip = 'Drag a commit onto %s to merge it.';
+  rsGraphLoadFailed = 'Could not read the history';
   rsBmCommitNone = 'Commit';
   rsBmCommitPick = 'Pick a Commit in the Graph...';
   rsBmNewItem = '&New Branch...';
@@ -2993,6 +3122,56 @@ resourcestring
   rsSubmodulesHeader = 'Submodules';
   rsReflogItem = 'Re&flog...';
   rsWorktreesItem = '&Worktrees...';
+  rsFlowMenu = 'Git &Flow';
+  rsFlowFeature = 'Feature';
+  rsFlowRelease = 'Release';
+  rsFlowHotfix = 'Hotfix';
+  rsFlowSetupItem = 'Set Up Git Flow...';
+  rsFlowSettingsItem = 'Git Flow Settings...';
+  rsFlowStartItem = 'Start %s...';
+  rsFlowFinishItem = 'Finish %s %s...';
+  rsFlowSetupTitle = 'Git Flow';
+  rsFlowSetupNote = 'Features branch off the development branch and are merged back into it. ' +
+    'Releases branch off it too, and hotfixes off the production branch; both are merged into ' +
+    'the two branches and tagged. The setup goes in the repository''s config, where the ' +
+    'git-flow command reads it too.';
+  rsFlowMasterPrompt = 'Production branch';
+  rsFlowDevelopPrompt = 'Development branch (made from the production branch if new)';
+  rsFlowFeaturePrompt = 'Prefix of feature branches';
+  rsFlowReleasePrompt = 'Prefix of release branches';
+  rsFlowHotfixPrompt = 'Prefix of hotfix branches';
+  rsFlowTagPrompt = 'Prefix of version tags (may be empty)';
+  rsFlowSetupAction = 'Set Up';
+  rsFlowSameBranch = 'The production and the development branch must be two branches.';
+  rsFlowNoBranch = 'There is no branch %s.';
+  rsFlowBadPrefix = 'Every kind of branch needs a prefix a branch name can start with.';
+  rsFlowSamePrefix = 'Every kind of branch needs a prefix of its own.';
+  rsFlowBadTagPrefix = 'A tag name cannot start with that.';
+  rsFlowSetUp = 'Git flow is set up: %s for production, %s for development';
+  rsFlowSetupFailed = 'Could not set up git flow';
+  rsFlowTagTaken = 'The tag %s is there already.';
+  rsFlowUnderWay = '%s is under way; finish it first';
+  rsFlowStartTitle = 'Start %s';
+  rsFlowStartPrompt = 'Name, after %s; the branch is made from %s and switched to';
+  rsFlowStartTagNote = 'Finishing it tags the production branch with the name.';
+  rsFlowStartTagNotePrefix = 'Finishing it tags the production branch with the name after %s.';
+  rsFlowStartAction = 'Start';
+  rsFlowStarted = 'Started %s from %s';
+  rsFlowStartFailed = 'Could not start the branch';
+  rsFlowIntoTwo = '%s and %s';
+  rsFlowFinishTitle = 'Finish %s';
+  rsFlowFinishFeature = 'Merge %s into %s and delete it? You end up on %s.';
+  rsFlowFinishTagged = 'Merge %s into %s, tag %s as %s and delete the branch? You end up on %s.';
+  rsFlowFinishAction = 'Finish';
+  rsFlowTagMessage = '%s %s';
+  rsFlowTagMessagePrompt = 'Message of the tag %s (empty for a plain tag)';
+  rsFlowFinished = 'Finished %s: merged into %s';
+  rsFlowFinishedTagged = 'Finished %s: merged into %s and tagged %s';
+  rsFlowPushNote = 'Nothing is pushed yet: push %s, and the tag %s with Branch > Push Tags.';
+  rsFlowConflicts = 'Merging %s into %s stopped with conflicts';
+  rsFlowConflictsDetail = 'Resolve them and commit the merge, then finish %s again from ' +
+    'Branch > Git Flow to go on.';
+  rsFlowFinishFailed = 'Could not finish %s';
   rsWtHeader = 'Worktrees';
   rsWtAddRow = 'Add Worktree...';
   rsWtFilter = 'Filter worktrees';
@@ -4036,6 +4215,7 @@ begin
   FSummary.OnTotalsClick := @SummaryTotalsClick;
   FSummary.OnBehindAction := @SummaryBehindAction;
   FSummary.OnOpenUrl := @SummaryOpenUrl;
+  FSummary.OnIssueClick := @SummaryIssueClick;
   FSummary.OnFileExists := @RepoFileExists;
   FSummary.ForgeName := ForgeName;
   FSummary.OnReviewClick := @SummaryReviewClick;
@@ -4127,6 +4307,7 @@ begin
   FGraph.OnTipDismiss := @GraphTipDismiss;
   FGraph.OnDrop := @GraphDrop;
   FGraph.OnMore := @GraphMore;
+  FGraph.OnReload := @GraphReload;
   FGraph.OnPathCommits := @GraphPathCommits;
   FGraph.OnChangeCommits := @GraphChangeCommits;
   FCommitPopup := TPopupMenu.Create(Self);
@@ -4184,6 +4365,9 @@ begin
   FWelcome.OnOpenRecent := @WelcomeOpenRecent;
   FWelcome.OnClone := @WelcomeClone;
   FWelcome.OnInit := @WelcomeInit;
+  FWelcome.OnListMenu := @WelcomeListMenu;
+  FWelcome.OnListChanged := @WelcomeListChanged;
+  FWelcome.SetRepoList(App.RepoList);
   { The Repository page shares the box too; its links open as the
     summary's do. }
   FRepoPage := TGittanRepoPage.Create(Self);
@@ -5356,6 +5540,9 @@ begin
   AddItem(FileMenu, rsOpenRepo, ShortCut(VK_O, [ssModifier, ssShift]), @MenuOpenRepoClick);
   FRecentMenu := AddItem(FileMenu, rsOpenRecent, 0, nil);
   RebuildRecentMenu;
+  AddItem(FileMenu, rsRepoListItem, 0, @MenuRepoListClick);
+  FAddListItem := AddItem(FileMenu, rsAddListItem, 0, @MenuAddListClick);
+  UpdateRepoListItem;
   FCloneItem := AddItem(FileMenu, rsCloneItem, 0, @MenuCloneClick);
   FInitItem := AddItem(FileMenu, rsInitItem, 0, @MenuInitClick);
   AddItem(FileMenu, rsOpen, ShortCut(VK_O, [ssModifier]), @MenuOpenClick);
@@ -5388,6 +5575,7 @@ begin
   FFetchItem := AddItem(FileMenu, rsFetchMenu, ShortCut(VK_F, [ssModifier, ssAlt]),
     @MenuFetchClick);
   FRemotesItem := AddItem(FileMenu, rsRemotesItem, 0, @MenuRemotesClick);
+  FIssueTrackerItem := AddItem(FileMenu, rsIssueTrackerItem, 0, @MenuIssueTrackerClick);
   Sub := AddItem(FileMenu, rsSubmodulesMenu, 0, nil);
   FSubUpdateAllItem := AddItem(Sub, rsSubUpdateAllItem, 0, @MenuSubUpdateAllClick);
   FSubSyncAllItem := AddItem(Sub, rsSubSyncAllItem, 0, @MenuSubSyncAllClick);
@@ -5474,6 +5662,8 @@ begin
   FCompareBackItem.Tag := Ord(blCurrentSince);
   BranchMenu.Add(NewLine);
   FUpstreamItem := AddItem(BranchMenu, '', 0, @MenuUpstreamClick);
+  FFlowMenu := AddItem(BranchMenu, rsFlowMenu, 0, nil);
+  FillFlowMenu;
   BranchMenu.Add(NewLine);
   FTagsItem := AddItem(BranchMenu, rsTagsItem, 0, @MenuTagsClick);
   FNewTagItem := AddItem(BranchMenu, rsNewTagItem, 0, @MenuNewTagClick);
@@ -6988,6 +7178,7 @@ begin
   begin
     App.Settings.AddRecent(FRepo.Root);
     RebuildRecentMenu;
+    UpdateRepoListItem;
     ShowSummary;
     StartIndexing;
   end;
@@ -7104,6 +7295,9 @@ begin
     FRemoteUrls := ASnap.RemoteUrls;
     ReFindForge;
   end;
+  FIssueTracker := ASnap.IssueTracker;
+  UpdateIssueTracker;
+  ApplyFlowSnapshot(ASnap);
   { The pull request is looked up for the branch HEAD is on, the detached
     id during a rebase, so this runs before the rebase branch stands in. }
   StartPullJob(False);
@@ -7154,7 +7348,8 @@ begin
   { Not in the middle of a merge or rebase, which the Commit section
     finishes first. }
   if FOperation = '' then
-    FSummary.SetBehind(ASnap.BehindDefault, FDefaultBranch)
+    FSummary.SetBehind(ASnap.BehindDefault, FDefaultBranch, ASnap.DefaultConflicts,
+      ASnap.DefaultConflictPaths)
   else
     FSummary.SetBehind(0, '');
   FSummary.BaseClickable := (BaseActionRef <> '') or (StashOfBase >= 0) or BlameShown;
@@ -7752,6 +7947,7 @@ begin
   HideBoxPages;
   SetNavRow(-1);
   FTreeClean := False;
+  UpdateRepoListItem;
   FWelcome.Visible := True;
   FWelcome.FitHeight(FSummaryBox.ClientHeight);
 end;
@@ -8465,10 +8661,13 @@ const
 {$I umain.translations.inc}
 {$I umain.conflicts.inc}
 {$I umain.commitactions.inc}
+{$I umain.issues.inc}
 {$I umain.branches.inc}
 {$I umain.rebase.inc}
 {$I umain.stash.inc}
 {$I umain.worktrees.inc}
+{$I umain.gitflow.inc}
+{$I umain.repolist.inc}
 {$I umain.palette.inc}
 {$I umain.nav.inc}
 {$I umain.undo.inc}

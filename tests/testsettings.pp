@@ -24,6 +24,7 @@ type
     procedure TestRoundTrip;
     procedure TestQuotesAndSpaces;
     procedure TestRecentList;
+    procedure TestSaveRecent;
     procedure TestTabs;
     procedure TestDamagedFileGivesDefaults;
     procedure TestOldDefaultFont;
@@ -77,6 +78,8 @@ begin
     AssertEquals(0, S.UpdateSnoozedUntil, 0);
     AssertTrue(S.CommitOpen);
     AssertTrue('the sidebar''s rows start shown', S.NavOpen);
+    AssertFalse('all of the graph''s parents', S.GraphFirstParent);
+    AssertFalse('the graph''s merges', S.GraphNoMerges);
     AssertEquals('', S.CommitDraft);
     AssertEquals('no tab width picked', 0, S.TabSize);
     AssertEquals('', S.GitPath);
@@ -121,6 +124,8 @@ begin
     S.SubmodulesOpen := False;
     S.TickHintHidden := True;
     S.GraphTipHidden := True;
+    S.GraphFirstParent := True;
+    S.GraphNoMerges := True;
     S.CommitOpen := False;
     S.CommitDraft := 'Subject = x'#10#10'C:\new\nope\\'#10;
     S.CommitDraftRepo := '/tmp/a';
@@ -180,6 +185,8 @@ begin
     AssertFalse(S.SubmodulesOpen);
     AssertTrue(S.TickHintHidden);
     AssertTrue(S.GraphTipHidden);
+    AssertTrue(S.GraphFirstParent);
+    AssertTrue(S.GraphNoMerges);
     AssertFalse(S.CommitOpen);
     AssertEquals('Subject = x'#10#10'C:\new\nope\\'#10, S.CommitDraft);
     AssertEquals('/tmp/a', S.CommitDraftRepo);
@@ -283,6 +290,10 @@ begin
     AssertEquals('/repo/' + IntToStr(MaxRecent), S.Recent[0]);
     AssertEquals('/repo/' + IntToStr(MaxRecent + 3), S.Recent[1]);
     AssertEquals(-1, S.Recent.IndexOf('/repo/3'));
+    S.RemoveRecent('/repo/' + IntToStr(MaxRecent + 3));
+    S.RemoveRecent('/repo/none');
+    AssertEquals('removed', MaxRecent - 1, S.Recent.Count);
+    AssertEquals('/repo/' + IntToStr(MaxRecent + 2), S.Recent[1]);
     for i := 1 to MaxPaletteRecent + 2 do
       S.AddPaletteRecent('Action ' + IntToStr(i));
     S.AddPaletteRecent('Action 5');
@@ -293,6 +304,35 @@ begin
       S.PaletteRecent[MaxPaletteRecent - 1]);
   finally
     S.Free;
+  end;
+end;
+
+{ SaveRecent writes the recent list alone, leaving what else the file
+  holds as it is. }
+procedure TSettingsTest.TestSaveRecent;
+var
+  S, Back: TGittanSettings;
+begin
+  S := TGittanSettings.Create(FFileName);
+  try
+    S.EditorCommand := '/usr/bin/editor';
+    S.AddRecent('/repo/a');
+    S.AddRecent('/repo/b');
+    S.Save;
+    S.EditorCommand := '/changed';
+    S.RemoveRecent('/repo/b');
+    S.SaveRecent;
+  finally
+    S.Free;
+  end;
+  Back := TGittanSettings.Create(FFileName);
+  try
+    Back.Load;
+    AssertEquals(1, Back.Recent.Count);
+    AssertEquals('/repo/a', Back.Recent[0]);
+    AssertEquals('the rest untouched', '/usr/bin/editor', Back.EditorCommand);
+  finally
+    Back.Free;
   end;
 end;
 

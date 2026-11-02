@@ -165,6 +165,8 @@ type
     function ShownFrame: TRepoFrame; override;
     function FrameAt(AIndex: integer): TRepoFrame; override;
     procedure ExtensionsChanged; override;
+    procedure RepoListChanged; override;
+    procedure ShowRepoList; override;
     procedure CheckAccounts; override;
     procedure AskOpenRepository; override;
     procedure ShowSettings; override;
@@ -1222,6 +1224,30 @@ var
 begin
   for i := 0 to FFrames.Count - 1 do
     Frames[i].QueueRebuildExtMenu;
+end;
+
+procedure TGittanWindow.RepoListChanged;
+var
+  i: integer;
+begin
+  for i := 0 to FFrames.Count - 1 do
+    Frames[i].RepoListChanged;
+end;
+
+procedure TGittanWindow.ShowRepoList;
+var
+  i: integer;
+begin
+  HideForgeView;
+  if ShownFrame.IsBlank then
+    Exit;
+  for i := 0 to FFrames.Count - 1 do
+    if Frames[i].IsBlank then
+    begin
+      ShowFrame(Frames[i]);
+      Exit;
+    end;
+  NewTab;
 end;
 
 procedure TGittanWindow.LoadExtensionsAsync(Data: PtrInt);

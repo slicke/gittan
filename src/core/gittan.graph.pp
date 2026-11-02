@@ -50,6 +50,8 @@ type
     LayoutGraph its lane, its color and the lines of its row. }
   TGittanGraphCommit = record
     Hash, Short, Author, Subject, Body: string;
+    {** The commit's note (git notes), trimmed; '' without one. }
+    Note: string;
     Parents: TStringArray;
     Date: TDateTime;
     Refs: TGittanGraphRefs;

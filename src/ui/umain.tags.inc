@@ -26,6 +26,7 @@ const
   tmDelete = 7;
   tmDeleteRemote = 8;
   tmBrowse = 9;
+  tmArchive = 10;
 
 procedure TRepoFrame.ShowTagList(const AScreenRect: TRect);
 var
@@ -95,6 +96,7 @@ begin
   Add(rsCaShow, tmShow, True);
   Add(rsCaCompare, tmCompare, True);
   Add(rsCaBrowse, tmBrowse, True);
+  Add(rsCaArchive, tmArchive, True);
   FTagMenu.Items.Add(NewLine);
   Add(rsTmCheckout, tmCheckout, not Busy);
   Add(rsCaBranch, tmBranch, FOperation = '');
@@ -121,6 +123,7 @@ begin
     tmShow: ShowBlameCommit(T.Commit);
     tmCompare: SetBase('refs/tags/' + T.Name);
     tmBrowse: BrowseCommit(T.Commit, T.Name, T.Subject);
+    tmArchive: ExportArchive(T.Commit, T.Name);
     tmCheckout: CheckoutTagAsk(T);
     tmBranch: BranchAtAsk(T.Name, T.Commit);
     tmPush: StartRemote(rkPushTag, pmAuto, T.Name, FTagRemote);

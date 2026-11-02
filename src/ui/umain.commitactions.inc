@@ -24,7 +24,12 @@
   bounds a patch series: Create Patch Series with Marked <name>...
   writes every commit between the two (umain.patches.inc). The Bisect
   submenu starts a bisect from the commit, or marks it while git
-  bisects (umain.bisect.inc). }
+  bisects (umain.bisect.inc). Export Files as Archive... writes the
+  commit's files as a zip or tar.gz where a save dialog says
+  (ExportArchive, which the tag menu offers too), and Add or Edit
+  Note... the commit's note (git notes), kept beside the commit and
+  shown in the summary's card (EditNoteAsk). Neither changes the
+  history, so the graph stays open. }
 const
   caShow = 1;
   caCompare = 2;
@@ -52,6 +57,8 @@ const
   caPatch = 24;
   caPatchSeries = 25;
   caFixup = 26;
+  caArchive = 27;
+  caNote = 28;
 
 { The commit by the name a person knows it by: a local branch on it,
   else a remote one, else a tag, else its short id. }
@@ -153,6 +160,7 @@ begin
   Add(nil, rsCaShow, caShow);
   Add(nil, rsCaCompare, caCompare);
   Add(nil, rsCaBrowse, caBrowse);
+  Add(nil, rsCaArchive, caArchive);
   if FMarkHash = ACommit.Hash then
     Add(nil, rsCaUnmark, caMark)
   else
@@ -208,6 +216,10 @@ begin
     Add(Sub, rsCaBisectStartBad, caBisectStartBad);
   end;
   Line;
+  if ACommit.Note = '' then
+    Add(nil, rsCaNoteAdd, caNote, not Jobs)
+  else
+    Add(nil, rsCaNoteEdit, caNote, not Jobs);
   Add(nil, rsCopyHash, caCopy);
   if Assigned(FForge) then
     Add(nil, Format(rsOpenCommitOnForge, [ForgeName]), caForge);
@@ -281,10 +293,21 @@ begin
     BrowseCommit(Hash, FActionName, FActionCommit.Subject);
     Exit;
   end;
-  { Patches change nothing, so the graph stays open behind the dialog. }
+  { Patches, an archive and a note change no history, so the graph stays
+    open behind the dialog. }
   if (Sender as TMenuItem).Tag = caPatch then
   begin
     CreatePatches('', Hash);
+    Exit;
+  end;
+  if (Sender as TMenuItem).Tag = caArchive then
+  begin
+    ExportArchive(Hash, FActionName);
+    Exit;
+  end;
+  if (Sender as TMenuItem).Tag = caNote then
+  begin
+    EditNoteAsk(FActionCommit);
     Exit;
   end;
   if (Sender as TMenuItem).Tag = caPatchSeries then
@@ -476,4 +499,133 @@ begin
     StatusNote(Format(rsCaWasReset, [ResetTarget, AShort]))
   else
     BannerError(rsCaFailed, FRepo.Error);
+end;
+
+{ The files of AHash as an archive: a save dialog offers a zip and a
+  tar.gz, named after the repository and AName (the name the commit
+  goes by), and git writes the format the extension names, every path
+  under a folder named as the file. The file is shown in Finder (or
+  the file manager) when written. }
+procedure TRepoFrame.ExportArchive(const AHash, AName: string);
+var
+  Dlg: TSaveDialog;
+  Base, Target, Prefix: string;
+  Ok: boolean;
+  i: integer;
+begin
+  if (FRepo.Root = '') or (AHash = '') then
+    Exit;
+  Base := ExtractFileName(ExcludeTrailingPathDelimiter(FRepo.Root));
+  if AName <> '' then
+    Base := Base + '-' + AName;
+  { A ref's slash or space is no file name. }
+  for i := 1 to Length(Base) do
+    if Base[i] in ['/', '\', ':', ' ', '"', '*', '?', '<', '>', '|'] then
+      Base[i] := '-';
+  Dlg := TSaveDialog.Create(nil);
+  try
+    Dlg.Title := rsArchiveTitle;
+    Dlg.Options := Dlg.Options + [ofOverwritePrompt];
+    Dlg.Filter := rsArchiveFilter;
+    Dlg.DefaultExt := 'zip';
+    Dlg.FileName := Base + '.zip';
+    Dlg.InitialDir := ExtractFileDir(ExcludeTrailingPathDelimiter(FRepo.Root));
+    if not Dlg.Execute then
+      Exit;
+    Target := Dlg.FileName;
+    { The second filter picked but the name left without its extension,
+      or with the .gz alone that the Cocoa panel adds for it. }
+    if (Dlg.FilterIndex = 2) and not AnsiEndsText('.tar.gz', Target) and
+      not AnsiEndsText('.tgz', Target) and not AnsiEndsText('.tar', Target) then
+    begin
+      if AnsiEndsText('.zip', Target) then
+        Target := Copy(Target, 1, Length(Target) - 4)
+      else if AnsiEndsText('.gz', Target) then
+        Target := Copy(Target, 1, Length(Target) - 3);
+      Target := Target + '.tar.gz';
+      { The dialog asked about the name before it got the extension. }
+      if FileExists(Target) and (AskDlg(rsArchiveTitle, Format(rsArchiveReplace,
+        [ExtractFileName(Target)]), mtWarning, [mrYes, rsArchiveReplaceAction, mrCancel,
+        rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes) then
+        Exit;
+    end;
+    Prefix := ExtractFileName(Target);
+    if AnsiEndsText('.tar.gz', Prefix) then
+      Prefix := Copy(Prefix, 1, Length(Prefix) - 7)
+    else
+      Prefix := ChangeFileExt(Prefix, '');
+    if Prefix = '' then
+      Prefix := Base;
+    Screen.Cursor := crHourGlass;
+    try
+      Ok := FRepo.Archive(AHash, Target, Prefix + '/');
+    finally
+      Screen.Cursor := crDefault;
+    end;
+    if Ok then
+    begin
+      StatusNote(Format(rsArchiveWritten, [ShortPath(Target)]));
+      RevealFile(Target);
+    end
+    else
+      BannerError(rsArchiveFailed, FRepo.Error);
+  finally
+    Dlg.Free;
+  end;
+end;
+
+{ Shows AFile selected in Finder, Explorer or, where neither is, its
+  folder in the file manager. }
+procedure TRepoFrame.RevealFile(const AFile: string);
+begin
+  {$IFDEF DARWIN}
+  RunDetached('open', ['-R', AFile]);
+  {$ELSE}
+  {$IFDEF WINDOWS}
+  RunDetached('explorer.exe', ['/select,' + AFile]);
+  {$ELSE}
+  RunDetached('xdg-open', [ExtractFileDir(AFile)]);
+  {$ENDIF}
+  {$ENDIF}
+end;
+
+{ The note of ACommit in a dialog; saved, the card of the commit shown
+  and the graph's rows read it again (a note is searched with the
+  message). }
+procedure TRepoFrame.EditNoteAsk(const ACommit: TGittanGraphCommit);
+var
+  NoteText: string;
+  Ok: boolean;
+begin
+  if (FRepo.Root = '') or (ACommit.Hash = '') then
+    Exit;
+  NoteText := ACommit.Note;
+  if not EditCommitNote(CommitKnownName(ACommit), NoteText) or (NoteText = ACommit.Note) then
+    Exit;
+  Screen.Cursor := crHourGlass;
+  try
+    Ok := FRepo.SetNote(ACommit.Hash, NoteText);
+  finally
+    Screen.Cursor := crDefault;
+  end;
+  if not Ok then
+  begin
+    BannerError(rsNoteFailed, FRepo.Error);
+    Exit;
+  end;
+  if NoteText = '' then
+    StatusNote(Format(rsNoteRemoved, [ACommit.Short]))
+  else
+    StatusNote(Format(rsNoteSaved, [ACommit.Short]));
+  { The card of the commit shown reads the note again: the base is the
+    same, so SetBase alone would leave it. }
+  if BlameShown and (FBlameCommit.Hash = ACommit.Hash) then
+  begin
+    ShowBlameCommit(ACommit.Hash);
+    FSummary.SetCommit(FBlameCommit, FBlameBody);
+  end;
+  if FGraph.Visible then
+    GraphReload(nil);
+  { Branch > Commit names the note's item by whether there is one. }
+  FBranchCommit := Default(TGittanGraphCommit);
 end;

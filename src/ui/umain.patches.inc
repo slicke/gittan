@@ -64,15 +64,7 @@ begin
       StatusNote(Format(rsPatchWritten, [ShortPath(Files[0])]))
     else
       StatusNote(Format(rsPatchesWritten, [Files.Count, ShortPath(Folder)]));
-    {$IFDEF DARWIN}
-    RunDetached('open', ['-R', Files[Files.Count - 1]]);
-    {$ELSE}
-    {$IFDEF WINDOWS}
-    RunDetached('explorer.exe', ['/select,' + Files[Files.Count - 1]]);
-    {$ELSE}
-    RunDetached('xdg-open', [Folder]);
-    {$ENDIF}
-    {$ENDIF}
+    RevealFile(Files[Files.Count - 1]);
   finally
     Files.Free;
   end;

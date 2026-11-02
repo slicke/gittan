@@ -86,6 +86,9 @@ type
     {** Whether the commit graph's tip on dragging a commit onto the
       branch was put away with Don't Show Again. }
     GraphTipHidden: boolean;
+    {** The commit graph's toggles: follow only the first parent of a
+      merge, and leave the merges out. }
+    GraphFirstParent, GraphNoMerges: boolean;
     {** Whether the Commit section under the tree is unfolded. }
     CommitOpen: boolean;
     {** The commit message being written, kept until it is committed,
@@ -228,6 +231,12 @@ type
     {** Puts ARoot first in the recent list, dropping a duplicate and the
       oldest beyond MaxRecent. }
     procedure AddRecent(const ARoot: string);
+    {** Takes ARoot out of the recent list. }
+    procedure RemoveRecent(const ARoot: string);
+    {** Writes the recent list alone into the file, at once, so a removal
+      outlasts a run that does not close normally; errors are ignored as
+      in Save. }
+    procedure SaveRecent;
     {** Puts the action AName (as the command palette names it) first in
       PaletteRecent, dropping a duplicate and the oldest beyond
       MaxPaletteRecent. }
@@ -478,6 +487,8 @@ begin
       SubmodulesOpen := Ini.ReadBool(SecWindow, 'Submodules', True);
       TickHintHidden := Ini.ReadBool(SecWindow, 'TickHintHidden', False);
       GraphTipHidden := Ini.ReadBool(SecWindow, 'GraphTipHidden', False);
+      GraphFirstParent := Ini.ReadBool(SecWindow, 'GraphFirstParent', False);
+      GraphNoMerges := Ini.ReadBool(SecWindow, 'GraphNoMerges', False);
       CommitOpen := Ini.ReadBool(SecWindow, 'Commit', True);
       CommitDraft := UnescapeC(Ini.ReadString(SecCommit, 'Draft', ''));
       CommitDraftRepo := Ini.ReadString(SecCommit, 'Repo', '');
@@ -629,6 +640,8 @@ begin
       Ini.WriteBool(SecWindow, 'Submodules', SubmodulesOpen);
       Ini.WriteBool(SecWindow, 'TickHintHidden', TickHintHidden);
       Ini.WriteBool(SecWindow, 'GraphTipHidden', GraphTipHidden);
+      Ini.WriteBool(SecWindow, 'GraphFirstParent', GraphFirstParent);
+      Ini.WriteBool(SecWindow, 'GraphNoMerges', GraphNoMerges);
       Ini.WriteBool(SecWindow, 'Commit', CommitOpen);
       if CommitDraft <> '' then
       begin
@@ -910,6 +923,36 @@ begin
   FRecent.Insert(0, ARoot);
   while FRecent.Count > MaxRecent do
     FRecent.Delete(FRecent.Count - 1);
+end;
+
+procedure TGittanSettings.RemoveRecent(const ARoot: string);
+var
+  i: integer;
+begin
+  i := FRecent.IndexOf(ARoot);
+  if i >= 0 then
+    FRecent.Delete(i);
+end;
+
+procedure TGittanSettings.SaveRecent;
+var
+  Ini: TIniFile;
+  i: integer;
+begin
+  try
+    ForceDirectories(ExtractFileDir(FFileName));
+    Ini := TIniFile.Create(FFileName);
+    try
+      Ini.EraseSection(SecRecent);
+      for i := 0 to FRecent.Count - 1 do
+        Ini.WriteString(SecRecent, 'Repo' + IntToStr(i), KeepEdges(FRecent[i]));
+      Ini.UpdateFile;
+    finally
+      Ini.Free;
+    end;
+  except
+    { As in Save. }
+  end;
 end;
 
 procedure TGittanSettings.AddPaletteRecent(const AName: string);

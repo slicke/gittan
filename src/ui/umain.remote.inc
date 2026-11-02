@@ -41,6 +41,7 @@ begin
   FPushItem.Enabled := Can;
   FForcePushItem.Enabled := Can and FHasUpstream;
   FRemotesItem.Enabled := Can;
+  FIssueTrackerItem.Enabled := Can;
   FCloneItem.Enabled := (FRemoteJob = nil) and (FCommitJob = nil);
   FInitItem.Enabled := FCloneItem.Enabled;
   UpdateSubmoduleItems;

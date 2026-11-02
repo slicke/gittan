@@ -152,7 +152,19 @@ end;
 procedure TRepoFrame.MenuClearRecentClick(Sender: TObject);
 begin
   App.Settings.Recent.Clear;
-  RebuildRecentMenu;
+  RecentChanged;
+end;
+
+{ The recent list lost a repository or all: written at once, so they
+  stay gone after a run that does not close normally, and every frame's
+  Open Recent and welcome view follow. }
+procedure TRepoFrame.RecentChanged;
+var
+  i: integer;
+begin
+  App.Settings.SaveRecent;
+  for i := 0 to FWindow.FrameCount - 1 do
+    FWindow.FrameAt(i).RebuildRecentMenu;
 end;
 
 { ---------------------------------------------------------------------------
@@ -2014,7 +2026,7 @@ begin
     Limit := GraphSearchLimit;
   Screen.Cursor := crHourGlass;
   try
-    FRepo.GraphCommits(Commits, Limit);
+    LoadGraphCommits(Limit, Commits);
     { A commit to stay on past the newest ones (picked after More, then
       Back): the history up to the search's limit. }
     if (Keep <> '') and (Limit < GraphSearchLimit) and (Length(Commits) >= Limit) then
@@ -2029,13 +2041,15 @@ begin
       if not Found then
       begin
         Limit := GraphSearchLimit;
-        FRepo.GraphCommits(Commits, Limit);
+        LoadGraphCommits(Limit, Commits);
       end;
     end;
   finally
     Screen.Cursor := crDefault;
   end;
   FGraph.Marked := FMarkHash;
+  FGraph.FirstParent := App.Settings.GraphFirstParent;
+  FGraph.NoMerges := App.Settings.GraphNoMerges;
   { How to merge from here, until Don't Show Again; a detached HEAD has
     no branch to merge into. }
   if App.Settings.GraphTipHidden or (FBranch = '') then
@@ -2055,19 +2069,66 @@ begin
   FGraph.Tip := '';
 end;
 
+{ The log as the graph's toggles (the settings') ask for it: only the
+  first parent of a merge followed, the merges left out. The limit is
+  kept for a reload. A failure is told in a banner, with git's reason,
+  but for the one before the first commit, when there is no log. }
+function TRepoFrame.LoadGraphCommits(ALimit: integer; out ACommits: TGittanGraphCommits): boolean;
+begin
+  FGraphLoadLimit := ALimit;
+  Result := FRepo.GraphCommits(ACommits, ALimit, App.Settings.GraphFirstParent,
+    App.Settings.GraphNoMerges);
+  if not Result and (FRepo.CommitId('HEAD') <> '') then
+    BannerError(rsGraphLoadFailed, FRepo.Error);
+end;
+
 procedure TRepoFrame.GraphMore(Sender: TObject);
 var
   Commits: TGittanGraphCommits;
+  Ok: boolean;
 begin
   if FRepo.Root = '' then
     Exit;
   Screen.Cursor := crHourGlass;
   try
-    FRepo.GraphCommits(Commits, GraphSearchLimit);
+    Ok := LoadGraphCommits(GraphSearchLimit, Commits);
   finally
     Screen.Cursor := crDefault;
   end;
-  FGraph.Replace(Commits, Length(Commits) >= GraphSearchLimit);
+  { What is shown stays when the log cannot be read. }
+  if Ok then
+    FGraph.Replace(Commits, Length(Commits) >= GraphSearchLimit);
+end;
+
+{ A toggle of the graph's header was clicked, or a note changed: the
+  log is read again with as many commits as before, and the toggles are
+  kept in the settings. }
+procedure TRepoFrame.GraphReload(Sender: TObject);
+var
+  Commits: TGittanGraphCommits;
+  Limit: integer;
+  Ok: boolean;
+begin
+  if FRepo.Root = '' then
+    Exit;
+  if (App.Settings.GraphFirstParent <> FGraph.FirstParent) or
+    (App.Settings.GraphNoMerges <> FGraph.NoMerges) then
+  begin
+    App.Settings.GraphFirstParent := FGraph.FirstParent;
+    App.Settings.GraphNoMerges := FGraph.NoMerges;
+    App.Settings.Save;
+  end;
+  Limit := FGraphLoadLimit;
+  if Limit <= 0 then
+    Limit := GraphLimit;
+  Screen.Cursor := crHourGlass;
+  try
+    Ok := LoadGraphCommits(Limit, Commits);
+  finally
+    Screen.Cursor := crDefault;
+  end;
+  if Ok then
+    FGraph.Replace(Commits, Length(Commits) >= Limit);
 end;
 
 procedure TRepoFrame.GraphPathCommits(Sender: TObject; const APath: string;
