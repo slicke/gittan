@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.13 (build-138, 2026-11-03)
+
 ### Added
 - The commit graph has First Parent and No Merges toggles beside Statistics: the first follows only the main line through each merge, the second leaves the merges out. Both are remembered.
 - Export Files as Archive... in a commit's menu and a tag's menu writes the files of that commit as a zip or a tar.gz, every path under a folder named as the file.
