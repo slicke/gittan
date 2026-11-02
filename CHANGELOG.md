@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- The row saying a branch is behind main also says whether merging main would go through cleanly, or which files would conflict, before you press Merge or Rebase. Needs git 2.38 or later.
 - Linux on arm64, such as Raspberry Pi OS (64-bit): a .deb, an .rpm and a .tar.gz beside the amd64 ones.
 
 ### Fixed

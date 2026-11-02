@@ -191,9 +191,14 @@ type
     FOnTotalsClick: TGittanBranchClickEvent;
     { How many commits of FBehindRef (the default branch) the branch
       lacks, 0 for no row; the row's Rebase and Merge pills as last
-      painted, and the one under the mouse, -1 for none. }
+      painted, and the one under the mouse, -1 for none. FBehindConflicts
+      is how many files a merge of it would leave conflicted (0 merges
+      cleanly, -1 unknown) and FBehindConflictPath the one when it is
+      one. }
     FBehindCount: integer;
     FBehindRef: string;
+    FBehindConflicts: integer;
+    FBehindConflictPath: string;
     FBehindRects: array[0..1] of TRect;
     FBehindHot: integer;
     FOnBehindAction: TGittanBehindActionEvent;
@@ -314,8 +319,11 @@ type
     procedure SetUpstreamGone(AGone: boolean);
     {** Shows a row under the header saying the branch lacks ACount
       commits of ARef, the default branch, with Rebase and Merge, which
-      raise OnBehindAction; 0 shows none. }
-    procedure SetBehind(ACount: integer; const ARef: string);
+      raise OnBehindAction; 0 shows none. AConflicts says how many files
+      a merge of ARef would leave conflicted, APaths which (0 merges
+      cleanly, -1 says nothing). }
+    procedure SetBehind(ACount: integer; const ARef: string; AConflicts: integer = -1;
+      const APaths: TStringArray = nil);
     {** The color of the notes' links. }
     property LinkColor: TColor read FLink write FLink;
     {** The image list the file badges come from. }
@@ -395,6 +403,9 @@ resourcestring
   rsBehindMany = '%d commits behind %s';
   rsBehindRebase = 'Rebase';
   rsBehindMerge = 'Merge';
+  rsMergesCleanly = '✓ merges cleanly';
+  rsConflictsIn = '✕ conflicts in %s';
+  rsConflictsInMany = '✕ conflicts in %d files';
   rsUpstreamGone = '✕ upstream deleted on remote';
   rsBinary = 'binary';
   rsPartlyAdded = 'partly added with git add';
@@ -466,6 +477,7 @@ begin
   FMoreHot := -1;
   FCommitHot := -1;
   FBehindHot := -1;
+  FBehindConflicts := -1;
   FNotOnRemote := -1;
   FNotesWidth := -1;
   FCardWidth := -1;
@@ -544,14 +556,23 @@ begin
   Invalidate;
 end;
 
-procedure TGittanSummary.SetBehind(ACount: integer; const ARef: string);
+procedure TGittanSummary.SetBehind(ACount: integer; const ARef: string;
+  AConflicts: integer; const APaths: TStringArray);
+var
+  Path: string;
 begin
   if ARef = '' then
     ACount := 0;
-  if (FBehindCount = ACount) and (FBehindRef = ARef) then
+  Path := '';
+  if (AConflicts = 1) and (Length(APaths) = 1) then
+    Path := ExtractFileName(APaths[0]);
+  if (FBehindCount = ACount) and (FBehindRef = ARef) and (FBehindConflicts = AConflicts) and
+    (FBehindConflictPath = Path) then
     Exit;
   FBehindCount := ACount;
   FBehindRef := ARef;
+  FBehindConflicts := AConflicts;
+  FBehindConflictPath := Path;
   FBehindHot := -1;
   FBehindRects[0] := Rect(0, 0, 0, 0);
   FBehindRects[1] := Rect(0, 0, 0, 0);
@@ -599,6 +620,24 @@ begin
   Canvas.Font.Color := FText;
   Canvas.TextOut(X, TextY, '↓ ' + Part);
   Inc(X, Canvas.TextWidth('↓ ' + Part) + Px(Gap));
+  if FBehindConflicts >= 0 then
+  begin
+    if FBehindConflicts = 0 then
+    begin
+      Part := rsMergesCleanly;
+      Canvas.Font.Color := FAdded;
+    end
+    else
+    begin
+      if FBehindConflictPath <> '' then
+        Part := Format(rsConflictsIn, [FBehindConflictPath])
+      else
+        Part := Format(rsConflictsInMany, [FBehindConflicts]);
+      Canvas.Font.Color := FDeleted;
+    end;
+    Canvas.TextOut(X, TextY, Part);
+    Inc(X, Canvas.TextWidth(Part) + Px(Gap));
+  end;
   for i := 0 to 1 do
   begin
     if i = 0 then

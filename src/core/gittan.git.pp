@@ -148,6 +148,13 @@ type
     {** How many commits of DefaultBranch the branch lacks, from
       BehindDefault; 0 on a detached HEAD. }
     BehindDefault: integer;
+    {** While BehindDefault is above 0: how many files a merge of
+      DefaultBranch into HEAD would leave conflicted, from
+      MergeConflicts (0 when it merges cleanly), with their paths in
+      DefaultConflictPaths; -1 when nothing was asked or git cannot
+      tell (older than 2.38, GitHasMergeTree). }
+    DefaultConflicts: integer;
+    DefaultConflictPaths: TStringArray;
     {** For a branch without an upstream in a repository with a remote,
       how many of its commits no remote-tracking branch has, from
       NotOnRemotes (0 when all are there); -1 with an upstream, without
@@ -831,6 +838,13 @@ type
       sync line counts that, and a pull brings it in), or when git
       cannot tell. }
     function BehindDefault(const ABranch, ADefault: string): integer;
+    {** How many files a merge of ARef into HEAD would leave conflicted,
+      their paths in APaths, by a merge in memory that touches neither
+      the work tree nor the index (`merge-tree --write-tree`): 0 when it
+      merges cleanly, -1 when git cannot tell, as before 2.38
+      (GitHasMergeTree). Only commits count, not the changes in the work
+      tree. }
+    function MergeConflicts(const ARef: string; out APaths: TStringArray): integer;
     {** Whether the tip of the local branch ABranch's upstream is reached
       from one of the branch's newest reflog entries, as push
       --force-if-includes asks: the upstream holds nothing the branch
@@ -1112,6 +1126,10 @@ function GitVersionOf(const AExe: string; out AVersion: string;
 
 {** Whether git AMajor.AMinor is MinGitMajor.MinGitMinor or later. }
 function GitVersionSupported(AMajor, AMinor: integer): boolean;
+
+{** Whether the git GitExe runs has `merge-tree --write-tree`, 2.38 or
+  later; asked once per git, SetGitExe forgets the answer. }
+function GitHasMergeTree: boolean;
 
 {** What a git call answers when git could not be started: that none
   was found, when AExe is the plain "git" SetGitExe falls back to, else
@@ -1443,6 +1461,10 @@ var
     starting git while the main thread changes the path copies a string
     that is not freed. }
   GOldGitExes: TStringList;
+  { GitHasMergeTree's answer for GGitExe: -1 not asked yet, else 0 or 1.
+    An integer, so a watcher thread asking while the main thread sets
+    another git at most asks twice. }
+  GMergeTree: integer = -1;
 
 function ToolSearchPath: string;
 begin
@@ -1487,6 +1509,19 @@ begin
   Result := (AMajor > MinGitMajor) or ((AMajor = MinGitMajor) and (AMinor >= MinGitMinor));
 end;
 
+function GitHasMergeTree: boolean;
+var
+  Version: string;
+  Major, Minor: integer;
+begin
+  if GMergeTree < 0 then
+    if GitVersion(Version, Major, Minor) and ((Major > 2) or ((Major = 2) and (Minor >= 38))) then
+      GMergeTree := 1
+    else
+      GMergeTree := 0;
+  Result := GMergeTree = 1;
+end;
+
 function GitNotRunMessage(const AExe: string): string;
 begin
   if (AExe = '') or (AExe = 'git') then
@@ -1517,6 +1552,7 @@ begin
     Exe := 'git';
   if Exe = GGitExe then
     Exit;
+  GMergeTree := -1;
   { One string per path git ran by, not one per call: the settings set
     it again on every save. A path set again is the kept string itself,
     so the one in use is always kept or new, never a copy freed later. }
@@ -6055,8 +6091,11 @@ begin
   if not MergeBase(ASnap.DefaultBranch, ASnap.MergeBase) then
     ASnap.MergeBase := '';
   ASnap.HasUpstream := AheadBehind(ASnap.Ahead, ASnap.Behind);
+  ASnap.DefaultConflicts := -1;
   if not ASnap.Detached then
     ASnap.BehindDefault := BehindDefault(ASnap.Branch, ASnap.DefaultBranch);
+  if ASnap.BehindDefault > 0 then
+    ASnap.DefaultConflicts := MergeConflicts(ASnap.DefaultBranch, ASnap.DefaultConflictPaths);
   if ASnap.HasUpstream or ASnap.Detached or (RemoteFor('') = '') then
     ASnap.NotOnRemote := -1
   else
@@ -6197,6 +6236,41 @@ begin
   Result := CountCommits('HEAD', ADefault);
   if Result < 0 then
     Result := 0;
+end;
+
+{ merge-tree exits with 1 on conflicts, which RunGitIn takes for a
+  failure and hands what git wrote on stdout over in AError: with -z the
+  merged tree's id, a NUL, then each conflicted path and a NUL
+  (--name-only names a path once, --no-messages leaves out the
+  messages). A real failure starts with git's message, never with an id
+  and a NUL. }
+function TGittanRepo.MergeConflicts(const ARef: string; out APaths: TStringArray): integer;
+var
+  Output, Err: string;
+  Fields: TStringArray;
+  i: integer;
+begin
+  APaths := nil;
+  if (FRoot = '') or (ARef = '') or not GitHasMergeTree then
+    Exit(-1);
+  if RunGitIn(FRoot, ['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z',
+    'HEAD', ARef], Output, Err) then
+    Exit(0);
+  Fields := Err.Split([#0]);
+  if (Length(Fields) < 2) or not (Length(Fields[0]) in [40, 64]) then
+    Exit(-1);
+  for i := 1 to Length(Fields[0]) do
+    if not (Fields[0][i] in ['0'..'9', 'a'..'f']) then
+      Exit(-1);
+  for i := 1 to High(Fields) do
+    if Fields[i] <> '' then
+    begin
+      SetLength(APaths, Length(APaths) + 1);
+      APaths[High(APaths)] := Fields[i];
+    end;
+  Result := Length(APaths);
+  if Result = 0 then
+    Result := -1;
 end;
 
 function TGittanRepo.NotOnRemotes: integer;

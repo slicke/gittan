@@ -104,6 +104,7 @@ type
     procedure TestMoveAndRemove;
     procedure TestRebaseOnto;
     procedure TestBehindDefault;
+    procedure TestMergeConflicts;
     procedure TestUpstreamInReflog;
     procedure TestRebaseOntoConflicts;
     procedure TestRebaseStray;
@@ -2816,6 +2817,10 @@ begin
   AssertEquals(2, FRepo.BehindDefault('side', 'origin/main'));
   AssertTrue(FRepo.Snapshot(Snap));
   AssertEquals(2, Snap.BehindDefault);
+  if GitHasMergeTree then
+    AssertEquals('merges cleanly', 0, Snap.DefaultConflicts)
+  else
+    AssertEquals('git older than 2.38', -1, Snap.DefaultConflicts);
   AssertEquals('side is on no remote', 1, Snap.NotOnRemote);
   AssertEquals(1, FRepo.NotOnRemotes);
   AssertTrue('its commit is not pushed', Snap.Recent[0].Unpushed);
@@ -2831,6 +2836,49 @@ begin
   AssertTrue(FRepo.Snapshot(Snap));
   AssertEquals('detached', 0, Snap.BehindDefault);
   AssertEquals('detached', -1, Snap.NotOnRemote);
+end;
+
+{ A merge in memory finds the files both sides changed, and touches
+  neither the work tree nor the index. }
+procedure TGitRepoTest.TestMergeConflicts;
+var
+  Main: string;
+  Paths: TStringArray;
+  Snap: TGittanRepoSnapshot;
+begin
+  if not GitHasMergeTree then
+    Exit;
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Main := FRepo.Branch;
+  Git(['remote', 'add', 'origin', 'https://example.invalid/repo.git']);
+  Git(['checkout', '-q', '-b', 'side']);
+  WriteFile('b.txt', 'side'#10);
+  WriteFile(QuoteName, 'side'#10);
+  Commit('side');
+  Git(['checkout', '-q', Main]);
+  WriteFile('b.txt', 'main'#10);
+  WriteFile(QuoteName, 'main'#10);
+  WriteFile('c.txt', 'c'#10);
+  Commit('main');
+  Git(['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+  Git(['checkout', '-q', 'side']);
+  WriteFile('b.txt', 'changed'#10);
+
+  AssertEquals(2, FRepo.MergeConflicts('origin/main', Paths));
+  AssertEquals(2, Length(Paths));
+  AssertEquals('b.txt', Paths[0]);
+  AssertEquals(QuoteName, Paths[1]);
+  AssertTrue(FRepo.Snapshot(Snap));
+  AssertEquals('the work tree and the index are left alone', 1, Length(Snap.Stats));
+  AssertEquals('b.txt', Snap.Stats[0].Path);
+  AssertEquals(1, Snap.BehindDefault);
+  AssertEquals(2, Snap.DefaultConflicts);
+  AssertEquals(-1, FRepo.MergeConflicts('no-such-ref', Paths));
+  AssertEquals(0, Length(Paths));
+  AssertEquals('nothing to merge', 0, FRepo.MergeConflicts('side~1', Paths));
 end;
 
 { An amend of a pushed commit leaves the upstream's tip in the branch's

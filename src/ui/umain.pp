@@ -7154,7 +7154,8 @@ begin
   { Not in the middle of a merge or rebase, which the Commit section
     finishes first. }
   if FOperation = '' then
-    FSummary.SetBehind(ASnap.BehindDefault, FDefaultBranch)
+    FSummary.SetBehind(ASnap.BehindDefault, FDefaultBranch, ASnap.DefaultConflicts,
+      ASnap.DefaultConflictPaths)
   else
     FSummary.SetBehind(0, '');
   FSummary.BaseClickable := (BaseActionRef <> '') or (StashOfBase >= 0) or BlameShown;
