@@ -387,6 +387,7 @@ jobs:
           cp "$QJS"/libqjs.so.0.*.* dist/Gittan/libqjs.so.0
           cp "$QJS"/libtqshim.so dist/Gittan/
           cp externals/quickjs/LICENSE.quickjs-ng dist/Gittan/
+          cp LICENSE dist/Gittan/LICENSE.gittan
           tar -C dist -czf Gittan-linux-"$DEB_ARCH".tar.gz Gittan
           # The .deb and the .rpm, which install the desktop file and the
           # icons a Wayland desktop needs to show Gittan's (make packages).
@@ -428,6 +429,7 @@ jobs:
           # below leaves loose dylibs in Contents/MacOS alone.
           cp externals/quickjs/prebuilt/"${CPU:-aarch64}"-darwin/*.dylib dist/macos/Gittan.app/Contents/MacOS/
           cp externals/quickjs/LICENSE.quickjs-ng dist/macos/Gittan.app/Contents/Resources/
+          cp LICENSE dist/macos/Gittan.app/Contents/Resources/LICENSE.gittan
           codesign --force --sign - dist/macos/Gittan.app/Contents/MacOS/*.dylib
           # Apple Silicon refuses unsigned code; sign ad hoc.
           codesign --force --deep --sign - dist/macos/Gittan.app
@@ -466,6 +468,7 @@ jobs:
           # the executable.
           cp externals/quickjs/prebuilt/x86_64-win64/libqjs.dll externals/quickjs/prebuilt/x86_64-win64/tqshim.dll dist/Gittan/
           cp externals/quickjs/LICENSE.quickjs-ng dist/Gittan/
+          cp LICENSE dist/Gittan/LICENSE.gittan
           (cd dist && 7z a -tzip ../Gittan-windows-x64.zip Gittan >/dev/null)
 
       # The installer, on every Windows build (PRs too, so a broken .iss

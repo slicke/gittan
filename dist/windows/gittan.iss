@@ -78,7 +78,7 @@ Source: "{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "lexlib\*"; DestDir: "{app}\lexlib"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "dist\windows\gittan.cmd"; DestDir: "{app}\bin"; Flags: ignoreversion
 ; GPLv3 wants the license with the binary.
-Source: "LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
+Source: "LICENSE"; DestDir: "{app}"; DestName: "LICENSE.gittan.txt"; Flags: ignoreversion
 ; The extensions' JavaScript engine (quickjs-ng) and its shim, which the
 ; executable finds beside itself, and the engine's license.
 Source: "externals\quickjs\prebuilt\x86_64-win64\libqjs.dll"; DestDir: "{app}"; Flags: ignoreversion
@@ -87,6 +87,8 @@ Source: "externals\quickjs\LICENSE.quickjs-ng"; DestDir: "{app}"; DestName: "LIC
 
 [InstallDelete]
 Type: filesandordirs; Name: "{app}\lexlib"
+; The license was LICENSE.txt before it was LICENSE.gittan.txt.
+Type: files; Name: "{app}\LICENSE.txt"
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"
