@@ -31,7 +31,7 @@ uses
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   fpjson, gittan.ext.engine, gittan.ext.registry, gittan.ext.api, gittan.ext.loader,
   gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
-  gittan.rebase, gittan.worktrees, gittan.gitflow, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
+  gittan.rebase, gittan.worktrees, gittan.gitflow, gittan.repolist, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
   gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, gittan.merge, gittan.mergeview,
   ATSynEdit_Gaps, md5;
 
@@ -212,6 +212,13 @@ type
     {** The commands the extensions registered changed: every frame
       builds its Extensions menu and popups again (QueueRebuildExtMenu). }
     procedure ExtensionsChanged; virtual; abstract;
+    {** The repository list (App.RepoList) changed and was saved: every
+      frame's welcome view shows it again (TRepoFrame.RepoListChanged). }
+    procedure RepoListChanged; virtual; abstract;
+    {** File > Repository List: shows the welcome view, which has the
+      list: the frame shown when it has no repository, else another
+      that has none, else a new one. }
+    procedure ShowRepoList; virtual; abstract;
   end;
 
   { TRepoFrame }
@@ -855,6 +862,13 @@ type
     FFlowBranches: TGittanFlowBranches;
     FFlowAskKind: TGittanFlowKind;
     FMenuFlowBranch: TGittanFlowBranch;
+    { The repository list (umain.repolist.inc): File > Add to Repository
+      List, the menu of a right-click in the welcome view and the entry
+      or recent repository it is for. }
+    FAddListItem: TMenuItem;
+    FListPopup: TPopupMenu;
+    FListEntry: TGittanRepoEntry;
+    FListRoot: string;
     { The command palette (umain.palette.inc): its item in the Go menu,
       the list and the action of each of its rows, by name. }
     FPaletteItem: TMenuItem;
@@ -1198,6 +1212,9 @@ type
     procedure WelcomeOpenRecent(Sender: TObject; const ARoot: string);
     procedure WelcomeClone(Sender: TObject);
     procedure WelcomeInit(Sender: TObject);
+    procedure WelcomeListMenu(Sender: TObject; AEntry: TGittanRepoEntry;
+      const ARoot: string; const APos: TPoint);
+    procedure WelcomeListChanged(Sender: TObject);
     function SelectedPath: string;
     function StatIcon(const AStat: TGittanFileStat): integer;
     function StatHint(const AStat: TGittanFileStat): string;
@@ -2025,6 +2042,13 @@ type
     procedure FlowFinishAsk(const ABranch: TGittanFlowBranch);
     function FlowBranchOf(const ABranch: string; out AFlowBranch: TGittanFlowBranch): boolean;
     function FlowFinishCaption(const ABranch: TGittanFlowBranch): string;
+    procedure UpdateRepoListItem;
+    procedure SaveRepoList;
+    procedure MenuRepoListClick(Sender: TObject);
+    procedure MenuAddListClick(Sender: TObject);
+    function ListMenuFolder: TGittanRepoEntry;
+    function CheckListName(const AValues: array of string): string;
+    procedure ListMenuClick(Sender: TObject);
     procedure StashChangesAsk(AChosenOnly: boolean);
     procedure ApplyStash(AStash: TGittanStash; APop: boolean);
     procedure DropStashAsk(AStash: TGittanStash);
@@ -2279,6 +2303,9 @@ type
       among them, while the widgetset is still in its click. Several
       asks before it runs give one rebuild. }
     procedure QueueRebuildExtMenu;
+    {** The repository list changed (TRepoWindow.RepoListChanged): the
+      welcome view and File > Add to Repository List follow. }
+    procedure RepoListChanged;
     {** The folder an open job is opening, '' when none runs. }
     property OpeningDir: string read FOpeningDir;
     {** The root of the repository opening, as the window found it
@@ -2423,6 +2450,33 @@ resourcestring
   rsNextTab = 'Next Tab';
   rsPrevTab = 'Previous Tab';
   rsOpenRecent = 'Open Re&cent';
+  rsRepoListItem = 'Repository &List';
+  rsAddListItem = 'Add to Repository List';
+  rsListOpen = 'Open';
+  rsListRename = 'Rename...';
+  rsListRemove = 'Remove from List';
+  rsListRemoveFolder = 'Remove Folder...';
+  rsListAddRecent = 'Add to Repository List';
+  rsListNewFolder = 'New Folder...';
+  rsListAddRepo = 'Add Repository...';
+  rsListAddFolder = 'Add Repositories in Folder...';
+  rsListRenameTitle = 'Rename';
+  rsListFolderPrompt = 'Name of the folder';
+  rsListRepoPrompt = 'Name in the list, empty for the folder''s';
+  rsListNoName = 'The folder needs a name.';
+  rsListNewFolderTitle = 'New Folder';
+  rsListCreate = 'Create';
+  rsListRemoveTitle = 'Remove Folder';
+  rsListRemoveAsk = 'Remove the folder %s and the %d repositories in it from the list? ' +
+    'The repositories themselves stay where they are.';
+  rsListRemoveAction = 'Remove';
+  rsListNotRepo = 'Not a git repository: %s';
+  rsListHasIt = 'The repository list has it already';
+  rsListAllListed = 'The repository list has every repository there already';
+  rsListNoneFound = 'No repositories found in %s';
+  rsListAdded = 'Added %s to the repository list';
+  rsListFolderAdded = 'Added %d repositories to the repository list, in %s';
+  rsListSaveFailed = 'Could not save the repository list';
   rsCloneItem = 'Clo&ne Repository...';
   rsInitItem = '&Init Repository...';
   rsInitTitle = 'Init Repository';
@@ -4251,6 +4305,9 @@ begin
   FWelcome.OnOpenRecent := @WelcomeOpenRecent;
   FWelcome.OnClone := @WelcomeClone;
   FWelcome.OnInit := @WelcomeInit;
+  FWelcome.OnListMenu := @WelcomeListMenu;
+  FWelcome.OnListChanged := @WelcomeListChanged;
+  FWelcome.SetRepoList(App.RepoList);
   { The Repository page shares the box too; its links open as the
     summary's do. }
   FRepoPage := TGittanRepoPage.Create(Self);
@@ -5423,6 +5480,9 @@ begin
   AddItem(FileMenu, rsOpenRepo, ShortCut(VK_O, [ssModifier, ssShift]), @MenuOpenRepoClick);
   FRecentMenu := AddItem(FileMenu, rsOpenRecent, 0, nil);
   RebuildRecentMenu;
+  AddItem(FileMenu, rsRepoListItem, 0, @MenuRepoListClick);
+  FAddListItem := AddItem(FileMenu, rsAddListItem, 0, @MenuAddListClick);
+  UpdateRepoListItem;
   FCloneItem := AddItem(FileMenu, rsCloneItem, 0, @MenuCloneClick);
   FInitItem := AddItem(FileMenu, rsInitItem, 0, @MenuInitClick);
   AddItem(FileMenu, rsOpen, ShortCut(VK_O, [ssModifier]), @MenuOpenClick);
@@ -7057,6 +7117,7 @@ begin
   begin
     App.Settings.AddRecent(FRepo.Root);
     RebuildRecentMenu;
+    UpdateRepoListItem;
     ShowSummary;
     StartIndexing;
   end;
@@ -7822,6 +7883,7 @@ begin
   HideBoxPages;
   SetNavRow(-1);
   FTreeClean := False;
+  UpdateRepoListItem;
   FWelcome.Visible := True;
   FWelcome.FitHeight(FSummaryBox.ClientHeight);
 end;
@@ -8540,6 +8602,7 @@ const
 {$I umain.stash.inc}
 {$I umain.worktrees.inc}
 {$I umain.gitflow.inc}
+{$I umain.repolist.inc}
 {$I umain.palette.inc}
 {$I umain.nav.inc}
 {$I umain.undo.inc}
