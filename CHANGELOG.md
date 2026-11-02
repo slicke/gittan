@@ -7,7 +7,7 @@
 
 ### Fixed
 - The macOS disk image holds only Gittan and the Applications link; it also had a linux and a windows folder.
-- Every package carries Gittan's license (GPLv3) as LICENSE.gittan, beside the JavaScript engine's; only the Windows installer had it.
+- Every package carries Gittan's license (GPLv3) as LICENSE.gittan, beside the JavaScript engine's; only the Windows installer had it. A NOTICE file beside them says what each license covers and credits the code built into Gittan.
 
 ## 0.11 (build-136, 2026-11-02)
 

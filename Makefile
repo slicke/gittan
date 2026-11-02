@@ -383,6 +383,7 @@ packages: build
 	install -m 644 $(QJS_DIR)/libtqshim.so $(PKG_ROOT)/usr/lib/gittan/; \
 	install -m 644 externals/quickjs/LICENSE.quickjs-ng $(PKG_ROOT)/usr/share/doc/gittan/; \
 	install -m 644 LICENSE $(PKG_ROOT)/usr/share/doc/gittan/LICENSE.gittan; \
+	install -m 644 NOTICE $(PKG_ROOT)/usr/share/doc/gittan/; \
 	install -m 644 dist/linux/$(DESKTOP_ID).desktop $(PKG_ROOT)/usr/share/applications/; \
 	install -m 644 dist/linux/$(DESKTOP_ID).metainfo.xml $(PKG_ROOT)/usr/share/metainfo/; \
 	$(call install_icons,$(PKG_ROOT)/usr/share)
