@@ -176,18 +176,22 @@ begin
   ctx^.Free(v);
 end;
 
-{ AShow, when given, is evaluated into the message of a timeout. }
+{ AShow, when given, is evaluated into the message of a timeout. Thirty
+  seconds by the clock, not a count of CheckSynchronize calls, which
+  return at once while there is something to synchronize: a Windows
+  runner took over six to answer three git commands at once, git looking
+  through PATH for commands like an unknown one. }
 procedure TExtApiTest.WaitFor(ctx: JSContext; const AExpr: string; const AShow: string);
 var
-  i: integer;
+  GiveUpAt: QWord;
 begin
-  for i := 1 to 600 do
-  begin
+  GiveUpAt := GetTickCount64 + 30000;
+  repeat
     CheckSynchronize(10);
     FEngine.PumpJobs;
     if EvalIn(ctx, 'String(!!(' + AExpr + '))') = 'true' then
       Exit;
-  end;
+  until GetTickCount64 >= GiveUpAt;
   if AShow <> '' then
     Fail('timed out waiting for ' + AExpr + ': ' + EvalIn(ctx, AShow))
   else
