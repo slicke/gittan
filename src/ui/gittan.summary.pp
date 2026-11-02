@@ -144,10 +144,13 @@ type
     FStepHot: integer;
     FOnCommitStep: TGittanCommitStepEvent;
     { The commit's note, wrapped, under the body; the issue references
-      of the card (found with FIssueTracker's regular expression as the
-      lines are painted) and the one under the mouse, -1 for none. }
+      in each line of the subject, the body and the note (found with
+      FIssueTracker's regular expression by FindCardLinks, when the
+      card is laid out or the tracker changes); where each was painted;
+      and the one under the mouse, -1 for none. }
     FCardNote: TStringArray;
     FIssueTracker: TGittanIssueTracker;
+    FSubjectLinks, FBodyLinks, FNoteLinks: array of TGittanIssueLinks;
     FCardLinks: array of TGittanCardLink;
     FCardLinkHot: integer;
     FOnIssueClick: TGittanIssueClickEvent;
@@ -252,7 +255,9 @@ type
     procedure PaintReview(var Y: integer);
     procedure LayoutCard;
     procedure PaintCard(var Y: integer);
-    procedure PaintCardLine(X, Y: integer; const AText: string);
+    procedure FindCardLinks;
+    procedure PaintCardLine(X, Y: integer; const AText: string;
+      const ALinks: TGittanIssueLinks);
     function CardLinkAt(X, Y: integer): integer;
     procedure SetCardLinkHot(AValue: integer);
     procedure SetIssueTracker(const AValue: TGittanIssueTracker);
@@ -1369,6 +1374,8 @@ begin
   FCardWidth := Width;
   FCardSubject := nil;
   FCardLines := nil;
+  FCardNote := nil;
+  FindCardLinks;
   FCardHeight := 0;
   if FCommit.Hash = '' then
     Exit;
@@ -1454,6 +1461,28 @@ begin
   if Length(FCardNote) > 0 then
     Inc(FCardHeight, 6 + (Length(FCardNote) + 1) * LineHeight);
   Inc(FCardHeight, Px(NoteGap) + Px(Pad) div 2);
+  FindCardLinks;
+end;
+
+{ The issue references in every line of the card, one array per line,
+  so a paint runs no regular expression. }
+procedure TGittanSummary.FindCardLinks;
+
+  procedure Find(const ALines: TStringArray; var ALinks: array of TGittanIssueLinks);
+  var
+    i: integer;
+  begin
+    for i := 0 to High(ALines) do
+      ALinks[i] := FindIssueLinks(ALines[i], FIssueTracker);
+  end;
+
+begin
+  SetLength(FSubjectLinks, Length(FCardSubject));
+  SetLength(FBodyLinks, Length(FCardLines));
+  SetLength(FNoteLinks, Length(FCardNote));
+  Find(FCardSubject, FSubjectLinks);
+  Find(FCardLines, FBodyLinks);
+  Find(FCardNote, FNoteLinks);
 end;
 
 { A card as a note's, with a stripe in the link color: the subject in
@@ -1503,7 +1532,7 @@ begin
   Canvas.Font.Color := FText;
   for k := 0 to High(FCardSubject) do
   begin
-    PaintCardLine(X, At, FCardSubject[k]);
+    PaintCardLine(X, At, FCardSubject[k], FSubjectLinks[k]);
     Inc(At, LineHeight);
   end;
   Canvas.Font.Style := [];
@@ -1528,7 +1557,7 @@ begin
   Canvas.Font.Color := FText;
   for k := 0 to High(FCardLines) do
   begin
-    PaintCardLine(X, At, FCardLines[k]);
+    PaintCardLine(X, At, FCardLines[k], FBodyLinks[k]);
     Inc(At, LineHeight);
   end;
   { The note, under its heading, dimmed. }
@@ -1543,7 +1572,7 @@ begin
     Canvas.Font.Color := FText;
     for k := 0 to High(FCardNote) do
     begin
-      PaintCardLine(X, At, FCardNote[k]);
+      PaintCardLine(X, At, FCardNote[k], FNoteLinks[k]);
       Inc(At, LineHeight);
     end;
   end;
@@ -1551,19 +1580,19 @@ begin
 end;
 
 { A line of the card at X, Y in the canvas's font, with the references
-  to issues in it in the link color (underlined under the mouse) and
-  noted in FCardLinks, in the order they are painted, so the index of
-  the one under the mouse holds from paint to paint. }
-procedure TGittanSummary.PaintCardLine(X, Y: integer; const AText: string);
+  to issues in it (ALinks, from FindCardLinks) in the link color
+  (underlined under the mouse) and noted in FCardLinks, in the order
+  they are painted, so the index of the one under the mouse holds from
+  paint to paint. }
+procedure TGittanSummary.PaintCardLine(X, Y: integer; const AText: string;
+  const ALinks: TGittanIssueLinks);
 var
-  Links: TGittanIssueLinks;
   i, p, n: integer;
   Seg: string;
   SavedColor: TColor;
   SavedStyle: TFontStyles;
 begin
-  Links := FindIssueLinks(AText, FIssueTracker);
-  if Length(Links) = 0 then
+  if Length(ALinks) = 0 then
   begin
     Canvas.TextOut(X, Y, AText);
     Exit;
@@ -1571,29 +1600,29 @@ begin
   SavedColor := Canvas.Font.Color;
   SavedStyle := Canvas.Font.Style;
   p := 1;
-  for i := 0 to High(Links) do
+  for i := 0 to High(ALinks) do
   begin
-    if (Links[i].Start < p) or (Links[i].Len <= 0) then
+    if (ALinks[i].Start < p) or (ALinks[i].Len <= 0) then
       Continue;
-    Seg := Copy(AText, p, Links[i].Start - p);
+    Seg := Copy(AText, p, ALinks[i].Start - p);
     if Seg <> '' then
     begin
       Canvas.TextOut(X, Y, Seg);
       Inc(X, Canvas.TextWidth(Seg));
     end;
-    Seg := Copy(AText, Links[i].Start, Links[i].Len);
+    Seg := Copy(AText, ALinks[i].Start, ALinks[i].Len);
     n := Length(FCardLinks);
     SetLength(FCardLinks, n + 1);
     Canvas.Font.Color := FLink;
     if FCardLinkHot = n then
       Canvas.Font.Style := SavedStyle + [fsUnderline];
     FCardLinks[n].R := Rect(X, Y, X + Canvas.TextWidth(Seg), Y + Canvas.TextHeight('Xg'));
-    FCardLinks[n].Id := Links[i].Id;
+    FCardLinks[n].Id := ALinks[i].Id;
     Canvas.TextOut(X, Y, Seg);
     Inc(X, Canvas.TextWidth(Seg));
     Canvas.Font.Color := SavedColor;
     Canvas.Font.Style := SavedStyle;
-    p := Links[i].Start + Links[i].Len;
+    p := ALinks[i].Start + ALinks[i].Len;
   end;
   Seg := Copy(AText, p, MaxInt);
   if Seg <> '' then
@@ -1623,6 +1652,7 @@ begin
   if (FIssueTracker.Url = AValue.Url) and (FIssueTracker.LogRegex = AValue.LogRegex) then
     Exit;
   FIssueTracker := AValue;
+  FindCardLinks;
   FCardLinkHot := -1;
   Invalidate;
 end;

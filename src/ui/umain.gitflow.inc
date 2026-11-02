@@ -13,7 +13,8 @@
   and Git Flow Settings... to change the setup. A right click on a
   branch of git flow in the branch list offers its Finish too.
   The menu is filled as the Branch menu opens (FillFlowMenu), so the
-  palette lists its items. Nothing is offered that moves HEAD while git
+  palette lists its items, from the setup and the branches of the last
+  snapshot (ApplyFlowSnapshot), so opening it runs no git. Nothing is offered that moves HEAD while git
   is in the middle of something or a job runs. A finish that stops with
   conflicts leaves them to the Commit section; its Finish item, still
   there with the branch, goes on from where it stopped. }
@@ -40,6 +41,28 @@ begin
   Result := StringReplace(AName, '&', '&&', [rfReplaceAll]);
 end;
 
+{ The git flow of a snapshot and its branches among the snapshot's local
+  branches (RefState's tips, sorted by name as for-each-ref sorts), kept
+  for the menus. }
+procedure TRepoFrame.ApplyFlowSnapshot(const ASnap: TGittanRepoSnapshot);
+var
+  Names: TStringList;
+  Tip: TGittanBranchTip;
+begin
+  FSnapFlow := ParseFlowConfig(ASnap.FlowConfig);
+  FSnapFlowBranches := nil;
+  if not FSnapFlow.Initialized then
+    Exit;
+  Names := TStringList.Create;
+  try
+    for Tip in ASnap.RefState.Tips do
+      Names.Add(Tip.Name);
+    FSnapFlowBranches := FlowBranchesOf(FSnapFlow, Names);
+  finally
+    Names.Free;
+  end;
+end;
+
 procedure TRepoFrame.FillFlowMenu;
 var
   Has, Ready: boolean;
@@ -60,7 +83,7 @@ begin
   Has := (FRepo <> nil) and (FRepo.Root <> '');
   Ready := Has and RepoReady;
   if Has then
-    FFlow := ReadFlow(FRepo.Root)
+    FFlow := FSnapFlow
   else
     FFlow := DefaultFlow('');
   FFlowBranches := nil;
@@ -70,7 +93,7 @@ begin
       @FlowMenuClick);
     Exit;
   end;
-  FFlowBranches := ListFlowBranches(FRepo.Root, FFlow);
+  FFlowBranches := FSnapFlowBranches;
   for Kind := Low(Kind) to High(Kind) do
     AddMenuItem(FFlowMenu, Format(rsFlowStartItem, [FlowKindWord(Kind)]), Ord(Kind), Ready,
       @FlowMenuClick);
@@ -328,7 +351,7 @@ var
   FlowName: string;
 begin
   AFlowBranch := Default(TGittanFlowBranch);
-  FFlow := ReadFlow(FRepo.Root);
+  FFlow := FSnapFlow;
   Result := FlowKindOf(FFlow, ABranch, Kind, FlowName);
   if Result then
   begin

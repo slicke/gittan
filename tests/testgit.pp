@@ -1690,6 +1690,10 @@ begin
   AssertTrue(FRepo.SetIssueTracker(T));
   Read := IssueTrackerIn(FDir);
   AssertEquals('#(\d+)', Read.LogRegex);
+  { An expression that starts with a dash is no option to git config. }
+  T.LogRegex := '-(\d+)-';
+  AssertTrue(FRepo.SetIssueTracker(T));
+  AssertEquals('-(\d+)-', IssueTrackerIn(FDir).LogRegex);
   T.Url := '';
   T.LogRegex := '';
   AssertTrue(FRepo.SetIssueTracker(T));
@@ -3031,6 +3035,18 @@ begin
   AssertEquals('b.txt', Snap.Stats[0].Path);
   AssertEquals(1, Snap.BehindDefault);
   AssertEquals(2, Snap.DefaultConflicts);
+  { The next snapshot takes the merge it kept, and makes it again once
+    the default branch moved: to a commit with nothing new in it, which
+    merges cleanly. }
+  AssertTrue(FRepo.Snapshot(Snap));
+  AssertEquals(2, Snap.DefaultConflicts);
+  AssertEquals(2, Length(Snap.DefaultConflictPaths));
+  Git(['update-ref', 'refs/remotes/origin/main',
+    Trim(Git(['commit-tree', 'side~1^{tree}', '-p', 'side~1', '-m', 'empty']))]);
+  AssertTrue(FRepo.Snapshot(Snap));
+  AssertEquals(1, Snap.BehindDefault);
+  AssertEquals('merges cleanly now', 0, Snap.DefaultConflicts);
+  AssertEquals(0, Length(Snap.DefaultConflictPaths));
   AssertEquals(-1, FRepo.MergeConflicts('no-such-ref', Paths));
   AssertEquals(0, Length(Paths));
   AssertEquals('nothing to merge', 0, FRepo.MergeConflicts('side~1', Paths));

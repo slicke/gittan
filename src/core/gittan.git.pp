@@ -185,6 +185,10 @@ type
     {** The issue tracker the config names (IssueTrackerIn), for the
       links in commit messages. }
     IssueTracker: TGittanIssueTracker;
+    {** The git flow keys of the config, as `git config --get-regexp
+      ^gitflow\.` prints them (gittan.gitflow's ParseFlowConfig reads
+      them), so the Branch menu is filled without running git. }
+    FlowConfig: string;
     {** Where the branches are, from ReadRefState, for Undo. }
     RefState: TGittanRefState;
   end;
@@ -275,6 +279,13 @@ type
     FIndexAdded: boolean;
     FIgnoreWhitespace: boolean;
     FOnOutput: TGittanOutputEvent;
+    { The last MergeConflicts of Snapshot: the two commits merged (HEAD's
+      and the default branch's, '' for none), the count and the paths.
+      The merge depends on the two commits alone, so a snapshot while
+      neither moved takes them from here instead of merging again. }
+    FConflictsOf: string;
+    FConflicts: integer;
+    FConflictPaths: TStringArray;
     {** The folder a linked worktree's git directory shares with the
       main one (its commondir file), else the git directory itself. }
     function CommonDir: string;
@@ -6137,6 +6148,7 @@ end;
 function TGittanRepo.Snapshot(out ASnap: TGittanRepoSnapshot): boolean;
 var
   List: TStringList;
+  Pair: string;
 begin
   ASnap := Default(TGittanRepoSnapshot);
   ASnap.Ok := ChangeStats(ASnap.Stats);
@@ -6152,7 +6164,29 @@ begin
   if not ASnap.Detached then
     ASnap.BehindDefault := BehindDefault(ASnap.Branch, ASnap.DefaultBranch);
   if ASnap.BehindDefault > 0 then
-    ASnap.DefaultConflicts := MergeConflicts(ASnap.DefaultBranch, ASnap.DefaultConflictPaths);
+  begin
+    Pair := CommitId(ASnap.DefaultBranch);
+    if (ASnap.Head = '') or (Pair = '') then
+      Pair := ''
+    else
+      Pair := ASnap.Head + ' ' + Pair;
+    if (Pair <> '') and (Pair = FConflictsOf) then
+    begin
+      ASnap.DefaultConflicts := FConflicts;
+      ASnap.DefaultConflictPaths := Copy(FConflictPaths);
+    end
+    else
+    begin
+      ASnap.DefaultConflicts := MergeConflicts(ASnap.DefaultBranch, ASnap.DefaultConflictPaths);
+      { A failure (-1) may be git's of the moment, so it is asked again. }
+      if ASnap.DefaultConflicts >= 0 then
+        FConflictsOf := Pair
+      else
+        FConflictsOf := '';
+      FConflicts := ASnap.DefaultConflicts;
+      FConflictPaths := Copy(ASnap.DefaultConflictPaths);
+    end;
+  end;
   if ASnap.HasUpstream or ASnap.Detached or (RemoteFor('') = '') then
     ASnap.NotOnRemote := -1
   else
@@ -6178,6 +6212,9 @@ begin
   end;
   ASnap.RemoteUrls := ResolvedRemoteUrlsIn(FRoot);
   ASnap.IssueTracker := IssueTrackerIn(FRoot);
+  { No key is a failure of git config, and no git flow. }
+  if not RunGit(FRoot, ['config', '--get-regexp', '^gitflow\.'], ASnap.FlowConfig) then
+    ASnap.FlowConfig := '';
   ReadRefState(ASnap.RefState);
   Result := ASnap.Ok;
 end;
@@ -6320,7 +6357,10 @@ begin
   for i := 1 to Length(Fields[0]) do
     if not (Fields[0][i] in ['0'..'9', 'a'..'f']) then
       Exit(-1);
-  for i := 1 to High(Fields) do
+  { Each entry ends with a NUL, so what follows the last one is not a
+    path: nothing, or a line break and what git wrote on stderr, which
+    RunGitEnv joins to the output of a failed call. }
+  for i := 1 to High(Fields) - 1 do
     if Fields[i] <> '' then
     begin
       SetLength(APaths, Length(APaths) + 1);
@@ -6614,7 +6654,8 @@ function TGittanRepo.SetIssueTracker(const ATracker: TGittanIssueTracker): boole
         Result := not RunGit(FRoot, ['config', '--local', '--get-all', AKey], Output);
     end
     else
-      Result := RunGit(FRoot, ['config', '--local', AKey, Trim(AValue)], Output);
+      { A value that starts with a dash (an expression may) is no option. }
+      Result := RunGit(FRoot, ['config', '--local', '--end-of-options', AKey, Trim(AValue)], Output);
   end;
 
 begin

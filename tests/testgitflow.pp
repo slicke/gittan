@@ -78,6 +78,35 @@ begin
     end;
 end;
 
+{ A file's bytes as they are, and written back as they are (TStringList
+  would end the text with a line break). }
+function ReadRaw(const APath: string): string;
+var
+  F: TFileStream;
+begin
+  F := TFileStream.Create(APath, fmOpenRead or fmShareDenyNone);
+  try
+    SetLength(Result, F.Size);
+    if F.Size > 0 then
+      F.ReadBuffer(Result[1], F.Size);
+  finally
+    F.Free;
+  end;
+end;
+
+procedure WriteRaw(const APath, AText: string);
+var
+  F: TFileStream;
+begin
+  F := TFileStream.Create(APath, fmCreate);
+  try
+    if AText <> '' then
+      F.WriteBuffer(AText[1], Length(AText));
+  finally
+    F.Free;
+  end;
+end;
+
 procedure TGitFlowTest.CommitFile(const AName, AText, AMessage: string);
 begin
   WriteFile(AName, AText);
@@ -181,7 +210,7 @@ end;
 procedure TGitFlowTest.TestInit;
 var
   Flow: TGittanFlow;
-  Err: string;
+  Err, Config, Text: string;
 begin
   Git(['init', '-q', '-b', 'master']);
   CommitFile('a.txt', 'a', 'first');
@@ -206,12 +235,29 @@ begin
   AssertEquals('what the git-flow command looks for', 'support/',
     GitOut(['config', 'gitflow.prefix.support']));
   AssertEquals('master', SuggestFlowMaster(FDir));
-  { The empty prefix is written too, as the command wants it. }
+  { The empty prefix is written too, as the command wants it, into a
+    config file that may lack its last line break; a setup done again
+    adds no second section header. }
   Flow.VersionTag := '';
+  Config := IncludeTrailingPathDelimiter(FDir) + '.git' + PathDelim + 'config';
+  Text := ReadRaw(Config);
+  WriteRaw(Config, TrimRight(Text));
   AssertTrue(Err, InitFlow(FDir, Flow, Err));
   AssertTrue('set, empty', Pos('gitflow.prefix.versiontag',
     GitOut(['config', '--get-regexp', 'versiontag'])) = 1);
   AssertEquals('', ReadFlow(FDir).VersionTag);
+  AssertEquals('master', GitOut(['config', 'gitflow.branch.master']));
+  Text := ReadRaw(Config);
+  AssertTrue('a header', Pos('[gitflow "prefix"]', Text) > 0);
+  AssertTrue(Err, InitFlow(FDir, Flow, Err));
+  AssertEquals('', ReadFlow(FDir).VersionTag);
+  AssertEquals('no header added', Length(Text), Length(ReadRaw(Config)));
+  { The prefixes the git-flow command uses and Gittan does not are
+    kept as the command set them. }
+  Git(['config', 'gitflow.prefix.bugfix', 'fix/']);
+  AssertTrue(Err, InitFlow(FDir, Flow, Err));
+  AssertEquals('fix/', GitOut(['config', 'gitflow.prefix.bugfix']));
+  AssertEquals('support/', GitOut(['config', 'gitflow.prefix.support']));
 end;
 
 procedure TGitFlowTest.TestFeature;

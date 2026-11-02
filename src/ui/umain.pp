@@ -866,6 +866,11 @@ type
     FFlowMenu: TMenuItem;
     FFlow: TGittanFlow;
     FFlowBranches: TGittanFlowBranches;
+    { The git flow and its branches as of the last snapshot, which the
+      Branch menu and the branch list's menu read, so opening them runs
+      no git. }
+    FSnapFlow: TGittanFlow;
+    FSnapFlowBranches: TGittanFlowBranches;
     FFlowAskKind: TGittanFlowKind;
     FMenuFlowBranch: TGittanFlowBranch;
     { The repository list (umain.repolist.inc): File > Add to Repository
@@ -2046,6 +2051,7 @@ type
     procedure AddWorktreeAsk;
     procedure RemoveWorktreeAsk(const AWorktree: TGittanWorktree);
     procedure FillFlowMenu;
+    procedure ApplyFlowSnapshot(const ASnap: TGittanRepoSnapshot);
     procedure FlowMenuClick(Sender: TObject);
     function CheckFlowSetup(const AValues: array of string): string;
     procedure FlowSetupAsk;
@@ -7283,6 +7289,7 @@ begin
   end;
   FIssueTracker := ASnap.IssueTracker;
   UpdateIssueTracker;
+  ApplyFlowSnapshot(ASnap);
   { The pull request is looked up for the branch HEAD is on, the detached
     id during a rebase, so this runs before the rebase branch stands in. }
   StartPullJob(False);

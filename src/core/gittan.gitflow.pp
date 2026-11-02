@@ -278,13 +278,17 @@ end;
 
 { An empty value cannot go to git config as an argument: RunTool
   refuses an empty one on Unix, where TProcess would end the argument
-  list there and git config would read the key instead. The key is unset and written into the repository's
-  config file, in a section of its own (git takes a section more than
-  once), as "key =", which git reads as empty. }
+  list there and git config would read the key instead. The key is
+  unset and written into the repository's config file, in a section of
+  its own (git takes a section more than once), as "key =", which git
+  reads as empty. A file that does not end with a line break gets one
+  first, and the section's header is left out when --unset-all left it
+  as the file's last line, so a setup done again does not pile headers
+  up. }
 function SetEmptyKey(const ARoot, ASection, ASubsection, AName: string;
   out AError: string): boolean;
 var
-  Output, Path: string;
+  Output, Path, Header, Text: string;
   F: TFileStream;
   Line: string;
 begin
@@ -298,10 +302,20 @@ begin
   Path := SetDirSeparators(Trim(Path));
   if (Path = '') or not ((Path[1] in ['/', '\']) or ((Length(Path) > 1) and (Path[2] = ':'))) then
     Path := IncludeTrailingPathDelimiter(ARoot) + Path;
-  Line := '[' + ASection + ' "' + ASubsection + '"]'#10#9 + AName + ' ='#10;
+  Header := '[' + ASection + ' "' + ASubsection + '"]';
   try
     F := TFileStream.Create(Path, fmOpenReadWrite or fmShareDenyWrite);
     try
+      SetLength(Text, F.Size);
+      if F.Size > 0 then
+        F.ReadBuffer(Text[1], F.Size);
+      Line := '';
+      if (Text <> '') and not (Text[Length(Text)] in [#10, #13]) then
+        Line := #10;
+      Text := TrimRight(Text);
+      if not Text.EndsWith(Header) then
+        Line := Line + Header + #10;
+      Line := Line + #9 + AName + ' ='#10;
       F.Seek(0, soEnd);
       F.WriteBuffer(Line[1], Length(Line));
     finally
@@ -335,6 +349,18 @@ var
     Result := RunGitIn(ARoot, ['config', '--local', AKey, AValue], Output, AError);
   end;
 
+  { A key set already is left as it is: the bugfix and support
+    prefixes, which the git-flow command uses and Gittan does not, so
+    a setup done here keeps what was set there. }
+  function KeepKey(const AKey, AValue: string): boolean;
+  var
+    Err: string;
+  begin
+    Result := RunGitIn(ARoot, ['config', '--local', '--get', AKey], Output, Err);
+    if not Result then
+      Result := SetKey(AKey, AValue);
+  end;
+
 begin
   AError := '';
   if (AFlow.Master = '') or (AFlow.Develop = '') or (AFlow.Master = AFlow.Develop) then
@@ -353,10 +379,10 @@ begin
     SetKey('gitflow.branch.master', AFlow.Master) and
     SetKey('gitflow.branch.develop', AFlow.Develop) and
     SetKey('gitflow.prefix.feature', AFlow.Prefix[fkFeature]) and
-    SetKey('gitflow.prefix.bugfix', 'bugfix/') and
+    KeepKey('gitflow.prefix.bugfix', 'bugfix/') and
     SetKey('gitflow.prefix.release', AFlow.Prefix[fkRelease]) and
     SetKey('gitflow.prefix.hotfix', AFlow.Prefix[fkHotfix]) and
-    SetKey('gitflow.prefix.support', 'support/') and
+    KeepKey('gitflow.prefix.support', 'support/') and
     SetKey('gitflow.prefix.versiontag', AFlow.VersionTag);
 end;
 
