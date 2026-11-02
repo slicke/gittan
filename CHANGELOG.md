@@ -7,6 +7,7 @@
 
 ### Changed
 - The Pull requests page's filters sit in three menu chips, Review, Checks and More, under the presets instead of nine chips of their own; a chip with filters on names them ("Approved · Checks passing").
+- Syntax highlighting of large files and diffs is faster: the parser (EControl) matches its rules in about two thirds of the time. Markdown emphasis right beside a code span is now marked, and in Pascal `of` is a keyword.
 
 ## 0.12 (build-137, 2026-11-02)
 
