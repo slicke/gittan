@@ -6,6 +6,10 @@ Gittan is free software under the GNU General Public License, version 3
 Gittan and its JavaScript engine. Gittan's source, with every package below,
 is at https://github.com/slicke/gittan.
 
+tqshim (Trndi-QuickJS) and the extensions engine around it come from Trndi,
+Copyright (c) Björn Lindh, also under the GNU General Public License,
+version 3: https://github.com/slicke/trndi
+
 The other files beside it, and the code built into it, come from elsewhere
 under licenses of their own, which cover that code only, not Gittan.
 
