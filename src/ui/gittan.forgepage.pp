@@ -28,16 +28,21 @@ unit gittan.forgepage;
   own, say one that needs an approval the pull request still waits
   for.
   The filters are the forge's (SetFilters; TGittanForge.Filters, the
-  base's StandardFilters), as chips in rows under a section's
-  heading: the ones for the section, each on or off (MineFilters,
-  ReviewFilters, their keys joined with commas; OnFilterChange;
-  FilterPulls, every one on must pass), and after them a chip with the
-  section's order (MineOrder, ReviewOrder; SortPulls) that opens a
-  menu of the orders: the last changed first, the newest first and, of
-  the user's own, the ones that need attention first. What needs
-  attention is changes asked for or checks failing, either of which
-  the user can leave out (AttentionReasons) from the menu of a right
-  click on its chip or from the order's; a reason left out shows its
+  base's StandardFilters), in a row under a section's heading: a chip
+  per group (FilterGroups: Review, Checks, More) whose menu, from a
+  click with either button, has the group's filters for the section
+  as check items, each on or off (MineFilters, ReviewFilters, their
+  keys joined with commas; OnFilterChange; FilterPulls, every one on
+  must pass); a chip with filters on is highlighted and names them
+  ("Approved · Checks passing ▾") in place of its group, so the row
+  reads as the filters on. A filter without a group is a chip of its
+  own, on or off with a click. After them a chip with the section's
+  order (MineOrder, ReviewOrder; SortPulls) that opens a menu of the
+  orders: the last changed first, the newest first and, of the user's
+  own, the ones that need attention first. What needs attention is
+  changes asked for or checks failing, either of which the user can
+  leave out (AttentionReasons) from the menu of the group that holds
+  Needs attention or from the order's; a reason left out shows its
   card chip dim. Over the filters a row of presets: All (no filter),
   the forge's (TGittanForge.Presets) and the user's own (SetFilters'
   APresets holds both, the own ones after; Presets), the one whose
@@ -97,10 +102,12 @@ type
   private
     FForge, FLogin, FError, FOpenRoot: string;
     FMine, FReview: TGittanForgePulls;
-    { The forge's filters and the presets, the forge's then the user's
-      own; the filters on of each section as their keys; the checks
-      ignored by name; and the lists as the filters leave them. }
+    { The forge's filters, the groups of the section shown, and the
+      presets, the forge's then the user's own; the filters on of each
+      section as their keys; the checks ignored by name; and the lists
+      as the filters leave them. }
     FDefs: TGittanForgeFilterDefs;
+    FGroups: TStringArray;
     FPresets: TGittanForgePresets;
     FMineKeys, FReviewKeys: string;
     FIgnored: TStringList;
@@ -156,6 +163,9 @@ type
     procedure ShowMenu(AOrders: boolean; const AScreenPos: TPoint);
     procedure ShowChecksMenu(const APull: TGittanForgePull; const AScreenPos: TPoint);
     procedure ShowPresetMenu(AIndex: integer; const AScreenPos: TPoint);
+    procedure ShowGroupMenu(const AGroup: string; const AScreenPos: TPoint);
+    procedure AddReasonItems;
+    procedure MenuFilterClick(Sender: TObject);
     procedure MenuOrderClick(Sender: TObject);
     procedure MenuAttentionClick(Sender: TObject);
     procedure MenuCheckClick(Sender: TObject);
@@ -322,12 +332,15 @@ const
   ReviewLink = 'gittan:review:';
   RefreshLink = 'gittan:refresh';
   FilterLink = 'gittan:filter:';
+  GroupLink = 'gittan:group:';
   PresetLink = 'gittan:preset:';
   AllPresetLink = 'gittan:preset:all';
   SavePresetLink = 'gittan:savepreset';
   ChecksLink = 'gittan:checks:';
   OrderLink = 'gittan:order';
   OrderGlyph = ' ▾';
+  { Between the filters on that a group's chip names. }
+  ChipJoin = ' · ';
   RefreshGlyph = '↻';
   Pad = 24;
   Gap = 12;
@@ -555,13 +568,11 @@ end;
   has checked; for the user's own the reasons that need attention,
   those counted checked. }
 
-procedure TGittanForgePage.ShowMenu(AOrders: boolean; const AScreenPos: TPoint);
-var
-  Shown, Last: TGittanPullOrder;
-  O: TGittanPullOrder;
-  Item: TMenuItem;
+procedure TGittanForgePage.AddReasonItems;
 
   procedure AddReason(const ACaption: string; AReason: TGittanAttentionReason);
+  var
+    Item: TMenuItem;
   begin
     Item := TMenuItem.Create(FMenu);
     Item.Caption := ACaption;
@@ -571,6 +582,18 @@ var
     FMenu.Items.Add(Item);
   end;
 
+begin
+  if FMenu.Items.Count > 0 then
+    FMenu.Items.Add(NewLine);
+  AddReason(rsChangesAttention, arChangesRequested);
+  AddReason(rsChecksAttention, arChecksFailing);
+end;
+
+procedure TGittanForgePage.ShowMenu(AOrders: boolean; const AScreenPos: TPoint);
+var
+  Shown, Last: TGittanPullOrder;
+  O: TGittanPullOrder;
+  Item: TMenuItem;
 begin
   FMenu.Items.Clear;
   if CurSection = fsReview then
@@ -595,14 +618,57 @@ begin
       FMenu.Items.Add(Item);
     end;
   if CurSection <> fsReview then
-  begin
-    if AOrders then
-      FMenu.Items.Add(NewLine);
-    AddReason(rsChangesAttention, arChangesRequested);
-    AddReason(rsChecksAttention, arChecksFailing);
-  end;
+    AddReasonItems;
   if FMenu.Items.Count > 0 then
     FMenu.PopUp(AScreenPos.X, AScreenPos.Y);
+end;
+
+{ The menu of the filters of AGroup for the section shown, each a
+  check item on while its key is; with the reasons of attention after
+  them when the group holds Needs attention and the section is the
+  user's own. }
+
+procedure TGittanForgePage.ShowGroupMenu(const AGroup: string; const AScreenPos: TPoint);
+var
+  i: integer;
+  Item: TMenuItem;
+  Keys: string;
+  WithReasons: boolean;
+begin
+  FMenu.Items.Clear;
+  Keys := SectionKeysOf(CurSection);
+  WithReasons := False;
+  for i := 0 to High(FDefs) do
+    if (CurSection in FDefs[i].Sections) and (FDefs[i].Group = AGroup) then
+    begin
+      Item := TMenuItem.Create(FMenu);
+      Item.Caption := FDefs[i].Caption;
+      Item.Tag := i;
+      Item.Checked := HasKey(Keys, FDefs[i].Key);
+      Item.OnClick := @MenuFilterClick;
+      FMenu.Items.Add(Item);
+      if (FDefs[i].Key = fkAttention) and (CurSection <> fsReview) then
+        WithReasons := True;
+    end;
+  if WithReasons then
+    AddReasonItems;
+  if FMenu.Items.Count > 0 then
+    FMenu.PopUp(AScreenPos.X, AScreenPos.Y);
+end;
+
+procedure TGittanForgePage.MenuFilterClick(Sender: TObject);
+var
+  n: integer;
+begin
+  n := (Sender as TMenuItem).Tag;
+  if (n < 0) or (n > High(FDefs)) then
+    Exit;
+  if CurSection = fsReview then
+    SetReviewFilters(ToggleKey(SectionKeysOf(fsReview), FDefs[n].Key))
+  else
+    SetMineFilters(ToggleKey(SectionKeysOf(fsMine), FDefs[n].Key));
+  if Assigned(FOnFilterChange) then
+    FOnFilterChange(Self);
 end;
 
 { The menu of APull's checks at AScreenPos: each by name as a check
@@ -814,27 +880,53 @@ begin
   SetLength(Result, n);
 end;
 
-{ The filters row of the section shown: the forge's filters for it,
-  the ones on marked, and the order's chip with a glyph for its menu. }
+{ The filters row of the section shown: the forge's filters for it
+  that have no group as chips of their own, the ones on marked; a chip
+  per group with a glyph for its menu, named after the group, or after
+  the filters of it that are on and marked; and the order's chip with
+  the glyph. }
 
 function TGittanForgePage.FilterChips: TGittanChipSpecs;
 var
   Defs: TGittanForgeFilterDefs;
-  Keys: string;
-  i: integer;
+  Keys, Named: string;
+  i, g, n: integer;
   Order: TGittanPullOrder;
 begin
   Defs := SectionFilters(FDefs, CurSection);
+  FGroups := FilterGroups(FDefs, CurSection);
   Keys := SectionKeysOf(CurSection);
   if CurSection = fsReview then
     Order := FReviewOrder
   else
     Order := FMineOrder;
   Result := nil;
-  SetLength(Result, Length(Defs) + 1);
+  SetLength(Result, Length(Defs) + Length(FGroups) + 1);
+  n := 0;
   for i := 0 to High(Defs) do
-    Result[i] := Chip(Defs[i].Caption, FilterLink + Defs[i].Key, HasKey(Keys, Defs[i].Key));
-  Result[High(Result)] := Chip(OrderCaption(Order) + OrderGlyph, OrderLink, False);
+    if Defs[i].Group = '' then
+    begin
+      Result[n] := Chip(Defs[i].Caption, FilterLink + Defs[i].Key, HasKey(Keys, Defs[i].Key));
+      Inc(n);
+    end;
+  for g := 0 to High(FGroups) do
+  begin
+    Named := '';
+    for i := 0 to High(Defs) do
+      if (Defs[i].Group = FGroups[g]) and HasKey(Keys, Defs[i].Key) then
+      begin
+        if Named <> '' then
+          Named := Named + ChipJoin;
+        Named := Named + Defs[i].Caption;
+      end;
+    if Named = '' then
+      Result[n] := Chip(FGroups[g] + OrderGlyph, GroupLink + IntToStr(g), False)
+    else
+      Result[n] := Chip(Named + OrderGlyph, GroupLink + IntToStr(g), True);
+    Inc(n);
+  end;
+  Result[n] := Chip(OrderCaption(Order) + OrderGlyph, OrderLink, False);
+  SetLength(Result, n + 1);
 end;
 
 { The chips of AChips from ALeft, their text on the line at ATop: a
@@ -1719,12 +1811,20 @@ begin
     Url := FLinkUrls[i]
   else
     Url := '';
-  { Either button: the menu of a card's checks. }
+  { Either button: the menu of a card's checks, or of a group's
+    filters. }
   if Copy(Url, 1, Length(ChecksLink)) = ChecksLink then
   begin
     n := StrToIntDef(Copy(Url, Length(ChecksLink) + 1, MaxInt), -1);
     if (n >= 0) and (n <= High(Shown)) then
       ShowChecksMenu(Shown[n], ClientToScreen(Point(FLinkRects[i].Left, FLinkRects[i].Bottom)));
+    Exit;
+  end;
+  if Copy(Url, 1, Length(GroupLink)) = GroupLink then
+  begin
+    n := StrToIntDef(Copy(Url, Length(GroupLink) + 1, MaxInt), -1);
+    if (n >= 0) and (n <= High(FGroups)) then
+      ShowGroupMenu(FGroups[n], ClientToScreen(Point(FLinkRects[i].Left, FLinkRects[i].Bottom)));
     Exit;
   end;
   if Button = mbRight then

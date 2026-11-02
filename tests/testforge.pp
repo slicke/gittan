@@ -442,6 +442,8 @@ var
   Ignored: TStringList;
   Now_: TDateTime;
   i: integer;
+  Groups: TStringArray;
+  Section: TGittanForgeSection;
 begin
   Now_ := EncodeDateTime(2026, 10, 27, 12, 0, 0, 0);
   Defs := StandardFilters;
@@ -558,6 +560,26 @@ begin
 
   AssertEquals(fkFeedback, SectionFilters(Defs, fsMine)[0].Key);
   AssertEquals(fkAskedOfMe, SectionFilters(Defs, fsReview)[0].Key);
+  { Every standard filter sits in a group; the groups come in the
+    order of their first filter, each once, in both sections. }
+  for i := 0 to High(Defs) do
+    AssertTrue(Defs[i].Key, Defs[i].Group <> '');
+  for Section := fsMine to fsReview do
+  begin
+    Groups := FilterGroups(Defs, Section);
+    AssertEquals(3, Length(Groups));
+    AssertEquals(fgReview, Groups[0]);
+    AssertEquals(fgChecks, Groups[1]);
+    AssertEquals(fgMore, Groups[2]);
+  end;
+  { A filter without a group is left out of them. }
+  for i := 0 to High(Defs) do
+    if Defs[i].Group = fgChecks then
+      Defs[i].Group := '';
+  Groups := FilterGroups(Defs, fsMine);
+  AssertEquals(2, Length(Groups));
+  AssertEquals(fgReview, Groups[0]);
+  AssertEquals(fgMore, Groups[1]);
 end;
 
 procedure TForgeTest.TestKeys;

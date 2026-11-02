@@ -145,11 +145,13 @@ type
 
   {** A filter a forge offers on its lists (TGittanForge.Filters): Key
     names it in the settings (lower case letters, no comma), Caption is
-    its chip, Sections says which lists it is for, and Passes judges a
-    pull request. The base's are StandardFilters; a forge adds its own
-    or leaves some out. }
+    its item, Group the chip whose menu holds it (the standard ones
+    are fgReview, fgChecks and fgMore; '' for a chip of its own, on or
+    off with a click), Sections says which lists it is for, and Passes
+    judges a pull request. The base's are StandardFilters; a forge
+    adds its own or leaves some out. }
   TGittanForgeFilterDef = record
-    Key, Caption: string;
+    Key, Caption, Group: string;
     Sections: TGittanForgeSections;
     Passes: TGittanPullTest;
   end;
@@ -183,6 +185,12 @@ const
   fkStale = 'stale';
   fkAskedOfMe = 'askedofme';
   fkNew = 'new';
+
+  {** The groups of the standard filters, each a chip with a menu:
+    the review's state, the checks, and the rest. }
+  fgReview = 'Review';
+  fgChecks = 'Checks';
+  fgMore = 'More';
 
 type
 
@@ -321,12 +329,13 @@ function IsStale(const APull: TGittanForgePull; ANow: TDateTime): boolean;
 function FilterContext(ANow: TDateTime;
   AReasons: TGittanAttentionReasons = AllAttentionReasons;
   AIgnored: TStrings = nil): TGittanFilterContext;
-{** The filters every forge has: of the user's own, with feedback,
-  needing attention, waiting for a reviewer, approved, changes
-  requested, checks failing, checks passing, no drafts and stale; of
-  the ones waiting for review, asked of me, new to me (no review of
-  mine), approved, checks failing, checks passing, no drafts and
-  stale. }
+{** The filters every forge has, in groups: of the user's own, with
+  feedback, waiting for a reviewer, approved and changes requested
+  (Review), checks failing and checks passing (Checks), needing
+  attention, no drafts and stale (More); of the ones waiting for
+  review, asked of me, new to me (no review of mine) and approved
+  (Review), checks failing and checks passing (Checks), no drafts and
+  stale (More). }
 function StandardFilters: TGittanForgeFilterDefs;
 {** The presets every forge has: of the user's own, Needs me
   (attention), Waiting on others (waiting, no drafts) and Ready to
@@ -339,6 +348,11 @@ function FindFilter(const ADefs: TGittanForgeFilterDefs; const AKey: string): in
 {** The filters of ADefs that are for ASection, in their order. }
 function SectionFilters(const ADefs: TGittanForgeFilterDefs;
   ASection: TGittanForgeSection): TGittanForgeFilterDefs;
+{** The groups of the filters of ADefs that are for ASection, each
+  once, in the order they first come, '' (a chip of its own) left
+  out. }
+function FilterGroups(const ADefs: TGittanForgeFilterDefs;
+  ASection: TGittanForgeSection): TStringArray;
 {** Keys joined with commas: whether AKeys holds AKey; AKeys with AKey
   taken out when it is in, else added; whether A and B hold the same
   keys in any order; AKeys with only the keys ADefs has for ASection,
@@ -1593,11 +1607,12 @@ begin
   Result := APull.MyReview = rvNone;
 end;
 
-function FilterDef(const AKey, ACaption: string; ASections: TGittanForgeSections;
+function FilterDef(const AKey, ACaption, AGroup: string; ASections: TGittanForgeSections;
   APasses: TGittanPullTest): TGittanForgeFilterDef;
 begin
   Result.Key := AKey;
   Result.Caption := ACaption;
+  Result.Group := AGroup;
   Result.Sections := ASections;
   Result.Passes := APasses;
 end;
@@ -1606,18 +1621,19 @@ function StandardFilters: TGittanForgeFilterDefs;
 begin
   Result := nil;
   SetLength(Result, 11);
-  Result[0] := FilterDef(fkFeedback, 'With feedback', [fsMine], @TestFeedback);
-  Result[1] := FilterDef(fkAttention, 'Needs attention', [fsMine], @TestAttention);
-  Result[2] := FilterDef(fkWaiting, 'Waiting for reviewer', [fsMine], @TestWaiting);
-  Result[3] := FilterDef(fkAskedOfMe, 'Asked of me', [fsReview], @TestAskedOfMe);
-  Result[4] := FilterDef(fkNew, 'New to me', [fsReview], @TestNew);
-  Result[5] := FilterDef(fkApproved, 'Approved', [fsMine, fsReview], @TestApproved);
-  Result[6] := FilterDef(fkChanges, 'Changes requested', [fsMine], @TestChanges);
-  Result[7] := FilterDef(fkChecksFailing, 'Checks failing', [fsMine, fsReview],
+  Result[0] := FilterDef(fkFeedback, 'With feedback', fgReview, [fsMine], @TestFeedback);
+  Result[1] := FilterDef(fkWaiting, 'Waiting for reviewer', fgReview, [fsMine], @TestWaiting);
+  Result[2] := FilterDef(fkAskedOfMe, 'Asked of me', fgReview, [fsReview], @TestAskedOfMe);
+  Result[3] := FilterDef(fkNew, 'New to me', fgReview, [fsReview], @TestNew);
+  Result[4] := FilterDef(fkApproved, 'Approved', fgReview, [fsMine, fsReview], @TestApproved);
+  Result[5] := FilterDef(fkChanges, 'Changes requested', fgReview, [fsMine], @TestChanges);
+  Result[6] := FilterDef(fkChecksFailing, 'Checks failing', fgChecks, [fsMine, fsReview],
     @TestChecksFailing);
-  Result[8] := FilterDef(fkChecksOk, 'Checks passing', [fsMine, fsReview], @TestChecksOk);
-  Result[9] := FilterDef(fkNoDrafts, 'No drafts', [fsMine, fsReview], @TestNoDrafts);
-  Result[10] := FilterDef(fkStale, 'Stale', [fsMine, fsReview], @TestStale);
+  Result[7] := FilterDef(fkChecksOk, 'Checks passing', fgChecks, [fsMine, fsReview],
+    @TestChecksOk);
+  Result[8] := FilterDef(fkAttention, 'Needs attention', fgMore, [fsMine], @TestAttention);
+  Result[9] := FilterDef(fkNoDrafts, 'No drafts', fgMore, [fsMine, fsReview], @TestNoDrafts);
+  Result[10] := FilterDef(fkStale, 'Stale', fgMore, [fsMine, fsReview], @TestStale);
 end;
 
 function Preset(const AName: string; ASection: TGittanForgeSection;
@@ -1665,6 +1681,31 @@ begin
     begin
       Result[n] := ADefs[i];
       Inc(n);
+    end;
+  SetLength(Result, n);
+end;
+
+function FilterGroups(const ADefs: TGittanForgeFilterDefs;
+  ASection: TGittanForgeSection): TStringArray;
+var
+  i, j, n: integer;
+  Found: boolean;
+begin
+  Result := nil;
+  SetLength(Result, Length(ADefs));
+  n := 0;
+  for i := 0 to High(ADefs) do
+    if (ASection in ADefs[i].Sections) and (ADefs[i].Group <> '') then
+    begin
+      Found := False;
+      for j := 0 to n - 1 do
+        if Result[j] = ADefs[i].Group then
+          Found := True;
+      if not Found then
+      begin
+        Result[n] := ADefs[i].Group;
+        Inc(n);
+      end;
     end;
   SetLength(Result, n);
 end;
