@@ -1433,19 +1433,19 @@
       <div class="card" data-os="mac">
         <div class="os"><svg viewBox="0 0 24 24"><path d="M16.4 12.6c0-2.6 2.1-3.8 2.2-3.9-1.2-1.8-3.1-2-3.7-2-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9-1.7 0-3.3 1-4.2 2.6-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8 1.6 0 2 .8 3.4.8 1.4 0 2.3-1.3 3.1-2.5 1-1.4 1.4-2.8 1.4-2.9-.1 0-2.7-1-2.7-4.1zM13.9 5c.7-.9 1.2-2 1.1-3.2-1 0-2.3.7-3 1.6-.7.8-1.2 2-1.1 3.1 1.1.1 2.3-.6 3-1.5z"/></svg>macOS<span class="yours">Your system</span></div>
         <div class="file">Apple Silicon · Gittan-macos-silicon.dmg</div>
-        <a class="btn" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-macos-silicon.dmg">Download .dmg</a>
+        <a class="btn" data-label="For Apple Silicon" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-macos-silicon.dmg">Download .dmg</a>
         <div class="more">Intel Mac? <a data-short="Intel" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-macos-intel.dmg">Gittan-macos-intel.dmg</a></div>
       </div>
       <div class="card" data-os="win">
         <div class="os"><svg viewBox="0 0 24 24"><path d="M3 5.1 10.4 4v7.1H3zm8.3-1.2L21 2.5v8.6h-9.7zM3 12.9h7.4V20L3 18.9zm8.3 0H21v8.6l-9.7-1.4z"/></svg>Windows<span class="yours">Your system</span></div>
         <div class="file">x64 · Gittan-windows-x64-setup.exe</div>
-        <a class="btn" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-windows-x64-setup.exe">Download installer</a>
+        <a class="btn" data-label="x64 installer" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-windows-x64-setup.exe">Download installer</a>
         <div class="more">Without installing: <a data-short=".zip" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-windows-x64.zip">Gittan-windows-x64.zip</a></div>
       </div>
       <div class="card" data-os="linux">
         <div class="os"><svg viewBox="0 0 24 24"><path d="M12 2c-2.2 0-3.6 1.8-3.6 4.4 0 1.4.3 2.3-.6 3.6C6.5 11.8 5 14 5 16.3c0 .6.1 1.1.3 1.6-.6.4-1.6.8-1.6 1.7 0 1.2 1.9 1.1 3.1 1.6 1.1.5 2 .8 2.9.4.6-.3.9-.8 1-1.2h2.6c.1.4.4.9 1 1.2.9.4 1.8.1 2.9-.4 1.2-.5 3.1-.4 3.1-1.6 0-.9-1-1.3-1.6-1.7.2-.5.3-1 .3-1.6 0-2.3-1.5-4.5-2.8-6.3-.9-1.3-.6-2.2-.6-3.6C15.6 3.8 14.2 2 12 2zm-1.6 4.2c.5 0 .8.6.8 1.2s-.3 1.1-.8 1.1-.8-.5-.8-1.1.3-1.2.8-1.2zm3.2 0c.5 0 .8.6.8 1.2s-.3 1.1-.8 1.1-.8-.5-.8-1.1.3-1.2.8-1.2zM12 9.3c.9 0 2 .6 2 1 0 .5-1.1 1.2-2 1.2s-2-.7-2-1.2c0-.4 1.1-1 2-1z"/></svg>Linux<span class="yours">Your system</span></div>
         <div class="file">amd64, GTK 3 · Gittan-linux-amd64.deb</div>
-        <a class="btn" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-linux-amd64.deb">Download .deb</a>
+        <a class="btn" data-label="amd64 .deb" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-linux-amd64.deb">Download .deb</a>
         <div class="more">
           <div>Or <a data-short=".rpm" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-linux-x86_64.rpm">.rpm</a> · <a data-short=".tar.gz" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-linux-amd64.tar.gz">.tar.gz</a></div>
           <div data-arch="arm64">arm64, Raspberry Pi: <a data-short=".deb" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-linux-arm64.deb">.deb</a> · <a data-short=".rpm" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-linux-aarch64.rpm">.rpm</a> · <a data-short=".tar.gz" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-linux-arm64.tar.gz">.tar.gz</a></div>
@@ -1578,7 +1578,7 @@ make run
     card.classList.add('mine');
     var get = document.getElementById('get');
     var main = card.querySelector('.btn');
-    var label = card.querySelector('.file').textContent.split(' · ')[0];
+    var label = main.dataset.label;
     var others = Array.prototype.filter.call(card.querySelectorAll('a[data-short]'), function (a) { return !a.closest('[data-arch]'); });
     // An arm64 Linux gets the arm64 files; a Mac's user agent says Intel either way, so the Mac is left alone.
     var arm = card.querySelector('[data-arch="arm64"]');
@@ -1589,8 +1589,9 @@ make run
     }
     get.href = main.href;
     get.querySelector('span').textContent = 'Download for ' + names[os];
+    // What the button gives, then the platform's other files: "For Apple Silicon (or Intel)".
     document.getElementById('get-sub').innerHTML = label +
-      others.map(function (a) { return ' · <a href="' + a.href + '">' + a.dataset.short + '</a>'; }).join('') +
+      (others.length ? ' (or ' + others.map(function (a) { return '<a href="' + a.href + '">' + a.dataset.short + '</a>'; }).join(', ') + ')' : '') +
       ' · free and open source · <a href="#download">Other platforms</a>';
   }
 
