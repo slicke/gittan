@@ -855,13 +855,14 @@ type
       sync line counts that, and a pull brings it in), or when git
       cannot tell. }
     function BehindDefault(const ABranch, ADefault: string): integer;
-    {** How many files a merge of ARef into HEAD would leave conflicted,
-      their paths in APaths, by a merge in memory that touches neither
-      the work tree nor the index (`merge-tree --write-tree`): 0 when it
-      merges cleanly, -1 when git cannot tell, as before 2.38
-      (GitHasMergeTree). Only commits count, not the changes in the work
-      tree. }
-    function MergeConflicts(const ARef: string; out APaths: TStringArray): integer;
+    {** How many files a merge of ARef into AHead (HEAD unless given)
+      would leave conflicted, their paths in APaths, by a merge in memory
+      that touches neither the work tree nor the index (`merge-tree
+      --write-tree`): 0 when it merges cleanly, -1 when git cannot tell,
+      as before 2.38 (GitHasMergeTree). Only commits count, not the
+      changes in the work tree. }
+    function MergeConflicts(const ARef: string; out APaths: TStringArray;
+      const AHead: string = 'HEAD'): integer;
     {** Whether the tip of the local branch ABranch's upstream is reached
       from one of the branch's newest reflog entries, as push
       --force-if-includes asks: the upstream holds nothing the branch
@@ -904,7 +905,8 @@ type
     function SetNote(const AHash, AText: string): boolean;
     {** Writes the issue tracker into the repository's config (bugtraq.url
       and bugtraq.logregex, see gittan.issuelinks); an empty value
-      removes its key. }
+      removes its key, and sets it empty when the global config still
+      has it (SetEmptyConfigKey). }
     function SetIssueTracker(const ATracker: TGittanIssueTracker): boolean;
     {** The commit ARef names as GraphCommits gives it (no lanes): for the
       commit menu of a commit shown outside the graph. False when git
@@ -1383,6 +1385,12 @@ function ResolvedRemoteUrlsIn(const ADir: string): string;
   the bugtraq keys (ParseIssueTrackerConfig); empty without one. For
   threads. }
 function IssueTrackerIn(const ADir: string): TGittanIssueTracker;
+
+{** Sets AKey ("section.name" or "section.subsection.name") to an empty
+  value in the local config of the repository in ARoot, which a key
+  set in the global config is then read as. False with the reason in
+  AError. }
+function SetEmptyConfigKey(const ARoot, AKey: string; out AError: string): boolean;
 
 {** AConfig's remote URLs (the lines `git config --get-regexp` prints for
   ^remote\..*\.url$ and ^url\..*\.insteadof$ together) each rewritten as
@@ -2290,6 +2298,70 @@ begin
     Result := ParseIssueTrackerConfig(Output)
   else
     Result := ParseIssueTrackerConfig('');
+end;
+
+{ An empty value cannot go to git config as an argument: RunTool
+  refuses an empty one on Unix, where TProcess would end the argument
+  list there and git config would read the key instead. The key is
+  unset and written into the repository's config file, in a section of
+  its own (git takes a section more than once), as "key =", which git
+  reads as empty. A file that does not end with a line break gets one
+  first, and the section's header is left out when --unset-all left it
+  as the file's last line, so a value written again does not pile
+  headers up. }
+function SetEmptyConfigKey(const ARoot, AKey: string; out AError: string): boolean;
+var
+  Output, Path, Header, Text, Name: string;
+  F: TFileStream;
+  Line: string;
+  First, Last: integer;
+begin
+  First := Pos('.', AKey);
+  Last := LastDelimiter('.', AKey);
+  if (First < 2) or (Last = Length(AKey)) then
+  begin
+    AError := Format('%s is no config key.', [AKey]);
+    Exit(False);
+  end;
+  Name := Copy(AKey, Last + 1, MaxInt);
+  if Last = First then
+    Header := '[' + Copy(AKey, 1, First - 1) + ']'
+  else
+    Header := '[' + Copy(AKey, 1, First - 1) + ' "' + Copy(AKey, First + 1, Last - First - 1) + '"]';
+  { --unset-all exits with 5 when the key is not there. }
+  RunGitIn(ARoot, ['config', '--local', '--unset-all', AKey], Output, AError);
+  AError := '';
+  Result := RunGitIn(ARoot, ['rev-parse', '--git-path', 'config'], Path, AError);
+  if not Result then
+    Exit;
+  Path := SetDirSeparators(Trim(Path));
+  if (Path = '') or not ((Path[1] in ['/', '\']) or ((Length(Path) > 1) and (Path[2] = ':'))) then
+    Path := IncludeTrailingPathDelimiter(ARoot) + Path;
+  try
+    F := TFileStream.Create(Path, fmOpenReadWrite or fmShareDenyWrite);
+    try
+      SetLength(Text, F.Size);
+      if F.Size > 0 then
+        F.ReadBuffer(Text[1], F.Size);
+      Line := '';
+      if (Text <> '') and not (Text[Length(Text)] in [#10, #13]) then
+        Line := #10;
+      Text := TrimRight(Text);
+      if not Text.EndsWith(Header) then
+        Line := Line + Header + #10;
+      Line := Line + #9 + Name + ' ='#10;
+      F.Seek(0, soEnd);
+      F.WriteBuffer(Line[1], Length(Line));
+    finally
+      F.Free;
+    end;
+  except
+    on E: Exception do
+    begin
+      AError := E.Message;
+      Result := False;
+    end;
+  end;
 end;
 
 function ApplyInsteadOf(const AConfig: string): string;
@@ -6148,7 +6220,7 @@ end;
 function TGittanRepo.Snapshot(out ASnap: TGittanRepoSnapshot): boolean;
 var
   List: TStringList;
-  Pair: string;
+  Pair, DefaultId: string;
 begin
   ASnap := Default(TGittanRepoSnapshot);
   ASnap.Ok := ChangeStats(ASnap.Stats);
@@ -6165,11 +6237,13 @@ begin
     ASnap.BehindDefault := BehindDefault(ASnap.Branch, ASnap.DefaultBranch);
   if ASnap.BehindDefault > 0 then
   begin
-    Pair := CommitId(ASnap.DefaultBranch);
-    if (ASnap.Head = '') or (Pair = '') then
+    { The two commits are merged by id, so what is cached is what was
+      merged though HEAD or the branch moves meanwhile. }
+    DefaultId := CommitId(ASnap.DefaultBranch);
+    if (ASnap.Head = '') or (DefaultId = '') then
       Pair := ''
     else
-      Pair := ASnap.Head + ' ' + Pair;
+      Pair := ASnap.Head + ' ' + DefaultId;
     if (Pair <> '') and (Pair = FConflictsOf) then
     begin
       ASnap.DefaultConflicts := FConflicts;
@@ -6177,7 +6251,7 @@ begin
     end
     else
     begin
-      ASnap.DefaultConflicts := MergeConflicts(ASnap.DefaultBranch, ASnap.DefaultConflictPaths);
+      ASnap.DefaultConflicts := MergeConflicts(DefaultId, ASnap.DefaultConflictPaths, ASnap.Head);
       { A failure (-1) may be git's of the moment, so it is asked again. }
       if ASnap.DefaultConflicts >= 0 then
         FConflictsOf := Pair
@@ -6339,17 +6413,18 @@ end;
   (--name-only names a path once, --no-messages leaves out the
   messages). A real failure starts with git's message, never with an id
   and a NUL. }
-function TGittanRepo.MergeConflicts(const ARef: string; out APaths: TStringArray): integer;
+function TGittanRepo.MergeConflicts(const ARef: string; out APaths: TStringArray;
+  const AHead: string): integer;
 var
   Output, Err: string;
   Fields: TStringArray;
   i: integer;
 begin
   APaths := nil;
-  if (FRoot = '') or (ARef = '') or not GitHasMergeTree then
+  if (FRoot = '') or (ARef = '') or (AHead = '') or not GitHasMergeTree then
     Exit(-1);
   if RunGitIn(FRoot, ['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z',
-    'HEAD', ARef], Output, Err) then
+    AHead, ARef], Output, Err) then
     Exit(0);
   Fields := Err.Split([#0]);
   if (Length(Fields) < 2) or not (Length(Fields[0]) in [40, 64]) then
@@ -6523,7 +6598,9 @@ begin
 end;
 
 { The fields are split at unit separators and the commits at NULs (-z),
-  since the body, last, may hold anything, line breaks too. The commits
+  since the body may hold anything, line breaks too: it is the last
+  field before the note, which follows a record separator, so a unit
+  separator in the body stays in it. The commits
   not pushed (or not pulled) are read with the same cut, so every one in
   the log is marked. }
 const
@@ -6531,21 +6608,44 @@ const
   GraphLogArgs: array[0..9] of string = ('log', '--no-color', '--decorate=full',
     '--decorate-refs=HEAD', '--decorate-refs=refs/heads/', '--decorate-refs=refs/remotes/',
     '--decorate-refs=refs/tags/', '--decorate-refs=refs/bisect/', '-z',
-    '--format=%H%x1f%P%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%s%x1f%b%x1f%N');
+    '--format=%H%x1f%P%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%s%x1f%b%x1e%N');
+
+{ S cut at its first ACount - 1 unit separators, the last field the
+  rest with any separators in it: SysUtils' Split with a count drops
+  the rest instead. }
+function SplitFields(const S: string; ACount: integer): TStringArray;
+var
+  Start, i: integer;
+begin
+  Result := nil;
+  Start := 1;
+  for i := 1 to Length(S) do
+    if (S[i] = #31) and (Length(Result) < ACount - 1) then
+    begin
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := Copy(S, Start, i - Start);
+      Start := i + 1;
+    end;
+  SetLength(Result, Length(Result) + 1);
+  Result[High(Result)] := Copy(S, Start, MaxInt);
+end;
 
 { The commits of a log in GraphLogArgs' format, those whose ids are in
   AAhead or ABehind (rev-list output) marked not pushed or not pulled. }
 function ParseGraphLog(const AOutput, AAhead, ABehind: string): TGittanGraphCommits;
 var
   Records, Fields: TStringArray;
-  i: integer;
+  i, Cut: integer;
   Seconds: int64;
 begin
   Result := nil;
   Records := AOutput.Split([#0]);
   for i := 0 to High(Records) do
   begin
-    Fields := Records[i].Split([#31]);
+    Cut := LastDelimiter(#30, Records[i]);
+    if Cut = 0 then
+      Cut := Length(Records[i]) + 1;
+    Fields := SplitFields(Copy(Records[i], 1, Cut - 1), 8);
     if Length(Fields) < 8 then
       Continue;
     SetLength(Result, Length(Result) + 1);
@@ -6565,10 +6665,7 @@ begin
       Refs := ParseGraphRefs(Fields[5]);
       Subject := Fields[6];
       Body := TrimRight(Fields[7]);
-      if Length(Fields) > 8 then
-        Note := Trim(AdjustLineBreaks(Fields[8], tlbsLF))
-      else
-        Note := '';
+      Note := Trim(AdjustLineBreaks(Copy(Records[i], Cut + 1, MaxInt), tlbsLF));
       Unpushed := Pos(Hash, AAhead) > 0;
       Unpulled := Pos(Hash, ABehind) > 0;
     end;
@@ -6644,7 +6741,7 @@ function TGittanRepo.SetIssueTracker(const ATracker: TGittanIssueTracker): boole
 
   function SetKey(const AKey, AValue: string): boolean;
   var
-    Output: string;
+    Output, Err: string;
   begin
     if Trim(AValue) = '' then
     begin
@@ -6652,6 +6749,14 @@ function TGittanRepo.SetIssueTracker(const ATracker: TGittanIssueTracker): boole
       { Unsetting a key that is not there fails, and is what was asked. }
       if not Result then
         Result := not RunGit(FRoot, ['config', '--local', '--get-all', AKey], Output);
+      { A value from the global config would still count: an empty one
+        here, read after it, hides it. }
+      if Result and RunGit(FRoot, ['config', '--get', AKey], Output) and (Trim(Output) <> '') then
+      begin
+        Result := SetEmptyConfigKey(FRoot, AKey, Err);
+        if not Result then
+          FError := Err;
+      end;
     end
     else
       { A value that starts with a dash (an expression may) is no option. }
@@ -6943,6 +7048,22 @@ begin
     end;
 end;
 
+{ The global config files git reads: GIT_CONFIG_GLOBAL in their place
+  when set (as the tests set it), else ~/.gitconfig and the XDG one. }
+function GlobalConfigFiles: TStringArray;
+var
+  Xdg: string;
+begin
+  Result := nil;
+  if EnvironmentVariable('GIT_CONFIG_GLOBAL') <> '' then
+    Exit([EnvironmentVariable('GIT_CONFIG_GLOBAL')]);
+  Xdg := EnvironmentVariable('XDG_CONFIG_HOME');
+  if Xdg = '' then
+    Xdg := IncludeTrailingPathDelimiter(GetUserDir) + '.config';
+  Result := [IncludeTrailingPathDelimiter(GetUserDir) + '.gitconfig',
+    IncludeTrailingPathDelimiter(Xdg) + 'git' + PathDelim + 'config'];
+end;
+
 function TGittanRepo.Fingerprint: string;
 var
   Paths: TStringList;
@@ -6994,6 +7115,15 @@ begin
         ' ' + IntToStr(Info.Size) + #10;
       FindClose(Info);
     end;
+    { The global config, where the bugtraq and gitflow keys the snapshot
+      reads may be set too. }
+    for FileName in GlobalConfigFiles do
+      if StatExact(FileName, Info) then
+      begin
+        Result := Result + 'global ' + FormatDateTime('yyyymmddhhnnsszzz', Info.TimeStamp) +
+          ' ' + IntToStr(Info.Size) + #10;
+        FindClose(Info);
+      end;
     for i := 0 to Paths.Count - 1 do
       Result := Result + IntToStr(PtrUInt(Paths.Objects[i])) + ' ' + Paths[i] + #10;
     { Between two commits the files on disk do not matter. }
@@ -7389,26 +7519,30 @@ begin
     Result := EmptyTree + '..' + AHash;
 end;
 
-{ One call with the fields split at unit separators; the body, last,
-  may hold anything, line breaks too. }
+{ One call with the fields split at unit separators; the body, the last
+  of them, may hold anything, line breaks too, and the note follows a
+  NUL, which a commit message cannot hold. }
 function TGittanRepo.CommitDetails(const AHash: string; out ACommit: TGittanCommitLine;
   out ABody: string): boolean;
 var
   Output: string;
   Fields: TStringArray;
+  Cut: integer;
   Seconds: int64;
 begin
   ACommit := Default(TGittanCommitLine);
   ABody := '';
   Result := (FRoot <> '') and (AHash <> '') and RunGit(FRoot, ['log', '-1', '--no-color',
-    '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%s%x1f%b%x1f%N', AHash, '--'], Output);
+    '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%s%x1f%b%x00%N', AHash, '--'], Output);
   if not Result then
     Exit;
-  Fields := Output.Split([#31], 7);
+  Cut := Pos(#0, Output);
+  if Cut = 0 then
+    Cut := Length(Output) + 1;
+  Fields := SplitFields(Copy(Output, 1, Cut - 1), 6);
   if Length(Fields) < 6 then
     Exit(False);
-  if Length(Fields) > 6 then
-    ACommit.Note := Trim(AdjustLineBreaks(Fields[6], tlbsLF));
+  ACommit.Note := Trim(AdjustLineBreaks(Copy(Output, Cut + 1, MaxInt), tlbsLF));
   ACommit.Hash := Fields[0];
   ACommit.Short := Fields[1];
   ACommit.Author := Fields[2];

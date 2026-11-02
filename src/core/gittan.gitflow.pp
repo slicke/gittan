@@ -72,6 +72,10 @@ function SuggestFlowMaster(const ARoot: string): string;
   InitFlow can make it from there. }
 function FlowBranchAvailable(const ARoot, ABranch: string): boolean;
 
+{** Whether AFlow's prefixes are all different, so FlowKindOf can tell
+  the kinds apart. }
+function FlowPrefixesDiffer(const AFlow: TGittanFlow): boolean;
+
 {** Sets git flow up in the repository at ARoot as AFlow says (local
   config, with git-flow's support and bugfix prefixes too, which its
   command looks for). The production branch must exist, or be on the
@@ -256,6 +260,17 @@ begin
   Result := (ABranch <> '') and (HasBranch(ARoot, ABranch) or (RemoteWith(ARoot, ABranch) <> ''));
 end;
 
+function FlowPrefixesDiffer(const AFlow: TGittanFlow): boolean;
+var
+  A, B: TGittanFlowKind;
+begin
+  Result := True;
+  for A := Low(A) to High(A) do
+    for B := Succ(A) to High(B) do
+      if AFlow.Prefix[A] = AFlow.Prefix[B] then
+        Exit(False);
+end;
+
 { A local branch ABranch, made from the remote's when only the remote
   has it, or from AFrom when given and no remote has it either. }
 function EnsureBranch(const ARoot, ABranch, AFrom: string; out AError: string): boolean;
@@ -276,76 +291,15 @@ begin
   Result := RunGitIn(ARoot, ['branch', '--no-track', ABranch, AFrom], Output, AError);
 end;
 
-{ An empty value cannot go to git config as an argument: RunTool
-  refuses an empty one on Unix, where TProcess would end the argument
-  list there and git config would read the key instead. The key is
-  unset and written into the repository's config file, in a section of
-  its own (git takes a section more than once), as "key =", which git
-  reads as empty. A file that does not end with a line break gets one
-  first, and the section's header is left out when --unset-all left it
-  as the file's last line, so a setup done again does not pile headers
-  up. }
-function SetEmptyKey(const ARoot, ASection, ASubsection, AName: string;
-  out AError: string): boolean;
-var
-  Output, Path, Header, Text: string;
-  F: TFileStream;
-  Line: string;
-begin
-  { --unset-all exits with 5 when the key is not there. }
-  RunGitIn(ARoot, ['config', '--local', '--unset-all', ASection + '.' + ASubsection + '.' + AName],
-    Output, AError);
-  AError := '';
-  Result := RunGitIn(ARoot, ['rev-parse', '--git-path', 'config'], Path, AError);
-  if not Result then
-    Exit;
-  Path := SetDirSeparators(Trim(Path));
-  if (Path = '') or not ((Path[1] in ['/', '\']) or ((Length(Path) > 1) and (Path[2] = ':'))) then
-    Path := IncludeTrailingPathDelimiter(ARoot) + Path;
-  Header := '[' + ASection + ' "' + ASubsection + '"]';
-  try
-    F := TFileStream.Create(Path, fmOpenReadWrite or fmShareDenyWrite);
-    try
-      SetLength(Text, F.Size);
-      if F.Size > 0 then
-        F.ReadBuffer(Text[1], F.Size);
-      Line := '';
-      if (Text <> '') and not (Text[Length(Text)] in [#10, #13]) then
-        Line := #10;
-      Text := TrimRight(Text);
-      if not Text.EndsWith(Header) then
-        Line := Line + Header + #10;
-      Line := Line + #9 + AName + ' ='#10;
-      F.Seek(0, soEnd);
-      F.WriteBuffer(Line[1], Length(Line));
-    finally
-      F.Free;
-    end;
-  except
-    on E: Exception do
-    begin
-      AError := E.Message;
-      Result := False;
-    end;
-  end;
-end;
-
 function InitFlow(const ARoot: string; const AFlow: TGittanFlow; out AError: string): boolean;
 var
   Output: string;
   Kind: TGittanFlowKind;
 
   function SetKey(const AKey, AValue: string): boolean;
-  var
-    Dot: integer;
   begin
     if AValue = '' then
-    begin
-      Dot := LastDelimiter('.', AKey);
-      Exit(SetEmptyKey(ARoot, Copy(AKey, 1, Pos('.', AKey) - 1),
-        Copy(AKey, Pos('.', AKey) + 1, Dot - Pos('.', AKey) - 1), Copy(AKey, Dot + 1, MaxInt),
-        AError));
-    end;
+      Exit(SetEmptyConfigKey(ARoot, AKey, AError));
     Result := RunGitIn(ARoot, ['config', '--local', AKey, AValue], Output, AError);
   end;
 
@@ -374,16 +328,23 @@ begin
       AError := 'Every kind of branch needs a prefix.';
       Exit(False);
     end;
+  if not FlowPrefixesDiffer(AFlow) then
+  begin
+    AError := 'Every kind of branch needs a prefix of its own.';
+    Exit(False);
+  end;
+  { The branch keys go last: ReadFlow counts a setup as done once they
+    are there, so a write that fails before them leaves none. }
   Result := EnsureBranch(ARoot, AFlow.Master, '', AError) and
     EnsureBranch(ARoot, AFlow.Develop, AFlow.Master, AError) and
-    SetKey('gitflow.branch.master', AFlow.Master) and
-    SetKey('gitflow.branch.develop', AFlow.Develop) and
     SetKey('gitflow.prefix.feature', AFlow.Prefix[fkFeature]) and
     KeepKey('gitflow.prefix.bugfix', 'bugfix/') and
     SetKey('gitflow.prefix.release', AFlow.Prefix[fkRelease]) and
     SetKey('gitflow.prefix.hotfix', AFlow.Prefix[fkHotfix]) and
     KeepKey('gitflow.prefix.support', 'support/') and
-    SetKey('gitflow.prefix.versiontag', AFlow.VersionTag);
+    SetKey('gitflow.prefix.versiontag', AFlow.VersionTag) and
+    SetKey('gitflow.branch.master', AFlow.Master) and
+    SetKey('gitflow.branch.develop', AFlow.Develop);
 end;
 
 function FlowKindOf(const AFlow: TGittanFlow; const ABranch: string; out AKind: TGittanFlowKind;
@@ -395,7 +356,7 @@ begin
   Result := False;
   AKind := fkFeature;
   AName := '';
-  if not AFlow.Initialized then
+  if not AFlow.Initialized or (ABranch = AFlow.Master) or (ABranch = AFlow.Develop) then
     Exit;
   Best := 0;
   for Kind := Low(Kind) to High(Kind) do
@@ -622,7 +583,7 @@ function FinishFlowBranch(const ARoot: string; const AFlow: TGittanFlow;
   AKind: TGittanFlowKind; const AName, ATagMessage: string; out AConflicts: boolean;
   out AStoppedAt, AError: string): boolean;
 var
-  Branch, Tag, Output, Target: string;
+  Branch, Tag, Output, Err, Target: string;
   Targets: TStringArray;
   Tagged, Ok: boolean;
 begin
@@ -647,10 +608,18 @@ begin
   for Target in Targets do
     if not EnsureBranch(ARoot, Target, '', AError) then
       Exit;
+  { The finish ends on the development branch, which a hotfix into a
+    release under way has not among its targets. }
+  if not EnsureBranch(ARoot, AFlow.Develop, '', AError) then
+    Exit;
   Tagged := AKind in [fkRelease, fkHotfix];
   Tag := FlowTag(AFlow, AName);
+  { A tag there already is the one a finish stopped after making, so it
+    must hold the branch, merged into the production branch. }
   if Tagged and HasRef(ARoot, 'refs/tags/' + Tag) and
-    not IsMergedInto(ARoot, Branch, AFlow.Master) then
+    not (IsMergedInto(ARoot, Branch, AFlow.Master) and
+    RunGitIn(ARoot, ['merge-base', '--is-ancestor', 'refs/heads/' + Branch, 'refs/tags/' + Tag],
+    Output, Err)) then
   begin
     AError := Format('The tag %s is there already.', [Tag]);
     Exit;

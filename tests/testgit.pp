@@ -1632,6 +1632,16 @@ begin
   AssertEquals('', Line.Note);
   { Removing a note that is not there is fine. }
   AssertTrue('remove again: ' + FRepo.Error, FRepo.SetNote(Head, '  '));
+  { A unit separator in the body stays in it, the note apart. }
+  Git(['commit', '--allow-empty', '-q', '-m', 'odd'#10#10'a'#31'b']);
+  Head := Trim(Git(['rev-parse', 'HEAD']));
+  AssertTrue(FRepo.SetNote(Head, 'n'));
+  AssertTrue(FRepo.CommitDetails(Head, Line, Body));
+  AssertEquals('a'#31'b', Body);
+  AssertEquals('n', Line.Note);
+  AssertTrue(FRepo.GraphCommits(Commits));
+  AssertEquals('a'#31'b', Commits[0].Body);
+  AssertEquals('n', Commits[0].Note);
   { A full id git cannot resolve is still taken as an object name, so
     the refusal is tested with a name that is none. }
   AssertFalse('bad object', FRepo.SetNote('no-such-ref', 'x'));
@@ -1673,6 +1683,8 @@ end;
 procedure TGitRepoTest.TestIssueTracker;
 var
   T, Read: TGittanIssueTracker;
+  Snap: TGittanRepoSnapshot;
+  Included: string;
 begin
   MakeHistory;
   AssertTrue(FRepo.Open(FDir));
@@ -1686,6 +1698,9 @@ begin
   AssertEquals(T.Url, Read.Url);
   AssertEquals(T.LogRegex, Read.LogRegex);
   AssertEquals(T.Url, Trim(Git(['config', 'bugtraq.url'])));
+  FRepo.Snapshot(Snap);
+  AssertEquals('the snapshot''s', T.Url, Snap.IssueTracker.Url);
+  AssertEquals(T.LogRegex, Snap.IssueTracker.LogRegex);
   T.LogRegex := '#(\d+)';
   AssertTrue(FRepo.SetIssueTracker(T));
   Read := IssueTrackerIn(FDir);
@@ -1702,6 +1717,29 @@ begin
   AssertEquals('', Read.LogRegex);
   { Taking out what is not there is fine. }
   AssertTrue(FRepo.SetIssueTracker(T));
+  { A tracker from a config file the local one does not hold (an
+    include here, the global config mostly) is hidden by empty keys. }
+  Included := IncludeTrailingPathDelimiter(FDir) + 'tracker.inc';
+  with TStringList.Create do
+    try
+      Add('[bugtraq]');
+      Add(#9'url = https://example.test/%BUGID%');
+      Add(#9'logregex = ABC-([0-9]+)');
+      SaveToFile(Included);
+    finally
+      Free;
+    end;
+  Git(['config', 'include.path', Included]);
+  AssertEquals('ABC-([0-9]+)', IssueTrackerIn(FDir).LogRegex);
+  AssertTrue(FRepo.SetIssueTracker(T));
+  Read := IssueTrackerIn(FDir);
+  AssertEquals('', Read.Url);
+  AssertEquals('', Read.LogRegex);
+  AssertTrue('again', FRepo.SetIssueTracker(T));
+  AssertEquals('', IssueTrackerIn(FDir).LogRegex);
+  T.LogRegex := '#(\d+)';
+  AssertTrue(FRepo.SetIssueTracker(T));
+  AssertEquals('#(\d+)', IssueTrackerIn(FDir).LogRegex);
 end;
 
 { A file is followed through its rename; a folder lists what changed

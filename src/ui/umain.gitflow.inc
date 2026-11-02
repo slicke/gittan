@@ -156,6 +156,9 @@ begin
   for i := 2 to 4 do
     if (Trim(AValues[i]) = '') or not FRepo.IsBranchName(Trim(AValues[i]) + 'x') then
       Exit(rsFlowBadPrefix);
+  if (Trim(AValues[2]) = Trim(AValues[3])) or (Trim(AValues[2]) = Trim(AValues[4])) or
+    (Trim(AValues[3]) = Trim(AValues[4])) then
+    Exit(rsFlowSamePrefix);
   if (Trim(AValues[5]) <> '') and not FRepo.IsTagName(Trim(AValues[5]) + '1') then
     Exit(rsFlowBadTagPrefix);
 end;

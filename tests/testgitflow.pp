@@ -172,6 +172,14 @@ begin
   AssertEquals('1.2.1', Name);
   AssertFalse('the prefix alone', FlowKindOf(Flow, 'feature/', Kind, Name));
   AssertFalse(FlowKindOf(Flow, 'develop', Kind, Name));
+  { A prefix need not end in a slash, and the two branches are never
+    branches of git flow. }
+  Flow.Prefix[fkFeature] := 'ma';
+  AssertFalse('the production branch', FlowKindOf(Flow, 'main', Kind, Name));
+  AssertTrue(FlowKindOf(Flow, 'mark', Kind, Name));
+  Flow.Prefix[fkFeature] := 'de';
+  AssertFalse('the development branch', FlowKindOf(Flow, 'develop', Kind, Name));
+  Flow.Prefix[fkFeature] := 'feature/';
   Flow.Prefix[fkHotfix] := 'release/hot/';
   AssertTrue(FlowKindOf(Flow, 'release/hot/2', Kind, Name));
   AssertTrue('the longest prefix', Kind = fkHotfix);
@@ -223,7 +231,11 @@ begin
   Flow.Develop := 'develop';
   Flow.Prefix[fkRelease] := '';
   AssertFalse('a prefix missing', InitFlow(FDir, Flow, Err));
+  Flow.Prefix[fkRelease] := 'feature/';
+  AssertFalse('one prefix for two kinds', InitFlow(FDir, Flow, Err));
+  AssertFalse(FlowPrefixesDiffer(Flow));
   Flow.Prefix[fkRelease] := 'release/';
+  AssertTrue(FlowPrefixesDiffer(Flow));
   AssertFalse('no such branch', InitFlow(FDir, DefaultFlow('trunk'), Err));
   AssertTrue(Err, InitFlow(FDir, Flow, Err));
   AssertEquals('develop made from master', GitOut(['rev-parse', 'master']),
@@ -312,6 +324,13 @@ begin
   AssertEquals('the release merged into both', GitOut(['rev-parse', 'main^2']),
     GitOut(['rev-parse', 'develop^2']));
   AssertEquals('1.11', LatestFlowVersion(FDir, Flow));
+  { A tag of the name on another commit is refused, though the branch
+    is in main. }
+  Git(['branch', 'release/1.12', 'main']);
+  Git(['tag', 'v1.12', 'main^1']);
+  AssertFalse('another tag', FinishFlowBranch(FDir, Flow, fkRelease, '1.12', '', Conflicts,
+    Stopped, Err));
+  AssertTrue('kept', GitOut(['branch', '--list', 'release/1.12']) <> '');
 end;
 
 procedure TGitFlowTest.TestHotfixIntoRelease;
@@ -339,6 +358,7 @@ begin
     GitOut(['rev-parse', 'release/1.1^2']));
   AssertFalse('not on develop yet', RunGitIn(FDir, ['merge-base', '--is-ancestor', 'main^2',
     'develop'], Err, Stopped));
+  AssertEquals('on develop', 'develop', GitOut(['symbolic-ref', '--short', 'HEAD']));
   AssertEquals('', GitOut(['branch', '--list', 'hotfix/1.0.1']));
 end;
 

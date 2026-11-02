@@ -193,6 +193,7 @@ begin
     AssertTrue(Back.Root[0].Collapsed);
     AssertEquals('Named', Back.Root[0][0].Caption);
     AssertEquals(P('a'), Back.Root[0][0].Path);
+    AssertTrue('in its folder', Back.Root[0][0].Parent = Back.Root[0]);
     AssertEquals('Empty', Back.Root[0][1].Name);
     AssertFalse(Back.Root[1].IsFolder);
     { Saved over. }

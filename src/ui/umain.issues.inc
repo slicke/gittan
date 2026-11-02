@@ -37,13 +37,32 @@ var
 begin
   if FRepo.Root = '' then
     Exit;
-  Url := IssueUrl(FIssueTracker, AId);
+  { Without an expression the summary marks the forge's #<number>,
+    which bugtraq.url alone is no address for. }
+  if IssueTrackerEmpty(FIssueTracker) then
+    Url := ''
+  else
+    Url := IssueUrl(FIssueTracker, AId);
   if Url <> '' then
     OpenURL(Url)
   else if Assigned(FForge) and TryStrToInt(AId, Number) then
     OpenOnForge(IssueTarget(Number))
   else
     StatusNote(Format(rsIssueNoAddress, [AId]), True);
+end;
+
+{ An expression for the ids alone would be dropped, and one TRegExpr
+  cannot read would mark nothing, so both are said in the dialog. }
+function TRepoFrame.CheckIssueTracker(const AValues: array of string): string;
+var
+  i: integer;
+begin
+  Result := '';
+  if (Trim(AValues[1]) = '') and (Trim(AValues[2]) <> '') then
+    Exit(rsIssueNeedsRegex);
+  for i := 1 to 2 do
+    if IssueRegexError(Trim(AValues[i])) <> '' then
+      Exit(Format(rsIssueBadRegex, [IssueRegexError(Trim(AValues[i]))]));
 end;
 
 procedure TRepoFrame.MenuIssueTrackerClick(Sender: TObject);
@@ -64,7 +83,7 @@ begin
   if Length(Lines) > 1 then
     Values[2] := Trim(Lines[1]);
   if not AskInput(rsIssueTrackerTitle, rsIssueTrackerNote, [rsIssueTrackerUrl,
-    rsIssueTrackerRegex, rsIssueTrackerIdRegex], Values, nil, '', True) then
+    rsIssueTrackerRegex, rsIssueTrackerIdRegex], Values, @CheckIssueTracker, '', True) then
     Exit;
   T.Url := Trim(Values[0]);
   T.LogRegex := Trim(Values[1]);

@@ -533,13 +533,21 @@ begin
     if not Dlg.Execute then
       Exit;
     Target := Dlg.FileName;
-    { The second filter picked but the name left without its extension. }
+    { The second filter picked but the name left without its extension,
+      or with the .gz alone that the Cocoa panel adds for it. }
     if (Dlg.FilterIndex = 2) and not AnsiEndsText('.tar.gz', Target) and
       not AnsiEndsText('.tgz', Target) and not AnsiEndsText('.tar', Target) then
     begin
       if AnsiEndsText('.zip', Target) then
-        Target := Copy(Target, 1, Length(Target) - 4);
+        Target := Copy(Target, 1, Length(Target) - 4)
+      else if AnsiEndsText('.gz', Target) then
+        Target := Copy(Target, 1, Length(Target) - 3);
       Target := Target + '.tar.gz';
+      { The dialog asked about the name before it got the extension. }
+      if FileExists(Target) and (AskDlg(rsArchiveTitle, Format(rsArchiveReplace,
+        [ExtractFileName(Target)]), mtWarning, [mrYes, rsArchiveReplaceAction, mrCancel,
+        rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes) then
+        Exit;
     end;
     Prefix := ExtractFileName(Target);
     if AnsiEndsText('.tar.gz', Prefix) then

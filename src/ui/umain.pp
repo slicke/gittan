@@ -1810,7 +1810,7 @@ type
     procedure SummarySelectCommit(Sender: TObject; const AHash: string);
     procedure BranchPopupPick(Sender: TObject; AIndex: integer);
     procedure ShowCommitGraph(const AFilter: string = ''; const AKeep: string = '');
-    function LoadGraphCommits(ALimit: integer): TGittanGraphCommits;
+    function LoadGraphCommits(ALimit: integer; out ACommits: TGittanGraphCommits): boolean;
     procedure GraphMore(Sender: TObject);
     procedure GraphReload(Sender: TObject);
     procedure GraphPathCommits(Sender: TObject; const APath: string; AHashes: TStrings);
@@ -2061,7 +2061,7 @@ type
     function FlowBranchOf(const ABranch: string; out AFlowBranch: TGittanFlowBranch): boolean;
     function FlowFinishCaption(const ABranch: TGittanFlowBranch): string;
     procedure UpdateRepoListItem;
-    procedure SaveRepoList;
+    function SaveRepoList: boolean;
     procedure MenuRepoListClick(Sender: TObject);
     procedure MenuAddListClick(Sender: TObject);
     function ListMenuFolder: TGittanRepoEntry;
@@ -2095,6 +2095,7 @@ type
     procedure ExportArchive(const AHash, AName: string);
     procedure EditNoteAsk(const ACommit: TGittanGraphCommit);
     procedure RevealFile(const AFile: string);
+    function CheckIssueTracker(const AValues: array of string): string;
     procedure MenuIssueTrackerClick(Sender: TObject);
     procedure SummaryIssueClick(Sender: TObject; const AId: string);
     procedure UpdateIssueTracker;
@@ -2904,6 +2905,8 @@ resourcestring
   rsArchiveFilter = 'Zip archive (*.zip)|*.zip|Compressed tar archive (*.tar.gz)|*.tar.gz';
   rsArchiveWritten = 'Wrote %s';
   rsArchiveFailed = 'Could not write the archive';
+  rsArchiveReplace = '%s exists already. Replace it?';
+  rsArchiveReplaceAction = 'Replace';
   rsCaNoteAdd = 'Add Note...';
   rsCaNoteEdit = 'Edit Note...';
   rsNoteSaved = 'Saved the note on %s';
@@ -2923,6 +2926,9 @@ resourcestring
   rsIssueTrackerSaved = 'Issue tracker saved';
   rsIssueTrackerFailed = 'Could not save the issue tracker';
   rsIssueNoAddress = 'No address is set for issue %s: File > Issue Tracker...';
+  rsIssueNeedsRegex = 'An expression for the ids needs the regular expression that finds ' +
+    'the references.';
+  rsIssueBadRegex = 'That is no regular expression: %s';
   rsCaPatchSeries = 'Create Patch Series with Marked %s...';
   rsBrowseTitle = 'Files at %s';
   rsCaMark = 'Mark for Comparison';
@@ -3051,6 +3057,7 @@ resourcestring
   rsBmSwitchItem = '&Switch to Branch...';
   rsBmCommitMenu = 'Commit %s';
   rsGraphDragTip = 'Drag a commit onto %s to merge it.';
+  rsGraphLoadFailed = 'Could not read the history';
   rsBmCommitNone = 'Commit';
   rsBmCommitPick = 'Pick a Commit in the Graph...';
   rsBmNewItem = '&New Branch...';
@@ -3138,6 +3145,7 @@ resourcestring
   rsFlowSameBranch = 'The production and the development branch must be two branches.';
   rsFlowNoBranch = 'There is no branch %s.';
   rsFlowBadPrefix = 'Every kind of branch needs a prefix a branch name can start with.';
+  rsFlowSamePrefix = 'Every kind of branch needs a prefix of its own.';
   rsFlowBadTagPrefix = 'A tag name cannot start with that.';
   rsFlowSetUp = 'Git flow is set up: %s for production, %s for development';
   rsFlowSetupFailed = 'Could not set up git flow';

@@ -32,9 +32,10 @@ begin
     FAddListItem.Enabled := (FRepo.Root <> '') and (App.RepoList.Find(FRepo.Root) = nil);
 end;
 
-procedure TRepoFrame.SaveRepoList;
+function TRepoFrame.SaveRepoList: boolean;
 begin
-  if not App.RepoList.Save then
+  Result := App.RepoList.Save;
+  if not Result then
     BannerError(rsListSaveFailed, App.RepoList.FileName);
   FWindow.RepoListChanged;
 end;
@@ -50,11 +51,8 @@ begin
     Exit;
   if App.RepoList.AddRepo(nil, FRepo.Root) = nil then
     StatusNote(rsListHasIt, False)
-  else
-  begin
-    SaveRepoList;
+  else if SaveRepoList then
     BannerSuccess(Format(rsListAdded, [ExtractFileName(ExcludeTrailingPathDelimiter(FRepo.Root))]));
-  end;
 end;
 
 procedure TRepoFrame.WelcomeListChanged(Sender: TObject);
@@ -223,8 +221,13 @@ begin
       end;
       Folder := App.RepoList.AddFolder(Folder, ExtractFileName(RepoListPath(Dir)));
       Added := 0;
+      { Each by its root as git gives it, as Add Repository does, so a
+        folder reached through a link is not listed twice, and a .git
+        that is no repository (a worktree's whose repository is gone)
+        is left out. }
       for i := 0 to High(Found) do
-        if App.RepoList.AddRepo(Folder, Found[i]) <> nil then
+        if RunGitIn(Found[i], ['rev-parse', '--show-toplevel'], Out, Err) and
+          (App.RepoList.AddRepo(Folder, Trim(Out)) <> nil) then
           Inc(Added);
       if Added = 0 then
       begin
@@ -234,8 +237,8 @@ begin
       end;
       if Folder.Parent <> nil then
         Folder.Parent.Collapsed := False;
-      SaveRepoList;
-      BannerSuccess(Format(rsListFolderAdded, [Added, Folder.Caption]));
+      if SaveRepoList then
+        BannerSuccess(Format(rsListFolderAdded, [Added, Folder.Caption]));
     end;
   end;
 end;

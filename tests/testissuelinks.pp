@@ -101,6 +101,9 @@ begin
   AssertEquals(0, Length(FindIssueLinks('#12', T)));
   T.LogRegex := '(\d+'#10'\d';
   AssertEquals(0, Length(FindIssueLinks('#12', T)));
+  AssertTrue('said why', IssueRegexError('(\d+') <> '');
+  AssertEquals('', IssueRegexError(DefaultIssueRegex));
+  AssertEquals('', IssueRegexError(''));
 end;
 
 procedure TIssueLinksTest.TestUrl;
@@ -112,6 +115,8 @@ begin
   AssertEquals('', IssueUrl(T, '12'));
   T.Url := 'https://example.test/issues/%BUGID%?x=1';
   AssertEquals('https://example.test/issues/12?x=1', IssueUrl(T, '12'));
+  T.Url := 'https://example.test/issues/%bugid%';
+  AssertEquals('the marker in any case', 'https://example.test/issues/12', IssueUrl(T, '12'));
   T.Url := 'https://example.test/browse/';
   AssertEquals('https://example.test/browse/ABC-7', IssueUrl(T, 'ABC-7'));
 end;

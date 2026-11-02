@@ -78,6 +78,8 @@ begin
     AssertEquals(0, S.UpdateSnoozedUntil, 0);
     AssertTrue(S.CommitOpen);
     AssertTrue('the sidebar''s rows start shown', S.NavOpen);
+    AssertFalse('all of the graph''s parents', S.GraphFirstParent);
+    AssertFalse('the graph''s merges', S.GraphNoMerges);
     AssertEquals('', S.CommitDraft);
     AssertEquals('no tab width picked', 0, S.TabSize);
     AssertEquals('', S.GitPath);

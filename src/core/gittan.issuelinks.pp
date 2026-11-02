@@ -53,6 +53,10 @@ function IssueTrackerEmpty(const ATracker: TGittanIssueTracker): boolean;
 function FindIssueLinks(const AText: string;
   const ATracker: TGittanIssueTracker): TGittanIssueLinks;
 
+{** Why ARegex is no regular expression TRegExpr can read; '' when it
+  is one, or empty. }
+function IssueRegexError(const ARegex: string): string;
+
 {** The address of issue AId: ATracker's Url with the id in place of
   %BUGID% (appended when the marker is missing); '' without a Url. }
 function IssueUrl(const ATracker: TGittanIssueTracker; const AId: string): string;
@@ -157,12 +161,32 @@ begin
   end;
 end;
 
+function IssueRegexError(const ARegex: string): string;
+var
+  R: TRegExpr;
+begin
+  Result := '';
+  if ARegex = '' then
+    Exit;
+  R := TRegExpr.Create(ARegex);
+  try
+    try
+      R.Compile;
+    except
+      on E: Exception do
+        Result := E.Message;
+    end;
+  finally
+    R.Free;
+  end;
+end;
+
 function IssueUrl(const ATracker: TGittanIssueTracker; const AId: string): string;
 begin
   Result := Trim(ATracker.Url);
   if Result = '' then
     Exit;
-  if Pos(IssueIdMarker, Result) > 0 then
+  if Pos(IssueIdMarker, UpperCase(Result)) > 0 then
     Result := StringReplace(Result, IssueIdMarker, AId, [rfReplaceAll, rfIgnoreCase])
   else
     Result := Result + AId;

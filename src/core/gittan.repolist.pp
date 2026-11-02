@@ -525,6 +525,17 @@ begin
   end;
 end;
 
+{$IFDEF WINDOWS}
+{ Declared here rather than taken from the Windows unit, whose DeleteFile
+  would shadow that of SysUtils. }
+function MoveFileExW(AFrom, ATo: PWideChar; AFlags: longword): LongBool; stdcall;
+  external 'kernel32' name 'MoveFileExW';
+
+const
+  MOVEFILE_REPLACE_EXISTING = 1;
+  MOVEFILE_WRITE_THROUGH = 8;
+{$ENDIF}
+
 function TGittanRepoList.Save: boolean;
 var
   Temp: string;
@@ -549,14 +560,13 @@ begin
     Exit;
   end;
   {$IFDEF WINDOWS}
-  { RenameFile does not replace a file on Windows. }
-  if FileExists(FFileName) and not DeleteFile(FFileName) then
-  begin
-    DeleteFile(Temp);
-    Exit;
-  end;
-  {$ENDIF}
+  { RenameFile does not replace a file on Windows; MoveFileEx does, in
+    one step, so the list on disk stays the old one when it fails. }
+  Result := MoveFileExW(PWideChar(UTF8Decode(Temp)), PWideChar(UTF8Decode(FFileName)),
+    MOVEFILE_REPLACE_EXISTING or MOVEFILE_WRITE_THROUGH);
+  {$ELSE}
   Result := RenameFile(Temp, FFileName);
+  {$ENDIF}
   if not Result then
     DeleteFile(Temp);
 end;

@@ -2026,7 +2026,7 @@ begin
     Limit := GraphSearchLimit;
   Screen.Cursor := crHourGlass;
   try
-    Commits := LoadGraphCommits(Limit);
+    LoadGraphCommits(Limit, Commits);
     { A commit to stay on past the newest ones (picked after More, then
       Back): the history up to the search's limit. }
     if (Keep <> '') and (Limit < GraphSearchLimit) and (Length(Commits) >= Limit) then
@@ -2041,7 +2041,7 @@ begin
       if not Found then
       begin
         Limit := GraphSearchLimit;
-        Commits := LoadGraphCommits(Limit);
+        LoadGraphCommits(Limit, Commits);
       end;
     end;
   finally
@@ -2071,27 +2071,33 @@ end;
 
 { The log as the graph's toggles (the settings') ask for it: only the
   first parent of a merge followed, the merges left out. The limit is
-  kept for a reload. }
-function TRepoFrame.LoadGraphCommits(ALimit: integer): TGittanGraphCommits;
+  kept for a reload. A failure is told in a banner, with git's reason,
+  but for the one before the first commit, when there is no log. }
+function TRepoFrame.LoadGraphCommits(ALimit: integer; out ACommits: TGittanGraphCommits): boolean;
 begin
-  Result := nil;
   FGraphLoadLimit := ALimit;
-  FRepo.GraphCommits(Result, ALimit, App.Settings.GraphFirstParent, App.Settings.GraphNoMerges);
+  Result := FRepo.GraphCommits(ACommits, ALimit, App.Settings.GraphFirstParent,
+    App.Settings.GraphNoMerges);
+  if not Result and (FRepo.CommitId('HEAD') <> '') then
+    BannerError(rsGraphLoadFailed, FRepo.Error);
 end;
 
 procedure TRepoFrame.GraphMore(Sender: TObject);
 var
   Commits: TGittanGraphCommits;
+  Ok: boolean;
 begin
   if FRepo.Root = '' then
     Exit;
   Screen.Cursor := crHourGlass;
   try
-    Commits := LoadGraphCommits(GraphSearchLimit);
+    Ok := LoadGraphCommits(GraphSearchLimit, Commits);
   finally
     Screen.Cursor := crDefault;
   end;
-  FGraph.Replace(Commits, Length(Commits) >= GraphSearchLimit);
+  { What is shown stays when the log cannot be read. }
+  if Ok then
+    FGraph.Replace(Commits, Length(Commits) >= GraphSearchLimit);
 end;
 
 { A toggle of the graph's header was clicked, or a note changed: the
@@ -2101,6 +2107,7 @@ procedure TRepoFrame.GraphReload(Sender: TObject);
 var
   Commits: TGittanGraphCommits;
   Limit: integer;
+  Ok: boolean;
 begin
   if FRepo.Root = '' then
     Exit;
@@ -2116,11 +2123,12 @@ begin
     Limit := GraphLimit;
   Screen.Cursor := crHourGlass;
   try
-    Commits := LoadGraphCommits(Limit);
+    Ok := LoadGraphCommits(Limit, Commits);
   finally
     Screen.Cursor := crDefault;
   end;
-  FGraph.Replace(Commits, Length(Commits) >= Limit);
+  if Ok then
+    FGraph.Replace(Commits, Length(Commits) >= Limit);
 end;
 
 procedure TRepoFrame.GraphPathCommits(Sender: TObject; const APath: string;
