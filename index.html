@@ -878,6 +878,7 @@
         <button role="tab" id="b-branches" aria-selected="false" aria-controls="t-branches" tabindex="-1"><b>Branches</b></button>
         <button role="tab" id="b-stashes" aria-selected="false" aria-controls="t-stashes" tabindex="-1"><b>Stashes</b></button>
         <button role="tab" id="b-worktrees" aria-selected="false" aria-controls="t-worktrees" tabindex="-1"><b>Worktrees</b></button>
+        <button role="tab" id="b-repolist" aria-selected="false" aria-controls="t-repolist" tabindex="-1"><b>Repository list</b></button>
         <button role="tab" id="b-conflicts" aria-selected="false" aria-controls="t-conflicts" tabindex="-1"><b>Conflicts</b></button>
         <button role="tab" id="b-merge" aria-selected="false" aria-controls="t-merge" tabindex="-1"><b>Merge editor</b></button>
         <button role="tab" id="b-graphmenu" aria-selected="false" aria-controls="t-graphmenu" tabindex="-1"><b>Commit menu</b></button>
@@ -930,6 +931,15 @@
             <source srcset="assets/shots/worktrees-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/worktrees-light.avif" type="image/avif">
             <img src="assets/shots/worktrees-light.png" width="1280" height="800" loading="lazy" alt="The worktree trailhead-maps on offline-maps open in a second tab beside trailhead, with the worktree list showing Add Worktree, trailhead on main as the repository and trailhead-maps on offline-maps as this one, and the summary saying three commits behind origin/main with a Rebase button">
+          </picture></div>
+        </figure>
+        <figure id="t-repolist" role="tabpanel" aria-labelledby="b-repolist">
+          <figcaption><b>The repository list</b> in the welcome view keeps your repositories in folders of your own, folded or open, over the ones you opened last. Drag a recent one into a folder, or add every repository in a folder at once with the +; File &gt; Repository List shows it in a tab.</figcaption>
+          <div class="frame"><picture>
+            <source srcset="assets/shots/welcome-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/welcome-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/welcome-light.avif" type="image/avif">
+            <img src="assets/shots/welcome-light.png" width="1280" height="800" loading="lazy" alt="The welcome view with Open Repository, Clone and Init, then the repository list: the folder Trailhead open with trailhead, trailhead-api and trail-icons, the folders Work and Open source folded, and under it Recent with trailhead and notes">
           </picture></div>
         </figure>
         <figure id="t-rebase" role="tabpanel" aria-labelledby="b-rebase">
