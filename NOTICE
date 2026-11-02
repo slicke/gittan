@@ -1,0 +1,99 @@
+Gittan's licenses
+=================
+
+Gittan is free software under the GNU General Public License, version 3
+(LICENSE.gittan). That covers Gittan itself and tqshim, the bridge between
+Gittan and its JavaScript engine. Gittan's source, with every package below,
+is at https://github.com/slicke/gittan.
+
+tqshim (Trndi-QuickJS) and the extensions engine around it come from Trndi,
+Copyright (c) Björn Lindh, also under the GNU General Public License,
+version 3: https://github.com/slicke/trndi
+
+The other files beside it, and the code built into it, come from elsewhere
+under licenses of their own, which cover that code only, not Gittan.
+
+
+The JavaScript engine
+---------------------
+
+libqjs is quickjs-ng (https://github.com/quickjs-ng/quickjs), the engine that
+runs Gittan's extensions. It is under the MIT License, in LICENSE.quickjs-ng.
+
+
+Built into Gittan
+-----------------
+
+ATSynEdit, ATFlatControls and ATSynEdit_Ex, the editor and its controls,
+Copyright (C) Alexey Torgashin (UVviewsoft.com), are under the Mozilla Public
+License 2.0 (or the LGPL). Their source:
+  https://github.com/Alexey-T/ATSynEdit
+  https://github.com/Alexey-T/ATFlatControls
+  https://github.com/Alexey-T/ATSynEdit_Ex
+
+EControl, the syntax highlighting, by Michael Zakharov and Alexey Torgashin,
+is used with the author's permission for open source programs:
+  https://github.com/Alexey-T/EControl
+
+EncConv, the text encodings, by Alexey Torgashin from Lazarus's
+LConvEncoding, is under Lazarus's license (the LGPL with a static linking
+exception): https://github.com/Alexey-T/EncConv
+
+BGRABitmap, the drawing, is under the LGPL with a static linking exception:
+  https://github.com/bgrabitmap/bgrabitmap
+
+MetaDarkStyle, the dark mode on Windows, is under the LGPL 2.1 or later with
+a static linking exception: https://github.com/zamtmn/metadarkstyle
+
+LazInk, which draws the Markdown preview, is under the BSD Zero Clause
+License: https://github.com/TonyStone31/LazInk. Parts of it come from
+published standards:
+
+- Its default stylesheet and its table of named characters come from the HTML
+  Living Standard, https://html.spec.whatwg.org/ - Copyright WHATWG (Apple,
+  Google, Mozilla, Microsoft), under the Creative Commons Attribution 4.0
+  International License, https://creativecommons.org/licenses/by/4.0/.
+  LazInk's copies are changed from the original.
+
+- Its WebP decoder's tables come from RFC 6386, VP8 Data Format and Decoding
+  Guide, under these terms:
+
+    Copyright (c) 2011 IETF Trust and the persons identified as the
+    document authors.  All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions
+    are met:
+
+    - Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+    - Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    - Neither the name of Internet Society, IETF or IETF Trust, nor the
+      names of specific contributors, may be used to endorse or promote
+      products derived from this software without specific prior written
+      permission.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+    A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT
+    OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+    SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+    LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+Gittan is built with Free Pascal and Lazarus, whose run-time library and LCL
+are under the LGPL with a static linking exception:
+https://www.freepascal.org, https://www.lazarus-ide.org
+
+
+The lexers
+----------
+
+The lexers in lexlib/ are CudaText's, by Alexey Torgashin and the people
+named in each file: https://github.com/Alexey-T/CudaText-lexers

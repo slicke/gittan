@@ -18,6 +18,8 @@ on:
 #                      Gittan-windows-x64-setup.exe (Inno Setup)
 #   - Linux (amd64):   Gittan-linux-amd64.tar.gz (Gittan + lexlib/, GTK 3),
 #                      Gittan-linux-amd64.deb and Gittan-linux-x86_64.rpm
+#   - Linux (arm64):   the same as Gittan-linux-arm64.tar.gz, .deb and
+#                      Gittan-linux-aarch64.rpm
 #
 # As in Trndi, a push to main publishes a release: the version job takes the
 # next build number from the "build-<n>" tags (100 when there is none), and
@@ -108,6 +110,20 @@ jobs:
           - name: linux-amd64
             os_target: linux
             runner: ubuntu-latest
+            deb_arch: amd64
+            rpm_arch: x86_64
+            laz_debs: fpc-laz_3.2.2-210709_amd64.deb fpc-src_3.2.2-210709_amd64.deb lazarus-project_5.0.0-0_amd64.deb
+          # Built natively on GitHub's arm runner, for Raspberry Pi OS and
+          # other arm64 Linux. 22.04's glibc (2.35) is older than Debian
+          # Bookworm's (2.36), so the executable starts there too. Lazarus
+          # 5.0RC1's arm64 debs come with FPC 3.2.4rc2.
+          - name: linux-arm64
+            os_target: linux
+            runner: ubuntu-22.04-arm
+            toolchain: linux-arm64
+            deb_arch: arm64
+            rpm_arch: aarch64
+            laz_debs: fpc-laz_3.2.4-rc2_arm64.deb fpc-src_3.2.4-rc2_arm64.deb lazarus-project_5.0.0-0_arm64.deb
           - name: macos-arm64
             os_target: macos
             runner: macos-26
@@ -138,13 +154,14 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/toolchain
-          key: toolchain-${{ matrix.os_target }}-lazarus-5.0RC1
+          key: toolchain-${{ matrix.toolchain || matrix.os_target }}-lazarus-5.0RC1
 
       - name: Install Lazarus/FPC (Linux)
         if: matrix.os_target == 'linux'
         env:
           # The folder on download.lazarus-ide.org and on SourceForge.
-          LAZ_FOLDER: Lazarus%20Linux%20amd64%20DEB/Lazarus%205.0RC1
+          LAZ_FOLDER: Lazarus%20Linux%20${{ matrix.deb_arch }}%20DEB/Lazarus%205.0RC1
+          LAZ_DEBS: ${{ matrix.laz_debs }}
         run: |
           set -euo pipefail
           sudo apt-get update
@@ -179,9 +196,10 @@ jobs:
             done
             return 1
           }
-          fetch fpc-laz.deb fpc-laz_3.2.2-210709_amd64.deb
-          fetch fpc-src.deb fpc-src_3.2.2-210709_amd64.deb
-          fetch lazarus.deb lazarus-project_5.0.0-0_amd64.deb
+          read -r FPC_DEB SRC_DEB LAZ_DEB <<< "$LAZ_DEBS"
+          fetch fpc-laz.deb "$FPC_DEB"
+          fetch fpc-src.deb "$SRC_DEB"
+          fetch lazarus.deb "$LAZ_DEB"
           sudo dpkg -i "$DL/fpc-laz.deb" "$DL/fpc-src.deb" "$DL/lazarus.deb" || true
           sudo apt-get -f install -y
           fpc -iV
@@ -350,6 +368,9 @@ jobs:
       # ===================== BUILD + PACKAGE =====================
       - name: Build and package (Linux)
         if: matrix.os_target == 'linux'
+        env:
+          DEB_ARCH: ${{ matrix.deb_arch }}
+          RPM_ARCH: ${{ matrix.rpm_arch }}
         run: |
           set -euo pipefail
           # The Makefile builds with gtk3 on Linux and refreshes lexlib/.
@@ -361,17 +382,21 @@ jobs:
           cp icons/png/gittan-256.png dist/Gittan/gittan.png
           # The extensions' JavaScript engine and its shim, beside the
           # executable, whose rpath is $ORIGIN (spec/extensions.md).
-          cp externals/quickjs/prebuilt/x86_64-linux/libqjs.so.0.*.* dist/Gittan/libqjs.so.0
-          cp externals/quickjs/prebuilt/x86_64-linux/libtqshim.so dist/Gittan/
+          # The QuickJS folders go by FPC's CPU names, as the rpm does.
+          QJS=externals/quickjs/prebuilt/"$RPM_ARCH"-linux
+          cp "$QJS"/libqjs.so.0.*.* dist/Gittan/libqjs.so.0
+          cp "$QJS"/libtqshim.so dist/Gittan/
           cp externals/quickjs/LICENSE.quickjs-ng dist/Gittan/
-          tar -C dist -czf Gittan-linux-amd64.tar.gz Gittan
+          cp LICENSE dist/Gittan/LICENSE.gittan
+          cp NOTICE dist/Gittan/
+          tar -C dist -czf Gittan-linux-"$DEB_ARCH".tar.gz Gittan
           # The .deb and the .rpm, which install the desktop file and the
           # icons a Wayland desktop needs to show Gittan's (make packages).
           sudo apt-get install -y ruby ruby-dev rpm
           sudo gem install --no-document fpm
           make packages
-          cp pkg/gittan_*.deb Gittan-linux-amd64.deb
-          cp pkg/gittan-*.rpm Gittan-linux-x86_64.rpm
+          cp pkg/gittan_*.deb Gittan-linux-"$DEB_ARCH".deb
+          cp pkg/gittan-*.rpm Gittan-linux-"$RPM_ARCH".rpm
 
       - name: Build and package (macOS)
         if: matrix.os_target == 'macos'
@@ -390,25 +415,29 @@ jobs:
           # Lazarus's bundle links Contents/MacOS/Gittan to ../../../Gittan;
           # replace the link with the binary and carry lexlib in Resources,
           # where gittan.lexers.pp looks for it.
-          mkdir -p dist
-          cp -R Gittan.app dist/
-          rm -f dist/Gittan.app/Contents/MacOS/Gittan
-          cp Gittan dist/Gittan.app/Contents/MacOS/Gittan
+          # The DMG gets a folder of its own: dist/ holds the Linux and
+          # Windows files, which hdiutil would pack beside the app.
+          mkdir -p dist/macos
+          cp -R Gittan.app dist/macos/
+          rm -f dist/macos/Gittan.app/Contents/MacOS/Gittan
+          cp Gittan dist/macos/Gittan.app/Contents/MacOS/Gittan
           # FPC's -Xs leaves the symbols in on macOS; strip them (27 MB to
           # 12 MB with the smart linking of the Release mode).
-          strip dist/Gittan.app/Contents/MacOS/Gittan
-          cp -R lexlib dist/Gittan.app/Contents/Resources/
+          strip dist/macos/Gittan.app/Contents/MacOS/Gittan
+          cp -R lexlib dist/macos/Gittan.app/Contents/Resources/
           # The extensions' JavaScript engine and its shim beside the binary,
           # whose rpath is @loader_path; signed ad hoc each, since --deep
           # below leaves loose dylibs in Contents/MacOS alone.
-          cp externals/quickjs/prebuilt/"${CPU:-aarch64}"-darwin/*.dylib dist/Gittan.app/Contents/MacOS/
-          cp externals/quickjs/LICENSE.quickjs-ng dist/Gittan.app/Contents/Resources/
-          codesign --force --sign - dist/Gittan.app/Contents/MacOS/*.dylib
+          cp externals/quickjs/prebuilt/"${CPU:-aarch64}"-darwin/*.dylib dist/macos/Gittan.app/Contents/MacOS/
+          cp externals/quickjs/LICENSE.quickjs-ng dist/macos/Gittan.app/Contents/Resources/
+          cp LICENSE dist/macos/Gittan.app/Contents/Resources/LICENSE.gittan
+          cp NOTICE dist/macos/Gittan.app/Contents/Resources/
+          codesign --force --sign - dist/macos/Gittan.app/Contents/MacOS/*.dylib
           # Apple Silicon refuses unsigned code; sign ad hoc.
-          codesign --force --deep --sign - dist/Gittan.app
-          codesign --verify --deep --strict dist/Gittan.app
-          ln -s /Applications dist/Applications
-          hdiutil create -volname Gittan -srcfolder dist -ov -format UDZO "$DMG"
+          codesign --force --deep --sign - dist/macos/Gittan.app
+          codesign --verify --deep --strict dist/macos/Gittan.app
+          ln -s /Applications dist/macos/Applications
+          hdiutil create -volname Gittan -srcfolder dist/macos -ov -format UDZO "$DMG"
 
       - name: Build and test (Windows)
         if: matrix.os_target == 'windows'
@@ -441,6 +470,8 @@ jobs:
           # the executable.
           cp externals/quickjs/prebuilt/x86_64-win64/libqjs.dll externals/quickjs/prebuilt/x86_64-win64/tqshim.dll dist/Gittan/
           cp externals/quickjs/LICENSE.quickjs-ng dist/Gittan/
+          cp LICENSE dist/Gittan/LICENSE.gittan
+          cp NOTICE dist/Gittan/
           (cd dist && 7z a -tzip ../Gittan-windows-x64.zip Gittan >/dev/null)
 
       # The installer, on every Windows build (PRs too, so a broken .iss
@@ -467,6 +498,9 @@ jobs:
             Gittan-linux-amd64.tar.gz
             Gittan-linux-amd64.deb
             Gittan-linux-x86_64.rpm
+            Gittan-linux-arm64.tar.gz
+            Gittan-linux-arm64.deb
+            Gittan-linux-aarch64.rpm
             Gittan-macos-silicon.dmg
             Gittan-macos-intel.dmg
             Gittan-windows-x64.zip
@@ -530,6 +564,7 @@ jobs:
             echo "- **Gittan-linux-amd64.deb** — Debian and Ubuntu: \`sudo apt install ./Gittan-linux-amd64.deb\`."
             echo "- **Gittan-linux-x86_64.rpm** — Fedora and other RPM distributions: \`sudo dnf install ./Gittan-linux-x86_64.rpm\` (\`zypper install\` on openSUSE)."
             echo "- **Gittan-linux-amd64.tar.gz** — Linux amd64 without installing, needs GTK 3. Unpacked, it has no launcher or icon in the desktop's menu."
+            echo "- **Gittan-linux-arm64.deb**, **Gittan-linux-aarch64.rpm** and **Gittan-linux-arm64.tar.gz** — the same for arm64 Linux, such as Raspberry Pi OS (64-bit): \`sudo apt install ./Gittan-linux-arm64.deb\`."
             echo
             echo "Gittan runs the git command line tool, so git must be on your PATH."
           } > notes.md
@@ -559,7 +594,10 @@ jobs:
             packages/Gittan-windows-x64.zip \
             packages/Gittan-linux-amd64.deb \
             packages/Gittan-linux-x86_64.rpm \
-            packages/Gittan-linux-amd64.tar.gz
+            packages/Gittan-linux-amd64.tar.gz \
+            packages/Gittan-linux-arm64.deb \
+            packages/Gittan-linux-aarch64.rpm \
+            packages/Gittan-linux-arm64.tar.gz
           # --latest: releases/latest, which the app's update check reads,
           # must move to it, not be left to how GitHub treats a published
           # draft.

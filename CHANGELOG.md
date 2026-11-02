@@ -3,11 +3,21 @@
 ## Unreleased
 
 ### Added
+- Linux on arm64, such as Raspberry Pi OS (64-bit): a .deb, an .rpm and a .tar.gz beside the amd64 ones.
+
+### Fixed
+- The macOS disk image holds only Gittan and the Applications link; it also had a linux and a windows folder.
+- Every package carries Gittan's license (GPLv3) as LICENSE.gittan, beside the JavaScript engine's; only the Windows installer had it. A NOTICE file beside them says what each license covers and credits the code built into Gittan.
+
+## 0.11 (build-136, 2026-11-02)
+
+### Added
 - Extensions: JavaScript files in Gittan's extensions folder (Extensions > Open Extensions Folder) add commands to the Extensions menu, the command palette and the file and editor menus, watch what happens (a repository opened or changed, a commit, a push or a pull, which they can stop with a reason), read the repository, run git and other programs, make requests, and put cards under the lines of the change view, with a settings page of their own. Each file says what it needs, and Gittan asks before it loads one that wants to read the repositories, the network, programs or the settings. The engine is quickjs-ng, brought over from Trndi.
 
 ### Fixed
 - Gittan no longer quits at once when Claude Code or Copilot ends before it has read the whole prompt Gittan gives it.
 - On Windows, a user whose name has a letter outside ASCII (Björn) can commit, stash and revert again: Gittan's temporary files went to a folder that does not exist.
+- On Windows, git's long outputs are read at speed; a megabyte took over ten seconds.
 
 ## 0.10 (build-135, 2026-10-31)
 
