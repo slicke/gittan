@@ -167,6 +167,13 @@ type
     FStatsOn, FStatsHot: boolean;
     FStats: TGittanCommitStats;
     FStatsRect: TRect;
+    { The toggles left of it, First Parent (0) and No Merges (1): what
+      the log was read with, their places, and the one under the mouse
+      (-1 for none). The owner reads the log again on OnReload. }
+    FFirstParent, FNoMerges: boolean;
+    FOptionRects: array[0..1] of TRect;
+    FOptionHot: integer;
+    FOnReload: TNotifyEvent;
     FTip: string;
     FTipRect, FTipLinkRect: TRect;
     FTipHot: boolean;
@@ -217,6 +224,12 @@ type
     procedure SetMarked(const AValue: string);
     procedure SetStatsOn(AValue: boolean);
     procedure SetStatsHot(AValue: boolean);
+    function Flat: boolean;
+    function OptionAt(X, Y: integer): integer;
+    procedure SetOptionHot(AValue: integer);
+    procedure SetFirstParent(AValue: boolean);
+    procedure SetNoMerges(AValue: boolean);
+    procedure PaintChip(const ARect: TRect; const ACaption: string; AOn, AHot: boolean);
     procedure SetTip(const AValue: string);
     function TipHeight: integer;
     procedure CountStats;
@@ -295,6 +308,14 @@ type
     procedure SetLaneColors(const AColors: array of TColor);
     {** The id of the commit marked for a comparison, '' for none. }
     property Marked: string read FMarked write SetMarked;
+    {** The toggles of the header, as the owner read the log: only the
+      first parent of each merge followed, and the merges left out (the
+      rows are then a flat list, since their parents may be missing).
+      Set before Popup; a click raises OnReload, and the owner answers
+      with Replace. }
+    property FirstParent: boolean read FFirstParent write SetFirstParent;
+    property NoMerges: boolean read FNoMerges write SetNoMerges;
+    property OnReload: TNotifyEvent read FOnReload write FOnReload;
     property OnPick: TGittanGraphPickEvent read FOnPick write FOnPick;
     {** A right click on a commit, or the Menu key on the highlighted one:
       the panel stays open under the menu the handler shows at
@@ -348,6 +369,8 @@ resourcestring
   rsGraphSearchingChanges = 'Searching the history for the change...';
   rsGraphChangeFailed = 'git could not search: %s';
   rsGraphStats = 'Statistics';
+  rsGraphFirstParent = 'First Parent';
+  rsGraphNoMerges = 'No Merges';
   rsGraphTipDismiss = 'Don''t Show Again';
   rsStatsSummary = '%s commits by %s authors';
   rsStatsSummaryOne = '%s commits by one author';
@@ -515,6 +538,7 @@ begin
   FDropRow := -1;
   FStatsWeek := -1;
   FStatsAuthor := -1;
+  FOptionHot := -1;
   FPathHashes := TStringList.Create;
   FPathHashes.Sorted := True;
   FPathHashes.Duplicates := dupIgnore;
@@ -608,10 +632,18 @@ begin
   Result := Px(Pad) + Min(ALane, MaxLanes - 1) * Px(LaneWidth) + Px(LaneWidth) div 2;
 end;
 
-{ The lanes drawn: one while the filter shows a flat list. }
+{ The rows are a flat list, a dot each and no lines: while a filter
+  picks commits out of the history, and without the merges, whose
+  children then name parents the list lacks. }
+function TGittanCommitGraph.Flat: boolean;
+begin
+  Result := FFiltered or FNoMerges;
+end;
+
+{ The lanes drawn: one while the list is flat. }
 function TGittanCommitGraph.ShownLanes: integer;
 begin
-  if FFiltered then
+  if Flat then
     Result := 1
   else
     Result := FLanes;
@@ -768,8 +800,8 @@ begin
     FMetaFull[r] := FMetaFull[r] + FMetaAge[r];
     FSubjectRoom[r] := -1;
     FAuthorKeys[r] := UTF8LowerCase(Composed(FCommits[r].Author));
-    FSearch[r] := UTF8LowerCase(Composed(FCommits[r].Subject + #10 + FCommits[r].Body)) +
-      #10 + FAuthorKeys[r] + #10 + FCommits[r].Hash;
+    FSearch[r] := UTF8LowerCase(Composed(FCommits[r].Subject + #10 + FCommits[r].Body + #10 +
+      FCommits[r].Note)) + #10 + FAuthorKeys[r] + #10 + FCommits[r].Hash;
     FShown[r] := r;
   end;
   FCurrent := -1;
@@ -1096,6 +1128,19 @@ begin
   else
     W := 90;
   FStatsRect := Rect(FEdit.Left - Px(Gap) - W, FEdit.Top, FEdit.Left - Px(Gap), FEdit.Top + FEdit.Height);
+  { The toggles, No Merges then First Parent going left. }
+  if HandleAllocated then
+    W := Canvas.TextWidth(rsGraphNoMerges) + 4 * Px(ChipPadX)
+  else
+    W := 90;
+  FOptionRects[1] := Rect(FStatsRect.Left - Px(Gap) - W, FEdit.Top, FStatsRect.Left - Px(Gap),
+    FEdit.Top + FEdit.Height);
+  if HandleAllocated then
+    W := Canvas.TextWidth(rsGraphFirstParent) + 4 * Px(ChipPadX)
+  else
+    W := 90;
+  FOptionRects[0] := Rect(FOptionRects[1].Left - Px(Gap) - W, FEdit.Top,
+    FOptionRects[1].Left - Px(Gap), FEdit.Top + FEdit.Height);
 end;
 
 function TGittanCommitGraph.TipHeight: integer;
@@ -1420,12 +1465,13 @@ begin
   inherited MouseMove(Shift, X, Y);
   SetCloseHot(PtInRect(FCloseRect, Point(X, Y)));
   SetStatsHot(PtInRect(FStatsRect, Point(X, Y)));
+  SetOptionHot(OptionAt(X, Y));
   if FTipHot <> ((FTip <> '') and PtInRect(FTipLinkRect, Point(X, Y))) then
   begin
     FTipHot := not FTipHot;
     Invalidate;
   end;
-  if FCloseHot or FStatsHot or FTipHot then
+  if FCloseHot or FStatsHot or FTipHot or (FOptionHot >= 0) then
     Cursor := crHandPoint
   else
     Cursor := crDefault;
@@ -1436,6 +1482,7 @@ begin
   inherited MouseLeave;
   SetCloseHot(False);
   SetStatsHot(False);
+  SetOptionHot(-1);
   if FTipHot then
   begin
     FTipHot := False;
@@ -1451,6 +1498,15 @@ begin
     Close
   else if (Button = mbLeft) and PtInRect(FStatsRect, Point(X, Y)) then
     SetStatsOn(not FStatsOn)
+  else if (Button = mbLeft) and (OptionAt(X, Y) >= 0) then
+  begin
+    if OptionAt(X, Y) = 0 then
+      SetFirstParent(not FFirstParent)
+    else
+      SetNoMerges(not FNoMerges);
+    if Assigned(FOnReload) then
+      FOnReload(Self);
+  end
   else if (Button = mbLeft) and (FTip <> '') and PtInRect(FTipLinkRect, Point(X, Y)) and
     Assigned(FOnTipDismiss) then
     FOnTipDismiss(Self);
@@ -1508,7 +1564,7 @@ begin
   { The branch and how far it is from its upstream end before the
     Statistics toggle: a long name is cut, and the upstream goes when
     it leaves the name too little room. }
-  Room := FStatsRect.Left - Px(Gap) - (X + BodyHeight - 4 + 5);
+  Room := FOptionRects[0].Left - Px(Gap) - (X + BodyHeight - 4 + 5);
   if (FBranch <> '') and (Room > Canvas.TextWidth('…')) then
   begin
     NParts := 0;
@@ -1562,30 +1618,10 @@ begin
     Canvas.Pen.Style := psSolid;
     Canvas.Brush.Style := bsClear;
   end;
-  { The Statistics toggle: outlined, filled in the accent while on. }
-  Canvas.Font := Font;
-  if FStatsOn then
-  begin
-    Canvas.Pen.Color := FAccent;
-    Canvas.Brush.Color := FAccent;
-  end
-  else
-  begin
-    Canvas.Pen.Color := FLine;
-    if FStatsHot then
-      Canvas.Brush.Color := FHover
-    else
-      Canvas.Brush.Color := FBack;
-  end;
-  Canvas.Brush.Style := bsSolid;
-  Canvas.RoundRect(FStatsRect, 8, 8);
-  Canvas.Brush.Style := bsClear;
-  if FStatsOn then
-    Canvas.Font.Color := FBack
-  else
-    Canvas.Font.Color := FText;
-  Canvas.TextOut((FStatsRect.Left + FStatsRect.Right - Canvas.TextWidth(rsGraphStats)) div 2,
-    (FStatsRect.Top + FStatsRect.Bottom - BodyHeight) div 2, rsGraphStats);
+  { The toggles: outlined, filled in the accent while on. }
+  PaintChip(FOptionRects[0], rsGraphFirstParent, FFirstParent, FOptionHot = 0);
+  PaintChip(FOptionRects[1], rsGraphNoMerges, FNoMerges, FOptionHot = 1);
+  PaintChip(FStatsRect, rsGraphStats, FStatsOn, FStatsHot);
 
   Canvas.Pen.Color := FDim;
   Canvas.Pen.Width := 2;
@@ -1716,7 +1752,7 @@ begin
     ACanvas.Pen.Width := 1;
   end;
 
-  if not FFiltered then
+  if not Flat then
   begin
     ACanvas.Pen.Width := 2;
     for i := 0 to High(C.TopEdges) do
@@ -1737,7 +1773,7 @@ begin
   for i := 0 to High(C.Refs) do
     if C.Refs[i].Kind = grHead then
       IsHead := True;
-  if FFiltered then
+  if Flat then
     X := LaneX(0)
   else
     X := LaneX(C.Lane);
@@ -1824,6 +1860,76 @@ begin
   if FStatsHot = AValue then
     Exit;
   FStatsHot := AValue;
+  Invalidate;
+end;
+
+{ A toggle of the header: outlined, filled in the accent while on, in
+  the hover color under the mouse. }
+procedure TGittanCommitGraph.PaintChip(const ARect: TRect; const ACaption: string;
+  AOn, AHot: boolean);
+var
+  BodyHeight: integer;
+begin
+  Canvas.Font := Font;
+  BodyHeight := Canvas.TextHeight('Xg');
+  if AOn then
+  begin
+    Canvas.Pen.Color := FAccent;
+    Canvas.Brush.Color := FAccent;
+  end
+  else
+  begin
+    Canvas.Pen.Color := FLine;
+    if AHot then
+      Canvas.Brush.Color := FHover
+    else
+      Canvas.Brush.Color := FBack;
+  end;
+  Canvas.Brush.Style := bsSolid;
+  Canvas.RoundRect(ARect, 8, 8);
+  Canvas.Brush.Style := bsClear;
+  if AOn then
+    Canvas.Font.Color := FBack
+  else
+    Canvas.Font.Color := FText;
+  Canvas.TextOut((ARect.Left + ARect.Right - Canvas.TextWidth(ACaption)) div 2,
+    (ARect.Top + ARect.Bottom - BodyHeight) div 2, ACaption);
+end;
+
+function TGittanCommitGraph.OptionAt(X, Y: integer): integer;
+var
+  k: integer;
+begin
+  Result := -1;
+  for k := 0 to 1 do
+    if PtInRect(FOptionRects[k], Point(X, Y)) then
+      Exit(k);
+end;
+
+procedure TGittanCommitGraph.SetOptionHot(AValue: integer);
+begin
+  if FOptionHot = AValue then
+    Exit;
+  FOptionHot := AValue;
+  Invalidate;
+end;
+
+procedure TGittanCommitGraph.SetFirstParent(AValue: boolean);
+begin
+  if FFirstParent = AValue then
+    Exit;
+  FFirstParent := AValue;
+  Invalidate;
+end;
+
+{ The lanes come or go with the merges, so the rows are laid out again. }
+procedure TGittanCommitGraph.SetNoMerges(AValue: boolean);
+begin
+  if FNoMerges = AValue then
+    Exit;
+  FNoMerges := AValue;
+  Arrange;
+  FRows.Invalidate;
   Invalidate;
 end;
 

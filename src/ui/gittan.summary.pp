@@ -27,7 +27,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Controls, Graphics, ImgList, InkDraw, gittan.git, gittan.icons,
-  gittan.reviews, gittan.statusbar, gittan.forge;
+  gittan.reviews, gittan.statusbar, gittan.forge, gittan.issuelinks;
 
 type
   TGittanSelectFileEvent = procedure(Sender: TObject; const APath: string) of object;
@@ -42,6 +42,14 @@ type
   TGittanSelectCommitEvent = procedure(Sender: TObject; const AHash: string) of object;
   {** A click on a link to AUrl. }
   TGittanOpenUrlEvent = procedure(Sender: TObject; const AUrl: string) of object;
+  {** An issue reference in the commit's card was clicked: AId is the
+    issue's id as the tracker's regular expression found it. }
+  TGittanIssueClickEvent = procedure(Sender: TObject; const AId: string) of object;
+  {** An issue reference painted in the card: where, and the id. }
+  TGittanCardLink = record
+    R: TRect;
+    Id: string;
+  end;
   {** A click on Rebase (ARebase) or Merge in the row of a branch behind
     the default branch. }
   TGittanBehindActionEvent = procedure(Sender: TObject; ARebase: boolean) of object;
@@ -135,6 +143,14 @@ type
     FStepRects: array[0..1] of TRect;
     FStepHot: integer;
     FOnCommitStep: TGittanCommitStepEvent;
+    { The commit's note, wrapped, under the body; the issue references
+      of the card (found with FIssueTracker's regular expression as the
+      lines are painted) and the one under the mouse, -1 for none. }
+    FCardNote: TStringArray;
+    FIssueTracker: TGittanIssueTracker;
+    FCardLinks: array of TGittanCardLink;
+    FCardLinkHot: integer;
+    FOnIssueClick: TGittanIssueClickEvent;
     { The newest commits, shown under a clean tree, with how far the
       branch is from its upstream; FCommitHot is the row under the
       mouse, -1 for none. }
@@ -236,6 +252,10 @@ type
     procedure PaintReview(var Y: integer);
     procedure LayoutCard;
     procedure PaintCard(var Y: integer);
+    procedure PaintCardLine(X, Y: integer; const AText: string);
+    function CardLinkAt(X, Y: integer): integer;
+    procedure SetCardLinkHot(AValue: integer);
+    procedure SetIssueTracker(const AValue: TGittanIssueTracker);
     procedure SetBackHot(AValue: boolean);
     procedure SetStepHot(AValue: integer);
     function PaintSteps(ARight, Y: integer): integer;
@@ -375,6 +395,11 @@ type
     {** A click on the commit card's link back to the working tree. }
     property OnBackClick: TNotifyEvent read FOnBackClick write FOnBackClick;
     property OnCommitStep: TGittanCommitStepEvent read FOnCommitStep write FOnCommitStep;
+    {** The issue tracker whose regular expression marks the references
+      to issues in the card's subject, body and note as links; one with
+      no expression marks none. }
+    property IssueTracker: TGittanIssueTracker read FIssueTracker write SetIssueTracker;
+    property OnIssueClick: TGittanIssueClickEvent read FOnIssueClick write FOnIssueClick;
   end;
 
 {** A line about a pull request for a list's detail: who opened it, how
@@ -388,6 +413,7 @@ uses
   Math, DateUtils, LazUTF8, StrUtils, InkMarkdown, gittan.textfit, gittan.theme, Forms;
 
 resourcestring
+  rsCardNote = 'Note';
   rsOneFile = '1 changed file';
   rsManyFiles = '%d changed files';
   rsClean = 'Working tree clean';
@@ -474,6 +500,7 @@ begin
   FActionHot := -1;
   FLinkHot := -1;
   FStepHot := -1;
+  FCardLinkHot := -1;
   FMoreHot := -1;
   FCommitHot := -1;
   FBehindHot := -1;
@@ -1303,13 +1330,14 @@ end;
 
 procedure TGittanSummary.SetCommit(const ACommit: TGittanCommitLine; const ABody: string);
 begin
-  if (FCommit.Hash = ACommit.Hash) and (FCommitBody = ABody) then
+  if (FCommit.Hash = ACommit.Hash) and (FCommitBody = ABody) and (FCommit.Note = ACommit.Note) then
     Exit;
   FCommit := ACommit;
   FCommitBody := ABody;
   FCardWidth := -1;
   FBackHot := False;
   FStepHot := -1;
+  FCardLinkHot := -1;
   UpdateHeight;
   Invalidate;
 end;
@@ -1388,9 +1416,43 @@ begin
     SetLength(FCardLines, NoteMaxLines);
     FCardLines[High(FCardLines)] := '…';
   end;
+  { The note (git notes), wrapped as the body is, under a heading. }
+  FCardNote := nil;
+  if FCommit.Note <> '' then
+  begin
+    Paras := TStringList.Create;
+    try
+      Paras.Text := FCommit.Note;
+      for i := 0 to Paras.Count - 1 do
+      begin
+        Para := TrimRight(Paras[i]);
+        if Para = '' then
+        begin
+          if (Length(FCardNote) > 0) and (FCardNote[High(FCardNote)] <> '') then
+          begin
+            SetLength(FCardNote, Length(FCardNote) + 1);
+            FCardNote[High(FCardNote)] := '';
+          end;
+        end
+        else
+          WrapText(C, Para, Inner, FCardNote);
+        if Length(FCardNote) > NoteMaxLines then
+          Break;
+      end;
+    finally
+      Paras.Free;
+    end;
+    if Length(FCardNote) > NoteMaxLines then
+    begin
+      SetLength(FCardNote, NoteMaxLines);
+      FCardNote[High(FCardNote)] := '…';
+    end;
+  end;
   FCardHeight := 2 * Px(NotePadY) + (Length(FCardSubject) + 1) * LineHeight + 2;
   if Length(FCardLines) > 0 then
     Inc(FCardHeight, 6 + Length(FCardLines) * LineHeight);
+  if Length(FCardNote) > 0 then
+    Inc(FCardHeight, 6 + (Length(FCardNote) + 1) * LineHeight);
   Inc(FCardHeight, Px(NoteGap) + Px(Pad) div 2);
 end;
 
@@ -1409,6 +1471,7 @@ begin
   FBackRect := Rect(0, 0, 0, 0);
   FStepRects[0] := Rect(0, 0, 0, 0);
   FStepRects[1] := Rect(0, 0, 0, 0);
+  FCardLinks := nil;
   if FCardHeight = 0 then
     Exit;
   Canvas.Font := Font;
@@ -1440,7 +1503,7 @@ begin
   Canvas.Font.Color := FText;
   for k := 0 to High(FCardSubject) do
   begin
-    Canvas.TextOut(X, At, FCardSubject[k]);
+    PaintCardLine(X, At, FCardSubject[k]);
     Inc(At, LineHeight);
   end;
   Canvas.Font.Style := [];
@@ -1465,10 +1528,103 @@ begin
   Canvas.Font.Color := FText;
   for k := 0 to High(FCardLines) do
   begin
-    Canvas.TextOut(X, At, FCardLines[k]);
+    PaintCardLine(X, At, FCardLines[k]);
     Inc(At, LineHeight);
   end;
+  { The note, under its heading, dimmed. }
+  if Length(FCardNote) > 0 then
+  begin
+    Inc(At, 6);
+    Canvas.Font.Color := FDim;
+    Canvas.Font.Style := [fsBold];
+    Canvas.TextOut(X, At, rsCardNote);
+    Canvas.Font.Style := [];
+    Inc(At, LineHeight);
+    Canvas.Font.Color := FText;
+    for k := 0 to High(FCardNote) do
+    begin
+      PaintCardLine(X, At, FCardNote[k]);
+      Inc(At, LineHeight);
+    end;
+  end;
   Inc(Y, FCardHeight);
+end;
+
+{ A line of the card at X, Y in the canvas's font, with the references
+  to issues in it in the link color (underlined under the mouse) and
+  noted in FCardLinks, in the order they are painted, so the index of
+  the one under the mouse holds from paint to paint. }
+procedure TGittanSummary.PaintCardLine(X, Y: integer; const AText: string);
+var
+  Links: TGittanIssueLinks;
+  i, p, n: integer;
+  Seg: string;
+  SavedColor: TColor;
+  SavedStyle: TFontStyles;
+begin
+  Links := FindIssueLinks(AText, FIssueTracker);
+  if Length(Links) = 0 then
+  begin
+    Canvas.TextOut(X, Y, AText);
+    Exit;
+  end;
+  SavedColor := Canvas.Font.Color;
+  SavedStyle := Canvas.Font.Style;
+  p := 1;
+  for i := 0 to High(Links) do
+  begin
+    if (Links[i].Start < p) or (Links[i].Len <= 0) then
+      Continue;
+    Seg := Copy(AText, p, Links[i].Start - p);
+    if Seg <> '' then
+    begin
+      Canvas.TextOut(X, Y, Seg);
+      Inc(X, Canvas.TextWidth(Seg));
+    end;
+    Seg := Copy(AText, Links[i].Start, Links[i].Len);
+    n := Length(FCardLinks);
+    SetLength(FCardLinks, n + 1);
+    Canvas.Font.Color := FLink;
+    if FCardLinkHot = n then
+      Canvas.Font.Style := SavedStyle + [fsUnderline];
+    FCardLinks[n].R := Rect(X, Y, X + Canvas.TextWidth(Seg), Y + Canvas.TextHeight('Xg'));
+    FCardLinks[n].Id := Links[i].Id;
+    Canvas.TextOut(X, Y, Seg);
+    Inc(X, Canvas.TextWidth(Seg));
+    Canvas.Font.Color := SavedColor;
+    Canvas.Font.Style := SavedStyle;
+    p := Links[i].Start + Links[i].Len;
+  end;
+  Seg := Copy(AText, p, MaxInt);
+  if Seg <> '' then
+    Canvas.TextOut(X, Y, Seg);
+end;
+
+function TGittanSummary.CardLinkAt(X, Y: integer): integer;
+var
+  i: integer;
+begin
+  Result := -1;
+  for i := 0 to High(FCardLinks) do
+    if PtInRect(FCardLinks[i].R, Point(X, Y)) then
+      Exit(i);
+end;
+
+procedure TGittanSummary.SetCardLinkHot(AValue: integer);
+begin
+  if FCardLinkHot = AValue then
+    Exit;
+  FCardLinkHot := AValue;
+  Invalidate;
+end;
+
+procedure TGittanSummary.SetIssueTracker(const AValue: TGittanIssueTracker);
+begin
+  if (FIssueTracker.Url = AValue.Url) and (FIssueTracker.LogRegex = AValue.LogRegex) then
+    Exit;
+  FIssueTracker := AValue;
+  FCardLinkHot := -1;
+  Invalidate;
 end;
 
 { Newer and Older, right-aligned at ARight on the line at Y: in the link
@@ -2365,10 +2521,11 @@ begin
   SetTotalsHot((FTotalsRect.Right > FTotalsRect.Left) and PtInRect(FTotalsRect, Point(X, Y)));
   SetBackHot(Assigned(FOnBackClick) and PtInRect(FBackRect, Point(X, Y)));
   SetStepHot(StepAt(X, Y));
+  SetCardLinkHot(CardLinkAt(X, Y));
   if Assigned(FOnBehindAction) then
     SetBehindHot(BehindAt(X, Y));
   if (FLinkHot >= 0) or (FActionHot >= 0) or FBackHot or (FStepHot >= 0) or (FBehindHot >= 0) or FTextLinkHot or
-    FDetailsHot or (FMoreHot >= 0) then
+    FDetailsHot or (FMoreHot >= 0) or (FCardLinkHot >= 0) then
     Cursor := crHandPoint
   else if not (FBranchHot or FBaseHot or FSyncHot or FTotalsHot or FReviewHot) then
     Cursor := crDefault;
@@ -2391,6 +2548,7 @@ begin
   SetTotalsHot(False);
   SetBackHot(False);
   SetStepHot(-1);
+  SetCardLinkHot(-1);
   SetBehindHot(-1);
 end;
 
@@ -2424,6 +2582,11 @@ begin
   if (Button = mbLeft) and (StepAt(X, Y) >= 0) then
   begin
     FOnCommitStep(Self, StepAt(X, Y) = 1);
+    Exit;
+  end;
+  if (Button = mbLeft) and Assigned(FOnIssueClick) and (CardLinkAt(X, Y) >= 0) then
+  begin
+    FOnIssueClick(Self, FCardLinks[CardLinkAt(X, Y)].Id);
     Exit;
   end;
   if (Button = mbLeft) and (FSyncRect.Right > FSyncRect.Left) and Assigned(FOnSyncClick) and

@@ -10,7 +10,7 @@ unit gittan.git;
 interface
 
 uses
-  Classes, SysUtils, gittan.graph, gittan.rebase, gittan.undo;
+  Classes, SysUtils, gittan.graph, gittan.rebase, gittan.undo, gittan.issuelinks;
 
 const
   {** Bits added to the kind in the Objects of ChangedPaths: the index
@@ -55,6 +55,9 @@ type
     Hash, Short, Subject, Author: string;
     Date: TDateTime;
     Unpushed: boolean;
+    {** The commit's note (git notes), trimmed; '' without one. Read by
+      CommitDetails alone. }
+    Note: string;
   end;
   TGittanCommitLines = array of TGittanCommitLine;
 
@@ -179,6 +182,9 @@ type
     {** The remotes' URLs as git reaches them, from ResolvedRemoteUrlsIn:
       which forge the repository is on (gittan.forge's ForgeClassFor). }
     RemoteUrls: string;
+    {** The issue tracker the config names (IssueTrackerIn), for the
+      links in commit messages. }
+    IssueTracker: TGittanIssueTracker;
     {** Where the branches are, from ReadRefState, for Undo. }
     RefState: TGittanRefState;
   end;
@@ -876,7 +882,19 @@ type
       parents and refs, those not pushed and not pulled marked, laid out
       with LayoutGraph; false before the first commit. }
     function GraphCommits(out ACommits: TGittanGraphCommits;
-      AMax: integer = 500): boolean;
+      AMax: integer = 500; AFirstParent: boolean = False;
+      ANoMerges: boolean = False): boolean;
+    {** Writes the files of ARef as an archive at AFile, in the format
+      the file's extension names (.zip, .tar, .tar.gz, .tgz), every path
+      under the folder APrefix when it is given ("name/"). }
+    function Archive(const ARef, AFile, APrefix: string): boolean;
+    {** Sets the note of commit AHash to AText (git notes), replacing
+      any; an empty text removes it. }
+    function SetNote(const AHash, AText: string): boolean;
+    {** Writes the issue tracker into the repository's config (bugtraq.url
+      and bugtraq.logregex, see gittan.issuelinks); an empty value
+      removes its key. }
+    function SetIssueTracker(const ATracker: TGittanIssueTracker): boolean;
     {** The commit ARef names as GraphCommits gives it (no lanes): for the
       commit menu of a commit shown outside the graph. False when git
       knows no such commit. }
@@ -1349,6 +1367,11 @@ function RemoteUrlsIn(const ADir: string): string;
   url.<base>.insteadOf rules of the config (ApplyInsteadOf), read with
   them in one git config. For threads. }
 function ResolvedRemoteUrlsIn(const ADir: string): string;
+
+{** The issue tracker the config of the repository in ADir names with
+  the bugtraq keys (ParseIssueTrackerConfig); empty without one. For
+  threads. }
+function IssueTrackerIn(const ADir: string): TGittanIssueTracker;
 
 {** AConfig's remote URLs (the lines `git config --get-regexp` prints for
   ^remote\..*\.url$ and ^url\..*\.insteadof$ together) each rewritten as
@@ -2244,6 +2267,18 @@ begin
     '^(remote\..*\.url|url\..*\.insteadof)$'], Output, Err) then
     Exit('');
   Result := ApplyInsteadOf(Output);
+end;
+
+{ -z, since bugtraq.logregex may hold two lines. git exits with 1 when
+  no key matches, which is no tracker. }
+function IssueTrackerIn(const ADir: string): TGittanIssueTracker;
+var
+  Output, Err: string;
+begin
+  if RunGitIn(ADir, ['config', '-z', '--get-regexp', '^bugtraq\.'], Output, Err) then
+    Result := ParseIssueTrackerConfig(Output)
+  else
+    Result := ParseIssueTrackerConfig('');
 end;
 
 function ApplyInsteadOf(const AConfig: string): string;
@@ -6142,6 +6177,7 @@ begin
     List.Free;
   end;
   ASnap.RemoteUrls := ResolvedRemoteUrlsIn(FRoot);
+  ASnap.IssueTracker := IssueTrackerIn(FRoot);
   ReadRefState(ASnap.RefState);
   Result := ASnap.Ok;
 end;
@@ -6455,7 +6491,7 @@ const
   GraphLogArgs: array[0..9] of string = ('log', '--no-color', '--decorate=full',
     '--decorate-refs=HEAD', '--decorate-refs=refs/heads/', '--decorate-refs=refs/remotes/',
     '--decorate-refs=refs/tags/', '--decorate-refs=refs/bisect/', '-z',
-    '--format=%H%x1f%P%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%s%x1f%b');
+    '--format=%H%x1f%P%x1f%h%x1f%an%x1f%ct%x1f%D%x1f%s%x1f%b%x1f%N');
 
 { The commits of a log in GraphLogArgs' format, those whose ids are in
   AAhead or ABehind (rev-list output) marked not pushed or not pulled. }
@@ -6489,14 +6525,23 @@ begin
       Refs := ParseGraphRefs(Fields[5]);
       Subject := Fields[6];
       Body := TrimRight(Fields[7]);
+      if Length(Fields) > 8 then
+        Note := Trim(AdjustLineBreaks(Fields[8], tlbsLF))
+      else
+        Note := '';
       Unpushed := Pos(Hash, AAhead) > 0;
       Unpulled := Pos(Hash, ABehind) > 0;
     end;
   end;
 end;
 
+{ With AFirstParent git follows only the first parent of a merge, so a
+  merged branch's commits are left out; the other parents are cut from
+  each commit too, since LayoutGraph would keep a lane open for them to
+  the end. With ANoMerges the merges are left out, and their children
+  name parents the list lacks; the graph shows such a list flat. }
 function TGittanRepo.GraphCommits(out ACommits: TGittanGraphCommits;
-  AMax: integer): boolean;
+  AMax: integer; AFirstParent: boolean; ANoMerges: boolean): boolean;
 var
   Output, Ahead, Behind: string;
   Args: array of string;
@@ -6506,8 +6551,12 @@ begin
   SetLength(Args, Length(GraphLogArgs));
   for i := 0 to High(GraphLogArgs) do
     Args[i] := GraphLogArgs[i];
-  Args := Concat(Args, ['--topo-order', '-n', IntToStr(AMax), '--branches', '--remotes',
-    '--tags', 'HEAD']);
+  Args := Concat(Args, ['--topo-order', '-n', IntToStr(AMax)]);
+  if AFirstParent then
+    Args := Concat(Args, ['--first-parent']);
+  if ANoMerges then
+    Args := Concat(Args, ['--no-merges']);
+  Args := Concat(Args, ['--branches', '--remotes', '--tags', 'HEAD']);
   Result := (FRoot <> '') and RunGit(FRoot, Args, Output);
   if not Result then
     Exit;
@@ -6516,7 +6565,63 @@ begin
   if not RunGit(FRoot, ['rev-list', '-n', IntToStr(AMax), 'HEAD..@{upstream}'], Behind) then
     Behind := '';
   ACommits := ParseGraphLog(Output, Ahead, Behind);
+  if AFirstParent then
+    for i := 0 to High(ACommits) do
+      if Length(ACommits[i].Parents) > 1 then
+        SetLength(ACommits[i].Parents, 1);
   LayoutGraph(ACommits);
+end;
+
+{ git names the format after the extension of -o's file. }
+function TGittanRepo.Archive(const ARef, AFile, APrefix: string): boolean;
+var
+  Output: string;
+  Args: TStringArray;
+begin
+  if (FRoot = '') or (ARef = '') or (AFile = '') then
+    Exit(False);
+  Args := ['archive', '-o', AFile];
+  if APrefix <> '' then
+    Args := Concat(Args, ['--prefix=' + APrefix]);
+  Result := RunGit(FRoot, Concat(Args, ['--end-of-options', ARef]), Output);
+end;
+
+function TGittanRepo.SetNote(const AHash, AText: string): boolean;
+var
+  Output: string;
+begin
+  if (FRoot = '') or (AHash = '') then
+    Exit(False);
+  if Trim(AText) = '' then
+    Result := RunGit(FRoot, ['notes', 'remove', '--ignore-missing', AHash], Output)
+  else
+    Result := RunGit(FRoot, ['notes', 'add', '-f', '-m', AText, AHash], Output);
+end;
+
+{ RunTool refuses an empty argument, so an empty value unsets the key;
+  unsetting a key that is not there fails with 5, which is no failure. }
+function TGittanRepo.SetIssueTracker(const ATracker: TGittanIssueTracker): boolean;
+
+  function SetKey(const AKey, AValue: string): boolean;
+  var
+    Output: string;
+  begin
+    if Trim(AValue) = '' then
+    begin
+      Result := RunGit(FRoot, ['config', '--local', '--unset-all', AKey], Output);
+      { Unsetting a key that is not there fails, and is what was asked. }
+      if not Result then
+        Result := not RunGit(FRoot, ['config', '--local', '--get-all', AKey], Output);
+    end
+    else
+      Result := RunGit(FRoot, ['config', '--local', AKey, Trim(AValue)], Output);
+  end;
+
+begin
+  if FRoot = '' then
+    Exit(False);
+  Result := SetKey('bugtraq.url', ATracker.Url) and
+    SetKey('bugtraq.logregex', Trim(AdjustLineBreaks(ATracker.LogRegex, tlbsLF)));
 end;
 
 { --end-of-options, so a ref that starts with a dash is no option. }
@@ -7255,12 +7360,14 @@ begin
   ACommit := Default(TGittanCommitLine);
   ABody := '';
   Result := (FRoot <> '') and (AHash <> '') and RunGit(FRoot, ['log', '-1', '--no-color',
-    '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%s%x1f%b', AHash, '--'], Output);
+    '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%s%x1f%b%x1f%N', AHash, '--'], Output);
   if not Result then
     Exit;
-  Fields := Output.Split([#31], 6);
+  Fields := Output.Split([#31], 7);
   if Length(Fields) < 6 then
     Exit(False);
+  if Length(Fields) > 6 then
+    ACommit.Note := Trim(AdjustLineBreaks(Fields[6], tlbsLF));
   ACommit.Hash := Fields[0];
   ACommit.Short := Fields[1];
   ACommit.Author := Fields[2];

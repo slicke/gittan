@@ -122,6 +122,8 @@ begin
     S.SubmodulesOpen := False;
     S.TickHintHidden := True;
     S.GraphTipHidden := True;
+    S.GraphFirstParent := True;
+    S.GraphNoMerges := True;
     S.CommitOpen := False;
     S.CommitDraft := 'Subject = x'#10#10'C:\new\nope\\'#10;
     S.CommitDraftRepo := '/tmp/a';
@@ -181,6 +183,8 @@ begin
     AssertFalse(S.SubmodulesOpen);
     AssertTrue(S.TickHintHidden);
     AssertTrue(S.GraphTipHidden);
+    AssertTrue(S.GraphFirstParent);
+    AssertTrue(S.GraphNoMerges);
     AssertFalse(S.CommitOpen);
     AssertEquals('Subject = x'#10#10'C:\new\nope\\'#10, S.CommitDraft);
     AssertEquals('/tmp/a', S.CommitDraftRepo);

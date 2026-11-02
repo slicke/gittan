@@ -33,6 +33,7 @@ uses
   gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
   gittan.rebase, gittan.worktrees, gittan.gitflow, gittan.repolist, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
   gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, gittan.merge, gittan.mergeview,
+  gittan.notedlg, gittan.issuelinks,
   ATSynEdit_Gaps, md5;
 
 type
@@ -285,6 +286,11 @@ type
       in FForgeCaptions (UpdateForgeItems). }
     FForge: TGittanForge;
     FRemoteUrls: string;
+    { The issue tracker the repository's config names (the snapshot's),
+      whose references in commit messages the summary's card links
+      (umain.issues.inc); File > Issue Tracker... sets it. }
+    FIssueTracker: TGittanIssueTracker;
+    FIssueTrackerItem: TMenuItem;
     FForgeItems: array of TMenuItem;
     FForgeCaptions: array of string;
     { The AI features (umain.ai.inc, gittan.ai), shown only once the
@@ -906,6 +912,9 @@ type
     { The commit graph, in the middle of the form, from the status bar's
       ahead/behind counts or View > Commit Graph. }
     FGraph: TGittanCommitGraph;
+    { How many commits the graph was last read with, for a reload with
+      other toggles (GraphReload). }
+    FGraphLoadLimit: integer;
     { The notice over the form while a fetch, pull or push runs: at once
       when a pre-push hook has to run first, else after NoticeDelay; and
       what a failed one or a failed commit said. }
@@ -1796,7 +1805,9 @@ type
     procedure SummarySelectCommit(Sender: TObject; const AHash: string);
     procedure BranchPopupPick(Sender: TObject; AIndex: integer);
     procedure ShowCommitGraph(const AFilter: string = ''; const AKeep: string = '');
+    function LoadGraphCommits(ALimit: integer): TGittanGraphCommits;
     procedure GraphMore(Sender: TObject);
+    procedure GraphReload(Sender: TObject);
     procedure GraphPathCommits(Sender: TObject; const APath: string; AHashes: TStrings);
     procedure GraphChangeCommits(Sender: TObject; const AChanges: TStringArray);
     procedure ChangeJobDone(Sender: TObject);
@@ -2075,6 +2086,12 @@ type
     procedure GraphContext(Sender: TObject; const ACommit: TGittanGraphCommit;
       const AScreenPos: TPoint);
     procedure CommitMenuClick(Sender: TObject);
+    procedure ExportArchive(const AHash, AName: string);
+    procedure EditNoteAsk(const ACommit: TGittanGraphCommit);
+    procedure RevealFile(const AFile: string);
+    procedure MenuIssueTrackerClick(Sender: TObject);
+    procedure SummaryIssueClick(Sender: TObject; const AId: string);
+    procedure UpdateIssueTracker;
     function ContinueMode: boolean;
     function StrayRebase: boolean;
     function OperationLabel: string;
@@ -2876,6 +2893,30 @@ resourcestring
   rsCaCompare = 'Compare with Working Tree';
   rsCaBrowse = 'Browse Files...';
   rsCaPatch = 'Create Patch...';
+  rsCaArchive = 'Export Files as Archive...';
+  rsArchiveTitle = 'Export Files as Archive';
+  rsArchiveFilter = 'Zip archive (*.zip)|*.zip|Compressed tar archive (*.tar.gz)|*.tar.gz';
+  rsArchiveWritten = 'Wrote %s';
+  rsArchiveFailed = 'Could not write the archive';
+  rsCaNoteAdd = 'Add Note...';
+  rsCaNoteEdit = 'Edit Note...';
+  rsNoteSaved = 'Saved the note on %s';
+  rsNoteRemoved = 'Removed the note from %s';
+  rsNoteFailed = 'Could not write the note';
+  rsIssueTrackerItem = 'Issue Trac&ker...';
+  rsIssueTrackerTitle = 'Issue Tracker';
+  rsIssueTrackerNote = 'References to issues in commit messages become links in the ' +
+    'commit''s card. The address has %BUGID% where the issue''s id goes. The regular ' +
+    'expression finds the references; its first group is the id. With a second ' +
+    'expression the first finds each reference ("Fixes #12 and #13") and the second the ' +
+    'ids within it. Kept in the repository''s config as bugtraq.url and bugtraq.logregex, ' +
+    'which other git clients read too; leave everything empty to take it out.';
+  rsIssueTrackerUrl = 'Address of an issue';
+  rsIssueTrackerRegex = 'Regular expression';
+  rsIssueTrackerIdRegex = 'Expression for the ids within a reference (optional)';
+  rsIssueTrackerSaved = 'Issue tracker saved';
+  rsIssueTrackerFailed = 'Could not save the issue tracker';
+  rsIssueNoAddress = 'No address is set for issue %s: File > Issue Tracker...';
   rsCaPatchSeries = 'Create Patch Series with Marked %s...';
   rsBrowseTitle = 'Files at %s';
   rsCaMark = 'Mark for Comparison';
@@ -4160,6 +4201,7 @@ begin
   FSummary.OnTotalsClick := @SummaryTotalsClick;
   FSummary.OnBehindAction := @SummaryBehindAction;
   FSummary.OnOpenUrl := @SummaryOpenUrl;
+  FSummary.OnIssueClick := @SummaryIssueClick;
   FSummary.OnFileExists := @RepoFileExists;
   FSummary.ForgeName := ForgeName;
   FSummary.OnReviewClick := @SummaryReviewClick;
@@ -4251,6 +4293,7 @@ begin
   FGraph.OnTipDismiss := @GraphTipDismiss;
   FGraph.OnDrop := @GraphDrop;
   FGraph.OnMore := @GraphMore;
+  FGraph.OnReload := @GraphReload;
   FGraph.OnPathCommits := @GraphPathCommits;
   FGraph.OnChangeCommits := @GraphChangeCommits;
   FCommitPopup := TPopupMenu.Create(Self);
@@ -5518,6 +5561,7 @@ begin
   FFetchItem := AddItem(FileMenu, rsFetchMenu, ShortCut(VK_F, [ssModifier, ssAlt]),
     @MenuFetchClick);
   FRemotesItem := AddItem(FileMenu, rsRemotesItem, 0, @MenuRemotesClick);
+  FIssueTrackerItem := AddItem(FileMenu, rsIssueTrackerItem, 0, @MenuIssueTrackerClick);
   Sub := AddItem(FileMenu, rsSubmodulesMenu, 0, nil);
   FSubUpdateAllItem := AddItem(Sub, rsSubUpdateAllItem, 0, @MenuSubUpdateAllClick);
   FSubSyncAllItem := AddItem(Sub, rsSubSyncAllItem, 0, @MenuSubSyncAllClick);
@@ -7237,6 +7281,8 @@ begin
     FRemoteUrls := ASnap.RemoteUrls;
     ReFindForge;
   end;
+  FIssueTracker := ASnap.IssueTracker;
+  UpdateIssueTracker;
   { The pull request is looked up for the branch HEAD is on, the detached
     id during a rebase, so this runs before the rebase branch stands in. }
   StartPullJob(False);
@@ -8600,6 +8646,7 @@ const
 {$I umain.translations.inc}
 {$I umain.conflicts.inc}
 {$I umain.commitactions.inc}
+{$I umain.issues.inc}
 {$I umain.branches.inc}
 {$I umain.rebase.inc}
 {$I umain.stash.inc}
