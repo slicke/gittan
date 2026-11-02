@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Linux on arm64, such as Raspberry Pi OS (64-bit): a .deb, an .rpm and a .tar.gz beside the amd64 ones.
+
+### Fixed
+- The macOS disk image holds only Gittan and the Applications link; it also had a linux and a windows folder.
+
 ## 0.11 (build-136, 2026-11-02)
 
 ### Added

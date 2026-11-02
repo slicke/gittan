@@ -31,8 +31,9 @@ Packaged builds for every platform are on the [Releases page](https://github.com
 | --- | --- |
 | macOS (Apple Silicon) | `Gittan-macos-silicon.dmg` |
 | macOS (Intel) | `Gittan-macos-intel.dmg` |
-| Windows (x64) | `Gittan-windows-x64-setup.exe`, or `Gittan-windows-x64.zip` without installing |
+| Windows (x64; Windows 11 on Arm runs it emulated) | `Gittan-windows-x64-setup.exe`, or `Gittan-windows-x64.zip` without installing |
 | Linux (amd64, GTK 3) | `Gittan-linux-amd64.deb`, `Gittan-linux-x86_64.rpm`, or `Gittan-linux-amd64.tar.gz` without installing |
+| Linux (arm64, GTK 3; Raspberry Pi OS 64-bit) | `Gittan-linux-arm64.deb`, `Gittan-linux-aarch64.rpm`, or `Gittan-linux-arm64.tar.gz` without installing |
 
 Gittan needs git 2.30 or later on your `PATH`. The macOS build is signed ad hoc, so macOS blocks it at first: drag it to Applications, then run `xattr -cr /Applications/Gittan.app` in Terminal. The GitHub features (pull requests and review comments) use the `gh` CLI when it is installed and signed in. The AI features use [Claude Code](https://code.claude.com/docs) or [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli) with your own sign-in.
 
