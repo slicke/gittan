@@ -414,6 +414,10 @@
   .aicard { margin-top: 10px; font-size: 12.5px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); border-left: 3px solid #8b5cf6; background: var(--bg-elev); color: var(--fg-muted); }
   .aicard b { color: var(--fg); font-weight: 650; }
   .aicard .who { color: #8b5cf6; font-weight: 600; margin-right: 6px; }
+  .aicard.ext { border-left-color: var(--accent); }
+  .aicard.ext .who { color: var(--accent); }
+  .mini.code div { white-space: pre; color: var(--fg); }
+  .mini.code .c { color: var(--fg-faint); }
   .uipills { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
   .uipills span { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--bg-elev); color: var(--fg-muted); }
   .uipills .hot { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
@@ -490,7 +494,7 @@
   .dl .os svg { width: 22px; height: 22px; fill: var(--fg); }
   .dl .file { color: var(--fg-muted); font-size: 13.5px; margin: 6px 0 22px; }
   .dl .btn { margin-top: auto; }
-  .dl .alt { margin-top: 10px; font-size: 13.5px; text-align: center; }
+  .dl .more { margin-top: 10px; min-height: 3em; font-size: 13.5px; line-height: 1.5; text-align: center; color: var(--fg-muted); }
   .dl .card.mine { border-color: color-mix(in srgb, var(--green) 55%, var(--line)); box-shadow: 0 0 0 3px var(--tint-green), var(--shadow-sm); }
   .dl .card.mine .btn { background: var(--ink); border-color: var(--ink); color: var(--ink-fg); }
   .dl .yours { display: none; margin-left: auto; font-size: 11.5px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--green); }
@@ -576,7 +580,7 @@
       <source srcset="assets/logo-dark.svg" media="(prefers-color-scheme: dark)" data-dark>
       <img class="logo" src="assets/logo-light.svg" alt="Gittan, Git Tree Analyzer &amp; Navigator" width="437" height="133">
     </picture>
-    <div><a class="pill" href="#new"><b>New</b> Tabs, a merge editor, a command palette and Undo <span aria-hidden="true">→</span></a></div>
+    <div><a class="pill" href="#new"><b>New</b> Extensions, a merge editor, a command palette and Undo <span aria-hidden="true">→</span></a></div>
     <h1>Understand every change.<br><em>Then commit it.</em></h1>
     <span class="strandline" aria-hidden="true"><svg class="strand"><use href="#strand"/></svg></span>
     <p class="tag">Gittan is a free, native git client built around the diff. See what you changed as you change it, who wrote each line and the history behind it, then commit, sync and merge without leaving it.</p>
@@ -611,6 +615,11 @@
     <h2>What's <em>new</em></h2>
     <p class="lead">Gittan has grown a lot this autumn. These are the larger additions; the tour and the workflow below show most of them in place.</p>
     <div class="facts c4">
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M5 8h4V7a2 2 0 1 1 4 0v1h4v4h1a2 2 0 1 1 0 4h-1v4H5z"/></svg></div>
+        <h3>Extensions</h3>
+        <p>A JavaScript file in the extensions folder adds commands to the menus and the command palette, can stop a commit, a push or a pull with a reason, and puts cards under the lines of the change view. Gittan asks before one may read your repositories, go to the network or run programs. <a href="#extensions">More below</a>.</p>
+      </div>
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M3 11h18"/><path d="M8 7V4h6v3"/></svg></div>
         <h3>Tabs</h3>
@@ -660,11 +669,6 @@
         <div class="ic"><svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10"/><path d="M16 12H9a3 3 0 0 0-3 3"/></svg></div>
         <h3>Fixup, and drag to merge</h3>
         <p>Fixup with the Ticked Files on a commit makes a fixup! commit for it, and Fold It In… rebases it in. Drag a commit onto your branch's row in the graph to merge it.</p>
-      </div>
-      <div class="reveal">
-        <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3v9h9"/><path d="M20.5 15A9 9 0 1 1 9 3.5"/></svg></div>
-        <h3>Composition and change:</h3>
-        <p>The Repository page counts the code, test, documentation and configuration files and their lines. The graph's search takes <code>change:</code> for the commits that add or remove a text.</p>
       </div>
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2z"/></svg></div>
@@ -1073,6 +1077,24 @@
           <div class="aicard"><span class="who">✦ llama3.1</span><b>Bug</b> · Two fetches race, and the older answer can win.</div>
         </div>
       </div>
+      <div class="story wide reveal" id="extensions">
+        <div>
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="M5 8h4V7a2 2 0 1 1 4 0v1h4v4h1a2 2 0 1 1 0 4h-1v4H5z"/></svg></div>
+          <h3>Extensions</h3>
+          <p>An extension is one JavaScript file in Gittan's extensions folder (Extensions &gt; Open Extensions Folder). It can add commands to the Extensions menu, the command palette and the file and editor menus, listen when a repository opens or changes and before and after a commit, a push or a pull, and stop one with a reason. It can read the repository's files, diffs, blame and history, run git and other programs, make web requests, and put cards under the lines of the change view, with a settings page of its own. The manifest at the top of the file names what it needs beyond notes, timers and its own storage, and Gittan asks before it loads one that wants to read your repositories, go to the network, run programs or change Gittan's settings. The <a href="https://github.com/slicke/gittan/tree/main/docs/extensions">guide</a> has the whole API, type declarations for your editor and three samples: a commit lint, a shortlog and a push webhook.</p>
+        </div>
+        <div class="art" aria-hidden="true">
+          <div class="mini code">
+            <div><span class="c">/* @name Commit Lint   @perms data */</span></div>
+            <div>Gittan.on("commit.before", function (p) {</div>
+            <div>  var subject = p.message.split("\n")[0];</div>
+            <div>  if (subject.length &gt; 72)</div>
+            <div>    return "Keep the subject under 72.";</div>
+            <div>});</div>
+          </div>
+          <div class="aicard ext"><span class="who">Commit Lint</span><b>Commit stopped</b> · Keep the subject under 72.</div>
+        </div>
+      </div>
     </div>
 
     <div class="facts c4">
@@ -1412,21 +1434,26 @@
         <div class="os"><svg viewBox="0 0 24 24"><path d="M16.4 12.6c0-2.6 2.1-3.8 2.2-3.9-1.2-1.8-3.1-2-3.7-2-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9-1.7 0-3.3 1-4.2 2.6-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8 1.6 0 2 .8 3.4.8 1.4 0 2.3-1.3 3.1-2.5 1-1.4 1.4-2.8 1.4-2.9-.1 0-2.7-1-2.7-4.1zM13.9 5c.7-.9 1.2-2 1.1-3.2-1 0-2.3.7-3 1.6-.7.8-1.2 2-1.1 3.1 1.1.1 2.3-.6 3-1.5z"/></svg>macOS<span class="yours">Your system</span></div>
         <div class="file">Apple Silicon · Gittan-macos-silicon.dmg</div>
         <a class="btn" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-macos-silicon.dmg">Download .dmg</a>
-        <a class="alt" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-macos-intel.dmg">Intel Mac? Gittan-macos-intel.dmg</a>
+        <div class="more">Intel Mac? <a data-short="Intel" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-macos-intel.dmg">Gittan-macos-intel.dmg</a></div>
       </div>
       <div class="card" data-os="win">
         <div class="os"><svg viewBox="0 0 24 24"><path d="M3 5.1 10.4 4v7.1H3zm8.3-1.2L21 2.5v8.6h-9.7zM3 12.9h7.4V20L3 18.9zm8.3 0H21v8.6l-9.7-1.4z"/></svg>Windows<span class="yours">Your system</span></div>
-        <div class="file">x64 · Gittan-windows-x64.zip</div>
-        <a class="btn" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-windows-x64.zip">Download .zip</a>
+        <div class="file">x64 · Gittan-windows-x64-setup.exe</div>
+        <a class="btn" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-windows-x64-setup.exe">Download installer</a>
+        <div class="more">Without installing: <a data-short=".zip" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-windows-x64.zip">Gittan-windows-x64.zip</a></div>
       </div>
       <div class="card" data-os="linux">
         <div class="os"><svg viewBox="0 0 24 24"><path d="M12 2c-2.2 0-3.6 1.8-3.6 4.4 0 1.4.3 2.3-.6 3.6C6.5 11.8 5 14 5 16.3c0 .6.1 1.1.3 1.6-.6.4-1.6.8-1.6 1.7 0 1.2 1.9 1.1 3.1 1.6 1.1.5 2 .8 2.9.4.6-.3.9-.8 1-1.2h2.6c.1.4.4.9 1 1.2.9.4 1.8.1 2.9-.4 1.2-.5 3.1-.4 3.1-1.6 0-.9-1-1.3-1.6-1.7.2-.5.3-1 .3-1.6 0-2.3-1.5-4.5-2.8-6.3-.9-1.3-.6-2.2-.6-3.6C15.6 3.8 14.2 2 12 2zm-1.6 4.2c.5 0 .8.6.8 1.2s-.3 1.1-.8 1.1-.8-.5-.8-1.1.3-1.2.8-1.2zm3.2 0c.5 0 .8.6.8 1.2s-.3 1.1-.8 1.1-.8-.5-.8-1.1.3-1.2.8-1.2zM12 9.3c.9 0 2 .6 2 1 0 .5-1.1 1.2-2 1.2s-2-.7-2-1.2c0-.4 1.1-1 2-1z"/></svg>Linux<span class="yours">Your system</span></div>
-        <div class="file">amd64, GTK 3 · Gittan-linux-amd64.tar.gz</div>
-        <a class="btn" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-linux-amd64.tar.gz">Download .tar.gz</a>
+        <div class="file">amd64, GTK 3 · Gittan-linux-amd64.deb</div>
+        <a class="btn" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-linux-amd64.deb">Download .deb</a>
+        <div class="more">
+          <div>Or <a data-short=".rpm" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-linux-x86_64.rpm">.rpm</a> · <a data-short=".tar.gz" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-linux-amd64.tar.gz">.tar.gz</a></div>
+          <div data-arch="arm64">arm64, Raspberry Pi: <a data-short=".deb" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-linux-arm64.deb">.deb</a> · <a data-short=".rpm" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-linux-aarch64.rpm">.rpm</a> · <a data-short=".tar.gz" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-linux-arm64.tar.gz">.tar.gz</a></div>
+        </div>
       </div>
     </div>
     <div class="note">
-      Gittan runs the <code>git</code> command line tool, so git 2.30 or later must be installed and on your PATH. On Linux it uses GTK 3, which every common desktop already has. The macOS build is signed ad hoc, so macOS blocks it at first: drag it to Applications, then run <code>xattr -cr /Applications/Gittan.app</code> in Terminal. Older builds and release notes are on the <a href="https://github.com/slicke/gittan/releases">Releases page</a>. Every push to main is also built on <a href="https://github.com/slicke/gittan/actions/workflows/build.yml?query=branch%3Amain+is%3Asuccess">GitHub Actions</a>, where the artifacts of the newest run are the current development build.
+      Gittan runs the <code>git</code> command line tool, so git 2.30 or later must be installed and on your PATH. The Windows installer needs no administrator for yourself alone, and adds Open in Gittan to folders' menu and the <code>gittan</code> command; it is not signed, so SmartScreen warns at first: More info, then Run anyway. The x64 build runs on Windows 11 on Arm too, emulated. On Linux the .deb (Debian, Ubuntu, Raspberry Pi OS 64-bit) and the .rpm (Fedora, openSUSE) put Gittan in the desktop's menu with its icon, and the .tar.gz runs where you unpack it; all use GTK 3, which every common desktop already has. The macOS build is signed ad hoc, so macOS blocks it at first: drag it to Applications, then run <code>xattr -cr /Applications/Gittan.app</code> in Terminal. Older builds and release notes are on the <a href="https://github.com/slicke/gittan/releases">Releases page</a>. Every push to main is also built on <a href="https://github.com/slicke/gittan/actions/workflows/build.yml?query=branch%3Amain+is%3Asuccess">GitHub Actions</a>, where the artifacts of the newest run are the current development build.
     </div>
   </div>
 </section>
@@ -1550,11 +1577,20 @@ make run
     var card = document.querySelector('.dl [data-os="' + os + '"]');
     card.classList.add('mine');
     var get = document.getElementById('get');
-    get.href = card.querySelector('a').href;
+    var main = card.querySelector('.btn');
+    var label = card.querySelector('.file').textContent.split(' · ')[0];
+    var others = Array.prototype.filter.call(card.querySelectorAll('a[data-short]'), function (a) { return !a.closest('[data-arch]'); });
+    // An arm64 Linux gets the arm64 files; a Mac's user agent says Intel either way, so the Mac is left alone.
+    var arm = card.querySelector('[data-arch="arm64"]');
+    if (arm && /aarch64|arm64|armv8/i.test(ua + ' ' + plat)) {
+      others = Array.prototype.slice.call(arm.querySelectorAll('a[data-short]'));
+      main = others.shift();
+      label = label.replace('amd64', 'arm64');
+    }
+    get.href = main.href;
     get.querySelector('span').textContent = 'Download for ' + names[os];
-    document.getElementById('get-sub').innerHTML =
-      card.querySelector('.file').textContent.split(' · ')[0] +
-      (os === 'mac' ? ' · <a href="' + card.querySelector('.alt').href + '">Intel</a>' : '') +
+    document.getElementById('get-sub').innerHTML = label +
+      others.map(function (a) { return ' · <a href="' + a.href + '">' + a.dataset.short + '</a>'; }).join('') +
       ' · free and open source · <a href="#download">Other platforms</a>';
   }
 
