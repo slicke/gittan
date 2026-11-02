@@ -31,7 +31,7 @@ uses
   gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   fpjson, gittan.ext.engine, gittan.ext.registry, gittan.ext.api, gittan.ext.loader,
   gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
-  gittan.rebase, gittan.worktrees, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
+  gittan.rebase, gittan.worktrees, gittan.gitflow, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
   gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, gittan.merge, gittan.mergeview,
   ATSynEdit_Gaps, md5;
 
@@ -846,6 +846,15 @@ type
       the worktrees it shows, the menu of one and the one it is for. }
     FWorktreesItem: TMenuItem;
     FWorktreePopup: TGittanPopupList;
+    { Git flow (umain.gitflow.inc): Branch > Git Flow, the setup and the
+      branches it was last filled with (a Finish item's tag indexes
+      them), the kind a start asks a name for, and the branch of git
+      flow the branch list's menu is for. }
+    FFlowMenu: TMenuItem;
+    FFlow: TGittanFlow;
+    FFlowBranches: TGittanFlowBranches;
+    FFlowAskKind: TGittanFlowKind;
+    FMenuFlowBranch: TGittanFlowBranch;
     { The command palette (umain.palette.inc): its item in the Go menu,
       the list and the action of each of its rows, by name. }
     FPaletteItem: TMenuItem;
@@ -2007,6 +2016,15 @@ type
     procedure WorktreeMenuClick(Sender: TObject);
     procedure AddWorktreeAsk;
     procedure RemoveWorktreeAsk(const AWorktree: TGittanWorktree);
+    procedure FillFlowMenu;
+    procedure FlowMenuClick(Sender: TObject);
+    function CheckFlowSetup(const AValues: array of string): string;
+    procedure FlowSetupAsk;
+    function CheckFlowStart(const AValues: array of string): string;
+    procedure FlowStartAsk(AKind: TGittanFlowKind);
+    procedure FlowFinishAsk(const ABranch: TGittanFlowBranch);
+    function FlowBranchOf(const ABranch: string; out AFlowBranch: TGittanFlowBranch): boolean;
+    function FlowFinishCaption(const ABranch: TGittanFlowBranch): string;
     procedure StashChangesAsk(AChosenOnly: boolean);
     procedure ApplyStash(AStash: TGittanStash; APop: boolean);
     procedure DropStashAsk(AStash: TGittanStash);
@@ -2993,6 +3011,55 @@ resourcestring
   rsSubmodulesHeader = 'Submodules';
   rsReflogItem = 'Re&flog...';
   rsWorktreesItem = '&Worktrees...';
+  rsFlowMenu = 'Git &Flow';
+  rsFlowFeature = 'Feature';
+  rsFlowRelease = 'Release';
+  rsFlowHotfix = 'Hotfix';
+  rsFlowSetupItem = 'Set Up Git Flow...';
+  rsFlowSettingsItem = 'Git Flow Settings...';
+  rsFlowStartItem = 'Start %s...';
+  rsFlowFinishItem = 'Finish %s %s...';
+  rsFlowSetupTitle = 'Git Flow';
+  rsFlowSetupNote = 'Features branch off the development branch and are merged back into it. ' +
+    'Releases branch off it too, and hotfixes off the production branch; both are merged into ' +
+    'the two branches and tagged. The setup goes in the repository''s config, where the ' +
+    'git-flow command reads it too.';
+  rsFlowMasterPrompt = 'Production branch';
+  rsFlowDevelopPrompt = 'Development branch (made from the production branch if new)';
+  rsFlowFeaturePrompt = 'Prefix of feature branches';
+  rsFlowReleasePrompt = 'Prefix of release branches';
+  rsFlowHotfixPrompt = 'Prefix of hotfix branches';
+  rsFlowTagPrompt = 'Prefix of version tags (may be empty)';
+  rsFlowSetupAction = 'Set Up';
+  rsFlowSameBranch = 'The production and the development branch must be two branches.';
+  rsFlowNoBranch = 'There is no branch %s.';
+  rsFlowBadPrefix = 'Every kind of branch needs a prefix a branch name can start with.';
+  rsFlowBadTagPrefix = 'A tag name cannot start with that.';
+  rsFlowSetUp = 'Git flow is set up: %s for production, %s for development';
+  rsFlowSetupFailed = 'Could not set up git flow';
+  rsFlowTagTaken = 'The tag %s is there already.';
+  rsFlowUnderWay = '%s is under way; finish it first';
+  rsFlowStartTitle = 'Start %s';
+  rsFlowStartPrompt = 'Name, after %s; the branch is made from %s and switched to';
+  rsFlowStartTagNote = 'Finishing it tags the production branch with the name.';
+  rsFlowStartTagNotePrefix = 'Finishing it tags the production branch with the name after %s.';
+  rsFlowStartAction = 'Start';
+  rsFlowStarted = 'Started %s from %s';
+  rsFlowStartFailed = 'Could not start the branch';
+  rsFlowIntoTwo = '%s and %s';
+  rsFlowFinishTitle = 'Finish %s';
+  rsFlowFinishFeature = 'Merge %s into %s and delete it? You end up on %s.';
+  rsFlowFinishTagged = 'Merge %s into %s, tag %s as %s and delete the branch? You end up on %s.';
+  rsFlowFinishAction = 'Finish';
+  rsFlowTagMessage = '%s %s';
+  rsFlowTagMessagePrompt = 'Message of the tag %s (empty for a plain tag)';
+  rsFlowFinished = 'Finished %s: merged into %s';
+  rsFlowFinishedTagged = 'Finished %s: merged into %s and tagged %s';
+  rsFlowPushNote = 'Nothing is pushed yet: push %s, and the tag %s with Branch > Push Tags.';
+  rsFlowConflicts = 'Merging %s into %s stopped with conflicts';
+  rsFlowConflictsDetail = 'Resolve them and commit the merge, then finish %s again from ' +
+    'Branch > Git Flow to go on.';
+  rsFlowFinishFailed = 'Could not finish %s';
   rsWtHeader = 'Worktrees';
   rsWtAddRow = 'Add Worktree...';
   rsWtFilter = 'Filter worktrees';
@@ -5474,6 +5541,8 @@ begin
   FCompareBackItem.Tag := Ord(blCurrentSince);
   BranchMenu.Add(NewLine);
   FUpstreamItem := AddItem(BranchMenu, '', 0, @MenuUpstreamClick);
+  FFlowMenu := AddItem(BranchMenu, rsFlowMenu, 0, nil);
+  FillFlowMenu;
   BranchMenu.Add(NewLine);
   FTagsItem := AddItem(BranchMenu, rsTagsItem, 0, @MenuTagsClick);
   FNewTagItem := AddItem(BranchMenu, rsNewTagItem, 0, @MenuNewTagClick);
@@ -8470,6 +8539,7 @@ const
 {$I umain.rebase.inc}
 {$I umain.stash.inc}
 {$I umain.worktrees.inc}
+{$I umain.gitflow.inc}
 {$I umain.palette.inc}
 {$I umain.nav.inc}
 {$I umain.undo.inc}

@@ -34,6 +34,7 @@ const
   bmRebase = 8;
   bmCurrentSince = 9;
   bmUpstream = 10;
+  bmFlowFinish = 11;
 
 procedure TRepoFrame.BranchContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
 var
@@ -81,6 +82,11 @@ begin
     Add(rsBmRename, bmRename, (BranchName <> FBranch) or (FOperation = ''));
     Add(rsBmDelete, bmDelete, BranchName <> FBranch);
     Add(rsBmUpstream, bmUpstream, True);
+    if FlowBranchOf(BranchName, FMenuFlowBranch) then
+    begin
+      FBranchMenu.Items.Add(NewLine);
+      Add(FlowFinishCaption(FMenuFlowBranch), bmFlowFinish, not Busy);
+    end;
     Up := FRepo.Upstream(BranchName);
   end
   else
@@ -113,6 +119,9 @@ begin
     bmRename: RenameBranchAsk(BranchName);
     bmDelete: DeleteBranchAsk(BranchName);
     bmUpstream: ShowUpstreamList(BranchName, MenuListAnchor);
+    bmFlowFinish:
+      if FMenuFlowBranch.Branch = BranchName then
+        FlowFinishAsk(FMenuFlowBranch);
     bmDeleteRemote:
       if AskDlg(rsBmDeleteRemoteTitle, Format(rsBmDeleteRemoteAsk, [FMenuBranchUpstream]),
         mtWarning, [mrYes, rsBmDeleteAction, mrCancel, rsCancelButton, 'IsCancel',
@@ -434,6 +443,7 @@ procedure TRepoFrame.BranchMenuOpen(Sender: TObject);
 begin
   UpdateBranchItems;
   FillBranchCommitMenu;
+  FillFlowMenu;
 end;
 
 { From the menu the list opens at the top of the frame (MenuListAnchor);
