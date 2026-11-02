@@ -580,7 +580,7 @@
       <source srcset="assets/logo-dark.svg" media="(prefers-color-scheme: dark)" data-dark>
       <img class="logo" src="assets/logo-light.svg" alt="Gittan, Git Tree Analyzer &amp; Navigator" width="437" height="133">
     </picture>
-    <div><a class="pill" href="#new"><b>New</b> Extensions, a merge editor, a command palette and Undo <span aria-hidden="true">→</span></a></div>
+    <div><a class="pill" href="#new"><b>New</b> Git flow, a repository list, issue links and Extensions <span aria-hidden="true">→</span></a></div>
     <h1>Understand every change.<br><em>Then commit it.</em></h1>
     <span class="strandline" aria-hidden="true"><svg class="strand"><use href="#strand"/></svg></span>
     <p class="tag">Gittan is a free, native git client built around the diff. See what you changed as you change it, who wrote each line and the history behind it, then commit, sync and merge without leaving it.</p>
@@ -615,6 +615,26 @@
     <h2>What's <em>new</em></h2>
     <p class="lead">Gittan has grown a lot this autumn. These are the larger additions; the tour and the workflow below show most of them in place.</p>
     <div class="facts c4">
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10"/><path d="M6 7c0 3 12 1 12 3"/><path d="M18 14c0 3-12 1-12 3"/></svg></div>
+        <h3>Git flow</h3>
+        <p>Branch &gt; Git Flow sets it up, then starts and finishes features, releases and hotfixes: finishing merges the branch where it belongs, tags a release and deletes the branch. Plain git does it, in the git-flow command's own settings, so the command need not be installed and the two share a repository.</p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M8 11h8"/><path d="M8 15h5"/></svg></div>
+        <h3>Repository list</h3>
+        <p>The welcome view keeps your repositories in folders of your own. Drag a recent one in, add every repository in a folder at once, and drag rows to order them. File &gt; Repository List shows it in a tab.</p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg></div>
+        <h3>Issue links and notes</h3>
+        <p>An issue named in a commit's message is a link in its card: #123 opens the issue on GitHub with no setup, and File &gt; Issue Tracker… sets any other tracker, in the bugtraq keys other git clients read too. Add a note to a commit (git notes), and the graph's search finds it.</p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10"/><path d="M18 9a7 7 0 0 1-7 7H8"/><path d="m14 19 2 2 4-4"/></svg></div>
+        <h3>Will it merge?</h3>
+        <p>When your branch is behind main, the row that says so also says whether merging main would go through cleanly, or which files would conflict, before you press Merge or Rebase. Needs git 2.38 or later.</p>
+      </div>
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M5 8h4V7a2 2 0 1 1 4 0v1h4v4h1a2 2 0 1 1 0 4h-1v4H5z"/></svg></div>
         <h3>Extensions</h3>
@@ -653,7 +673,7 @@
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7"/><path d="M18 15.5V10a3 3 0 0 0-3-3h-4"/><path d="m13 4-3 3 3 3"/></svg></div>
         <h3>Pull requests everywhere</h3>
-        <p>The globe at the top right shows your pull requests on GitHub across every repository, the ones you wrote and the ones waiting for your review, with filters. Approve, ask for changes, comment and merge from Gittan, open a new one with Branch &gt; Create Pull Request…, and switch between your gh accounts.</p>
+        <p>The globe at the top right shows your pull requests on GitHub across every repository, the ones you wrote and the ones waiting for your review, with filters in three menus: Review, Checks and More. Approve, ask for changes, comment and merge from Gittan, open a new one with Branch &gt; Create Pull Request…, and switch between your gh accounts.</p>
       </div>
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
@@ -768,7 +788,7 @@
           </picture></div>
         </figure>
         <figure id="t-graph" role="tabpanel" aria-labelledby="b-graph">
-          <figcaption><b>The commit graph</b> (Graph in the sidebar, or <kbd>⌘⌥3</kbd>) draws every branch and tag, marks the commits not pushed and the ones waiting on the remote, shows any commit against its parent with a click, and filters as you type in its search field. Drag a commit onto your branch's row to merge it.</figcaption>
+          <figcaption><b>The commit graph</b> (Graph in the sidebar, or <kbd>⌘⌥3</kbd>) draws every branch and tag, marks the commits not pushed and the ones waiting on the remote, shows any commit against its parent with a click, and filters as you type in its search field. First Parent follows only the main line through each merge, and No Merges leaves the merges out. Drag a commit onto your branch's row to merge it.</figcaption>
           <div class="frame"><picture>
             <source srcset="assets/shots/graph-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/graph-dark.png" media="(prefers-color-scheme: dark)" data-dark>
@@ -1036,7 +1056,7 @@
         <div>
           <div class="ic"><svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10"/><path d="M6 7c0 4 12 1 12 3"/></svg></div>
           <h3>From the commit graph</h3>
-          <p>Right-click a commit to branch or tag from it, merge it, cherry-pick or revert it, or reset to it: soft, mixed or hard, with what each keeps spelled out. Rebase interactively from it, bisect from it, or write it as a patch. Mark one commit and compare another with it.</p>
+          <p>Right-click a commit to branch or tag from it, merge it, cherry-pick or revert it, or reset to it: soft, mixed or hard, with what each keeps spelled out. Rebase interactively from it, bisect from it, write it as a patch, export its files as a zip or a tar.gz, or add a note to it. Mark one commit and compare another with it.</p>
         </div>
         <div class="art" aria-hidden="true">
           <div class="menu">
@@ -1121,7 +1141,7 @@
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg></div>
         <h3>Tags</h3>
-        <p>Branch &gt; Tags… lists them newest first. Make one at HEAD or at any commit, check one out, branch from it, push it, or delete it here and on the remote.</p>
+        <p>Branch &gt; Tags… lists them newest first. Make one at HEAD or at any commit, check one out, branch from it, push it, export its files as an archive, or delete it here and on the remote.</p>
       </div>
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M9 14h6"/><path d="M12 11v6"/></svg></div>
