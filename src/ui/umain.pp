@@ -1588,6 +1588,7 @@ type
     { umain.actions.inc }
     procedure ApplySettings;
     procedure RebuildRecentMenu;
+    procedure RecentChanged;
     procedure MenuRecentClick(Sender: TObject);
     procedure MenuClearRecentClick(Sender: TObject);
     procedure MenuFindClick(Sender: TObject);
@@ -2457,6 +2458,8 @@ resourcestring
   rsListRemove = 'Remove from List';
   rsListRemoveFolder = 'Remove Folder...';
   rsListAddRecent = 'Add to Repository List';
+  rsListRemoveRecent = 'Remove from Recent';
+  rsListClearRecent = 'Clear Recent';
   rsListNewFolder = 'New Folder...';
   rsListAddRepo = 'Add Repository...';
   rsListAddFolder = 'Add Repositories in Folder...';

@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Added
-- A repository list in the welcome view, in folders of your own: drag a recent repository into it, or add one with + or a right-click, add every repository in a folder at once, and drag rows to order them or move them between folders. File > Repository List shows it, File > Add to Repository List adds the repository open.
+- A repository list in the welcome view, in folders of your own: drag a recent repository into it, or add one with + or a right-click, add every repository in a folder at once, and drag rows to order them or move them between folders. File > Repository List shows it, File > Add to Repository List adds the repository open. A right-click on a recent repository removes it from Recent, or clears Recent.
 - Git flow: Branch > Git Flow sets it up, then starts and finishes feature, release and hotfix branches. Finishing merges the branch where it belongs, tags a release or hotfix and deletes the branch; after a conflict, finish again once the merge is committed. The setup is the git-flow command's own, so the two work on the same repository, and the command need not be installed.
 - The row saying a branch is behind main also says whether merging main would go through cleanly, or which files would conflict, before you press Merge or Rebase. Needs git 2.38 or later.
 

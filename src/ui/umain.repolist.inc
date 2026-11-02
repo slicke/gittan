@@ -17,6 +17,8 @@ const
   lmNewFolder = 5;
   lmAddRepo = 6;
   lmAddFolder = 7;
+  lmRemoveRecent = 8;
+  lmClearRecent = 9;
 
 procedure TRepoFrame.RepoListChanged;
 begin
@@ -95,6 +97,8 @@ begin
   else if ARoot <> '' then
   begin
     Add(rsListAddRecent, lmAddRecent, App.RepoList.Find(ARoot) = nil);
+    Add(rsListRemoveRecent, lmRemoveRecent);
+    Add(rsListClearRecent, lmClearRecent);
     FListPopup.Items.Add(NewLine);
   end;
   Add(rsListNewFolder, lmNewFolder);
@@ -169,6 +173,16 @@ begin
     lmAddRecent:
       if App.RepoList.AddRepo(nil, FListRoot) <> nil then
         SaveRepoList;
+    lmRemoveRecent:
+    begin
+      App.Settings.RemoveRecent(FListRoot);
+      RecentChanged;
+    end;
+    lmClearRecent:
+    begin
+      App.Settings.Recent.Clear;
+      RecentChanged;
+    end;
     lmNewFolder:
     begin
       Value := '';

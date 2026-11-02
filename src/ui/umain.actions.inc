@@ -152,7 +152,19 @@ end;
 procedure TRepoFrame.MenuClearRecentClick(Sender: TObject);
 begin
   App.Settings.Recent.Clear;
-  RebuildRecentMenu;
+  RecentChanged;
+end;
+
+{ The recent list lost a repository or all: written at once, so they
+  stay gone after a run that does not close normally, and every frame's
+  Open Recent and welcome view follow. }
+procedure TRepoFrame.RecentChanged;
+var
+  i: integer;
+begin
+  App.Settings.SaveRecent;
+  for i := 0 to FWindow.FrameCount - 1 do
+    FWindow.FrameAt(i).RebuildRecentMenu;
 end;
 
 { ---------------------------------------------------------------------------

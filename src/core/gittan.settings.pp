@@ -228,6 +228,12 @@ type
     {** Puts ARoot first in the recent list, dropping a duplicate and the
       oldest beyond MaxRecent. }
     procedure AddRecent(const ARoot: string);
+    {** Takes ARoot out of the recent list. }
+    procedure RemoveRecent(const ARoot: string);
+    {** Writes the recent list alone into the file, at once, so a removal
+      outlasts a run that does not close normally; errors are ignored as
+      in Save. }
+    procedure SaveRecent;
     {** Puts the action AName (as the command palette names it) first in
       PaletteRecent, dropping a duplicate and the oldest beyond
       MaxPaletteRecent. }
@@ -910,6 +916,36 @@ begin
   FRecent.Insert(0, ARoot);
   while FRecent.Count > MaxRecent do
     FRecent.Delete(FRecent.Count - 1);
+end;
+
+procedure TGittanSettings.RemoveRecent(const ARoot: string);
+var
+  i: integer;
+begin
+  i := FRecent.IndexOf(ARoot);
+  if i >= 0 then
+    FRecent.Delete(i);
+end;
+
+procedure TGittanSettings.SaveRecent;
+var
+  Ini: TIniFile;
+  i: integer;
+begin
+  try
+    ForceDirectories(ExtractFileDir(FFileName));
+    Ini := TIniFile.Create(FFileName);
+    try
+      Ini.EraseSection(SecRecent);
+      for i := 0 to FRecent.Count - 1 do
+        Ini.WriteString(SecRecent, 'Repo' + IntToStr(i), KeepEdges(FRecent[i]));
+      Ini.UpdateFile;
+    finally
+      Ini.Free;
+    end;
+  except
+    { As in Save. }
+  end;
 end;
 
 procedure TGittanSettings.AddPaletteRecent(const AName: string);

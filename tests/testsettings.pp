@@ -24,6 +24,7 @@ type
     procedure TestRoundTrip;
     procedure TestQuotesAndSpaces;
     procedure TestRecentList;
+    procedure TestSaveRecent;
     procedure TestTabs;
     procedure TestDamagedFileGivesDefaults;
     procedure TestOldDefaultFont;
@@ -283,6 +284,10 @@ begin
     AssertEquals('/repo/' + IntToStr(MaxRecent), S.Recent[0]);
     AssertEquals('/repo/' + IntToStr(MaxRecent + 3), S.Recent[1]);
     AssertEquals(-1, S.Recent.IndexOf('/repo/3'));
+    S.RemoveRecent('/repo/' + IntToStr(MaxRecent + 3));
+    S.RemoveRecent('/repo/none');
+    AssertEquals('removed', MaxRecent - 1, S.Recent.Count);
+    AssertEquals('/repo/' + IntToStr(MaxRecent + 2), S.Recent[1]);
     for i := 1 to MaxPaletteRecent + 2 do
       S.AddPaletteRecent('Action ' + IntToStr(i));
     S.AddPaletteRecent('Action 5');
@@ -293,6 +298,35 @@ begin
       S.PaletteRecent[MaxPaletteRecent - 1]);
   finally
     S.Free;
+  end;
+end;
+
+{ SaveRecent writes the recent list alone, leaving what else the file
+  holds as it is. }
+procedure TSettingsTest.TestSaveRecent;
+var
+  S, Back: TGittanSettings;
+begin
+  S := TGittanSettings.Create(FFileName);
+  try
+    S.EditorCommand := '/usr/bin/editor';
+    S.AddRecent('/repo/a');
+    S.AddRecent('/repo/b');
+    S.Save;
+    S.EditorCommand := '/changed';
+    S.RemoveRecent('/repo/b');
+    S.SaveRecent;
+  finally
+    S.Free;
+  end;
+  Back := TGittanSettings.Create(FFileName);
+  try
+    Back.Load;
+    AssertEquals(1, Back.Recent.Count);
+    AssertEquals('/repo/a', Back.Recent[0]);
+    AssertEquals('the rest untouched', '/usr/bin/editor', Back.EditorCommand);
+  finally
+    Back.Free;
   end;
 end;
 
