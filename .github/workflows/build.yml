@@ -550,7 +550,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: lazarus-haiku
-          key: toolchain-haiku-${{ matrix.widgetset }}-lazarus-5.0RC1
+          key: toolchain-haiku-${{ matrix.widgetset }}-lazarus-5.0RC1-gl
 
       - name: Stamp the build number
         if: env.GITTAN_BUILD != ''
@@ -590,7 +590,8 @@ jobs:
             "https://download.lazarus-ide.org/Lazarus%20Zip%20_%20GZip/Lazarus%205.0RC1/lazarus-5.0RC1-0.tar.gz"
           tar xzf lazarus.tar.gz -C lazarus-haiku --strip-components=1
           rm lazarus.tar.gz
-          (cd lazarus-haiku && make lazbuild LCL_PLATFORM="$WIDGETSET")
+          # -gl: line info, so a crash of lazbuild gives a readable backtrace.
+          (cd lazarus-haiku && make lazbuild LCL_PLATFORM="$WIDGETSET" OPT="-gl")
           ./lazarus-haiku/lazbuild --version
 
       - name: Save the Lazarus build
@@ -607,13 +608,18 @@ jobs:
           WIDGETSET='${{ matrix.widgetset }}'
           export GITTAN_BUILD='${{ needs.version.outputs.build_number }}'
           export GITTAN_VERSION='${{ needs.version.outputs.version }}'
+          VENDOR_PACKAGES='${{ env.VENDOR_PACKAGES }}'
           # lazbuild does not find its own folder on Haiku ("Invalid Lazarus
           # directory"), and the Makefile quotes $(LAZBUILD), so a wrapper
           # passes --lazarusdir.
           printf '#!/bin/bash\nexec "%s/lazarus-haiku/lazbuild" --lazarusdir="%s/lazarus-haiku" "$@"\n' "$PWD" "$PWD" > lazbuild-haiku
           chmod +x lazbuild-haiku
           LAZBUILD="$PWD/lazbuild-haiku"
-          make deps LAZBUILD="$LAZBUILD" WIDGETSET="$WIDGETSET"
+          # As on the other legs: register the packages, and the build of
+          # Gittan.lpi compiles them as its dependencies. lazbuild crashed
+          # (access violation) after compiling a package on its own with
+          # make deps.
+          for LPK in $VENDOR_PACKAGES; do "$LAZBUILD" --add-package-link "$LPK"; done
           make LAZBUILD="$LAZBUILD" WIDGETSET="$WIDGETSET"
           make test
           mkdir -p dist/Gittan
