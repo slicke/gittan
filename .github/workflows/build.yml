@@ -611,8 +611,17 @@ jobs:
           VENDOR_PACKAGES='${{ env.VENDOR_PACKAGES }}'
           # lazbuild does not find its own folder on Haiku ("Invalid Lazarus
           # directory"), and the Makefile quotes $(LAZBUILD), so a wrapper
-          # passes --lazarusdir.
-          printf '#!/bin/bash\nexec "%s/lazarus-haiku/lazbuild" --lazarusdir="%s/lazarus-haiku" "$@"\n' "$PWD" "$PWD" > lazbuild-haiku
+          # passes --lazarusdir. lazbuild also crashes with an access
+          # violation (exit 217) on its way out, after the compile and the
+          # link are done, so the wrapper lets 217 through with a warning;
+          # the executable is checked after the build.
+          cat > lazbuild-haiku <<WRAP
+          #!/bin/bash
+          "$PWD/lazarus-haiku/lazbuild" --lazarusdir="$PWD/lazarus-haiku" "\$@"
+          rc=\$?
+          if [ \$rc = 217 ]; then echo "lazbuild crashed on exit (217); going on" >&2; exit 0; fi
+          exit \$rc
+          WRAP
           chmod +x lazbuild-haiku
           LAZBUILD="$PWD/lazbuild-haiku"
           # As on the other legs: register the packages, and the build of
@@ -621,6 +630,7 @@ jobs:
           # make deps.
           for LPK in $VENDOR_PACKAGES; do "$LAZBUILD" --add-package-link "$LPK"; done
           make LAZBUILD="$LAZBUILD" WIDGETSET="$WIDGETSET"
+          test -x Gittan || { echo "::error::Gittan was not built"; exit 1; }
           make test
           mkdir -p dist/Gittan
           cp Gittan dist/Gittan/
