@@ -536,9 +536,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # qt6: HaikuPorts' libqt6pas, as its own Lazarus uses. A gtk3
+          # build links but does not start: Haiku's GTK 3 lacks symbols the
+          # LCL's gtk3 binding imports.
           - name: haiku-x86_64
-            widgetset: gtk3
-          - name: haiku-x86_64-qt6
             widgetset: qt6
     steps:
       - uses: actions/checkout@v7
@@ -568,11 +569,11 @@ jobs:
           shell: bash
           cpu_count: 4
 
-      - name: Install FPC, GTK 3, libQt6Pas and git
+      - name: Install FPC, libQt6Pas and git
         shell: cpa.sh {0}
         run: |
           set -euo pipefail
-          pkgman install -y fpc fpc_source git gtk3_devel libqt6pas
+          pkgman install -y fpc fpc_source git libqt6pas
           fpc -iV
           git --version
 
@@ -809,7 +810,7 @@ jobs:
             gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$F"
             case "$(basename "$F")" in
               Gittan-haiku-x86_64.tar.gz)
-                ADDED="$ADDED- **Gittan-haiku-x86_64.tar.gz** — Haiku (64-bit) without installing, needs GTK 3 from HaikuPorts (\`pkgman install gtk3\`). Unpack anywhere and run Gittan."$'\n' ;;
+                ADDED="$ADDED- **Gittan-haiku-x86_64.tar.gz** — Haiku (64-bit) without installing, needs Qt 6 from HaikuPorts (\`pkgman install libqt6pas\`). Unpack anywhere and run Gittan."$'\n' ;;
               *)
                 ADDED="$ADDED- **$(basename "$F")**"$'\n' ;;
             esac
@@ -818,6 +819,10 @@ jobs:
           # The lines go into the Downloads list, before the note on git
           # that ends it.
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > notes.md
+          cp notes.md notes.orig
           ADDED="$ADDED" perl -0pi -e 's/\r//g; s|\n\n(Gittan runs the git command line tool)|\n$ENV{ADDED}\n$1|' notes.md
-          grep -q "Gittan-haiku\|\*\*Gittan-" notes.md
+          if cmp -s notes.md notes.orig; then
+            echo "::warning::The notes have no line on git to put the downloads before; they are left as they are"
+            exit 0
+          fi
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
