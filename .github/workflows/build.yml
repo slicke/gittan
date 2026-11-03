@@ -580,7 +580,13 @@ jobs:
         shell: cpa.sh {0}
         run: |
           set -euo pipefail
-          pkgman install -y fpc fpc_source git libqt6pas devel:libiconv
+          # A download now and then breaks off ("Interrupted system call").
+          for TRY in 1 2 3; do
+            pkgman install -y fpc fpc_source git libqt6pas devel:libiconv && break
+            [ $TRY = 3 ] && exit 1
+            echo "::warning::pkgman stopped (try $TRY of 3)"
+            sleep 10
+          done
           fpc -iV
           git --version
 
