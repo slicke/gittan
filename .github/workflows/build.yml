@@ -579,7 +579,7 @@ jobs:
           git --version
 
       - name: Build Lazarus 5.0RC1
-        shell: cpa.sh {0}
+        shell: cpa.sh {0} --environment-variables WIDGETSET
         run: |
           set -euo pipefail
           if [ -x lazarus-haiku/lazbuild ]; then echo "lazbuild from the cache"; exit 0; fi
@@ -592,7 +592,7 @@ jobs:
           ./lazarus-haiku/lazbuild --version
 
       - name: Build, test and package
-        shell: cpa.sh {0}
+        shell: cpa.sh {0} --environment-variables GITTAN_BUILD GITTAN_VERSION WIDGETSET
         run: |
           set -euo pipefail
           LAZBUILD="$PWD/lazarus-haiku/lazbuild"
