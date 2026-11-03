@@ -4,6 +4,7 @@
 
 ### Added
 - The tab bar says that Cmd+P (Ctrl+P on Windows and Linux) opens the command palette, dimmed at its right end, until tabs fill that space.
+- While a repository takes a moment to open, a busy line moves under "Opening ..." in the welcome view, as in the status bar during a fetch.
 
 ## 0.13 (build-138, 2026-11-03)
 
