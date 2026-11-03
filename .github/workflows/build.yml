@@ -589,9 +589,10 @@ jobs:
       # a 64-bit pointer, so pthread_create writes past it and every join
       # (TThread.WaitFor, Free on a thread) passes a cut-off handle and
       # crashes. Gittan crashed so at start, in TGittanLexers.Finish. Linux
-      # declares it PtrUInt. The build is kept in the cache (fpc-haiku/),
-      # and ~/.fpc.cfg, read before the system's /etc/fpc.cfg, points the
-      # compiler at its units.
+      # declares it PtrUInt. The Makefile asks for 3.0.4 to start from;
+      # HaikuPorts' 3.2.2 builds it as well (OVERRIDEVERSIONCHECK). The
+      # build is kept in the cache (fpc-haiku/), and ~/.fpc.cfg, read before
+      # the system's /etc/fpc.cfg, points the compiler at its units.
       - name: Build FPC 3.2.2 with the thread fix
         shell: cpa.sh {0}
         run: |
@@ -612,7 +613,7 @@ jobs:
             sed -i 's/^  TThreadID = THandle;/  TThreadID = PtrUInt;/' "$SYSOSH"
             grep -q '^  TThreadID = PtrUInt;' "$SYSOSH" || { echo "::error::The TThreadID fix did not apply"; exit 1; }
             (cd fpcbuild-3.2.2/fpcsrc \
-              && make all -j4 FPMAKEOPT="-T 4" \
+              && make all -j4 FPMAKEOPT="-T 4" OVERRIDEVERSIONCHECK=1 \
               && make install INSTALL_PREFIX="$PREFIX" PP="$PWD/compiler/ppcx64")
             ln -sf ../lib/fpc/3.2.2/ppcx64 "$PREFIX/bin/ppcx64"
             rm -rf fpcbuild-3.2.2
