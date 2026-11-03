@@ -642,6 +642,20 @@ jobs:
           cp externals/quickjs/LICENSE.quickjs-ng dist/Gittan/
           cp LICENSE dist/Gittan/LICENSE.gittan
           cp NOTICE dist/Gittan/
+          # The libraries load through the rpath ($ORIGIN, escaped in
+          # Gittan.lpi, since FPC's link on Haiku goes through a shell that
+          # would eat the dollar). Started from / for a few seconds, Gittan
+          # must not stop on the runtime_loader's "cannot open"; whatever
+          # else it does without a desktop session is no matter here.
+          (cd / && timeout 10 "$OLDPWD/dist/Gittan/Gittan" > /tmp/gittan-start.log 2>&1) || true
+          cat /tmp/gittan-start.log
+          if grep -qi "runtime_loader\|cannot open file\|could not load" /tmp/gittan-start.log; then
+            echo "::error::Gittan cannot load its libraries on Haiku"; exit 1
+          fi
+          # Haiku's loader also searches lib/ beside the executable whatever
+          # the rpath says, so the libraries go there too, as Trndi's do.
+          mkdir -p dist/Gittan/lib
+          cp dist/Gittan/libqjs.so.0 dist/Gittan/libtqshim.so dist/Gittan/lib/
           tar -C dist -czf Gittan-${{ matrix.name }}.tar.gz Gittan
           ls -l Gittan-${{ matrix.name }}.tar.gz
 
