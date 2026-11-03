@@ -137,7 +137,7 @@ resourcestring
   rsAIEnabled = 'Turn on the AI features';
   rsAINote = 'They run the agent picked here in the repository, with your own ' +
     'login, or ask a model at an OpenAI-compatible API with your key, to write a ' +
-    'commit message from the ticked files, review the changes and find where ' +
+    'commit message from the included files, review the changes and find where ' +
     'something is. The changes are sent to its provider (Anthropic for Claude ' +
     'Code, GitHub for Copilot, the server named for the API), and when you ask ' +
     'where something is, so is the text of the files an API''s model picks. Off ' +

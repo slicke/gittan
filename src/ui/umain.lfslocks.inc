@@ -10,7 +10,7 @@
   Unlock File for one the user holds and Force Unlock for another
   user's (asked first), each a remote job (rkLfsLock, rkLfsUnlock,
   rkLfsForceUnlock); the header says who holds the file shown when it
-  is not the user (LockNote). File > Git LFS Locks... lists every lock,
+  is not the user (LockNote). Repository > Git LFS Locks... lists every lock,
   the user's first: a pick shows the file, a right click offers the
   unlock. See spec/special-views.md. }
 

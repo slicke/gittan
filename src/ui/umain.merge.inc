@@ -4,7 +4,7 @@
   Included by umain.pp. A conflicted file with markers can be resolved
   in three panes (gittan.mergeview): mine and theirs above, a box on
   every line of a conflict, and the result under them. It opens from the
-  header's Merge Editor pill, File > Open in Merge Editor or the
+  header's Merge Editor pill, Changes > Open in Merge Editor or the
   conflict's list in the band, and stays on for the conflicted files
   shown after it, until its Close pill; a file without markers, or one
   that is no conflict any more, shows the change view as before. The
@@ -371,7 +371,7 @@ begin
   end;
 end;
 
-{ File > Open in Merge Editor closes it again while it is shown. }
+{ Changes > Open in Merge Editor closes it again while it is shown. }
 procedure TRepoFrame.MenuMergeEditorClick(Sender: TObject);
 begin
   if FView = gvMerge then

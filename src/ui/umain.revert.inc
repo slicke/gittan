@@ -3,13 +3,13 @@
   ---------------------------------------------------------------------------
   Revert Changes... in the file menu (the tree, the summary's rows, the
   file header) puts a changed file back as HEAD has it, or every changed
-  file under a folder of the tree; File > Revert File... does it to the
+  file under a folder of the tree; Changes > Revert File... does it to the
   file shown. A new or untracked file is deleted, a rename goes back.
   It asks first. Discard (umain.discard.inc) puts back one block against
   the version compared with; Revert is whole files against HEAD, so
   it is offered only while the work tree is compared
   with HEAD. Before anything changes, what was on disk is saved as blobs
-  (TGittanRepo.RevertFiles), and File > Undo Revert writes the latest
+  (TGittanRepo.RevertFiles), and Changes > Undo Revert writes the latest
   revert back. }
 
 { The changed files the file menu acts on: the file, or every one under
@@ -95,7 +95,7 @@ begin
   end;
 end;
 
-{ File > Revert File: the file the view shows. }
+{ Changes > Revert File: the file the view shows. }
 procedure TRepoFrame.MenuRevertFileClick(Sender: TObject);
 var
   Paths: TStringList;

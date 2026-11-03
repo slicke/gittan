@@ -115,7 +115,7 @@ begin
 end;
 
 { The commit menu's items for ACommit, under ARoot: the graph's popup,
-  or Branch > Commit for the commit shown (FillBranchCommitMenu). }
+  or Commit > Commit abc1234 for the commit shown (FillBranchCommitMenu). }
 procedure TRepoFrame.FillCommitMenu(ARoot: TMenuItem; const ACommit: TGittanGraphCommit);
 var
   Busy, Jobs, InHead, IsHead, IsMerge: boolean;
@@ -225,7 +225,7 @@ begin
     Add(nil, Format(rsOpenCommitOnForge, [ForgeName]), caForge);
 end;
 
-{ Branch > Commit, filled as the Branch menu opens (and for the command
+{ Commit > Commit, filled as the Branch menu opens (and for the command
   palette): the commit menu of the commit shown against its parent
   (picked in the graph, the blame band or Older and Newer), named by
   its short id; without one, an item that opens the graph to pick one
@@ -247,12 +247,16 @@ begin
     Commit := FBranchCommit;
     FBranchCommitMenu.Caption := Format(rsBmCommitMenu, [Commit.Short]);
     FillCommitMenu(FBranchCommitMenu, Commit);
+    FBranchCommitMenu.Visible := True;
+    FPickCommitItem.Visible := False;
     Exit;
   end;
-  FBranchCommitMenu.Caption := rsBmCommitNone;
+  { No commit shown: a plain item in its place, so neither the menu nor
+    the palette says "Commit: Commit". }
   FBranchCommitMenu.Clear;
-  AddMenuItem(FBranchCommitMenu, rsBmCommitPick, 0, (FRepo <> nil) and (FRepo.Root <> ''),
-    @MenuPickCommitClick);
+  FBranchCommitMenu.Visible := False;
+  FPickCommitItem.Visible := True;
+  FPickCommitItem.Enabled := (FRepo <> nil) and (FRepo.Root <> '');
 end;
 
 procedure TRepoFrame.MenuPickCommitClick(Sender: TObject);
@@ -626,6 +630,6 @@ begin
   end;
   if FGraph.Visible then
     GraphReload(nil);
-  { Branch > Commit names the note's item by whether there is one. }
+  { Commit > Commit names the note's item by whether there is one. }
   FBranchCommit := Default(TGittanGraphCommit);
 end;

@@ -86,7 +86,8 @@ begin
   App.Settings.NavOpen := not FSideNav.Collapsed;
   App.Settings.RepoFilesOpen := FRepoHeader.Expanded;
   App.Settings.SubmodulesOpen := FSubHeader.Expanded;
-  App.Settings.CommitOpen := FCommitHeader.Expanded;
+  { As the user left it, not as the idle fold did. }
+  App.Settings.CommitOpen := FCommitHeader.Expanded or FCommitAutoFolded;
   StopCommitJob(True);
   StopRemoteJob(True);
   AbandonCommandJob(True);

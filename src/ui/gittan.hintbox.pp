@@ -4,7 +4,7 @@ unit gittan.hintbox;
   corners, with an icon before it if one is set: an image from a list,
   or a marker of the status bar (gittan.statusbar's HintBranch and the
   others) drawn in a color. Made for the note under the Commit button,
-  which says what keeps a commit back, as "Tick the files to commit."
+  which says what keeps a commit back, as "Include the files to commit."
   with the tree's ticked box beside it, so the words point at the
   boxes. A warning (Warn) takes the second palette, for what has to be
   dealt with first, such as conflicts. A link (Link, OnLink) on a line

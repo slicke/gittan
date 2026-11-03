@@ -8,7 +8,7 @@
   (TGittanRepo.Commit with the file's text from gittan.leaveout). A
   block left out is drawn in muted tints without its word shades, its
   pill says Include, the file's box is mixed and the header has
-  Include All. File > Leave Change Out of Commit (Cmd+Alt+K) does what
+  Include All. Changes > Leave Out of Commit (Cmd+Alt+K) does what
   the middle pill does for the block the caret is in, and reads Include
   Change in Commit where the pill reads Include. Leaving out every block of a file unticks it, and
   Include on a block of an unticked file ticks it with that block alone
@@ -82,7 +82,7 @@ begin
 end;
 
 { What the middle pill offers for the block: Include in Commit for one
-  left out or of a file not ticked, Skip in Commit for the rest. }
+  left out or of a file not ticked, Leave Out of Commit for the rest. }
 function TRepoFrame.LeaveOutCaption(ABlock: integer): string;
 begin
   if not ShownFileChosen or BlockLeftOut(ABlock) then
@@ -440,7 +440,7 @@ begin
   LeftOutChanged;
 end;
 
-{ File > Leave Change Out of Commit acts on the selected lines, else on
+{ Changes > Leave Out of Commit acts on the selected lines, else on
   the block the caret is in. }
 procedure TRepoFrame.MenuLeaveOutClick(Sender: TObject);
 var

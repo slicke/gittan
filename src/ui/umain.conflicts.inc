@@ -14,7 +14,7 @@
   either order, with the names git wrote on the markers; the conflict's
   lines are replaced on disk through gittan.discard (ResolveBlock in
   gittan.conflicts gives the block), so the file must still hold them,
-  and the block is kept with the discards, so File > Undo Discard puts
+  and the block is kept with the discards, so Changes > Undo Discard puts
   the conflict back. When the file's last conflict goes, the file is
   marked resolved and the view moves on to the next conflicted file, or
   to the Commit section when there is none; resolving a whole file moves
@@ -590,7 +590,7 @@ begin
   GoToConflict(False);
 end;
 
-{ File > Resolve Conflict acts on the conflict the caret is in; the
+{ Changes > Resolve Conflict acts on the conflict the caret is in; the
   item follows the caret (from UpdateDiscardItems). }
 procedure TRepoFrame.UpdateResolveItems;
 begin

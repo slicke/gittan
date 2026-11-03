@@ -1,7 +1,7 @@
 { ---------------------------------------------------------------------------
   Fetch, pull and push
   ---------------------------------------------------------------------------
-  File > Fetch, Pull and Push, and the same in a list that drops up from
+  Repository > Fetch, Pull and Push, and the same in a list that drops up from
   the status bar's "↑2 ↓5", with the commit graph last. Each runs in a
   thread (gittan.remotejob), one at a time and not while a commit runs;
   the status bar says what is going on meanwhile, and a notice in the
