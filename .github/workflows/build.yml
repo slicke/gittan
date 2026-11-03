@@ -573,7 +573,7 @@ jobs:
         shell: cpa.sh {0}
         run: |
           set -euo pipefail
-          pkgman install -y fpc fpc_source git libqt6pas
+          pkgman install -y fpc fpc_source git libqt6pas devel:libiconv
           fpc -iV
           git --version
 
