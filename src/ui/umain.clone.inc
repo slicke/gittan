@@ -9,7 +9,7 @@
   Repository... (Init... in the welcome view) makes a repository of a
   folder chosen in the folder dialog and opens it; a folder that is one
   already is just opened, and one inside another repository is asked
-  about first. File > Remotes... and Edit Remotes... on the Repository
+  about first. Repository > Remotes... and Edit Remotes... on the Repository
   page open the Remotes dialog (gittan.remotesdlg), which changes the
   remotes with git at once; a remote added with its fetch asked for is
   fetched when the dialog closes. }

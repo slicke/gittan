@@ -23,10 +23,11 @@ type
 
   TGittanExtHost = class
   public
-    {** alert(): a message with an OK button. }
-    procedure Alert(const AText: string); virtual;
-    {** confirm(): a yes/no question. }
-    function Confirm(const AText: string): boolean; virtual;
+    {** alert(): a message with an OK button, from the extension AName
+      ('' when none is known). }
+    procedure Alert(const AName, AText: string); virtual;
+    {** confirm(): a yes/no question, from the extension AName. }
+    function Confirm(const AName, AText: string): boolean; virtual;
     {** prompt(): a line of text; False when cancelled. }
     function Prompt(const ACaption, AText, ADefault: string; out AValue: string): boolean; virtual;
     {** select(): one of AOptions, its index, -1 when cancelled. }
@@ -101,11 +102,11 @@ end;
 
 { TGittanExtHost }
 
-procedure TGittanExtHost.Alert(const AText: string);
+procedure TGittanExtHost.Alert(const AName, AText: string);
 begin
 end;
 
-function TGittanExtHost.Confirm(const AText: string): boolean;
+function TGittanExtHost.Confirm(const AName, AText: string): boolean;
 begin
   Result := False;
 end;

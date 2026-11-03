@@ -13,12 +13,12 @@
   not count it and Hide Unchanged Lines folds it away; FKeptOf says
   which lines are kept, and the mouse resting on one gets an Unkeep
   pill, the header an "Unkeep n" pill for the whole file. The Discard
-  pill, or File > Discard Change on the block the caret is in, puts
+  pill, or Changes > Discard Change on the block the caret is in, puts
   the block's lines back to how they are in the
   version compared against: its deleted lines are written over its
   added ones (gittan.discard, which checks the file still holds them
   first), after a question, and the repository is refreshed so the
-  view shows the result. The blocks discarded are kept, so File > Undo
+  view shows the result. The blocks discarded are kept, so Changes > Undo
   Discard writes them back, the latest first.
   The pills are offered for a tracked text file against a commit or a
   snapshot, not against a range (the right side is not the work tree
@@ -628,7 +628,7 @@ begin
     StatusNote(Format(rsUnresolveFailed, [Path, FRepo.Error]), True);
 end;
 
-{ File > Discard Change acts on the block the caret is in. }
+{ Changes > Discard Change acts on the block the caret is in. }
 procedure TRepoFrame.MenuDiscardClick(Sender: TObject);
 begin
   if Edit.Carets.Count > 0 then
@@ -656,10 +656,27 @@ begin
   end;
 end;
 
+{ The menus' open handlers: a menu's items are brought up to date as it
+  opens, and the palette and the own title bar's menu run them too. }
 procedure TRepoFrame.FileMenuClick(Sender: TObject);
 begin
-  UpdateDiscardItems;
   UpdateRemoteItems;
+end;
+
+procedure TRepoFrame.RepoMenuOpen(Sender: TObject);
+begin
+  UpdateRemoteItems;
+  UpdateDiscardItems;
   FLfsLocksItem.Visible := (FRepo.Root <> '') and FLfsInstalled and
     ((FLfsLockable.Count > 0) or (FLfsLocks <> nil));
+end;
+
+procedure TRepoFrame.CommitMenuOpen(Sender: TObject);
+begin
+  FillBranchCommitMenu;
+end;
+
+procedure TRepoFrame.ChangesMenuOpen(Sender: TObject);
+begin
+  UpdateDiscardItems;
 end;

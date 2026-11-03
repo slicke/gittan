@@ -6,7 +6,7 @@
   older of the two to the newer, both included, when one is in the
   other's history (the mark of umain.commitactions.inc): the dialog
   (gittan.patchdlg) lists them and asks for the folder, and the files
-  are shown in Finder (or the file manager) when written. File > Apply
+  are shown in Finder (or the file manager) when written. Repository > Apply
   Patches... picks patch files and the dialog chooses between committing
   each (git am) and changing the work tree alone (git apply). An am
   that stops is carried on in the Commit section, as a rebase is; a

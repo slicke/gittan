@@ -28,6 +28,8 @@ type
     FileName: string;
     DisplayName, Author, Version, Description, Homepage, License: string;
     Requested, Granted: TExtPermSet;
+    {** @repos: the repositories it runs for, every one when empty. }
+    Repos: TStringArray;
     {** On in the settings. }
     Enabled: boolean;
     {** Has a context in the engine now. }
@@ -244,6 +246,7 @@ begin
     Inf.Homepage := Manifest.Homepage;
     Inf.License := Manifest.License;
     Inf.Requested := Manifest.Requested;
+    Inf.Repos := Manifest.Repos;
     { The modules in the subfolders run under this file's grant, so an
       edit of one asks again as an edit of the file does. }
     Inf.Hash := GrantHash(string(Source), FModulesDigest);
@@ -314,6 +317,9 @@ begin
       Inf.Error := rsExtNoEngine;
       Exit;
     end;
+    { ExtInScope reads it from the context: without it every repository
+      is in scope. }
+    Ext^.Repos := Inf.Repos;
     if Assigned(FOnProvision) then
     begin
       Engine.BeginRegistration(Ext);

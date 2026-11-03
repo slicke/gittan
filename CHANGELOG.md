@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Changed
+- A release is titled with its version alone, such as 0.14, and its notes list the changes from this changelog rather than the commits. The status bar's badge for a newer Gittan names that version, "0.14 available", not its build number.
+- The File menu is split in four. File keeps the tabs, Open Repository, Open Recent, Clone, Init, the repository list and a file's Open and Save. Repository has Pull, Push, Force Push, Fetch, Remotes, Submodules, Issue Tracker, Clean, Apply Patches, Git LFS Locks and Open in Terminal. Commit has Commit, Write Commit Message, Split Changes into Commits, Sign Off, Skip Hooks, Name and Email, and the menu of the commit shown, which was in the Branch menu. Changes has Discard Change, Undo Discard, Leave Out of Commit, Resolve Conflict, Open in Merge Editor, Revert File and Undo Revert. The command palette names them by their new menus.
+- One pair of words for what goes into a commit: a change or a file is included or left out. The pill over a change says Leave Out of Commit (it said Skip in Commit), the editor's menu Leave Selected Lines Out of Commit, the tree's menu Include All Files and Leave Out All Files (they said Tick All Files and Untick All Files), and Stash Included Files... and Fixup with the Included Files follow.
+- An extension's alert, confirm and console.log dialogs are titled with the extension's name, Extension "name", not a bare "Extension" or a sentence about console.log.
+- With nothing to commit, the Commit section folds to its header, "Commit · no changes", and unfolds again as changes come. Folding or unfolding it yourself still stands, and Commit > Commit... unfolds it, for an amend.
+
+### Added
+- Haiku (64-bit), Gittan-haiku-x86_64.tar.gz, with Qt 6 from HaikuPorts (`pkgman install libqt6pas`). Its tabs are in a row under the menu bar. Like the Windows on Arm build, a release does not wait for it.
+- A native build for Windows on Arm, Gittan-windows-arm64.zip, built with a development version of Free Pascal (3.3.1). A release does not wait for it: it is added to the release when its build makes it. The x64 build still runs there, emulated.
+- An extension can name the repositories it runs for with `@repos` in its manifest: roots such as `~/work/*` or remotes such as `github.com/you/*`. In other repositories its events are not raised and its commands are not in the menus or the command palette.
+- The tab bar says that Cmd+P (Ctrl+P on Windows and Linux) opens the command palette, dimmed at its right end, until tabs fill that space.
+- While a repository takes a moment to open, a busy line moves under "Opening ..." in the welcome view, as in the status bar during a fetch.
+
 ## 0.13 (build-138, 2026-11-03)
 
 ### Added

@@ -209,7 +209,7 @@ begin
     FSubjectCount.Font.Color := RGBToColor(110, 110, 110);
 end;
 
-{ The Push the banner after a commit offers: as File > Push, while
+{ The Push the banner after a commit offers: as Repository > Push, while
   nothing else runs. }
 procedure TRepoFrame.CommitPushClick(Sender: TObject);
 begin
@@ -278,7 +278,15 @@ begin
   SetAllChosen(False);
 end;
 
+{ A fold or unfold by the user (or for something to do: a conflict, a
+  merge) stands, so the section does not fold itself again while idle. }
 procedure TRepoFrame.CommitHeaderToggle(Sender: TObject);
+begin
+  FCommitAutoFolded := False;
+  ShowCommitBox;
+end;
+
+procedure TRepoFrame.ShowCommitBox;
 begin
   FCommitBox.Visible := FCommitHeader.Expanded;
   LayoutRepoFiles;
@@ -480,7 +488,7 @@ end;
 procedure TRepoFrame.UpdateCommitState;
 var
   Chosen, Total, i: integer;
-  Whole, Continuing, Busy, Can: boolean;
+  Whole, Continuing, Busy, Can, Idle: boolean;
   Note: string;
 begin
   if FCommitPanel = nil then
@@ -562,6 +570,27 @@ begin
     Note := rsCommitTickHint;
   if not Continuing and MessageBlank then
     Can := False;
+  { Nothing to commit and nothing under way: the section folds to its
+    header, "Commit · no changes", and unfolds again as changes come,
+    unless the user folded or unfolded it meanwhile (CommitHeaderToggle). }
+  Idle := CommitChoosing and (Total = 0) and (FConflictFiles = 0) and (FOperation = '') and
+    (FCommitJob = nil) and not FCommitAmend.Checked and (Note = '') and MessageBlank;
+  if Idle <> FCommitIdle then
+  begin
+    FCommitIdle := Idle;
+    if Idle and FCommitHeader.Expanded then
+    begin
+      FCommitAutoFolded := True;
+      FCommitHeader.Expanded := False;
+      ShowCommitBox;
+    end
+    else if not Idle and FCommitAutoFolded then
+    begin
+      FCommitAutoFolded := False;
+      FCommitHeader.Expanded := True;
+      ShowCommitBox;
+    end;
+  end;
   if CommitChoosing and (Total > 0) then
   begin
     FCommitHeader.Detail := Format(rsCommitCount, [Chosen, Total]);
@@ -574,7 +603,10 @@ begin
   end
   else
   begin
-    FCommitHeader.Detail := '';
+    if Idle then
+      FCommitHeader.Detail := rsCommitNoChanges
+    else
+      FCommitHeader.Detail := '';
     FCommitHeader.CheckIndex := -1;
   end;
   FChosenCount := Chosen;
@@ -615,7 +647,7 @@ begin
     FCommitNote.Link := rsDontShowAgain
   else
     FCommitNote.Link := '';
-  { "Tick the files" beside a ticked box and the conflicts beside their
+  { "Include the files" beside a ticked box and the conflicts beside their
     badge, as the tree draws them, the base beside a branch. }
   FCommitNote.Warn := (FRepo.Base = '') and (FConflictFiles > 0);
   if Note = rsCommitNotHead then
@@ -731,7 +763,7 @@ begin
     (Trim(AdjustLineBreaks(FCommitMemo.Text)) = Trim(AdjustLineBreaks(FCommitTemplate))));
 end;
 
-{ File > Sign Off and Skip Hooks, ticked as the options are. }
+{ Commit > Sign Off and Skip Hooks, ticked as the options are. }
 procedure TRepoFrame.UpdateOptionItems;
 begin
   if FSignOffMenuItem = nil then
@@ -785,7 +817,7 @@ begin
     StartCommit;
 end;
 
-{ File > Commit: the section unfolded and the message field focused. }
+{ Commit > Commit: the section unfolded and the message field focused. }
 procedure TRepoFrame.MenuCommitClick(Sender: TObject);
 begin
   if FRepo.Root = '' then
@@ -1055,7 +1087,7 @@ begin
       bkSuccess, BannerActionSeconds, rsPushAction, @CommitPushClick);
   end
   { Behind the upstream a push would be refused: the banner offers the
-    pull first, through File > Pull, which asks how to bring the
+    pull first, through Repository > Pull, which asks how to bring the
     commits in (and about a rewritten branch). }
   else if not Amended and FHasUpstream and (FBehind > 0) and FPullItem.Enabled then
   begin

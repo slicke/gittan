@@ -8,7 +8,9 @@
   (TGittanTabStrip) that stretches from the traffic lights to the right
   edge, as Firefox's tabs do: Back and Forward first, two chevrons
   (SetNav; dim while there is nowhere to go), then a tab per open
-  repository, the one shown filled, then a plus that opens a new tab.
+  repository, the one shown filled, then a plus that opens a new tab,
+  and at the right of the empty part a dim tip (SetTip, the command
+  palette's key), drawn only while the tabs and the plus leave it room.
 
   The strip draws the tabs itself in the system's colors, so it follows
   the window's appearance; a tab with news (something happened in its
@@ -76,6 +78,7 @@ type
       whether the forge view is shown, the mouse on it and pressed. }
     FBanner: NSView;
     FForgeVisible, FForgeShown, FBannerHot, FBannerPressed: boolean;
+    FTip: string;
     FOnSelect, FOnClose: TGittanTabEvent;
     FOnNew, FOnForge, FOnBack, FOnForward: TNotifyEvent;
     function GlobeRoom: double;
@@ -120,6 +123,9 @@ type
       forward (AForward) to, a dim chevron taking no click; ABackHint
       and AForwardHint their tooltips. }
     procedure SetNav(ABack, AForward: boolean; const ABackHint, AForwardHint: string);
+    {** The dim tip at the right of the empty part, left out where the
+      tabs and the plus reach it and while the tabs are fixed. }
+    procedure SetTip(const ATip: string);
     {** A click on a tab: show it. }
     property OnSelect: TGittanTabEvent read FOnSelect write FOnSelect;
     {** The cross or a middle click on a tab: close it. }
@@ -681,6 +687,15 @@ begin
     FStrip.setNeedsDisplay_(True);
 end;
 
+procedure TGittanToolbar.SetTip(const ATip: string);
+begin
+  if ATip = FTip then
+    Exit;
+  FTip := ATip;
+  if FStrip <> nil then
+    FStrip.setNeedsDisplay_(True);
+end;
+
 function TGittanToolbar.NavRect(ANav: integer; const ABounds: NSRect): NSRect;
 begin
   Result := NSMakeRect(Ord(ANav = NavForward) * (NavWidth + NavGap),
@@ -805,6 +820,7 @@ procedure TGittanToolbar.Draw(const ABounds: NSRect);
 var
   i: integer;
   R, C, T: NSRect;
+  S: NSSize;
   Dark, Shown, Hover: boolean;
   Fill, Text, Cross: NSColor;
   Para: NSMutableParagraphStyle;
@@ -894,6 +910,18 @@ begin
       C.origin.x + C.size.width / 2, C.origin.y + C.size.height - 6, Cross, 1.4);
     StrokeLine(C.origin.x + 6, C.origin.y + C.size.height / 2,
       C.origin.x + C.size.width - 6, C.origin.y + C.size.height / 2, Cross, 1.4);
+    { The tip, right-aligned before the banner's room, while it is clear
+      of the plus. }
+    if FTip <> '' then
+    begin
+      Attrs := NSDictionary.dictionaryWithObjectsAndKeys(Font, NSFontAttributeName,
+        NSColor.tertiaryLabelColor, NSForegroundColorAttributeName, nil);
+      S := NSStr(FTip).sizeWithAttributes(Attrs);
+      T := NSMakeRect(ABounds.size.width - GlobeRoom - 10 - S.width,
+        (ABounds.size.height - S.height) / 2, S.width, S.height);
+      if T.origin.x >= C.origin.x + C.size.width + 16 then
+        NSStr(FTip).drawInRect_withAttributes(T, Attrs);
+    end;
   finally
     Para.release;
   end;

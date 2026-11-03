@@ -442,7 +442,6 @@ end;
 procedure TRepoFrame.BranchMenuOpen(Sender: TObject);
 begin
   UpdateBranchItems;
-  FillBranchCommitMenu;
   FillFlowMenu;
 end;
 

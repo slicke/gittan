@@ -25,6 +25,11 @@ ifeq ($(OS),Windows_NT)
   WIDGETSET ?= win32
 else ifeq ($(shell uname -s),Darwin)
   WIDGETSET ?= cocoa
+else ifeq ($(shell uname -s),Haiku)
+  # qt6, through HaikuPorts' libqt6pas (pkgman install libqt6pas): a gtk3
+  # Gittan links there but does not start, as Haiku's GTK 3 lacks symbols
+  # the LCL's gtk3 binding imports.
+  WIDGETSET ?= qt6
 else
   # gtk3: GTK draws its own window decoration under Wayland, so a form can
   # take the title bar (gtk_window_set_titlebar) and keep the shadow and

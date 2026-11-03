@@ -120,6 +120,7 @@ TExtContextInfo = record
   DisplayName: string;       // parsed from header (first line)
   Author: string;            // parsed from header ("(c) ..." line)
   Granted: TExtPermSet;      // baseline + user-approved promptable perms
+  Repos: TStringArray;       // @repos: the repositories it runs for, all when empty
 end;
 
 TExtContextList = specialize TFPGList<PExtContextInfo>;
@@ -471,7 +472,7 @@ public
     const pos: integer): RawUtf8;
 
     {** Show an informational alert dialog to the user. }
-  procedure alert(const msg: string);
+  procedure alert(const msg: string; const AName: string = '');
 
     {** Access a registered callback by name. }
   property callback[f: string]: TJSCallback read findCallback;
@@ -569,6 +570,9 @@ public
   function ExtensionIdForContext(ctx: JSContext): string;
     {** What the extension owning @code(ctx) was granted; [] for none. }
   function GrantedForContext(ctx: JSContext): TExtPermSet;
+  function ContextInScope(ctx: JSContext; const ARoot, ARemoteUrls: string): boolean;
+  function FireIn(const AEvent, APayloadJson: string; AScoped: boolean;
+    const ARoot, ARemoteUrls: string; out ACancelMessage: string): boolean;
 
     {** Folder of the extension owning @code(ctx) (its script's directory),
         or '' for the admin/template context. Module imports are confined
@@ -611,6 +615,19 @@ public
         data permission gets ok, kind, mode and amend alone, none of the
         repository's content. Main thread only. }
   function Fire(const AEvent, APayloadJson: string; out ACancelMessage: string): boolean;
+    overload;
+    {** Fire for the repository at ARoot with the remotes ARemoteUrls: the
+        listeners of an extension whose @repos leaves it out are not
+        called (ExtRepoInScope). }
+  function Fire(const AEvent, APayloadJson, ARoot, ARemoteUrls: string;
+    out ACancelMessage: string): boolean; overload;
+    {** Whether AEvent has a listener for the repository at ARoot with the
+        remotes ARemoteUrls: a caller asks before it builds a payload that
+        costs. }
+  function Listens(const AEvent, ARoot, ARemoteUrls: string): boolean;
+    {** Whether the extension AExtId runs for the repository at ARoot with
+        the remotes ARemoteUrls (its @repos); False for one not loaded. }
+  function ExtInScope(const AExtId, ARoot, ARemoteUrls: string): boolean;
     {** Fire for an event that cannot be cancelled. }
   procedure Emit(const AEvent, APayloadJson: string);
     {** Runs the command AKey (TGittanExtRegistry.CommandKey) with
@@ -829,9 +846,9 @@ end;
 ******************************************************************************}
 
 {** Show a simple informational alert through the host. }
-procedure TGittanExtEngine.alert(const msg: string);
+procedure TGittanExtEngine.alert(const msg: string; const AName: string);
 begin
-  ExtHost.Alert(msg);
+  ExtHost.Alert(AName, msg);
 end;
 
 {** Raise JS exception with filename context. }
@@ -3521,8 +3538,56 @@ begin
         Exit(FExtContexts[i]^.Granted);
 end;
 
+function TGittanExtEngine.ContextInScope(ctx: JSContext;
+  const ARoot, ARemoteUrls: string): boolean;
+var
+  i: integer;
+begin
+  Result := False;
+  if Assigned(FExtContexts) then
+    for i := 0 to FExtContexts.Count - 1 do
+      if (FExtContexts[i] <> nil) and (FExtContexts[i]^.Ctx = ctx) then
+        Exit(ExtRepoInScope(FExtContexts[i]^.Repos, ARoot, ARemoteUrls));
+end;
+
+function TGittanExtEngine.ExtInScope(const AExtId, ARoot, ARemoteUrls: string): boolean;
+var
+  i: integer;
+begin
+  Result := False;
+  if Assigned(FExtContexts) then
+    for i := 0 to FExtContexts.Count - 1 do
+      if (FExtContexts[i] <> nil) and (FExtContexts[i]^.ExtId = AExtId) then
+        Exit(ExtRepoInScope(FExtContexts[i]^.Repos, ARoot, ARemoteUrls));
+end;
+
+function TGittanExtEngine.Listens(const AEvent, ARoot, ARemoteUrls: string): boolean;
+var
+  i: integer;
+begin
+  Result := False;
+  if FRegistry = nil then
+    Exit;
+  for i := 0 to FRegistry.ListenerCount - 1 do
+    if (FRegistry.Listener(i).Event = AEvent) and
+      ContextInScope(FRegistry.Listener(i).Ctx, ARoot, ARemoteUrls) then
+      Exit(True);
+end;
+
 function TGittanExtEngine.Fire(const AEvent, APayloadJson: string;
   out ACancelMessage: string): boolean;
+begin
+  Result := FireIn(AEvent, APayloadJson, False, '', '', ACancelMessage);
+end;
+
+function TGittanExtEngine.Fire(const AEvent, APayloadJson, ARoot, ARemoteUrls: string;
+  out ACancelMessage: string): boolean;
+begin
+  Result := FireIn(AEvent, APayloadJson, True, ARoot, ARemoteUrls, ACancelMessage);
+end;
+
+function TGittanExtEngine.FireIn(const AEvent, APayloadJson: string; AScoped: boolean;
+  const ARoot, ARemoteUrls: string; out ACancelMessage: string): boolean;
 var
   Listeners: TGittanExtListeners;
   i: integer;
@@ -3544,6 +3609,8 @@ begin
     begin
       if IsExtShuttingDown then
         Break;
+      if AScoped and not ContextInScope(Listeners[i].Ctx, ARoot, ARemoteUrls) then
+        Continue;
       if epData in GrantedForContext(Listeners[i].Ctx) then
         arg := ParseJsonIn(Listeners[i].Ctx, APayloadJson)
       else

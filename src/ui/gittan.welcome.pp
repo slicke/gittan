@@ -23,7 +23,8 @@ unit gittan.welcome;
   tells with OnListChanged, for the frame to save and show everywhere. An error is shown in red
   under the name, wrapped to the column, so the next attempt is one click
   or one drop away. While a repository opens it shows only that, in place
-  of the error, the buttons and the list.
+  of the error, the buttons and the list, with the status bar's busy line
+  under it once the open has taken BusyDelay.
 
   It paints itself in the editor's palette, like the summary, and sizes
   its height to its content so it can sit in the same TScrollBox: the
@@ -35,7 +36,7 @@ unit gittan.welcome;
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Graphics, BGRABitmap, gittan.repolist;
+  Classes, SysUtils, Types, Controls, Graphics, ExtCtrls, BGRABitmap, gittan.repolist;
 
 type
   {** A click on a recent repository, with its root. }
@@ -90,6 +91,13 @@ type
     { The canvas Render measures on: the control's as it paints, else the
       measuring one. }
     FC: TCanvas;
+    { The busy line: its timer, the step it is at (-1 until BusyDelay
+      has passed since SetBusy, FBusyStart), and where the last paint
+      put it, which a tick paints alone. }
+    FBusyTimer: TTimer;
+    FBusyPhase: integer;
+    FBusyStart: QWord;
+    FBusyRect: TRect;
     FOnOpen, FOnClone, FOnInit: TNotifyEvent;
     FOnOpenRecent: TGittanOpenRecentEvent;
     FOnListMenu: TGittanListMenuEvent;
@@ -106,6 +114,7 @@ type
       APath: string; AHot, AMissing: boolean; ALineHeight: integer);
     procedure PaintList(var Y: integer; AColLeft, AColWidth, ALineHeight: integer);
     procedure SetHot(AValue: integer);
+    procedure BusyTimerTimer(Sender: TObject);
     function RecentMissing(AIndex: integer): boolean;
     function FitLeft(const AText: string; AMaxWidth: integer): string;
     function LogoBitmap(APixels: integer): TBGRABitmap;
@@ -172,7 +181,7 @@ type
 implementation
 
 uses
-  Math, LazUTF8, BGRABitmapTypes, gittan.statusbar,
+  Math, LazUTF8, LCLIntf, BGRABitmapTypes, gittan.statusbar,
   gittan.textfit, gittan.theme;
 
 { WordmarkDark and WordmarkLight, icons/wordmark/gittan-wordmark-<theme>.png
@@ -215,6 +224,12 @@ const
   FolderRowHeight = 30;
   Indent = 20;
   DragStart = 5;
+  { The busy line under the opening's text: shown once an open has
+    taken this many ms, so a quick one does not flash it; its width and
+    height. }
+  BusyDelay = 400;
+  BusyWidth = 120;
+  BusyHeight = 3;
 
 { TGittanWelcome }
 
@@ -228,6 +243,10 @@ begin
   Align := alTop;
   SetColors(clWindow, clWindowText, clGrayText, clBtnFace, clBtnShadow, clRed);
   FAccent := clHighlight;
+  FBusyTimer := TTimer.Create(Self);
+  FBusyTimer.Enabled := False;
+  FBusyTimer.Interval := BusyStep;
+  FBusyTimer.OnTimer := @BusyTimerTimer;
 end;
 
 destructor TGittanWelcome.Destroy;
@@ -291,10 +310,32 @@ begin
   if FBusy = AMessage then
     Exit;
   FBusy := AMessage;
+  FBusyPhase := -1;
+  FBusyStart := GetTickCount64;
+  FBusyRect := Rect(0, 0, 0, 0);
+  FBusyTimer.Enabled := AMessage <> '';
   FHot := hotNone;
   Cursor := crDefault;
   Layout;
   Invalidate;
+end;
+
+procedure TGittanWelcome.BusyTimerTimer(Sender: TObject);
+begin
+  if FBusyPhase < 0 then
+  begin
+    if GetTickCount64 - FBusyStart < BusyDelay then
+      Exit;
+    FBusyPhase := 0;
+  end
+  else
+    FBusyPhase := (FBusyPhase + 1) mod BusySweep;
+  if not IsVisible then
+    Exit;
+  if HandleAllocated and not IsRectEmpty(FBusyRect) then
+    InvalidateRect(Handle, @FBusyRect, False)
+  else
+    Invalidate;
 end;
 
 procedure TGittanWelcome.SetColors(ABack, AText, ADim, AHover, ALine,
@@ -760,8 +801,10 @@ begin
   ErrHeight := 0;
   ErrLines := TStringList.Create;
   try
+    { The busy line's room is kept from the start, so the text does not
+      move when it shows. }
     if FBusy <> '' then
-      Inc(Total, Px(Pad) + LineHeight)
+      Inc(Total, Px(Pad) + LineHeight + Px(Gap) + Px(BusyHeight))
     else
     begin
       if FError <> '' then
@@ -823,6 +866,11 @@ begin
       Inc(Y, Px(Pad));
       FC.Font.Color := FDim;
       FC.TextOut((Width - FC.TextWidth(FBusy)) div 2, Y, FBusy);
+      Inc(Y, LineHeight + Px(Gap));
+      FBusyRect := Rect((Width - Px(BusyWidth)) div 2, Y, (Width + Px(BusyWidth)) div 2,
+        Y + Px(BusyHeight));
+      if FBusyPhase >= 0 then
+        DrawBusyTrack(FC, FBusyRect, FBusyPhase, FHover, FAccent);
       Exit;
     end;
 

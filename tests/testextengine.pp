@@ -21,7 +21,7 @@ type
 
   TFakeExtHost = class(TGittanExtHost)
   public
-    Alerts, Errors, Logs: TStringList;
+    Alerts, AlertNames, Errors, Logs: TStringList;
     { Each permission prompt as "name|author|perms", each banner as
       "title|detail|0 or 1" and each card as "path|line|text|severity|ext". }
     Asked, Notified, Cards: TStringList;
@@ -33,8 +33,8 @@ type
     OnAsk: procedure of object;
     constructor Create;
     destructor Destroy; override;
-    procedure Alert(const AText: string); override;
-    function Confirm(const AText: string): boolean; override;
+    procedure Alert(const AName, AText: string); override;
+    function Confirm(const AName, AText: string): boolean; override;
     function Prompt(const ACaption, AText, ADefault: string; out AValue: string): boolean; override;
     function Select(const ACaption, AText: string; const AOptions: array of string): integer; override;
     procedure ShowLog(const ATitle, AText: string); override;
@@ -68,6 +68,7 @@ type
     procedure TestCommandRegisteredAndRun;
     procedure TestCommandUnregister;
     procedure TestListenerCancels;
+    procedure TestListenerScopedToRepos;
     procedure TestListenerFalseAndObject;
     procedure TestListenerThrowDoesNotCancel;
     procedure TestOff;
@@ -90,6 +91,7 @@ constructor TFakeExtHost.Create;
 begin
   inherited Create;
   Alerts := TStringList.Create;
+  AlertNames := TStringList.Create;
   Errors := TStringList.Create;
   Logs := TStringList.Create;
   Asked := TStringList.Create;
@@ -105,16 +107,18 @@ begin
   Asked.Free;
   Logs.Free;
   Errors.Free;
+  AlertNames.Free;
   Alerts.Free;
   inherited Destroy;
 end;
 
-procedure TFakeExtHost.Alert(const AText: string);
+procedure TFakeExtHost.Alert(const AName, AText: string);
 begin
   Alerts.Add(AText);
+  AlertNames.Add(AName);
 end;
 
-function TFakeExtHost.Confirm(const AText: string): boolean;
+function TFakeExtHost.Confirm(const AName, AText: string): boolean;
 begin
   Alerts.Add('confirm:' + AText);
   Result := ConfirmAnswer;
@@ -298,6 +302,27 @@ begin
   AssertTrue('other events untouched', FEngine.Fire('push.before', '{}', Msg));
 end;
 
+procedure TExtEngineTest.TestListenerScopedToRepos;
+const
+  Urls = 'remote.origin.url git@github.com:slicke/gittan.git'#10;
+var
+  Info: PExtContextInfo;
+  Msg: string;
+begin
+  Info := Load('scoped', 'Gittan.on("commit.before", function () { return "stopped"; });',
+    PermBaseline + [epData]);
+  Info^.Repos := ['github.com/slicke/*'];
+  AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
+  AssertTrue('listens for its remote', FEngine.Listens('commit.before', '/a', Urls));
+  AssertFalse('not for another', FEngine.Listens('commit.before', '/b', ''));
+  AssertTrue('in scope', FEngine.ExtInScope('scoped', '/a', Urls));
+  AssertFalse('out of scope', FEngine.ExtInScope('scoped', '/b', ''));
+  AssertFalse('its repository is stopped', FEngine.Fire('commit.before', '{}', '/a', Urls, Msg));
+  AssertEquals('its reason', 'stopped', Msg);
+  AssertTrue('another goes', FEngine.Fire('commit.before', '{}', '/b', '', Msg));
+  AssertFalse('unscoped reaches it', FEngine.Fire('commit.before', '{}', Msg));
+end;
+
 procedure TExtEngineTest.TestListenerFalseAndObject;
 var
   Msg: string;
@@ -364,11 +389,13 @@ begin
     'console.log("logged");', PermBaseline);
   AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
   AssertEquals('alerts', 'one,two3,confirm:sure?', FHost.Alerts.CommaText);
+  AssertEquals('alerts name the extension', 'dialogs', FHost.AlertNames[0]);
   AssertEquals('confirm answer', 'true', EvalIn(Info^.Ctx, 'globalThis.c'));
   AssertEquals('prompt answer', 'typed', EvalIn(Info^.Ctx, 'globalThis.p'));
   AssertEquals('select answer', '1', EvalIn(Info^.Ctx, 'globalThis.s'));
   AssertEquals('console.log shown', 1, FHost.Logs.Count);
   AssertTrue('with its text', Pos('logged', FHost.Logs[0]) > 0);
+  AssertEquals('under the extension''s name', 'Extension "dialogs" · console.log: logged', FHost.Logs[0]);
 end;
 
 procedure TExtEngineTest.TestPermissionGate;

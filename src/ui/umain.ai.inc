@@ -8,7 +8,7 @@
   agent's provider) and the agent they pick can be asked (its command
   found; for the API a model named). The first feature is AI at the
   right end of the Commit
-  header, and File > Write Commit Message (Shift+Cmd+K): the agent
+  header, and Commit > Write Commit Message (Shift+Cmd+K): the agent
   writes the message for the ticked files, which goes into the field
   when the field is as it was when it was asked. Either again while it
   writes stops it.
@@ -22,7 +22,7 @@
   fourth Resolve with the agent in a conflict's list (umain.conflicts.inc):
   the agent writes the lines that take the conflict's place, which are
   written as a pick of the list is, so Undo Discard puts it back. The
-  fifth is File > Split Changes into Commits: the agent groups the
+  fifth is Commit > Split Changes into Commits: the agent groups the
   changed files into commits with their messages, and a pick from the
   plan ticks one commit's files and fills in its message. The sixth is
   Fix on a finding's card: the agent changes the file as the finding

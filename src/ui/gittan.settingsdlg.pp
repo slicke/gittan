@@ -127,6 +127,7 @@ resourcestring
   rsExtOpenFolder = 'Open Folder';
   rsExtResetPerms = 'Reset Permissions';
   rsExtPermsLine = 'Permissions: %s';
+  rsExtReposLine = 'Runs for: %s';
   rsExtNotLoaded = 'Not loaded: %s';
   rsSettingsTitle = 'Settings';
   rsEditorPage = 'Editor';
@@ -137,7 +138,7 @@ resourcestring
   rsAIEnabled = 'Turn on the AI features';
   rsAINote = 'They run the agent picked here in the repository, with your own ' +
     'login, or ask a model at an OpenAI-compatible API with your key, to write a ' +
-    'commit message from the ticked files, review the changes and find where ' +
+    'commit message from the included files, review the changes and find where ' +
     'something is. The changes are sent to its provider (Anthropic for Claude ' +
     'Code, GitHub for Copilot, the server named for the API), and when you ask ' +
     'where something is, so is the text of the files an API''s model picks. Off ' +
@@ -1161,6 +1162,8 @@ begin
   if Info.Description <> '' then
     About := About + LineEnding + Info.Description;
   About := About + LineEnding + Format(rsExtPermsLine, [PermSetToCSV(Info.Granted + PermBaseline)]);
+  if Length(Info.Repos) > 0 then
+    About := About + LineEnding + Format(rsExtReposLine, [string.Join(', ', Info.Repos)]);
   if not Info.Loaded and (Info.Error <> '') then
     About := About + LineEnding + Format(rsExtNotLoaded, [Info.Error]);
   FExtInfo.Caption := About;

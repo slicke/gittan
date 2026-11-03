@@ -8,7 +8,7 @@
   a message refers to one. The snapshot reads them (IssueTrackerIn) and
   ApplySnapshot hands them to the summary (UpdateIssueTracker); without
   a tracker a forge's issues are still linked as #<number>
-  (DefaultIssueRegex), opened on the forge. File > Issue Tracker...
+  (DefaultIssueRegex), opened on the forge. Repository > Issue Tracker...
   asks for the address and the expression (one, or one for the
   references and one for the ids within them) and writes them into the
   repository's config; everything left empty takes the tracker out. }

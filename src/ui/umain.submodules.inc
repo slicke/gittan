@@ -20,7 +20,7 @@
   new commits when the submodule has them. A submodule git status
   reports changed is shown the same way from its row in the summary or
   its node in the file tree, the page then with a card for how it moved
-  (CompareSubmodule) and the commits it moved by. File > Submodules and the section's menu update, sync and add
+  (CompareSubmodule) and the commits it moved by. Repository > Submodules and the section's menu update, sync and add
   submodules (at the end of this file). }
 procedure TRepoFrame.SetupSubmodules;
 
@@ -538,7 +538,7 @@ end;
 { ---------------------------------------------------------------------------
   Updating, syncing and adding submodules
   ---------------------------------------------------------------------------
-  File > Submodules updates them all (git submodule update --init
+  Repository > Submodules updates them all (git submodule update --init
   --recursive), syncs their URLs from .gitmodules and adds one; the
   section's menu updates or syncs the row it was opened on, and a
   submodule shown while it is not checked out, or checked out elsewhere

@@ -2,8 +2,9 @@ unit umain;
 
 {$mode objfpc}{$H+}
 
-{ The form draws its own title bar on Windows and GTK 3 (gittan.owntitlebar). }
-{$IF DEFINED(LCLWin32) OR DEFINED(LCLGtk3)}{$DEFINE OWNBAR}{$ENDIF}
+{ The form draws its own title bar on Windows and GTK 3, and a row of tabs
+  under the menu bar on Qt (gittan.owntitlebar). }
+{$IF DEFINED(LCLWin32) OR DEFINED(LCLGtk3) OR DEFINED(LCLQt5) OR DEFINED(LCLQt6)}{$DEFINE OWNBAR}{$ENDIF}
 
 interface
 
@@ -288,14 +289,14 @@ type
     FRemoteUrls: string;
     { The issue tracker the repository's config names (the snapshot's),
       whose references in commit messages the summary's card links
-      (umain.issues.inc); File > Issue Tracker... sets it. }
+      (umain.issues.inc); Repository > Issue Tracker... sets it. }
     FIssueTracker: TGittanIssueTracker;
     FIssueTrackerItem: TMenuItem;
     FForgeItems: array of TMenuItem;
     FForgeCaptions: array of string;
     { The AI features (umain.ai.inc, gittan.ai), shown only once the
       settings turn them on and the agent's command is found: the agent
-      the settings pick as it is set up (FindAI), File > Write Commit
+      the settings pick as it is set up (FindAI), Commit > Write Commit
       Message (the Commit header's AI does the same), the job writing
       it, and the field's text when it started, which the message
       replaces only while it is unchanged. }
@@ -325,7 +326,7 @@ type
       (-1 while the list has none). }
     FConflictJob: TGittanConflictJob;
     FConflictAIItem, FConflictMergeItem: integer;
-    { Splitting the changes into commits (umain.ai.inc): File > Split
+    { Splitting the changes into commits (umain.ai.inc): Commit > Split
       Changes into Commits, the job while it runs, the plan it gave
       (pruned of what has been committed since, PrunePlan) and the list
       it is picked from. }
@@ -514,6 +515,9 @@ type
     FCommitOn, FCommitOff: TStringList;
     FCommitPanel, FCommitBox, FCommitRow: TPanel;
     FCommitHeader: TGittanSectionHeader;
+    { Whether there is nothing to commit, and whether the section folded
+      itself for that (umain.commit.inc, UpdateCommitState). }
+    FCommitIdle, FCommitAutoFolded: boolean;
     FCommitMemo: TMemo;
     FCommitAmend: TCheckBox;
     { After Amend: "⌄", or the option that is on ("Sign-off ⌄") in the
@@ -537,7 +541,7 @@ type
     { How many changed files are chosen and how many could be (not the
       conflicts), as UpdateCommitState last counted them. }
     FChosenCount, FChoosableCount: integer;
-    { Tick All Files and Untick All Files in the file menu, over the
+    { Include All Files and Leave Out All Files in the file menu, over the
       tree while it chooses what to commit. }
     FTickSepItem, FTickAllItem, FUntickAllItem: TMenuItem;
     FCommitNote: TGittanHintBox;
@@ -585,8 +589,9 @@ type
     FRemoteAhead: integer;
     FRemoteHead: string;
     FFetchItem, FPullItem, FPushItem, FForcePushItem: TMenuItem;
-    { Branch > Commit: the commit menu of the commit shown. }
-    FBranchCommitMenu: TMenuItem;
+    { Commit > Commit abc1234: the commit menu of the commit shown, and in
+      its place Pick a Commit in the Graph... while none is. }
+    FBranchCommitMenu, FPickCommitItem: TMenuItem;
     { The commit FillBranchCommitMenu read last, so the command palette,
       which opens the Branch menu as it lists the actions, runs no git
       log for it again; forgotten with every snapshot. }
@@ -620,7 +625,7 @@ type
     { Asks the remotes again SubmodulePoll ms after the last job of a
       round finished; off while no repository is open. }
     FSubTimer: TTimer;
-    { The submodules' actions: File > Submodules, the section's menu with
+    { The submodules' actions: Repository > Submodules, the section's menu with
       the items it enables, and the index of the shown submodule's
       Update pill in the header (-1 when it has none). }
     FSubUpdateAllItem, FSubSyncAllItem, FSubAddItem: TMenuItem;
@@ -639,7 +644,7 @@ type
       mouse is on and the row it is on (-1 for none; for a conflicted
       file the conflict whose button it is on), the timer that shows the
       pills at the row's end after a pause and the pills; the blocks
-      discarded, latest last, which File > Undo Discard puts back; and
+      discarded, latest last, which Changes > Undo Discard puts back; and
       the two menu items. }
     FHotDiscard, FHotRow: integer;
     FPillTimer: TTimer;
@@ -963,7 +968,7 @@ type
       them (sorted), the locks the job last read,
       the job and whether to read again when it is done, the header's
       note of a lock and the note it took the place of, the file menu's
-      items, File > Git LFS Locks...,
+      items, Repository > Git LFS Locks...,
       its list, the locks it shows and the one its menu is for. }
     FLfsInstalled: boolean;
     FLfsLockable: TStringList;
@@ -1514,6 +1519,9 @@ type
     procedure UpdateDiscardItems;
     procedure NoteDiscard(const ABlock: TGittanDiscard);
     procedure FileMenuClick(Sender: TObject);
+    procedure RepoMenuOpen(Sender: TObject);
+    procedure CommitMenuOpen(Sender: TObject);
+    procedure ChangesMenuOpen(Sender: TObject);
     procedure MenuDiscardClick(Sender: TObject);
     procedure MenuUndoDiscardClick(Sender: TObject);
     function DiscardBackText(const ABlock: TGittanDiscard): string;
@@ -1631,7 +1639,7 @@ type
     function AIAvailable: boolean;
     {** The agent's name for the hints and messages (TGittanAI.Title). }
     function AgentName: string;
-    {** Shows AI in the Commit header and File > Write Commit Message
+    {** Shows AI in the Commit header and Commit > Write Commit Message
       when AIAvailable, enabled as the commit section allows; from
       UpdateCommitState. }
     procedure UpdateMessageAction;
@@ -1666,7 +1674,7 @@ type
     procedure ConflictJobDone(Sender: TObject);
     function EditingRepoPath(const ARelPath: string): boolean;
     procedure AbandonConflictJob;
-    {** File > Split Changes into Commits while AIAvailable: enabled with
+    {** Commit > Split Changes into Commits while AIAvailable: enabled with
       two files or more to choose from, or a plan held; from
       UpdateMessageAction. }
     procedure UpdateSplitItem;
@@ -1881,6 +1889,7 @@ type
     procedure CommitPushClick(Sender: TObject);
     procedure ColorCommit;
     procedure CommitHeaderToggle(Sender: TObject);
+    procedure ShowCommitBox;
     function CommitChoosing: boolean;
     function CommitChosen(AIndex: integer): boolean;
     procedure SetCommitChosen(AIndex: integer; AValue: boolean);
@@ -2467,6 +2476,9 @@ resourcestring
   rsAppName = 'Git Tree Analyzer & Navigator';
   rsAppShortName = 'Gittan';
   rsFile = '&File';
+  rsRepoMenu = '&Repository';
+  rsCommitMenuTitle = 'Co&mmit';
+  rsChangesMenu = 'C&hanges';
   rsOpen = '&Open...';
   rsOpenRepo = 'Open &Repository...';
   rsNewTab = 'New &Tab';
@@ -2641,7 +2653,7 @@ resourcestring
   rsSettings = 'Se&ttings...';
   rsAbout = '&About Gittan';
   rsUpdateTitle = 'Gittan Updates';
-  rsUpdateBadge = 'Build %d available';
+  rsUpdateBadge = '%s available';
   rsUpdateHint = '%s is out; this is %s.';
   rsUpdateHintClick = 'Click to download it';
   rsUpdateAvailable = '%s is out; this is %s. Download it from GitHub?';
@@ -2734,7 +2746,7 @@ resourcestring
   rsResolveAIEditing = '%s''s resolution was not used: %s is being edited.';
   rsResolvedAI = '%s resolved the conflict at line %d of %s: %s';
   rsResolvedAILast = '%s resolved the last conflict in %s, now marked resolved: %s';
-  rsResolvedAIUndo = 'File > Undo Discard puts it back';
+  rsResolvedAIUndo = 'Changes > Undo Discard puts it back';
   rsSplitMenu = 'Split Changes into Commits...';
   rsSplitStopMenu = 'Stop Splitting into Commits';
   rsSplitting = '%s is splitting the changes into commits...';
@@ -2744,7 +2756,7 @@ resourcestring
   rsPlanFile = '1 file';
   rsPlanFiles = '%d files';
   rsPlanAgain = 'Plan Again';
-  rsPlanTicked = 'Ticked the files of commit %d of %d: commit them, then File > Split ' +
+  rsPlanTicked = 'Included the files of commit %d of %d: commit them, then Commit > Split ' +
     'Changes into Commits for the next';
   rsPlanOne = '%s sees the changes as one commit: its message is in the field';
   rsFixLink = '✦ Fix';
@@ -2769,7 +2781,7 @@ resourcestring
   rsSeverityQuestion = 'Question';
   rsWriteMessageMenu = 'Write Commit Message';
   rsStopMessageMenu = 'Stop Writing Commit Message';
-  rsWriteMessageHint = 'Write the message with %s from the ticked files';
+  rsWriteMessageHint = 'Write the message with %s from the included files';
   rsWritingMessage = 'Stop';
   rsWritingMessageHint = '%s is writing the message; click to stop';
   rsWritingStatus = '%s is writing the message...';
@@ -2778,15 +2790,16 @@ resourcestring
   rsCommitting = 'Committing...';
   rsCommitMessageHint = {$IFDEF DARWIN}'Message (⌘↩ to commit)'{$ELSE}'Message (Ctrl+Enter to commit)'{$ENDIF};
   rsCommitCount = '%d of %d';
+  rsCommitNoChanges = 'no changes';
   rsCommitNotHead = 'Commits go on HEAD. Compare with HEAD to choose files.';
   rsCommitConflicts = 'Resolve the conflicts first (%d files).';
   rsCommitConflictOne = 'Resolve the conflict first.';
   rsNextConflictLink = 'Next Conflict (%s)';
   rsResolvePill = 'Resolve';
   rsCommitWhole = 'While %s, everything staged goes into the commit too.';
-  rsCommitNothing = 'Tick the files to commit.';
-  rsCommitTickHint = 'Ticked files go into the commit. Click a box or press Space to ' +
-    'leave one out.';
+  rsCommitNothing = 'Include the files to commit.';
+  rsCommitTickHint = 'A file with a tick goes into the commit. Click its box or press ' +
+    'Space to leave it out.';
   rsDontShowAgain = 'Don''t Show Again';
   rsCommitted = 'Committed %s: %s';
   rsCommittedTitle = 'Committed %s';
@@ -2794,8 +2807,8 @@ resourcestring
   rsCommittedBehindOne = '%s · pull the new commit on %s, then push';
   rsPulledPush = '%d commits to push';
   rsPulledPushOne = '1 commit to push';
-  rsTickAllItem = 'Tick All Files';
-  rsUntickAllItem = 'Untick All Files';
+  rsTickAllItem = 'Include All Files';
+  rsUntickAllItem = 'Leave Out All Files';
   rsPushAction = 'Push';
   rsSubjectCount = '%d/%d';
   rsSubjectCountHint = 'Characters in the first line. git log and GitHub cut it after %d.';
@@ -2925,7 +2938,7 @@ resourcestring
   rsIssueTrackerIdRegex = 'Expression for the ids within a reference (optional)';
   rsIssueTrackerSaved = 'Issue tracker saved';
   rsIssueTrackerFailed = 'Could not save the issue tracker';
-  rsIssueNoAddress = 'No address is set for issue %s: File > Issue Tracker...';
+  rsIssueNoAddress = 'No address is set for issue %s: Repository > Issue Tracker...';
   rsIssueNeedsRegex = 'An expression for the ids needs the regular expression that finds ' +
     'the references.';
   rsIssueBadRegex = 'That is no regular expression: %s';
@@ -2993,7 +3006,7 @@ resourcestring
   rsCaWasReset = 'Reset %s to %s';
   rsCaConflicts = 'Stopped with conflicts: resolve them, then continue';
   rsCaRebase = 'Rebase Interactively from Here...';
-  rsCaFixup = 'Fixup with the Ticked Files';
+  rsCaFixup = 'Fixup with the Included Files';
   rsFixupCommitted = 'Committed a fixup of %s';
   rsFixupFold = 'Fold It In...';
   rsCaBisect = 'Bisect';
@@ -3058,7 +3071,6 @@ resourcestring
   rsBmCommitMenu = 'Commit %s';
   rsGraphDragTip = 'Drag a commit onto %s to merge it.';
   rsGraphLoadFailed = 'Could not read the history';
-  rsBmCommitNone = 'Commit';
   rsBmCommitPick = 'Pick a Commit in the Graph...';
   rsBmNewItem = '&New Branch...';
   rsBmMergeItem = '&Merge into %s...';
@@ -3224,7 +3236,7 @@ resourcestring
   rsTagDeleteRemoteAsk = 'Delete the tag %s on %s, for everyone who uses it? The local one stays.';
   rsStashMenu = 'Stas&h';
   rsStashAllItem = '&Stash Changes...';
-  rsStashChosenItem = 'Stash &Ticked Files...';
+  rsStashChosenItem = 'Stash &Included Files...';
   rsPopStashItem = '&Pop Latest Stash';
   rsApplyStashItem = '&Apply Latest Stash';
   rsStashListItem = 'Stas&hes...';
@@ -3235,7 +3247,7 @@ resourcestring
   rsStashUntracked = 'with untracked files';
   rsStashTitle = 'Stash Changes';
   rsStashPrompt = 'A message for the stash of every change (may be left empty)';
-  rsStashPromptChosen = 'A message for the stash of the %d ticked files (may be left empty)';
+  rsStashPromptChosen = 'A message for the stash of the %d included files (may be left empty)';
   rsStashed = 'Stashed the changes of %d files';
   rsStashedOne = 'Stashed the changes of 1 file';
   rsNothingToStash = 'Nothing to stash';
@@ -3463,9 +3475,9 @@ resourcestring
   rsChangedOnDisk = 'changed on disk';
   rsDiscardChange = '&Discard Change';
   rsUndoDiscard = '&Undo Discard';
-  rsLeaveOutItem = '&Leave Change Out of Commit';
-  rsIncludeItem = '&Include Change in Commit';
-  rsLeaveOutLinesItem = 'Skip Selected Lines in Commit';
+  rsLeaveOutItem = '&Leave Out of Commit';
+  rsIncludeItem = '&Include in Commit';
+  rsLeaveOutLinesItem = 'Leave Selected Lines Out of Commit';
   rsIncludeLinesItem = 'Include Selected Lines in Commit';
   rsLeftOutLines = 'Left %d changed lines of %s out of the commit';
   rsLeftOutLine = 'Left a changed line of %s out of the commit';
@@ -3496,7 +3508,7 @@ resourcestring
   rsFileHistoryItem = 'Show History';
   rsRevertTitle = 'Revert';
   rsRevertFilesAsk = 'Revert %s to how HEAD has it? Your changes are undone, and a new ' +
-    'file is deleted. File > Undo Revert brings them back.';
+    'file is deleted. Changes > Undo Revert brings them back.';
   rsRevertFilesAction = 'Revert';
   rsRevertCount = '%d files in %s';
   rsReverted = 'Reverted %s';
@@ -3528,12 +3540,12 @@ resourcestring
   rsKeptBlock = 'Marked the change at line %d of %s reviewed';
   rsUnkept = 'Shows the change at line %d of %s again';
   rsUnkeptAll = 'Shows every change of %s again';
-  rsLeaveOutPill = 'Skip in Commit';
+  rsLeaveOutPill = 'Leave Out of Commit';
   rsLeaveOutPillHint = 'Leave the change out of the next commit; it stays in the file';
   rsIncludePill = 'Include in Commit';
   rsIncludePillHint = 'Put the change back into the next commit';
   rsDiscardPillHint = 'Put the lines back as they were, after asking; ' +
-    'File > Undo Discard brings them back';
+    'Changes > Undo Discard brings them back';
   rsIncludeAllAction = 'Include All';
   rsBlockDiscardItem = 'Discard Change...';
   rsLeftOutBlock = 'Left the change at line %d of %s out of the commit';
@@ -3541,7 +3553,7 @@ resourcestring
   rsIncludedBlock = 'The change at line %d of %s goes into the commit';
   rsIncludedAll = 'Every change of %s goes into the commit';
   rsDiscardAsk = 'Discard this change to %s?' + LineEnding +
-    '%s. File > Undo Discard brings it back.';
+    '%s. Changes > Undo Discard brings it back.';
   rsDiscardBackOne = 'The line goes back to how it is in %s';
   rsDiscardBackMany = 'The %d lines go back to how they are in %s';
   rsDiscarded = 'Discarded the change at line %d of %s';
@@ -5505,8 +5517,8 @@ end;
 procedure TRepoFrame.BuildMenu;
 var
   Main: TMainMenu;
-  FileMenu, EditMenu, BranchMenu, StashMenu, ViewMenu, GoMenu, ToolsMenu, WindowMenu, HelpMenu,
-    Item, Sub: TMenuItem;
+  FileMenu, EditMenu, RepoMenu, CommitMenu, ChangesMenu, BranchMenu, StashMenu, ViewMenu, GoMenu,
+    ToolsMenu, WindowMenu, HelpMenu, Item, Sub: TMenuItem;
   i: integer;
 
   function AddItem(AParent: TMenuItem; const ACaption: string; AShortCut: TShortCut;
@@ -5533,83 +5545,27 @@ begin
   FAppMenuItem := Item;
   {$ENDIF}
 
+  { File: tabs, and getting repositories and files in and out. }
   FileMenu := TMenuItem.Create(Main);
   FileMenu.Caption := rsFile;
+  FileMenu.OnClick := @FileMenuClick;
   Main.Items.Add(FileMenu);
   AddItem(FileMenu, rsNewTab, ShortCut(VK_T, [ssModifier]), @MenuNewTabClick);
   AddItem(FileMenu, rsOpenRepo, ShortCut(VK_O, [ssModifier, ssShift]), @MenuOpenRepoClick);
   FRecentMenu := AddItem(FileMenu, rsOpenRecent, 0, nil);
   RebuildRecentMenu;
+  FCloneItem := AddItem(FileMenu, rsCloneItem, 0, @MenuCloneClick);
+  FInitItem := AddItem(FileMenu, rsInitItem, 0, @MenuInitClick);
+  FileMenu.Add(NewLine);
   AddItem(FileMenu, rsRepoListItem, 0, @MenuRepoListClick);
   FAddListItem := AddItem(FileMenu, rsAddListItem, 0, @MenuAddListClick);
   UpdateRepoListItem;
-  FCloneItem := AddItem(FileMenu, rsCloneItem, 0, @MenuCloneClick);
-  FInitItem := AddItem(FileMenu, rsInitItem, 0, @MenuInitClick);
+  FileMenu.Add(NewLine);
   AddItem(FileMenu, rsOpen, ShortCut(VK_O, [ssModifier]), @MenuOpenClick);
   FSaveItem := AddItem(FileMenu, rsSave, ShortCut(VK_S, [ssModifier]), @MenuSaveClick);
   FSaveItem.Enabled := False;
   AddItem(FileMenu, rsCloseTab, ShortCut(VK_W, [ssModifier]), @MenuCloseTabClick);
-  FileMenu.Add(NewLine);
-  FCommitItem := AddItem(FileMenu, rsCommitMenu, ShortCut(VK_K, [ssModifier]),
-    @MenuCommitClick);
-  FCommitItem.Enabled := False;
-  FMessageItem := AddItem(FileMenu, rsWriteMessageMenu, ShortCut(VK_K, [ssModifier,
-    ssShift]), @MessageActionClick);
-  FMessageItem.Visible := False;
-  FSplitItem := AddItem(FileMenu, rsSplitMenu, 0, @MenuSplitClick);
-  FSplitItem.Visible := False;
-  { The person in the Commit header, for the keyboard. }
-  FIdentityItem := AddItem(FileMenu, rsIdentityMenu, 0, @IdentityClick);
-  FIdentityItem.Enabled := False;
-  { The Commit section's options, where they are found and in the
-    palette; the chevron beside Amend has them too. }
-  FSignOffMenuItem := AddItem(FileMenu, rsSignOffItem, 0, @SignOffItemClick);
-  FSkipHooksMenuItem := AddItem(FileMenu, rsSkipHooksItem, 0, @SkipHooksItemClick);
-  UpdateOptionItems;
-  FPullItem := AddItem(FileMenu, rsPullMenu, ShortCut(VK_L, [ssModifier, ssShift]),
-    @MenuPullClick);
-  FPushItem := AddItem(FileMenu, rsPushMenu, ShortCut(VK_P, [ssModifier, ssShift]),
-    @MenuPushClick);
-  FForcePushItem := AddItem(FileMenu, rsForcePushMenu, ShortCut(VK_P, [ssModifier, ssShift,
-    ssAlt]), @MenuForcePushClick);
-  FFetchItem := AddItem(FileMenu, rsFetchMenu, ShortCut(VK_F, [ssModifier, ssAlt]),
-    @MenuFetchClick);
-  FRemotesItem := AddItem(FileMenu, rsRemotesItem, 0, @MenuRemotesClick);
-  FIssueTrackerItem := AddItem(FileMenu, rsIssueTrackerItem, 0, @MenuIssueTrackerClick);
-  Sub := AddItem(FileMenu, rsSubmodulesMenu, 0, nil);
-  FSubUpdateAllItem := AddItem(Sub, rsSubUpdateAllItem, 0, @MenuSubUpdateAllClick);
-  FSubSyncAllItem := AddItem(Sub, rsSubSyncAllItem, 0, @MenuSubSyncAllClick);
-  Sub.Add(NewLine);
-  FSubAddItem := AddItem(Sub, rsSubAddItem, 0, @MenuSubAddClick);
-  UpdateRemoteItems;
-  FileMenu.Add(NewLine);
-  FDiscardItem := AddItem(FileMenu, rsDiscardChange, ShortCut(VK_BACK, [ssModifier, ssShift]),
-    @MenuDiscardClick);
-  FUndoDiscardItem := AddItem(FileMenu, rsUndoDiscard, ShortCut(VK_Z, [ssModifier, ssAlt]),
-    @MenuUndoDiscardClick);
-  FLeaveOutItem := AddItem(FileMenu, rsLeaveOutItem, ShortCut(VK_K, [ssModifier, ssAlt]),
-    @MenuLeaveOutClick);
-  FResolveItem := AddItem(FileMenu, rsResolveHere, ShortCut(VK_R, [ssModifier, ssShift]),
-    @MenuResolveHereClick);
-  FMergeEditorItem := AddItem(FileMenu, rsMergeEditorItem, ShortCut(VK_E, [ssModifier, ssShift]),
-    @MenuMergeEditorClick);
-  FRevertFileItem := AddItem(FileMenu, rsRevertFile, ShortCut(VK_BACK, [ssModifier, ssAlt]),
-    @MenuRevertFileClick);
-  FUndoRevertItem := AddItem(FileMenu, rsUndoRevert, 0, @MenuUndoRevertClick);
-  FCleanItem := AddItem(FileMenu, rsCleanItem, 0, @MenuCleanClick);
-  FApplyPatchesItem := AddItem(FileMenu, rsApplyPatchesItem, 0, @MenuApplyPatchesClick);
-  FLfsLocksItem := AddItem(FileMenu, rsLfsLocksItem, 0, @MenuLfsLocksClick);
-  FLfsLocksItem.Visible := False;
-  UpdateDiscardItems;
-  FileMenu.OnClick := @FileMenuClick;
-  FileMenu.Add(NewLine);
-  FTerminalItem := AddItem(FileMenu, rsOpenTerminal, ShortCut(VK_T, [ssModifier, ssAlt]),
-    @MenuOpenTerminalClick);
 
-  FTerminalItem.Enabled := False;
-
-  { The Branch menu: the verb first, then the branch from the list
-    (umain.branches.inc). }
   { What the focused control does with text, as every application's Edit
     menu (EditAction), then Find, which acts on the editor. }
   EditMenu := TMenuItem.Create(Main);
@@ -5633,6 +5589,96 @@ begin
   AddItem(EditMenu, rsFindNext, ShortCut(VK_G, [ssModifier]), @MenuFindNextClick);
   AddItem(EditMenu, rsFindPrev, ShortCut(VK_G, [ssModifier, ssShift]), @MenuFindPrevClick);
 
+  { Repository: what is done to the open repository as a whole, its
+    remotes, its submodules and its untracked files (umain.remote.inc,
+    umain.clone.inc, umain.submodules.inc, umain.clean.inc). }
+  RepoMenu := TMenuItem.Create(Main);
+  RepoMenu.Caption := rsRepoMenu;
+  RepoMenu.OnClick := @RepoMenuOpen;
+  Main.Items.Add(RepoMenu);
+  FPullItem := AddItem(RepoMenu, rsPullMenu, ShortCut(VK_L, [ssModifier, ssShift]),
+    @MenuPullClick);
+  FPushItem := AddItem(RepoMenu, rsPushMenu, ShortCut(VK_P, [ssModifier, ssShift]),
+    @MenuPushClick);
+  FForcePushItem := AddItem(RepoMenu, rsForcePushMenu, ShortCut(VK_P, [ssModifier, ssShift,
+    ssAlt]), @MenuForcePushClick);
+  FFetchItem := AddItem(RepoMenu, rsFetchMenu, ShortCut(VK_F, [ssModifier, ssAlt]),
+    @MenuFetchClick);
+  RepoMenu.Add(NewLine);
+  FRemotesItem := AddItem(RepoMenu, rsRemotesItem, 0, @MenuRemotesClick);
+  Sub := AddItem(RepoMenu, rsSubmodulesMenu, 0, nil);
+  FSubUpdateAllItem := AddItem(Sub, rsSubUpdateAllItem, 0, @MenuSubUpdateAllClick);
+  FSubSyncAllItem := AddItem(Sub, rsSubSyncAllItem, 0, @MenuSubSyncAllClick);
+  Sub.Add(NewLine);
+  FSubAddItem := AddItem(Sub, rsSubAddItem, 0, @MenuSubAddClick);
+  FIssueTrackerItem := AddItem(RepoMenu, rsIssueTrackerItem, 0, @MenuIssueTrackerClick);
+  UpdateRemoteItems;
+  RepoMenu.Add(NewLine);
+  FCleanItem := AddItem(RepoMenu, rsCleanItem, 0, @MenuCleanClick);
+  FApplyPatchesItem := AddItem(RepoMenu, rsApplyPatchesItem, 0, @MenuApplyPatchesClick);
+  FLfsLocksItem := AddItem(RepoMenu, rsLfsLocksItem, 0, @MenuLfsLocksClick);
+  FLfsLocksItem.Visible := False;
+  RepoMenu.Add(NewLine);
+  FTerminalItem := AddItem(RepoMenu, rsOpenTerminal, ShortCut(VK_T, [ssModifier, ssAlt]),
+    @MenuOpenTerminalClick);
+  FTerminalItem.Enabled := False;
+
+  { Commit: the commit, its message and options, the person, and the
+    menu of the commit shown (umain.commit.inc, umain.commitactions.inc). }
+  CommitMenu := TMenuItem.Create(Main);
+  CommitMenu.Caption := rsCommitMenuTitle;
+  CommitMenu.OnClick := @CommitMenuOpen;
+  Main.Items.Add(CommitMenu);
+  FCommitItem := AddItem(CommitMenu, rsCommitMenu, ShortCut(VK_K, [ssModifier]),
+    @MenuCommitClick);
+  FCommitItem.Enabled := False;
+  FMessageItem := AddItem(CommitMenu, rsWriteMessageMenu, ShortCut(VK_K, [ssModifier,
+    ssShift]), @MessageActionClick);
+  FMessageItem.Visible := False;
+  FSplitItem := AddItem(CommitMenu, rsSplitMenu, 0, @MenuSplitClick);
+  FSplitItem.Visible := False;
+  CommitMenu.Add(NewLine);
+  { The Commit section's options, where they are found and in the
+    palette; the chevron beside Amend has them too. }
+  FSignOffMenuItem := AddItem(CommitMenu, rsSignOffItem, 0, @SignOffItemClick);
+  FSkipHooksMenuItem := AddItem(CommitMenu, rsSkipHooksItem, 0, @SkipHooksItemClick);
+  UpdateOptionItems;
+  { The person in the Commit header, for the keyboard. }
+  FIdentityItem := AddItem(CommitMenu, rsIdentityMenu, 0, @IdentityClick);
+  FIdentityItem.Enabled := False;
+  CommitMenu.Add(NewLine);
+  { The commit menu of the commit shown, so cherry-pick, revert, reset
+    and the rest are in the menu bar and the palette too. }
+  FBranchCommitMenu := AddItem(CommitMenu, '', 0, nil);
+  FPickCommitItem := AddItem(CommitMenu, rsBmCommitPick, 0, @MenuPickCommitClick);
+  FillBranchCommitMenu;
+
+  { Changes: what is done to a change or a changed file before it is
+    committed (umain.discard.inc, umain.leaveout.inc, umain.conflicts.inc,
+    umain.merge.inc, umain.revert.inc). }
+  ChangesMenu := TMenuItem.Create(Main);
+  ChangesMenu.Caption := rsChangesMenu;
+  ChangesMenu.OnClick := @ChangesMenuOpen;
+  Main.Items.Add(ChangesMenu);
+  FDiscardItem := AddItem(ChangesMenu, rsDiscardChange, ShortCut(VK_BACK, [ssModifier, ssShift]),
+    @MenuDiscardClick);
+  FUndoDiscardItem := AddItem(ChangesMenu, rsUndoDiscard, ShortCut(VK_Z, [ssModifier, ssAlt]),
+    @MenuUndoDiscardClick);
+  FLeaveOutItem := AddItem(ChangesMenu, rsLeaveOutItem, ShortCut(VK_K, [ssModifier, ssAlt]),
+    @MenuLeaveOutClick);
+  ChangesMenu.Add(NewLine);
+  FResolveItem := AddItem(ChangesMenu, rsResolveHere, ShortCut(VK_R, [ssModifier, ssShift]),
+    @MenuResolveHereClick);
+  FMergeEditorItem := AddItem(ChangesMenu, rsMergeEditorItem, ShortCut(VK_E, [ssModifier, ssShift]),
+    @MenuMergeEditorClick);
+  ChangesMenu.Add(NewLine);
+  FRevertFileItem := AddItem(ChangesMenu, rsRevertFile, ShortCut(VK_BACK, [ssModifier, ssAlt]),
+    @MenuRevertFileClick);
+  FUndoRevertItem := AddItem(ChangesMenu, rsUndoRevert, 0, @MenuUndoRevertClick);
+  UpdateDiscardItems;
+
+  { The Branch menu: the verb first, then the branch from the list
+    (umain.branches.inc). }
   BranchMenu := TMenuItem.Create(Main);
   BranchMenu.Caption := rsBranchMenu;
   BranchMenu.OnClick := @BranchMenuOpen;
@@ -5651,10 +5697,6 @@ begin
   FMergeItem.Tag := Ord(blMerge);
   FRebaseItem := AddItem(BranchMenu, '', 0, @MenuBranchListClick);
   FRebaseItem.Tag := Ord(blRebase);
-  { The commit menu of the commit shown, so cherry-pick, revert, reset
-    and the rest are in the menu bar and the palette too. }
-  FBranchCommitMenu := AddItem(BranchMenu, rsBmCommitNone, 0, nil);
-  FillBranchCommitMenu;
   BranchMenu.Add(NewLine);
   FCompareBranchItem := AddItem(BranchMenu, '', 0, @MenuBranchListClick);
   FCompareBranchItem.Tag := Ord(blBranchSince);
@@ -7146,6 +7188,8 @@ begin
     Exit;
   end;
   FRepo.OpenAt(Job.Root, Job.GitDir);
+  { The commands of an extension whose @repos names this root. }
+  QueueRebuildExtMenu;
   ShowSidebar(True);
   LoadCommitDraft;
   { The exclude file lives in the git directory, which git names (a
@@ -7294,6 +7338,8 @@ begin
   begin
     FRemoteUrls := ASnap.RemoteUrls;
     ReFindForge;
+    { An extension's @repos may name a remote. }
+    QueueRebuildExtMenu;
   end;
   FIssueTracker := ASnap.IssueTracker;
   UpdateIssueTracker;

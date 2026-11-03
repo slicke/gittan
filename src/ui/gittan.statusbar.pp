@@ -170,8 +170,8 @@ type
     procedure SetFiles(const AText: string);
     {** The caret's position ("Ln 12, Col 4"), '' for none. }
     procedure SetPosition(const AText: string);
-    {** A newer Gittan ("Build 109 available") as a green badge, '' for
-      none. }
+    {** A newer Gittan ("0.14 available", the release's title) as a green
+      badge, '' for none. }
     procedure SetUpdate(const AText: string);
     {** Shows AText on the track in ATone, in place of any message before.
       It clears itself after ASeconds; 0 keeps it until the next message
@@ -209,6 +209,12 @@ type
       them. }
     property OnPartClick: TGittanStatusClickEvent read FOnPartClick write FOnPartClick;
   end;
+
+const
+  {** The busy line: the timer's step in ms and the steps of one sweep
+    there and back, for DrawBusyTrack's APhase. }
+  BusyStep = 40;
+  BusySweep = 44;
 
 {** A transport button, for SetTransport. }
 function StatusButton(const ACaption, AIcon: string; ATone: TGittanStatusTone = stNormal;
@@ -268,6 +274,13 @@ procedure FillHover(ACanvas: TCanvas; const ARect: TRect; ARadius: integer; ACol
   that ends a chip dropping a list. }
 procedure DrawChevron(ACanvas: TCanvas; CX, CY: integer; AColor: TColor);
 
+{** The busy line in ARect: the track in ATrack, and a stretch of AFill
+  that eases from one end to the other and back, slowest at the ends,
+  at step APhase of BusySweep. The status bar's while a job runs, the
+  welcome view's while a repository opens. }
+procedure DrawBusyTrack(ACanvas: TCanvas; const ARect: TRect; APhase: integer;
+  ATrack, AFill: TColor);
+
 implementation
 
 uses
@@ -301,11 +314,8 @@ const
   TrackNarrow = 140;
   TrackHeight = 3;
   { The stretch that slides on the track while something is under way:
-    its width as a part of the track, the timer's step in ms and the
-    steps of one sweep there and back. }
+    its width as a part of the track. }
   BusyPart = 4;
-  BusyStep = 40;
-  BusySweep = 44;
   { The name and the branch are cut to these. }
   NameMax = 220;
   BranchMax = 200;
@@ -384,6 +394,25 @@ begin
   ACanvas.Brush.Style := bsSolid;
   ACanvas.Brush.Color := AColor;
   ACanvas.RoundRect(ARect, ARadius, ARadius);
+  ACanvas.Pen.Style := psSolid;
+  ACanvas.Brush.Style := bsClear;
+end;
+
+procedure DrawBusyTrack(ACanvas: TCanvas; const ARect: TRect; APhase: integer;
+  ATrack, AFill: TColor);
+var
+  H, Fill, X: integer;
+begin
+  H := ARect.Bottom - ARect.Top;
+  ACanvas.Pen.Style := psClear;
+  ACanvas.Brush.Style := bsSolid;
+  ACanvas.Brush.Color := ATrack;
+  ACanvas.RoundRect(ARect, H, H);
+  ACanvas.Brush.Color := AFill;
+  Fill := Max(H, (ARect.Right - ARect.Left) div BusyPart);
+  X := ARect.Left + Round((1 - Cos(2 * Pi * APhase / BusySweep)) / 2 *
+    (ARect.Right - ARect.Left - Fill));
+  ACanvas.RoundRect(X, ARect.Top, X + Fill, ARect.Bottom, H, H);
   ACanvas.Pen.Style := psSolid;
   ACanvas.Brush.Style := bsClear;
 end;
@@ -1690,20 +1719,7 @@ begin
       BusyY := Y + TextH + Px(1);
     end;
     FBusyRect := Rect(TrackLeft, BusyY, TrackLeft + TrackW, BusyY + Px(TrackHeight));
-    Canvas.Pen.Style := psClear;
-    Canvas.Brush.Style := bsSolid;
-    Canvas.Brush.Color := FHover;
-    Canvas.RoundRect(TrackLeft, BusyY, TrackLeft + TrackW, BusyY + Px(TrackHeight),
-      Px(TrackHeight), Px(TrackHeight));
-    { A stretch of the accent eases from one end to the other and back,
-      slowest at the ends. }
-    Canvas.Brush.Color := FAccent;
-    Fill := Max(Px(TrackHeight), TrackW div BusyPart);
-    X := TrackLeft + Round((1 - Cos(2 * Pi * FBusyPhase / BusySweep)) / 2 * (TrackW - Fill));
-    Canvas.RoundRect(X, BusyY, X + Fill, BusyY + Px(TrackHeight), Px(TrackHeight),
-      Px(TrackHeight));
-    Canvas.Pen.Style := psSolid;
-    Canvas.Brush.Style := bsClear;
+    DrawBusyTrack(Canvas, FBusyRect, FBusyPhase, FHover, FAccent);
   end
   else
   begin

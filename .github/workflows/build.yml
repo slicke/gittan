@@ -20,12 +20,15 @@ on:
 #                      Gittan-linux-amd64.deb and Gittan-linux-x86_64.rpm
 #   - Linux (arm64):   the same as Gittan-linux-arm64.tar.gz, .deb and
 #                      Gittan-linux-aarch64.rpm
+# Two legs the release does not wait for, added to it when they make it:
+#   - Windows (arm64): Gittan-windows-arm64.zip  (Gittan.exe + lexlib/, FPC 3.3.1)
+#   - Haiku (x86_64):  Gittan-haiku-x86_64.tar.gz (qt6, built in a QEMU VM)
 #
 # As in Trndi, a push to main publishes a release: the version job takes the
 # next build number from the "build-<n>" tags (100 when there is none), and
-# the publish job creates the release "build-<n>" with the packages and
-# the commits since the previous build as its notes. PRs, to main or develop,
-# only upload artifacts.
+# the publish job creates the release "build-<n>", titled Major.Minor (0.14),
+# with the packages and CHANGELOG.md's changes as its notes. PRs, to main or
+# develop, only upload artifacts.
 # Every leg also builds and runs the unit tests in tests/ (`make test`).
 #
 # The toolchain is Lazarus 5.0RC1 (Trndi pins 4.8). One thing differs from
@@ -508,6 +511,419 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # ===================== BEST-EFFORT LEGS =====================
+  # Platforms the release does not wait for: they are not in publish's
+  # needs, so a release goes out as soon as the five platforms above are
+  # built, and a leg that fails (continue-on-error, so it reports without
+  # marking the run failed) is simply left out. publish-extra adds what they
+  # built to the release afterwards.
+  #
+  # Haiku: cross-platform-actions boots the haiku-builder image under QEMU,
+  # with the workspace synced both ways, so the package comes back to the
+  # runner for the artifact step. HaikuPorts' fpc is 3.2.2 and its
+  # lazarus_bin 4.0, which lacks ThemeServices.IsDarkTheme, so Lazarus
+  # 5.0RC1 is built from its source tarball inside the VM and kept in the
+  # Actions cache (lazarus-haiku/, a folder of the workspace so it is
+  # synced into the VM).
+  build-extra:
+    name: Build (${{ matrix.name }}, best effort)
+    needs: version
+    if: always() && (needs.version.result == 'success' || needs.version.result == 'skipped')
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 90
+    env:
+      GITTAN_BUILD: ${{ needs.version.outputs.build_number }}
+      GITTAN_VERSION: ${{ needs.version.outputs.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # qt6: HaikuPorts' libqt6pas, as its own Lazarus uses. A gtk3
+          # build links but does not start: Haiku's GTK 3 lacks symbols the
+          # LCL's gtk3 binding imports.
+          - name: haiku-x86_64
+            widgetset: qt6
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Restore the Lazarus build
+        id: lazarus-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: lazarus-haiku
+          key: toolchain-haiku-${{ matrix.widgetset }}-lazarus-5.0RC1-gl-threadid
+
+      - name: Restore the FPC build
+        id: fpc-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: fpc-haiku
+          key: toolchain-haiku-fpc-3.2.2-threadid-patched
+
+      - name: Stamp the build number
+        if: env.GITTAN_BUILD != ''
+        run: |
+          set -euo pipefail
+          perl -pi -e 's|(<UseVersionInfo Value="True"/>)|$1<RevisionNr Value="$ENV{GITTAN_BUILD}"/>|' Gittan.lpi
+          grep -q "<RevisionNr Value=\"$GITTAN_BUILD\"/>" Gittan.lpi
+
+      - name: Start the Haiku VM
+        uses: cross-platform-actions/action@v1.7.0
+        with:
+          operating_system: haiku
+          version: 'r1beta6'
+          architecture: x86-64
+          shell: bash
+          cpu_count: 4
+
+      - name: Install FPC, libQt6Pas and git
+        shell: cpa.sh {0}
+        run: |
+          set -euo pipefail
+          # A download now and then breaks off ("Interrupted system call").
+          for TRY in 1 2 3; do
+            pkgman install -y fpc fpc_source git libqt6pas devel:libiconv && break
+            [ $TRY = 3 ] && exit 1
+            echo "::warning::pkgman stopped (try $TRY of 3)"
+            sleep 10
+          done
+          fpc -iV
+          git --version
+
+      # FPC 3.2.2 rebuilt from HaikuPorts' source and patches, with one fix:
+      # its RTL declares TThreadID as a Longint on Haiku, where pthread_t is
+      # a 64-bit pointer, so pthread_create writes past it and every join
+      # (TThread.WaitFor, Free on a thread) passes a cut-off handle and
+      # crashes. Gittan crashed so at start, in TGittanLexers.Finish. Linux
+      # declares it PtrUInt. The Makefile asks for 3.0.4 to start from;
+      # HaikuPorts' 3.2.2 builds it as well (OVERRIDEVERSIONCHECK). The
+      # build is kept in the cache (fpc-haiku/), and ~/.fpc.cfg, read before
+      # the system's /etc/fpc.cfg, points the compiler at its units.
+      - name: Build FPC 3.2.2 with the thread fix
+        shell: cpa.sh {0}
+        run: |
+          set -euo pipefail
+          PREFIX="$PWD/fpc-haiku"
+          if [ -x "$PREFIX/bin/ppcx64" ]; then
+            echo "FPC from the cache"
+          else
+            curl -fsSL --connect-timeout 30 --retry 3 -o fpcbuild.tar.gz \
+              https://downloads.sourceforge.net/freepascal/fpcbuild-3.2.2.tar.gz
+            tar xzf fpcbuild.tar.gz
+            rm fpcbuild.tar.gz
+            curl -fsSL -o fpc.patchset \
+              https://raw.githubusercontent.com/haikuports/haikuports/a69ad94446b31f9710249251a2506f5c393a3b94/dev-lang/fpc/patches/fpc-3.2.2.patchset
+            # Inside Gittan's checkout git apply leaves paths outside the
+            # current folder alone and says nothing, so the search for the
+            # repository stops above it.
+            (cd fpcbuild-3.2.2 && GIT_CEILING_DIRECTORIES="$PWD/.." git apply -p1 ../fpc.patchset)
+            rm fpc.patchset
+            # Without HaikuPorts' iconv patch the RTL looks for libiconv_open
+            # in libtextencoding, which r1beta6 lacks.
+            grep -q '^ {\$linklib iconv}' fpcbuild-3.2.2/fpcsrc/rtl/unix/cwstring.pp \
+              || { echo "::error::HaikuPorts' patches did not apply"; exit 1; }
+            SYSOSH=fpcbuild-3.2.2/fpcsrc/rtl/haiku/sysosh.inc
+            sed -i 's/^  TThreadID = THandle;/  TThreadID = PtrUInt;/' "$SYSOSH"
+            grep -q '^  TThreadID = PtrUInt;' "$SYSOSH" || { echo "::error::The TThreadID fix did not apply"; exit 1; }
+            (cd fpcbuild-3.2.2/fpcsrc \
+              && make all -j4 FPMAKEOPT="-T 4" OVERRIDEVERSIONCHECK=1 \
+              && make install INSTALL_PREFIX="$PREFIX" PP="$PWD/compiler/ppcx64")
+            ln -sf ../lib/fpc/3.2.2/ppcx64 "$PREFIX/bin/ppcx64"
+            rm -rf fpcbuild-3.2.2
+          fi
+          if [ -f /etc/fpc.cfg ]; then
+            sed "s|/boot/system/lib/fpc|$PREFIX/lib/fpc|g" /etc/fpc.cfg > ~/.fpc.cfg
+          else
+            # HaikuPorts makes /etc/fpc.cfg in a post-install script.
+            "$PREFIX/lib/fpc/3.2.2/samplecfg" "$PREFIX/lib/fpc/3.2.2" "$HOME/fpccfg"
+            cp "$HOME/fpccfg/fpc.cfg" ~/.fpc.cfg
+          fi
+          grep -q "$PREFIX/lib/fpc" ~/.fpc.cfg || { echo "::error::~/.fpc.cfg does not point at the new units"; cat ~/.fpc.cfg; exit 1; }
+          export PATH="$PREFIX/bin:$PATH"
+          command -v fpc
+          fpc -iVTPTO
+
+      - name: Save the FPC build
+        if: steps.fpc-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: fpc-haiku
+          key: ${{ steps.fpc-cache.outputs.cache-primary-key }}
+
+      # The steps in the VM get their values in the script itself: the action
+      # forwards environment variables over ssh (SendEnv), which the Haiku
+      # image's sshd does not accept (no AcceptEnv), so they arrive unset.
+      - name: Build Lazarus 5.0RC1
+        shell: cpa.sh {0}
+        run: |
+          set -euo pipefail
+          WIDGETSET='${{ matrix.widgetset }}'
+          if [ -x lazarus-haiku/lazbuild ]; then echo "lazbuild from the cache"; exit 0; fi
+          export PATH="$PWD/fpc-haiku/bin:$PATH"
+          mkdir -p lazarus-haiku
+          curl -fsSL --connect-timeout 30 -o lazarus.tar.gz \
+            "https://download.lazarus-ide.org/Lazarus%20Zip%20_%20GZip/Lazarus%205.0RC1/lazarus-5.0RC1-0.tar.gz"
+          tar xzf lazarus.tar.gz -C lazarus-haiku --strip-components=1
+          rm lazarus.tar.gz
+          # -gl: line info, so a crash of lazbuild gives a readable backtrace.
+          (cd lazarus-haiku && make lazbuild LCL_PLATFORM="$WIDGETSET" OPT="-gl")
+          RC=0
+          ./lazarus-haiku/lazbuild --version || RC=$?
+          if [ "$RC" != 0 ]; then
+            # Why it ended: the debug_server's lines in the syslog, and
+            # whether any program with cthreads starts.
+            tail -40 /boot/system/var/log/syslog || true
+            mkdir -p /tmp/ct
+            printf "program ct;\nuses cthreads;\nbegin\n  writeln('cthreads: fine');\nend.\n" > /tmp/ct/ct.pas
+            fpc -FE/tmp/ct /tmp/ct/ct.pas >/dev/null && { /tmp/ct/ct; echo "ct: exit $?"; } || true
+            echo "::error::lazbuild --version ended with exit code $RC"
+            exit 1
+          fi
+
+      - name: Save the Lazarus build
+        if: steps.lazarus-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: lazarus-haiku
+          key: ${{ steps.lazarus-cache.outputs.cache-primary-key }}
+
+      - name: Build, test and package
+        shell: cpa.sh {0}
+        run: |
+          set -euo pipefail
+          WIDGETSET='${{ matrix.widgetset }}'
+          export GITTAN_BUILD='${{ needs.version.outputs.build_number }}'
+          export GITTAN_VERSION='${{ needs.version.outputs.version }}'
+          VENDOR_PACKAGES='${{ env.VENDOR_PACKAGES }}'
+          export PATH="$PWD/fpc-haiku/bin:$PATH"
+          # lazbuild does not find its own folder on Haiku ("Invalid Lazarus
+          # directory"), and the Makefile quotes $(LAZBUILD), so a wrapper
+          # passes --lazarusdir. lazbuild also crashes with an access
+          # violation (exit 217) on its way out, after the compile and the
+          # link are done, so the wrapper lets 217 through with a warning;
+          # the executable is checked after the build.
+          cat > lazbuild-haiku <<WRAP
+          #!/bin/bash
+          "$PWD/lazarus-haiku/lazbuild" --lazarusdir="$PWD/lazarus-haiku" --compiler="$PWD/fpc-haiku/bin/fpc" "\$@"
+          rc=\$?
+          if [ \$rc = 217 ]; then echo "lazbuild crashed on exit (217); going on" >&2; exit 0; fi
+          exit \$rc
+          WRAP
+          chmod +x lazbuild-haiku
+          LAZBUILD="$PWD/lazbuild-haiku"
+          # As on the other legs: register the packages, and the build of
+          # Gittan.lpi compiles them as its dependencies. lazbuild crashed
+          # (access violation) after compiling a package on its own with
+          # make deps.
+          for LPK in $VENDOR_PACKAGES; do "$LAZBUILD" --add-package-link "$LPK"; done
+          # FPC's programs on Haiku now and then crash on their way out (an
+          # access violation in a system library, exit 217): lazbuild after
+          # the link, which the wrapper lets through, and fpc itself after a
+          # package, which stops lazbuild. A second go compiles only what is
+          # left, so the build is tried up to three times.
+          for TRY in 1 2 3; do
+            make LAZBUILD="$LAZBUILD" WIDGETSET="$WIDGETSET" && break
+            echo "::warning::The build stopped (try $TRY of 3)"
+            [ $TRY = 3 ] && exit 1
+          done
+          test -x Gittan || { echo "::error::Gittan was not built"; exit 1; }
+          # The tests run but do not stop the leg: their program has ended
+          # at once with exit code 3 and no output on Haiku, which is not
+          # yet understood.
+          make test || echo "::warning::The tests failed on Haiku (exit $?)"
+          mkdir -p dist/Gittan
+          cp Gittan dist/Gittan/
+          cp -r lexlib dist/Gittan/
+          cp icons/png/gittan-256.png dist/Gittan/gittan.png
+          QJS=externals/quickjs/prebuilt/x86_64-haiku
+          cp "$QJS"/libqjs.so.0.*.* dist/Gittan/libqjs.so.0
+          cp "$QJS"/libtqshim.so dist/Gittan/
+          cp externals/quickjs/LICENSE.quickjs-ng dist/Gittan/
+          cp LICENSE dist/Gittan/LICENSE.gittan
+          cp NOTICE dist/Gittan/
+          # The libraries load through the rpath ($ORIGIN, escaped in
+          # Gittan.lpi, since FPC's link on Haiku goes through a shell that
+          # would eat the dollar). Started from / for a few seconds, Gittan
+          # must not stop on the runtime_loader's "cannot open"; whatever
+          # else it does without a desktop session is no matter here.
+          (cd / && timeout 10 "$OLDPWD/dist/Gittan/Gittan" > /tmp/gittan-start.log 2>&1) || true
+          cat /tmp/gittan-start.log
+          if grep -qi "runtime_loader\|cannot open file\|could not load" /tmp/gittan-start.log; then
+            echo "::error::Gittan cannot load its libraries on Haiku"; exit 1
+          fi
+          # A crash is reported but does not stop the leg: without a desktop
+          # session it may come from that. On a desktop Gittan crashed in
+          # TThread.WaitFor before FPC's thread fix above.
+          if grep -qi "access violation\|runtime error" /tmp/gittan-start.log; then
+            echo "::warning::Gittan crashed at the start check"
+          fi
+          # Haiku's loader also searches lib/ beside the executable whatever
+          # the rpath says, so the libraries go there too, as Trndi's do.
+          mkdir -p dist/Gittan/lib
+          cp dist/Gittan/libqjs.so.0 dist/Gittan/libtqshim.so dist/Gittan/lib/
+          tar -C dist -czf Gittan-${{ matrix.name }}.tar.gz Gittan
+          ls -l Gittan-${{ matrix.name }}.tar.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: Gittan-extra-${{ matrix.name }}
+          path: Gittan-${{ matrix.name }}.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  # Windows on Arm: GitHub's windows-11-arm runner. No Lazarus release has
+  # an aarch64-win64 compiler, which needs FPC 3.3.1 (trunk): a native
+  # build of it comes from frostney/fpc-toolchain. Lazarus 5.0RC1's x64
+  # installer gives lazbuild, which runs emulated, and the LCL's sources,
+  # which it compiles with that compiler. FPC assembles for this target
+  # with clang and links itself. The tests run natively.
+  build-winarm:
+    name: Build (windows-arm64, best effort)
+    needs: version
+    if: always() && (needs.version.result == 'success' || needs.version.result == 'skipped')
+    runs-on: windows-11-arm
+    continue-on-error: true
+    timeout-minutes: 90
+    env:
+      GITTAN_BUILD: ${{ needs.version.outputs.build_number }}
+      GITTAN_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      # The x64 leg's cache of the Lazarus installer; only read here.
+      - name: Restore the toolchain downloads
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/toolchain
+          key: toolchain-windows-lazarus-5.0RC1
+
+      - name: Install Lazarus
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dl = Join-Path $env:RUNNER_TEMP 'toolchain'
+          $exe = Join-Path $dl 'lazarus-5.0RC1.exe'
+          New-Item -ItemType Directory -Force -Path $dl | Out-Null
+          if (Test-Path $exe) {
+            Write-Host "lazarus-5.0RC1.exe from the cache"
+          } else {
+            $folder = 'Lazarus%20Windows%2064%20bits/Lazarus%205.0RC1'
+            $file = 'lazarus-5.0RC1-fpc-3.2.2-win64.exe'
+            $done = $false
+            for ($try = 1; $try -le 10 -and -not $done; $try++) {
+              if ($try % 2 -eq 1) { $url = "https://download.lazarus-ide.org/$folder/$file" }
+              else { $url = "https://sourceforge.net/projects/lazarus/files/$folder/$file/download" }
+              curl.exe -sSL --fail -C - --connect-timeout 30 --speed-limit 102400 --speed-time 30 -w "lazarus-5.0RC1.exe: %{size_download} bytes at %{speed_download} B/s from %{url_effective}\n" -o "$exe.part" $url
+              if ($LASTEXITCODE -eq 0) { $done = $true } else { Write-Host "Attempt $try stopped"; Start-Sleep 5 }
+            }
+            if (-not $done) { throw "Downloading Lazarus failed" }
+            Move-Item "$exe.part" $exe
+          }
+          Start-Process $exe -ArgumentList '/VERYSILENT','/SP-','/NORESTART','/DIR=C:\Lazarus' -Wait
+          # An installer that allows x64 Windows alone refuses Windows on Arm;
+          # its files are then taken out with innoextract.
+          if (-not (Test-Path 'C:\Lazarus\lazbuild.exe')) {
+            Write-Host "The installer did not install; extracting it"
+            choco install innoextract -y --no-progress
+            $x = Join-Path $env:RUNNER_TEMP 'lazarus-x'
+            innoextract -s -d $x $exe
+            Move-Item (Join-Path $x 'app') 'C:\Lazarus'
+          }
+          Add-Content $env:GITHUB_PATH 'C:\Lazarus'
+          & 'C:\Lazarus\lazbuild.exe' --version
+
+      # FPC 3.3.1 for Windows on Arm, a native build with its fpc.cfg, from
+      # frostney/fpc-toolchain, which caches it; plain fpc goes first on
+      # PATH. FPC's own nightly aarch64-win64 snapshot cannot be used: each
+      # of its executables, the compiler too, crashed at start (0xC0000005)
+      # on this runner.
+      - name: Install FPC 3.3.1
+        id: fpc
+        uses: frostney/fpc-toolchain@v1
+        with:
+          version: 3.3.1-b2
+
+      - name: Check FPC
+        shell: pwsh
+        run: |
+          $fpc = (Get-Command fpc).Source
+          Write-Host $fpc
+          Add-Content $env:GITHUB_ENV "FPC_EXE=$fpc"
+          & $fpc -iWTPTO
+          clang --version
+          # A first program, run natively, before Gittan.
+          $hello = Join-Path $env:RUNNER_TEMP 'hello'
+          New-Item -ItemType Directory -Force -Path $hello | Out-Null
+          Set-Content "$hello\hello.pas" "program hello; uses Classes, SysUtils; var L: TStringList; begin L := TStringList.Create; L.Add('hello from arm64'); writeln(Trim(L.Text), ' ', FormatDateTime('yyyy-mm-dd', Now)); L.Free; end."
+          & $fpc "$hello\hello.pas"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & "$hello\hello.exe"
+          if ($LASTEXITCODE) { exit 1 }
+
+      - name: Stamp the build number
+        if: env.GITTAN_BUILD != ''
+        shell: pwsh
+        run: |
+          $t = Get-Content Gittan.lpi -Raw
+          $t = $t.Replace('<UseVersionInfo Value="True"/>', "<UseVersionInfo Value=`"True`"/><RevisionNr Value=`"$env:GITTAN_BUILD`"/>")
+          Set-Content Gittan.lpi $t -NoNewline
+          if (-not (Select-String -Path Gittan.lpi -SimpleMatch "<RevisionNr Value=`"$env:GITTAN_BUILD`"/>")) { exit 1 }
+
+      - name: Build and test
+        shell: pwsh
+        run: |
+          # As on the x64 leg: the tests' repositories on D:, outside
+          # Defender's scan.
+          Add-MpPreference -ExclusionPath $env:RUNNER_TEMP -ErrorAction SilentlyContinue
+          $env:TMP = $env:RUNNER_TEMP
+          $env:TEMP = $env:RUNNER_TEMP
+          foreach ($lpk in ($env:VENDOR_PACKAGES -split '\s+' | Where-Object { $_ })) {
+            lazbuild --lazarusdir=C:\Lazarus --add-package-link $lpk
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
+          ./make.ps1 build --lazarusdir=C:\Lazarus "--compiler=$env:FPC_EXE" --cpu=aarch64 --os=win64
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          # make.ps1 test compiles with the fpc on PATH, the same one.
+          ./make.ps1 test
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bytes = [System.IO.File]::ReadAllBytes('Gittan.exe')
+          $pe = [BitConverter]::ToInt32($bytes, 0x3c)
+          if ([BitConverter]::ToUInt16($bytes, $pe + 4) -ne 0xAA64) { throw "Gittan.exe is not an arm64 executable" }
+          New-Item -ItemType Directory -Force -Path dist\Gittan | Out-Null
+          Copy-Item Gittan.exe dist\Gittan\
+          Copy-Item -Recurse lexlib dist\Gittan\
+          Copy-Item externals\quickjs\prebuilt\aarch64-win64\libqjs.dll, externals\quickjs\prebuilt\aarch64-win64\tqshim.dll dist\Gittan\
+          Copy-Item externals\quickjs\LICENSE.quickjs-ng dist\Gittan\
+          Copy-Item LICENSE dist\Gittan\LICENSE.gittan
+          Copy-Item NOTICE dist\Gittan\
+          # A start that ends at once (a missing DLL, a crash in startup)
+          # is reported; one still running after ten seconds is stopped.
+          $p = Start-Process dist\Gittan\Gittan.exe -PassThru
+          Start-Sleep 10
+          if ($p.HasExited) { Write-Host "::warning::Gittan.exe ended within ten seconds (exit $($p.ExitCode))" }
+          else { Stop-Process -Id $p.Id -Force; Write-Host "Gittan.exe was still running after ten seconds" }
+          Compress-Archive -Path dist\Gittan -DestinationPath Gittan-windows-arm64.zip
+          Get-Item Gittan-windows-arm64.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: Gittan-extra-windows-arm64
+          path: Gittan-windows-arm64.zip
+          if-no-files-found: error
+          retention-days: 14
+
   # ===================== PUBLISH =====================
   publish:
     name: Publish build
@@ -540,8 +956,24 @@ jobs:
           PREV="build-$((BUILD - 1))"
           ls -l packages
 
-          # The commits since the previous build, or the last ten for the first one.
-          if git rev-parse -q --verify "refs/tags/$PREV" >/dev/null; then
+          # The changes are CHANGELOG.md's: its Unreleased section, or the
+          # section already named for this build ("## 0.13 (build-138, ...)")
+          # when Unreleased is empty. Without either, the commits since the
+          # previous build, or the last ten for the first one.
+          # changelog_section prints the section under the first "## "
+          # heading that matches the pattern, without blank lines around it.
+          changelog_section() {
+            awk -v re="$1" '
+              /^## / { if (on) exit; if ($0 ~ re) { on = 1; next } }
+              on { if ($0 != "") { for (; blank > 0; blank--) print ""; print; seen = 1 }
+                   else if (seen) blank++ }
+            ' CHANGELOG.md
+          }
+          CHANGES=$(changelog_section '^## Unreleased')
+          [ -n "$CHANGES" ] || CHANGES=$(changelog_section "^## .*[(]build-${BUILD}[,)]")
+          if [ -n "$CHANGES" ]; then
+            :
+          elif git rev-parse -q --verify "refs/tags/$PREV" >/dev/null; then
             CHANGES=$(git log --no-merges --format='- %s' "${PREV}..HEAD")
             [ -n "$CHANGES" ] || CHANGES="- No new commits"
           else
@@ -580,7 +1012,7 @@ jobs:
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
-              --title "Gittan ${VERSION}" \
+              --title "${VERSION%.*}" \
               --notes-file notes.md \
               --draft
           elif [ "$DRAFT" != "true" ]; then
@@ -602,3 +1034,62 @@ jobs:
           # must move to it, not be left to how GitHub treats a published
           # draft.
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+
+  # ===================== PUBLISH THE BEST-EFFORT LEGS =====================
+  # After the release is out, adds the packages of the legs that made it and
+  # a Downloads line for each; a leg that made none is left out. Runs when
+  # publish did, whatever the legs' results.
+  publish-extra:
+    name: Add the best-effort packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [version, publish, build-extra, build-winarm]
+    permissions:
+      contents: write
+    if: always() && needs.publish.result == 'success'
+    steps:
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          pattern: Gittan-extra-*
+          path: packages
+          merge-multiple: true
+
+      - name: Add the packages to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD: ${{ needs.version.outputs.build_number }}
+        run: |
+          set -euo pipefail
+          TAG="build-${BUILD}"
+          mkdir -p packages
+          ls -l packages
+          # A rerun uploads the packages again but does not list them twice.
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > notes.md
+          ADDED=
+          for F in packages/*; do
+            [ -f "$F" ] || continue
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$F"
+            if grep -qF -- "**$(basename "$F")**" notes.md; then
+              echo "$(basename "$F") is listed already"
+              continue
+            fi
+            case "$(basename "$F")" in
+              Gittan-haiku-x86_64.tar.gz)
+                ADDED="$ADDED- **Gittan-haiku-x86_64.tar.gz** — Haiku (64-bit) without installing, needs Qt 6 from HaikuPorts (\`pkgman install libqt6pas\`). Unpack anywhere and run Gittan."$'\n' ;;
+              Gittan-windows-arm64.zip)
+                ADDED="$ADDED- **Gittan-windows-arm64.zip** — Windows 11 on Arm, native, without installing; built with a development version of Free Pascal (3.3.1). Unpack anywhere and run Gittan.exe."$'\n' ;;
+              *)
+                ADDED="$ADDED- **$(basename "$F")**"$'\n' ;;
+            esac
+          done
+          [ -n "$ADDED" ] || { echo "No best-effort package to list; the notes stay as they are."; exit 0; }
+          # The lines go into the Downloads list, before the note on git
+          # that ends it.
+          cp notes.md notes.orig
+          ADDED="$ADDED" perl -0pi -e 's/\r//g; s|\n\n(Gittan runs the git command line tool)|\n$ENV{ADDED}\n$1|' notes.md
+          if cmp -s notes.md notes.orig; then
+            echo "::warning::The notes have no line on git to put the downloads before; they are left as they are"
+            exit 0
+          fi
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md

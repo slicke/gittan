@@ -28,8 +28,8 @@ type
     function FrameOf(const ARoot: string): TRepoFrame;
   public
     constructor Create(AWindow: TRepoWindow);
-    procedure Alert(const AText: string); override;
-    function Confirm(const AText: string): boolean; override;
+    procedure Alert(const AName, AText: string); override;
+    function Confirm(const AName, AText: string): boolean; override;
     function Prompt(const ACaption, AText, ADefault: string; out AValue: string): boolean; override;
     function Select(const ACaption, AText: string; const AOptions: array of string): integer; override;
     procedure ShowLog(const ATitle, AText: string); override;
@@ -57,6 +57,7 @@ uses
 resourcestring
   rsExtMessage = 'Extension';
   rsExtQuestion = 'Extension question';
+  rsExtNamed = 'Extension "%s"';
   rsExtError = 'Extension error';
   rsExtPermTitle = 'An extension asks for permissions';
   rsExtPermText = '%s' + LineEnding + LineEnding + 'File: %s' + LineEnding;
@@ -84,14 +85,23 @@ begin
     Result := FWindow.ShownFrame;
 end;
 
-procedure TGittanExtUIHost.Alert(const AText: string);
+procedure TGittanExtUIHost.Alert(const AName, AText: string);
 begin
-  TellDlg(rsExtMessage, AText, mtInformation);
+  if AName <> '' then
+    TellDlg(Format(rsExtNamed, [AName]), AText, mtInformation)
+  else
+    TellDlg(rsExtMessage, AText, mtInformation);
 end;
 
-function TGittanExtUIHost.Confirm(const AText: string): boolean;
+function TGittanExtUIHost.Confirm(const AName, AText: string): boolean;
+var
+  Title: string;
 begin
-  Result := AskDlg(rsExtQuestion, AText, mtConfirmation, [mrYes, mrNo]) = mrYes;
+  if AName <> '' then
+    Title := Format(rsExtNamed, [AName])
+  else
+    Title := rsExtQuestion;
+  Result := AskDlg(Title, AText, mtConfirmation, [mrYes, mrNo]) = mrYes;
 end;
 
 function TGittanExtUIHost.Prompt(const ACaption, AText, ADefault: string;

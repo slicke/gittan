@@ -1,7 +1,7 @@
 { ---------------------------------------------------------------------------
   Clean
   ---------------------------------------------------------------------------
-  File > Clean... deletes files git does not track: the dialog
+  Repository > Clean... deletes files git does not track: the dialog
   (gittan.cleandlg) chooses untracked files,
   ignored ones or both and lists what git clean -n says would go for
   that choice, each with a box; the ticked ones are deleted with git
