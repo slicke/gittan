@@ -776,8 +776,20 @@ jobs:
             $env:PATH = "$llvm;$env:PATH"
           }
           clang --version
-          & "$bin\fpc.exe" -iVDW
-          & "$bin\fpc.exe" -iTPTO
+          Get-ChildItem $bin | Format-Table Name, Length
+          Get-Content (Join-Path $bin 'fpc.cfg')
+          $ErrorActionPreference = "Continue"
+          foreach ($exe in 'ppca64.exe', 'fpc.exe') {
+            & "$bin\$exe" -iVDWTPTO
+            Write-Host "$exe -iVDWTPTO: exit $LASTEXITCODE"
+          }
+          $hello = Join-Path $env:RUNNER_TEMP 'hello'
+          New-Item -ItemType Directory -Force -Path $hello | Out-Null
+          Set-Content "$hello\hello.pas" "program hello; begin writeln('hello from arm64'); end."
+          & "$bin\fpc.exe" -va "$hello\hello.pas" 2>&1 | Select-Object -Last 60
+          Write-Host "fpc hello.pas: exit $LASTEXITCODE"
+          & "$hello\hello.exe"
+          if ($LASTEXITCODE) { exit 1 }
 
       - name: Stamp the build number
         if: env.GITTAN_BUILD != ''
