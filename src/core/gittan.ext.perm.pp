@@ -28,6 +28,8 @@ type
     Homepage: string;
     License: string;
     Requested: TExtPermSet;
+    {** The repositories it runs for (@repos), every one when empty. }
+    Repos: TStringArray;
     IsValid: boolean;
     ErrorMessage: string;
   end;
@@ -69,6 +71,19 @@ function CSVToPermSet(const s: string): TExtPermSet;
 
 {** Map a name like "net" to epNet. Returns False if unknown. }
 function ParsePermName(const s: string; out g: TExtPermGroup): boolean;
+
+{** A remote's URL as @repos compares it: host and path in lower case,
+    without the scheme, the user, the port, a trailing slash or ".git",
+    so https://github.com/a/b.git and git@github.com:a/b are both
+    github.com/a/b. }
+function RemoteUrlKey(const AUrl: string): string;
+
+{** Whether the repository at ARoot, with the remotes ARemoteUrls (a line
+    each, "remote.<name>.url <url>" as RemoteUrlsIn gives them), is one of
+    APatterns (@repos): a pattern that starts with /, ~, \\ or a drive is
+    a root (~ the home folder), any other a remote (RemoteUrlKey); * and ?
+    are wildcards. True when APatterns is empty. }
+function ExtRepoInScope(const APatterns: TStringArray; const ARoot, ARemoteUrls: string): boolean;
 
 implementation
 
@@ -139,6 +154,99 @@ begin
   Result := LowerCase(base);
 end;
 
+function RemoteUrlKey(const AUrl: string): string;
+var
+  s: string;
+  p, Slash: integer;
+begin
+  s := LowerCase(Trim(AUrl));
+  p := Pos('://', s);
+  if p > 0 then
+  begin
+    Delete(s, 1, p + 2);
+    Slash := Pos('/', s);
+    if Slash = 0 then
+      Slash := Length(s) + 1;
+    p := Pos('@', s);
+    if (p > 0) and (p < Slash) then
+    begin
+      Delete(s, 1, p);
+      Dec(Slash, p);
+    end;
+    p := Pos(':', s);
+    if (p > 0) and (p < Slash) then
+      Delete(s, p, Slash - p);
+  end
+  else if (s <> '') and not (s[1] in ['/', '.', '~', '\']) then
+  begin
+    { user@host:owner/repo, git's scp form: the colon comes before any
+      slash. }
+    Slash := Pos('/', s);
+    if Slash = 0 then
+      Slash := Length(s) + 1;
+    p := Pos(':', s);
+    if (p > 0) and (p < Slash) then
+    begin
+      s[p] := '/';
+      p := Pos('@', s);
+      if (p > 0) and (p < Slash) then
+        Delete(s, 1, p);
+    end;
+  end;
+  while (s <> '') and (s[Length(s)] = '/') do
+    SetLength(s, Length(s) - 1);
+  if Copy(s, Length(s) - 3, 4) = '.git' then
+    SetLength(s, Length(s) - 4);
+  Result := s;
+end;
+
+{ A root or a root pattern with / for a separator and no trailing one. }
+function ScopePath(const APath: string): string;
+begin
+  Result := StringReplace(APath, '\', '/', [rfReplaceAll]);
+  while (Length(Result) > 1) and (Result[Length(Result)] = '/') do
+    SetLength(Result, Length(Result) - 1);
+end;
+
+function IsPathPattern(const APattern: string): boolean;
+begin
+  Result := (APattern <> '') and ((APattern[1] in ['/', '~', '\']) or
+    ((Length(APattern) >= 3) and (APattern[1] in ['A'..'Z', 'a'..'z']) and
+    (APattern[2] = ':') and (APattern[3] in ['/', '\'])));
+end;
+
+function ExtRepoInScope(const APatterns: TStringArray; const ARoot, ARemoteUrls: string): boolean;
+var
+  Pattern, Root, Line, Url: string;
+  p: integer;
+begin
+  if Length(APatterns) = 0 then
+    Exit(True);
+  Root := ScopePath(ARoot);
+  for Pattern in APatterns do
+    if IsPathPattern(Pattern) then
+    begin
+      { GetUserDir ends in a separator, so ~/x would give two. }
+      if Pattern[1] = '~' then
+        Url := ScopePath(ExcludeTrailingPathDelimiter(GetUserDir) + Copy(Pattern, 2, MaxInt))
+      else
+        Url := ScopePath(Pattern);
+      if (Root <> '') and IsWild(Root, Url, not FileNameCaseSensitive) then
+        Exit(True);
+    end
+    else
+      for Line in ARemoteUrls.Split([#10]) do
+      begin
+        p := Pos(' ', Line);
+        if p = 0 then
+          Continue;
+        Url := RemoteUrlKey(Copy(Line, p + 1, MaxInt));
+        if (Url <> '') and IsWild(Url, RemoteUrlKey(Pattern), False) then
+          Exit(True);
+      end;
+  Result := False;
+end;
+
 { Strip leading "*" decoration from a manifest body line. }
 function StripLineDecoration(const line: string): string;
 var
@@ -192,6 +300,7 @@ begin
   Result.Homepage := '';
   Result.License := '';
   Result.Requested := [];
+  Result.Repos := nil;
   Result.IsValid := True;
   Result.ErrorMessage := '';
 
@@ -260,6 +369,15 @@ begin
           Include(Result.Requested, g)
         else
           AddError('Unknown permission: ' + parts[j]);
+    end
+    else if DirectiveValue('@repos', value) then
+    begin
+      parts := value.Split([','], TStringSplitOptions.ExcludeEmpty);
+      for j := 0 to High(parts) do
+        if Trim(parts[j]) <> '' then
+          Result.Repos := Concat(Result.Repos, [Trim(parts[j])]);
+      if Length(parts) = 0 then
+        AddError('@repos names no repository');
     end
     else if (Pos('(c)', lc) = 1) or (Pos('copyright', lc) = 1) then
     begin

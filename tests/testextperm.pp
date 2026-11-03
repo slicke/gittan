@@ -7,7 +7,7 @@ unit testextperm;
 interface
 
 uses
-  fpcunit, testregistry, gittan.ext.perm;
+  SysUtils, fpcunit, testregistry, gittan.ext.perm;
 
 type
   TExtPermTest = class(TTestCase)
@@ -22,6 +22,9 @@ type
     procedure TestUtf8BomIsAccepted;
     procedure TestUseStrictPrologueIsSkipped;
     procedure TestBlankLineAfterPrologueIsRejected;
+    procedure TestReposDirective;
+    procedure TestRemoteUrlKey;
+    procedure TestRepoInScope;
   end;
 
 implementation
@@ -187,6 +190,63 @@ begin
   AssertEquals('single CR after prologue accepted', 'CR only', manifest.DisplayName);
   manifest := ParseExtManifest('"use strict";'#10'/* @name LF only */');
   AssertEquals('single LF after prologue accepted', 'LF only', manifest.DisplayName);
+end;
+
+procedure TExtPermTest.TestReposDirective;
+var
+  manifest: TExtManifest;
+begin
+  manifest := ParseExtManifest('/*' + LineEnding +
+    '@name Scoped' + LineEnding +
+    '@repos github.com/slicke/*, /work/my repo' + LineEnding +
+    '@repos ~/kod/gittan' + LineEnding + '*/');
+  AssertTrue('valid', manifest.IsValid);
+  AssertEquals('three patterns', 3, Length(manifest.Repos));
+  AssertEquals('a remote', 'github.com/slicke/*', manifest.Repos[0]);
+  AssertEquals('a root with a space', '/work/my repo', manifest.Repos[1]);
+  AssertEquals('a second line adds', '~/kod/gittan', manifest.Repos[2]);
+
+  manifest := ParseExtManifest('/* @name Everywhere */');
+  AssertEquals('none without @repos', 0, Length(manifest.Repos));
+
+  manifest := ParseExtManifest('/*' + LineEnding + '@name Empty' + LineEnding +
+    '@repos' + LineEnding + '*/');
+  AssertFalse('an empty @repos is refused', manifest.IsValid);
+end;
+
+procedure TExtPermTest.TestRemoteUrlKey;
+begin
+  AssertEquals('https', 'github.com/slicke/trndi',
+    RemoteUrlKey('https://github.com/slicke/trndi.git'));
+  AssertEquals('scp form', 'github.com/slicke/trndi',
+    RemoteUrlKey('git@github.com:slicke/trndi.git'));
+  AssertEquals('ssh with a port', 'example.org/a/b',
+    RemoteUrlKey('ssh://git@example.org:2222/a/b.git'));
+  AssertEquals('user and password', 'example.org/a/b',
+    RemoteUrlKey('https://me:secret@Example.org/A/B/'));
+  AssertEquals('a local path stays', '/srv/git/x', RemoteUrlKey('/srv/git/x.git'));
+end;
+
+procedure TExtPermTest.TestRepoInScope;
+const
+  Urls = 'remote.origin.url git@github.com:slicke/gittan.git'#10 +
+    'remote.fork.url https://gitlab.com/someone/gittan'#10;
+begin
+  AssertTrue('no patterns is every repository', ExtRepoInScope(nil, '/a', ''));
+  AssertTrue('a remote', ExtRepoInScope(['github.com/slicke/gittan'], '/a', Urls));
+  AssertTrue('a remote with a wildcard', ExtRepoInScope(['github.com/slicke/*'], '/a', Urls));
+  AssertTrue('a pattern written as a URL',
+    ExtRepoInScope(['https://gitlab.com/someone/gittan.git'], '/a', Urls));
+  AssertTrue('any remote counts', ExtRepoInScope(['gitlab.com/*'], '/a', Urls));
+  AssertFalse('another owner', ExtRepoInScope(['github.com/other/*'], '/a', Urls));
+  AssertFalse('no remotes', ExtRepoInScope(['github.com/slicke/*'], '/a', ''));
+  AssertTrue('a root', ExtRepoInScope(['/work/x'], '/work/x', ''));
+  AssertTrue('a root with a trailing slash', ExtRepoInScope(['/work/x/'], '/work/x', ''));
+  AssertTrue('a folder of roots', ExtRepoInScope(['/work/*'], '/work/x', ''));
+  AssertFalse('another root', ExtRepoInScope(['/work/x'], '/work/y', ''));
+  AssertTrue('the home folder',
+    ExtRepoInScope(['~/kod/*'], IncludeTrailingPathDelimiter(GetUserDir) + 'kod/x', ''));
+  AssertTrue('one of several', ExtRepoInScope(['/nope', 'github.com/slicke/gittan'], '/a', Urls));
 end;
 
 initialization

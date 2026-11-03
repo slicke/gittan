@@ -68,6 +68,7 @@ type
     procedure TestCommandRegisteredAndRun;
     procedure TestCommandUnregister;
     procedure TestListenerCancels;
+    procedure TestListenerScopedToRepos;
     procedure TestListenerFalseAndObject;
     procedure TestListenerThrowDoesNotCancel;
     procedure TestOff;
@@ -299,6 +300,27 @@ begin
     '{"message": "a rather long subject"}', Msg));
   AssertEquals('its reason', 'Subject too long: 21', Msg);
   AssertTrue('other events untouched', FEngine.Fire('push.before', '{}', Msg));
+end;
+
+procedure TExtEngineTest.TestListenerScopedToRepos;
+const
+  Urls = 'remote.origin.url git@github.com:slicke/gittan.git'#10;
+var
+  Info: PExtContextInfo;
+  Msg: string;
+begin
+  Info := Load('scoped', 'Gittan.on("commit.before", function () { return "stopped"; });',
+    PermBaseline + [epData]);
+  Info^.Repos := ['github.com/slicke/*'];
+  AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
+  AssertTrue('listens for its remote', FEngine.Listens('commit.before', '/a', Urls));
+  AssertFalse('not for another', FEngine.Listens('commit.before', '/b', ''));
+  AssertTrue('in scope', FEngine.ExtInScope('scoped', '/a', Urls));
+  AssertFalse('out of scope', FEngine.ExtInScope('scoped', '/b', ''));
+  AssertFalse('its repository is stopped', FEngine.Fire('commit.before', '{}', '/a', Urls, Msg));
+  AssertEquals('its reason', 'stopped', Msg);
+  AssertTrue('another goes', FEngine.Fire('commit.before', '{}', '/b', '', Msg));
+  AssertFalse('unscoped reaches it', FEngine.Fire('commit.before', '{}', Msg));
 end;
 
 procedure TExtEngineTest.TestListenerFalseAndObject;

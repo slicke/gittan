@@ -16,6 +16,18 @@ The file starts with a manifest in a comment:
 
 `@perms` names what the extension needs beyond what every extension may do: `data` to read the repositories (`Gittan.repo`, the files and their content, and the full payload of an event), `net` for `Gittan.net.fetch`, `exec` for `Gittan.git.run` and `Gittan.exec.run`, `settings` for `Gittan.app.setting`. Gittan asks you once per file, and again when the file changes or a module in a subfolder does (a module runs with the permissions of the file that imports it). A no is not kept: the file is skipped and asked about again at the next load. Dialogs, cards, commands, timers and the extension's own storage and settings page need no permission.
 
+`@repos` keeps an extension to some repositories; without it, it runs for every one. It takes patterns separated by commas, on one line or several. A pattern that starts with `/`, `~`, a drive or `\\` is the root of a repository (`~/work/*`, `C:\src\app`); any other is compared with the repositories' remotes, written as host and path (`github.com/you/*`, `gitlab.example.org/team/app`; a URL such as `git@github.com:you/app.git` works too). `*` and `?` are wildcards. A repository is in when its root or one of its remotes matches. Out of it, the extension's listeners are not called and its commands are not in its menus or the command palette:
+
+```js
+/*
+@name Ticket Ids
+@perms data
+@repos github.com/acme/*, ~/work/legacy-app
+*/
+```
+
+`@repos` picks where the extension acts; it is not a permission. A timer or a command's own code can still read the repository shown, as far as `@perms` lets it.
+
 The scripts run in quickjs-ng (ES2023, with `fetch`-like networking, timers, `console`, `import` of modules from subfolders of the extensions folder, and top-level `await`). `gittan.d.ts` beside this file describes the `Gittan` object for an editor's completion.
 
 ## Commands

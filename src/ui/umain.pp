@@ -7187,6 +7187,8 @@ begin
     Exit;
   end;
   FRepo.OpenAt(Job.Root, Job.GitDir);
+  { The commands of an extension whose @repos names this root. }
+  QueueRebuildExtMenu;
   ShowSidebar(True);
   LoadCommitDraft;
   { The exclude file lives in the git directory, which git names (a
@@ -7335,6 +7337,8 @@ begin
   begin
     FRemoteUrls := ASnap.RemoteUrls;
     ReFindForge;
+    { An extension's @repos may name a remote. }
+    QueueRebuildExtMenu;
   end;
   FIssueTracker := ASnap.IssueTracker;
   UpdateIssueTracker;

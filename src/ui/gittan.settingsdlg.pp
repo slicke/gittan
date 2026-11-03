@@ -127,6 +127,7 @@ resourcestring
   rsExtOpenFolder = 'Open Folder';
   rsExtResetPerms = 'Reset Permissions';
   rsExtPermsLine = 'Permissions: %s';
+  rsExtReposLine = 'Runs for: %s';
   rsExtNotLoaded = 'Not loaded: %s';
   rsSettingsTitle = 'Settings';
   rsEditorPage = 'Editor';
@@ -1161,6 +1162,8 @@ begin
   if Info.Description <> '' then
     About := About + LineEnding + Info.Description;
   About := About + LineEnding + Format(rsExtPermsLine, [PermSetToCSV(Info.Granted + PermBaseline)]);
+  if Length(Info.Repos) > 0 then
+    About := About + LineEnding + Format(rsExtReposLine, [string.Join(', ', Info.Repos)]);
   if not Info.Loaded and (Info.Error <> '') then
     About := About + LineEnding + Format(rsExtNotLoaded, [Info.Error]);
   FExtInfo.Caption := About;

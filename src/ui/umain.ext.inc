@@ -51,6 +51,9 @@ begin
     for i := 0 to Eng.Registry.CommandCount - 1 do
     begin
       Cmd := Eng.Registry.Command(i);
+      { An extension's @repos may leave this repository out. }
+      if not Eng.ExtInScope(Cmd.ExtId, FRepo.Root, FRemoteUrls) then
+        Continue;
       if cwMenu in Cmd.Where then
         FExtMenu.Add(NewItem(FExtMenu, Cmd.Title));
       if cwFilePopup in Cmd.Where then
@@ -136,9 +139,9 @@ begin
     QueueRebuildExtMenu;
 end;
 
-{ Raises AEvent in the extensions with AJson (freed here) as its
-  payload, the repository's root put in; False when an extension
-  stopped it, which the banner says. }
+{ Raises AEvent in the extensions that run for this repository (their
+  @repos) with AJson (freed here) as its payload, the repository's root
+  put in; False when an extension stopped it, which the banner says. }
 function TRepoFrame.ExtFire(const AEvent: string; AJson: TJSONObject): boolean;
 var
   Eng: TGittanExtEngine;
@@ -150,7 +153,7 @@ begin
       Exit;
     Eng := TGittanExtEngine.Existing;
     AJson.Add('repo', FRepo.Root);
-    Result := Eng.Fire(AEvent, AJson.AsJSON, Msg);
+    Result := Eng.Fire(AEvent, AJson.AsJSON, FRepo.Root, FRemoteUrls, Msg);
     if not Result then
     begin
       if Msg = '' then
@@ -167,7 +170,7 @@ var
   Eng: TGittanExtEngine;
 begin
   Eng := TGittanExtEngine.Existing;
-  Result := (Eng <> nil) and Eng.Registry.HasListener(AEvent);
+  Result := (Eng <> nil) and Eng.Listens(AEvent, FRepo.Root, FRemoteUrls);
 end;
 
 procedure TRepoFrame.ExtEmit(const AEvent: string; AJson: TJSONObject);

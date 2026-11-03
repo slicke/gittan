@@ -28,6 +28,8 @@ type
     FileName: string;
     DisplayName, Author, Version, Description, Homepage, License: string;
     Requested, Granted: TExtPermSet;
+    {** @repos: the repositories it runs for, every one when empty. }
+    Repos: TStringArray;
     {** On in the settings. }
     Enabled: boolean;
     {** Has a context in the engine now. }
@@ -244,6 +246,7 @@ begin
     Inf.Homepage := Manifest.Homepage;
     Inf.License := Manifest.License;
     Inf.Requested := Manifest.Requested;
+    Inf.Repos := Manifest.Repos;
     { The modules in the subfolders run under this file's grant, so an
       edit of one asks again as an edit of the file does. }
     Inf.Hash := GrantHash(string(Source), FModulesDigest);
