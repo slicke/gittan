@@ -532,7 +532,6 @@ jobs:
     env:
       GITTAN_BUILD: ${{ needs.version.outputs.build_number }}
       GITTAN_VERSION: ${{ needs.version.outputs.version }}
-      WIDGETSET: ${{ matrix.widgetset }}
     strategy:
       fail-fast: false
       matrix:
@@ -568,7 +567,6 @@ jobs:
           architecture: x86-64
           shell: bash
           cpu_count: 4
-          environment_variables: GITTAN_BUILD GITTAN_VERSION WIDGETSET
 
       - name: Install FPC, GTK 3, libQt6Pas and git
         shell: cpa.sh {0}
@@ -578,10 +576,14 @@ jobs:
           fpc -iV
           git --version
 
+      # The steps in the VM get their values in the script itself: the action
+      # forwards environment variables over ssh (SendEnv), which the Haiku
+      # image's sshd does not accept (no AcceptEnv), so they arrive unset.
       - name: Build Lazarus 5.0RC1
-        shell: cpa.sh {0} --environment-variables WIDGETSET
+        shell: cpa.sh {0}
         run: |
           set -euo pipefail
+          WIDGETSET='${{ matrix.widgetset }}'
           if [ -x lazarus-haiku/lazbuild ]; then echo "lazbuild from the cache"; exit 0; fi
           mkdir -p lazarus-haiku
           curl -fsSL --connect-timeout 30 -o lazarus.tar.gz \
@@ -592,9 +594,12 @@ jobs:
           ./lazarus-haiku/lazbuild --version
 
       - name: Build, test and package
-        shell: cpa.sh {0} --environment-variables GITTAN_BUILD GITTAN_VERSION WIDGETSET
+        shell: cpa.sh {0}
         run: |
           set -euo pipefail
+          WIDGETSET='${{ matrix.widgetset }}'
+          export GITTAN_BUILD='${{ needs.version.outputs.build_number }}'
+          export GITTAN_VERSION='${{ needs.version.outputs.version }}'
           LAZBUILD="$PWD/lazarus-haiku/lazbuild"
           make deps LAZBUILD="$LAZBUILD" WIDGETSET="$WIDGETSET"
           make LAZBUILD="$LAZBUILD" WIDGETSET="$WIDGETSET"
