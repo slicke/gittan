@@ -10,6 +10,7 @@
 - With nothing to commit, the Commit section folds to its header, "Commit · no changes", and unfolds again as changes come. Folding or unfolding it yourself still stands, and Commit > Commit... unfolds it, for an amend.
 
 ### Added
+- Haiku (64-bit), Gittan-haiku-x86_64.tar.gz, with Qt 6 from HaikuPorts (`pkgman install libqt6pas`). Like the Windows on Arm build, a release does not wait for it.
 - A native build for Windows on Arm, Gittan-windows-arm64.zip, built with a development version of Free Pascal (3.3.1). A release does not wait for it: it is added to the release when its build makes it. The x64 build still runs there, emulated.
 - An extension can name the repositories it runs for with `@repos` in its manifest: roots such as `~/work/*` or remotes such as `github.com/you/*`. In other repositories its events are not raised and its commands are not in the menus or the command palette.
 - The tab bar says that Cmd+P (Ctrl+P on Windows and Linux) opens the command palette, dimmed at its right end, until tabs fill that space.
