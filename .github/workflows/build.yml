@@ -1072,7 +1072,7 @@ jobs:
               Gittan-haiku-x86_64.tar.gz)
                 ADDED="$ADDED- **Gittan-haiku-x86_64.tar.gz** — Haiku (64-bit) without installing, needs Qt 6 from HaikuPorts (\`pkgman install libqt6pas\`). Unpack anywhere and run Gittan."$'\n' ;;
               Gittan-windows-arm64.zip)
-                ADDED="$ADDED- **Gittan-windows-arm64.zip** — Windows 11 on Arm, native, without installing; built with a development snapshot of Free Pascal. Unpack anywhere and run Gittan.exe."$'\n' ;;
+                ADDED="$ADDED- **Gittan-windows-arm64.zip** — Windows 11 on Arm, native, without installing; built with a development version of Free Pascal (3.3.1). Unpack anywhere and run Gittan.exe."$'\n' ;;
               *)
                 ADDED="$ADDED- **$(basename "$F")**"$'\n' ;;
             esac

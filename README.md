@@ -21,7 +21,7 @@ A free, native git client built around the diff. See what you changed as you cha
   </picture>
 </p>
 
-Gittan runs on macOS, Windows and Linux. It is written in Free Pascal with Lazarus and talks to the `git` command line tool, so it works with whatever git, hooks and signing you already have set up.
+Gittan runs on macOS, Windows and Linux, and on Haiku. It is written in Free Pascal with Lazarus and talks to the `git` command line tool, so it works with whatever git, hooks and signing you already have set up.
 
 ## Download
 
