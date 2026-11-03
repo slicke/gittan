@@ -551,7 +551,14 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: lazarus-haiku
-          key: toolchain-haiku-${{ matrix.widgetset }}-lazarus-5.0RC1-gl
+          key: toolchain-haiku-${{ matrix.widgetset }}-lazarus-5.0RC1-gl-threadid
+
+      - name: Restore the FPC build
+        id: fpc-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: fpc-haiku
+          key: toolchain-haiku-fpc-3.2.2-threadid
 
       - name: Stamp the build number
         if: env.GITTAN_BUILD != ''
@@ -577,6 +584,75 @@ jobs:
           fpc -iV
           git --version
 
+      # FPC 3.2.2 rebuilt from HaikuPorts' source and patches, with one fix:
+      # its RTL declares TThreadID as a Longint on Haiku, where pthread_t is
+      # a 64-bit pointer, so pthread_create writes past it and every join
+      # (TThread.WaitFor, Free on a thread) passes a cut-off handle and
+      # crashes. Gittan crashed so at start, in TGittanLexers.Finish. Linux
+      # declares it PtrUInt. The build is kept in the cache (fpc-haiku/),
+      # and ~/.fpc.cfg, read before the system's /etc/fpc.cfg, points the
+      # compiler at its units.
+      - name: Build FPC 3.2.2 with the thread fix
+        shell: cpa.sh {0}
+        run: |
+          set -euo pipefail
+          PREFIX="$PWD/fpc-haiku"
+          if [ -x "$PREFIX/bin/ppcx64" ]; then
+            echo "FPC from the cache"
+          else
+            curl -fsSL --connect-timeout 30 --retry 3 -o fpcbuild.tar.gz \
+              https://downloads.sourceforge.net/freepascal/fpcbuild-3.2.2.tar.gz
+            tar xzf fpcbuild.tar.gz
+            rm fpcbuild.tar.gz
+            curl -fsSL -o fpc.patchset \
+              https://raw.githubusercontent.com/haikuports/haikuports/a69ad94446b31f9710249251a2506f5c393a3b94/dev-lang/fpc/patches/fpc-3.2.2.patchset
+            (cd fpcbuild-3.2.2 && git apply -p1 ../fpc.patchset)
+            rm fpc.patchset
+            SYSOSH=fpcbuild-3.2.2/fpcsrc/rtl/haiku/sysosh.inc
+            sed -i 's/^  TThreadID = THandle;/  TThreadID = PtrUInt;/' "$SYSOSH"
+            grep -q '^  TThreadID = PtrUInt;' "$SYSOSH" || { echo "::error::The TThreadID fix did not apply"; exit 1; }
+            (cd fpcbuild-3.2.2/fpcsrc \
+              && make all -j4 FPMAKEOPT="-T 4" \
+              && make install INSTALL_PREFIX="$PREFIX" PP="$PWD/compiler/ppcx64")
+            ln -sf ../lib/fpc/3.2.2/ppcx64 "$PREFIX/bin/ppcx64"
+            rm -rf fpcbuild-3.2.2
+          fi
+          if [ -f /etc/fpc.cfg ]; then
+            sed "s|/boot/system/lib/fpc|$PREFIX/lib/fpc|g" /etc/fpc.cfg > ~/.fpc.cfg
+          else
+            # HaikuPorts makes /etc/fpc.cfg in a post-install script.
+            "$PREFIX/lib/fpc/3.2.2/samplecfg" "$PREFIX/lib/fpc/3.2.2" "$HOME/fpccfg"
+            cp "$HOME/fpccfg/fpc.cfg" ~/.fpc.cfg
+          fi
+          grep -q "$PREFIX/lib/fpc" ~/.fpc.cfg || { echo "::error::~/.fpc.cfg does not point at the new units"; cat ~/.fpc.cfg; exit 1; }
+          export PATH="$PREFIX/bin:$PATH"
+          command -v fpc
+          fpc -iVTPTO
+          # A thread that is waited for and freed, which crashed before.
+          mkdir -p /tmp/tt
+          cat > /tmp/tt/tt.pas <<'PAS'
+          program tt;
+          uses cthreads, Classes;
+          type TT = class(TThread) procedure Execute; override; end;
+          procedure TT.Execute; begin Sleep(100); end;
+          var T: TT;
+          begin
+            T := TT.Create(False);
+            T.WaitFor;
+            T.Free;
+            writeln('WaitFor and Free: fine');
+          end.
+          PAS
+          fpc -FE/tmp/tt /tmp/tt/tt.pas >/dev/null
+          /tmp/tt/tt
+
+      - name: Save the FPC build
+        if: steps.fpc-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: fpc-haiku
+          key: ${{ steps.fpc-cache.outputs.cache-primary-key }}
+
       # The steps in the VM get their values in the script itself: the action
       # forwards environment variables over ssh (SendEnv), which the Haiku
       # image's sshd does not accept (no AcceptEnv), so they arrive unset.
@@ -586,6 +662,7 @@ jobs:
           set -euo pipefail
           WIDGETSET='${{ matrix.widgetset }}'
           if [ -x lazarus-haiku/lazbuild ]; then echo "lazbuild from the cache"; exit 0; fi
+          export PATH="$PWD/fpc-haiku/bin:$PATH"
           mkdir -p lazarus-haiku
           curl -fsSL --connect-timeout 30 -o lazarus.tar.gz \
             "https://download.lazarus-ide.org/Lazarus%20Zip%20_%20GZip/Lazarus%205.0RC1/lazarus-5.0RC1-0.tar.gz"
@@ -610,6 +687,7 @@ jobs:
           export GITTAN_BUILD='${{ needs.version.outputs.build_number }}'
           export GITTAN_VERSION='${{ needs.version.outputs.version }}'
           VENDOR_PACKAGES='${{ env.VENDOR_PACKAGES }}'
+          export PATH="$PWD/fpc-haiku/bin:$PATH"
           # lazbuild does not find its own folder on Haiku ("Invalid Lazarus
           # directory"), and the Makefile quotes $(LAZBUILD), so a wrapper
           # passes --lazarusdir. lazbuild also crashes with an access
@@ -618,7 +696,7 @@ jobs:
           # the executable is checked after the build.
           cat > lazbuild-haiku <<WRAP
           #!/bin/bash
-          "$PWD/lazarus-haiku/lazbuild" --lazarusdir="$PWD/lazarus-haiku" "\$@"
+          "$PWD/lazarus-haiku/lazbuild" --lazarusdir="$PWD/lazarus-haiku" --compiler="$PWD/fpc-haiku/bin/fpc" "\$@"
           rc=\$?
           if [ \$rc = 217 ]; then echo "lazbuild crashed on exit (217); going on" >&2; exit 0; fi
           exit \$rc
