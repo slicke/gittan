@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gittan — Git Tree Analyzer &amp; Navigator</title>
-<meta name="description" content="Gittan, the Git Tree Analyzer &amp; Navigator, is a native git client built around the diff: see what you changed, who last changed each line and how the code got the way it is, then commit, pull, push, merge, rebase, stash and resolve conflicts. macOS, Windows and Linux.">
+<meta name="description" content="Gittan, the Git Tree Analyzer &amp; Navigator, is a native git client built around the diff: see what you changed, who last changed each line and how the code got the way it is, then commit, pull, push, merge, rebase, stash and resolve conflicts. macOS, Windows and Linux, and more.">
 <link rel="canonical" href="https://gittan.app/">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#f5f3ee" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#141518" media="(prefers-color-scheme: dark)">
 <meta property="og:title" content="Gittan — Git Tree Analyzer &amp; Navigator">
-<meta property="og:description" content="See what you changed, who wrote each line and how the code got here. Then commit, sync and merge. macOS, Windows and Linux.">
+<meta property="og:description" content="See what you changed, who wrote each line and how the code got here. Then commit, sync and merge. macOS, Windows and Linux, and more.">
 <meta property="og:image" content="https://gittan.app/assets/shots/unified-dark.png">
 <meta property="og:image:width" content="1280">
 <meta property="og:image:height" content="800">
@@ -32,7 +32,7 @@
   "name": "Gittan",
   "alternateName": "Git Tree Analyzer & Navigator",
   "applicationCategory": "DeveloperApplication",
-  "operatingSystem": "macOS, Windows, Linux",
+  "operatingSystem": "macOS, Windows, Linux, Haiku",
   "url": "https://gittan.app/",
   "downloadUrl": "https://github.com/slicke/gittan/releases/latest",
   "image": "https://gittan.app/assets/shots/unified-dark.png",
@@ -594,7 +594,7 @@
         View on GitHub
       </a>
     </div>
-    <div class="sub" id="get-sub">Free and open source · macOS, Windows and Linux</div>
+    <div class="sub" id="get-sub">Free and open source · macOS, Windows and Linux, and more</div>
 
     <div class="shot">
       <div class="frame">
@@ -1260,7 +1260,7 @@
         <div>
           <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18"/><path d="M8 21h8"/></svg></div>
           <h3>At home on each desktop</h3>
-          <p>Tabs sit in the title bar on every platform: beside the traffic lights on macOS, and in Gittan's own title bar with a menu button on Windows and Linux. The window keeps the system's shadow and rounded corners.</p>
+          <p>Tabs sit in the title bar: beside the traffic lights on macOS, and in Gittan's own title bar with a menu button on Windows and Linux. The window keeps the system's shadow and rounded corners.</p>
         </div>
         <div class="art oswins">
           <figure class="os-linux"><picture>
@@ -1470,7 +1470,10 @@
         <div class="os"><svg viewBox="0 0 24 24"><path d="M3 5.1 10.4 4v7.1H3zm8.3-1.2L21 2.5v8.6h-9.7zM3 12.9h7.4V20L3 18.9zm8.3 0H21v8.6l-9.7-1.4z"/></svg>Windows<span class="yours">Your system</span></div>
         <div class="file">x64 · Gittan-windows-x64-setup.exe</div>
         <a class="btn" data-label="x64 installer" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-windows-x64-setup.exe">Download installer</a>
-        <div class="more">Without installing: <a data-short=".zip" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-windows-x64.zip">Gittan-windows-x64.zip</a></div>
+        <div class="more">
+          <div>Without installing: <a data-short=".zip" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-windows-x64.zip">Gittan-windows-x64.zip</a></div>
+          <div data-arch="arm64">Windows on Arm, native: <a data-short="Arm .zip" href="https://github.com/slicke/gittan/releases/latest/download/Gittan-windows-arm64.zip">.zip</a></div>
+        </div>
       </div>
       <div class="card" data-os="linux">
         <div class="os"><svg viewBox="0 0 24 24"><path d="M12 2c-2.2 0-3.6 1.8-3.6 4.4 0 1.4.3 2.3-.6 3.6C6.5 11.8 5 14 5 16.3c0 .6.1 1.1.3 1.6-.6.4-1.6.8-1.6 1.7 0 1.2 1.9 1.1 3.1 1.6 1.1.5 2 .8 2.9.4.6-.3.9-.8 1-1.2h2.6c.1.4.4.9 1 1.2.9.4 1.8.1 2.9-.4 1.2-.5 3.1-.4 3.1-1.6 0-.9-1-1.3-1.6-1.7.2-.5.3-1 .3-1.6 0-2.3-1.5-4.5-2.8-6.3-.9-1.3-.6-2.2-.6-3.6C15.6 3.8 14.2 2 12 2zm-1.6 4.2c.5 0 .8.6.8 1.2s-.3 1.1-.8 1.1-.8-.5-.8-1.1.3-1.2.8-1.2zm3.2 0c.5 0 .8.6.8 1.2s-.3 1.1-.8 1.1-.8-.5-.8-1.1.3-1.2.8-1.2zM12 9.3c.9 0 2 .6 2 1 0 .5-1.1 1.2-2 1.2s-2-.7-2-1.2c0-.4 1.1-1 2-1z"/></svg>Linux<span class="yours">Your system</span></div>
@@ -1483,7 +1486,7 @@
       </div>
     </div>
     <div class="note">
-      Gittan runs the <code>git</code> command line tool, so git 2.30 or later must be installed and on your PATH. The Windows installer needs no administrator for yourself alone, and adds Open in Gittan to folders' menu and the <code>gittan</code> command; it is not signed, so SmartScreen warns at first: More info, then Run anyway. The x64 build runs on Windows 11 on Arm too, emulated. On Linux the .deb (Debian, Ubuntu, Raspberry Pi OS 64-bit) and the .rpm (Fedora, openSUSE) put Gittan in the desktop's menu with its icon, and the .tar.gz runs where you unpack it; all use GTK 3, which every common desktop already has. The macOS build is signed ad hoc, so macOS blocks it at first: drag it to Applications, then run <code>xattr -cr /Applications/Gittan.app</code> in Terminal. Older builds and release notes are on the <a href="https://github.com/slicke/gittan/releases">Releases page</a>. Every push to main is also built on <a href="https://github.com/slicke/gittan/actions/workflows/build.yml?query=branch%3Amain+is%3Asuccess">GitHub Actions</a>, where the artifacts of the newest run are the current development build.
+      Gittan runs the <code>git</code> command line tool, so git 2.30 or later must be installed and on your PATH. The Windows installer needs no administrator for yourself alone, and adds Open in Gittan to folders' menu and the <code>gittan</code> command; it is not signed, so SmartScreen warns at first: More info, then Run anyway. The x64 build runs on Windows 11 on Arm too, emulated; Gittan-windows-arm64.zip runs there natively. On Linux the .deb (Debian, Ubuntu, Raspberry Pi OS 64-bit) and the .rpm (Fedora, openSUSE) put Gittan in the desktop's menu with its icon, and the .tar.gz runs where you unpack it; all use GTK 3, which every common desktop already has. The macOS build is signed ad hoc, so macOS blocks it at first: drag it to Applications, then run <code>xattr -cr /Applications/Gittan.app</code> in Terminal. On Haiku (64-bit), <a href="https://github.com/slicke/gittan/releases/latest/download/Gittan-haiku-x86_64.tar.gz">Gittan-haiku-x86_64.tar.gz</a> runs where you unpack it and needs Qt 6: <code>pkgman install libqt6pas</code>. The Windows on Arm and Haiku builds are added to a release when they build, so the newest release may lack one; the Releases page then has the latest that has it. Older builds and release notes are on the <a href="https://github.com/slicke/gittan/releases">Releases page</a>. Every push to main is also built on <a href="https://github.com/slicke/gittan/actions/workflows/build.yml?query=branch%3Amain+is%3Asuccess">GitHub Actions</a>, where the artifacts of the newest run are the current development build.
     </div>
   </div>
 </section>
@@ -1610,19 +1613,31 @@ make run
     var main = card.querySelector('.btn');
     var label = main.dataset.label;
     var others = Array.prototype.filter.call(card.querySelectorAll('a[data-short]'), function (a) { return !a.closest('[data-arch]'); });
-    // An arm64 Linux gets the arm64 files; a Mac's user agent says Intel either way, so the Mac is left alone.
     var arm = card.querySelector('[data-arch="arm64"]');
-    if (arm && /aarch64|arm64|armv8/i.test(ua + ' ' + plat)) {
+    function show() {
+      get.href = main.href;
+      get.querySelector('span').textContent = 'Download for ' + names[os];
+      // What the button gives, then the platform's other files: "For Apple Silicon (or Intel)".
+      document.getElementById('get-sub').innerHTML = label +
+        (others.length ? ' (or ' + others.map(function (a) { return '<a href="' + a.href + '">' + a.dataset.short + '</a>'; }).join(', ') + ')' : '') +
+        ' · free and open source · <a href="#download">Other platforms</a>';
+    }
+    // An arm64 Linux gets the arm64 files; a Mac's user agent says Intel either way, so the Mac is left alone.
+    if (os === 'linux' && arm && /aarch64|arm64|armv8/i.test(ua + ' ' + plat)) {
       others = Array.prototype.slice.call(arm.querySelectorAll('a[data-short]'));
       main = others.shift();
       label = label.replace('amd64', 'arm64');
     }
-    get.href = main.href;
-    get.querySelector('span').textContent = 'Download for ' + names[os];
-    // What the button gives, then the platform's other files: "For Apple Silicon (or Intel)".
-    document.getElementById('get-sub').innerHTML = label +
-      (others.length ? ' (or ' + others.map(function (a) { return '<a href="' + a.href + '">' + a.dataset.short + '</a>'; }).join(', ') + ')' : '') +
-      ' · free and open source · <a href="#download">Other platforms</a>';
+    show();
+    // Windows on Arm says x64 in its user agent; Chromium's client hints tell. The button stays the x64
+    // installer, which runs there emulated and is in every release, and the native zip comes first after it.
+    if (os === 'win' && arm && navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+      navigator.userAgentData.getHighEntropyValues(['architecture']).then(function (v) {
+        if (v.architecture !== 'arm') return;
+        others = Array.prototype.slice.call(arm.querySelectorAll('a[data-short]')).concat(others);
+        show();
+      }, function () {});
+    }
   }
 
   // ---- Screenshot tabs: a list beside the picture, each tab carrying its figure's caption, with arrow keys.
