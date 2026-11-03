@@ -471,7 +471,7 @@ public
     const pos: integer): RawUtf8;
 
     {** Show an informational alert dialog to the user. }
-  procedure alert(const msg: string);
+  procedure alert(const msg: string; const AName: string = '');
 
     {** Access a registered callback by name. }
   property callback[f: string]: TJSCallback read findCallback;
@@ -829,9 +829,9 @@ end;
 ******************************************************************************}
 
 {** Show a simple informational alert through the host. }
-procedure TGittanExtEngine.alert(const msg: string);
+procedure TGittanExtEngine.alert(const msg: string; const AName: string);
 begin
-  ExtHost.Alert(msg);
+  ExtHost.Alert(AName, msg);
 end;
 
 {** Raise JS exception with filename context. }

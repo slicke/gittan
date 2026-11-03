@@ -55,7 +55,7 @@ begin
   res^ := JS_UNDEFINED;
   if argc <= 0 then
   begin
-    TGittanExtEngine.Instance.alert('');
+    TGittanExtEngine.Instance.alert('', TGittanExtEngine.Instance.ExtensionNameForContext(ctx));
     Exit;
   end;
   totalLen := 0;
@@ -68,7 +68,7 @@ begin
     Move(PAnsiChar(ctx^.ToUtf8(argv^[i]))^, p^, Length(ctx^.ToUtf8(argv^[i])));
     Inc(p, Length(ctx^.ToUtf8(argv^[i])));
   end;
-  TGittanExtEngine.Instance.alert(Output);
+  TGittanExtEngine.Instance.alert(Output, TGittanExtEngine.Instance.ExtensionNameForContext(ctx));
 end;
 
 {** Confirmation dialog that returns a boolean to JavaScript.
@@ -105,7 +105,7 @@ begin
       end;
     end;
 
-    if ExtHost.Confirm(output) then
+    if ExtHost.Confirm(TGittanExtEngine.Instance.ExtensionNameForContext(ctx), output) then
       res^ := JS_TRUE
     else
       res^ := JS_FALSE;
