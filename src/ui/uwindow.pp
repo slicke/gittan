@@ -47,8 +47,9 @@ unit uwindow;
 
 {$mode objfpc}{$H+}
 
-{ The form draws its own title bar on Windows and GTK 3, as in umain. }
-{$IF DEFINED(LCLWin32) OR DEFINED(LCLGtk3)}{$DEFINE OWNBAR}{$ENDIF}
+{ The form draws its own title bar on Windows and GTK 3, and a row of tabs
+  under the menu bar on Qt, as in umain. }
+{$IF DEFINED(LCLWin32) OR DEFINED(LCLGtk3) OR DEFINED(LCLQt5) OR DEFINED(LCLQt6)}{$DEFINE OWNBAR}{$ENDIF}
 
 interface
 
@@ -344,6 +345,10 @@ begin
   {$ENDIF}
   {$IFDEF LCLGtk3}
   FOwnBar := TGittanGtkTitleBar.Create(Self);
+  {$ENDIF}
+  {$IF DEFINED(LCLQt5) OR DEFINED(LCLQt6)}
+  { Qt keeps the window's caption and menu bar; the tabs go under them. }
+  FOwnBar := TGittanTabBar.Create(Self);
   {$ENDIF}
   {$IFDEF OWNBAR}
   FOwnBar.Title := rsAppShortName;

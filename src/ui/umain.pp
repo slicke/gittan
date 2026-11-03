@@ -2,8 +2,9 @@ unit umain;
 
 {$mode objfpc}{$H+}
 
-{ The form draws its own title bar on Windows and GTK 3 (gittan.owntitlebar). }
-{$IF DEFINED(LCLWin32) OR DEFINED(LCLGtk3)}{$DEFINE OWNBAR}{$ENDIF}
+{ The form draws its own title bar on Windows and GTK 3, and a row of tabs
+  under the menu bar on Qt (gittan.owntitlebar). }
+{$IF DEFINED(LCLWin32) OR DEFINED(LCLGtk3) OR DEFINED(LCLQt5) OR DEFINED(LCLQt6)}{$DEFINE OWNBAR}{$ENDIF}
 
 interface
 

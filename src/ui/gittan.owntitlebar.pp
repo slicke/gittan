@@ -42,7 +42,11 @@
 
   SetBand draws a progress band along the bar's top edge, as the band
   over the title bar on macOS (gittan.titlebar): the bar paints it, in
-  the strip above its tabs. }
+  the strip above its tabs.
+
+  TGittanTabBar is the same bar as a row of tabs under the window's own
+  title bar and menu bar (Qt, as on Haiku): no menu button and no caption
+  buttons, the window system keeping its caption and the menu bar. }
 unit gittan.owntitlebar;
 
 {$mode objfpc}{$H+}
@@ -110,6 +114,9 @@ type
     procedure PopupClose(Sender: TObject);
     procedure DropMenu(AOnly: TMenuItem);
   protected
+    { A row of tabs only (TGittanTabBar): no menu button, no caption
+      buttons. }
+    FTabsOnly: boolean;
     procedure DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
       const AXProportion, AYProportion: double); override;
     {** The part at a point of the bar, with the index of the tab. }
@@ -190,6 +197,17 @@ type
     {** The chevrons: back, forward. }
     property OnBack: TNotifyEvent read FOnBack write FOnBack;
     property OnForward: TNotifyEvent read FOnForward write FOnForward;
+  end;
+
+  {** The bar as a row of tabs under the window's own title bar and menu
+    bar, where the window system keeps them (Qt). }
+  TGittanTabBar = class(TGittanOwnTitleBar)
+  protected
+    function Maximized: boolean; override;
+    procedure DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
+      AColor: TColor); override;
+  public
+    constructor Create(AOwner: TComponent); override;
   end;
 
 const
@@ -430,6 +448,10 @@ begin
     Exit;
   H := Height;
   W := Scale96ToForm(ButtonWidth);
+  { A row of tabs only: the caption buttons and the menu button take no
+    room, their rects empty at the edges. }
+  if FTabsOnly then
+    W := 0;
   FCloseRect := Types.Rect(Width - W, 0, Width, H);
   FMaxRect := Types.Rect(FCloseRect.Left - W, 0, FCloseRect.Left, H);
   FMinRect := Types.Rect(FMaxRect.Left - W, 0, FMaxRect.Left, H);
@@ -440,8 +462,12 @@ begin
   else
     FForgeRect := Types.Rect(0, 0, 0, 0);
   S := Scale96ToForm(PlusSize);
-  FMenuRect := Types.Rect(Scale96ToForm(Pad), (H - S) div 2,
-    Scale96ToForm(Pad + MenuButtonWidth), (H + S) div 2);
+  if FTabsOnly then
+    FMenuRect := Types.Rect(Scale96ToForm(Pad - Gap), (H - S) div 2,
+      Scale96ToForm(Pad - Gap), (H + S) div 2)
+  else
+    FMenuRect := Types.Rect(Scale96ToForm(Pad), (H - S) div 2,
+      Scale96ToForm(Pad + MenuButtonWidth), (H + S) div 2);
   X := FMenuRect.Right + Scale96ToForm(Gap);
   W := Scale96ToForm(NavSize);
   FBackRect := Types.Rect(X, (H - W) div 2 + 1, X + W, (H + W) div 2 + 1);
@@ -861,14 +887,17 @@ begin
   TextY := (Height - Canvas.TextHeight('Xg')) div 2 + 1;
 
   { The menu button: three lines. }
-  if FMenuOpen or (FHotPart = tpMenu) then
-    HotBox(FMenuRect, FButtonHot);
-  Mid := (FMenuRect.Left + FMenuRect.Right) div 2;
-  W := Scale96ToForm(7);
-  for i := -1 to 1 do
+  if not FTabsOnly then
   begin
-    L := (FMenuRect.Top + FMenuRect.Bottom) div 2 + i * Scale96ToForm(5);
-    Line(Mid - W, L, Mid + W, L, Ink);
+    if FMenuOpen or (FHotPart = tpMenu) then
+      HotBox(FMenuRect, FButtonHot);
+    Mid := (FMenuRect.Left + FMenuRect.Right) div 2;
+    W := Scale96ToForm(7);
+    for i := -1 to 1 do
+    begin
+      L := (FMenuRect.Top + FMenuRect.Bottom) div 2 + i * Scale96ToForm(5);
+      Line(Mid - W, L, Mid + W, L, Ink);
+    end;
   end;
 
   { The chevrons, on a box under the mouse; dim while there is nowhere
@@ -998,13 +1027,16 @@ begin
     Canvas.Pen.Width := 1;
   end;
 
-  DrawButton(tpMinimize, FMinRect, tgMinimize);
-  if Maximized then
-    Glyph := tgRestore
-  else
-    Glyph := tgMaximize;
-  DrawButton(tpMaximize, FMaxRect, Glyph);
-  DrawButton(tpClose, FCloseRect, tgClose);
+  if not FTabsOnly then
+  begin
+    DrawButton(tpMinimize, FMinRect, tgMinimize);
+    if Maximized then
+      Glyph := tgRestore
+    else
+      Glyph := tgMaximize;
+    DrawButton(tpMaximize, FMaxRect, Glyph);
+    DrawButton(tpClose, FCloseRect, tgClose);
+  end;
 
   if FBandTotal > 0 then
   begin
@@ -1026,6 +1058,24 @@ begin
   inherited DoAutoAdjustLayout(AMode, AXProportion, AYProportion);
   if AMode = lapAutoAdjustForDPI then
     Height := Scale96ToScreen(TitleBarHeight);
+end;
+
+{ TGittanTabBar }
+
+constructor TGittanTabBar.Create(AOwner: TComponent);
+begin
+  inherited Create(AOwner);
+  FTabsOnly := True;
+end;
+
+function TGittanTabBar.Maximized: boolean;
+begin
+  Result := False;
+end;
+
+procedure TGittanTabBar.DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
+  AColor: TColor);
+begin
 end;
 
 end.
