@@ -558,7 +558,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: fpc-haiku
-          key: toolchain-haiku-fpc-3.2.2-threadid
+          key: toolchain-haiku-fpc-3.2.2-threadid-patched
 
       - name: Stamp the build number
         if: env.GITTAN_BUILD != ''
@@ -613,8 +613,15 @@ jobs:
             rm fpcbuild.tar.gz
             curl -fsSL -o fpc.patchset \
               https://raw.githubusercontent.com/haikuports/haikuports/a69ad94446b31f9710249251a2506f5c393a3b94/dev-lang/fpc/patches/fpc-3.2.2.patchset
-            (cd fpcbuild-3.2.2 && git apply -p1 ../fpc.patchset)
+            # Inside Gittan's checkout git apply leaves paths outside the
+            # current folder alone and says nothing, so the search for the
+            # repository stops above it.
+            (cd fpcbuild-3.2.2 && GIT_CEILING_DIRECTORIES="$PWD/.." git apply -p1 ../fpc.patchset)
             rm fpc.patchset
+            # Without HaikuPorts' iconv patch the RTL looks for libiconv_open
+            # in libtextencoding, which r1beta6 lacks.
+            grep -q '^ {\$linklib iconv}' fpcbuild-3.2.2/fpcsrc/rtl/unix/cwstring.pp \
+              || { echo "::error::HaikuPorts' patches did not apply"; exit 1; }
             SYSOSH=fpcbuild-3.2.2/fpcsrc/rtl/haiku/sysosh.inc
             sed -i 's/^  TThreadID = THandle;/  TThreadID = PtrUInt;/' "$SYSOSH"
             grep -q '^  TThreadID = PtrUInt;' "$SYSOSH" || { echo "::error::The TThreadID fix did not apply"; exit 1; }
