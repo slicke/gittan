@@ -683,10 +683,9 @@ jobs:
 
   # Windows on Arm: GitHub's windows-11-arm runner. No Lazarus release has
   # an aarch64-win64 compiler, which needs FPC 3.3.1 (trunk), so the
-  # compiler is FPC's nightly snapshot for that target: a native ppca64
-  # with its units. Lazarus 5.0RC1's x64 installer runs emulated and gives
-  # lazbuild and the LCL's sources, which lazbuild compiles with that
-  # compiler. FPC assembles for this target with clang and links itself.
+  # compiler is trunk at a pinned commit, built as a cross compiler.
+  # Lazarus 5.0RC1's x64 installer gives lazbuild and the LCL's sources,
+  # which lazbuild compiles with that compiler; both run emulated. FPC assembles for this target with clang and links itself.
   # The tests run natively.
   build-winarm:
     name: Build (windows-arm64, best effort)
@@ -699,6 +698,7 @@ jobs:
       GITTAN_BUILD: ${{ needs.version.outputs.build_number }}
       GITTAN_VERSION: ${{ needs.version.outputs.version }}
       FPC_DIR: C:\fpc-a64
+      FPC_COMMIT: dc8aeb24b097b67737adb17d1c6a19f160fffb3a
     steps:
       - uses: actions/checkout@v7
         with:
@@ -746,27 +746,62 @@ jobs:
           Add-Content $env:GITHUB_PATH 'C:\Lazarus'
           & 'C:\Lazarus\lazbuild.exe' --version
 
-      - name: Install FPC trunk (aarch64-win64 snapshot)
+      # FPC trunk at FPC_COMMIT, built here as an x64 cross compiler (run
+      # emulated) with Lazarus's FPC 3.2.2, and kept in the cache by the
+      # commit. FPC's nightly aarch64-win64 snapshot, cross-built on Linux,
+      # cannot be used: each of its executables, the compiler too, crashed
+      # at start (0xC0000005) on this runner.
+      - name: Restore FPC trunk
+        id: fpc-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: C:\fpc-a64
+          key: fpc-trunk-aarch64-win64-${{ env.FPC_COMMIT }}
+
+      - name: Build FPC trunk
+        if: steps.fpc-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $url = 'https://downloads.freepascal.org/fpc/snapshot/trunk/aarch64-win64/fpc-3.3.1.aarch64-win64.built.on.x86_64-linux.tar.gz'
-          $tgz = Join-Path $env:RUNNER_TEMP 'fpc-a64.tar.gz'
-          $done = $false
-          for ($try = 1; $try -le 5 -and -not $done; $try++) {
-            curl.exe -sSL --fail -C - --connect-timeout 30 --speed-limit 102400 --speed-time 30 -w "fpc snapshot: %{size_download} bytes at %{speed_download} B/s\n" -o $tgz $url
-            if ($LASTEXITCODE -eq 0) { $done = $true } else { Write-Host "Attempt $try stopped"; Start-Sleep 5 }
-          }
-          if (-not $done) { throw "Downloading the FPC snapshot failed" }
-          New-Item -ItemType Directory -Force -Path $env:FPC_DIR | Out-Null
-          tar -xzf $tgz -C $env:FPC_DIR
-          $bin = Join-Path $env:FPC_DIR 'bin\aarch64-win64'
-          # The snapshot has no fpc.cfg; ppca64 reads the one beside it.
+          $src = Join-Path $env:RUNNER_TEMP 'fpcsrc'
+          $tgz = "$src.tar.gz"
+          curl.exe -sSL --fail --retry 5 -o $tgz "https://gitlab.com/freepascal.org/fpc/source/-/archive/$env:FPC_COMMIT/source-$env:FPC_COMMIT.tar.gz"
+          New-Item -ItemType Directory -Force -Path $src | Out-Null
+          tar -xzf $tgz -C $src --strip-components=1
+          # The bin folder of Lazarus's FPC has make and the tools the
+          # Makefiles call beside ppcx64.
+          $boot = (Get-ChildItem 'C:\Lazarus\fpc\*\bin\x86_64-win64\ppcx64.exe' | Select-Object -First 1).FullName
+          $env:PATH = "$(Split-Path $boot);$env:PATH"
+          (Get-Command make).Source
+          Set-Location $src
+          $ErrorActionPreference = "Continue"
+          make all OS_TARGET=win64 CPU_TARGET=aarch64 "PP=$boot"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          make crossinstall OS_TARGET=win64 CPU_TARGET=aarch64 "PP=$boot" "INSTALL_PREFIX=$env:FPC_DIR"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Save FPC trunk
+        if: steps.fpc-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: C:\fpc-a64
+          key: fpc-trunk-aarch64-win64-${{ env.FPC_COMMIT }}
+
+      - name: Set up FPC trunk
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bin = Join-Path $env:FPC_DIR 'bin\x86_64-win64'
+          Get-ChildItem $bin | Format-Table Name, Length
+          Get-ChildItem (Join-Path $env:FPC_DIR 'units') | Format-Table Name
+          # ppcrossa64 reads the fpc.cfg beside it. make.ps1 test calls fpc
+          # by name, which fpc.cmd answers with the cross compiler.
           @(
             "-Fu$env:FPC_DIR\units\`$fpctarget",
             "-Fu$env:FPC_DIR\units\`$fpctarget\*",
             "-Fu$env:FPC_DIR\units\`$fpctarget\rtl"
           ) | Set-Content (Join-Path $bin 'fpc.cfg')
+          Set-Content (Join-Path $bin 'fpc.cmd') '@"%~dp0ppcrossa64.exe" %*'
           Add-Content $env:GITHUB_PATH $bin
           # The assembler for this target is clang.
           if (-not (Get-Command clang -ErrorAction SilentlyContinue)) {
@@ -776,19 +811,16 @@ jobs:
             $env:PATH = "$llvm;$env:PATH"
           }
           clang --version
-          Get-ChildItem $bin | Format-Table Name, Length
-          Get-Content (Join-Path $bin 'fpc.cfg')
           $ErrorActionPreference = "Continue"
-          foreach ($exe in 'ppca64.exe', 'fpc.exe') {
-            & "$bin\$exe" -iVDWTPTO
-            Write-Host "$exe -iVDWTPTO: exit $LASTEXITCODE"
-          }
+          & "$bin\ppcrossa64.exe" -iVDWTPTO
+          # A first program, run natively, before Gittan.
           $hello = Join-Path $env:RUNNER_TEMP 'hello'
           New-Item -ItemType Directory -Force -Path $hello | Out-Null
-          Set-Content "$hello\hello.pas" "program hello; begin writeln('hello from arm64'); end."
-          & "$bin\fpc.exe" -va "$hello\hello.pas" 2>&1 | Select-Object -Last 60
-          Write-Host "fpc hello.pas: exit $LASTEXITCODE"
+          Set-Content "$hello\hello.pas" "program hello; uses Classes, SysUtils; var L: TStringList; begin L := TStringList.Create; L.Add('hello from arm64'); writeln(L.Text, ' ', FormatDateTime('yyyy-mm-dd', Now)); L.Free; end."
+          & "$bin\ppcrossa64.exe" "$hello\hello.pas"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           & "$hello\hello.exe"
+          Write-Host "hello.exe: exit $LASTEXITCODE"
           if ($LASTEXITCODE) { exit 1 }
 
       - name: Stamp the build number
@@ -812,10 +844,10 @@ jobs:
             lazbuild --lazarusdir=C:\Lazarus --add-package-link $lpk
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
           }
-          $fpc = Join-Path $env:FPC_DIR 'bin\aarch64-win64\fpc.exe'
+          $fpc = Join-Path $env:FPC_DIR 'bin\x86_64-win64\ppcrossa64.exe'
           ./make.ps1 build --lazarusdir=C:\Lazarus "--compiler=$fpc" --cpu=aarch64 --os=win64
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          # make.ps1 test compiles with the fpc on PATH, the snapshot's.
+          # make.ps1 test compiles with the fpc on PATH, fpc.cmd.
           ./make.ps1 test
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
