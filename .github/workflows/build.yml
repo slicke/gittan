@@ -593,6 +593,13 @@ jobs:
           (cd lazarus-haiku && make lazbuild LCL_PLATFORM="$WIDGETSET")
           ./lazarus-haiku/lazbuild --version
 
+      - name: Save the Lazarus build
+        if: steps.lazarus-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: lazarus-haiku
+          key: ${{ steps.lazarus-cache.outputs.cache-primary-key }}
+
       - name: Build, test and package
         shell: cpa.sh {0}
         run: |
@@ -600,7 +607,12 @@ jobs:
           WIDGETSET='${{ matrix.widgetset }}'
           export GITTAN_BUILD='${{ needs.version.outputs.build_number }}'
           export GITTAN_VERSION='${{ needs.version.outputs.version }}'
-          LAZBUILD="$PWD/lazarus-haiku/lazbuild"
+          # lazbuild does not find its own folder on Haiku ("Invalid Lazarus
+          # directory"), and the Makefile quotes $(LAZBUILD), so a wrapper
+          # passes --lazarusdir.
+          printf '#!/bin/bash\nexec "%s/lazarus-haiku/lazbuild" --lazarusdir="%s/lazarus-haiku" "$@"\n' "$PWD" "$PWD" > lazbuild-haiku
+          chmod +x lazbuild-haiku
+          LAZBUILD="$PWD/lazbuild-haiku"
           make deps LAZBUILD="$LAZBUILD" WIDGETSET="$WIDGETSET"
           make LAZBUILD="$LAZBUILD" WIDGETSET="$WIDGETSET"
           make test
@@ -616,13 +628,6 @@ jobs:
           cp NOTICE dist/Gittan/
           tar -C dist -czf Gittan-${{ matrix.name }}.tar.gz Gittan
           ls -l Gittan-${{ matrix.name }}.tar.gz
-
-      - name: Save the Lazarus build
-        if: steps.lazarus-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: lazarus-haiku
-          key: ${{ steps.lazarus-cache.outputs.cache-primary-key }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
