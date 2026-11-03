@@ -508,6 +508,125 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # ===================== BEST-EFFORT LEGS =====================
+  # Platforms with no runner of their own, built in a VM on a Linux one.
+  # They are not in publish's needs, so a release goes out as soon as the
+  # five platforms above are built, and a leg that fails (continue-on-error,
+  # so it reports without marking the run failed) is simply left out.
+  # publish-extra adds what they built to the release afterwards.
+  #
+  # Haiku: cross-platform-actions boots the haiku-builder image under QEMU,
+  # with the workspace synced both ways, so the package comes back to the
+  # runner for the artifact step. HaikuPorts' fpc is 3.2.2 and its
+  # lazarus_bin 4.0, which lacks ThemeServices.IsDarkTheme, so Lazarus
+  # 5.0RC1 is built from its source tarball inside the VM and kept in the
+  # Actions cache (lazarus-haiku/, a folder of the workspace so it is
+  # synced into the VM).
+  build-extra:
+    name: Build (${{ matrix.name }}, best effort)
+    needs: version
+    if: always() && (needs.version.result == 'success' || needs.version.result == 'skipped')
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 90
+    env:
+      GITTAN_BUILD: ${{ needs.version.outputs.build_number }}
+      GITTAN_VERSION: ${{ needs.version.outputs.version }}
+      WIDGETSET: ${{ matrix.widgetset }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: haiku-x86_64
+            widgetset: gtk3
+          - name: haiku-x86_64-qt6
+            widgetset: qt6
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Restore the Lazarus build
+        id: lazarus-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: lazarus-haiku
+          key: toolchain-haiku-${{ matrix.widgetset }}-lazarus-5.0RC1
+
+      - name: Stamp the build number
+        if: env.GITTAN_BUILD != ''
+        run: |
+          set -euo pipefail
+          perl -pi -e 's|(<UseVersionInfo Value="True"/>)|$1<RevisionNr Value="$ENV{GITTAN_BUILD}"/>|' Gittan.lpi
+          grep -q "<RevisionNr Value=\"$GITTAN_BUILD\"/>" Gittan.lpi
+
+      - name: Start the Haiku VM
+        uses: cross-platform-actions/action@v1.7.0
+        with:
+          operating_system: haiku
+          version: 'r1beta6'
+          architecture: x86-64
+          shell: bash
+          cpu_count: 4
+          environment_variables: GITTAN_BUILD GITTAN_VERSION WIDGETSET
+
+      - name: Install FPC, GTK 3, libQt6Pas and git
+        shell: cpa.sh {0}
+        run: |
+          set -euo pipefail
+          pkgman install -y fpc fpc_source git gtk3_devel libqt6pas
+          fpc -iV
+          git --version
+
+      - name: Build Lazarus 5.0RC1
+        shell: cpa.sh {0}
+        run: |
+          set -euo pipefail
+          if [ -x lazarus-haiku/lazbuild ]; then echo "lazbuild from the cache"; exit 0; fi
+          mkdir -p lazarus-haiku
+          curl -fsSL --connect-timeout 30 -o lazarus.tar.gz \
+            "https://download.lazarus-ide.org/Lazarus%20Zip%20_%20GZip/Lazarus%205.0RC1/lazarus-5.0RC1-0.tar.gz"
+          tar xzf lazarus.tar.gz -C lazarus-haiku --strip-components=1
+          rm lazarus.tar.gz
+          (cd lazarus-haiku && make lazbuild LCL_PLATFORM="$WIDGETSET")
+          ./lazarus-haiku/lazbuild --version
+
+      - name: Build, test and package
+        shell: cpa.sh {0}
+        run: |
+          set -euo pipefail
+          LAZBUILD="$PWD/lazarus-haiku/lazbuild"
+          make deps LAZBUILD="$LAZBUILD" WIDGETSET="$WIDGETSET"
+          make LAZBUILD="$LAZBUILD" WIDGETSET="$WIDGETSET"
+          make test
+          mkdir -p dist/Gittan
+          cp Gittan dist/Gittan/
+          cp -r lexlib dist/Gittan/
+          cp icons/png/gittan-256.png dist/Gittan/gittan.png
+          QJS=externals/quickjs/prebuilt/x86_64-haiku
+          cp "$QJS"/libqjs.so.0.*.* dist/Gittan/libqjs.so.0
+          cp "$QJS"/libtqshim.so dist/Gittan/
+          cp externals/quickjs/LICENSE.quickjs-ng dist/Gittan/
+          cp LICENSE dist/Gittan/LICENSE.gittan
+          cp NOTICE dist/Gittan/
+          tar -C dist -czf Gittan-${{ matrix.name }}.tar.gz Gittan
+          ls -l Gittan-${{ matrix.name }}.tar.gz
+
+      - name: Save the Lazarus build
+        if: steps.lazarus-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: lazarus-haiku
+          key: ${{ steps.lazarus-cache.outputs.cache-primary-key }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: Gittan-extra-${{ matrix.name }}
+          path: Gittan-${{ matrix.name }}.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
   # ===================== PUBLISH =====================
   publish:
     name: Publish build
@@ -602,3 +721,51 @@ jobs:
           # must move to it, not be left to how GitHub treats a published
           # draft.
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+
+  # ===================== PUBLISH THE BEST-EFFORT LEGS =====================
+  # After the release is out, adds the packages of the legs that made it and
+  # a Downloads line for each; a leg that made none is left out. Runs when
+  # publish did, whatever build-extra's result.
+  publish-extra:
+    name: Add the best-effort packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [version, publish, build-extra]
+    permissions:
+      contents: write
+    if: always() && needs.publish.result == 'success'
+    steps:
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          pattern: Gittan-extra-*
+          path: packages
+          merge-multiple: true
+
+      - name: Add the packages to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD: ${{ needs.version.outputs.build_number }}
+        run: |
+          set -euo pipefail
+          TAG="build-${BUILD}"
+          mkdir -p packages
+          ls -l packages
+          ADDED=
+          for F in packages/*; do
+            [ -f "$F" ] || continue
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$F"
+            case "$(basename "$F")" in
+              Gittan-haiku-x86_64.tar.gz)
+                ADDED="$ADDED- **Gittan-haiku-x86_64.tar.gz** — Haiku (64-bit) without installing, needs GTK 3 from HaikuPorts (\`pkgman install gtk3\`). Unpack anywhere and run Gittan."$'\n' ;;
+              *)
+                ADDED="$ADDED- **$(basename "$F")**"$'\n' ;;
+            esac
+          done
+          [ -n "$ADDED" ] || { echo "No best-effort package was built; the release stays as it is."; exit 0; }
+          # The lines go into the Downloads list, before the note on git
+          # that ends it.
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > notes.md
+          ADDED="$ADDED" perl -0pi -e 's/\r//g; s|\n\n(Gittan runs the git command line tool)|\n$ENV{ADDED}\n$1|' notes.md
+          grep -q "Gittan-haiku\|\*\*Gittan-" notes.md
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
