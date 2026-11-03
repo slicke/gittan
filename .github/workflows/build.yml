@@ -629,30 +629,37 @@ jobs:
           export PATH="$PREFIX/bin:$PATH"
           command -v fpc
           fpc -iVTPTO
-          # A thread that is waited for and freed, which crashed before.
-          mkdir -p /tmp/tt
-          cat > /tmp/tt/tt.pas <<'PAS'
-          program tt;
-          uses cthreads, Classes;
-          type TT = class(TThread) procedure Execute; override; end;
-          procedure TT.Execute; begin Sleep(100); end;
-          var T: TT;
-          begin
-            T := TT.Create(False);
-            T.WaitFor;
-            T.Free;
-            writeln('WaitFor and Free: fine');
-          end.
-          PAS
-          fpc -FE/tmp/tt /tmp/tt/tt.pas >/dev/null
-          /tmp/tt/tt
 
+      # Before the check below, so a build that fails it is kept all the same.
       - name: Save the FPC build
         if: steps.fpc-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: fpc-haiku
           key: ${{ steps.fpc-cache.outputs.cache-primary-key }}
+
+      - name: Check the thread fix
+        shell: cpa.sh {0}
+        run: |
+          set -euo pipefail
+          export PATH="$PWD/fpc-haiku/bin:$PATH"
+          # A thread that is waited for and freed, which crashed before.
+          mkdir -p /tmp/threadcheck
+          cat > /tmp/threadcheck/threadcheck.pas <<'PAS'
+          program threadcheck;
+          uses cthreads, Classes;
+          type TWaiter = class(TThread) procedure Execute; override; end;
+          procedure TWaiter.Execute; begin Sleep(100); end;
+          var W: TWaiter;
+          begin
+            W := TWaiter.Create(False);
+            W.WaitFor;
+            W.Free;
+            writeln('WaitFor and Free: fine');
+          end.
+          PAS
+          fpc -FE/tmp/threadcheck /tmp/threadcheck/threadcheck.pas
+          /tmp/threadcheck/threadcheck
 
       # The steps in the VM get their values in the script itself: the action
       # forwards environment variables over ssh (SendEnv), which the Haiku
