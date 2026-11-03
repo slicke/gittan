@@ -654,7 +654,18 @@ jobs:
           rm lazarus.tar.gz
           # -gl: line info, so a crash of lazbuild gives a readable backtrace.
           (cd lazarus-haiku && make lazbuild LCL_PLATFORM="$WIDGETSET" OPT="-gl")
-          ./lazarus-haiku/lazbuild --version
+          RC=0
+          ./lazarus-haiku/lazbuild --version || RC=$?
+          if [ "$RC" != 0 ]; then
+            # Why it ended: the debug_server's lines in the syslog, and
+            # whether any program with cthreads starts.
+            tail -40 /boot/system/var/log/syslog || true
+            mkdir -p /tmp/ct
+            printf "program ct;\nuses cthreads;\nbegin\n  writeln('cthreads: fine');\nend.\n" > /tmp/ct/ct.pas
+            fpc -FE/tmp/ct /tmp/ct/ct.pas >/dev/null && { /tmp/ct/ct; echo "ct: exit $?"; } || true
+            echo "::error::lazbuild --version ended with exit code $RC"
+            exit 1
+          fi
 
       - name: Save the Lazarus build
         if: steps.lazarus-cache.outputs.cache-hit != 'true'
