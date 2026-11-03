@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- The tab bar says that Cmd+P (Ctrl+P on Windows and Linux) opens the command palette, dimmed at its right end, until tabs fill that space.
+
 ## 0.13 (build-138, 2026-11-03)
 
 ### Added

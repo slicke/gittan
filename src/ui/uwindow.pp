@@ -208,6 +208,13 @@ resourcestring
   rsNavBackHint = 'Back (Alt+Left)';
   rsNavForwardHint = 'Forward (Alt+Right)';
   {$ENDIF}
+  { The tip in the empty part of the tab strip: the command palette's
+    key (Go > Command Palette...). }
+  {$IFDEF LCLCocoa}
+  rsPaletteTip = '⌘P for all actions';
+  {$ELSE}
+  rsPaletteTip = 'Ctrl+P for all actions';
+  {$ENDIF}
 
 
 procedure TGittanWindow.FormCreate(Sender: TObject);
@@ -328,6 +335,7 @@ begin
     FToolbar.OnForge := @ForgeClick;
     FToolbar.OnBack := @TabBack;
     FToolbar.OnForward := @TabForward;
+    FToolbar.SetTip(rsPaletteTip);
   end;
   FTitleBarHeight := ExtendUnderTitleBar(Handle);
   {$ENDIF}
@@ -347,6 +355,7 @@ begin
   FOwnBar.OnForge := @ForgeClick;
   FOwnBar.OnBack := @TabBack;
   FOwnBar.OnForward := @TabForward;
+  FOwnBar.SetTip(rsPaletteTip);
   {$ENDIF}
   {$IFDEF LCLWin32}
   InstallTitleBar(Self, TGittanWinTitleBar(FOwnBar));

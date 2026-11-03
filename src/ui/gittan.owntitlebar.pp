@@ -28,7 +28,9 @@
   them; a tab with news has a dot in the accent before its name; the cross on the shown and the hovered tab, or a middle click,
   closes one (OnTabClose), a press on a tab shows it (OnTabSelect), the
   plus asks for a new one (OnNewTab). The tooltip is the path of the tab
-  under the mouse.
+  under the mouse. At the right of the empty part a dim tip (SetTip,
+  the command palette's key) is drawn while the tabs and the plus leave
+  it room.
 
   What the window system does differs: how the window is moved,
   maximized, minimized and closed, which glyphs the caption buttons get.
@@ -90,7 +92,7 @@ type
     FSide, FMain, FText, FDim, FTabFill, FTabBorder, FButtonHot, FMark: TColor;
     FBandPos, FBandTotal: integer;
     FBandTrack, FBandFill: TColor;
-    FTitle: string;
+    FTitle, FTip: string;
     FOnTabSelect, FOnTabClose: TGittanTitleTabEvent;
     FOnNewTab, FOnForge, FOnBack, FOnForward: TNotifyEvent;
     procedure SetActive(AValue: boolean);
@@ -158,6 +160,9 @@ type
       forward (AForward) to, a dim chevron taking no click; ABackHint
       and AForwardHint their hints. }
     procedure SetNav(ABack, AForward: boolean; const ABackHint, AForwardHint: string);
+    {** The dim tip at the right of the empty part, left out where the
+      tabs and the plus reach it and while the tabs are fixed. }
+    procedure SetTip(const ATip: string);
     {** The bar's colors: the shade over the sidebar and the background
       over the rest, the text and the dim text, the shown tab's fill and
       border, a caption button (or a hovered tab) under the mouse, and
@@ -335,6 +340,14 @@ end;
 
 { Where the tabs and the plus end: the globe when it is there, else the
   minimize button. }
+procedure TGittanOwnTitleBar.SetTip(const ATip: string);
+begin
+  if ATip = FTip then
+    Exit;
+  FTip := ATip;
+  Invalidate;
+end;
+
 function TGittanOwnTitleBar.TabsLimit: integer;
 begin
   if FForgeVisible then
@@ -933,6 +946,23 @@ begin
     Line(Mid, L - W, Mid, L + W + 1, FDim);
   end;
   Canvas.Pen.Width := 1;
+
+  { The tip, right-aligned before the banner or the caption buttons,
+    while it is clear of the last tab and the plus. }
+  if not FFixed and (FTip <> '') then
+  begin
+    L := TabsStart + TabsShown * TabWidth;
+    if not FPlusRect.IsEmpty then
+      L := FPlusRect.Right;
+    W := Canvas.TextWidth(FTip);
+    Mid := TabsLimit - Scale96ToForm(Pad + Gap) - W;
+    if Mid >= L + Scale96ToForm(16) then
+    begin
+      Canvas.Brush.Style := bsClear;
+      Canvas.Font.Color := FDim;
+      Canvas.TextOut(Mid, TextY, FTip);
+    end;
+  end;
 
   { The banner: a ribbon from the top edge with a notch at its foot, in
     the accent with a white globe while the forge view is shown, else a
