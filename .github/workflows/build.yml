@@ -23,9 +23,9 @@ on:
 #
 # As in Trndi, a push to main publishes a release: the version job takes the
 # next build number from the "build-<n>" tags (100 when there is none), and
-# the publish job creates the release "build-<n>" with the packages and
-# the commits since the previous build as its notes. PRs, to main or develop,
-# only upload artifacts.
+# the publish job creates the release "build-<n>", titled Major.Minor (0.14),
+# with the packages and CHANGELOG.md's changes as its notes. PRs, to main or
+# develop, only upload artifacts.
 # Every leg also builds and runs the unit tests in tests/ (`make test`).
 #
 # The toolchain is Lazarus 5.0RC1 (Trndi pins 4.8). One thing differs from
@@ -540,8 +540,24 @@ jobs:
           PREV="build-$((BUILD - 1))"
           ls -l packages
 
-          # The commits since the previous build, or the last ten for the first one.
-          if git rev-parse -q --verify "refs/tags/$PREV" >/dev/null; then
+          # The changes are CHANGELOG.md's: its Unreleased section, or the
+          # section already named for this build ("## 0.13 (build-138, ...)")
+          # when Unreleased is empty. Without either, the commits since the
+          # previous build, or the last ten for the first one.
+          # changelog_section prints the section under the first "## "
+          # heading that matches the pattern, without blank lines around it.
+          changelog_section() {
+            awk -v re="$1" '
+              /^## / { if (on) exit; if ($0 ~ re) { on = 1; next } }
+              on { if ($0 != "") { for (; blank > 0; blank--) print ""; print; seen = 1 }
+                   else if (seen) blank++ }
+            ' CHANGELOG.md
+          }
+          CHANGES=$(changelog_section '^## Unreleased')
+          [ -n "$CHANGES" ] || CHANGES=$(changelog_section "^## .*[(]build-${BUILD}[,)]")
+          if [ -n "$CHANGES" ]; then
+            :
+          elif git rev-parse -q --verify "refs/tags/$PREV" >/dev/null; then
             CHANGES=$(git log --no-merges --format='- %s' "${PREV}..HEAD")
             [ -n "$CHANGES" ] || CHANGES="- No new commits"
           else
@@ -580,7 +596,7 @@ jobs:
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
-              --title "Gittan ${VERSION}" \
+              --title "${VERSION%.*}" \
               --notes-file notes.md \
               --draft
           elif [ "$DRAFT" != "true" ]; then

@@ -2652,7 +2652,7 @@ resourcestring
   rsSettings = 'Se&ttings...';
   rsAbout = '&About Gittan';
   rsUpdateTitle = 'Gittan Updates';
-  rsUpdateBadge = 'Build %d available';
+  rsUpdateBadge = '%s available';
   rsUpdateHint = '%s is out; this is %s.';
   rsUpdateHintClick = 'Click to download it';
   rsUpdateAvailable = '%s is out; this is %s. Download it from GitHub?';

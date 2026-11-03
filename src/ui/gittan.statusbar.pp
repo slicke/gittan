@@ -170,8 +170,8 @@ type
     procedure SetFiles(const AText: string);
     {** The caret's position ("Ln 12, Col 4"), '' for none. }
     procedure SetPosition(const AText: string);
-    {** A newer Gittan ("Build 109 available") as a green badge, '' for
-      none. }
+    {** A newer Gittan ("0.14 available", the release's title) as a green
+      badge, '' for none. }
     procedure SetUpdate(const AText: string);
     {** Shows AText on the track in ATone, in place of any message before.
       It clears itself after ASeconds; 0 keeps it until the next message

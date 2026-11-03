@@ -4,9 +4,9 @@
   A build from CI knows its number (gittan.update). The check itself,
   a little after start and every UpdatePoll ms after that, is App's
   (gittan.app); when the latest release is newer, the status bar shows a
-  green badge ("Build 109 available") unless Remind Me Later was chosen
-  less than UpdateSnoozeDays ago. A click on the badge, or Tools > Check
-  for Updates, opens the dialog: Download opens the release's page,
+  green badge ("0.14 available", the release's title) unless Remind Me
+  Later was chosen less than UpdateSnoozeDays ago. A click on the badge,
+  or Tools > Check for Updates, opens the dialog: Download opens the release's page,
   Remind Me Later hides the badge for UpdateSnoozeDays. The menu's check
   always answers, also when Gittan is up to date, a local build or
   offline. A local build never checks by itself. }
@@ -40,7 +40,7 @@ procedure TRepoFrame.ShowUpdateBadge;
 begin
   if App.UpdateDue then
   begin
-    FStatus.SetUpdate(Format(rsUpdateBadge, [App.UpdateRelease.Build]));
+    FStatus.SetUpdate(Format(rsUpdateBadge, [App.UpdateRelease.Name]));
     FStatus.PartHint[spUpdate] := Format(rsUpdateHint, [App.UpdateRelease.Name,
       CurrentBuildName]) + LineEnding + HintLink + ' ' + rsUpdateHintClick;
   end
