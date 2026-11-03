@@ -154,6 +154,23 @@ begin
   Result := LowerCase(base);
 end;
 
+{ The first colon of S outside an IPv6 host's brackets ([::1]:22), 0
+  when there is none. }
+function HostColon(const S: string): integer;
+var
+  i: integer;
+  InBrackets: boolean;
+begin
+  InBrackets := False;
+  for i := 1 to Length(S) do
+    case S[i] of
+      '[': InBrackets := True;
+      ']': InBrackets := False;
+      ':': if not InBrackets then Exit(i);
+    end;
+  Result := 0;
+end;
+
 function RemoteUrlKey(const AUrl: string): string;
 var
   s: string;
@@ -173,7 +190,7 @@ begin
       Delete(s, 1, p);
       Dec(Slash, p);
     end;
-    p := Pos(':', s);
+    p := HostColon(s);
     if (p > 0) and (p < Slash) then
       Delete(s, p, Slash - p);
   end
@@ -184,7 +201,7 @@ begin
     Slash := Pos('/', s);
     if Slash = 0 then
       Slash := Length(s) + 1;
-    p := Pos(':', s);
+    p := HostColon(s);
     if (p > 0) and (p < Slash) then
     begin
       s[p] := '/';
@@ -269,7 +286,7 @@ var
   lines, parts: TStringArray;
   i, j: integer;
   trimmed, lc, value: string;
-  haveName: boolean;
+  haveName, named: boolean;
   g: TExtPermGroup;
 
   function DirectiveValue(const Directive: string; out AValue: string): boolean;
@@ -372,11 +389,17 @@ begin
     end
     else if DirectiveValue('@repos', value) then
     begin
+      { An empty Repos means every repository, so a line of commas and
+        blanks is refused as an empty one is. }
+      named := False;
       parts := value.Split([','], TStringSplitOptions.ExcludeEmpty);
       for j := 0 to High(parts) do
         if Trim(parts[j]) <> '' then
+        begin
           Result.Repos := Concat(Result.Repos, [Trim(parts[j])]);
-      if Length(parts) = 0 then
+          named := True;
+        end;
+      if not named then
         AddError('@repos names no repository');
     end
     else if (Pos('(c)', lc) = 1) or (Pos('copyright', lc) = 1) then

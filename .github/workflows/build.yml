@@ -1064,10 +1064,16 @@ jobs:
           TAG="build-${BUILD}"
           mkdir -p packages
           ls -l packages
+          # A rerun uploads the packages again but does not list them twice.
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > notes.md
           ADDED=
           for F in packages/*; do
             [ -f "$F" ] || continue
             gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$F"
+            if grep -qF -- "**$(basename "$F")**" notes.md; then
+              echo "$(basename "$F") is listed already"
+              continue
+            fi
             case "$(basename "$F")" in
               Gittan-haiku-x86_64.tar.gz)
                 ADDED="$ADDED- **Gittan-haiku-x86_64.tar.gz** — Haiku (64-bit) without installing, needs Qt 6 from HaikuPorts (\`pkgman install libqt6pas\`). Unpack anywhere and run Gittan."$'\n' ;;
@@ -1077,10 +1083,9 @@ jobs:
                 ADDED="$ADDED- **$(basename "$F")**"$'\n' ;;
             esac
           done
-          [ -n "$ADDED" ] || { echo "No best-effort package was built; the release stays as it is."; exit 0; }
+          [ -n "$ADDED" ] || { echo "No best-effort package to list; the notes stay as they are."; exit 0; }
           # The lines go into the Downloads list, before the note on git
           # that ends it.
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > notes.md
           cp notes.md notes.orig
           ADDED="$ADDED" perl -0pi -e 's/\r//g; s|\n\n(Gittan runs the git command line tool)|\n$ENV{ADDED}\n$1|' notes.md
           if cmp -s notes.md notes.orig; then

@@ -317,6 +317,9 @@ begin
       Inf.Error := rsExtNoEngine;
       Exit;
     end;
+    { ExtInScope reads it from the context: without it every repository
+      is in scope. }
+    Ext^.Repos := Inf.Repos;
     if Assigned(FOnProvision) then
     begin
       Engine.BeginRegistration(Ext);

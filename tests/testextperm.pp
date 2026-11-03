@@ -212,6 +212,10 @@ begin
   manifest := ParseExtManifest('/*' + LineEnding + '@name Empty' + LineEnding +
     '@repos' + LineEnding + '*/');
   AssertFalse('an empty @repos is refused', manifest.IsValid);
+
+  manifest := ParseExtManifest('/*' + LineEnding + '@name Commas' + LineEnding +
+    '@repos , ,' + LineEnding + '*/');
+  AssertFalse('commas and blanks are refused', manifest.IsValid);
 end;
 
 procedure TExtPermTest.TestRemoteUrlKey;
@@ -225,6 +229,12 @@ begin
   AssertEquals('user and password', 'example.org/a/b',
     RemoteUrlKey('https://me:secret@Example.org/A/B/'));
   AssertEquals('a local path stays', '/srv/git/x', RemoteUrlKey('/srv/git/x.git'));
+  AssertEquals('IPv6 with a port', '[2001:db8::1]/a/b',
+    RemoteUrlKey('ssh://git@[2001:db8::1]:2222/a/b.git'));
+  AssertEquals('IPv6 in the scp form', '[2001:db8::1]/a/b',
+    RemoteUrlKey('git@[2001:db8::1]:a/b.git'));
+  AssertEquals('an IPv6 pattern stays', '[2001:db8::1]/a/b',
+    RemoteUrlKey('[2001:db8::1]/a/b'));
 end;
 
 procedure TExtPermTest.TestRepoInScope;
