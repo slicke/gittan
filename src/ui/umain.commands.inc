@@ -106,10 +106,12 @@ end;
   AInTerminal (the tile's terminal), else in a job whose output the
   page shows. The file's commands, and the
   keys it gives (AByKey), wait for the file to be trusted: the page is
-  shown with its card instead. }
+  shown with its card instead. One the file marks with confirm asks
+  first. }
 procedure TRepoFrame.RunRepoCommand(AIndex: integer; AByKey, AInTerminal: boolean);
 var
   Cmd: TGittanRepoCommand;
+  Ask: string;
 begin
   if (FRepo.Root = '') or (AIndex < 0) or (AIndex > High(FRepoCommands)) then
     Exit;
@@ -121,6 +123,18 @@ begin
   begin
     ShowCommands;
     Exit;
+  end;
+  { confirm in the file: a clean or a deploy waits for a yes, whether a
+    tile, a key, the terminal or Run Again asked. }
+  if Cmd.Confirm then
+  begin
+    if Cmd.ConfirmText <> '' then
+      Ask := Cmd.ConfirmText
+    else
+      Ask := Format(rsCommandConfirm, [Cmd.Name]);
+    if AskDlg(Cmd.Name, Ask + LineEnding + LineEnding + Cmd.Command, mtConfirmation,
+      [mrYes, rsCommandRunAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
+      Exit;
   end;
   RunCommandRecord(Cmd, AInTerminal);
 end;

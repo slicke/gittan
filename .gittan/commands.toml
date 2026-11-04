@@ -19,6 +19,8 @@ key = "E"
 
 [commands.clean]
 key = "C"
+description = "Remove the built units and the executable"
+confirm = true
 
 [commands.lexlib]
 key = "L"
@@ -26,3 +28,4 @@ key = "L"
 [commands.log]
 run = "git -c color.ui=always log --oneline --graph --decorate -20"
 key = "G"
+description = "The last 20 commits as a graph"

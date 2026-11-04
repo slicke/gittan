@@ -11,7 +11,8 @@ unit gittan.commandpage;
   right; what runs (the shell line, or a script's text, with the full
   name for a tile in a group) is its hint. It fills under the mouse
   and a click raises OnRun with its index. A section of the file that
-  names no script or target is a dimmed tile whose hint says so, and
+  names no script or target (or has run lines for other systems only)
+  is a dimmed tile whose hint says so, and
   it leads nowhere. Each source's heading names its file, and the
   first's offers Edit… or Create… (OnEditFile). While the commands
   file is not trusted its commands are dimmed under a card that says
@@ -211,6 +212,8 @@ resourcestring
   rsRunInTerminal = 'Run in Terminal';
   rsTerminalTile = 'in a terminal';
   rsNoSuchTarget = 'no script or target named %s';
+  rsNoCommandHere = 'no command for %s';
+  rsAsksFirst = 'asks first';
 
 const
   RunLink = 'gittan:run:';
@@ -756,7 +759,9 @@ begin
     Busy := FRunning and IsRun(Cmd);
     { What runs is the tile's hint: the shell line, or a script's text;
       a section that names nothing says so. }
-    if Cmd.Command = '' then
+    if Cmd.Elsewhere then
+      Tip := Format(rsNoCommandHere, [CommandsSystemTitle])
+    else if Cmd.Command = '' then
       Tip := Format(rsNoSuchTarget, [Cmd.Name])
     else if Cmd.Detail <> '' then
       Tip := Cmd.Detail
@@ -764,6 +769,11 @@ begin
       Tip := Cmd.Command;
     if Cmd.Terminal then
       Tip := Tip + ' · ' + rsTerminalTile;
+    if Cmd.Confirm and (Cmd.Command <> '') then
+      Tip := Tip + ' · ' + rsAsksFirst;
+    { The file's line on what it does comes first. }
+    if Cmd.Description <> '' then
+      Tip := Cmd.Description + LineEnding + Tip;
     if AShort then
       Tip := Cmd.Name + LineEnding + Tip;
 

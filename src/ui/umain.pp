@@ -2614,6 +2614,8 @@ resourcestring
   rsCommandFailed = '%s failed with exit code %d';
   rsCommandStopped = '%s was stopped';
   rsCommandNoStart = '%s could not be started';
+  rsCommandConfirm = 'Run %s?';
+  rsCommandRunAction = 'Run';
   rsNavHome = 'Home';
   rsNavGraph = 'Graph';
   rsNavRepository = 'Repository';

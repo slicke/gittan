@@ -70,6 +70,20 @@ type
     Key: char;
     {** Runs in a terminal window instead of under the page. }
     Terminal: boolean;
+    {** A line the file gives that says what it does, for the tile's
+      hint; '' for none. }
+    Description: string;
+    {** Asks before it runs: the file's confirm = true, or a question of
+      its own (ConfirmText, '' for the plain one). }
+    Confirm: boolean;
+    ConfirmText: string;
+    {** The file's hidden = true: it is not listed, nor a script, target
+      or kind's command it names. Only ParseCommandsToml gives it;
+      DiscoverRepoCommands leaves such ones out. }
+    Hidden: boolean;
+    {** run is a table of lines per system and has none for this one:
+      Command is empty, and the page says so. }
+    Elsewhere: boolean;
     Source: TGittanCommandSource;
     {** The kind's name for csProject ("Rust"); the file's path for
       csFile (".gittan/commands.toml", TGittanCommandsFile.Path); '' for the
@@ -92,14 +106,27 @@ type
 
 {** The commands of a commands.toml's text: a table per command under
   [commands], [commands.test], with run = the shell line, key = one
-  letter or digit and terminal = true; a string as the table's value,
-  lint = "npm run lint" under [commands], is its run line. A table
-  without a run line has an empty Command and stands for a script's or
-  a target's key. Keys are kept as capitals; anything but a letter or a
-  digit is no key. TOML keeps no order, so they come sorted by name.
-  AError is the reader's message when the text is not TOML, with no
-  commands. }
-function ParseCommandsToml(const AText: string; out AError: string): TGittanRepoCommands;
+  letter or digit, terminal = true, description = a line for the hint,
+  confirm = true or a question to ask before it runs, and hidden = true;
+  a string as the table's value, lint = "npm run lint" under
+  [commands], is its run line. run may be a table of lines per system,
+  run = { windows = "...", unix = "..." }: the line of ASystem (macos,
+  windows, linux, freebsd, haiku; '' for the system Gittan runs on),
+  else unix's on any system but Windows, else default's; with none of
+  them Command is empty and Elsewhere true. A table without a run line
+  has an empty Command and stands for a script's or a target's key.
+  Keys are kept as capitals; anything but a letter or a digit is no
+  key. TOML keeps no order, so they come sorted by name. AError is the
+  reader's message when the text is not TOML, with no commands. }
+function ParseCommandsToml(const AText: string; out AError: string;
+  const ASystem: string = ''): TGittanRepoCommands;
+
+{** The system Gittan runs on as a key of a run table: macos, windows,
+  linux, freebsd, haiku, or unix for another Unix. }
+function CommandsSystem: string;
+
+{** The same as people write it: macOS, Windows, Linux. }
+function CommandsSystemTitle: string;
 
 {** The kinds of project a commands.toml's text asks for: true with
   ANames when it has project = ["rust", "go"] or project = "rust, go"
@@ -296,15 +323,67 @@ begin
   end;
 end;
 
-function ParseCommandsToml(const AText: string; out AError: string): TGittanRepoCommands;
+function CommandsSystem: string;
+begin
+  {$if defined(darwin)}
+  Result := 'macos';
+  {$elseif defined(windows)}
+  Result := 'windows';
+  {$elseif defined(linux)}
+  Result := 'linux';
+  {$elseif defined(freebsd)}
+  Result := 'freebsd';
+  {$elseif defined(haiku)}
+  Result := 'haiku';
+  {$else}
+  Result := 'unix';
+  {$endif}
+end;
+
+function CommandsSystemTitle: string;
+begin
+  case CommandsSystem of
+    'macos': Result := 'macOS';
+    'windows': Result := 'Windows';
+    'linux': Result := 'Linux';
+    'freebsd': Result := 'FreeBSD';
+    'haiku': Result := 'Haiku';
+    else
+      Result := 'Unix';
+  end;
+end;
+
+{ The line of a run table for ASystem: its own, else unix's on any
+  system but Windows, else default's; '' with none. }
+function RunLineFor(ATable: TTOMLTable; const ASystem: string): string;
+var
+  Field: TTOMLValue;
+  Key: string;
+begin
+  for Key in [ASystem, 'unix', 'default'] do
+  begin
+    if (Key = 'unix') and (ASystem = 'windows') then
+      Continue;
+    if ATable.TryGetValue(Key, Field) and (Field is TTOMLString) and
+      (Trim(Field.AsString) <> '') then
+      Exit(Field.AsString);
+  end;
+  Result := '';
+end;
+
+function ParseCommandsToml(const AText: string; out AError: string;
+  const ASystem: string): TGittanRepoCommands;
 var
   Doc, Table: TTOMLTable;
   Value, Field: TTOMLValue;
   Names: TStringList;
   Cmd: TGittanRepoCommand;
-  Name: string;
+  Name, System: string;
 begin
   Result := nil;
+  System := LowerCase(ASystem);
+  if System = '' then
+    System := CommandsSystem;
   Doc := ReadTomlText(AText, AError);
   if Doc = nil then
     Exit;
@@ -330,8 +409,14 @@ begin
         Cmd.Command := Value.AsString
       else if Value is TTOMLTable then
       begin
-        if TTOMLTable(Value).TryGetValue('run', Field) and (Field is TTOMLString) then
-          Cmd.Command := Field.AsString;
+        if TTOMLTable(Value).TryGetValue('run', Field) then
+          if Field is TTOMLString then
+            Cmd.Command := Field.AsString
+          else if Field is TTOMLTable then
+          begin
+            Cmd.Command := RunLineFor(TTOMLTable(Field), System);
+            Cmd.Elsewhere := Cmd.Command = '';
+          end;
         if TTOMLTable(Value).TryGetValue('key', Field) then
           if Field is TTOMLString then
             Cmd.Key := KeyOf(Field.AsString)
@@ -339,6 +424,18 @@ begin
             Cmd.Key := Chr(Ord('0') + Field.AsInteger);
         if TTOMLTable(Value).TryGetValue('terminal', Field) and (Field is TTOMLBoolean) then
           Cmd.Terminal := Field.AsBoolean;
+        if TTOMLTable(Value).TryGetValue('description', Field) and (Field is TTOMLString) then
+          Cmd.Description := Trim(Field.AsString);
+        if TTOMLTable(Value).TryGetValue('confirm', Field) then
+          if Field is TTOMLBoolean then
+            Cmd.Confirm := Field.AsBoolean
+          else if (Field is TTOMLString) and (Trim(Field.AsString) <> '') then
+          begin
+            Cmd.Confirm := True;
+            Cmd.ConfirmText := Trim(Field.AsString);
+          end;
+        if TTOMLTable(Value).TryGetValue('hidden', Field) and (Field is TTOMLBoolean) then
+          Cmd.Hidden := Field.AsBoolean;
       end
       else
         Continue;
@@ -435,8 +532,12 @@ begin
   Result :=
     '# Gittan runs these from the repository root: a table per command' + LineEnding +
     '# under [commands], with run the shell line, key one letter or digit' + LineEnding +
-    '# for its shortcut (Ctrl+Cmd on macOS, Ctrl+Alt elsewhere) and' + LineEnding +
-    '# terminal = true for one that opens in a terminal. A table named as' + LineEnding +
+    '# for its shortcut (Ctrl+Cmd on macOS, Ctrl+Alt elsewhere),' + LineEnding +
+    '# terminal = true for one that opens in a terminal, description a' + LineEnding +
+    '# line for its hint, confirm = true (or a question) to ask before it' + LineEnding +
+    '# runs and hidden = true to leave it off the page. run may be a line' + LineEnding +
+    '# per system: run = { windows = "...", unix = "..." } (macos, linux' + LineEnding +
+    '# and default too). A table named as' + LineEnding +
     '# a package.json script, a Makefile target or a command of the' + LineEnding +
     '# project''s tools (cargo test, go test) with no run line gives that' + LineEnding +
     '# one a key; a name with a colon is quoted, [commands."build:run"].' + LineEnding +
@@ -448,10 +549,15 @@ begin
     '# [commands.test]' + LineEnding +
     '# run = "npm test"' + LineEnding +
     '# key = "T"' + LineEnding +
+    '# description = "The unit tests"' + LineEnding +
     '#' + LineEnding +
     '# [commands.dev]' + LineEnding +
     '# run = "npm run dev"' + LineEnding +
-    '# terminal = true' + LineEnding;
+    '# terminal = true' + LineEnding +
+    '#' + LineEnding +
+    '# [commands.clean]' + LineEnding +
+    '# run = { windows = "rmdir /s /q build", unix = "rm -rf build" }' + LineEnding +
+    '# confirm = "Remove the build folder?"' + LineEnding;
 end;
 
 { ---------------------------------------------------------------------------
@@ -660,16 +766,24 @@ var
   F: TGittanCommandsFile;
 
   { A file section without a command line that names ACommand gives it
-    the key and the terminal flag, and is taken by it. }
+    the key, the terminal flag, the description, the question and
+    whether it is hidden, and is taken by it. One whose run lines are
+    for other systems is a command of its own. }
   procedure TakeFromFile(var ACommand: TGittanRepoCommand);
   var
     k: integer;
   begin
     for k := 0 to High(FileOnes) do
-      if (FileOnes[k].Command = '') and (FileOnes[k].Name = ACommand.Name) then
+      if (FileOnes[k].Command = '') and not FileOnes[k].Elsewhere and
+        (FileOnes[k].Name = ACommand.Name) then
       begin
         ACommand.Key := FileOnes[k].Key;
         ACommand.Terminal := FileOnes[k].Terminal;
+        if FileOnes[k].Description <> '' then
+          ACommand.Description := FileOnes[k].Description;
+        ACommand.Confirm := FileOnes[k].Confirm;
+        ACommand.ConfirmText := FileOnes[k].ConfirmText;
+        ACommand.Hidden := FileOnes[k].Hidden;
         Taken[k] := True;
         Exit;
       end;
@@ -677,6 +791,10 @@ var
 
   procedure Add(const ACommand: TGittanRepoCommand);
   begin
+    { A hidden one is not listed and its key runs nothing; a hidden
+      section that names nothing is still shown, as a misspelling. }
+    if ACommand.Hidden and ((ACommand.Command <> '') or ACommand.Elsewhere) then
+      Exit;
     SetLength(Result, Length(Result) + 1);
     Result[High(Result)] := ACommand;
   end;

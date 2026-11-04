@@ -29,6 +29,8 @@ type
   published
     procedure TestParseToml;
     procedure TestParseTomlNotToml;
+    procedure TestParseTomlFields;
+    procedure TestParseTomlPerSystem;
     procedure TestTomlProjects;
     procedure TestCommandsFiles;
     procedure TestPackageScripts;
@@ -38,6 +40,9 @@ type
     procedure TestDiscoverOrder;
     procedure TestDiscoverKeysFromFile;
     procedure TestDiscoverOrphan;
+    procedure TestDiscoverFieldsFromFile;
+    procedure TestDiscoverHidden;
+    procedure TestDiscoverElsewhere;
     procedure TestHash;
     procedure TestHashOfFiles;
     procedure TestCommandByKey;
@@ -184,6 +189,56 @@ begin
   C := ParseCommandsToml('[test]'#10'command = make test'#10, E);
   AssertEquals('an ini file is no TOML', 0, Length(C));
   AssertTrue(E <> '');
+end;
+
+procedure TRepoCommandsTest.TestParseTomlFields;
+var
+  C: TGittanRepoCommands;
+  Err: string;
+begin
+  C := ParseCommandsToml(
+    '[commands.a]'#10'run = "x"'#10'description = "  Does x  "'#10'confirm = true'#10 +
+    '[commands.b]'#10'run = "y"'#10'confirm = "Really y?"'#10'hidden = true'#10 +
+    '[commands.c]'#10'run = "z"'#10'confirm = ""'#10'hidden = "yes"'#10'description = 3'#10,
+    Err);
+  AssertEquals(Err, 3, Length(C));
+  AssertEquals('the description is trimmed', 'Does x', C[0].Description);
+  AssertTrue('confirm = true asks', C[0].Confirm);
+  AssertEquals('with the plain question', '', C[0].ConfirmText);
+  AssertFalse(C[0].Hidden);
+  AssertTrue('a question of its own asks too', C[1].Confirm);
+  AssertEquals('Really y?', C[1].ConfirmText);
+  AssertTrue(C[1].Hidden);
+  AssertFalse('an empty question asks nothing', C[2].Confirm);
+  AssertFalse('a value of another type counts as missing', C[2].Hidden);
+  AssertEquals('', C[2].Description);
+end;
+
+procedure TRepoCommandsTest.TestParseTomlPerSystem;
+const
+  Text = '[commands.both]'#10'run = { windows = "make.ps1", unix = "make" }'#10 +
+    '[commands.mac]'#10'run.macos = "open ."'#10'run.default = "xdg-open ."'#10 +
+    '[commands.winonly]'#10'run = { windows = "dir" }'#10'key = "W"'#10;
+var
+  C: TGittanRepoCommands;
+  Err: string;
+begin
+  C := ParseCommandsToml(Text, Err, 'windows');
+  AssertEquals(Err, 3, Length(C));
+  AssertEquals('make.ps1', C[0].Command);
+  AssertEquals('default when the system has none', 'xdg-open .', C[1].Command);
+  AssertEquals('dir', C[2].Command);
+  AssertFalse(C[2].Elsewhere);
+  C := ParseCommandsToml(Text, Err, 'macos');
+  AssertEquals('unix covers macOS', 'make', C[0].Command);
+  AssertEquals('the system''s own comes first', 'open .', C[1].Command);
+  AssertEquals('no line for this system', '', C[2].Command);
+  AssertTrue('says so', C[2].Elsewhere);
+  AssertEquals('and keeps its key', 'W', C[2].Key);
+  C := ParseCommandsToml(Text, Err, 'linux');
+  AssertEquals('make', C[0].Command);
+  AssertEquals('xdg-open .', C[1].Command);
+  AssertEquals('the detail is the line run', 'make', C[0].Detail);
 end;
 
 procedure TRepoCommandsTest.TestTomlProjects;
@@ -386,6 +441,59 @@ begin
   AssertEquals('build', C[2].Name);
   AssertEquals('the orphan''s key does not take the target''s', 'B', C[2].Key);
   AssertEquals('and runs the target', 2, CommandByKey(C, 'B'));
+end;
+
+procedure TRepoCommandsTest.TestDiscoverFieldsFromFile;
+var
+  C: TGittanRepoCommands;
+begin
+  Put('.gittan/commands.toml',
+    '[commands.clean]'#10'confirm = "Remove lib?"'#10'description = "Removes lib"'#10);
+  Put('Makefile', 'clean:'#10'build:'#10);
+  C := DiscoverRepoCommands(FDir);
+  AssertEquals(2, Length(C));
+  AssertEquals('clean', C[0].Name);
+  AssertEquals('make clean', C[0].Command);
+  AssertTrue('the question comes with the section', C[0].Confirm);
+  AssertEquals('Remove lib?', C[0].ConfirmText);
+  AssertEquals('so does the description', 'Removes lib', C[0].Description);
+  AssertFalse(C[1].Confirm);
+end;
+
+procedure TRepoCommandsTest.TestDiscoverHidden;
+var
+  C: TGittanRepoCommands;
+begin
+  Put('.gittan/commands.toml',
+    '[commands.internal]'#10'hidden = true'#10'key = "I"'#10 +
+    '[commands.secret]'#10'run = "echo"'#10'hidden = true'#10'key = "S"'#10 +
+    '[commands.gone]'#10'hidden = true'#10 +
+    '[commands.elsewhere]'#10'run = { nosuch = "x" }'#10'hidden = true'#10);
+  Put('Makefile', 'internal:'#10'build:'#10);
+  C := DiscoverRepoCommands(FDir);
+  AssertEquals('hidden ones are left out; one naming nothing is kept', 2, Length(C));
+  AssertEquals('gone', C[0].Name);
+  AssertEquals('', C[0].Command);
+  AssertEquals('build', C[1].Name);
+  AssertEquals('a hidden one''s key runs nothing', -1, CommandByKey(C, 'I'));
+  AssertEquals(-1, CommandByKey(C, 'S'));
+end;
+
+procedure TRepoCommandsTest.TestDiscoverElsewhere;
+var
+  C: TGittanRepoCommands;
+begin
+  { Lines for a system that is none: no line for this one, so the
+    target of the same name is not given the section's key. }
+  Put('.gittan/commands.toml', '[commands.build]'#10'run = { nosuch = "x" }'#10'key = "B"'#10);
+  Put('Makefile', 'build:'#10);
+  C := DiscoverRepoCommands(FDir);
+  AssertEquals(2, Length(C));
+  AssertTrue(C[0].Elsewhere);
+  AssertEquals('', C[0].Command);
+  AssertEquals('make build', C[1].Command);
+  AssertEquals(#0, C[1].Key);
+  AssertEquals('its key runs nothing', -1, CommandByKey(C, 'B'));
 end;
 
 procedure TRepoCommandsTest.TestHash;
