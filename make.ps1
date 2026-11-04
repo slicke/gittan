@@ -2,7 +2,7 @@
 make.ps1 - the Makefile's targets for Windows, where there is no make.
 
 Usage:
-  .\make.ps1 [build|debug|rebuild|run|lexlib|deps|ide|test|clean|help] [lazbuild-args...]
+  .\make.ps1 [build|debug|rebuild|run|lexlib|deps|ide|outdated|vendor-check|test|clean|help] [lazbuild-args...]
   .\make.ps1 [lazbuild-args...]
 
  - Finds lazbuild as Trndi's make.ps1 does: LAZBUILD, then PATH, then
@@ -46,6 +46,66 @@ $VendorPackages = @(
     'vendor\metadarkstyle\metadarkstyle.lpk',
     'vendor\lazink\lazink.lpk'
 )
+
+# Before every build Test-Vendor warns, as the Makefile's vendor-check does,
+# when a submodule is not at the commit Gittan records and when a package the
+# IDE is built with has moved since the last ide target, which writes their
+# commits into $IdeStamp. 'outdated' fetches the remotes and lists what
+# upstream has that the checkout lacks.
+$IdeVendor = @('vendor/ATFlatControls', 'vendor/EncConv', 'vendor/BGRABitmap', 'vendor/ATSynEdit')
+$IdeStamp = '.ide-vendor'
+
+function Test-InGit {
+    $ErrorActionPreference = 'Continue'  # git on stderr is no error here (Windows PowerShell 5.1)
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return $false }
+    & git rev-parse --git-dir *> $null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Test-Vendor {
+    $ErrorActionPreference = 'Continue'  # git on stderr is no error here (Windows PowerShell 5.1)
+    if (-not (Test-InGit)) { return }
+    foreach ($line in @(& git submodule status 2>$null)) {
+        if ($line.Length -lt 2) { continue }
+        $parts = $line.Substring(1).Trim().Split(' ')
+        $sha = $parts[0]; $path = $parts[1]
+        switch ($line[0]) {
+            '-' { Write-Warning "$path is not checked out; run: git submodule update --init" }
+            '+' {
+                $rec = ((& git ls-files -s -- $path) -split ' ')[1]
+                Write-Warning ("$path is at $($sha.Substring(0, 7)), Gittan records $($rec.Substring(0, 7)); " +
+                    "run: git submodule update $path (or git add $path for a move you mean)")
+            }
+            'U' { Write-Warning "$path has a merge conflict" }
+        }
+    }
+    if (Test-Path $IdeStamp) {
+        $stamp = @(Get-Content $IdeStamp)
+        $moved = @($IdeVendor | Where-Object { $stamp -notcontains "$(& git -C $_ rev-parse HEAD) $_" })
+        if ($moved.Count -gt 0) {
+            Write-Warning "the Lazarus IDE was built with older $($moved -join ' '); run: .\make.ps1 ide"
+        }
+    }
+}
+
+function Show-Outdated {
+    $ErrorActionPreference = 'Continue'  # git on stderr is no error here (Windows PowerShell 5.1)
+    foreach ($entry in @(& git config -f .gitmodules --get-regexp '\.path$')) {
+        $d = ($entry -split ' ', 2)[1]
+        & git -C $d fetch -q origin 2>$null
+        if ($LASTEXITCODE -ne 0) { Write-Host "${d}: could not fetch origin"; continue }
+        $up = & git -C $d symbolic-ref -q --short refs/remotes/origin/HEAD
+        if (-not $up) {
+            & git -C $d remote set-head origin -a *> $null
+            $up = & git -C $d symbolic-ref -q --short refs/remotes/origin/HEAD
+        }
+        if (-not $up) { Write-Host "${d}: origin has no default branch"; continue }
+        $n = [int](& git -C $d rev-list --count --no-merges "HEAD..$up")
+        if ($n -eq 0) { Write-Host "${d}: up to date with $up"; continue }
+        Write-Host "${d}: $n commit(s) behind $up"
+        & git -C $d log --oneline --no-merges -10 "HEAD..$up" | ForEach-Object { Write-Host "    $_" }
+    }
+}
 
 $lazCandidates = @('C:\lazarus\lazbuild.exe', 'C:\fpcupdeluxe\lazarus\lazbuild.exe')
 
@@ -139,6 +199,7 @@ function Copy-QuickJSLibs {
 
 function Invoke-Lazbuild([string[]]$Flags) {
     Need-Lazbuild
+    Test-Vendor
     Copy-Lexers
     Write-Host "Running: $laz $($Flags -join ' ') $Lpi" -ForegroundColor Cyan
     & $laz @Flags $Lpi
@@ -186,8 +247,14 @@ switch ($target) {
         # --build-ide= for a short option and stops.
         Need-Lazbuild
         & $laz @rest --build-ide=
-        exit $LASTEXITCODE
+        $rc = $LASTEXITCODE
+        if ($rc -eq 0 -and (Test-InGit)) {
+            $IdeVendor | ForEach-Object { "$(& git -C $_ rev-parse HEAD) $_" } | Set-Content $IdeStamp
+        }
+        exit $rc
     }
+    'vendor-check' { Test-Vendor; exit 0 }
+    'outdated' { Show-Outdated; exit 0 }
     'test' {
         if (-not (Get-Command fpc -ErrorAction SilentlyContinue)) {
             Write-Error 'fpc not found on PATH or beside lazbuild.'; exit 1
@@ -215,6 +282,7 @@ switch ($target) {
         Write-Host "  run       Build, then start Gittan (arguments after 'run' go to Gittan)"
         Write-Host '  deps      Register the vendored packages with lazbuild and compile them'
         Write-Host '  ide       Rebuild the Lazarus IDE (after ATSynEdit, ATFlatControls, EncConv or BGRABitmap moves)'
+        Write-Host "  outdated  Fetch the vendored packages' remotes and list the commits upstream is ahead"
         Write-Host '  test      Build and run the unit tests in tests\'
         Write-Host "  lexlib    Copy the lexers from $LexersSrc and $LexersOwn into $LexLib\ (part of every build)"
         Write-Host "  clean     Remove lib\, $LexLib\, the test build and the binary"

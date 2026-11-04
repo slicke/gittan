@@ -64,3 +64,6 @@ symbol_order*.fpc
 
 # Linux packages (make packages)
 pkg/
+
+# Commits of the packages the Lazarus IDE was last built with (make ide)
+/.ide-vendor
