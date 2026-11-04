@@ -163,7 +163,7 @@ section { padding: calc(var(--section-gap) / 2) 0; }
 .hero .tag-line { font-size: var(--step-lead); line-height: 1.45; max-width: 36ch; margin: 36px 0 40px; }
 .hero .sub { margin-top: 16px; font-size: var(--step-small); color: var(--muted); }
 .hero .sub a { color: var(--ink); }
-.hero-shot { grid-column: 7 / span 4; height: calc(100svh - max(calc(var(--bar) + 48px), 18svh)); margin: 0; overflow: clip; background: var(--ui-bg); }
+.hero-shot { grid-column: 7 / span 4; height: calc(100svh - max(calc(var(--bar) + 48px), 18svh)); margin: 0; overflow: clip; container-type: size; }
 .hero-shot img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 0 0; }
 .hero-facts { grid-column: 11 / span 2; margin: 0; padding: 0; list-style: none; display: grid; gap: 40px; }
 .hero-facts b { display: block; font: 400 var(--step-lead)/1.2 var(--display); letter-spacing: -.02em; font-weight: 400; margin-bottom: 6px; }
@@ -264,9 +264,10 @@ section { padding: calc(var(--section-gap) / 2) 0; }
 /* ---------- footer: a picture of the product beside the closing line and the links ---------- */
 .foot { padding: calc(var(--section-gap) / 2) 0 0; }
 .foot .grid { align-items: stretch; }
-.foot-pic { grid-column: 1 / span 6; min-height: 60svh; margin: 0; overflow: clip; background: var(--ui-bg); }
+.foot-pic { grid-column: 1 / span 6; min-height: 60svh; margin: 0; overflow: clip; container-type: size; }
 .foot-pic img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 0 0; }
 .foot-side { grid-column: 7 / -1; background: var(--surface); padding: clamp(32px, 4vw, 56px); display: flex; flex-direction: column; gap: 32px; }
+.foot-logo img { display: block; width: min(100%, 300px); height: auto; }
 .foot-side h2 { font-size: var(--step-sub); line-height: 1.15; max-width: 24ch; }
 .foot-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--gutter); }
 .foot-cols ul { list-style: none; margin: 0; padding: 0; }
@@ -465,3 +466,13 @@ pre.sh .c { color: var(--code-dim); }
   .scard { transform: none !important; }
   .bar .now span { transition: none; }
 }
+
+/* ---------- screenshot corners ----------
+   The window shots carry desktop wallpaper in their rounded corners (up to 19px along the top edge at the
+   shots' 1280 x 800) and a lighter outline pixel round the window. Scaled down, the browser blends both into
+   the picture, so clip 3 shot pixels in, on a curve of 26 (2% of 1280, 3.25% of 800), scaled with it. */
+img[src^="assets/shots/"]:not([src*="-zoom"]) { clip-path: inset(0.375% 0.234% round 2% / 3.25%); }
+img[src^="assets/shots/os-"] { clip-path: inset(0.5% 0.3% round 2.6% / 4.2%); }
+/* The hero and footer crops fill their frame's height and keep the window's left edge, so only the
+   left corners are the window's, measured in the frame's height: 3 of 800 is 0.375cqh, 26 is 3.25cqh. */
+.hero-shot img, .foot-pic img { clip-path: inset(0.375cqh 0 0.375cqh 0.375cqh round 3.25cqh 0 0 3.25cqh); }
