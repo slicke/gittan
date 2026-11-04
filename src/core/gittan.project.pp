@@ -141,8 +141,9 @@ type
 
   { TGittanGitProjectContext }
 
-  {** The context of a real repository: Since is the newest tag
-    reachable from HEAD, the tracked files git ls-files, the files at
+  {** The context of a real repository: Since is the tag nearest HEAD
+    (git describe --tags --abbrev=0: the closest reachable one, not the
+    newest by version), the tracked files git ls-files, the files at
     the tag git cat-file. }
   TGittanGitProjectContext = class(TGittanProjectContext)
   private
@@ -180,6 +181,12 @@ type
     class function DependencyFile(const ARoot: string): string; virtual;
     {** The lock file at ARoot with the resolved versions; ''. }
     class function LockFile(const ARoot: string): string; virtual;
+    {** Every name the dependency file and the lock file may have, the
+      one preferred first, so the files at Since are read under the
+      names they had there; none when there is only the one
+      DependencyFile and LockFile give. }
+    class function DependencyFileNames: TStringArray; virtual;
+    class function LockFileNames: TStringArray; virtual;
     {** The dependencies the dependency file's text asks for. }
     class function Dependencies(const AText: string): TGittanDependencies; virtual;
     {** The packages the text of the lock file AName resolved. }
@@ -324,7 +331,8 @@ function TextOf(const ARoot, AName: string): string;
 {** The files at ARoot whose name ends with AExt, by name. }
 function FilesWithExt(const ARoot, AExt: string): TStringArray;
 {** A name for the shell: quoted when it has a space or a character
-  the shell reads. }
+  the shell reads, in single quotes for sh (a quote in it as '\''), in
+  double quotes on Windows. }
 function ShellName(const AName: string): string;
 
 implementation
@@ -577,18 +585,189 @@ begin
     Result := ADependency.Version;
 end;
 
+{ The numbers of a version: 1, 2, 3 of "1.2.3-beta"; a part that does
+  not start with a digit ends them ("1.x" is 1). }
+function VersionParts(const AVersion: string): TStringArray;
+var
+  Parts: TStringArray;
+  i, k: integer;
+begin
+  Result := nil;
+  Parts := AVersion.Split(['.']);
+  for i := 0 to High(Parts) do
+  begin
+    k := 1;
+    while (k <= Length(Parts[i])) and (Parts[i][k] in ['0'..'9']) do
+      Inc(k);
+    if k = 1 then
+      Break;
+    SetLength(Result, Length(Result) + 1);
+    Result[High(Result)] := Copy(Parts[i], 1, k - 1);
+    if k <= Length(Parts[i]) then
+      Break;
+  end;
+end;
+
+{ -1, 0 or 1 as the version A is below, equal to or above B, by their
+  numbers, a missing one counted as 0. }
+function CompareVersionParts(const A, B: TStringArray): integer;
+var
+  i, Last: integer;
+  X, Y: int64;
+begin
+  Last := High(A);
+  if High(B) > Last then
+    Last := High(B);
+  for i := 0 to Last do
+  begin
+    X := 0;
+    Y := 0;
+    if i <= High(A) then
+      X := StrToInt64Def(A[i], 0);
+    if i <= High(B) then
+      Y := StrToInt64Def(B[i], 0);
+    if X < Y then
+      Exit(-1);
+    if X > Y then
+      Exit(1);
+  end;
+  Result := 0;
+end;
+
+{ Whether AVersion starts with the numbers of APrefix. }
+function HasVersionPrefix(const AVersion, APrefix: TStringArray): boolean;
+var
+  i: integer;
+begin
+  if Length(APrefix) > Length(AVersion) then
+    Exit(False);
+  for i := 0 to High(APrefix) do
+    if StrToInt64Def(AVersion[i], 0) <> StrToInt64Def(APrefix[i], 0) then
+      Exit(False);
+  Result := True;
+end;
+
+{ Whether AVersion meets one constraint of a requirement: ">=1.2",
+  "<2", "==1.4", "~1.2" (or ~= of Python: the same 1.2), "^1.2" or a
+  bare "1.2" (Cargo's and npm's caret: the same major, the same 0.x
+  below 1), "!=1.3". One without a number ("*", "workspace", "latest")
+  is met by every version. }
+function MeetsConstraint(const AVersion: TStringArray; const AConstraint: string): boolean;
+var
+  Op: string;
+  Want, Prefix: TStringArray;
+  i, c: integer;
+begin
+  i := 1;
+  while (i <= Length(AConstraint)) and (AConstraint[i] in ['<', '>', '=', '!', '~', '^']) do
+    Inc(i);
+  Op := Copy(AConstraint, 1, i - 1);
+  { npm's "v1.2". }
+  if (i <= Length(AConstraint)) and (AConstraint[i] = 'v') then
+    Inc(i);
+  Want := VersionParts(Copy(AConstraint, i, MaxInt));
+  if Length(Want) = 0 then
+    Exit(True);
+  c := CompareVersionParts(AVersion, Want);
+  if Op = '>=' then
+    Result := c >= 0
+  else if Op = '>' then
+    Result := c > 0
+  else if Op = '<=' then
+    Result := c <= 0
+  else if Op = '<' then
+    Result := c < 0
+  else if Op = '!=' then
+    Result := c <> 0
+  else if (Op = '=') or (Op = '==') or (Op = '===') then
+    Result := HasVersionPrefix(AVersion, Want)
+  else if (Op = '~') or (Op = '~=') then
+  begin
+    { ~1.2 is 1.2.x, ~1 is 1.x; Python's ~=1.4.2 is 1.4.x. }
+    Prefix := Copy(Want, 0, 2);
+    if (Op = '~=') and (Length(Want) > 1) then
+      Prefix := Copy(Want, 0, Length(Want) - 1);
+    Result := HasVersionPrefix(AVersion, Prefix) and (c >= 0);
+  end
+  else
+  begin
+    { The caret, written or not: the first number that is not 0 stays. }
+    i := 0;
+    while (i < High(Want)) and (StrToInt64Def(Want[i], 0) = 0) do
+      Inc(i);
+    Result := HasVersionPrefix(AVersion, Copy(Want, 0, i + 1)) and (c >= 0);
+  end;
+end;
+
+{ Whether AVersion meets a requirement as a manifest writes it: any of
+  its "||" alternatives, each a list of constraints by commas or spaces
+  (">=1.2, <2", ">=1.2 <2"). }
+function MeetsRequirement(const AVersion, ARequirement: string): boolean;
+var
+  Version, Alternatives, Constraints: TStringArray;
+  Req: string;
+  i, k: integer;
+  All: boolean;
+begin
+  Version := VersionParts(AVersion);
+  { An operator and its number are one constraint: ">= 1.2". }
+  Req := '';
+  for i := 1 to Length(ARequirement) do
+    if not ((ARequirement[i] = ' ') and (Req <> '') and
+      (Req[Length(Req)] in ['<', '>', '=', '!', '~', '^'])) then
+      Req := Req + ARequirement[i];
+  Alternatives := Req.Split(['||']);
+  for i := 0 to High(Alternatives) do
+  begin
+    Constraints := Alternatives[i].Split([',', ' '], TStringSplitOptions.ExcludeEmpty);
+    All := True;
+    for k := 0 to High(Constraints) do
+      if not MeetsConstraint(Version, Constraints[k]) then
+        All := False;
+    if All then
+      Exit(True);
+  end;
+  Result := Length(Alternatives) = 0;
+end;
+
 procedure ResolveDependencies(var ADependencies: TGittanDependencies;
   const ALocked: TGittanDependencies);
 var
-  i, j: integer;
+  i, j, Count, Best: integer;
 begin
   for i := 0 to High(ADependencies) do
+  begin
+    Count := 0;
+    Best := -1;
     for j := 0 to High(ALocked) do
       if ALocked[j].Name = ADependencies[i].Name then
       begin
-        ADependencies[i].Resolved := ALocked[j].Resolved;
-        Break;
+        Inc(Count);
+        Best := j;
       end;
+    if Count > 1 then
+    begin
+      { Several versions locked: the one the manifest asks for, exactly
+        when one is, else the newest that meets the requirement; none
+        when none meets it, rather than one that is wrong. }
+      Best := -1;
+      for j := 0 to High(ALocked) do
+        if (ALocked[j].Name = ADependencies[i].Name) and
+          MeetsRequirement(ALocked[j].Resolved, ADependencies[i].Version) then
+        begin
+          if ALocked[j].Resolved = ADependencies[i].Version then
+          begin
+            Best := j;
+            Break;
+          end;
+          if (Best < 0) or (CompareVersionParts(VersionParts(ALocked[j].Resolved),
+            VersionParts(ALocked[Best].Resolved)) > 0) then
+            Best := j;
+        end;
+    end;
+    if Best >= 0 then
+      ADependencies[i].Resolved := ALocked[Best].Resolved;
+  end;
 end;
 
 function DependencyChanges(const AOld, ANew: TGittanDependencies): TGittanDependencyChanges;
@@ -638,10 +817,34 @@ begin
   end;
 end;
 
+{ The name of the file at Since and its text: ACurrent when it was
+  there, else the first of ANames that was; '' for none. }
+function FileAtSince(AContext: TGittanProjectContext; const ACurrent: string;
+  const ANames: TStringArray; out AText: string): string;
+var
+  i: integer;
+begin
+  AText := '';
+  if ACurrent <> '' then
+  begin
+    AText := AContext.ReadAt(ACurrent);
+    if AText <> '' then
+      Exit(ACurrent);
+  end;
+  for i := 0 to High(ANames) do
+    if ANames[i] <> ACurrent then
+    begin
+      AText := AContext.ReadAt(ANames[i]);
+      if AText <> '' then
+        Exit(ANames[i]);
+    end;
+  Result := '';
+end;
+
 function ReadDependencies(AKind: TGittanProjectKindClass; AContext: TGittanProjectContext;
   out ADependencies: TGittanDependencies; out AChanges: TGittanDependencyChanges): boolean;
 var
-  DepFile, LockName, OldLock: string;
+  DepFile, LockName, OldText, OldLockName, OldLock: string;
   Old: TGittanDependencies;
 begin
   ADependencies := nil;
@@ -656,13 +859,14 @@ begin
     ResolveDependencies(ADependencies, AKind.Locked(LockName, TextOf(AContext.Root, LockName)));
   if AContext.Since = '' then
     Exit;
-  Old := AKind.Dependencies(AContext.ReadAt(DepFile));
-  if LockName <> '' then
-  begin
-    OldLock := AContext.ReadAt(LockName);
-    if OldLock <> '' then
-      ResolveDependencies(Old, AKind.Locked(LockName, OldLock));
-  end;
+  { The tag's files under the names they had there: a project that
+    moved from requirements.txt to pyproject.toml, or to another lock
+    file, is compared with what it had. }
+  FileAtSince(AContext, DepFile, AKind.DependencyFileNames, OldText);
+  Old := AKind.Dependencies(OldText);
+  OldLockName := FileAtSince(AContext, LockName, AKind.LockFileNames, OldLock);
+  if OldLockName <> '' then
+    ResolveDependencies(Old, AKind.Locked(OldLockName, OldLock));
   AChanges := DependencyChanges(Old, ADependencies);
 end;
 
@@ -915,6 +1119,16 @@ begin
   Result := '';
 end;
 
+class function TGittanProjectKind.DependencyFileNames: TStringArray;
+begin
+  Result := nil;
+end;
+
+class function TGittanProjectKind.LockFileNames: TStringArray;
+begin
+  Result := nil;
+end;
+
 class function TGittanProjectKind.Dependencies(const AText: string): TGittanDependencies;
 begin
   Result := nil;
@@ -962,10 +1176,12 @@ begin
     Result.Detail := rsPicked;
   Result.StateStyle := psDim;
   DepFile := DependencyFile(AContext.Root);
-  { A kind picked with no file of its own has nothing to read. }
+  { A kind picked with no file of its own has nothing to read, but the
+    checks that need no such file still hold. }
   if (DepFile <> '') and not HasFile(AContext.Root, DepFile) then
   begin
     AddBlock(Result, ProjectNote(Format(rsPickedNoFile, [DepFile])));
+    AddBlock(Result, ChecksBlock(Checks(AContext)));
     Exit;
   end;
   if ReadDependencies(Self, AContext, Deps, Changes) then
@@ -1036,10 +1252,14 @@ end;
 
 function TextOf(const ARoot, AName: string): string;
 begin
+  Result := '';
   if HasFile(ARoot, AName) then
-    Result := ReadFileBytes(RootFile(ARoot, AName))
-  else
-    Result := '';
+    try
+      Result := ReadFileBytes(RootFile(ARoot, AName));
+    except
+      { Gone or locked since HasFile looked: as if it were not there. }
+      Result := '';
+    end;
 end;
 
 function FilesWithExt(const ARoot, AExt: string): TStringArray;
@@ -1074,7 +1294,13 @@ var
 begin
   for i := 1 to Length(AName) do
     if not (AName[i] in ['A'..'Z', 'a'..'z', '0'..'9', '_', '-', '.', '/', '+', '=', ':', ',']) then
+      {$IFDEF WINDOWS}
       Exit('"' + StringReplace(AName, '"', '\"', [rfReplaceAll]) + '"');
+      {$ELSE}
+      { Single quotes, where sh reads nothing ($, `, \ and " included);
+        a quote of the name ends them, is escaped and opens them again. }
+      Exit('''' + StringReplace(AName, '''', '''\''''', [rfReplaceAll]) + '''');
+      {$ENDIF}
   Result := AName;
 end;
 

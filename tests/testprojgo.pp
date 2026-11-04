@@ -25,6 +25,8 @@ type
     procedure TestGoMod;
     procedure TestGoModInfo;
     procedure TestGoSection;
+    procedure TestGoRunTests;
+    procedure TestGoAbsoluteReplace;
   end;
 
 implementation
@@ -141,6 +143,49 @@ begin
   AssertTrue(Sec.Blocks[3].Kind = pbChecks);
   { No go.sum, and the folder of the replace is not there. }
   AssertEquals(2, Length(Sec.Blocks[3].Checks));
+end;
+
+procedure TProjGoTest.TestGoRunTests;
+var
+  C: TGittanProjectCommands;
+  i: integer;
+  HasRun: boolean;
+begin
+  Put('go.mod', 'module x' + LE);
+  Put('lib.go', 'package x' + LE);
+  Put('main_test.go', 'package main' + LE);
+  C := TGittanGoKind.Commands(FDir);
+  HasRun := False;
+  for i := 0 to High(C) do
+    if C[i].Name = 'run' then
+      HasRun := True;
+  AssertFalse('a _test.go is not what go run builds', HasRun);
+  Put('main.go', 'package main' + LE);
+  C := TGittanGoKind.Commands(FDir);
+  for i := 0 to High(C) do
+    if C[i].Name = 'run' then
+      HasRun := True;
+  AssertTrue(HasRun);
+end;
+
+procedure TProjGoTest.TestGoAbsoluteReplace;
+var
+  Ctx: TGittanProjectContext;
+  Abs: string;
+begin
+  ForceDirectories(IncludeTrailingPathDelimiter(FDir) + 'there');
+  Abs := StringReplace(IncludeTrailingPathDelimiter(FDir) + 'there', '\', '/', [rfReplaceAll]);
+  Put('go.mod', 'module x' + LE + 'replace a.b/c => ' + Abs + LE +
+    'replace d.e/f => ' + Abs + '-gone' + LE);
+  Put('go.sum', '');
+  Ctx := TGittanProjectContext.Create(FDir, '', nil);
+  try
+    AssertEquals('the absolute path is read as it is, the missing one warned of', 1,
+      Length(TGittanGoKind.Checks(Ctx)));
+    AssertTrue(Pos('-gone', TGittanGoKind.Checks(Ctx)[0].Text) > 0);
+  finally
+    Ctx.Free;
+  end;
 end;
 
 initialization

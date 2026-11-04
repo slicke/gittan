@@ -39,6 +39,8 @@ type
     class function Commands(const ARoot: string): TGittanProjectCommands; override;
     class function DependencyFile(const ARoot: string): string; override;
     class function LockFile(const ARoot: string): string; override;
+    class function DependencyFileNames: TStringArray; override;
+    class function LockFileNames: TStringArray; override;
     class function Dependencies(const AText: string): TGittanDependencies; override;
     class function Locked(const AName, AText: string): TGittanDependencies; override;
     class function Version(const AText: string): string; override;
@@ -352,18 +354,35 @@ begin
     Result := '';
 end;
 
-class function TGittanPythonKind.LockFile(const ARoot: string): string;
 const
   { A typed array, not an array constructor: FPC 3.2.2 gets a for-in
     over a constructor of strings wrong. }
-  LockNames: array[0..2] of string = ('uv.lock', 'poetry.lock', 'pdm.lock');
+  PythonLockNames: array[0..2] of string = ('uv.lock', 'poetry.lock', 'pdm.lock');
+
+class function TGittanPythonKind.LockFile(const ARoot: string): string;
 var
   FileName: string;
 begin
-  for FileName in LockNames do
+  for FileName in PythonLockNames do
     if HasFile(ARoot, FileName) then
       Exit(FileName);
   Result := '';
+end;
+
+class function TGittanPythonKind.DependencyFileNames: TStringArray;
+begin
+  SetLength(Result, 2);
+  Result[0] := 'pyproject.toml';
+  Result[1] := 'requirements.txt';
+end;
+
+class function TGittanPythonKind.LockFileNames: TStringArray;
+var
+  i: integer;
+begin
+  SetLength(Result, Length(PythonLockNames));
+  for i := 0 to High(PythonLockNames) do
+    Result[i] := PythonLockNames[i];
 end;
 
 class function TGittanPythonKind.Dependencies(const AText: string): TGittanDependencies;

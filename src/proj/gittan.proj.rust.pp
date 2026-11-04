@@ -74,6 +74,8 @@ uses
 resourcestring
   rsCargoLockUntracked = 'Cargo.lock is not committed. A crate with a binary commits it so ' +
     'that every build uses the versions this one has.';
+  rsNoCargoLock = 'No Cargo.lock. cargo build writes it; a crate with a binary commits it so ' +
+    'that every build uses the same versions.';
   rsTargetTracked = 'Files under target/ are committed: cargo''s build output.';
   rsPackage = 'Package';
   rsEdition = 'Edition';
@@ -145,6 +147,24 @@ function ParseCargoDependencies(const AText: string): TGittanDependencies;
 var
   E: TGittanTomlEntry;
   Group, Name: string;
+
+  { A key of a [dependencies.name] table: the dependency once, with the
+    version of whichever key gives one, path and git before version
+    as well as after. }
+  procedure TakeKey(const AVersion: string);
+  var
+    i: integer;
+  begin
+    for i := 0 to High(Result) do
+      if (Result[i].Name = Name) and (Result[i].Group = Group) then
+      begin
+        if AVersion <> '' then
+          Result[i].Version := AVersion;
+        Exit;
+      end;
+    AddDependency(Result, Name, AVersion, '', Group);
+  end;
+
 begin
   Result := nil;
   for E in ReadToml(AText) do
@@ -154,11 +174,11 @@ begin
     if Name = '' then
       AddDependency(Result, E.Key, CargoRequirement(E.Value), '', Group)
     else if E.Key = 'version' then
-      AddDependency(Result, Name, TomlString(E.Value), '', Group)
+      TakeKey(TomlString(E.Value))
     else if (E.Key = 'workspace') and (Trim(E.Value) = 'true') then
-      AddDependency(Result, Name, 'workspace', '', Group)
+      TakeKey('workspace')
     else if (E.Key = 'path') or (E.Key = 'git') then
-      AddDependency(Result, Name, '', '', Group);
+      TakeKey('');
   end;
 end;
 
@@ -292,9 +312,11 @@ var
   Path: string;
 begin
   Result := nil;
-  if HasFile(AContext.Root, 'Cargo.lock') and not AContext.IsTracked('Cargo.lock') and
-    RustHasBinary(AContext.Root) then
-    AddProjectCheck(Result, ProjectCheck(rsCargoLockUntracked, 'Cargo.lock'));
+  if RustHasBinary(AContext.Root) then
+    if not HasFile(AContext.Root, 'Cargo.lock') then
+      AddProjectCheck(Result, ProjectCheck(rsNoCargoLock, ''))
+    else if not AContext.IsTracked('Cargo.lock') then
+      AddProjectCheck(Result, ProjectCheck(rsCargoLockUntracked, 'Cargo.lock'));
   if AContext.TrackedUnder('target/', Path) then
     AddProjectCheck(Result, ProjectCheck(rsTargetTracked, Path, 'target/'));
 end;

@@ -60,14 +60,20 @@ function TomlArrayStrings(const AValue: string): TStringArray;
 {** A key as written, its quotes taken off. }
 function BareKey(const AKey: string): string;
 
-{** Adds a dependency to ADeps, once per name and group (a lock file
-  may list a package twice; the first is kept). }
+{** Adds a dependency to ADeps, once per name and group; a second one
+  of the same name and group is left out. }
 procedure AddDependency(var ADeps: TGittanDependencies; const AName, AVersion, AResolved,
   AGroup: string);
 
+{** Adds a package of a lock file, with its version in Resolved, once
+  per name and version: a lock may hold two versions of a package, and
+  ResolveDependencies of gittan.project picks the one the manifest
+  asks for. }
+procedure AddLocked(var ADeps: TGittanDependencies; const AName, AResolved: string);
+
 {** The packages of a TOML lock with [[package]] of name and version
   (Cargo.lock, uv.lock, poetry.lock, pdm.lock), each with its version
-  in Resolved. }
+  in Resolved, every version of a package listed twice. }
 function ParseTomlLock(const AText: string): TGittanDependencies;
 
 {** The JSON object of AJson, nil when it is not one; the caller frees
@@ -84,6 +90,20 @@ uses
   TOML
   --------------------------------------------------------------------------- }
 
+{ Whether the character at AIndex of AText closes the string AQuote
+  opened. In a basic ("...") string a backslash escapes the character
+  after it, which AIndex then steps over; a literal ('...') string has
+  no escapes. }
+function EndsQuote(const AText: string; var AIndex: integer; AQuote: char): boolean;
+begin
+  if (AQuote = '"') and (AText[AIndex] = '\') and (AIndex < Length(AText)) then
+  begin
+    Inc(AIndex);
+    Exit(False);
+  end;
+  Result := AText[AIndex] = AQuote;
+end;
+
 { The line without its comment: a "#" outside quotes ends it. }
 function StripComment(const ALine: string): string;
 var
@@ -91,17 +111,19 @@ var
   Quote: char;
 begin
   Quote := #0;
-  for i := 1 to Length(ALine) do
+  i := 1;
+  while i <= Length(ALine) do
   begin
     if Quote <> #0 then
     begin
-      if ALine[i] = Quote then
+      if EndsQuote(ALine, i, Quote) then
         Quote := #0;
     end
     else if ALine[i] in ['"', ''''] then
       Quote := ALine[i]
     else if ALine[i] = '#' then
       Exit(Copy(ALine, 1, i - 1));
+    Inc(i);
   end;
   Result := ALine;
 end;
@@ -115,11 +137,12 @@ var
 begin
   Result := 0;
   Quote := #0;
-  for i := 1 to Length(ALine) do
+  i := 1;
+  while i <= Length(ALine) do
   begin
     if Quote <> #0 then
     begin
-      if ALine[i] = Quote then
+      if EndsQuote(ALine, i, Quote) then
         Quote := #0;
     end
     else
@@ -128,6 +151,7 @@ begin
         '[', '{': Inc(Result);
         ']', '}': Dec(Result);
       end;
+    Inc(i);
   end;
 end;
 
@@ -214,13 +238,88 @@ begin
   end;
 end;
 
+{ The UTF-8 of the code point ACode; '' for a surrogate or one beyond
+  Unicode. }
+function CodePointUtf8(ACode: longword): string;
+begin
+  if ACode < $80 then
+    Result := Chr(ACode)
+  else if ACode < $800 then
+    Result := Chr($C0 or (ACode shr 6)) + Chr($80 or (ACode and $3F))
+  else if (ACode >= $D800) and (ACode <= $DFFF) then
+    Result := ''
+  else if ACode < $10000 then
+    Result := Chr($E0 or (ACode shr 12)) + Chr($80 or ((ACode shr 6) and $3F)) +
+      Chr($80 or (ACode and $3F))
+  else if ACode <= $10FFFF then
+    Result := Chr($F0 or (ACode shr 18)) + Chr($80 or ((ACode shr 12) and $3F)) +
+      Chr($80 or ((ACode shr 6) and $3F)) + Chr($80 or (ACode and $3F))
+  else
+    Result := '';
+end;
+
+{ The inside of a basic string with its escapes decoded: \" \\ \b \t
+  \n \f \r \e, and \uXXXX and \UXXXXXXXX as UTF-8; an escape TOML does
+  not know stays as written. }
+function UnescapeBasic(const S: string): string;
+var
+  i, n: integer;
+  Code: longword;
+  Hex: string;
+begin
+  Result := '';
+  i := 1;
+  while i <= Length(S) do
+  begin
+    if (S[i] <> '\') or (i = Length(S)) then
+    begin
+      Result := Result + S[i];
+      Inc(i);
+      Continue;
+    end;
+    Inc(i);
+    case S[i] of
+      '"': Result := Result + '"';
+      '\': Result := Result + '\';
+      'b': Result := Result + #8;
+      't': Result := Result + #9;
+      'n': Result := Result + #10;
+      'f': Result := Result + #12;
+      'r': Result := Result + #13;
+      'e': Result := Result + #27;
+      'u', 'U':
+      begin
+        if S[i] = 'u' then
+          n := 4
+        else
+          n := 8;
+        Hex := Copy(S, i + 1, n);
+        if (Length(Hex) = n) and TryStrToDWord('$' + Hex, Code) then
+        begin
+          Result := Result + CodePointUtf8(Code);
+          Inc(i, n);
+        end
+        else
+          Result := Result + '\' + S[i];
+      end;
+      else
+        Result := Result + '\' + S[i];
+    end;
+    Inc(i);
+  end;
+end;
+
 function TomlString(const AValue: string): string;
 var
   S: string;
 begin
   S := Trim(AValue);
   if (Length(S) >= 2) and (S[1] in ['"', '''']) and (S[Length(S)] = S[1]) then
-    Result := Copy(S, 2, Length(S) - 2)
+  begin
+    Result := Copy(S, 2, Length(S) - 2);
+    if S[1] = '"' then
+      Result := UnescapeBasic(Result);
+  end
   else
     Result := '';
 end;
@@ -241,11 +340,19 @@ begin
   Part := '';
   Depth := 0;
   Quote := #0;
-  for i := 1 to Length(S) do
+  i := 0;
+  while i < Length(S) do
   begin
+    Inc(i);
     if Quote <> #0 then
     begin
-      if S[i] = Quote then
+      { An escape stays as written, the backslash and what it escapes. }
+      if (Quote = '"') and (S[i] = '\') and (i < Length(S)) then
+      begin
+        Part := Part + S[i];
+        Inc(i);
+      end
+      else if S[i] = Quote then
         Quote := #0;
       Part := Part + S[i];
     end
@@ -320,8 +427,6 @@ var
 begin
   if AName = '' then
     Exit;
-  { Once each: a lock file may list a package twice (two versions), and
-    the first is kept. }
   for i := 0 to High(ADeps) do
     if (ADeps[i].Name = AName) and (ADeps[i].Group = AGroup) then
       Exit;
@@ -330,6 +435,21 @@ begin
   ADeps[High(ADeps)].Version := AVersion;
   ADeps[High(ADeps)].Resolved := AResolved;
   ADeps[High(ADeps)].Group := AGroup;
+end;
+
+procedure AddLocked(var ADeps: TGittanDependencies; const AName, AResolved: string);
+var
+  i: integer;
+begin
+  if AName = '' then
+    Exit;
+  for i := 0 to High(ADeps) do
+    if (ADeps[i].Name = AName) and (ADeps[i].Resolved = AResolved) then
+      Exit;
+  SetLength(ADeps, Length(ADeps) + 1);
+  ADeps[High(ADeps)] := Default(TGittanDependency);
+  ADeps[High(ADeps)].Name := AName;
+  ADeps[High(ADeps)].Resolved := AResolved;
 end;
 
 { The packages of a TOML lock with [[package]] of name and version
@@ -343,7 +463,7 @@ var
   procedure Flush;
   begin
     if (Name <> '') and (Version <> '') then
-      AddDependency(Result, Name, '', Version, '');
+      AddLocked(Result, Name, Version);
     Name := '';
     Version := '';
   end;

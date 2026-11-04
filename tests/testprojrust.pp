@@ -27,6 +27,7 @@ type
     procedure TestCargoLock;
     procedure TestCargoInfo;
     procedure TestRustSection;
+    procedure TestRustNoLock;
   end;
 
 implementation
@@ -120,6 +121,14 @@ begin
   AssertEquals('1.0', Find(D, 'serde').Version);
   AssertEquals('0.2', Find(D, 'libc').Version);
   AssertEquals('', Find(D, 'mine').Version);
+  { A version after path or git still counts. }
+  D := ParseCargoDependencies('[dependencies.both]' + LE + 'path = "../both"' + LE +
+    'version = "0.3"' + LE + '[dev-dependencies.g]' + LE + 'git = "https://x/g"' + LE +
+    'version = "1.2"' + LE);
+  AssertEquals('both g', Names(D));
+  AssertEquals('0.3', Find(D, 'both').Version);
+  AssertEquals('1.2', Find(D, 'g').Version);
+  AssertEquals('dev', Find(D, 'g').Group);
 end;
 
 procedure TProjRustTest.TestCargoLock;
@@ -188,6 +197,27 @@ begin
   AssertTrue(Sec.Blocks[Bins].Rows[0].Cells[1].Style = psButton);
   AssertEquals('cargo run --bin tool', Sec.Blocks[Bins].Rows[0].Cells[1].Command);
   AssertEquals('run:tool', Sec.Blocks[Bins].Rows[0].Cells[1].CommandName);
+end;
+
+procedure TProjRustTest.TestRustNoLock;
+var
+  C: TGittanProjectContext;
+  Checks: TGittanProjectChecks;
+begin
+  Put('Cargo.toml', '[package]' + LE + 'name = "x"' + LE);
+  Put('src/main.rs', '');
+  C := TGittanProjectContext.Create(FDir, '', nil);
+  try
+    Checks := TGittanRustKind.Checks(C);
+    AssertEquals('a binary with no Cargo.lock at all', 1, Length(Checks));
+    AssertTrue(Pos('No Cargo.lock', Checks[0].Text) = 1);
+    AssertEquals('', Checks[0].Path);
+    DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'src' + PathDelim + 'main.rs');
+    Put('src/lib.rs', '');
+    AssertEquals('a library needs none', 0, Length(TGittanRustKind.Checks(C)));
+  finally
+    C.Free;
+  end;
 end;
 
 initialization

@@ -17,6 +17,7 @@ type
     procedure TestTomlTables;
     procedure TestTomlMultiLine;
     procedure TestTomlValues;
+    procedure TestTomlEscapes;
     procedure TestTomlLock;
     procedure TestJsonObject;
   end;
@@ -77,9 +78,39 @@ begin
   D := ParseTomlLock('[[package]]' + LE + 'name = "a"' + LE + 'version = "1.0"' + LE +
     '[[package]]' + LE + 'name = "a"' + LE + 'version = "2.0"' + LE + '[[package]]' + LE +
     'name = "b"' + LE + 'version = "3"' + LE + '[package.metadata]' + LE + 'x = 1' + LE);
-  AssertEquals('a twice keeps the first', 2, Length(D));
+  AssertEquals('a twice keeps both versions', 3, Length(D));
   AssertEquals('1.0', D[0].Resolved);
-  AssertEquals('b', D[1].Name);
+  AssertEquals('a', D[1].Name);
+  AssertEquals('2.0', D[1].Resolved);
+  AssertEquals('b', D[2].Name);
+  D := nil;
+  AddLocked(D, 'a', '1.0');
+  AddLocked(D, 'a', '1.0');
+  AssertEquals('the same version once', 1, Length(D));
+end;
+
+procedure TManifestTest.TestTomlEscapes;
+var
+  E: TGittanTomlEntries;
+begin
+  { An escaped quote does not end the string: the # after it is no
+    comment, the bracket in it opens nothing, the comma splits
+    nothing. }
+  E := ReadToml('a = "x\" # y" # comment' + LE + 'b = ["p\"]", "q"]' + LE +
+    'c = { k = "1\",2" }' + LE + 'd = ''lit\'' # done' + LE);
+  AssertEquals(4, Length(E));
+  AssertEquals('"x\" # y"', E[0].Value);
+  AssertEquals('x" # y', TomlString(E[0].Value));
+  AssertEquals('c', E[2].Key);
+  AssertEquals('p"] q', string.Join(' ', TomlArrayStrings(E[1].Value)));
+  AssertEquals('1",2', TomlString(TomlInlineValue(E[2].Value, 'k')));
+  AssertEquals('a literal string has no escapes', 'lit\', TomlString(E[3].Value));
+  AssertEquals('a\b', TomlString('"a\\b"'));
+  AssertEquals('t' + #9 + 'n' + #10, TomlString('"t\tn\n"'));
+  AssertEquals('é', TomlString('"\u00E9"'));
+  AssertEquals('😀', TomlString('"\U0001F600"'));
+  AssertEquals('unknown kept', '\q', TomlString('"\q"'));
+  AssertEquals('a\\b', TomlString('''a\\b'''));
 end;
 
 procedure TManifestTest.TestJsonObject;

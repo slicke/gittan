@@ -31,6 +31,7 @@ type
     class function Identify(const ARoot: string; out AManifest: string): boolean; override;
     class function DependencyFile(const ARoot: string): string; override;
     class function LockFile(const ARoot: string): string; override;
+    class function LockFileNames: TStringArray; override;
     class function Dependencies(const AText: string): TGittanDependencies; override;
     class function Locked(const AName, AText: string): TGittanDependencies; override;
     class function Version(const AText: string): string; override;
@@ -68,6 +69,11 @@ function ParseNodeInfo(const AJson: string): TNodeInfo;
 {** The package manager of the package at ARoot: what packageManager
   says ("pnpm@9.1.0"), else the one whose lock file is there, else npm. }
 function NodePackageManager(const ARoot: string): string;
+
+{** The tool of a package manager as NodePackageManager gives it: npm,
+  pnpm, yarn or bun, without the version ("pnpm" of "pnpm@9.1.0"); ''
+  for any other, which the Install button does not run. }
+function NodeTool(const AManager: string): string;
 
 implementation
 
@@ -235,7 +241,7 @@ begin
         Version := Trim(Copy(Version, 2, MaxInt));
       Version := BareKey(Version);
       if Version <> '' then
-        AddDependency(Result, Name, '', Version, '');
+        AddLocked(Result, Name, Version);
       Name := '';
     end;
   end;
@@ -292,7 +298,7 @@ begin
       Version := Copy(Key, i + 1, MaxInt);
     end;
     if (Name <> '') and (Version <> '') then
-      AddDependency(Result, Name, '', Version, '');
+      AddLocked(Result, Name, Version);
   end;
 end;
 
@@ -370,6 +376,27 @@ begin
     Result := 'npm';
 end;
 
+function NodeTool(const AManager: string): string;
+const
+  Tools: array[0..3] of string = ('npm', 'pnpm', 'yarn', 'bun');
+var
+  i: integer;
+begin
+  Result := AManager;
+  if Pos('@', Result) > 1 then
+    Result := Copy(Result, 1, Pos('@', Result) - 1);
+  for i := 0 to High(Tools) do
+    if Result = Tools[i] then
+      Exit;
+  Result := '';
+end;
+
+const
+  { A typed array, not an array constructor: FPC 3.2.2 gets a for-in
+    over a constructor of strings wrong. }
+  NodeLockNames: array[0..4] of string = ('package-lock.json', 'pnpm-lock.yaml', 'yarn.lock',
+    'bun.lock', 'npm-shrinkwrap.json');
+
 { TGittanNodeKind }
 
 class function TGittanNodeKind.Name: string;
@@ -392,18 +419,38 @@ begin
 end;
 
 class function TGittanNodeKind.LockFile(const ARoot: string): string;
-const
-  { A typed array, not an array constructor: FPC 3.2.2 gets a for-in
-    over a constructor of strings wrong. }
-  LockNames: array[0..4] of string = ('package-lock.json', 'pnpm-lock.yaml', 'yarn.lock',
-    'bun.lock', 'npm-shrinkwrap.json');
 var
-  FileName: string;
+  Tool, FileName: string;
 begin
-  for FileName in LockNames do
+  { The lock of the package manager the page names, when it is there,
+    so the versions are the ones its install gives. }
+  Tool := NodeTool(NodePackageManager(ARoot));
+  if Tool = 'npm' then
+  begin
+    if HasFile(ARoot, 'package-lock.json') then
+      Exit('package-lock.json');
+    if HasFile(ARoot, 'npm-shrinkwrap.json') then
+      Exit('npm-shrinkwrap.json');
+  end
+  else if (Tool = 'pnpm') and HasFile(ARoot, 'pnpm-lock.yaml') then
+    Exit('pnpm-lock.yaml')
+  else if (Tool = 'yarn') and HasFile(ARoot, 'yarn.lock') then
+    Exit('yarn.lock')
+  else if (Tool = 'bun') and HasFile(ARoot, 'bun.lock') then
+    Exit('bun.lock');
+  for FileName in NodeLockNames do
     if HasFile(ARoot, FileName) then
       Exit(FileName);
   Result := '';
+end;
+
+class function TGittanNodeKind.LockFileNames: TStringArray;
+var
+  i: integer;
+begin
+  SetLength(Result, Length(NodeLockNames));
+  for i := 0 to High(NodeLockNames) do
+    Result[i] := NodeLockNames[i];
 end;
 
 class function TGittanNodeKind.Dependencies(const AText: string): TGittanDependencies;
@@ -459,15 +506,16 @@ begin
   Result.Blocks := nil;
   Info := ParseNodeInfo(TextOf(AContext.Root, 'package.json'));
   Manager := NodePackageManager(AContext.Root);
-  { The tool without its version: pnpm of pnpm@9.1.0. }
-  Tool := Manager;
-  if Pos('@', Tool) > 1 then
-    Tool := Copy(Tool, 1, Pos('@', Tool) - 1);
+  { The tool without its version, and only one it knows: the field is
+    the repository's text, and the button runs it through the shell. }
+  Tool := NodeTool(Manager);
   Facts := ProjectBlock(pbFacts);
   AddFact(Facts, rsPackage, Info.Name, psStrong);
-  if Manager <> '' then
+  if Tool <> '' then
     AddRow(Facts, ProjectRow([ProjectCell(rsManager, psDim), ProjectCell(Manager),
-      ProjectButton(rsInstall, 'install', Tool + ' install')]));
+      ProjectButton(rsInstall, 'install', Tool + ' install')]))
+  else
+    AddFact(Facts, rsManager, Manager);
   AddFact(Facts, rsModuleType, Info.ModuleType);
   AddFact(Facts, rsEngines, string.Join(', ', Info.Engines));
   AddFact(Facts, rsWorkspaces, string.Join(', ', Info.Workspaces));

@@ -30,6 +30,8 @@ type
     procedure TestNodeInfo;
     procedure TestNodeManager;
     procedure TestNodeSection;
+    procedure TestNodeLockOfManager;
+    procedure TestNodeUnknownManager;
   end;
 
 implementation
@@ -210,6 +212,43 @@ begin
   AssertEquals('pnpm install', R.Cells[2].Command);
   AssertEquals('3.4.0', Sec.Blocks[1].Rows[0].Cells[2].Text);
   AssertEquals('no commands of its own', 0, Length(TGittanNodeKind.Commands(FDir)));
+end;
+
+procedure TProjNodeTest.TestNodeLockOfManager;
+begin
+  Put('package.json', '{"packageManager": "pnpm@9.1.0"}');
+  Put('package-lock.json', '{}');
+  Put('pnpm-lock.yaml', '');
+  AssertEquals('the lock of the manager named', 'pnpm-lock.yaml', TGittanNodeKind.LockFile(FDir));
+  Put('package.json', '{"packageManager": "yarn@4.1.0"}');
+  AssertEquals('without its lock: the first there', 'package-lock.json',
+    TGittanNodeKind.LockFile(FDir));
+  Put('package.json', '{}');
+  AssertEquals('pnpm by its lock, npm''s lock there too', 'pnpm-lock.yaml',
+    TGittanNodeKind.LockFile(FDir));
+  AssertEquals('pnpm', NodeTool('pnpm@9.1.0+sha512.abc'));
+  AssertEquals('npm', NodeTool('npm'));
+  AssertEquals('', NodeTool('rm -rf ~; npm'));
+  AssertEquals('', NodeTool('evil@1'));
+end;
+
+procedure TProjNodeTest.TestNodeUnknownManager;
+var
+  C: TGittanProjectContext;
+  Sec: TGittanProjectSection;
+  R: TGittanProjectRow;
+begin
+  Put('package.json', '{"name": "x", "packageManager": "x; touch pwned@1"}');
+  C := TGittanProjectContext.Create(FDir, '', nil);
+  try
+    Sec := TGittanNodeKind.Section(C, 'package.json');
+  finally
+    C.Free;
+  end;
+  R := Sec.Blocks[0].Rows[1];
+  AssertEquals('Package manager', R.Cells[0].Text);
+  AssertEquals('shown as written', 'x; touch pwned@1', R.Cells[1].Text);
+  AssertEquals('no Install button', 2, Length(R.Cells));
 end;
 
 initialization

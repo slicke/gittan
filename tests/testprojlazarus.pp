@@ -226,8 +226,13 @@ begin
   C := TGittanLazarusKind.Commands(FDir);
   AssertEquals(3, Length(C));
   AssertEquals('build:No Ext (Release)', C[0].Name);
+  {$IFDEF WINDOWS}
   AssertTrue('quoted for the shell: ' + C[0].Command,
     Pos('--bm="No Ext (Release)" Trndi.lpi', C[0].Command) > 0);
+  {$ELSE}
+  AssertTrue('quoted for the shell: ' + C[0].Command,
+    Pos('--bm=''No Ext (Release)'' Trndi.lpi', C[0].Command) > 0);
+  {$ENDIF}
   AssertEquals('build:GTK3', C[2].Name);
   AssertTrue(Pos('--bm=GTK3 Trndi.lpi', C[2].Command) > 0);
 end;

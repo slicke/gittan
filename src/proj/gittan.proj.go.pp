@@ -179,7 +179,7 @@ begin
 end;
 
 { Whether a .go file at the root is of package main, so "go run ." has
-  something to run. }
+  something to run; a _test.go file is not built by go run. }
 function RootIsMainPackage(const ARoot: string): boolean;
 var
   FileName, Text, Line: string;
@@ -187,6 +187,8 @@ var
 begin
   for FileName in FilesWithExt(ARoot, '.go') do
   begin
+    if SameText(Copy(FileName, Length(FileName) - 7, 8), '_test.go') then
+      Continue;
     Text := TextOf(ARoot, FileName);
     Start := 1;
     while NextLine(Text, Start, Line) do
@@ -199,10 +201,31 @@ begin
   Result := False;
 end;
 
-{ A replacement that is a folder: it starts with ./, ../ or /. }
+{ A replacement that is an absolute folder: /x, \x, or C:\x and C:/x. }
+function IsAbsolutePath(const ATarget: string): boolean;
+begin
+  Result := (Pos('/', ATarget) = 1) or (Pos('\', ATarget) = 1) or
+    ((Length(ATarget) >= 3) and (UpCase(ATarget[1]) in ['A'..'Z']) and (ATarget[2] = ':') and
+    (ATarget[3] in ['/', '\']));
+end;
+
+{ A replacement that is a folder, as go reads it: ., .., one that
+  starts with ./ or ../ (.\ and ..\ too), or an absolute one. }
 function IsLocalPath(const ATarget: string): boolean;
 begin
-  Result := (Pos('./', ATarget) = 1) or (Pos('../', ATarget) = 1) or (Pos('/', ATarget) = 1);
+  Result := (ATarget = '.') or (ATarget = '..') or (Pos('./', ATarget) = 1) or
+    (Pos('../', ATarget) = 1) or (Pos('.\', ATarget) = 1) or (Pos('..\', ATarget) = 1) or
+    IsAbsolutePath(ATarget);
+end;
+
+{ The folder of a local replacement: an absolute one as it is, else
+  from the root. }
+function LocalPathDir(const ARoot, ATarget: string): string;
+begin
+  if IsAbsolutePath(ATarget) then
+    Result := SetDirSeparators(ATarget)
+  else
+    Result := RootFile(ARoot, ATarget);
 end;
 
 { TGittanGoKind }
@@ -259,7 +282,7 @@ begin
   Info := ParseGoModInfo(TextOf(AContext.Root, 'go.mod'));
   for i := 0 to High(Info.Replaces) do
     if IsLocalPath(Info.Replaces[i].New) and
-      not DirectoryExists(RootFile(AContext.Root, Info.Replaces[i].New)) then
+      not DirectoryExists(LocalPathDir(AContext.Root, Info.Replaces[i].New)) then
       AddProjectCheck(Result, ProjectCheck(Format(rsLocalReplace, [Info.Replaces[i].Old +
         ' => ' + Info.Replaces[i].New]), ''));
 end;

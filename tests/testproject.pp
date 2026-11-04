@@ -12,7 +12,7 @@ interface
 uses
   Classes, SysUtils, fpcunit, testregistry, gittan.project, gittan.manifest, gittan.repocommands,
   gittan.git, gittan.proj.lazarus, gittan.proj.node, gittan.proj.rust, gittan.proj.go,
-  gittan.proj.python, testhelpers;
+  gittan.proj.python, testhelpers{$IFDEF UNIX}, BaseUnix{$ENDIF};
 
 type
   { A context whose files at the tag are given. }
@@ -63,6 +63,10 @@ type
     procedure TestReportRust;
     procedure TestReportNoTag;
     procedure TestReportPython;
+    procedure TestReportRenamed;
+    procedure TestResolveVersions;
+    procedure TestPickedChecks;
+    procedure TestTextOfUnreadable;
     procedure TestChoice;
     procedure TestSections;
     procedure TestContextTracked;
@@ -639,6 +643,120 @@ begin
   end;
 end;
 
+procedure TProjectTest.TestReportRenamed;
+var
+  C: TOldTextContext;
+  Deps: TGittanDependencies;
+  Ch: TGittanDependencyChanges;
+begin
+  { requirements.txt at the tag, pyproject.toml now: compared with what
+    the tag had, not all of it added. }
+  Put('pyproject.toml', '[project]' + LineEnding + 'dependencies = ["requests>=2", "click"]' +
+    LineEnding);
+  C := TOldTextContext.Create(FDir, 'v1', nil);
+  try
+    C.Old.Values['requirements.txt'] := 'requests>=2\n';
+    AssertTrue(ReadDependencies(TGittanPythonKind, C, Deps, Ch));
+  finally
+    C.Free;
+  end;
+  AssertEquals('click alone is new', 1, Length(Ch));
+  AssertEquals('click', Ch[0].Name);
+  AssertTrue(Ch[0].Kind = dcAdded);
+  { yarn.lock at the tag, package-lock.json now: the old versions come
+    from the old lock. }
+  Put('package.json', '{"dependencies": {"vue": "^3"}}');
+  Put('package-lock.json', '{"packages": {"node_modules/vue": {"version": "3.4.0"}}}');
+  C := TOldTextContext.Create(FDir, 'v1', nil);
+  try
+    C.Old.Values['package.json'] := '{"dependencies": {"vue": "^3"}}';
+    C.Old.Values['yarn.lock'] := 'vue@^3:\n  version "3.2.0"\n';
+    AssertTrue(ReadDependencies(TGittanNodeKind, C, Deps, Ch));
+  finally
+    C.Free;
+  end;
+  AssertEquals(1, Length(Ch));
+  AssertTrue(Ch[0].Kind = dcChanged);
+  AssertEquals('3.2.0', Ch[0].OldVersion);
+  AssertEquals('3.4.0', Ch[0].NewVersion);
+end;
+
+procedure TProjectTest.TestResolveVersions;
+var
+  D, L: TGittanDependencies;
+
+  function Resolved(const AVersion: string): string;
+  begin
+    D := nil;
+    AddDependency(D, 'syn', AVersion, '', '');
+    ResolveDependencies(D, L);
+    Result := D[0].Resolved;
+  end;
+
+begin
+  L := nil;
+  AddLocked(L, 'syn', '1.0.109');
+  AddLocked(L, 'syn', '2.0.77');
+  AddLocked(L, 'other', '0.1.0');
+  AssertEquals('caret by major', '1.0.109', Resolved('1'));
+  AssertEquals('2.0.77', Resolved('^2.0'));
+  AssertEquals('exact', '1.0.109', Resolved('=1.0.109'));
+  AssertEquals('the newest that meets it', '2.0.77', Resolved('>=1.0'));
+  AssertEquals('a range', '1.0.109', Resolved('>=1.0, <2'));
+  AssertEquals('npm''s spaces', '1.0.109', Resolved('>= 1.0 < 2'));
+  AssertEquals('alternatives', '2.0.77', Resolved('^0.5 || ^2'));
+  AssertEquals('~', '2.0.77', Resolved('~2.0'));
+  AssertEquals('none meets it: not a wrong one', '', Resolved('^3'));
+  AssertEquals('no number: the newest', '2.0.77', Resolved('workspace'));
+  L := nil;
+  AddLocked(L, 'syn', '0.4.2');
+  AddLocked(L, 'syn', '0.5.1');
+  AssertEquals('0.x keeps its minor', '0.4.2', Resolved('0.4'));
+  L := nil;
+  AddLocked(L, 'syn', '1.0.0');
+  AssertEquals('one version locked: that one', '1.0.0', Resolved('^3'));
+end;
+
+procedure TProjectTest.TestPickedChecks;
+var
+  C: TGittanProjectContext;
+  Tracked: TStringList;
+  Sec: TGittanProjectSection;
+begin
+  { Node picked with no package.json: the note, and the check of
+    node_modules/ that needs no package.json. }
+  Tracked := TStringList.Create;
+  try
+    Tracked.Add('node_modules/a/index.js');
+    C := TGittanProjectContext.Create(FDir, '', Tracked);
+  finally
+    Tracked.Free;
+  end;
+  try
+    Sec := TGittanNodeKind.StandardSection(C, '');
+  finally
+    C.Free;
+  end;
+  AssertEquals(2, Length(Sec.Blocks));
+  AssertTrue(Sec.Blocks[0].Kind = pbNote);
+  AssertTrue(Sec.Blocks[1].Kind = pbChecks);
+  AssertEquals('node_modules/', Sec.Blocks[1].Checks[0].IgnorePattern);
+end;
+
+procedure TProjectTest.TestTextOfUnreadable;
+begin
+  { A folder of the name: FileExists says no on every system. A file
+    that cannot be read is '' as well, not an exception. }
+  ForceDirectories(IncludeTrailingPathDelimiter(FDir) + 'dir.txt');
+  AssertEquals('', TextOf(FDir, 'dir.txt'));
+  {$IFDEF UNIX}
+  Put('locked.txt', 'x');
+  { root reads it all the same. }
+  if (fpGetUid <> 0) and (fpChmod(IncludeTrailingPathDelimiter(FDir) + 'locked.txt', 0) = 0) then
+    AssertEquals('', TextOf(FDir, 'locked.txt'));
+  {$ENDIF}
+end;
+
 procedure TProjectTest.TestChoice;
 var
   P: TGittanProjects;
@@ -765,8 +883,14 @@ end;
 procedure TProjectTest.TestShellName;
 begin
   AssertEquals('Trndi.lpi', ShellName('Trndi.lpi'));
+  {$IFDEF WINDOWS}
   AssertEquals('"No Ext (Release)"', ShellName('No Ext (Release)'));
   AssertEquals('"a\"b"', ShellName('a"b'));
+  {$ELSE}
+  AssertEquals('''No Ext (Release)''', ShellName('No Ext (Release)'));
+  AssertEquals('nothing sh reads in single quotes', '''a"$b`c\d''', ShellName('a"$b`c\d'));
+  AssertEquals('a quote ends them and opens them again', '''it''\''''s''', ShellName('it''s'));
+  {$ENDIF}
 end;
 
 procedure TProjectTest.TestChecksLazarus;

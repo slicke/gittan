@@ -103,7 +103,7 @@ const
 implementation
 
 uses
-  DOM, XMLRead, gittan.textfile, gittan.submodules;
+  DOM, XMLRead, gittan.textfile, gittan.submodules, gittan.git;
 
 resourcestring
   rsLpsTracked = '%s is committed. The session file changes every time the project is opened ' +
@@ -558,9 +558,9 @@ begin
   Result := False;
 end;
 
-{ lazbuild as the shell finds it, or where Lazarus is usually installed
-  when it is not on the PATH, as an app started from the Finder has a
-  short one. }
+{ lazbuild as the shell finds it (FindTool, on the PATH the commands
+  run with), else where Lazarus is usually installed, as an app started
+  from the Finder has a short PATH. }
 function LazbuildPath: string;
 const
   Places: array[0..5] of string = (
@@ -570,6 +570,8 @@ var
   Place, Home: string;
 begin
   Result := 'lazbuild';
+  if FindTool('lazbuild') <> '' then
+    Exit;
   Home := GetEnvironmentVariable('HOME');
   if (Home <> '') and FileExists(Home + '/fpcupdeluxe/lazarus/lazbuild') then
     Exit(Home + '/fpcupdeluxe/lazarus/lazbuild');
