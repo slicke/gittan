@@ -31,8 +31,11 @@ type
   {** Add to .gitignore clicked on a check. }
   TGittanProjectCheckEvent = procedure(Sender: TObject;
     const ACheck: TGittanProjectCheck) of object;
-  {** A button clicked: the command's name and its shell line. }
-  TGittanProjectRunEvent = procedure(Sender: TObject; const AName, ACommand: string) of object;
+  {** A button clicked: the kind of its section ("Lazarus", as the
+    Commands page names a kind's commands), the command's name and its
+    shell line. }
+  TGittanProjectRunEvent = procedure(Sender: TObject;
+    const AProject, AName, ACommand: string) of object;
   {** The kinds' chip clicked, with its rectangle on the screen. }
   TGittanProjectAnchorEvent = procedure(Sender: TObject; const AScreenRect: TRect) of object;
 
@@ -45,12 +48,16 @@ type
       Rect: TRect;
       Kind: TLinkKind;
       Text, Command, Hint: string;
+      { A button's: the kind of its section. }
+      Project: string;
       Check: TGittanProjectCheck;
     end;
   private
     FName, FRoot, FKinds: string;
     FPicked: boolean;
     FSections: TGittanProjectSections;
+    { The kind of the section being painted, for its buttons. }
+    FSectionKind: string;
     FBack, FText, FDim, FHover, FLine, FLink, FOk, FWarn, FErrorColor, FCard: TColor;
     FLinks: array of TLink;
     FHot: integer;
@@ -392,6 +399,7 @@ begin
       CellWidth(ACell)), 0);
     R.Bottom := R.Top + TextH + 2 * Px(ButtonPadY);
     i := AddLink(R, lkRun, ACell.CommandName, ACell.Command, ACell.Hint);
+    FLinks[i].Project := FSectionKind;
     FC.Pen.Style := psClear;
     FC.Brush.Style := bsSolid;
     if FHot = i then
@@ -440,7 +448,7 @@ end;
   it, and any further cell (a button) after the value. }
 procedure TGittanProjectPage.PaintFacts(var Y: integer; const ABlock: TGittanProjectBlock);
 var
-  LabelW, RowH, i, k, X, W: integer;
+  LabelW, RowH, i, k, j, X, W, Rest: integer;
   Row: TGittanProjectRow;
 begin
   FC.Font := Font;
@@ -462,10 +470,15 @@ begin
     X := Px(Pad);
     for k := 0 to High(Row.Cells) do
     begin
+      { A long value leaves room for the cells after it (a button). }
+      Rest := 0;
+      for j := k + 1 to High(Row.Cells) do
+        if Row.Cells[j].Text <> '' then
+          Inc(Rest, CellWidth(Row.Cells[j]) + Px(ColGap));
       if k = 0 then
         W := LabelW
       else
-        W := Min(CellWidth(Row.Cells[k]), Width - Px(Pad) - X);
+        W := Min(CellWidth(Row.Cells[k]), Width - Px(Pad) - X - Rest);
       PaintCell(Row.Cells[k], X, Y, W, RowH);
       Inc(X, W + Px(ColGap));
       if X >= Width - Px(Pad) then
@@ -735,6 +748,10 @@ begin
   begin
     PaintHeading(Y, FSections[i].Name, FSections[i].Detail, FSections[i].State,
       StyleColor(FSections[i].StateStyle));
+    if FSections[i].Kind <> nil then
+      FSectionKind := FSections[i].Kind.Name
+    else
+      FSectionKind := FSections[i].Name;
     for b := 0 to High(FSections[i].Blocks) do
     begin
       if FSections[i].Blocks[b].Kind = pbChecks then
@@ -785,7 +802,7 @@ begin
         FOnOpenUrl(Self, FLinks[i].Text);
     lkRun:
       if Assigned(FOnRunCommand) then
-        FOnRunCommand(Self, FLinks[i].Text, FLinks[i].Command);
+        FOnRunCommand(Self, FLinks[i].Project, FLinks[i].Text, FLinks[i].Command);
     lkIgnore:
       if Assigned(FOnIgnore) then
         FOnIgnore(Self, FLinks[i].Check);

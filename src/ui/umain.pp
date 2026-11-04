@@ -805,10 +805,11 @@ type
       shown on it, the hash of its commands file and the command
       running (umain.commands.inc). }
     FCommandPage: TGittanCommandPage;
-    { The Project page, in the box too (umain.project.inc), and whether
-      a snapshot came since its reports were built. }
+    { The Project page, in the box too (umain.project.inc), whether
+      a snapshot came since its reports were built, and whether their
+      reload is queued (ReloadProjectAsync). }
     FProjectPage: TGittanProjectPage;
-    FProjectStale: boolean;
+    FProjectStale, FProjectReloadQueued: boolean;
     { The list of the kinds of project to pick from, under the page's
       chip. }
     FKindsPopup: TGittanPopupList;
@@ -1371,11 +1372,12 @@ type
     procedure SaveBlobAs;
     procedure SetupProjectPage;
     procedure LoadProject;
+    procedure ReloadProjectAsync(Data: PtrInt);
     procedure MenuProjectClick(Sender: TObject);
     procedure ShowProject;
     procedure ProjectPageOpenUrl(Sender: TObject; const AText: string);
     procedure ProjectPageIgnore(Sender: TObject; const ACheck: TGittanProjectCheck);
-    procedure ProjectPageRun(Sender: TObject; const AName, ACommand: string);
+    procedure ProjectPageRun(Sender: TObject; const AProject, AName, ACommand: string);
     procedure ProjectPagePickKinds(Sender: TObject; const AScreenRect: TRect);
     procedure KindsPopupPick(Sender: TObject; AIndex: integer);
     function ProjectKindNames: string;
@@ -7418,6 +7420,17 @@ begin
   ApplySnapshot(Snap);
 end;
 
+{ The Project page's reports, built again for the snapshots that came
+  since ApplySnapshot queued this, while the page still shows. }
+procedure TRepoFrame.ReloadProjectAsync(Data: PtrInt);
+begin
+  FProjectReloadQueued := False;
+  if (FView <> gvProject) or not FProjectStale then
+    Exit;
+  LoadProject;
+  FProjectPage.FitHeight(FSummaryBox.ClientHeight);
+end;
+
 { Draws a snapshot of the repository into the views, on the main thread.
   The git work that built it is ApplySnapshot's caller's business: it is
   done on this thread by LoadRepository, in the watcher thread otherwise. }
@@ -7545,14 +7558,19 @@ begin
     FCommandPage.FitHeight(FSummaryBox.ClientHeight);
   end;
   { The project's reports too, but only while the page shows: they
-    take a few git runs. }
+    take a few git runs, so they are built from the message loop, once
+    for snapshots that come in a row, after the views are drawn. }
   FProjectStale := True;
   if FView = gvProject then
   begin
     HideBoxPages;
-    LoadProject;
     FProjectPage.Visible := True;
     FProjectPage.FitHeight(FSummaryBox.ClientHeight);
+    if not FProjectReloadQueued then
+    begin
+      FProjectReloadQueued := True;
+      Application.QueueAsyncCall(@ReloadProjectAsync, 0);
+    end;
   end;
   { The Files page follows HEAD, which a commit moved. }
   if FView = gvFiles then
@@ -7891,10 +7909,10 @@ begin
   LeaveEditorViews;
   FSummaryBox.Visible := True;
   FView := gvSummary;
-  { The Repository, Commands, Files and Pull Requests pages and the page
-    of a submodule give the box back. }
+  { The Repository, Commands, Files, Pull Requests and Project pages and
+    the page of a submodule give the box back. }
   if FRepoPage.Visible or FSubPage.Visible or FCommandPage.Visible or FFilesPage.Visible or
-    FPullPage.Visible then
+    FPullPage.Visible or ((FProjectPage <> nil) and FProjectPage.Visible) then
   begin
     HideBoxPages;
     FSummary.Visible := FRepo.Root <> '';

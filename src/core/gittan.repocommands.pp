@@ -84,6 +84,11 @@ type
     {** run is a table of lines per system and has none for this one:
       Command is empty, and the page says so. }
     Elsewhere: boolean;
+    {** A section with no run line whose name an earlier section already
+      took: the command line of the script, target or
+      kind's command they both name ("make test"). It is listed
+      without a command, as one that names nothing is; '' otherwise. }
+    Overlaps: string;
     Source: TGittanCommandSource;
     {** The kind's name for csProject ("Rust"); the file's path for
       csFile (".gittan/commands.toml", TGittanCommandsFile.Path); '' for the
@@ -495,8 +500,18 @@ var
   begin
     F := Default(TGittanCommandsFile);
     F.Path := APath;
-    F.Text := ReadFileBytes(Root + SetDirSeparators(APath));
-    F.Commands := ParseCommandsToml(F.Text, F.Error);
+    { A file that cannot be read gives no commands and says why. }
+    try
+      F.Text := ReadFileBytes(Root + SetDirSeparators(APath));
+      F.Commands := ParseCommandsToml(F.Text, F.Error);
+    except
+      on E: Exception do
+      begin
+        F.Text := '';
+        F.Commands := nil;
+        F.Error := E.Message;
+      end;
+    end;
     if AMain then
       F.HasProjects := ParseCommandsTomlProjects(F.Text, F.Projects);
     for i := 0 to High(F.Commands) do
@@ -515,7 +530,10 @@ begin
   Sub := Root + CommandsFolder + PathDelim + CommandsSubFolder + PathDelim;
   Names := TStringList.Create;
   try
-    if FindFirst(Sub + '*.toml', faAnyFile, Info) = 0 then
+    { Every name, as a mask is case-sensitive on Unix and CI.TOML would
+      be found on Windows only; a hidden file (an editor's, macOS's ._)
+      is left out. }
+    if FindFirst(Sub + '*', faAnyFile, Info) = 0 then
       try
         repeat
           if (Info.Attr and faDirectory = 0) and (Info.Name[1] <> '.') and
@@ -799,6 +817,24 @@ var
       end;
   end;
 
+  { The command line of the script, target or kind's command named
+    AName, '' for none. }
+  function LineNamed(const AName: string): string;
+  var
+    k: integer;
+  begin
+    for k := 0 to High(Scripts) do
+      if Scripts[k].Name = AName then
+        Exit(Scripts[k].Command);
+    for k := 0 to High(Targets) do
+      if Targets[k].Name = AName then
+        Exit(Targets[k].Command);
+    for k := 0 to High(Kinds) do
+      if Kinds[k].Name = AName then
+        Exit(Kinds[k].Command);
+    Result := '';
+  end;
+
   procedure Add(const ACommand: TGittanRepoCommand);
   begin
     { A hidden one is not listed and its key runs nothing; a hidden
@@ -869,6 +905,11 @@ begin
       TakeFromFile(Kinds[High(Kinds)]);
     end;
   end;
+  { A section left over that names what an earlier file's section took
+    says so, rather than naming nothing. }
+  for i := 0 to High(FileOnes) do
+    if not Taken[i] and (FileOnes[i].Command = '') and not FileOnes[i].Elsewhere then
+      FileOnes[i].Overlaps := LineNamed(FileOnes[i].Name);
   { The file's own commands, in its order, with a section that names
     no script or target among them, without a command: the page shows
     it as such, so a misspelt or dropped name is seen. }

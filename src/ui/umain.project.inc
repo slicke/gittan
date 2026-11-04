@@ -108,16 +108,37 @@ end;
 { A button of a section: its command runs as a command of the Commands
   page does, whose output panel shows it. A driver's command comes from
   the repository's own files as a script of package.json does, so it
-  needs no trust. }
-procedure TRepoFrame.ProjectPageRun(Sender: TObject; const AName, ACommand: string);
+  needs no trust. One the Commands page lists too (the kind's, with the
+  same line) runs as that one, so its tile shows the run and confirm
+  in commands.toml asks; the name first, a build mode's button is the
+  one build of a project with one mode. }
+procedure TRepoFrame.ProjectPageRun(Sender: TObject; const AProject, AName, ACommand: string);
 var
   Cmd: TGittanRepoCommand;
+  i, Found: integer;
 begin
+  Found := -1;
+  for i := 0 to High(FRepoCommands) do
+    if (FRepoCommands[i].Source = csProject) and (FRepoCommands[i].Project = AProject) and
+      (FRepoCommands[i].Command = ACommand) then
+      if FRepoCommands[i].Name = AName then
+      begin
+        Found := i;
+        Break;
+      end
+      else if Found < 0 then
+        Found := i;
+  if Found >= 0 then
+  begin
+    RunRepoCommand(Found, False, False);
+    Exit;
+  end;
   Cmd := Default(TGittanRepoCommand);
   Cmd.Name := AName;
   Cmd.Command := ACommand;
   Cmd.Detail := ACommand;
   Cmd.Source := csProject;
+  Cmd.Project := AProject;
   RunCommandRecord(Cmd, False);
 end;
 

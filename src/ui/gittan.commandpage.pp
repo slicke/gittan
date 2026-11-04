@@ -212,6 +212,7 @@ resourcestring
   rsRunInTerminal = 'Run in Terminal';
   rsTerminalTile = 'in a terminal';
   rsNoSuchTarget = 'no script or target named %s';
+  rsOverlaps = 'an earlier file already names %s (%s)';
   rsNoCommandHere = 'no command for %s';
   rsAsksFirst = 'asks first';
 
@@ -761,6 +762,8 @@ begin
       a section that names nothing says so. }
     if Cmd.Elsewhere then
       Tip := Format(rsNoCommandHere, [CommandsSystemTitle])
+    else if Cmd.Overlaps <> '' then
+      Tip := Format(rsOverlaps, [Cmd.Name, Cmd.Overlaps])
     else if Cmd.Command = '' then
       Tip := Format(rsNoSuchTarget, [Cmd.Name])
     else if Cmd.Detail <> '' then

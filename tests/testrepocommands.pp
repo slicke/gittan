@@ -33,6 +33,8 @@ type
     procedure TestParseTomlPerSystem;
     procedure TestTomlProjects;
     procedure TestCommandsFiles;
+    procedure TestCommandsFileNames;
+    procedure TestCommandsFileUnreadable;
     procedure TestPackageScripts;
     procedure TestPackageNotJson;
     procedure TestMakefileTargets;
@@ -43,8 +45,10 @@ type
     procedure TestDiscoverFieldsFromFile;
     procedure TestDiscoverHidden;
     procedure TestDiscoverElsewhere;
+    procedure TestDiscoverOverlap;
     procedure TestHash;
     procedure TestHashOfFiles;
+    procedure TestHashRenamed;
     procedure TestCommandByKey;
     procedure TestSplitName;
     procedure TestJobRuns;
@@ -306,6 +310,48 @@ begin
   AssertEquals('only commands.toml names the kinds', 1, Length(ProjectsOfRoot(FDir)));
 end;
 
+procedure TRepoCommandsTest.TestCommandsFileNames;
+var
+  F: TGittanCommandsFiles;
+begin
+  Put('.gittan/commands/CI.TOML', '[commands.ci]'#10'run = "make ci"'#10);
+  Put('.gittan/commands/.draft.toml', '[commands.draft]'#10'run = "echo"'#10);
+  Put('.gittan/commands/._ci.toml', 'macOS'' resource fork');
+  F := ReadCommandsFiles(FDir);
+  AssertEquals('a hidden file is left out', 1, Length(F));
+  AssertEquals('the extension in any case, on every system', '.gittan/commands/CI.TOML',
+    F[0].Path);
+  AssertEquals('ci', F[0].Commands[0].Name);
+end;
+
+procedure TRepoCommandsTest.TestCommandsFileUnreadable;
+{$ifndef windows}
+var
+  F: TGittanCommandsFiles;
+  Name: string;
+{$endif}
+begin
+  {$ifndef windows}
+  Put('.gittan/commands/locked.toml', '[commands.x]'#10'run = "echo"'#10);
+  Put('.gittan/commands/open.toml', '[commands.y]'#10'run = "echo"'#10);
+  Name := IncludeTrailingPathDelimiter(FDir) + '.gittan/commands/locked.toml';
+  FpChmod(Name, 0);
+  try
+    F := ReadCommandsFiles(FDir);
+  finally
+    FpChmod(Name, &644);
+  end;
+  AssertEquals('the file is listed still', 2, Length(F));
+  { root reads it anyway }
+  if FpGetuid <> 0 then
+  begin
+    AssertEquals('no commands from a file that cannot be read', 0, Length(F[0].Commands));
+    AssertTrue('and why', F[0].Error <> '');
+  end;
+  AssertEquals('the next file is read', 'y', F[1].Commands[0].Name);
+  {$endif}
+end;
+
 procedure TRepoCommandsTest.TestPackageScripts;
 var
   C: TGittanRepoCommands;
@@ -496,6 +542,28 @@ begin
   AssertEquals('its key runs nothing', -1, CommandByKey(C, 'B'));
 end;
 
+procedure TRepoCommandsTest.TestDiscoverOverlap;
+var
+  C: TGittanRepoCommands;
+begin
+  Put('.gittan/commands.toml', '[commands.test]'#10'key = "T"'#10);
+  Put('.gittan/commands/more.toml', '[commands.test]'#10'key = "X"'#10 +
+    '[commands.nosuch]'#10'key = "N"'#10);
+  Put('Makefile', 'test:'#10);
+  C := DiscoverRepoCommands(FDir);
+  AssertEquals(3, Length(C));
+  AssertEquals('nosuch', C[0].Name);
+  AssertEquals('one that names nothing overlaps nothing', '', C[0].Overlaps);
+  AssertEquals('test', C[1].Name);
+  AssertEquals('.gittan/commands/more.toml', C[1].Project);
+  AssertEquals('the later one runs nothing', '', C[1].Command);
+  AssertEquals('and names what the earlier took', 'make test', C[1].Overlaps);
+  AssertEquals('make test', C[2].Command);
+  AssertEquals('the earlier file''s key', 'T', C[2].Key);
+  AssertEquals('', C[2].Overlaps);
+  AssertEquals(-1, CommandByKey(C, 'X'));
+end;
+
 procedure TRepoCommandsTest.TestHash;
 var
   H: string;
@@ -527,6 +595,17 @@ begin
   AssertTrue('a file changed asks again', H2 <> CommandsFileHash(FDir));
   Put('.gittan/commands/more.toml', '');
   AssertEquals('the same files, the same hash', H2, CommandsFileHash(FDir));
+end;
+
+procedure TRepoCommandsTest.TestHashRenamed;
+var
+  H: string;
+begin
+  Put('.gittan/commands/a.toml', '[commands.a]'#10'run = "x"'#10);
+  H := CommandsFileHash(FDir);
+  DeleteFile(IncludeTrailingPathDelimiter(FDir) + SetDirSeparators('.gittan/commands/a.toml'));
+  Put('.gittan/commands/b.toml', '[commands.a]'#10'run = "x"'#10);
+  AssertTrue('a file renamed asks again', H <> CommandsFileHash(FDir));
 end;
 
 procedure TRepoCommandsTest.TestCommandByKey;
