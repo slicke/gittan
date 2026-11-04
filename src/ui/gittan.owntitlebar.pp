@@ -54,7 +54,7 @@ unit gittan.owntitlebar;
 interface
 
 uses
-  Classes, SysUtils, Controls, Graphics, Menus, Types, Forms;
+  Classes, SysUtils, Controls, Graphics, Menus, Types, Forms, gittan.avatar;
 
 type
   {** Something done to the tab at AIndex, in the order of SetTabs. }
@@ -85,9 +85,11 @@ type
     FCanBack, FCanForward: boolean;
     FBackHint, FForwardHint: string;
     { The globe: whether it is there, whether the forge view is shown,
-      and its hint. }
+      its hint, and the user's picture, drawn in the globe's place when
+      the forge has given one. }
     FForgeVisible, FForgeShown: boolean;
     FForgeHint: string;
+    FAvatar: TGittanAvatar;
     FHotPart, FPressedPart, FHotButton, FPressedButton: TGittanTitlePart;
     FHotIndex, FPressedIndex: integer;
     FMenuOpen: boolean;
@@ -142,6 +144,7 @@ type
     procedure CaptionButtonClick(APart: TGittanTitlePart); virtual;
   public
     constructor Create(AOwner: TComponent); override;
+    destructor Destroy; override;
     {** The caption button under the mouse or pressed, tpNone for none;
       set by a form that sees the mouse there itself (Windows). }
     procedure SetButtonState(AHot, APressed: TGittanTitlePart);
@@ -161,8 +164,11 @@ type
       const AMarks: array of boolean; AActive: integer; AFixed: boolean = False);
     {** The banner before the caption buttons: shown while AVisible
       (there is a forge), in the accent while AShown (the forge view is
-      shown), AHint its hint (the forge's name). }
-    procedure SetForge(AVisible, AShown: boolean; const AHint: string);
+      shown), AHint its hint (the forge's name, with the login when it
+      is known); APicture the bytes of the user's picture, drawn as a
+      disc in the globe's place, '' for the globe. }
+    procedure SetForge(AVisible, AShown: boolean; const AHint: string;
+      const APicture: string = '');
     {** The chevrons: whether there is somewhere to go back (ABack) and
       forward (AForward) to, a dim chevron taking no click; ABackHint
       and AForwardHint their hints. }
@@ -250,6 +256,7 @@ const
 constructor TGittanOwnTitleBar.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  FAvatar := TGittanAvatar.Create;
   ControlStyle := ControlStyle + [csOpaque];
   { Not Scale96ToForm: the bar has no form yet. }
   Height := Scale96ToScreen(TitleBarHeight);
@@ -655,11 +662,19 @@ begin
   end;
 end;
 
-procedure TGittanOwnTitleBar.SetForge(AVisible, AShown: boolean; const AHint: string);
+destructor TGittanOwnTitleBar.Destroy;
+begin
+  FAvatar.Free;
+  inherited Destroy;
+end;
+
+procedure TGittanOwnTitleBar.SetForge(AVisible, AShown: boolean; const AHint: string;
+  const APicture: string);
 begin
   FForgeVisible := AVisible;
   FForgeShown := AShown;
   FForgeHint := AHint;
+  FAvatar.SetData(APicture);
   Layout;
   Invalidate;
 end;
@@ -1015,15 +1030,40 @@ begin
       Types.Point(R.Right - 1, R.Bottom), Types.Point((R.Left + R.Right) div 2, R.Bottom - W),
       Types.Point(R.Left, R.Bottom)]);
     L := Scale96ToForm(ForgeIconSize);
-    if FForgeShown then
-      GlobeInk := clWhite
-    else if FHotPart = tpForge then
-      GlobeInk := Ink
+    if FAvatar.HasImage then
+    begin
+      { The user's picture as a disc on a little of the text color, so
+        one with a clear background still reads as a disc, with a white
+        ring round it while the forge view is shown. }
+      C := Types.Rect(R.Left + (R.Width - L) div 2, (R.Bottom - W - L) div 2 + 1, 0, 0);
+      C.Right := C.Left + L;
+      C.Bottom := C.Top + L;
+      Canvas.Pen.Style := psClear;
+      Canvas.Brush.Color := MixColor(Canvas.Brush.Color, FText, 0.12);
+      Canvas.Ellipse(C);
+      Canvas.Pen.Style := psSolid;
+      Canvas.Brush.Style := bsClear;
+      FAvatar.Draw(Canvas, C.Left, C.Top, L, GetCanvasScaleFactor);
+      if FForgeShown then
+      begin
+        Canvas.Pen.Color := clWhite;
+        Canvas.Pen.Width := Scale96ToForm(2);
+        Canvas.Ellipse(C);
+      end;
+      Canvas.Brush.Style := bsSolid;
+    end
     else
-      GlobeInk := FDim;
-    { The icon is a square ASize - 4 wide at its left. }
-    DrawStatusIcon(Canvas, HintLink, R.Left + (R.Width - (L - 4)) div 2,
-      (R.Bottom - W - L) div 2 + 1, L, GlobeInk);
+    begin
+      if FForgeShown then
+        GlobeInk := clWhite
+      else if FHotPart = tpForge then
+        GlobeInk := Ink
+      else
+        GlobeInk := FDim;
+      { The icon is a square ASize - 4 wide at its left. }
+      DrawStatusIcon(Canvas, HintLink, R.Left + (R.Width - (L - 4)) div 2,
+        (R.Bottom - W - L) div 2 + 1, L, GlobeInk);
+    end;
     Canvas.Pen.Width := 1;
   end;
 

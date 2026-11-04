@@ -16,8 +16,11 @@ unit uforge;
   section at a time, which the window's tab strip picks while the view
   is shown (Tabs, SelectTab, StepTab, OnTabsChange),
   read by the forge's AccountJob (gittan.forge; GitHub's runs one
-  GraphQL query through gh) each time the view is shown and on Refresh,
-  the page keeping what it had meanwhile. A card of a pull request goes
+  GraphQL query through gh) once at start, each time the view is shown,
+  on Refresh and when the forge or its account changes, the page keeping
+  what it had meanwhile; the login and the user's picture go to the
+  chrome's globe as well (Picture, ChromeHint, OnUserChange), the
+  picture kept between starts beside the ini file. A card of a pull request goes
   to the window (TRepoWindow.ComparePullRequest): a frame with a remote
   for its repository compares with it there, else its local clone among
   the recent repositories (or beside them while CloneSiblings is on;
@@ -71,9 +74,11 @@ type
     FRecentMenu, FCloseItem: TMenuItem;
     FDark: boolean;
     FThemeTimer: TTimer;
-    FOnTabsChange: TNotifyEvent;
+    FOnTabsChange, FOnUserChange: TNotifyEvent;
     function FindForge: boolean;
     procedure ForgetAnswers;
+    procedure LoadPicture;
+    procedure UserChanged;
     procedure BuildMenu;
     procedure RebuildRecentMenu;
     procedure ApplyTheme;
@@ -122,6 +127,17 @@ type
     function HasForge: boolean;
     {** The forge's name, '' without one. }
     function ForgeName: string;
+    {** What the chrome's globe says of the forge: its name, with the
+      login before it once the forge has said who ("octocat on GitHub"). }
+    function ChromeHint: string;
+    {** The user's login as the forge last gave it, '' before it has. }
+    property Login: string read FLogin;
+    {** The bytes of the user's picture (PNG or JPEG) as the forge gave
+      it, '' without one, for the chrome's globe. }
+    property Picture: string read FAvatar;
+    {** The user changed: the login or the picture came, changed or went,
+      so the chrome's globe follows. }
+    property OnUserChange: TNotifyEvent read FOnUserChange write FOnUserChange;
     {** The window shows the view now: the page follows the appearance,
       shows what the forge last answered and asks it again. }
     procedure Shown;
@@ -132,7 +148,7 @@ type
       found is dropped (the window hides the view then, HasForge). }
     procedure SettingsChanged;
     {** The active account of the forge's tool changed: what the account
-      of before had found goes, and the view asks again while shown. }
+      of before had found goes, and the view asks again. }
     procedure AccountChanged;
     {** The view's tabs, which the window's tab strip shows while the
       view is shown: their names in ACaptions, in AMarks the ones with
@@ -179,6 +195,8 @@ resourcestring
   rsCheckUpdates = 'Check for &Updates...';
   rsSettings = 'Se&ttings...';
   rsAbout = '&About Gittan';
+  { The globe's hint: the login, then the forge: "octocat on GitHub". }
+  rsUserOnForge = '%s on %s';
 
 { TForgeView }
 
@@ -230,7 +248,44 @@ begin
   FDark := IsDarkMode;
   ApplyTheme;
   FindForge;
+  { The picture kept from the last start, then the forge asked once at
+    start, so the chrome's globe has the user and the view its lists
+    before it is first shown. }
+  LoadPicture;
+  StartJob;
   BuildMenu;
+end;
+
+{ The picture kept from the last start (SaveForgePicture, in JobDone),
+  when it is this forge's and its login is the account still in use: the
+  forge's active login, when it tells of any. }
+procedure TForgeView.LoadPicture;
+var
+  KeptForge, KeptLogin, KeptUrl, KeptBytes: string;
+  Account: TGittanForgeAccount;
+  Accounts: TGittanForgeAccounts;
+  Known: boolean;
+begin
+  if not Assigned(FForge) then
+    Exit;
+  if not LoadForgePicture(App.Settings.ForgePictureFile, KeptForge, KeptLogin, KeptUrl,
+    KeptBytes) or (KeptForge <> FForge.Name) then
+    Exit;
+  Accounts := FForge.Accounts;
+  Known := Length(Accounts) = 0;
+  for Account in Accounts do
+    Known := Known or (Account.Active and SameText(Account.Login, KeptLogin));
+  if not Known then
+    Exit;
+  FLogin := KeptLogin;
+  FAvatarUrl := KeptUrl;
+  FAvatar := KeptBytes;
+end;
+
+procedure TForgeView.UserChanged;
+begin
+  if Assigned(FOnUserChange) then
+    FOnUserChange(Self);
 end;
 
 { The first registered forge that is on and whose tool is found, kept
@@ -273,6 +328,13 @@ begin
     Result := FForge.Name
   else
     Result := '';
+end;
+
+function TForgeView.ChromeHint: string;
+begin
+  Result := ForgeName;
+  if (Result <> '') and (FLogin <> '') then
+    Result := Format(rsUserOnForge, [FLogin, Result]);
 end;
 
 { The items that mean something without a repository; the global ones
@@ -424,7 +486,8 @@ begin
 end;
 
 { What the forge or the account of before had found or was asking; a
-  new one is asked at once while the view is shown. }
+  new one is asked at once, shown or not, so the chrome's globe follows
+  the account. }
 procedure TForgeView.ForgetAnswers;
 begin
   AbandonJob;
@@ -436,9 +499,9 @@ begin
   FError := '';
   FPage.ForgetAnswer;
   { The job first, as in Shown. }
-  if Visible then
-    StartJob;
+  StartJob;
   UpdatePage;
+  UserChanged;
 end;
 
 procedure TForgeView.FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
@@ -523,7 +586,10 @@ end;
 procedure TForgeView.JobDone(Sender: TObject);
 var
   Job: TGittanForgeJob;
+  OldLogin, OldAvatar: string;
 begin
+  OldLogin := FLogin;
+  OldAvatar := FAvatar;
   Job := TGittanForgeJob(Sender);
   if Job <> FJob then
     Exit;
@@ -548,6 +614,16 @@ begin
     FReview := Job.Review;
   end;
   UpdatePage;
+  if (OldLogin <> FLogin) or (OldAvatar <> FAvatar) then
+  begin
+    { Kept for the next start (LoadPicture); gone when the forge gives
+      no picture any more. }
+    if (FLogin <> '') and (FAvatar <> '') then
+      SaveForgePicture(App.Settings.ForgePictureFile, ForgeName, FLogin, FAvatarUrl, FAvatar)
+    else if FAvatar = '' then
+      DeleteFile(App.Settings.ForgePictureFile);
+    UserChanged;
+  end;
 end;
 
 procedure TForgeView.FreeJobsAsync(Data: PtrInt);

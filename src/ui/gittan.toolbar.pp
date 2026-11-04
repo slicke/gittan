@@ -75,9 +75,13 @@ type
     FBackHint, FForwardHint: string;
     FHotNav: integer;
     { The banner: its view (made when first shown), whether it is there,
-      whether the forge view is shown, the mouse on it and pressed. }
+      whether the forge view is shown, the mouse on it and pressed; the
+      user's picture (its bytes, and decoded; nil for none), drawn in the
+      globe's place. }
     FBanner: NSView;
     FForgeVisible, FForgeShown, FBannerHot, FBannerPressed: boolean;
+    FPictureData: string;
+    FPicture: NSImage;
     FTip: string;
     FOnSelect, FOnClose: TGittanTabEvent;
     FOnNew, FOnForge, FOnBack, FOnForward: TNotifyEvent;
@@ -117,8 +121,11 @@ type
       const AMarks: array of boolean; AActive: integer; AFixed: boolean = False);
     {** The banner at the right end: shown while AVisible (there is a
       forge), in the accent while AShown (the forge view is shown),
-      AHint its tooltip (the forge's name). }
-    procedure SetForge(AVisible, AShown: boolean; const AHint: string);
+      AHint its tooltip (the forge's name, with the login when it is
+      known); APicture the bytes of the user's picture (PNG or JPEG),
+      drawn as a disc in the globe's place, '' for the globe. }
+    procedure SetForge(AVisible, AShown: boolean; const AHint: string;
+      const APicture: string = '');
     {** The chevrons: whether there is somewhere to go back (ABack) and
       forward (AForward) to, a dim chevron taking no click; ABackHint
       and AForwardHint their tooltips. }
@@ -221,6 +228,8 @@ const
   BannerRight = 14;
   BannerHeight = 44;
   BannerNotch = 8;
+  { The user's picture in the banner, a disc this wide. }
+  PictureSize = 20;
   GlobeWidth = 40;
   { FPressed for the plus and the chevrons. }
   PlusPart = -2;
@@ -506,6 +515,8 @@ begin
     FBanner.removeFromSuperview;
     FBanner.release;
   end;
+  if FPicture <> nil then
+    FPicture.release;
   if FWindow <> nil then
     FWindow.setToolbar(nil);
   if FToolbar <> nil then
@@ -523,12 +534,33 @@ begin
   inherited Destroy;
 end;
 
-procedure TGittanToolbar.SetForge(AVisible, AShown: boolean; const AHint: string);
+procedure TGittanToolbar.SetForge(AVisible, AShown: boolean; const AHint: string;
+  const APicture: string);
+var
+  Data: NSData;
 begin
   if AVisible and (FBanner = nil) then
     MakeBanner;
   FForgeVisible := AVisible;
   FForgeShown := AShown;
+  if APicture <> FPictureData then
+  begin
+    FPictureData := APicture;
+    if FPicture <> nil then
+      FPicture.release;
+    FPicture := nil;
+    if APicture <> '' then
+    begin
+      Data := NSData.dataWithBytes_length(@APicture[1], Length(APicture));
+      FPicture := NSImage.alloc.initWithData(Data);
+      { Bytes that are no picture give nil, or an image with no size. }
+      if (FPicture <> nil) and (FPicture.size.width <= 0) then
+      begin
+        FPicture.release;
+        FPicture := nil;
+      end;
+    end;
+  end;
   if FBanner <> nil then
   begin
     FBanner.setHidden(not AVisible);
@@ -610,6 +642,30 @@ begin
   end;
   Fill.setFill;
   P.fill;
+  if FPicture <> nil then
+  begin
+    { The user's picture in the ribbon's body, above the notch: a disc
+      on a little of the label color, so one with a clear background
+      still reads as a disc, with a white ring round it while the forge
+      view is shown. }
+    S := PictureSize;
+    X := (W - S) / 2;
+    Y := (H - BannerNotch - S) / 2 + 3;
+    G := NSMakeRect(X, Y, S, S);
+    NSColor.labelColor.colorWithAlphaComponent(0.12).setFill;
+    NSBezierPath.bezierPathWithOvalInRect(G).fill;
+    NSGraphicsContext.currentContext.saveGraphicsState;
+    NSBezierPath.bezierPathWithOvalInRect(G).addClip;
+    FPicture.drawInRect_fromRect_operation_fraction_respectFlipped_hints(G, NSZeroRect,
+      NSCompositeSourceOver, 1.0, True, nil);
+    NSGraphicsContext.currentContext.restoreGraphicsState;
+    if FForgeShown then
+    begin
+      NSColor.whiteColor.setStroke;
+      StrokeOval(NSInsetRect(G, 0.75, 0.75), 1.5);
+    end;
+    Exit;
+  end;
   { The globe in the ribbon's body, above the notch: a circle, a
     narrower one in it and a line across. }
   S := 16;

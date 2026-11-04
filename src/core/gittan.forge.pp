@@ -672,6 +672,14 @@ function ForgeClassFor(const AUrls: string): TGittanForgeClass; overload;
   each, for telling whether the user switched: equal keys, the same
   accounts in use. }
 function ActiveAccountsKey(const AAccounts: TGittanForgeAccounts): string;
+{** Writes the user's picture to AFile for the next start, so the chrome
+  has it before the forge has answered: the forge's name, the login and
+  the picture's address, a line each, then the bytes. }
+procedure SaveForgePicture(const AFile, AForgeName, ALogin, AUrl, ABytes: string);
+{** Reads a picture written by SaveForgePicture; false, and everything
+  empty, when there is no such file or it is not one. }
+function LoadForgePicture(const AFile: string; out AForgeName, ALogin, AUrl,
+  ABytes: string): boolean;
 {** Keeps AForge as the forge of AClass with the tool ACli: left as it
   is when it already is, else freed and made again, or left nil without
   a class or a tool. True when it changed, so what the old one found can
@@ -814,6 +822,74 @@ begin
   Result := ForgeClassIn(AUrls, '', False);
   if (Result = nil) and HasSshUrl(AUrls) then
     Result := ForgeClassIn(AUrls, UserSshConfig, True);
+end;
+
+procedure SaveForgePicture(const AFile, AForgeName, ALogin, AUrl, ABytes: string);
+var
+  Stream: TFileStream;
+  Head: string;
+begin
+  ForceDirectories(ExtractFilePath(AFile));
+  Stream := TFileStream.Create(AFile, fmCreate);
+  try
+    Head := AForgeName + #10 + ALogin + #10 + AUrl + #10;
+    Stream.WriteBuffer(Head[1], Length(Head));
+    if ABytes <> '' then
+      Stream.WriteBuffer(ABytes[1], Length(ABytes));
+  finally
+    Stream.Free;
+  end;
+end;
+
+function LoadForgePicture(const AFile: string; out AForgeName, ALogin, AUrl,
+  ABytes: string): boolean;
+var
+  Stream: TFileStream;
+  All: string;
+  Lines: array[0..2] of string;
+  i, p, q: integer;
+begin
+  Result := False;
+  AForgeName := '';
+  ALogin := '';
+  AUrl := '';
+  ABytes := '';
+  if not FileExists(AFile) then
+    Exit;
+  try
+    Stream := TFileStream.Create(AFile, fmOpenRead or fmShareDenyWrite);
+    try
+      SetLength(All, Stream.Size);
+      if All <> '' then
+        Stream.ReadBuffer(All[1], Length(All));
+    finally
+      Stream.Free;
+    end;
+  except
+    Exit;
+  end;
+  { The three lines, then the bytes. }
+  p := 1;
+  for i := 0 to 2 do
+  begin
+    q := p;
+    while (q <= Length(All)) and (All[q] <> #10) do
+      Inc(q);
+    if q > Length(All) then
+      Exit;
+    Lines[i] := Copy(All, p, q - p);
+    p := q + 1;
+  end;
+  ABytes := Copy(All, p, Length(All));
+  if (Lines[0] = '') or (Lines[1] = '') or (ABytes = '') then
+  begin
+    ABytes := '';
+    Exit;
+  end;
+  AForgeName := Lines[0];
+  ALogin := Lines[1];
+  AUrl := Lines[2];
+  Result := True;
 end;
 
 function KeepForge(var AForge: TGittanForge; AClass: TGittanForgeClass;

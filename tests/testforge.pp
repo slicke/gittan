@@ -37,6 +37,7 @@ type
     procedure TestForgeFor;
     procedure TestSshAlias;
     procedure TestKeepForge;
+    procedure TestPictureFile;
   end;
 
 implementation
@@ -933,6 +934,41 @@ begin
   AssertTrue(KeepForge(Forge, TGittanGitHubForge, '/opt/gh'));
   AssertTrue(KeepForge(Forge, nil, ''));
   AssertNull(Forge);
+end;
+
+
+procedure TForgeTest.TestPictureFile;
+var
+  Dir, FileName, Forge, Login, Url, Bytes: string;
+begin
+  Dir := IncludeTrailingPathDelimiter(GetTempDir) + 'gittan-picture-' + IntToStr(GetProcessID);
+  FileName := IncludeTrailingPathDelimiter(Dir) + 'sub' + PathDelim + 'forge-picture';
+  try
+    AssertFalse('no file', LoadForgePicture(FileName, Forge, Login, Url, Bytes));
+    AssertEquals('', Bytes);
+    { Bytes with line feeds in them come back whole; the folder is made. }
+    SaveForgePicture(FileName, 'GitHub', 'octocat', 'https://example.org/a.png',
+      #137'PNG'#10#13#10'x'#0#10);
+    AssertTrue('read', LoadForgePicture(FileName, Forge, Login, Url, Bytes));
+    AssertEquals('GitHub', Forge);
+    AssertEquals('octocat', Login);
+    AssertEquals('https://example.org/a.png', Url);
+    AssertEquals(#137'PNG'#10#13#10'x'#0#10, Bytes);
+    { Not a picture file: too few lines, or no bytes after them. }
+    SaveForgePicture(FileName, 'GitHub', 'octocat', '', '');
+    AssertFalse('no bytes', LoadForgePicture(FileName, Forge, Login, Url, Bytes));
+    AssertEquals('', Login);
+    with TStringList.Create do
+      try
+        Text := 'just one line';
+        SaveToFile(FileName);
+      finally
+        Free;
+      end;
+    AssertFalse('one line', LoadForgePicture(FileName, Forge, Login, Url, Bytes));
+  finally
+    RemoveTree(Dir);
+  end;
 end;
 
 initialization

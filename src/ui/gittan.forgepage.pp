@@ -70,8 +70,8 @@ unit gittan.forgepage;
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Graphics, ExtCtrls, Menus, BGRABitmap, gittan.forge,
-  gittan.summary;
+  Classes, SysUtils, Types, Controls, Graphics, ExtCtrls, Menus, gittan.forge,
+  gittan.summary, gittan.avatar;
 
 const
   {** The sections, as the owner's tabs count them: Ord of
@@ -138,11 +138,9 @@ type
     { The canvas the content is painted on: the control's in Paint, a
       measuring one in Layout. }
     FC: TCanvas;
-    { The user's picture as the forge sent it (FAvatarData, its bytes;
-      FAvatar decoded, nil for none or one that could not be read) and
-      as painted: resampled to the disc's pixels and cut round. }
-    FAvatarData: string;
-    FAvatar, FAvatarShown: TBGRABitmap;
+    { The user's picture as the forge sent it, decoded and cut round
+      (gittan.avatar). }
+    FAvatar: TGittanAvatar;
     FOnPick: TGittanForgePickEvent;
     FOnRefresh, FOnFilterChange, FOnSavePreset: TNotifyEvent;
     FOnOpenUrl: TGittanOpenUrlEvent;
@@ -402,6 +400,7 @@ begin
   FDefs := StandardFilters;
   FPresets := StandardPresets;
   FIgnored := TStringList.Create;
+  FAvatar := TGittanAvatar.Create;
   FMenu := TPopupMenu.Create(Self);
   FMenuPreset := -1;
   FPulse := TTimer.Create(Self);
@@ -412,37 +411,15 @@ end;
 
 destructor TGittanForgePage.Destroy;
 begin
-  FAvatarShown.Free;
   FAvatar.Free;
   FIgnored.Free;
   inherited Destroy;
 end;
 
 procedure TGittanForgePage.SetAvatar(const AData: string);
-var
-  Stream: TStringStream;
 begin
-  if AData = FAvatarData then
-    Exit;
-  FAvatarData := AData;
-  FreeAndNil(FAvatarShown);
-  FreeAndNil(FAvatar);
-  if AData <> '' then
-  begin
-    Stream := TStringStream.Create(AData);
-    try
-      try
-        FAvatar := TBGRABitmap.Create(Stream);
-        if (FAvatar.Width = 0) or (FAvatar.Height = 0) then
-          FreeAndNil(FAvatar);
-      except
-        FreeAndNil(FAvatar);
-      end;
-    finally
-      Stream.Free;
-    end;
-  end;
-  Invalidate;
+  if FAvatar.SetData(AData) then
+    Invalidate;
 end;
 
 procedure TGittanForgePage.SetForge(const AName: string);
@@ -1108,26 +1085,9 @@ end;
 procedure TGittanForgePage.PaintAvatar(ALeft, ATop, ASize: integer);
 var
   Initial: string;
-  Pixels: integer;
-  Mask: TBGRABitmap;
 begin
-  if (FLogin <> '') and (FAvatar <> nil) then
+  if (FLogin <> '') and FAvatar.HasImage then
   begin
-    Pixels := Max(1, Round(ASize * GetCanvasScaleFactor));
-    if (FAvatarShown = nil) or (FAvatarShown.Width <> Pixels) then
-    begin
-      FreeAndNil(FAvatarShown);
-      FAvatar.ResampleFilter := rfBestQuality;
-      FAvatarShown := FAvatar.Resample(Pixels, Pixels, rmFineResample) as TBGRABitmap;
-      Mask := TBGRABitmap.Create(Pixels, Pixels, BGRAPixelTransparent);
-      try
-        Mask.FillEllipseAntialias((Pixels - 1) / 2, (Pixels - 1) / 2, Pixels / 2, Pixels / 2,
-          BGRAWhite);
-        FAvatarShown.ApplyMask(Mask);
-      finally
-        Mask.Free;
-      end;
-    end;
     { On the hover fill, so a picture with a clear background still
       reads as a disc. }
     FC.Pen.Style := psClear;
@@ -1136,7 +1096,7 @@ begin
     FC.Ellipse(ALeft, ATop, ALeft + ASize, ATop + ASize);
     FC.Pen.Style := psSolid;
     FC.Brush.Style := bsClear;
-    FAvatarShown.Draw(FC, Rect(ALeft, ATop, ALeft + ASize, ATop + ASize), False);
+    FAvatar.Draw(FC, ALeft, ATop, ASize, GetCanvasScaleFactor);
     Exit;
   end;
   FC.Pen.Style := psClear;

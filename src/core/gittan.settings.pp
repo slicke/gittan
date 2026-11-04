@@ -196,6 +196,9 @@ type
     {** The folder the extensions (gittan.ext.loader) are read from:
       extensions beside the ini file. }
     function ExtensionsDir: string;
+    {** The file the forge user's picture is kept in between starts
+      (SaveForgePicture in gittan.forge), beside the ini file. }
+    function ForgePictureFile: string;
     {** Whether the extension AId (ExtIdFromPath, its file's name in
       lower case) loads; on unless turned off in the settings dialog.
       Section Extensions, the id as the key, 0 for off. }
@@ -737,6 +740,11 @@ end;
 function TGittanSettings.ExtensionsDir: string;
 begin
   Result := IncludeTrailingPathDelimiter(ExtractFilePath(FFileName)) + 'extensions';
+end;
+
+function TGittanSettings.ForgePictureFile: string;
+begin
+  Result := IncludeTrailingPathDelimiter(ExtractFilePath(FFileName)) + 'forge-picture';
 end;
 
 function TGittanSettings.ExtEnabled(const AId: string): boolean;
