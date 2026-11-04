@@ -1090,12 +1090,13 @@ type
       diff line of every block of changed lines, the name of the code tree
       range each block is in (a gap row names the block after it), the
       code tree of each side's text (valid, FRangesValid, from the end of
-      a parse to the next build), and how often the headings rebuilt the
-      view of this file. }
+      a parse to the next build), and how often new headings rewrote the
+      gap rows' text since the last build. }
     FBlockStarts: TIntegerDynArray;
     FHeadings: array of string;
     FCodeRanges, FOldRanges: TGittanCodeRanges;
     FRangesValid, FBuildingView: boolean;
+    FGapTextRounds: integer;
     { Scrolling on past the bottom of a file, or the top: the wheel
       delta pulled so far (positive downwards, towards the next file,
       negative upwards, towards the previous), the time of the last wheel
@@ -1474,6 +1475,7 @@ type
     function VisibleRow(ARow: integer): integer;
     function RowOfLine(ALine, AFallback: integer): integer;
     function GapRowText(ACount: integer; const AHeading: string): string;
+    procedure SetGapRowTexts(AEd: TATSynEdit; const ARows: TGittanRows);
     function GapHeading(AGapTo: integer): string;
     function GapRowLayout(AEd: TATSynEdit; C: TCanvas; ARow, ATop: integer;
       out ALayout: TGapRowLayout): boolean;
