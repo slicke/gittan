@@ -14,7 +14,7 @@
 <meta property="og:image" content="https://gittan.app/assets/shots/unified-dark.png">
 <meta property="og:image:width" content="1280">
 <meta property="og:image:height" content="800">
-<meta property="og:image:alt" content="Gittan in dark mode showing the changes to a Vue component, with Reviewed, Skip in Commit and Discard pills on the framed block under the mouse">
+<meta property="og:image:alt" content="Gittan in dark mode showing the changes to a Vue component, with Reviewed, Leave Out of Commit, Put into Its Commit and Discard pills on the framed block under the mouse">
 <meta property="og:url" content="https://gittan.app/">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
@@ -335,6 +335,12 @@
   .facts .ic { width: 30px; height: 30px; border-radius: 8px; margin-bottom: 12px; }
   .facts .ic svg { width: 16px; height: 16px; }
   .facts .lede { margin-bottom: 12px; }
+  .story .art.pic picture, .story .art.pic img { display: block; }
+  .story .art.pic img { width: 100%; height: auto; border-radius: 9px; box-shadow: 0 0 0 1px var(--line), var(--shadow-sm); background: var(--bg-elev); }
+  .story p + p { margin-top: 12px; }
+  .facts p a[data-tab], .facts p a[href^="#"] { white-space: nowrap; }
+  .smalls { margin: 28px 0 0; max-width: 860px; color: var(--fg-muted); font-size: 14.5px; text-wrap: pretty; }
+  .smalls b { color: var(--fg); font-weight: 600; }
   @media (max-width: 900px) {
     .facts, .facts.c4 { grid-template-columns: repeat(2, 1fr); }
     .facts > div, .facts.c4 > div { padding-right: 24px; }
@@ -557,6 +563,7 @@
     <nav>
       <a class="brand" href="#"><img src="assets/icon-64.png" alt="" width="28" height="28"> Gittan</a>
       <div class="links">
+        <a href="#unique" class="opt">Only here</a>
         <a href="#new" class="opt">New</a>
         <a href="#tour" class="opt">Tour</a>
         <a href="#workflow" class="opt">Workflow</a>
@@ -580,7 +587,7 @@
       <source srcset="assets/logo-dark.svg" media="(prefers-color-scheme: dark)" data-dark>
       <img class="logo" src="assets/logo-light.svg" alt="Gittan, Git Tree Analyzer &amp; Navigator" width="437" height="133">
     </picture>
-    <div><a class="pill" href="#new"><b>New</b> Git flow, a repository list, issue links and Extensions <span aria-hidden="true">→</span></a></div>
+    <div><a class="pill" href="#unique"><b>New</b> Put a change into its commit, and the Project page <span aria-hidden="true">→</span></a></div>
     <h1>Understand every change.<br><em>Then commit it.</em></h1>
     <span class="strandline" aria-hidden="true"><svg class="strand"><use href="#strand"/></svg></span>
     <p class="tag">Gittan is a free, native git client built around the diff. See what you changed as you change it, who wrote each line and the history behind it, then commit, sync and merge without leaving it.</p>
@@ -602,19 +609,130 @@
           <source srcset="assets/shots/unified-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
           <source srcset="assets/shots/unified-dark.png" media="(prefers-color-scheme: dark)" data-dark>
           <source srcset="assets/shots/unified-light.avif" type="image/avif">
-          <img src="assets/shots/unified-light.png" width="1280" height="800" fetchpriority="high" alt="Gittan showing the changes to a Vue component: Home over Graph, Repository, Commands, Files and Recent in the sidebar, the changed files with check boxes under them, the diff with only the changed lines and a few around them, the block under the mouse framed with Reviewed, Skip in Commit and Discard pills at its first row, the Commit section under the tree, and the status bar with the repository, its branch and a Pull button over one commit behind and two ahead">
+          <img src="assets/shots/unified-light.png" width="1280" height="800" fetchpriority="high" alt="Gittan showing the changes to a Vue component: Home over Graph, Repository, Commands, Files and Project in the sidebar, the changed files with check boxes under them, the diff with only the changed lines and a few around them, the block under the mouse framed with Reviewed, Leave Out of Commit, Put into Its Commit and Discard pills at its first row, the Commit section under the tree, and the status bar with the repository, its branch and a Pull button over one commit behind and two ahead">
         </picture>
       </div>
     </div>
   </div>
 </header>
 
+<section id="unique">
+  <div class="wrap">
+    <p class="eyebrow"><svg class="strand" aria-hidden="true"><use href="#strand"/></svg>Only in Gittan</p>
+    <h2>What I haven't found <em>anywhere else</em></h2>
+    <p class="lead">Most of what Gittan does, every git client does. These things I have not found in TortoiseGit, SourceTree, Fork, GitKraken, Tower or the git views of the IDEs, as far as I have looked. If you know one that has it, <a href="https://github.com/slicke/gittan/issues">tell me</a> and I will take the line out.</p>
+    <div class="stories">
+      <div class="story wide reveal">
+        <div>
+          <div class="ic"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><path d="M6 8v8"/><path d="M20 6h-7"/><path d="m16 3-3 3 3 3"/><path d="M13 6H6"/></svg></div>
+          <h3>Put a change into the commit it belongs to</h3>
+          <p>Hover a change and press <b>Put into Its Commit</b>: Gittan finds the commit of your branch that last wrote those lines, asks, and folds the change into it. <b>Commit &gt; Put Changes into Their Commits…</b> does it for everything at once, each change with its commit, or why it cannot be placed. The round of small fixes after a review ends up in the commits they fix, not in a “fixes” commit on top. Pushed commits are never rewritten, and Branch &gt; Undo takes it back. The command line has <code>git absorb</code> for this; no client I know has it.</p> <p><a href="#workflow" data-tab="b-absorb">See it in the change view</a></p>
+        </div>
+        <div class="art pic"><picture>
+            <source srcset="assets/shots/absorb-zoom-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/absorb-zoom-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/absorb-zoom-light.avif" type="image/avif">
+            <img src="assets/shots/absorb-zoom-light.png" width="648" height="516" loading="lazy" alt="The dialog Put Changes into Their Commits: fifteen changes listed, src/App.vue:7 ticked and going into 3bc4f5e Load the sample trails on start, src/components/TrailCard.vue:70 ticked and going into 4da5e9c Say what unit the climb is in, the rest unticked with the reason, such as its lines were last changed before the branch, 2 of 2 ticked, and Cancel and Put 2 buttons">
+          </picture></div>
+      </div>
+      <div class="story wide reveal">
+        <div>
+          <div class="ic"><svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10"/><path d="M18 9a7 7 0 0 1-7 7H8"/><path d="m14 19 2 2 4-4"/></svg></div>
+          <h3>A merge preview before you merge</h3>
+          <p>The row that says your branch is behind main also says whether merging main would go through: “merges cleanly”, or “conflicts in TrailList.vue”, worked out in memory before you press Merge or Rebase. Nothing in the work tree is touched to find out. Needs git 2.38 or later.</p>
+        </div>
+        <div class="art pic"><picture>
+            <source srcset="assets/shots/mergecheck-zoom-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/mergecheck-zoom-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/mergecheck-zoom-light.avif" type="image/avif">
+            <img src="assets/shots/mergecheck-zoom-light.png" width="540" height="120" loading="lazy" alt="The summary of trailhead-maps on offline-maps: 4 commits behind origin/main, conflicts in TrailList.vue in red, and Rebase and Merge buttons">
+          </picture></div>
+      </div>
+      <div class="story wide reveal">
+        <div>
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="m4 7.5 8 4.5 8-4.5"/><path d="M12 12v9"/></svg></div>
+          <h3>What changed in the dependencies since the last release</h3>
+          <p><b>View &gt; Project</b> reads the project the way its own tools do, for Lazarus, Node, Rust, Go and Python, and compares it with the newest tag: each dependency with the version asked for, the version the lock file resolved, and what changed since the tag, added, removed or <code>3.5.13 → 3.5.17</code>. A Lazarus project shows its build modes with a Build button each, and where every package comes from: a package file in the repository, a submodule at a tag, Lazarus itself, or nowhere. Under it are the mistakes that end up in commits, such as a session file, build output or a virtual environment, each with a button that ignores it.</p> <p><a href="#tour" data-tab="b-project">See the whole page</a></p>
+        </div>
+        <div class="art pic"><picture>
+            <source srcset="assets/shots/project-zoom-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/project-zoom-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/project-zoom-light.avif" type="image/avif">
+            <img src="assets/shots/project-zoom-light.png" width="1055" height="470" loading="lazy" alt="The Project page of Gittan itself: Lazarus, Gittan.lpi, version 0.15.0, 2 build modes and 6 packages, 2 changed since build-136; the build modes Default and Release with their output, platform, optimization and debug info and a Build button each, and the packages with where each comes from, such as vendor/lazink at 841eded, moved from 5020fd9 since the tag, and LCL from Lazarus">
+          </picture></div>
+      </div>
+    </div>
+    <div class="facts c3">
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/></svg></div>
+        <h3>Time-lapse</h3>
+        <p><b>Go &gt; Time-lapse</b> plays a file through every version it has had, oldest first, the lines each commit brought in lit up, with a track to scrub. A file's history as a film rather than a list. <a href="#tour" data-tab="b-timelapse">See it</a></p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 10h16"/><path d="M7 14h13"/><path d="M10 18h10"/></svg></div>
+        <h3>Code History under the lines</h3>
+        <p><b>Go &gt; Code History</b> lays the earlier versions of the selected lines, or of the function the caret is in, under them, one color per commit, the changed words shaded. The past of a function, read top to bottom in place. <a href="#tour" data-tab="b-history">See it</a></p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 12.5 9 17.5 20 6.5"/></svg></div>
+        <h3>Reviewed, and gone</h3>
+        <p>A change you have read and accepted gets <b>Reviewed</b> and turns into plain code for the rest of the session, so the diff shrinks to what you have not looked at yet. The file and git are not touched; a long review is worked through like a checklist.</p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></div>
+        <h3>Undo for what git did</h3>
+        <p><b>Branch &gt; Undo</b> takes back a commit, an amend, a merge, a reset, a rebase, a switch, a deleted or renamed branch, named after what it was (“Undo Merge feature/x”), and Redo does it again. It follows what git did in a terminal too.</p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="m8 12 3 3 5-6"/></svg></div>
+        <h3>No index to think about</h3>
+        <p>Gittan never says “staged”. A commit takes the files you ticked, whole, as the diff shows them, and a change or a few lines can be left out and stay in the file. The index still exists for git's sake; you do not have to know.</p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg></div>
+        <h3>Search for the commit that changed a text</h3>
+        <p>The graph filters as you type: <code>author:</code>, <code>since:</code>, <code>path:</code>, and <code>change:</code> for the commits that added or removed a text or matched a <code>/regex/</code>, which is <code>git log -S</code> and <code>-G</code> with a text field. <a href="#workflow" data-tab="b-search">See it</a></p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M8 4c-2 0-3 1-3 3v2c0 1.5-1 3-2 3 1 0 2 1.5 2 3v2c0 2 1 3 3 3"/><path d="M16 4c2 0 3 1 3 3v2c0 1.5 1 3 2 3-1 0-2 1.5-2 3v2c0 2-1 3-3 3"/></svg></div>
+        <h3>Symbols in a diff</h3>
+        <p>The gap rows of a diff name the function the next change is in. <b>Go &gt; Changed Symbols</b> lists the functions a diff touched, <b>Callers of Changed Symbols</b> who calls them, and <kbd>F12</kbd> goes to a definition, with no IDE and no language server.</p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2z"/></svg></div>
+        <h3>AI with the agent you already have</h3>
+        <p>Turn it on and pick Claude Code or GitHub Copilot: Gittan runs the tool you are signed into, with no account of its own. A review comes back as cards under the lines, beside a pull request's comments, with a Fix button on each. The agent gets no tool that writes or goes to the network. <a href="#tour" data-tab="b-ai">See it</a></p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M9 13h6"/><path d="M9 17h4"/></svg></div>
+        <h3>Markdown, HTML and SVG drawn, changes marked</h3>
+        <p><b>View &gt; Preview</b> draws the file beside its diff with the changed parts marked on the drawn page, and no browser engine inside. A <code>.po</code> file shows as originals and translations row by row, a changed image as two pictures at one scale. <a href="#tour" data-tab="b-preview">See it</a></p>
+      </div>
+    </div>
+    <p class="smalls"><b>Small things.</b> Scroll past the end of a file and the next changed file is pulled in. Git flow without the git-flow command, on the same config it writes. A Git LFS file shown as the file, not the pointer, with its locks. Several <code>gh</code> accounts, switched from the settings. A branch's worktrees as tabs. Extensions that can stop a commit, a push or a pull with a reason, <a href="#extensions">more below</a>. Native on macOS, Windows (x64 and Arm), Linux (x64 and Raspberry Pi) and Haiku, from one code base.</p>
+  </div>
+</section>
 <section id="new">
   <div class="wrap">
     <p class="eyebrow"><svg class="strand" aria-hidden="true"><use href="#strand"/></svg>New</p>
     <h2>What's <em>new</em></h2>
-    <p class="lead">Gittan has grown a lot this autumn. These are the larger additions; the tour and the workflow below show most of them in place.</p>
+    <p class="lead">Gittan has grown a lot this autumn. These are the larger additions, the newest first; the tour and the workflow below show most of them in place.</p>
     <div class="facts c4">
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><path d="M6 8v8"/><path d="M20 6h-7"/><path d="m16 3-3 3 3 3"/><path d="M13 6H6"/></svg></div>
+        <h3>Put into its commit</h3>
+        <p>A change goes into the commit of your branch that last wrote its lines, as <code>git absorb</code> does, without the command: a pill over a block, or <b>Commit &gt; Put Changes into Their Commits…</b> for all of them. <a href="#workflow" data-tab="b-absorb">See it</a></p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="m4 7.5 8 4.5 8-4.5"/><path d="M12 12v9"/></svg></div>
+        <h3>Project page</h3>
+        <p><b>View &gt; Project</b> shows what the repository is as a project, for Lazarus, Node, Rust, Go and Python: its dependencies against the lock file and the newest tag, a Lazarus project's build modes and packages, and the files that should not be committed. <a href="#tour" data-tab="b-project">See it</a></p>
+      </div>
+      <div class="reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 10h16"/><path d="M7 14h13"/><path d="M10 18h10"/></svg></div>
+        <h3>Commands in TOML</h3>
+        <p>A repository's own commands are <code>.gittan/commands.toml</code>, and every <code>.toml</code> in <code>.gittan/commands/</code>: a description for the tile, a question before it runs, a line per system, hidden ones. The commands of the project's tools are listed too, grouped by name. <a href="#tour" data-tab="b-commands">See it</a></p>
+      </div>
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10"/><path d="M6 7c0 3 12 1 12 3"/><path d="M18 14c0 3-12 1-12 3"/></svg></div>
         <h3>Git flow</h3>
@@ -683,7 +801,7 @@
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h9"/><path d="M4 18h16"/><path d="m16 10 4 4"/><path d="m20 10-4 4"/></svg></div>
         <h3>Commit line by line</h3>
-        <p>Skip in Commit now works on the lines you select as well as on whole blocks. <code>commit.template</code> fills the message, and Sign Off and Skip Hooks sit after Amend.</p>
+        <p>Leave Out of Commit works on the lines you select as well as on whole blocks. <code>commit.template</code> fills the message, and Sign Off and Skip Hooks sit after Amend.</p>
       </div>
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10"/><path d="M16 12H9a3 3 0 0 0-3 3"/></svg></div>
@@ -714,6 +832,7 @@
         <button role="tab" id="b-preview" aria-selected="false" aria-controls="t-preview" tabindex="-1"><b>Preview</b></button>
         <button role="tab" id="b-summary" aria-selected="false" aria-controls="t-summary" tabindex="-1"><b>Summary</b></button>
         <button role="tab" id="b-repo" aria-selected="false" aria-controls="t-repo" tabindex="-1"><b>Repository</b></button>
+        <button role="tab" id="b-project" aria-selected="false" aria-controls="t-project" tabindex="-1"><b>Project</b></button>
         <button role="tab" id="b-graph" aria-selected="false" aria-controls="t-graph" tabindex="-1"><b>Commit graph</b></button>
         <button role="tab" id="b-stats" aria-selected="false" aria-controls="t-stats" tabindex="-1"><b>Statistics</b></button>
         <button role="tab" id="b-files" aria-selected="false" aria-controls="t-files" tabindex="-1"><b>Files</b></button>
@@ -775,7 +894,7 @@
             <source srcset="assets/shots/summary-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/summary-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/summary-light.avif" type="image/avif">
-            <img src="assets/shots/summary-light.png" width="1280" height="800" loading="lazy" alt="The repository summary: six changed files with added and deleted line counts and bars, and a submodule moved from 64a3db3 to af86be3; Home heads the sidebar over Graph, Repository, Commands, Files and Recent, and the status bar offers Pull with one commit behind and two ahead">
+            <img src="assets/shots/summary-light.png" width="1280" height="800" loading="lazy" alt="The repository summary: seven changed files with added and deleted line counts and bars, and a submodule moved from 64a3db3 to af86be3; Home heads the sidebar over Graph, Repository, Commands, Files and Project, and the status bar offers Pull with one commit behind and two ahead">
           </picture></div>
         </figure>
         <figure id="t-repo" role="tabpanel" aria-labelledby="b-repo">
@@ -784,7 +903,16 @@
             <source srcset="assets/shots/repo-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/repo-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/repo-light.avif" type="image/avif">
-            <img src="assets/shots/repo-light.png" width="1280" height="800" loading="lazy" alt="The Repository page of trailhead: main tracking origin/main with the last commit 10 days ago, tiles for 15 commits since 4 Aug 2026, 3 branches, the tag v0.1.0, 17 tracked files, one submodule and 496 KiB, then the composition: 299 lines in all, 11 code files with 222 lines, no test files, one documentation file and 5 configuration files with 68 lines, each with a bar, then the origin remote with Edit Remotes and three contributors with their share of the commits">
+            <img src="assets/shots/repo-light.png" width="1280" height="800" loading="lazy" alt="The Repository page of trailhead: main tracking origin/main with the last commit 15 days ago, tiles for 16 commits since 4 Aug 2026, 3 branches, the tag v0.1.0, 18 tracked files, one submodule and 516 KiB, then the composition: 355 lines in all, 11 code files with 226 lines, no test files, one documentation file and 6 configuration files with 120 lines, each with a bar, then the origin remote with Edit Remotes and three contributors with their share of the commits">
+          </picture></div>
+        </figure>
+        <figure id="t-project" role="tabpanel" aria-labelledby="b-project">
+          <figcaption><b>The Project page</b> (Project in the sidebar, or <kbd>⌘⌥7</kbd>) reads the repository as its own tools do, for Lazarus, Node, Rust, Go and Python: here Gittan itself, its title and version, its build modes with a Build button each, and its packages with where each comes from and what moved since the tag build-136. A Node, Rust, Go or Python project lists its dependencies as asked for and as the lock file resolved them, added, removed and changed since the newest tag.</figcaption>
+          <div class="frame"><picture>
+            <source srcset="assets/shots/project-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/project-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/project-light.avif" type="image/avif">
+            <img src="assets/shots/project-light.png" width="1280" height="800" loading="lazy" alt="The Project page of Gittan: Lazarus, Gittan.lpi, 0.15.0, 2 build modes, 6 packages and 2 changed since build-136; the title Git Tree Analyzer &amp; Navigator, version 0.15.0, 48 units and the session kept in the project folder; the build modes Default (-O1, DWARF 2) and Release (-O2, smart link, stripped) with a Build button each; and the packages LazInk, BGRABitmapPack, atsynedit_ex_package, atsynedit_package, MetaDarkStyle and LCL with the submodule and tag each comes from, two of them moved since the tag">
           </picture></div>
         </figure>
         <figure id="t-graph" role="tabpanel" aria-labelledby="b-graph">
@@ -793,7 +921,7 @@
             <source srcset="assets/shots/graph-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/graph-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/graph-light.avif" type="image/avif">
-            <img src="assets/shots/graph-light.png" width="1280" height="800" loading="lazy" alt="The commit graph with a Statistics toggle and a search field in its header: main two commits ahead and one behind origin/main, the offline-maps branch on the remote, elevation-chart only local, the tag v0.1.0, and two merged branches">
+            <img src="assets/shots/graph-light.png" width="1280" height="800" loading="lazy" alt="The commit graph with First Parent, No Merges, Statistics and a search field in its header: main two commits ahead and one behind origin/main, the offline-maps branch on the remote, elevation-chart only local, the tag v0.1.0, and two merged branches">
           </picture></div>
         </figure>
         <figure id="t-stats" role="tabpanel" aria-labelledby="b-stats">
@@ -802,7 +930,7 @@
             <source srcset="assets/shots/stats-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/stats-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/stats-light.avif" type="image/avif">
-            <img src="assets/shots/stats-light.png" width="1280" height="800" loading="lazy" alt="The commit graph's statistics: 19 commits by 3 authors as weekly bars from August to October stacked in each author's color, the week of 5 October under the mouse with six commits, and rows for Sam Okafor, Maja Lindqvist and Inés Moreau with their own weeks">
+            <img src="assets/shots/stats-light.png" width="1280" height="800" loading="lazy" alt="The commit graph's statistics: 20 commits by 3 authors as weekly bars from August to October stacked in each author's color, the week of 5 October under the mouse with seven commits, and rows for Sam Okafor, Maja Lindqvist and Inés Moreau with their own weeks">
           </picture></div>
         </figure>
         <figure id="t-files" role="tabpanel" aria-labelledby="b-files">
@@ -815,12 +943,12 @@
           </picture></div>
         </figure>
         <figure id="t-commands" role="tabpanel" aria-labelledby="b-commands">
-          <figcaption><b>Commands</b> in the sidebar, or <kbd>⌘⌥4</kbd>, turns a repository's own commands into tiles: the scripts of <code>package.json</code>, the targets of a Makefile and what <code>.gittan/commands.ini</code> adds. A click runs one in the root, with its output in a panel under the tiles that tells its state and time and offers Stop, Run Again and Copy; the terminal mark runs it in your own terminal instead. A key from the file runs it from any view with <kbd>⌃⌘</kbd>, once you have trusted the file.</figcaption>
+          <figcaption><b>Commands</b> in the sidebar, or <kbd>⌘⌥4</kbd>, turns a repository's own commands into tiles: the scripts of <code>package.json</code>, the targets of a Makefile, the commands of the project's own tools, and what <code>.gittan/commands.toml</code> adds, commands that share a name before a colon grouped together. A click runs one in the root, with its output in a panel under the tiles that tells its state and time and offers Stop, Run Again and Copy; the terminal mark runs it in your own terminal instead. A key from the file runs it from any view with <kbd>⌃⌘</kbd>, once you have trusted the file.</figcaption>
           <div class="frame"><picture>
             <source srcset="assets/shots/commands-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/commands-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/commands-light.avif" type="image/avif">
-            <img src="assets/shots/commands-light.png" width="1280" height="800" loading="lazy" alt="The Commands page of trailhead: authors, graph and icons from .gittan/commands.ini and build, dev and preview from package.json, each with its shortcut, and under them the output of graph, Done in 72 ms, a colored git log graph, with Run Again and Copy">
+            <img src="assets/shots/commands-light.png" width="1280" height="800" loading="lazy" alt="The Commands page of trailhead: authors, graph and reset-cache from .gittan/commands.toml, its icons:list and icons:update grouped under icons, and build, dev and preview from package.json, each with its shortcut and terminal mark, and under them the output of graph, Done in 64 ms, a colored git log graph, with Run Again and Copy">
           </picture></div>
         </figure>
         <figure id="t-palette" role="tabpanel" aria-labelledby="b-palette">
@@ -829,7 +957,7 @@
             <source srcset="assets/shots/palette-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/palette-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/palette-light.avif" type="image/avif">
-            <img src="assets/shots/palette-light.png" width="1280" height="800" loading="lazy" alt="The command palette over TrailCard.vue filtered by branch: Switch to Branch with ⌘B, New Branch, Merge into main, Rebase main onto and the rest of the Branch menu, with Undo, Redo and Stash in a column on the left and Pull, Push and New Branch on the right">
+            <img src="assets/shots/palette-light.png" width="1280" height="800" loading="lazy" alt="The command palette over TrailCard.vue filtered by branch: Switch to Branch with ⌘B, New Branch, Merge into main, Rebase main onto, Git Flow and the rest of the Branch menu, with Undo, Redo and Stash in a column on the left and Pull, Push and New Branch on the right">
           </picture></div>
         </figure>
         <figure id="t-submodule" role="tabpanel" aria-labelledby="b-submodule">
@@ -874,6 +1002,7 @@
     <div class="tour">
       <div class="tabs" role="tablist" aria-label="Workflow screenshots" aria-orientation="vertical">
         <button role="tab" id="b-commit" aria-selected="true" aria-controls="t-commit"><b>Commit</b></button>
+        <button role="tab" id="b-absorb" aria-selected="false" aria-controls="t-absorb" tabindex="-1"><b>Put into its commit</b></button>
         <button role="tab" id="b-sync" aria-selected="false" aria-controls="t-sync" tabindex="-1"><b>Pull &amp; push</b></button>
         <button role="tab" id="b-branches" aria-selected="false" aria-controls="t-branches" tabindex="-1"><b>Branches</b></button>
         <button role="tab" id="b-stashes" aria-selected="false" aria-controls="t-stashes" tabindex="-1"><b>Stashes</b></button>
@@ -889,12 +1018,21 @@
       </div>
       <div class="stage">
         <figure id="t-commit" class="on" role="tabpanel" aria-labelledby="b-commit">
-          <figcaption><b>Commit</b> from the tree: tick the files that belong together, write the message under them, and commit with <kbd>⌘↩</kbd>. Skip in Commit leaves a block of a file out, or only the lines you select, so here the favourite button waits for the next commit along with README.md.</figcaption>
+          <figcaption><b>Commit</b> from the tree: tick the files that belong together, write the message under them, and commit with <kbd>⌘↩</kbd>. Leave Out of Commit leaves a block of a file out, or only the lines you select, so here the favourite button waits for the next commit along with README.md.</figcaption>
           <div class="frame"><picture>
             <source srcset="assets/shots/commit-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/commit-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/commit-light.avif" type="image/avif">
-            <img src="assets/shots/commit-light.png" width="1280" height="800" loading="lazy" alt="TrailCard.vue changed in the diff view with the button block left out of the commit in a muted tint and Include in Commit among the pills over it, the file's box in the tree half ticked, README.md unticked, Include All in the file header, and the Commit section with a message and the Commit button">
+            <img src="assets/shots/commit-light.png" width="1280" height="800" loading="lazy" alt="TrailCard.vue changed in the diff view with the button block left out of the commit in a muted tint and Reviewed, Include in Commit, Put into Its Commit and Discard pills over it, the file's box in the tree half ticked, README.md unticked, Include All in the file header, and the Commit section with a message and the Commit button">
+          </picture></div>
+        </figure>
+        <figure id="t-absorb" role="tabpanel" aria-labelledby="b-absorb">
+          <figcaption><b>Put Changes into Their Commits…</b> in the Commit menu folds each change into the commit of your branch that last wrote its lines, as a fixup commit rebased in at once: here a fix in App.vue goes into Load the sample trails on start and one in TrailCard.vue into Say what unit the climb is in, both not pushed yet, while the changes to older lines stay in the work tree, each with its reason. Put into Its Commit over a block does it for one change. Branch &gt; Undo takes it back.</figcaption>
+          <div class="frame"><picture>
+            <source srcset="assets/shots/absorb-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/absorb-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/absorb-light.avif" type="image/avif">
+            <img src="assets/shots/absorb-light.png" width="1280" height="800" loading="lazy" alt="The dialog Put Changes into Their Commits over the diff of TrailCard.vue: fifteen changes, src/App.vue:7 ticked going into 3bc4f5e Load the sample trails on start and src/components/TrailCard.vue:70 ticked going into 4da5e9c Say what unit the climb is in, the others unticked with the reason, 2 of 2 ticked, a note that the commits after the oldest one changed are rewritten and Branch &gt; Undo takes it back, and Cancel and Put 2 buttons">
           </picture></div>
         </figure>
         <figure id="t-sync" role="tabpanel" aria-labelledby="b-sync">
@@ -921,7 +1059,7 @@
             <source srcset="assets/shots/stashes-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/stashes-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/stashes-light.avif" type="image/avif">
-            <img src="assets/shots/stashes-light.png" width="1280" height="800" loading="lazy" alt="The stash list over the status bar: Stash Changes, then Chart legend on elevation-chart eleven days old with untracked files and Try a dark map style on main two weeks old, the latter checked; the summary shows that stash's one changed file against its base, and the status bar reads vs stash: Try a dark map style with a cross">
+            <img src="assets/shots/stashes-light.png" width="1280" height="800" loading="lazy" alt="The stash list over the status bar: Stash Changes, then Chart legend on elevation-chart two weeks old with untracked files and Try a dark map style on main two weeks old, the latter checked; the summary shows that stash's one changed file against its base, and the status bar reads vs stash: Try a dark map style with a cross">
           </picture></div>
         </figure>
         <figure id="t-worktrees" role="tabpanel" aria-labelledby="b-worktrees">
@@ -930,7 +1068,7 @@
             <source srcset="assets/shots/worktrees-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/worktrees-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/worktrees-light.avif" type="image/avif">
-            <img src="assets/shots/worktrees-light.png" width="1280" height="800" loading="lazy" alt="The worktree trailhead-maps on offline-maps open in a second tab beside trailhead, with the worktree list showing Add Worktree, trailhead on main as the repository and trailhead-maps on offline-maps as this one, and the summary saying three commits behind origin/main with a Rebase button">
+            <img src="assets/shots/worktrees-light.png" width="1280" height="800" loading="lazy" alt="The worktree trailhead-maps on offline-maps open in a second tab beside trailhead, with the worktree list showing Add Worktree, trailhead on main as the repository and trailhead-maps on offline-maps as this one, over the row saying four commits behind origin/main">
           </picture></div>
         </figure>
         <figure id="t-repolist" role="tabpanel" aria-labelledby="b-repolist">
@@ -948,7 +1086,7 @@
             <source srcset="assets/shots/rebase-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/rebase-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/rebase-light.avif" type="image/avif">
-            <img src="assets/shots/rebase-light.png" width="1280" height="800" loading="lazy" alt="The dialog Commits of main after 2a6aaf7: four commits newest first, the top one set to Reword with its new message Say that the climb is in metres in the field under the list, the next set to Edit and two left as Pick, Move Up and Move Down buttons, and a note that two of the commits are pushed already, so the next push must be forced">
+            <img src="assets/shots/rebase-light.png" width="1280" height="800" loading="lazy" alt="The dialog Commits of main after 241f7b2: five commits newest first, the top one set to Reword with its new message Say that the climb is in metres in the field under the list, the next set to Edit and three left as Pick, Move Up and Move Down buttons, and a note that three of the commits are pushed already, so the next push must be forced">
           </picture></div>
         </figure>
         <figure id="t-bisect" role="tabpanel" aria-labelledby="b-bisect">
@@ -957,7 +1095,7 @@
             <source srcset="assets/shots/bisect-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/bisect-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/bisect-light.avif" type="image/avif">
-            <img src="assets/shots/bisect-light.png" width="1280" height="800" loading="lazy" alt="The commit graph during a bisect: main marked bad, two older commits marked good, and HEAD on Sort the trails by climb, the commit to test; beside the graph the Commit section's note with Good, Bad and Skip buttons, and Bisecting in the status bar">
+            <img src="assets/shots/bisect-light.png" width="1280" height="800" loading="lazy" alt="The commit graph during a bisect: main marked bad, two older commits marked good, and HEAD on Update Vue and Vite, add VueUse, the commit to test; beside the graph the Commit section's note with Good, Bad and Skip buttons, and Bisecting in the status bar">
           </picture></div>
         </figure>
         <figure id="t-cleanup" role="tabpanel" aria-labelledby="b-cleanup">
@@ -993,7 +1131,7 @@
             <source srcset="assets/shots/graphmenu-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/graphmenu-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/graphmenu-light.avif" type="image/avif">
-            <img src="assets/shots/graphmenu-light.png" width="1280" height="800" loading="lazy" alt="The commit graph with the menu of an older commit on main: Show Commit, Compare with Working Tree, Browse Files, Mark for Comparison, Create Patch, Create Branch Here, Create Tag Here, Revert Commit, Rebase Interactively from Here, Fixup with the Ticked Files highlighted, Reset main to Here, Bisect and Copy Commit Hash">
+            <img src="assets/shots/graphmenu-light.png" width="1280" height="800" loading="lazy" alt="The commit graph with the menu of Update Vue and Vite, add VueUse: Show Commit, Compare with Working Tree, Browse Files, Export Files as Archive, Mark for Comparison, Create Patch, Create Branch Here, Create Tag Here, Revert Commit, Rebase Interactively from Here, Fixup with the Included Files, Reset main to Here, Bisect, Add Note and Copy Commit Hash">
           </picture></div>
         </figure>
         <figure id="t-search" role="tabpanel" aria-labelledby="b-search">
@@ -1002,7 +1140,7 @@
             <source srcset="assets/shots/search-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/search-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/search-light.avif" type="image/avif">
-            <img src="assets/shots/search-light.png" width="1280" height="800" loading="lazy" alt="The commit graph filtered by author:sam path:src/components: four commits by Sam Okafor as a flat list, Let the tile cache be cleared, Cache map tiles for offline use, Estimate the walking time with Naismith's rule and Show the length of each trail, and 4 of 19 commits match under them">
+            <img src="assets/shots/search-light.png" width="1280" height="800" loading="lazy" alt="The commit graph filtered by author:sam path:src/components: four commits by Sam Okafor as a flat list, Let the tile cache be cleared, Cache map tiles for offline use, Estimate the walking time with Naismith's rule and Show the length of each trail, and 4 of 20 commits match under them">
           </picture></div>
         </figure>
       </div>
@@ -1015,7 +1153,7 @@
         <div>
           <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M3 12h5.5"/><path d="M15.5 12H21"/></svg></div>
           <h3>Commit what you see</h3>
-          <p>Every changed file in the tree has a check box. Untick what should wait, or leave a block of a file out with Skip in Commit, or only the lines you select, write the message at the bottom of the panel and commit with <kbd>⌘↩</kbd>. Files go in as the diff shows them, and your hooks, signing and commit template work as git is set up to. Amend picks up the last message, ✦ AI writes one if you have turned the AI features on, and a branch that can be pushed offers Push right after.</p>
+          <p>Every changed file in the tree has a check box. Untick what should wait, or leave a block of a file out with Leave Out of Commit, or only the lines you select, write the message at the bottom of the panel and commit with <kbd>⌘↩</kbd>. Files go in as the diff shows them, and your hooks, signing and commit template work as git is set up to. Amend picks up the last message, ✦ AI writes one if you have turned the AI features on, and a branch that can be pushed offers Push right after.</p>
         </div>
         <div class="art" aria-hidden="true">
           <div class="mini tree">
@@ -1319,7 +1457,7 @@
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></div>
         <h3>Review, skip or discard a block</h3>
-        <p>Rest the mouse on a changed row and pills appear. Reviewed shows the block as plain code for the rest of the session, so the diff shrinks as you read it. Skip in Commit leaves it for a later commit. Discard puts it back as HEAD has it, after asking.</p>
+        <p>Rest the mouse on a changed row and pills appear. Reviewed shows the block as plain code for the rest of the session, so the diff shrinks as you read it. Leave Out of Commit leaves it for a later commit, and Put into Its Commit folds it into the commit of your branch that wrote those lines. Discard puts it back as HEAD has it, after asking.</p>
       </div>
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h10"/><path d="M18 15l2 2-2 2"/></svg></div>
@@ -1443,7 +1581,7 @@
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg></div>
         <h3>Your own commands</h3>
-        <p>The scripts of <code>package.json</code>, the targets of a Makefile and <code>.gittan/commands.ini</code> become buttons on the Commands page, their output drawn as a terminal draws it.</p>
+        <p>The scripts of <code>package.json</code>, the targets of a Makefile, the commands of Cargo, Go, Python and Lazarus and <code>.gittan/commands.toml</code> become buttons on the Commands page, their output drawn as a terminal draws it.</p>
       </div>
       <div class="reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5v14"/><path d="M11 10h6"/><path d="M11 14h4"/></svg></div>
@@ -1669,6 +1807,17 @@ make run
         e.preventDefault();
         select(tabs[(j + tabs.length) % tabs.length], true);
       });
+    });
+  });
+
+  // ---- A link with data-tab picks that tab of the tour or the workflow, then scrolls to it.
+  document.querySelectorAll('a[data-tab]').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      var b = document.getElementById(a.dataset.tab);
+      if (!b) return;
+      e.preventDefault();
+      b.click();
+      b.closest('section').scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   });
 
