@@ -563,7 +563,6 @@ begin
   FKeeps.Apply(FCurrentPath, FChangeLines, FKeptOf);
   ApplyLeftOut;
   FHeadings := nil;
-  FHeadingRebuilds := 0;
   SetChangeActions;
   RebuildIfChanges;
 end;

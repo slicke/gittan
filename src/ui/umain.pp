@@ -90,6 +90,22 @@ type
   end;
   TGittanRows = array of TGittanRow;
 
+  {** The chips of a painted gap row (TRepoFrame.EditDrawLine): the
+    first GapStep hidden lines, the last ones, the whole run. }
+  TGapChip = (gcDown, gcUp, gcAll);
+
+  {** Where the parts of a gap row are painted (TRepoFrame.GapRowLayout):
+    the fold glyph, the description, the chips and the name of the
+    symbol the changes after the gap are in, an empty rect or string for
+    a part the row has not. }
+  TGapRowLayout = record
+    Icon: TRect;
+    Text, Heading: string;
+    TextX, TextY, HeadingX, ChipHeight: integer;
+    Chips: array[TGapChip] of TRect;
+    ChipText: array[TGapChip] of string;
+  end;
+
   {** The tree views of the form, the one from umain.lfm included, with a
     click on a node's check box (its state image) told apart: it goes to
     OnStateClick instead of selecting the row, so choosing files to
@@ -649,6 +665,10 @@ type
       discarded, latest last, which Changes > Undo Discard puts back; and
       the two menu items. }
     FHotDiscard, FHotRow: integer;
+    { The gap row under the mouse and the part of it (gapPartRow, gapPartHeading
+      or Ord of a TGapChip), see SetHotGap. }
+    FHotGapEd: TATSynEdit;
+    FHotGapRow, FHotGapChip: integer;
     FPillTimer: TTimer;
     FDiscardPills: TGittanHoverPills;
     { Keeping changes as code for the session (gittan.keep): the keeps
@@ -1064,7 +1084,6 @@ type
     FHeadings: array of string;
     FCodeRanges, FOldRanges: TGittanCodeRanges;
     FRangesValid, FBuildingView: boolean;
-    FHeadingRebuilds: integer;
     { Scrolling on past the bottom of a file, or the top: the wheel
       delta pulled so far (positive downwards, towards the next file,
       negative upwards, towards the previous), the time of the last wheel
@@ -1432,13 +1451,19 @@ type
       ALexer: TecSyntAnalyzer);
     function VisibleRow(ARow: integer): integer;
     function RowOfLine(ALine, AFallback: integer): integer;
-    function GapRowText(ACount: integer; const AHeading: string;
-      out ADown, AUp, AAll, AHeadingCol: integer): string;
+    function GapRowText(ACount: integer; const AHeading: string): string;
     function GapHeading(AGapTo: integer): string;
+    function GapRowLayout(AEd: TATSynEdit; C: TCanvas; ARow, ATop: integer;
+      out ALayout: TGapRowLayout): boolean;
+    function GapPartAt(AEd: TATSynEdit; X, Y: integer; out ARow: integer): integer;
+    function GapPartHint(ARow, APart: integer): string;
+    procedure SetHotGap(AEd: TATSynEdit; ARow, APart: integer);
+    procedure EditDrawLine(Sender: TObject; C: TCanvas; ALineIndex, AX, AY: integer;
+      const AStr: atString; const ACharSize: TATEditorCharSize;
+      constref AExtent: TATIntFixedArray);
     function RowMarkers(const ARows: TGittanRows; AOldSide: boolean): string;
     function RowTexts(AEd: TATSynEdit): TStringList;
     procedure UpdateSymbolHeadings;
-    procedure RebuildForHeadingsAsync(Data: PtrInt);
     procedure UpdateSymbolCrumb;
     procedure ExpandGap(AFrom, ATo: integer);
 
@@ -2629,7 +2654,7 @@ resourcestring
   rsHistoryTitle = 'History of %s';
   rsHistoryIn = '%s in %s';
   rsHistoryLines = 'lines %d-%d';
-  rsHistoryMore = '⋯  ↓ %d older changes  ⋯';
+  rsHistoryMore = '↓ %d older changes';
   rsHistoryCounts = '+%d −%d';
   rsHistoryLoading = 'Loading history...';
   rsHistoryNeedsFile = 'Show a file first: the history is of the selected lines, or of the function at the caret.';
@@ -3611,11 +3636,16 @@ resourcestring
   rsOneChangedFile = '1 changed file';
   rsNoChanges = 'No changes';
   rsNoLongerChanged = '%s has no changes any more.';
-  rsGapLines = '⋯  %d unchanged lines  ⋯';
-  rsGapLine = '⋯  1 unchanged line  ⋯';
+  rsGapLines = '%d unchanged lines';
+  rsGapLine = '1 unchanged line';
   rsGapDown = '↓ %d';
   rsGapUp = '↑ %d';
-  rsGapAll = 'all';
+  rsGapAll = 'Show all';
+  rsGapShow = 'Show';
+  rsGapDownHint = 'Show the first %d of the hidden lines';
+  rsGapUpHint = 'Show the last %d of the hidden lines';
+  rsGapAllHint = 'Show all %d hidden lines';
+  rsGapOneHint = 'Show the hidden line';
   rsPullNext = 'Next: %s  ↓';
   rsPullPrev = 'Previous: %s  ↑';
   rsSwitchBranchHint = 'Switch branch';
@@ -3901,6 +3931,12 @@ const
   rowMore = -4;
   { How many hidden lines a gap row's labels open at a time. }
   GapStep = 20;
+  { What GapPartAt answers besides Ord of a TGapChip. }
+  gapPartNone = -3;
+  gapPartHeading = -2;
+  gapPartRow = -1;
+  { The smallest font of a painted gap row, in points. }
+  MinGapFontSize = 8;
   { How many commits the history view shows at a time, and the line
     range that stands for the whole file (git clamps it to the end). }
   HistoryStep = 5;
@@ -4034,6 +4070,8 @@ begin
   FHotDiscard := -1;
   FHotRow := -1;
   FHotKeep := -1;
+  FHotGapRow := -1;
+  FHotGapChip := gapPartNone;
   FFramedBlock := -1;
   FHeaderUnkeep := -1;
   FKeeps := TGittanKeeps.Create;
@@ -4760,6 +4798,8 @@ begin
   { The cards of the review comments (see umain.reviews.inc). }
   AEd.OnDrawGap := @EditDrawGap;
   AEd.OnClickGap := @EditClickGap;
+  { A gap row is painted over its text (see EditDrawLine). }
+  AEd.OnDrawLine := @EditDrawLine;
 end;
 
 function TRepoFrame.AdapterOf(AEd: TATSynEdit): TATAdapterEControl;
@@ -8206,7 +8246,6 @@ begin
   { The diff may have changed, so the blocks and their headings are
     found again after the parse. }
   FHeadings := nil;
-  FHeadingRebuilds := 0;
   FCurrentPath := APath;
   SetOverscroll(0);
   FSummary.Notice := '';
