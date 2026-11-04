@@ -76,7 +76,7 @@ declare namespace Gittan {
   function on(event: Event, fn: (payload: any) => Cancel): typeof fn;
   function off(event: Event, fn: Function): boolean;
 
-  /** The extension's own values in gittan.ini. A key is one line without "=", not starting with ";" or "["; get, set and define throw on another. */
+  /** The extension's own values, kept in settings.json. A key tells case, is not empty and has no control character; get, set and define throw on another. */
   const storage: {
     get(key: string): string | null;
     set(key: string, value: string): void;

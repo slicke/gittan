@@ -1,40 +1,42 @@
 unit testsettings;
 
-{** Tests of gittan.settings: the ini file round trip and the recent
-  list. }
+{** Tests of gittan.settings: the round trip through settings.json and
+  state.json, the keys kept that Gittan does not know, the old ini file
+  found, and the recent list. }
 
 {$mode objfpc}{$H+}
 
 interface
 
 uses
-  Classes, SysUtils, IniFiles, fpcunit, testregistry, gittan.settings,
-  { GitHub registers itself, so the settings keep its section. }
-  gittan.github{$IFDEF UNIX}, BaseUnix{$ENDIF};
+  Classes, SysUtils, fpcunit, testregistry, fpjson, jsonparser, gittan.settings,
+  gittan.textfile, testhelpers{$IFDEF UNIX}, BaseUnix{$ENDIF};
 
 type
   TSettingsTest = class(TTestCase)
   private
-    FFileName: string;
+    FDir: string;
+    procedure Put(const AName, AText: string);
+    function ReadJson(const AName: string): TJSONObject;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
   published
     procedure TestDefaults;
     procedure TestRoundTrip;
-    procedure TestQuotesAndSpaces;
+    procedure TestStringsAsTheyAre;
     procedure TestRecentList;
     procedure TestSaveRecent;
     procedure TestTabs;
     procedure TestDamagedFileGivesDefaults;
-    procedure TestOldDefaultFont;
     procedure TestDefaultFontSize;
     procedure TestTrust;
     procedure TestProjectKinds;
-    procedure TestOldGhPath;
-    procedure TestOldForgeSwitch;
-    procedure TestOldFilterFlags;
+    procedure TestForgeValues;
     procedure TestExtensions;
+    procedure TestLayout;
+    procedure TestUnknownKeysKept;
+    procedure TestOldIni;
   end;
 
 implementation
@@ -53,23 +55,43 @@ end;
 
 procedure TSettingsTest.SetUp;
 begin
-  FFileName := GetTempFileName('', 'gittan-settings-');
+  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'gittan-settings-' +
+    IntToStr(GetProcessID) + '-' + IntToStr(Random(MaxInt));
+  ForceDirectories(FDir);
 end;
 
 procedure TSettingsTest.TearDown;
 begin
-  if FileExists(FFileName) then
-    DeleteFile(FFileName);
+  RemoveTree(FDir);
+end;
+
+procedure TSettingsTest.Put(const AName, AText: string);
+begin
+  AssertTrue(WriteFileReplacing(IncludeTrailingPathDelimiter(FDir) + AName, AText));
+end;
+
+function TSettingsTest.ReadJson(const AName: string): TJSONObject;
+var
+  Data: TJSONData;
+begin
+  Data := GetJSON(ReadFileBytes(IncludeTrailingPathDelimiter(FDir) + AName));
+  AssertTrue(AName + ' is an object', Data is TJSONObject);
+  Result := TJSONObject(Data);
 end;
 
 procedure TSettingsTest.TestDefaults;
 var
   S: TGittanSettings;
 begin
-  S := TGittanSettings.Create(FFileName);
+  S := TGittanSettings.Create(FDir);
   try
-    AssertEquals(FFileName, S.FileName);
+    AssertEquals(FDir, S.Dir);
+    AssertEquals(IncludeTrailingPathDelimiter(FDir) + 'settings.json', S.SettingsFile);
+    AssertEquals(IncludeTrailingPathDelimiter(FDir) + 'state.json', S.StateFile);
     S.Load;
+    AssertFalse('no old ini', S.OldIniFound);
+    AssertTrue(S.ReviewComments);
+    AssertTrue(S.Translations);
     AssertEquals(3, S.ContextLines);
     AssertTrue('the unchanged lines start hidden', S.OnlyChanges);
     AssertEquals(0, S.Width);
@@ -113,7 +135,7 @@ procedure TSettingsTest.TestRoundTrip;
 var
   S: TGittanSettings;
 begin
-  S := TGittanSettings.Create(FFileName);
+  S := TGittanSettings.Create(FDir);
   try
     S.Left := 10;
     S.Top := 20;
@@ -173,7 +195,7 @@ begin
   finally
     S.Free;
   end;
-  S := TGittanSettings.Create(FFileName);
+  S := TGittanSettings.Create(FDir);
   try
     S.Load;
     AssertEquals(10, S.Left);
@@ -227,7 +249,7 @@ begin
     AssertEquals('openai/gpt-4o-mini', S.OpenAIModel);
     {$IFDEF UNIX}
     AssertEquals('with a key the file is its owner''s alone', &600,
-      FileModeOf(FFileName) and &777);
+      FileModeOf(S.SettingsFile) and &777);
     {$ENDIF}
     AssertEquals('the day, without the time', EncodeDate(2026, 10, 29),
       S.UpdateSnoozedUntil, 0);
@@ -242,15 +264,17 @@ begin
   end;
 end;
 
-procedure TSettingsTest.TestQuotesAndSpaces;
+{ Whatever a string holds comes back as it was: quotes and spaces at
+  its edges, backslashes, line ends, a tab, letters past ASCII. }
+procedure TSettingsTest.TestStringsAsTheyAre;
 var
   S: TGittanSettings;
 begin
-  S := TGittanSettings.Create(FFileName);
+  S := TGittanSettings.Create(FDir);
   try
     S.EditorCommand := '"C:\Program Files\Code\Code.exe"';
     S.TerminalCommand := '"wt.exe" -d';
-    S.CommitDraft := '"Quoted subject"';
+    S.CommitDraft := '"Quoted subject"'#13#10#13#10'body\n'#9'åäö 🙂'#10;
     S.CommitDraftRepo := '  /tmp/a ';
     S.GitPath := '"';
     S.SetForgeCliPath('GitHub', '""');
@@ -259,12 +283,12 @@ begin
   finally
     S.Free;
   end;
-  S := TGittanSettings.Create(FFileName);
+  S := TGittanSettings.Create(FDir);
   try
     S.Load;
     AssertEquals('"C:\Program Files\Code\Code.exe"', S.EditorCommand);
     AssertEquals('"wt.exe" -d', S.TerminalCommand);
-    AssertEquals('"Quoted subject"', S.CommitDraft);
+    AssertEquals('"Quoted subject"'#13#10#13#10'body\n'#9'åäö 🙂'#10, S.CommitDraft);
     AssertEquals('  /tmp/a ', S.CommitDraftRepo);
     AssertEquals('"', S.GitPath);
     AssertEquals('""', S.ForgeCliPath('GitHub'));
@@ -279,7 +303,7 @@ var
   S: TGittanSettings;
   i: integer;
 begin
-  S := TGittanSettings.Create(FFileName);
+  S := TGittanSettings.Create(FDir);
   try
     for i := 1 to MaxRecent + 3 do
       S.AddRecent('/repo/' + IntToStr(i));
@@ -314,7 +338,7 @@ procedure TSettingsTest.TestSaveRecent;
 var
   S, Back: TGittanSettings;
 begin
-  S := TGittanSettings.Create(FFileName);
+  S := TGittanSettings.Create(FDir);
   try
     S.EditorCommand := '/usr/bin/editor';
     S.AddRecent('/repo/a');
@@ -326,7 +350,7 @@ begin
   finally
     S.Free;
   end;
-  Back := TGittanSettings.Create(FFileName);
+  Back := TGittanSettings.Create(FDir);
   try
     Back.Load;
     AssertEquals(1, Back.Recent.Count);
@@ -341,7 +365,7 @@ procedure TSettingsTest.TestTabs;
 var
   S: TGittanSettings;
 begin
-  S := TGittanSettings.Create(FFileName);
+  S := TGittanSettings.Create(FDir);
   try
     AssertEquals('none by default', 0, S.Tabs.Count);
     S.Tabs.Add('/repo/a');
@@ -352,7 +376,7 @@ begin
   finally
     S.Free;
   end;
-  S := TGittanSettings.Create(FFileName);
+  S := TGittanSettings.Create(FDir);
   try
     S.Load;
     AssertEquals(3, S.Tabs.Count);
@@ -365,7 +389,7 @@ begin
   finally
     S.Free;
   end;
-  S := TGittanSettings.Create(FFileName);
+  S := TGittanSettings.Create(FDir);
   try
     S.Load;
     AssertEquals('fewer tabs drop the rest', 1, S.Tabs.Count);
@@ -378,48 +402,34 @@ end;
 procedure TSettingsTest.TestDamagedFileGivesDefaults;
 var
   S: TGittanSettings;
-  F: TStringList;
 begin
-  F := TStringList.Create;
-  try
-    F.Text := '[View]'#10'ContextLines=lots'#10'[Window'#10'Width=';
-    F.SaveToFile(FFileName);
-  finally
-    F.Free;
-  end;
-  S := TGittanSettings.Create(FFileName);
+  Put('settings.json', '{"diff": {"contextLines": 5,');
+  Put('state.json', '["not", "an", "object"]');
+  S := TGittanSettings.Create(FDir);
   try
     S.Load;
-    AssertEquals(3, S.ContextLines);
+    AssertEquals('a file cut short is none', 3, S.ContextLines);
     AssertEquals(0, S.Width);
   finally
     S.Free;
   end;
-end;
-
-procedure TSettingsTest.TestOldDefaultFont;
-var
-  S: TGittanSettings;
-  F: TStringList;
-begin
-  F := TStringList.Create;
-  try
-    F.Text := '[View]'#10'FontName=Courier New'#10'FontSize=9'#10;
-    F.SaveToFile(FFileName);
-  finally
-    F.Free;
-  end;
-  S := TGittanSettings.Create(FFileName);
+  { A member of another type keeps the default, the rest are read. }
+  Put('settings.json', '{"diff": {"contextLines": "lots", "sideBySide": 1, "blame": true},' +
+    '"editor": [], "tools": {"autoFetchMinutes": 100000}}');
+  Put('state.json', '{"window": {"width": 1.5e30, "height": 700}, "recent": ["/a", 3, "", "/b"],' +
+    '"tabs": {"open": "/a", "active": 2}}');
+  S := TGittanSettings.Create(FDir);
   try
     S.Load;
-    AssertEquals('the old built-in font is no choice', '', S.FontName);
-    AssertEquals(0, S.FontSize);
-    S.FontName := 'Courier New';
-    S.FontSize := 10;
-    S.Save;
-    S.Load;
-    AssertEquals('another size is a choice', 'Courier New', S.FontName);
-    AssertEquals(10, S.FontSize);
+    AssertEquals(3, S.ContextLines);
+    AssertFalse('a number is no boolean', S.SideBySide);
+    AssertTrue(S.Blame);
+    AssertEquals('kept in its range', MaxAutoFetchMinutes, S.AutoFetchMinutes);
+    AssertEquals('a float is no width', 0, S.Width);
+    AssertEquals(700, S.Height);
+    AssertEquals('the strings of the list', '/a,/b', S.Recent.CommaText);
+    AssertEquals('no tabs', 0, S.Tabs.Count);
+    AssertEquals(0, S.ActiveTab);
   finally
     S.Free;
   end;
@@ -437,7 +447,7 @@ procedure TSettingsTest.TestTrust;
 var
   S: TGittanSettings;
 begin
-  S := TGittanSettings.Create(FFileName);
+  S := TGittanSettings.Create(FDir);
   try
     AssertTrue('no file needs no trust', S.CommandsTrusted('/tmp/a', ''));
     AssertFalse(S.CommandsTrusted('/tmp/a', 'abc'));
@@ -451,7 +461,7 @@ begin
   finally
     S.Free;
   end;
-  S := TGittanSettings.Create(FFileName);
+  S := TGittanSettings.Create(FDir);
   try
     S.Load;
     AssertTrue('the newest hash is kept', S.CommandsTrusted('/tmp/a', 'def'));
@@ -466,7 +476,7 @@ procedure TSettingsTest.TestProjectKinds;
 var
   S: TGittanSettings;
 begin
-  S := TGittanSettings.Create(FFileName);
+  S := TGittanSettings.Create(FDir);
   try
     AssertEquals('none picked', '', S.ProjectKindsOf('/tmp/a'));
     S.SetProjectKinds('/tmp/a', 'Lazarus,Node');
@@ -477,7 +487,7 @@ begin
   finally
     S.Free;
   end;
-  S := TGittanSettings.Create(FFileName);
+  S := TGittanSettings.Create(FDir);
   try
     S.Load;
     AssertEquals('Lazarus,Node', S.ProjectKindsOf('/tmp/a'));
@@ -488,130 +498,42 @@ begin
   end;
 end;
 
-{ gh's path was kept in Tools with git's; it is read from there and
-  moved to the GitHub section. }
-{ The GitHub features had a switch of their own; off, it turns the
-  hosting features off, and moves to the Hosting section. }
-procedure TSettingsTest.TestOldForgeSwitch;
+{ A forge's values live in its object; a value cleared goes from the
+  file, and so the object once it is empty. }
+procedure TSettingsTest.TestForgeValues;
 var
   S: TGittanSettings;
-  Ini: TStringList;
-  Cfg: TIniFile;
+  Doc: TJSONObject;
 begin
-  Ini := TStringList.Create;
+  S := TGittanSettings.Create(FDir);
   try
-    Ini.Add('[GitHub]');
-    Ini.Add('Enabled=0');
-    Ini.Add('Cli=/opt/gh/bin/gh');
-    Ini.SaveToFile(FFileName);
-    S := TGittanSettings.Create(FFileName);
-    try
-      S.Load;
-      AssertFalse(S.HostingEnabled);
-      AssertEquals('/opt/gh/bin/gh', S.ForgeCliPath('GitHub'));
-      S.Save;
-    finally
-      S.Free;
-    end;
-    Cfg := TIniFile.Create(FFileName);
-    try
-      AssertFalse('the switch is under Hosting', Cfg.ReadBool('Hosting', 'Enabled', True));
-      AssertEquals('the old switch is gone', 'none', Cfg.ReadString('GitHub', 'Enabled', 'none'));
-    finally
-      Cfg.Free;
-    end;
-  finally
-    Ini.Free;
-  end;
-end;
-
-procedure TSettingsTest.TestOldFilterFlags;
-var
-  S: TGittanSettings;
-  F: TStringList;
-begin
-  { An earlier version's flags become the filters' keys, once; the new
-    value, once there, is what counts. }
-  F := TStringList.Create;
-  try
-    F.Text := '[GitHub]'#10'HideWithoutFeedback=1'#10'OnlyStale=1'#10'HideReviewDrafts=1'#10;
-    F.SaveToFile(FFileName);
-  finally
-    F.Free;
-  end;
-  S := TGittanSettings.Create(FFileName);
-  try
-    S.Load;
-    AssertEquals('feedback,stale', S.ForgeValue('GitHub', 'MineFilters'));
-    AssertEquals('nodrafts', S.ForgeValue('GitHub', 'ReviewFilters'));
-    { Written, then cleared: the key goes from the file. }
-    S.Save;
     S.SetForgeValue('GitHub', 'MineFilters', 'attention');
+    S.SetForgeValue('GitHub', 'ReviewFilters', 'nodrafts');
+    S.SetForgeValue('GitLab', 'MineFilters', 'stale');
+    S.SetForgeValue('GitLab', 'MineFilters', '');
+    S.SetForgeValue('Gitea', 'MineFilters', '');
     S.SetForgeValue('GitHub', 'ReviewFilters', '');
     S.Save;
   finally
     S.Free;
   end;
-  F := TStringList.Create;
+  Doc := ReadJson('settings.json');
   try
-    F.LoadFromFile(FFileName);
-    AssertTrue('the flags are gone', Pos('HideWithoutFeedback', F.Text) = 0);
-    AssertTrue('an empty value is not written', Pos('ReviewFilters', F.Text) = 0);
+    AssertEquals('attention', Doc.FindPath('hosting.forges.GitHub.mineFilters').AsString);
+    AssertNull('a cleared value is not written', Doc.FindPath('hosting.forges.GitHub.reviewFilters'));
+    AssertNull('nor an empty forge', Doc.FindPath('hosting.forges.GitLab'));
+    AssertNull(Doc.FindPath('hosting.forges.Gitea'));
   finally
-    F.Free;
+    Doc.Free;
   end;
-  S := TGittanSettings.Create(FFileName);
+  S := TGittanSettings.Create(FDir);
   try
     S.Load;
     AssertEquals('attention', S.ForgeValue('GitHub', 'MineFilters'));
-    AssertEquals('an empty value with the new one there stays empty', '',
-      S.ForgeValue('GitHub', 'ReviewFilters'));
+    AssertEquals('', S.ForgeValue('GitHub', 'ReviewFilters'));
+    AssertEquals('', S.ForgeValue('GitLab', 'MineFilters'));
   finally
     S.Free;
-  end;
-  { One section's keys there already: only the other is migrated. }
-  F := TStringList.Create;
-  try
-    F.Text := '[GitHub]'#10'ReviewFilters=new'#10'HideWithoutFeedback=1'#10 +
-      'HideReviewDrafts=1'#10;
-    F.SaveToFile(FFileName);
-  finally
-    F.Free;
-  end;
-  S := TGittanSettings.Create(FFileName);
-  try
-    S.Load;
-    AssertEquals('feedback', S.ForgeValue('GitHub', 'MineFilters'));
-    AssertEquals('the saved one kept', 'new', S.ForgeValue('GitHub', 'ReviewFilters'));
-  finally
-    S.Free;
-  end;
-end;
-
-procedure TSettingsTest.TestOldGhPath;
-var
-  S: TGittanSettings;
-  Ini: TStringList;
-begin
-  Ini := TStringList.Create;
-  try
-    Ini.Add('[Tools]');
-    Ini.Add('Gh=/opt/gh/bin/gh');
-    Ini.SaveToFile(FFileName);
-    S := TGittanSettings.Create(FFileName);
-    try
-      S.Load;
-      AssertEquals('/opt/gh/bin/gh', S.ForgeCliPath('GitHub'));
-      AssertTrue(S.HostingEnabled);
-      S.Save;
-    finally
-      S.Free;
-    end;
-    Ini.LoadFromFile(FFileName);
-    AssertEquals('the old key is gone', -1, Ini.IndexOf('Gh=/opt/gh/bin/gh'));
-    AssertTrue('the path is under GitHub', Ini.IndexOf('Cli=/opt/gh/bin/gh') >= 0);
-  finally
-    Ini.Free;
   end;
 end;
 
@@ -620,13 +542,14 @@ var
   S: TGittanSettings;
   Keys: TStringList;
 begin
-  S := TGittanSettings.Create(FFileName);
+  S := TGittanSettings.Create(FDir);
   try
     AssertTrue('on by default', S.ExtEnabled('hello'));
     AssertFalse('no grant', S.HasExtPerm('hello'));
     AssertEquals('no value', '', S.ExtValue('hello', 'url'));
-    AssertEquals('its folder', IncludeTrailingPathDelimiter(ExtractFilePath(FFileName)) +
+    AssertEquals('its folder', IncludeTrailingPathDelimiter(FDir) +
       'extensions', S.ExtensionsDir);
+    AssertEquals(IncludeTrailingPathDelimiter(FDir) + 'forge-picture', S.ForgePictureFile);
     S.SetExtEnabled('hello', False);
     S.SetExtEnabled('other', False);
     S.SetExtEnabled('other', True);
@@ -637,17 +560,17 @@ begin
     S.SetExtValue('hello', 'json', '{"a": "b c"}');
     S.SetExtValue('hello', 'gone', 'x');
     S.SetExtValue('hello', 'gone', '');
-    { Line ends in a value: written as they are they would start lines
-      of the file's own, a section of Gittan's among them. }
     S.SetExtValue('hello', 'lines', 'a' + #10 + '[Trust]' + #13#10 + 'x=1' + #13 + 'c:\d\n');
+    S.SetExtValue('hello', 'a=b', 'eq');
+    S.SetExtValue('hello', 'URL', 'upper');
     try
-      S.SetExtValue('hello', 'a=b', 'v');
-      Fail('a key with = is refused');
+      S.SetExtValue('hello', '', 'v');
+      Fail('an empty key is refused');
     except
       on EArgumentException do;
     end;
     try
-      S.SetExtValue('hello', 'k' + #10 + '[Tools]', 'v');
+      S.SetExtValue('hello', 'k' + #10 + 'x', 'v');
       Fail('a key with a line end is refused');
     except
       on EArgumentException do;
@@ -656,18 +579,15 @@ begin
   finally
     S.Free;
   end;
-  Keys := TStringList.Create;
-  Keys.LoadFromFile(FFileName);
-  AssertEquals('no section from the value', -1, Keys.IndexOf('[Trust]'));
-  AssertEquals('no pair from the value', -1, Keys.IndexOf('x=1'));
-  Keys.Free;
-  S := TGittanSettings.Create(FFileName);
+  S := TGittanSettings.Create(FDir);
   Keys := TStringList.Create;
   try
     S.Load;
     AssertEquals('line ends and backslashes as they were',
       'a' + #10 + '[Trust]' + #13#10 + 'x=1' + #13 + 'c:\d\n', S.ExtValue('hello', 'lines'));
-    AssertFalse('no key from the value', S.ExtValue('hello', 'x') = '1');
+    AssertEquals('= in a key', 'eq', S.ExtValue('hello', 'a=b'));
+    AssertEquals('a key tells case', 'upper', S.ExtValue('hello', 'URL'));
+    AssertEquals(' https://example.com/hook ', S.ExtValue('hello', 'url'));
     AssertFalse('off kept', S.ExtEnabled('hello'));
     AssertTrue('on again', S.ExtEnabled('other'));
     AssertTrue('grant kept', S.HasExtPerm('hello'));
@@ -678,7 +598,7 @@ begin
     AssertEquals('json as it was', '{"a": "b c"}', S.ExtValue('hello', 'json'));
     AssertEquals('empty dropped', '', S.ExtValue('hello', 'gone'));
     S.ExtValueKeys('hello', Keys);
-    AssertEquals('the keys', 'url,json,lines', Keys.CommaText);
+    AssertEquals('the keys', 'url,json,lines,a=b,URL', Keys.CommaText);
     S.ClearExtPerm('hello');
     AssertFalse('grant cleared', S.HasExtPerm('hello'));
     AssertEquals('values stay', '{"a": "b c"}', S.ExtValue('hello', 'json'));
@@ -687,11 +607,125 @@ begin
     Keys.Free;
     S.Free;
   end;
-  S := TGittanSettings.Create(FFileName);
+  S := TGittanSettings.Create(FDir);
   try
     S.Load;
     AssertFalse('cleared grant gone from the file', S.HasExtPerm('hello'));
     AssertEquals('value still there', '{"a": "b c"}', S.ExtValue('hello', 'json'));
+  finally
+    S.Free;
+  end;
+end;
+
+{ Where each value goes: what the user picks in settings.json, what
+  Gittan keeps in state.json, both with the version of the layout. }
+procedure TSettingsTest.TestLayout;
+var
+  S: TGittanSettings;
+  Doc: TJSONObject;
+begin
+  S := TGittanSettings.Create(FDir);
+  try
+    S.FontName := 'Menlo';
+    S.OpenAIKey := 'sk';
+    S.Width := 900;
+    S.AddRecent('/repo/a');
+    S.Tabs.Add('/repo/a');
+    S.TrustCommands('/repo/a', 'abc');
+    S.SetExtValue('hello', 'k', 'v');
+    S.SetExtPerm('hello', 'Hash', 'h');
+    S.Save;
+  finally
+    S.Free;
+  end;
+  Doc := ReadJson('settings.json');
+  try
+    AssertEquals(SettingsVersion, Doc.Get('version', 0));
+    AssertEquals('Menlo', Doc.FindPath('editor.fontName').AsString);
+    AssertEquals('sk', Doc.FindPath('ai.openai.key').AsString);
+    AssertEquals('v', Doc.FindPath('extensions.hello.values.k').AsString);
+    AssertNull('no state in the settings', Doc.Find('window'));
+  finally
+    Doc.Free;
+  end;
+  Doc := ReadJson('state.json');
+  try
+    AssertEquals(SettingsVersion, Doc.Get('version', 0));
+    AssertEquals(900, Doc.FindPath('window.width').AsInteger);
+    AssertEquals('/repo/a', Doc.FindPath('recent[0]').AsString);
+    AssertEquals('/repo/a', Doc.FindPath('tabs.open[0]').AsString);
+    AssertEquals('the root as the key', 'abc', TJSONObject(Doc.Find('trust')).Strings['/repo/a']);
+    AssertEquals('h', Doc.FindPath('extensionGrants.hello.hash').AsString);
+    AssertNull('no settings in the state', Doc.Find('editor'));
+    AssertNull('no draft written', Doc.Find('commitDraft'));
+  finally
+    Doc.Free;
+  end;
+  AssertFalse('no temporary file left', FileExists(IncludeTrailingPathDelimiter(FDir) +
+    'settings.json.tmp'));
+end;
+
+{ A key Gittan does not know, a newer build's or one written by hand,
+  is written back as it was. }
+procedure TSettingsTest.TestUnknownKeysKept;
+var
+  S: TGittanSettings;
+  Doc: TJSONObject;
+begin
+  Put('settings.json', '{"future": {"x": [1, 2]}, "editor": {"fontName": "A", "later": true}}');
+  Put('state.json', '{"window": {"width": 640, "dock": "left"}, "notes": "mine"}');
+  S := TGittanSettings.Create(FDir);
+  try
+    S.Load;
+    AssertEquals('A', S.FontName);
+    AssertEquals(640, S.Width);
+    S.FontName := 'B';
+    S.Width := 700;
+    S.Save;
+    S.Save;
+  finally
+    S.Free;
+  end;
+  Doc := ReadJson('settings.json');
+  try
+    AssertEquals('B', Doc.FindPath('editor.fontName').AsString);
+    AssertTrue('beside a known key', Doc.FindPath('editor.later').AsBoolean);
+    AssertEquals('an object of its own', 2, Doc.FindPath('future.x[1]').AsInteger);
+  finally
+    Doc.Free;
+  end;
+  Doc := ReadJson('state.json');
+  try
+    AssertEquals(700, Doc.FindPath('window.width').AsInteger);
+    AssertEquals('left', Doc.FindPath('window.dock').AsString);
+    AssertEquals('mine', Doc.Get('notes', ''));
+  finally
+    Doc.Free;
+  end;
+end;
+
+{ An earlier build's gittan.ini with neither JSON file: the settings
+  started over, which the window says once; nothing is read from it. }
+procedure TSettingsTest.TestOldIni;
+var
+  S: TGittanSettings;
+begin
+  Put('gittan.ini', '[View]'#10'ContextLines=9'#10);
+  S := TGittanSettings.Create(FDir);
+  try
+    S.Load;
+    AssertTrue(S.OldIniFound);
+    AssertEquals('not read', 3, S.ContextLines);
+    S.Save;
+  finally
+    S.Free;
+  end;
+  AssertTrue('the old file is left alone', FileExists(IncludeTrailingPathDelimiter(FDir) +
+    'gittan.ini'));
+  S := TGittanSettings.Create(FDir);
+  try
+    S.Load;
+    AssertFalse('once saved, said', S.OldIniFound);
   finally
     S.Free;
   end;

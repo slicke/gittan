@@ -98,10 +98,10 @@ Gittan.settings.define([
   {key: "max", type: "number", label: "Max lines", default: "20"}
 ]);
 var url = Gittan.settings.get("url");             // what the settings page holds, else the default
-Gittan.storage.setJSON("seen", {at: Date.now()}); // the extension's own values in gittan.ini
+Gittan.storage.setJSON("seen", {at: Date.now()}); // the extension's own values, kept in settings.json
 ```
 
-A value may hold anything, line ends included. A key ignores case, as in any ini file (`Token` and `token` are one key), and is one line without `=`, not starting with `;` or `[`; `get`, `set` and `define` throw on another.
+A value may hold anything, line ends included. A key tells case, as a JavaScript object's does (`Token` and `token` are two keys), and is not empty and has no line end, tab or other control character; `get`, `set` and `define` throw on another.
 
 ## Programs and the network
 

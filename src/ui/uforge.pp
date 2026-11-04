@@ -20,7 +20,7 @@ unit uforge;
   on Refresh and when the forge or its account changes, the page keeping
   what it had meanwhile; the login and the user's picture go to the
   chrome's globe as well (Picture, ChromeHint, OnUserChange), the
-  picture kept between starts beside the ini file. A card of a pull request goes
+  picture kept between starts beside the settings. A card of a pull request goes
   to the window (TRepoWindow.ComparePullRequest): a frame with a remote
   for its repository compares with it there, else its local clone among
   the recent repositories (or beside them while CloneSiblings is on;

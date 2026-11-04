@@ -502,9 +502,9 @@ end;
   _settingsGet, _appSetting
   --------------------------------------------------------------------------- }
 
-{ A key goes into gittan.ini as it is, so one that would start a line,
-  a section or a pair of its own (ValidExtKey) is refused with an error
-  the extension can read, in the getters too, so a typo shows at once. }
+{ A key that ValidExtKey refuses (empty, or with a control character)
+  is refused with an error the extension can read, in the getters too,
+  so a typo shows at once. }
 function CheckExtKey(res: PJSValue; ctx: JSContext; const AWho, AKey: string): boolean;
 begin
   Result := ValidExtKey(AKey);

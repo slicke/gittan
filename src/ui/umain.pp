@@ -2446,6 +2446,10 @@ type
     procedure ShowNoLexers;
     {** Banners a git older than the one Gittan needs. }
     procedure CheckGitVersion;
+    {** Banners, once, that the settings started over: an earlier
+      build's gittan.ini was found and not read (OldIniFound). Remove
+      with OldIniFound once the builds with gittan.ini are gone. }
+    procedure CheckSettingsReset;
     {** The lexers are in (App.Lexers.OnLoaded, through the window). }
     procedure LexersLoaded(Sender: TObject);
     {** A check for a newer build ended (App.OnUpdateChecked, through
@@ -2962,6 +2966,8 @@ resourcestring
   rsForceUnseen = '%s has commits that were fetched but were never in the branch, ' +
     'someone else''s work maybe, which the forced push would lose. Pull them in first?';
   rsGitTooOld = 'git %s is older than %d.%d';
+  rsSettingsReset = 'Your settings were reset';
+  rsSettingsResetDetail = 'Gittan now keeps its settings in settings.json and state.json, and does not read the gittan.ini of earlier builds. Pick your options again in Settings; the old file is still in %s.';
   rsGitTooOldDetail = 'Gittan needs git %d.%d or later, and some of what it does fails with ' +
     'this one (%s). Update git, or set a newer one in Settings > Tools.';
   rsPushingTo = 'Pushing %s to %s...';

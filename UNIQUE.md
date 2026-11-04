@@ -50,6 +50,10 @@ Turn it on and pick Claude Code or GitHub Copilot CLI: Gittan runs the command l
 
 A JavaScript file in the extensions folder adds commands to the menu and the command palette, watches commits, pushes and pulls, and can stop one with a reason shown to the user. Each file declares what it needs, Gittan asks before loading one that wants the repository, the network or programs, and `@repos` in the file limits it to the repositories it is for. A repository's own commands (`.gittan/commands.ini`) become buttons and keys, once you have trusted that version of the file.
 
+## What changed in the dependencies since the last release
+
+**View > Project** reads the project the way its own tools do, for Lazarus, Node, Rust, Go and Python, and compares it with the newest tag. Each dependency shows the version asked for and the version the lock file resolved, and what changed since the tag: added, removed, or `1.0.200 → 1.0.210`. A Lazarus project shows its build modes with a Build button each, and where every package comes from: a package file in the repository, a submodule at a tag, Lazarus itself, or nowhere, which a clone would then have to install. A vendored package that moved since the release shows as the move. Under it are the mistakes that end up in commits, such as a session file, build output or a virtual environment, each with a button that ignores it and stops tracking it. Other clients show a lock file as a long diff; I have not seen one read it as a list of packages.
+
 ## Small things
 
 - Scroll past the end of a file and the next changed file is pulled in.

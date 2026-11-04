@@ -16,7 +16,7 @@ type
   TExtLoaderTest = class(TTestCase)
   private
     FHost: TFakeExtHost;
-    FDir, FIni: string;
+    FDir: string;
     FSettings: TGittanSettings;
     FLoader: TGittanExtLoader;
     procedure Put(const AName, AScript: string);
@@ -49,8 +49,7 @@ begin
   FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'gittan-extloader-' +
     IntToStr(GetProcessID) + '-' + IntToStr(Random(MaxInt));
   ForceDirectories(FDir);
-  FIni := IncludeTrailingPathDelimiter(FDir) + 'gittan.ini';
-  FSettings := TGittanSettings.Create(FIni);
+  FSettings := TGittanSettings.Create(FDir);
   FLoader := TGittanExtLoader.Create(FSettings);
 end;
 
@@ -260,9 +259,9 @@ begin
   AssertEquals('the twin reported', Files - 1, FHost.Errors.Count);
 end;
 
-{ A name that cannot be a key of gittan.ini: a = splits it, a ; makes
-  it a comment. One with ] is fine, since TIniFile takes a section's
-  name to the last ]. }
+{ A name with what the old ini file could not hold (=, a ; first, ]) loads,
+  its values kept under it; one with a control character, which a file
+  name holds on Unix alone, does not. }
 procedure TExtLoaderTest.TestNameRefused;
 var
   Inf: TGittanExtInfo;
@@ -270,16 +269,26 @@ begin
   Put('a=b.js', '/* @name Eq */ Gittan.alert("eq");');
   Put(';c.js', '/* @name Semi */ Gittan.alert("semi");');
   Put('d]e.js', '/* @name Bracket */ Gittan.alert("bracket");');
+  {$IFDEF UNIX}
+  Put('t'#9'b.js', '/* @name Tab */ Gittan.alert("tab");');
+  {$ENDIF}
   FLoader.Load;
   AssertTrue('= listed', FLoader.FindInfo('a=b', Inf));
-  AssertFalse('= not loaded', Inf.Loaded);
-  AssertTrue('says why: ' + Inf.Error, Pos('Rename the file', Inf.Error) > 0);
+  AssertTrue('= loaded', Inf.Loaded);
   AssertTrue('; listed', FLoader.FindInfo(';c', Inf));
-  AssertFalse('; not loaded', Inf.Loaded);
+  AssertTrue('; loaded', Inf.Loaded);
   AssertTrue('] listed', FLoader.FindInfo('d]e', Inf));
   AssertTrue('] loaded', Inf.Loaded);
-  AssertEquals('only that one ran', 'bracket', FHost.Alerts.CommaText);
-  AssertEquals('two reported', 2, FHost.Errors.Count);
+  {$IFDEF UNIX}
+  AssertTrue('tab listed', FLoader.FindInfo('t'#9'b', Inf));
+  AssertFalse('tab not loaded', Inf.Loaded);
+  AssertTrue('says why: ' + Inf.Error, Pos('Rename the file', Inf.Error) > 0);
+  AssertEquals('one reported', 1, FHost.Errors.Count);
+  {$ENDIF}
+  AssertEquals('the three ran', 3, FHost.Alerts.Count);
+  AssertTrue(FHost.Alerts.IndexOf('eq') >= 0);
+  AssertTrue(FHost.Alerts.IndexOf('semi') >= 0);
+  AssertTrue(FHost.Alerts.IndexOf('bracket') >= 0);
   FSettings.SetExtValue('d]e', 'k', 'v');
   FSettings.SetExtEnabled('d]e', False);
   FSettings.Save;

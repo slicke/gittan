@@ -6,10 +6,10 @@ unit gittan.repolist;
   folders too, and keeps whether it is collapsed. Unlike the recent
   repositories nothing comes in by itself.
 
-  The list lives in a file of its own beside gittan.ini
+  The list lives in a file of its own beside the settings
   (RepoListFileName), JSON, written whole after every change (through a
   temporary file renamed over it), so an arranged list does not depend on
-  Gittan closing normally as the ini does. A file that cannot be read
+  Gittan closing normally as the settings do. A file that cannot be read
   leaves the list empty and is not written over until the list changes.
 
   FindRepositories looks for the repositories in a folder, for Add
@@ -140,7 +140,7 @@ function FindRepositories(const ADir: string; ADepth: integer = FindDepth): TStr
 implementation
 
 uses
-  fpjson, jsonparser;
+  fpjson, jsonparser, gittan.textfile;
 
 function RepoListPath(const APath: string): string;
 begin
@@ -525,50 +525,9 @@ begin
   end;
 end;
 
-{$IFDEF WINDOWS}
-{ Declared here rather than taken from the Windows unit, whose DeleteFile
-  would shadow that of SysUtils. }
-function MoveFileExW(AFrom, ATo: PWideChar; AFlags: longword): LongBool; stdcall;
-  external 'kernel32' name 'MoveFileExW';
-
-const
-  MOVEFILE_REPLACE_EXISTING = 1;
-  MOVEFILE_WRITE_THROUGH = 8;
-{$ENDIF}
-
 function TGittanRepoList.Save: boolean;
-var
-  Temp: string;
-  S: TFileStream;
-  Json: string;
 begin
-  Result := False;
-  if FFileName = '' then
-    Exit;
-  Temp := FFileName + '.tmp';
-  Json := ToJson + LineEnding;
-  try
-    ForceDirectories(ExtractFileDir(FFileName));
-    S := TFileStream.Create(Temp, fmCreate);
-    try
-      S.WriteBuffer(Json[1], Length(Json));
-    finally
-      S.Free;
-    end;
-  except
-    DeleteFile(Temp);
-    Exit;
-  end;
-  {$IFDEF WINDOWS}
-  { RenameFile does not replace a file on Windows; MoveFileEx does, in
-    one step, so the list on disk stays the old one when it fails. }
-  Result := MoveFileExW(PWideChar(UTF8Decode(Temp)), PWideChar(UTF8Decode(FFileName)),
-    MOVEFILE_REPLACE_EXISTING or MOVEFILE_WRITE_THROUGH);
-  {$ELSE}
-  Result := RenameFile(Temp, FFileName);
-  {$ENDIF}
-  if not Result then
-    DeleteFile(Temp);
+  Result := (FFileName <> '') and WriteFileReplacing(FFileName, ToJson + LineEnding);
 end;
 
 end.

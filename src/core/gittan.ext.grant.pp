@@ -11,7 +11,7 @@ uses
 
 {** Decide which permissions are granted for an extension before it is loaded.
 
-    Storage (gittan.settings, section ExtPerm:<id>):
+    Storage (gittan.settings, extensionGrants.<id> in state.json):
       Hash    - SHA-256 of the file contents that was last approved
       Granted - comma-separated promptable groups approved
       Author  - the manifest's author at that approval

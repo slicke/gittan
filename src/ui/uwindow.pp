@@ -715,6 +715,7 @@ begin
     FActive.ShowOpening('');
   { After the repositories, whose opening clears the banners. }
   FActive.CheckGitVersion;
+  FActive.CheckSettingsReset;
 end;
 
 { The window where it was, if that is still on a screen. The sizes are

@@ -3,8 +3,9 @@ unit gittan.textfile;
 {** Small helpers for text as git and the files have it, byte for byte:
   reading a whole file, splitting at LF with the CRs kept, a line
   without its CR, walking the lines of git's output, and undoing the
-  backslash escapes the settings, the symbol index and .po files write.
-  No LCL; tested in tests/testtextfile.pp. }
+  backslash escapes the symbol index and .po files write, and writing a
+  whole file through a temporary one renamed over it. No LCL; tested in
+  tests/testtextfile.pp. }
 
 {$mode objfpc}{$H+}
 
@@ -31,6 +32,14 @@ function NextLine(const S: string; var AStart: integer; out ALine: string): bool
 {** S with the C escapes read: \n, \t, \r, \a, \b, \f, \v and a
   backslash before any other character for that character. }
 function UnescapeC(const S: string): string;
+
+{** Writes AText as the whole of AFileName, creating its folder: into
+  AFileName + '.tmp' first, then renamed over it in one step, so a
+  failed or cut write leaves the old file as it was. AMode is the new
+  file's permissions on Unix (&600 for one with a secret in it), less
+  the umask; Windows has none. False when it could not be written. }
+function WriteFileReplacing(const AFileName: RawByteString; const AText: RawByteString;
+  AMode: integer = &644): boolean;
 
 implementation
 
@@ -120,6 +129,50 @@ begin
     Inc(i);
   end;
   SetLength(Result, n);
+end;
+
+{$IFDEF WINDOWS}
+{ Declared here rather than taken from the Windows unit, whose DeleteFile
+  would shadow that of SysUtils. }
+function MoveFileExW(AFrom, ATo: PWideChar; AFlags: longword): LongBool; stdcall;
+  external 'kernel32' name 'MoveFileExW';
+
+const
+  MOVEFILE_REPLACE_EXISTING = 1;
+  MOVEFILE_WRITE_THROUGH = 8;
+{$ENDIF}
+
+function WriteFileReplacing(const AFileName: RawByteString; const AText: RawByteString;
+  AMode: integer): boolean;
+var
+  Temp: RawByteString;
+  F: THandle;
+begin
+  Result := False;
+  Temp := AFileName + '.tmp';
+  ForceDirectories(ExtractFileDir(AFileName));
+  { A temporary file left by an earlier run would keep its own mode. }
+  DeleteFile(Temp);
+  F := FileCreate(Temp, AMode);
+  if F = THandle(-1) then
+    Exit;
+  Result := (AText = '') or (FileWrite(F, AText[1], Length(AText)) = Length(AText));
+  FileClose(F);
+  if not Result then
+  begin
+    DeleteFile(Temp);
+    Exit;
+  end;
+  {$IFDEF WINDOWS}
+  { RenameFile does not replace a file on Windows; MoveFileEx does, in
+    one step, so the file on disk stays the old one when it fails. }
+  Result := MoveFileExW(PWideChar(UTF8Decode(Temp)), PWideChar(UTF8Decode(AFileName)),
+    MOVEFILE_REPLACE_EXISTING or MOVEFILE_WRITE_THROUGH);
+  {$ELSE}
+  Result := RenameFile(Temp, AFileName);
+  {$ENDIF}
+  if not Result then
+    DeleteFile(Temp);
 end;
 
 end.
