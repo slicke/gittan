@@ -107,6 +107,15 @@ function CommandsFileTemplate: string;
   none; a section without a command never matches. }
 function CommandByKey(const ACommands: TGittanRepoCommands; AKey: char): integer;
 
+{** The group of a command's name, for the page to list the commands
+  that share one under a heading: AGroup is what comes before the first
+  ":" (build for build:run, npm's way of naming), or before the first
+  "-" for a Makefile target (build for build-linux; a target cannot have
+  a colon), and AShort the rest. A name with no separator, or one that
+  starts or ends with it, is a group of its own name with AShort the
+  whole name, so build belongs with build:run and build:test. }
+procedure SplitCommandName(const ACommand: TGittanRepoCommand; out AGroup, AShort: string);
+
 type
 
   { TGittanCommandJob }
@@ -387,6 +396,28 @@ begin
     if (AKey <> #0) and (ACommands[i].Key = AKey) and (ACommands[i].Command <> '') then
       Exit(i);
   Result := -1;
+end;
+
+procedure SplitCommandName(const ACommand: TGittanRepoCommand; out AGroup, AShort: string);
+var
+  Sep: char;
+  p: integer;
+begin
+  if ACommand.Source = csMake then
+    Sep := '-'
+  else
+    Sep := ':';
+  p := Pos(Sep, ACommand.Name);
+  if (p > 1) and (p < Length(ACommand.Name)) then
+  begin
+    AGroup := Copy(ACommand.Name, 1, p - 1);
+    AShort := Copy(ACommand.Name, p + 1, MaxInt);
+  end
+  else
+  begin
+    AGroup := ACommand.Name;
+    AShort := ACommand.Name;
+  end;
 end;
 
 function DiscoverRepoCommands(const ARoot: string): TGittanRepoCommands;

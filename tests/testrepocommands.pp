@@ -37,6 +37,7 @@ type
     procedure TestDiscoverOrphan;
     procedure TestHash;
     procedure TestCommandByKey;
+    procedure TestSplitName;
     procedure TestJobRuns;
     procedure TestJobFails;
     procedure TestJobKill;
@@ -312,6 +313,48 @@ begin
   AssertEquals(1, CommandByKey(C, 'B'));
   AssertEquals(-1, CommandByKey(C, 'A'));
   AssertEquals('no key matches no command', -1, CommandByKey(C, #0));
+end;
+
+procedure TRepoCommandsTest.TestSplitName;
+var
+  C: TGittanRepoCommand;
+  G, S: string;
+begin
+  C := Default(TGittanRepoCommand);
+  C.Source := csPackage;
+  C.Name := 'build:run';
+  SplitCommandName(C, G, S);
+  AssertEquals('build', G);
+  AssertEquals('run', S);
+  C.Name := 'build:run:fast';
+  SplitCommandName(C, G, S);
+  AssertEquals('the first colon splits', 'build', G);
+  AssertEquals('run:fast', S);
+  C.Name := 'build';
+  SplitCommandName(C, G, S);
+  AssertEquals('a plain name is its own group', 'build', G);
+  AssertEquals('build', S);
+  C.Name := ':x';
+  SplitCommandName(C, G, S);
+  AssertEquals('a leading colon is no group', ':x', G);
+  C.Name := 'x:';
+  SplitCommandName(C, G, S);
+  AssertEquals('nor a trailing one', 'x:', G);
+  AssertEquals('x:', S);
+  C.Name := 'build-linux';
+  SplitCommandName(C, G, S);
+  AssertEquals('a dash is no separator for a script', 'build-linux', G);
+  C.Source := csMake;
+  SplitCommandName(C, G, S);
+  AssertEquals('but is for a target', 'build', G);
+  AssertEquals('linux', S);
+  C.Source := csFile;
+  C.Name := 'build-linux';
+  SplitCommandName(C, G, S);
+  AssertEquals('nor for the file''s', 'build-linux', G);
+  C.Name := 'build:linux';
+  SplitCommandName(C, G, S);
+  AssertEquals('build', G);
 end;
 
 procedure TRepoCommandsTest.TestJobRuns;

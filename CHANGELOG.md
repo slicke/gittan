@@ -7,6 +7,7 @@
 - The globe at the right end of the tab bar shows your GitHub picture once GitHub has answered, with your login in its tooltip, "octocat on GitHub", and keeps it between starts. GitHub is asked when Gittan starts, so the picture and the GitHub view's lists are there before the view is first opened.
 
 ### Changed
+- The Commands page groups the commands that share a name: build:run and build:test, as npm scripts are named, are listed under a heading build (with build itself first when there is one), and a Makefile's build-linux and build-win under build; the rest come first, as before. Each tile is one line, the name with its shortcut and the terminal button, and what it runs shows as its tooltip instead of under the name.
 - The row that stands for the hidden lines of a diff is drawn as a row of its own instead of as text the syntax highlighting colored: a fold mark, "116 unchanged lines", the buttons ↓ 20, ↑ 20 and Show all (or Show for a short run), each lit under the mouse with a tooltip saying what it opens, and the name of the function the next change is in at the right end. The names no longer rebuild the view when they are found.
 - Moving on from a large file whose syntax highlighting is still being worked out no longer waits for it to finish: the highlighting is cancelled (EControl and ATSynEdit_Ex updated).
 

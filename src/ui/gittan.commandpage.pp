@@ -2,11 +2,17 @@ unit gittan.commandpage;
 
 {** The Commands page: the repository's own commands as tiles, grouped
   by where they come from (gittan.repocommands): the commands file,
-  the scripts of package.json and the targets of a Makefile. A tile
-  has the command's name, under it what runs dimmed, and at the right
-  its shortcut as a chip; it fills under the mouse and a click raises
-  OnRun with its index. A section of the file that names no script or
-  target is a dimmed tile that says so and leads nowhere. Each group's heading names its file, and the
+  the scripts of package.json and the targets of a Makefile. In each,
+  the commands that share a group (SplitCommandName: build for
+  build:run and build:test, or build-linux for a target) are listed
+  under the group's name, with the name after it on the tile, and the
+  rest come first under no heading. A tile is one line: a run mark,
+  the command's name, its shortcut as a chip and a terminal at the
+  right; what runs (the shell line, or a script's text, with the full
+  name for a tile in a group) is its hint. It fills under the mouse
+  and a click raises OnRun with its index. A section of the file that
+  names no script or target is a dimmed tile whose hint says so, and
+  it leads nowhere. Each source's heading names its file, and the
   first's offers Edit… or Create… (OnEditFile). While the commands
   file is not trusted its commands are dimmed under a card that says
   why, with a Trust Commands button (OnTrust).
@@ -23,8 +29,7 @@ unit gittan.commandpage;
   state's color.
 
   The tiles of every group share one grid, so a group of one has a tile
-  as wide as the others; a tile has a run mark at the left and what
-  runs in CodeFont (the editor's); under the mark a terminal raises
+  as wide as the others; the terminal at a tile's right end raises
   OnRunInTerminal, for a command that keeps running (a dev server, a
   watch), also while another runs here.
 
@@ -67,11 +72,11 @@ type
     { Ticks while a command runs: the time counts and the dot pulses. }
     FTimer: TTimer;
     FConsole: TGittanConsole;
-    FCodeFont: TFont;
     FShortcutPrefix: string;
     FBack, FText, FDim, FHover, FLine, FLink, FOk, FErrorColor, FCard: TColor;
     FLinkRects: array of TRect;
     FLinkUrls: array of string;
+    FLinkHints: array of string;
     FHot: integer;
     FContentHeight, FBoxHeight, FOutputTop: integer;
     { The canvas the content is painted on: the control's in Paint, a
@@ -81,13 +86,15 @@ type
     FOnStop, FOnTrust, FOnEditFile, FOnCopyOutput: TNotifyEvent;
     function LinkAt(X, Y: integer): integer;
     procedure SetHot(AValue: integer);
-    procedure AddLink(const ARect: TRect; const AUrl: string);
+    procedure AddLink(const ARect: TRect; const AUrl: string; const AHint: string = '');
     procedure PaintHeading(var Y: integer; const ATitle, ADetail, AState: string;
       AStateColor: TColor);
     procedure PaintAction(ATop: integer; const ACaption, ALink: string);
     procedure PaintNote(var Y: integer; const AText: string);
     procedure PaintTrustCard(var Y: integer);
     procedure PaintTiles(var Y: integer; ASource: TGittanCommandSource);
+    procedure PaintSubheading(var Y: integer; const ATitle: string);
+    procedure PaintGrid(var Y: integer; const AIndexes: array of integer; AShort: boolean);
     procedure PaintButton(const R: TRect; const ACaption, ALink: string;
       AFill, ATextColor: TColor);
     procedure PaintStateMark(X, Y, ASize: integer; AColor: TColor);
@@ -134,9 +141,6 @@ type
     procedure FitHeight(AMin: integer);
     {** The console the output goes to. }
     property Console: TGittanConsole read FConsole;
-    {** The font of what a tile runs: the editor's. Layout after a
-      change. }
-    property CodeFont: TFont read FCodeFont;
     {** What a shortcut's chip starts with: "⌃⌘" or "Ctrl+Alt+". }
     property ShortcutPrefix: string read FShortcutPrefix write FShortcutPrefix;
     {** Whether a command is running. }
@@ -202,12 +206,15 @@ const
   CopyLink = 'gittan:copy';
   TrustLink = 'gittan:trust';
   EditLink = 'gittan:edit';
+  { A tile that leads nowhere (off, or running): its hint shows, nothing
+    runs. }
+  NoteLink = 'gittan:note';
   Pad = 24;
   Gap = 12;
   TitleFontSize = 20;
   { The tiles: their least width, the gap between them, the padding in
     them, the corner radius; the chip of a shortcut. }
-  TileMinWidth = 240;
+  TileMinWidth = 180;
   TileGap = 10;
   TilePadX = 14;
   TilePadY = 10;
@@ -220,8 +227,7 @@ const
   MarkW = 7;
   MarkH = 9;
   MarkGap = 10;
-  { The terminal under the run mark, which the mark's column is as wide
-    as. }
+  { The terminal at the right end of a tile. }
   TermW = 13;
   TermH = 11;
   CardPad = 14;
@@ -263,7 +269,6 @@ begin
   FConsole := TGittanConsole.Create(Self);
   FConsole.Parent := Self;
   FConsole.Visible := False;
-  FCodeFont := TFont.Create;
   ShowHint := True;
   FTimer := TTimer.Create(Self);
   FTimer.Enabled := False;
@@ -273,7 +278,6 @@ end;
 
 destructor TGittanCommandPage.Destroy;
 begin
-  FCodeFont.Free;
   inherited Destroy;
 end;
 
@@ -398,23 +402,26 @@ begin
   if FHot = AValue then
     Exit;
   FHot := AValue;
-  if AValue < 0 then
+  if (AValue < 0) or (FLinkUrls[AValue] = NoteLink) then
     Cursor := crDefault
   else
     Cursor := crHandPoint;
-  if (AValue >= 0) and (Copy(FLinkUrls[AValue], 1, Length(TerminalLink)) = TerminalLink) then
-    Hint := rsRunInTerminal
+  if AValue >= 0 then
+    Hint := FLinkHints[AValue]
   else
     Hint := '';
   Invalidate;
 end;
 
-procedure TGittanCommandPage.AddLink(const ARect: TRect; const AUrl: string);
+procedure TGittanCommandPage.AddLink(const ARect: TRect; const AUrl: string;
+  const AHint: string);
 begin
   SetLength(FLinkRects, Length(FLinkRects) + 1);
   SetLength(FLinkUrls, Length(FLinkUrls) + 1);
+  SetLength(FLinkHints, Length(FLinkHints) + 1);
   FLinkRects[High(FLinkRects)] := ARect;
   FLinkUrls[High(FLinkUrls)] := AUrl;
+  FLinkHints[High(FLinkHints)] := AHint;
 end;
 
 function TGittanCommandPage.GroupCount(ASource: TGittanCommandSource): integer;
@@ -567,17 +574,24 @@ end;
   the right its shortcut as a chip. The running
   one says so; the file's are dimmed and lead nowhere while the file
   is not trusted; none leads anywhere while one runs. }
+procedure TGittanCommandPage.PaintSubheading(var Y: integer; const ATitle: string);
+begin
+  Inc(Y, Px(Gap));
+  FC.Font := Font;
+  FC.Font.Style := [fsBold];
+  FC.Font.Color := FText;
+  FC.Brush.Style := bsClear;
+  FC.TextOut(Px(Pad), Y, FitTextRight(FC, ATitle, Width - 2 * Px(Pad)));
+  Inc(Y, FC.TextHeight('Xg') + Px(Gap) div 2);
+end;
+
 procedure TGittanCommandPage.PaintTiles(var Y: integer; ASource: TGittanCommandSource);
 var
-  Indexes: array of integer;
-  n, Rows, Cols, TileW, TileH, BodyH, CodeH, i, X, TileY, TextX, NameY, Inner, ChipW,
-  ChipH, Right, MarkX, MarkY, j, k, TermY: integer;
-  Detail, Chip: string;
-  R, ChipR: TRect;
-  Off, Leads, Hot, TermHot, Busy: boolean;
-  TermR: TRect;
-  Cmd: TGittanRepoCommand;
-  StateColor: TColor;
+  Indexes, Plain, Members: array of integer;
+  Groups: array of string;
+  Counts: array of integer;
+  i, j, k, g: integer;
+  Group, Short: string;
 begin
   Indexes := nil;
   for i := 0 to High(FCommands) do
@@ -586,11 +600,12 @@ begin
       SetLength(Indexes, Length(Indexes) + 1);
       Indexes[High(Indexes)] := i;
     end;
-  n := Length(Indexes);
-  if n = 0 then
+  if Length(Indexes) = 0 then
     Exit;
-  { By name, whatever the order of the file they come from. }
-  for i := 1 to n - 1 do
+  { By name, whatever the order of the file they come from; a group's
+    members are then together, its bare name (build before build:run)
+    first. }
+  for i := 1 to High(Indexes) do
   begin
     j := i;
     while (j > 0) and (CompareText(FCommands[Indexes[j - 1]].Name,
@@ -602,39 +617,138 @@ begin
       Dec(j);
     end;
   end;
+  { The groups, in the order the names give, with how many each has. }
+  Groups := nil;
+  Counts := nil;
+  for i := 0 to High(Indexes) do
+  begin
+    SplitCommandName(FCommands[Indexes[i]], Group, Short);
+    g := -1;
+    for j := 0 to High(Groups) do
+      if CompareText(Groups[j], Group) = 0 then
+        g := j;
+    if g < 0 then
+    begin
+      SetLength(Groups, Length(Groups) + 1);
+      SetLength(Counts, Length(Counts) + 1);
+      g := High(Groups);
+      Groups[g] := Group;
+    end;
+    Inc(Counts[g]);
+  end;
+  { The commands of no group (a group of one) first, under no heading,
+    then each group with its name over it. }
+  Plain := nil;
+  for g := 0 to High(Groups) do
+    if Counts[g] < 2 then
+      for i := 0 to High(Indexes) do
+      begin
+        SplitCommandName(FCommands[Indexes[i]], Group, Short);
+        if CompareText(Group, Groups[g]) = 0 then
+        begin
+          SetLength(Plain, Length(Plain) + 1);
+          Plain[High(Plain)] := Indexes[i];
+        end;
+      end;
+  { Back in name order, as the groups' order is the first member's. }
+  for i := 1 to High(Plain) do
+  begin
+    j := i;
+    while (j > 0) and (CompareText(FCommands[Plain[j - 1]].Name,
+        FCommands[Plain[j]].Name) > 0) do
+    begin
+      k := Plain[j];
+      Plain[j] := Plain[j - 1];
+      Plain[j - 1] := k;
+      Dec(j);
+    end;
+  end;
+  if Length(Plain) > 0 then
+    PaintGrid(Y, Plain, False);
+  for g := 0 to High(Groups) do
+    if Counts[g] >= 2 then
+    begin
+      Members := nil;
+      for i := 0 to High(Indexes) do
+      begin
+        SplitCommandName(FCommands[Indexes[i]], Group, Short);
+        if CompareText(Group, Groups[g]) = 0 then
+        begin
+          SetLength(Members, Length(Members) + 1);
+          Members[High(Members)] := Indexes[i];
+        end;
+      end;
+      PaintSubheading(Y, Groups[g]);
+      PaintGrid(Y, Members, True);
+    end;
+end;
+
+procedure TGittanCommandPage.PaintGrid(var Y: integer; const AIndexes: array of integer;
+  AShort: boolean);
+var
+  n, Rows, Cols, TileW, TileH, BodyH, i, X, TileY, TextX, NameY, ChipW, ChipH, Right,
+  MarkX, MarkY, TermY: integer;
+  Detail, Chip, Group, Shown, Tip: string;
+  R, ChipR, TermR: TRect;
+  Off, Leads, Hot, TermHot, Busy: boolean;
+  Cmd: TGittanRepoCommand;
+  StateColor: TColor;
+begin
+  n := Length(AIndexes);
+  if n = 0 then
+    Exit;
   Cols := ColumnCount;
   Rows := (n + Cols - 1) div Cols;
   TileW := (Width - 2 * Px(Pad) - (Cols - 1) * Px(TileGap)) div Cols;
   FC.Font := Font;
-  BodyH := FC.TextHeight('Xg');
-  FC.Font := FCodeFont;
-  CodeH := FC.TextHeight('Xg');
-  TileH := 2 * Px(TilePadY) + BodyH + Px(4) + CodeH;
+  BodyH := Max(FC.TextHeight('Xg'), Px(TermH));
+  TileH := 2 * Px(TilePadY) + BodyH;
   for i := 0 to n - 1 do
   begin
-    Cmd := FCommands[Indexes[i]];
+    Cmd := FCommands[AIndexes[i]];
+    SplitCommandName(Cmd, Group, Shown);
+    if not AShort then
+      Shown := Cmd.Name;
     X := Px(Pad) + (i mod Cols) * (TileW + Px(TileGap));
     TileY := Y + (i div Cols) * (TileH + Px(TileGap));
     R := Rect(X, TileY, X + TileW, TileY + TileH);
+    NameY := TileY + Px(TilePadY);
+    Right := X + TileW - Px(TilePadX);
     { The file's are off while it is not trusted, and a section that
       names no script or target always. }
-    Off := ((ASource = csFile) and not FTrusted) or (Cmd.Command = '');
+    Off := ((Cmd.Source = csFile) and not FTrusted) or (Cmd.Command = '');
     Leads := not Off and not FRunning and Assigned(FOnRun);
     Busy := FRunning and (Cmd.Name = FRunName) and (Cmd.Source = FRunSource);
+    { What runs is the tile's hint: the shell line, or a script's text;
+      a section that names nothing says so. }
+    if Cmd.Command = '' then
+      Tip := Format(rsNoSuchTarget, [Cmd.Name])
+    else if Cmd.Detail <> '' then
+      Tip := Cmd.Detail
+    else
+      Tip := Cmd.Command;
+    if Cmd.Terminal then
+      Tip := Tip + ' · ' + rsTerminalTile;
+    if AShort then
+      Tip := Cmd.Name + LineEnding + Tip;
+
     { The terminal's link goes first, as LinkAt takes the first that
-      holds the point; it leads while another command runs here too. }
-    TermY := (TileY + Px(TilePadY)) + BodyH + Px(4) + (CodeH - Px(TermH)) div 2;
-    TermR := Rect(X + Px(TilePadX) - Px(4), TermY - Px(4), X + Px(TilePadX) + Px(TermW) + Px(4),
-      TermY + Px(TermH) + Px(4));
+      holds the point; it leads while another command runs here too.
+      It sits at the right end, before the chip. }
     TermHot := False;
-    if not Off and Assigned(FOnRunInTerminal) then
+    TermY := NameY + (BodyH - Px(TermH)) div 2;
+    TermR := Rect(Right - Px(TermW) - Px(4), TermY - Px(4), Right + Px(4),
+      TermY + Px(TermH) + Px(4));
+    if not Off and Assigned(FOnRunInTerminal) and not Busy then
     begin
       TermHot := FHot = Length(FLinkRects);
-      AddLink(TermR, TerminalLink + IntToStr(Indexes[i]));
+      AddLink(TermR, TerminalLink + IntToStr(AIndexes[i]), rsRunInTerminal);
     end;
     Hot := Leads and (FHot = Length(FLinkRects));
     if Leads then
-      AddLink(R, RunLink + IntToStr(Indexes[i]));
+      AddLink(R, RunLink + IntToStr(AIndexes[i]), Tip)
+    else
+      AddLink(R, NoteLink, Tip);
 
     { The tile, with a hairline round it; the running one's in the
       link color. }
@@ -651,10 +765,10 @@ begin
       FC.Brush.Color := FCard;
     FC.RoundRect(R, Px(TileRadius), Px(TileRadius));
     FC.Brush.Style := bsClear;
-    NameY := TileY + Px(TilePadY);
 
     { The run mark, in the link color under the mouse and while it
-      runs, faint while the tile leads nowhere. }
+      runs, in the last run's state color, faint while the tile leads
+      nowhere. }
     MarkY := NameY + (BodyH - Px(MarkH)) div 2;
     TextX := X + Px(TilePadX);
     FC.Pen.Style := psClear;
@@ -671,45 +785,59 @@ begin
       FC.Brush.Color := MixColor(FDim, FCard, 0.5)
     else
       FC.Brush.Color := FDim;
-    MarkX := TextX + (Px(TermW) - Px(MarkW)) div 2;
+    MarkX := TextX;
     FC.Polygon([Point(MarkX, MarkY), Point(MarkX + Px(MarkW), MarkY + Px(MarkH) div 2),
       Point(MarkX, MarkY + Px(MarkH))]);
     FC.Pen.Style := psSolid;
     FC.Brush.Style := bsClear;
-    { The terminal under it, in the link color under the mouse. }
-    if TermHot then
-      PaintTerminalIcon(TextX, TermY, Px(TermW), FLink)
-    else if Off then
-      PaintTerminalIcon(TextX, TermY, Px(TermW), MixColor(FDim, FCard, 0.5))
-    else
-      PaintTerminalIcon(TextX, TermY, Px(TermW), FDim);
-    Inc(TextX, Px(TermW) + Px(MarkGap));
-    Right := X + TileW - Px(TilePadX);
+    Inc(TextX, Px(MarkW) + Px(MarkGap));
 
-    { The chip of the shortcut, on the name's line. }
-    if Cmd.Key <> #0 then
+    if Busy then
     begin
-      Chip := FShortcutPrefix + Cmd.Key;
+      { The time so far, where the chip would be. }
       FC.Font := Font;
-      FC.Font.Size := Max(7, Font.Size - 2);
-      if Font.Size <= 0 then
-        FC.Font.Size := 9;
-      ChipW := FC.TextWidth(Chip) + 2 * Px(ChipPadX);
-      ChipH := FC.TextHeight(Chip) + 2 * Px(ChipPadY);
-      ChipR := Rect(Right - ChipW, NameY + (BodyH - ChipH) div 2, Right,
-        NameY + (BodyH - ChipH) div 2 + ChipH);
-      FC.Pen.Style := psClear;
-      FC.Brush.Style := bsSolid;
-      if Hot then
-        FC.Brush.Color := FCard
-      else
-        FC.Brush.Color := FHover;
-      FC.RoundRect(ChipR, Px(ChipRadius), Px(ChipRadius));
-      FC.Pen.Style := psSolid;
-      FC.Brush.Style := bsClear;
-      FC.Font.Color := FDim;
-      FC.TextOut(ChipR.Left + Px(ChipPadX), ChipR.Top + Px(ChipPadY), Chip);
-      Right := ChipR.Left - Px(Gap) div 2;
+      FC.Font.Color := FLink;
+      Detail := Format(rsRunningTile, [FormatElapsed(GetTickCount64 - FRunStart)]);
+      FC.TextOut(Right - FC.TextWidth(Detail), NameY + (BodyH - FC.TextHeight(Detail)) div 2,
+        Detail);
+      Right := Right - FC.TextWidth(Detail) - Px(Gap) div 2;
+    end
+    else
+    begin
+      { The terminal, in the link color under the mouse. }
+      if not Off and Assigned(FOnRunInTerminal) then
+      begin
+        if TermHot then
+          PaintTerminalIcon(Right - Px(TermW), TermY, Px(TermW), FLink)
+        else
+          PaintTerminalIcon(Right - Px(TermW), TermY, Px(TermW), FDim);
+        Right := Right - Px(TermW) - Px(Gap);
+      end;
+      { The chip of the shortcut. }
+      if Cmd.Key <> #0 then
+      begin
+        Chip := FShortcutPrefix + Cmd.Key;
+        FC.Font := Font;
+        FC.Font.Size := Max(7, Font.Size - 2);
+        if Font.Size <= 0 then
+          FC.Font.Size := 9;
+        ChipW := FC.TextWidth(Chip) + 2 * Px(ChipPadX);
+        ChipH := FC.TextHeight(Chip) + 2 * Px(ChipPadY);
+        ChipR := Rect(Right - ChipW, NameY + (BodyH - ChipH) div 2, Right,
+          NameY + (BodyH - ChipH) div 2 + ChipH);
+        FC.Pen.Style := psClear;
+        FC.Brush.Style := bsSolid;
+        if Hot or TermHot then
+          FC.Brush.Color := FCard
+        else
+          FC.Brush.Color := FHover;
+        FC.RoundRect(ChipR, Px(ChipRadius), Px(ChipRadius));
+        FC.Pen.Style := psSolid;
+        FC.Brush.Style := bsClear;
+        FC.Font.Color := FDim;
+        FC.TextOut(ChipR.Left + Px(ChipPadX), ChipR.Top + Px(ChipPadY), Chip);
+        Right := ChipR.Left - Px(Gap) div 2;
+      end;
     end;
 
     FC.Font := Font;
@@ -719,35 +847,8 @@ begin
       FC.Font.Color := FDim
     else
       FC.Font.Color := FText;
-    FC.TextOut(TextX, NameY, FitTextRight(FC, Cmd.Name, Right - TextX));
-
-    { What runs, in the code font; a target's is make and its name. }
-    Inner := X + TileW - Px(TilePadX) - TextX;
-    if Busy then
-    begin
-      FC.Font := Font;
-      Detail := Format(rsRunningTile, [FormatElapsed(GetTickCount64 - FRunStart)]);
-      FC.Font.Color := FLink;
-    end
-    else
-    begin
-      FC.Font := FCodeFont;
-      if Cmd.Command = '' then
-      begin
-        FC.Font := Font;
-        Detail := Format(rsNoSuchTarget, [Cmd.Name]);
-      end
-      else if Cmd.Detail <> '' then
-        Detail := Cmd.Detail
-      else
-        Detail := Cmd.Command;
-      if Cmd.Terminal then
-        Detail := Detail + ' · ' + rsTerminalTile;
-      FC.Font.Color := FDim;
-    end;
-    FC.Brush.Style := bsClear;
-    FC.TextOut(TextX, NameY + BodyH + Px(4) + (CodeH - FC.TextHeight('Xg')) div 2,
-      FitTextRight(FC, Detail, Inner));
+    FC.TextOut(TextX, NameY + (BodyH - FC.TextHeight('Xg')) div 2,
+      FitTextRight(FC, Shown, Right - TextX));
   end;
   Inc(Y, Rows * TileH + (Rows - 1) * Px(TileGap));
 end;
@@ -1048,6 +1149,7 @@ begin
   FC.FillRect(Rect(0, 0, Width, Height));
   FLinkRects := nil;
   FLinkUrls := nil;
+  FLinkHints := nil;
   FC.Font := Font;
   FC.Brush.Style := bsClear;
   TextH := FC.TextHeight('Xg');
