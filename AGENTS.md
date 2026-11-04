@@ -68,6 +68,7 @@ Details of each area live in `spec/`. Read the file that matches what you are ab
 - [spec/ai.md](spec/ai.md): AI features through Claude Code, GitHub Copilot or an OpenAI-compatible API. Read when touching `gittan.ai`, `gittan.agentcli`, `gittan.openai`, `umain.ai.inc`, the AI review's cards in the change view, the AI page of the settings, AI in the Commit header, Commit > Write Commit Message, `RunAgentCli` or `ChatComplete`.
 - [spec/extensions.md](spec/extensions.md): Extensions. Read when touching `gittan.ext.*`, `gittan.exthost`, `umain.ext.inc`, the Extensions menu or settings page, `externals/quickjs/`, the libraries beside the executable, or an event the extensions get.
 - [spec/file-actions.md](spec/file-actions.md): Discard, leave out, keep, revert, rename, remove, clean and context menus. Read when touching `gittan.discard`, `gittan.keep`, `gittan.leaveout`, `umain.discard.inc`, `umain.leaveout.inc`, `umain.revert.inc`, `umain.movefiles.inc`, `umain.clean.inc`, the file and editor popup menus.
+- [spec/absorb.md](spec/absorb.md): Putting changes into the commits they belong to (what git absorb does). Read when touching `gittan.absorb`, `gittan.absorbdlg`, `umain.absorb.inc`, the pill Put into Its Commit, Changes > Put Change into Its Commit... or Commit > Put Changes into Their Commits....
 
 ## Editing Guidance
 - Keep changes focused and minimal. Avoid unrelated refactors or formatting-only edits.

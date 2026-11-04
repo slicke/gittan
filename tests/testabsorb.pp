@@ -1,0 +1,392 @@
+unit testabsorb;
+
+{** Tests of gittan.absorb: the old lines a block stands for, and
+  against a real repository the base of the branch (with and without an
+  upstream), the target of every block (a changed line, an addition
+  between lines of one commit, a line older than the branch, a new
+  file), and the run that puts them into their commits, all of them or
+  some, with what is left staying in the work tree. }
+
+{$mode objfpc}{$H+}
+
+interface
+
+uses
+  Classes, SysUtils, fpcunit, testregistry, gittan.git, gittan.absorb, testhelpers;
+
+type
+  TAbsorbTest = class(TTestCase)
+  private
+    FDir: string;
+    FRepo: TGittanRepo;
+    procedure Git(const AArgs: array of string);
+    function GitOut(const AArgs: array of string): string;
+    procedure WriteLines(const AName: string; const ALines: array of string);
+    function ReadLines(const AName: string): string;
+    procedure Commit(const AMessage: string);
+    procedure MakeBranch;
+    procedure ChangeWorkTree;
+    function Build(APlan: TGittanAbsorbPlan; const APaths: array of string): string;
+    function Subjects: string;
+  protected
+    procedure SetUp; override;
+    procedure TearDown; override;
+  published
+    procedure TestBlockOldLines;
+    procedure TestBaseRoot;
+    procedure TestBaseUpstream;
+    procedure TestBuild;
+    procedure TestRunAll;
+    procedure TestRunSome;
+    procedure TestRunNothing;
+  end;
+
+implementation
+
+uses
+  gittan.keep;
+
+procedure TAbsorbTest.SetUp;
+begin
+  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'gittan-absorb-' +
+    IntToStr(GetProcessID) + '-' + IntToStr(Random(MaxInt));
+  ForceDirectories(FDir);
+  Git(['init', '-q', '-b', 'main']);
+  WriteLines('a.txt', ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight',
+    'nine', 'ten']);
+  WriteLines('b.txt', ['alpha', 'beta', 'gamma']);
+  Commit('Base');
+  FRepo := TGittanRepo.Create;
+  AssertTrue(FRepo.Open(FDir));
+end;
+
+procedure TAbsorbTest.TearDown;
+begin
+  FRepo.Free;
+  RemoveTree(FDir);
+end;
+
+procedure TAbsorbTest.Git(const AArgs: array of string);
+var
+  Output, Err: string;
+begin
+  if not RunGitIn(FDir, AArgs, Output, Err) then
+    Fail('git ' + AArgs[0] + ' failed: ' + Err);
+end;
+
+function TAbsorbTest.GitOut(const AArgs: array of string): string;
+var
+  Err: string;
+begin
+  if not RunGitIn(FDir, AArgs, Result, Err) then
+    Fail('git ' + AArgs[0] + ' failed: ' + Err);
+  Result := Trim(Result);
+end;
+
+procedure TAbsorbTest.WriteLines(const AName: string; const ALines: array of string);
+var
+  Lines: TStringList;
+  s: string;
+begin
+  Lines := TStringList.Create;
+  try
+    for s in ALines do
+      Lines.Add(s);
+    Lines.SaveToFile(IncludeTrailingPathDelimiter(FDir) + AName);
+  finally
+    Lines.Free;
+  end;
+end;
+
+{ The file's lines joined with '|'. }
+function TAbsorbTest.ReadLines(const AName: string): string;
+var
+  Lines: TStringList;
+  i: integer;
+begin
+  Lines := TStringList.Create;
+  try
+    Lines.LoadFromFile(IncludeTrailingPathDelimiter(FDir) + AName);
+    Result := '';
+    for i := 0 to Lines.Count - 1 do
+    begin
+      if i > 0 then
+        Result := Result + '|';
+      Result := Result + Lines[i];
+    end;
+  finally
+    Lines.Free;
+  end;
+end;
+
+procedure TAbsorbTest.Commit(const AMessage: string);
+begin
+  Git(['add', '-A']);
+  Git(['commit', '-q', '-m', AMessage]);
+end;
+
+{ Three commits on top of Base: "Change two" writes line 2 of a.txt,
+  "Change five" lines 5 and 6, "Change beta" line 2 of b.txt. }
+procedure TAbsorbTest.MakeBranch;
+begin
+  WriteLines('a.txt', ['one', 'two!', 'three', 'four', 'five', 'six', 'seven', 'eight',
+    'nine', 'ten']);
+  Commit('Change two');
+  WriteLines('a.txt', ['one', 'two!', 'three', 'four', 'five!', 'six!', 'seven', 'eight',
+    'nine', 'ten']);
+  Commit('Change five');
+  WriteLines('b.txt', ['alpha', 'beta!', 'gamma']);
+  Commit('Change beta');
+end;
+
+{ The work tree: line 2 of a.txt again (Change two's), a line between
+  5 and 6 (between Change five's), line 10 (Base's), line 2 of b.txt
+  (Change beta's) and a new file. }
+procedure TAbsorbTest.ChangeWorkTree;
+begin
+  WriteLines('a.txt', ['one', 'two!!', 'three', 'four', 'five!', 'five-b', 'six!', 'seven',
+    'eight', 'nine', 'ten!']);
+  WriteLines('b.txt', ['alpha', 'beta!!', 'gamma']);
+  WriteLines('c.txt', ['new']);
+end;
+
+{ Builds the plan for APaths; the error, '' when it went through. }
+function TAbsorbTest.Build(APlan: TGittanAbsorbPlan; const APaths: array of string): string;
+var
+  Paths: TStringList;
+  s: string;
+begin
+  Paths := TStringList.Create;
+  try
+    for s in APaths do
+      Paths.Add(s);
+    if APlan.Build(FRepo, Paths, Result) then
+      Result := '';
+  finally
+    Paths.Free;
+  end;
+end;
+
+{ The subjects of the branch, newest first, joined with '|'. }
+function TAbsorbTest.Subjects: string;
+begin
+  Result := StringReplace(GitOut(['log', '--format=%s']), #10, '|', [rfReplaceAll]);
+end;
+
+procedure TAbsorbTest.TestBlockOldLines;
+var
+  Lines: TStringList;
+  AFrom, ATo, ABefore, AAfter: integer;
+begin
+  Lines := TStringList.Create;
+  try
+    Lines.Add(' one');
+    Lines.Add('-two');
+    Lines.Add('-three');
+    Lines.Add('+two!');
+    Lines.Add(' four');
+    Lines.Add('+four-b');
+    Lines.Add(' five');
+    Lines.Add('-six');
+    { Lines 2 and 3 deleted, between 1 and 4. }
+    BlockOldLines(Lines, 1, AFrom, ATo, ABefore, AAfter);
+    AssertEquals('from', 2, AFrom);
+    AssertEquals('to', 3, ATo);
+    AssertEquals('before', 1, ABefore);
+    AssertEquals('after', 4, AAfter);
+    { An addition between 4 and 5. }
+    BlockOldLines(Lines, 5, AFrom, ATo, ABefore, AAfter);
+    AssertTrue('none deleted', ATo < AFrom);
+    AssertEquals('before', 4, ABefore);
+    AssertEquals('after', 5, AAfter);
+    { Line 6 deleted at the end of the file. }
+    BlockOldLines(Lines, 7, AFrom, ATo, ABefore, AAfter);
+    AssertEquals('from', 6, AFrom);
+    AssertEquals('to', 6, ATo);
+    AssertEquals('before', 5, ABefore);
+    AssertEquals('after', 0, AAfter);
+    { An addition at the start of the file. }
+    Lines.Clear;
+    Lines.Add('+zero');
+    Lines.Add(' one');
+    BlockOldLines(Lines, 0, AFrom, ATo, ABefore, AAfter);
+    AssertEquals('before', 0, ABefore);
+    AssertEquals('after', 1, AAfter);
+  finally
+    Lines.Free;
+  end;
+end;
+
+{ Without an upstream or a default branch the branch reaches back to
+  the root; with only the root commit there is nothing to put changes
+  into. }
+procedure TAbsorbTest.TestBaseRoot;
+var
+  Onto, Err: string;
+begin
+  AssertFalse('root alone', AbsorbBase(FRepo, Onto, Err));
+  AssertEquals(rsAbsorbNoCommits, Err);
+  MakeBranch;
+  AssertTrue('base: ' + Err, AbsorbBase(FRepo, Onto, Err));
+  AssertEquals('the root', GitOut(['rev-parse', 'HEAD~3']), Onto);
+end;
+
+{ With an upstream the branch's commits are those since the merge base
+  with it, so pushed commits are never rewritten. }
+procedure TAbsorbTest.TestBaseUpstream;
+var
+  Origin, Onto, Err: string;
+begin
+  Origin := FDir + '-origin';
+  Git(['init', '-q', '--bare', Origin]);
+  try
+    Git(['remote', 'add', 'origin', Origin]);
+    Git(['push', '-q', '-u', 'origin', 'main']);
+    MakeBranch;
+    AssertTrue('base: ' + Err, AbsorbBase(FRepo, Onto, Err));
+    AssertEquals('the pushed commit', GitOut(['rev-parse', 'origin/main']), Onto);
+    Git(['push', '-q']);
+    AssertFalse('all pushed', AbsorbBase(FRepo, Onto, Err));
+    AssertEquals(rsAbsorbNoCommits, Err);
+  finally
+    RemoveTree(Origin);
+  end;
+end;
+
+procedure TAbsorbTest.TestBuild;
+var
+  Plan: TGittanAbsorbPlan;
+  Pair: TGittanKeep;
+begin
+  MakeBranch;
+  ChangeWorkTree;
+  Plan := TGittanAbsorbPlan.Create;
+  try
+    AssertEquals('', Build(Plan, ['a.txt', 'b.txt', 'c.txt']));
+    AssertEquals('steps', 3, Length(Plan.Steps));
+    AssertEquals('Change two', Plan.Steps[0].Subject);
+    AssertEquals('pushed', 0, Plan.Pushed);
+    AssertEquals('hunks', 5, Length(Plan.Hunks));
+    AssertEquals('a.txt', Plan.Hunks[0].Path);
+    AssertEquals('line 2', 2, Plan.Hunks[0].Line);
+    AssertEquals('two!! goes to Change two', 0, Plan.Hunks[0].Target);
+    AssertEquals('five-b goes to Change five', 1, Plan.Hunks[1].Target);
+    AssertEquals('ten! is older', -1, Plan.Hunks[2].Target);
+    AssertEquals(rsAbsorbOlder, Plan.Hunks[2].Reason);
+    AssertEquals('b.txt', Plan.Hunks[3].Path);
+    AssertEquals('beta!! goes to Change beta', 2, Plan.Hunks[3].Target);
+    AssertEquals('c.txt', Plan.Hunks[4].Path);
+    AssertEquals('new file', -1, Plan.Hunks[4].Target);
+    AssertEquals(rsAbsorbNewFile, Plan.Hunks[4].Reason);
+    AssertEquals('placeable', 3, Plan.Placeable);
+    AssertNotNull('diff kept', Plan.Diff('a.txt'));
+    Pair.HasOld := True;
+    Pair.HasNew := True;
+    Pair.Old := 'two!';
+    Pair.New := 'two!!';
+    Pair.Line := 2;
+    AssertEquals('found by its pair', 0, Plan.HunkOf('a.txt', Pair));
+    Pair.Line := 3;
+    AssertEquals('not at another line', -1, Plan.HunkOf('a.txt', Pair));
+  finally
+    Plan.Free;
+  end;
+end;
+
+{ Every placeable hunk into its commit: three fixup commits folded in,
+  the branch the same three commits with the changes in them, and the
+  older line and the new file still in the work tree. }
+procedure TAbsorbTest.TestRunAll;
+var
+  Plan: TGittanAbsorbPlan;
+  Commits: integer;
+  Conflicts, Stopped: boolean;
+  Err: string;
+begin
+  MakeBranch;
+  ChangeWorkTree;
+  Plan := TGittanAbsorbPlan.Create;
+  try
+    AssertEquals('', Build(Plan, ['a.txt', 'b.txt', 'c.txt']));
+    AssertTrue('run: ' + Err, AbsorbRun(FRepo, Plan, [True, True, True, True, True], [],
+      Commits, Conflicts, Stopped, Err));
+    AssertEquals('fixups', 3, Commits);
+    AssertFalse(Conflicts);
+    AssertFalse(Stopped);
+    AssertEquals('Change beta|Change five|Change two|Base', Subjects);
+    AssertEquals('Change two holds two!!', 'one|two!!|three|four|five|six|seven|eight|nine|ten',
+      StringReplace(GitOut(['show', 'HEAD~2:a.txt']), #10, '|', [rfReplaceAll]));
+    AssertEquals('Change five holds five-b',
+      'one|two!!|three|four|five!|five-b|six!|seven|eight|nine|ten',
+      StringReplace(GitOut(['show', 'HEAD~1:a.txt']), #10, '|', [rfReplaceAll]));
+    AssertEquals('Change beta holds beta!!', 'alpha|beta!!|gamma',
+      StringReplace(GitOut(['show', 'HEAD:b.txt']), #10, '|', [rfReplaceAll]));
+    AssertEquals('the rest stays in the work tree', 'M a.txt|?? c.txt',
+      StringReplace(GitOut(['status', '--porcelain']), #10, '|', [rfReplaceAll]));
+    AssertEquals('one|two!!|three|four|five!|five-b|six!|seven|eight|nine|ten!',
+      ReadLines('a.txt'));
+    AssertEquals('', GitOut(['stash', 'list']));
+  finally
+    Plan.Free;
+  end;
+end;
+
+{ Only b.txt's hunk chosen: one fixup, a.txt's changes all left in the
+  work tree. }
+procedure TAbsorbTest.TestRunSome;
+var
+  Plan: TGittanAbsorbPlan;
+  Commits: integer;
+  Conflicts, Stopped: boolean;
+  Err: string;
+begin
+  MakeBranch;
+  ChangeWorkTree;
+  Plan := TGittanAbsorbPlan.Create;
+  try
+    AssertEquals('', Build(Plan, ['a.txt', 'b.txt', 'c.txt']));
+    AssertTrue('run: ' + Err, AbsorbRun(FRepo, Plan, [False, False, False, True, True], [],
+      Commits, Conflicts, Stopped, Err));
+    AssertEquals('fixups', 1, Commits);
+    AssertEquals('Change beta|Change five|Change two|Base', Subjects);
+    AssertEquals('alpha|beta!!|gamma',
+      StringReplace(GitOut(['show', 'HEAD:b.txt']), #10, '|', [rfReplaceAll]));
+    AssertEquals('one|two!|three|four|five!|six!|seven|eight|nine|ten',
+      StringReplace(GitOut(['show', 'HEAD:a.txt']), #10, '|', [rfReplaceAll]));
+    AssertEquals('M a.txt|?? c.txt',
+      StringReplace(GitOut(['status', '--porcelain']), #10, '|', [rfReplaceAll]));
+    AssertEquals('one|two!!|three|four|five!|five-b|six!|seven|eight|nine|ten!',
+      ReadLines('a.txt'));
+  finally
+    Plan.Free;
+  end;
+end;
+
+{ Nothing chosen, or only hunks without a target: no commit, the
+  branch untouched. }
+procedure TAbsorbTest.TestRunNothing;
+var
+  Plan: TGittanAbsorbPlan;
+  Commits: integer;
+  Conflicts, Stopped: boolean;
+  Err: string;
+begin
+  MakeBranch;
+  ChangeWorkTree;
+  Plan := TGittanAbsorbPlan.Create;
+  try
+    AssertEquals('', Build(Plan, ['a.txt', 'c.txt']));
+    AssertFalse(AbsorbRun(FRepo, Plan, [False, False, True, True], [], Commits, Conflicts,
+      Stopped, Err));
+    AssertEquals(0, Commits);
+    AssertEquals(rsAbsorbNothingChosen, Err);
+    AssertEquals('Change beta|Change five|Change two|Base', Subjects);
+  finally
+    Plan.Free;
+  end;
+end;
+
+initialization
+  RegisterTest(TAbsorbTest);
+
+end.

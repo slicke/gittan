@@ -29,10 +29,10 @@ uses
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.textfile, gittan.sectionheader, gittan.hintbox,
   gittan.forge, gittan.lfslocks, gittan.askdlg,
-  gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
+  gittan.discard, gittan.keep, gittan.leaveout, gittan.absorb, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   fpjson, gittan.ext.engine, gittan.ext.registry, gittan.ext.api, gittan.ext.loader,
   gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
-  gittan.rebase, gittan.worktrees, gittan.gitflow, gittan.repolist, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
+  gittan.rebase, gittan.worktrees, gittan.gitflow, gittan.repolist, gittan.rebasedlg, gittan.cleandlg, gittan.absorbdlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
   gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, gittan.merge, gittan.mergeview,
   gittan.notedlg, gittan.issuelinks,
   ATSynEdit_Gaps, md5;
@@ -331,6 +331,8 @@ type
       (pruned of what has been committed since, PrunePlan) and the list
       it is picked from. }
     FSplitItem: TMenuItem;
+    { Commit > Put Changes into Their Commits... (umain.absorb.inc). }
+    FAbsorbItem: TMenuItem;
     FSplitJob: TGittanSplitJob;
     FCommitPlan: TGittanCommitPlan;
     FPlanAgent: string;
@@ -667,8 +669,12 @@ type
     FLeftOutOf: TIntegerDynArray;
     FHeaderInclude: integer;
     FPillChoose: boolean;
+    { The pills have Put into Its Commit too (umain.absorb.inc). }
+    FPillAbsorb: boolean;
     FDiscards: array of TGittanDiscard;
     FDiscardItem, FUndoDiscardItem, FLeaveOutItem: TMenuItem;
+    { Changes > Put Change into Its Commit... (umain.absorb.inc). }
+    FAbsorbChangeItem: TMenuItem;
     { Resolving one conflict at a time (umain.conflicts.inc): the diff
       line of each conflict's "<<<<<<<" (set by ShowChanges with the
       roles) and its row in the view (found with the block rows), which
@@ -1515,6 +1521,15 @@ type
       out AError: string): boolean;
     procedure MenuLeaveOutClick(Sender: TObject);
     procedure UpdateLeaveOutItem;
+    { umain.absorb.inc }
+    function CanAbsorb: boolean;
+    function AbsorbPlanFor(APaths: TStrings): TGittanAbsorbPlan;
+    function AbsorbPushedNote(APlan: TGittanAbsorbPlan): string;
+    procedure AbsorbBlockAt(ABlock: integer);
+    procedure MenuAbsorbClick(Sender: TObject);
+    procedure MenuAbsorbChangeClick(Sender: TObject);
+    procedure RunAbsorb(APlan: TGittanAbsorbPlan; const AChosen: TBooleanDynArray);
+    procedure UpdateAbsorbItems;
     procedure DiscardBlockAt(ABlock: integer);
     procedure UpdateDiscardItems;
     procedure NoteDiscard(const ABlock: TGittanDiscard);
@@ -2748,6 +2763,7 @@ resourcestring
   rsResolvedAILast = '%s resolved the last conflict in %s, now marked resolved: %s';
   rsResolvedAIUndo = 'Changes > Undo Discard puts it back';
   rsSplitMenu = 'Split Changes into Commits...';
+  rsAbsorbMenu = 'Put Changes into Their Commits...';
   rsSplitStopMenu = 'Stop Splitting into Commits';
   rsSplitting = '%s is splitting the changes into commits...';
   rsSplitFailed = '%s could not split the changes';
@@ -3540,6 +3556,19 @@ resourcestring
   rsKeptBlock = 'Marked the change at line %d of %s reviewed';
   rsUnkept = 'Shows the change at line %d of %s again';
   rsUnkeptAll = 'Shows every change of %s again';
+  rsAbsorbItem = 'Put Change into Its Commit...';
+  rsAbsorbPill = 'Put into Its Commit';
+  rsAbsorbPillHint = 'Put the change into the commit of this branch that last changed these ' +
+    'lines, as a fixup folded in at once';
+  rsAbsorbTitle = 'Put into Its Commit';
+  rsAbsorbAsk = 'Put the change at line %d of %s into %s "%s"?';
+  rsAbsorbAskRewrites = 'The commits after it are rewritten; Branch > Undo takes it back.';
+  rsAbsorbAction = 'Put';
+  rsAbsorbCannot = 'The change at line %d of %s cannot be placed: %s.';
+  rsAbsorbNoChanges = 'The ticked files have no changes to put into a commit';
+  rsAbsorbDone = 'Put the changes into %d commits';
+  rsAbsorbDoneOne = 'Put the change into "%s"';
+  rsAbsorbFailed = 'Could not put the changes into their commits';
   rsLeaveOutPill = 'Leave Out of Commit';
   rsLeaveOutPillHint = 'Leave the change out of the next commit; it stays in the file';
   rsIncludePill = 'Include in Commit';
@@ -5637,6 +5666,8 @@ begin
   FMessageItem.Visible := False;
   FSplitItem := AddItem(CommitMenu, rsSplitMenu, 0, @MenuSplitClick);
   FSplitItem.Visible := False;
+  FAbsorbItem := AddItem(CommitMenu, rsAbsorbMenu, 0, @MenuAbsorbClick);
+  FAbsorbItem.Enabled := False;
   CommitMenu.Add(NewLine);
   { The Commit section's options, where they are found and in the
     palette; the chevron beside Amend has them too. }
@@ -5666,6 +5697,8 @@ begin
     @MenuUndoDiscardClick);
   FLeaveOutItem := AddItem(ChangesMenu, rsLeaveOutItem, ShortCut(VK_K, [ssModifier, ssAlt]),
     @MenuLeaveOutClick);
+  FAbsorbChangeItem := AddItem(ChangesMenu, rsAbsorbItem, 0, @MenuAbsorbChangeClick);
+  FAbsorbChangeItem.Enabled := False;
   ChangesMenu.Add(NewLine);
   FResolveItem := AddItem(ChangesMenu, rsResolveHere, ShortCut(VK_R, [ssModifier, ssShift]),
     @MenuResolveHereClick);
@@ -8695,6 +8728,7 @@ const
 {$I umain.blame.inc}
 {$I umain.discard.inc}
 {$I umain.leaveout.inc}
+{$I umain.absorb.inc}
 {$I umain.index.inc}
 {$I umain.history.inc}
 {$I umain.timelapse.inc}

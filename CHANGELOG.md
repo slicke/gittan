@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- A change can be put into the commit it belongs to, what the git absorb command does: the pill Put into Its Commit over a change in the change view (or Changes > Put Change into Its Commit...) finds the commit of this branch that last changed those lines, asks, and folds the change into it, and Commit > Put Changes into Their Commits... lists every change of the ticked files with its commit, or why it cannot be placed, and puts the ticked ones in at once. Each goes in as a fixup commit that a rebase folds in; what cannot be placed, a line older than the branch or a new file, stays in the work tree. Commits already pushed to the upstream, or on the default branch, are never rewritten, and Branch > Undo takes the rebase back.
 - The globe at the right end of the tab bar shows your GitHub picture once GitHub has answered, with your login in its tooltip, "octocat on GitHub", and keeps it between starts. GitHub is asked when Gittan starts, so the picture and the GitHub view's lists are there before the view is first opened.
 
 ### Changed
