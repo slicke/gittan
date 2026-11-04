@@ -43,7 +43,6 @@ begin
   FSideNav.AddRow(rsNavPulls, niPull, True);
   FSideNav.SetRowVisible(navPulls, Assigned(FForge));
   FSideNav.AddRow(rsNavProject, niProject, True);
-  FSideNav.AddRow(rsNavRecent, niClock, True);
   FSideNav.Heading := rsNavChanges;
   FSideNav.ShowToggle(rsNavHide, rsNavShow);
   FSideNav.OnPick := @SideNavPick;
@@ -71,32 +70,7 @@ begin
     navFiles: MenuFilesClick(Sender);
     navPulls: MenuPullsClick(Sender);
     navProject: MenuProjectClick(Sender);
-    navRecent: ShowRecentList(FSideNav.RowScreenRect(AIndex));
   end;
-end;
-
-{ The Recent row's list: the recent repositories as File > Open Recent
-  names them, the open one checked, then Open Repository... }
-procedure TRepoFrame.ShowRecentList(const AAnchor: TRect);
-var
-  i: integer;
-begin
-  FRecentPopup.Clear;
-  if App.Settings.Recent.Count = 0 then
-    FRecentPopup.AddHeader(rsNoRecent);
-  for i := 0 to App.Settings.Recent.Count - 1 do
-    FRecentPopup.Add(ShortPath(App.Settings.Recent[i]), '',
-      (FRepo.Root <> '') and SameFileName(App.Settings.Recent[i], FRepo.Root));
-  FRecentPopup.Add(StripHotkey(rsOpenRepo));
-  FRecentPopup.Popup(AAnchor);
-end;
-
-procedure TRepoFrame.RecentPopupPick(Sender: TObject; AIndex: integer);
-begin
-  if AIndex < App.Settings.Recent.Count then
-    FWindow.OpenRepository(App.Settings.Recent[AIndex])
-  else
-    MenuOpenRepoClick(Sender);
 end;
 
 { The row of the view shown; the Graph row stands in for it while the

@@ -44,13 +44,13 @@ type
     branch for the graph, a book for the repository, a terminal with
     its prompt for the commands, a page for the files, a pull request
     (a branch's commits meeting the trunk) for the pull requests, a
-    globe for a forge (GitHub) across every repository, a
-    clock for the recent repositories, a window of text for the
+    globe for a forge (GitHub) across every repository, a window of
+    text for the
     settings' Editor page or sliders for its Tools page and for the
     settings themselves, a sparkle for its AI page and an i in a circle
     for its About page. }
   TGittanNavIcon = (niHome, niGraph, niRepository, niCommands, niFiles, niPull, niForge,
-    niClock, niEditor, niTools, niAI, niAbout, niExtensions, niProject);
+    niEditor, niTools, niAI, niAbout, niExtensions, niProject);
 
   {** A click on a row, with its index. }
   TGittanNavPickEvent = procedure(Sender: TObject; AIndex: integer) of object;
@@ -104,9 +104,6 @@ type
       the small size under the large rows. }
     function AddRow(const ACaption: string; AIcon: TGittanNavIcon;
       ASmall: boolean = False): integer;
-    {** A row's rectangle in screen coordinates, for a list to drop
-      from. }
-    function RowScreenRect(AIndex: integer): TRect;
     {** Hides a row (its place closes up) or shows it again, for a row
       whose page needs a tool that may be missing. }
     procedure SetRowVisible(AIndex: integer; AVisible: boolean);
@@ -366,13 +363,6 @@ begin
   Invalidate;
 end;
 
-function TGittanSideNav.RowScreenRect(AIndex: integer): TRect;
-begin
-  Result := RowRect(AIndex);
-  Result.TopLeft := ClientToScreen(Result.TopLeft);
-  Result.BottomRight := ClientToScreen(Result.BottomRight);
-end;
-
 procedure TGittanSideNav.SetColors(ABack, AText, ADim, AHover, ASelected,
   ALine: TColor);
 begin
@@ -581,15 +571,6 @@ begin
       Canvas.Polyline([Point(Mid, Y), Point(Eave - 4, Y), Point(Eave, Y + 4),
         Point(Eave, Y + ASize), Point(Mid, Y + ASize), Point(Mid, Y)]);
       Canvas.Polyline([Point(Eave - 4, Y), Point(Eave - 4, Y + 4), Point(Eave, Y + 4)]);
-    end;
-    niClock:
-    begin
-      { A dial with the hands at ten past ten. }
-      Canvas.Ellipse(X, Y, X + ASize + 1, Y + ASize + 1);
-      Mid := X + ASize div 2;
-      Eave := Y + ASize div 2;
-      Canvas.Line(Mid, Eave, Mid, Y + 3);
-      Canvas.Line(Mid, Eave, Mid + ASize div 4, Eave);
     end;
     niEditor:
     begin

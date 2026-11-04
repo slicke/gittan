@@ -616,7 +616,6 @@ type
       log for it again; forgotten with every snapshot. }
     FBranchCommit: TGittanGraphCommit;
     FSyncPopup: TGittanPopupList;
-    FRecentPopup: TGittanPopupList;
     { The header's lexer name drops the lexers, Automatic and Plain
       text first (FSyntaxPopupNames: the lexer of each item after them). }
     FSyntaxPopup: TGittanPopupList;
@@ -1313,8 +1312,6 @@ type
     procedure SideNavPick(Sender: TObject; AIndex: integer);
     procedure SetNavRow(ARow: integer);
     procedure GraphClosed(Sender: TObject);
-    procedure ShowRecentList(const AAnchor: TRect);
-    procedure RecentPopupPick(Sender: TObject; AIndex: integer);
     procedure MenuRepoInfoClick(Sender: TObject);
     procedure RepoPageOpenTarget(Sender: TObject; ATarget: TGittanRepoTarget;
       const AName: string; const AScreenRect: TRect);
@@ -2620,7 +2617,6 @@ resourcestring
   rsCompAllFiles = 'All files';
   rsCompOneFile = '1 file';
   rsCompFiles = '%d files';
-  rsNavRecent = 'Recent';
   rsNavCommands = 'Commands';
   rsNavChanges = 'Changes';
   rsNavPulls = 'Pull Requests';
@@ -2633,7 +2629,6 @@ resourcestring
   rsBlobReadFailed = 'Could not read %s: %s';
   rsBlobWriteFailed = 'Could not write %s: %s';
   rsFilesSubmoduleUnknown = '%s is not among the submodules of this work tree';
-  rsNoRecent = 'No recent repositories';
   rsNavFiles = 'Files';
   rsNavHide = 'Hide navigation';
   rsNavShow = 'Show navigation';
@@ -3776,8 +3771,6 @@ const
   navFiles = 4;
   navPulls = 5;
   navProject = 6;
-  { The last row: a list, never selected. }
-  navRecent = 7;
   { The tag of Automatic in the list of the kinds of project. }
   KindsAutomatic = -2;
   { Scrolling on past the bottom of a file goes to the next one, and
@@ -4442,9 +4435,6 @@ begin
   FSyntaxPopup.Parent := Self;
   FSyntaxPopup.OnPick := @SyntaxPopupPick;
   FSyntaxPopupNames := TStringList.Create;
-  FRecentPopup := TGittanPopupList.Create(Self);
-  FRecentPopup.Parent := Self;
-  FRecentPopup.OnPick := @RecentPopupPick;
   FCompositionPopup := TGittanPopupList.Create(Self);
   FCompositionPopup.Parent := Self;
   FCompositionPopup.OnPick := @CompositionPopupPick;
@@ -5055,7 +5045,7 @@ begin
   FSymbolBar.SetColors(P.Shade, P.Text, P.Dim, P.Line);
   FTimelapseBar.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Accent);
   for List in [FBranchPopup, FStashPopup, FUpstreamPopup, FTagPopup, FViewPopup,
-    FSubListPopup, FReflogPopup, FPullPopup, FReviewPopup, FSyncPopup, FRecentPopup,
+    FSubListPopup, FReflogPopup, FPullPopup, FReviewPopup, FSyncPopup,
     FSyntaxPopup, FBasePopup, FConflictPopup, FFindPopup, FCompositionPopup, FWorktreePopup,
     FPalettePopup, FPlanPopup, FKindsPopup] do
     List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
