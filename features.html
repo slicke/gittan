@@ -853,21 +853,17 @@ git submodule update --init --recursive</pre>
         </div>
       </li>
       <li>
-        <h3>Register the vendored packages, once</h3>
-        <p>Lazarus has to know where the packages are. Add them in this order, since each depends on the ones before it.</p>
+        <h3>Register the vendored packages</h3>
+        <p>Lazarus has to know where the packages are. <code>make deps</code> registers each one with <code>lazbuild --add-package-link</code> and compiles it, in dependency order. Run it again after a submodule moves.</p>
         <div class="codeblock">
-<pre class="sh">for p in ATFlatControls/atflatcontrols/atflatcontrols_package.lpk \
-         EncConv/encconv/encconv_package.lpk \
-         BGRABitmap/bgrabitmap/bgrabitmappack.lpk \
-         ATSynEdit/atsynedit/atsynedit_package.lpk \
-         EControl/econtrol/econtrol_package.lpk \
-         ATSynEdit_Ex/atsynedit_ex/atsynedit_ex_package.lpk \
-         metadarkstyle/metadarkstyle.lpk \
-         lazink/lazink.lpk; do
-  lazbuild --add-package-link vendor/$p
-done</pre>
+<pre class="sh">make deps
+
+<span class="c"># Windows:</span>
+.\make.ps1 deps
+
+<span class="c"># Building from the Lazarus IDE? Rebuild it with the vendored ATSynEdit too:</span>
+make ide</pre>
         </div>
-        <p>On Windows run the same <code>lazbuild --add-package-link</code> for each file in PowerShell, or open each <code>.lpk</code> once in the IDE (Package &gt; Open Package File), which registers it.</p>
       </li>
       <li>
         <h3>Build and run</h3>
