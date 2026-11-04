@@ -66,9 +66,9 @@ function Test-Vendor {
     $ErrorActionPreference = 'Continue'  # git on stderr is no error here (Windows PowerShell 5.1)
     if (-not (Test-InGit)) { return }
     foreach ($line in @(& git submodule status 2>$null)) {
-        if ($line.Length -lt 2) { continue }
-        $parts = $line.Substring(1).Trim().Split(' ')
-        $sha = $parts[0]; $path = $parts[1]
+        # "<state><sha> <path> (<describe>)", no describe when not checked out
+        if ($line -notmatch '^.(\S+) (.+?)( \(.*\))?$') { continue }
+        $sha = $Matches[1]; $path = $Matches[2]
         switch ($line[0]) {
             '-' { Write-Warning "$path is not checked out; run: git submodule update --init" }
             '+' {
@@ -92,18 +92,18 @@ function Show-Outdated {
     $ErrorActionPreference = 'Continue'  # git on stderr is no error here (Windows PowerShell 5.1)
     foreach ($entry in @(& git config -f .gitmodules --get-regexp '\.path$')) {
         $d = ($entry -split ' ', 2)[1]
+        # An empty folder would let git run in Gittan's own repository.
+        if (-not (Test-Path (Join-Path $d '.git'))) { Write-Host "${d}: not checked out"; continue }
         & git -C $d fetch -q origin 2>$null
         if ($LASTEXITCODE -ne 0) { Write-Host "${d}: could not fetch origin"; continue }
+        # Every time, so a default branch renamed upstream is followed.
+        & git -C $d remote set-head origin -a *> $null
         $up = & git -C $d symbolic-ref -q --short refs/remotes/origin/HEAD
-        if (-not $up) {
-            & git -C $d remote set-head origin -a *> $null
-            $up = & git -C $d symbolic-ref -q --short refs/remotes/origin/HEAD
-        }
         if (-not $up) { Write-Host "${d}: origin has no default branch"; continue }
-        $n = [int](& git -C $d rev-list --count --no-merges "HEAD..$up")
+        $n = [int](& git -C $d rev-list --count "HEAD..$up")
         if ($n -eq 0) { Write-Host "${d}: up to date with $up"; continue }
         Write-Host "${d}: $n commit(s) behind $up"
-        & git -C $d log --oneline --no-merges -10 "HEAD..$up" | ForEach-Object { Write-Host "    $_" }
+        & git -C $d log --oneline -10 "HEAD..$up" | ForEach-Object { Write-Host "    $_" }
     }
 }
 

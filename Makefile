@@ -278,13 +278,14 @@ ide:
 
 vendor-check:
 	@if git rev-parse --git-dir >/dev/null 2>&1; then \
-	  git submodule status 2>/dev/null | while read -r line; do \
-	    st=$$(printf '%s' "$$line" | cut -c1); set -- $$(printf '%s' "$$line" | cut -c2-); \
+	  git submodule status 2>/dev/null | while IFS= read -r line; do \
+	    st=$$(printf '%s' "$$line" | cut -c1); rest=$${line#?}; \
+	    sha=$${rest%% *}; p=$${rest#* }; p=$${p% \(*\)}; \
 	    case "$$st" in \
-	      -) echo "warning: $$2 is not checked out; run: git submodule update --init" >&2 ;; \
-	      +) rec=$$(git ls-files -s -- "$$2" | cut -d' ' -f2 | cut -c1-7); \
-	         echo "warning: $$2 is at $$(echo $$1 | cut -c1-7), Gittan records $$rec; run: git submodule update $$2 (or git add $$2 for a move you mean)" >&2 ;; \
-	      U) echo "warning: $$2 has a merge conflict" >&2 ;; \
+	      -) echo "warning: $$p is not checked out; run: git submodule update --init" >&2 ;; \
+	      +) rec=$$(git ls-files -s -- "$$p" | cut -d' ' -f2 | cut -c1-7); \
+	         echo "warning: $$p is at $$(echo $$sha | cut -c1-7), Gittan records $$rec; run: git submodule update $$p (or git add $$p for a move you mean)" >&2 ;; \
+	      U) echo "warning: $$p has a merge conflict" >&2 ;; \
 	    esac; \
 	  done; \
 	  if [ -f $(IDE_STAMP) ]; then \
@@ -297,13 +298,14 @@ vendor-check:
 
 outdated:
 	@git config -f .gitmodules --get-regexp '\.path$$' | while read -r key d; do \
+	  if [ ! -e "$$d/.git" ]; then echo "$$d: not checked out"; continue; fi; \
 	  if ! git -C "$$d" fetch -q origin 2>/dev/null; then echo "$$d: could not fetch origin"; continue; fi; \
-	  up=$$(git -C "$$d" symbolic-ref -q --short refs/remotes/origin/HEAD || \
-	    { git -C "$$d" remote set-head origin -a >/dev/null 2>&1; git -C "$$d" symbolic-ref -q --short refs/remotes/origin/HEAD; }); \
+	  git -C "$$d" remote set-head origin -a >/dev/null 2>&1; \
+	  up=$$(git -C "$$d" symbolic-ref -q --short refs/remotes/origin/HEAD); \
 	  if [ -z "$$up" ]; then echo "$$d: origin has no default branch"; continue; fi; \
-	  n=$$(git -C "$$d" rev-list --count --no-merges HEAD..$$up); \
+	  n=$$(git -C "$$d" rev-list --count "HEAD..$$up"); \
 	  if [ "$$n" = 0 ]; then echo "$$d: up to date with $$up"; \
-	  else echo "$$d: $$n commit(s) behind $$up"; git -C "$$d" log --oneline --no-merges -10 HEAD..$$up | sed 's/^/    /'; fi; \
+	  else echo "$$d: $$n commit(s) behind $$up"; git -C "$$d" log --oneline -10 "HEAD..$$up" | sed 's/^/    /'; fi; \
 	done
 
 icons:
