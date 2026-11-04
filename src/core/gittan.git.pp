@@ -942,6 +942,13 @@ type
       relative to Root with "/" separators. Returns false when git
       failed. }
     function Files(AList: TStrings): boolean;
+    {** The files git tracks, as paths relative to Root with "/",
+      sorted (the list is a TStringList, set sorted and case
+      sensitive, so Find works on it). Returns false when git failed. }
+    function TrackedFiles(AList: TStringList): boolean;
+    {** The newest tag reachable from HEAD (git describe --tags
+      --abbrev=0); false with '' when there is none. }
+    function NearestTag(out AName: string): boolean;
     {** Runs `git grep` for the words AWords, whole words only, over the
       files Files lists (the untracked ones too), binary files left out,
       ignoring case when AIgnoreCase. AOutput is what `-z -n` prints: the
@@ -2765,6 +2772,10 @@ begin
 end;
 
 function TGittanRepo.RebaseBranch: string;
+const
+  { A typed array, not an array constructor: FPC 3.2.2 gets a for-in
+    over a constructor of strings wrong. }
+  RebaseDirs: array[0..1] of string = ('rebase-merge', 'rebase-apply');
 var
   Dir, Sub: string;
   Lines: TStringList;
@@ -2773,7 +2784,7 @@ begin
   Dir := GitDir;
   if Dir = '' then
     Exit;
-  for Sub in ['rebase-merge', 'rebase-apply'] do
+  for Sub in RebaseDirs do
     if FileExists(IncludeTrailingPathDelimiter(Dir) + Sub + PathDelim + 'head-name') then
     begin
       Lines := TStringList.Create;
@@ -5935,6 +5946,32 @@ begin
     SplitNul(Output, AList);
 end;
 
+function TGittanRepo.TrackedFiles(AList: TStringList): boolean;
+var
+  Output: string;
+begin
+  AList.Clear;
+  AList.Sorted := False;
+  AList.CaseSensitive := True;
+  if FRoot = '' then
+    Exit(False);
+  Result := RunGit(FRoot, ['ls-files', '-z', '--cached'], Output);
+  if Result then
+    SplitNul(Output, AList);
+  AList.Sorted := True;
+end;
+
+function TGittanRepo.NearestTag(out AName: string): boolean;
+var
+  Output: string;
+begin
+  AName := '';
+  Result := (FRoot <> '') and RunGit(FRoot, ['describe', '--tags', '--abbrev=0'], Output);
+  if Result then
+    AName := Trim(Output);
+  Result := AName <> '';
+end;
+
 { git grep exits with 1 and says nothing when no row matched, which
   RunGit reports as a failure without a message. }
 function TGittanRepo.Grep(AWords: TStrings; AIgnoreCase: boolean; out AOutput: string): boolean;
@@ -6376,6 +6413,10 @@ end;
 { symbolic-ref names the branch even before its first commit; it fails
   when HEAD is detached, and the commit id stands in then. }
 function TGittanRepo.DefaultBranch: string;
+const
+  { A typed array, not an array constructor: FPC 3.2.2 gets a for-in
+    over a constructor of strings wrong. }
+  DefaultNames: array[0..1] of string = ('main', 'master');
 var
   Remote, Name: string;
 begin
@@ -6388,7 +6429,7 @@ begin
   if RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'refs/remotes/' + Remote + '/HEAD'],
     Result) then
     Exit(Trim(Result));
-  for Name in ['main', 'master'] do
+  for Name in DefaultNames do
     if HasCommit(Remote + '/' + Name) then
       Exit(Remote + '/' + Name);
   Result := '';

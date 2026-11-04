@@ -20,7 +20,7 @@
   and the file header names the symbol the caret is in. The tree is
   known only when the background parse of the text ends, so the headings
   are found then (UpdateSymbolHeadings, from AdapterParseDone) and the
-  view is built once more with them in its gap rows. }
+  gap rows' text takes them (SetGapRowTexts). }
 
 { The index is the diff line, the value its number in the old file (0
   for an added line) or the new file (0 for a deleted line). }
@@ -146,6 +146,7 @@ begin
   end;
   SetLength(Rows, NRows);
   Lexer := App.Lexers.ForFile(FCurrentPath, FRepo.Root);
+  FGapTextRounds := 0;
   FBuildingView := True;
   try
     if not FSideBySide then
@@ -227,7 +228,7 @@ procedure TRepoFrame.FillChangeEditor(AEd: TATSynEdit; const ARows: TGittanRows;
 var
   Lines: TStringList;
   Numbers, Kinds: TIntegerDynArray;
-  i, Down, Up, All, Heading, Role: integer;
+  i, Role: integer;
   Marker: char;
   Hidden: boolean;
 begin
@@ -237,7 +238,7 @@ begin
       case ARows[i].Line of
         rowGap:
           Lines.Add(GapRowText(ARows[i].GapTo - ARows[i].GapFrom + 1,
-            GapHeading(ARows[i].GapTo), Down, Up, All, Heading));
+            GapHeading(ARows[i].GapTo)));
         rowFiller: Lines.Add('');
         rowCommit: Lines.Add(HistoryHeaderText(ARows[i].GapFrom));
         rowMore: Lines.Add(Format(rsHistoryMore, [HistoryStep]));
@@ -369,44 +370,337 @@ begin
   Result := VisibleRow(AFallback);
 end;
 
-{ The text of a gap row standing for ACount hidden lines: how many, and
-  for a run longer than GapStep the three ways to open it, each a few
-  lines on: ADown opens the first GapStep lines (the text above goes on
-  down), AUp the last ones (the text below goes on up), AAll the whole
-  run. The three are the columns the labels start at, in UTF-16 units
-  as the editor counts them, or -1 for a short run, where a click
-  anywhere opens it. AHeading, the symbol the changes after the gap are
-  in, ends the row, from column AHeadingCol (-1 without one); a click on
-  it does nothing. }
-function TRepoFrame.GapRowText(ACount: integer; const AHeading: string;
-  out ADown, AUp, AAll, AHeadingCol: integer): string;
-const
-  Sep = '   ';
-  HeadingSep = '      ';
+{ The text of a gap row standing for ACount hidden lines, with
+  AHeading, the symbol the changes after the gap are in, after it. The
+  row is painted over its text (EditDrawLine), so this is what a copy or
+  a search of the text sees. }
+function TRepoFrame.GapRowText(ACount: integer; const AHeading: string): string;
 begin
   if ACount = 1 then
     Result := rsGapLine
   else
     Result := Format(rsGapLines, [ACount]);
-  ADown := -1;
-  AUp := -1;
-  AAll := -1;
-  AHeadingCol := -1;
-  if ACount > GapStep then
+  if AHeading <> '' then
+    Result := Result + '      ' + AHeading;
+end;
+
+{ Puts the text of every gap row of ARows into AEd again, with the
+  headings as they are now, so a copy or a search sees the names the
+  parse found after the build. Only rows whose text differs change; the
+  editor stays read-only and unmodified, and the change starts a new
+  parse, which finds the same names. }
+procedure TRepoFrame.SetGapRowTexts(AEd: TATSynEdit; const ARows: TGittanRows);
+var
+  r: integer;
+  S: UnicodeString;
+  Wrote: boolean;
+begin
+  Wrote := False;
+  for r := 0 to Min(High(ARows), AEd.Strings.Count - 1) do
   begin
-    Result := Result + Sep;
-    ADown := Length(UTF8Decode(Result));
-    Result := Result + Format(rsGapDown, [GapStep]) + Sep;
-    AUp := Length(UTF8Decode(Result));
-    Result := Result + Format(rsGapUp, [GapStep]) + Sep;
-    AAll := Length(UTF8Decode(Result));
-    Result := Result + rsGapAll;
+    if (ARows[r].Line <> rowGap) or ARows[r].Hidden then
+      Continue;
+    S := UTF8Decode(GapRowText(ARows[r].GapTo - ARows[r].GapFrom + 1,
+      GapHeading(ARows[r].GapTo)));
+    if AEd.Strings.Lines[r] = S then
+      Continue;
+    if not Wrote then
+      AEd.ModeReadOnly := False;
+    Wrote := True;
+    AEd.Strings.Lines[r] := S;
+    AEd.Strings.LinesState[r] := TATLineState.None;
   end;
-  if AHeading = '' then
+  if not Wrote then
     Exit;
-  Result := Result + HeadingSep;
-  AHeadingCol := Length(UTF8Decode(Result));
-  Result := Result + AHeading;
+  AEd.ModeReadOnly := True;
+  AEd.Modified := False;
+  { The wrap info is rebuilt from the hidden-lines map, as after a build. }
+  AEd.Strings.WrapStructInvalidate;
+  AEd.Update(True);
+end;
+
+{ Lays out the gap row ARow of AEd, whose top is at ATop: the fold
+  glyph, "116 unchanged lines" in the window's font a size under the
+  editor's (smaller still when the editor's line is low), the chips
+  that open the first GapStep hidden lines, the last ones and all of
+  them (a short run has Show alone), each only while it fits the text
+  area, Down first, and the symbol's name at the right end, left out
+  when it would run into the chips. The history view's
+  more row (rowMore) has one chip for the older changes. C is left with
+  the row's font. False for a row that is not one of these, or in
+  another view. }
+function TRepoFrame.GapRowLayout(AEd: TATSynEdit; C: TCanvas; ARow, ATop: integer;
+  out ALayout: TGapRowLayout): boolean;
+var
+  CharH, X, PadX, TextH, Count, Right, Gap, W: integer;
+  Chip, Rest: TGapChip;
+begin
+  Result := False;
+  ALayout := Default(TGapRowLayout);
+  if (ARow < 0) or (ARow > High(FRows)) then
+    Exit;
+  if not (((FRows[ARow].Line = rowGap) and (FView = gvChanges)) or
+    ((FRows[ARow].Line = rowMore) and (FView = gvHistory))) then
+    Exit;
+  CharH := AEd.TextCharSize.Y;
+  C.Font.Assign(FHeader.Font);
+  C.Font.Style := [];
+  C.Font.Size := Max(MinGapFontSize, EditorFontSize(AEd) - 1);
+  TextH := C.TextHeight('Xg');
+  while (TextH + Px(2) > CharH) and (C.Font.Size > MinGapFontSize) do
+  begin
+    C.Font.Size := C.Font.Size - 1;
+    TextH := C.TextHeight('Xg');
+  end;
+  ALayout.ChipHeight := Min(CharH - Px(2), TextH + Px(4));
+  ALayout.TextY := ATop + (CharH - TextH) div 2;
+  Gap := Max(Px(6), CharH div 2);
+  X := AEd.RectMain.Left + Gap;
+  ALayout.Icon := Rect(X, ATop, X + CharH, ATop + CharH);
+  Inc(X, CharH + Px(4));
+  PadX := Max(Px(6), ALayout.ChipHeight div 2);
+  if FRows[ARow].Line = rowGap then
+  begin
+    Count := FRows[ARow].GapTo - FRows[ARow].GapFrom + 1;
+    if Count = 1 then
+      ALayout.Text := rsGapLine
+    else
+      ALayout.Text := Format(rsGapLines, [Count]);
+    ALayout.TextX := X;
+    Inc(X, C.TextWidth(ALayout.Text) + CharH);
+    if Count > GapStep then
+    begin
+      ALayout.ChipText[gcDown] := Format(rsGapDown, [GapStep]);
+      ALayout.ChipText[gcUp] := Format(rsGapUp, [GapStep]);
+      ALayout.ChipText[gcAll] := rsGapAll;
+    end
+    else
+      ALayout.ChipText[gcAll] := rsGapShow;
+    ALayout.Heading := GapHeading(FRows[ARow].GapTo);
+  end
+  else
+    ALayout.ChipText[gcAll] := Format(rsHistoryMore, [HistoryStep]);
+  Right := AEd.RectMain.Right - Gap;
+  for Chip in TGapChip do
+  begin
+    if ALayout.ChipText[Chip] = '' then
+      Continue;
+    W := C.TextWidth(ALayout.ChipText[Chip]) + 2 * PadX;
+    if X + W > Right then
+    begin
+      { A narrow pane: this chip and the ones after it are left out. }
+      for Rest := Chip to High(TGapChip) do
+        ALayout.ChipText[Rest] := '';
+      Break;
+    end;
+    ALayout.Chips[Chip] := Rect(X, ATop + (CharH - ALayout.ChipHeight) div 2, X + W, 0);
+    ALayout.Chips[Chip].Bottom := ALayout.Chips[Chip].Top + ALayout.ChipHeight;
+    X := ALayout.Chips[Chip].Right + Px(6);
+  end;
+  if ALayout.Heading <> '' then
+  begin
+    ALayout.HeadingX := Right - C.TextWidth(ALayout.Heading);
+    if ALayout.HeadingX < X + CharH then
+      ALayout.Heading := '';
+  end;
+  Result := True;
+end;
+
+{ Paints a gap row over the text the editor has just drawn for it, the
+  whole width of the text area whatever the horizontal scroll: the
+  row's tint, a fold glyph (two chevrons apart), the description and
+  the symbol's name in the dim color, and the chips as pills, the one
+  under the mouse in the accent. A row that word wrap splits has them
+  on its first part alone, where GapPartAt looks for them, and the tint
+  on the others. The editor goes on painting with the canvas's font, so
+  it is put back. }
+procedure TRepoFrame.EditDrawLine(Sender: TObject; C: TCanvas; ALineIndex, AX, AY: integer;
+  const AStr: atString; const ACharSize: TATEditorCharSize;
+  constref AExtent: TATIntFixedArray);
+var
+  Ed: TATSynEdit;
+  L: TGapRowLayout;
+  P: TGittanPalette;
+  Tint: TColor;
+  R: TRect;
+  Chip: TGapChip;
+  Hot: boolean;
+  Cx, Cy, S, CharH: integer;
+  FontName: string;
+  FontSize: integer;
+  FontStyle: TFontStyles;
+  FontColor: TColor;
+  BrushStyle: TBrushStyle;
+begin
+  Ed := TATSynEdit(Sender);
+  if (Ed <> Edit) and (Ed <> FEditOld) then
+    Exit;
+  FontName := C.Font.Name;
+  FontSize := C.Font.Size;
+  FontStyle := C.Font.Style;
+  FontColor := C.Font.Color;
+  BrushStyle := C.Brush.Style;
+  if not GapRowLayout(Ed, C, ALineIndex, AY, L) then
+  begin
+    C.Font.Name := FontName;
+    C.Font.Size := FontSize;
+    C.Font.Style := FontStyle;
+    C.Font.Color := FontColor;
+    Exit;
+  end;
+  CharH := Ed.TextCharSize.Y;
+  P := Palette;
+  Tint := Ed.Colors.TextBG;
+  EditCalcBookmarkColor(Ed, bmGap, Tint);
+  R := Rect(Ed.RectMain.Left, AY, Ed.RectMain.Right, AY + CharH);
+  C.Brush.Style := bsSolid;
+  C.Brush.Color := Tint;
+  C.FillRect(R);
+  if Ed.CaretPosToClientPos(Point(0, ALineIndex)).Y <> AY then
+  begin
+    C.Brush.Style := BrushStyle;
+    C.Font.Name := FontName;
+    C.Font.Size := FontSize;
+    C.Font.Style := FontStyle;
+    C.Font.Color := FontColor;
+    Exit;
+  end;
+  C.Pen.Style := psSolid;
+  C.Pen.Width := Max(1, Px(1));
+  C.Pen.Color := P.Dim;
+  Cx := (L.Icon.Left + L.Icon.Right) div 2;
+  Cy := (L.Icon.Top + L.Icon.Bottom) div 2;
+  S := Max(2, CharH div 5);
+  C.Line(Cx - S, Cy - 2, Cx, Cy - 2 - S);
+  C.Line(Cx, Cy - 2 - S, Cx + S + 1, Cy - 1);
+  C.Line(Cx - S, Cy + 2, Cx, Cy + 2 + S);
+  C.Line(Cx, Cy + 2 + S, Cx + S + 1, Cy + 1);
+  C.Brush.Style := bsClear;
+  C.Font.Color := P.Dim;
+  if L.Text <> '' then
+    C.TextOut(L.TextX, L.TextY, L.Text);
+  for Chip in TGapChip do
+  begin
+    if L.ChipText[Chip] = '' then
+      Continue;
+    Hot := (Ed = FHotGapEd) and (ALineIndex = FHotGapRow) and (Ord(Chip) = FHotGapChip);
+    C.Pen.Width := 1;
+    C.Brush.Style := bsSolid;
+    if Hot then
+    begin
+      C.Pen.Color := P.Accent;
+      C.Brush.Color := MixColor(P.Pill, P.Accent, 0.18);
+    end
+    else
+    begin
+      C.Pen.Color := P.Border;
+      C.Brush.Color := P.Pill;
+    end;
+    R := L.Chips[Chip];
+    C.RoundRect(R.Left, R.Top, R.Right, R.Bottom, L.ChipHeight, L.ChipHeight);
+    C.Brush.Style := bsClear;
+    if Hot then
+      C.Font.Color := P.Accent
+    else
+      C.Font.Color := P.PillText;
+    C.TextOut(R.Left + (R.Width - C.TextWidth(L.ChipText[Chip])) div 2, L.TextY,
+      L.ChipText[Chip]);
+  end;
+  if L.Heading <> '' then
+  begin
+    C.Font.Color := P.Dim;
+    C.TextOut(L.HeadingX, L.TextY, L.Heading);
+  end;
+  C.Pen.Width := 1;
+  C.Brush.Style := BrushStyle;
+  C.Font.Name := FontName;
+  C.Font.Size := FontSize;
+  C.Font.Style := FontStyle;
+  C.Font.Color := FontColor;
+end;
+
+{ What is under the mouse at X, Y of AEd: gapPartNone when it is not on a
+  gap row, else ARow is the row and the answer Ord of the chip, gapPartHeading
+  on the symbol's name, or gapPartRow elsewhere on the row. The layout
+  takes the editor's canvas, whose font is put back. }
+function TRepoFrame.GapPartAt(AEd: TATSynEdit; X, Y: integer; out ARow: integer): integer;
+var
+  Details: TATEditorPosDetails;
+  L: TGapRowLayout;
+  Chip: TGapChip;
+  RowTop: integer;
+  Saved: TFont;
+begin
+  Result := gapPartNone;
+  ARow := AEd.ClientPosToCaretPos(ATPoint(X, Y), Details).Y;
+  if (ARow < 0) or Details.BelowAllText or (X < AEd.RectMain.Left) or
+    (X >= AEd.RectMain.Right) then
+    Exit;
+  RowTop := AEd.CaretPosToClientPos(Point(0, ARow)).Y;
+  Saved := TFont.Create;
+  try
+    Saved.Assign(AEd.Canvas.Font);
+    if not GapRowLayout(AEd, AEd.Canvas, ARow, RowTop, L) then
+      Exit;
+    Result := gapPartRow;
+    for Chip in TGapChip do
+      if (L.ChipText[Chip] <> '') and L.Chips[Chip].Contains(Point(X, Y)) then
+        Exit(Ord(Chip));
+    if (L.Heading <> '') and (X >= L.HeadingX) and
+      (X < L.HeadingX + AEd.Canvas.TextWidth(L.Heading)) then
+      Result := gapPartHeading;
+  finally
+    AEd.Canvas.Font.Assign(Saved);
+    Saved.Free;
+  end;
+end;
+
+{ The hint of a chip of gap row ARow (APart from GapPartAt): what it
+  opens; '' off the chips. }
+function TRepoFrame.GapPartHint(ARow, APart: integer): string;
+var
+  Count: integer;
+begin
+  Result := '';
+  if (APart < 0) or (ARow < 0) or (ARow > High(FRows)) or (FRows[ARow].Line <> rowGap) then
+    Exit;
+  Count := FRows[ARow].GapTo - FRows[ARow].GapFrom + 1;
+  case TGapChip(APart) of
+    gcDown: Result := Format(rsGapDownHint, [GapStep]);
+    gcUp: Result := Format(rsGapUpHint, [GapStep]);
+    gcAll:
+      if Count = 1 then
+        Result := rsGapOneHint
+      else
+        Result := Format(rsGapAllHint, [Count]);
+  end;
+end;
+
+{ The gap row and the part of it under the mouse, for the chip's accent
+  and the hand cursor (HandCursorAsync); a change repaints, and leaving
+  the rows puts the arrow back. }
+procedure TRepoFrame.SetHotGap(AEd: TATSynEdit; ARow, APart: integer);
+var
+  Old: TATSynEdit;
+begin
+  if (AEd = FHotGapEd) and (ARow = FHotGapRow) and (APart = FHotGapChip) then
+    Exit;
+  Old := FHotGapEd;
+  FHotGapEd := AEd;
+  FHotGapRow := ARow;
+  FHotGapChip := APart;
+  if Old <> nil then
+  begin
+    Old.Invalidate;
+    if Old <> AEd then
+      Old.Cursor := crDefault;
+  end;
+  if AEd <> nil then
+  begin
+    AEd.Invalidate;
+    if APart = gapPartHeading then
+      AEd.Cursor := crDefault;
+  end;
 end;
 
 { The heading of the gap row that hides the diff lines up to AGapTo: the
@@ -532,19 +826,20 @@ begin
   if not Differ then
     Exit;
   FHeadings := Names;
-  if FOnlyChanges and (FHeadingRebuilds < 2) then
+  { The gap rows paint the names as they are now (EditDrawLine), so a
+    repaint shows them. Their text takes them too, for a copy or a
+    search; a lexer that reads a heading as code could name the blocks
+    differently each time, so twice a build at most. }
+  if FGapTextRounds < 2 then
   begin
-    Inc(FHeadingRebuilds);
-    { The adapter is still in its parse-done handler; the text is
-      replaced from the message loop. }
-    Application.QueueAsyncCall(@RebuildForHeadingsAsync, 0);
+    Inc(FGapTextRounds);
+    SetGapRowTexts(Edit, FRows);
+    if FEditOld.Visible then
+      SetGapRowTexts(FEditOld, FRowsOld);
   end;
-end;
-
-procedure TRepoFrame.RebuildForHeadingsAsync(Data: PtrInt);
-begin
-  if FView = gvChanges then
-    RebuildIfChanges;
+  Edit.Invalidate;
+  if FEditOld.Visible then
+    FEditOld.Invalidate;
 end;
 
 { The file header names the symbol the caret is in, from the code tree
@@ -581,7 +876,7 @@ begin
   UpdateChangeNav;
 end;
 
-{ A click on a gap row opens it: on one of its labels (see GapRowText)
+{ A click on a gap row opens it: on one of its chips (see GapRowLayout)
   the first or the last GapStep lines, elsewhere the whole run; in the
   history view a click on a commit header or the more row acts (see
   HistoryClick). Cmd+click (Ctrl+click elsewhere) goes to the definition
@@ -590,8 +885,7 @@ end;
 procedure TRepoFrame.EditMouseUp(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: integer);
 var
-  Row, Col, From, To_, Down, Up, All, Heading: integer;
-  Symbol: string;
+  Row, Part, From, To_: integer;
 begin
   if Button <> mbLeft then
     Exit;
@@ -619,27 +913,17 @@ begin
   end;
   if FView <> gvChanges then
     Exit;
-  Row := TATSynEdit(Sender).Carets[0].PosY;
-  if (Row < 0) or (Row > High(FRows)) or (FRows[Row].Line <> rowGap) then
+  Part := GapPartAt(TATSynEdit(Sender), X, Y, Row);
+  { A click on the symbol's name opens nothing. }
+  if (Part = gapPartNone) or (Part = gapPartHeading) or (FRows[Row].Line <> rowGap) then
     Exit;
   From := FRows[Row].GapFrom;
   To_ := FRows[Row].GapTo;
-  Col := TATSynEdit(Sender).Carets[0].PosX;
-  Symbol := GapHeading(To_);
-  GapRowText(To_ - From + 1, Symbol, Down, Up, All, Heading);
-  { A click on the symbol's name opens nothing; one right of it opens the
-    run, as on a gap row without a name. The caret stops at the end of
-    the row, so such a click is at the name's end. }
-  if (Heading >= 0) and (Col >= Heading) and
-    (Col < Heading + Length(UTF8Decode(Symbol))) then
-    Exit;
-  if (All >= 0) and (Col < All) then
-  begin
-    if Col >= Up then
-      From := To_ - GapStep + 1
-    else if Col >= Down then
-      To_ := From + GapStep - 1;
-  end;
+  if Part = Ord(gcDown) then
+    To_ := From + GapStep - 1
+  else if Part = Ord(gcUp) then
+    From := To_ - GapStep + 1;
+  SetHotGap(nil, -1, gapPartNone);
   ExpandGap(From, To_);
 end;
 

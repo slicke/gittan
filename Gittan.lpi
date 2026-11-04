@@ -15,7 +15,7 @@
     </General>
     <VersionInfo>
       <UseVersionInfo Value="True"/>
-      <MinorVersionNr Value="14"/>
+      <MinorVersionNr Value="15"/>
       <StringTable FileDescription="Git Tree Analyzer &amp; Navigator" InternalName="Gittan" OriginalFilename="Gittan.exe" ProductName="Git Tree Analyzer &amp; Navigator"/>
     </VersionInfo>
     <BuildModes>
@@ -29,7 +29,7 @@
           <SearchPaths>
             <IncludeFiles Value="$(ProjOutDir)"/>
             <Libraries Value="externals/quickjs/prebuilt/$(TargetCPU)-$(TargetOS)"/>
-            <OtherUnitFiles Value="src/core;src/ui"/>
+            <OtherUnitFiles Value="src/core;src/proj;src/ui;vendor/toml-fp/src"/>
             <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)-release"/>
           </SearchPaths>
           <Conditionals Value="if TargetOS='linux' then CustomOptions += ' -k-rpath=\$ORIGIN -k-rpath=\$ORIGIN/../lib/gittan';
@@ -181,6 +181,14 @@ if TargetOS='darwin' then CustomOptions += ' -k-rpath -k@loader_path';"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
+        <Filename Value="src/ui/gittan.absorbdlg.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
+        <Filename Value="src/core/gittan.absorb.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
         <Filename Value="src/ui/gittan.patchdlg.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>
@@ -286,7 +294,7 @@ if TargetOS='darwin' then CustomOptions += ' -k-rpath -k@loader_path';"/>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir)"/>
       <Libraries Value="externals/quickjs/prebuilt/$(TargetCPU)-$(TargetOS)"/>
-      <OtherUnitFiles Value="src/core;src/ui"/>
+      <OtherUnitFiles Value="src/core;src/proj;src/ui;vendor/toml-fp/src"/>
       <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Conditionals Value="if TargetOS='linux' then CustomOptions += ' -k-rpath=\$ORIGIN -k-rpath=\$ORIGIN/../lib/gittan';

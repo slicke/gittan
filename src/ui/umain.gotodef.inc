@@ -808,20 +808,37 @@ var
   N1, N2: integer;
   Part: TATLinePart;
   Link: boolean;
-  Row, Block, Keep: integer;
+  Row, Block, Keep, GapPart, GapRow: integer;
 begin
   Ed := TATSynEdit(Sender);
   { On a changed row the pills go to the block under the mouse (see
     umain.discard.inc) and the word hover goes on as usual. A
     conflict's button has a hint that goes the way of the blame's; on
     the blame band the cell under the mouse is the hover, see
-    umain.blame.inc. }
+    umain.blame.inc. On a gap row the chip under the mouse is lit and
+    has a hint the same way, the cursor is a hand (the editor sets its
+    own after this handler, so the hand comes after that), and the word
+    hover is off, since the row's text is painted over. }
   Block := DiscardAt(Ed, X, Y, Row, Keep);
   SetHotDiscard(Ed, Block, Keep, Row);
+  GapPart := GapPartAt(Ed, X, Y, GapRow);
+  if GapPart = gapPartNone then
+    SetHotGap(nil, -1, gapPartNone)
+  else
+    SetHotGap(Ed, GapRow, GapPart);
   if (FHotDiscard >= 0) and CanResolveBlocks then
     Word := rsResolveBlockHint
+  else if GapPart <> gapPartNone then
+    Word := GapPartHint(GapRow, GapPart)
   else
     Word := BlameHintAt(Ed, X, Y);
+  if (Word = '') and (GapPart <> gapPartNone) then
+  begin
+    ClearHover;
+    if GapPart <> gapPartHeading then
+      Application.QueueAsyncCall(@HandCursorAsync, PtrInt(Ed));
+    Exit;
+  end;
   if Word <> '' then
   begin
     if (Word <> FHoverBlame) or (Ed <> FHoverEd) then
@@ -881,6 +898,8 @@ procedure TRepoFrame.EditMouseLeave(Sender: TObject);
 begin
   if not MouseOnDiscardPills then
     SetHotDiscard(TATSynEdit(Sender), -1, -1, -1);
+  if Sender = FHotGapEd then
+    SetHotGap(nil, -1, gapPartNone);
   if Sender = FHoverEd then
     ClearHover;
 end;

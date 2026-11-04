@@ -16,7 +16,7 @@ type
   TExtLoaderTest = class(TTestCase)
   private
     FHost: TFakeExtHost;
-    FDir, FIni: string;
+    FDir: string;
     FSettings: TGittanSettings;
     FLoader: TGittanExtLoader;
     procedure Put(const AName, AScript: string);
@@ -34,6 +34,7 @@ type
     procedure TestReloadPicksUpEdits;
     procedure TestScriptErrorListed;
     procedure TestCaseTwinRefused;
+    procedure TestCaseTwinWithEqualsRefused;
     procedure TestNameRefused;
   end;
 
@@ -49,8 +50,7 @@ begin
   FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'gittan-extloader-' +
     IntToStr(GetProcessID) + '-' + IntToStr(Random(MaxInt));
   ForceDirectories(FDir);
-  FIni := IncludeTrailingPathDelimiter(FDir) + 'gittan.ini';
-  FSettings := TGittanSettings.Create(FIni);
+  FSettings := TGittanSettings.Create(FDir);
   FLoader := TGittanExtLoader.Create(FSettings);
 end;
 
@@ -260,9 +260,40 @@ begin
   AssertEquals('the twin reported', Files - 1, FHost.Errors.Count);
 end;
 
-{ A name that cannot be a key of gittan.ini: a = splits it, a ; makes
-  it a comment. One with ] is fine, since TIniFile takes a section's
-  name to the last ]. }
+{ An id with an = is matched whole, so A=B.js and a=b.js collide as
+  Test.js and test.js do. }
+procedure TExtLoaderTest.TestCaseTwinWithEqualsRefused;
+var
+  Found: TSearchRec;
+  Files, Loaded, i: integer;
+begin
+  Put('A=B.js', '/* @name Upper */ Gittan.alert("upper");');
+  Put('a=b.js', '/* @name Lower */ Gittan.alert("lower");');
+  Files := 0;
+  if FindFirst(IncludeTrailingPathDelimiter(FLoader.Dir) + '*.js', faAnyFile, Found) = 0 then
+  begin
+    repeat
+      Inc(Files);
+    until FindNext(Found) <> 0;
+    FindClose(Found);
+  end;
+  FLoader.Load;
+  AssertEquals('each file listed', Files, FLoader.Count);
+  Loaded := 0;
+  for i := 0 to FLoader.Count - 1 do
+    if FLoader.Info(i).Loaded then
+      Inc(Loaded)
+    else
+      AssertTrue('the twin says which file it matched: ' + FLoader.Info(i).Error,
+        Pos('=', FLoader.Info(i).Error) > 0);
+  AssertEquals('one of them loaded', 1, Loaded);
+  AssertEquals('one run', 1, FHost.Alerts.Count);
+  AssertEquals('the twin reported', Files - 1, FHost.Errors.Count);
+end;
+
+{ A name with what the old ini file could not hold (=, a ; first, ]) loads,
+  its values kept under it; one with a control character, which a file
+  name holds on Unix alone, does not. }
 procedure TExtLoaderTest.TestNameRefused;
 var
   Inf: TGittanExtInfo;
@@ -270,16 +301,26 @@ begin
   Put('a=b.js', '/* @name Eq */ Gittan.alert("eq");');
   Put(';c.js', '/* @name Semi */ Gittan.alert("semi");');
   Put('d]e.js', '/* @name Bracket */ Gittan.alert("bracket");');
+  {$IFDEF UNIX}
+  Put('t'#9'b.js', '/* @name Tab */ Gittan.alert("tab");');
+  {$ENDIF}
   FLoader.Load;
   AssertTrue('= listed', FLoader.FindInfo('a=b', Inf));
-  AssertFalse('= not loaded', Inf.Loaded);
-  AssertTrue('says why: ' + Inf.Error, Pos('Rename the file', Inf.Error) > 0);
+  AssertTrue('= loaded', Inf.Loaded);
   AssertTrue('; listed', FLoader.FindInfo(';c', Inf));
-  AssertFalse('; not loaded', Inf.Loaded);
+  AssertTrue('; loaded', Inf.Loaded);
   AssertTrue('] listed', FLoader.FindInfo('d]e', Inf));
   AssertTrue('] loaded', Inf.Loaded);
-  AssertEquals('only that one ran', 'bracket', FHost.Alerts.CommaText);
-  AssertEquals('two reported', 2, FHost.Errors.Count);
+  {$IFDEF UNIX}
+  AssertTrue('tab listed', FLoader.FindInfo('t'#9'b', Inf));
+  AssertFalse('tab not loaded', Inf.Loaded);
+  AssertTrue('says why: ' + Inf.Error, Pos('Rename the file', Inf.Error) > 0);
+  AssertEquals('one reported', 1, FHost.Errors.Count);
+  {$ENDIF}
+  AssertEquals('the three ran', 3, FHost.Alerts.Count);
+  AssertTrue(FHost.Alerts.IndexOf('eq') >= 0);
+  AssertTrue(FHost.Alerts.IndexOf('semi') >= 0);
+  AssertTrue(FHost.Alerts.IndexOf('bracket') >= 0);
   FSettings.SetExtValue('d]e', 'k', 'v');
   FSettings.SetExtEnabled('d]e', False);
   FSettings.Save;

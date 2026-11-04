@@ -124,7 +124,7 @@ begin
   FHost.Repo := FRepo;
   FHost.PermissionAnswer := True;
   SetExtHost(FHost);
-  FSettings := TGittanSettings.Create(IncludeTrailingPathDelimiter(FDir) + 'gittan.ini');
+  FSettings := TGittanSettings.Create(FDir);
   FEngine := TGittanExtEngine.Instance;
   AssertNotNull('engine', FEngine);
 end;
@@ -421,9 +421,11 @@ begin
     'Gittan.storage.remove("url"); globalThis.gone = Gittan.storage.get("url");' +
     'globalThis.dflt = Gittan.storage.getJSON("missing", 7);' +
     'Gittan.storage.set("text", "a\n[Trust]\nx=1");' +
-    'try { Gittan.storage.set("a=b", "v"); globalThis.bad = "stored"; } catch (e) { globalThis.bad = String(e); }' +
-    'try { Gittan.storage.get(";c"); globalThis.badGet = "read"; } catch (e) { globalThis.badGet = String(e); }' +
-    'try { Gittan.settings.define([{key: "[s]", type: "string"}]); globalThis.badDef = "defined"; } catch (e) { globalThis.badDef = String(e); }' +
+    'Gittan.storage.set("a=b", "eq");' +
+    'try { Gittan.storage.set("", "v"); globalThis.bad = "stored"; } catch (e) { globalThis.bad = String(e); }' +
+    'try { Gittan.storage.get("c\nd"); globalThis.badGet = "read"; } catch (e) { globalThis.badGet = String(e); }' +
+    'try { Gittan.settings.define([{key: "s\tt", type: "string"}]); globalThis.badDef = "defined"; } catch (e) { globalThis.badDef = String(e); }' +
+    'try { Gittan.settings.define([{key: "", type: "string"}]); globalThis.emptyDef = "defined"; } catch (e) { globalThis.emptyDef = String(e); }' +
     'globalThis.done = true;', AllPerms);
   AssertEquals('nothing before', 'null', EvalIn(Info^.Ctx, 'String(before)'));
   AssertEquals('set', 'https://x', EvalIn(Info^.Ctx, 'after'));
@@ -432,13 +434,15 @@ begin
   AssertEquals('default', '7', EvalIn(Info^.Ctx, 'String(dflt)'));
   AssertEquals('in the settings', '{"a":1}', FSettings.ExtValue('store', 'n'));
   AssertEquals('line ends kept', 'a' + #10 + '[Trust]' + #10 + 'x=1', FSettings.ExtValue('store', 'text'));
-  AssertTrue('a key with = refused: ' + EvalIn(Info^.Ctx, 'bad'),
-    Pos('Gittan.storage.set: The key "a=b"', EvalIn(Info^.Ctx, 'bad')) > 0);
-  AssertEquals('nothing under it', '', FSettings.ExtValue('store', 'a'));
-  AssertTrue('a comment key refused on read: ' + EvalIn(Info^.Ctx, 'badGet'),
-    Pos('Gittan.storage.get: The key ";c"', EvalIn(Info^.Ctx, 'badGet')) > 0);
-  AssertTrue('a section key refused in define: ' + EvalIn(Info^.Ctx, 'badDef'),
-    Pos('Gittan.settings.define: The key "[s]"', EvalIn(Info^.Ctx, 'badDef')) > 0);
+  AssertEquals('= in a key', 'eq', FSettings.ExtValue('store', 'a=b'));
+  AssertTrue('an empty key refused: ' + EvalIn(Info^.Ctx, 'bad'),
+    Pos('Gittan.storage.set: The key ""', EvalIn(Info^.Ctx, 'bad')) > 0);
+  AssertTrue('a line end refused on read: ' + EvalIn(Info^.Ctx, 'badGet'),
+    Pos('Gittan.storage.get: The key "c', EvalIn(Info^.Ctx, 'badGet')) > 0);
+  AssertTrue('a tab refused in define: ' + EvalIn(Info^.Ctx, 'badDef'),
+    Pos('Gittan.settings.define: The key "s', EvalIn(Info^.Ctx, 'badDef')) > 0);
+  AssertTrue('an empty key refused in define: ' + EvalIn(Info^.Ctx, 'emptyDef'),
+    Pos('Gittan.settings.define: The key ""', EvalIn(Info^.Ctx, 'emptyDef')) > 0);
   AssertEquals('nothing declared', 0, Length(FEngine.Registry.SettingsOf('store')));
 end;
 

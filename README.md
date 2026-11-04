@@ -88,7 +88,7 @@ Gittan needs git 2.30 or later on your `PATH`. The macOS build is signed ad hoc,
   </tr>
 </table>
 
-The [website](https://gittan.app) has the full tour, and the files in [spec/](spec/) describe how each area works.
+The [website](https://gittan.app) has the full tour, and the files in [spec/](spec/) describe how each area works. [UNIQUE.md](UNIQUE.md) lists what I have not found in other git clients.
 
 ## Build from source
 

@@ -87,8 +87,9 @@ type
     ApiKey: string;
     {** The extensions as found (gittan.ext.loader's Infos), the settings
       they declared (gittan.ext.registry), their folder, and three lists
-      the caller owns: their values as "id" + #9 + "key" = value, which
-      the page edits in place; the ids turned off, which the page writes
+      the caller owns: their values as "id" + #9 + "key" and the value
+      (a list from NewExtValueList in gittan.settings, whose separator
+      no key has), which the page edits in place; the ids turned off, which the page writes
       on OK; and the ids whose permissions the page reset, to be asked
       again at the next load. }
     ExtInfos: TGittanExtInfos;
@@ -214,7 +215,7 @@ resourcestring
   rsAboutLocalBuild = 'A local build of %s';
   rsAboutText = 'A free, native git client built around the diff.';
   rsCheckUpdates = 'Check for &Updates';
-  rsUpdateChecking = 'Asking GitHub...';
+  rsUpdateChecking = 'Checking for a new version…';
   rsUpdateCurrent = 'This is the latest build.';
   rsUpdateDownload = 'Download %s';
   rsUpdateLatest = 'The latest release is %s';
@@ -1263,8 +1264,9 @@ begin
 end;
 
 { A declared setting's control changed: its value goes to the caller's
-  list. An emptied field stays in it as "name=", since Values[] := ''
-  would drop the pair, and the caller would then keep the old value. }
+  list. An emptied field stays in it with an empty value, since
+  Values[] := '' would drop the pair, and the caller would then keep the
+  old value. }
 procedure TSettingsForm.ExtSettingChange(Sender: TObject);
 var
   Def: TGittanExtSettingDef;

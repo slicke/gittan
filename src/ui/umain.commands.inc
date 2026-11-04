@@ -1,7 +1,8 @@
 { ---------------------------------------------------------------------------
   The Commands page
   ---------------------------------------------------------------------------
-  The repository's own commands (gittan.repocommands: .gittan/commands.ini,
+  The repository's own commands (gittan.repocommands: .gittan/commands.toml
+  and the .toml files of .gittan/commands,
   the scripts of package.json, the targets of a Makefile) as tiles on a
   page in the box (gittan.commandpage), opened from the sidebar's
   Commands row, View > Commands (Cmd+4) and, on macOS, a click on
@@ -47,14 +48,16 @@ begin
   if FRepo.Root = '' then
   begin
     FRepoCommands := nil;
+    FRepoProjects := nil;
+    FCommandsFiles := nil;
     FCommandsHash := '';
     Exit;
   end;
-  FRepoCommands := DiscoverRepoCommands(FRepo.Root);
-  FCommandsHash := CommandsFileHash(FRepo.Root);
-  FCommandPage.CodeFont.Assign(Edit.Font);
+  FRepoCommands := DiscoverRepoCommands(FRepo.Root, FRepoProjects, FCommandsFiles,
+    App.Settings.ProjectKindsOf(FRepo.Root));
+  FCommandsHash := CommandsHashOf(FCommandsFiles);
   FCommandPage.SetRepository(ExtractFileName(FRepo.Root), FRepo.Root);
-  FCommandPage.SetCommands(FRepoCommands, FCommandsHash <> '', CommandsTrusted);
+  FCommandPage.SetCommands(FRepoCommands, FRepoProjects, FCommandsFiles, CommandsTrusted);
 end;
 
 procedure TRepoFrame.MenuCommandsClick(Sender: TObject);
@@ -103,10 +106,12 @@ end;
   AInTerminal (the tile's terminal), else in a job whose output the
   page shows. The file's commands, and the
   keys it gives (AByKey), wait for the file to be trusted: the page is
-  shown with its card instead. }
+  shown with its card instead. One the file marks with confirm asks
+  first. }
 procedure TRepoFrame.RunRepoCommand(AIndex: integer; AByKey, AInTerminal: boolean);
 var
   Cmd: TGittanRepoCommand;
+  Ask: string;
 begin
   if (FRepo.Root = '') or (AIndex < 0) or (AIndex > High(FRepoCommands)) then
     Exit;
@@ -119,6 +124,32 @@ begin
     ShowCommands;
     Exit;
   end;
+  { confirm in the file: a clean or a deploy waits for a yes, whether a
+    tile, a key, the terminal or Run Again asked. }
+  if Cmd.Confirm then
+  begin
+    if Cmd.ConfirmText <> '' then
+      Ask := Cmd.ConfirmText
+    else
+      Ask := Format(rsCommandConfirm, [Cmd.Name]);
+    if AskDlg(Cmd.Name, Ask + LineEnding + LineEnding + Cmd.Command, mtConfirmation,
+      [mrYes, rsCommandRunAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
+      Exit;
+  end;
+  RunCommandRecord(Cmd, AInTerminal);
+end;
+
+{ Runs ACmd, a command of the page or one a button elsewhere gives
+  (the Project page's), in a terminal when it asks for one or
+  AInTerminal, else in the job whose output the Commands page shows,
+  which it then opens. }
+procedure TRepoFrame.RunCommandRecord(const ACmd: TGittanRepoCommand; AInTerminal: boolean);
+var
+  Cmd: TGittanRepoCommand;
+begin
+  Cmd := ACmd;
+  if (FRepo.Root = '') or (Cmd.Command = '') then
+    Exit;
   if Cmd.Terminal or AInTerminal then
   begin
     OpenTerminal(Cmd.Command);
@@ -132,6 +163,7 @@ begin
   end;
   FCommandName := Cmd.Name;
   FCommandSource := Cmd.Source;
+  FCommandProject := Cmd.Project;
   FCommandRead := 0;
   FCommandJob := TGittanCommandJob.Create(FRepo.Root, Cmd.Command);
   FCommandJob.OnOutput := @CommandJobOutput;
@@ -142,7 +174,7 @@ begin
   FCommandPage.Console.Font.Assign(Edit.Font);
   FCommandPage.Console.Text := '';
   FCommandPage.Console.FollowEnd := True;
-  FCommandPage.SetRun(Cmd.Name, Cmd.Source, True, -1, 0, True, False);
+  FCommandPage.SetRun(Cmd.Name, Cmd.Source, Cmd.Project, True, -1, 0, True, False);
   FCommandJob.Start;
   ShowCommands;
   { No further than the panel's end needs: the console fills the box
@@ -179,8 +211,8 @@ begin
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
   FCommandPage.Console.FollowEnd := False;
-  FCommandPage.SetRun(FCommandName, FCommandSource, False, Job.ExitCode, Job.ElapsedMs,
-    Job.Started, Job.Killed);
+  FCommandPage.SetRun(FCommandName, FCommandSource, FCommandProject, False, Job.ExitCode,
+    Job.ElapsedMs, Job.Started, Job.Killed);
   if FCommandPage.Visible then
     FCommandPage.FitHeight(FSummaryBox.ClientHeight);
   { The page says it in red too, so the status bar's note is enough. }
@@ -216,7 +248,8 @@ begin
     Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
   end;
   FCommandPage.Console.FollowEnd := False;
-  FCommandPage.SetRun(FCommandName, FCommandSource, False, -1, Job.ElapsedMs, True, True);
+  FCommandPage.SetRun(FCommandName, FCommandSource, FCommandProject, False, -1, Job.ElapsedMs,
+    True, True);
 end;
 
 { Stop on the page: the job ends it, and its end comes as Killed. }
@@ -232,11 +265,11 @@ begin
     Exit;
   App.Settings.TrustCommands(FRepo.Root, FCommandsHash);
   App.Settings.Save;
-  FCommandPage.SetCommands(FRepoCommands, FCommandsHash <> '', CommandsTrusted);
+  FCommandPage.SetCommands(FRepoCommands, FRepoProjects, FCommandsFiles, CommandsTrusted);
 end;
 
-{ Edit… or Create…: the file opens in the editor as a Config file does;
-  a new one is written with its commented example first, and the
+{ Edit… or Create…: commands.toml opens in the editor as a Config file
+  does; a new one is written with its commented example first, and the
   Config section lists it. }
 procedure TRepoFrame.CommandPageEditFile(Sender: TObject);
 var

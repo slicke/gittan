@@ -25,3 +25,6 @@
 [submodule "vendor/lazink"]
 	path = vendor/lazink
 	url = https://github.com/TonyStone31/LazInk.git
+[submodule "vendor/toml-fp"]
+	path = vendor/toml-fp
+	url = https://github.com/ikelaiah/toml-fp.git

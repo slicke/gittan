@@ -130,6 +130,7 @@ type
     function FrameNames: TStringArray;
     procedure UpdateTabs;
     procedure ForgeTabsChange(Sender: TObject);
+    procedure ForgeUserChange(Sender: TObject);
     procedure SaveTabs;
     procedure CloseFrameAsync(Data: PtrInt);
     procedure TabSelect(Sender: TObject; AIndex: integer);
@@ -252,6 +253,7 @@ begin
   FForgeView.Visible := False;
   FForgeView.Align := alClient;
   FForgeView.Parent := Self;
+  FForgeView.OnUserChange := @ForgeUserChange;
   FForgeView.Init(Self);
   FForgeView.OnTabsChange := @ForgeTabsChange;
   UpdateForgeChrome;
@@ -481,17 +483,20 @@ begin
 end;
 
 { The globe in the chrome: there while there is a forge, filled while
-  the view is shown. }
+  the view is shown, the user's picture in its place once the forge has
+  given one. }
 procedure TGittanWindow.UpdateForgeChrome;
 begin
   if FForgeView = nil then
     Exit;
   {$IFDEF LCLCocoa}
   if FToolbar <> nil then
-    FToolbar.SetForge(FForgeView.HasForge, FForgeShown, FForgeView.ForgeName);
+    FToolbar.SetForge(FForgeView.HasForge, FForgeShown, FForgeView.ChromeHint,
+      FForgeView.Picture);
   {$ENDIF}
   {$IFDEF OWNBAR}
-  FOwnBar.SetForge(FForgeView.HasForge, FForgeShown, FForgeView.ForgeName);
+  FOwnBar.SetForge(FForgeView.HasForge, FForgeShown, FForgeView.ChromeHint,
+    FForgeView.Picture);
   {$ENDIF}
 end;
 
@@ -710,6 +715,7 @@ begin
     FActive.ShowOpening('');
   { After the repositories, whose opening clears the banners. }
   FActive.CheckGitVersion;
+  FActive.CheckSettingsReset;
 end;
 
 { The window where it was, if that is still on a screen. The sizes are
@@ -1277,6 +1283,11 @@ procedure TGittanWindow.ForgeTabsChange(Sender: TObject);
 begin
   if FForgeShown then
     UpdateTabs;
+end;
+
+procedure TGittanWindow.ForgeUserChange(Sender: TObject);
+begin
+  UpdateForgeChrome;
 end;
 
 procedure TGittanWindow.TabSelect(Sender: TObject; AIndex: integer);

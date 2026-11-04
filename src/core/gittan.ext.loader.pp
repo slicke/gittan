@@ -84,7 +84,7 @@ uses
 
 resourcestring
   rsExtReadFailed = 'The extension file could not be read';
-  rsExtBadName = 'The extension file "%s" was not loaded: its name keeps its settings in gittan.ini, so it cannot hold "=", a tab or a line end, start with ";" or "[", or start or end with a space. Rename the file.';
+  rsExtBadName = 'The extension file "%s" was not loaded: its name is the key of its settings, so it cannot hold a tab, a line end or another control character. Rename the file.';
   rsExtInvalidManifest = 'The manifest of %s is not valid';
   rsExtDupId = 'The extension file "%s" was not loaded: apart from letter case, its name matches "%s", so both would share the same settings and permissions. Rename one of the files.';
   rsExtDenied = 'The permissions it asks for were not granted';
@@ -222,8 +222,8 @@ begin
   Inf.Id := ExtIdFromPath(AFileName);
   Inf.Enabled := FSettings.ExtEnabled(Inf.Id);
   try
-    { The id is a key of gittan.ini (Extensions) and part of its
-      sections' names (ExtPerm:<id>, ExtValues:<id>). }
+    { The id is the key of the extension's values in settings.json and
+      of its grant in state.json. }
     if not ValidExtKey(Inf.Id) then
     begin
       Inf.Error := Format(rsExtBadName, [ExtractFileName(AFileName)]);
@@ -260,8 +260,9 @@ begin
     if Inf.DisplayName = '' then
       Inf.DisplayName := Inf.Id;
     { Ids are the names in lower case, so Test.js and test.js would share
-      their settings and grants: the first wins. ASeen holds id=file
-      pairs, so the id is looked up as a name. }
+      their settings and grants: the first wins. ASeen holds id and file
+      parted by a tab, which ValidExtKey keeps out of an id, so an id with
+      an = is looked up whole. }
     i := ASeen.IndexOfName(Inf.Id);
     if i >= 0 then
     begin
@@ -351,6 +352,8 @@ begin
   Folder := IncludeTrailingPathDelimiter(Dir);
   Files := TStringList.Create;
   Seen := TStringList.Create;
+  Seen.NameValueSeparator := #9;
+  Seen.CaseSensitive := True;
   FLoading := True;
   try
     if FindFirst(Folder + '*.js', faAnyFile and not faDirectory, Sr) = 0 then

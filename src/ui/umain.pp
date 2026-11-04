@@ -19,7 +19,7 @@ uses
   gittan.lexers, gittan.git, gittan.conflicts, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.welcome, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.sidenav, gittan.repoinfo, gittan.repopage, gittan.subpage,
-  gittan.repocommands, gittan.commandpage, gittan.job,
+  gittan.repocommands, gittan.project, gittan.commandpage, gittan.projectpage, gittan.job,
   gittan.settingsdlg, gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   {$IFDEF LCLCocoa}gittan.memohint,{$ENDIF}
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
@@ -29,10 +29,10 @@ uses
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.textfile, gittan.sectionheader, gittan.hintbox,
   gittan.forge, gittan.lfslocks, gittan.askdlg,
-  gittan.discard, gittan.keep, gittan.leaveout, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
+  gittan.discard, gittan.keep, gittan.leaveout, gittan.absorb, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   fpjson, gittan.ext.engine, gittan.ext.registry, gittan.ext.api, gittan.ext.loader,
   gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
-  gittan.rebase, gittan.worktrees, gittan.gitflow, gittan.repolist, gittan.rebasedlg, gittan.cleandlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
+  gittan.rebase, gittan.worktrees, gittan.gitflow, gittan.repolist, gittan.rebasedlg, gittan.cleandlg, gittan.absorbdlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
   gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, gittan.merge, gittan.mergeview,
   gittan.notedlg, gittan.issuelinks,
   ATSynEdit_Gaps, md5;
@@ -49,7 +49,8 @@ type
     binary view), or the Pull Requests page (gittan.pullpage,
     umain.pulls.inc). }
   TGittanView = (gvSummary, gvRepoInfo, gvChanges, gvRepoDiff, gvFile, gvHistory, gvSubmodule,
-    gvImage, gvTranslation, gvBinary, gvCommands, gvFiles, gvBlob, gvPulls, gvMerge);
+    gvImage, gvTranslation, gvBinary, gvCommands, gvFiles, gvBlob, gvPulls, gvMerge,
+    gvProject);
 
   {** The three strengths of a commit's color in the history view: the
     faint tint of its rows, the shade of the words it changed, and the
@@ -89,6 +90,22 @@ type
     Hidden: boolean;
   end;
   TGittanRows = array of TGittanRow;
+
+  {** The chips of a painted gap row (TRepoFrame.EditDrawLine): the
+    first GapStep hidden lines, the last ones, the whole run. }
+  TGapChip = (gcDown, gcUp, gcAll);
+
+  {** Where the parts of a gap row are painted (TRepoFrame.GapRowLayout):
+    the fold glyph, the description, the chips and the name of the
+    symbol the changes after the gap are in, an empty rect or string for
+    a part the row has not. }
+  TGapRowLayout = record
+    Icon: TRect;
+    Text, Heading: string;
+    TextX, TextY, HeadingX, ChipHeight: integer;
+    Chips: array[TGapChip] of TRect;
+    ChipText: array[TGapChip] of string;
+  end;
 
   {** The tree views of the form, the one from umain.lfm included, with a
     click on a node's check box (its state image) told apart: it goes to
@@ -331,6 +348,8 @@ type
       (pruned of what has been committed since, PrunePlan) and the list
       it is picked from. }
     FSplitItem: TMenuItem;
+    { Commit > Put Changes into Their Commits... (umain.absorb.inc). }
+    FAbsorbItem: TMenuItem;
     FSplitJob: TGittanSplitJob;
     FCommitPlan: TGittanCommitPlan;
     FPlanAgent: string;
@@ -597,7 +616,6 @@ type
       log for it again; forgotten with every snapshot. }
     FBranchCommit: TGittanGraphCommit;
     FSyncPopup: TGittanPopupList;
-    FRecentPopup: TGittanPopupList;
     { The header's lexer name drops the lexers, Automatic and Plain
       text first (FSyntaxPopupNames: the lexer of each item after them). }
     FSyntaxPopup: TGittanPopupList;
@@ -647,6 +665,10 @@ type
       discarded, latest last, which Changes > Undo Discard puts back; and
       the two menu items. }
     FHotDiscard, FHotRow: integer;
+    { The gap row under the mouse and the part of it (gapPartRow, gapPartHeading
+      or Ord of a TGapChip), see SetHotGap. }
+    FHotGapEd: TATSynEdit;
+    FHotGapRow, FHotGapChip: integer;
     FPillTimer: TTimer;
     FDiscardPills: TGittanHoverPills;
     { Keeping changes as code for the session (gittan.keep): the keeps
@@ -667,8 +689,12 @@ type
     FLeftOutOf: TIntegerDynArray;
     FHeaderInclude: integer;
     FPillChoose: boolean;
+    { The pills have Put into Its Commit too (umain.absorb.inc). }
+    FPillAbsorb: boolean;
     FDiscards: array of TGittanDiscard;
     FDiscardItem, FUndoDiscardItem, FLeaveOutItem: TMenuItem;
+    { Changes > Put Change into Its Commit... (umain.absorb.inc). }
+    FAbsorbChangeItem: TMenuItem;
     { Resolving one conflict at a time (umain.conflicts.inc): the diff
       line of each conflict's "<<<<<<<" (set by ShowChanges with the
       roles) and its row in the view (found with the block rows), which
@@ -779,10 +805,22 @@ type
       shown on it, the hash of its commands file and the command
       running (umain.commands.inc). }
     FCommandPage: TGittanCommandPage;
+    { The Project page, in the box too (umain.project.inc), whether
+      a snapshot came since its reports were built, and whether their
+      reload is queued (ReloadProjectAsync). }
+    FProjectPage: TGittanProjectPage;
+    FProjectStale, FProjectReloadQueued: boolean;
+    { The list of the kinds of project to pick from, under the page's
+      chip. }
+    FKindsPopup: TGittanPopupList;
     FRepoCommands: TGittanRepoCommands;
+    FRepoProjects: TGittanProjects;
+    { The commands files read with FRepoCommands, a section each on the
+      page. }
+    FCommandsFiles: TGittanCommandsFiles;
     FCommandsHash: string;
     FCommandJob: TGittanCommandJob;
-    FCommandName: string;
+    FCommandName, FCommandProject: string;
     FCommandSource: TGittanCommandSource;
     FCommandRead: integer;
     { The Files page, in the box too (umain.files.inc): whether it
@@ -1052,13 +1090,13 @@ type
       diff line of every block of changed lines, the name of the code tree
       range each block is in (a gap row names the block after it), the
       code tree of each side's text (valid, FRangesValid, from the end of
-      a parse to the next build), and how often the headings rebuilt the
-      view of this file. }
+      a parse to the next build), and how often new headings rewrote the
+      gap rows' text since the last build. }
     FBlockStarts: TIntegerDynArray;
     FHeadings: array of string;
     FCodeRanges, FOldRanges: TGittanCodeRanges;
     FRangesValid, FBuildingView: boolean;
-    FHeadingRebuilds: integer;
+    FGapTextRounds: integer;
     { Scrolling on past the bottom of a file, or the top: the wheel
       delta pulled so far (positive downwards, towards the next file,
       negative upwards, towards the previous), the time of the last wheel
@@ -1279,8 +1317,6 @@ type
     procedure SideNavPick(Sender: TObject; AIndex: integer);
     procedure SetNavRow(ARow: integer);
     procedure GraphClosed(Sender: TObject);
-    procedure ShowRecentList(const AAnchor: TRect);
-    procedure RecentPopupPick(Sender: TObject; AIndex: integer);
     procedure MenuRepoInfoClick(Sender: TObject);
     procedure RepoPageOpenTarget(Sender: TObject; ATarget: TGittanRepoTarget;
       const AName: string; const AScreenRect: TRect);
@@ -1335,6 +1371,18 @@ type
     function BlobData(out AData: RawByteString): boolean;
     procedure OpenBlobOutside;
     procedure SaveBlobAs;
+    procedure SetupProjectPage;
+    procedure LoadProject;
+    procedure ReloadProjectAsync(Data: PtrInt);
+    procedure MenuProjectClick(Sender: TObject);
+    procedure ShowProject;
+    procedure ProjectPageOpenUrl(Sender: TObject; const AText: string);
+    procedure ProjectPageIgnore(Sender: TObject; const ACheck: TGittanProjectCheck);
+    procedure ProjectPageRun(Sender: TObject; const AProject, AName, ACommand: string);
+    procedure ProjectPagePickKinds(Sender: TObject; const AScreenRect: TRect);
+    procedure KindsPopupPick(Sender: TObject; AIndex: integer);
+    function ProjectKindNames: string;
+    procedure RunCommandRecord(const ACmd: TGittanRepoCommand; AInTerminal: boolean);
     procedure SetupCommandPage;
     function CommandsTrusted: boolean;
     procedure LoadRepoCommands;
@@ -1426,13 +1474,20 @@ type
       ALexer: TecSyntAnalyzer);
     function VisibleRow(ARow: integer): integer;
     function RowOfLine(ALine, AFallback: integer): integer;
-    function GapRowText(ACount: integer; const AHeading: string;
-      out ADown, AUp, AAll, AHeadingCol: integer): string;
+    function GapRowText(ACount: integer; const AHeading: string): string;
+    procedure SetGapRowTexts(AEd: TATSynEdit; const ARows: TGittanRows);
     function GapHeading(AGapTo: integer): string;
+    function GapRowLayout(AEd: TATSynEdit; C: TCanvas; ARow, ATop: integer;
+      out ALayout: TGapRowLayout): boolean;
+    function GapPartAt(AEd: TATSynEdit; X, Y: integer; out ARow: integer): integer;
+    function GapPartHint(ARow, APart: integer): string;
+    procedure SetHotGap(AEd: TATSynEdit; ARow, APart: integer);
+    procedure EditDrawLine(Sender: TObject; C: TCanvas; ALineIndex, AX, AY: integer;
+      const AStr: atString; const ACharSize: TATEditorCharSize;
+      constref AExtent: TATIntFixedArray);
     function RowMarkers(const ARows: TGittanRows; AOldSide: boolean): string;
     function RowTexts(AEd: TATSynEdit): TStringList;
     procedure UpdateSymbolHeadings;
-    procedure RebuildForHeadingsAsync(Data: PtrInt);
     procedure UpdateSymbolCrumb;
     procedure ExpandGap(AFrom, ATo: integer);
 
@@ -1515,6 +1570,15 @@ type
       out AError: string): boolean;
     procedure MenuLeaveOutClick(Sender: TObject);
     procedure UpdateLeaveOutItem;
+    { umain.absorb.inc }
+    function CanAbsorb: boolean;
+    function AbsorbPlanFor(APaths: TStrings): TGittanAbsorbPlan;
+    function AbsorbPushedNote(APlan: TGittanAbsorbPlan): string;
+    procedure AbsorbBlockAt(ABlock: integer);
+    procedure MenuAbsorbClick(Sender: TObject);
+    procedure MenuAbsorbChangeClick(Sender: TObject);
+    procedure RunAbsorb(APlan: TGittanAbsorbPlan; const AChosen: TBooleanDynArray);
+    procedure UpdateAbsorbItems;
     procedure DiscardBlockAt(ABlock: integer);
     procedure UpdateDiscardItems;
     procedure NoteDiscard(const ABlock: TGittanDiscard);
@@ -2386,6 +2450,10 @@ type
     procedure ShowNoLexers;
     {** Banners a git older than the one Gittan needs. }
     procedure CheckGitVersion;
+    {** Banners, once, that the settings started over: an earlier
+      build's gittan.ini was found and not read (OldIniFound). Remove
+      with OldIniFound once the builds with gittan.ini are gone. }
+    procedure CheckSettingsReset;
     {** The lexers are in (App.Lexers.OnLoaded, through the window). }
     procedure LexersLoaded(Sender: TObject);
     {** A check for a newer build ended (App.OnUpdateChecked, through
@@ -2540,18 +2608,24 @@ resourcestring
   rsRepoDiff = '&Repository Diff';
   rsRepoInfo = 'Repository &Info';
   rsCommandsMenu = '&Commands';
+  rsProjectMenu = 'Pro&ject';
+  rsNavProject = 'Project';
+  rsAutomaticKinds = 'Automatic';
+  rsProjectKinds = 'Kinds of project';
+  rsNoProjectKind = 'none found';
   rsCommandStillRunning = '%s is still running';
   rsCommandDone = '%s finished in %s';
   rsCommandFailed = '%s failed with exit code %d';
   rsCommandStopped = '%s was stopped';
   rsCommandNoStart = '%s could not be started';
+  rsCommandConfirm = 'Run %s?';
+  rsCommandRunAction = 'Run';
   rsNavHome = 'Home';
   rsNavGraph = 'Graph';
   rsNavRepository = 'Repository';
   rsCompAllFiles = 'All files';
   rsCompOneFile = '1 file';
   rsCompFiles = '%d files';
-  rsNavRecent = 'Recent';
   rsNavCommands = 'Commands';
   rsNavChanges = 'Changes';
   rsNavPulls = 'Pull Requests';
@@ -2564,7 +2638,6 @@ resourcestring
   rsBlobReadFailed = 'Could not read %s: %s';
   rsBlobWriteFailed = 'Could not write %s: %s';
   rsFilesSubmoduleUnknown = '%s is not among the submodules of this work tree';
-  rsNoRecent = 'No recent repositories';
   rsNavFiles = 'Files';
   rsNavHide = 'Hide navigation';
   rsNavShow = 'Show navigation';
@@ -2614,7 +2687,7 @@ resourcestring
   rsHistoryTitle = 'History of %s';
   rsHistoryIn = '%s in %s';
   rsHistoryLines = 'lines %d-%d';
-  rsHistoryMore = '⋯  ↓ %d older changes  ⋯';
+  rsHistoryMore = '↓ %d older changes';
   rsHistoryCounts = '+%d −%d';
   rsHistoryLoading = 'Loading history...';
   rsHistoryNeedsFile = 'Show a file first: the history is of the selected lines, or of the function at the caret.';
@@ -2748,6 +2821,7 @@ resourcestring
   rsResolvedAILast = '%s resolved the last conflict in %s, now marked resolved: %s';
   rsResolvedAIUndo = 'Changes > Undo Discard puts it back';
   rsSplitMenu = 'Split Changes into Commits...';
+  rsAbsorbMenu = 'Put Changes into Their Commits...';
   rsSplitStopMenu = 'Stop Splitting into Commits';
   rsSplitting = '%s is splitting the changes into commits...';
   rsSplitFailed = '%s could not split the changes';
@@ -2896,6 +2970,8 @@ resourcestring
   rsForceUnseen = '%s has commits that were fetched but were never in the branch, ' +
     'someone else''s work maybe, which the forced push would lose. Pull them in first?';
   rsGitTooOld = 'git %s is older than %d.%d';
+  rsSettingsReset = 'Your settings were reset';
+  rsSettingsResetDetail = 'Gittan now keeps its settings in settings.json and state.json, and does not read the gittan.ini of earlier builds. Pick your options again in Settings; the old file is still in %s.';
   rsGitTooOldDetail = 'Gittan needs git %d.%d or later, and some of what it does fails with ' +
     'this one (%s). Update git, or set a newer one in Settings > Tools.';
   rsPushingTo = 'Pushing %s to %s...';
@@ -3456,6 +3532,10 @@ resourcestring
   rsFileMoreMenu = 'More';
   rsIgnoreAdded = 'Added %s to %s';
   rsIgnoreFailed = 'Could not write %s';
+  rsIgnoreAddedUntracked = 'Added %s to %s and stopped tracking %d files';
+  rsIgnoreAddedUntrackedOne = 'Added %s to %s and stopped tracking %s';
+  rsIgnoreNotUntracked = 'Added %s to .gitignore, but the files it matches could not be ' +
+    'taken out of the index';
   rsLfsTrackMenu = 'Track with Git &LFS';
   rsLfsUntrackMenu = 'Stop Tracking with Git LFS';
   rsLfsTracked = 'Git LFS tracks %s now; files already committed move to it the next time ' +
@@ -3540,6 +3620,19 @@ resourcestring
   rsKeptBlock = 'Marked the change at line %d of %s reviewed';
   rsUnkept = 'Shows the change at line %d of %s again';
   rsUnkeptAll = 'Shows every change of %s again';
+  rsAbsorbItem = 'Put Change into Its Commit...';
+  rsAbsorbPill = 'Put into Its Commit';
+  rsAbsorbPillHint = 'Put the change into the commit of this branch that last changed these ' +
+    'lines, as a fixup folded in at once';
+  rsAbsorbTitle = 'Put into Its Commit';
+  rsAbsorbAsk = 'Put the change at line %d of %s into %s "%s"?';
+  rsAbsorbAskRewrites = 'The commits after it are rewritten; Branch > Undo takes it back.';
+  rsAbsorbAction = 'Put';
+  rsAbsorbCannot = 'The change at line %d of %s cannot be placed: %s.';
+  rsAbsorbNoChanges = 'The ticked files have no changes to put into a commit';
+  rsAbsorbDone = 'Put the changes into %d commits';
+  rsAbsorbDoneOne = 'Put the change into "%s"';
+  rsAbsorbFailed = 'Could not put the changes into their commits';
   rsLeaveOutPill = 'Leave Out of Commit';
   rsLeaveOutPillHint = 'Leave the change out of the next commit; it stays in the file';
   rsIncludePill = 'Include in Commit';
@@ -3582,11 +3675,16 @@ resourcestring
   rsOneChangedFile = '1 changed file';
   rsNoChanges = 'No changes';
   rsNoLongerChanged = '%s has no changes any more.';
-  rsGapLines = '⋯  %d unchanged lines  ⋯';
-  rsGapLine = '⋯  1 unchanged line  ⋯';
+  rsGapLines = '%d unchanged lines';
+  rsGapLine = '1 unchanged line';
   rsGapDown = '↓ %d';
   rsGapUp = '↑ %d';
-  rsGapAll = 'all';
+  rsGapAll = 'Show all';
+  rsGapShow = 'Show';
+  rsGapDownHint = 'Show the first %d of the hidden lines';
+  rsGapUpHint = 'Show the last %d of the hidden lines';
+  rsGapAllHint = 'Show all %d hidden lines';
+  rsGapOneHint = 'Show the hidden line';
   rsPullNext = 'Next: %s  ↓';
   rsPullPrev = 'Previous: %s  ↑';
   rsSwitchBranchHint = 'Switch branch';
@@ -3652,7 +3750,7 @@ resourcestring
   rsPullSquashAsk = 'Squash the commits of #%d "%s" into one on %s?';
   rsPullRebaseMergeAsk = 'Rebase the commits of #%d "%s" onto %s?';
   rsPullMergeAction = 'Merge';
-  rsPullActing = 'Asking %s...';
+  rsPullActing = '%s #%d on %s…';
   rsPullActionDone = '%s #%d';
   rsPositionOld = 'Ln %d (old), Col %d';
   rsReviewComments = 'Review &Comments';
@@ -3681,8 +3779,9 @@ const
   navCommands = 3;
   navFiles = 4;
   navPulls = 5;
-  { The last row: a list, never selected. }
-  navRecent = 6;
+  navProject = 6;
+  { The tag of Automatic in the list of the kinds of project. }
+  KindsAutomatic = -2;
   { Scrolling on past the bottom of a file goes to the next one, and
     past the top to the previous: the wheel delta the pull needs (120 is
     one notch of a mouse wheel, 8 one pixel of a trackpad on macOS), the
@@ -3872,6 +3971,12 @@ const
   rowMore = -4;
   { How many hidden lines a gap row's labels open at a time. }
   GapStep = 20;
+  { What GapPartAt answers besides Ord of a TGapChip. }
+  gapPartNone = -3;
+  gapPartHeading = -2;
+  gapPartRow = -1;
+  { The smallest font of a painted gap row, in points. }
+  MinGapFontSize = 8;
   { How many commits the history view shows at a time, and the line
     range that stands for the whole file (git clamps it to the end). }
   HistoryStep = 5;
@@ -4005,6 +4110,8 @@ begin
   FHotDiscard := -1;
   FHotRow := -1;
   FHotKeep := -1;
+  FHotGapRow := -1;
+  FHotGapChip := gapPartNone;
   FFramedBlock := -1;
   FHeaderUnkeep := -1;
   FKeeps := TGittanKeeps.Create;
@@ -4337,9 +4444,6 @@ begin
   FSyntaxPopup.Parent := Self;
   FSyntaxPopup.OnPick := @SyntaxPopupPick;
   FSyntaxPopupNames := TStringList.Create;
-  FRecentPopup := TGittanPopupList.Create(Self);
-  FRecentPopup.Parent := Self;
-  FRecentPopup.OnPick := @RecentPopupPick;
   FCompositionPopup := TGittanPopupList.Create(Self);
   FCompositionPopup.Parent := Self;
   FCompositionPopup.OnPick := @CompositionPopupPick;
@@ -4392,6 +4496,7 @@ begin
   SetupCommandPage;
   SetupFilesPage;
   SetupPullPage;
+  SetupProjectPage;
   { So does the page of a submodule. }
   FSubPage := TGittanSubPage.Create(Self);
   FSubPage.Parent := FSummaryBox;
@@ -4731,6 +4836,8 @@ begin
   { The cards of the review comments (see umain.reviews.inc). }
   AEd.OnDrawGap := @EditDrawGap;
   AEd.OnClickGap := @EditClickGap;
+  { A gap row is painted over its text (see EditDrawLine). }
+  AEd.OnDrawLine := @EditDrawLine;
 end;
 
 function TRepoFrame.AdapterOf(AEd: TATSynEdit): TATAdapterEControl;
@@ -4947,9 +5054,9 @@ begin
   FSymbolBar.SetColors(P.Shade, P.Text, P.Dim, P.Line);
   FTimelapseBar.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Accent);
   for List in [FBranchPopup, FStashPopup, FUpstreamPopup, FTagPopup, FViewPopup,
-    FSubListPopup, FReflogPopup, FPullPopup, FReviewPopup, FSyncPopup, FRecentPopup,
+    FSubListPopup, FReflogPopup, FPullPopup, FReviewPopup, FSyncPopup,
     FSyntaxPopup, FBasePopup, FConflictPopup, FFindPopup, FCompositionPopup, FWorktreePopup,
-    FPalettePopup, FPlanPopup] do
+    FPalettePopup, FPlanPopup, FKindsPopup] do
     List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
   FPaletteLeft.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border);
   FPaletteRight.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border);
@@ -5026,6 +5133,10 @@ begin
       RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(62, 62, 62),
       FLinkColor, RGBToColor(63, 185, 80), RGBToColor(227, 179, 65), RGBToColor(248, 81, 73));
     FPullPage.SetCardColor(RGBToColor(40, 40, 41));
+    FProjectPage.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(62, 62, 62),
+      FLinkColor, RGBToColor(63, 185, 80), RGBToColor(227, 179, 65), RGBToColor(248, 81, 73));
+    FProjectPage.SetCardColor(RGBToColor(40, 40, 41));
     FSubPage.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(45, 45, 46), RGBToColor(62, 62, 62),
       RGBToColor(40, 40, 41), FLinkColor, RGBToColor(63, 185, 80),
@@ -5056,6 +5167,10 @@ begin
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(222, 222, 222),
       FLinkColor, RGBToColor(26, 127, 55), RGBToColor(154, 103, 0), RGBToColor(207, 34, 46));
     FPullPage.SetCardColor(RGBToColor(245, 245, 246));
+    FProjectPage.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(222, 222, 222),
+      FLinkColor, RGBToColor(26, 127, 55), RGBToColor(154, 103, 0), RGBToColor(207, 34, 46));
+    FProjectPage.SetCardColor(RGBToColor(245, 245, 246));
     FSubPage.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(243, 243, 243), RGBToColor(222, 222, 222),
       RGBToColor(245, 245, 246), FLinkColor, RGBToColor(26, 127, 55),
@@ -5637,6 +5752,8 @@ begin
   FMessageItem.Visible := False;
   FSplitItem := AddItem(CommitMenu, rsSplitMenu, 0, @MenuSplitClick);
   FSplitItem.Visible := False;
+  FAbsorbItem := AddItem(CommitMenu, rsAbsorbMenu, 0, @MenuAbsorbClick);
+  FAbsorbItem.Enabled := False;
   CommitMenu.Add(NewLine);
   { The Commit section's options, where they are found and in the
     palette; the chevron beside Amend has them too. }
@@ -5666,6 +5783,8 @@ begin
     @MenuUndoDiscardClick);
   FLeaveOutItem := AddItem(ChangesMenu, rsLeaveOutItem, ShortCut(VK_K, [ssModifier, ssAlt]),
     @MenuLeaveOutClick);
+  FAbsorbChangeItem := AddItem(ChangesMenu, rsAbsorbItem, 0, @MenuAbsorbChangeClick);
+  FAbsorbChangeItem.Enabled := False;
   ChangesMenu.Add(NewLine);
   FResolveItem := AddItem(ChangesMenu, rsResolveHere, ShortCut(VK_R, [ssModifier, ssShift]),
     @MenuResolveHereClick);
@@ -5747,6 +5866,7 @@ begin
   FPullsItem := AddItem(ViewMenu, rsPullRequests, ShortCut(VK_6, ViewKeys),
     @MenuPullsClick);
   FPullsItem.Visible := Assigned(FForge);
+  AddItem(ViewMenu, rsProjectMenu, ShortCut(VK_7, ViewKeys), @MenuProjectClick);
   ViewMenu.Add(NewLine);
   FCompareMenu := AddItem(ViewMenu, rsCompareWith, 0, nil);
   RebuildCompareMenu;
@@ -7302,6 +7422,17 @@ begin
   ApplySnapshot(Snap);
 end;
 
+{ The Project page's reports, built again for the snapshots that came
+  since ApplySnapshot queued this, while the page still shows. }
+procedure TRepoFrame.ReloadProjectAsync(Data: PtrInt);
+begin
+  FProjectReloadQueued := False;
+  if (FView <> gvProject) or not FProjectStale then
+    Exit;
+  LoadProject;
+  FProjectPage.FitHeight(FSummaryBox.ClientHeight);
+end;
+
 { Draws a snapshot of the repository into the views, on the main thread.
   The git work that built it is ApplySnapshot's caller's business: it is
   done on this thread by LoadRepository, in the watcher thread otherwise. }
@@ -7427,6 +7558,21 @@ begin
     HideBoxPages;
     FCommandPage.Visible := True;
     FCommandPage.FitHeight(FSummaryBox.ClientHeight);
+  end;
+  { The project's reports too, but only while the page shows: they
+    take a few git runs, so they are built from the message loop, once
+    for snapshots that come in a row, after the views are drawn. }
+  FProjectStale := True;
+  if FView = gvProject then
+  begin
+    HideBoxPages;
+    FProjectPage.Visible := True;
+    FProjectPage.FitHeight(FSummaryBox.ClientHeight);
+    if not FProjectReloadQueued then
+    begin
+      FProjectReloadQueued := True;
+      Application.QueueAsyncCall(@ReloadProjectAsync, 0);
+    end;
   end;
   { The Files page follows HEAD, which a commit moved. }
   if FView = gvFiles then
@@ -7765,10 +7911,10 @@ begin
   LeaveEditorViews;
   FSummaryBox.Visible := True;
   FView := gvSummary;
-  { The Repository, Commands, Files and Pull Requests pages and the page
-    of a submodule give the box back. }
+  { The Repository, Commands, Files, Pull Requests and Project pages and
+    the page of a submodule give the box back. }
   if FRepoPage.Visible or FSubPage.Visible or FCommandPage.Visible or FFilesPage.Visible or
-    FPullPage.Visible then
+    FPullPage.Visible or ((FProjectPage <> nil) and FProjectPage.Visible) then
   begin
     HideBoxPages;
     FSummary.Visible := FRepo.Root <> '';
@@ -7800,6 +7946,8 @@ begin
     FFilesPage.Visible := False;
   if FPullPage <> nil then
     FPullPage.Visible := False;
+  if FProjectPage <> nil then
+    FProjectPage.Visible := False;
 end;
 
 { Hides the editor and what goes with it, for a page in the box. }
@@ -8173,7 +8321,6 @@ begin
   { The diff may have changed, so the blocks and their headings are
     found again after the parse. }
   FHeadings := nil;
-  FHeadingRebuilds := 0;
   FCurrentPath := APath;
   SetOverscroll(0);
   FSummary.Notice := '';
@@ -8695,12 +8842,14 @@ const
 {$I umain.blame.inc}
 {$I umain.discard.inc}
 {$I umain.leaveout.inc}
+{$I umain.absorb.inc}
 {$I umain.index.inc}
 {$I umain.history.inc}
 {$I umain.timelapse.inc}
 {$I umain.repofiles.inc}
 {$I umain.repopage.inc}
 {$I umain.commands.inc}
+{$I umain.project.inc}
 {$I umain.submodules.inc}
 {$I umain.update.inc}
 {$I umain.reviews.inc}

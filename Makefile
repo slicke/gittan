@@ -168,6 +168,17 @@ VENDOR_PACKAGES := \
   vendor/metadarkstyle/metadarkstyle.lpk \
   vendor/lazink/lazink.lpk
 
+# Before every build vendor-check warns, without stopping the build, when a
+# submodule is not checked out at the commit Gittan records (after a pull with
+# no `git submodule update`; a move not yet added is warned of too), and when a
+# package the IDE is built with has moved since the last `make ide`, which
+# writes their commits into IDE_STAMP (no file, no warning). Outside a git
+# checkout it says nothing. `make outdated` fetches every submodule's remote
+# and lists the commits upstream has that the checkout lacks; it is the only
+# one that needs the network, so no build runs it.
+IDE_VENDOR := vendor/ATFlatControls vendor/EncConv vendor/BGRABitmap vendor/ATSynEdit
+IDE_STAMP := .ide-vendor
+
 # Application icon. The artwork comes finished: icons/gittan-mac.png is the
 # macOS icon at 1024 pixels and icons/png/gittan-<n>.png the Windows and Linux
 # one at each size; `make icons` packs them with tools/makeicons.swift (macOS
@@ -210,7 +221,7 @@ define bundle_icon
 endef
 endif
 
-.PHONY: all build debug rebuild run clean help lexlib icons wordmark dialogicon test deps ide desktop packages version
+.PHONY: all build debug rebuild run clean help lexlib icons wordmark dialogicon test deps ide vendor-check outdated desktop packages version
 
 all: build
 
@@ -224,6 +235,7 @@ help:
 	@echo "  lexlib    Copy the lexers from $(LEXERS_SRC) and $(LEXERS_OWN) into $(LEXLIB)/ (part of every build)"
 	@echo "  deps      Register the vendored packages with lazbuild and compile them"
 	@echo "  ide       Rebuild the Lazarus IDE (after ATSynEdit, ATFlatControls, EncConv or BGRABitmap moves)"
+	@echo "  outdated  Fetch the vendored packages' remotes and list the commits upstream is ahead"
 	@echo "  wordmark  Write src/ui/gittan.wordmark.inc from icons/wordmark/gittan-wordmark-<theme>.png"
 	@echo "  dialogicon Write src/ui/gittan.dialogicon.inc from icons/dialog/gittan-dialog-<n>.png"
 	@echo "  desktop   Install app.gittan.Gittan.desktop and the icons for ./Gittan in ~/.local/share (Linux)"
@@ -233,19 +245,19 @@ help:
 	@echo "  clean     Remove lib/, $(LEXLIB)/, the test build and the binary"
 	@echo "Current: WIDGETSET=$(WIDGETSET) CPU=$(or $(CPU),native) LAZBUILD=$(LAZBUILD)"
 
-build: lexlib qjs-links
+build: vendor-check lexlib qjs-links
 	$(call stage_qjs,.)
 	"$(LAZBUILD)" $(LAZFLAGS) $(RELEASE_MODE) $(LPI)
 	$(bundle_icon)
 	$(stage_qjs_app)
 
-debug: lexlib qjs-links
+debug: vendor-check lexlib qjs-links
 	$(call stage_qjs,.)
 	"$(LAZBUILD)" $(LAZFLAGS) $(DEBUG_MODE) $(DEBUG_FLAGS) $(LPI)
 	$(bundle_icon)
 	$(stage_qjs_app)
 
-rebuild: lexlib qjs-links
+rebuild: vendor-check lexlib qjs-links
 	$(call stage_qjs,.)
 	"$(LAZBUILD)" -B $(LAZFLAGS) $(RELEASE_MODE) $(LPI)
 	$(bundle_icon)
@@ -261,6 +273,40 @@ deps:
 
 ide:
 	"$(LAZBUILD)" --build-ide=
+	@if git rev-parse --git-dir >/dev/null 2>&1; then \
+	  for d in $(IDE_VENDOR); do echo "$$(git -C $$d rev-parse HEAD) $$d"; done > $(IDE_STAMP); fi
+
+vendor-check:
+	@if git rev-parse --git-dir >/dev/null 2>&1; then \
+	  git submodule status 2>/dev/null | while IFS= read -r line; do \
+	    st=$$(printf '%s' "$$line" | cut -c1); rest=$${line#?}; \
+	    sha=$${rest%% *}; p=$${rest#* }; p=$${p% \(*\)}; \
+	    case "$$st" in \
+	      -) echo "warning: $$p is not checked out; run: git submodule update --init" >&2 ;; \
+	      +) rec=$$(git ls-files -s -- "$$p" | cut -d' ' -f2 | cut -c1-7); \
+	         echo "warning: $$p is at $$(echo $$sha | cut -c1-7), Gittan records $$rec; run: git submodule update $$p (or git add $$p for a move you mean)" >&2 ;; \
+	      U) echo "warning: $$p has a merge conflict" >&2 ;; \
+	    esac; \
+	  done; \
+	  if [ -f $(IDE_STAMP) ]; then \
+	    moved=""; for d in $(IDE_VENDOR); do \
+	      grep -qx "$$(git -C $$d rev-parse HEAD 2>/dev/null) $$d" $(IDE_STAMP) || moved="$$moved $$d"; \
+	    done; \
+	    [ -z "$$moved" ] || echo "warning: the Lazarus IDE was built with older$$moved; run: make ide" >&2; \
+	  fi; \
+	fi
+
+outdated:
+	@git config -f .gitmodules --get-regexp '\.path$$' | while read -r key d; do \
+	  if [ ! -e "$$d/.git" ]; then echo "$$d: not checked out"; continue; fi; \
+	  if ! git -C "$$d" fetch -q origin 2>/dev/null; then echo "$$d: could not fetch origin"; continue; fi; \
+	  git -C "$$d" remote set-head origin -a >/dev/null 2>&1; \
+	  up=$$(git -C "$$d" symbolic-ref -q --short refs/remotes/origin/HEAD); \
+	  if [ -z "$$up" ]; then echo "$$d: origin has no default branch"; continue; fi; \
+	  n=$$(git -C "$$d" rev-list --count "HEAD..$$up"); \
+	  if [ "$$n" = 0 ]; then echo "$$d: up to date with $$up"; \
+	  else echo "$$d: $$n commit(s) behind $$up"; git -C "$$d" log --oneline -10 "HEAD..$$up" | sed 's/^/    /'; fi; \
+	done
 
 icons:
 	swift tools/makeicons.swift "$(ICON_MAC_SRC)" "$(ICON_PNG_DIR)" icons Gittan.ico
@@ -405,7 +451,7 @@ run: build
 
 test: qjs-links
 	@mkdir -p $(TESTLIB)
-	$(FPC) $(if $(CPU),-P$(CPU)) -Mobjfpc -Sh -O1 -Fusrc/core -FU$(TESTLIB) -FEtests -Fl$(QJS_DIR) $(QJS_RPATH) tests/gittantests.lpr
+	$(FPC) $(if $(CPU),-P$(CPU)) -Mobjfpc -Sh -O1 -Fusrc/core -Fusrc/proj -Fuvendor/toml-fp/src -FU$(TESTLIB) -FEtests -Fl$(QJS_DIR) $(QJS_RPATH) tests/gittantests.lpr
 	$(call stage_qjs,tests)
 	$(TESTBIN) --all --format=plain $(TEST_ARGS)
 

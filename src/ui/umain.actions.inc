@@ -413,6 +413,15 @@ end;
 { A git older than MinGitMajor.MinGitMinor is said in the banner, at
   start and when the settings name another git. One that cannot be run,
   or names no version, is left to the errors of the git calls. }
+procedure TRepoFrame.CheckSettingsReset;
+begin
+  if not App.Settings.OldIniFound then
+    Exit;
+  MarkNews;
+  FBanner.DetailFont.Assign(Edit.Font);
+  FBanner.Add(rsSettingsReset, Format(rsSettingsResetDetail, [App.Settings.Dir]), bkInfo);
+end;
+
 procedure TRepoFrame.CheckGitVersion;
 var
   Version: string;
@@ -515,7 +524,7 @@ begin
     V.ExtDir := App.Extensions.Dir;
     SetLength(V.ExtInfos, App.Extensions.Count);
     V.ExtDefs := nil;
-    V.ExtValues := TStringList.Create;
+    V.ExtValues := NewExtValueList;
     V.ExtDisabled := TStringList.Create;
     V.ExtResetPerms := TStringList.Create;
     V.ExtReload := @ExtReloadForSettings;

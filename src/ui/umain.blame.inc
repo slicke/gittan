@@ -459,6 +459,7 @@ end;
   it lands after the editor's own cursor update (see EditMouseMove). }
 procedure TRepoFrame.HandCursorAsync(Data: PtrInt);
 begin
-  if (FHoverBlame <> '') and (TATSynEdit(Data) = FHoverEd) then
-    FHoverEd.Cursor := crHandPoint;
+  if ((FHoverBlame <> '') and (TATSynEdit(Data) = FHoverEd)) or
+    ((FHotGapRow >= 0) and (FHotGapChip <> gapPartHeading) and (TATSynEdit(Data) = FHotGapEd)) then
+    TATSynEdit(Data).Cursor := crHandPoint;
 end;

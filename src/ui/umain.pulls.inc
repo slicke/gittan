@@ -230,7 +230,7 @@ begin
     Exit;
   FPullActionJob.OnDone := @PullActionDone;
   FPullActionJob.Start;
-  FStatus.ShowBusy(Format(rsPullActing, [ForgeName]));
+  FStatus.ShowBusy(Format(rsPullActing, [gittan.forge.PullActionDoing(AAction), APull.Number, ForgeName]));
 end;
 
 procedure TRepoFrame.PullActionDone(Sender: TObject);

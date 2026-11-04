@@ -23,7 +23,9 @@ uses
   uwindow,
   { The forges and the AI agents, which register themselves as they
     load. }
-  gittan.github, gittan.agentcli, gittan.openai
+  gittan.github, gittan.agentcli, gittan.openai,
+  { The project drivers, which register themselves too. }
+  gittan.proj.lazarus, gittan.proj.node, gittan.proj.rust, gittan.proj.go, gittan.proj.python
   { you can add units after this };
 
 {$R *.res}

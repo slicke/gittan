@@ -308,8 +308,13 @@ begin
   Anchor.TopLeft := Edit.ClientToScreen(Anchor.TopLeft);
   Anchor.BottomRight := Edit.ClientToScreen(Anchor.BottomRight);
   FPillChoose := (FHotKeep < 0) and CanLeaveOut;
+  FPillAbsorb := FPillChoose and CanAbsorb;
   if FHotKeep >= 0 then
     FDiscardPills.Show(Anchor, [rsUnkeepPill], '', [rsUnkeepPillHint])
+  else if FPillAbsorb then
+    FDiscardPills.Show(Anchor, [rsKeepPill, LeaveOutCaption(FHotDiscard), rsAbsorbPill,
+      rsDiscardAction], 'k  d', [rsKeepPillHint, LeaveOutHint(FHotDiscard), rsAbsorbPillHint,
+      rsDiscardPillHint])
   else if FPillChoose then
     FDiscardPills.Show(Anchor, [rsKeepPill, LeaveOutCaption(FHotDiscard), rsDiscardAction],
       'k d', [rsKeepPillHint, LeaveOutHint(FHotDiscard), rsDiscardPillHint])
@@ -406,7 +411,8 @@ begin
 end;
 
 { A pill: Unkeep on a kept line, else Keep, Leave Out or Include (see
-  umain.leaveout.inc) or Discard for the block. The pills go before the
+  umain.leaveout.inc), Put into Its Commit (umain.absorb.inc) or Discard
+  for the block. The pills go before the
   question. }
 procedure TRepoFrame.DiscardPillsPick(Sender: TObject; AIndex: integer);
 var
@@ -421,6 +427,8 @@ begin
     KeepBlockAt(Block)
   else if FPillChoose and (AIndex = 1) then
     ToggleLeaveOutAt(Block)
+  else if FPillAbsorb and (AIndex = 2) then
+    AbsorbBlockAt(Block)
   else
     DiscardBlockAt(Block);
 end;
@@ -555,7 +563,6 @@ begin
   FKeeps.Apply(FCurrentPath, FChangeLines, FKeptOf);
   ApplyLeftOut;
   FHeadings := nil;
-  FHeadingRebuilds := 0;
   SetChangeActions;
   RebuildIfChanges;
 end;
@@ -645,6 +652,7 @@ begin
     (BlockAtRow(Edit.Carets[0].PosY) >= 0);
   FUndoDiscardItem.Enabled := Length(FDiscards) > 0;
   UpdateLeaveOutItem;
+  UpdateAbsorbItems;
   UpdateResolveItems;
   if FRevertFileItem <> nil then
   begin
@@ -674,6 +682,7 @@ end;
 procedure TRepoFrame.CommitMenuOpen(Sender: TObject);
 begin
   FillBranchCommitMenu;
+  UpdateAbsorbItems;
 end;
 
 procedure TRepoFrame.ChangesMenuOpen(Sender: TObject);

@@ -16,8 +16,11 @@ unit uforge;
   section at a time, which the window's tab strip picks while the view
   is shown (Tabs, SelectTab, StepTab, OnTabsChange),
   read by the forge's AccountJob (gittan.forge; GitHub's runs one
-  GraphQL query through gh) each time the view is shown and on Refresh,
-  the page keeping what it had meanwhile. A card of a pull request goes
+  GraphQL query through gh) once at start, each time the view is shown,
+  on Refresh and when the forge or its account changes, the page keeping
+  what it had meanwhile; the login and the user's picture go to the
+  chrome's globe as well (Picture, ChromeHint, OnUserChange), the
+  picture kept between starts beside the settings. A card of a pull request goes
   to the window (TRepoWindow.ComparePullRequest): a frame with a remote
   for its repository compares with it there, else its local clone among
   the recent repositories (or beside them while CloneSiblings is on;
@@ -65,15 +68,22 @@ type
     { The address of the user's picture as last fetched, and its bytes,
       kept across the jobs so a refresh does not fetch it again. }
     FAvatarUrl, FAvatar: string;
+    { Whether the picture was fetched in this run, so a job may skip its
+      address; and whether the login and picture are the ones kept from
+      the last start (LoadPicture), which the first answer confirms or,
+      when it fails, drops. }
+    FPictureFresh, FRestored: boolean;
     FMine, FReview: TGittanForgePulls;
     FMainMenu: TMainMenu;
     FAppMenuItem: TMenuItem;
     FRecentMenu, FCloseItem: TMenuItem;
     FDark: boolean;
     FThemeTimer: TTimer;
-    FOnTabsChange: TNotifyEvent;
+    FOnTabsChange, FOnUserChange: TNotifyEvent;
     function FindForge: boolean;
     procedure ForgetAnswers;
+    procedure LoadPicture;
+    procedure UserChanged;
     procedure BuildMenu;
     procedure RebuildRecentMenu;
     procedure ApplyTheme;
@@ -122,6 +132,17 @@ type
     function HasForge: boolean;
     {** The forge's name, '' without one. }
     function ForgeName: string;
+    {** What the chrome's globe says of the forge: its name, with the
+      login before it once the forge has said who ("octocat on GitHub"). }
+    function ChromeHint: string;
+    {** The user's login as the forge last gave it, '' before it has. }
+    property Login: string read FLogin;
+    {** The bytes of the user's picture (PNG or JPEG) as the forge gave
+      it, '' without one, for the chrome's globe. }
+    property Picture: string read FAvatar;
+    {** The user changed: the login or the picture came, changed or went,
+      so the chrome's globe follows. }
+    property OnUserChange: TNotifyEvent read FOnUserChange write FOnUserChange;
     {** The window shows the view now: the page follows the appearance,
       shows what the forge last answered and asks it again. }
     procedure Shown;
@@ -132,7 +153,7 @@ type
       found is dropped (the window hides the view then, HasForge). }
     procedure SettingsChanged;
     {** The active account of the forge's tool changed: what the account
-      of before had found goes, and the view asks again while shown. }
+      of before had found goes, and the view asks again. }
     procedure AccountChanged;
     {** The view's tabs, which the window's tab strip shows while the
       view is shown: their names in ACaptions, in AMarks the ones with
@@ -179,6 +200,8 @@ resourcestring
   rsCheckUpdates = 'Check for &Updates...';
   rsSettings = 'Se&ttings...';
   rsAbout = '&About Gittan';
+  { The globe's hint: the login, then the forge: "octocat on GitHub". }
+  rsUserOnForge = '%s on %s';
 
 { TForgeView }
 
@@ -230,7 +253,49 @@ begin
   FDark := IsDarkMode;
   ApplyTheme;
   FindForge;
+  { The picture kept from the last start, then the forge asked once at
+    start, so the chrome's globe has the user and the view its lists
+    before it is first shown. }
+  LoadPicture;
+  StartJob;
   BuildMenu;
+end;
+
+{ The picture kept from the last start (SaveForgePicture, in JobDone),
+  when it is this forge's and its login is the forge's active account:
+  none when the forge lists no account (logged out, or one that keeps no
+  list) or something else picks the account (AccountsNote, a token in
+  the environment). }
+procedure TForgeView.LoadPicture;
+var
+  KeptForge, KeptLogin, KeptUrl, KeptBytes: string;
+  Account: TGittanForgeAccount;
+  Accounts: TGittanForgeAccounts;
+  Known: boolean;
+begin
+  if not Assigned(FForge) then
+    Exit;
+  if not LoadForgePicture(App.Settings.ForgePictureFile, KeptForge, KeptLogin, KeptUrl,
+    KeptBytes) or (KeptForge <> FForge.Name) then
+    Exit;
+  if FForge.AccountsNote <> '' then
+    Exit;
+  Accounts := FForge.Accounts;
+  Known := False;
+  for Account in Accounts do
+    Known := Known or (Account.Active and SameText(Account.Login, KeptLogin));
+  if not Known then
+    Exit;
+  FLogin := KeptLogin;
+  FAvatarUrl := KeptUrl;
+  FAvatar := KeptBytes;
+  FRestored := True;
+end;
+
+procedure TForgeView.UserChanged;
+begin
+  if Assigned(FOnUserChange) then
+    FOnUserChange(Self);
 end;
 
 { The first registered forge that is on and whose tool is found, kept
@@ -273,6 +338,13 @@ begin
     Result := FForge.Name
   else
     Result := '';
+end;
+
+function TForgeView.ChromeHint: string;
+begin
+  Result := ForgeName;
+  if (Result <> '') and (FLogin <> '') then
+    Result := Format(rsUserOnForge, [FLogin, Result]);
 end;
 
 { The items that mean something without a repository; the global ones
@@ -424,7 +496,8 @@ begin
 end;
 
 { What the forge or the account of before had found or was asking; a
-  new one is asked at once while the view is shown. }
+  new one is asked at once, shown or not, so the chrome's globe follows
+  the account. }
 procedure TForgeView.ForgetAnswers;
 begin
   AbandonJob;
@@ -433,12 +506,14 @@ begin
   FLogin := '';
   FAvatarUrl := '';
   FAvatar := '';
+  FPictureFresh := False;
+  FRestored := False;
   FError := '';
   FPage.ForgetAnswer;
   { The job first, as in Shown. }
-  if Visible then
-    StartJob;
+  StartJob;
   UpdatePage;
+  UserChanged;
 end;
 
 procedure TForgeView.FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
@@ -503,7 +578,10 @@ begin
   if not Assigned(FForge) or (FJob <> nil) then
     Exit;
   FJob := FForge.AccountJob(GetUserDir);
-  FJob.KnownAvatarUrl := FAvatarUrl;
+  { The picture kept from the last start is fetched again once, as the
+    forge may give a new one at the same address. }
+  if FPictureFresh then
+    FJob.KnownAvatarUrl := FAvatarUrl;
   FJob.Clones.Assign(App.Settings.Recent);
   FJob.Siblings := App.Settings.CloneSiblings;
   FJob.OnDone := @JobDone;
@@ -523,7 +601,11 @@ end;
 procedure TForgeView.JobDone(Sender: TObject);
 var
   Job: TGittanForgeJob;
+  OldLogin, OldAvatar, OldAvatarUrl: string;
 begin
+  OldLogin := FLogin;
+  OldAvatar := FAvatar;
+  OldAvatarUrl := FAvatarUrl;
   Job := TGittanForgeJob(Sender);
   if Job <> FJob then
     Exit;
@@ -534,20 +616,45 @@ begin
   if FError = '' then
   begin
     FLogin := Job.Login;
-    { A new picture, or none any more; the same address keeps the one
-      held, which the job did not fetch again. }
-    if Job.PictureUrl <> FAvatarUrl then
+    { A picture fetched, new or the kept one again; else a new address,
+      or none any more, drops the one held, and the same address keeps
+      it: the job did not fetch it again, or the fetch of the kept one
+      failed and is tried again next time. }
+    if Job.Avatar <> '' then
     begin
       FAvatarUrl := Job.PictureUrl;
       FAvatar := Job.Avatar;
+      FPictureFresh := True;
+    end
+    else if Job.PictureUrl <> FAvatarUrl then
+    begin
       { A fetch that failed tries again next time. }
-      if FAvatar = '' then
-        FAvatarUrl := '';
+      FAvatarUrl := '';
+      FAvatar := '';
     end;
     FMine := Job.Mine;
     FReview := Job.Review;
+  end
+  else if FRestored then
+  begin
+    { The kept user is not shown as the forge's when the forge could not
+      say who it is; the file stays for the next start. }
+    FLogin := '';
+    FAvatarUrl := '';
+    FAvatar := '';
   end;
+  FRestored := False;
   UpdatePage;
+  if (OldLogin <> FLogin) or (OldAvatar <> FAvatar) or (OldAvatarUrl <> FAvatarUrl) then
+  begin
+    { Kept for the next start (LoadPicture), a write that fails left at
+      that; gone when the forge gives no picture any more. }
+    if (FLogin <> '') and (FAvatar <> '') then
+      SaveForgePicture(App.Settings.ForgePictureFile, ForgeName, FLogin, FAvatarUrl, FAvatar)
+    else if (FAvatar = '') and (FError = '') then
+      DeleteFile(App.Settings.ForgePictureFile);
+    UserChanged;
+  end;
 end;
 
 procedure TForgeView.FreeJobsAsync(Data: PtrInt);

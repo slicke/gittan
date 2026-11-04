@@ -23,6 +23,9 @@ uses
 const
   {** A pull request unchanged this many days is stale (IsStale). }
   StaleDays = 30;
+  {** The widest and tallest picture of the user taken (PictureFits); a
+    forge's are a few hundred pixels. }
+  MaxPictureSide = 4096;
 
 type
   {** Where a pull request stands. }
@@ -627,6 +630,12 @@ type
   the caller. }
 function PullActionDone(AAction: TGittanPullAction): string;
 
+{** What AAction does while it runs, for a status: "Approving",
+  "Requesting changes on", "Commenting on", "Merging", "Squashing and
+  merging", "Rebasing and merging", "Marking ready for review",
+  followed by the pull request's number by the caller. }
+function PullActionDoing(AAction: TGittanPullAction): string;
+
 {** Whether AAction is a review: it may carry words (Text), which a
   request for changes and a comment must. }
 function PullActionIsReview(AAction: TGittanPullAction): boolean;
@@ -666,6 +675,24 @@ function ForgeClassFor(const AUrls: string): TGittanForgeClass; overload;
   each, for telling whether the user switched: equal keys, the same
   accounts in use. }
 function ActiveAccountsKey(const AAccounts: TGittanForgeAccounts): string;
+{** Writes the user's picture to AFile for the next start, so the chrome
+  has it before the forge has answered: the forge's name, the login and
+  the picture's address, a line each, then the bytes; through a
+  temporary file (WriteFileReplacing), so a cut write leaves the old
+  one. False, raising nothing, when it could not be written. }
+function SaveForgePicture(const AFile, AForgeName, ALogin, AUrl, ABytes: string): boolean;
+{** Reads a picture written by SaveForgePicture; false, and everything
+  empty, when there is no such file, it is not one, it is larger than
+  a picture taken could make it (read no further then) or its bytes are
+  no picture PictureFits takes. }
+function LoadForgePicture(const AFile: string; out AForgeName, ALogin, AUrl,
+  ABytes: string): boolean;
+{** The width and height ABytes declare, from a PNG's IHDR or a JPEG's
+  start of frame, without decoding them; false for anything else. }
+function PictureSize(const ABytes: string; out AWidth, AHeight: integer): boolean;
+{** Whether ABytes is a PNG or JPEG of at most MaxPictureSide pixels a
+  side, so decoding it takes little memory. }
+function PictureFits(const ABytes: string): boolean;
 {** Keeps AForge as the forge of AClass with the tool ACli: left as it
   is when it already is, else freed and made again, or left nil without
   a class or a tool. True when it changed, so what the old one found can
@@ -694,7 +721,7 @@ function RemoteRepoPath(const AUrl: string): string;
 implementation
 
 uses
-  gittan.git, gittan.http;
+  gittan.git, gittan.http, gittan.textfile;
 
 const
   { The largest picture taken, in bytes; a forge's are a few KB. }
@@ -808,6 +835,151 @@ begin
   Result := ForgeClassIn(AUrls, '', False);
   if (Result = nil) and HasSshUrl(AUrls) then
     Result := ForgeClassIn(AUrls, UserSshConfig, True);
+end;
+
+function SaveForgePicture(const AFile, AForgeName, ALogin, AUrl, ABytes: string): boolean;
+begin
+  try
+    Result := WriteFileReplacing(AFile, AForgeName + #10 + ALogin + #10 + AUrl + #10 +
+      ABytes);
+  except
+    Result := False;
+  end;
+end;
+
+function LoadForgePicture(const AFile: string; out AForgeName, ALogin, AUrl,
+  ABytes: string): boolean;
+var
+  Stream: TFileStream;
+  All: string;
+  Lines: array[0..2] of string;
+  i, p, q: integer;
+begin
+  Result := False;
+  AForgeName := '';
+  ALogin := '';
+  AUrl := '';
+  ABytes := '';
+  if not FileExists(AFile) then
+    Exit;
+  try
+    Stream := TFileStream.Create(AFile, fmOpenRead or fmShareDenyWrite);
+    try
+      { The largest picture taken and room for the three lines. }
+      if Stream.Size > MaxAvatarBytes + 64 * 1024 then
+        Exit;
+      SetLength(All, Stream.Size);
+      if All <> '' then
+        Stream.ReadBuffer(All[1], Length(All));
+    finally
+      Stream.Free;
+    end;
+  except
+    Exit;
+  end;
+  { The three lines, then the bytes. }
+  p := 1;
+  for i := 0 to 2 do
+  begin
+    q := p;
+    while (q <= Length(All)) and (All[q] <> #10) do
+      Inc(q);
+    if q > Length(All) then
+      Exit;
+    Lines[i] := Copy(All, p, q - p);
+    p := q + 1;
+  end;
+  ABytes := Copy(All, p, Length(All));
+  if (Lines[0] = '') or (Lines[1] = '') or not PictureFits(ABytes) then
+  begin
+    ABytes := '';
+    Exit;
+  end;
+  AForgeName := Lines[0];
+  ALogin := Lines[1];
+  AUrl := Lines[2];
+  Result := True;
+end;
+
+function PictureSize(const ABytes: string; out AWidth, AHeight: integer): boolean;
+
+  function Byte_(i: integer): integer;
+  begin
+    Result := Ord(ABytes[i]);
+  end;
+
+  function Word16(i: integer): integer;
+  begin
+    Result := Byte_(i) shl 8 or Byte_(i + 1);
+  end;
+
+  function Word32(i: integer): int64;
+  begin
+    Result := int64(Word16(i)) shl 16 or Word16(i + 2);
+  end;
+
+var
+  p, Marker: integer;
+  W, H: int64;
+begin
+  Result := False;
+  AWidth := 0;
+  AHeight := 0;
+  { PNG: the signature, then IHDR first with the width and height. }
+  if (Length(ABytes) >= 24) and (Copy(ABytes, 1, 8) = #137'PNG'#13#10#26#10) and
+    (Copy(ABytes, 13, 4) = 'IHDR') then
+  begin
+    W := Word32(17);
+    H := Word32(21);
+    if (W > MaxInt) or (H > MaxInt) then
+      Exit;
+    AWidth := W;
+    AHeight := H;
+    Exit(True);
+  end;
+  { JPEG: the segments after SOI up to a start of frame (C0 to CF but
+    DHT C4, JPG C8 and DAC CC), whose height and width follow the
+    precision. }
+  if (Length(ABytes) < 4) or (Byte_(1) <> $FF) or (Byte_(2) <> $D8) then
+    Exit;
+  p := 3;
+  while p + 1 <= Length(ABytes) do
+  begin
+    if Byte_(p) <> $FF then
+      Exit;
+    Marker := Byte_(p + 1);
+    if Marker = $FF then
+    begin
+      { A fill byte. }
+      Inc(p);
+      Continue;
+    end;
+    Inc(p, 2);
+    { Markers with no length: TEM and RST0 to RST7. }
+    if (Marker = $01) or (Marker in [$D0..$D7]) then
+      Continue;
+    if (Marker = $D9) or (Marker = $DA) or (p + 1 > Length(ABytes)) then
+      Exit;
+    if (Marker in [$C0..$CF]) and not (Marker in [$C4, $C8, $CC]) then
+    begin
+      if p + 6 > Length(ABytes) then
+        Exit;
+      AHeight := Word16(p + 3);
+      AWidth := Word16(p + 5);
+      Exit(True);
+    end;
+    if Word16(p) < 2 then
+      Exit;
+    Inc(p, Word16(p));
+  end;
+end;
+
+function PictureFits(const ABytes: string): boolean;
+var
+  W, H: integer;
+begin
+  Result := PictureSize(ABytes, W, H) and (W > 0) and (H > 0) and (W <= MaxPictureSide) and
+    (H <= MaxPictureSide);
 end;
 
 function KeepForge(var AForge: TGittanForge; AClass: TGittanForgeClass;
@@ -2067,6 +2239,20 @@ begin
   end;
 end;
 
+function PullActionDoing(AAction: TGittanPullAction): string;
+begin
+  case AAction of
+    plApprove: Result := 'Approving';
+    plRequestChanges: Result := 'Requesting changes on';
+    plComment: Result := 'Commenting on';
+    plMerge: Result := 'Merging';
+    plSquash: Result := 'Squashing and merging';
+    plRebaseMerge: Result := 'Rebasing and merging';
+    else
+      Result := 'Marking ready for review';
+  end;
+end;
+
 function PullActionIsReview(AAction: TGittanPullAction): boolean;
 begin
   Result := AAction in [plApprove, plRequestChanges, plComment];
@@ -2131,8 +2317,9 @@ begin
   Result := Terminated;
 end;
 
-{ The user's picture, unless it is the one held; a failure leaves it
-  empty, and the page keeps the initial. }
+{ The user's picture, unless it is the one held; a failure, or bytes
+  that are no PNG or JPEG PictureFits takes, leave it empty, and the
+  page keeps the initial. }
 procedure TGittanForgeJob.FetchAvatar;
 var
   Response: TGittanHttpResponse;
@@ -2140,7 +2327,8 @@ begin
   if (FAvatarUrl = '') or (FAvatarUrl = FKnownAvatarUrl) or Terminated then
     Exit;
   Response := HttpGet(FAvatarUrl, [], 15, @Cancelled);
-  if HttpOk(Response) and (Length(Response.Body) <= MaxAvatarBytes) then
+  if HttpOk(Response) and (Length(Response.Body) <= MaxAvatarBytes) and
+    PictureFits(Response.Body) then
     FAvatar := Response.Body;
 end;
 

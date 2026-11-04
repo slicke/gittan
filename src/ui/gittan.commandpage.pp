@@ -2,11 +2,18 @@ unit gittan.commandpage;
 
 {** The Commands page: the repository's own commands as tiles, grouped
   by where they come from (gittan.repocommands): the commands file,
-  the scripts of package.json and the targets of a Makefile. A tile
-  has the command's name, under it what runs dimmed, and at the right
-  its shortcut as a chip; it fills under the mouse and a click raises
-  OnRun with its index. A section of the file that names no script or
-  target is a dimmed tile that says so and leads nowhere. Each group's heading names its file, and the
+  the scripts of package.json and the targets of a Makefile. In each,
+  the commands that share a group (SplitCommandName: build for
+  build:run and build:test, or build-linux for a target) are listed
+  under the group's name, with the name after it on the tile, and the
+  rest come first under no heading. A tile is one line: a run mark,
+  the command's name, its shortcut as a chip and a terminal at the
+  right; what runs (the shell line, or a script's text, with the full
+  name for a tile in a group) is its hint. It fills under the mouse
+  and a click raises OnRun with its index. A section of the file that
+  names no script or target (or has run lines for other systems only)
+  is a dimmed tile whose hint says so, and
+  it leads nowhere. Each source's heading names its file, and the
   first's offers Edit… or Create… (OnEditFile). While the commands
   file is not trusted its commands are dimmed under a card that says
   why, with a Trust Commands button (OnTrust).
@@ -23,8 +30,7 @@ unit gittan.commandpage;
   state's color.
 
   The tiles of every group share one grid, so a group of one has a tile
-  as wide as the others; a tile has a run mark at the left and what
-  runs in CodeFont (the editor's); under the mark a terminal raises
+  as wide as the others; the terminal at a tile's right end raises
   OnRunInTerminal, for a command that keeps running (a dev server, a
   watch), also while another runs here.
 
@@ -41,7 +47,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Controls, Graphics, ExtCtrls, gittan.repocommands,
-  gittan.console;
+  gittan.project, gittan.console;
 
 const
   {** The least height of the console, in 96-DPI pixels. }
@@ -57,8 +63,10 @@ type
   private
     FName, FRoot: string;
     FCommands: TGittanRepoCommands;
-    FHasFile, FTrusted: boolean;
-    FRunName: string;
+    FProjects: TGittanProjects;
+    FFiles: TGittanCommandsFiles;
+    FTrusted: boolean;
+    FRunName, FRunProject: string;
     FRunSource: TGittanCommandSource;
     FHasRun, FRunning, FRunStarted, FRunKilled, FStopping, FPulse: boolean;
     FExitCode: integer;
@@ -67,11 +75,11 @@ type
     { Ticks while a command runs: the time counts and the dot pulses. }
     FTimer: TTimer;
     FConsole: TGittanConsole;
-    FCodeFont: TFont;
     FShortcutPrefix: string;
     FBack, FText, FDim, FHover, FLine, FLink, FOk, FErrorColor, FCard: TColor;
     FLinkRects: array of TRect;
     FLinkUrls: array of string;
+    FLinkHints: array of string;
     FHot: integer;
     FContentHeight, FBoxHeight, FOutputTop: integer;
     { The canvas the content is painted on: the control's in Paint, a
@@ -81,13 +89,17 @@ type
     FOnStop, FOnTrust, FOnEditFile, FOnCopyOutput: TNotifyEvent;
     function LinkAt(X, Y: integer): integer;
     procedure SetHot(AValue: integer);
-    procedure AddLink(const ARect: TRect; const AUrl: string);
+    procedure AddLink(const ARect: TRect; const AUrl: string; const AHint: string = '');
     procedure PaintHeading(var Y: integer; const ATitle, ADetail, AState: string;
       AStateColor: TColor);
     procedure PaintAction(ATop: integer; const ACaption, ALink: string);
-    procedure PaintNote(var Y: integer; const AText: string);
+    procedure PaintNote(var Y: integer; const AText: string; AColor: TColor = clNone);
+    procedure PaintFileSection(var Y: integer; const AFile: TGittanCommandsFile);
     procedure PaintTrustCard(var Y: integer);
-    procedure PaintTiles(var Y: integer; ASource: TGittanCommandSource);
+    procedure PaintTiles(var Y: integer; ASource: TGittanCommandSource;
+      const AProject: string = '');
+    procedure PaintSubheading(var Y: integer; const ATitle: string);
+    procedure PaintGrid(var Y: integer; const AIndexes: array of integer; AShort: boolean);
     procedure PaintButton(const R: TRect; const ACaption, ALink: string;
       AFill, ATextColor: TColor);
     procedure PaintStateMark(X, Y, ASize: integer; AColor: TColor);
@@ -96,7 +108,8 @@ type
     function RunState(out AColor: TColor): string;
     function RunIndex: integer;
     procedure TimerTick(Sender: TObject);
-    function GroupCount(ASource: TGittanCommandSource): integer;
+    function GroupCount(ASource: TGittanCommandSource; const AProject: string = ''): integer;
+    function IsRun(const ACommand: TGittanRepoCommand): boolean;
     function ColumnCount: integer;
     procedure PaintContent;
     procedure Layout;
@@ -113,15 +126,21 @@ type
     {** The repository shown: its name over its root. Another root
       drops the commands and the run of the one before. }
     procedure SetRepository(const AName, ARoot: string);
-    {** The commands, whether the commands file exists and whether it
-      is trusted. }
-    procedure SetCommands(const ACommands: TGittanRepoCommands; AHasFile, ATrusted: boolean);
+    {** The commands, the kinds of project they are listed under (a
+      section each, in this order), the commands files (a section each,
+      the first under Commands; ReadCommandsFiles) and whether they are
+      trusted. }
+    procedure SetCommands(const ACommands: TGittanRepoCommands;
+      const AProjects: TGittanProjects; const AFiles: TGittanCommandsFiles;
+      ATrusted: boolean);
     {** The command AName of ASource (a script and a target may share
-      a name) is running (ARunning), or has ended with AExitCode after
-      AElapsedMs; AStarted false when the shell could not start it,
-      AKilled when Stop ended it. }
+      a name; AProject the kind's name for one of a kind's) is running
+      (ARunning), or has ended with AExitCode after AElapsedMs; AStarted
+      false when the shell could not start it, AKilled when Stop ended
+      it. }
     procedure SetRun(const AName: string; ASource: TGittanCommandSource;
-      ARunning: boolean; AExitCode: integer; AElapsedMs: int64; AStarted, AKilled: boolean);
+      const AProject: string; ARunning: boolean; AExitCode: integer; AElapsedMs: int64;
+      AStarted, AKilled: boolean);
     {** The palette: the background, the text, the dim text, the fill
       under the mouse, the dividers, the links, the ok state and the
       error state. }
@@ -134,9 +153,6 @@ type
     procedure FitHeight(AMin: integer);
     {** The console the output goes to. }
     property Console: TGittanConsole read FConsole;
-    {** The font of what a tile runs: the editor's. Layout after a
-      change. }
-    property CodeFont: TFont read FCodeFont;
     {** What a shortcut's chip starts with: "⌃⌘" or "Ctrl+Alt+". }
     property ShortcutPrefix: string read FShortcutPrefix write FShortcutPrefix;
     {** Whether a command is running. }
@@ -174,11 +190,14 @@ resourcestring
   rsMakefile = 'Makefile';
   rsEditFile = 'Edit…';
   rsCreateFile = 'Create…';
-  rsNoCommands = 'No commands yet. A .gittan/commands.ini names them, and the scripts of a ' +
-    'package.json and the targets of a Makefile are listed by themselves.';
-  rsTrustTitle = 'This repository''s commands.ini has not been trusted on this computer';
-  rsTrustText = 'A committed file could make a shortcut run anything. Its commands and ' +
-    'their shortcuts are off until you trust it; a change of the file asks again.';
+  rsNoCommands = 'No commands yet. A .gittan/commands.toml names them, and the scripts of a ' +
+    'package.json, the targets of a Makefile and the commands of a Cargo.toml, go.mod, ' +
+    'pyproject.toml or Lazarus project are listed by themselves.';
+  rsNoManifest = 'named in commands.toml';
+  rsNotToml = 'Not read: %s';
+  rsTrustTitle = 'This repository''s commands have not been trusted on this computer';
+  rsTrustText = 'A committed file could make a shortcut run anything. The commands of ' +
+    '.gittan and their shortcuts are off until you trust them; a change of a file asks again.';
   rsTrustButton = 'Trust Commands';
   rsRunning = 'Running';
   rsRunningTile = 'Running… %s';
@@ -193,6 +212,9 @@ resourcestring
   rsRunInTerminal = 'Run in Terminal';
   rsTerminalTile = 'in a terminal';
   rsNoSuchTarget = 'no script or target named %s';
+  rsOverlaps = 'an earlier file already names %s (%s)';
+  rsNoCommandHere = 'no command for %s';
+  rsAsksFirst = 'asks first';
 
 const
   RunLink = 'gittan:run:';
@@ -202,12 +224,15 @@ const
   CopyLink = 'gittan:copy';
   TrustLink = 'gittan:trust';
   EditLink = 'gittan:edit';
+  { A tile that leads nowhere (off, or running): its hint shows, nothing
+    runs. }
+  NoteLink = 'gittan:note';
   Pad = 24;
   Gap = 12;
   TitleFontSize = 20;
   { The tiles: their least width, the gap between them, the padding in
     them, the corner radius; the chip of a shortcut. }
-  TileMinWidth = 240;
+  TileMinWidth = 180;
   TileGap = 10;
   TilePadX = 14;
   TilePadY = 10;
@@ -220,8 +245,7 @@ const
   MarkW = 7;
   MarkH = 9;
   MarkGap = 10;
-  { The terminal under the run mark, which the mark's column is as wide
-    as. }
+  { The terminal at the right end of a tile. }
   TermW = 13;
   TermH = 11;
   CardPad = 14;
@@ -263,7 +287,6 @@ begin
   FConsole := TGittanConsole.Create(Self);
   FConsole.Parent := Self;
   FConsole.Visible := False;
-  FCodeFont := TFont.Create;
   ShowHint := True;
   FTimer := TTimer.Create(Self);
   FTimer.Enabled := False;
@@ -273,7 +296,6 @@ end;
 
 destructor TGittanCommandPage.Destroy;
 begin
-  FCodeFont.Free;
   inherited Destroy;
 end;
 
@@ -282,7 +304,7 @@ begin
   if FRoot <> ARoot then
   begin
     FCommands := nil;
-    FHasFile := False;
+    FFiles := nil;
     FTrusted := True;
     FHasRun := False;
     FRunning := False;
@@ -297,14 +319,19 @@ begin
 end;
 
 procedure TGittanCommandPage.SetCommands(const ACommands: TGittanRepoCommands;
-  AHasFile, ATrusted: boolean);
+  const AProjects: TGittanProjects; const AFiles: TGittanCommandsFiles; ATrusted: boolean);
 var
   i: integer;
 begin
   SetLength(FCommands, Length(ACommands));
   for i := 0 to High(ACommands) do
     FCommands[i] := ACommands[i];
-  FHasFile := AHasFile;
+  SetLength(FProjects, Length(AProjects));
+  for i := 0 to High(AProjects) do
+    FProjects[i] := AProjects[i];
+  SetLength(FFiles, Length(AFiles));
+  for i := 0 to High(AFiles) do
+    FFiles[i] := AFiles[i];
   FTrusted := ATrusted;
   FHot := -1;
   Layout;
@@ -312,12 +339,14 @@ begin
 end;
 
 procedure TGittanCommandPage.SetRun(const AName: string; ASource: TGittanCommandSource;
-  ARunning: boolean; AExitCode: integer; AElapsedMs: int64; AStarted, AKilled: boolean);
+  const AProject: string; ARunning: boolean; AExitCode: integer; AElapsedMs: int64;
+  AStarted, AKilled: boolean);
 begin
   if ARunning and not FRunning then
     FRunStart := GetTickCount64;
   FRunName := AName;
   FRunSource := ASource;
+  FRunProject := AProject;
   FHasRun := True;
   FRunning := ARunning;
   FStopping := False;
@@ -398,33 +427,46 @@ begin
   if FHot = AValue then
     Exit;
   FHot := AValue;
-  if AValue < 0 then
+  if (AValue < 0) or (FLinkUrls[AValue] = NoteLink) then
     Cursor := crDefault
   else
     Cursor := crHandPoint;
-  if (AValue >= 0) and (Copy(FLinkUrls[AValue], 1, Length(TerminalLink)) = TerminalLink) then
-    Hint := rsRunInTerminal
+  if AValue >= 0 then
+    Hint := FLinkHints[AValue]
   else
     Hint := '';
   Invalidate;
 end;
 
-procedure TGittanCommandPage.AddLink(const ARect: TRect; const AUrl: string);
+procedure TGittanCommandPage.AddLink(const ARect: TRect; const AUrl: string;
+  const AHint: string);
 begin
   SetLength(FLinkRects, Length(FLinkRects) + 1);
   SetLength(FLinkUrls, Length(FLinkUrls) + 1);
+  SetLength(FLinkHints, Length(FLinkHints) + 1);
   FLinkRects[High(FLinkRects)] := ARect;
   FLinkUrls[High(FLinkUrls)] := AUrl;
+  FLinkHints[High(FLinkHints)] := AHint;
 end;
 
-function TGittanCommandPage.GroupCount(ASource: TGittanCommandSource): integer;
+function TGittanCommandPage.GroupCount(ASource: TGittanCommandSource;
+  const AProject: string): integer;
 var
   i: integer;
 begin
   Result := 0;
   for i := 0 to High(FCommands) do
-    if FCommands[i].Source = ASource then
+    if (FCommands[i].Source = ASource) and (FCommands[i].Project = AProject) then
       Inc(Result);
+end;
+
+{ Whether ACommand is the one that runs or ran last: by name, source
+  and kind, so a reload that moves the indexes keeps it, and a kind's
+  test is told from a script's. }
+function TGittanCommandPage.IsRun(const ACommand: TGittanRepoCommand): boolean;
+begin
+  Result := (ACommand.Name = FRunName) and (ACommand.Source = FRunSource) and
+    (ACommand.Project = FRunProject);
 end;
 
 { A dim bold title with a dim detail after it and, after that, a state
@@ -479,13 +521,16 @@ begin
 end;
 
 { A dim paragraph, wrapped to the width. }
-procedure TGittanCommandPage.PaintNote(var Y: integer; const AText: string);
+procedure TGittanCommandPage.PaintNote(var Y: integer; const AText: string; AColor: TColor);
 var
   R: TRect;
   Style: TTextStyle;
 begin
   FC.Font := Font;
-  FC.Font.Color := FDim;
+  if AColor = clNone then
+    FC.Font.Color := FDim
+  else
+    FC.Font.Color := AColor;
   FC.Brush.Style := bsClear;
   R := Rect(Px(Pad), Y, Width - Px(Pad), Y);
   Style := FC.TextStyle;
@@ -567,30 +612,39 @@ end;
   the right its shortcut as a chip. The running
   one says so; the file's are dimmed and lead nowhere while the file
   is not trusted; none leads anywhere while one runs. }
-procedure TGittanCommandPage.PaintTiles(var Y: integer; ASource: TGittanCommandSource);
+procedure TGittanCommandPage.PaintSubheading(var Y: integer; const ATitle: string);
+begin
+  Inc(Y, Px(Gap));
+  FC.Font := Font;
+  FC.Font.Style := [fsBold];
+  FC.Font.Color := FText;
+  FC.Brush.Style := bsClear;
+  FC.TextOut(Px(Pad), Y, FitTextRight(FC, ATitle, Width - 2 * Px(Pad)));
+  Inc(Y, FC.TextHeight('Xg') + Px(Gap) div 2);
+end;
+
+procedure TGittanCommandPage.PaintTiles(var Y: integer; ASource: TGittanCommandSource;
+  const AProject: string);
 var
-  Indexes: array of integer;
-  n, Rows, Cols, TileW, TileH, BodyH, CodeH, i, X, TileY, TextX, NameY, Inner, ChipW,
-  ChipH, Right, MarkX, MarkY, j, k, TermY: integer;
-  Detail, Chip: string;
-  R, ChipR: TRect;
-  Off, Leads, Hot, TermHot, Busy: boolean;
-  TermR: TRect;
-  Cmd: TGittanRepoCommand;
-  StateColor: TColor;
+  Indexes, Plain, Members: array of integer;
+  Groups: array of string;
+  Counts: array of integer;
+  i, j, k, g: integer;
+  Group, Short: string;
 begin
   Indexes := nil;
   for i := 0 to High(FCommands) do
-    if FCommands[i].Source = ASource then
+    if (FCommands[i].Source = ASource) and (FCommands[i].Project = AProject) then
     begin
       SetLength(Indexes, Length(Indexes) + 1);
       Indexes[High(Indexes)] := i;
     end;
-  n := Length(Indexes);
-  if n = 0 then
+  if Length(Indexes) = 0 then
     Exit;
-  { By name, whatever the order of the file they come from. }
-  for i := 1 to n - 1 do
+  { By name, whatever the order of the file they come from; a group's
+    members are then together, its bare name (build before build:run)
+    first. }
+  for i := 1 to High(Indexes) do
   begin
     j := i;
     while (j > 0) and (CompareText(FCommands[Indexes[j - 1]].Name,
@@ -602,39 +656,147 @@ begin
       Dec(j);
     end;
   end;
+  { The groups, in the order the names give, with how many each has. }
+  Groups := nil;
+  Counts := nil;
+  for i := 0 to High(Indexes) do
+  begin
+    SplitCommandName(FCommands[Indexes[i]], Group, Short);
+    g := -1;
+    for j := 0 to High(Groups) do
+      if CompareText(Groups[j], Group) = 0 then
+        g := j;
+    if g < 0 then
+    begin
+      SetLength(Groups, Length(Groups) + 1);
+      SetLength(Counts, Length(Counts) + 1);
+      g := High(Groups);
+      Groups[g] := Group;
+    end;
+    Inc(Counts[g]);
+  end;
+  { The commands of no group (a group of one) first, under no heading,
+    then each group with its name over it. }
+  Plain := nil;
+  for g := 0 to High(Groups) do
+    if Counts[g] < 2 then
+      for i := 0 to High(Indexes) do
+      begin
+        SplitCommandName(FCommands[Indexes[i]], Group, Short);
+        if CompareText(Group, Groups[g]) = 0 then
+        begin
+          SetLength(Plain, Length(Plain) + 1);
+          Plain[High(Plain)] := Indexes[i];
+        end;
+      end;
+  { Back in name order, as the groups' order is the first member's. }
+  for i := 1 to High(Plain) do
+  begin
+    j := i;
+    while (j > 0) and (CompareText(FCommands[Plain[j - 1]].Name,
+        FCommands[Plain[j]].Name) > 0) do
+    begin
+      k := Plain[j];
+      Plain[j] := Plain[j - 1];
+      Plain[j - 1] := k;
+      Dec(j);
+    end;
+  end;
+  if Length(Plain) > 0 then
+    PaintGrid(Y, Plain, False);
+  for g := 0 to High(Groups) do
+    if Counts[g] >= 2 then
+    begin
+      Members := nil;
+      for i := 0 to High(Indexes) do
+      begin
+        SplitCommandName(FCommands[Indexes[i]], Group, Short);
+        if CompareText(Group, Groups[g]) = 0 then
+        begin
+          SetLength(Members, Length(Members) + 1);
+          Members[High(Members)] := Indexes[i];
+        end;
+      end;
+      PaintSubheading(Y, Groups[g]);
+      PaintGrid(Y, Members, True);
+    end;
+end;
+
+procedure TGittanCommandPage.PaintGrid(var Y: integer; const AIndexes: array of integer;
+  AShort: boolean);
+var
+  n, Rows, Cols, TileW, TileH, BodyH, i, X, TileY, TextX, NameY, ChipW, ChipH, Right,
+  MarkX, MarkY, TermY: integer;
+  Detail, Chip, Group, Shown, Tip: string;
+  R, ChipR, TermR: TRect;
+  Off, Leads, Hot, TermHot, Busy: boolean;
+  Cmd: TGittanRepoCommand;
+  StateColor: TColor;
+begin
+  n := Length(AIndexes);
+  if n = 0 then
+    Exit;
   Cols := ColumnCount;
   Rows := (n + Cols - 1) div Cols;
   TileW := (Width - 2 * Px(Pad) - (Cols - 1) * Px(TileGap)) div Cols;
   FC.Font := Font;
-  BodyH := FC.TextHeight('Xg');
-  FC.Font := FCodeFont;
-  CodeH := FC.TextHeight('Xg');
-  TileH := 2 * Px(TilePadY) + BodyH + Px(4) + CodeH;
+  BodyH := Max(FC.TextHeight('Xg'), Px(TermH));
+  TileH := 2 * Px(TilePadY) + BodyH;
   for i := 0 to n - 1 do
   begin
-    Cmd := FCommands[Indexes[i]];
+    Cmd := FCommands[AIndexes[i]];
+    SplitCommandName(Cmd, Group, Shown);
+    if not AShort then
+      Shown := Cmd.Name;
     X := Px(Pad) + (i mod Cols) * (TileW + Px(TileGap));
     TileY := Y + (i div Cols) * (TileH + Px(TileGap));
     R := Rect(X, TileY, X + TileW, TileY + TileH);
+    NameY := TileY + Px(TilePadY);
+    Right := X + TileW - Px(TilePadX);
     { The file's are off while it is not trusted, and a section that
       names no script or target always. }
-    Off := ((ASource = csFile) and not FTrusted) or (Cmd.Command = '');
+    Off := ((Cmd.Source = csFile) and not FTrusted) or (Cmd.Command = '');
     Leads := not Off and not FRunning and Assigned(FOnRun);
-    Busy := FRunning and (Cmd.Name = FRunName) and (Cmd.Source = FRunSource);
+    Busy := FRunning and IsRun(Cmd);
+    { What runs is the tile's hint: the shell line, or a script's text;
+      a section that names nothing says so. }
+    if Cmd.Elsewhere then
+      Tip := Format(rsNoCommandHere, [CommandsSystemTitle])
+    else if Cmd.Overlaps <> '' then
+      Tip := Format(rsOverlaps, [Cmd.Name, Cmd.Overlaps])
+    else if Cmd.Command = '' then
+      Tip := Format(rsNoSuchTarget, [Cmd.Name])
+    else if Cmd.Detail <> '' then
+      Tip := Cmd.Detail
+    else
+      Tip := Cmd.Command;
+    if Cmd.Terminal then
+      Tip := Tip + ' · ' + rsTerminalTile;
+    if Cmd.Confirm and (Cmd.Command <> '') then
+      Tip := Tip + ' · ' + rsAsksFirst;
+    { The file's line on what it does comes first. }
+    if Cmd.Description <> '' then
+      Tip := Cmd.Description + LineEnding + Tip;
+    if AShort then
+      Tip := Cmd.Name + LineEnding + Tip;
+
     { The terminal's link goes first, as LinkAt takes the first that
-      holds the point; it leads while another command runs here too. }
-    TermY := (TileY + Px(TilePadY)) + BodyH + Px(4) + (CodeH - Px(TermH)) div 2;
-    TermR := Rect(X + Px(TilePadX) - Px(4), TermY - Px(4), X + Px(TilePadX) + Px(TermW) + Px(4),
-      TermY + Px(TermH) + Px(4));
+      holds the point; it leads while another command runs here too.
+      It sits at the right end, before the chip. }
     TermHot := False;
-    if not Off and Assigned(FOnRunInTerminal) then
+    TermY := NameY + (BodyH - Px(TermH)) div 2;
+    TermR := Rect(Right - Px(TermW) - Px(4), TermY - Px(4), Right + Px(4),
+      TermY + Px(TermH) + Px(4));
+    if not Off and Assigned(FOnRunInTerminal) and not Busy then
     begin
       TermHot := FHot = Length(FLinkRects);
-      AddLink(TermR, TerminalLink + IntToStr(Indexes[i]));
+      AddLink(TermR, TerminalLink + IntToStr(AIndexes[i]), rsRunInTerminal);
     end;
     Hot := Leads and (FHot = Length(FLinkRects));
     if Leads then
-      AddLink(R, RunLink + IntToStr(Indexes[i]));
+      AddLink(R, RunLink + IntToStr(AIndexes[i]), Tip)
+    else
+      AddLink(R, NoteLink, Tip);
 
     { The tile, with a hairline round it; the running one's in the
       link color. }
@@ -651,17 +813,17 @@ begin
       FC.Brush.Color := FCard;
     FC.RoundRect(R, Px(TileRadius), Px(TileRadius));
     FC.Brush.Style := bsClear;
-    NameY := TileY + Px(TilePadY);
 
     { The run mark, in the link color under the mouse and while it
-      runs, faint while the tile leads nowhere. }
+      runs, in the last run's state color, faint while the tile leads
+      nowhere. }
     MarkY := NameY + (BodyH - Px(MarkH)) div 2;
     TextX := X + Px(TilePadX);
     FC.Pen.Style := psClear;
     FC.Brush.Style := bsSolid;
     if Hot or Busy then
       FC.Brush.Color := FLink
-    else if FHasRun and (Cmd.Name = FRunName) and (Cmd.Source = FRunSource) and
+    else if FHasRun and IsRun(Cmd) and
       not FRunning then
     begin
       RunState(StateColor);
@@ -671,45 +833,59 @@ begin
       FC.Brush.Color := MixColor(FDim, FCard, 0.5)
     else
       FC.Brush.Color := FDim;
-    MarkX := TextX + (Px(TermW) - Px(MarkW)) div 2;
+    MarkX := TextX;
     FC.Polygon([Point(MarkX, MarkY), Point(MarkX + Px(MarkW), MarkY + Px(MarkH) div 2),
       Point(MarkX, MarkY + Px(MarkH))]);
     FC.Pen.Style := psSolid;
     FC.Brush.Style := bsClear;
-    { The terminal under it, in the link color under the mouse. }
-    if TermHot then
-      PaintTerminalIcon(TextX, TermY, Px(TermW), FLink)
-    else if Off then
-      PaintTerminalIcon(TextX, TermY, Px(TermW), MixColor(FDim, FCard, 0.5))
-    else
-      PaintTerminalIcon(TextX, TermY, Px(TermW), FDim);
-    Inc(TextX, Px(TermW) + Px(MarkGap));
-    Right := X + TileW - Px(TilePadX);
+    Inc(TextX, Px(MarkW) + Px(MarkGap));
 
-    { The chip of the shortcut, on the name's line. }
-    if Cmd.Key <> #0 then
+    if Busy then
     begin
-      Chip := FShortcutPrefix + Cmd.Key;
+      { The time so far, where the chip would be. }
       FC.Font := Font;
-      FC.Font.Size := Max(7, Font.Size - 2);
-      if Font.Size <= 0 then
-        FC.Font.Size := 9;
-      ChipW := FC.TextWidth(Chip) + 2 * Px(ChipPadX);
-      ChipH := FC.TextHeight(Chip) + 2 * Px(ChipPadY);
-      ChipR := Rect(Right - ChipW, NameY + (BodyH - ChipH) div 2, Right,
-        NameY + (BodyH - ChipH) div 2 + ChipH);
-      FC.Pen.Style := psClear;
-      FC.Brush.Style := bsSolid;
-      if Hot then
-        FC.Brush.Color := FCard
-      else
-        FC.Brush.Color := FHover;
-      FC.RoundRect(ChipR, Px(ChipRadius), Px(ChipRadius));
-      FC.Pen.Style := psSolid;
-      FC.Brush.Style := bsClear;
-      FC.Font.Color := FDim;
-      FC.TextOut(ChipR.Left + Px(ChipPadX), ChipR.Top + Px(ChipPadY), Chip);
-      Right := ChipR.Left - Px(Gap) div 2;
+      FC.Font.Color := FLink;
+      Detail := Format(rsRunningTile, [FormatElapsed(GetTickCount64 - FRunStart)]);
+      FC.TextOut(Right - FC.TextWidth(Detail), NameY + (BodyH - FC.TextHeight(Detail)) div 2,
+        Detail);
+      Right := Right - FC.TextWidth(Detail) - Px(Gap) div 2;
+    end
+    else
+    begin
+      { The terminal, in the link color under the mouse. }
+      if not Off and Assigned(FOnRunInTerminal) then
+      begin
+        if TermHot then
+          PaintTerminalIcon(Right - Px(TermW), TermY, Px(TermW), FLink)
+        else
+          PaintTerminalIcon(Right - Px(TermW), TermY, Px(TermW), FDim);
+        Right := Right - Px(TermW) - Px(Gap);
+      end;
+      { The chip of the shortcut. }
+      if Cmd.Key <> #0 then
+      begin
+        Chip := FShortcutPrefix + Cmd.Key;
+        FC.Font := Font;
+        FC.Font.Size := Max(7, Font.Size - 2);
+        if Font.Size <= 0 then
+          FC.Font.Size := 9;
+        ChipW := FC.TextWidth(Chip) + 2 * Px(ChipPadX);
+        ChipH := FC.TextHeight(Chip) + 2 * Px(ChipPadY);
+        ChipR := Rect(Right - ChipW, NameY + (BodyH - ChipH) div 2, Right,
+          NameY + (BodyH - ChipH) div 2 + ChipH);
+        FC.Pen.Style := psClear;
+        FC.Brush.Style := bsSolid;
+        if Hot or TermHot then
+          FC.Brush.Color := FCard
+        else
+          FC.Brush.Color := FHover;
+        FC.RoundRect(ChipR, Px(ChipRadius), Px(ChipRadius));
+        FC.Pen.Style := psSolid;
+        FC.Brush.Style := bsClear;
+        FC.Font.Color := FDim;
+        FC.TextOut(ChipR.Left + Px(ChipPadX), ChipR.Top + Px(ChipPadY), Chip);
+        Right := ChipR.Left - Px(Gap) div 2;
+      end;
     end;
 
     FC.Font := Font;
@@ -719,35 +895,8 @@ begin
       FC.Font.Color := FDim
     else
       FC.Font.Color := FText;
-    FC.TextOut(TextX, NameY, FitTextRight(FC, Cmd.Name, Right - TextX));
-
-    { What runs, in the code font; a target's is make and its name. }
-    Inner := X + TileW - Px(TilePadX) - TextX;
-    if Busy then
-    begin
-      FC.Font := Font;
-      Detail := Format(rsRunningTile, [FormatElapsed(GetTickCount64 - FRunStart)]);
-      FC.Font.Color := FLink;
-    end
-    else
-    begin
-      FC.Font := FCodeFont;
-      if Cmd.Command = '' then
-      begin
-        FC.Font := Font;
-        Detail := Format(rsNoSuchTarget, [Cmd.Name]);
-      end
-      else if Cmd.Detail <> '' then
-        Detail := Cmd.Detail
-      else
-        Detail := Cmd.Command;
-      if Cmd.Terminal then
-        Detail := Detail + ' · ' + rsTerminalTile;
-      FC.Font.Color := FDim;
-    end;
-    FC.Brush.Style := bsClear;
-    FC.TextOut(TextX, NameY + BodyH + Px(4) + (CodeH - FC.TextHeight('Xg')) div 2,
-      FitTextRight(FC, Detail, Inner));
+    FC.TextOut(TextX, NameY + (BodyH - FC.TextHeight('Xg')) div 2,
+      FitTextRight(FC, Shown, Right - TextX));
   end;
   Inc(Y, Rows * TileH + (Rows - 1) * Px(TileGap));
 end;
@@ -800,8 +949,7 @@ var
   i: integer;
 begin
   for i := 0 to High(FCommands) do
-    if (FCommands[i].Name = FRunName) and (FCommands[i].Source = FRunSource) and
-      (FCommands[i].Command <> '') then
+    if IsRun(FCommands[i]) and (FCommands[i].Command <> '') then
     begin
       if (FCommands[i].Source = csFile) and not FTrusted then
         Exit(-1);
@@ -1039,15 +1187,27 @@ begin
   PaintContent;
 end;
 
+{ A commands file's tiles, under a note in the error color when it is
+  no TOML. }
+procedure TGittanCommandPage.PaintFileSection(var Y: integer; const AFile: TGittanCommandsFile);
+begin
+  if AFile.Error <> '' then
+    PaintNote(Y, Format(rsNotToml, [AFile.Error]), FErrorColor);
+  if GroupCount(csFile, AFile.Path) > 0 then
+    PaintTiles(Y, csFile, AFile.Path);
+end;
+
 procedure TGittanCommandPage.PaintContent;
 var
-  Y, TextH, TitleH, HeadingTop, X: integer;
+  Y, TextH, TitleH, HeadingTop, X, i: integer;
+  Main: boolean;
 begin
   FC.Brush.Style := bsSolid;
   FC.Brush.Color := FBack;
   FC.FillRect(Rect(0, 0, Width, Height));
   FLinkRects := nil;
   FLinkUrls := nil;
+  FLinkHints := nil;
   FC.Font := Font;
   FC.Brush.Style := bsClear;
   TextH := FC.TextHeight('Xg');
@@ -1068,21 +1228,28 @@ begin
   FC.TextOut(Px(Pad), Y, FitTextLeft(FC, FRoot, Width - 2 * Px(Pad)));
   Inc(Y, TextH);
 
-  { The file's commands, with the trust card over them while the file
-    is not trusted; with no commands at all the page says so here. }
+  { The files' commands under Commands, commands.toml's there and each
+    other file's in a section of its own, with the trust card over them while they are not trusted;
+    with no commands at all the page says so here. }
   HeadingTop := Y;
+  Main := (Length(FFiles) > 0) and (FFiles[0].Path = CommandsPath);
   PaintHeading(Y, rsFileGroup, CommandsPath, '', FDim);
   if Assigned(FOnEditFile) then
-    if FHasFile then
+    if Main then
       PaintAction(HeadingTop + Px(Pad), rsEditFile, EditLink)
     else
       PaintAction(HeadingTop + Px(Pad), rsCreateFile, EditLink);
-  if FHasFile and not FTrusted then
+  if (Length(FFiles) > 0) and not FTrusted then
     PaintTrustCard(Y);
-  if GroupCount(csFile) > 0 then
-    PaintTiles(Y, csFile)
-  else if Length(FCommands) = 0 then
+  if Main then
+    PaintFileSection(Y, FFiles[0]);
+  if Length(FCommands) = 0 then
     PaintNote(Y, rsNoCommands);
+  for i := Ord(Main) to High(FFiles) do
+  begin
+    PaintHeading(Y, ChangeFileExt(ExtractFileName(FFiles[i].Path), ''), FFiles[i].Path, '', FDim);
+    PaintFileSection(Y, FFiles[i]);
+  end;
 
   if GroupCount(csPackage) > 0 then
   begin
@@ -1094,6 +1261,17 @@ begin
     PaintHeading(Y, rsTargetsGroup, rsMakefile, '', FDim);
     PaintTiles(Y, csMake);
   end;
+  { A section per kind of project, its name over the file that told
+    it; a kind the commands file asked for with no file says so. }
+  for i := 0 to High(FProjects) do
+    if GroupCount(csProject, FProjects[i].Name) > 0 then
+    begin
+      if FProjects[i].Manifest <> '' then
+        PaintHeading(Y, FProjects[i].Name, FProjects[i].Manifest, '', FDim)
+      else
+        PaintHeading(Y, FProjects[i].Name, rsNoManifest, '', FDim);
+      PaintTiles(Y, csProject, FProjects[i].Name);
+    end;
 
   { The output of the last run, in its panel. }
   FOutputTop := -1;

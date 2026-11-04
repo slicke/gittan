@@ -68,6 +68,8 @@ begin
       APlace.Kind := pkCommands;
     gvPulls:
       APlace.Kind := pkPulls;
+    gvProject:
+      APlace.Kind := pkProject;
     else
       Exit;
   end;
@@ -309,6 +311,8 @@ begin
       ShowCommands;
     pkPulls:
       ShowPulls;
+    pkProject:
+      ShowProject;
     pkGraph:
     begin
       ShowCommitGraph(APlace.Path, APlace.Ref);

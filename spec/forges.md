@@ -13,14 +13,14 @@ Read this before adding a service that hosts repositories (GitLab, Bitbucket, Gi
     RegisterForge(TGittanGitLabForge);
   ```
 
-  From then on everything else follows: a repository whose remote is on the forge gets it (`ForgeClassFor` asks `HostsRemote`), the settings keep its tool's path in a section named after it, the settings dialog's Hosting page has a block for it (its name and its tool's field, under the one switch for every forge), and About lists its tool's version. No unit in `src/ui` needs to change.
+  From then on everything else follows: a repository whose remote is on the forge gets it (`ForgeClassFor` asks `HostsRemote`), the settings keep its tool's path in an object named after it, the settings dialog's Hosting page has a block for it (its name and its tool's field, under the one switch for every forge), and About lists its tool's version. No unit in `src/ui` needs to change.
 
 ## The class
 
 Every method below is abstract in `TGittanForge`; each comment in `gittan.forge.pp` is the authority.
 
-1. `class function Name: string` – how the interface names it ("GitLab"): menus, links, the sidebar, the settings section and the Hosting page's block. Keep it short and stable, since it is the ini section name.
-2. `class function CliName: string` – the tool as found on the search path ("glab"). `FindTool` looks for it, and an old `[Tools]` key of that name is read once.
+1. `class function Name: string` – how the interface names it ("GitLab"): menus, links, the sidebar, the settings section and the Hosting page's block. Keep it short and stable, since it is the forge's key in settings.json (`hosting.forges.<Name>`).
+2. `class function CliName: string` – the tool as found on the search path ("glab"). `FindTool` looks for it.
 3. `class function HostsRemote(const AHost: string): boolean` – whether a remote on `AHost` (lower case, no user, no port, from `RemoteHost`) is on this forge: its public host (gitlab.com), and the self-hosted ones its tool is logged in to, read from the tool's own config file the way GitHub's reads gh's `hosts.yml` (`GhHosts`, `GhConfigDir`; read again only when the file changed, `GhLoggedHosts`, since `ForgeClassFor` asks for every remote of every repository). It is called from the snapshot's consumer whenever the remotes change, so it should read a file at most, never run the tool or touch the network.
 4. `function Version(out AVersion: string): boolean` – the tool's own `--version`, as "glab 1.45.0".
 5. `function PullJob(const ARoot, ABranch, ALogin: string): TGittanPullRequestJob` – the open repository's pull requests (merge requests, on GitLab), see below. Not started.
@@ -32,7 +32,7 @@ Every method below is abstract in `TGittanForge`; each comment in `gittan.forge.
 
 Three more have an answer in the base, for a forge whose tool keeps no list of accounts (none, no note, no switch), and a forge overrides them when its tool can be logged in to several:
 
-- `class function Accounts: TGittanForgeAccounts` – the accounts the tool is logged in to, a host and a login each, the active one per host marked, read from the tool's own files without running it, since the window asks on every activation and every minute (`CheckAccounts`). GitHub reads gh's `hosts.yml` (`GhAccounts`), again only when the file changed. Keep it cheap and main-thread.
+- `class function Accounts: TGittanForgeAccounts` – the accounts the tool is logged in to, a host and a login each, the active one per host marked, read from the tool's own files without running it, since the window asks on every activation and every minute (`CheckAccounts`). GitHub reads gh's `hosts.yml` (`GhAccounts`), again only when the file changed. Keep it cheap and main-thread. The forge view restores the user's picture kept from the last start only for an active account listed here, with no `AccountsNote`, so a forge that lists none shows the user once its first job has answered.
 - `class function AccountsNote: string` – why the tool would not use the account picked, when something outside its login decides (gh with `GH_TOKEN` in the environment); empty otherwise. The Hosting page shows it in place of its own note.
 - `function SwitchAccount(const AHost, ALogin: string; out AError: string): boolean` – makes ALogin the tool's active account on AHost, for the tool everywhere (`gh auth switch --hostname --user`). It runs the tool and waits.
 
@@ -64,7 +64,7 @@ Write the parsing as plain functions of the tool's output (JSON, mostly) and tes
 
 ## Still to do when a second forge arrives
 
-- The forge view shows one forge, the first registered that is on and whose tool is found; its filters, presets and ignored checks are already kept under each forge's own section (`ForgeValue`), the attention reasons and the orders under `[GitHub]`. With two forges on, it needs a way to show the other's pull requests, a switch in its head or tabs of its own.
+- The forge view shows one forge, the first registered that is on and whose tool is found; its filters, presets and ignored checks are already kept in each forge's own object (`ForgeValue`), the attention reasons and the orders in `hosting`, for every forge. With two forges on, it needs a way to show the other's pull requests, a switch in its head or tabs of its own.
 
 - `ForgeClassFor` takes the first forge that hosts one of the remotes, the remotes in git's order. A repository with remotes on two forges gets the first; a setting per repository may be wanted then.
 - The texts of the pull request features name the forge through `Name`; check that none of them says something only true of GitHub ("gh", "GitHub Actions") for the new one.
