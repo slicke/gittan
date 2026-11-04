@@ -524,7 +524,7 @@ begin
     V.ExtDir := App.Extensions.Dir;
     SetLength(V.ExtInfos, App.Extensions.Count);
     V.ExtDefs := nil;
-    V.ExtValues := TStringList.Create;
+    V.ExtValues := NewExtValueList;
     V.ExtDisabled := TStringList.Create;
     V.ExtResetPerms := TStringList.Create;
     V.ExtReload := @ExtReloadForSettings;

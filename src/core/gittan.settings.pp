@@ -251,9 +251,12 @@ type
     procedure AddRecent(const ARoot: string);
     {** Takes ARoot out of the recent list. }
     procedure RemoveRecent(const ARoot: string);
-    {** Writes state.json at once, so a removal from the recent list
-      outlasts a run that does not close normally; settings.json is left
-      as it is, and errors are ignored as in Save. }
+    {** Writes the recent lists (Recent, PaletteRecent) into state.json
+      at once, so a removal from the recent list outlasts a run that does
+      not close normally. The file is read again first and the rest of it
+      kept as it is there, so what another instance saved since Load
+      stays; settings.json is left as it is, and errors are ignored as in
+      Save. }
     procedure SaveRecent;
     {** Puts the action AName (as the command palette names it) first in
       PaletteRecent, dropping a duplicate and the oldest beyond
@@ -293,6 +296,13 @@ type
   values: not empty, and no control character (a line end, a tab), so
   the files stay one key to a line and readable. }
 function ValidExtKey(const AKey: string): boolean;
+
+{** A list for the extensions' values as the settings dialog edits them,
+  "id" + #9 + "key" as a name with the value after it: the name and the
+  value are parted by #31, which ValidExtKey keeps out of an id and a key
+  (an = is in a key as any other character), and the names tell case
+  (Token and token are two keys). The caller frees it. }
+function NewExtValueList: TStringList;
 
 resourcestring
   rsBadExtKey = 'The key "%s" cannot be stored: a key is not empty and has no line end, tab or other control character.';
@@ -342,6 +352,13 @@ begin
   for c in AKey do
     if (c < ' ') or (c = #127) then
       Exit(False);
+end;
+
+function NewExtValueList: TStringList;
+begin
+  Result := TStringList.Create;
+  Result.NameValueSeparator := #31;
+  Result.CaseSensitive := True;
 end;
 
 { A key of the forge view's (MineFilters) as the file has it
@@ -762,7 +779,14 @@ begin
     O.Strings['repo'] := CommitDraftRepo;
   end
   else
-    DropKey(FStateDoc, 'commitDraft');
+  begin
+    { No draft: its members go, a key of a newer build's stays. }
+    O := ObjOf(FStateDoc, 'commitDraft');
+    DropKey(O, 'text');
+    DropKey(O, 'repo');
+    if (O = nil) or (O.Count = 0) then
+      DropKey(FStateDoc, 'commitDraft');
+  end;
   if UpdateSnoozedUntil > 0 then
     ChildOf(FStateDoc, 'update').Strings['snoozedUntil'] :=
       FormatDateTime('yyyy"-"mm"-"dd', UpdateSnoozedUntil)
@@ -794,9 +818,21 @@ begin
 end;
 
 procedure TGittanSettings.SaveRecent;
+var
+  Doc: TJSONObject;
 begin
+  { The file as it is now, which another instance may have written since
+    Load, with the recent lists put in, and nothing else. }
   try
-    WriteState;
+    Doc := ReadDoc(StateFile);
+    try
+      Doc.Integers['version'] := SettingsVersion;
+      Doc.Arrays['recent'] := ListJson(FRecent);
+      Doc.Arrays['paletteRecent'] := ListJson(FPaletteRecent);
+      WriteFileReplacing(StateFile, Doc.FormatJSON(JsonLayout) + LineEnding);
+    finally
+      Doc.Free;
+    end;
   except
     { As in Save. }
   end;

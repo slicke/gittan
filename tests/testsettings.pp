@@ -29,6 +29,9 @@ type
     procedure TestSaveRecent;
     procedure TestTabs;
     procedure TestDamagedFileGivesDefaults;
+    procedure TestWrongTypesSaved;
+    procedure TestDraftUnknownKept;
+    procedure TestExtValueList;
     procedure TestDefaultFontSize;
     procedure TestTrust;
     procedure TestProjectKinds;
@@ -345,6 +348,16 @@ begin
     S.AddRecent('/repo/b');
     S.Save;
     S.EditorCommand := '/changed';
+    { Another instance saves its draft and width meanwhile. }
+    Back := TGittanSettings.Create(FDir);
+    try
+      Back.Load;
+      Back.CommitDraft := 'newer';
+      Back.Width := 1234;
+      Back.Save;
+    finally
+      Back.Free;
+    end;
     S.RemoveRecent('/repo/b');
     S.SaveRecent;
   finally
@@ -356,6 +369,8 @@ begin
     AssertEquals(1, Back.Recent.Count);
     AssertEquals('/repo/a', Back.Recent[0]);
     AssertEquals('the rest untouched', '/usr/bin/editor', Back.EditorCommand);
+    AssertEquals('the other instance''s draft kept', 'newer', Back.CommitDraft);
+    AssertEquals('and its width', 1234, Back.Width);
   finally
     Back.Free;
   end;
@@ -431,6 +446,119 @@ begin
     AssertEquals('no tabs', 0, S.Tabs.Count);
     AssertEquals(0, S.ActiveTab);
   finally
+    S.Free;
+  end;
+end;
+
+{ A member of another type is written back as the field has it, and the
+  file read again gives what was saved. }
+procedure TSettingsTest.TestWrongTypesSaved;
+var
+  S: TGittanSettings;
+  Doc: TJSONObject;
+begin
+  Put('settings.json', '{"diff": {"contextLines": "lots", "sideBySide": 1},' +
+    '"editor": [], "ai": {"claude": "x"}}');
+  Put('state.json', '{"window": {"width": "wide"}, "commitDraft": 7}');
+  S := TGittanSettings.Create(FDir);
+  try
+    S.Load;
+    AssertEquals(3, S.ContextLines);
+    S.FontName := 'Menlo';
+    S.ClaudeModel := 'sonnet';
+    S.Height := 500;
+    S.Save;
+  finally
+    S.Free;
+  end;
+  S := TGittanSettings.Create(FDir);
+  try
+    S.Load;
+    AssertEquals('the default, saved', 3, S.ContextLines);
+    AssertFalse(S.SideBySide);
+    AssertEquals('the other setting', 'Menlo', S.FontName);
+    AssertEquals('in place of a string', 'sonnet', S.ClaudeModel);
+    AssertEquals(0, S.Width);
+    AssertEquals(500, S.Height);
+    AssertEquals('', S.CommitDraft);
+  finally
+    S.Free;
+  end;
+  Doc := ReadJson('settings.json');
+  try
+    AssertEquals('a number now', 3, Doc.FindPath('diff.contextLines').AsInteger);
+    AssertTrue('a boolean now', Doc.FindPath('diff.sideBySide') is TJSONBoolean);
+  finally
+    Doc.Free;
+  end;
+end;
+
+{ With no draft, the draft's text and repository go, a member of a newer
+  build's stays. }
+procedure TSettingsTest.TestDraftUnknownKept;
+var
+  S: TGittanSettings;
+  Doc: TJSONObject;
+begin
+  Put('state.json', '{"commitDraft": {"text": "wip", "repo": "/a", "later": 1}}');
+  S := TGittanSettings.Create(FDir);
+  try
+    S.Load;
+    AssertEquals('wip', S.CommitDraft);
+    S.CommitDraft := '';
+    S.Save;
+  finally
+    S.Free;
+  end;
+  Doc := ReadJson('state.json');
+  try
+    AssertNull('no text', Doc.FindPath('commitDraft.text'));
+    AssertNull('no repo', Doc.FindPath('commitDraft.repo'));
+    AssertEquals('kept', 1, Doc.FindPath('commitDraft.later').AsInteger);
+  finally
+    Doc.Free;
+  end;
+end;
+
+{ The settings dialog's list of values: a key with an = and keys that
+  differ in case alone go there and back whole. }
+procedure TSettingsTest.TestExtValueList;
+var
+  S: TGittanSettings;
+  L, Keys: TStringList;
+  Key, Id: string;
+  i: integer;
+begin
+  S := TGittanSettings.Create(FDir);
+  L := NewExtValueList;
+  Keys := TStringList.Create;
+  try
+    S.SetExtValue('a=b', 'x=y', 'old=1');
+    S.SetExtValue('a=b', 'Token', 'upper');
+    S.SetExtValue('a=b', 'token', 'lower');
+    S.ExtValueKeys('a=b', Keys);
+    for Key in Keys do
+      L.Values['a=b' + #9 + Key] := S.ExtValue('a=b', Key);
+    AssertEquals(3, L.Count);
+    AssertEquals('old=1', L.Values['a=b' + #9 + 'x=y']);
+    AssertEquals('upper', L.Values['a=b' + #9 + 'Token']);
+    AssertEquals('lower', L.Values['a=b' + #9 + 'token']);
+    L.Values['a=b' + #9 + 'token'] := 'edited';
+    for i := 0 to L.Count - 1 do
+    begin
+      Id := L.Names[i];
+      Key := Copy(Id, Pos(#9, Id) + 1, MaxInt);
+      Id := Copy(Id, 1, Pos(#9, Id) - 1);
+      S.SetExtValue(Id, Key, L.ValueFromIndex[i]);
+    end;
+    AssertEquals('old=1', S.ExtValue('a=b', 'x=y'));
+    AssertEquals('upper', S.ExtValue('a=b', 'Token'));
+    AssertEquals('edited', S.ExtValue('a=b', 'token'));
+    AssertEquals('no key made of a part', '', S.ExtValue('a=b', 'x'));
+    AssertEquals('no extension made of a part', '', S.ExtValue('a', 'x=y'));
+  finally
+    Keys.Free;
+    L.Free;
     S.Free;
   end;
 end;
@@ -623,6 +751,7 @@ procedure TSettingsTest.TestLayout;
 var
   S: TGittanSettings;
   Doc: TJSONObject;
+  Found: TSearchRec;
 begin
   S := TGittanSettings.Create(FDir);
   try
@@ -663,6 +792,11 @@ begin
   end;
   AssertFalse('no temporary file left', FileExists(IncludeTrailingPathDelimiter(FDir) +
     'settings.json.tmp'));
+  if FindFirst(IncludeTrailingPathDelimiter(FDir) + '*.tmp', faAnyFile, Found) = 0 then
+  begin
+    FindClose(Found);
+    Fail('no temporary file left: ' + Found.Name);
+  end;
 end;
 
 { A key Gittan does not know, a newer build's or one written by hand,

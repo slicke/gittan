@@ -425,6 +425,7 @@ begin
     'try { Gittan.storage.set("", "v"); globalThis.bad = "stored"; } catch (e) { globalThis.bad = String(e); }' +
     'try { Gittan.storage.get("c\nd"); globalThis.badGet = "read"; } catch (e) { globalThis.badGet = String(e); }' +
     'try { Gittan.settings.define([{key: "s\tt", type: "string"}]); globalThis.badDef = "defined"; } catch (e) { globalThis.badDef = String(e); }' +
+    'try { Gittan.settings.define([{key: "", type: "string"}]); globalThis.emptyDef = "defined"; } catch (e) { globalThis.emptyDef = String(e); }' +
     'globalThis.done = true;', AllPerms);
   AssertEquals('nothing before', 'null', EvalIn(Info^.Ctx, 'String(before)'));
   AssertEquals('set', 'https://x', EvalIn(Info^.Ctx, 'after'));
@@ -440,6 +441,8 @@ begin
     Pos('Gittan.storage.get: The key "c', EvalIn(Info^.Ctx, 'badGet')) > 0);
   AssertTrue('a tab refused in define: ' + EvalIn(Info^.Ctx, 'badDef'),
     Pos('Gittan.settings.define: The key "s', EvalIn(Info^.Ctx, 'badDef')) > 0);
+  AssertTrue('an empty key refused in define: ' + EvalIn(Info^.Ctx, 'emptyDef'),
+    Pos('Gittan.settings.define: The key ""', EvalIn(Info^.Ctx, 'emptyDef')) > 0);
   AssertEquals('nothing declared', 0, Length(FEngine.Registry.SettingsOf('store')));
 end;
 

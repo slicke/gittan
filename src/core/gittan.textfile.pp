@@ -33,11 +33,13 @@ function NextLine(const S: string; var AStart: integer; out ALine: string): bool
   backslash before any other character for that character. }
 function UnescapeC(const S: string): string;
 
-{** Writes AText as the whole of AFileName, creating its folder: into
-  AFileName + '.tmp' first, then renamed over it in one step, so a
-  failed or cut write leaves the old file as it was. AMode is the new
-  file's permissions on Unix (&600 for one with a secret in it), less
-  the umask; Windows has none. False when it could not be written. }
+{** Writes AText as the whole of AFileName, creating its folder: into a
+  temporary file beside it first (AFileName, the process id, a count of
+  the writes and .tmp, so two writers never share one), then renamed over
+  it in one step, so a failed or cut write leaves the old file as it
+  was. AMode is the new file's permissions on Unix (&600 for one with a
+  secret in it), less the umask; Windows has none. False when it could
+  not be written. }
 function WriteFileReplacing(const AFileName: RawByteString; const AText: RawByteString;
   AMode: integer = &644): boolean;
 
@@ -142,6 +144,10 @@ const
   MOVEFILE_WRITE_THROUGH = 8;
 {$ENDIF}
 
+var
+  { The writes so far, which name each one's temporary file. }
+  WriteCount: longint = 0;
+
 function WriteFileReplacing(const AFileName: RawByteString; const AText: RawByteString;
   AMode: integer): boolean;
 var
@@ -149,9 +155,11 @@ var
   F: THandle;
 begin
   Result := False;
-  Temp := AFileName + '.tmp';
+  Temp := AFileName + '.' + IntToStr(GetProcessID) + '-' +
+    IntToStr(InterLockedIncrement(WriteCount)) + '.tmp';
   ForceDirectories(ExtractFileDir(AFileName));
-  { A temporary file left by an earlier run would keep its own mode. }
+  { One left by an earlier run with the same process id would keep its
+    own mode. }
   DeleteFile(Temp);
   F := FileCreate(Temp, AMode);
   if F = THandle(-1) then

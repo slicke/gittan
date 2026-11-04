@@ -34,6 +34,7 @@ type
     procedure TestReloadPicksUpEdits;
     procedure TestScriptErrorListed;
     procedure TestCaseTwinRefused;
+    procedure TestCaseTwinWithEqualsRefused;
     procedure TestNameRefused;
   end;
 
@@ -255,6 +256,37 @@ begin
         Pos('.js', FLoader.Info(i).Error) > 0);
   AssertEquals('one of them loaded', 1, Loaded);
   AssertEquals('one context', 1, TGittanExtEngine.Instance.ExtensionCount);
+  AssertEquals('one run', 1, FHost.Alerts.Count);
+  AssertEquals('the twin reported', Files - 1, FHost.Errors.Count);
+end;
+
+{ An id with an = is matched whole, so A=B.js and a=b.js collide as
+  Test.js and test.js do. }
+procedure TExtLoaderTest.TestCaseTwinWithEqualsRefused;
+var
+  Found: TSearchRec;
+  Files, Loaded, i: integer;
+begin
+  Put('A=B.js', '/* @name Upper */ Gittan.alert("upper");');
+  Put('a=b.js', '/* @name Lower */ Gittan.alert("lower");');
+  Files := 0;
+  if FindFirst(IncludeTrailingPathDelimiter(FLoader.Dir) + '*.js', faAnyFile, Found) = 0 then
+  begin
+    repeat
+      Inc(Files);
+    until FindNext(Found) <> 0;
+    FindClose(Found);
+  end;
+  FLoader.Load;
+  AssertEquals('each file listed', Files, FLoader.Count);
+  Loaded := 0;
+  for i := 0 to FLoader.Count - 1 do
+    if FLoader.Info(i).Loaded then
+      Inc(Loaded)
+    else
+      AssertTrue('the twin says which file it matched: ' + FLoader.Info(i).Error,
+        Pos('=', FLoader.Info(i).Error) > 0);
+  AssertEquals('one of them loaded', 1, Loaded);
   AssertEquals('one run', 1, FHost.Alerts.Count);
   AssertEquals('the twin reported', Files - 1, FHost.Errors.Count);
 end;

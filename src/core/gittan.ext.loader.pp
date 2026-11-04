@@ -260,8 +260,9 @@ begin
     if Inf.DisplayName = '' then
       Inf.DisplayName := Inf.Id;
     { Ids are the names in lower case, so Test.js and test.js would share
-      their settings and grants: the first wins. ASeen holds id=file
-      pairs, so the id is looked up as a name. }
+      their settings and grants: the first wins. ASeen holds id and file
+      parted by a tab, which ValidExtKey keeps out of an id, so an id with
+      an = is looked up whole. }
     i := ASeen.IndexOfName(Inf.Id);
     if i >= 0 then
     begin
@@ -351,6 +352,8 @@ begin
   Folder := IncludeTrailingPathDelimiter(Dir);
   Files := TStringList.Create;
   Seen := TStringList.Create;
+  Seen.NameValueSeparator := #9;
+  Seen.CaseSensitive := True;
   FLoading := True;
   try
     if FindFirst(Folder + '*.js', faAnyFile and not faDirectory, Sr) = 0 then

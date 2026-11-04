@@ -589,8 +589,6 @@ begin
       Def := Default(TGittanExtSettingDef);
       Def.ExtId := ExtIdOf(ctx);
       Def.Key := Item.Get('key', '');
-      if Def.Key = '' then
-        Continue;
       if not CheckExtKey(res, ctx, 'Gittan.settings.define', Def.Key) then
         Exit;
       Def.Kind := SettingKindOf(Item.Get('type', 'string'));
