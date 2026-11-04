@@ -359,8 +359,14 @@ function RunLineFor(ATable: TTOMLTable; const ASystem: string): string;
 var
   Field: TTOMLValue;
   Key: string;
+  Keys: array[0..2] of string;
 begin
-  for Key in [ASystem, 'unix', 'default'] do
+  { Not an array constructor: FPC 3.2.2 gets a for-in over a
+    constructor of strings wrong. }
+  Keys[0] := ASystem;
+  Keys[1] := 'unix';
+  Keys[2] := 'default';
+  for Key in Keys do
   begin
     if (Key = 'unix') and (ASystem = 'windows') then
       Continue;
@@ -755,6 +761,10 @@ end;
 
 function DiscoverRepoCommands(const ARoot: string; out AProjects: TGittanProjects;
   out AFiles: TGittanCommandsFiles; const AChoice: string): TGittanRepoCommands;
+const
+  { A typed array, not an array constructor: FPC 3.2.2 gets a for-in
+    over a constructor of strings wrong. }
+  MakefileNames: array[0..2] of string = ('Makefile', 'makefile', 'GNUmakefile');
 var
   Root, Runner, Name: string;
   FileOnes, Scripts, Targets, Kinds: TGittanRepoCommands;
@@ -826,7 +836,7 @@ begin
     end;
   end;
   TargetNames := nil;
-  for Name in ['Makefile', 'makefile', 'GNUmakefile'] do
+  for Name in MakefileNames do
     if FileExists(Root + Name) then
     begin
       TargetNames := ParseMakefileTargets(ReadFileBytes(Root + Name));

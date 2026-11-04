@@ -427,6 +427,10 @@ begin
 end;
 
 function ReadLazPackage(const AXml: string): TLazPackage;
+const
+  { A typed array, not an array constructor: FPC 3.2.2 gets a for-in
+    over a constructor of strings wrong. }
+  VersionParts: array[0..3] of string = ('Major', 'Minor', 'Release', 'Build');
 var
   Doc: TXMLDocument;
   Pkg, Ver: TDOMElement;
@@ -449,7 +453,7 @@ begin
     if Ver <> nil then
     begin
       Parts := nil;
-      for Part in ['Major', 'Minor', 'Release', 'Build'] do
+      for Part in VersionParts do
       begin
         SetLength(Parts, Length(Parts) + 1);
         Parts[High(Parts)] := Attr(Ver, Part);

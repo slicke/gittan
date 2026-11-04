@@ -210,6 +210,7 @@ begin
   Start := 1;
   while NextLine(AText, Start, Line) do
   begin
+    Line := BareLine(Line);
     if (Line = '') or (Line[1] = '#') then
       Continue;
     if Line[1] <> ' ' then
@@ -391,11 +392,15 @@ begin
 end;
 
 class function TGittanNodeKind.LockFile(const ARoot: string): string;
+const
+  { A typed array, not an array constructor: FPC 3.2.2 gets a for-in
+    over a constructor of strings wrong. }
+  LockNames: array[0..4] of string = ('package-lock.json', 'pnpm-lock.yaml', 'yarn.lock',
+    'bun.lock', 'npm-shrinkwrap.json');
 var
   FileName: string;
 begin
-  for FileName in ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock',
-      'npm-shrinkwrap.json'] do
+  for FileName in LockNames do
     if HasFile(ARoot, FileName) then
       Exit(FileName);
   Result := '';

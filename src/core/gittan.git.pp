@@ -2772,6 +2772,10 @@ begin
 end;
 
 function TGittanRepo.RebaseBranch: string;
+const
+  { A typed array, not an array constructor: FPC 3.2.2 gets a for-in
+    over a constructor of strings wrong. }
+  RebaseDirs: array[0..1] of string = ('rebase-merge', 'rebase-apply');
 var
   Dir, Sub: string;
   Lines: TStringList;
@@ -2780,7 +2784,7 @@ begin
   Dir := GitDir;
   if Dir = '' then
     Exit;
-  for Sub in ['rebase-merge', 'rebase-apply'] do
+  for Sub in RebaseDirs do
     if FileExists(IncludeTrailingPathDelimiter(Dir) + Sub + PathDelim + 'head-name') then
     begin
       Lines := TStringList.Create;
@@ -6409,6 +6413,10 @@ end;
 { symbolic-ref names the branch even before its first commit; it fails
   when HEAD is detached, and the commit id stands in then. }
 function TGittanRepo.DefaultBranch: string;
+const
+  { A typed array, not an array constructor: FPC 3.2.2 gets a for-in
+    over a constructor of strings wrong. }
+  DefaultNames: array[0..1] of string = ('main', 'master');
 var
   Remote, Name: string;
 begin
@@ -6421,7 +6429,7 @@ begin
   if RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'refs/remotes/' + Remote + '/HEAD'],
     Result) then
     Exit(Trim(Result));
-  for Name in ['main', 'master'] do
+  for Name in DefaultNames do
     if HasCommit(Remote + '/' + Name) then
       Exit(Remote + '/' + Name);
   Result := '';

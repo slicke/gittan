@@ -90,6 +90,8 @@ var
 begin
   Lines := TStringList.Create;
   try
+    { LF on every system, so git show gives back what the asserts split. }
+    Lines.LineBreak := #10;
     for s in ALines do
       Lines.Add(s);
     Lines.SaveToFile(IncludeTrailingPathDelimiter(FDir) + AName);

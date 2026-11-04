@@ -291,11 +291,15 @@ begin
 end;
 
 class function TGittanPythonKind.Identify(const ARoot: string; out AManifest: string): boolean;
+const
+  { A typed array, not an array constructor: FPC 3.2.2 gets a for-in
+    over a constructor of strings wrong. }
+  ManifestNames: array[0..2] of string = ('pyproject.toml', 'setup.py', 'requirements.txt');
 var
   FileName: string;
 begin
   AManifest := '';
-  for FileName in ['pyproject.toml', 'setup.py', 'requirements.txt'] do
+  for FileName in ManifestNames do
     if HasFile(ARoot, FileName) then
     begin
       AManifest := FileName;
@@ -349,10 +353,14 @@ begin
 end;
 
 class function TGittanPythonKind.LockFile(const ARoot: string): string;
+const
+  { A typed array, not an array constructor: FPC 3.2.2 gets a for-in
+    over a constructor of strings wrong. }
+  LockNames: array[0..2] of string = ('uv.lock', 'poetry.lock', 'pdm.lock');
 var
   FileName: string;
 begin
-  for FileName in ['uv.lock', 'poetry.lock', 'pdm.lock'] do
+  for FileName in LockNames do
     if HasFile(ARoot, FileName) then
       Exit(FileName);
   Result := '';
@@ -385,11 +393,15 @@ begin
 end;
 
 class function TGittanPythonKind.Checks(AContext: TGittanProjectContext): TGittanProjectChecks;
+const
+  { A typed array, not an array constructor: FPC 3.2.2 gets a for-in
+    over a constructor of strings wrong. }
+  VenvFolders: array[0..1] of string = ('.venv/', 'venv/');
 var
   Path, Folder: string;
 begin
   Result := nil;
-  for Folder in ['.venv/', 'venv/'] do
+  for Folder in VenvFolders do
     if AContext.TrackedUnder(Folder, Path) then
       AddProjectCheck(Result, ProjectCheck(Format(rsVenvTracked, [Folder]), Path, Folder));
   Path := AContext.TrackedWithExt('.pyc');

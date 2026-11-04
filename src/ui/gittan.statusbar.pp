@@ -368,14 +368,18 @@ const
 { TGittanStatusHint }
 
 procedure TGittanStatusHint.SplitLine(const ALine: string; out AIcon, AText: string);
+const
+  { A typed array, not an array constructor: FPC 3.2.2 gets a for-in
+    over a constructor of strings wrong. }
+  Markers: array[0..19] of string = (HintPassed, HintFailed, HintPending, HintLink, HintSwitch,
+    HintFolder, HintBranch, HintPull, HintComment, HintSync, HintStash, HintFetch, HintDown,
+    HintUp, HintPlay, HintSkip, HintWarn, HintSearch, HintUndo, HintRedo);
 var
   M: string;
 begin
   AIcon := '';
   AText := ALine;
-  for M in [HintPassed, HintFailed, HintPending, HintLink, HintSwitch, HintFolder, HintBranch, HintPull,
-    HintComment, HintSync, HintStash, HintFetch, HintDown, HintUp, HintPlay, HintSkip,
-    HintWarn, HintSearch, HintUndo, HintRedo] do
+  for M in Markers do
     if Copy(ALine, 1, Length(M) + 1) = M + ' ' then
     begin
       AIcon := M;
