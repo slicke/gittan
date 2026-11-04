@@ -15,7 +15,7 @@
     </General>
     <VersionInfo>
       <UseVersionInfo Value="True"/>
-      <MinorVersionNr Value="14"/>
+      <MinorVersionNr Value="15"/>
       <StringTable FileDescription="Git Tree Analyzer &amp; Navigator" InternalName="Gittan" OriginalFilename="Gittan.exe" ProductName="Git Tree Analyzer &amp; Navigator"/>
     </VersionInfo>
     <BuildModes>
