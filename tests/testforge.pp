@@ -38,6 +38,7 @@ type
     procedure TestSshAlias;
     procedure TestKeepForge;
     procedure TestPictureFile;
+    procedure TestPictureSize;
   end;
 
 implementation
@@ -936,28 +937,82 @@ begin
   AssertNull(Forge);
 end;
 
+{ A big-endian number of ACount bytes. }
+function BigEndian(AValue: int64; ACount: integer): string;
+var
+  i: integer;
+begin
+  Result := '';
+  for i := ACount - 1 downto 0 do
+    Result := Result + Chr((AValue shr (8 * i)) and $FF);
+end;
+
+{ The start of a PNG AWidth by AHeight: the signature and IHDR. }
+function PngHead(AWidth, AHeight: int64): string;
+begin
+  Result := #137'PNG'#13#10#26#10 + BigEndian(13, 4) + 'IHDR' + BigEndian(AWidth, 4) +
+    BigEndian(AHeight, 4) + #8#6#0#0#0;
+end;
+
+{ The start of a JPEG AWidth by AHeight: SOI, an APP0 and SOF0. }
+function JpegHead(AWidth, AHeight: integer): string;
+begin
+  Result := #$FF#$D8#$FF#$E0 + BigEndian(16, 2) + 'JFIF'#0#1#1#0#0#1#0#1#0#0 +
+    #$FF#$FF#$C0 + BigEndian(17, 2) + #8 + BigEndian(AHeight, 2) + BigEndian(AWidth, 2) + #3;
+end;
 
 procedure TForgeTest.TestPictureFile;
 var
-  Dir, FileName, Forge, Login, Url, Bytes: string;
+  Dir, FileName, Forge, Login, Url, Bytes, Picture: string;
+
+  procedure WriteRaw(const AText: string);
+  begin
+    with TFileStream.Create(FileName, fmCreate) do
+      try
+        if AText <> '' then
+          WriteBuffer(AText[1], Length(AText));
+      finally
+        Free;
+      end;
+  end;
+
 begin
   Dir := IncludeTrailingPathDelimiter(GetTempDir) + 'gittan-picture-' + IntToStr(GetProcessID);
   FileName := IncludeTrailingPathDelimiter(Dir) + 'sub' + PathDelim + 'forge-picture';
   try
     AssertFalse('no file', LoadForgePicture(FileName, Forge, Login, Url, Bytes));
     AssertEquals('', Bytes);
-    { Bytes with line feeds in them come back whole; the folder is made. }
-    SaveForgePicture(FileName, 'GitHub', 'octocat', 'https://example.org/a.png',
-      #137'PNG'#10#13#10'x'#0#10);
+    { Bytes with line feeds in them come back whole (a PNG's signature
+      has two); the folder is made. }
+    Picture := PngHead(48, 48) + 'x'#0#10;
+    AssertTrue('saved', SaveForgePicture(FileName, 'GitHub', 'octocat',
+      'https://example.org/a.png', Picture));
+    AssertFalse('no temporary file left', FileExists(FileName + '.tmp'));
     AssertTrue('read', LoadForgePicture(FileName, Forge, Login, Url, Bytes));
     AssertEquals('GitHub', Forge);
     AssertEquals('octocat', Login);
     AssertEquals('https://example.org/a.png', Url);
-    AssertEquals(#137'PNG'#10#13#10'x'#0#10, Bytes);
-    { Not a picture file: too few lines, or no bytes after them. }
+    AssertEquals(Picture, Bytes);
+    { Not a picture file: too few lines, no bytes after them, no forge
+      or login, bytes that are no picture or too large a file. }
     SaveForgePicture(FileName, 'GitHub', 'octocat', '', '');
     AssertFalse('no bytes', LoadForgePicture(FileName, Forge, Login, Url, Bytes));
     AssertEquals('', Login);
+    SaveForgePicture(FileName, '', 'octocat', 'https://example.org/a.png', Picture);
+    AssertFalse('no forge', LoadForgePicture(FileName, Forge, Login, Url, Bytes));
+    AssertEquals('', Bytes);
+    SaveForgePicture(FileName, 'GitHub', '', 'https://example.org/a.png', Picture);
+    AssertFalse('no login', LoadForgePicture(FileName, Forge, Login, Url, Bytes));
+    AssertEquals('', Forge);
+    SaveForgePicture(FileName, 'GitHub', 'octocat', 'https://example.org/a.gif', 'GIF89a');
+    AssertFalse('no picture', LoadForgePicture(FileName, Forge, Login, Url, Bytes));
+    SaveForgePicture(FileName, 'GitHub', 'octocat', 'https://example.org/a.png',
+      PngHead(8192, 8192));
+    AssertFalse('too wide', LoadForgePicture(FileName, Forge, Login, Url, Bytes));
+    WriteRaw('GitHub'#10'octocat'#10'https://example.org/a.png'#10 + Picture +
+      StringOfChar('x', 2 * 1024 * 1024));
+    AssertFalse('too large', LoadForgePicture(FileName, Forge, Login, Url, Bytes));
+    AssertEquals('', Bytes);
     with TStringList.Create do
       try
         Text := 'just one line';
@@ -969,6 +1024,30 @@ begin
   finally
     RemoveTree(Dir);
   end;
+end;
+
+procedure TForgeTest.TestPictureSize;
+var
+  W, H: integer;
+begin
+  AssertTrue('png', PictureSize(PngHead(460, 200), W, H));
+  AssertEquals(460, W);
+  AssertEquals(200, H);
+  { A fill byte before SOF0 is skipped. }
+  AssertTrue('jpeg', PictureSize(JpegHead(320, 240), W, H));
+  AssertEquals(320, W);
+  AssertEquals(240, H);
+  AssertFalse('cut png', PictureSize(Copy(PngHead(1, 1), 1, 20), W, H));
+  AssertFalse('cut jpeg', PictureSize(Copy(JpegHead(1, 1), 1, 24), W, H));
+  AssertFalse('scan before a frame', PictureSize(#$FF#$D8#$FF#$DA#0#2, W, H));
+  AssertFalse('gif', PictureSize('GIF89a'#1#0#1#0, W, H));
+  AssertFalse('nothing', PictureSize('', W, H));
+  AssertEquals(0, W);
+  AssertTrue(PictureFits(PngHead(MaxPictureSide, MaxPictureSide)));
+  AssertFalse('too tall', PictureFits(PngHead(16, MaxPictureSide + 1)));
+  AssertFalse('too wide', PictureFits(JpegHead(MaxPictureSide + 1, 16)));
+  AssertFalse('empty', PictureFits(PngHead(0, 16)));
+  AssertFalse('beyond integer', PictureFits(PngHead($FFFFFFFF, 16)));
 end;
 
 initialization

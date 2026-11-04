@@ -6,7 +6,8 @@ unit gittan.avatar;
   title bar; the macOS toolbar decodes the same bytes with NSImage). The
   bytes are PNG or JPEG, read with BGRABitmap; the disc is resampled to
   the pixels asked for and cut round with a mask, kept until the size
-  changes. See spec/github.md. }
+  changes; bytes PictureFits refuses (no PNG or JPEG, or too large a
+  side) are no picture. See spec/github.md. }
 
 {$mode objfpc}{$H+}
 
@@ -39,7 +40,7 @@ type
 implementation
 
 uses
-  Math, BGRABitmapTypes;
+  Math, BGRABitmapTypes, gittan.forge;
 
 destructor TGittanAvatar.Destroy;
 begin
@@ -58,7 +59,9 @@ begin
   FData := AData;
   FreeAndNil(FDisc);
   FreeAndNil(FImage);
-  if AData = '' then
+  { Only a PNG or JPEG of a size worth drawing, its size read from its
+    header: the decoder makes the whole bitmap before the pixels. }
+  if not PictureFits(AData) then
     Exit;
   Stream := TStringStream.Create(AData);
   try

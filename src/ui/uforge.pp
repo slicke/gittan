@@ -68,6 +68,11 @@ type
     { The address of the user's picture as last fetched, and its bytes,
       kept across the jobs so a refresh does not fetch it again. }
     FAvatarUrl, FAvatar: string;
+    { Whether the picture was fetched in this run, so a job may skip its
+      address; and whether the login and picture are the ones kept from
+      the last start (LoadPicture), which the first answer confirms or,
+      when it fails, drops. }
+    FPictureFresh, FRestored: boolean;
     FMine, FReview: TGittanForgePulls;
     FMainMenu: TMainMenu;
     FAppMenuItem: TMenuItem;
@@ -257,8 +262,10 @@ begin
 end;
 
 { The picture kept from the last start (SaveForgePicture, in JobDone),
-  when it is this forge's and its login is the account still in use: the
-  forge's active login, when it tells of any. }
+  when it is this forge's and its login is the forge's active account:
+  none when the forge lists no account (logged out, or one that keeps no
+  list) or something else picks the account (AccountsNote, a token in
+  the environment). }
 procedure TForgeView.LoadPicture;
 var
   KeptForge, KeptLogin, KeptUrl, KeptBytes: string;
@@ -271,8 +278,10 @@ begin
   if not LoadForgePicture(App.Settings.ForgePictureFile, KeptForge, KeptLogin, KeptUrl,
     KeptBytes) or (KeptForge <> FForge.Name) then
     Exit;
+  if FForge.AccountsNote <> '' then
+    Exit;
   Accounts := FForge.Accounts;
-  Known := Length(Accounts) = 0;
+  Known := False;
   for Account in Accounts do
     Known := Known or (Account.Active and SameText(Account.Login, KeptLogin));
   if not Known then
@@ -280,6 +289,7 @@ begin
   FLogin := KeptLogin;
   FAvatarUrl := KeptUrl;
   FAvatar := KeptBytes;
+  FRestored := True;
 end;
 
 procedure TForgeView.UserChanged;
@@ -496,6 +506,8 @@ begin
   FLogin := '';
   FAvatarUrl := '';
   FAvatar := '';
+  FPictureFresh := False;
+  FRestored := False;
   FError := '';
   FPage.ForgetAnswer;
   { The job first, as in Shown. }
@@ -566,7 +578,10 @@ begin
   if not Assigned(FForge) or (FJob <> nil) then
     Exit;
   FJob := FForge.AccountJob(GetUserDir);
-  FJob.KnownAvatarUrl := FAvatarUrl;
+  { The picture kept from the last start is fetched again once, as the
+    forge may give a new one at the same address. }
+  if FPictureFresh then
+    FJob.KnownAvatarUrl := FAvatarUrl;
   FJob.Clones.Assign(App.Settings.Recent);
   FJob.Siblings := App.Settings.CloneSiblings;
   FJob.OnDone := @JobDone;
@@ -586,10 +601,11 @@ end;
 procedure TForgeView.JobDone(Sender: TObject);
 var
   Job: TGittanForgeJob;
-  OldLogin, OldAvatar: string;
+  OldLogin, OldAvatar, OldAvatarUrl: string;
 begin
   OldLogin := FLogin;
   OldAvatar := FAvatar;
+  OldAvatarUrl := FAvatarUrl;
   Job := TGittanForgeJob(Sender);
   if Job <> FJob then
     Exit;
@@ -600,27 +616,42 @@ begin
   if FError = '' then
   begin
     FLogin := Job.Login;
-    { A new picture, or none any more; the same address keeps the one
-      held, which the job did not fetch again. }
-    if Job.PictureUrl <> FAvatarUrl then
+    { A picture fetched, new or the kept one again; else a new address,
+      or none any more, drops the one held, and the same address keeps
+      it: the job did not fetch it again, or the fetch of the kept one
+      failed and is tried again next time. }
+    if Job.Avatar <> '' then
     begin
       FAvatarUrl := Job.PictureUrl;
       FAvatar := Job.Avatar;
+      FPictureFresh := True;
+    end
+    else if Job.PictureUrl <> FAvatarUrl then
+    begin
       { A fetch that failed tries again next time. }
-      if FAvatar = '' then
-        FAvatarUrl := '';
+      FAvatarUrl := '';
+      FAvatar := '';
     end;
     FMine := Job.Mine;
     FReview := Job.Review;
-  end;
-  UpdatePage;
-  if (OldLogin <> FLogin) or (OldAvatar <> FAvatar) then
+  end
+  else if FRestored then
   begin
-    { Kept for the next start (LoadPicture); gone when the forge gives
-      no picture any more. }
+    { The kept user is not shown as the forge's when the forge could not
+      say who it is; the file stays for the next start. }
+    FLogin := '';
+    FAvatarUrl := '';
+    FAvatar := '';
+  end;
+  FRestored := False;
+  UpdatePage;
+  if (OldLogin <> FLogin) or (OldAvatar <> FAvatar) or (OldAvatarUrl <> FAvatarUrl) then
+  begin
+    { Kept for the next start (LoadPicture), a write that fails left at
+      that; gone when the forge gives no picture any more. }
     if (FLogin <> '') and (FAvatar <> '') then
       SaveForgePicture(App.Settings.ForgePictureFile, ForgeName, FLogin, FAvatarUrl, FAvatar)
-    else if FAvatar = '' then
+    else if (FAvatar = '') and (FError = '') then
       DeleteFile(App.Settings.ForgePictureFile);
     UserChanged;
   end;

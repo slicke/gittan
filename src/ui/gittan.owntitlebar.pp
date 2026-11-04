@@ -674,6 +674,9 @@ begin
   FForgeVisible := AVisible;
   FForgeShown := AShown;
   FForgeHint := AHint;
+  { Under the pointer, the hint follows at once. }
+  if FHotPart = tpForge then
+    Hint := FForgeHint;
   FAvatar.SetData(APicture);
   Layout;
   Invalidate;

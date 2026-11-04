@@ -366,7 +366,13 @@ begin
   AssertEquals('pr|ready|12|--repo|o/r', Joined(GitHubPullActionArgs('o/r', 12, plReady, '')));
   AssertTrue(TGittanGitHubForge.HasPullActions);
   AssertEquals('Approved', PullActionDone(plApprove));
+  AssertEquals('Approving', PullActionDoing(plApprove));
+  AssertEquals('Requesting changes on', PullActionDoing(plRequestChanges));
+  AssertEquals('Commenting on', PullActionDoing(plComment));
+  AssertEquals('Merging', PullActionDoing(plMerge));
   AssertEquals('Squashing and merging', PullActionDoing(plSquash));
+  AssertEquals('Rebasing and merging', PullActionDoing(plRebaseMerge));
+  AssertEquals('Marking ready for review', PullActionDoing(plReady));
   AssertTrue(PullActionMerges(plSquash));
   AssertFalse(PullActionIsReview(plReady));
 end;
