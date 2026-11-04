@@ -19,7 +19,7 @@ uses
   gittan.lexers, gittan.git, gittan.conflicts, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.welcome, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.sidenav, gittan.repoinfo, gittan.repopage, gittan.subpage,
-  gittan.repocommands, gittan.project, gittan.commandpage, gittan.job,
+  gittan.repocommands, gittan.project, gittan.commandpage, gittan.projectpage, gittan.job,
   gittan.settingsdlg, gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   {$IFDEF LCLCocoa}gittan.memohint,{$ENDIF}
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
@@ -49,7 +49,8 @@ type
     binary view), or the Pull Requests page (gittan.pullpage,
     umain.pulls.inc). }
   TGittanView = (gvSummary, gvRepoInfo, gvChanges, gvRepoDiff, gvFile, gvHistory, gvSubmodule,
-    gvImage, gvTranslation, gvBinary, gvCommands, gvFiles, gvBlob, gvPulls, gvMerge);
+    gvImage, gvTranslation, gvBinary, gvCommands, gvFiles, gvBlob, gvPulls, gvMerge,
+    gvProject);
 
   {** The three strengths of a commit's color in the history view: the
     faint tint of its rows, the shade of the words it changed, and the
@@ -805,6 +806,10 @@ type
       shown on it, the hash of its commands file and the command
       running (umain.commands.inc). }
     FCommandPage: TGittanCommandPage;
+    { The Project page, in the box too (umain.project.inc), and whether
+      a snapshot came since its reports were built. }
+    FProjectPage: TGittanProjectPage;
+    FProjectStale: boolean;
     FRepoCommands: TGittanRepoCommands;
     FRepoProjects: TGittanProjects;
     FCommandsHash: string;
@@ -1361,6 +1366,12 @@ type
     function BlobData(out AData: RawByteString): boolean;
     procedure OpenBlobOutside;
     procedure SaveBlobAs;
+    procedure SetupProjectPage;
+    procedure LoadProject;
+    procedure MenuProjectClick(Sender: TObject);
+    procedure ShowProject;
+    procedure ProjectPageOpenUrl(Sender: TObject; const AText: string);
+    procedure ProjectPageIgnore(Sender: TObject; const ACheck: TGittanProjectCheck);
     procedure SetupCommandPage;
     function CommandsTrusted: boolean;
     procedure LoadRepoCommands;
@@ -2581,6 +2592,8 @@ resourcestring
   rsRepoDiff = '&Repository Diff';
   rsRepoInfo = 'Repository &Info';
   rsCommandsMenu = '&Commands';
+  rsProjectMenu = 'Pro&ject';
+  rsNavProject = 'Project';
   rsCommandStillRunning = '%s is still running';
   rsCommandDone = '%s finished in %s';
   rsCommandFailed = '%s failed with exit code %d';
@@ -3498,6 +3511,10 @@ resourcestring
   rsFileMoreMenu = 'More';
   rsIgnoreAdded = 'Added %s to %s';
   rsIgnoreFailed = 'Could not write %s';
+  rsIgnoreAddedUntracked = 'Added %s to %s and stopped tracking %d files';
+  rsIgnoreAddedUntrackedOne = 'Added %s to %s and stopped tracking %s';
+  rsIgnoreNotUntracked = 'Added %s to .gitignore, but the files it matches could not be ' +
+    'taken out of the index';
   rsLfsTrackMenu = 'Track with Git &LFS';
   rsLfsUntrackMenu = 'Stop Tracking with Git LFS';
   rsLfsTracked = 'Git LFS tracks %s now; files already committed move to it the next time ' +
@@ -3741,8 +3758,9 @@ const
   navCommands = 3;
   navFiles = 4;
   navPulls = 5;
+  navProject = 6;
   { The last row: a list, never selected. }
-  navRecent = 6;
+  navRecent = 7;
   { Scrolling on past the bottom of a file goes to the next one, and
     past the top to the previous: the wheel delta the pull needs (120 is
     one notch of a mouse wheel, 8 one pixel of a trackpad on macOS), the
@@ -4460,6 +4478,7 @@ begin
   SetupCommandPage;
   SetupFilesPage;
   SetupPullPage;
+  SetupProjectPage;
   { So does the page of a submodule. }
   FSubPage := TGittanSubPage.Create(Self);
   FSubPage.Parent := FSummaryBox;
@@ -5096,6 +5115,10 @@ begin
       RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(62, 62, 62),
       FLinkColor, RGBToColor(63, 185, 80), RGBToColor(227, 179, 65), RGBToColor(248, 81, 73));
     FPullPage.SetCardColor(RGBToColor(40, 40, 41));
+    FProjectPage.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
+      RGBToColor(150, 150, 150), RGBToColor(50, 50, 51), RGBToColor(62, 62, 62),
+      FLinkColor, RGBToColor(63, 185, 80), RGBToColor(227, 179, 65), RGBToColor(248, 81, 73));
+    FProjectPage.SetCardColor(RGBToColor(40, 40, 41));
     FSubPage.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont,
       RGBToColor(150, 150, 150), RGBToColor(45, 45, 46), RGBToColor(62, 62, 62),
       RGBToColor(40, 40, 41), FLinkColor, RGBToColor(63, 185, 80),
@@ -5126,6 +5149,10 @@ begin
       RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(222, 222, 222),
       FLinkColor, RGBToColor(26, 127, 55), RGBToColor(154, 103, 0), RGBToColor(207, 34, 46));
     FPullPage.SetCardColor(RGBToColor(245, 245, 246));
+    FProjectPage.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
+      RGBToColor(110, 110, 110), RGBToColor(235, 235, 235), RGBToColor(222, 222, 222),
+      FLinkColor, RGBToColor(26, 127, 55), RGBToColor(154, 103, 0), RGBToColor(207, 34, 46));
+    FProjectPage.SetCardColor(RGBToColor(245, 245, 246));
     FSubPage.SetColors(Edit.Colors.TextBG, RGBToColor(30, 30, 30),
       RGBToColor(110, 110, 110), RGBToColor(243, 243, 243), RGBToColor(222, 222, 222),
       RGBToColor(245, 245, 246), FLinkColor, RGBToColor(26, 127, 55),
@@ -5821,6 +5848,7 @@ begin
   FPullsItem := AddItem(ViewMenu, rsPullRequests, ShortCut(VK_6, ViewKeys),
     @MenuPullsClick);
   FPullsItem.Visible := Assigned(FForge);
+  AddItem(ViewMenu, rsProjectMenu, ShortCut(VK_7, ViewKeys), @MenuProjectClick);
   ViewMenu.Add(NewLine);
   FCompareMenu := AddItem(ViewMenu, rsCompareWith, 0, nil);
   RebuildCompareMenu;
@@ -7502,6 +7530,16 @@ begin
     FCommandPage.Visible := True;
     FCommandPage.FitHeight(FSummaryBox.ClientHeight);
   end;
+  { The project's reports too, but only while the page shows: they
+    take a few git runs. }
+  FProjectStale := True;
+  if FView = gvProject then
+  begin
+    HideBoxPages;
+    LoadProject;
+    FProjectPage.Visible := True;
+    FProjectPage.FitHeight(FSummaryBox.ClientHeight);
+  end;
   { The Files page follows HEAD, which a commit moved. }
   if FView = gvFiles then
   begin
@@ -7874,6 +7912,8 @@ begin
     FFilesPage.Visible := False;
   if FPullPage <> nil then
     FPullPage.Visible := False;
+  if FProjectPage <> nil then
+    FProjectPage.Visible := False;
 end;
 
 { Hides the editor and what goes with it, for a page in the box. }
@@ -8775,6 +8815,7 @@ const
 {$I umain.repofiles.inc}
 {$I umain.repopage.inc}
 {$I umain.commands.inc}
+{$I umain.project.inc}
 {$I umain.submodules.inc}
 {$I umain.update.inc}
 {$I umain.reviews.inc}

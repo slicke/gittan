@@ -42,6 +42,7 @@ begin
   FSideNav.AddRow(rsNavFiles, niFiles, True);
   FSideNav.AddRow(rsNavPulls, niPull, True);
   FSideNav.SetRowVisible(navPulls, Assigned(FForge));
+  FSideNav.AddRow(rsNavProject, niProject, True);
   FSideNav.AddRow(rsNavRecent, niClock, True);
   FSideNav.Heading := rsNavChanges;
   FSideNav.ShowToggle(rsNavHide, rsNavShow);
@@ -69,6 +70,7 @@ begin
     navCommands: MenuCommandsClick(Sender);
     navFiles: MenuFilesClick(Sender);
     navPulls: MenuPullsClick(Sender);
+    navProject: MenuProjectClick(Sender);
     navRecent: ShowRecentList(FSideNav.RowScreenRect(AIndex));
   end;
 end;

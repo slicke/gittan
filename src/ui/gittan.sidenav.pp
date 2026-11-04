@@ -50,7 +50,7 @@ type
     settings themselves, a sparkle for its AI page and an i in a circle
     for its About page. }
   TGittanNavIcon = (niHome, niGraph, niRepository, niCommands, niFiles, niPull, niForge,
-    niClock, niEditor, niTools, niAI, niAbout, niExtensions);
+    niClock, niEditor, niTools, niAI, niAbout, niExtensions, niProject);
 
   {** A click on a row, with its index. }
   TGittanNavPickEvent = procedure(Sender: TObject; AIndex: integer) of object;
@@ -534,6 +534,18 @@ begin
       Canvas.Polyline([Point(Mid, Eave - ASize div 5), Point(Mid + ASize div 5, Eave),
         Point(Mid, Eave + ASize div 5)]);
       Canvas.Line(X + ASize div 2, Y + ASize * 5 div 7, X + ASize - 3, Y + ASize * 5 div 7);
+    end;
+    niProject:
+    begin
+      { A package: a box seen from above its corner, the top face's
+        edges meeting at the middle. }
+      Eave := ASize div 2;  { the middle }
+      Canvas.Polyline([Point(X + Eave, Y), Point(X + ASize, Y + ASize div 4),
+        Point(X + ASize, Y + ASize * 3 div 4), Point(X + Eave, Y + ASize),
+        Point(X, Y + ASize * 3 div 4), Point(X, Y + ASize div 4), Point(X + Eave, Y)]);
+      Canvas.Polyline([Point(X, Y + ASize div 4), Point(X + Eave, Y + ASize div 2),
+        Point(X + ASize, Y + ASize div 4)]);
+      Canvas.Line(X + Eave, Y + ASize div 2, X + Eave, Y + ASize);
     end;
     niPull:
     begin
