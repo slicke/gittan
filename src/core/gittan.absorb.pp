@@ -47,6 +47,10 @@ resourcestring
   rsAbsorbNoCommits = 'There are no commits on the branch to put changes into.';
   rsAbsorbNoBranch = 'HEAD is not on a branch.';
   rsAbsorbNothingChosen = 'No change was chosen.';
+  rsAbsorbNoBase = 'Could not find where the branch leaves %s.';
+  rsAbsorbMoved = 'The branch has moved since the changes were read; try again.';
+  rsAbsorbStashConflicts = 'The changes went into their commits, but putting back what ' +
+    'was left in the work tree gave conflicts; git keeps it in the stash too.';
 
 type
   {** One block of changed lines of a file: its pairs (as gittan.keep
@@ -68,6 +72,8 @@ type
   TGittanAbsorbPlan = class
   private
     FOnto: string;
+    FBranch: string;
+    FHead: string;
     FSteps: TGittanRebaseSteps;
     FHunks: TGittanAbsorbHunks;
     FDiffs: TStringList;
@@ -92,6 +98,10 @@ type
     function HunkOf(const APath: string; const APair: TGittanKeep): integer;
     {** The commit the branch's commits sit on. }
     property Onto: string read FOnto;
+    {** The branch and HEAD's id when the plan was built, which the run
+      checks before it commits anything. }
+    property Branch: string read FBranch;
+    property Head: string read FHead;
     {** The branch's commits, oldest first, as a rebase replays them. }
     property Steps: TGittanRebaseSteps read FSteps;
     property Hunks: TGittanAbsorbHunks read FHunks;
@@ -102,8 +112,10 @@ type
 {** The commit the branch's own commits sit on: the merge base with the
   branch's upstream, else with the default branch, else the commit
   AbsorbMaxStack back, or the root commit when the branch is shorter.
-  False with AError when HEAD is on no branch, or the branch has no
-  commit of its own (AOnto is HEAD then). }
+  An upstream that is gone counts as none. False with AError when HEAD
+  is on no branch, the merge base with the upstream or default branch
+  cannot be found, or the branch has no commit of its own (AOnto is
+  HEAD then). }
 function AbsorbBase(ARepo: TGittanRepo; out AOnto: string; out AError: string): boolean;
 
 {** The old file's lines the block at AStart of ALines (a diff with the
@@ -113,6 +125,11 @@ function AbsorbBase(ARepo: TGittanRepo; out AOnto: string; out AError: string): 
   and AAfter the one after it (0 at the end). }
 procedure BlockOldLines(ALines: TStrings; AStart: integer; out AFrom, ATo, ABefore,
   AAfter: integer);
+
+{** BlockOldLines with AOld, the old file's lines before AStart, counted
+  already, so a pass over the blocks need not count from the start. }
+procedure BlockOldLinesAt(ALines: TStrings; AStart, AOld: integer; out AFrom, ATo,
+  ABefore, AAfter: integer);
 
 {** The step of ASteps the block belongs to by ABlame, the blame of the
   old file: the one commit that wrote the lines AFrom..ATo, or with
@@ -126,10 +143,13 @@ function AbsorbTarget(ABlame: TGittanBlame; AFrom, ATo, ABefore, AAfter: integer
   without a target is never taken) as fixup commits, one per target
   commit, and replays the branch from the plan's Onto with the fixups
   folded in. ACommits is how many fixup commits were made. True when
-  the rebase went through. False with AError when a commit failed, or
-  nothing was chosen; AConflicts and AStopped as RebaseInteractive
-  gives them when the rebase stopped, which the Commit section carries
-  on, the fixup commits still on the branch. }
+  the rebase went through. False with AError when the branch moved since
+  the plan was built, a file changed since or cannot be read, a commit
+  failed, or nothing was chosen; AConflicts and AStopped as
+  RebaseInteractive gives them when the rebase stopped, which the Commit
+  section carries on, the fixup commits still on the branch; AConflicts
+  with rsAbsorbStashConflicts when the rebase went through but the rest
+  of the work tree clashed when it was put back. }
 function AbsorbRun(ARepo: TGittanRepo; APlan: TGittanAbsorbPlan;
   const AChosen: array of boolean; AOptions: TGittanCommitOptions;
   out ACommits: integer; out AConflicts, AStopped: boolean; out AError: string): boolean;
@@ -155,10 +175,18 @@ begin
     Exit;
   end;
   Ref := ARepo.Upstream(Branch);
+  if (Ref <> '') and not ARepo.HasCommit(Ref) then
+    Ref := '';
   if Ref = '' then
     Ref := ARepo.DefaultBranch;
-  if (Ref <> '') and ARepo.MergeBase(Ref, AOnto) then
-    Result := True
+  if Ref <> '' then
+  begin
+    { Never further back than the upstream or the default branch, so
+      without a merge base with it there is no base. }
+    Result := ARepo.MergeBase(Ref, AOnto);
+    if not Result then
+      AError := Format(rsAbsorbNoBase, [Ref]);
+  end
   else
   begin
     { No upstream and no default branch: the last AbsorbMaxStack
@@ -200,6 +228,15 @@ begin
   for i := 0 to AStart - 1 do
     if ALines[i][1] <> '+' then
       Inc(Old);
+  BlockOldLinesAt(ALines, AStart, Old, AFrom, ATo, ABefore, AAfter);
+end;
+
+procedure BlockOldLinesAt(ALines: TStrings; AStart, AOld: integer; out AFrom, ATo,
+  ABefore, AAfter: integer);
+var
+  i, Old: integer;
+begin
+  Old := AOld;
   ABefore := Old;
   AFrom := Old + 1;
   i := AStart;
@@ -306,7 +343,7 @@ procedure TGittanAbsorbPlan.AddHunks(ARepo: TGittanRepo; const APath: string; AL
 var
   Blame: TGittanBlame;
   Output: string;
-  i, AFrom, ATo, ABefore, AAfter: integer;
+  i, Old, AFrom, ATo, ABefore, AAfter: integer;
   NewFile, Deleted, Blamed: boolean;
 
   procedure AddHunk(AStart: integer);
@@ -329,7 +366,7 @@ var
         Reason := rsAbsorbNoNeighbours
       else
       begin
-        BlockOldLines(ALines, AStart, AFrom, ATo, ABefore, AAfter);
+        BlockOldLinesAt(ALines, AStart, Old, AFrom, ATo, ABefore, AAfter);
         Target := AbsorbTarget(Blame, AFrom, ATo, ABefore, AAfter, FSteps, Reason);
       end;
     end;
@@ -353,9 +390,15 @@ begin
       Blame := TGittanBlame.Create;
       Blamed := ARepo.Blame(APath, 'HEAD', Output) and Blame.Parse(Output);
     end;
+    { Old counts the old file's lines before i as it goes. }
+    Old := 0;
     for i := 0 to ALines.Count - 1 do
+    begin
       if (ALines[i][1] <> ' ') and ((i = 0) or (ALines[i - 1][1] = ' ')) then
         AddHunk(i);
+      if ALines[i][1] <> '+' then
+        Inc(Old);
+    end;
   finally
     Blame.Free;
   end;
@@ -372,6 +415,8 @@ begin
   FSteps := nil;
   FDiffs.Clear;
   FPushed := 0;
+  FBranch := ARepo.Branch;
+  FHead := ARepo.CommitId('HEAD');
   Result := AbsorbBase(ARepo, FOnto, AError);
   if not Result then
     Exit;
@@ -461,7 +506,7 @@ var
   Taken: array of boolean;
   Merges, Whole: boolean;
   t, h, Found: integer;
-  Id, Err: string;
+  Id, Err, Output: string;
   Text: RawByteString;
 
   { Whether the hunk is chosen and has a target. }
@@ -484,12 +529,17 @@ var
   { The text to commit for APath at this point: the work tree's with
     the pairs of every hunk not taken yet put back as HEAD has them,
     so the fixup commit holds only its own hunks and what is left
-    stays in the work tree. The whole file when nothing is left out. }
+    stays in the work tree. The whole file when nothing is left out,
+    checked against the plan's diff all the same, so a change made
+    since is not committed. }
   function PartFor(const APath: string; out AText: RawByteString; out AWhole: boolean): boolean;
   var
     LeftOut: TGittanKeepArray;
+    FileText: RawByteString;
     i, k: integer;
   begin
+    Result := False;
+    AText := '';
     LeftOut := nil;
     for i := 0 to High(Hunks) do
       if (Hunks[i].Path = APath) and not Taken[i] then
@@ -499,10 +549,17 @@ var
           LeftOut[High(LeftOut)] := Hunks[i].Pairs[k];
         end;
     AWhole := Length(LeftOut) = 0;
-    if AWhole then
-      Exit(True);
-    Result := LeaveOutText(ReadFileBytes(IncludeTrailingPathDelimiter(ARepo.Root) +
-      SetDirSeparators(APath)), APlan.Diff(APath), LeftOut, AText, Found, Err);
+    try
+      FileText := ReadFileBytes(IncludeTrailingPathDelimiter(ARepo.Root) +
+        SetDirSeparators(APath));
+    except
+      on E: Exception do
+      begin
+        AError := APath + ': ' + E.Message;
+        Exit;
+      end;
+    end;
+    Result := LeaveOutText(FileText, APlan.Diff(APath), LeftOut, AText, Found, Err);
     if not Result then
       AError := APath + ': ' + Err;
   end;
@@ -517,6 +574,13 @@ begin
   Steps := APlan.Steps;
   Taken := nil;
   SetLength(Taken, Length(Hunks));
+  { Nothing is written when the branch moved since the plan was built:
+    its steps and diffs would be wrong. }
+  if (ARepo.Branch <> APlan.Branch) or (ARepo.CommitId('HEAD') <> APlan.Head) then
+  begin
+    AError := rsAbsorbMoved;
+    Exit;
+  end;
   Paths := TStringList.Create;
   try
     Paths.CaseSensitive := True;
@@ -566,7 +630,18 @@ begin
     Exit;
   Result := ARepo.RebaseInteractive(APlan.Onto, Steps, AConflicts, AStopped);
   if not Result then
+  begin
     AError := ARepo.Error;
+    Exit;
+  end;
+  { --autostash puts the rest back after the rebase, and a clash there
+    leaves files in conflict with git's exit code still 0. }
+  if RunGitIn(ARepo.Root, ['ls-files', '-u'], Output, Err) and (Trim(Output) <> '') then
+  begin
+    AConflicts := True;
+    AError := rsAbsorbStashConflicts;
+    Result := False;
+  end;
 end;
 
 end.

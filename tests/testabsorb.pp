@@ -35,16 +35,19 @@ type
     procedure TestBlockOldLines;
     procedure TestBaseRoot;
     procedure TestBaseUpstream;
+    procedure TestBaseNoMergeBase;
     procedure TestBuild;
     procedure TestRunAll;
     procedure TestRunSome;
     procedure TestRunNothing;
+    procedure TestRunStale;
+    procedure TestRunMoved;
   end;
 
 implementation
 
 uses
-  gittan.keep;
+  gittan.keep, gittan.discard;
 
 procedure TAbsorbTest.SetUp;
 begin
@@ -255,6 +258,34 @@ begin
   end;
 end;
 
+{ An upstream with no history in common gives no base rather than the
+  last commits; one that is gone counts as none. }
+procedure TAbsorbTest.TestBaseNoMergeBase;
+var
+  Origin, Other, Onto, Err: string;
+begin
+  Origin := FDir + '-origin';
+  Other := FDir + '-other';
+  Git(['init', '-q', '--bare', Origin]);
+  Git(['init', '-q', '-b', 'main', Other]);
+  try
+    Git(['-C', Other, 'commit', '-q', '--allow-empty', '-m', 'Elsewhere']);
+    Git(['-C', Other, 'push', '-q', Origin, 'main']);
+    Git(['remote', 'add', 'origin', Origin]);
+    Git(['fetch', '-q', 'origin']);
+    Git(['branch', '-q', '-u', 'origin/main']);
+    MakeBranch;
+    AssertFalse('no merge base', AbsorbBase(FRepo, Onto, Err));
+    AssertEquals(Format(rsAbsorbNoBase, ['origin/main']), Err);
+    Git(['update-ref', '-d', 'refs/remotes/origin/main']);
+    AssertTrue('gone: ' + Err, AbsorbBase(FRepo, Onto, Err));
+    AssertEquals('the root', GitOut(['rev-parse', 'HEAD~3']), Onto);
+  finally
+    RemoveTree(Other);
+    RemoveTree(Origin);
+  end;
+end;
+
 procedure TAbsorbTest.TestBuild;
 var
   Plan: TGittanAbsorbPlan;
@@ -383,6 +414,63 @@ begin
     AssertEquals(0, Commits);
     AssertEquals(rsAbsorbNothingChosen, Err);
     AssertEquals('Change beta|Change five|Change two|Base', Subjects);
+  finally
+    Plan.Free;
+  end;
+end;
+
+{ A file changed since the plan was built stops the run, a file whose
+  every hunk is chosen too, and so does one that is gone; nothing is
+  committed. }
+procedure TAbsorbTest.TestRunStale;
+var
+  Plan: TGittanAbsorbPlan;
+  Commits: integer;
+  Conflicts, Stopped: boolean;
+  Err: string;
+begin
+  MakeBranch;
+  ChangeWorkTree;
+  Plan := TGittanAbsorbPlan.Create;
+  try
+    AssertEquals('', Build(Plan, ['a.txt', 'b.txt', 'c.txt']));
+    WriteLines('b.txt', ['alpha', 'beta!!!', 'gamma']);
+    AssertFalse('changed', AbsorbRun(FRepo, Plan, [False, False, False, True, True], [],
+      Commits, Conflicts, Stopped, Err));
+    AssertEquals('b.txt: ' + rsDiscardStale, Err);
+    AssertEquals(0, Commits);
+    DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'b.txt');
+    AssertFalse('gone', AbsorbRun(FRepo, Plan, [False, False, False, True, True], [],
+      Commits, Conflicts, Stopped, Err));
+    AssertTrue('the path in the error: ' + Err, Pos('b.txt: ', Err) = 1);
+    AssertEquals(0, Commits);
+    AssertEquals('Change beta|Change five|Change two|Base', Subjects);
+  finally
+    Plan.Free;
+  end;
+end;
+
+{ A commit made after the plan was built stops the run before it writes
+  anything. }
+procedure TAbsorbTest.TestRunMoved;
+var
+  Plan: TGittanAbsorbPlan;
+  Commits: integer;
+  Conflicts, Stopped: boolean;
+  Err: string;
+begin
+  MakeBranch;
+  ChangeWorkTree;
+  Plan := TGittanAbsorbPlan.Create;
+  try
+    AssertEquals('', Build(Plan, ['a.txt', 'b.txt']));
+    Git(['add', 'c.txt']);
+    Git(['commit', '-q', '-m', 'Add c']);
+    AssertFalse(AbsorbRun(FRepo, Plan, [True, True, True, True], [], Commits, Conflicts,
+      Stopped, Err));
+    AssertEquals(rsAbsorbMoved, Err);
+    AssertEquals(0, Commits);
+    AssertEquals('Add c|Change beta|Change five|Change two|Base', Subjects);
   finally
     Plan.Free;
   end;

@@ -205,6 +205,10 @@ begin
     StatusNote(Err);
     BannerSuccess(Err);
   end
+  else if Conflicts and (FRepo.Operation = '') then
+    { The rebase went through and the stash it put back clashed: there
+      is no rebase to continue, only the files to resolve. }
+    BannerError(rsAbsorbFailed, Err)
   else if Conflicts then
     StatusNote(rsCaConflicts, True)
   else if Stopped then
