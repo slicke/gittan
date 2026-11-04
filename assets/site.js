@@ -131,34 +131,22 @@
     c.appendChild(b);
   });
 
-  // ---- The bar: the name of the section in view slides up into its centre.
+  // ---- The bar: the same links on both pages. The link of the section in view is underlined; with none in
+  //      view, the link to this page itself (All features on the features page).
   var bar = document.querySelector('.bar');
-  var now = bar && bar.querySelector('.now');
-  var named = $$('[data-name]');
-  if (now && named.length) {
-    var cur = now.querySelector('span'), current = '';
-    var setName = function (name) {
-      if (name === current) return;
-      current = name;
-      var next = document.createElement('span');
-      next.textContent = name;
-      if (still) { now.innerHTML = ''; now.appendChild(next); cur = next; return; }
-      next.className = 'in';
-      now.appendChild(next);
-      var old = cur;
-      requestAnimationFrame(function () { requestAnimationFrame(function () {
-        next.className = '';
-        if (old) { old.className = 'out'; setTimeout(function () { old.remove(); }, 320); }
-      }); });
-      cur = next;
+  var all = $$('.bar .sections a');
+  var here = function (a) { return a.pathname.replace(/index\.html$/, '') === location.pathname.replace(/index\.html$/, ''); };
+  var secLinks = all.filter(function (a) { return a.hash && here(a) && document.getElementById(a.hash.slice(1)); });
+  var pageLink = all.filter(function (a) { return !a.hash && here(a); })[0] || null;
+  if (all.length) {
+    var mark = function () {
+      var y = window.innerHeight * 0.4, on = null;
+      secLinks.forEach(function (a) { var r = document.getElementById(a.hash.slice(1)).getBoundingClientRect(); if (r.top <= y && r.bottom > y) on = a; });
+      on = on || pageLink;
+      all.forEach(function (a) { if (a === on) a.setAttribute('aria-current', a === pageLink ? 'page' : 'true'); else a.removeAttribute('aria-current'); });
     };
-    var pick = function () {
-      var y = window.innerHeight * 0.4, name = '';
-      named.forEach(function (s) { var r = s.getBoundingClientRect(); if (r.top <= y && r.bottom > y) name = s.dataset.name; });
-      setName(name);
-    };
-    window.addEventListener('scroll', pick, { passive: true });
-    pick();
+    window.addEventListener('scroll', mark, { passive: true });
+    mark();
   }
 
   // ---- The bar's action steps aside while another button to the same place is on the screen.
