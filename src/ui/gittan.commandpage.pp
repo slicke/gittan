@@ -63,7 +63,8 @@ type
     FName, FRoot: string;
     FCommands: TGittanRepoCommands;
     FProjects: TGittanProjects;
-    FHasFile, FTrusted: boolean;
+    FFiles: TGittanCommandsFiles;
+    FTrusted: boolean;
     FRunName, FRunProject: string;
     FRunSource: TGittanCommandSource;
     FHasRun, FRunning, FRunStarted, FRunKilled, FStopping, FPulse: boolean;
@@ -91,7 +92,8 @@ type
     procedure PaintHeading(var Y: integer; const ATitle, ADetail, AState: string;
       AStateColor: TColor);
     procedure PaintAction(ATop: integer; const ACaption, ALink: string);
-    procedure PaintNote(var Y: integer; const AText: string);
+    procedure PaintNote(var Y: integer; const AText: string; AColor: TColor = clNone);
+    procedure PaintFileSection(var Y: integer; const AFile: TGittanCommandsFile);
     procedure PaintTrustCard(var Y: integer);
     procedure PaintTiles(var Y: integer; ASource: TGittanCommandSource;
       const AProject: string = '');
@@ -124,10 +126,12 @@ type
       drops the commands and the run of the one before. }
     procedure SetRepository(const AName, ARoot: string);
     {** The commands, the kinds of project they are listed under (a
-      section each, in this order), whether the commands file exists
-      and whether it is trusted. }
+      section each, in this order), the commands files (a section each,
+      the first under Commands; ReadCommandsFiles) and whether they are
+      trusted. }
     procedure SetCommands(const ACommands: TGittanRepoCommands;
-      const AProjects: TGittanProjects; AHasFile, ATrusted: boolean);
+      const AProjects: TGittanProjects; const AFiles: TGittanCommandsFiles;
+      ATrusted: boolean);
     {** The command AName of ASource (a script and a target may share
       a name; AProject the kind's name for one of a kind's) is running
       (ARunning), or has ended with AExitCode after AElapsedMs; AStarted
@@ -185,13 +189,14 @@ resourcestring
   rsMakefile = 'Makefile';
   rsEditFile = 'Edit…';
   rsCreateFile = 'Create…';
-  rsNoCommands = 'No commands yet. A .gittan/commands.ini names them, and the scripts of a ' +
+  rsNoCommands = 'No commands yet. A .gittan/commands.toml names them, and the scripts of a ' +
     'package.json, the targets of a Makefile and the commands of a Cargo.toml, go.mod, ' +
     'pyproject.toml or Lazarus project are listed by themselves.';
-  rsNoManifest = 'named in commands.ini';
-  rsTrustTitle = 'This repository''s commands.ini has not been trusted on this computer';
-  rsTrustText = 'A committed file could make a shortcut run anything. Its commands and ' +
-    'their shortcuts are off until you trust it; a change of the file asks again.';
+  rsNoManifest = 'named in commands.toml';
+  rsNotToml = 'Not read: %s';
+  rsTrustTitle = 'This repository''s commands have not been trusted on this computer';
+  rsTrustText = 'A committed file could make a shortcut run anything. The commands of ' +
+    '.gittan and their shortcuts are off until you trust them; a change of a file asks again.';
   rsTrustButton = 'Trust Commands';
   rsRunning = 'Running';
   rsRunningTile = 'Running… %s';
@@ -295,7 +300,7 @@ begin
   if FRoot <> ARoot then
   begin
     FCommands := nil;
-    FHasFile := False;
+    FFiles := nil;
     FTrusted := True;
     FHasRun := False;
     FRunning := False;
@@ -310,7 +315,7 @@ begin
 end;
 
 procedure TGittanCommandPage.SetCommands(const ACommands: TGittanRepoCommands;
-  const AProjects: TGittanProjects; AHasFile, ATrusted: boolean);
+  const AProjects: TGittanProjects; const AFiles: TGittanCommandsFiles; ATrusted: boolean);
 var
   i: integer;
 begin
@@ -320,7 +325,9 @@ begin
   SetLength(FProjects, Length(AProjects));
   for i := 0 to High(AProjects) do
     FProjects[i] := AProjects[i];
-  FHasFile := AHasFile;
+  SetLength(FFiles, Length(AFiles));
+  for i := 0 to High(AFiles) do
+    FFiles[i] := AFiles[i];
   FTrusted := ATrusted;
   FHot := -1;
   Layout;
@@ -510,13 +517,16 @@ begin
 end;
 
 { A dim paragraph, wrapped to the width. }
-procedure TGittanCommandPage.PaintNote(var Y: integer; const AText: string);
+procedure TGittanCommandPage.PaintNote(var Y: integer; const AText: string; AColor: TColor);
 var
   R: TRect;
   Style: TTextStyle;
 begin
   FC.Font := Font;
-  FC.Font.Color := FDim;
+  if AColor = clNone then
+    FC.Font.Color := FDim
+  else
+    FC.Font.Color := AColor;
   FC.Brush.Style := bsClear;
   R := Rect(Px(Pad), Y, Width - Px(Pad), Y);
   Style := FC.TextStyle;
@@ -1164,9 +1174,20 @@ begin
   PaintContent;
 end;
 
+{ A commands file's tiles, under a note in the error color when it is
+  no TOML. }
+procedure TGittanCommandPage.PaintFileSection(var Y: integer; const AFile: TGittanCommandsFile);
+begin
+  if AFile.Error <> '' then
+    PaintNote(Y, Format(rsNotToml, [AFile.Error]), FErrorColor);
+  if GroupCount(csFile, AFile.Path) > 0 then
+    PaintTiles(Y, csFile, AFile.Path);
+end;
+
 procedure TGittanCommandPage.PaintContent;
 var
   Y, TextH, TitleH, HeadingTop, X, i: integer;
+  Main: boolean;
 begin
   FC.Brush.Style := bsSolid;
   FC.Brush.Color := FBack;
@@ -1194,21 +1215,28 @@ begin
   FC.TextOut(Px(Pad), Y, FitTextLeft(FC, FRoot, Width - 2 * Px(Pad)));
   Inc(Y, TextH);
 
-  { The file's commands, with the trust card over them while the file
-    is not trusted; with no commands at all the page says so here. }
+  { The files' commands under Commands, commands.toml's there and each
+    other file's in a section of its own, with the trust card over them while they are not trusted;
+    with no commands at all the page says so here. }
   HeadingTop := Y;
+  Main := (Length(FFiles) > 0) and (FFiles[0].Path = CommandsPath);
   PaintHeading(Y, rsFileGroup, CommandsPath, '', FDim);
   if Assigned(FOnEditFile) then
-    if FHasFile then
+    if Main then
       PaintAction(HeadingTop + Px(Pad), rsEditFile, EditLink)
     else
       PaintAction(HeadingTop + Px(Pad), rsCreateFile, EditLink);
-  if FHasFile and not FTrusted then
+  if (Length(FFiles) > 0) and not FTrusted then
     PaintTrustCard(Y);
-  if GroupCount(csFile) > 0 then
-    PaintTiles(Y, csFile)
-  else if Length(FCommands) = 0 then
+  if Main then
+    PaintFileSection(Y, FFiles[0]);
+  if Length(FCommands) = 0 then
     PaintNote(Y, rsNoCommands);
+  for i := Ord(Main) to High(FFiles) do
+  begin
+    PaintHeading(Y, ChangeFileExt(ExtractFileName(FFiles[i].Path), ''), FFiles[i].Path, '', FDim);
+    PaintFileSection(Y, FFiles[i]);
+  end;
 
   if GroupCount(csPackage) > 0 then
   begin

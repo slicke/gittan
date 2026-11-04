@@ -1,6 +1,6 @@
 # Project drivers
 
-Read this when touching `gittan.project`, `gittan.manifest`, a `gittan.proj.*` driver, adding a driver, `RegisterProjectKind`, `Identify`, `TGittanProjectContext`, the Project page's model, or the `project =` line of `.gittan/commands.ini`. The Commands page that lists the drivers' commands is in repo-commands.md, the Project page that paints their sections in project-page.md.
+Read this when touching `gittan.project`, `gittan.manifest`, a `gittan.proj.*` driver, adding a driver, `RegisterProjectKind`, `Identify`, `TGittanProjectContext`, the Project page's model, or the `project =` line of `.gittan/commands.toml`. The Commands page that lists the drivers' commands is in repo-commands.md, the Project page that paints their sections in project-page.md.
 
 ## What a driver is
 
@@ -9,7 +9,7 @@ Read this when touching `gittan.project`, `gittan.manifest`, a `gittan.proj.*` d
 - Every method is a class function that reads files at most and asks git only through the context, never the network, since the kinds are asked on every snapshot. Only `Name` and `Identify` are abstract; the rest default to nothing:
   1. `Name` – the kind's name ("Rust"): the section's heading, the word a `project =` line and the settings use. Short and stable.
   2. `Identify(ARoot, out AManifest)` – whether the files at the root make the repository one of this kind, with the file that tells it as the page shows it ("Cargo.toml", "Trndi.lpi", "a.lpi +1"). `DetectProjects` asks every driver.
-  3. `Commands(ARoot)` – the commands its tools offer (`TGittanProjectCommand`: name, shell line, terminal), plain verbs (`build`, `test`) so a `[test]` section of commands.ini reaches them, `build:<mode>` for several of a verb, which the Commands page groups (`SplitCommandName`).
+  3. `Commands(ARoot)` – the commands its tools offer (`TGittanProjectCommand`: name, shell line, terminal), plain verbs (`build`, `test`) so a `[commands.test]` table of commands.toml reaches them, `build:<mode>` for several of a verb, which the Commands page groups (`SplitCommandName`).
   4. `DependencyFile`, `LockFile`, `Dependencies(AText)`, `Locked(AName, AText)`, `Version(AText)`, `PackageUrl(AName)` – what `StandardSection` needs for the dependencies table.
   5. `Checks(AContext)` – what is worth a warning (`TGittanProjectCheck`: text, path, `IgnorePattern` when .gitignore settles it).
   6. `Section(AContext, AManifest)` – the driver's section of the Project page. The default is `StandardSection`: the heading (the manifest, the version, the count of dependencies, how many changed since the tag), the dependencies table (`DependencyTable`) and the checks. A driver overrides it to show more, usually around `StandardSection`'s blocks.
@@ -30,7 +30,7 @@ Read this when touching `gittan.project`, `gittan.manifest`, a `gittan.proj.*` d
 
 ## Which kinds a repository is
 
-- `ProjectsOfRoot(ARoot, AChoice)` in `gittan.repocommands`: the kinds the user picked on the Project page (`AChoice`, from the settings, `TGittanSettings.ProjectKindsOf`: "Lazarus,Go", "none"), else a `project = rust, go` line of commands.ini before its first section (`ParseCommandsProjects`), else `DetectProjects`. A named kind is listed through `ProjectsNamed`, with the manifest its `Identify` gives, '' when it does not identify the root; an unknown name is skipped; `SplitProjectChoice` reads either form. `DiscoverRepoCommands(ARoot, out AProjects, AChoice)` gives the kinds to `LoadRepoCommands`, which keeps them in `FRepoProjects` for both pages.
+- `ProjectsOfRoot(ARoot, AChoice)` in `gittan.repocommands`: the kinds the user picked on the Project page (`AChoice`, from the settings, `TGittanSettings.ProjectKindsOf`: "Lazarus,Go", "none"), else `project = ["rust", "go"]` in commands.toml before its first table (`ParseCommandsTomlProjects`, through the files `ReadCommandsFiles` read), else `DetectProjects`. A named kind is listed through `ProjectsNamed`, with the manifest its `Identify` gives, '' when it does not identify the root; an unknown name is skipped; `SplitProjectChoice` reads either form. `DiscoverRepoCommands(ARoot, out AProjects, AChoice)` gives the kinds to `LoadRepoCommands`, which keeps them in `FRepoProjects` for both pages.
 
 ## Adding a driver
 

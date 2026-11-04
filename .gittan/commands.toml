@@ -1,0 +1,28 @@
+# Gittan's own commands, shown on the Commands page (spec/repo-commands.md).
+# The Makefile's targets are listed by themselves; a table named as one
+# gives it a key: Ctrl+Cmd on macOS, Ctrl+Alt elsewhere.
+
+[commands.build]
+key = "B"
+
+[commands.test]
+key = "T"
+
+[commands.run]
+key = "R"
+
+[commands.debug]
+key = "U"
+
+[commands.rebuild]
+key = "E"
+
+[commands.clean]
+key = "C"
+
+[commands.lexlib]
+key = "L"
+
+[commands.log]
+run = "git -c color.ui=always log --oneline --graph --decorate -20"
+key = "G"

@@ -48,7 +48,7 @@ Turn it on and pick Claude Code or GitHub Copilot CLI: Gittan runs the command l
 
 ## Extensions that can say no
 
-A JavaScript file in the extensions folder adds commands to the menu and the command palette, watches commits, pushes and pulls, and can stop one with a reason shown to the user. Each file declares what it needs, Gittan asks before loading one that wants the repository, the network or programs, and `@repos` in the file limits it to the repositories it is for. A repository's own commands (`.gittan/commands.ini`) become buttons and keys, once you have trusted that version of the file.
+A JavaScript file in the extensions folder adds commands to the menu and the command palette, watches commits, pushes and pulls, and can stop one with a reason shown to the user. Each file declares what it needs, Gittan asks before loading one that wants the repository, the network or programs, and `@repos` in the file limits it to the repositories it is for. A repository's own commands (`.gittan/commands.toml`, and more files in `.gittan/commands/`) become buttons and keys, once you have trusted that version of the files.
 
 ## What changed in the dependencies since the last release
 

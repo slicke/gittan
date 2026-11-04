@@ -449,7 +449,7 @@ run: build
 
 test: qjs-links
 	@mkdir -p $(TESTLIB)
-	$(FPC) $(if $(CPU),-P$(CPU)) -Mobjfpc -Sh -O1 -Fusrc/core -Fusrc/proj -FU$(TESTLIB) -FEtests -Fl$(QJS_DIR) $(QJS_RPATH) tests/gittantests.lpr
+	$(FPC) $(if $(CPU),-P$(CPU)) -Mobjfpc -Sh -O1 -Fusrc/core -Fusrc/proj -Fuvendor/toml-fp/src -FU$(TESTLIB) -FEtests -Fl$(QJS_DIR) $(QJS_RPATH) tests/gittantests.lpr
 	$(call stage_qjs,tests)
 	$(TESTBIN) --all --format=plain $(TEST_ARGS)
 

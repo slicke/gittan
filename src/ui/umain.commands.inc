@@ -1,7 +1,8 @@
 { ---------------------------------------------------------------------------
   The Commands page
   ---------------------------------------------------------------------------
-  The repository's own commands (gittan.repocommands: .gittan/commands.ini,
+  The repository's own commands (gittan.repocommands: .gittan/commands.toml
+  and the .toml files of .gittan/commands,
   the scripts of package.json, the targets of a Makefile) as tiles on a
   page in the box (gittan.commandpage), opened from the sidebar's
   Commands row, View > Commands (Cmd+4) and, on macOS, a click on
@@ -48,14 +49,15 @@ begin
   begin
     FRepoCommands := nil;
     FRepoProjects := nil;
+    FCommandsFiles := nil;
     FCommandsHash := '';
     Exit;
   end;
-  FRepoCommands := DiscoverRepoCommands(FRepo.Root, FRepoProjects,
+  FRepoCommands := DiscoverRepoCommands(FRepo.Root, FRepoProjects, FCommandsFiles,
     App.Settings.ProjectKindsOf(FRepo.Root));
-  FCommandsHash := CommandsFileHash(FRepo.Root);
+  FCommandsHash := CommandsHashOf(FCommandsFiles);
   FCommandPage.SetRepository(ExtractFileName(FRepo.Root), FRepo.Root);
-  FCommandPage.SetCommands(FRepoCommands, FRepoProjects, FCommandsHash <> '', CommandsTrusted);
+  FCommandPage.SetCommands(FRepoCommands, FRepoProjects, FCommandsFiles, CommandsTrusted);
 end;
 
 procedure TRepoFrame.MenuCommandsClick(Sender: TObject);
@@ -249,11 +251,11 @@ begin
     Exit;
   App.Settings.TrustCommands(FRepo.Root, FCommandsHash);
   App.Settings.Save;
-  FCommandPage.SetCommands(FRepoCommands, FRepoProjects, FCommandsHash <> '', CommandsTrusted);
+  FCommandPage.SetCommands(FRepoCommands, FRepoProjects, FCommandsFiles, CommandsTrusted);
 end;
 
-{ Edit… or Create…: the file opens in the editor as a Config file does;
-  a new one is written with its commented example first, and the
+{ Edit… or Create…: commands.toml opens in the editor as a Config file
+  does; a new one is written with its commented example first, and the
   Config section lists it. }
 procedure TRepoFrame.CommandPageEditFile(Sender: TObject);
 var

@@ -814,6 +814,9 @@ type
     FKindsPopup: TGittanPopupList;
     FRepoCommands: TGittanRepoCommands;
     FRepoProjects: TGittanProjects;
+    { The commands files read with FRepoCommands, a section each on the
+      page. }
+    FCommandsFiles: TGittanCommandsFiles;
     FCommandsHash: string;
     FCommandJob: TGittanCommandJob;
     FCommandName, FCommandProject: string;

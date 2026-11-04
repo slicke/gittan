@@ -259,10 +259,10 @@ type
       PaletteRecent, dropping a duplicate and the oldest beyond
       MaxPaletteRecent. }
     procedure AddPaletteRecent(const AName: string);
-    {** Whether the commands file of the repository at ARoot, whose
-      text has the hash AHash (CommandsFileHash), has been trusted:
-      the file's commands and keys run only then. A repository without
-      the file (AHash empty) needs no trust. }
+    {** Whether the commands files of the repository at ARoot, whose
+      text has the hash AHash (CommandsFileHash), have been trusted:
+      the files' commands and keys run only then. A repository without
+      one (AHash empty) needs no trust. }
     function CommandsTrusted(const ARoot, AHash: string): boolean;
     {** Trusts the commands file of ARoot as it is now; a change of its
       text asks again. }

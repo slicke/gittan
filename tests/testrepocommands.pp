@@ -1,7 +1,8 @@
 unit testrepocommands;
 
-{** Tests of gittan.repocommands: the commands file, the scripts of a
-  package.json, the targets of a Makefile, how DiscoverRepoCommands
+{** Tests of gittan.repocommands: the commands files (commands.toml
+  and the files of .gittan/commands), the
+  scripts of a package.json, the targets of a Makefile, how DiscoverRepoCommands
   joins them, the file's hash, and a command run by TGittanCommandJob. }
 
 {$mode objfpc}{$H+}
@@ -10,7 +11,7 @@ interface
 
 uses
   Classes, SysUtils, {$ifndef windows}BaseUnix,{$endif} fpcunit, testregistry,
-  gittan.repocommands, testhelpers;
+  gittan.repocommands, gittan.project, gittan.sha256, testhelpers;
 
 type
   TRepoCommandsTest = class(TTestCase)
@@ -26,8 +27,10 @@ type
     procedure SetUp; override;
     procedure TearDown; override;
   published
-    procedure TestParseFile;
-    procedure TestParseFileKeys;
+    procedure TestParseToml;
+    procedure TestParseTomlNotToml;
+    procedure TestTomlProjects;
+    procedure TestCommandsFiles;
     procedure TestPackageScripts;
     procedure TestPackageNotJson;
     procedure TestMakefileTargets;
@@ -36,6 +39,7 @@ type
     procedure TestDiscoverKeysFromFile;
     procedure TestDiscoverOrphan;
     procedure TestHash;
+    procedure TestHashOfFiles;
     procedure TestCommandByKey;
     procedure TestSplitName;
     procedure TestJobRuns;
@@ -109,49 +113,142 @@ begin
   CheckSynchronize(0);
 end;
 
-procedure TRepoCommandsTest.TestParseFile;
+procedure TRepoCommandsTest.TestParseToml;
 var
   C: TGittanRepoCommands;
+  E: string;
 begin
-  C := ParseCommandsFile(
-    '; a comment' + #10 +
-    '[test]' + #10 +
-    'command = npm test' + #10 +
-    'key = t' + #10 +
-    '# another comment' + #10 +
-    '' + #10 +
-    '[ dev ]' + #13#10 +
-    'Command=npm run dev' + #13#10 +
-    'terminal = yes' + #13#10 +
-    '[build]' + #10 +
-    'key = B' + #10);
-  AssertEquals(3, Length(C));
-  AssertEquals('test', C[0].Name);
-  AssertEquals('npm test', C[0].Command);
-  AssertEquals('the detail is the command', 'npm test', C[0].Detail);
-  AssertEquals('the key is a capital', 'T', C[0].Key);
-  AssertFalse(C[0].Terminal);
-  AssertTrue(C[0].Source = csFile);
-  AssertEquals('the name is trimmed', 'dev', C[1].Name);
-  AssertEquals('npm run dev', C[1].Command);
-  AssertEquals('no key', #0, C[1].Key);
-  AssertTrue('terminal = yes', C[1].Terminal);
-  AssertEquals('a section without a command', '', C[2].Command);
-  AssertEquals('B', C[2].Key);
+  C := ParseCommandsToml(
+    '# a comment'#10 +
+    'project = "rust"'#10 +
+    '[commands]'#10 +
+    'lint = "npm run lint"'#10 +
+    '[commands.log]'#10 +
+    'run = ''git log --format="%h %s"'''#10 +
+    'key = "g"'#10 +
+    '[commands."build:run"]'#10 +
+    'run = """'#10'make build'#10'./run'#10'"""'#10 +
+    'terminal = true'#10 +
+    'key = 7'#10 +
+    '[commands.wrong]'#10 +
+    'run = 3'#10 +
+    'key = "F1"'#10 +
+    'terminal = "yes"'#10 +
+    'other = "kept out"'#10 +
+    '[commands.blank]'#10 +
+    'run = "  "'#10 +
+    'key = "B"'#10 +
+    '[elsewhere]'#10 +
+    'run = "not a command"'#10, E);
+  AssertEquals('no error', '', E);
+  AssertEquals(5, Length(C));
+  { By name: blank, build:run, lint, log, wrong. }
+  AssertEquals('blank', C[0].Name);
+  AssertEquals('a run of blanks runs nothing', '', C[0].Command);
+  AssertEquals('B', C[0].Key);
+  AssertEquals('a quoted name', 'build:run', C[1].Name);
+  AssertEquals('a multi-line string, its first newline dropped', 'make build'#10'./run'#10,
+    C[1].Command);
+  AssertTrue(C[1].Terminal);
+  AssertEquals('a digit as a number', '7', C[1].Key);
+  AssertTrue(C[1].Source = csFile);
+  AssertEquals('a string is the run line', 'lint', C[2].Name);
+  AssertEquals('npm run lint', C[2].Command);
+  AssertEquals(#0, C[2].Key);
+  AssertEquals('log', C[3].Name);
+  AssertEquals('a literal string keeps its quotes', 'git log --format="%h %s"', C[3].Command);
+  AssertEquals('the detail is the line', C[3].Command, C[3].Detail);
+  AssertEquals('a key as a capital', 'G', C[3].Key);
+  AssertEquals('wrong', C[4].Name);
+  AssertEquals('a run that is no string is none', '', C[4].Command);
+  AssertEquals('F1 is no key', #0, C[4].Key);
+  AssertFalse('terminal must be a boolean', C[4].Terminal);
+  AssertEquals('no [commands], none', 0, Length(ParseCommandsToml('project = "go"', E)));
+  AssertEquals('', E);
+  AssertEquals(0, Length(ParseCommandsToml('', E)));
+  AssertEquals('commands that is no table gives none', 0,
+    Length(ParseCommandsToml('commands = "x"', E)));
 end;
 
-procedure TRepoCommandsTest.TestParseFileKeys;
+procedure TRepoCommandsTest.TestParseTomlNotToml;
 var
   C: TGittanRepoCommands;
+  E: string;
 begin
-  C := ParseCommandsFile('[a]'#10'command = x'#10'key = 7'#10'[b]'#10'command = y'#10'key = F1'#10 +
-    '[c]'#10'command = z'#10'key = -'#10'lines before any section = ignored');
-  AssertEquals(3, Length(C));
-  AssertEquals('a digit is a key', '7', C[0].Key);
-  AssertEquals('two characters are none', #0, C[1].Key);
-  AssertEquals('punctuation is none', #0, C[2].Key);
-  AssertEquals('nothing before a section', 0, Length(ParseCommandsFile('command = x')));
-  AssertEquals(0, Length(ParseCommandsFile('')));
+  C := ParseCommandsToml('[commands.a]'#10'run = "x'#10, E);
+  AssertEquals('no commands', 0, Length(C));
+  AssertTrue('the reader''s message', E <> '');
+  C := ParseCommandsToml('[commands.a]'#10'run = "x"'#10'[commands.a]'#10'run = "y"'#10, E);
+  AssertEquals('a table twice is no TOML', 0, Length(C));
+  AssertTrue(E <> '');
+  C := ParseCommandsToml('[test]'#10'command = make test'#10, E);
+  AssertEquals('an ini file is no TOML', 0, Length(C));
+  AssertTrue(E <> '');
+end;
+
+procedure TRepoCommandsTest.TestTomlProjects;
+var
+  N: TStringArray;
+begin
+  AssertFalse('no line', ParseCommandsTomlProjects('[commands.a]'#10'run = "x"'#10, N));
+  AssertFalse('in a table it is none', ParseCommandsTomlProjects(
+    '[commands]'#10'project = "rust"'#10, N));
+  AssertFalse('no TOML', ParseCommandsTomlProjects('project = rust', N));
+  AssertTrue(ParseCommandsTomlProjects('project = ["Rust", "go"]', N));
+  AssertEquals(2, Length(N));
+  AssertEquals('Rust', N[0]);
+  AssertEquals('go', N[1]);
+  AssertTrue('a string of names', ParseCommandsTomlProjects('project = "rust, go python"', N));
+  AssertEquals(3, Length(N));
+  AssertEquals('python', N[2]);
+  AssertTrue(ParseCommandsTomlProjects('project = "none"', N));
+  AssertEquals('none is no kind', 0, Length(N));
+  AssertTrue(ParseCommandsTomlProjects('project = []', N));
+  AssertEquals(0, Length(N));
+  AssertFalse('a number is no list', ParseCommandsTomlProjects('project = 1', N));
+end;
+
+procedure TRepoCommandsTest.TestCommandsFiles;
+var
+  F: TGittanCommandsFiles;
+  C: TGittanRepoCommands;
+  P: TGittanProjects;
+begin
+  AssertEquals('none', 0, Length(ReadCommandsFiles(FDir)));
+  AssertEquals(0, Length(ReadCommandsFiles('')));
+  Put('.gittan/commands.ini', '[old]'#10'command = echo old'#10);
+  Put('.gittan/commands/release.toml', '[commands.tag]'#10'run = "git tag"'#10);
+  Put('.gittan/commands/Docs.toml', '[commands.docs]'#10'run = "make docs"'#10);
+  Put('.gittan/commands/notes.txt', 'not a commands file');
+  Put('.gittan/commands/broken.toml', '[commands.x'#10);
+  F := ReadCommandsFiles(FDir);
+  AssertEquals('the folder''s; an ini is no commands file', 3, Length(F));
+  AssertEquals('by name, capitals first', '.gittan/commands/Docs.toml', F[0].Path);
+  AssertEquals('.gittan/commands/broken.toml', F[1].Path);
+  AssertEquals('no commands from a broken file', 0, Length(F[1].Commands));
+  AssertTrue('and why', F[1].Error <> '');
+  AssertEquals('.gittan/commands/release.toml', F[2].Path);
+  AssertEquals('', F[2].Error);
+  AssertEquals('the command knows its file', '.gittan/commands/release.toml',
+    F[2].Commands[0].Project);
+  Put('.gittan/commands.toml', 'project = "none"'#10'[commands.main]'#10'run = "echo main"'#10);
+  F := ReadCommandsFiles(FDir);
+  AssertEquals(4, Length(F));
+  AssertEquals('commands.toml first', CommandsPath, F[0].Path);
+  AssertTrue(F[0].HasProjects);
+  C := DiscoverRepoCommands(FDir, P, F);
+  AssertEquals('file by file', 3, Length(C));
+  AssertEquals('main', C[0].Name);
+  AssertEquals(CommandsPath, C[0].Project);
+  AssertEquals('docs', C[1].Name);
+  AssertEquals('tag', C[2].Name);
+  AssertEquals('the files given back', 4, Length(F));
+  Put('Cargo.toml', '[package]'#10'name = "x"'#10);
+  C := DiscoverRepoCommands(FDir, P, F);
+  AssertEquals('project = "none" keeps the kinds out', 0, Length(P));
+  Put('.gittan/commands/release.toml', 'project = "none"'#10);
+  Put('.gittan/commands.toml', '[commands.main]'#10'run = "echo main"'#10);
+  AssertEquals('only commands.toml names the kinds', 1, Length(ProjectsOfRoot(FDir)));
 end;
 
 procedure TRepoCommandsTest.TestPackageScripts;
@@ -226,7 +323,7 @@ var
 begin
   AssertEquals('nothing in an empty folder', 0, Length(DiscoverRepoCommands(FDir)));
   AssertEquals(0, Length(DiscoverRepoCommands('')));
-  Put('.gittan/commands.ini', '[lint]'#10'command = npm run lint -- --fix'#10'key = L'#10);
+  Put('.gittan/commands.toml', '[commands.lint]'#10'run = "npm run lint -- --fix"'#10'key = "L"'#10);
   Put('package.json', '{"scripts": {"test": "vitest run"}}');
   Put('Makefile', 'all: deps'#10#9'echo'#10'deps:'#10);
   C := DiscoverRepoCommands(FDir);
@@ -247,20 +344,20 @@ procedure TRepoCommandsTest.TestDiscoverKeysFromFile;
 var
   C: TGittanRepoCommands;
 begin
-  Put('.gittan/commands.ini',
-    '[test]'#10'key = T'#10'terminal = true'#10 +
-    '[deps]'#10'key = D'#10 +
-    '[own]'#10'command = echo own'#10'key = T'#10 +
-    '[other]'#10'key = X'#10);
+  Put('.gittan/commands.toml',
+    '[commands.test]'#10'key = "T"'#10'terminal = true'#10 +
+    '[commands.deps]'#10'key = "D"'#10 +
+    '[commands.own]'#10'run = "echo own"'#10'key = "T"'#10 +
+    '[commands.other]'#10'key = "X"'#10);
   Put('package.json', '{"scripts": {"test": "vitest run"}}');
   Put('Makefile', 'deps:'#10);
   C := DiscoverRepoCommands(FDir);
-  AssertEquals('a keyed section taken by a script or target is no command of its own', 4,
+  AssertEquals('a keyed table taken by a script or target is no command of its own', 4,
     Length(C));
-  AssertEquals('own', C[0].Name);
-  AssertEquals('the first with a key keeps it', 'T', C[0].Key);
-  AssertEquals('one taken by nothing stays, after the file''s own', 'other', C[1].Name);
-  AssertEquals('', C[1].Command);
+  AssertEquals('the file''s by name; one taken by nothing stays', 'other', C[0].Name);
+  AssertEquals('', C[0].Command);
+  AssertEquals('own', C[1].Name);
+  AssertEquals('the first with a key keeps it', 'T', C[1].Key);
   AssertEquals('test', C[2].Name);
   AssertEquals('npm run test', C[2].Command);
   AssertEquals('the same key again is dropped', #0, C[2].Key);
@@ -274,10 +371,10 @@ procedure TRepoCommandsTest.TestDiscoverOrphan;
 var
   C: TGittanRepoCommands;
 begin
-  Put('.gittan/commands.ini',
-    '[biuld]'#10'key = B'#10 +
-    '[own]'#10'command = echo own'#10'key = O'#10 +
-    '[build]'#10'key = B'#10);
+  Put('.gittan/commands.toml',
+    '[commands.biuld]'#10'key = "B"'#10 +
+    '[commands.own]'#10'run = "echo own"'#10'key = "O"'#10 +
+    '[commands.build]'#10'key = "B"'#10);
   Put('Makefile', 'build:'#10);
   C := DiscoverRepoCommands(FDir);
   AssertEquals('the orphan is kept among the file''s', 3, Length(C));
@@ -297,19 +394,39 @@ var
 begin
   AssertEquals('no file, no hash', '', CommandsFileHash(FDir));
   AssertEquals('', CommandsFileHash(''));
-  Put('.gittan/commands.ini', '[a]'#10'command = x'#10);
+  Put('.gittan/commands.toml', '[commands]'#10'a = "x"'#10);
   H := CommandsFileHash(FDir);
   AssertEquals('SHA-256 in hex', 64, Length(H));
   AssertEquals('the same text, the same hash', H, CommandsFileHash(FDir));
-  Put('.gittan/commands.ini', '[a]'#10'command = y'#10);
+  Put('.gittan/commands.toml', '[commands]'#10'a = "y"'#10);
   AssertTrue('another text, another hash', H <> CommandsFileHash(FDir));
+end;
+
+procedure TRepoCommandsTest.TestHashOfFiles;
+var
+  H, H2: string;
+begin
+  AssertEquals('none, no hash', '', CommandsHashOf(nil));
+  Put('.gittan/commands.toml', '[commands.a]'#10'run = "x"'#10);
+  H := CommandsFileHash(FDir);
+  AssertEquals(64, Length(H));
+  AssertTrue('the TOML hashes with its path',
+    H <> SHA256Print(SHA256String('[commands.a]'#10'run = "x"'#10)));
+  Put('.gittan/commands/more.toml', '');
+  H2 := CommandsFileHash(FDir);
+  AssertTrue('a file added asks again, even an empty one', H <> H2);
+  Put('.gittan/commands/more.toml', '# a comment'#10);
+  AssertTrue('a file changed asks again', H2 <> CommandsFileHash(FDir));
+  Put('.gittan/commands/more.toml', '');
+  AssertEquals('the same files, the same hash', H2, CommandsFileHash(FDir));
 end;
 
 procedure TRepoCommandsTest.TestCommandByKey;
 var
   C: TGittanRepoCommands;
+  E: string;
 begin
-  C := ParseCommandsFile('[a]'#10'command = x'#10'[b]'#10'command = y'#10'key = B'#10);
+  C := ParseCommandsToml('[commands]'#10'a = "x"'#10'[commands.b]'#10'run = "y"'#10'key = "B"'#10, E);
   AssertEquals(1, CommandByKey(C, 'B'));
   AssertEquals(-1, CommandByKey(C, 'A'));
   AssertEquals('no key matches no command', -1, CommandByKey(C, #0));

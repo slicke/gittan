@@ -400,10 +400,10 @@ var
   i: integer;
 begin
   Put('Cargo.toml', '');
-  Put('.gittan/commands.ini', '[test]' + LineEnding + 'key = T' + LineEnding +
-    '[clippy]' + LineEnding + 'terminal = yes' + LineEnding);
+  Put('.gittan/commands.toml', '[commands.test]' + LineEnding + 'key = "T"' + LineEnding +
+    '[commands.clippy]' + LineEnding + 'terminal = true' + LineEnding);
   C := DiscoverRepoCommands(FDir);
-  AssertEquals('the sections give keys and are not listed', 6, Length(C));
+  AssertEquals('the tables give keys and are not listed', 6, Length(C));
   for i := 0 to High(C) do
   begin
     AssertTrue('all of the kind', C[i].Source = csProject);
@@ -423,8 +423,8 @@ var
   N: TStringArray;
   i: integer;
 begin
-  AssertFalse('no line', ParseCommandsProjects('[a]' + LineEnding + 'project = rust', N));
-  AssertTrue(ParseCommandsProjects('; hi' + LineEnding + 'Project = Rust, go' + LineEnding +
+  AssertFalse('no line', ParseCommandsTomlProjects('[a]' + LineEnding + 'project = "rust"', N));
+  AssertTrue(ParseCommandsTomlProjects('# hi' + LineEnding + 'project = ["Rust", "go"]' + LineEnding +
     '[a]' + LineEnding, N));
   AssertEquals(2, Length(N));
   AssertEquals('Rust', N[0]);
@@ -433,7 +433,7 @@ begin
     which has no file and so no manifest, but is listed as asked. }
   Put('Cargo.toml', '');
   Put('go.mod', 'module x');
-  Put('.gittan/commands.ini', 'project = go python' + LineEnding);
+  Put('.gittan/commands.toml', 'project = "go python"' + LineEnding);
   C := DiscoverRepoCommands(FDir, P);
   AssertEquals(2, Length(P));
   AssertEquals('Go', P[0].Name);
@@ -450,11 +450,11 @@ var
   P: TGittanProjects;
   N: TStringArray;
 begin
-  AssertTrue(ParseCommandsProjects('project = none', N));
+  AssertTrue(ParseCommandsTomlProjects('project = "none"', N));
   AssertEquals(0, Length(N));
   Put('Cargo.toml', '');
-  Put('.gittan/commands.ini', 'project = none' + LineEnding + '[x]' + LineEnding +
-    'command = echo' + LineEnding);
+  Put('.gittan/commands.toml', 'project = "none"' + LineEnding + '[commands.x]' + LineEnding +
+    'run = "echo"' + LineEnding);
   C := DiscoverRepoCommands(FDir, P);
   AssertEquals(0, Length(P));
   AssertEquals('the file''s command alone', 1, Length(C));
@@ -466,7 +466,7 @@ var
   P: TGittanProjects;
 begin
   Put('Cargo.toml', '');
-  Put('.gittan/commands.ini', 'project = cobol, rust, rust' + LineEnding);
+  Put('.gittan/commands.toml', 'project = ["cobol", "rust", "rust"]' + LineEnding);
   P := ProjectsOfRoot(FDir);
   AssertEquals('the unknown is skipped, the repeat once', 1, Length(P));
   AssertEquals('Rust', P[0].Name);
@@ -645,7 +645,7 @@ var
 begin
   Put('Cargo.toml', '');
   Put('go.mod', 'module x');
-  Put('.gittan/commands.ini', 'project = go' + LineEnding);
+  Put('.gittan/commands.toml', 'project = "go"' + LineEnding);
   P := ProjectsOfRoot(FDir);
   AssertEquals('the file''s line', 1, Length(P));
   AssertEquals('Go', P[0].Name);
