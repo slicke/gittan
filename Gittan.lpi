@@ -29,7 +29,7 @@
           <SearchPaths>
             <IncludeFiles Value="$(ProjOutDir)"/>
             <Libraries Value="externals/quickjs/prebuilt/$(TargetCPU)-$(TargetOS)"/>
-            <OtherUnitFiles Value="src/core;src/ui"/>
+            <OtherUnitFiles Value="src/core;src/proj;src/ui"/>
             <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)-release"/>
           </SearchPaths>
           <Conditionals Value="if TargetOS='linux' then CustomOptions += ' -k-rpath=\$ORIGIN -k-rpath=\$ORIGIN/../lib/gittan';
@@ -294,7 +294,7 @@ if TargetOS='darwin' then CustomOptions += ' -k-rpath -k@loader_path';"/>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir)"/>
       <Libraries Value="externals/quickjs/prebuilt/$(TargetCPU)-$(TargetOS)"/>
-      <OtherUnitFiles Value="src/core;src/ui"/>
+      <OtherUnitFiles Value="src/core;src/proj;src/ui"/>
       <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Conditionals Value="if TargetOS='linux' then CustomOptions += ' -k-rpath=\$ORIGIN -k-rpath=\$ORIGIN/../lib/gittan';

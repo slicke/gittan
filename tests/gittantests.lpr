@@ -18,7 +18,8 @@ uses
   testgithub, testconflicts, testcli, testsymbolchanges,
   testcallers, testrepofiles, testdiscard, testkeep, testleaveout, testsubmodules, testupdate,
   testreviews, testgraph, testpofile, testcommitjob, testrepoinfo, testrebase, testcommitstats, testwatch, testjob, testterminal, testhttp,
-  testtextfile, testrepocommands, testproject, testmanifest, testsha256, testai, testagentcli, testopenai, testforge,
+  testtextfile, testrepocommands, testproject, testmanifest, testprojlazarus, testprojnode,
+  testprojrust, testprojgo, testprojpython, testsha256, testai, testagentcli, testopenai, testforge,
   testlfslocks, testworktrees, testgitflow, testrepolist, testpickaxe, testnavhistory, testtimelapse, testundo, testmerge, testtabnames,
   testextperm, testextmodules, testextquickjs, testextengine, testextloader, testextapi,
   testissuelinks, testabsorb;

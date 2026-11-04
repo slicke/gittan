@@ -1,32 +1,30 @@
 unit gittan.project;
 
-{** The kinds of project a repository can be, told by the files at its
-  root: a Lazarus project (a .lpi), a Node package (package.json), a
-  Rust crate (Cargo.toml), a Go module (go.mod), a Python project
-  (pyproject.toml, setup.py or requirements.txt). A kind knows what file
-  told it, the commands its tools run (cargo build, go test ./...,
-  lazbuild X.lpi), which the Commands page lists under the kind's name
-  beside the scripts of a package.json and the targets of a Makefile and
-  which DiscoverRepoCommands in gittan.repocommands joins with the rest,
-  and what its manifest and lock file say (gittan.manifest): the
-  dependencies with the versions asked for and resolved, the project's
-  own version, and the checks worth a warning (a session file or the
-  compiled units committed, a lock file missing), which the Project page
-  shows with what changed since the last tag (ProjectReport,
-  DependencyChanges).
+{** The kinds of project a repository can be, and what Gittan shows of
+  them. A kind is a driver: a class in a unit of its own under src/proj
+  (gittan.proj.lazarus, gittan.proj.node, gittan.proj.rust,
+  gittan.proj.go, gittan.proj.python) that registers itself as it
+  loads, as a forge does. Each driver says whether the files at a root
+  make the repository one of its kind (Identify), which commands its
+  tools offer (the Commands page lists them under the kind's name), and
+  what its section of the Project page holds (Section): the page paints
+  whatever blocks a driver gives it, facts, tables, checks and notes,
+  so a driver shows what only its kind has (Lazarus its build modes and
+  where each package comes from, Go its module and replace lines).
 
-  A kind is a class registered as the unit loads (RegisterProjectKind),
-  as a forge is: a kind with more to it than these can move to a unit
-  of its own, and an extension can ask for the kinds of a repository
-  later. Nothing here needs the LCL or runs a program; tested in
-  tests/testproject.pp. }
+  This unit holds the base class, the registry, the page's model and
+  the helpers that build it, the dependency comparison every driver
+  with a manifest shares (StandardSection), and the context a driver
+  reads git through (TGittanProjectContext; TGittanGitProjectContext
+  asks the real git). Nothing here needs the LCL; tested in
+  tests/testproject.pp, each driver in tests/testproj<kind>.pp. }
 
 {$mode objfpc}{$H+}
 
 interface
 
 uses
-  Classes, SysUtils, gittan.manifest;
+  Classes, SysUtils, gittan.manifest, gittan.submodules;
 
 type
   {** A command of a kind's tools: its name on the tile and the shell
@@ -47,54 +45,167 @@ type
   end;
   TGittanProjectChecks = array of TGittanProjectCheck;
 
+  {** How the page paints a cell: plain text, dimmed, bold, in the link
+    color, in the ok, warning or error color, or as a button (with a
+    Command; the page runs it as the Commands page would). }
+  TGittanProjectStyle = (psText, psDim, psStrong, psLink, psOk, psWarn, psError, psButton);
+
+  {** A cell of a table or a fact's value. Url makes it a link that
+    opens in the browser, Command a button that runs the shell line
+    under the name CommandName; Hint is the tooltip. }
+  TGittanProjectCell = record
+    Text, Hint, Url, Command, CommandName: string;
+    Style: TGittanProjectStyle;
+  end;
+  TGittanProjectCells = array of TGittanProjectCell;
+
+  {** A row of a table: its cells under the columns, or, when Heading is
+    set, a subheading over the rows that follow. }
+  TGittanProjectRow = record
+    Cells: TGittanProjectCells;
+    Heading: string;
+  end;
+  TGittanProjectRows = array of TGittanProjectRow;
+
+  {** What a block is: facts (a label and a value per row, the label
+    dimmed), a table (its columns as headers when Columns is set; the
+    last column at the right end when RightLast), the checks in a
+    card, or a dim note. }
+  TGittanProjectBlockKind = (pbFacts, pbTable, pbChecks, pbNote);
+
+  TGittanProjectBlock = record
+    Kind: TGittanProjectBlockKind;
+    {** Painted as a subheading over the block, '' for none. }
+    Title: string;
+    Columns: TStringArray;
+    Rows: TGittanProjectRows;
+    RightLast: boolean;
+    Checks: TGittanProjectChecks;
+    Text: string;
+  end;
+  TGittanProjectBlocks = array of TGittanProjectBlock;
+
+  TGittanProjectKind = class;
+  TGittanProjectKindClass = class of TGittanProjectKind;
+
+  {** One kind's section of the Project page: its heading (the name, a
+    detail after it, a state at the right end in its style) and its
+    blocks. }
+  TGittanProjectSection = record
+    Kind: TGittanProjectKindClass;
+    Name, Detail, State: string;
+    StateStyle: TGittanProjectStyle;
+    Blocks: TGittanProjectBlocks;
+  end;
+  TGittanProjectSections = array of TGittanProjectSection;
+
+  { TGittanProjectContext }
+
+  {** What a driver may ask of git while it builds its section: the
+    root, the tag the page compares with (Since, '' for none), the files
+    git tracks, a file's text at the tag, a submodule's commit at a
+    ref, the submodules. The base answers from what it was given and
+    nothing for the rest, which the tests use; TGittanGitProjectContext
+    asks git. }
+  TGittanProjectContext = class
+  private
+    FRoot, FSince: string;
+    FTracked: TStringList;
+  public
+    {** ATracked is copied, sorted; nil for none. }
+    constructor Create(const ARoot, ASince: string; ATracked: TStrings);
+    destructor Destroy; override;
+    {** The text of APath (from the root, "/") at Since; '' when there is
+      no Since or the file was not there. }
+    function ReadAt(const APath: string): string; virtual;
+    {** The commit the submodule at APath records at ARef ('' for
+      HEAD); '' when it is no submodule there. }
+    function GitlinkAt(const APath, ARef: string): string; virtual;
+    {** A name for ACommit of the submodule at APath: its tag, or
+      tag-n-gHASH, else the short hash. }
+    function Describe(const APath, ACommit: string): string; virtual;
+    {** The submodules of the repository, with the commits the index
+      records. }
+    function Submodules: TGittanSubmodules; virtual;
+    {** Whether git tracks APath. }
+    function IsTracked(const APath: string): boolean;
+    {** Whether git tracks a path that starts with APrefix, the first
+      such in AFirst. }
+    function TrackedUnder(const APrefix: string; out AFirst: string): boolean;
+    {** The first tracked path with the extension AExt, ''. }
+    function TrackedWithExt(const AExt: string): string;
+    property Root: string read FRoot;
+    property Since: string read FSince;
+    property Tracked: TStringList read FTracked;
+  end;
+
+  { TGittanGitProjectContext }
+
+  {** The context of a real repository: Since is the newest tag
+    reachable from HEAD, the tracked files git ls-files, the files at
+    the tag git cat-file. }
+  TGittanGitProjectContext = class(TGittanProjectContext)
+  private
+    FSubmodules: TGittanSubmodules;
+    FSubmodulesRead: boolean;
+  public
+    constructor Create(const ARoot: string);
+    function ReadAt(const APath: string): string; override;
+    function GitlinkAt(const APath, ARef: string): string; override;
+    function Describe(const APath, ACommit: string): string; override;
+    function Submodules: TGittanSubmodules; override;
+  end;
+
   { TGittanProjectKind }
 
-  {** One kind of project. Every method reads files at most; none runs
-    a program or touches the network, since the kinds are asked on
-    every snapshot. }
+  {** One kind of project, a driver. Every method reads files at most
+    and asks git only through the context, never the network, since the
+    kinds are asked on every snapshot. Only Name and Identify are
+    required; the rest have a default of nothing. }
   TGittanProjectKind = class
   public
     {** How the interface names it: "Rust", "Go". Short and stable, as
-      the commands file names a kind by it. }
+      the commands file and the settings name a kind by it. }
     class function Name: string; virtual; abstract;
-    {** The file at ARoot that makes it this kind, as the page shows it
-      ("Cargo.toml", "Gittan.lpi"), '' when the repository is not one. }
-    class function Manifest(const ARoot: string): string; virtual; abstract;
+    {** Whether the files at ARoot make the repository one of this kind,
+      with the file that tells it in AManifest, as the page shows it
+      ("Cargo.toml", "Gittan.lpi"). }
+    class function Identify(const ARoot: string; out AManifest: string): boolean;
+      virtual; abstract;
     {** The commands the kind's tools offer for the repository at
-      ARoot, in the order the page sorts anyway. }
-    class function Commands(const ARoot: string): TGittanProjectCommands; virtual; abstract;
-    {** The file at ARoot that lists the dependencies ("Cargo.toml",
-      "pyproject.toml" else "requirements.txt", the first .lpi), as a
-      path relative to the root; '' when the kind lists none. }
+      ARoot. }
+    class function Commands(const ARoot: string): TGittanProjectCommands; virtual;
+    {** The file at ARoot that lists the dependencies, from the root;
+      '' when the kind lists none. }
     class function DependencyFile(const ARoot: string): string; virtual;
-    {** The lock file at ARoot that holds the resolved versions
-      ("Cargo.lock", whichever of package-lock.json, yarn.lock,
-      pnpm-lock.yaml and bun.lock is there, uv.lock, poetry.lock or
-      pdm.lock); '' when there is none or the kind has none. }
+    {** The lock file at ARoot with the resolved versions; ''. }
     class function LockFile(const ARoot: string): string; virtual;
-    {** The dependencies the text of the dependency file asks for. }
+    {** The dependencies the dependency file's text asks for. }
     class function Dependencies(const AText: string): TGittanDependencies; virtual;
-    {** The packages the text of the lock file AName resolved, each with
-      its version in Resolved. }
+    {** The packages the text of the lock file AName resolved. }
     class function Locked(const AName, AText: string): TGittanDependencies; virtual;
-    {** The project's own version as the dependency file's text gives
-      it; '' when it has none. }
+    {** The project's own version from the dependency file's text. }
     class function Version(const AText: string): string; virtual;
-    {** The web page of the package AName on the kind's registry
-      (crates.io, npmjs.com, pkg.go.dev, pypi.org); '' for a kind with
-      none. }
+    {** The page of the package AName on the kind's registry; ''. }
     class function PackageUrl(const AName: string): string; virtual;
-    {** What is worth a warning at ARoot, given the paths git tracks
-      (ATracked, sorted, with "/"): none by default. }
-    class function Checks(const ARoot: string; ATracked: TStrings): TGittanProjectChecks;
-      virtual;
+    {** What is worth a warning. }
+    class function Checks(AContext: TGittanProjectContext): TGittanProjectChecks; virtual;
+    {** The kind's section of the Project page. The default is
+      StandardSection; a driver overrides it to show what its kind has
+      beyond dependencies, building on StandardSection or not. }
+    class function Section(AContext: TGittanProjectContext;
+      const AManifest: string): TGittanProjectSection; virtual;
+    {** The section every driver with a manifest can have: the heading
+      (the manifest, the version, the count of dependencies, how many
+      changed since the tag), the dependencies table and the checks. }
+    class function StandardSection(AContext: TGittanProjectContext;
+      const AManifest: string): TGittanProjectSection;
   end;
-  TGittanProjectKindClass = class of TGittanProjectKind;
 
-  {** A kind found at a root, with the file that told it. }
+  {** A kind found or chosen at a root, with the file that told it ('',
+    for a kind chosen with no file). }
   TGittanProject = record
     Kind: TGittanProjectKindClass;
-    {** Kind.Name, kept so a record stands on its own. }
     Name: string;
     Manifest: string;
   end;
@@ -113,18 +224,6 @@ type
   end;
   TGittanDependencyChanges = array of TGittanDependencyChange;
 
-  {** What the Project page shows of one kind: the files, the version,
-    the dependencies with their resolved versions, how they differ from
-    those at Since (a tag's name, or '' when there was nothing to
-    compare with) and the checks. }
-  TGittanProjectReport = record
-    Name, Manifest, DependencyFile, LockFile, Version, Since: string;
-    Dependencies: TGittanDependencies;
-    Changes: TGittanDependencyChanges;
-    Checks: TGittanProjectChecks;
-  end;
-  TGittanProjectReports = array of TGittanProjectReport;
-
 {** Adds a kind to those DetectProjects asks, in the order registered. }
 procedure RegisterProjectKind(AClass: TGittanProjectKindClass);
 
@@ -134,17 +233,49 @@ function ProjectKinds: TGittanProjectKindClasses;
 {** The kind named AName, whatever the case; nil for none. }
 function ProjectKindByName(const AName: string): TGittanProjectKindClass;
 
-{** Every registered kind the repository at ARoot is, in the order
-  registered, each with its manifest. }
+{** Every registered kind that identifies the repository at ARoot, in
+  the order registered, each with its manifest. }
 function DetectProjects(const ARoot: string): TGittanProjects;
+
+{** The kinds of ANames ("rust", "go"), in the registered order, each
+  once, with the manifest its Identify gives at ARoot ('' when it does
+  not identify it); an unknown name is skipped. }
+function ProjectsNamed(const ARoot: string; const ANames: array of string): TGittanProjects;
+
+{** The names of a choice as written ("rust, go"; commas or spaces),
+  "none" left out. }
+function SplitProjectChoice(const AValue: string): TStringArray;
 
 {** A command as a kind returns it. }
 function ProjectCommand(const AName, ACommand: string; ATerminal: boolean = False):
   TGittanProjectCommand;
+procedure AddProjectCommand(var ACommands: TGittanProjectCommands;
+  const ACommand: TGittanProjectCommand);
 
 {** A check as a kind returns it. }
 function ProjectCheck(const AText, APath: string; const AIgnorePattern: string = ''):
   TGittanProjectCheck;
+procedure AddProjectCheck(var AChecks: TGittanProjectChecks; const ACheck: TGittanProjectCheck);
+
+{** The page's model. }
+function ProjectCell(const AText: string; AStyle: TGittanProjectStyle = psText;
+  const AHint: string = ''; const AUrl: string = ''): TGittanProjectCell;
+function ProjectButton(const AText, ACommandName, ACommand: string;
+  const AHint: string = ''): TGittanProjectCell;
+function ProjectRow(const ACells: array of TGittanProjectCell): TGittanProjectRow;
+function ProjectHeadingRow(const AHeading: string): TGittanProjectRow;
+function ProjectBlock(AKind: TGittanProjectBlockKind; const ATitle: string = ''):
+  TGittanProjectBlock;
+procedure AddRow(var ABlock: TGittanProjectBlock; const ARow: TGittanProjectRow);
+{** A fact: ALabel dimmed, AValue in AStyle; nothing when AValue is ''. }
+procedure AddFact(var ABlock: TGittanProjectBlock; const ALabel, AValue: string;
+  AStyle: TGittanProjectStyle = psText; const AUrl: string = '');
+{** Adds ABlock, unless it is empty (no rows, no checks, no text). }
+procedure AddBlock(var ASection: TGittanProjectSection; const ABlock: TGittanProjectBlock);
+{** A note block with AText. }
+function ProjectNote(const AText: string): TGittanProjectBlock;
+{** The checks as a block. }
+function ChecksBlock(const AChecks: TGittanProjectChecks): TGittanProjectBlock;
 
 {** The version of a dependency as shown: the resolved one when the
   lock file has it, else what the manifest asks for. }
@@ -156,45 +287,77 @@ procedure ResolveDependencies(var ADependencies: TGittanDependencies;
   const ALocked: TGittanDependencies);
 
 {** How ANew's dependencies differ from AOld's, by name and group: the
-  ones added and changed in ANew's order (changed when the version
-  shown differs), then the ones removed in AOld's. }
+  ones added and changed in ANew's order, then the ones removed. }
 function DependencyChanges(const AOld, ANew: TGittanDependencies): TGittanDependencyChanges;
 
-{** What the Project page shows of AProject at ARoot: its dependency
-  and lock files read from the root, their old texts (AOldManifest,
-  AOldLock, as they were at ASince, '' for a file that was not there)
-  giving the changes when ASince is not '', and the checks over the
-  tracked paths. }
-function ProjectReport(const AProject: TGittanProject; const ARoot: string;
-  const AOldManifest, AOldLock, ASince: string; ATracked: TStrings): TGittanProjectReport;
+{** The dependencies of AKind at the context's root, resolved by the
+  lock file, and how they differ from those at Since (none without a
+  Since). False when the kind has no dependency file. }
+function ReadDependencies(AKind: TGittanProjectKindClass; AContext: TGittanProjectContext;
+  out ADependencies: TGittanDependencies; out AChanges: TGittanDependencyChanges): boolean;
+
+{** The table of dependencies: the name (a link to the registry), what
+  is asked for, what is resolved, and the change since the tag at the
+  right; the groups under subheadings, the removed ones at their group's
+  end. }
+function DependencyTable(AKind: TGittanProjectKindClass; const ASince: string;
+  const ADependencies: TGittanDependencies; const AChanges: TGittanDependencyChanges):
+  TGittanProjectBlock;
+
+{** How the page names a dependency group: Development for dev, and so
+  on; another as it is, with a capital. }
+function GroupTitle(const AGroup: string): string;
+
+{** The sections of the page for AProjects: each kind's Section, or its
+  StandardSection when it was picked with no manifest. }
+function ProjectSections(const AProjects: TGittanProjects;
+  AContext: TGittanProjectContext): TGittanProjectSections;
+
+{ Helpers the drivers share. }
+
+{** ARoot + AName. }
+function RootFile(const ARoot, AName: string): string;
+function HasFile(const ARoot, AName: string): boolean;
+function HasDir(const ARoot, AName: string): boolean;
+{** The text of the file AName at ARoot, '' without it. }
+function TextOf(const ARoot, AName: string): string;
+{** The files at ARoot whose name ends with AExt, by name. }
+function FilesWithExt(const ARoot, AExt: string): TStringArray;
+{** A name for the shell: quoted when it has a space or a character
+  the shell reads. }
+function ShellName(const AName: string): string;
 
 implementation
 
 uses
-  gittan.textfile;
+  gittan.git, gittan.textfile;
 
 resourcestring
-  rsLpsTracked = '%s is committed. The session file changes every time the project is opened ' +
-    'in Lazarus; it belongs in .gitignore.';
-  rsLibTracked = 'Files under lib/ are committed: the compiled units, which every build ' +
-    'writes again.';
-  rsBackupTracked = 'Files under backup/ are committed: the IDE''s copies of files before ' +
-    'an edit.';
-  rsNodeModulesTracked = 'Files under node_modules/ are committed. npm install writes them ' +
-    'from the lock file.';
-  rsNoNodeLock = 'No lock file. npm install writes package-lock.json; commit it so that every ' +
-    'clone gets the versions this one has.';
-  rsCargoLockUntracked = 'Cargo.lock is not committed. A crate with a binary commits it so ' +
-    'that every build uses the versions this one has.';
-  rsTargetTracked = 'Files under target/ are committed: cargo''s build output.';
-  rsNoGoSum = 'No go.sum. go mod tidy writes it; commit it so that every build checks the ' +
-    'modules it downloads.';
-  rsVenvTracked = 'Files under %s are committed: the virtual environment, which every ' +
-    'computer makes for itself.';
-  rsPycTracked = '%s is committed: compiled bytecode, which Python writes again.';
+  rsChangesSince = '%d changed since %s';
+  rsOneChangeSince = '1 changed since %s';
+  rsNoChangesSince = 'no changes since %s';
+  rsDependencies = '%d dependencies';
+  rsOneDependency = '1 dependency';
+  rsNoDependencies = 'No dependencies in %s.';
+  rsPickedNoFile = 'Picked by hand, but there is no %s at the root.';
+  rsPicked = 'picked';
+  rsAdded = 'added';
+  rsRemoved = 'removed';
+  rsChangedHint = '%s was %s at %s';
+  rsAddedHint = '%s is new since %s';
+  rsRemovedHint = '%s was %s at %s and is gone';
+  rsGroupDev = 'Development';
+  rsGroupBuild = 'Build';
+  rsGroupPeer = 'Peer';
+  rsGroupOptional = 'Optional';
+  rsGroupIndirect = 'Indirect';
 
 var
   GKinds: TGittanProjectKindClasses;
+
+{ ---------------------------------------------------------------------------
+  The registry
+  --------------------------------------------------------------------------- }
 
 procedure RegisterProjectKind(AClass: TGittanProjectKindClass);
 var
@@ -231,15 +394,53 @@ begin
   if (ARoot = '') or not DirectoryExists(ARoot) then
     Exit;
   for i := 0 to High(GKinds) do
+    if GKinds[i].Identify(ARoot, Manifest) then
+    begin
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)].Kind := GKinds[i];
+      Result[High(Result)].Name := GKinds[i].Name;
+      Result[High(Result)].Manifest := Manifest;
+    end;
+end;
+
+function ProjectsNamed(const ARoot: string; const ANames: array of string): TGittanProjects;
+var
+  i, j: integer;
+  Wanted: boolean;
+  Manifest: string;
+begin
+  Result := nil;
+  for i := 0 to High(GKinds) do
   begin
-    Manifest := GKinds[i].Manifest(ARoot);
-    if Manifest = '' then
+    Wanted := False;
+    for j := 0 to High(ANames) do
+      if SameText(Trim(ANames[j]), GKinds[i].Name) then
+        Wanted := True;
+    if not Wanted then
       Continue;
+    if (ARoot = '') or not DirectoryExists(ARoot) or
+      not GKinds[i].Identify(ARoot, Manifest) then
+      Manifest := '';
     SetLength(Result, Length(Result) + 1);
     Result[High(Result)].Kind := GKinds[i];
     Result[High(Result)].Name := GKinds[i].Name;
     Result[High(Result)].Manifest := Manifest;
   end;
+end;
+
+function SplitProjectChoice(const AValue: string): TStringArray;
+var
+  Parts: TStringArray;
+  i: integer;
+begin
+  Result := nil;
+  Parts := AValue.Split([',', ' ', ';'], TStringSplitOptions.ExcludeEmpty);
+  for i := 0 to High(Parts) do
+    if not SameText(Parts[i], 'none') then
+    begin
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := Parts[i];
+    end;
 end;
 
 function ProjectCommand(const AName, ACommand: string; ATerminal: boolean): TGittanProjectCommand;
@@ -249,6 +450,13 @@ begin
   Result.Terminal := ATerminal;
 end;
 
+procedure AddProjectCommand(var ACommands: TGittanProjectCommands;
+  const ACommand: TGittanProjectCommand);
+begin
+  SetLength(ACommands, Length(ACommands) + 1);
+  ACommands[High(ACommands)] := ACommand;
+end;
+
 function ProjectCheck(const AText, APath: string; const AIgnorePattern: string):
   TGittanProjectCheck;
 begin
@@ -256,6 +464,110 @@ begin
   Result.Path := APath;
   Result.IgnorePattern := AIgnorePattern;
 end;
+
+procedure AddProjectCheck(var AChecks: TGittanProjectChecks; const ACheck: TGittanProjectCheck);
+begin
+  SetLength(AChecks, Length(AChecks) + 1);
+  AChecks[High(AChecks)] := ACheck;
+end;
+
+{ ---------------------------------------------------------------------------
+  The page's model
+  --------------------------------------------------------------------------- }
+
+function ProjectCell(const AText: string; AStyle: TGittanProjectStyle; const AHint: string;
+  const AUrl: string): TGittanProjectCell;
+begin
+  Result := Default(TGittanProjectCell);
+  Result.Text := AText;
+  Result.Style := AStyle;
+  Result.Hint := AHint;
+  Result.Url := AUrl;
+end;
+
+function ProjectButton(const AText, ACommandName, ACommand: string;
+  const AHint: string): TGittanProjectCell;
+begin
+  Result := Default(TGittanProjectCell);
+  Result.Text := AText;
+  Result.Style := psButton;
+  Result.CommandName := ACommandName;
+  Result.Command := ACommand;
+  if AHint <> '' then
+    Result.Hint := AHint
+  else
+    Result.Hint := ACommand;
+end;
+
+function ProjectRow(const ACells: array of TGittanProjectCell): TGittanProjectRow;
+var
+  i: integer;
+begin
+  Result := Default(TGittanProjectRow);
+  SetLength(Result.Cells, Length(ACells));
+  for i := 0 to High(ACells) do
+    Result.Cells[i] := ACells[i];
+end;
+
+function ProjectHeadingRow(const AHeading: string): TGittanProjectRow;
+begin
+  Result := Default(TGittanProjectRow);
+  Result.Heading := AHeading;
+end;
+
+function ProjectBlock(AKind: TGittanProjectBlockKind; const ATitle: string): TGittanProjectBlock;
+begin
+  Result := Default(TGittanProjectBlock);
+  Result.Kind := AKind;
+  Result.Title := ATitle;
+end;
+
+procedure AddRow(var ABlock: TGittanProjectBlock; const ARow: TGittanProjectRow);
+begin
+  SetLength(ABlock.Rows, Length(ABlock.Rows) + 1);
+  ABlock.Rows[High(ABlock.Rows)] := ARow;
+end;
+
+procedure AddFact(var ABlock: TGittanProjectBlock; const ALabel, AValue: string;
+  AStyle: TGittanProjectStyle; const AUrl: string);
+begin
+  if AValue = '' then
+    Exit;
+  AddRow(ABlock, ProjectRow([ProjectCell(ALabel, psDim), ProjectCell(AValue, AStyle, AUrl, AUrl)]));
+end;
+
+procedure AddBlock(var ASection: TGittanProjectSection; const ABlock: TGittanProjectBlock);
+begin
+  case ABlock.Kind of
+    pbFacts, pbTable:
+      if Length(ABlock.Rows) = 0 then
+        Exit;
+    pbChecks:
+      if Length(ABlock.Checks) = 0 then
+        Exit;
+    pbNote:
+      if ABlock.Text = '' then
+        Exit;
+  end;
+  SetLength(ASection.Blocks, Length(ASection.Blocks) + 1);
+  ASection.Blocks[High(ASection.Blocks)] := ABlock;
+end;
+
+function ProjectNote(const AText: string): TGittanProjectBlock;
+begin
+  Result := ProjectBlock(pbNote);
+  Result.Text := AText;
+end;
+
+function ChecksBlock(const AChecks: TGittanProjectChecks): TGittanProjectBlock;
+begin
+  Result := ProjectBlock(pbChecks);
+  Result.Checks := AChecks;
+end;
+
+{ ---------------------------------------------------------------------------
+  Dependencies
+  --------------------------------------------------------------------------- }
 
 function DependencyShown(const ADependency: TGittanDependency): string;
 begin
@@ -326,7 +638,272 @@ begin
   end;
 end;
 
-{ The base class: a kind without dependencies or checks. }
+function ReadDependencies(AKind: TGittanProjectKindClass; AContext: TGittanProjectContext;
+  out ADependencies: TGittanDependencies; out AChanges: TGittanDependencyChanges): boolean;
+var
+  DepFile, LockName, OldLock: string;
+  Old: TGittanDependencies;
+begin
+  ADependencies := nil;
+  AChanges := nil;
+  DepFile := AKind.DependencyFile(AContext.Root);
+  if DepFile = '' then
+    Exit(False);
+  Result := True;
+  ADependencies := AKind.Dependencies(TextOf(AContext.Root, DepFile));
+  LockName := AKind.LockFile(AContext.Root);
+  if LockName <> '' then
+    ResolveDependencies(ADependencies, AKind.Locked(LockName, TextOf(AContext.Root, LockName)));
+  if AContext.Since = '' then
+    Exit;
+  Old := AKind.Dependencies(AContext.ReadAt(DepFile));
+  if LockName <> '' then
+  begin
+    OldLock := AContext.ReadAt(LockName);
+    if OldLock <> '' then
+      ResolveDependencies(Old, AKind.Locked(LockName, OldLock));
+  end;
+  AChanges := DependencyChanges(Old, ADependencies);
+end;
+
+function GroupTitle(const AGroup: string): string;
+begin
+  if AGroup = 'dev' then
+    Result := rsGroupDev
+  else if AGroup = 'build' then
+    Result := rsGroupBuild
+  else if AGroup = 'peer' then
+    Result := rsGroupPeer
+  else if AGroup = 'optional' then
+    Result := rsGroupOptional
+  else if AGroup = 'indirect' then
+    Result := rsGroupIndirect
+  else if AGroup = '' then
+    Result := ''
+  else
+    Result := UpperCase(Copy(AGroup, 1, 1)) + Copy(AGroup, 2, MaxInt);
+end;
+
+function DependencyTable(AKind: TGittanProjectKindClass; const ASince: string;
+  const ADependencies: TGittanDependencies; const AChanges: TGittanDependencyChanges):
+  TGittanProjectBlock;
+var
+  Groups: TStringArray;
+  g, i, k: integer;
+  D: TGittanDependency;
+  Note: TGittanProjectCell;
+  Resolved, Url: string;
+
+  procedure AddGroup(const AGroup: string);
+  var
+    n: integer;
+  begin
+    for n := 0 to High(Groups) do
+      if Groups[n] = AGroup then
+        Exit;
+    SetLength(Groups, Length(Groups) + 1);
+    Groups[High(Groups)] := AGroup;
+  end;
+
+begin
+  Result := ProjectBlock(pbTable);
+  Result.RightLast := True;
+  Groups := nil;
+  AddGroup('');
+  for i := 0 to High(ADependencies) do
+    AddGroup(ADependencies[i].Group);
+  for i := 0 to High(AChanges) do
+    if AChanges[i].Kind = dcRemoved then
+      AddGroup(AChanges[i].Group);
+  for g := 0 to High(Groups) do
+  begin
+    if Groups[g] <> '' then
+      AddRow(Result, ProjectHeadingRow(GroupTitle(Groups[g])));
+    for i := 0 to High(ADependencies) do
+    begin
+      D := ADependencies[i];
+      if D.Group <> Groups[g] then
+        Continue;
+      Note := ProjectCell('');
+      for k := 0 to High(AChanges) do
+        if (AChanges[k].Name = D.Name) and (AChanges[k].Group = D.Group) then
+          case AChanges[k].Kind of
+            dcAdded:
+              Note := ProjectCell(rsAdded, psOk, Format(rsAddedHint, [D.Name, ASince]));
+            dcChanged:
+              Note := ProjectCell(AChanges[k].OldVersion + ' → ' + AChanges[k].NewVersion, psLink,
+                Format(rsChangedHint, [D.Name, AChanges[k].OldVersion, ASince]));
+            dcRemoved: ;
+          end;
+      { The resolved version when it differs from what is asked for
+        (go.mod asks for the exact one). }
+      if D.Resolved <> D.Version then
+        Resolved := D.Resolved
+      else
+        Resolved := '';
+      Url := AKind.PackageUrl(D.Name);
+      AddRow(Result, ProjectRow([ProjectCell(D.Name, psStrong, Url, Url),
+        ProjectCell(D.Version, psDim), ProjectCell(Resolved), Note]));
+    end;
+    for i := 0 to High(AChanges) do
+      if (AChanges[i].Kind = dcRemoved) and (AChanges[i].Group = Groups[g]) then
+        AddRow(Result, ProjectRow([ProjectCell(AChanges[i].Name, psDim),
+          ProjectCell(AChanges[i].OldVersion, psDim), ProjectCell(''),
+          ProjectCell(rsRemoved, psError, Format(rsRemovedHint, [AChanges[i].Name,
+          AChanges[i].OldVersion, ASince]))]));
+    { A heading with nothing under it goes again. }
+    if (Length(Result.Rows) > 0) and (Result.Rows[High(Result.Rows)].Heading <> '') then
+      SetLength(Result.Rows, Length(Result.Rows) - 1);
+  end;
+end;
+
+{ ---------------------------------------------------------------------------
+  The context
+  --------------------------------------------------------------------------- }
+
+constructor TGittanProjectContext.Create(const ARoot, ASince: string; ATracked: TStrings);
+begin
+  inherited Create;
+  FRoot := ARoot;
+  FSince := ASince;
+  FTracked := TStringList.Create;
+  FTracked.CaseSensitive := True;
+  if ATracked <> nil then
+    FTracked.AddStrings(ATracked);
+  FTracked.Sorted := True;
+end;
+
+destructor TGittanProjectContext.Destroy;
+begin
+  FTracked.Free;
+  inherited Destroy;
+end;
+
+function TGittanProjectContext.ReadAt(const APath: string): string;
+begin
+  Result := '';
+end;
+
+function TGittanProjectContext.GitlinkAt(const APath, ARef: string): string;
+begin
+  Result := '';
+end;
+
+function TGittanProjectContext.Describe(const APath, ACommit: string): string;
+begin
+  Result := Copy(ACommit, 1, 7);
+end;
+
+function TGittanProjectContext.Submodules: TGittanSubmodules;
+begin
+  Result := nil;
+end;
+
+function TGittanProjectContext.IsTracked(const APath: string): boolean;
+var
+  i: integer;
+begin
+  Result := FTracked.Find(APath, i);
+end;
+
+function TGittanProjectContext.TrackedUnder(const APrefix: string; out AFirst: string): boolean;
+var
+  i: integer;
+begin
+  AFirst := '';
+  { Sorted, so the first path with the prefix is where it would go. }
+  FTracked.Find(APrefix, i);
+  if (i < FTracked.Count) and (Pos(APrefix, FTracked[i]) = 1) then
+  begin
+    AFirst := FTracked[i];
+    Exit(True);
+  end;
+  Result := False;
+end;
+
+function TGittanProjectContext.TrackedWithExt(const AExt: string): string;
+var
+  i: integer;
+begin
+  for i := 0 to FTracked.Count - 1 do
+    if SameText(ExtractFileExt(FTracked[i]), AExt) then
+      Exit(FTracked[i]);
+  Result := '';
+end;
+
+constructor TGittanGitProjectContext.Create(const ARoot: string);
+var
+  Output, Err, Tag, Path: string;
+  List: TStringList;
+begin
+  Tag := '';
+  if RunGitIn(ARoot, ['describe', '--tags', '--abbrev=0'], Output, Err) then
+    Tag := Trim(Output);
+  List := TStringList.Create;
+  try
+    if RunGitIn(ARoot, ['ls-files', '-z', '--cached'], Output, Err) then
+      for Path in Output.Split([#0], TStringSplitOptions.ExcludeEmpty) do
+        List.Add(Path);
+    inherited Create(ARoot, Tag, List);
+  finally
+    List.Free;
+  end;
+end;
+
+function TGittanGitProjectContext.ReadAt(const APath: string): string;
+var
+  Err: string;
+begin
+  if (Since = '') or (APath = '') or not RunGitIn(Root, ['cat-file', 'blob',
+    Since + ':' + APath], Result, Err) then
+    Result := '';
+end;
+
+function TGittanGitProjectContext.GitlinkAt(const APath, ARef: string): string;
+var
+  Output, Err, Ref: string;
+begin
+  Ref := ARef;
+  if Ref = '' then
+    Ref := 'HEAD';
+  if RunGitIn(Root, ['ls-tree', '-z', Ref, '--', APath], Output, Err) then
+    Result := ParseGitlink(Output)
+  else
+    Result := '';
+end;
+
+function TGittanGitProjectContext.Describe(const APath, ACommit: string): string;
+var
+  Output, Err: string;
+begin
+  if (ACommit <> '') and RunGitIn(IncludeTrailingPathDelimiter(Root) + SetDirSeparators(APath),
+    ['describe', '--tags', '--always', ACommit], Output, Err) and (Trim(Output) <> '') then
+    Result := Trim(Output)
+  else
+    Result := Copy(ACommit, 1, 7);
+end;
+
+function TGittanGitProjectContext.Submodules: TGittanSubmodules;
+var
+  Err: string;
+begin
+  if not FSubmodulesRead then
+  begin
+    FSubmodulesRead := True;
+    if not ListSubmodules(Root, FSubmodules, Err) then
+      FSubmodules := nil;
+  end;
+  Result := FSubmodules;
+end;
+
+{ ---------------------------------------------------------------------------
+  The base class
+  --------------------------------------------------------------------------- }
+
+class function TGittanProjectKind.Commands(const ARoot: string): TGittanProjectCommands;
+begin
+  Result := nil;
+end;
 
 class function TGittanProjectKind.DependencyFile(const ARoot: string): string;
 begin
@@ -358,24 +935,98 @@ begin
   Result := '';
 end;
 
-class function TGittanProjectKind.Checks(const ARoot: string;
-  ATracked: TStrings): TGittanProjectChecks;
+class function TGittanProjectKind.Checks(AContext: TGittanProjectContext): TGittanProjectChecks;
 begin
   Result := nil;
 end;
 
+class function TGittanProjectKind.Section(AContext: TGittanProjectContext;
+  const AManifest: string): TGittanProjectSection;
+begin
+  Result := StandardSection(AContext, AManifest);
+end;
+
+class function TGittanProjectKind.StandardSection(AContext: TGittanProjectContext;
+  const AManifest: string): TGittanProjectSection;
+var
+  Deps: TGittanDependencies;
+  Changes: TGittanDependencyChanges;
+  DepFile, Ver: string;
+  n: integer;
+begin
+  Result := Default(TGittanProjectSection);
+  Result.Kind := Self;
+  Result.Name := Name;
+  Result.Detail := AManifest;
+  if AManifest = '' then
+    Result.Detail := rsPicked;
+  Result.StateStyle := psDim;
+  DepFile := DependencyFile(AContext.Root);
+  { A kind picked with no file of its own has nothing to read. }
+  if (DepFile <> '') and not HasFile(AContext.Root, DepFile) then
+  begin
+    AddBlock(Result, ProjectNote(Format(rsPickedNoFile, [DepFile])));
+    Exit;
+  end;
+  if ReadDependencies(Self, AContext, Deps, Changes) then
+  begin
+    Ver := Version(TextOf(AContext.Root, DepFile));
+    if Ver <> '' then
+      Result.Detail := Result.Detail + ' · ' + Ver;
+    n := Length(Deps);
+    if n = 1 then
+      Result.Detail := Result.Detail + ' · ' + rsOneDependency
+    else if n > 1 then
+      Result.Detail := Result.Detail + ' · ' + Format(rsDependencies, [n]);
+    if AContext.Since <> '' then
+    begin
+      n := Length(Changes);
+      if n = 0 then
+        Result.State := Format(rsNoChangesSince, [AContext.Since])
+      else
+      begin
+        if n = 1 then
+          Result.State := Format(rsOneChangeSince, [AContext.Since])
+        else
+          Result.State := Format(rsChangesSince, [n, AContext.Since]);
+        Result.StateStyle := psLink;
+      end;
+    end;
+    if (Length(Deps) = 0) and (Length(Changes) = 0) then
+      AddBlock(Result, ProjectNote(Format(rsNoDependencies, [DepFile])))
+    else
+      AddBlock(Result, DependencyTable(Self, AContext.Since, Deps, Changes));
+  end;
+  AddBlock(Result, ChecksBlock(Checks(AContext)));
+end;
+
+function ProjectSections(const AProjects: TGittanProjects;
+  AContext: TGittanProjectContext): TGittanProjectSections;
+var
+  i: integer;
+begin
+  SetLength(Result, Length(AProjects));
+  for i := 0 to High(AProjects) do
+    { A kind picked by hand that its files do not tell has nothing of
+      its own to show: the standard section says so. }
+    if AProjects[i].Manifest = '' then
+      Result[i] := AProjects[i].Kind.StandardSection(AContext, '')
+    else
+      Result[i] := AProjects[i].Kind.Section(AContext, AProjects[i].Manifest);
+end;
+
 { ---------------------------------------------------------------------------
-  Helpers the kinds share
+  Helpers the drivers share
   --------------------------------------------------------------------------- }
 
 function RootFile(const ARoot, AName: string): string;
 begin
-  Result := IncludeTrailingPathDelimiter(ARoot) + AName;
+  Result := IncludeTrailingPathDelimiter(ARoot) + SetDirSeparators(AName);
 end;
 
 function HasFile(const ARoot, AName: string): boolean;
 begin
-  Result := FileExists(RootFile(ARoot, AName));
+  Result := (AName <> '') and FileExists(RootFile(ARoot, AName));
 end;
 
 function HasDir(const ARoot, AName: string): boolean;
@@ -391,7 +1042,6 @@ begin
     Result := '';
 end;
 
-{ The files at ARoot whose name ends with AExt, by name. }
 function FilesWithExt(const ARoot, AExt: string): TStringArray;
 var
   Info: TSearchRec;
@@ -418,674 +1068,14 @@ begin
   end;
 end;
 
-procedure Add(var ACommands: TGittanProjectCommands; const ACommand: TGittanProjectCommand);
-begin
-  SetLength(ACommands, Length(ACommands) + 1);
-  ACommands[High(ACommands)] := ACommand;
-end;
-
-{ Whether git tracks APath (ATracked is sorted, so it is found by
-  bisection) and whether it tracks anything under the folder APrefix
-  (with its "/"). }
-function Tracked(ATracked: TStrings; const APath: string): boolean;
-var
-  i: integer;
-begin
-  Result := ATracked <> nil;
-  if Result then
-    if (ATracked is TStringList) and TStringList(ATracked).Sorted then
-      Result := TStringList(ATracked).Find(APath, i)
-    else
-      Result := ATracked.IndexOf(APath) >= 0;
-end;
-
-function TrackedUnder(ATracked: TStrings; const APrefix: string; out AFirst: string): boolean;
-var
-  i: integer;
-begin
-  AFirst := '';
-  if ATracked = nil then
-    Exit(False);
-  for i := 0 to ATracked.Count - 1 do
-    if Pos(APrefix, ATracked[i]) = 1 then
-    begin
-      AFirst := ATracked[i];
-      Exit(True);
-    end;
-  Result := False;
-end;
-
-{ The first tracked path whose name ends with AExt. }
-function TrackedWithExt(ATracked: TStrings; const AExt: string): string;
-var
-  i: integer;
-begin
-  if ATracked <> nil then
-    for i := 0 to ATracked.Count - 1 do
-      if SameText(ExtractFileExt(ATracked[i]), AExt) then
-        Exit(ATracked[i]);
-  Result := '';
-end;
-
-procedure AddCheck(var AChecks: TGittanProjectChecks; const ACheck: TGittanProjectCheck);
-begin
-  SetLength(AChecks, Length(AChecks) + 1);
-  AChecks[High(AChecks)] := ACheck;
-end;
-
-{ A name for the shell: quoted when it has a space. }
 function ShellName(const AName: string): string;
-begin
-  if Pos(' ', AName) > 0 then
-    Result := '"' + AName + '"'
-  else
-    Result := AName;
-end;
-
-{ ---------------------------------------------------------------------------
-  Lazarus
-  --------------------------------------------------------------------------- }
-
-type
-  {** A Lazarus project: a .lpi at the root, built with lazbuild; a
-    .lpr alone is built with fpc. }
-  TGittanLazarusKind = class(TGittanProjectKind)
-  public
-    class function Name: string; override;
-    class function Manifest(const ARoot: string): string; override;
-    class function Commands(const ARoot: string): TGittanProjectCommands; override;
-    class function DependencyFile(const ARoot: string): string; override;
-    class function Dependencies(const AText: string): TGittanDependencies; override;
-    class function Version(const AText: string): string; override;
-    class function Checks(const ARoot: string; ATracked: TStrings): TGittanProjectChecks;
-      override;
-  end;
-
-class function TGittanLazarusKind.Name: string;
-begin
-  Result := 'Lazarus';
-end;
-
-class function TGittanLazarusKind.Manifest(const ARoot: string): string;
 var
-  Names: TStringArray;
+  i: integer;
 begin
-  Names := FilesWithExt(ARoot, '.lpi');
-  if Length(Names) = 0 then
-    Names := FilesWithExt(ARoot, '.lpr');
-  if Length(Names) = 0 then
-    Result := ''
-  else if Length(Names) = 1 then
-    Result := Names[0]
-  else
-    Result := Format('%s +%d', [Names[0], Length(Names) - 1]);
+  for i := 1 to Length(AName) do
+    if not (AName[i] in ['A'..'Z', 'a'..'z', '0'..'9', '_', '-', '.', '/', '+', '=', ':', ',']) then
+      Exit('"' + StringReplace(AName, '"', '\"', [rfReplaceAll]) + '"');
+  Result := AName;
 end;
-
-{ lazbuild as the shell finds it, or where Lazarus is usually installed
-  when it is not on the PATH, as an app started from the Finder has a
-  short one. }
-function LazbuildCommand: string;
-const
-  Places: array[0..5] of string = (
-    '/Applications/lazarus/lazbuild', '/usr/local/bin/lazbuild', '/usr/bin/lazbuild',
-    '/usr/lib/lazarus/lazbuild', 'C:\lazarus\lazbuild.exe', 'C:\fpcupdeluxe\lazarus\lazbuild.exe');
-var
-  Place, Home: string;
-begin
-  Result := 'lazbuild';
-  Home := GetEnvironmentVariable('HOME');
-  if (Home <> '') and FileExists(Home + '/fpcupdeluxe/lazarus/lazbuild') then
-    Exit(Home + '/fpcupdeluxe/lazarus/lazbuild');
-  for Place in Places do
-    if FileExists(Place) then
-      Exit(Place);
-end;
-
-class function TGittanLazarusKind.Commands(const ARoot: string): TGittanProjectCommands;
-var
-  Names: TStringArray;
-  FileName, Tool, Short: string;
-  Several: boolean;
-begin
-  Result := nil;
-  Names := FilesWithExt(ARoot, '.lpi');
-  if Length(Names) > 0 then
-    Tool := LazbuildCommand
-  else
-  begin
-    Names := FilesWithExt(ARoot, '.lpr');
-    Tool := 'fpc';
-  end;
-  Several := Length(Names) > 1;
-  for FileName in Names do
-  begin
-    Short := ChangeFileExt(FileName, '');
-    if Several then
-      Add(Result, ProjectCommand('build:' + Short, ShellName(Tool) + ' ' + ShellName(FileName)))
-    else
-      Add(Result, ProjectCommand('build', ShellName(Tool) + ' ' + ShellName(FileName)));
-  end;
-end;
-
-class function TGittanLazarusKind.DependencyFile(const ARoot: string): string;
-var
-  Names: TStringArray;
-begin
-  Names := FilesWithExt(ARoot, '.lpi');
-  if Length(Names) > 0 then
-    Result := Names[0]
-  else
-    Result := '';
-end;
-
-class function TGittanLazarusKind.Dependencies(const AText: string): TGittanDependencies;
-begin
-  Result := ParseLpiPackages(AText);
-end;
-
-class function TGittanLazarusKind.Version(const AText: string): string;
-begin
-  Result := LpiVersion(AText);
-end;
-
-class function TGittanLazarusKind.Checks(const ARoot: string;
-  ATracked: TStrings): TGittanProjectChecks;
-var
-  Path: string;
-begin
-  Result := nil;
-  Path := TrackedWithExt(ATracked, '.lps');
-  if Path <> '' then
-    AddCheck(Result, ProjectCheck(Format(rsLpsTracked, [Path]), Path, '*.lps'));
-  if TrackedUnder(ATracked, 'lib/', Path) then
-    AddCheck(Result, ProjectCheck(rsLibTracked, Path, 'lib/'));
-  if TrackedUnder(ATracked, 'backup/', Path) then
-    AddCheck(Result, ProjectCheck(rsBackupTracked, Path, 'backup/'));
-end;
-
-{ ---------------------------------------------------------------------------
-  Node
-  --------------------------------------------------------------------------- }
-
-type
-  {** A Node package: package.json at the root. Its scripts are the
-    Commands page's Scripts section already, so it offers no commands
-    of its own; it is a kind for its dependencies and its checks. }
-  TGittanNodeKind = class(TGittanProjectKind)
-  public
-    class function Name: string; override;
-    class function Manifest(const ARoot: string): string; override;
-    class function Commands(const ARoot: string): TGittanProjectCommands; override;
-    class function DependencyFile(const ARoot: string): string; override;
-    class function LockFile(const ARoot: string): string; override;
-    class function Dependencies(const AText: string): TGittanDependencies; override;
-    class function Locked(const AName, AText: string): TGittanDependencies; override;
-    class function Version(const AText: string): string; override;
-    class function PackageUrl(const AName: string): string; override;
-    class function Checks(const ARoot: string; ATracked: TStrings): TGittanProjectChecks;
-      override;
-  end;
-
-class function TGittanNodeKind.Name: string;
-begin
-  Result := 'Node';
-end;
-
-class function TGittanNodeKind.Manifest(const ARoot: string): string;
-begin
-  if HasFile(ARoot, 'package.json') then
-    Result := 'package.json'
-  else
-    Result := '';
-end;
-
-class function TGittanNodeKind.Commands(const ARoot: string): TGittanProjectCommands;
-begin
-  Result := nil;
-end;
-
-class function TGittanNodeKind.DependencyFile(const ARoot: string): string;
-begin
-  Result := 'package.json';
-end;
-
-class function TGittanNodeKind.LockFile(const ARoot: string): string;
-var
-  FileName: string;
-begin
-  for FileName in ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock',
-      'npm-shrinkwrap.json'] do
-    if HasFile(ARoot, FileName) then
-      Exit(FileName);
-  Result := '';
-end;
-
-class function TGittanNodeKind.Dependencies(const AText: string): TGittanDependencies;
-begin
-  Result := ParsePackageDependencies(AText);
-end;
-
-class function TGittanNodeKind.Locked(const AName, AText: string): TGittanDependencies;
-begin
-  if AName = 'yarn.lock' then
-    Result := ParseYarnLock(AText)
-  else if AName = 'pnpm-lock.yaml' then
-    Result := ParsePnpmLock(AText)
-  else if (AName = 'package-lock.json') or (AName = 'npm-shrinkwrap.json') then
-    Result := ParsePackageLock(AText)
-  else
-    Result := nil;
-end;
-
-class function TGittanNodeKind.Version(const AText: string): string;
-begin
-  Result := PackageVersion(AText);
-end;
-
-class function TGittanNodeKind.PackageUrl(const AName: string): string;
-begin
-  Result := 'https://www.npmjs.com/package/' + AName;
-end;
-
-class function TGittanNodeKind.Checks(const ARoot: string;
-  ATracked: TStrings): TGittanProjectChecks;
-var
-  Path: string;
-begin
-  Result := nil;
-  if TrackedUnder(ATracked, 'node_modules/', Path) then
-    AddCheck(Result, ProjectCheck(rsNodeModulesTracked, Path, 'node_modules/'));
-  if (LockFile(ARoot) = '') and (Length(Dependencies(TextOf(ARoot, 'package.json'))) > 0) then
-    AddCheck(Result, ProjectCheck(rsNoNodeLock, ''));
-end;
-
-{ ---------------------------------------------------------------------------
-  Rust
-  --------------------------------------------------------------------------- }
-
-type
-  {** A Rust crate or workspace: Cargo.toml at the root. }
-  TGittanRustKind = class(TGittanProjectKind)
-  public
-    class function Name: string; override;
-    class function Manifest(const ARoot: string): string; override;
-    class function Commands(const ARoot: string): TGittanProjectCommands; override;
-    class function DependencyFile(const ARoot: string): string; override;
-    class function LockFile(const ARoot: string): string; override;
-    class function Dependencies(const AText: string): TGittanDependencies; override;
-    class function Locked(const AName, AText: string): TGittanDependencies; override;
-    class function Version(const AText: string): string; override;
-    class function PackageUrl(const AName: string): string; override;
-    class function Checks(const ARoot: string; ATracked: TStrings): TGittanProjectChecks;
-      override;
-  end;
-
-class function TGittanRustKind.Name: string;
-begin
-  Result := 'Rust';
-end;
-
-class function TGittanRustKind.Manifest(const ARoot: string): string;
-begin
-  if HasFile(ARoot, 'Cargo.toml') then
-    Result := 'Cargo.toml'
-  else
-    Result := '';
-end;
-
-{ A binary to run: a main.rs, or a [[bin]] the manifest names. }
-function RustHasBinary(const ARoot: string): boolean;
-begin
-  Result := FileExists(RootFile(ARoot, 'src') + PathDelim + 'main.rs') or
-    (Pos('[[bin]]', TextOf(ARoot, 'Cargo.toml')) > 0);
-end;
-
-class function TGittanRustKind.Commands(const ARoot: string): TGittanProjectCommands;
-begin
-  Result := nil;
-  Add(Result, ProjectCommand('build', 'cargo build'));
-  if RustHasBinary(ARoot) then
-    Add(Result, ProjectCommand('run', 'cargo run'));
-  Add(Result, ProjectCommand('test', 'cargo test'));
-  Add(Result, ProjectCommand('check', 'cargo check'));
-  Add(Result, ProjectCommand('clippy', 'cargo clippy'));
-  Add(Result, ProjectCommand('fmt', 'cargo fmt'));
-  Add(Result, ProjectCommand('doc', 'cargo doc'));
-end;
-
-class function TGittanRustKind.DependencyFile(const ARoot: string): string;
-begin
-  Result := 'Cargo.toml';
-end;
-
-class function TGittanRustKind.LockFile(const ARoot: string): string;
-begin
-  if HasFile(ARoot, 'Cargo.lock') then
-    Result := 'Cargo.lock'
-  else
-    Result := '';
-end;
-
-class function TGittanRustKind.Dependencies(const AText: string): TGittanDependencies;
-begin
-  Result := ParseCargoDependencies(AText);
-end;
-
-class function TGittanRustKind.Locked(const AName, AText: string): TGittanDependencies;
-begin
-  Result := ParseCargoLock(AText);
-end;
-
-class function TGittanRustKind.Version(const AText: string): string;
-begin
-  Result := CargoVersion(AText);
-end;
-
-class function TGittanRustKind.PackageUrl(const AName: string): string;
-begin
-  Result := 'https://crates.io/crates/' + AName;
-end;
-
-class function TGittanRustKind.Checks(const ARoot: string;
-  ATracked: TStrings): TGittanProjectChecks;
-var
-  Path: string;
-begin
-  Result := nil;
-  if HasFile(ARoot, 'Cargo.lock') and not Tracked(ATracked, 'Cargo.lock') and
-    RustHasBinary(ARoot) then
-    AddCheck(Result, ProjectCheck(rsCargoLockUntracked, 'Cargo.lock'));
-  if TrackedUnder(ATracked, 'target/', Path) then
-    AddCheck(Result, ProjectCheck(rsTargetTracked, Path, 'target/'));
-end;
-
-{ ---------------------------------------------------------------------------
-  Go
-  --------------------------------------------------------------------------- }
-
-type
-  {** A Go module: go.mod at the root. }
-  TGittanGoKind = class(TGittanProjectKind)
-  public
-    class function Name: string; override;
-    class function Manifest(const ARoot: string): string; override;
-    class function Commands(const ARoot: string): TGittanProjectCommands; override;
-    class function DependencyFile(const ARoot: string): string; override;
-    class function Dependencies(const AText: string): TGittanDependencies; override;
-    class function PackageUrl(const AName: string): string; override;
-    class function Checks(const ARoot: string; ATracked: TStrings): TGittanProjectChecks;
-      override;
-  end;
-
-class function TGittanGoKind.Name: string;
-begin
-  Result := 'Go';
-end;
-
-class function TGittanGoKind.Manifest(const ARoot: string): string;
-begin
-  if HasFile(ARoot, 'go.mod') then
-    Result := 'go.mod'
-  else
-    Result := '';
-end;
-
-{ Whether a .go file at the root is of package main, so "go run ." has
-  something to run. A line "package main", first on its line, is
-  looked for; a comment that says so counts too, which is harmless. }
-function RootIsMainPackage(const ARoot: string): boolean;
-var
-  Name, Text: string;
-  Start: integer;
-  Line: string;
-begin
-  for Name in FilesWithExt(ARoot, '.go') do
-  begin
-    Text := TextOf(ARoot, Name);
-    Start := 1;
-    while NextLine(Text, Start, Line) do
-    begin
-      Line := Trim(Line);
-      if (Line = 'package main') or (Pos('package main ', Line + ' ') = 1) then
-        Exit(True);
-    end;
-  end;
-  Result := False;
-end;
-
-class function TGittanGoKind.Commands(const ARoot: string): TGittanProjectCommands;
-begin
-  Result := nil;
-  Add(Result, ProjectCommand('build', 'go build ./...'));
-  if RootIsMainPackage(ARoot) then
-    Add(Result, ProjectCommand('run', 'go run .'));
-  Add(Result, ProjectCommand('test', 'go test ./...'));
-  Add(Result, ProjectCommand('vet', 'go vet ./...'));
-  Add(Result, ProjectCommand('fmt', 'go fmt ./...'));
-end;
-
-class function TGittanGoKind.DependencyFile(const ARoot: string): string;
-begin
-  Result := 'go.mod';
-end;
-
-class function TGittanGoKind.Dependencies(const AText: string): TGittanDependencies;
-begin
-  Result := ParseGoMod(AText);
-end;
-
-class function TGittanGoKind.PackageUrl(const AName: string): string;
-begin
-  Result := 'https://pkg.go.dev/' + AName;
-end;
-
-class function TGittanGoKind.Checks(const ARoot: string;
-  ATracked: TStrings): TGittanProjectChecks;
-begin
-  Result := nil;
-  if not HasFile(ARoot, 'go.sum') and (Length(ParseGoMod(TextOf(ARoot, 'go.mod'))) > 0) then
-    AddCheck(Result, ProjectCheck(rsNoGoSum, ''));
-end;
-
-{ ---------------------------------------------------------------------------
-  Python
-  --------------------------------------------------------------------------- }
-
-type
-  {** A Python project: pyproject.toml, setup.py or requirements.txt at
-    the root, run through uv, poetry or pdm when their lock file is
-    there, else plain pip and python. }
-  TGittanPythonKind = class(TGittanProjectKind)
-  public
-    class function Name: string; override;
-    class function Manifest(const ARoot: string): string; override;
-    class function Commands(const ARoot: string): TGittanProjectCommands; override;
-    class function DependencyFile(const ARoot: string): string; override;
-    class function LockFile(const ARoot: string): string; override;
-    class function Dependencies(const AText: string): TGittanDependencies; override;
-    class function Locked(const AName, AText: string): TGittanDependencies; override;
-    class function Version(const AText: string): string; override;
-    class function PackageUrl(const AName: string): string; override;
-    class function Checks(const ARoot: string; ATracked: TStrings): TGittanProjectChecks;
-      override;
-  end;
-
-class function TGittanPythonKind.Name: string;
-begin
-  Result := 'Python';
-end;
-
-class function TGittanPythonKind.Manifest(const ARoot: string): string;
-var
-  FileName: string;
-begin
-  for FileName in ['pyproject.toml', 'setup.py', 'requirements.txt'] do
-    if HasFile(ARoot, FileName) then
-      Exit(FileName);
-  Result := '';
-end;
-
-class function TGittanPythonKind.Commands(const ARoot: string): TGittanProjectCommands;
-var
-  Project, Run, Install: string;
-begin
-  Result := nil;
-  Project := TextOf(ARoot, 'pyproject.toml');
-  { The tool that owns the environment, by its lock file, or by the
-    table it keeps in pyproject.toml before it has locked. }
-  if HasFile(ARoot, 'uv.lock') or (Pos('[tool.uv]', Project) > 0) then
-  begin
-    Run := 'uv run ';
-    Install := 'uv sync';
-  end
-  else if HasFile(ARoot, 'poetry.lock') or (Pos('[tool.poetry]', Project) > 0) then
-  begin
-    Run := 'poetry run ';
-    Install := 'poetry install';
-  end
-  else if HasFile(ARoot, 'pdm.lock') or (Pos('[tool.pdm]', Project) > 0) then
-  begin
-    Run := 'pdm run ';
-    Install := 'pdm install';
-  end
-  else
-  begin
-    Run := '';
-    if HasFile(ARoot, 'requirements.txt') then
-      Install := 'pip install -r requirements.txt'
-    else
-      Install := 'pip install -e .';
-  end;
-  Add(Result, ProjectCommand('install', Install));
-  if (Pos('pytest', Project) > 0) or HasDir(ARoot, 'tests') or HasDir(ARoot, 'test') or
-    HasFile(ARoot, 'pytest.ini') or HasFile(ARoot, 'conftest.py') then
-    Add(Result, ProjectCommand('test', Run + 'pytest'));
-  if Pos('ruff', Project) > 0 then
-  begin
-    Add(Result, ProjectCommand('lint', Run + 'ruff check .'));
-    Add(Result, ProjectCommand('fmt', Run + 'ruff format .'));
-  end
-  else if HasFile(ARoot, '.flake8') or (Pos('flake8', Project) > 0) then
-    Add(Result, ProjectCommand('lint', Run + 'flake8'));
-  if Pos('mypy', Project) > 0 then
-    Add(Result, ProjectCommand('typecheck', Run + 'mypy .'));
-  if HasFile(ARoot, 'tox.ini') then
-    Add(Result, ProjectCommand('tox', 'tox'));
-  if HasFile(ARoot, 'noxfile.py') then
-    Add(Result, ProjectCommand('nox', 'nox'));
-end;
-
-class function TGittanPythonKind.DependencyFile(const ARoot: string): string;
-begin
-  if HasFile(ARoot, 'pyproject.toml') then
-    Result := 'pyproject.toml'
-  else if HasFile(ARoot, 'requirements.txt') then
-    Result := 'requirements.txt'
-  else
-    Result := '';
-end;
-
-class function TGittanPythonKind.LockFile(const ARoot: string): string;
-var
-  FileName: string;
-begin
-  for FileName in ['uv.lock', 'poetry.lock', 'pdm.lock'] do
-    if HasFile(ARoot, FileName) then
-      Exit(FileName);
-  Result := '';
-end;
-
-{ A pyproject.toml starts with a table or a key; a requirements.txt
-  with a requirement. The first "[" at a line's start tells. }
-function LooksLikeToml(const AText: string): boolean;
-begin
-  Result := (Pos('[project]', AText) > 0) or (Pos('[tool.', AText) > 0) or
-    (Pos('[build-system]', AText) > 0) or (Pos('[dependency-groups]', AText) > 0);
-end;
-
-class function TGittanPythonKind.Dependencies(const AText: string): TGittanDependencies;
-begin
-  if LooksLikeToml(AText) then
-    Result := ParsePyproject(AText)
-  else
-    Result := ParseRequirements(AText);
-end;
-
-class function TGittanPythonKind.Locked(const AName, AText: string): TGittanDependencies;
-begin
-  Result := ParsePythonLock(AText);
-end;
-
-class function TGittanPythonKind.Version(const AText: string): string;
-begin
-  if LooksLikeToml(AText) then
-    Result := PyprojectVersion(AText)
-  else
-    Result := '';
-end;
-
-class function TGittanPythonKind.PackageUrl(const AName: string): string;
-begin
-  Result := 'https://pypi.org/project/' + AName + '/';
-end;
-
-class function TGittanPythonKind.Checks(const ARoot: string;
-  ATracked: TStrings): TGittanProjectChecks;
-var
-  Path, Folder: string;
-begin
-  Result := nil;
-  for Folder in ['.venv/', 'venv/'] do
-    if TrackedUnder(ATracked, Folder, Path) then
-      AddCheck(Result, ProjectCheck(Format(rsVenvTracked, [Folder]), Path, Folder));
-  Path := TrackedWithExt(ATracked, '.pyc');
-  if Path <> '' then
-    AddCheck(Result, ProjectCheck(Format(rsPycTracked, [Path]), Path, '__pycache__/'));
-end;
-
-{ ---------------------------------------------------------------------------
-  The report
-  --------------------------------------------------------------------------- }
-
-function ProjectReport(const AProject: TGittanProject; const ARoot: string;
-  const AOldManifest, AOldLock, ASince: string; ATracked: TStrings): TGittanProjectReport;
-var
-  Text, LockText: string;
-  Old: TGittanDependencies;
-begin
-  Result := Default(TGittanProjectReport);
-  Result.Name := AProject.Name;
-  Result.Manifest := AProject.Manifest;
-  Result.DependencyFile := AProject.Kind.DependencyFile(ARoot);
-  Result.LockFile := AProject.Kind.LockFile(ARoot);
-  Text := TextOf(ARoot, Result.DependencyFile);
-  if Result.DependencyFile <> '' then
-  begin
-    Result.Version := AProject.Kind.Version(Text);
-    Result.Dependencies := AProject.Kind.Dependencies(Text);
-    if Result.LockFile <> '' then
-    begin
-      LockText := TextOf(ARoot, Result.LockFile);
-      ResolveDependencies(Result.Dependencies,
-        AProject.Kind.Locked(Result.LockFile, LockText));
-    end;
-    if ASince <> '' then
-    begin
-      Result.Since := ASince;
-      Old := AProject.Kind.Dependencies(AOldManifest);
-      if (Result.LockFile <> '') and (AOldLock <> '') then
-        ResolveDependencies(Old, AProject.Kind.Locked(Result.LockFile, AOldLock));
-      Result.Changes := DependencyChanges(Old, Result.Dependencies);
-    end;
-  end;
-  Result.Checks := AProject.Kind.Checks(ARoot, ATracked);
-end;
-
-initialization
-  RegisterProjectKind(TGittanLazarusKind);
-  RegisterProjectKind(TGittanNodeKind);
-  RegisterProjectKind(TGittanRustKind);
-  RegisterProjectKind(TGittanGoKind);
-  RegisterProjectKind(TGittanPythonKind);
 
 end.

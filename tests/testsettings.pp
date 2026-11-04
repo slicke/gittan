@@ -30,6 +30,7 @@ type
     procedure TestOldDefaultFont;
     procedure TestDefaultFontSize;
     procedure TestTrust;
+    procedure TestProjectKinds;
     procedure TestOldGhPath;
     procedure TestOldForgeSwitch;
     procedure TestOldFilterFlags;
@@ -456,6 +457,32 @@ begin
     AssertTrue('the newest hash is kept', S.CommandsTrusted('/tmp/a', 'def'));
     AssertFalse(S.CommandsTrusted('/tmp/a', 'abc'));
     AssertFalse('an empty hash trusts nothing', S.CommandsTrusted('/tmp/b', 'x'));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSettingsTest.TestProjectKinds;
+var
+  S: TGittanSettings;
+begin
+  S := TGittanSettings.Create(FFileName);
+  try
+    AssertEquals('none picked', '', S.ProjectKindsOf('/tmp/a'));
+    S.SetProjectKinds('/tmp/a', 'Lazarus,Node');
+    S.SetProjectKinds('/tmp/b', 'none');
+    S.SetProjectKinds('/tmp/c', 'Go');
+    S.SetProjectKinds('/tmp/c', '');
+    S.Save;
+  finally
+    S.Free;
+  end;
+  S := TGittanSettings.Create(FFileName);
+  try
+    S.Load;
+    AssertEquals('Lazarus,Node', S.ProjectKindsOf('/tmp/a'));
+    AssertEquals('none', S.ProjectKindsOf('/tmp/b'));
+    AssertEquals('forgotten', '', S.ProjectKindsOf('/tmp/c'));
   finally
     S.Free;
   end;

@@ -810,6 +810,9 @@ type
       a snapshot came since its reports were built. }
     FProjectPage: TGittanProjectPage;
     FProjectStale: boolean;
+    { The list of the kinds of project to pick from, under the page's
+      chip. }
+    FKindsPopup: TGittanPopupList;
     FRepoCommands: TGittanRepoCommands;
     FRepoProjects: TGittanProjects;
     FCommandsHash: string;
@@ -1372,6 +1375,11 @@ type
     procedure ShowProject;
     procedure ProjectPageOpenUrl(Sender: TObject; const AText: string);
     procedure ProjectPageIgnore(Sender: TObject; const ACheck: TGittanProjectCheck);
+    procedure ProjectPageRun(Sender: TObject; const AName, ACommand: string);
+    procedure ProjectPagePickKinds(Sender: TObject; const AScreenRect: TRect);
+    procedure KindsPopupPick(Sender: TObject; AIndex: integer);
+    function ProjectKindNames: string;
+    procedure RunCommandRecord(const ACmd: TGittanRepoCommand; AInTerminal: boolean);
     procedure SetupCommandPage;
     function CommandsTrusted: boolean;
     procedure LoadRepoCommands;
@@ -2594,6 +2602,9 @@ resourcestring
   rsCommandsMenu = '&Commands';
   rsProjectMenu = 'Pro&ject';
   rsNavProject = 'Project';
+  rsAutomaticKinds = 'Automatic';
+  rsProjectKinds = 'Kinds of project';
+  rsNoProjectKind = 'none found';
   rsCommandStillRunning = '%s is still running';
   rsCommandDone = '%s finished in %s';
   rsCommandFailed = '%s failed with exit code %d';
@@ -3761,6 +3772,8 @@ const
   navProject = 6;
   { The last row: a list, never selected. }
   navRecent = 7;
+  { The tag of Automatic in the list of the kinds of project. }
+  KindsAutomatic = -2;
   { Scrolling on past the bottom of a file goes to the next one, and
     past the top to the previous: the wheel delta the pull needs (120 is
     one notch of a mouse wheel, 8 one pixel of a trackpad on macOS), the
@@ -5038,7 +5051,7 @@ begin
   for List in [FBranchPopup, FStashPopup, FUpstreamPopup, FTagPopup, FViewPopup,
     FSubListPopup, FReflogPopup, FPullPopup, FReviewPopup, FSyncPopup, FRecentPopup,
     FSyntaxPopup, FBasePopup, FConflictPopup, FFindPopup, FCompositionPopup, FWorktreePopup,
-    FPalettePopup, FPlanPopup] do
+    FPalettePopup, FPlanPopup, FKindsPopup] do
     List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
   FPaletteLeft.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border);
   FPaletteRight.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border);

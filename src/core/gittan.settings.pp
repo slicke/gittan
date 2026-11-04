@@ -51,6 +51,7 @@ type
     FPaletteRecent: TStringList;
     FTabs: TStringList;
     FTrust: TStringList;
+    FProjectKinds: TStringList;
     { Each forge's tool, by its name. }
     FForgeClis: TStringList;
     { What the forge view keeps per forge (ForgeValue), as
@@ -252,6 +253,11 @@ type
     {** Trusts the commands file of ARoot as it is now; a change of its
       text asks again. }
     procedure TrustCommands(const ARoot, AHash: string);
+    {** The kinds of project picked for ARoot on the Project page ("rust,
+      go", "none"); '' when none were picked and the files decide. }
+    function ProjectKindsOf(const ARoot: string): string;
+    {** Keeps AValue as the kinds picked for ARoot; '' forgets them. }
+    procedure SetProjectKinds(const ARoot, AValue: string);
     {** The recently opened repositories, newest first. }
     property Recent: TStringList read FRecent;
     {** The actions last run from the command palette, newest first;
@@ -291,6 +297,8 @@ const
   SecCommit = 'Commit';
   SecTools = 'Tools';
   SecTrust = 'Trust';
+  { The kinds of project picked per root, keyed as the Trust section. }
+  SecProjectKinds = 'ProjectKinds';
   SecAI = 'AI';
   { A section per forge, the service that hosts the repositories. }
   SecGitHub = 'GitHub';
@@ -382,6 +390,7 @@ begin
   FPaletteRecent.CaseSensitive := True;
   FTabs := TStringList.Create;
   FTrust := TStringList.Create;
+  FProjectKinds := TStringList.Create;
   FForgeClis := TStringList.Create;
   FForgeClis.CaseSensitive := False;
   FForgeValues := TStringList.Create;
@@ -411,6 +420,7 @@ begin
   FForgeValues.Free;
   FForgeClis.Free;
   FTrust.Free;
+  FProjectKinds.Free;
   FRecent.Free;
   FPaletteRecent.Free;
   FTabs.Free;
@@ -576,6 +586,7 @@ begin
       OpenAIModel := Ini.ReadString(SecAI, 'OpenAIModel', '');
       UpdateSnoozedUntil := ReadDay(Ini.ReadString(SecUpdate, 'SnoozedUntil', ''));
       Ini.ReadSectionValues(SecTrust, FTrust);
+      Ini.ReadSectionValues(SecProjectKinds, FProjectKinds);
       FRecent.Clear;
       for i := 0 to MaxRecent - 1 do
       begin
@@ -727,6 +738,9 @@ begin
       Ini.EraseSection(SecTrust);
       for i := 0 to FTrust.Count - 1 do
         Ini.WriteString(SecTrust, FTrust.Names[i], FTrust.ValueFromIndex[i]);
+      Ini.EraseSection(SecProjectKinds);
+      for i := 0 to FProjectKinds.Count - 1 do
+        Ini.WriteString(SecProjectKinds, FProjectKinds.Names[i], FProjectKinds.ValueFromIndex[i]);
       SaveExt(Ini);
       Ini.UpdateFile;
     finally
@@ -919,6 +933,17 @@ begin
   if AHash = '' then
     Exit;
   FTrust.Values[TrustKey(ARoot)] := AHash;
+end;
+
+function TGittanSettings.ProjectKindsOf(const ARoot: string): string;
+begin
+  Result := FProjectKinds.Values[TrustKey(ARoot)];
+end;
+
+procedure TGittanSettings.SetProjectKinds(const ARoot, AValue: string);
+begin
+  { Values[] with '' deletes the line. }
+  FProjectKinds.Values[TrustKey(ARoot)] := AValue;
 end;
 
 procedure TGittanSettings.AddRecent(const ARoot: string);

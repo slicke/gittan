@@ -1,18 +1,20 @@
 { ---------------------------------------------------------------------------
   The Project page
   ---------------------------------------------------------------------------
-  What the repository is as a project (gittan.project: the kinds the
-  root's files tell, their dependencies with the versions asked for and
-  resolved, the project's version, and the checks worth a warning), as
-  a page in the box (gittan.projectpage), opened from the sidebar's
-  Project row and View > Project (Cmd+7). The dependencies are compared
-  with those at the newest tag reachable from HEAD, so the page says
-  what a release will carry that the last one did not; the old files
-  are read from the tag with FileBlob. The reports are built when the
-  page is shown and, while it shows, on every snapshot, since the files
-  may change under it; a dependency's name opens its page on the
-  registry, and Add to .gitignore on a check writes the pattern. See
-  spec/project-page.md. }
+  What the repository is as a project, as a page in the box
+  (gittan.projectpage), opened from the sidebar's Project row and View >
+  Project (Cmd+7). Each kind shown is a driver (src/proj) that builds
+  its own section through a TGittanGitProjectContext: the newest tag
+  reachable from HEAD to compare with, the files git tracks, the files
+  and submodules as they were at the tag. The kinds are the ones
+  LoadRepoCommands found (FRepoProjects): picked on this page, else the
+  project line of .gittan/commands.ini, else each driver's Identify;
+  the chip at the top right drops the list to pick them from
+  (FKindsPopup), kept per repository in the settings. The sections are
+  built when the page is shown and, while it shows, on every snapshot;
+  a link opens in the browser, a button runs its command as the
+  Commands page does, and Add to .gitignore on a check writes the
+  pattern. See spec/project-page.md. }
 
 procedure TRepoFrame.SetupProjectPage;
 begin
@@ -21,18 +23,33 @@ begin
   FProjectPage.Visible := False;
   FProjectPage.OnOpenUrl := @ProjectPageOpenUrl;
   FProjectPage.OnIgnore := @ProjectPageIgnore;
+  FProjectPage.OnRunCommand := @ProjectPageRun;
+  FProjectPage.OnPickKinds := @ProjectPagePickKinds;
+  FKindsPopup := TGittanPopupList.Create(Self);
+  FKindsPopup.Parent := Self;
+  FKindsPopup.OnPick := @KindsPopupPick;
 end;
 
-{ Builds the reports: the tag, the tracked files, and for each kind its
-  files as they are at the tag. A few small git runs, so only while the
-  page is wanted. }
+{ The names of the kinds shown, "Lazarus, Node". }
+function TRepoFrame.ProjectKindNames: string;
+var
+  i: integer;
+begin
+  Result := '';
+  for i := 0 to High(FRepoProjects) do
+  begin
+    if Result <> '' then
+      Result := Result + ', ';
+    Result := Result + FRepoProjects[i].Name;
+  end;
+end;
+
+{ Builds the sections: a context of the repository (a few small git
+  runs), then each kind's driver. }
 procedure TRepoFrame.LoadProject;
 var
-  Reports: TGittanProjectReports;
-  Tracked: TStringList;
-  Since, OldManifest, OldLock, FileName: string;
-  Blob: RawByteString;
-  i: integer;
+  Context: TGittanGitProjectContext;
+  Sections: TGittanProjectSections;
 begin
   FProjectStale := False;
   if FRepo.Root = '' then
@@ -40,33 +57,15 @@ begin
     FProjectPage.SetRepository('', '');
     Exit;
   end;
-  if not FRepo.NearestTag(Since) then
-    Since := '';
-  Tracked := TStringList.Create;
+  Context := TGittanGitProjectContext.Create(FRepo.Root);
   try
-    FRepo.TrackedFiles(Tracked);
-    SetLength(Reports, Length(FRepoProjects));
-    for i := 0 to High(FRepoProjects) do
-    begin
-      OldManifest := '';
-      OldLock := '';
-      if Since <> '' then
-      begin
-        FileName := FRepoProjects[i].Kind.DependencyFile(FRepo.Root);
-        if (FileName <> '') and FRepo.FileBlob(FileName, Since, Blob) then
-          OldManifest := Blob;
-        FileName := FRepoProjects[i].Kind.LockFile(FRepo.Root);
-        if (FileName <> '') and FRepo.FileBlob(FileName, Since, Blob) then
-          OldLock := Blob;
-      end;
-      Reports[i] := ProjectReport(FRepoProjects[i], FRepo.Root, OldManifest, OldLock, Since,
-        Tracked);
-    end;
+    Sections := ProjectSections(FRepoProjects, Context);
   finally
-    Tracked.Free;
+    Context.Free;
   end;
   FProjectPage.SetRepository(ExtractFileName(FRepo.Root), FRepo.Root);
-  FProjectPage.SetReports(Reports);
+  FProjectPage.SetSections(Sections, ProjectKindNames,
+    App.Settings.ProjectKindsOf(FRepo.Root) <> '');
 end;
 
 procedure TRepoFrame.MenuProjectClick(Sender: TObject);
@@ -104,6 +103,107 @@ end;
 procedure TRepoFrame.ProjectPageOpenUrl(Sender: TObject; const AText: string);
 begin
   OpenURL(AText);
+end;
+
+{ A button of a section: its command runs as a command of the Commands
+  page does, whose output panel shows it. A driver's command comes from
+  the repository's own files as a script of package.json does, so it
+  needs no trust. }
+procedure TRepoFrame.ProjectPageRun(Sender: TObject; const AName, ACommand: string);
+var
+  Cmd: TGittanRepoCommand;
+begin
+  Cmd := Default(TGittanRepoCommand);
+  Cmd.Name := AName;
+  Cmd.Command := ACommand;
+  Cmd.Detail := ACommand;
+  Cmd.Source := csProject;
+  RunCommandRecord(Cmd, False);
+end;
+
+{ The list of the kinds: Automatic, which lets the files decide (with
+  the kinds they tell), then every kind the drivers know, those shown
+  checked, each with the file that identifies it here. }
+procedure TRepoFrame.ProjectPagePickKinds(Sender: TObject; const AScreenRect: TRect);
+var
+  Kinds: TGittanProjectKindClasses;
+  Found: TGittanProjects;
+  i, j: integer;
+  Detected, Manifest: string;
+  Shown: boolean;
+begin
+  if FRepo.Root = '' then
+    Exit;
+  Found := DetectProjects(FRepo.Root);
+  Detected := '';
+  for i := 0 to High(Found) do
+  begin
+    if Detected <> '' then
+      Detected := Detected + ', ';
+    Detected := Detected + Found[i].Name;
+  end;
+  if Detected = '' then
+    Detected := rsNoProjectKind;
+  FKindsPopup.Clear;
+  FKindsPopup.Add(rsAutomaticKinds, Detected, App.Settings.ProjectKindsOf(FRepo.Root) = '',
+    KindsAutomatic);
+  FKindsPopup.AddHeader(rsProjectKinds);
+  Kinds := ProjectKinds;
+  for i := 0 to High(Kinds) do
+  begin
+    Shown := False;
+    for j := 0 to High(FRepoProjects) do
+      if FRepoProjects[j].Kind = Kinds[i] then
+        Shown := True;
+    if not Kinds[i].Identify(FRepo.Root, Manifest) then
+      Manifest := '';
+    FKindsPopup.Add(Kinds[i].Name, Manifest, Shown, i);
+  end;
+  FKindsPopup.Popup(AScreenRect);
+end;
+
+{ Automatic forgets what was picked; a kind is taken in or out of the
+  kinds shown, which are then kept as picked ("none" when it was the
+  last). The commands and the page follow at once. }
+procedure TRepoFrame.KindsPopupPick(Sender: TObject; AIndex: integer);
+var
+  Row: PtrInt;
+  Kinds: TGittanProjectKindClasses;
+  Names: TStringList;
+  i, k: integer;
+begin
+  if FRepo.Root = '' then
+    Exit;
+  Row := FKindsPopup.TagOf(AIndex);
+  if Row = KindsAutomatic then
+    App.Settings.SetProjectKinds(FRepo.Root, '')
+  else
+  begin
+    Kinds := ProjectKinds;
+    if (Row < 0) or (Row > High(Kinds)) then
+      Exit;
+    Names := TStringList.Create;
+    try
+      for i := 0 to High(FRepoProjects) do
+        Names.Add(FRepoProjects[i].Name);
+      k := Names.IndexOf(Kinds[Row].Name);
+      if k >= 0 then
+        Names.Delete(k)
+      else
+        Names.Add(Kinds[Row].Name);
+      if Names.Count = 0 then
+        App.Settings.SetProjectKinds(FRepo.Root, 'none')
+      else
+        App.Settings.SetProjectKinds(FRepo.Root, string.Join(',', Names.ToStringArray));
+    finally
+      Names.Free;
+    end;
+  end;
+  App.Settings.Save;
+  LoadRepoCommands;
+  LoadProject;
+  if FView = gvProject then
+    FProjectPage.FitHeight(FSummaryBox.ClientHeight);
 end;
 
 { Writes the check's pattern to the root's .gitignore, as the file

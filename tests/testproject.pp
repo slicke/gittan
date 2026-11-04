@@ -11,7 +11,20 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry, gittan.project, gittan.manifest, gittan.repocommands,
-  testhelpers;
+  gittan.git, gittan.proj.lazarus, gittan.proj.node, gittan.proj.rust, gittan.proj.go,
+  gittan.proj.python, testhelpers;
+
+type
+  { A context whose files at the tag are given. }
+  TOldTextContext = class(TGittanProjectContext)
+  private
+    FOld: TStringList;
+  public
+    constructor Create(const ARoot, ASince: string; ATracked: TStrings);
+    destructor Destroy; override;
+    function ReadAt(const APath: string): string; override;
+    property Old: TStringList read FOld;
+  end;
 
 type
   TProjectTest = class(TTestCase)
@@ -20,6 +33,8 @@ type
     procedure Put(const ARel, AText: string);
     function Names(const ACommands: TGittanProjectCommands): string;
     function CommandOf(const ACommands: TGittanProjectCommands; const AName: string): string;
+    function ChecksOf(AKind: TGittanProjectKindClass; ATracked: TStrings): TGittanProjectChecks;
+    procedure Git(const AArgs: array of string);
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -48,6 +63,11 @@ type
     procedure TestReportRust;
     procedure TestReportNoTag;
     procedure TestReportPython;
+    procedure TestChoice;
+    procedure TestSections;
+    procedure TestContextTracked;
+    procedure TestGitContext;
+    procedure TestShellName;
     procedure TestChecksLazarus;
     procedure TestChecksNode;
     procedure TestChecksRustGo;
@@ -55,6 +75,23 @@ type
   end;
 
 implementation
+
+constructor TOldTextContext.Create(const ARoot, ASince: string; ATracked: TStrings);
+begin
+  inherited Create(ARoot, ASince, ATracked);
+  FOld := TStringList.Create;
+end;
+
+destructor TOldTextContext.Destroy;
+begin
+  FOld.Free;
+  inherited Destroy;
+end;
+
+function TOldTextContext.ReadAt(const APath: string): string;
+begin
+  Result := StringReplace(FOld.Values[APath], '\n', LineEnding, [rfReplaceAll]);
+end;
 
 procedure TProjectTest.SetUp;
 begin
@@ -95,6 +132,27 @@ begin
       Result := Result + ' ';
     Result := Result + ACommands[i].Name;
   end;
+end;
+
+function TProjectTest.ChecksOf(AKind: TGittanProjectKindClass;
+  ATracked: TStrings): TGittanProjectChecks;
+var
+  C: TGittanProjectContext;
+begin
+  C := TGittanProjectContext.Create(FDir, '', ATracked);
+  try
+    Result := AKind.Checks(C);
+  finally
+    C.Free;
+  end;
+end;
+
+procedure TProjectTest.Git(const AArgs: array of string);
+var
+  Output, Err: string;
+begin
+  if not RunGitIn(FDir, AArgs, Output, Err) then
+    Fail('git ' + string.Join(' ', AArgs) + ': ' + Err);
 end;
 
 function TProjectTest.CommandOf(const ACommands: TGittanProjectCommands;
@@ -480,9 +538,11 @@ end;
 
 procedure TProjectTest.TestReportRust;
 var
-  R: TGittanProjectReport;
-  P: TGittanProjects;
+  C: TOldTextContext;
   Tracked: TStringList;
+  Deps: TGittanDependencies;
+  Ch: TGittanDependencyChanges;
+  Sec: TGittanProjectSection;
 begin
   Put('Cargo.toml', '[package]' + LineEnding + 'name = "x"' + LineEnding + 'version = "0.2.0"' +
     LineEnding + '[dependencies]' + LineEnding + 'serde = "1"' + LineEnding + 'anyhow = "1"' +
@@ -491,78 +551,222 @@ begin
     'version = "1.0.210"' + LineEnding + '[[package]]' + LineEnding + 'name = "anyhow"' +
     LineEnding + 'version = "1.0.89"' + LineEnding);
   Put('src/lib.rs', '');
-  P := DetectProjects(FDir);
   Tracked := TStringList.Create;
   try
     Tracked.Add('Cargo.lock');
     Tracked.Add('Cargo.toml');
-    Tracked.Sorted := True;
-    R := ProjectReport(P[0], FDir,
-      '[package]' + LineEnding + 'version = "0.1.0"' + LineEnding + '[dependencies]' +
-      LineEnding + 'serde = "1"' + LineEnding + 'rand = "0.8"' + LineEnding,
-      '[[package]]' + LineEnding + 'name = "serde"' + LineEnding + 'version = "1.0.200"' +
-      LineEnding, 'v0.1.0', Tracked);
+    C := TOldTextContext.Create(FDir, 'v0.1.0', Tracked);
   finally
     Tracked.Free;
   end;
-  AssertEquals('Rust', R.Name);
-  AssertEquals('Cargo.toml', R.DependencyFile);
-  AssertEquals('Cargo.lock', R.LockFile);
-  AssertEquals('0.2.0', R.Version);
-  AssertEquals('v0.1.0', R.Since);
-  AssertEquals(3, Length(R.Dependencies));
-  AssertEquals('1.0.210', R.Dependencies[0].Resolved);
-  AssertEquals('1.0.210', DependencyShown(R.Dependencies[0]));
-  AssertEquals('0.5', DependencyShown(R.Dependencies[2]));
+  try
+    C.Old.Values['Cargo.toml'] := '[package]\nversion = "0.1.0"\n[dependencies]\nserde = "1"\nrand = "0.8"\n';
+    C.Old.Values['Cargo.lock'] := '[[package]]\nname = "serde"\nversion = "1.0.200"\n';
+    AssertTrue(ReadDependencies(TGittanRustKind, C, Deps, Ch));
+    Sec := TGittanRustKind.StandardSection(C, 'Cargo.toml');
+  finally
+    C.Free;
+  end;
+  AssertEquals(3, Length(Deps));
+  AssertEquals('1.0.210', Deps[0].Resolved);
+  AssertEquals('0.5', DependencyShown(Deps[2]));
   { serde 1.0.200 -> 1.0.210, anyhow and criterion added, rand removed. }
-  AssertEquals(4, Length(R.Changes));
-  AssertEquals('serde', R.Changes[0].Name);
-  AssertTrue(R.Changes[0].Kind = dcChanged);
-  AssertEquals('1.0.200', R.Changes[0].OldVersion);
-  AssertEquals('anyhow', R.Changes[1].Name);
-  AssertTrue(R.Changes[1].Kind = dcAdded);
-  AssertEquals('rand', R.Changes[3].Name);
-  AssertTrue(R.Changes[3].Kind = dcRemoved);
-  AssertEquals('no checks: a library, the lock tracked', 0, Length(R.Checks));
+  AssertEquals(4, Length(Ch));
+  AssertEquals('serde', Ch[0].Name);
+  AssertTrue(Ch[0].Kind = dcChanged);
+  AssertEquals('1.0.200', Ch[0].OldVersion);
+  AssertEquals('anyhow', Ch[1].Name);
+  AssertTrue(Ch[1].Kind = dcAdded);
+  AssertEquals('rand', Ch[3].Name);
+  AssertTrue(Ch[3].Kind = dcRemoved);
+  AssertEquals('Cargo.toml · 0.2.0 · 3 dependencies', Sec.Detail);
+  AssertEquals('4 changed since v0.1.0', Sec.State);
+  AssertTrue(Sec.StateStyle = psLink);
+  AssertEquals('the table alone: no checks', 1, Length(Sec.Blocks));
+  { serde, anyhow, removed rand, the Development heading, criterion. }
+  AssertEquals(5, Length(Sec.Blocks[0].Rows));
+  AssertEquals('1.0.200 → 1.0.210', Sec.Blocks[0].Rows[0].Cells[3].Text);
+  AssertEquals('https://crates.io/crates/serde', Sec.Blocks[0].Rows[0].Cells[0].Url);
+  AssertEquals('rand', Sec.Blocks[0].Rows[2].Cells[0].Text);
+  AssertEquals('removed', Sec.Blocks[0].Rows[2].Cells[3].Text);
+  AssertEquals('Development', Sec.Blocks[0].Rows[3].Heading);
 end;
 
 procedure TProjectTest.TestReportNoTag;
 var
-  R: TGittanProjectReport;
+  C: TGittanProjectContext;
+  Sec: TGittanProjectSection;
 begin
   Put('go.mod', 'module x' + LineEnding + 'require a.b/c v1.0.0' + LineEnding);
   Put('go.sum', '');
-  R := ProjectReport(DetectProjects(FDir)[0], FDir, '', '', '', nil);
-  AssertEquals('Go', R.Name);
-  AssertEquals('', R.Since);
-  AssertEquals(1, Length(R.Dependencies));
-  AssertEquals('v1.0.0', DependencyShown(R.Dependencies[0]));
-  AssertEquals('no comparison without a tag', 0, Length(R.Changes));
-  AssertEquals('', R.LockFile);
-  AssertEquals('', R.Version);
+  C := TGittanProjectContext.Create(FDir, '', nil);
+  try
+    Sec := TGittanGoKind.StandardSection(C, 'go.mod');
+  finally
+    C.Free;
+  end;
+  AssertEquals('Go', Sec.Name);
+  AssertEquals('no comparison without a tag', '', Sec.State);
+  AssertEquals(1, Length(Sec.Blocks));
+  AssertEquals('v1.0.0', Sec.Blocks[0].Rows[0].Cells[1].Text);
+  AssertEquals('resolved as asked: one column', '', Sec.Blocks[0].Rows[0].Cells[2].Text);
 end;
 
 procedure TProjectTest.TestReportPython;
 var
-  R: TGittanProjectReport;
+  C: TGittanProjectContext;
+  Deps: TGittanDependencies;
+  Ch: TGittanDependencyChanges;
 begin
   Put('pyproject.toml', '[project]' + LineEnding + 'version = "3.0"' + LineEnding +
     'dependencies = ["requests>=2"]' + LineEnding);
   Put('uv.lock', '[[package]]' + LineEnding + 'name = "requests"' + LineEnding +
     'version = "2.32.3"' + LineEnding);
-  R := ProjectReport(DetectProjects(FDir)[0], FDir, '', '', '', nil);
-  AssertEquals('pyproject.toml', R.DependencyFile);
-  AssertEquals('uv.lock', R.LockFile);
-  AssertEquals('3.0', R.Version);
-  AssertEquals('2.32.3', R.Dependencies[0].Resolved);
-  { requirements.txt alone. }
-  DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'pyproject.toml');
-  DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'uv.lock');
-  Put('requirements.txt', 'click==8.1' + LineEnding);
-  R := ProjectReport(DetectProjects(FDir)[0], FDir, '', '', '', nil);
-  AssertEquals('requirements.txt', R.DependencyFile);
-  AssertEquals('click', R.Dependencies[0].Name);
-  AssertEquals('==8.1', DependencyShown(R.Dependencies[0]));
+  C := TGittanProjectContext.Create(FDir, '', nil);
+  try
+    AssertTrue(ReadDependencies(TGittanPythonKind, C, Deps, Ch));
+    AssertEquals('2.32.3', Deps[0].Resolved);
+    DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'pyproject.toml');
+    DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'uv.lock');
+    Put('requirements.txt', 'click==8.1' + LineEnding);
+    AssertTrue(ReadDependencies(TGittanPythonKind, C, Deps, Ch));
+    AssertEquals('click', Deps[0].Name);
+    AssertEquals('==8.1', DependencyShown(Deps[0]));
+    DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'requirements.txt');
+    AssertFalse('setup.py alone lists none', ReadDependencies(TGittanPythonKind, C, Deps, Ch));
+  finally
+    C.Free;
+  end;
+end;
+
+procedure TProjectTest.TestChoice;
+var
+  P: TGittanProjects;
+begin
+  Put('Cargo.toml', '');
+  Put('go.mod', 'module x');
+  Put('.gittan/commands.ini', 'project = go' + LineEnding);
+  P := ProjectsOfRoot(FDir);
+  AssertEquals('the file''s line', 1, Length(P));
+  AssertEquals('Go', P[0].Name);
+  P := ProjectsOfRoot(FDir, 'rust, python');
+  AssertEquals('the choice wins over the line', 2, Length(P));
+  AssertEquals('Rust', P[0].Name);
+  AssertEquals('Cargo.toml', P[0].Manifest);
+  AssertEquals('Python', P[1].Name);
+  AssertEquals('chosen with no file', '', P[1].Manifest);
+  AssertEquals('none chosen', 0, Length(ProjectsOfRoot(FDir, 'none')));
+  AssertEquals('rust go', LowerCase(string.Join(' ', SplitProjectChoice('Rust,go none'))));
+end;
+
+procedure TProjectTest.TestSections;
+var
+  C: TGittanProjectContext;
+  S: TGittanProjectSections;
+  Picked: TGittanProjectSection;
+begin
+  { A kind picked with no file: a note, no state. }
+  C := TGittanProjectContext.Create(FDir, 'v1', nil);
+  try
+    Picked := TGittanGoKind.StandardSection(C, '');
+  finally
+    C.Free;
+  end;
+  AssertEquals('picked', Picked.Detail);
+  AssertEquals('', Picked.State);
+  AssertEquals(1, Length(Picked.Blocks));
+  AssertTrue(Picked.Blocks[0].Kind = pbNote);
+  AssertTrue(Pos('no go.mod', Picked.Blocks[0].Text) > 0);
+  Put('Cargo.toml', '[package]' + LineEnding + 'name = "x"' + LineEnding);
+  Put('go.mod', 'module x');
+  C := TGittanProjectContext.Create(FDir, '', nil);
+  try
+    S := ProjectSections(DetectProjects(FDir), C);
+  finally
+    C.Free;
+  end;
+  AssertEquals(2, Length(S));
+  AssertEquals('Rust', S[0].Name);
+  AssertTrue(S[0].Kind = TGittanRustKind);
+  AssertEquals('Go', S[1].Name);
+  { Node picked with no package.json: no facts of its own. }
+  C := TGittanProjectContext.Create(FDir, '', nil);
+  try
+    S := ProjectSections(ProjectsNamed(FDir, ['node']), C);
+  finally
+    C.Free;
+  end;
+  AssertEquals(1, Length(S));
+  AssertEquals(1, Length(S[0].Blocks));
+  AssertTrue(S[0].Blocks[0].Kind = pbNote);
+end;
+
+procedure TProjectTest.TestContextTracked;
+var
+  C: TGittanProjectContext;
+  L: TStringList;
+  First: string;
+begin
+  L := TStringList.Create;
+  try
+    L.Add('src/b.pp');
+    L.Add('lib/x/a.o');
+    L.Add('a.lps');
+    L.Add('libs.txt');
+    C := TGittanProjectContext.Create(FDir, '', L);
+  finally
+    L.Free;
+  end;
+  try
+    AssertTrue(C.IsTracked('src/b.pp'));
+    AssertFalse(C.IsTracked('src/c.pp'));
+    AssertTrue(C.TrackedUnder('lib/', First));
+    AssertEquals('lib/x/a.o', First);
+    AssertFalse(C.TrackedUnder('target/', First));
+    AssertEquals('a.lps', C.TrackedWithExt('.LPS'));
+    AssertEquals('', C.ReadAt('a.lps'));
+    AssertEquals('abcdefg', C.Describe('x', 'abcdefghij'));
+  finally
+    C.Free;
+  end;
+end;
+
+procedure TProjectTest.TestGitContext;
+var
+  C: TGittanGitProjectContext;
+  Deps: TGittanDependencies;
+  Ch: TGittanDependencyChanges;
+begin
+  Git(['init', '-q']);
+  Put('Cargo.toml', '[dependencies]' + LineEnding + 'serde = "1"' + LineEnding);
+  Git(['add', '-A']);
+  Git(['-c', 'user.name=T', '-c', 'user.email=t@x', 'commit', '-q', '-m', 'one']);
+  Git(['tag', 'v1']);
+  Put('Cargo.toml', '[dependencies]' + LineEnding + 'serde = "2"' + LineEnding);
+  Git(['add', '-A']);
+  Git(['-c', 'user.name=T', '-c', 'user.email=t@x', 'commit', '-q', '-m', 'two']);
+  C := TGittanGitProjectContext.Create(FDir);
+  try
+    AssertEquals('v1', C.Since);
+    AssertTrue(C.IsTracked('Cargo.toml'));
+    AssertTrue(Pos('serde = "1"', C.ReadAt('Cargo.toml')) > 0);
+    AssertEquals('', C.ReadAt('missing.toml'));
+    AssertEquals('no submodules', 0, Length(C.Submodules));
+    AssertEquals('', C.GitlinkAt('Cargo.toml', ''));
+    AssertTrue(ReadDependencies(TGittanRustKind, C, Deps, Ch));
+    AssertEquals(1, Length(Ch));
+    AssertEquals('1', Ch[0].OldVersion);
+    AssertEquals('2', Ch[0].NewVersion);
+  finally
+    C.Free;
+  end;
+end;
+
+procedure TProjectTest.TestShellName;
+begin
+  AssertEquals('Trndi.lpi', ShellName('Trndi.lpi'));
+  AssertEquals('"No Ext (Release)"', ShellName('No Ext (Release)'));
+  AssertEquals('"a\"b"', ShellName('a"b'));
 end;
 
 procedure TProjectTest.TestChecksLazarus;
@@ -578,7 +782,7 @@ begin
     Tracked.Add('lib/x86_64-linux/a.o');
     Tracked.Add('backup/a.pp');
     Tracked.Sorted := True;
-    C := DetectProjects(FDir)[0].Kind.Checks(FDir, Tracked);
+    C := ChecksOf(DetectProjects(FDir)[0].Kind, Tracked);
     AssertEquals(3, Length(C));
     AssertEquals('a.lps', C[0].Path);
     AssertEquals('*.lps', C[0].IgnorePattern);
@@ -587,7 +791,7 @@ begin
     AssertEquals('backup/', C[2].IgnorePattern);
     Tracked.Clear;
     Tracked.Add('a.lpi');
-    AssertEquals(0, Length(DetectProjects(FDir)[0].Kind.Checks(FDir, Tracked)));
+    AssertEquals(0, Length(ChecksOf(DetectProjects(FDir)[0].Kind, Tracked)));
   finally
     Tracked.Free;
   end;
@@ -604,13 +808,13 @@ begin
     Tracked.Add('node_modules/vue/package.json');
     Tracked.Add('package.json');
     Tracked.Sorted := True;
-    C := DetectProjects(FDir)[0].Kind.Checks(FDir, Tracked);
+    C := ChecksOf(DetectProjects(FDir)[0].Kind, Tracked);
     AssertEquals(2, Length(C));
     AssertEquals('node_modules/', C[0].IgnorePattern);
     AssertEquals('no lock: about no file', '', C[1].Path);
     Put('package-lock.json', '{}');
     Tracked.Clear;
-    C := DetectProjects(FDir)[0].Kind.Checks(FDir, Tracked);
+    C := ChecksOf(DetectProjects(FDir)[0].Kind, Tracked);
     AssertEquals(0, Length(C));
   finally
     Tracked.Free;
@@ -631,7 +835,7 @@ begin
     Tracked.Add('Cargo.toml');
     Tracked.Add('target/debug/x');
     Tracked.Sorted := True;
-    C := ProjectKindByName('rust').Checks(FDir, Tracked);
+    C := ChecksOf(ProjectKindByName('rust'), Tracked);
     AssertEquals(2, Length(C));
     AssertEquals('Cargo.lock', C[0].Path);
     AssertEquals('no pattern: it should be committed', '', C[0].IgnorePattern);
@@ -639,13 +843,13 @@ begin
     Tracked.Add('Cargo.lock');
     Put('src/lib.rs', '');
     DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'src' + PathDelim + 'main.rs');
-    C := ProjectKindByName('rust').Checks(FDir, Tracked);
+    C := ChecksOf(ProjectKindByName('rust'), Tracked);
     AssertEquals('a library with its lock tracked', 1, Length(C));
-    C := ProjectKindByName('go').Checks(FDir, Tracked);
+    C := ChecksOf(ProjectKindByName('go'), Tracked);
     AssertEquals(1, Length(C));
     AssertTrue(Pos('go.sum', C[0].Text) > 0);
     Put('go.sum', '');
-    AssertEquals(0, Length(ProjectKindByName('go').Checks(FDir, Tracked)));
+    AssertEquals(0, Length(ChecksOf(ProjectKindByName('go'), Tracked)));
   finally
     Tracked.Free;
   end;
@@ -662,7 +866,7 @@ begin
     Tracked.Add('.venv/bin/python');
     Tracked.Add('src/__pycache__/a.cpython-312.pyc');
     Tracked.Sorted := True;
-    C := ProjectKindByName('python').Checks(FDir, Tracked);
+    C := ChecksOf(ProjectKindByName('python'), Tracked);
     AssertEquals(2, Length(C));
     AssertEquals('.venv/', C[0].IgnorePattern);
     AssertEquals('__pycache__/', C[1].IgnorePattern);

@@ -51,7 +51,8 @@ begin
     FCommandsHash := '';
     Exit;
   end;
-  FRepoCommands := DiscoverRepoCommands(FRepo.Root, FRepoProjects);
+  FRepoCommands := DiscoverRepoCommands(FRepo.Root, FRepoProjects,
+    App.Settings.ProjectKindsOf(FRepo.Root));
   FCommandsHash := CommandsFileHash(FRepo.Root);
   FCommandPage.SetRepository(ExtractFileName(FRepo.Root), FRepo.Root);
   FCommandPage.SetCommands(FRepoCommands, FRepoProjects, FCommandsHash <> '', CommandsTrusted);
@@ -119,6 +120,20 @@ begin
     ShowCommands;
     Exit;
   end;
+  RunCommandRecord(Cmd, AInTerminal);
+end;
+
+{ Runs ACmd, a command of the page or one a button elsewhere gives
+  (the Project page's), in a terminal when it asks for one or
+  AInTerminal, else in the job whose output the Commands page shows,
+  which it then opens. }
+procedure TRepoFrame.RunCommandRecord(const ACmd: TGittanRepoCommand; AInTerminal: boolean);
+var
+  Cmd: TGittanRepoCommand;
+begin
+  Cmd := ACmd;
+  if (FRepo.Root = '') or (Cmd.Command = '') then
+    Exit;
   if Cmd.Terminal or AInTerminal then
   begin
     OpenTerminal(Cmd.Command);

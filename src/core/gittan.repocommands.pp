@@ -107,13 +107,16 @@ function PackageRunner(const ARoot: string): string;
   command is kept among the file's, with an empty Command, so the page
   can say so. AProjects is the kinds found, as the file's project line
   keeps them (ProjectsOfRoot). Reads the root's files; nothing runs. }
-function DiscoverRepoCommands(const ARoot: string; out AProjects: TGittanProjects):
-  TGittanRepoCommands;
+function DiscoverRepoCommands(const ARoot: string; out AProjects: TGittanProjects;
+  const AChoice: string = ''): TGittanRepoCommands;
 function DiscoverRepoCommands(const ARoot: string): TGittanRepoCommands;
 
-{** The kinds of project at ARoot: DetectProjects, kept to those a
-  "project =" line of the commands file names when there is one. }
-function ProjectsOfRoot(const ARoot: string): TGittanProjects;
+{** The kinds of project at ARoot. AChoice, what the user picked on the
+  Project page ("rust, go", "none"; '' for none picked), comes first;
+  else a "project =" line of the commands file; else DetectProjects,
+  the kinds whose Identify says so. A kind named that does not identify
+  the root is listed with no manifest. }
+function ProjectsOfRoot(const ARoot: string; const AChoice: string = ''): TGittanProjects;
 
 {** The SHA-256 of the commands file's text under ARoot, '' without the
   file: a hash that cannot be collided, so a trusted file cannot be
@@ -479,35 +482,16 @@ begin
   end;
 end;
 
-function ProjectsOfRoot(const ARoot: string): TGittanProjects;
+function ProjectsOfRoot(const ARoot: string; const AChoice: string): TGittanProjects;
 var
   Names: TStringArray;
-  All: TGittanProjects;
-  i, j, n: integer;
 begin
-  All := DetectProjects(ARoot);
-  if (ARoot = '') or not ParseCommandsProjects(ReadIfExists(IncludeTrailingPathDelimiter(ARoot) +
+  if Trim(AChoice) <> '' then
+    Exit(ProjectsNamed(ARoot, SplitProjectChoice(AChoice)));
+  if (ARoot <> '') and ParseCommandsProjects(ReadIfExists(IncludeTrailingPathDelimiter(ARoot) +
     CommandsFolder + PathDelim + CommandsFile), Names) then
-    Exit(All);
-  { The kinds named, in the order they are registered, found or not:
-    a kind the line asks for is listed even when its file is missing,
-    since the line says what the repository is. }
-  Result := nil;
-  for i := 0 to High(Names) do
-  begin
-    if ProjectKindByName(Names[i]) = nil then
-      Continue;
-    n := Length(Result);
-    for j := 0 to High(Result) do
-      if Result[j].Kind = ProjectKindByName(Names[i]) then
-        n := -1;
-    if n < 0 then
-      Continue;
-    SetLength(Result, n + 1);
-    Result[n].Kind := ProjectKindByName(Names[i]);
-    Result[n].Name := Result[n].Kind.Name;
-    Result[n].Manifest := Result[n].Kind.Manifest(ARoot);
-  end;
+    Exit(ProjectsNamed(ARoot, Names));
+  Result := DetectProjects(ARoot);
 end;
 
 function DiscoverRepoCommands(const ARoot: string): TGittanRepoCommands;
@@ -517,8 +501,8 @@ begin
   Result := DiscoverRepoCommands(ARoot, Projects);
 end;
 
-function DiscoverRepoCommands(const ARoot: string; out AProjects: TGittanProjects):
-  TGittanRepoCommands;
+function DiscoverRepoCommands(const ARoot: string; out AProjects: TGittanProjects;
+  const AChoice: string): TGittanRepoCommands;
 var
   Root, Runner, Name: string;
   FileOnes, Scripts, Targets, Kinds: TGittanRepoCommands;
@@ -586,7 +570,7 @@ begin
   end;
   { Each kind of project's commands, under the kind's name. }
   Kinds := nil;
-  AProjects := ProjectsOfRoot(ARoot);
+  AProjects := ProjectsOfRoot(ARoot, AChoice);
   for j := 0 to High(AProjects) do
   begin
     KindOnes := AProjects[j].Kind.Commands(ARoot);

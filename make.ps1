@@ -261,7 +261,7 @@ switch ($target) {
         }
         New-Item -ItemType Directory -Path 'tests\lib' -Force | Out-Null
         $qjsDir = Get-QjsDir ((& fpc -iTP) | Out-String).Trim()
-        & fpc -Mobjfpc -Sh -O1 '-Fusrc\core' '-FUtests\lib' '-FEtests' "-Fl$qjsDir" 'tests\gittantests.lpr'
+        & fpc -Mobjfpc -Sh -O1 '-Fusrc\core' '-Fusrc\proj' '-FUtests\lib' '-FEtests' "-Fl$qjsDir" 'tests\gittantests.lpr'
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         Copy-QuickJSLibs (Join-Path $PSScriptRoot 'tests\gittantests.exe')
         & 'tests\gittantests.exe' --all --format=plain @rest
