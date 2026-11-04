@@ -627,6 +627,12 @@ type
   the caller. }
 function PullActionDone(AAction: TGittanPullAction): string;
 
+{** What AAction does while it runs, for a status: "Approving",
+  "Requesting changes on", "Commenting on", "Merging", "Squashing and
+  merging", "Rebasing and merging", "Marking ready for review",
+  followed by the pull request's number by the caller. }
+function PullActionDoing(AAction: TGittanPullAction): string;
+
 {** Whether AAction is a review: it may carry words (Text), which a
   request for changes and a comment must. }
 function PullActionIsReview(AAction: TGittanPullAction): boolean;
@@ -2064,6 +2070,20 @@ begin
     plRebaseMerge: Result := 'Rebased and merged';
     else
       Result := 'Marked ready for review';
+  end;
+end;
+
+function PullActionDoing(AAction: TGittanPullAction): string;
+begin
+  case AAction of
+    plApprove: Result := 'Approving';
+    plRequestChanges: Result := 'Requesting changes on';
+    plComment: Result := 'Commenting on';
+    plMerge: Result := 'Merging';
+    plSquash: Result := 'Squashing and merging';
+    plRebaseMerge: Result := 'Rebasing and merging';
+    else
+      Result := 'Marking ready for review';
   end;
 end;
 

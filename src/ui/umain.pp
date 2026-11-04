@@ -3652,7 +3652,7 @@ resourcestring
   rsPullSquashAsk = 'Squash the commits of #%d "%s" into one on %s?';
   rsPullRebaseMergeAsk = 'Rebase the commits of #%d "%s" onto %s?';
   rsPullMergeAction = 'Merge';
-  rsPullActing = 'Asking %s...';
+  rsPullActing = '%s #%d on %s…';
   rsPullActionDone = '%s #%d';
   rsPositionOld = 'Ln %d (old), Col %d';
   rsReviewComments = 'Review &Comments';

@@ -214,7 +214,7 @@ resourcestring
   rsAboutLocalBuild = 'A local build of %s';
   rsAboutText = 'A free, native git client built around the diff.';
   rsCheckUpdates = 'Check for &Updates';
-  rsUpdateChecking = 'Asking GitHub...';
+  rsUpdateChecking = 'Checking for a new version…';
   rsUpdateCurrent = 'This is the latest build.';
   rsUpdateDownload = 'Download %s';
   rsUpdateLatest = 'The latest release is %s';

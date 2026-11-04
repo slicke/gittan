@@ -315,7 +315,7 @@ resourcestring
   rsMenuAttention = 'Needs Attention First';
   rsChangesAttention = 'Changes Requested Need Attention';
   rsChecksAttention = 'Failing Checks Need Attention';
-  rsLoading = 'Asking %s…';
+  rsLoading = 'Loading pull requests from %s…';
   rsNoMine = 'No open pull requests of yours.';
   rsCaughtUp = 'All caught up';
   rsNoReview = 'Nothing waiting for your review.';

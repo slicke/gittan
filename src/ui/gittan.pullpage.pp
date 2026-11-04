@@ -139,7 +139,7 @@ resourcestring
   rsOneOpen = '1 open';
   rsManyOpen = '%d open';
   rsRefresh = 'Refresh';
-  rsLoading = 'Asking %s…';
+  rsLoading = 'Loading pull requests from %s…';
   rsNoPulls = 'No open pull requests.';
   rsForgeLink = '%s ↗';
   rsComparing = 'Comparing';

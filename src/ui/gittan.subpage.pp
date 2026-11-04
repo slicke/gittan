@@ -118,7 +118,7 @@ resourcestring
   rsSubPageDefaultBranch = 'the remote''s default branch';
   rsSubPageSameBranch = 'the repository''s own branch (%s)';
   rsSubPageBranch = 'follows %s';
-  rsSubPageChecking = 'Asking the remote…';
+  rsSubPageChecking = 'Looking up the branch on the remote…';
   rsSubPageCheckingDetail = 'ls-remote looks up its branch; nothing is fetched.';
   rsSubPageNotAsked = 'The remote has not been asked yet';
   rsSubPageConflict = 'In conflict';
