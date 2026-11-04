@@ -19,7 +19,7 @@ uses
   gittan.lexers, gittan.git, gittan.conflicts, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.welcome, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.sidenav, gittan.repoinfo, gittan.repopage, gittan.subpage,
-  gittan.repocommands, gittan.commandpage, gittan.job,
+  gittan.repocommands, gittan.project, gittan.commandpage, gittan.job,
   gittan.settingsdlg, gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   {$IFDEF LCLCocoa}gittan.memohint,{$ENDIF}
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
@@ -806,9 +806,10 @@ type
       running (umain.commands.inc). }
     FCommandPage: TGittanCommandPage;
     FRepoCommands: TGittanRepoCommands;
+    FRepoProjects: TGittanProjects;
     FCommandsHash: string;
     FCommandJob: TGittanCommandJob;
-    FCommandName: string;
+    FCommandName, FCommandProject: string;
     FCommandSource: TGittanCommandSource;
     FCommandRead: integer;
     { The Files page, in the box too (umain.files.inc): whether it

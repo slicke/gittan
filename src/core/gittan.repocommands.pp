@@ -6,11 +6,16 @@ unit gittan.repocommands;
   section names a command, its shell line, a key for its shortcut and
   whether it runs in a terminal; the scripts of a package.json, each
   run through the package manager the lock file tells (npm, pnpm, yarn
-  or bun); and the targets of a Makefile, each run by make. A section
-  of the file with no command line and the name of a script or a target
+  or bun); the targets of a Makefile, each run by make; and the
+  commands of the kinds of project the root's files tell (gittan.project:
+  cargo build for a Cargo.toml, go test ./... for a go.mod, lazbuild for
+  a .lpi), each under its kind's name. A section of the file with no
+  command line and the name of a script, a target or a kind's command
   gives that one its key, so a repository can give its own make test a
-  shortcut without writing it again. Nothing here needs the LCL; tested
-  in tests/testrepocommands.pp.
+  shortcut without writing it again, and a line "project = rust, go"
+  before the first section keeps the kinds to those named ("none" for
+  no kind) when the files would tell another. Nothing here needs the
+  LCL; tested in tests/testrepocommands.pp and tests/testproject.pp.
 
   A committed file lets a clone say what a key does on this computer,
   so the file's commands run only once the user has trusted it:
@@ -28,7 +33,7 @@ unit gittan.repocommands;
 interface
 
 uses
-  Classes, SysUtils, gittan.job;
+  Classes, SysUtils, gittan.job, gittan.project;
 
 const
   {** The folder of the repository's own Gittan files, at the root. }
@@ -45,8 +50,8 @@ const
 
 type
   {** Where a command comes from: the commands file, package.json, a
-    Makefile. }
-  TGittanCommandSource = (csFile, csPackage, csMake);
+    Makefile, a kind of project's tools. }
+  TGittanCommandSource = (csFile, csPackage, csMake, csProject);
 
   TGittanRepoCommand = record
     {** The section's name, the script's or the target's. }
@@ -61,6 +66,8 @@ type
     {** Runs in a terminal window instead of under the page. }
     Terminal: boolean;
     Source: TGittanCommandSource;
+    {** The kind's name for csProject ("Rust"); '' for the rest. }
+    Project: string;
   end;
   TGittanRepoCommands = array of TGittanRepoCommand;
 
@@ -70,6 +77,12 @@ type
   stands for a script's or a target's key. Keys are kept as capitals;
   anything but a letter or a digit is no key. }
 function ParseCommandsFile(const AText: string): TGittanRepoCommands;
+
+{** The kinds of project the commands file's text asks for: true with
+  ANames when a line "project = rust, go" stands before the first
+  section ("none" gives true and no names), false without one, when
+  the files decide. }
+function ParseCommandsProjects(const AText: string; out ANames: TStringArray): boolean;
 
 {** The scripts of a package.json's text, in its order: Name is the
   script's name and Detail its text; Command is empty, DiscoverRepoCommands
@@ -88,11 +101,19 @@ function ParseMakefileTargets(const AText: string): TStringArray;
 function PackageRunner(const ARoot: string): string;
 
 {** The commands of the repository at ARoot: the file's first, then the
-  scripts, then the targets, with the keys the file gives them. A file
-  section with no command line that names no script or target is kept
-  among the file's, with an empty Command, so the page can say so.
-  Reads the three files; nothing runs. }
+  scripts, then the targets, then each kind of project's in the order
+  the kinds are registered, with the keys the file gives them. A file
+  section with no command line that names no script, target or kind's
+  command is kept among the file's, with an empty Command, so the page
+  can say so. AProjects is the kinds found, as the file's project line
+  keeps them (ProjectsOfRoot). Reads the root's files; nothing runs. }
+function DiscoverRepoCommands(const ARoot: string; out AProjects: TGittanProjects):
+  TGittanRepoCommands;
 function DiscoverRepoCommands(const ARoot: string): TGittanRepoCommands;
+
+{** The kinds of project at ARoot: DetectProjects, kept to those a
+  "project =" line of the commands file names when there is one. }
+function ProjectsOfRoot(const ARoot: string): TGittanProjects;
 
 {** The SHA-256 of the commands file's text under ARoot, '' without the
   file: a hash that cannot be collided, so a trusted file cannot be
@@ -246,13 +267,51 @@ begin
   end;
 end;
 
+function ParseCommandsProjects(const AText: string; out ANames: TStringArray): boolean;
+var
+  Start, P, i, n: integer;
+  Line, Field, Value: string;
+begin
+  Result := False;
+  ANames := nil;
+  Start := 1;
+  while NextLine(AText, Start, Line) do
+  begin
+    Line := Trim(Line);
+    if (Line = '') or (Line[1] = ';') or (Line[1] = '#') then
+      Continue;
+    if Line[1] = '[' then
+      Exit;
+    P := Pos('=', Line);
+    if P = 0 then
+      Continue;
+    Field := LowerCase(Trim(Copy(Line, 1, P - 1)));
+    Value := Trim(Copy(Line, P + 1, MaxInt));
+    if (Field <> 'project') and (Field <> 'projects') then
+      Continue;
+    Result := True;
+    ANames := Value.Split([',', ' '], TStringSplitOptions.ExcludeEmpty);
+    n := 0;
+    for i := 0 to High(ANames) do
+      if not SameText(ANames[i], 'none') then
+      begin
+        ANames[n] := ANames[i];
+        Inc(n);
+      end;
+    SetLength(ANames, n);
+    Exit;
+  end;
+end;
+
 function CommandsFileTemplate: string;
 begin
   Result :=
     '; Gittan runs these from the repository root: a section per command,' + LineEnding +
     '; with a key for its shortcut (Ctrl+Cmd on macOS, Ctrl+Alt elsewhere).' + LineEnding +
-    '; A section named as a package.json script or a Makefile target with' + LineEnding +
-    '; no command line gives that one a key.' + LineEnding +
+    '; A section named as a package.json script, a Makefile target or a' + LineEnding +
+    '; command of the project''s tools (cargo test, go test) with no command' + LineEnding +
+    '; line gives that one a key. "project = rust, go" before the sections' + LineEnding +
+    '; keeps the kinds of project to those named; "project = none" lists none.' + LineEnding +
     ';' + LineEnding +
     '; [test]' + LineEnding +
     '; command = npm test' + LineEnding +
@@ -420,11 +479,51 @@ begin
   end;
 end;
 
+function ProjectsOfRoot(const ARoot: string): TGittanProjects;
+var
+  Names: TStringArray;
+  All: TGittanProjects;
+  i, j, n: integer;
+begin
+  All := DetectProjects(ARoot);
+  if (ARoot = '') or not ParseCommandsProjects(ReadIfExists(IncludeTrailingPathDelimiter(ARoot) +
+    CommandsFolder + PathDelim + CommandsFile), Names) then
+    Exit(All);
+  { The kinds named, in the order they are registered, found or not:
+    a kind the line asks for is listed even when its file is missing,
+    since the line says what the repository is. }
+  Result := nil;
+  for i := 0 to High(Names) do
+  begin
+    if ProjectKindByName(Names[i]) = nil then
+      Continue;
+    n := Length(Result);
+    for j := 0 to High(Result) do
+      if Result[j].Kind = ProjectKindByName(Names[i]) then
+        n := -1;
+    if n < 0 then
+      Continue;
+    SetLength(Result, n + 1);
+    Result[n].Kind := ProjectKindByName(Names[i]);
+    Result[n].Name := Result[n].Kind.Name;
+    Result[n].Manifest := Result[n].Kind.Manifest(ARoot);
+  end;
+end;
+
 function DiscoverRepoCommands(const ARoot: string): TGittanRepoCommands;
 var
+  Projects: TGittanProjects;
+begin
+  Result := DiscoverRepoCommands(ARoot, Projects);
+end;
+
+function DiscoverRepoCommands(const ARoot: string; out AProjects: TGittanProjects):
+  TGittanRepoCommands;
+var
   Root, Runner, Name: string;
-  FileOnes, Scripts, Targets: TGittanRepoCommands;
+  FileOnes, Scripts, Targets, Kinds: TGittanRepoCommands;
   TargetNames: TStringArray;
+  KindOnes: TGittanProjectCommands;
   Taken: array of boolean;
   i, j, n: integer;
   Used: set of char;
@@ -453,6 +552,7 @@ var
 
 begin
   Result := nil;
+  AProjects := nil;
   if ARoot = '' then
     Exit;
   Root := IncludeTrailingPathDelimiter(ARoot);
@@ -484,6 +584,24 @@ begin
     Targets[i].Source := csMake;
     TakeFromFile(Targets[i]);
   end;
+  { Each kind of project's commands, under the kind's name. }
+  Kinds := nil;
+  AProjects := ProjectsOfRoot(ARoot);
+  for j := 0 to High(AProjects) do
+  begin
+    KindOnes := AProjects[j].Kind.Commands(ARoot);
+    for i := 0 to High(KindOnes) do
+    begin
+      SetLength(Kinds, Length(Kinds) + 1);
+      Kinds[High(Kinds)] := Default(TGittanRepoCommand);
+      Kinds[High(Kinds)].Name := KindOnes[i].Name;
+      Kinds[High(Kinds)].Command := KindOnes[i].Command;
+      Kinds[High(Kinds)].Terminal := KindOnes[i].Terminal;
+      Kinds[High(Kinds)].Source := csProject;
+      Kinds[High(Kinds)].Project := AProjects[j].Name;
+      TakeFromFile(Kinds[High(Kinds)]);
+    end;
+  end;
   { The file's own commands, in its order, with a section that names
     no script or target among them, without a command: the page shows
     it as such, so a misspelt or dropped name is seen. }
@@ -494,6 +612,8 @@ begin
     Add(Scripts[i]);
   for i := 0 to High(Targets) do
     Add(Targets[i]);
+  for i := 0 to High(Kinds) do
+    Add(Kinds[i]);
   { The first command with a key keeps it; a section without a command
     holds none. }
   Used := [];

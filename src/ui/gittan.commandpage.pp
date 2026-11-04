@@ -46,7 +46,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Controls, Graphics, ExtCtrls, gittan.repocommands,
-  gittan.console;
+  gittan.project, gittan.console;
 
 const
   {** The least height of the console, in 96-DPI pixels. }
@@ -62,8 +62,9 @@ type
   private
     FName, FRoot: string;
     FCommands: TGittanRepoCommands;
+    FProjects: TGittanProjects;
     FHasFile, FTrusted: boolean;
-    FRunName: string;
+    FRunName, FRunProject: string;
     FRunSource: TGittanCommandSource;
     FHasRun, FRunning, FRunStarted, FRunKilled, FStopping, FPulse: boolean;
     FExitCode: integer;
@@ -92,7 +93,8 @@ type
     procedure PaintAction(ATop: integer; const ACaption, ALink: string);
     procedure PaintNote(var Y: integer; const AText: string);
     procedure PaintTrustCard(var Y: integer);
-    procedure PaintTiles(var Y: integer; ASource: TGittanCommandSource);
+    procedure PaintTiles(var Y: integer; ASource: TGittanCommandSource;
+      const AProject: string = '');
     procedure PaintSubheading(var Y: integer; const ATitle: string);
     procedure PaintGrid(var Y: integer; const AIndexes: array of integer; AShort: boolean);
     procedure PaintButton(const R: TRect; const ACaption, ALink: string;
@@ -103,7 +105,8 @@ type
     function RunState(out AColor: TColor): string;
     function RunIndex: integer;
     procedure TimerTick(Sender: TObject);
-    function GroupCount(ASource: TGittanCommandSource): integer;
+    function GroupCount(ASource: TGittanCommandSource; const AProject: string = ''): integer;
+    function IsRun(const ACommand: TGittanRepoCommand): boolean;
     function ColumnCount: integer;
     procedure PaintContent;
     procedure Layout;
@@ -120,15 +123,19 @@ type
     {** The repository shown: its name over its root. Another root
       drops the commands and the run of the one before. }
     procedure SetRepository(const AName, ARoot: string);
-    {** The commands, whether the commands file exists and whether it
-      is trusted. }
-    procedure SetCommands(const ACommands: TGittanRepoCommands; AHasFile, ATrusted: boolean);
+    {** The commands, the kinds of project they are listed under (a
+      section each, in this order), whether the commands file exists
+      and whether it is trusted. }
+    procedure SetCommands(const ACommands: TGittanRepoCommands;
+      const AProjects: TGittanProjects; AHasFile, ATrusted: boolean);
     {** The command AName of ASource (a script and a target may share
-      a name) is running (ARunning), or has ended with AExitCode after
-      AElapsedMs; AStarted false when the shell could not start it,
-      AKilled when Stop ended it. }
+      a name; AProject the kind's name for one of a kind's) is running
+      (ARunning), or has ended with AExitCode after AElapsedMs; AStarted
+      false when the shell could not start it, AKilled when Stop ended
+      it. }
     procedure SetRun(const AName: string; ASource: TGittanCommandSource;
-      ARunning: boolean; AExitCode: integer; AElapsedMs: int64; AStarted, AKilled: boolean);
+      const AProject: string; ARunning: boolean; AExitCode: integer; AElapsedMs: int64;
+      AStarted, AKilled: boolean);
     {** The palette: the background, the text, the dim text, the fill
       under the mouse, the dividers, the links, the ok state and the
       error state. }
@@ -179,7 +186,9 @@ resourcestring
   rsEditFile = 'Edit…';
   rsCreateFile = 'Create…';
   rsNoCommands = 'No commands yet. A .gittan/commands.ini names them, and the scripts of a ' +
-    'package.json and the targets of a Makefile are listed by themselves.';
+    'package.json, the targets of a Makefile and the commands of a Cargo.toml, go.mod, ' +
+    'pyproject.toml or Lazarus project are listed by themselves.';
+  rsNoManifest = 'named in commands.ini';
   rsTrustTitle = 'This repository''s commands.ini has not been trusted on this computer';
   rsTrustText = 'A committed file could make a shortcut run anything. Its commands and ' +
     'their shortcuts are off until you trust it; a change of the file asks again.';
@@ -301,13 +310,16 @@ begin
 end;
 
 procedure TGittanCommandPage.SetCommands(const ACommands: TGittanRepoCommands;
-  AHasFile, ATrusted: boolean);
+  const AProjects: TGittanProjects; AHasFile, ATrusted: boolean);
 var
   i: integer;
 begin
   SetLength(FCommands, Length(ACommands));
   for i := 0 to High(ACommands) do
     FCommands[i] := ACommands[i];
+  SetLength(FProjects, Length(AProjects));
+  for i := 0 to High(AProjects) do
+    FProjects[i] := AProjects[i];
   FHasFile := AHasFile;
   FTrusted := ATrusted;
   FHot := -1;
@@ -316,12 +328,14 @@ begin
 end;
 
 procedure TGittanCommandPage.SetRun(const AName: string; ASource: TGittanCommandSource;
-  ARunning: boolean; AExitCode: integer; AElapsedMs: int64; AStarted, AKilled: boolean);
+  const AProject: string; ARunning: boolean; AExitCode: integer; AElapsedMs: int64;
+  AStarted, AKilled: boolean);
 begin
   if ARunning and not FRunning then
     FRunStart := GetTickCount64;
   FRunName := AName;
   FRunSource := ASource;
+  FRunProject := AProject;
   FHasRun := True;
   FRunning := ARunning;
   FStopping := False;
@@ -424,14 +438,24 @@ begin
   FLinkHints[High(FLinkHints)] := AHint;
 end;
 
-function TGittanCommandPage.GroupCount(ASource: TGittanCommandSource): integer;
+function TGittanCommandPage.GroupCount(ASource: TGittanCommandSource;
+  const AProject: string): integer;
 var
   i: integer;
 begin
   Result := 0;
   for i := 0 to High(FCommands) do
-    if FCommands[i].Source = ASource then
+    if (FCommands[i].Source = ASource) and (FCommands[i].Project = AProject) then
       Inc(Result);
+end;
+
+{ Whether ACommand is the one that runs or ran last: by name, source
+  and kind, so a reload that moves the indexes keeps it, and a kind's
+  test is told from a script's. }
+function TGittanCommandPage.IsRun(const ACommand: TGittanRepoCommand): boolean;
+begin
+  Result := (ACommand.Name = FRunName) and (ACommand.Source = FRunSource) and
+    (ACommand.Project = FRunProject);
 end;
 
 { A dim bold title with a dim detail after it and, after that, a state
@@ -585,7 +609,8 @@ begin
   Inc(Y, FC.TextHeight('Xg') + Px(Gap) div 2);
 end;
 
-procedure TGittanCommandPage.PaintTiles(var Y: integer; ASource: TGittanCommandSource);
+procedure TGittanCommandPage.PaintTiles(var Y: integer; ASource: TGittanCommandSource;
+  const AProject: string);
 var
   Indexes, Plain, Members: array of integer;
   Groups: array of string;
@@ -595,7 +620,7 @@ var
 begin
   Indexes := nil;
   for i := 0 to High(FCommands) do
-    if FCommands[i].Source = ASource then
+    if (FCommands[i].Source = ASource) and (FCommands[i].Project = AProject) then
     begin
       SetLength(Indexes, Length(Indexes) + 1);
       Indexes[High(Indexes)] := i;
@@ -718,7 +743,7 @@ begin
       names no script or target always. }
     Off := ((Cmd.Source = csFile) and not FTrusted) or (Cmd.Command = '');
     Leads := not Off and not FRunning and Assigned(FOnRun);
-    Busy := FRunning and (Cmd.Name = FRunName) and (Cmd.Source = FRunSource);
+    Busy := FRunning and IsRun(Cmd);
     { What runs is the tile's hint: the shell line, or a script's text;
       a section that names nothing says so. }
     if Cmd.Command = '' then
@@ -775,7 +800,7 @@ begin
     FC.Brush.Style := bsSolid;
     if Hot or Busy then
       FC.Brush.Color := FLink
-    else if FHasRun and (Cmd.Name = FRunName) and (Cmd.Source = FRunSource) and
+    else if FHasRun and IsRun(Cmd) and
       not FRunning then
     begin
       RunState(StateColor);
@@ -901,8 +926,7 @@ var
   i: integer;
 begin
   for i := 0 to High(FCommands) do
-    if (FCommands[i].Name = FRunName) and (FCommands[i].Source = FRunSource) and
-      (FCommands[i].Command <> '') then
+    if IsRun(FCommands[i]) and (FCommands[i].Command <> '') then
     begin
       if (FCommands[i].Source = csFile) and not FTrusted then
         Exit(-1);
@@ -1142,7 +1166,7 @@ end;
 
 procedure TGittanCommandPage.PaintContent;
 var
-  Y, TextH, TitleH, HeadingTop, X: integer;
+  Y, TextH, TitleH, HeadingTop, X, i: integer;
 begin
   FC.Brush.Style := bsSolid;
   FC.Brush.Color := FBack;
@@ -1196,6 +1220,17 @@ begin
     PaintHeading(Y, rsTargetsGroup, rsMakefile, '', FDim);
     PaintTiles(Y, csMake);
   end;
+  { A section per kind of project, its name over the file that told
+    it; a kind the commands file asked for with no file says so. }
+  for i := 0 to High(FProjects) do
+    if GroupCount(csProject, FProjects[i].Name) > 0 then
+    begin
+      if FProjects[i].Manifest <> '' then
+        PaintHeading(Y, FProjects[i].Name, FProjects[i].Manifest, '', FDim)
+      else
+        PaintHeading(Y, FProjects[i].Name, rsNoManifest, '', FDim);
+      PaintTiles(Y, csProject, FProjects[i].Name);
+    end;
 
   { The output of the last run, in its panel. }
   FOutputTop := -1;

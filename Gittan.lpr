@@ -23,7 +23,7 @@ uses
   uwindow,
   { The forges and the AI agents, which register themselves as they
     load. }
-  gittan.github, gittan.agentcli, gittan.openai
+  gittan.github, gittan.agentcli, gittan.openai, gittan.project
   { you can add units after this };
 
 {$R *.res}
