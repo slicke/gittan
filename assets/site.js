@@ -131,10 +131,12 @@
     c.appendChild(b);
   });
 
-  // ---- The bar: the same links on both pages. The link of the section in view is underlined; with none in
-  //      view, the link to this page itself (All features on the features page).
+  // ---- The bar: the same links on both pages. The link of the section in view is underlined (a section
+  //      in the submenu underlines All features and is marked in the list); with none in view, the link to
+  //      this page itself (All features on the features page).
   var bar = document.querySelector('.bar');
   var all = $$('.bar .sections a');
+  var top = function (a) { var h = a.closest('.has-sub'); return a.closest('.sub') ? h.querySelector(':scope > a') : a; };
   var here = function (a) { return a.pathname.replace(/index\.html$/, '') === location.pathname.replace(/index\.html$/, ''); };
   var secLinks = all.filter(function (a) { return a.hash && here(a) && document.getElementById(a.hash.slice(1)); });
   var pageLink = all.filter(function (a) { return !a.hash && here(a); })[0] || null;
@@ -142,12 +144,24 @@
     var mark = function () {
       var y = window.innerHeight * 0.4, on = null;
       secLinks.forEach(function (a) { var r = document.getElementById(a.hash.slice(1)).getBoundingClientRect(); if (r.top <= y && r.bottom > y) on = a; });
-      on = on || pageLink;
-      all.forEach(function (a) { if (a === on) a.setAttribute('aria-current', a === pageLink ? 'page' : 'true'); else a.removeAttribute('aria-current'); });
+      var lit = [];
+      if (on) { lit.push(on); if (top(on) !== on) lit.push(top(on)); } else if (pageLink) lit.push(pageLink);
+      all.forEach(function (a) { if (lit.indexOf(a) >= 0) a.setAttribute('aria-current', a === pageLink && !on ? 'page' : 'true'); else a.removeAttribute('aria-current'); });
     };
     window.addEventListener('scroll', mark, { passive: true });
     mark();
   }
+  // The submenu: hover and focus open it in CSS; the arrow opens and shuts it for touch and keyboard.
+  $$('.has-sub').forEach(function (h) {
+    var t = h.querySelector('.sub-toggle');
+    var set = function (open) { h.classList.toggle('open', open); h.classList.toggle('shut', !open && h.matches(':hover, :focus-within')); t.setAttribute('aria-expanded', String(open)); };
+    t.addEventListener('click', function () { set(!h.classList.contains('open')); });
+    h.addEventListener('mouseleave', function () { h.classList.remove('shut'); if (!h.contains(document.activeElement)) set(false); });
+    h.addEventListener('focusout', function (e) { if (!h.contains(e.relatedTarget)) { set(false); h.classList.remove('shut'); } });
+    h.addEventListener('keydown', function (e) { if (e.key === 'Escape') { set(false); t.focus(); } });
+    $$('.sub a', h).forEach(function (a) { a.addEventListener('click', function () { set(false); if (document.activeElement) document.activeElement.blur(); }); });
+    document.addEventListener('click', function (e) { if (!h.contains(e.target)) set(false); });
+  });
 
   // ---- The bar's action steps aside while another button to the same place is on the screen.
   var cta = bar && bar.querySelector('.bar-cta');
