@@ -7,7 +7,12 @@ unit testbatch;
   the remote left out), deleted, and a deletion git refuses; and the
   overview of what is left undone in a repository: clean, with changes,
   untracked files, a stash, a branch ahead of its upstream and one on
-  no remote, in the middle of a merge, and without a remote. }
+  no remote, in the middle of a merge, and without a remote; and who a
+  repository commits as, the owner of a remote's URL and the
+  repositories that commit under another e-mail than the others of
+  their owner; and maintenance: a remote's HEAD moved on the remote, a
+  worktree whose folder is gone and loose objects found, each done and
+  then no longer found, a remote that cannot be reached, and the jobs. }
 
 {$mode objfpc}{$H+}
 
@@ -25,6 +30,7 @@ type
     function GitOut(const ADir: string; const AArgs: array of string): string;
     procedure CommitFile(const AName, AText, AMessage: string);
     procedure MakeRepos;
+    procedure MakeClone;
     function FindBranch(const ARepo: TGittanGoneRepo; const AName: string): integer;
   protected
     procedure SetUp; override;
@@ -43,6 +49,18 @@ type
     procedure TestStatusOperation;
     procedure TestStatusNoRemote;
     procedure TestStatusJob;
+    procedure TestIdentity;
+    procedure TestIdentityLocal;
+    procedure TestRemoteOwner;
+    procedure TestSameIdentity;
+    procedure TestOddIdentities;
+    procedure TestIdentityJob;
+    procedure TestMaintSetHead;
+    procedure TestMaintWorktrees;
+    procedure TestMaintPack;
+    procedure TestMaintRemoteError;
+    procedure TestMaintNotARepo;
+    procedure TestMaintJobs;
   end;
 
 implementation
@@ -480,6 +498,324 @@ begin
     AssertEquals('missing', Job.Repos[1].Caption);
   finally
     Job.Free;
+  end;
+end;
+
+procedure TBatchTest.TestIdentity;
+var
+  Id: TGittanRepoIdentity;
+begin
+  MakeRepos;
+  { The test run's global config (another test may have changed its
+    name and e-mail), no signing. }
+  Id := RepoIdentity(FWork, 'Work');
+  AssertEquals('', Id.Error);
+  AssertEquals('Work', Id.Caption);
+  AssertEquals(GitOut(FWork, ['config', 'user.name']), Id.Name);
+  AssertTrue(Id.Email <> '');
+  AssertEquals(GitOut(FWork, ['config', 'user.email']), Id.Email);
+  AssertEquals('global', Id.EmailScope);
+  AssertFalse(Id.Sign);
+  AssertEquals('openpgp', Id.SignFormat);
+  { origin is a local path: no owner. }
+  AssertEquals('', Id.Owner);
+  AssertFalse(Id.Odd);
+  Id := RepoIdentity(IncludeTrailingPathDelimiter(FDir) + 'missing', '');
+  AssertTrue(Id.Error <> '');
+  AssertEquals('missing', Id.Caption);
+  Id := RepoIdentity(FDir, '');
+  AssertTrue(Id.Error <> '');
+end;
+
+procedure TBatchTest.TestIdentityLocal;
+var
+  Id: TGittanRepoIdentity;
+begin
+  ForceDirectories(FWork);
+  Git(FWork, ['init', '-q']);
+  Git(FWork, ['config', 'user.name', 'Me At Work']);
+  Git(FWork, ['config', 'user.email', 'me@work.example']);
+  Git(FWork, ['config', 'commit.gpgsign', 'yes']);
+  Git(FWork, ['config', 'gpg.format', 'ssh']);
+  Git(FWork, ['config', 'user.signingkey', '~/.ssh/id_ed25519.pub']);
+  Git(FWork, ['remote', 'add', 'upstream', 'git@github.com:acme/tool.git']);
+  Id := RepoIdentity(FWork, '');
+  AssertEquals('', Id.Error);
+  AssertEquals('Me At Work', Id.Name);
+  AssertEquals('me@work.example', Id.Email);
+  AssertEquals('local', Id.EmailScope);
+  AssertTrue(Id.Sign);
+  AssertEquals('ssh', Id.SignFormat);
+  AssertEquals('~/.ssh/id_ed25519.pub', Id.SigningKey);
+  { No origin: the first remote. }
+  AssertEquals('github.com/acme', Id.Owner);
+  Git(FWork, ['remote', 'add', 'origin', 'https://gitlab.com/group/sub/tool.git']);
+  AssertEquals('gitlab.com/group/sub', RepoIdentity(FWork, '').Owner);
+end;
+
+procedure TBatchTest.TestRemoteOwner;
+begin
+  AssertEquals('github.com/acme', RemoteOwner('git@github.com:acme/tool.git'));
+  AssertEquals('github.com/acme', RemoteOwner('https://github.com/acme/tool'));
+  AssertEquals('github.com/acme', RemoteOwner('ssh://git@GitHub.com:22/acme/tool.git'));
+  AssertEquals('gitlab.com/a/b', RemoteOwner('https://gitlab.com/a/b/tool.git'));
+  AssertEquals('example.com', RemoteOwner('git@example.com:tool.git'));
+  AssertEquals('', RemoteOwner('/srv/git/tool.git'));
+  AssertEquals('', RemoteOwner('file:///srv/git/tool.git'));
+  AssertEquals('', RemoteOwner(''));
+end;
+
+procedure TBatchTest.TestSameIdentity;
+var
+  A, B: TGittanRepoIdentity;
+begin
+  A := Default(TGittanRepoIdentity);
+  A.Name := 'Me';
+  A.Email := 'me@example.com';
+  A.SignFormat := 'openpgp';
+  B := A;
+  B.Email := 'ME@example.com';
+  B.SigningKey := 'unused while not signing';
+  AssertTrue(SameIdentity(A, B));
+  B.Sign := True;
+  AssertFalse(SameIdentity(A, B));
+  A.Sign := True;
+  AssertFalse(SameIdentity(A, B));
+  A.SigningKey := B.SigningKey;
+  AssertTrue(SameIdentity(A, B));
+  B.Name := 'Someone';
+  AssertFalse(SameIdentity(A, B));
+  B := A;
+  B.Error := 'gone';
+  AssertFalse(SameIdentity(A, B));
+end;
+
+procedure TBatchTest.TestOddIdentities;
+var
+  Ids: TGittanRepoIdentities;
+
+  procedure Add(const AOwner, AEmail: string; const AError: string = '');
+  begin
+    SetLength(Ids, Length(Ids) + 1);
+    Ids[High(Ids)] := Default(TGittanRepoIdentity);
+    Ids[High(Ids)].Owner := AOwner;
+    Ids[High(Ids)].Email := AEmail;
+    Ids[High(Ids)].Error := AError;
+    Ids[High(Ids)].Odd := True;
+  end;
+
+begin
+  Ids := nil;
+  { acme: two on the work address, one private, which stands out. }
+  Add('github.com/acme', 'me@acme.example');
+  Add('github.com/me', 'me@home.example');
+  Add('github.com/ACME', 'Me@Acme.example');
+  Add('github.com/acme', 'me@home.example');
+  { me: one address; no owner; could not be read. }
+  Add('github.com/me', 'me@home.example');
+  Add('', 'other@example.com');
+  Add('github.com/acme', 'x@y.example', 'broken');
+  { tie: one each, both marked. }
+  Add('gitlab.com/t', 'a@example.com');
+  Add('gitlab.com/t', 'b@example.com');
+  MarkOddIdentities(Ids);
+  AssertFalse(Ids[0].Odd);
+  AssertFalse(Ids[1].Odd);
+  AssertFalse(Ids[2].Odd);
+  AssertTrue(Ids[3].Odd);
+  AssertFalse(Ids[4].Odd);
+  AssertFalse(Ids[5].Odd);
+  AssertFalse(Ids[6].Odd);
+  AssertTrue(Ids[7].Odd);
+  AssertTrue(Ids[8].Odd);
+end;
+
+procedure TBatchTest.TestIdentityJob;
+var
+  Job: TGittanIdentityJob;
+begin
+  MakeRepos;
+  Job := TGittanIdentityJob.Create([FWork, IncludeTrailingPathDelimiter(FDir) + 'missing'],
+    ['Work', '']);
+  try
+    Job.Start;
+    Job.WaitFor;
+    AssertEquals(2, Job.Finished);
+    AssertEquals('Work', Job.Repos[0].Caption);
+    AssertEquals(GitOut(FWork, ['config', 'user.email']), Job.Repos[0].Email);
+    AssertTrue(Job.Repos[1].Error <> '');
+    AssertEquals('missing', Job.Repos[1].Caption);
+  finally
+    Job.Free;
+  end;
+end;
+
+{ A bare remote with main and trunk, HEAD on main, and FWork a clone of
+  it, whose origin/HEAD is then main. }
+procedure TBatchTest.MakeClone;
+var
+  Seed: string;
+begin
+  Seed := IncludeTrailingPathDelimiter(FDir) + 'seed';
+  ForceDirectories(Seed);
+  ForceDirectories(FRemote);
+  Git(FRemote, ['init', '-q', '--bare']);
+  Git(FRemote, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+  Git(Seed, ['init', '-q']);
+  Git(Seed, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+  with TStringList.Create do
+    try
+      Text := 'a';
+      SaveToFile(IncludeTrailingPathDelimiter(Seed) + 'a.txt');
+    finally
+      Free;
+    end;
+  Git(Seed, ['add', 'a.txt']);
+  Git(Seed, ['commit', '-q', '-m', 'first']);
+  Git(Seed, ['branch', 'trunk']);
+  Git(Seed, ['push', '-q', FRemote, 'main', 'trunk']);
+  Git(FDir, ['clone', '-q', FRemote, FWork]);
+end;
+
+function FindTask(const ARepo: TGittanMaintRepo; ATask: TGittanMaintTask): integer;
+begin
+  for Result := 0 to High(ARepo.Items) do
+    if ARepo.Items[Result].Task = ATask then
+      Exit;
+  Result := -1;
+end;
+
+procedure TBatchTest.TestMaintSetHead;
+var
+  Repo: TGittanMaintRepo;
+  i: integer;
+begin
+  MakeClone;
+  Repo := ScanMaintenance(FWork, '');
+  AssertEquals('', Repo.Error);
+  AssertEquals('', Repo.RemoteError);
+  AssertEquals('work', Repo.Caption);
+  AssertEquals(-1, FindTask(Repo, mtSetHead));
+  { The default branch is renamed on the forge. }
+  Git(FRemote, ['symbolic-ref', 'HEAD', 'refs/heads/trunk']);
+  Repo := ScanMaintenance(FWork, '');
+  i := FindTask(Repo, mtSetHead);
+  AssertTrue(i >= 0);
+  AssertEquals('origin', Repo.Items[i].Remote);
+  AssertEquals('main', Repo.Items[i].Have);
+  AssertEquals('trunk', Repo.Items[i].Want);
+  RunMaintTask(FWork, Repo.Items[i]);
+  AssertEquals('', Repo.Items[i].Error);
+  AssertTrue(Repo.Items[i].Done);
+  AssertEquals('refs/remotes/origin/trunk', GitOut(FWork, ['symbolic-ref',
+    'refs/remotes/origin/HEAD']));
+  AssertEquals(-1, FindTask(ScanMaintenance(FWork, ''), mtSetHead));
+  { Not set at all. }
+  Git(FWork, ['remote', 'set-head', 'origin', '--delete']);
+  i := FindTask(ScanMaintenance(FWork, ''), mtSetHead);
+  AssertTrue(i >= 0);
+  AssertEquals('', ScanMaintenance(FWork, '').Items[i].Have);
+  { Not asked without ACheckRemote. }
+  AssertEquals(-1, FindTask(ScanMaintenance(FWork, '', False), mtSetHead));
+end;
+
+procedure TBatchTest.TestMaintWorktrees;
+var
+  Repo: TGittanMaintRepo;
+  Tree: string;
+  i: integer;
+begin
+  MakeClone;
+  Tree := IncludeTrailingPathDelimiter(FDir) + 'tree';
+  Git(FWork, ['worktree', 'add', '-q', Tree, 'trunk']);
+  AssertEquals(-1, FindTask(ScanMaintenance(FWork, '', False), mtPruneWorktrees));
+  RemoveTree(Tree);
+  Repo := ScanMaintenance(FWork, '', False);
+  i := FindTask(Repo, mtPruneWorktrees);
+  AssertTrue(i >= 0);
+  AssertEquals(1, Length(Repo.Items[i].Worktrees));
+  AssertEquals('tree', ExtractFileName(ExcludeTrailingPathDelimiter(Repo.Items[i].Worktrees[0])));
+  RunMaintTask(FWork, Repo.Items[i]);
+  AssertTrue(Repo.Items[i].Done);
+  AssertEquals(-1, FindTask(ScanMaintenance(FWork, '', False), mtPruneWorktrees));
+end;
+
+procedure TBatchTest.TestMaintPack;
+var
+  Repo: TGittanMaintRepo;
+  i: integer;
+begin
+  ForceDirectories(FWork);
+  Git(FWork, ['init', '-q']);
+  CommitFile('a.txt', 'a', 'first');
+  CommitFile('b.txt', 'b', 'second');
+  { Under the limits: nothing to pack. }
+  AssertEquals(-1, FindTask(ScanMaintenance(FWork, '', False), mtPack));
+  Repo := ScanMaintenance(FWork, '', False, 1, 1);
+  i := FindTask(Repo, mtPack);
+  AssertTrue(i >= 0);
+  AssertTrue(Repo.Items[i].Loose > 0);
+  AssertTrue(Repo.Items[i].SizeKiB > 0);
+  RunMaintTask(FWork, Repo.Items[i]);
+  AssertEquals('', Repo.Items[i].Error);
+  AssertTrue(Repo.Items[i].Done);
+  AssertTrue(Repo.Items[i].Loose > 0);
+  AssertTrue(Repo.Items[i].AfterKiB > 0);
+  AssertEquals('count: 0', GitOut(FWork, ['count-objects', '-v']).Split([#10])[0]);
+end;
+
+procedure TBatchTest.TestMaintRemoteError;
+var
+  Repo: TGittanMaintRepo;
+begin
+  ForceDirectories(FWork);
+  Git(FWork, ['init', '-q']);
+  Git(FWork, ['remote', 'add', 'origin', IncludeTrailingPathDelimiter(FDir) + 'nowhere.git']);
+  Repo := ScanMaintenance(FWork, '');
+  AssertEquals('', Repo.Error);
+  AssertTrue(Repo.RemoteError <> '');
+  AssertEquals(0, Length(Repo.Items));
+end;
+
+procedure TBatchTest.TestMaintNotARepo;
+begin
+  AssertTrue(ScanMaintenance(IncludeTrailingPathDelimiter(FDir) + 'missing', '').Error <> '');
+  AssertTrue(ScanMaintenance(FDir, '').Error <> '');
+end;
+
+procedure TBatchTest.TestMaintJobs;
+var
+  Scan: TGittanMaintScanJob;
+  RunJob: TGittanMaintRunJob;
+  Refs: TGittanMaintRefs;
+  i: integer;
+begin
+  MakeClone;
+  Git(FRemote, ['symbolic-ref', 'HEAD', 'refs/heads/trunk']);
+  Scan := TGittanMaintScanJob.Create([FWork, IncludeTrailingPathDelimiter(FDir) + 'missing'],
+    ['Work', '']);
+  try
+    Scan.Start;
+    Scan.WaitFor;
+    AssertEquals(2, Scan.Finished);
+    AssertEquals('Work', Scan.Repos[0].Caption);
+    i := FindTask(Scan.Repos[0], mtSetHead);
+    AssertTrue(i >= 0);
+    AssertTrue(Scan.Repos[1].Error <> '');
+    SetLength(Refs, 1);
+    Refs[0].Path := FWork;
+    Refs[0].Item := Scan.Repos[0].Items[i];
+  finally
+    Scan.Free;
+  end;
+  RunJob := TGittanMaintRunJob.Create(Refs);
+  try
+    RunJob.Start;
+    RunJob.WaitFor;
+    AssertEquals(1, RunJob.Finished);
+    AssertTrue(RunJob.Refs[0].Item.Done);
+  finally
+    RunJob.Free;
   end;
 end;
 

@@ -29,6 +29,29 @@ unit gittan.batchpage;
   no remote with their counts, no remote at all, or why it could not be
   read; the clean ones are named on one line under the cards.
 
+  Then Identity, which reads and changes nothing either: Check has the
+  owner run TGittanIdentityJob (StartIdentity, SetIdentities), and the
+  repositories are shown by who they commit as, a card per name, e-mail
+  and signing alike (SameIdentity), most used first: its head names
+  them, a line says how commits are signed, and a row per repository
+  with its remote's owner opens it; a row is tagged when the e-mail is
+  set in the repository itself, and in the warning color when the other
+  repositories of its owner commit under another e-mail
+  (MarkOddIdentities). A card for a repository that could not be read.
+
+  Then Maintenance: Scan (OnMaintScan) has the owner run
+  TGittanMaintScanJob over the picked repositories (StartMaintScan,
+  SetMaintScan): a card per repository that needs something, a row per
+  task with a check box, all picked as they come: the remote's default
+  branch to follow here (only the local refs/remotes/<remote>/HEAD
+  changes), the worktrees whose folder is gone
+  to forget, the objects to pack, with what was found dim after it; the
+  remote that could not be asked in the warning color. Run
+  (OnMaintRun) has the owner run TGittanMaintRunJob over the tasks
+  picked (PickedMaintRefs, SetMaintRunning, ApplyMaintRun): a task done
+  is tagged done (packing with the size after), one that failed with
+  git's reason.
+
   Then Gone branches, the branches deleted on the remote. Scan (OnScan) has the owner run TGittanGoneScanJob over the
   picked repositories (ChosenRepos) and give what it found as it comes
   (StartScan, SetScan): a card per repository with something to say,
@@ -58,7 +81,9 @@ const
   {** The operations, as Operation counts them. }
   BatchOverview = 0;
   BatchGone = 1;
-  BatchOperationCount = 2;
+  BatchIdentity = 2;
+  BatchMaintenance = 3;
+  BatchOperationCount = 4;
 
 type
   {** A repository to open, by its root. }
@@ -81,6 +106,19 @@ type
     FStatus: TGittanRepoStatuses;
     FStatusDone, FStatusTotal: integer;
     FChecking: boolean;
+    { What the identity check read, the first FIdsDone of FIdsTotal,
+      MarkOddIdentities applied. }
+    FIds: TGittanRepoIdentities;
+    FIdsDone, FIdsTotal: integer;
+    FReadingIds: boolean;
+    { What the maintenance scan found, the first FMaintDone of
+      FMaintTotal, FMaintSeen of them had their tasks picked; the tasks
+      picked, as MaintKey. }
+    FMaint: TGittanMaintRepos;
+    FMaintDone, FMaintTotal, FMaintSeen: integer;
+    FMaintScanning, FMaintScanned, FMaintRunning: boolean;
+    FMaintPicked: TStringList;
+    FOnMaintScan, FOnMaintRun: TNotifyEvent;
     { Whether the list is unfolded, and the operation shown. }
     FReposOpen: boolean;
     FOperation: integer;
@@ -132,6 +170,15 @@ type
     function WrappedHeight(const AText: string; AWidth: integer): integer;
     procedure PaintStatusCard(var Y: integer; AIndex, ALeft, ARight: integer);
     procedure PaintStatus(var Y: integer; ALeft, ARight: integer);
+    procedure PaintCheckPill(var Y: integer; ALeft: integer; ARunning: boolean;
+      ADone, ATotal: integer; const ADetail: string);
+    procedure PaintIdentityCard(var Y: integer; const AMembers: array of integer;
+      ALeft, ARight: integer);
+    procedure PaintIdentity(var Y: integer; ALeft, ARight: integer);
+    function MaintCount(out ARepos: integer): integer;
+    procedure ToggleMaint(ARepo, AItem: integer);
+    procedure PaintMaintCard(var Y: integer; AIndex, ALeft, ARight: integer);
+    procedure PaintMaint(var Y: integer; ALeft, ARight: integer);
     procedure PaintContent;
     procedure Layout;
   protected
@@ -165,7 +212,7 @@ type
     function PickedRefs: TGittanBranchRefs;
     {** How many of PickedRefs are not merged. }
     function PickedNotMerged: integer;
-    {** Whether a scan or a deletion runs. }
+    {** Whether a scan, a deletion or maintenance runs. }
     function Busy: boolean;
     {** An overview of ATotal repositories starts: what the last one read
       goes. }
@@ -175,7 +222,33 @@ type
     procedure SetStatus(const ARepos: TGittanRepoStatuses; ADone: integer; ARunning: boolean);
     {** Whether the overview runs. }
     property Checking: boolean read FChecking;
-    {** The operation shown, BatchOverview (the default) or BatchGone. }
+    {** An identity check of ATotal repositories starts: what the last
+      one read goes. }
+    procedure StartIdentity(ATotal: integer);
+    {** What the identity check read: the first ADone of ARepos, and
+      whether it still runs. }
+    procedure SetIdentities(const ARepos: TGittanRepoIdentities; ADone: integer;
+      ARunning: boolean);
+    {** Whether the identity check runs. }
+    property ReadingIdentities: boolean read FReadingIds;
+    {** A maintenance scan of ATotal repositories starts: what the last
+      one found goes. }
+    procedure StartMaintScan(ATotal: integer);
+    {** What the maintenance scan found: the first ADone of ARepos, and
+      whether it still runs. }
+    procedure SetMaintScan(const ARepos: TGittanMaintRepos; ADone: integer; ARunning: boolean);
+    {** Whether the tasks picked are being run. }
+    procedure SetMaintRunning(ARunning: boolean);
+    {** What the run did to the first ADone of ARefs. }
+    procedure ApplyMaintRun(const ARefs: TGittanMaintRefs; ADone: integer);
+    {** The tasks picked to run, those done already left out. }
+    function PickedMaintRefs: TGittanMaintRefs;
+    {** A click on Maintenance's Scan: the owner runs the scan. }
+    property OnMaintScan: TNotifyEvent read FOnMaintScan write FOnMaintScan;
+    {** A click on Run: the owner runs PickedMaintRefs. }
+    property OnMaintRun: TNotifyEvent read FOnMaintRun write FOnMaintRun;
+    {** The operation shown, BatchOverview (the default), BatchGone or
+      BatchIdentity. }
     property Operation: integer read FOperation write SetOperation;
     {** A click on an operation's pill changed Operation. }
     property OnOperationChange: TNotifyEvent read FOnOperationChange write FOnOperationChange;
@@ -192,16 +265,18 @@ type
     property OnScan: TNotifyEvent read FOnScan write FOnScan;
     {** A click on Delete: the owner asks and deletes PickedRefs. }
     property OnDelete: TNotifyEvent read FOnDelete write FOnDelete;
-    {** A click on Check: the owner reads the picked repositories. }
+    {** A click on Check, in the overview or the identity check: the
+      owner reads the picked repositories for the operation shown. }
     property OnCheck: TNotifyEvent read FOnCheck write FOnCheck;
-    {** A click on a card's head in the overview: open that repository. }
+    {** A click on a card's head in the overview, or a repository's row
+      in the identity check: open that repository. }
     property OnOpen: TGittanBatchOpenEvent read FOnOpen write FOnOpen;
   end;
 
 implementation
 
 uses
-  Math, LCLIntf, LCLType, gittan.forgepage, gittan.textfit, gittan.theme;
+  Math, LCLIntf, LCLType, gittan.forgepage, gittan.textfit, gittan.theme, gittan.repoinfo;
 
 resourcestring
   rsTitle = 'Batch';
@@ -262,6 +337,46 @@ resourcestring
   rsBranchCount = '%s (%d)';
   rsAllDone = 'Nothing is left undone in the repositories checked.';
   rsCleanIn = 'Nothing left undone in %s.';
+  rsOpIdentity = 'Identity';
+  rsIdentityAbout = 'Who each repository commits as, and whether it signs. A repository is ' +
+    'marked when the others of the same owner commit under another e-mail.';
+  rsIdOne = 'One identity';
+  rsIdOneInAll = 'One identity in all %d';
+  rsIdMany = '%d identities in %d repositories';
+  rsIdMarked = ', %d marked';
+  rsNoIdentity = 'No name or e-mail set';
+  rsNoEmail = '%s, no e-mail set';
+  rsNoName = '<%s>, no name set';
+  rsSigns = 'Signs commits with the %s key %s';
+  rsSignsDefault = 'Signs commits with the default %s key';
+  rsNoSign = 'Does not sign commits';
+  rsSetHere = 'set here';
+  rsOdd = 'unlike the rest of %s';
+  rsNoOwner = 'no remote on a host';
+  rsOpMaint = 'Maintenance';
+  rsMaintAbout = 'Tidies up after things that changed: a default branch renamed on the ' +
+    'remote, worktrees whose folder you deleted, and repositories worth compressing. Scan ' +
+    'checks each remote; nothing changes until you press Run.';
+  rsSetHead = 'Update default branch: %s → %s';
+  rsSetHeadNew = 'Set default branch: %s';
+  rsHeadRenamed = 'renamed on %s';
+  rsHeadFrom = 'as on %s';
+  rsPruneOne = 'Clean up 1 deleted worktree';
+  rsPruneMany = 'Clean up %d deleted worktrees';
+  rsPack = 'Compress the repository';
+  rsPackDetail = '%s loose objects, %s';
+  rsMaintDone = 'done';
+  rsPackedTo = 'done, now %s';
+  rsRemoteFailed = 'Could not ask the remote: %s';
+  rsTaskOne = '1 task in 1 repository';
+  rsTasksOneRepo = '%d tasks in 1 repository';
+  rsTasksManyRepos = '%d tasks in %d repositories';
+  rsNothingToDo = 'Nothing to do in %s.';
+  rsAllTidy = 'Nothing to do in the repositories scanned.';
+  rsRunOne = 'Run 1 task';
+  rsRunMany = 'Run %d tasks';
+  rsRunNone = 'Pick tasks to run';
+  rsRunning = 'Running…';
 
 const
   RowLink = 'r:';
@@ -276,6 +391,10 @@ const
   UnfoldLink = 'unfold';
   OperationLink = 'op:';
   OpenLink = 'o:';
+  IdOpenLink = 'io:';
+  MaintScanLink = 'mscan';
+  MaintRunLink = 'mrun';
+  MaintLink = 'mt:';
   Pad = 24;
   Gap = 12;
   TitleFontSize = 20;
@@ -292,6 +411,12 @@ const
   TagPadX = 6;
   TagPadY = 2;
   TagRadius = 6;
+
+{ A task's key among the picked ones: its repository and the task. }
+function MaintKey(const APath: string; ATask: TGittanMaintTask): string;
+begin
+  Result := APath + #0 + IntToStr(Ord(ATask));
+end;
 
 { A branch's key among the picked ones: its repository and its name. }
 function PickKey(const APath, ABranch: string): string;
@@ -322,11 +447,16 @@ begin
   FPicked.CaseSensitive := True;
   FPicked.Sorted := True;
   FPicked.Duplicates := dupIgnore;
+  FMaintPicked := TStringList.Create;
+  FMaintPicked.CaseSensitive := True;
+  FMaintPicked.Sorted := True;
+  FMaintPicked.Duplicates := dupIgnore;
   SetTheme(False);
 end;
 
 destructor TGittanBatchPage.Destroy;
 begin
+  FMaintPicked.Free;
   FPicked.Free;
   FChosen.Free;
   inherited Destroy;
@@ -589,7 +719,7 @@ end;
 
 function TGittanBatchPage.Busy: boolean;
 begin
-  Result := FScanning or FDeleting;
+  Result := FScanning or FDeleting or FMaintScanning or FMaintRunning;
 end;
 
 { The branches of a card that can still be picked: those not deleted. }
@@ -1432,9 +1562,8 @@ end;
   repositories on one line. }
 procedure TGittanBatchPage.PaintStatus(var Y: integer; ALeft, ARight: integer);
 var
-  TextH, i, Cards: integer;
-  Detail, ButtonText, Clean: string;
-  R: TRect;
+  i, Cards: integer;
+  Detail, Clean: string;
 begin
   Cards := 0;
   for i := 0 to FStatusDone - 1 do
@@ -1446,32 +1575,10 @@ begin
       Detail := Format(rsNeedOne, [FStatusDone])
     else
       Detail := Format(rsNeedMany, [Cards, FStatusDone]);
-  FC.Font := Font;
-  TextH := FC.TextHeight('Xg');
   PaintText(Y, rsStatusAbout, FDim, ALeft, ARight);
   Inc(Y, Px(Gap));
 
-  i := ChosenCount;
-  if i = 0 then
-    ButtonText := rsCheckNone
-  else if i = 1 then
-    ButtonText := rsCheckOne
-  else
-    ButtonText := Format(rsCheckMany, [i]);
-  Inc(Y, Px(PillPadY));
-  R := PaintPill(ALeft, Y, ButtonText, CheckLink, False, (i > 0) and not FChecking);
-  if FChecking then
-  begin
-    FC.Font.Color := FDim;
-    FC.TextOut(R.Right + Px(Gap), Y, Format(rsChecking, [Min(FStatusDone + 1, FStatusTotal),
-      FStatusTotal]));
-  end
-  else if Detail <> '' then
-  begin
-    FC.Font.Color := FDim;
-    FC.TextOut(R.Right + Px(Gap), Y, Detail);
-  end;
-  Inc(Y, TextH + Px(PillPadY) + Px(Gap));
+  PaintCheckPill(Y, ALeft, FChecking, FStatusDone, FStatusTotal, Detail);
 
   Clean := '';
   for i := 0 to FStatusDone - 1 do
@@ -1492,6 +1599,633 @@ begin
   begin
     PaintText(Y, Format(rsCleanIn, [Clean]), FDim, ALeft, ARight);
     Inc(Y, Px(Gap));
+  end;
+end;
+
+{ Check, for the picked repositories, with the progress after it while
+  ARunning, else ADetail. }
+procedure TGittanBatchPage.PaintCheckPill(var Y: integer; ALeft: integer; ARunning: boolean;
+  ADone, ATotal: integer; const ADetail: string);
+var
+  i, TextH: integer;
+  ButtonText: string;
+  R: TRect;
+begin
+  FC.Font := Font;
+  TextH := FC.TextHeight('Xg');
+  i := ChosenCount;
+  if i = 0 then
+    ButtonText := rsCheckNone
+  else if i = 1 then
+    ButtonText := rsCheckOne
+  else
+    ButtonText := Format(rsCheckMany, [i]);
+  Inc(Y, Px(PillPadY));
+  R := PaintPill(ALeft, Y, ButtonText, CheckLink, False, (i > 0) and not ARunning);
+  FC.Font.Color := FDim;
+  if ARunning then
+    FC.TextOut(R.Right + Px(Gap), Y, Format(rsChecking, [Min(ADone + 1, ATotal), ATotal]))
+  else if ADetail <> '' then
+    FC.TextOut(R.Right + Px(Gap), Y, ADetail);
+  Inc(Y, TextH + Px(PillPadY) + Px(Gap));
+end;
+
+{ ---------------------------------------------------------------------------
+  Identity
+  --------------------------------------------------------------------------- }
+
+procedure TGittanBatchPage.StartIdentity(ATotal: integer);
+begin
+  FIds := nil;
+  FIdsDone := 0;
+  FIdsTotal := ATotal;
+  FReadingIds := True;
+  FHot := -1;
+  Layout;
+  Invalidate;
+end;
+
+procedure TGittanBatchPage.SetIdentities(const ARepos: TGittanRepoIdentities; ADone: integer;
+  ARunning: boolean);
+begin
+  ADone := Min(ADone, Length(ARepos));
+  { Only what is done: the thread may still write the rest. }
+  FIds := Copy(ARepos, 0, ADone);
+  MarkOddIdentities(FIds);
+  FIdsDone := ADone;
+  FReadingIds := ARunning;
+  Layout;
+  Invalidate;
+end;
+
+{ A signing key as it is shown: a file's name of a path, the start and
+  the end of a key given in full, else as it is. }
+function KeyText(const AKey: string): string;
+var
+  Key, Rest: string;
+  p: integer;
+begin
+  Key := Trim(AKey);
+  if Copy(Key, 1, 5) = 'key::' then
+    Delete(Key, 1, 5);
+  if (Pos('/', Key) > 0) or (Pos('\', Key) > 0) then
+    Exit(ExtractFileName(StringReplace(Key, '\', '/', [rfReplaceAll])));
+  p := Pos(' ', Key);
+  if (p > 0) and (Length(Key) > 32) then
+  begin
+    Rest := Trim(Copy(Key, p + 1, MaxInt));
+    Exit(Copy(Key, 1, p - 1) + ' …' + Copy(Rest, Max(1, Length(Rest) - 7), 8));
+  end;
+  Result := Key;
+end;
+
+{ A card of the repositories in AMembers, which commit as the same: the
+  name and the e-mail in bold, how commits are signed, then a row per
+  repository, which opens it, with its remote's owner and its tags. One
+  that could not be read has a card of its own with git's reason. }
+procedure TGittanBatchPage.PaintIdentityCard(var Y: integer; const AMembers: array of integer;
+  ALeft, ARight: integer);
+var
+  Id: TGittanRepoIdentity;
+  TextH, RowH, H, X, RowTop, m, TagLeft: integer;
+  R: TRect;
+  Head, Line, Where: string;
+  HeadColor, LineColor: TColor;
+begin
+  Id := FIds[AMembers[0]];
+  FC.Font := Font;
+  TextH := FC.TextHeight('Xg');
+  RowH := TextH + 2 * Px(RowPadY);
+  if Id.Error <> '' then
+  begin
+    Head := Id.Caption;
+    HeadColor := FText;
+    Line := FirstLine(Id.Error);
+    LineColor := FErrorColor;
+  end
+  else
+  begin
+    HeadColor := FText;
+    if (Id.Name = '') and (Id.Email = '') then
+    begin
+      Head := rsNoIdentity;
+      HeadColor := FWarn;
+    end
+    else if Id.Email = '' then
+    begin
+      Head := Format(rsNoEmail, [Id.Name]);
+      HeadColor := FWarn;
+    end
+    else if Id.Name = '' then
+    begin
+      Head := Format(rsNoName, [Id.Email]);
+      HeadColor := FWarn;
+    end
+    else
+      Head := Id.Name + ' <' + Id.Email + '>';
+    if not Id.Sign then
+      Line := rsNoSign
+    else if Id.SigningKey = '' then
+      Line := Format(rsSignsDefault, [Id.SignFormat])
+    else
+      Line := Format(rsSigns, [Id.SignFormat, KeyText(Id.SigningKey)]);
+    LineColor := FDim;
+  end;
+
+  H := 2 * Px(CardPadY) + 2 * TextH + Px(4);
+  if Id.Error = '' then
+    Inc(H, Px(4) + Length(AMembers) * RowH);
+  R := Rect(ALeft, Y, ARight, Y + H);
+  FC.Pen.Style := psClear;
+  FC.Brush.Style := bsSolid;
+  FC.Brush.Color := FCard;
+  FC.RoundRect(R, Px(CardRadius), Px(CardRadius));
+  FC.Pen.Style := psSolid;
+  FC.Brush.Style := bsClear;
+
+  RowTop := Y + Px(CardPadY);
+  X := ALeft + Px(CardPadX);
+  FC.Font := Font;
+  FC.Font.Style := [fsBold];
+  FC.Font.Color := HeadColor;
+  FC.TextOut(X, RowTop, FitTextLeft(FC, Head, ARight - Px(CardPadX) - X));
+  Inc(RowTop, TextH + Px(4));
+  FC.Font := Font;
+  FC.Font.Color := LineColor;
+  FC.TextOut(X, RowTop, FitTextLeft(FC, Line, ARight - Px(CardPadX) - X));
+  Inc(RowTop, TextH);
+
+  if Id.Error = '' then
+  begin
+    Inc(RowTop, Px(4));
+    for m := 0 to High(AMembers) do
+    begin
+      Id := FIds[AMembers[m]];
+      R := Rect(ALeft + Px(CardPadX) div 2, RowTop, ARight - Px(CardPadX) div 2, RowTop + RowH);
+      AddLink(R, IdOpenLink + IntToStr(AMembers[m]));
+      if FHot = High(FLinkRects) then
+      begin
+        FC.Pen.Style := psClear;
+        FC.Brush.Style := bsSolid;
+        FC.Brush.Color := FHover;
+        FC.RoundRect(R, Px(8), Px(8));
+        FC.Pen.Style := psSolid;
+        FC.Brush.Style := bsClear;
+      end;
+      TagLeft := ARight - Px(CardPadX);
+      if Id.Odd then
+        TagLeft := PaintTag(TagLeft, RowTop + Px(RowPadY), Format(rsOdd, [Id.Owner]), FWarn) -
+          Px(6);
+      if (Id.EmailScope = 'local') or (Id.EmailScope = 'worktree') then
+        TagLeft := PaintTag(TagLeft, RowTop + Px(RowPadY), rsSetHere, FDim) - Px(6);
+      X := ALeft + Px(CardPadX) + Px(Indent);
+      FC.Font := Font;
+      FC.Brush.Style := bsClear;
+      FC.Font.Color := FText;
+      FC.TextOut(X, RowTop + Px(RowPadY), FitTextLeft(FC, Id.Caption, TagLeft - Px(Gap) - X));
+      Inc(X, FC.TextWidth(Id.Caption) + Px(Gap));
+      Where := Id.Owner;
+      if Where = '' then
+        Where := rsNoOwner;
+      FC.Font.Color := FDim;
+      if X < TagLeft - 3 * Px(Gap) then
+        FC.TextOut(X, RowTop + Px(RowPadY), FitTextLeft(FC, Where, TagLeft - Px(Gap) - X));
+      Inc(RowTop, RowH);
+    end;
+  end;
+  Inc(Y, H + Px(CardGap));
+end;
+
+{ The identity check: what it does, Check with the progress after it or
+  how many identities once done, then a card per identity, the most
+  used first, and one per repository that could not be read. }
+procedure TGittanBatchPage.PaintIdentity(var Y: integer; ALeft, ARight: integer);
+var
+  Groups: array of array of integer;
+  Errors: array of integer;
+  i, g, j, Marked: integer;
+  Detail: string;
+  Swap: array of integer;
+begin
+  Groups := nil;
+  Errors := nil;
+  Marked := 0;
+  for i := 0 to FIdsDone - 1 do
+  begin
+    if FIds[i].Odd then
+      Inc(Marked);
+    if FIds[i].Error <> '' then
+    begin
+      SetLength(Errors, Length(Errors) + 1);
+      Errors[High(Errors)] := i;
+      Continue;
+    end;
+    g := 0;
+    while (g <= High(Groups)) and not SameIdentity(FIds[Groups[g][0]], FIds[i]) do
+      Inc(g);
+    if g > High(Groups) then
+    begin
+      SetLength(Groups, Length(Groups) + 1);
+      Groups[g] := nil;
+    end;
+    SetLength(Groups[g], Length(Groups[g]) + 1);
+    Groups[g][High(Groups[g])] := i;
+  end;
+  { The most used first, in the order they came otherwise. }
+  for g := 1 to High(Groups) do
+  begin
+    j := g;
+    while (j > 0) and (Length(Groups[j]) > Length(Groups[j - 1])) do
+    begin
+      Swap := Groups[j];
+      Groups[j] := Groups[j - 1];
+      Groups[j - 1] := Swap;
+      Dec(j);
+    end;
+  end;
+
+  Detail := '';
+  if (FIdsDone > 0) and not FReadingIds and (Length(Groups) > 0) then
+  begin
+    if (Length(Groups) = 1) and (FIdsDone = 1) then
+      Detail := rsIdOne
+    else if Length(Groups) = 1 then
+      Detail := Format(rsIdOneInAll, [Length(Groups[0])])
+    else
+      Detail := Format(rsIdMany, [Length(Groups), FIdsDone - Length(Errors)]);
+    if Marked > 0 then
+      Detail := Detail + Format(rsIdMarked, [Marked]);
+  end;
+  PaintText(Y, rsIdentityAbout, FDim, ALeft, ARight);
+  Inc(Y, Px(Gap));
+  PaintCheckPill(Y, ALeft, FReadingIds, FIdsDone, FIdsTotal, Detail);
+  for g := 0 to High(Groups) do
+    PaintIdentityCard(Y, Groups[g], ALeft, ARight);
+  for i := 0 to High(Errors) do
+    PaintIdentityCard(Y, [Errors[i]], ALeft, ARight);
+end;
+
+{ ---------------------------------------------------------------------------
+  Maintenance
+  --------------------------------------------------------------------------- }
+
+procedure TGittanBatchPage.StartMaintScan(ATotal: integer);
+begin
+  FMaint := nil;
+  FMaintDone := 0;
+  FMaintTotal := ATotal;
+  FMaintSeen := 0;
+  FMaintPicked.Clear;
+  FMaintScanning := True;
+  FMaintScanned := True;
+  FHot := -1;
+  Layout;
+  Invalidate;
+end;
+
+procedure TGittanBatchPage.SetMaintScan(const ARepos: TGittanMaintRepos; ADone: integer;
+  ARunning: boolean);
+var
+  i, j: integer;
+begin
+  ADone := Min(ADone, Length(ARepos));
+  { Only what is done: the thread may still write the rest. }
+  FMaint := Copy(ARepos, 0, ADone);
+  FMaintDone := ADone;
+  FMaintScanning := ARunning;
+  { Every task of what came is picked; what the user dropped since
+    stays dropped. }
+  for i := FMaintSeen to FMaintDone - 1 do
+    for j := 0 to High(FMaint[i].Items) do
+      FMaintPicked.Add(MaintKey(FMaint[i].Path, FMaint[i].Items[j].Task));
+  FMaintSeen := Max(FMaintSeen, FMaintDone);
+  Layout;
+  Invalidate;
+end;
+
+procedure TGittanBatchPage.SetMaintRunning(ARunning: boolean);
+begin
+  FMaintRunning := ARunning;
+  Layout;
+  Invalidate;
+end;
+
+procedure TGittanBatchPage.ApplyMaintRun(const ARefs: TGittanMaintRefs; ADone: integer);
+var
+  i, r, t, k: integer;
+begin
+  for i := 0 to Min(ADone, Length(ARefs)) - 1 do
+    for r := 0 to High(FMaint) do
+      if FMaint[r].Path = ARefs[i].Path then
+        for t := 0 to High(FMaint[r].Items) do
+          if FMaint[r].Items[t].Task = ARefs[i].Item.Task then
+          begin
+            FMaint[r].Items[t] := ARefs[i].Item;
+            k := FMaintPicked.IndexOf(MaintKey(ARefs[i].Path, ARefs[i].Item.Task));
+            if ARefs[i].Item.Done and (k >= 0) then
+              FMaintPicked.Delete(k);
+          end;
+  Layout;
+  Invalidate;
+end;
+
+function TGittanBatchPage.PickedMaintRefs: TGittanMaintRefs;
+var
+  r, t, n: integer;
+begin
+  Result := nil;
+  n := 0;
+  for r := 0 to High(FMaint) do
+    for t := 0 to High(FMaint[r].Items) do
+      if not FMaint[r].Items[t].Done and
+        (FMaintPicked.IndexOf(MaintKey(FMaint[r].Path, FMaint[r].Items[t].Task)) >= 0) then
+      begin
+        SetLength(Result, n + 1);
+        Result[n].Path := FMaint[r].Path;
+        Result[n].Item := FMaint[r].Items[t];
+        Inc(n);
+      end;
+end;
+
+{ The tasks found, and in how many repositories. }
+function TGittanBatchPage.MaintCount(out ARepos: integer): integer;
+var
+  r: integer;
+begin
+  Result := 0;
+  ARepos := 0;
+  for r := 0 to FMaintDone - 1 do
+    if Length(FMaint[r].Items) > 0 then
+    begin
+      Inc(Result, Length(FMaint[r].Items));
+      Inc(ARepos);
+    end;
+end;
+
+procedure TGittanBatchPage.ToggleMaint(ARepo, AItem: integer);
+var
+  Key: string;
+  k: integer;
+begin
+  if (ARepo < 0) or (ARepo >= FMaintDone) or (AItem < 0) or
+    (AItem > High(FMaint[ARepo].Items)) or FMaint[ARepo].Items[AItem].Done or Busy then
+    Exit;
+  Key := MaintKey(FMaint[ARepo].Path, FMaint[ARepo].Items[AItem].Task);
+  k := FMaintPicked.IndexOf(Key);
+  if k >= 0 then
+    FMaintPicked.Delete(k)
+  else
+    FMaintPicked.Add(Key);
+  Layout;
+  Invalidate;
+end;
+
+{ A repository's card: its name and path, the remote's failure in the
+  warning color or an error in the error color, then a row per task
+  with its box, what it does, what was found dim, and once it ran a tag
+  at the right. }
+procedure TGittanBatchPage.PaintMaintCard(var Y: integer; AIndex, ALeft, ARight: integer);
+var
+  M: TGittanMaintRepo;
+  It: TGittanMaintItem;
+  TextH, RowH, S, H, X, RowTop, t, TagLeft, i: integer;
+  R: TRect;
+  Notes: array of string;
+  NoteColors: array of TColor;
+  Title, Detail, TagText: string;
+  TagColor: TColor;
+  CanPick: boolean;
+
+  procedure AddNote(const AText: string; AColor: TColor);
+  begin
+    SetLength(Notes, Length(Notes) + 1);
+    SetLength(NoteColors, Length(NoteColors) + 1);
+    Notes[High(Notes)] := AText;
+    NoteColors[High(NoteColors)] := AColor;
+  end;
+
+begin
+  M := FMaint[AIndex];
+  Notes := nil;
+  NoteColors := nil;
+  if M.Error <> '' then
+    AddNote(FirstLine(M.Error), FErrorColor);
+  if M.RemoteError <> '' then
+    AddNote(Format(rsRemoteFailed, [FirstLine(M.RemoteError)]), FWarn);
+  FC.Font := Font;
+  TextH := FC.TextHeight('Xg');
+  RowH := TextH + 2 * Px(RowPadY);
+  S := Max(Px(12), TextH - Px(2));
+  H := 2 * Px(CardPadY) + TextH + Length(Notes) * (TextH + Px(4)) + Length(M.Items) * RowH;
+  if Length(M.Items) > 0 then
+    Inc(H, Px(4));
+  R := Rect(ALeft, Y, ARight, Y + H);
+  FC.Pen.Style := psClear;
+  FC.Brush.Style := bsSolid;
+  FC.Brush.Color := FCard;
+  FC.RoundRect(R, Px(CardRadius), Px(CardRadius));
+  FC.Pen.Style := psSolid;
+  FC.Brush.Style := bsClear;
+
+  RowTop := Y + Px(CardPadY);
+  X := ALeft + Px(CardPadX);
+  FC.Font := Font;
+  FC.Font.Style := [fsBold];
+  FC.Font.Color := FText;
+  FC.TextOut(X, RowTop, FitTextLeft(FC, M.Caption, ARight - Px(CardPadX) - X));
+  Inc(X, FC.TextWidth(M.Caption) + Px(Gap));
+  FC.Font.Style := [];
+  FC.Font.Color := FDim;
+  if X < ARight - Px(CardPadX) - Px(Gap) then
+    FC.TextOut(X, RowTop, FitTextLeft(FC, ShortPath(M.Path), ARight - Px(CardPadX) - X));
+  Inc(RowTop, TextH);
+  for t := 0 to High(Notes) do
+  begin
+    Inc(RowTop, Px(4));
+    FC.Font.Color := NoteColors[t];
+    FC.TextOut(ALeft + Px(CardPadX), RowTop, FitTextLeft(FC, Notes[t],
+      ARight - ALeft - 2 * Px(CardPadX)));
+    Inc(RowTop, TextH);
+  end;
+  if Length(M.Items) > 0 then
+    Inc(RowTop, Px(4));
+
+  for t := 0 to High(M.Items) do
+  begin
+    It := M.Items[t];
+    case It.Task of
+      mtSetHead:
+      begin
+        if It.Have = '' then
+        begin
+          Title := Format(rsSetHeadNew, [It.Want]);
+          Detail := Format(rsHeadFrom, [It.Remote]);
+        end
+        else
+        begin
+          Title := Format(rsSetHead, [It.Have, It.Want]);
+          Detail := Format(rsHeadRenamed, [It.Remote]);
+        end;
+      end;
+      mtPruneWorktrees:
+      begin
+        if Length(It.Worktrees) = 1 then
+          Title := rsPruneOne
+        else
+          Title := Format(rsPruneMany, [Length(It.Worktrees)]);
+        Detail := '';
+        for i := 0 to High(It.Worktrees) do
+        begin
+          if Detail <> '' then
+            Detail := Detail + ', ';
+          Detail := Detail + ShortPath(It.Worktrees[i]);
+        end;
+      end;
+      else
+      begin
+        Title := rsPack;
+        Detail := Format(rsPackDetail, [GroupDigits(It.Loose), FormatKiB(It.SizeKiB)]);
+      end;
+    end;
+    R := Rect(ALeft + Px(CardPadX) div 2, RowTop, ARight - Px(CardPadX) div 2, RowTop + RowH);
+    CanPick := not Busy and not It.Done;
+    if CanPick then
+    begin
+      AddLink(R, MaintLink + IntToStr(AIndex) + ':' + IntToStr(t));
+      if FHot = High(FLinkRects) then
+      begin
+        FC.Pen.Style := psClear;
+        FC.Brush.Style := bsSolid;
+        FC.Brush.Color := FHover;
+        FC.RoundRect(R, Px(8), Px(8));
+        FC.Pen.Style := psSolid;
+        FC.Brush.Style := bsClear;
+      end;
+    end;
+    X := ALeft + Px(CardPadX) + Px(Indent);
+    if It.Done then
+      PaintBox(X, RowTop + (RowH - S) div 2, S, 0, False)
+    else
+      PaintBox(X, RowTop + (RowH - S) div 2, S,
+        Ord(FMaintPicked.IndexOf(MaintKey(M.Path, It.Task)) >= 0), CanPick);
+    Inc(X, S + Px(BoxGap));
+    TagLeft := ARight - Px(CardPadX);
+    TagText := '';
+    if It.Done then
+    begin
+      if It.Task = mtPack then
+        TagText := Format(rsPackedTo, [FormatKiB(It.AfterKiB)])
+      else
+        TagText := rsMaintDone;
+      TagColor := FOk;
+    end
+    else if It.Error <> '' then
+    begin
+      TagText := It.Error;
+      TagColor := FErrorColor;
+    end;
+    if TagText <> '' then
+    begin
+      FC.Font := Font;
+      { A long reason from git is cut to half the row. }
+      TagText := FitTextLeft(FC, TagText, (ARight - X) div 2);
+      TagLeft := PaintTag(TagLeft, RowTop + Px(RowPadY), TagText, TagColor);
+    end;
+    FC.Font := Font;
+    FC.Brush.Style := bsClear;
+    if It.Done then
+      FC.Font.Color := FDim
+    else
+      FC.Font.Color := FText;
+    FC.TextOut(X, RowTop + Px(RowPadY), FitTextLeft(FC, Title, TagLeft - Px(Gap) - X));
+    Inc(X, FC.TextWidth(Title) + Px(Gap));
+    FC.Font.Color := FDim;
+    if X < TagLeft - 3 * Px(Gap) then
+      FC.TextOut(X, RowTop + Px(RowPadY), FitTextLeft(FC, Detail, TagLeft - Px(Gap) - X));
+    Inc(RowTop, RowH);
+  end;
+  Inc(Y, H + Px(CardGap));
+end;
+
+{ Maintenance: what it does, Scan with the progress after it or what was
+  found, the cards, the repositories with nothing to do, and Run. }
+procedure TGittanBatchPage.PaintMaint(var Y: integer; ALeft, ARight: integer);
+var
+  TextH, n, Repos, i, Picked, Cards: integer;
+  Detail, ButtonText, Nothing: string;
+  R: TRect;
+begin
+  n := MaintCount(Repos);
+  Detail := '';
+  if FMaintScanned and not FMaintScanning and (n > 0) then
+    if n = 1 then
+      Detail := rsTaskOne
+    else if Repos = 1 then
+      Detail := Format(rsTasksOneRepo, [n])
+    else
+      Detail := Format(rsTasksManyRepos, [n, Repos]);
+  FC.Font := Font;
+  TextH := FC.TextHeight('Xg');
+  PaintText(Y, rsMaintAbout, FDim, ALeft, ARight);
+  Inc(Y, Px(Gap));
+
+  i := ChosenCount;
+  if i = 0 then
+    ButtonText := rsScanNone
+  else if i = 1 then
+    ButtonText := rsScanOne
+  else
+    ButtonText := Format(rsScanMany, [i]);
+  Inc(Y, Px(PillPadY));
+  R := PaintPill(ALeft, Y, ButtonText, MaintScanLink, True, (i > 0) and not Busy);
+  FC.Font.Color := FDim;
+  if FMaintScanning then
+    FC.TextOut(R.Right + Px(Gap), Y, Format(rsScanning, [Min(FMaintDone + 1, FMaintTotal),
+      FMaintTotal]))
+  else if Detail <> '' then
+    FC.TextOut(R.Right + Px(Gap), Y, Detail);
+  Inc(Y, TextH + Px(PillPadY) + Px(Gap));
+
+  Nothing := '';
+  Cards := 0;
+  for i := 0 to FMaintDone - 1 do
+    if (Length(FMaint[i].Items) = 0) and (FMaint[i].Error = '') and
+      (FMaint[i].RemoteError = '') then
+    begin
+      if Nothing <> '' then
+        Nothing := Nothing + ', ';
+      Nothing := Nothing + FMaint[i].Caption;
+    end
+    else
+    begin
+      PaintMaintCard(Y, i, ALeft, ARight);
+      Inc(Cards);
+    end;
+  if (Cards = 0) and (FMaintDone > 0) and not FMaintScanning then
+  begin
+    PaintText(Y, rsAllTidy, FDim, ALeft, ARight);
+    Inc(Y, Px(Gap));
+  end
+  else if Nothing <> '' then
+  begin
+    PaintText(Y, Format(rsNothingToDo, [Nothing]), FDim, ALeft, ARight);
+    Inc(Y, Px(Gap));
+  end;
+
+  if n > 0 then
+  begin
+    Picked := Length(PickedMaintRefs);
+    if FMaintRunning then
+      ButtonText := rsRunning
+    else if Picked = 0 then
+      ButtonText := rsRunNone
+    else if Picked = 1 then
+      ButtonText := rsRunOne
+    else
+      ButtonText := Format(rsRunMany, [Picked]);
+    Inc(Y, Px(PillPadY));
+    PaintPill(ALeft, Y, ButtonText, MaintRunLink, True, (Picked > 0) and not Busy);
+    Inc(Y, TextH + Px(PillPadY));
   end;
 end;
 
@@ -1552,10 +2286,13 @@ begin
   X := ALeft;
   for i := 0 to BatchOperationCount - 1 do
   begin
-    if i = BatchGone then
-      Caption_ := rsOpGone
-    else
-      Caption_ := rsStatusHeading;
+    case i of
+      BatchGone: Caption_ := rsOpGone;
+      BatchIdentity: Caption_ := rsOpIdentity;
+      BatchMaintenance: Caption_ := rsOpMaint;
+      else
+        Caption_ := rsStatusHeading;
+    end;
     X := PaintPill(X, Y, Caption_, OperationLink + IntToStr(i), i = FOperation, True).Right +
       Px(6);
   end;
@@ -1619,10 +2356,13 @@ begin
   else
     PaintPicked(Y, L, R);
   PaintOperations(Y, L, R);
-  if FOperation = BatchGone then
-    PaintGone(Y, L, R)
-  else
-    PaintStatus(Y, L, R);
+  case FOperation of
+    BatchGone: PaintGone(Y, L, R);
+    BatchIdentity: PaintIdentity(Y, L, R);
+    BatchMaintenance: PaintMaint(Y, L, R);
+    else
+      PaintStatus(Y, L, R);
+  end;
 
   { Layout sets the height from this. }
   FContentHeight := Y + Px(Pad);
@@ -1760,6 +2500,30 @@ begin
   begin
     if Assigned(FOnCheck) then
       FOnCheck(Self);
+  end
+  else if Url = MaintScanLink then
+  begin
+    if Assigned(FOnMaintScan) then
+      FOnMaintScan(Self);
+  end
+  else if Url = MaintRunLink then
+  begin
+    if Assigned(FOnMaintRun) then
+      FOnMaintRun(Self);
+  end
+  else if Copy(Url, 1, Length(MaintLink)) = MaintLink then
+  begin
+    Rest := Copy(Url, Length(MaintLink) + 1, MaxInt);
+    p := Pos(':', Rest);
+    a := StrToIntDef(Copy(Rest, 1, p - 1), -1);
+    b := StrToIntDef(Copy(Rest, p + 1, MaxInt), -1);
+    ToggleMaint(a, b);
+  end
+  else if Copy(Url, 1, Length(IdOpenLink)) = IdOpenLink then
+  begin
+    a := StrToIntDef(Copy(Url, Length(IdOpenLink) + 1, MaxInt), -1);
+    if (a >= 0) and (a < FIdsDone) and Assigned(FOnOpen) then
+      FOnOpen(Self, FIds[a].Path);
   end
   else if Copy(Url, 1, Length(OpenLink)) = OpenLink then
   begin

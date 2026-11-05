@@ -20,7 +20,10 @@ unit uforge;
   repositories the welcome view shows, picked there (kept in the
   settings, BatchRepos): an overview of what is left undone in each,
   read as it is shown and on Check, a card's head opening that
-  repository; and Gone branches, deleting the branches deleted on the remote, which
+  repository; the identity check, who each commits as and whether it
+  signs, read the same way; Maintenance, which scans for a remote's
+  HEAD left behind, worktrees whose folder is gone and objects to pack
+  and runs the tasks picked; and Gone branches, deleting the branches deleted on the remote, which
   the view scans for and deletes, asking first, all in jobs of its own
   (gittan.batch); one operation shown at a time, its pill kept in the
   settings (BatchOperation),
@@ -73,6 +76,9 @@ type
     FBatchShown: boolean;
     FScanJob: TGittanGoneScanJob;
     FStatusJob: TGittanStatusJob;
+    FIdentityJob: TGittanIdentityJob;
+    FMaintScanJob: TGittanMaintScanJob;
+    FMaintRunJob: TGittanMaintRunJob;
     FDeleteJob: TGittanGoneDeleteJob;
     FForge: TGittanForge;
     { The job under way, and the jobs given up or done, freed once their
@@ -121,6 +127,15 @@ type
     procedure BatchOperationChange(Sender: TObject);
     procedure CheckProgress(Sender: TObject);
     procedure CheckDone(Sender: TObject);
+    procedure IdentityCheck;
+    procedure IdentityProgress(Sender: TObject);
+    procedure IdentityDone(Sender: TObject);
+    procedure BatchMaintScan(Sender: TObject);
+    procedure MaintScanProgress(Sender: TObject);
+    procedure MaintScanDone(Sender: TObject);
+    procedure BatchMaintRun(Sender: TObject);
+    procedure MaintRunProgress(Sender: TObject);
+    procedure MaintRunDone(Sender: TObject);
     procedure BatchOpen(Sender: TObject; const APath: string);
     procedure ScanProgress(Sender: TObject);
     procedure ScanDone(Sender: TObject);
@@ -281,6 +296,25 @@ begin
     FZombies.Add(FStatusJob);
     FStatusJob := nil;
   end;
+  if FIdentityJob <> nil then
+  begin
+    FIdentityJob.Stop(False);
+    FZombies.Add(FIdentityJob);
+    FIdentityJob := nil;
+  end;
+  if FMaintScanJob <> nil then
+  begin
+    FMaintScanJob.Stop(False);
+    FZombies.Add(FMaintScanJob);
+    FMaintScanJob := nil;
+  end;
+  { A run of maintenance, as a deletion, runs to its end. }
+  if FMaintRunJob <> nil then
+  begin
+    FMaintRunJob.Stop(False);
+    FZombies.Add(FMaintRunJob);
+    FMaintRunJob := nil;
+  end;
   if FDeleteJob <> nil then
   begin
     FDeleteJob.Stop(False);
@@ -325,6 +359,8 @@ begin
   FBatch.Operation := App.Settings.BatchOperation;
   FBatch.OnOperationChange := @BatchOperationChange;
   FBatch.OnOpen := @BatchOpen;
+  FBatch.OnMaintScan := @BatchMaintScan;
+  FBatch.OnMaintRun := @BatchMaintRun;
   FThemeTimer := TTimer.Create(Self);
   FThemeTimer.Interval := 2000;
   FThemeTimer.Enabled := False;
@@ -698,19 +734,20 @@ begin
   FBatch.FitHeight(FBox.ClientHeight);
   FPage.Visible := False;
   FBatch.Visible := True;
-  { The overview is local and quick: read again each time it shows. }
-  if FBatch.Operation = BatchOverview then
+  { The overview and the identity check are local and quick: read again
+    each time they show. }
+  if FBatch.Operation in [BatchOverview, BatchIdentity] then
     BatchCheck(Self);
 end;
 
-{ Another operation's pill: kept for the next start, and the overview
-  read again as it comes into view. }
+{ Another operation's pill: kept for the next start, and the overview or
+  the identity check read again as it comes into view. }
 procedure TForgeView.BatchOperationChange(Sender: TObject);
 begin
   App.Settings.BatchOperation := FBatch.Operation;
   FBatch.FitHeight(FBox.ClientHeight);
   FBox.VertScrollBar.Position := 0;
-  if FBatch.Operation = BatchOverview then
+  if FBatch.Operation in [BatchOverview, BatchIdentity] then
     BatchCheck(Self);
 end;
 
@@ -745,6 +782,11 @@ procedure TForgeView.BatchCheck(Sender: TObject);
 var
   Paths, Captions: TStringArray;
 begin
+  if FBatch.Operation = BatchIdentity then
+  begin
+    IdentityCheck;
+    Exit;
+  end;
   if FStatusJob <> nil then
     Exit;
   FBatch.ChosenRepos(Paths, Captions);
@@ -780,7 +822,130 @@ begin
   FBatch.FitHeight(FBox.ClientHeight);
 end;
 
-{ A card's head in the overview: the repository opens, which hides the
+{ The identity check of the picked repositories, as the overview's. }
+procedure TForgeView.IdentityCheck;
+var
+  Paths, Captions: TStringArray;
+begin
+  if FIdentityJob <> nil then
+    Exit;
+  FBatch.ChosenRepos(Paths, Captions);
+  if Length(Paths) = 0 then
+    Exit;
+  FIdentityJob := TGittanIdentityJob.Create(Paths, Captions);
+  FIdentityJob.OnProgress := @IdentityProgress;
+  FIdentityJob.OnDone := @IdentityDone;
+  FBatch.StartIdentity(Length(Paths));
+  FBatch.FitHeight(FBox.ClientHeight);
+  FIdentityJob.Start;
+end;
+
+procedure TForgeView.IdentityProgress(Sender: TObject);
+begin
+  if Sender <> FIdentityJob then
+    Exit;
+  FBatch.SetIdentities(FIdentityJob.Repos, FIdentityJob.Finished, True);
+  FBatch.FitHeight(FBox.ClientHeight);
+end;
+
+procedure TForgeView.IdentityDone(Sender: TObject);
+var
+  Job: TGittanIdentityJob;
+begin
+  Job := TGittanIdentityJob(Sender);
+  if Job <> FIdentityJob then
+    Exit;
+  FIdentityJob := nil;
+  FZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeJobsAsync, 0);
+  FBatch.SetIdentities(Job.Repos, Job.Finished, False);
+  FBatch.FitHeight(FBox.ClientHeight);
+end;
+
+{ Maintenance's scan of the picked repositories; one batch job that
+  changes or fetches at a time (Busy). }
+procedure TForgeView.BatchMaintScan(Sender: TObject);
+var
+  Paths, Captions: TStringArray;
+begin
+  if FBatch.Busy then
+    Exit;
+  FBatch.ChosenRepos(Paths, Captions);
+  if Length(Paths) = 0 then
+    Exit;
+  FMaintScanJob := TGittanMaintScanJob.Create(Paths, Captions);
+  FMaintScanJob.OnProgress := @MaintScanProgress;
+  FMaintScanJob.OnDone := @MaintScanDone;
+  FBatch.StartMaintScan(Length(Paths));
+  FBatch.FitHeight(FBox.ClientHeight);
+  FMaintScanJob.Start;
+end;
+
+procedure TForgeView.MaintScanProgress(Sender: TObject);
+begin
+  if Sender <> FMaintScanJob then
+    Exit;
+  FBatch.SetMaintScan(FMaintScanJob.Repos, FMaintScanJob.Finished, True);
+  FBatch.FitHeight(FBox.ClientHeight);
+end;
+
+procedure TForgeView.MaintScanDone(Sender: TObject);
+var
+  Job: TGittanMaintScanJob;
+begin
+  Job := TGittanMaintScanJob(Sender);
+  if Job <> FMaintScanJob then
+    Exit;
+  FMaintScanJob := nil;
+  FZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeJobsAsync, 0);
+  FBatch.SetMaintScan(Job.Repos, Job.Finished, False);
+  FBatch.FitHeight(FBox.ClientHeight);
+end;
+
+{ Run: the tasks picked, without asking, since none of them loses
+  anything (a worktree pruned is one whose folder is gone already). }
+procedure TForgeView.BatchMaintRun(Sender: TObject);
+var
+  Refs: TGittanMaintRefs;
+begin
+  if FBatch.Busy then
+    Exit;
+  Refs := FBatch.PickedMaintRefs;
+  if Length(Refs) = 0 then
+    Exit;
+  FMaintRunJob := TGittanMaintRunJob.Create(Refs);
+  FMaintRunJob.OnProgress := @MaintRunProgress;
+  FMaintRunJob.OnDone := @MaintRunDone;
+  FBatch.SetMaintRunning(True);
+  FMaintRunJob.Start;
+end;
+
+procedure TForgeView.MaintRunProgress(Sender: TObject);
+begin
+  if Sender <> FMaintRunJob then
+    Exit;
+  FBatch.ApplyMaintRun(FMaintRunJob.Refs, FMaintRunJob.Finished);
+  FBatch.FitHeight(FBox.ClientHeight);
+end;
+
+procedure TForgeView.MaintRunDone(Sender: TObject);
+var
+  Job: TGittanMaintRunJob;
+begin
+  Job := TGittanMaintRunJob(Sender);
+  if Job <> FMaintRunJob then
+    Exit;
+  FMaintRunJob := nil;
+  FZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeJobsAsync, 0);
+  FBatch.ApplyMaintRun(Job.Refs, Job.Finished);
+  FBatch.SetMaintRunning(False);
+  FBatch.FitHeight(FBox.ClientHeight);
+end;
+
+{ A card's head in the overview or a row of the identity check: the
+  repository opens, which hides the
   view. }
 procedure TForgeView.BatchOpen(Sender: TObject; const APath: string);
 begin
