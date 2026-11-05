@@ -19,10 +19,11 @@ unit uforge;
   box in the page's place, operations run in several of the
   repositories the welcome view shows, picked there (kept in the
   settings, BatchRepos): an overview of what is left undone in each,
-  read as the tab is shown and on Check, a card's head opening that
-  repository; and deleting the branches deleted on the remote, which
+  read as it is shown and on Check, a card's head opening that
+  repository; and Gone branches, deleting the branches deleted on the remote, which
   the view scans for and deletes, asking first, all in jobs of its own
-  (gittan.batch),
+  (gittan.batch); one operation shown at a time, its pill kept in the
+  settings (BatchOperation),
   read by the forge's AccountJob (gittan.forge; GitHub's runs one
   GraphQL query through gh) once at start, each time the view is shown,
   on Refresh and when the forge or its account changes, the page keeping
@@ -117,6 +118,7 @@ type
     procedure BatchChosenChange(Sender: TObject);
     procedure BatchScan(Sender: TObject);
     procedure BatchCheck(Sender: TObject);
+    procedure BatchOperationChange(Sender: TObject);
     procedure CheckProgress(Sender: TObject);
     procedure CheckDone(Sender: TObject);
     procedure BatchOpen(Sender: TObject; const APath: string);
@@ -320,6 +322,8 @@ begin
   FBatch.OnScan := @BatchScan;
   FBatch.OnDelete := @BatchDelete;
   FBatch.OnCheck := @BatchCheck;
+  FBatch.Operation := App.Settings.BatchOperation;
+  FBatch.OnOperationChange := @BatchOperationChange;
   FBatch.OnOpen := @BatchOpen;
   FThemeTimer := TTimer.Create(Self);
   FThemeTimer.Interval := 2000;
@@ -694,8 +698,20 @@ begin
   FBatch.FitHeight(FBox.ClientHeight);
   FPage.Visible := False;
   FBatch.Visible := True;
-  { The overview is local and quick: read again each time. }
-  BatchCheck(Self);
+  { The overview is local and quick: read again each time it shows. }
+  if FBatch.Operation = BatchOverview then
+    BatchCheck(Self);
+end;
+
+{ Another operation's pill: kept for the next start, and the overview
+  read again as it comes into view. }
+procedure TForgeView.BatchOperationChange(Sender: TObject);
+begin
+  App.Settings.BatchOperation := FBatch.Operation;
+  FBatch.FitHeight(FBox.ClientHeight);
+  FBox.VertScrollBar.Position := 0;
+  if FBatch.Operation = BatchOverview then
+    BatchCheck(Self);
 end;
 
 procedure TForgeView.BatchChosenChange(Sender: TObject);

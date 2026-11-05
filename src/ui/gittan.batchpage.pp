@@ -12,7 +12,12 @@ unit gittan.batchpage;
   Chosen, by root, which the owner keeps in the settings
   (OnChosenChange); a picked root no row has stays picked, unseen.
 
-  Under it the operations. First the overview, which reads and changes
+  The list folds to one line naming the picked ones, with Change to
+  unfold it (and Done at its heading to fold it again); it starts
+  unfolded while nothing is picked. Under it the operations, as a row
+  of pills, one shown at a time (Operation, OnOperationChange, which the
+  owner keeps), each keeping what it found while another is shown.
+  First the overview, which reads and changes
   nothing: Check (OnCheck, which the owner also runs as the tab is
   shown) has the owner run TGittanStatusJob over the picked
   repositories and give what it read as it comes (StartCheck,
@@ -23,7 +28,7 @@ unit gittan.batchpage;
   no remote with their counts, no remote at all, or why it could not be
   read; the clean ones are named on one line under the cards.
 
-  Then the branches deleted on the remote. Scan (OnScan) has the owner run TGittanGoneScanJob over the
+  Then Gone branches, the branches deleted on the remote. Scan (OnScan) has the owner run TGittanGoneScanJob over the
   picked repositories (ChosenRepos) and give what it found as it comes
   (StartScan, SetScan): a card per repository with something to say,
   with its gone branches, each with a check box and a tag that says
@@ -48,6 +53,12 @@ interface
 uses
   Classes, SysUtils, Types, Controls, Graphics, gittan.batch;
 
+const
+  {** The operations, as Operation counts them. }
+  BatchOverview = 0;
+  BatchGone = 1;
+  BatchOperationCount = 2;
+
 type
   {** A repository to open, by its root. }
   TGittanBatchOpenEvent = procedure(Sender: TObject; const APath: string) of object;
@@ -69,6 +80,10 @@ type
     FStatus: TGittanRepoStatuses;
     FStatusDone, FStatusTotal: integer;
     FChecking: boolean;
+    { Whether the list is unfolded, and the operation shown. }
+    FReposOpen: boolean;
+    FOperation: integer;
+    FOnOperationChange: TNotifyEvent;
     FOnCheck: TNotifyEvent;
     FOnOpen: TGittanBatchOpenEvent;
     { The branches picked to delete, as PickKey. }
@@ -107,6 +122,9 @@ type
     procedure PaintText(var Y: integer; const AText: string; AColor: TColor;
       ALeft, ARight: integer);
     procedure PaintRows(var Y: integer; ALeft, ARight: integer);
+    procedure PaintPicked(var Y: integer; ALeft, ARight: integer);
+    procedure PaintOperations(var Y: integer; ALeft, ARight: integer);
+    procedure SetOperation(AValue: integer);
     procedure PaintGoneCard(var Y: integer; AIndex, ALeft, ARight: integer);
     procedure PaintGone(var Y: integer; ALeft, ARight: integer);
     function WrappedHeight(const AText: string; AWidth: integer): integer;
@@ -155,6 +173,10 @@ type
     procedure SetStatus(const ARepos: TGittanRepoStatuses; ADone: integer; ARunning: boolean);
     {** Whether the overview runs. }
     property Checking: boolean read FChecking;
+    {** The operation shown, BatchOverview (the default) or BatchGone. }
+    property Operation: integer read FOperation write SetOperation;
+    {** A click on an operation's pill changed Operation. }
+    property OnOperationChange: TNotifyEvent read FOnOperationChange write FOnOperationChange;
     {** The palette of the dark or the light appearance. }
     procedure SetTheme(ADark: boolean);
     {** Makes the control at least AMin high, and no higher than its
@@ -189,7 +211,12 @@ resourcestring
   rsNoRepos = 'No repositories to pick yet. Open some, or add them to the repository list on ' +
     'the welcome page.';
   rsNotFound = 'not found';
-  rsGoneHeading = 'Branches deleted on the remote';
+  rsChangeChip = 'Change';
+  rsDoneChip = 'Done';
+  rsNonePicked = 'None picked.';
+  { After the names that fit: how many more. }
+  rsMorePicked = ' and %d more';
+  rsOpGone = 'Gone branches';
   rsGoneAbout = 'Finds local branches that were deleted on the remote. The branch you are on ' +
     'is never touched.';
   rsScanOne = 'Scan 1 repository';
@@ -245,6 +272,9 @@ const
   ScanLink = 'scan';
   DeleteLink = 'delete';
   CheckLink = 'check';
+  FoldLink = 'fold';
+  UnfoldLink = 'unfold';
+  OperationLink = 'op:';
   OpenLink = 'o:';
   Pad = 24;
   Gap = 12;
@@ -342,6 +372,7 @@ end;
 procedure TGittanBatchPage.SetChosen(APaths: TStrings);
 begin
   FChosen.Assign(APaths);
+  FReposOpen := FChosen.Count = 0;
   Layout;
   Invalidate;
 end;
@@ -801,8 +832,8 @@ begin
 end;
 
 { A dim bold title with a dim detail after it over a divider, as the
-  forge page's; with AChips All and None at the right of the title's
-  line. }
+  forge page's; with AChips the list's pills at the right of the title's
+  line: All, None and Done while it is unfolded, else Change. }
 procedure TGittanBatchPage.PaintHeading(var Y: integer; const ATitle, ADetail: string;
   ALeft, ARight: integer; AChips: boolean);
 var
@@ -819,13 +850,17 @@ begin
   FC.Font.Style := [];
   if ADetail <> '' then
     FC.TextOut(X, Y, ADetail);
-  if AChips then
+  if AChips and FReposOpen then
   begin
-    X := ARight - PillWidth(rsNoneChip);
+    X := ARight - PillWidth(rsDoneChip);
+    PaintPill(X, Y, rsDoneChip, FoldLink, True, True);
+    X := X - Px(6) - PillWidth(rsNoneChip);
     PaintPill(X, Y, rsNoneChip, NoneLink, False, True);
     X := X - Px(6) - PillWidth(rsAllChip);
     PaintPill(X, Y, rsAllChip, AllLink, False, True);
-  end;
+  end
+  else if AChips then
+    PaintPill(ARight - PillWidth(rsChangeChip), Y, rsChangeChip, UnfoldLink, False, True);
   Inc(Y, TextH + Px(Gap) div 2);
   FC.Pen.Style := psSolid;
   FC.Pen.Color := FLine;
@@ -1070,8 +1105,8 @@ begin
   Inc(Y, H + Px(CardGap));
 end;
 
-{ The gone branches: the heading with what was found, what Scan does,
-  Scan with the progress after it, the cards, the repositories with
+{ The gone branches: what Scan does, Scan with the progress after it or
+  what was found, the cards, the repositories with
   nothing gone, and Delete. }
 procedure TGittanBatchPage.PaintGone(var Y: integer; ALeft, ARight: integer);
 var
@@ -1086,7 +1121,6 @@ begin
       Detail := Format(rsGoneOneRepo, [n])
     else
       Detail := Format(rsGoneManyRepos, [n, Repos]);
-  PaintHeading(Y, rsGoneHeading, Detail, ALeft, ARight, False);
   FC.Font := Font;
   TextH := FC.TextHeight('Xg');
   PaintText(Y, rsGoneAbout, FDim, ALeft, ARight);
@@ -1107,6 +1141,11 @@ begin
     FC.Font.Color := FDim;
     FC.TextOut(R.Right + Px(Gap), Y, Format(rsScanning, [Min(FGoneDone + 1, FGoneTotal),
       FGoneTotal]));
+  end
+  else if Detail <> '' then
+  begin
+    FC.Font.Color := FDim;
+    FC.TextOut(R.Right + Px(Gap), Y, Detail);
   end;
   Inc(Y, TextH + Px(PillPadY) + Px(Gap));
 
@@ -1347,8 +1386,8 @@ begin
   Y := RowTop + Px(CardPadY) + Px(CardGap);
 end;
 
-{ The overview: the heading with how many need something, what Check
-  does, Check with the progress after it, the cards, and the clean
+{ The overview: what Check does, Check with the progress after it, or
+  how many need something once it is done, the cards, and the clean
   repositories on one line. }
 procedure TGittanBatchPage.PaintStatus(var Y: integer; ALeft, ARight: integer);
 var
@@ -1366,7 +1405,6 @@ begin
       Detail := Format(rsNeedOne, [FStatusDone])
     else
       Detail := Format(rsNeedMany, [Cards, FStatusDone]);
-  PaintHeading(Y, rsStatusHeading, Detail, ALeft, ARight, False);
   FC.Font := Font;
   TextH := FC.TextHeight('Xg');
   PaintText(Y, rsStatusAbout, FDim, ALeft, ARight);
@@ -1386,6 +1424,11 @@ begin
     FC.Font.Color := FDim;
     FC.TextOut(R.Right + Px(Gap), Y, Format(rsChecking, [Min(FStatusDone + 1, FStatusTotal),
       FStatusTotal]));
+  end
+  else if Detail <> '' then
+  begin
+    FC.Font.Color := FDim;
+    FC.TextOut(R.Right + Px(Gap), Y, Detail);
   end;
   Inc(Y, TextH + Px(PillPadY) + Px(Gap));
 
@@ -1409,6 +1452,89 @@ begin
     PaintText(Y, Format(rsCleanIn, [Clean]), FDim, ALeft, ARight);
     Inc(Y, Px(Gap));
   end;
+end;
+
+{ The folded list: the picked ones by name, as many as fit, then how
+  many more; the line unfolds the list too. }
+procedure TGittanBatchPage.PaintPicked(var Y: integer; ALeft, ARight: integer);
+var
+  Paths, Captions: TStringArray;
+  Line, Next, More: string;
+  i, TextH: integer;
+  R: TRect;
+begin
+  ChosenRepos(Paths, Captions);
+  FC.Font := Font;
+  TextH := FC.TextHeight('Xg');
+  Inc(Y, Px(RowPadY));
+  if Length(Captions) = 0 then
+    Line := rsNonePicked
+  else
+  begin
+    Line := Captions[0];
+    for i := 1 to High(Captions) do
+    begin
+      Next := Line + ', ' + Captions[i];
+      More := '';
+      if i < High(Captions) then
+        More := Format(rsMorePicked, [High(Captions) - i]);
+      if FC.TextWidth(Next + More) > ARight - ALeft then
+      begin
+        Line := Line + Format(rsMorePicked, [Length(Captions) - i]);
+        Break;
+      end;
+      Line := Next;
+    end;
+  end;
+  R := Rect(ALeft, Y - Px(RowPadY), ARight, Y + TextH + Px(RowPadY));
+  AddLink(R, UnfoldLink);
+  if FHot = High(FLinkRects) then
+    FC.Font.Color := FText
+  else
+    FC.Font.Color := FDim;
+  FC.Brush.Style := bsClear;
+  FC.TextOut(ALeft, Y, FitTextLeft(FC, Line, ARight - ALeft));
+  Inc(Y, TextH + Px(RowPadY));
+end;
+
+{ The operations as pills, the one shown in the link color, over a
+  divider. }
+procedure TGittanBatchPage.PaintOperations(var Y: integer; ALeft, ARight: integer);
+var
+  i, X, TextH: integer;
+  Caption_: string;
+begin
+  Inc(Y, Px(Pad));
+  FC.Font := Font;
+  TextH := FC.TextHeight('Xg');
+  Inc(Y, Px(PillPadY));
+  X := ALeft;
+  for i := 0 to BatchOperationCount - 1 do
+  begin
+    if i = BatchGone then
+      Caption_ := rsOpGone
+    else
+      Caption_ := rsStatusHeading;
+    X := PaintPill(X, Y, Caption_, OperationLink + IntToStr(i), i = FOperation, True).Right +
+      Px(6);
+  end;
+  Inc(Y, TextH + Px(PillPadY) + Px(Gap) div 2);
+  FC.Pen.Style := psSolid;
+  FC.Pen.Color := FLine;
+  FC.Line(ALeft, Y, ARight, Y);
+  Inc(Y, Px(Gap));
+end;
+
+procedure TGittanBatchPage.SetOperation(AValue: integer);
+begin
+  if (AValue < 0) or (AValue >= BatchOperationCount) then
+    AValue := BatchOverview;
+  if FOperation = AValue then
+    Exit;
+  FOperation := AValue;
+  FHot := -1;
+  Layout;
+  Invalidate;
 end;
 
 procedure TGittanBatchPage.Paint;
@@ -1447,9 +1573,15 @@ begin
 
   PaintHeading(Y, rsReposHeading, Format(rsPickedOf, [ChosenCount, RepoCount]), L, R,
     Length(FRows) > 0);
-  PaintRows(Y, L, R);
-  PaintStatus(Y, L, R);
-  PaintGone(Y, L, R);
+  if FReposOpen or (Length(FRows) = 0) then
+    PaintRows(Y, L, R)
+  else
+    PaintPicked(Y, L, R);
+  PaintOperations(Y, L, R);
+  if FOperation = BatchGone then
+    PaintGone(Y, L, R)
+  else
+    PaintStatus(Y, L, R);
 
   { Layout sets the height from this. }
   FContentHeight := Y + Px(Pad);
@@ -1558,6 +1690,30 @@ begin
   begin
     if Assigned(FOnScan) then
       FOnScan(Self);
+  end
+  else if Url = FoldLink then
+  begin
+    FReposOpen := False;
+    FHot := -1;
+    Layout;
+    Invalidate;
+  end
+  else if Url = UnfoldLink then
+  begin
+    FReposOpen := True;
+    FHot := -1;
+    Layout;
+    Invalidate;
+  end
+  else if Copy(Url, 1, Length(OperationLink)) = OperationLink then
+  begin
+    a := StrToIntDef(Copy(Url, Length(OperationLink) + 1, MaxInt), -1);
+    if (a >= 0) and (a < BatchOperationCount) and (a <> FOperation) then
+    begin
+      SetOperation(a);
+      if Assigned(FOnOperationChange) then
+        FOnOperationChange(Self);
+    end;
   end
   else if Url = CheckLink then
   begin
