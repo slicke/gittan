@@ -99,7 +99,7 @@ git clone --recursive https://github.com/slicke/gittan.git
 cd gittan
 ```
 
-A fresh Lazarus knows none of the vendored packages. `make deps` (`.\make.ps1 deps` on Windows) registers each with `lazbuild --add-package-link` and compiles it, in dependency order: ATFlatControls, EncConv, BGRABitmap, ATSynEdit, EControl, ATSynEdit_Ex, MetaDarkStyle and LazInk (`VENDOR_PACKAGES` in the Makefile, `make.ps1` and [.github/workflows/build.yml](.github/workflows/build.yml)). Run it again after a submodule moves. If you build from the IDE, `make ide` rebuilds Lazarus with the vendored ATSynEdit and its dependencies.
+A fresh Lazarus knows none of the vendored packages. `make deps` (`.\make.ps1 deps` on Windows) registers each with `lazbuild --add-package-link` and compiles it, in dependency order: ATFlatControls, EncConv, BGRABitmap, ATSynEdit, EControl, ATSynEdit_Ex, MetaDarkStyle and LazInk (`VENDOR_PACKAGES` in the Makefile, `make.ps1` and [.github/workflows/build.yml](.github/workflows/build.yml)). Run it again after a submodule moves. If you build from the IDE or open the forms in its designer, `make ide` (`.\make.ps1 ide`) installs the vendored ATFlatControls and ATSynEdit in Lazarus (`lazbuild --add-package`, EncConv and BGRABitmap coming with ATSynEdit) and rebuilds the IDE with them; run it after `make deps`, and again when one of them moves.
 
 Then build with make:
 

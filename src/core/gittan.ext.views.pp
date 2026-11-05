@@ -61,8 +61,10 @@ function ReadExtAnswer(const AJson: string; out AValue: TJSONData; out AError: s
 
 {** A tab's model from a value: {text, empty, rows: [{title, detail, tag,
   url, repo, severity, actions: [{id, title}]}]}, or a list of rows
-  alone, or a string as its text; False when the value has no model
-  (null, a number), as an action's answer that asks for a render. }
+  alone, or a string as its text; an object is one when it has a text,
+  empty or rows key, whatever its value (an empty text clears the tab);
+  False when the value has no model (null, a number, an object without
+  those keys), as an action's answer that asks for a render. }
 function ExtTabModelOf(AValue: TJSONData; out AModel: TExtTabModel): boolean;
 
 {** An operation's result from a value: null, an empty string and the
@@ -213,9 +215,13 @@ begin
   begin
     AModel.Text := TextOf(TJSONObject(AValue), 'text');
     AModel.Empty := TextOf(TJSONObject(AValue), 'empty');
+    { A model by its keys, whatever their values: an empty text clears the
+      tab rather than asking for a render again. }
     if TJSONObject(AValue).Find('rows') is TJSONArray then
       Rows := TJSONArray(TJSONObject(AValue).Find('rows'))
-    else if (AModel.Text = '') and (AModel.Empty = '') then
+    else if (TJSONObject(AValue).IndexOfName('text') < 0) and
+      (TJSONObject(AValue).IndexOfName('empty') < 0) and
+      (TJSONObject(AValue).IndexOfName('rows') < 0) then
       Exit(False);
   end
   else

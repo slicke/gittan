@@ -551,6 +551,21 @@ begin
   FHost.Root := '';
   AssertEquals('the forge view''s', 'GitHub', EvalIn(Info^.Ctx, 'Gittan.forge.info().name'));
   AssertEquals('one named', 'GitHub', EvalIn(Info^.Ctx, 'Gittan.forge.info({forge: "github"}).name'));
+  { A folder that is gone is refused, not swapped for the home folder;
+    a saved tool that is gone is not ready. }
+  EvalIn(Info^.Ctx, 'Gittan.forge.cli(["status"], {forge: "GitHub", repo: "/no/such/folder"}).then(' +
+    'function (r) { globalThis.gone = "ran"; }, function (e) { globalThis.gone = String((e && e.message) || e); });');
+  WaitFor(Info^.Ctx, 'globalThis.gone');
+  AssertEquals('no folder', 'Gittan.forge.cli: /no/such/folder is not a folder',
+    EvalIn(Info^.Ctx, 'globalThis.gone'));
+  FSettings.SetForgeCliPath('GitHub', '/no/such/gh');
+  AssertEquals('a tool that is gone', 'false:/no/such/gh was not found',
+    EvalIn(Info^.Ctx, 'var i = Gittan.forge.info(); i.ready + ":" + i.reason'));
+  EvalIn(Info^.Ctx, 'Gittan.forge.cli(["status"]).then(function (r) { globalThis.nogh = "ran"; },' +
+    'function (e) { globalThis.nogh = String((e && e.message) || e); });');
+  WaitFor(Info^.Ctx, 'globalThis.nogh');
+  AssertEquals('rejected', 'Gittan.forge.cli: /no/such/gh was not found',
+    EvalIn(Info^.Ctx, 'globalThis.nogh'));
   FSettings.HostingEnabled := False;
   AssertEquals('off in the settings', 'false', EvalIn(Info^.Ctx, 'String(Gittan.forge.info().ready)'));
 end;

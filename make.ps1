@@ -53,6 +53,13 @@ $VendorPackages = @(
 # commits into $IdeStamp. 'outdated' fetches the remotes and lists what
 # upstream has that the checkout lacks.
 $IdeVendor = @('vendor/ATFlatControls', 'vendor/EncConv', 'vendor/BGRABitmap', 'vendor/ATSynEdit')
+# What the ide target installs in the IDE before it rebuilds it, so the form
+# designer knows the controls of Gittan's forms; EncConv and BGRABitmap come
+# with ATSynEdit, which requires them. IDE_PACKAGES in the Makefile.
+$IdePackages = @(
+    'vendor/ATFlatControls/atflatcontrols/atflatcontrols_package.lpk',
+    'vendor/ATSynEdit/atsynedit/atsynedit_package.lpk'
+)
 $IdeStamp = '.ide-vendor'
 
 function Test-InGit {
@@ -246,6 +253,14 @@ switch ($target) {
         # first: built with FPC 3.3.1, lazbuild takes one after an empty
         # --build-ide= for a short option and stops.
         Need-Lazbuild
+        foreach ($lpk in $IdePackages) {
+            if (-not (Test-Path $lpk)) {
+                Write-Error "$lpk is missing; run: git submodule update --init"
+                exit 1
+            }
+            & $laz --add-package $lpk
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
         & $laz @rest --build-ide=
         $rc = $LASTEXITCODE
         if ($rc -eq 0 -and (Test-InGit)) {
@@ -281,7 +296,7 @@ switch ($target) {
         Write-Host '  rebuild   Build with every unit recompiled'
         Write-Host "  run       Build, then start Gittan (arguments after 'run' go to Gittan)"
         Write-Host '  deps      Register the vendored packages with lazbuild and compile them'
-        Write-Host '  ide       Rebuild the Lazarus IDE (after ATSynEdit, ATFlatControls, EncConv or BGRABitmap moves)'
+        Write-Host '  ide       Install ATSynEdit and ATFlatControls in the Lazarus IDE and rebuild it (also after ATSynEdit, ATFlatControls, EncConv or BGRABitmap moves)'
         Write-Host "  outdated  Fetch the vendored packages' remotes and list the commits upstream is ahead"
         Write-Host '  test      Build and run the unit tests in tests\'
         Write-Host "  lexlib    Copy the lexers from $LexersSrc and $LexersOwn into $LexLib\ (part of every build)"

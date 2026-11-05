@@ -51,6 +51,8 @@ resourcestring
   rsAbsorbNothingChosen = 'No change was chosen.';
   rsAbsorbNoBase = 'Could not find where the branch leaves %s.';
   rsAbsorbMoved = 'The branch has moved since the changes were read; try again.';
+  rsAbsorbNotUndone = 'The fixup commits made could not be taken back: %s';
+  rsAbsorbSpecFile = 'Could not write %s.';
   rsAbsorbStashConflicts = 'The changes went into their commits, but putting back what ' +
     'was left in the work tree gave conflicts; git keeps it in the stash too.';
 
@@ -147,9 +149,11 @@ function AbsorbTarget(ABlame: TGittanBlame; AFrom, ATo, ABefore, AAfter: integer
   folded in. ACommits is how many fixup commits were made. True when
   the rebase went through. False with AError when the branch moved since
   the plan was built, a file changed since or cannot be read, a commit
-  failed, the branch holds a merge commit, or nothing was chosen, with
-  the fixup commits made before taken back (ACommits 0), so the branch
-  and the work tree are as they were; AConflicts and AStopped as
+  failed, the branch holds a merge commit, the rebase did not start, or
+  nothing was chosen, with the fixup commits made before taken back
+  (ACommits 0), so the branch and the work tree are as they were, or
+  ACommits as it was and rsAbsorbNotUndone after AError when taking them
+  back failed; AConflicts and AStopped as
   RebaseInteractive gives them when the rebase stopped, which the Commit
   section carries on, the fixup commits still on the branch; AConflicts
   with rsAbsorbStashConflicts when the rebase went through but the rest
@@ -517,7 +521,7 @@ var
   Taken: array of boolean;
   Merges, Whole, Rebasing: boolean;
   t, h, Found: integer;
-  Id, Err, Output: string;
+  Id, Err, Output, LastFixup: string;
   Text: RawByteString;
 
   { Whether the hunk is chosen and has a target. }
@@ -579,21 +583,38 @@ var
     rebase has started: HEAD back where the plan found it and the paths
     committed back in the index as it has them, so the changes are in
     the work tree again, as before, and no stray fixup! commit is left
-    on the branch. }
-  procedure UndoCommits;
+    on the branch. The paths go to git in a file, as a commit's do, so
+    many of them do not grow the command line past what the system
+    takes. False, with git's error after AError, when a reset failed. }
+  function UndoCommits: boolean;
   var
-    Args: TStringArray;
+    SpecFile, Spec: string;
     i: integer;
   begin
-    if not RunGitIn(ARepo.Root, ['reset', '-q', '--soft', APlan.Head], Output, Err) then
-      Exit;
-    if Committed.Count = 0 then
-      Exit;
-    Args := ['--literal-pathspecs', 'reset', '-q', APlan.Head, '--'];
-    SetLength(Args, Length(Args) + Committed.Count);
-    for i := 0 to Committed.Count - 1 do
-      Args[5 + i] := Committed[i];
-    RunGitIn(ARepo.Root, Args, Output, Err);
+    Result := RunGitIn(ARepo.Root, ['reset', '-q', '--soft', APlan.Head], Output, Err);
+    if Result and (Committed.Count > 0) then
+    begin
+      Spec := '';
+      for i := 0 to Committed.Count - 1 do
+        Spec := Spec + Committed[i] + #0;
+      SpecFile := GetTempFileName(GetTempDir, 'gittan-absorb-');
+      try
+        Result := WriteFileReplacing(SpecFile, Spec);
+        if not Result then
+          Err := Format(rsAbsorbSpecFile, [SpecFile])
+        else
+          Result := RunGitIn(ARepo.Root, ['--literal-pathspecs', 'reset', '-q', APlan.Head,
+            '--pathspec-from-file=' + SpecFile, '--pathspec-file-nul'], Output, Err);
+      finally
+        DeleteFile(SpecFile);
+      end;
+    end;
+    if not Result then
+    begin
+      if AError <> '' then
+        AError := AError + LineEnding;
+      AError := AError + Format(rsAbsorbNotUndone, [Trim(Err)]);
+    end;
   end;
 
 begin
@@ -649,6 +670,7 @@ begin
           Exit;
         end;
         Committed.AddStrings(Paths);
+        LastFixup := Id;
         Inc(ACommits);
       end;
     finally
@@ -677,14 +699,17 @@ begin
     if not Result then
     begin
       AError := ARepo.Error;
+      { The rebase never started (its files could not be written, or
+        git refused to begin, a pre-rebase hook or the autostash): the
+        fixup commits are taken back as for a failed commit. One that
+        ran and stopped is left to the Commit section. }
+      if not AConflicts and not AStopped then
+        Rebasing := (ARepo.Operation <> '') or (ARepo.CommitId('HEAD') <> LastFixup);
       Exit;
     end;
   finally
-    if not Rebasing and (ACommits > 0) then
-    begin
-      UndoCommits;
+    if not Rebasing and (ACommits > 0) and UndoCommits then
       ACommits := 0;
-    end;
     Committed.Free;
   end;
   { --autostash puts the rest back after the rebase, and a clash there

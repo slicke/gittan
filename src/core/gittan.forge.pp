@@ -688,7 +688,8 @@ function ForgeClassFor(const AUrls: string): TGittanForgeClass; overload;
   (TGittanApp.ForgeCli), the extensions (Gittan.forge, Gittan.app
   .setting) and the rest: '' for no forge or while hosting is off
   (AHosting false), else APath, the settings' path for it
-  (TGittanSettings.ForgeCliPath), else the one FindTool finds ('' for
+  (TGittanSettings.ForgeCliPath), '' when no file is there (a bare name
+  is looked up with FindTool), else the one FindTool finds ('' for
   none). }
 function ForgeTool(AForge: TGittanForgeClass; AHosting: boolean; const APath: string): string;
 {** The active accounts of AAccounts as one string, "host=login" a line
@@ -852,10 +853,17 @@ function ForgeTool(AForge: TGittanForgeClass; AHosting: boolean; const APath: st
 begin
   if (AForge = nil) or not AHosting then
     Result := ''
-  else if APath <> '' then
+  else if APath = '' then
+    Result := FindTool(AForge.CliName)
+  else if ExtractFilePath(APath) = '' then
+    { A bare name, as the settings may hold: looked up as one. }
+    Result := FindTool(APath)
+  else if FileExists(APath) then
     Result := APath
   else
-    Result := FindTool(AForge.CliName);
+    { A path that is gone is no tool: not another gh found in its
+      place, which the user did not pick. }
+    Result := '';
 end;
 
 function ForgeClassFor(const AUrls: string): TGittanForgeClass;

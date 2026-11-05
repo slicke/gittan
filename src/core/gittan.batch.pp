@@ -30,8 +30,9 @@ unit gittan.batch;
   prune`, `git gc`).
 
   The last operation deletes the local branches whose branch on the
-  remote is gone. TGittanGoneScanJob fetches each repository with
-  --prune and lists its local branches whose upstream is gone
+  remote is gone. TGittanGoneScanJob fetches, with --prune, the remotes
+  each repository's local branches track (skipFetchAll or not) and
+  lists its local branches whose upstream is gone
   (TGittanRepo.GoneBranches), the current one left out, each with how
   far its work reached the default branch (GoneMergeState): merged,
   squashed into it, or not merged. TGittanGoneDeleteJob deletes the
@@ -108,7 +109,9 @@ type
     the branches ahead of their upstream (Unpushed), the branches with
     no upstream that have commits on no remote (Unshared), whether it
     has no remote at all (NoRemote; Unshared is then empty, since every
-    commit is on none), and Error when it could not be read. }
+    commit is on none), and Error when it, or a part of it (the
+    stashes, the branches), could not be read. A branch whose upstream
+    is gone counts as one with no upstream. }
   TGittanRepoStatus = record
     Path: string;
     Caption: string;
@@ -174,7 +177,8 @@ type
 
   {** What a maintenance scan found in a repository: the tasks it needs;
     RemoteError when the remote could not be asked; Error when the
-    repository could not be read. }
+    repository, or a part the scan reads (its worktrees, its objects),
+    could not be read. }
   TGittanMaintRepo = record
     Path: string;
     Caption: string;
@@ -210,6 +214,10 @@ type
   protected
     {** Counts an item done and tells the main thread. }
     procedure ItemDone;
+    {** Whether the job was told to end; what a git that goes to the
+      network asks as it runs, so a stalled connection does not hold
+      the job. }
+    function Cancelled: boolean;
     procedure Detach; override;
   public
     {** The items done, whose results may be read now. }
@@ -345,8 +353,10 @@ function RepoIdentity(const APath, ACaption: string): TGittanRepoIdentity;
 {** "github.com/acme" of a remote's URL such as git@github.com:acme/r.git
   (the group path on a forge with subgroups, "gitlab.com/a/b" of
   gitlab.com/a/b/r); the host alone when the path has one part; empty
-  for a local path. }
-function RemoteOwner(const AUrl: string): string;
+  for a local path. An ssh URL's host is the one ASshConfig (an
+  ssh_config's text, SshHostName) connects to, so github-work:acme/r
+  with a Host github-work block naming github.com is github.com/acme. }
+function RemoteOwner(const AUrl: string; const ASshConfig: string = ''): string;
 
 {** Whether A and B commit as the same: name, e-mail (in any case) and
   signing alike; never for one that could not be read. }
@@ -362,23 +372,33 @@ const
   {** Loose objects, or packs, from which ScanMaintenance offers to pack. }
   MaintLooseLimit = 1000;
   MaintPackLimit = 10;
+  {** The seconds ssh waits for a connection in what the batch jobs run
+    against a remote (ConnectTimeout), unless the user runs ssh their
+    own way. }
+  BatchConnectTimeout = 20;
 
 {** What the repository at APath needs, captioned ACaption: mtSetHead
   when its remote (origin, else the first) has a HEAD that the local
   refs/remotes/<remote>/HEAD does not point at (`git ls-remote
   --symref`, the one thing here that goes to the network), when
   ACheckRemote; mtPruneWorktrees when worktrees are prunable;
-  mtPack from ALooseLimit loose objects or APackLimit packs. }
+  mtPack from ALooseLimit loose objects or APackLimit packs. ACancel,
+  when given, is asked as ls-remote runs, and True ends it. }
 function ScanMaintenance(const APath, ACaption: string; ACheckRemote: boolean = True;
-  ALooseLimit: integer = MaintLooseLimit; APackLimit: integer = MaintPackLimit): TGittanMaintRepo;
+  ALooseLimit: integer = MaintLooseLimit; APackLimit: integer = MaintPackLimit;
+  ACancel: TGittanCancelEvent = nil): TGittanMaintRepo;
 
 {** Runs AItem's task in the repository at APath: Done, else Error with
   git's reason; for mtPack the size then in AfterKiB (Loose, Packs and
-  SizeKiB stay as they were found). }
+  SizeKiB stay as they were found). mtSetHead fetches the branch Want
+  of the remote first, which set-head needs as a remote-tracking ref. }
 procedure RunMaintTask(const APath: string; var AItem: TGittanMaintItem);
 
-{** Scans the repository at APath as TGittanGoneScanJob does. }
-function ScanGoneRepo(const APath, ACaption: string; AFetch: boolean): TGittanGoneRepo;
+{** Scans the repository at APath as TGittanGoneScanJob does: with
+  AFetch, `git fetch --prune --multiple` of the remotes its local
+  branches track, asking ACancel as it runs. }
+function ScanGoneRepo(const APath, ACaption: string; AFetch: boolean;
+  ACancel: TGittanCancelEvent = nil): TGittanGoneRepo;
 
 {** Deletes the local branch ABranch of the repository at APath (`git
   branch -D`): Deleted, with the commit it was at, or Error. }
@@ -485,6 +505,57 @@ begin
   AOutput := Trim(AOutput);
 end;
 
+{ RemoteEnvironmentIn with ssh's ConnectTimeout added to the batch mode
+  Gittan sets; nothing changed when the user runs ssh their own way. }
+function BatchRemoteEnv(const ADir: string): TStringArray;
+var
+  i: integer;
+begin
+  Result := RemoteEnvironmentIn(ADir);
+  for i := 0 to High(Result) do
+    if Copy(Result[i], 1, Length('GIT_SSH_COMMAND=')) = 'GIT_SSH_COMMAND=' then
+      Result[i] := Result[i] + ' -o ConnectTimeout=' + IntToStr(BatchConnectTimeout);
+end;
+
+{ Fetches, with --prune, the remotes the local branches of the
+  repository at ARoot track: not --all, which leaves out a remote with
+  remote.<name>.skipFetchAll, whose gone branches would then not be
+  seen. True with nothing to fetch. }
+function FetchTracked(const ARoot: string; ACancel: TGittanCancelEvent;
+  out AError: string): boolean;
+var
+  Output, Name: string;
+  Remotes, Lines: TStringList;
+  Args: array of string;
+begin
+  AError := '';
+  Result := True;
+  Remotes := TStringList.Create;
+  Lines := TStringList.Create;
+  try
+    if not GitOut(ARoot, ['remote'], Output) then
+      Exit;
+    Remotes.Text := Output;
+    { %(upstream:remotename) is '.' for a branch that tracks a local one. }
+    if not GitOut(ARoot, ['for-each-ref', '--format=%(upstream:remotename)', 'refs/heads'],
+      Output) then
+      Exit;
+    Lines.Text := Output;
+    Args := ['fetch', '--prune', '--multiple'];
+    for Name in Remotes do
+      if (Name <> '') and (Lines.IndexOf(Name) >= 0) then
+        Args := Concat(Args, [Name]);
+    if Length(Args) = 3 then
+      Exit;
+    Result := RunGitEnv(ARoot, Args, BatchRemoteEnv(ARoot), Output, AError, '', nil, ACancel);
+    if not Result and (AError = '') then
+      AError := 'git fetch failed.';
+  finally
+    Lines.Free;
+    Remotes.Free;
+  end;
+end;
+
 function GoneMergeState(ARepo: TGittanRepo; const ABranch, ADefault: string): TGittanGoneMerge;
 var
   Root, Base, Tree, Squash, Cherry: string;
@@ -515,11 +586,12 @@ begin
     Result := gmSquashed;
 end;
 
-function ScanGoneRepo(const APath, ACaption: string; AFetch: boolean): TGittanGoneRepo;
+function ScanGoneRepo(const APath, ACaption: string; AFetch: boolean;
+  ACancel: TGittanCancelEvent): TGittanGoneRepo;
 var
   Repo: TGittanRepo;
   Names: TStringList;
-  Current, DefaultRef: string;
+  Current, DefaultRef, Err: string;
   i, n: integer;
 begin
   Result := Default(TGittanGoneRepo);
@@ -542,8 +614,8 @@ begin
         Result.Error := 'Not a git repository.';
       Exit;
     end;
-    if AFetch and not Repo.Fetch then
-      Result.FetchError := Trim(Repo.Error);
+    if AFetch and not FetchTracked(Repo.Root, ACancel, Err) then
+      Result.FetchError := Trim(Err);
     if not Repo.GoneBranches(Names) then
     begin
       Result.Error := Trim(Repo.Error);
@@ -630,7 +702,8 @@ begin
 
     { A line a file, quoted when its name needs it, so a name with a
       line break is one line too. }
-    if not GitOut(APath, ['status', '--porcelain', '--untracked-files=normal'], Output) then
+    { =all: each file of a new folder counts, as the page says files. }
+    if not GitOut(APath, ['status', '--porcelain', '--untracked-files=all'], Output) then
     begin
       Result.Error := 'git status failed.';
       Exit;
@@ -643,11 +716,19 @@ begin
         Inc(Result.Changed);
 
     if Repo.Stashes(Stashes) then
-      Result.Stashes := Length(Stashes);
+      Result.Stashes := Length(Stashes)
+    else
+      Result.Error := 'git stash list failed.';
 
     Result.NoRemote := GitOut(APath, ['remote'], Output) and (Output = '');
-    if GitOut(APath, ['for-each-ref', '--format=%(refname:short)%09%(upstream:short)%09' +
+    { lstrip=2, not short: short gives heads/foo when a tag foo exists. }
+    if not GitOut(APath, ['for-each-ref', '--format=%(refname:lstrip=2)%09%(upstream:short)%09' +
       '%(upstream:track,nobracket)', 'refs/heads'], Output) then
+    begin
+      if Result.Error = '' then
+        Result.Error := 'git for-each-ref failed.';
+    end
+    else
     begin
       Lines.Text := Output;
       for Line in Lines do
@@ -662,7 +743,9 @@ begin
           Upstream := Fields[1];
         if Length(Fields) > 2 then
           Track := Fields[2];
-        if Upstream <> '' then
+        { An upstream deleted on the remote is no upstream: its commits
+          are counted against every remote below. }
+        if (Upstream <> '') and (Track <> 'gone') then
         begin
           Ahead := AheadOf(Track);
           if Ahead > 0 then
@@ -691,7 +774,7 @@ end;
   Identity
   --------------------------------------------------------------------------- }
 
-function RemoteOwner(const AUrl: string): string;
+function RemoteOwner(const AUrl: string; const ASshConfig: string): string;
 var
   Host, RepoPath: string;
   p: integer;
@@ -699,6 +782,11 @@ begin
   Host := RemoteHost(AUrl);
   if Host = '' then
     Exit('');
+  { Over ssh: host:path, or a scheme with ssh in it, as gittan.forge
+    tells. }
+  p := Pos('://', AUrl);
+  if (ASshConfig <> '') and ((p = 0) or (Pos('ssh', LowerCase(Copy(AUrl, 1, p - 1))) > 0)) then
+    Host := LowerCase(SshHostName(Host, ASshConfig));
   RepoPath := RemoteRepoPath(AUrl);
   p := LastDelimiter('/', RepoPath);
   if p > 1 then
@@ -768,7 +856,7 @@ begin
       end;
     end;
   end;
-  Result.Owner := RemoteOwner(Output);
+  Result.Owner := RemoteOwner(Output, UserSshConfig);
 end;
 
 function SameIdentity(const A, B: TGittanRepoIdentity): boolean;
@@ -839,7 +927,7 @@ end;
   --------------------------------------------------------------------------- }
 
 { The loose objects, packs and size in KiB of `git count-objects -v`. }
-procedure ReadObjects(const APath: string; out ALoose, APacks: integer; out AKiB: int64);
+function ReadObjects(const APath: string; out ALoose, APacks: integer; out AKiB: int64): boolean;
 var
   Output: string;
   Lines: TStringList;
@@ -848,7 +936,8 @@ begin
   ALoose := 0;
   APacks := 0;
   AKiB := 0;
-  if not GitOut(APath, ['count-objects', '-v'], Output) then
+  Result := GitOut(APath, ['count-objects', '-v'], Output);
+  if not Result then
     Exit;
   AKiB := ParseCountObjects(Output);
   Lines := TStringList.Create;
@@ -890,7 +979,7 @@ begin
 end;
 
 function ScanMaintenance(const APath, ACaption: string; ACheckRemote: boolean;
-  ALooseLimit: integer; APackLimit: integer): TGittanMaintRepo;
+  ALooseLimit: integer; APackLimit: integer; ACancel: TGittanCancelEvent): TGittanMaintRepo;
 var
   Output, Err, Remote, Root: string;
   Lines: TStringList;
@@ -934,8 +1023,8 @@ begin
     finally
       Lines.Free;
     end;
-    if RunGitEnv(APath, ['ls-remote', '--symref', Remote, 'HEAD'], RemoteEnvironmentIn(APath),
-      Output, Err) then
+    if RunGitEnv(APath, ['ls-remote', '--symref', Remote, 'HEAD'], BatchRemoteEnv(APath),
+      Output, Err, '', nil, ACancel) then
     begin
       Item := Default(TGittanMaintItem);
       Item.Task := mtSetHead;
@@ -969,13 +1058,23 @@ begin
       end;
     if Length(Item.Worktrees) > 0 then
       Add(Item);
+  end
+  else
+  begin
+    Result.Error := Trim(Err);
+    if Result.Error = '' then
+      Result.Error := 'git worktree list failed.';
   end;
 
   { Objects enough to pack. }
   Item := Default(TGittanMaintItem);
   Item.Task := mtPack;
-  ReadObjects(APath, Item.Loose, Item.Packs, Item.SizeKiB);
-  if (Item.Loose >= ALooseLimit) or (Item.Packs >= APackLimit) then
+  if not ReadObjects(APath, Item.Loose, Item.Packs, Item.SizeKiB) then
+  begin
+    if Result.Error = '' then
+      Result.Error := 'git count-objects failed.';
+  end
+  else if (Item.Loose >= ALooseLimit) or (Item.Packs >= APackLimit) then
     Add(Item);
 end;
 
@@ -989,8 +1088,12 @@ begin
   Err := '';
   case AItem.Task of
     mtSetHead:
-      AItem.Done := RunGitEnv(APath, ['remote', 'set-head', AItem.Remote, '--auto'],
-        RemoteEnvironmentIn(APath), Output, Err);
+      { set-head needs refs/remotes/<remote>/<want>, which a branch
+        made on the remote since the last fetch does not have yet. }
+      AItem.Done := ((AItem.Want = '') or RunGitEnv(APath, ['fetch', '--', AItem.Remote,
+        AItem.Want], BatchRemoteEnv(APath), Output, Err)) and
+        RunGitEnv(APath, ['remote', 'set-head', AItem.Remote, '--auto'],
+        BatchRemoteEnv(APath), Output, Err);
     mtPruneWorktrees:
       AItem.Done := PruneWorktrees(APath, Err);
     mtPack:
@@ -1054,6 +1157,11 @@ begin
     Queue(@NotifyProgress);
 end;
 
+function TGittanBatchJob.Cancelled: boolean;
+begin
+  Result := Terminated;
+end;
+
 procedure TGittanBatchJob.Detach;
 begin
   FOnProgress := nil;
@@ -1094,7 +1202,7 @@ begin
   begin
     if Terminated then
       Exit;
-    FRepos[i] := ScanGoneRepo(FRepos[i].Path, FRepos[i].Caption, FFetch);
+    FRepos[i] := ScanGoneRepo(FRepos[i].Path, FRepos[i].Caption, FFetch, @Cancelled);
     ItemDone;
   end;
   Done;
@@ -1190,7 +1298,8 @@ begin
   begin
     if Terminated then
       Exit;
-    FRepos[i] := ScanMaintenance(FRepos[i].Path, FRepos[i].Caption);
+    FRepos[i] := ScanMaintenance(FRepos[i].Path, FRepos[i].Caption, True, MaintLooseLimit,
+      MaintPackLimit, @Cancelled);
     ItemDone;
   end;
   Done;

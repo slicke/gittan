@@ -106,6 +106,20 @@ begin
   finally
     V.Free;
   end;
+  V := GetJSON('{"text": ""}');
+  try
+    AssertTrue('an empty text clears the tab', ExtTabModelOf(V, M));
+    AssertEquals('no text', '', M.Text);
+    AssertEquals('no rows', 0, Length(M.Rows));
+  finally
+    V.Free;
+  end;
+  V := GetJSON('{"rows": null}');
+  try
+    AssertTrue('rows of null are a model too', ExtTabModelOf(V, M));
+  finally
+    V.Free;
+  end;
 end;
 
 procedure TExtViewsTest.TestBatchResult;

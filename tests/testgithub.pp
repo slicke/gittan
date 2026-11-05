@@ -90,6 +90,44 @@ begin
   AssertFalse('in a cluster', Allows(['pr', 'comment', '1', '-wF', '/etc/passwd']));
   AssertFalse('the editor', Allows(['pr', 'comment', '1', '-e']));
   AssertFalse('the token', Allows(['status', '--show-token']));
+  { The subcommand behind --repo, and no other flag before it. }
+  AssertFalse('a checkout behind --repo', Allows(['pr', '--repo', 'o/r', 'checkout', '12']));
+  AssertFalse('a checkout behind -R', Allows(['pr', '-R', 'o/r', 'checkout', '12']));
+  AssertFalse('a checkout behind --repo=', Allows(['pr', '--repo=o/r', 'checkout', '12']));
+  AssertFalse('a checkout behind -Ro/r', Allows(['pr', '-Ro/r', 'checkout', '12']));
+  AssertFalse('a download behind -R', Allows(['run', '-R', 'o/r', 'download', '1']));
+  AssertFalse('a clone behind -R', Allows(['repo', '-R', 'o/r', 'clone', 'a/b']));
+  AssertFalse('another flag before the subcommand', Allows(['pr', '-x', 'checkout', '12']));
+  AssertTrue('a list behind -R', Allows(['pr', '-R', 'o/r', 'list']));
+  { A typed field in a cluster, at any length. }
+  AssertFalse('api -iF a file', Allows(['api', 'x', '-iF', 'body=@/etc/passwd']));
+  AssertFalse('api -iFbody=@', Allows(['api', 'x', '-iFbody=@/etc/passwd']));
+  AssertFalse('api -iF=body=@', Allows(['api', 'x', '-iF=body=@/etc/passwd']));
+  AssertFalse('a long cluster', Allows(['pr', 'view', '1', '-cccccw']));
+  AssertFalse('-O after = in a cluster', Allows(['release', 'view', '-iO=x']));
+  AssertTrue('api -iF a value', Allows(['api', 'x', '-iF', 'per_page=5']));
+  AssertTrue('api -f, no file', Allows(['api', 'x', '-f', 'body=@not-a-file']));
+  AssertTrue('a value run together', Allows(['pr', 'list', '-q.title']));
+  { Deleting the local branch, the browser, a checkout or worktree. }
+  AssertFalse('pr merge -d', Allows(['pr', 'merge', '12', '-d']));
+  AssertFalse('pr merge -sd', Allows(['pr', 'merge', '12', '-sd']));
+  AssertFalse('pr merge --delete-branch', Allows(['pr', 'merge', '12', '--delete-branch']));
+  AssertFalse('pr close -d', Allows(['pr', 'close', '12', '-d']));
+  AssertTrue('pr merge', Allows(['pr', 'merge', '12', '--squash']));
+  AssertTrue('pr list -d, the drafts', Allows(['pr', 'list', '-d']));
+  AssertFalse('-w', Allows(['pr', 'view', '12', '-w']));
+  AssertFalse('-w in a cluster', Allows(['pr', 'view', '12', '-cw']));
+  AssertTrue('run list -w, the workflow', Allows(['run', 'list', '-w', 'build.yml']));
+  AssertFalse('issue develop -c', Allows(['issue', 'develop', '3', '-c']));
+  AssertFalse('issue develop --checkout', Allows(['issue', 'develop', '3', '--checkout']));
+  AssertFalse('a worktree', Allows(['issue', 'develop', '3', '--worktree', '/tmp/x']));
+  AssertTrue('issue develop', Allows(['issue', 'develop', '3', '--name', 'fix']));
+  AssertTrue('pr close -c, a comment', Allows(['pr', 'close', '12', '-c', 'Done']));
+  AssertFalse('pr create', Allows(['pr', 'create', '--fill']));
+  AssertFalse('repo rename', Allows(['repo', 'rename', 'x', '--yes']));
+  AssertFalse('an attachment', Allows(['issue', 'comment', '1', '--attach', '/etc/passwd']));
+  AssertFalse('read-file -o', Allows(['repo', 'read-file', 'README.md', '-o', '/tmp/x']));
+  AssertTrue('read-file', Allows(['repo', 'read-file', 'README.md']));
 end;
 
 procedure TGitHubTest.TestRegistered;

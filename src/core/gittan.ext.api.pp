@@ -786,6 +786,8 @@ begin
   if Cli = '' then
     if (ApiSettings <> nil) and not ApiSettings.HostingEnabled then
       O.Add('reason', Forge.Name + ' is turned off in the settings')
+    else if (ApiSettings <> nil) and (ApiSettings.ForgeCliPath(Forge.Name) <> '') then
+      O.Add('reason', ApiSettings.ForgeCliPath(Forge.Name) + ' was not found')
     else
       O.Add('reason', Forge.CliName + ' was not found');
   O.Add('cwd', Cwd);
@@ -1073,15 +1075,22 @@ begin
     Exit;
   end;
   Exe := SeenForgeCli(Forge.Name);
-  if Exe = '' then
+  if (Exe = '') or not FileExists(Exe) then
   begin
     res := StringToValueVal('Gittan.forge.cli: ' + Forge.Name +
       ' is turned off or ' + Forge.CliName + ' was not found');
     Exit;
   end;
+  { The home folder only when no folder is asked for: one that is gone
+    is refused rather than the tool run elsewhere. }
   Dir := ParamStr(params, 2);
-  if (Dir = '') or not DirectoryExists(Dir) then
-    Dir := ExcludeTrailingPathDelimiter(GetUserDir);
+  if Dir = '' then
+    Dir := ExcludeTrailingPathDelimiter(GetUserDir)
+  else if not DirectoryExists(Dir) then
+  begin
+    res := StringToValueVal('Gittan.forge.cli: ' + Dir + ' is not a folder');
+    Exit;
+  end;
   res := StringToValueVal(ToolJson(Exe, Dir, Args, [], Forge.CliEnv, ParamStr(params, 3)));
   Result := True;
 end;

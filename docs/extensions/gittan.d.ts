@@ -72,11 +72,14 @@ declare namespace Gittan {
     clearCards(o?: RepoOptions): void;
   };
 
-  /** A command of a repository; one of the GitHub view (where "forge") gets ForgeContext. */
+  /** A command of a repository gets CommandContext; one of the GitHub view (where "forge") gets ForgeContext, and one in both either. */
   interface CommandContext { repo: string; path: string; line: number; selection: string }
   interface ForgeContext { forge: string; login: string }
+  type RepoWhere = "menu" | "file" | "editor";
   const commands: {
-    register(cmd: { id: string; title: string; where?: ("menu" | "file" | "editor" | "forge")[] | string; run(ctx: CommandContext & ForgeContext): void }): boolean;
+    register(cmd: { id: string; title: string; where: "forge" | ["forge"]; run(ctx: ForgeContext): void }): boolean;
+    register(cmd: { id: string; title: string; where?: RepoWhere | RepoWhere[]; run(ctx: CommandContext): void }): boolean;
+    register(cmd: { id: string; title: string; where?: (RepoWhere | "forge")[] | string; run(ctx: CommandContext | ForgeContext): void }): boolean;
     unregister(id: string): boolean;
   };
 

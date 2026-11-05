@@ -180,9 +180,12 @@ begin
   inherited Destroy;
 end;
 
+{ Each kind has its mark, so a command "tab:x" is not the tab x. The keys
+  live only while Gittan runs (the menus' Hint, RunCommand); none is kept
+  in the settings. }
 class function TGittanExtRegistry.CommandKey(const AExtId, AId: string): string;
 begin
-  Result := AExtId + #9 + AId;
+  Result := AExtId + #9'cmd:' + AId;
 end;
 
 class function TGittanExtRegistry.KindKey(const AExtId, AId: string;

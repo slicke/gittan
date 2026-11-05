@@ -29,6 +29,7 @@ type
     procedure TestSaveRecent;
     procedure TestTabs;
     procedure TestBatchRepos;
+    procedure TestBatchOperationIndex;
     procedure TestDamagedFileGivesDefaults;
     procedure TestWrongTypesSaved;
     procedure TestDraftUnknownKept;
@@ -438,6 +439,28 @@ begin
     AssertEquals('ext:forge-overview:b', S.BatchOperation);
   finally
     S.Free;
+  end;
+end;
+
+{ batch.operation kept by its index before: 1 to 3 the operations, 0
+  and an unknown one the overview. }
+procedure TSettingsTest.TestBatchOperationIndex;
+const
+  Keys: array[0..4] of string = ('', 'gone', 'identity', 'maintenance', '');
+var
+  S: TGittanSettings;
+  i: integer;
+begin
+  for i := 0 to High(Keys) do
+  begin
+    Put('state.json', '{"batch": {"operation": ' + IntToStr(i) + '}}');
+    S := TGittanSettings.Create(FDir);
+    try
+      S.Load;
+      AssertEquals('index ' + IntToStr(i), Keys[i], S.BatchOperation);
+    finally
+      S.Free;
+    end;
   end;
 end;
 

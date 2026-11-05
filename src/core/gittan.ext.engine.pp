@@ -122,6 +122,7 @@ TExtContextInfo = record
   Granted: TExtPermSet;      // baseline + user-approved promptable perms
   Repos: TStringArray;       // @repos: the repositories it runs for, all when empty
   Forges: TStringArray;      // @forges: the forges it runs for, lower case, all when empty
+  Generation: QWord;         // a number of its own, never reused, unlike Ctx's address
 end;
 
 TExtContextList = specialize TFPGList<PExtContextInfo>;
@@ -187,6 +188,8 @@ private
     {** Active "target" context for registration helpers (addFunction/addClassFunction/AddPromise).
         nil means write to FContext (legacy/admin path). Set by BeginRegistration. }
   FCurrentRegCtx: JSContext;
+    {** The last context's Generation; each new context takes the next. }
+  FContextGeneration: QWord;
     {** Active permissions for the current registration target. Used by *If gated helpers. }
   FCurrentRegPerms: TExtPermSet;
     {** Stable extension id for the current registration target. Empty outside
@@ -569,6 +572,10 @@ public
         for the admin/template context. Unlike the display name this is
         unique per loaded extension, so it is safe to key registries on. }
   function ExtensionIdForContext(ctx: JSContext): string;
+    {** The number the context owning @code(ctx) was made with, 0 for none.
+        A context made after another has a new number even when it got
+        the freed one's address, so a caller keeps it to tell a reload. }
+  function GenerationForContext(ctx: JSContext): QWord;
     {** What the extension owning @code(ctx) was granted; [] for none. }
   function GrantedForContext(ctx: JSContext): TExtPermSet;
   function ContextInScope(ctx: JSContext; const ARoot, ARemoteUrls: string): boolean;
@@ -2333,6 +2340,18 @@ begin
       Exit(FExtContexts[i]^.ExtId);
 end;
 
+function TGittanExtEngine.GenerationForContext(ctx: JSContext): QWord;
+var
+  i: integer;
+begin
+  Result := 0;
+  if (ctx = nil) or (not Assigned(FExtContexts)) then
+    Exit;
+  for i := 0 to FExtContexts.Count - 1 do
+    if (FExtContexts[i] <> nil) and (FExtContexts[i]^.Ctx = ctx) then
+      Exit(FExtContexts[i]^.Generation);
+end;
+
 function TGittanExtEngine.ModuleRootForContext(ctx: JSContext): string;
 var
   i: integer;
@@ -2538,6 +2557,8 @@ begin
   Info^.DisplayName := DisplayName;
   Info^.Author := Author;
   Info^.Granted := Granted;
+  Inc(FContextGeneration);
+  Info^.Generation := FContextGeneration;
 
   // Provision engine-internal baselines (alert/confirm/prompt/select/log/timers/console)
   // into this ctx, gated by Granted. Caller will follow up with BeginRegistration to

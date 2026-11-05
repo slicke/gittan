@@ -16,6 +16,10 @@
 
 ### Fixed
 - Removing a great many files from the repository at once no longer fails on a command line too long for the system.
+- Putting changes into their commits no longer leaves the fixup commits on the branch when git refuses to start the rebase (a pre-rebase hook, an autostash that fails); they are taken back, and if that fails too, it says so. Taking them back no longer fails on a command line too long for the system when many files were picked.
+- Deleting the branches whose branch on the remote was deleted no longer lists a branch that follows a local branch, and finds a branch that has the name of a tag.
+- A gh path set in the settings that no longer exists counts as no gh, rather than failing each time gh runs.
+- `make ide` (and `make.ps1 ide`) installs ATSynEdit and ATFlatControls in the IDE before rebuilding it, so a fresh Lazarus can open the forms in the designer.
 
 ## 0.15 (build-140, 2026-11-04)
 

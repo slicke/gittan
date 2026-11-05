@@ -155,9 +155,10 @@ LEXLIB := lexlib
 # Vendored packages, in dependency order: the list is VENDOR_PACKAGES in
 # .github/workflows/build.yml, and a new package goes in both. `make deps`
 # registers each with --add-package-link and compiles it, after a fresh clone
-# or a submodule move; `make ide` rebuilds the Lazarus IDE, which is built with
-# ATSynEdit, ATFlatControls, EncConv and BGRABitmap, with the IDE's own build
-# profile (its widgetset too).
+# or a submodule move; `make ide` installs ATFlatControls and ATSynEdit in the
+# Lazarus IDE (IDE_PACKAGES) and rebuilds it, so it is built with ATSynEdit,
+# ATFlatControls, EncConv and BGRABitmap, with the IDE's own build profile (its
+# widgetset too).
 VENDOR_PACKAGES := \
   vendor/ATFlatControls/atflatcontrols/atflatcontrols_package.lpk \
   vendor/EncConv/encconv/encconv_package.lpk \
@@ -177,6 +178,13 @@ VENDOR_PACKAGES := \
 # and lists the commits upstream has that the checkout lacks; it is the only
 # one that needs the network, so no build runs it.
 IDE_VENDOR := vendor/ATFlatControls vendor/EncConv vendor/BGRABitmap vendor/ATSynEdit
+# The packages `make ide` installs in the IDE (--add-package) before it
+# rebuilds it, so the form designer knows the controls of Gittan's forms
+# (TATSynEdit, the ATFlatControls); EncConv and BGRABitmap come with
+# ATSynEdit, which requires them.
+IDE_PACKAGES := \
+  vendor/ATFlatControls/atflatcontrols/atflatcontrols_package.lpk \
+  vendor/ATSynEdit/atsynedit/atsynedit_package.lpk
 IDE_STAMP := .ide-vendor
 
 # Application icon. The artwork comes finished: icons/gittan-mac.png is the
@@ -234,7 +242,7 @@ help:
 	@echo "  test      Build and run the unit tests in tests/ (TEST_ARGS forwards options)"
 	@echo "  lexlib    Copy the lexers from $(LEXERS_SRC) and $(LEXERS_OWN) into $(LEXLIB)/ (part of every build)"
 	@echo "  deps      Register the vendored packages with lazbuild and compile them"
-	@echo "  ide       Rebuild the Lazarus IDE (after ATSynEdit, ATFlatControls, EncConv or BGRABitmap moves)"
+	@echo "  ide       Install ATSynEdit and ATFlatControls in the Lazarus IDE and rebuild it (also after ATSynEdit, ATFlatControls, EncConv or BGRABitmap moves)"
 	@echo "  outdated  Fetch the vendored packages' remotes and list the commits upstream is ahead"
 	@echo "  wordmark  Write src/ui/gittan.wordmark.inc from icons/wordmark/gittan-wordmark-<theme>.png"
 	@echo "  dialogicon Write src/ui/gittan.dialogicon.inc from icons/dialog/gittan-dialog-<n>.png"
@@ -272,6 +280,11 @@ deps:
 	done
 
 ide:
+	@set -e; for lpk in $(IDE_PACKAGES); do \
+	  if [ ! -f "$$lpk" ]; then \
+	    echo "$$lpk is missing; run: git submodule update --init"; exit 1; fi; \
+	  "$(LAZBUILD)" --add-package "$$lpk"; \
+	done
 	"$(LAZBUILD)" --build-ide=
 	@if git rev-parse --git-dir >/dev/null 2>&1; then \
 	  for d in $(IDE_VENDOR); do echo "$$(git -C $$d rev-parse HEAD) $$d"; done > $(IDE_STAMP); fi

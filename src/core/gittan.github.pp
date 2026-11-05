@@ -1452,12 +1452,13 @@ class function TGittanGitHubForge.CliAllows(const AArgs: array of string;
   out AReason: string): boolean;
 const
   { The commands an extension may run, each with the subcommands it may
-    not ('' for none); a command not listed is refused. }
+    not ('' for none); a command not listed is refused. pr create may
+    push the local branch and repo rename rewrites the clone's remote. }
   Allowed: array[0..10, 0..1] of string = (
     ('api', ''),
-    ('pr', ' checkout '),
+    ('pr', ' checkout create '),
     ('issue', ''),
-    ('repo', ' clone create sync set-default deploy-key '),
+    ('repo', ' clone create sync set-default deploy-key rename '),
     ('run', ' download '),
     ('workflow', ''),
     ('release', ' create upload download '),
@@ -1467,31 +1468,51 @@ const
     ('cache', ''));
   { Flags that read or write a local file, work in a local clone or
     start another program, in any command. }
-  Refused: array[0..14] of string = ('--input', '--body-file', '--notes-file',
+  Refused: array[0..16] of string = ('--input', '--body-file', '--notes-file',
     '--output', '--dir', '--clobber', '--clone', '--remote', '--checkout', '--web',
-    '--editor', '--template-file', '--env-file', '--show-token', '--exec');
-
-  { -wF and the like: short flags run together, one of which reads or
-    writes a file or starts an editor. }
-  function ShortCluster(const AArg: string; ATyped: boolean): boolean;
-  var
-    k: integer;
-  begin
-    Result := False;
-    if (Length(AArg) < 3) or (Length(AArg) > 5) then
-      Exit;
-    for k := 2 to Length(AArg) do
-      if not (AArg[k] in ['a'..'z', 'A'..'Z']) then
-        Exit;
-    for k := 2 to Length(AArg) do
-      if (AArg[k] in ['O', 'D', 'e']) or (AArg[k] = 'F') and not ATyped then
-        Exit(True);
-  end;
+    '--editor', '--template-file', '--env-file', '--show-token', '--exec',
+    '--attach', '--worktree');
+  { Flags refused in one subcommand alone, short and long: pr merge's and
+    pr close's -d delete the local branch too (-d is --draft elsewhere),
+    issue develop's -c checks the branch out, repo read-file's -o writes
+    a file. }
+  SubRefused: array[0..3, 0..3] of string = (
+    ('pr', 'merge', 'd', '--delete-branch'),
+    ('pr', 'close', 'd', '--delete-branch'),
+    ('issue', 'develop', 'c', '--checkout'),
+    ('repo', 'read-file', 'o', '--output'));
+  { Short flags that take a value in every command that has one, so the
+    rest of a run of short flags after one is its value (-q.name,
+    -tDeploy) and no flag. }
+  ValueLetters = ['A', 'B', 'D', 'L', 'O', 'R', 'S', 'T', 'X', 'b', 'g', 'j',
+    'k', 'o', 'q', 't'];
 
 var
   Cmd, Sub, A, Flag, Value: string;
-  i, c: integer;
-  Known, Typed: boolean;
+  i, c, k: integer;
+  Known, Typed, HasSubs: boolean;
+
+  function SubRefuses(const AFlag: string; AShort: boolean): boolean;
+  var
+    n: integer;
+  begin
+    Result := False;
+    for n := 0 to High(SubRefused) do
+      if (SubRefused[n, 0] = Cmd) and (SubRefused[n, 1] = Sub) and
+        (AShort and (SubRefused[n, 2] = AFlag) or
+        not AShort and (SubRefused[n, 3] = AFlag)) then
+        Exit(True);
+  end;
+
+  { A typed field (api's and workflow run's -F, --field) whose
+    "key=@file" reads a file. }
+  function ReadsFile(const AValue: string): boolean;
+  begin
+    Result := Pos('=@', AValue) > 0;
+    if Result then
+      AReason := 'gh ' + Cmd + ' reads no file for an extension';
+  end;
+
 begin
   Result := False;
   AReason := '';
@@ -1506,14 +1527,6 @@ begin
     if Allowed[c, 0] = Cmd then
     begin
       Known := True;
-      Sub := '';
-      if Length(AArgs) > 1 then
-        Sub := AArgs[1];
-      if (Sub <> '') and (Pos(' ' + Sub + ' ', Allowed[c, 1]) > 0) then
-      begin
-        AReason := 'gh ' + Cmd + ' ' + Sub + ' is not open to extensions';
-        Exit;
-      end;
       Break;
     end;
   if not Known then
@@ -1521,49 +1534,109 @@ begin
     AReason := 'gh ' + Cmd + ' is not open to extensions';
     Exit;
   end;
+  { The subcommand is the first argument that is no flag: gh takes
+    --repo (-R) before it too, so pr --repo o/r checkout 12 is a
+    checkout. Any other flag there is refused rather than guessed at,
+    since gh would take the word after it for its value. }
+  Sub := '';
+  HasSubs := (Cmd <> 'api') and (Cmd <> 'status');
+  if HasSubs then
+  begin
+    i := 1;
+    while i <= High(AArgs) do
+    begin
+      A := AArgs[i];
+      if (A = '-R') or (A = '--repo') then
+        Inc(i, 2)
+      else if (Pos('--repo=', A) = 1) or (Pos('-R', A) = 1) then
+        Inc(i)
+      else if (A <> '') and (A[1] = '-') then
+      begin
+        AReason := 'gh ' + Cmd + ' takes no ' + A +
+          ' before its subcommand from an extension';
+        Exit;
+      end
+      else
+      begin
+        Sub := A;
+        Break;
+      end;
+    end;
+    if (Sub <> '') and (Pos(' ' + Sub + ' ', Allowed[c, 1]) > 0) then
+    begin
+      AReason := 'gh ' + Cmd + ' ' + Sub + ' is not open to extensions';
+      Exit;
+    end;
+  end;
+  { -F is api's and workflow run's typed field and the short --body-file
+    elsewhere. }
+  Typed := (Cmd = 'api') or (Cmd = 'workflow');
   for i := 1 to High(AArgs) do
   begin
     A := AArgs[i];
     if A = '--' then
       Break;
-    Flag := A;
-    if Pos('=', Flag) > 0 then
-      Flag := Copy(Flag, 1, Pos('=', Flag) - 1);
-    for c := 0 to High(Refused) do
-      if Flag = Refused[c] then
-      begin
-        AReason := 'gh ' + Flag + ' is not open to extensions';
-        Exit;
-      end;
-    { -F is api's and workflow run's typed field, whose "key=@file"
-      reads a file, and the short --body-file elsewhere; -O, -D and -e
-      are --output, --dir and --editor, alone or in a cluster of short
-      flags (-wF). }
-    Typed := (Cmd = 'api') or (Cmd = 'workflow');
-    if Typed then
+    if (Length(A) < 2) or (A[1] <> '-') then
+      Continue;
+    if A[2] = '-' then
     begin
+      Flag := A;
       Value := '';
-      if (A = '-F') or (A = '--field') then
+      if Pos('=', Flag) > 0 then
       begin
-        if i < High(AArgs) then
-          Value := AArgs[i + 1];
+        Value := Copy(Flag, Pos('=', Flag) + 1, MaxInt);
+        Flag := Copy(Flag, 1, Pos('=', Flag) - 1);
       end
-      else if Pos('--field=', A) = 1 then
-        Value := Copy(A, 9, MaxInt)
-      else if (Pos('-F', A) = 1) and (Length(A) > 2) then
-        Value := Copy(A, 3, MaxInt);
-      if Pos('=@', Value) > 0 then
+      else if i < High(AArgs) then
+        Value := AArgs[i + 1];
+      for c := 0 to High(Refused) do
+        if Flag = Refused[c] then
+        begin
+          AReason := 'gh ' + Flag + ' is not open to extensions';
+          Exit;
+        end;
+      if SubRefuses(Flag, False) then
       begin
-        AReason := 'gh ' + Cmd + ' reads no file for an extension';
+        AReason := 'gh ' + Cmd + ' ' + Sub + ' ' + Flag +
+          ' is not open to extensions';
         Exit;
       end;
+      if Typed and (Flag = '--field') and ReadsFile(Value) then
+        Exit;
+      Continue;
     end;
-    if (Length(A) >= 2) and (A[1] = '-') and (A[2] <> '-') and
-      (((A[2] = 'F') and not Typed) or (A[2] in ['O', 'D', 'e']) or
-      ShortCluster(A, Typed)) then
+    { One short flag or several run together (-iF, -wF), any of which may
+      be one refused: -O, -D, -e and -w are --output, --dir, --editor and
+      --web (-w is --workflow in run list), -F --body-file outside api and
+      workflow. The value of the last one may follow it, after an = or
+      not (-Fkey=@file, -iO=file). }
+    k := 2;
+    while k <= Length(A) do
     begin
-      AReason := 'gh ' + A + ' is not open to extensions';
-      Exit;
+      if (A[k] in ['O', 'D', 'e']) or (A[k] = 'F') and not Typed or
+        (A[k] = 'w') and not ((Cmd = 'run') and (Sub = 'list')) or
+        SubRefuses(A[k], True) then
+      begin
+        AReason := 'gh -' + A[k] + ' is not open to extensions';
+        Exit;
+      end;
+      if A[k] = 'F' then
+      begin
+        Value := Copy(A, k + 1, MaxInt);
+        if Value = '' then
+        begin
+          if i < High(AArgs) then
+            Value := AArgs[i + 1];
+        end
+        else if Value[1] = '=' then
+          Delete(Value, 1, 1);
+        if ReadsFile(Value) then
+          Exit;
+        Break;
+      end;
+      if (A[k] in ValueLetters) or (k < Length(A)) and (A[k + 1] = '=') then
+        Break;
+      Inc(k);
     end;
   end;
   Result := True;

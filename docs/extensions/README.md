@@ -128,7 +128,7 @@ Gittan.forge.cli(["pr", "list", "--json", "number,title"]).then(function (r) { /
 Gittan.forges.gh.run(["api", "user"]);      // gh, and only where the forge is GitHub
 ```
 
-The forge is the one of the repository named (`{repo: ctx.repo}`), else the GitHub view's while it is shown, else the shown repository's; `{forge: "GitHub"}` names one. It is looked up at each call, so code that awaits between calls names its forge or repository (`{forge: ctx.forge}` in a tab, `{repo: ctx.repo}` in an operation) and does not change course when the user closes the view meanwhile. The tool runs in that repository, or your home folder for the view. `Gittan.forge.cli` runs whichever forge's tool that is, so code that reads its output should look at `info().name`; `Gittan.forges.gh.run` refuses (the promise is rejected) where the forge is not GitHub, with the reason, as it does when GitHub is turned off in the settings or gh is not found. The tool can do whatever your account may on the forge, which is why `forge` is asked for, but nothing on your computer: for gh only `api`, `pr`, `issue`, `repo`, `run`, `workflow`, `release`, `search`, `label`, `status` and `cache`, without what works in a local clone or with local files (`pr checkout`, `repo clone`, `run download`, `release upload`, `--body-file`, `--input`, `api -F key=@file`...) and without `--web` or `--editor`; anything else (an alias, a gh extension, `config`, `auth`, `gist`) is rejected with the reason. For more, ask for `exec` and run `Gittan.exec.run("gh", ...)`.
+The forge is the one of the repository named (`{repo: ctx.repo}`), else the GitHub view's while it is shown, else the shown repository's; `{forge: "GitHub"}` names one. It is looked up at each call, so code that awaits between calls names its forge or repository (`{forge: ctx.forge}` in a tab, `{repo: ctx.repo}` in an operation) and does not change course when the user closes the view meanwhile. The tool runs in that repository, or your home folder for the view. `Gittan.forge.cli` runs whichever forge's tool that is, so code that reads its output should look at `info().name`; `Gittan.forges.gh.run` refuses (the promise is rejected) where the forge is not GitHub, with the reason, as it does when GitHub is turned off in the settings or gh is not found. The tool can do whatever your account may on the forge, which is why `forge` is asked for, but nothing on your computer: for gh only `api`, `pr`, `issue`, `repo`, `run`, `workflow`, `release`, `search`, `label`, `status` and `cache`, without what works in a local clone or with local files (`pr checkout`, `pr create`, `repo clone`, `repo rename`, `run download`, `release upload`, `pr merge --delete-branch`, `issue develop --checkout`, `--worktree`, `--body-file`, `--attach`, `--input`, `api -F key=@file`...) and without `--web` (`-w`) or `--editor`; the subcommand comes first, after `--repo` alone (`["pr", "--repo", "o/r", "list"]`); anything else (an alias, a gh extension, `config`, `auth`, `gist`) is rejected with the reason. For more, ask for `exec` and run `Gittan.exec.run("gh", ...)`.
 
 ## The GitHub view
 
@@ -147,7 +147,7 @@ Gittan.forgeTabs.register({
       empty: "Nothing waits."                  // when there are no rows
     };
   },
-  action: async function (id, row, ctx) { }   // a row's pill; return a model, or nothing to render again
+  action: async function (id, row, ctx) { }   // a row's pill; return a model ({text: ""} clears the tab), or nothing to render again
 });
 ```
 

@@ -6,11 +6,16 @@ unit testbatch;
   fetch (merged, squashed, not merged; the current one and one still on
   the remote left out), deleted, and a deletion git refuses; and the
   overview of what is left undone in a repository: clean, with changes,
-  untracked files, a stash, a branch ahead of its upstream and one on
-  no remote, in the middle of a merge, and without a remote; and who a
-  repository commits as, the owner of a remote's URL and the
+  untracked files (each of a new folder), a stash, a branch ahead of
+  its upstream and one on no remote, one whose upstream is gone with
+  work on no remote, a branch beside a tag of its name, in the middle
+  of a merge, and without a remote; a branch that tracks a local one
+  never gone, a remote with skipFetchAll still fetched; and who a
+  repository commits as, the owner of a remote's URL (an ssh alias by
+  its HostName) and the
   repositories that commit under another e-mail than the others of
-  their owner; and maintenance: a remote's HEAD moved on the remote, a
+  their owner; and maintenance: a remote's HEAD moved on the remote
+  (to a branch not fetched yet too), a
   worktree whose folder is gone and loose objects found, each done and
   then no longer found, a remote that cannot be reached, and the jobs. }
 
@@ -41,6 +46,8 @@ type
     procedure TestRowRepos;
     procedure TestScan;
     procedure TestScanNotARepo;
+    procedure TestScanTagAndLocalUpstream;
+    procedure TestScanSkipFetchAll;
     procedure TestDelete;
     procedure TestDeleteRefused;
     procedure TestJobs;
@@ -48,14 +55,18 @@ type
     procedure TestStatusUndone;
     procedure TestStatusOperation;
     procedure TestStatusNoRemote;
+    procedure TestStatusGoneUpstream;
+    procedure TestStatusUntrackedFolder;
     procedure TestStatusJob;
     procedure TestIdentity;
     procedure TestIdentityLocal;
     procedure TestRemoteOwner;
+    procedure TestRemoteOwnerSshAlias;
     procedure TestSameIdentity;
     procedure TestOddIdentities;
     procedure TestIdentityJob;
     procedure TestMaintSetHead;
+    procedure TestMaintSetHeadUnfetched;
     procedure TestMaintWorktrees;
     procedure TestMaintPack;
     procedure TestMaintRemoteError;
@@ -115,6 +126,10 @@ end;
   merged, squash, wip and current are deleted on the remote alone, so
   only a fetch with --prune finds them gone. }
 procedure TBatchTest.MakeRepos;
+const
+  { A typed array: FPC 3.2.2 makes ['merged', ..., 'current'] an array
+    of shortstrings as long as its first, so current came out curren. }
+  GoneNames: array[0..3] of string = ('merged', 'squash', 'wip', 'current');
 var
   Name: string;
 begin
@@ -153,7 +168,7 @@ begin
   Git(FWork, ['switch', '-q', '-c', 'current', 'main']);
   Git(FWork, ['push', '-q', '-u', 'origin', 'current']);
 
-  for Name in ['merged', 'squash', 'wip', 'current'] do
+  for Name in GoneNames do
     Git(FRemote, ['branch', '-q', '-D', Name]);
 end;
 
@@ -184,20 +199,20 @@ begin
     Recent.Add('/src/three');
     Rows := BatchRows(List, Recent, 'Recent');
     AssertEquals(7, Length(Rows));
-    AssertEquals('/src/top', Rows[0].Path);
+    AssertEquals(RepoListPath('/src/top'), Rows[0].Path);
     AssertTrue(Rows[1].IsFolder);
     AssertEquals('Work', Rows[1].Caption);
     { A collapsed folder's repositories are there too. }
-    AssertEquals('/src/one', Rows[2].Path);
+    AssertEquals(RepoListPath('/src/one'), Rows[2].Path);
     AssertEquals(1, Rows[2].Depth);
     AssertEquals('Inner', Rows[3].Caption);
-    AssertEquals('/src/two', Rows[4].Path);
+    AssertEquals(RepoListPath('/src/two'), Rows[4].Path);
     AssertEquals(2, Rows[4].Depth);
     { The recent one the list has is not listed again. }
     AssertTrue(Rows[5].IsFolder);
     AssertEquals('Recent', Rows[5].Caption);
     AssertEquals('', Rows[5].Path);
-    AssertEquals('/src/three', Rows[6].Path);
+    AssertEquals(RepoListPath('/src/three'), Rows[6].Path);
     AssertEquals('three', Rows[6].Caption);
     AssertEquals(1, Rows[6].Depth);
   finally
@@ -242,14 +257,14 @@ begin
     Rows := BatchRows(List, nil, 'Recent');
     Paths := BatchRowRepos(Rows, 0);
     AssertEquals(2, Length(Paths));
-    AssertEquals('/src/one', Paths[0]);
-    AssertEquals('/src/two', Paths[1]);
+    AssertEquals(RepoListPath('/src/one'), Paths[0]);
+    AssertEquals(RepoListPath('/src/two'), Paths[1]);
     Paths := BatchRowRepos(Rows, 2);
     AssertEquals(1, Length(Paths));
-    AssertEquals('/src/two', Paths[0]);
+    AssertEquals(RepoListPath('/src/two'), Paths[0]);
     Paths := BatchRowRepos(Rows, 4);
     AssertEquals(1, Length(Paths));
-    AssertEquals('/src/top', Paths[0]);
+    AssertEquals(RepoListPath('/src/top'), Paths[0]);
     AssertEquals(0, Length(BatchRowRepos(Rows, 9)));
   finally
     List.Free;
@@ -369,29 +384,65 @@ end;
   gone branches deleted: nothing left undone. }
 procedure TBatchTest.TestStatusClean;
 var
-  Status: TGittanRepoStatus;
+  St: TGittanRepoStatus;
 begin
   MakeRepos;
   Git(FWork, ['switch', '-q', 'main']);
   Git(FWork, ['fetch', '-q', '--prune']);
   Git(FWork, ['branch', '-q', '-D', 'merged', 'squash', 'wip', 'current']);
-  Status := RepoStatus(FWork, '');
-  AssertEquals('', Status.Error);
-  AssertEquals('work', Status.Caption);
-  AssertEquals('main', Status.Branch);
-  AssertFalse(Status.Detached);
-  AssertEquals(0, Status.Changed);
-  AssertEquals(0, Status.Untracked);
-  AssertEquals(0, Status.Stashes);
-  AssertEquals(0, Length(Status.Unpushed));
-  AssertEquals(0, Length(Status.Unshared));
-  AssertFalse(Status.NoRemote);
-  AssertTrue(StatusClean(Status));
+  St := RepoStatus(FWork, '');
+  AssertEquals('', St.Error);
+  AssertEquals('work', St.Caption);
+  AssertEquals('main', St.Branch);
+  AssertFalse(St.Detached);
+  AssertEquals(0, St.Changed);
+  AssertEquals(0, St.Untracked);
+  AssertEquals(0, St.Stashes);
+  AssertEquals(0, Length(St.Unpushed));
+  AssertEquals(0, Length(St.Unshared));
+  AssertFalse(St.NoRemote);
+  AssertTrue(StatusClean(St));
+end;
+
+{ A tag named as a branch (keep, wip), and a branch that tracks a
+  local branch deleted since: wip is still gone by its own name, the
+  local one is not gone from any remote. }
+procedure TBatchTest.TestScanTagAndLocalUpstream;
+var
+  Repo: TGittanGoneRepo;
+begin
+  MakeRepos;
+  Git(FWork, ['tag', 'wip', 'main']);
+  Git(FWork, ['tag', 'keep', 'main']);
+  Git(FWork, ['branch', '-q', 'base', 'main']);
+  Git(FWork, ['branch', '-q', '--track', 'onbase', 'base']);
+  Git(FWork, ['branch', '-q', '-D', 'base']);
+  Repo := ScanGoneRepo(FWork, '', True);
+  AssertEquals('', Repo.Error);
+  AssertEquals('', Repo.FetchError);
+  AssertTrue(FindBranch(Repo, 'wip') >= 0);
+  AssertEquals(-1, FindBranch(Repo, 'heads/wip'));
+  AssertEquals(-1, FindBranch(Repo, 'onbase'));
+  AssertEquals(-1, FindBranch(Repo, 'keep'));
+  AssertEquals(3, Length(Repo.Branches));
+end;
+
+{ origin skipped by fetch --all is fetched all the same. }
+procedure TBatchTest.TestScanSkipFetchAll;
+var
+  Repo: TGittanGoneRepo;
+begin
+  MakeRepos;
+  Git(FWork, ['config', 'remote.origin.skipFetchAll', 'true']);
+  Repo := ScanGoneRepo(FWork, '', True);
+  AssertEquals('', Repo.FetchError);
+  AssertEquals(3, Length(Repo.Branches));
+  AssertTrue(FindBranch(Repo, 'wip') >= 0);
 end;
 
 procedure TBatchTest.TestStatusUndone;
 var
-  Status: TGittanRepoStatus;
+  St: TGittanRepoStatus;
 begin
   MakeRepos;
   Git(FWork, ['switch', '-q', 'main']);
@@ -419,32 +470,32 @@ begin
     finally
       Free;
     end;
-  Status := RepoStatus(FWork, 'Work');
-  AssertEquals('', Status.Error);
-  AssertEquals('Work', Status.Caption);
-  AssertEquals(2, Status.Changed);
-  AssertEquals(2, Status.Untracked);
-  AssertEquals(1, Status.Stashes);
-  AssertEquals(1, Length(Status.Unpushed));
-  AssertEquals('keep', Status.Unpushed[0].Name);
-  AssertEquals(1, Status.Unpushed[0].Count);
-  AssertEquals(1, Length(Status.Unshared));
-  AssertEquals('local', Status.Unshared[0].Name);
-  AssertEquals(2, Status.Unshared[0].Count);
-  AssertFalse(StatusClean(Status));
+  St := RepoStatus(FWork, 'Work');
+  AssertEquals('', St.Error);
+  AssertEquals('Work', St.Caption);
+  AssertEquals(2, St.Changed);
+  AssertEquals(2, St.Untracked);
+  AssertEquals(1, St.Stashes);
+  AssertEquals(1, Length(St.Unpushed));
+  AssertEquals('keep', St.Unpushed[0].Name);
+  AssertEquals(1, St.Unpushed[0].Count);
+  AssertEquals(1, Length(St.Unshared));
+  AssertEquals('local', St.Unshared[0].Name);
+  AssertEquals(2, St.Unshared[0].Count);
+  AssertFalse(StatusClean(St));
 
   { A detached HEAD has no branch. }
   Git(FWork, ['stash', '-q', '-u']);
   Git(FWork, ['switch', '-q', '--detach', 'main']);
-  Status := RepoStatus(FWork, '');
-  AssertTrue(Status.Detached);
-  AssertEquals('', Status.Branch);
-  AssertFalse(StatusClean(Status));
+  St := RepoStatus(FWork, '');
+  AssertTrue(St.Detached);
+  AssertEquals('', St.Branch);
+  AssertFalse(StatusClean(St));
 end;
 
 procedure TBatchTest.TestStatusOperation;
 var
-  Status: TGittanRepoStatus;
+  St: TGittanRepoStatus;
   Output, Err: string;
 begin
   MakeRepos;
@@ -455,30 +506,78 @@ begin
   CommitFile('a.txt', 'two', 'two');
   { Stops on the conflict in a.txt. }
   AssertFalse(RunGitIn(FWork, ['merge', '-q', 'one'], Output, Err));
-  Status := RepoStatus(FWork, '');
-  AssertEquals('merging', Status.Operation);
-  AssertTrue(Status.Changed > 0);
-  AssertFalse(StatusClean(Status));
+  St := RepoStatus(FWork, '');
+  AssertEquals('merging', St.Operation);
+  AssertTrue(St.Changed > 0);
+  AssertFalse(StatusClean(St));
 end;
 
 procedure TBatchTest.TestStatusNoRemote;
 var
-  Status: TGittanRepoStatus;
+  St: TGittanRepoStatus;
 begin
   ForceDirectories(FWork);
   Git(FWork, ['init', '-q']);
   CommitFile('a.txt', 'a', 'first');
   Git(FWork, ['switch', '-q', '-c', 'side']);
   CommitFile('b.txt', 'b', 'side');
-  Status := RepoStatus(FWork, '');
-  AssertEquals('', Status.Error);
-  AssertTrue(Status.NoRemote);
+  St := RepoStatus(FWork, '');
+  AssertEquals('', St.Error);
+  AssertTrue(St.NoRemote);
   { Every commit is on no remote: not told branch by branch. }
-  AssertEquals(0, Length(Status.Unshared));
-  AssertFalse(StatusClean(Status));
-  Status := RepoStatus(IncludeTrailingPathDelimiter(FDir) + 'missing', '');
-  AssertTrue(Status.Error <> '');
-  AssertFalse(StatusClean(Status));
+  AssertEquals(0, Length(St.Unshared));
+  AssertFalse(StatusClean(St));
+  St := RepoStatus(IncludeTrailingPathDelimiter(FDir) + 'missing', '');
+  AssertTrue(St.Error <> '');
+  AssertFalse(StatusClean(St));
+end;
+
+{ wip's upstream is deleted on the remote: its commit is on no remote,
+  not "pushed" because nothing is ahead of a ref that is gone. A tag of
+  the name of keep, ahead of its upstream, leaves its name as it is. }
+procedure TBatchTest.TestStatusGoneUpstream;
+var
+  St: TGittanRepoStatus;
+begin
+  MakeRepos;
+  Git(FWork, ['switch', '-q', 'main']);
+  Git(FWork, ['branch', '-q', '-D', 'merged', 'squash', 'current']);
+  Git(FWork, ['fetch', '-q', '--prune', 'origin']);
+  Git(FWork, ['tag', 'keep', 'main']);
+  Git(FWork, ['switch', '-q', 'keep']);
+  CommitFile('k.txt', 'k', 'keep ahead');
+  Git(FWork, ['switch', '-q', 'main']);
+  St := RepoStatus(FWork, '');
+  AssertEquals('', St.Error);
+  AssertEquals(1, Length(St.Unpushed));
+  AssertEquals('keep', St.Unpushed[0].Name);
+  AssertEquals(1, Length(St.Unshared));
+  AssertEquals('wip', St.Unshared[0].Name);
+  AssertEquals(1, St.Unshared[0].Count);
+  AssertFalse(StatusClean(St));
+end;
+
+{ A new folder's files count one each. }
+procedure TBatchTest.TestStatusUntrackedFolder;
+var
+  St: TGittanRepoStatus;
+begin
+  ForceDirectories(FWork);
+  Git(FWork, ['init', '-q']);
+  CommitFile('a.txt', 'a', 'first');
+  ForceDirectories(IncludeTrailingPathDelimiter(FWork) + 'new');
+  with TStringList.Create do
+    try
+      Text := 'n';
+      SaveToFile(IncludeTrailingPathDelimiter(FWork) + 'new' + PathDelim + 'one.txt');
+      SaveToFile(IncludeTrailingPathDelimiter(FWork) + 'new' + PathDelim + 'two.txt');
+      SaveToFile(IncludeTrailingPathDelimiter(FWork) + 'top.txt');
+    finally
+      Free;
+    end;
+  St := RepoStatus(FWork, '');
+  AssertEquals('', St.Error);
+  AssertEquals(3, St.Untracked);
 end;
 
 procedure TBatchTest.TestStatusJob;
@@ -563,6 +662,20 @@ begin
   AssertEquals('', RemoteOwner('/srv/git/tool.git'));
   AssertEquals('', RemoteOwner('file:///srv/git/tool.git'));
   AssertEquals('', RemoteOwner(''));
+end;
+
+procedure TBatchTest.TestRemoteOwnerSshAlias;
+const
+  Config = 'Host github-work' + LineEnding + '  HostName github.com' + LineEnding +
+    '  IdentityFile ~/.ssh/work' + LineEnding;
+begin
+  AssertEquals('github.com/acme', RemoteOwner('github-work:acme/x.git', Config));
+  AssertEquals('github.com/acme', RemoteOwner('git@github-work:acme/x.git', Config));
+  AssertEquals('github.com/acme', RemoteOwner('ssh://git@github-work/acme/x', Config));
+  AssertEquals('github.com/acme', RemoteOwner('git@github.com:acme/x.git', Config));
+  { Not over ssh: the host as it is. }
+  AssertEquals('github-work/acme', RemoteOwner('https://github-work/acme/x', Config));
+  AssertEquals('github-work/acme', RemoteOwner('github-work:acme/x.git'));
 end;
 
 procedure TBatchTest.TestSameIdentity;
@@ -717,6 +830,27 @@ begin
   AssertEquals('', ScanMaintenance(FWork, '').Items[i].Have);
   { Not asked without ACheckRemote. }
   AssertEquals(-1, FindTask(ScanMaintenance(FWork, '', False), mtSetHead));
+end;
+
+{ The remote's HEAD moved to a branch made there after the clone, which
+  set-head --auto alone refuses (no refs/remotes/origin/next yet). }
+procedure TBatchTest.TestMaintSetHeadUnfetched;
+var
+  Repo: TGittanMaintRepo;
+  i: integer;
+begin
+  MakeClone;
+  Git(FRemote, ['branch', 'next', 'main']);
+  Git(FRemote, ['symbolic-ref', 'HEAD', 'refs/heads/next']);
+  Repo := ScanMaintenance(FWork, '');
+  i := FindTask(Repo, mtSetHead);
+  AssertTrue(i >= 0);
+  AssertEquals('next', Repo.Items[i].Want);
+  RunMaintTask(FWork, Repo.Items[i]);
+  AssertEquals('', Repo.Items[i].Error);
+  AssertTrue(Repo.Items[i].Done);
+  AssertEquals('refs/remotes/origin/next', GitOut(FWork, ['symbolic-ref',
+    'refs/remotes/origin/HEAD']));
 end;
 
 procedure TBatchTest.TestMaintWorktrees;

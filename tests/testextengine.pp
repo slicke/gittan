@@ -86,6 +86,7 @@ type
     procedure TestPayloadWithoutData;
     procedure TestListenerScopedToForges;
     procedure TestForgeTabsAndBatch;
+    procedure TestCommandKeysApart;
   end;
 
 implementation
@@ -555,6 +556,28 @@ begin
   AssertEquals('the tab stays', 1, Length(FEngine.Registry.CommandsIn(cwForgeTab)));
   AssertEquals('then the tab', 'true', EvalIn(Info^.Ctx, 'String(Gittan.forgeTabs.unregister("prs"))'));
   AssertEquals('the operation stays', 1, FEngine.Registry.CommandCount);
+end;
+
+{ A command whose id looks like a tab's or an operation's key is found
+  apart from them: each kind has its mark. }
+procedure TExtEngineTest.TestCommandKeysApart;
+var
+  Info: PExtContextInfo;
+begin
+  Info := Load('keyed',
+    'globalThis.ran = "";' +
+    'Gittan.commands.register({id: "tab:x", title: "T", run: function () { globalThis.ran += "c"; }});' +
+    'Gittan.commands.register({id: "batch:y", title: "B", run: function () { globalThis.ran += "d"; }});' +
+    'Gittan.forgeTabs.register({id: "x", title: "X", render: function () { globalThis.ran += "t"; return {rows: []}; }});' +
+    'Gittan.batch.register({id: "y", title: "Y", run: function () { globalThis.ran += "b"; return 1; }});',
+    PermBaseline);
+  AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
+  AssertEquals('four', 4, FEngine.Registry.CommandCount);
+  FEngine.RunCommand(TGittanExtRegistry.CommandKey('keyed', 'tab:x'), '{}');
+  FEngine.RunCommand(TGittanExtRegistry.KindKey('keyed', 'x', cwForgeTab), '{"seq": 1, "kind": "render"}');
+  FEngine.RunCommand(TGittanExtRegistry.CommandKey('keyed', 'batch:y'), '{}');
+  FEngine.RunCommand(TGittanExtRegistry.KindKey('keyed', 'y', cwBatch), '{"seq": 2, "repo": "/r"}');
+  AssertEquals('each its own', 'ctdb', EvalIn(Info^.Ctx, 'globalThis.ran'));
 end;
 
 initialization

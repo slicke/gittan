@@ -159,7 +159,7 @@ end;
 procedure TGittanExtTabPage.PaintRow(var Y: integer; AIndex, ALeft, ARight: integer);
 var
   Row: TExtTabRow;
-  TextH, H, Inner, RowTop, TagW, OpenW, X, i: integer;
+  TextH, H, Inner, RowTop, TagW, OpenW, X, PillsRight, Lines, i: integer;
   R, HeadR, PillR: TRect;
   Hot, CanOpen: boolean;
 begin
@@ -170,8 +170,26 @@ begin
   H := 2 * Px(CardPadY) + TextH;
   if Row.Detail <> '' then
     Inc(H, Px(4) + WrappedHeight(Row.Detail, Inner));
+  { The actions' pills wrap as the Batch page's operations do; the
+    lines are counted with the same test the painting below makes, so
+    the card is as tall as its pills. }
+  PillsRight := ALeft + Px(CardPadX) + Inner;
   if Length(Row.Actions) > 0 then
-    Inc(H, Px(8) + TextH + 2 * Px(PillPadY));
+  begin
+    Lines := 1;
+    X := ALeft + Px(CardPadX);
+    for i := 0 to High(Row.Actions) do
+    begin
+      if (X > ALeft + Px(CardPadX)) and (X + PillWidth(Row.Actions[i].Title) > PillsRight) then
+      begin
+        X := ALeft + Px(CardPadX);
+        Inc(Lines);
+      end;
+      Inc(X, PillWidth(Row.Actions[i].Title) + Px(6));
+    end;
+    Inc(H, Px(8) + TextH + 2 * Px(PillPadY) +
+      (Lines - 1) * (TextH + 2 * Px(PillPadY) + Px(6)));
+  end;
   R := Rect(ALeft, Y, ARight, Y + H);
   HeadR := Rect(ALeft, Y, ARight, Y + Px(CardPadY) + TextH + Px(4));
   CanOpen := (Row.Url <> '') or (Row.Repo <> '');
@@ -236,6 +254,11 @@ begin
     X := ALeft + Px(CardPadX);
     for i := 0 to High(Row.Actions) do
     begin
+      if (X > ALeft + Px(CardPadX)) and (X + PillWidth(Row.Actions[i].Title) > PillsRight) then
+      begin
+        X := ALeft + Px(CardPadX);
+        Inc(RowTop, TextH + 2 * Px(PillPadY) + Px(6));
+      end;
       PillR := PaintPill(X, RowTop, Row.Actions[i].Title,
         RowActionLink + IntToStr(AIndex) + ':' + Row.Actions[i].Id, False, not FBusy);
       X := PillR.Right + Px(6);

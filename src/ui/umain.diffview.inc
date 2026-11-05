@@ -840,17 +840,14 @@ begin
     repaint shows them. Their text takes them too, for a copy or a
     search; a lexer that reads a heading as code could name the blocks
     differently each time, so twice a build at most. }
-  if FGapTextRounds < 2 then
+  if (FGapTextRounds < 2) and not FGapTextQueued then
   begin
-    Inc(FGapTextRounds);
     { The adapter is still in its parse-done handler, and a change of
       the text starts a parse; the text is written from the message
-      loop. }
-    if not FGapTextQueued then
-    begin
-      FGapTextQueued := True;
-      Application.QueueAsyncCall(@GapTextsAsync, 0);
-    end;
+      loop, once for the names a queued call will read then. }
+    Inc(FGapTextRounds);
+    FGapTextQueued := True;
+    Application.QueueAsyncCall(@GapTextsAsync, 0);
   end;
   Edit.Invalidate;
   if FEditOld.Visible then

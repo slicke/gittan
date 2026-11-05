@@ -65,7 +65,7 @@ interface
 uses
   Classes, SysUtils, Types, Controls, Forms, Menus, ExtCtrls, Graphics, LCLType, Dialogs,
   Clipbrd, gittan.job, gittan.forge, gittan.forgepage, gittan.batch, gittan.batchpage,
-  gittan.askdlg, gittan.extpage, gittan.ext.registry, gittan.ext.quickjs, fpjson, umain;
+  gittan.askdlg, gittan.extpage, gittan.ext.registry, fpjson, umain;
 
 const
   {** The Batch tab's index, after the forge page's sections. }
@@ -124,14 +124,21 @@ type
     FExtTabs: TGittanExtCommands;
     FExtTab, FExtTabSeq: integer;
     FExtTabActing: boolean;
+    { Asked for while an action ran (Refresh, the view shown again): the
+      tab renders when the action's answer is in, so that answer is
+      still taken. }
+    FExtTabRenderAfter: boolean;
     { The account changed while a tab was shown: its rows were the old
       account's, asked again once the job says who is logged in now. }
     FExtTabStale: boolean;
-    FExtTabCtx: JSContext;
+    { The generation of the context its function was in (the engine's
+      GenerationForContext), not the context's address, which a context
+      made on a reload may get again. }
+    FExtTabGen: QWord;
     FExtMenu: TMenuItem;
     FExtQueued, FIsShown: boolean;
     FExtRunKey, FExtRunExt: string;
-    FExtRunCtx: JSContext;
+    FExtRunGen: QWord;
     FExtRunPaths, FExtRunCaptions: TStringArray;
     FExtRunIndex, FExtRunSeq: integer;
     FThemeTimer: TTimer;
@@ -203,6 +210,9 @@ type
     procedure RebuildExtAsync(Data: PtrInt);
     procedure ShowExtTab;
     procedure RenderExtTab;
+    { RenderExtTab, or once the running action's answer is in. }
+    procedure RenderExtTabSoon;
+    procedure RenderExtTabAsync(Data: PtrInt);
     procedure ExtTabRefresh(Sender: TObject);
     procedure ExtTabAction(Sender: TObject; ARow: integer; const AAction: string);
     procedure ExtTabOpenUrl(Sender: TObject; const ATarget: string);
@@ -331,6 +341,7 @@ resourcestring
   rsExtTabGone = 'The extension no longer has this tab.';
   rsExtRunGone = 'The extension no longer has this operation.';
   rsExtReloaded = 'The extensions were loaded again, which stopped the run.';
+  rsExtAccountChanged = 'The account changed, which stopped the run.';
 
 var
   { The number of the last request to an extension's tab or operation. }
@@ -751,12 +762,18 @@ begin
   begin
     FExtTabSeq := 0;
     FExtTabActing := False;
+    FExtTabRenderAfter := False;
     FExtTabStale := True;
     FExtPage.SetModel(Default(TExtTabModel));
     FExtPage.SetBusy(True, False);
     if FExtPage.Visible then
       FExtPage.FitHeight(FBox.ClientHeight);
   end;
+  { A Batch operation's run stops: its next steps would run the forge's
+    tool as the new account. FinishExtRun drops its seq, so an answer
+    still to come is not taken. }
+  if FExtRunKey <> '' then
+    FinishExtRun(rsExtAccountChanged);
   { The job first, as in Shown. }
   StartJob;
   UpdatePage;
@@ -830,6 +847,8 @@ begin
     Exit;
   FExtTab := -1;
   FExtTabSeq := 0;
+  FExtTabActing := False;
+  FExtTabRenderAfter := False;
   FExtPage.Visible := False;
   if AIndex = BatchTab then
   begin
@@ -1267,11 +1286,13 @@ begin
   end;
   FRestored := False;
   UpdatePage;
-  if FExtTabStale then
+  { Asked again when it was the old account's, or when it was rendered
+    while the job had not yet said who is logged in. }
+  if FExtTabStale or (OldLogin <> FLogin) then
   begin
     FExtTabStale := False;
     if FExtPage.Visible then
-      RenderExtTab;
+      RenderExtTabSoon;
   end;
   if (OldLogin <> FLogin) or (OldAvatar <> FAvatar) or (OldAvatarUrl <> FAvatarUrl) then
   begin
@@ -1492,7 +1513,7 @@ procedure TForgeView.MenuRefreshClick(Sender: TObject);
 begin
   StartJob;
   if FExtTab >= 0 then
-    RenderExtTab;
+    RenderExtTabSoon;
 end;
 
 { ---------------------------------------------------------------------------
@@ -1534,17 +1555,17 @@ var
   Item: TMenuItem;
   Ops: TGittanBatchExtOps;
   ShownKey: string;
-  ShownCtx: JSContext;
+  ShownGen: QWord;
   i, n: integer;
 begin
   Eng := TGittanExtEngine.Existing;
   ShownKey := '';
-  ShownCtx := nil;
+  ShownGen := 0;
   if FExtTab >= 0 then
   begin
     ShownKey := TGittanExtRegistry.KindKey(FExtTabs[FExtTab].ExtId, FExtTabs[FExtTab].Id,
       cwForgeTab);
-    ShownCtx := FExtTabCtx;
+    ShownGen := FExtTabGen;
   end;
   FExtTabs := nil;
   Ops := nil;
@@ -1601,7 +1622,7 @@ begin
   begin
     if (Eng = nil) or not Eng.Registry.FindCommand(FExtRunKey, Cmd) then
       FinishExtRun(rsExtRunGone)
-    else if Cmd.Ctx <> FExtRunCtx then
+    else if Eng.GenerationForContext(Cmd.Ctx) <> FExtRunGen then
       FinishExtRun(rsExtReloaded);
   end;
   FBatch.SetExtOps(Ops);
@@ -1624,8 +1645,12 @@ begin
       FPage.FitHeight(FBox.ClientHeight);
       FPage.Visible := True;
     end
-    else if FExtTabs[FExtTab].Ctx <> ShownCtx then
+    else if (Eng = nil) or (Eng.GenerationForContext(FExtTabs[FExtTab].Ctx) <> ShownGen) then
     begin
+      { Loaded again: what the old context was asked (a render or an
+        action) never answers, so it is asked again. }
+      FExtTabActing := False;
+      FExtTabRenderAfter := False;
       if FIsShown then
         ShowExtTab
       else
@@ -1646,7 +1671,7 @@ begin
   FPage.Visible := False;
   FBatch.Visible := False;
   FExtPage.Visible := True;
-  RenderExtTab;
+  RenderExtTabSoon;
 end;
 
 { The tab's render, asked with a number of its own; an answer to an
@@ -1668,10 +1693,11 @@ begin
     FExtPage.FitHeight(FBox.ClientHeight);
     Exit;
   end;
-  FExtTabCtx := Cmd.Ctx;
+  FExtTabGen := Eng.GenerationForContext(Cmd.Ctx);
   FExtTabStale := False;
   FExtTabSeq := NextExtSeq;
   FExtTabActing := False;
+  FExtTabRenderAfter := False;
   FExtPage.SetBusy(True, False);
   FExtPage.FitHeight(FBox.ClientHeight);
   Ctx := ExtContext;
@@ -1684,9 +1710,23 @@ begin
   end;
 end;
 
+procedure TForgeView.RenderExtTabSoon;
+begin
+  if FExtTabActing and (FExtTabSeq <> 0) then
+    FExtTabRenderAfter := True
+  else
+    RenderExtTab;
+end;
+
+procedure TForgeView.RenderExtTabAsync(Data: PtrInt);
+begin
+  if (FExtTab >= 0) and FExtPage.Visible and (FExtTabSeq = 0) then
+    RenderExtTab;
+end;
+
 procedure TForgeView.ExtTabRefresh(Sender: TObject);
 begin
-  RenderExtTab;
+  RenderExtTabSoon;
 end;
 
 { An action of a row: the extension's action with the row as it gave
@@ -1706,9 +1746,10 @@ begin
   Key := TGittanExtRegistry.KindKey(FExtTabs[FExtTab].ExtId, FExtTabs[FExtTab].Id, cwForgeTab);
   if (Eng = nil) or not Eng.Registry.FindCommand(Key, Cmd) then
     Exit;
-  FExtTabCtx := Cmd.Ctx;
+  FExtTabGen := Eng.GenerationForContext(Cmd.Ctx);
   FExtTabSeq := NextExtSeq;
   FExtTabActing := True;
+  FExtTabRenderAfter := False;
   FExtPage.SetBusy(True, True);
   Ctx := ExtContext;
   try
@@ -1744,11 +1785,13 @@ var
   Value: TJSONData;
   Err: string;
   Model: TExtTabModel;
-  Acting: boolean;
+  Acting, RenderAfter: boolean;
 begin
   Acting := FExtTabActing;
+  RenderAfter := FExtTabRenderAfter;
   FExtTabSeq := 0;
   FExtTabActing := False;
+  FExtTabRenderAfter := False;
   if not ReadExtAnswer(AJson, Value, Err) then
     FExtPage.SetError(Err)
   else
@@ -1767,6 +1810,11 @@ begin
       Value.Free;
     end;
   FExtPage.FitHeight(FBox.ClientHeight);
+  { A render asked for while the action ran (Refresh, the view shown
+    again), from the message loop as the answer may come while
+    RunCommand is on the stack. }
+  if RenderAfter then
+    Application.QueueAsyncCall(@RenderExtTabAsync, 0);
 end;
 
 procedure TForgeView.ExtDeliver(ASeq: integer; const AExtId, AJson: string);
@@ -1824,7 +1872,7 @@ begin
     Exit;
   FExtRunKey := Op.Key;
   FExtRunExt := Op.ExtId;
-  FExtRunCtx := Cmd.Ctx;
+  FExtRunGen := Eng.GenerationForContext(Cmd.Ctx);
   FExtRunIndex := 0;
   FExtRunSeq := 0;
   FBatch.StartExtRun(Op.Key, FExtRunPaths, FExtRunCaptions);
@@ -1907,7 +1955,7 @@ begin
   FExtRunKey := '';
   FExtRunExt := '';
   FExtRunSeq := 0;
-  FExtRunCtx := nil;
+  FExtRunGen := 0;
   if FBatch.Visible then
     FBatch.FitHeight(FBox.ClientHeight);
 end;

@@ -44,6 +44,7 @@ type
     procedure TestRunMoved;
     procedure TestBuildMerges;
     procedure TestRunUndone;
+    procedure TestRunRebaseRefused;
   end;
 
 implementation
@@ -540,6 +541,54 @@ begin
     AssertEquals('one|two!!|three|four|five!|five-b|six!|seven|eight|nine|ten!',
       ReadLines('a.txt'));
     AssertEquals('alpha|beta!!|gamma', ReadLines('b.txt'));
+  finally
+    Plan.Free;
+  end;
+end;
+
+{ A pre-rebase hook that refuses: git does not start the rebase, so the
+  fixup commits are taken back as for a refused commit, and the branch,
+  the index and the work tree are as they were. }
+procedure TAbsorbTest.TestRunRebaseRefused;
+var
+  Plan: TGittanAbsorbPlan;
+  Commits: integer;
+  Conflicts, Stopped: boolean;
+  Err, Hook, Before: string;
+begin
+  MakeBranch;
+  ChangeWorkTree;
+  Before := GitOut(['rev-parse', 'HEAD']);
+  Hook := IncludeTrailingPathDelimiter(FDir) + '.git' + PathDelim + 'hooks' + PathDelim +
+    'pre-rebase';
+  ForceDirectories(ExtractFileDir(Hook));
+  with TStringList.Create do
+  try
+    Add('#!/bin/sh');
+    Add('exit 1');
+    TextLineBreakStyle := tlbsLF;
+    SaveToFile(Hook);
+  finally
+    Free;
+  end;
+  {$ifdef unix}
+  FpChmod(Hook, &755);
+  {$endif}
+  Plan := TGittanAbsorbPlan.Create;
+  try
+    AssertEquals('', Build(Plan, ['a.txt', 'b.txt', 'c.txt']));
+    AssertFalse('refused', AbsorbRun(FRepo, Plan, [True, True, True, True, True], [],
+      Commits, Conflicts, Stopped, Err));
+    AssertFalse('no conflicts', Conflicts);
+    AssertFalse('not stopped', Stopped);
+    AssertEquals('no fixup left', 0, Commits);
+    AssertEquals('HEAD as it was', Before, GitOut(['rev-parse', 'HEAD']));
+    AssertEquals('Change beta|Change five|Change two|Base', Subjects);
+    AssertEquals('nothing staged', '', GitOut(['diff', '--cached', '--name-only']));
+    AssertEquals('one|two!!|three|four|five!|five-b|six!|seven|eight|nine|ten!',
+      ReadLines('a.txt'));
+    AssertEquals('alpha|beta!!|gamma', ReadLines('b.txt'));
+    AssertEquals('no stash left', '', GitOut(['stash', 'list']));
   finally
     Plan.Free;
   end;
