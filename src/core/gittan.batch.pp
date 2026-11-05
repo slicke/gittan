@@ -720,7 +720,10 @@ begin
     else
       Result.Error := 'git stash list failed.';
 
-    Result.NoRemote := GitOut(APath, ['remote'], Output) and (Output = '');
+    if GitOut(APath, ['remote'], Output) then
+      Result.NoRemote := Output = ''
+    else if Result.Error = '' then
+      Result.Error := 'git remote failed.';
     { lstrip=2, not short: short gives heads/foo when a tag foo exists. }
     if not GitOut(APath, ['for-each-ref', '--format=%(refname:lstrip=2)%09%(upstream:short)%09' +
       '%(upstream:track,nobracket)', 'refs/heads'], Output) then
@@ -751,10 +754,17 @@ begin
           if Ahead > 0 then
             AddCount(Result.Unpushed, Name, Ahead);
         end
-        else if not Result.NoRemote and GitOut(APath, ['rev-list', '--count',
-          'refs/heads/' + Name, '--not', '--remotes'], Count) and
-          (StrToIntDef(Count, 0) > 0) then
-          AddCount(Result.Unshared, Name, StrToIntDef(Count, 0));
+        else if not Result.NoRemote then
+        begin
+          if not GitOut(APath, ['rev-list', '--count', 'refs/heads/' + Name,
+            '--not', '--remotes'], Count) then
+          begin
+            if Result.Error = '' then
+              Result.Error := 'git rev-list failed.';
+          end
+          else if StrToIntDef(Count, 0) > 0 then
+            AddCount(Result.Unshared, Name, StrToIntDef(Count, 0));
+        end;
       end;
     end;
   finally
