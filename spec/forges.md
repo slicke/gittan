@@ -36,6 +36,12 @@ Three more have an answer in the base, for a forge whose tool keeps no list of a
 - `class function AccountsNote: string` – why the tool would not use the account picked, when something outside its login decides (gh with `GH_TOKEN` in the environment); empty otherwise. The Hosting page shows it in place of its own note.
 - `function SwitchAccount(const AHost, ALogin: string; out AError: string): boolean` – makes ALogin the tool's active account on AHost, for the tool everywhere (`gh auth switch --hostname --user`). It runs the tool and waits.
 
+One more has the base's answer (none) for a tool that needs nothing:
+
+- `class function CliEnv: TStringArray` – the tool's environment when it runs for the forge's own jobs and for an extension (`Gittan.forge.cli`, `Gittan.forges.<CliName>.run`), "NAME=value" each: its prompts and its update notice off (GitHub's `GH_PROMPT_DISABLED=1`, `GH_NO_UPDATE_NOTIFIER=1`, which `RunGh` takes too).
+
+A registered forge reaches the extensions with no more code: `Gittan.forges.<CliName>` (`Gittan.forges.glab`), `@forges <name>` in a manifest, and `Gittan.forge` resolving it from a repository's remotes (spec/extensions.md). Its tool's output is its own, so an extension reads `Gittan.forge.info().name` before it parses it.
+
 Two more have the base's answer and a forge overrides them to shape the forge view's filters:
 
 - `class function Filters: TGittanForgeFilterDefs` – the filters the view offers on its two lists, each a key (kept in the settings, lower case, no comma), a caption, a group (the chip whose menu lists it: `fgReview`, `fgChecks` or `fgMore`, or one of the forge's own; '' for a chip of its own), the sections it is for and a `Passes` test over a `TGittanForgePull` and a `TGittanFilterContext` (the time, the attention reasons, the ignored checks). The base's `StandardFilters` fit every forge; a forge with a notion of its own (a pipeline, an approval rule) adds a def with a test of its own, in a standard group or one of its own, or leaves out one that means nothing on it. The view keeps the filters on by key under the forge's section, so a key must stay stable.

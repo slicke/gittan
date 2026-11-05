@@ -21,7 +21,7 @@ uses
   testtextfile, testrepocommands, testproject, testmanifest, testprojlazarus, testprojnode,
   testprojrust, testprojgo, testprojpython, testsha256, testai, testagentcli, testopenai, testforge,
   testlfslocks, testworktrees, testgitflow, testrepolist, testpickaxe, testnavhistory, testtimelapse, testundo, testmerge, testtabnames,
-  testextperm, testextmodules, testextquickjs, testextengine, testextloader, testextapi,
+  testextperm, testextmodules, testextquickjs, testextengine, testextloader, testextapi, testextviews,
   testissuelinks, testabsorb, testbatch;
 
 { Every git the tests start reads this file as the user's config and no

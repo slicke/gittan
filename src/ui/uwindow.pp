@@ -167,6 +167,8 @@ type
     function ShownFrame: TRepoFrame; override;
     function FrameAt(AIndex: integer): TRepoFrame; override;
     procedure ExtensionsChanged; override;
+    function ForgeViewForge: string; override;
+    procedure ExtDeliver(ASeq: integer; const AExtId, AJson: string); override;
     procedure RepoListChanged; override;
     procedure ShowRepoList; override;
     procedure CheckAccounts; override;
@@ -1036,7 +1038,7 @@ end;
 procedure TGittanWindow.UpdateTabs;
 var
   Captions, Hints: TStringArray;
-  Marks: TBooleanDynArray;
+  Marks, Exts: TBooleanDynArray;
   i: integer;
 begin
   if (csDestroying in ComponentState) or (FFrames = nil) then
@@ -1044,14 +1046,13 @@ begin
   UpdateNav;
   if FForgeShown then
   begin
-    i := FForgeView.Tabs(Captions, Marks);
-    Hints := nil;
+    i := FForgeView.Tabs(Captions, Hints, Marks, Exts);
     {$IFDEF LCLCocoa}
     if FToolbar <> nil then
-      FToolbar.SetTabs(Captions, Hints, Marks, i, True);
+      FToolbar.SetTabs(Captions, Hints, Marks, Exts, i, True);
     {$ENDIF}
     {$IFDEF OWNBAR}
-    FOwnBar.SetTabs(Captions, Hints, Marks, i, True);
+    FOwnBar.SetTabs(Captions, Hints, Marks, Exts, i, True);
     {$ENDIF}
     Exit;
   end;
@@ -1075,10 +1076,10 @@ begin
   end;
   {$IFDEF LCLCocoa}
   if FToolbar <> nil then
-    FToolbar.SetTabs(Captions, Hints, Marks, i);
+    FToolbar.SetTabs(Captions, Hints, Marks, [], i);
   {$ENDIF}
   {$IFDEF OWNBAR}
-  FOwnBar.SetTabs(Captions, Hints, Marks, i);
+  FOwnBar.SetTabs(Captions, Hints, Marks, [], i);
   {$ENDIF}
 end;
 
@@ -1244,6 +1245,22 @@ var
 begin
   for i := 0 to FFrames.Count - 1 do
     Frames[i].QueueRebuildExtMenu;
+  if FForgeView <> nil then
+    FForgeView.ExtensionsChanged;
+end;
+
+function TGittanWindow.ForgeViewForge: string;
+begin
+  if FForgeShown and (FForgeView <> nil) then
+    Result := FForgeView.ForgeName
+  else
+    Result := '';
+end;
+
+procedure TGittanWindow.ExtDeliver(ASeq: integer; const AExtId, AJson: string);
+begin
+  if FForgeView <> nil then
+    FForgeView.ExtDeliver(ASeq, AExtId, AJson);
 end;
 
 procedure TGittanWindow.RepoListChanged;

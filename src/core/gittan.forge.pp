@@ -572,6 +572,11 @@ type
       something outside the tool's login decides it (a token in the
       environment); empty otherwise, the base's answer. }
     class function AccountsNote: string; virtual;
+    {** What the tool's environment gets when it runs for an extension
+      (Gittan.forge.cli), "NAME=value" each: its prompts and its update
+      notice off, since nobody could answer the one and the other would
+      land in stderr. None, the base's answer. }
+    class function CliEnv: TStringArray; virtual;
     {** The filters the forge view offers on this forge's lists, and
       the presets of them it names: the base's are StandardFilters and
       StandardPresets; a forge with its own notions (a pipeline, an
@@ -2357,6 +2362,11 @@ class function TGittanForge.AccountsNote: string;
 
 begin
   Result := '';
+end;
+
+class function TGittanForge.CliEnv: TStringArray;
+begin
+  Result := nil;
 end;
 
 function TGittanForge.SwitchAccount(const AHost, ALogin: string;

@@ -14,7 +14,7 @@ The file starts with a manifest in a comment:
 */
 ```
 
-`@perms` names what the extension needs beyond what every extension may do: `data` to read the repositories (`Gittan.repo`, the files and their content, and the full payload of an event), `net` for `Gittan.net.fetch`, `exec` for `Gittan.git.run` and `Gittan.exec.run`, `settings` for `Gittan.app.setting`. Gittan asks you once per file, and again when the file changes or a module in a subfolder does (a module runs with the permissions of the file that imports it). A no is not kept: the file is skipped and asked about again at the next load. Dialogs, cards, commands, timers and the extension's own storage and settings page need no permission.
+`@perms` names what the extension needs beyond what every extension may do: `data` to read the repositories (`Gittan.repo`, the files and their content, and the full payload of an event), `net` for `Gittan.net.fetch`, `exec` for `Gittan.git.run` and `Gittan.exec.run`, `forge` for the forge's tool with your account (`Gittan.forge`, `Gittan.forges.gh`), `settings` for `Gittan.app.setting`. Gittan asks you once per file, and again when the file changes or a module in a subfolder does (a module runs with the permissions of the file that imports it). A no is not kept: the file is skipped and asked about again at the next load. Dialogs, cards, commands, timers and the extension's own storage and settings page need no permission.
 
 `@repos` keeps an extension to some repositories; without it, it runs for every one. It takes patterns separated by commas, on one line or several. A pattern that starts with `/`, `~`, a drive or `\\` is the root of a repository (`~/work/*`, `C:\src\app`); any other is compared with the repositories' remotes, written as host and path (`github.com/you/*`, `gitlab.example.org/team/app`; a URL such as `git@github.com:you/app.git` works too). `*` and `?` are wildcards. A repository is in when its root or one of its remotes matches. Out of it, the extension's listeners are not called and its commands are not in its menus or the command palette:
 
@@ -26,7 +26,9 @@ The file starts with a manifest in a comment:
 */
 ```
 
-`@repos` picks where the extension acts; it is not a permission. A timer or a command's own code can still read the repository shown, as far as `@perms` lets it.
+`@forges` keeps it to the repositories on some forges, by name (`@forges github`): a repository whose remotes are on another forge, or on none, is out of it, and in the GitHub view its tabs and commands show only when the view is GitHub's. An extension that runs `gh` says `@forges github`, so it never runs gh for a repository on GitLab. An unknown name keeps the file from loading.
+
+`@repos` and `@forges` pick where the extension acts; they are not permissions. A timer or a command's own code can still read the repository shown, as far as `@perms` lets it.
 
 The scripts run in quickjs-ng (ES2023, with `fetch`-like networking, timers, `console`, `import` of modules from subfolders of the extensions folder, and top-level `await`). `gittan.d.ts` beside this file describes the `Gittan` object for an editor's completion.
 
@@ -42,6 +44,8 @@ Gittan.commands.register({
   }
 });
 ```
+
+In the GitHub view's own Extensions menu, `where: "forge"`; such a command gets `{forge, login}`: the forge's name and your login on it.
 
 ## Events
 
@@ -107,9 +111,62 @@ A value may hold anything, line ends included. A key tells case, as a JavaScript
 
 ```js
 Gittan.git.run(["log", "--oneline", "-n", "5"]).then(function (r) { /* r.ok, r.status (the exit code), r.stdout, r.stderr */ });
-Gittan.exec.run("gh", ["pr", "list"]).then(function (r) { ... });
+Gittan.exec.run("make", ["-n", "all"]).then(function (r) { ... });
 Gittan.net.fetch("https://example.com/hook", {method: "POST", body: JSON.stringify(p), headers: {"Content-Type": "application/json"}})
   .then(function (res) { return res.text(); });
 ```
 
 These run off the main thread and come back as promises. A script that runs for 10 seconds without returning is stopped; waiting for a promise does not count.
+
+## The forge
+
+With `forge`, an extension runs the forge's own tool (gh for GitHub), logged in as you, without `exec`:
+
+```js
+Gittan.forge.info();          // {name: "GitHub", cli: "gh", ready, reason, accounts: [{host, login, active}]}, null on no forge
+Gittan.forge.cli(["pr", "list", "--json", "number,title"]).then(function (r) { /* as git.run's */ });
+Gittan.forges.gh.run(["api", "user"]);      // gh, and only where the forge is GitHub
+```
+
+The forge is the one of the repository named (`{repo: ctx.repo}`), else the GitHub view's while it is shown, else the shown repository's; `{forge: "GitHub"}` names one. The tool runs in that repository, or your home folder for the view. `Gittan.forge.cli` runs whichever forge's tool that is, so code that reads its output should look at `info().name`; `Gittan.forges.gh.run` refuses (the promise is rejected) where the forge is not GitHub, with the reason, as it does when GitHub is turned off in the settings or gh is not found. The tool can do whatever your account may, which is why `forge` is asked for.
+
+## The GitHub view
+
+An extension can add a tab to the GitHub view, after Batch:
+
+```js
+Gittan.forgeTabs.register({
+  id: "waiting",
+  title: "Waiting",
+  description: "Your pull requests with no update in two weeks.",
+  render: async function (ctx) {               // ctx: {forge, login}; as the tab is shown and on Refresh
+    return {
+      text: "",                                // a paragraph over the rows
+      rows: [{title: "acme/app#12 Fix", detail: "Updated 2026-09-01", tag: "draft", severity: "warn",
+              url: "https://github.com/acme/app/pull/12", actions: [{id: "nudge", title: "Nudge"}]}],
+      empty: "Nothing waits."                  // when there are no rows
+    };
+  },
+  action: async function (id, row, ctx) { }   // a row's pill; return a model, or nothing to render again
+});
+```
+
+A row opens its `url` in the browser, or its `repo` (a root) in Gittan. `severity` is `info`, `ok`, `warn` or `error`. A throw or a rejected promise shows its message on the tab.
+
+And an operation to the Batch tab, which runs once for each repository picked there, in turn:
+
+```js
+Gittan.batch.register({
+  id: "open",
+  title: "Open on GitHub",
+  description: "How many pull requests are open in each.",
+  run: async function (ctx) {                  // ctx: {repo, name, forge, login}
+    var r = await Gittan.forges.gh.run(["pr", "list", "--json", "number"], {repo: ctx.repo});
+    if (!r.ok) return {text: r.stderr, severity: "error"};
+    var n = JSON.parse(r.stdout).length;
+    return n ? n + " open" : null;             // a string, {text, severity, url}, or null for nothing to say
+  }
+});
+```
+
+A repository the extension does not run for (`@repos`, `@forges`) is left out and named as such. `samples/forge-overview.js` has a tab, an operation and a command of the view.

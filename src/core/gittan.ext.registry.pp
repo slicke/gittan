@@ -18,12 +18,19 @@ uses
 
 type
   {** Where a command shows: in the Extensions menu (and so in the
-    command palette), in the file tree's popup, in the editor's popup. }
-  TGittanExtCommandWhere = (cwMenu, cwFilePopup, cwEditorPopup);
+    command palette), in the file tree's popup, in the editor's popup,
+    in the forge view's Extensions menu; a tab of the forge view
+    (Gittan.forgeTabs.register) and an operation of its Batch tab
+    (Gittan.batch.register) are kept as commands too, whose function
+    answers through Gittan._deliver, and only their own natives make
+    them. }
+  TGittanExtCommandWhere = (cwMenu, cwFilePopup, cwEditorPopup, cwForge, cwForgeTab, cwBatch);
   TGittanExtCommandWheres = set of TGittanExtCommandWhere;
 
   TGittanExtCommand = record
     ExtId, Id, Title: string;
+    {** What a tab or an operation is for, a line under its title. }
+    Note: string;
     Where: TGittanExtCommandWheres;
     Ctx: JSContext;
     Func: JSValue;
@@ -62,11 +69,21 @@ type
     {** The key the menu items carry: the extension's id and the
       command's, so a command is found again after a reload. }
     class function CommandKey(const AExtId, AId: string): string;
+    {** The key of a tab or an operation: kept apart from the commands'
+      by a mark, so the same id may be both. }
+    class function KindKey(const AExtId, AId: string; AWhere: TGittanExtCommandWhere): string;
+    {** The commands, tabs or operations of AWhere, in the order
+      added. }
+    function CommandsIn(AWhere: TGittanExtCommandWhere): TGittanExtCommands;
     {** Adds a command, replacing one of the same id of the extension
       (whose function is freed); AFunc is owned from here. }
     procedure AddCommand(const AExtId, AId, ATitle: string;
-      AWhere: TGittanExtCommandWheres; ACtx: JSContext; const AFunc: JSValue);
-    function RemoveCommand(const AExtId, AId: string): boolean;
+      AWhere: TGittanExtCommandWheres; ACtx: JSContext; const AFunc: JSValue;
+      const ANote: string = '');
+    {** Removes the command AId of AExtId; with AWhere, only one that is
+      in one of those places, so a tab and a command may share an id. }
+    function RemoveCommand(const AExtId, AId: string;
+      AWhere: TGittanExtCommandWheres = []): boolean;
     function CommandCount: integer;
     function Command(AIndex: integer): TGittanExtCommand;
     function FindCommand(const AKey: string; out ACommand: TGittanExtCommand): boolean;
@@ -103,7 +120,8 @@ const
 function IsGittanExtEvent(const AName: string): boolean;
 {** The events, joined with commas, for a message. }
 function GittanExtEventList: string;
-{** "menu,file,editor" as a set; an empty or unknown text is the menu. }
+{** "menu,file,editor,forge" as a set; an empty or unknown text is the
+  menu. }
 function ParseCommandWheres(const ACsv: string): TGittanExtCommandWheres;
 {** Whether two JS values are the same value (the same object). }
 function SameJSValue(const A, B: JSValue): boolean;
@@ -143,6 +161,7 @@ begin
       'menu': Include(Result, cwMenu);
       'file': Include(Result, cwFilePopup);
       'editor': Include(Result, cwEditorPopup);
+      'forge': Include(Result, cwForge);
     end;
   if Result = [] then
     Result := [cwMenu];
@@ -164,6 +183,53 @@ end;
 class function TGittanExtRegistry.CommandKey(const AExtId, AId: string): string;
 begin
   Result := AExtId + #9 + AId;
+end;
+
+class function TGittanExtRegistry.KindKey(const AExtId, AId: string;
+  AWhere: TGittanExtCommandWhere): string;
+begin
+  case AWhere of
+    cwForgeTab: Result := AExtId + #9'tab:' + AId;
+    cwBatch: Result := AExtId + #9'batch:' + AId;
+    else
+      Result := CommandKey(AExtId, AId);
+  end;
+end;
+
+{ The key a command is found by: a tab's and an operation's carry their
+  mark. }
+function KeyOf(const ACmd: TGittanExtCommand): string;
+begin
+  if cwForgeTab in ACmd.Where then
+    Result := TGittanExtRegistry.KindKey(ACmd.ExtId, ACmd.Id, cwForgeTab)
+  else if cwBatch in ACmd.Where then
+    Result := TGittanExtRegistry.KindKey(ACmd.ExtId, ACmd.Id, cwBatch)
+  else
+    Result := TGittanExtRegistry.CommandKey(ACmd.ExtId, ACmd.Id);
+end;
+
+{ Whether a tab or an operation is of the same kind as AWhere: a
+  command (any of the menus) is replaced by a command, a tab by a tab. }
+function SameKind(AA, AB: TGittanExtCommandWheres): boolean;
+const
+  Own = [cwForgeTab, cwBatch];
+begin
+  Result := (AA * Own) = (AB * Own);
+end;
+
+function TGittanExtRegistry.CommandsIn(AWhere: TGittanExtCommandWhere): TGittanExtCommands;
+var
+  i, n: integer;
+begin
+  Result := nil;
+  n := 0;
+  for i := 0 to High(FCommands) do
+    if AWhere in FCommands[i].Where then
+    begin
+      SetLength(Result, n + 1);
+      Result[n] := FCommands[i];
+      Inc(n);
+    end;
 end;
 
 procedure TGittanExtRegistry.DeleteCommand(AIndex: integer);
@@ -189,14 +255,20 @@ begin
 end;
 
 procedure TGittanExtRegistry.AddCommand(const AExtId, AId, ATitle: string;
-  AWhere: TGittanExtCommandWheres; ACtx: JSContext; const AFunc: JSValue);
+  AWhere: TGittanExtCommandWheres; ACtx: JSContext; const AFunc: JSValue;
+  const ANote: string);
 var
   Cmd: TGittanExtCommand;
+  i: integer;
 begin
-  RemoveCommand(AExtId, AId);
+  for i := High(FCommands) downto 0 do
+    if (FCommands[i].ExtId = AExtId) and (FCommands[i].Id = AId) and
+      SameKind(FCommands[i].Where, AWhere) then
+      DeleteCommand(i);
   Cmd.ExtId := AExtId;
   Cmd.Id := AId;
   Cmd.Title := ATitle;
+  Cmd.Note := ANote;
   Cmd.Where := AWhere;
   Cmd.Ctx := ACtx;
   Cmd.Func := AFunc;
@@ -204,12 +276,14 @@ begin
   FCommands[High(FCommands)] := Cmd;
 end;
 
-function TGittanExtRegistry.RemoveCommand(const AExtId, AId: string): boolean;
+function TGittanExtRegistry.RemoveCommand(const AExtId, AId: string;
+  AWhere: TGittanExtCommandWheres): boolean;
 var
   i: integer;
 begin
   for i := 0 to High(FCommands) do
-    if (FCommands[i].ExtId = AExtId) and (FCommands[i].Id = AId) then
+    if (FCommands[i].ExtId = AExtId) and (FCommands[i].Id = AId) and
+      ((AWhere = []) or SameKind(FCommands[i].Where, AWhere)) then
     begin
       DeleteCommand(i);
       Exit(True);
@@ -233,7 +307,7 @@ var
   i: integer;
 begin
   for i := 0 to High(FCommands) do
-    if CommandKey(FCommands[i].ExtId, FCommands[i].Id) = AKey then
+    if KeyOf(FCommands[i]) = AKey then
     begin
       ACommand := FCommands[i];
       Exit(True);

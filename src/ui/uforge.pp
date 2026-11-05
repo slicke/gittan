@@ -39,10 +39,20 @@ unit uforge;
   the job's FindClones and AddSiblingRepositories) opens in a tab and
   compares, else the pull request opens on the forge.
 
+  The extensions reach the view too (spec/extensions.md): their tabs
+  after Batch (Gittan.forgeTabs.register, shown in gittan.extpage, each
+  rendered as it is shown and on Refresh), their operations in the
+  Batch tab after Gittan's own (Gittan.batch.register, called once per
+  picked repository in turn: RunExtStep), and their commands for the
+  forge view in an Extensions menu (where: "forge"); a tab and a command
+  only of the extensions whose @forges has the view's forge. A tab's or
+  an operation's answer comes back through the window
+  (TRepoWindow.ExtDeliver) by the request's number (NextExtSeq).
+
   The view has a menu of its own (MainMenu, with AppMenuItem for the
   application menu on macOS), the few items that mean something without
   a repository: New Tab, Open Repository..., Open Recent, Close GitHub,
-  Refresh, the tabs, Settings..., Check for Updates... and About; the
+  Refresh, the tabs, Extensions, Settings..., Check for Updates... and About; the
   global ones go through TRepoWindow, which runs them in the repository
   frame shown under the view. The window sets the menu, the caption and
   the title bar when it shows the view (Shown) and gives the frame's
@@ -55,7 +65,7 @@ interface
 uses
   Classes, SysUtils, Types, Controls, Forms, Menus, ExtCtrls, Graphics, LCLType, Dialogs,
   Clipbrd, gittan.job, gittan.forge, gittan.forgepage, gittan.batch, gittan.batchpage,
-  gittan.askdlg, umain;
+  gittan.askdlg, gittan.extpage, gittan.ext.registry, gittan.ext.quickjs, fpjson, umain;
 
 const
   {** The Batch tab's index, after the forge page's sections. }
@@ -105,6 +115,22 @@ type
     FAppMenuItem: TMenuItem;
     FRecentMenu, FCloseItem: TMenuItem;
     FDark: boolean;
+    { The extensions: the tabs of those that run for the forge, the one
+      shown (-1 for none), the request it waits for (0 for none), whether
+      that is an action, and the context its function was in, so a reload
+      asks again; the Extensions menu; the run of a Batch operation, its
+      repositories and the one it is at. }
+    FExtPage: TGittanExtTabPage;
+    FExtTabs: TGittanExtCommands;
+    FExtTab, FExtTabSeq: integer;
+    FExtTabActing: boolean;
+    FExtTabCtx: JSContext;
+    FExtMenu: TMenuItem;
+    FExtQueued, FIsShown: boolean;
+    FExtRunKey, FExtRunExt: string;
+    FExtRunCtx: JSContext;
+    FExtRunPaths, FExtRunCaptions: TStringArray;
+    FExtRunIndex, FExtRunSeq: integer;
     FThemeTimer: TTimer;
     FOnTabsChange, FOnUserChange: TNotifyEvent;
     function FindForge: boolean;
@@ -168,6 +194,25 @@ type
     procedure MenuCheckUpdatesClick(Sender: TObject);
     procedure MenuSettingsClick(Sender: TObject);
     procedure MenuAboutClick(Sender: TObject);
+    function CurrentTab: integer;
+    function ExtContext: TJSONObject;
+    procedure RebuildExt;
+    procedure RebuildExtAsync(Data: PtrInt);
+    procedure ShowExtTab;
+    procedure RenderExtTab;
+    procedure ExtTabRefresh(Sender: TObject);
+    procedure ExtTabAction(Sender: TObject; ARow: integer; const AAction: string);
+    procedure ExtTabOpenUrl(Sender: TObject; const ATarget: string);
+    procedure ExtTabOpenRepo(Sender: TObject; const ATarget: string);
+    procedure ExtTabAnswer(const AJson: string);
+    procedure BatchExtRun(Sender: TObject);
+    procedure BatchOpenUrl(Sender: TObject; const APath: string);
+    procedure RunExtStep;
+    procedure RunExtStepAsync(Data: PtrInt);
+    procedure FinishExtRun(const AError: string);
+    procedure ExtCommandClick(Sender: TObject);
+    procedure MenuExtReloadClick(Sender: TObject);
+    procedure MenuExtFolderClick(Sender: TObject);
   protected
     procedure Paint; override;
   public
@@ -205,11 +250,19 @@ type
       of before had found goes, and the view asks again. }
     procedure AccountChanged;
     {** The view's tabs, which the window's tab strip shows while the
-      view is shown: their names in ACaptions, in AMarks the ones with
-      something to do (pull requests waiting for review); gives the
-      shown one's index. }
-    function Tabs(out ACaptions: TStringArray; out AMarks: TBooleanDynArray): integer;
-    {** How many tabs: the sections, then Batch. }
+      view is shown: their names in ACaptions, their tooltips in AHints
+      (the extension behind an extension's tab), in AMarks the ones with
+      something to do (pull requests waiting for review), in AExts the
+      ones an extension added; gives the shown one's index. }
+    function Tabs(out ACaptions, AHints: TStringArray;
+      out AMarks, AExts: TBooleanDynArray): integer;
+    {** The commands, tabs and operations the extensions registered
+      changed: the view's follow, from the message loop. }
+    procedure ExtensionsChanged;
+    {** What an extension's tab or operation answered for the request
+      ASeq (gittan.ext.host's Deliver). }
+    procedure ExtDeliver(ASeq: integer; const AExtId, AJson: string);
+    {** How many tabs: the sections, then Batch, then the extensions'. }
     function TabCount: integer;
     {** Shows the tab at AIndex. }
     procedure SelectTab(AIndex: integer);
@@ -229,7 +282,8 @@ type
 implementation
 
 uses
-  LCLIntf, gittan.app, gittan.theme, gittan.textfit;
+  LCLIntf, gittan.app, gittan.theme, gittan.textfit, gittan.git, gittan.ext.engine,
+  gittan.ext.views;
 
 resourcestring
   rsSavePresetTitle = 'Save as Preset';
@@ -266,6 +320,37 @@ resourcestring
     'are lost.';
   rsBatchDelete = 'Delete';
   rsBatchCancel = 'Cancel';
+  rsExtensions = 'E&xtensions';
+  { Under an extension's tab or operation: the extension's name. }
+  rsFromExtension = 'From the extension %s';
+  rsReloadExtensions = 'Reload Extensions';
+  rsOpenExtensionsFolder = 'Open Extensions Folder';
+  rsExtTabGone = 'The extension no longer has this tab.';
+  rsExtRunGone = 'The extension no longer has this operation.';
+  rsExtReloaded = 'The extensions were loaded again, which stopped the run.';
+
+var
+  { The number of the last request to an extension's tab or operation. }
+  ExtSeq: integer = 0;
+
+{ The name of the extension behind ACmd: its @name, else its file's id. }
+function ExtNameOf(const ACmd: TGittanExtCommand): string;
+var
+  Eng: TGittanExtEngine;
+begin
+  Result := ACmd.ExtId;
+  Eng := TGittanExtEngine.Existing;
+  if (Eng <> nil) and (Eng.ExtensionNameForContext(ACmd.Ctx) <> '') then
+    Result := Eng.ExtensionNameForContext(ACmd.Ctx);
+end;
+
+function NextExtSeq: integer;
+begin
+  Inc(ExtSeq);
+  if ExtSeq <= 0 then
+    ExtSeq := 1;
+  Result := ExtSeq;
+end;
 
 { TForgeView }
 
@@ -361,6 +446,16 @@ begin
   FBatch.OnOpen := @BatchOpen;
   FBatch.OnMaintScan := @BatchMaintScan;
   FBatch.OnMaintRun := @BatchMaintRun;
+  FBatch.OnExtRun := @BatchExtRun;
+  FBatch.OnOpenUrl := @BatchOpenUrl;
+  FExtTab := -1;
+  FExtPage := TGittanExtTabPage.Create(Self);
+  FExtPage.Visible := False;
+  FExtPage.Parent := FBox;
+  FExtPage.OnRefresh := @ExtTabRefresh;
+  FExtPage.OnAction := @ExtTabAction;
+  FExtPage.OnOpenUrl := @ExtTabOpenUrl;
+  FExtPage.OnOpenRepo := @ExtTabOpenRepo;
   FThemeTimer := TTimer.Create(Self);
   FThemeTimer.Interval := 2000;
   FThemeTimer.Enabled := False;
@@ -374,6 +469,7 @@ begin
   LoadPicture;
   StartJob;
   BuildMenu;
+  RebuildExt;
 end;
 
 { The picture kept from the last start (SaveForgePicture, in JobDone),
@@ -510,6 +606,10 @@ begin
   AddItem(GoMenu, rsNextTab, ShortCut(VK_OEM_6, [ssModifier, ssShift]), @MenuNextTabClick);
   AddItem(GoMenu, rsPrevTab, ShortCut(VK_OEM_4, [ssModifier, ssShift]), @MenuPrevTabClick);
 
+  { Built by RebuildExt. }
+  FExtMenu := TMenuItem.Create(FMainMenu);
+  FExtMenu.Caption := rsExtensions;
+
   ToolsMenu := TMenuItem.Create(FMainMenu);
   ToolsMenu.Caption := rsTools;
   FMainMenu.Items.Add(ToolsMenu);
@@ -519,6 +619,8 @@ begin
   AddItem(ToolsMenu, rsSettings, ShortCut(VK_OEM_COMMA, [ssModifier]), @MenuSettingsClick);
   AddItem(ToolsMenu, rsAbout, 0, @MenuAboutClick);
   {$ENDIF}
+  { After Tools, as a repository's. }
+  FMainMenu.Items.Add(FExtMenu);
 end;
 
 { The recent repositories as a repository frame's File menu names them,
@@ -558,6 +660,7 @@ procedure TForgeView.ApplyTheme;
 begin
   FPage.SetTheme(FDark);
   FBatch.SetTheme(FDark);
+  FExtPage.SetTheme(FDark);
   Color := FPage.Color;
   FBox.Color := FPage.Color;
   Invalidate;
@@ -593,19 +696,28 @@ begin
   { The repository list or the recent ones may have changed. }
   if FBatchShown then
     ShowBatch;
+  FIsShown := True;
+  { The extension's tab asked again, as the forge is. }
+  if FExtTab >= 0 then
+    ShowExtTab;
   FBox.VertScrollBar.Position := 0;
   FThemeTimer.Enabled := True;
 end;
 
 procedure TForgeView.Hidden;
 begin
+  FIsShown := False;
   FThemeTimer.Enabled := False;
 end;
 
 procedure TForgeView.SettingsChanged;
 begin
   if FindForge then
+  begin
     ForgetAnswers;
+    { The extensions' tabs and commands are those of the forge. }
+    RebuildExt;
+  end;
 end;
 
 procedure TForgeView.AccountChanged;
@@ -655,43 +767,64 @@ begin
     FOnTabsChange(Self);
 end;
 
-function TForgeView.Tabs(out ACaptions: TStringArray; out AMarks: TBooleanDynArray): integer;
+function TForgeView.Tabs(out ACaptions, AHints: TStringArray;
+  out AMarks, AExts: TBooleanDynArray): integer;
 var
   i: integer;
 begin
   ACaptions := nil;
+  AHints := nil;
   AMarks := nil;
+  AExts := nil;
   SetLength(ACaptions, TabCount);
+  SetLength(AHints, TabCount);
   SetLength(AMarks, TabCount);
+  SetLength(AExts, TabCount);
   for i := 0 to SectionCount - 1 do
     ACaptions[i] := SectionCaption(i);
   ACaptions[BatchTab] := rsBatchTab;
+  for i := 0 to High(FExtTabs) do
+  begin
+    ACaptions[BatchTab + 1 + i] := FExtTabs[i].Title;
+    AHints[BatchTab + 1 + i] := Format(rsFromExtension, [ExtNameOf(FExtTabs[i])]);
+    AExts[BatchTab + 1 + i] := True;
+  end;
   AMarks[Ord(fsReview)] := Length(FReview) > 0;
-  if FBatchShown then
+  Result := CurrentTab;
+end;
+
+function TForgeView.TabCount: integer;
+begin
+  Result := SectionCount + 1 + Length(FExtTabs);
+end;
+
+function TForgeView.CurrentTab: integer;
+begin
+  if FExtTab >= 0 then
+    Result := BatchTab + 1 + FExtTab
+  else if FBatchShown then
     Result := BatchTab
   else
     Result := FPage.Section;
 end;
 
-function TForgeView.TabCount: integer;
-begin
-  Result := SectionCount + 1;
-end;
-
 procedure TForgeView.SelectTab(AIndex: integer);
-var
-  Current: integer;
 begin
-  if FBatchShown then
-    Current := BatchTab
-  else
-    Current := FPage.Section;
-  if (AIndex < 0) or (AIndex >= TabCount) or (AIndex = Current) then
+  if (AIndex < 0) or (AIndex >= TabCount) or (AIndex = CurrentTab) then
     Exit;
+  FExtTab := -1;
+  FExtTabSeq := 0;
+  FExtPage.Visible := False;
   if AIndex = BatchTab then
   begin
     FBatchShown := True;
     ShowBatch;
+  end
+  else if AIndex > BatchTab then
+  begin
+    FBatchShown := False;
+    FExtTab := AIndex - BatchTab - 1;
+    ShowExtTab;
   end
   else
   begin
@@ -707,14 +840,8 @@ begin
 end;
 
 procedure TForgeView.StepTab(ADelta: integer);
-var
-  Current: integer;
 begin
-  if FBatchShown then
-    Current := BatchTab
-  else
-    Current := FPage.Section;
-  SelectTab(((Current + ADelta) mod TabCount + TabCount) mod TabCount);
+  SelectTab(((CurrentTab + ADelta) mod TabCount + TabCount) mod TabCount);
 end;
 
 procedure TForgeView.BoxResize(Sender: TObject);
@@ -722,6 +849,8 @@ begin
   FPage.FitHeight(FBox.ClientHeight);
   if FBatch.Visible then
     FBatch.FitHeight(FBox.ClientHeight);
+  if FExtPage.Visible then
+    FExtPage.FitHeight(FBox.ClientHeight);
 end;
 
 { The batch page in the forge page's place, its rows read again from the
@@ -1340,6 +1469,446 @@ end;
 procedure TForgeView.MenuRefreshClick(Sender: TObject);
 begin
   StartJob;
+  if FExtTab >= 0 then
+    RenderExtTab;
+end;
+
+{ ---------------------------------------------------------------------------
+  The extensions
+  --------------------------------------------------------------------------- }
+
+procedure TForgeView.ExtensionsChanged;
+begin
+  if FExtQueued then
+    Exit;
+  FExtQueued := True;
+  Application.QueueAsyncCall(@RebuildExtAsync, 0);
+end;
+
+procedure TForgeView.RebuildExtAsync(Data: PtrInt);
+begin
+  FExtQueued := False;
+  RebuildExt;
+end;
+
+{ What every request to an extension gets: the forge and the login. }
+function TForgeView.ExtContext: TJSONObject;
+begin
+  Result := TJSONObject.Create;
+  Result.Add('forge', ForgeName);
+  Result.Add('login', FLogin);
+end;
+
+{ The Extensions menu, the tabs and the Batch operations from the
+  registry: a command and a tab only of an extension whose @forges has
+  the view's forge; an operation of every extension, as its @forges is
+  asked of each repository it runs on. A tab or a run whose extension
+  was loaded again (another context) is asked again or stopped, since
+  the function it waits for is gone. }
+procedure TForgeView.RebuildExt;
+var
+  Eng: TGittanExtEngine;
+  Cmd: TGittanExtCommand;
+  Item: TMenuItem;
+  Ops: TGittanBatchExtOps;
+  ShownKey: string;
+  ShownCtx: JSContext;
+  i, n: integer;
+begin
+  Eng := TGittanExtEngine.Existing;
+  ShownKey := '';
+  ShownCtx := nil;
+  if FExtTab >= 0 then
+  begin
+    ShownKey := TGittanExtRegistry.KindKey(FExtTabs[FExtTab].ExtId, FExtTabs[FExtTab].Id,
+      cwForgeTab);
+    ShownCtx := FExtTabCtx;
+  end;
+  FExtTabs := nil;
+  Ops := nil;
+  if FExtMenu <> nil then
+    FExtMenu.Clear;
+  if Eng <> nil then
+  begin
+    n := 0;
+    for Cmd in Eng.Registry.CommandsIn(cwForgeTab) do
+      if Eng.ExtForgeInScope(Cmd.ExtId, ForgeName) then
+      begin
+        SetLength(FExtTabs, n + 1);
+        FExtTabs[n] := Cmd;
+        Inc(n);
+      end;
+    n := 0;
+    for Cmd in Eng.Registry.CommandsIn(cwBatch) do
+    begin
+      SetLength(Ops, n + 1);
+      Ops[n].Key := TGittanExtRegistry.KindKey(Cmd.ExtId, Cmd.Id, cwBatch);
+      Ops[n].ExtId := Cmd.ExtId;
+      Ops[n].Title := Cmd.Title;
+      Ops[n].Note := Cmd.Note;
+      Ops[n].Source := Format(rsFromExtension, [ExtNameOf(Cmd)]);
+      Inc(n);
+    end;
+    if FExtMenu <> nil then
+      for Cmd in Eng.Registry.CommandsIn(cwForge) do
+        if Eng.ExtForgeInScope(Cmd.ExtId, ForgeName) then
+        begin
+          Item := TMenuItem.Create(FExtMenu);
+          Item.Caption := Cmd.Title;
+          Item.Hint := TGittanExtRegistry.CommandKey(Cmd.ExtId, Cmd.Id);
+          Item.OnClick := @ExtCommandClick;
+          FExtMenu.Add(Item);
+        end;
+  end;
+  if FExtMenu <> nil then
+  begin
+    if FExtMenu.Count > 0 then
+      FExtMenu.Add(NewLine);
+    Item := TMenuItem.Create(FExtMenu);
+    Item.Caption := rsReloadExtensions;
+    Item.OnClick := @MenuExtReloadClick;
+    FExtMenu.Add(Item);
+    Item := TMenuItem.Create(FExtMenu);
+    Item.Caption := rsOpenExtensionsFolder;
+    Item.OnClick := @MenuExtFolderClick;
+    FExtMenu.Add(Item);
+  end;
+
+  { The run: stopped when its operation is gone or was loaded again. }
+  if FExtRunKey <> '' then
+  begin
+    if (Eng = nil) or not Eng.Registry.FindCommand(FExtRunKey, Cmd) then
+      FinishExtRun(rsExtRunGone)
+    else if Cmd.Ctx <> FExtRunCtx then
+      FinishExtRun(rsExtReloaded);
+  end;
+  FBatch.SetExtOps(Ops);
+  if FBatch.Visible then
+    FBatch.FitHeight(FBox.ClientHeight);
+
+  { The tab shown, where it is now. }
+  if ShownKey <> '' then
+  begin
+    FExtTab := -1;
+    for i := 0 to High(FExtTabs) do
+      if TGittanExtRegistry.KindKey(FExtTabs[i].ExtId, FExtTabs[i].Id, cwForgeTab) = ShownKey then
+        FExtTab := i;
+    if FExtTab < 0 then
+    begin
+      { Gone: the first section in its place. }
+      FExtTabSeq := 0;
+      FExtPage.Visible := False;
+      FPage.Section := 0;
+      FPage.FitHeight(FBox.ClientHeight);
+      FPage.Visible := True;
+    end
+    else if FExtTabs[FExtTab].Ctx <> ShownCtx then
+    begin
+      if FIsShown then
+        ShowExtTab
+      else
+        FExtTabSeq := 0;
+    end;
+  end;
+  if Assigned(FOnTabsChange) then
+    FOnTabsChange(Self);
+end;
+
+procedure TForgeView.ShowExtTab;
+begin
+  if (FExtTab < 0) or (FExtTab > High(FExtTabs)) then
+    Exit;
+  FExtPage.SetTab(FExtTabs[FExtTab].Title, FExtTabs[FExtTab].Note,
+    Format(rsFromExtension, [ExtNameOf(FExtTabs[FExtTab])]));
+  FExtPage.Width := FBox.ClientWidth;
+  FPage.Visible := False;
+  FBatch.Visible := False;
+  FExtPage.Visible := True;
+  RenderExtTab;
+end;
+
+{ The tab's render, asked with a number of its own; an answer to an
+  older request is not taken. }
+procedure TForgeView.RenderExtTab;
+var
+  Eng: TGittanExtEngine;
+  Ctx: TJSONObject;
+  Key: string;
+  Cmd: TGittanExtCommand;
+begin
+  if (FExtTab < 0) or (FExtTab > High(FExtTabs)) then
+    Exit;
+  Eng := TGittanExtEngine.Existing;
+  Key := TGittanExtRegistry.KindKey(FExtTabs[FExtTab].ExtId, FExtTabs[FExtTab].Id, cwForgeTab);
+  if (Eng = nil) or not Eng.Registry.FindCommand(Key, Cmd) then
+  begin
+    FExtPage.SetError(rsExtTabGone);
+    FExtPage.FitHeight(FBox.ClientHeight);
+    Exit;
+  end;
+  FExtTabCtx := Cmd.Ctx;
+  FExtTabSeq := NextExtSeq;
+  FExtTabActing := False;
+  FExtPage.SetBusy(True, False);
+  FExtPage.FitHeight(FBox.ClientHeight);
+  Ctx := ExtContext;
+  try
+    Ctx.Add('seq', FExtTabSeq);
+    Ctx.Add('kind', 'render');
+    Eng.RunCommand(Key, Ctx.AsJSON);
+  finally
+    Ctx.Free;
+  end;
+end;
+
+procedure TForgeView.ExtTabRefresh(Sender: TObject);
+begin
+  RenderExtTab;
+end;
+
+{ An action of a row: the extension's action with the row as it gave
+  it; its answer is the new model, or nothing, and the tab renders
+  again. }
+procedure TForgeView.ExtTabAction(Sender: TObject; ARow: integer; const AAction: string);
+var
+  Eng: TGittanExtEngine;
+  Ctx: TJSONObject;
+  Key: string;
+  Cmd: TGittanExtCommand;
+  Row: TJSONData;
+begin
+  if (FExtTab < 0) or (FExtTab > High(FExtTabs)) then
+    Exit;
+  Eng := TGittanExtEngine.Existing;
+  Key := TGittanExtRegistry.KindKey(FExtTabs[FExtTab].ExtId, FExtTabs[FExtTab].Id, cwForgeTab);
+  if (Eng = nil) or not Eng.Registry.FindCommand(Key, Cmd) then
+    Exit;
+  FExtTabCtx := Cmd.Ctx;
+  FExtTabSeq := NextExtSeq;
+  FExtTabActing := True;
+  FExtPage.SetBusy(True, True);
+  Ctx := ExtContext;
+  try
+    Ctx.Add('seq', FExtTabSeq);
+    Ctx.Add('kind', 'action');
+    Ctx.Add('action', AAction);
+    try
+      Row := GetJSON(FExtPage.RowJson(ARow));
+    except
+      Row := TJSONNull.Create;
+    end;
+    Ctx.Add('row', Row);
+    Eng.RunCommand(Key, Ctx.AsJSON);
+  finally
+    Ctx.Free;
+  end;
+end;
+
+procedure TForgeView.ExtTabOpenUrl(Sender: TObject; const ATarget: string);
+begin
+  OpenURL(ATarget);
+end;
+
+procedure TForgeView.ExtTabOpenRepo(Sender: TObject; const ATarget: string);
+begin
+  if DirectoryExists(ATarget) then
+    FWindow.OpenRepository(ATarget);
+end;
+
+procedure TForgeView.ExtTabAnswer(const AJson: string);
+var
+  Value: TJSONData;
+  Err: string;
+  Model: TExtTabModel;
+  Acting: boolean;
+begin
+  Acting := FExtTabActing;
+  FExtTabSeq := 0;
+  FExtTabActing := False;
+  if not ReadExtAnswer(AJson, Value, Err) then
+    FExtPage.SetError(Err)
+  else
+    try
+      if ExtTabModelOf(Value, Model) then
+        FExtPage.SetModel(Model)
+      else if Acting then
+      begin
+        { The action said nothing of the rows: they are asked again. }
+        RenderExtTab;
+        Exit;
+      end
+      else
+        FExtPage.SetModel(Default(TExtTabModel));
+    finally
+      Value.Free;
+    end;
+  FExtPage.FitHeight(FBox.ClientHeight);
+end;
+
+procedure TForgeView.ExtDeliver(ASeq: integer; const AExtId, AJson: string);
+var
+  Value: TJSONData;
+  Err: string;
+  Res: TExtBatchResult;
+begin
+  if (ASeq = 0) then
+    Exit;
+  if (ASeq = FExtTabSeq) and (FExtTab >= 0) and (FExtTab <= High(FExtTabs)) and
+    (FExtTabs[FExtTab].ExtId = AExtId) then
+    ExtTabAnswer(AJson)
+  else if (ASeq = FExtRunSeq) and (FExtRunKey <> '') and (AExtId = FExtRunExt) then
+  begin
+    FExtRunSeq := 0;
+    if ReadExtAnswer(AJson, Value, Err) then
+      try
+        Res := ExtBatchResultOf(Value);
+      finally
+        Value.Free;
+      end
+    else
+    begin
+      Res := Default(TExtBatchResult);
+      Res.Said := True;
+      Res.Text := Err;
+      Res.Severity := esError;
+    end;
+    FBatch.SetExtResult(FExtRunKey, FExtRunIndex, Res, False);
+    Inc(FExtRunIndex);
+    if FBatch.Visible then
+      FBatch.FitHeight(FBox.ClientHeight);
+    { From the message loop: the answer may come while RunCommand is
+      still on the stack. }
+    Application.QueueAsyncCall(@RunExtStepAsync, 0);
+  end;
+end;
+
+{ Run of an extension's operation: once for each picked repository, in
+  turn, as each answers; one run at a time. }
+procedure TForgeView.BatchExtRun(Sender: TObject);
+var
+  Op: TGittanBatchExtOp;
+  Eng: TGittanExtEngine;
+  Cmd: TGittanExtCommand;
+begin
+  if (FExtRunKey <> '') or not FBatch.ShownExtOp(Op) then
+    Exit;
+  Eng := TGittanExtEngine.Existing;
+  if (Eng = nil) or not Eng.Registry.FindCommand(Op.Key, Cmd) then
+    Exit;
+  FBatch.ChosenRepos(FExtRunPaths, FExtRunCaptions);
+  if Length(FExtRunPaths) = 0 then
+    Exit;
+  FExtRunKey := Op.Key;
+  FExtRunExt := Op.ExtId;
+  FExtRunCtx := Cmd.Ctx;
+  FExtRunIndex := 0;
+  FExtRunSeq := 0;
+  FBatch.StartExtRun(Op.Key, FExtRunPaths, FExtRunCaptions);
+  FBatch.FitHeight(FBox.ClientHeight);
+  RunExtStep;
+end;
+
+procedure TForgeView.RunExtStepAsync(Data: PtrInt);
+begin
+  RunExtStep;
+end;
+
+{ The next repository: left out when the extension does not run for it
+  (@repos, @forges against its remotes), else the operation called with
+  the repository, its name and its forge, the answer awaited. }
+procedure TForgeView.RunExtStep;
+var
+  Eng: TGittanExtEngine;
+  Path, Urls: string;
+  Forge: TGittanForgeClass;
+  Ctx: TJSONObject;
+begin
+  if (FExtRunKey = '') or (FExtRunSeq <> 0) then
+    Exit;
+  Eng := TGittanExtEngine.Existing;
+  while FExtRunIndex <= High(FExtRunPaths) do
+  begin
+    if Eng = nil then
+    begin
+      FinishExtRun(rsExtRunGone);
+      Exit;
+    end;
+    Path := FExtRunPaths[FExtRunIndex];
+    Urls := '';
+    if DirectoryExists(Path) then
+      Urls := ResolvedRemoteUrlsIn(Path);
+    if not Eng.ExtInScope(FExtRunExt, Path, Urls) then
+    begin
+      FBatch.SetExtResult(FExtRunKey, FExtRunIndex, Default(TExtBatchResult), True);
+      Inc(FExtRunIndex);
+      Continue;
+    end;
+    Forge := ForgeClassFor(Urls);
+    FExtRunSeq := NextExtSeq;
+    Ctx := ExtContext;
+    try
+      Ctx.Add('seq', FExtRunSeq);
+      Ctx.Add('repo', Path);
+      Ctx.Add('name', FExtRunCaptions[FExtRunIndex]);
+      if Forge <> nil then
+        Ctx.Strings['forge'] := Forge.Name
+      else
+        Ctx.Nulls['forge'] := True;
+      if not Eng.RunCommand(FExtRunKey, Ctx.AsJSON) then
+        FinishExtRun(rsExtRunGone);
+    finally
+      Ctx.Free;
+    end;
+    if FBatch.Visible then
+      FBatch.FitHeight(FBox.ClientHeight);
+    Exit;
+  end;
+  FinishExtRun('');
+end;
+
+procedure TForgeView.FinishExtRun(const AError: string);
+begin
+  if FExtRunKey = '' then
+    Exit;
+  FBatch.FinishExtRun(FExtRunKey, AError);
+  FExtRunKey := '';
+  FExtRunExt := '';
+  FExtRunSeq := 0;
+  FExtRunCtx := nil;
+  if FBatch.Visible then
+    FBatch.FitHeight(FBox.ClientHeight);
+end;
+
+procedure TForgeView.BatchOpenUrl(Sender: TObject; const APath: string);
+begin
+  OpenURL(APath);
+end;
+
+procedure TForgeView.ExtCommandClick(Sender: TObject);
+var
+  Eng: TGittanExtEngine;
+  Ctx: TJSONObject;
+begin
+  Eng := TGittanExtEngine.Existing;
+  if (Eng = nil) or not (Sender is TMenuItem) then
+    Exit;
+  Ctx := ExtContext;
+  try
+    if not Eng.RunCommand(TMenuItem(Sender).Hint, Ctx.AsJSON) then
+      ExtensionsChanged;
+  finally
+    Ctx.Free;
+  end;
+end;
+
+procedure TForgeView.MenuExtReloadClick(Sender: TObject);
+begin
+  App.Extensions.Reload;
+end;
+
+procedure TForgeView.MenuExtFolderClick(Sender: TObject);
+begin
+  OpenDocument(App.Extensions.Dir);
 end;
 
 procedure TForgeView.MenuNextTabClick(Sender: TObject);

@@ -2,7 +2,7 @@
 // A member whose permission was not granted is undefined.
 
 declare namespace Gittan {
-  type Permission = "data" | "ui" | "timers" | "net" | "exec" | "settings";
+  type Permission = "data" | "ui" | "timers" | "net" | "exec" | "settings" | "forge";
 
   const api: { version: string; extensionId: string; permissions: Permission[] };
   const permissions: { has(name: Permission): boolean; require(name: Permission): true };
@@ -43,7 +43,14 @@ declare namespace Gittan {
   /** Needs exec. input goes to the program's standard input. */
   const git: { run(args: string[], o?: RepoOptions & { input?: string }): Promise<RunResult> };
   const exec: { run(cmd: string, args: string[], o?: RepoOptions & { cwd?: string; input?: string }): Promise<RunResult> };
-  const gh: { run(args: string[], o?: RepoOptions & { input?: string }): Promise<RunResult> };
+
+  /** The forge the call acts on: the repository's (repo), the one named (forge), else the GitHub view's while it is shown, else the shown repository's. */
+  interface ForgeOptions extends RepoOptions { forge?: string; input?: string }
+  interface ForgeInfo { name: string; cli: string; ready: boolean; reason?: string; accounts: { host: string; login: string; active: boolean }[] }
+  /** Needs forge. cli runs the forge's own tool (gh for GitHub) with your account; rejected on no forge or when it cannot run. */
+  const forge: { info(o?: ForgeOptions): ForgeInfo | null; cli(args: string[], o?: ForgeOptions): Promise<RunResult> };
+  /** Needs forge. Each forge by its tool: run is rejected where the forge is another. */
+  const forges: { gh: { name: "GitHub"; run(args: string[], o?: ForgeOptions): Promise<RunResult> }; [cli: string]: { name: string; run(args: string[], o?: ForgeOptions): Promise<RunResult> } };
 
   interface FetchResponse { status: number; ok: boolean; url: string; redirected: boolean; headers: { get(n: string): string | null; has(n: string): boolean; keys(): string[] }; text(): Promise<string>; json(): Promise<any> }
   /** Needs net. */
@@ -65,9 +72,27 @@ declare namespace Gittan {
     clearCards(o?: RepoOptions): void;
   };
 
+  /** A command of a repository; one of the GitHub view (where "forge") gets ForgeContext. */
   interface CommandContext { repo: string; path: string; line: number; selection: string }
+  interface ForgeContext { forge: string; login: string }
   const commands: {
-    register(cmd: { id: string; title: string; where?: ("menu" | "file" | "editor")[] | string; run(ctx: CommandContext): void }): boolean;
+    register(cmd: { id: string; title: string; where?: ("menu" | "file" | "editor" | "forge")[] | string; run(ctx: CommandContext & ForgeContext): void }): boolean;
+    unregister(id: string): boolean;
+  };
+
+  type Severity = "info" | "ok" | "warn" | "error";
+  interface TabRow { title: string; detail?: string; tag?: string; severity?: Severity; url?: string; repo?: string; actions?: { id: string; title?: string }[]; [more: string]: any }
+  interface TabModel { text?: string; rows?: (TabRow | string)[]; empty?: string }
+  /** A tab of the GitHub view, after Batch: render as it is shown and on Refresh; an action returns a model, or nothing to render again. */
+  const forgeTabs: {
+    register(tab: { id: string; title: string; description?: string; render(ctx: ForgeContext): TabModel | TabRow[] | string | Promise<TabModel | TabRow[] | string>; action?(id: string, row: TabRow, ctx: ForgeContext): any }): boolean;
+    unregister(id: string): boolean;
+  };
+  interface BatchContext extends ForgeContext { repo: string; name: string; forge: string }
+  type BatchResult = string | { text: string; severity?: Severity; url?: string } | null | undefined;
+  /** An operation of the Batch tab, run once for each repository picked, in turn. */
+  const batch: {
+    register(op: { id: string; title: string; description?: string; run(ctx: BatchContext): BatchResult | Promise<BatchResult> }): boolean;
     unregister(id: string): boolean;
   };
 

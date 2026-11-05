@@ -129,6 +129,7 @@ resourcestring
   rsExtResetPerms = 'Reset Permissions';
   rsExtPermsLine = 'Permissions: %s';
   rsExtReposLine = 'Runs for: %s';
+  rsExtForgesLine = 'Runs on: %s';
   rsExtNotLoaded = 'Not loaded: %s';
   rsSettingsTitle = 'Settings';
   rsEditorPage = 'Editor';
@@ -1131,6 +1132,27 @@ end;
   in FExtSettingsBox: a check box for a switch, a field for a text, a
   spinner for a number, a list for a choice, each with its label and
   note. }
+
+{ The forges of @forges as the forges name themselves ("GitHub"). }
+function ForgeNamesOf(const AForges: TStringArray): string;
+var
+  Name: string;
+  Forge: TGittanForgeClass;
+  Shown: string;
+begin
+  Result := '';
+  for Name in AForges do
+  begin
+    Shown := Name;
+    for Forge in RegisteredForges do
+      if LowerCase(Forge.Name) = Name then
+        Shown := Forge.Name;
+    if Result <> '' then
+      Result := Result + ', ';
+    Result := Result + Shown;
+  end;
+end;
+
 procedure TSettingsForm.ShowExtInfo;
 var
   i, Index: integer;
@@ -1165,6 +1187,8 @@ begin
   About := About + LineEnding + Format(rsExtPermsLine, [PermSetToCSV(Info.Granted + PermBaseline)]);
   if Length(Info.Repos) > 0 then
     About := About + LineEnding + Format(rsExtReposLine, [string.Join(', ', Info.Repos)]);
+  if Length(Info.Forges) > 0 then
+    About := About + LineEnding + Format(rsExtForgesLine, [ForgeNamesOf(Info.Forges)]);
   if not Info.Loaded and (Info.Error <> '') then
     About := About + LineEnding + Format(rsExtNotLoaded, [Info.Error]);
   FExtInfo.Caption := About;

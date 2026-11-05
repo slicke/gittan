@@ -25,6 +25,10 @@ type
     { Each permission prompt as "name|author|perms", each banner as
       "title|detail|0 or 1" and each card as "path|line|text|severity|ext". }
     Asked, Notified, Cards: TStringList;
+    { Each answer of a tab or an operation as "seq|ext|json". }
+    Delivered: TStringList;
+    { What ForgeViewForge answers. }
+    ViewForge: string;
     Status, Cleared: string;
     ConfirmAnswer, PermissionAnswer: boolean;
     PromptAnswer: string;
@@ -46,6 +50,8 @@ type
     procedure SetStatus(const ARoot, AText: string; ASeconds: integer); override;
     procedure Notify(const ARoot, ATitle, ADetail: string; AError: boolean); override;
     procedure CommandsChanged; override;
+    function ForgeViewForge: string; override;
+    procedure Deliver(ASeq: integer; const AExtId, AJson: string); override;
   end;
 
   { TExtEngineTest }
@@ -78,6 +84,8 @@ type
     procedure TestUnloadClearsRegistry;
     procedure TestEveryListenerIsCalled;
     procedure TestPayloadWithoutData;
+    procedure TestListenerScopedToForges;
+    procedure TestForgeTabsAndBatch;
   end;
 
 implementation
@@ -97,11 +105,13 @@ begin
   Asked := TStringList.Create;
   Notified := TStringList.Create;
   Cards := TStringList.Create;
+  Delivered := TStringList.Create;
   SelectAnswer := -1;
 end;
 
 destructor TFakeExtHost.Destroy;
 begin
+  Delivered.Free;
   Cards.Free;
   Notified.Free;
   Asked.Free;
@@ -180,6 +190,16 @@ end;
 procedure TFakeExtHost.CommandsChanged;
 begin
   Inc(Changed);
+end;
+
+function TFakeExtHost.ForgeViewForge: string;
+begin
+  Result := ViewForge;
+end;
+
+procedure TFakeExtHost.Deliver(ASeq: integer; const AExtId, AJson: string);
+begin
+  Delivered.Add(IntToStr(ASeq) + '|' + AExtId + '|' + AJson);
 end;
 
 { TExtEngineTest }
@@ -460,9 +480,81 @@ begin
     EvalIn(WithData^.Ctx, 'globalThis.got'));
 end;
 
+{ @forges keeps an extension to the repositories whose remotes are on
+  those forges (GitHub is registered in the tests, testgithub), and to
+  the forge view of those forges. }
+procedure TExtEngineTest.TestListenerScopedToForges;
+const
+  OnGitHub = 'remote.origin.url git@github.com:slicke/gittan.git'#10;
+  Elsewhere = 'remote.origin.url https://git.example.net/a/b.git'#10;
+var
+  Info: PExtContextInfo;
+begin
+  Info := Load('forged', 'Gittan.on("commit.before", function () { return "stopped"; });',
+    PermBaseline + [epData]);
+  Info^.Forges := ['github'];
+  AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
+  AssertTrue('a repository on GitHub', FEngine.ExtInScope('forged', '/a', OnGitHub));
+  AssertTrue('listens there', FEngine.Listens('commit.before', '/a', OnGitHub));
+  AssertFalse('not on another host', FEngine.ExtInScope('forged', '/b', Elsewhere));
+  AssertFalse('not without a remote', FEngine.ExtInScope('forged', '/c', ''));
+  AssertFalse('nor listens there', FEngine.Listens('commit.before', '/c', ''));
+  AssertTrue('the forge view of GitHub', FEngine.ExtForgeInScope('forged', 'GitHub'));
+  AssertFalse('of another forge', FEngine.ExtForgeInScope('forged', 'GitLab'));
+  AssertFalse('one not loaded', FEngine.ExtForgeInScope('nope', 'GitHub'));
+end;
+
+{ A tab and an operation are kept beside a command of the same id, and
+  their functions answer through _deliver, a promise's value or its
+  error, with the request's seq. }
+procedure TExtEngineTest.TestForgeTabsAndBatch;
+var
+  Info: PExtContextInfo;
+  Tabs: TGittanExtCommands;
+begin
+  Info := Load('forgy',
+    'Gittan.commands.register({id: "prs", title: "Mine", where: "forge", run: function () {}});' +
+    'Gittan.forgeTabs.register({id: "prs", title: "Old PRs", description: "Stale ones",' +
+    '  render: function (c) { return Promise.resolve({rows: [{title: c.forge + "/" + c.login}]}); },' +
+    '  action: function (a, row, c) { return a + ":" + row.title; }});' +
+    'Gittan.batch.register({id: "b", title: "Count", run: function (c) {' +
+    '  if (c.repo === "/bad") throw new Error("boom"); return c.repo + "!"; }});' +
+    'globalThis.typeOk = typeof Gittan._deliver;', PermBaseline);
+  AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
+  AssertEquals('deliver out of reach', 'undefined', EvalIn(Info^.Ctx, 'globalThis.typeOk'));
+  AssertEquals('three', 3, FEngine.Registry.CommandCount);
+  Tabs := FEngine.Registry.CommandsIn(cwForgeTab);
+  AssertEquals('one tab', 1, Length(Tabs));
+  AssertEquals('its title', 'Old PRs', Tabs[0].Title);
+  AssertEquals('its note', 'Stale ones', Tabs[0].Note);
+  AssertEquals('one operation', 1, Length(FEngine.Registry.CommandsIn(cwBatch)));
+  AssertEquals('one forge command', 1, Length(FEngine.Registry.CommandsIn(cwForge)));
+  AssertEquals('not in the frames'' menu', 0, Length(FEngine.Registry.CommandsIn(cwMenu)));
+
+  AssertTrue('renders', FEngine.RunCommand(TGittanExtRegistry.KindKey('forgy', 'prs', cwForgeTab),
+    '{"seq": 7, "kind": "render", "forge": "GitHub", "login": "octo"}'));
+  AssertEquals('rendered', '7|forgy|{"value":{"rows":[{"title":"GitHub/octo"}]}}',
+    FHost.Delivered.Text.Trim);
+  FHost.Delivered.Clear;
+  FEngine.RunCommand(TGittanExtRegistry.KindKey('forgy', 'prs', cwForgeTab),
+    '{"seq": 8, "kind": "action", "action": "close", "row": {"title": "x"}}');
+  AssertEquals('acted', '8|forgy|{"value":"close:x"}', FHost.Delivered.Text.Trim);
+  FHost.Delivered.Clear;
+  FEngine.RunCommand(TGittanExtRegistry.KindKey('forgy', 'b', cwBatch), '{"seq": 9, "repo": "/r"}');
+  FEngine.RunCommand(TGittanExtRegistry.KindKey('forgy', 'b', cwBatch), '{"seq": 10, "repo": "/bad"}');
+  AssertEquals('ran', '9|forgy|{"value":"/r!"}', FHost.Delivered[0]);
+  AssertEquals('threw', '10|forgy|{"error":"boom"}', FHost.Delivered[1]);
+
+  AssertEquals('the command goes alone', 'true', EvalIn(Info^.Ctx, 'String(Gittan.commands.unregister("prs"))'));
+  AssertEquals('the tab stays', 1, Length(FEngine.Registry.CommandsIn(cwForgeTab)));
+  AssertEquals('then the tab', 'true', EvalIn(Info^.Ctx, 'String(Gittan.forgeTabs.unregister("prs"))'));
+  AssertEquals('the operation stays', 1, FEngine.Registry.CommandCount);
+end;
+
 initialization
   RegisterTest(TExtEngineTest);
 
 finalization
   TGittanExtEngine.ReleaseInstance;
+
 end.

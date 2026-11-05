@@ -231,6 +231,12 @@ type
     {** The commands the extensions registered changed: every frame
       builds its Extensions menu and popups again (QueueRebuildExtMenu). }
     procedure ExtensionsChanged; virtual; abstract;
+    {** The forge view's forge ("GitHub") while the view is shown, ''
+      while it is not (gittan.ext.host's ForgeViewForge). }
+    function ForgeViewForge: string; virtual; abstract;
+    {** What an extension's tab or Batch operation answered, for the
+      forge view (gittan.ext.host's Deliver). }
+    procedure ExtDeliver(ASeq: integer; const AExtId, AJson: string); virtual; abstract;
     {** The repository list (App.RepoList) changed and was saved: every
       frame's welcome view shows it again (TRepoFrame.RepoListChanged). }
     procedure RepoListChanged; virtual; abstract;

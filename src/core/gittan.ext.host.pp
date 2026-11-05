@@ -71,6 +71,14 @@ type
     procedure OpenFile(const ARoot, APath: string; ALine: integer); virtual;
     {** The commands registered changed: the menus follow. }
     procedure CommandsChanged; virtual;
+    {** The forge of the forge view while it is shown ("GitHub"), ''
+      while it is not: where no repository is named, Gittan.forge acts
+      on it then, else on the shown repository's. }
+    function ForgeViewForge: string; virtual;
+    {** What a tab's or a Batch operation's function of the extension
+      AExtId gave for the request ASeq, as {"value": ...} or
+      {"error": "..."}. }
+    procedure Deliver(ASeq: integer; const AExtId, AJson: string); virtual;
   end;
 
 {** The host in place; the default one until SetExtHost. }
@@ -185,6 +193,15 @@ begin
 end;
 
 procedure TGittanExtHost.CommandsChanged;
+begin
+end;
+
+function TGittanExtHost.ForgeViewForge: string;
+begin
+  Result := '';
+end;
+
+procedure TGittanExtHost.Deliver(ASeq: integer; const AExtId, AJson: string);
 begin
 end;
 

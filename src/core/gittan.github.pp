@@ -148,6 +148,7 @@ type
     {** A note when GH_TOKEN or GITHUB_TOKEN is set, which gh takes over
       the active account on github.com and ghe.com. }
     class function AccountsNote: string; override;
+    class function CliEnv: TStringArray; override;
     {** gh auth switch with the host and the user. }
     function SwitchAccount(const AHost, ALogin: string; out AError: string): boolean;
       override;
@@ -365,8 +366,7 @@ end;
 function RunGh(const AExe, ADir: string; const AArgs: array of string;
   out AOutput, AError: string): boolean;
 begin
-  Result := RunCli(AExe, ADir, AArgs, ['GH_PROMPT_DISABLED=1', 'GH_NO_UPDATE_NOTIFIER=1'],
-    AOutput, AError);
+  Result := RunCli(AExe, ADir, AArgs, TGittanGitHubForge.CliEnv, AOutput, AError);
 end;
 
 { ---------------------------------------------------------------------------
@@ -1431,6 +1431,11 @@ class function TGittanGitHubForge.Accounts: TGittanForgeAccounts;
 begin
   GhLoggedHosts;
   Result := Copy(LoggedAccounts);
+end;
+
+class function TGittanGitHubForge.CliEnv: TStringArray;
+begin
+  Result := ['GH_PROMPT_DISABLED=1', 'GH_NO_UPDATE_NOTIFIER=1'];
 end;
 
 class function TGittanGitHubForge.AccountsNote: string;
