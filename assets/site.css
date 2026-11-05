@@ -493,3 +493,63 @@ img[src^="assets/shots/os-"] { clip-path: inset(0.5% 0.3% round 2.6% / 4.2%); }
 /* The hero and footer crops fill their frame's height and keep the window's left edge, so only the
    left corners are the window's, measured in the frame's height: 3 of 800 is 0.375cqh, 26 is 3.25cqh. */
 .hero-shot img, .foot-pic img { clip-path: inset(0.375cqh 0 0.375cqh 0.375cqh round 3.25cqh 0 0 3.25cqh); }
+
+/* ---------- polish ----------
+   A finishing layer: more depth, the blue where it matters, and a little structure in the lists.
+   Everything here only adds to the rules above; delete this block to get the previous look back. */
+
+/* the bar: a hairline and a little glass, so content passes under it instead of vanishing */
+.bar { background: color-mix(in srgb, var(--bg) 84%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2); box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 9%, transparent); }
+
+/* the main call to action is the blue one; it turns to ink on hover */
+:root { --cta: var(--accent); --cta-ink: var(--accent-ink); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --cta: #2f6be0; --cta-ink: #ffffff; } }
+:root[data-theme="dark"] { --cta: #2f6be0; --cta-ink: #ffffff; }
+.hero .tag, .bar .bar-cta, .foot-side .tag { background: var(--cta); color: var(--cta-ink); }
+.hero .tag:hover, .bar .bar-cta:hover, .foot-side .tag:hover { background: var(--ink); color: var(--bg); }
+
+/* hero: a wash of blue behind the window, the second line of the headline in the accent */
+.hero { position: relative; isolation: isolate; }
+.hero::before {
+  content: ""; position: absolute; z-index: -1; pointer-events: none;
+  right: -12vw; top: -8vw; width: 72vw; height: 72vw; max-width: 1100px; max-height: 1100px;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 20%, transparent), color-mix(in srgb, var(--accent) 6%, transparent) 55%, transparent 100%);
+}
+.hero h1 span:last-child { color: var(--link); }
+.hero-shot { filter: drop-shadow(0 28px 44px color-mix(in srgb, #000 24%, transparent)); }
+@media (min-width: 761px) {
+  .hero-facts li { padding-left: 18px; border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); }
+}
+
+/* stacking cards: an edge and a shadow so each one reads as lying on the last */
+.scard { box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 10%, transparent), 0 40px 70px -40px color-mix(in srgb, #000 45%, transparent); }
+.scard:nth-child(odd) .pic { background: linear-gradient(135deg, var(--ui-bg) 40%, color-mix(in srgb, var(--accent) 9%, var(--ui-bg))); }
+.scard:nth-child(even) .pic { background: linear-gradient(135deg, var(--ui-bg) 40%, color-mix(in srgb, var(--accent) 7%, var(--ui-bg))); }
+.scard h3::before { content: ""; display: block; width: 36px; height: 3px; margin-bottom: 18px; background: var(--accent); }
+.scard:nth-child(even) h3::before { background: #5aa2ff; }
+
+/* lists: a rule over each item, so the grid has lines to hang on */
+.flist li, .facts > div { padding-top: 18px; border-top: 1px solid var(--line-strong); }
+.flist { row-gap: 40px; }
+
+/* tour: the chosen view gets a blue edge, and the screenshot a shadow */
+.tour .tabs button[aria-selected="true"] { box-shadow: inset 3px 0 0 var(--accent); }
+.tour .tabs button { border-left: 0; }
+.tour .frame { filter: drop-shadow(0 26px 40px color-mix(in srgb, #000 22%, transparent)); }
+
+/* download: each platform under a rule; yours under the blue one */
+.dl .card { border-top: 2px solid var(--ink); padding-top: 24px; }
+.dl .card.mine { border-top-color: var(--accent); }
+.dl .card.mine .tag { background: var(--cta); color: var(--cta-ink); }
+.dl .card.mine .tag:hover { background: var(--ink); color: var(--bg); }
+
+/* footer */
+.foot-side { box-shadow: inset 0 3px 0 var(--accent); }
+.foot-pic { filter: drop-shadow(0 20px 30px color-mix(in srgb, #000 18%, transparent)); }
+@media (prefers-reduced-motion: no-preference) {
+  .tag { transition: background-color .3s, color .3s, transform .3s var(--ease-out); }
+  .tag:hover { transform: translateY(-1px); }
+}
+@media (max-width: 760px) {
+  .hero::before { right: -40vw; top: 35%; width: 130vw; height: 130vw; }
+}
