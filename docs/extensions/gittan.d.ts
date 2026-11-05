@@ -89,7 +89,8 @@ declare namespace Gittan {
     unregister(id: string): boolean;
   };
   interface BatchContext extends ForgeContext { repo: string; name: string; forge: string }
-  type BatchResult = string | { text: string; severity?: Severity; url?: string } | null | undefined;
+  /** null, undefined, false, true, 0 and "" say nothing; url is an http(s) address. Not answered within 300 s is an error. */
+  type BatchResult = string | number | boolean | { text: string; severity?: Severity; url?: string } | null | undefined;
   /** An operation of the Batch tab, run once for each repository picked, in turn. */
   const batch: {
     register(op: { id: string; title: string; description?: string; run(ctx: BatchContext): BatchResult | Promise<BatchResult> }): boolean;

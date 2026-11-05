@@ -3537,17 +3537,27 @@ begin
   Result := RunGit(FRoot, ['mv', '--', AOld, ANew], Output);
 end;
 
+{ The paths go in a file, as a commit's do (see Commit), so a folder
+  with thousands of tracked files does not grow the command line past
+  what the system takes. }
 function TGittanRepo.RemovePaths(APaths: TStrings; AKeep: boolean): boolean;
 var
-  Output: string;
+  Output, SpecFile: string;
   Args: array of string;
 begin
   if (FRoot = '') or (APaths.Count = 0) then
     Exit(False);
-  Args := ['--literal-pathspecs', 'rm', '-q'];
-  if AKeep then
-    Args := Concat(Args, ['--cached']);
-  Result := RunGit(FRoot, Concat(Args, ['--'], APaths.ToStringArray), Output);
+  SpecFile := GetTempFileName(GetTempDir, 'gittan-rm-');
+  try
+    WriteBytes(SpecFile, NulList(APaths));
+    Args := ['--literal-pathspecs', 'rm', '-q'];
+    if AKeep then
+      Args := Concat(Args, ['--cached']);
+    Result := RunGit(FRoot, Concat(Args, ['--pathspec-from-file=' + SpecFile,
+      '--pathspec-file-nul']), Output);
+  finally
+    DeleteFile(SpecFile);
+  end;
 end;
 
 { The paths go in a file, as a commit's do (see Commit), and are read

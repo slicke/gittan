@@ -17,6 +17,8 @@ type
     procedure TestTabModel;
     procedure TestTabModelShapes;
     procedure TestBatchResult;
+    procedure TestBatchResultFalsy;
+    procedure TestWebUrlOnly;
   end;
 
 implementation
@@ -133,6 +135,52 @@ begin
     R := ExtBatchResultOf(V);
     AssertTrue('error', R.Severity = esError);
     AssertEquals('url', 'https://x', R.Url);
+  finally
+    V.Free;
+  end;
+end;
+
+procedure TExtViewsTest.TestBatchResultFalsy;
+
+  function SaidOf(const AJson: string): boolean;
+  var
+    V: TJSONData;
+  begin
+    V := GetJSON(AJson);
+    try
+      Result := ExtBatchResultOf(V).Said;
+    finally
+      V.Free;
+    end;
+  end;
+
+begin
+  AssertFalse('false says nothing', SaidOf('false'));
+  AssertFalse('true says nothing', SaidOf('true'));
+  AssertFalse('0 says nothing', SaidOf('0'));
+  AssertTrue('3 is said', SaidOf('3'));
+end;
+
+procedure TExtViewsTest.TestWebUrlOnly;
+var
+  V: TJSONData;
+  M: TExtTabModel;
+begin
+  AssertEquals('https', 'https://x/1', ExtWebUrl('https://x/1'));
+  AssertEquals('http in capitals', 'HTTP://x', ExtWebUrl('HTTP://x'));
+  AssertEquals('file', '', ExtWebUrl('file:///Applications/Calculator.app'));
+  AssertEquals('a path', '', ExtWebUrl('/Users/x/run.command'));
+  AssertEquals('another scheme', '', ExtWebUrl('vscode://file/x'));
+  V := GetJSON('[{"title": "a", "url": "file:///etc/passwd"}]');
+  try
+    AssertTrue('a model', ExtTabModelOf(V, M));
+    AssertEquals('the row keeps no file link', '', M.Rows[0].Url);
+  finally
+    V.Free;
+  end;
+  V := GetJSON('{"text": "x", "url": "ssh://h"}');
+  try
+    AssertEquals('the result keeps no other scheme', '', ExtBatchResultOf(V).Url);
   finally
     V.Free;
   end;

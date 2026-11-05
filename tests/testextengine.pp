@@ -518,7 +518,9 @@ begin
     '  render: function (c) { return Promise.resolve({rows: [{title: c.forge + "/" + c.login}]}); },' +
     '  action: function (a, row, c) { return a + ":" + row.title; }});' +
     'Gittan.batch.register({id: "b", title: "Count", run: function (c) {' +
-    '  if (c.repo === "/bad") throw new Error("boom"); return c.repo + "!"; }});' +
+    '  if (c.repo === "/bad") throw new Error("boom");' +
+    '  if (c.repo === "/loop") { var o = {}; o.self = o; return o; }' +
+    '  return c.repo + "!"; }});' +
     'globalThis.typeOk = typeof Gittan._deliver;', PermBaseline);
   AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
   AssertEquals('deliver out of reach', 'undefined', EvalIn(Info^.Ctx, 'globalThis.typeOk'));
@@ -544,6 +546,10 @@ begin
   FEngine.RunCommand(TGittanExtRegistry.KindKey('forgy', 'b', cwBatch), '{"seq": 10, "repo": "/bad"}');
   AssertEquals('ran', '9|forgy|{"value":"/r!"}', FHost.Delivered[0]);
   AssertEquals('threw', '10|forgy|{"error":"boom"}', FHost.Delivered[1]);
+  FEngine.RunCommand(TGittanExtRegistry.KindKey('forgy', 'b', cwBatch), '{"seq": 11, "repo": "/loop"}');
+  AssertEquals('an answer that is no JSON still answers', 3, FHost.Delivered.Count);
+  AssertTrue('as an error: ' + FHost.Delivered[2],
+    Pos('11|forgy|{"error":"The answer is not JSON: ', FHost.Delivered[2]) = 1);
 
   AssertEquals('the command goes alone', 'true', EvalIn(Info^.Ctx, 'String(Gittan.commands.unregister("prs"))'));
   AssertEquals('the tab stays', 1, Length(FEngine.Registry.CommandsIn(cwForgeTab)));

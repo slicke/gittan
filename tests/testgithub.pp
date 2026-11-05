@@ -17,6 +17,7 @@ type
   TGitHubTest = class(TTestCase)
   published
     procedure TestRegistered;
+    procedure TestCliAllows;
     procedure TestHosts;
     procedure TestAccounts;
     procedure TestAccountsSwitchedAtOnce;
@@ -51,6 +52,45 @@ const
     '{"author":null,"state":"COMMENTED"},{"author":{"login":"eve"},"state":"COMMENTED"}],' +
     '"reviewRequests":[{"__typename":"Team","name":"Core","slug":"core"},' +
     '{"__typename":"User","login":"dan"}]}';
+
+procedure TGitHubTest.TestCliAllows;
+
+  function Allows(const AArgs: array of string): boolean;
+  var
+    Reason: string;
+  begin
+    Result := TGittanGitHubForge.CliAllows(AArgs, Reason);
+    if not Result then
+      AssertTrue('a reason', Reason <> '');
+  end;
+
+begin
+  AssertTrue('pr list', Allows(['pr', 'list', '--json', 'number,title']));
+  AssertTrue('api', Allows(['api', 'repos/{owner}/{repo}', '-F', 'per_page=5', '-XGET']));
+  AssertTrue('a comment', Allows(['pr', 'comment', '12', '--body', 'Thanks']));
+  AssertTrue('status', Allows(['status']));
+  AssertFalse('nothing', Allows([]));
+  AssertFalse('an alias', Allows(['alias', 'set', '--shell', 'x', 'curl x | sh']));
+  AssertFalse('an extension', Allows(['extension', 'exec', 'x']));
+  AssertFalse('the config', Allows(['config', 'set', 'browser', 'x']));
+  AssertFalse('a name of the user''s', Allows(['co', '12']));
+  AssertFalse('a gist of a file', Allows(['gist', 'create', '/etc/passwd']));
+  AssertFalse('a checkout', Allows(['pr', 'checkout', '12']));
+  AssertFalse('a clone', Allows(['repo', 'clone', 'a/b', '--', '-c', 'core.fsmonitor=x']));
+  AssertFalse('a download', Allows(['run', 'download', '1']));
+  AssertFalse('an upload', Allows(['release', 'upload', 'v1', '/etc/passwd']));
+  AssertFalse('api reading a file', Allows(['api', 'x', '-F', 'body=@/etc/passwd']));
+  AssertFalse('api reading a file, run together', Allows(['api', 'x', '-Fbody=@/etc/passwd']));
+  AssertFalse('api reading a file, long', Allows(['api', 'x', '--field=body=@/etc/passwd']));
+  AssertFalse('api --input', Allows(['api', 'x', '--input', '/etc/passwd']));
+  AssertFalse('api --input=', Allows(['api', 'x', '--input=/etc/passwd']));
+  AssertFalse('a workflow field of a file', Allows(['workflow', 'run', 'x', '--field', 'a=@/etc/passwd']));
+  AssertFalse('a body file', Allows(['issue', 'create', '--body-file', '/etc/passwd']));
+  AssertFalse('a short body file', Allows(['issue', 'create', '-F', '/etc/passwd']));
+  AssertFalse('in a cluster', Allows(['pr', 'comment', '1', '-wF', '/etc/passwd']));
+  AssertFalse('the editor', Allows(['pr', 'comment', '1', '-e']));
+  AssertFalse('the token', Allows(['status', '--show-token']));
+end;
 
 procedure TGitHubTest.TestRegistered;
 var

@@ -16,7 +16,7 @@ unit gittan.extpage;
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Graphics, gittan.ext.views;
+  Classes, SysUtils, Types, Controls, Graphics, gittan.ext.views, gittan.cardpage;
 
 type
   {** An action of a row picked: the row's index and the action's id. }
@@ -27,36 +27,18 @@ type
 
   { TGittanExtTabPage }
 
-  TGittanExtTabPage = class(TCustomControl)
+  TGittanExtTabPage = class(TGittanCardPage)
   private
     FTitle, FNote, FSource, FError, FBusyText: string;
     FModel: TExtTabModel;
     FHasModel, FBusy: boolean;
-    FBack, FText, FDim, FHover, FLine, FLink, FOk, FWarn, FErrorColor, FCard: TColor;
-    FLinkRects: array of TRect;
-    FLinkUrls: array of string;
-    FHot, FContentHeight: integer;
-    FC: TCanvas;
     FOnRefresh: TNotifyEvent;
     FOnAction: TGittanExtActionEvent;
     FOnOpenUrl, FOnOpenRepo: TGittanExtOpenEvent;
-    procedure AddLink(const ARect: TRect; const AUrl: string);
-    function LinkAt(X, Y: integer): integer;
-    procedure SetHot(AValue: integer);
-    function PaintPill(ALeft, ATop: integer; const AText, ALink: string;
-      AEnabled: boolean): TRect;
-    procedure PaintText(var Y: integer; const AText: string; AColor: TColor;
-      ALeft, ARight: integer);
-    function WrappedHeight(const AText: string; AWidth: integer): integer;
     function SeverityColor(ASeverity: TExtSeverity): TColor;
     procedure PaintRow(var Y: integer; AIndex, ALeft, ARight: integer);
-    procedure PaintContent;
-    procedure Layout;
   protected
-    procedure Paint; override;
-    procedure Resize; override;
-    procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
-    procedure MouseLeave; override;
+    procedure PaintContent; override;
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer); override;
   public
     constructor Create(AOwner: TComponent); override;
@@ -73,8 +55,6 @@ type
     procedure SetError(const AError: string);
     {** The row at AIndex as the extension gave it, for an action. }
     function RowJson(AIndex: integer): string;
-    procedure SetTheme(ADark: boolean);
-    procedure FitHeight(AMin: integer);
     property OnRefresh: TNotifyEvent read FOnRefresh write FOnRefresh;
     property OnAction: TGittanExtActionEvent read FOnAction write FOnAction;
     property OnOpenUrl: TGittanExtOpenEvent read FOnOpenUrl write FOnOpenUrl;
@@ -105,36 +85,11 @@ const
   CardPadY = 10;
   CardRadius = 12;
   CardGap = 8;
-  PillPadX = 10;
-  PillPadY = 3;
   TagPadX = 6;
 
 constructor TGittanExtTabPage.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
-  ControlStyle := ControlStyle + [csOpaque];
-  FHot := -1;
-  Align := alTop;
-  SetTheme(False);
-end;
-
-procedure TGittanExtTabPage.SetTheme(ADark: boolean);
-var
-  P: TGittanForgePalette;
-begin
-  P := ForgePalette(ADark);
-  FBack := P.Back;
-  FText := P.Text;
-  FDim := P.Dim;
-  FHover := P.Hover;
-  FLine := P.Line;
-  FLink := P.Link;
-  FOk := P.Ok;
-  FWarn := P.Warn;
-  FErrorColor := P.Error;
-  FCard := P.Card;
-  Color := FBack;
-  Invalidate;
 end;
 
 procedure TGittanExtTabPage.SetTab(const ATitle, ANote, ASource: string);
@@ -185,86 +140,6 @@ begin
     Result := FModel.Rows[AIndex].Json
   else
     Result := 'null';
-end;
-
-procedure TGittanExtTabPage.AddLink(const ARect: TRect; const AUrl: string);
-begin
-  SetLength(FLinkRects, Length(FLinkRects) + 1);
-  SetLength(FLinkUrls, Length(FLinkUrls) + 1);
-  FLinkRects[High(FLinkRects)] := ARect;
-  FLinkUrls[High(FLinkUrls)] := AUrl;
-end;
-
-function TGittanExtTabPage.PaintPill(ALeft, ATop: integer; const AText, ALink: string;
-  AEnabled: boolean): TRect;
-var
-  TextH: integer;
-  Hot: boolean;
-begin
-  FC.Font := Font;
-  TextH := FC.TextHeight('Xg');
-  Result := Rect(ALeft, ATop - Px(PillPadY), ALeft + FC.TextWidth(AText) + 2 * Px(PillPadX),
-    ATop + TextH + Px(PillPadY));
-  Hot := False;
-  if AEnabled then
-  begin
-    AddLink(Result, ALink);
-    Hot := FHot = High(FLinkRects);
-  end;
-  FC.Pen.Style := psSolid;
-  FC.Brush.Style := bsSolid;
-  if not AEnabled then
-  begin
-    FC.Pen.Color := MixColor(FBack, FLine, 0.6);
-    FC.Brush.Color := FBack;
-    FC.Font.Color := MixColor(FBack, FDim, 0.7);
-  end
-  else
-  begin
-    FC.Pen.Color := FLine;
-    if Hot then
-    begin
-      FC.Brush.Color := FHover;
-      FC.Font.Color := FText;
-    end
-    else
-    begin
-      FC.Brush.Color := FBack;
-      FC.Font.Color := FDim;
-    end;
-  end;
-  FC.RoundRect(Result, Result.Height, Result.Height);
-  FC.Brush.Style := bsClear;
-  FC.TextOut(Result.Left + Px(PillPadX), ATop, AText);
-  FC.Font := Font;
-end;
-
-procedure TGittanExtTabPage.PaintText(var Y: integer; const AText: string; AColor: TColor;
-  ALeft, ARight: integer);
-var
-  R: TRect;
-  Style: TTextStyle;
-begin
-  FC.Font := Font;
-  FC.Font.Color := AColor;
-  FC.Brush.Style := bsClear;
-  R := Rect(ALeft, Y, ARight, Y + WrappedHeight(AText, ARight - ALeft));
-  Style := FC.TextStyle;
-  Style.Wordbreak := True;
-  Style.SingleLine := False;
-  Style.Alignment := taLeftJustify;
-  Style.Layout := tlTop;
-  FC.TextRect(R, R.Left, R.Top, AText, Style);
-  Y := R.Bottom;
-end;
-
-function TGittanExtTabPage.WrappedHeight(const AText: string; AWidth: integer): integer;
-var
-  R: TRect;
-begin
-  R := Rect(0, 0, AWidth, 0);
-  DrawText(FC.Handle, PChar(AText), Length(AText), R, DT_CALCRECT or DT_WORDBREAK);
-  Result := Max(R.Bottom, FC.TextHeight('Xg'));
 end;
 
 function TGittanExtTabPage.SeverityColor(ASeverity: TExtSeverity): TColor;
@@ -362,7 +237,7 @@ begin
     for i := 0 to High(Row.Actions) do
     begin
       PillR := PaintPill(X, RowTop, Row.Actions[i].Title,
-        RowActionLink + IntToStr(AIndex) + ':' + Row.Actions[i].Id, not FBusy);
+        RowActionLink + IntToStr(AIndex) + ':' + Row.Actions[i].Id, False, not FBusy);
       X := PillR.Right + Px(6);
     end;
     Inc(RowTop, TextH + Px(PillPadY));
@@ -409,7 +284,7 @@ begin
   end;
   Inc(Y, Px(Gap) + Px(PillPadY));
 
-  PillR := PaintPill(L, Y, rsRefresh, RefreshPillLink, not FBusy);
+  PillR := PaintPill(L, Y, rsRefresh, RefreshPillLink, False, not FBusy);
   FC.Font.Color := FDim;
   if FBusy then
     FC.TextOut(PillR.Right + Px(Gap), Y, FBusyText);
@@ -439,78 +314,6 @@ begin
     end;
   end;
   FContentHeight := Y + Px(Pad);
-end;
-
-procedure TGittanExtTabPage.Paint;
-begin
-  FC := Canvas;
-  PaintContent;
-end;
-
-procedure TGittanExtTabPage.FitHeight(AMin: integer);
-begin
-  Constraints.MinHeight := AMin;
-  Layout;
-end;
-
-{ The content painted on the measuring canvas, for its height; the
-  height is set here, never in Paint. }
-procedure TGittanExtTabPage.Layout;
-var
-  H: integer;
-begin
-  if (Parent = nil) or (Width <= 0) then
-  begin
-    Invalidate;
-    Exit;
-  end;
-  FC := MeasureCanvas(Font);
-  PaintContent;
-  H := Max(FContentHeight, Constraints.MinHeight);
-  if Height <> H then
-    Height := H;
-  Invalidate;
-end;
-
-procedure TGittanExtTabPage.Resize;
-begin
-  inherited Resize;
-  Layout;
-end;
-
-function TGittanExtTabPage.LinkAt(X, Y: integer): integer;
-var
-  i: integer;
-begin
-  { The last added wins: the pills lie on their card. }
-  for i := High(FLinkRects) downto 0 do
-    if PtInRect(FLinkRects[i], Point(X, Y)) then
-      Exit(i);
-  Result := -1;
-end;
-
-procedure TGittanExtTabPage.SetHot(AValue: integer);
-begin
-  if FHot = AValue then
-    Exit;
-  FHot := AValue;
-  if AValue < 0 then
-    Cursor := crDefault
-  else
-    Cursor := crHandPoint;
-  Invalidate;
-end;
-
-procedure TGittanExtTabPage.MouseMove(Shift: TShiftState; X, Y: integer);
-begin
-  inherited MouseMove(Shift, X, Y);
-  SetHot(LinkAt(X, Y));
-end;
-
-procedure TGittanExtTabPage.MouseLeave;
-begin
-  inherited MouseLeave;
-  SetHot(-1);
 end;
 
 procedure TGittanExtTabPage.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);

@@ -422,8 +422,8 @@ begin
   S := TGittanSettings.Create(FDir);
   try
     AssertEquals('none by default', 0, S.BatchRepos.Count);
-    AssertEquals('the overview by default', 0, S.BatchOperation);
-    S.BatchOperation := 1;
+    AssertEquals('the overview by default', '', S.BatchOperation);
+    S.BatchOperation := 'ext:forge-overview:b';
     S.BatchRepos.Add('/repo/a');
     S.BatchRepos.Add('/repo/b c');
     S.Save;
@@ -435,7 +435,7 @@ begin
     S.Load;
     AssertEquals(2, S.BatchRepos.Count);
     AssertEquals('/repo/b c', S.BatchRepos[1]);
-    AssertEquals(1, S.BatchOperation);
+    AssertEquals('ext:forge-overview:b', S.BatchOperation);
   finally
     S.Free;
   end;

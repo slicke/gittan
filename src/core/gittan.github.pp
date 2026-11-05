@@ -149,6 +149,16 @@ type
       the active account on github.com and ghe.com. }
     class function AccountsNote: string; override;
     class function CliEnv: TStringArray; override;
+    {** The commands of gh that read and change what is on GitHub (api,
+      pr, issue, repo, run, workflow, release, search, label, status,
+      cache), without those that work in a local clone or with local
+      files (pr checkout, repo clone, run download, release upload...)
+      and without the flags that read or write a file or start an
+      editor or the browser; never alias, extension, config, auth,
+      browse or gist, nor a name gh would take for an alias or an
+      extension of the user's. }
+    class function CliAllows(const AArgs: array of string; out AReason: string): boolean;
+      override;
     {** gh auth switch with the host and the user. }
     function SwitchAccount(const AHost, ALogin: string; out AError: string): boolean;
       override;
@@ -1436,6 +1446,127 @@ end;
 class function TGittanGitHubForge.CliEnv: TStringArray;
 begin
   Result := ['GH_PROMPT_DISABLED=1', 'GH_NO_UPDATE_NOTIFIER=1'];
+end;
+
+class function TGittanGitHubForge.CliAllows(const AArgs: array of string;
+  out AReason: string): boolean;
+const
+  { The commands an extension may run, each with the subcommands it may
+    not ('' for none); a command not listed is refused. }
+  Allowed: array[0..10, 0..1] of string = (
+    ('api', ''),
+    ('pr', ' checkout '),
+    ('issue', ''),
+    ('repo', ' clone create sync set-default deploy-key '),
+    ('run', ' download '),
+    ('workflow', ''),
+    ('release', ' create upload download '),
+    ('search', ''),
+    ('label', ''),
+    ('status', ''),
+    ('cache', ''));
+  { Flags that read or write a local file, work in a local clone or
+    start another program, in any command. }
+  Refused: array[0..14] of string = ('--input', '--body-file', '--notes-file',
+    '--output', '--dir', '--clobber', '--clone', '--remote', '--checkout', '--web',
+    '--editor', '--template-file', '--env-file', '--show-token', '--exec');
+
+  { -wF and the like: short flags run together, one of which reads or
+    writes a file or starts an editor. }
+  function ShortCluster(const AArg: string; ATyped: boolean): boolean;
+  var
+    k: integer;
+  begin
+    Result := False;
+    if (Length(AArg) < 3) or (Length(AArg) > 5) then
+      Exit;
+    for k := 2 to Length(AArg) do
+      if not (AArg[k] in ['a'..'z', 'A'..'Z']) then
+        Exit;
+    for k := 2 to Length(AArg) do
+      if (AArg[k] in ['O', 'D', 'e']) or (AArg[k] = 'F') and not ATyped then
+        Exit(True);
+  end;
+
+var
+  Cmd, Sub, A, Flag, Value: string;
+  i, c: integer;
+  Known, Typed: boolean;
+begin
+  Result := False;
+  AReason := '';
+  if Length(AArgs) = 0 then
+  begin
+    AReason := 'gh needs a command';
+    Exit;
+  end;
+  Cmd := AArgs[0];
+  Known := False;
+  for c := 0 to High(Allowed) do
+    if Allowed[c, 0] = Cmd then
+    begin
+      Known := True;
+      Sub := '';
+      if Length(AArgs) > 1 then
+        Sub := AArgs[1];
+      if (Sub <> '') and (Pos(' ' + Sub + ' ', Allowed[c, 1]) > 0) then
+      begin
+        AReason := 'gh ' + Cmd + ' ' + Sub + ' is not open to extensions';
+        Exit;
+      end;
+      Break;
+    end;
+  if not Known then
+  begin
+    AReason := 'gh ' + Cmd + ' is not open to extensions';
+    Exit;
+  end;
+  for i := 1 to High(AArgs) do
+  begin
+    A := AArgs[i];
+    if A = '--' then
+      Break;
+    Flag := A;
+    if Pos('=', Flag) > 0 then
+      Flag := Copy(Flag, 1, Pos('=', Flag) - 1);
+    for c := 0 to High(Refused) do
+      if Flag = Refused[c] then
+      begin
+        AReason := 'gh ' + Flag + ' is not open to extensions';
+        Exit;
+      end;
+    { -F is api's and workflow run's typed field, whose "key=@file"
+      reads a file, and the short --body-file elsewhere; -O, -D and -e
+      are --output, --dir and --editor, alone or in a cluster of short
+      flags (-wF). }
+    Typed := (Cmd = 'api') or (Cmd = 'workflow');
+    if Typed then
+    begin
+      Value := '';
+      if (A = '-F') or (A = '--field') then
+      begin
+        if i < High(AArgs) then
+          Value := AArgs[i + 1];
+      end
+      else if Pos('--field=', A) = 1 then
+        Value := Copy(A, 9, MaxInt)
+      else if (Pos('-F', A) = 1) and (Length(A) > 2) then
+        Value := Copy(A, 3, MaxInt);
+      if Pos('=@', Value) > 0 then
+      begin
+        AReason := 'gh ' + Cmd + ' reads no file for an extension';
+        Exit;
+      end;
+    end;
+    if (Length(A) >= 2) and (A[1] = '-') and (A[2] <> '-') and
+      (((A[2] = 'F') and not Typed) or (A[2] in ['O', 'D', 'e']) or
+      ShortCluster(A, Typed)) then
+    begin
+      AReason := 'gh ' + A + ' is not open to extensions';
+      Exit;
+    end;
+  end;
+  Result := True;
 end;
 
 class function TGittanGitHubForge.AccountsNote: string;

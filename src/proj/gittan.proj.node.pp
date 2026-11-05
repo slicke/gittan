@@ -486,7 +486,7 @@ var
 begin
   Result := nil;
   if AContext.TrackedUnder('node_modules/', Path) then
-    AddProjectCheck(Result, ProjectCheck(rsNodeModulesTracked, Path, 'node_modules/'));
+    AddProjectCheck(Result, ProjectCheck(rsNodeModulesTracked, Path, '/node_modules/'));
   if (LockFile(AContext.Root) = '') and
     (Length(Dependencies(TextOf(AContext.Root, 'package.json'))) > 0) then
     AddProjectCheck(Result, ProjectCheck(rsNoNodeLock, ''));

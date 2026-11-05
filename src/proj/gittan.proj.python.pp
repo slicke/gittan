@@ -422,7 +422,7 @@ begin
   Result := nil;
   for Folder in VenvFolders do
     if AContext.TrackedUnder(Folder, Path) then
-      AddProjectCheck(Result, ProjectCheck(Format(rsVenvTracked, [Folder]), Path, Folder));
+      AddProjectCheck(Result, ProjectCheck(Format(rsVenvTracked, [Folder]), Path, '/' + Folder));
   Path := AContext.TrackedWithExt('.pyc');
   if Path <> '' then
     AddProjectCheck(Result, ProjectCheck(Format(rsPycTracked, [Path]), Path, '__pycache__/'));

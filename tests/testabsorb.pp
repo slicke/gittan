@@ -42,12 +42,14 @@ type
     procedure TestRunNothing;
     procedure TestRunStale;
     procedure TestRunMoved;
+    procedure TestBuildMerges;
+    procedure TestRunUndone;
   end;
 
 implementation
 
 uses
-  gittan.keep, gittan.discard;
+  {$ifdef unix}BaseUnix,{$endif} gittan.keep, gittan.discard;
 
 procedure TAbsorbTest.SetUp;
 begin
@@ -471,6 +473,73 @@ begin
     AssertEquals(rsAbsorbMoved, Err);
     AssertEquals(0, Commits);
     AssertEquals('Add c|Change beta|Change five|Change two|Base', Subjects);
+  finally
+    Plan.Free;
+  end;
+end;
+
+{ A merge commit among the branch's commits: no plan, as the
+  interactive rebase refuses such a range. }
+procedure TAbsorbTest.TestBuildMerges;
+var
+  Plan: TGittanAbsorbPlan;
+begin
+  MakeBranch;
+  Git(['switch', '-q', '-c', 'side', 'HEAD~1']);
+  WriteLines('d.txt', ['side']);
+  Commit('Side');
+  Git(['switch', '-q', 'main']);
+  Git(['merge', '-q', '--no-ff', '--no-edit', 'side']);
+  ChangeWorkTree;
+  Plan := TGittanAbsorbPlan.Create;
+  try
+    AssertEquals(rsAbsorbMerges, Build(Plan, ['a.txt', 'b.txt']));
+  finally
+    Plan.Free;
+  end;
+end;
+
+{ The second fixup commit refused by a hook: the first is taken back,
+  so the branch is as it was, nothing is staged and the work tree still
+  has every change. }
+procedure TAbsorbTest.TestRunUndone;
+var
+  Plan: TGittanAbsorbPlan;
+  Commits: integer;
+  Conflicts, Stopped: boolean;
+  Err, Hook, Before: string;
+begin
+  MakeBranch;
+  ChangeWorkTree;
+  Before := GitOut(['rev-parse', 'HEAD']);
+  Hook := IncludeTrailingPathDelimiter(FDir) + '.git' + PathDelim + 'hooks' + PathDelim +
+    'commit-msg';
+  ForceDirectories(ExtractFileDir(Hook));
+  with TStringList.Create do
+  try
+    Add('#!/bin/sh');
+    Add('if grep -q "Change five" "$1"; then exit 1; fi');
+    Add('exit 0');
+    TextLineBreakStyle := tlbsLF;
+    SaveToFile(Hook);
+  finally
+    Free;
+  end;
+  {$ifdef unix}
+  FpChmod(Hook, &755);
+  {$endif}
+  Plan := TGittanAbsorbPlan.Create;
+  try
+    AssertEquals('', Build(Plan, ['a.txt', 'b.txt', 'c.txt']));
+    AssertFalse('refused', AbsorbRun(FRepo, Plan, [True, True, True, True, True], [],
+      Commits, Conflicts, Stopped, Err));
+    AssertEquals('no fixup left', 0, Commits);
+    AssertEquals('HEAD as it was', Before, GitOut(['rev-parse', 'HEAD']));
+    AssertEquals('Change beta|Change five|Change two|Base', Subjects);
+    AssertEquals('nothing staged', '', GitOut(['diff', '--cached', '--name-only']));
+    AssertEquals('one|two!!|three|four|five!|five-b|six!|seven|eight|nine|ten!',
+      ReadLines('a.txt'));
+    AssertEquals('alpha|beta!!|gamma', ReadLines('b.txt'));
   finally
     Plan.Free;
   end;

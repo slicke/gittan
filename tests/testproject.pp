@@ -740,7 +740,7 @@ begin
   AssertEquals(2, Length(Sec.Blocks));
   AssertTrue(Sec.Blocks[0].Kind = pbNote);
   AssertTrue(Sec.Blocks[1].Kind = pbChecks);
-  AssertEquals('node_modules/', Sec.Blocks[1].Checks[0].IgnorePattern);
+  AssertEquals('/node_modules/', Sec.Blocks[1].Checks[0].IgnorePattern);
 end;
 
 procedure TProjectTest.TestTextOfUnreadable;
@@ -911,8 +911,8 @@ begin
     AssertEquals('a.lps', C[0].Path);
     AssertEquals('*.lps', C[0].IgnorePattern);
     AssertTrue(Pos('a.lps', C[0].Text) > 0);
-    AssertEquals('lib/', C[1].IgnorePattern);
-    AssertEquals('backup/', C[2].IgnorePattern);
+    AssertEquals('/lib/', C[1].IgnorePattern);
+    AssertEquals('/backup/', C[2].IgnorePattern);
     Tracked.Clear;
     Tracked.Add('a.lpi');
     AssertEquals(0, Length(ChecksOf(DetectProjects(FDir)[0].Kind, Tracked)));
@@ -934,7 +934,7 @@ begin
     Tracked.Sorted := True;
     C := ChecksOf(DetectProjects(FDir)[0].Kind, Tracked);
     AssertEquals(2, Length(C));
-    AssertEquals('node_modules/', C[0].IgnorePattern);
+    AssertEquals('/node_modules/', C[0].IgnorePattern);
     AssertEquals('no lock: about no file', '', C[1].Path);
     Put('package-lock.json', '{}');
     Tracked.Clear;
@@ -963,7 +963,7 @@ begin
     AssertEquals(2, Length(C));
     AssertEquals('Cargo.lock', C[0].Path);
     AssertEquals('no pattern: it should be committed', '', C[0].IgnorePattern);
-    AssertEquals('target/', C[1].IgnorePattern);
+    AssertEquals('/target/', C[1].IgnorePattern);
     Tracked.Add('Cargo.lock');
     Put('src/lib.rs', '');
     DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'src' + PathDelim + 'main.rs');
@@ -992,7 +992,7 @@ begin
     Tracked.Sorted := True;
     C := ChecksOf(ProjectKindByName('python'), Tracked);
     AssertEquals(2, Length(C));
-    AssertEquals('.venv/', C[0].IgnorePattern);
+    AssertEquals('/.venv/', C[0].IgnorePattern);
     AssertEquals('__pycache__/', C[1].IgnorePattern);
   finally
     Tracked.Free;

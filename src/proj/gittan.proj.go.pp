@@ -56,7 +56,7 @@ function ParseGoModInfo(const AText: string): TGoModInfo;
 implementation
 
 uses
-  gittan.textfile;
+  Math, gittan.textfile;
 
 resourcestring
   rsNoGoSum = 'No go.sum. go mod tidy writes it; commit it so that every build checks the ' +
@@ -179,8 +179,34 @@ begin
 end;
 
 { Whether a .go file at the root is of package main, so "go run ." has
-  something to run; a _test.go file is not built by go run. }
+  something to run; a _test.go file is not built by go run. A file is
+  read up to its package clause, which comes before any code, so a
+  large file of another package costs no more than its head. }
 function RootIsMainPackage(const ARoot: string): boolean;
+const
+  { Enough for any licence header before the package clause. }
+  HeadBytes = 65536;
+
+  function HeadOf(const AFileName: string): string;
+  var
+    F: TFileStream;
+  begin
+    Result := '';
+    try
+      F := TFileStream.Create(IncludeTrailingPathDelimiter(ARoot) + AFileName,
+        fmOpenRead or fmShareDenyNone);
+      try
+        SetLength(Result, Min(F.Size, HeadBytes));
+        if Result <> '' then
+          SetLength(Result, F.Read(Result[1], Length(Result)));
+      finally
+        F.Free;
+      end;
+    except
+      Result := '';
+    end;
+  end;
+
 var
   FileName, Text, Line: string;
   Start: integer;
@@ -189,13 +215,15 @@ begin
   begin
     if SameText(Copy(FileName, Length(FileName) - 7, 8), '_test.go') then
       Continue;
-    Text := TextOf(ARoot, FileName);
+    Text := HeadOf(FileName);
     Start := 1;
     while NextLine(Text, Start, Line) do
     begin
       Line := Trim(Line);
       if (Line = 'package main') or (Pos('package main ', Line + ' ') = 1) then
         Exit(True);
+      if Pos('package ', Line) = 1 then
+        Break;
     end;
   end;
   Result := False;

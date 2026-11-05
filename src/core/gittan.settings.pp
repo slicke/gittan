@@ -287,9 +287,11 @@ type
       roots, kept in state.json (batch.repos). }
     property BatchRepos: TStringList read FBatchRepos;
   public
-    {** The operation shown on the Batch tab, by its index (0, the
-      overview, by default), kept in state.json (batch.operation). }
-    BatchOperation: integer;
+    {** The operation shown on the Batch tab, by its key (overview, gone,
+      identity, maintenance or an extension's; '', the overview, by
+      default), kept in state.json (batch.operation), so an extension's
+      is found again once the extensions are loaded. }
+    BatchOperation: string;
     {** The folder of the files, and the files. }
     property Dir: string read FDir;
     function SettingsFile: string;
@@ -709,7 +711,14 @@ begin
   ListOf(O, 'open', FTabs);
   ActiveTab := IntOf(O, 'active');
   ListOf(ObjOf(FStateDoc, 'batch'), 'repos', FBatchRepos);
-  BatchOperation := Max(0, IntOf(ObjOf(FStateDoc, 'batch'), 'operation'));
+  BatchOperation := StrOf(ObjOf(FStateDoc, 'batch'), 'operation');
+  { Kept by its index before. }
+  if BatchOperation = '' then
+    case IntOf(ObjOf(FStateDoc, 'batch'), 'operation') of
+      1: BatchOperation := 'gone';
+      2: BatchOperation := 'identity';
+      3: BatchOperation := 'maintenance';
+    end;
   if (ActiveTab < 0) or (ActiveTab >= FTabs.Count) then
     ActiveTab := 0;
 end;
@@ -811,7 +820,7 @@ begin
   O.Arrays['open'] := ListJson(FTabs);
   O.Integers['active'] := ActiveTab;
   ChildOf(FStateDoc, 'batch').Arrays['repos'] := ListJson(FBatchRepos);
-  ChildOf(FStateDoc, 'batch').Integers['operation'] := BatchOperation;
+  ChildOf(FStateDoc, 'batch').Strings['operation'] := BatchOperation;
 end;
 
 function TGittanSettings.WriteState: boolean;

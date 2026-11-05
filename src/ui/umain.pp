@@ -542,6 +542,8 @@ type
     FCommitHeader: TGittanSectionHeader;
     { Whether there is nothing to commit, and whether the section folded
       itself for that (umain.commit.inc, UpdateCommitState). }
+    { FCommitIdle: nothing to commit and nothing under way, as the
+      Commit section last saw it, which folds it as it turns true. }
     FCommitIdle, FCommitAutoFolded: boolean;
     FCommitMemo: TMemo;
     FCommitAmend: TCheckBox;
@@ -1103,6 +1105,9 @@ type
     FCodeRanges, FOldRanges: TGittanCodeRanges;
     FRangesValid, FBuildingView: boolean;
     FGapTextRounds: integer;
+    { The gap rows' text is to be written from the message loop
+      (GapTextsAsync). }
+    FGapTextQueued: boolean;
     { Scrolling on past the bottom of a file, or the top: the wheel
       delta pulled so far (positive downwards, towards the next file,
       negative upwards, towards the previous), the time of the last wheel
@@ -1482,6 +1487,7 @@ type
     function RowOfLine(ALine, AFallback: integer): integer;
     function GapRowText(ACount: integer; const AHeading: string): string;
     procedure SetGapRowTexts(AEd: TATSynEdit; const ARows: TGittanRows);
+    procedure GapTextsAsync(Data: PtrInt);
     function GapHeading(AGapTo: integer): string;
     function GapRowLayout(AEd: TATSynEdit; C: TCanvas; ARow, ATop: integer;
       out ALayout: TGapRowLayout): boolean;

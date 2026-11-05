@@ -1814,12 +1814,24 @@ const
     '    },' + LineEnding +
     '    unregister: function (id) { return t.unregisterCommand(String(id)); }' + LineEnding +
     '  };' + LineEnding +
-    '  var deliver = t._deliver;' + LineEnding +
+    '  var deliver = t._deliver, ANSWER_SECONDS = 300;' + LineEnding +
     '  delete t._deliver;' + LineEnding +
+    '  var said = function (e) { try { return String((e && e.message) || e); } catch (x) { return "The extension failed"; } };' + LineEnding +
     '  var answer = function (seq, p) {' + LineEnding +
+    '    var done = false, timer = null;' + LineEnding +
+    '    var send = function (o) {' + LineEnding +
+    '      if (done) return;' + LineEnding +
+    '      done = true;' + LineEnding +
+    '      if (timer !== null && typeof clearTimeout === "function") clearTimeout(timer);' + LineEnding +
+    '      var s;' + LineEnding +
+    '      try { s = JSON.stringify(o); } catch (e) { s = JSON.stringify({ error: "The answer is not JSON: " + said(e) }); }' + LineEnding +
+    '      deliver(Number(seq), s);' + LineEnding +
+    '    };' + LineEnding +
+    '    if (typeof setTimeout === "function")' + LineEnding +
+    '      timer = setTimeout(function () { send({ error: "The extension did not answer within " + ANSWER_SECONDS + " seconds" }); }, ANSWER_SECONDS * 1000);' + LineEnding +
     '    Promise.resolve().then(p).then(' + LineEnding +
-    '      function (v) { deliver(Number(seq), JSON.stringify({ value: v === undefined ? null : v })); },' + LineEnding +
-    '      function (e) { deliver(Number(seq), JSON.stringify({ error: String((e && e.message) || e) })); });' + LineEnding +
+    '      function (v) { send({ value: v === undefined ? null : v }); },' + LineEnding +
+    '      function (e) { send({ error: said(e) }); });' + LineEnding +
     '  };' + LineEnding +
     '  t.forgeTabs = {' + LineEnding +
     '    register: function (o) {' + LineEnding +

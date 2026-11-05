@@ -65,11 +65,29 @@ function ReadExtAnswer(const AJson: string; out AValue: TJSONData; out AError: s
   (null, a number), as an action's answer that asks for a render. }
 function ExtTabModelOf(AValue: TJSONData; out AModel: TExtTabModel): boolean;
 
-{** An operation's result from a value: null or an empty string says
-  nothing, a string is the text, {text, severity, url} the rest. }
+{** An operation's result from a value: null, an empty string and the
+  other values JavaScript counts as false (false, 0) say nothing, as
+  does true; a string or another number is the text, {text, severity,
+  url} the rest. }
 function ExtBatchResultOf(AValue: TJSONData): TExtBatchResult;
 
+{** AUrl when it is a web address (http:// or https://), else '': what
+  an extension gives as a row's or a result's link is opened only in
+  the browser, never as a file, an app or another scheme's handler. }
+function ExtWebUrl(const AUrl: string): string;
+
 implementation
+
+function ExtWebUrl(const AUrl: string): string;
+var
+  U: string;
+begin
+  U := Trim(AUrl);
+  if (Pos('https://', LowerCase(U)) = 1) or (Pos('http://', LowerCase(U)) = 1) then
+    Result := U
+  else
+    Result := '';
+end;
 
 function ParseExtSeverity(const AName: string): TExtSeverity;
 begin
@@ -151,7 +169,7 @@ begin
   ARow.Title := TextOf(O, 'title');
   ARow.Detail := TextOf(O, 'detail');
   ARow.Tag := TextOf(O, 'tag');
-  ARow.Url := TextOf(O, 'url');
+  ARow.Url := ExtWebUrl(TextOf(O, 'url'));
   ARow.Repo := TextOf(O, 'repo');
   ARow.Severity := ParseExtSeverity(TextOf(O, 'severity'));
   ARow.Json := O.AsJSON;
@@ -227,10 +245,12 @@ begin
   begin
     O := TJSONObject(AValue);
     Result.Text := TextOf(O, 'text');
-    Result.Url := TextOf(O, 'url');
+    Result.Url := ExtWebUrl(TextOf(O, 'url'));
     Result.Severity := ParseExtSeverity(TextOf(O, 'severity'));
   end
-  else if AValue.JSONType in [jtString, jtNumber, jtBoolean] then
+  else if AValue.JSONType = jtString then
+    Result.Text := AValue.AsString
+  else if (AValue.JSONType = jtNumber) and (AValue.AsFloat <> 0) then
     Result.Text := AValue.AsString;
   Result.Text := Trim(Result.Text);
   Result.Said := (Result.Text <> '') or (Result.Url <> '');

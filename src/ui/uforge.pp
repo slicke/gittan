@@ -124,6 +124,9 @@ type
     FExtTabs: TGittanExtCommands;
     FExtTab, FExtTabSeq: integer;
     FExtTabActing: boolean;
+    { The account changed while a tab was shown: its rows were the old
+      account's, asked again once the job says who is logged in now. }
+    FExtTabStale: boolean;
     FExtTabCtx: JSContext;
     FExtMenu: TMenuItem;
     FExtQueued, FIsShown: boolean;
@@ -441,7 +444,7 @@ begin
   FBatch.OnScan := @BatchScan;
   FBatch.OnDelete := @BatchDelete;
   FBatch.OnCheck := @BatchCheck;
-  FBatch.Operation := App.Settings.BatchOperation;
+  FBatch.OperationKey := App.Settings.BatchOperation;
   FBatch.OnOperationChange := @BatchOperationChange;
   FBatch.OnOpen := @BatchOpen;
   FBatch.OnMaintScan := @BatchMaintScan;
@@ -741,6 +744,19 @@ begin
   FRestored := False;
   FError := '';
   FPage.ForgetAnswer;
+  { An extension's tab keeps nothing of the old account: an answer
+    still to come is not taken, the rows go so no action of theirs runs
+    as the new account, and it is asked again when the job is done. }
+  if FExtTab >= 0 then
+  begin
+    FExtTabSeq := 0;
+    FExtTabActing := False;
+    FExtTabStale := True;
+    FExtPage.SetModel(Default(TExtTabModel));
+    FExtPage.SetBusy(True, False);
+    if FExtPage.Visible then
+      FExtPage.FitHeight(FBox.ClientHeight);
+  end;
   { The job first, as in Shown. }
   StartJob;
   UpdatePage;
@@ -873,7 +889,7 @@ end;
   the identity check read again as it comes into view. }
 procedure TForgeView.BatchOperationChange(Sender: TObject);
 begin
-  App.Settings.BatchOperation := FBatch.Operation;
+  App.Settings.BatchOperation := FBatch.OperationKey;
   FBatch.FitHeight(FBox.ClientHeight);
   FBox.VertScrollBar.Position := 0;
   if FBatch.Operation in [BatchOverview, BatchIdentity] then
@@ -1251,6 +1267,12 @@ begin
   end;
   FRestored := False;
   UpdatePage;
+  if FExtTabStale then
+  begin
+    FExtTabStale := False;
+    if FExtPage.Visible then
+      RenderExtTab;
+  end;
   if (OldLogin <> FLogin) or (OldAvatar <> FAvatar) or (OldAvatarUrl <> FAvatarUrl) then
   begin
     { Kept for the next start (LoadPicture), a write that fails left at
@@ -1647,6 +1669,7 @@ begin
     Exit;
   end;
   FExtTabCtx := Cmd.Ctx;
+  FExtTabStale := False;
   FExtTabSeq := NextExtSeq;
   FExtTabActing := False;
   FExtPage.SetBusy(True, False);
@@ -1706,7 +1729,8 @@ end;
 
 procedure TForgeView.ExtTabOpenUrl(Sender: TObject; const ATarget: string);
 begin
-  OpenURL(ATarget);
+  if ExtWebUrl(ATarget) <> '' then
+    OpenURL(ATarget);
 end;
 
 procedure TForgeView.ExtTabOpenRepo(Sender: TObject; const ATarget: string);
@@ -1815,7 +1839,11 @@ end;
 
 { The next repository: left out when the extension does not run for it
   (@repos, @forges against its remotes), else the operation called with
-  the repository, its name and its forge, the answer awaited. }
+  the repository, its name and its forge, the answer awaited. One
+  repository a call: after one left out the next is taken from the
+  message loop, so a run over many repositories that the extension
+  leaves out (each a git process for its remotes) keeps the window
+  alive. }
 procedure TForgeView.RunExtStep;
 var
   Eng: TGittanExtEngine;
@@ -1841,6 +1869,11 @@ begin
     begin
       FBatch.SetExtResult(FExtRunKey, FExtRunIndex, Default(TExtBatchResult), True);
       Inc(FExtRunIndex);
+      if FExtRunIndex <= High(FExtRunPaths) then
+      begin
+        Application.QueueAsyncCall(@RunExtStepAsync, 0);
+        Exit;
+      end;
       Continue;
     end;
     Forge := ForgeClassFor(Urls);
@@ -1881,7 +1914,8 @@ end;
 
 procedure TForgeView.BatchOpenUrl(Sender: TObject; const APath: string);
 begin
-  OpenURL(APath);
+  if ExtWebUrl(APath) <> '' then
+    OpenURL(APath);
 end;
 
 procedure TForgeView.ExtCommandClick(Sender: TObject);

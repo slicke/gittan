@@ -577,6 +577,14 @@ type
       notice off, since nobody could answer the one and the other would
       land in stderr. None, the base's answer. }
     class function CliEnv: TStringArray; virtual;
+    {** Whether an extension may run the tool with AArgs
+      (Gittan.forge.cli): what reads the forge with the user's account
+      or changes what is on it, never what runs another program, reads
+      or writes a local file or works in a local clone; the reason
+      otherwise. The base allows nothing, so a forge opens its tool to
+      extensions only by saying what of it is safe. }
+    class function CliAllows(const AArgs: array of string; out AReason: string): boolean;
+      virtual;
     {** The filters the forge view offers on this forge's lists, and
       the presets of them it names: the base's are StandardFilters and
       StandardPresets; a forge with its own notions (a pipeline, an
@@ -676,6 +684,13 @@ function ForgeClassFor(const AUrls: string; const ASshConfig: string): TGittanFo
   they are give no forge and one of them is an ssh remote's, and then
   only the aliases looked up. }
 function ForgeClassFor(const AUrls: string): TGittanForgeClass; overload;
+{** The tool AForge's features run, the one rule for the forge view
+  (TGittanApp.ForgeCli), the extensions (Gittan.forge, Gittan.app
+  .setting) and the rest: '' for no forge or while hosting is off
+  (AHosting false), else APath, the settings' path for it
+  (TGittanSettings.ForgeCliPath), else the one FindTool finds ('' for
+  none). }
+function ForgeTool(AForge: TGittanForgeClass; AHosting: boolean; const APath: string): string;
 {** The active accounts of AAccounts as one string, "host=login" a line
   each, for telling whether the user switched: equal keys, the same
   accounts in use. }
@@ -831,6 +846,16 @@ end;
 function ForgeClassFor(const AUrls: string; const ASshConfig: string): TGittanForgeClass;
 begin
   Result := ForgeClassIn(AUrls, ASshConfig, False);
+end;
+
+function ForgeTool(AForge: TGittanForgeClass; AHosting: boolean; const APath: string): string;
+begin
+  if (AForge = nil) or not AHosting then
+    Result := ''
+  else if APath <> '' then
+    Result := APath
+  else
+    Result := FindTool(AForge.CliName);
 end;
 
 function ForgeClassFor(const AUrls: string): TGittanForgeClass;
@@ -2367,6 +2392,13 @@ end;
 class function TGittanForge.CliEnv: TStringArray;
 begin
   Result := nil;
+end;
+
+class function TGittanForge.CliAllows(const AArgs: array of string;
+  out AReason: string): boolean;
+begin
+  AReason := Name + '''s tool is not open to extensions';
+  Result := False;
 end;
 
 function TGittanForge.SwitchAccount(const AHost, ALogin: string;

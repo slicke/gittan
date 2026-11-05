@@ -74,6 +74,11 @@ type
 var
   Api: TGittanExtApi;
   ApiSettings: TGittanSettings;
+  { The tool of each forge as _forgeInfo found it on the main thread,
+    "name=path", for forgeRun on the promise thread, which may not read
+    the settings while the main thread changes them. }
+  ForgeCliSeen: TStringList;
+  ForgeCliLock: TRTLCriticalSection;
 
 { ---------------------------------------------------------------------------
   JSON of the repository's records
@@ -666,10 +671,9 @@ begin
       for Forge in RegisteredForges do
         if Name = Forge.Name + 'Cli' then
         begin
-          if ApiSettings.ForgeCliPath(Forge.Name) <> '' then
-            ReturnString(res, ctx, ApiSettings.ForgeCliPath(Forge.Name))
-          else
-            ReturnString(res, ctx, FindTool(Forge.CliName));
+          { The tool whether hosting is on or not, as the settings name
+            it. }
+          ReturnString(res, ctx, ForgeTool(Forge, True, ApiSettings.ForgeCliPath(Forge.Name)));
         end;
   end;
 end;
@@ -690,20 +694,39 @@ begin
   Result := nil;
 end;
 
-{ The tool of AForge as the forge features use it: '' while hosting is
-  off or it is not found, as App.ForgeCli. }
+{ The tool of AForge as the forge features use it (ForgeTool, as
+  App.ForgeCli): '' while hosting is off or it is not found. On the
+  main thread, as it reads the settings. }
 function ForgeCliOf(AForge: TGittanForgeClass): string;
 begin
-  Result := '';
   if AForge = nil then
-    Exit;
-  if ApiSettings = nil then
-    Exit(FindTool(AForge.CliName));
-  if not ApiSettings.HostingEnabled then
-    Exit;
-  Result := ApiSettings.ForgeCliPath(AForge.Name);
-  if Result = '' then
-    Result := FindTool(AForge.CliName);
+    Result := ''
+  else if ApiSettings = nil then
+    Result := ForgeTool(AForge, True, '')
+  else
+    Result := ForgeTool(AForge, ApiSettings.HostingEnabled, ApiSettings.ForgeCliPath(AForge.Name));
+end;
+
+{ Keeps the tool _forgeInfo found for AForge, on the main thread. }
+procedure SeeForgeCli(const AForge, ACli: string);
+begin
+  EnterCriticalSection(ForgeCliLock);
+  try
+    ForgeCliSeen.Values[AForge] := ACli;
+  finally
+    LeaveCriticalSection(ForgeCliLock);
+  end;
+end;
+
+{ The tool _forgeInfo last found for AForge, on any thread; '' for none. }
+function SeenForgeCli(const AForge: string): string;
+begin
+  EnterCriticalSection(ForgeCliLock);
+  try
+    Result := ForgeCliSeen.Values[AForge];
+  finally
+    LeaveCriticalSection(ForgeCliLock);
+  end;
 end;
 
 { The forge of the repository at ARoot, by its remotes; nil when they
@@ -755,6 +778,7 @@ begin
   if Forge = nil then
     Exit;
   Cli := ForgeCliOf(Forge);
+  SeeForgeCli(Forge.Name, Cli);
   O := TJSONObject.Create;
   O.Add('name', Forge.Name);
   O.Add('tool', Forge.CliName);
@@ -1020,14 +1044,15 @@ begin
 end;
 
 { forgeRun(forge, args, cwd, input) on the promise thread: the tool of
-  the forge named, as the forge features find it, so nothing but a
-  forge's tool runs, with the forge's environment (CliEnv), in cwd or
-  the home folder. }
+  the forge named, as _forgeInfo found it on the main thread just
+  before (the facade asks it first), so nothing but a forge's tool
+  runs, and only with the arguments the forge allows (CliAllows), with
+  its environment (CliEnv), in cwd or the home folder. }
 function TGittanExtApi.ForgeRun(const ctx: PJSContext; const func: string;
   const params: JSParameters; out res: JSValueVal): boolean;
 var
   Forge: TGittanForgeClass;
-  Exe, Dir: string;
+  Exe, Dir, Reason: string;
   Args: TStringArray;
 begin
   Result := False;
@@ -1042,7 +1067,12 @@ begin
     res := StringToValueVal('Gittan.forge.cli: the arguments are a list of strings');
     Exit;
   end;
-  Exe := ForgeCliOf(Forge);
+  if not Forge.CliAllows(Args, Reason) then
+  begin
+    res := StringToValueVal('Gittan.forge.cli: ' + Reason);
+    Exit;
+  end;
+  Exe := SeenForgeCli(Forge.Name);
   if Exe = '' then
   begin
     res := StringToValueVal('Gittan.forge.cli: ' + Forge.Name +
@@ -1465,6 +1495,12 @@ begin
   end;
 end;
 
+initialization
+  InitCriticalSection(ForgeCliLock);
+  ForgeCliSeen := TStringList.Create;
+
 finalization
   FreeAndNil(Api);
+  FreeAndNil(ForgeCliSeen);
+  DoneCriticalSection(ForgeCliLock);
 end.

@@ -533,12 +533,20 @@ begin
   Git(['remote', 'add', 'origin', 'https://github.com/slicke/gittan.git']);
   AssertEquals('on GitHub now', 'GitHub:gh:true',
     EvalIn(Info^.Ctx, 'var i = Gittan.forge.info(); i.name + ":" + i.cli + ":" + i.ready'));
-  EvalIn(Info^.Ctx, 'Gittan.forges.gh.run(["rev-parse", "--is-inside-work-tree"]).then(function (r) {' +
-    'globalThis.inRepo = r.stdout.trim(); }, function (e) { globalThis.inRepo = "rejected:" + e; });' +
-    'Gittan.forge.cli(["--version"]).then(function (r) { globalThis.ver = r.stdout.substring(0, 11); });');
-  WaitFor(Info^.Ctx, 'globalThis.inRepo && globalThis.ver');
+  { git stands in for gh: "status" is a command of both, and git's
+    names the branch only in a repository. }
+  EvalIn(Info^.Ctx, 'Gittan.forges.gh.run(["status"]).then(function (r) {' +
+    'globalThis.inRepo = String(r.stdout.indexOf("branch") >= 0); }, function (e) { globalThis.inRepo = "rejected:" + e; });' +
+    'Gittan.forge.cli(["--version"]).then(function (r) { globalThis.ver = "ran"; },' +
+    'function (e) { globalThis.ver = String((e && e.message) || e); });' +
+    'Gittan.forge.cli(["alias", "set", "--shell", "x", "echo"]).then(function (r) { globalThis.alias = "ran"; },' +
+    'function (e) { globalThis.alias = String((e && e.message) || e); });');
+  WaitFor(Info^.Ctx, 'globalThis.inRepo && globalThis.ver && globalThis.alias');
   AssertEquals('in the repository', 'true', EvalIn(Info^.Ctx, 'globalThis.inRepo'));
-  AssertEquals('the forge''s tool', 'git version', EvalIn(Info^.Ctx, 'globalThis.ver'));
+  AssertEquals('no command gh does not open', 'Gittan.forge.cli: gh --version is not open to extensions',
+    EvalIn(Info^.Ctx, 'globalThis.ver'));
+  AssertEquals('no alias', 'Gittan.forge.cli: gh alias is not open to extensions',
+    EvalIn(Info^.Ctx, 'globalThis.alias'));
   FHost.ViewForge := 'GitHub';
   FHost.Root := '';
   AssertEquals('the forge view''s', 'GitHub', EvalIn(Info^.Ctx, 'Gittan.forge.info().name'));

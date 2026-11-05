@@ -84,7 +84,8 @@ unit gittan.batchpage;
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Graphics, gittan.batch, gittan.ext.views;
+  Classes, SysUtils, Types, Controls, Graphics, gittan.batch, gittan.ext.views,
+  gittan.cardpage;
 
 const
   {** The operations, as Operation counts them. }
@@ -93,6 +94,9 @@ const
   BatchIdentity = 2;
   BatchMaintenance = 3;
   BatchOperationCount = 4;
+  {** The keys of Gittan's own operations, as OperationKey gives them. }
+  BatchOperationKeys: array[0..BatchOperationCount - 1] of string =
+    ('overview', 'gone', 'identity', 'maintenance');
 
 type
   {** A repository to open, by its root. }
@@ -121,7 +125,7 @@ type
 
   { TGittanBatchPage }
 
-  TGittanBatchPage = class(TCustomControl)
+  TGittanBatchPage = class(TGittanCardPage)
   private
     FRows: TGittanBatchRows;
     { Per row: a repository whose folder is gone. }
@@ -152,19 +156,13 @@ type
     { Whether the list is unfolded, and the operation shown. }
     FReposOpen: boolean;
     FOperation: integer;
+    { The extension's operation OperationKey asked for before it came. }
+    FWantedKey: string;
     FOnOperationChange: TNotifyEvent;
     FOnCheck: TNotifyEvent;
     FOnOpen: TGittanBatchOpenEvent;
     { The branches picked to delete, as PickKey. }
     FPicked: TStringList;
-    FBack, FText, FDim, FHover, FLine, FLink, FOk, FWarn, FErrorColor, FCard: TColor;
-    FLinkRects: array of TRect;
-    FLinkUrls: array of string;
-    FHot: integer;
-    FContentHeight: integer;
-    { The canvas the content is painted on: the control's in Paint, a
-      measuring one in Layout. }
-    FC: TCanvas;
     FOnChosenChange, FOnScan, FOnDelete: TNotifyEvent;
     { The extensions' operations, and their runs, one per key, kept while
       another is shown. }
@@ -175,9 +173,6 @@ type
     function ExtRunIndex(const AKey: string): integer;
     procedure PaintExtCard(var Y: integer; ARun, AIndex, ALeft, ARight: integer);
     procedure PaintExtOp(var Y: integer; ALeft, ARight: integer);
-    function LinkAt(X, Y: integer): integer;
-    procedure SetHot(AValue: integer);
-    procedure AddLink(const ARect: TRect; const AUrl: string);
     function IsChosen(const APath: string): boolean;
     procedure SetChosenPath(const APath: string; AOn: boolean);
     function RowState(AIndex: integer): integer;
@@ -191,22 +186,18 @@ type
     procedure ToggleBranch(AIndex, ABranch: integer);
     procedure ChosenChanged;
     procedure PaintBox(ALeft, ATop, ASize, AState: integer; AEnabled: boolean);
-    function PillWidth(const AText: string; AExt: boolean = False): integer;
-    function PaintPill(ALeft, ATop: integer; const AText, ALink: string;
-      APrimary, AEnabled: boolean; AExt: boolean = False): TRect;
     function PaintTag(ARight, ATop: integer; const AText: string; AColor: TColor): integer;
     procedure PaintHeading(var Y: integer; const ATitle, ADetail: string; ALeft, ARight: integer;
       AChips: boolean);
-    procedure PaintText(var Y: integer; const AText: string; AColor: TColor;
-      ALeft, ARight: integer);
     procedure PaintRows(var Y: integer; ALeft, ARight: integer);
     procedure PaintPicked(var Y: integer; ALeft, ARight: integer);
     procedure PaintChevron(ALeft, ATop, ASize: integer; AOpen: boolean; AColor: TColor);
     procedure PaintOperations(var Y: integer; ALeft, ARight: integer);
     procedure SetOperation(AValue: integer);
+    function GetOperationKey: string;
+    procedure SetOperationKey(const AKey: string);
     procedure PaintGoneCard(var Y: integer; AIndex, ALeft, ARight: integer);
     procedure PaintGone(var Y: integer; ALeft, ARight: integer);
-    function WrappedHeight(const AText: string; AWidth: integer): integer;
     procedure PaintStatusCard(var Y: integer; AIndex, ALeft, ARight: integer);
     procedure PaintStatus(var Y: integer; ALeft, ARight: integer);
     procedure PaintCheckPill(var Y: integer; ALeft: integer; ARunning: boolean;
@@ -218,13 +209,8 @@ type
     procedure ToggleMaint(ARepo, AItem: integer);
     procedure PaintMaintCard(var Y: integer; AIndex, ALeft, ARight: integer);
     procedure PaintMaint(var Y: integer; ALeft, ARight: integer);
-    procedure PaintContent;
-    procedure Layout;
   protected
-    procedure Paint; override;
-    procedure Resize; override;
-    procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
-    procedure MouseLeave; override;
+    procedure PaintContent; override;
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer); override;
   public
     constructor Create(AOwner: TComponent); override;
@@ -311,13 +297,13 @@ type
       BatchIdentity, BatchMaintenance, or an extension's after
       BatchOperationCount. }
     property Operation: integer read FOperation write SetOperation;
+    {** The operation shown by its key: one of BatchOperationKeys or an
+      extension's (TGittanBatchExtOp.Key). An extension's not there yet
+      is waited for: SetExtOps shows it once it comes, unless another
+      was picked meanwhile. }
+    property OperationKey: string read GetOperationKey write SetOperationKey;
     {** A click on an operation's pill changed Operation. }
     property OnOperationChange: TNotifyEvent read FOnOperationChange write FOnOperationChange;
-    {** The palette of the dark or the light appearance. }
-    procedure SetTheme(ADark: boolean);
-    {** Makes the control at least AMin high, and no higher than its
-      content needs beyond that. }
-    procedure FitHeight(AMin: integer);
     {** The roots picked. }
     property Chosen: TStringList read FChosen;
     {** A check box, All or None changed Chosen. }
@@ -443,6 +429,7 @@ resourcestring
   rsExtRunMany = 'Run on %d repositories';
   rsExtRunNone = 'Pick repositories to run on';
   rsExtRunning = 'Running on %d of %d…';
+  rsExtOtherRunning = 'Another operation of an extension is running; this one can run once it is done.';
   rsExtSaidOne = 'Something to say of 1 of %d';
   rsExtSaidMany = 'Something to say of %d of %d';
   rsExtSaidNoneOne = 'Nothing to say of the repository';
@@ -468,8 +455,6 @@ const
   MaintScanLink = 'mscan';
   MaintRunLink = 'mrun';
   MaintLink = 'mt:';
-  PuzzleSide = 11;
-  PuzzleGap = 5;
   ExtRunLink = 'xrun';
   ExtOpenLink = 'xo:';
   ExtUrlLink = 'xu:';
@@ -484,8 +469,6 @@ const
   CardPadY = 10;
   CardRadius = 12;
   CardGap = 8;
-  PillPadX = 10;
-  PillPadY = 3;
   TagPadX = 6;
   TagPadY = 2;
   TagRadius = 6;
@@ -516,9 +499,6 @@ end;
 constructor TGittanBatchPage.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
-  ControlStyle := ControlStyle + [csOpaque];
-  FHot := -1;
-  Align := alTop;
   FChosen := TStringList.Create;
   FChosen.CaseSensitive := True;
   FPicked := TStringList.Create;
@@ -529,7 +509,6 @@ begin
   FMaintPicked.CaseSensitive := True;
   FMaintPicked.Sorted := True;
   FMaintPicked.Duplicates := dupIgnore;
-  SetTheme(False);
 end;
 
 destructor TGittanBatchPage.Destroy;
@@ -538,25 +517,6 @@ begin
   FPicked.Free;
   FChosen.Free;
   inherited Destroy;
-end;
-
-procedure TGittanBatchPage.SetTheme(ADark: boolean);
-var
-  P: TGittanForgePalette;
-begin
-  P := ForgePalette(ADark);
-  FBack := P.Back;
-  FText := P.Text;
-  FDim := P.Dim;
-  FHover := P.Hover;
-  FLine := P.Line;
-  FLink := P.Link;
-  FOk := P.Ok;
-  FWarn := P.Warn;
-  FErrorColor := P.Error;
-  FCard := P.Card;
-  Color := FBack;
-  Invalidate;
 end;
 
 { ---------------------------------------------------------------------------
@@ -894,14 +854,6 @@ end;
   Painting
   --------------------------------------------------------------------------- }
 
-procedure TGittanBatchPage.AddLink(const ARect: TRect; const AUrl: string);
-begin
-  SetLength(FLinkRects, Length(FLinkRects) + 1);
-  SetLength(FLinkUrls, Length(FLinkUrls) + 1);
-  FLinkRects[High(FLinkRects)] := ARect;
-  FLinkUrls[High(FLinkUrls)] := AUrl;
-end;
-
 { A check box ASize across: empty (AState 0), checked (1) or with a dash
   (2), in the link color; dim when not AEnabled. }
 procedure TGittanBatchPage.PaintBox(ALeft, ATop, ASize, AState: integer; AEnabled: boolean);
@@ -947,79 +899,6 @@ begin
     FC.Line(ALeft + ASize * 4 div 15, ATop + ASize div 2, ALeft + ASize * 11 div 15,
       ATop + ASize div 2);
   FC.Pen.Width := 1;
-end;
-
-function TGittanBatchPage.PillWidth(const AText: string; AExt: boolean): integer;
-begin
-  FC.Font := Font;
-  Result := FC.TextWidth(AText) + 2 * Px(PillPadX);
-  if AExt then
-    Inc(Result, Px(PuzzleSide) + Px(PuzzleGap));
-end;
-
-{ A button as a pill, its text at ALeft, ATop: APrimary in the link color,
-  else outlined; a link only while AEnabled, dim otherwise. Gives its
-  rectangle. }
-function TGittanBatchPage.PaintPill(ALeft, ATop: integer; const AText, ALink: string;
-  APrimary, AEnabled, AExt: boolean): TRect;
-var
-  TextH: integer;
-  Hot: boolean;
-begin
-  FC.Font := Font;
-  TextH := FC.TextHeight('Xg');
-  Result := Rect(ALeft, ATop - Px(PillPadY), ALeft + PillWidth(AText, AExt),
-    ATop + TextH + Px(PillPadY));
-  Hot := False;
-  if AEnabled then
-  begin
-    AddLink(Result, ALink);
-    Hot := FHot = High(FLinkRects);
-  end;
-  FC.Pen.Style := psSolid;
-  FC.Brush.Style := bsSolid;
-  if not AEnabled then
-  begin
-    FC.Pen.Color := MixColor(FBack, FLine, 0.6);
-    FC.Brush.Color := FBack;
-    FC.Font.Color := MixColor(FBack, FDim, 0.7);
-  end
-  else if APrimary then
-  begin
-    FC.Pen.Color := FLink;
-    if Hot then
-      FC.Brush.Color := MixColor(FBack, FLink, 0.3)
-    else
-      FC.Brush.Color := MixColor(FBack, FLink, 0.18);
-    FC.Font.Color := FLink;
-  end
-  else
-  begin
-    FC.Pen.Color := FLine;
-    if Hot then
-    begin
-      FC.Brush.Color := FHover;
-      FC.Font.Color := FText;
-    end
-    else
-    begin
-      FC.Brush.Color := FBack;
-      FC.Font.Color := FDim;
-    end;
-  end;
-  FC.RoundRect(Result, Result.Height, Result.Height);
-  FC.Brush.Style := bsClear;
-  if AExt then
-  begin
-    { An extension's: the puzzle piece before the text, in its color. }
-    PaintPuzzle(FC, Result.Left + Px(PillPadX), ATop + (TextH - Px(PuzzleSide)) div 2,
-      Px(PuzzleSide), FC.Font.Color);
-    FC.Brush.Style := bsClear;
-    FC.TextOut(Result.Left + Px(PillPadX) + Px(PuzzleSide) + Px(PuzzleGap), ATop, AText);
-  end
-  else
-    FC.TextOut(Result.Left + Px(PillPadX), ATop, AText);
-  FC.Font := Font;
 end;
 
 { A tag ending at ARight in a smaller font, its text in AColor on the
@@ -1126,28 +1005,6 @@ begin
   FC.Pen.Color := FLine;
   FC.Line(ALeft, Y, ARight, Y);
   Inc(Y, Px(Gap) div 2);
-end;
-
-{ A paragraph in AColor, wrapped between ALeft and ARight. }
-procedure TGittanBatchPage.PaintText(var Y: integer; const AText: string; AColor: TColor;
-  ALeft, ARight: integer);
-var
-  R: TRect;
-  Style: TTextStyle;
-begin
-  FC.Font := Font;
-  FC.Font.Color := AColor;
-  FC.Brush.Style := bsClear;
-  R := Rect(ALeft, Y, ARight, Y);
-  DrawText(FC.Handle, PChar(AText), Length(AText), R, DT_CALCRECT or DT_WORDBREAK);
-  R.Right := ARight;
-  Style := FC.TextStyle;
-  Style.Wordbreak := True;
-  Style.SingleLine := False;
-  Style.Alignment := taLeftJustify;
-  Style.Layout := tlTop;
-  FC.TextRect(R, R.Left, R.Top, AText, Style);
-  Y := R.Bottom;
 end;
 
 { The repositories, a row each, indented by depth: the box, a folder's
@@ -1479,16 +1336,6 @@ begin
   FChecking := ARunning;
   Layout;
   Invalidate;
-end;
-
-{ The height of AText wrapped in AWidth, in the canvas's font. }
-function TGittanBatchPage.WrappedHeight(const AText: string; AWidth: integer): integer;
-var
-  R: TRect;
-begin
-  R := Rect(0, 0, AWidth, 0);
-  DrawText(FC.Handle, PChar(AText), Length(AText), R, DT_CALCRECT or DT_WORDBREAK);
-  Result := Max(R.Bottom, FC.TextHeight('Xg'));
 end;
 
 { The branches with their counts, joined: "keep (1), feature/x (3)". }
@@ -2347,7 +2194,8 @@ begin
         Break;
       end;
   FExtRuns := Kept;
-  { The one shown, where it is now; Gittan's own stay where they are. }
+  { The one shown, where it is now; Gittan's own stay where they are.
+    One asked for before it came is shown once it is here. }
   if FOperation >= BatchOperationCount then
   begin
     FOperation := BatchOverview;
@@ -2355,6 +2203,14 @@ begin
       if FExtOps[i].Key = Shown then
         FOperation := BatchOperationCount + i;
   end;
+  if FWantedKey <> '' then
+    for i := 0 to High(FExtOps) do
+      if FExtOps[i].Key = FWantedKey then
+      begin
+        FOperation := BatchOperationCount + i;
+        FWantedKey := '';
+        Break;
+      end;
   FHot := -1;
   Layout;
   Invalidate;
@@ -2539,7 +2395,7 @@ var
   Op: TGittanBatchExtOp;
   Run, i, n, Said, Asked, TextH: integer;
   ButtonText, Detail, Quiet, LeftOut: string;
-  Running: boolean;
+  Running, Other: boolean;
   R: TRect;
 begin
   if not ShownExtOp(Op) then
@@ -2593,11 +2449,19 @@ begin
   else
     ButtonText := Format(rsExtRunMany, [n]);
   Inc(Y, Px(PillPadY));
-  R := PaintPill(ALeft, Y, ButtonText, ExtRunLink, False, (n > 0) and not Running);
+  { One run at a time (the forge view's BatchExtRun): another's running
+    keeps this one's pill off too, and says why. }
+  Other := False;
+  for i := 0 to High(FExtRuns) do
+    if (i <> Run) and FExtRuns[i].Running then
+      Other := True;
+  R := PaintPill(ALeft, Y, ButtonText, ExtRunLink, False, (n > 0) and not Running and not Other);
   FC.Font.Color := FDim;
   if Running then
     FC.TextOut(R.Right + Px(Gap), Y, Format(rsExtRunning,
       [Min(FExtRuns[Run].Done + 1, FExtRuns[Run].Total), FExtRuns[Run].Total]))
+  else if Other then
+    FC.TextOut(R.Right + Px(Gap), Y, rsExtOtherRunning)
   else if Detail <> '' then
     FC.TextOut(R.Right + Px(Gap), Y, Detail);
   Inc(Y, TextH + Px(PillPadY) + Px(Gap));
@@ -2729,10 +2593,35 @@ begin
   Invalidate;
 end;
 
-procedure TGittanBatchPage.Paint;
+function TGittanBatchPage.GetOperationKey: string;
 begin
-  FC := Canvas;
-  PaintContent;
+  if FOperation < BatchOperationCount then
+    Result := BatchOperationKeys[FOperation]
+  else if FOperation - BatchOperationCount <= High(FExtOps) then
+    Result := FExtOps[FOperation - BatchOperationCount].Key
+  else
+    Result := BatchOperationKeys[BatchOverview];
+end;
+
+procedure TGittanBatchPage.SetOperationKey(const AKey: string);
+var
+  i: integer;
+begin
+  FWantedKey := '';
+  for i := 0 to High(BatchOperationKeys) do
+    if BatchOperationKeys[i] = AKey then
+    begin
+      SetOperation(i);
+      Exit;
+    end;
+  for i := 0 to High(FExtOps) do
+    if FExtOps[i].Key = AKey then
+    begin
+      SetOperation(BatchOperationCount + i);
+      Exit;
+    end;
+  SetOperation(BatchOverview);
+  FWantedKey := AKey;
 end;
 
 procedure TGittanBatchPage.PaintContent;
@@ -2783,69 +2672,6 @@ begin
 
   { Layout sets the height from this. }
   FContentHeight := Y + Px(Pad);
-end;
-
-procedure TGittanBatchPage.FitHeight(AMin: integer);
-begin
-  Constraints.MinHeight := AMin;
-  Layout;
-end;
-
-{ The content painted on the measuring canvas, for its height; the
-  height is set here, never in Paint. }
-procedure TGittanBatchPage.Layout;
-var
-  H: integer;
-begin
-  if (Parent = nil) or (Width <= 0) then
-    Exit;
-  FC := MeasureCanvas(Font);
-  PaintContent;
-  H := Max(FContentHeight, Constraints.MinHeight);
-  if Height <> H then
-    Height := H;
-  Invalidate;
-end;
-
-procedure TGittanBatchPage.Resize;
-begin
-  inherited Resize;
-  Layout;
-end;
-
-function TGittanBatchPage.LinkAt(X, Y: integer): integer;
-var
-  i: integer;
-begin
-  { The last link added wins: a card's rows lie on it. }
-  for i := High(FLinkRects) downto 0 do
-    if PtInRect(FLinkRects[i], Point(X, Y)) then
-      Exit(i);
-  Result := -1;
-end;
-
-procedure TGittanBatchPage.SetHot(AValue: integer);
-begin
-  if FHot = AValue then
-    Exit;
-  FHot := AValue;
-  if AValue < 0 then
-    Cursor := crDefault
-  else
-    Cursor := crHandPoint;
-  Invalidate;
-end;
-
-procedure TGittanBatchPage.MouseMove(Shift: TShiftState; X, Y: integer);
-begin
-  inherited MouseMove(Shift, X, Y);
-  SetHot(LinkAt(X, Y));
-end;
-
-procedure TGittanBatchPage.MouseLeave;
-begin
-  inherited MouseLeave;
-  SetHot(-1);
 end;
 
 procedure TGittanBatchPage.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
@@ -2908,6 +2734,7 @@ begin
     a := StrToIntDef(Copy(Url, Length(OperationLink) + 1, MaxInt), -1);
     if (a >= 0) and (a < BatchOperationCount + Length(FExtOps)) and (a <> FOperation) then
     begin
+      FWantedKey := '';
       SetOperation(a);
       if Assigned(FOnOperationChange) then
         FOnOperationChange(Self);

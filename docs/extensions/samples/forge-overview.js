@@ -17,9 +17,11 @@ Gittan.forgeTabs.register({
   id: "waiting",
   title: "Waiting",
   description: "Your open pull requests with no update in " + DAYS + " days.",
-  render: async function () {
+  // { forge: ctx.forge } keeps the calls to the view's forge, even when
+  // the view is closed before the answer comes.
+  render: async function (ctx) {
     var r = await Gittan.forges.gh.run(["search", "prs", "--author=@me", "--state=open",
-      "--json", "number,title,url,updatedAt,repository,isDraft", "--limit", "100"]);
+      "--json", "number,title,url,updatedAt,repository,isDraft", "--limit", "100"], { forge: ctx.forge });
     if (!r.ok)
       throw new Error(r.stderr.trim() || "gh failed");
     var cutoff = Date.now() - DAYS * 24 * 3600 * 1000;
@@ -39,10 +41,11 @@ Gittan.forgeTabs.register({
     return { rows: rows, empty: "Nothing has waited more than " + DAYS + " days." };
   },
   // Nothing returned: the tab renders again.
-  action: async function (id, row) {
+  action: async function (id, row, ctx) {
     if (id !== "nudge" || !Gittan.ui.confirm("Comment “Still on it” on " + row.title + "?"))
       return;
-    var r = await Gittan.forges.gh.run(["pr", "comment", row.url, "--body", "Still on it."]);
+    var r = await Gittan.forges.gh.run(["pr", "comment", row.url, "--body", "Still on it."],
+      { forge: ctx.forge });
     if (!r.ok)
       throw new Error(r.stderr.trim());
   }

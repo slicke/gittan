@@ -488,7 +488,7 @@ end;
 procedure TRepoFrame.UpdateCommitState;
 var
   Chosen, Total, i: integer;
-  Whole, Continuing, Busy, Can, Idle: boolean;
+  Whole, Continuing, Busy, Can, Idle, NoWork: boolean;
   Note: string;
 begin
   if FCommitPanel = nil then
@@ -572,19 +572,23 @@ begin
     Can := False;
   { Nothing to commit and nothing under way: the section folds to its
     header, "Commit · no changes", and unfolds again as changes come,
-    unless the user folded or unfolded it meanwhile (CommitHeaderToggle). }
-  Idle := CommitChoosing and (Total = 0) and (FConflictFiles = 0) and (FOperation = '') and
-    (FCommitJob = nil) and not FCommitAmend.Checked and (Note = '') and MessageBlank;
-  if Idle <> FCommitIdle then
+    unless the user folded or unfolded it meanwhile (CommitHeaderToggle).
+    It folds as the changes go, never as the message is emptied: a
+    message typed and deleted again in a section the user unfolded
+    leaves it open under the caret. }
+  NoWork := CommitChoosing and (Total = 0) and (FConflictFiles = 0) and (FOperation = '') and
+    (FCommitJob = nil) and not FCommitAmend.Checked and (Note = '');
+  Idle := NoWork and MessageBlank;
+  if NoWork <> FCommitIdle then
   begin
-    FCommitIdle := Idle;
+    FCommitIdle := NoWork;
     if Idle and FCommitHeader.Expanded then
     begin
       FCommitAutoFolded := True;
       FCommitHeader.Expanded := False;
       ShowCommitBox;
     end
-    else if not Idle and FCommitAutoFolded then
+    else if not NoWork and FCommitAutoFolded then
     begin
       FCommitAutoFolded := False;
       FCommitHeader.Expanded := True;
