@@ -834,7 +834,7 @@ begin
     if FForgeShown then
     begin
       if Key = VK_9 then
-        FForgeView.SelectTab(SectionCount - 1)
+        FForgeView.SelectTab(FForgeView.TabCount - 1)
       else
         FForgeView.SelectTab(Key - VK_1);
       Key := 0;

@@ -14,7 +14,13 @@ unit uforge;
   the Pull Requests page sits in a repository frame's: the open pull
   requests the user wrote or the open ones waiting for their review, a
   section at a time, which the window's tab strip picks while the view
-  is shown (Tabs, SelectTab, StepTab, OnTabsChange),
+  is shown (Tabs, SelectTab, StepTab, OnTabsChange), with the Batch tab
+  after them (BatchTab): the batch page (gittan.batchpage) in the same
+  box in the page's place, operations run in several of the
+  repositories the welcome view shows, picked there (kept in the
+  settings, BatchRepos); so far deleting the branches deleted on the
+  remote, which the view scans for and deletes in jobs of its own
+  (gittan.batch), asking first,
   read by the forge's AccountJob (gittan.forge; GitHub's runs one
   GraphQL query through gh) once at start, each time the view is shown,
   on Refresh and when the forge or its account changes, the page keeping
@@ -42,7 +48,12 @@ interface
 
 uses
   Classes, SysUtils, Types, Controls, Forms, Menus, ExtCtrls, Graphics, LCLType, Dialogs,
-  Clipbrd, gittan.job, gittan.forge, gittan.forgepage, gittan.askdlg, umain;
+  Clipbrd, gittan.job, gittan.forge, gittan.forgepage, gittan.batch, gittan.batchpage,
+  gittan.askdlg, umain;
+
+const
+  {** The Batch tab's index, after the forge page's sections. }
+  BatchTab = SectionCount;
 
 type
 
@@ -53,6 +64,12 @@ type
     FWindow: TRepoWindow;
     FBox: TScrollBox;
     FPage: TGittanForgePage;
+    { The Batch tab's page, shown in the box in FPage's place while
+      FBatchShown; the scan and the deletion it runs, one at a time. }
+    FBatch: TGittanBatchPage;
+    FBatchShown: boolean;
+    FScanJob: TGittanGoneScanJob;
+    FDeleteJob: TGittanGoneDeleteJob;
     FForge: TGittanForge;
     { The job under way, and the jobs given up or done, freed once their
       thread has ended. }
@@ -93,6 +110,14 @@ type
     procedure JobDone(Sender: TObject);
     procedure FreeJobsAsync(Data: PtrInt);
     procedure BoxResize(Sender: TObject);
+    procedure ShowBatch;
+    procedure BatchChosenChange(Sender: TObject);
+    procedure BatchScan(Sender: TObject);
+    procedure ScanProgress(Sender: TObject);
+    procedure ScanDone(Sender: TObject);
+    procedure BatchDelete(Sender: TObject);
+    procedure DeleteProgress(Sender: TObject);
+    procedure DeleteDone(Sender: TObject);
     procedure PagePick(Sender: TObject; const APull: TGittanForgePull);
     procedure PageContext(Sender: TObject; const APull: TGittanForgePull;
       const AScreenPos: TPoint);
@@ -160,6 +185,8 @@ type
       something to do (pull requests waiting for review); gives the
       shown one's index. }
     function Tabs(out ACaptions: TStringArray; out AMarks: TBooleanDynArray): integer;
+    {** How many tabs: the sections, then Batch. }
+    function TabCount: integer;
     {** Shows the tab at AIndex. }
     procedure SelectTab(AIndex: integer);
     {** The tab ADelta tabs on, round the ends. }
@@ -202,6 +229,19 @@ resourcestring
   rsAbout = '&About Gittan';
   { The globe's hint: the login, then the forge: "octocat on GitHub". }
   rsUserOnForge = '%s on %s';
+  rsBatchTab = 'Batch';
+  { The heading of the recent repositories the repository list lacks. }
+  rsRecentRepos = 'Recent';
+  rsBatchDeleteTitle = 'Delete Branches';
+  rsBatchDeleteOne = 'Delete the branch “%s” in %s?';
+  rsBatchDeleteMany = 'Delete %d branches in %d repositories?';
+  rsBatchDeleteManyOne = 'Delete %d branches in %s?';
+  rsBatchNotMerged = '%d of them are not merged into the default branch: commits that only ' +
+    'they have are lost.';
+  rsBatchNotMergedOne = 'It is not merged into the default branch: commits that only it has ' +
+    'are lost.';
+  rsBatchDelete = 'Delete';
+  rsBatchCancel = 'Cancel';
 
 { TForgeView }
 
@@ -219,6 +259,19 @@ begin
     FThemeTimer.Enabled := False;
   AbandonJob;
   AbandonAction;
+  { A scan is given up; a deletion runs to its end. }
+  if FScanJob <> nil then
+  begin
+    FScanJob.Stop(False);
+    FZombies.Add(FScanJob);
+    FScanJob := nil;
+  end;
+  if FDeleteJob <> nil then
+  begin
+    FDeleteJob.Stop(False);
+    FZombies.Add(FDeleteJob);
+    FDeleteJob := nil;
+  end;
   { Waits for the jobs given up. }
   FreeAndNil(FZombies);
   FreeAndNil(FForge);
@@ -246,6 +299,13 @@ begin
   FPage.OnFilterChange := @PageFilterChange;
   FPage.OnSavePreset := @PageSavePreset;
   FPage.OnOpenUrl := @PageOpenUrl;
+  FBatch := TGittanBatchPage.Create(Self);
+  FBatch.Visible := False;
+  FBatch.Parent := FBox;
+  FBatch.SetChosen(App.Settings.BatchRepos);
+  FBatch.OnChosenChange := @BatchChosenChange;
+  FBatch.OnScan := @BatchScan;
+  FBatch.OnDelete := @BatchDelete;
   FThemeTimer := TTimer.Create(Self);
   FThemeTimer.Interval := 2000;
   FThemeTimer.Enabled := False;
@@ -442,6 +502,7 @@ end;
 procedure TForgeView.ApplyTheme;
 begin
   FPage.SetTheme(FDark);
+  FBatch.SetTheme(FDark);
   Color := FPage.Color;
   FBox.Color := FPage.Color;
   Invalidate;
@@ -474,6 +535,9 @@ begin
     the forge's answer. }
   StartJob;
   UpdatePage;
+  { The repository list or the recent ones may have changed. }
+  if FBatchShown then
+    ShowBatch;
   FBox.VertScrollBar.Position := 0;
   FThemeTimer.Enabled := True;
 end;
@@ -542,33 +606,200 @@ var
 begin
   ACaptions := nil;
   AMarks := nil;
-  SetLength(ACaptions, SectionCount);
-  SetLength(AMarks, SectionCount);
+  SetLength(ACaptions, TabCount);
+  SetLength(AMarks, TabCount);
   for i := 0 to SectionCount - 1 do
     ACaptions[i] := SectionCaption(i);
+  ACaptions[BatchTab] := rsBatchTab;
   AMarks[Ord(fsReview)] := Length(FReview) > 0;
-  Result := FPage.Section;
+  if FBatchShown then
+    Result := BatchTab
+  else
+    Result := FPage.Section;
+end;
+
+function TForgeView.TabCount: integer;
+begin
+  Result := SectionCount + 1;
 end;
 
 procedure TForgeView.SelectTab(AIndex: integer);
+var
+  Current: integer;
 begin
-  if (AIndex < 0) or (AIndex >= SectionCount) or (AIndex = FPage.Section) then
+  if FBatchShown then
+    Current := BatchTab
+  else
+    Current := FPage.Section;
+  if (AIndex < 0) or (AIndex >= TabCount) or (AIndex = Current) then
     Exit;
-  FPage.Section := AIndex;
-  FPage.FitHeight(FBox.ClientHeight);
+  if AIndex = BatchTab then
+  begin
+    FBatchShown := True;
+    ShowBatch;
+  end
+  else
+  begin
+    FBatchShown := False;
+    FPage.Section := AIndex;
+    FPage.FitHeight(FBox.ClientHeight);
+    FBatch.Visible := False;
+    FPage.Visible := True;
+  end;
   FBox.VertScrollBar.Position := 0;
   if Assigned(FOnTabsChange) then
     FOnTabsChange(Self);
 end;
 
 procedure TForgeView.StepTab(ADelta: integer);
+var
+  Current: integer;
 begin
-  SelectTab(((FPage.Section + ADelta) mod SectionCount + SectionCount) mod SectionCount);
+  if FBatchShown then
+    Current := BatchTab
+  else
+    Current := FPage.Section;
+  SelectTab(((Current + ADelta) mod TabCount + TabCount) mod TabCount);
 end;
 
 procedure TForgeView.BoxResize(Sender: TObject);
 begin
   FPage.FitHeight(FBox.ClientHeight);
+  if FBatch.Visible then
+    FBatch.FitHeight(FBox.ClientHeight);
+end;
+
+{ The batch page in the forge page's place, its rows read again from the
+  repository list and the recent repositories, measured before it is
+  shown. }
+procedure TForgeView.ShowBatch;
+begin
+  FBatch.SetRows(BatchRows(App.RepoList, App.Settings.Recent, rsRecentRepos));
+  FBatch.Width := FBox.ClientWidth;
+  FBatch.FitHeight(FBox.ClientHeight);
+  FPage.Visible := False;
+  FBatch.Visible := True;
+end;
+
+procedure TForgeView.BatchChosenChange(Sender: TObject);
+begin
+  App.Settings.BatchRepos.Assign(FBatch.Chosen);
+  FBatch.FitHeight(FBox.ClientHeight);
+end;
+
+{ Scan: the picked repositories fetched and their gone branches found,
+  in a job, the page showing each repository as it is done. }
+procedure TForgeView.BatchScan(Sender: TObject);
+var
+  Paths, Captions: TStringArray;
+begin
+  if FBatch.Busy then
+    Exit;
+  FBatch.ChosenRepos(Paths, Captions);
+  if Length(Paths) = 0 then
+    Exit;
+  FScanJob := TGittanGoneScanJob.Create(Paths, Captions);
+  FScanJob.OnProgress := @ScanProgress;
+  FScanJob.OnDone := @ScanDone;
+  FBatch.StartScan(Length(Paths));
+  FBatch.FitHeight(FBox.ClientHeight);
+  FScanJob.Start;
+end;
+
+procedure TForgeView.ScanProgress(Sender: TObject);
+begin
+  if Sender <> FScanJob then
+    Exit;
+  FBatch.SetScan(FScanJob.Repos, FScanJob.Finished, True);
+  FBatch.FitHeight(FBox.ClientHeight);
+end;
+
+procedure TForgeView.ScanDone(Sender: TObject);
+var
+  Job: TGittanGoneScanJob;
+begin
+  Job := TGittanGoneScanJob(Sender);
+  if Job <> FScanJob then
+    Exit;
+  FScanJob := nil;
+  FZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeJobsAsync, 0);
+  FBatch.SetScan(Job.Repos, Job.Finished, False);
+  FBatch.FitHeight(FBox.ClientHeight);
+end;
+
+{ Delete: the branches picked, after a question that says how many are
+  not merged, deleted in a job; the frames of those repositories see
+  their branches go through their watchers. }
+procedure TForgeView.BatchDelete(Sender: TObject);
+var
+  Refs: TGittanBranchRefs;
+  Repos: TStringList;
+  Ask: string;
+  NotMerged, i: integer;
+  Kind: TMsgDlgType;
+begin
+  if FBatch.Busy then
+    Exit;
+  Refs := FBatch.PickedRefs;
+  if Length(Refs) = 0 then
+    Exit;
+  NotMerged := FBatch.PickedNotMerged;
+  Repos := TStringList.Create;
+  try
+    Repos.Sorted := True;
+    Repos.Duplicates := dupIgnore;
+    for i := 0 to High(Refs) do
+      Repos.Add(Refs[i].Path);
+    if Length(Refs) = 1 then
+      Ask := Format(rsBatchDeleteOne, [Refs[0].Branch, ShortPath(Refs[0].Path)])
+    else if Repos.Count = 1 then
+      Ask := Format(rsBatchDeleteManyOne, [Length(Refs), ShortPath(Refs[0].Path)])
+    else
+      Ask := Format(rsBatchDeleteMany, [Length(Refs), Repos.Count]);
+  finally
+    Repos.Free;
+  end;
+  Kind := mtConfirmation;
+  if NotMerged > 0 then
+  begin
+    Kind := mtWarning;
+    if Length(Refs) = 1 then
+      Ask := Ask + LineEnding + LineEnding + rsBatchNotMergedOne
+    else
+      Ask := Ask + LineEnding + LineEnding + Format(rsBatchNotMerged, [NotMerged]);
+  end;
+  if AskDlg(rsBatchDeleteTitle, Ask, Kind, [mrYes, rsBatchDelete, mrCancel, rsBatchCancel,
+    'IsCancel', 'IsDefault'], 0) <> mrYes then
+    Exit;
+  FDeleteJob := TGittanGoneDeleteJob.Create(Refs);
+  FDeleteJob.OnProgress := @DeleteProgress;
+  FDeleteJob.OnDone := @DeleteDone;
+  FBatch.SetDeleting(True);
+  FDeleteJob.Start;
+end;
+
+procedure TForgeView.DeleteProgress(Sender: TObject);
+begin
+  if Sender <> FDeleteJob then
+    Exit;
+  FBatch.ApplyDeleted(FDeleteJob.Refs, FDeleteJob.Branches, FDeleteJob.Finished);
+  FBatch.FitHeight(FBox.ClientHeight);
+end;
+
+procedure TForgeView.DeleteDone(Sender: TObject);
+var
+  Job: TGittanGoneDeleteJob;
+begin
+  Job := TGittanGoneDeleteJob(Sender);
+  if Job <> FDeleteJob then
+    Exit;
+  FDeleteJob := nil;
+  FZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeJobsAsync, 0);
+  FBatch.ApplyDeleted(Job.Refs, Job.Branches, Job.Finished);
+  FBatch.SetDeleting(False);
+  FBatch.FitHeight(FBox.ClientHeight);
 end;
 
 { Asks the forge, one job at a time: a start while one runs waits for
