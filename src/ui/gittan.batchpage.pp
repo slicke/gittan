@@ -12,9 +12,10 @@ unit gittan.batchpage;
   Chosen, by root, which the owner keeps in the settings
   (OnChosenChange); a picked root no row has stays picked, unseen.
 
-  The list folds to one line naming the picked ones, with Change to
-  unfold it (and Done at its heading to fold it again); it starts
-  unfolded while nothing is picked. Under it the operations, as a row
+  The list folds to one line naming the picked ones: its heading, with
+  a chevron before it as a folder of the welcome view's list has, folds
+  and unfolds it, and so does a click on that line; it starts unfolded
+  while nothing is picked. Under it the operations, as a row
   of pills, one shown at a time (Operation, OnOperationChange, which the
   owner keeps), each keeping what it found while another is shown.
   First the overview, which reads and changes
@@ -123,6 +124,7 @@ type
       ALeft, ARight: integer);
     procedure PaintRows(var Y: integer; ALeft, ARight: integer);
     procedure PaintPicked(var Y: integer; ALeft, ARight: integer);
+    procedure PaintChevron(ALeft, ATop, ASize: integer; AOpen: boolean; AColor: TColor);
     procedure PaintOperations(var Y: integer; ALeft, ARight: integer);
     procedure SetOperation(AValue: integer);
     procedure PaintGoneCard(var Y: integer; AIndex, ALeft, ARight: integer);
@@ -211,8 +213,6 @@ resourcestring
   rsNoRepos = 'No repositories to pick yet. Open some, or add them to the repository list on ' +
     'the welcome page.';
   rsNotFound = 'not found';
-  rsChangeChip = 'Change';
-  rsDoneChip = 'Done';
   rsNonePicked = 'None picked.';
   { After the names that fit: how many more. }
   rsMorePicked = ' and %d more';
@@ -832,12 +832,38 @@ begin
 end;
 
 { A dim bold title with a dim detail after it over a divider, as the
-  forge page's; with AChips the list's pills at the right of the title's
-  line: All, None and Done while it is unfolded, else Change. }
+  forge page's; with AChips the list's: a chevron before the title,
+  down while it is unfolded, the title and the detail a link that folds
+  or unfolds it, and All and None at the right while it is unfolded. }
+{ A chevron ASize across in AColor: pointing down with AOpen, else
+  right. }
+procedure TGittanBatchPage.PaintChevron(ALeft, ATop, ASize: integer; AOpen: boolean;
+  AColor: TColor);
+var
+  M: integer;
+begin
+  FC.Pen.Style := psSolid;
+  FC.Pen.Color := AColor;
+  FC.Pen.Width := Max(1, ASize div 6);
+  M := ASize div 2;
+  if AOpen then
+  begin
+    FC.Line(ALeft + 1, ATop + ASize * 3 div 10, ALeft + M, ATop + ASize * 7 div 10);
+    FC.Line(ALeft + M, ATop + ASize * 7 div 10, ALeft + ASize - 1, ATop + ASize * 3 div 10);
+  end
+  else
+  begin
+    FC.Line(ALeft + ASize * 3 div 10, ATop + 1, ALeft + ASize * 7 div 10, ATop + M);
+    FC.Line(ALeft + ASize * 7 div 10, ATop + M, ALeft + ASize * 3 div 10, ATop + ASize - 1);
+  end;
+  FC.Pen.Width := 1;
+end;
+
 procedure TGittanBatchPage.PaintHeading(var Y: integer; const ATitle, ADetail: string;
   ALeft, ARight: integer; AChips: boolean);
 var
-  TextH, X: integer;
+  TextH, X, W: integer;
+  Hot: boolean;
 begin
   Inc(Y, Px(Pad));
   FC.Font := Font;
@@ -845,22 +871,37 @@ begin
   FC.Font.Color := FDim;
   FC.Brush.Style := bsClear;
   TextH := FC.TextHeight('Xg');
-  FC.TextOut(ALeft, Y, ATitle);
-  X := ALeft + FC.TextWidth(ATitle) + Px(Gap) div 2;
+  X := ALeft;
+  Hot := False;
+  if AChips then
+  begin
+    { The link first, so the chevron and the text know it is hot. }
+    FC.Font.Style := [];
+    W := Px(14) + FC.TextWidth(ADetail) + Px(Gap) div 2;
+    FC.Font.Style := [fsBold];
+    Inc(W, FC.TextWidth(ATitle));
+    if FReposOpen then
+      AddLink(Rect(ALeft - Px(4), Y - Px(4), ALeft + W + Px(4), Y + TextH + Px(4)), FoldLink)
+    else
+      AddLink(Rect(ALeft - Px(4), Y - Px(4), ALeft + W + Px(4), Y + TextH + Px(4)), UnfoldLink);
+    Hot := FHot = High(FLinkRects);
+    if Hot then
+      FC.Font.Color := FText;
+    PaintChevron(X, Y + (TextH - Px(10)) div 2, Px(10), FReposOpen, FC.Font.Color);
+    Inc(X, Px(14));
+  end;
+  FC.TextOut(X, Y, ATitle);
+  X := X + FC.TextWidth(ATitle) + Px(Gap) div 2;
   FC.Font.Style := [];
   if ADetail <> '' then
     FC.TextOut(X, Y, ADetail);
   if AChips and FReposOpen then
   begin
-    X := ARight - PillWidth(rsDoneChip);
-    PaintPill(X, Y, rsDoneChip, FoldLink, True, True);
-    X := X - Px(6) - PillWidth(rsNoneChip);
+    X := ARight - PillWidth(rsNoneChip);
     PaintPill(X, Y, rsNoneChip, NoneLink, False, True);
     X := X - Px(6) - PillWidth(rsAllChip);
     PaintPill(X, Y, rsAllChip, AllLink, False, True);
-  end
-  else if AChips then
-    PaintPill(ARight - PillWidth(rsChangeChip), Y, rsChangeChip, UnfoldLink, False, True);
+  end;
   Inc(Y, TextH + Px(Gap) div 2);
   FC.Pen.Style := psSolid;
   FC.Pen.Color := FLine;
