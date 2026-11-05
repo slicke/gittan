@@ -12,8 +12,18 @@ unit gittan.batchpage;
   Chosen, by root, which the owner keeps in the settings
   (OnChosenChange); a picked root no row has stays picked, unseen.
 
-  Under it the operations, one so far: the branches deleted on the
-  remote. Scan (OnScan) has the owner run TGittanGoneScanJob over the
+  Under it the operations. First the overview, which reads and changes
+  nothing: Check (OnCheck, which the owner also runs as the tab is
+  shown) has the owner run TGittanStatusJob over the picked
+  repositories and give what it read as it comes (StartCheck,
+  SetStatus): a card per repository with something left undone, its
+  name, branch and path in a head that opens it (OnOpen), then a line
+  each for what git is in the middle of, a detached HEAD, the changed
+  and untracked files, the stashes, the branches not pushed and those on
+  no remote with their counts, no remote at all, or why it could not be
+  read; the clean ones are named on one line under the cards.
+
+  Then the branches deleted on the remote. Scan (OnScan) has the owner run TGittanGoneScanJob over the
   picked repositories (ChosenRepos) and give what it found as it comes
   (StartScan, SetScan): a card per repository with something to say,
   with its gone branches, each with a check box and a tag that says
@@ -39,6 +49,8 @@ uses
   Classes, SysUtils, Types, Controls, Graphics, gittan.batch;
 
 type
+  {** A repository to open, by its root. }
+  TGittanBatchOpenEvent = procedure(Sender: TObject; const APath: string) of object;
 
   { TGittanBatchPage }
 
@@ -53,6 +65,12 @@ type
     FGone: TGittanGoneRepos;
     FGoneDone, FGoneTotal, FSeen: integer;
     FScanning, FScanned, FDeleting: boolean;
+    { What the overview read, the first FStatusDone of FStatusTotal. }
+    FStatus: TGittanRepoStatuses;
+    FStatusDone, FStatusTotal: integer;
+    FChecking: boolean;
+    FOnCheck: TNotifyEvent;
+    FOnOpen: TGittanBatchOpenEvent;
     { The branches picked to delete, as PickKey. }
     FPicked: TStringList;
     FBack, FText, FDim, FHover, FLine, FLink, FOk, FWarn, FErrorColor, FCard: TColor;
@@ -91,6 +109,9 @@ type
     procedure PaintRows(var Y: integer; ALeft, ARight: integer);
     procedure PaintGoneCard(var Y: integer; AIndex, ALeft, ARight: integer);
     procedure PaintGone(var Y: integer; ALeft, ARight: integer);
+    function WrappedHeight(const AText: string; AWidth: integer): integer;
+    procedure PaintStatusCard(var Y: integer; AIndex, ALeft, ARight: integer);
+    procedure PaintStatus(var Y: integer; ALeft, ARight: integer);
     procedure PaintContent;
     procedure Layout;
   protected
@@ -126,6 +147,14 @@ type
     function PickedNotMerged: integer;
     {** Whether a scan or a deletion runs. }
     function Busy: boolean;
+    {** An overview of ATotal repositories starts: what the last one read
+      goes. }
+    procedure StartCheck(ATotal: integer);
+    {** What the overview read: the first ADone of ARepos (the others may
+      still be written), and whether it still runs. }
+    procedure SetStatus(const ARepos: TGittanRepoStatuses; ADone: integer; ARunning: boolean);
+    {** Whether the overview runs. }
+    property Checking: boolean read FChecking;
     {** The palette of the dark or the light appearance. }
     procedure SetTheme(ADark: boolean);
     {** Makes the control at least AMin high, and no higher than its
@@ -139,6 +168,10 @@ type
     property OnScan: TNotifyEvent read FOnScan write FOnScan;
     {** A click on Delete: the owner asks and deletes PickedRefs. }
     property OnDelete: TNotifyEvent read FOnDelete write FOnDelete;
+    {** A click on Check: the owner reads the picked repositories. }
+    property OnCheck: TNotifyEvent read FOnCheck write FOnCheck;
+    {** A click on a card's head in the overview: open that repository. }
+    property OnOpen: TGittanBatchOpenEvent read FOnOpen write FOnOpen;
   end;
 
 implementation
@@ -176,6 +209,32 @@ resourcestring
   rsDeleteMany = 'Delete %d branches';
   rsDeleteNone = 'Pick branches to delete';
   rsDeleting = 'Deleting…';
+  rsStatusHeading = 'Overview';
+  rsStatusAbout = 'What is left undone in each repository: changes, stashes and commits that ' +
+    'are not pushed. Nothing is fetched or changed.';
+  rsCheckOne = 'Check 1 repository';
+  rsCheckMany = 'Check %d repositories';
+  rsCheckNone = 'Pick repositories to check';
+  rsChecking = 'Checking %d of %d…';
+  rsNeedOne = '1 of %d has something left';
+  rsNeedMany = '%d of %d have something left';
+  rsOnBranch = 'on %s';
+  rsOpen = 'Open';
+  rsInMiddle = 'In the middle of %s';
+  rsDetached = 'HEAD is detached, on no branch';
+  rsChangedOne = '1 changed file';
+  rsChangedMany = '%d changed files';
+  rsUntrackedOne = '1 untracked file';
+  rsUntrackedMany = '%d untracked files';
+  rsStashOne = '1 stash';
+  rsStashMany = '%d stashes';
+  rsNotPushed = 'Not pushed: %s';
+  rsOnNoRemote = 'On no remote: %s';
+  rsNoRemote = 'No remote: nothing here is pushed anywhere';
+  { A branch and its count of commits: "feature/x (3)". }
+  rsBranchCount = '%s (%d)';
+  rsAllDone = 'Nothing is left undone in the repositories checked.';
+  rsCleanIn = 'Nothing left undone in %s.';
 
 const
   RowLink = 'r:';
@@ -185,6 +244,8 @@ const
   NoneLink = 'none';
   ScanLink = 'scan';
   DeleteLink = 'delete';
+  CheckLink = 'check';
+  OpenLink = 'o:';
   Pad = 24;
   Gap = 12;
   TitleFontSize = 20;
@@ -1094,6 +1155,262 @@ begin
   end;
 end;
 
+{ ---------------------------------------------------------------------------
+  The overview
+  --------------------------------------------------------------------------- }
+
+procedure TGittanBatchPage.StartCheck(ATotal: integer);
+begin
+  FStatus := nil;
+  FStatusDone := 0;
+  FStatusTotal := ATotal;
+  FChecking := True;
+  FHot := -1;
+  Layout;
+  Invalidate;
+end;
+
+procedure TGittanBatchPage.SetStatus(const ARepos: TGittanRepoStatuses; ADone: integer;
+  ARunning: boolean);
+begin
+  ADone := Min(ADone, Length(ARepos));
+  { Only what is done: the thread may still write the rest. }
+  FStatus := Copy(ARepos, 0, ADone);
+  FStatusDone := ADone;
+  FChecking := ARunning;
+  Layout;
+  Invalidate;
+end;
+
+{ The height of AText wrapped in AWidth, in the canvas's font. }
+function TGittanBatchPage.WrappedHeight(const AText: string; AWidth: integer): integer;
+var
+  R: TRect;
+begin
+  R := Rect(0, 0, AWidth, 0);
+  DrawText(FC.Handle, PChar(AText), Length(AText), R, DT_CALCRECT or DT_WORDBREAK);
+  Result := Max(R.Bottom, FC.TextHeight('Xg'));
+end;
+
+{ The branches with their counts, joined: "keep (1), feature/x (3)". }
+function CountsText(const ACounts: TGittanBranchCounts): string;
+var
+  i: integer;
+begin
+  Result := '';
+  for i := 0 to High(ACounts) do
+  begin
+    if Result <> '' then
+      Result := Result + ', ';
+    Result := Result + Format(rsBranchCount, [ACounts[i].Name, ACounts[i].Count]);
+  end;
+end;
+
+{ A repository's card in the overview: a head with its name in bold, the
+  branch and the path dim and Open at the right, all of it a link that
+  opens the repository; then a line, wrapped, for each thing left
+  undone, the ones that may lose work in the warning color. }
+procedure TGittanBatchPage.PaintStatusCard(var Y: integer; AIndex, ALeft, ARight: integer);
+var
+  St: TGittanRepoStatus;
+  Lines: array of string;
+  LineColors: array of TColor;
+  TextH, H, X, RowTop, i, Inner, OpenW, Room: integer;
+  R, HeadR: TRect;
+  Style: TTextStyle;
+  Part, Detail: string;
+  Hot, CanOpen: boolean;
+
+  procedure AddLine(const AText: string; AColor: TColor);
+  begin
+    SetLength(Lines, Length(Lines) + 1);
+    SetLength(LineColors, Length(LineColors) + 1);
+    Lines[High(Lines)] := AText;
+    LineColors[High(LineColors)] := AColor;
+  end;
+
+begin
+  St := FStatus[AIndex];
+  Lines := nil;
+  LineColors := nil;
+  if St.Error <> '' then
+    AddLine(FirstLine(St.Error), FErrorColor)
+  else
+  begin
+    if St.Operation <> '' then
+      AddLine(Format(rsInMiddle, [St.Operation]), FWarn);
+    if St.Detached then
+      AddLine(rsDetached, FWarn);
+    Part := '';
+    if St.Changed = 1 then
+      Part := rsChangedOne
+    else if St.Changed > 1 then
+      Part := Format(rsChangedMany, [St.Changed]);
+    if St.Untracked > 0 then
+    begin
+      if Part <> '' then
+        Part := Part + ', ';
+      if St.Untracked = 1 then
+        Part := Part + rsUntrackedOne
+      else
+        Part := Part + Format(rsUntrackedMany, [St.Untracked]);
+    end;
+    if Part <> '' then
+      AddLine(Part, FText);
+    if St.Stashes = 1 then
+      AddLine(rsStashOne, FText)
+    else if St.Stashes > 1 then
+      AddLine(Format(rsStashMany, [St.Stashes]), FText);
+    if Length(St.Unpushed) > 0 then
+      AddLine(Format(rsNotPushed, [CountsText(St.Unpushed)]), FText);
+    if Length(St.Unshared) > 0 then
+      AddLine(Format(rsOnNoRemote, [CountsText(St.Unshared)]), FWarn);
+    if St.NoRemote then
+      AddLine(rsNoRemote, FWarn);
+  end;
+
+  FC.Font := Font;
+  TextH := FC.TextHeight('Xg');
+  Inner := ARight - ALeft - 2 * Px(CardPadX);
+  H := 2 * Px(CardPadY) + TextH;
+  for i := 0 to High(Lines) do
+    Inc(H, Px(4) + WrappedHeight(Lines[i], Inner));
+  R := Rect(ALeft, Y, ARight, Y + H);
+  HeadR := Rect(ALeft, Y, ARight, Y + Px(CardPadY) + TextH + Px(4));
+  { A repository that could not be read has nothing to open. }
+  CanOpen := St.Error = '';
+  Hot := False;
+  if CanOpen then
+  begin
+    AddLink(HeadR, OpenLink + IntToStr(AIndex));
+    Hot := FHot = High(FLinkRects);
+  end;
+  FC.Pen.Style := psClear;
+  FC.Brush.Style := bsSolid;
+  FC.Brush.Color := FCard;
+  FC.RoundRect(R, Px(CardRadius), Px(CardRadius));
+  if Hot then
+  begin
+    FC.Brush.Color := FHover;
+    FC.RoundRect(HeadR, Px(CardRadius), Px(CardRadius));
+  end;
+  FC.Pen.Style := psSolid;
+  FC.Brush.Style := bsClear;
+
+  { The head: Open at the right, the name, the branch, then the path,
+    which gives way first (its end kept). }
+  RowTop := Y + Px(CardPadY);
+  FC.Font := Font;
+  OpenW := 0;
+  if CanOpen then
+  begin
+    OpenW := FC.TextWidth(rsOpen);
+    if Hot then
+      FC.Font.Color := FLink
+    else
+      FC.Font.Color := FDim;
+    FC.TextOut(ARight - Px(CardPadX) - OpenW, RowTop, rsOpen);
+  end;
+  Room := ARight - Px(CardPadX) - OpenW - Px(Gap);
+  X := ALeft + Px(CardPadX);
+  FC.Font.Style := [fsBold];
+  FC.Font.Color := FText;
+  FC.TextOut(X, RowTop, FitTextLeft(FC, St.Caption, Room - X));
+  Inc(X, FC.TextWidth(St.Caption) + Px(Gap));
+  FC.Font.Style := [];
+  FC.Font.Color := FDim;
+  if (St.Branch <> '') and (X < Room - Px(Gap)) then
+  begin
+    Detail := Format(rsOnBranch, [St.Branch]);
+    FC.TextOut(X, RowTop, FitTextLeft(FC, Detail, Room - X));
+    Inc(X, FC.TextWidth(Detail) + Px(Gap));
+  end;
+  if X < Room - 3 * Px(Gap) then
+    FC.TextOut(X, RowTop, FitTextLeft(FC, ShortPath(St.Path), Room - X));
+  Inc(RowTop, TextH);
+
+  { The lines, wrapped. }
+  Style := FC.TextStyle;
+  Style.Wordbreak := True;
+  Style.SingleLine := False;
+  Style.Alignment := taLeftJustify;
+  Style.Layout := tlTop;
+  for i := 0 to High(Lines) do
+  begin
+    Inc(RowTop, Px(4));
+    FC.Font.Color := LineColors[i];
+    H := WrappedHeight(Lines[i], Inner);
+    R := Rect(ALeft + Px(CardPadX), RowTop, ALeft + Px(CardPadX) + Inner, RowTop + H);
+    FC.TextRect(R, R.Left, R.Top, Lines[i], Style);
+    Inc(RowTop, H);
+  end;
+  Y := RowTop + Px(CardPadY) + Px(CardGap);
+end;
+
+{ The overview: the heading with how many need something, what Check
+  does, Check with the progress after it, the cards, and the clean
+  repositories on one line. }
+procedure TGittanBatchPage.PaintStatus(var Y: integer; ALeft, ARight: integer);
+var
+  TextH, i, Cards: integer;
+  Detail, ButtonText, Clean: string;
+  R: TRect;
+begin
+  Cards := 0;
+  for i := 0 to FStatusDone - 1 do
+    if not StatusClean(FStatus[i]) then
+      Inc(Cards);
+  Detail := '';
+  if (FStatusDone > 0) and not FChecking then
+    if Cards = 1 then
+      Detail := Format(rsNeedOne, [FStatusDone])
+    else
+      Detail := Format(rsNeedMany, [Cards, FStatusDone]);
+  PaintHeading(Y, rsStatusHeading, Detail, ALeft, ARight, False);
+  FC.Font := Font;
+  TextH := FC.TextHeight('Xg');
+  PaintText(Y, rsStatusAbout, FDim, ALeft, ARight);
+  Inc(Y, Px(Gap));
+
+  i := ChosenCount;
+  if i = 0 then
+    ButtonText := rsCheckNone
+  else if i = 1 then
+    ButtonText := rsCheckOne
+  else
+    ButtonText := Format(rsCheckMany, [i]);
+  Inc(Y, Px(PillPadY));
+  R := PaintPill(ALeft, Y, ButtonText, CheckLink, False, (i > 0) and not FChecking);
+  if FChecking then
+  begin
+    FC.Font.Color := FDim;
+    FC.TextOut(R.Right + Px(Gap), Y, Format(rsChecking, [Min(FStatusDone + 1, FStatusTotal),
+      FStatusTotal]));
+  end;
+  Inc(Y, TextH + Px(PillPadY) + Px(Gap));
+
+  Clean := '';
+  for i := 0 to FStatusDone - 1 do
+    if StatusClean(FStatus[i]) then
+    begin
+      if Clean <> '' then
+        Clean := Clean + ', ';
+      Clean := Clean + FStatus[i].Caption;
+    end
+    else
+      PaintStatusCard(Y, i, ALeft, ARight);
+  if (Cards = 0) and (FStatusDone > 0) and not FChecking then
+  begin
+    PaintText(Y, rsAllDone, FDim, ALeft, ARight);
+    Inc(Y, Px(Gap));
+  end
+  else if Clean <> '' then
+  begin
+    PaintText(Y, Format(rsCleanIn, [Clean]), FDim, ALeft, ARight);
+    Inc(Y, Px(Gap));
+  end;
+end;
+
 procedure TGittanBatchPage.Paint;
 begin
   FC := Canvas;
@@ -1131,6 +1448,7 @@ begin
   PaintHeading(Y, rsReposHeading, Format(rsPickedOf, [ChosenCount, RepoCount]), L, R,
     Length(FRows) > 0);
   PaintRows(Y, L, R);
+  PaintStatus(Y, L, R);
   PaintGone(Y, L, R);
 
   { Layout sets the height from this. }
@@ -1240,6 +1558,17 @@ begin
   begin
     if Assigned(FOnScan) then
       FOnScan(Self);
+  end
+  else if Url = CheckLink then
+  begin
+    if Assigned(FOnCheck) then
+      FOnCheck(Self);
+  end
+  else if Copy(Url, 1, Length(OpenLink)) = OpenLink then
+  begin
+    a := StrToIntDef(Copy(Url, Length(OpenLink) + 1, MaxInt), -1);
+    if (a >= 0) and (a < FStatusDone) and Assigned(FOnOpen) then
+      FOnOpen(Self, FStatus[a].Path);
   end
   else if Url = DeleteLink then
   begin

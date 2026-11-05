@@ -9,7 +9,13 @@ unit gittan.batch;
   open, then the recent repositories the list does not have under a
   heading of their own.
 
-  The first operation deletes the local branches whose branch on the
+  The overview (RepoStatus, TGittanStatusJob) reads, without fetching or
+  changing anything, what is left undone in a repository: the branch,
+  what git is in the middle of, the changed and untracked files, the
+  stashes, the branches ahead of their upstream and the branches with
+  commits on no remote, or that it has no remote at all.
+
+  The other operation deletes the local branches whose branch on the
   remote is gone. TGittanGoneScanJob fetches each repository with
   --prune and lists its local branches whose upstream is gone
   (TGittanRepo.GoneBranches), the current one left out, each with how
@@ -72,6 +78,36 @@ type
   end;
   TGittanGoneRepos = array of TGittanGoneRepo;
 
+  {** A local branch and a count of commits: how far it is ahead of its
+    upstream, or how many of its commits are on no remote. }
+  TGittanBranchCount = record
+    Name: string;
+    Count: integer;
+  end;
+  TGittanBranchCounts = array of TGittanBranchCount;
+
+  {** What is left undone in a repository (RepoStatus): the branch
+    checked out ('' when HEAD is detached, Detached then), what git is
+    in the middle of (TGittanRepo.Operation), the tracked files changed
+    (staged or not, conflicts too) and the untracked ones, the stashes,
+    the branches ahead of their upstream (Unpushed), the branches with
+    no upstream that have commits on no remote (Unshared), whether it
+    has no remote at all (NoRemote; Unshared is then empty, since every
+    commit is on none), and Error when it could not be read. }
+  TGittanRepoStatus = record
+    Path: string;
+    Caption: string;
+    Branch: string;
+    Detached: boolean;
+    Operation: string;
+    Changed, Untracked, Stashes: integer;
+    Unpushed: TGittanBranchCounts;
+    Unshared: TGittanBranchCounts;
+    NoRemote: boolean;
+    Error: string;
+  end;
+  TGittanRepoStatuses = array of TGittanRepoStatus;
+
   {** A branch to delete: the repository's root and the branch. }
   TGittanBranchRef = record
     Path: string;
@@ -115,6 +151,21 @@ type
     property Repos: TGittanGoneRepos read FRepos;
   end;
 
+  { TGittanStatusJob }
+
+  {** Reads each repository's status (RepoStatus); Repos holds them, a
+    repository at a time. }
+  TGittanStatusJob = class(TGittanBatchJob)
+  private
+    FRepos: TGittanRepoStatuses;
+  protected
+    procedure Execute; override;
+  public
+    {** A job for the repositories at APaths, captioned ACaptions. }
+    constructor Create(const APaths, ACaptions: array of string);
+    property Repos: TGittanRepoStatuses read FRepos;
+  end;
+
   { TGittanGoneDeleteJob }
 
   {** Deletes the branches given, each with `git branch -D`; Branches
@@ -151,6 +202,14 @@ function BatchRowRepos(const ARows: TGittanBatchRows; AIndex: integer): TStringA
   made for the comparison, reachable from nothing, `git cherry`);
   else not merged. }
 function GoneMergeState(ARepo: TGittanRepo; const ABranch, ADefault: string): TGittanGoneMerge;
+
+{** What is left undone in the repository at APath, captioned ACaption
+  (its folder's name when empty), read with git and nothing fetched. }
+function RepoStatus(const APath, ACaption: string): TGittanRepoStatus;
+
+{** Whether AStatus has nothing to say: on a branch, nothing in progress,
+  nothing changed, stashed, unpushed or unshared, a remote, no error. }
+function StatusClean(const AStatus: TGittanRepoStatus): boolean;
 
 {** Scans the repository at APath as TGittanGoneScanJob does. }
 function ScanGoneRepo(const APath, ACaption: string; AFetch: boolean): TGittanGoneRepo;
@@ -344,6 +403,124 @@ begin
   end;
 end;
 
+{ "ahead 2, behind 1", "ahead 3", "behind 1", "gone" or '': the ahead
+  count, 0 when there is none. }
+function AheadOf(const ATrack: string): integer;
+var
+  p, q: integer;
+begin
+  Result := 0;
+  p := Pos('ahead ', ATrack);
+  if p = 0 then
+    Exit;
+  Inc(p, Length('ahead '));
+  q := p;
+  while (q <= Length(ATrack)) and (ATrack[q] in ['0'..'9']) do
+    Inc(q);
+  Result := StrToIntDef(Copy(ATrack, p, q - p), 0);
+end;
+
+function RepoStatus(const APath, ACaption: string): TGittanRepoStatus;
+var
+  Repo: TGittanRepo;
+  Lines: TStringList;
+  Output, Line, Name, Upstream, Track, Count: string;
+  Fields: TStringArray;
+  Stashes: TGittanStashes;
+  Ahead: integer;
+
+  procedure AddCount(var AList: TGittanBranchCounts; const AName: string; ACount: integer);
+  begin
+    SetLength(AList, Length(AList) + 1);
+    AList[High(AList)].Name := AName;
+    AList[High(AList)].Count := ACount;
+  end;
+
+begin
+  Result := Default(TGittanRepoStatus);
+  Result.Path := APath;
+  Result.Caption := ACaption;
+  if Result.Caption = '' then
+    Result.Caption := ExtractFileName(ExcludeTrailingPathDelimiter(APath));
+  if not DirectoryExists(APath) then
+  begin
+    Result.Error := 'The folder is not there.';
+    Exit;
+  end;
+  Repo := TGittanRepo.Create;
+  Lines := TStringList.Create;
+  try
+    if not Repo.Open(APath) then
+    begin
+      Result.Error := Trim(Repo.Error);
+      if Result.Error = '' then
+        Result.Error := 'Not a git repository.';
+      Exit;
+    end;
+    Result.Branch := Repo.Branch(Result.Detached);
+    if Result.Detached then
+      Result.Branch := '';
+    Result.Operation := Repo.Operation;
+
+    { A line a file, quoted when its name needs it, so a name with a
+      line break is one line too. }
+    if not GitOut(APath, ['status', '--porcelain', '--untracked-files=normal'], Output) then
+    begin
+      Result.Error := 'git status failed.';
+      Exit;
+    end;
+    Lines.Text := Output;
+    for Line in Lines do
+      if Copy(Line, 1, 2) = '??' then
+        Inc(Result.Untracked)
+      else if Line <> '' then
+        Inc(Result.Changed);
+
+    if Repo.Stashes(Stashes) then
+      Result.Stashes := Length(Stashes);
+
+    Result.NoRemote := GitOut(APath, ['remote'], Output) and (Output = '');
+    if GitOut(APath, ['for-each-ref', '--format=%(refname:short)%09%(upstream:short)%09' +
+      '%(upstream:track,nobracket)', 'refs/heads'], Output) then
+    begin
+      Lines.Text := Output;
+      for Line in Lines do
+      begin
+        Fields := Line.Split([#9]);
+        if Length(Fields) = 0 then
+          Continue;
+        Name := Fields[0];
+        Upstream := '';
+        Track := '';
+        if Length(Fields) > 1 then
+          Upstream := Fields[1];
+        if Length(Fields) > 2 then
+          Track := Fields[2];
+        if Upstream <> '' then
+        begin
+          Ahead := AheadOf(Track);
+          if Ahead > 0 then
+            AddCount(Result.Unpushed, Name, Ahead);
+        end
+        else if not Result.NoRemote and GitOut(APath, ['rev-list', '--count',
+          'refs/heads/' + Name, '--not', '--remotes'], Count) and
+          (StrToIntDef(Count, 0) > 0) then
+          AddCount(Result.Unshared, Name, StrToIntDef(Count, 0));
+      end;
+    end;
+  finally
+    Lines.Free;
+    Repo.Free;
+  end;
+end;
+
+function StatusClean(const AStatus: TGittanRepoStatus): boolean;
+begin
+  Result := (AStatus.Error = '') and not AStatus.Detached and (AStatus.Operation = '') and
+    (AStatus.Changed = 0) and (AStatus.Untracked = 0) and (AStatus.Stashes = 0) and
+    (Length(AStatus.Unpushed) = 0) and (Length(AStatus.Unshared) = 0) and not AStatus.NoRemote;
+end;
+
 function DeleteGoneBranch(const APath, ABranch: string): TGittanGoneBranch;
 var
   Output, Err: string;
@@ -425,6 +602,38 @@ begin
     if Terminated then
       Exit;
     FRepos[i] := ScanGoneRepo(FRepos[i].Path, FRepos[i].Caption, FFetch);
+    ItemDone;
+  end;
+  Done;
+end;
+
+{ ---------------------------------------------------------------------------
+  TGittanStatusJob
+  --------------------------------------------------------------------------- }
+
+constructor TGittanStatusJob.Create(const APaths, ACaptions: array of string);
+var
+  i: integer;
+begin
+  inherited Create(True);
+  SetLength(FRepos, Length(APaths));
+  for i := 0 to High(APaths) do
+  begin
+    FRepos[i].Path := APaths[i];
+    if i <= High(ACaptions) then
+      FRepos[i].Caption := ACaptions[i];
+  end;
+end;
+
+procedure TGittanStatusJob.Execute;
+var
+  i: integer;
+begin
+  for i := 0 to High(FRepos) do
+  begin
+    if Terminated then
+      Exit;
+    FRepos[i] := RepoStatus(FRepos[i].Path, FRepos[i].Caption);
     ItemDone;
   end;
   Done;

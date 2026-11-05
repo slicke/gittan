@@ -18,9 +18,11 @@ unit uforge;
   after them (BatchTab): the batch page (gittan.batchpage) in the same
   box in the page's place, operations run in several of the
   repositories the welcome view shows, picked there (kept in the
-  settings, BatchRepos); so far deleting the branches deleted on the
-  remote, which the view scans for and deletes in jobs of its own
-  (gittan.batch), asking first,
+  settings, BatchRepos): an overview of what is left undone in each,
+  read as the tab is shown and on Check, a card's head opening that
+  repository; and deleting the branches deleted on the remote, which
+  the view scans for and deletes, asking first, all in jobs of its own
+  (gittan.batch),
   read by the forge's AccountJob (gittan.forge; GitHub's runs one
   GraphQL query through gh) once at start, each time the view is shown,
   on Refresh and when the forge or its account changes, the page keeping
@@ -69,6 +71,7 @@ type
     FBatch: TGittanBatchPage;
     FBatchShown: boolean;
     FScanJob: TGittanGoneScanJob;
+    FStatusJob: TGittanStatusJob;
     FDeleteJob: TGittanGoneDeleteJob;
     FForge: TGittanForge;
     { The job under way, and the jobs given up or done, freed once their
@@ -113,6 +116,10 @@ type
     procedure ShowBatch;
     procedure BatchChosenChange(Sender: TObject);
     procedure BatchScan(Sender: TObject);
+    procedure BatchCheck(Sender: TObject);
+    procedure CheckProgress(Sender: TObject);
+    procedure CheckDone(Sender: TObject);
+    procedure BatchOpen(Sender: TObject; const APath: string);
     procedure ScanProgress(Sender: TObject);
     procedure ScanDone(Sender: TObject);
     procedure BatchDelete(Sender: TObject);
@@ -266,6 +273,12 @@ begin
     FZombies.Add(FScanJob);
     FScanJob := nil;
   end;
+  if FStatusJob <> nil then
+  begin
+    FStatusJob.Stop(False);
+    FZombies.Add(FStatusJob);
+    FStatusJob := nil;
+  end;
   if FDeleteJob <> nil then
   begin
     FDeleteJob.Stop(False);
@@ -306,6 +319,8 @@ begin
   FBatch.OnChosenChange := @BatchChosenChange;
   FBatch.OnScan := @BatchScan;
   FBatch.OnDelete := @BatchDelete;
+  FBatch.OnCheck := @BatchCheck;
+  FBatch.OnOpen := @BatchOpen;
   FThemeTimer := TTimer.Create(Self);
   FThemeTimer.Interval := 2000;
   FThemeTimer.Enabled := False;
@@ -679,6 +694,8 @@ begin
   FBatch.FitHeight(FBox.ClientHeight);
   FPage.Visible := False;
   FBatch.Visible := True;
+  { The overview is local and quick: read again each time. }
+  BatchCheck(Self);
 end;
 
 procedure TForgeView.BatchChosenChange(Sender: TObject);
@@ -704,6 +721,54 @@ begin
   FBatch.StartScan(Length(Paths));
   FBatch.FitHeight(FBox.ClientHeight);
   FScanJob.Start;
+end;
+
+{ Check: what is left undone in the picked repositories, read in a job,
+  the page showing each as it is done; one at a time. }
+procedure TForgeView.BatchCheck(Sender: TObject);
+var
+  Paths, Captions: TStringArray;
+begin
+  if FStatusJob <> nil then
+    Exit;
+  FBatch.ChosenRepos(Paths, Captions);
+  if Length(Paths) = 0 then
+    Exit;
+  FStatusJob := TGittanStatusJob.Create(Paths, Captions);
+  FStatusJob.OnProgress := @CheckProgress;
+  FStatusJob.OnDone := @CheckDone;
+  FBatch.StartCheck(Length(Paths));
+  FBatch.FitHeight(FBox.ClientHeight);
+  FStatusJob.Start;
+end;
+
+procedure TForgeView.CheckProgress(Sender: TObject);
+begin
+  if Sender <> FStatusJob then
+    Exit;
+  FBatch.SetStatus(FStatusJob.Repos, FStatusJob.Finished, True);
+  FBatch.FitHeight(FBox.ClientHeight);
+end;
+
+procedure TForgeView.CheckDone(Sender: TObject);
+var
+  Job: TGittanStatusJob;
+begin
+  Job := TGittanStatusJob(Sender);
+  if Job <> FStatusJob then
+    Exit;
+  FStatusJob := nil;
+  FZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeJobsAsync, 0);
+  FBatch.SetStatus(Job.Repos, Job.Finished, False);
+  FBatch.FitHeight(FBox.ClientHeight);
+end;
+
+{ A card's head in the overview: the repository opens, which hides the
+  view. }
+procedure TForgeView.BatchOpen(Sender: TObject; const APath: string);
+begin
+  FWindow.OpenRepository(APath);
 end;
 
 procedure TForgeView.ScanProgress(Sender: TObject);

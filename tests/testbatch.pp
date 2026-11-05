@@ -4,7 +4,10 @@ unit testbatch;
   repositories, a folder's repositories, and in a clone of a repository
   made for the test the branches deleted on the remote found after a
   fetch (merged, squashed, not merged; the current one and one still on
-  the remote left out), deleted, and a deletion git refuses. }
+  the remote left out), deleted, and a deletion git refuses; and the
+  overview of what is left undone in a repository: clean, with changes,
+  untracked files, a stash, a branch ahead of its upstream and one on
+  no remote, in the middle of a merge, and without a remote. }
 
 {$mode objfpc}{$H+}
 
@@ -35,6 +38,11 @@ type
     procedure TestDelete;
     procedure TestDeleteRefused;
     procedure TestJobs;
+    procedure TestStatusClean;
+    procedure TestStatusUndone;
+    procedure TestStatusOperation;
+    procedure TestStatusNoRemote;
+    procedure TestStatusJob;
   end;
 
 implementation
@@ -336,6 +344,142 @@ begin
     AssertFalse(Del.Branches[1].Deleted);
   finally
     Del.Free;
+  end;
+end;
+
+{ MakeRepos's work repository on main, fetched and pruned, with the
+  gone branches deleted: nothing left undone. }
+procedure TBatchTest.TestStatusClean;
+var
+  Status: TGittanRepoStatus;
+begin
+  MakeRepos;
+  Git(FWork, ['switch', '-q', 'main']);
+  Git(FWork, ['fetch', '-q', '--prune']);
+  Git(FWork, ['branch', '-q', '-D', 'merged', 'squash', 'wip', 'current']);
+  Status := RepoStatus(FWork, '');
+  AssertEquals('', Status.Error);
+  AssertEquals('work', Status.Caption);
+  AssertEquals('main', Status.Branch);
+  AssertFalse(Status.Detached);
+  AssertEquals(0, Status.Changed);
+  AssertEquals(0, Status.Untracked);
+  AssertEquals(0, Status.Stashes);
+  AssertEquals(0, Length(Status.Unpushed));
+  AssertEquals(0, Length(Status.Unshared));
+  AssertFalse(Status.NoRemote);
+  AssertTrue(StatusClean(Status));
+end;
+
+procedure TBatchTest.TestStatusUndone;
+var
+  Status: TGittanRepoStatus;
+begin
+  MakeRepos;
+  Git(FWork, ['switch', '-q', 'main']);
+  Git(FWork, ['branch', '-q', '-D', 'merged', 'squash', 'wip', 'current']);
+  { keep one ahead of its upstream; local, never pushed, two commits on
+    no remote; empty, never pushed, none. }
+  Git(FWork, ['switch', '-q', 'keep']);
+  CommitFile('k.txt', 'k', 'keep ahead');
+  Git(FWork, ['switch', '-q', '-c', 'local', 'main']);
+  CommitFile('l1.txt', 'l', 'local one');
+  CommitFile('l2.txt', 'l', 'local two');
+  Git(FWork, ['switch', '-q', '-c', 'empty', 'main']);
+  Git(FWork, ['switch', '-q', 'main']);
+  { A stash, then a change, a staged file and two untracked. }
+  with TStringList.Create do
+    try
+      Text := 'changed';
+      SaveToFile(IncludeTrailingPathDelimiter(FWork) + 'a.txt');
+      Git(FWork, ['stash', '-q']);
+      SaveToFile(IncludeTrailingPathDelimiter(FWork) + 'a.txt');
+      SaveToFile(IncludeTrailingPathDelimiter(FWork) + 'new.txt');
+      Git(FWork, ['add', 'new.txt']);
+      SaveToFile(IncludeTrailingPathDelimiter(FWork) + 'u1.txt');
+      SaveToFile(IncludeTrailingPathDelimiter(FWork) + 'u2.txt');
+    finally
+      Free;
+    end;
+  Status := RepoStatus(FWork, 'Work');
+  AssertEquals('', Status.Error);
+  AssertEquals('Work', Status.Caption);
+  AssertEquals(2, Status.Changed);
+  AssertEquals(2, Status.Untracked);
+  AssertEquals(1, Status.Stashes);
+  AssertEquals(1, Length(Status.Unpushed));
+  AssertEquals('keep', Status.Unpushed[0].Name);
+  AssertEquals(1, Status.Unpushed[0].Count);
+  AssertEquals(1, Length(Status.Unshared));
+  AssertEquals('local', Status.Unshared[0].Name);
+  AssertEquals(2, Status.Unshared[0].Count);
+  AssertFalse(StatusClean(Status));
+
+  { A detached HEAD has no branch. }
+  Git(FWork, ['stash', '-q', '-u']);
+  Git(FWork, ['switch', '-q', '--detach', 'main']);
+  Status := RepoStatus(FWork, '');
+  AssertTrue(Status.Detached);
+  AssertEquals('', Status.Branch);
+  AssertFalse(StatusClean(Status));
+end;
+
+procedure TBatchTest.TestStatusOperation;
+var
+  Status: TGittanRepoStatus;
+  Output, Err: string;
+begin
+  MakeRepos;
+  Git(FWork, ['switch', '-q', 'main']);
+  Git(FWork, ['switch', '-q', '-c', 'one']);
+  CommitFile('a.txt', 'one', 'one');
+  Git(FWork, ['switch', '-q', '-c', 'two', 'main']);
+  CommitFile('a.txt', 'two', 'two');
+  { Stops on the conflict in a.txt. }
+  AssertFalse(RunGitIn(FWork, ['merge', '-q', 'one'], Output, Err));
+  Status := RepoStatus(FWork, '');
+  AssertEquals('merging', Status.Operation);
+  AssertTrue(Status.Changed > 0);
+  AssertFalse(StatusClean(Status));
+end;
+
+procedure TBatchTest.TestStatusNoRemote;
+var
+  Status: TGittanRepoStatus;
+begin
+  ForceDirectories(FWork);
+  Git(FWork, ['init', '-q']);
+  CommitFile('a.txt', 'a', 'first');
+  Git(FWork, ['switch', '-q', '-c', 'side']);
+  CommitFile('b.txt', 'b', 'side');
+  Status := RepoStatus(FWork, '');
+  AssertEquals('', Status.Error);
+  AssertTrue(Status.NoRemote);
+  { Every commit is on no remote: not told branch by branch. }
+  AssertEquals(0, Length(Status.Unshared));
+  AssertFalse(StatusClean(Status));
+  Status := RepoStatus(IncludeTrailingPathDelimiter(FDir) + 'missing', '');
+  AssertTrue(Status.Error <> '');
+  AssertFalse(StatusClean(Status));
+end;
+
+procedure TBatchTest.TestStatusJob;
+var
+  Job: TGittanStatusJob;
+begin
+  MakeRepos;
+  Job := TGittanStatusJob.Create([FWork, IncludeTrailingPathDelimiter(FDir) + 'missing'],
+    ['Work', '']);
+  try
+    Job.Start;
+    Job.WaitFor;
+    AssertEquals(2, Job.Finished);
+    AssertEquals('Work', Job.Repos[0].Caption);
+    AssertEquals('current', Job.Repos[0].Branch);
+    AssertTrue(Job.Repos[1].Error <> '');
+    AssertEquals('missing', Job.Repos[1].Caption);
+  finally
+    Job.Free;
   end;
 end;
 
