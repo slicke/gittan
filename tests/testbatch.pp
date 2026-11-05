@@ -875,14 +875,30 @@ begin
 end;
 
 procedure TBatchTest.TestMaintPack;
+
+  { Text zlib cannot shrink much, so the loose objects come to some KiB:
+    on Windows count-objects adds up the files' sizes, not disk blocks,
+    and two one-letter files came to 0 KiB there. }
+  function Noise(ASeed: cardinal): string;
+  var
+    k: integer;
+  begin
+    SetLength(Result, 8192);
+    for k := 1 to Length(Result) do
+    begin
+      ASeed := ASeed * 1103515245 + 12345;
+      Result[k] := Chr(33 + (ASeed shr 16) mod 90);
+    end;
+  end;
+
 var
   Repo: TGittanMaintRepo;
   i: integer;
 begin
   ForceDirectories(FWork);
   Git(FWork, ['init', '-q']);
-  CommitFile('a.txt', 'a', 'first');
-  CommitFile('b.txt', 'b', 'second');
+  CommitFile('a.txt', Noise(1), 'first');
+  CommitFile('b.txt', Noise(2), 'second');
   { Under the limits: nothing to pack. }
   AssertEquals(-1, FindTask(ScanMaintenance(FWork, '', False), mtPack));
   Repo := ScanMaintenance(FWork, '', False, 1, 1);
