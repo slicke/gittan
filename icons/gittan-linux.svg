@@ -1,14 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><title>Gittan</title>
-<rect x="8" y="8" width="240" height="240" rx="54" fill="#141A26"/>
+<g transform="translate(128 128) scale(1.2174) translate(-128 -128)">
 <rect x="36" y="44" width="184" height="168" rx="18" fill="#1B2231"/>
-<path d="M54 44H202A18 18 0 0 1 220 62V74H36V62A18 18 0 0 1 54 44Z" fill="#2B3446"/>
+<path d="M54 44H202A18 18 0 0 1 220 62V74H36V62A18 18 0 0 1 54 44Z" fill="#34405A"/>
 <rect x="36" y="106" width="184" height="35" fill="#3A2530"/>
 <rect x="36" y="142" width="184" height="35" fill="#1F3A33"/>
-<circle cx="56" cy="59" r="5.500" fill="#5A667E"/><circle cx="74" cy="59" r="5.500" fill="#5A667E"/><circle cx="92" cy="59" r="5.500" fill="#5A667E"/>
+<circle cx="56" cy="59" r="5.500" fill="#7C8AA5"/><circle cx="74" cy="59" r="5.500" fill="#7C8AA5"/><circle cx="92" cy="59" r="5.500" fill="#7C8AA5"/>
 <rect x="84" y="81" width="72" height="18" rx="9" fill="#3A465C"/>
 <rect x="50" y="119.500" width="20" height="8" rx="4" fill="#FF4B58"/>
 <rect x="84" y="113.500" width="92" height="20" rx="10" fill="#FF4B58"/>
 <rect x="50" y="155.500" width="20" height="8" rx="4" fill="#2BE070"/><rect x="56" y="149.500" width="8" height="20" rx="4" fill="#2BE070"/>
 <rect x="84" y="149.500" width="118" height="20" rx="10" fill="#2BE070"/>
 <rect x="84" y="184" width="50" height="18" rx="9" fill="#3A465C"/>
+<rect x="37.500" y="45.500" width="181" height="165" rx="16.500" fill="none" stroke="#56647F" stroke-width="3"/>
+</g>
 </svg>
