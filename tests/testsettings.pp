@@ -28,6 +28,8 @@ type
     procedure TestRecentList;
     procedure TestSaveRecent;
     procedure TestTabs;
+    procedure TestBatchRepos;
+    procedure TestBatchOperationIndex;
     procedure TestDamagedFileGivesDefaults;
     procedure TestWrongTypesSaved;
     procedure TestDraftUnknownKept;
@@ -411,6 +413,54 @@ begin
     AssertEquals('an active tab past the end is the first', 0, S.ActiveTab);
   finally
     S.Free;
+  end;
+end;
+
+procedure TSettingsTest.TestBatchRepos;
+var
+  S: TGittanSettings;
+begin
+  S := TGittanSettings.Create(FDir);
+  try
+    AssertEquals('none by default', 0, S.BatchRepos.Count);
+    AssertEquals('the overview by default', '', S.BatchOperation);
+    S.BatchOperation := 'ext:forge-overview:b';
+    S.BatchRepos.Add('/repo/a');
+    S.BatchRepos.Add('/repo/b c');
+    S.Save;
+  finally
+    S.Free;
+  end;
+  S := TGittanSettings.Create(FDir);
+  try
+    S.Load;
+    AssertEquals(2, S.BatchRepos.Count);
+    AssertEquals('/repo/b c', S.BatchRepos[1]);
+    AssertEquals('ext:forge-overview:b', S.BatchOperation);
+  finally
+    S.Free;
+  end;
+end;
+
+{ batch.operation kept by its index before: 1 to 3 the operations, 0
+  and an unknown one the overview. }
+procedure TSettingsTest.TestBatchOperationIndex;
+const
+  Keys: array[0..4] of string = ('', 'gone', 'identity', 'maintenance', '');
+var
+  S: TGittanSettings;
+  i: integer;
+begin
+  for i := 0 to High(Keys) do
+  begin
+    Put('state.json', '{"batch": {"operation": ' + IntToStr(i) + '}}');
+    S := TGittanSettings.Create(FDir);
+    try
+      S.Load;
+      AssertEquals('index ' + IntToStr(i), Keys[i], S.BatchOperation);
+    finally
+      S.Free;
+    end;
   end;
 end;
 

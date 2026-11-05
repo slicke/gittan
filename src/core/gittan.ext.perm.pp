@@ -12,9 +12,10 @@ uses
 
 type
   {** Coarse permission groups. ui/timers are baseline (granted without prompt);
-      data (the repository's content), net, exec and settings must be declared
-      in the extension manifest and approved. }
-  TExtPermGroup = (epData, epUI, epTimers, epNet, epExec, epSettings);
+      data (the repository's content), net, exec, settings and forge (the
+      forge's tool with the user's account) must be declared in the
+      extension manifest and approved. }
+  TExtPermGroup = (epData, epUI, epTimers, epNet, epExec, epSettings, epForge);
   TExtPermSet = set of TExtPermGroup;
 
   {** Parsed manifest from an extension's leading /* ... */ comment block.
@@ -30,6 +31,9 @@ type
     Requested: TExtPermSet;
     {** The repositories it runs for (@repos), every one when empty. }
     Repos: TStringArray;
+    {** The forges it runs for (@forges), by name in lower case, every
+      one when empty. }
+    Forges: TStringArray;
     IsValid: boolean;
     ErrorMessage: string;
   end;
@@ -38,17 +42,19 @@ const
   {** Always granted, no prompt. }
   PermBaseline: TExtPermSet = [epUI, epTimers];
   {** Must appear in @perms and be approved by the user. }
-  PermPromptable: TExtPermSet = [epData, epNet, epExec, epSettings];
+  PermPromptable: TExtPermSet = [epData, epNet, epExec, epSettings, epForge];
   {** Human-readable names. Order matches TExtPermGroup. }
   PermGroupName: array[TExtPermGroup] of string =
-    ('data', 'ui', 'timers', 'net', 'exec', 'settings');
+    ('data', 'ui', 'timers', 'net', 'exec', 'settings', 'forge');
   PermGroupDesc: array[TExtPermGroup] of string =
     ('Read the repositories: the files and their content, changes and history',
      'Show dialogs, cards and messages, add commands to the menus, keep its own settings',
      'Schedule timers',
      'Make network requests (fetch)',
      'Run git and other programs',
-     'Read Gittan''s own settings');
+     'Read Gittan''s own settings',
+     'Use your account on the forge through its tool (gh): read and change whatever the ' +
+     'account may');
 
 {** Parse the leading /* ... */ block from an extension source. A UTF-8 BOM
     and a single compiler-emitted "use strict"; prologue line are tolerated
@@ -84,6 +90,11 @@ function RemoteUrlKey(const AUrl: string): string;
     a root (~ the home folder), any other a remote (RemoteUrlKey); * and ?
     are wildcards. True when APatterns is empty. }
 function ExtRepoInScope(const APatterns: TStringArray; const ARoot, ARemoteUrls: string): boolean;
+
+{** Whether the forge AForgeName ("GitHub", '' for none) is one of
+  AForges (@forges, in lower case): True when AForges is empty, False
+  for no forge when it is not. }
+function ExtForgeInScope(const AForges: TStringArray; const AForgeName: string): boolean;
 
 implementation
 
@@ -264,6 +275,18 @@ begin
   Result := False;
 end;
 
+function ExtForgeInScope(const AForges: TStringArray; const AForgeName: string): boolean;
+var
+  Name: string;
+begin
+  if Length(AForges) = 0 then
+    Exit(True);
+  for Name in AForges do
+    if (AForgeName <> '') and (Name = LowerCase(AForgeName)) then
+      Exit(True);
+  Result := False;
+end;
+
 { Strip leading "*" decoration from a manifest body line. }
 function StripLineDecoration(const line: string): string;
 var
@@ -318,6 +341,7 @@ begin
   Result.License := '';
   Result.Requested := [];
   Result.Repos := nil;
+  Result.Forges := nil;
   Result.IsValid := True;
   Result.ErrorMessage := '';
 
@@ -401,6 +425,16 @@ begin
         end;
       if not named then
         AddError('@repos names no repository');
+    end
+    else if DirectiveValue('@forges', value) then
+    begin
+      { Names alone, which the loader checks against the forges
+        registered; an empty line is refused as an empty @repos is. }
+      parts := value.Split([',', ' ', #9], TStringSplitOptions.ExcludeEmpty);
+      for j := 0 to High(parts) do
+        Result.Forges := Concat(Result.Forges, [LowerCase(parts[j])]);
+      if Length(parts) = 0 then
+        AddError('@forges names no forge');
     end
     else if (Pos('(c)', lc) = 1) or (Pos('copyright', lc) = 1) then
     begin

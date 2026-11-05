@@ -47,6 +47,8 @@ type
     procedure Notify(const ARoot, ATitle, ADetail: string; AError: boolean); override;
     procedure OpenFile(const ARoot, APath: string; ALine: integer); override;
     procedure CommandsChanged; override;
+    function ForgeViewForge: string; override;
+    procedure Deliver(ASeq: integer; const AExtId, AJson: string); override;
   end;
 
 implementation
@@ -252,7 +254,20 @@ end;
 procedure TGittanExtUIHost.Notify(const ARoot, ATitle, ADetail: string; AError: boolean);
 var
   Frame: TRepoFrame;
+  Text: string;
 begin
+  { The forge view has no banner, and the frame's is under it. }
+  if (FWindow <> nil) and (FWindow.ForgeViewForge <> '') and (ARoot = ActiveRoot) then
+  begin
+    Text := ATitle;
+    if ADetail <> '' then
+      Text := Text + LineEnding + LineEnding + ADetail;
+    if AError then
+      TellDlg(rsExtMessage, Text, mtError)
+    else
+      TellDlg(rsExtMessage, Text, mtInformation);
+    Exit;
+  end;
   Frame := FrameOf(ARoot);
   if Frame <> nil then
     Frame.ExtNotify(ATitle, ADetail, AError);
@@ -278,6 +293,20 @@ begin
     Exit;
   if FWindow <> nil then
     FWindow.ExtensionsChanged;
+end;
+
+function TGittanExtUIHost.ForgeViewForge: string;
+begin
+  if FWindow <> nil then
+    Result := FWindow.ForgeViewForge
+  else
+    Result := '';
+end;
+
+procedure TGittanExtUIHost.Deliver(ASeq: integer; const AExtId, AJson: string);
+begin
+  if FWindow <> nil then
+    FWindow.ExtDeliver(ASeq, AExtId, AJson);
 end;
 
 end.

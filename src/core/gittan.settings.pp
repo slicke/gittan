@@ -63,6 +63,7 @@ type
     FRecent: TStringList;
     FPaletteRecent: TStringList;
     FTabs: TStringList;
+    FBatchRepos: TStringList;
     { The two files as read, which Save writes back with the fields put
       in, so a key it does not know stays. What has no field of its own
       lives in them alone: the forges' values (hosting.forges), the
@@ -282,6 +283,15 @@ type
     {** The repositories open in the window's tabs when it closed, left
       to right, which open again at the next start. }
     property Tabs: TStringList read FTabs;
+    {** The repositories picked on the forge view's Batch tab, by their
+      roots, kept in state.json (batch.repos). }
+    property BatchRepos: TStringList read FBatchRepos;
+  public
+    {** The operation shown on the Batch tab, by its key (overview, gone,
+      identity, maintenance or an extension's; '', the overview, by
+      default), kept in state.json (batch.operation), so an extension's
+      is found again once the extensions are loaded. }
+    BatchOperation: string;
     {** The folder of the files, and the files. }
     property Dir: string read FDir;
     function SettingsFile: string;
@@ -529,6 +539,8 @@ begin
   FPaletteRecent := TStringList.Create;
   FPaletteRecent.CaseSensitive := True;
   FTabs := TStringList.Create;
+  FBatchRepos := TStringList.Create;
+  FBatchRepos.CaseSensitive := True;
   FSettingsDoc := TJSONObject.Create;
   FStateDoc := TJSONObject.Create;
   if ADir <> '' then
@@ -556,6 +568,7 @@ begin
   FRecent.Free;
   FPaletteRecent.Free;
   FTabs.Free;
+  FBatchRepos.Free;
   inherited Destroy;
 end;
 
@@ -697,6 +710,15 @@ begin
   O := ObjOf(FStateDoc, 'tabs');
   ListOf(O, 'open', FTabs);
   ActiveTab := IntOf(O, 'active');
+  ListOf(ObjOf(FStateDoc, 'batch'), 'repos', FBatchRepos);
+  BatchOperation := StrOf(ObjOf(FStateDoc, 'batch'), 'operation');
+  { Kept by its index before. }
+  if BatchOperation = '' then
+    case IntOf(ObjOf(FStateDoc, 'batch'), 'operation') of
+      1: BatchOperation := 'gone';
+      2: BatchOperation := 'identity';
+      3: BatchOperation := 'maintenance';
+    end;
   if (ActiveTab < 0) or (ActiveTab >= FTabs.Count) then
     ActiveTab := 0;
 end;
@@ -797,6 +819,8 @@ begin
   O := ChildOf(FStateDoc, 'tabs');
   O.Arrays['open'] := ListJson(FTabs);
   O.Integers['active'] := ActiveTab;
+  ChildOf(FStateDoc, 'batch').Arrays['repos'] := ListJson(FBatchRepos);
+  ChildOf(FStateDoc, 'batch').Strings['operation'] := BatchOperation;
 end;
 
 function TGittanSettings.WriteState: boolean;

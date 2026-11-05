@@ -726,9 +726,9 @@ begin
   if Path <> '' then
     AddProjectCheck(Result, ProjectCheck(Format(rsLpsTracked, [Path]), Path, '*.lps'));
   if AContext.TrackedUnder('lib/', Path) then
-    AddProjectCheck(Result, ProjectCheck(rsLibTracked, Path, 'lib/'));
+    AddProjectCheck(Result, ProjectCheck(rsLibTracked, Path, '/lib/'));
   if AContext.TrackedUnder('backup/', Path) then
-    AddProjectCheck(Result, ProjectCheck(rsBackupTracked, Path, 'backup/'));
+    AddProjectCheck(Result, ProjectCheck(rsBackupTracked, Path, '/backup/'));
   { A submodule not checked out hides its packages; say so once for
     each, then the packages found nowhere. }
   Subs := AContext.Submodules;

@@ -45,10 +45,14 @@ resourcestring
   rsAbsorbNoNeighbours = 'no commit of the branch wrote the lines round it';
   rsAbsorbBinary = 'the file is binary';
   rsAbsorbNoCommits = 'There are no commits on the branch to put changes into.';
+  rsAbsorbMerges = 'The commits of the branch include a merge commit, which an ' +
+    'interactive rebase would flatten.';
   rsAbsorbNoBranch = 'HEAD is not on a branch.';
   rsAbsorbNothingChosen = 'No change was chosen.';
   rsAbsorbNoBase = 'Could not find where the branch leaves %s.';
   rsAbsorbMoved = 'The branch has moved since the changes were read; try again.';
+  rsAbsorbNotUndone = 'The fixup commits made could not be taken back: %s';
+  rsAbsorbSpecFile = 'Could not write %s.';
   rsAbsorbStashConflicts = 'The changes went into their commits, but putting back what ' +
     'was left in the work tree gave conflicts; git keeps it in the stash too.';
 
@@ -145,7 +149,11 @@ function AbsorbTarget(ABlame: TGittanBlame; AFrom, ATo, ABefore, AAfter: integer
   folded in. ACommits is how many fixup commits were made. True when
   the rebase went through. False with AError when the branch moved since
   the plan was built, a file changed since or cannot be read, a commit
-  failed, or nothing was chosen; AConflicts and AStopped as
+  failed, the branch holds a merge commit, the rebase did not start, or
+  nothing was chosen, with the fixup commits made before taken back
+  (ACommits 0), so the branch and the work tree are as they were, or
+  ACommits as it was and rsAbsorbNotUndone after AError when taking them
+  back failed; AConflicts and AStopped as
   RebaseInteractive gives them when the rebase stopped, which the Commit
   section carries on, the fixup commits still on the branch; AConflicts
   with rsAbsorbStashConflicts when the rebase went through but the rest
@@ -425,6 +433,13 @@ begin
     AError := ARepo.Error;
     Exit(False);
   end;
+  { As the interactive rebase and the fixup fold, which refuse a range
+    with a merge commit in it. }
+  if Merges then
+  begin
+    AError := rsAbsorbMerges;
+    Exit(False);
+  end;
   if Length(FSteps) = 0 then
   begin
     AError := rsAbsorbNoCommits;
@@ -499,14 +514,14 @@ function AbsorbRun(ARepo: TGittanRepo; APlan: TGittanAbsorbPlan;
   const AChosen: array of boolean; AOptions: TGittanCommitOptions;
   out ACommits: integer; out AConflicts, AStopped: boolean; out AError: string): boolean;
 var
-  Paths: TStringList;
+  Paths, Committed: TStringList;
   Parts: TGittanCommitParts;
   Steps: TGittanRebaseSteps;
   Hunks: TGittanAbsorbHunks;
   Taken: array of boolean;
-  Merges, Whole: boolean;
+  Merges, Whole, Rebasing: boolean;
   t, h, Found: integer;
-  Id, Err, Output: string;
+  Id, Err, Output, LastFixup: string;
   Text: RawByteString;
 
   { Whether the hunk is chosen and has a target. }
@@ -564,6 +579,44 @@ var
       AError := APath + ': ' + Err;
   end;
 
+  { Takes back the fixup commits made before something failed, while no
+    rebase has started: HEAD back where the plan found it and the paths
+    committed back in the index as it has them, so the changes are in
+    the work tree again, as before, and no stray fixup! commit is left
+    on the branch. The paths go to git in a file, as a commit's do, so
+    many of them do not grow the command line past what the system
+    takes. False, with git's error after AError, when a reset failed. }
+  function UndoCommits: boolean;
+  var
+    SpecFile, Spec: string;
+    i: integer;
+  begin
+    Result := RunGitIn(ARepo.Root, ['reset', '-q', '--soft', APlan.Head], Output, Err);
+    if Result and (Committed.Count > 0) then
+    begin
+      Spec := '';
+      for i := 0 to Committed.Count - 1 do
+        Spec := Spec + Committed[i] + #0;
+      SpecFile := GetTempFileName(GetTempDir, 'gittan-absorb-');
+      try
+        Result := WriteFileReplacing(SpecFile, Spec);
+        if not Result then
+          Err := Format(rsAbsorbSpecFile, [SpecFile])
+        else
+          Result := RunGitIn(ARepo.Root, ['--literal-pathspecs', 'reset', '-q', APlan.Head,
+            '--pathspec-from-file=' + SpecFile, '--pathspec-file-nul'], Output, Err);
+      finally
+        DeleteFile(SpecFile);
+      end;
+    end;
+    if not Result then
+    begin
+      if AError <> '' then
+        AError := AError + LineEnding;
+      AError := AError + Format(rsAbsorbNotUndone, [Trim(Err)]);
+    end;
+  end;
+
 begin
   ACommits := 0;
   AConflicts := False;
@@ -581,58 +634,83 @@ begin
     AError := rsAbsorbMoved;
     Exit;
   end;
-  Paths := TStringList.Create;
+  Rebasing := False;
+  Committed := TStringList.Create;
   try
-    Paths.CaseSensitive := True;
-    for t := 0 to High(Steps) do
-    begin
-      PathsFor(t);
-      if Paths.Count = 0 then
-        Continue;
-      { The hunks of this step are taken before the texts are made, so
-        they are in them; those of later steps are left out still. }
-      for h := 0 to High(Hunks) do
-        if Chosen(h) and (Hunks[h].Target = t) then
-          Taken[h] := True;
-      Parts := nil;
-      for h := 0 to Paths.Count - 1 do
+    Committed.CaseSensitive := True;
+    Committed.Sorted := True;
+    Committed.Duplicates := dupIgnore;
+    Paths := TStringList.Create;
+    try
+      Paths.CaseSensitive := True;
+      for t := 0 to High(Steps) do
       begin
-        if not PartFor(Paths[h], Text, Whole) then
-          Exit;
-        if Whole then
+        PathsFor(t);
+        if Paths.Count = 0 then
           Continue;
-        SetLength(Parts, Length(Parts) + 1);
-        Parts[High(Parts)].Path := Paths[h];
-        Parts[High(Parts)].Text := Text;
+        { The hunks of this step are taken before the texts are made, so
+          they are in them; those of later steps are left out still. }
+        for h := 0 to High(Hunks) do
+          if Chosen(h) and (Hunks[h].Target = t) then
+            Taken[h] := True;
+        Parts := nil;
+        for h := 0 to Paths.Count - 1 do
+        begin
+          if not PartFor(Paths[h], Text, Whole) then
+            Exit;
+          if Whole then
+            Continue;
+          SetLength(Parts, Length(Parts) + 1);
+          Parts[High(Parts)].Path := Paths[h];
+          Parts[High(Parts)].Text := Text;
+        end;
+        if not ARepo.Commit(FixupSubject(Steps, t), Paths, False, Id, Parts, AOptions) then
+        begin
+          AError := ARepo.Error;
+          Exit;
+        end;
+        Committed.AddStrings(Paths);
+        LastFixup := Id;
+        Inc(ACommits);
       end;
-      if not ARepo.Commit(FixupSubject(Steps, t), Paths, False, Id, Parts, AOptions) then
-      begin
-        AError := ARepo.Error;
-        Exit;
-      end;
-      Inc(ACommits);
+    finally
+      Paths.Free;
+    end;
+    if ACommits = 0 then
+    begin
+      AError := rsAbsorbNothingChosen;
+      Exit;
+    end;
+    if not ARepo.RebaseSteps(APlan.Onto, Steps, Merges) then
+    begin
+      AError := ARepo.Error;
+      Exit;
+    end;
+    if Merges then
+    begin
+      AError := rsAbsorbMerges;
+      Exit;
+    end;
+    AutosquashSteps(Steps);
+    if not CheckRebaseSteps(Steps, AError) then
+      Exit;
+    Rebasing := True;
+    Result := ARepo.RebaseInteractive(APlan.Onto, Steps, AConflicts, AStopped);
+    if not Result then
+    begin
+      AError := ARepo.Error;
+      { The rebase never started (its files could not be written, or
+        git refused to begin, a pre-rebase hook or the autostash): the
+        fixup commits are taken back as for a failed commit. One that
+        ran and stopped is left to the Commit section. }
+      if not AConflicts and not AStopped then
+        Rebasing := (ARepo.Operation <> '') or (ARepo.CommitId('HEAD') <> LastFixup);
+      Exit;
     end;
   finally
-    Paths.Free;
-  end;
-  if ACommits = 0 then
-  begin
-    AError := rsAbsorbNothingChosen;
-    Exit;
-  end;
-  if not ARepo.RebaseSteps(APlan.Onto, Steps, Merges) then
-  begin
-    AError := ARepo.Error;
-    Exit;
-  end;
-  AutosquashSteps(Steps);
-  if not CheckRebaseSteps(Steps, AError) then
-    Exit;
-  Result := ARepo.RebaseInteractive(APlan.Onto, Steps, AConflicts, AStopped);
-  if not Result then
-  begin
-    AError := ARepo.Error;
-    Exit;
+    if not Rebasing and (ACommits > 0) and UndoCommits then
+      ACommits := 0;
+    Committed.Free;
   end;
   { --autostash puts the rest back after the rebase, and a clash there
     leaves files in conflict with git's exit code still 0. }

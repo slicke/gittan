@@ -60,6 +60,9 @@ type
     FDragArea: NSView;
     FCaptions, FHints: array of string;
     FMarks: array of boolean;
+    { The tabs an extension added (the forge view's): a puzzle piece
+      before the name. }
+    FExts: array of boolean;
     FActive: integer;
     { The tabs are a view's own (the forge view's): no cross, no plus. }
     FFixed: boolean;
@@ -115,10 +118,11 @@ type
     destructor Destroy; override;
     {** The tabs, left to right: ACaptions are their names, AHints their
       tooltips (the paths), AMarks those with news (a dot before the
-      name), AActive the one shown; AFixed when they are a view's own,
+      name), AExts those an extension added (a puzzle piece before it,
+      gittan.puzzle), AActive the one shown; AFixed when they are a view's own,
       which cannot be closed or added to: no cross and no plus. }
     procedure SetTabs(const ACaptions, AHints: array of string;
-      const AMarks: array of boolean; AActive: integer; AFixed: boolean = False);
+      const AMarks, AExts: array of boolean; AActive: integer; AFixed: boolean = False);
     {** The banner at the right end: shown while AVisible (there is a
       forge), in the accent while AShown (the forge view is shown),
       AHint its tooltip (the forge's name, with the login when it is
@@ -149,7 +153,7 @@ type
 implementation
 
 uses
-  SysUtils, Math, cocoa_extra;
+  SysUtils, Math, cocoa_extra, gittan.puzzle;
 
 type
   NSColorSystemBlue = objccategory external (NSColor)
@@ -258,6 +262,30 @@ var
 begin
   C := NSColor.labelColor.colorUsingColorSpace(NSColorSpace.sRGBColorSpace);
   Result := (C <> nil) and (C.redComponent > 0.5);
+end;
+
+const
+  { The side of the puzzle piece before an extension's tab. }
+  PuzzleSize = 12;
+
+{ The puzzle piece (gittan.puzzle's parts) at X, Y of the flipped strip
+  in AColor, as one path so a color with alpha is not darker where the
+  parts meet. }
+procedure DrawPuzzle(X, Y: double; AColor: NSColor);
+var
+  Body, KnobTop, KnobRight: TPuzzleRect;
+  Radius: double;
+  Path: NSBezierPath;
+begin
+  PuzzleParts(PuzzleSize, Body, KnobTop, KnobRight, Radius);
+  Path := NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius(
+    NSMakeRect(X + Body.X, Y + Body.Y, Body.W, Body.H), Radius, Radius);
+  Path.appendBezierPathWithOvalInRect(NSMakeRect(X + KnobTop.X, Y + KnobTop.Y, KnobTop.W, KnobTop.H));
+  Path.appendBezierPathWithOvalInRect(NSMakeRect(X + KnobRight.X, Y + KnobRight.Y, KnobRight.W,
+    KnobRight.H));
+  Path.setWindingRule(NSNonZeroWindingRule);
+  AColor.setFill;
+  Path.fill;
 end;
 
 procedure StrokeLine(X1, Y1, X2, Y2: double; AColor: NSColor; AWidth: double);
@@ -705,7 +733,7 @@ begin
 end;
 
 procedure TGittanToolbar.SetTabs(const ACaptions, AHints: array of string;
-  const AMarks: array of boolean; AActive: integer; AFixed: boolean);
+  const AMarks, AExts: array of boolean; AActive: integer; AFixed: boolean);
 var
   i: integer;
 begin
@@ -713,10 +741,12 @@ begin
   SetLength(FCaptions, Length(ACaptions));
   SetLength(FHints, Length(ACaptions));
   SetLength(FMarks, Length(ACaptions));
+  SetLength(FExts, Length(ACaptions));
   for i := 0 to High(ACaptions) do
   begin
     FCaptions[i] := ACaptions[i];
     FMarks[i] := (i <= High(AMarks)) and AMarks[i];
+    FExts[i] := (i <= High(AExts)) and AExts[i];
     if i <= High(AHints) then
       FHints[i] := AHints[i]
     else
@@ -936,6 +966,12 @@ begin
           R.origin.y + R.size.height / 2 - 3, 6, 6)).fill;
         T.origin.x := T.origin.x + 11;
         T.size.width := T.size.width - 11;
+      end;
+      if FExts[i] then
+      begin
+        DrawPuzzle(T.origin.x, R.origin.y + (R.size.height - PuzzleSize) / 2, Text);
+        T.origin.x := T.origin.x + PuzzleSize + 5;
+        T.size.width := T.size.width - PuzzleSize - 5;
       end;
       NSStr(FCaptions[i]).drawInRect_withAttributes(T, Attrs);
       if not FFixed and (Shown or (i = FHot)) then

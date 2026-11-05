@@ -30,6 +30,9 @@ type
     Requested, Granted: TExtPermSet;
     {** @repos: the repositories it runs for, every one when empty. }
     Repos: TStringArray;
+    {** @forges: the forges it runs for, by name in lower case, every
+      one when empty. }
+    Forges: TStringArray;
     {** On in the settings. }
     Enabled: boolean;
     {** Has a context in the engine now. }
@@ -80,7 +83,7 @@ type
 implementation
 
 uses
-  gittan.ext.host, gittan.ext.grant, gittan.ext.modules, gittan.textfile;
+  gittan.ext.host, gittan.ext.grant, gittan.ext.modules, gittan.textfile, gittan.forge;
 
 resourcestring
   rsExtReadFailed = 'The extension file could not be read';
@@ -91,6 +94,7 @@ resourcestring
   rsExtChangedWhileAsked = 'The file or a module beside it changed while Gittan asked; reload the extensions to be asked about what is there now';
   rsExtOff = 'Turned off';
   rsExtNoEngine = 'The extension engine could not be started';
+  rsExtUnknownForge = 'Unknown forge in @forges: %s (Gittan knows %s)';
 
 constructor TGittanExtLoader.Create(ASettings: TGittanSettings);
 begin
@@ -206,6 +210,38 @@ begin
 end;
 
 
+{ A name of @forges that no registered forge has makes the manifest
+  invalid, so a typo does not leave the extension out everywhere
+  unseen. }
+procedure CheckForges(var AManifest: TExtManifest);
+var
+  Name, Known: string;
+  Forge: TGittanForgeClass;
+  Found: boolean;
+begin
+  Known := '';
+  for Forge in RegisteredForges do
+  begin
+    if Known <> '' then
+      Known := Known + ', ';
+    Known := Known + Forge.Name;
+  end;
+  if Known = '' then
+    Known := 'none';
+  for Name in AManifest.Forges do
+  begin
+    Found := False;
+    for Forge in RegisteredForges do
+      Found := Found or (LowerCase(Forge.Name) = Name);
+    if Found then
+      Continue;
+    AManifest.IsValid := False;
+    if AManifest.ErrorMessage <> '' then
+      AManifest.ErrorMessage := AManifest.ErrorMessage + sLineBreak;
+    AManifest.ErrorMessage := AManifest.ErrorMessage + Format(rsExtUnknownForge, [Name, Known]);
+  end;
+end;
+
 procedure TGittanExtLoader.LoadOne(const AFileName: string; ASeen: TStrings);
 var
   Inf: TGittanExtInfo;
@@ -247,6 +283,8 @@ begin
     Inf.License := Manifest.License;
     Inf.Requested := Manifest.Requested;
     Inf.Repos := Manifest.Repos;
+    Inf.Forges := Manifest.Forges;
+    CheckForges(Manifest);
     { The modules in the subfolders run under this file's grant, so an
       edit of one asks again as an edit of the file does. }
     Inf.Hash := GrantHash(string(Source), FModulesDigest);
@@ -321,6 +359,7 @@ begin
     { ExtInScope reads it from the context: without it every repository
       is in scope. }
     Ext^.Repos := Inf.Repos;
+    Ext^.Forges := Inf.Forges;
     if Assigned(FOnProvision) then
     begin
       Engine.BeginRegistration(Ext);

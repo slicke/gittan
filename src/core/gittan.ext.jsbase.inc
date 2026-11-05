@@ -821,9 +821,93 @@ begin
   if (argc < 1) or (eng = nil) then
     Exit;
   if eng.Registry.RemoveCommand(eng.ExtensionIdForContext(ctx),
-    string(ctx^.ToUtf8(argv^[0]))) then
+    string(ctx^.ToUtf8(argv^[0])), [cwMenu]) then
   begin
     ExtHost.CommandsChanged;
     res^ := JS_TRUE;
   end;
+end;
+
+{** Registers a tab of the forge view (magic 0) or an operation of the
+    Batch tab (magic 1): id, title, description and the function the
+    shim made, which answers through _deliver. }
+procedure RegisterKind(res: PJSValue; ctx: JSContext; argc: integer; argv: PJSValues;
+  AWhere: TGittanExtCommandWhere; const AWho: string);
+var
+  eng: TGittanExtEngine;
+begin
+  res^ := JS_UNDEFINED;
+  eng := TGittanExtEngine(JS_GetContextOpaque(ctx));
+  if (argc < 4) or not JS_IsFunction(ctx, argv^[3]) then
+  begin
+    res^ := JS_ThrowError(ctx, RawUtf8(AWho + ': an id, a title and a function are expected'));
+    Exit;
+  end;
+  if eng = nil then
+    Exit;
+  eng.Registry.AddCommand(eng.ExtensionIdForContext(ctx), string(ctx^.ToUtf8(argv^[0])),
+    string(ctx^.ToUtf8(argv^[1])), [AWhere], ctx, JS_DupValue(ctx, argv^[3]),
+    string(ctx^.ToUtf8(argv^[2])));
+  ExtHost.CommandsChanged;
+  res^ := JS_TRUE;
+end;
+
+procedure UnregisterKind(res: PJSValue; ctx: JSContext; argc: integer; argv: PJSValues;
+  AWhere: TGittanExtCommandWhere);
+var
+  eng: TGittanExtEngine;
+begin
+  res^ := JS_FALSE;
+  eng := TGittanExtEngine(JS_GetContextOpaque(ctx));
+  if (argc < 1) or (eng = nil) then
+    Exit;
+  if eng.Registry.RemoveCommand(eng.ExtensionIdForContext(ctx),
+    string(ctx^.ToUtf8(argv^[0])), [AWhere]) then
+  begin
+    ExtHost.CommandsChanged;
+    res^ := JS_TRUE;
+  end;
+end;
+
+{** Gittan.registerForgeTab(id, title, description, fn), what
+    Gittan.forgeTabs.register calls. }
+procedure JSForgeTabRegister(res: PJSValue; ctx: JSContext; this_val: PJSValue;
+argc: integer; argv: PJSValues; magic: integer);
+begin
+  RegisterKind(res, ctx, argc, argv, cwForgeTab, 'Gittan.forgeTabs.register');
+end;
+
+procedure JSForgeTabUnregister(res: PJSValue; ctx: JSContext; this_val: PJSValue;
+argc: integer; argv: PJSValues; magic: integer);
+begin
+  UnregisterKind(res, ctx, argc, argv, cwForgeTab);
+end;
+
+{** Gittan.registerBatch(id, title, description, fn), what
+    Gittan.batch.register calls. }
+procedure JSBatchRegister(res: PJSValue; ctx: JSContext; this_val: PJSValue;
+argc: integer; argv: PJSValues; magic: integer);
+begin
+  RegisterKind(res, ctx, argc, argv, cwBatch, 'Gittan.batch.register');
+end;
+
+procedure JSBatchUnregister(res: PJSValue; ctx: JSContext; this_val: PJSValue;
+argc: integer; argv: PJSValues; magic: integer);
+begin
+  UnregisterKind(res, ctx, argc, argv, cwBatch);
+end;
+
+{** _deliver(seq, json): what a tab's or an operation's function gave
+    for the request seq, {value} or {error}, to the window. }
+procedure JSDeliver(res: PJSValue; ctx: JSContext; this_val: PJSValue;
+argc: integer; argv: PJSValues; magic: integer);
+var
+  eng: TGittanExtEngine;
+  seq: longint;
+begin
+  res^ := JS_UNDEFINED;
+  eng := TGittanExtEngine(JS_GetContextOpaque(ctx));
+  if (argc < 2) or (eng = nil) or (JS_ToInt32(ctx, @seq, argv^[0].Raw) <> 0) then
+    Exit;
+  ExtHost.Deliver(seq, eng.ExtensionIdForContext(ctx), string(ctx^.ToUtf8(argv^[1])));
 end;

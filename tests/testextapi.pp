@@ -55,6 +55,7 @@ type
     procedure TestSettings;
     procedure TestPermissionsShape;
     procedure TestUiNatives;
+    procedure TestForge;
   end;
 
 implementation
@@ -63,7 +64,7 @@ uses
   {$IFDEF UNIX}BaseUnix,{$ENDIF} testhelpers;
 
 const
-  AllPerms: TExtPermSet = [epData, epUI, epTimers, epNet, epExec, epSettings];
+  AllPerms: TExtPermSet = [epData, epUI, epTimers, epNet, epExec, epSettings, epForge];
 
 { TRepoFakeHost }
 
@@ -474,7 +475,7 @@ var
 begin
   Full := Load('full', '', AllPerms);
   Bare := Load('bare', '', PermBaseline);
-  AssertEquals('all listed', 'data,ui,timers,net,exec,settings',
+  AssertEquals('all listed', 'data,ui,timers,net,exec,settings,forge',
     EvalIn(Full^.Ctx, 'Gittan.api.permissions.join(",")'));
   AssertEquals('id', 'full', EvalIn(Full^.Ctx, 'Gittan.api.extensionId'));
   AssertEquals('git there', 'object', EvalIn(Full^.Ctx, 'typeof Gittan.git'));
@@ -508,6 +509,68 @@ begin
   AssertEquals('cleared', 'ui', FHost.Cleared);
 end;
 
+{ Gittan.forge and Gittan.forges.gh: only with forge; the forge of the
+  repository by its remotes, of the forge view while it is shown, or
+  the one named; the tool run is the forge's, here git in gh's place
+  so no test runs gh, and gh.run refuses where the forge is not
+  GitHub. }
+procedure TExtApiTest.TestForge;
+var
+  Bare, Info: PExtContextInfo;
+begin
+  Bare := Load('noforge', '', PermBaseline + [epExec]);
+  AssertEquals('no forge without it', 'undefined', EvalIn(Bare^.Ctx, 'typeof Gittan.forge'));
+  AssertEquals('nor the forges', 'undefined', EvalIn(Bare^.Ctx, 'typeof Gittan.forges'));
+  FSettings.SetForgeCliPath('GitHub', GitExe);
+  Info := Load('forge', 'Gittan.forges.gh.run(["--version"]).then(function (r) { globalThis.local = "ran"; },' +
+    'function (e) { globalThis.local = String(e.message); });', PermBaseline + [epForge]);
+  AssertEquals('no exec needed', 'undefined', EvalIn(Info^.Ctx, 'typeof Gittan.exec'));
+  AssertEquals('no forge for a repository without a remote', 'null',
+    EvalIn(Info^.Ctx, 'JSON.stringify(Gittan.forge.info())'));
+  WaitFor(Info^.Ctx, 'globalThis.local');
+  AssertEquals('gh refused there', 'Gittan.forges.gh.run: here is on no forge, not on GitHub',
+    EvalIn(Info^.Ctx, 'globalThis.local'));
+  Git(['remote', 'add', 'origin', 'https://github.com/slicke/gittan.git']);
+  AssertEquals('on GitHub now', 'GitHub:gh:true',
+    EvalIn(Info^.Ctx, 'var i = Gittan.forge.info(); i.name + ":" + i.cli + ":" + i.ready'));
+  { git stands in for gh: "status" is a command of both, and git's
+    names the branch only in a repository. }
+  EvalIn(Info^.Ctx, 'Gittan.forges.gh.run(["status"]).then(function (r) {' +
+    'globalThis.inRepo = String(r.stdout.indexOf("branch") >= 0); }, function (e) { globalThis.inRepo = "rejected:" + e; });' +
+    'Gittan.forge.cli(["--version"]).then(function (r) { globalThis.ver = "ran"; },' +
+    'function (e) { globalThis.ver = String((e && e.message) || e); });' +
+    'Gittan.forge.cli(["alias", "set", "--shell", "x", "echo"]).then(function (r) { globalThis.alias = "ran"; },' +
+    'function (e) { globalThis.alias = String((e && e.message) || e); });');
+  WaitFor(Info^.Ctx, 'globalThis.inRepo && globalThis.ver && globalThis.alias');
+  AssertEquals('in the repository', 'true', EvalIn(Info^.Ctx, 'globalThis.inRepo'));
+  AssertEquals('no command gh does not open', 'Gittan.forge.cli: gh --version is not open to extensions',
+    EvalIn(Info^.Ctx, 'globalThis.ver'));
+  AssertEquals('no alias', 'Gittan.forge.cli: gh alias is not open to extensions',
+    EvalIn(Info^.Ctx, 'globalThis.alias'));
+  FHost.ViewForge := 'GitHub';
+  FHost.Root := '';
+  AssertEquals('the forge view''s', 'GitHub', EvalIn(Info^.Ctx, 'Gittan.forge.info().name'));
+  AssertEquals('one named', 'GitHub', EvalIn(Info^.Ctx, 'Gittan.forge.info({forge: "github"}).name'));
+  { A folder that is gone is refused, not swapped for the home folder;
+    a saved tool that is gone is not ready. }
+  EvalIn(Info^.Ctx, 'Gittan.forge.cli(["status"], {forge: "GitHub", repo: "/no/such/folder"}).then(' +
+    'function (r) { globalThis.gone = "ran"; }, function (e) { globalThis.gone = String((e && e.message) || e); });');
+  WaitFor(Info^.Ctx, 'globalThis.gone');
+  AssertEquals('no folder', 'Gittan.forge.cli: /no/such/folder is not a folder',
+    EvalIn(Info^.Ctx, 'globalThis.gone'));
+  FSettings.SetForgeCliPath('GitHub', '/no/such/gh');
+  AssertEquals('a tool that is gone', 'false:/no/such/gh was not found',
+    EvalIn(Info^.Ctx, 'var i = Gittan.forge.info(); i.ready + ":" + i.reason'));
+  EvalIn(Info^.Ctx, 'Gittan.forge.cli(["status"]).then(function (r) { globalThis.nogh = "ran"; },' +
+    'function (e) { globalThis.nogh = String((e && e.message) || e); });');
+  WaitFor(Info^.Ctx, 'globalThis.nogh');
+  AssertEquals('rejected', 'Gittan.forge.cli: /no/such/gh was not found',
+    EvalIn(Info^.Ctx, 'globalThis.nogh'));
+  FSettings.HostingEnabled := False;
+  AssertEquals('off in the settings', 'false', EvalIn(Info^.Ctx, 'String(Gittan.forge.info().ready)'));
+end;
+
 initialization
   RegisterTest(TExtApiTest);
+
 end.

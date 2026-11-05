@@ -231,6 +231,12 @@ type
     {** The commands the extensions registered changed: every frame
       builds its Extensions menu and popups again (QueueRebuildExtMenu). }
     procedure ExtensionsChanged; virtual; abstract;
+    {** The forge view's forge ("GitHub") while the view is shown, ''
+      while it is not (gittan.ext.host's ForgeViewForge). }
+    function ForgeViewForge: string; virtual; abstract;
+    {** What an extension's tab or Batch operation answered, for the
+      forge view (gittan.ext.host's Deliver). }
+    procedure ExtDeliver(ASeq: integer; const AExtId, AJson: string); virtual; abstract;
     {** The repository list (App.RepoList) changed and was saved: every
       frame's welcome view shows it again (TRepoFrame.RepoListChanged). }
     procedure RepoListChanged; virtual; abstract;
@@ -536,6 +542,8 @@ type
     FCommitHeader: TGittanSectionHeader;
     { Whether there is nothing to commit, and whether the section folded
       itself for that (umain.commit.inc, UpdateCommitState). }
+    { FCommitIdle: nothing to commit and nothing under way, as the
+      Commit section last saw it, which folds it as it turns true. }
     FCommitIdle, FCommitAutoFolded: boolean;
     FCommitMemo: TMemo;
     FCommitAmend: TCheckBox;
@@ -1097,6 +1105,9 @@ type
     FCodeRanges, FOldRanges: TGittanCodeRanges;
     FRangesValid, FBuildingView: boolean;
     FGapTextRounds: integer;
+    { The gap rows' text is to be written from the message loop
+      (GapTextsAsync). }
+    FGapTextQueued: boolean;
     { Scrolling on past the bottom of a file, or the top: the wheel
       delta pulled so far (positive downwards, towards the next file,
       negative upwards, towards the previous), the time of the last wheel
@@ -1476,6 +1487,7 @@ type
     function RowOfLine(ALine, AFallback: integer): integer;
     function GapRowText(ACount: integer; const AHeading: string): string;
     procedure SetGapRowTexts(AEd: TATSynEdit; const ARows: TGittanRows);
+    procedure GapTextsAsync(Data: PtrInt);
     function GapHeading(AGapTo: integer): string;
     function GapRowLayout(AEd: TATSynEdit; C: TCanvas; ARow, ATop: integer;
       out ALayout: TGapRowLayout): boolean;

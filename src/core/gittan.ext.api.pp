@@ -4,12 +4,13 @@ unit gittan.ext.api;
   that read a repository, run git and other programs, make HTTP
   requests, keep an extension's own values, declare its settings and
   put cards, messages and files in the window, and the JS facade over
-  them (Gittan.repo, Gittan.git, Gittan.exec, Gittan.net, Gittan.ui,
-  Gittan.storage, Gittan.settings, Gittan.app). RegisterGittanApi puts
-  them in an extension's context as it is provisioned
-  (TGittanExtLoader.OnProvision), each gated by the permission group it
-  needs (gittan.ext.perm): data for the repository, exec for git and
-  programs, net for HTTP, ui for the window, settings for Gittan's own.
+  them (Gittan.repo, Gittan.git, Gittan.exec, Gittan.forge, Gittan.forges,
+  Gittan.net, Gittan.ui, Gittan.storage, Gittan.settings, Gittan.app).
+  RegisterGittanApi puts them in an extension's context as it is
+  provisioned (TGittanExtLoader.OnProvision), each gated by the
+  permission group it needs (gittan.ext.perm): data for the repository,
+  exec for git and programs, forge for the forge's tool, net for HTTP,
+  ui for the window, settings for Gittan's own.
   The reads run on the main thread against the window's repository
   (ExtHost.RepoFor); the extension's own values and its settings page
   are every extension's (ui); git, programs and HTTP run on the promise thread
@@ -62,6 +63,8 @@ type
       const params: JSParameters; out res: JSValueVal): boolean;
     function ExecRun(const ctx: PJSContext; const func: string;
       const params: JSParameters; out res: JSValueVal): boolean;
+    function ForgeRun(const ctx: PJSContext; const func: string;
+      const params: JSParameters; out res: JSValueVal): boolean;
     function HttpRequestCb(const ctx: PJSContext; const func: string;
       const params: JSParameters; out res: JSValueVal): boolean;
     function RepoRead(const ctx: PJSContext; const func: string;
@@ -71,6 +74,11 @@ type
 var
   Api: TGittanExtApi;
   ApiSettings: TGittanSettings;
+  { The tool of each forge as _forgeInfo found it on the main thread,
+    "name=path", for forgeRun on the promise thread, which may not read
+    the settings while the main thread changes them. }
+  ForgeCliSeen: TStringList;
+  ForgeCliLock: TRTLCriticalSection;
 
 { ---------------------------------------------------------------------------
   JSON of the repository's records
@@ -663,12 +671,137 @@ begin
       for Forge in RegisteredForges do
         if Name = Forge.Name + 'Cli' then
         begin
-          if ApiSettings.ForgeCliPath(Forge.Name) <> '' then
-            ReturnString(res, ctx, ApiSettings.ForgeCliPath(Forge.Name))
-          else
-            ReturnString(res, ctx, FindTool(Forge.CliName));
+          { The tool whether hosting is on or not, as the settings name
+            it. }
+          ReturnString(res, ctx, ForgeTool(Forge, True, ApiSettings.ForgeCliPath(Forge.Name)));
         end;
   end;
+end;
+
+{ ---------------------------------------------------------------------------
+  The forge: Gittan._forgeInfo
+  --------------------------------------------------------------------------- }
+
+{ The registered forge named AName, without regard to case; nil for
+  none. }
+function ForgeNamed(const AName: string): TGittanForgeClass;
+var
+  Forge: TGittanForgeClass;
+begin
+  for Forge in RegisteredForges do
+    if SameText(Forge.Name, AName) then
+      Exit(Forge);
+  Result := nil;
+end;
+
+{ The tool of AForge as the forge features use it (ForgeTool, as
+  App.ForgeCli): '' while hosting is off or it is not found. On the
+  main thread, as it reads the settings. }
+function ForgeCliOf(AForge: TGittanForgeClass): string;
+begin
+  if AForge = nil then
+    Result := ''
+  else if ApiSettings = nil then
+    Result := ForgeTool(AForge, True, '')
+  else
+    Result := ForgeTool(AForge, ApiSettings.HostingEnabled, ApiSettings.ForgeCliPath(AForge.Name));
+end;
+
+{ Keeps the tool _forgeInfo found for AForge, on the main thread. }
+procedure SeeForgeCli(const AForge, ACli: string);
+begin
+  EnterCriticalSection(ForgeCliLock);
+  try
+    ForgeCliSeen.Values[AForge] := ACli;
+  finally
+    LeaveCriticalSection(ForgeCliLock);
+  end;
+end;
+
+{ The tool _forgeInfo last found for AForge, on any thread; '' for none. }
+function SeenForgeCli(const AForge: string): string;
+begin
+  EnterCriticalSection(ForgeCliLock);
+  try
+    Result := ForgeCliSeen.Values[AForge];
+  finally
+    LeaveCriticalSection(ForgeCliLock);
+  end;
+end;
+
+{ The forge of the repository at ARoot, by its remotes; nil when they
+  are on none. }
+function ForgeOfRoot(const ARoot: string): TGittanForgeClass;
+begin
+  Result := nil;
+  if (ARoot <> '') and DirectoryExists(ARoot) then
+    Result := ForgeClassFor(ResolvedRemoteUrlsIn(ARoot));
+end;
+
+{ _forgeInfo(root, forge): the forge Gittan.forge acts on, the one
+  named, else the repository's at root, else the forge view's while it
+  is shown, else the shown repository's; undefined for none. Its name,
+  its tool, whether it can run (ready, else why not), the accounts its
+  tool is logged in to, and the folder the tool runs in: the
+  repository's, '' (the home folder) for the forge view's. }
+procedure JSForgeInfo(res: PJSValue; ctx: JSContext; this_val: PJSValue;
+  argc: integer; argv: PJSValues; magic: integer);
+var
+  Root, Named, Cwd, Cli: string;
+  Forge: TGittanForgeClass;
+  O, A: TJSONObject;
+  Accounts: TJSONArray;
+  Account: TGittanForgeAccount;
+begin
+  res^ := JS_UNDEFINED;
+  Root := Arg(ctx, argc, argv, 0);
+  Named := Arg(ctx, argc, argv, 1);
+  Cwd := '';
+  if Named <> '' then
+  begin
+    Forge := ForgeNamed(Named);
+    if Root <> '' then
+      Cwd := Root;
+  end
+  else if Root <> '' then
+  begin
+    Forge := ForgeOfRoot(Root);
+    Cwd := Root;
+  end
+  else if ExtHost.ForgeViewForge <> '' then
+    Forge := ForgeNamed(ExtHost.ForgeViewForge)
+  else
+  begin
+    Cwd := ExtHost.ActiveRoot;
+    Forge := ForgeOfRoot(Cwd);
+  end;
+  if Forge = nil then
+    Exit;
+  Cli := ForgeCliOf(Forge);
+  SeeForgeCli(Forge.Name, Cli);
+  O := TJSONObject.Create;
+  O.Add('name', Forge.Name);
+  O.Add('tool', Forge.CliName);
+  O.Add('ready', Cli <> '');
+  if Cli = '' then
+    if (ApiSettings <> nil) and not ApiSettings.HostingEnabled then
+      O.Add('reason', Forge.Name + ' is turned off in the settings')
+    else if (ApiSettings <> nil) and (ApiSettings.ForgeCliPath(Forge.Name) <> '') then
+      O.Add('reason', ApiSettings.ForgeCliPath(Forge.Name) + ' was not found')
+    else
+      O.Add('reason', Forge.CliName + ' was not found');
+  O.Add('cwd', Cwd);
+  Accounts := TJSONArray.Create;
+  for Account in Forge.Accounts do
+  begin
+    A := TJSONObject.Create;
+    A.Add('host', Account.Host);
+    A.Add('login', Account.Login);
+    A.Add('active', Account.Active);
+    Accounts.Add(A);
+  end;
+  O.Add('accounts', Accounts);
+  ReturnJson(res, ctx, O);
 end;
 
 { ---------------------------------------------------------------------------
@@ -912,6 +1045,56 @@ begin
   Result := True;
 end;
 
+{ forgeRun(forge, args, cwd, input) on the promise thread: the tool of
+  the forge named, as _forgeInfo found it on the main thread just
+  before (the facade asks it first), so nothing but a forge's tool
+  runs, and only with the arguments the forge allows (CliAllows), with
+  its environment (CliEnv), in cwd or the home folder. }
+function TGittanExtApi.ForgeRun(const ctx: PJSContext; const func: string;
+  const params: JSParameters; out res: JSValueVal): boolean;
+var
+  Forge: TGittanForgeClass;
+  Exe, Dir, Reason: string;
+  Args: TStringArray;
+begin
+  Result := False;
+  Forge := ForgeNamed(ParamStr(params, 0));
+  if Forge = nil then
+  begin
+    res := StringToValueVal('Gittan.forge.cli: no forge');
+    Exit;
+  end;
+  if not ArgsOf(ParamStr(params, 1), Args) then
+  begin
+    res := StringToValueVal('Gittan.forge.cli: the arguments are a list of strings');
+    Exit;
+  end;
+  if not Forge.CliAllows(Args, Reason) then
+  begin
+    res := StringToValueVal('Gittan.forge.cli: ' + Reason);
+    Exit;
+  end;
+  Exe := SeenForgeCli(Forge.Name);
+  if (Exe = '') or not FileExists(Exe) then
+  begin
+    res := StringToValueVal('Gittan.forge.cli: ' + Forge.Name +
+      ' is turned off or ' + Forge.CliName + ' was not found');
+    Exit;
+  end;
+  { The home folder only when no folder is asked for: one that is gone
+    is refused rather than the tool run elsewhere. }
+  Dir := ParamStr(params, 2);
+  if Dir = '' then
+    Dir := ExcludeTrailingPathDelimiter(GetUserDir)
+  else if not DirectoryExists(Dir) then
+  begin
+    res := StringToValueVal('Gittan.forge.cli: ' + Dir + ' is not a folder');
+    Exit;
+  end;
+  res := StringToValueVal(ToolJson(Exe, Dir, Args, [], Forge.CliEnv, ParamStr(params, 3)));
+  Result := True;
+end;
+
 { Gittan.repo.diffAsync, blameAsync and fileTextAsync on the promise
   thread: params are the state JSRepoState gave, the kind, the path and the
   ref. A repository of its own with that comparison, so nothing of the
@@ -1129,6 +1312,10 @@ const
     '  var has = function (n) { return typeof t[n] === "function"; };' + LineEnding +
     '  var J = function (s) { return s === undefined ? undefined : JSON.parse(s); };' + LineEnding +
     '  var R = function (o) { return (o && o.repo) ? String(o.repo) : t._root(); };' + LineEnding +
+    '  var A = function (a) { return JSON.stringify((a || []).map(String)); };' + LineEnding +
+    '  var FORGES = ';
+  API_FACADE_FORGES: string =
+    ';' + LineEnding +
     '  var need = function (n) { throw new Error("Gittan permission not granted: " + n + ". Add it to @perms and approve the extension."); };' + LineEnding +
     '  t.api = { version: "' + ApiVersion + '", extensionId: "';
   API_FACADE_2: string =
@@ -1169,10 +1356,29 @@ const
     '  if (typeof gitRun === "function") {' + LineEnding +
     '    var gitRunF = globalThis.gitRun, execRunF = globalThis.execRun;' + LineEnding +
     '    delete globalThis.gitRun; delete globalThis.execRun;' + LineEnding +
-    '    var A = function (a) { return JSON.stringify((a || []).map(String)); };' + LineEnding +
     '    t.git = { run: function (args, o) { return gitRunF(R(o), A(args), String((o && o.input) || "")).then(J); } };' + LineEnding +
     '    t.exec = { run: function (cmd, args, o) { return execRunF(String(cmd), A(args), String((o && o.cwd) || R(o)), String((o && o.input) || "")).then(J); } };' + LineEnding +
-    '    t.gh = { run: function (args, o) { var gh = has("_appSetting") ? t._appSetting("GitHubCli") : "gh"; return t.exec.run(gh || "gh", args, o); } };' + LineEnding +
+    '  }' + LineEnding +
+    '  if (has("_forgeInfo") && typeof forgeRun === "function") {' + LineEnding +
+    '    var forgeInfoF = t._forgeInfo, forgeRunF = globalThis.forgeRun;' + LineEnding +
+    '    delete t._forgeInfo; delete globalThis.forgeRun;' + LineEnding +
+    '    var FI = function (o) { return J(forgeInfoF.call(t, (o && o.repo) ? String(o.repo) : "", (o && o.forge) ? String(o.forge) : "")); };' + LineEnding +
+    '    var FR = function (who, want, args, o) {' + LineEnding +
+    '      var i = FI(o);' + LineEnding +
+    '      var where = (o && o.repo) ? "the repository " + o.repo : "here";' + LineEnding +
+    '      if (!i) return Promise.reject(new Error(who + ": " + where + " is on no forge" + (want ? ", not on " + want : "")));' + LineEnding +
+    '      if (want && i.name !== want) return Promise.reject(new Error(who + ": " + where + " is on " + i.name + ", not on " + want));' + LineEnding +
+    '      if (!i.ready) return Promise.reject(new Error(who + ": " + i.reason));' + LineEnding +
+    '      return forgeRunF(i.name, A(args), i.cwd, String((o && o.input) || "")).then(J);' + LineEnding +
+    '    };' + LineEnding +
+    '    t.forge = {' + LineEnding +
+    '      info: function (o) { var i = FI(o); return i ? { name: i.name, cli: i.tool, ready: i.ready, reason: i.reason, accounts: i.accounts } : null; },' + LineEnding +
+    '      cli: function (args, o) { return FR("Gittan.forge.cli", "", args, o); }' + LineEnding +
+    '    };' + LineEnding +
+    '    t.forges = {};' + LineEnding +
+    '    FORGES.forEach(function (f) {' + LineEnding +
+    '      t.forges[f.cli] = { name: f.name, run: function (args, o) { return FR("Gittan.forges." + f.cli + ".run", f.name, args, o); } };' + LineEnding +
+    '    });' + LineEnding +
     '  }' + LineEnding +
     '  if (typeof globalThis.fetch === "function") {' + LineEnding +
     '    var f = globalThis.fetch;' + LineEnding +
@@ -1205,6 +1411,24 @@ const
     '  };' + LineEnding +
     '  if (has("_appSetting")) t.app = { setting: function (n) { return t._appSetting(String(n)); } };' + LineEnding +
     '})();';
+
+{ The registered forges for the facade, [{"name", "cli"}], so each gets
+  Gittan.forges.<its tool>.run (Gittan.forges.gh for GitHub) without
+  the facade naming one. }
+function ForgesJson: string;
+var
+  Arr: TJSONArray;
+  Forge: TGittanForgeClass;
+begin
+  Arr := TJSONArray.Create;
+  try
+    for Forge in RegisteredForges do
+      Arr.Add(TJSONObject.Create(['name', Forge.Name, 'cli', Forge.CliName]));
+    Result := Arr.AsJSON;
+  finally
+    Arr.Free;
+  end;
+end;
 
 procedure RegisterGittanApi(AEngine: TGittanExtEngine; AExt: PExtContextInfo;
   ASettings: TGittanSettings);
@@ -1254,6 +1478,10 @@ begin
       window touched. }
     AddPromiseIf(epExec, 'gitRun', @Api.GitRun, 2, 3, True);
     AddPromiseIf(epExec, 'execRun', @Api.ExecRun, 2, 4, True);
+    { Taken into the facade's closure as repoRead is; it runs nothing but
+      a forge's tool anyway. }
+    addClassFunctionIf(epForge, '_forgeInfo', @JSForgeInfo, 2);
+    AddPromiseIf(epForge, 'forgeRun', @Api.ForgeRun, 2, 4, True);
     AddPromiseIf(epNet, 'httpRequest', @Api.HttpRequestCb, 4, 5, True);
     AddPromiseIf(epData, 'repoRead', @Api.RepoRead, 4, 4, True);
     if CanRegister(epNet) then
@@ -1270,11 +1498,18 @@ begin
           Perms := Perms + ', ';
         Perms := Perms + '"' + PermGroupName[g] + '"';
       end;
-    ExecuteInCurrent(API_FACADE_1 + ExtId + API_FACADE_2 + Perms + API_FACADE_3,
+    ExecuteInCurrent(API_FACADE_1 + ForgesJson + API_FACADE_FORGES + ExtId + API_FACADE_2 +
+      Perms + API_FACADE_3,
       '<gittan api>');
   end;
 end;
 
+initialization
+  InitCriticalSection(ForgeCliLock);
+  ForgeCliSeen := TStringList.Create;
+
 finalization
   FreeAndNil(Api);
+  FreeAndNil(ForgeCliSeen);
+  DoneCriticalSection(ForgeCliLock);
 end.

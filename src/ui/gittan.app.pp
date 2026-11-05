@@ -239,12 +239,10 @@ function TGittanApp.ForgeCli(AForge: TGittanForgeClass): string;
 begin
   if AForge = nil then
     AForge := ForgeClass;
-  if (AForge = nil) or not FSettings.HostingEnabled then
+  if AForge = nil then
     Result := ''
-  else if FSettings.ForgeCliPath(AForge.Name) <> '' then
-    Result := FSettings.ForgeCliPath(AForge.Name)
   else
-    Result := FindTool(AForge.CliName);
+    Result := ForgeTool(AForge, FSettings.HostingEnabled, FSettings.ForgeCliPath(AForge.Name));
 end;
 
 end.

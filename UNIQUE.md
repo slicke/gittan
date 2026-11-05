@@ -48,11 +48,15 @@ Turn it on and pick Claude Code or GitHub Copilot CLI: Gittan runs the command l
 
 ## Extensions that can say no
 
-A JavaScript file in the extensions folder adds commands to the menu and the command palette, watches commits, pushes and pulls, and can stop one with a reason shown to the user. Each file declares what it needs, Gittan asks before loading one that wants the repository, the network or programs, and `@repos` in the file limits it to the repositories it is for. A repository's own commands (`.gittan/commands.toml`, and more files in `.gittan/commands/`) become buttons and keys, once you have trusted that version of the files.
+A JavaScript file in the extensions folder adds commands to the menu and the command palette, watches commits, pushes and pulls, and can stop one with a reason shown to the user. Each file declares what it needs, Gittan asks before loading one that wants the repository, the network or programs, and `@repos` in the file limits it to the repositories it is for. An extension can also add its own tab and Batch operations to the GitHub view and run gh as you, with a permission of its own apart from running programs; `@forges github` keeps it to repositories on GitHub, so its gh never runs against a repository hosted elsewhere. A repository's own commands (`.gittan/commands.toml`, and more files in `.gittan/commands/`) become buttons and keys, once you have trusted that version of the files.
 
 ## What changed in the dependencies since the last release
 
 **View > Project** reads the project the way its own tools do, for Lazarus, Node, Rust, Go and Python, and compares it with the newest tag. Each dependency shows the version asked for and the version the lock file resolved, and what changed since the tag: added, removed, or `1.0.200 → 1.0.210`. A Lazarus project shows its build modes with a Build button each, and where every package comes from: a package file in the repository, a submodule at a tag, Lazarus itself, or nowhere, which a clone would then have to install. A vendored package that moved since the release shows as the move. Under it are the mistakes that end up in commits, such as a session file, build output or a virtual environment, each with a button that ignores it and stops tracking it. Other clients show a lock file as a long diff; I have not seen one read it as a list of packages.
+
+## Clean up many repositories at once
+
+The **Batch** tab of the GitHub view works on the repositories you pick from your repository list. **Gone branches** fetches each one and lists the local branches whose branch on the remote was deleted, each marked merged, squash-merged or not merged: a branch squash-merged on the forge is recognized as merged even though none of its commits are in main. The merged ones are picked, and one Delete clears them all. **Identity** shows who each repository commits as and whether it signs, and marks the one where the others of the same owner use another e-mail, such as a work repository committed to with a private address.
 
 ## Small things
 

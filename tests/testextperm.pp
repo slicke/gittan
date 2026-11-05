@@ -25,6 +25,8 @@ type
     procedure TestReposDirective;
     procedure TestRemoteUrlKey;
     procedure TestRepoInScope;
+    procedure TestForgesDirective;
+    procedure TestForgePermission;
   end;
 
 implementation
@@ -257,6 +259,39 @@ begin
   AssertTrue('the home folder',
     ExtRepoInScope(['~/kod/*'], IncludeTrailingPathDelimiter(GetUserDir) + 'kod/x', ''));
   AssertTrue('one of several', ExtRepoInScope(['/nope', 'github.com/slicke/gittan'], '/a', Urls));
+end;
+
+procedure TExtPermTest.TestForgesDirective;
+var
+  manifest: TExtManifest;
+begin
+  manifest := ParseExtManifest('/*' + LineEnding + '@name Forged' + LineEnding +
+    '@forges GitHub, gitlab' + LineEnding + '*/');
+  AssertTrue('valid: ' + manifest.ErrorMessage, manifest.IsValid);
+  AssertEquals('two', 2, Length(manifest.Forges));
+  AssertEquals('lower case', 'github', manifest.Forges[0]);
+  AssertEquals('second', 'gitlab', manifest.Forges[1]);
+  manifest := ParseExtManifest('/*' + LineEnding + '@name Empty' + LineEnding +
+    '@forges ,' + LineEnding + '*/');
+  AssertFalse('an empty @forges is refused', manifest.IsValid);
+  AssertTrue('every forge without it', ExtForgeInScope(nil, 'GitHub'));
+  AssertTrue('also no forge', ExtForgeInScope(nil, ''));
+  AssertTrue('its forge, any case', ExtForgeInScope(['github'], 'GitHub'));
+  AssertFalse('another forge', ExtForgeInScope(['github'], 'GitLab'));
+  AssertFalse('no forge', ExtForgeInScope(['github'], ''));
+end;
+
+procedure TExtPermTest.TestForgePermission;
+var
+  manifest: TExtManifest;
+begin
+  manifest := ParseExtManifest('/*' + LineEnding + '@name Forge' + LineEnding +
+    '@perms forge' + LineEnding + '*/');
+  AssertTrue('valid', manifest.IsValid);
+  AssertTrue('forge requested', epForge in manifest.Requested);
+  AssertFalse('not exec', epExec in manifest.Requested);
+  AssertTrue('asked for', epForge in PermPromptable);
+  AssertEquals('named', 'forge', PermSetToCSV([epForge]));
 end;
 
 initialization

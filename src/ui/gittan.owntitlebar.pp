@@ -76,6 +76,9 @@ type
     FSplitControl: TControl;
     FCaptions, FHints: array of string;
     FMarks: array of boolean;
+    { The tabs an extension added (the forge view's): a puzzle piece
+      before the name. }
+    FExts: array of boolean;
     FTabActive: integer;
     { The tabs are a view's own (the forge view's): no cross, no plus. }
     FFixed: boolean;
@@ -161,7 +164,7 @@ type
       name), AActive the one shown; AFixed when they are a view's own,
       which cannot be closed or added to: no cross and no plus. }
     procedure SetTabs(const ACaptions, AHints: array of string;
-      const AMarks: array of boolean; AActive: integer; AFixed: boolean = False);
+      const AMarks, AExts: array of boolean; AActive: integer; AFixed: boolean = False);
     {** The banner before the caption buttons: shown while AVisible
       (there is a forge), in the accent while AShown (the forge view is
       shown), AHint its hint (the forge's name, with the login when it
@@ -223,7 +226,7 @@ const
 implementation
 
 uses
-  Math, LCLIntf, LCLType, gittan.statusbar, gittan.theme;
+  Math, LCLIntf, LCLType, gittan.statusbar, gittan.theme, gittan.puzzle;
 
 const
   Pad = 8;
@@ -295,7 +298,7 @@ begin
 end;
 
 procedure TGittanOwnTitleBar.SetTabs(const ACaptions, AHints: array of string;
-  const AMarks: array of boolean; AActive: integer; AFixed: boolean);
+  const AMarks, AExts: array of boolean; AActive: integer; AFixed: boolean);
 var
   i: integer;
 begin
@@ -303,10 +306,12 @@ begin
   SetLength(FCaptions, Length(ACaptions));
   SetLength(FHints, Length(ACaptions));
   SetLength(FMarks, Length(ACaptions));
+  SetLength(FExts, Length(ACaptions));
   for i := 0 to High(ACaptions) do
   begin
     FCaptions[i] := ACaptions[i];
     FMarks[i] := (i <= High(AMarks)) and AMarks[i];
+    FExts[i] := (i <= High(AExts)) and AExts[i];
     if i <= High(AHints) then
       FHints[i] := AHints[i]
     else
@@ -961,6 +966,13 @@ begin
       Canvas.Brush.Color := FMark;
       Canvas.Pen.Color := FMark;
       Canvas.Ellipse(L, (R.Top + R.Bottom - W) div 2, L + W, (R.Top + R.Bottom + W) div 2);
+      Canvas.Brush.Style := bsClear;
+      Inc(L, W + Scale96ToForm(5));
+    end;
+    if FExts[i] then
+    begin
+      W := Scale96ToForm(11);
+      PaintPuzzle(Canvas, L, (R.Top + R.Bottom - W) div 2, W, Canvas.Font.Color);
       Canvas.Brush.Style := bsClear;
       Inc(L, W + Scale96ToForm(5));
     end;

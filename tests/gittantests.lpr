@@ -21,8 +21,8 @@ uses
   testtextfile, testrepocommands, testproject, testmanifest, testprojlazarus, testprojnode,
   testprojrust, testprojgo, testprojpython, testsha256, testai, testagentcli, testopenai, testforge,
   testlfslocks, testworktrees, testgitflow, testrepolist, testpickaxe, testnavhistory, testtimelapse, testundo, testmerge, testtabnames,
-  testextperm, testextmodules, testextquickjs, testextengine, testextloader, testextapi,
-  testissuelinks, testabsorb;
+  testextperm, testextmodules, testextquickjs, testextengine, testextloader, testextapi, testextviews,
+  testissuelinks, testabsorb, testbatch;
 
 { Every git the tests start reads this file as the user's config and no
   system config, so what the developer has set (signed commits, a hooks
@@ -31,7 +31,11 @@ uses
   settings a parent process passes in the environment (GIT_CONFIG_COUNT
   with its keys and values, and GIT_CONFIG_PARAMETERS, which git -c
   sets for what it runs) come after the config files, so they are
-  cleared too. }
+  cleared too. Git looks for a repository no higher than the folders in
+  the temporary folder (GIT_CEILING_DIRECTORIES, the temporary folder
+  itself), where every test makes its own, so a test's folder outside a
+  repository is not taken for one when the temporary folder lies in a
+  repository's work tree. }
 function IsolateGitConfig: string;
 var
   Lines: TStringList;
@@ -57,6 +61,8 @@ begin
   SetTestVariable('GIT_CONFIG_NOSYSTEM', '1');
   SetTestVariable('GIT_CONFIG_COUNT', '0');
   SetTestVariable('GIT_CONFIG_PARAMETERS', '');
+  if ExcludeTrailingPathDelimiter(GetTempDir) <> '' then
+    SetTestVariable('GIT_CEILING_DIRECTORIES', ExcludeTrailingPathDelimiter(GetTempDir));
 end;
 
 var

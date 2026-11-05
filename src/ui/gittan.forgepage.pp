@@ -95,6 +95,13 @@ type
   end;
   TGittanChipSpecs = array of TGittanChipSpec;
 
+  {** The forge view's palette, which its pages share: the background,
+    the text, the dim text, the fill under the mouse, the dividers, the
+    links, the ok, warning and error tones, and the cards' fill. }
+  TGittanForgePalette = record
+    Back, Text, Dim, Hover, Line, Link, Ok, Warn, Error, Card: TColor;
+  end;
+
 
   { TGittanForgePage }
 
@@ -284,6 +291,10 @@ type
 
 {** A section's name, for its tab. }
 function SectionCaption(ASection: integer): string;
+
+{** The palette of the dark or the light appearance: the editor's
+  background and text, and the tones the Pull Requests page has. }
+function ForgePalette(ADark: boolean): TGittanForgePalette;
 
 implementation
 
@@ -998,22 +1009,43 @@ begin
   Invalidate;
 end;
 
-procedure TGittanForgePage.SetTheme(ADark: boolean);
+function ForgePalette(ADark: boolean): TGittanForgePalette;
 begin
   if ADark then
   begin
-    SetColors(RGBToColor(30, 30, 30), RGBToColor(224, 224, 224), RGBToColor(150, 150, 150),
-      RGBToColor(50, 50, 51), RGBToColor(62, 62, 62), RGBToColor(78, 161, 255),
-      RGBToColor(63, 185, 80), RGBToColor(227, 179, 65), RGBToColor(248, 81, 73));
-    SetCardColor(RGBToColor(40, 40, 41));
+    Result.Back := RGBToColor(30, 30, 30);
+    Result.Text := RGBToColor(224, 224, 224);
+    Result.Dim := RGBToColor(150, 150, 150);
+    Result.Hover := RGBToColor(50, 50, 51);
+    Result.Line := RGBToColor(62, 62, 62);
+    Result.Link := RGBToColor(78, 161, 255);
+    Result.Ok := RGBToColor(63, 185, 80);
+    Result.Warn := RGBToColor(227, 179, 65);
+    Result.Error := RGBToColor(248, 81, 73);
+    Result.Card := RGBToColor(40, 40, 41);
   end
   else
   begin
-    SetColors(clWhite, RGBToColor(30, 30, 30), RGBToColor(110, 110, 110),
-      RGBToColor(235, 235, 235), RGBToColor(222, 222, 222), RGBToColor(0, 102, 204),
-      RGBToColor(26, 127, 55), RGBToColor(154, 103, 0), RGBToColor(207, 34, 46));
-    SetCardColor(RGBToColor(245, 245, 246));
+    Result.Back := clWhite;
+    Result.Text := RGBToColor(30, 30, 30);
+    Result.Dim := RGBToColor(110, 110, 110);
+    Result.Hover := RGBToColor(235, 235, 235);
+    Result.Line := RGBToColor(222, 222, 222);
+    Result.Link := RGBToColor(0, 102, 204);
+    Result.Ok := RGBToColor(26, 127, 55);
+    Result.Warn := RGBToColor(154, 103, 0);
+    Result.Error := RGBToColor(207, 34, 46);
+    Result.Card := RGBToColor(245, 245, 246);
   end;
+end;
+
+procedure TGittanForgePage.SetTheme(ADark: boolean);
+var
+  P: TGittanForgePalette;
+begin
+  P := ForgePalette(ADark);
+  SetColors(P.Back, P.Text, P.Dim, P.Hover, P.Line, P.Link, P.Ok, P.Warn, P.Error);
+  SetCardColor(P.Card);
 end;
 
 procedure TGittanForgePage.FitHeight(AMin: integer);

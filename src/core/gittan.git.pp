@@ -339,7 +339,9 @@ type
     {** The local branches whose upstream is gone (`[gone]` in
       `git branch -vv`): the branch it tracks was deleted on the remote
       and a fetch with --prune, or the push that deleted it, removed the
-      remote-tracking ref. }
+      remote-tracking ref. A branch that tracks a local branch
+      (branch.<name>.remote = .) is left out, as is the refname's
+      heads/ that a tag of the same name would give. }
     function GoneBranches(AList: TStrings): boolean;
     {** Switches the work tree to the branch ABranch (`git switch`): a
       local branch, or the name of a remote-tracking one without the
@@ -3346,13 +3348,14 @@ function TGittanRepo.GoneBranches(AList: TStrings): boolean;
 var
   Output, Line: string;
   Raw: TStringList;
-  Tab: integer;
+  Fields: TStringArray;
 begin
   AList.Clear;
   if FRoot = '' then
     Exit(False);
-  Result := RunGit(FRoot, ['for-each-ref', '--format=%(refname:short)%09%(upstream:track)',
-    'refs/heads'], Output);
+  { lstrip=2, not short: short gives heads/foo when a tag foo exists. }
+  Result := RunGit(FRoot, ['for-each-ref',
+    '--format=%(refname:lstrip=2)%09%(upstream)%09%(upstream:track)', 'refs/heads'], Output);
   if not Result then
     Exit;
   Raw := TStringList.Create;
@@ -3360,9 +3363,10 @@ begin
     Raw.Text := Output;
     for Line in Raw do
     begin
-      Tab := Pos(#9, Line);
-      if (Tab > 1) and (Copy(Line, Tab + 1, MaxInt) = '[gone]') then
-        AList.Add(Copy(Line, 1, Tab - 1));
+      Fields := Line.Split([#9]);
+      if (Length(Fields) = 3) and (Fields[0] <> '') and (Fields[2] = '[gone]') and
+        (Copy(Fields[1], 1, Length('refs/remotes/')) = 'refs/remotes/') then
+        AList.Add(Fields[0]);
     end;
   finally
     Raw.Free;
@@ -3537,17 +3541,27 @@ begin
   Result := RunGit(FRoot, ['mv', '--', AOld, ANew], Output);
 end;
 
+{ The paths go in a file, as a commit's do (see Commit), so a folder
+  with thousands of tracked files does not grow the command line past
+  what the system takes. }
 function TGittanRepo.RemovePaths(APaths: TStrings; AKeep: boolean): boolean;
 var
-  Output: string;
+  Output, SpecFile: string;
   Args: array of string;
 begin
   if (FRoot = '') or (APaths.Count = 0) then
     Exit(False);
-  Args := ['--literal-pathspecs', 'rm', '-q'];
-  if AKeep then
-    Args := Concat(Args, ['--cached']);
-  Result := RunGit(FRoot, Concat(Args, ['--'], APaths.ToStringArray), Output);
+  SpecFile := GetTempFileName(GetTempDir, 'gittan-rm-');
+  try
+    WriteBytes(SpecFile, NulList(APaths));
+    Args := ['--literal-pathspecs', 'rm', '-q'];
+    if AKeep then
+      Args := Concat(Args, ['--cached']);
+    Result := RunGit(FRoot, Concat(Args, ['--pathspec-from-file=' + SpecFile,
+      '--pathspec-file-nul']), Output);
+  finally
+    DeleteFile(SpecFile);
+  end;
 end;
 
 { The paths go in a file, as a commit's do (see Commit), and are read

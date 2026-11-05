@@ -318,7 +318,7 @@ begin
     else if not AContext.IsTracked('Cargo.lock') then
       AddProjectCheck(Result, ProjectCheck(rsCargoLockUntracked, 'Cargo.lock'));
   if AContext.TrackedUnder('target/', Path) then
-    AddProjectCheck(Result, ProjectCheck(rsTargetTracked, Path, 'target/'));
+    AddProjectCheck(Result, ProjectCheck(rsTargetTracked, Path, '/target/'));
 end;
 
 class function TGittanRustKind.Section(AContext: TGittanProjectContext;

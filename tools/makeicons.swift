@@ -9,7 +9,7 @@
 //
 // Writes:
 //   <outdir>/Gittan.icns         macOS, <mac.png> scaled to each size
-//   <Gittan.ico>                 Windows/Linux LCL icon, 16..256 from <pngdir>
+//   <Gittan.ico>                 Windows/Linux LCL icon, 16..256 from <pngdir> (20 and 40 for 125 %)
 //
 // macOS only (CoreGraphics, ImageIO, iconutil).
 
@@ -140,7 +140,7 @@ func bmpEntry(_ bm: Bitmap) -> Data {
   return d
 }
 
-let icoSizes = [16, 24, 32, 48, 64, 128, 256]
+let icoSizes = [16, 20, 24, 32, 40, 48, 64, 128, 256]
 var entries: [(size: Int, data: Data)] = icoSizes.map { n in
   let bm = loadSquare(pngDir + "/gittan-\(n).png", size: n)
   return (n, n >= 256 ? bm.pngData() : bmpEntry(bm))

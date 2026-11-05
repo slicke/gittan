@@ -121,6 +121,8 @@ TExtContextInfo = record
   Author: string;            // parsed from header ("(c) ..." line)
   Granted: TExtPermSet;      // baseline + user-approved promptable perms
   Repos: TStringArray;       // @repos: the repositories it runs for, all when empty
+  Forges: TStringArray;      // @forges: the forges it runs for, lower case, all when empty
+  Generation: QWord;         // a number of its own, never reused, unlike Ctx's address
 end;
 
 TExtContextList = specialize TFPGList<PExtContextInfo>;
@@ -186,6 +188,8 @@ private
     {** Active "target" context for registration helpers (addFunction/addClassFunction/AddPromise).
         nil means write to FContext (legacy/admin path). Set by BeginRegistration. }
   FCurrentRegCtx: JSContext;
+    {** The last context's Generation; each new context takes the next. }
+  FContextGeneration: QWord;
     {** Active permissions for the current registration target. Used by *If gated helpers. }
   FCurrentRegPerms: TExtPermSet;
     {** Stable extension id for the current registration target. Empty outside
@@ -568,6 +572,10 @@ public
         for the admin/template context. Unlike the display name this is
         unique per loaded extension, so it is safe to key registries on. }
   function ExtensionIdForContext(ctx: JSContext): string;
+    {** The number the context owning @code(ctx) was made with, 0 for none.
+        A context made after another has a new number even when it got
+        the freed one's address, so a caller keeps it to tell a reload. }
+  function GenerationForContext(ctx: JSContext): QWord;
     {** What the extension owning @code(ctx) was granted; [] for none. }
   function GrantedForContext(ctx: JSContext): TExtPermSet;
   function ContextInScope(ctx: JSContext; const ARoot, ARemoteUrls: string): boolean;
@@ -626,8 +634,13 @@ public
         costs. }
   function Listens(const AEvent, ARoot, ARemoteUrls: string): boolean;
     {** Whether the extension AExtId runs for the repository at ARoot with
-        the remotes ARemoteUrls (its @repos); False for one not loaded. }
+        the remotes ARemoteUrls (its @repos, and its @forges against the
+        forge the remotes are on); False for one not loaded. }
   function ExtInScope(const AExtId, ARoot, ARemoteUrls: string): boolean;
+    {** Whether the extension AExtId runs for the forge AForgeName (its
+        @forges), where no repository decides: the forge view's menu,
+        tabs and operations. False for one not loaded. }
+  function ExtForgeInScope(const AExtId, AForgeName: string): boolean;
     {** Fire for an event that cannot be cancelled. }
   procedure Emit(const AEvent, APayloadJson: string);
     {** Runs the command AKey (TGittanExtRegistry.CommandKey) with
@@ -687,6 +700,9 @@ GittanClassID: JSClassID;
 GlobalShutdownInProgress: boolean = false;
 
 implementation
+
+uses
+  gittan.forge;
 
 {$I gittan.ext.jsbase.inc }
 
@@ -1805,6 +1821,53 @@ const
     '    },' + LineEnding +
     '    unregister: function (id) { return t.unregisterCommand(String(id)); }' + LineEnding +
     '  };' + LineEnding +
+    '  var deliver = t._deliver, ANSWER_SECONDS = 300;' + LineEnding +
+    '  delete t._deliver;' + LineEnding +
+    '  var said = function (e) { try { return String((e && e.message) || e); } catch (x) { return "The extension failed"; } };' + LineEnding +
+    '  var answer = function (seq, p) {' + LineEnding +
+    '    var done = false, timer = null;' + LineEnding +
+    '    var send = function (o) {' + LineEnding +
+    '      if (done) return;' + LineEnding +
+    '      done = true;' + LineEnding +
+    '      if (timer !== null && typeof clearTimeout === "function") clearTimeout(timer);' + LineEnding +
+    '      var s;' + LineEnding +
+    '      try { s = JSON.stringify(o); } catch (e) { s = JSON.stringify({ error: "The answer is not JSON: " + said(e) }); }' + LineEnding +
+    '      deliver(Number(seq), s);' + LineEnding +
+    '    };' + LineEnding +
+    '    if (typeof setTimeout === "function")' + LineEnding +
+    '      timer = setTimeout(function () { send({ error: "The extension did not answer within " + ANSWER_SECONDS + " seconds" }); }, ANSWER_SECONDS * 1000);' + LineEnding +
+    '    Promise.resolve().then(p).then(' + LineEnding +
+    '      function (v) { send({ value: v === undefined ? null : v }); },' + LineEnding +
+    '      function (e) { send({ error: said(e) }); });' + LineEnding +
+    '  };' + LineEnding +
+    '  t.forgeTabs = {' + LineEnding +
+    '    register: function (o) {' + LineEnding +
+    '      if (!o || typeof o.render !== "function" || !o.id)' + LineEnding +
+    '        throw new TypeError("Gittan.forgeTabs.register: {id, title, render} expected");' + LineEnding +
+    '      return t.registerForgeTab(String(o.id), String(o.title || o.id), String(o.description || ""), function (ctx) {' + LineEnding +
+    '        var seq = ctx.seq; delete ctx.seq;' + LineEnding +
+    '        if (ctx.kind === "action") {' + LineEnding +
+    '          var a = ctx.action, row = ctx.row; delete ctx.kind; delete ctx.action; delete ctx.row;' + LineEnding +
+    '          answer(seq, function () { return typeof o.action === "function" ? o.action(a, row, ctx) : undefined; });' + LineEnding +
+    '        } else {' + LineEnding +
+    '          delete ctx.kind;' + LineEnding +
+    '          answer(seq, function () { return o.render(ctx); });' + LineEnding +
+    '        }' + LineEnding +
+    '      });' + LineEnding +
+    '    },' + LineEnding +
+    '    unregister: function (id) { return t.unregisterForgeTab(String(id)); }' + LineEnding +
+    '  };' + LineEnding +
+    '  t.batch = {' + LineEnding +
+    '    register: function (o) {' + LineEnding +
+    '      if (!o || typeof o.run !== "function" || !o.id)' + LineEnding +
+    '        throw new TypeError("Gittan.batch.register: {id, title, run} expected");' + LineEnding +
+    '      return t.registerBatch(String(o.id), String(o.title || o.id), String(o.description || ""), function (ctx) {' + LineEnding +
+    '        var seq = ctx.seq; delete ctx.seq;' + LineEnding +
+    '        answer(seq, function () { return o.run(ctx); });' + LineEnding +
+    '      });' + LineEnding +
+    '    },' + LineEnding +
+    '    unregister: function (id) { return t.unregisterBatch(String(id)); }' + LineEnding +
+    '  };' + LineEnding +
     '})();';
 var
   ctx: JSContext;
@@ -1826,6 +1889,13 @@ begin
   addClassFunction('off', @JSOff, 2);
   addClassFunctionIf(epUI, 'registerCommand',   @JSCommandRegister,   4);
   addClassFunctionIf(epUI, 'unregisterCommand', @JSCommandUnregister, 1);
+  // The forge view's tabs and the Batch tab's operations, whose functions
+  // answer through _deliver, which the shim takes out of reach.
+  addClassFunctionIf(epUI, 'registerForgeTab',   @JSForgeTabRegister,   4);
+  addClassFunctionIf(epUI, 'unregisterForgeTab', @JSForgeTabUnregister, 1);
+  addClassFunctionIf(epUI, 'registerBatch',      @JSBatchRegister,      4);
+  addClassFunctionIf(epUI, 'unregisterBatch',    @JSBatchUnregister,    1);
+  addClassFunctionIf(epUI, '_deliver',           @JSDeliver,            2);
   if CanRegister(epUI) then
     ExecuteInCurrent(COMMANDS_SHIM, '<commands shim>');
 
@@ -2270,6 +2340,18 @@ begin
       Exit(FExtContexts[i]^.ExtId);
 end;
 
+function TGittanExtEngine.GenerationForContext(ctx: JSContext): QWord;
+var
+  i: integer;
+begin
+  Result := 0;
+  if (ctx = nil) or (not Assigned(FExtContexts)) then
+    Exit;
+  for i := 0 to FExtContexts.Count - 1 do
+    if (FExtContexts[i] <> nil) and (FExtContexts[i]^.Ctx = ctx) then
+      Exit(FExtContexts[i]^.Generation);
+end;
+
 function TGittanExtEngine.ModuleRootForContext(ctx: JSContext): string;
 var
   i: integer;
@@ -2475,6 +2557,8 @@ begin
   Info^.DisplayName := DisplayName;
   Info^.Author := Author;
   Info^.Granted := Granted;
+  Inc(FContextGeneration);
+  Info^.Generation := FContextGeneration;
 
   // Provision engine-internal baselines (alert/confirm/prompt/select/log/timers/console)
   // into this ctx, gated by Granted. Caller will follow up with BeginRegistration to
@@ -3538,6 +3622,25 @@ begin
         Exit(FExtContexts[i]^.Granted);
 end;
 
+{ Whether the extension of AExt runs for the repository at ARoot with
+  the remotes ARemoteUrls: its @repos, then its @forges against the
+  forge of the remotes, which is looked for only when it has @forges. }
+function InScope(AExt: PExtContextInfo; const ARoot, ARemoteUrls: string): boolean;
+var
+  Forge: TGittanForgeClass;
+  Name: string;
+begin
+  Result := ExtRepoInScope(AExt^.Repos, ARoot, ARemoteUrls);
+  if not Result or (Length(AExt^.Forges) = 0) then
+    Exit;
+  Forge := ForgeClassFor(ARemoteUrls);
+  if Forge <> nil then
+    Name := Forge.Name
+  else
+    Name := '';
+  Result := ExtForgeInScope(AExt^.Forges, Name);
+end;
+
 function TGittanExtEngine.ContextInScope(ctx: JSContext;
   const ARoot, ARemoteUrls: string): boolean;
 var
@@ -3547,7 +3650,7 @@ begin
   if Assigned(FExtContexts) then
     for i := 0 to FExtContexts.Count - 1 do
       if (FExtContexts[i] <> nil) and (FExtContexts[i]^.Ctx = ctx) then
-        Exit(ExtRepoInScope(FExtContexts[i]^.Repos, ARoot, ARemoteUrls));
+        Exit(InScope(FExtContexts[i], ARoot, ARemoteUrls));
 end;
 
 function TGittanExtEngine.ExtInScope(const AExtId, ARoot, ARemoteUrls: string): boolean;
@@ -3558,7 +3661,18 @@ begin
   if Assigned(FExtContexts) then
     for i := 0 to FExtContexts.Count - 1 do
       if (FExtContexts[i] <> nil) and (FExtContexts[i]^.ExtId = AExtId) then
-        Exit(ExtRepoInScope(FExtContexts[i]^.Repos, ARoot, ARemoteUrls));
+        Exit(InScope(FExtContexts[i], ARoot, ARemoteUrls));
+end;
+
+function TGittanExtEngine.ExtForgeInScope(const AExtId, AForgeName: string): boolean;
+var
+  i: integer;
+begin
+  Result := False;
+  if Assigned(FExtContexts) then
+    for i := 0 to FExtContexts.Count - 1 do
+      if (FExtContexts[i] <> nil) and (FExtContexts[i]^.ExtId = AExtId) then
+        Exit(gittan.ext.perm.ExtForgeInScope(FExtContexts[i]^.Forges, AForgeName));
 end;
 
 function TGittanExtEngine.Listens(const AEvent, ARoot, ARemoteUrls: string): boolean;

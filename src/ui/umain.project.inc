@@ -239,12 +239,14 @@ var
   Paths: TStringList;
   i: integer;
 
-  { Whether the pattern, as the checks write them, covers APath: a
-    folder's name with "/" anywhere in the path, "*.ext" by the
-    extension, else the one path. }
+  { Whether the pattern, as the checks write them, covers APath: "/name/"
+    the folder at the root, "name/" a folder of that name at any depth,
+    "*.ext" by the extension, else the one path. }
   function Matches(const APath: string): boolean;
   begin
-    if Pattern[Length(Pattern)] = '/' then
+    if (Pattern[1] = '/') and (Pattern[Length(Pattern)] = '/') then
+      Result := Pos(Copy(Pattern, 2, MaxInt), APath) = 1
+    else if Pattern[Length(Pattern)] = '/' then
       Result := (Pos(Pattern, APath) = 1) or (Pos('/' + Pattern, APath) > 0)
     else if Pos('*.', Pattern) = 1 then
       Result := SameText(ExtractFileExt(APath), Copy(Pattern, 2, MaxInt))

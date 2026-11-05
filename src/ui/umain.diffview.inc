@@ -384,6 +384,16 @@ begin
     Result := Result + '      ' + AHeading;
 end;
 
+procedure TRepoFrame.GapTextsAsync(Data: PtrInt);
+begin
+  FGapTextQueued := False;
+  if FView <> gvChanges then
+    Exit;
+  SetGapRowTexts(Edit, FRows);
+  if FEditOld.Visible then
+    SetGapRowTexts(FEditOld, FRowsOld);
+end;
+
 { Puts the text of every gap row of ARows into AEd again, with the
   headings as they are now, so a copy or a search sees the names the
   parse found after the build. Only rows whose text differs change; the
@@ -830,12 +840,14 @@ begin
     repaint shows them. Their text takes them too, for a copy or a
     search; a lexer that reads a heading as code could name the blocks
     differently each time, so twice a build at most. }
-  if FGapTextRounds < 2 then
+  if (FGapTextRounds < 2) and not FGapTextQueued then
   begin
+    { The adapter is still in its parse-done handler, and a change of
+      the text starts a parse; the text is written from the message
+      loop, once for the names a queued call will read then. }
     Inc(FGapTextRounds);
-    SetGapRowTexts(Edit, FRows);
-    if FEditOld.Visible then
-      SetGapRowTexts(FEditOld, FRowsOld);
+    FGapTextQueued := True;
+    Application.QueueAsyncCall(@GapTextsAsync, 0);
   end;
   Edit.Invalidate;
   if FEditOld.Visible then
