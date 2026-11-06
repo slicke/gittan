@@ -72,6 +72,11 @@ function ParsePullRequest(const AJson: string; out APull: TGittanPullRequest): b
 {** Reads the array gh pr list --json prints. }
 function ParsePullRequests(const AJson: string; out APulls: TGittanPullRequests): boolean;
 
+{** How many pull requests each search of ForgeQuery's answer found in
+  all (its issueCount), of which it gives the first fifty; false when
+  the answer has no such counts. }
+function ParseForgeTotals(const AJson: string; out AMine, AReview: integer): boolean;
+
 {** Reads the answer to ForgeQuery: the login, the pull requests the
   user wrote (AMine) and those asked of them (AReview, as GitHub lists
   them, see NeedsMyReview). False when AJson is not the answer, with the
@@ -201,7 +206,7 @@ function GhEnvHost(const AHost, AToken, AEnterpriseToken: string): string;
 implementation
 
 uses
-  DateUtils, fpjson, jsonparser, gittan.git;
+  Math, DateUtils, fpjson, jsonparser, gittan.git;
 
 function GhConfigDir: string;
 begin
@@ -858,6 +863,38 @@ begin
   SetLength(APulls, n);
 end;
 
+function ParseForgeTotals(const AJson: string; out AMine, AReview: integer): boolean;
+var
+  Root, Data, Count: TJSONData;
+begin
+  AMine := 0;
+  AReview := 0;
+  Result := False;
+  try
+    Root := GetJSON(AJson);
+  except
+    Exit;
+  end;
+  try
+    if (Root = nil) or (Root.JSONType <> jtObject) then
+      Exit;
+    Data := TJSONObject(Root).Find('data');
+    if (Data = nil) or (Data.JSONType <> jtObject) then
+      Exit;
+    Count := Dig(Data, ['mine', 'issueCount']);
+    if (Count = nil) or (Count.JSONType <> jtNumber) then
+      Exit;
+    AMine := Count.AsInteger;
+    Count := Dig(Data, ['review', 'issueCount']);
+    if (Count = nil) or (Count.JSONType <> jtNumber) then
+      Exit;
+    AReview := Count.AsInteger;
+    Result := True;
+  finally
+    Root.Free;
+  end;
+end;
+
 function ParseForgeAnswer(const AJson: string; out ALogin: string;
   out AMine, AReview: TGittanForgePulls; out AError: string): boolean;
 var
@@ -1338,6 +1375,7 @@ function TGitHubAccountJob.Ask(out ALogin: string; out AMine, AReview: TGittanFo
   out AError: string): boolean;
 var
   Output, Url: string;
+  MineCount, ReviewCount: integer;
 begin
   ALogin := '';
   AMine := nil;
@@ -1346,6 +1384,10 @@ begin
   Result := RunGh(FExe, Root, ['api', 'graphql', '-f', 'query=' + ForgeQuery], Output, AError)
     and ParseForgeAnswer(Output, ALogin, Url, AMine, AReview, AError);
   AvatarUrl := Url;
+  if Result and ParseForgeTotals(Output, MineCount, ReviewCount) then
+  begin
+    SetLeft(Max(0, MineCount - Length(AMine)), Max(0, ReviewCount - Length(AReview)));
+  end;
 end;
 
 { ---------------------------------------------------------------------------

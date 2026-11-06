@@ -111,6 +111,8 @@ type
       when it fails, drops. }
     FPictureFresh, FRestored: boolean;
     FMine, FReview: TGittanForgePulls;
+    { How many more of each the forge has than it listed. }
+    FMineLeft, FReviewLeft: integer;
     FMainMenu: TMainMenu;
     FAppMenuItem: TMenuItem;
     FRecentMenu, FCloseItem: TMenuItem;
@@ -883,6 +885,8 @@ begin
   AbandonJob;
   FMine := nil;
   FReview := nil;
+  FMineLeft := 0;
+  FReviewLeft := 0;
   FLogin := '';
   FAvatarUrl := '';
   FAvatar := '';
@@ -930,6 +934,7 @@ begin
   FPage.CanAct := ActsNow;
   FPage.SetLogin(FLogin);
   FPage.SetAvatar(FAvatar);
+  FPage.SetLeft(FMineLeft, FReviewLeft);
   FPage.SetPulls(FMine, FReview, FError, FJob <> nil);
   FPage.FitHeight(FBox.ClientHeight);
   if Assigned(FOnTabsChange) then
@@ -1442,6 +1447,8 @@ begin
     end;
     FMine := Job.Mine;
     FReview := Job.Review;
+    FMineLeft := Job.MineLeft;
+    FReviewLeft := Job.ReviewLeft;
   end
   else if FRestored then
   begin

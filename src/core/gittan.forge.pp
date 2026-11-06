@@ -464,6 +464,7 @@ type
     FForgeName, FRoot, FLogin, FError: string;
     FAvatarUrl, FKnownAvatarUrl, FAvatar: string;
     FMine, FReview: TGittanForgePulls;
+    FMineLeft, FReviewLeft: integer;
     FClones: TStringList;
     FSiblings: boolean;
     function Cancelled: boolean;
@@ -478,6 +479,9 @@ type
     {** The address of the user's picture, which Ask sets when the forge
       gives one; Execute fetches it (Avatar). }
     property AvatarUrl: string read FAvatarUrl write FAvatarUrl;
+    {** Ask says how many more of each list the forge has than it gave,
+      when the forge gives a list a page at a time (MineLeft). }
+    procedure SetLeft(AMine, AReview: integer);
   public
     constructor Create(const AForgeName, ARoot: string);
     destructor Destroy; override;
@@ -500,6 +504,10 @@ type
     property Avatar: string read FAvatar;
     property Mine: TGittanForgePulls read FMine;
     property Review: TGittanForgePulls read FReview;
+    {** How many more of each list the forge has than it gave (0 when it
+      gave them all, or does not say). }
+    property MineLeft: integer read FMineLeft;
+    property ReviewLeft: integer read FReviewLeft;
     property Error: string read FError;
   end;
 
@@ -2394,6 +2402,12 @@ begin
   if (FError = '') and (Length(FMine) = 0) and (Length(FReview) = 0) and (FLogin = '') then
     FError := 'The answer of ' + FForgeName + ' had no login in it.';
   Done;
+end;
+
+procedure TGittanForgeJob.SetLeft(AMine, AReview: integer);
+begin
+  FMineLeft := AMine;
+  FReviewLeft := AReview;
 end;
 
 function TGittanForgeJob.Cancelled: boolean;

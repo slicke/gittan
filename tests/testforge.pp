@@ -204,7 +204,18 @@ procedure TForgeTest.TestParseErrors;
 var
   Login, Error, Url: string;
   MinePulls, ReviewPulls: TGittanForgePulls;
+  MineCount, ReviewCount: integer;
 begin
+  { The searches' totals, of which the answer gives the first fifty. }
+  AssertTrue(ParseForgeTotals(Answer, MineCount, ReviewCount));
+  AssertEquals(1, MineCount);
+  AssertEquals(2, ReviewCount);
+  AssertTrue(ParseForgeTotals('{"data":{"mine":{"issueCount":73,"nodes":[]},' +
+    '"review":{"issueCount":0,"nodes":[]}}}', MineCount, ReviewCount));
+  AssertEquals(73, MineCount);
+  AssertFalse('no counts', ParseForgeTotals('{"data":{"viewer":{"login":"x"}}}', MineCount,
+    ReviewCount));
+  AssertFalse(ParseForgeTotals('not json', MineCount, ReviewCount));
   AssertFalse(ParseForgeAnswer('', Login, MinePulls, ReviewPulls, Error));
   AssertFalse(ParseForgeAnswer('not json', Login, MinePulls, ReviewPulls, Error));
   AssertFalse(ParseForgeAnswer('[]', Login, MinePulls, ReviewPulls, Error));

@@ -125,6 +125,8 @@ type
   private
     FForge, FLogin, FError, FOpenRoot: string;
     FMine, FReview: TGittanForgePulls;
+    { How many more of each list the forge has than it gave. }
+    FMineLeft, FReviewLeft: integer;
     { The forge's filters, the groups of the section shown, and the
       presets, the forge's then the user's own; the filters on of each
       section as their keys; the checks ignored by name; and the lists
@@ -252,6 +254,10 @@ type
       it is being asked now. }
     procedure SetPulls(const AMine, AReview: TGittanForgePulls; const AError: string;
       ALoading: boolean);
+    {** How many more of the user's own and of those waiting for their
+      review the forge has than it listed (it gives the last changed
+      fifty), said under the section's heading; 0 for none. }
+    procedure SetLeft(AMine, AReview: integer);
     {** Forgets that the forge answered (another forge or account), so
       an empty section says nothing until the new one has. }
     procedure ForgetAnswer;
@@ -347,6 +353,9 @@ resourcestring
   rsSomeOpen = '%d of %d open';
   rsToReview = '%d to review';
   rsAllChip = 'All';
+  { Under a section's heading when the forge has more than it listed:
+    how many, and the forge. }
+  rsMoreOnForge = 'These are the last changed; %d more are on %s, not listed here.';
   rsFilterChip = 'Filter';
   rsSavePresetChip = 'Save as preset…';
   rsDeletePreset = 'Delete Preset “%s”';
@@ -503,6 +512,16 @@ begin
   if FOpenRoot = ARoot then
     Exit;
   FOpenRoot := ARoot;
+  Layout;
+  Invalidate;
+end;
+
+procedure TGittanForgePage.SetLeft(AMine, AReview: integer);
+begin
+  if (FMineLeft = AMine) and (FReviewLeft = AReview) then
+    Exit;
+  FMineLeft := AMine;
+  FReviewLeft := AReview;
   Layout;
   Invalidate;
 end;
@@ -1838,7 +1857,7 @@ procedure TGittanForgePage.PaintSection(var Y: integer; const ATitle: string;
   ALinkPrefix: string; AEmptyCheck: boolean; ALeft, ARight: integer);
 var
   Detail: string;
-  i: integer;
+  i, NotListed: integer;
 begin
   if ATotal > Length(APulls) then
     Detail := Format(rsSomeOpen, [Length(APulls), ATotal])
@@ -1849,6 +1868,16 @@ begin
   else
     Detail := '';
   PaintHeading(Y, ATitle, Detail, ATotal > 0, ALeft, ARight);
+  { The forge listed the last changed of more than it gives. }
+  if CurSection = fsReview then
+    NotListed := FReviewLeft
+  else
+    NotListed := FMineLeft;
+  if NotListed > 0 then
+  begin
+    PaintNote(Y, Format(rsMoreOnForge, [NotListed, FForge]), FWarn, ALeft, ARight);
+    Inc(Y, Px(Gap));
+  end;
   if Length(APulls) = 0 then
   begin
     if ATotal > 0 then
