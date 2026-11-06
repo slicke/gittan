@@ -11,6 +11,7 @@
 - The cards of the GitHub view are easier to scan: the pull request glyph is red while changes are asked for or checks fail and yellow while checks run, "Waiting for you" stands out in yellow, "Asked again" takes its place rather than standing beside it, the reviewers line no longer repeats who the chip names, and the link to a local clone is a dim line rather than a blue one.
 - The filters of the GitHub view take one row: the presets, each with how many pull requests it leaves, then one Filter menu with the filters under their groups, then the order. The Filter chip names the filters on only while no preset does, so what is on is said once. Whether changes requested and failing checks need attention is set on the Hosting page of the settings rather than in the filter menus.
 - On the Batch tab the buttons that do something (Check, Scan, Delete, Run) are filled, so they no longer look like the picked operation, and repositories with the same folder name are told apart by their parent folders ("clean/trailhead", "conflict/trailhead"), in the list and on the cards.
+- In a narrow window a card's chips in the GitHub view go on a line of their own rather than cut the title to a few words.
 - What an action on a pull request in the GitHub view did shows in a banner over the page ("Merged #12"), and a failure shows GitHub's words there rather than in a dialog.
 
 ### Fixed

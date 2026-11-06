@@ -222,6 +222,7 @@ type
     procedure PaintCard(var Y: integer; const APull: TGittanForgePull; ALeft, ARight: integer;
       const ALink: string; AIndex: integer);
     function PullLine(const APull: TGittanForgePull): string;
+    function ChipsWidth(const APull: TGittanForgePull): integer;
     procedure PaintSection(var Y: integer; const ATitle: string; const APulls: TGittanForgePulls;
       ATotal: integer; const AEmptyTitle, AEmpty, ALinkPrefix: string; AEmptyCheck: boolean;
       ALeft, ARight: integer);
@@ -421,6 +422,9 @@ const
   CardRadius = 12;
   CardGap = 8;
   GlyphGap = 10;
+  { The least room a card's title keeps beside its chips; with less the
+    chips go on a line of their own. }
+  MinTitleWidth = 160;
   ChipPadX = 6;
   ChipPadY = 2;
   ChipRadius = 6;
@@ -1581,6 +1585,40 @@ begin
   FC.Brush.Style := bsClear;
 end;
 
+{ How wide the chips at the right of a card's title are, the gaps
+  between them included, as PaintCard paints them. }
+function TGittanForgePage.ChipsWidth(const APull: TGittanForgePull): integer;
+
+  procedure Add(const AText: string);
+  begin
+    if AText = '' then
+      Exit;
+    FC.Font := Font;
+    FC.Font.Size := Max(7, Font.Size - 2);
+    if Font.Size <= 0 then
+      FC.Font.Size := 9;
+    Inc(Result, FC.TextWidth(AText) + 2 * Px(ChipPadX) + Px(Gap) div 2);
+  end;
+
+var
+  Note: string;
+begin
+  Result := 0;
+  Note := PullChecksNote(APull, FIgnored);
+  if (Note = '') and (Length(APull.CheckList) > 0) then
+    Note := rsChecksIgnored;
+  Add(Note);
+  if APull.IsDraft then
+    Add(rsDraft)
+  else
+  begin
+    Add(PullReviewNote(APull, FLogin));
+    if APull.Requested and (APull.MyReview <> rvNone) and not ReviewNoteNamesAsked(APull) then
+      Add(rsAskedAgain);
+  end;
+  FC.Font := Font;
+end;
+
 function TGittanForgePage.PullLine(const APull: TGittanForgePull): string;
 var
   UtcNow: TDateTime;
@@ -1620,7 +1658,7 @@ var
   TextH, CardH, Right, X, TextX, LineY, ChipTop, First, Links: integer;
   Number, Repo, Rest, ForgeLink, CloneLink, Note, Detail, Part: string;
   Lines: integer;
-  HasClone, HasForge, HasChecksMenu, HasMore, Hot, AskedAgain: boolean;
+  HasClone, HasForge, HasChecksMenu, HasMore, Hot, AskedAgain, ChipsLine: boolean;
   Next: TGittanPullNext;
   GlyphColor, Tone: TColor;
   Checks: TGittanChecksState;
@@ -1651,6 +1689,12 @@ begin
   if Detail <> '' then
     Inc(Lines);
   if HasClone then
+    Inc(Lines);
+  { In a narrow window the chips take a line of their own under the
+    title rather than leave the title a few letters. }
+  ChipsLine := ChipsWidth(APull) > (ARight - ALeft) - 2 * Px(CardPadX) - TextH - Px(GlyphGap) -
+    Max(Px(MinTitleWidth), (ARight - ALeft) div 2);
+  if ChipsLine then
     Inc(Lines);
   CardH := 2 * Px(CardPadY) + Lines * TextH + Px(LineGap) * (Lines - 1);
   R := Rect(ALeft, Y, ARight, Y + CardH);
@@ -1692,6 +1736,8 @@ begin
   { The chips, right to left: the checks, the review, asked again. }
   Right := R.Right - Px(CardPadX);
   ChipTop := R.Top + Px(CardPadY);
+  if ChipsLine then
+    Inc(ChipTop, TextH + Px(LineGap));
   { Of the user's own a reason left out of what needs attention is dim. }
   if (CurSection = fsReview) or (arChecksFailing in FAttention) then
     Tone := FErrorColor
@@ -1762,6 +1808,8 @@ begin
   Inc(X, FC.TextWidth(Number) + Px(Gap) div 2);
   FC.Font.Style := [fsBold];
   FC.Font.Color := FText;
+  if ChipsLine then
+    Right := R.Right - Px(CardPadX);
   FC.TextOut(X, R.Top + Px(CardPadY), FitTextRight(FC, APull.Title, Max(0, Right - X)));
   FC.Font.Style := [];
 
@@ -1770,6 +1818,8 @@ begin
     before them, and before those the forge link, there to click
     whether shown or not, since the mouse on it shows it. }
   LineY := R.Top + Px(CardPadY) + TextH + Px(LineGap);
+  if ChipsLine then
+    Inc(LineY, TextH + Px(LineGap));
   Right := R.Right - Px(CardPadX);
   if HasMore then
     Right := PaintMore(Right, LineY - Px(FilterPadY), TextH + 2 * Px(FilterPadY),
