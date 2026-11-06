@@ -332,7 +332,7 @@ implementation
 
 uses
   Math, LCLIntf, LCLType, gittan.forgepage, gittan.textfit, gittan.theme, gittan.repoinfo,
-  gittan.puzzle;
+  gittan.puzzle, gittan.tabnames;
 
 resourcestring
   rsTitle = 'Batch';
@@ -613,6 +613,33 @@ begin
   Result := Length(Paths);
 end;
 
+{ Captions that two repositories share are told apart as the tabs are,
+  by as many parent folders as it takes ("clean/trailhead"); the
+  others stay as they are. }
+procedure DistinguishCaptions(const APaths: TStringArray; var ACaptions: TStringArray);
+var
+  Names: TStringArray;
+  Shared: array of boolean;
+  i, j: integer;
+begin
+  { Which are shared, before any is renamed. }
+  Shared := nil;
+  SetLength(Shared, Length(ACaptions));
+  for i := 0 to High(ACaptions) do
+    for j := 0 to High(ACaptions) do
+      if (j <> i) and (ACaptions[j] = ACaptions[i]) then
+        Shared[i] := True;
+  Names := nil;
+  for i := 0 to High(ACaptions) do
+    if Shared[i] then
+    begin
+      if Names = nil then
+        Names := DistinctNames(APaths);
+      if Names[i] <> '' then
+        ACaptions[i] := Names[i];
+    end;
+end;
+
 procedure TGittanBatchPage.ChosenRepos(out APaths, ACaptions: TStringArray);
 var
   i, n: integer;
@@ -641,6 +668,7 @@ begin
   end;
   SetLength(APaths, n);
   SetLength(ACaptions, n);
+  DistinguishCaptions(APaths, ACaptions);
 end;
 
 procedure TGittanBatchPage.ToggleRow(AIndex: integer);
@@ -1261,7 +1289,7 @@ begin
   else
     ButtonText := Format(rsScanMany, [i]);
   Inc(Y, Px(PillPadY));
-  R := PaintPill(ALeft, Y, ButtonText, ScanLink, True, (i > 0) and not Busy);
+  R := PaintButton(ALeft, Y, ButtonText, ScanLink, (i > 0) and not Busy);
   if FScanning then
   begin
     FC.Font.Color := FDim;
@@ -1315,7 +1343,7 @@ begin
     else
       ButtonText := Format(rsDeleteMany, [Picked]);
     Inc(Y, Px(PillPadY));
-    PaintPill(ALeft, Y, ButtonText, DeleteLink, True, (Picked > 0) and not Busy);
+    PaintButton(ALeft, Y, ButtonText, DeleteLink, (Picked > 0) and not Busy);
     Inc(Y, TextH + Px(PillPadY));
   end;
 end;
@@ -1566,7 +1594,7 @@ begin
   else
     ButtonText := Format(rsCheckMany, [i]);
   Inc(Y, Px(PillPadY));
-  R := PaintPill(ALeft, Y, ButtonText, CheckLink, False, (i > 0) and not ARunning);
+  R := PaintButton(ALeft, Y, ButtonText, CheckLink, (i > 0) and not ARunning);
   FC.Font.Color := FDim;
   if ARunning then
     FC.TextOut(R.Right + Px(Gap), Y, Format(rsChecking, [Min(ADone + 1, ATotal), ATotal]))
@@ -2122,7 +2150,7 @@ begin
   else
     ButtonText := Format(rsScanMany, [i]);
   Inc(Y, Px(PillPadY));
-  R := PaintPill(ALeft, Y, ButtonText, MaintScanLink, True, (i > 0) and not Busy);
+  R := PaintButton(ALeft, Y, ButtonText, MaintScanLink, (i > 0) and not Busy);
   FC.Font.Color := FDim;
   if FMaintScanning then
     FC.TextOut(R.Right + Px(Gap), Y, Format(rsScanning, [Min(FMaintDone + 1, FMaintTotal),
@@ -2169,7 +2197,7 @@ begin
     else
       ButtonText := Format(rsRunMany, [Picked]);
     Inc(Y, Px(PillPadY));
-    PaintPill(ALeft, Y, ButtonText, MaintRunLink, True, (Picked > 0) and not Busy);
+    PaintButton(ALeft, Y, ButtonText, MaintRunLink, (Picked > 0) and not Busy);
     Inc(Y, TextH + Px(PillPadY));
   end;
 end;
@@ -2464,7 +2492,7 @@ begin
   for i := 0 to High(FExtRuns) do
     if (i <> Run) and FExtRuns[i].Running then
       Other := True;
-  R := PaintPill(ALeft, Y, ButtonText, ExtRunLink, False, (n > 0) and not Running and not Other);
+  R := PaintButton(ALeft, Y, ButtonText, ExtRunLink, (n > 0) and not Running and not Other);
   FC.Font.Color := FDim;
   if Running then
     FC.TextOut(R.Right + Px(Gap), Y, Format(rsExtRunning,
