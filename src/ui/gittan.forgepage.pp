@@ -62,6 +62,14 @@ unit gittan.forgepage;
   (CanAct); and after it three dots that open the card's menu
   (OnContext), so what a right click offers is in sight. An empty
   section says so in a card of its own with a large dim glyph.
+  At the right of a section's heading a search field (FocusSearch,
+  Cmd+F in the owner's menu) keeps the cards whose number, title,
+  repository, author or branch hold every word typed (SearchPulls), on
+  top of the filters. The keys (the owner hands them over): Up and Down
+  move a ring from card to card (MoveSelection, SelectedRect for the
+  owner to scroll it into view), Return does what a click on it does
+  (PickSelected), the menu key opens its menu (ContextSelected); typing
+  in the search field rings the first card, so Return opens it.
   The head has the login's initial in a disc, the forge's name and the
   page's title with Refresh (OnRefresh) after them, a dot pulsing in
   its place while the forge is asked, and under them the login with the
@@ -78,7 +86,7 @@ unit gittan.forgepage;
 interface
 
 uses
-  Classes, SysUtils, Types, Controls, Graphics, ExtCtrls, Menus, gittan.forge,
+  Classes, SysUtils, Types, Controls, Graphics, ExtCtrls, Menus, StdCtrls, gittan.forge,
   gittan.summary, gittan.avatar;
 
 const
@@ -169,8 +177,19 @@ type
     FOnRefresh, FOnFilterChange, FOnSavePreset: TNotifyEvent;
     FOnOpenUrl: TGittanOpenUrlEvent;
     FOnContext, FOnMerge: TGittanForgeContextEvent;
+    { The search field, its words, where the heading leaves it room and
+      whether it shows; the card the keys ring (-1 for none) and where
+      each card of the section shown lies. }
+    FSearch: TEdit;
+    FSearchText: string;
+    FSearchRect: TRect;
+    FSearchShown: boolean;
+    FSel: integer;
+    FCardRects: array of TRect;
     FOnWhere: TGittanForgeWhereEvent;
     FCanAct: boolean;
+    procedure SearchChange(Sender: TObject);
+    function ShownPulls: TGittanForgePulls;
     procedure SetCanAct(AValue: boolean);
     { Where a click on APull's card goes (OnWhere; its clone, else the
       forge, when the owner does not say), and the tooltip of the link
@@ -255,6 +274,25 @@ type
       it is being asked now. }
     procedure SetPulls(const AMine, AReview: TGittanForgePulls; const AError: string;
       ALoading: boolean);
+    {** The search field takes the keys, its words selected. }
+    procedure FocusSearch;
+    {** Whether the search field has the keys. }
+    function SearchFocused: boolean;
+    {** The words searched for. }
+    property SearchText: string read FSearchText;
+    {** Empties the search field. }
+    procedure ClearSearch;
+    {** Moves the ring ADelta cards on, from the first or the last when
+      none has it; stops at the ends. }
+    procedure MoveSelection(ADelta: integer);
+    {** Where the ringed card lies, for the owner to scroll to; false
+      while none has the ring. }
+    function SelectedRect(out ARect: TRect): boolean;
+    {** Does to the ringed card what a click does; false while none has
+      the ring. }
+    function PickSelected: boolean;
+    {** Opens the ringed card's menu; false while none has the ring. }
+    function ContextSelected: boolean;
     {** How many more of the user's own and of those waiting for their
       review the forge has than it listed (it gives the last changed
       fifty), said under the section's heading; 0 for none. }
@@ -354,6 +392,8 @@ resourcestring
   rsSomeOpen = '%d of %d open';
   rsToReview = '%d to review';
   rsAllChip = 'All';
+  rsSearchHint = 'Search';
+  rsNoSearchMatch = 'Nothing here matches “%s”.';
   { Under a section's heading when the forge has more than it listed:
     how many, and the forge. }
   rsMoreOnForge = 'These are the last changed; %d more are on %s, not listed here.';
@@ -425,6 +465,8 @@ const
   { The least room a card's title keeps beside its chips; with less the
     chips go on a line of their own. }
   MinTitleWidth = 160;
+  { The search field's width at the right of a section's heading. }
+  SearchWidth = 200;
   ChipPadX = 6;
   ChipPadY = 2;
   ChipRadius = 6;
@@ -476,6 +518,12 @@ begin
   FAvatar := TGittanAvatar.Create;
   FMenu := TPopupMenu.Create(Self);
   FMenuPreset := -1;
+  FSel := -1;
+  FSearch := TEdit.Create(Self);
+  FSearch.TextHint := rsSearchHint;
+  FSearch.Visible := False;
+  FSearch.OnChange := @SearchChange;
+  FSearch.Parent := Self;
   FPulse := TTimer.Create(Self);
   FPulse.Enabled := False;
   FPulse.Interval := PulseStep;
@@ -528,6 +576,100 @@ begin
   FReviewLeft := AReview;
   Layout;
   Invalidate;
+end;
+
+procedure TGittanForgePage.SearchChange(Sender: TObject);
+begin
+  if FSearchText = FSearch.Text then
+    Exit;
+  FSearchText := FSearch.Text;
+  FHot := -1;
+  Layout;
+  { The first card found has the ring, so Return opens it. }
+  if (FSearchText <> '') and (Length(ShownPulls) > 0) then
+    FSel := 0
+  else
+    FSel := -1;
+  Invalidate;
+end;
+
+function TGittanForgePage.ShownPulls: TGittanForgePulls;
+begin
+  if CurSection = fsReview then
+    Result := FShownReview
+  else
+    Result := FShownMine;
+end;
+
+procedure TGittanForgePage.FocusSearch;
+begin
+  if not FSearch.Visible or not FSearch.CanFocus then
+    Exit;
+  FSearch.SetFocus;
+  FSearch.SelectAll;
+end;
+
+function TGittanForgePage.SearchFocused: boolean;
+begin
+  Result := FSearch.Focused;
+end;
+
+procedure TGittanForgePage.ClearSearch;
+begin
+  FSearch.Text := '';
+end;
+
+procedure TGittanForgePage.MoveSelection(ADelta: integer);
+var
+  n: integer;
+begin
+  n := Length(ShownPulls);
+  if n = 0 then
+    Exit;
+  if FSel < 0 then
+  begin
+    if ADelta > 0 then
+      FSel := 0
+    else
+      FSel := n - 1;
+  end
+  else
+    FSel := EnsureRange(FSel + ADelta, 0, n - 1);
+  Invalidate;
+end;
+
+function TGittanForgePage.SelectedRect(out ARect: TRect): boolean;
+begin
+  Result := (FSel >= 0) and (FSel <= High(FCardRects));
+  if Result then
+    ARect := FCardRects[FSel]
+  else
+    ARect := Rect(0, 0, 0, 0);
+end;
+
+function TGittanForgePage.PickSelected: boolean;
+var
+  Shown: TGittanForgePulls;
+begin
+  Shown := ShownPulls;
+  Result := (FSel >= 0) and (FSel <= High(Shown)) and Assigned(FOnPick);
+  if Result then
+    FOnPick(Self, Shown[FSel]);
+end;
+
+function TGittanForgePage.ContextSelected: boolean;
+var
+  Shown: TGittanForgePulls;
+  R: TRect;
+begin
+  Shown := ShownPulls;
+  Result := (FSel >= 0) and (FSel <= High(Shown)) and (FSel <= High(FCardRects)) and
+    Assigned(FOnContext);
+  if Result then
+  begin
+    R := FCardRects[FSel];
+    FOnContext(Self, Shown[FSel], ClientToScreen(Point(R.Left + Px(CardPadX), R.Bottom)));
+  end;
 end;
 
 procedure TGittanForgePage.ForgetAnswer;
@@ -806,6 +948,7 @@ begin
     Exit;
   FSection := AValue;
   FHot := -1;
+  FSel := -1;
   Layout;
   Invalidate;
 end;
@@ -1186,6 +1329,11 @@ begin
     Exit;
   FC := MeasureCanvas(Font);
   PaintContent;
+  { The search field where the heading left it room. }
+  FSearch.Visible := FSearchShown;
+  if FSearchShown then
+    FSearch.SetBounds(FSearchRect.Left, FSearchRect.Top + (FSearchRect.Height -
+      FSearch.Height) div 2, FSearchRect.Width, FSearch.Height);
   H := Max(FContentHeight, Constraints.MinHeight);
   if Height <> H then
     Height := H;
@@ -1397,6 +1545,12 @@ begin
   FC.Font.Style := [];
   if ADetail <> '' then
     FC.TextOut(X, Y, ADetail);
+  { The search field's room at the right, while there is something to
+    search, or words in it. }
+  FSearchShown := AChips or (FSearchText <> '');
+  if FSearchShown then
+    FSearchRect := Rect(Max(X + FC.TextWidth(ADetail) + Px(Gap), ARight - Px(SearchWidth)),
+      Y - Px(4), ARight, Y + TextH + Px(4));
   Inc(Y, TextH + Px(Gap) div 2);
   FC.Pen.Style := psSolid;
   FC.Pen.Color := FLine;
@@ -1714,6 +1868,17 @@ begin
   FC.RoundRect(R, Px(CardRadius), Px(CardRadius));
   FC.Pen.Style := psSolid;
   FC.Brush.Style := bsClear;
+  { Where it lies, and the ring of the keys. }
+  if AIndex <= High(FCardRects) then
+    FCardRects[AIndex] := R;
+  if AIndex = FSel then
+  begin
+    FC.Pen.Color := FLink;
+    FC.Pen.Width := Max(1, Px(2));
+    FC.RoundRect(R.Left + 1, R.Top + 1, R.Right - 1, R.Bottom - 1, Px(CardRadius),
+      Px(CardRadius));
+    FC.Pen.Width := 1;
+  end;
 
   { The glyph tells the card's state at the left edge, where the eye
     runs down the list: dim for a draft, in the error color while
@@ -1930,7 +2095,9 @@ begin
   end;
   if Length(APulls) = 0 then
   begin
-    if ATotal > 0 then
+    if FSearchText <> '' then
+      PaintEmpty(Y, '', Format(rsNoSearchMatch, [FSearchText]), AEmptyCheck, ALeft, ARight)
+    else if ATotal > 0 then
       PaintEmpty(Y, '', rsNoMatch, AEmptyCheck, ALeft, ARight)
     else if FAnswered and (FError = '') then
       PaintEmpty(Y, AEmptyTitle, AEmpty, AEmptyCheck, ALeft, ARight);
@@ -2012,10 +2179,14 @@ begin
 
   { The section, as its filters leave it. }
   Ctx := FilterContext(LocalTimeToUniversal(Now), FAttention, FIgnored);
-  FShownMine := SortPulls(FilterPulls(FMine, FDefs, SectionKeysOf(fsMine), Ctx), FMineOrder,
-    FAttention, FIgnored);
-  FShownReview := SortPulls(FilterPulls(FReview, FDefs, SectionKeysOf(fsReview), Ctx),
-    FReviewOrder, FAttention, FIgnored);
+  FShownMine := SortPulls(SearchPulls(FilterPulls(FMine, FDefs, SectionKeysOf(fsMine), Ctx),
+    FSearchText), FMineOrder, FAttention, FIgnored);
+  FShownReview := SortPulls(SearchPulls(FilterPulls(FReview, FDefs, SectionKeysOf(fsReview),
+    Ctx), FSearchText), FReviewOrder, FAttention, FIgnored);
+  FCardRects := nil;
+  SetLength(FCardRects, Length(ShownPulls));
+  if FSel > High(ShownPulls) then
+    FSel := High(ShownPulls);
   if CurSection = fsReview then
     PaintSection(Y, rsReviewGroup, FShownReview, Length(FReview), rsCaughtUp, rsNoReview,
       ReviewLink, True, L, R)

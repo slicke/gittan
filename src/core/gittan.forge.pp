@@ -684,6 +684,12 @@ type
     merging it. }
   TGittanPullNext = (pnNone, pnReview, pnMerge);
 
+{** The pull requests of APulls that AText finds, in their order: each
+  of its words, without regard to case, in the number ("#12" or "12"),
+  the title, the repository, the author or the head branch; all of
+  them for an empty AText. }
+function SearchPulls(const APulls: TGittanForgePulls; const AText: string): TGittanForgePulls;
+
 {** The next step for APull in ASection: one waiting for the user's
   review is reviewed; one of their own is merged once nothing Gittan
   knows of stands in its way: it is open and no draft, its checks (the
@@ -2348,6 +2354,39 @@ begin
       Result := not APull.IsDraft
     else if AAction in [plApprove, plRequestChanges] then
       Result := (AViewer = '') or not SameText(APull.Author, AViewer);
+end;
+
+function SearchPulls(const APulls: TGittanForgePulls; const AText: string): TGittanForgePulls;
+var
+  Words: TStringArray;
+  Hay, W: string;
+  i, n: integer;
+  Found: boolean;
+begin
+  Words := LowerCase(Trim(AText)).Split([' ', #9], TStringSplitOptions.ExcludeEmpty);
+  if Length(Words) = 0 then
+    Exit(Copy(APulls));
+  Result := nil;
+  SetLength(Result, Length(APulls));
+  n := 0;
+  for i := 0 to High(APulls) do
+  begin
+    Hay := LowerCase('#' + IntToStr(APulls[i].Number) + #10 + APulls[i].Title + #10 +
+      APulls[i].Repo + #10 + APulls[i].Author + #10 + APulls[i].HeadRef);
+    Found := True;
+    for W in Words do
+      if Pos(W, Hay) = 0 then
+      begin
+        Found := False;
+        Break;
+      end;
+    if Found then
+    begin
+      Result[n] := APulls[i];
+      Inc(n);
+    end;
+  end;
+  SetLength(Result, n);
 end;
 
 function PullNext(const APull: TGittanForgePull; ASection: TGittanForgeSection;

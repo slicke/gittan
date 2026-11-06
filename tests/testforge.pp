@@ -33,6 +33,7 @@ type
     procedure TestSiblingRepositories;
     procedure TestPullRequestOf;
     procedure TestPullNext;
+    procedure TestSearchPulls;
     procedure TestRemoteHost;
     procedure TestRemoteRepoPath;
     procedure TestForgeFor;
@@ -914,6 +915,37 @@ begin
   Pull.State := prMerged;
   AssertTrue('merged already', PullNext(Pull, fsMine) = pnNone);
   AssertTrue(PullNext(Pull, fsReview) = pnNone);
+end;
+
+procedure TForgeTest.TestSearchPulls;
+var
+  Pulls, Found: TGittanForgePulls;
+begin
+  Pulls := nil;
+  SetLength(Pulls, 3);
+  Pulls[0].Number := 12;
+  Pulls[0].Title := 'Offline map tiles';
+  Pulls[0].Repo := 'trailhead/trailhead';
+  Pulls[0].Author := 'maja';
+  Pulls[0].HeadRef := 'feature/offline';
+  Pulls[1].Number := 120;
+  Pulls[1].Title := 'Summit icon';
+  Pulls[1].Repo := 'trailhead/trail-icons';
+  Pulls[1].Author := 'ines';
+  Pulls[2].Number := 7;
+  Pulls[2].Title := 'Docs';
+  Pulls[2].Repo := 'maja/gpx-tools';
+  Pulls[2].Author := 'sam';
+  AssertEquals('all for nothing', 3, Length(SearchPulls(Pulls, '  ')));
+  Found := SearchPulls(Pulls, 'MAP');
+  AssertEquals(1, Length(Found));
+  AssertEquals(12, Found[0].Number);
+  AssertEquals('by author and repository', 2, Length(SearchPulls(Pulls, 'maja')));
+  AssertEquals('every word', 1, Length(SearchPulls(Pulls, 'maja gpx')));
+  AssertEquals('by number', 1, Length(SearchPulls(Pulls, '#120')));
+  AssertEquals('a number starts', 2, Length(SearchPulls(Pulls, '#12')));
+  AssertEquals('by branch', 1, Length(SearchPulls(Pulls, 'feature/')));
+  AssertEquals(0, Length(SearchPulls(Pulls, 'nothing')));
 end;
 
 procedure TForgeTest.TestRemoteRepoPath;

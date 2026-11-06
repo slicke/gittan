@@ -217,6 +217,7 @@ type
     procedure MenuRecentClick(Sender: TObject);
     procedure MenuCloseClick(Sender: TObject);
     procedure MenuRefreshClick(Sender: TObject);
+    procedure MenuFindClick(Sender: TObject);
     procedure MenuNextTabClick(Sender: TObject);
     procedure MenuPrevTabClick(Sender: TObject);
     procedure MenuCheckUpdatesClick(Sender: TObject);
@@ -324,7 +325,7 @@ type
 implementation
 
 uses
-  LCLIntf, gittan.app, gittan.theme, gittan.textfit, gittan.git, gittan.ext.engine,
+  Math, LCLIntf, gittan.app, gittan.theme, gittan.textfit, gittan.git, gittan.ext.engine,
   gittan.ext.views;
 
 resourcestring
@@ -340,6 +341,7 @@ resourcestring
   rsCloseForge = 'Close %s';
   rsView = '&View';
   rsRefresh = 'Re&fresh';
+  rsFind = '&Find...';
   rsGo = '&Go';
   rsNextTab = 'Next Tab';
   rsPrevTab = 'Previous Tab';
@@ -739,6 +741,7 @@ begin
   ViewMenu.Caption := rsView;
   FMainMenu.Items.Add(ViewMenu);
   AddItem(ViewMenu, rsRefresh, ShortCut(VK_R, [ssModifier]), @MenuRefreshClick);
+  AddItem(ViewMenu, rsFind, ShortCut(VK_F, [ssModifier]), @MenuFindClick);
 
   GoMenu := TMenuItem.Create(FMainMenu);
   GoMenu.Caption := rsGo;
@@ -920,12 +923,65 @@ begin
 end;
 
 procedure TForgeView.FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
+var
+  R: TRect;
 begin
+  { The keys of the page's cards and its search, while it is shown. }
+  if FPage.Visible and (Shift * [ssCtrl, ssAlt, ssMeta] = []) then
+    case Key of
+      VK_ESCAPE:
+        if FPage.SearchText <> '' then
+        begin
+          FPage.ClearSearch;
+          Key := 0;
+          Exit;
+        end
+        else if FPage.SearchFocused then
+        begin
+          FBox.SetFocus;
+          Key := 0;
+          Exit;
+        end;
+      VK_UP, VK_DOWN:
+      begin
+        if Key = VK_UP then
+          FPage.MoveSelection(-1)
+        else
+          FPage.MoveSelection(1);
+        { The ringed card in view. }
+        if FPage.SelectedRect(R) then
+          with FBox.VertScrollBar do
+            if R.Top < Position then
+              Position := Max(0, R.Top - Px(8))
+            else if R.Bottom > Position + FBox.ClientHeight then
+              Position := R.Bottom - FBox.ClientHeight + Px(8);
+        Key := 0;
+        Exit;
+      end;
+      VK_RETURN:
+        if FPage.PickSelected then
+        begin
+          Key := 0;
+          Exit;
+        end;
+      VK_APPS:
+        if FPage.ContextSelected then
+        begin
+          Key := 0;
+          Exit;
+        end;
+    end;
   if (Key = VK_ESCAPE) and (Shift = []) then
   begin
     Key := 0;
     FWindow.HideForgeView;
   end;
+end;
+
+procedure TForgeView.MenuFindClick(Sender: TObject);
+begin
+  if FPage.Visible then
+    FPage.FocusSearch;
 end;
 
 { What the job last read, to the page, and whether one runs. }
