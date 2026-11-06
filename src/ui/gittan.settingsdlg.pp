@@ -77,6 +77,9 @@ type
     {** Whether the forge view looks for clones beside the recent
       repositories. }
     CloneSiblings: boolean;
+    {** What makes one of the user's pull requests need attention in the
+      forge view: changes asked for, checks failing. }
+    ChangesNeedAttention, ChecksNeedAttention: boolean;
     {** Whether the AI features show, the agent they run, and each
       agent's command (empty for the one found; for the API its server,
       empty for OpenAIDefaultUrl) and model (empty for its own choice;
@@ -204,6 +207,11 @@ resourcestring
     'of your pull requests, for a repository with a remote on one of the services ' +
     'below. They run the service''s command line tool with its own login.';
   rsCloneSiblings = 'Look for clones beside the recent repositories';
+  rsAttentionHeading = 'Needs attention';
+  rsChangesAttention = 'Changes requested';
+  rsChecksAttention = 'Failing checks';
+  rsAttentionNote = 'Your pull requests with these pass the Needs attention filter of the ' +
+    'GitHub view and come first in its Needs Attention First order.';
   rsCloneSiblingsNote = 'A pull request on the page of your pull requests links to a clone of its ' +
     'repository among the recent ones. With this on, the repositories in the folders ' +
     'they are in count too.';
@@ -361,7 +369,7 @@ type
     FThemeBox: TComboBox;
     FEditorEdit, FTerminalEdit, FGitEdit, FAgentEdit, FKeyEdit, FModelEdit: TEdit;
     FGitNote, FAgentLabel, FAgentNote, FKeyLabel, FKeyNote, FModelNote: TLabel;
-    FAIBox, FSiblingsBox, FAutoFetchBox: TCheckBox;
+    FAIBox, FSiblingsBox, FAutoFetchBox, FChangesBox, FChecksBox: TCheckBox;
     { The Hosting page's switch, and the block of each registered forge
       (FForges, in their order): its tool's field and the note under it. }
     FHostingBox: TCheckBox;
@@ -717,6 +725,16 @@ begin
   FSiblingsBox.Caption := rsCloneSiblings;
   Place(FSiblingsBox, 20);
   Lbl := AddLabel(rsCloneSiblingsNote, 4);
+  Lbl.Font.Color := clGrayText;
+  Lbl.WordWrap := True;
+  AddLabel(rsAttentionHeading, 20).Font.Style := [fsBold];
+  FChangesBox := TCheckBox.Create(Self);
+  FChangesBox.Caption := rsChangesAttention;
+  Place(FChangesBox, 8);
+  FChecksBox := TCheckBox.Create(Self);
+  FChecksBox.Caption := rsChecksAttention;
+  Place(FChecksBox, 4);
+  Lbl := AddLabel(rsAttentionNote, 4);
   Lbl.Font.Color := clGrayText;
   Lbl.WordWrap := True;
 
@@ -1558,6 +1576,8 @@ begin
   for i := 0 to High(FAccountBoxes) do
     FAccountBoxes[i].Enabled := FHostingBox.Checked and (FAccountBoxes[i].Items.Count > 1);
   FSiblingsBox.Enabled := FHostingBox.Checked;
+  FChangesBox.Enabled := FHostingBox.Checked;
+  FChecksBox.Enabled := FHostingBox.Checked;
 end;
 
 { Forge AIndex's accounts under its tool: a list per host, the active
@@ -2020,6 +2040,8 @@ begin
     end;
     F.FHostingBox.Checked := AValues.HostingEnabled;
     F.FSiblingsBox.Checked := AValues.CloneSiblings;
+    F.FChangesBox.Checked := AValues.ChangesNeedAttention;
+    F.FChecksBox.Checked := AValues.ChecksNeedAttention;
     F.HostingChange(nil);
     F.FAIBox.Checked := AValues.AIEnabled;
     F.FAgent := AValues.Agent;
@@ -2061,6 +2083,8 @@ begin
       AValues.HostingEnabled := F.FHostingBox.Checked;
       AValues.Accounts := F.PickedAccounts;
       AValues.CloneSiblings := F.FSiblingsBox.Checked;
+      AValues.ChangesNeedAttention := F.FChangesBox.Checked;
+      AValues.ChecksNeedAttention := F.FChecksBox.Checked;
       AValues.AIEnabled := F.FAIBox.Checked;
       { The fields hold the picked agent's; the other's are as kept. }
       F.AgentChange(nil);

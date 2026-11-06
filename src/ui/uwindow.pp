@@ -1216,6 +1216,9 @@ begin
       Frames[i].SettingsChanged(AFont, ATheme, ATabSize, ATools);
   if FActive <> nil then
     FActive.SettingsChanged(AFont, ATheme, ATabSize, ATools);
+  { What needs attention may have changed. }
+  if FForgeView <> nil then
+    FForgeView.ReloadFilters;
   { The forge view's forge too; gone, the view keeps Batch alone. }
   if ATools and (FForgeView <> nil) then
   begin

@@ -283,6 +283,9 @@ type
       changed: the forge is found again, and what one that is gone had
       found is dropped (the window hides the view then, HasForge). }
     procedure SettingsChanged;
+    {** The settings dialog was closed with OK: the filters and what
+      needs attention as the settings have them now. }
+    procedure ReloadFilters;
     {** The active account of the forge's tool changed: what the account
       of before had found goes, and the view asks again. }
     procedure AccountChanged;
@@ -858,6 +861,12 @@ begin
   ApplyForgeState;
   if Assigned(FOnTabsChange) then
     FOnTabsChange(Self);
+end;
+
+procedure TForgeView.ReloadFilters;
+begin
+  LoadFilters;
+  FPage.FitHeight(FBox.ClientHeight);
 end;
 
 procedure TForgeView.AccountChanged;

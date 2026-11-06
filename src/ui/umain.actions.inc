@@ -511,6 +511,8 @@ begin
       V.ForgePaths[i] := App.Settings.ForgeCliPath(Forges[i].Name);
     V.HostingEnabled := App.Settings.HostingEnabled;
     V.CloneSiblings := App.Settings.CloneSiblings;
+    V.ChangesNeedAttention := App.Settings.ChangesNeedAttention;
+    V.ChecksNeedAttention := App.Settings.ChecksNeedAttention;
     V.AIEnabled := App.Settings.AIEnabled;
     V.Agent := AgentOfKey(App.Settings.AIAgent);
     V.AgentPaths[gaClaude] := App.Settings.ClaudePath;
@@ -553,6 +555,8 @@ begin
       App.Settings.EditorCommand := V.EditorCommand;
       App.Settings.TerminalCommand := V.TerminalCommand;
       App.Settings.CloneSiblings := V.CloneSiblings;
+      App.Settings.ChangesNeedAttention := V.ChangesNeedAttention;
+      App.Settings.ChecksNeedAttention := V.ChecksNeedAttention;
       App.Settings.AutoFetch := V.AutoFetch;
       App.Settings.AutoFetchMinutes := V.AutoFetchMinutes;
       App.Settings.AIEnabled := V.AIEnabled;
