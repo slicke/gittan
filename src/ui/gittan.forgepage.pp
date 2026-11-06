@@ -1621,7 +1621,7 @@ var
   TextH, CardH, Right, X, TextX, LineY, ChipTop, First, Links: integer;
   Number, Repo, Rest, ForgeLink, CloneLink, Note, Detail, Part: string;
   Lines: integer;
-  HasClone, HasForge, HasChecksMenu, HasMore, Hot: boolean;
+  HasClone, HasForge, HasChecksMenu, HasMore, Hot, AskedAgain: boolean;
   Next: TGittanPullNext;
   GlyphColor, Tone: TColor;
   Checks: TGittanChecksState;
@@ -1672,8 +1672,19 @@ begin
   FC.Pen.Style := psSolid;
   FC.Brush.Style := bsClear;
 
+  { The glyph tells the card's state at the left edge, where the eye
+    runs down the list: dim for a draft, in the error color while
+    changes are asked for or checks fail (what counts as needing
+    attention, of the user's own), in the warning color while checks
+    run, else in the ok color. }
   if APull.IsDraft then
     GlyphColor := FDim
+  else if ((APull.ReviewDecision = rdChangesRequested) and ((CurSection = fsReview) or
+    (arChangesRequested in FAttention))) or ((ChecksState(APull, FIgnored) = chkFailed) and
+    ((CurSection = fsReview) or (arChecksFailing in FAttention))) then
+    GlyphColor := FErrorColor
+  else if ChecksState(APull, FIgnored) = chkPending then
+    GlyphColor := FWarn
   else
     GlyphColor := FOk;
   PaintPullGlyph(R.Left + Px(CardPadX), R.Top + Px(CardPadY), TextH, GlyphColor);
@@ -1714,7 +1725,14 @@ begin
   else
   begin
     Note := PullReviewNote(APull, FLogin);
-
+    { Asked again after a review: said once, in the chip that would
+      say "Waiting for you". }
+    AskedAgain := APull.Requested and (APull.MyReview <> rvNone);
+    if AskedAgain and ReviewNoteNamesAsked(APull) then
+    begin
+      Note := rsAskedAgain;
+      AskedAgain := False;
+    end;
     if Note <> '' then
     begin
       case APull.ReviewDecision of
@@ -1725,13 +1743,17 @@ begin
           else
             Tone := FDim;
       else
-        Tone := FDim;
+        { What asks something of the user stands out. }
+        if APull.Requested then
+          Tone := FWarn
+        else
+          Tone := FDim;
       end;
       Right := PaintChip(Right, ChipTop, Note, Tone).Left - Px(Gap) div 2;
     end;
+    if AskedAgain then
+      Right := PaintChip(Right, ChipTop, rsAskedAgain, FWarn).Left - Px(Gap) div 2;
   end;
-  if APull.Requested and (APull.MyReview <> rvNone) then
-    Right := PaintChip(Right, ChipTop, rsAskedAgain, FWarn).Left - Px(Gap) div 2;
 
   { The number and the title. }
   X := TextX;
@@ -1802,19 +1824,23 @@ begin
     FC.TextOut(TextX, LineY, FitTextRight(FC, Detail, Max(0, Right - TextX)));
   end;
 
-  { The clone's link, under the forge's, its path cut at its start to
-    the card. }
+  { The clone's link, the last line, dim like the rest of what the card
+    tells, its path cut at its start to the card; in the link color
+    under the mouse. }
   if HasClone then
   begin
     Inc(LineY, TextH + Px(LineGap));
     Right := R.Right - Px(CardPadX);
     CloneLink := Format(rsCloneLink, [FitTextLeft(FC, ShortPath(APull.Clone),
       Max(0, Right - TextX - FC.TextWidth(Format(rsCloneLink, ['']))))]);
-    LinkR := Rect(Right - FC.TextWidth(CloneLink), LineY, Right, LineY + TextH);
+    LinkR := Rect(TextX, LineY, TextX + FC.TextWidth(CloneLink), LineY + TextH);
     AddLink(LinkR, ALink);
-    FC.Font.Color := FLink;
+    FC.Font.Color := FDim;
     if FHot = High(FLinkRects) then
+    begin
+      FC.Font.Color := FLink;
       FC.Font.Style := [fsUnderline];
+    end;
     FC.TextOut(LinkR.Left, LinkR.Top, CloneLink);
     FC.Font.Style := [];
   end;

@@ -403,7 +403,8 @@ begin
   SetLength(Pull.RequestedOf, 1);
   Pull.RequestedOf[0] := 'chef';
   AssertEquals('Waiting for chef', PullReviewNote(Pull));
-  AssertEquals('waiting for chef', PullReviewers(Pull));
+  AssertEquals('the chip names chef already', '', PullReviewers(Pull));
+  AssertTrue(ReviewNoteNamesAsked(Pull));
   AssertTrue(WaitsForReview(Pull));
   SetLength(Pull.RequestedOf, 2);
   Pull.RequestedOf[1] := 'core';
@@ -428,9 +429,14 @@ begin
   AssertEquals('Waiting for chef', PullReviewNote(Pull, 'anna'));
   SetLength(Pull.RequestedOf, 2);
 
-  { The decision wins over who is asked. }
+  { The decision wins over who is asked, and the line names them. }
   Pull.ReviewDecision := rdApproved;
   AssertEquals('Approved', PullReviewNote(Pull));
+  SetLength(Pull.RequestedOf, 1);
+  AssertFalse(ReviewNoteNamesAsked(Pull));
+  AssertEquals('anna approved · coderabbitai commented · carl requested changes · ' +
+    'waiting for chef', PullReviewers(Pull));
+  SetLength(Pull.RequestedOf, 2);
   AssertTrue(WaitsForReview(Pull));
   Pull.ReviewDecision := rdChangesRequested;
   AssertEquals('Changes requested', PullReviewNote(Pull));

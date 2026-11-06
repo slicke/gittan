@@ -313,9 +313,13 @@ function PullReviewNote(const APull: TGittanForgePull; const ALogin: string = ''
 {** The reviewers line of a card: each latest review as "anna
   approved", "bob requested changes" or "coderabbit commented", then
   "waiting for chef, team" (ALogin, the user, as "you", first), joined
-  with " · "; a dismissed review is left out. Empty when nobody has
-  reviewed and nobody is asked. }
+  with " · "; a dismissed review is left out, and so is who is asked
+  when PullReviewNote names them already (ReviewNoteNamesAsked). Empty
+  when nobody has reviewed and nobody else is to be named. }
 function PullReviewers(const APull: TGittanForgePull; const ALogin: string = ''): string;
+{** Whether PullReviewNote names the one reviewer asked ("Waiting for
+  anna"): one is asked and no review decided it. }
+function ReviewNoteNamesAsked(const APull: TGittanForgePull): boolean;
 {** Whether APull waits for someone else's review: a review is asked
   of someone and no changes are requested. }
 function WaitsForReview(const APull: TGittanForgePull): boolean;
@@ -1737,8 +1741,14 @@ begin
         rvCommented: Add(APull.Reviews[i].Login + ' commented');
       end;
   Names := RequestedNames(APull, ALogin);
-  if Names <> '' then
+  if (Names <> '') and not ReviewNoteNamesAsked(APull) then
     Add('waiting for ' + Names);
+end;
+
+function ReviewNoteNamesAsked(const APull: TGittanForgePull): boolean;
+begin
+  Result := (Length(APull.RequestedOf) = 1) and
+    not (APull.ReviewDecision in [rdApproved, rdChangesRequested]);
 end;
 
 
