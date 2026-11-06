@@ -83,6 +83,8 @@ type
       globe's place. }
     FBanner: NSView;
     FForgeVisible, FForgeShown, FBannerHot, FBannerPressed: boolean;
+    { What waits for the user in the forge view, counted in a badge. }
+    FForgeCount: integer;
     FPictureData: string;
     FPicture: NSImage;
     FTip: string;
@@ -127,9 +129,12 @@ type
       forge), in the accent while AShown (the forge view is shown),
       AHint its tooltip (the forge's name, with the login when it is
       known); APicture the bytes of the user's picture (PNG or JPEG),
-      drawn as a disc in the globe's place, '' for the globe. }
+      drawn as a disc in the globe's place, '' for the globe; ACount
+      what waits for the user there (pull requests to review), counted
+      in a badge at the globe's corner while the view is not shown, 0
+      for none. }
     procedure SetForge(AVisible, AShown: boolean; const AHint: string;
-      const APicture: string = '');
+      const APicture: string = ''; ACount: integer = 0);
     {** The chevrons: whether there is somewhere to go back (ABack) and
       forward (AForward) to, a dim chevron taking no click; ABackHint
       and AForwardHint their tooltips. }
@@ -234,6 +239,10 @@ const
   BannerNotch = 8;
   { The user's picture in the banner, a disc this wide. }
   PictureSize = 20;
+  { The badge that counts what waits in the forge view: its height (its
+    width too, up to nine) and its digits' size. }
+  BadgeSize = 13;
+  BadgeFontSize = 9;
   GlobeWidth = 40;
   { FPressed for the plus and the chevrons. }
   PlusPart = -2;
@@ -563,7 +572,7 @@ begin
 end;
 
 procedure TGittanToolbar.SetForge(AVisible, AShown: boolean; const AHint: string;
-  const APicture: string);
+  const APicture: string; ACount: integer);
 var
   Data: NSData;
 begin
@@ -571,6 +580,7 @@ begin
     MakeBanner;
   FForgeVisible := AVisible;
   FForgeShown := AShown;
+  FForgeCount := ACount;
   if APicture <> FPictureData then
   begin
     FPictureData := APicture;
@@ -639,6 +649,40 @@ var
   W, H, S, X, Y: double;
   Fill, Ink: NSColor;
   G: NSRect;
+
+  { What waits for the user, in a disc of the accent at the top right
+    corner of the globe or the picture whose top is ATop: the number up
+    to nine, "9+" in a wider one beyond; none while the view is shown,
+    where its tab has the dot. }
+  procedure DrawBadge(ATop: double);
+  var
+    Text: NSString;
+    Attrs: NSDictionary;
+    Size: NSSize;
+    B: NSRect;
+    BW: double;
+  begin
+    if FForgeShown or (FForgeCount <= 0) then
+      Exit;
+    if FForgeCount > 9 then
+      Text := NSStr('9+')
+    else
+      Text := NSStr(IntToStr(FForgeCount));
+    Attrs := NSDictionary.dictionaryWithObjectsAndKeys(
+      NSFont.boldSystemFontOfSize(BadgeFontSize), NSFontAttributeName,
+      NSColor.whiteColor, NSForegroundColorAttributeName, nil);
+    Size := Text.sizeWithAttributes(Attrs);
+    BW := BadgeSize;
+    if Size.width + 6 > BW then
+      BW := Size.width + 6;
+    B := NSMakeRect(W - BW - 1, ATop - 5, BW, BadgeSize);
+    NSColor.systemBlueColor.setFill;
+    NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius(B, BadgeSize / 2,
+      BadgeSize / 2).fill;
+    Text.drawAtPoint_withAttributes(NSMakePoint(B.origin.x + (BW - Size.width) / 2,
+      B.origin.y + (BadgeSize - Size.height) / 2), Attrs);
+  end;
+
 begin
   W := ABounds.size.width;
   H := ABounds.size.height;
@@ -692,6 +736,7 @@ begin
       NSColor.whiteColor.setStroke;
       StrokeOval(NSInsetRect(G, 0.75, 0.75), 1.5);
     end;
+    DrawBadge(Y);
     Exit;
   end;
   { The globe in the ribbon's body, above the notch: a circle, a
@@ -704,6 +749,7 @@ begin
   StrokeOval(G, 1.3);
   StrokeOval(NSMakeRect(X + S * 5 / 14, Y, S * 4 / 14, S), 1.3);
   StrokeLine(X, Y + S / 2, X + S, Y + S / 2, Ink, 1.3);
+  DrawBadge(Y);
 end;
 
 procedure TGittanToolbar.BannerDown;

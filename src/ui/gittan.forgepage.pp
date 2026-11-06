@@ -52,8 +52,17 @@ unit gittan.forgepage;
   delete it. A card fills under the mouse and a click raises OnPick
   with the pull request, as one on its clone's link does, for the
   owner to compare with it when it is the open repository's, else in
-  its clone, else to open it on the forge. An empty section says so in
-  a card of its own with a large dim glyph.
+  its clone, else to open it on the forge; which of the three it will
+  be the owner says (OnWhere), and the card's tooltip tells it. At the
+  right end of a card's second line are its buttons: the next step
+  (PullNext in gittan.forge), Review on one waiting for the user's
+  review, which does what the click does and says so when that is the
+  forge ("Review on GitHub ↗"), or Merge with a glyph for its menu
+  (OnMerge, where the owner offers the ways to merge) on one of the
+  user's own that nothing stands in the way of, while the forge acts
+  (CanAct); and after it three dots that open the card's menu
+  (OnContext), so what a right click offers is in sight. An empty
+  section says so in a card of its own with a large dim glyph.
   The head has the login's initial in a disc, the forge's name and the
   page's title with Refresh (OnRefresh) after them, a dot pulsing in
   its place while the forge is asked, and under them the login with the
@@ -85,6 +94,14 @@ type
     menu, in screen coordinates. }
   TGittanForgeContextEvent = procedure(Sender: TObject; const APull: TGittanForgePull;
     const AScreenPos: TPoint) of object;
+
+  {** Where a click on a card goes: the owner compares with the pull
+    request in a repository that is open (ptCompare), opens its local
+    clone and compares there (ptClone), or opens it on the forge
+    (ptForge). }
+  TGittanPickTarget = (ptCompare, ptClone, ptForge);
+  TGittanForgeWhereEvent = function(Sender: TObject;
+    const APull: TGittanForgePull): TGittanPickTarget of object;
 
   { A chip of a row: its text, the link a click follows, whether it is
     on (in the link color), and whether it is dim (an offer, not a
@@ -151,7 +168,18 @@ type
     FOnPick: TGittanForgePickEvent;
     FOnRefresh, FOnFilterChange, FOnSavePreset: TNotifyEvent;
     FOnOpenUrl: TGittanOpenUrlEvent;
-    FOnContext: TGittanForgeContextEvent;
+    FOnContext, FOnMerge: TGittanForgeContextEvent;
+    FOnWhere: TGittanForgeWhereEvent;
+    FCanAct: boolean;
+    procedure SetCanAct(AValue: boolean);
+    { Where a click on APull's card goes (OnWhere; its clone, else the
+      forge, when the owner does not say), and the tooltip of the link
+      at AIndex. }
+    function WhereOf(const APull: TGittanForgePull): TGittanPickTarget;
+    function HintOf(AIndex: integer): string;
+    function PaintButton(ARight, ATop: integer; const AText, ALink: string;
+      AColor: TColor): TRect;
+    function PaintMore(ARight, ATop, ASize: integer; const ALink: string): TRect;
     {** The pull request whose card is at X, Y; false between them. }
     function CardAt(X, Y: integer; out APull: TGittanForgePull): boolean;
     function LinkAt(X, Y: integer): integer;
@@ -283,8 +311,18 @@ type
       AddPreset. }
     property OnSavePreset: TNotifyEvent read FOnSavePreset write FOnSavePreset;
     property OnPick: TGittanForgePickEvent read FOnPick write FOnPick;
-    {** A right click on a card, for a menu. }
+    {** A right click on a card, or a click on its three dots, for a
+      menu. }
     property OnContext: TGittanForgeContextEvent read FOnContext write FOnContext;
+    {** A click on a card's Merge button, for a menu of the ways to
+      merge, under the button. }
+    property OnMerge: TGittanForgeContextEvent read FOnMerge write FOnMerge;
+    {** Where a click on a card goes, for its tooltip and its Review
+      button; unset, its clone when it has one, else the forge. }
+    property OnWhere: TGittanForgeWhereEvent read FOnWhere write FOnWhere;
+    {** Whether the forge acts on a pull request (merges it): the Merge
+      button shows only then. }
+    property CanAct: boolean read FCanAct write SetCanAct;
     property OnRefresh: TNotifyEvent read FOnRefresh write FOnRefresh;
     property OnOpenUrl: TGittanOpenUrlEvent read FOnOpenUrl write FOnOpenUrl;
   end;
@@ -299,7 +337,8 @@ function ForgePalette(ADark: boolean): TGittanForgePalette;
 implementation
 
 uses
-  Math, DateUtils, LCLIntf, LCLType, BGRABitmapTypes, gittan.reviews, gittan.textfit, gittan.theme;
+  Math, DateUtils, Forms, LCLIntf, LCLType, BGRABitmapTypes, gittan.reviews, gittan.textfit,
+  gittan.theme;
 
 resourcestring
   rsPageTitle = 'Pull requests';
@@ -335,6 +374,18 @@ resourcestring
   rsAskedAgain = 'Asked again';
   rsOpened = 'opened %s';
   rsUpdated = 'updated %s';
+  { A card's buttons: the review of one waiting for it, where the click
+    compares, or on the forge when there is no clone to compare in
+    ("Review on GitHub ↗"); and the merge of one's own. }
+  rsReviewButton = 'Review';
+  rsReviewOnForge = 'Review on %s ↗';
+  rsMergeButton = 'Merge';
+  { The tooltips of a card (the number, and the clone's path or the
+    forge's name) and of its three dots. }
+  rsHintCompare = 'Compare with pull request #%d';
+  rsHintClone = 'Open %s and compare with pull request #%d';
+  rsHintForge = 'Open pull request #%d on %s';
+  rsHintMore = 'More for pull request #%d';
 
 const
   MineLink = 'gittan:mine:';
@@ -346,6 +397,8 @@ const
   AllPresetLink = 'gittan:preset:all';
   SavePresetLink = 'gittan:savepreset';
   ChecksLink = 'gittan:checks:';
+  NextLink = 'gittan:next:';
+  MoreLink = 'gittan:more:';
   OrderLink = 'gittan:order';
   OrderGlyph = ' ▾';
   { Between the filters on that a group's chip names. }
@@ -404,6 +457,7 @@ begin
   ControlStyle := ControlStyle + [csOpaque];
   FHot := -1;
   Align := alTop;
+  ShowHint := True;
   SetColors(clWindow, clWindowText, clGrayText, clBtnFace, clBtnShadow, clHighlight,
     clGreen, clOlive, clRed);
   FCard := clBtnFace;
@@ -461,6 +515,65 @@ end;
 procedure TGittanForgePage.ForgetAnswer;
 begin
   FAnswered := False;
+end;
+
+procedure TGittanForgePage.SetCanAct(AValue: boolean);
+begin
+  if FCanAct = AValue then
+    Exit;
+  FCanAct := AValue;
+  FHot := -1;
+  Layout;
+  Invalidate;
+end;
+
+function TGittanForgePage.WhereOf(const APull: TGittanForgePull): TGittanPickTarget;
+begin
+  if Assigned(FOnWhere) then
+    Result := FOnWhere(Self, APull)
+  else if APull.Clone <> '' then
+    Result := ptClone
+  else
+    Result := ptForge;
+end;
+
+{ What a click on the link at AIndex does, where the card does not say:
+  a card's own (and its clone's link), and its three dots. }
+function TGittanForgePage.HintOf(AIndex: integer): string;
+var
+  Url: string;
+  Shown: TGittanForgePulls;
+  n: integer;
+  More: boolean;
+begin
+  Result := '';
+  if (AIndex < 0) or (AIndex > High(FLinkUrls)) then
+    Exit;
+  Url := FLinkUrls[AIndex];
+  More := Copy(Url, 1, Length(MoreLink)) = MoreLink;
+  if CurSection = fsReview then
+    Shown := FShownReview
+  else
+    Shown := FShownMine;
+  if More then
+    n := StrToIntDef(Copy(Url, Length(MoreLink) + 1, MaxInt), -1)
+  else if Copy(Url, 1, Length(MineLink)) = MineLink then
+    n := StrToIntDef(Copy(Url, Length(MineLink) + 1, MaxInt), -1)
+  else if Copy(Url, 1, Length(ReviewLink)) = ReviewLink then
+    n := StrToIntDef(Copy(Url, Length(ReviewLink) + 1, MaxInt), -1)
+  else
+    Exit;
+  if (n < 0) or (n > High(Shown)) then
+    Exit;
+  if More then
+    Exit(Format(rsHintMore, [Shown[n].Number]));
+  case WhereOf(Shown[n]) of
+    ptCompare: Result := Format(rsHintCompare, [Shown[n].Number]);
+    ptClone: Result := Format(rsHintClone, [ShortPath(Shown[n].Clone), Shown[n].Number]);
+  else
+    if Shown[n].Url <> '' then
+      Result := Format(rsHintForge, [Shown[n].Number, FForge]);
+  end;
 end;
 
 procedure TGittanForgePage.SetPulls(const AMine, AReview: TGittanForgePulls;
@@ -1089,6 +1202,8 @@ begin
 end;
 
 procedure TGittanForgePage.SetHot(AValue: integer);
+var
+  Told: string;
 begin
   if FHot = AValue then
     Exit;
@@ -1097,6 +1212,13 @@ begin
     Cursor := crDefault
   else
     Cursor := crHandPoint;
+  { The tooltip of what is under the mouse now, not of what was. }
+  Told := HintOf(AValue);
+  if Told <> Hint then
+  begin
+    Hint := Told;
+    Application.CancelHint;
+  end;
   Invalidate;
 end;
 
@@ -1403,6 +1525,63 @@ end;
   clone under those, which ALink, the card's own, picks too. The card
   and its links are under the mouse together. }
 
+{ A button ending at ARight with its text on the line at ATop, a link
+  to ALink: a rounded outline in AColor with the caption in it, on a
+  tint of AColor under the mouse. Gives its rectangle. }
+function TGittanForgePage.PaintButton(ARight, ATop: integer; const AText, ALink: string;
+  AColor: TColor): TRect;
+var
+  TextH: integer;
+begin
+  FC.Font := Font;
+  TextH := FC.TextHeight('Xg');
+  Result := Rect(ARight - FC.TextWidth(AText) - 2 * Px(FilterPadX), ATop - Px(FilterPadY),
+    ARight, ATop + TextH + Px(FilterPadY));
+  AddLink(Result, ALink);
+  FC.Pen.Style := psSolid;
+  FC.Pen.Color := AColor;
+  if FHot = High(FLinkRects) then
+  begin
+    FC.Brush.Style := bsSolid;
+    FC.Brush.Color := MixColor(FBack, AColor, 0.22);
+  end
+  else
+    FC.Brush.Style := bsClear;
+  FC.RoundRect(Result, Result.Height, Result.Height);
+  FC.Brush.Style := bsClear;
+  FC.Font.Color := AColor;
+  FC.TextOut(Result.Left + Px(FilterPadX), ATop, AText);
+end;
+
+{ Three dots in a disc ASize across ending at ARight, its top at ATop,
+  a link to ALink: dim, on a fill and in the text color under the
+  mouse. Gives its rectangle. }
+function TGittanForgePage.PaintMore(ARight, ATop, ASize: integer; const ALink: string): TRect;
+var
+  D, Step, X, Y, i: integer;
+begin
+  Result := Rect(ARight - ASize, ATop, ARight, ATop + ASize);
+  AddLink(Result, ALink);
+  FC.Pen.Style := psClear;
+  FC.Brush.Style := bsSolid;
+  if FHot = High(FLinkRects) then
+  begin
+    FC.Brush.Color := MixColor(FHover, FText, 0.16);
+    FC.Ellipse(Result);
+    FC.Brush.Color := FText;
+  end
+  else
+    FC.Brush.Color := FDim;
+  D := Max(2, Px(3));
+  Step := D + Max(1, Px(2));
+  X := Result.Left + (ASize - (2 * Step + D)) div 2;
+  Y := Result.Top + (ASize - D) div 2;
+  for i := 0 to 2 do
+    FC.Ellipse(X + i * Step, Y, X + i * Step + D + 1, Y + D + 1);
+  FC.Pen.Style := psSolid;
+  FC.Brush.Style := bsClear;
+end;
+
 function TGittanForgePage.PullLine(const APull: TGittanForgePull): string;
 var
   UtcNow: TDateTime;
@@ -1442,7 +1621,8 @@ var
   TextH, CardH, Right, X, TextX, LineY, ChipTop, First, Links: integer;
   Number, Repo, Rest, ForgeLink, CloneLink, Note, Detail, Part: string;
   Lines: integer;
-  HasClone, HasForge, HasChecksMenu, Hot: boolean;
+  HasClone, HasForge, HasChecksMenu, HasMore, Hot: boolean;
+  Next: TGittanPullNext;
   GlyphColor, Tone: TColor;
   Checks: TGittanChecksState;
 begin
@@ -1453,6 +1633,13 @@ begin
     not SameFileName(APull.Clone, FOpenRoot);
   HasForge := (APull.Url <> '') and Assigned(FOnOpenUrl);
   HasChecksMenu := Length(APull.CheckList) > 0;
+  HasMore := Assigned(FOnContext);
+  { The next step: a review is the card's own click, a merge the
+    owner's menu while the forge acts. }
+  Next := PullNext(APull, CurSection, FIgnored);
+  if ((Next = pnReview) and not Assigned(FOnPick)) or ((Next = pnMerge) and
+    not (FCanAct and Assigned(FOnMerge))) then
+    Next := pnNone;
   Detail := PullReviewers(APull, FLogin);
   Part := PullChecksDetail(APull, FIgnored);
   if Part <> '' then
@@ -1469,7 +1656,8 @@ begin
   CardH := 2 * Px(CardPadY) + Lines * TextH + Px(LineGap) * (Lines - 1);
   R := Rect(ALeft, Y, ARight, Y + CardH);
   First := Length(FLinkRects);
-  Links := Ord(Assigned(FOnPick)) + Ord(HasChecksMenu) + Ord(HasForge) + Ord(HasClone);
+  Links := Ord(Assigned(FOnPick)) + Ord(HasChecksMenu) + Ord(HasForge) + Ord(HasClone) +
+    Ord(HasMore) + Ord(Next <> pnNone);
   Hot := (FHot >= First) and (FHot < First + Links);
   FC.Pen.Style := psClear;
   FC.Brush.Style := bsSolid;
@@ -1556,11 +1744,29 @@ begin
   FC.TextOut(X, R.Top + Px(CardPadY), FitTextRight(FC, APull.Title, Max(0, Right - X)));
   FC.Font.Style := [];
 
-  { The second line: the repository, the rest dim, and the forge link
-    at its right end, there to click whether shown or not, since the
-    mouse on it shows it. }
+  { The second line: the repository, the rest dim, and at its right
+    end the three dots of the card's menu, the next step's button
+    before them, and before those the forge link, there to click
+    whether shown or not, since the mouse on it shows it. }
   LineY := R.Top + Px(CardPadY) + TextH + Px(LineGap);
   Right := R.Right - Px(CardPadX);
+  if HasMore then
+    Right := PaintMore(Right, LineY - Px(FilterPadY), TextH + 2 * Px(FilterPadY),
+      MoreLink + IntToStr(AIndex)).Left - Px(Gap) div 2;
+  case Next of
+    pnReview:
+      if (WhereOf(APull) = ptForge) and (APull.Url <> '') then
+        Right := PaintButton(Right, LineY, Format(rsReviewOnForge, [FForge]),
+          NextLink + IntToStr(AIndex), FLink).Left - Px(Gap)
+      else
+        Right := PaintButton(Right, LineY, rsReviewButton, NextLink + IntToStr(AIndex),
+          FLink).Left - Px(Gap);
+    pnMerge:
+      Right := PaintButton(Right, LineY, rsMergeButton + OrderGlyph,
+        NextLink + IntToStr(AIndex), FOk).Left - Px(Gap);
+  end;
+  FC.Font := Font;
+  FC.Brush.Style := bsClear;
   if HasForge then
   begin
     ForgeLink := Format(rsForgeLink, [FForge]);
@@ -1817,6 +2023,32 @@ begin
     n := StrToIntDef(Copy(Url, Length(GroupLink) + 1, MaxInt), -1);
     if (n >= 0) and (n <= High(FGroups)) then
       ShowGroupMenu(FGroups[n], ClientToScreen(Point(FLinkRects[i].Left, FLinkRects[i].Bottom)));
+    Exit;
+  end;
+  { A card's buttons: the three dots open its menu under them; the
+    next step is the card's own click (a review) or the owner's menu of
+    the ways to merge. }
+  if (Button = mbLeft) and (Copy(Url, 1, Length(MoreLink)) = MoreLink) then
+  begin
+    n := StrToIntDef(Copy(Url, Length(MoreLink) + 1, MaxInt), -1);
+    if (n >= 0) and (n <= High(Shown)) and Assigned(FOnContext) then
+      FOnContext(Self, Shown[n], ClientToScreen(Point(FLinkRects[i].Left,
+        FLinkRects[i].Bottom)));
+    Exit;
+  end;
+  if (Button = mbLeft) and (Copy(Url, 1, Length(NextLink)) = NextLink) then
+  begin
+    n := StrToIntDef(Copy(Url, Length(NextLink) + 1, MaxInt), -1);
+    if (n < 0) or (n > High(Shown)) then
+      Exit;
+    if PullNext(Shown[n], CurSection, FIgnored) = pnMerge then
+    begin
+      if Assigned(FOnMerge) then
+        FOnMerge(Self, Shown[n], ClientToScreen(Point(FLinkRects[i].Left,
+          FLinkRects[i].Bottom)));
+    end
+    else if Assigned(FOnPick) then
+      FOnPick(Self, Shown[n]);
     Exit;
   end;
   if Button = mbRight then

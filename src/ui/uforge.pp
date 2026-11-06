@@ -65,7 +65,7 @@ interface
 uses
   Classes, SysUtils, Types, Controls, Forms, Menus, ExtCtrls, Graphics, LCLType, Dialogs,
   Clipbrd, gittan.job, gittan.forge, gittan.forgepage, gittan.batch, gittan.batchpage,
-  gittan.askdlg, gittan.extpage, gittan.ext.registry, fpjson, umain;
+  gittan.askdlg, gittan.extpage, gittan.ext.registry, gittan.banner, fpjson, umain;
 
 const
   {** The Batch tab's index, after the forge page's sections. }
@@ -142,7 +142,23 @@ type
     FExtRunPaths, FExtRunCaptions: TStringArray;
     FExtRunIndex, FExtRunSeq: integer;
     FThemeTimer: TTimer;
+    { Asks the forge again now and then, shown or not, so the globe's
+      count follows. }
+    FPollTimer: TTimer;
+    { What an action on a pull request did, or the forge's words when
+      it failed, over the page. }
+    FBanner: TGittanBanner;
     FOnTabsChange, FOnUserChange: TNotifyEvent;
+    procedure PollTimerTimer(Sender: TObject);
+    procedure BannerChange(Sender: TObject);
+    procedure ApplyForgeState;
+    function TabOffset: integer;
+    function InnerTab: integer;
+    procedure SelectInner(AIndex: integer);
+    function PageWhere(Sender: TObject; const APull: TGittanForgePull): TGittanPickTarget;
+    procedure PageMerge(Sender: TObject; const APull: TGittanForgePull;
+      const AScreenPos: TPoint);
+    procedure BatchNotice(Sender: TObject);
     function FindForge: boolean;
     procedure ForgetAnswers;
     procedure LoadPicture;
@@ -234,11 +250,18 @@ type
     {** Builds the view, once it is placed in AWindow, which it then
       asks for what needs a repository or the window (FWindow). }
     procedure Init(AWindow: TRepoWindow);
-    {** Whether there is a forge: the globe shows and the view can be
-      shown only then. }
+    {** Whether there is a forge. Without one the view has the Batch
+      tab (and the extensions' tabs) alone, with a note that a hosting
+      service would bring the pull requests. }
     function HasForge: boolean;
     {** The forge's name, '' without one. }
     function ForgeName: string;
+    {** The view's name, for the window's caption and Close: the
+      forge's, else Batch's. }
+    function Title: string;
+    {** The pull requests waiting for the user's review, which the
+      globe counts. }
+    function ReviewCount: integer;
     {** What the chrome's globe says of the forge: its name, with the
       login before it once the forge has said who ("octocat on GitHub"). }
     function ChromeHint: string;
@@ -248,7 +271,8 @@ type
       it, '' without one, for the chrome's globe. }
     property Picture: string read FAvatar;
     {** The user changed: the login or the picture came, changed or went,
-      so the chrome's globe follows. }
+      or the count of pull requests waiting for their review changed, so
+      the chrome's globe follows. }
     property OnUserChange: TNotifyEvent read FOnUserChange write FOnUserChange;
     {** The window shows the view now: the page follows the appearance,
       shows what the forge last answered and asks it again. }
@@ -342,6 +366,19 @@ resourcestring
   rsExtRunGone = 'The extension no longer has this operation.';
   rsExtReloaded = 'The extensions were loaded again, which stopped the run.';
   rsExtAccountChanged = 'The account changed, which stopped the run.';
+  { Without a hosting service: the globe's hint and Batch's note. }
+  rsNoForgeHint = 'Batch: work in several repositories at once';
+  rsNoForgeNote = 'Connect a hosting service such as GitHub to see your pull requests ' +
+    'and the ones waiting for your review here as well.';
+  rsNoForgeLink = 'Hosting Settings…';
+  { The minutes between two looks at the forge. }
+
+
+const
+  { The minutes between two looks at the forge, and the seconds a
+    success stays in the banner. }
+  ForgePollMinutes = 5;
+  BannerSeconds = 8;
 
 var
   { The number of the last request to an extension's tab or operation. }
@@ -380,6 +417,8 @@ begin
   Application.RemoveAsyncCalls(Self);
   if FThemeTimer <> nil then
     FThemeTimer.Enabled := False;
+  if FPollTimer <> nil then
+    FPollTimer.Enabled := False;
   AbandonJob;
   AbandonAction;
   { A scan is given up; a deletion runs to its end. }
@@ -429,6 +468,12 @@ end;
 procedure TForgeView.Init(AWindow: TRepoWindow);
 begin
   FWindow := AWindow;
+  FBanner := TGittanBanner.Create(Self);
+  FBanner.Align := alTop;
+  FBanner.Visible := False;
+  FBanner.BorderSpacing.Top := AWindow.TitleBarHeight;
+  FBanner.OnChange := @BannerChange;
+  FBanner.Parent := Self;
   FBox := TScrollBox.Create(Self);
   FBox.BorderStyle := bsNone;
   FBox.HorzScrollBar.Visible := False;
@@ -441,6 +486,8 @@ begin
   FPage.Parent := FBox;
   FPage.OnPick := @PagePick;
   FPage.OnContext := @PageContext;
+  FPage.OnMerge := @PageMerge;
+  FPage.OnWhere := @PageWhere;
   FCardPopup := TPopupMenu.Create(Self);
   FPage.OnRefresh := @PageRefresh;
   LoadFilters;
@@ -462,6 +509,7 @@ begin
   FBatch.OnMaintRun := @BatchMaintRun;
   FBatch.OnExtRun := @BatchExtRun;
   FBatch.OnOpenUrl := @BatchOpenUrl;
+  FBatch.OnNotice := @BatchNotice;
   FExtTab := -1;
   FExtPage := TGittanExtTabPage.Create(Self);
   FExtPage.Visible := False;
@@ -474,9 +522,14 @@ begin
   FThemeTimer.Interval := 2000;
   FThemeTimer.Enabled := False;
   FThemeTimer.OnTimer := @ThemeTimerTimer;
+  FPollTimer := TTimer.Create(Self);
+  FPollTimer.Interval := ForgePollMinutes * 60 * 1000;
+  FPollTimer.Enabled := False;
+  FPollTimer.OnTimer := @PollTimerTimer;
   FDark := IsDarkMode;
   ApplyTheme;
   FindForge;
+  ApplyForgeState;
   { The picture kept from the last start, then the forge asked once at
     start, so the chrome's globe has the user and the view its lists
     before it is first shown. }
@@ -549,7 +602,73 @@ begin
   { The filters are the forge's, and what the user kept of them. }
   LoadFilters;
   if FCloseItem <> nil then
-    FCloseItem.Caption := Format(rsCloseForge, [ForgeName]);
+    FCloseItem.Caption := Format(rsCloseForge, [Title]);
+end;
+
+{ With a forge the page's sections are tabs and Batch says nothing of
+  it; without one Batch stands alone with its note, shown in the page's
+  place when a section was, and nothing is asked. }
+procedure TForgeView.ApplyForgeState;
+begin
+  if HasForge then
+    FBatch.SetNotice('', '')
+  else
+  begin
+    FBatch.SetNotice(rsNoForgeNote, rsNoForgeLink);
+    FPollTimer.Enabled := False;
+    if not FBatchShown and (FExtTab < 0) then
+    begin
+      FBatchShown := True;
+      FPage.Visible := False;
+      if FIsShown then
+        ShowBatch
+      else
+        FBatch.Visible := True;
+    end;
+  end;
+  if FBatch.Visible then
+    FBatch.FitHeight(FBox.ClientHeight);
+end;
+
+procedure TForgeView.BatchNotice(Sender: TObject);
+begin
+  FWindow.ShowHostingSettings;
+end;
+
+function TForgeView.Title: string;
+begin
+  Result := ForgeName;
+  if Result = '' then
+    Result := rsBatchTab;
+end;
+
+function TForgeView.ReviewCount: integer;
+begin
+  Result := Length(FReview);
+end;
+
+procedure TForgeView.PollTimerTimer(Sender: TObject);
+begin
+  StartJob;
+end;
+
+{ The banner takes the strip's height over it while shown, so the box
+  under it does not leave a gap; the box takes it back when it goes. }
+procedure TForgeView.BannerChange(Sender: TObject);
+begin
+  DisableAlign;
+  try
+    if FBanner.Visible then
+    begin
+      FBanner.BorderSpacing.Top := FWindow.TitleBarHeight;
+      FBanner.Top := 0;
+      FBox.BorderSpacing.Top := 0;
+    end
+    else
+      FBox.BorderSpacing.Top := FWindow.TitleBarHeight;
+  finally
+    EnableAlign;
+  end;
 end;
 
 function TForgeView.HasForge: boolean;
@@ -568,7 +687,9 @@ end;
 function TForgeView.ChromeHint: string;
 begin
   Result := ForgeName;
-  if (Result <> '') and (FLogin <> '') then
+  if Result = '' then
+    Result := rsNoForgeHint
+  else if FLogin <> '' then
     Result := Format(rsUserOnForge, [FLogin, Result]);
 end;
 
@@ -606,7 +727,7 @@ begin
   AddItem(FileMenu, rsOpenRepo, ShortCut(VK_O, [ssModifier, ssShift]), @MenuOpenRepoClick);
   FRecentMenu := AddItem(FileMenu, rsOpenRecent, 0, nil);
   RebuildRecentMenu;
-  FCloseItem := AddItem(FileMenu, Format(rsCloseForge, [ForgeName]),
+  FCloseItem := AddItem(FileMenu, Format(rsCloseForge, [Title]),
     ShortCut(VK_W, [ssModifier]), @MenuCloseClick);
 
   ViewMenu := TMenuItem.Create(FMainMenu);
@@ -675,6 +796,8 @@ begin
   FPage.SetTheme(FDark);
   FBatch.SetTheme(FDark);
   FExtPage.SetTheme(FDark);
+  with ForgePalette(FDark) do
+    FBanner.SetColors(Card, Text, Dim, Hover, Line, Link, Error, Ok);
   Color := FPage.Color;
   FBox.Color := FPage.Color;
   Invalidate;
@@ -732,6 +855,9 @@ begin
     { The extensions' tabs and commands are those of the forge. }
     RebuildExt;
   end;
+  ApplyForgeState;
+  if Assigned(FOnTabsChange) then
+    FOnTabsChange(Self);
 end;
 
 procedure TForgeView.AccountChanged;
@@ -792,6 +918,7 @@ end;
 { What the job last read, to the page, and whether one runs. }
 procedure TForgeView.UpdatePage;
 begin
+  FPage.CanAct := ActsNow;
   FPage.SetLogin(FLogin);
   FPage.SetAvatar(FAvatar);
   FPage.SetPulls(FMine, FReview, FError, FJob <> nil);
@@ -813,25 +940,51 @@ begin
   SetLength(AHints, TabCount);
   SetLength(AMarks, TabCount);
   SetLength(AExts, TabCount);
-  for i := 0 to SectionCount - 1 do
-    ACaptions[i] := SectionCaption(i);
-  ACaptions[BatchTab] := rsBatchTab;
+  { The sections only with a forge (TabOffset). }
+  if HasForge then
+  begin
+    for i := 0 to SectionCount - 1 do
+      ACaptions[i] := SectionCaption(i);
+    AMarks[Ord(fsReview)] := Length(FReview) > 0;
+  end;
+  ACaptions[BatchTab - TabOffset] := rsBatchTab;
   for i := 0 to High(FExtTabs) do
   begin
-    ACaptions[BatchTab + 1 + i] := FExtTabs[i].Title;
-    AHints[BatchTab + 1 + i] := Format(rsFromExtension, [ExtNameOf(FExtTabs[i])]);
-    AExts[BatchTab + 1 + i] := True;
+    ACaptions[BatchTab + 1 + i - TabOffset] := FExtTabs[i].Title;
+    AHints[BatchTab + 1 + i - TabOffset] := Format(rsFromExtension, [ExtNameOf(FExtTabs[i])]);
+    AExts[BatchTab + 1 + i - TabOffset] := True;
   end;
-  AMarks[Ord(fsReview)] := Length(FReview) > 0;
   Result := CurrentTab;
+end;
+
+{ The tabs the strip shows leave the sections out without a forge: the
+  strip's index plus this is the view's own (InnerTab, SelectInner). }
+function TForgeView.TabOffset: integer;
+begin
+  if HasForge then
+    Result := 0
+  else
+    Result := SectionCount;
 end;
 
 function TForgeView.TabCount: integer;
 begin
-  Result := SectionCount + 1 + Length(FExtTabs);
+  Result := SectionCount + 1 + Length(FExtTabs) - TabOffset;
 end;
 
 function TForgeView.CurrentTab: integer;
+begin
+  Result := InnerTab - TabOffset;
+end;
+
+procedure TForgeView.SelectTab(AIndex: integer);
+begin
+  if (AIndex < 0) or (AIndex >= TabCount) then
+    Exit;
+  SelectInner(AIndex + TabOffset);
+end;
+
+function TForgeView.InnerTab: integer;
 begin
   if FExtTab >= 0 then
     Result := BatchTab + 1 + FExtTab
@@ -841,9 +994,9 @@ begin
     Result := FPage.Section;
 end;
 
-procedure TForgeView.SelectTab(AIndex: integer);
+procedure TForgeView.SelectInner(AIndex: integer);
 begin
-  if (AIndex < 0) or (AIndex >= TabCount) or (AIndex = CurrentTab) then
+  if (AIndex < TabOffset) or (AIndex >= TabCount + TabOffset) or (AIndex = InnerTab) then
     Exit;
   FExtTab := -1;
   FExtTabSeq := 0;
@@ -1243,14 +1396,19 @@ procedure TForgeView.JobDone(Sender: TObject);
 var
   Job: TGittanForgeJob;
   OldLogin, OldAvatar, OldAvatarUrl: string;
+  OldCount: integer;
 begin
   OldLogin := FLogin;
   OldAvatar := FAvatar;
   OldAvatarUrl := FAvatarUrl;
+  OldCount := ReviewCount;
   Job := TGittanForgeJob(Sender);
   if Job <> FJob then
     Exit;
   FJob := nil;
+  { The next look in a while, counted from this answer. }
+  FPollTimer.Enabled := False;
+  FPollTimer.Enabled := Assigned(FForge);
   FZombies.Add(Job);
   Application.QueueAsyncCall(@FreeJobsAsync, 0);
   FError := Job.Error;
@@ -1303,7 +1461,9 @@ begin
     else if (FAvatar = '') and (FError = '') then
       DeleteFile(App.Settings.ForgePictureFile);
     UserChanged;
-  end;
+  end
+  else if ReviewCount <> OldCount then
+    UserChanged;
 end;
 
 procedure TForgeView.FreeJobsAsync(Data: PtrInt);
@@ -1337,8 +1497,30 @@ procedure TForgeView.PageContext(Sender: TObject; const APull: TGittanForgePull;
   const AScreenPos: TPoint);
 begin
   FActionPull := APull;
-  FillPullCardMenu(FCardPopup, PullRequestOf(APull), ForgeName, ActsNow, @CardMenuClick);
+  FillPullCardMenu(FCardPopup, PullRequestOf(APull), ForgeName, FLogin, ActsNow,
+    @CardMenuClick);
   FCardPopup.PopUp(AScreenPos.X, AScreenPos.Y);
+end;
+
+{ A card's Merge button: the ways to merge, under it. }
+procedure TForgeView.PageMerge(Sender: TObject; const APull: TGittanForgePull;
+  const AScreenPos: TPoint);
+begin
+  FActionPull := APull;
+  FillPullMergeMenu(FCardPopup, PullRequestOf(APull), ActsNow, @CardMenuClick);
+  if FCardPopup.Items.Count > 0 then
+    FCardPopup.PopUp(AScreenPos.X, AScreenPos.Y);
+end;
+
+{ Where PagePick goes, for the card's tooltip and its Review button. }
+function TForgeView.PageWhere(Sender: TObject; const APull: TGittanForgePull): TGittanPickTarget;
+begin
+  if FWindow.HasFrameFor(APull.Repo) then
+    Result := ptCompare
+  else if APull.Clone <> '' then
+    Result := ptClone
+  else
+    Result := ptForge;
 end;
 
 procedure TForgeView.CardMenuClick(Sender: TObject);
@@ -1365,7 +1547,7 @@ procedure TForgeView.StartAction(const APull: TGittanForgePull; AAction: TGittan
 var
   Words: string;
 begin
-  if not ActsNow or not PullActionFits(PullRequestOf(APull), AAction) or
+  if not ActsNow or not PullActionFits(PullRequestOf(APull), AAction, FLogin) or
     not AskPullAction(PullRequestOf(APull), AAction, Words) then
     Exit;
   FActionJob := FForge.ActionJob(GetUserDir, APull.Repo, APull.Number, AAction, Words);
@@ -1374,6 +1556,7 @@ begin
   FActionJob.OnDone := @ActionDone;
   FActionJob.Start;
   Screen.Cursor := crAppStart;
+  UpdatePage;
 end;
 
 procedure TForgeView.ActionDone(Sender: TObject);
@@ -1387,8 +1570,13 @@ begin
   Screen.Cursor := crDefault;
   FZombies.Add(Job);
   Application.QueueAsyncCall(@FreeJobsAsync, 0);
-  if not Job.Ok then
-    TellDlg(Format(rsPullActionFailed, [ForgeName]), Job.Error, mtError);
+  { In the banner, as a repository's page has it: what was done, or
+    the forge's words. }
+  if Job.Ok then
+    FBanner.Add(Format(rsPullActionDone, [PullActionDone(Job.Action), Job.Number]), '',
+      bkSuccess, BannerSeconds)
+  else
+    FBanner.Add(Format(rsPullActionFailed, [ForgeName]), Job.Error, bkError);
   { The lists as they are now. }
   AbandonJob;
   StartJob;
@@ -1638,12 +1826,14 @@ begin
         FExtTab := i;
     if FExtTab < 0 then
     begin
-      { Gone: the first section in its place. }
+      { Gone: the first section in its place, or Batch without a
+        forge. }
       FExtTabSeq := 0;
       FExtPage.Visible := False;
       FPage.Section := 0;
       FPage.FitHeight(FBox.ClientHeight);
       FPage.Visible := True;
+      ApplyForgeState;
     end
     else if (Eng = nil) or (Eng.GenerationForContext(FExtTabs[FExtTab].Ctx) <> ShownGen) then
     begin

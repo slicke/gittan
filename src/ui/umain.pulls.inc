@@ -131,7 +131,7 @@ end;
   page and the chip follow. One action runs at a time. The forge view's
   cards have the same menu (FillPullCardMenu, PullCardAction). }
 procedure FillPullCardMenu(AMenu: TPopupMenu; const APull: TGittanPullRequest;
-  const AForgeName: string; AActs: boolean; AOnClick: TNotifyEvent);
+  const AForgeName, AViewer: string; AActs: boolean; AOnClick: TNotifyEvent);
 
   procedure Add(const ACaption: string; ATag: integer);
   begin
@@ -140,7 +140,7 @@ procedure FillPullCardMenu(AMenu: TPopupMenu; const APull: TGittanPullRequest;
 
   function Fits(AAction: TGittanPullAction): boolean;
   begin
-    Result := AActs and PullActionFits(APull, AAction);
+    Result := AActs and PullActionFits(APull, AAction, AViewer);
   end;
 
 begin
@@ -151,11 +151,14 @@ begin
     Add(Format(rsOpenPullOnForge, [AForgeName]), pcOpen);
     Add(rsCopyPullLink, pcCopy);
   end;
-  if Fits(plApprove) then
+  { One's own has Comment alone. }
+  if Fits(plComment) then
   begin
     AMenu.Items.Add(NewLine);
-    Add(rsPullApprove, pcAct + Ord(plApprove));
-    Add(rsPullRequestChanges, pcAct + Ord(plRequestChanges));
+    if Fits(plApprove) then
+      Add(rsPullApprove, pcAct + Ord(plApprove));
+    if Fits(plRequestChanges) then
+      Add(rsPullRequestChanges, pcAct + Ord(plRequestChanges));
     Add(rsPullComment, pcAct + Ord(plComment));
   end;
   if Fits(plMerge) then
@@ -170,6 +173,17 @@ begin
     AMenu.Items.Add(NewLine);
     Add(rsPullReady, pcAct + Ord(plReady));
   end;
+end;
+
+procedure FillPullMergeMenu(AMenu: TPopupMenu; const APull: TGittanPullRequest;
+  AActs: boolean; AOnClick: TNotifyEvent);
+begin
+  AMenu.Items.Clear;
+  if not (AActs and PullActionFits(APull, plMerge)) then
+    Exit;
+  AddMenuItem(AMenu.Items, rsPullMerge, pcAct + Ord(plMerge), True, AOnClick);
+  AddMenuItem(AMenu.Items, rsPullSquash, pcAct + Ord(plSquash), True, AOnClick);
+  AddMenuItem(AMenu.Items, rsPullRebaseMerge, pcAct + Ord(plRebaseMerge), True, AOnClick);
 end;
 
 function PullCardAction(ATag: integer; out AAction: TGittanPullAction): boolean;
@@ -187,7 +201,8 @@ begin
   if FRepo.Root = '' then
     Exit;
   FActionPull := APull;
-  FillPullCardMenu(FPullCardPopup, APull, ForgeName, PullActsNow, @PullCardMenuClick);
+  FillPullCardMenu(FPullCardPopup, APull, ForgeName, FPullLogin, PullActsNow,
+    @PullCardMenuClick);
   FPullCardPopup.PopUp(AScreenPos.X, AScreenPos.Y);
 end;
 
@@ -215,7 +230,7 @@ end;
 function TRepoFrame.CanPullAction(const APull: TGittanPullRequest;
   AAction: TGittanPullAction): boolean;
 begin
-  Result := PullActsNow and PullActionFits(APull, AAction);
+  Result := PullActsNow and PullActionFits(APull, AAction, FPullLogin);
 end;
 
 procedure TRepoFrame.StartPullAction(const APull: TGittanPullRequest;

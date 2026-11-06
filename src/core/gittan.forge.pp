@@ -658,9 +658,27 @@ function PullActionMerges(AAction: TGittanPullAction): boolean;
 
 {** Whether AAction fits APull as it is: an open pull request the
   forge knows (a number and its repository); a draft can be marked
-  ready but not merged, and only a draft marked ready. Whether the
-  forge acts at all is the caller's to know. }
-function PullActionFits(const APull: TGittanPullRequest; AAction: TGittanPullAction): boolean;
+  ready but not merged, and only a draft marked ready; and AViewer, the
+  login the forge knows the user as ('' when not known), neither
+  approves a pull request of their own nor requests changes on it,
+  which a forge refuses, though they may comment. Whether the forge
+  acts at all is the caller's to know. }
+function PullActionFits(const APull: TGittanPullRequest; AAction: TGittanPullAction;
+  const AViewer: string = ''): boolean;
+
+type
+  {** What comes next for a pull request of the forge view, the step a
+    card offers as a button: nothing, the user's review of it, or
+    merging it. }
+  TGittanPullNext = (pnNone, pnReview, pnMerge);
+
+{** The next step for APull in ASection: one waiting for the user's
+  review is reviewed; one of their own is merged once nothing Gittan
+  knows of stands in its way: it is open and no draft, its checks (the
+  ones in AIgnored left out) neither fail nor run, and it is approved,
+  or needs no review and none is asked of anyone. }
+function PullNext(const APull: TGittanForgePull; ASection: TGittanForgeSection;
+  AIgnored: TStrings = nil): TGittanPullNext;
 
 {** Adds AClass to the forges Gittan knows; a forge's unit calls it in
   its initialization. }
@@ -2301,14 +2319,32 @@ begin
   Result := AAction in [plMerge, plSquash, plRebaseMerge];
 end;
 
-function PullActionFits(const APull: TGittanPullRequest; AAction: TGittanPullAction): boolean;
+function PullActionFits(const APull: TGittanPullRequest; AAction: TGittanPullAction;
+  const AViewer: string): boolean;
 begin
   Result := (APull.Number > 0) and (APull.Repo <> '') and (APull.State = prOpen);
   if Result then
     if AAction = plReady then
       Result := APull.IsDraft
     else if PullActionMerges(AAction) then
-      Result := not APull.IsDraft;
+      Result := not APull.IsDraft
+    else if AAction in [plApprove, plRequestChanges] then
+      Result := (AViewer = '') or not SameText(APull.Author, AViewer);
+end;
+
+function PullNext(const APull: TGittanForgePull; ASection: TGittanForgeSection;
+  AIgnored: TStrings): TGittanPullNext;
+begin
+  Result := pnNone;
+  if APull.State <> prOpen then
+    Exit;
+  if ASection = fsReview then
+    Exit(pnReview);
+  if APull.IsDraft or not (ChecksState(APull, AIgnored) in [chkNone, chkPassed]) then
+    Exit;
+  if (APull.ReviewDecision = rdApproved) or ((APull.ReviewDecision = rdNone) and
+    (Length(APull.RequestedOf) = 0)) then
+    Result := pnMerge;
 end;
 
 constructor TGittanForgeJob.Create(const AForgeName, ARoot: string);

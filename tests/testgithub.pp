@@ -466,6 +466,15 @@ begin
   AssertTrue(PullActionFits(Pull, plApprove));
   AssertTrue(PullActionFits(Pull, plSquash));
   AssertFalse('only a draft is marked ready', PullActionFits(Pull, plReady));
+  { One's own is neither approved nor asked changes of, as the forge
+    refuses; a comment and a merge are fine. }
+  Pull.Author := 'Maja';
+  AssertTrue('the viewer not known', PullActionFits(Pull, plApprove));
+  AssertTrue('another''s', PullActionFits(Pull, plApprove, 'sam'));
+  AssertFalse('one''s own', PullActionFits(Pull, plApprove, 'maja'));
+  AssertFalse('one''s own', PullActionFits(Pull, plRequestChanges, 'maja'));
+  AssertTrue(PullActionFits(Pull, plComment, 'maja'));
+  AssertTrue(PullActionFits(Pull, plMerge, 'maja'));
   Pull.IsDraft := True;
   AssertTrue(PullActionFits(Pull, plReady));
   AssertTrue('a draft is reviewed', PullActionFits(Pull, plComment));

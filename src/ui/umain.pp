@@ -212,6 +212,13 @@ type
     procedure AskOpenRepository; virtual; abstract;
     procedure ShowSettings; virtual; abstract;
     procedure ShowAbout; virtual; abstract;
+    {** The settings dialog at its Hosting page. }
+    procedure ShowHostingSettings; virtual; abstract;
+    {** Whether a frame has a remote for the repository ARepo
+      ("owner/name"), so ComparePullRequest compares in it rather than
+      opening a clone; by the frames' last snapshots (HoldsRepo), so it
+      can be asked often. }
+    function HasFrameFor(const ARepo: string): boolean; virtual; abstract;
     {** A pull request picked in the forge view: compares with it in the
       frame that has a remote for its repository, showing that frame,
       else opens AClone (its local clone, '' for none) and compares
@@ -2502,14 +2509,21 @@ type
     {** Whether the open repository has a remote for the repository
       ARepo ("owner/name" on the forge); False without one open. }
     function HasRemoteFor(const ARepo: string): boolean;
+    {** The same by the remotes of the last snapshot, with no git run:
+      for what is asked often, as the forge view's cards ask where a
+      click on them goes. }
+    function HoldsRepo(const ARepo: string): boolean;
     {** Fetches APull and compares with it, as Compare With > Pull
       Requests does; also for a pull request of the forge view. }
     procedure ComparePull(const APull: TGittanPullRequest);
     {** File > Open Repository..., Settings... and About Gittan, which the
-      forge view's menu runs here too, since they need no repository. }
+      forge view's menu runs here too, since they need no repository;
+      and the settings at their Hosting page, for the forge view's note
+      that the hosting features are not set up. }
     procedure MenuOpenRepoClick(Sender: TObject);
     procedure MenuSettingsClick(Sender: TObject);
     procedure MenuAboutClick(Sender: TObject);
+    procedure ShowHostingSettings;
   end;
 
 {** Asks what AAction on APull needs before it runs: the words of a
@@ -2530,15 +2544,27 @@ const
 
 resourcestring
   rsPullActionFailed = 'Could not do it on %s';
+  { What is being done to a pull request, and what was (PullActionDoing
+    and PullActionDone of gittan.forge, the number, the forge's name):
+    "Merging #12 on GitHub…", "Merged #12". }
+  rsPullActing = '%s #%d on %s…';
+  rsPullActionDone = '%s #%d';
 
 {** Fills AMenu with what can be done to the pull request APull of a
   card, the Pull Requests page's or the forge view's: compare with it,
   open it on AForgeName and copy its link when it has one, and while
   AActs (the forge acts and no action runs) the reviews, the merges or,
-  for a draft, Mark Ready, as PullActionFits allows; each item's
-  OnClick is AOnClick, its Tag one of the pc tags. }
+  for a draft, Mark Ready, as PullActionFits allows for AViewer, the
+  user's login on the forge ('' when not known), whose own pull request
+  has Comment alone of the reviews; each item's OnClick is AOnClick,
+  its Tag one of the pc tags. }
 procedure FillPullCardMenu(AMenu: TPopupMenu; const APull: TGittanPullRequest;
-  const AForgeName: string; AActs: boolean; AOnClick: TNotifyEvent);
+  const AForgeName, AViewer: string; AActs: boolean; AOnClick: TNotifyEvent);
+{** Fills AMenu with the ways to merge APull alone, for the menu of a
+  card's Merge button: the same items, tags and conditions as in
+  FillPullCardMenu; empty when it cannot be merged now. }
+procedure FillPullMergeMenu(AMenu: TPopupMenu; const APull: TGittanPullRequest;
+  AActs: boolean; AOnClick: TNotifyEvent);
 {** The action a card menu item's tag ATag stands for; false for the
   other items. }
 function PullCardAction(ATag: integer; out AAction: TGittanPullAction): boolean;
@@ -3762,8 +3788,6 @@ resourcestring
   rsPullSquashAsk = 'Squash the commits of #%d "%s" into one on %s?';
   rsPullRebaseMergeAsk = 'Rebase the commits of #%d "%s" onto %s?';
   rsPullMergeAction = 'Merge';
-  rsPullActing = '%s #%d on %s…';
-  rsPullActionDone = '%s #%d';
   rsPositionOld = 'Ln %d (old), Col %d';
   rsReviewComments = 'Review &Comments';
   rsReviewResolved = 'Resolved';
@@ -5222,6 +5246,11 @@ end;
 function TRepoFrame.HasRemoteFor(const ARepo: string): boolean;
 begin
   Result := (FRepo.Root <> '') and (ARepo <> '') and FRepo.HasRemoteFor(ARepo);
+end;
+
+function TRepoFrame.HoldsRepo(const ARepo: string): boolean;
+begin
+  Result := (FRepo.Root <> '') and (ARepo <> '') and RemoteUrlsHold(FRemoteUrls, ARepo);
 end;
 
 { The window is named after the repository, or the file when none is

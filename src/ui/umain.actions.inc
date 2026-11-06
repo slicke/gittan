@@ -657,6 +657,11 @@ begin
   OpenSettings(pgEditor);
 end;
 
+procedure TRepoFrame.ShowHostingSettings;
+begin
+  OpenSettings(pgHosting);
+end;
+
 { About Gittan is the settings' last page. }
 procedure TRepoFrame.MenuAboutClick(Sender: TObject);
 begin
@@ -2864,11 +2869,14 @@ begin
   end;
   AddAction(paList, rsAllPulls, '');
   { Review it, merge it, while it is open and the forge acts. }
-  if CanPullAction(FPull, plApprove) then
+  if CanPullAction(FPull, plComment) then
   begin
     FPullPopup.AddHeader(rsPullReviewHeader);
-    AddAction(paAct + Ord(plApprove), rsPullApprove, '');
-    AddAction(paAct + Ord(plRequestChanges), rsPullRequestChanges, '');
+    { One's own has Comment alone. }
+    if CanPullAction(FPull, plApprove) then
+      AddAction(paAct + Ord(plApprove), rsPullApprove, '');
+    if CanPullAction(FPull, plRequestChanges) then
+      AddAction(paAct + Ord(plRequestChanges), rsPullRequestChanges, '');
     AddAction(paAct + Ord(plComment), rsPullComment, '');
   end;
   if CanPullAction(FPull, plMerge) then

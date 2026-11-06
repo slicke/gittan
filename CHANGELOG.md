@@ -3,6 +3,19 @@
 ## Unreleased
 
 ### Added
+- The globe counts the pull requests waiting for your review, and GitHub is asked again every five minutes, so the count follows without opening the GitHub view.
+- A card in the GitHub view has its next step as a button: Review on one waiting for your review (Review on GitHub when there is no clone to compare in), Merge with the three ways to merge on one of yours that is approved with its checks passing. Three dots open the card's menu, so what a right click offers is in sight, and the card's tooltip says where a click goes: compare in the open repository, open its clone, or open it on GitHub.
+- The Batch tab works without GitHub: the globe is always there, and without a hosting service it opens Batch alone, with a note and a link to the Hosting settings.
+
+### Changed
+- What an action on a pull request in the GitHub view did shows in a banner over the page ("Merged #12"), and a failure shows GitHub's words there rather than in a dialog.
+
+### Fixed
+- Your own pull requests no longer offer Approve and Request Changes, which GitHub refuses for the author; Comment is still there.
+
+## 0.16 (build-141, 2026-11-06)
+
+### Added
 - Extensions can add to the GitHub view: a tab of their own after Batch, with rows that open a link or a repository and buttons that act on them; an operation on the Batch tab that runs once for each picked repository and says what it found, a card per repository; and commands in the view's own Extensions menu. A new permission, `forge`, lets an extension run the forge's tool with your account (`Gittan.forge.cli`, and `Gittan.forges.gh.run` for gh, which runs only where the forge is GitHub) without the `exec` permission: only gh's commands that read and change what is on GitHub (api, pr, issue, repo, run, workflow, release, search, label, status, cache), never an alias, a gh extension, its config or login, or anything that reads or writes a local file or starts another program, and `@forges github` in its manifest keeps it to repositories on GitHub and to GitHub's view. What an extension added is marked with a puzzle piece and says which extension it is from. The sample `forge-overview.js` shows a tab of your pull requests that have waited, the open pull requests and issues of each repository, and who you are logged in as.
 - The GitHub view has a third tab, Batch, for work in several repositories at once. Pick repositories from the repository list and the recent ones (a folder's box picks all in it; the choice is kept), then Scan: each is fetched with --prune and its local branches whose branch on the remote was deleted are listed, each marked merged, squash-merged or not merged into the default branch. The merged ones are picked; Delete removes the picked branches after asking, and shows the commit each was at.
 - The Batch tab shows one operation at a time, picked with a row of pills (Overview, Gone branches) and kept between starts, and the list of repositories folds to one line naming the picked ones once something is picked; a click on its heading, with a chevron as the welcome view's folders have, unfolds it.

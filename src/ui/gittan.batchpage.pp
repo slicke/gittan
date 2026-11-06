@@ -170,6 +170,10 @@ type
     FExtRuns: array of TGittanBatchExtRun;
     FOnExtRun: TNotifyEvent;
     FOnOpenUrl: TGittanBatchOpenEvent;
+    { A note over the list (Notice), with a link that raises OnNotice. }
+    FNotice, FNoticeLink: string;
+    FOnNotice: TNotifyEvent;
+    procedure PaintNotice(var Y: integer; ALeft, ARight: integer);
     function ExtRunIndex(const AKey: string): integer;
     procedure PaintExtCard(var Y: integer; ARun, AIndex, ALeft, ARight: integer);
     procedure PaintExtOp(var Y: integer; ALeft, ARight: integer);
@@ -318,6 +322,10 @@ type
     {** A click on a card's head in the overview, or a repository's row
       in the identity check: open that repository. }
     property OnOpen: TGittanBatchOpenEvent read FOnOpen write FOnOpen;
+    {** A note in a card under the head, ALink a link after it that
+      raises OnNotice; '' for none. }
+    procedure SetNotice(const AText, ALink: string);
+    property OnNotice: TNotifyEvent read FOnNotice write FOnNotice;
   end;
 
 implementation
@@ -458,6 +466,7 @@ const
   ExtRunLink = 'xrun';
   ExtOpenLink = 'xo:';
   ExtUrlLink = 'xu:';
+  NoticeLink = 'notice';
   Pad = 24;
   Gap = 12;
   TitleFontSize = 20;
@@ -2652,6 +2661,7 @@ begin
   FC.TextOut(L, Y + TitleH + 2, FitTextLeft(FC, rsSubtitle, R - L));
   Inc(Y, TitleH + 2 + TextH);
 
+  PaintNotice(Y, L, R);
   PaintHeading(Y, rsReposHeading, Format(rsPickedOf, [ChosenCount, RepoCount]), L, R,
     Length(FRows) > 0);
   if FReposOpen or (Length(FRows) = 0) then
@@ -2674,6 +2684,59 @@ begin
   FContentHeight := Y + Px(Pad);
 end;
 
+procedure TGittanBatchPage.SetNotice(const AText, ALink: string);
+begin
+  if (FNotice = AText) and (FNoticeLink = ALink) then
+    Exit;
+  FNotice := AText;
+  FNoticeLink := ALink;
+  FHot := -1;
+  Layout;
+  Invalidate;
+end;
+
+{ The note in a card with a stripe of the link color at its left, the
+  text wrapped and the link under it. }
+procedure TGittanBatchPage.PaintNotice(var Y: integer; ALeft, ARight: integer);
+var
+  R, LinkR: TRect;
+  TextH, H, TextW: integer;
+begin
+  if FNotice = '' then
+    Exit;
+  Inc(Y, Px(Pad));
+  FC.Font := Font;
+  TextH := FC.TextHeight('Xg');
+  TextW := ARight - ALeft - 2 * Px(14);
+  H := 2 * Px(10) + WrappedHeight(FNotice, TextW);
+  if FNoticeLink <> '' then
+    Inc(H, TextH + Px(4));
+  R := Rect(ALeft, Y, ARight, Y + H);
+  FC.Pen.Style := psClear;
+  FC.Brush.Style := bsSolid;
+  FC.Brush.Color := FCard;
+  FC.RoundRect(R, Px(12), Px(12));
+  FC.Brush.Color := FLink;
+  FC.FillRect(Rect(R.Left, R.Top + Px(6), R.Left + Px(3), R.Bottom - Px(6)));
+  FC.Pen.Style := psSolid;
+  FC.Brush.Style := bsClear;
+  Y := R.Top + Px(10);
+  PaintText(Y, FNotice, FText, R.Left + Px(14), R.Right - Px(14));
+  if FNoticeLink <> '' then
+  begin
+    Inc(Y, Px(4));
+    FC.Font := Font;
+    LinkR := Rect(R.Left + Px(14), Y, R.Left + Px(14) + FC.TextWidth(FNoticeLink), Y + TextH);
+    AddLink(LinkR, NoticeLink);
+    FC.Font.Color := FLink;
+    if FHot = High(FLinkRects) then
+      FC.Font.Style := [fsUnderline];
+    FC.TextOut(LinkR.Left, LinkR.Top, FNoticeLink);
+    FC.Font := Font;
+  end;
+  Y := R.Bottom;
+end;
+
 procedure TGittanBatchPage.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
 var
   i, p, a, b: integer;
@@ -2686,7 +2749,12 @@ begin
   if i < 0 then
     Exit;
   Url := FLinkUrls[i];
-  if Copy(Url, 1, Length(RowLink)) = RowLink then
+  if Url = NoticeLink then
+  begin
+    if Assigned(FOnNotice) then
+      FOnNotice(Self);
+  end
+  else if Copy(Url, 1, Length(RowLink)) = RowLink then
     ToggleRow(StrToIntDef(Copy(Url, Length(RowLink) + 1, MaxInt), -1))
   else if Copy(Url, 1, Length(GoneLink)) = GoneLink then
     ToggleGone(StrToIntDef(Copy(Url, Length(GoneLink) + 1, MaxInt), -1))

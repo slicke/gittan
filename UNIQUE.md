@@ -56,7 +56,7 @@ A JavaScript file in the extensions folder adds commands to the menu and the com
 
 ## Clean up many repositories at once
 
-The **Batch** tab of the GitHub view works on the repositories you pick from your repository list. **Gone branches** fetches each one and lists the local branches whose branch on the remote was deleted, each marked merged, squash-merged or not merged: a branch squash-merged on the forge is recognized as merged even though none of its commits are in main. The merged ones are picked, and one Delete clears them all. **Identity** shows who each repository commits as and whether it signs, and marks the one where the others of the same owner use another e-mail, such as a work repository committed to with a private address.
+The **Batch** tab behind the globe works on the repositories you pick from your repository list, with or without GitHub. **Gone branches** fetches each one and lists the local branches whose branch on the remote was deleted, each marked merged, squash-merged or not merged: a branch squash-merged on the forge is recognized as merged even though none of its commits are in main. The merged ones are picked, and one Delete clears them all. **Identity** shows who each repository commits as and whether it signs, and marks the one where the others of the same owner use another e-mail, such as a work repository committed to with a private address.
 
 ## Small things
 

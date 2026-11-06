@@ -32,6 +32,7 @@ type
     procedure TestFindClones;
     procedure TestSiblingRepositories;
     procedure TestPullRequestOf;
+    procedure TestPullNext;
     procedure TestRemoteHost;
     procedure TestRemoteRepoPath;
     procedure TestForgeFor;
@@ -842,6 +843,60 @@ begin
   AssertEquals(EncodeDateTime(2026, 10, 20, 12, 34, 56, 0), Pull.Created);
   AssertEquals(0, Pull.ChecksPending);
   AssertEquals('', Pull.Labels);
+end;
+
+{ The step a card offers: a review of one waiting for it, a merge of
+  one's own that nothing stands in the way of. }
+procedure TForgeTest.TestPullNext;
+var
+  Pull: TGittanForgePull;
+  Ignored: TStringList;
+begin
+  Pull := Default(TGittanForgePull);
+  Pull.Number := 7;
+  Pull.State := prOpen;
+  AssertTrue('one to review', PullNext(Pull, fsReview) = pnReview);
+  AssertTrue('no review needed, no checks', PullNext(Pull, fsMine) = pnMerge);
+  Pull.ReviewDecision := rdReviewRequired;
+  AssertTrue('waits for a review', PullNext(Pull, fsMine) = pnNone);
+  Pull.ReviewDecision := rdChangesRequested;
+  AssertTrue(PullNext(Pull, fsMine) = pnNone);
+  Pull.ReviewDecision := rdApproved;
+  AssertTrue('approved', PullNext(Pull, fsMine) = pnMerge);
+  Pull.IsDraft := True;
+  AssertTrue('a draft', PullNext(Pull, fsMine) = pnNone);
+  Pull.IsDraft := False;
+  { A review asked of someone where none is required. }
+  Pull.ReviewDecision := rdNone;
+  SetLength(Pull.RequestedOf, 1);
+  Pull.RequestedOf[0] := 'sam';
+  AssertTrue('asked of sam', PullNext(Pull, fsMine) = pnNone);
+  Pull.RequestedOf := nil;
+  { The checks: failing or running ones stand in the way, unless
+    ignored. }
+  SetLength(Pull.CheckList, 2);
+  Pull.CheckList[0].Name := 'build';
+  Pull.CheckList[0].State := chkPassed;
+  Pull.CheckList[1].Name := 'npm audit';
+  Pull.CheckList[1].State := chkFailed;
+  Pull.Checks := chkFailed;
+  AssertTrue('a check fails', PullNext(Pull, fsMine) = pnNone);
+  Ignored := TStringList.Create;
+  try
+    Ignored.Add('npm audit');
+    AssertTrue('the failing check ignored', PullNext(Pull, fsMine, Ignored) = pnMerge);
+  finally
+    Ignored.Free;
+  end;
+  Pull.CheckList[1].State := chkPending;
+  Pull.Checks := chkPending;
+  AssertTrue('a check runs', PullNext(Pull, fsMine) = pnNone);
+  Pull.CheckList[1].State := chkPassed;
+  Pull.Checks := chkPassed;
+  AssertTrue(PullNext(Pull, fsMine) = pnMerge);
+  Pull.State := prMerged;
+  AssertTrue('merged already', PullNext(Pull, fsMine) = pnNone);
+  AssertTrue(PullNext(Pull, fsReview) = pnNone);
 end;
 
 procedure TForgeTest.TestRemoteRepoPath;
