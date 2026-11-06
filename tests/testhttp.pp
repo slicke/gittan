@@ -6,8 +6,8 @@ unit testhttp;
   macOS too). The server answers one connection at a time: /echo with the
   method, the X-Test and User-Agent headers and the body, a line each;
   /missing with a 404; /moved with a redirect to /echo; /slow after
-  SlowMs, longer than the timeout the test gives, and before a request
-  given up comes back. }
+  SlowMs, far longer than the timeout the test gives, and before a
+  request given up comes back, or as soon as the test ends. }
 
 {$mode objfpc}{$H+}
 
@@ -56,7 +56,11 @@ type
 implementation
 
 const
-  SlowMs = 2500;
+  { Far beyond TestTimeout's second: WinHTTP gives a request given 1 s up
+    after about 2 s, so with 2.5 s it now and then had /slow's answer
+    first. The server stops waiting when the test ends, so the length
+    costs no time. }
+  SlowMs = 10000;
   { When TestGivenUp gives its request up: after it has started, while
     /slow is still waiting. }
   GiveUpMs = 500;
@@ -164,6 +168,7 @@ var
   Data, Head, Body, Path, Status, Extra, Answer, Chunk: string;
   Buffer: array[0..4095] of char;
   Got, Ends, Wanted: integer;
+  Started: QWord;
 begin
   Data := '';
   Ends := 0;
@@ -202,7 +207,9 @@ begin
   end
   else if Path = '/slow' then
   begin
-    Sleep(SlowMs);
+    Started := GetTickCount64;
+    while not FStopping and (GetTickCount64 - Started < SlowMs) do
+      Sleep(20);
     Body := 'late';
   end
   else
@@ -355,8 +362,13 @@ end;
 procedure THttpTest.TestTimeout;
 var
   R: TGittanHttpResponse;
+  Started, Took: QWord;
 begin
+  Started := GetTickCount64;
   R := HttpGet(Url('/slow'), [], 1);
+  Took := GetTickCount64 - Started;
+  AssertTrue(Format('given up near its second, not after %d ms', [Took]),
+    Took < SlowMs);
   AssertEquals(0, R.Status);
   AssertTrue('says why', R.Error <> '');
   AssertEquals('', R.Body);
