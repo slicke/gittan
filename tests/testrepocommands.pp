@@ -35,6 +35,7 @@ type
     procedure TestCommandsFiles;
     procedure TestCommandsFileNames;
     procedure TestCommandsFileUnreadable;
+    procedure TestPersonalFile;
     procedure TestPackageScripts;
     procedure TestPackageNotJson;
     procedure TestMakefileTargets;
@@ -308,6 +309,64 @@ begin
   Put('.gittan/commands/release.toml', 'project = "none"'#10);
   Put('.gittan/commands.toml', '[commands.main]'#10'run = "echo main"'#10);
   AssertEquals('only commands.toml names the kinds', 1, Length(ProjectsOfRoot(FDir)));
+  Put('.gittan/commands.toml', 'project = "rust"'#10);
+  Put('.gittan/repo.toml', 'project = "none"'#10);
+  AssertEquals('repo.toml names them before commands.toml', 0, Length(ProjectsOfRoot(FDir)));
+  Put('.gittan/repo.toml', '[branches]'#10'protected = ["main"]'#10);
+  AssertEquals('and without a project line leaves it to commands.toml', 1,
+    Length(ProjectsOfRoot(FDir)));
+end;
+
+procedure TRepoCommandsTest.TestPersonalFile;
+var
+  F: TGittanCommandsFiles;
+  C: TGittanRepoCommands;
+  P: TGittanProjects;
+  Personal, H: string;
+  i: integer;
+begin
+  Personal := IncludeTrailingPathDelimiter(FDir) + 'gitdir' + PathDelim + PersonalFolder +
+    PathDelim + CommandsFile;
+  AssertEquals('no git directory, no file', '', PersonalCommandsFileName(''));
+  AssertEquals(Personal, PersonalCommandsFileName(IncludeTrailingPathDelimiter(FDir) + 'gitdir'));
+  AssertEquals('a missing file is not read', 0, Length(ReadCommandsFiles(FDir, Personal)));
+  Put('Makefile', 'test:'#10#9'echo t'#10'lint:'#10#9'echo l'#10);
+  Put('.gittan/commands.toml', '[commands.test]'#10'key = "T"'#10'confirm = true'#10 +
+    '[commands.lint]'#10'key = "L"'#10'description = "The team''s lint"'#10 +
+    '[commands.main]'#10'run = "echo main"'#10'key = "M"'#10 +
+    '[commands.ship]'#10'run = "echo ship"'#10'key = "X"'#10);
+  H := CommandsFileHash(FDir);
+  Put('gitdir/gittan/commands.toml', '[commands.mine]'#10'run = "echo mine"'#10'key = "M"'#10 +
+    '[commands.test]'#10'key = "X"'#10'description = "Mine"'#10'[commands.lint]'#10 +
+    'terminal = true'#10);
+  F := ReadCommandsFiles(FDir, Personal);
+  AssertEquals('the personal file last', 2, Length(F));
+  AssertEquals(PersonalCommandsShown, F[1].Path);
+  AssertTrue(F[1].Personal);
+  AssertFalse(F[0].Personal);
+  AssertEquals('the personal file needs no trust', H, CommandsHashOf(F));
+  C := DiscoverRepoCommands(FDir, P, F, '', Personal);
+  AssertEquals('mine, main, ship, then the targets', 5, Length(C));
+  AssertEquals('mine', C[0].Name);
+  AssertTrue(C[0].Personal);
+  AssertEquals(PersonalCommandsShown, C[0].Project);
+  AssertEquals('the personal key comes first', 'M', C[0].Key);
+  AssertEquals('main', C[1].Name);
+  AssertFalse(C[1].Personal);
+  AssertEquals('and the committed one loses it', #0, C[1].Key);
+  AssertEquals('ship', C[2].Name);
+  AssertEquals('a personal key on a target, listed later, wins too', #0, C[2].Key);
+  i := 3;
+  AssertEquals('test', C[i].Name);
+  AssertEquals('the personal key over the committed one', 'X', C[i].Key);
+  AssertTrue(C[i].Personal);
+  AssertEquals('Mine', C[i].Description);
+  AssertTrue('the committed question holds', C[i].Confirm);
+  AssertEquals('lint', C[i + 1].Name);
+  AssertEquals('the committed key when the personal file gives none', 'L', C[i + 1].Key);
+  AssertFalse('so it waits for trust', C[i + 1].Personal);
+  AssertTrue(C[i + 1].Terminal);
+  AssertEquals('The team''s lint', C[i + 1].Description);
 end;
 
 procedure TRepoCommandsTest.TestCommandsFileNames;

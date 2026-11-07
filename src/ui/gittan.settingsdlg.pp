@@ -865,7 +865,9 @@ begin
   FUpdateLink.BorderSpacing.Left := Scale96ToScreen(10);
 
   AddLabel(rsRunsOn, 16);
-  FVersionsLabel := AddLabel(DupeString(LineEnding, VersionLines - 1), 4);
+  { Room for the versions until they are read; the last line holds a space,
+    as an empty last line is not measured. }
+  FVersionsLabel := AddLabel(DupeString(LineEnding, VersionLines - 1) + ' ', 4);
   FVersionsLabel.ShowAccelChar := False;
   FVersionsLabel.Font.Color := clGrayText;
   Row := AddRow(8);
@@ -968,7 +970,18 @@ begin
   Tallest := Max(Tallest, H);
   FExtPage.GetPreferredSize(W, H, False, True);
   Tallest := Max(Tallest, H);
-  FAboutPage.GetPreferredSize(W, H, False, True);
+  { About's preferred height while it is hidden counts its wrapped
+    licenses as one line, so the form
+    grew when About was shown: lay it out for a moment beside the page
+    shown and take the height it has then. }
+  if FAboutPage.Visible then
+    H := FAboutPage.Height
+  else
+  begin
+    FAboutPage.Visible := True;
+    H := FAboutPage.Height;
+    FAboutPage.Visible := False;
+  end;
   Tallest := Max(Tallest, H);
   FEditorBox.Constraints.MinHeight := Tallest;
   FToolsBox.Constraints.MinHeight := Tallest;

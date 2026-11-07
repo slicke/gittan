@@ -142,7 +142,7 @@ begin
   FSubjectCount.Layout := tlCenter;
   FSubjectCount.BorderSpacing.Right := 8;
   FSubjectCount.ShowHint := True;
-  FSubjectCount.Hint := Format(rsSubjectCountHint, [SubjectHardLimit]);
+  FSubjectCount.Hint := Format(rsSubjectCountHint, [DefaultSubjectHard]);
   FSubjectCount.Visible := False;
   FSubjectCount.Parent := FCommitRow;
   FCommitNote := TGittanHintBox.Create(Self);
@@ -180,9 +180,10 @@ begin
   Application.QueueAsyncCall(@FocusTreeAsync, 0);
 end;
 
-{ The first line's length shows once it is past SubjectSoftLimit, in
-  the warning color past SubjectHardLimit, where git log --oneline and
-  GitHub cut it. }
+{ The first line's length shows once it is past the soft limit, the
+  usual 50, in the warning color past the hard one, 72, where git log
+  --oneline and GitHub cut it; .gittan/repo.toml may set both
+  (FRepoConfig). }
 procedure TRepoFrame.UpdateSubjectCount;
 var
   Len: integer;
@@ -192,11 +193,11 @@ begin
   Len := 0;
   if FCommitMemo.Lines.Count > 0 then
     Len := UTF8Length(TrimRight(FCommitMemo.Lines[0]));
-  FSubjectCount.Visible := Len > SubjectSoftLimit;
+  FSubjectCount.Visible := Len > FRepoConfig.SubjectSoft;
   if not FSubjectCount.Visible then
     Exit;
-  FSubjectCount.Caption := Format(rsSubjectCount, [Len, SubjectHardLimit]);
-  if Len > SubjectHardLimit then
+  FSubjectCount.Caption := Format(rsSubjectCount, [Len, FRepoConfig.SubjectHard]);
+  if Len > FRepoConfig.SubjectHard then
   begin
     if FDark then
       FSubjectCount.Font.Color := RGBToColor(232, 170, 70)
@@ -564,6 +565,12 @@ begin
     the note says what the Abort button does instead. }
   if (Note = '') and StrayRebase then
     Note := Format(rsStrayRebaseNote, [FRebaseBranch, FBranch]);
+  { What .gittan/repo.toml asks of the commit: not on a protected
+    branch, a subject of its types. Commit stays on; it is the team's
+    rule, not git's. }
+  if (Note = '') and not Whole and not Continuing and (FOperation = '') and
+    ((Total > 0) or FCommitAmend.Checked or not MessageBlank) then
+    Note := CommitConfigNote;
   { What a tick means, while files are ticked, until Don't Show Again. }
   if (Note = '') and not Whole and CommitChoosing and (Chosen > 0) and
     not App.Settings.TickHintHidden then
@@ -654,7 +661,7 @@ begin
   { "Include the files" beside a ticked box and the conflicts beside their
     badge, as the tree draws them, the base beside a branch. }
   FCommitNote.Warn := (FRepo.Base = '') and (FConflictFiles > 0);
-  if Note = rsCommitNotHead then
+  if (Note = rsCommitNotHead) or (Note = Format(rsProtectedBranchNote, [FBranch])) then
     FCommitNote.Glyph := HintBranch
   else
     FCommitNote.Glyph := '';
@@ -676,6 +683,76 @@ begin
     FCommitItem.Enabled := FRepo.Root <> '';
   if FIdentityItem <> nil then
     FIdentityItem.Enabled := FRepo.Root <> '';
+end;
+
+{ What repo.toml says of this commit, '' for nothing: the branch is a
+  protected one, else the subject is not of the types or scopes it
+  lists. }
+function TRepoFrame.CommitConfigNote: string;
+var
+  Subject, Detail: string;
+begin
+  Result := '';
+  if not FHeadDetached and BranchProtected(FRepoConfig, FBranch) then
+    Exit(Format(rsProtectedBranchNote, [FBranch]));
+  if MessageBlank or (FCommitMemo.Lines.Count = 0) then
+    Exit;
+  Subject := FCommitMemo.Lines[0];
+  case CheckSubject(FRepoConfig, Subject, Detail) of
+    scNoType:
+      Result := Format(rsSubjectNoType, [FRepoConfig.Types[0],
+        string.Join(', ', FRepoConfig.Types)]);
+    scUnknownType:
+      Result := Format(rsSubjectUnknownType, [Detail, string.Join(', ', FRepoConfig.Types)]);
+    scUnknownScope:
+      Result := Format(rsSubjectUnknownScope, [Detail, string.Join(', ', FRepoConfig.Scopes)]);
+  end;
+end;
+
+{ A repo.toml that is no TOML, or cannot be read, leaves its settings
+  out: the banner says why, once for each error (AOld the one said
+  last), rather than the settings going without a word. }
+procedure TRepoFrame.NoteRepoConfigError(const AOld: string);
+begin
+  if (FRepoConfig.Error <> '') and (FRepoConfig.Error <> AOld) then
+    BannerError(rsRepoConfigNotRead, FRepoConfig.Error);
+end;
+
+{ Reads .gittan/repo.toml again, from ApplySnapshot, and passes on what
+  changed: the subject's limits, sign-off's default and the template,
+  which an untouched field takes. The issue tracker and the protected
+  branches are read where they are used. }
+procedure TRepoFrame.LoadRepoConfig;
+var
+  Old: TGittanRepoConfig;
+  Blank: boolean;
+begin
+  Old := FRepoConfig;
+  if FRepo.Root = '' then
+    FRepoConfig := EmptyRepoConfig
+  else
+    FRepoConfig := ReadRepoConfig(FRepo.Root);
+  if FRepo.Root = '' then
+    Exit;
+  NoteRepoConfigError(Old.Error);
+  if FRepoConfig.SignOff <> Old.SignOff then
+  begin
+    FSignOff := FRepo.SignOff(FRepoConfig.SignOff);
+    UpdateCommitOptions;
+  end;
+  if FRepoConfig.Template <> Old.Template then
+  begin
+    Blank := MessageBlank and (FOperation = '') and not FCommitAmend.Checked and
+      (FCommitJob = nil);
+    FCommitTemplate := FRepo.CommitTemplate(FRepoConfig.Template);
+    if Blank then
+      FCommitMemo.Text := FCommitTemplate;
+  end;
+  if FRepoConfig.SubjectHard = DefaultSubjectHard then
+    FSubjectCount.Hint := Format(rsSubjectCountHint, [DefaultSubjectHard])
+  else
+    FSubjectCount.Hint := Format(rsSubjectCountHintRepo, [FRepoConfig.SubjectHard]);
+  UpdateSubjectCount;
 end;
 
 procedure TRepoFrame.CommitNoteLink(Sender: TObject);
@@ -750,7 +827,7 @@ var
 begin
   if (FRepo.Root = '') or not FCommitOptions.Enabled then
     Exit;
-  FSignOff := FRepo.SignOff;
+  FSignOff := FRepo.SignOff(FRepoConfig.SignOff);
   FSignOffItem.Checked := FSignOff;
   FSkipHooksItem.Checked := FSkipHooks;
   UpdateCommitOptions;
@@ -780,9 +857,9 @@ end;
 
 procedure TRepoFrame.SignOffItemClick(Sender: TObject);
 begin
-  if not FRepo.SetSignOff(not FSignOff) then
+  if not FRepo.SetSignOff(not FSignOff, FRepoConfig.SignOff) then
     StatusNote(FRepo.Error, True);
-  FSignOff := FRepo.SignOff;
+  FSignOff := FRepo.SignOff(FRepoConfig.SignOff);
   UpdateCommitOptions;
 end;
 
@@ -1031,7 +1108,7 @@ begin
     if not Fixup then
     begin
       { commit.template may have changed since the repository opened. }
-      FCommitTemplate := FRepo.CommitTemplate;
+      FCommitTemplate := FRepo.CommitTemplate(FRepoConfig.Template);
       FCommitMemo.Text := FCommitTemplate;
       FCommitAmend.Checked := False;
       FAmendMessage := '';
@@ -1228,11 +1305,12 @@ begin
   FAmendMessage := '';
   FMergeMessage := '';
   FCommitDraftFor := FRepo.Root;
-  FSignOff := FRepo.SignOff;
+  FSignOff := FRepo.SignOff(FRepoConfig.SignOff);
   FSkipHooks := False;
   UpdateCommitOptions;
-  { commit.template fills a field with no draft, as git's editor would. }
-  FCommitTemplate := FRepo.CommitTemplate;
+  { commit.template (or repo.toml's) fills a field with no draft, as
+    git's editor would. }
+  FCommitTemplate := FRepo.CommitTemplate(FRepoConfig.Template);
   if (FRepo.Root <> '') and (App.Settings.CommitDraftRepo = FRepo.Root) then
     FCommitMemo.Text := App.Settings.CommitDraft
   else

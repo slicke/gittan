@@ -7,6 +7,8 @@
 - A card in the GitHub view has its next step as a button: Review on one waiting for your review (Review on GitHub when there is no clone to compare in), Merge with the three ways to merge on one of yours that is approved with its checks passing. Three dots open the card's menu, so what a right click offers is in sight, and the card's tooltip says where a click goes: compare in the open repository, open its clone, or open it on GitHub.
 - The GitHub view has a search field (View > Find..., Cmd+F) that keeps the pull requests whose number, title, repository, author or branch hold the words typed, and works from the keyboard: Up and Down move from card to card, Return opens the one picked, the menu key opens its menu, Escape empties the search.
 - The Batch tab works without GitHub: the globe is always there, and without a hosting service it opens Batch alone, with a note and a link to the Hosting settings.
+- Commands of your own for a repository go in `.git/gittan/commands.toml`, which is never committed and needs no trust. The Commands page lists them under Personal, with Create… until the file exists, and the Config section lists the file. Its keys come before those of the committed files, and a table naming a script, target or tool command gives it your own key. A worktree shares the file with the main checkout.
+- `.gittan/repo.toml` says what a repository wants, for everyone who clones it, and needs no trust as nothing in it runs. It can name the kinds of project (`project =`, before the line of the same name in commands.toml), give the issue tracker for the links in commit messages (`[issues]`, when git config names none), set the subject's lengths, a message template and sign-off by default, ask for Conventional Commits subjects with `types` and `scopes`, and list protected branches. The Commit section says when a subject is not of the listed types or a protected branch is checked out, without stopping the commit. The whole `.gittan` folder is described in docs/gittan-folder/README.md.
 
 ### Changed
 - The cards of the GitHub view are easier to scan: the pull request glyph is red while changes are asked for or checks fail and yellow while checks run, "Waiting for you" stands out in yellow, "Asked again" takes its place rather than standing beside it, the reviewers line no longer repeats who the chip names, and the link to a local clone is a dim line rather than a blue one.
@@ -18,6 +20,17 @@
 ### Fixed
 - The GitHub view says when GitHub has more pull requests than the fifty last changed it lists, rather than leaving the rest out without a word.
 - Your own pull requests no longer offer Approve and Request Changes, which GitHub refuses for the author; Comment is still there.
+- Go to Symbol, Go to Symbol in Repository and Changed Symbols open their list under the file header, or under the title bar over the summary, instead of over the tabs.
+- Go to Symbol, Changed Symbols and Callers of Changed Symbols say in the status bar that a file has to be shown first, rather than doing nothing.
+- Go > Time-lapse plays the file of the Code History shown, rather than asking for a file.
+- After a time-lapse, a file without changes no longer shows the time-lapse's counter in its header over the Revert and Save buttons.
+- Escape closes the Code History and the time-lapse and goes back to what was shown before.
+- Blame and Side by Side on a new file say in the status bar that it has no committed lines, rather than showing empty panes. A file added in a commit you compare still has its blame.
+- File > New Tab and Repository List go to the empty tab when there is one, rather than opening another.
+- The Settings window keeps its height on About instead of growing by a line.
+- While two commits are compared, an edit of `.gittan/commands.toml` is picked up without a refresh.
+- Back and Forward pass over the Pull Requests page when the hosting service has been turned off since, rather than stopping there with nothing shown.
+- The GitHub view says you're not logged in when gh has no account, with Log In in Terminal (runs `gh auth login`) and Hosting Settings, rather than showing gh's message in red.
 
 ## 0.16 (build-141, 2026-11-06)
 

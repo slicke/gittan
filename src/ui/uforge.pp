@@ -206,6 +206,8 @@ type
     procedure ActionDone(Sender: TObject);
     procedure AbandonAction;
     procedure PageRefresh(Sender: TObject);
+    procedure PageLogIn(Sender: TObject);
+    procedure PageHostingSettings(Sender: TObject);
     procedure LoadFilters;
     procedure PageFilterChange(Sender: TObject);
     procedure PageSavePreset(Sender: TObject);
@@ -326,7 +328,7 @@ implementation
 
 uses
   Math, LCLIntf, gittan.app, gittan.theme, gittan.textfit, gittan.git, gittan.ext.engine,
-  gittan.ext.views;
+  gittan.ext.views, gittan.cli;
 
 resourcestring
   rsSavePresetTitle = 'Save as Preset';
@@ -497,6 +499,8 @@ begin
   FPage.OnWhere := @PageWhere;
   FCardPopup := TPopupMenu.Create(Self);
   FPage.OnRefresh := @PageRefresh;
+  FPage.OnLogIn := @PageLogIn;
+  FPage.OnHostingSettings := @PageHostingSettings;
   LoadFilters;
   FPage.OnFilterChange := @PageFilterChange;
   FPage.OnSavePreset := @PageSavePreset;
@@ -991,6 +995,11 @@ begin
   FPage.SetLogin(FLogin);
   FPage.SetAvatar(FAvatar);
   FPage.SetLeft(FMineLeft, FReviewLeft);
+  if Assigned(FForge) and (FError <> '') and FForge.NeedsLogin(FError) and
+    (FForge.LoginArgs <> '') then
+    FPage.LoginCommand := FForge.CliName + ' ' + FForge.LoginArgs
+  else
+    FPage.LoginCommand := '';
   FPage.SetPulls(FMine, FReview, FError, FJob <> nil);
   FPage.FitHeight(FBox.ClientHeight);
   if Assigned(FOnTabsChange) then
@@ -1666,6 +1675,28 @@ end;
 procedure TForgeView.PageRefresh(Sender: TObject);
 begin
   StartJob;
+end;
+
+{ The forge's tool logs in in a terminal, as it asks; Refresh, or the
+  next look, reads the lists with the account. Its path quoted for the
+  shell the terminal runs: cmd.exe's double quotes on Windows. }
+procedure TForgeView.PageLogIn(Sender: TObject);
+var
+  Tool: string;
+begin
+  if not Assigned(FForge) or (FForge.LoginArgs = '') then
+    Exit;
+  {$IFDEF WINDOWS}
+  Tool := '"' + FForge.Cli + '"';
+  {$ELSE}
+  Tool := ShellQuote(FForge.Cli);
+  {$ENDIF}
+  FWindow.RunInTerminal(Tool + ' ' + FForge.LoginArgs);
+end;
+
+procedure TForgeView.PageHostingSettings(Sender: TObject);
+begin
+  FWindow.ShowHostingSettings;
 end;
 
 { The forge's filters and presets with the user's own presets after
