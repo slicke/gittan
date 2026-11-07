@@ -939,6 +939,7 @@ begin
   FSideItem.Checked := FSideBySide;
   RebuildIfChanges;
   ApplyLayout;
+  NoteNewFile;
 end;
 
 { Whitespace changes are left out by git itself (-w on every diff), so
@@ -2393,8 +2394,8 @@ begin
   Result := 'cd ' + gittan.cli.ShellQuote(ARoot) + ' && ' + ACommand + '; exec ${SHELL:-sh}';
 end;
 
-{ A terminal in the repository root, running ACommand there when it is
-  not empty (a command of the repository marked for the terminal, see
+{ A terminal in ARoot (the repository's root for OpenTerminal), running
+  ACommand there when it is not empty (a command of the repository marked for the terminal, see
   umain.commands.inc). The terminal command from the settings file gets
   the root appended, and the command after it; the platform's terminal
   when none is set. On macOS Terminal is told through osascript to
@@ -2406,7 +2407,7 @@ end;
   after -- for gnome-terminal, whose -e takes one string, -x for
   xfce4-terminal, and -e for the rest (x-terminal-emulator takes -e as
   xterm does, whichever terminal it is). }
-procedure TRepoFrame.OpenTerminal(const ACommand: string);
+procedure TRepoFrame.OpenTerminalIn(const ARoot, ACommand: string);
 {$IF not defined(DARWIN) and not defined(WINDOWS)}
 const
   Terminals: array[0..4] of string = ('x-terminal-emulator', 'gnome-terminal',
@@ -2419,24 +2420,24 @@ var
   Script: string;
 {$ENDIF}
 begin
-  if FRepo.Root = '' then
+  if ARoot = '' then
     Exit;
   if Trim(App.Settings.TerminalCommand) <> '' then
   begin
     if ACommand = '' then
-      RunCommandWith(App.Settings.TerminalCommand, [FRepo.Root])
+      RunCommandWith(App.Settings.TerminalCommand, [ARoot])
     else
-      RunCommandWith(App.Settings.TerminalCommand, [FRepo.Root, ACommand]);
+      RunCommandWith(App.Settings.TerminalCommand, [ARoot, ACommand]);
     Exit;
   end;
   {$IFDEF DARWIN}
   if ACommand = '' then
-    RunDetached('open', ['-a', 'Terminal', FRepo.Root])
+    RunDetached('open', ['-a', 'Terminal', ARoot])
   else
   begin
     { The line goes into an AppleScript string: its backslashes and
       quotes escaped. }
-    Script := 'cd ' + gittan.cli.ShellQuote(FRepo.Root) + ' && ' + ACommand;
+    Script := 'cd ' + gittan.cli.ShellQuote(ARoot) + ' && ' + ACommand;
     Script := StringReplace(Script, '\', '\\', [rfReplaceAll]);
     Script := StringReplace(Script, '"', '\"', [rfReplaceAll]);
     RunDetached('osascript', ['-e', 'tell application "Terminal" to do script "' +
@@ -2447,33 +2448,38 @@ begin
   if FindDefaultExecutablePath('wt.exe') <> '' then
   begin
     if ACommand = '' then
-      RunDetached('wt.exe', ['-d', FRepo.Root])
+      RunDetached('wt.exe', ['-d', ARoot])
     else
-      RunDetached('wt.exe', ['-d', FRepo.Root, 'cmd.exe', '/K', ACommand]);
+      RunDetached('wt.exe', ['-d', ARoot, 'cmd.exe', '/K', ACommand]);
   end
   else if ACommand = '' then
-    RunDetached('cmd.exe', ['/C', 'start', 'cmd.exe'], FRepo.Root)
+    RunDetached('cmd.exe', ['/C', 'start', 'cmd.exe'], ARoot)
   else
-    RunDetached('cmd.exe', ['/C', 'start', 'cmd.exe', '/K', ACommand], FRepo.Root);
+    RunDetached('cmd.exe', ['/C', 'start', 'cmd.exe', '/K', ACommand], ARoot);
   {$ELSE}
   for T in Terminals do
     if FindDefaultExecutablePath(T) <> '' then
     begin
       if ACommand = '' then
-        RunDetached(T, [], FRepo.Root)
+        RunDetached(T, [], ARoot)
       else if T = 'gnome-terminal' then
-        RunDetached(T, ['--', 'sh', '-c', ShellLineIn(FRepo.Root, ACommand)],
-          FRepo.Root)
+        RunDetached(T, ['--', 'sh', '-c', ShellLineIn(ARoot, ACommand)],
+          ARoot)
       else if T = 'xfce4-terminal' then
-        RunDetached(T, ['-x', 'sh', '-c', ShellLineIn(FRepo.Root, ACommand)],
-          FRepo.Root)
+        RunDetached(T, ['-x', 'sh', '-c', ShellLineIn(ARoot, ACommand)],
+          ARoot)
       else
-        RunDetached(T, ['-e', 'sh', '-c', ShellLineIn(FRepo.Root, ACommand)],
-          FRepo.Root);
+        RunDetached(T, ['-e', 'sh', '-c', ShellLineIn(ARoot, ACommand)],
+          ARoot);
       Exit;
     end;
   {$ENDIF}
   {$ENDIF}
+end;
+
+procedure TRepoFrame.OpenTerminal(const ACommand: string);
+begin
+  OpenTerminalIn(FRepo.Root, ACommand);
 end;
 
 { Tools > Install CLI Command: a gittan command for the terminal that

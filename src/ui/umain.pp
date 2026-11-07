@@ -214,6 +214,9 @@ type
     procedure ShowAbout; virtual; abstract;
     {** The settings dialog at its Hosting page. }
     procedure ShowHostingSettings; virtual; abstract;
+    {** A terminal in the user's home folder running ACommand (the forge
+      tool's login), through the frame's terminal (OpenTerminalIn). }
+    procedure RunInTerminal(const ACommand: string); virtual; abstract;
     {** Whether a frame has a remote for the repository ARepo
       ("owner/name"), so ComparePullRequest compares in it rather than
       opening a clone; by the frames' last snapshots (HoldsRepo), so it
@@ -1524,6 +1527,8 @@ type
     { umain.blame.inc }
     procedure MenuBlameClick(Sender: TObject);
     procedure StartBlame;
+    function ShownIsNewFile: boolean;
+    procedure NoteNewFile;
     procedure AbandonBlameJob;
     procedure FreeBlameJobsAsync(Data: PtrInt);
     procedure CacheBlame(const ARef, APath: string; ABlame: TGittanBlame);
@@ -1690,6 +1695,7 @@ type
     procedure TimelapseStep(ADelta: integer);
     function TimelapseDotColor(AIndex: integer): TColor;
     function TimelapseKey(Key: word; Shift: TShiftState): boolean;
+    function HistoryEscape(Key: word; Shift: TShiftState): boolean;
     { umain.actions.inc }
     procedure ApplySettings;
     procedure RebuildRecentMenu;
@@ -1854,6 +1860,7 @@ type
     procedure MenuGoToRepoSymbolClick(Sender: TObject);
     procedure SymbolBarPick(Sender: TObject; AIndex: integer);
     procedure SymbolBarClose(Sender: TObject);
+    procedure SymbolBarVisibleChange(Sender: TObject);
     procedure EditMouseMove(Sender: TObject; Shift: TShiftState; X, Y: integer);
     procedure EditMouseLeave(Sender: TObject);
     procedure HoverLookup(Ed: TATSynEdit; const Word: string);
@@ -2129,6 +2136,7 @@ type
     procedure NavRestoreRow(ARow, ACol, ATop: integer);
     function NavRestore(const APlace: TGittanPlace): boolean;
     procedure NavStep(AForward: boolean);
+    procedure NavReturn;
     procedure MenuBackClick(Sender: TObject);
     procedure MenuForwardClick(Sender: TObject);
     procedure PalettePopupPick(Sender: TObject; AIndex: integer);
@@ -2524,6 +2532,9 @@ type
     procedure MenuSettingsClick(Sender: TObject);
     procedure MenuAboutClick(Sender: TObject);
     procedure ShowHostingSettings;
+    {** A terminal in ARoot running ACommand when it is not empty (the
+      window's RunInTerminal, for the forge view). }
+    procedure OpenTerminalIn(const ARoot, ACommand: string);
   end;
 
 {** Asks what AAction on APull needs before it runs: the words of a
@@ -2712,6 +2723,9 @@ resourcestring
   rsBlame = '&Blame';
   rsNotCommitted = 'Not committed';
   rsNotCommittedYet = 'Not committed yet';
+  rsNewFileModes = 'The file is new: it has no committed lines to blame and no old side to show beside it.';
+  rsNewFileBlame = 'The file is new: it has no committed lines to blame.';
+  rsNewFileSide = 'The file is new: it has no old side to show beside it.';
   rsCommit = 'commit %s';
   rsHistory = 'Code &History';
   rsGoFileHistory = 'Fi&le History';
@@ -2800,6 +2814,8 @@ resourcestring
   rsChangedSymbolHint = 'Changed symbol';
   rsRepoSymbolHint = 'Symbol in repository';
   rsNoChangedSymbols = 'No changed symbols in this file.';
+  rsSymbolsNeedFile = 'Show a file first: the symbols are those of the file shown.';
+  rsChangedSymbolsNeedFile = 'Show a file'#39's changes first: the symbols are those its diff changed.';
   rsCallers = 'Ca&llers of Changed Symbols...';
   rsCallerHint = 'Changed symbol or a line that uses it';
   rsCallersAbove = 'same name, listed above';
@@ -4305,6 +4321,7 @@ begin
   FSymbolBar.Visible := False;
   FSymbolBar.OnPick := @SymbolBarPick;
   FSymbolBar.OnClose := @SymbolBarClose;
+  FSymbolBar.OnVisibleChange := @SymbolBarVisibleChange;
   { The time-lapse bar sits under the editor while a time-lapse plays. }
   FTimelapseBar := TGittanTimelapseBar.Create(Self);
   FTimelapseBar.Parent := EditorPanel;
@@ -5576,13 +5593,31 @@ begin
   PlaceUnderTitleBar;
 end;
 
+procedure TRepoFrame.SymbolBarVisibleChange(Sender: TObject);
+begin
+  PlaceUnderTitleBar;
+end;
+
 { The banner is the first alTop control of the panel when shown (Top 0
   puts it before the header), and takes the strip's height as its own
-  spacing so the header under it does not leave a gap. }
+  spacing so the header under it does not leave a gap. The find bar and
+  the symbol bar follow the header in that order (a Top past the panel's
+  height puts a control last among the alTop ones); over the summary,
+  where the header is hidden, the symbol bar is the first row and takes
+  the strip's height itself. }
 procedure TRepoFrame.PlaceUnderTitleBar;
+var
+  Bar: boolean;
 begin
+  Bar := (FSymbolBar <> nil) and FSymbolBar.Visible;
   EditorPanel.DisableAlign;
   try
+    if FSymbolBar <> nil then
+    begin
+      FFindBar.Top := EditorPanel.Height + 1;
+      FSymbolBar.Top := EditorPanel.Height + 2;
+      FSymbolBar.BorderSpacing.Top := 0;
+    end;
     if FBanner.Visible then
     begin
       FBanner.BorderSpacing.Top := FTitleBarHeight;
@@ -5597,6 +5632,11 @@ begin
       { The page of a submodule has the header over the box. }
       if FHeader.Visible then
         FSummaryBox.BorderSpacing.Top := 0
+      else if Bar then
+      begin
+        FSymbolBar.BorderSpacing.Top := FTitleBarHeight;
+        FSummaryBox.BorderSpacing.Top := 0;
+      end
       else
         FSummaryBox.BorderSpacing.Top := FTitleBarHeight;
     end;
@@ -8751,7 +8791,7 @@ end;
 { A command's key runs it (CommandKey). }
 procedure TRepoFrame.FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
 begin
-  if TimelapseKey(Key, Shift) or CommandKey(Key, Shift) then
+  if TimelapseKey(Key, Shift) or HistoryEscape(Key, Shift) or CommandKey(Key, Shift) then
     Key := 0;
 end;
 

@@ -41,7 +41,8 @@ var
 begin
   FBlameOld := nil;
   FBlameNew := nil;
-  if FBlameOn and (FView = gvChanges) and (FCurrentPath <> '') then
+  NoteNewFile;
+  if FBlameOn and (FView = gvChanges) and (FCurrentPath <> '') and not ShownIsNewFile then
   begin
     FRepo.DiffSides(OldRef, NewRef);
     i := FBlameCache.IndexOf(BlameKey(OldRef, FCurrentPath));
@@ -61,6 +62,35 @@ begin
     end;
   end;
   ApplyBlame;
+end;
+
+{ Whether the change view shows a file with no old side: every row is
+  an added line (an untracked or newly added file). }
+function TRepoFrame.ShownIsNewFile: boolean;
+var
+  i: integer;
+begin
+  Result := (FView = gvChanges) and (FChangeLines <> nil) and (FChangeLines.Count > 0);
+  if not Result then
+    Exit;
+  for i := 0 to FChangeLines.Count - 1 do
+    if (FChangeLines[i] = '') or (FChangeLines[i][1] <> '+') then
+      Exit(False);
+end;
+
+{ Blame and Side by Side have nothing to show for a new file, and the
+  band and the old pane stayed empty without a word: the status bar
+  says why while either is on. }
+procedure TRepoFrame.NoteNewFile;
+begin
+  if not ShownIsNewFile then
+    Exit;
+  if FBlameOn and FSideBySide then
+    StatusNote(rsNewFileModes)
+  else if FBlameOn then
+    StatusNote(rsNewFileBlame)
+  else if FSideBySide then
+    StatusNote(rsNewFileSide);
 end;
 
 { A job that is no longer wanted runs on without a handler until git is

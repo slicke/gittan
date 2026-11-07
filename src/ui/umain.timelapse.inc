@@ -24,10 +24,21 @@
 
 procedure TRepoFrame.MenuTimelapseClick(Sender: TObject);
 var
-  Path: string;
+  Path, Ref: string;
 begin
-  Path := ShownRelPath;
-  if (FRepo.Root = '') or not (FView in [gvChanges, gvFile]) or (Path = '') then
+  { From the code history the time-lapse plays the file of that history,
+    from the commit it was read at. }
+  if FView = gvHistory then
+  begin
+    Path := FHistoryPath;
+    Ref := FHistoryRef;
+  end
+  else
+  begin
+    Path := ShownRelPath;
+    Ref := HistoryRef;
+  end;
+  if (FRepo.Root = '') or not (FView in [gvChanges, gvFile, gvHistory]) or (Path = '') then
   begin
     StatusNote(rsTimelapseNeedsFile);
     Exit;
@@ -35,7 +46,7 @@ begin
   AbandonHistoryJob;
   AbandonTimelapseJob;
   FHistoryPath := Path;
-  FHistoryRef := HistoryRef;
+  FHistoryRef := Ref;
   FHistoryName := Path;
   FTimelapseJob := TGittanTimelapseJob.Create(FRepo.Root, Path, FHistoryRef);
   FTimelapseJob.OnDone := @TimelapseJobDone;

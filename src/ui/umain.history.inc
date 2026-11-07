@@ -176,8 +176,23 @@ begin
   Result := AFrom > 0;
 end;
 
+{ Escape in the code history or the time-lapse, while the editor, the
+  time-lapse bar or the file tree has the focus (not a field, whose
+  Escape is its own), goes back to what was shown before, as Escape
+  closes the commit graph. }
+function TRepoFrame.HistoryEscape(Key: word; Shift: TShiftState): boolean;
+begin
+  Result := (Key = VK_ESCAPE) and (FView = gvHistory) and
+    (Shift * [ssShift, ssCtrl, ssAlt, ssMeta] = []) and
+    ((FWindow.ActiveControl = Edit) or (FWindow.ActiveControl = FTimelapseBar) or
+    (FWindow.ActiveControl = FileTree));
+  if Result then
+    NavReturn;
+end;
+
 { The commit the lines are counted in, and the history starts from: the
   right commit of a range, else the base (HEAD by default). }
+
 function TRepoFrame.HistoryRef: string;
 var
   OldRef, NewRef: string;

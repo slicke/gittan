@@ -584,6 +584,14 @@ type
       something outside the tool's login decides it (a token in the
       environment); empty otherwise, the base's answer. }
     class function AccountsNote: string; virtual;
+    {** The tool's arguments that log it in, after its name ("auth login"):
+      it asks its questions, so it runs in a terminal. Empty when the
+      forge cannot say, the base's answer. }
+    class function LoginArgs: string; virtual;
+    {** Whether AError, a job's, says the tool is logged out or its login
+      no longer holds, so the user is to log in rather than read it. The
+      base never says so. }
+    class function NeedsLogin(const AError: string): boolean; virtual;
     {** What the tool's environment gets when it runs for an extension
       (Gittan.forge.cli), "NAME=value" each: its prompts and its update
       notice off, since nobody could answer the one and the other would
@@ -2494,6 +2502,16 @@ class function TGittanForge.AccountsNote: string;
 
 begin
   Result := '';
+end;
+
+class function TGittanForge.LoginArgs: string;
+begin
+  Result := '';
+end;
+
+class function TGittanForge.NeedsLogin(const AError: string): boolean;
+begin
+  Result := False;
 end;
 
 class function TGittanForge.CliEnv: TStringArray;

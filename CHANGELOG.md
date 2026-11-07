@@ -18,6 +18,15 @@
 ### Fixed
 - The GitHub view says when GitHub has more pull requests than the fifty last changed it lists, rather than leaving the rest out without a word.
 - Your own pull requests no longer offer Approve and Request Changes, which GitHub refuses for the author; Comment is still there.
+- Go to Symbol, Go to Symbol in Repository and Changed Symbols open their list under the file header, or under the title bar over the summary, instead of over the tabs.
+- Go to Symbol, Changed Symbols and Callers of Changed Symbols say in the status bar that a file has to be shown first, rather than doing nothing.
+- Go > Time-lapse plays the file of the Code History shown, rather than asking for a file.
+- After a time-lapse, a file without changes no longer shows the time-lapse's counter in its header over the Revert and Save buttons.
+- Escape closes the Code History and the time-lapse and goes back to what was shown before.
+- Blame and Side by Side on a new file say in the status bar that it has no committed lines, rather than showing empty panes.
+- File > New Tab and Repository List go to the empty tab when there is one, rather than opening another.
+- The Settings window keeps its height on About instead of growing by a line.
+- The GitHub view says you're not logged in when gh has no account, with Log In in Terminal (runs `gh auth login`) and Hosting Settings, rather than showing gh's message in red.
 
 ## 0.16 (build-141, 2026-11-06)
 

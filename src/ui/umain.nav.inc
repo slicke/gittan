@@ -369,6 +369,30 @@ begin
   NavUpdateItems;
 end;
 
+{ Leaves a view that is no place (the code history, the time-lapse) for
+  the place shown before it, which is still the one noted, or for the
+  summary when that is gone. }
+procedure TRepoFrame.NavReturn;
+var
+  Shown: boolean;
+begin
+  if FRepo.Root = '' then
+    Exit;
+  Shown := False;
+  if FNavValid then
+  begin
+    FNavBusy := True;
+    try
+      Shown := NavRestore(FNavPlace);
+    finally
+      FNavBusy := False;
+    end;
+  end;
+  if not Shown then
+    ShowSummary;
+  NavUpdateItems;
+end;
+
 procedure TRepoFrame.MenuBackClick(Sender: TObject);
 begin
   NavStep(False);
