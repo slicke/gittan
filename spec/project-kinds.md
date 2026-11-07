@@ -30,7 +30,7 @@ Read this when touching `gittan.project`, `gittan.manifest`, a `gittan.proj.*` d
 
 ## Which kinds a repository is
 
-- `ProjectsOfRoot(ARoot, AChoice)` in `gittan.repocommands`: the kinds the user picked on the Project page (`AChoice`, from the settings, `TGittanSettings.ProjectKindsOf`: "Lazarus,Go", "none"), else `project = ["rust", "go"]` in commands.toml before its first table (`ParseCommandsTomlProjects`, through the files `ReadCommandsFiles` read), else `DetectProjects`. A named kind is listed through `ProjectsNamed`, with the manifest its `Identify` gives, '' when it does not identify the root; an unknown name is skipped; `SplitProjectChoice` reads either form. `DiscoverRepoCommands(ARoot, out AProjects, AChoice)` gives the kinds to `LoadRepoCommands`, which keeps them in `FRepoProjects` for both pages.
+- `ProjectsOfRoot(ARoot, AChoice)` in `gittan.repocommands`: the kinds the user picked on the Project page (`AChoice`, from the settings, `TGittanSettings.ProjectKindsOf`: "Lazarus,Go", "none"), else `project =` in `.gittan/repo.toml` (`ReadRepoConfig`, repo-config.md), else `project = ["rust", "go"]` in commands.toml before its first table (`ParseCommandsTomlProjects`, through the files `ReadCommandsFiles` read), else `DetectProjects`. A named kind is listed through `ProjectsNamed`, with the manifest its `Identify` gives, '' when it does not identify the root; an unknown name is skipped; `SplitProjectChoice` reads either form. `DiscoverRepoCommands(ARoot, out AProjects, AChoice)` gives the kinds to `LoadRepoCommands`, which keeps them in `FRepoProjects` for both pages.
 
 ## Adding a driver
 

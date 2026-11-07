@@ -8,7 +8,7 @@
   reachable from HEAD to compare with, the files git tracks, the files
   and submodules as they were at the tag. The kinds are the ones
   LoadRepoCommands found (FRepoProjects): picked on this page, else the
-  project line of .gittan/commands.toml, else each driver's Identify;
+  project line of .gittan/repo.toml or .gittan/commands.toml, else each driver's Identify;
   the chip at the top right drops the list to pick them from
   (FKindsPopup), kept per repository in the settings. The sections are
   built when the page is shown and, while it shows, on every snapshot;

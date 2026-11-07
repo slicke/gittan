@@ -47,6 +47,13 @@ const
   {** The folder inside it whose .toml files are commands files too, a
     section of the page each. }
   CommandsSubFolder = 'commands';
+  {** The folder of the user's own Gittan files for one repository,
+    inside its git directory (the one a linked worktree shares with the
+    main one), so they are never committed nor come with a clone. }
+  PersonalFolder = 'gittan';
+  {** The personal commands file as the page and the Config section show
+    it: inside .git, whatever the git directory is called. }
+  PersonalCommandsShown = '.git/' + PersonalFolder + '/' + CommandsFile;
   {** How much of a command's output the job keeps: the newest bytes. }
   OutputKeep = 1024 * 1024;
   {** How long a command may take to end after Kill before it is made
@@ -94,6 +101,9 @@ type
       csFile (".gittan/commands.toml", TGittanCommandsFile.Path); '' for the
       rest. }
     Project: string;
+    {** The personal commands file gave it, or gave it its key: it needs
+      no trust, as nothing committed wrote it. }
+    Personal: boolean;
   end;
   TGittanRepoCommands = array of TGittanRepoCommand;
 
@@ -106,6 +116,9 @@ type
     Commands: TGittanRepoCommands;
     HasProjects: boolean;
     Projects: TStringArray;
+    {** The personal file (PersonalCommandsShown as its Path): its
+      commands need no trust and its hash is not part of the files'. }
+    Personal: boolean;
   end;
   TGittanCommandsFiles = array of TGittanCommandsFile;
 
@@ -140,8 +153,14 @@ function CommandsSystemTitle: string;
 function ParseCommandsTomlProjects(const AText: string; out ANames: TStringArray): boolean;
 
 {** The commands files under ARoot, read and parsed: commands.toml, then
-  the .toml files of .gittan/commands by name. }
-function ReadCommandsFiles(const ARoot: string): TGittanCommandsFiles;
+  the .toml files of .gittan/commands by name, then the personal file
+  APersonal (a full name, PersonalCommandsFileName) when it exists. }
+function ReadCommandsFiles(const ARoot: string;
+  const APersonal: string = ''): TGittanCommandsFiles;
+
+{** The personal commands file of the repository whose shared git
+  directory is AGitDir: gittan/commands.toml in it; '' without one. }
+function PersonalCommandsFileName(const AGitDir: string): string;
 
 {** The scripts of a package.json's text, in its order: Name is the
   script's name and Detail its text; Command is empty, DiscoverRepoCommands
@@ -166,16 +185,21 @@ function PackageRunner(const ARoot: string): string;
   or kind's command is kept among the file's, with an empty Command, so
   the page can say so. AProjects is the kinds found, as the file's
   project line keeps them (ProjectsOfRoot); AFiles the commands files
-  read (ReadCommandsFiles). Reads the root's files; nothing runs. }
+  read (ReadCommandsFiles, with the personal file APersonal last). The
+  personal file's tables come before the committed files' in the
+  list, so a key it gives, or a script it names, is its own over
+  theirs. Reads the root's files; nothing runs. }
 function DiscoverRepoCommands(const ARoot: string; out AProjects: TGittanProjects;
-  out AFiles: TGittanCommandsFiles; const AChoice: string = ''): TGittanRepoCommands;
+  out AFiles: TGittanCommandsFiles; const AChoice: string = '';
+  const APersonal: string = ''): TGittanRepoCommands;
 function DiscoverRepoCommands(const ARoot: string; out AProjects: TGittanProjects;
   const AChoice: string = ''): TGittanRepoCommands;
 function DiscoverRepoCommands(const ARoot: string): TGittanRepoCommands;
 
 {** The kinds of project at ARoot. AChoice, what the user picked on the
   Project page ("rust, go", "none"; '' for none picked), comes first;
-  else a "project =" line of the commands file; else DetectProjects,
+  else a "project =" line of .gittan/repo.toml (gittan.repoconfig), else
+  one of the commands file; else DetectProjects,
   the kinds whose Identify says so. A kind named that does not identify
   the root is listed with no manifest. }
 function ProjectsOfRoot(const ARoot: string; const AChoice: string = ''): TGittanProjects;
@@ -183,13 +207,18 @@ function ProjectsOfRoot(const ARoot: string; const AChoice: string = ''): TGitta
 {** The SHA-256 of the commands files' text, '' without one: a hash that
   cannot be collided, so trusted files cannot be swapped for others of
   the same hash. Each file's path goes in with its text, so a file added
-  to .gittan/commands asks again. }
+  to .gittan/commands asks again. The personal file is left out: it
+  needs no trust. }
 function CommandsHashOf(const AFiles: TGittanCommandsFiles): string;
 function CommandsFileHash(const ARoot: string): string;
 
 {** What a new commands.toml holds: an example with its lines commented
   out. }
 function CommandsFileTemplate: string;
+
+{** What a new personal commands file holds: the same, said for a file
+  of one's own. }
+function PersonalCommandsTemplate: string;
 
 {** The index of the command with the key AKey in ACommands, -1 for
   none; a section without a command never matches. }
@@ -262,7 +291,7 @@ implementation
 uses
   {$ifdef unix}BaseUnix,{$endif}
   Process, fpjson, jsonparser, TOML.Types, TOML.Parser, gittan.git, gittan.textfile,
-  gittan.sha256;
+  gittan.sha256, gittan.repoconfig;
 
 { ---------------------------------------------------------------------------
   The commands file
@@ -486,23 +515,32 @@ begin
   end;
 end;
 
-function ReadCommandsFiles(const ARoot: string): TGittanCommandsFiles;
+function PersonalCommandsFileName(const AGitDir: string): string;
+begin
+  if AGitDir = '' then
+    Result := ''
+  else
+    Result := IncludeTrailingPathDelimiter(AGitDir) + PersonalFolder + PathDelim + CommandsFile;
+end;
+
+function ReadCommandsFiles(const ARoot: string; const APersonal: string): TGittanCommandsFiles;
 var
   Root, Sub: string;
   Names: TStringList;
   Info: TSearchRec;
   i: integer;
 
-  procedure AddFile(const APath: string; AMain: boolean);
+  procedure AddFile(const APath, AFileName: string; AMain, APersonal: boolean);
   var
     F: TGittanCommandsFile;
     i: integer;
   begin
     F := Default(TGittanCommandsFile);
     F.Path := APath;
+    F.Personal := APersonal;
     { A file that cannot be read gives no commands and says why. }
     try
-      F.Text := ReadFileBytes(Root + SetDirSeparators(APath));
+      F.Text := ReadFileBytes(AFileName);
       F.Commands := ParseCommandsToml(F.Text, F.Error);
     except
       on E: Exception do
@@ -515,7 +553,10 @@ var
     if AMain then
       F.HasProjects := ParseCommandsTomlProjects(F.Text, F.Projects);
     for i := 0 to High(F.Commands) do
+    begin
       F.Commands[i].Project := APath;
+      F.Commands[i].Personal := APersonal;
+    end;
     SetLength(Result, Length(Result) + 1);
     Result[High(Result)] := F;
   end;
@@ -526,7 +567,7 @@ begin
     Exit;
   Root := IncludeTrailingPathDelimiter(ARoot);
   if FileExists(Root + CommandsFolder + PathDelim + CommandsFile) then
-    AddFile(CommandsPath, True);
+    AddFile(CommandsPath, Root + CommandsFolder + PathDelim + CommandsFile, True, False);
   Sub := Root + CommandsFolder + PathDelim + CommandsSubFolder + PathDelim;
   Names := TStringList.Create;
   try
@@ -545,10 +586,13 @@ begin
       end;
     Names.CustomSort(@CompareOrdinal);
     for i := 0 to Names.Count - 1 do
-      AddFile(CommandsFolder + '/' + CommandsSubFolder + '/' + Names[i], False);
+      AddFile(CommandsFolder + '/' + CommandsSubFolder + '/' + Names[i], Sub + Names[i],
+        False, False);
   finally
     Names.Free;
   end;
+  if (APersonal <> '') and FileExists(APersonal) then
+    AddFile(PersonalCommandsShown, APersonal, False, True);
 end;
 
 function CommandsFileTemplate: string;
@@ -582,6 +626,27 @@ begin
     '# [commands.clean]' + LineEnding +
     '# run = { windows = "rmdir /s /q build", unix = "rm -rf build" }' + LineEnding +
     '# confirm = "Remove the build folder?"' + LineEnding;
+end;
+
+function PersonalCommandsTemplate: string;
+begin
+  Result :=
+    '# Your own commands for this repository, kept in its .git folder:' + LineEnding +
+    '# never committed, never in a clone, and run without asking to be' + LineEnding +
+    '# trusted. They are written as in .gittan/commands.toml: a table per' + LineEnding +
+    '# command under [commands], with run the shell line, key one letter' + LineEnding +
+    '# or digit for its shortcut (Ctrl+Cmd on macOS, Ctrl+Alt elsewhere),' + LineEnding +
+    '# terminal, description, confirm and hidden. A table with no run' + LineEnding +
+    '# line named as a script, a Makefile target or a command of the' + LineEnding +
+    '# project''s tools gives that one your key, before the key a' + LineEnding +
+    '# committed file gives it.' + LineEnding +
+    '#' + LineEnding +
+    '# [commands.serve]' + LineEnding +
+    '# run = "python3 -m http.server 8000"' + LineEnding +
+    '# terminal = true' + LineEnding +
+    '#' + LineEnding +
+    '# [commands.test]' + LineEnding +
+    '# key = "T"' + LineEnding;
 end;
 
 { ---------------------------------------------------------------------------
@@ -741,13 +806,18 @@ begin
   end;
 end;
 
-{ ProjectsOfRoot with the commands files read: the first one's project
-  line. }
+{ ProjectsOfRoot with the commands files read: repo.toml's project
+  line, else the first commands file's. }
 function ProjectsOfFiles(const ARoot: string; const AFiles: TGittanCommandsFiles;
   const AChoice: string): TGittanProjects;
+var
+  Config: TGittanRepoConfig;
 begin
   if Trim(AChoice) <> '' then
     Exit(ProjectsNamed(ARoot, SplitProjectChoice(AChoice)));
+  Config := ReadRepoConfig(ARoot);
+  if Config.HasProjects then
+    Exit(ProjectsNamed(ARoot, Config.Projects));
   if (Length(AFiles) > 0) and AFiles[0].HasProjects then
     Exit(ProjectsNamed(ARoot, AFiles[0].Projects));
   Result := DetectProjects(ARoot);
@@ -778,7 +848,8 @@ begin
 end;
 
 function DiscoverRepoCommands(const ARoot: string; out AProjects: TGittanProjects;
-  out AFiles: TGittanCommandsFiles; const AChoice: string): TGittanRepoCommands;
+  out AFiles: TGittanCommandsFiles; const AChoice: string;
+  const APersonal: string): TGittanRepoCommands;
 const
   { A typed array, not an array constructor: FPC 3.2.2 gets a for-in
     over a constructor of strings wrong. }
@@ -796,24 +867,54 @@ var
   { A file section without a command line that names ACommand gives it
     the key, the terminal flag, the description, the question and
     whether it is hidden, and is taken by it. One whose run lines are
-    for other systems is a command of its own. }
+    for other systems is a command of its own. When the personal file's
+    section came first, a committed one of the same name is taken too
+    and fills in what the personal one leaves out: its key when the
+    personal one gives none, its description, its question; a flag set
+    in either holds. }
   procedure TakeFromFile(var ACommand: TGittanRepoCommand);
   var
     k: integer;
+    First: boolean;
   begin
+    First := True;
     for k := 0 to High(FileOnes) do
       if (FileOnes[k].Command = '') and not FileOnes[k].Elsewhere and
         (FileOnes[k].Name = ACommand.Name) then
       begin
-        ACommand.Key := FileOnes[k].Key;
-        ACommand.Terminal := FileOnes[k].Terminal;
-        if FileOnes[k].Description <> '' then
-          ACommand.Description := FileOnes[k].Description;
-        ACommand.Confirm := FileOnes[k].Confirm;
-        ACommand.ConfirmText := FileOnes[k].ConfirmText;
-        ACommand.Hidden := FileOnes[k].Hidden;
         Taken[k] := True;
-        Exit;
+        if First then
+        begin
+          ACommand.Key := FileOnes[k].Key;
+          ACommand.Terminal := FileOnes[k].Terminal;
+          if FileOnes[k].Description <> '' then
+            ACommand.Description := FileOnes[k].Description;
+          ACommand.Confirm := FileOnes[k].Confirm;
+          ACommand.ConfirmText := FileOnes[k].ConfirmText;
+          ACommand.Hidden := FileOnes[k].Hidden;
+          ACommand.Personal := FileOnes[k].Personal;
+          if not FileOnes[k].Personal then
+            Exit;
+          First := False;
+        end
+        else if not FileOnes[k].Personal then
+        begin
+          if ACommand.Key = #0 then
+          begin
+            ACommand.Key := FileOnes[k].Key;
+            ACommand.Personal := False;
+          end;
+          ACommand.Terminal := ACommand.Terminal or FileOnes[k].Terminal;
+          if (FileOnes[k].Description <> '') and (ACommand.Description = '') then
+            ACommand.Description := FileOnes[k].Description;
+          if FileOnes[k].Confirm and not ACommand.Confirm then
+          begin
+            ACommand.Confirm := True;
+            ACommand.ConfirmText := FileOnes[k].ConfirmText;
+          end;
+          ACommand.Hidden := ACommand.Hidden or FileOnes[k].Hidden;
+          Exit;
+        end;
       end;
   end;
 
@@ -852,14 +953,24 @@ begin
   if ARoot = '' then
     Exit;
   Root := IncludeTrailingPathDelimiter(ARoot);
-  AFiles := ReadCommandsFiles(ARoot);
+  AFiles := ReadCommandsFiles(ARoot, APersonal);
+  { The personal file's tables first: its keys, and what it says of a
+    script or target, are the user's own over the committed files'. }
   FileOnes := nil;
   for F in AFiles do
-    for i := 0 to High(F.Commands) do
-    begin
-      SetLength(FileOnes, Length(FileOnes) + 1);
-      FileOnes[High(FileOnes)] := F.Commands[i];
-    end;
+    if F.Personal then
+      for i := 0 to High(F.Commands) do
+      begin
+        SetLength(FileOnes, Length(FileOnes) + 1);
+        FileOnes[High(FileOnes)] := F.Commands[i];
+      end;
+  for F in AFiles do
+    if not F.Personal then
+      for i := 0 to High(F.Commands) do
+      begin
+        SetLength(FileOnes, Length(FileOnes) + 1);
+        FileOnes[High(FileOnes)] := F.Commands[i];
+      end;
   SetLength(Taken, Length(FileOnes));
   Scripts := ParsePackageScripts(ReadIfExists(Root + 'package.json'));
   if Length(Scripts) > 0 then
@@ -942,13 +1053,14 @@ var
   F: TGittanCommandsFile;
   All: string;
 begin
-  if Length(AFiles) = 0 then
-    Exit('');
   { The path and the text's length before each text, so no two sets of
     files join to the same string. }
   All := '';
   for F in AFiles do
-    All := All + F.Path + #0 + IntToStr(Length(F.Text)) + #0 + F.Text;
+    if not F.Personal then
+      All := All + F.Path + #0 + IntToStr(Length(F.Text)) + #0 + F.Text;
+  if All = '' then
+    Exit('');
   Result := SHA256Print(SHA256String(All));
 end;
 

@@ -8,8 +8,9 @@
   in the settings, over a second tree like the first, in a panel at the
   bottom of the tree panel; the panel is as high as the rows, up to half
   the panel, and hidden while there is nothing to list. The exclude file
-  of the git directory, .git/info/exclude, is listed last when it
-  exists. A click shows the file through ShowRepoFile, so a changed one
+  of the git directory, .git/info/exclude, is listed after them when it
+  exists, and the personal commands file, .git/gittan/commands.toml,
+  last. A click shows the file through ShowRepoFile, so a changed one
   is selected in the tree above with its diff, and only one of the trees
   keeps a selection. The files listed here are the ones the editor lets
   the user change; see "Editing the repository's files" below. }
@@ -53,7 +54,8 @@ end;
 { Fills the section's tree from ListRepoFiles: the root files in their
   fixed order, then .github as a folder, every folder open, then the
   exclude file as one row (Data 2, where the others have 1), since it
-  is not under the root. }
+  is not under the root, and the personal commands file as another
+  (Data 3). }
 procedure TRepoFrame.FillRepoFiles;
 var
   Files: TStringList;
@@ -101,6 +103,14 @@ begin
     begin
       Node := FRepoTree.Items.AddChild(nil, ExcludeShown);
       Node.Data := Pointer(2);
+      Node.ImageIndex := iconFile;
+      Node.SelectedIndex := iconFile;
+      Inc(Count);
+    end;
+    if (FPersonalPath <> '') and FileExists(FPersonalPath) then
+    begin
+      Node := FRepoTree.Items.AddChild(nil, PersonalCommandsShown);
+      Node.Data := Pointer(3);
       Node.ImageIndex := iconFile;
       Node.SelectedIndex := iconFile;
       Inc(Count);
@@ -245,6 +255,12 @@ begin
     { The exclude file is never in the tree above: it is not tracked. }
     FileTree.Selected := nil;
     OpenFile(FExcludePath);
+    Exit;
+  end;
+  if Node.Data = Pointer(3) then
+  begin
+    FileTree.Selected := nil;
+    OpenFile(FPersonalPath);
     Exit;
   end;
   ShowRepoFile(Node.GetTextPath);
@@ -459,7 +475,7 @@ function TRepoFrame.RepoFileName(const AFileName: string): boolean;
 var
   Root, Rel: string;
 begin
-  if (AFileName <> '') and (AFileName = FExcludePath) then
+  if (AFileName <> '') and ((AFileName = FExcludePath) or (AFileName = FPersonalPath)) then
     Exit(True);
   if FRepo.Root = '' then
     Exit(False);

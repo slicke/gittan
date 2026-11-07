@@ -19,7 +19,7 @@ uses
   gittan.lexers, gittan.git, gittan.conflicts, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.welcome, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.sidenav, gittan.repoinfo, gittan.repopage, gittan.subpage,
-  gittan.repocommands, gittan.project, gittan.commandpage, gittan.projectpage, gittan.job,
+  gittan.repocommands, gittan.repoconfig, gittan.project, gittan.commandpage, gittan.projectpage, gittan.job,
   gittan.settingsdlg, gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   {$IFDEF LCLCocoa}gittan.memohint,{$ENDIF}
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
@@ -572,8 +572,8 @@ type
     FHasCommitOption: boolean;
     FCommitButton: TButton;
     { The length of the message's first line, by the Commit button, once
-      it is past SubjectSoftLimit; in the warning color past
-      SubjectHardLimit. }
+      it is past the soft limit; in the warning color past the hard one
+      (FRepoConfig's SubjectSoft and SubjectHard). }
     FSubjectCount: TLabel;
     { How many changed files are chosen and how many could be (not the
       conflicts), as UpdateCommitState last counted them. }
@@ -674,6 +674,12 @@ type
       so a change on disk behind an edit is noticed; the exclude file of
       the open repository, found once when it is opened; and File > Save. }
     FEditPath, FExcludePath: string;
+    { The personal commands file (.git/gittan/commands.toml in the git
+      directory the worktrees share), found with FExcludePath. }
+    FPersonalPath: string;
+    { What .gittan/repo.toml says (gittan.repoconfig): read at open and
+      on every snapshot, LoadRepoConfig. }
+    FRepoConfig: TGittanRepoConfig;
     FEditStamp: LongInt;
     FSaveItem: TMenuItem;
     { Discarding a block of changes (umain.discard.inc): the block the
@@ -1070,6 +1076,9 @@ type
     FSideRatio: double;
     FSyncingScroll: boolean;
     FBranch: string;
+    { HEAD is on no branch: FBranch is a commit's id, which no protected
+      branch's pattern of repo.toml is for. }
+    FHeadDetached: boolean;
     FFileCount: integer;
     FStats: TGittanFileStats;
     FLoadError: string;
@@ -1419,6 +1428,11 @@ type
     procedure CommandPageStop(Sender: TObject);
     procedure CommandPageTrust(Sender: TObject);
     procedure CommandPageEditFile(Sender: TObject);
+    procedure CommandPageEditPersonal(Sender: TObject);
+    procedure LoadRepoConfig;
+    function CommitConfigNote: string;
+    function EffectiveIssueTracker: TGittanIssueTracker;
+    procedure EditCommandsFile(const AFileName, AShown, ATemplate: string);
     procedure CommandPageCopyOutput(Sender: TObject);
     function CommandKey(AKey: word; AShift: TShiftState): boolean;
     procedure OpenTerminal(const ACommand: string);
@@ -2940,6 +2954,13 @@ resourcestring
   rsPushAction = 'Push';
   rsSubjectCount = '%d/%d';
   rsSubjectCountHint = 'Characters in the first line. git log and GitHub cut it after %d.';
+  rsSubjectCountHintRepo = 'Characters in the first line. .gittan/repo.toml keeps it to %d.';
+  rsProtectedBranchNote = '%s is protected in .gittan/repo.toml: its changes come through ' +
+    'pull requests. Commit on a branch of its own.';
+  rsSubjectNoType = '.gittan/repo.toml asks for a subject such as "%s: what it does", ' +
+    'with one of these types: %s.';
+  rsSubjectUnknownType = '"%s" is not one of the types .gittan/repo.toml lists: %s.';
+  rsSubjectUnknownScope = '"%s" is not one of the scopes .gittan/repo.toml lists: %s.';
   rsCommitFailed = 'The commit failed';
   rsCommitAgain = 'Commit Again';
   rsFetchMenu = '&Fetch';
@@ -3849,11 +3870,6 @@ const
   { How long a note stays in the banner, and one that offers an action. }
   BannerInfoSeconds = 8;
   BannerActionSeconds = 20;
-  { The commit message's first line: its length shows past the soft
-    limit, the usual 50, and warns past the hard one, where git log
-    --oneline and GitHub cut it. }
-  SubjectSoftLimit = 50;
-  SubjectHardLimit = 72;
   { How long the pull request data is kept before gh is asked again,
     while checks run and otherwise; ms. }
   PullPollPending = 30000;
@@ -4153,6 +4169,7 @@ end;
 procedure TRepoFrame.Init(AWindow: TRepoWindow);
 begin
   FWindow := AWindow;
+  FRepoConfig := EmptyRepoConfig;
   FTitleBarHeight := FWindow.TitleBarHeight;
   FindAI;
   FTabSize := App.Settings.TabSize;
@@ -7309,6 +7326,8 @@ begin
   ClearReviews;
   FThreadFlips.Clear;
   FExcludePath := '';
+  FPersonalPath := '';
+  FRepoConfig := EmptyRepoConfig;
   AbandonSubmoduleJobs;
   FSubmodules := nil;
   FSubInfos := nil;
@@ -7392,6 +7411,9 @@ begin
   { The commands of an extension whose @repos names this root. }
   QueueRebuildExtMenu;
   ShowSidebar(True);
+  { Before the draft: repo.toml's template and sign-off fill the
+    section. }
+  FRepoConfig := ReadRepoConfig(Job.Root);
   LoadCommitDraft;
   { The exclude file lives in the git directory, which git names (a
     work tree's is elsewhere), once per open: the section lists it and
@@ -7399,6 +7421,8 @@ begin
   FExcludePath := FRepo.GitDir;
   if FExcludePath <> '' then
     FExcludePath := IncludeTrailingPathDelimiter(FExcludePath) + SetDirSeparators(ExcludeFile);
+  { The personal commands are the repository's, not one worktree's. }
+  FPersonalPath := PersonalCommandsFileName(FRepo.CommonDir);
   UpdateCaption;
   FSummary.Selected := '';
   LoadSnapshots;
@@ -7543,6 +7567,7 @@ begin
   FReviewSegments.Clear;
   FStats := ASnap.Stats;
   FBranch := ASnap.Branch;
+  FHeadDetached := ASnap.Detached;
   FSnapHead := ASnap.Head;
   { The remotes decide the forge, before the pull request is looked up
     on it. }
@@ -7553,6 +7578,8 @@ begin
     { An extension's @repos may name a remote. }
     QueueRebuildExtMenu;
   end;
+  { repo.toml follows the files, as the commands do: an edit or a pull. }
+  LoadRepoConfig;
   FIssueTracker := ASnap.IssueTracker;
   UpdateIssueTracker;
   ApplyFlowSnapshot(ASnap);

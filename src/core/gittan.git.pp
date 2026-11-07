@@ -286,9 +286,6 @@ type
     FConflictsOf: string;
     FConflicts: integer;
     FConflictPaths: TStringArray;
-    {** The folder a linked worktree's git directory shares with the
-      main one (its commondir file), else the git directory itself. }
-    function CommonDir: string;
     function RunGit(const ADir: string; const AArgs: array of string;
       out AOutput: string; const AIndexFile: string = ''): boolean;
     function RunRemote(const AArgs: array of string): boolean;
@@ -774,15 +771,19 @@ type
     function HasLocalIdentity: boolean;
     {** Whether commits in the repository are signed off, as Gittan keeps
       it in the repository's own config (`gittan.signOff`), so it holds
-      for that repository and its worktrees alone. }
-    function SignOff: boolean;
-    {** Keeps ASignOff for SignOff, unsetting the key when off. }
-    function SetSignOff(ASignOff: boolean): boolean;
+      for that repository and its worktrees alone; ADefault (what
+      .gittan/repo.toml says) while the key is not set. }
+    function SignOff(ADefault: boolean = False): boolean;
+    {** Keeps ASignOff for SignOff: the key is unset when it is ADefault,
+      else set to true or false. }
+    function SetSignOff(ASignOff: boolean; ADefault: boolean = False): boolean;
     {** The message commit.template names (a path from the root when
-      relative, ~ expanded), without its comment lines, which git takes
-      out only when it opens an editor, and without the blank lines at
-      its end; '' without one or when it cannot be read. }
-    function CommitTemplate: string;
+      relative, ~ expanded), or AFallback (a path from the root, what
+      .gittan/repo.toml names) when git config names none, without its
+      comment lines, which git takes out only when it opens an editor,
+      and without the blank lines at its end; '' without one or when it
+      cannot be read. }
+    function CommitTemplate(const AFallback: string = ''): string;
     {** Tells git how the repository pulls a branch that has diverged, in
       its own config, so Pull(pmAuto) asks no more: ARebase sets
       pull.rebase true, else pull.rebase false with pull.ff true (a
@@ -923,6 +924,10 @@ type
     {** The git directory of the work tree (a linked work tree has one of
       its own), empty when nothing is open. }
     function GitDir: string;
+    {** The folder a linked worktree's git directory shares with the
+      main one (its commondir file), else the git directory itself;
+      empty when nothing is open. }
+    function CommonDir: string;
     {** What git is in the middle of: "merging", "rebasing",
       "cherry-picking", "reverting" or "bisecting", from the files it
       leaves in the git directory meanwhile; empty when nothing. }
@@ -3035,26 +3040,39 @@ begin
     RunGit(FRoot, ['config', '--local', 'user.email'], Output));
 end;
 
-function TGittanRepo.SignOff: boolean;
+function TGittanRepo.SignOff(ADefault: boolean): boolean;
 var
   Output: string;
 begin
-  Result := (FRoot <> '') and RunGit(FRoot, ['config', '--local', '--bool', 'gittan.signOff'],
-    Output) and (Trim(Output) = 'true');
+  if FRoot = '' then
+    Exit(False);
+  { git config exits with 1 for a key that is not set. }
+  if RunGit(FRoot, ['config', '--local', '--bool', 'gittan.signOff'], Output) then
+    Result := Trim(Output) = 'true'
+  else
+    Result := ADefault;
 end;
 
-function TGittanRepo.CommitTemplate: string;
+function TGittanRepo.CommitTemplate(const AFallback: string): string;
 var
   Output, FileName, Comment: string;
   Lines: TStringList;
   i: integer;
 begin
   Result := '';
-  if (FRoot = '') or not RunGit(FRoot, ['config', '--path', 'commit.template'], Output) then
+  if FRoot = '' then
     Exit;
+  if not RunGit(FRoot, ['config', '--path', 'commit.template'], Output) then
+    Output := '';
   FileName := Trim(Output);
   if FileName = '' then
-    Exit;
+  begin
+    { The repository's own, a path from the root. }
+    if Trim(AFallback) = '' then
+      Exit;
+    Output := Trim(AFallback);
+    FileName := Output;
+  end;
   FileName := ExpandFileName(IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(FileName));
   if not FileExists(FileName) then
     FileName := ExpandFileName(SetDirSeparators(Trim(Output)));
@@ -3112,24 +3130,27 @@ begin
 end;
 
 { --unset fails (5) when the key is not there, which is what off is. }
-function TGittanRepo.SetSignOff(ASignOff: boolean): boolean;
+function TGittanRepo.SetSignOff(ASignOff: boolean; ADefault: boolean): boolean;
 var
   Output, Err: string;
 begin
   if FRoot = '' then
     Exit(False);
-  if ASignOff then
-    Exit(RunGit(FRoot, ['config', '--local', 'gittan.signOff', 'true'], Output));
+  { Against the default the key says so; with it the key goes, so a
+    change of the default reaches the repository. }
+  if ASignOff <> ADefault then
+    Exit(RunGit(FRoot, ['config', '--local', '--replace-all', 'gittan.signOff',
+      BoolToStr(ASignOff, 'true', 'false')], Output) and (SignOff(ADefault) = ASignOff));
   { --unset-all fails when the key is not there, which is no failure. }
   RunGitIn(FRoot, ['config', '--local', '--unset-all', 'gittan.signOff'], Output, Err);
-  Result := not SignOff;
+  Result := SignOff(ADefault) = ASignOff;
   if Result then
     Exit;
   Err := Trim(Err);
   if Err <> '' then
     FError := Err
   else
-    FError := 'Sign-off is still on: another git config sets gittan.signOff.';
+    FError := 'Sign-off did not change: another git config sets gittan.signOff.';
 end;
 
 function TGittanRepo.RemoteFor(const ARepoPath: string): string;

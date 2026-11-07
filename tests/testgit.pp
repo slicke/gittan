@@ -2084,6 +2084,15 @@ begin
     AssertTrue(FRepo.SetSignOff(False));
     AssertFalse(FRepo.SignOff);
     AssertTrue('off when off', FRepo.SetSignOff(False));
+    { With repo.toml's sign-off = true as the default: on until turned
+      off, which the key then says, and back on drops the key. }
+    AssertTrue('the default while no key', FRepo.SignOff(True));
+    AssertTrue(FRepo.SetSignOff(False, True));
+    AssertFalse(FRepo.SignOff(True));
+    AssertEquals('false', Trim(Git(['config', '--local', 'gittan.signOff'])));
+    AssertTrue(FRepo.SetSignOff(True, True));
+    AssertTrue(FRepo.SignOff(True));
+    AssertFalse('the key gone', FRepo.SignOff(False));
   finally
     Paths.Free;
   end;
@@ -2586,6 +2595,12 @@ begin
   AssertEquals('auto is #', 'Subject' + LineEnding + '; dropped', FRepo.CommitTemplate);
   Git(['config', 'commit.template', 'missing.txt']);
   AssertEquals('', FRepo.CommitTemplate);
+  AssertEquals('git config''s even when its file is missing', '',
+    FRepo.CommitTemplate('tmpl.txt'));
+  Git(['config', '--unset', 'commit.template']);
+  AssertEquals('repo.toml''s when git config names none', 'Subject' + LineEnding + '; dropped',
+    FRepo.CommitTemplate('tmpl.txt'));
+  AssertEquals('', FRepo.CommitTemplate('  '));
 end;
 
 procedure TGitRepoTest.TestRemoteEnvironment;

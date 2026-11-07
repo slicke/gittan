@@ -6,7 +6,9 @@
   keys several clients share (gittan.issuelinks): bugtraq.url, the
   address of an issue with %BUGID% for its id, and bugtraq.logregex, how
   a message refers to one. The snapshot reads them (IssueTrackerIn) and
-  ApplySnapshot hands them to the summary (UpdateIssueTracker); without
+  ApplySnapshot hands them to the summary (UpdateIssueTracker), or,
+  when the config names none, the [issues] of .gittan/repo.toml
+  (EffectiveIssueTracker); without
   a tracker a forge's issues are still linked as #<number>
   (DefaultIssueRegex), opened on the forge. Repository > Issue Tracker...
   asks for the address and the expression (one, or one for the
@@ -15,11 +17,19 @@
 
 { The summary marks the references with the config's expression, or
   the forge's #<number> when the config names none. }
+{ The tracker git config names, else the one .gittan/repo.toml does. }
+function TRepoFrame.EffectiveIssueTracker: TGittanIssueTracker;
+begin
+  Result := FIssueTracker;
+  if IssueTrackerEmpty(Result) and not IssueTrackerEmpty(FRepoConfig.Issues) then
+    Result := FRepoConfig.Issues;
+end;
+
 procedure TRepoFrame.UpdateIssueTracker;
 var
   T: TGittanIssueTracker;
 begin
-  T := FIssueTracker;
+  T := EffectiveIssueTracker;
   if IssueTrackerEmpty(T) and Assigned(FForge) then
   begin
     T.Url := '';
@@ -39,10 +49,10 @@ begin
     Exit;
   { Without an expression the summary marks the forge's #<number>,
     which bugtraq.url alone is no address for. }
-  if IssueTrackerEmpty(FIssueTracker) then
+  if IssueTrackerEmpty(EffectiveIssueTracker) then
     Url := ''
   else
-    Url := IssueUrl(FIssueTracker, AId);
+    Url := IssueUrl(EffectiveIssueTracker, AId);
   if Url <> '' then
     OpenURL(Url)
   else if Assigned(FForge) and TryStrToInt(AId, Number) then
