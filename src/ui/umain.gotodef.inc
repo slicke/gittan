@@ -349,7 +349,10 @@ var
   i: integer;
 begin
   if not Edit.Visible then
+  begin
+    StatusNote(rsSymbolsNeedFile);
     Exit;
+  end;
   FreeAndNil(FSymbolFiles);
   FSymbolOnOld := nil;
   FSymbolPlaces := False;
@@ -485,7 +488,10 @@ var
   i: integer;
 begin
   if not Edit.Visible or (FView <> gvChanges) then
+  begin
+    StatusNote(rsChangedSymbolsNeedFile);
     Exit;
+  end;
   Changes := ShownSymbolChanges(NewSide, OldSide);
   Names := TStringList.Create;
   Details := TStringList.Create;
@@ -551,7 +557,10 @@ var
   i, j, k, m, n, Files, Lines: integer;
 begin
   if not Edit.Visible or (FView <> gvChanges) or (FRepo.Root = '') then
+  begin
+    StatusNote(rsChangedSymbolsNeedFile);
     Exit;
+  end;
   Changes := ShownSymbolChanges(NewSide, OldSide);
   IgnoreCase := (FAdapter.Lexer <> nil) and LexerIgnoresCase(FAdapter.Lexer.LexerName);
   Idents := TStringList.Create;

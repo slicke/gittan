@@ -286,9 +286,6 @@ type
     FConflictsOf: string;
     FConflicts: integer;
     FConflictPaths: TStringArray;
-    {** The folder a linked worktree's git directory shares with the
-      main one (its commondir file), else the git directory itself. }
-    function CommonDir: string;
     function RunGit(const ADir: string; const AArgs: array of string;
       out AOutput: string; const AIndexFile: string = ''): boolean;
     function RunRemote(const AArgs: array of string): boolean;
@@ -774,15 +771,19 @@ type
     function HasLocalIdentity: boolean;
     {** Whether commits in the repository are signed off, as Gittan keeps
       it in the repository's own config (`gittan.signOff`), so it holds
-      for that repository and its worktrees alone. }
-    function SignOff: boolean;
-    {** Keeps ASignOff for SignOff, unsetting the key when off. }
-    function SetSignOff(ASignOff: boolean): boolean;
+      for that repository and its worktrees alone; ADefault (what
+      .gittan/repo.toml says) while the key is not set. }
+    function SignOff(ADefault: boolean = False): boolean;
+    {** Keeps ASignOff for SignOff: the key is unset when it is ADefault,
+      else set to true or false. }
+    function SetSignOff(ASignOff: boolean; ADefault: boolean = False): boolean;
     {** The message commit.template names (a path from the root when
-      relative, ~ expanded), without its comment lines, which git takes
-      out only when it opens an editor, and without the blank lines at
-      its end; '' without one or when it cannot be read. }
-    function CommitTemplate: string;
+      relative, ~ expanded), or AFallback (a path from the root, what
+      .gittan/repo.toml names) when git config names none, without its
+      comment lines, which git takes out only when it opens an editor,
+      and without the blank lines at its end; '' without one or when it
+      cannot be read. }
+    function CommitTemplate(const AFallback: string = ''): string;
     {** Tells git how the repository pulls a branch that has diverged, in
       its own config, so Pull(pmAuto) asks no more: ARebase sets
       pull.rebase true, else pull.rebase false with pull.ff true (a
@@ -923,6 +924,10 @@ type
     {** The git directory of the work tree (a linked work tree has one of
       its own), empty when nothing is open. }
     function GitDir: string;
+    {** The folder a linked worktree's git directory shares with the
+      main one (its commondir file), else the git directory itself;
+      empty when nothing is open. }
+    function CommonDir: string;
     {** What git is in the middle of: "merging", "rebasing",
       "cherry-picking", "reverting" or "bisecting", from the files it
       leaves in the git directory meanwhile; empty when nothing. }
@@ -3035,29 +3040,97 @@ begin
     RunGit(FRoot, ['config', '--local', 'user.email'], Output));
 end;
 
-function TGittanRepo.SignOff: boolean;
+function TGittanRepo.SignOff(ADefault: boolean): boolean;
 var
   Output: string;
 begin
-  Result := (FRoot <> '') and RunGit(FRoot, ['config', '--local', '--bool', 'gittan.signOff'],
-    Output) and (Trim(Output) = 'true');
+  if FRoot = '' then
+    Exit(False);
+  { git config exits with 1 for a key that is not set. }
+  if RunGit(FRoot, ['config', '--local', '--bool', 'gittan.signOff'], Output) then
+    Result := Trim(Output) = 'true'
+  else
+    Result := ADefault;
 end;
 
-function TGittanRepo.CommitTemplate: string;
+{ Whether AFileName, expanded, is a file under ARoot reached through
+  no link: neither the file nor a folder between the root and it is a
+  symbolic link (or on Windows a reparse point), so a path a cloned file
+  names cannot read what lies outside the checkout. }
+function FileInCheckout(const ARoot, AFileName: string): boolean;
+
+  function IsLink(const APath: string): boolean;
+  var
+    Link: TRawbyteSymLinkRec;
+    Info: TSearchRec;
+  begin
+    Result := FileGetSymLinkTarget(APath, Link);
+    if not Result and (FindFirst(APath, faAnyFile or faSymLink, Info) = 0) then
+    begin
+      Result := (Info.Attr and faSymLink) <> 0;
+      FindClose(Info);
+    end;
+  end;
+
+var
+  Root, Rest, Path: string;
+  Parts: TStringArray;
+  i: integer;
+begin
+  Result := False;
+  Root := IncludeTrailingPathDelimiter(ExpandFileName(ARoot));
+  {$IF DEFINED(WINDOWS) OR DEFINED(DARWIN)}
+  if not SameText(Copy(AFileName, 1, Length(Root)), Root) then
+  {$ELSE}
+  if Copy(AFileName, 1, Length(Root)) <> Root then
+  {$ENDIF}
+    Exit;
+  Rest := Copy(AFileName, Length(Root) + 1, MaxInt);
+  if Rest = '' then
+    Exit;
+  Parts := Rest.Split([PathDelim]);
+  Path := ExcludeTrailingPathDelimiter(Root);
+  for i := 0 to High(Parts) do
+  begin
+    if Parts[i] = '' then
+      Continue;
+    Path := Path + PathDelim + Parts[i];
+    if IsLink(Path) then
+      Exit;
+  end;
+  Result := FileExists(AFileName);
+end;
+
+function TGittanRepo.CommitTemplate(const AFallback: string): string;
 var
   Output, FileName, Comment: string;
   Lines: TStringList;
   i: integer;
 begin
   Result := '';
-  if (FRoot = '') or not RunGit(FRoot, ['config', '--path', 'commit.template'], Output) then
+  if FRoot = '' then
     Exit;
+  if not RunGit(FRoot, ['config', '--path', 'commit.template'], Output) then
+    Output := '';
   FileName := Trim(Output);
   if FileName = '' then
-    Exit;
-  FileName := ExpandFileName(IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(FileName));
-  if not FileExists(FileName) then
-    FileName := ExpandFileName(SetDirSeparators(Trim(Output)));
+  begin
+    { The repository's own, a path from the root that a clone brings:
+      a file in the checkout, never one beside it (../) or through a
+      link, whose text would go into a message to be pushed. }
+    if Trim(AFallback) = '' then
+      Exit;
+    FileName := ExpandFileName(IncludeTrailingPathDelimiter(FRoot) +
+      SetDirSeparators(Trim(AFallback)));
+    if not FileInCheckout(FRoot, FileName) then
+      Exit;
+  end
+  else
+  begin
+    FileName := ExpandFileName(IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(FileName));
+    if not FileExists(FileName) then
+      FileName := ExpandFileName(SetDirSeparators(Trim(Output)));
+  end;
   if not FileExists(FileName) then
     Exit;
   { The comment lines start as git's own do: core.commentString (or
@@ -3112,24 +3185,27 @@ begin
 end;
 
 { --unset fails (5) when the key is not there, which is what off is. }
-function TGittanRepo.SetSignOff(ASignOff: boolean): boolean;
+function TGittanRepo.SetSignOff(ASignOff: boolean; ADefault: boolean): boolean;
 var
   Output, Err: string;
 begin
   if FRoot = '' then
     Exit(False);
-  if ASignOff then
-    Exit(RunGit(FRoot, ['config', '--local', 'gittan.signOff', 'true'], Output));
+  { Against the default the key says so; with it the key goes, so a
+    change of the default reaches the repository. }
+  if ASignOff <> ADefault then
+    Exit(RunGit(FRoot, ['config', '--local', '--replace-all', 'gittan.signOff',
+      BoolToStr(ASignOff, 'true', 'false')], Output) and (SignOff(ADefault) = ASignOff));
   { --unset-all fails when the key is not there, which is no failure. }
   RunGitIn(FRoot, ['config', '--local', '--unset-all', 'gittan.signOff'], Output, Err);
-  Result := not SignOff;
+  Result := SignOff(ADefault) = ASignOff;
   if Result then
     Exit;
   Err := Trim(Err);
   if Err <> '' then
     FError := Err
   else
-    FError := 'Sign-off is still on: another git config sets gittan.signOff.';
+    FError := 'Sign-off did not change: another git config sets gittan.signOff.';
 end;
 
 function TGittanRepo.RemoteFor(const ARepoPath: string): string;
@@ -7126,6 +7202,26 @@ var
   FileName, Id, Left, Right: string;
 
   i: integer;
+
+  { The name, time and size of each file in ADir, none when it is not
+    there. }
+  procedure AddStats(const ADir: string);
+  var
+    F: TSearchRec;
+  begin
+    if FindFirst(IncludeTrailingPathDelimiter(ADir) + AllFilesMask, faAnyFile, F) <> 0 then
+      Exit;
+    try
+      repeat
+        if F.Attr and faDirectory = 0 then
+          Result := Result + 'setting ' + F.Name + ' ' +
+            FormatDateTime('yyyymmddhhnnsszzz', F.TimeStamp) + ' ' + IntToStr(F.Size) + #10;
+      until FindNext(F) <> 0;
+    finally
+      FindClose(F);
+    end;
+  end;
+
 begin
   Result := '';
   if FRoot = '' then
@@ -7181,6 +7277,20 @@ begin
       end;
     for i := 0 to Paths.Count - 1 do
       Result := Result + IntToStr(PtrUInt(Paths.Objects[i])) + ' ' + Paths[i] + #10;
+    { What Gittan reads of the repository's own settings, on disk
+      whatever is compared: the .gittan folder (repo.toml, the commands
+      files, gittan.repoconfig and gittan.repocommands) and the personal
+      commands file in the git directory, which no status lists and
+      another worktree may change. }
+    AddStats(IncludeTrailingPathDelimiter(FRoot) + '.gittan');
+    AddStats(IncludeTrailingPathDelimiter(FRoot) + '.gittan' + PathDelim + 'commands');
+    if (FGitDir <> '') and StatExact(IncludeTrailingPathDelimiter(CommonDir) + 'gittan' +
+      PathDelim + 'commands.toml', Info) then
+    begin
+      Result := Result + 'personal ' + FormatDateTime('yyyymmddhhnnsszzz', Info.TimeStamp) +
+        ' ' + IntToStr(Info.Size) + #10;
+      FindClose(Info);
+    end;
     { Between two commits the files on disk do not matter. }
     if IsRange then
       Exit;

@@ -170,7 +170,7 @@ type
 implementation
 
 uses
-  gittan.textfit, gittan.theme, gittan.statusbar, Forms;
+  gittan.textfit, gittan.theme, gittan.statusbar, Forms, WSControls;
 
 resourcestring
   rsBinary = 'binary';
@@ -304,11 +304,25 @@ begin
   Invalidate;
 end;
 
+{ Shows or hides a navigator. Hidden while the header itself is hidden
+  (the summary hides the header, and the change count is updated
+  meanwhile), the LCL leaves its native view shown on Cocoa: since issue
+  #42363 hiding the header clears the navigator's showing state without
+  hiding its view, so the Visible := False after it changes nothing
+  there, and the view came back with the header, over the pills, with
+  its last counter. Telling the widgetset again hides it for real. }
+procedure SetNavVisible(ANav: TGittanChangeNav; AValue: boolean);
+begin
+  ANav.Visible := AValue;
+  if not AValue and ANav.HandleAllocated then
+    TWSWinControlClass(ANav.WidgetSetClass).ShowHide(ANav);
+end;
+
 procedure TGittanFileHeader.SetChanges(ACurrent, ATotal: integer);
 begin
   FChangeCurrent := ACurrent;
   FChangeTotal := ATotal;
-  FNav.Visible := FShowControls and (ATotal > 0);
+  SetNavVisible(FNav, FShowControls and (ATotal > 0));
   if ATotal > 0 then
     FNav.SetPosition(ACurrent, ATotal);
   { The room for the path depends on the navigator's width. }
@@ -320,7 +334,7 @@ procedure TGittanFileHeader.SetConflicts(ACurrent, ATotal: integer);
 begin
   FConflictCurrent := ACurrent;
   FConflictTotal := ATotal;
-  FConflictNav.Visible := FShowControls and (ATotal > 0);
+  SetNavVisible(FConflictNav, FShowControls and (ATotal > 0));
   if ATotal > 0 then
     FConflictNav.SetPosition(ACurrent, ATotal);
   Invalidate;
@@ -344,8 +358,8 @@ begin
   if FShowControls = AValue then
     Exit;
   FShowControls := AValue;
-  FNav.Visible := AValue and (FChangeTotal > 0);
-  FConflictNav.Visible := AValue and (FConflictTotal > 0);
+  SetNavVisible(FNav, AValue and (FChangeTotal > 0));
+  SetNavVisible(FConflictNav, AValue and (FConflictTotal > 0));
   SetHot(-1);
   Invalidate;
 end;

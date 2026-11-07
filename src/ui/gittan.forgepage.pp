@@ -175,6 +175,10 @@ type
     FAvatar: TGittanAvatar;
     FOnPick: TGittanForgePickEvent;
     FOnRefresh, FOnFilterChange, FOnSavePreset: TNotifyEvent;
+    { The command that logs the forge's tool in, as the user would type
+      it, while the forge's error says it is logged out; else ''. }
+    FLoginCommand: string;
+    FOnLogIn, FOnHostingSettings: TNotifyEvent;
     FOnOpenUrl: TGittanOpenUrlEvent;
     FOnContext, FOnMerge: TGittanForgeContextEvent;
     { The search field, its words, where the heading leaves it room and
@@ -274,6 +278,7 @@ type
       it is being asked now. }
     procedure SetPulls(const AMine, AReview: TGittanForgePulls; const AError: string;
       ALoading: boolean);
+    procedure SetLoginCommand(const AValue: string);
     {** The search field takes the keys, its words selected. }
     procedure FocusSearch;
     {** Whether the search field has the keys. }
@@ -365,6 +370,14 @@ type
       button shows only then. }
     property CanAct: boolean read FCanAct write SetCanAct;
     property OnRefresh: TNotifyEvent read FOnRefresh write FOnRefresh;
+    {** While set, the forge's error is that its tool is logged out: the
+      page says so with this command ("gh auth login") and offers Log In,
+      which runs it in a terminal (OnLogIn), and Hosting Settings
+      (OnHostingSettings), in place of the tool's words. }
+    property LoginCommand: string read FLoginCommand write SetLoginCommand;
+    property OnLogIn: TNotifyEvent read FOnLogIn write FOnLogIn;
+    property OnHostingSettings: TNotifyEvent read FOnHostingSettings
+      write FOnHostingSettings;
     property OnOpenUrl: TGittanOpenUrlEvent read FOnOpenUrl write FOnOpenUrl;
   end;
 
@@ -409,6 +422,11 @@ resourcestring
   rsMenuNewest = 'Newest First';
   rsMenuAttention = 'Needs Attention First';
   rsLoading = 'Loading pull requests from %s…';
+  rsLoggedOut = 'You''re not logged in to %s';
+  rsLoggedOutHint = 'Log in with %s in a terminal, then refresh. The Hosting settings ' +
+    'show the accounts it has.';
+  rsLogIn = 'Log In in Terminal';
+  rsHostingSettings = 'Hosting Settings';
   rsNoMine = 'No open pull requests of yours.';
   rsCaughtUp = 'All caught up';
   rsNoReview = 'Nothing waiting for your review.';
@@ -436,6 +454,8 @@ const
   MineLink = 'gittan:mine:';
   ReviewLink = 'gittan:review:';
   RefreshLink = 'gittan:refresh';
+  LogInLink = 'gittan:login';
+  HostingLink = 'gittan:hosting';
   FilterLink = 'gittan:filter:';
   GroupLink = 'gittan:filters';
   PresetLink = 'gittan:preset:';
@@ -747,6 +767,16 @@ begin
   FHot := -1;
   FPhase := 0;
   FPulse.Enabled := ALoading;
+  Layout;
+  Invalidate;
+end;
+
+procedure TGittanForgePage.SetLoginCommand(const AValue: string);
+begin
+  if FLoginCommand = AValue then
+    Exit;
+  FLoginCommand := AValue;
+  FHot := -1;
   Layout;
   Invalidate;
 end;
@@ -2174,6 +2204,35 @@ begin
   X := L + AvatarD + Px(Gap);
   FC.TextOut(X, Y + TitleH + 2, FitTextLeft(FC, Who, R - X));
   Inc(Y, AvatarD);
+  { Logged out: that in words, with what to do and the buttons for it,
+    and no section, as there is nothing to list. }
+  if (FError <> '') and (FLoginCommand <> '') then
+  begin
+    Inc(Y, Px(Gap));
+    FC.Font := Font;
+    FC.Font.Style := [fsBold];
+    FC.Font.Color := FText;
+    FC.TextOut(L, Y, Format(rsLoggedOut, [FForge]));
+    Inc(Y, TextH);
+    PaintNote(Y, Format(rsLoggedOutHint, [FLoginCommand]), FDim, L, R);
+    Inc(Y, Px(Gap) + Px(FilterPadY));
+    FC.Font := Font;
+    X := L + FC.TextWidth(rsLogIn) + 2 * Px(FilterPadX);
+    if Assigned(FOnLogIn) then
+      X := PaintButton(X, Y, rsLogIn, LogInLink, FLink).Right + Px(Gap)
+    else
+      X := L;
+    PaintButton(X + FC.TextWidth(rsHostingSettings) + 2 * Px(FilterPadX), Y,
+      rsHostingSettings, HostingLink, FDim);
+    Inc(Y, TextH + Px(FilterPadY) + Px(Pad));
+    FContentHeight := Y;
+    FShownMine := nil;
+    FShownReview := nil;
+    FCardRects := nil;
+    FSel := -1;
+    FSearchShown := False;
+    Exit;
+  end;
   if FError <> '' then
     PaintNote(Y, FError, FErrorColor, L, R);
 
@@ -2371,6 +2430,16 @@ begin
   begin
     if Assigned(FOnRefresh) then
       FOnRefresh(Self);
+  end
+  else if Url = LogInLink then
+  begin
+    if Assigned(FOnLogIn) then
+      FOnLogIn(Self);
+  end
+  else if Url = HostingLink then
+  begin
+    if Assigned(FOnHostingSettings) then
+      FOnHostingSettings(Self);
   end
   else if Assigned(FOnOpenUrl) then
     FOnOpenUrl(Self, Url);

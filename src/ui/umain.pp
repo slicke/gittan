@@ -19,7 +19,7 @@ uses
   gittan.lexers, gittan.git, gittan.conflicts, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.welcome, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.sidenav, gittan.repoinfo, gittan.repopage, gittan.subpage,
-  gittan.repocommands, gittan.project, gittan.commandpage, gittan.projectpage, gittan.job,
+  gittan.repocommands, gittan.repoconfig, gittan.project, gittan.commandpage, gittan.projectpage, gittan.job,
   gittan.settingsdlg, gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   {$IFDEF LCLCocoa}gittan.memohint,{$ENDIF}
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
@@ -214,6 +214,9 @@ type
     procedure ShowAbout; virtual; abstract;
     {** The settings dialog at its Hosting page. }
     procedure ShowHostingSettings; virtual; abstract;
+    {** A terminal in the user's home folder running ACommand (the forge
+      tool's login), through the frame's terminal (OpenTerminalIn). }
+    procedure RunInTerminal(const ACommand: string); virtual; abstract;
     {** Whether a frame has a remote for the repository ARepo
       ("owner/name"), so ComparePullRequest compares in it rather than
       opening a clone; by the frames' last snapshots (HoldsRepo), so it
@@ -569,8 +572,8 @@ type
     FHasCommitOption: boolean;
     FCommitButton: TButton;
     { The length of the message's first line, by the Commit button, once
-      it is past SubjectSoftLimit; in the warning color past
-      SubjectHardLimit. }
+      it is past the soft limit; in the warning color past the hard one
+      (FRepoConfig's SubjectSoft and SubjectHard). }
     FSubjectCount: TLabel;
     { How many changed files are chosen and how many could be (not the
       conflicts), as UpdateCommitState last counted them. }
@@ -671,6 +674,12 @@ type
       so a change on disk behind an edit is noticed; the exclude file of
       the open repository, found once when it is opened; and File > Save. }
     FEditPath, FExcludePath: string;
+    { The personal commands file (.git/gittan/commands.toml in the git
+      directory the worktrees share), found with FExcludePath. }
+    FPersonalPath: string;
+    { What .gittan/repo.toml says (gittan.repoconfig): read at open and
+      on every snapshot, LoadRepoConfig. }
+    FRepoConfig: TGittanRepoConfig;
     FEditStamp: LongInt;
     FSaveItem: TMenuItem;
     { Discarding a block of changes (umain.discard.inc): the block the
@@ -1067,6 +1076,9 @@ type
     FSideRatio: double;
     FSyncingScroll: boolean;
     FBranch: string;
+    { HEAD is on no branch: FBranch is a commit's id, which no protected
+      branch's pattern of repo.toml is for. }
+    FHeadDetached: boolean;
     FFileCount: integer;
     FStats: TGittanFileStats;
     FLoadError: string;
@@ -1416,6 +1428,12 @@ type
     procedure CommandPageStop(Sender: TObject);
     procedure CommandPageTrust(Sender: TObject);
     procedure CommandPageEditFile(Sender: TObject);
+    procedure CommandPageEditPersonal(Sender: TObject);
+    procedure LoadRepoConfig;
+    procedure NoteRepoConfigError(const AOld: string);
+    function CommitConfigNote: string;
+    function EffectiveIssueTracker: TGittanIssueTracker;
+    procedure EditCommandsFile(const AFileName, AShown, ATemplate: string);
     procedure CommandPageCopyOutput(Sender: TObject);
     function CommandKey(AKey: word; AShift: TShiftState): boolean;
     procedure OpenTerminal(const ACommand: string);
@@ -1524,6 +1542,9 @@ type
     { umain.blame.inc }
     procedure MenuBlameClick(Sender: TObject);
     procedure StartBlame;
+    function ShownIsNewFile: boolean;
+    function NewFileUncommitted: boolean;
+    procedure NoteNewFile;
     procedure AbandonBlameJob;
     procedure FreeBlameJobsAsync(Data: PtrInt);
     procedure CacheBlame(const ARef, APath: string; ABlame: TGittanBlame);
@@ -1690,6 +1711,7 @@ type
     procedure TimelapseStep(ADelta: integer);
     function TimelapseDotColor(AIndex: integer): TColor;
     function TimelapseKey(Key: word; Shift: TShiftState): boolean;
+    function HistoryEscape(Key: word; Shift: TShiftState): boolean;
     { umain.actions.inc }
     procedure ApplySettings;
     procedure RebuildRecentMenu;
@@ -1854,6 +1876,7 @@ type
     procedure MenuGoToRepoSymbolClick(Sender: TObject);
     procedure SymbolBarPick(Sender: TObject; AIndex: integer);
     procedure SymbolBarClose(Sender: TObject);
+    procedure SymbolBarVisibleChange(Sender: TObject);
     procedure EditMouseMove(Sender: TObject; Shift: TShiftState; X, Y: integer);
     procedure EditMouseLeave(Sender: TObject);
     procedure HoverLookup(Ed: TATSynEdit; const Word: string);
@@ -2129,6 +2152,7 @@ type
     procedure NavRestoreRow(ARow, ACol, ATop: integer);
     function NavRestore(const APlace: TGittanPlace): boolean;
     procedure NavStep(AForward: boolean);
+    procedure NavReturn;
     procedure MenuBackClick(Sender: TObject);
     procedure MenuForwardClick(Sender: TObject);
     procedure PalettePopupPick(Sender: TObject; AIndex: integer);
@@ -2392,6 +2416,9 @@ type
       window opens a repository in such a frame rather than in a new
       one. }
     function IsBlank: boolean;
+    {** Takes the error of a repository that did not open off the
+      welcome view, as New Tab reuses the frame. }
+    procedure ClearOpenError;
     {** The root of the open repository, '' for none. }
     function RepoRoot: string;
     {** The open repository and its changed files, for the extensions
@@ -2524,6 +2551,9 @@ type
     procedure MenuSettingsClick(Sender: TObject);
     procedure MenuAboutClick(Sender: TObject);
     procedure ShowHostingSettings;
+    {** A terminal in ARoot running ACommand when it is not empty (the
+      window's RunInTerminal, for the forge view). }
+    procedure OpenTerminalIn(const ARoot, ACommand: string);
   end;
 
 {** Asks what AAction on APull needs before it runs: the words of a
@@ -2712,6 +2742,9 @@ resourcestring
   rsBlame = '&Blame';
   rsNotCommitted = 'Not committed';
   rsNotCommittedYet = 'Not committed yet';
+  rsNewFileModes = 'The file is new: it has no committed lines to blame and no old side to show beside it.';
+  rsNewFileBlame = 'The file is new: it has no committed lines to blame.';
+  rsNewFileSide = 'The file is new: it has no old side to show beside it.';
   rsCommit = 'commit %s';
   rsHistory = 'Code &History';
   rsGoFileHistory = 'Fi&le History';
@@ -2800,6 +2833,8 @@ resourcestring
   rsChangedSymbolHint = 'Changed symbol';
   rsRepoSymbolHint = 'Symbol in repository';
   rsNoChangedSymbols = 'No changed symbols in this file.';
+  rsSymbolsNeedFile = 'Show a file first: the symbols are those of the file shown.';
+  rsChangedSymbolsNeedFile = 'Show a file'#39's changes first: the symbols are those its diff changed.';
   rsCallers = 'Ca&llers of Changed Symbols...';
   rsCallerHint = 'Changed symbol or a line that uses it';
   rsCallersAbove = 'same name, listed above';
@@ -2924,6 +2959,14 @@ resourcestring
   rsPushAction = 'Push';
   rsSubjectCount = '%d/%d';
   rsSubjectCountHint = 'Characters in the first line. git log and GitHub cut it after %d.';
+  rsRepoConfigNotRead = '.gittan/repo.toml could not be read, so what it says is left out';
+  rsSubjectCountHintRepo = 'Characters in the first line. .gittan/repo.toml keeps it to %d.';
+  rsProtectedBranchNote = '%s is protected in .gittan/repo.toml: its changes come through ' +
+    'pull requests. Commit on a branch of its own.';
+  rsSubjectNoType = '.gittan/repo.toml asks for a subject such as "%s: what it does", ' +
+    'with one of these types: %s.';
+  rsSubjectUnknownType = '"%s" is not one of the types .gittan/repo.toml lists: %s.';
+  rsSubjectUnknownScope = '"%s" is not one of the scopes .gittan/repo.toml lists: %s.';
   rsCommitFailed = 'The commit failed';
   rsCommitAgain = 'Commit Again';
   rsFetchMenu = '&Fetch';
@@ -3047,6 +3090,8 @@ resourcestring
     'expression the first finds each reference ("Fixes #12 and #13") and the second the ' +
     'ids within it. Kept in the repository''s config as bugtraq.url and bugtraq.logregex, ' +
     'which other git clients read too; leave everything empty to take it out.';
+  rsIssueTrackerRepoNote = ' While these are empty, .gittan/repo.toml''s tracker is used: ' +
+    '%s. Its [issues] table is the repository''s own, changed in that file.';
   rsIssueTrackerUrl = 'Address of an issue';
   rsIssueTrackerRegex = 'Regular expression';
   rsIssueTrackerIdRegex = 'Expression for the ids within a reference (optional)';
@@ -3833,11 +3878,6 @@ const
   { How long a note stays in the banner, and one that offers an action. }
   BannerInfoSeconds = 8;
   BannerActionSeconds = 20;
-  { The commit message's first line: its length shows past the soft
-    limit, the usual 50, and warns past the hard one, where git log
-    --oneline and GitHub cut it. }
-  SubjectSoftLimit = 50;
-  SubjectHardLimit = 72;
   { How long the pull request data is kept before gh is asked again,
     while checks run and otherwise; ms. }
   PullPollPending = 30000;
@@ -4137,6 +4177,7 @@ end;
 procedure TRepoFrame.Init(AWindow: TRepoWindow);
 begin
   FWindow := AWindow;
+  FRepoConfig := EmptyRepoConfig;
   FTitleBarHeight := FWindow.TitleBarHeight;
   FindAI;
   FTabSize := App.Settings.TabSize;
@@ -4305,6 +4346,7 @@ begin
   FSymbolBar.Visible := False;
   FSymbolBar.OnPick := @SymbolBarPick;
   FSymbolBar.OnClose := @SymbolBarClose;
+  FSymbolBar.OnVisibleChange := @SymbolBarVisibleChange;
   { The time-lapse bar sits under the editor while a time-lapse plays. }
   FTimelapseBar := TGittanTimelapseBar.Create(Self);
   FTimelapseBar.Parent := EditorPanel;
@@ -4605,6 +4647,12 @@ end;
 function TRepoFrame.IsBlank: boolean;
 begin
   Result := (FRepo.Root = '') and (FOpenJob = nil) and (FView = gvSummary);
+end;
+
+procedure TRepoFrame.ClearOpenError;
+begin
+  FWelcome.SetError('');
+  FWelcome.FitHeight(FSummaryBox.ClientHeight);
 end;
 
 function TRepoFrame.RepoRoot: string;
@@ -5576,13 +5624,31 @@ begin
   PlaceUnderTitleBar;
 end;
 
+procedure TRepoFrame.SymbolBarVisibleChange(Sender: TObject);
+begin
+  PlaceUnderTitleBar;
+end;
+
 { The banner is the first alTop control of the panel when shown (Top 0
   puts it before the header), and takes the strip's height as its own
-  spacing so the header under it does not leave a gap. }
+  spacing so the header under it does not leave a gap. The find bar and
+  the symbol bar follow the header in that order (a Top past the panel's
+  height puts a control last among the alTop ones); over the summary,
+  where the header is hidden, the symbol bar is the first row and takes
+  the strip's height itself. }
 procedure TRepoFrame.PlaceUnderTitleBar;
+var
+  Bar: boolean;
 begin
+  Bar := (FSymbolBar <> nil) and FSymbolBar.Visible;
   EditorPanel.DisableAlign;
   try
+    if FSymbolBar <> nil then
+    begin
+      FFindBar.Top := EditorPanel.Height + 1;
+      FSymbolBar.Top := EditorPanel.Height + 2;
+      FSymbolBar.BorderSpacing.Top := 0;
+    end;
     if FBanner.Visible then
     begin
       FBanner.BorderSpacing.Top := FTitleBarHeight;
@@ -5597,6 +5663,11 @@ begin
       { The page of a submodule has the header over the box. }
       if FHeader.Visible then
         FSummaryBox.BorderSpacing.Top := 0
+      else if Bar then
+      begin
+        FSymbolBar.BorderSpacing.Top := FTitleBarHeight;
+        FSummaryBox.BorderSpacing.Top := 0;
+      end
       else
         FSummaryBox.BorderSpacing.Top := FTitleBarHeight;
     end;
@@ -7269,6 +7340,8 @@ begin
   ClearReviews;
   FThreadFlips.Clear;
   FExcludePath := '';
+  FPersonalPath := '';
+  FRepoConfig := EmptyRepoConfig;
   AbandonSubmoduleJobs;
   FSubmodules := nil;
   FSubInfos := nil;
@@ -7352,6 +7425,10 @@ begin
   { The commands of an extension whose @repos names this root. }
   QueueRebuildExtMenu;
   ShowSidebar(True);
+  { Before the draft: repo.toml's template and sign-off fill the
+    section. }
+  FRepoConfig := ReadRepoConfig(Job.Root);
+  NoteRepoConfigError('');
   LoadCommitDraft;
   { The exclude file lives in the git directory, which git names (a
     work tree's is elsewhere), once per open: the section lists it and
@@ -7359,6 +7436,8 @@ begin
   FExcludePath := FRepo.GitDir;
   if FExcludePath <> '' then
     FExcludePath := IncludeTrailingPathDelimiter(FExcludePath) + SetDirSeparators(ExcludeFile);
+  { The personal commands are the repository's, not one worktree's. }
+  FPersonalPath := PersonalCommandsFileName(FRepo.CommonDir);
   UpdateCaption;
   FSummary.Selected := '';
   LoadSnapshots;
@@ -7503,6 +7582,7 @@ begin
   FReviewSegments.Clear;
   FStats := ASnap.Stats;
   FBranch := ASnap.Branch;
+  FHeadDetached := ASnap.Detached;
   FSnapHead := ASnap.Head;
   { The remotes decide the forge, before the pull request is looked up
     on it. }
@@ -7513,6 +7593,8 @@ begin
     { An extension's @repos may name a remote. }
     QueueRebuildExtMenu;
   end;
+  { repo.toml follows the files, as the commands do: an edit or a pull. }
+  LoadRepoConfig;
   FIssueTracker := ASnap.IssueTracker;
   UpdateIssueTracker;
   ApplyFlowSnapshot(ASnap);
@@ -8751,7 +8833,7 @@ end;
 { A command's key runs it (CommandKey). }
 procedure TRepoFrame.FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
 begin
-  if TimelapseKey(Key, Shift) or CommandKey(Key, Shift) then
+  if TimelapseKey(Key, Shift) or HistoryEscape(Key, Shift) or CommandKey(Key, Shift) then
     Key := 0;
 end;
 

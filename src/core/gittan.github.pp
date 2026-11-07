@@ -153,6 +153,12 @@ type
     {** A note when GH_TOKEN or GITHUB_TOKEN is set, which gh takes over
       the active account on github.com and ghe.com. }
     class function AccountsNote: string; override;
+    class function LoginArgs: string; override;
+    {** gh logged out ("To get started with GitHub CLI, please run:  gh
+      auth login") or its token refused ("HTTP 401: Bad credentials ...
+      Try authenticating with:  gh auth login"): both point at gh auth
+      login. }
+    class function NeedsLogin(const AError: string): boolean; override;
     class function CliEnv: TStringArray; override;
     {** The commands of gh that read and change what is on GitHub (api,
       pr, issue, repo, run, workflow, release, search, label, status,
@@ -1682,6 +1688,16 @@ begin
     end;
   end;
   Result := True;
+end;
+
+class function TGittanGitHubForge.LoginArgs: string;
+begin
+  Result := 'auth login';
+end;
+
+class function TGittanGitHubForge.NeedsLogin(const AError: string): boolean;
+begin
+  Result := Pos('gh auth login', AError) > 0;
 end;
 
 class function TGittanGitHubForge.AccountsNote: string;

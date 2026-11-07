@@ -176,6 +176,7 @@ type
     procedure ShowSettings; override;
     procedure ShowAbout; override;
     procedure ShowHostingSettings; override;
+    procedure RunInTerminal(const ACommand: string); override;
     function HasFrameFor(const ARepo: string): boolean; override;
     function ComparePullRequest(const APull: TGittanPullRequest;
       const AClone: string): boolean; override;
@@ -523,6 +524,17 @@ end;
 procedure TGittanWindow.ShowHostingSettings;
 begin
   FActive.ShowHostingSettings;
+end;
+
+procedure TGittanWindow.RunInTerminal(const ACommand: string);
+var
+  Home: string;
+begin
+  { The home folder without its last delimiter, but / stays /. }
+  Home := ExcludeTrailingPathDelimiter(GetUserDir);
+  if Home = '' then
+    Home := PathDelim;
+  FActive.OpenTerminalIn(Home, ACommand);
 end;
 
 function TGittanWindow.HasFrameFor(const ARepo: string): boolean;
@@ -1124,8 +1136,21 @@ begin
   end;
 end;
 
+{ An empty tab (the welcome view) is shown rather than a second one
+  like it, as File > Repository List does. }
 procedure TGittanWindow.NewTab;
+var
+  i: integer;
 begin
+  HideForgeView;
+  for i := 0 to FFrames.Count - 1 do
+    if Frames[i].IsBlank then
+    begin
+      { A new tab says nothing of a repository that did not open in it. }
+      Frames[i].ClearOpenError;
+      ShowFrame(Frames[i]);
+      Exit;
+    end;
   NewFrame;
 end;
 
