@@ -115,7 +115,7 @@ These work like the `bugtraq.url` and `bugtraq.logregex` keys that several git c
 **`[commit]`** says how commit messages are written:
 
 - `subject-limit` and `subject-max` set the first line's lengths. Past the limit, its length shows beside the Commit button; past the maximum, the count turns amber. Without them, the limit is 50 and the maximum 72, where `git log --oneline` and GitHub cut the line.
-- `template` is a file, as a path from the root, that fills an empty message field, in the same way as git's `commit.template`, which wins if it is set. Lines starting with `#` are left out.
+- `template` is a file, as a path from the root, that fills an empty message field, in the same way as git's `commit.template`, which wins if it is set. It has to be a file in the repository: a path that leads outside it (`../`, an absolute path or a symbolic link) is not read. Lines starting with `#` are left out.
 - `sign-off = true` makes commits signed off (`Signed-off-by:`) unless you turn Sign Off off in the Commit section's options. Gittan then remembers that choice for this repository.
 - `types` asks for subjects written as [Conventional Commits](https://www.conventionalcommits.org): `type(scope): what it does`, or `type!:` for a breaking change. The Commit section says so when the subject has no type or one the list does not have. `scopes` lists the scopes too; without it, any scope is fine. Merges, reverts and `fixup!`, `squash!` and `amend!` commits are not checked.
 

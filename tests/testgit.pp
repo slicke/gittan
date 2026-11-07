@@ -656,6 +656,19 @@ begin
   Git(['remote', 'add', 'origin', 'https://github.com/o/r.git']);
   B := FRepo.Fingerprint;
   AssertTrue('a remote added seen', A <> B);
+  { Between two commits the files on disk count not, the repository's
+    own settings do, and the personal commands file in .git, which no
+    status lists. }
+  FRepo.Base := 'HEAD..HEAD';
+  A := FRepo.Fingerprint;
+  WriteFile('.gittan/repo.toml', '[commit]'#10'subject-max = 60'#10);
+  B := FRepo.Fingerprint;
+  AssertTrue('repo.toml seen in a range', A <> B);
+  WriteFile('.git/gittan/commands.toml', '[commands.x]'#10'run = "echo"'#10);
+  A := FRepo.Fingerprint;
+  AssertTrue('the personal file seen', A <> B);
+  WriteFile('a.txt', 'changed in the work tree'#10);
+  AssertEquals('a work tree file not, in a range', A, FRepo.Fingerprint);
 end;
 
 { A snapshot holds the untracked files, and the whole tree comparison
@@ -2578,6 +2591,8 @@ begin
 end;
 
 procedure TGitRepoTest.TestCommitTemplate;
+var
+  Outside: string;
 begin
   MakeHistory;
   AssertTrue(FRepo.Open(FDir));
@@ -2601,6 +2616,27 @@ begin
   AssertEquals('repo.toml''s when git config names none', 'Subject' + LineEnding + '; dropped',
     FRepo.CommitTemplate('tmpl.txt'));
   AssertEquals('', FRepo.CommitTemplate('  '));
+  { A clone's file names nothing outside the checkout. }
+  Outside := ExcludeTrailingPathDelimiter(FDir) + '-outside.txt';
+  with TStringList.Create do
+    try
+      Text := 'secret';
+      SaveToFile(Outside);
+    finally
+      Free;
+    end;
+  try
+    AssertEquals('not beside the root', '',
+      FRepo.CommitTemplate('../' + ExtractFileName(Outside)));
+    AssertEquals('not an absolute path', '', FRepo.CommitTemplate(Outside));
+    {$IFDEF UNIX}
+    AssertEquals(0, fpSymlink(PChar(Outside), PChar(IncludeTrailingPathDelimiter(FDir) +
+      'link.txt')));
+    AssertEquals('not through a link', '', FRepo.CommitTemplate('link.txt'));
+    {$ENDIF}
+  finally
+    DeleteFile(Outside);
+  end;
 end;
 
 procedure TGitRepoTest.TestRemoteEnvironment;

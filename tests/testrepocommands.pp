@@ -333,7 +333,8 @@ begin
   Put('Makefile', 'test:'#10#9'echo t'#10'lint:'#10#9'echo l'#10);
   Put('.gittan/commands.toml', '[commands.test]'#10'key = "T"'#10'confirm = true'#10 +
     '[commands.lint]'#10'key = "L"'#10'description = "The team''s lint"'#10 +
-    '[commands.main]'#10'run = "echo main"'#10'key = "M"'#10);
+    '[commands.main]'#10'run = "echo main"'#10'key = "M"'#10 +
+    '[commands.ship]'#10'run = "echo ship"'#10'key = "X"'#10);
   H := CommandsFileHash(FDir);
   Put('gitdir/gittan/commands.toml', '[commands.mine]'#10'run = "echo mine"'#10'key = "M"'#10 +
     '[commands.test]'#10'key = "X"'#10'description = "Mine"'#10'[commands.lint]'#10 +
@@ -345,7 +346,7 @@ begin
   AssertFalse(F[0].Personal);
   AssertEquals('the personal file needs no trust', H, CommandsHashOf(F));
   C := DiscoverRepoCommands(FDir, P, F, '', Personal);
-  AssertEquals('mine, main, then the targets', 4, Length(C));
+  AssertEquals('mine, main, ship, then the targets', 5, Length(C));
   AssertEquals('mine', C[0].Name);
   AssertTrue(C[0].Personal);
   AssertEquals(PersonalCommandsShown, C[0].Project);
@@ -353,7 +354,9 @@ begin
   AssertEquals('main', C[1].Name);
   AssertFalse(C[1].Personal);
   AssertEquals('and the committed one loses it', #0, C[1].Key);
-  i := 2;
+  AssertEquals('ship', C[2].Name);
+  AssertEquals('a personal key on a target, listed later, wins too', #0, C[2].Key);
+  i := 3;
   AssertEquals('test', C[i].Name);
   AssertEquals('the personal key over the committed one', 'X', C[i].Key);
   AssertTrue(C[i].Personal);

@@ -709,6 +709,15 @@ begin
   end;
 end;
 
+{ A repo.toml that is no TOML, or cannot be read, leaves its settings
+  out: the banner says why, once for each error (AOld the one said
+  last), rather than the settings going without a word. }
+procedure TRepoFrame.NoteRepoConfigError(const AOld: string);
+begin
+  if (FRepoConfig.Error <> '') and (FRepoConfig.Error <> AOld) then
+    BannerError(rsRepoConfigNotRead, FRepoConfig.Error);
+end;
+
 { Reads .gittan/repo.toml again, from ApplySnapshot, and passes on what
   changed: the subject's limits, sign-off's default and the template,
   which an untouched field takes. The issue tracker and the protected
@@ -725,6 +734,7 @@ begin
     FRepoConfig := ReadRepoConfig(FRepo.Root);
   if FRepo.Root = '' then
     Exit;
+  NoteRepoConfigError(Old.Error);
   if FRepoConfig.SignOff <> Old.SignOff then
   begin
     FSignOff := FRepo.SignOff(FRepoConfig.SignOff);

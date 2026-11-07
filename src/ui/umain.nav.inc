@@ -310,7 +310,12 @@ begin
     pkCommands:
       ShowCommands;
     pkPulls:
+    begin
+      { Without a forge (hosting turned off since) there is no page. }
       ShowPulls;
+      if FView <> gvPulls then
+        Exit;
+    end;
     pkProject:
       ShowProject;
     pkGraph:
@@ -389,7 +394,13 @@ begin
     end;
   end;
   if not Shown then
+  begin
+    { The summary is the place now, not the one that could not be
+      shown, which the idle sync would otherwise put on the back list. }
     ShowSummary;
+    FNavValid := False;
+    NavSync;
+  end;
   NavUpdateItems;
 end;
 

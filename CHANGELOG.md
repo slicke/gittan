@@ -25,9 +25,11 @@
 - Go > Time-lapse plays the file of the Code History shown, rather than asking for a file.
 - After a time-lapse, a file without changes no longer shows the time-lapse's counter in its header over the Revert and Save buttons.
 - Escape closes the Code History and the time-lapse and goes back to what was shown before.
-- Blame and Side by Side on a new file say in the status bar that it has no committed lines, rather than showing empty panes.
+- Blame and Side by Side on a new file say in the status bar that it has no committed lines, rather than showing empty panes. A file added in a commit you compare still has its blame.
 - File > New Tab and Repository List go to the empty tab when there is one, rather than opening another.
 - The Settings window keeps its height on About instead of growing by a line.
+- While two commits are compared, an edit of `.gittan/commands.toml` is picked up without a refresh.
+- Back and Forward pass over the Pull Requests page when the hosting service has been turned off since, rather than stopping there with nothing shown.
 - The GitHub view says you're not logged in when gh has no account, with Log In in Terminal (runs `gh auth login`) and Hosting Settings, rather than showing gh's message in red.
 
 ## 0.16 (build-141, 2026-11-06)

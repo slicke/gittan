@@ -1033,19 +1033,23 @@ begin
     Add(Targets[i]);
   for i := 0 to High(Kinds) do
     Add(Kinds[i]);
-  { The first command with a key keeps it; a section without a command
-    holds none. }
+  { The first command with a key keeps it, the personal file's before
+    the committed ones wherever they are listed (a script or target
+    the personal file gives a key comes after the files' own commands);
+    a section without a command holds none. }
   Used := [];
   n := 0;
-  for j := 0 to High(Result) do
-    if (Result[j].Key <> #0) and (Result[j].Command <> '') then
-      if Result[j].Key in Used then
-        Result[j].Key := #0
-      else
-      begin
-        Include(Used, Result[j].Key);
-        Inc(n);
-      end;
+  for i := 0 to 1 do
+    for j := 0 to High(Result) do
+      if (Result[j].Key <> #0) and (Result[j].Command <> '') and
+        (Result[j].Personal = (i = 0)) then
+        if Result[j].Key in Used then
+          Result[j].Key := #0
+        else
+        begin
+          Include(Used, Result[j].Key);
+          Inc(n);
+        end;
 end;
 
 function CommandsHashOf(const AFiles: TGittanCommandsFiles): string;

@@ -47,7 +47,8 @@ begin
   AbandonTimelapseJob;
   FHistoryPath := Path;
   FHistoryRef := Ref;
-  FHistoryName := Path;
+  { The title stays the code history's piece until the time-lapse takes
+    its place (TimelapseJobDone): one that fails leaves that history. }
   FTimelapseJob := TGittanTimelapseJob.Create(FRepo.Root, Path, FHistoryRef);
   FTimelapseJob.OnDone := @TimelapseJobDone;
   FTimelapseJob.Start;
@@ -102,6 +103,7 @@ begin
   FCurrentPath := '';
   SetOverscroll(0);
   FSummary.Notice := '';
+  FHistoryName := FHistoryPath;
   FHeader.SetTitle(Format(rsTimelapseTitle, [FHistoryName]));
   { The band names the commits of the lines, not a blame. }
   FBlameOld := nil;

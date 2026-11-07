@@ -527,8 +527,14 @@ begin
 end;
 
 procedure TGittanWindow.RunInTerminal(const ACommand: string);
+var
+  Home: string;
 begin
-  FActive.OpenTerminalIn(ExcludeTrailingPathDelimiter(GetUserDir), ACommand);
+  { The home folder without its last delimiter, but / stays /. }
+  Home := ExcludeTrailingPathDelimiter(GetUserDir);
+  if Home = '' then
+    Home := PathDelim;
+  FActive.OpenTerminalIn(Home, ACommand);
 end;
 
 function TGittanWindow.HasFrameFor(const ARepo: string): boolean;
@@ -1140,6 +1146,8 @@ begin
   for i := 0 to FFrames.Count - 1 do
     if Frames[i].IsBlank then
     begin
+      { A new tab says nothing of a repository that did not open in it. }
+      Frames[i].ClearOpenError;
       ShowFrame(Frames[i]);
       Exit;
     end;

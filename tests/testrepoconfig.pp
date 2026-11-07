@@ -126,6 +126,9 @@ begin
   C := ParseRepoConfig('[commit]'#10'subject-limit = 90'#10);
   AssertEquals(90, C.SubjectSoft);
   AssertEquals('a limit over the default maximum raises it', 90, C.SubjectHard);
+  C := ParseRepoConfig('[commit]'#10'subject-limit = 90'#10'subject-max = 60'#10);
+  AssertEquals('a maximum set holds', 60, C.SubjectHard);
+  AssertEquals('and pulls the limit down', 60, C.SubjectSoft);
   C := ParseRepoConfig('[commit]'#10'subject-limit = 0'#10'subject-max = 1000'#10);
   AssertEquals('out of range is left out', DefaultSubjectSoft, C.SubjectSoft);
   AssertEquals(DefaultSubjectHard, C.SubjectHard);
@@ -199,6 +202,8 @@ end;
 procedure TRepoConfigTest.TestProtected;
 var
   C: TGittanRepoConfig;
+  S: string;
+  i: integer;
 begin
   AssertTrue(GlobMatch('main', 'main'));
   AssertFalse(GlobMatch('main', 'mainline'));
@@ -209,6 +214,17 @@ begin
   AssertFalse(GlobMatch('v?', 'v10'));
   AssertTrue(GlobMatch('*', ''));
   AssertTrue(GlobMatch('a**b', 'ab'));
+  AssertTrue(GlobMatch('*/*-fix', 'hotfix/x-y-fix'));
+  AssertFalse(GlobMatch('*/*-fix', 'hotfix/x-y-fixed'));
+  AssertTrue('? is a character, not a byte', GlobMatch('release/?', 'release/'#$C3#$A5));
+  AssertFalse(GlobMatch('release/??', 'release/'#$C3#$A5));
+  AssertTrue('a character before a star', GlobMatch('*'#$C3#$A5, 'x'#$C3#$A5));
+  { Twenty stars before a b that is not there: no exponential search. }
+  S := '';
+  for i := 1 to 20 do
+    S := S + '*a';
+  AssertFalse('many stars', GlobMatch(S + 'b', StringOfChar('a', 60)));
+  AssertTrue(GlobMatch(S, StringOfChar('a', 60)));
   C := ParseRepoConfig('[branches]'#10'protected = ["main", "release/*"]'#10);
   AssertTrue(BranchProtected(C, 'main'));
   AssertTrue(BranchProtected(C, 'release/2'));

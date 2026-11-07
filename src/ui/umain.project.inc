@@ -143,7 +143,8 @@ begin
 end;
 
 { The list of the kinds: Automatic, which lets the files decide (with
-  the kinds they tell), then every kind the drivers know, those shown
+  the kinds it gives: a project line's, else those the files tell),
+  then every kind the drivers know, those shown
   checked, each with the file that identifies it here. }
 procedure TRepoFrame.ProjectPagePickKinds(Sender: TObject; const AScreenRect: TRect);
 var
@@ -155,7 +156,9 @@ var
 begin
   if FRepo.Root = '' then
     Exit;
-  Found := DetectProjects(FRepo.Root);
+  { What Automatic gives: the project line of repo.toml or a commands
+    file when there is one, else what the files tell. }
+  Found := ProjectsOfRoot(FRepo.Root, '');
   Detected := '';
   for i := 0 to High(Found) do
   begin

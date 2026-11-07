@@ -226,10 +226,11 @@ begin
         Result.SubjectHard := Hard;
       if Soft > 0 then
         Result.SubjectSoft := Soft;
-      { A maximum under the default limit, or a limit over the
-        maximum: the count shows from the maximum. }
+      { A limit over the default maximum raises it; a maximum under the
+        limit, its own or the default, pulls the limit down: a maximum
+        the file sets holds. }
       if Result.SubjectSoft > Result.SubjectHard then
-        if Soft > 0 then
+        if Hard = 0 then
           Result.SubjectHard := Result.SubjectSoft
         else
           Result.SubjectSoft := Result.SubjectHard;
@@ -335,36 +336,61 @@ begin
 end;
 
 function GlobMatch(const APattern, AName: string): boolean;
+var
+  P, N, StarP, StarN: integer;
 
-  function MatchAt(P, N: integer): boolean;
+  { The bytes of the UTF-8 character at AName[I], so ? takes one
+    character, not one byte of it. }
+  function CharLen(I: integer): integer;
   begin
-    while P <= Length(APattern) do
-    begin
-      if APattern[P] = '*' then
-      begin
-        { Every place the rest could start, the end too. }
-        while (P <= Length(APattern)) and (APattern[P] = '*') do
-          Inc(P);
-        if P > Length(APattern) then
-          Exit(True);
-        while N <= Length(AName) do
-        begin
-          if MatchAt(P, N) then
-            Exit(True);
-          Inc(N);
-        end;
-        Exit(False);
-      end;
-      if (N > Length(AName)) or ((APattern[P] <> '?') and (APattern[P] <> AName[N])) then
-        Exit(False);
-      Inc(P);
-      Inc(N);
+    case Ord(AName[I]) of
+      $C0..$DF: Result := 2;
+      $E0..$EF: Result := 3;
+      $F0..$F7: Result := 4;
+      else
+        Result := 1;
     end;
-    Result := N > Length(AName);
+    if I + Result > Length(AName) + 1 then
+      Result := Length(AName) + 1 - I;
   end;
 
 begin
-  Result := MatchAt(1, 1);
+  { One pass with a step back to the last *, which then takes one more
+    character: the time is the pattern's length times the name's,
+    whatever the pattern (a recursion over every * was exponential in
+    them, and the pattern comes from a cloned file). }
+  P := 1;
+  N := 1;
+  StarP := 0;
+  StarN := 0;
+  while N <= Length(AName) do
+    if (P <= Length(APattern)) and (APattern[P] = '*') then
+    begin
+      StarP := P;
+      StarN := N;
+      Inc(P);
+    end
+    else if (P <= Length(APattern)) and (APattern[P] = '?') then
+    begin
+      Inc(N, CharLen(N));
+      Inc(P);
+    end
+    else if (P <= Length(APattern)) and (APattern[P] = AName[N]) then
+    begin
+      Inc(N);
+      Inc(P);
+    end
+    else if StarP > 0 then
+    begin
+      Inc(StarN, CharLen(StarN));
+      N := StarN;
+      P := StarP + 1;
+    end
+    else
+      Exit(False);
+  while (P <= Length(APattern)) and (APattern[P] = '*') do
+    Inc(P);
+  Result := P > Length(APattern);
 end;
 
 function BranchProtected(const AConfig: TGittanRepoConfig; const ABranch: string): boolean;

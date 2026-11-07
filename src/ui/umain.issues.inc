@@ -80,6 +80,7 @@ var
   Values: array of string;
   Lines: TStringArray;
   T: TGittanIssueTracker;
+  Note: string;
 begin
   if FRepo.Root = '' then
     Exit;
@@ -92,7 +93,16 @@ begin
     Values[1] := Trim(Lines[0]);
   if Length(Lines) > 1 then
     Values[2] := Trim(Lines[1]);
-  if not AskInput(rsIssueTrackerTitle, rsIssueTrackerNote, [rsIssueTrackerUrl,
+  { The tracker repo.toml names stays when these are emptied: the note
+    says so, rather than the fields' promise to take it out. }
+  Note := rsIssueTrackerNote;
+  if not IssueTrackerEmpty(FRepoConfig.Issues) then
+    if FRepoConfig.Issues.Url <> '' then
+      Note := Note + Format(rsIssueTrackerRepoNote, [FRepoConfig.Issues.Url])
+    else
+      Note := Note + Format(rsIssueTrackerRepoNote,
+        [Trim(AdjustLineBreaks(FRepoConfig.Issues.LogRegex, tlbsLF)).Split([#10])[0]]);
+  if not AskInput(rsIssueTrackerTitle, Note, [rsIssueTrackerUrl,
     rsIssueTrackerRegex, rsIssueTrackerIdRegex], Values, @CheckIssueTracker, '', True) then
     Exit;
   T.Url := Trim(Values[0]);

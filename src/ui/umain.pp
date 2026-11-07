@@ -1430,6 +1430,7 @@ type
     procedure CommandPageEditFile(Sender: TObject);
     procedure CommandPageEditPersonal(Sender: TObject);
     procedure LoadRepoConfig;
+    procedure NoteRepoConfigError(const AOld: string);
     function CommitConfigNote: string;
     function EffectiveIssueTracker: TGittanIssueTracker;
     procedure EditCommandsFile(const AFileName, AShown, ATemplate: string);
@@ -1542,6 +1543,7 @@ type
     procedure MenuBlameClick(Sender: TObject);
     procedure StartBlame;
     function ShownIsNewFile: boolean;
+    function NewFileUncommitted: boolean;
     procedure NoteNewFile;
     procedure AbandonBlameJob;
     procedure FreeBlameJobsAsync(Data: PtrInt);
@@ -2414,6 +2416,9 @@ type
       window opens a repository in such a frame rather than in a new
       one. }
     function IsBlank: boolean;
+    {** Takes the error of a repository that did not open off the
+      welcome view, as New Tab reuses the frame. }
+    procedure ClearOpenError;
     {** The root of the open repository, '' for none. }
     function RepoRoot: string;
     {** The open repository and its changed files, for the extensions
@@ -2954,6 +2959,7 @@ resourcestring
   rsPushAction = 'Push';
   rsSubjectCount = '%d/%d';
   rsSubjectCountHint = 'Characters in the first line. git log and GitHub cut it after %d.';
+  rsRepoConfigNotRead = '.gittan/repo.toml could not be read, so what it says is left out';
   rsSubjectCountHintRepo = 'Characters in the first line. .gittan/repo.toml keeps it to %d.';
   rsProtectedBranchNote = '%s is protected in .gittan/repo.toml: its changes come through ' +
     'pull requests. Commit on a branch of its own.';
@@ -3084,6 +3090,8 @@ resourcestring
     'expression the first finds each reference ("Fixes #12 and #13") and the second the ' +
     'ids within it. Kept in the repository''s config as bugtraq.url and bugtraq.logregex, ' +
     'which other git clients read too; leave everything empty to take it out.';
+  rsIssueTrackerRepoNote = ' While these are empty, .gittan/repo.toml''s tracker is used: ' +
+    '%s. Its [issues] table is the repository''s own, changed in that file.';
   rsIssueTrackerUrl = 'Address of an issue';
   rsIssueTrackerRegex = 'Regular expression';
   rsIssueTrackerIdRegex = 'Expression for the ids within a reference (optional)';
@@ -4639,6 +4647,12 @@ end;
 function TRepoFrame.IsBlank: boolean;
 begin
   Result := (FRepo.Root = '') and (FOpenJob = nil) and (FView = gvSummary);
+end;
+
+procedure TRepoFrame.ClearOpenError;
+begin
+  FWelcome.SetError('');
+  FWelcome.FitHeight(FSummaryBox.ClientHeight);
 end;
 
 function TRepoFrame.RepoRoot: string;
@@ -7414,6 +7428,7 @@ begin
   { Before the draft: repo.toml's template and sign-off fill the
     section. }
   FRepoConfig := ReadRepoConfig(Job.Root);
+  NoteRepoConfigError('');
   LoadCommitDraft;
   { The exclude file lives in the git directory, which git names (a
     work tree's is elsewhere), once per open: the section lists it and

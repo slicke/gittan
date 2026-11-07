@@ -3053,6 +3053,54 @@ begin
     Result := ADefault;
 end;
 
+{ Whether AFileName, expanded, is a file under ARoot reached through
+  no link: neither the file nor a folder between the root and it is a
+  symbolic link (or on Windows a reparse point), so a path a cloned file
+  names cannot read what lies outside the checkout. }
+function FileInCheckout(const ARoot, AFileName: string): boolean;
+
+  function IsLink(const APath: string): boolean;
+  var
+    Link: TRawbyteSymLinkRec;
+    Info: TSearchRec;
+  begin
+    Result := FileGetSymLinkTarget(APath, Link);
+    if not Result and (FindFirst(APath, faAnyFile or faSymLink, Info) = 0) then
+    begin
+      Result := (Info.Attr and faSymLink) <> 0;
+      FindClose(Info);
+    end;
+  end;
+
+var
+  Root, Rest, Path: string;
+  Parts: TStringArray;
+  i: integer;
+begin
+  Result := False;
+  Root := IncludeTrailingPathDelimiter(ExpandFileName(ARoot));
+  {$IF DEFINED(WINDOWS) OR DEFINED(DARWIN)}
+  if not SameText(Copy(AFileName, 1, Length(Root)), Root) then
+  {$ELSE}
+  if Copy(AFileName, 1, Length(Root)) <> Root then
+  {$ENDIF}
+    Exit;
+  Rest := Copy(AFileName, Length(Root) + 1, MaxInt);
+  if Rest = '' then
+    Exit;
+  Parts := Rest.Split([PathDelim]);
+  Path := ExcludeTrailingPathDelimiter(Root);
+  for i := 0 to High(Parts) do
+  begin
+    if Parts[i] = '' then
+      Continue;
+    Path := Path + PathDelim + Parts[i];
+    if IsLink(Path) then
+      Exit;
+  end;
+  Result := FileExists(AFileName);
+end;
+
 function TGittanRepo.CommitTemplate(const AFallback: string): string;
 var
   Output, FileName, Comment: string;
@@ -3067,15 +3115,22 @@ begin
   FileName := Trim(Output);
   if FileName = '' then
   begin
-    { The repository's own, a path from the root. }
+    { The repository's own, a path from the root that a clone brings:
+      a file in the checkout, never one beside it (../) or through a
+      link, whose text would go into a message to be pushed. }
     if Trim(AFallback) = '' then
       Exit;
-    Output := Trim(AFallback);
-    FileName := Output;
+    FileName := ExpandFileName(IncludeTrailingPathDelimiter(FRoot) +
+      SetDirSeparators(Trim(AFallback)));
+    if not FileInCheckout(FRoot, FileName) then
+      Exit;
+  end
+  else
+  begin
+    FileName := ExpandFileName(IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(FileName));
+    if not FileExists(FileName) then
+      FileName := ExpandFileName(SetDirSeparators(Trim(Output)));
   end;
-  FileName := ExpandFileName(IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(FileName));
-  if not FileExists(FileName) then
-    FileName := ExpandFileName(SetDirSeparators(Trim(Output)));
   if not FileExists(FileName) then
     Exit;
   { The comment lines start as git's own do: core.commentString (or
@@ -7147,6 +7202,26 @@ var
   FileName, Id, Left, Right: string;
 
   i: integer;
+
+  { The name, time and size of each file in ADir, none when it is not
+    there. }
+  procedure AddStats(const ADir: string);
+  var
+    F: TSearchRec;
+  begin
+    if FindFirst(IncludeTrailingPathDelimiter(ADir) + AllFilesMask, faAnyFile, F) <> 0 then
+      Exit;
+    try
+      repeat
+        if F.Attr and faDirectory = 0 then
+          Result := Result + 'setting ' + F.Name + ' ' +
+            FormatDateTime('yyyymmddhhnnsszzz', F.TimeStamp) + ' ' + IntToStr(F.Size) + #10;
+      until FindNext(F) <> 0;
+    finally
+      FindClose(F);
+    end;
+  end;
+
 begin
   Result := '';
   if FRoot = '' then
@@ -7202,6 +7277,20 @@ begin
       end;
     for i := 0 to Paths.Count - 1 do
       Result := Result + IntToStr(PtrUInt(Paths.Objects[i])) + ' ' + Paths[i] + #10;
+    { What Gittan reads of the repository's own settings, on disk
+      whatever is compared: the .gittan folder (repo.toml, the commands
+      files, gittan.repoconfig and gittan.repocommands) and the personal
+      commands file in the git directory, which no status lists and
+      another worktree may change. }
+    AddStats(IncludeTrailingPathDelimiter(FRoot) + '.gittan');
+    AddStats(IncludeTrailingPathDelimiter(FRoot) + '.gittan' + PathDelim + 'commands');
+    if (FGitDir <> '') and StatExact(IncludeTrailingPathDelimiter(CommonDir) + 'gittan' +
+      PathDelim + 'commands.toml', Info) then
+    begin
+      Result := Result + 'personal ' + FormatDateTime('yyyymmddhhnnsszzz', Info.TimeStamp) +
+        ' ' + IntToStr(Info.Size) + #10;
+      FindClose(Info);
+    end;
     { Between two commits the files on disk do not matter. }
     if IsRange then
       Exit;

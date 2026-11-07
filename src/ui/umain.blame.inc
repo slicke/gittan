@@ -42,7 +42,7 @@ begin
   FBlameOld := nil;
   FBlameNew := nil;
   NoteNewFile;
-  if FBlameOn and (FView = gvChanges) and (FCurrentPath <> '') and not ShownIsNewFile then
+  if FBlameOn and (FView = gvChanges) and (FCurrentPath <> '') and not NewFileUncommitted then
   begin
     FRepo.DiffSides(OldRef, NewRef);
     i := FBlameCache.IndexOf(BlameKey(OldRef, FCurrentPath));
@@ -78,16 +78,27 @@ begin
       Exit(False);
 end;
 
+{ A new file whose lines are the work tree's: none committed, so
+  nothing to blame. In a range the new side is a commit, and the commit
+  that added the file is what blame shows of every line. }
+function TRepoFrame.NewFileUncommitted: boolean;
+begin
+  Result := ShownIsNewFile and not FRepo.IsRange;
+end;
+
 { Blame and Side by Side have nothing to show for a new file, and the
   band and the old pane stayed empty without a word: the status bar
   says why while either is on. }
 procedure TRepoFrame.NoteNewFile;
+var
+  Blame: boolean;
 begin
   if not ShownIsNewFile then
     Exit;
-  if FBlameOn and FSideBySide then
+  Blame := FBlameOn and NewFileUncommitted;
+  if Blame and FSideBySide then
     StatusNote(rsNewFileModes)
-  else if FBlameOn then
+  else if Blame then
     StatusNote(rsNewFileBlame)
   else if FSideBySide then
     StatusNote(rsNewFileSide);
