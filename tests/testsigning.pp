@@ -18,8 +18,11 @@ type
   TSigningTest = class(TTestCase)
   private
     FDir: string;
+    { other.pub as MakeKey made it. }
+    FOtherKey: string;
     function Git(const AArgs: array of string): string;
     function MakeKey: boolean;
+    function FolderList: string;
     procedure WriteFile(const AName, AText: string);
     function Commit(const AMessage: string; ASign: boolean): string;
     function FileText(const AName: string): string;
@@ -75,7 +78,7 @@ end;
 function TSigningTest.MakeKey: boolean;
 var
   Output, Error: string;
-  Status: integer;
+  Code: integer;
   Name: string;
 begin
   Result := True;
@@ -83,21 +86,40 @@ begin
   begin
     {$IFDEF WINDOWS}
     Result := RunTool('ssh-keygen', FDir, ['-q', '-t', 'ed25519', '-N', '', '-f', Name], [], [],
-      Output, Error, Status, nil);
+      Output, Error, Code, nil);
     {$ELSE}
     Result := RunTool('/bin/sh', FDir, ['-c', 'ssh-keygen -q -t ed25519 -N "" -f ' + Name],
-      [], [], Output, Error, Status, nil);
+      [], [], Output, Error, Code, nil);
     {$ENDIF}
     { Not there at all: the tests that need it are skipped. }
     if not Result then
       Exit;
     { There, but no key made: what it said fails the test. }
-    if (Status <> 0) or not FileExists(FDir + PathDelim + Name + '.pub') then
-      Fail(Format('ssh-keygen made no %s.pub (exit %d): %s %s', [Name, Status, Trim(Output),
+    if (Code <> 0) or not FileExists(FDir + PathDelim + Name + '.pub') then
+      Fail(Format('ssh-keygen made no %s.pub (exit %d): %s %s', [Name, Code, Trim(Output),
         Trim(Error)]));
     {$IFNDEF WINDOWS}
     FpChmod(FDir + PathDelim + Name, &600);
     {$ENDIF}
+  end;
+  { Read at once: on CI's x64 runners other.pub was gone again by the
+    time the test came to it, and nothing here removes it. }
+  FOtherKey := FileText(FDir + PathDelim + 'other.pub');
+end;
+
+{ The names in the test's folder, for the note above. }
+function TSigningTest.FolderList: string;
+var
+  Info: TSearchRec;
+begin
+  Result := '';
+  if FindFirst(FDir + PathDelim + '*', faAnyFile, Info) = 0 then
+  try
+    repeat
+      Result := Result + Info.Name + ' ';
+    until FindNext(Info) <> 0;
+  finally
+    FindClose(Info);
   end;
 end;
 
@@ -272,7 +294,9 @@ begin
   AssertTrue('a fingerprint: ' + Commits[1].Signature.Key, Pos('SHA256:', Commits[1].Signature.Key) = 1);
 
   { Another key allowed: a valid signature by a key not known here. }
-  WriteFile('allowed', 'other@example.invalid ' + FileText(FDir + PathDelim + 'other.pub'));
+  if not FileExists(FDir + PathDelim + 'other.pub') then
+    WriteLn(ErrOutput, 'other.pub is gone from ', FDir, ': ', FolderList);
+  WriteFile('allowed', 'other@example.invalid ' + FOtherKey);
   AssertTrue(Error, CommitSignatures(FDir, [Signed], nil, Commits, Error, []));
   AssertTrue('unknown key', Commits[0].Signature.State = ssUnknownKey);
   AssertEquals('U', Commits[0].Signature.Code);
