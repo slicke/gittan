@@ -2310,10 +2310,13 @@ begin
 end;
 
 { The host of the first remote the forge hosts, with the owner and
-  the repository there ("slicke/gittan"); '' without a forge. }
+  the repository there ("slicke/gittan"); '' without a forge. An ssh
+  remote's host may be an alias of ~/.ssh/config (github-work), as
+  FindForge takes it: the host it names is the one asked. }
 function TRepoFrame.TrustHost(out AOwner, ARepo: string): string;
 var
-  Line, Url, Path: string;
+  Line, Url, Path, Host, SshConfig: string;
+  SshRead: boolean;
   p: integer;
 begin
   Result := '';
@@ -2321,21 +2324,37 @@ begin
   ARepo := '';
   if FForge = nil then
     Exit;
+  SshConfig := '';
+  SshRead := False;
   for Line in FRemoteUrls.Split([#10]) do
   begin
     p := Pos(' ', Line);
     if p = 0 then
       Continue;
     Url := Trim(Copy(Line, p + 1, MaxInt));
-    if not TGittanForgeClass(FForge.ClassType).HostsRemote(RemoteHost(Url)) then
+    Host := RemoteHost(Url);
+    if Host = '' then
       Continue;
+    if not TGittanForgeClass(FForge.ClassType).HostsRemote(Host) then
+    begin
+      if SameText(Copy(Url, 1, 7), 'http://') or SameText(Copy(Url, 1, 8), 'https://') then
+        Continue;
+      if not SshRead then
+      begin
+        SshConfig := UserSshConfig;
+        SshRead := True;
+      end;
+      Host := LowerCase(SshHostName(Host, SshConfig));
+      if not TGittanForgeClass(FForge.ClassType).HostsRemote(Host) then
+        Continue;
+    end;
     Path := RemoteRepoPath(Url);
     p := Pos('/', Path);
     if p = 0 then
       Continue;
     AOwner := Copy(Path, 1, p - 1);
     ARepo := Copy(Path, p + 1, MaxInt);
-    Exit(RemoteHost(Url));
+    Exit(Host);
   end;
 end;
 
@@ -2364,11 +2383,11 @@ begin
     RunGitIn(FRepo.Root, ['config', '--global', '--replace-all', 'gpg.ssh.allowedSignersFile',
       Allowed], Output, Err);
   end
-  else if Pos('~/', Allowed) = 1 then
-    Allowed := IncludeTrailingPathDelimiter(GetUserDir) + Copy(Allowed, 3, MaxInt);
+  else
+    Allowed := AllowedSignersPath(FRepo.Root, Allowed);
   StatusNote(Format(rsTrustAsking, [Host]));
   FTrustJob := TGittanTrustJob.Create(FRepo.Root, Host, RepoOwner, RepoName, AHash,
-    GpgProgramFor(FRepo.Root), Allowed);
+    GpgProgramFor(FRepo.Root), Allowed, FForge.Cli);
   FTrustJob.OnDone := @TrustJobDone;
   FTrustJob.Start;
 end;

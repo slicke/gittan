@@ -433,6 +433,10 @@ begin
   AssertFalse(C.Local);
   AssertFalse('the local false wins', C.Sign);
   AssertTrue('OpenPGP without a format', C.Format = sfOpenPgp);
+  C := ParseCommitterSetup('global'#0'commit.gpgsign'#0);
+  AssertTrue('a key without a value is true', C.Sign);
+  C := ParseCommitterSetup('global'#0'commit.gpgsign'#10#0);
+  AssertFalse('an empty value is false', C.Sign);
   C := ParseCommitterSetup('');
   AssertEquals('', C.Name);
   AssertFalse(C.Sign);
@@ -500,6 +504,14 @@ begin
   WriteFile('c', '-----BEGIN OPENSSH PRIVATE KEY-----'#10'b3BlbnNzaC1rZXkt'#10);
   AssertEquals('', PublicKeyOf(FDir + PathDelim + 'c'));
   AssertEquals('', PublicKeyOf('key::-----BEGIN OPENSSH PRIVATE KEY-----'));
+
+  AssertEquals('from the root', ExpandFileName(FDir + PathDelim + '.allowed_signers'),
+    AllowedSignersPath(FDir, '.allowed_signers'));
+  AssertEquals('an absolute path as it is', FDir + PathDelim + 'a',
+    AllowedSignersPath('/elsewhere', FDir + PathDelim + 'a'));
+  AssertEquals('the home folder', IncludeTrailingPathDelimiter(GetUserDir) + '.ssh' + PathDelim +
+    'allowed_signers', AllowedSignersPath(FDir, '~/.ssh/allowed_signers'));
+  AssertEquals('', AllowedSignersPath(FDir, ''));
 
   AssertTrue(Error, AddAllowedSigner(FDir + PathDelim + 'deep' + PathDelim + 'allowed',
     'a@x', 'ssh-ed25519 AAAA c', Error));

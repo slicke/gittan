@@ -2324,15 +2324,20 @@ var
   Args, Env: array of string;
   Status, i: integer;
 begin
-  SetLength(Args, 4 + Length(AArgs));
+  SetLength(Args, 6 + Length(AArgs));
   Args[0] := '-c';
   Args[1] := 'core.quotepath=false';
   { With it git writes a blank context line as an empty line, not a
     space, and the readers of a hunk would lose the line. }
   Args[2] := '-c';
   Args[3] := 'diff.suppressBlankEmpty=false';
+  { With it git log writes gpg's or ssh-keygen's text before each
+    commit, whatever --format says, and the readers would lose the
+    records. }
+  Args[4] := '-c';
+  Args[5] := 'log.showSignature=false';
   for i := 0 to High(AArgs) do
-    Args[4 + i] := AArgs[i];
+    Args[6 + i] := AArgs[i];
   SetLength(Env, Length(AEnv) + 4);
   for i := 0 to High(AEnv) do
     Env[i] := AEnv[i];

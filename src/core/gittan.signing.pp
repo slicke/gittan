@@ -195,6 +195,10 @@ function TestSigning(const ARoot: string; const ASetup: TGittanSigningSetup;
 
 {** ~/.ssh/allowed_signers, the file Gittan sets up when none is. }
 function DefaultAllowedSignersFile: string;
+{** The allowed signers file gpg.ssh.allowedSignersFile names (AValue),
+  as git reads it: ~/ is the home folder, and a relative path is from
+  the repository's root ARoot, where git runs ssh-keygen. }
+function AllowedSignersPath(const ARoot, AValue: string): string;
 
 {** Puts "AEmail <key>" into AFile (made, with its folder, when it does
   not exist) unless the file has the key already. AKey is a .pub file's
@@ -567,8 +571,8 @@ begin
           'gpg.ssh.allowedSignersFile', Allowed], Output, AError) then
           Exit(False);
       end
-      else if Pos('~/', Allowed) = 1 then
-        Allowed := IncludeTrailingPathDelimiter(GetUserDir) + Copy(Allowed, 3, MaxInt);
+      else
+        Allowed := AllowedSignersPath(ARoot, Allowed);
       Result := AddAllowedSigner(Allowed, AEmail, ASetup.Key, AError);
     end;
   end
@@ -632,7 +636,8 @@ begin
     else if Key = 'user.email' then
       Result.Email := Trim(Value)
     else if Key = 'commit.gpgsign' then
-      Result.Sign := (Value = '') or (LowerCase(Trim(Value)) = 'true') or (Trim(Value) = '1') or
+      { A key without "=" is true to git, "gpgsign =" false. }
+      Result.Sign := (p = 0) or (LowerCase(Trim(Value)) = 'true') or (Trim(Value) = '1') or
         (LowerCase(Trim(Value)) = 'yes') or (LowerCase(Trim(Value)) = 'on')
     else if Key = 'gpg.format' then
       Result.Format := SignFormatOf(Trim(Value));
@@ -790,6 +795,24 @@ begin
   Result := IncludeTrailingPathDelimiter(GetUserDir) + '.ssh' + PathDelim + 'allowed_signers';
 end;
 
+{ git expands ~/ in a path of its config; a key or a file named
+  without one is taken as it is. }
+function ExpandHome(const APath: string): string;
+begin
+  if Pos('~/', APath) = 1 then
+    Result := IncludeTrailingPathDelimiter(GetUserDir) + SetDirSeparators(Copy(APath, 3, MaxInt))
+  else
+    Result := APath;
+end;
+
+function AllowedSignersPath(const ARoot, AValue: string): string;
+begin
+  Result := ExpandHome(Trim(AValue));
+  if (Result <> '') and (ARoot <> '') and (ExtractFileDrive(Result) = '') and
+    not (Result[1] in AllowDirectorySeparators) then
+    Result := ExpandFileName(IncludeTrailingPathDelimiter(ARoot) + SetDirSeparators(Result));
+end;
+
 function PublicKeyOf(const AKey: string): string;
 var
   Lines: TStringList;
@@ -798,8 +821,9 @@ begin
   Result := Trim(AKey);
   if Pos('key::', Result) = 1 then
     Delete(Result, 1, 5)
-  else if FileExists(Result) then
+  else if FileExists(ExpandHome(Result)) then
   begin
+    Result := ExpandHome(Result);
     Lines := TStringList.Create;
     try
       try
@@ -809,9 +833,9 @@ begin
         else
           Result := '';
         { A private key: its public half lies beside it as <name>.pub. }
-        if (Pos('-----', Result) = 1) and FileExists(Trim(AKey) + '.pub') then
+        if (Pos('-----', Result) = 1) and FileExists(ExpandHome(Trim(AKey)) + '.pub') then
         begin
-          Lines.LoadFromFile(Trim(AKey) + '.pub');
+          Lines.LoadFromFile(ExpandHome(Trim(AKey)) + '.pub');
           if Lines.Count > 0 then
             Result := Trim(Lines[0])
           else

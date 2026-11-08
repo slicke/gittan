@@ -36,7 +36,7 @@ type
     why nothing or only part of it could be done. }
   TGittanTrustJob = class(TGittanJob)
   private
-    FRoot, FHost, FOwner, FRepo, FHash, FGpgProgram, FAllowedFile: string;
+    FRoot, FHost, FOwner, FRepo, FHash, FGpgProgram, FAllowedFile, FCli: string;
     FTrusted, FUsers: TStringArray;
     FSshAdded: integer;
     FError: string;
@@ -46,9 +46,11 @@ type
   public
     {** AGpgProgram is the gpg git uses ('' when none, then GPG keys
       are left out), AAllowedFile the allowed signers file as it is or
-      is to be made. }
+      is to be made, ACli the forge's tool (gh), asked for its token
+      for AHost so a private repository's commit is found ('' to ask
+      without one). }
     constructor Create(const ARoot, AHost, AOwner, ARepo, AHash, AGpgProgram,
-      AAllowedFile: string);
+      AAllowedFile, ACli: string);
     property Hash: string read FHash;
     property Host: string read FHost;
     property Trusted: TStringArray read FTrusted;
@@ -66,16 +68,17 @@ function GitHubApiBase(const AHost: string): string;
   knows no user for gives none for that one. GitHubCommitPeople gives
   the two apart, '' for one GitHub knows no user for. }
 function GitHubCommitLogins(const ABase, AOwner, ARepo, AHash: string;
-  out ALogins: TStringArray; out AError: string): boolean;
+  out ALogins: TStringArray; out AError: string; const AToken: string = ''): boolean;
 function GitHubCommitPeople(const ABase, AOwner, ARepo, AHash: string;
-  out AAuthor, ACommitter, AError: string): boolean;
+  out AAuthor, ACommitter, AError: string; const AToken: string = ''): boolean;
 function ParseGitHubCommitLogins(const AJson: string): TStringArray;
 procedure ParseGitHubCommitPeople(const AJson: string; out AAuthor, ACommitter: string);
 
 {** The signing keys of the GitHub user ALogin (GET /users/{login}/gpg_keys
-  and /ssh_signing_keys). }
+  and /ssh_signing_keys). AToken, when given, goes along as the
+  requests' Authorization, which a private repository's commit wants. }
 function GitHubUserKeys(const ABase, ALogin: string; out AKeys: TGittanForgeKeys;
-  out AError: string): boolean;
+  out AError: string; const AToken: string = ''): boolean;
 procedure ParseGitHubGpgKeys(const AJson: string; var AKeys: TGittanForgeKeys);
 procedure ParseGitHubSshKeys(const AJson: string; var AKeys: TGittanForgeKeys);
 
@@ -115,11 +118,14 @@ begin
   AList[High(AList)] := Trim(AValue);
 end;
 
-function Fetch(const AUrl: string; out ABody, AError: string): boolean;
+function Fetch(const AUrl, AToken: string; out ABody, AError: string): boolean;
 var
   Response: TGittanHttpResponse;
 begin
-  Response := HttpGet(AUrl, [GitHubAccept], FetchSeconds);
+  if AToken <> '' then
+    Response := HttpGet(AUrl, [GitHubAccept, 'Authorization: Bearer ' + AToken], FetchSeconds)
+  else
+    Response := HttpGet(AUrl, [GitHubAccept], FetchSeconds);
   Result := HttpOk(Response);
   if Result then
   begin
@@ -188,24 +194,25 @@ begin
 end;
 
 function GitHubCommitPeople(const ABase, AOwner, ARepo, AHash: string;
-  out AAuthor, ACommitter, AError: string): boolean;
+  out AAuthor, ACommitter, AError: string; const AToken: string): boolean;
 var
   Body: string;
 begin
   AAuthor := '';
   ACommitter := '';
-  Result := Fetch(ABase + '/repos/' + AOwner + '/' + ARepo + '/commits/' + AHash, Body, AError);
+  Result := Fetch(ABase + '/repos/' + AOwner + '/' + ARepo + '/commits/' + AHash, AToken, Body,
+    AError);
   if Result then
     ParseGitHubCommitPeople(Body, AAuthor, ACommitter);
 end;
 
 function GitHubCommitLogins(const ABase, AOwner, ARepo, AHash: string;
-  out ALogins: TStringArray; out AError: string): boolean;
+  out ALogins: TStringArray; out AError: string; const AToken: string): boolean;
 var
   Author, Committer: string;
 begin
   ALogins := nil;
-  Result := GitHubCommitPeople(ABase, AOwner, ARepo, AHash, Author, Committer, AError);
+  Result := GitHubCommitPeople(ABase, AOwner, ARepo, AHash, Author, Committer, AError, AToken);
   if Result then
   begin
     AddOnce(ALogins, Author);
@@ -280,17 +287,17 @@ begin
 end;
 
 function GitHubUserKeys(const ABase, ALogin: string; out AKeys: TGittanForgeKeys;
-  out AError: string): boolean;
+  out AError: string; const AToken: string): boolean;
 var
   Body, Err2: string;
   Ok1, Ok2: boolean;
 begin
   AKeys := Default(TGittanForgeKeys);
   AKeys.Login := ALogin;
-  Ok1 := Fetch(ABase + '/users/' + ALogin + '/gpg_keys', Body, AError);
+  Ok1 := Fetch(ABase + '/users/' + ALogin + '/gpg_keys', AToken, Body, AError);
   if Ok1 then
     ParseGitHubGpgKeys(Body, AKeys);
-  Ok2 := Fetch(ABase + '/users/' + ALogin + '/ssh_signing_keys', Body, Err2);
+  Ok2 := Fetch(ABase + '/users/' + ALogin + '/ssh_signing_keys', AToken, Body, Err2);
   if Ok2 then
     ParseGitHubSshKeys(Body, AKeys);
   Result := Ok1 or Ok2;
@@ -334,7 +341,7 @@ end;
   --------------------------------------------------------------------------- }
 
 constructor TGittanTrustJob.Create(const ARoot, AHost, AOwner, ARepo, AHash, AGpgProgram,
-  AAllowedFile: string);
+  AAllowedFile, ACli: string);
 begin
   inherited Create(True);
   FRoot := ARoot;
@@ -344,6 +351,7 @@ begin
   FHash := AHash;
   FGpgProgram := AGpgProgram;
   FAllowedFile := AAllowedFile;
+  FCli := ACli;
 end;
 
 function TGittanTrustJob.Cancelled: boolean;
@@ -362,14 +370,22 @@ end;
 procedure TGittanTrustJob.Execute;
 var
   Base, Reason, Login, Armored, Key, Email, Author, Committer, AuthorEmail,
-  CommitterEmail: string;
+  CommitterEmail, Token, Err: string;
   KeyOk: boolean;
   Logins, Fingerprints, Emails: TStringArray;
   Keys: TGittanForgeKeys;
   i: integer;
 begin
   Base := GitHubApiBase(FHost);
-  if not GitHubCommitPeople(Base, FOwner, FRepo, FHash, Author, Committer, FError) then
+  { Without a token GitHub answers 404 for a private repository's
+    commit; a tool not logged in to the host gives none. }
+  Token := '';
+  if (FCli <> '') and RunCli(FCli, FRoot, ['auth', 'token', '--hostname', FHost],
+    ['GH_PROMPT_DISABLED=1', 'GH_NO_UPDATE_NOTIFIER=1'], Token, Err) then
+    Token := Trim(Token)
+  else
+    Token := '';
+  if not GitHubCommitPeople(Base, FOwner, FRepo, FHash, Author, Committer, FError, Token) then
   begin
     { 404 or 422: GitHub has no such commit, as before a push. }
     if (Pos('not found', FError) > 0) or (Pos('422', FError) > 0) then
@@ -393,7 +409,7 @@ begin
       AddOnce(Emails, AuthorEmail);
     if Login = Committer then
       AddOnce(Emails, CommitterEmail);
-    if not GitHubUserKeys(Base, Login, Keys, Reason) then
+    if not GitHubUserKeys(Base, Login, Keys, Reason, Token) then
     begin
       FError := Reason;
       Continue;

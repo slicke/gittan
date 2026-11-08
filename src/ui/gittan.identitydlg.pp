@@ -99,6 +99,9 @@ type
     FKept: array[TGittanSignFormat] of string;
     FGpgProgram: string;
     FGpgLooked: boolean;
+    { The key of an X.509 setup (gpgsm), which the dialog shows under
+      GPG; '' for any other. }
+    FX509Key: string;
     procedure Row(const ACaption: string; AControl: TControl; AButton: TControl = nil);
     procedure Check(Sender: TObject);
     procedure SignChange(Sender: TObject);
@@ -106,6 +109,7 @@ type
     procedure TestClick(Sender: TObject);
     procedure FillKeys;
     function ChosenFormat: TGittanSignFormat;
+    function FormatToSave: TGittanSignFormat;
     function KeyValue: string;
     function KeyValueFor(AFormat: TGittanSignFormat): string;
     procedure SetKeyValue(const AValue: string);
@@ -304,6 +308,15 @@ begin
   end;
 end;
 
+{ X.509 stays as it was while its key is the one chosen; another key
+  under GPG is an OpenPGP one. }
+function TIdentityForm.FormatToSave: TGittanSignFormat;
+begin
+  Result := ChosenFormat;
+  if (Result = sfOpenPgp) and (FX509Key <> '') and (KeyValue = FX509Key) then
+    Result := sfX509;
+end;
+
 { The key as git wants it: for GPG the id behind the item chosen, else
   what was typed (an id, or a fingerprint); for SSH the text itself,
   a .pub path or a key, the agent note dropped. }
@@ -480,7 +493,7 @@ var
 begin
   Setup := Default(TGittanSigningSetup);
   Setup.Sign := True;
-  Setup.Format := ChosenFormat;
+  Setup.Format := FormatToSave;
   Setup.Key := KeyValue;
   Say(rsIdentityDlgTesting);
   Application.ProcessMessages;
@@ -518,7 +531,7 @@ begin
   FChoose.Visible := ChosenFormat = sfSsh;
   FTest.Enabled := Signing and (KeyValue <> '');
   FSaveButton.Enabled := (Trim(FName.Text) <> '') and (Trim(FEmail.Text) <> '') and
-    (not Signing or ((KeyValue <> '') and ((ChosenFormat <> sfOpenPgp) or (FGpgProgram <> ''))));
+    (not Signing or ((KeyValue <> '') and ((FormatToSave <> sfOpenPgp) or (FGpgProgram <> ''))));
 end;
 
 function ChooseIdentity(var AName, AEmail: string; var ALocal: boolean;
@@ -540,6 +553,8 @@ begin
       end
     else
       F.FSign.ItemIndex := 0;
+    if ASigning.Sign and (ASigning.Format = sfX509) then
+      F.FX509Key := ASigning.Key;
     F.FillKeys;
     F.SetKeyValue(ASigning.Key);
     F.Check(nil);
@@ -552,9 +567,7 @@ begin
       ASigning.Sign := F.ChosenFormat <> sfNone;
       if ASigning.Sign then
       begin
-        { X.509 through gpgsm is kept as it was: the dialog offers gpg. }
-        if not ((F.ChosenFormat = sfOpenPgp) and (ASigning.Format = sfX509)) then
-          ASigning.Format := F.ChosenFormat;
+        ASigning.Format := F.FormatToSave;
         ASigning.Key := F.KeyValue;
       end;
     end;
