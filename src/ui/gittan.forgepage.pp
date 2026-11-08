@@ -234,7 +234,7 @@ type
     procedure PaintHeading(var Y: integer; const ATitle, ADetail: string;
       AChips: boolean; ALeft, ARight: integer);
     function PresetChips: TGittanChipSpecs;
-    function FilterChips: TGittanChipSpecs;
+    function FilterChips(AMaxWidth: integer): TGittanChipSpecs;
     procedure PaintChipRow(ALeft, ARight: integer; var ATop: integer;
       const AChips: array of TGittanChipSpec);
     procedure PaintNote(var Y: integer; const AText: string; AColor: TColor;
@@ -487,6 +487,7 @@ const
   MinTitleWidth = 160;
   { The search field's width at the right of a section's heading. }
   SearchWidth = 200;
+  MinSearchWidth = 80;
   ChipPadX = 6;
   ChipPadY = 2;
   ChipRadius = 6;
@@ -1209,11 +1210,11 @@ end;
   the filters of it that are on and marked; and the order's chip with
   the glyph. }
 
-function TGittanForgePage.FilterChips: TGittanChipSpecs;
+function TGittanForgePage.FilterChips(AMaxWidth: integer): TGittanChipSpecs;
 var
   Defs: TGittanForgeFilterDefs;
   Keys, Named: string;
-  i: integer;
+  i, Count: integer;
   Order: TGittanPullOrder;
 begin
   Defs := SectionFilters(FDefs, CurSection);
@@ -1224,6 +1225,7 @@ begin
     Order := FMineOrder;
   { The filters on are named here only while no preset says them. }
   Named := '';
+  Count := 0;
   if (Keys <> '') and (FindPreset(FPresets, CurSection, Keys) < 0) then
     for i := 0 to High(Defs) do
       if HasKey(Keys, Defs[i].Key) then
@@ -1231,7 +1233,11 @@ begin
         if Named <> '' then
           Named := Named + ChipJoin;
         Named := Named + Defs[i].Caption;
+        Inc(Count);
       end;
+  { A chip wider than the page says how many; its menu names them. }
+  if (Count > 1) and (FC.TextWidth(Named + OrderGlyph) + 2 * Px(FilterPadX) > AMaxWidth) then
+    Named := Format('%s (%d)', [rsFilterChip, Count]);
   Result := nil;
   SetLength(Result, 2);
   if Named = '' then
@@ -1609,8 +1615,17 @@ begin
     search, or words in it. }
   FSearchShown := AChips or (FSearchText <> '');
   if FSearchShown then
+  begin
     FSearchRect := Rect(Max(X + FC.TextWidth(ADetail) + Px(Gap), ARight - Px(SearchWidth)),
       Y - Px(4), ARight, Y + TextH + Px(4));
+    { Too narrow beside the heading: a row of its own under it. }
+    if FSearchRect.Width < Px(MinSearchWidth) then
+    begin
+      Inc(Y, TextH + Px(Gap));
+      FSearchRect := Rect(Max(ALeft, ARight - Px(SearchWidth)), Y - Px(4), ARight,
+        Y + TextH + Px(4));
+    end;
+  end;
   Inc(Y, TextH + Px(Gap) div 2);
   FC.Pen.Style := psSolid;
   FC.Pen.Color := FLine;
@@ -1619,7 +1634,7 @@ begin
   if not AChips then
     Exit;
   { One row, wrapped where it must: the presets, Filter and the order. }
-  Chips := Concat(PresetChips, FilterChips);
+  Chips := Concat(PresetChips, FilterChips(ARight - ALeft));
   Inc(Y, Px(FilterPadY));
   PaintChipRow(ALeft, ARight, Y, Chips);
   Inc(Y, TextH + Px(FilterPadY) + Px(Gap) div 2);

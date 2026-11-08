@@ -1612,7 +1612,7 @@ function TForgeView.PageWhere(Sender: TObject; const APull: TGittanForgePull): T
 begin
   if FWindow.HasFrameFor(APull.Repo) then
     Result := ptCompare
-  else if APull.Clone <> '' then
+  else if (APull.Clone <> '') and DirectoryExists(APull.Clone) then
     Result := ptClone
   else
     Result := ptForge;

@@ -65,8 +65,6 @@ type
     function CanOverlay: boolean;
     function CanDifference: boolean;
     function Overlay: boolean;
-    function ModeEnabled(AMode: TGittanImageMode): boolean;
-    function ShownMode: TGittanImageMode;
     function LineHeight: integer;
     function AreaTop: integer;
     function ColumnLeft(ASide: integer): integer;
@@ -78,6 +76,7 @@ type
     function ModeAt(X, Y: integer): integer;
     function SliderShown: boolean;
     function SliderRect: TRect;
+    function SliderWraps: boolean;
     function SliderValue: double;
     procedure SetSliderAt(X: integer);
     procedure SetSplitAt(X: integer);
@@ -97,6 +96,12 @@ type
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer); override;
     procedure MouseLeave; override;
   public
+    {** Whether AMode applies to the two images shown (Difference wants
+      two of one size). }
+    function ModeEnabled(AMode: TGittanImageMode): boolean;
+    {** The mode the pills show: Mode while it applies, else side by
+      side; the menu checks it too. }
+    function ShownMode: TGittanImageMode;
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
     {** The two versions as the bytes of their files: AOld the one
@@ -434,6 +439,9 @@ begin
   CountDiffering;
   FDrag := dgNone;
   Invalidate;
+  { What applies changed with the images: the menu follows the pills. }
+  if Assigned(FOnModeChange) then
+    FOnModeChange(Self);
 end;
 
 procedure TGittanImageDiff.CountDiffering;
@@ -523,6 +531,8 @@ begin
   Result := Pad + 2 * LineHeight + 2 * Gap;
   if CanOverlay then
     Result := Result + LineHeight + 2 * Px(PillRise) + 2 * Gap;
+  if SliderShown and SliderWraps then
+    Result := Result + LineHeight + 2 * Px(PillRise) + Gap;
 end;
 
 { The left edge of a side's column, where its caption starts. }
@@ -621,12 +631,29 @@ begin
   Result := Overlay and (FMode in [imSwipe, imOnion]);
 end;
 
-{ The slider's track, right of the pills on their row. }
+{ Whether the slider has no room right of the pills, in a narrow pane. }
+function TGittanImageDiff.SliderWraps: boolean;
+begin
+  Result := ModeRect(High(TGittanImageMode)).Right + Px(SliderGap) + Px(SliderWidth) >
+    ClientWidth - Pad;
+end;
+
+{ The slider's track, right of the pills on their row, or on a row of
+  its own under them when it has no room there. }
 function TGittanImageDiff.SliderRect: TRect;
 var
   Last: TRect;
 begin
   Last := ModeRect(High(TGittanImageMode));
+  if SliderWraps then
+  begin
+    Result.Left := Pad + Px(KnobRadius);
+    Result.Right := Max(Result.Left + Px(20), Min(Result.Left + Px(SliderWidth),
+      ClientWidth - Pad - Px(KnobRadius)));
+    Result.Top := Last.Bottom + Gap;
+    Result.Bottom := Result.Top + Last.Height;
+    Exit;
+  end;
   Result.Left := Last.Right + Px(SliderGap);
   Result.Right := Result.Left + Px(SliderWidth);
   Result.Top := Last.Top;

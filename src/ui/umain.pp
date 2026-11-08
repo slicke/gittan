@@ -6083,7 +6083,7 @@ begin
     Item := AddItem(FImageMenu, ImageModeCaption(m), 0, @MenuImageModeClick);
     Item.Tag := Ord(m);
     Item.RadioItem := True;
-    Item.Checked := m = FImageDiff.Mode;
+    Item.Checked := m = FImageDiff.ShownMode;
     FImageModeItems[m] := Item;
   end;
   FMdPreviewItem := AddItem(ViewMenu, rsMarkdownPreview, ShortCut(VK_V, [ssModifier, ssShift]),

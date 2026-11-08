@@ -174,7 +174,8 @@ procedure TCoAuthorsForm.Put(const APerson: string; AChecked: boolean);
 var
   i: integer;
 begin
-  if Trim(APerson) = '' then
+  { An author git log gave without a proper e-mail is no co-author. }
+  if (Trim(APerson) = '') or not IsPerson(APerson) then
     Exit;
   i := FList.Items.IndexOf(Trim(APerson));
   if i < 0 then

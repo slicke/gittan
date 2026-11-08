@@ -958,8 +958,13 @@ var
 begin
   if FImageModeItems[imSideBySide] = nil then
     Exit;
+  { The mode shown, as the pills: side by side where the one chosen
+    does not apply to these two images. }
   for m := Low(TGittanImageMode) to High(TGittanImageMode) do
-    FImageModeItems[m].Checked := m = FImageDiff.Mode;
+  begin
+    FImageModeItems[m].Checked := m = FImageDiff.ShownMode;
+    FImageModeItems[m].Enabled := FImageDiff.ModeEnabled(m);
+  end;
 end;
 
 procedure TRepoFrame.MenuSideBySideClick(Sender: TObject);

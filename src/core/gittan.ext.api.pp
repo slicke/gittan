@@ -894,6 +894,8 @@ end;
   an exception rather than from a dialog that looks wrong. }
 const
   MessageMaxButtons = 6;
+  { A button's label, so six of them stay within a screen. }
+  MessageMaxLabel = 40;
 
 procedure JSMessage(res: PJSValue; ctx: JSContext; this_val: PJSValue;
   argc: integer; argv: PJSValues; magic: integer);
@@ -905,7 +907,7 @@ var
   Buttons: array of string;
   Kind: TExtMessageKind;
   KindName, Title, Text: string;
-  i, Default, Cancel: integer;
+  i, k, n, Default, Cancel: integer;
 
   procedure Fail(const AWhy: string);
   begin
@@ -997,6 +999,16 @@ begin
         if Buttons[i] = '' then
         begin
           Fail('a button''s label is a text that is not empty');
+          Exit;
+        end;
+        { Characters, not bytes: a UTF-8 continuation byte is no new one. }
+        n := 0;
+        for k := 1 to Length(Buttons[i]) do
+          if (Ord(Buttons[i][k]) and $C0) <> $80 then
+            Inc(n);
+        if n > MessageMaxLabel then
+        begin
+          Fail(Format('a button''s label is no longer than %d characters', [MessageMaxLabel]));
           Exit;
         end;
         { AskDlg would take these for its flags, not a caption. }

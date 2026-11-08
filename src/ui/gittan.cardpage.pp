@@ -159,10 +159,14 @@ begin
   AddLink(Result, ALink);
   FC.Pen.Style := psSolid;
   FC.Brush.Style := bsSolid;
+  { White on the link color, which dark mode lightens: the fill is
+    darkened there, and further under the mouse, so the caption keeps
+    its contrast. }
+  FC.Brush.Color := FLink;
+  if IsDarkMode then
+    FC.Brush.Color := MixColor(FLink, clBlack, 0.3);
   if FHot = High(FLinkRects) then
-    FC.Brush.Color := MixColor(FLink, clWhite, 0.15)
-  else
-    FC.Brush.Color := FLink;
+    FC.Brush.Color := MixColor(FC.Brush.Color, clBlack, 0.15);
   FC.Pen.Color := FC.Brush.Color;
   FC.RoundRect(Result, Result.Height, Result.Height);
   FC.Brush.Style := bsClear;
