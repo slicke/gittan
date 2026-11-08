@@ -414,8 +414,19 @@ begin
   Result := Rect(Scale96ToScreen(IconLeft), IconTop, Scale96ToScreen(IconLeft) + S, IconTop + S);
 end;
 
+{ AskDlgFrom's line sits under the icon, so the button row goes at
+  least a gap below the icon's bottom, which a short text (one line,
+  without the macOS heading) does not reach. }
 procedure TAskForm.DoShow;
+var
+  Need: integer;
 begin
+  if FFrom <> nil then
+  begin
+    Need := Scale96ToScreen(TopGap + IconSize + FieldGap) - FButtonRow.Top;
+    if Need > 0 then
+      FButtonRow.BorderSpacing.Top := FButtonRow.BorderSpacing.Top + Need;
+  end;
   inherited DoShow;
   if Length(FEdits) > 0 then
   begin
