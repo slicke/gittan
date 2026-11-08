@@ -135,6 +135,9 @@ type
     {** How a changed image is shown: side, swipe, onion or difference
       (gittan.imagediff's ImageModeOf); empty for side by side. }
     ImageMode: string;
+    {** Show the merge base as a pane of the merge editor, when the
+      conflict markers hold it. }
+    MergeBase: boolean;
     {** The name of the syntax theme (see gittan.syntaxthemes); empty for
       the default. }
     SyntaxTheme: string;
@@ -660,6 +663,7 @@ begin
   ReviewComments := BoolOf(O, 'reviewComments', True);
   Translations := BoolOf(O, 'translations', True);
   ImageMode := StrOf(O, 'imageMode');
+  MergeBase := BoolOf(O, 'mergeBase', False);
   O := ObjOf(FSettingsDoc, 'tools');
   GitPath := StrOf(O, 'git');
   EditorCommand := StrOf(O, 'editor');
@@ -749,6 +753,7 @@ begin
   O.Booleans['reviewComments'] := ReviewComments;
   O.Booleans['translations'] := Translations;
   O.Strings['imageMode'] := ImageMode;
+  O.Booleans['mergeBase'] := MergeBase;
   O := ChildOf(FSettingsDoc, 'tools');
   O.Strings['git'] := GitPath;
   O.Strings['editor'] := EditorCommand;

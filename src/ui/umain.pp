@@ -1216,6 +1216,9 @@ type
       the view asked already. }
     FMergeView: TGittanMergeView;
     FMergeMode: boolean;
+    { What each pill of the merge editor's header does (the ma constants
+      in umain.merge.inc), in the pills' order. }
+    FMergeActionIds: array of integer;
     FMergePath: string;
     FMergeKeep: TStringArray;
     FMergeAsked: boolean;
@@ -3473,6 +3476,7 @@ resourcestring
   rsMergeEditorPick = 'Open in Merge Editor';
   rsMergeMine = 'Mine';
   rsMergeTheirs = 'Theirs';
+  rsMergePaneBase = 'Base';
   rsMergeResult = 'Result';
   rsMergeHeader = 'Conflict %d of %d · %s';
   rsMergeNoLines = 'no lines';
@@ -3481,6 +3485,8 @@ resourcestring
   rsMergeAllMine = 'All Mine';
   rsMergeAllTheirs = 'All Theirs';
   rsMergeReset = 'Reset';
+  rsMergeShowBase = 'Show Base';
+  rsMergeHideBase = 'Hide Base';
   rsMergeSave = 'Save';
   rsMergeClose = 'Close';
   rsMergeNothing = 'Nothing to save: the result is the file as it is';
@@ -4381,9 +4387,10 @@ begin
   FMergeView.Parent := EditorPanel;
   FMergeView.Align := alClient;
   FMergeView.Visible := False;
-  FMergeView.SetKinds(bmConflictOurs, bmConflictTheirs, bmConflictMarker, bmFiller, bmGap);
-  FMergeView.SetTexts(rsMergeMine, rsMergeTheirs, rsMergeResult, rsMergeHeader, rsMergeEdited,
-    rsMergeResolvedCount, rsMergeNoLines);
+  FMergeView.SetKinds(bmConflictOurs, bmConflictTheirs, bmConflictBase, bmConflictMarker,
+    bmFiller, bmGap);
+  FMergeView.SetTexts(rsMergeMine, rsMergeTheirs, rsMergePaneBase, rsMergeResult, rsMergeHeader,
+    rsMergeEdited, rsMergeResolvedCount, rsMergeNoLines);
   FMergeView.OnPicked := @MergeChanged;
   FMergeView.OnEdited := @MergeChanged;
   { The Markdown preview sits right of the editor, its splitter between

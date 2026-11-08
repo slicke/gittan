@@ -43,6 +43,7 @@ begin
   FShowComments := App.Settings.ReviewComments;
   FTranslations := App.Settings.Translations;
   FImageDiff.Mode := ImageModeOf(App.Settings.ImageMode);
+  FMergeView.ShowBase := App.Settings.MergeBase;
   FSyntaxTheme := FindSyntaxTheme(App.Settings.SyntaxTheme);
   if FSyntaxTheme < 0 then
     FSyntaxTheme := DefaultSyntaxTheme;
@@ -115,6 +116,7 @@ begin
   App.Settings.ReviewComments := FShowComments;
   App.Settings.Translations := FTranslations;
   App.Settings.ImageMode := ImageModeName(FImageDiff.Mode);
+  App.Settings.MergeBase := FMergeView.ShowBase;
   App.Settings.SyntaxTheme := SyntaxThemes[FSyntaxTheme].Name;
   App.Settings.Save;
   SaveIndex;

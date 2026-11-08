@@ -1176,6 +1176,17 @@ function GitVersionSupported(AMajor, AMinor: integer): boolean;
   later; asked once per git, SetGitExe forgets the answer. }
 function GitHasMergeTree: boolean;
 
+{** The arguments that make git write the merge base into a conflict's
+  markers (merge.conflictStyle zdiff3, or diff3 before git 2.35), so
+  the merge editor can show it: ['-c', 'merge.conflictStyle=zdiff3'],
+  or none when the config of the repository at ARoot sets a style of
+  its own, which is kept. They go before the command. }
+function ConflictStyleArgs(const ARoot: string): TStringArray;
+
+{** AArgs, a git command that may stop with conflicts, with
+  ConflictStyleArgs before it. }
+function WithConflictStyle(const ARoot: string; const AArgs: array of string): TStringArray;
+
 {** What a git call answers when git could not be started: that none
   was found, when AExe is the plain "git" SetGitExe falls back to, else
   that the one at AExe could not be run; both say where to set another. }
@@ -1523,6 +1534,8 @@ var
     An integer, so a watcher thread asking while the main thread sets
     another git at most asks twice. }
   GMergeTree: integer = -1;
+  { The conflict style ConflictStyleArgs asks for, found once. }
+  GConflictStyle: string = '';
 
 function ToolSearchPath: string;
 begin
@@ -1580,6 +1593,34 @@ begin
   Result := GMergeTree = 1;
 end;
 
+function ConflictStyleArgs(const ARoot: string): TStringArray;
+var
+  Output, Err, Version: string;
+  Major, Minor: integer;
+begin
+  Result := nil;
+  if (ARoot <> '') and RunGitIn(ARoot, ['config', '--get', 'merge.conflictStyle'], Output, Err) and
+    (Trim(Output) <> '') then
+    Exit;
+  if GConflictStyle = '' then
+    if GitVersion(Version, Major, Minor) and ((Major > 2) or ((Major = 2) and (Minor >= 35))) then
+      GConflictStyle := 'zdiff3'
+    else
+      GConflictStyle := 'diff3';
+  Result := ['-c', 'merge.conflictStyle=' + GConflictStyle];
+end;
+
+function WithConflictStyle(const ARoot: string; const AArgs: array of string): TStringArray;
+var
+  i, n: integer;
+begin
+  Result := ConflictStyleArgs(ARoot);
+  n := Length(Result);
+  SetLength(Result, n + Length(AArgs));
+  for i := 0 to High(AArgs) do
+    Result[n + i] := AArgs[i];
+end;
+
 function GitNotRunMessage(const AExe: string): string;
 begin
   if (AExe = '') or (AExe = 'git') then
@@ -1611,6 +1652,7 @@ begin
   if Exe = GGitExe then
     Exit;
   GMergeTree := -1;
+  GConflictStyle := '';
   { One string per path git ran by, not one per call: the settings set
     it again on every save. A path set again is the kept string itself,
     so the one in use is always kept or new, never a copy freed later. }
@@ -3824,9 +3866,9 @@ begin
   end;
   Ref := 'stash@{' + IntToStr(Index) + '}';
   if APop then
-    Result := RunGit(FRoot, ['stash', 'pop', Ref], Output)
+    Result := RunGit(FRoot, WithConflictStyle(FRoot, ['stash', 'pop', Ref]), Output)
   else
-    Result := RunGit(FRoot, ['stash', 'apply', Ref], Output);
+    Result := RunGit(FRoot, WithConflictStyle(FRoot, ['stash', 'apply', Ref]), Output);
   if not Result then
     AConflicts := RunGitIn(FRoot, ['ls-files', '-u'], Output, Ignored) and
       (Trim(Output) <> '');
@@ -4353,14 +4395,17 @@ begin
   ADiverged := False;
   case AMode of
     pmMerge:
-      Result := RunRemote(['pull', '--progress', '--no-rebase', '--ff', '--no-edit']);
+      Result := RunRemote(WithConflictStyle(FRoot, ['pull', '--progress', '--no-rebase', '--ff',
+        '--no-edit']));
     pmRebase:
-      Result := RunRemote(['pull', '--progress', '--rebase', '--autostash']);
+      Result := RunRemote(WithConflictStyle(FRoot, ['pull', '--progress', '--rebase',
+        '--autostash']));
     else
       if PullRebases(FRoot, Branch) then
-        Result := RunRemote(['pull', '--progress', '--autostash', '--no-edit'])
+        Result := RunRemote(WithConflictStyle(FRoot, ['pull', '--progress', '--autostash',
+          '--no-edit']))
       else if PullConfigured(FRoot, Branch) then
-        Result := RunRemote(['pull', '--progress', '--no-edit'])
+        Result := RunRemote(WithConflictStyle(FRoot, ['pull', '--progress', '--no-edit']))
       else
         Result := RunRemote(['pull', '--progress', '--ff-only']);
   end;
@@ -5013,7 +5058,7 @@ var
   Output, Ignored: string;
 begin
   AConflicts := False;
-  Result := RunGitEnv(ARoot, AArgs, ['GIT_EDITOR=:'], Output, AError);
+  Result := RunGitEnv(ARoot, WithConflictStyle(ARoot, AArgs), ['GIT_EDITOR=:'], Output, AError);
   if Result then
     Exit;
   AConflicts := (ARepo.Operation <> '') and
@@ -5174,7 +5219,8 @@ begin
       FError := Format('Could not write the rebase files in %s.', [Folder]);
       Exit(False);
     end;
-  Result := RunGitEnv(FRoot, ['rebase', '-i', '--autostash', '--empty=keep', AOnto],
+  Result := RunGitEnv(FRoot, WithConflictStyle(FRoot, ['rebase', '-i', '--autostash',
+    '--empty=keep', AOnto]),
     ['GIT_SEQUENCE_EDITOR=cp ' + ShellQuote(Folder + 'todo'), 'GIT_EDITOR=:'], Output, Err);
   if Operation = 'rebasing' then
   begin
@@ -5848,7 +5894,8 @@ begin
   end;
   if not RunGit(FRoot, ['add', '-u'], Output) then
     Exit(False);
-  Result := RunGitEnv(FRoot, [Command, '--continue'], ['GIT_EDITOR=:'], Output, Err);
+  Result := RunGitEnv(FRoot, WithConflictStyle(FRoot, [Command, '--continue']), ['GIT_EDITOR=:'],
+    Output, Err);
   if Result then
   begin
     if Operation = '' then

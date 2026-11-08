@@ -26,30 +26,37 @@ type
   {** A run of the file: lines both sides agree on (Conflict False, the
     lines in Lines), or a conflict, Lines then its lines as the file
     holds them (the markers, both sides and the base), Sides the lines
-    of mine and theirs, Names the names git wrote on the markers,
-    Picked which lines of each side go into the result, Taken whether a
-    side goes in at all (a side with no lines can be taken too, which
-    resolves the conflict as that side's deletion) and TheirsFirst the
-    order, theirs before mine when theirs was taken first. }
+    of mine and theirs, Names the names git wrote on the markers, Base
+    the lines of the merge base when the markers hold it (HasBase: the
+    "|||||||" of merge.conflictStyle diff3 or zdiff3, BaseName what git
+    wrote after it), Picked which lines of each side go into the
+    result, Taken whether a side goes in at all (a side with no lines
+    can be taken too, which resolves the conflict as that side's
+    deletion) and TheirsFirst the order, theirs before mine when theirs
+    was taken first. }
   TGittanMergeChunk = record
     Conflict: boolean;
     Lines: TStringArray;
     Sides: array[TGittanMergeSide] of TStringArray;
     Names: array[TGittanMergeSide] of string;
+    Base: TStringArray;
+    BaseName: string;
+    HasBase: boolean;
     Picked: array[TGittanMergeSide] of TBooleanDynArray;
     Taken: array[TGittanMergeSide] of boolean;
     TheirsFirst: boolean;
   end;
 
-  {** A row of the two panes above the result, side by side: a line of
-    a chunk both sides agree on (Line the index in Lines, on both
-    sides), a conflict's header row (Header), or a row of a conflict,
-    Mine and Theirs the index of the side's line on it or -1 where the
-    shorter side is padded. }
+  {** A row of the panes above the result, side by side: a line of a
+    chunk both sides agree on (Line the index in Lines, on every
+    pane), a conflict's header row (Header), or a row of a conflict,
+    Mine, Theirs and Base the index of the pane's line on it or -1
+    where a shorter pane is padded (Base is -1 throughout when the
+    rows were laid out without the base). }
   TGittanMergeRow = record
     Chunk: integer;
     Header: boolean;
-    Line, Mine, Theirs: integer;
+    Line, Mine, Theirs, Base: integer;
   end;
   TGittanMergeRows = array of TGittanMergeRow;
 
@@ -76,6 +83,8 @@ type
     constructor Create(ALines: TStrings; ARebase: boolean);
     {** The chunk's index of every conflict, in order. }
     function Conflicts: TIntegerDynArray;
+    {** Whether any conflict holds the merge base. }
+    function HasBase: boolean;
     {** Whether a side of the conflict in chunk AChunk is taken. }
     function Resolved(AChunk: integer): boolean;
     {** How many conflicts have a side taken. }
@@ -90,8 +99,10 @@ type
     procedure PickAll(AChunk: integer; ASide: TGittanMergeSide; AOn: boolean);
     {** Picks ASide whole, and drops the other, in every conflict. }
     procedure PickEverywhere(ASide: TGittanMergeSide);
-    {** The rows of the two panes above the result. }
-    function Rows: TGittanMergeRows;
+    {** The rows of the panes above the result: mine and theirs, and
+      the base too when AWithBase, which pads a conflict to the longest
+      of the three. }
+    function Rows(AWithBase: boolean = False): TGittanMergeRows;
     {** The result: the lines both sides agree on, the lines picked of
       each conflict with a side taken, and every other conflict as the
       file holds it. }
@@ -205,9 +216,15 @@ begin
     Append(FChunks[n].Lines, FFileLines[i]);
     case Roles[i] of
       crOurs: Append(FChunks[n].Sides[Ours], FFileLines[i]);
+      crBase: Append(FChunks[n].Base, FFileLines[i]);
       crTheirs: Append(FChunks[n].Sides[Theirs], FFileLines[i]);
       crMarker:
-        if Copy(FFileLines[i], 1, 7) = '>>>>>>>' then
+        if Copy(FFileLines[i], 1, 7) = '|||||||' then
+        begin
+          FChunks[n].HasBase := True;
+          FChunks[n].BaseName := Trim(Copy(FFileLines[i], 9, MaxInt));
+        end
+        else if Copy(FFileLines[i], 1, 7) = '>>>>>>>' then
         begin
           FChunks[n].Names[Theirs] := Trim(Copy(FFileLines[i], 9, MaxInt));
           { The next line starts a chunk of its own, even another
@@ -244,6 +261,16 @@ begin
       SetLength(Result, Length(Result) + 1);
       Result[High(Result)] := i;
     end;
+end;
+
+function TGittanMerge.HasBase: boolean;
+var
+  i: integer;
+begin
+  Result := False;
+  for i := 0 to High(FChunks) do
+    if FChunks[i].Conflict and FChunks[i].HasBase then
+      Exit(True);
 end;
 
 function TGittanMerge.Resolved(AChunk: integer): boolean;
@@ -335,11 +362,11 @@ begin
     end;
 end;
 
-function TGittanMerge.Rows: TGittanMergeRows;
+function TGittanMerge.Rows(AWithBase: boolean): TGittanMergeRows;
 var
   c, i, n, Count: integer;
 
-  procedure Add(AHeader: boolean; ALine, AMine, ATheirs: integer);
+  procedure Add(AHeader: boolean; ALine, AMine, ATheirs, ABase: integer);
   begin
     if n > High(Result) then
       SetLength(Result, n * 2 + 16);
@@ -348,7 +375,17 @@ var
     Result[n].Line := ALine;
     Result[n].Mine := AMine;
     Result[n].Theirs := ATheirs;
+    Result[n].Base := ABase;
     Inc(n);
+  end;
+
+  { i while a pane with ACount lines has a line there, else -1. }
+  function At(ACount: integer): integer;
+  begin
+    if i < ACount then
+      Result := i
+    else
+      Result := -1;
   end;
 
 begin
@@ -358,24 +395,23 @@ begin
     if not FChunks[c].Conflict then
     begin
       for i := 0 to High(FChunks[c].Lines) do
-        Add(False, i, -1, -1);
+        Add(False, i, -1, -1, -1);
     end
     else
     begin
-      Add(True, -1, -1, -1);
+      Add(True, -1, -1, -1, -1);
       Count := Length(FChunks[c].Sides[msMine]);
       if Length(FChunks[c].Sides[msTheirs]) > Count then
         Count := Length(FChunks[c].Sides[msTheirs]);
+      if AWithBase and (Length(FChunks[c].Base) > Count) then
+        Count := Length(FChunks[c].Base);
       for i := 0 to Count - 1 do
-      begin
-        if i <= High(FChunks[c].Sides[msMine]) then
-          if i <= High(FChunks[c].Sides[msTheirs]) then
-            Add(False, -1, i, i)
-          else
-            Add(False, -1, i, -1)
+        if AWithBase then
+          Add(False, -1, At(Length(FChunks[c].Sides[msMine])),
+            At(Length(FChunks[c].Sides[msTheirs])), At(Length(FChunks[c].Base)))
         else
-          Add(False, -1, -1, i);
-      end;
+          Add(False, -1, At(Length(FChunks[c].Sides[msMine])),
+            At(Length(FChunks[c].Sides[msTheirs])), -1);
     end;
   SetLength(Result, n);
 end;

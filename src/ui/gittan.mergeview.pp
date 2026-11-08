@@ -2,7 +2,9 @@ unit gittan.mergeview;
 
 {** The merge editor: a conflicted file in three panes, the user's side
   (mine) and the side that came in (theirs) next to each other above,
-  row for row, and the result under them across the width. Each
+  row for row, and the result under them across the width; a fourth,
+  the merge base both sides started from, can be shown between mine
+  and theirs when git wrote it into the markers (ShowBase, HasBase). Each
   conflict starts with a header row in the two panes above, and each of
   its lines has a box in the band left of the text: a tick puts the line
   into the result, and the header's box takes or drops the whole side
@@ -52,18 +54,18 @@ type
     FRows: TGittanMergeRows;
     FStarts: TIntegerDynArray;
     FTop: TPanel;
-    FMinePanel, FTheirsPanel: TPanel;
-    FMineCap, FTheirsCap, FResultCap: TGittanMergeCaption;
-    FEditMine, FEditTheirs, FEditResult: TATSynEdit;
-    FAdapterMine, FAdapterTheirs, FAdapterResult: TATAdapterEControl;
-    FSideSplitter, FTopSplitter: TSplitter;
-    FEdited, FFilling, FSyncing: boolean;
-    FKindMine, FKindTheirs, FKindMarker, FKindFiller, FKindHeader: integer;
+    FMinePanel, FBasePanel, FTheirsPanel: TPanel;
+    FMineCap, FBaseCap, FTheirsCap, FResultCap: TGittanMergeCaption;
+    FEditMine, FEditBase, FEditTheirs, FEditResult: TATSynEdit;
+    FAdapterMine, FAdapterBase, FAdapterTheirs, FAdapterResult: TATAdapterEControl;
+    FSideSplitter, FBaseSplitter, FTopSplitter: TSplitter;
+    FEdited, FFilling, FSyncing, FShowBase: boolean;
+    FKindMine, FKindTheirs, FKindBase, FKindMarker, FKindFiller, FKindHeader: integer;
     FBack, FText, FDim, FLine, FAccent: TColor;
-    FMineTitle, FTheirsTitle, FResultTitle: string;
+    FMineTitle, FTheirsTitle, FBaseTitle, FResultTitle: string;
     FHeaderText, FEditedText, FResolvedText, FNoLinesText: string;
     FOnPicked, FOnEdited: TNotifyEvent;
-    FTopRatio, FSideRatio: double;
+    FTopRatio, FSideRatio, FBaseRatio: double;
     { The header row GoToConflict went to last and the top row that left
       in view, so the next step goes on from that conflict while the
       panes are not scrolled since. }
@@ -71,6 +73,11 @@ type
     procedure ShowConflictRow(ARow: integer);
     procedure SetupEditor(AEd: TATSynEdit);
     procedure FillSide(AEd: TATSynEdit; ASide: TGittanMergeSide);
+    procedure FillBase;
+    procedure FillPanes;
+    function BaseShown: boolean;
+    procedure SetShowBase(AValue: boolean);
+    procedure LayoutBase;
     procedure FillResult(AKeepTop: boolean);
     procedure SetText(AEd: TATSynEdit; const AText: string);
     procedure UpdateCaptions;
@@ -111,23 +118,31 @@ type
     {** Which conflict the panes show at their top, 0-based, or -1
       above the first. }
     function CurrentConflict: integer;
+    {** Whether the merge shown has the base in its markers, so the
+      base pane can be shown. }
+    function HasBase: boolean;
     {** Takes the font, zoom, tab size and bookmark colors of AFrom, and
       the scroll bars' theme AScrollTheme (nil leaves them); the form
       gives each editor its colors itself. }
     procedure Restyle(AFrom: TATSynEdit; AScrollTheme: PATScrollbarTheme);
     procedure SetColors(ABack, AText, ADim, ALine, AAccent: TColor);
     {** The bookmark kinds the rows take, which the form colors. }
-    procedure SetKinds(AMine, ATheirs, AMarker, AFiller, AHeader: integer);
+    procedure SetKinds(AMine, ATheirs, ABase, AMarker, AFiller, AHeader: integer);
     {** The titles: the panes' captions and the conflict headers
       (Format with the number, the count and the side's name), the
       note of a result edited by hand, the count of the resolved (with
       the resolved and the count), and what a header says of a side
       without lines. }
-    procedure SetTexts(const AMine, ATheirs, AResult, AHeader, AEdited, AResolved,
+    procedure SetTexts(const AMine, ATheirs, ABase, AResult, AHeader, AEdited, AResolved,
       ANoLines: string);
     property Merge: TGittanMerge read FMerge;
     property Edited: boolean read FEdited;
+    {** Show the base pane between mine and theirs, for a merge whose
+      markers hold the base (HasBase); without one the panes stay two
+      whatever this says. }
+    property ShowBase: boolean read FShowBase write SetShowBase;
     property EditMine: TATSynEdit read FEditMine;
+    property EditBase: TATSynEdit read FEditBase;
     property EditTheirs: TATSynEdit read FEditTheirs;
     property EditResult: TATSynEdit read FEditResult;
     property Lexer: TecSyntAnalyzer read GetLexer write SetLexer;
@@ -204,6 +219,7 @@ begin
   inherited Create(AOwner);
   FTopRatio := 0.55;
   FSideRatio := 0.5;
+  FBaseRatio := 1 / 3;
   FGoneRow := -1;
   FBack := clWindow;
   FText := clWindowText;
@@ -212,6 +228,7 @@ begin
   FAccent := clHighlight;
   FMineTitle := 'Mine';
   FTheirsTitle := 'Theirs';
+  FBaseTitle := 'Base';
   FResultTitle := 'Result';
   FHeaderText := 'Conflict %d of %d · %s';
   FEditedText := 'edited by hand';
@@ -244,6 +261,31 @@ begin
   FSideSplitter.ResizeStyle := rsUpdate;
   FSideSplitter.OnMoved := @SplitterMoved;
 
+  { The base pane and its splitter, right of the first splitter; both
+    hidden until a merge with a base is shown with ShowBase on. }
+  FBasePanel := TPanel.Create(Self);
+  FBasePanel.Parent := FTop;
+  FBasePanel.Align := alLeft;
+  FBasePanel.BevelOuter := bvNone;
+  FBasePanel.Width := 200;
+  FBasePanel.Left := FSideSplitter.Left + FSideSplitter.Width + 1;
+  FBasePanel.Visible := False;
+  FBaseCap := TGittanMergeCaption.Create(Self);
+  FBaseCap.Parent := FBasePanel;
+  FBaseCap.Align := alTop;
+  FEditBase := TATSynEdit.Create(Self);
+  FEditBase.Parent := FBasePanel;
+  FEditBase.Align := alClient;
+
+  FBaseSplitter := TSplitter.Create(Self);
+  FBaseSplitter.Parent := FTop;
+  FBaseSplitter.Align := alLeft;
+  FBaseSplitter.Left := FBasePanel.Left + FBasePanel.Width + 1;
+  FBaseSplitter.Width := Px(4);
+  FBaseSplitter.ResizeStyle := rsUpdate;
+  FBaseSplitter.OnMoved := @SplitterMoved;
+  FBaseSplitter.Visible := False;
+
   FTheirsPanel := TPanel.Create(Self);
   FTheirsPanel.Parent := FTop;
   FTheirsPanel.Align := alClient;
@@ -273,12 +315,15 @@ begin
 
   FAdapterMine := TATAdapterEControl.Create(Self);
   FAdapterMine.AddEditor(FEditMine);
+  FAdapterBase := TATAdapterEControl.Create(Self);
+  FAdapterBase.AddEditor(FEditBase);
   FAdapterTheirs := TATAdapterEControl.Create(Self);
   FAdapterTheirs.AddEditor(FEditTheirs);
   FAdapterResult := TATAdapterEControl.Create(Self);
   FAdapterResult.AddEditor(FEditResult);
 
   SetupEditor(FEditMine);
+  SetupEditor(FEditBase);
   SetupEditor(FEditTheirs);
   SetupEditor(FEditResult);
   FEditResult.ModeReadOnly := False;
@@ -343,28 +388,32 @@ begin
   Color := ALine;
   FTop.Color := ALine;
   FMinePanel.Color := ALine;
+  FBasePanel.Color := ALine;
   FTheirsPanel.Color := ALine;
   FMineCap.SetColors(ABack, AText, ADim, ALine);
+  FBaseCap.SetColors(ABack, AText, ADim, ALine);
   FTheirsCap.SetColors(ABack, AText, ADim, ALine);
   FResultCap.SetColors(ABack, AText, ADim, ALine);
   Invalidate;
 end;
 
-procedure TGittanMergeView.SetKinds(AMine, ATheirs, AMarker, AFiller, AHeader: integer);
+procedure TGittanMergeView.SetKinds(AMine, ATheirs, ABase, AMarker, AFiller, AHeader: integer);
 begin
   FKindMine := AMine;
   FKindTheirs := ATheirs;
+  FKindBase := ABase;
   FKindMarker := AMarker;
   FKindFiller := AFiller;
   FKindHeader := AHeader;
 end;
 
-procedure TGittanMergeView.SetTexts(const AMine, ATheirs, AResult, AHeader, AEdited,
+procedure TGittanMergeView.SetTexts(const AMine, ATheirs, ABase, AResult, AHeader, AEdited,
   AResolved, ANoLines: string);
 begin
   FNoLinesText := ANoLines;
   FMineTitle := AMine;
   FTheirsTitle := ATheirs;
+  FBaseTitle := ABase;
   FResultTitle := AResult;
   FHeaderText := AHeader;
   FEditedText := AEdited;
@@ -376,7 +425,7 @@ procedure TGittanMergeView.Restyle(AFrom: TATSynEdit; AScrollTheme: PATScrollbar
 var
   Ed: TATSynEdit;
 begin
-  for Ed in [FEditMine, FEditTheirs, FEditResult] do
+  for Ed in [FEditMine, FEditBase, FEditTheirs, FEditResult] do
   begin
     Ed.Font.Assign(AFrom.Font);
     Ed.OptScaleFont := AFrom.OptScaleFont;
@@ -392,6 +441,7 @@ begin
     Ed.Update(True);
   end;
   FMineCap.Font.Assign(Font);
+  FBaseCap.Font.Assign(Font);
   FTheirsCap.Font.Assign(Font);
   FResultCap.Font.Assign(Font);
 end;
@@ -401,11 +451,12 @@ var
   Ed: TATSynEdit;
 begin
   FAdapterMine.Lexer := ALexer;
+  FAdapterBase.Lexer := ALexer;
   FAdapterTheirs.Lexer := ALexer;
   FAdapterResult.Lexer := ALexer;
   { Assigning a lexer parses nothing yet; a change from line 0 starts
     the adapter's parse. }
-  for Ed in [FEditMine, FEditTheirs, FEditResult] do
+  for Ed in [FEditMine, FEditBase, FEditTheirs, FEditResult] do
   begin
     if ALexer <> nil then
       Ed.DoEventChange(0);
@@ -423,6 +474,8 @@ begin
   inherited Resize;
   FTop.Height := Max(Px(80), Round(ClientHeight * FTopRatio));
   FMinePanel.Width := Max(Px(80), Round(FTop.ClientWidth * FSideRatio));
+  if FBasePanel.Visible then
+    FBasePanel.Width := Max(Px(80), Round(FTop.ClientWidth * FBaseRatio));
 end;
 
 procedure TGittanMergeView.SplitterMoved(Sender: TObject);
@@ -430,7 +483,65 @@ begin
   if ClientHeight > 0 then
     FTopRatio := FTop.Height / ClientHeight;
   if FTop.ClientWidth > 0 then
+  begin
     FSideRatio := FMinePanel.Width / FTop.ClientWidth;
+    if FBasePanel.Visible then
+      FBaseRatio := FBasePanel.Width / FTop.ClientWidth;
+  end;
+end;
+
+{ Whether the base pane is up: asked for, and the merge has a base. }
+function TGittanMergeView.BaseShown: boolean;
+begin
+  Result := FShowBase and (FMerge <> nil) and FMerge.HasBase;
+end;
+
+function TGittanMergeView.HasBase: boolean;
+begin
+  Result := (FMerge <> nil) and FMerge.HasBase;
+end;
+
+{ Shows or hides the base pane and its splitter, and shares the width
+  out again: three panes get a third each, two a half, unless the first
+  splitter was moved to a width that still fits. }
+procedure TGittanMergeView.LayoutBase;
+var
+  Shown: boolean;
+begin
+  Shown := BaseShown;
+  if Shown = FBasePanel.Visible then
+    Exit;
+  FBasePanel.Visible := Shown;
+  FBaseSplitter.Visible := Shown;
+  if Shown then
+  begin
+    if FSideRatio > 0.4 then
+    begin
+      FSideRatio := 1 / 3;
+      FBaseRatio := 1 / 3;
+    end;
+  end
+  else if FSideRatio < 0.4 then
+    FSideRatio := 0.5;
+  Resize;
+end;
+
+procedure TGittanMergeView.SetShowBase(AValue: boolean);
+var
+  TopRow: integer;
+begin
+  if AValue = FShowBase then
+    Exit;
+  FShowBase := AValue;
+  if FMerge = nil then
+    Exit;
+  { The rows change their padding with the base; the panes stay on the
+    same chunk, as close as the new rows allow. }
+  TopRow := FEditMine.LineTop;
+  FillPanes;
+  FEditMine.LineTop := Min(TopRow, Max(0, High(FRows)));
+  FEditMine.Update;
+  EditScroll(FEditMine);
 end;
 
 { A read-only ATSynEdit ignores Text, so the mode is lifted for the
@@ -519,6 +630,58 @@ begin
   AEd.Update;
 end;
 
+{ The base pane: the base's lines of each conflict on its rows, with
+  no boxes to tick, since the base goes into the result by neither
+  side. }
+procedure TGittanMergeView.FillBase;
+var
+  Lines: TStringArray;
+  i: integer;
+  Chunk: TGittanMergeChunk;
+begin
+  Lines := nil;
+  SetLength(Lines, Length(FRows));
+  for i := 0 to High(FRows) do
+  begin
+    Chunk := FMerge.Chunks[FRows[i].Chunk];
+    if FRows[i].Header then
+      Lines[i] := ''
+    else if not Chunk.Conflict then
+      Lines[i] := Chunk.Lines[FRows[i].Line]
+    else if FRows[i].Base >= 0 then
+      Lines[i] := Chunk.Base[FRows[i].Base]
+    else
+      Lines[i] := '';
+  end;
+  SetText(FEditBase, JoinLines(Lines));
+  for i := 0 to High(FRows) do
+  begin
+    if not FMerge.Chunks[FRows[i].Chunk].Conflict then
+      Continue;
+    if FRows[i].Header then
+      FEditBase.BookmarkSetForLine_2(i, FKindHeader, '', TATBookmarkAutoDelete.DontDelete, False, 0)
+    else if FRows[i].Base >= 0 then
+      FEditBase.BookmarkSetForLine_2(i, FKindBase, '', TATBookmarkAutoDelete.DontDelete, False, 0)
+    else
+      FEditBase.BookmarkSetForLine_2(i, FKindFiller, '', TATBookmarkAutoDelete.DontDelete, False, 0);
+  end;
+  FEditBase.Update;
+end;
+
+{ The rows for the panes above, with the base when it is shown, and the
+  panes filled from them. }
+procedure TGittanMergeView.FillPanes;
+begin
+  FRows := FMerge.Rows(BaseShown);
+  LayoutBase;
+  FillSide(FEditMine, msMine);
+  FillSide(FEditTheirs, msTheirs);
+  if BaseShown then
+    FillBase
+  else
+    SetText(FEditBase, '');
+end;
+
 { The result from the ticks; AKeepTop keeps the pane where it was. }
 procedure TGittanMergeView.FillResult(AKeepTop: boolean);
 var
@@ -558,10 +721,9 @@ procedure TGittanMergeView.Load(AMerge: TGittanMerge);
 begin
   FreeAndNil(FMerge);
   FMerge := AMerge;
-  FRows := FMerge.Rows;
-  FillSide(FEditMine, msMine);
-  FillSide(FEditTheirs, msTheirs);
+  FillPanes;
   FEditMine.LineTop := 0;
+  FEditBase.LineTop := 0;
   FEditTheirs.LineTop := 0;
   FEditResult.DoCaretSingle(0, 0);
   FillResult(False);
@@ -577,11 +739,13 @@ begin
   FFilling := True;
   try
     SetText(FEditMine, '');
+    SetText(FEditBase, '');
     SetText(FEditTheirs, '');
     SetText(FEditResult, '');
   finally
     FFilling := False;
   end;
+  LayoutBase;
 end;
 
 function TGittanMergeView.ResultLines: TStringArray;
@@ -641,11 +805,12 @@ end;
 
 procedure TGittanMergeView.UpdateCaptions;
 var
-  Mine, Theirs, Detail: string;
+  Mine, Theirs, Base, Detail: string;
   c, Count: integer;
 begin
   Mine := '';
   Theirs := '';
+  Base := '';
   Count := 0;
   if FMerge <> nil then
   begin
@@ -657,9 +822,12 @@ begin
           Mine := FMerge.Chunks[c].Names[msMine];
         if Theirs = '' then
           Theirs := FMerge.Chunks[c].Names[msTheirs];
+        if Base = '' then
+          Base := FMerge.Chunks[c].BaseName;
       end;
   end;
   FMineCap.SetText(FMineTitle, Mine);
+  FBaseCap.SetText(FBaseTitle, Base);
   FTheirsCap.SetText(FTheirsTitle, Theirs);
   if FEdited then
     Detail := FEditedText
@@ -698,7 +866,7 @@ var
   Row: TGittanMergeRow;
   Index: integer;
 begin
-  if (FMerge = nil) or FEdited or (ARow < 0) or (ARow > High(FRows)) then
+  if (FMerge = nil) or FEdited or (AEd = FEditBase) or (ARow < 0) or (ARow > High(FRows)) then
     Exit;
   Row := FRows[ARow];
   if not FMerge.Chunks[Row.Chunk].Conflict then
@@ -766,18 +934,15 @@ begin
   if FSyncing or (FMerge = nil) then
     Exit;
   Src := TATSynEdit(Sender);
-  if Src = FEditTheirs then
-    Other := FEditMine
-  else
-    Other := FEditTheirs;
   FSyncing := True;
   try
     TopRow := Src.LineTop;
-    if Other.LineTop <> TopRow then
-    begin
-      Other.LineTop := TopRow;
-      Other.Update;
-    end;
+    for Other in [FEditMine, FEditBase, FEditTheirs] do
+      if (Other <> Src) and Other.Visible and (Other.LineTop <> TopRow) then
+      begin
+        Other.LineTop := TopRow;
+        Other.Update;
+      end;
     if FEdited or (TopRow < 0) or (TopRow > High(FRows)) then
       Exit;
     Row := FRows[TopRow];
@@ -904,6 +1069,7 @@ var
   Box: TRect;
   Title: string;
   Ink: TColor;
+  IsBase: boolean;
 
   procedure DrawBox(AState: TGittanPickState);
   begin
@@ -943,6 +1109,7 @@ begin
   Band := BandRect(Ed);
   if Band.Right <= Band.Left then
     Exit;
+  IsBase := Ed = FEditBase;
   Side := SideOf(Ed);
   CharH := Ed.TextCharSize.Y;
   S := Max(Px(9), Min(Px(14), CharH - Px(4)));
@@ -974,11 +1141,25 @@ begin
       Cy := Y + CharH div 2;
       if FRows[Row].Header then
       begin
-        State := FMerge.PickState(FRows[Row].Chunk, Side);
-        DrawBox(State);
-        Title := Format(FHeaderText, [ConflictNumber(FRows[Row].Chunk), Count, Chunk.Names[Side]]);
-        if Length(Chunk.Sides[Side]) = 0 then
-          Title := Title + ' · ' + FNoLinesText;
+        { The base's header names what git wrote after its marker, and
+          has no box: the base is picked from neither side. }
+        if IsBase then
+        begin
+          if Chunk.BaseName <> '' then
+            Title := Format(FHeaderText, [ConflictNumber(FRows[Row].Chunk), Count, Chunk.BaseName])
+          else
+            Title := Format(FHeaderText, [ConflictNumber(FRows[Row].Chunk), Count, FBaseTitle]);
+          if Length(Chunk.Base) = 0 then
+            Title := Title + ' · ' + FNoLinesText;
+        end
+        else
+        begin
+          State := FMerge.PickState(FRows[Row].Chunk, Side);
+          DrawBox(State);
+          Title := Format(FHeaderText, [ConflictNumber(FRows[Row].Chunk), Count, Chunk.Names[Side]]);
+          if Length(Chunk.Sides[Side]) = 0 then
+            Title := Title + ' · ' + FNoLinesText;
+        end;
         C.Brush.Style := bsClear;
         C.Font.Assign(Ed.Font);
         C.Font.Size := Ed.Font.Size;
@@ -988,6 +1169,8 @@ begin
         C.Font.Style := [];
         Continue;
       end;
+      if IsBase then
+        Continue;
       if Side = msMine then
         Index := FRows[Row].Mine
       else

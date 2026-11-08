@@ -3190,9 +3190,19 @@ begin
   AssertTrue('conflicts', Conflicts);
   AssertEquals('rebasing', FRepo.Operation);
   AssertEquals('topic', FRepo.RebaseBranch);
+  { The markers hold the base, for the merge editor. }
+  AssertTrue('base in the markers',
+    Pos('|||||||', FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt')) > 0);
   AssertTrue(FRepo.Error, FRepo.AbortOperation);
   AssertEquals('', FRepo.Operation);
   AssertEquals('topic', FRepo.Branch);
+  { A style the repository sets itself is kept. }
+  AssertEquals(2, Length(ConflictStyleArgs(FDir)));
+  AssertEquals('-c', ConflictStyleArgs(FDir)[0]);
+  Git(['config', 'merge.conflictStyle', 'merge']);
+  AssertEquals(0, Length(ConflictStyleArgs(FDir)));
+  Git(['config', '--unset', 'merge.conflictStyle']);
+  AssertEquals(2, Length(ConflictStyleArgs(FDir)));
 end;
 
 { A rebase left behind: it stopped with conflicts, they were resolved,

@@ -573,8 +573,8 @@ begin
   AConflicts := False;
   if not SwitchTo(ARoot, ATarget, AError) then
     Exit(False);
-  Result := RunGitEnv(ARoot, ['merge', '--no-ff', '--no-edit', ABranch], ['GIT_EDITOR=:'],
-    Output, AError);
+  Result := RunGitEnv(ARoot, WithConflictStyle(ARoot, ['merge', '--no-ff', '--no-edit', ABranch]),
+    ['GIT_EDITOR=:'], Output, AError);
   if not Result then
     AConflicts := RunGitIn(ARoot, ['ls-files', '-u'], Output, Ignored) and (Trim(Output) <> '');
 end;
