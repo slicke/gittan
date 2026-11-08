@@ -3297,6 +3297,7 @@ resourcestring
   rsBmMergeSquashNote = 'Squash stages their changes for one commit of yours, written in the ' +
     'Commit section.';
   rsBmMergeNothing = '%s has no commits %s lacks: nothing to merge';
+  rsBmMergeMoved = 'The checked-out branch changed while you were asked: nothing was merged';
   rsBmFastForward = 'Fast-forward';
   rsBmMergeCommit = 'Merge Commit';
   rsBmSquash = 'Squash';

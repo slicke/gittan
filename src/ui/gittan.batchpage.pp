@@ -605,12 +605,28 @@ begin
       Inc(Result);
 end;
 
+{ The paint asks it several times: the paths are counted, the
+  captions not made. }
 function TGittanBatchPage.ChosenCount: integer;
 var
-  Paths, Captions: TStringArray;
+  i: integer;
+  Seen: TStringList;
 begin
-  ChosenRepos(Paths, Captions);
-  Result := Length(Paths);
+  Result := 0;
+  Seen := TStringList.Create;
+  try
+    Seen.CaseSensitive := True;
+    Seen.Sorted := True;
+    for i := 0 to High(FRows) do
+      if not FRows[i].IsFolder and IsChosen(FRows[i].Path) and
+        (Seen.IndexOf(FRows[i].Path) < 0) then
+      begin
+        Seen.Add(FRows[i].Path);
+        Inc(Result);
+      end;
+  finally
+    Seen.Free;
+  end;
 end;
 
 { Captions that two repositories share are told apart as the tabs are,
@@ -620,15 +636,28 @@ procedure DistinguishCaptions(const APaths: TStringArray; var ACaptions: TString
 var
   Names: TStringArray;
   Shared: array of boolean;
-  i, j: integer;
+  Counts: TStringList;
+  i, k: integer;
 begin
-  { Which are shared, before any is renamed. }
+  { Which are shared, before any is renamed: each caption counted once
+    in a sorted list, not every pair compared. }
   Shared := nil;
   SetLength(Shared, Length(ACaptions));
-  for i := 0 to High(ACaptions) do
-    for j := 0 to High(ACaptions) do
-      if (j <> i) and (ACaptions[j] = ACaptions[i]) then
-        Shared[i] := True;
+  Counts := TStringList.Create;
+  try
+    Counts.CaseSensitive := True;
+    Counts.Sorted := True;
+    for i := 0 to High(ACaptions) do
+      if Counts.Find(ACaptions[i], k) then
+        Counts.Objects[k] := TObject(PtrInt(Counts.Objects[k]) + 1)
+      else
+        Counts.AddObject(ACaptions[i], TObject(PtrInt(1)));
+    for i := 0 to High(ACaptions) do
+      if Counts.Find(ACaptions[i], k) then
+        Shared[i] := PtrInt(Counts.Objects[k]) > 1;
+  finally
+    Counts.Free;
+  end;
   Names := nil;
   for i := 0 to High(ACaptions) do
     if Shared[i] then

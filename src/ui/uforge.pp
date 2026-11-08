@@ -286,7 +286,8 @@ type
     procedure Hidden;
     {** The settings dialog was closed with OK and the tools may have
       changed: the forge is found again, and what one that is gone had
-      found is dropped (the window hides the view then, HasForge). }
+      found is dropped; the view stays, with Batch alone
+      (ApplyForgeState). }
     procedure SettingsChanged;
     {** The settings dialog was closed with OK: the filters and what
       needs attention as the settings have them now. }

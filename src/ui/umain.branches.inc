@@ -687,13 +687,17 @@ end;
   or the user cancels. }
 function TRepoFrame.AskMergeWay(const ARef, AName: string; out AWay: TGittanMergeWay): boolean;
 var
-  Msg: string;
+  Msg, Head, Ref: string;
   Count: integer;
   Forward: boolean;
   Answer: TModalResult;
 begin
   Result := False;
   AWay := mwMerge;
+  { What the question is about, to see after it that another client did
+    not switch or move the branch meanwhile. }
+  Head := FRepo.CommitId('HEAD');
+  Ref := FRepo.Branch;
   if not FRepo.CommitsToMerge(ARef, Count, Forward) then
   begin
     BannerError(rsCaFailed, FRepo.Error);
@@ -734,6 +738,11 @@ begin
     mrNo: AWay := mwSquash;
     else
       Exit;
+  end;
+  if (FRepo.CommitId('HEAD') <> Head) or (FRepo.Branch <> Ref) then
+  begin
+    StatusNote(rsBmMergeMoved, True);
+    Exit;
   end;
   Result := True;
 end;
