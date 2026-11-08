@@ -949,7 +949,9 @@ jobs:
               # somewhere keeps a reader (cat in an alias) waiting.
               # One ps for the pairs and awk for the tree (a walk with pgrep
               # stalled here once), and each procstat under a time limit.
-              TREE=$(ps -ax -o pid=,ppid=,command= | awk '
+              # One -o per column: FreeBSD's ps takes all after "pid=" in
+              # "-o pid=,ppid=,command=" for that column's header.
+              TREE=$(ps -ax -o pid= -o ppid= -o command= | awk '
                 { ppid[$1] = $2; if ($3 ~ /(^|\/)tests\/gittantests$/) root[$1] = 1 }
                 END { for (p in ppid) { q = p; for (i = 0; i < 20 && q != ""; i++) {
                   if (q in root) { print p; break } q = ppid[q] } } }')
