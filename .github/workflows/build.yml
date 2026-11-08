@@ -947,18 +947,17 @@ jobs:
               # Every process under the test program, with its threads'
               # stacks and its open files: a pipe's write end held open
               # somewhere keeps a reader (cat in an alias) waiting.
-              TREE=$(pgrep -f tests/gittantests)
-              NEW=$TREE
-              while [ -n "$NEW" ]; do
-                KIDS=
-                for P in $NEW; do KIDS="$KIDS $(pgrep -P "$P")"; done
-                NEW=$(echo $KIDS)
-                TREE="$TREE $NEW"
-              done
+              # One ps for the pairs and awk for the tree (a walk with pgrep
+              # stalled here once), and each procstat under a time limit.
+              TREE=$(ps -ax -o pid=,ppid=,command= | awk '
+                { ppid[$1] = $2; if ($3 ~ /(^|\/)tests\/gittantests$/) root[$1] = 1 }
+                END { for (p in ppid) { q = p; for (i = 0; i < 20 && q != ""; i++) {
+                  if (q in root) { print p; break } q = ppid[q] } } }')
+              echo "The test program's processes: $(echo $TREE)"
               for P in $TREE; do
                 echo "--- $P: $(ps -ww -o command= -p "$P")"
-                procstat -kk "$P" || true
-                procstat -f "$P" || true
+                timeout 20 procstat -kk "$P" || true
+                timeout 20 procstat -f "$P" || true
               done
               pkill -f tests/gittantests || true
               kill "$MAKEPID" 2>/dev/null || true
