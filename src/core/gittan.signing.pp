@@ -556,8 +556,11 @@ begin
     Scope := '--local'
   else
     Scope := '--global';
+  { TStringArray.Create, not [...]: FPC 3.2.2 cuts a for-in's literal
+    strings to the first one's length (user.signingke). }
   if not ALocal then
-    for Key in ['commit.gpgsign', 'tag.gpgSign', 'gpg.format', 'user.signingkey'] do
+    for Key in TStringArray.Create('commit.gpgsign', 'tag.gpgSign', 'gpg.format',
+      'user.signingkey') do
       RunGitIn(ARoot, ['config', '--local', '--unset-all', Key], Output, AError);
   if ASetup.Sign then
   begin
@@ -592,7 +595,7 @@ begin
       signing on is overridden at this scope, else the choice would
       change nothing. }
     Result := True;
-    for Key in ['commit.gpgsign', 'tag.gpgSign'] do
+    for Key in TStringArray.Create('commit.gpgsign', 'tag.gpgSign') do
     begin
       RunGitIn(ARoot, ['config', Scope, '--unset-all', Key], Output, AError);
       if ConfigValue(ARoot, ['config', '--type=bool', '--get', Key]) = 'true' then
