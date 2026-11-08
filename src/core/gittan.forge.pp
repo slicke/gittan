@@ -313,9 +313,13 @@ function PullReviewNote(const APull: TGittanForgePull; const ALogin: string = ''
 {** The reviewers line of a card: each latest review as "anna
   approved", "bob requested changes" or "coderabbit commented", then
   "waiting for chef, team" (ALogin, the user, as "you", first), joined
-  with " · "; a dismissed review is left out. Empty when nobody has
-  reviewed and nobody is asked. }
+  with " · "; a dismissed review is left out, and so is who is asked
+  when PullReviewNote names them already (ReviewNoteNamesAsked). Empty
+  when nobody has reviewed and nobody else is to be named. }
 function PullReviewers(const APull: TGittanForgePull; const ALogin: string = ''): string;
+{** Whether PullReviewNote names the one reviewer asked ("Waiting for
+  anna"): one is asked and no review decided it. }
+function ReviewNoteNamesAsked(const APull: TGittanForgePull): boolean;
 {** Whether APull waits for someone else's review: a review is asked
   of someone and no changes are requested. }
 function WaitsForReview(const APull: TGittanForgePull): boolean;
@@ -460,6 +464,7 @@ type
     FForgeName, FRoot, FLogin, FError: string;
     FAvatarUrl, FKnownAvatarUrl, FAvatar: string;
     FMine, FReview: TGittanForgePulls;
+    FMineLeft, FReviewLeft: integer;
     FClones: TStringList;
     FSiblings: boolean;
     function Cancelled: boolean;
@@ -474,6 +479,9 @@ type
     {** The address of the user's picture, which Ask sets when the forge
       gives one; Execute fetches it (Avatar). }
     property AvatarUrl: string read FAvatarUrl write FAvatarUrl;
+    {** Ask says how many more of each list the forge has than it gave,
+      when the forge gives a list a page at a time (MineLeft). }
+    procedure SetLeft(AMine, AReview: integer);
   public
     constructor Create(const AForgeName, ARoot: string);
     destructor Destroy; override;
@@ -496,6 +504,10 @@ type
     property Avatar: string read FAvatar;
     property Mine: TGittanForgePulls read FMine;
     property Review: TGittanForgePulls read FReview;
+    {** How many more of each list the forge has than it gave (0 when it
+      gave them all, or does not say). }
+    property MineLeft: integer read FMineLeft;
+    property ReviewLeft: integer read FReviewLeft;
     property Error: string read FError;
   end;
 
@@ -572,6 +584,14 @@ type
       something outside the tool's login decides it (a token in the
       environment); empty otherwise, the base's answer. }
     class function AccountsNote: string; virtual;
+    {** The tool's arguments that log it in, after its name ("auth login"):
+      it asks its questions, so it runs in a terminal. Empty when the
+      forge cannot say, the base's answer. }
+    class function LoginArgs: string; virtual;
+    {** Whether AError, a job's, says the tool is logged out or its login
+      no longer holds, so the user is to log in rather than read it. The
+      base never says so. }
+    class function NeedsLogin(const AError: string): boolean; virtual;
     {** What the tool's environment gets when it runs for an extension
       (Gittan.forge.cli), "NAME=value" each: its prompts and its update
       notice off, since nobody could answer the one and the other would
@@ -658,9 +678,33 @@ function PullActionMerges(AAction: TGittanPullAction): boolean;
 
 {** Whether AAction fits APull as it is: an open pull request the
   forge knows (a number and its repository); a draft can be marked
-  ready but not merged, and only a draft marked ready. Whether the
-  forge acts at all is the caller's to know. }
-function PullActionFits(const APull: TGittanPullRequest; AAction: TGittanPullAction): boolean;
+  ready but not merged, and only a draft marked ready; and AViewer, the
+  login the forge knows the user as ('' when not known), neither
+  approves a pull request of their own nor requests changes on it,
+  which a forge refuses, though they may comment. Whether the forge
+  acts at all is the caller's to know. }
+function PullActionFits(const APull: TGittanPullRequest; AAction: TGittanPullAction;
+  const AViewer: string = ''): boolean;
+
+type
+  {** What comes next for a pull request of the forge view, the step a
+    card offers as a button: nothing, the user's review of it, or
+    merging it. }
+  TGittanPullNext = (pnNone, pnReview, pnMerge);
+
+{** The pull requests of APulls that AText finds, in their order: each
+  of its words, without regard to case, in the number ("#12" or "12"),
+  the title, the repository, the author or the head branch; all of
+  them for an empty AText. }
+function SearchPulls(const APulls: TGittanForgePulls; const AText: string): TGittanForgePulls;
+
+{** The next step for APull in ASection: one waiting for the user's
+  review is reviewed; one of their own is merged once nothing Gittan
+  knows of stands in its way: it is open and no draft, its checks (the
+  ones in AIgnored left out) neither fail nor run, and it is approved,
+  or needs no review and none is asked of anyone. }
+function PullNext(const APull: TGittanForgePull; ASection: TGittanForgeSection;
+  AIgnored: TStrings = nil): TGittanPullNext;
 
 {** Adds AClass to the forges Gittan knows; a forge's unit calls it in
   its initialization. }
@@ -1719,8 +1763,15 @@ begin
         rvCommented: Add(APull.Reviews[i].Login + ' commented');
       end;
   Names := RequestedNames(APull, ALogin);
-  if Names <> '' then
+  if (Names <> '') and not ReviewNoteNamesAsked(APull) then
     Add('waiting for ' + Names);
+end;
+
+function ReviewNoteNamesAsked(const APull: TGittanForgePull): boolean;
+begin
+  { A draft's chip says Draft, not who was asked. }
+  Result := (Length(APull.RequestedOf) = 1) and not APull.IsDraft and
+    not (APull.ReviewDecision in [rdApproved, rdChangesRequested]);
 end;
 
 
@@ -2238,7 +2289,10 @@ begin
     FReviewPulls := nil;
   if Terminated then
     Exit;
-  if (FLogin = '') and (Length(FReviewPulls) > 0) and AskLogin(Asked) then
+  { Also with no requests: the menu leaves Approve and Request Changes
+    off the user's own pull requests by it (PullActionFits). }
+  if (FLogin = '') and ((Length(FReviewPulls) > 0) or (Length(FPulls) > 0)) and
+    AskLogin(Asked) then
     FLogin := Asked;
   FReviewPulls := WithoutReviewed(FReviewPulls, FLogin);
   if not Terminated then
@@ -2301,14 +2355,65 @@ begin
   Result := AAction in [plMerge, plSquash, plRebaseMerge];
 end;
 
-function PullActionFits(const APull: TGittanPullRequest; AAction: TGittanPullAction): boolean;
+function PullActionFits(const APull: TGittanPullRequest; AAction: TGittanPullAction;
+  const AViewer: string): boolean;
 begin
   Result := (APull.Number > 0) and (APull.Repo <> '') and (APull.State = prOpen);
   if Result then
     if AAction = plReady then
       Result := APull.IsDraft
     else if PullActionMerges(AAction) then
-      Result := not APull.IsDraft;
+      Result := not APull.IsDraft
+    else if AAction in [plApprove, plRequestChanges] then
+      Result := (AViewer = '') or not SameText(APull.Author, AViewer);
+end;
+
+function SearchPulls(const APulls: TGittanForgePulls; const AText: string): TGittanForgePulls;
+var
+  Words: TStringArray;
+  Hay, W: string;
+  i, n: integer;
+  Found: boolean;
+begin
+  Words := LowerCase(Trim(AText)).Split([' ', #9], TStringSplitOptions.ExcludeEmpty);
+  if Length(Words) = 0 then
+    Exit(Copy(APulls));
+  Result := nil;
+  SetLength(Result, Length(APulls));
+  n := 0;
+  for i := 0 to High(APulls) do
+  begin
+    Hay := LowerCase('#' + IntToStr(APulls[i].Number) + #10 + APulls[i].Title + #10 +
+      APulls[i].Repo + #10 + APulls[i].Author + #10 + APulls[i].HeadRef);
+    Found := True;
+    for W in Words do
+      if Pos(W, Hay) = 0 then
+      begin
+        Found := False;
+        Break;
+      end;
+    if Found then
+    begin
+      Result[n] := APulls[i];
+      Inc(n);
+    end;
+  end;
+  SetLength(Result, n);
+end;
+
+function PullNext(const APull: TGittanForgePull; ASection: TGittanForgeSection;
+  AIgnored: TStrings): TGittanPullNext;
+begin
+  Result := pnNone;
+  if APull.State <> prOpen then
+    Exit;
+  if ASection = fsReview then
+    Exit(pnReview);
+  if APull.IsDraft or not (ChecksState(APull, AIgnored) in [chkNone, chkPassed]) then
+    Exit;
+  if (APull.ReviewDecision = rdApproved) or ((APull.ReviewDecision = rdNone) and
+    (Length(APull.RequestedOf) = 0)) then
+    Result := pnMerge;
 end;
 
 constructor TGittanForgeJob.Create(const AForgeName, ARoot: string);
@@ -2348,6 +2453,12 @@ begin
   if (FError = '') and (Length(FMine) = 0) and (Length(FReview) = 0) and (FLogin = '') then
     FError := 'The answer of ' + FForgeName + ' had no login in it.';
   Done;
+end;
+
+procedure TGittanForgeJob.SetLeft(AMine, AReview: integer);
+begin
+  FMineLeft := AMine;
+  FReviewLeft := AReview;
 end;
 
 function TGittanForgeJob.Cancelled: boolean;
@@ -2395,6 +2506,16 @@ class function TGittanForge.AccountsNote: string;
 
 begin
   Result := '';
+end;
+
+class function TGittanForge.LoginArgs: string;
+begin
+  Result := '';
+end;
+
+class function TGittanForge.NeedsLogin(const AError: string): boolean;
+begin
+  Result := False;
 end;
 
 class function TGittanForge.CliEnv: TStringArray;

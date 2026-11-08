@@ -73,10 +73,10 @@ end;
 
 { Whether R is a range the lexer shows in its code tree, as CudaText
   shows it: with a tree rule, and from the main lexer, not a sub-lexer. }
-function InCodeTree(Client: TecClientSyntAnalyzer; R: TecTextRange): boolean;
+function InCodeTree(Client: TecClientSyntAnalyzer; R: PecPublicDataFoldRange): boolean;
 begin
-  Result := (R.Rule <> nil) and R.Rule.DisplayInTree and (R.StartIdx >= 0) and
-    (R.Rule.SyntOwner.LexerName = Client.Owner.LexerName);
+  Result := (R^.Rule <> nil) and R^.Rule.DisplayInTree and (R^.StartIdx >= 0) and
+    (R^.Rule.SyntOwner.LexerName = Client.Owner.LexerName);
 end;
 
 { The code tree of AAdapter's text, which AEd shows, as a flat list in
@@ -89,7 +89,8 @@ end;
 function TRepoFrame.CodeRanges(AAdapter: TATAdapterEControl; AEd: TATSynEdit): TGittanCodeRanges;
 var
   Client: TecClientSyntAnalyzer;
-  R, Outer: TecTextRange;
+  R: PecPublicDataFoldRange;
+  Outer: integer;
   Title: string;
   P: TPoint;
   i, Count: integer;
@@ -108,19 +109,19 @@ begin
   Count := 0;
   Client.CriSecForData.Enter;
   try
-    SetLength(Result, Client.PublicData.FoldRanges.Count);
-    for i := 0 to Client.PublicData.FoldRanges.Count - 1 do
+    SetLength(Result, Length(Client.PublicData.FoldRanges));
+    for i := 0 to High(Client.PublicData.FoldRanges) do
     begin
-      R := TecTextRange(Client.PublicData.FoldRanges[i]);
+      R := @Client.PublicData.FoldRanges[i];
       if not InCodeTree(Client, R) then
         Continue;
-      Title := Trim(UTF8Encode(Client.GetRangeName(R, Client.PublicData.Tokens)));
+      Title := Trim(UTF8Encode(Client.GetRangeName(i)));
       Title := StringReplace(Title, #13, ' ', [rfReplaceAll]);
       Result[Count].Symbol.Name := StringReplace(Title, #10, ' ', [rfReplaceAll]);
-      if R.IdentIdx >= 0 then
-        P := Client.PublicData.Tokens._GetItemPtr(R.IdentIdx)^.Range.PointStart
+      if R^.IdentIdx >= 0 then
+        P := Client.PublicData.Tokens._GetItemPtr(R^.IdentIdx)^.Range.PointStart
       else
-        P := Client.PublicData.Tokens._GetItemPtr(R.StartIdx)^.Range.PointStart;
+        P := Client.PublicData.Tokens._GetItemPtr(R^.StartIdx)^.Range.PointStart;
       Result[Count].Symbol.Row := P.Y;
       Result[Count].Symbol.Col := P.X;
       Result[Count].Symbol.Line := '';
@@ -138,18 +139,18 @@ begin
           Result[Count].Symbol.Line := Result[Count].Symbol.Line + '…';
       end;
       Result[Count].Symbol.Depth := 0;
-      Outer := R.Parent;
-      while Outer <> nil do
+      Outer := R^.Parent;
+      while Outer >= 0 do
       begin
-        if InCodeTree(Client, Outer) then
+        if InCodeTree(Client, @Client.PublicData.FoldRanges[Outer]) then
           Inc(Result[Count].Symbol.Depth);
-        Outer := Outer.Parent;
+        Outer := Client.PublicData.FoldRanges[Outer].Parent;
       end;
       Result[Count].FromRow :=
-        Client.PublicData.Tokens._GetItemPtr(R.StartIdx)^.Range.PointStart.Y;
-      if R.EndIdx >= 0 then
+        Client.PublicData.Tokens._GetItemPtr(R^.StartIdx)^.Range.PointStart.Y;
+      if R^.EndIdx >= 0 then
         Result[Count].ToRow :=
-          Client.PublicData.Tokens._GetItemPtr(R.EndIdx)^.Range.PointEnd.Y
+          Client.PublicData.Tokens._GetItemPtr(R^.EndIdx)^.Range.PointEnd.Y
       else
         Result[Count].ToRow := AEd.Strings.Count - 1;
       Inc(Count);
@@ -349,7 +350,10 @@ var
   i: integer;
 begin
   if not Edit.Visible then
+  begin
+    StatusNote(rsSymbolsNeedFile);
     Exit;
+  end;
   FreeAndNil(FSymbolFiles);
   FSymbolOnOld := nil;
   FSymbolPlaces := False;
@@ -485,7 +489,10 @@ var
   i: integer;
 begin
   if not Edit.Visible or (FView <> gvChanges) then
+  begin
+    StatusNote(rsChangedSymbolsNeedFile);
     Exit;
+  end;
   Changes := ShownSymbolChanges(NewSide, OldSide);
   Names := TStringList.Create;
   Details := TStringList.Create;
@@ -551,7 +558,10 @@ var
   i, j, k, m, n, Files, Lines: integer;
 begin
   if not Edit.Visible or (FView <> gvChanges) or (FRepo.Root = '') then
+  begin
+    StatusNote(rsChangedSymbolsNeedFile);
     Exit;
+  end;
   Changes := ShownSymbolChanges(NewSide, OldSide);
   IgnoreCase := (FAdapter.Lexer <> nil) and LexerIgnoresCase(FAdapter.Lexer.LexerName);
   Idents := TStringList.Create;

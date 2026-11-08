@@ -96,7 +96,7 @@ function TRepoFrame.EnclosingRange(AAdapter: TATAdapterEControl; ARow: integer;
   out AFrom, ATo: integer; out AName: string): boolean;
 var
   Client: TecClientSyntAnalyzer;
-  R: TecTextRange;
+  R: PecPublicDataFoldRange;
   i, Y1, Y2: integer;
 begin
   Result := False;
@@ -114,20 +114,20 @@ begin
     Exit;
   Client.CriSecForData.Enter;
   try
-    for i := 0 to Client.PublicData.FoldRanges.Count - 1 do
+    for i := 0 to High(Client.PublicData.FoldRanges) do
     begin
-      R := TecTextRange(Client.PublicData.FoldRanges[i]);
-      if not InCodeTree(Client, R) or (R.EndIdx < 0) then
+      R := @Client.PublicData.FoldRanges[i];
+      if not InCodeTree(Client, R) or (R^.EndIdx < 0) then
         Continue;
-      Y1 := Client.PublicData.Tokens._GetItemPtr(R.StartIdx)^.Range.PointStart.Y;
-      Y2 := Client.PublicData.Tokens._GetItemPtr(R.EndIdx)^.Range.PointEnd.Y;
+      Y1 := Client.PublicData.Tokens._GetItemPtr(R^.StartIdx)^.Range.PointStart.Y;
+      Y2 := Client.PublicData.Tokens._GetItemPtr(R^.EndIdx)^.Range.PointEnd.Y;
       if (ARow < Y1) or (ARow > Y2) then
         Continue;
       if Result and (Y2 - Y1 >= ATo - AFrom) then
         Continue;
       AFrom := Y1;
       ATo := Y2;
-      AName := Trim(UTF8Encode(Client.GetRangeName(R, Client.PublicData.Tokens)));
+      AName := Trim(UTF8Encode(Client.GetRangeName(i)));
       AName := StringReplace(AName, #13, ' ', [rfReplaceAll]);
       AName := StringReplace(AName, #10, ' ', [rfReplaceAll]);
       Result := True;
@@ -176,8 +176,23 @@ begin
   Result := AFrom > 0;
 end;
 
+{ Escape in the code history or the time-lapse, while the editor, the
+  time-lapse bar or the file tree has the focus (not a field, whose
+  Escape is its own), goes back to what was shown before, as Escape
+  closes the commit graph. }
+function TRepoFrame.HistoryEscape(Key: word; Shift: TShiftState): boolean;
+begin
+  Result := (Key = VK_ESCAPE) and (FView = gvHistory) and
+    (Shift * [ssShift, ssCtrl, ssAlt, ssMeta] = []) and
+    ((FWindow.ActiveControl = Edit) or (FWindow.ActiveControl = FTimelapseBar) or
+    (FWindow.ActiveControl = FileTree));
+  if Result then
+    NavReturn;
+end;
+
 { The commit the lines are counted in, and the history starts from: the
   right commit of a range, else the base (HEAD by default). }
+
 function TRepoFrame.HistoryRef: string;
 var
   OldRef, NewRef: string;

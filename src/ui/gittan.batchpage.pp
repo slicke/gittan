@@ -170,6 +170,10 @@ type
     FExtRuns: array of TGittanBatchExtRun;
     FOnExtRun: TNotifyEvent;
     FOnOpenUrl: TGittanBatchOpenEvent;
+    { A note over the list (Notice), with a link that raises OnNotice. }
+    FNotice, FNoticeLink: string;
+    FOnNotice: TNotifyEvent;
+    procedure PaintNotice(var Y: integer; ALeft, ARight: integer);
     function ExtRunIndex(const AKey: string): integer;
     procedure PaintExtCard(var Y: integer; ARun, AIndex, ALeft, ARight: integer);
     procedure PaintExtOp(var Y: integer; ALeft, ARight: integer);
@@ -318,13 +322,17 @@ type
     {** A click on a card's head in the overview, or a repository's row
       in the identity check: open that repository. }
     property OnOpen: TGittanBatchOpenEvent read FOnOpen write FOnOpen;
+    {** A note in a card under the head, ALink a link after it that
+      raises OnNotice; '' for none. }
+    procedure SetNotice(const AText, ALink: string);
+    property OnNotice: TNotifyEvent read FOnNotice write FOnNotice;
   end;
 
 implementation
 
 uses
   Math, LCLIntf, LCLType, gittan.forgepage, gittan.textfit, gittan.theme, gittan.repoinfo,
-  gittan.puzzle;
+  gittan.puzzle, gittan.tabnames;
 
 resourcestring
   rsTitle = 'Batch';
@@ -458,6 +466,7 @@ const
   ExtRunLink = 'xrun';
   ExtOpenLink = 'xo:';
   ExtUrlLink = 'xu:';
+  NoticeLink = 'notice';
   Pad = 24;
   Gap = 12;
   TitleFontSize = 20;
@@ -596,12 +605,68 @@ begin
       Inc(Result);
 end;
 
+{ The paint asks it several times: the paths are counted, the
+  captions not made. }
 function TGittanBatchPage.ChosenCount: integer;
 var
-  Paths, Captions: TStringArray;
+  i: integer;
+  Seen: TStringList;
 begin
-  ChosenRepos(Paths, Captions);
-  Result := Length(Paths);
+  Result := 0;
+  Seen := TStringList.Create;
+  try
+    Seen.CaseSensitive := True;
+    Seen.Sorted := True;
+    for i := 0 to High(FRows) do
+      if not FRows[i].IsFolder and IsChosen(FRows[i].Path) and
+        (Seen.IndexOf(FRows[i].Path) < 0) then
+      begin
+        Seen.Add(FRows[i].Path);
+        Inc(Result);
+      end;
+  finally
+    Seen.Free;
+  end;
+end;
+
+{ Captions that two repositories share are told apart as the tabs are,
+  by as many parent folders as it takes ("clean/trailhead"); the
+  others stay as they are. }
+procedure DistinguishCaptions(const APaths: TStringArray; var ACaptions: TStringArray);
+var
+  Names: TStringArray;
+  Shared: array of boolean;
+  Counts: TStringList;
+  i, k: integer;
+begin
+  { Which are shared, before any is renamed: each caption counted once
+    in a sorted list, not every pair compared. }
+  Shared := nil;
+  SetLength(Shared, Length(ACaptions));
+  Counts := TStringList.Create;
+  try
+    Counts.CaseSensitive := True;
+    Counts.Sorted := True;
+    for i := 0 to High(ACaptions) do
+      if Counts.Find(ACaptions[i], k) then
+        Counts.Objects[k] := TObject(PtrInt(Counts.Objects[k]) + 1)
+      else
+        Counts.AddObject(ACaptions[i], TObject(PtrInt(1)));
+    for i := 0 to High(ACaptions) do
+      if Counts.Find(ACaptions[i], k) then
+        Shared[i] := PtrInt(Counts.Objects[k]) > 1;
+  finally
+    Counts.Free;
+  end;
+  Names := nil;
+  for i := 0 to High(ACaptions) do
+    if Shared[i] then
+    begin
+      if Names = nil then
+        Names := DistinctNames(APaths);
+      if Names[i] <> '' then
+        ACaptions[i] := Names[i];
+    end;
 end;
 
 procedure TGittanBatchPage.ChosenRepos(out APaths, ACaptions: TStringArray);
@@ -632,6 +697,7 @@ begin
   end;
   SetLength(APaths, n);
   SetLength(ACaptions, n);
+  DistinguishCaptions(APaths, ACaptions);
 end;
 
 procedure TGittanBatchPage.ToggleRow(AIndex: integer);
@@ -1252,7 +1318,7 @@ begin
   else
     ButtonText := Format(rsScanMany, [i]);
   Inc(Y, Px(PillPadY));
-  R := PaintPill(ALeft, Y, ButtonText, ScanLink, True, (i > 0) and not Busy);
+  R := PaintButton(ALeft, Y, ButtonText, ScanLink, (i > 0) and not Busy);
   if FScanning then
   begin
     FC.Font.Color := FDim;
@@ -1306,7 +1372,7 @@ begin
     else
       ButtonText := Format(rsDeleteMany, [Picked]);
     Inc(Y, Px(PillPadY));
-    PaintPill(ALeft, Y, ButtonText, DeleteLink, True, (Picked > 0) and not Busy);
+    PaintButton(ALeft, Y, ButtonText, DeleteLink, (Picked > 0) and not Busy);
     Inc(Y, TextH + Px(PillPadY));
   end;
 end;
@@ -1557,7 +1623,7 @@ begin
   else
     ButtonText := Format(rsCheckMany, [i]);
   Inc(Y, Px(PillPadY));
-  R := PaintPill(ALeft, Y, ButtonText, CheckLink, False, (i > 0) and not ARunning);
+  R := PaintButton(ALeft, Y, ButtonText, CheckLink, (i > 0) and not ARunning);
   FC.Font.Color := FDim;
   if ARunning then
     FC.TextOut(R.Right + Px(Gap), Y, Format(rsChecking, [Min(ADone + 1, ATotal), ATotal]))
@@ -2113,7 +2179,7 @@ begin
   else
     ButtonText := Format(rsScanMany, [i]);
   Inc(Y, Px(PillPadY));
-  R := PaintPill(ALeft, Y, ButtonText, MaintScanLink, True, (i > 0) and not Busy);
+  R := PaintButton(ALeft, Y, ButtonText, MaintScanLink, (i > 0) and not Busy);
   FC.Font.Color := FDim;
   if FMaintScanning then
     FC.TextOut(R.Right + Px(Gap), Y, Format(rsScanning, [Min(FMaintDone + 1, FMaintTotal),
@@ -2160,7 +2226,7 @@ begin
     else
       ButtonText := Format(rsRunMany, [Picked]);
     Inc(Y, Px(PillPadY));
-    PaintPill(ALeft, Y, ButtonText, MaintRunLink, True, (Picked > 0) and not Busy);
+    PaintButton(ALeft, Y, ButtonText, MaintRunLink, (Picked > 0) and not Busy);
     Inc(Y, TextH + Px(PillPadY));
   end;
 end;
@@ -2455,7 +2521,7 @@ begin
   for i := 0 to High(FExtRuns) do
     if (i <> Run) and FExtRuns[i].Running then
       Other := True;
-  R := PaintPill(ALeft, Y, ButtonText, ExtRunLink, False, (n > 0) and not Running and not Other);
+  R := PaintButton(ALeft, Y, ButtonText, ExtRunLink, (n > 0) and not Running and not Other);
   FC.Font.Color := FDim;
   if Running then
     FC.TextOut(R.Right + Px(Gap), Y, Format(rsExtRunning,
@@ -2652,6 +2718,7 @@ begin
   FC.TextOut(L, Y + TitleH + 2, FitTextLeft(FC, rsSubtitle, R - L));
   Inc(Y, TitleH + 2 + TextH);
 
+  PaintNotice(Y, L, R);
   PaintHeading(Y, rsReposHeading, Format(rsPickedOf, [ChosenCount, RepoCount]), L, R,
     Length(FRows) > 0);
   if FReposOpen or (Length(FRows) = 0) then
@@ -2674,6 +2741,59 @@ begin
   FContentHeight := Y + Px(Pad);
 end;
 
+procedure TGittanBatchPage.SetNotice(const AText, ALink: string);
+begin
+  if (FNotice = AText) and (FNoticeLink = ALink) then
+    Exit;
+  FNotice := AText;
+  FNoticeLink := ALink;
+  FHot := -1;
+  Layout;
+  Invalidate;
+end;
+
+{ The note in a card with a stripe of the link color at its left, the
+  text wrapped and the link under it. }
+procedure TGittanBatchPage.PaintNotice(var Y: integer; ALeft, ARight: integer);
+var
+  R, LinkR: TRect;
+  TextH, H, TextW: integer;
+begin
+  if FNotice = '' then
+    Exit;
+  Inc(Y, Px(Pad));
+  FC.Font := Font;
+  TextH := FC.TextHeight('Xg');
+  TextW := ARight - ALeft - 2 * Px(14);
+  H := 2 * Px(10) + WrappedHeight(FNotice, TextW);
+  if FNoticeLink <> '' then
+    Inc(H, TextH + Px(4));
+  R := Rect(ALeft, Y, ARight, Y + H);
+  FC.Pen.Style := psClear;
+  FC.Brush.Style := bsSolid;
+  FC.Brush.Color := FCard;
+  FC.RoundRect(R, Px(12), Px(12));
+  FC.Brush.Color := FLink;
+  FC.FillRect(Rect(R.Left, R.Top + Px(6), R.Left + Px(3), R.Bottom - Px(6)));
+  FC.Pen.Style := psSolid;
+  FC.Brush.Style := bsClear;
+  Y := R.Top + Px(10);
+  PaintText(Y, FNotice, FText, R.Left + Px(14), R.Right - Px(14));
+  if FNoticeLink <> '' then
+  begin
+    Inc(Y, Px(4));
+    FC.Font := Font;
+    LinkR := Rect(R.Left + Px(14), Y, R.Left + Px(14) + FC.TextWidth(FNoticeLink), Y + TextH);
+    AddLink(LinkR, NoticeLink);
+    FC.Font.Color := FLink;
+    if FHot = High(FLinkRects) then
+      FC.Font.Style := [fsUnderline];
+    FC.TextOut(LinkR.Left, LinkR.Top, FNoticeLink);
+    FC.Font := Font;
+  end;
+  Y := R.Bottom;
+end;
+
 procedure TGittanBatchPage.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
 var
   i, p, a, b: integer;
@@ -2686,7 +2806,12 @@ begin
   if i < 0 then
     Exit;
   Url := FLinkUrls[i];
-  if Copy(Url, 1, Length(RowLink)) = RowLink then
+  if Url = NoticeLink then
+  begin
+    if Assigned(FOnNotice) then
+      FOnNotice(Self);
+  end
+  else if Copy(Url, 1, Length(RowLink)) = RowLink then
     ToggleRow(StrToIntDef(Copy(Url, Length(RowLink) + 1, MaxInt), -1))
   else if Copy(Url, 1, Length(GoneLink)) = GoneLink then
     ToggleGone(StrToIntDef(Copy(Url, Length(GoneLink) + 1, MaxInt), -1))

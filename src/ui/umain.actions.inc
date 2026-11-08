@@ -42,6 +42,8 @@ begin
   FBlameOn := App.Settings.Blame;
   FShowComments := App.Settings.ReviewComments;
   FTranslations := App.Settings.Translations;
+  FImageDiff.Mode := ImageModeOf(App.Settings.ImageMode);
+  FMergeView.ShowBase := App.Settings.MergeBase;
   FSyntaxTheme := FindSyntaxTheme(App.Settings.SyntaxTheme);
   if FSyntaxTheme < 0 then
     FSyntaxTheme := DefaultSyntaxTheme;
@@ -113,6 +115,8 @@ begin
   App.Settings.Blame := FBlameOn;
   App.Settings.ReviewComments := FShowComments;
   App.Settings.Translations := FTranslations;
+  App.Settings.ImageMode := ImageModeName(FImageDiff.Mode);
+  App.Settings.MergeBase := FMergeView.ShowBase;
   App.Settings.SyntaxTheme := SyntaxThemes[FSyntaxTheme].Name;
   App.Settings.Save;
   SaveIndex;
@@ -511,6 +515,8 @@ begin
       V.ForgePaths[i] := App.Settings.ForgeCliPath(Forges[i].Name);
     V.HostingEnabled := App.Settings.HostingEnabled;
     V.CloneSiblings := App.Settings.CloneSiblings;
+    V.ChangesNeedAttention := App.Settings.ChangesNeedAttention;
+    V.ChecksNeedAttention := App.Settings.ChecksNeedAttention;
     V.AIEnabled := App.Settings.AIEnabled;
     V.Agent := AgentOfKey(App.Settings.AIAgent);
     V.AgentPaths[gaClaude] := App.Settings.ClaudePath;
@@ -553,6 +559,8 @@ begin
       App.Settings.EditorCommand := V.EditorCommand;
       App.Settings.TerminalCommand := V.TerminalCommand;
       App.Settings.CloneSiblings := V.CloneSiblings;
+      App.Settings.ChangesNeedAttention := V.ChangesNeedAttention;
+      App.Settings.ChecksNeedAttention := V.ChecksNeedAttention;
       App.Settings.AutoFetch := V.AutoFetch;
       App.Settings.AutoFetchMinutes := V.AutoFetchMinutes;
       App.Settings.AIEnabled := V.AIEnabled;
@@ -655,6 +663,11 @@ end;
 procedure TRepoFrame.MenuSettingsClick(Sender: TObject);
 begin
   OpenSettings(pgEditor);
+end;
+
+procedure TRepoFrame.ShowHostingSettings;
+begin
+  OpenSettings(pgHosting);
 end;
 
 { About Gittan is the settings' last page. }
@@ -837,6 +850,7 @@ end;
 procedure TRepoFrame.HeaderMenu(Sender: TObject; const AScreenRect: TRect);
 var
   n: integer;
+  m: TGittanImageMode;
 
   procedure AddRow(AItem: TMenuItem);
   begin
@@ -864,6 +878,12 @@ begin
   AddRow(FBlameItem);
   AddRow(FTranslationsItem);
   AddRow(FReviewItem);
+  if FImageMenu.Enabled then
+  begin
+    FViewPopup.AddHeader(rsImageHeader);
+    for m := Low(TGittanImageMode) to High(TGittanImageMode) do
+      AddRow(FImageModeItems[m]);
+  end;
   FViewPopup.AddHeader(rsHistoryHeader);
   AddRow(FCodeHistoryItem);
   AddRow(FTimelapseItem);
@@ -886,6 +906,7 @@ end;
 procedure TRepoFrame.ViewMenuClick(Sender: TObject);
 begin
   FFoldMenu.Enabled := FoldingShown and Edit.Visible;
+  FImageMenu.Enabled := FImageDiff.Visible and FImageDiff.Overlays;
 end;
 
 procedure TRepoFrame.MenuOnlyChangesClick(Sender: TObject);
@@ -924,12 +945,35 @@ begin
   ApplyTheme;
 end;
 
+{ View > Image: the mode of a changed image; the control's pills set it
+  too, and ImageModeChange keeps the items in step. }
+procedure TRepoFrame.MenuImageModeClick(Sender: TObject);
+begin
+  FImageDiff.Mode := TGittanImageMode((Sender as TMenuItem).Tag);
+end;
+
+procedure TRepoFrame.ImageModeChange(Sender: TObject);
+var
+  m: TGittanImageMode;
+begin
+  if FImageModeItems[imSideBySide] = nil then
+    Exit;
+  { The mode shown, as the pills: side by side where the one chosen
+    does not apply to these two images. }
+  for m := Low(TGittanImageMode) to High(TGittanImageMode) do
+  begin
+    FImageModeItems[m].Checked := m = FImageDiff.ShownMode;
+    FImageModeItems[m].Enabled := FImageDiff.ModeEnabled(m);
+  end;
+end;
+
 procedure TRepoFrame.MenuSideBySideClick(Sender: TObject);
 begin
   FSideBySide := not FSideBySide;
   FSideItem.Checked := FSideBySide;
   RebuildIfChanges;
   ApplyLayout;
+  NoteNewFile;
 end;
 
 { Whitespace changes are left out by git itself (-w on every diff), so
@@ -2069,7 +2113,10 @@ begin
   FGraph.Popup(Commits, Length(Commits) >= Limit, FBranch, FAhead, FBehind,
     FHasUpstream, Filter, Keep);
   if FGraph.Visible then
+  begin
     FSideNav.Selected := navGraph;
+    VerifyGraphSignatures;
+  end;
 end;
 
 procedure TRepoFrame.GraphTipDismiss(Sender: TObject);
@@ -2107,7 +2154,10 @@ begin
   end;
   { What is shown stays when the log cannot be read. }
   if Ok then
+  begin
     FGraph.Replace(Commits, Length(Commits) >= GraphSearchLimit);
+    VerifyGraphSignatures;
+  end;
 end;
 
 { A toggle of the graph's header was clicked, or a note changed: the
@@ -2138,7 +2188,10 @@ begin
     Screen.Cursor := crDefault;
   end;
   if Ok then
+  begin
     FGraph.Replace(Commits, Length(Commits) >= Limit);
+    VerifyGraphSignatures;
+  end;
 end;
 
 procedure TRepoFrame.GraphPathCommits(Sender: TObject; const APath: string;
@@ -2187,6 +2240,250 @@ begin
   FChangeJob.Stop(False);
   FBlameZombies.Add(FChangeJob);
   FChangeJob := nil;
+end;
+
+{ The graph's rows get the signatures known already, and the rest are
+  read on a thread, newest first as the rows are; a job for the rows
+  before is given up. }
+procedure TRepoFrame.VerifyGraphSignatures;
+var
+  Hashes, Unknown: TStringArray;
+  Known: TGittanSignedCommits;
+  i, n: integer;
+begin
+  AbandonSignJob;
+  if FRepo.Root = '' then
+    Exit;
+  Hashes := FGraph.CommitHashes;
+  SetLength(Known, Length(Hashes));
+  n := 0;
+  for i := 0 to High(Hashes) do
+    if FSignCache.Find(Hashes[i], Known[n].Signature) then
+    begin
+      Known[n].Hash := Hashes[i];
+      Inc(n);
+    end;
+  if n > 0 then
+    FGraph.SetSignatures(Known, n);
+  Unknown := FSignCache.Unknown(Hashes);
+  if Length(Unknown) = 0 then
+    Exit;
+  FSignJob := TGittanSignJob.Create(FRepo.Root, Unknown, App.Settings.TrustedKeyList);
+  FSignApplied := 0;
+  FSignJob.OnProgress := @SignJobProgress;
+  FSignJob.OnDone := @SignJobDone;
+  FSignJob.Start;
+end;
+
+procedure TRepoFrame.SignJobProgress(Sender: TObject);
+var
+  Job: TGittanSignJob;
+begin
+  Job := TGittanSignJob(Sender);
+  if Job <> FSignJob then
+    Exit;
+  { Only the chunk new since the last call: a graph of 50000 commits
+    would otherwise go over the first ones again at every chunk. }
+  FSignCache.PutAll(Job.Results, Job.Finished, FSignApplied);
+  FGraph.SetSignatures(Job.Results, Job.Finished, FSignApplied);
+  FSignApplied := Max(FSignApplied, Job.Finished);
+end;
+
+{ The job queues this from inside Execute, so it is freed from the
+  message loop with the blame jobs. }
+procedure TRepoFrame.SignJobDone(Sender: TObject);
+var
+  Job: TGittanSignJob;
+begin
+  Job := TGittanSignJob(Sender);
+  if Job <> FSignJob then
+    Exit;
+  FSignJob := nil;
+  FSignCache.PutAll(Job.Results, Job.Finished, FSignApplied);
+  FGraph.SetSignatures(Job.Results, Job.Finished, FSignApplied);
+  { A chunk git could not read is left out of the cache (its results
+    have no hash), so the next look asks again; the reason is said. }
+  if Job.Error <> '' then
+    StatusNote(Job.Error, True);
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+end;
+
+procedure TRepoFrame.AbandonSignJob;
+begin
+  if FSignJob = nil then
+    Exit;
+  FSignJob.Stop(False);
+  FBlameZombies.Add(FSignJob);
+  FSignJob := nil;
+end;
+
+{ The host of the first remote the forge hosts, with the owner and
+  the repository there ("slicke/gittan"); '' without a forge. An ssh
+  remote's host may be an alias of ~/.ssh/config (github-work), as
+  FindForge takes it: the host it names is the one asked. }
+function TRepoFrame.TrustHost(out AOwner, ARepo: string): string;
+var
+  Line, Url, Path, Host, SshConfig: string;
+  SshRead: boolean;
+  p: integer;
+begin
+  Result := '';
+  AOwner := '';
+  ARepo := '';
+  if FForge = nil then
+    Exit;
+  SshConfig := '';
+  SshRead := False;
+  for Line in FRemoteUrls.Split([#10]) do
+  begin
+    p := Pos(' ', Line);
+    if p = 0 then
+      Continue;
+    Url := Trim(Copy(Line, p + 1, MaxInt));
+    Host := RemoteHost(Url);
+    if Host = '' then
+      Continue;
+    if not TGittanForgeClass(FForge.ClassType).HostsRemote(Host) then
+    begin
+      if SameText(Copy(Url, 1, 7), 'http://') or SameText(Copy(Url, 1, 8), 'https://') then
+        Continue;
+      if not SshRead then
+      begin
+        SshConfig := UserSshConfig;
+        SshRead := True;
+      end;
+      Host := LowerCase(SshHostName(Host, SshConfig));
+      if not TGittanForgeClass(FForge.ClassType).HostsRemote(Host) then
+        Continue;
+    end;
+    Path := RemoteRepoPath(Url);
+    p := Pos('/', Path);
+    if p = 0 then
+      Continue;
+    AOwner := Copy(Path, 1, p - 1);
+    ARepo := Copy(Path, p + 1, MaxInt);
+    Exit(Host);
+  end;
+end;
+
+{ Takes the forge's word for the keys of the commit's author and
+  committer (see gittan.trustkeys): the gpg git uses gets the GPG keys
+  and the allowed signers file the SSH keys, the one set anywhere, else
+  the default one set up globally, as saving an SSH key does. }
+procedure TRepoFrame.TrustForgeKeys(const AHash: string);
+var
+  Host, RepoOwner, RepoName, Allowed, Output, Err: string;
+begin
+  if (FRepo.Root = '') or (AHash = '') then
+    Exit;
+  if FTrustJob <> nil then
+  begin
+    StatusNote(rsTrustBusy);
+    Exit;
+  end;
+  Host := TrustHost(RepoOwner, RepoName);
+  if Host = '' then
+    Exit;
+  Allowed := ReadSigningSetup(FRepo.Root).AllowedSigners;
+  if Allowed = '' then
+  begin
+    Allowed := DefaultAllowedSignersFile;
+    RunGitIn(FRepo.Root, ['config', '--global', '--replace-all', 'gpg.ssh.allowedSignersFile',
+      Allowed], Output, Err);
+  end
+  else
+    Allowed := AllowedSignersPath(FRepo.Root, Allowed);
+  StatusNote(Format(rsTrustAsking, [Host]));
+  FTrustJob := TGittanTrustJob.Create(FRepo.Root, Host, RepoOwner, RepoName, AHash,
+    GpgProgramFor(FRepo.Root), Allowed, FForge.Cli);
+  FTrustJob.OnDone := @TrustJobDone;
+  FTrustJob.Start;
+end;
+
+procedure TRepoFrame.SignaturesTrusted;
+begin
+  FSignCache.Clear;
+  if FRepo.Root = '' then
+    Exit;
+  if FGraph.Visible then
+    VerifyGraphSignatures;
+  if BlameShown then
+  begin
+    FBlameSignature := CommitSignatureOf(FBlameCommit.Hash);
+    FSummary.SetCommit(FBlameCommit, FBlameBody, FBlameSignature);
+  end;
+end;
+
+{ The keys taken go into the settings, what was found of the signatures
+  is forgotten and the rows and the card are checked again. }
+procedure TRepoFrame.TrustJobDone(Sender: TObject);
+var
+  Job: TGittanTrustJob;
+  Entry, Users: string;
+  i: integer;
+begin
+  Job := TGittanTrustJob(Sender);
+  if Job <> FTrustJob then
+    Exit;
+  FTrustJob := nil;
+  for Entry in Job.Trusted do
+    App.Settings.AddTrustedKey(Entry);
+  if Length(Job.Trusted) > 0 then
+    App.Settings.Save;
+  Users := '';
+  for i := 0 to High(Job.Users) do
+  begin
+    if Users <> '' then
+      Users := Users + ', ';
+    Users := Users + Job.Users[i];
+  end;
+  if (Length(Job.Trusted) = 0) and (Job.SshAdded = 0) then
+  begin
+    if Job.Error <> '' then
+      StatusNote(Job.Error, True)
+    else
+      StatusNote(Format(rsTrustNothing, [Job.Host, Users]));
+  end
+  else
+  begin
+    { Taken in part: what failed is said with what was taken. }
+    if Job.Error <> '' then
+      StatusNote(Format(rsTrustDone, [Job.Host, Users, Length(Job.Trusted), Job.SshAdded]) +
+        ' ' + Job.Error, True)
+    else
+      StatusNote(Format(rsTrustDone, [Job.Host, Users, Length(Job.Trusted), Job.SshAdded]));
+    { The keys and the allowed signers file are everyone's: every tab
+      checks its commits again. }
+    for i := 0 to FWindow.FrameCount - 1 do
+      FWindow.FrameAt(i).SignaturesTrusted;
+  end;
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+end;
+
+procedure TRepoFrame.SummaryTrustClick(Sender: TObject);
+begin
+  if BlameShown then
+    TrustForgeKeys(FBlameCommit.Hash);
+end;
+
+{ The signature of one commit, for the card: as known, else read now,
+  which costs a gpg or ssh-keygen run for a signed commit. }
+function TRepoFrame.CommitSignatureOf(const AHash: string): TGittanSignature;
+var
+  Found: TGittanSignedCommits;
+  Error: string;
+begin
+  Result := Default(TGittanSignature);
+  if (AHash = '') or (FRepo.Root = '') or FSignCache.Find(AHash, Result) then
+    Exit;
+  if CommitSignatures(FRepo.Root, [AHash], nil, Found, Error, App.Settings.TrustedKeyList) and
+    (Length(Found) = 1) then
+  begin
+    Result := Found[0].Signature;
+    FSignCache.Put(AHash, Result);
+  end;
 end;
 
 { The filter that keeps the commits touching APath: quoted when the path
@@ -2384,8 +2681,8 @@ begin
   Result := 'cd ' + gittan.cli.ShellQuote(ARoot) + ' && ' + ACommand + '; exec ${SHELL:-sh}';
 end;
 
-{ A terminal in the repository root, running ACommand there when it is
-  not empty (a command of the repository marked for the terminal, see
+{ A terminal in ARoot (the repository's root for OpenTerminal), running
+  ACommand there when it is not empty (a command of the repository marked for the terminal, see
   umain.commands.inc). The terminal command from the settings file gets
   the root appended, and the command after it; the platform's terminal
   when none is set. On macOS Terminal is told through osascript to
@@ -2397,7 +2694,7 @@ end;
   after -- for gnome-terminal, whose -e takes one string, -x for
   xfce4-terminal, and -e for the rest (x-terminal-emulator takes -e as
   xterm does, whichever terminal it is). }
-procedure TRepoFrame.OpenTerminal(const ACommand: string);
+procedure TRepoFrame.OpenTerminalIn(const ARoot, ACommand: string);
 {$IF not defined(DARWIN) and not defined(WINDOWS)}
 const
   Terminals: array[0..4] of string = ('x-terminal-emulator', 'gnome-terminal',
@@ -2410,24 +2707,24 @@ var
   Script: string;
 {$ENDIF}
 begin
-  if FRepo.Root = '' then
+  if ARoot = '' then
     Exit;
   if Trim(App.Settings.TerminalCommand) <> '' then
   begin
     if ACommand = '' then
-      RunCommandWith(App.Settings.TerminalCommand, [FRepo.Root])
+      RunCommandWith(App.Settings.TerminalCommand, [ARoot])
     else
-      RunCommandWith(App.Settings.TerminalCommand, [FRepo.Root, ACommand]);
+      RunCommandWith(App.Settings.TerminalCommand, [ARoot, ACommand]);
     Exit;
   end;
   {$IFDEF DARWIN}
   if ACommand = '' then
-    RunDetached('open', ['-a', 'Terminal', FRepo.Root])
+    RunDetached('open', ['-a', 'Terminal', ARoot])
   else
   begin
     { The line goes into an AppleScript string: its backslashes and
       quotes escaped. }
-    Script := 'cd ' + gittan.cli.ShellQuote(FRepo.Root) + ' && ' + ACommand;
+    Script := 'cd ' + gittan.cli.ShellQuote(ARoot) + ' && ' + ACommand;
     Script := StringReplace(Script, '\', '\\', [rfReplaceAll]);
     Script := StringReplace(Script, '"', '\"', [rfReplaceAll]);
     RunDetached('osascript', ['-e', 'tell application "Terminal" to do script "' +
@@ -2438,33 +2735,38 @@ begin
   if FindDefaultExecutablePath('wt.exe') <> '' then
   begin
     if ACommand = '' then
-      RunDetached('wt.exe', ['-d', FRepo.Root])
+      RunDetached('wt.exe', ['-d', ARoot])
     else
-      RunDetached('wt.exe', ['-d', FRepo.Root, 'cmd.exe', '/K', ACommand]);
+      RunDetached('wt.exe', ['-d', ARoot, 'cmd.exe', '/K', ACommand]);
   end
   else if ACommand = '' then
-    RunDetached('cmd.exe', ['/C', 'start', 'cmd.exe'], FRepo.Root)
+    RunDetached('cmd.exe', ['/C', 'start', 'cmd.exe'], ARoot)
   else
-    RunDetached('cmd.exe', ['/C', 'start', 'cmd.exe', '/K', ACommand], FRepo.Root);
+    RunDetached('cmd.exe', ['/C', 'start', 'cmd.exe', '/K', ACommand], ARoot);
   {$ELSE}
   for T in Terminals do
     if FindDefaultExecutablePath(T) <> '' then
     begin
       if ACommand = '' then
-        RunDetached(T, [], FRepo.Root)
+        RunDetached(T, [], ARoot)
       else if T = 'gnome-terminal' then
-        RunDetached(T, ['--', 'sh', '-c', ShellLineIn(FRepo.Root, ACommand)],
-          FRepo.Root)
+        RunDetached(T, ['--', 'sh', '-c', ShellLineIn(ARoot, ACommand)],
+          ARoot)
       else if T = 'xfce4-terminal' then
-        RunDetached(T, ['-x', 'sh', '-c', ShellLineIn(FRepo.Root, ACommand)],
-          FRepo.Root)
+        RunDetached(T, ['-x', 'sh', '-c', ShellLineIn(ARoot, ACommand)],
+          ARoot)
       else
-        RunDetached(T, ['-e', 'sh', '-c', ShellLineIn(FRepo.Root, ACommand)],
-          FRepo.Root);
+        RunDetached(T, ['-e', 'sh', '-c', ShellLineIn(ARoot, ACommand)],
+          ARoot);
       Exit;
     end;
   {$ENDIF}
   {$ENDIF}
+end;
+
+procedure TRepoFrame.OpenTerminal(const ACommand: string);
+begin
+  OpenTerminalIn(FRepo.Root, ACommand);
 end;
 
 { Tools > Install CLI Command: a gittan command for the terminal that
@@ -2864,11 +3166,14 @@ begin
   end;
   AddAction(paList, rsAllPulls, '');
   { Review it, merge it, while it is open and the forge acts. }
-  if CanPullAction(FPull, plApprove) then
+  if CanPullAction(FPull, plComment) then
   begin
     FPullPopup.AddHeader(rsPullReviewHeader);
-    AddAction(paAct + Ord(plApprove), rsPullApprove, '');
-    AddAction(paAct + Ord(plRequestChanges), rsPullRequestChanges, '');
+    { One's own has Comment alone. }
+    if CanPullAction(FPull, plApprove) then
+      AddAction(paAct + Ord(plApprove), rsPullApprove, '');
+    if CanPullAction(FPull, plRequestChanges) then
+      AddAction(paAct + Ord(plRequestChanges), rsPullRequestChanges, '');
     AddAction(paAct + Ord(plComment), rsPullComment, '');
   end;
   if CanPullAction(FPull, plMerge) then

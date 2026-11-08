@@ -41,7 +41,8 @@ var
 begin
   FBlameOld := nil;
   FBlameNew := nil;
-  if FBlameOn and (FView = gvChanges) and (FCurrentPath <> '') then
+  NoteNewFile;
+  if FBlameOn and (FView = gvChanges) and (FCurrentPath <> '') and not NewFileUncommitted then
   begin
     FRepo.DiffSides(OldRef, NewRef);
     i := FBlameCache.IndexOf(BlameKey(OldRef, FCurrentPath));
@@ -61,6 +62,46 @@ begin
     end;
   end;
   ApplyBlame;
+end;
+
+{ Whether the change view shows a file with no old side: every row is
+  an added line (an untracked or newly added file). }
+function TRepoFrame.ShownIsNewFile: boolean;
+var
+  i: integer;
+begin
+  Result := (FView = gvChanges) and (FChangeLines <> nil) and (FChangeLines.Count > 0);
+  if not Result then
+    Exit;
+  for i := 0 to FChangeLines.Count - 1 do
+    if (FChangeLines[i] = '') or (FChangeLines[i][1] <> '+') then
+      Exit(False);
+end;
+
+{ A new file whose lines are the work tree's: none committed, so
+  nothing to blame. In a range the new side is a commit, and the commit
+  that added the file is what blame shows of every line. }
+function TRepoFrame.NewFileUncommitted: boolean;
+begin
+  Result := ShownIsNewFile and not FRepo.IsRange;
+end;
+
+{ Blame and Side by Side have nothing to show for a new file, and the
+  band and the old pane stayed empty without a word: the status bar
+  says why while either is on. }
+procedure TRepoFrame.NoteNewFile;
+var
+  Blame: boolean;
+begin
+  if not ShownIsNewFile then
+    Exit;
+  Blame := FBlameOn and NewFileUncommitted;
+  if Blame and FSideBySide then
+    StatusNote(rsNewFileModes)
+  else if Blame then
+    StatusNote(rsNewFileBlame)
+  else if FSideBySide then
+    StatusNote(rsNewFileSide);
 end;
 
 { A job that is no longer wanted runs on without a handler until git is
@@ -136,12 +177,20 @@ begin
   AbandonHistoryJob;
   AbandonTimelapseJob;
   AbandonChangeJob;
+  AbandonSignJob;
+  if FTrustJob <> nil then
+  begin
+    FTrustJob.Stop(False);
+    FBlameZombies.Add(FTrustJob);
+    FTrustJob := nil;
+  end;
   AbandonRepoInfoJob;
   FreeAndNil(FHistory);
   FreeAndNil(FTimelapse);
   { Waits for the jobs given up. }
   FreeAndNil(FBlameZombies);
   FreeAndNil(FBlameCache);
+  FreeAndNil(FSignCache);
 end;
 
 { The author of a commit as the band names it. }
@@ -451,6 +500,7 @@ begin
     FBlameCommit := Default(TGittanCommitLine);
     FBlameBody := '';
   end;
+  FBlameSignature := CommitSignatureOf(FBlameCommit.Hash);
   FBlameRange := Range;
   SetBase(Range);
 end;

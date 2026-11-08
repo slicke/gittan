@@ -310,7 +310,12 @@ begin
     pkCommands:
       ShowCommands;
     pkPulls:
+    begin
+      { Without a forge (hosting turned off since) there is no page. }
       ShowPulls;
+      if FView <> gvPulls then
+        Exit;
+    end;
     pkProject:
       ShowProject;
     pkGraph:
@@ -365,6 +370,43 @@ begin
     if FNavValid then
       FNavHistory.Settled(FNavPlace);
     StatusNote(rsNavGone);
+  end;
+  NavUpdateItems;
+end;
+
+{ Leaves a view that is no place (the code history, the time-lapse) for
+  the place shown before it, which is still the one noted, or for the
+  summary when that is gone. }
+procedure TRepoFrame.NavReturn;
+var
+  Shown, Tried: boolean;
+begin
+  if FRepo.Root = '' then
+    Exit;
+  Shown := False;
+  Tried := FNavValid;
+  if FNavValid then
+  begin
+    FNavBusy := True;
+    try
+      Shown := NavRestore(FNavPlace);
+    finally
+      FNavBusy := False;
+    end;
+  end;
+  if not Shown then
+  begin
+    { The summary is the place now, not the one that could not be
+      shown, which the idle sync would otherwise put on the back list. }
+    ShowSummary;
+    FNavValid := False;
+    NavSync;
+    { As NavStep: the summary on top of Back is the place shown now,
+      which Back would only show again. }
+    if FNavValid then
+      FNavHistory.Settled(FNavPlace);
+    if Tried then
+      StatusNote(rsNavGone);
   end;
   NavUpdateItems;
 end;

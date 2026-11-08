@@ -27,7 +27,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Controls, Graphics, ImgList, InkDraw, gittan.git, gittan.icons,
-  gittan.reviews, gittan.statusbar, gittan.forge, gittan.issuelinks;
+  gittan.reviews, gittan.statusbar, gittan.forge, gittan.issuelinks, gittan.signing;
 
 type
   TGittanSelectFileEvent = procedure(Sender: TObject; const APath: string) of object;
@@ -131,11 +131,19 @@ type
       FBackRect is the card's link back to the working tree. }
     FCommit: TGittanCommitLine;
     FCommitBody: string;
+    FCommitSign: TGittanSignature;
     FCardSubject, FCardLines: TStringArray;
     FCardWidth, FCardHeight: integer;
     FBackRect: TRect;
     FBackHot: boolean;
     FOnBackClick: TNotifyEvent;
+    { The link at the end of the signature line of a commit signed with
+      a key not known here, "Trust github.com's keys" (TrustCaption,
+      none while empty), which raises OnTrustClick. }
+    FTrustRect: TRect;
+    FTrustHot: boolean;
+    FTrustCaption: string;
+    FOnTrustClick: TNotifyEvent;
     { Newer (0) and Older (1) at the right of the card's author line:
       whether each can be gone to, where it is (empty when not), and
       the one under the mouse, -1 for none. }
@@ -260,6 +268,9 @@ type
       const ALinks: TGittanIssueLinks);
     function CardLinkAt(X, Y: integer): integer;
     procedure SetCardLinkHot(AValue: integer);
+    procedure SetTrustHot(AValue: boolean);
+    procedure SetTrustCaption(const AValue: string);
+    function TrustShown: boolean;
     procedure SetIssueTracker(const AValue: TGittanIssueTracker);
     procedure SetBackHot(AValue: boolean);
     procedure SetStepHot(AValue: integer);
@@ -323,8 +334,11 @@ type
     procedure SetReviewPulls(const APulls: TGittanPullRequests);
     {** Shows ACommit, the commit the files are compared through (with
       its parent), in a card under the header with ABody, the rest of
-      its message; an empty Hash shows none. }
-    procedure SetCommit(const ACommit: TGittanCommitLine; const ABody: string);
+      its message, and ASignature, what is known of its signature (a
+      line under the author's when it has one); an empty Hash shows
+      none. }
+    procedure SetCommit(const ACommit: TGittanCommitLine; const ABody: string;
+      const ASignature: TGittanSignature);
     {** Whether the card offers Newer and Older (OnCommitStep); neither
       shows when both are off. }
     procedure SetCommitSteps(ANewer, AOlder: boolean);
@@ -399,6 +413,8 @@ type
     property OnReviewClick: TGittanBranchClickEvent read FOnReviewClick write FOnReviewClick;
     {** A click on the commit card's link back to the working tree. }
     property OnBackClick: TNotifyEvent read FOnBackClick write FOnBackClick;
+    property TrustCaption: string read FTrustCaption write SetTrustCaption;
+    property OnTrustClick: TNotifyEvent read FOnTrustClick write FOnTrustClick;
     property OnCommitStep: TGittanCommitStepEvent read FOnCommitStep write FOnCommitStep;
     {** The issue tracker whose regular expression marks the references
       to issues in the card's subject, body and note as links; one with
@@ -415,7 +431,8 @@ function ReviewPullLine(const APull: TGittanPullRequest): string;
 implementation
 
 uses
-  Math, DateUtils, LazUTF8, StrUtils, InkMarkdown, gittan.textfit, gittan.theme, Forms;
+  Math, DateUtils, LazUTF8, StrUtils, InkMarkdown, gittan.textfit, gittan.theme, Forms,
+  gittan.signmark;
 
 resourcestring
   rsCardNote = 'Note';
@@ -486,6 +503,7 @@ const
     its left, and the most lines of text it shows (the rest is on
     the forge). }
   NotePadX = 12;
+  ShieldSize = 11;
   NotePadY = 8;
   NoteGap = 8;
   NoteStripe = 3;
@@ -1333,14 +1351,18 @@ begin
   Inc(Y, Px(RowHeight));
 end;
 
-procedure TGittanSummary.SetCommit(const ACommit: TGittanCommitLine; const ABody: string);
+procedure TGittanSummary.SetCommit(const ACommit: TGittanCommitLine; const ABody: string;
+  const ASignature: TGittanSignature);
 begin
-  if (FCommit.Hash = ACommit.Hash) and (FCommitBody = ABody) and (FCommit.Note = ACommit.Note) then
+  if (FCommit.Hash = ACommit.Hash) and (FCommitBody = ABody) and (FCommit.Note = ACommit.Note) and
+    (SignatureText(FCommitSign) = SignatureText(ASignature)) then
     Exit;
   FCommit := ACommit;
   FCommitBody := ABody;
+  FCommitSign := ASignature;
   FCardWidth := -1;
   FBackHot := False;
+  FTrustHot := False;
   FStepHot := -1;
   FCardLinkHot := -1;
   UpdateHeight;
@@ -1456,6 +1478,8 @@ begin
     end;
   end;
   FCardHeight := 2 * Px(NotePadY) + (Length(FCardSubject) + 1) * LineHeight + 2;
+  if FCommitSign.State <> ssNone then
+    Inc(FCardHeight, LineHeight);
   if Length(FCardLines) > 0 then
     Inc(FCardHeight, 6 + Length(FCardLines) * LineHeight);
   if Length(FCardNote) > 0 then
@@ -1498,6 +1522,7 @@ var
 begin
   LayoutCard;
   FBackRect := Rect(0, 0, 0, 0);
+  FTrustRect := Rect(0, 0, 0, 0);
   FStepRects[0] := Rect(0, 0, 0, 0);
   FStepRects[1] := Rect(0, 0, 0, 0);
   FCardLinks := nil;
@@ -1552,8 +1577,34 @@ begin
   Room := PaintSteps(Card.Right - Px(NotePadX), At) - X;
   Canvas.Font.Color := FDim;
   Canvas.TextOut(X, At, FitTextRight(Canvas, Meta, Room));
+  Inc(At, LineHeight);
+  { The signature: its shield and what git made of it. }
+  if FCommitSign.State <> ssNone then
+  begin
+    Canvas.Font.Color := SignatureColor(FCommitSign, FAdded, FDim, FDeleted);
+    PaintShield(Canvas, X, At + (LineHeight - Px(ShieldSize)) div 2, Px(ShieldSize),
+      Canvas.Font.Color, FSelectedBack, ShieldFilled(FCommitSign),
+      FCommitSign.State in [ssGood, ssTrusted]);
+    Canvas.Brush.Style := bsClear;
+    Room := Card.Right - Px(NotePadX);
+    { The link first, so the text is cut short of it. }
+    if TrustShown then
+    begin
+      FTrustRect := Rect(Room - Canvas.TextWidth(FTrustCaption), At, Room, At + LineHeight);
+      Canvas.Font.Color := FLink;
+      if FTrustHot then
+        Canvas.Font.Style := [fsUnderline];
+      Canvas.TextOut(FTrustRect.Left, At, FTrustCaption);
+      Canvas.Font.Style := [];
+      Canvas.Font.Color := SignatureColor(FCommitSign, FAdded, FDim, FDeleted);
+      Room := FTrustRect.Left - Px(Gap);
+    end;
+    Canvas.TextOut(X + Px(ShieldSize) + Px(Gap) div 2, At, FitTextRight(Canvas,
+      SignatureText(FCommitSign), Room - X - Px(ShieldSize) - Px(Gap) div 2));
+    Inc(At, LineHeight);
+  end;
 
-  Inc(At, LineHeight + 6);
+  Inc(At, 6);
   Canvas.Font.Color := FText;
   for k := 0 to High(FCardLines) do
   begin
@@ -1722,6 +1773,28 @@ begin
     Exit;
   FBackHot := AValue;
   Invalidate;
+end;
+
+procedure TGittanSummary.SetTrustHot(AValue: boolean);
+begin
+  if FTrustHot = AValue then
+    Exit;
+  FTrustHot := AValue;
+  Invalidate;
+end;
+
+procedure TGittanSummary.SetTrustCaption(const AValue: string);
+begin
+  if FTrustCaption = AValue then
+    Exit;
+  FTrustCaption := AValue;
+  Invalidate;
+end;
+
+function TGittanSummary.TrustShown: boolean;
+begin
+  Result := (FCommitSign.State = ssUnknownKey) and (FTrustCaption <> '') and
+    Assigned(FOnTrustClick);
 end;
 
 function TGittanSummary.LinkAt(X, Y: integer): integer;
@@ -2550,11 +2623,12 @@ begin
   SetSyncHot((FSyncRect.Right > FSyncRect.Left) and PtInRect(FSyncRect, Point(X, Y)));
   SetTotalsHot((FTotalsRect.Right > FTotalsRect.Left) and PtInRect(FTotalsRect, Point(X, Y)));
   SetBackHot(Assigned(FOnBackClick) and PtInRect(FBackRect, Point(X, Y)));
+  SetTrustHot(TrustShown and PtInRect(FTrustRect, Point(X, Y)));
   SetStepHot(StepAt(X, Y));
   SetCardLinkHot(CardLinkAt(X, Y));
   if Assigned(FOnBehindAction) then
     SetBehindHot(BehindAt(X, Y));
-  if (FLinkHot >= 0) or (FActionHot >= 0) or FBackHot or (FStepHot >= 0) or (FBehindHot >= 0) or FTextLinkHot or
+  if (FLinkHot >= 0) or (FActionHot >= 0) or FBackHot or FTrustHot or (FStepHot >= 0) or (FBehindHot >= 0) or FTextLinkHot or
     FDetailsHot or (FMoreHot >= 0) or (FCardLinkHot >= 0) then
     Cursor := crHandPoint
   else if not (FBranchHot or FBaseHot or FSyncHot or FTotalsHot or FReviewHot) then
@@ -2577,6 +2651,7 @@ begin
   SetSyncHot(False);
   SetTotalsHot(False);
   SetBackHot(False);
+  SetTrustHot(False);
   SetStepHot(-1);
   SetCardLinkHot(-1);
   SetBehindHot(-1);
@@ -2607,6 +2682,11 @@ begin
   if (Button = mbLeft) and Assigned(FOnBackClick) and PtInRect(FBackRect, Point(X, Y)) then
   begin
     FOnBackClick(Self);
+    Exit;
+  end;
+  if (Button = mbLeft) and TrustShown and PtInRect(FTrustRect, Point(X, Y)) then
+  begin
+    FOnTrustClick(Self);
     Exit;
   end;
   if (Button = mbLeft) and (StepAt(X, Y) >= 0) then

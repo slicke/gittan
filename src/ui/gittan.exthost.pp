@@ -31,8 +31,10 @@ type
     procedure Alert(const AName, AText: string); override;
     function Confirm(const AName, AText: string): boolean; override;
     function Prompt(const ACaption, AText, ADefault: string; out AValue: string): boolean; override;
+    function Message(const AName, ATitle, AText: string; AKind: TExtMessageKind;
+      const AButtons: array of string; ADefault, ACancel: integer): integer; override;
     function Select(const ACaption, AText: string; const AOptions: array of string): integer; override;
-    procedure ShowLog(const ATitle, AText: string); override;
+    procedure ShowLog(const AName, ATitle, AText: string); override;
     procedure ReportError(const ATitle, ADetail: string); override;
     function AskPermission(const AName, AFile, AAuthor: string;
       const ARequested: TExtPermSet): boolean; override;
@@ -59,7 +61,9 @@ uses
 resourcestring
   rsExtMessage = 'Extension';
   rsExtQuestion = 'Extension question';
-  rsExtNamed = 'Extension "%s"';
+  rsExtOK = 'OK';
+  rsExtFrom = 'From the extension %s';
+  rsExtFromSome = 'From an extension';
   rsExtError = 'Extension error';
   rsExtPermTitle = 'An extension asks for permissions';
   rsExtPermText = '%s' + LineEnding + LineEnding + 'File: %s' + LineEnding;
@@ -87,23 +91,38 @@ begin
     Result := FWindow.ShownFrame;
 end;
 
-procedure TGittanExtUIHost.Alert(const AName, AText: string);
+{ The line at the left of an extension's dialog's buttons, with the
+  puzzle piece (AskDlgFrom), so it cannot pass for one of Gittan's own. }
+function FromLine(const AName: string): string;
 begin
   if AName <> '' then
-    TellDlg(Format(rsExtNamed, [AName]), AText, mtInformation)
+    Result := Format(rsExtFrom, [AName])
   else
-    TellDlg(rsExtMessage, AText, mtInformation);
+    Result := rsExtFromSome;
+end;
+
+{ alert and confirm have no title of their own: the extension's name
+  heads the text. }
+procedure TGittanExtUIHost.Alert(const AName, AText: string);
+var
+  Title: string;
+begin
+  Title := AName;
+  if Title = '' then
+    Title := rsExtMessage;
+  AskDlgFrom(Title, AText, mtInformation, [mrOK, 'IsDefault', 'IsCancel'],
+    FromLine(AName));
 end;
 
 function TGittanExtUIHost.Confirm(const AName, AText: string): boolean;
 var
   Title: string;
 begin
-  if AName <> '' then
-    Title := Format(rsExtNamed, [AName])
-  else
+  Title := AName;
+  if Title = '' then
     Title := rsExtQuestion;
-  Result := AskDlg(Title, AText, mtConfirmation, [mrYes, mrNo]) = mrYes;
+  Result := AskDlgFrom(Title, AText, mtConfirmation, [mrYes, mrNo],
+    FromLine(AName)) = mrYes;
 end;
 
 function TGittanExtUIHost.Prompt(const ACaption, AText, ADefault: string;
@@ -113,6 +132,95 @@ begin
   Result := AskText(ACaption, AText, AValue, nil, '', '', True);
   if not Result then
     AValue := '';
+end;
+
+{ The extension's title heads the text (its name when it gives none, as
+  alert's), and the line at the left of the buttons names the extension,
+  so a message cannot pass for one of Gittan's own. A button's modal result is ButtonBase plus its index, above the
+  LCL's own, so Escape and the close box without a cancel button
+  (mrCancel) answer -1. }
+function TGittanExtUIHost.Message(const AName, ATitle, AText: string;
+  AKind: TExtMessageKind; const AButtons: array of string;
+  ADefault, ACancel: integer): integer;
+const
+  ButtonBase = 1000;
+  Kinds: array[TExtMessageKind] of TMsgDlgType =
+    (mtInformation, mtWarning, mtError, mtConfirmation);
+var
+  Caption, Text: string;
+  Labels: array of string;
+  Args: array of TVarRec;
+  i, n: integer;
+  Pressed: TModalResult;
+
+  procedure Put(const AValue: TVarRec);
+  begin
+    SetLength(Args, Length(Args) + 1);
+    Args[High(Args)] := AValue;
+  end;
+
+  procedure PutInt(AValue: integer);
+  var
+    V: TVarRec;
+  begin
+    V := Default(TVarRec);
+    V.VType := vtInteger;
+    V.VInteger := AValue;
+    Put(V);
+  end;
+
+  procedure PutStr(const AValue: string);
+  var
+    V: TVarRec;
+  begin
+    V := Default(TVarRec);
+    V.VType := vtAnsiString;
+    V.VAnsiString := Pointer(AValue);
+    Put(V);
+  end;
+
+begin
+  Caption := ATitle;
+  Text := AText;
+  if Text = '' then
+  begin
+    { A title alone is the text, under the name as alert's. }
+    Text := Caption;
+    Caption := '';
+  end;
+  if Caption = '' then
+    Caption := AName;
+  if Caption = '' then
+    Caption := rsExtMessage;
+  { The labels are kept in Labels while Args points at them. }
+  Labels := nil;
+  Args := nil;
+  if Length(AButtons) = 0 then
+  begin
+    SetLength(Labels, 1);
+    Labels[0] := rsExtOK;
+  end
+  else
+  begin
+    SetLength(Labels, Length(AButtons));
+    for i := 0 to High(AButtons) do
+      Labels[i] := AButtons[i];
+  end;
+  for i := 0 to High(Labels) do
+  begin
+    PutInt(ButtonBase + i);
+    PutStr(Labels[i]);
+    if i = ADefault then
+      PutStr('IsDefault');
+    if i = ACancel then
+      PutStr('IsCancel');
+  end;
+  Pressed := AskDlgFrom(Caption, Text, Kinds[AKind], Args, FromLine(AName));
+  n := Pressed - ButtonBase;
+  if (n >= 0) and (n <= High(Labels)) then
+    Result := n
+  else
+    Result := -1;
 end;
 
 function TGittanExtUIHost.Select(const ACaption, AText: string;
@@ -131,9 +239,10 @@ begin
   end;
 end;
 
-procedure TGittanExtUIHost.ShowLog(const ATitle, AText: string);
+procedure TGittanExtUIHost.ShowLog(const AName, ATitle, AText: string);
 begin
-  TellDlg(ATitle, AText, mtInformation);
+  AskDlgFrom(ATitle, AText, mtInformation, [mrOK, 'IsDefault', 'IsCancel'],
+    FromLine(AName));
 end;
 
 procedure TGittanExtUIHost.ReportError(const ATitle, ADetail: string);

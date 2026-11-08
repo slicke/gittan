@@ -152,6 +152,9 @@ begin
   Git(FWork, ['switch', '-q', '-c', 'squash']);
   CommitFile('c.txt', 'c', 'squash one');
   CommitFile('d.txt', 'd', 'squash two');
+  { A rename, which log -p would find and diff-tree not. }
+  Git(FWork, ['mv', 'b.txt', 'renamed.txt']);
+  Git(FWork, ['commit', '-q', '-m', 'squash rename']);
   Git(FWork, ['push', '-q', '-u', 'origin', 'squash']);
   Git(FWork, ['switch', '-q', 'main']);
   Git(FWork, ['merge', '-q', '--squash', 'squash']);

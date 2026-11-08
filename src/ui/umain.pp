@@ -19,13 +19,13 @@ uses
   gittan.lexers, gittan.git, gittan.conflicts, gittan.icons, gittan.theme, gittan.changenav,
   gittan.summary, gittan.welcome, gittan.fileheader, gittan.watch, gittan.settings,
   gittan.sidenav, gittan.repoinfo, gittan.repopage, gittan.subpage,
-  gittan.repocommands, gittan.project, gittan.commandpage, gittan.projectpage, gittan.job,
+  gittan.repocommands, gittan.repoconfig, gittan.project, gittan.commandpage, gittan.projectpage, gittan.job,
   gittan.settingsdlg, gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   {$IFDEF LCLCocoa}gittan.memohint,{$ENDIF}
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
   {$IFDEF LCLWin32}gittan.wintitlebar,{$ENDIF}
   {$IFDEF LCLGtk3}gittan.gtktitlebar,{$ENDIF}
-  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.timelapse, gittan.timelapsebar, gittan.pickaxe, gittan.navhistory, gittan.undo, gittan.paletteside,
+  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.timelapse, gittan.timelapsebar, gittan.pickaxe, gittan.signing, gittan.trustkeys, gittan.navhistory, gittan.undo, gittan.paletteside,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.textfile, gittan.sectionheader, gittan.hintbox,
   gittan.forge, gittan.lfslocks, gittan.askdlg,
@@ -33,7 +33,7 @@ uses
   fpjson, gittan.ext.engine, gittan.ext.registry, gittan.ext.api, gittan.ext.loader,
   gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
   gittan.rebase, gittan.worktrees, gittan.gitflow, gittan.repolist, gittan.rebasedlg, gittan.cleandlg, gittan.absorbdlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
-  gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, gittan.merge, gittan.mergeview,
+  gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, gittan.coauthorsdlg, gittan.merge, gittan.mergeview,
   gittan.notedlg, gittan.issuelinks,
   ATSynEdit_Gaps, md5;
 
@@ -212,6 +212,16 @@ type
     procedure AskOpenRepository; virtual; abstract;
     procedure ShowSettings; virtual; abstract;
     procedure ShowAbout; virtual; abstract;
+    {** The settings dialog at its Hosting page. }
+    procedure ShowHostingSettings; virtual; abstract;
+    {** A terminal in the user's home folder running ACommand (the forge
+      tool's login), through the frame's terminal (OpenTerminalIn). }
+    procedure RunInTerminal(const ACommand: string); virtual; abstract;
+    {** Whether a frame has a remote for the repository ARepo
+      ("owner/name"), so ComparePullRequest compares in it rather than
+      opening a clone; by the frames' last snapshots (HoldsRepo), so it
+      can be asked often. }
+    function HasFrameFor(const ARepo: string): boolean; virtual; abstract;
     {** A pull request picked in the forge view: compares with it in the
       frame that has a remote for its repository, showing that frame,
       else opens AClone (its local clone, '' for none) and compares
@@ -377,6 +387,9 @@ type
     FRecentMenu, FCompareMenu, FTerminalItem, FUninstallCliItem: TMenuItem;
     FSnapshots: TGittanSnapshots;
     FWrapItem, FOnlyChangesItem, FSideItem, FIgnoreSpaceItem, FMdPreviewItem: TMenuItem;
+    { View > Image: how a changed image is shown, one item per mode. }
+    FImageMenu: TMenuItem;
+    FImageModeItems: array[TGittanImageMode] of TMenuItem;
     {** View > Folding, enabled where FoldingShown (see ViewMenuClick). }
     FFoldMenu: TMenuItem;
     {** The file lines the folded ranges started on before a rebuild of
@@ -553,8 +566,11 @@ type
       FSkipHooks). }
     FCommitOptions: TLabel;
     FCommitOptionsMenu: TPopupMenu;
-    FSignOffItem, FSkipHooksItem: TMenuItem;
-    FSignOffMenuItem, FSkipHooksMenuItem: TMenuItem;
+    FSignOffItem, FSkipHooksItem, FCoAuthorsItem: TMenuItem;
+    FSignOffMenuItem, FSkipHooksMenuItem, FCoAuthorsMenuItem: TMenuItem;
+    { The people credited in the next commit with a Co-authored-by line
+      each (Co-authors...), "Name <e-mail>"; dropped once it is made. }
+    FCoAuthors: TStringArray;
     { What commit.template holds, put in an empty message field. }
     FCommitTemplate: string;
     FSignOff, FSkipHooks: boolean;
@@ -562,8 +578,8 @@ type
     FHasCommitOption: boolean;
     FCommitButton: TButton;
     { The length of the message's first line, by the Commit button, once
-      it is past SubjectSoftLimit; in the warning color past
-      SubjectHardLimit. }
+      it is past the soft limit; in the warning color past the hard one
+      (FRepoConfig's SubjectSoft and SubjectHard). }
     FSubjectCount: TLabel;
     { How many changed files are chosen and how many could be (not the
       conflicts), as UpdateCommitState last counted them. }
@@ -664,6 +680,12 @@ type
       so a change on disk behind an edit is noticed; the exclude file of
       the open repository, found once when it is opened; and File > Save. }
     FEditPath, FExcludePath: string;
+    { The personal commands file (.git/gittan/commands.toml in the git
+      directory the worktrees share), found with FExcludePath. }
+    FPersonalPath: string;
+    { What .gittan/repo.toml says (gittan.repoconfig): read at open and
+      on every snapshot, LoadRepoConfig. }
+    FRepoConfig: TGittanRepoConfig;
     FEditStamp: LongInt;
     FSaveItem: TMenuItem;
     { Discarding a block of changes (umain.discard.inc): the block the
@@ -1060,6 +1082,9 @@ type
     FSideRatio: double;
     FSyncingScroll: boolean;
     FBranch: string;
+    { HEAD is on no branch: FBranch is a commit's id, which no protected
+      branch's pattern of repo.toml is for. }
+    FHeadDetached: boolean;
     FFileCount: integer;
     FStats: TGittanFileStats;
     FLoadError: string;
@@ -1161,6 +1186,18 @@ type
     { The search for the commits making the changes of the graph's
       filter (change:), given up when the filter or the graph goes. }
     FChangeJob: TGittanChangeJob;
+    { The commits' signatures, as read for the graph's rows and the
+      card: kept per commit while the repository is open (FSignCache),
+      read on a thread for the graph's commits not known yet
+      (FSignJob, given up when the graph closes or is reloaded). }
+    FSignCache: TGittanSignatureCache;
+    FSignJob: TGittanSignJob;
+    { How many of FSignJob's results the cache and the graph have. }
+    FSignApplied: integer;
+    FBlameSignature: TGittanSignature;
+    { Taking the forge's word for a commit's signing keys (gittan.trustkeys),
+      one at a time; never broken off, since it writes keys. }
+    FTrustJob: TGittanTrustJob;
     FHistoryPath, FHistoryRef, FHistoryName: string;
     FHistoryFrom, FHistoryTo, FHistoryMax: integer;
     FHistoryMore: boolean;
@@ -1194,6 +1231,9 @@ type
       the view asked already. }
     FMergeView: TGittanMergeView;
     FMergeMode: boolean;
+    { What each pill of the merge editor's header does (the ma constants
+      in umain.merge.inc), in the pills' order. }
+    FMergeActionIds: array of integer;
     FMergePath: string;
     FMergeKeep: TStringArray;
     FMergeAsked: boolean;
@@ -1409,6 +1449,12 @@ type
     procedure CommandPageStop(Sender: TObject);
     procedure CommandPageTrust(Sender: TObject);
     procedure CommandPageEditFile(Sender: TObject);
+    procedure CommandPageEditPersonal(Sender: TObject);
+    procedure LoadRepoConfig;
+    procedure NoteRepoConfigError(const AOld: string);
+    function CommitConfigNote: string;
+    function EffectiveIssueTracker: TGittanIssueTracker;
+    procedure EditCommandsFile(const AFileName, AShown, ATemplate: string);
     procedure CommandPageCopyOutput(Sender: TObject);
     function CommandKey(AKey: word; AShift: TShiftState): boolean;
     procedure OpenTerminal(const ACommand: string);
@@ -1517,6 +1563,9 @@ type
     { umain.blame.inc }
     procedure MenuBlameClick(Sender: TObject);
     procedure StartBlame;
+    function ShownIsNewFile: boolean;
+    function NewFileUncommitted: boolean;
+    procedure NoteNewFile;
     procedure AbandonBlameJob;
     procedure FreeBlameJobsAsync(Data: PtrInt);
     procedure CacheBlame(const ARef, APath: string; ABlame: TGittanBlame);
@@ -1683,6 +1732,7 @@ type
     procedure TimelapseStep(ADelta: integer);
     function TimelapseDotColor(AIndex: integer): TColor;
     function TimelapseKey(Key: word; Shift: TShiftState): boolean;
+    function HistoryEscape(Key: word; Shift: TShiftState): boolean;
     { umain.actions.inc }
     procedure ApplySettings;
     procedure RebuildRecentMenu;
@@ -1799,6 +1849,8 @@ type
     procedure MenuSyntaxThemeClick(Sender: TObject);
     procedure SetSyntaxTheme(ATheme: integer);
     procedure MenuSideBySideClick(Sender: TObject);
+    procedure MenuImageModeClick(Sender: TObject);
+    procedure ImageModeChange(Sender: TObject);
     procedure MenuMarkdownPreviewClick(Sender: TObject);
     function MarkdownPreviewPath: string;
     procedure UpdateMarkdownPreview;
@@ -1847,6 +1899,7 @@ type
     procedure MenuGoToRepoSymbolClick(Sender: TObject);
     procedure SymbolBarPick(Sender: TObject; AIndex: integer);
     procedure SymbolBarClose(Sender: TObject);
+    procedure SymbolBarVisibleChange(Sender: TObject);
     procedure EditMouseMove(Sender: TObject; Shift: TShiftState; X, Y: integer);
     procedure EditMouseLeave(Sender: TObject);
     procedure HoverLookup(Ed: TATSynEdit; const Word: string);
@@ -1901,6 +1954,15 @@ type
     procedure GraphChangeCommits(Sender: TObject; const AChanges: TStringArray);
     procedure ChangeJobDone(Sender: TObject);
     procedure AbandonChangeJob;
+    procedure VerifyGraphSignatures;
+    procedure SignJobProgress(Sender: TObject);
+    procedure SignJobDone(Sender: TObject);
+    procedure AbandonSignJob;
+    function CommitSignatureOf(const AHash: string): TGittanSignature;
+    function TrustHost(out AOwner, ARepo: string): string;
+    procedure TrustForgeKeys(const AHash: string);
+    procedure TrustJobDone(Sender: TObject);
+    procedure SummaryTrustClick(Sender: TObject);
     procedure MenuCommitGraphClick(Sender: TObject);
     procedure GraphPick(Sender: TObject; const AHash: string);
     function MenuListAnchor: TRect;
@@ -1981,6 +2043,7 @@ type
     procedure CommitAmendClick(Sender: TObject);
     procedure CommitOptionsClick(Sender: TObject);
     procedure SignOffItemClick(Sender: TObject);
+    procedure CoAuthorsItemClick(Sender: TObject);
     procedure SkipHooksItemClick(Sender: TObject);
     procedure UpdateCommitOptions;
     function MessageBlank: boolean;
@@ -2055,6 +2118,8 @@ type
     procedure DeleteBranchAsk(const AName: string);
     procedure DeleteGoneBranches;
     procedure MergeIntoCurrent(const ARef: string);
+    function AskMergeWay(const ARef, AName: string; out AWay: TGittanMergeWay): boolean;
+    function RunMerge(const ARef, AName: string; AWay: TGittanMergeWay): boolean;
     procedure RebaseOntoAsk(const ARef: string);
     {** Rebase (ARebase) or Merge in the summary's row of a branch behind
       the default branch: a fetch, then the rebase's question or the
@@ -2122,6 +2187,7 @@ type
     procedure NavRestoreRow(ARow, ACol, ATop: integer);
     function NavRestore(const APlace: TGittanPlace): boolean;
     procedure NavStep(AForward: boolean);
+    procedure NavReturn;
     procedure MenuBackClick(Sender: TObject);
     procedure MenuForwardClick(Sender: TObject);
     procedure PalettePopupPick(Sender: TObject; AIndex: integer);
@@ -2385,6 +2451,9 @@ type
       window opens a repository in such a frame rather than in a new
       one. }
     function IsBlank: boolean;
+    {** Takes the error of a repository that did not open off the
+      welcome view, as New Tab reuses the frame. }
+    procedure ClearOpenError;
     {** The root of the open repository, '' for none. }
     function RepoRoot: string;
     {** The open repository and its changed files, for the extensions
@@ -2451,6 +2520,10 @@ type
       the pull requests, the login and the review comments of the
       account of before go, and the pull requests are asked for again. }
     procedure AccountChanged;
+    {** Keys were trusted, in this frame or another (TrustJobDone): what
+      was found of the signatures goes, and the rows and the card are
+      checked again. }
+    procedure SignaturesTrusted;
     {** The settings changed (TRepoWindow.SettingsChanged): AFont, ATheme
       and ATabSize in the editors, the agent found again, and with
       ATools the forge and the repository read again. }
@@ -2502,14 +2575,24 @@ type
     {** Whether the open repository has a remote for the repository
       ARepo ("owner/name" on the forge); False without one open. }
     function HasRemoteFor(const ARepo: string): boolean;
+    {** The same by the remotes of the last snapshot, with no git run:
+      for what is asked often, as the forge view's cards ask where a
+      click on them goes. }
+    function HoldsRepo(const ARepo: string): boolean;
     {** Fetches APull and compares with it, as Compare With > Pull
       Requests does; also for a pull request of the forge view. }
     procedure ComparePull(const APull: TGittanPullRequest);
     {** File > Open Repository..., Settings... and About Gittan, which the
-      forge view's menu runs here too, since they need no repository. }
+      forge view's menu runs here too, since they need no repository;
+      and the settings at their Hosting page, for the forge view's note
+      that the hosting features are not set up. }
     procedure MenuOpenRepoClick(Sender: TObject);
     procedure MenuSettingsClick(Sender: TObject);
     procedure MenuAboutClick(Sender: TObject);
+    procedure ShowHostingSettings;
+    {** A terminal in ARoot running ACommand when it is not empty (the
+      window's RunInTerminal, for the forge view). }
+    procedure OpenTerminalIn(const ARoot, ACommand: string);
   end;
 
 {** Asks what AAction on APull needs before it runs: the words of a
@@ -2530,15 +2613,27 @@ const
 
 resourcestring
   rsPullActionFailed = 'Could not do it on %s';
+  { What is being done to a pull request, and what was (PullActionDoing
+    and PullActionDone of gittan.forge, the number, the forge's name):
+    "Merging #12 on GitHub…", "Merged #12". }
+  rsPullActing = '%s #%d on %s…';
+  rsPullActionDone = '%s #%d';
 
 {** Fills AMenu with what can be done to the pull request APull of a
   card, the Pull Requests page's or the forge view's: compare with it,
   open it on AForgeName and copy its link when it has one, and while
   AActs (the forge acts and no action runs) the reviews, the merges or,
-  for a draft, Mark Ready, as PullActionFits allows; each item's
-  OnClick is AOnClick, its Tag one of the pc tags. }
+  for a draft, Mark Ready, as PullActionFits allows for AViewer, the
+  user's login on the forge ('' when not known), whose own pull request
+  has Comment alone of the reviews; each item's OnClick is AOnClick,
+  its Tag one of the pc tags. }
 procedure FillPullCardMenu(AMenu: TPopupMenu; const APull: TGittanPullRequest;
-  const AForgeName: string; AActs: boolean; AOnClick: TNotifyEvent);
+  const AForgeName, AViewer: string; AActs: boolean; AOnClick: TNotifyEvent);
+{** Fills AMenu with the ways to merge APull alone, for the menu of a
+  card's Merge button: the same items, tags and conditions as in
+  FillPullCardMenu; empty when it cannot be merged now. }
+procedure FillPullMergeMenu(AMenu: TPopupMenu; const APull: TGittanPullRequest;
+  AActs: boolean; AOnClick: TNotifyEvent);
 {** The action a card menu item's tag ATag stands for; false for the
   other items. }
 function PullCardAction(ATag: integer; out AAction: TGittanPullAction): boolean;
@@ -2672,6 +2767,7 @@ resourcestring
   rsContextLines = 'Conte&xt Lines';
   rsNLines = '%d lines';
   rsSideBySide = 'Side &by Side';
+  rsImageMenu = '&Image';
   rsWordWrap = '&Word Wrap';
   rsMarkdownPreview = '&Preview';
   rsPreviewToggle = 'Preview';
@@ -2686,6 +2782,9 @@ resourcestring
   rsBlame = '&Blame';
   rsNotCommitted = 'Not committed';
   rsNotCommittedYet = 'Not committed yet';
+  rsNewFileModes = 'The file is new: it has no committed lines to blame and no old side to show beside it.';
+  rsNewFileBlame = 'The file is new: it has no committed lines to blame.';
+  rsNewFileSide = 'The file is new: it has no old side to show beside it.';
   rsCommit = 'commit %s';
   rsHistory = 'Code &History';
   rsGoFileHistory = 'Fi&le History';
@@ -2774,6 +2873,8 @@ resourcestring
   rsChangedSymbolHint = 'Changed symbol';
   rsRepoSymbolHint = 'Symbol in repository';
   rsNoChangedSymbols = 'No changed symbols in this file.';
+  rsSymbolsNeedFile = 'Show a file first: the symbols are those of the file shown.';
+  rsChangedSymbolsNeedFile = 'Show a file'#39's changes first: the symbols are those its diff changed.';
   rsCallers = 'Ca&llers of Changed Symbols...';
   rsCallerHint = 'Changed symbol or a line that uses it';
   rsCallersAbove = 'same name, listed above';
@@ -2802,12 +2903,16 @@ resourcestring
   rsCommitAmend = 'Amend';
   rsSignOffItem = 'Sign Off';
   rsSkipHooksItem = 'Skip Hooks';
+  rsCoAuthorsItem = 'Co-authors...';
   rsSignOffShort = 'Sign-off';
   rsSkipHooksShort = 'No hooks';
+  rsCoAuthorShort = '+%s';
+  rsCoAuthorsShort = '+%d';
   rsCommitOptionsCount = '%d options';
   rsCommitOptionsHint = 'Commit options: Sign Off adds a Signed-off-by line with your name ' +
     '(kept for this repository), Skip Hooks commits without the pre-commit and commit-msg ' +
-    'hooks (this commit only)';
+    'hooks (this commit only), Co-authors credits the people who worked on it with you ' +
+    '(this commit only)';
   rsWriteMessage = '✦ AI';
   rsAIReviewMenu = 'Review Changes with AI';
   rsAIReviewStopMenu = 'Stop AI Review';
@@ -2898,6 +3003,14 @@ resourcestring
   rsPushAction = 'Push';
   rsSubjectCount = '%d/%d';
   rsSubjectCountHint = 'Characters in the first line. git log and GitHub cut it after %d.';
+  rsRepoConfigNotRead = '.gittan/repo.toml could not be read, so what it says is left out';
+  rsSubjectCountHintRepo = 'Characters in the first line. .gittan/repo.toml keeps it to %d.';
+  rsProtectedBranchNote = '%s is protected in .gittan/repo.toml: its changes come through ' +
+    'pull requests. Commit on a branch of its own.';
+  rsSubjectNoType = '.gittan/repo.toml asks for a subject such as "%s: what it does", ' +
+    'with one of these types: %s.';
+  rsSubjectUnknownType = '"%s" is not one of the types .gittan/repo.toml lists: %s.';
+  rsSubjectUnknownScope = '"%s" is not one of the scopes .gittan/repo.toml lists: %s.';
   rsCommitFailed = 'The commit failed';
   rsCommitAgain = 'Commit Again';
   rsFetchMenu = '&Fetch';
@@ -3021,6 +3134,8 @@ resourcestring
     'expression the first finds each reference ("Fixes #12 and #13") and the second the ' +
     'ids within it. Kept in the repository''s config as bugtraq.url and bugtraq.logregex, ' +
     'which other git clients read too; leave everything empty to take it out.';
+  rsIssueTrackerRepoNote = ' While these are empty, .gittan/repo.toml''s tracker is used: ' +
+    '%s. Its [issues] table is the repository''s own, changed in that file.';
   rsIssueTrackerUrl = 'Address of an issue';
   rsIssueTrackerRegex = 'Regular expression';
   rsIssueTrackerIdRegex = 'Expression for the ids within a reference (optional)';
@@ -3170,6 +3285,23 @@ resourcestring
   rsBmRebaseHeader = 'Rebase %s onto';
   rsBmCompareHeader = 'Show what a branch changed since it left %s';
   rsBmCompareBackHeader = 'Show what %s changed since it left';
+  rsBmMergeTitle = 'Merge';
+  rsBmMergeAskForward = 'Merge %s into %s? It brings %d commits, and %s has none of its own ' +
+    'since they parted, so it can move forward to %s with no merge commit.';
+  rsBmMergeAskForwardOne = 'Merge %s into %s? It brings one commit, and %s has none of its own ' +
+    'since they parted, so it can move forward to %s with no merge commit.';
+  rsBmMergeAsk = 'Merge %s into %s? It brings %d commits since they parted, which a merge ' +
+    'commit joins to those of %s.';
+  rsBmMergeAskOne = 'Merge %s into %s? It brings one commit since they parted, which a merge ' +
+    'commit joins to those of %s.';
+  rsBmMergeSquashNote = 'Squash stages their changes for one commit of yours, written in the ' +
+    'Commit section.';
+  rsBmMergeNothing = '%s has no commits %s lacks: nothing to merge';
+  rsBmMergeMoved = 'The checked-out branch changed while you were asked: nothing was merged';
+  rsBmFastForward = 'Fast-forward';
+  rsBmMergeCommit = 'Merge Commit';
+  rsBmSquash = 'Squash';
+  rsBmSquashed = 'Squashed %s into %s: its changes are staged, ready to commit';
   rsBmRebaseTitle = 'Rebase';
   rsBmRebaseAsk = 'Rebase %s onto %s? Its %d commits since they parted are replayed on top of %s.';
   rsBmRebaseAskOne = 'Rebase %s onto %s? Its one commit since they parted is replayed on top of %s.';
@@ -3218,6 +3350,7 @@ resourcestring
   rsFilterView = 'Filter';
   rsViewHeader = 'View';
   rsHistoryHeader = 'History';
+  rsImageHeader = 'Image';
   rsFilterSubmodules = 'Filter submodules';
   rsSubmodulesHeader = 'Submodules';
   rsReflogItem = 'Re&flog...';
@@ -3395,14 +3528,17 @@ resourcestring
   rsMergeEditorPick = 'Open in Merge Editor';
   rsMergeMine = 'Mine';
   rsMergeTheirs = 'Theirs';
+  rsMergePaneBase = 'Base';
   rsMergeResult = 'Result';
-  rsMergeHeader = 'Conflict %d of %d · %s';
+  rsMergeHeader = 'Conflict %d of %d';
   rsMergeNoLines = 'no lines';
   rsMergeEdited = 'edited by hand: the boxes are off until Reset';
   rsMergeResolvedCount = '%d of %d conflicts resolved';
   rsMergeAllMine = 'All Mine';
   rsMergeAllTheirs = 'All Theirs';
   rsMergeReset = 'Reset';
+  rsMergeShowBase = 'Show Base';
+  rsMergeHideBase = 'Hide Base';
   rsMergeSave = 'Save';
   rsMergeClose = 'Close';
   rsMergeNothing = 'Nothing to save: the result is the file as it is';
@@ -3462,6 +3598,13 @@ resourcestring
   rsOperationOf = '%s %s';
   rsIdentityHint = 'Commits as %s <%s>%s. Click to change.';
   rsIdentityHintLocal = ' (this repository only)';
+  rsIdentityHintSigns = ', signing with %s';
+  rsTrustKeys = 'Trust %s''s keys';
+  rsCaTrustKeys = 'Trust Signing Keys from %s';
+  rsTrustAsking = 'Asking %s whose keys signed this commit...';
+  rsTrustDone = 'Took %s''s word for the keys of %s: %d GPG, %d SSH. The commits are checked again.';
+  rsTrustNothing = '%s lists no signing keys for %s.';
+  rsTrustBusy = 'Keys are being fetched already.';
   rsIdentityNone = 'Git has no name or e-mail to commit under. Click to set them.';
   rsSubmodules = 'Submodules';
   rsSubmodulesNewer = '%d · %d behind';
@@ -3762,8 +3905,6 @@ resourcestring
   rsPullSquashAsk = 'Squash the commits of #%d "%s" into one on %s?';
   rsPullRebaseMergeAsk = 'Rebase the commits of #%d "%s" onto %s?';
   rsPullMergeAction = 'Merge';
-  rsPullActing = '%s #%d on %s…';
-  rsPullActionDone = '%s #%d';
   rsPositionOld = 'Ln %d (old), Col %d';
   rsReviewComments = 'Review &Comments';
   rsReviewResolved = 'Resolved';
@@ -3809,11 +3950,6 @@ const
   { How long a note stays in the banner, and one that offers an action. }
   BannerInfoSeconds = 8;
   BannerActionSeconds = 20;
-  { The commit message's first line: its length shows past the soft
-    limit, the usual 50, and warns past the hard one, where git log
-    --oneline and GitHub cut it. }
-  SubjectSoftLimit = 50;
-  SubjectHardLimit = 72;
   { How long the pull request data is kept before gh is asked again,
     while checks run and otherwise; ms. }
   PullPollPending = 30000;
@@ -4113,6 +4249,7 @@ end;
 procedure TRepoFrame.Init(AWindow: TRepoWindow);
 begin
   FWindow := AWindow;
+  FRepoConfig := EmptyRepoConfig;
   FTitleBarHeight := FWindow.TitleBarHeight;
   FindAI;
   FTabSize := App.Settings.TabSize;
@@ -4133,6 +4270,7 @@ begin
   FBlameCache := TStringList.Create;
   FBlameCache.CaseSensitive := True;
   FBlameZombies := TGittanJobReaper.Create;
+  FSignCache := TGittanSignatureCache.Create;
   FNavHistory := TGittanNavHistory.Create;
   FUndoHistory := TGittanUndoHistory.Create;
   Application.AddOnIdleHandler(@NavIdle);
@@ -4281,6 +4419,7 @@ begin
   FSymbolBar.Visible := False;
   FSymbolBar.OnPick := @SymbolBarPick;
   FSymbolBar.OnClose := @SymbolBarClose;
+  FSymbolBar.OnVisibleChange := @SymbolBarVisibleChange;
   { The time-lapse bar sits under the editor while a time-lapse plays. }
   FTimelapseBar := TGittanTimelapseBar.Create(Self);
   FTimelapseBar.Parent := EditorPanel;
@@ -4298,6 +4437,7 @@ begin
   FImageDiff := TGittanImageDiff.Create(Self);
   FImageDiff.Parent := EditorPanel;
   FImageDiff.Align := alClient;
+  FImageDiff.OnModeChange := @ImageModeChange;
   FImageDiff.Visible := False;
   FBinaryView := TGittanBinaryView.Create(Self);
   FBinaryView.Parent := EditorPanel;
@@ -4307,9 +4447,10 @@ begin
   FMergeView.Parent := EditorPanel;
   FMergeView.Align := alClient;
   FMergeView.Visible := False;
-  FMergeView.SetKinds(bmConflictOurs, bmConflictTheirs, bmConflictMarker, bmFiller, bmGap);
-  FMergeView.SetTexts(rsMergeMine, rsMergeTheirs, rsMergeResult, rsMergeHeader, rsMergeEdited,
-    rsMergeResolvedCount, rsMergeNoLines);
+  FMergeView.SetKinds(bmConflictOurs, bmConflictTheirs, bmConflictBase, bmConflictMarker,
+    bmFiller, bmGap);
+  FMergeView.SetTexts(rsMergeMine, rsMergeTheirs, rsMergePaneBase, rsMergeResult, rsMergeHeader,
+    rsMergeEdited, rsMergeResolvedCount, rsMergeNoLines);
   FMergeView.OnPicked := @MergeChanged;
   FMergeView.OnEdited := @MergeChanged;
   { The Markdown preview sits right of the editor, its splitter between
@@ -4352,6 +4493,7 @@ begin
   FSummary.OnReviewClick := @SummaryReviewClick;
   FSummary.OnSelectCommit := @SummarySelectCommit;
   FSummary.OnBackClick := @SummaryBackClick;
+  FSummary.OnTrustClick := @SummaryTrustClick;
   FSummary.OnCommitStep := @SummaryCommitStep;
   FSummary.OnRowAction := @SummaryRowAction;
   { The branch list pops up over the form, under the branch. }
@@ -4581,6 +4723,12 @@ end;
 function TRepoFrame.IsBlank: boolean;
 begin
   Result := (FRepo.Root = '') and (FOpenJob = nil) and (FView = gvSummary);
+end;
+
+procedure TRepoFrame.ClearOpenError;
+begin
+  FWelcome.SetError('');
+  FWelcome.FitHeight(FSummaryBox.ClientHeight);
 end;
 
 function TRepoFrame.RepoRoot: string;
@@ -5072,7 +5220,8 @@ begin
     List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
   FPaletteLeft.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border);
   FPaletteRight.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border);
-  FGraph.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent, P.Warning);
+  FGraph.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent, P.Warning, P.Added,
+    P.Deleted);
   FBanner.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Line, P.Accent, P.Deleted, P.Added);
   FDiscardPills.SetColors(P.Popup, P.Text, P.Border, P.Accent, P.Added, P.Deleted);
   FStatus.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Raised, P.Accent, P.Added,
@@ -5085,11 +5234,12 @@ begin
   FBandFill := P.Accent;
   FWelcome.SetAccent(P.Accent);
   FMergeView.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Accent);
+  FMergeView.SetHeaderColors(KindColor(ckConflict), P.Pill, P.PillText, P.Border);
   RestyleMergeView;
   if FDark then
   begin
     FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim, P.Line, P.Deleted,
-      P.Added, RGBToColor(58, 58, 60), RGBToColor(44, 44, 46));
+      P.Added, RGBToColor(58, 58, 60), RGBToColor(44, 44, 46), P.Accent);
     FBinaryView.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim,
       RGBToColor(44, 44, 46));
     FHeader.ConflictNav.SetColors(P.Shade, RGBToColor(58, 46, 68),
@@ -5103,7 +5253,7 @@ begin
   else
   begin
     FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim, P.Line, P.Deleted,
-      P.Added, RGBToColor(255, 255, 255), RGBToColor(230, 230, 230));
+      P.Added, RGBToColor(255, 255, 255), RGBToColor(230, 230, 230), P.Accent);
     FBinaryView.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim, P.Shade);
     FHeader.ConflictNav.SetColors(P.Shade, RGBToColor(248, 240, 255),
       RGBToColor(190, 160, 220), RGBToColor(110, 50, 160), RGBToColor(155, 63, 200));
@@ -5222,6 +5372,11 @@ end;
 function TRepoFrame.HasRemoteFor(const ARepo: string): boolean;
 begin
   Result := (FRepo.Root <> '') and (ARepo <> '') and FRepo.HasRemoteFor(ARepo);
+end;
+
+function TRepoFrame.HoldsRepo(const ARepo: string): boolean;
+begin
+  Result := (FRepo.Root <> '') and (ARepo <> '') and RemoteUrlsHold(FRemoteUrls, ARepo);
 end;
 
 { The window is named after the repository, or the file when none is
@@ -5547,13 +5702,31 @@ begin
   PlaceUnderTitleBar;
 end;
 
+procedure TRepoFrame.SymbolBarVisibleChange(Sender: TObject);
+begin
+  PlaceUnderTitleBar;
+end;
+
 { The banner is the first alTop control of the panel when shown (Top 0
   puts it before the header), and takes the strip's height as its own
-  spacing so the header under it does not leave a gap. }
+  spacing so the header under it does not leave a gap. The find bar and
+  the symbol bar follow the header in that order (a Top past the panel's
+  height puts a control last among the alTop ones); over the summary,
+  where the header is hidden, the symbol bar is the first row and takes
+  the strip's height itself. }
 procedure TRepoFrame.PlaceUnderTitleBar;
+var
+  Bar: boolean;
 begin
+  Bar := (FSymbolBar <> nil) and FSymbolBar.Visible;
   EditorPanel.DisableAlign;
   try
+    if FSymbolBar <> nil then
+    begin
+      FFindBar.Top := EditorPanel.Height + 1;
+      FSymbolBar.Top := EditorPanel.Height + 2;
+      FSymbolBar.BorderSpacing.Top := 0;
+    end;
     if FBanner.Visible then
     begin
       FBanner.BorderSpacing.Top := FTitleBarHeight;
@@ -5568,6 +5741,11 @@ begin
       { The page of a submodule has the header over the box. }
       if FHeader.Visible then
         FSummaryBox.BorderSpacing.Top := 0
+      else if Bar then
+      begin
+        FSymbolBar.BorderSpacing.Top := FTitleBarHeight;
+        FSummaryBox.BorderSpacing.Top := 0;
+      end
       else
         FSummaryBox.BorderSpacing.Top := FTitleBarHeight;
     end;
@@ -5647,6 +5825,7 @@ var
   FileMenu, EditMenu, RepoMenu, CommitMenu, ChangesMenu, BranchMenu, StashMenu, ViewMenu, GoMenu,
     ToolsMenu, WindowMenu, HelpMenu, Item, Sub: TMenuItem;
   i: integer;
+  m: TGittanImageMode;
 
   function AddItem(AParent: TMenuItem; const ACaption: string; AShortCut: TShortCut;
     AClick: TNotifyEvent): TMenuItem;
@@ -5771,6 +5950,7 @@ begin
     palette; the chevron beside Amend has them too. }
   FSignOffMenuItem := AddItem(CommitMenu, rsSignOffItem, 0, @SignOffItemClick);
   FSkipHooksMenuItem := AddItem(CommitMenu, rsSkipHooksItem, 0, @SkipHooksItemClick);
+  FCoAuthorsMenuItem := AddItem(CommitMenu, rsCoAuthorsItem, 0, @CoAuthorsItemClick);
   UpdateOptionItems;
   { The person in the Commit header, for the keyboard. }
   FIdentityItem := AddItem(CommitMenu, rsIdentityMenu, 0, @IdentityClick);
@@ -5900,6 +6080,15 @@ begin
   FSideItem := AddItem(ViewMenu, rsSideBySide, ShortCut(VK_S, [ssModifier, ssShift]),
     @MenuSideBySideClick);
   FSideItem.Checked := FSideBySide;
+  FImageMenu := AddItem(ViewMenu, rsImageMenu, 0, nil);
+  for m := Low(TGittanImageMode) to High(TGittanImageMode) do
+  begin
+    Item := AddItem(FImageMenu, ImageModeCaption(m), 0, @MenuImageModeClick);
+    Item.Tag := Ord(m);
+    Item.RadioItem := True;
+    Item.Checked := m = FImageDiff.ShownMode;
+    FImageModeItems[m] := Item;
+  end;
   FMdPreviewItem := AddItem(ViewMenu, rsMarkdownPreview, ShortCut(VK_V, [ssModifier, ssShift]),
     @MenuMarkdownPreviewClick);
   FMdPreviewItem.Checked := FMdPreviewOn;
@@ -7227,6 +7416,7 @@ begin
   UpdateDiscardItems;
   FPullRange := '';
   FMarkHash := '';
+  FSignCache.Clear;
   NavClear;
   FUndoHistory.Clear;
   UpdateUndoItems;
@@ -7240,6 +7430,8 @@ begin
   ClearReviews;
   FThreadFlips.Clear;
   FExcludePath := '';
+  FPersonalPath := '';
+  FRepoConfig := EmptyRepoConfig;
   AbandonSubmoduleJobs;
   FSubmodules := nil;
   FSubInfos := nil;
@@ -7323,6 +7515,10 @@ begin
   { The commands of an extension whose @repos names this root. }
   QueueRebuildExtMenu;
   ShowSidebar(True);
+  { Before the draft: repo.toml's template and sign-off fill the
+    section. }
+  FRepoConfig := ReadRepoConfig(Job.Root);
+  NoteRepoConfigError('');
   LoadCommitDraft;
   { The exclude file lives in the git directory, which git names (a
     work tree's is elsewhere), once per open: the section lists it and
@@ -7330,6 +7526,8 @@ begin
   FExcludePath := FRepo.GitDir;
   if FExcludePath <> '' then
     FExcludePath := IncludeTrailingPathDelimiter(FExcludePath) + SetDirSeparators(ExcludeFile);
+  { The personal commands are the repository's, not one worktree's. }
+  FPersonalPath := PersonalCommandsFileName(FRepo.CommonDir);
   UpdateCaption;
   FSummary.Selected := '';
   LoadSnapshots;
@@ -7453,6 +7651,7 @@ var
   Icons: array of integer;
   Texts, Actions: array of string;
   i: integer;
+  RepoOwner, RepoName: string;
   Branch: string;
 begin
   if not ASnap.Ok then
@@ -7474,6 +7673,7 @@ begin
   FReviewSegments.Clear;
   FStats := ASnap.Stats;
   FBranch := ASnap.Branch;
+  FHeadDetached := ASnap.Detached;
   FSnapHead := ASnap.Head;
   { The remotes decide the forge, before the pull request is looked up
     on it. }
@@ -7484,6 +7684,8 @@ begin
     { An extension's @repos may name a remote. }
     QueueRebuildExtMenu;
   end;
+  { repo.toml follows the files, as the commands do: an edit or a pull. }
+  LoadRepoConfig;
   FIssueTracker := ASnap.IssueTracker;
   UpdateIssueTracker;
   ApplyFlowSnapshot(ASnap);
@@ -7542,10 +7744,14 @@ begin
   else
     FSummary.SetBehind(0, '');
   FSummary.BaseClickable := (BaseActionRef <> '') or (StashOfBase >= 0) or BlameShown;
-  if BlameShown then
-    FSummary.SetCommit(FBlameCommit, FBlameBody)
+  if TrustHost(RepoOwner, RepoName) <> '' then
+    FSummary.TrustCaption := Format(rsTrustKeys, [TrustHost(RepoOwner, RepoName)])
   else
-    FSummary.SetCommit(Default(TGittanCommitLine), '');
+    FSummary.TrustCaption := '';
+  if BlameShown then
+    FSummary.SetCommit(FBlameCommit, FBlameBody, FBlameSignature)
+  else
+    FSummary.SetCommit(Default(TGittanCommitLine), '', Default(TGittanSignature));
   UpdateCommitSteps;
   FSummary.SetRepository(ExtractFileName(FRepo.Root), Branch, BaseLabel, FStats, Icons,
     Texts, Actions);
@@ -8722,7 +8928,7 @@ end;
 { A command's key runs it (CommandKey). }
 procedure TRepoFrame.FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
 begin
-  if TimelapseKey(Key, Shift) or CommandKey(Key, Shift) then
+  if TimelapseKey(Key, Shift) or HistoryEscape(Key, Shift) or CommandKey(Key, Shift) then
     Key := 0;
 end;
 

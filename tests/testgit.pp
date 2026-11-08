@@ -104,6 +104,8 @@ type
     procedure TestSkip;
     procedure TestCommitActions;
     procedure TestCommitActionConflicts;
+    procedure TestMergeWays;
+    procedure TestCoAuthors;
     procedure TestBranchManagement;
     procedure TestSwitchBlocked;
     procedure TestRevertFiles;
@@ -656,6 +658,19 @@ begin
   Git(['remote', 'add', 'origin', 'https://github.com/o/r.git']);
   B := FRepo.Fingerprint;
   AssertTrue('a remote added seen', A <> B);
+  { Between two commits the files on disk count not, the repository's
+    own settings do, and the personal commands file in .git, which no
+    status lists. }
+  FRepo.Base := 'HEAD..HEAD';
+  A := FRepo.Fingerprint;
+  WriteFile('.gittan/repo.toml', '[commit]'#10'subject-max = 60'#10);
+  B := FRepo.Fingerprint;
+  AssertTrue('repo.toml seen in a range', A <> B);
+  WriteFile('.git/gittan/commands.toml', '[commands.x]'#10'run = "echo"'#10);
+  A := FRepo.Fingerprint;
+  AssertTrue('the personal file seen', A <> B);
+  WriteFile('a.txt', 'changed in the work tree'#10);
+  AssertEquals('a work tree file not, in a range', A, FRepo.Fingerprint);
 end;
 
 { A snapshot holds the untracked files, and the whole tree comparison
@@ -2084,6 +2099,15 @@ begin
     AssertTrue(FRepo.SetSignOff(False));
     AssertFalse(FRepo.SignOff);
     AssertTrue('off when off', FRepo.SetSignOff(False));
+    { With repo.toml's sign-off = true as the default: on until turned
+      off, which the key then says, and back on drops the key. }
+    AssertTrue('the default while no key', FRepo.SignOff(True));
+    AssertTrue(FRepo.SetSignOff(False, True));
+    AssertFalse(FRepo.SignOff(True));
+    AssertEquals('false', Trim(Git(['config', '--local', 'gittan.signOff'])));
+    AssertTrue(FRepo.SetSignOff(True, True));
+    AssertTrue(FRepo.SignOff(True));
+    AssertFalse('the key gone', FRepo.SignOff(False));
   finally
     Paths.Free;
   end;
@@ -2569,6 +2593,8 @@ begin
 end;
 
 procedure TGitRepoTest.TestCommitTemplate;
+var
+  Outside: string;
 begin
   MakeHistory;
   AssertTrue(FRepo.Open(FDir));
@@ -2586,6 +2612,36 @@ begin
   AssertEquals('auto is #', 'Subject' + LineEnding + '; dropped', FRepo.CommitTemplate);
   Git(['config', 'commit.template', 'missing.txt']);
   AssertEquals('', FRepo.CommitTemplate);
+  AssertEquals('git config''s even when its file is missing', '',
+    FRepo.CommitTemplate('tmpl.txt'));
+  Git(['config', '--unset', 'commit.template']);
+  AssertEquals('repo.toml''s when git config names none', 'Subject' + LineEnding + '; dropped',
+    FRepo.CommitTemplate('tmpl.txt'));
+  AssertEquals('', FRepo.CommitTemplate('  '));
+  { A clone's file names nothing outside the checkout. }
+  Outside := ExcludeTrailingPathDelimiter(FDir) + '-outside.txt';
+  with TStringList.Create do
+    try
+      Text := 'secret';
+      SaveToFile(Outside);
+    finally
+      Free;
+    end;
+  try
+    AssertEquals('not beside the root', '',
+      FRepo.CommitTemplate('../' + ExtractFileName(Outside)));
+    AssertEquals('not an absolute path', '', FRepo.CommitTemplate(Outside));
+    AssertEquals('nothing of git''s own', '', FRepo.CommitTemplate('.git/config'));
+    AssertEquals('nothing of git''s own, by another case', '',
+      FRepo.CommitTemplate('.GIT/config'));
+    {$IFDEF UNIX}
+    AssertEquals(0, fpSymlink(PChar(Outside), PChar(IncludeTrailingPathDelimiter(FDir) +
+      'link.txt')));
+    AssertEquals('not through a link', '', FRepo.CommitTemplate('link.txt'));
+    {$ENDIF}
+  finally
+    DeleteFile(Outside);
+  end;
 end;
 
 procedure TGitRepoTest.TestRemoteEnvironment;
@@ -2620,7 +2676,48 @@ function SetEnvironmentVariableW(AName, AValue: PWideChar): LongBool; stdcall;
 {$else}
 function setenv(AName, AValue: PChar; AOverwrite: longint): longint; cdecl;
   external 'c';
+function unsetenv(AName: PChar): longint; cdecl;
+  external 'c';
 {$endif}
+
+{ Whether the test's environment has AName at all, empty or not. }
+function HasTestVariable(const AName: string): boolean;
+var
+  Env: string;
+begin
+  Result := False;
+  for Env in EnvironmentStrings do
+    if Pos(UpperCase(AName) + '=', UpperCase(Env)) = 1 then
+      Exit(True);
+end;
+
+{ Takes AName out of the test's environment, as SetTestVariable puts it
+  in: libc's and envp, or Windows' one. }
+procedure UnsetTestVariable(const AName: string);
+{$ifndef windows}
+var
+  i, j: integer;
+{$endif}
+begin
+  {$ifdef windows}
+  SetEnvironmentVariableW(PWideChar(UnicodeString(AName)), nil);
+  {$else}
+  unsetenv(PChar(AName));
+  i := 0;
+  while envp[i] <> nil do
+    if StrLComp(envp[i], PChar(AName + '='), Length(AName) + 1) = 0 then
+    begin
+      j := i;
+      while envp[j] <> nil do
+      begin
+        envp[j] := envp[j + 1];
+        Inc(j);
+      end;
+    end
+    else
+      Inc(i);
+  {$endif}
+end;
 procedure SetTestVariable(const AName, AValue: string);
 {$ifndef windows}
 var
@@ -2681,8 +2778,12 @@ const
   Name = {$ifdef windows}'TEMP'{$else}'TMPDIR'{$endif};
 var
   Old, Dir, Temp: string;
+  Had: boolean;
 begin
   Old := EnvironmentVariable(Name);
+  { Unset is not empty: git takes an empty TMPDIR for the root, where
+    no file can be made, and every later signing test failed. }
+  Had := HasTestVariable(Name);
   Dir := FDir + PathDelim + 'Björn';
   AssertTrue(Dir, CreateDir(Dir));
   SetTestVariable(Name, Dir);
@@ -2694,7 +2795,10 @@ begin
     AssertTrue(Temp, FileExists(Temp));
     DeleteFile(Temp);
   finally
-    SetTestVariable(Name, Old);
+    if Had then
+      SetTestVariable(Name, Old)
+    else
+      UnsetTestVariable(Name);
   end;
 end;
 
@@ -3139,9 +3243,39 @@ begin
   AssertTrue('conflicts', Conflicts);
   AssertEquals('rebasing', FRepo.Operation);
   AssertEquals('topic', FRepo.RebaseBranch);
+  { The markers hold the base, for the merge editor. }
+  AssertTrue('base in the markers',
+    Pos('|||||||', FileText(IncludeTrailingPathDelimiter(FDir) + 'a.txt')) > 0);
   AssertTrue(FRepo.Error, FRepo.AbortOperation);
   AssertEquals('', FRepo.Operation);
   AssertEquals('topic', FRepo.Branch);
+  { A style the repository sets itself is kept. }
+  AssertEquals(2, Length(ConflictStyleArgs(FDir)));
+  AssertEquals('-c', ConflictStyleArgs(FDir)[0]);
+  Git(['config', 'merge.conflictStyle', 'merge']);
+  AssertEquals(0, Length(ConflictStyleArgs(FDir)));
+  Git(['config', '--unset', 'merge.conflictStyle']);
+  AssertEquals(2, Length(ConflictStyleArgs(FDir)));
+  { The answer is kept by the config file's time and size (RepoConfigPath):
+    the main checkout's .git/config, a worktree's through its .git file. }
+  AssertEquals(IncludeTrailingPathDelimiter(FDir) + '.git' + PathDelim + 'config',
+    RepoConfigPath(FDir));
+  { git writes the worktree's gitdir with its links resolved (/private/var
+    on macOS), so the main checkout's file is known by its tail. }
+  Git(['worktree', 'add', '-q', 'wtstyle']);
+  AssertEquals('config', ExtractFileName(RepoConfigPath(
+    IncludeTrailingPathDelimiter(FDir) + 'wtstyle')));
+  AssertEquals('.git', ExtractFileName(ExtractFileDir(RepoConfigPath(
+    IncludeTrailingPathDelimiter(FDir) + 'wtstyle'))));
+  AssertTrue('the main checkout''s config', FileExists(RepoConfigPath(
+    IncludeTrailingPathDelimiter(FDir) + 'wtstyle')) and
+    (Pos(PathDelim + 'wtstyle', RepoConfigPath(IncludeTrailingPathDelimiter(FDir) + 'wtstyle')) = 0));
+  AssertEquals(2, Length(ConflictStyleArgs(IncludeTrailingPathDelimiter(FDir) + 'wtstyle')));
+  Git(['config', 'merge.conflictStyle', 'merge']);
+  AssertEquals(0, Length(ConflictStyleArgs(IncludeTrailingPathDelimiter(FDir) + 'wtstyle')));
+  Git(['config', '--unset', 'merge.conflictStyle']);
+  AssertEquals('', RepoConfigPath(IncludeTrailingPathDelimiter(FDir) + 'nowhere'));
+  AssertEquals('', RepoConfigPath(''));
 end;
 
 { A rebase left behind: it stopped with conflicts, they were resolved,
@@ -3446,6 +3580,138 @@ begin
   AssertTrue(FRepo.AbortOperation);
   AssertFalse('no such commit', FRepo.CherryPick('nothing', Conflicts));
   AssertFalse(Conflicts);
+end;
+
+{ The ways to merge: a branch with no commits of its own can move
+  forward, or take a merge commit anyway; a squash stages the changes
+  with git's message and no commit; a diverged branch cannot fast-forward
+  and a squash of it stops on the conflicts as a merge does. }
+procedure TGitRepoTest.TestMergeWays;
+var
+  Main, First, Side: string;
+  Count: integer;
+  Forward, Conflicts: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Main := Trim(Git(['rev-parse', '--abbrev-ref', 'HEAD']));
+  First := Trim(Git(['rev-parse', 'HEAD']));
+  Git(['checkout', '-q', '-b', 'side']);
+  WriteFile('b.txt', 'b'#10);
+  Commit('side one');
+  WriteFile('c.txt', 'c'#10);
+  Commit('side two');
+  Side := Trim(Git(['rev-parse', 'HEAD']));
+  Git(['checkout', '-q', Main]);
+
+  AssertTrue(FRepo.Error, FRepo.CommitsToMerge('side', Count, Forward));
+  AssertEquals(2, Count);
+  AssertTrue('nothing of its own', Forward);
+  AssertTrue(FRepo.Error, FRepo.CommitsToMerge('HEAD', Count, Forward));
+  AssertEquals('already in', 0, Count);
+  AssertFalse(Forward);
+  AssertFalse(FRepo.CommitsToMerge('no-such-branch', Count, Forward));
+  AssertTrue('git''s own reason: ' + FRepo.Error, Trim(FRepo.Error) <> '');
+
+  AssertTrue(FRepo.Error, FRepo.MergeRef('side', Conflicts, mwMergeCommit));
+  AssertEquals('two parents', First + ' ' + Side, Trim(Git(['log', '-1', '--format=%P'])));
+  AssertTrue(FRepo.Reset(First, rmHard));
+
+  AssertTrue(FRepo.Error, FRepo.MergeRef('side', Conflicts, mwFastForward));
+  AssertEquals(Side, Trim(Git(['rev-parse', 'HEAD'])));
+  AssertTrue(FRepo.Reset(First, rmHard));
+
+  AssertFalse(FRepo.SquashPending);
+  AssertTrue(FRepo.Error, FRepo.MergeRef('side', Conflicts, mwSquash));
+  AssertEquals('no commit', First, Trim(Git(['rev-parse', 'HEAD'])));
+  AssertEquals('', FRepo.Operation);
+  AssertTrue(FRepo.SquashPending);
+  AssertEquals('A  b.txt'#0'A  c.txt'#0, Git(['status', '--porcelain', '-z']));
+  AssertTrue(FRepo.MergeMessage, Pos('Squashed commit of the following:', FRepo.MergeMessage) = 1);
+  AssertTrue(FRepo.MergeMessage, Pos('side two', FRepo.MergeMessage) > 0);
+  Git(['commit', '-q', '-m', 'squashed']);
+  AssertFalse('the commit took it', FRepo.SquashPending);
+  AssertEquals('', FRepo.MergeMessage);
+  AssertTrue(FRepo.Reset(First, rmHard));
+
+  WriteFile('b.txt', 'main'#10);
+  Commit('main b');
+  AssertTrue(FRepo.Error, FRepo.CommitsToMerge('side', Count, Forward));
+  AssertEquals(2, Count);
+  AssertFalse('diverged', Forward);
+  AssertFalse('cannot fast-forward', FRepo.MergeRef('side', Conflicts, mwFastForward));
+  AssertFalse(Conflicts);
+  AssertTrue(FRepo.Error <> '');
+  AssertFalse(FRepo.MergeRef('side', Conflicts, mwSquash));
+  AssertTrue('a squash stops on conflicts too', Conflicts);
+  AssertEquals('', FRepo.Operation);
+  Git(['reset', '-q', '--hard']);
+end;
+
+{ Co-authored-by trailers go in a paragraph of their own, or join a
+  trailer block the message ends with; one already there is not
+  repeated. RecentAuthors lists each author once, the latest first. }
+procedure TGitRepoTest.TestCoAuthors;
+var
+  Authors: TStringArray;
+  Id: string;
+  Paths: TStringList;
+begin
+  AssertEquals('', WithCoAuthors('', []));
+  AssertEquals('Subject', WithCoAuthors('Subject'#10#10, []));
+  AssertEquals('Subject'#10#10'Co-authored-by: Ada <ada@example.invalid>',
+    WithCoAuthors('Subject'#10, ['Ada <ada@example.invalid>']));
+  AssertEquals('Subject'#10#10'Body here.'#10#10'Co-authored-by: Ada <ada@example.invalid>'#10 +
+    'Co-authored-by: Bo <bo@example.invalid>',
+    WithCoAuthors('Subject'#10#10'Body here.', ['Ada <ada@example.invalid>', ' Bo <bo@example.invalid>']));
+  AssertEquals('joins the trailers',
+    'Subject'#10#10'Body.'#10#10'Fixes: #1'#10'Co-authored-by: Ada <ada@example.invalid>',
+    WithCoAuthors('Subject'#10#10'Body.'#10#10'Fixes: #1', ['Ada <ada@example.invalid>']));
+  AssertEquals('a subject with a colon is no trailer block',
+    'Fix: the thing'#10#10'Co-authored-by: Ada <ada@example.invalid>',
+    WithCoAuthors('Fix: the thing', ['Ada <ada@example.invalid>']));
+  AssertEquals('not twice',
+    'Subject'#10#10'Co-authored-by: Ada <ada@example.invalid>',
+    WithCoAuthors('Subject'#10#10'Co-authored-by: Ada <ada@example.invalid>', ['Ada <ada@example.invalid>']));
+  AssertEquals('the line in the body is no trailer',
+    'Subject'#10#10'Co-authored-by: Ada <ada@example.invalid>'#10#10'More.'#10#10 +
+    'Co-authored-by: Ada <ada@example.invalid>',
+    WithCoAuthors('Subject'#10#10'Co-authored-by: Ada <ada@example.invalid>'#10#10'More.',
+    ['Ada <ada@example.invalid>']));
+  AssertEquals('not twice when asked twice',
+    'Subject'#10#10'Co-authored-by: Ada <ada@example.invalid>',
+    WithCoAuthors('Subject', ['Ada <ada@example.invalid>', 'Ada <ada@example.invalid>']));
+
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  WriteFile('x.txt', 'x'#10);
+  Git(['add', 'x.txt']);
+  Git(['-c', 'user.name=Ada', '-c', 'user.email=ada@example.invalid', 'commit', '-q', '-m', 'by ada']);
+  WriteFile('x.txt', 'y'#10);
+  Git(['add', 'x.txt']);
+  Git(['commit', '-q', '-m', 'by test']);
+  AssertTrue(FRepo.Open(FDir));
+  Authors := FRepo.RecentAuthors;
+  AssertTrue('at least two', Length(Authors) >= 2);
+  AssertEquals('Gittan Test <test@example.invalid>', Authors[0]);
+  AssertEquals('Ada <ada@example.invalid>', Authors[1]);
+  AssertEquals('one of each', 1, Length(FRepo.RecentAuthors(1)));
+  WriteFile('x.txt', 'z'#10);
+  Paths := TStringList.Create;
+  try
+    Paths.Add('x.txt');
+    AssertTrue(FRepo.Error, FRepo.Commit(WithCoAuthors('with ada', ['Ada <ada@example.invalid>']),
+      Paths, False, Id, nil, [coSignOff]));
+  finally
+    Paths.Free;
+  end;
+  AssertEquals('the sign-off joins the block',
+    'with ada'#10#10'Co-authored-by: Ada <ada@example.invalid>'#10 +
+    'Signed-off-by: Gittan Test <test@example.invalid>',
+    Trim(Git(['log', '-1', '--format=%B'])));
 end;
 
 procedure TGitRepoTest.TestBranchManagement;

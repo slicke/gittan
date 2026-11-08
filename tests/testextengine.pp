@@ -33,6 +33,10 @@ type
     ConfirmAnswer, PermissionAnswer: boolean;
     PromptAnswer: string;
     SelectAnswer, Changed: integer;
+    { What Message answers, and each message as
+      "name|title|text|kind|button,button|default|cancel". }
+    MessageAnswer: integer;
+    Messages: TStringList;
     { Run as a permission is asked, while the real host's dialog is up. }
     OnAsk: procedure of object;
     constructor Create;
@@ -41,7 +45,9 @@ type
     function Confirm(const AName, AText: string): boolean; override;
     function Prompt(const ACaption, AText, ADefault: string; out AValue: string): boolean; override;
     function Select(const ACaption, AText: string; const AOptions: array of string): integer; override;
-    procedure ShowLog(const ATitle, AText: string); override;
+    function Message(const AName, ATitle, AText: string; AKind: TExtMessageKind;
+      const AButtons: array of string; ADefault, ACancel: integer): integer; override;
+    procedure ShowLog(const AName, ATitle, AText: string); override;
     procedure ReportError(const ATitle, ADetail: string); override;
     function AskPermission(const AName, AFile, AAuthor: string;
       const ARequested: TExtPermSet): boolean; override;
@@ -100,6 +106,7 @@ constructor TFakeExtHost.Create;
 begin
   inherited Create;
   Alerts := TStringList.Create;
+  Messages := TStringList.Create;
   AlertNames := TStringList.Create;
   Errors := TStringList.Create;
   Logs := TStringList.Create;
@@ -119,6 +126,7 @@ begin
   Logs.Free;
   Errors.Free;
   AlertNames.Free;
+  Messages.Free;
   Alerts.Free;
   inherited Destroy;
 end;
@@ -148,9 +156,28 @@ begin
   Result := SelectAnswer;
 end;
 
-procedure TFakeExtHost.ShowLog(const ATitle, AText: string);
+function TFakeExtHost.Message(const AName, ATitle, AText: string;
+  AKind: TExtMessageKind; const AButtons: array of string;
+  ADefault, ACancel: integer): integer;
+var
+  Labels: string;
+  i: integer;
 begin
-  Logs.Add(ATitle + ': ' + AText);
+  Labels := '';
+  for i := 0 to High(AButtons) do
+  begin
+    if i > 0 then
+      Labels := Labels + ',';
+    Labels := Labels + AButtons[i];
+  end;
+  Messages.Add(AName + '|' + ATitle + '|' + AText + '|' + IntToStr(Ord(AKind)) + '|' +
+    Labels + '|' + IntToStr(ADefault) + '|' + IntToStr(ACancel));
+  Result := MessageAnswer;
+end;
+
+procedure TFakeExtHost.ShowLog(const AName, ATitle, AText: string);
+begin
+  Logs.Add(AName + ' · ' + ATitle + ': ' + AText);
 end;
 
 procedure TFakeExtHost.ReportError(const ATitle, ADetail: string);
@@ -416,7 +443,7 @@ begin
   AssertEquals('select answer', '1', EvalIn(Info^.Ctx, 'globalThis.s'));
   AssertEquals('console.log shown', 1, FHost.Logs.Count);
   AssertTrue('with its text', Pos('logged', FHost.Logs[0]) > 0);
-  AssertEquals('under the extension''s name', 'Extension "dialogs" · console.log: logged', FHost.Logs[0]);
+  AssertEquals('under the extension''s name', 'dialogs · console.log: logged', FHost.Logs[0]);
 end;
 
 procedure TExtEngineTest.TestPermissionGate;

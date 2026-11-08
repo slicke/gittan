@@ -35,7 +35,7 @@ type
     FShown: TIntegerDynArray;
     FBack, FText, FDim, FLine: TColor;
     FOnPick: TGittanPickEvent;
-    FOnClose: TNotifyEvent;
+    FOnClose, FOnVisibleChange: TNotifyEvent;
     FCloseHot, FNeedFilter: boolean;
     function CloseRect: TRect;
     procedure Fill;
@@ -50,6 +50,7 @@ type
       const AXProportion, AYProportion: double); override;
     procedure Paint; override;
     procedure Resize; override;
+    procedure VisibleChanged; override;
     procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
     procedure MouseLeave; override;
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
@@ -73,6 +74,9 @@ type
     procedure SetColors(ABack, AText, ADim, ALine: TColor);
     property OnPick: TGittanPickEvent read FOnPick write FOnPick;
     property OnClose: TNotifyEvent read FOnClose write FOnClose;
+    {** Raised when the bar is shown or hidden, so its owner can place it
+      among the rows over the editor. }
+    property OnVisibleChange: TNotifyEvent read FOnVisibleChange write FOnVisibleChange;
   end;
 
 implementation
@@ -153,6 +157,13 @@ begin
   if FEdit.CanFocus then
     FEdit.SetFocus;
   FEdit.SelectAll;
+end;
+
+procedure TGittanSymbolBar.VisibleChanged;
+begin
+  inherited VisibleChanged;
+  if Assigned(FOnVisibleChange) then
+    FOnVisibleChange(Self);
 end;
 
 procedure TGittanSymbolBar.SetColors(ABack, AText, ADim, ALine: TColor);

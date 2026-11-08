@@ -21,7 +21,7 @@ type
     terminated before it starts never runs Execute at all. }
   TGittanCommitJob = class(TGittanJob)
   private
-    FRoot, FMessage: string;
+    FRoot, FMessage, FDraft: string;
     FPaths: TStringList;
     FAmend: boolean;
     FParts: TGittanCommitParts;
@@ -40,6 +40,9 @@ type
     property Amend: boolean read FAmend;
     property Options: TGittanCommitOptions read FOptions;
     property Message: string read FMessage;
+    {** The text of the field the message came from, before what was
+      added to it (co-authors); '' when it came from no field. }
+    property Draft: string read FDraft write FDraft;
     {** Whether the commit was made. }
     property Ok: boolean read FOk;
     {** The new commit, when Ok. }

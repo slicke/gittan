@@ -805,7 +805,7 @@ begin
 end;
 
 { ---------------------------------------------------------------------------
-  The window: Gittan._notify, _status, _openFile, _addCard, _clearCards
+  The window: Gittan._notify, _message, _status, _openFile, _addCard, _clearCards
   --------------------------------------------------------------------------- }
 
 procedure JSNotify(res: PJSValue; ctx: JSContext; this_val: PJSValue;
@@ -883,6 +883,147 @@ begin
       ExtHost.AddCard(O.Get('repo', ''), Card)
     else
       ExtHost.AddCard(ExtHost.ActiveRoot, Card);
+  finally
+    Data.Free;
+  end;
+end;
+
+{ Gittan.ui.message({title, text, kind, buttons, default, cancel}): the
+  dialog's button pressed, by its index; -1 when closed without one.
+  The shape is checked here, so an extension learns of a mistake from
+  an exception rather than from a dialog that looks wrong. }
+const
+  MessageMaxButtons = 6;
+  { A button's label, so six of them stay within a screen. }
+  MessageMaxLabel = 40;
+
+procedure JSMessage(res: PJSValue; ctx: JSContext; this_val: PJSValue;
+  argc: integer; argv: PJSValues; magic: integer);
+var
+  Eng: TGittanExtEngine;
+  Data: TJSONData;
+  O: TJSONObject;
+  List: TJSONArray;
+  Buttons: array of string;
+  Kind: TExtMessageKind;
+  KindName, Title, Text: string;
+  i, k, n, Default, Cancel: integer;
+
+  procedure Fail(const AWhy: string);
+  begin
+    res^ := JS_ThrowError(ctx, 'Gittan.ui.message: ' + AWhy);
+  end;
+
+  { AMin is 0 for default, which a button always is, -1 for cancel,
+    which may be none. }
+  function IndexOf(const AKey: string; ADefault, AMin: integer; out AIndex: integer): boolean;
+  var
+    V: TJSONData;
+    Count: integer;
+  begin
+    Count := Length(Buttons);
+    if Count = 0 then
+      Count := 1; { OK alone }
+    V := O.Find(AKey);
+    if (V = nil) or (V.JSONType = jtNull) then
+    begin
+      AIndex := ADefault;
+      Exit(True);
+    end;
+    Result := (V.JSONType = jtNumber) and (Frac(V.AsFloat) = 0) and
+      (V.AsFloat >= AMin) and (V.AsFloat < Count);
+    if Result then
+      AIndex := V.AsInteger
+    else if AMin < 0 then
+      Fail(AKey + ' is the index of a button, or -1')
+    else
+      Fail(AKey + ' is the index of a button');
+  end;
+
+begin
+  res^ := JS_NewInt32(ctx, -1);
+  Eng := EngineOf(ctx);
+  if Eng = nil then
+    Exit;
+  try
+    Data := GetJSON(Arg(ctx, argc, argv, 0));
+  except
+    Fail('{text, title?, kind?, buttons?} is expected');
+    Exit;
+  end;
+  try
+    if not (Data is TJSONObject) then
+    begin
+      Fail('{text, title?, kind?, buttons?} is expected');
+      Exit;
+    end;
+    O := TJSONObject(Data);
+    Title := O.Get('title', '');
+    Text := O.Get('text', '');
+    if (Title = '') and (Text = '') then
+    begin
+      Fail('a text or a title is needed');
+      Exit;
+    end;
+    KindName := LowerCase(O.Get('kind', 'info'));
+    case KindName of
+      'info', '': Kind := emkInfo;
+      'warn', 'warning': Kind := emkWarning;
+      'error': Kind := emkError;
+      'question': Kind := emkQuestion;
+    else
+      Fail('kind is "info", "warn", "error" or "question"');
+      Exit;
+    end;
+    Buttons := nil;
+    if (O.Find('buttons') <> nil) and (O.Find('buttons').JSONType <> jtNull) then
+    begin
+      if not (O.Find('buttons') is TJSONArray) then
+      begin
+        Fail('buttons is an array of labels');
+        Exit;
+      end;
+      List := TJSONArray(O.Find('buttons'));
+      if List.Count > MessageMaxButtons then
+      begin
+        Fail(Format('no more than %d buttons', [MessageMaxButtons]));
+        Exit;
+      end;
+      SetLength(Buttons, List.Count);
+      for i := 0 to List.Count - 1 do
+      begin
+        if List[i].JSONType = jtString then
+          Buttons[i] := Trim(List[i].AsString)
+        else
+          Buttons[i] := '';
+        if Buttons[i] = '' then
+        begin
+          Fail('a button''s label is a text that is not empty');
+          Exit;
+        end;
+        { Characters, not bytes: a UTF-8 continuation byte is no new one. }
+        n := 0;
+        for k := 1 to Length(Buttons[i]) do
+          if (Ord(Buttons[i][k]) and $C0) <> $80 then
+            Inc(n);
+        if n > MessageMaxLabel then
+        begin
+          Fail(Format('a button''s label is no longer than %d characters', [MessageMaxLabel]));
+          Exit;
+        end;
+        { AskDlg would take these for its flags, not a caption. }
+        if SameText(Buttons[i], 'IsDefault') or SameText(Buttons[i], 'IsCancel') or
+          SameText(Buttons[i], 'NoCancel') then
+        begin
+          Fail('"' + Buttons[i] + '" cannot be a button''s label');
+          Exit;
+        end;
+      end;
+    end;
+    if not IndexOf('default', 0, 0, Default) or not IndexOf('cancel', -1, -1, Cancel) then
+      Exit;
+    res^ := JS_NewInt32(ctx, ExtHost.Message(Eng.ExtensionNameForContext(ctx),
+      Title, Text, Kind, Buttons, Default, Cancel));
   finally
     Data.Free;
   end;
@@ -1390,6 +1531,7 @@ const
     '    confirm: function () { return t.confirm.apply(t, arguments); },' + LineEnding +
     '    prompt: function (caption, text, def) { return t.prompt(String(caption), String(text === undefined ? "" : text), String(def === undefined ? "" : def)); },' + LineEnding +
     '    select: function (caption, text, options) { return Number(t.select.apply(t, [String(caption), String(text)].concat((options || []).map(String)))); },' + LineEnding +
+    '    message: function (o) { if (o === null || typeof o !== "object") o = { text: o === undefined ? "" : String(o) }; return t._message(JSON.stringify(o)); },' + LineEnding +
     '    notify: function (title, detail) { t._notify(String(title), String(detail === undefined ? "" : detail), false); },' + LineEnding +
     '    error: function (title, detail) { t._notify(String(title), String(detail === undefined ? "" : detail), true); },' + LineEnding +
     '    setStatus: function (text, seconds) { t._status(String(text), seconds === undefined ? 6 : Number(seconds)); },' + LineEnding +
@@ -1470,6 +1612,7 @@ begin
     addClassFunctionIf(epUI, '_settingsGet', @JSSettingsGet, 1);
     addClassFunctionIf(epSettings, '_appSetting', @JSAppSetting, 1);
     addClassFunctionIf(epUI, '_notify', @JSNotify, 3);
+    addClassFunctionIf(epUI, '_message', @JSMessage, 1);
     addClassFunctionIf(epUI, '_status', @JSStatus, 2);
     addClassFunctionIf(epUI, '_openFile', @JSOpenFile, 2);
     addClassFunctionIf(epUI, '_addCard', @JSAddCard, 1);

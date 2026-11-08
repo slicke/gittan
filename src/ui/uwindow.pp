@@ -175,6 +175,9 @@ type
     procedure AskOpenRepository; override;
     procedure ShowSettings; override;
     procedure ShowAbout; override;
+    procedure ShowHostingSettings; override;
+    procedure RunInTerminal(const ACommand: string); override;
+    function HasFrameFor(const ARepo: string): boolean; override;
     function ComparePullRequest(const APull: TGittanPullRequest;
       const AClone: string): boolean; override;
     procedure HideForgeView; override;
@@ -456,7 +459,7 @@ end;
   title bar's shade whole, since no sidebar is under it. }
 procedure TGittanWindow.ShowForgeView;
 begin
-  if FForgeShown or (FForgeView = nil) or not FForgeView.HasForge then
+  if FForgeShown or (FForgeView = nil) then
     Exit;
   FForgeShown := True;
   FForgeView.Visible := True;
@@ -472,7 +475,7 @@ begin
   {$IFDEF LCLGtk3}
   TGittanGtkTitleBar(FOwnBar).HideNativeMenu;
   {$ENDIF}
-  Caption := FForgeView.ForgeName;
+  Caption := FForgeView.Title;
   FForgeView.Shown;
   UpdateTabs;
   UpdateForgeChrome;
@@ -484,21 +487,22 @@ begin
     ActivateFrame(FActive);
 end;
 
-{ The globe in the chrome: there while there is a forge, filled while
-  the view is shown, the user's picture in its place once the forge has
-  given one. }
+{ The globe in the chrome: always there, since the view has Batch with
+  no forge too; filled while the view is shown, the user's picture in
+  its place once the forge has given one, and the pull requests waiting
+  for the user's review counted on it. }
 procedure TGittanWindow.UpdateForgeChrome;
 begin
   if FForgeView = nil then
     Exit;
   {$IFDEF LCLCocoa}
   if FToolbar <> nil then
-    FToolbar.SetForge(FForgeView.HasForge, FForgeShown, FForgeView.ChromeHint,
-      FForgeView.Picture);
+    FToolbar.SetForge(True, FForgeShown, FForgeView.ChromeHint, FForgeView.Picture,
+      FForgeView.ReviewCount);
   {$ENDIF}
   {$IFDEF OWNBAR}
-  FOwnBar.SetForge(FForgeView.HasForge, FForgeShown, FForgeView.ChromeHint,
-    FForgeView.Picture);
+  FOwnBar.SetForge(True, FForgeShown, FForgeView.ChromeHint, FForgeView.Picture,
+    FForgeView.ReviewCount);
   {$ENDIF}
 end;
 
@@ -515,6 +519,32 @@ end;
 procedure TGittanWindow.ShowAbout;
 begin
   FActive.MenuAboutClick(nil);
+end;
+
+procedure TGittanWindow.ShowHostingSettings;
+begin
+  FActive.ShowHostingSettings;
+end;
+
+procedure TGittanWindow.RunInTerminal(const ACommand: string);
+var
+  Home: string;
+begin
+  { The home folder without its last delimiter, but / stays /. }
+  Home := ExcludeTrailingPathDelimiter(GetUserDir);
+  if Home = '' then
+    Home := PathDelim;
+  FActive.OpenTerminalIn(Home, ACommand);
+end;
+
+function TGittanWindow.HasFrameFor(const ARepo: string): boolean;
+var
+  i: integer;
+begin
+  Result := False;
+  for i := 0 to FFrames.Count - 1 do
+    if Frames[i].HoldsRepo(ARepo) then
+      Exit(True);
 end;
 
 { The frame with a remote for the pull request's repository, shown,
@@ -1106,8 +1136,21 @@ begin
   end;
 end;
 
+{ An empty tab (the welcome view) is shown rather than a second one
+  like it, as File > Repository List does. }
 procedure TGittanWindow.NewTab;
+var
+  i: integer;
 begin
+  HideForgeView;
+  for i := 0 to FFrames.Count - 1 do
+    if Frames[i].IsBlank then
+    begin
+      { A new tab says nothing of a repository that did not open in it. }
+      Frames[i].ClearOpenError;
+      ShowFrame(Frames[i]);
+      Exit;
+    end;
   NewFrame;
 end;
 
@@ -1198,12 +1241,18 @@ begin
       Frames[i].SettingsChanged(AFont, ATheme, ATabSize, ATools);
   if FActive <> nil then
     FActive.SettingsChanged(AFont, ATheme, ATabSize, ATools);
-  { The forge view's forge too; gone, the view goes with its globe. }
+  { What needs attention may have changed. }
+  if FForgeView <> nil then
+    FForgeView.ReloadFilters;
+  { The forge view's forge too; gone, the view keeps Batch alone. }
   if ATools and (FForgeView <> nil) then
   begin
     FForgeView.SettingsChanged;
-    if not FForgeView.HasForge then
-      HideForgeView;
+    if FForgeShown then
+    begin
+      Caption := FForgeView.Title;
+      UpdateTabs;
+    end;
     UpdateForgeChrome;
   end;
 end;

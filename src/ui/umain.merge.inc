@@ -10,7 +10,15 @@
   that is no conflict any more, shows the change view as before. The
   view is FView gvMerge, in the editor's place under the file header,
   whose pills are All Mine, All Theirs (Reset instead of the two once
-  the result is edited by hand), Save and Close.
+  the result is edited by hand), Show Base or Hide Base when the
+  markers hold the merge base, Save and Close.
+
+  The base pane is off at first and kept in the settings (MergeBase):
+  four panes are a lot, and git writes the base only with
+  merge.conflictStyle diff3 or zdiff3, which Gittan asks for on the
+  merges, rebases, cherry-picks, reverts, pulls and stash applies it
+  runs itself (WithConflictStyle in gittan.git), unless the repository
+  sets a style of its own.
 
   Save writes the result over the file as one block (ResultBlock in
   gittan.merge, through gittan.discard, so a file that changed since
@@ -21,6 +29,15 @@
   on disk keeps the ticks; leaving the file with ticks or edits not
   saved asks first, and so does a file changed outside Gittan
   meanwhile, which Save then writes over. }
+
+const
+  { What a pill of the merge editor's header does, FMergeActionIds. }
+  maAllMine = 0;
+  maAllTheirs = 1;
+  maReset = 2;
+  maBase = 3;
+  maSave = 4;
+  maClose = 5;
 
 { Whether two lists of lines are the same. }
 function SameLines(const A, B: TStringArray): boolean;
@@ -212,38 +229,63 @@ begin
     Exit;
   FMergeView.Font.Assign(Font);
   ApplyEditorColors(FMergeView.EditMine);
+  ApplyEditorColors(FMergeView.EditBase);
   ApplyEditorColors(FMergeView.EditTheirs);
   ApplyEditorColors(FMergeView.EditResult);
   FMergeView.Restyle(Edit, @FScrollbarTheme);
 end;
 
+{ The header's pills, and FMergeActionIds what each does. }
 procedure TRepoFrame.SetMergeActions;
+var
+  Captions: array of string;
+
+  procedure Add(AId: integer; const ACaption: string);
+  begin
+    FMergeActionIds := Concat(FMergeActionIds, [AId]);
+    Captions := Concat(Captions, [ACaption]);
+  end;
+
 begin
+  FMergeActionIds := nil;
+  Captions := nil;
   if FMergeView.Edited then
-    FHeader.SetActions([rsMergeReset, rsMergeSave, rsMergeClose])
+    Add(maReset, rsMergeReset)
   else
-    FHeader.SetActions([rsMergeAllMine, rsMergeAllTheirs, rsMergeSave, rsMergeClose]);
+  begin
+    Add(maAllMine, rsMergeAllMine);
+    Add(maAllTheirs, rsMergeAllTheirs);
+  end;
+  if FMergeView.HasBase then
+    if FMergeView.ShowBase then
+      Add(maBase, rsMergeHideBase)
+    else
+      Add(maBase, rsMergeShowBase);
+  Add(maSave, rsMergeSave);
+  Add(maClose, rsMergeClose);
+  FHeader.SetActions(Captions);
 end;
 
 procedure TRepoFrame.MergeHeaderAction(AIndex: integer);
 begin
-  if FMergeView.Edited then
-    case AIndex of
-      0:
-      begin
-        FMergeView.ResetResult;
-        SetMergeActions;
-      end;
-      1: SaveMerge(True);
-      2: CloseMergeEditor;
-    end
-  else
-    case AIndex of
-      0: FMergeView.PickEverywhere(msMine);
-      1: FMergeView.PickEverywhere(msTheirs);
-      2: SaveMerge(True);
-      3: CloseMergeEditor;
+  if (AIndex < 0) or (AIndex > High(FMergeActionIds)) then
+    Exit;
+  case FMergeActionIds[AIndex] of
+    maAllMine: FMergeView.PickEverywhere(msMine);
+    maAllTheirs: FMergeView.PickEverywhere(msTheirs);
+    maReset:
+    begin
+      FMergeView.ResetResult;
+      SetMergeActions;
     end;
+    maBase:
+    begin
+      FMergeView.ShowBase := not FMergeView.ShowBase;
+      SetMergeActions;
+    end;
+    maSave: SaveMerge(True);
+    maClose: CloseMergeEditor;
+  end;
 end;
 
 { A tick or the first key typed in the result: the pills follow. }

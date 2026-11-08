@@ -14,7 +14,9 @@ unit gittan.commandpage;
   names no script or target (or has run lines for other systems only)
   is a dimmed tile whose hint says so, and
   it leads nowhere. Each source's heading names its file, and the
-  first's offers Edit… or Create… (OnEditFile). While the commands
+  first's offers Edit… or Create… (OnEditFile), as the Personal
+  heading after the committed files' does for the file of one's own in
+  the git directory (OnEditPersonal), whose commands need no trust. While the commands
   file is not trusted its commands are dimmed under a card that says
   why, with a Trust Commands button (OnTrust).
 
@@ -86,7 +88,7 @@ type
       measuring one in Layout. }
     FC: TCanvas;
     FOnRun, FOnRunInTerminal: TGittanCommandIndexEvent;
-    FOnStop, FOnTrust, FOnEditFile, FOnCopyOutput: TNotifyEvent;
+    FOnStop, FOnTrust, FOnEditFile, FOnEditPersonal, FOnCopyOutput: TNotifyEvent;
     function LinkAt(X, Y: integer): integer;
     procedure SetHot(AValue: integer);
     procedure AddLink(const ARect: TRect; const AUrl: string; const AHint: string = '');
@@ -170,6 +172,9 @@ type
     property OnTrust: TNotifyEvent read FOnTrust write FOnTrust;
     {** Edit… or Create… at the right of the first group's heading. }
     property OnEditFile: TNotifyEvent read FOnEditFile write FOnEditFile;
+    {** Edit… or Create… at the right of the Personal heading, for the
+      file of one's own in the git directory. }
+    property OnEditPersonal: TNotifyEvent read FOnEditPersonal write FOnEditPersonal;
     property OnCopyOutput: TNotifyEvent read FOnCopyOutput write FOnCopyOutput;
   end;
 
@@ -184,6 +189,7 @@ uses
 resourcestring
   rsPageTitle = 'Commands';
   rsFileGroup = 'Commands';
+  rsPersonalGroup = 'Personal';
   rsScriptsGroup = 'Scripts';
   rsTargetsGroup = 'Targets';
   rsPackageJson = 'package.json';
@@ -193,7 +199,7 @@ resourcestring
   rsNoCommands = 'No commands yet. A .gittan/commands.toml names them, and the scripts of a ' +
     'package.json, the targets of a Makefile and the commands of a Cargo.toml, go.mod, ' +
     'pyproject.toml or Lazarus project are listed by themselves.';
-  rsNoManifest = 'named in commands.toml';
+  rsNoManifest = 'named in .gittan';
   rsNotToml = 'Not read: %s';
   rsTrustTitle = 'This repository''s commands have not been trusted on this computer';
   rsTrustText = 'A committed file could make a shortcut run anything. The commands of ' +
@@ -224,6 +230,7 @@ const
   CopyLink = 'gittan:copy';
   TrustLink = 'gittan:trust';
   EditLink = 'gittan:edit';
+  PersonalLink = 'gittan:personal';
   { A tile that leads nowhere (off, or running): its hint shows, nothing
     runs. }
   NoteLink = 'gittan:note';
@@ -755,7 +762,7 @@ begin
     Right := X + TileW - Px(TilePadX);
     { The file's are off while it is not trusted, and a section that
       names no script or target always. }
-    Off := ((Cmd.Source = csFile) and not FTrusted) or (Cmd.Command = '');
+    Off := ((Cmd.Source = csFile) and not Cmd.Personal and not FTrusted) or (Cmd.Command = '');
     Leads := not Off and not FRunning and Assigned(FOnRun);
     Busy := FRunning and IsRun(Cmd);
     { What runs is the tile's hint: the shell line, or a script's text;
@@ -951,7 +958,7 @@ begin
   for i := 0 to High(FCommands) do
     if IsRun(FCommands[i]) and (FCommands[i].Command <> '') then
     begin
-      if (FCommands[i].Source = csFile) and not FTrusted then
+      if (FCommands[i].Source = csFile) and not FCommands[i].Personal and not FTrusted then
         Exit(-1);
       Exit(i);
     end;
@@ -1199,7 +1206,7 @@ end;
 
 procedure TGittanCommandPage.PaintContent;
 var
-  Y, TextH, TitleH, HeadingTop, X, i: integer;
+  Y, TextH, TitleH, HeadingTop, X, i, Personal: integer;
   Main: boolean;
 begin
   FC.Brush.Style := bsSolid;
@@ -1246,9 +1253,30 @@ begin
   if Length(FCommands) = 0 then
     PaintNote(Y, rsNoCommands);
   for i := Ord(Main) to High(FFiles) do
+    if not FFiles[i].Personal then
+    begin
+      PaintHeading(Y, ChangeFileExt(ExtractFileName(FFiles[i].Path), ''), FFiles[i].Path, '',
+        FDim);
+      PaintFileSection(Y, FFiles[i]);
+    end;
+  { The personal file's, after the committed ones: offered with
+    Create… while there is none, as the git directory is no place one
+    would look for it. }
+  if Assigned(FOnEditPersonal) then
   begin
-    PaintHeading(Y, ChangeFileExt(ExtractFileName(FFiles[i].Path), ''), FFiles[i].Path, '', FDim);
-    PaintFileSection(Y, FFiles[i]);
+    Personal := -1;
+    for i := 0 to High(FFiles) do
+      if FFiles[i].Personal then
+        Personal := i;
+    HeadingTop := Y;
+    PaintHeading(Y, rsPersonalGroup, PersonalCommandsShown, '', FDim);
+    if Personal >= 0 then
+    begin
+      PaintAction(HeadingTop + Px(Pad), rsEditFile, PersonalLink);
+      PaintFileSection(Y, FFiles[Personal]);
+    end
+    else
+      PaintAction(HeadingTop + Px(Pad), rsCreateFile, PersonalLink);
   end;
 
   if GroupCount(csPackage) > 0 then
@@ -1342,8 +1370,13 @@ begin
       FOnTrust(Self);
   end
   else if FLinkUrls[i] = EditLink then
+  begin
     if Assigned(FOnEditFile) then
       FOnEditFile(Self);
+  end
+  else if FLinkUrls[i] = PersonalLink then
+    if Assigned(FOnEditPersonal) then
+      FOnEditPersonal(Self);
 end;
 
 end.

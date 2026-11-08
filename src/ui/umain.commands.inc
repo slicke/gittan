@@ -30,6 +30,7 @@ begin
   FCommandPage.OnStop := @CommandPageStop;
   FCommandPage.OnTrust := @CommandPageTrust;
   FCommandPage.OnEditFile := @CommandPageEditFile;
+  FCommandPage.OnEditPersonal := @CommandPageEditPersonal;
   FCommandPage.OnCopyOutput := @CommandPageCopyOutput;
 end;
 
@@ -54,7 +55,7 @@ begin
     Exit;
   end;
   FRepoCommands := DiscoverRepoCommands(FRepo.Root, FRepoProjects, FCommandsFiles,
-    App.Settings.ProjectKindsOf(FRepo.Root));
+    App.Settings.ProjectKindsOf(FRepo.Root), FPersonalPath);
   FCommandsHash := CommandsHashOf(FCommandsFiles);
   FCommandPage.SetRepository(ExtractFileName(FRepo.Root), FRepo.Root);
   FCommandPage.SetCommands(FRepoCommands, FRepoProjects, FCommandsFiles, CommandsTrusted);
@@ -119,7 +120,8 @@ begin
   { A section that names no script or target has nothing to run. }
   if Cmd.Command = '' then
     Exit;
-  if not CommandsTrusted and (AByKey or (Cmd.Source = csFile)) then
+  { The personal file's, and the keys it gives, are the user's own. }
+  if not CommandsTrusted and not Cmd.Personal and (AByKey or (Cmd.Source = csFile)) then
   begin
     ShowCommands;
     Exit;
@@ -272,22 +274,35 @@ end;
   does; a new one is written with its commented example first, and the
   Config section lists it. }
 procedure TRepoFrame.CommandPageEditFile(Sender: TObject);
-var
-  FileName: string;
-  F: TFileStream;
-  Template: string;
 begin
   if FRepo.Root = '' then
     Exit;
-  FileName := IncludeTrailingPathDelimiter(FRepo.Root) + CommandsFolder + PathDelim + CommandsFile;
-  if not FileExists(FileName) then
+  EditCommandsFile(IncludeTrailingPathDelimiter(FRepo.Root) + CommandsFolder + PathDelim +
+    CommandsFile, CommandsPath, CommandsFileTemplate);
+end;
+
+{ The same for the personal file in the git directory, which the Config
+  section lists after the exclude file. }
+procedure TRepoFrame.CommandPageEditPersonal(Sender: TObject);
+begin
+  if (FRepo.Root = '') or (FPersonalPath = '') then
+    Exit;
+  EditCommandsFile(FPersonalPath, PersonalCommandsShown, PersonalCommandsTemplate);
+end;
+
+{ Opens AFileName, a commands file the Config section lists as AShown,
+  writing ATemplate first when it is missing. }
+procedure TRepoFrame.EditCommandsFile(const AFileName, AShown, ATemplate: string);
+var
+  F: TFileStream;
+begin
+  if not FileExists(AFileName) then
   begin
     try
-      ForceDirectories(ExtractFileDir(FileName));
-      Template := CommandsFileTemplate;
-      F := TFileStream.Create(FileName, fmCreate);
+      ForceDirectories(ExtractFileDir(AFileName));
+      F := TFileStream.Create(AFileName, fmCreate);
       try
-        F.WriteBuffer(Template[1], Length(Template));
+        F.WriteBuffer(ATemplate[1], Length(ATemplate));
       finally
         F.Free;
       end;
@@ -301,7 +316,16 @@ begin
     FillRepoFiles;
     LoadRepoCommands;
   end;
-  ShowRepoFile(CommandsPath);
+  if AFileName = FPersonalPath then
+  begin
+    { Not under the root, so not through ShowRepoFile: the section's row
+      is selected as a click on it would. }
+    FileTree.Selected := nil;
+    OpenFile(AFileName);
+    SelectRepoNode(AShown);
+  end
+  else
+    ShowRepoFile(AShown);
 end;
 
 procedure TRepoFrame.CommandPageCopyOutput(Sender: TObject);

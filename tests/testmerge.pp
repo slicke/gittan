@@ -31,6 +31,7 @@ type
     procedure TestRows;
     procedure TestOriginsAndStarts;
     procedure TestDiff3Base;
+    procedure TestBaseRows;
     procedure TestAdjacentConflicts;
     procedure TestResultWrites;
   end;
@@ -278,8 +279,73 @@ begin
   try
     AssertEquals('m', Joined(M.Chunks[0].Sides[msMine]));
     AssertEquals('t', Joined(M.Chunks[0].Sides[msTheirs]));
+    AssertTrue(M.HasBase);
+    AssertTrue(M.Chunks[0].HasBase);
+    AssertEquals('o', Joined(M.Chunks[0].Base));
+    AssertEquals('base', M.Chunks[0].BaseName);
     M.PickAll(0, msMine, True);
     AssertEquals('m', Joined(M.Output));
+  finally
+    M.Free;
+  end;
+  { An add/add conflict's base is empty, and still a base. }
+  M := Load(['<<<<<<< HEAD', 'm', '||||||| base', '=======', 't', '>>>>>>> f']);
+  try
+    AssertTrue(M.HasBase);
+    AssertTrue(M.Chunks[0].HasBase);
+    AssertEquals(0, Length(M.Chunks[0].Base));
+    AssertEquals('t', Joined(M.Chunks[0].Sides[msTheirs]));
+  finally
+    M.Free;
+  end;
+end;
+
+{ The rows take the base as a third pane when asked, padded like the
+  sides; without it the base is left out of the rows, and markers
+  without one give no base. }
+procedure TMergeTest.TestBaseRows;
+var
+  M: TGittanMerge;
+  R: TGittanMergeRows;
+begin
+  M := Load(['a', '<<<<<<< HEAD', 'm', '||||||| base', 'o1', 'o2', '=======', 't1', 't2',
+    't3', '>>>>>>> f']);
+  try
+    R := M.Rows;
+    AssertEquals(5, Length(R));
+    AssertEquals(-1, R[2].Base);
+    AssertEquals(-1, R[3].Base);
+    R := M.Rows(True);
+    AssertEquals(5, Length(R));
+    AssertTrue(R[1].Header);
+    AssertEquals(0, R[2].Mine);
+    AssertEquals(0, R[2].Base);
+    AssertEquals(0, R[2].Theirs);
+    AssertEquals(-1, R[3].Mine);
+    AssertEquals(1, R[3].Base);
+    AssertEquals(1, R[3].Theirs);
+    AssertEquals(-1, R[4].Base);
+    AssertEquals(2, R[4].Theirs);
+    { The base stays in the file while the conflict is not resolved. }
+    AssertEquals(11, Length(M.Output));
+  finally
+    M.Free;
+  end;
+  M := Load(['<<<<<<< HEAD', 'm', '||||||| base', 'o1', 'o2', 'o3', '=======', 't', '>>>>>>> f']);
+  try
+    R := M.Rows(True);
+    AssertEquals(4, Length(R));
+    AssertEquals(2, R[3].Base);
+    AssertEquals(-1, R[3].Mine);
+    AssertEquals(-1, R[3].Theirs);
+    AssertEquals(2, Length(M.Rows));
+  finally
+    M.Free;
+  end;
+  M := Load(['<<<<<<< HEAD', 'm', '=======', 't', '>>>>>>> f']);
+  try
+    AssertFalse(M.HasBase);
+    AssertEquals('', M.Chunks[0].BaseName);
   finally
     M.Free;
   end;

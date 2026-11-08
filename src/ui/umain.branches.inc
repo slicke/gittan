@@ -665,27 +665,116 @@ begin
     MergeIntoCurrent(Ref);
 end;
 
-{ A merge of ARef into the branch HEAD is on, with git's message; one
-  that stops with conflicts leaves them to the Commit section. }
+{ A merge of ARef into the branch HEAD is on, the way the user picks
+  in AskMergeWay; one that stops with conflicts leaves them to the
+  Commit section. }
 procedure TRepoFrame.MergeIntoCurrent(const ARef: string);
 var
-  Ok, Conflicts: boolean;
+  Way: TGittanMergeWay;
 begin
+  if not RepoReady or (FBranch = '') then
+    Exit;
+  if AskMergeWay(ARef, ARef, Way) then
+    RunMerge(ARef, ARef, Way);
+end;
+
+{ Asks how to merge ARef (named AName in the question) into the current
+  branch: it says how many commits it brings and whether the branch can
+  move forward to it with no merge commit. The buttons are then
+  Fast-forward, Merge Commit (--no-ff) and Squash; a branch with
+  commits of its own gets Merge, which makes a merge commit, and
+  Squash. False when nothing is to be merged (said in the status bar)
+  or the user cancels. }
+function TRepoFrame.AskMergeWay(const ARef, AName: string; out AWay: TGittanMergeWay): boolean;
+var
+  Msg, Head, Ref: string;
+  Count: integer;
+  Forward: boolean;
+  Answer: TModalResult;
+begin
+  Result := False;
+  AWay := mwMerge;
+  { What the question is about, to see after it that another client did
+    not switch or move the branch meanwhile. }
+  Head := FRepo.CommitId('HEAD');
+  Ref := FRepo.Branch;
+  if not FRepo.CommitsToMerge(ARef, Count, Forward) then
+  begin
+    BannerError(rsCaFailed, FRepo.Error);
+    Exit;
+  end;
+  if Count = 0 then
+  begin
+    StatusNote(Format(rsBmMergeNothing, [AName, FBranch]));
+    Exit;
+  end;
+  if Forward then
+  begin
+    if Count = 1 then
+      Msg := Format(rsBmMergeAskForwardOne, [AName, FBranch, FBranch, AName])
+    else
+      Msg := Format(rsBmMergeAskForward, [AName, FBranch, Count, FBranch, AName]);
+    Answer := AskDlg(rsBmMergeTitle, Msg + ' ' + rsBmMergeSquashNote, mtConfirmation,
+      [mrYes, rsBmFastForward, 'IsDefault', mrYesToAll, rsBmMergeCommit, mrNo, rsBmSquash,
+      mrCancel, rsCancelButton, 'IsCancel'], 0);
+  end
+  else
+  begin
+    if Count = 1 then
+      Msg := Format(rsBmMergeAskOne, [AName, FBranch, FBranch])
+    else
+      Msg := Format(rsBmMergeAsk, [AName, FBranch, Count, FBranch]);
+    Answer := AskDlg(rsBmMergeTitle, Msg + ' ' + rsBmMergeSquashNote, mtConfirmation,
+      [mrYes, rsMergeAction, 'IsDefault', mrNo, rsBmSquash,
+      mrCancel, rsCancelButton, 'IsCancel'], 0);
+  end;
+  case Answer of
+    mrYes:
+      if Forward then
+        AWay := mwFastForward
+      else
+        AWay := mwMerge;
+    mrYesToAll: AWay := mwMergeCommit;
+    mrNo: AWay := mwSquash;
+    else
+      Exit;
+  end;
+  if (FRepo.CommitId('HEAD') <> Head) or (FRepo.Branch <> Ref) then
+  begin
+    StatusNote(rsBmMergeMoved, True);
+    Exit;
+  end;
+  Result := True;
+end;
+
+{ Runs the merge AskMergeWay settled on; True when it went through. A
+  squash leaves its changes staged with git's message, which the
+  Commit section fills in. }
+function TRepoFrame.RunMerge(const ARef, AName: string; AWay: TGittanMergeWay): boolean;
+var
+  Ok, Conflicts: boolean;
+  Branch: string;
+begin
+  Branch := FBranch;
   StopWatcher;
   try
     Screen.Cursor := crHourGlass;
     try
-      Ok := FRepo.MergeRef(ARef, Conflicts);
+      Ok := FRepo.MergeRef(ARef, Conflicts, AWay);
     finally
       Screen.Cursor := crDefault;
     end;
+    FLoadError := '';
     FSummary.Notice := '';
     RefreshRepository;
   finally
     StartWatcher;
   end;
-  if Ok then
-    StatusNote(Format(rsCaMerged, [ARef]))
+  Result := Ok;
+  if Ok and (AWay = mwSquash) then
+    StatusNote(Format(rsBmSquashed, [AName, Branch]))
+  else if Ok then
+    StatusNote(Format(rsCaMerged, [AName]))
   else if Conflicts then
     StatusNote(rsCaConflicts, True)
   else

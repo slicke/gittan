@@ -211,6 +211,12 @@ type
     commits' changes staged), the work tree (rmMixed, unstaged), or
     nothing (rmHard, every change in tracked files lost). }
   TGittanResetMode = (rmSoft, rmMixed, rmHard);
+  {** How a merge is made: as git chooses (a fast-forward when the
+    branch has no commits of its own, else a merge commit), a
+    fast-forward only (refused when it cannot), always a merge commit
+    (`--no-ff`), or squashed (`--squash`: the changes are staged with no
+    commit, for one commit of the user's own). }
+  TGittanMergeWay = (mwMerge, mwFastForward, mwMergeCommit, mwSquash);
 
   {** What Clean removes: the files git neither tracks nor ignores
     (cnUntracked, `git clean`), the ignored ones alone (cnIgnored, `-X`)
@@ -286,9 +292,6 @@ type
     FConflictsOf: string;
     FConflicts: integer;
     FConflictPaths: TStringArray;
-    {** The folder a linked worktree's git directory shares with the
-      main one (its commondir file), else the git directory itself. }
-    function CommonDir: string;
     function RunGit(const ADir: string; const AArgs: array of string;
       out AOutput: string; const AIndexFile: string = ''): boolean;
     function RunRemote(const AArgs: array of string): boolean;
@@ -629,10 +632,19 @@ type
     {** Whether the commit AAncestor is in the history of ADescendant. }
     function IsAncestor(const AAncestor, ADescendant: string): boolean;
     {** Merges ARef (a branch, tag or commit) into the branch HEAD is on,
-      with git's message (`git merge --no-edit`). False when nothing was
-      merged; AConflicts is then set when git stopped merging with
-      conflicts to resolve, which the Commit section carries on. }
-    function MergeRef(const ARef: string; out AConflicts: boolean): boolean;
+      with git's message (`git merge --no-edit`), the way AWay says.
+      False when nothing was merged; AConflicts is then set when git
+      stopped merging with conflicts to resolve, which the Commit
+      section carries on. A squash leaves the changes staged and the
+      message in SQUASH_MSG (SquashPending, MergeMessage). }
+    function MergeRef(const ARef: string; out AConflicts: boolean;
+      AWay: TGittanMergeWay = mwMerge): boolean;
+    {** What merging ARef into HEAD would bring: ACount commits HEAD
+      lacks (0 when it has them all), and AFastForward when HEAD has no
+      commits of its own since they parted, so the branch can move
+      forward to ARef with no merge commit. }
+    function CommitsToMerge(const ARef: string; out ACount: integer;
+      out AFastForward: boolean): boolean;
     {** Replays the commits the branch HEAD is on made since it left AOnto
       (a branch, tag or commit) on top of AOnto (`git rebase --autostash`,
       so local changes are stashed and put back). False when git refused;
@@ -758,12 +770,20 @@ type
       the rebased branch out again. Not for a merge. }
     function QuitOperation: boolean;
     {** The message git prepared for the merge, cherry-pick or revert in
-      progress (MERGE_MSG in the git directory), its comment lines left
+      progress (MERGE_MSG in the git directory), or for a squash merge
+      staged and not yet committed (SQUASH_MSG), its comment lines left
       out; empty when there is none. }
     function MergeMessage: string;
+    {** Whether a squash merge is staged and not yet committed: git
+      left SQUASH_MSG in the git directory, which the next commit
+      takes away. }
+    function SquashPending: boolean;
     {** The e-mail the repository commits under (`git config
       user.email`), empty when none is set. }
     function UserEmail: string;
+    {** The authors of the last AMax commits as "Name <e-mail>", each
+      once, the latest first; for the co-authors to pick from. }
+    function RecentAuthors(AMax: integer = 500): TStringArray;
     {** Sets the name and e-mail commits are made under: in the user's
       global git config with AGlobal, else in the repository's own. With
       AGlobal the repository's own are unset, since they would go
@@ -774,15 +794,19 @@ type
     function HasLocalIdentity: boolean;
     {** Whether commits in the repository are signed off, as Gittan keeps
       it in the repository's own config (`gittan.signOff`), so it holds
-      for that repository and its worktrees alone. }
-    function SignOff: boolean;
-    {** Keeps ASignOff for SignOff, unsetting the key when off. }
-    function SetSignOff(ASignOff: boolean): boolean;
+      for that repository and its worktrees alone; ADefault (what
+      .gittan/repo.toml says) while the key is not set. }
+    function SignOff(ADefault: boolean = False): boolean;
+    {** Keeps ASignOff for SignOff: the key is unset when it is ADefault,
+      else set to true or false. }
+    function SetSignOff(ASignOff: boolean; ADefault: boolean = False): boolean;
     {** The message commit.template names (a path from the root when
-      relative, ~ expanded), without its comment lines, which git takes
-      out only when it opens an editor, and without the blank lines at
-      its end; '' without one or when it cannot be read. }
-    function CommitTemplate: string;
+      relative, ~ expanded), or AFallback (a path from the root, what
+      .gittan/repo.toml names) when git config names none, without its
+      comment lines, which git takes out only when it opens an editor,
+      and without the blank lines at its end; '' without one or when it
+      cannot be read. }
+    function CommitTemplate(const AFallback: string = ''): string;
     {** Tells git how the repository pulls a branch that has diverged, in
       its own config, so Pull(pmAuto) asks no more: ARebase sets
       pull.rebase true, else pull.rebase false with pull.ff true (a
@@ -923,6 +947,10 @@ type
     {** The git directory of the work tree (a linked work tree has one of
       its own), empty when nothing is open. }
     function GitDir: string;
+    {** The folder a linked worktree's git directory shares with the
+      main one (its commondir file), else the git directory itself;
+      empty when nothing is open. }
+    function CommonDir: string;
     {** What git is in the middle of: "merging", "rebasing",
       "cherry-picking", "reverting" or "bisecting", from the files it
       leaves in the git directory meanwhile; empty when nothing. }
@@ -1170,6 +1198,32 @@ function GitVersionSupported(AMajor, AMinor: integer): boolean;
 {** Whether the git GitExe runs has `merge-tree --write-tree`, 2.38 or
   later; asked once per git, SetGitExe forgets the answer. }
 function GitHasMergeTree: boolean;
+
+{** AMessage with a "Co-authored-by: Name <e-mail>" trailer for each of
+  ACoAuthors not already in it: in the last paragraph when that is a
+  block of trailers ("Key: value" lines), else in a new one, so git's
+  --signoff adds its line to the same block. }
+function WithCoAuthors(const AMessage: string; const ACoAuthors: array of string): string;
+
+{** The arguments that make git write the merge base into a conflict's
+  markers (merge.conflictStyle zdiff3, or diff3 before git 2.35), so
+  the merge editor can show it: ['-c', 'merge.conflictStyle=zdiff3'],
+  or none when the config of the repository at ARoot sets a style of
+  its own, which is kept. They go before the command. Whether the
+  repository sets one is remembered per root for as long as its config
+  file (RepoConfigPath) keeps its time and size, so a merge costs no
+  git config call of its own; a style set in the global config
+  afterwards is seen at the next start or SetGitExe. }
+function ConflictStyleArgs(const ARoot: string): TStringArray;
+
+{** The config file of the repository whose work tree is at ARoot:
+  .git/config, or through a worktree's .git file and its commondir; ''
+  when it cannot be told without git. }
+function RepoConfigPath(const ARoot: string): string;
+
+{** AArgs, a git command that may stop with conflicts, with
+  ConflictStyleArgs before it. }
+function WithConflictStyle(const ARoot: string; const AArgs: array of string): TStringArray;
 
 {** What a git call answers when git could not be started: that none
   was found, when AExe is the plain "git" SetGitExe falls back to, else
@@ -1518,6 +1572,20 @@ var
     An integer, so a watcher thread asking while the main thread sets
     another git at most asks twice. }
   GMergeTree: integer = -1;
+  { The conflict style ConflictStyleArgs asks for, found once: 0 not
+    asked yet, 1 zdiff3, 2 diff3 (an integer, as GMergeTree, since a
+    job's thread may ask too). }
+  GConflictStyle: integer = 0;
+  { Per root, whether its config sets merge.conflictStyle, with the
+    time and size of the config file it was read from; under
+    GConflictLock, since the jobs' threads run merges too. }
+  GConflictOwn: array of record
+    Root, ConfigPath: string;
+    Age: longint;
+    Size: int64;
+    Own: boolean;
+  end;
+  GConflictLock: TRTLCriticalSection;
 
 function ToolSearchPath: string;
 begin
@@ -1575,6 +1643,17 @@ begin
   Result := GMergeTree = 1;
 end;
 
+function WithConflictStyle(const ARoot: string; const AArgs: array of string): TStringArray;
+var
+  i, n: integer;
+begin
+  Result := ConflictStyleArgs(ARoot);
+  n := Length(Result);
+  SetLength(Result, n + Length(AArgs));
+  for i := 0 to High(AArgs) do
+    Result[n + i] := AArgs[i];
+end;
+
 function GitNotRunMessage(const AExe: string): string;
 begin
   if (AExe = '') or (AExe = 'git') then
@@ -1606,6 +1685,13 @@ begin
   if Exe = GGitExe then
     Exit;
   GMergeTree := -1;
+  GConflictStyle := 0;
+  EnterCriticalSection(GConflictLock);
+  try
+    GConflictOwn := nil;
+  finally
+    LeaveCriticalSection(GConflictLock);
+  end;
   { One string per path git ran by, not one per call: the settings set
     it again on every save. A path set again is the kept string itself,
     so the one in use is always kept or new, never a copy freed later. }
@@ -2238,15 +2324,20 @@ var
   Args, Env: array of string;
   Status, i: integer;
 begin
-  SetLength(Args, 4 + Length(AArgs));
+  SetLength(Args, 6 + Length(AArgs));
   Args[0] := '-c';
   Args[1] := 'core.quotepath=false';
   { With it git writes a blank context line as an empty line, not a
     space, and the readers of a hunk would lose the line. }
   Args[2] := '-c';
   Args[3] := 'diff.suppressBlankEmpty=false';
+  { With it git log writes gpg's or ssh-keygen's text before each
+    commit, whatever --format says, and the readers would lose the
+    records. }
+  Args[4] := '-c';
+  Args[5] := 'log.showSignature=false';
   for i := 0 to High(AArgs) do
-    Args[4 + i] := AArgs[i];
+    Args[6 + i] := AArgs[i];
   SetLength(Env, Length(AEnv) + 4);
   for i := 0 to High(AEnv) do
     Env[i] := AEnv[i];
@@ -2997,6 +3088,35 @@ begin
   Result := Trim(Result);
 end;
 
+function TGittanRepo.RecentAuthors(AMax: integer): TStringArray;
+var
+  Output: string;
+  Lines, Seen: TStringList;
+  i: integer;
+begin
+  Result := nil;
+  if (FRoot = '') or not RunGit(FRoot, ['log', '-n', IntToStr(AMax),
+    '--format=%an <%ae>'], Output) then
+    Exit;
+  Lines := TStringList.Create;
+  Seen := TStringList.Create;
+  try
+    Seen.CaseSensitive := True;
+    Seen.Sorted := True;
+    Lines.Text := Output;
+    for i := 0 to Lines.Count - 1 do
+      if (Trim(Lines[i]) <> '') and (Seen.IndexOf(Trim(Lines[i])) < 0) then
+      begin
+        Seen.Add(Trim(Lines[i]));
+        SetLength(Result, Length(Result) + 1);
+        Result[High(Result)] := Trim(Lines[i]);
+      end;
+  finally
+    Seen.Free;
+    Lines.Free;
+  end;
+end;
+
 { A key with several values (a config edited by hand) is set with
   --replace-all and taken out with --unset-all, where a plain set or
   --unset refuses it, and the local ones would then go before the
@@ -3035,29 +3155,104 @@ begin
     RunGit(FRoot, ['config', '--local', 'user.email'], Output));
 end;
 
-function TGittanRepo.SignOff: boolean;
+function TGittanRepo.SignOff(ADefault: boolean): boolean;
 var
   Output: string;
 begin
-  Result := (FRoot <> '') and RunGit(FRoot, ['config', '--local', '--bool', 'gittan.signOff'],
-    Output) and (Trim(Output) = 'true');
+  if FRoot = '' then
+    Exit(False);
+  { git config exits with 1 for a key that is not set. }
+  if RunGit(FRoot, ['config', '--local', '--bool', 'gittan.signOff'], Output) then
+    Result := Trim(Output) = 'true'
+  else
+    Result := ADefault;
 end;
 
-function TGittanRepo.CommitTemplate: string;
+{ Whether AFileName, expanded, is a file under ARoot reached through
+  no link: neither the file nor a folder between the root and it is a
+  symbolic link (or on Windows a reparse point), and nothing is in .git,
+  so a path a cloned file names cannot read what lies outside the
+  checkout or git's own files. }
+function FileInCheckout(const ARoot, AFileName: string): boolean;
+
+  function IsLink(const APath: string): boolean;
+  var
+    Link: TRawbyteSymLinkRec;
+    Info: TSearchRec;
+  begin
+    Result := FileGetSymLinkTarget(APath, Link);
+    if not Result and (FindFirst(APath, faAnyFile or faSymLink, Info) = 0) then
+    begin
+      Result := (Info.Attr and faSymLink) <> 0;
+      FindClose(Info);
+    end;
+  end;
+
+var
+  Root, Rest, Path: string;
+  Parts: TStringArray;
+  i: integer;
+begin
+  Result := False;
+  Root := IncludeTrailingPathDelimiter(ExpandFileName(ARoot));
+  { The two are expanded from the same root, so its case is the same;
+    on a case-sensitive Mac volume /x/repo beside /x/Repo is another
+    folder. Windows may give a drive letter in another case. }
+  {$IFDEF WINDOWS}
+  if not SameText(Copy(AFileName, 1, Length(Root)), Root) then
+  {$ELSE}
+  if Copy(AFileName, 1, Length(Root)) <> Root then
+  {$ENDIF}
+    Exit;
+  Rest := Copy(AFileName, Length(Root) + 1, MaxInt);
+  if Rest = '' then
+    Exit;
+  Parts := Rest.Split([PathDelim]);
+  Path := ExcludeTrailingPathDelimiter(Root);
+  for i := 0 to High(Parts) do
+  begin
+    if Parts[i] = '' then
+      Continue;
+    { Nothing of git's own: .git/config may hold a remote's token. }
+    if SameText(Parts[i], '.git') then
+      Exit;
+    Path := Path + PathDelim + Parts[i];
+    if IsLink(Path) then
+      Exit;
+  end;
+  Result := FileExists(AFileName);
+end;
+
+function TGittanRepo.CommitTemplate(const AFallback: string): string;
 var
   Output, FileName, Comment: string;
   Lines: TStringList;
   i: integer;
 begin
   Result := '';
-  if (FRoot = '') or not RunGit(FRoot, ['config', '--path', 'commit.template'], Output) then
+  if FRoot = '' then
     Exit;
+  if not RunGit(FRoot, ['config', '--path', 'commit.template'], Output) then
+    Output := '';
   FileName := Trim(Output);
   if FileName = '' then
-    Exit;
-  FileName := ExpandFileName(IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(FileName));
-  if not FileExists(FileName) then
-    FileName := ExpandFileName(SetDirSeparators(Trim(Output)));
+  begin
+    { The repository's own, a path from the root that a clone brings:
+      a file in the checkout, never one beside it (../) or through a
+      link, whose text would go into a message to be pushed. }
+    if Trim(AFallback) = '' then
+      Exit;
+    FileName := ExpandFileName(IncludeTrailingPathDelimiter(FRoot) +
+      SetDirSeparators(Trim(AFallback)));
+    if not FileInCheckout(FRoot, FileName) then
+      Exit;
+  end
+  else
+  begin
+    FileName := ExpandFileName(IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(FileName));
+    if not FileExists(FileName) then
+      FileName := ExpandFileName(SetDirSeparators(Trim(Output)));
+  end;
   if not FileExists(FileName) then
     Exit;
   { The comment lines start as git's own do: core.commentString (or
@@ -3112,24 +3307,27 @@ begin
 end;
 
 { --unset fails (5) when the key is not there, which is what off is. }
-function TGittanRepo.SetSignOff(ASignOff: boolean): boolean;
+function TGittanRepo.SetSignOff(ASignOff: boolean; ADefault: boolean): boolean;
 var
   Output, Err: string;
 begin
   if FRoot = '' then
     Exit(False);
-  if ASignOff then
-    Exit(RunGit(FRoot, ['config', '--local', 'gittan.signOff', 'true'], Output));
+  { Against the default the key says so; with it the key goes, so a
+    change of the default reaches the repository. }
+  if ASignOff <> ADefault then
+    Exit(RunGit(FRoot, ['config', '--local', '--replace-all', 'gittan.signOff',
+      BoolToStr(ASignOff, 'true', 'false')], Output) and (SignOff(ADefault) = ASignOff));
   { --unset-all fails when the key is not there, which is no failure. }
   RunGitIn(FRoot, ['config', '--local', '--unset-all', 'gittan.signOff'], Output, Err);
-  Result := not SignOff;
+  Result := SignOff(ADefault) = ASignOff;
   if Result then
     Exit;
   Err := Trim(Err);
   if Err <> '' then
     FError := Err
   else
-    FError := 'Sign-off is still on: another git config sets gittan.signOff.';
+    FError := 'Sign-off did not change: another git config sets gittan.signOff.';
 end;
 
 function TGittanRepo.RemoteFor(const ARepoPath: string): string;
@@ -3748,9 +3946,9 @@ begin
   end;
   Ref := 'stash@{' + IntToStr(Index) + '}';
   if APop then
-    Result := RunGit(FRoot, ['stash', 'pop', Ref], Output)
+    Result := RunGit(FRoot, WithConflictStyle(FRoot, ['stash', 'pop', Ref]), Output)
   else
-    Result := RunGit(FRoot, ['stash', 'apply', Ref], Output);
+    Result := RunGit(FRoot, WithConflictStyle(FRoot, ['stash', 'apply', Ref]), Output);
   if not Result then
     AConflicts := RunGitIn(FRoot, ['ls-files', '-u'], Output, Ignored) and
       (Trim(Output) <> '');
@@ -4223,6 +4421,120 @@ begin
   {$endif}
 end;
 
+function RepoConfigPath(const ARoot: string): string;
+var
+  Dir, Line: string;
+begin
+  Result := '';
+  if ARoot = '' then
+    Exit;
+  Dir := IncludeTrailingPathDelimiter(ARoot) + '.git';
+  if FileExists(Dir) and not DirectoryExists(Dir) then
+  begin
+    { A worktree's .git file: "gitdir: <path>". }
+    Line := Trim(ReadFileBytes(Dir));
+    if Pos('gitdir:', Line) <> 1 then
+      Exit;
+    Dir := Trim(Copy(Line, 8, MaxInt));
+    if not IsAbsolutePath(Dir) then
+      Dir := ExpandFileName(IncludeTrailingPathDelimiter(ARoot) + Dir);
+    if FileExists(IncludeTrailingPathDelimiter(Dir) + 'commondir') then
+    begin
+      Line := Trim(ReadFileBytes(IncludeTrailingPathDelimiter(Dir) + 'commondir'));
+      if Line <> '' then
+        if IsAbsolutePath(Line) then
+          Dir := Line
+        else
+          Dir := ExpandFileName(IncludeTrailingPathDelimiter(Dir) + Line);
+    end;
+  end;
+  if DirectoryExists(Dir) then
+    Result := IncludeTrailingPathDelimiter(Dir) + 'config';
+end;
+
+{ The time and size of the file, -1 and -1 when it is not there. }
+procedure FileStamp(const APath: string; out AAge: longint; out ASize: int64);
+var
+  Info: TSearchRec;
+begin
+  AAge := -1;
+  ASize := -1;
+  if (APath <> '') and (FindFirst(APath, faAnyFile, Info) = 0) then
+  begin
+    AAge := Info.Time;
+    ASize := Info.Size;
+    FindClose(Info);
+  end;
+end;
+
+{ Whether the repository at ARoot sets merge.conflictStyle itself, from
+  what is remembered while its config file is unchanged, else asked of
+  git and remembered. }
+function OwnConflictStyle(const ARoot: string): boolean;
+var
+  Output, Err, Path: string;
+  Age: longint;
+  Size: int64;
+  i, At: integer;
+begin
+  Path := RepoConfigPath(ARoot);
+  FileStamp(Path, Age, Size);
+  if Path <> '' then
+  begin
+    EnterCriticalSection(GConflictLock);
+    try
+      for i := 0 to High(GConflictOwn) do
+        if (GConflictOwn[i].Root = ARoot) and (GConflictOwn[i].ConfigPath = Path) and
+          (GConflictOwn[i].Age = Age) and (GConflictOwn[i].Size = Size) then
+          Exit(GConflictOwn[i].Own);
+    finally
+      LeaveCriticalSection(GConflictLock);
+    end;
+  end;
+  Result := RunGitIn(ARoot, ['config', '--get', 'merge.conflictStyle'], Output, Err) and
+    (Trim(Output) <> '');
+  if Path = '' then
+    Exit;
+  EnterCriticalSection(GConflictLock);
+  try
+    At := -1;
+    for i := 0 to High(GConflictOwn) do
+      if GConflictOwn[i].Root = ARoot then
+        At := i;
+    if At < 0 then
+    begin
+      At := Length(GConflictOwn);
+      SetLength(GConflictOwn, At + 1);
+    end;
+    GConflictOwn[At].Root := ARoot;
+    GConflictOwn[At].ConfigPath := Path;
+    GConflictOwn[At].Age := Age;
+    GConflictOwn[At].Size := Size;
+    GConflictOwn[At].Own := Result;
+  finally
+    LeaveCriticalSection(GConflictLock);
+  end;
+end;
+
+function ConflictStyleArgs(const ARoot: string): TStringArray;
+var
+  Version: string;
+  Major, Minor: integer;
+begin
+  Result := nil;
+  if (ARoot <> '') and OwnConflictStyle(ARoot) then
+    Exit;
+  if GConflictStyle = 0 then
+    if GitVersion(Version, Major, Minor) and ((Major > 2) or ((Major = 2) and (Minor >= 35))) then
+      GConflictStyle := 1
+    else
+      GConflictStyle := 2;
+  if GConflictStyle = 1 then
+    Result := ['-c', 'merge.conflictStyle=zdiff3']
+  else
+    Result := ['-c', 'merge.conflictStyle=diff3'];
+end;
+
 function TGittanRepo.LastFetch: TDateTime;
 var
   Name: string;
@@ -4277,14 +4589,17 @@ begin
   ADiverged := False;
   case AMode of
     pmMerge:
-      Result := RunRemote(['pull', '--progress', '--no-rebase', '--ff', '--no-edit']);
+      Result := RunRemote(WithConflictStyle(FRoot, ['pull', '--progress', '--no-rebase', '--ff',
+        '--no-edit']));
     pmRebase:
-      Result := RunRemote(['pull', '--progress', '--rebase', '--autostash']);
+      Result := RunRemote(WithConflictStyle(FRoot, ['pull', '--progress', '--rebase',
+        '--autostash']));
     else
       if PullRebases(FRoot, Branch) then
-        Result := RunRemote(['pull', '--progress', '--autostash', '--no-edit'])
+        Result := RunRemote(WithConflictStyle(FRoot, ['pull', '--progress', '--autostash',
+          '--no-edit']))
       else if PullConfigured(FRoot, Branch) then
-        Result := RunRemote(['pull', '--progress', '--no-edit'])
+        Result := RunRemote(WithConflictStyle(FRoot, ['pull', '--progress', '--no-edit']))
       else
         Result := RunRemote(['pull', '--progress', '--ff-only']);
   end;
@@ -4929,6 +5244,75 @@ begin
     RunGit(FRoot, ['merge-base', '--is-ancestor', AAncestor, ADescendant], Output);
 end;
 
+{ A trailer line is a token of letters and dashes, a colon and a space. }
+function IsTrailerLine(const ALine: string): boolean;
+var
+  i: integer;
+begin
+  i := Pos(': ', ALine);
+  Result := i > 1;
+  if Result then
+    for i := 1 to i - 1 do
+      if not (ALine[i] in ['A'..'Z', 'a'..'z', '-']) then
+        Exit(False);
+end;
+
+function WithCoAuthors(const AMessage: string; const ACoAuthors: array of string): string;
+var
+  Lines: TStringList;
+  i, k, Last, Start: integer;
+  Block, Known: boolean;
+  Line: string;
+begin
+  Result := TrimRight(AMessage);
+  if Length(ACoAuthors) = 0 then
+    Exit;
+  Lines := TStringList.Create;
+  try
+    { LF on Windows too, as git writes a message. }
+    Lines.LineBreak := #10;
+    Lines.Text := Result;
+    { Whether the last paragraph is trailers alone. }
+    Last := Lines.Count - 1;
+    Block := Last >= 0;
+    i := Last;
+    while (i >= 0) and (Trim(Lines[i]) <> '') do
+    begin
+      if not IsTrailerLine(Lines[i]) then
+        Block := False;
+      Dec(i);
+    end;
+    { The first paragraph is the subject, never a trailer block. }
+    if i < 0 then
+      Block := False;
+    Start := i + 1;
+    for i := 0 to High(ACoAuthors) do
+    begin
+      Line := 'Co-authored-by: ' + Trim(ACoAuthors[i]);
+      { Already credited only in the trailers: the same line in the
+        body, a paragraph above, is no trailer git reads. }
+      Known := False;
+      if Block then
+        for k := Start to Lines.Count - 1 do
+          if Lines[k] = Line then
+            Known := True;
+      if Known then
+        Continue;
+      if not Block then
+      begin
+        if Lines.Count > 0 then
+          Lines.Add('');
+        Block := True;
+        Start := Lines.Count;
+      end;
+      Lines.Add(Line);
+    end;
+    Result := TrimRight(Lines.Text);
+  finally
+    Lines.Free;
+  end;
+end;
+
 { Runs a command that makes a commit, as the comment above says. AError
   keeps git's reason; AConflicts is set when it stopped with conflicts. }
 function RunCommitting(ARepo: TGittanRepo; const ARoot: string;
@@ -4937,23 +5321,60 @@ var
   Output, Ignored: string;
 begin
   AConflicts := False;
-  Result := RunGitEnv(ARoot, AArgs, ['GIT_EDITOR=:'], Output, AError);
+  Result := RunGitEnv(ARoot, WithConflictStyle(ARoot, AArgs), ['GIT_EDITOR=:'], Output, AError);
   if Result then
     Exit;
   AConflicts := (ARepo.Operation <> '') and
     RunGitIn(ARoot, ['ls-files', '-u'], Output, Ignored) and (Trim(Output) <> '');
 end;
 
-function TGittanRepo.MergeRef(const ARef: string; out AConflicts: boolean): boolean;
+function TGittanRepo.MergeRef(const ARef: string; out AConflicts: boolean;
+  AWay: TGittanMergeWay): boolean;
 var
-  Err: string;
+  Err, Output, Ignored: string;
 begin
   AConflicts := False;
   if FRoot = '' then
     Exit(False);
-  Result := RunCommitting(Self, FRoot, ['merge', '--no-edit', ARef], AConflicts, Err);
+  case AWay of
+    mwFastForward:
+      Result := RunCommitting(Self, FRoot, ['merge', '--ff-only', ARef], AConflicts, Err);
+    mwMergeCommit:
+      Result := RunCommitting(Self, FRoot, ['merge', '--no-ff', '--no-edit', ARef], AConflicts, Err);
+    mwSquash:
+    begin
+      { A squash writes no MERGE_HEAD, so git is in the middle of
+        nothing when it stops; the unmerged entries say it did. }
+      Result := RunCommitting(Self, FRoot, ['merge', '--squash', ARef], AConflicts, Err);
+      if not Result then
+        AConflicts := RunGitIn(FRoot, ['ls-files', '-u'], Output, Ignored) and
+          (Trim(Output) <> '');
+    end;
+    else
+      Result := RunCommitting(Self, FRoot, ['merge', '--no-edit', ARef], AConflicts, Err);
+  end;
   if not Result then
     FError := Err;
+end;
+
+{ rev-list counts the commits on ARef but not on HEAD; HEAD among ARef's
+  ancestors means the branch has none of its own since they parted. }
+function TGittanRepo.CommitsToMerge(const ARef: string; out ACount: integer;
+  out AFastForward: boolean): boolean;
+var
+  Output: string;
+begin
+  ACount := 0;
+  AFastForward := False;
+  { A failed git keeps its own message in FError. }
+  Result := (FRoot <> '') and RunGit(FRoot, ['rev-list', '--count', 'HEAD..' + ARef], Output);
+  if not Result then
+    Exit;
+  Result := TryStrToInt(Trim(Output), ACount);
+  if not Result then
+    FError := 'git rev-list gave no count: ' + Trim(Output)
+  else if ACount > 0 then
+    AFastForward := IsAncestor('HEAD', ARef);
 end;
 
 function TGittanRepo.RebaseOnto(const AOnto: string; out AConflicts: boolean): boolean;
@@ -5098,7 +5519,8 @@ begin
       FError := Format('Could not write the rebase files in %s.', [Folder]);
       Exit(False);
     end;
-  Result := RunGitEnv(FRoot, ['rebase', '-i', '--autostash', '--empty=keep', AOnto],
+  Result := RunGitEnv(FRoot, WithConflictStyle(FRoot, ['rebase', '-i', '--autostash',
+    '--empty=keep', AOnto]),
     ['GIT_SEQUENCE_EDITOR=cp ' + ShellQuote(Folder + 'todo'), 'GIT_EDITOR=:'], Output, Err);
   if Operation = 'rebasing' then
   begin
@@ -5772,7 +6194,8 @@ begin
   end;
   if not RunGit(FRoot, ['add', '-u'], Output) then
     Exit(False);
-  Result := RunGitEnv(FRoot, [Command, '--continue'], ['GIT_EDITOR=:'], Output, Err);
+  Result := RunGitEnv(FRoot, WithConflictStyle(FRoot, [Command, '--continue']), ['GIT_EDITOR=:'],
+    Output, Err);
   if Result then
   begin
     if Operation = '' then
@@ -5831,7 +6254,7 @@ end;
 
 function TGittanRepo.SkipOperation: boolean;
 var
-  Command, Output: string;
+  Command, Output, Err: string;
 begin
   Command := OperationCommand(Operation);
   if (FRoot = '') or (Command = '') or (Command = 'merge') then
@@ -5839,9 +6262,18 @@ begin
     FError := 'There is no commit to skip.';
     Exit(False);
   end;
-  Result := RunGit(FRoot, [Command, '--skip'], Output);
-  if Result and (Operation = '') then
-    CleanRebaseFiles;
+  Result := RunGitEnv(FRoot, WithConflictStyle(FRoot, [Command, '--skip']), ['GIT_EDITOR=:'],
+    Output, Err);
+  if Result then
+  begin
+    if Operation = '' then
+      CleanRebaseFiles;
+    Exit;
+  end;
+  FError := Err;
+  { Stopped at a later commit with conflicts of its own: skipping worked. }
+  Result := (Operation <> '') and RunGit(FRoot, ['ls-files', '-u'], Output) and
+    (Trim(Output) <> '');
 end;
 
 function TGittanRepo.AbortOperation: boolean;
@@ -5880,12 +6312,17 @@ end;
   told afterwards; # stands in then. }
 function TGittanRepo.MergeMessage: string;
 var
-  Dir, Line, Comment: string;
+  Dir, FileName, Line, Comment: string;
   Lines: TStringList;
 begin
   Result := '';
   Dir := GitDir;
-  if (Dir = '') or not FileExists(IncludeTrailingPathDelimiter(Dir) + 'MERGE_MSG') then
+  if Dir = '' then
+    Exit;
+  FileName := IncludeTrailingPathDelimiter(Dir) + 'MERGE_MSG';
+  if not FileExists(FileName) then
+    FileName := IncludeTrailingPathDelimiter(Dir) + 'SQUASH_MSG';
+  if not FileExists(FileName) then
     Exit;
   if not RunGit(FRoot, ['config', '--get', 'core.commentString'], Comment) and
     not RunGit(FRoot, ['config', '--get', 'core.commentChar'], Comment) then
@@ -5895,7 +6332,7 @@ begin
     Comment := '#';
   Lines := TStringList.Create;
   try
-    Lines.LoadFromFile(IncludeTrailingPathDelimiter(Dir) + 'MERGE_MSG');
+    Lines.LoadFromFile(FileName);
     for Line in Lines do
       if not Line.StartsWith(Comment) then
         Result := Result + Line + #10;
@@ -5903,6 +6340,14 @@ begin
     Lines.Free;
   end;
   Result := Trim(Result);
+end;
+
+function TGittanRepo.SquashPending: boolean;
+var
+  Dir: string;
+begin
+  Dir := GitDir;
+  Result := (Dir <> '') and FileExists(IncludeTrailingPathDelimiter(Dir) + 'SQUASH_MSG');
 end;
 
 function TGittanRepo.HeadMessage(out AMessage: string): boolean;
@@ -7126,6 +7571,26 @@ var
   FileName, Id, Left, Right: string;
 
   i: integer;
+
+  { The name, time and size of each file in ADir, none when it is not
+    there. }
+  procedure AddStats(const ADir: string);
+  var
+    F: TSearchRec;
+  begin
+    if FindFirst(IncludeTrailingPathDelimiter(ADir) + AllFilesMask, faAnyFile, F) <> 0 then
+      Exit;
+    try
+      repeat
+        if F.Attr and faDirectory = 0 then
+          Result := Result + 'setting ' + F.Name + ' ' +
+            FormatDateTime('yyyymmddhhnnsszzz', F.TimeStamp) + ' ' + IntToStr(F.Size) + #10;
+      until FindNext(F) <> 0;
+    finally
+      FindClose(F);
+    end;
+  end;
+
 begin
   Result := '';
   if FRoot = '' then
@@ -7181,6 +7646,20 @@ begin
       end;
     for i := 0 to Paths.Count - 1 do
       Result := Result + IntToStr(PtrUInt(Paths.Objects[i])) + ' ' + Paths[i] + #10;
+    { What Gittan reads of the repository's own settings, on disk
+      whatever is compared: the .gittan folder (repo.toml, the commands
+      files, gittan.repoconfig and gittan.repocommands) and the personal
+      commands file in the git directory, which no status lists and
+      another worktree may change. }
+    AddStats(IncludeTrailingPathDelimiter(FRoot) + '.gittan');
+    AddStats(IncludeTrailingPathDelimiter(FRoot) + '.gittan' + PathDelim + 'commands');
+    if (FGitDir <> '') and StatExact(IncludeTrailingPathDelimiter(CommonDir) + 'gittan' +
+      PathDelim + 'commands.toml', Info) then
+    begin
+      Result := Result + 'personal ' + FormatDateTime('yyyymmddhhnnsszzz', Info.TimeStamp) +
+        ' ' + IntToStr(Info.Size) + #10;
+      FindClose(Info);
+    end;
     { Between two commits the files on disk do not matter. }
     if IsRange then
       Exit;
@@ -7700,12 +8179,14 @@ initialization
   {$ifdef unix}
   InitCriticalSection(GSpawnLock);
   {$endif}
+  InitCriticalSection(GConflictLock);
   GToolPath := MakeToolPath;
   GOldGitExes := TStringList.Create;
   SetGitExe('');
 
 finalization
   GOldGitExes.Free;
+  DoneCriticalSection(GConflictLock);
   {$ifdef unix}
   DoneCriticalSection(GSpawnLock);
   {$endif}

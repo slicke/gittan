@@ -21,6 +21,7 @@ type
     procedure TestHosts;
     procedure TestAccounts;
     procedure TestAccountsSwitchedAtOnce;
+    procedure TestNeedsLogin;
     procedure TestParsePullRequest;
     procedure TestParsePullRequests;
     procedure TestWithoutReviewed;
@@ -52,6 +53,23 @@ const
     '{"author":null,"state":"COMMENTED"},{"author":{"login":"eve"},"state":"COMMENTED"}],' +
     '"reviewRequests":[{"__typename":"Team","name":"Core","slug":"core"},' +
     '{"__typename":"User","login":"dan"}]}';
+
+procedure TGitHubTest.TestNeedsLogin;
+begin
+  AssertEquals('auth login', TGittanGitHubForge.LoginArgs);
+  AssertTrue('logged out', TGittanGitHubForge.NeedsLogin(
+    'To get started with GitHub CLI, please run:  gh auth login' + LineEnding +
+    'Alternatively, populate the GH_TOKEN environment variable with a GitHub API ' +
+    'authentication token.'));
+  AssertTrue('token refused', TGittanGitHubForge.NeedsLogin(
+    'HTTP 401: Bad credentials (https://api.github.com/graphql)' + LineEnding +
+    'Try authenticating with:  gh auth login'));
+  AssertFalse('other error', TGittanGitHubForge.NeedsLogin(
+    'error connecting to api.github.com'));
+  AssertFalse('none', TGittanGitHubForge.NeedsLogin(''));
+  AssertEquals('base', '', TGittanForge.LoginArgs);
+  AssertFalse('base never', TGittanForge.NeedsLogin('gh auth login'));
+end;
 
 procedure TGitHubTest.TestCliAllows;
 
@@ -466,6 +484,15 @@ begin
   AssertTrue(PullActionFits(Pull, plApprove));
   AssertTrue(PullActionFits(Pull, plSquash));
   AssertFalse('only a draft is marked ready', PullActionFits(Pull, plReady));
+  { One's own is neither approved nor asked changes of, as the forge
+    refuses; a comment and a merge are fine. }
+  Pull.Author := 'Maja';
+  AssertTrue('the viewer not known', PullActionFits(Pull, plApprove));
+  AssertTrue('another''s', PullActionFits(Pull, plApprove, 'sam'));
+  AssertFalse('one''s own', PullActionFits(Pull, plApprove, 'maja'));
+  AssertFalse('one''s own', PullActionFits(Pull, plRequestChanges, 'maja'));
+  AssertTrue(PullActionFits(Pull, plComment, 'maja'));
+  AssertTrue(PullActionFits(Pull, plMerge, 'maja'));
   Pull.IsDraft := True;
   AssertTrue(PullActionFits(Pull, plReady));
   AssertTrue('a draft is reviewed', PullActionFits(Pull, plComment));

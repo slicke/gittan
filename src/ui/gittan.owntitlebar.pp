@@ -92,6 +92,8 @@ type
       the forge has given one. }
     FForgeVisible, FForgeShown: boolean;
     FForgeHint: string;
+    { What waits for the user in the forge view, counted in a badge. }
+    FForgeCount: integer;
     FAvatar: TGittanAvatar;
     FHotPart, FPressedPart, FHotButton, FPressedButton: TGittanTitlePart;
     FHotIndex, FPressedIndex: integer;
@@ -169,9 +171,11 @@ type
       (there is a forge), in the accent while AShown (the forge view is
       shown), AHint its hint (the forge's name, with the login when it
       is known); APicture the bytes of the user's picture, drawn as a
-      disc in the globe's place, '' for the globe. }
+      disc in the globe's place, '' for the globe; ACount what waits
+      for the user there (pull requests to review), counted in a badge
+      at the globe's corner while the view is not shown, 0 for none. }
     procedure SetForge(AVisible, AShown: boolean; const AHint: string;
-      const APicture: string = '');
+      const APicture: string = ''; ACount: integer = 0);
     {** The chevrons: whether there is somewhere to go back (ABack) and
       forward (AForward) to, a dim chevron taking no click; ABackHint
       and AForwardHint their hints. }
@@ -246,6 +250,10 @@ const
   ForgeFoot = 4;
   ForgeNotch = 7;
   ForgeIconSize = 20;
+  { The badge that counts what waits in the forge view: its height (its
+    width too, up to nine) and its digits' font size. }
+  ForgeBadgeSize = 13;
+  ForgeBadgeFont = 7;
   CrossSize = 18;
   ButtonWidth = 46;
   BandHeight = 3;
@@ -674,11 +682,12 @@ begin
 end;
 
 procedure TGittanOwnTitleBar.SetForge(AVisible, AShown: boolean; const AHint: string;
-  const APicture: string);
+  const APicture: string; ACount: integer);
 begin
   FForgeVisible := AVisible;
   FForgeShown := AShown;
   FForgeHint := AHint;
+  FForgeCount := ACount;
   { Under the pointer, the hint follows at once. }
   if FHotPart = tpForge then
     Hint := FForgeHint;
@@ -828,6 +837,7 @@ var
   Ink, GlobeInk: TColor;
   Glyph: TGittanTitleGlyph;
   Shown, Hover: boolean;
+  Badge: string;
 
   procedure DrawButton(APart: TGittanTitlePart; const AR: TRect; AGlyph: TGittanTitleGlyph);
   var
@@ -1080,6 +1090,36 @@ begin
         (R.Bottom - W - L) div 2 + 1, L, GlobeInk);
     end;
     Canvas.Pen.Width := 1;
+    { What waits for the user, in a disc of the mark color at the top
+      right corner of the globe or the picture: the number up to nine,
+      "9+" in a wider one beyond; none while the view is shown, where
+      its tab has the dot. }
+    if (FForgeCount > 0) and not FForgeShown then
+    begin
+      if FForgeCount > 9 then
+        Badge := '9+'
+      else
+        Badge := IntToStr(FForgeCount);
+      Canvas.Font := Font;
+      Canvas.Font.Size := ForgeBadgeFont;
+      Canvas.Font.Style := [fsBold];
+      L := Scale96ToForm(ForgeBadgeSize);
+      C.Right := R.Right - 1;
+      C.Left := C.Right - Max(L, Canvas.TextWidth(Badge) + Scale96ToForm(6));
+      C.Top := Max(R.Top, (R.Bottom - W - Scale96ToForm(ForgeIconSize)) div 2 - Scale96ToForm(3));
+      C.Bottom := C.Top + L;
+      Canvas.Pen.Style := psClear;
+      Canvas.Brush.Style := bsSolid;
+      Canvas.Brush.Color := FMark;
+      Canvas.RoundRect(C.Left, C.Top, C.Right + 1, C.Bottom + 1, L, L);
+      Canvas.Pen.Style := psSolid;
+      Canvas.Brush.Style := bsClear;
+      Canvas.Font.Color := clWhite;
+      Canvas.TextOut(C.Left + (C.Width - Canvas.TextWidth(Badge)) div 2,
+        C.Top + (C.Height - Canvas.TextHeight(Badge)) div 2, Badge);
+      Canvas.Font := Font;
+      Canvas.Brush.Style := bsSolid;
+    end;
   end;
 
   if not FTabsOnly then

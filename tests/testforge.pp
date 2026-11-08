@@ -32,6 +32,8 @@ type
     procedure TestFindClones;
     procedure TestSiblingRepositories;
     procedure TestPullRequestOf;
+    procedure TestPullNext;
+    procedure TestSearchPulls;
     procedure TestRemoteHost;
     procedure TestRemoteRepoPath;
     procedure TestForgeFor;
@@ -203,7 +205,18 @@ procedure TForgeTest.TestParseErrors;
 var
   Login, Error, Url: string;
   MinePulls, ReviewPulls: TGittanForgePulls;
+  MineCount, ReviewCount: integer;
 begin
+  { The searches' totals, of which the answer gives the first fifty. }
+  AssertTrue(ParseForgeTotals(Answer, MineCount, ReviewCount));
+  AssertEquals(1, MineCount);
+  AssertEquals(2, ReviewCount);
+  AssertTrue(ParseForgeTotals('{"data":{"mine":{"issueCount":73,"nodes":[]},' +
+    '"review":{"issueCount":0,"nodes":[]}}}', MineCount, ReviewCount));
+  AssertEquals(73, MineCount);
+  AssertFalse('no counts', ParseForgeTotals('{"data":{"viewer":{"login":"x"}}}', MineCount,
+    ReviewCount));
+  AssertFalse(ParseForgeTotals('not json', MineCount, ReviewCount));
   AssertFalse(ParseForgeAnswer('', Login, MinePulls, ReviewPulls, Error));
   AssertFalse(ParseForgeAnswer('not json', Login, MinePulls, ReviewPulls, Error));
   AssertFalse(ParseForgeAnswer('[]', Login, MinePulls, ReviewPulls, Error));
@@ -402,8 +415,13 @@ begin
   SetLength(Pull.RequestedOf, 1);
   Pull.RequestedOf[0] := 'chef';
   AssertEquals('Waiting for chef', PullReviewNote(Pull));
-  AssertEquals('waiting for chef', PullReviewers(Pull));
+  AssertEquals('the chip names chef already', '', PullReviewers(Pull));
+  AssertTrue(ReviewNoteNamesAsked(Pull));
   AssertTrue(WaitsForReview(Pull));
+  Pull.IsDraft := True;
+  AssertFalse('a draft''s chip names nobody', ReviewNoteNamesAsked(Pull));
+  AssertEquals('waiting for chef', PullReviewers(Pull));
+  Pull.IsDraft := False;
   SetLength(Pull.RequestedOf, 2);
   Pull.RequestedOf[1] := 'core';
   AssertEquals('Waiting for 2 reviewers', PullReviewNote(Pull));
@@ -427,9 +445,14 @@ begin
   AssertEquals('Waiting for chef', PullReviewNote(Pull, 'anna'));
   SetLength(Pull.RequestedOf, 2);
 
-  { The decision wins over who is asked. }
+  { The decision wins over who is asked, and the line names them. }
   Pull.ReviewDecision := rdApproved;
   AssertEquals('Approved', PullReviewNote(Pull));
+  SetLength(Pull.RequestedOf, 1);
+  AssertFalse(ReviewNoteNamesAsked(Pull));
+  AssertEquals('anna approved · coderabbitai commented · carl requested changes · ' +
+    'waiting for chef', PullReviewers(Pull));
+  SetLength(Pull.RequestedOf, 2);
   AssertTrue(WaitsForReview(Pull));
   Pull.ReviewDecision := rdChangesRequested;
   AssertEquals('Changes requested', PullReviewNote(Pull));
@@ -842,6 +865,91 @@ begin
   AssertEquals(EncodeDateTime(2026, 10, 20, 12, 34, 56, 0), Pull.Created);
   AssertEquals(0, Pull.ChecksPending);
   AssertEquals('', Pull.Labels);
+end;
+
+{ The step a card offers: a review of one waiting for it, a merge of
+  one's own that nothing stands in the way of. }
+procedure TForgeTest.TestPullNext;
+var
+  Pull: TGittanForgePull;
+  Ignored: TStringList;
+begin
+  Pull := Default(TGittanForgePull);
+  Pull.Number := 7;
+  Pull.State := prOpen;
+  AssertTrue('one to review', PullNext(Pull, fsReview) = pnReview);
+  AssertTrue('no review needed, no checks', PullNext(Pull, fsMine) = pnMerge);
+  Pull.ReviewDecision := rdReviewRequired;
+  AssertTrue('waits for a review', PullNext(Pull, fsMine) = pnNone);
+  Pull.ReviewDecision := rdChangesRequested;
+  AssertTrue(PullNext(Pull, fsMine) = pnNone);
+  Pull.ReviewDecision := rdApproved;
+  AssertTrue('approved', PullNext(Pull, fsMine) = pnMerge);
+  Pull.IsDraft := True;
+  AssertTrue('a draft', PullNext(Pull, fsMine) = pnNone);
+  Pull.IsDraft := False;
+  { A review asked of someone where none is required. }
+  Pull.ReviewDecision := rdNone;
+  SetLength(Pull.RequestedOf, 1);
+  Pull.RequestedOf[0] := 'sam';
+  AssertTrue('asked of sam', PullNext(Pull, fsMine) = pnNone);
+  Pull.RequestedOf := nil;
+  { The checks: failing or running ones stand in the way, unless
+    ignored. }
+  SetLength(Pull.CheckList, 2);
+  Pull.CheckList[0].Name := 'build';
+  Pull.CheckList[0].State := chkPassed;
+  Pull.CheckList[1].Name := 'npm audit';
+  Pull.CheckList[1].State := chkFailed;
+  Pull.Checks := chkFailed;
+  AssertTrue('a check fails', PullNext(Pull, fsMine) = pnNone);
+  Ignored := TStringList.Create;
+  try
+    Ignored.Add('npm audit');
+    AssertTrue('the failing check ignored', PullNext(Pull, fsMine, Ignored) = pnMerge);
+  finally
+    Ignored.Free;
+  end;
+  Pull.CheckList[1].State := chkPending;
+  Pull.Checks := chkPending;
+  AssertTrue('a check runs', PullNext(Pull, fsMine) = pnNone);
+  Pull.CheckList[1].State := chkPassed;
+  Pull.Checks := chkPassed;
+  AssertTrue(PullNext(Pull, fsMine) = pnMerge);
+  Pull.State := prMerged;
+  AssertTrue('merged already', PullNext(Pull, fsMine) = pnNone);
+  AssertTrue(PullNext(Pull, fsReview) = pnNone);
+end;
+
+procedure TForgeTest.TestSearchPulls;
+var
+  Pulls, Found: TGittanForgePulls;
+begin
+  Pulls := nil;
+  SetLength(Pulls, 3);
+  Pulls[0].Number := 12;
+  Pulls[0].Title := 'Offline map tiles';
+  Pulls[0].Repo := 'trailhead/trailhead';
+  Pulls[0].Author := 'maja';
+  Pulls[0].HeadRef := 'feature/offline';
+  Pulls[1].Number := 120;
+  Pulls[1].Title := 'Summit icon';
+  Pulls[1].Repo := 'trailhead/trail-icons';
+  Pulls[1].Author := 'ines';
+  Pulls[2].Number := 7;
+  Pulls[2].Title := 'Docs';
+  Pulls[2].Repo := 'maja/gpx-tools';
+  Pulls[2].Author := 'sam';
+  AssertEquals('all for nothing', 3, Length(SearchPulls(Pulls, '  ')));
+  Found := SearchPulls(Pulls, 'MAP');
+  AssertEquals(1, Length(Found));
+  AssertEquals(12, Found[0].Number);
+  AssertEquals('by author and repository', 2, Length(SearchPulls(Pulls, 'maja')));
+  AssertEquals('every word', 1, Length(SearchPulls(Pulls, 'maja gpx')));
+  AssertEquals('by number', 1, Length(SearchPulls(Pulls, '#120')));
+  AssertEquals('a number starts', 2, Length(SearchPulls(Pulls, '#12')));
+  AssertEquals('by branch', 1, Length(SearchPulls(Pulls, 'feature/')));
+  AssertEquals(0, Length(SearchPulls(Pulls, 'nothing')));
 end;
 
 procedure TForgeTest.TestRemoteRepoPath;

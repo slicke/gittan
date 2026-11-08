@@ -24,6 +24,8 @@ const
   MaxRecent = 10;
   {** How many actions the command palette lists as recently used. }
   MaxPaletteRecent = 8;
+  {** How many co-authors the dialog remembers. }
+  MaxCoAuthors = 20;
   {** The width of a tab in the editor when none was picked: git's own,
     what a diff shows in a terminal and on GitHub. }
   DefaultTabSize = 8;
@@ -64,6 +66,8 @@ type
     FPaletteRecent: TStringList;
     FTabs: TStringList;
     FBatchRepos: TStringList;
+    FCoAuthors: TStringList;
+    FTrustedKeys: TStringList;
     { The two files as read, which Save writes back with the fields put
       in, so a key it does not know stays. What has no field of its own
       lives in them alone: the forges' values (hosting.forges), the
@@ -132,6 +136,12 @@ type
     {** Show a translation file (.po) as its originals beside its
       translations. }
     Translations: boolean;
+    {** How a changed image is shown: side, swipe, onion or difference
+      (gittan.imagediff's ImageModeOf); empty for side by side. }
+    ImageMode: string;
+    {** Show the merge base as a pane of the merge editor, when the
+      conflict markers hold it. }
+    MergeBase: boolean;
     {** The name of the syntax theme (see gittan.syntaxthemes); empty for
       the default. }
     SyntaxTheme: string;
@@ -286,6 +296,20 @@ type
     {** The repositories picked on the forge view's Batch tab, by their
       roots, kept in state.json (batch.repos). }
     property BatchRepos: TStringList read FBatchRepos;
+    {** The people credited as co-authors before, "Name <e-mail>", the
+      latest first (AddCoAuthor), for the co-authors dialog to list. }
+    property CoAuthors: TStringList read FCoAuthors;
+    {** The signing keys taken on a forge's word (gittan.signing's
+      TrustEntry: fingerprint, host, user), kept in settings.json as
+      signing.trustedKeys, since trusting a key is a choice to keep. }
+    property TrustedKeys: TStringList read FTrustedKeys;
+    {** Adds AEntry unless its fingerprint is there already. }
+    procedure AddTrustedKey(const AEntry: string);
+    {** The entries as an array, for a job to take along. }
+    function TrustedKeyList: TStringArray;
+    {** Puts APerson first among CoAuthors, dropping a duplicate and
+      the oldest beyond MaxCoAuthors. }
+    procedure AddCoAuthor(const APerson: string);
   public
     {** The operation shown on the Batch tab, by its key (overview, gone,
       identity, maintenance or an extension's; '', the overview, by
@@ -541,6 +565,9 @@ begin
   FTabs := TStringList.Create;
   FBatchRepos := TStringList.Create;
   FBatchRepos.CaseSensitive := True;
+  FCoAuthors := TStringList.Create;
+  FCoAuthors.CaseSensitive := True;
+  FTrustedKeys := TStringList.Create;
   FSettingsDoc := TJSONObject.Create;
   FStateDoc := TJSONObject.Create;
   if ADir <> '' then
@@ -569,6 +596,8 @@ begin
   FPaletteRecent.Free;
   FTabs.Free;
   FBatchRepos.Free;
+  FCoAuthors.Free;
+  FTrustedKeys.Free;
   inherited Destroy;
 end;
 
@@ -656,6 +685,8 @@ begin
   MarkdownPreview := BoolOf(O, 'markdownPreview', False);
   ReviewComments := BoolOf(O, 'reviewComments', True);
   Translations := BoolOf(O, 'translations', True);
+  ImageMode := StrOf(O, 'imageMode');
+  MergeBase := BoolOf(O, 'mergeBase', False);
   O := ObjOf(FSettingsDoc, 'tools');
   GitPath := StrOf(O, 'git');
   EditorCommand := StrOf(O, 'editor');
@@ -670,6 +701,7 @@ begin
   ChecksNeedAttention := BoolOf(O, 'checksNeedAttention', True);
   MineOrder := EnsureRange(IntOf(O, 'mineOrder'), 0, 2);
   ReviewOrder := EnsureRange(IntOf(O, 'reviewOrder'), 0, 1);
+  ListOf(ObjOf(FSettingsDoc, 'signing'), 'trustedKeys', FTrustedKeys);
   O := ObjOf(FSettingsDoc, 'ai');
   AIEnabled := BoolOf(O, 'enabled', False);
   AIAgent := StrOf(O, 'agent');
@@ -711,6 +743,7 @@ begin
   ListOf(O, 'open', FTabs);
   ActiveTab := IntOf(O, 'active');
   ListOf(ObjOf(FStateDoc, 'batch'), 'repos', FBatchRepos);
+  ListOf(ObjOf(FStateDoc, 'commit'), 'coAuthors', FCoAuthors, MaxCoAuthors);
   BatchOperation := StrOf(ObjOf(FStateDoc, 'batch'), 'operation');
   { Kept by its index before. }
   if BatchOperation = '' then
@@ -744,6 +777,8 @@ begin
   O.Booleans['markdownPreview'] := MarkdownPreview;
   O.Booleans['reviewComments'] := ReviewComments;
   O.Booleans['translations'] := Translations;
+  O.Strings['imageMode'] := ImageMode;
+  O.Booleans['mergeBase'] := MergeBase;
   O := ChildOf(FSettingsDoc, 'tools');
   O.Strings['git'] := GitPath;
   O.Strings['editor'] := EditorCommand;
@@ -757,6 +792,7 @@ begin
   O.Booleans['checksNeedAttention'] := ChecksNeedAttention;
   O.Integers['mineOrder'] := MineOrder;
   O.Integers['reviewOrder'] := ReviewOrder;
+  ChildOf(FSettingsDoc, 'signing').Arrays['trustedKeys'] := ListJson(FTrustedKeys);
   O := ChildOf(FSettingsDoc, 'ai');
   O.Booleans['enabled'] := AIEnabled;
   O.Strings['agent'] := AIAgent;
@@ -820,6 +856,7 @@ begin
   O.Arrays['open'] := ListJson(FTabs);
   O.Integers['active'] := ActiveTab;
   ChildOf(FStateDoc, 'batch').Arrays['repos'] := ListJson(FBatchRepos);
+  ChildOf(FStateDoc, 'commit').Arrays['coAuthors'] := ListJson(FCoAuthors);
   ChildOf(FStateDoc, 'batch').Strings['operation'] := BatchOperation;
 end;
 
@@ -987,6 +1024,44 @@ begin
   i := FRecent.IndexOf(ARoot);
   if i >= 0 then
     FRecent.Delete(i);
+end;
+
+procedure TGittanSettings.AddTrustedKey(const AEntry: string);
+var
+  i: integer;
+  Key: string;
+begin
+  Key := UpperCase(Trim(AEntry.Split([#31])[0]));
+  if Key = '' then
+    Exit;
+  for i := 0 to FTrustedKeys.Count - 1 do
+    if UpperCase(Trim(FTrustedKeys[i].Split([#31])[0])) = Key then
+      Exit;
+  FTrustedKeys.Add(AEntry);
+end;
+
+function TGittanSettings.TrustedKeyList: TStringArray;
+var
+  i: integer;
+begin
+  Result := nil;
+  SetLength(Result, FTrustedKeys.Count);
+  for i := 0 to FTrustedKeys.Count - 1 do
+    Result[i] := FTrustedKeys[i];
+end;
+
+procedure TGittanSettings.AddCoAuthor(const APerson: string);
+var
+  i: integer;
+begin
+  if Trim(APerson) = '' then
+    Exit;
+  i := FCoAuthors.IndexOf(Trim(APerson));
+  if i >= 0 then
+    FCoAuthors.Delete(i);
+  FCoAuthors.Insert(0, Trim(APerson));
+  while FCoAuthors.Count > MaxCoAuthors do
+    FCoAuthors.Delete(FCoAuthors.Count - 1);
 end;
 
 procedure TGittanSettings.AddPaletteRecent(const AName: string);

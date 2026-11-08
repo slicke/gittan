@@ -113,6 +113,10 @@ begin
   FSkipHooksItem.Caption := rsSkipHooksItem;
   FSkipHooksItem.OnClick := @SkipHooksItemClick;
   FCommitOptionsMenu.Items.Add(FSkipHooksItem);
+  FCoAuthorsItem := TMenuItem.Create(FCommitOptionsMenu);
+  FCoAuthorsItem.Caption := rsCoAuthorsItem;
+  FCoAuthorsItem.OnClick := @CoAuthorsItemClick;
+  FCommitOptionsMenu.Items.Add(FCoAuthorsItem);
   FAbortButton := TButton.Create(Self);
   FAbortButton.Caption := rsAbortButton;
   FAbortButton.Align := alLeft;
@@ -142,7 +146,7 @@ begin
   FSubjectCount.Layout := tlCenter;
   FSubjectCount.BorderSpacing.Right := 8;
   FSubjectCount.ShowHint := True;
-  FSubjectCount.Hint := Format(rsSubjectCountHint, [SubjectHardLimit]);
+  FSubjectCount.Hint := Format(rsSubjectCountHint, [DefaultSubjectHard]);
   FSubjectCount.Visible := False;
   FSubjectCount.Parent := FCommitRow;
   FCommitNote := TGittanHintBox.Create(Self);
@@ -180,9 +184,10 @@ begin
   Application.QueueAsyncCall(@FocusTreeAsync, 0);
 end;
 
-{ The first line's length shows once it is past SubjectSoftLimit, in
-  the warning color past SubjectHardLimit, where git log --oneline and
-  GitHub cut it. }
+{ The first line's length shows once it is past the soft limit, the
+  usual 50, in the warning color past the hard one, 72, where git log
+  --oneline and GitHub cut it; .gittan/repo.toml may set both
+  (FRepoConfig). }
 procedure TRepoFrame.UpdateSubjectCount;
 var
   Len: integer;
@@ -192,11 +197,11 @@ begin
   Len := 0;
   if FCommitMemo.Lines.Count > 0 then
     Len := UTF8Length(TrimRight(FCommitMemo.Lines[0]));
-  FSubjectCount.Visible := Len > SubjectSoftLimit;
+  FSubjectCount.Visible := Len > FRepoConfig.SubjectSoft;
   if not FSubjectCount.Visible then
     Exit;
-  FSubjectCount.Caption := Format(rsSubjectCount, [Len, SubjectHardLimit]);
-  if Len > SubjectHardLimit then
+  FSubjectCount.Caption := Format(rsSubjectCount, [Len, FRepoConfig.SubjectHard]);
+  if Len > FRepoConfig.SubjectHard then
   begin
     if FDark then
       FSubjectCount.Font.Color := RGBToColor(232, 170, 70)
@@ -510,8 +515,9 @@ begin
   Continuing := ContinueMode;
   Busy := (FCommitJob <> nil) or (FRemoteJob <> nil);
   { A merge is committed with git's message, filled into an empty field
-    once; it goes when the merge does. }
-  if FOperation = 'merging' then
+    once; it goes when the merge does. A squash merge has one too, with
+    no operation under way. }
+  if (FOperation = 'merging') or FRepo.SquashPending then
   begin
     if (FMergeMessage = '') and MessageBlank then
     begin
@@ -564,6 +570,12 @@ begin
     the note says what the Abort button does instead. }
   if (Note = '') and StrayRebase then
     Note := Format(rsStrayRebaseNote, [FRebaseBranch, FBranch]);
+  { What .gittan/repo.toml asks of the commit: not on a protected
+    branch, a subject of its types. Commit stays on; it is the team's
+    rule, not git's. }
+  if (Note = '') and not Whole and not Continuing and (FOperation = '') and
+    ((Total > 0) or FCommitAmend.Checked or not MessageBlank) then
+    Note := CommitConfigNote;
   { What a tick means, while files are ticked, until Don't Show Again. }
   if (Note = '') and not Whole and CommitChoosing and (Chosen > 0) and
     not App.Settings.TickHintHidden then
@@ -654,7 +666,7 @@ begin
   { "Include the files" beside a ticked box and the conflicts beside their
     badge, as the tree draws them, the base beside a branch. }
   FCommitNote.Warn := (FRepo.Base = '') and (FConflictFiles > 0);
-  if Note = rsCommitNotHead then
+  if (Note = rsCommitNotHead) or (Note = Format(rsProtectedBranchNote, [FBranch])) then
     FCommitNote.Glyph := HintBranch
   else
     FCommitNote.Glyph := '';
@@ -676,6 +688,76 @@ begin
     FCommitItem.Enabled := FRepo.Root <> '';
   if FIdentityItem <> nil then
     FIdentityItem.Enabled := FRepo.Root <> '';
+end;
+
+{ What repo.toml says of this commit, '' for nothing: the branch is a
+  protected one, else the subject is not of the types or scopes it
+  lists. }
+function TRepoFrame.CommitConfigNote: string;
+var
+  Subject, Detail: string;
+begin
+  Result := '';
+  if not FHeadDetached and BranchProtected(FRepoConfig, FBranch) then
+    Exit(Format(rsProtectedBranchNote, [FBranch]));
+  if MessageBlank or (FCommitMemo.Lines.Count = 0) then
+    Exit;
+  Subject := FCommitMemo.Lines[0];
+  case CheckSubject(FRepoConfig, Subject, Detail) of
+    scNoType:
+      Result := Format(rsSubjectNoType, [FRepoConfig.Types[0],
+        string.Join(', ', FRepoConfig.Types)]);
+    scUnknownType:
+      Result := Format(rsSubjectUnknownType, [Detail, string.Join(', ', FRepoConfig.Types)]);
+    scUnknownScope:
+      Result := Format(rsSubjectUnknownScope, [Detail, string.Join(', ', FRepoConfig.Scopes)]);
+  end;
+end;
+
+{ A repo.toml that is no TOML, or cannot be read, leaves its settings
+  out: the banner says why, once for each error (AOld the one said
+  last), rather than the settings going without a word. }
+procedure TRepoFrame.NoteRepoConfigError(const AOld: string);
+begin
+  if (FRepoConfig.Error <> '') and (FRepoConfig.Error <> AOld) then
+    BannerError(rsRepoConfigNotRead, FRepoConfig.Error);
+end;
+
+{ Reads .gittan/repo.toml again, from ApplySnapshot, and passes on what
+  changed: the subject's limits, sign-off's default and the template,
+  which an untouched field takes. The issue tracker and the protected
+  branches are read where they are used. }
+procedure TRepoFrame.LoadRepoConfig;
+var
+  Old: TGittanRepoConfig;
+  Blank: boolean;
+begin
+  Old := FRepoConfig;
+  if FRepo.Root = '' then
+    FRepoConfig := EmptyRepoConfig
+  else
+    FRepoConfig := ReadRepoConfig(FRepo.Root);
+  if FRepo.Root = '' then
+    Exit;
+  NoteRepoConfigError(Old.Error);
+  if FRepoConfig.SignOff <> Old.SignOff then
+  begin
+    FSignOff := FRepo.SignOff(FRepoConfig.SignOff);
+    UpdateCommitOptions;
+  end;
+  if FRepoConfig.Template <> Old.Template then
+  begin
+    Blank := MessageBlank and (FOperation = '') and not FCommitAmend.Checked and
+      (FCommitJob = nil);
+    FCommitTemplate := FRepo.CommitTemplate(FRepoConfig.Template);
+    if Blank then
+      FCommitMemo.Text := FCommitTemplate;
+  end;
+  if FRepoConfig.SubjectHard = DefaultSubjectHard then
+    FSubjectCount.Hint := Format(rsSubjectCountHint, [DefaultSubjectHard])
+  else
+    FSubjectCount.Hint := Format(rsSubjectCountHintRepo, [FRepoConfig.SubjectHard]);
+  UpdateSubjectCount;
 end;
 
 procedure TRepoFrame.CommitNoteLink(Sender: TObject);
@@ -718,18 +800,41 @@ end;
 procedure TRepoFrame.UpdateCommitOptions;
 var
   Shown: string;
+  Count: integer;
 begin
   if FCommitOptions = nil then
     Exit;
   Shown := '';
+  Count := 0;
   if FSignOff then
+  begin
     Shown := rsSignOffShort;
-  { Both would not fit beside Amend and Commit; the menu says which. }
+    Inc(Count);
+  end;
   if FSkipHooks then
-    if Shown = '' then
-      Shown := rsSkipHooksShort
+  begin
+    Shown := rsSkipHooksShort;
+    Inc(Count);
+  end;
+  { One co-author by first name, "+Ada", while that fits beside Amend
+    and Commit; more, or a long name, as their count, "+2". }
+  if Length(FCoAuthors) = 1 then
+  begin
+    Shown := Trim(Copy(FCoAuthors[0], 1, Pos(' ', FCoAuthors[0] + ' ') - 1));
+    if (Shown = '') or (UTF8Length(Shown) > 8) then
+      Shown := Format(rsCoAuthorsShort, [1])
     else
-      Shown := Format(rsCommitOptionsCount, [2]);
+      Shown := Format(rsCoAuthorShort, [Shown]);
+    Inc(Count);
+  end
+  else if Length(FCoAuthors) > 1 then
+  begin
+    Shown := Format(rsCoAuthorsShort, [Length(FCoAuthors)]);
+    Inc(Count);
+  end;
+  { Two would not fit beside Amend and Commit; the menu says which. }
+  if Count > 1 then
+    Shown := Format(rsCommitOptionsCount, [Count]);
   FHasCommitOption := Shown <> '';
   if Shown = '' then
     FCommitOptions.Caption := '⌄'
@@ -750,9 +855,10 @@ var
 begin
   if (FRepo.Root = '') or not FCommitOptions.Enabled then
     Exit;
-  FSignOff := FRepo.SignOff;
+  FSignOff := FRepo.SignOff(FRepoConfig.SignOff);
   FSignOffItem.Checked := FSignOff;
   FSkipHooksItem.Checked := FSkipHooks;
+  FCoAuthorsItem.Checked := Length(FCoAuthors) > 0;
   UpdateCommitOptions;
   At := FCommitOptions.ClientToScreen(Point(0, FCommitOptions.Height));
   FCommitOptionsMenu.PopUp(At.X, At.Y);
@@ -774,21 +880,56 @@ begin
     Exit;
   FSignOffMenuItem.Checked := FSignOff;
   FSkipHooksMenuItem.Checked := FSkipHooks;
+  FCoAuthorsMenuItem.Checked := Length(FCoAuthors) > 0;
   FSignOffMenuItem.Enabled := (FRepo <> nil) and (FRepo.Root <> '');
   FSkipHooksMenuItem.Enabled := FSignOffMenuItem.Enabled;
+  FCoAuthorsMenuItem.Enabled := FSignOffMenuItem.Enabled;
 end;
 
 procedure TRepoFrame.SignOffItemClick(Sender: TObject);
 begin
-  if not FRepo.SetSignOff(not FSignOff) then
+  if not FRepo.SetSignOff(not FSignOff, FRepoConfig.SignOff) then
     StatusNote(FRepo.Error, True);
-  FSignOff := FRepo.SignOff;
+  FSignOff := FRepo.SignOff(FRepoConfig.SignOff);
   UpdateCommitOptions;
 end;
 
 procedure TRepoFrame.SkipHooksItemClick(Sender: TObject);
 begin
   FSkipHooks := not FSkipHooks;
+  UpdateCommitOptions;
+end;
+
+{ The co-authors dialog, with the people credited before and the
+  repository's recent authors to tick, the user's own identity left
+  out; the people ticked are remembered for the next time. }
+procedure TRepoFrame.CoAuthorsItemClick(Sender: TObject);
+var
+  Known, Recent: TStringArray;
+  Me, S: string;
+  i: integer;
+begin
+  if (FRepo = nil) or (FRepo.Root = '') then
+    Exit;
+  Me := FRepo.UserName + ' <' + FRepo.UserEmail + '>';
+  Known := nil;
+  for S in App.Settings.CoAuthors do
+    if S <> Me then
+    begin
+      SetLength(Known, Length(Known) + 1);
+      Known[High(Known)] := S;
+    end;
+  Recent := FRepo.RecentAuthors;
+  for i := 0 to High(Recent) do
+    if Recent[i] <> Me then
+    begin
+      SetLength(Known, Length(Known) + 1);
+      Known[High(Known)] := Recent[i];
+    end;
+  if not ChooseCoAuthors(FCoAuthors, Known) then
+    Exit;
+  for i := High(FCoAuthors) downto 0 do
+    App.Settings.AddCoAuthor(FCoAuthors[i]);
   UpdateCommitOptions;
 end;
 
@@ -838,20 +979,33 @@ begin
   end;
 end;
 
+{ The signing goes with the identity, at the same scope; what was found
+  of the commits' signatures is forgotten, since an allowed signers
+  file set up now may verify what could not be checked before. }
 function TRepoFrame.EditIdentity: boolean;
 var
-  Who, Mail: string;
+  Who, Mail, Error: string;
   Local: boolean;
+  Signing: TGittanSigningSetup;
 begin
   Who := FRepo.UserName;
   Mail := FRepo.UserEmail;
   Local := FRepo.HasLocalIdentity;
-  Result := ChooseIdentity(Who, Mail, Local);
+  Signing := ReadSigningSetup(FRepo.Root);
+  Result := ChooseIdentity(Who, Mail, Local, Signing, FRepo.Root);
   if not Result then
     Exit;
   Result := FRepo.SetIdentity(Who, Mail, not Local);
   if not Result then
+  begin
     StatusNote(FRepo.Error, True);
+    Exit;
+  end;
+  Result := WriteSigningSetup(FRepo.Root, Signing, Mail, Local, Error);
+  if not Result then
+    StatusNote(Error, True);
+  FSignCache.Clear;
+  CommitHeaderEnter(nil);
 end;
 
 { git refuses to commit without a name and an e-mail; a fresh machine
@@ -872,21 +1026,24 @@ begin
 end;
 
 { The hint over the person says who commits; read as the mouse comes
-  in, so a change made with git outside is seen too. }
+  in, so a change made with git outside is seen too, in one git call
+  (ReadCommitterSetup), since the mouse comes in often. }
 procedure TRepoFrame.CommitHeaderEnter(Sender: TObject);
 var
-  Who, Mail, Where: string;
+  Where: string;
+  Committer: TGittanCommitter;
 begin
-  Who := FRepo.UserName;
-  Mail := FRepo.UserEmail;
-  if (Who = '') or (Mail = '') then
+  Committer := ReadCommitterSetup(FRepo.Root);
+  if (Committer.Name = '') or (Committer.Email = '') then
     FCommitHeader.PersonHint := rsIdentityNone
   else
   begin
     Where := '';
-    if FRepo.HasLocalIdentity then
+    if Committer.Local then
       Where := rsIdentityHintLocal;
-    FCommitHeader.PersonHint := Format(rsIdentityHint, [Who, Mail, Where]);
+    if Committer.Sign then
+      Where := Where + Format(rsIdentityHintSigns, [SignFormatName(Committer.Format)]);
+    FCommitHeader.PersonHint := Format(rsIdentityHint, [Committer.Name, Committer.Email, Where]);
   end;
 end;
 
@@ -914,16 +1071,17 @@ begin
     end;
     { An extension may stop the commit (commit.before). }
     if ExtListens('commit.before') and not ExtFire('commit.before',
-      TJSONObject.Create(['message', FCommitMemo.Text, 'paths', ListJson(Paths),
-      'amend', FCommitAmend.Checked])) then
+      TJSONObject.Create(['message', WithCoAuthors(FCommitMemo.Text, FCoAuthors),
+      'paths', ListJson(Paths), 'amend', FCommitAmend.Checked])) then
       Exit;
     Options := [];
     if FSignOff then
       Include(Options, coSignOff);
     if FSkipHooks then
       Include(Options, coNoVerify);
-    FCommitJob := TGittanCommitJob.Create(FRepo.Root, FCommitMemo.Text, Paths,
-      FCommitAmend.Checked, Parts, Options);
+    FCommitJob := TGittanCommitJob.Create(FRepo.Root, WithCoAuthors(FCommitMemo.Text,
+      FCoAuthors), Paths, FCommitAmend.Checked, Parts, Options);
+    FCommitJob.Draft := FCommitMemo.Text;
   finally
     Paths.Free;
   end;
@@ -1031,12 +1189,13 @@ begin
     if not Fixup then
     begin
       { commit.template may have changed since the repository opened. }
-      FCommitTemplate := FRepo.CommitTemplate;
+      FCommitTemplate := FRepo.CommitTemplate(FRepoConfig.Template);
       FCommitMemo.Text := FCommitTemplate;
       FCommitAmend.Checked := False;
       FAmendMessage := '';
       FMergeMessage := '';
       FSkipHooks := False;
+      FCoAuthors := nil;
       UpdateCommitOptions;
     end;
     FCommitOn.Clear;
@@ -1178,12 +1337,18 @@ begin
 end;
 
 { Clears the draft slot and the field where they still hold the message
-  AJob committed, the field back to the template. }
+  AJob committed, the field back to the template. The field's text is
+  compared, without the Co-authored-by lines the commit added. }
 procedure TRepoFrame.ForgetCommitted(AJob: TGittanCommitJob);
 
   function Same(const AText: string): boolean;
+  var
+    Committed: string;
   begin
-    Result := Trim(AdjustLineBreaks(AText)) = Trim(AdjustLineBreaks(AJob.Message));
+    Committed := AJob.Draft;
+    if Committed = '' then
+      Committed := AJob.Message;
+    Result := Trim(AdjustLineBreaks(AText)) = Trim(AdjustLineBreaks(Committed));
   end;
 
 begin
@@ -1228,11 +1393,13 @@ begin
   FAmendMessage := '';
   FMergeMessage := '';
   FCommitDraftFor := FRepo.Root;
-  FSignOff := FRepo.SignOff;
+  FSignOff := FRepo.SignOff(FRepoConfig.SignOff);
   FSkipHooks := False;
+  FCoAuthors := nil;
   UpdateCommitOptions;
-  { commit.template fills a field with no draft, as git's editor would. }
-  FCommitTemplate := FRepo.CommitTemplate;
+  { commit.template (or repo.toml's) fills a field with no draft, as
+    git's editor would. }
+  FCommitTemplate := FRepo.CommitTemplate(FRepoConfig.Template);
   if (FRepo.Root <> '') and (App.Settings.CommitDraftRepo = FRepo.Root) then
     FCommitMemo.Text := App.Settings.CommitDraft
   else

@@ -55,6 +55,7 @@ type
     procedure TestSettings;
     procedure TestPermissionsShape;
     procedure TestUiNatives;
+    procedure TestUiMessage;
     procedure TestForge;
   end;
 
@@ -507,6 +508,29 @@ begin
   AssertEquals('status', 'busy|3', FHost.Status);
   AssertEquals('card', 'a.txt|2|look|note|ui', FHost.Cards.CommaText);
   AssertEquals('cleared', 'ui', FHost.Cleared);
+end;
+
+{ Gittan.ui.message: the dialog's shape reaches the host, its answer the
+  script, and a shape that is wrong throws without a dialog. }
+procedure TExtApiTest.TestUiMessage;
+var
+  Info: PExtContextInfo;
+begin
+  FHost.MessageAnswer := 1;
+  Info := Load('msg', 'globalThis.a = Gittan.ui.message({title: "Push?", text: "To main", kind: "warn",' +
+    ' buttons: ["Push Anyway", "Cancel"], default: 1, cancel: 1});' +
+    'globalThis.b = Gittan.ui.message("plain");' +
+    'globalThis.bad = [{text: "x", kind: "loud"}, {text: "x", buttons: [""]}, {text: "x", buttons: ["a"], cancel: 1},' +
+    ' {}, {text: "x", buttons: "a"}, {text: "x", buttons: ["1","2","3","4","5","6","7"]},' +
+    ' {text: "x", buttons: ["a"], default: -1}, {text: "x", buttons: ["NoCancel"]},' +
+    ' {text: "x", buttons: [new Array(42).join("x")]}].map(function (o) {' +
+    ' try { Gittan.ui.message(o); return "no"; } catch (e) { return "threw"; } }).join(",");', AllPerms);
+  AssertEquals('answer', '1', EvalIn(Info^.Ctx, 'String(globalThis.a)'));
+  AssertEquals('a number', 'number', EvalIn(Info^.Ctx, 'typeof globalThis.a'));
+  AssertEquals('two dialogs', 2, FHost.Messages.Count);
+  AssertEquals('the shape', 'msg|Push?|To main|1|Push Anyway,Cancel|1|1', FHost.Messages[0]);
+  AssertEquals('a text alone', 'msg||plain|0||0|-1', FHost.Messages[1]);
+  AssertEquals('wrong shapes throw', 'threw,threw,threw,threw,threw,threw,threw,threw,threw', EvalIn(Info^.Ctx, 'globalThis.bad'));
 end;
 
 { Gittan.forge and Gittan.forges.gh: only with forge; the forge of the

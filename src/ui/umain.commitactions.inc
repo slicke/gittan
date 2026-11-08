@@ -59,6 +59,7 @@ const
   caFixup = 26;
   caArchive = 27;
   caNote = 28;
+  caTrust = 29;
 
 { The commit by the name a person knows it by: a local branch on it,
   else a remote one, else a tag, else its short id. }
@@ -119,7 +120,8 @@ end;
 procedure TRepoFrame.FillCommitMenu(ARoot: TMenuItem; const ACommit: TGittanGraphCommit);
 var
   Busy, Jobs, InHead, IsHead, IsMerge: boolean;
-  Known: string;
+  Known, Host, RepoOwner, RepoName: string;
+  Signature: TGittanSignature;
   i: integer;
   Item, Sub: TMenuItem;
 
@@ -223,6 +225,15 @@ begin
   Add(nil, rsCopyHash, caCopy);
   if Assigned(FForge) then
     Add(nil, Format(rsOpenCommitOnForge, [ForgeName]), caForge);
+  { A key not known here: the forge may know whose it is. Only what
+    the graph's job or the card found: gpg is not run as the menu
+    opens, which a slow verifier would hold up. }
+  if FSignCache.Find(ACommit.Hash, Signature) and (Signature.State = ssUnknownKey) then
+  begin
+    Host := TrustHost(RepoOwner, RepoName);
+    if Host <> '' then
+      Add(nil, Format(rsCaTrustKeys, [Host]), caTrust, FTrustJob = nil);
+  end;
 end;
 
 { Commit > Commit, filled as the Branch menu opens (and for the command
@@ -269,8 +280,9 @@ end;
   asks first, saying what it keeps. }
 procedure TRepoFrame.CommitMenuClick(Sender: TObject);
 var
-  Hash, Short, Note: string;
+  Hash, Short, Note, Ref: string;
   Ok, Conflicts, Reopen: boolean;
+  Way: TGittanMergeWay;
 begin
   Hash := FActionCommit.Hash;
   Short := FActionCommit.Short;
@@ -312,6 +324,11 @@ begin
   if (Sender as TMenuItem).Tag = caNote then
   begin
     EditNoteAsk(FActionCommit);
+    Exit;
+  end;
+  if (Sender as TMenuItem).Tag = caTrust then
+  begin
+    TrustForgeKeys(Hash);
     Exit;
   end;
   if (Sender as TMenuItem).Tag = caPatchSeries then
@@ -375,7 +392,19 @@ begin
     caResetHard:
       if ResetToAsk(Hash, Short, rmHard) then
         ShowCommitGraph;
-    caMerge, caCherryPick, caRevert:
+    caMerge:
+    begin
+      { By the name it goes by while that is still the commit, so git's
+        message says "Merge branch 'feature'". The question and the
+        merge are the branch list's. }
+      if FRepo.CommitId(FActionName) = Hash then
+        Ref := FActionName
+      else
+        Ref := Hash;
+      if AskMergeWay(Ref, FActionName, Way) and RunMerge(Ref, FActionName, Way) then
+        ShowCommitGraph;
+    end;
+    caCherryPick, caRevert:
     begin
       StopWatcher;
       try
@@ -384,16 +413,6 @@ begin
         Reopen := True;
         try
           case (Sender as TMenuItem).Tag of
-            caMerge:
-            begin
-              { By the name it goes by while that is still the commit,
-                so git's message says "Merge branch 'feature'". }
-              if FRepo.CommitId(FActionName) = Hash then
-                Ok := FRepo.MergeRef(FActionName, Conflicts)
-              else
-                Ok := FRepo.MergeRef(Hash, Conflicts);
-              Note := Format(rsCaMerged, [FActionName]);
-            end;
             caCherryPick:
             begin
               Ok := FRepo.CherryPick(Hash, Conflicts);
@@ -626,7 +645,7 @@ begin
   if BlameShown and (FBlameCommit.Hash = ACommit.Hash) then
   begin
     ShowBlameCommit(ACommit.Hash);
-    FSummary.SetCommit(FBlameCommit, FBlameBody);
+    FSummary.SetCommit(FBlameCommit, FBlameBody, FBlameSignature);
   end;
   if FGraph.Visible then
     GraphReload(nil);

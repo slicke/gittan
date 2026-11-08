@@ -53,7 +53,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Controls, Graphics, Forms, StdCtrls, ExtCtrls,
-  LCLType, LMessages, gittan.graph, gittan.commitstats, gittan.popuphook;
+  LCLType, LMessages, gittan.graph, gittan.commitstats, gittan.popuphook, gittan.signing;
 
 type
   TGittanGraphPickEvent = procedure(Sender: TObject; const AHash: string) of object;
@@ -183,7 +183,14 @@ type
       bars are drawn against. }
     FStatsAuthorMax: integer;
     FHook: TGittanPopupHook;
-    FBack, FText, FDim, FHover, FLine, FAccent, FTag: TColor;
+    FBack, FText, FDim, FHover, FLine, FAccent, FTag, FOk, FErrorColor: TColor;
+    { What is known of each commit's signature (by FCommits' index;
+      ssNone until the owner tells, SetSignatures), the commits' ids
+      sorted with their indexes, and whether any is signed, which gives
+      every row room for the shield. }
+    FSigns: array of TGittanSignature;
+    FSignIndex: TStringList;
+    FAnySigned: boolean;
     FLaneColors: array of TColor;
     FOnPick: TGittanGraphPickEvent;
     FOnContext: TGittanGraphContextEvent;
@@ -302,8 +309,17 @@ type
     procedure Recenter;
     {** The colors: the background, the text, the dim text, the
       highlighted row, the border and the dividers, the accent (the
-      current branch, the commits not pushed) and the tags. }
-    procedure SetColors(ABack, AText, ADim, AHover, ALine, AAccent, ATag: TColor);
+      current branch, the commits not pushed), the tags, and the
+      shield of a verified and of a bad signature. }
+    procedure SetColors(ABack, AText, ADim, AHover, ALine, AAccent, ATag, AOk,
+      AError: TColor);
+    {** The ids of the commits loaded, in their order. }
+    function CommitHashes: TStringArray;
+    {** What the owner found of the commits' signatures, those of
+      ACommits from AFrom up to ACount (all with -1); a commit not
+      loaded is passed over. The rows are painted again. }
+    procedure SetSignatures(const ACommits: TGittanSignedCommits; ACount: integer = -1;
+      AFrom: integer = 0);
     {** The colors the lanes take in turn. }
     procedure SetLaneColors(const AColors: array of TColor);
     {** The id of the commit marked for a comparison, '' for none. }
@@ -352,7 +368,7 @@ implementation
 
 uses
   Math, DateUtils, LazUTF8, LazFileUtils, LCLIntf, gittan.reviews, gittan.statusbar,
-  gittan.repoinfo, gittan.theme;
+  gittan.repoinfo, gittan.theme, gittan.signmark;
 
 resourcestring
   rsGraphTitle = 'Commit Graph';
@@ -389,6 +405,7 @@ const
   Pad = 16;
   Gap = 10;
   RowHeight = 28;
+  ShieldSize = 11;
   LaneWidth = 16;
   { The most lanes drawn; a commit further right sits at the last. }
   MaxLanes = 12;
@@ -531,6 +548,10 @@ constructor TGittanCommitGraph.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
   FHook := TGittanPopupHook.Create(Self, @Close, True);
+  FSignIndex := TStringList.Create;
+  FSignIndex.Sorted := True;
+  FSignIndex.CaseSensitive := True;
+  FSignIndex.Duplicates := dupIgnore;
   ControlStyle := ControlStyle + [csOpaque];
   Visible := False;
   FCurrent := -1;
@@ -572,7 +593,7 @@ begin
   FDragTimer.Interval := DragScrollInterval;
   FDragTimer.OnTimer := @DragTimerTick;
   SetColors(clWindow, clWindowText, clGrayText, clBtnFace, clBtnShadow,
-    clHighlight, clMaroon);
+    clHighlight, clMaroon, clGreen, clRed);
   SetLaneColors([clHighlight]);
 end;
 
@@ -582,11 +603,12 @@ begin
   FHook.Hook(False);
   FPathHashes.Free;
   FChangeHashes.Free;
+  FSignIndex.Free;
   inherited Destroy;
 end;
 
 procedure TGittanCommitGraph.SetColors(ABack, AText, ADim, AHover, ALine,
-  AAccent, ATag: TColor);
+  AAccent, ATag, AOk, AError: TColor);
 begin
   FBack := ABack;
   FText := AText;
@@ -595,6 +617,8 @@ begin
   FLine := ALine;
   FAccent := AAccent;
   FTag := ATag;
+  FOk := AOk;
+  FErrorColor := AError;
   Color := ABack;
   FBox.Color := ABack;
   FRows.Color := ABack;
@@ -787,9 +811,14 @@ begin
   SetLength(FSearch, Length(FCommits));
   SetLength(FAuthorKeys, Length(FCommits));
   SetLength(FShown, Length(FCommits));
+  FSigns := nil;
+  SetLength(FSigns, Length(FCommits));
+  FSignIndex.Clear;
+  FAnySigned := False;
   FIdChars := 7;
   for r := 0 to High(FCommits) do
   begin
+    FSignIndex.AddObject(FCommits[r].Hash, TObject(PtrInt(r)));
     FIdChars := Max(FIdChars, Length(FCommits[r].Short));
     FMetaAge[r] := '';
     if FCommits[r].Date > 0 then
@@ -879,6 +908,33 @@ begin
   else if FRows.CanFocus then
     FRows.SetFocus;
   FHook.Hook(True);
+end;
+
+function TGittanCommitGraph.CommitHashes: TStringArray;
+var
+  r: integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(FCommits));
+  for r := 0 to High(FCommits) do
+    Result[r] := FCommits[r].Hash;
+end;
+
+procedure TGittanCommitGraph.SetSignatures(const ACommits: TGittanSignedCommits; ACount: integer;
+  AFrom: integer);
+var
+  i, k: integer;
+begin
+  if (ACount < 0) or (ACount > Length(ACommits)) then
+    ACount := Length(ACommits);
+  for i := Max(0, AFrom) to ACount - 1 do
+    if FSignIndex.Find(ACommits[i].Hash, k) then
+    begin
+      FSigns[PtrInt(FSignIndex.Objects[k])] := ACommits[i].Signature;
+      if ACommits[i].Signature.State <> ssNone then
+        FAnySigned := True;
+    end;
+  FRows.Invalidate;
 end;
 
 procedure TGittanCommitGraph.Replace(const ACommits: TGittanGraphCommits; AMore: boolean);
@@ -1825,6 +1881,17 @@ begin
   if Mark <> '' then
     ACanvas.TextOut(Right - ACanvas.TextWidth(Mark), TextY, Mark);
   Dec(Right, ACanvas.TextWidth('↑') + Px(Gap) + Px(Gap) div 2);
+  { The signature's shield, in a slot of its own once any commit of the
+    list is signed, so the rows line up. }
+  if FAnySigned then
+  begin
+    if FSigns[Index].State <> ssNone then
+      PaintShield(ACanvas, Right - Px(ShieldSize), CenterY - Px(ShieldSize) div 2,
+        Px(ShieldSize), SignatureColor(FSigns[Index], FOk, FDim, FErrorColor), FBack,
+        ShieldFilled(FSigns[Index]), FSigns[Index].State in [ssGood, ssTrusted]);
+    ACanvas.Brush.Style := bsClear;
+    Dec(Right, Px(ShieldSize) + Px(Gap) div 2);
+  end;
 
   X := GraphRight;
   Meta := FMetaFull[Index];

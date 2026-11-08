@@ -45,6 +45,12 @@ type
       link only while AEnabled, dim otherwise. Gives its rectangle. }
     function PaintPill(ALeft, ATop: integer; const AText, ALink: string;
       APrimary, AEnabled: boolean; AExt: boolean = False): TRect;
+    {** A button that does something, as a pill filled with the link
+      color and its caption in white, lighter under the mouse; set apart
+      from a pill that picks (PaintPill), whose picked one is a tint.
+      Disabled, it is a dim outline, as a pill is. }
+    function PaintButton(ALeft, ATop: integer; const AText, ALink: string;
+      AEnabled: boolean): TRect;
     {** A paragraph in AColor, wrapped between ALeft and ARight. }
     procedure PaintText(var Y: integer; const AText: string; AColor: TColor;
       ALeft, ARight: integer);
@@ -137,6 +143,36 @@ begin
   Result := FC.TextWidth(AText) + 2 * Px(PillPadX);
   if AExt then
     Inc(Result, Px(PuzzleSide) + Px(PuzzleGap));
+end;
+
+function TGittanCardPage.PaintButton(ALeft, ATop: integer; const AText, ALink: string;
+  AEnabled: boolean): TRect;
+var
+  TextH: integer;
+begin
+  if not AEnabled then
+    Exit(PaintPill(ALeft, ATop, AText, ALink, False, False));
+  FC.Font := Font;
+  TextH := FC.TextHeight('Xg');
+  Result := Rect(ALeft, ATop - Px(PillPadY), ALeft + PillWidth(AText),
+    ATop + TextH + Px(PillPadY));
+  AddLink(Result, ALink);
+  FC.Pen.Style := psSolid;
+  FC.Brush.Style := bsSolid;
+  { White on the link color, which dark mode lightens: the fill is
+    darkened there, and further under the mouse, so the caption keeps
+    its contrast. }
+  FC.Brush.Color := FLink;
+  if IsDarkMode then
+    FC.Brush.Color := MixColor(FLink, clBlack, 0.3);
+  if FHot = High(FLinkRects) then
+    FC.Brush.Color := MixColor(FC.Brush.Color, clBlack, 0.15);
+  FC.Pen.Color := FC.Brush.Color;
+  FC.RoundRect(Result, Result.Height, Result.Height);
+  FC.Brush.Style := bsClear;
+  FC.Font.Color := clWhite;
+  FC.TextOut(Result.Left + Px(PillPadX), ATop, AText);
+  FC.Font := Font;
 end;
 
 function TGittanCardPage.PaintPill(ALeft, ATop: integer; const AText, ALink: string;

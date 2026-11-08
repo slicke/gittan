@@ -6,7 +6,9 @@
   keys several clients share (gittan.issuelinks): bugtraq.url, the
   address of an issue with %BUGID% for its id, and bugtraq.logregex, how
   a message refers to one. The snapshot reads them (IssueTrackerIn) and
-  ApplySnapshot hands them to the summary (UpdateIssueTracker); without
+  ApplySnapshot hands them to the summary (UpdateIssueTracker), or,
+  when the config names none, the [issues] of .gittan/repo.toml
+  (EffectiveIssueTracker); without
   a tracker a forge's issues are still linked as #<number>
   (DefaultIssueRegex), opened on the forge. Repository > Issue Tracker...
   asks for the address and the expression (one, or one for the
@@ -15,11 +17,25 @@
 
 { The summary marks the references with the config's expression, or
   the forge's #<number> when the config names none. }
+{ The tracker git config names, else the one .gittan/repo.toml does;
+  a bugtraq.url without an expression is still git config's word on
+  the address. }
+function TRepoFrame.EffectiveIssueTracker: TGittanIssueTracker;
+begin
+  Result := FIssueTracker;
+  if IssueTrackerEmpty(Result) and not IssueTrackerEmpty(FRepoConfig.Issues) then
+  begin
+    Result := FRepoConfig.Issues;
+    if Trim(FIssueTracker.Url) <> '' then
+      Result.Url := FIssueTracker.Url;
+  end;
+end;
+
 procedure TRepoFrame.UpdateIssueTracker;
 var
   T: TGittanIssueTracker;
 begin
-  T := FIssueTracker;
+  T := EffectiveIssueTracker;
   if IssueTrackerEmpty(T) and Assigned(FForge) then
   begin
     T.Url := '';
@@ -39,10 +55,10 @@ begin
     Exit;
   { Without an expression the summary marks the forge's #<number>,
     which bugtraq.url alone is no address for. }
-  if IssueTrackerEmpty(FIssueTracker) then
+  if IssueTrackerEmpty(EffectiveIssueTracker) then
     Url := ''
   else
-    Url := IssueUrl(FIssueTracker, AId);
+    Url := IssueUrl(EffectiveIssueTracker, AId);
   if Url <> '' then
     OpenURL(Url)
   else if Assigned(FForge) and TryStrToInt(AId, Number) then
@@ -70,6 +86,7 @@ var
   Values: array of string;
   Lines: TStringArray;
   T: TGittanIssueTracker;
+  Note: string;
 begin
   if FRepo.Root = '' then
     Exit;
@@ -82,7 +99,16 @@ begin
     Values[1] := Trim(Lines[0]);
   if Length(Lines) > 1 then
     Values[2] := Trim(Lines[1]);
-  if not AskInput(rsIssueTrackerTitle, rsIssueTrackerNote, [rsIssueTrackerUrl,
+  { The tracker repo.toml names stays when these are emptied: the note
+    says so, rather than the fields' promise to take it out. }
+  Note := rsIssueTrackerNote;
+  if not IssueTrackerEmpty(FRepoConfig.Issues) then
+    if FRepoConfig.Issues.Url <> '' then
+      Note := Note + Format(rsIssueTrackerRepoNote, [FRepoConfig.Issues.Url])
+    else
+      Note := Note + Format(rsIssueTrackerRepoNote,
+        [Trim(AdjustLineBreaks(FRepoConfig.Issues.LogRegex, tlbsLF)).Split([#10])[0]]);
+  if not AskInput(rsIssueTrackerTitle, Note, [rsIssueTrackerUrl,
     rsIssueTrackerRegex, rsIssueTrackerIdRegex], Values, @CheckIssueTracker, '', True) then
     Exit;
   T.Url := Trim(Values[0]);

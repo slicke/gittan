@@ -40,6 +40,13 @@ function AskDlgCheck(const ATitle, AMsg: string; AKind: TMsgDlgType;
   const AButtons: array of const; const ACheckCaption: string;
   var AChecked: boolean): TModalResult;
 
+{** AskDlg asked by someone other than Gittan: AFrom, after a puzzle
+  piece in the dim color, at the left of the buttons (an extension's
+  "From the extension <name>"), so the dialog cannot pass for Gittan's
+  own while ATitle is the asker's. }
+function AskDlgFrom(const ATitle, AMsg: string; AKind: TMsgDlgType;
+  const AButtons: array of const; const AFrom: string): TModalResult;
+
 {** AskDlg with QuestionDlg's help context or keyword, which it does not
   use, so a call to QuestionDlg changes in its name alone. }
 function AskDlg(const ATitle, AMsg: string; AKind: TMsgDlgType;
@@ -71,7 +78,7 @@ function AskText(const ATitle, APrompt: string; var AValue: string;
 implementation
 
 uses
-  Math, Types, LCLType, gittan.dialogicon, gittan.pathfield
+  Math, Types, LCLType, LCLIntf, gittan.dialogicon, gittan.pathfield, gittan.puzzle
   {$IFDEF LCLCocoa}, gittan.titlebar{$ENDIF};
 
 resourcestring
@@ -97,6 +104,9 @@ const
   IconGap = 18;
   ButtonMinWidth = 84;
   ButtonGap = 8;
+  { The puzzle piece before AskDlgFrom's line, and its gap to the text. }
+  FromPiece = 12;
+  FromGap = 6;
   FieldGap = 10;
   { The space over the first line of text and the icon. On macOS the
     hidden title bar's strip is over it already, and the title is the
@@ -134,6 +144,10 @@ type
     FError: TLabel;
     FOk: TButton;
     FButtonRow: TPanel;
+    FFrom: TLabel;
+    FFromRow: TPanel;
+    FTexts: array of TLabel;
+    FButtons: array of TButton;
     FCheck: TGittanAskCheck;
     FOptional: boolean;
     FPathField: integer;
@@ -145,6 +159,9 @@ type
     procedure AddText(const AText: string; ABold: boolean; AGap: integer = FieldGap);
     procedure AddButtons(const AButtons: array of TAskButton; ADefault, ACancel: integer);
     procedure ButtonClick(Sender: TObject);
+    procedure AddFrom(const AText: string);
+    procedure RowPaint(Sender: TObject);
+    procedure Fit;
   protected
     procedure KeyDown(var Key: word; Shift: TShiftState); override;
     procedure Paint; override;
@@ -247,6 +264,8 @@ begin
   if ABold then
     Lbl.Font.Style := [fsBold];
   Lbl.Parent := Self;
+  SetLength(FTexts, Length(FTexts) + 1);
+  FTexts[High(FTexts)] := Lbl;
 end;
 
 { The buttons at the right: on macOS the default rightmost with the
@@ -314,11 +333,112 @@ begin
     B.Default := Order[i] = ADefault;
     B.Cancel := Order[i] = ACancel;
     B.Parent := Row;
+    SetLength(FButtons, Length(FButtons) + 1);
+    FButtons[High(FButtons)] := B;
     if Order[i] = ADefault then
       FOk := B;
   end;
   if ACancel >= 0 then
     FCancelResult := AButtons[ACancel].Result;
+end;
+
+{ AText at the left of the buttons, under the icon's left edge, after
+  the puzzle piece RowPaint draws, in a row of its own (FFromRow) that
+  Fit moves over the buttons when the text does not fit beside them. }
+procedure TAskForm.AddFrom(const AText: string);
+begin
+  FFromRow := TPanel.Create(Self);
+  FFromRow.BevelOuter := bvNone;
+  FFromRow.Align := alClient;
+  FFromRow.BorderSpacing.Left := Scale96ToScreen(IconLeft - Margin);
+  FFromRow.OnPaint := @RowPaint;
+  FFromRow.Parent := FButtonRow;
+  FFrom := TLabel.Create(Self);
+  FFrom.ShowAccelChar := False;
+  FFrom.Caption := AText;
+  FFrom.Hint := AText;
+  FFrom.ShowHint := True;
+  FFrom.Font.Color := clGrayText;
+  FFrom.Layout := tlCenter;
+  FFrom.Align := alClient;
+  FFrom.BorderSpacing.Left := Scale96ToScreen(FromPiece + FromGap);
+  FFrom.Parent := FFromRow;
+end;
+
+{ Measured before the dialog is shown, from the texts and the buttons
+  rather than the layout, which the widgetsets have not all made by
+  then (on Windows DoShow saw none). The dialog grows wider than
+  DialogWidth when the buttons need it, so none is cut. AskDlgFrom's
+  line goes over the buttons, under the text in its column, when it
+  does not fit beside them; beside them it sits under the icon, so the
+  button row goes at least a gap below the icon's bottom, which a short
+  text (one line, without the macOS heading) does not reach. }
+procedure TAskForm.Fit;
+var
+  Bmp: TBitmap;
+  i, W, H, BW, BH, Buttons, Room, TextLeft, TextBottom, Need: integer;
+  R: TRect;
+begin
+  Buttons := 0;
+  for i := 0 to High(FButtons) do
+  begin
+    BW := 0;
+    BH := 0;
+    FButtons[i].HandleNeeded;
+    FButtons[i].GetPreferredSize(BW, BH);
+    Inc(Buttons, Max(BW, FButtons[i].Constraints.MinWidth) + FButtons[i].BorderSpacing.Left);
+  end;
+  W := Max(Scale96ToScreen(DialogWidth), FButtonRow.BorderSpacing.Left + Buttons +
+    FButtonRow.BorderSpacing.Right);
+  Constraints.MaxWidth := W;
+  Constraints.MinWidth := W;
+  if FFrom = nil then
+    Exit;
+  TextLeft := Scale96ToScreen(IconLeft + IconSize + IconGap);
+  Bmp := TBitmap.Create;
+  try
+    Bmp.SetSize(1, 1);
+    Bmp.Canvas.Font := FFrom.Font;
+    Room := W - FButtonRow.BorderSpacing.Left - FButtonRow.BorderSpacing.Right - Buttons -
+      FFromRow.BorderSpacing.Left - FFrom.BorderSpacing.Left;
+    if Bmp.Canvas.TextWidth(FFrom.Caption) > Room then
+    begin
+      FFromRow.Parent := Self;
+      FFromRow.Align := alTop;
+      FFromRow.Height := Bmp.Canvas.TextHeight('Xg') + Scale96ToScreen(4);
+      FFromRow.Top := FButtonRow.Top - 1;
+      FFromRow.BorderSpacing.Left := TextLeft;
+      FFromRow.BorderSpacing.Right := Scale96ToScreen(EdgeGap);
+      FFromRow.BorderSpacing.Top := Scale96ToScreen(FieldGap);
+      Exit;
+    end;
+    TextBottom := 0;
+    for i := 0 to High(FTexts) do
+    begin
+      Bmp.Canvas.Font := FTexts[i].Font;
+      R := Rect(0, 0, W - TextLeft - FTexts[i].BorderSpacing.Right, 0);
+      DrawText(Bmp.Canvas.Handle, PChar(FTexts[i].Caption), Length(FTexts[i].Caption), R,
+        DT_CALCRECT or DT_WORDBREAK or DT_NOPREFIX);
+      H := R.Bottom - R.Top;
+      Inc(TextBottom, FTexts[i].BorderSpacing.Top + H);
+    end;
+    Need := Scale96ToScreen(TopGap + IconSize + FieldGap) -
+      (TextBottom + FButtonRow.BorderSpacing.Top);
+    if Need > 0 then
+      FButtonRow.BorderSpacing.Top := FButtonRow.BorderSpacing.Top + Need;
+  finally
+    Bmp.Free;
+  end;
+end;
+
+procedure TAskForm.RowPaint(Sender: TObject);
+var
+  S: integer;
+begin
+  if FFrom = nil then
+    Exit;
+  S := Scale96ToScreen(FromPiece);
+  PaintPuzzle(FFromRow.Canvas, 0, (FFromRow.ClientHeight - S) div 2, S, clGrayText);
 end;
 
 { Escape answers the cancel button's result, mrCancel without one; a
@@ -467,9 +587,10 @@ end;
   The calls
   --------------------------------------------------------------------------- }
 
-{ AskDlg, with a check box under the text when ACheckCaption is given. }
+{ AskDlg, with a check box under the text when ACheckCaption is given and
+  AFrom at the left of the buttons when it is. }
 function AskWith(const ATitle, AMsg: string; AKind: TMsgDlgType;
-  const AButtons: array of const; const ACheckCaption: string;
+  const AButtons: array of const; const ACheckCaption, AFrom: string;
   var AChecked: boolean): TModalResult;
 var
   F: TAskForm;
@@ -540,9 +661,14 @@ begin
       Box.Parent := F;
     end;
     F.AddButtons(Buttons, Default, Cancel);
+    if AFrom <> '' then
+      F.AddFrom(AFrom);
+    F.Fit;
     F.FNoCancel := NoCancel;
     Result := F.ShowModal;
-    if Result = mrNone then
+    { The close box gives mrCancel (on Windows and GTK), whatever the
+      buttons are: it presses the cancel button, as Escape does. }
+    if (Result = mrNone) or ((Result = mrCancel) and not F.FPressed) then
       Result := F.FCancelResult;
     if Box <> nil then
       AChecked := Box.Checked;
@@ -557,14 +683,23 @@ var
   Unused: boolean;
 begin
   Unused := False;
-  Result := AskWith(ATitle, AMsg, AKind, AButtons, '', Unused);
+  Result := AskWith(ATitle, AMsg, AKind, AButtons, '', '', Unused);
+end;
+
+function AskDlgFrom(const ATitle, AMsg: string; AKind: TMsgDlgType;
+  const AButtons: array of const; const AFrom: string): TModalResult;
+var
+  Unused: boolean;
+begin
+  Unused := False;
+  Result := AskWith(ATitle, AMsg, AKind, AButtons, '', AFrom, Unused);
 end;
 
 function AskDlgCheck(const ATitle, AMsg: string; AKind: TMsgDlgType;
   const AButtons: array of const; const ACheckCaption: string;
   var AChecked: boolean): TModalResult;
 begin
-  Result := AskWith(ATitle, AMsg, AKind, AButtons, ACheckCaption, AChecked);
+  Result := AskWith(ATitle, AMsg, AKind, AButtons, ACheckCaption, '', AChecked);
 end;
 
 function AskDlg(const ATitle, AMsg: string; AKind: TMsgDlgType;
