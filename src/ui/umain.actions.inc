@@ -42,6 +42,7 @@ begin
   FBlameOn := App.Settings.Blame;
   FShowComments := App.Settings.ReviewComments;
   FTranslations := App.Settings.Translations;
+  FImageDiff.Mode := ImageModeOf(App.Settings.ImageMode);
   FSyntaxTheme := FindSyntaxTheme(App.Settings.SyntaxTheme);
   if FSyntaxTheme < 0 then
     FSyntaxTheme := DefaultSyntaxTheme;
@@ -113,6 +114,7 @@ begin
   App.Settings.Blame := FBlameOn;
   App.Settings.ReviewComments := FShowComments;
   App.Settings.Translations := FTranslations;
+  App.Settings.ImageMode := ImageModeName(FImageDiff.Mode);
   App.Settings.SyntaxTheme := SyntaxThemes[FSyntaxTheme].Name;
   App.Settings.Save;
   SaveIndex;
@@ -846,6 +848,7 @@ end;
 procedure TRepoFrame.HeaderMenu(Sender: TObject; const AScreenRect: TRect);
 var
   n: integer;
+  m: TGittanImageMode;
 
   procedure AddRow(AItem: TMenuItem);
   begin
@@ -873,6 +876,12 @@ begin
   AddRow(FBlameItem);
   AddRow(FTranslationsItem);
   AddRow(FReviewItem);
+  if FImageMenu.Enabled then
+  begin
+    FViewPopup.AddHeader(rsImageHeader);
+    for m := Low(TGittanImageMode) to High(TGittanImageMode) do
+      AddRow(FImageModeItems[m]);
+  end;
   FViewPopup.AddHeader(rsHistoryHeader);
   AddRow(FCodeHistoryItem);
   AddRow(FTimelapseItem);
@@ -895,6 +904,7 @@ end;
 procedure TRepoFrame.ViewMenuClick(Sender: TObject);
 begin
   FFoldMenu.Enabled := FoldingShown and Edit.Visible;
+  FImageMenu.Enabled := FImageDiff.Visible and FImageDiff.Overlays;
 end;
 
 procedure TRepoFrame.MenuOnlyChangesClick(Sender: TObject);
@@ -931,6 +941,23 @@ begin
   for i := 0 to High(FThemeItems) do
     FThemeItems[i].Checked := i = FSyntaxTheme;
   ApplyTheme;
+end;
+
+{ View > Image: the mode of a changed image; the control's pills set it
+  too, and ImageModeChange keeps the items in step. }
+procedure TRepoFrame.MenuImageModeClick(Sender: TObject);
+begin
+  FImageDiff.Mode := TGittanImageMode((Sender as TMenuItem).Tag);
+end;
+
+procedure TRepoFrame.ImageModeChange(Sender: TObject);
+var
+  m: TGittanImageMode;
+begin
+  if FImageModeItems[imSideBySide] = nil then
+    Exit;
+  for m := Low(TGittanImageMode) to High(TGittanImageMode) do
+    FImageModeItems[m].Checked := m = FImageDiff.Mode;
 end;
 
 procedure TRepoFrame.MenuSideBySideClick(Sender: TObject);

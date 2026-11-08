@@ -387,6 +387,9 @@ type
     FRecentMenu, FCompareMenu, FTerminalItem, FUninstallCliItem: TMenuItem;
     FSnapshots: TGittanSnapshots;
     FWrapItem, FOnlyChangesItem, FSideItem, FIgnoreSpaceItem, FMdPreviewItem: TMenuItem;
+    { View > Image: how a changed image is shown, one item per mode. }
+    FImageMenu: TMenuItem;
+    FImageModeItems: array[TGittanImageMode] of TMenuItem;
     {** View > Folding, enabled where FoldingShown (see ViewMenuClick). }
     FFoldMenu: TMenuItem;
     {** The file lines the folded ranges started on before a rebuild of
@@ -1828,6 +1831,8 @@ type
     procedure MenuSyntaxThemeClick(Sender: TObject);
     procedure SetSyntaxTheme(ATheme: integer);
     procedure MenuSideBySideClick(Sender: TObject);
+    procedure MenuImageModeClick(Sender: TObject);
+    procedure ImageModeChange(Sender: TObject);
     procedure MenuMarkdownPreviewClick(Sender: TObject);
     function MarkdownPreviewPath: string;
     procedure UpdateMarkdownPreview;
@@ -2728,6 +2733,7 @@ resourcestring
   rsContextLines = 'Conte&xt Lines';
   rsNLines = '%d lines';
   rsSideBySide = 'Side &by Side';
+  rsImageMenu = '&Image';
   rsWordWrap = '&Word Wrap';
   rsMarkdownPreview = '&Preview';
   rsPreviewToggle = 'Preview';
@@ -3289,6 +3295,7 @@ resourcestring
   rsFilterView = 'Filter';
   rsViewHeader = 'View';
   rsHistoryHeader = 'History';
+  rsImageHeader = 'Image';
   rsFilterSubmodules = 'Filter submodules';
   rsSubmodulesHeader = 'Submodules';
   rsReflogItem = 'Re&flog...';
@@ -4364,6 +4371,7 @@ begin
   FImageDiff := TGittanImageDiff.Create(Self);
   FImageDiff.Parent := EditorPanel;
   FImageDiff.Align := alClient;
+  FImageDiff.OnModeChange := @ImageModeChange;
   FImageDiff.Visible := False;
   FBinaryView := TGittanBinaryView.Create(Self);
   FBinaryView.Parent := EditorPanel;
@@ -5161,7 +5169,7 @@ begin
   if FDark then
   begin
     FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim, P.Line, P.Deleted,
-      P.Added, RGBToColor(58, 58, 60), RGBToColor(44, 44, 46));
+      P.Added, RGBToColor(58, 58, 60), RGBToColor(44, 44, 46), P.Accent);
     FBinaryView.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim,
       RGBToColor(44, 44, 46));
     FHeader.ConflictNav.SetColors(P.Shade, RGBToColor(58, 46, 68),
@@ -5175,7 +5183,7 @@ begin
   else
   begin
     FImageDiff.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim, P.Line, P.Deleted,
-      P.Added, RGBToColor(255, 255, 255), RGBToColor(230, 230, 230));
+      P.Added, RGBToColor(255, 255, 255), RGBToColor(230, 230, 230), P.Accent);
     FBinaryView.SetColors(Edit.Colors.TextBG, Edit.Colors.TextFont, P.Dim, P.Shade);
     FHeader.ConflictNav.SetColors(P.Shade, RGBToColor(248, 240, 255),
       RGBToColor(190, 160, 220), RGBToColor(110, 50, 160), RGBToColor(155, 63, 200));
@@ -5747,6 +5755,7 @@ var
   FileMenu, EditMenu, RepoMenu, CommitMenu, ChangesMenu, BranchMenu, StashMenu, ViewMenu, GoMenu,
     ToolsMenu, WindowMenu, HelpMenu, Item, Sub: TMenuItem;
   i: integer;
+  m: TGittanImageMode;
 
   function AddItem(AParent: TMenuItem; const ACaption: string; AShortCut: TShortCut;
     AClick: TNotifyEvent): TMenuItem;
@@ -6000,6 +6009,15 @@ begin
   FSideItem := AddItem(ViewMenu, rsSideBySide, ShortCut(VK_S, [ssModifier, ssShift]),
     @MenuSideBySideClick);
   FSideItem.Checked := FSideBySide;
+  FImageMenu := AddItem(ViewMenu, rsImageMenu, 0, nil);
+  for m := Low(TGittanImageMode) to High(TGittanImageMode) do
+  begin
+    Item := AddItem(FImageMenu, ImageModeCaption(m), 0, @MenuImageModeClick);
+    Item.Tag := Ord(m);
+    Item.RadioItem := True;
+    Item.Checked := m = FImageDiff.Mode;
+    FImageModeItems[m] := Item;
+  end;
   FMdPreviewItem := AddItem(ViewMenu, rsMarkdownPreview, ShortCut(VK_V, [ssModifier, ssShift]),
     @MenuMarkdownPreviewClick);
   FMdPreviewItem.Checked := FMdPreviewOn;

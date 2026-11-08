@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- A changed image can be shown in more ways than side by side: Swipe lays the old and the new version over each other with a divider to drag, Onion Skin draws the new one over the old with an opacity to set, and Difference shows where two images of the same size differ. The pills under the captions choose, as does View > Image, and the choice is kept.
 - An extension can ask with buttons of its own: `Gittan.ui.message({title, text, kind, buttons, default, cancel})` shows a message with an info, warning, error or question icon and up to six buttons, and gives the index of the one pressed. The extensions guide now describes the dialogs.
 - The globe counts the pull requests waiting for your review, and GitHub is asked again every five minutes, so the count follows without opening the GitHub view.
 - A card in the GitHub view has its next step as a button: Review on one waiting for your review (Review on GitHub when there is no clone to compare in), Merge with the three ways to merge on one of yours that is approved with its checks passing. Three dots open the card's menu, so what a right click offers is in sight, and the card's tooltip says where a click goes: compare in the open repository, open its clone, or open it on GitHub.

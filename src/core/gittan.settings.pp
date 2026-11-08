@@ -132,6 +132,9 @@ type
     {** Show a translation file (.po) as its originals beside its
       translations. }
     Translations: boolean;
+    {** How a changed image is shown: side, swipe, onion or difference
+      (gittan.imagediff's ImageModeOf); empty for side by side. }
+    ImageMode: string;
     {** The name of the syntax theme (see gittan.syntaxthemes); empty for
       the default. }
     SyntaxTheme: string;
@@ -656,6 +659,7 @@ begin
   MarkdownPreview := BoolOf(O, 'markdownPreview', False);
   ReviewComments := BoolOf(O, 'reviewComments', True);
   Translations := BoolOf(O, 'translations', True);
+  ImageMode := StrOf(O, 'imageMode');
   O := ObjOf(FSettingsDoc, 'tools');
   GitPath := StrOf(O, 'git');
   EditorCommand := StrOf(O, 'editor');
@@ -744,6 +748,7 @@ begin
   O.Booleans['markdownPreview'] := MarkdownPreview;
   O.Booleans['reviewComments'] := ReviewComments;
   O.Booleans['translations'] := Translations;
+  O.Strings['imageMode'] := ImageMode;
   O := ChildOf(FSettingsDoc, 'tools');
   O.Strings['git'] := GitPath;
   O.Strings['editor'] := EditorCommand;
