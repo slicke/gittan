@@ -90,6 +90,25 @@ Gittan.ui.addCard({path: "src/main.pp", line: 120, title: "Note", text: "Markdow
 Gittan.ui.clearCards();
 ```
 
+The dialogs wait for an answer, and the script with them:
+
+```js
+Gittan.ui.alert("a message with OK");
+if (Gittan.ui.confirm("Yes or no?")) { /* ... */ }
+var name = Gittan.ui.prompt("Branch", "Name of the branch:", "feature/");   // "" when cancelled
+var pick = Gittan.ui.select("Remote", "Push to:", ["origin", "upstream"]);  // the index, -1 when cancelled
+var i = Gittan.ui.message({
+  title: "Push to main?",
+  text: "main is protected in this repository.",
+  kind: "warn",                       // "info" (the default), "warn", "error" or "question"
+  buttons: ["Push Anyway", "Open Pull Request", "Cancel"],
+  default: 1,                         // Return presses it; the first button when left out
+  cancel: 2                           // Escape and the close box press it
+});
+```
+
+`message` gives the index of the button pressed, or -1 when the dialog was closed without one (no `cancel`). Without `buttons` it has OK alone, and `Gittan.ui.message("text")` is the same as `{text: "text"}`. It takes up to six buttons, each with a label; a shape it cannot show (an unknown kind, an empty label, an index that is no button's) throws instead of opening the dialog. The dialog's title says which extension it is from, Extension "name", and `title` heads the text. The buttons are placed the way the system places them, so the default one may not be where it is in the list.
+
 A card sits under the line in the change view, like the AI review's, while the work tree is what is compared. It goes to the shown repository; a command that answers later gives `repo: ctx.repo` to `addCard` and `clearCards`, so the card lands in the repository it ran in even after another tab was picked. `clearCards()` without one clears every repository's.
 
 ## Storage and settings

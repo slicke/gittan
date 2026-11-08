@@ -58,8 +58,11 @@ declare namespace Gittan {
 
   /** repo: the repository it is for (a command's ctx.repo), else the shown one. */
   interface Card { repo?: string; path: string; line: number; side?: "new" | "old"; title?: string; text: string; severity?: string }
+  interface Message { text?: string; title?: string; kind?: "info" | "warn" | "warning" | "error" | "question"; buttons?: string[]; default?: number; cancel?: number }
   const ui: {
     alert(...text: any[]): void;
+    /** The index of the button pressed, -1 when closed without one. Up to six buttons; OK alone without any. */
+    message(m: Message | string): number;
     confirm(...text: any[]): boolean;
     prompt(caption: string, text?: string, def?: string): string;
     select(caption: string, text: string, options: string[]): number;

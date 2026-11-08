@@ -19,6 +19,9 @@ uses
 
 type
 
+  {** The icon of Gittan.ui.message's dialog. }
+  TExtMessageKind = (emkInfo, emkWarning, emkError, emkQuestion);
+
   { TGittanExtHost }
 
   TGittanExtHost = class
@@ -32,6 +35,13 @@ type
     function Prompt(const ACaption, AText, ADefault: string; out AValue: string): boolean; virtual;
     {** select(): one of AOptions, its index, -1 when cancelled. }
     function Select(const ACaption, AText: string; const AOptions: array of string): integer; virtual;
+    {** Gittan.ui.message(): ATitle over AText from the extension AName,
+      with AKind's icon and the buttons AButtons (OK when there is none);
+      Return presses ADefault, Escape and the close box ACancel. The index
+      of the button pressed, -1 when the dialog was closed without one
+      (ACancel -1). }
+    function Message(const AName, ATitle, AText: string; AKind: TExtMessageKind;
+      const AButtons: array of string; ADefault, ACancel: integer): integer; virtual;
     {** What an extension logged (console.log, console.pop), shown as
       text the user can read and copy. }
     procedure ShowLog(const ATitle, AText: string); virtual;
@@ -128,6 +138,13 @@ end;
 
 function TGittanExtHost.Select(const ACaption, AText: string;
   const AOptions: array of string): integer;
+begin
+  Result := -1;
+end;
+
+function TGittanExtHost.Message(const AName, ATitle, AText: string;
+  AKind: TExtMessageKind; const AButtons: array of string;
+  ADefault, ACancel: integer): integer;
 begin
   Result := -1;
 end;

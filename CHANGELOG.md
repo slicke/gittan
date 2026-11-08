@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- An extension can ask with buttons of its own: `Gittan.ui.message({title, text, kind, buttons, default, cancel})` shows a message with an info, warning, error or question icon and up to six buttons, and gives the index of the one pressed. The extensions guide now describes the dialogs.
 - The globe counts the pull requests waiting for your review, and GitHub is asked again every five minutes, so the count follows without opening the GitHub view.
 - A card in the GitHub view has its next step as a button: Review on one waiting for your review (Review on GitHub when there is no clone to compare in), Merge with the three ways to merge on one of yours that is approved with its checks passing. Three dots open the card's menu, so what a right click offers is in sight, and the card's tooltip says where a click goes: compare in the open repository, open its clone, or open it on GitHub.
 - The GitHub view has a search field (View > Find..., Cmd+F) that keeps the pull requests whose number, title, repository, author or branch hold the words typed, and works from the keyboard: Up and Down move from card to card, Return opens the one picked, the menu key opens its menu, Escape empties the search.
