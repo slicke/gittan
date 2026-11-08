@@ -244,30 +244,32 @@ section { padding: calc(var(--section-gap) / 2) 0; }
   .hero-shot img { width: 124%; }
 }
 
-/* ---------- cards that stack: three, in turn the surface and the ink ---------- */
-.stack { display: grid; gap: 24px; }
-.scard {
-  position: sticky; top: calc(var(--bar) + 32px); min-height: min(58svh, 540px);
-  display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); border-radius: var(--card-radius); overflow: hidden;
-  background: var(--surface); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line), var(--shadow); transform-origin: 50% 0; will-change: transform;
-}
-.scard:nth-child(even) { background: var(--ink); color: var(--bg); box-shadow: var(--shadow); }
-.scard:nth-child(even) a { color: var(--bg); }
-.scard .words { grid-column: 1 / span 5; padding: clamp(32px, 4vw, 56px); display: flex; flex-direction: column; gap: 22px; }
-.scard .more { margin-top: auto; padding-top: 16px; }
-.scard h3 { font: 400 var(--step-head)/1.08 var(--display); letter-spacing: -.02em; text-wrap: balance; }
-.scard h3::before { content: ""; display: block; width: 28px; height: 6px; border-radius: 3px; margin-bottom: 20px; background: var(--accent-bright); }
-.scard p { font-size: var(--step-lead); line-height: 1.45; max-width: 40ch; }
-.scard:nth-child(odd) p { color: var(--muted); }
-.scard .more { font-weight: 600; text-decoration: none; color: var(--ink); }
+/* ---------- the three proofs: the first wide and on the ink, the other two side by side under it ---------- */
+.stack { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.scard { min-width: 0; display: flex; flex-direction: column; border-radius: var(--card-radius); overflow: hidden; background: var(--surface); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line), var(--shadow); }
+.scard .words { padding: clamp(24px, 3vw, 36px); display: flex; flex-direction: column; gap: 16px; }
+.scard h3 { font: 400 var(--step-sub)/1.12 var(--display); letter-spacing: -.02em; text-wrap: balance; }
+.scard h3::before { content: ""; display: block; width: 28px; height: 6px; border-radius: 3px; margin-bottom: 16px; background: var(--accent-bright); }
+.scard p { color: var(--muted); max-width: 52ch; }
+.scard .more { margin-top: auto; padding-top: 12px; font-weight: 600; text-decoration: none; color: var(--ink); }
 .scard .more:hover { color: var(--accent); }
-.scard:nth-child(even) .more:hover { color: var(--accent-inv); }
-.scard .pic { grid-column: 6 / -1; display: flex; align-items: center; justify-content: center; background: var(--ui-bg); padding: clamp(24px, 3vw, 48px); }
-.scard:nth-child(even) .pic { background: color-mix(in srgb, var(--ink) 88%, var(--bg)); }
-.scard .pic img { display: block; width: auto; max-width: 100%; max-height: 52svh; height: auto; }
+.scard .pic { order: -1; display: flex; align-items: center; justify-content: center; height: clamp(220px, 23vw, 320px); padding: clamp(20px, 2.5vw, 32px); background: var(--ui-bg); box-shadow: inset 0 -1px 0 var(--line); }
+.scard .pic img { display: block; width: auto; max-width: 100%; height: auto; max-height: 100%; object-fit: contain; }
+/* the first: the claim no client has, wide, words beside the dialog, on the ink */
+.scard:first-child { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); background: var(--ink); color: var(--bg); box-shadow: var(--shadow); }
+.scard:first-child .words { grid-column: 1 / span 5; padding: clamp(32px, 4vw, 56px); gap: 22px; }
+.scard:first-child h3 { font-size: var(--step-head); line-height: 1.08; }
+.scard:first-child p { font-size: var(--step-lead); line-height: 1.45; max-width: 40ch; color: inherit; }
+.scard:first-child .more { color: var(--bg); padding-top: 16px; }
+.scard:first-child .more:hover { color: var(--accent-inv); }
+.scard:first-child .pic { order: 0; grid-column: 6 / -1; min-height: 0; padding: clamp(24px, 3vw, 44px); background: color-mix(in srgb, var(--ink) 88%, var(--bg)); box-shadow: none; }
+.scard:first-child .pic img { max-height: 460px; }
 @media (max-width: 900px) {
-  .scard { position: static; display: flex; flex-direction: column; min-height: 0; }
-  .scard .pic { order: -1; }
+  .stack { grid-template-columns: 1fr; }
+  .scard:first-child { display: flex; flex-direction: column; }
+  .scard:first-child .pic { order: -1; }
+  .scard:first-child .pic { height: auto; }
+  .scard:first-child .pic img { max-height: none; }
 }
 
 /* ---------- the other nine, a list of rows ---------- */
@@ -566,7 +568,6 @@ pre.sh .c { color: var(--code-dim); }
 @media (prefers-reduced-motion: reduce) {
   .mini .live, .chip::before, .js .tour figure.on, .commitbox .msg span { animation: none; }
   .tag:hover svg { transform: none; }
-  .scard { transform: none !important; }
   .bar .sections a::after, .sub, .sub-toggle svg { transition: none; }
 }
 

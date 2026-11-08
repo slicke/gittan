@@ -217,25 +217,4 @@
   } else {
     pics.forEach(function (p) { p.classList.add('is-in'); });
   }
-
-  // ---- The cards that stack: the one beneath settles to 0.96 as the next slides over it.
-  var cards = $$('.scard');
-  if (cards.length > 1 && !still) {
-    var ticking = false;
-    var stackPaint = function () {
-      ticking = false;
-      var wide = window.innerWidth > 900;
-      cards.forEach(function (c, i) {
-        var next = cards[i + 1];
-        if (!wide || !next) { c.style.transform = ''; return; }
-        var top = c.getBoundingClientRect().top, nt = next.getBoundingClientRect().top;
-        var h = c.offsetHeight || 1;
-        var p = Math.min(1, Math.max(0, 1 - (nt - top) / h));
-        c.style.transform = p > 0 ? 'scale(' + (1 - 0.04 * p).toFixed(4) + ')' : '';
-      });
-    };
-    window.addEventListener('scroll', function () { if (!ticking) { ticking = true; requestAnimationFrame(stackPaint); } }, { passive: true });
-    window.addEventListener('resize', stackPaint);
-    stackPaint();
-  }
 })();
