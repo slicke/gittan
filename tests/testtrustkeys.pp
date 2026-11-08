@@ -66,11 +66,12 @@ begin
   ParseGitHubGpgKeys('[{"id":1,"key_id":"B5690EEEBB952194","raw_key":"-----BEGIN PGP PUBLIC KEY ' +
     'BLOCK-----\nxx\n-----END PGP PUBLIC KEY BLOCK-----","emails":[{"email":"noreply@github.com",' +
     '"verified":true}]},{"id":2,"raw_key":null,"emails":[]},{"id":3,"raw_key":"-----BEGIN PGP ' +
-    'PUBLIC KEY BLOCK-----\nyy","emails":[{"email":"ada@example.invalid"},{"email":"noreply@github.com"}]}]',
+    'PUBLIC KEY BLOCK-----\nyy","emails":[{"email":"ada@example.invalid","verified":true},' +
+    '{"email":"noreply@github.com"},{"email":"eve@example.invalid","verified":false}]}]',
     Keys);
   AssertEquals('a null key is left out', 2, Length(Keys.GpgKeys));
   AssertTrue(Pos('xx', Keys.GpgKeys[0]) > 0);
-  AssertEquals(2, Length(Keys.Emails));
+  AssertEquals('only the verified addresses', 2, Length(Keys.Emails));
   AssertEquals('noreply@github.com', Keys.Emails[0]);
   AssertEquals('ada@example.invalid', Keys.Emails[1]);
   ParseGitHubSshKeys('[{"id":5,"key":"ssh-ed25519 AAAAC3 ada","title":"laptop"},{"id":6,"key":' +

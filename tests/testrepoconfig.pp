@@ -97,6 +97,12 @@ begin
   AssertEquals('a string is a list of one', 1, Length(C.Protected));
   C := ParseRepoConfig('[issues]'#10'ids = ''(\d+)'''#10);
   AssertEquals('ids without regex is no tracker', '', C.Issues.LogRegex);
+  C := ParseRepoConfig('[issues]'#10'url = "file:///Applications/Calculator.app"'#10 +
+    'regex = ''#(\d+)'''#10);
+  AssertEquals('a web address only', '', C.Issues.Url);
+  AssertEquals('#(\d+)', C.Issues.LogRegex);
+  C := ParseRepoConfig('[issues]'#10'url = "HTTP://t.test/%BUGID%"'#10);
+  AssertEquals('HTTP://t.test/%BUGID%', C.Issues.Url);
 end;
 
 procedure TRepoConfigTest.TestWrongTypes;

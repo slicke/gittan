@@ -233,11 +233,16 @@ begin
       Raw := TJSONObject(Item).Find('raw_key');
       if (Raw <> nil) and not Raw.IsNull and (Trim(Raw.AsString) <> '') then
         AddOnce(AKeys.GpgKeys, Raw.AsString);
+      { Only the addresses GitHub has verified: a key's uid may name
+        anyone's, and its SSH keys go into allowed_signers under them. }
       Emails := TJSONObject(Item).Find('emails');
       if Emails is TJSONArray then
         for k := 0 to Emails.Count - 1 do
           if Emails.Items[k] is TJSONObject then
           begin
+            E := TJSONObject(Emails.Items[k]).Find('verified');
+            if not ((E is TJSONBoolean) and E.AsBoolean) then
+              Continue;
             E := TJSONObject(Emails.Items[k]).Find('email');
             if (E <> nil) and not E.IsNull then
               AddOnce(AKeys.Emails, E.AsString);

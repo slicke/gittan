@@ -212,6 +212,11 @@ begin
 
     Table := TableOf(Doc, 'issues');
     Result.Issues.Url := StringIn(Table, 'url');
+    { A clone's file opens a web page, nothing else: another scheme
+      could hand the click to any program the system has for it. }
+    if not (SameText(Copy(Result.Issues.Url, 1, 8), 'https://') or
+      SameText(Copy(Result.Issues.Url, 1, 7), 'http://')) then
+      Result.Issues.Url := '';
     Result.Issues.LogRegex := StringIn(Table, 'regex');
     Ids := StringIn(Table, 'ids');
     if (Result.Issues.LogRegex <> '') and (Ids <> '') then

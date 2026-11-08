@@ -106,7 +106,7 @@ Every part is optional. Where git config sets the same thing, git config wins, s
 
 **`[issues]`** turns references to issues in commit messages into links:
 
-- `url` is the address of an issue, with `%BUGID%` where its id goes.
+- `url` is the address of an issue, with `%BUGID%` where its id goes. It must start with `http://` or `https://`; any other address is ignored.
 - `regex` finds a reference. Its first group is the id; without a group, the whole match is.
 - `ids` is optional. Use it when `regex` finds a whole reference such as "Fixes #12, #13"; `ids` then picks the ids out of it.
 

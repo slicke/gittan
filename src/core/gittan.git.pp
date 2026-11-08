@@ -3165,8 +3165,9 @@ end;
 
 { Whether AFileName, expanded, is a file under ARoot reached through
   no link: neither the file nor a folder between the root and it is a
-  symbolic link (or on Windows a reparse point), so a path a cloned file
-  names cannot read what lies outside the checkout. }
+  symbolic link (or on Windows a reparse point), and nothing is in .git,
+  so a path a cloned file names cannot read what lies outside the
+  checkout or git's own files. }
 function FileInCheckout(const ARoot, AFileName: string): boolean;
 
   function IsLink(const APath: string): boolean;
@@ -3204,6 +3205,9 @@ begin
   begin
     if Parts[i] = '' then
       Continue;
+    { Nothing of git's own: .git/config may hold a remote's token. }
+    if SameText(Parts[i], '.git') then
+      Exit;
     Path := Path + PathDelim + Parts[i];
     if IsLink(Path) then
       Exit;

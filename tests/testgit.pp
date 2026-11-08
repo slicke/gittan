@@ -2631,6 +2631,9 @@ begin
     AssertEquals('not beside the root', '',
       FRepo.CommitTemplate('../' + ExtractFileName(Outside)));
     AssertEquals('not an absolute path', '', FRepo.CommitTemplate(Outside));
+    AssertEquals('nothing of git''s own', '', FRepo.CommitTemplate('.git/config'));
+    AssertEquals('nothing of git''s own, by another case', '',
+      FRepo.CommitTemplate('.GIT/config'));
     {$IFDEF UNIX}
     AssertEquals(0, fpSymlink(PChar(Outside), PChar(IncludeTrailingPathDelimiter(FDir) +
       'link.txt')));
