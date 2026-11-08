@@ -78,7 +78,7 @@ function AskText(const ATitle, APrompt: string; var AValue: string;
 implementation
 
 uses
-  Math, Types, LCLType, gittan.dialogicon, gittan.pathfield, gittan.puzzle
+  Math, Types, LCLType, LCLIntf, gittan.dialogicon, gittan.pathfield, gittan.puzzle
   {$IFDEF LCLCocoa}, gittan.titlebar{$ENDIF};
 
 resourcestring
@@ -146,6 +146,8 @@ type
     FButtonRow: TPanel;
     FFrom: TLabel;
     FFromRow: TPanel;
+    FTexts: array of TLabel;
+    FButtons: array of TButton;
     FCheck: TGittanAskCheck;
     FOptional: boolean;
     FPathField: integer;
@@ -159,6 +161,7 @@ type
     procedure ButtonClick(Sender: TObject);
     procedure AddFrom(const AText: string);
     procedure RowPaint(Sender: TObject);
+    procedure Fit;
   protected
     procedure KeyDown(var Key: word; Shift: TShiftState); override;
     procedure Paint; override;
@@ -261,6 +264,8 @@ begin
   if ABold then
     Lbl.Font.Style := [fsBold];
   Lbl.Parent := Self;
+  SetLength(FTexts, Length(FTexts) + 1);
+  FTexts[High(FTexts)] := Lbl;
 end;
 
 { The buttons at the right: on macOS the default rightmost with the
@@ -328,6 +333,8 @@ begin
     B.Default := Order[i] = ADefault;
     B.Cancel := Order[i] = ACancel;
     B.Parent := Row;
+    SetLength(FButtons, Length(FButtons) + 1);
+    FButtons[High(FButtons)] := B;
     if Order[i] = ADefault then
       FOk := B;
   end;
@@ -337,7 +344,7 @@ end;
 
 { AText at the left of the buttons, under the icon's left edge, after
   the puzzle piece RowPaint draws, in a row of its own (FFromRow) that
-  DoShow moves over the buttons when the text does not fit beside them. }
+  Fit moves over the buttons when the text does not fit beside them. }
 procedure TAskForm.AddFrom(const AText: string);
 begin
   FFromRow := TPanel.Create(Self);
@@ -356,6 +363,72 @@ begin
   FFrom.Align := alClient;
   FFrom.BorderSpacing.Left := Scale96ToScreen(FromPiece + FromGap);
   FFrom.Parent := FFromRow;
+end;
+
+{ Measured before the dialog is shown, from the texts and the buttons
+  rather than the layout, which the widgetsets have not all made by
+  then (on Windows DoShow saw none). The dialog grows wider than
+  DialogWidth when the buttons need it, so none is cut. AskDlgFrom's
+  line goes over the buttons, under the text in its column, when it
+  does not fit beside them; beside them it sits under the icon, so the
+  button row goes at least a gap below the icon's bottom, which a short
+  text (one line, without the macOS heading) does not reach. }
+procedure TAskForm.Fit;
+var
+  Bmp: TBitmap;
+  i, W, H, BW, BH, Buttons, Room, TextLeft, TextBottom, Need: integer;
+  R: TRect;
+begin
+  Buttons := 0;
+  for i := 0 to High(FButtons) do
+  begin
+    BW := 0;
+    BH := 0;
+    FButtons[i].HandleNeeded;
+    FButtons[i].GetPreferredSize(BW, BH);
+    Inc(Buttons, Max(BW, FButtons[i].Constraints.MinWidth) + FButtons[i].BorderSpacing.Left);
+  end;
+  W := Max(Scale96ToScreen(DialogWidth), FButtonRow.BorderSpacing.Left + Buttons +
+    FButtonRow.BorderSpacing.Right);
+  Constraints.MaxWidth := W;
+  Constraints.MinWidth := W;
+  if FFrom = nil then
+    Exit;
+  TextLeft := Scale96ToScreen(IconLeft + IconSize + IconGap);
+  Bmp := TBitmap.Create;
+  try
+    Bmp.SetSize(1, 1);
+    Bmp.Canvas.Font := FFrom.Font;
+    Room := W - FButtonRow.BorderSpacing.Left - FButtonRow.BorderSpacing.Right - Buttons -
+      FFromRow.BorderSpacing.Left - FFrom.BorderSpacing.Left;
+    if Bmp.Canvas.TextWidth(FFrom.Caption) > Room then
+    begin
+      FFromRow.Parent := Self;
+      FFromRow.Align := alTop;
+      FFromRow.Height := Bmp.Canvas.TextHeight('Xg') + Scale96ToScreen(4);
+      FFromRow.Top := FButtonRow.Top - 1;
+      FFromRow.BorderSpacing.Left := TextLeft;
+      FFromRow.BorderSpacing.Right := Scale96ToScreen(EdgeGap);
+      FFromRow.BorderSpacing.Top := Scale96ToScreen(FieldGap);
+      Exit;
+    end;
+    TextBottom := 0;
+    for i := 0 to High(FTexts) do
+    begin
+      Bmp.Canvas.Font := FTexts[i].Font;
+      R := Rect(0, 0, W - TextLeft - FTexts[i].BorderSpacing.Right, 0);
+      DrawText(Bmp.Canvas.Handle, PChar(FTexts[i].Caption), Length(FTexts[i].Caption), R,
+        DT_CALCRECT or DT_WORDBREAK or DT_NOPREFIX);
+      H := R.Bottom - R.Top;
+      Inc(TextBottom, FTexts[i].BorderSpacing.Top + H);
+    end;
+    Need := Scale96ToScreen(TopGap + IconSize + FieldGap) -
+      (TextBottom + FButtonRow.BorderSpacing.Top);
+    if Need > 0 then
+      FButtonRow.BorderSpacing.Top := FButtonRow.BorderSpacing.Top + Need;
+  finally
+    Bmp.Free;
+  end;
 end;
 
 procedure TAskForm.RowPaint(Sender: TObject);
@@ -419,35 +492,8 @@ begin
   Result := Rect(Scale96ToScreen(IconLeft), IconTop, Scale96ToScreen(IconLeft) + S, IconTop + S);
 end;
 
-{ AskDlgFrom's line: when it does not fit beside the buttons (three of
-  them, a long name) it goes over them, under the text, in the text's
-  column; beside them it sits under the icon, so the button row goes at
-  least a gap below the icon's bottom, which a short text (one line,
-  without the macOS heading) does not reach. }
 procedure TAskForm.DoShow;
-var
-  Need: integer;
 begin
-  if FFrom <> nil then
-  begin
-    FFromRow.Canvas.Font := FFrom.Font;
-    if FFromRow.Canvas.TextWidth(FFrom.Caption) > FFrom.Width then
-    begin
-      FFromRow.Parent := Self;
-      FFromRow.Align := alTop;
-      FFromRow.Height := FFromRow.Canvas.TextHeight('Xg') + Scale96ToScreen(4);
-      FFromRow.Top := FButtonRow.Top - 1;
-      FFromRow.BorderSpacing.Left := Scale96ToScreen(IconLeft + IconSize + IconGap);
-      FFromRow.BorderSpacing.Right := Scale96ToScreen(EdgeGap);
-      FFromRow.BorderSpacing.Top := Scale96ToScreen(FieldGap);
-    end
-    else
-    begin
-      Need := Scale96ToScreen(TopGap + IconSize + FieldGap) - FButtonRow.Top;
-      if Need > 0 then
-        FButtonRow.BorderSpacing.Top := FButtonRow.BorderSpacing.Top + Need;
-    end;
-  end;
   inherited DoShow;
   if Length(FEdits) > 0 then
   begin
@@ -617,6 +663,7 @@ begin
     F.AddButtons(Buttons, Default, Cancel);
     if AFrom <> '' then
       F.AddFrom(AFrom);
+    F.Fit;
     F.FNoCancel := NoCancel;
     Result := F.ShowModal;
     if Result = mrNone then
