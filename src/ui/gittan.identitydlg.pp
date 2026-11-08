@@ -459,7 +459,7 @@ begin
     Say(SysUtils.Format(rsIdentityDlgTestFailed, [Trim(Error)]));
     Exit;
   end;
-  if not CommitSignatures(FRoot, [Id], nil, Commits, Error) or (Length(Commits) <> 1) then
+  if not CommitSignatures(FRoot, [Id], nil, Commits, Error, []) or (Length(Commits) <> 1) then
   begin
     Say(SysUtils.Format(rsIdentityDlgTestFailed, [Trim(Error)]));
     Exit;

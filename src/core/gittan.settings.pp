@@ -67,6 +67,7 @@ type
     FTabs: TStringList;
     FBatchRepos: TStringList;
     FCoAuthors: TStringList;
+    FTrustedKeys: TStringList;
     { The two files as read, which Save writes back with the fields put
       in, so a key it does not know stays. What has no field of its own
       lives in them alone: the forges' values (hosting.forges), the
@@ -298,6 +299,14 @@ type
     {** The people credited as co-authors before, "Name <e-mail>", the
       latest first (AddCoAuthor), for the co-authors dialog to list. }
     property CoAuthors: TStringList read FCoAuthors;
+    {** The signing keys taken on a forge's word (gittan.signing's
+      TrustEntry: fingerprint, host, user), kept in settings.json as
+      signing.trustedKeys, since trusting a key is a choice to keep. }
+    property TrustedKeys: TStringList read FTrustedKeys;
+    {** Adds AEntry unless its fingerprint is there already. }
+    procedure AddTrustedKey(const AEntry: string);
+    {** The entries as an array, for a job to take along. }
+    function TrustedKeyList: TStringArray;
     {** Puts APerson first among CoAuthors, dropping a duplicate and
       the oldest beyond MaxCoAuthors. }
     procedure AddCoAuthor(const APerson: string);
@@ -558,6 +567,7 @@ begin
   FBatchRepos.CaseSensitive := True;
   FCoAuthors := TStringList.Create;
   FCoAuthors.CaseSensitive := True;
+  FTrustedKeys := TStringList.Create;
   FSettingsDoc := TJSONObject.Create;
   FStateDoc := TJSONObject.Create;
   if ADir <> '' then
@@ -587,6 +597,7 @@ begin
   FTabs.Free;
   FBatchRepos.Free;
   FCoAuthors.Free;
+  FTrustedKeys.Free;
   inherited Destroy;
 end;
 
@@ -690,6 +701,7 @@ begin
   ChecksNeedAttention := BoolOf(O, 'checksNeedAttention', True);
   MineOrder := EnsureRange(IntOf(O, 'mineOrder'), 0, 2);
   ReviewOrder := EnsureRange(IntOf(O, 'reviewOrder'), 0, 1);
+  ListOf(ObjOf(FSettingsDoc, 'signing'), 'trustedKeys', FTrustedKeys);
   O := ObjOf(FSettingsDoc, 'ai');
   AIEnabled := BoolOf(O, 'enabled', False);
   AIAgent := StrOf(O, 'agent');
@@ -780,6 +792,7 @@ begin
   O.Booleans['checksNeedAttention'] := ChecksNeedAttention;
   O.Integers['mineOrder'] := MineOrder;
   O.Integers['reviewOrder'] := ReviewOrder;
+  ChildOf(FSettingsDoc, 'signing').Arrays['trustedKeys'] := ListJson(FTrustedKeys);
   O := ChildOf(FSettingsDoc, 'ai');
   O.Booleans['enabled'] := AIEnabled;
   O.Strings['agent'] := AIAgent;
@@ -1011,6 +1024,30 @@ begin
   i := FRecent.IndexOf(ARoot);
   if i >= 0 then
     FRecent.Delete(i);
+end;
+
+procedure TGittanSettings.AddTrustedKey(const AEntry: string);
+var
+  i: integer;
+  Key: string;
+begin
+  Key := UpperCase(Trim(AEntry.Split([#31])[0]));
+  if Key = '' then
+    Exit;
+  for i := 0 to FTrustedKeys.Count - 1 do
+    if UpperCase(Trim(FTrustedKeys[i].Split([#31])[0])) = Key then
+      Exit;
+  FTrustedKeys.Add(AEntry);
+end;
+
+function TGittanSettings.TrustedKeyList: TStringArray;
+var
+  i: integer;
+begin
+  Result := nil;
+  SetLength(Result, FTrustedKeys.Count);
+  for i := 0 to FTrustedKeys.Count - 1 do
+    Result[i] := FTrustedKeys[i];
 end;
 
 procedure TGittanSettings.AddCoAuthor(const APerson: string);

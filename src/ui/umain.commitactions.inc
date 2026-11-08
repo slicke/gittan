@@ -59,6 +59,7 @@ const
   caFixup = 26;
   caArchive = 27;
   caNote = 28;
+  caTrust = 29;
 
 { The commit by the name a person knows it by: a local branch on it,
   else a remote one, else a tag, else its short id. }
@@ -119,7 +120,7 @@ end;
 procedure TRepoFrame.FillCommitMenu(ARoot: TMenuItem; const ACommit: TGittanGraphCommit);
 var
   Busy, Jobs, InHead, IsHead, IsMerge: boolean;
-  Known: string;
+  Known, Host, RepoOwner, RepoName: string;
   i: integer;
   Item, Sub: TMenuItem;
 
@@ -223,6 +224,10 @@ begin
   Add(nil, rsCopyHash, caCopy);
   if Assigned(FForge) then
     Add(nil, Format(rsOpenCommitOnForge, [ForgeName]), caForge);
+  { A key not known here: the forge may know whose it is. }
+  Host := TrustHost(RepoOwner, RepoName);
+  if (Host <> '') and (CommitSignatureOf(ACommit.Hash).State = ssUnknownKey) then
+    Add(nil, Format(rsCaTrustKeys, [Host]), caTrust, FTrustJob = nil);
 end;
 
 { Commit > Commit, filled as the Branch menu opens (and for the command
@@ -313,6 +318,11 @@ begin
   if (Sender as TMenuItem).Tag = caNote then
   begin
     EditNoteAsk(FActionCommit);
+    Exit;
+  end;
+  if (Sender as TMenuItem).Tag = caTrust then
+  begin
+    TrustForgeKeys(Hash);
     Exit;
   end;
   if (Sender as TMenuItem).Tag = caPatchSeries then

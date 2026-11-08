@@ -12,7 +12,8 @@ uses
   Classes, SysUtils, Graphics, gittan.signing;
 
 {** What to say of ASignature: nothing for a commit never signed. A
-  verified one names its signer and key; one by a key not known here,
+  verified one names its signer and key, and through which forge the
+  key was trusted when it was; one by a key not known here,
   or one git could not check, says so and why, as far as the format
   tells (an SSH signature wants an allowed signers file, an OpenPGP one
   gpg); a bad one says what is wrong with it. }
@@ -39,6 +40,7 @@ resourcestring
   rsSignVerifiedBy = 'Verified signature by %s';
   rsSignVerified = 'Verified signature';
   rsSignKey = 'key %s';
+  rsSignTrusted = 'trusted through %s (%s)';
   rsSignUnknownKey = 'Signed with a key not known here';
   rsSignBad = 'Bad signature';
   rsSignExpired = 'Signature expired';
@@ -67,6 +69,16 @@ begin
         Result := rsSignVerified;
       if ASignature.Key <> '' then
         Result := Result + ' · ' + Format(rsSignKey, [ASignature.Key]);
+    end;
+    ssTrusted:
+    begin
+      if ASignature.Signer <> '' then
+        Result := Format(rsSignVerifiedBy, [ASignature.Signer])
+      else
+        Result := rsSignVerified;
+      if ASignature.Key <> '' then
+        Result := Result + ' · ' + Format(rsSignKey, [ASignature.Key]);
+      Result := Result + ' · ' + Format(rsSignTrusted, [ASignature.TrustedFrom, ASignature.TrustedUser]);
     end;
     ssUnknownKey:
     begin
@@ -100,7 +112,7 @@ end;
 function SignatureColor(const ASignature: TGittanSignature; AOk, ADim, AError: TColor): TColor;
 begin
   case ASignature.State of
-    ssGood: Result := AOk;
+    ssGood, ssTrusted: Result := AOk;
     ssBad: Result := AError;
   else
     Result := ADim;
@@ -109,7 +121,7 @@ end;
 
 function ShieldFilled(const ASignature: TGittanSignature): boolean;
 begin
-  Result := ASignature.State in [ssGood, ssBad];
+  Result := ASignature.State in [ssGood, ssTrusted, ssBad];
 end;
 
 { A shield: straight top, sides down to past the middle, and a point at

@@ -178,6 +178,12 @@ begin
   AbandonTimelapseJob;
   AbandonChangeJob;
   AbandonSignJob;
+  if FTrustJob <> nil then
+  begin
+    FTrustJob.Stop(False);
+    FBlameZombies.Add(FTrustJob);
+    FTrustJob := nil;
+  end;
   AbandonRepoInfoJob;
   FreeAndNil(FHistory);
   FreeAndNil(FTimelapse);

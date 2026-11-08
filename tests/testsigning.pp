@@ -34,6 +34,7 @@ type
     procedure TestJob;
     procedure TestSetup;
     procedure TestKeys;
+    procedure TestTrust;
   end;
 
 implementation
@@ -242,7 +243,7 @@ begin
   Signed := Commit('signed', True);
 
   { No allowed signers file: git says N, which is not taken for unsigned. }
-  AssertTrue(Error, CommitSignatures(FDir, [Signed, Plain], nil, Commits, Error));
+  AssertTrue(Error, CommitSignatures(FDir, [Signed, Plain], nil, Commits, Error, []));
   AssertEquals(2, Length(Commits));
   AssertEquals('in the order asked for', Signed, Commits[0].Hash);
   AssertTrue(Commits[0].Signature.Format = sfSsh);
@@ -256,7 +257,7 @@ begin
     key's fingerprint. }
   WriteFile('allowed', 'test@example.invalid ' + FileText(FDir + PathDelim + 'key.pub'));
   Git(['config', 'gpg.ssh.allowedSignersFile', FDir + PathDelim + 'allowed']);
-  AssertTrue(Error, CommitSignatures(FDir, [Plain, Signed], nil, Commits, Error));
+  AssertTrue(Error, CommitSignatures(FDir, [Plain, Signed], nil, Commits, Error, []));
   AssertTrue(Commits[0].Signature.State = ssNone);
   AssertTrue('good', Commits[1].Signature.State = ssGood);
   AssertEquals('G', Commits[1].Signature.Code);
@@ -265,15 +266,15 @@ begin
 
   { Another key allowed: a valid signature by a key not known here. }
   WriteFile('allowed', 'other@example.invalid ' + FileText(FDir + PathDelim + 'other.pub'));
-  AssertTrue(Error, CommitSignatures(FDir, [Signed], nil, Commits, Error));
+  AssertTrue(Error, CommitSignatures(FDir, [Signed], nil, Commits, Error, []));
   AssertTrue('unknown key', Commits[0].Signature.State = ssUnknownKey);
   AssertEquals('U', Commits[0].Signature.Code);
 
   { Nothing asked for. }
-  AssertTrue(CommitSignatures(FDir, [], nil, Commits, Error));
+  AssertTrue(CommitSignatures(FDir, [], nil, Commits, Error, []));
   AssertEquals(0, Length(Commits));
   { A hash that is no commit fails. }
-  AssertFalse(CommitSignatures(FDir, ['0000000000000000000000000000000000000000'], nil, Commits, Error));
+  AssertFalse(CommitSignatures(FDir, ['0000000000000000000000000000000000000000'], nil, Commits, Error, []));
 end;
 
 procedure TSigningTest.TestJob;
@@ -298,7 +299,7 @@ begin
     WriteFile('f.txt', IntToStr(i) + #10);
     Hashes[i] := Commit('c' + IntToStr(i), i mod 3 = 0);
   end;
-  Job := TGittanSignJob.Create(FDir, Hashes);
+  Job := TGittanSignJob.Create(FDir, Hashes, []);
   Cache := TGittanSignatureCache.Create;
   try
     Job.Start;
@@ -362,7 +363,7 @@ begin
   { A commit signed as set up verifies, and is on no branch. }
   AssertTrue(Error, gittan.signing.TestSigning(FDir, Cfg, Id, Error));
   AssertEquals(40, Length(Id));
-  AssertTrue(Error, CommitSignatures(FDir, [Id], nil, Commits, Error));
+  AssertTrue(Error, CommitSignatures(FDir, [Id], nil, Commits, Error, []));
   AssertTrue('verified', Commits[0].Signature.State = ssGood);
   AssertEquals('', Trim(Git(['branch', '--contains', Id])));
   { A key that is not there fails with git's reason. }
@@ -434,6 +435,50 @@ begin
     FileText(FDir + PathDelim + 'deep' + PathDelim + 'allowed'));
   AssertFalse(AddAllowedSigner(FDir + PathDelim + 'allowed2', 'a@x', 'nonsense', Error));
   AssertTrue(Pos('nonsense', Error) > 0);
+end;
+
+procedure TSigningTest.TestTrust;
+var
+  Commits: TGittanSignedCommits;
+  Entry: string;
+  Fprs: TStringArray;
+begin
+  Entry := TrustEntry('abcdef0123456789abcdef0123456789abcdef01', 'github.com', 'web-flow');
+  AssertEquals('ABCDEF0123456789ABCDEF0123456789ABCDEF01', TrustEntryKey(Entry));
+  Commits := ParseSignatureHeaders('aaaa'#10'gpgsig -----BEGIN PGP SIGNATURE-----'#10#10'    a'#0 +
+    'bbbb'#10'gpgsig -----BEGIN PGP SIGNATURE-----'#10#10'    b'#0 +
+    'cccc'#10'gpgsig -----BEGIN PGP SIGNATURE-----'#10#10'    c'#0 +
+    'dddd'#10'gpgsig -----BEGIN PGP SIGNATURE-----'#10#10'    d'#0);
+  ApplyVerdicts('aaaa'#31'U'#31'GitHub <noreply@github.com>'#31'B5690EEEBB952194'#31'undefined'#31 +
+    'abcdef0123456789abcdef0123456789abcdef01'#31'abcdef0123456789abcdef0123456789abcdef01'#0 +
+    'bbbb'#31'U'#31'Sub'#31'1111'#31'undefined'#31'1111111111111111111111111111111111111111'#31 +
+    'ABCDEF0123456789ABCDEF0123456789ABCDEF01'#0 +
+    'cccc'#31'U'#31'Other'#31'2222'#31'undefined'#31'2222222222222222222222222222222222222222'#31 +
+    '2222222222222222222222222222222222222222'#0 +
+    'dddd'#31'B'#31'Bad'#31'3333'#31'undefined'#31'abcdef0123456789abcdef0123456789abcdef01'#31 +
+    'abcdef0123456789abcdef0123456789abcdef01'#0, Commits);
+  AssertEquals('ABCDEF0123456789ABCDEF0123456789ABCDEF01', Commits[0].Signature.Fingerprint);
+  ApplyTrust(Commits, [Entry]);
+  AssertTrue('the key itself', Commits[0].Signature.State = ssTrusted);
+  AssertEquals('github.com', Commits[0].Signature.TrustedFrom);
+  AssertEquals('web-flow', Commits[0].Signature.TrustedUser);
+  AssertEquals('the signer git names is kept', 'GitHub <noreply@github.com>', Commits[0].Signature.Signer);
+  AssertTrue('a subkey of it', Commits[1].Signature.State = ssTrusted);
+  AssertTrue('another key', Commits[2].Signature.State = ssUnknownKey);
+  AssertTrue('a bad signature is never trusted', Commits[3].Signature.State = ssBad);
+  ApplyTrust(Commits, []);
+  AssertTrue(Commits[2].Signature.State = ssUnknownKey);
+
+  Fprs := ParseGpgImport('gpg: key B5690EEEBB952194: public key imported'#10 +
+    '[GNUPG:] IMPORTED B5690EEEBB952194 GitHub <noreply@github.com>'#10 +
+    '[GNUPG:] IMPORT_OK 1 5DE3E0509C47EA3CF04A42D34AEE18F83AFDEB23'#10 +
+    '[GNUPG:] IMPORT_OK 0 4AEE18F83AFDEB23'#10 +
+    '[GNUPG:] IMPORT_RES 2 0 1 0 1 0 0 0 0 1 0 0 0 0 0 0 0'#10);
+  AssertEquals(2, Length(Fprs));
+  AssertEquals('5DE3E0509C47EA3CF04A42D34AEE18F83AFDEB23', Fprs[0]);
+  AssertEquals(0, Length(ParseGpgImport('gpg: no valid OpenPGP data found.')));
+  AssertFalse(ImportGpgKeys('', '-----BEGIN PGP PUBLIC KEY BLOCK-----', Fprs, Entry));
+  AssertFalse(ImportGpgKeys(FDir + PathDelim + 'no-such-gpg', 'x', Fprs, Entry));
 end;
 
 initialization

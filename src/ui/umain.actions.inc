@@ -2263,7 +2263,7 @@ begin
   Unknown := FSignCache.Unknown(Hashes);
   if Length(Unknown) = 0 then
     Exit;
-  FSignJob := TGittanSignJob.Create(FRepo.Root, Unknown);
+  FSignJob := TGittanSignJob.Create(FRepo.Root, Unknown, App.Settings.TrustedKeyList);
   FSignJob.OnProgress := @SignJobProgress;
   FSignJob.OnDone := @SignJobDone;
   FSignJob.Start;
@@ -2305,6 +2305,122 @@ begin
   FSignJob := nil;
 end;
 
+{ The host of the first remote the forge hosts, with the owner and
+  the repository there ("slicke/gittan"); '' without a forge. }
+function TRepoFrame.TrustHost(out AOwner, ARepo: string): string;
+var
+  Line, Url, Path: string;
+  p: integer;
+begin
+  Result := '';
+  AOwner := '';
+  ARepo := '';
+  if FForge = nil then
+    Exit;
+  for Line in FRemoteUrls.Split([#10]) do
+  begin
+    p := Pos(' ', Line);
+    if p = 0 then
+      Continue;
+    Url := Trim(Copy(Line, p + 1, MaxInt));
+    if not TGittanForgeClass(FForge.ClassType).HostsRemote(RemoteHost(Url)) then
+      Continue;
+    Path := RemoteRepoPath(Url);
+    p := Pos('/', Path);
+    if p = 0 then
+      Continue;
+    AOwner := Copy(Path, 1, p - 1);
+    ARepo := Copy(Path, p + 1, MaxInt);
+    Exit(RemoteHost(Url));
+  end;
+end;
+
+{ Takes the forge's word for the keys of the commit's author and
+  committer (see gittan.trustkeys): the gpg git uses gets the GPG keys
+  and the allowed signers file the SSH keys, the one set anywhere, else
+  the default one set up globally, as saving an SSH key does. }
+procedure TRepoFrame.TrustForgeKeys(const AHash: string);
+var
+  Host, RepoOwner, RepoName, Allowed, Output, Err: string;
+begin
+  if (FRepo.Root = '') or (AHash = '') then
+    Exit;
+  if FTrustJob <> nil then
+  begin
+    StatusNote(rsTrustBusy);
+    Exit;
+  end;
+  Host := TrustHost(RepoOwner, RepoName);
+  if Host = '' then
+    Exit;
+  Allowed := ReadSigningSetup(FRepo.Root).AllowedSigners;
+  if Allowed = '' then
+  begin
+    Allowed := DefaultAllowedSignersFile;
+    RunGitIn(FRepo.Root, ['config', '--global', '--replace-all', 'gpg.ssh.allowedSignersFile',
+      Allowed], Output, Err);
+  end
+  else if Pos('~/', Allowed) = 1 then
+    Allowed := IncludeTrailingPathDelimiter(GetUserDir) + Copy(Allowed, 3, MaxInt);
+  StatusNote(Format(rsTrustAsking, [Host]));
+  FTrustJob := TGittanTrustJob.Create(FRepo.Root, Host, RepoOwner, RepoName, AHash,
+    GpgProgramFor(FRepo.Root), Allowed);
+  FTrustJob.OnDone := @TrustJobDone;
+  FTrustJob.Start;
+end;
+
+{ The keys taken go into the settings, what was found of the signatures
+  is forgotten and the rows and the card are checked again. }
+procedure TRepoFrame.TrustJobDone(Sender: TObject);
+var
+  Job: TGittanTrustJob;
+  Entry, Users: string;
+  i: integer;
+begin
+  Job := TGittanTrustJob(Sender);
+  if Job <> FTrustJob then
+    Exit;
+  FTrustJob := nil;
+  for Entry in Job.Trusted do
+    App.Settings.AddTrustedKey(Entry);
+  if Length(Job.Trusted) > 0 then
+    App.Settings.Save;
+  Users := '';
+  for i := 0 to High(Job.Users) do
+  begin
+    if Users <> '' then
+      Users := Users + ', ';
+    Users := Users + Job.Users[i];
+  end;
+  if (Length(Job.Trusted) = 0) and (Job.SshAdded = 0) then
+  begin
+    if Job.Error <> '' then
+      StatusNote(Job.Error, True)
+    else
+      StatusNote(Format(rsTrustNothing, [Job.Host, Users]));
+  end
+  else
+  begin
+    StatusNote(Format(rsTrustDone, [Job.Host, Users, Length(Job.Trusted), Job.SshAdded]));
+    FSignCache.Clear;
+    if FGraph.Visible then
+      VerifyGraphSignatures;
+    if BlameShown then
+    begin
+      FBlameSignature := CommitSignatureOf(FBlameCommit.Hash);
+      FSummary.SetCommit(FBlameCommit, FBlameBody, FBlameSignature);
+    end;
+  end;
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+end;
+
+procedure TRepoFrame.SummaryTrustClick(Sender: TObject);
+begin
+  if BlameShown then
+    TrustForgeKeys(FBlameCommit.Hash);
+end;
+
 { The signature of one commit, for the card: as known, else read now,
   which costs a gpg or ssh-keygen run for a signed commit. }
 function TRepoFrame.CommitSignatureOf(const AHash: string): TGittanSignature;
@@ -2315,7 +2431,8 @@ begin
   Result := Default(TGittanSignature);
   if (AHash = '') or (FRepo.Root = '') or FSignCache.Find(AHash, Result) then
     Exit;
-  if CommitSignatures(FRepo.Root, [AHash], nil, Found, Error) and (Length(Found) = 1) then
+  if CommitSignatures(FRepo.Root, [AHash], nil, Found, Error, App.Settings.TrustedKeyList) and
+    (Length(Found) = 1) then
   begin
     Result := Found[0].Signature;
     FSignCache.Put(AHash, Result);

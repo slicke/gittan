@@ -1886,7 +1886,7 @@ begin
     if FSigns[Index].State <> ssNone then
       PaintShield(ACanvas, Right - Px(ShieldSize), CenterY - Px(ShieldSize) div 2,
         Px(ShieldSize), SignatureColor(FSigns[Index], FOk, FDim, FErrorColor), FBack,
-        ShieldFilled(FSigns[Index]), FSigns[Index].State = ssGood);
+        ShieldFilled(FSigns[Index]), FSigns[Index].State in [ssGood, ssTrusted]);
     ACanvas.Brush.Style := bsClear;
     Dec(Right, Px(ShieldSize) + Px(Gap) div 2);
   end;

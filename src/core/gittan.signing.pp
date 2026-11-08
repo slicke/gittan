@@ -22,12 +22,14 @@ uses
 
 type
   {** What the signature of a commit came to: none (never signed), good
-    (git vouches for it: G), by a key not known here (a valid signature
+    (git vouches for it: G), trusted (a valid signature by a key git
+    gives no trust, U, whose fingerprint the user took on a forge's
+    word, see ApplyTrust), by a key not known here (a valid signature
     whose key or signer git cannot vouch for: U, and gpg's E when the
     public key is missing), bad (B, or an expired or revoked key: X, Y,
     R; Code tells which), or unchecked (signed, but the verifier could
     not run: no gpg, or no allowed signers file for an SSH signature). }
-  TGittanSignState = (ssNone, ssGood, ssUnknownKey, ssBad, ssUnchecked);
+  TGittanSignState = (ssNone, ssGood, ssTrusted, ssUnknownKey, ssBad, ssUnchecked);
 
   {** How a commit was signed, from the first line of its signature. }
   TGittanSignFormat = (sfNone, sfSsh, sfOpenPgp, sfX509);
@@ -40,9 +42,13 @@ type
     Code: char;
     {** The signer git names (%GS: the principal of an SSH signature's
       allowed signers entry, a gpg key's user id), the key (%GK: an
-      SSH key's fingerprint, a gpg key id) and gpg's trust level (%GT);
+      SSH key's fingerprint, a gpg key id), gpg's trust level (%GT) and
+      the fingerprint of the key and of its primary key (%GF, %GP);
       what git gave, '' for nothing. }
-    Signer, Key, Trust: string;
+    Signer, Key, Trust, Fingerprint, Primary: string;
+    {** For ssTrusted: the forge whose word the key was taken on and
+      the user it belongs to there. }
+    TrustedFrom, TrustedUser: string;
   end;
 
   TGittanSignedCommit = record
@@ -78,7 +84,7 @@ type
   TGittanSignJob = class(TGittanJob)
   private
     FRoot: string;
-    FHashes: TStringArray;
+    FHashes, FTrusted: TStringArray;
     FResults: TGittanSignedCommits;
     FFinished: integer;
     FError: string;
@@ -89,7 +95,7 @@ type
     procedure Execute; override;
     procedure Detach; override;
   public
-    constructor Create(const ARoot: string; const AHashes: TStringArray);
+    constructor Create(const ARoot: string; const AHashes, ATrusted: TStringArray);
     function Finished: integer;
     property Results: TGittanSignedCommits read FResults;
     {** git's reason when a chunk could not be read; those commits are
@@ -193,7 +199,7 @@ function SignatureFormat(const ALine: string): TGittanSignFormat;
 function ParseSignatureHeaders(const AOutput: string): TGittanSignedCommits;
 
 {** Reads git's verdicts from AOutput, a log in VerifyFormat (-z, a
-  record per commit: hash, %G?, %GS, %GK, %GT at unit separators), into
+  record per commit: hash, %G?, %GS, %GK, %GT, %GF, %GP at unit separators), into
   the commits of ACommits by hash. A verdict of N for a signed commit
   leaves it unchecked, since git says N when the verifier could not
   run; any other letter sets the state (see TGittanSignState). }
@@ -204,15 +210,38 @@ function SignStateOf(ACode: char): TGittanSignState;
 
 {** The signatures of AHashes in the repository at ARoot: the headers
   first, then git's verdict on the signed ones alone, so an unsigned
-  commit costs no gpg; ACommits comes in AHashes' order. ACancel, when
-  given, is asked as git runs. False when git failed, with its reason in
-  AError. For threads too. }
+  commit costs no gpg, and ApplyTrust with ATrusted; ACommits comes in
+  AHashes' order. ACancel, when given, is asked as git runs. False
+  when git failed, with its reason in AError. For threads too. }
 function CommitSignatures(const ARoot: string; const AHashes: array of string;
   ACancel: TGittanCancelEvent; out ACommits: TGittanSignedCommits;
+  out AError: string; const ATrusted: array of string): boolean;
+
+{** Marks as trusted the commits whose valid signature git gives no
+  trust (ssUnknownKey with a fingerprint) when the key's fingerprint,
+  or its primary key's, is one of ATrusted: entries as TrustEntry makes
+  them, a fingerprint the user took on a forge's word, with the forge
+  and the user there. gpg's web of trust is left alone: the signature
+  itself gpg has checked, only the trust comes from the forge. }
+procedure ApplyTrust(var ACommits: TGittanSignedCommits; const ATrusted: array of string);
+
+{** An entry of the trusted keys: the fingerprint, the forge's host
+  and the user, at unit separators. }
+function TrustEntry(const AFingerprint, AHost, AUser: string): string;
+{** The fingerprint of AEntry, upper case. }
+function TrustEntryKey(const AEntry: string): string;
+
+{** Imports AArmored (public keys, ASCII armored) into AProgram's
+  keyring (gpg --import) and gives the fingerprints of the keys it
+  took, those already there too; false with gpg's reason when it could
+  not run, or took none. }
+function ImportGpgKeys(const AProgram, AArmored: string; out AFingerprints: TStringArray;
   out AError: string): boolean;
+{** The fingerprints of gpg's IMPORT_OK status lines in AOutput. }
+function ParseGpgImport(const AOutput: string): TStringArray;
 
 const
-  VerifyFormat = '--format=%H%x1f%G?%x1f%GS%x1f%GK%x1f%GT';
+  VerifyFormat = '--format=%H%x1f%G?%x1f%GS%x1f%GK%x1f%GT%x1f%GF%x1f%GP';
 
 implementation
 
@@ -301,15 +330,93 @@ begin
           Trust := Trim(Fields[4]);
           if Trust = 'undefined' then
             Trust := '';
+          if Length(Fields) > 5 then
+            Fingerprint := UpperCase(Trim(Fields[5]));
+          if Length(Fields) > 6 then
+            Primary := UpperCase(Trim(Fields[6]));
         end;
   end;
+end;
+
+function TrustEntry(const AFingerprint, AHost, AUser: string): string;
+begin
+  Result := UpperCase(Trim(AFingerprint)) + #31 + Trim(AHost) + #31 + Trim(AUser);
+end;
+
+function TrustEntryKey(const AEntry: string): string;
+begin
+  Result := UpperCase(Trim(AEntry.Split([#31])[0]));
+end;
+
+procedure ApplyTrust(var ACommits: TGittanSignedCommits; const ATrusted: array of string);
+var
+  i, k: integer;
+  Parts: TStringArray;
+  Fpr: string;
+begin
+  for i := 0 to High(ACommits) do
+    with ACommits[i].Signature do
+      if (State = ssUnknownKey) and ((Fingerprint <> '') or (Primary <> '')) then
+        for k := 0 to High(ATrusted) do
+        begin
+          Parts := ATrusted[k].Split([#31]);
+          Fpr := UpperCase(Trim(Parts[0]));
+          if (Fpr <> '') and ((Fpr = Fingerprint) or (Fpr = Primary)) then
+          begin
+            State := ssTrusted;
+            if Length(Parts) > 1 then
+              TrustedFrom := Parts[1];
+            if Length(Parts) > 2 then
+              TrustedUser := Parts[2];
+            Break;
+          end;
+        end;
+end;
+
+function ParseGpgImport(const AOutput: string): TStringArray;
+var
+  Line: string;
+  Parts: TStringArray;
+begin
+  Result := nil;
+  for Line in AOutput.Split([#10, #13]) do
+    if Pos('[GNUPG:] IMPORT_OK ', Line) = 1 then
+    begin
+      Parts := Trim(Line).Split([' '], TStringSplitOptions.ExcludeEmpty);
+      if Length(Parts) >= 4 then
+      begin
+        SetLength(Result, Length(Result) + 1);
+        Result[High(Result)] := UpperCase(Parts[3]);
+      end;
+    end;
+end;
+
+function ImportGpgKeys(const AProgram, AArmored: string; out AFingerprints: TStringArray;
+  out AError: string): boolean;
+var
+  Output: string;
+  Status: integer;
+begin
+  AFingerprints := nil;
+  Result := (AProgram <> '') and (Trim(AArmored) <> '') and RunTool(AProgram, '',
+    ['--batch', '--status-fd', '1', '--import'], [], [], Output, AError, Status, nil, AArmored);
+  if not Result then
+  begin
+    if AError = '' then
+      AError := 'gpg could not be run: ' + AProgram;
+    Exit;
+  end;
+  AFingerprints := ParseGpgImport(Output);
+  Result := Length(AFingerprints) > 0;
+  if not Result and (Trim(AError) = '') then
+    AError := 'gpg imported no key';
 end;
 
 { The hashes go on stdin, so a chunk is not bound by the command line.
   --no-walk=unsorted keeps their order. }
 function CommitSignatures(const ARoot: string; const AHashes: array of string;
   ACancel: TGittanCancelEvent; out ACommits: TGittanSignedCommits;
-  out AError: string): boolean;
+  out AError: string; const ATrusted: array of string): boolean;
 var
   Input, Output: string;
   i, n: integer;
@@ -342,6 +449,7 @@ begin
     if not Result then
       Exit;
     ApplyVerdicts(Output, Found);
+    ApplyTrust(Found, ATrusted);
   end;
   { In the order asked for; a hash git did not list is unsigned. }
   SetLength(ACommits, Length(AHashes));
@@ -756,11 +864,12 @@ end;
   The results are written in the hashes' order and the count says how
   many may be read, with a barrier between, as the batch jobs do. }
 
-constructor TGittanSignJob.Create(const ARoot: string; const AHashes: TStringArray);
+constructor TGittanSignJob.Create(const ARoot: string; const AHashes, ATrusted: TStringArray);
 begin
   inherited Create(True);
   FRoot := ARoot;
   FHashes := Copy(AHashes, 0, Length(AHashes));
+  FTrusted := Copy(ATrusted, 0, Length(ATrusted));
   SetLength(FResults, Length(FHashes));
 end;
 
@@ -801,7 +910,7 @@ begin
     if n > SignChunk then
       n := SignChunk;
     Chunk := Copy(FHashes, At, n);
-    if CommitSignatures(FRoot, Chunk, @Cancelled, Found, Reason) then
+    if CommitSignatures(FRoot, Chunk, @Cancelled, Found, Reason, FTrusted) then
       for i := 0 to n - 1 do
         FResults[At + i] := Found[i]
     else

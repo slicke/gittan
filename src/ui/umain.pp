@@ -25,7 +25,7 @@ uses
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
   {$IFDEF LCLWin32}gittan.wintitlebar,{$ENDIF}
   {$IFDEF LCLGtk3}gittan.gtktitlebar,{$ENDIF}
-  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.timelapse, gittan.timelapsebar, gittan.pickaxe, gittan.signing, gittan.navhistory, gittan.undo, gittan.paletteside,
+  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.timelapse, gittan.timelapsebar, gittan.pickaxe, gittan.signing, gittan.trustkeys, gittan.navhistory, gittan.undo, gittan.paletteside,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.textfile, gittan.sectionheader, gittan.hintbox,
   gittan.forge, gittan.lfslocks, gittan.askdlg,
@@ -1193,6 +1193,9 @@ type
     FSignCache: TGittanSignatureCache;
     FSignJob: TGittanSignJob;
     FBlameSignature: TGittanSignature;
+    { Taking the forge's word for a commit's signing keys (gittan.trustkeys),
+      one at a time; never broken off, since it writes keys. }
+    FTrustJob: TGittanTrustJob;
     FHistoryPath, FHistoryRef, FHistoryName: string;
     FHistoryFrom, FHistoryTo, FHistoryMax: integer;
     FHistoryMore: boolean;
@@ -1954,6 +1957,10 @@ type
     procedure SignJobDone(Sender: TObject);
     procedure AbandonSignJob;
     function CommitSignatureOf(const AHash: string): TGittanSignature;
+    function TrustHost(out AOwner, ARepo: string): string;
+    procedure TrustForgeKeys(const AHash: string);
+    procedure TrustJobDone(Sender: TObject);
+    procedure SummaryTrustClick(Sender: TObject);
     procedure MenuCommitGraphClick(Sender: TObject);
     procedure GraphPick(Sender: TObject; const AHash: string);
     function MenuListAnchor: TRect;
@@ -3585,6 +3592,12 @@ resourcestring
   rsIdentityHint = 'Commits as %s <%s>%s. Click to change.';
   rsIdentityHintLocal = ' (this repository only)';
   rsIdentityHintSigns = ', signing with %s';
+  rsTrustKeys = 'Trust %s''s keys';
+  rsCaTrustKeys = 'Trust Signing Keys from %s';
+  rsTrustAsking = 'Asking %s whose keys signed this commit...';
+  rsTrustDone = 'Took %s''s word for the keys of %s: %d GPG, %d SSH. The commits are checked again.';
+  rsTrustNothing = '%s lists no signing keys for %s.';
+  rsTrustBusy = 'Keys are being fetched already.';
   rsIdentityNone = 'Git has no name or e-mail to commit under. Click to set them.';
   rsSubmodules = 'Submodules';
   rsSubmodulesNewer = '%d · %d behind';
@@ -4473,6 +4486,7 @@ begin
   FSummary.OnReviewClick := @SummaryReviewClick;
   FSummary.OnSelectCommit := @SummarySelectCommit;
   FSummary.OnBackClick := @SummaryBackClick;
+  FSummary.OnTrustClick := @SummaryTrustClick;
   FSummary.OnCommitStep := @SummaryCommitStep;
   FSummary.OnRowAction := @SummaryRowAction;
   { The branch list pops up over the form, under the branch. }
@@ -7630,6 +7644,7 @@ var
   Icons: array of integer;
   Texts, Actions: array of string;
   i: integer;
+  RepoOwner, RepoName: string;
   Branch: string;
 begin
   if not ASnap.Ok then
@@ -7722,6 +7737,10 @@ begin
   else
     FSummary.SetBehind(0, '');
   FSummary.BaseClickable := (BaseActionRef <> '') or (StashOfBase >= 0) or BlameShown;
+  if TrustHost(RepoOwner, RepoName) <> '' then
+    FSummary.TrustCaption := Format(rsTrustKeys, [TrustHost(RepoOwner, RepoName)])
+  else
+    FSummary.TrustCaption := '';
   if BlameShown then
     FSummary.SetCommit(FBlameCommit, FBlameBody, FBlameSignature)
   else
