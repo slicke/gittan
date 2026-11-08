@@ -929,11 +929,21 @@ jobs:
             if kill -0 "$MAKEPID" 2>/dev/null; then
               echo "::error::The tests still ran after 10 minutes"
               ps -axww -o pid,ppid,stat,etime,command | grep -v ' \[[^]]*\]$'
-              for P in $(pgrep -f tests/gittantests); do
-                echo "--- threads of $P"; procstat -kk "$P" || true
-                for C in $(pgrep -P "$P"); do
-                  echo "--- child $C"; procstat -kk "$C" || true
-                done
+              # Every process under the test program, with its threads'
+              # stacks and its open files: a pipe's write end held open
+              # somewhere keeps a reader (cat in an alias) waiting.
+              TREE=$(pgrep -f tests/gittantests)
+              NEW=$TREE
+              while [ -n "$NEW" ]; do
+                KIDS=
+                for P in $NEW; do KIDS="$KIDS $(pgrep -P "$P")"; done
+                NEW=$(echo $KIDS)
+                TREE="$TREE $NEW"
+              done
+              for P in $TREE; do
+                echo "--- $P: $(ps -ww -o command= -p "$P")"
+                procstat -kk "$P" || true
+                procstat -f "$P" || true
               done
               pkill -f tests/gittantests || true
               kill "$MAKEPID" 2>/dev/null || true
