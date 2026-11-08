@@ -294,16 +294,17 @@ var
 begin
   AKeys := Default(TGittanForgeKeys);
   AKeys.Login := ALogin;
-  Ok1 := Fetch(ABase + '/users/' + ALogin + '/gpg_keys', AToken, Body, AError);
+  { 30 a page by default; nobody has more than 100 signing keys. }
+  Ok1 := Fetch(ABase + '/users/' + ALogin + '/gpg_keys?per_page=100', AToken, Body, AError);
   if Ok1 then
     ParseGitHubGpgKeys(Body, AKeys);
-  Ok2 := Fetch(ABase + '/users/' + ALogin + '/ssh_signing_keys', AToken, Body, Err2);
+  Ok2 := Fetch(ABase + '/users/' + ALogin + '/ssh_signing_keys?per_page=100', AToken, Body, Err2);
   if Ok2 then
     ParseGitHubSshKeys(Body, AKeys);
+  { One of the two failed: true with what was found, the failure in
+    AError, so the list is not taken for all of the user's keys. }
   Result := Ok1 or Ok2;
-  if Result then
-    AError := ''
-  else if AError = '' then
+  if Ok1 then
     AError := Err2;
 end;
 
@@ -414,6 +415,8 @@ begin
       FError := Reason;
       Continue;
     end;
+    if Reason <> '' then
+      FError := Reason;
     SetLength(FUsers, Length(FUsers) + 1);
     FUsers[High(FUsers)] := Login;
     if (FGpgProgram <> '') and (Length(Keys.GpgKeys) > 0) then

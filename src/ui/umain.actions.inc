@@ -2392,6 +2392,20 @@ begin
   FTrustJob.Start;
 end;
 
+procedure TRepoFrame.SignaturesTrusted;
+begin
+  FSignCache.Clear;
+  if FRepo.Root = '' then
+    Exit;
+  if FGraph.Visible then
+    VerifyGraphSignatures;
+  if BlameShown then
+  begin
+    FBlameSignature := CommitSignatureOf(FBlameCommit.Hash);
+    FSummary.SetCommit(FBlameCommit, FBlameBody, FBlameSignature);
+  end;
+end;
+
 { The keys taken go into the settings, what was found of the signatures
   is forgotten and the rows and the card are checked again. }
 procedure TRepoFrame.TrustJobDone(Sender: TObject);
@@ -2424,15 +2438,16 @@ begin
   end
   else
   begin
-    StatusNote(Format(rsTrustDone, [Job.Host, Users, Length(Job.Trusted), Job.SshAdded]));
-    FSignCache.Clear;
-    if FGraph.Visible then
-      VerifyGraphSignatures;
-    if BlameShown then
-    begin
-      FBlameSignature := CommitSignatureOf(FBlameCommit.Hash);
-      FSummary.SetCommit(FBlameCommit, FBlameBody, FBlameSignature);
-    end;
+    { Taken in part: what failed is said with what was taken. }
+    if Job.Error <> '' then
+      StatusNote(Format(rsTrustDone, [Job.Host, Users, Length(Job.Trusted), Job.SshAdded]) +
+        ' ' + Job.Error, True)
+    else
+      StatusNote(Format(rsTrustDone, [Job.Host, Users, Length(Job.Trusted), Job.SshAdded]));
+    { The keys and the allowed signers file are everyone's: every tab
+      checks its commits again. }
+    for i := 0 to FWindow.FrameCount - 1 do
+      FWindow.FrameAt(i).SignaturesTrusted;
   end;
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);

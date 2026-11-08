@@ -2518,6 +2518,10 @@ type
       the pull requests, the login and the review comments of the
       account of before go, and the pull requests are asked for again. }
     procedure AccountChanged;
+    {** Keys were trusted, in this frame or another (TrustJobDone): what
+      was found of the signatures goes, and the rows and the card are
+      checked again. }
+    procedure SignaturesTrusted;
     {** The settings changed (TRepoWindow.SettingsChanged): AFont, ATheme
       and ATabSize in the editors, the agent found again, and with
       ATools the forge and the repository read again. }

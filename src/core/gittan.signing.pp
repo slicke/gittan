@@ -527,6 +527,8 @@ begin
   Result := Trim(Result);
 end;
 
+function OpenPgpProgramIn(const ARoot: string): string; forward;
+
 function ReadSigningSetup(const ARoot: string): TGittanSigningSetup;
 begin
   Result := Default(TGittanSigningSetup);
@@ -534,7 +536,7 @@ begin
   Result.Format := SignFormatOf(ConfigValue(ARoot, ['config', '--get', 'gpg.format']));
   Result.Key := ConfigValue(ARoot, ['config', '--get', 'user.signingkey']);
   Result.AllowedSigners := ConfigValue(ARoot, ['config', '--get', 'gpg.ssh.allowedSignersFile']);
-  Result.GpgProgram := ConfigValue(ARoot, ['config', '--get', 'gpg.program']);
+  Result.GpgProgram := OpenPgpProgramIn(ARoot);
 end;
 
 function WriteSigningSetup(const ARoot: string; const ASetup: TGittanSigningSetup;
@@ -703,13 +705,32 @@ begin
     Status, nil) and (Status = 0);
 end;
 
+{ gpg.program and gpg.openpgp.program are one setting to git, the last
+  one read winning. }
+function OpenPgpProgramIn(const ARoot: string): string;
+var
+  Output, Error, Line: string;
+  p: integer;
+begin
+  Result := '';
+  if not RunGitIn(ARoot, ['config', '--get-regexp', '^gpg\.(openpgp\.)?program$'], Output,
+    Error) then
+    Exit;
+  for Line in Output.Split([#10]) do
+  begin
+    p := Pos(' ', Line);
+    if p > 0 then
+      Result := Trim(Copy(Line, p + 1, MaxInt));
+  end;
+end;
+
 function GpgProgramFor(const ARoot: string): string;
 {$IFDEF WINDOWS}
 var
   Dir, Guess: string;
 {$ENDIF}
 begin
-  Result := ConfigValue(ARoot, ['config', '--get', 'gpg.program']);
+  Result := OpenPgpProgramIn(ARoot);
   if Result <> '' then
     Exit;
   if GpgRuns('gpg') then

@@ -362,6 +362,13 @@ begin
   Cfg := ReadSigningSetup(FDir);
   AssertFalse(Cfg.Sign);
   AssertEquals('', Cfg.Key);
+  AssertEquals('', Cfg.GpgProgram);
+  Git(['config', 'gpg.program', 'gpg-a']);
+  Git(['config', 'gpg.openpgp.program', 'gpg-b']);
+  AssertEquals('the last one git reads', 'gpg-b', ReadSigningSetup(FDir).GpgProgram);
+  Git(['config', '--unset', 'gpg.program']);
+  AssertEquals('gpg.openpgp.program alone', 'gpg-b', GpgProgramFor(FDir));
+  Git(['config', '--unset', 'gpg.openpgp.program']);
   Allowed := FDir + PathDelim + 'allowed';
   Git(['config', 'gpg.ssh.allowedSignersFile', Allowed]);
 
