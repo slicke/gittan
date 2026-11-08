@@ -732,10 +732,10 @@ jobs:
             [ $TRY = 3 ] && exit 1
           done
           test -x Gittan || { echo "::error::Gittan was not built"; exit 1; }
-          # The tests run but do not stop the leg: their program has ended
-          # at once with exit code 3 and no output on Haiku, which is not
-          # yet understood.
-          make test || echo "::warning::The tests failed on Haiku (exit $?)"
+          # The tests stop the leg, as on the others. (They used to end at
+          # once with exit code 3: the Makefile's rpath lost $ORIGIN in
+          # FPC's link through a shell, so libqjs was not found.)
+          make test
           mkdir -p dist/Gittan
           cp Gittan dist/Gittan/
           cp -r lexlib dist/Gittan/
