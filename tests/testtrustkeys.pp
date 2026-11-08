@@ -31,6 +31,7 @@ end;
 procedure TTrustKeysTest.TestCommitLogins;
 var
   Logins: TStringArray;
+  Author, Committer: string;
 begin
   Logins := ParseGitHubCommitLogins('{"sha":"abc","author":{"login":"slicke"},' +
     '"committer":{"login":"web-flow"},"commit":{"verification":{"verified":true}}}');
@@ -44,6 +45,17 @@ begin
   AssertEquals('web-flow', Logins[0]);
   AssertEquals(0, Length(ParseGitHubCommitLogins('{"message":"Not Found"}')));
   AssertEquals(0, Length(ParseGitHubCommitLogins('not json')));
+  { The two apart, so a key is bound to its owner's e-mail alone. }
+  ParseGitHubCommitPeople('{"author":{"login":"slicke"},"committer":{"login":"web-flow"}}',
+    Author, Committer);
+  AssertEquals('slicke', Author);
+  AssertEquals('web-flow', Committer);
+  ParseGitHubCommitPeople('{"author":null,"committer":{"login":"web-flow"}}', Author, Committer);
+  AssertEquals('', Author);
+  AssertEquals('web-flow', Committer);
+  ParseGitHubCommitPeople('not json', Author, Committer);
+  AssertEquals('', Author);
+  AssertEquals('', Committer);
 end;
 
 procedure TTrustKeysTest.TestUserKeys;

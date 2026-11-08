@@ -2292,6 +2292,10 @@ begin
   FSignJob := nil;
   FSignCache.PutAll(Job.Results, Job.Finished);
   FGraph.SetSignatures(Job.Results, Job.Finished);
+  { A chunk git could not read is left out of the cache (its results
+    have no hash), so the next look asks again; the reason is said. }
+  if Job.Error <> '' then
+    StatusNote(Job.Error, True);
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
 end;

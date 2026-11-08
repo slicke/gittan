@@ -98,8 +98,9 @@ type
     constructor Create(const ARoot: string; const AHashes, ATrusted: TStringArray);
     function Finished: integer;
     property Results: TGittanSignedCommits read FResults;
-    {** git's reason when a chunk could not be read; those commits are
-      kept as unsigned. }
+    {** git's reason when a chunk could not be read; those commits'
+      results have an empty Hash, so the cache leaves them out and they
+      are asked for again next time. }
     property Error: string read FError;
     property OnProgress: TNotifyEvent read FOnProgress write FOnProgress;
   end;
@@ -116,6 +117,16 @@ type
     Key, AllowedSigners, GpgProgram: string;
   end;
 
+  {** Who commits and whether it is signed, what the Commit header's
+    hint says: user.name and user.email as git would commit under,
+    Local when either is set in the repository itself (or its
+    worktree), Sign and Format from commit.gpgsign and gpg.format. }
+  TGittanCommitter = record
+    Name, Email: string;
+    Local, Sign: boolean;
+    Format: TGittanSignFormat;
+  end;
+
 const
   SignChunk = 100;
 
@@ -123,11 +134,21 @@ const
   scope read. }
 function ReadSigningSetup(const ARoot: string): TGittanSigningSetup;
 
+{** The committer of the repository at ARoot in one git call (git config
+  --show-scope -z --get-regexp over the four keys), for what is read as
+  often as the mouse comes over the Commit header. ParseCommitterSetup
+  reads git's output: scope NUL key LF value NUL per entry, in the
+  order of precedence, so the last of a key wins. }
+function ReadCommitterSetup(const ARoot: string): TGittanCommitter;
+function ParseCommitterSetup(const AOutput: string): TGittanCommitter;
+
 {** Saves ASetup in the repository's own config (ALocal) or the global
   one, as SetIdentity does with the identity: commit.gpgsign and
   tag.gpgSign on with gpg.format and user.signingkey, or both unset at
-  that scope when Sign is off, and with the global one the repository's
-  own values are unset first, since they would go before it. For an
+  that scope when Sign is off (and set to false there when a wider
+  scope still turns them on, so the choice holds), and with the global
+  one the repository's own values are unset first, since they would go
+  before it. For an
   SSH key the allowed signers file is seen to as well, so Gittan can
   show one's own commits as verified: the one set anywhere, else
   DefaultAllowedSignersFile set globally, gets a line with AEmail and
@@ -182,7 +203,8 @@ function DefaultAllowedSignersFile: string;
 function AddAllowedSigner(const AFile, AEmail, AKey: string; out AError: string): boolean;
 
 {** The key AKey stands for, as AddAllowedSigner puts it in the file:
-  "type base64", read from the file when AKey names one. '' when it
+  "type base64", read from the file when AKey names one; a private key
+  file (git signs with one too) gives its .pub beside it. '' when it
   cannot be read. }
 function PublicKeyOf(const AKey: string): string;
 
@@ -552,11 +574,71 @@ begin
   end
   else
   begin
-    { git exits with 5 when there is nothing to unset. }
-    RunGitIn(ARoot, ['config', Scope, '--unset-all', 'commit.gpgsign'], Output, AError);
-    RunGitIn(ARoot, ['config', Scope, '--unset-all', 'tag.gpgSign'], Output, AError);
-    AError := '';
+    { git exits with 5 when there is nothing to unset. A wider scope
+      (the global config under a repository's own) that still turns
+      signing on is overridden at this scope, else the choice would
+      change nothing. }
     Result := True;
+    for Key in ['commit.gpgsign', 'tag.gpgSign'] do
+    begin
+      RunGitIn(ARoot, ['config', Scope, '--unset-all', Key], Output, AError);
+      if ConfigValue(ARoot, ['config', '--type=bool', '--get', Key]) = 'true' then
+        Result := RunGitIn(ARoot, ['config', Scope, '--replace-all', Key, 'false'],
+          Output, AError) and Result;
+    end;
+    if Result then
+      AError := '';
+  end;
+end;
+
+function ReadCommitterSetup(const ARoot: string): TGittanCommitter;
+var
+  Output, Error: string;
+begin
+  { git exits with 1 when no key matches. }
+  if (ARoot = '') or not RunGitIn(ARoot, ['config', '--show-scope', '-z', '--get-regexp',
+    '^(user\.(name|email)|commit\.gpgsign|gpg\.format)$'], Output, Error) then
+    Output := '';
+  Result := ParseCommitterSetup(Output);
+end;
+
+function ParseCommitterSetup(const AOutput: string): TGittanCommitter;
+var
+  Parts: TStringArray;
+  Scope, Key, Value: string;
+  i, p: integer;
+begin
+  Result := Default(TGittanCommitter);
+  Result.Format := sfOpenPgp;
+  { Split at NUL, the pieces go scope, "key LF value", scope, ... }
+  Parts := AOutput.Split([#0]);
+  i := 0;
+  while i + 1 <= High(Parts) do
+  begin
+    Scope := Parts[i];
+    Key := Parts[i + 1];
+    Inc(i, 2);
+    p := Pos(#10, Key);
+    if p = 0 then
+      Value := ''
+    else
+    begin
+      Value := Copy(Key, p + 1, MaxInt);
+      Key := Copy(Key, 1, p - 1);
+    end;
+    Key := LowerCase(Key);
+    if Key = 'user.name' then
+      Result.Name := Trim(Value)
+    else if Key = 'user.email' then
+      Result.Email := Trim(Value)
+    else if Key = 'commit.gpgsign' then
+      Result.Sign := (Value = '') or (LowerCase(Trim(Value)) = 'true') or (Trim(Value) = '1') or
+        (LowerCase(Trim(Value)) = 'yes') or (LowerCase(Trim(Value)) = 'on')
+    else if Key = 'gpg.format' then
+      Result.Format := SignFormatOf(Trim(Value));
+    if ((Key = 'user.name') or (Key = 'user.email')) and
+      ((Scope = 'local') or (Scope = 'worktree')) then
+      Result.Local := True;
   end;
 end;
 
@@ -726,6 +808,15 @@ begin
           Result := Trim(Lines[0])
         else
           Result := '';
+        { A private key: its public half lies beside it as <name>.pub. }
+        if (Pos('-----', Result) = 1) and FileExists(Trim(AKey) + '.pub') then
+        begin
+          Lines.LoadFromFile(Trim(AKey) + '.pub');
+          if Lines.Count > 0 then
+            Result := Trim(Lines[0])
+          else
+            Result := '';
+        end;
       except
         Result := '';
       end;
@@ -733,9 +824,10 @@ begin
       Lines.Free;
     end;
   end;
-  { The type and the key, without the comment. }
+  { The type and the key, without the comment; a line of a key file
+    that is no key (-----BEGIN ...) is none. }
   Parts := Result.Split([' '], TStringSplitOptions.ExcludeEmpty);
-  if Length(Parts) < 2 then
+  if (Length(Parts) < 2) or (Pos('-', Parts[0]) = 1) then
     Exit('');
   Result := Parts[0] + ' ' + Parts[1];
 end;
@@ -915,11 +1007,13 @@ begin
         FResults[At + i] := Found[i]
     else
     begin
+      { Not read, not unsigned: an empty hash keeps them out of the
+        cache and the rows, so they are asked for again. }
       if Reason <> '' then
         FError := Reason;
       for i := 0 to n - 1 do
       begin
-        FResults[At + i].Hash := FHashes[At + i];
+        FResults[At + i].Hash := '';
         FResults[At + i].Signature := Default(TGittanSignature);
         FResults[At + i].Signature.Code := ' ';
       end;

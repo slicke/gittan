@@ -1026,25 +1026,24 @@ begin
 end;
 
 { The hint over the person says who commits; read as the mouse comes
-  in, so a change made with git outside is seen too. }
+  in, so a change made with git outside is seen too, in one git call
+  (ReadCommitterSetup), since the mouse comes in often. }
 procedure TRepoFrame.CommitHeaderEnter(Sender: TObject);
 var
-  Who, Mail, Where: string;
-  Signing: TGittanSigningSetup;
+  Where: string;
+  Committer: TGittanCommitter;
 begin
-  Who := FRepo.UserName;
-  Mail := FRepo.UserEmail;
-  if (Who = '') or (Mail = '') then
+  Committer := ReadCommitterSetup(FRepo.Root);
+  if (Committer.Name = '') or (Committer.Email = '') then
     FCommitHeader.PersonHint := rsIdentityNone
   else
   begin
     Where := '';
-    if FRepo.HasLocalIdentity then
+    if Committer.Local then
       Where := rsIdentityHintLocal;
-    Signing := ReadSigningSetup(FRepo.Root);
-    if Signing.Sign then
-      Where := Where + Format(rsIdentityHintSigns, [SignFormatName(Signing.Format)]);
-    FCommitHeader.PersonHint := Format(rsIdentityHint, [Who, Mail, Where]);
+    if Committer.Sign then
+      Where := Where + Format(rsIdentityHintSigns, [SignFormatName(Committer.Format)]);
+    FCommitHeader.PersonHint := Format(rsIdentityHint, [Committer.Name, Committer.Email, Where]);
   end;
 end;
 

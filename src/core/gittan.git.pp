@@ -1209,8 +1209,17 @@ function WithCoAuthors(const AMessage: string; const ACoAuthors: array of string
   markers (merge.conflictStyle zdiff3, or diff3 before git 2.35), so
   the merge editor can show it: ['-c', 'merge.conflictStyle=zdiff3'],
   or none when the config of the repository at ARoot sets a style of
-  its own, which is kept. They go before the command. }
+  its own, which is kept. They go before the command. Whether the
+  repository sets one is remembered per root for as long as its config
+  file (RepoConfigPath) keeps its time and size, so a merge costs no
+  git config call of its own; a style set in the global config
+  afterwards is seen at the next start or SetGitExe. }
 function ConflictStyleArgs(const ARoot: string): TStringArray;
+
+{** The config file of the repository whose work tree is at ARoot:
+  .git/config, or through a worktree's .git file and its commondir; ''
+  when it cannot be told without git. }
+function RepoConfigPath(const ARoot: string): string;
 
 {** AArgs, a git command that may stop with conflicts, with
   ConflictStyleArgs before it. }
@@ -1563,8 +1572,20 @@ var
     An integer, so a watcher thread asking while the main thread sets
     another git at most asks twice. }
   GMergeTree: integer = -1;
-  { The conflict style ConflictStyleArgs asks for, found once. }
-  GConflictStyle: string = '';
+  { The conflict style ConflictStyleArgs asks for, found once: 0 not
+    asked yet, 1 zdiff3, 2 diff3 (an integer, as GMergeTree, since a
+    job's thread may ask too). }
+  GConflictStyle: integer = 0;
+  { Per root, whether its config sets merge.conflictStyle, with the
+    time and size of the config file it was read from; under
+    GConflictLock, since the jobs' threads run merges too. }
+  GConflictOwn: array of record
+    Root, ConfigPath: string;
+    Age: longint;
+    Size: int64;
+    Own: boolean;
+  end;
+  GConflictLock: TRTLCriticalSection;
 
 function ToolSearchPath: string;
 begin
@@ -1622,23 +1643,6 @@ begin
   Result := GMergeTree = 1;
 end;
 
-function ConflictStyleArgs(const ARoot: string): TStringArray;
-var
-  Output, Err, Version: string;
-  Major, Minor: integer;
-begin
-  Result := nil;
-  if (ARoot <> '') and RunGitIn(ARoot, ['config', '--get', 'merge.conflictStyle'], Output, Err) and
-    (Trim(Output) <> '') then
-    Exit;
-  if GConflictStyle = '' then
-    if GitVersion(Version, Major, Minor) and ((Major > 2) or ((Major = 2) and (Minor >= 35))) then
-      GConflictStyle := 'zdiff3'
-    else
-      GConflictStyle := 'diff3';
-  Result := ['-c', 'merge.conflictStyle=' + GConflictStyle];
-end;
-
 function WithConflictStyle(const ARoot: string; const AArgs: array of string): TStringArray;
 var
   i, n: integer;
@@ -1681,7 +1685,13 @@ begin
   if Exe = GGitExe then
     Exit;
   GMergeTree := -1;
-  GConflictStyle := '';
+  GConflictStyle := 0;
+  EnterCriticalSection(GConflictLock);
+  try
+    GConflictOwn := nil;
+  finally
+    LeaveCriticalSection(GConflictLock);
+  end;
   { One string per path git ran by, not one per call: the settings set
     it again on every save. A path set again is the kept string itself,
     so the one in use is always kept or new, never a copy freed later. }
@@ -4397,6 +4407,120 @@ begin
   {$else}
   Result := (APath <> '') and (APath[1] = '/');
   {$endif}
+end;
+
+function RepoConfigPath(const ARoot: string): string;
+var
+  Dir, Line: string;
+begin
+  Result := '';
+  if ARoot = '' then
+    Exit;
+  Dir := IncludeTrailingPathDelimiter(ARoot) + '.git';
+  if FileExists(Dir) and not DirectoryExists(Dir) then
+  begin
+    { A worktree's .git file: "gitdir: <path>". }
+    Line := Trim(ReadFileBytes(Dir));
+    if Pos('gitdir:', Line) <> 1 then
+      Exit;
+    Dir := Trim(Copy(Line, 8, MaxInt));
+    if not IsAbsolutePath(Dir) then
+      Dir := ExpandFileName(IncludeTrailingPathDelimiter(ARoot) + Dir);
+    if FileExists(IncludeTrailingPathDelimiter(Dir) + 'commondir') then
+    begin
+      Line := Trim(ReadFileBytes(IncludeTrailingPathDelimiter(Dir) + 'commondir'));
+      if Line <> '' then
+        if IsAbsolutePath(Line) then
+          Dir := Line
+        else
+          Dir := ExpandFileName(IncludeTrailingPathDelimiter(Dir) + Line);
+    end;
+  end;
+  if DirectoryExists(Dir) then
+    Result := IncludeTrailingPathDelimiter(Dir) + 'config';
+end;
+
+{ The time and size of the file, -1 and -1 when it is not there. }
+procedure FileStamp(const APath: string; out AAge: longint; out ASize: int64);
+var
+  Info: TSearchRec;
+begin
+  AAge := -1;
+  ASize := -1;
+  if (APath <> '') and (FindFirst(APath, faAnyFile, Info) = 0) then
+  begin
+    AAge := Info.Time;
+    ASize := Info.Size;
+    FindClose(Info);
+  end;
+end;
+
+{ Whether the repository at ARoot sets merge.conflictStyle itself, from
+  what is remembered while its config file is unchanged, else asked of
+  git and remembered. }
+function OwnConflictStyle(const ARoot: string): boolean;
+var
+  Output, Err, Path: string;
+  Age: longint;
+  Size: int64;
+  i, At: integer;
+begin
+  Path := RepoConfigPath(ARoot);
+  FileStamp(Path, Age, Size);
+  if Path <> '' then
+  begin
+    EnterCriticalSection(GConflictLock);
+    try
+      for i := 0 to High(GConflictOwn) do
+        if (GConflictOwn[i].Root = ARoot) and (GConflictOwn[i].ConfigPath = Path) and
+          (GConflictOwn[i].Age = Age) and (GConflictOwn[i].Size = Size) then
+          Exit(GConflictOwn[i].Own);
+    finally
+      LeaveCriticalSection(GConflictLock);
+    end;
+  end;
+  Result := RunGitIn(ARoot, ['config', '--get', 'merge.conflictStyle'], Output, Err) and
+    (Trim(Output) <> '');
+  if Path = '' then
+    Exit;
+  EnterCriticalSection(GConflictLock);
+  try
+    At := -1;
+    for i := 0 to High(GConflictOwn) do
+      if GConflictOwn[i].Root = ARoot then
+        At := i;
+    if At < 0 then
+    begin
+      At := Length(GConflictOwn);
+      SetLength(GConflictOwn, At + 1);
+    end;
+    GConflictOwn[At].Root := ARoot;
+    GConflictOwn[At].ConfigPath := Path;
+    GConflictOwn[At].Age := Age;
+    GConflictOwn[At].Size := Size;
+    GConflictOwn[At].Own := Result;
+  finally
+    LeaveCriticalSection(GConflictLock);
+  end;
+end;
+
+function ConflictStyleArgs(const ARoot: string): TStringArray;
+var
+  Version: string;
+  Major, Minor: integer;
+begin
+  Result := nil;
+  if (ARoot <> '') and OwnConflictStyle(ARoot) then
+    Exit;
+  if GConflictStyle = 0 then
+    if GitVersion(Version, Major, Minor) and ((Major > 2) or ((Major = 2) and (Minor >= 35))) then
+      GConflictStyle := 1
+    else
+      GConflictStyle := 2;
+  if GConflictStyle = 1 then
+    Result := ['-c', 'merge.conflictStyle=zdiff3']
+  else
+    Result := ['-c', 'merge.conflictStyle=diff3'];
 end;
 
 function TGittanRepo.LastFetch: TDateTime;
@@ -8021,12 +8145,14 @@ initialization
   {$ifdef unix}
   InitCriticalSection(GSpawnLock);
   {$endif}
+  InitCriticalSection(GConflictLock);
   GToolPath := MakeToolPath;
   GOldGitExes := TStringList.Create;
   SetGitExe('');
 
 finalization
   GOldGitExes.Free;
+  DoneCriticalSection(GConflictLock);
   {$ifdef unix}
   DoneCriticalSection(GSpawnLock);
   {$endif}

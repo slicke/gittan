@@ -28,6 +28,7 @@
 - Syntax highlighting is worked out faster, by about a third on large Markdown and HTML files (EControl, ATSynEdit_Ex and ATSynEdit updated).
 
 ### Fixed
+- The Batch tab's scan for gone branches no longer leaves a loose commit object in each repository for every branch that was not merged: the squash check compares patch ids instead of making a commit, so Maintenance no longer finds objects to pack that the scan itself left.
 - On macOS the shown tab is filled all through, so the line where the sidebar's shade meets the editor's no longer shows across it.
 - The GitHub view says when GitHub has more pull requests than the fifty last changed it lists, rather than leaving the rest out without a word.
 - Your own pull requests no longer offer Approve and Request Changes, which GitHub refuses for the author; Comment is still there.

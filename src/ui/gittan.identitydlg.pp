@@ -89,8 +89,14 @@ type
     FSaveButton: TButton;
     FNextTop: integer;
     { What FKey's items stand for, in its order: the key ids while GPG
-      is chosen, the .pub paths and the agent's keys for SSH. }
+      is chosen, the .pub paths and the agent's keys (key::type base64
+      comment, what user.signingkey takes a literal key as) for SSH. }
     FGpgIds, FSshValues: TStringArray;
+    { The format the items are for, and the key last chosen for each,
+      so a switch of format does not carry a .pub path into the GPG
+      key, and back again finds the SSH key. }
+    FFilledFormat: TGittanSignFormat;
+    FKept: array[TGittanSignFormat] of string;
     FGpgProgram: string;
     FGpgLooked: boolean;
     procedure Row(const ACaption: string; AControl: TControl; AButton: TControl = nil);
@@ -101,6 +107,7 @@ type
     procedure FillKeys;
     function ChosenFormat: TGittanSignFormat;
     function KeyValue: string;
+    function KeyValueFor(AFormat: TGittanSignFormat): string;
     procedure SetKeyValue(const AValue: string);
     procedure Say(const AText: string);
   protected
@@ -301,14 +308,19 @@ end;
   what was typed (an id, or a fingerprint); for SSH the text itself,
   a .pub path or a key, the agent note dropped. }
 function TIdentityForm.KeyValue: string;
+begin
+  Result := KeyValueFor(ChosenFormat);
+end;
+
+function TIdentityForm.KeyValueFor(AFormat: TGittanSignFormat): string;
 var
   i: integer;
 begin
   Result := Trim(FKey.Text);
   i := FKey.Items.IndexOf(FKey.Text);
-  if (ChosenFormat = sfOpenPgp) and (i >= 0) and (i <= High(FGpgIds)) then
+  if (AFormat = sfOpenPgp) and (i >= 0) and (i <= High(FGpgIds)) then
     Result := FGpgIds[i]
-  else if (ChosenFormat = sfSsh) and (i >= 0) and (i <= High(FSshValues)) then
+  else if (AFormat = sfSsh) and (i >= 0) and (i <= High(FSshValues)) then
     Result := FSshValues[i];
 end;
 
@@ -321,6 +333,16 @@ begin
     for i := 0 to High(FGpgIds) do
       if (AValue <> '') and (Pos(UpperCase(AValue), UpperCase(FGpgIds[i])) > 0) or
         (Pos(UpperCase(FGpgIds[i]), UpperCase(AValue)) > 0) then
+      begin
+        FKey.ItemIndex := i;
+        Exit;
+      end;
+  end
+  else if ChosenFormat = sfSsh then
+  begin
+    { An agent's key shows as its item, not as the key's text. }
+    for i := 0 to High(FSshValues) do
+      if (AValue <> '') and (FSshValues[i] = AValue) then
       begin
         FKey.ItemIndex := i;
         Exit;
@@ -349,7 +371,12 @@ var
   Parts: TStringArray;
   Kept: string;
 begin
-  Kept := KeyValue;
+  { The items are still those of the format filled last, and are read
+    as that format's. }
+  if FFilledFormat <> sfNone then
+    FKept[FFilledFormat] := KeyValueFor(FFilledFormat);
+  FFilledFormat := ChosenFormat;
+  Kept := FKept[ChosenFormat];
   FKey.Items.Clear;
   FGpgIds := nil;
   FSshValues := nil;
@@ -370,10 +397,13 @@ begin
           Comment := Parts[2]
         else
           Comment := Parts[0];
-        { The item shows the comment, the key itself stands behind it. }
+        { The item shows the comment, the key itself stands behind it,
+          with key:: before it: git takes a bare key as one only when
+          it starts with ssh-, so an ecdsa or sk- key would be read as
+          a file's path. }
         FKey.Items.Add(SysUtils.Format(rsIdentityDlgAgent, [Comment]));
         SetLength(FSshValues, Length(FSshValues) + 1);
-        FSshValues[High(FSshValues)] := Key;
+        FSshValues[High(FSshValues)] := 'key::' + Key;
       end;
       if FKey.Items.Count = 0 then
         Say(rsIdentityDlgNoSshKeys);

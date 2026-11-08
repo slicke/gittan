@@ -333,9 +333,10 @@ function BatchRowRepos(const ARows: TGittanBatchRows; AIndex: integer): TStringA
 {** How far the work of the local branch ABranch of ARepo reached
   ADefault (a ref such as origin/main, '' for none): merged when its tip
   is in ADefault or in HEAD; squashed when ADefault has a commit with
-  the same changes as all the branch made since it left it (a commit
-  made for the comparison, reachable from nothing, `git cherry`);
-  else not merged. }
+  the same changes as all the branch made since it left it (the patch
+  id of the branch's tree against their merge base among those of the
+  commits ADefault has since, as `git cherry` compares, with nothing
+  written to the repository); else not merged. }
 function GoneMergeState(ARepo: TGittanRepo; const ABranch, ADefault: string): TGittanGoneMerge;
 
 {** What is left undone in the repository at APath, captioned ACaption
@@ -558,7 +559,7 @@ end;
 
 function GoneMergeState(ARepo: TGittanRepo; const ABranch, ADefault: string): TGittanGoneMerge;
 var
-  Root, Base, Tree, Squash, Cherry: string;
+  Root, Base, Patch, Squash, Ids, Err, Line: string;
 begin
   Result := gmNotMerged;
   Root := ARepo.Root;
@@ -570,20 +571,28 @@ begin
   if ADefault = '' then
     Exit;
   { The branch's changes since it left the default branch as one
-    commit on the merge base, which git cherry finds in the default
-    branch when a squash of them is there. }
+    patch, whose id (what git cherry compares) is looked for among the
+    ids of the commits the default branch has since. The scan is read
+    only: a commit made for the comparison would leave a loose object
+    behind at every scan. }
   if not GitOut(Root, ['merge-base', ADefault, 'refs/heads/' + ABranch], Base) or
     (Base = '') then
     Exit;
-  if not GitOut(Root, ['rev-parse', 'refs/heads/' + ABranch + '^{tree}'], Tree) or
-    (Tree = '') then
+  if not GitOut(Root, ['diff-tree', '-p', Base, 'refs/heads/' + ABranch + '^{tree}'], Patch) or
+    (Patch = '') then
     Exit;
-  if not GitOut(Root, ['-c', 'user.name=Gittan', '-c', 'user.email=gittan@localhost',
-    'commit-tree', Tree, '-p', Base, '-m', 'squash of ' + ABranch], Squash) or
-    (Squash = '') then
+  if not RunGitEnv(Root, ['patch-id', '--stable'], [], Squash, Err, '', nil, nil, Patch) or
+    (Trim(Squash) = '') then
     Exit;
-  if GitOut(Root, ['cherry', ADefault, Squash], Cherry) and (Copy(Cherry, 1, 2) = '- ') then
-    Result := gmSquashed;
+  Squash := Copy(Trim(Squash), 1, 40);
+  if not RunGitIn(Root, ['log', '-p', '--no-merges', '--format=commit %H', Base + '..' + ADefault],
+    Patch, Err) or (Patch = '') then
+    Exit;
+  if not RunGitEnv(Root, ['patch-id', '--stable'], [], Ids, Err, '', nil, nil, Patch) then
+    Exit;
+  for Line in Ids.Split([#10]) do
+    if Copy(Line, 1, 40) = Squash then
+      Exit(gmSquashed);
 end;
 
 function ScanGoneRepo(const APath, ACaption: string; AFetch: boolean;

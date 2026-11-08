@@ -3205,6 +3205,26 @@ begin
   AssertEquals(0, Length(ConflictStyleArgs(FDir)));
   Git(['config', '--unset', 'merge.conflictStyle']);
   AssertEquals(2, Length(ConflictStyleArgs(FDir)));
+  { The answer is kept by the config file's time and size (RepoConfigPath):
+    the main checkout's .git/config, a worktree's through its .git file. }
+  AssertEquals(IncludeTrailingPathDelimiter(FDir) + '.git' + PathDelim + 'config',
+    RepoConfigPath(FDir));
+  { git writes the worktree's gitdir with its links resolved (/private/var
+    on macOS), so the main checkout's file is known by its tail. }
+  Git(['worktree', 'add', '-q', 'wtstyle']);
+  AssertEquals('config', ExtractFileName(RepoConfigPath(
+    IncludeTrailingPathDelimiter(FDir) + 'wtstyle')));
+  AssertEquals('.git', ExtractFileName(ExtractFileDir(RepoConfigPath(
+    IncludeTrailingPathDelimiter(FDir) + 'wtstyle'))));
+  AssertTrue('the main checkout''s config', FileExists(RepoConfigPath(
+    IncludeTrailingPathDelimiter(FDir) + 'wtstyle')) and
+    (Pos(PathDelim + 'wtstyle', RepoConfigPath(IncludeTrailingPathDelimiter(FDir) + 'wtstyle')) = 0));
+  AssertEquals(2, Length(ConflictStyleArgs(IncludeTrailingPathDelimiter(FDir) + 'wtstyle')));
+  Git(['config', 'merge.conflictStyle', 'merge']);
+  AssertEquals(0, Length(ConflictStyleArgs(IncludeTrailingPathDelimiter(FDir) + 'wtstyle')));
+  Git(['config', '--unset', 'merge.conflictStyle']);
+  AssertEquals('', RepoConfigPath(IncludeTrailingPathDelimiter(FDir) + 'nowhere'));
+  AssertEquals('', RepoConfigPath(''));
 end;
 
 { A rebase left behind: it stopped with conflicts, they were resolved,

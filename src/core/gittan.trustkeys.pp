@@ -8,9 +8,10 @@ unit gittan.trustkeys;
   login. The GPG keys go into the gpg git uses, and their fingerprints
   into the trusted keys (TGittanSettings.TrustedKeys), which ApplyTrust
   of gittan.signing shows as verified; the SSH keys go into the
-  allowed signers file under the commit's e-mails, which makes git
-  itself say good. All of it in a TGittanTrustJob, since it goes to
-  the network. }
+  allowed signers file under their owner's e-mails (those GitHub lists
+  for the user, and the commit's where GitHub names the user as its
+  author or committer), which makes git itself say good. All of it in
+  a TGittanTrustJob, since it goes to the network. }
 
 {$mode objfpc}{$H+}
 
@@ -62,10 +63,14 @@ function GitHubApiBase(const AHost: string): string;
 
 {** The logins of the author and the committer of the commit AHash in
   AOwner/ARepo, each once, in that order; a commit whose e-mail GitHub
-  knows no user for gives none for that one. }
+  knows no user for gives none for that one. GitHubCommitPeople gives
+  the two apart, '' for one GitHub knows no user for. }
 function GitHubCommitLogins(const ABase, AOwner, ARepo, AHash: string;
   out ALogins: TStringArray; out AError: string): boolean;
+function GitHubCommitPeople(const ABase, AOwner, ARepo, AHash: string;
+  out AAuthor, ACommitter, AError: string): boolean;
 function ParseGitHubCommitLogins(const AJson: string): TStringArray;
+procedure ParseGitHubCommitPeople(const AJson: string; out AAuthor, ACommitter: string);
 
 {** The signing keys of the GitHub user ALogin (GET /users/{login}/gpg_keys
   and /ssh_signing_keys). }
@@ -75,8 +80,9 @@ procedure ParseGitHubGpgKeys(const AJson: string; var AKeys: TGittanForgeKeys);
 procedure ParseGitHubSshKeys(const AJson: string; var AKeys: TGittanForgeKeys);
 
 {** The e-mails a commit was made under: the author's and the
-  committer's, each once. }
+  committer's, each once; CommitPeople gives the two apart. }
 function CommitEmails(const ARoot, AHash: string): TStringArray;
+function CommitPeople(const ARoot, AHash: string; out AAuthorEmail, ACommitterEmail: string): boolean;
 
 implementation
 
@@ -154,31 +160,57 @@ begin
   end;
 end;
 
-function ParseGitHubCommitLogins(const AJson: string): TStringArray;
+procedure ParseGitHubCommitPeople(const AJson: string; out AAuthor, ACommitter: string);
 var
   Data: TJSONData;
 begin
-  Result := nil;
+  AAuthor := '';
+  ACommitter := '';
   Data := SafeJson(AJson);
   if Data = nil then
     Exit;
   try
-    AddOnce(Result, LoginOf(Data, 'author'));
-    AddOnce(Result, LoginOf(Data, 'committer'));
+    AAuthor := Trim(LoginOf(Data, 'author'));
+    ACommitter := Trim(LoginOf(Data, 'committer'));
   finally
     Data.Free;
   end;
 end;
 
-function GitHubCommitLogins(const ABase, AOwner, ARepo, AHash: string;
-  out ALogins: TStringArray; out AError: string): boolean;
+function ParseGitHubCommitLogins(const AJson: string): TStringArray;
+var
+  Author, Committer: string;
+begin
+  Result := nil;
+  ParseGitHubCommitPeople(AJson, Author, Committer);
+  AddOnce(Result, Author);
+  AddOnce(Result, Committer);
+end;
+
+function GitHubCommitPeople(const ABase, AOwner, ARepo, AHash: string;
+  out AAuthor, ACommitter, AError: string): boolean;
 var
   Body: string;
 begin
-  ALogins := nil;
+  AAuthor := '';
+  ACommitter := '';
   Result := Fetch(ABase + '/repos/' + AOwner + '/' + ARepo + '/commits/' + AHash, Body, AError);
   if Result then
-    ALogins := ParseGitHubCommitLogins(Body);
+    ParseGitHubCommitPeople(Body, AAuthor, ACommitter);
+end;
+
+function GitHubCommitLogins(const ABase, AOwner, ARepo, AHash: string;
+  out ALogins: TStringArray; out AError: string): boolean;
+var
+  Author, Committer: string;
+begin
+  ALogins := nil;
+  Result := GitHubCommitPeople(ABase, AOwner, ARepo, AHash, Author, Committer, AError);
+  if Result then
+  begin
+    AddOnce(ALogins, Author);
+    AddOnce(ALogins, Committer);
+  end;
 end;
 
 procedure ParseGitHubGpgKeys(const AJson: string; var AKeys: TGittanForgeKeys);
@@ -263,19 +295,33 @@ begin
     AError := Err2;
 end;
 
-function CommitEmails(const ARoot, AHash: string): TStringArray;
+function CommitPeople(const ARoot, AHash: string; out AAuthorEmail, ACommitterEmail: string): boolean;
 var
   Output, Error: string;
   Parts: TStringArray;
 begin
-  Result := nil;
-  if not RunGitIn(ARoot, ['log', '-1', '--format=%ae%x1f%ce', AHash], Output, Error) then
+  AAuthorEmail := '';
+  ACommitterEmail := '';
+  Result := RunGitIn(ARoot, ['log', '-1', '--format=%ae%x1f%ce', AHash], Output, Error);
+  if not Result then
     Exit;
   Parts := Trim(Output).Split([#31]);
   if Length(Parts) > 0 then
-    AddOnce(Result, Parts[0]);
+    AAuthorEmail := Trim(Parts[0]);
   if Length(Parts) > 1 then
-    AddOnce(Result, Parts[1]);
+    ACommitterEmail := Trim(Parts[1]);
+end;
+
+function CommitEmails(const ARoot, AHash: string): TStringArray;
+var
+  Author, Committer: string;
+begin
+  Result := nil;
+  if CommitPeople(ARoot, AHash, Author, Committer) then
+  begin
+    AddOnce(Result, Author);
+    AddOnce(Result, Committer);
+  end;
 end;
 
 { ---------------------------------------------------------------------------
@@ -301,19 +347,24 @@ begin
 end;
 
 { Every key of every user is taken, so the commits of the same people
-  elsewhere in the history verify too. An SSH key goes in under each
-  e-mail of the commit and of the user's GPG keys, since git matches
-  the committer's e-mail against the principal. }
+  elsewhere in the history verify too. An SSH key goes in under the
+  e-mails of its owner alone, since git matches the committer's e-mail
+  against the principal: the e-mails GitHub lists for the user's GPG
+  keys, and the commit's author or committer e-mail where GitHub names
+  the user as that one (its word that the e-mail is theirs). Another
+  user's e-mail under the key would make a commit forged under that
+  e-mail verify as theirs. }
 procedure TGittanTrustJob.Execute;
 var
-  Base, Reason, Login, Armored, Key, Email: string;
+  Base, Reason, Login, Armored, Key, Email, Author, Committer, AuthorEmail,
+  CommitterEmail: string;
   KeyOk: boolean;
   Logins, Fingerprints, Emails: TStringArray;
   Keys: TGittanForgeKeys;
   i: integer;
 begin
   Base := GitHubApiBase(FHost);
-  if not GitHubCommitLogins(Base, FOwner, FRepo, FHash, Logins, FError) then
+  if not GitHubCommitPeople(Base, FOwner, FRepo, FHash, Author, Committer, FError) then
   begin
     { 404 or 422: GitHub has no such commit, as before a push. }
     if (Pos('not found', FError) > 0) or (Pos('422', FError) > 0) then
@@ -322,13 +373,21 @@ begin
     Done;
     Exit;
   end;
+  Logins := nil;
+  AddOnce(Logins, Author);
+  AddOnce(Logins, Committer);
   if Length(Logins) = 0 then
     FError := 'GitHub knows no user for this commit''s author or committer.';
-  Emails := CommitEmails(FRoot, FHash);
+  CommitPeople(FRoot, FHash, AuthorEmail, CommitterEmail);
   for Login in Logins do
   begin
     if Terminated then
       Break;
+    Emails := nil;
+    if Login = Author then
+      AddOnce(Emails, AuthorEmail);
+    if Login = Committer then
+      AddOnce(Emails, CommitterEmail);
     if not GitHubUserKeys(Base, Login, Keys, Reason) then
     begin
       FError := Reason;
@@ -353,11 +412,13 @@ begin
     else if (FGpgProgram = '') and (Length(Keys.GpgKeys) > 0) then
       FError := 'gpg was not found, so ' + Login + '''s GPG keys could not be taken in.';
     if (FAllowedFile <> '') and (Length(Keys.SshKeys) > 0) then
+    begin
+      for Email in Keys.Emails do
+        AddOnce(Emails, Email);
       for Key in Keys.SshKeys do
       begin
-        for Email in Keys.Emails do
-          AddOnce(Emails, Email);
-        KeyOk := True;
+        { With no e-mail to bind it to, the key is not added. }
+        KeyOk := Length(Emails) > 0;
         for Email in Emails do
           if not AddAllowedSigner(FAllowedFile, Email, Key, Reason) then
           begin
@@ -367,6 +428,7 @@ begin
         if KeyOk then
           Inc(FSshAdded);
       end;
+    end;
   end;
   Done;
 end;

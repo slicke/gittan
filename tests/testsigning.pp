@@ -34,6 +34,7 @@ type
     procedure TestJob;
     procedure TestSetup;
     procedure TestKeys;
+    procedure TestCommitter;
     procedure TestTrust;
   end;
 
@@ -322,6 +323,26 @@ begin
     Cache.Free;
     Job.Free;
   end;
+  { A chunk git cannot read (a hash that is no commit among them) is
+    not taken for unsigned: its results have no hash, so the cache
+    leaves them out and asks again, and the reason is kept. }
+  Hashes := [Hashes[0], StringOfChar('0', 40)];
+  Job := TGittanSignJob.Create(FDir, Hashes, []);
+  Cache := TGittanSignatureCache.Create;
+  try
+    Job.Start;
+    Job.WaitFor;
+    AssertEquals(2, Job.Finished);
+    AssertTrue('a reason', Job.Error <> '');
+    AssertEquals('', Job.Results[0].Hash);
+    AssertEquals('', Job.Results[1].Hash);
+    Cache.PutAll(Job.Results, Job.Finished);
+    AssertEquals(0, Cache.Count);
+    AssertEquals(2, Length(Cache.Unknown(Hashes)));
+  finally
+    Cache.Free;
+    Job.Free;
+  end;
 end;
 
 { The setup is written to the repository's own config alone, so the
@@ -378,6 +399,55 @@ begin
   AssertFalse(Cfg.Sign);
   AssertTrue(Cfg.Format = sfSsh);
   AssertFalse(RunGitIn(FDir, ['config', '--local', 'tag.gpgSign'], Id, Error));
+
+  { Off for this repository while the global config signs: unsetting
+    the repository's own key would leave the global one on, so it is
+    set to false here. The runner's global config is put back after. }
+  AssertTrue(Error, RunGitIn(FDir, ['config', '--global', 'commit.gpgsign', 'true'], Id, Error));
+  try
+    AssertTrue(ReadSigningSetup(FDir).Sign);
+    AssertTrue(Error, WriteSigningSetup(FDir, Cfg, 'test@example.invalid', True, Error));
+    AssertFalse('off for the repository', ReadSigningSetup(FDir).Sign);
+    AssertEquals('false', Trim(Git(['config', '--local', 'commit.gpgsign'])));
+    AssertEquals('true', Trim(Git(['config', '--global', 'commit.gpgsign'])));
+  finally
+    RunGitIn(FDir, ['config', '--global', '--unset-all', 'commit.gpgsign'], Id, Error);
+  end;
+  AssertFalse(RunGitIn(FDir, ['config', '--global', 'commit.gpgsign'], Id, Error));
+end;
+
+procedure TSigningTest.TestCommitter;
+var
+  C: TGittanCommitter;
+begin
+  C := ParseCommitterSetup('global'#0'user.name'#10'Ada'#0'global'#0'user.email'#10'ada@x'#0 +
+    'local'#0'user.name'#10'Ada at work'#0'global'#0'commit.gpgsign'#10'true'#0 +
+    'local'#0'gpg.format'#10'ssh'#0);
+  AssertEquals('Ada at work', C.Name);
+  AssertEquals('ada@x', C.Email);
+  AssertTrue('the repository has its own', C.Local);
+  AssertTrue(C.Sign);
+  AssertTrue(C.Format = sfSsh);
+  C := ParseCommitterSetup('global'#0'user.name'#10'Ada'#0'global'#0'user.email'#10'ada@x'#0 +
+    'global'#0'commit.gpgsign'#10'true'#0'local'#0'commit.gpgsign'#10'false'#0);
+  AssertFalse(C.Local);
+  AssertFalse('the local false wins', C.Sign);
+  AssertTrue('OpenPGP without a format', C.Format = sfOpenPgp);
+  C := ParseCommitterSetup('');
+  AssertEquals('', C.Name);
+  AssertFalse(C.Sign);
+  { Against the repository: the identity SetUp gave it. }
+  C := ReadCommitterSetup(FDir);
+  AssertEquals('Gittan Test', C.Name);
+  AssertEquals('test@example.invalid', C.Email);
+  AssertTrue(C.Local);
+  AssertFalse(C.Sign);
+  Git(['config', 'commit.gpgsign', 'true']);
+  Git(['config', 'gpg.format', 'ssh']);
+  C := ReadCommitterSetup(FDir);
+  AssertTrue(C.Sign);
+  AssertTrue(C.Format = sfSsh);
+  AssertEquals('', ReadCommitterSetup('').Name);
 end;
 
 procedure TSigningTest.TestKeys;
@@ -423,6 +493,13 @@ begin
   AssertEquals('ssh-ed25519 AAAA', PublicKeyOf('ssh-ed25519 AAAA'));
   AssertEquals('', PublicKeyOf('ABCDEF'));
   AssertEquals('', PublicKeyOf(FDir + PathDelim + 'nope.pub'));
+  { A private key file gives the public key beside it, or nothing. }
+  WriteFile('b', '-----BEGIN OPENSSH PRIVATE KEY-----'#10'b3BlbnNzaC1rZXkt'#10 +
+    '-----END OPENSSH PRIVATE KEY-----'#10);
+  AssertEquals('ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEx', PublicKeyOf(FDir + PathDelim + 'b'));
+  WriteFile('c', '-----BEGIN OPENSSH PRIVATE KEY-----'#10'b3BlbnNzaC1rZXkt'#10);
+  AssertEquals('', PublicKeyOf(FDir + PathDelim + 'c'));
+  AssertEquals('', PublicKeyOf('key::-----BEGIN OPENSSH PRIVATE KEY-----'));
 
   AssertTrue(Error, AddAllowedSigner(FDir + PathDelim + 'deep' + PathDelim + 'allowed',
     'a@x', 'ssh-ed25519 AAAA c', Error));
