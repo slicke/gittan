@@ -47,6 +47,7 @@
     var show = function () {
       get.href = main.href;
       get.querySelector('span').textContent = 'Download for ' + names[os];
+      if (!get.querySelector('.os-glyph')) { var g = card.querySelector('.os svg').cloneNode(true); g.setAttribute('class', 'os-glyph'); g.setAttribute('aria-hidden', 'true'); get.insertBefore(g, get.firstChild); }
       // What the button gives, then the platform's other files: "For Apple Silicon (or Intel)".
       document.getElementById('get-sub').innerHTML = label +
         (others.length ? ' (or ' + others.map(function (a) { return '<a href="' + a.href + '">' + a.dataset.short + '</a>'; }).join(', ') + ')' : '') +
