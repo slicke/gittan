@@ -121,6 +121,7 @@ procedure TRepoFrame.FillCommitMenu(ARoot: TMenuItem; const ACommit: TGittanGrap
 var
   Busy, Jobs, InHead, IsHead, IsMerge: boolean;
   Known, Host, RepoOwner, RepoName: string;
+  Signature: TGittanSignature;
   i: integer;
   Item, Sub: TMenuItem;
 
@@ -224,10 +225,15 @@ begin
   Add(nil, rsCopyHash, caCopy);
   if Assigned(FForge) then
     Add(nil, Format(rsOpenCommitOnForge, [ForgeName]), caForge);
-  { A key not known here: the forge may know whose it is. }
-  Host := TrustHost(RepoOwner, RepoName);
-  if (Host <> '') and (CommitSignatureOf(ACommit.Hash).State = ssUnknownKey) then
-    Add(nil, Format(rsCaTrustKeys, [Host]), caTrust, FTrustJob = nil);
+  { A key not known here: the forge may know whose it is. Only what
+    the graph's job or the card found: gpg is not run as the menu
+    opens, which a slow verifier would hold up. }
+  if FSignCache.Find(ACommit.Hash, Signature) and (Signature.State = ssUnknownKey) then
+  begin
+    Host := TrustHost(RepoOwner, RepoName);
+    if Host <> '' then
+      Add(nil, Format(rsCaTrustKeys, [Host]), caTrust, FTrustJob = nil);
+  end;
 end;
 
 { Commit > Commit, filled as the Branch menu opens (and for the command

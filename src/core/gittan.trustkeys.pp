@@ -82,6 +82,14 @@ function GitHubUserKeys(const ABase, ALogin: string; out AKeys: TGittanForgeKeys
 procedure ParseGitHubGpgKeys(const AJson: string; var AKeys: TGittanForgeKeys);
 procedure ParseGitHubSshKeys(const AJson: string; var AKeys: TGittanForgeKeys);
 
+{** The e-mails ALogin's SSH keys go into the allowed signers file
+  under: the commit's author e-mail when GitHub names ALogin as its
+  author (AAuthor), the committer e-mail likewise, and the verified
+  e-mails of ALogin's GPG keys (AKeyEmails), each once; never another
+  user's, which would let a commit forged under it verify. }
+function SignerEmails(const ALogin, AAuthor, ACommitter, AAuthorEmail, ACommitterEmail: string;
+  const AKeyEmails: TStringArray): TStringArray;
+
 {** The e-mails a commit was made under: the author's and the
   committer's, each once; CommitPeople gives the two apart. }
 function CommitEmails(const ARoot, AHash: string): TStringArray;
@@ -325,6 +333,22 @@ begin
     ACommitterEmail := Trim(Parts[1]);
 end;
 
+function SignerEmails(const ALogin, AAuthor, ACommitter, AAuthorEmail, ACommitterEmail: string;
+  const AKeyEmails: TStringArray): TStringArray;
+var
+  Email: string;
+begin
+  Result := nil;
+  if ALogin = '' then
+    Exit;
+  if ALogin = AAuthor then
+    AddOnce(Result, AAuthorEmail);
+  if ALogin = ACommitter then
+    AddOnce(Result, ACommitterEmail);
+  for Email in AKeyEmails do
+    AddOnce(Result, Email);
+end;
+
 function CommitEmails(const ARoot, AHash: string): TStringArray;
 var
   Author, Committer: string;
@@ -405,11 +429,6 @@ begin
   begin
     if Terminated then
       Break;
-    Emails := nil;
-    if Login = Author then
-      AddOnce(Emails, AuthorEmail);
-    if Login = Committer then
-      AddOnce(Emails, CommitterEmail);
     if not GitHubUserKeys(Base, Login, Keys, Reason, Token) then
     begin
       FError := Reason;
@@ -437,8 +456,7 @@ begin
       FError := 'gpg was not found, so ' + Login + '''s GPG keys could not be taken in.';
     if (FAllowedFile <> '') and (Length(Keys.SshKeys) > 0) then
     begin
-      for Email in Keys.Emails do
-        AddOnce(Emails, Email);
+      Emails := SignerEmails(Login, Author, Committer, AuthorEmail, CommitterEmail, Keys.Emails);
       for Key in Keys.SshKeys do
       begin
         { With no e-mail to bind it to, the key is not added. }

@@ -315,10 +315,11 @@ type
       AError: TColor);
     {** The ids of the commits loaded, in their order. }
     function CommitHashes: TStringArray;
-    {** What the owner found of the commits' signatures, the first
-      ACount of ACommits (all with -1); a commit not loaded is passed
-      over. The rows are painted again. }
-    procedure SetSignatures(const ACommits: TGittanSignedCommits; ACount: integer = -1);
+    {** What the owner found of the commits' signatures, those of
+      ACommits from AFrom up to ACount (all with -1); a commit not
+      loaded is passed over. The rows are painted again. }
+    procedure SetSignatures(const ACommits: TGittanSignedCommits; ACount: integer = -1;
+      AFrom: integer = 0);
     {** The colors the lanes take in turn. }
     procedure SetLaneColors(const AColors: array of TColor);
     {** The id of the commit marked for a comparison, '' for none. }
@@ -919,13 +920,14 @@ begin
     Result[r] := FCommits[r].Hash;
 end;
 
-procedure TGittanCommitGraph.SetSignatures(const ACommits: TGittanSignedCommits; ACount: integer);
+procedure TGittanCommitGraph.SetSignatures(const ACommits: TGittanSignedCommits; ACount: integer;
+  AFrom: integer);
 var
   i, k: integer;
 begin
   if (ACount < 0) or (ACount > Length(ACommits)) then
     ACount := Length(ACommits);
-  for i := 0 to ACount - 1 do
+  for i := Max(0, AFrom) to ACount - 1 do
     if FSignIndex.Find(ACommits[i].Hash, k) then
     begin
       FSigns[PtrInt(FSignIndex.Objects[k])] := ACommits[i].Signature;

@@ -61,6 +61,7 @@ end;
 procedure TTrustKeysTest.TestUserKeys;
 var
   Keys: TGittanForgeKeys;
+  Emails: TStringArray;
 begin
   Keys := Default(TGittanForgeKeys);
   ParseGitHubGpgKeys('[{"id":1,"key_id":"B5690EEEBB952194","raw_key":"-----BEGIN PGP PUBLIC KEY ' +
@@ -79,6 +80,16 @@ begin
   AssertEquals('the same key once', 1, Length(Keys.SshKeys));
   AssertEquals('ssh-ed25519 AAAAC3 ada', Keys.SshKeys[0]);
   ParseGitHubSshKeys('{"message":"Not Found"}', Keys);
+  { Each user's keys under their own e-mails alone. }
+  Emails := SignerEmails('ada', 'ada', 'web-flow', 'ada@x', 'noreply@github.com', ['ada@work']);
+  AssertEquals(2, Length(Emails));
+  AssertEquals('ada@x', Emails[0]);
+  AssertEquals('ada@work', Emails[1]);
+  Emails := SignerEmails('web-flow', 'ada', 'web-flow', 'ada@x', 'noreply@github.com', nil);
+  AssertEquals(1, Length(Emails));
+  AssertEquals('noreply@github.com', Emails[0]);
+  AssertEquals('nobody''s', 0, Length(SignerEmails('eve', 'ada', 'web-flow', 'ada@x',
+    'noreply@github.com', nil)));
   ParseGitHubSshKeys('', Keys);
   AssertEquals(1, Length(Keys.SshKeys));
 end;

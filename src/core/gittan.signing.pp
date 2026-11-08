@@ -70,7 +70,9 @@ type
     {** The signature kept for AHash; false when it is not known yet. }
     function Find(const AHash: string; out ASignature: TGittanSignature): boolean;
     procedure Put(const AHash: string; const ASignature: TGittanSignature);
-    procedure PutAll(const ACommits: TGittanSignedCommits; ACount: integer = -1);
+    {** Those of ACommits from AFrom up to ACount (all with -1). }
+    procedure PutAll(const ACommits: TGittanSignedCommits; ACount: integer = -1;
+      AFrom: integer = 0);
     {** Those of AHashes not known yet, in their order. }
     function Unknown(const AHashes: TStringArray): TStringArray;
     function Count: integer;
@@ -201,10 +203,15 @@ function DefaultAllowedSignersFile: string;
 function AllowedSignersPath(const ARoot, AValue: string): string;
 
 {** Puts "AEmail <key>" into AFile (made, with its folder, when it does
-  not exist) unless the file has the key already. AKey is a .pub file's
-  path, whose first line is taken, or the key itself ("key::" before
-  it dropped); its comment is left out. False with the reason. }
+  not exist) unless the file has the key under that e-mail already; the
+  key under another e-mail gets a line of its own. AKey is a .pub
+  file's path, whose first line is taken, or the key itself ("key::"
+  before it dropped); its comment is left out. One call at a time
+  writes the file, from any thread. False with the reason. }
 function AddAllowedSigner(const AFile, AEmail, AKey: string; out AError: string): boolean;
+{** Whether ALine of an allowed signers file has AKey with AEmail among
+  its principals. }
+function SignerLineHas(const ALine, AEmail, AKey: string): boolean;
 
 {** The key AKey stands for, as AddAllowedSigner puts it in the file:
   "type base64", read from the file when AKey names one; a private key
@@ -877,6 +884,31 @@ begin
   Result := Parts[0] + ' ' + Parts[1];
 end;
 
+{ Whether a line of an allowed signers file ("principals [options] key")
+  has AKey under AEmail: the principals are its first field, joined by
+  commas. }
+function SignerLineHas(const ALine, AEmail, AKey: string): boolean;
+var
+  Fields, Principals: TStringArray;
+  P: string;
+begin
+  Result := False;
+  if Pos(AKey, ALine) = 0 then
+    Exit;
+  Fields := Trim(ALine).Split([' ', #9], TStringSplitOptions.ExcludeEmpty);
+  if Length(Fields) = 0 then
+    Exit;
+  Principals := Fields[0].Split([',']);
+  for P in Principals do
+    if SameText(Trim(P), AEmail) then
+      Exit(True);
+end;
+
+var
+  { Two tabs' trust jobs, or one and the identity dialog, would read the
+    same file and each write it back without the other's line. }
+  AllowedSignersLock: TRTLCriticalSection;
+
 function AddAllowedSigner(const AFile, AEmail, AKey: string; out AError: string): boolean;
 var
   Lines: TStringList;
@@ -890,13 +922,16 @@ begin
     AError := 'The public key could not be read: ' + AKey;
     Exit(False);
   end;
+  EnterCriticalSection(AllowedSignersLock);
   Lines := TStringList.Create;
   try
     try
       if FileExists(AFile) then
         Lines.LoadFromFile(AFile);
+      { The key under another e-mail is no line for this one: a commit
+        made under this e-mail would not verify. }
       for i := 0 to Lines.Count - 1 do
-        if Pos(Key, Lines[i]) > 0 then
+        if SignerLineHas(Lines[i], AEmail, Key) then
           Exit(True);
       Lines.Add(AEmail + ' ' + Key);
       ForceDirectories(ExtractFileDir(AFile));
@@ -911,6 +946,7 @@ begin
     end;
   finally
     Lines.Free;
+    LeaveCriticalSection(AllowedSignersLock);
   end;
 end;
 
@@ -967,13 +1003,16 @@ begin
   FHashes.AddObject(AHash, TObject(PtrInt(High(FSignatures))));
 end;
 
-procedure TGittanSignatureCache.PutAll(const ACommits: TGittanSignedCommits; ACount: integer);
+procedure TGittanSignatureCache.PutAll(const ACommits: TGittanSignedCommits; ACount: integer;
+  AFrom: integer);
 var
   i: integer;
 begin
   if (ACount < 0) or (ACount > Length(ACommits)) then
     ACount := Length(ACommits);
-  for i := 0 to ACount - 1 do
+  if AFrom < 0 then
+    AFrom := 0;
+  for i := AFrom to ACount - 1 do
     Put(ACommits[i].Hash, ACommits[i].Signature);
 end;
 
@@ -1071,5 +1110,11 @@ begin
   end;
   Done;
 end;
+
+initialization
+  InitCriticalSection(AllowedSignersLock);
+
+finalization
+  DoneCriticalSection(AllowedSignersLock);
 
 end.

@@ -2269,6 +2269,7 @@ begin
   if Length(Unknown) = 0 then
     Exit;
   FSignJob := TGittanSignJob.Create(FRepo.Root, Unknown, App.Settings.TrustedKeyList);
+  FSignApplied := 0;
   FSignJob.OnProgress := @SignJobProgress;
   FSignJob.OnDone := @SignJobDone;
   FSignJob.Start;
@@ -2281,8 +2282,11 @@ begin
   Job := TGittanSignJob(Sender);
   if Job <> FSignJob then
     Exit;
-  FSignCache.PutAll(Job.Results, Job.Finished);
-  FGraph.SetSignatures(Job.Results, Job.Finished);
+  { Only the chunk new since the last call: a graph of 50000 commits
+    would otherwise go over the first ones again at every chunk. }
+  FSignCache.PutAll(Job.Results, Job.Finished, FSignApplied);
+  FGraph.SetSignatures(Job.Results, Job.Finished, FSignApplied);
+  FSignApplied := Max(FSignApplied, Job.Finished);
 end;
 
 { The job queues this from inside Execute, so it is freed from the
@@ -2295,8 +2299,8 @@ begin
   if Job <> FSignJob then
     Exit;
   FSignJob := nil;
-  FSignCache.PutAll(Job.Results, Job.Finished);
-  FGraph.SetSignatures(Job.Results, Job.Finished);
+  FSignCache.PutAll(Job.Results, Job.Finished, FSignApplied);
+  FGraph.SetSignatures(Job.Results, Job.Finished, FSignApplied);
   { A chunk git could not read is left out of the cache (its results
     have no hash), so the next look asks again; the reason is said. }
   if Job.Error <> '' then

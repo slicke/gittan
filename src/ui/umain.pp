@@ -1192,6 +1192,8 @@ type
       (FSignJob, given up when the graph closes or is reloaded). }
     FSignCache: TGittanSignatureCache;
     FSignJob: TGittanSignJob;
+    { How many of FSignJob's results the cache and the graph have. }
+    FSignApplied: integer;
     FBlameSignature: TGittanSignature;
     { Taking the forge's word for a commit's signing keys (gittan.trustkeys),
       one at a time; never broken off, since it writes keys. }

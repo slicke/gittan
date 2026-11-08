@@ -527,8 +527,13 @@ begin
     'b@x', 'ssh-ed25519 BBBB', Error));
   AssertTrue(Error, AddAllowedSigner(FDir + PathDelim + 'deep' + PathDelim + 'allowed',
     'c@x', 'key::ssh-ed25519 AAAA', Error));
-  AssertEquals('a@x ssh-ed25519 AAAA' + LineEnding + 'b@x ssh-ed25519 BBBB' + LineEnding,
-    FileText(FDir + PathDelim + 'deep' + PathDelim + 'allowed'));
+  AssertTrue(Error, AddAllowedSigner(FDir + PathDelim + 'deep' + PathDelim + 'allowed',
+    'A@X', 'ssh-ed25519 AAAA', Error));
+  AssertEquals('the same key under another e-mail too, each pair once',
+    'a@x ssh-ed25519 AAAA' + LineEnding + 'b@x ssh-ed25519 BBBB' + LineEnding +
+    'c@x ssh-ed25519 AAAA' + LineEnding, FileText(FDir + PathDelim + 'deep' + PathDelim + 'allowed'));
+  AssertTrue(SignerLineHas('a@x,c@x namespaces="git" ssh-ed25519 AAAA', 'c@x', 'ssh-ed25519 AAAA'));
+  AssertFalse(SignerLineHas('a@x ssh-ed25519 AAAA', 'c@x', 'ssh-ed25519 AAAA'));
   AssertFalse(AddAllowedSigner(FDir + PathDelim + 'allowed2', 'a@x', 'nonsense', Error));
   AssertTrue(Pos('nonsense', Error) > 0);
 end;

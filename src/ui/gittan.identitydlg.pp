@@ -330,7 +330,10 @@ var
   i: integer;
 begin
   Result := Trim(FKey.Text);
-  i := FKey.Items.IndexOf(FKey.Text);
+  { The item picked, else the first with the text typed. }
+  i := FKey.ItemIndex;
+  if (i < 0) or (i >= FKey.Items.Count) or (FKey.Items[i] <> FKey.Text) then
+    i := FKey.Items.IndexOf(FKey.Text);
   if (AFormat = sfOpenPgp) and (i >= 0) and (i <= High(FGpgIds)) then
     Result := FGpgIds[i]
   else if (AFormat = sfSsh) and (i >= 0) and (i <= High(FSshValues)) then
@@ -414,6 +417,13 @@ begin
           with key:: before it: git takes a bare key as one only when
           it starts with ssh-, so an ecdsa or sk- key would be read as
           a file's path. }
+        { Two keys of one machine often share the comment: the second
+          names its type and the end of the key, so each item is one
+          key. }
+        if (FKey.Items.IndexOf(SysUtils.Format(rsIdentityDlgAgent, [Comment])) >= 0) and
+          (Length(Parts) >= 2) then
+          Comment := Comment + ', ' + Parts[0] + ' …' +
+            Copy(Parts[1], Length(Parts[1]) - 5, 6);
         FKey.Items.Add(SysUtils.Format(rsIdentityDlgAgent, [Comment]));
         SetLength(FSshValues, Length(FSshValues) + 1);
         FSshValues[High(FSshValues)] := 'key::' + Key;
