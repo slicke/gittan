@@ -3195,7 +3195,10 @@ var
 begin
   Result := False;
   Root := IncludeTrailingPathDelimiter(ExpandFileName(ARoot));
-  {$IF DEFINED(WINDOWS) OR DEFINED(DARWIN)}
+  { The two are expanded from the same root, so its case is the same;
+    on a case-sensitive Mac volume /x/repo beside /x/Repo is another
+    folder. Windows may give a drive letter in another case. }
+  {$IFDEF WINDOWS}
   if not SameText(Copy(AFileName, 1, Length(Root)), Root) then
   {$ELSE}
   if Copy(AFileName, 1, Length(Root)) <> Root then

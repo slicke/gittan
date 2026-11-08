@@ -17,12 +17,18 @@
 
 { The summary marks the references with the config's expression, or
   the forge's #<number> when the config names none. }
-{ The tracker git config names, else the one .gittan/repo.toml does. }
+{ The tracker git config names, else the one .gittan/repo.toml does;
+  a bugtraq.url without an expression is still git config's word on
+  the address. }
 function TRepoFrame.EffectiveIssueTracker: TGittanIssueTracker;
 begin
   Result := FIssueTracker;
   if IssueTrackerEmpty(Result) and not IssueTrackerEmpty(FRepoConfig.Issues) then
+  begin
     Result := FRepoConfig.Issues;
+    if Trim(FIssueTracker.Url) <> '' then
+      Result.Url := FIssueTracker.Url;
+  end;
 end;
 
 procedure TRepoFrame.UpdateIssueTracker;
