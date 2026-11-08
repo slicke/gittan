@@ -177,12 +177,14 @@ begin
   AbandonHistoryJob;
   AbandonTimelapseJob;
   AbandonChangeJob;
+  AbandonSignJob;
   AbandonRepoInfoJob;
   FreeAndNil(FHistory);
   FreeAndNil(FTimelapse);
   { Waits for the jobs given up. }
   FreeAndNil(FBlameZombies);
   FreeAndNil(FBlameCache);
+  FreeAndNil(FSignCache);
 end;
 
 { The author of a commit as the band names it. }
@@ -492,6 +494,7 @@ begin
     FBlameCommit := Default(TGittanCommitLine);
     FBlameBody := '';
   end;
+  FBlameSignature := CommitSignatureOf(FBlameCommit.Hash);
   FBlameRange := Range;
   SetBase(Range);
 end;

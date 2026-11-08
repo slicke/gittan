@@ -2108,7 +2108,10 @@ begin
   FGraph.Popup(Commits, Length(Commits) >= Limit, FBranch, FAhead, FBehind,
     FHasUpstream, Filter, Keep);
   if FGraph.Visible then
+  begin
     FSideNav.Selected := navGraph;
+    VerifyGraphSignatures;
+  end;
 end;
 
 procedure TRepoFrame.GraphTipDismiss(Sender: TObject);
@@ -2146,7 +2149,10 @@ begin
   end;
   { What is shown stays when the log cannot be read. }
   if Ok then
+  begin
     FGraph.Replace(Commits, Length(Commits) >= GraphSearchLimit);
+    VerifyGraphSignatures;
+  end;
 end;
 
 { A toggle of the graph's header was clicked, or a note changed: the
@@ -2177,7 +2183,10 @@ begin
     Screen.Cursor := crDefault;
   end;
   if Ok then
+  begin
     FGraph.Replace(Commits, Length(Commits) >= Limit);
+    VerifyGraphSignatures;
+  end;
 end;
 
 procedure TRepoFrame.GraphPathCommits(Sender: TObject; const APath: string;
@@ -2226,6 +2235,91 @@ begin
   FChangeJob.Stop(False);
   FBlameZombies.Add(FChangeJob);
   FChangeJob := nil;
+end;
+
+{ The graph's rows get the signatures known already, and the rest are
+  read on a thread, newest first as the rows are; a job for the rows
+  before is given up. }
+procedure TRepoFrame.VerifyGraphSignatures;
+var
+  Hashes, Unknown: TStringArray;
+  Known: TGittanSignedCommits;
+  i, n: integer;
+begin
+  AbandonSignJob;
+  if FRepo.Root = '' then
+    Exit;
+  Hashes := FGraph.CommitHashes;
+  SetLength(Known, Length(Hashes));
+  n := 0;
+  for i := 0 to High(Hashes) do
+    if FSignCache.Find(Hashes[i], Known[n].Signature) then
+    begin
+      Known[n].Hash := Hashes[i];
+      Inc(n);
+    end;
+  if n > 0 then
+    FGraph.SetSignatures(Known, n);
+  Unknown := FSignCache.Unknown(Hashes);
+  if Length(Unknown) = 0 then
+    Exit;
+  FSignJob := TGittanSignJob.Create(FRepo.Root, Unknown);
+  FSignJob.OnProgress := @SignJobProgress;
+  FSignJob.OnDone := @SignJobDone;
+  FSignJob.Start;
+end;
+
+procedure TRepoFrame.SignJobProgress(Sender: TObject);
+var
+  Job: TGittanSignJob;
+begin
+  Job := TGittanSignJob(Sender);
+  if Job <> FSignJob then
+    Exit;
+  FSignCache.PutAll(Job.Results, Job.Finished);
+  FGraph.SetSignatures(Job.Results, Job.Finished);
+end;
+
+{ The job queues this from inside Execute, so it is freed from the
+  message loop with the blame jobs. }
+procedure TRepoFrame.SignJobDone(Sender: TObject);
+var
+  Job: TGittanSignJob;
+begin
+  Job := TGittanSignJob(Sender);
+  if Job <> FSignJob then
+    Exit;
+  FSignJob := nil;
+  FSignCache.PutAll(Job.Results, Job.Finished);
+  FGraph.SetSignatures(Job.Results, Job.Finished);
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+end;
+
+procedure TRepoFrame.AbandonSignJob;
+begin
+  if FSignJob = nil then
+    Exit;
+  FSignJob.Stop(False);
+  FBlameZombies.Add(FSignJob);
+  FSignJob := nil;
+end;
+
+{ The signature of one commit, for the card: as known, else read now,
+  which costs a gpg or ssh-keygen run for a signed commit. }
+function TRepoFrame.CommitSignatureOf(const AHash: string): TGittanSignature;
+var
+  Found: TGittanSignedCommits;
+  Error: string;
+begin
+  Result := Default(TGittanSignature);
+  if (AHash = '') or (FRepo.Root = '') or FSignCache.Find(AHash, Result) then
+    Exit;
+  if CommitSignatures(FRepo.Root, [AHash], nil, Found, Error) and (Length(Found) = 1) then
+  begin
+    Result := Found[0].Signature;
+    FSignCache.Put(AHash, Result);
+  end;
 end;
 
 { The filter that keeps the commits touching APath: quoted when the path

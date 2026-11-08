@@ -22,7 +22,7 @@ uses
   testprojrust, testprojgo, testprojpython, testsha256, testai, testagentcli, testopenai, testforge,
   testlfslocks, testworktrees, testgitflow, testrepolist, testpickaxe, testnavhistory, testtimelapse, testundo, testmerge, testtabnames,
   testextperm, testextmodules, testextquickjs, testextengine, testextloader, testextapi, testextviews,
-  testissuelinks, testabsorb, testbatch, testrepoconfig;
+  testissuelinks, testabsorb, testbatch, testrepoconfig, testsigning;
 
 { Every git the tests start reads this file as the user's config and no
   system config, so what the developer has set (signed commits, a hooks

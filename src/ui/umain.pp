@@ -25,7 +25,7 @@ uses
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
   {$IFDEF LCLWin32}gittan.wintitlebar,{$ENDIF}
   {$IFDEF LCLGtk3}gittan.gtktitlebar,{$ENDIF}
-  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.timelapse, gittan.timelapsebar, gittan.pickaxe, gittan.navhistory, gittan.undo, gittan.paletteside,
+  gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.timelapse, gittan.timelapsebar, gittan.pickaxe, gittan.signing, gittan.navhistory, gittan.undo, gittan.paletteside,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
   gittan.popuplist, gittan.statusbar, gittan.repofiles, gittan.textfile, gittan.sectionheader, gittan.hintbox,
   gittan.forge, gittan.lfslocks, gittan.askdlg,
@@ -1186,6 +1186,13 @@ type
     { The search for the commits making the changes of the graph's
       filter (change:), given up when the filter or the graph goes. }
     FChangeJob: TGittanChangeJob;
+    { The commits' signatures, as read for the graph's rows and the
+      card: kept per commit while the repository is open (FSignCache),
+      read on a thread for the graph's commits not known yet
+      (FSignJob, given up when the graph closes or is reloaded). }
+    FSignCache: TGittanSignatureCache;
+    FSignJob: TGittanSignJob;
+    FBlameSignature: TGittanSignature;
     FHistoryPath, FHistoryRef, FHistoryName: string;
     FHistoryFrom, FHistoryTo, FHistoryMax: integer;
     FHistoryMore: boolean;
@@ -1942,6 +1949,11 @@ type
     procedure GraphChangeCommits(Sender: TObject; const AChanges: TStringArray);
     procedure ChangeJobDone(Sender: TObject);
     procedure AbandonChangeJob;
+    procedure VerifyGraphSignatures;
+    procedure SignJobProgress(Sender: TObject);
+    procedure SignJobDone(Sender: TObject);
+    procedure AbandonSignJob;
+    function CommitSignatureOf(const AHash: string): TGittanSignature;
     procedure MenuCommitGraphClick(Sender: TObject);
     procedure GraphPick(Sender: TObject; const AHash: string);
     function MenuListAnchor: TRect;
@@ -4237,6 +4249,7 @@ begin
   FBlameCache := TStringList.Create;
   FBlameCache.CaseSensitive := True;
   FBlameZombies := TGittanJobReaper.Create;
+  FSignCache := TGittanSignatureCache.Create;
   FNavHistory := TGittanNavHistory.Create;
   FUndoHistory := TGittanUndoHistory.Create;
   Application.AddOnIdleHandler(@NavIdle);
@@ -5185,7 +5198,8 @@ begin
     List.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent);
   FPaletteLeft.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border);
   FPaletteRight.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border);
-  FGraph.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent, P.Warning);
+  FGraph.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent, P.Warning, P.Added,
+    P.Deleted);
   FBanner.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Line, P.Accent, P.Deleted, P.Added);
   FDiscardPills.SetColors(P.Popup, P.Text, P.Border, P.Accent, P.Added, P.Deleted);
   FStatus.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Raised, P.Accent, P.Added,
@@ -7380,6 +7394,7 @@ begin
   UpdateDiscardItems;
   FPullRange := '';
   FMarkHash := '';
+  FSignCache.Clear;
   NavClear;
   FUndoHistory.Clear;
   UpdateUndoItems;
@@ -7707,9 +7722,9 @@ begin
     FSummary.SetBehind(0, '');
   FSummary.BaseClickable := (BaseActionRef <> '') or (StashOfBase >= 0) or BlameShown;
   if BlameShown then
-    FSummary.SetCommit(FBlameCommit, FBlameBody)
+    FSummary.SetCommit(FBlameCommit, FBlameBody, FBlameSignature)
   else
-    FSummary.SetCommit(Default(TGittanCommitLine), '');
+    FSummary.SetCommit(Default(TGittanCommitLine), '', Default(TGittanSignature));
   UpdateCommitSteps;
   FSummary.SetRepository(ExtractFileName(FRepo.Root), Branch, BaseLabel, FStats, Icons,
     Texts, Actions);

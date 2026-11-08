@@ -629,7 +629,7 @@ begin
   if BlameShown and (FBlameCommit.Hash = ACommit.Hash) then
   begin
     ShowBlameCommit(ACommit.Hash);
-    FSummary.SetCommit(FBlameCommit, FBlameBody);
+    FSummary.SetCommit(FBlameCommit, FBlameBody, FBlameSignature);
   end;
   if FGraph.Visible then
     GraphReload(nil);

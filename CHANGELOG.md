@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- Signed commits show a shield in the commit graph and a line on the commit's card: filled with a check when git vouches for the signature, red for a bad or revoked one, outlined for a key not known here or a signature git could not check, which the card explains (an SSH signature wants an allowed signers file, an OpenPGP one gpg), rather than passing such a commit off as unsigned, as git's own letter does.
 - Co-authors: the chevron beside Amend, and Commit > Co-authors..., open a list of the people you have credited before and the repository's recent authors to tick, or someone new as Name <e-mail>; each gets a Co-authored-by line in the commit's message. The label beside Amend shows who, and the choice lasts for one commit.
 - Merging a branch asks how: a branch with no commits of its own since they parted offers Fast-forward, Merge Commit and Squash, one with commits of its own Merge and Squash, and the question says how many commits come in. A squash stages the changes with git's message in the Commit section, for one commit of yours.
 - The merge editor can show the merge base, what both sides started from, as a pane between Mine and Theirs: Show Base in the header, when the conflict markers hold it. The merges, rebases, cherry-picks, reverts, pulls and stash applies Gittan runs now ask git to write the base into the markers (merge.conflictStyle zdiff3), unless the repository sets a style of its own.

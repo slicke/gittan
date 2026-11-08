@@ -27,7 +27,7 @@ interface
 
 uses
   Classes, SysUtils, Types, Controls, Graphics, ImgList, InkDraw, gittan.git, gittan.icons,
-  gittan.reviews, gittan.statusbar, gittan.forge, gittan.issuelinks;
+  gittan.reviews, gittan.statusbar, gittan.forge, gittan.issuelinks, gittan.signing;
 
 type
   TGittanSelectFileEvent = procedure(Sender: TObject; const APath: string) of object;
@@ -131,6 +131,7 @@ type
       FBackRect is the card's link back to the working tree. }
     FCommit: TGittanCommitLine;
     FCommitBody: string;
+    FCommitSign: TGittanSignature;
     FCardSubject, FCardLines: TStringArray;
     FCardWidth, FCardHeight: integer;
     FBackRect: TRect;
@@ -323,8 +324,11 @@ type
     procedure SetReviewPulls(const APulls: TGittanPullRequests);
     {** Shows ACommit, the commit the files are compared through (with
       its parent), in a card under the header with ABody, the rest of
-      its message; an empty Hash shows none. }
-    procedure SetCommit(const ACommit: TGittanCommitLine; const ABody: string);
+      its message, and ASignature, what is known of its signature (a
+      line under the author's when it has one); an empty Hash shows
+      none. }
+    procedure SetCommit(const ACommit: TGittanCommitLine; const ABody: string;
+      const ASignature: TGittanSignature);
     {** Whether the card offers Newer and Older (OnCommitStep); neither
       shows when both are off. }
     procedure SetCommitSteps(ANewer, AOlder: boolean);
@@ -415,7 +419,8 @@ function ReviewPullLine(const APull: TGittanPullRequest): string;
 implementation
 
 uses
-  Math, DateUtils, LazUTF8, StrUtils, InkMarkdown, gittan.textfit, gittan.theme, Forms;
+  Math, DateUtils, LazUTF8, StrUtils, InkMarkdown, gittan.textfit, gittan.theme, Forms,
+  gittan.signmark;
 
 resourcestring
   rsCardNote = 'Note';
@@ -486,6 +491,7 @@ const
     its left, and the most lines of text it shows (the rest is on
     the forge). }
   NotePadX = 12;
+  ShieldSize = 11;
   NotePadY = 8;
   NoteGap = 8;
   NoteStripe = 3;
@@ -1333,12 +1339,15 @@ begin
   Inc(Y, Px(RowHeight));
 end;
 
-procedure TGittanSummary.SetCommit(const ACommit: TGittanCommitLine; const ABody: string);
+procedure TGittanSummary.SetCommit(const ACommit: TGittanCommitLine; const ABody: string;
+  const ASignature: TGittanSignature);
 begin
-  if (FCommit.Hash = ACommit.Hash) and (FCommitBody = ABody) and (FCommit.Note = ACommit.Note) then
+  if (FCommit.Hash = ACommit.Hash) and (FCommitBody = ABody) and (FCommit.Note = ACommit.Note) and
+    (SignatureText(FCommitSign) = SignatureText(ASignature)) then
     Exit;
   FCommit := ACommit;
   FCommitBody := ABody;
+  FCommitSign := ASignature;
   FCardWidth := -1;
   FBackHot := False;
   FStepHot := -1;
@@ -1456,6 +1465,8 @@ begin
     end;
   end;
   FCardHeight := 2 * Px(NotePadY) + (Length(FCardSubject) + 1) * LineHeight + 2;
+  if FCommitSign.State <> ssNone then
+    Inc(FCardHeight, LineHeight);
   if Length(FCardLines) > 0 then
     Inc(FCardHeight, 6 + Length(FCardLines) * LineHeight);
   if Length(FCardNote) > 0 then
@@ -1552,8 +1563,20 @@ begin
   Room := PaintSteps(Card.Right - Px(NotePadX), At) - X;
   Canvas.Font.Color := FDim;
   Canvas.TextOut(X, At, FitTextRight(Canvas, Meta, Room));
+  Inc(At, LineHeight);
+  { The signature: its shield and what git made of it. }
+  if FCommitSign.State <> ssNone then
+  begin
+    Canvas.Font.Color := SignatureColor(FCommitSign, FAdded, FDim, FDeleted);
+    PaintShield(Canvas, X, At + (LineHeight - Px(ShieldSize)) div 2, Px(ShieldSize),
+      Canvas.Font.Color, FSelectedBack, ShieldFilled(FCommitSign), FCommitSign.State = ssGood);
+    Canvas.Brush.Style := bsClear;
+    Canvas.TextOut(X + Px(ShieldSize) + Px(Gap) div 2, At, FitTextRight(Canvas,
+      SignatureText(FCommitSign), Card.Right - Px(NotePadX) - X - Px(ShieldSize) - Px(Gap) div 2));
+    Inc(At, LineHeight);
+  end;
 
-  Inc(At, LineHeight + 6);
+  Inc(At, 6);
   Canvas.Font.Color := FText;
   for k := 0 to High(FCardLines) do
   begin
