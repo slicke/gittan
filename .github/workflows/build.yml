@@ -915,7 +915,31 @@ jobs:
             for LPK in $VENDOR_PACKAGES; do "$LAZBUILD" --add-package-link "$LPK"; done
             gmake LAZBUILD="$LAZBUILD"
             test -x Gittan
-            gmake test
+            # The tests once hung here with nothing to show for it, so they
+            # run in the background under a watch: after 10 minutes the
+            # test program's processes are listed with their command lines
+            # (a git, gpg or ssh-keygen waiting on input names the test) and
+            # its threads' kernel stacks, then it is stopped.
+            gmake test &
+            MAKEPID=$!
+            WAITED=0
+            while kill -0 "$MAKEPID" 2>/dev/null && [ "$WAITED" -lt 600 ]; do
+              sleep 5; WAITED=$((WAITED + 5))
+            done
+            if kill -0 "$MAKEPID" 2>/dev/null; then
+              echo "::error::The tests still ran after 10 minutes"
+              ps -axww -o pid,ppid,stat,etime,command | grep -v ' \[[^]]*\]$'
+              for P in $(pgrep -f tests/gittantests); do
+                echo "--- threads of $P"; procstat -kk "$P" || true
+                for C in $(pgrep -P "$P"); do
+                  echo "--- child $C"; procstat -kk "$C" || true
+                done
+              done
+              pkill -f tests/gittantests || true
+              kill "$MAKEPID" 2>/dev/null || true
+              exit 1
+            fi
+            wait "$MAKEPID"
             mkdir -p dist/Gittan
             cp Gittan dist/Gittan/
             cp -r lexlib dist/Gittan/
