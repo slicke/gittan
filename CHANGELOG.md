@@ -20,6 +20,7 @@
 - On the Batch tab the buttons that do something (Check, Scan, Delete, Run) are filled, so they no longer look like the picked operation, and repositories with the same folder name are told apart by their parent folders ("clean/trailhead", "conflict/trailhead"), in the list and on the cards.
 - In a narrow window a card's chips in the GitHub view go on a line of their own rather than cut the title to a few words.
 - What an action on a pull request in the GitHub view did shows in a banner over the page ("Merged #12"), and a failure shows GitHub's words there rather than in a dialog.
+- Syntax highlighting is worked out faster, by about a third on large Markdown and HTML files (EControl, ATSynEdit_Ex and ATSynEdit updated).
 
 ### Fixed
 - On macOS the shown tab is filled all through, so the line where the sidebar's shade meets the editor's no longer shows across it.

@@ -96,7 +96,7 @@ function TRepoFrame.EnclosingRange(AAdapter: TATAdapterEControl; ARow: integer;
   out AFrom, ATo: integer; out AName: string): boolean;
 var
   Client: TecClientSyntAnalyzer;
-  R: TecTextRange;
+  R: PecPublicDataFoldRange;
   i, Y1, Y2: integer;
 begin
   Result := False;
@@ -114,20 +114,20 @@ begin
     Exit;
   Client.CriSecForData.Enter;
   try
-    for i := 0 to Client.PublicData.FoldRanges.Count - 1 do
+    for i := 0 to High(Client.PublicData.FoldRanges) do
     begin
-      R := TecTextRange(Client.PublicData.FoldRanges[i]);
-      if not InCodeTree(Client, R) or (R.EndIdx < 0) then
+      R := @Client.PublicData.FoldRanges[i];
+      if not InCodeTree(Client, R) or (R^.EndIdx < 0) then
         Continue;
-      Y1 := Client.PublicData.Tokens._GetItemPtr(R.StartIdx)^.Range.PointStart.Y;
-      Y2 := Client.PublicData.Tokens._GetItemPtr(R.EndIdx)^.Range.PointEnd.Y;
+      Y1 := Client.PublicData.Tokens._GetItemPtr(R^.StartIdx)^.Range.PointStart.Y;
+      Y2 := Client.PublicData.Tokens._GetItemPtr(R^.EndIdx)^.Range.PointEnd.Y;
       if (ARow < Y1) or (ARow > Y2) then
         Continue;
       if Result and (Y2 - Y1 >= ATo - AFrom) then
         Continue;
       AFrom := Y1;
       ATo := Y2;
-      AName := Trim(UTF8Encode(Client.GetRangeName(R, Client.PublicData.Tokens)));
+      AName := Trim(UTF8Encode(Client.GetRangeName(i)));
       AName := StringReplace(AName, #13, ' ', [rfReplaceAll]);
       AName := StringReplace(AName, #10, ' ', [rfReplaceAll]);
       Result := True;
