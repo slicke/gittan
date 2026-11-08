@@ -269,8 +269,9 @@ end;
   asks first, saying what it keeps. }
 procedure TRepoFrame.CommitMenuClick(Sender: TObject);
 var
-  Hash, Short, Note: string;
+  Hash, Short, Note, Ref: string;
   Ok, Conflicts, Reopen: boolean;
+  Way: TGittanMergeWay;
 begin
   Hash := FActionCommit.Hash;
   Short := FActionCommit.Short;
@@ -375,7 +376,19 @@ begin
     caResetHard:
       if ResetToAsk(Hash, Short, rmHard) then
         ShowCommitGraph;
-    caMerge, caCherryPick, caRevert:
+    caMerge:
+    begin
+      { By the name it goes by while that is still the commit, so git's
+        message says "Merge branch 'feature'". The question and the
+        merge are the branch list's. }
+      if FRepo.CommitId(FActionName) = Hash then
+        Ref := FActionName
+      else
+        Ref := Hash;
+      if AskMergeWay(Ref, FActionName, Way) and RunMerge(Ref, FActionName, Way) then
+        ShowCommitGraph;
+    end;
+    caCherryPick, caRevert:
     begin
       StopWatcher;
       try
@@ -384,16 +397,6 @@ begin
         Reopen := True;
         try
           case (Sender as TMenuItem).Tag of
-            caMerge:
-            begin
-              { By the name it goes by while that is still the commit,
-                so git's message says "Merge branch 'feature'". }
-              if FRepo.CommitId(FActionName) = Hash then
-                Ok := FRepo.MergeRef(FActionName, Conflicts)
-              else
-                Ok := FRepo.MergeRef(Hash, Conflicts);
-              Note := Format(rsCaMerged, [FActionName]);
-            end;
             caCherryPick:
             begin
               Ok := FRepo.CherryPick(Hash, Conflicts);

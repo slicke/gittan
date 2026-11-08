@@ -104,6 +104,7 @@ type
     procedure TestSkip;
     procedure TestCommitActions;
     procedure TestCommitActionConflicts;
+    procedure TestMergeWays;
     procedure TestBranchManagement;
     procedure TestSwitchBlocked;
     procedure TestRevertFiles;
@@ -3507,6 +3508,72 @@ begin
   AssertTrue(FRepo.AbortOperation);
   AssertFalse('no such commit', FRepo.CherryPick('nothing', Conflicts));
   AssertFalse(Conflicts);
+end;
+
+{ The ways to merge: a branch with no commits of its own can move
+  forward, or take a merge commit anyway; a squash stages the changes
+  with git's message and no commit; a diverged branch cannot fast-forward
+  and a squash of it stops on the conflicts as a merge does. }
+procedure TGitRepoTest.TestMergeWays;
+var
+  Main, First, Side: string;
+  Count: integer;
+  Forward, Conflicts: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Main := Trim(Git(['rev-parse', '--abbrev-ref', 'HEAD']));
+  First := Trim(Git(['rev-parse', 'HEAD']));
+  Git(['checkout', '-q', '-b', 'side']);
+  WriteFile('b.txt', 'b'#10);
+  Commit('side one');
+  WriteFile('c.txt', 'c'#10);
+  Commit('side two');
+  Side := Trim(Git(['rev-parse', 'HEAD']));
+  Git(['checkout', '-q', Main]);
+
+  AssertTrue(FRepo.Error, FRepo.CommitsToMerge('side', Count, Forward));
+  AssertEquals(2, Count);
+  AssertTrue('nothing of its own', Forward);
+  AssertTrue(FRepo.Error, FRepo.CommitsToMerge('HEAD', Count, Forward));
+  AssertEquals('already in', 0, Count);
+  AssertFalse(Forward);
+
+  AssertTrue(FRepo.Error, FRepo.MergeRef('side', Conflicts, mwMergeCommit));
+  AssertEquals('two parents', First + ' ' + Side, Trim(Git(['log', '-1', '--format=%P'])));
+  AssertTrue(FRepo.Reset(First, rmHard));
+
+  AssertTrue(FRepo.Error, FRepo.MergeRef('side', Conflicts, mwFastForward));
+  AssertEquals(Side, Trim(Git(['rev-parse', 'HEAD'])));
+  AssertTrue(FRepo.Reset(First, rmHard));
+
+  AssertFalse(FRepo.SquashPending);
+  AssertTrue(FRepo.Error, FRepo.MergeRef('side', Conflicts, mwSquash));
+  AssertEquals('no commit', First, Trim(Git(['rev-parse', 'HEAD'])));
+  AssertEquals('', FRepo.Operation);
+  AssertTrue(FRepo.SquashPending);
+  AssertEquals('A  b.txt'#0'A  c.txt'#0, Git(['status', '--porcelain', '-z']));
+  AssertTrue(FRepo.MergeMessage, Pos('Squashed commit of the following:', FRepo.MergeMessage) = 1);
+  AssertTrue(FRepo.MergeMessage, Pos('side two', FRepo.MergeMessage) > 0);
+  Git(['commit', '-q', '-m', 'squashed']);
+  AssertFalse('the commit took it', FRepo.SquashPending);
+  AssertEquals('', FRepo.MergeMessage);
+  AssertTrue(FRepo.Reset(First, rmHard));
+
+  WriteFile('b.txt', 'main'#10);
+  Commit('main b');
+  AssertTrue(FRepo.Error, FRepo.CommitsToMerge('side', Count, Forward));
+  AssertEquals(2, Count);
+  AssertFalse('diverged', Forward);
+  AssertFalse('cannot fast-forward', FRepo.MergeRef('side', Conflicts, mwFastForward));
+  AssertFalse(Conflicts);
+  AssertTrue(FRepo.Error <> '');
+  AssertFalse(FRepo.MergeRef('side', Conflicts, mwSquash));
+  AssertTrue('a squash stops on conflicts too', Conflicts);
+  AssertEquals('', FRepo.Operation);
+  Git(['reset', '-q', '--hard']);
 end;
 
 procedure TGitRepoTest.TestBranchManagement;

@@ -211,6 +211,12 @@ type
     commits' changes staged), the work tree (rmMixed, unstaged), or
     nothing (rmHard, every change in tracked files lost). }
   TGittanResetMode = (rmSoft, rmMixed, rmHard);
+  {** How a merge is made: as git chooses (a fast-forward when the
+    branch has no commits of its own, else a merge commit), a
+    fast-forward only (refused when it cannot), always a merge commit
+    (`--no-ff`), or squashed (`--squash`: the changes are staged with no
+    commit, for one commit of the user's own). }
+  TGittanMergeWay = (mwMerge, mwFastForward, mwMergeCommit, mwSquash);
 
   {** What Clean removes: the files git neither tracks nor ignores
     (cnUntracked, `git clean`), the ignored ones alone (cnIgnored, `-X`)
@@ -626,10 +632,19 @@ type
     {** Whether the commit AAncestor is in the history of ADescendant. }
     function IsAncestor(const AAncestor, ADescendant: string): boolean;
     {** Merges ARef (a branch, tag or commit) into the branch HEAD is on,
-      with git's message (`git merge --no-edit`). False when nothing was
-      merged; AConflicts is then set when git stopped merging with
-      conflicts to resolve, which the Commit section carries on. }
-    function MergeRef(const ARef: string; out AConflicts: boolean): boolean;
+      with git's message (`git merge --no-edit`), the way AWay says.
+      False when nothing was merged; AConflicts is then set when git
+      stopped merging with conflicts to resolve, which the Commit
+      section carries on. A squash leaves the changes staged and the
+      message in SQUASH_MSG (SquashPending, MergeMessage). }
+    function MergeRef(const ARef: string; out AConflicts: boolean;
+      AWay: TGittanMergeWay = mwMerge): boolean;
+    {** What merging ARef into HEAD would bring: ACount commits HEAD
+      lacks (0 when it has them all), and AFastForward when HEAD has no
+      commits of its own since they parted, so the branch can move
+      forward to ARef with no merge commit. }
+    function CommitsToMerge(const ARef: string; out ACount: integer;
+      out AFastForward: boolean): boolean;
     {** Replays the commits the branch HEAD is on made since it left AOnto
       (a branch, tag or commit) on top of AOnto (`git rebase --autostash`,
       so local changes are stashed and put back). False when git refused;
@@ -755,9 +770,14 @@ type
       the rebased branch out again. Not for a merge. }
     function QuitOperation: boolean;
     {** The message git prepared for the merge, cherry-pick or revert in
-      progress (MERGE_MSG in the git directory), its comment lines left
+      progress (MERGE_MSG in the git directory), or for a squash merge
+      staged and not yet committed (SQUASH_MSG), its comment lines left
       out; empty when there is none. }
     function MergeMessage: string;
+    {** Whether a squash merge is staged and not yet committed: git
+      left SQUASH_MSG in the git directory, which the next commit
+      takes away. }
+    function SquashPending: boolean;
     {** The e-mail the repository commits under (`git config
       user.email`), empty when none is set. }
     function UserEmail: string;
@@ -5065,16 +5085,51 @@ begin
     RunGitIn(ARoot, ['ls-files', '-u'], Output, Ignored) and (Trim(Output) <> '');
 end;
 
-function TGittanRepo.MergeRef(const ARef: string; out AConflicts: boolean): boolean;
+function TGittanRepo.MergeRef(const ARef: string; out AConflicts: boolean;
+  AWay: TGittanMergeWay): boolean;
 var
-  Err: string;
+  Err, Output, Ignored: string;
 begin
   AConflicts := False;
   if FRoot = '' then
     Exit(False);
-  Result := RunCommitting(Self, FRoot, ['merge', '--no-edit', ARef], AConflicts, Err);
+  case AWay of
+    mwFastForward:
+      Result := RunCommitting(Self, FRoot, ['merge', '--ff-only', ARef], AConflicts, Err);
+    mwMergeCommit:
+      Result := RunCommitting(Self, FRoot, ['merge', '--no-ff', '--no-edit', ARef], AConflicts, Err);
+    mwSquash:
+    begin
+      { A squash writes no MERGE_HEAD, so git is in the middle of
+        nothing when it stops; the unmerged entries say it did. }
+      Result := RunCommitting(Self, FRoot, ['merge', '--squash', ARef], AConflicts, Err);
+      if not Result then
+        AConflicts := RunGitIn(FRoot, ['ls-files', '-u'], Output, Ignored) and
+          (Trim(Output) <> '');
+    end;
+    else
+      Result := RunCommitting(Self, FRoot, ['merge', '--no-edit', ARef], AConflicts, Err);
+  end;
   if not Result then
     FError := Err;
+end;
+
+{ rev-list counts the commits on ARef but not on HEAD; HEAD among ARef's
+  ancestors means the branch has none of its own since they parted. }
+function TGittanRepo.CommitsToMerge(const ARef: string; out ACount: integer;
+  out AFastForward: boolean): boolean;
+var
+  Output: string;
+begin
+  ACount := 0;
+  AFastForward := False;
+  Result := (FRoot <> '') and
+    RunGit(FRoot, ['rev-list', '--count', 'HEAD..' + ARef], Output) and
+    TryStrToInt(Trim(Output), ACount);
+  if not Result then
+    FError := Output
+  else if ACount > 0 then
+    AFastForward := IsAncestor('HEAD', ARef);
 end;
 
 function TGittanRepo.RebaseOnto(const AOnto: string; out AConflicts: boolean): boolean;
@@ -6003,12 +6058,17 @@ end;
   told afterwards; # stands in then. }
 function TGittanRepo.MergeMessage: string;
 var
-  Dir, Line, Comment: string;
+  Dir, FileName, Line, Comment: string;
   Lines: TStringList;
 begin
   Result := '';
   Dir := GitDir;
-  if (Dir = '') or not FileExists(IncludeTrailingPathDelimiter(Dir) + 'MERGE_MSG') then
+  if Dir = '' then
+    Exit;
+  FileName := IncludeTrailingPathDelimiter(Dir) + 'MERGE_MSG';
+  if not FileExists(FileName) then
+    FileName := IncludeTrailingPathDelimiter(Dir) + 'SQUASH_MSG';
+  if not FileExists(FileName) then
     Exit;
   if not RunGit(FRoot, ['config', '--get', 'core.commentString'], Comment) and
     not RunGit(FRoot, ['config', '--get', 'core.commentChar'], Comment) then
@@ -6018,7 +6078,7 @@ begin
     Comment := '#';
   Lines := TStringList.Create;
   try
-    Lines.LoadFromFile(IncludeTrailingPathDelimiter(Dir) + 'MERGE_MSG');
+    Lines.LoadFromFile(FileName);
     for Line in Lines do
       if not Line.StartsWith(Comment) then
         Result := Result + Line + #10;
@@ -6026,6 +6086,14 @@ begin
     Lines.Free;
   end;
   Result := Trim(Result);
+end;
+
+function TGittanRepo.SquashPending: boolean;
+var
+  Dir: string;
+begin
+  Dir := GitDir;
+  Result := (Dir <> '') and FileExists(IncludeTrailingPathDelimiter(Dir) + 'SQUASH_MSG');
 end;
 
 function TGittanRepo.HeadMessage(out AMessage: string): boolean;

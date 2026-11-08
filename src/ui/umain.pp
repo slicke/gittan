@@ -2093,6 +2093,8 @@ type
     procedure DeleteBranchAsk(const AName: string);
     procedure DeleteGoneBranches;
     procedure MergeIntoCurrent(const ARef: string);
+    function AskMergeWay(const ARef, AName: string; out AWay: TGittanMergeWay): boolean;
+    function RunMerge(const ARef, AName: string; AWay: TGittanMergeWay): boolean;
     procedure RebaseOntoAsk(const ARef: string);
     {** Rebase (ARebase) or Merge in the summary's row of a branch behind
       the default branch: a fetch, then the rebase's question or the
@@ -3250,6 +3252,22 @@ resourcestring
   rsBmRebaseHeader = 'Rebase %s onto';
   rsBmCompareHeader = 'Show what a branch changed since it left %s';
   rsBmCompareBackHeader = 'Show what %s changed since it left';
+  rsBmMergeTitle = 'Merge';
+  rsBmMergeAskForward = 'Merge %s into %s? It brings %d commits, and %s has none of its own ' +
+    'since they parted, so it can move forward to %s with no merge commit.';
+  rsBmMergeAskForwardOne = 'Merge %s into %s? It brings one commit, and %s has none of its own ' +
+    'since they parted, so it can move forward to %s with no merge commit.';
+  rsBmMergeAsk = 'Merge %s into %s? It brings %d commits since they parted, which a merge ' +
+    'commit joins to those of %s.';
+  rsBmMergeAskOne = 'Merge %s into %s? It brings one commit since they parted, which a merge ' +
+    'commit joins to those of %s.';
+  rsBmMergeSquashNote = 'Squash stages their changes for one commit of yours, written in the ' +
+    'Commit section.';
+  rsBmMergeNothing = '%s has no commits %s lacks: nothing to merge';
+  rsBmFastForward = 'Fast-forward';
+  rsBmMergeCommit = 'Merge Commit';
+  rsBmSquash = 'Squash';
+  rsBmSquashed = 'Squashed %s into %s: its changes are staged, ready to commit';
   rsBmRebaseTitle = 'Rebase';
   rsBmRebaseAsk = 'Rebase %s onto %s? Its %d commits since they parted are replayed on top of %s.';
   rsBmRebaseAskOne = 'Rebase %s onto %s? Its one commit since they parted is replayed on top of %s.';

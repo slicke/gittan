@@ -511,8 +511,9 @@ begin
   Continuing := ContinueMode;
   Busy := (FCommitJob <> nil) or (FRemoteJob <> nil);
   { A merge is committed with git's message, filled into an empty field
-    once; it goes when the merge does. }
-  if FOperation = 'merging' then
+    once; it goes when the merge does. A squash merge has one too, with
+    no operation under way. }
+  if (FOperation = 'merging') or FRepo.SquashPending then
   begin
     if (FMergeMessage = '') and MessageBlank then
     begin
