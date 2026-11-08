@@ -34,7 +34,7 @@ type
     function Message(const AName, ATitle, AText: string; AKind: TExtMessageKind;
       const AButtons: array of string; ADefault, ACancel: integer): integer; override;
     function Select(const ACaption, AText: string; const AOptions: array of string): integer; override;
-    procedure ShowLog(const ATitle, AText: string); override;
+    procedure ShowLog(const AName, ATitle, AText: string); override;
     procedure ReportError(const ATitle, ADetail: string); override;
     function AskPermission(const AName, AFile, AAuthor: string;
       const ARequested: TExtPermSet): boolean; override;
@@ -239,9 +239,10 @@ begin
   end;
 end;
 
-procedure TGittanExtUIHost.ShowLog(const ATitle, AText: string);
+procedure TGittanExtUIHost.ShowLog(const AName, ATitle, AText: string);
 begin
-  TellDlg(ATitle, AText, mtInformation);
+  AskDlgFrom(ATitle, AText, mtInformation, [mrOK, 'IsDefault', 'IsCancel'],
+    FromLine(AName));
 end;
 
 procedure TGittanExtUIHost.ReportError(const ATitle, ADetail: string);

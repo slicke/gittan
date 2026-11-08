@@ -43,8 +43,9 @@ type
     function Message(const AName, ATitle, AText: string; AKind: TExtMessageKind;
       const AButtons: array of string; ADefault, ACancel: integer): integer; virtual;
     {** What an extension logged (console.log, console.pop), shown as
-      text the user can read and copy. }
-    procedure ShowLog(const ATitle, AText: string); virtual;
+      text the user can read and copy under ATitle; AName is the
+      extension's name, '' when none is known. }
+    procedure ShowLog(const AName, ATitle, AText: string); virtual;
     {** An error of an extension: a script that fails to load, a native
       that raises. }
     procedure ReportError(const ATitle, ADetail: string); virtual;
@@ -149,7 +150,7 @@ begin
   Result := -1;
 end;
 
-procedure TGittanExtHost.ShowLog(const ATitle, AText: string);
+procedure TGittanExtHost.ShowLog(const AName, ATitle, AText: string);
 begin
 end;
 

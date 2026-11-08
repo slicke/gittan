@@ -49,8 +49,7 @@ sErr        = 'Script execution failed';
 RS_TYPE_ERROR_MSG = 'A data type was expected, but another was found';
 RS_PROM_ERR_CAPT = 'The asynchronous function %s failed to complete';
 RS_LOG_RECEIVE = 'Output through console.log has been received';
-RS_LOG_DESC = 'Extension · console.log';
-RS_LOG_DESC_FROM = 'Extension "%s" · console.log';
+RS_LOG_TITLE = 'console.log';
 RS_LOG_EMPTY_MSG = '<No message provided>';
 RS_LOG_POP_TITLE = 'Console output';
 RS_DATA_TYPE_ERR = 'Datatype %s was not expected, expected in function %s';
@@ -998,7 +997,7 @@ argc: integer; argv: PJSValues; magic: integer);
 var
   msg: pchar;
   i: integer;
-  fullMsg, extName, desc: string;
+  fullMsg, extName: string;
 begin
   // Concatenate all arguments into a single string
   fullMsg := '';
@@ -1022,11 +1021,7 @@ begin
   extName := '';
   if Assigned(ConsoleExtNameLookup) then
     extName := ConsoleExtNameLookup(ctx);
-  if extName <> '' then
-    desc := Format(RS_LOG_DESC_FROM, [extName])
-  else
-    desc := RS_LOG_DESC;
-  ExtHost.ShowLog(desc, fullMsg);
+  ExtHost.ShowLog(extName, RS_LOG_TITLE, fullMsg);
 
   // Return undefined
   res^ := JS_UNDEFINED;
@@ -1165,7 +1160,10 @@ begin
     Count := ConsoleBuffer.Count;
     fullMsg := TrimRight(ConsoleBuffer.Text);
     ConsoleBuffer.Clear;
-    ExtHost.ShowLog(RS_LOG_POP_TITLE, fullMsg);
+    if Assigned(ConsoleExtNameLookup) then
+      ExtHost.ShowLog(ConsoleExtNameLookup(ctx), RS_LOG_POP_TITLE, fullMsg)
+    else
+      ExtHost.ShowLog('', RS_LOG_POP_TITLE, fullMsg);
   end;
 
   res^ := JS_NewInt32(ctx, Count);

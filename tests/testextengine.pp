@@ -47,7 +47,7 @@ type
     function Select(const ACaption, AText: string; const AOptions: array of string): integer; override;
     function Message(const AName, ATitle, AText: string; AKind: TExtMessageKind;
       const AButtons: array of string; ADefault, ACancel: integer): integer; override;
-    procedure ShowLog(const ATitle, AText: string); override;
+    procedure ShowLog(const AName, ATitle, AText: string); override;
     procedure ReportError(const ATitle, ADetail: string); override;
     function AskPermission(const AName, AFile, AAuthor: string;
       const ARequested: TExtPermSet): boolean; override;
@@ -175,9 +175,9 @@ begin
   Result := MessageAnswer;
 end;
 
-procedure TFakeExtHost.ShowLog(const ATitle, AText: string);
+procedure TFakeExtHost.ShowLog(const AName, ATitle, AText: string);
 begin
-  Logs.Add(ATitle + ': ' + AText);
+  Logs.Add(AName + ' · ' + ATitle + ': ' + AText);
 end;
 
 procedure TFakeExtHost.ReportError(const ATitle, ADetail: string);
@@ -443,7 +443,7 @@ begin
   AssertEquals('select answer', '1', EvalIn(Info^.Ctx, 'globalThis.s'));
   AssertEquals('console.log shown', 1, FHost.Logs.Count);
   AssertTrue('with its text', Pos('logged', FHost.Logs[0]) > 0);
-  AssertEquals('under the extension''s name', 'Extension "dialogs" · console.log: logged', FHost.Logs[0]);
+  AssertEquals('under the extension''s name', 'dialogs · console.log: logged', FHost.Logs[0]);
 end;
 
 procedure TExtEngineTest.TestPermissionGate;
