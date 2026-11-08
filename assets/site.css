@@ -14,6 +14,9 @@
   --accent-tint: #d5f7e1;     /* the wordmark's tile */
   --accent-inv: #2be070;      /* the other theme's green, for what sits on the ink */
   --accent-inv-ink: #0b1a12;
+  --lead-bg: var(--ink);       /* the lead card: the ink on light, the dark wordmark's green tile on dark */
+  --lead-ink: var(--bg);
+  --lead-hot: #2be070;
   --red: #c8323f;
   --red-bright: #ff4b58;
   --red-tint: #fde3e5;
@@ -57,6 +60,7 @@
   :root:not([data-theme="light"]) {
     --bg: #141a26; --surface: #1b2231; --ink: #e9edf5; --muted: #9aa6bc; --faint: #6f7b92;
     --accent: #2be070; --accent-ink: #0b1a12; --accent-tint: #1f3a33; --accent-inv: #127a3a; --accent-inv-ink: #ffffff;
+    --lead-bg: #1f3a33; --lead-ink: #e9edf5; --lead-hot: #2be070;
     --red: #ff6b75; --red-tint: #3a2530;
     --ui-bg: #1b2231; --code-bg: #0f141d; --kbd: rgba(233, 237, 245, .1);
     --line: #2b3446; --line-strong: #3a465c;
@@ -69,6 +73,7 @@
 :root[data-theme="dark"] {
   --bg: #141a26; --surface: #1b2231; --ink: #e9edf5; --muted: #9aa6bc; --faint: #6f7b92;
   --accent: #2be070; --accent-ink: #0b1a12; --accent-tint: #1f3a33; --accent-inv: #127a3a; --accent-inv-ink: #ffffff;
+    --lead-bg: #1f3a33; --lead-ink: #e9edf5; --lead-hot: #2be070;
   --red: #ff6b75; --red-tint: #3a2530;
   --ui-bg: #1b2231; --code-bg: #0f141d; --kbd: rgba(233, 237, 245, .1);
   --line: #2b3446; --line-strong: #3a465c;
@@ -256,14 +261,14 @@ section { padding: calc(var(--section-gap) / 2) 0; }
 .scard .pic { order: -1; display: flex; align-items: center; justify-content: center; height: clamp(220px, 23vw, 320px); padding: clamp(20px, 2.5vw, 32px); background: var(--ui-bg); box-shadow: inset 0 -1px 0 var(--line); }
 .scard .pic img { display: block; width: auto; max-width: 100%; height: auto; max-height: 100%; object-fit: contain; }
 /* the first: the claim no client has, wide, words beside the dialog, on the ink */
-.scard:first-child { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); background: var(--ink); color: var(--bg); box-shadow: var(--shadow); }
+.scard:first-child { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); background: var(--lead-bg); color: var(--lead-ink); box-shadow: var(--shadow); }
 .scard:first-child .words { grid-column: 1 / span 5; padding: clamp(32px, 4vw, 56px); gap: 22px; }
 .scard:first-child h3 { font-size: var(--step-head); line-height: 1.08; }
 .scard:first-child p { font-size: var(--step-lead); line-height: 1.45; max-width: 40ch; color: inherit; }
-.scard:first-child .more { color: var(--bg); padding-top: 16px; }
-.scard:first-child .more:hover { color: var(--accent-inv); }
+.scard:first-child .more { color: var(--lead-ink); padding-top: 16px; }
+.scard:first-child .more:hover { color: var(--lead-hot); }
 .scard:first-child .pic { order: 0; grid-column: 6 / -1; min-height: 0; height: auto; padding: clamp(24px, 3vw, 44px); box-shadow: none;
-  background: radial-gradient(closest-side at 55% 50%, color-mix(in srgb, var(--accent-inv) 34%, transparent), color-mix(in srgb, var(--accent-inv) 10%, transparent) 60%, transparent); }
+  background: radial-gradient(closest-side at 55% 50%, color-mix(in srgb, var(--lead-hot) 30%, transparent), color-mix(in srgb, var(--lead-hot) 9%, transparent) 60%, transparent); }
 .scard:first-child .pic img { max-height: 460px; }
 /* the lead card's illustration: a changed block drops into the commit of the branch that wrote its lines */
 .absorb { width: min(100%, 480px); display: grid; gap: 16px; }
