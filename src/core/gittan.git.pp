@@ -5260,8 +5260,8 @@ end;
 function WithCoAuthors(const AMessage: string; const ACoAuthors: array of string): string;
 var
   Lines: TStringList;
-  i, Last: integer;
-  Block: boolean;
+  i, k, Last, Start: integer;
+  Block, Known: boolean;
   Line: string;
 begin
   Result := TrimRight(AMessage);
@@ -5283,16 +5283,25 @@ begin
     { The first paragraph is the subject, never a trailer block. }
     if i < 0 then
       Block := False;
+    Start := i + 1;
     for i := 0 to High(ACoAuthors) do
     begin
       Line := 'Co-authored-by: ' + Trim(ACoAuthors[i]);
-      if Lines.IndexOf(Line) >= 0 then
+      { Already credited only in the trailers: the same line in the
+        body, a paragraph above, is no trailer git reads. }
+      Known := False;
+      if Block then
+        for k := Start to Lines.Count - 1 do
+          if Lines[k] = Line then
+            Known := True;
+      if Known then
         Continue;
       if not Block then
       begin
         if Lines.Count > 0 then
           Lines.Add('');
         Block := True;
+        Start := Lines.Count;
       end;
       Lines.Add(Line);
     end;

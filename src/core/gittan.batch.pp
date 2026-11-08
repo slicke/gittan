@@ -559,7 +559,7 @@ end;
 
 function GoneMergeState(ARepo: TGittanRepo; const ABranch, ADefault: string): TGittanGoneMerge;
 var
-  Root, Base, Patch, Squash, Ids, Err, Line: string;
+  Root, Base, Patch, Squash, Ids, Err, Line, Names, First: string;
 begin
   Result := gmNotMerged;
   Root := ARepo.Root;
@@ -589,8 +589,19 @@ begin
     (Trim(Squash) = '') then
     Exit;
   Squash := Copy(Trim(Squash), 1, 40);
-  if not RunGitIn(Root, ['log', '-p', '--no-renames', '--no-ext-diff', '--no-merges',
-    '--format=commit %H', Base + '..' + ADefault], Patch, Err) or (Patch = '') then
+  { Only the commits that touch one file the branch changed: a squash of
+    it must, and --full-diff keeps their whole patches, so the ids are
+    the same; an old branch would otherwise read the default branch's
+    whole history since into memory. }
+  if not GitOut(Root, ['diff-tree', '--name-only', '-z', '--no-renames', Base,
+    'refs/heads/' + ABranch + '^{tree}'], Names) then
+    Exit;
+  First := Copy(Names, 1, Pos(#0, Names + #0) - 1);
+  if First = '' then
+    Exit;
+  if not RunGitIn(Root, ['log', '-p', '--full-diff', '--no-renames', '--no-ext-diff', '--no-merges',
+    '--format=commit %H', Base + '..' + ADefault, '--', ':(literal)' + First], Patch, Err) or
+    (Patch = '') then
     Exit;
   if not RunGitEnv(Root, ['patch-id', '--stable'], [], Ids, Err, '', nil, nil, Patch) then
     Exit;

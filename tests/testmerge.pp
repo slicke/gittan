@@ -288,6 +288,16 @@ begin
   finally
     M.Free;
   end;
+  { An add/add conflict's base is empty, and still a base. }
+  M := Load(['<<<<<<< HEAD', 'm', '||||||| base', '=======', 't', '>>>>>>> f']);
+  try
+    AssertTrue(M.HasBase);
+    AssertTrue(M.Chunks[0].HasBase);
+    AssertEquals(0, Length(M.Chunks[0].Base));
+    AssertEquals('t', Joined(M.Chunks[0].Sides[msTheirs]));
+  finally
+    M.Free;
+  end;
 end;
 
 { The rows take the base as a third pane when asked, padded like the

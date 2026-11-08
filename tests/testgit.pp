@@ -3627,6 +3627,14 @@ begin
   AssertEquals('not twice',
     'Subject'#10#10'Co-authored-by: Ada <ada@example.invalid>',
     WithCoAuthors('Subject'#10#10'Co-authored-by: Ada <ada@example.invalid>', ['Ada <ada@example.invalid>']));
+  AssertEquals('the line in the body is no trailer',
+    'Subject'#10#10'Co-authored-by: Ada <ada@example.invalid>'#10#10'More.'#10#10 +
+    'Co-authored-by: Ada <ada@example.invalid>',
+    WithCoAuthors('Subject'#10#10'Co-authored-by: Ada <ada@example.invalid>'#10#10'More.',
+    ['Ada <ada@example.invalid>']));
+  AssertEquals('not twice when asked twice',
+    'Subject'#10#10'Co-authored-by: Ada <ada@example.invalid>',
+    WithCoAuthors('Subject', ['Ada <ada@example.invalid>', 'Ada <ada@example.invalid>']));
 
   MakeHistory;
   Git(['config', 'user.name', 'Gittan Test']);
