@@ -5352,11 +5352,13 @@ var
 begin
   ACount := 0;
   AFastForward := False;
-  Result := (FRoot <> '') and
-    RunGit(FRoot, ['rev-list', '--count', 'HEAD..' + ARef], Output) and
-    TryStrToInt(Trim(Output), ACount);
+  { A failed git keeps its own message in FError. }
+  Result := (FRoot <> '') and RunGit(FRoot, ['rev-list', '--count', 'HEAD..' + ARef], Output);
   if not Result then
-    FError := Output
+    Exit;
+  Result := TryStrToInt(Trim(Output), ACount);
+  if not Result then
+    FError := 'git rev-list gave no count: ' + Trim(Output)
   else if ACount > 0 then
     AFastForward := IsAncestor('HEAD', ARef);
 end;
@@ -6238,7 +6240,7 @@ end;
 
 function TGittanRepo.SkipOperation: boolean;
 var
-  Command, Output: string;
+  Command, Output, Err: string;
 begin
   Command := OperationCommand(Operation);
   if (FRoot = '') or (Command = '') or (Command = 'merge') then
@@ -6246,9 +6248,18 @@ begin
     FError := 'There is no commit to skip.';
     Exit(False);
   end;
-  Result := RunGit(FRoot, [Command, '--skip'], Output);
-  if Result and (Operation = '') then
-    CleanRebaseFiles;
+  Result := RunGitEnv(FRoot, WithConflictStyle(FRoot, [Command, '--skip']), ['GIT_EDITOR=:'],
+    Output, Err);
+  if Result then
+  begin
+    if Operation = '' then
+      CleanRebaseFiles;
+    Exit;
+  end;
+  FError := Err;
+  { Stopped at a later commit with conflicts of its own: skipping worked. }
+  Result := (Operation <> '') and RunGit(FRoot, ['ls-files', '-u'], Output) and
+    (Trim(Output) <> '');
 end;
 
 function TGittanRepo.AbortOperation: boolean;

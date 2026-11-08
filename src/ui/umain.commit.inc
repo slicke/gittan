@@ -1081,6 +1081,7 @@ begin
       Include(Options, coNoVerify);
     FCommitJob := TGittanCommitJob.Create(FRepo.Root, WithCoAuthors(FCommitMemo.Text,
       FCoAuthors), Paths, FCommitAmend.Checked, Parts, Options);
+    FCommitJob.Draft := FCommitMemo.Text;
   finally
     Paths.Free;
   end;
@@ -1336,12 +1337,18 @@ begin
 end;
 
 { Clears the draft slot and the field where they still hold the message
-  AJob committed, the field back to the template. }
+  AJob committed, the field back to the template. The field's text is
+  compared, without the Co-authored-by lines the commit added. }
 procedure TRepoFrame.ForgetCommitted(AJob: TGittanCommitJob);
 
   function Same(const AText: string): boolean;
+  var
+    Committed: string;
   begin
-    Result := Trim(AdjustLineBreaks(AText)) = Trim(AdjustLineBreaks(AJob.Message));
+    Committed := AJob.Draft;
+    if Committed = '' then
+      Committed := AJob.Message;
+    Result := Trim(AdjustLineBreaks(AText)) = Trim(AdjustLineBreaks(Committed));
   end;
 
 begin

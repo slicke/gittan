@@ -11,7 +11,7 @@ A repository can tell Gittan about itself in a folder named `.gittan` at its roo
 
 The Config section at the bottom of the sidebar lists every one of these files, the personal file included, and opens them in the editor. On the Commands page, Edit… or Create… opens a commands file and writes a commented example into it the first time.
 
-All the files are [TOML](https://toml.io). A file that is not valid TOML gives nothing, and Gittan shows the line and column where reading stopped, under the file's heading on the Commands page. A value of the wrong type, such as a number where a string belongs, is ignored as if it were not there.
+All the files are [TOML](https://toml.io). A file that is not valid TOML gives nothing, and Gittan shows the line and column where reading stopped: for a commands file under the file's heading on the Commands page, for `repo.toml` in the banner at the top of the window, when the repository opens or the file changes. A value of the wrong type, such as a number where a string belongs, is ignored as if it were not there.
 
 ## Why some files need trust
 

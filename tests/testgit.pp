@@ -3564,6 +3564,8 @@ begin
   AssertTrue(FRepo.Error, FRepo.CommitsToMerge('HEAD', Count, Forward));
   AssertEquals('already in', 0, Count);
   AssertFalse(Forward);
+  AssertFalse(FRepo.CommitsToMerge('no-such-branch', Count, Forward));
+  AssertTrue('git''s own reason: ' + FRepo.Error, Trim(FRepo.Error) <> '');
 
   AssertTrue(FRepo.Error, FRepo.MergeRef('side', Conflicts, mwMergeCommit));
   AssertEquals('two parents', First + ' ' + Side, Trim(Git(['log', '-1', '--format=%P'])));

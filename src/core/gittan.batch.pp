@@ -578,15 +578,19 @@ begin
   if not GitOut(Root, ['merge-base', ADefault, 'refs/heads/' + ABranch], Base) or
     (Base = '') then
     Exit;
-  if not GitOut(Root, ['diff-tree', '-p', Base, 'refs/heads/' + ABranch + '^{tree}'], Patch) or
+  { Both sides without renames: diff-tree finds none unless asked, log
+    -p follows diff.renames, on by default, and a squash that renames a
+    file would then never match. }
+  if not GitOut(Root, ['diff-tree', '-p', '--no-renames', Base, 'refs/heads/' + ABranch +
+    '^{tree}'], Patch) or
     (Patch = '') then
     Exit;
   if not RunGitEnv(Root, ['patch-id', '--stable'], [], Squash, Err, '', nil, nil, Patch) or
     (Trim(Squash) = '') then
     Exit;
   Squash := Copy(Trim(Squash), 1, 40);
-  if not RunGitIn(Root, ['log', '-p', '--no-merges', '--format=commit %H', Base + '..' + ADefault],
-    Patch, Err) or (Patch = '') then
+  if not RunGitIn(Root, ['log', '-p', '--no-renames', '--no-ext-diff', '--no-merges',
+    '--format=commit %H', Base + '..' + ADefault], Patch, Err) or (Patch = '') then
     Exit;
   if not RunGitEnv(Root, ['patch-id', '--stable'], [], Ids, Err, '', nil, nil, Patch) then
     Exit;
