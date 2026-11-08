@@ -33,7 +33,7 @@ uses
   fpjson, gittan.ext.engine, gittan.ext.registry, gittan.ext.api, gittan.ext.loader,
   gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
   gittan.rebase, gittan.worktrees, gittan.gitflow, gittan.repolist, gittan.rebasedlg, gittan.cleandlg, gittan.absorbdlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
-  gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, gittan.merge, gittan.mergeview,
+  gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, gittan.coauthorsdlg, gittan.merge, gittan.mergeview,
   gittan.notedlg, gittan.issuelinks,
   ATSynEdit_Gaps, md5;
 
@@ -566,8 +566,11 @@ type
       FSkipHooks). }
     FCommitOptions: TLabel;
     FCommitOptionsMenu: TPopupMenu;
-    FSignOffItem, FSkipHooksItem: TMenuItem;
-    FSignOffMenuItem, FSkipHooksMenuItem: TMenuItem;
+    FSignOffItem, FSkipHooksItem, FCoAuthorsItem: TMenuItem;
+    FSignOffMenuItem, FSkipHooksMenuItem, FCoAuthorsMenuItem: TMenuItem;
+    { The people credited in the next commit with a Co-authored-by line
+      each (Co-authors...), "Name <e-mail>"; dropped once it is made. }
+    FCoAuthors: TStringArray;
     { What commit.template holds, put in an empty message field. }
     FCommitTemplate: string;
     FSignOff, FSkipHooks: boolean;
@@ -2019,6 +2022,7 @@ type
     procedure CommitAmendClick(Sender: TObject);
     procedure CommitOptionsClick(Sender: TObject);
     procedure SignOffItemClick(Sender: TObject);
+    procedure CoAuthorsItemClick(Sender: TObject);
     procedure SkipHooksItemClick(Sender: TObject);
     procedure UpdateCommitOptions;
     function MessageBlank: boolean;
@@ -2874,12 +2878,16 @@ resourcestring
   rsCommitAmend = 'Amend';
   rsSignOffItem = 'Sign Off';
   rsSkipHooksItem = 'Skip Hooks';
+  rsCoAuthorsItem = 'Co-authors...';
   rsSignOffShort = 'Sign-off';
   rsSkipHooksShort = 'No hooks';
+  rsCoAuthorShort = '+%s';
+  rsCoAuthorsShort = '+%d';
   rsCommitOptionsCount = '%d options';
   rsCommitOptionsHint = 'Commit options: Sign Off adds a Signed-off-by line with your name ' +
     '(kept for this repository), Skip Hooks commits without the pre-commit and commit-msg ' +
-    'hooks (this commit only)';
+    'hooks (this commit only), Co-authors credits the people who worked on it with you ' +
+    '(this commit only)';
   rsWriteMessage = '✦ AI';
   rsAIReviewMenu = 'Review Changes with AI';
   rsAIReviewStopMenu = 'Stop AI Review';
@@ -5906,6 +5914,7 @@ begin
     palette; the chevron beside Amend has them too. }
   FSignOffMenuItem := AddItem(CommitMenu, rsSignOffItem, 0, @SignOffItemClick);
   FSkipHooksMenuItem := AddItem(CommitMenu, rsSkipHooksItem, 0, @SkipHooksItemClick);
+  FCoAuthorsMenuItem := AddItem(CommitMenu, rsCoAuthorsItem, 0, @CoAuthorsItemClick);
   UpdateOptionItems;
   { The person in the Commit header, for the keyboard. }
   FIdentityItem := AddItem(CommitMenu, rsIdentityMenu, 0, @IdentityClick);

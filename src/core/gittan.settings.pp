@@ -24,6 +24,8 @@ const
   MaxRecent = 10;
   {** How many actions the command palette lists as recently used. }
   MaxPaletteRecent = 8;
+  {** How many co-authors the dialog remembers. }
+  MaxCoAuthors = 20;
   {** The width of a tab in the editor when none was picked: git's own,
     what a diff shows in a terminal and on GitHub. }
   DefaultTabSize = 8;
@@ -64,6 +66,7 @@ type
     FPaletteRecent: TStringList;
     FTabs: TStringList;
     FBatchRepos: TStringList;
+    FCoAuthors: TStringList;
     { The two files as read, which Save writes back with the fields put
       in, so a key it does not know stays. What has no field of its own
       lives in them alone: the forges' values (hosting.forges), the
@@ -292,6 +295,12 @@ type
     {** The repositories picked on the forge view's Batch tab, by their
       roots, kept in state.json (batch.repos). }
     property BatchRepos: TStringList read FBatchRepos;
+    {** The people credited as co-authors before, "Name <e-mail>", the
+      latest first (AddCoAuthor), for the co-authors dialog to list. }
+    property CoAuthors: TStringList read FCoAuthors;
+    {** Puts APerson first among CoAuthors, dropping a duplicate and
+      the oldest beyond MaxCoAuthors. }
+    procedure AddCoAuthor(const APerson: string);
   public
     {** The operation shown on the Batch tab, by its key (overview, gone,
       identity, maintenance or an extension's; '', the overview, by
@@ -547,6 +556,8 @@ begin
   FTabs := TStringList.Create;
   FBatchRepos := TStringList.Create;
   FBatchRepos.CaseSensitive := True;
+  FCoAuthors := TStringList.Create;
+  FCoAuthors.CaseSensitive := True;
   FSettingsDoc := TJSONObject.Create;
   FStateDoc := TJSONObject.Create;
   if ADir <> '' then
@@ -575,6 +586,7 @@ begin
   FPaletteRecent.Free;
   FTabs.Free;
   FBatchRepos.Free;
+  FCoAuthors.Free;
   inherited Destroy;
 end;
 
@@ -719,6 +731,7 @@ begin
   ListOf(O, 'open', FTabs);
   ActiveTab := IntOf(O, 'active');
   ListOf(ObjOf(FStateDoc, 'batch'), 'repos', FBatchRepos);
+  ListOf(ObjOf(FStateDoc, 'commit'), 'coAuthors', FCoAuthors, MaxCoAuthors);
   BatchOperation := StrOf(ObjOf(FStateDoc, 'batch'), 'operation');
   { Kept by its index before. }
   if BatchOperation = '' then
@@ -830,6 +843,7 @@ begin
   O.Arrays['open'] := ListJson(FTabs);
   O.Integers['active'] := ActiveTab;
   ChildOf(FStateDoc, 'batch').Arrays['repos'] := ListJson(FBatchRepos);
+  ChildOf(FStateDoc, 'commit').Arrays['coAuthors'] := ListJson(FCoAuthors);
   ChildOf(FStateDoc, 'batch').Strings['operation'] := BatchOperation;
 end;
 
@@ -997,6 +1011,20 @@ begin
   i := FRecent.IndexOf(ARoot);
   if i >= 0 then
     FRecent.Delete(i);
+end;
+
+procedure TGittanSettings.AddCoAuthor(const APerson: string);
+var
+  i: integer;
+begin
+  if Trim(APerson) = '' then
+    Exit;
+  i := FCoAuthors.IndexOf(Trim(APerson));
+  if i >= 0 then
+    FCoAuthors.Delete(i);
+  FCoAuthors.Insert(0, Trim(APerson));
+  while FCoAuthors.Count > MaxCoAuthors do
+    FCoAuthors.Delete(FCoAuthors.Count - 1);
 end;
 
 procedure TGittanSettings.AddPaletteRecent(const AName: string);

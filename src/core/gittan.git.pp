@@ -781,6 +781,9 @@ type
     {** The e-mail the repository commits under (`git config
       user.email`), empty when none is set. }
     function UserEmail: string;
+    {** The authors of the last AMax commits as "Name <e-mail>", each
+      once, the latest first; for the co-authors to pick from. }
+    function RecentAuthors(AMax: integer = 500): TStringArray;
     {** Sets the name and e-mail commits are made under: in the user's
       global git config with AGlobal, else in the repository's own. With
       AGlobal the repository's own are unset, since they would go
@@ -1195,6 +1198,12 @@ function GitVersionSupported(AMajor, AMinor: integer): boolean;
 {** Whether the git GitExe runs has `merge-tree --write-tree`, 2.38 or
   later; asked once per git, SetGitExe forgets the answer. }
 function GitHasMergeTree: boolean;
+
+{** AMessage with a "Co-authored-by: Name <e-mail>" trailer for each of
+  ACoAuthors not already in it: in the last paragraph when that is a
+  block of trailers ("Key: value" lines), else in a new one, so git's
+  --signoff adds its line to the same block. }
+function WithCoAuthors(const AMessage: string; const ACoAuthors: array of string): string;
 
 {** The arguments that make git write the merge base into a conflict's
   markers (merge.conflictStyle zdiff3, or diff3 before git 2.35), so
@@ -3062,6 +3071,35 @@ begin
   if (FRoot = '') or not RunGit(FRoot, ['config', 'user.email'], Result) then
     Exit('');
   Result := Trim(Result);
+end;
+
+function TGittanRepo.RecentAuthors(AMax: integer): TStringArray;
+var
+  Output: string;
+  Lines, Seen: TStringList;
+  i: integer;
+begin
+  Result := nil;
+  if (FRoot = '') or not RunGit(FRoot, ['log', '-n', IntToStr(AMax),
+    '--format=%an <%ae>'], Output) then
+    Exit;
+  Lines := TStringList.Create;
+  Seen := TStringList.Create;
+  try
+    Seen.CaseSensitive := True;
+    Seen.Sorted := True;
+    Lines.Text := Output;
+    for i := 0 to Lines.Count - 1 do
+      if (Trim(Lines[i]) <> '') and (Seen.IndexOf(Trim(Lines[i])) < 0) then
+      begin
+        Seen.Add(Trim(Lines[i]));
+        SetLength(Result, Length(Result) + 1);
+        Result[High(Result)] := Trim(Lines[i]);
+      end;
+  finally
+    Seen.Free;
+    Lines.Free;
+  end;
 end;
 
 { A key with several values (a config edited by hand) is set with
@@ -5068,6 +5106,64 @@ var
 begin
   Result := (FRoot <> '') and
     RunGit(FRoot, ['merge-base', '--is-ancestor', AAncestor, ADescendant], Output);
+end;
+
+{ A trailer line is a token of letters and dashes, a colon and a space. }
+function IsTrailerLine(const ALine: string): boolean;
+var
+  i: integer;
+begin
+  i := Pos(': ', ALine);
+  Result := i > 1;
+  if Result then
+    for i := 1 to i - 1 do
+      if not (ALine[i] in ['A'..'Z', 'a'..'z', '-']) then
+        Exit(False);
+end;
+
+function WithCoAuthors(const AMessage: string; const ACoAuthors: array of string): string;
+var
+  Lines: TStringList;
+  i, Last: integer;
+  Block: boolean;
+  Line: string;
+begin
+  Result := TrimRight(AMessage);
+  if Length(ACoAuthors) = 0 then
+    Exit;
+  Lines := TStringList.Create;
+  try
+    Lines.Text := Result;
+    { Whether the last paragraph is trailers alone. }
+    Last := Lines.Count - 1;
+    Block := Last >= 0;
+    i := Last;
+    while (i >= 0) and (Trim(Lines[i]) <> '') do
+    begin
+      if not IsTrailerLine(Lines[i]) then
+        Block := False;
+      Dec(i);
+    end;
+    { The first paragraph is the subject, never a trailer block. }
+    if i < 0 then
+      Block := False;
+    for i := 0 to High(ACoAuthors) do
+    begin
+      Line := 'Co-authored-by: ' + Trim(ACoAuthors[i]);
+      if Lines.IndexOf(Line) >= 0 then
+        Continue;
+      if not Block then
+      begin
+        if Lines.Count > 0 then
+          Lines.Add('');
+        Block := True;
+      end;
+      Lines.Add(Line);
+    end;
+    Result := TrimRight(Lines.Text);
+  finally
+    Lines.Free;
+  end;
 end;
 
 { Runs a command that makes a commit, as the comment above says. AError

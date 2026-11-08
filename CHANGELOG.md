@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- Co-authors: the chevron beside Amend, and Commit > Co-authors..., open a list of the people you have credited before and the repository's recent authors to tick, or someone new as Name <e-mail>; each gets a Co-authored-by line in the commit's message. The label beside Amend shows who, and the choice lasts for one commit.
 - Merging a branch asks how: a branch with no commits of its own since they parted offers Fast-forward, Merge Commit and Squash, one with commits of its own Merge and Squash, and the question says how many commits come in. A squash stages the changes with git's message in the Commit section, for one commit of yours.
 - The merge editor can show the merge base, what both sides started from, as a pane between Mine and Theirs: Show Base in the header, when the conflict markers hold it. The merges, rebases, cherry-picks, reverts, pulls and stash applies Gittan runs now ask git to write the base into the markers (merge.conflictStyle zdiff3), unless the repository sets a style of its own.
 - A changed image can be shown in more ways than side by side: Swipe lays the old and the new version over each other with a divider to drag, Onion Skin draws the new one over the old with an opacity to set, and Difference shows where two images of the same size differ. The pills under the captions choose, as does View > Image, and the choice is kept.

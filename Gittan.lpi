@@ -209,6 +209,10 @@ if TargetOS='darwin' then CustomOptions += ' -k-rpath -k@loader_path';"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
+        <Filename Value="src/ui/gittan.coauthorsdlg.pp"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
+      <Unit>
         <Filename Value="src/ui/gittan.statusbar.pp"/>
         <IsPartOfProject Value="True"/>
       </Unit>

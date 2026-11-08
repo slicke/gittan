@@ -29,6 +29,7 @@ type
     procedure TestSaveRecent;
     procedure TestTabs;
     procedure TestBatchRepos;
+    procedure TestCoAuthors;
     procedure TestBatchOperationIndex;
     procedure TestDamagedFileGivesDefaults;
     procedure TestWrongTypesSaved;
@@ -411,6 +412,36 @@ begin
     S.Load;
     AssertEquals('fewer tabs drop the rest', 1, S.Tabs.Count);
     AssertEquals('an active tab past the end is the first', 0, S.ActiveTab);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSettingsTest.TestCoAuthors;
+var
+  S: TGittanSettings;
+  i: integer;
+begin
+  S := TGittanSettings.Create(FDir);
+  try
+    AssertEquals(0, S.CoAuthors.Count);
+    S.AddCoAuthor('Ada <ada@example.invalid>');
+    S.AddCoAuthor('Bo <bo@example.invalid>');
+    S.AddCoAuthor(' Ada <ada@example.invalid> ');
+    AssertEquals('once, moved first', 2, S.CoAuthors.Count);
+    AssertEquals('Ada <ada@example.invalid>', S.CoAuthors[0]);
+    for i := 1 to MaxCoAuthors + 3 do
+      S.AddCoAuthor('P' + IntToStr(i) + ' <p@example.invalid>');
+    AssertEquals(MaxCoAuthors, S.CoAuthors.Count);
+    S.Save;
+  finally
+    S.Free;
+  end;
+  S := TGittanSettings.Create(FDir);
+  try
+    S.Load;
+    AssertEquals(MaxCoAuthors, S.CoAuthors.Count);
+    AssertEquals('P' + IntToStr(MaxCoAuthors + 3) + ' <p@example.invalid>', S.CoAuthors[0]);
   finally
     S.Free;
   end;

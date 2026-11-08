@@ -105,6 +105,7 @@ type
     procedure TestCommitActions;
     procedure TestCommitActionConflicts;
     procedure TestMergeWays;
+    procedure TestCoAuthors;
     procedure TestBranchManagement;
     procedure TestSwitchBlocked;
     procedure TestRevertFiles;
@@ -3574,6 +3575,62 @@ begin
   AssertTrue('a squash stops on conflicts too', Conflicts);
   AssertEquals('', FRepo.Operation);
   Git(['reset', '-q', '--hard']);
+end;
+
+{ Co-authored-by trailers go in a paragraph of their own, or join a
+  trailer block the message ends with; one already there is not
+  repeated. RecentAuthors lists each author once, the latest first. }
+procedure TGitRepoTest.TestCoAuthors;
+var
+  Authors: TStringArray;
+  Id: string;
+  Paths: TStringList;
+begin
+  AssertEquals('', WithCoAuthors('', []));
+  AssertEquals('Subject', WithCoAuthors('Subject'#10#10, []));
+  AssertEquals('Subject'#10#10'Co-authored-by: Ada <ada@example.invalid>',
+    WithCoAuthors('Subject'#10, ['Ada <ada@example.invalid>']));
+  AssertEquals('Subject'#10#10'Body here.'#10#10'Co-authored-by: Ada <ada@example.invalid>'#10 +
+    'Co-authored-by: Bo <bo@example.invalid>',
+    WithCoAuthors('Subject'#10#10'Body here.', ['Ada <ada@example.invalid>', ' Bo <bo@example.invalid>']));
+  AssertEquals('joins the trailers',
+    'Subject'#10#10'Body.'#10#10'Fixes: #1'#10'Co-authored-by: Ada <ada@example.invalid>',
+    WithCoAuthors('Subject'#10#10'Body.'#10#10'Fixes: #1', ['Ada <ada@example.invalid>']));
+  AssertEquals('a subject with a colon is no trailer block',
+    'Fix: the thing'#10#10'Co-authored-by: Ada <ada@example.invalid>',
+    WithCoAuthors('Fix: the thing', ['Ada <ada@example.invalid>']));
+  AssertEquals('not twice',
+    'Subject'#10#10'Co-authored-by: Ada <ada@example.invalid>',
+    WithCoAuthors('Subject'#10#10'Co-authored-by: Ada <ada@example.invalid>', ['Ada <ada@example.invalid>']));
+
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  WriteFile('x.txt', 'x'#10);
+  Git(['add', 'x.txt']);
+  Git(['-c', 'user.name=Ada', '-c', 'user.email=ada@example.invalid', 'commit', '-q', '-m', 'by ada']);
+  WriteFile('x.txt', 'y'#10);
+  Git(['add', 'x.txt']);
+  Git(['commit', '-q', '-m', 'by test']);
+  AssertTrue(FRepo.Open(FDir));
+  Authors := FRepo.RecentAuthors;
+  AssertTrue('at least two', Length(Authors) >= 2);
+  AssertEquals('Gittan Test <test@example.invalid>', Authors[0]);
+  AssertEquals('Ada <ada@example.invalid>', Authors[1]);
+  AssertEquals('one of each', 1, Length(FRepo.RecentAuthors(1)));
+  WriteFile('x.txt', 'z'#10);
+  Paths := TStringList.Create;
+  try
+    Paths.Add('x.txt');
+    AssertTrue(FRepo.Error, FRepo.Commit(WithCoAuthors('with ada', ['Ada <ada@example.invalid>']),
+      Paths, False, Id, nil, [coSignOff]));
+  finally
+    Paths.Free;
+  end;
+  AssertEquals('the sign-off joins the block',
+    'with ada'#10#10'Co-authored-by: Ada <ada@example.invalid>'#10 +
+    'Signed-off-by: Gittan Test <test@example.invalid>',
+    Trim(Git(['log', '-1', '--format=%B'])));
 end;
 
 procedure TGitRepoTest.TestBranchManagement;

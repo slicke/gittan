@@ -113,6 +113,10 @@ begin
   FSkipHooksItem.Caption := rsSkipHooksItem;
   FSkipHooksItem.OnClick := @SkipHooksItemClick;
   FCommitOptionsMenu.Items.Add(FSkipHooksItem);
+  FCoAuthorsItem := TMenuItem.Create(FCommitOptionsMenu);
+  FCoAuthorsItem.Caption := rsCoAuthorsItem;
+  FCoAuthorsItem.OnClick := @CoAuthorsItemClick;
+  FCommitOptionsMenu.Items.Add(FCoAuthorsItem);
   FAbortButton := TButton.Create(Self);
   FAbortButton.Caption := rsAbortButton;
   FAbortButton.Align := alLeft;
@@ -796,18 +800,41 @@ end;
 procedure TRepoFrame.UpdateCommitOptions;
 var
   Shown: string;
+  Count: integer;
 begin
   if FCommitOptions = nil then
     Exit;
   Shown := '';
+  Count := 0;
   if FSignOff then
+  begin
     Shown := rsSignOffShort;
-  { Both would not fit beside Amend and Commit; the menu says which. }
+    Inc(Count);
+  end;
   if FSkipHooks then
-    if Shown = '' then
-      Shown := rsSkipHooksShort
+  begin
+    Shown := rsSkipHooksShort;
+    Inc(Count);
+  end;
+  { One co-author by first name, "+Ada", while that fits beside Amend
+    and Commit; more, or a long name, as their count, "+2". }
+  if Length(FCoAuthors) = 1 then
+  begin
+    Shown := Trim(Copy(FCoAuthors[0], 1, Pos(' ', FCoAuthors[0] + ' ') - 1));
+    if (Shown = '') or (UTF8Length(Shown) > 8) then
+      Shown := Format(rsCoAuthorsShort, [1])
     else
-      Shown := Format(rsCommitOptionsCount, [2]);
+      Shown := Format(rsCoAuthorShort, [Shown]);
+    Inc(Count);
+  end
+  else if Length(FCoAuthors) > 1 then
+  begin
+    Shown := Format(rsCoAuthorsShort, [Length(FCoAuthors)]);
+    Inc(Count);
+  end;
+  { Two would not fit beside Amend and Commit; the menu says which. }
+  if Count > 1 then
+    Shown := Format(rsCommitOptionsCount, [Count]);
   FHasCommitOption := Shown <> '';
   if Shown = '' then
     FCommitOptions.Caption := '⌄'
@@ -831,6 +858,7 @@ begin
   FSignOff := FRepo.SignOff(FRepoConfig.SignOff);
   FSignOffItem.Checked := FSignOff;
   FSkipHooksItem.Checked := FSkipHooks;
+  FCoAuthorsItem.Checked := Length(FCoAuthors) > 0;
   UpdateCommitOptions;
   At := FCommitOptions.ClientToScreen(Point(0, FCommitOptions.Height));
   FCommitOptionsMenu.PopUp(At.X, At.Y);
@@ -852,8 +880,10 @@ begin
     Exit;
   FSignOffMenuItem.Checked := FSignOff;
   FSkipHooksMenuItem.Checked := FSkipHooks;
+  FCoAuthorsMenuItem.Checked := Length(FCoAuthors) > 0;
   FSignOffMenuItem.Enabled := (FRepo <> nil) and (FRepo.Root <> '');
   FSkipHooksMenuItem.Enabled := FSignOffMenuItem.Enabled;
+  FCoAuthorsMenuItem.Enabled := FSignOffMenuItem.Enabled;
 end;
 
 procedure TRepoFrame.SignOffItemClick(Sender: TObject);
@@ -867,6 +897,39 @@ end;
 procedure TRepoFrame.SkipHooksItemClick(Sender: TObject);
 begin
   FSkipHooks := not FSkipHooks;
+  UpdateCommitOptions;
+end;
+
+{ The co-authors dialog, with the people credited before and the
+  repository's recent authors to tick, the user's own identity left
+  out; the people ticked are remembered for the next time. }
+procedure TRepoFrame.CoAuthorsItemClick(Sender: TObject);
+var
+  Known, Recent: TStringArray;
+  Me, S: string;
+  i: integer;
+begin
+  if (FRepo = nil) or (FRepo.Root = '') then
+    Exit;
+  Me := FRepo.UserName + ' <' + FRepo.UserEmail + '>';
+  Known := nil;
+  for S in App.Settings.CoAuthors do
+    if S <> Me then
+    begin
+      SetLength(Known, Length(Known) + 1);
+      Known[High(Known)] := S;
+    end;
+  Recent := FRepo.RecentAuthors;
+  for i := 0 to High(Recent) do
+    if Recent[i] <> Me then
+    begin
+      SetLength(Known, Length(Known) + 1);
+      Known[High(Known)] := Recent[i];
+    end;
+  if not ChooseCoAuthors(FCoAuthors, Known) then
+    Exit;
+  for i := High(FCoAuthors) downto 0 do
+    App.Settings.AddCoAuthor(FCoAuthors[i]);
   UpdateCommitOptions;
 end;
 
@@ -992,16 +1055,16 @@ begin
     end;
     { An extension may stop the commit (commit.before). }
     if ExtListens('commit.before') and not ExtFire('commit.before',
-      TJSONObject.Create(['message', FCommitMemo.Text, 'paths', ListJson(Paths),
-      'amend', FCommitAmend.Checked])) then
+      TJSONObject.Create(['message', WithCoAuthors(FCommitMemo.Text, FCoAuthors),
+      'paths', ListJson(Paths), 'amend', FCommitAmend.Checked])) then
       Exit;
     Options := [];
     if FSignOff then
       Include(Options, coSignOff);
     if FSkipHooks then
       Include(Options, coNoVerify);
-    FCommitJob := TGittanCommitJob.Create(FRepo.Root, FCommitMemo.Text, Paths,
-      FCommitAmend.Checked, Parts, Options);
+    FCommitJob := TGittanCommitJob.Create(FRepo.Root, WithCoAuthors(FCommitMemo.Text,
+      FCoAuthors), Paths, FCommitAmend.Checked, Parts, Options);
   finally
     Paths.Free;
   end;
@@ -1115,6 +1178,7 @@ begin
       FAmendMessage := '';
       FMergeMessage := '';
       FSkipHooks := False;
+      FCoAuthors := nil;
       UpdateCommitOptions;
     end;
     FCommitOn.Clear;
@@ -1308,6 +1372,7 @@ begin
   FCommitDraftFor := FRepo.Root;
   FSignOff := FRepo.SignOff(FRepoConfig.SignOff);
   FSkipHooks := False;
+  FCoAuthors := nil;
   UpdateCommitOptions;
   { commit.template (or repo.toml's) fills a field with no draft, as
     git's editor would. }
