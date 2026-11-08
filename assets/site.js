@@ -190,12 +190,21 @@
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !panel.hidden) close(); });
   }
 
-  // ---- Pictures below the fold open from a window, once.
+  // ---- Pictures below the fold open from a window, and the heads, rows and cards under it rise into place, once.
   var pics = $$('[data-reveal]');
+  if (!still) {
+    $$('.sechead, .flist li, .story, .facts > div, .dl .card, .install, .foot-side').forEach(function (el) {
+      if (el.getBoundingClientRect().top <= window.innerHeight) return;
+      el.classList.add('rise');
+      var kin = el.parentNode.children, i = Array.prototype.indexOf.call(kin, el);
+      if (kin.length > 2) el.style.transitionDelay = (i % 4) * 70 + 'ms';
+      pics.push(el);
+    });
+  }
   if ('IntersectionObserver' in window) {
     var po = new IntersectionObserver(function (es) {
       es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('is-in'); po.unobserve(e.target); } });
-    }, { rootMargin: '0px 0px -12% 0px', threshold: 0.1 });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.05 });
     pics.forEach(function (p) { po.observe(p); });
     window.addEventListener('load', function () { setTimeout(function () {
       pics.forEach(function (p) { var r = p.getBoundingClientRect(); if (r.top < innerHeight && r.bottom > 0) p.classList.add('is-in'); });
@@ -223,35 +232,5 @@
     window.addEventListener('scroll', function () { if (!ticking) { ticking = true; requestAnimationFrame(stackPaint); } }, { passive: true });
     window.addEventListener('resize', stackPaint);
     stackPaint();
-  }
-
-  // ---- One heading comes into focus letter by letter as it rises through the screen; crisp at rest.
-  var focus = document.querySelector('[data-focus]');
-  if (focus && !still) {
-    var text = focus.textContent;
-    focus.setAttribute('aria-label', text);
-    focus.classList.add('focus');
-    focus.innerHTML = text.split(' ').map(function (w) {
-      return '<span style="white-space:nowrap" aria-hidden="true">' + w.split('').map(function (c) { return '<span class="ch">' + c + '</span>'; }).join('') + '</span>';
-    }).join(' ');
-    var chs = $$('.ch', focus), n = chs.length, shown = -1, fTick = false;
-    var peak = window.innerWidth < 600 ? 8 : 10;
-    var fPaint = function () {
-      fTick = false;
-      var r = focus.getBoundingClientRect(), vh = window.innerHeight;
-      // 0 when its top is at 85% of the screen, 1 at 40%: the focus runs through the letters like a wave.
-      var p = Math.min(1, Math.max(0, (vh * 0.85 - r.top) / (vh * 0.45)));
-      var key = Math.round(p * 200);
-      if (key === shown) return;
-      shown = key;
-      chs.forEach(function (c, i) {
-        var at = (i / n) * 0.8;
-        var t = Math.min(1, Math.max(0, (p - at) / 0.2));
-        var b = (1 - t) * peak;
-        c.style.filter = b > 0.05 ? 'blur(' + b.toFixed(1) + 'px)' : '';
-      });
-    };
-    window.addEventListener('scroll', function () { if (!fTick) { fTick = true; requestAnimationFrame(fPaint); } }, { passive: true });
-    fPaint();
   }
 })();
