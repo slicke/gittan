@@ -264,6 +264,14 @@ section { padding: calc(var(--section-gap) / 2) 0; }
 .scard:first-child .more:hover { color: var(--accent-inv); }
 .scard:first-child .pic { order: 0; grid-column: 6 / -1; min-height: 0; padding: clamp(24px, 3vw, 44px); background: color-mix(in srgb, var(--ink) 88%, var(--bg)); box-shadow: none; }
 .scard:first-child .pic img { max-height: 460px; }
+/* the half cards' live illustrations: a menu with Undo chosen, and a block that settles into plain code */
+.scard .pic .menu { width: min(100%, 300px); }
+.scard .pic .reviewed { width: min(100%, 420px); }
+.reviewed .mini { background: var(--bg-elev); border-radius: 8px; box-shadow: 0 0 0 1px var(--line); }
+.reviewed .settle { background: var(--add-bg); color: var(--add-fg); border-left-color: var(--add-bar); animation: settle 5s ease-in-out infinite; }
+.reviewed .settle:nth-child(3) { animation-delay: .15s; }
+.reviewed .settle:nth-child(4) { animation-delay: .3s; }
+@keyframes settle { 0%, 30% { background: var(--add-bg); color: var(--add-fg); border-left-color: var(--add-bar); } 50%, 88% { background: transparent; color: var(--fg-muted); border-left-color: transparent; } 100% { background: var(--add-bg); color: var(--add-fg); border-left-color: var(--add-bar); } }
 @media (max-width: 900px) {
   .stack { grid-template-columns: 1fr; }
   .scard:first-child { display: flex; flex-direction: column; }
@@ -566,7 +574,7 @@ pre.sh .c { color: var(--code-dim); }
 @keyframes e-ap-settle { from { transform: scale(var(--from-scale, 1.1)); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .mini .live, .chip::before, .js .tour figure.on, .commitbox .msg span { animation: none; }
+  .mini .live, .reviewed .settle, .chip::before, .js .tour figure.on, .commitbox .msg span { animation: none; }
   .tag:hover svg { transform: none; }
   .bar .sections a::after, .sub, .sub-toggle svg { transition: none; }
 }

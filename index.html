@@ -154,33 +154,44 @@
       </article>
       <article class="scard">
         <div class="words">
-          <h3>A merge preview before you merge</h3>
+          <h3>Undo for what git did</h3>
           <div>
-            <p>The row that says your branch is behind main also says whether merging would go through, worked out in memory, before you press Merge or Rebase. Needs git 2.38 or later.</p>
+            <p>Branch &gt; Undo takes back a commit, an amend, a merge, a reset, a rebase or a switch, named after what it was, and Redo does it again. It follows what git did in a terminal too.</p>
           </div>
           <a class="more" href="features.html#only">Read more</a>
         </div>
-        <div class="pic" data-ui><picture>
-  <source srcset="assets/shots/mergecheck-zoom-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
-  <source srcset="assets/shots/mergecheck-zoom-dark.png" media="(prefers-color-scheme: dark)" data-dark>
-  <source srcset="assets/shots/mergecheck-zoom-light.avif" type="image/avif">
-  <img src="assets/shots/mergecheck-zoom-light.png" width="540" height="120" loading="lazy" alt="The summary of trailhead-maps on offline-maps: 4 commits behind origin/main, conflicts in TrailList.vue in red, and Rebase and Merge buttons">
-</picture></div>
+        <div class="pic" data-ui aria-hidden="true">
+          <div class="menu undo">
+            <div>Switch to Branch…<i>⌘B</i></div>
+            <div>New Branch…</div>
+            <hr>
+            <div class="sel">Undo Merge offline-maps<i>⌘Z</i></div>
+            <div>Redo<i>⇧⌘Z</i></div>
+            <hr>
+            <div>Reflog…</div>
+          </div>
+        </div>
       </article>
       <article class="scard">
         <div class="words">
-          <h3>What changed in the dependencies since the last release</h3>
+          <h3>Reviewed, and gone</h3>
           <div>
-            <p>View &gt; Project reads the project the way its own tools do, for Lazarus, Node, Rust, Go and Python, and compares every dependency with the newest tag.</p>
+            <p>A change you have read gets Reviewed and turns into plain code for the rest of the session, so the diff shrinks to what you have not looked at yet. The file and git are not touched.</p>
           </div>
-          <a class="more" href="?tab=b-project#tour" data-tab="b-project">See the whole page</a>
+          <a class="more" href="features.html#only">Read more</a>
         </div>
-        <div class="pic" data-ui><picture>
-  <source srcset="assets/shots/project-zoom-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
-  <source srcset="assets/shots/project-zoom-dark.png" media="(prefers-color-scheme: dark)" data-dark>
-  <source srcset="assets/shots/project-zoom-light.avif" type="image/avif">
-  <img src="assets/shots/project-zoom-light.png" width="1055" height="470" loading="lazy" alt="The Project page of Gittan itself: Lazarus, Gittan.lpi, version 0.15.0, 2 build modes and 6 packages, 2 changed since build-136; the build modes Default and Release with their output, platform, optimization and debug info and a Build button each, and the packages with where each comes from, such as vendor/lazink at 841eded, moved from 5020fd9 since the tag, and LCL from Lazarus">
-</picture></div>
+        <div class="pic" data-ui aria-hidden="true">
+          <div class="reviewed">
+            <div class="uipills"><span class="hot">✓ Reviewed</span><span>Leave Out of Commit</span><span>Put into Its Commit</span><span>Discard</span></div>
+            <div class="mini">
+              <div>const km = computed(() =&gt; …)</div>
+              <div class="settle">const favourite = computed(() =&gt;</div>
+              <div class="settle">  store.favourites.has(props.trail.id))</div>
+              <div class="settle">const start = computed(() =&gt; props.trail.path[0])</div>
+              <div>const { forecast, loading } = useForecast(start)</div>
+            </div>
+          </div>
+        </div>
       </article>
     </div>
     <p class="all-link"><a class="tag quiet" href="features.html#only"><span>Nine more, only in Gittan</span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg></a></p>
@@ -384,7 +395,7 @@
             <img src="assets/shots/commit-light.png" width="1280" height="800" loading="lazy" alt="TrailCard.vue changed in the diff view with the button block left out of the commit in a muted tint and Reviewed, Include in Commit, Put into Its Commit and Discard pills over it, the file's box in the tree half ticked, README.md unticked, Include All in the file header, and the Commit section with a message and the Commit button">
           </picture></div>
         <h3>Commit what you ticked</h3>
-        <p>Tick the files that belong together, write the message under them, and commit with <kbd>⌘↩</kbd>. A block, or only the lines you select, can wait for the next commit. There is no index to think about.</p>
+        <p>Tick the files that belong together and commit with <kbd>⌘↩</kbd>, or commit a block, or only the lines you select, line by line, and leave the rest for the next commit. There is no index to think about.</p>
         <a href="features.html?tab=b-commit#workflow">Committing, in the workflow</a>
       </li>
       <li>
@@ -395,7 +406,7 @@
             <img src="assets/shots/sync-light.png" width="1280" height="800" loading="lazy" alt="The list over the status bar with Pull (one behind), Push (two ahead), Force Push replacing one, Fetch and Commit Graph">
           </picture></div>
         <h3>Pull and push from the status bar</h3>
-        <p>Its middle button is always the next step: Pull here, with one commit behind and two ahead. Force Push takes a lease and says how many of the remote's commits it replaces, and a push shows its hooks as they run.</p>
+        <p>Its middle button is always the next step: Pull here, with one commit behind and two ahead. Force Push takes a lease and says how many of the remote's commits it replaces, and with <code>gh</code> signed in the branch's pull request and its checks sit beside them.</p>
         <a href="features.html?tab=b-sync#workflow">Pull and push, in the workflow</a>
       </li>
       <li>
