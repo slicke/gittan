@@ -3584,6 +3584,7 @@ resourcestring
   rsOperationOf = '%s %s';
   rsIdentityHint = 'Commits as %s <%s>%s. Click to change.';
   rsIdentityHintLocal = ' (this repository only)';
+  rsIdentityHintSigns = ', signing with %s';
   rsIdentityNone = 'Git has no name or e-mail to commit under. Click to set them.';
   rsSubmodules = 'Submodules';
   rsSubmodulesNewer = '%d · %d behind';

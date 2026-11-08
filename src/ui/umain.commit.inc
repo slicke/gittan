@@ -979,20 +979,33 @@ begin
   end;
 end;
 
+{ The signing goes with the identity, at the same scope; what was found
+  of the commits' signatures is forgotten, since an allowed signers
+  file set up now may verify what could not be checked before. }
 function TRepoFrame.EditIdentity: boolean;
 var
-  Who, Mail: string;
+  Who, Mail, Error: string;
   Local: boolean;
+  Signing: TGittanSigningSetup;
 begin
   Who := FRepo.UserName;
   Mail := FRepo.UserEmail;
   Local := FRepo.HasLocalIdentity;
-  Result := ChooseIdentity(Who, Mail, Local);
+  Signing := ReadSigningSetup(FRepo.Root);
+  Result := ChooseIdentity(Who, Mail, Local, Signing, FRepo.Root);
   if not Result then
     Exit;
   Result := FRepo.SetIdentity(Who, Mail, not Local);
   if not Result then
+  begin
     StatusNote(FRepo.Error, True);
+    Exit;
+  end;
+  Result := WriteSigningSetup(FRepo.Root, Signing, Mail, Local, Error);
+  if not Result then
+    StatusNote(Error, True);
+  FSignCache.Clear;
+  CommitHeaderEnter(nil);
 end;
 
 { git refuses to commit without a name and an e-mail; a fresh machine
@@ -1017,6 +1030,7 @@ end;
 procedure TRepoFrame.CommitHeaderEnter(Sender: TObject);
 var
   Who, Mail, Where: string;
+  Signing: TGittanSigningSetup;
 begin
   Who := FRepo.UserName;
   Mail := FRepo.UserEmail;
@@ -1027,6 +1041,9 @@ begin
     Where := '';
     if FRepo.HasLocalIdentity then
       Where := rsIdentityHintLocal;
+    Signing := ReadSigningSetup(FRepo.Root);
+    if Signing.Sign then
+      Where := Where + Format(rsIdentityHintSigns, [SignFormatName(Signing.Format)]);
     FCommitHeader.PersonHint := Format(rsIdentityHint, [Who, Mail, Where]);
   end;
 end;

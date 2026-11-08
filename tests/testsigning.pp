@@ -32,6 +32,8 @@ type
     procedure TestCache;
     procedure TestSshSignatures;
     procedure TestJob;
+    procedure TestSetup;
+    procedure TestKeys;
   end;
 
 implementation
@@ -319,6 +321,119 @@ begin
     Cache.Free;
     Job.Free;
   end;
+end;
+
+{ The setup is written to the repository's own config alone, so the
+  user's global config is left as it is; the allowed signers file is set
+  there first for the same reason. }
+procedure TSigningTest.TestSetup;
+var
+  Cfg: TGittanSigningSetup;
+  Error, Id, Allowed: string;
+  Commits: TGittanSignedCommits;
+begin
+  if not MakeKey then
+  begin
+    Ignore('ssh-keygen cannot be run here');
+    Exit;
+  end;
+  Cfg := ReadSigningSetup(FDir);
+  AssertFalse(Cfg.Sign);
+  AssertEquals('', Cfg.Key);
+  Allowed := FDir + PathDelim + 'allowed';
+  Git(['config', 'gpg.ssh.allowedSignersFile', Allowed]);
+
+  Cfg.Sign := True;
+  Cfg.Format := sfSsh;
+  Cfg.Key := FDir + PathDelim + 'key.pub';
+  AssertTrue(Error, WriteSigningSetup(FDir, Cfg, 'test@example.invalid', True, Error));
+  Cfg := ReadSigningSetup(FDir);
+  AssertTrue(Cfg.Sign);
+  AssertTrue(Cfg.Format = sfSsh);
+  AssertEquals(FDir + PathDelim + 'key.pub', Cfg.Key);
+  AssertEquals('true', Trim(Git(['config', '--local', 'tag.gpgSign'])));
+  AssertEquals(Allowed, Cfg.AllowedSigners);
+  AssertTrue('the allowed signers file was made', FileExists(Allowed));
+  AssertEquals('test@example.invalid ' + PublicKeyOf(Cfg.Key) + LineEnding, FileText(Allowed));
+  { Written again: the line is not doubled. }
+  AssertTrue(Error, WriteSigningSetup(FDir, Cfg, 'test@example.invalid', True, Error));
+  AssertEquals('test@example.invalid ' + PublicKeyOf(Cfg.Key) + LineEnding, FileText(Allowed));
+
+  { A commit signed as set up verifies, and is on no branch. }
+  AssertTrue(Error, gittan.signing.TestSigning(FDir, Cfg, Id, Error));
+  AssertEquals(40, Length(Id));
+  AssertTrue(Error, CommitSignatures(FDir, [Id], nil, Commits, Error));
+  AssertTrue('verified', Commits[0].Signature.State = ssGood);
+  AssertEquals('', Trim(Git(['branch', '--contains', Id])));
+  { A key that is not there fails with git's reason. }
+  Cfg.Key := FDir + PathDelim + 'nope.pub';
+  AssertFalse(gittan.signing.TestSigning(FDir, Cfg, Id, Error));
+  AssertTrue(Error, Pos('nope.pub', Error) > 0);
+
+  { Off again: both keys unset, the format and key kept. }
+  Cfg.Sign := False;
+  AssertTrue(Error, WriteSigningSetup(FDir, Cfg, 'test@example.invalid', True, Error));
+  Cfg := ReadSigningSetup(FDir);
+  AssertFalse(Cfg.Sign);
+  AssertTrue(Cfg.Format = sfSsh);
+  AssertFalse(RunGitIn(FDir, ['config', '--local', 'tag.gpgSign'], Id, Error));
+end;
+
+procedure TSigningTest.TestKeys;
+var
+  Keys: TStringArray;
+  Error: string;
+begin
+  AssertEquals('ssh', SignFormatName(sfSsh));
+  AssertEquals('openpgp', SignFormatName(sfOpenPgp));
+  AssertEquals('x509', SignFormatName(sfX509));
+  AssertTrue(SignFormatOf('') = sfOpenPgp);
+  AssertTrue(SignFormatOf('SSH') = sfSsh);
+  AssertTrue(SignFormatOf('x509') = sfX509);
+
+  Keys := ParseGpgSecretKeys(
+    'sec:u:255:22:ABCDEF0123456789:1700000000:::u:::scESC:::+:::ed25519:::0:'#10 +
+    'fpr:::::::::FFFF:'#10 +
+    'uid:u::::1700000000::HASH::Ada <ada@example.invalid>::::::::::0:'#10 +
+    'uid:u::::1700000000::HASH::Ada at work <ada@work.invalid>::::::::::0:'#10 +
+    'ssb:u:255:18:SUBKEY:1700000000::::::e:::+:::cv25519:'#10 +
+    'sec:e:255:22:0000000000000000:1600000000:1600000001::u:::scESC:::+:::ed25519:::0:'#10 +
+    'uid:e::::1600000000::HASH::Old <old@example.invalid>::::::::::0:'#10 +
+    'sec:r:255:22:1111111111111111:1600000000:::u:::scESC:::+:::ed25519:::0:'#10 +
+    'uid:r::::1600000000::HASH::Gone <gone@example.invalid>::::::::::0:'#10);
+  AssertEquals('one key, its first user id, expired and revoked left out', 1, Length(Keys));
+  AssertEquals('ABCDEF0123456789'#31'Ada <ada@example.invalid>', Keys[0]);
+  AssertEquals(0, Length(ParseGpgSecretKeys('')));
+
+  AssertFalse(GpgSecretKeys('', Keys, Error));
+  AssertFalse(GpgSecretKeys(FDir + PathDelim + 'no-such-gpg', Keys, Error));
+
+  WriteFile('b.pub', 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEx bjorn@laptop'#10);
+  WriteFile('a.pub', 'ssh-rsa AAAAB3NzaC1yc2E'#10);
+  WriteFile('a', 'private');
+  Keys := SshPublicKeysIn(FDir);
+  AssertEquals(2, Length(Keys));
+  AssertEquals(FDir + PathDelim + 'a.pub', Keys[0]);
+  AssertEquals(FDir + PathDelim + 'b.pub', Keys[1]);
+  AssertEquals(0, Length(SshPublicKeysIn(FDir + PathDelim + 'nowhere')));
+
+  AssertEquals('ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEx', PublicKeyOf(FDir + PathDelim + 'b.pub'));
+  AssertEquals('ssh-ed25519 AAAA', PublicKeyOf('key::ssh-ed25519 AAAA comment'));
+  AssertEquals('ssh-ed25519 AAAA', PublicKeyOf('ssh-ed25519 AAAA'));
+  AssertEquals('', PublicKeyOf('ABCDEF'));
+  AssertEquals('', PublicKeyOf(FDir + PathDelim + 'nope.pub'));
+
+  AssertTrue(Error, AddAllowedSigner(FDir + PathDelim + 'deep' + PathDelim + 'allowed',
+    'a@x', 'ssh-ed25519 AAAA c', Error));
+  AssertEquals('a@x ssh-ed25519 AAAA' + LineEnding, FileText(FDir + PathDelim + 'deep' + PathDelim + 'allowed'));
+  AssertTrue(Error, AddAllowedSigner(FDir + PathDelim + 'deep' + PathDelim + 'allowed',
+    'b@x', 'ssh-ed25519 BBBB', Error));
+  AssertTrue(Error, AddAllowedSigner(FDir + PathDelim + 'deep' + PathDelim + 'allowed',
+    'c@x', 'key::ssh-ed25519 AAAA', Error));
+  AssertEquals('a@x ssh-ed25519 AAAA' + LineEnding + 'b@x ssh-ed25519 BBBB' + LineEnding,
+    FileText(FDir + PathDelim + 'deep' + PathDelim + 'allowed'));
+  AssertFalse(AddAllowedSigner(FDir + PathDelim + 'allowed2', 'a@x', 'nonsense', Error));
+  AssertTrue(Pos('nonsense', Error) > 0);
 end;
 
 initialization
