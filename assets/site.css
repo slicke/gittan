@@ -262,8 +262,34 @@ section { padding: calc(var(--section-gap) / 2) 0; }
 .scard:first-child p { font-size: var(--step-lead); line-height: 1.45; max-width: 40ch; color: inherit; }
 .scard:first-child .more { color: var(--bg); padding-top: 16px; }
 .scard:first-child .more:hover { color: var(--accent-inv); }
-.scard:first-child .pic { order: 0; grid-column: 6 / -1; min-height: 0; padding: clamp(24px, 3vw, 44px); background: color-mix(in srgb, var(--ink) 88%, var(--bg)); box-shadow: none; }
+.scard:first-child .pic { order: 0; grid-column: 6 / -1; min-height: 0; height: auto; padding: clamp(24px, 3vw, 44px); box-shadow: none;
+  background: radial-gradient(closest-side at 55% 50%, color-mix(in srgb, var(--accent-inv) 34%, transparent), color-mix(in srgb, var(--accent-inv) 10%, transparent) 60%, transparent); }
 .scard:first-child .pic img { max-height: 460px; }
+/* the lead card's illustration: a changed block drops into the commit of the branch that wrote its lines */
+.absorb { width: min(100%, 480px); display: grid; gap: 16px; }
+.absorb > *, .absorb .mini { min-width: 0; }
+.absorb .change { position: relative; z-index: 1; padding: 10px 10px 4px; background: var(--bg-elev); border-radius: 10px; box-shadow: 0 0 0 1px var(--line), 0 14px 34px -14px rgba(0, 0, 0, .45); transform-origin: 50% 0; }
+.absorb .change .uipills { margin-bottom: 6px; }
+.absorb .change .file { padding: 0 12px 2px; font: 600 11.5px/1.6 var(--text); color: var(--fg-faint); }
+.absorb .change .mini { padding: 2px 0 0; }
+.absorb .commits { padding: 6px; background: var(--bg-elev); border-radius: 10px; box-shadow: 0 0 0 1px var(--line), 0 14px 34px -14px rgba(0, 0, 0, .45); font: 12px/1.9 var(--mono); color: var(--fg-muted); }
+.absorb .commits div { display: flex; align-items: center; gap: 12px; padding: 2px 10px; border-radius: 6px; white-space: nowrap; overflow: hidden; }
+.absorb .commits b { flex: none; font-weight: 400; color: var(--fg-faint); }
+.absorb .commits span { color: var(--fg); overflow: hidden; text-overflow: ellipsis; }
+.absorb .commits i { margin-left: auto; flex: none; font: 600 11px/1.9 var(--text); font-style: normal; color: var(--add-fg); opacity: 0; }
+.absorb .commits .dim span { color: var(--fg-faint); font-size: 11px; }
+@media (prefers-reduced-motion: no-preference) {
+  .absorb .change { animation: absorb-go 7s var(--ease-open) infinite; }
+  .absorb .hit { animation: absorb-land 7s ease infinite; }
+  .absorb .hit i { animation: absorb-badge 7s ease infinite; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .absorb .hit { background: var(--add-bg); }
+  .absorb .hit i { opacity: 1; }
+}
+@keyframes absorb-go { 0%, 22% { transform: none; opacity: 1; } 42%, 78% { transform: translateY(calc(100% + 34px)) scale(.45); opacity: 0; } 86%, 100% { transform: none; opacity: 1; } }
+@keyframes absorb-land { 0%, 38% { background: transparent; } 46%, 80% { background: var(--add-bg); } 90%, 100% { background: transparent; } }
+@keyframes absorb-badge { 0%, 40% { opacity: 0; } 48%, 80% { opacity: 1; } 90%, 100% { opacity: 0; } }
 /* the half cards' live illustrations: a menu with Undo chosen, and a block that settles into plain code */
 .scard .pic .menu { width: min(100%, 300px); }
 .scard .pic .reviewed { width: min(100%, 420px); }

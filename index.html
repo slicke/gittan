@@ -141,16 +141,28 @@
         <div class="words">
           <h3>Put a change into the commit it belongs to</h3>
           <div>
-            <p>Hover a change and press Put into Its Commit: Gittan folds it into the commit of your branch that last wrote those lines. The command line has <code>git absorb</code>; no client I know has it.</p>
+            <p>Hover a change and press Put into Its Commit: Gittan finds the commit of your branch that last wrote those lines and folds the change into it, so a round of fixes lands in the commits it fixes, not in a “fixes” commit on top. Pushed commits are never rewritten, and Undo takes it back. The command line has <code>git absorb</code>; no client I know has it.</p>
           </div>
           <a class="more" href="features.html?tab=b-absorb#workflow">See it in the change view</a>
         </div>
-        <div class="pic" data-ui><picture>
-  <source srcset="assets/shots/absorb-zoom-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
-  <source srcset="assets/shots/absorb-zoom-dark.png" media="(prefers-color-scheme: dark)" data-dark>
-  <source srcset="assets/shots/absorb-zoom-light.avif" type="image/avif">
-  <img src="assets/shots/absorb-zoom-light.png" width="648" height="516" loading="lazy" alt="The dialog Put Changes into Their Commits: fifteen changes listed, src/App.vue:7 ticked and going into 3bc4f5e Load the sample trails on start, src/components/TrailCard.vue:70 ticked and going into 4da5e9c Say what unit the climb is in, the rest unticked with the reason, such as its lines were last changed before the branch, 2 of 2 ticked, and Cancel and Put 2 buttons">
-</picture></div>
+        <div class="pic" data-ui aria-hidden="true">
+          <div class="absorb">
+            <div class="change">
+              <div class="uipills"><span>Reviewed</span><span>Leave Out of Commit</span><span class="hot">Put into Its Commit</span><span>Discard</span></div>
+              <div class="file">src/components/TrailCard.vue · line 70</div>
+              <div class="mini">
+                <div class="d">&lt;p class="stats"&gt;{{ km }} km · {{ climb }} m&lt;/p&gt;</div>
+                <div class="a">&lt;p class="stats"&gt;{{ km }} km · {{ climb }} m climb&lt;/p&gt;</div>
+              </div>
+            </div>
+            <div class="commits">
+              <div><b>a39a377</b><span>Show the length of each trail</span></div>
+              <div class="hit"><b>4da5e9c</b><span>Say what unit the climb is in</span><i>+1 −1</i></div>
+              <div><b>3bc4f5e</b><span>Load the sample trails on start</span></div>
+              <div class="dim"><b>origin/main</b><span>pushed, never rewritten</span></div>
+            </div>
+          </div>
+        </div>
       </article>
       <article class="scard">
         <div class="words">
