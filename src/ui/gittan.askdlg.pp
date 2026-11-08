@@ -145,6 +145,7 @@ type
     FOk: TButton;
     FButtonRow: TPanel;
     FFrom: TLabel;
+    FFromRow: TPanel;
     FCheck: TGittanAskCheck;
     FOptional: boolean;
     FPathField: integer;
@@ -335,10 +336,16 @@ begin
 end;
 
 { AText at the left of the buttons, under the icon's left edge, after
-  the room of the puzzle piece RowPaint draws; a long one is cut at the
-  buttons. }
+  the puzzle piece RowPaint draws, in a row of its own (FFromRow) that
+  DoShow moves over the buttons when the text does not fit beside them. }
 procedure TAskForm.AddFrom(const AText: string);
 begin
+  FFromRow := TPanel.Create(Self);
+  FFromRow.BevelOuter := bvNone;
+  FFromRow.Align := alClient;
+  FFromRow.BorderSpacing.Left := Scale96ToScreen(IconLeft - Margin);
+  FFromRow.OnPaint := @RowPaint;
+  FFromRow.Parent := FButtonRow;
   FFrom := TLabel.Create(Self);
   FFrom.ShowAccelChar := False;
   FFrom.Caption := AText;
@@ -347,9 +354,8 @@ begin
   FFrom.Font.Color := clGrayText;
   FFrom.Layout := tlCenter;
   FFrom.Align := alClient;
-  FFrom.BorderSpacing.Left := Scale96ToScreen(IconLeft - Margin + FromPiece + FromGap);
-  FFrom.Parent := FButtonRow;
-  FButtonRow.OnPaint := @RowPaint;
+  FFrom.BorderSpacing.Left := Scale96ToScreen(FromPiece + FromGap);
+  FFrom.Parent := FFromRow;
 end;
 
 procedure TAskForm.RowPaint(Sender: TObject);
@@ -359,8 +365,7 @@ begin
   if FFrom = nil then
     Exit;
   S := Scale96ToScreen(FromPiece);
-  PaintPuzzle(FButtonRow.Canvas, FFrom.Left - Scale96ToScreen(FromGap) - S,
-    (FButtonRow.ClientHeight - S) div 2, S, clGrayText);
+  PaintPuzzle(FFromRow.Canvas, 0, (FFromRow.ClientHeight - S) div 2, S, clGrayText);
 end;
 
 { Escape answers the cancel button's result, mrCancel without one; a
@@ -414,7 +419,9 @@ begin
   Result := Rect(Scale96ToScreen(IconLeft), IconTop, Scale96ToScreen(IconLeft) + S, IconTop + S);
 end;
 
-{ AskDlgFrom's line sits under the icon, so the button row goes at
+{ AskDlgFrom's line: when it does not fit beside the buttons (three of
+  them, a long name) it goes over them, under the text, in the text's
+  column; beside them it sits under the icon, so the button row goes at
   least a gap below the icon's bottom, which a short text (one line,
   without the macOS heading) does not reach. }
 procedure TAskForm.DoShow;
@@ -423,9 +430,23 @@ var
 begin
   if FFrom <> nil then
   begin
-    Need := Scale96ToScreen(TopGap + IconSize + FieldGap) - FButtonRow.Top;
-    if Need > 0 then
-      FButtonRow.BorderSpacing.Top := FButtonRow.BorderSpacing.Top + Need;
+    FFromRow.Canvas.Font := FFrom.Font;
+    if FFromRow.Canvas.TextWidth(FFrom.Caption) > FFrom.Width then
+    begin
+      FFromRow.Parent := Self;
+      FFromRow.Align := alTop;
+      FFromRow.Height := FFromRow.Canvas.TextHeight('Xg') + Scale96ToScreen(4);
+      FFromRow.Top := FButtonRow.Top - 1;
+      FFromRow.BorderSpacing.Left := Scale96ToScreen(IconLeft + IconSize + IconGap);
+      FFromRow.BorderSpacing.Right := Scale96ToScreen(EdgeGap);
+      FFromRow.BorderSpacing.Top := Scale96ToScreen(FieldGap);
+    end
+    else
+    begin
+      Need := Scale96ToScreen(TopGap + IconSize + FieldGap) - FButtonRow.Top;
+      if Need > 0 then
+        FButtonRow.BorderSpacing.Top := FButtonRow.BorderSpacing.Top + Need;
+    end;
   end;
   inherited DoShow;
   if Length(FEdits) > 0 then
