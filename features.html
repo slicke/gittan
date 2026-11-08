@@ -199,6 +199,22 @@
     </div>
     <div class="facts c4">
       <div>
+        <h3>Signed commits</h3>
+        <p>A shield beside each signed commit in the graph and on its card: verified, bad, or a key not known here, which the card explains. Set up signing with an SSH or GPG key in the Name and Email dialog, Test it first, and trust a key not known here on GitHub's word. <a href="#workflow" data-tab="b-signed">See it</a></p>
+      </div>
+      <div>
+        <h3>Fast-forward, merge or squash</h3>
+        <p>Merging a branch asks how, and says how many commits come in: Fast-forward when your branch has none of its own, else Merge Commit, or Squash, which stages the changes for one commit of yours. <a href="#workflow" data-tab="b-mergeask">See it</a></p>
+      </div>
+      <div>
+        <h3>Images four ways</h3>
+        <p>A changed image side by side, swiped with a divider to drag, as onion skin with an opacity to set, or as the difference, where two images of one size differ. <a href="#imagediff">See it</a></p>
+      </div>
+      <div>
+        <h3>Batch</h3>
+        <p>A tab of the GitHub view for work in several repositories at once, with or without GitHub: what is left undone in each, branches whose remote branch is gone, who each one commits as and whether it signs, and maintenance. <a href="#workflow" data-tab="b-batch">See it</a></p>
+      </div>
+      <div>
         <h3>Put into its commit</h3>
         <p>A change goes into the commit of your branch that last wrote its lines, as <code>git absorb</code> does, without the command: a pill over a block, or <b>Commit &gt; Put Changes into Their Commits…</b> for all of them. <a href="#workflow" data-tab="b-absorb">See it</a></p>
       </div>
@@ -244,7 +260,7 @@
       </div>
       <div>
         <h3>Merge editor</h3>
-        <p>A conflicted file in three panes, <kbd>⌘⇧E</kbd>: yours and theirs side by side, the result under them. Tick the lines to keep from either side, one conflict at a time, and Save writes the result.</p>
+        <p>A conflicted file in three panes, <kbd>⌘⇧E</kbd>: yours and theirs side by side, the result under them, and the base, what both started from, between them when you want it. Tick the lines to keep from either side, one conflict at a time, and Save writes the result.</p>
       </div>
       <div>
         <h3>Time-lapse</h3>
@@ -256,7 +272,7 @@
       </div>
       <div>
         <h3>Pull requests everywhere</h3>
-        <p>The globe at the top right shows your pull requests on GitHub across every repository, the ones you wrote and the ones waiting for your review, with filters in three menus: Review, Checks and More. Approve, ask for changes, comment and merge from Gittan, open a new one with Branch &gt; Create Pull Request…, and switch between your gh accounts.</p>
+        <p>The globe at the top right shows your pull requests on GitHub across every repository, the ones you wrote and the ones waiting for your review, and counts those waiting for you. Each card has its next step as a button, Review or Merge; presets, one Filter menu and a search keep the list short. Approve, ask for changes, comment and merge from Gittan, open a new one with Branch &gt; Create Pull Request…, and switch between your gh accounts. <a href="#workflow" data-tab="b-github">See it</a></p>
       </div>
       <div>
         <h3>Git LFS</h3>
@@ -292,12 +308,16 @@
         <button role="tab" id="b-absorb" aria-selected="false" aria-controls="t-absorb" tabindex="-1"><b>Put into its commit</b></button>
         <button role="tab" id="b-sync" aria-selected="false" aria-controls="t-sync" tabindex="-1"><b>Pull &amp; push</b></button>
         <button role="tab" id="b-branches" aria-selected="false" aria-controls="t-branches" tabindex="-1"><b>Branches</b></button>
+        <button role="tab" id="b-mergeask" aria-selected="false" aria-controls="t-mergeask" tabindex="-1"><b>Merge or squash</b></button>
         <button role="tab" id="b-stashes" aria-selected="false" aria-controls="t-stashes" tabindex="-1"><b>Stashes</b></button>
         <button role="tab" id="b-worktrees" aria-selected="false" aria-controls="t-worktrees" tabindex="-1"><b>Worktrees</b></button>
         <button role="tab" id="b-repolist" aria-selected="false" aria-controls="t-repolist" tabindex="-1"><b>Repository list</b></button>
+        <button role="tab" id="b-github" aria-selected="false" aria-controls="t-github" tabindex="-1"><b>GitHub</b></button>
+        <button role="tab" id="b-batch" aria-selected="false" aria-controls="t-batch" tabindex="-1"><b>Batch</b></button>
         <button role="tab" id="b-conflicts" aria-selected="false" aria-controls="t-conflicts" tabindex="-1"><b>Conflicts</b></button>
         <button role="tab" id="b-merge" aria-selected="false" aria-controls="t-merge" tabindex="-1"><b>Merge editor</b></button>
         <button role="tab" id="b-graphmenu" aria-selected="false" aria-controls="t-graphmenu" tabindex="-1"><b>Commit menu</b></button>
+        <button role="tab" id="b-signed" aria-selected="false" aria-controls="t-signed" tabindex="-1"><b>Signed commits</b></button>
         <button role="tab" id="b-rebase" aria-selected="false" aria-controls="t-rebase" tabindex="-1"><b>Rebase</b></button>
         <button role="tab" id="b-bisect" aria-selected="false" aria-controls="t-bisect" tabindex="-1"><b>Bisect</b></button>
         <button role="tab" id="b-search" aria-selected="false" aria-controls="t-search" tabindex="-1"><b>Search</b></button>
@@ -394,6 +414,42 @@
             <img src="assets/shots/cleanup-light.png" width="1280" height="800" loading="lazy" alt="The Clean dialog set to untracked and ignored files: dist, node_modules and npm-debug.log ticked, .env.local and src/composables unticked, 3 of 5 ticked, a note that git keeps no copy, and Cancel and Delete 3 buttons">
           </picture></div>
         </figure>
+        <figure id="t-mergeask" role="tabpanel" aria-labelledby="b-mergeask">
+          <figcaption><b>Merging a branch asks how</b>, and says how many commits come in. A branch with no commits of its own since the two parted offers Fast-forward, Merge Commit and Squash; one with commits of its own Merge and Squash. A squash stages the changes with git's message in the Commit section, for one commit of yours.</figcaption>
+          <div class="frame" data-ui><picture>
+            <source srcset="assets/shots/mergeask-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/mergeask-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/mergeask-light.avif" type="image/avif">
+            <img src="assets/shots/mergeask-light.png" width="1280" height="800" loading="lazy" alt="The question Merge walking-pace into main? It brings 2 commits, and main has none of its own since they parted, so it can move forward to walking-pace with no merge commit; Squash stages their changes for one commit of yours, written in the Commit section; with Merge Commit, Squash, Cancel and Fast-forward buttons, over the summary of trailhead">
+          </picture></div>
+        </figure>
+        <figure id="t-github" role="tabpanel" aria-labelledby="b-github">
+          <figcaption><b>The GitHub view</b>, the globe at the top right, lists your open pull requests across every repository, and those waiting for your review on the next tab, counted on the globe. The glyph turns red when changes are asked for or checks fail and yellow while checks run, and a card has its next step as a button: Merge, with the three ways to merge, on one that is approved with its checks passing. Presets, one Filter menu and the order take a row; <kbd>⌘F</kbd> searches, and the arrow keys move from card to card.</figcaption>
+          <div class="frame" data-ui><picture>
+            <source srcset="assets/shots/github-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/github-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/github-light.avif" type="image/avif">
+            <img src="assets/shots/github-light.png" width="1280" height="800" loading="lazy" alt="The GitHub view of maja-lindqvist, 5 open and 3 to review: the presets All 5, Needs me 2, Waiting on others 2 and Ready to merge 1, a Filter menu, Last updated and a search field; cards for #47 Estimate the walking time on descents with a yellow glyph, Waiting for sam-okafor and 1 of 3 checks pending, #42 Cache map tiles for offline use, Approved with 3 checks and a Merge button, #45 Draw the elevation profile with a red glyph and Changes requested, #8 Rate-limit the forecast endpoint in trailhead-api with 1 of 2 checks failing, and the draft #12 Add a bridge icon in trail-icons, each with three dots for its menu">
+          </picture></div>
+        </figure>
+        <figure id="t-batch" role="tabpanel" aria-labelledby="b-batch">
+          <figcaption><b>The Batch tab</b> works in several repositories at once, picked from the repository list, with or without GitHub. Overview says what is left undone in each: changes, stashes, commits not pushed, a branch on no remote, a merge stopped halfway. Gone branches, Identity (who each commits as and whether it signs) and Maintenance are the other operations. Repositories that share a folder name are told apart by their parent folders.</figcaption>
+          <div class="frame" data-ui><picture>
+            <source srcset="assets/shots/batch-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/batch-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/batch-light.avif" type="image/avif">
+            <img src="assets/shots/batch-light.png" width="1280" height="800" loading="lazy" alt="The Batch tab: 5 of 5 repositories picked, Projects/trailhead, clean/trailhead, conflict/trailhead, preview/trailhead and trail-icons-work; the pills Overview, Gone branches, Identity and Maintenance; Check 5 repositories, 4 of 5 have something left; and a card per repository with its changed and untracked files, stashes, commits not pushed and a branch on no remote, conflict/trailhead in the middle of merging">
+          </picture></div>
+        </figure>
+        <figure id="t-signed" role="tabpanel" aria-labelledby="b-signed">
+          <figcaption><b>Signed commits</b> get a shield before the id: filled with a check when git vouches for the signature, red for a bad one, outlined for a key not known here, so a commit is never passed off as unsigned. Verifying runs in the background; the card of the commit says whose key it was, and for a commit signed on GitHub, Trust github.com's keys fetches the signers' keys.</figcaption>
+          <div class="frame" data-ui><picture>
+            <source srcset="assets/shots/signed-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/signed-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/signed-light.avif" type="image/avif">
+            <img src="assets/shots/signed-light.png" width="1280" height="800" loading="lazy" alt="The commit graph of trailhead with a shield before each signed commit's id: filled green with a check on the commits of Sam Okafor and Maja Lindqvist, whose SSH keys are in the allowed signers file, outlined on Inés Moreau's, signed with a key not known here, and none on the oldest commits, which are not signed">
+          </picture></div>
+        </figure>
         <figure id="t-conflicts" role="tabpanel" aria-labelledby="b-conflicts">
           <figcaption><b>A merge that stopped</b> turns the status bar's button into Resolve 2 conflicts, and each conflicted file in the summary gets a Resolve pill. Your side, the base and theirs each get a color, a fork button on each conflict resolves that one alone, and Use Mine, Use Theirs, Mark Resolved and Merge Editor sit in the file header, while the Commit section waits with Commit Merge, Abort and Next Conflict.</figcaption>
           <div class="frame" data-ui><picture>
@@ -404,12 +460,12 @@
           </picture></div>
         </figure>
         <figure id="t-merge" role="tabpanel" aria-labelledby="b-merge">
-          <figcaption><b>The merge editor</b> (<kbd>⌘⇧E</kbd>, or Merge Editor in the file header) lays a conflicted file out in three panes: yours and theirs side by side, the result across the width under them. Tick the lines to keep from either side, conflict by conflict, and the result follows; Save writes it and marks the file resolved once no conflict is left.</figcaption>
+          <figcaption><b>The merge editor</b> (<kbd>⌘⇧E</kbd>, or Merge Editor in the file header) lays a conflicted file out in panes: yours and theirs side by side, the result across the width under them, and with Show Base what both sides started from between them, row for row. Each conflict is headed by a fork and the side's name. Tick the lines to keep from either side, conflict by conflict, and the result follows; Save writes it and marks the file resolved once no conflict is left. The merges Gittan runs write the base into the markers.</figcaption>
           <div class="frame" data-ui><picture>
             <source srcset="assets/shots/merge-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/merge-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/merge-light.avif" type="image/avif">
-            <img src="assets/shots/merge-light.png" width="1280" height="800" loading="lazy" alt="The merge editor on TrailCard.vue: Mine at HEAD and Theirs on offline-maps side by side with check boxes on each conflict's lines, the first conflict's two imports from mine and one from theirs ticked, and the Result pane under them with those three imports in place and 1 of 3 conflicts resolved">
+            <img src="assets/shots/merge-light.png" width="1280" height="800" loading="lazy" alt="The merge editor on TrailCard.vue with the base shown: Mine at HEAD, Base at 241f7b2 and Theirs on offline-maps side by side, each conflict headed by a fork, Conflict 2 of 3 and the side's name as a pill, the second conflict with no lines in the base and the third with the stats line both sides started from, check boxes on each side's lines, Hide Base in the header, and the Result pane under them, 1 of 3 conflicts resolved, with the third conflict's markers holding the base's line">
           </picture></div>
         </figure>
         <figure id="t-graphmenu" role="tabpanel" aria-labelledby="b-graphmenu">
@@ -454,6 +510,19 @@
             <div class="amend"><span class="cbx"></span>Amend · 2 of 3 files</div>
           </div>
         </div>
+      </div>
+
+      <div class="story wide">
+        <div>
+          <h3>Fast-forward, merge commit or squash</h3>
+          <p>Merge from the branch list or the graph asks how, and says how many commits come in. When your branch has nothing of its own since the two parted, Fast-forward moves it on with no merge commit; Merge Commit keeps the branch's shape; Squash stages everything it brings for one commit of yours, with git's message in the Commit section to edit.</p> <p><a href="#workflow" data-tab="b-mergeask">See it in place</a></p>
+        </div>
+        <div class="art pic" data-ui><picture>
+            <source srcset="assets/shots/mergeask-zoom-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/mergeask-zoom-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/mergeask-zoom-light.avif" type="image/avif">
+            <img src="assets/shots/mergeask-zoom-light.png" width="462" height="204" style="width:auto;max-width:100%" loading="lazy" alt="The question Merge walking-pace into main? It brings 2 commits and main has none of its own, with Merge Commit, Squash, Cancel and Fast-forward buttons">
+          </picture></div>
       </div>
 
       <div class="story">
@@ -557,7 +626,7 @@
       </div>
       <div>
         <h3>Merge and rebase</h3>
-        <p>See what a branch would bring, in either direction, then merge or rebase from that very comparison. Choose Commits… turns it into an interactive rebase. A rebase says first when the next push will have to be forced, and the status bar counts its steps.</p>
+        <p>See what a branch would bring, in either direction, then merge or rebase from that very comparison. A merge asks whether to fast-forward, make a merge commit or squash. Choose Commits… turns it into an interactive rebase. A rebase says first when the next push will have to be forced, and the status bar counts its steps.</p>
       </div>
       <div>
         <h3>Revert, and undo it</h3>
@@ -639,12 +708,17 @@
           <div><h4>Trailhead</h4><p>A planner for day hikes and overnight trips.</p></div>
         </div>
       </div>
-      <div class="story">
+      <div class="story" id="imagediff">
         <div>
-          <h3>Images side by side</h3>
-          <p>A changed PNG, JPEG, GIF and the like shows as the two pictures next to each other, at the same scale.</p>
+          <h3>Images four ways</h3>
+          <p>A changed PNG, JPEG, GIF and the like shows as the two pictures side by side at one scale, or over each other: Swipe with a divider to drag, Onion Skin with an opacity to set, and Difference, which lights up where two images of the same size differ. The header says how many of the pixels changed, and the choice is kept.</p>
         </div>
-        <div class="art pics" aria-hidden="true"><div class="o" data-l="HEAD"></div><div class="n" data-l="Work tree"></div></div>
+        <div class="art pic" data-ui><picture>
+            <source srcset="assets/shots/imagediff-zoom-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/imagediff-zoom-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/imagediff-zoom-light.avif" type="image/avif">
+            <img src="assets/shots/imagediff-zoom-light.png" width="1040" height="620" loading="lazy" alt="public/map.png in Swipe: the trail map before the change left of a divider, the route along the lake, and after it right of the divider, the new route by Mossy Hut up to Kettle Peak · 1 284 m; 800 × 500 on both sides, 2.6 % of the pixels differ, and the pills Side by Side, Swipe, Onion Skin and Difference with the divider's slider">
+          </picture></div>
       </div>
 
       <div class="story">
@@ -795,6 +869,18 @@
           <div><b>3</b><span>branches, 2 remote</span></div>
           <div><b>496<small style="font-size:14px"> KiB</small></b><span>17 files, 1 submodule</span></div>
         </div>
+      </div>
+      <div class="story wide">
+        <div>
+          <h3>Signed, and by whom</h3>
+          <p>The graph and the commit's card show each signature: verified, bad, or a key not known here, with what is missing (an allowed signers file for SSH, gpg for OpenPGP) rather than “unsigned”. Sign your own commits from the Name and Email dialog with an SSH key (verified by GitHub, GitLab and the others) or a GPG key, picked from those found, and Test signs a throwaway commit before anything is saved. A key not known here can be taken on GitHub's word.</p> <p><a href="#workflow" data-tab="b-signed">See it in the graph</a></p>
+        </div>
+        <div class="art pic" data-ui><picture>
+            <source srcset="assets/shots/signed-zoom-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/signed-zoom-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/signed-zoom-light.avif" type="image/avif">
+            <img src="assets/shots/signed-zoom-light.png" width="440" height="420" style="width:auto;max-width:100%" loading="lazy" alt="The right side of the commit graph: author, date, shield and id per commit, a filled green shield with a check on the commits of Sam Okafor and Maja Lindqvist, an outlined one on Inés Moreau's, signed with a key not known here, and none on the oldest commits">
+          </picture></div>
       </div>
     </div>
 
